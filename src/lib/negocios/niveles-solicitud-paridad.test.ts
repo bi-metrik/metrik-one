@@ -32,6 +32,8 @@ describe('la copia de Deno', () => {
     { slug: 'ok', tipo: 'toggle', nivel: 'deseable', showIf: { field: 'x', equals: 'si' } },
     { slug: 'roto', tipo: 'texto', nivel: 'deseable', pedir_si: 'ninos > 0' },
     { slug: 'raro', tipo: 'texto', nivel: 'obligatorio' },
+    { slug: 'flex', tipo: 'select', nivel: 'deseable', pedir_si: { field: 'fecha_salida', vacio: true } },
+    { slug: 'hay_menores', tipo: 'texto', nivel: 'deseable', pedir_si: { suma_de: ['ninos', 'infantes'], vacio: false } },
   ]
 
   it.each([
@@ -39,6 +41,7 @@ describe('la copia de Deno', () => {
     ['con menores', { destino: 'Madrid', adultos: 2, ninos: '1.000', destino_tipo: 'internacional' }],
     ['grupo', { adultos: '17', ninos: 5, total: 22, x: 'si', ok: 'true' }],
     ['cero', { adultos: 0, ninos: 0 }],
+    ['con fecha', { fecha_salida: '2026-11-15', infantes: '1' }],
   ])('mismo resultado: %s', (_n, valores) => {
     expect(copiaEdge.calcularNiveles(fields, valores)).toEqual(fuente.calcularNiveles(fields, valores))
   })

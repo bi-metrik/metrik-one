@@ -103,6 +103,7 @@ export interface CondicionPedirSi {
   distinto_de?: unknown[]
   al_menos?: number
   mayor_que?: number
+  vacio?: boolean
 }
 
 export type PedirSi = CondicionPedirSi | CondicionPedirSi[]
@@ -136,7 +137,7 @@ export interface NivelesSolicitud {
   errores: string[]
 }
 
-const COMPARACIONES = ['value', 'value_in', 'distinto_de', 'al_menos', 'mayor_que'] as const
+const COMPARACIONES = ['value', 'value_in', 'distinto_de', 'al_menos', 'mayor_que', 'vacio'] as const
 const LLAVES_CONDICION = new Set<string>(['field', 'suma_de', ...COMPARACIONES])
 
 const vacio = (v: unknown) => v === '' || v === null || v === undefined
@@ -164,7 +165,13 @@ export function leerPedirSi(raw: unknown): { condiciones: CondicionPedirSi[] } |
     if (o.suma_de !== undefined && !tieneSuma) return { error: '`suma_de` tiene que ser una lista de slugs' }
 
     if (!COMPARACIONES.some(k => o[k] !== undefined)) {
-      return { error: 'falta la comparación (value, value_in, distinto_de, al_menos o mayor_que)' }
+      return { error: 'falta la comparación (value, value_in, distinto_de, al_menos, mayor_que o vacio)' }
+    }
+    if (o.vacio !== undefined) {
+      if (typeof o.vacio !== 'boolean') return { error: '`vacio` tiene que ser true o false' }
+      if (COMPARACIONES.some(k => k !== 'vacio' && o[k] !== undefined)) {
+        return { error: '`vacio` va solo, sin otra comparación' }
+      }
     }
     if (o.value !== undefined && typeof o.value !== 'string') return { error: '`value` tiene que ser un texto' }
     for (const k of ['value_in', 'distinto_de'] as const) {
@@ -184,8 +191,14 @@ export function leerPedirSi(raw: unknown): { condiciones: CondicionPedirSi[] } |
   return { condiciones }
 }
 
-/** ¿Se cumple UNA condición con estos valores? Un dato ausente no la cumple. */
+/** ¿Se cumple UNA condición con estos valores? Un dato ausente no la cumple, salvo `vacio`. */
 function cumpleUna(c: CondicionPedirSi, valores: Record<string, unknown>): boolean {
+  if (c.vacio !== undefined) {
+    const ausente = c.suma_de
+      ? c.suma_de.every(s => parsearNumeroColombiano(valores[s]) === null)
+      : vacio(valores[c.field as string])
+    return c.vacio ? ausente : !ausente
+  }
   let numero: number | null
   let crudo: unknown = undefined
   if (c.suma_de) {

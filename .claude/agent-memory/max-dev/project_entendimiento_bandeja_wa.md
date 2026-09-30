@@ -24,4 +24,7 @@ La llave `modules.bandeja_solicitudes_wa` sigue apagada (Emilio).
 - El negocio se crea en Deno con un insert propio (no alcanza `crearNegocioEnWorkspace`): sin Drive
   al crear, sin auto-cotización, sin la regla de bloques `visible`. Si otra línea lo usa, revisar eso.
 - «Dos personas» da adultos = 2 pero NO niños = 0: el mínimo pregunta «¿Viajan niños?».
+- 2026-09-30: `pedir_si` ganó `vacio` (única comparación que mira la ausencia). La autorización de
+  datos NO va como campo: vive en `contactos.custom_data` vía el bloque tipo `contacto`. Si algún día
+  debe contar en el mínimo, hay que enseñarle a `calcularNiveles` a leer el contacto, no duplicarla.
 Relacionado: [[bandeja-wa-solicitudes]], [[fixture-de-produccion-bloquea-push]].

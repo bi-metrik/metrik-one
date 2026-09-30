@@ -27,13 +27,19 @@
  *     { "field": "tipo_viaje", "value_in": ["playa", "crucero"] }
  *     { "field": "numero_pasajeros", "al_menos": 6 }
  *     { "suma_de": ["ninos", "infantes"], "mayor_que": 0 }
+ *     { "field": "fecha_salida", "vacio": true }   ← cuenta mientras la fecha NO está
  *     [ {…}, {…} ]                       ← lista: tienen que cumplirse TODAS
  *
  * Cada condición lleva `field` o `suma_de` (uno solo) y al menos una comparación
  * (`value`, `value_in`, `distinto_de`, `al_menos`, `mayor_que`). Si trae varias, se
  * exigen todas.
  *
- * ⚠️ Un dato que todavía no está NO cumple la condición. «Permiso de salida de menores si
+ * `vacio` es la única comparación que mira la AUSENCIA: `true` se cumple cuando el dato no
+ * está (vacío, nulo; en una suma, ninguna parte con número) y `false` cuando sí está. Va
+ * sola: combinada con otra comparación no significaría nada y se rechaza. Nació con
+ * «flexibilidad de fechas»: solo se pregunta mientras no haya fecha de salida.
+ *
+ * ⚠️ Salvo `vacio`, un dato que todavía no está NO cumple la condición. «Permiso de salida de menores si
  * hay menores»: si nadie ha dicho cuántos niños viajan, el permiso no se pide todavía —
  * lo que falta es el número de niños, que es de su propia barra. Así la barra no cambia
  * de tamaño por adivinar, y la pregunta que sale primero es la de la fuente.
@@ -63,6 +69,7 @@ export interface CondicionPedirSi {
   distinto_de?: unknown[]
   al_menos?: number
   mayor_que?: number
+  vacio?: boolean
 }
 
 export type PedirSi = CondicionPedirSi | CondicionPedirSi[]
@@ -96,7 +103,7 @@ export interface NivelesSolicitud {
   errores: string[]
 }
 
-const COMPARACIONES = ['value', 'value_in', 'distinto_de', 'al_menos', 'mayor_que'] as const
+const COMPARACIONES = ['value', 'value_in', 'distinto_de', 'al_menos', 'mayor_que', 'vacio'] as const
 const LLAVES_CONDICION = new Set<string>(['field', 'suma_de', ...COMPARACIONES])
 
 const vacio = (v: unknown) => v === '' || v === null || v === undefined
@@ -124,7 +131,13 @@ export function leerPedirSi(raw: unknown): { condiciones: CondicionPedirSi[] } |
     if (o.suma_de !== undefined && !tieneSuma) return { error: '`suma_de` tiene que ser una lista de slugs' }
 
     if (!COMPARACIONES.some(k => o[k] !== undefined)) {
-      return { error: 'falta la comparación (value, value_in, distinto_de, al_menos o mayor_que)' }
+      return { error: 'falta la comparación (value, value_in, distinto_de, al_menos, mayor_que o vacio)' }
+    }
+    if (o.vacio !== undefined) {
+      if (typeof o.vacio !== 'boolean') return { error: '`vacio` tiene que ser true o false' }
+      if (COMPARACIONES.some(k => k !== 'vacio' && o[k] !== undefined)) {
+        return { error: '`vacio` va solo, sin otra comparación' }
+      }
     }
     if (o.value !== undefined && typeof o.value !== 'string') return { error: '`value` tiene que ser un texto' }
     for (const k of ['value_in', 'distinto_de'] as const) {
@@ -144,8 +157,14 @@ export function leerPedirSi(raw: unknown): { condiciones: CondicionPedirSi[] } |
   return { condiciones }
 }
 
-/** ¿Se cumple UNA condición con estos valores? Un dato ausente no la cumple. */
+/** ¿Se cumple UNA condición con estos valores? Un dato ausente no la cumple, salvo `vacio`. */
 function cumpleUna(c: CondicionPedirSi, valores: Record<string, unknown>): boolean {
+  if (c.vacio !== undefined) {
+    const ausente = c.suma_de
+      ? c.suma_de.every(s => parsearNumeroColombiano(valores[s]) === null)
+      : vacio(valores[c.field as string])
+    return c.vacio ? ausente : !ausente
+  }
   let numero: number | null
   let crudo: unknown = undefined
   if (c.suma_de) {

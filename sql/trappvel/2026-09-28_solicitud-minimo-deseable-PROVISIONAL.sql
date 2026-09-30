@@ -1,9 +1,9 @@
 -- ============================================================================
--- Trappvel · Etapa 1 «Condiciones del viaje»: mínimo y deseable · 2026-09-28
+-- Trappvel · Etapa 1 «Condiciones del viaje»: mínimo y deseable · 2026-09-28 (ajuste 2026-09-30)
 -- ============================================================================
--- ⚠️⚠️ PROVISIONAL. Qué dato es mínimo, cuál deseable y cuándo se pide NO está decidido:
--- falta la reunión con Edgar. Esto es una propuesta para poder probar el mecanismo, y
--- se cambia editando esta config, sin PR.
+-- ⚠️⚠️ PROVISIONAL. Edgar respondió, pero NO clasificó dato por dato: esta es la lectura de
+-- Mauricio de esas respuestas (decisiones del 2026-09-30). Se cambia editando esta config,
+-- sin PR.
 --
 -- ⚠️ NO ESTÁ APLICADO. Es dato de un workspace, no esquema: lo aplica la sesión
 -- principal (copia en proyectos/trappvel/clarity/migrations/).
@@ -19,19 +19,26 @@
 -- 1. A campos existentes les agrega `nivel` y `pregunta` (y `pedir_si` donde aplica).
 --    `ninos` cambia su `ayuda`: la edad ya SÍ se pide, en `edades_menores`.
 --    `ninos` e `infantes` pierden `default: 0` (ver abajo).
--- 2. Agrega 8 campos: tipo_viaje, edades_menores, presupuesto, categoria_hotel,
---    plan_alimentacion, equipaje, acomodacion, permiso_salida_menores. Ninguno es
---    `required`: el mínimo avisa, no frena (Edgar, 25-sep: «el sistema no los controla»).
+-- 2. Agrega 10 campos: ciudad_origen, tipo_viaje, flexibilidad_fecha, edades_menores,
+--    presupuesto, categoria_hotel, plan_alimentacion, equipaje, acomodacion,
+--    permiso_salida_menores. Ninguno es `required`: el mínimo avisa, no frena
+--    (Edgar, 25-sep: «el sistema no los controla»).
 --
--- Niveles provisionales:
---   Mínimo:   destino, fecha_salida, fecha_regreso, adultos, ninos, infantes,
---             edades_menores (si ninos + infantes > 0).
---   Deseable: presupuesto, tipo_viaje, categoria_hotel, plan_alimentacion, equipaje,
+-- Niveles provisionales (decisiones de Mauricio, 2026-09-30):
+--   Mínimo:   destino, ciudad_origen, fecha_salida, fecha_regreso, adultos, ninos, infantes,
+--             edades_menores (si ninos + infantes > 0), categoria_hotel.
+--   Deseable: tipo_viaje (informativo: ningún pedir_si depende de él),
+--             flexibilidad_fecha (solo mientras fecha_salida está vacía: `vacio: true`),
+--             presupuesto, plan_alimentacion, equipaje,
 --             acomodacion (si numero_pasajeros >= 6),
 --             permiso_salida_menores (si hay menores Y destino_tipo = internacional).
 -- Por qué: fechas exactas, quiénes viajan y la edad de los niños son lo que Tatiana llama
--- mínimo y lo que daña la cotización si llega mal (audios 4 y 5). El presupuesto lo nombra
--- ella, pero en Airtable no se registra nunca: queda deseable hasta que Edgar diga otra cosa.
+-- mínimo y lo que daña la cotización si llega mal (audios 4 y 5); ciudad de salida y
+-- categoría de hotel suben al mínimo el 30-sep. Presupuesto y equipaje siguen deseables.
+--
+-- La AUTORIZACIÓN de tratamiento de datos NO se agrega aquí: ya la registra el bloque
+-- «Autorizacion de tratamiento de datos» (tipo `contacto`) UNA vez por persona, en
+-- `contactos.custom_data` con fecha y autor. Un campo en este bloque la duplicaría por viaje.
 --
 -- `ninos` e `infantes` PIERDEN su `default: 0` (decisión de Mauricio, 2026-09-28). Con el
 -- default, la pantalla los mostraba en 0 y contaban como respondidos: el mínimo nunca
@@ -41,8 +48,10 @@
 -- Los negocios que ya guardaron 0 conservan su 0.
 
 -- ── Orden ───────────────────────────────────────────────────────────────────
--- DESPUÉS del deploy del PR «mínimo y deseable como configuración del campo». Aplicado
--- antes, la pantalla vieja ignora `nivel`/`pedir_si`/`pregunta` y solo muestra los 8
+-- DESPUÉS del deploy del PR del paso de entendimiento (#960), que trae el operador `vacio`
+-- de `pedir_si`. Sin él, `flexibilidad_fecha` se reporta como condición mal escrita y cuenta
+-- siempre (no se esconde, pero se pregunta aunque ya haya fecha). Aplicado
+-- antes, la pantalla vieja ignora `nivel`/`pedir_si`/`pregunta` y solo muestra los 10
 -- campos nuevos como campos opcionales más: no se rompe nada.
 --
 -- Para que el mínimo FRENE el avance (modo «bloquea») no se toca este bloque: se agrega
@@ -101,11 +110,37 @@ declare
     }
   },
   "insertar_despues_de": {
+    "destino": [
+      {
+        "slug": "ciudad_origen",
+        "tipo": "texto",
+        "label": "Ciudad de salida",
+        "nivel": "minimo",
+        "pregunta": "¿Desde qué ciudad salen?"
+      }
+    ],
+    "fecha_regreso": [
+      {
+        "slug": "flexibilidad_fecha",
+        "tipo": "select",
+        "label": "Flexibilidad de fechas",
+        "ayuda": "Solo se pregunta mientras no haya fecha de salida.",
+        "nivel": "deseable",
+        "pregunta": "¿Qué tan flexibles son con las fechas: entre semana, solo fines de semana o flexibles?",
+        "pedir_si": { "field": "fecha_salida", "vacio": true },
+        "opciones": [
+          { "value": "entre_semana", "label": "Entre semana" },
+          { "value": "fines_de_semana", "label": "Solo fines de semana" },
+          { "value": "flexible", "label": "Flexible" }
+        ]
+      }
+    ],
     "destino_tipo": [
       {
         "slug": "tipo_viaje",
         "tipo": "select",
         "label": "Tipo de viaje",
+        "ayuda": "Informativo: no cambia qué otros datos se piden.",
         "nivel": "deseable",
         "pregunta": "¿Qué tipo de viaje buscan: playa, naturaleza y aventura, crucero u otro?",
         "opciones": [
@@ -149,7 +184,7 @@ declare
         "slug": "categoria_hotel",
         "tipo": "select",
         "label": "Categoría de hotel",
-        "nivel": "deseable",
+        "nivel": "minimo",
         "pregunta": "¿De qué categoría prefieren el hotel?",
         "opciones": [
           { "value": "3", "label": "3 estrellas" },
@@ -253,8 +288,8 @@ begin
     end if;
   end loop;
 
-  if jsonb_array_length(v_fields) <> jsonb_array_length(v_cfg->'fields') + 8 then
-    raise exception 'El resultado no tiene los 8 campos nuevos (quedaron %)', jsonb_array_length(v_fields);
+  if jsonb_array_length(v_fields) <> jsonb_array_length(v_cfg->'fields') + 10 then
+    raise exception 'El resultado no tiene los 10 campos nuevos (quedaron %)', jsonb_array_length(v_fields);
   end if;
 
   update public.bloque_configs
@@ -267,7 +302,7 @@ end $$;
 -- from public.bloque_configs, jsonb_array_elements(config_extra->'fields') with ordinality as t(e, n)
 -- where id = '98281a40-2f67-4d8e-9bc5-6ca1f7a69417' order by n;
 
--- Vuelta atrás: quitar los 8 campos nuevos, las tres llaves nuevas, reponer la ayuda de
+-- Vuelta atrás: quitar los 10 campos nuevos, las tres llaves nuevas, reponer la ayuda de
 -- `ninos` y el `default: 0` de `ninos` e `infantes`. Los valores que alguien haya escrito en los campos nuevos quedan en
 -- negocio_bloques.data sin mostrarse (no se borran).
 -- update public.bloque_configs
@@ -280,7 +315,8 @@ end $$;
 --          else e - 'nivel' - 'pedir_si' - 'pregunta' end
 --     order by n)
 --   from jsonb_array_elements(config_extra->'fields') with ordinality as t(e, n)
---   where e->>'slug' not in ('tipo_viaje','edades_menores','presupuesto','categoria_hotel',
---                            'plan_alimentacion','equipaje','acomodacion','permiso_salida_menores')
+--   where e->>'slug' not in ('ciudad_origen','tipo_viaje','flexibilidad_fecha','edades_menores',
+--                            'presupuesto','categoria_hotel','plan_alimentacion','equipaje',
+--                            'acomodacion','permiso_salida_menores')
 -- ))
 -- where id = '98281a40-2f67-4d8e-9bc5-6ca1f7a69417';
