@@ -262,8 +262,27 @@ describe('QA de #971 v3', () => {
   });
 
   describe('corte de caja: un escrito corto que parece encabezado y no se resuelve', () => {
-    it.each([['Caro', true], ['Lsuia', true], ['T1 26 99', true], ['ok', false], ['gracias', false], ['Jorge?', false], ['son 3 adultos', false], ['jajaja', false]])('«%s» parece encabezado: %s', (t2, si) => {
-      expect(pareceEncabezado(t2)).toBe(si);
+    // Las 32 de la prueba aparte del QA v4 (qa971v4/cortos.ts), contra los mismos 4 viajes abiertos.
+    const CORTOS = ['ya', 'va', 'este también', 'del mismo', 'el mismo', 'ese mismo', 'también', 'igual', 'otro', 'otra más', 'sigue',
+      'mismo cliente', 'ok', 'dale', 'listo ya', 'Gracias', 'bueno', 'Ah ok', 'aquí va', 'mira', 'ojo', 'urgente', 'confirmado', 'ese es',
+      'de ella', 'su esposo', 'Lusia', 'Caro', 'Carlos', 'Jorje', 'Andres', 'Luisa?'];
+
+    it('QA v4: de los 32 escritos cortos, solo «Caro» (parecido a un nombre, sin resolver) corta la caja; los nombres casi exactos resuelven', () => {
+      const efecto = (c: string) => resolverEncabezado(c, W) ? 'encabezado' : pareceEncabezado(c, W) ? 'corta' : 'contenido';
+      const r = Object.fromEntries(CORTOS.map(c => [c, efecto(c)]));
+      expect(Object.entries(r).filter(([, e]) => e === 'corta').map(([c]) => c)).toEqual(['Caro']);
+      expect(Object.entries(r).filter(([, e]) => e === 'encabezado').map(([c]) => c)).toEqual(['Lusia', 'Jorje', 'Andres']);
+    });
+
+    it.each([['Lsuia', true], ['T1 26 99', true], ['Pedro', false], ['Jorge?', false], ['son 3 adultos', false], ['jajaja', false]])('«%s» parece encabezado: %s', (t2, si) => {
+      expect(pareceEncabezado(t2, W)).toBe(si);
+    });
+
+    it('«este también» y «del mismo» dentro de una caja no la cortan (F16b y F16c del QA v4)', () => {
+      for (const corto of ['este también', 'del mismo']) {
+        const ms = [enc(1, 'Carolina'), m(2, 'salimos el 28 de diciembre'), enc(3, corto), m(4, 'somos 3 adultos')];
+        expect(resumenDe(plan(ms, W).plan).map(x => x[2]), corto).toEqual(['carga', 'carga', 'carga']);
+      }
     });
 
     it('lo que sigue queda sin asignar hasta el próximo encabezado, con aviso; nunca hereda la caja anterior', () => {
@@ -298,5 +317,40 @@ describe('QA de #971 v3', () => {
         m(4, 'Mira esto que vi, ¿ustedes tienen algo así para San Andrés?')];
       expect(resumenDe(plan(ms).plan)).toEqual([[2, 'T1 26 9', 'carga'], [3, 'T1 26 9', 'sospecha'], [4, 'T1 26 9', 'carga']]);
     });
+  });
+});
+
+describe('QA de #971 v4', () => {
+  it('1 · la nota del comercial no vuelve a salir: ni su texto ni una paráfrasis, cargada o por decidir', () => {
+    const conCaja = [enc(1, 'Luisa'), m(2, 'Mejor maleta de mano'), m(3, 'ojo, esta señora es muy tacaña y se queja de todo', { escrito: true })];
+    const sinCaja = [m(1, 'ojo, esta señora es muy tacaña y se queja de todo', { escrito: true }), enc(2, 'Luisa'), m(3, 'Mejor maleta de mano')];
+    for (const ms of [conCaja, sinCaja]) {
+      const todo = partesResumenPlan(plan(ms).plan, ms).join('\n').toLowerCase();
+      expect(todo).not.toMatch(/taca|queja|ojo, esta/);
+      expect(todo).toContain('(nota del comercial, no se guarda)');
+    }
+  });
+
+  it('3 · el prefijo «(k/n) » se reserva antes de partir: ninguna línea se corta y el cierre y la ⚠ llegan completos (corte.ts del QA v4)', () => {
+    const W1: ViajeAbierto[] = [{ id: 'n11', codigo: 'T1 26 11', cliente: 'CAROLINA RUIZ', destino: 'PUNTA CANA' }];
+    let partidos = 0;
+    for (let extra = 0; extra < 200; extra++) {
+      const ms: MensajeViaje[] = [enc(1, 'Carolina', 0)];
+      for (let i = 0; i < 95 + (extra % 40); i++) {
+        const cuerpo = i === 40 ? 'Hola Tati, soy Andrés, quiero cotizar' : `${'x'.repeat(5 + (extra % 37))} mensaje`;
+        ms.push({ n: i + 2, cuerpo, reenviado: true, tipo: 'text', en: new Date(Date.parse('2026-10-01T14:00:00Z') + (i + 1) * 1000).toISOString() });
+      }
+      const p = plan(ms, W1).plan;
+      const partes = partesResumenPlan(p, ms);
+      if (partes.length < 2) continue;
+      partidos++;
+      for (const parte of partes) expect(parte.length).toBeLessThanOrEqual(MAX_LARGO_RESUMEN);
+      const lineas = partes.map(x => x.replace(/^\(\d+\/\d+\) /, '')).join('\n').split('\n');
+      for (const x of p.mensajes.filter(y => y.destino)) {
+        expect(lineas.some(l => new RegExp(`^   ${x.n} «.*»${x.sospecha ? ' ⚠' : ''}$`).test(l)), `${extra}: línea del ${x.n}`).toBe(true);
+      }
+      expect(partes[partes.length - 1].endsWith('descarta todo.')).toBe(true);
+    }
+    expect(partidos).toBeGreaterThan(50);
   });
 });

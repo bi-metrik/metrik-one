@@ -80,6 +80,15 @@ export function textoDe(mensajes: ReadonlyArray<MensajeEntrega>): string {
  */
 const RE_NOTA_COMERCIAL = /\b(ojo|esta senora|este senor|esta clienta|este cliente|la clienta|el cliente es|la senora es|el senor es|tacan\w*|pesad[oa]|groser[oa]|conflictiv[oa]|se queja|quejon\w*|cansona?|intens[oa]|dificil de|exigente|mala paga|no paga)\b/;
 
+/**
+ * ¿Es una nota del comercial sobre el cliente (un juicio)? Solo lo escrito por el comercial. Esa
+ * nota no se guarda y su texto no vuelve a salir en ningún mensaje del bot (QA de #971 v4).
+ */
+export function esNotaDelComercial(cuerpo: string, reenviado: boolean): boolean {
+  if (reenviado) return false;
+  return RE_NOTA_COMERCIAL.test(` ${normalizarTexto(cuerpo).replace(/[^a-z0-9$ ]/g, ' ').replace(/\s+/g, ' ')} `);
+}
+
 const RE_PAGO = /\b(abono|abone|pago|pague|consignacion|consigne|transferencia|transferi|comprobante|recibo|soporte de pago)\b/;
 const RE_PROMOCION = /\b(desde \$|desde usd|precio por persona|plan(es)? desde|salidas? (los |el )?\d{1,2}( y \d{1,2})?( de \w+)?,|cupos limitados|aplican (condiciones|restricciones)|promo(cion)?\b)/;
 

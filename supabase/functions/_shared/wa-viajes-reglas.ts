@@ -21,6 +21,7 @@
 
 import { normalizarNombre, normalizarTexto } from './wa-entendimiento-reglas.ts';
 import { codigoCompacto } from './wa-carga-reglas.ts';
+import { esNotaDelComercial } from './wa-guardianes.ts';
 
 /** Un viaje abierto de la línea, como lo ofrece la bandeja. */
 export interface ViajeAbierto {
@@ -106,6 +107,8 @@ function esCodigo(compacto: string): boolean {
  */
 export function resolverEncabezado(texto: string, viajes: ReadonlyArray<ViajeAbierto>): ResolucionEncabezado | null {
   const bruto = String(texto ?? '').trim();
+  // Una pregunta («Luisa?») no es un encabezado: va al bot (regla 4b de `decidirRuta`).
+  if (/[?¿]/.test(bruto)) return null;
   const palabras = normalizarTexto(bruto).split(/\s+/).filter(Boolean);
   if (palabras.length === 0 || palabras.length > MAX_PALABRAS_ENCABEZADO) return null;
 
@@ -165,7 +168,7 @@ export function armarSegmentos(
   for (const m of [...mensajes].sort((a, b) => a.n - b.n)) {
     const t = Date.parse(m.en);
     const escrito = !m.reenviado && m.tipo === 'text';
-    const res = escrito ? (resolverEncabezado(m.cuerpo, viajes) ?? (pareceEncabezado(m.cuerpo) ? { tipo: 'no_reconocido' } as ResolucionEncabezado : null)) : null;
+    const res = escrito ? (resolverEncabezado(m.cuerpo, viajes) ?? (pareceEncabezado(m.cuerpo, viajes) ? { tipo: 'no_reconocido' } as ResolucionEncabezado : null)) : null;
     if (res) {
       encabezados.push(m.n);
       const seg: Segmento = { origen: 'encabezado', encabezado: { n: m.n, texto: m.cuerpo.trim(), resolucion: res }, mensajes: [] };
@@ -194,25 +197,25 @@ export function tieneEncabezados(segmentos: ReadonlyArray<Segmento>): boolean {
   return segmentos.some(s => s.encabezado !== null && s.encabezado.resolucion.tipo !== 'no_reconocido');
 }
 
-/** Palabras cortas que el comercial escribe y que NO son un nombre: no cortan la caja. */
-const NO_ENCABEZADO = new Set([
-  'ok', 'okey', 'oki', 'listo', 'si', 'no', 'gracias', 'dale', 'bueno', 'perfecto', 'claro', 'vale', 'jaja', 'jajaja',
-  'ya', 'eso', 'esto', 'aja', 'hola', 'buenas', 'chao', 'genial', 'super', 'excelente', 'pendiente', 'espera', 'un', 'momento',
-]);
-
 /**
- * ¿Un escrito del comercial PARECE un encabezado aunque no se resuelva? Una o dos palabras, sin
- * números ni signos de pregunta ni palabras de conversación («ok», «gracias»), o algo con forma de
- * código. Si parece y no se resuelve, corta la caja: lo que sigue no hereda el viaje anterior
- * (QA de #971 v3: «Lusia» dejaba los mensajes de Luisa en la caja de Carolina).
+ * ¿Un escrito del comercial PARECE un encabezado aunque no se resuelva? Solo si tiene forma de
+ * código, o si TODAS sus palabras (sin el relleno) se parecen a una palabra del nombre de algún
+ * cliente con viaje abierto: a dos errores o menos, o como su comienzo («Caro» de Carolina). Las
+ * palabras del español común («también», «igual», «sigue», «confirmado») no se parecen a ningún
+ * nombre y no cortan la caja. No hay lista de palabras en el código: el criterio sale de los
+ * viajes abiertos (QA de #971 v4: 15 de 32 escritos cortos cortaban la caja).
+ * Si parece y no se resuelve, corta la caja: lo que sigue no hereda el viaje anterior.
  */
-export function pareceEncabezado(texto: string): boolean {
+export function pareceEncabezado(texto: string, viajes: ReadonlyArray<ViajeAbierto>): boolean {
   const bruto = String(texto ?? '').trim();
   if (!bruto || /[?¿]/.test(bruto)) return false;
   if (esCodigo(codigoCompacto(bruto))) return true;
   const palabras = palabrasDe(bruto);
-  if (palabras.length === 0 || palabras.length > 2 || palabras.some(w => /\d/.test(w) || w.length < 3)) return false;
-  return !palabras.some(w => NO_ENCABEZADO.has(w) || /^(ja)+$/.test(w));
+  if (palabras.length === 0 || palabras.length > 2 || palabras.some(w => /\d/.test(w))) return false;
+  const propias = palabras.filter(w => !RELLENO.has(w));
+  if (propias.length === 0) return false;
+  const delNombre = [...new Set(viajes.flatMap(v => palabrasDe(v.cliente)).filter(p => p.length >= 4))];
+  return propias.every(w => w.length >= 4 && delNombre.some(p => (p.startsWith(w) && w.length >= 4) || distancia(p, w) <= 2));
 }
 
 // ── Destinos del plan ────────────────────────────────────────────────────────
@@ -519,7 +522,11 @@ export function rangos(ns: ReadonlyArray<number>): string {
  */
 export function partesResumenPlan(plan: PlanViajes, mensajes: ReadonlyArray<MensajeViaje>, aviso?: string): string[] {
   const porN = new Map(mensajes.map(m => [m.n, m]));
-  const linea = (n: number, largo: number) => `   ${n} «${recorte(porN.get(n)?.cuerpo ?? '', largo)}»`;
+  // La nota del comercial (un juicio) no se repite: ni su texto ni una paráfrasis salen del bot.
+  const linea = (n: number, largo: number) => {
+    const m = porN.get(n);
+    return m && esNotaDelComercial(m.cuerpo, m.reenviado) ? `   ${n} (nota del comercial, no se guarda)` : `   ${n} «${recorte(m?.cuerpo ?? '', largo)}»`;
+  };
   const grupos = gruposDelPlan(plan);
   const porDecidir = pendientes(plan);
   const largo = plan.mensajes.length <= MAX_CON_TEXTO ? 40 : 30;
@@ -541,21 +548,30 @@ export function partesResumenPlan(plan: PlanViajes, mensajes: ReadonlyArray<Mens
     ? 'No cargué nada todavía. Para cada uno: «dejar el 4» (o «dejar todos»), «el 4 es de Luisa» / «el 4 es del 2» / «el 4 es nuevo Pedro» para moverlo, o «descartar el 4». Después, SÍ. DESCARTAR descarta todo.'
     : 'No cargué nada todavía. Revisa que cada mensaje esté en su viaje. ¿Así? Responde SÍ, o corrige: «el 4 es de Luisa», «descartar el 4». DESCARTAR descarta todo.');
 
-  const partes: string[] = [];
-  let actual = '';
-  for (const l of lineas) {
-    const candidato = actual ? `${actual}\n${l}` : l;
-    if (candidato.length > MAX_LARGO_RESUMEN && actual) {
-      partes.push(actual);
-      actual = l;
-    } else {
-      actual = candidato;
+  const empacar = (tope: number): string[] => {
+    const partes: string[] = [];
+    let actual = '';
+    for (const l of lineas) {
+      const candidato = actual ? `${actual}\n${l}` : l;
+      if (candidato.length > tope && actual) {
+        partes.push(actual);
+        actual = l;
+      } else {
+        actual = candidato;
+      }
     }
-  }
-  if (actual) partes.push(actual);
-  if (partes.length > 1) return partes.map((p, k) => `(${k + 1}/${partes.length}) ${p}`.slice(0, MAX_LARGO_RESUMEN));
-  return partes;
+    if (actual) partes.push(actual);
+    return partes;
+  };
+  const una = empacar(MAX_LARGO_RESUMEN);
+  if (una.length === 1) return una;
+  // Se reserva el espacio del prefijo «(k/n) » ANTES de partir: ninguna línea se corta.
+  const partes = empacar(MAX_LARGO_RESUMEN - PREFIJO_PARTE);
+  return partes.map((p, k) => `(${k + 1}/${partes.length}) ${p}`);
 }
+
+/** Lo más largo que puede ser «(k/n) » (hasta 99 partes). */
+const PREFIJO_PARTE = '(99/99) '.length;
 
 /** El resumen en un solo texto (las partes unidas). Para enviarlo, usar `partesResumenPlan`. */
 export function textoResumenPlan(plan: PlanViajes, mensajes: ReadonlyArray<MensajeViaje>, aviso?: string): string {
