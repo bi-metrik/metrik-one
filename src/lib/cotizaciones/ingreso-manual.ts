@@ -131,6 +131,16 @@ export function montoManual(v: unknown): number | null {
   return Number(t)
 }
 
+/**
+ * Lo que se VE mientras se escribe un monto: «280000» → «280.000» (brief del 2026-10-01,
+ * punto 7). Solo dígitos, con el punto de miles; vacío queda vacío. Lo que se guarda es el
+ * número: `montoManual` lee «280.000» igual que «280000».
+ */
+export function montoConMiles(v: string): string {
+  const digitos = v.replace(/\D/g, '').replace(/^0+(?=\d)/, '')
+  return digitos.replace(/\B(?=(\d{3})+(?!\d))/g, '.')
+}
+
 function edad(v: unknown): number | null {
   const t = String(v ?? '').trim()
   if (t === '') return null

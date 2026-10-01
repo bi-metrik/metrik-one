@@ -5,6 +5,7 @@ import { toast } from 'sonner'
 
 import {
   cambiarPantallazoDeHabitacion,
+  marcarHabitacionQueVa,
   corregirCampoDeFicha,
   corregirHabitacion,
   ponerFotoDelHotel,
@@ -16,7 +17,7 @@ import { comprimirFotoHotel } from '@/lib/cotizaciones/foto-hotel-navegador'
 import HojaCliente from '@/app/(app)/negocios/hoja-cliente'
 import TarjetaCosto from '@/app/(app)/negocios/tarjeta-costo'
 import { AlertaDecision } from '@/components/viaje/alerta-decision'
-import { BTN, BTN_PRIM, INPUT } from '@/components/viaje/estilo'
+import { BTN, BTN_ELEGIDO, BTN_PRIM, INPUT } from '@/components/viaje/estilo'
 import { ItemMenu, MenuAcciones, SeparadorMenu } from '@/components/viaje/menu-acciones'
 import { Miniatura, MiniaturaManual, useVistaAmpliada } from '@/components/viaje/pantallazo'
 import type { FilaAdicional } from '@/lib/cotizaciones/adicionales'
@@ -48,6 +49,8 @@ import {
   notaDeReferencia,
   ocupacionConEdades,
   pesos,
+  avisoDePasajeros,
+  referenciasTexto,
   resumenDeAlojamiento,
 } from '@/lib/cotizaciones/tarjeta-opcion'
 import { parseMontoCop } from '@/lib/negocios/monto-cop'
@@ -59,7 +62,8 @@ import {
   textoAvisoDeshacer,
   type EsperasDeshacer,
 } from '@/lib/cotizaciones/espera-deshacer'
-import { datosManuales } from '@/lib/cotizaciones/ingreso-manual'
+import { datosManuales, montoConMiles } from '@/lib/cotizaciones/ingreso-manual'
+import { nombreVisibleDeLinea } from '@/lib/cotizaciones/nombre-visible'
 
 /**
  * La tarjeta de una opción de viaje (prototipo aprobado por Mauricio el 2026-09-24,
@@ -74,6 +78,9 @@ import { datosManuales } from '@/lib/cotizaciones/ingreso-manual'
  */
 
 const ESPERA_DESHACER_MS = 6000
+
+/** La línea de una habitación que no va (de referencia). */
+export const TEXTO_NO_VA = 'No va: no suma al costo ni sale en la cotización.'
 /** Solo desde manejadores y efectos (el clic de «Quitar habitación» y el tic del aviso). */
 const horaActual = () => Date.now()
 
@@ -215,13 +222,14 @@ export default function TarjetaOpcion({
   const esHotel = ranura?.slug === 'hotel_detalle'
   const esTraslado = ranura?.slug === 'traslado_detalle'
   const [hotel] = esHotel ? hotelesDeItems([item]) : [null]
-  const nombre = (esHotel ? hotel?.hotel : null) || item.nombre || `Opción ${numero}`
+  const nombre = (esHotel ? hotel?.hotel : null) || nombreVisibleDeLinea(item) || `Opción ${numero}`
   const estrellas = esHotel ? hotel?.estrellas ?? null : null
 
   const grupo = composicionViaje ?? tarifa.composicion ?? null
   const habitaciones = esHotel ? habitacionesDeTarifa(tarifa) : []
   const reparto = esHotel && habitaciones.length > 0 ? repartirHabitaciones(habitaciones, grupo, tarifa.correcciones) : null
   const resumenAloj = reparto ? resumenDeAlojamiento(reparto) : null
+  const avisoPax = resumenAloj ? avisoDePasajeros(resumenAloj) : null
 
   const [confirmaBorrar, setConfirmaBorrar] = useState(false)
   const [editandoFicha, setEditandoFicha] = useState(false)
@@ -235,9 +243,10 @@ export default function TarjetaOpcion({
       <>
         {[hotel?.habitacion, `${resumenAloj.habitaciones} ${resumenAloj.habitaciones === 1 ? 'habitación' : 'habitaciones'}`].filter(Boolean).join(' · ')}
         {' · '}
-        {resumenAloj.falta
-          ? <span className="font-semibold text-[#9A5F0C]">{resumenAloj.falta.verbo.toLowerCase()} {resumenAloj.falta.quien}</span>
+        {avisoPax
+          ? <span className="font-semibold text-[#9A5F0C]">{avisoPax.corto.toLowerCase()}</span>
           : grupo ? `cubre a los ${grupo.adultos + grupo.ninos + grupo.infantes}` : null}
+        {resumenAloj.referencias > 0 && ` · ${referenciasTexto(resumenAloj.referencias)}`}
       </>
     )
     : resumenDeOpcion(item)
@@ -406,6 +415,7 @@ export default function TarjetaOpcion({
               resumen={resumenAloj}
               editable={editable}
               ampliar={ampliar}
+              onGuardada={guardada => setRecienGuardada({ antes: itemDeLaPagina.tarifa_pax, ahora: guardada })}
               onCambio={onCambio}
             />
           )}
@@ -575,6 +585,7 @@ function Alojamiento({
   resumen,
   editable,
   ampliar,
+  onGuardada,
   onCambio,
 }: {
   itemId: string
@@ -582,8 +593,27 @@ function Alojamiento({
   resumen: NonNullable<ReturnType<typeof resumenDeAlojamiento>>
   editable: boolean
   ampliar: (src: string, caption: string) => void
+  /** Lo que el servidor acaba de guardar, para pintarlo sin esperar el refresco. */
+  onGuardada: (t: TarifaPax) => void
   onCambio: () => void
 }) {
+  // «Va» / «No va» (ajuste de Mauricio, 2026-10-01): la operadora elige qué habitaciones van.
+  // Mientras se guarda, ninguna fila se puede tocar otra vez.
+  const [eligiendo, startEleccion] = useTransition()
+  function elegir(h: HabitacionRepartida, va: boolean) {
+    if (eligiendo || (h.rol === 'habitacion') === va) return
+    startEleccion(async () => {
+      const r = await marcarHabitacionQueVa(itemId, h.id, va)
+      if (!r.success) { toast.error(r.error ?? 'No se pudo guardar.'); return }
+      if (r.tarifa) onGuardada(r.tarifa)
+      if (r.pendiente) toast.warning(r.pendiente)
+      onCambio()
+    })
+  }
+  const avisoPax = avisoDePasajeros(resumen)
+  // Elegir tiene sentido con más de una captura: la única siempre va.
+  const puedeElegir = editable && reparto.habitaciones.length > 1
+
   // «Quitar habitación» se ve en el acto y se hace al vencer el «Deshacer».
   const [quitadas, setQuitadas] = useState<ReadonlySet<string>>(() => new Set())
   const enEspera = useRef(new Map<string, { reloj: ReturnType<typeof setTimeout>; ejecutar: () => void }>())
@@ -659,15 +689,22 @@ function Alojamiento({
               notaReferencia={notaDeReferencia(h.sirveParaRestar, porTipo, h.rol === 'habitacion')}
               editable={editable}
               ampliar={ampliar}
+              eleccion={puedeElegir ? { ocupado: eligiendo, onElegir: va => elegir(h, va) } : null}
               onQuitar={() => quitar(h, ix)}
               onCambio={onCambio}
             />
           ))}
         </div>
       )}
+      {eligiendo && <p className="m-0 text-xs text-[#6E6A62]" role="status">Guardando la elección…</p>}
       <AvisoDeshacerTotal segundos={segundosTotal} />
-      {resumen.falta && editable && (
-        <PideHabitacion itemId={itemId} texto={`${resumen.falta.verbo} ${resumen.falta.quien}: pega su habitación.`} onCambio={onCambio} />
+      {resumen.falta && editable && avisoPax && (
+        <PideHabitacion itemId={itemId} texto={avisoPax.frase} onCambio={onCambio} />
+      )}
+      {!resumen.falta && avisoPax && (
+        <p className="m-0 rounded-lg border border-[#E9C98F] bg-[#FBF1E2] px-3 py-2 text-[13px] font-semibold text-[#9A5F0C]" data-sobran>
+          {avisoPax.frase}
+        </p>
       )}
     </section>
   )
@@ -697,6 +734,7 @@ function FilaHabitacionTarjeta({
   notaReferencia,
   editable,
   ampliar,
+  eleccion,
   onQuitar,
   onCambio,
 }: {
@@ -705,6 +743,8 @@ function FilaHabitacionTarjeta({
   notaReferencia: string | null
   editable: boolean
   ampliar: (src: string, caption: string) => void
+  /** «Va» / «No va». `null` = no se elige (sin editar, o la opción tiene una sola captura). */
+  eleccion: { ocupado: boolean; onElegir: (va: boolean) => void } | null
   onQuitar: () => void
   onCambio: () => void
 }) {
@@ -714,9 +754,10 @@ function FilaHabitacionTarjeta({
   const textoOcupacion = h.lectura.campos.find(x => /ocupaci/i.test(x.label))?.valor ?? null
   const ocupacion = h.ocupacion ? ocupacionConEdades(h.ocupacion, textoOcupacion) : null
   const notaEdad = notaDeEdad(textoOcupacion)
-  // La captura que el reparto usa solo para restar no es una habitación del grupo: no lleva
-  // título propio, la explica su nota («ONE la usa para sacar el precio…»).
-  const titulo = h.numero ? `Habitación ${h.numero}` : null
+  // La que no va (de referencia) se nombra así y dice que no suma (brief del 2026-10-01,
+  // punto 2): el resumen decía «1 habitación» y no se entendía que había otra que no contaba.
+  const va = h.rol === 'habitacion'
+  const titulo = h.numero ? `Habitación ${h.numero}` : 'De referencia'
   const precio = h.moneda === 'COP' ? pesos(h.total) : formatoMonto(h.total, h.moneda)
   const src = urlDePantallazo(h.lectura.imagenRef)
   const manual = datosManuales(h.lectura)
@@ -742,9 +783,32 @@ function FilaHabitacionTarjeta({
         <Miniatura src={src} caption={[titulo, ocupacion].filter(Boolean).join(' · ') || 'Pantallazo'} ancho="w-[120px] max-sm:w-[84px]" onAmpliar={ampliar} />
       )}
       <div className="min-w-0">
-        {titulo && <b className="block font-semibold">{titulo}</b>}
+        <b className={`block font-semibold ${va ? '' : 'text-[#6E6A62]'}`}>{titulo}</b>
         {ocupacion && <span className="text-[13px] text-[#6E6A62]">{ocupacion}</span>}
         {manual?.fuente && <span className="block text-xs text-[#6E6A62]">{manual.fuente}</span>}
+        {!va && <span className="block text-xs text-[#6E6A62]" data-no-suma>{TEXTO_NO_VA}</span>}
+        {eleccion && (
+          <span className="mt-1.5 flex flex-wrap gap-1.5" role="group" aria-label="¿Va en la cotización?" data-va-no-va>
+            <button
+              type="button"
+              aria-pressed={va}
+              disabled={eleccion.ocupado}
+              onClick={() => eleccion.onElegir(true)}
+              className={`${va ? BTN_ELEGIDO : BTN} !px-2 !py-0.5 !text-xs`}
+            >
+              Va
+            </button>
+            <button
+              type="button"
+              aria-pressed={!va}
+              disabled={eleccion.ocupado}
+              onClick={() => eleccion.onElegir(false)}
+              className={`${va ? BTN : BTN_ELEGIDO} !px-2 !py-0.5 !text-xs`}
+            >
+              No va
+            </button>
+          </span>
+        )}
         {notaReferencia && (
           <div className="mt-[3px] flex items-start gap-[5px] text-xs text-[#6E6A62]">
             <svg className="mt-0.5 shrink-0 text-[#0E5C43]" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" aria-hidden><circle cx="12" cy="12" r="9" /><path d="M8 12h8" /></svg>
@@ -764,7 +828,7 @@ function FilaHabitacionTarjeta({
           </div>
         )}
       </div>
-      <span className="font-semibold tabular-nums max-sm:col-start-2 max-sm:row-start-2 max-sm:-mt-1.5 max-sm:justify-self-start">{precio}</span>
+      <span className={`tabular-nums max-sm:col-start-2 max-sm:row-start-2 max-sm:-mt-1.5 max-sm:justify-self-start ${va ? 'font-semibold' : 'text-[#6E6A62] line-through'}`}>{precio}</span>
       {editable ? (
         <span className="max-sm:col-start-3 max-sm:row-start-1">
           <MenuAcciones
@@ -808,7 +872,7 @@ function FormHabitacion({ itemId, h, onListo, onCancelar }: { itemId: string; h:
     adultos: String(h.ocupacion?.adultos ?? ''),
     ninos: String(h.ocupacion?.ninos ?? 0),
     infantes: String(h.ocupacion?.infantes ?? 0),
-    total: String(Math.round(h.total)),
+    total: montoConMiles(String(Math.round(h.total))),
   })
   const [isPending, startTransition] = useTransition()
 
@@ -816,7 +880,7 @@ function FormHabitacion({ itemId, h, onListo, onCancelar }: { itemId: string; h:
     e.preventDefault()
     const entero = (s: string) => Math.max(0, Math.trunc(Number(s) || 0))
     const total = parseMontoCop(v.total)
-    if (total === null) { toast.error('Escribe el precio sin puntos ni símbolo.'); return }
+    if (total === null) { toast.error('Escribe el precio de la habitación.'); return }
     startTransition(async () => {
       const r = await corregirHabitacion(itemId, h.id, { adultos: entero(v.adultos), ninos: entero(v.ninos), infantes: entero(v.infantes), total })
       if (!r.success) { toast.error(r.error ?? 'No se pudo guardar'); return }
@@ -828,7 +892,7 @@ function FormHabitacion({ itemId, h, onListo, onCancelar }: { itemId: string; h:
   const campo = (k: keyof typeof v, label: string) => (
     <label className="flex flex-col gap-0.5 text-xs text-[#6E6A62]">
       <span>{label}</span>
-      <input className={`${INPUT} tabular-nums`} inputMode="numeric" value={v[k]} onChange={e => setV(p => ({ ...p, [k]: e.target.value }))} />
+      <input className={`${INPUT} tabular-nums`} inputMode="numeric" value={v[k]} onChange={e => setV(p => ({ ...p, [k]: k === 'total' ? montoConMiles(e.target.value) : e.target.value }))} />
     </label>
   )
   return (

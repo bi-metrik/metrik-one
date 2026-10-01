@@ -2,9 +2,9 @@
 
 import { useId, useState, type ReactNode } from 'react'
 
-import { avisoFechasFueraDelViaje, nochesEntre, type ErroresManual } from '@/lib/cotizaciones/ingreso-manual'
+import { avisoFechasFueraDelViaje, montoConMiles, nochesEntre, type ErroresManual } from '@/lib/cotizaciones/ingreso-manual'
 import type { Composicion } from '@/lib/cotizaciones/tarifa-pasajero'
-import { BTN, BTN_PRIM, INPUT, INPUT_DUDOSO, SPIN } from '@/components/viaje/estilo'
+import { BTN, BTN_ELEGIDO, BTN_PRIM, INPUT, INPUT_DUDOSO, SPIN } from '@/components/viaje/estilo'
 
 /** El spinner dentro de un botón: el botón ya separa con `gap-1.5`, sin el margen propio. */
 const SPIN_BOTON = SPIN.replace('mr-1.5 ', '')
@@ -43,6 +43,14 @@ export const AYUDA_FUENTE = 'Solo la ve tu equipo.'
 export const AYUDA_EDAD_NINO = 'Si la llenas, la cotización dice: Tarifa niño de 2 a 11 años cumplidos a la fecha del viaje.'
 
 type Valores = Record<string, string>
+
+/** Los montos del formulario: se ven con punto de miles mientras se escriben (`montoConMiles`). */
+export const CAMPOS_MONTO: ReadonlySet<string> = new Set(['netoAdulto', 'netoNino', 'netoInfante', 'neto'])
+
+/** Lo que queda en la casilla después de escribir: un monto, con su punto de miles. */
+export function valorEscrito(campo: string, texto: string): string {
+  return CAMPOS_MONTO.has(campo) ? montoConMiles(texto) : texto
+}
 
 function inicial(tipo: TipoManual, grupo: Composicion | null): Valores {
   const pax = {
@@ -87,7 +95,7 @@ export default function IngresoManualForm({
     setMensaje(null)
   }
 
-  const poner = (k: string) => (e: { target: { value: string } }) => setV(prev => ({ ...prev, [k]: e.target.value }))
+  const poner = (k: string) => (e: { target: { value: string } }) => setV(prev => ({ ...prev, [k]: valorEscrito(k, e.target.value) }))
 
   /**
    * `numerico`: un monto o una cantidad. Como en `FormHabitacion`: texto con teclado numérico
@@ -150,7 +158,7 @@ export default function IngresoManualForm({
         <span className="text-sm font-semibold">Ingresar a mano</span>
         <div className="flex gap-1" role="group" aria-label="Qué vas a ingresar">
           {(['hotel', 'traslado'] as const).map(t => (
-            <button key={t} type="button" onClick={() => cambiarTipo(t)} aria-pressed={tipo === t} className={tipo === t ? `${BTN} border-[#0E5C43] bg-[#EAF1EE] text-[#0E5C43]` : BTN}>
+            <button key={t} type="button" onClick={() => cambiarTipo(t)} aria-pressed={tipo === t} className={tipo === t ? BTN_ELEGIDO : BTN}>
               {t === 'hotel' ? 'Hotel' : 'Traslado'}
             </button>
           ))}
