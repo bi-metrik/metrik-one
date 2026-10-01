@@ -302,6 +302,7 @@ export default function BandejaCapturas({
   receptor,
   onPendientes,
   fechasViaje = null,
+  onCambio,
 }: {
   cotizacionId: string
   /** Las líneas de la cotización: contra ellas se dice a dónde irá cada captura. */
@@ -319,8 +320,14 @@ export default function BandejaCapturas({
   onPendientes?: (porOpcion: Record<string, string>) => void
   /** Las fechas del viaje: el formulario manual avisa antes de llevar un hotel fuera de ellas. */
   fechasViaje?: { inicio: string | null; fin: string | null } | null
+  /**
+   * Cómo se pone al día la página después de aceptar o deshacer. El editor del viaje pasa el
+   * suyo, que además relee la cotización (`vista-fresca.ts`); sin él, el refresco de siempre.
+   */
+  onCambio?: () => void
 }) {
   const router = useRouter()
+  const refrescar = () => (onCambio ? onCambio() : router.refresh())
   const idEntrada = useId()
   const [capturas, setCapturas] = useState<Captura[]>([])
   const { ampliar, vista } = useVistaAmpliada()
@@ -614,7 +621,7 @@ export default function BandejaCapturas({
         return
       }
       actualizar(c.id, { estado: a.antes, aceptada: null, itemId: null, error: null })
-      router.refresh()
+      refrescar()
       return
     }
     if (c.estado.fase !== 'borrada') return
@@ -667,7 +674,7 @@ export default function BandejaCapturas({
       actualizar(c.id, {
         estado: { fase: 'parecida', conItemId: d.conItemId, donde: nombreDeOpcion(d.conItemId, ubicacionesVivas.current), alertas, habitacion: true },
       })
-      router.refresh()
+      refrescar()
       return
     }
     actualizar(c.id, {
@@ -683,7 +690,7 @@ export default function BandejaCapturas({
     // H3 · la fila dice dónde quedó; un faltante de la tarifa se avisa aparte.
     const ver = onOpcionCreada ? { label: 'Ver', onClick: () => onOpcionCreada(d.itemId) } : undefined
     if (d.pendiente) toast.warning(`Quedó un pendiente en ${d.donde}: ${d.pendiente}`, ver ? { action: ver } : undefined)
-    router.refresh()
+    refrescar()
   }
 
   /** «Agregar igual» / «Agregar como otra opción» / «Es una habitación más». */
