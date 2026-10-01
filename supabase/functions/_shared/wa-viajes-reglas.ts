@@ -19,8 +19,9 @@
 //   5. Un mensaje que nombra a dos viajes no se carga entero en ninguno (F13): solo se descarta.
 // ============================================================
 
-import { normalizarNombre, normalizarTexto } from './wa-entendimiento-reglas.ts';
-import { codigoCompacto } from './wa-carga-reglas.ts';
+import { nombreDeViaje, normalizarNombre, normalizarTexto } from './wa-entendimiento-reglas.ts';
+export { nombreDeViaje, nombrePropio } from './wa-entendimiento-reglas.ts';
+import { codigoCompacto, interpretarRespuestaNegocio } from './wa-carga-reglas.ts';
 import { esNotaDelComercial } from './wa-guardianes.ts';
 
 /** Un viaje abierto de la línea, como lo ofrece la bandeja. */
@@ -29,6 +30,12 @@ export interface ViajeAbierto {
   codigo: string | null;
   cliente: string | null;
   destino: string | null;
+  /**
+   * El nombre del negocio, como lo recuerda el comercial («Europa 2 días», «ARMENIA 2N»). Sirve de
+   * encabezado y es lo primero que se muestra (`nombreDeViaje`). Opcional: los planes guardados
+   * antes del 2026-10-01 no lo traen.
+   */
+  nombre?: string | null;
 }
 
 /** Un mensaje de la entrega con su hora de llegada. `n` es su número (1, 2, 3…) en la entrega. */
@@ -37,7 +44,7 @@ export interface MensajeViaje {
   cuerpo: string;
   reenviado: boolean;
   tipo: string;
-  /** ISO: cuándo llegó (`recibido_at`). */
+  /** ISO: cuándo lo mandó el comercial (`momentoDelMensaje`: la hora de Meta, o la de llegada). */
   en: string;
 }
 
@@ -45,13 +52,13 @@ export interface MensajeViaje {
 
 export type ResolucionEncabezado =
   /** Coincidencia EXACTA (código, nombre o nombre + apellido): cambia la caja sola y se avisa con «📌». */
-  | { tipo: 'viaje'; viaje: ViajeAbierto; por: 'codigo' | 'nombre' }
+  | { tipo: 'viaje'; viaje: ViajeAbierto; por: 'codigo' | 'nombre' | 'negocio' }
   /**
    * Coincidencia APROXIMADA («Lusia», «Jorje»), solo el apellido («Gómez») o el destino («la de
    * punta cana»): no cambia la caja sola. El bot pregunta en el acto «¿Cambias a…? sí/no» y lo que
    * sigue queda sin asignar hasta el «sí» (QA de #971 v5).
    */
-  | { tipo: 'aproximado'; viaje: ViajeAbierto; por: 'nombre' | 'apellido' | 'destino' }
+  | { tipo: 'aproximado'; viaje: ViajeAbierto; por: 'nombre' | 'apellido' | 'destino' | 'negocio' }
   | { tipo: 'nuevo'; cliente: string | null }
   | { tipo: 'ambiguo'; candidatos: ViajeAbierto[] }
   | { tipo: 'codigo_desconocido'; codigo: string }
@@ -91,6 +98,28 @@ function distanciaAlNombre(w: string, nombre: string | null): number {
     if (p.length >= 5 && w.length >= 5 && distancia(p, w) <= 1) mejor = 1;
   }
   return mejor;
+}
+
+/**
+ * La distancia de un escrito al cliente de un viaje: la peor de sus palabras (0 = todas están en
+ * el nombre, 1 = alguna con un error de tipeo). Si una palabra no se parece pero OTRA está tal cual
+ * y no es el nombre de pila («Lusia Prueba» por «Laura Prueba»: el apellido es exacto), cuenta como 2:
+ * se pregunta «¿Cambias a…?» en vez de dejar pasar el encabezado (prueba en vivo del 2026-10-01,
+ * error 6). Las demás palabras tienen que poder ser un nombre (letras, 3 o más, no comunes).
+ */
+function distanciaAlCliente(resto: ReadonlyArray<string>, cliente: string | null): number {
+  const ds = resto.map(w => distanciaAlNombre(w, cliente));
+  const peor = Math.max(...ds);
+  if (Number.isFinite(peor) || resto.length < 2) return peor;
+  const pila = palabrasDe(cliente)[0];
+  const apellidoExacto = resto.some((w, i) => ds[i] === 0 && w !== pila);
+  const otrasSonNombre = resto.every((w, i) => ds[i] <= 1 || (/^[a-z]{3,}$/.test(w) && !PALABRAS_COMUNES.has(w)));
+  return apellidoExacto && otrasSonNombre ? 2 : Infinity;
+}
+
+/** El nombre del negocio sin espacios ni signos: «ARMENIA 2N» y «Armenia 2 n» son el mismo. */
+function nombreCompacto(t: string | null | undefined): string {
+  return normalizarNombre(t).replace(/ /g, '');
 }
 
 /** ¿Esta palabra es una palabra del nombre? Igual, o con un error de tipeo si es larga («Carlina»). */
@@ -153,6 +182,20 @@ function primerNombreDelEquipo(w: string, equipo: ReadonlyArray<string>): boolea
   return equipo.some(n => palabrasDe(n)[0] === w);
 }
 
+/**
+ * ¿Es un acuse o una risa, sin nada de una solicitud? «ok gracias», «jajaja», «😂😂», un sticker. Con
+ * la bandeja encendida todo lo escrito entra a la bandeja: una tanda hecha SOLO de esto no se le
+ * pregunta al comercial («¿A qué viaje van?» por un «ok gracias» sería ruido del bot).
+ */
+export function esRuidoEscrito(cuerpo: string | null | undefined): boolean {
+  return esRisa(cuerpo) || palabrasDe(String(cuerpo ?? '')).every(w => PALABRAS_COMUNES.has(w) || /^(ja|je|ji|ha)+j?$/.test(w));
+}
+
+/** ¿Es solo una risa o solo emojis? «jajaja», «Jejeje», «😂😂». Un «ok» o un «sí» no: pueden ser respuesta. */
+export function esRisa(cuerpo: string | null | undefined): boolean {
+  return String(cuerpo ?? '').trim() !== '' && palabrasDe(String(cuerpo)).every(w => /^(ja|je|ji|ha)+j?$/.test(w));
+}
+
 /** ¿Todo el escrito es de palabras comunes y nombres del equipo? «gracias Tati», «súper bien». No es encabezado. */
 function sinEfecto(palabras: ReadonlyArray<string>, equipo: ReadonlyArray<string>): boolean {
   return palabras.length > 0 && palabras.every(w => PALABRAS_COMUNES.has(w) || palabraDelEquipo(w, equipo));
@@ -202,43 +245,65 @@ export function resolverEncabezado(
   // Exacta: cada palabra está tal cual en el nombre, y una de ellas es el nombre de pila. Gana sobre
   // un apodo del equipo: con una Mariana en el equipo, «María» sigue nombrando a la clienta María
   // (QA de #971 v6, ajuste del coordinador).
-  const exactos = viajes.filter(v => {
+  const porCliente = viajes.filter(v => {
     const del = palabrasDelCliente(v);
     return del.length > 0 && resto.includes(del[0]) && resto.every(w => del.includes(w));
   });
-  if (exactos.length === 1) return { tipo: 'viaje', viaje: exactos[0], por: 'nombre' };
+  // El NOMBRE del negocio, tal cual (sin tildes, mayúsculas ni espacios): «Europa 2 días», «ARMENIA
+  // 2N». Es como los comerciales recuerdan un viaje (prueba en vivo del 2026-10-01, parte B). Un
+  // nombre repetido no elige: pregunta cuál, con cliente y código.
+  const h = nombreCompacto(bruto);
+  const porNegocio = viajes.filter(v => !!v.nombre && nombreCompacto(v.nombre) === h);
+  const exactos = [...new Map([...porNegocio, ...porCliente].map(v => [v.id, v])).values()];
+  if (exactos.length === 1) return { tipo: 'viaje', viaje: exactos[0], por: porNegocio.length === 1 ? 'negocio' : 'nombre' };
   if (exactos.length > 1) return { tipo: 'ambiguo', candidatos: exactos };
   // Sin un cliente exacto, el resto del nombre del equipo y sus apodos («Tati», «Mau») no son encabezado.
   if (sinEfecto(resto, equipo)) return null;
 
-  // Aproximada: los candidatos a la MENOR distancia (0 = solo apellidos; 1 = un error de tipeo).
-  const distancias = viajes.map(v => ({ v, d: Math.max(...resto.map(w => distanciaAlNombre(w, v.cliente))) }));
+  // Aproximada: los candidatos a la MENOR distancia (0 = solo apellidos; 1 = un error de tipeo;
+  // 2 = el apellido exacto y otro nombre de pila).
+  const distancias = viajes.map(v => ({ v, d: distanciaAlCliente(resto, v.cliente) }));
   const minima = Math.min(...distancias.map(x => x.d));
   const porNombre = Number.isFinite(minima) ? distancias.filter(x => x.d === minima).map(x => x.v) : [];
   const porDestino = viajes.filter(v => {
     const d = palabrasDe(v.destino);
     return d.length > 0 && resto.length === d.length && d.every(w => resto.includes(w));
   });
-  const candidatos = [...new Map([...porNombre, ...porDestino].map(v => [v.id, v])).values()];
+  // El nombre del negocio con un error de tipeo o dos («Europa 2 dia»): solo nombres largos.
+  const porNegocioCerca = h.length >= 8 && /[a-z]{4}/.test(h)
+    ? viajes.filter(v => !!v.nombre && distancia(nombreCompacto(v.nombre), h) <= 2)
+    : [];
+  const candidatos = [...new Map([...porNombre, ...porDestino, ...porNegocioCerca].map(v => [v.id, v])).values()];
   if (candidatos.length === 1) {
-    const por = porNombre.length === 1 ? (minima === 0 ? 'apellido' : 'nombre') : 'destino';
+    const por = porNombre.length === 1 ? (minima === 1 ? 'nombre' : 'apellido') : porDestino.length === 1 ? 'destino' : 'negocio';
     return { tipo: 'aproximado', viaje: candidatos[0], por };
   }
   if (candidatos.length > 1) return { tipo: 'ambiguo', candidatos };
   return null;
 }
 
-/** Lo que el bot responde EN EL ACTO a un encabezado del comercial (QA de #971 v5). `null`: nada. */
-export function respuestaAlEncabezado(r: ResolucionEncabezado | null): string | null {
+/**
+ * Lo que el bot responde EN EL ACTO a un encabezado del comercial (QA de #971 v5). `null`: nada.
+ * Un encabezado ambiguo (un nombre repetido, dos clientes iguales) pregunta cuál en el acto, con
+ * cliente y código: la respuesta es el código, que es otro encabezado (prueba en vivo, parte B).
+ */
+export function respuestaAlEncabezado(r: ResolucionEncabezado | null, texto = ''): string | null {
   if (r?.tipo === 'viaje') return `📌 ${lineaCaja(r.viaje)}`;
   if (r?.tipo === 'nuevo') return r.cliente ? `📌 NUEVO ${r.cliente}` : TEXTO_PIDE_NOMBRE_NUEVO;
   if (r?.tipo === 'aproximado') return `¿Cambias a ${lineaCaja(r.viaje)}? sí/no`;
+  if (r?.tipo === 'ambiguo') {
+    return [
+      `¿Cuál viaje? «${String(texto).trim()}» puede ser:`,
+      ...r.candidatos.map(v => `- ${lineaCaja(v)}`),
+      'Escribe su código. Hasta entonces no asigno lo que sigue.',
+    ].join('\n');
+  }
   return null;
 }
 
-/** «Carolina · T1 26 11»: como se nombra una caja al comercial. */
+/** «Europa 2 días · Carolina Ruiz (T1 26 11)»: como se nombra una caja al comercial (`nombreDeViaje`). */
 export function lineaCaja(v: ViajeAbierto): string {
-  return [v.cliente, v.codigo].filter(Boolean).join(' · ') || 'sin código';
+  return nombreDeViaje(v);
 }
 
 /** Lo que el bot pide en el acto tras un «nuevo» sin nombre (como N9). */
@@ -304,6 +369,27 @@ export function leerSiNo(texto: string, opts: { estricto?: boolean } = {}): 'si'
   }
   if (afirma && !niega) return ws.every(w => (AFIRMA.has(w) && !(opts.estricto && ACUSES.has(w))) || COLA_SI_NO.has(w)) ? 'si' : null;
   return null;
+}
+
+/**
+ * ¿Este escrito tiene forma de RESPUESTA a una pregunta del bot? Un sí o un no, un número, un código,
+ * «nuevo …», un celular, «descartar», una corrección del resumen («el 3 es de Luisa», «dejar el 2») o
+ * algo corto (hasta tres palabras: un nombre). Un texto largo que no es nada de eso («Hola, queremos
+ * ir a Cartagena del 12 al 16…») es contenido de una solicitud: si llega sin tanda abierta, puede que
+ * su encabezado venga en camino (`hayQueEsperarEnVuelo`). Una respuesta de verdad NO espera: si
+ * esperara, un encabezado mandado DESPUÉS de ella podría abrir la tanda y tragársela.
+ */
+export function pareceRespuesta(texto: string): boolean {
+  const bruto = String(texto ?? '').trim();
+  if (!bruto) return false;
+  if (leerSiNo(bruto) !== null) return true;
+  if (interpretarRespuestaNegocio(bruto, []).tipo !== 'no_entendida') return true;
+  // Un celular solo («300 555 1234»): un texto con fechas y edades también junta 10 dígitos.
+  if (/^\+?[\d\s().-]{7,}$/.test(bruto)) return true;
+  const t = normalizarTexto(bruto).replace(/^[¡!¿?.,;:\s]+/, '');
+  if (/^(descart\w*|corregir|corrijo|cambiar|dejar|deja|dejalo|dejalos|mover|mueve|pasar|pasa|quitar|quita|sacar|saca|borrar|borra)\b/.test(t)) return true;
+  if (/^(el|la|los|las|mensaje|mensajes)?\s*\d{1,2}(\s*(,|y|e)\s*\d{1,2})*\s+(es|son|va|van|a|al|para)\b/.test(t)) return true;
+  return palabrasDe(bruto).length <= 3;
 }
 
 /** ¿Es un «no» claro? Para «¿Cambias a…? sí/no». */
@@ -447,7 +533,7 @@ export function pareceEncabezado(texto: string, viajes: ReadonlyArray<ViajeAbier
 
 /** A dónde va un mensaje. */
 export type DestinoPlan =
-  | { tipo: 'existente'; negocio_id: string; codigo: string | null; cliente: string | null }
+  | { tipo: 'existente'; negocio_id: string; codigo: string | null; cliente: string | null; nombre?: string | null }
   | { tipo: 'nuevo'; cliente: string | null };
 
 export function claveDestino(d: DestinoPlan): string {
@@ -455,7 +541,7 @@ export function claveDestino(d: DestinoPlan): string {
 }
 
 function destinoDeViaje(v: ViajeAbierto): DestinoPlan {
-  return { tipo: 'existente', negocio_id: v.id, codigo: v.codigo, cliente: v.cliente };
+  return { tipo: 'existente', negocio_id: v.id, codigo: v.codigo, cliente: v.cliente, nombre: v.nombre ?? null };
 }
 
 // ── Lo que se ve sin modelo: nombres, lugares, presentaciones ────────────────
@@ -579,20 +665,20 @@ function chocaConLaCaja(m: { fechas: string[]; adultos: number[] }, caja: { fech
   return null;
 }
 
-function lineaViaje(v: ViajeAbierto): string {
-  return [v.codigo, v.cliente].filter(Boolean).join(' · ') || 'sin código';
-}
-
 function avisoEncabezado(seg: Segmento, cerrados: ReadonlySet<string>): string | null {
   const e = seg.encabezado!;
   const r = e.resolucion;
   if (r.tipo === 'aproximado') {
     if (seg.confirmacion?.respuesta === 'si') return null;
+    // Con nada después del encabezado no hay qué asignar: no se pide «de qué viaje es» (error 11).
+    if (seg.mensajes.length === 0) return null;
     return seg.confirmacion?.respuesta === 'no'
       ? `Dijiste que «${e.texto}» no es ${lineaCaja(r.viaje)}: lo que siguió no lo cargué. Dime de qué viaje es.`
       : `«${e.texto}» puede ser ${lineaCaja(r.viaje)} y no me contestaste: lo que siguió no lo cargué. Dime de qué viaje es.`;
   }
-  if (r.tipo === 'ambiguo') return `«${e.texto}» puede ser ${r.candidatos.map(lineaViaje).join(' o ')}: no elegí. Dime cuál.`;
+  if (r.tipo === 'ambiguo') {
+    return seg.mensajes.length === 0 ? null : `«${e.texto}» puede ser ${r.candidatos.map(lineaCaja).join(' o ')}: no elegí. Dime cuál.`;
+  }
   if (r.tipo === 'no_reconocido') return `No reconocí el encabezado «${e.texto}»: lo que sigue no lo cargo en el viaje anterior. Dime de qué viaje es.`;
   if (r.tipo === 'codigo_desconocido') {
     return cerrados.has(r.codigo)
@@ -651,6 +737,9 @@ export function armarPlan(p: {
     for (const n of seg.mensajes) {
       const m = porN.get(n);
       if (!m) continue;
+      // Una risa o unos emojis («jajaja», «😂😂») no van al resumen ni se numeran (error 13): no
+      // traen nada de la solicitud y solo alargan la lista que el comercial revisa.
+      if (esRisa(m.cuerpo)) continue;
       const nombrados = viajesNombrados(m.cuerpo, destinosConocidos, p.viajes);
       if (!caja) {
         const motivo = !seg.encabezado ? 'llegó sin encabezado'
@@ -723,8 +812,9 @@ export function planSinDudas(plan: PlanViajes): boolean {
   return pendientes(plan).length === 0 && plan.avisos.length === 0 && gruposDelPlan(plan).length > 0;
 }
 
-function nombreDestino(d: DestinoPlan): string {
-  return d.tipo === 'nuevo' ? `NUEVO ${d.cliente ?? '(sin nombre)'}` : [d.codigo, d.cliente].filter(Boolean).join(' · ') || 'sin código';
+/** Un destino del plan como se le muestra al comercial: «NUEVO Laura» o «Europa 2 días · Carolina Ruiz (M1 26 5)». */
+export function nombreDestino(d: DestinoPlan): string {
+  return d.tipo === 'nuevo' ? `NUEVO ${d.cliente ?? '(sin nombre)'}` : nombreDeViaje(d);
 }
 
 function recorte(t: string, n = 40): string {
@@ -783,7 +873,7 @@ export function partesResumenPlan(plan: PlanViajes, mensajes: ReadonlyArray<Mens
   lineas.push(grupos.length === 0 ? 'No hay mensajes con un viaje asignado.' : `Entendí ${grupos.length} ${grupos.length === 1 ? 'viaje' : 'viajes'}:`);
   for (const g of grupos) {
     const n = g.mensajes.length;
-    lineas.push(`${g.k}) ${nombreDestino(g.destino)} (${n} ${n === 1 ? 'mensaje' : 'mensajes'})`);
+    lineas.push(`${g.k}) ${nombreDestino(g.destino)} — ${n} ${n === 1 ? 'mensaje' : 'mensajes'}`);
     lineas.push(...g.mensajes.map(n2 => `${linea(n2, largo)}${plan.mensajes.find(x => x.n === n2)?.sospecha ? ' ⚠' : ''}`));
   }
   if (porDecidir.length > 0) {
@@ -793,9 +883,11 @@ export function partesResumenPlan(plan: PlanViajes, mensajes: ReadonlyArray<Mens
   const descartados = plan.mensajes.filter(m => m.descartado).map(m => m.n);
   if (descartados.length > 0) lineas.push(`Descartados: ${rangos(descartados.map(visible))}`);
   lineas.push(...plan.avisos);
+  // Los ejemplos usan un número que está en el resumen (error 8: «el 4» salía con un solo mensaje).
+  const k = porDecidir.length > 0 ? visible(porDecidir[0].n) : Math.max(1, ...plan.mensajes.map(m => visible(m.n)));
   lineas.push(porDecidir.length > 0
-    ? 'No cargué nada todavía. Para cada uno: «dejar el 4» (o «dejar todos»), «el 4 es de Luisa» / «el 4 es del 2» / «el 4 es nuevo Pedro» para moverlo, o «descartar el 4». Después, SÍ. DESCARTAR descarta todo.'
-    : 'No cargué nada todavía. Revisa que cada mensaje esté en su viaje. ¿Así? Responde SÍ, o corrige: «el 4 es de Luisa», «descartar el 4». DESCARTAR descarta todo.');
+    ? `No cargué nada todavía. Para cada uno: «dejar el ${k}» (o «dejar todos»), «el ${k} es de Luisa» / «el ${k} es del 2» / «el ${k} es nuevo Pedro» para moverlo, o «descartar el ${k}». Después, SÍ. DESCARTAR descarta todo.`
+    : `No cargué nada todavía. Revisa que cada mensaje esté en su viaje. ¿Así? Responde SÍ, o corrige: «el ${k} es de Luisa», «descartar el ${k}». DESCARTAR descarta todo.`);
 
   const empacar = (tope: number): string[] => {
     const partes: string[] = [];

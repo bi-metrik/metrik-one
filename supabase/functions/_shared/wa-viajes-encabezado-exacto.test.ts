@@ -84,8 +84,8 @@ describe('a y b · exacto cambia la caja; aproximado pregunta', () => {
   });
 
   it('lo que el bot contesta en el acto', () => {
-    expect(respuestaAlEncabezado(resolverEncabezado('Carolina', vs))).toBe('📌 CAROLINA RUIZ · T1 26 103');
-    expect(respuestaAlEncabezado(resolverEncabezado('Lusia', vs))).toBe('¿Cambias a LUISA MEJÍA · T1 26 102? sí/no');
+    expect(respuestaAlEncabezado(resolverEncabezado('Carolina', vs))).toBe('📌 Carolina Ruiz (T1 26 103)');
+    expect(respuestaAlEncabezado(resolverEncabezado('Lusia', vs))).toBe('¿Cambias a Luisa Mejía (T1 26 102)? sí/no');
     expect(respuestaAlEncabezado(resolverEncabezado('nuevo Pedro', vs))).toBe('📌 NUEVO Pedro');
     expect(respuestaAlEncabezado(null)).toBeNull();
     expect([esNo('no'), esNo('No.'), esNo('no, la de Carolina'), esSi('sí'), esSi('sí, pero')]).toEqual([true, true, false, true, false]);

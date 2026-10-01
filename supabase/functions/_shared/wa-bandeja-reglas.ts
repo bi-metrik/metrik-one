@@ -26,9 +26,17 @@ export interface ConfigBandeja {
   palabrasCierre: string[];
   /**
    * Primeras palabras que mandan un mensaje escrito al bot de siempre (gastos, consultas)
-   * aunque la bandeja esté encendida. Solo aplica a lo que NO viene reenviado.
+   * aunque la bandeja esté encendida. Solo aplica a lo que NO viene reenviado. Incluye los
+   * `prefijosConsulta`.
    */
   prefijosBot: string[];
+  /**
+   * Prefijos de CONSULTA al bot de siempre («bot ¿cuánto vendimos en septiembre?»): mandan el
+   * escrito al bot como `prefijosBot` y además se quitan antes de que el bot lo lea. Con la
+   * bandeja encendida, todo lo escrito va a la bandeja (prueba en vivo del 2026-10-01): esta es la
+   * puerta para preguntarle algo al bot. `config_extra.bandeja_solicitudes.prefijos_consulta`.
+   */
+  prefijosConsulta: string[];
   /** Horas durante las cuales el primer mensaje escrito cuenta como respuesta a «¿de qué cliente es?». */
   horasRespuestaCliente: number;
   /**
@@ -52,7 +60,8 @@ export const MODOS_VIAJES: readonly ModoViajes[] = ['uno', 'encabezado'];
 export const CONFIG_BANDEJA_POR_DEFECTO: ConfigBandeja = {
   ventanaMinutos: 5,
   palabrasCierre: ['listo'],
-  prefijosBot: ['gasto'],
+  prefijosBot: ['gasto', 'bot'],
+  prefijosConsulta: ['bot'],
   horasRespuestaCliente: 24,
   modoViajes: 'uno',
   confirmar: 'siempre',
@@ -88,7 +97,9 @@ export function leerConfigBandeja(configExtra: unknown): ConfigBandeja {
   return {
     ventanaMinutos: entero(raw.ventana_minutos, 1, 120, d.ventanaMinutos),
     palabrasCierre: listaDePalabras(raw.palabras_cierre, d.palabrasCierre),
-    prefijosBot: listaDePalabras(raw.prefijos_bot, d.prefijosBot),
+    // Un prefijo de consulta es también un prefijo del bot: se suman, sin repetir.
+    prefijosBot: [...new Set([...listaDePalabras(raw.prefijos_bot, ['gasto']), ...listaDePalabras(raw.prefijos_consulta, d.prefijosConsulta)])],
+    prefijosConsulta: listaDePalabras(raw.prefijos_consulta, d.prefijosConsulta),
     horasRespuestaCliente: entero(raw.horas_respuesta_cliente, 1, 168, d.horasRespuestaCliente),
     modoViajes: MODOS_VIAJES.includes(raw.modo_viajes as ModoViajes) ? (raw.modo_viajes as ModoViajes) : d.modoViajes,
     // Un valor desconocido cae a `siempre`: confirmar de más cuesta un mensaje, de menos un dato.
@@ -128,6 +139,46 @@ export function esPregunta(texto: string): boolean {
   return /[¿?]/.test(String(texto ?? ''));
 }
 
+/** El texto sin el prefijo de consulta («bot ¿cuánto vendimos?» → «¿cuánto vendimos?»). `null` si no lo trae o no queda nada. */
+export function quitarPrefijoConsulta(texto: string, prefijos: ReadonlyArray<string>): string | null {
+  const bruto = String(texto ?? '').trim();
+  const m = /^(\S+?)[\s:;,.!]+([\s\S]+)$/.exec(bruto);
+  if (!m || !prefijos.includes(normalizar(m[1]))) return null;
+  const resto = m[2].trim();
+  return resto ? resto : null;
+}
+
+/** «cancelar» escrito solo: corta la conversación del bot que está a medias y vuelve a la bandeja. */
+export function esCancelar(texto: string): boolean {
+  return /^(cancelar|cancela|cancelalo|cancelar todo|salir)$/.test(normalizar(texto));
+}
+
+/**
+ * Estados de `bot_sessions` donde una RESPUESTA esperada es un código de negocio («¿En cuál
+ * negocio registro este gasto? … escribe el código»). Ahí un código no corta la conversación.
+ */
+export const ESTADOS_QUE_ESPERAN_CODIGO: readonly string[] = ['awaiting_selection'];
+
+/**
+ * ¿Este escrito corta la conversación del bot que está a medias? Solo dos cosas la cortan
+ * (prueba en vivo del 2026-10-01, falla 2: el flujo de actividades atrapaba al comercial):
+ *   · «cancelar» escrito solo;
+ *   · un encabezado reconocido («nuevo Laura», «Carolina Ruiz», «Europa 2 días»). Un CÓDIGO no la
+ *     corta cuando el bot espera justo un código (`awaiting_selection`): es su respuesta.
+ * `null`: el escrito es para el bot.
+ */
+export function salidaDeLaSesion(p: {
+  texto: string;
+  /** Lo que es el escrito como encabezado: por código, por nombre, o no es encabezado. */
+  encabezado: 'codigo' | 'nombre' | null;
+  estadoSesion: string | null;
+}): 'cancelar' | 'encabezado' | null {
+  if (esCancelar(p.texto)) return 'cancelar';
+  if (p.encabezado === 'nombre') return 'encabezado';
+  if (p.encabezado === 'codigo' && !ESTADOS_QUE_ESPERAN_CODIGO.includes(p.estadoSesion ?? '')) return 'encabezado';
+  return null;
+}
+
 export interface EntradaRuta {
   /** `workspaces.modules` del remitente. */
   modules: Record<string, unknown> | null | undefined;
@@ -137,46 +188,90 @@ export interface EntradaRuta {
   reenviado: boolean;
   /** Hay una conversación del bot a medias (p. ej. un gasto esperando la foto del soporte). */
   sesionBotEsperando: boolean;
-  /**
-   * Lo que hace falta para la regla 5 (N8, 2026-10-01). Sin saberlo (`undefined`) el escrito va
-   * a la bandeja, como antes: la regla solo manda al bot lo que SABE que no es de la bandeja.
-   */
-  /** El remitente tiene una entrega abierta (está reenviando una tanda). */
-  entregaAbierta?: boolean;
-  /** El bot de la bandeja le hizo una pregunta que sigue sin respuesta («¿A qué viaje van?», el reparto, el contacto). */
-  preguntaPendiente?: boolean;
-  /** El escrito nombra un viaje (modo `encabezado`): abre una caja. */
-  esEncabezado?: boolean;
+  /** Si hay conversación a medias: si este escrito la corta (`salidaDeLaSesion`). */
+  salidaDeSesion?: 'cancelar' | 'encabezado' | null;
 }
 
 /**
- * A dónde va un mensaje de un remitente YA identificado. Orden de las reglas:
+ * A dónde va un mensaje de un remitente YA identificado. Con la bandeja encendida MANDA LA
+ * BANDEJA (prueba en vivo del 2026-10-01, coherente con «el encabezado manda»): todo lo del
+ * comercial va a la bandeja. Orden de las reglas:
  *
  *   1. bandeja apagada en su workspace → el bot de siempre (nada cambia para nadie más);
- *   2. reenviado → bandeja, siempre: un reenvío es por definición material de una solicitud,
- *      y ni siquiera un gasto a medias puede tragárselo;
- *   3. conversación del bot a medias → el bot, para no romper un gasto que espera su foto;
- *   4. escrito empezando por un prefijo del bot («gasto …») → el bot;
- *   4b. escrito que es una PREGUNTA («¿cuánto vendimos en septiembre?») y no es encabezado → el bot,
- *      aunque haya una tanda abierta (QA de #971, F14b: se la tragaba la tanda de Carolina). Lo que el
- *      cliente pregunta llega reenviado (regla 2), no escrito;
- *   5. escrito (texto) SIN entrega abierta, SIN pregunta pendiente de la bandeja y que NO es un
- *      encabezado → el bot de siempre (N8, QA del 2026-10-01: «¿cuánto vendimos en
- *      septiembre?» se quedaba en la bandeja sin respuesta). Dentro de una tanda abierta un
- *      escrito sigue siendo parte de la tanda; con una pregunta pendiente es la respuesta;
- *   6. todo lo demás → bandeja: notas de voz, fotos, encabezados y lo escrito dentro de una tanda.
+ *   2. reenviado → bandeja, siempre: un reenvío es material de una solicitud, y ni siquiera un
+ *      gasto a medias puede tragárselo;
+ *   3. escrito que empieza por un prefijo del bot («gasto …», «bot …») → el bot;
+ *   4. conversación del bot de verdad a medias (un gasto esperando su foto) → el bot, salvo que el
+ *      escrito la corte («cancelar» o un encabezado reconocido): entonces vuelve a la bandeja;
+ *   5. todo lo demás → bandeja: notas de voz, fotos, encabezados, lo escrito con o sin tanda
+ *      abierta, y también una pregunta escrita (para consultar al bot está el prefijo «bot»).
  *
- * La regla 6 es la que hace que las notas de voz y los pantallazos del comercial no terminen
- * leídos como gastos, que es lo que pasaría hoy con `business: true`.
+ * Se fue la regla N8 (un escrito suelto sin tanda iba al bot): producía la carrera del encabezado
+ * (el escrito que llega antes de que el encabezado quede registrado se iba al bot de actividades),
+ * dejaba al comercial atrapado en ese flujo y un escrito sin encabezado nunca recibía «¿A qué viaje
+ * van?».
  */
 export function decidirRuta(e: EntradaRuta): Ruta {
   if (!bandejaActiva(e.modules)) return 'bot';
   if (e.reenviado) return 'bandeja';
-  if (e.sesionBotEsperando) return 'bot';
   if (e.tipo === 'text' && empiezaConPrefijoBot(e.texto, e.config.prefijosBot)) return 'bot';
-  if (e.tipo === 'text' && esPregunta(e.texto) && e.esEncabezado !== true && e.preguntaPendiente === false) return 'bot';
-  if (e.tipo === 'text' && e.entregaAbierta === false && e.preguntaPendiente === false && e.esEncabezado !== true) return 'bot';
+  if (e.sesionBotEsperando) return e.tipo === 'text' && e.salidaDeSesion ? 'bandeja' : 'bot';
   return 'bandeja';
+}
+
+/**
+ * ¿Hay que esperar a los mensajes que vienen en camino antes de decidir qué es este escrito?
+ * Meta manda cada mensaje en un webhook aparte y se procesan en paralelo: un escrito puede llegar
+ * ANTES de que su encabezado, mandado 1 a 3 segundos antes, quede registrado (latencia medida en
+ * vivo: 1,5 a 6,2 s). Mientras no haya tanda abierta, un escrito con una pregunta pendiente se
+ * tomaría como la RESPUESTA, y una palabra de cierre cerraría antes de que entre lo que se mandó
+ * antes. Solo en esos dos casos se espera, y en el primero solo si el escrito NO tiene forma de
+ * respuesta: un «sí» que esperara podría quedar dentro de la tanda que abre un encabezado mandado
+ * después. Lo demás entra sin demora (un mensaje que llega antes que su encabezado abre la tanda, y
+ * el orden lo arregla la hora de Meta: `ordenarPorEnvio`).
+ */
+export function hayQueEsperarEnVuelo(p: {
+  escrito: boolean; esEncabezado: boolean; esCierre: boolean; hayAbierta: boolean; hayPregunta: boolean;
+  /** Tiene forma de respuesta (`pareceRespuesta`): un «sí», un número, un nombre corto. Esa no espera. */
+  pareceRespuesta: boolean;
+}): boolean {
+  if (!p.escrito || p.esEncabezado) return false;
+  return p.esCierre || (!p.hayAbierta && p.hayPregunta && !p.pareceRespuesta);
+}
+
+/** Cuánto se espera a los mensajes en camino (ms): por encima de la latencia de registro medida en vivo. */
+export const ESPERA_EN_VUELO_MS = 6000;
+
+/** Lo que contesta el bot cuando «cancelar» corta una conversación del bot a medias. */
+export const TEXTO_SESION_CANCELADA = 'Listo, cancelé lo que el bot esperaba. Lo que escribas ahora va a la bandeja de solicitudes.';
+
+/** La pista cuando una pregunta escrita abre una tanda: quizá era para el bot de siempre. */
+export function textoPistaConsulta(prefijos: ReadonlyArray<string>): string {
+  const p = prefijos[0] ?? 'bot';
+  return `Lo guardé con las solicitudes de viaje. Si era una consulta para el bot, escríbela empezando con «${p}», por ejemplo: «${p} ¿cuánto vendimos en septiembre?».`;
+}
+
+/**
+ * La hora con la que se ORDENAN los mensajes de una entrega: la de Meta (`enviado_at`, cuando el
+ * comercial lo mandó) si es fresca, para que un mensaje registrado antes que su encabezado quede
+ * después de él; la de llegada (`recibido_at`) si la de Meta falta o está lejos de la llegada (un
+ * reenvío podría traer la hora del mensaje original: no se arriesga el orden de la tanda).
+ */
+export const HOLGURA_HORA_META_MS = 120_000;
+
+export function momentoDelMensaje(m: { enviado_at?: string | null; recibido_at?: string | null }): number {
+  const recibido = m.recibido_at ? Date.parse(m.recibido_at) : NaN;
+  const enviado = m.enviado_at ? Date.parse(m.enviado_at) : NaN;
+  if (Number.isNaN(recibido)) return Number.isNaN(enviado) ? 0 : enviado;
+  if (Number.isNaN(enviado)) return recibido;
+  const lag = recibido - enviado;
+  return lag >= -10_000 && lag <= HOLGURA_HORA_META_MS ? enviado : recibido;
+}
+
+/** Los mensajes en el orden en que el comercial los mandó (ver `momentoDelMensaje`); empate: llegada. */
+export function ordenarPorEnvio<T extends { enviado_at?: string | null; recibido_at?: string | null }>(ms: ReadonlyArray<T>): T[] {
+  return [...ms].sort((a, b) => momentoDelMensaje(a) - momentoDelMensaje(b)
+    || String(a.recibido_at ?? '').localeCompare(String(b.recibido_at ?? '')));
 }
 
 /** Lo que la base contesta al registrar un mensaje (`wa_bandeja_registrar_mensaje`). */

@@ -178,9 +178,9 @@ function base(): Tablas {
     staff: [{ id: STAFF, workspace_id: WS, full_name: 'TATIANA PRUEBA' }],
     wa_collaborators: [{ id: 'col-1', workspace_id: WS, name: 'EDGAR COLABORADOR' }],
     negocios: [
-      { id: 'n14', workspace_id: WS, linea_id: LINEA, codigo: 'T1 26 14', nombre: 'X', estado: 'abierto', created_at: '2026-09-20T10:00:00Z', contacto_id: 'c-marta', empresa_id: null, responsable_id: STAFF, contactos: { nombre: 'MARTA PRUEBA' }, empresas: null, workspaces: { slug: 'agencia' } },
-      { id: 'n15', workspace_id: WS, linea_id: LINEA, codigo: 'T1 26 15', nombre: 'Y', estado: 'abierto', created_at: '2026-09-25T10:00:00Z', contacto_id: 'c-luis', empresa_id: null, responsable_id: null, contactos: { nombre: 'LUIS PRUEBA' }, empresas: null, workspaces: { slug: 'agencia' } },
-      { id: 'n09', workspace_id: WS, linea_id: LINEA, codigo: 'T1 26 9', nombre: 'Z', estado: 'abierto', created_at: '2026-09-01T10:00:00Z', contacto_id: 'c-ana', empresa_id: null, responsable_id: null, contactos: { nombre: 'ANA PRUEBA' }, empresas: null, workspaces: { slug: 'agencia' } },
+      { id: 'n14', workspace_id: WS, linea_id: LINEA, codigo: 'T1 26 14', nombre: 'PUNTA CANA NOV', estado: 'abierto', created_at: '2026-09-20T10:00:00Z', contacto_id: 'c-marta', empresa_id: null, responsable_id: STAFF, contactos: { nombre: 'MARTA PRUEBA' }, empresas: null, workspaces: { slug: 'agencia' } },
+      { id: 'n15', workspace_id: WS, linea_id: LINEA, codigo: 'T1 26 15', nombre: 'CARTAGENA 3N', estado: 'abierto', created_at: '2026-09-25T10:00:00Z', contacto_id: 'c-luis', empresa_id: null, responsable_id: null, contactos: { nombre: 'LUIS PRUEBA' }, empresas: null, workspaces: { slug: 'agencia' } },
+      { id: 'n09', workspace_id: WS, linea_id: LINEA, codigo: 'T1 26 9', nombre: 'Aruba 5 días', estado: 'abierto', created_at: '2026-09-01T10:00:00Z', contacto_id: 'c-ana', empresa_id: null, responsable_id: null, contactos: { nombre: 'ANA PRUEBA' }, empresas: null, workspaces: { slug: 'agencia' } },
       { id: 'n01', workspace_id: WS, linea_id: LINEA, codigo: 'T1 26 1', nombre: 'W', estado: 'completado', created_at: '2026-09-28T10:00:00Z', contacto_id: 'c-marta', empresa_id: null, responsable_id: STAFF, contactos: { nombre: 'MARTA PRUEBA' }, empresas: null, workspaces: { slug: 'agencia' } },
     ],
     negocio_responsables: [{ negocio_id: 'n15', staff_id: STAFF }],
@@ -243,6 +243,8 @@ beforeEach(async () => {
   }));
   colaModelo = [];
   mod = await import('./wa-entendimiento.ts');
+  // La espera por los mensajes en camino (la carrera de los webhooks) no corre con reloj de verdad aquí.
+  (await import('./wa-bandeja.ts')).esperaEnVuelo.dormir = async () => {};
   t = base();
   db = crearDb(t);
   enviados.length = 0;
@@ -266,8 +268,8 @@ describe('«¿A qué viaje van?»', () => {
     // n15 (responsable por negocio_responsables) y n14 (responsable_id); no n09 (de otro) ni n01 (cerrado).
     expect(r!.opciones.map(o => o.id)).toEqual(['n15', 'n14']);
     expect(r!.texto).toContain('Recibí 2 mensajes. ¿A qué viaje van?');
-    expect(r!.texto).toContain('1. T1 26 15 · LUIS PRUEBA · CARTAGENA');
-    expect(r!.texto).toContain('2. T1 26 14 · MARTA PRUEBA · PUNTA CANA');
+    expect(r!.texto).toContain('1. CARTAGENA 3N · Luis Prueba (T1 26 15)');
+    expect(r!.texto).toContain('2. PUNTA CANA NOV · Marta Prueba (T1 26 14)');
     expect(r!.texto).toContain('NUEVO');
   });
 
@@ -276,7 +278,7 @@ describe('«¿A qué viaje van?»', () => {
     const r = await mod.armarPreguntaNegocio(db as never, id, WS, 1);
     expect(r!.opciones.map(o => o.id)).toEqual(['n09', 'n15', 'n14']);
     expect(r!.opciones[0].propuesto).toBe(true);
-    expect(r!.texto).toContain('Parece de ANA PRUEBA: es la 1.');
+    expect(r!.texto).toContain('Parece de Ana Prueba: es la 1.');
   });
 
   it('sin negocios abiertos en la línea solo se ofrece NUEVO', async () => {
@@ -291,8 +293,8 @@ describe('«¿A qué viaje van?»', () => {
 // ── Cargar en un negocio existente ──────────────────────────────────────────
 
 const OPCIONES = [
-  { id: 'n15', codigo: 'T1 26 15', cliente: 'LUIS PRUEBA', destino: 'CARTAGENA' },
-  { id: 'n14', codigo: 'T1 26 14', cliente: 'MARTA PRUEBA', destino: 'PUNTA CANA' },
+  { id: 'n15', codigo: 'T1 26 15', cliente: 'LUIS PRUEBA', destino: 'CARTAGENA', nombre: 'CARTAGENA 3N' },
+  { id: 'n14', codigo: 'T1 26 14', cliente: 'MARTA PRUEBA', destino: 'PUNTA CANA', nombre: 'PUNTA CANA NOV' },
 ];
 
 describe('carga en un negocio existente', () => {
@@ -325,7 +327,7 @@ describe('carga en un negocio existente', () => {
     expect(nuevas[1].contenido).toMatch(/^Se cargaron 2 datos desde WhatsApp \(Tatiana, 30-sep\)\./);
 
     expect(enviados).toHaveLength(1);
-    expect(enviados[0].texto).toContain('Cargué en T1 26 14: regreso 27 nov, niños 1.');
+    expect(enviados[0].texto).toContain('Cargué en PUNTA CANA NOV · Marta Prueba (T1 26 14): regreso 27 nov, niños 1.');
     expect(enviados[0].texto).toContain('salida (en ONE: 15 nov; el cliente dijo: 20 nov)');
     expect(enviados[0].texto).toContain('1. ¿Desde qué ciudad salen?');
   });
@@ -433,7 +435,7 @@ describe('NUEVO y re-pregunta', () => {
     await correr();
     expect(ent()).toMatchObject({ estado: 'esperando_negocio' });
     expect(enviados[0].texto).toContain('No entendí «el de marta».');
-    expect(enviados[0].texto).toContain('2. T1 26 14 · MARTA PRUEBA · PUNTA CANA');
+    expect(enviados[0].texto).toContain('2. PUNTA CANA NOV · Marta Prueba (T1 26 14)');
     expect(vi.mocked(fetch)).not.toHaveBeenCalled(); // sin destino no se gasta el modelo
 
     const tomada = await mod.tomarRespuestaContacto(db as never, { workspaceId: WS, phone: TEL, texto: '2', wamid: 'w-resp', enviadoAt: null });
@@ -494,8 +496,8 @@ describe('modo encabezado: manda el encabezado, el reparto se confirma y cada vi
     const r = await mod.armarPreguntaNegocio(db as never, id, WS, 5);
     expect(vi.mocked(fetch)).not.toHaveBeenCalled(); // el modelo ya no asigna
     expect(r!.texto).toContain('Entendí 2 viajes:');
-    expect(r!.texto).toContain('1) T1 26 14 · MARTA PRUEBA (2 mensajes)');
-    expect(r!.texto).toContain('2) T1 26 15 · LUIS PRUEBA (1 mensaje)');
+    expect(r!.texto).toContain('1) PUNTA CANA NOV · Marta Prueba (T1 26 14) — 2 mensajes');
+    expect(r!.texto).toContain('2) CARTAGENA 3N · Luis Prueba (T1 26 15) — 1 mensaje');
     expect(r!.texto).toContain('   2 «Hola Tati, buenas tardes» (saluda a mitad de la caja'); // numerado sin los encabezados
     expect(r!.texto).toContain('No cargué nada todavía');
 
@@ -530,7 +532,7 @@ describe('modo encabezado: manda el encabezado, el reparto se confirma y cada vi
     expect(t.wa_bandeja_entregas.find(e => e.id === id)!.plan_confirmado_at).toBeTruthy();
     // El avance en % va una vez por viaje, en el mensaje que cierra su carga; en ningún otro.
     const avance = enviados.filter(e => /— Mínimo \d+\/\d+ \(\d+ %\) · Completo \d+\/\d+ \(\d+ %\)/.test(e.texto));
-    expect(avance.map(e => e.texto.split('\n').find(l => l.includes('— Mínimo'))!.split(' — ')[0])).toEqual(['T1 26 14 · MARTA PRUEBA', 'T1 26 15 · LUIS PRUEBA']);
+    expect(avance.map(e => e.texto.split('\n').find(l => l.includes('— Mínimo'))!.split(' — ')[0])).toEqual(['PUNTA CANA NOV · Marta Prueba (T1 26 14)', 'CARTAGENA 3N · Luis Prueba (T1 26 15)']);
     expect(avance.every(e => e.texto.startsWith('Cargué en') || e.texto.startsWith('No encontré'))).toBe(true);
   });
 
@@ -547,10 +549,10 @@ describe('modo encabezado: manda el encabezado, el reparto se confirma y cada vi
     const sin = entregaCon({ estado: 'esperando_cliente', mensajes: [{ cuerpo: 'Martha', reenviado: false }, { cuerpo: 'volvemos el 27 de noviembre' }] });
     const r1 = await mod.armarPreguntaNegocio(db as never, sin, WS, 2);
     expect(r1!.texto).toContain('No hay mensajes con un viaje asignado.');
-    expect(r1!.texto).toContain('«Martha» puede ser MARTA PRUEBA · T1 26 14 y no me contestaste');
+    expect(r1!.texto).toContain('«Martha» puede ser PUNTA CANA NOV · Marta Prueba (T1 26 14) y no me contestaste');
     const con = entregaCon({ estado: 'esperando_cliente', mensajes: [{ cuerpo: 'Martha', reenviado: false }, { cuerpo: 'volvemos el 27 de noviembre' }, { cuerpo: 'sí', reenviado: false }] });
     const r2 = await mod.armarPreguntaNegocio(db as never, con, WS, 3);
-    expect(r2!.texto).toContain('1) T1 26 14 · MARTA PRUEBA (1 mensaje)');
+    expect(r2!.texto).toContain('1) PUNTA CANA NOV · Marta Prueba (T1 26 14) — 1 mensaje');
     expect(r2!.plan!.encabezados).toEqual([1, 3]);
   });
 
@@ -592,20 +594,20 @@ describe('QA v5 · lo que el bot contesta en el acto a un encabezado (atenderEnB
     const cfg = { ...(await import('./wa-bandeja-reglas.ts')).leerConfigBandeja(t.workspaces[0].config_extra) };
     await b.atenderEnBandeja(db as never, USER as never, { phone: TEL, text: texto, type: 'text', reenviado, wa_message_id: `w-acto-${++n}`, timestamp: '1790000000' } as never, cfg);
   };
-  const carolina = { id: 'n18', workspace_id: WS, linea_id: LINEA, codigo: 'T1 26 18', nombre: 'C', estado: 'abierto', created_at: '2026-09-26T10:00:00Z', contacto_id: 'c-c', empresa_id: null, responsable_id: null, contactos: { nombre: 'CAROLINA RUIZ' }, empresas: null };
+  const carolina = { id: 'n18', workspace_id: WS, linea_id: LINEA, codigo: 'T1 26 18', nombre: 'SAN ANDRÉS 4N', estado: 'abierto', created_at: '2026-09-26T10:00:00Z', contacto_id: 'c-c', empresa_id: null, responsable_id: null, contactos: { nombre: 'CAROLINA RUIZ' }, empresas: null };
 
   it('exacto: «📌»; aproximado: «¿Cambias a…? sí/no» y, con el «sí», «📌»; la firma del equipo no contesta nada', async () => {
     t.workspaces[0].config_extra = { bandeja_solicitudes: { modo_viajes: 'encabezado' } };
     t.negocios.push(carolina);
     await llega('Marta');
-    expect(enviados.map(e => e.texto)).toEqual(['📌 MARTA PRUEBA · T1 26 14']);
+    expect(enviados.map(e => e.texto)).toEqual(['📌 PUNTA CANA NOV · Marta Prueba (T1 26 14)']);
     await llega('volvemos el 27 de noviembre', true);
     await llega('Carlina');
     await llega('somos 3 adultos', true);
-    expect(enviados.map(e => e.texto).slice(1)).toEqual(['¿Cambias a CAROLINA RUIZ · T1 26 18? sí/no']);
+    expect(enviados.map(e => e.texto).slice(1)).toEqual(['¿Cambias a SAN ANDRÉS 4N · Carolina Ruiz (T1 26 18)? sí/no']);
     await llega('sí');
     await llega('Tatiana');
-    expect(enviados.map(e => e.texto).slice(2)).toEqual(['📌 CAROLINA RUIZ · T1 26 18']);
+    expect(enviados.map(e => e.texto).slice(2)).toEqual(['📌 SAN ANDRÉS 4N · Carolina Ruiz (T1 26 18)']);
 
     // El reparto al cerrar: lo de Marta en Marta, lo que siguió al «sí» en Carolina.
     const entrega = t.wa_bandeja_entregas.find(e => e.estado === 'abierta')!;
@@ -620,7 +622,7 @@ describe('QA v5 · lo que el bot contesta en el acto a un encabezado (atenderEnB
     t.negocios.push(carolina);
     await llega('Carlina');
     await llega('no');
-    expect(enviados.map(e => e.texto)).toEqual(['¿Cambias a CAROLINA RUIZ · T1 26 18? sí/no', 'No cambio a CAROLINA RUIZ · T1 26 18: lo que sigue queda sin asignar hasta otro encabezado.']);
+    expect(enviados.map(e => e.texto)).toEqual(['¿Cambias a SAN ANDRÉS 4N · Carolina Ruiz (T1 26 18)? sí/no', 'No cambio a SAN ANDRÉS 4N · Carolina Ruiz (T1 26 18): lo que sigue queda sin asignar hasta otro encabezado.']);
     // Un segundo «no» ya no es respuesta a nada: es contenido de la tanda y no contesta.
     await llega('no');
     expect(enviados).toHaveLength(2);
@@ -633,9 +635,9 @@ describe('QA v5 · lo que el bot contesta en el acto a un encabezado (atenderEnB
     await llega('mmm no sé');
     await llega('si claro');
     expect(enviados.map(e => e.texto)).toEqual([
-      '¿Cambias a CAROLINA RUIZ · T1 26 18? sí/no',
-      'No entendí: ¿cambias a CAROLINA RUIZ · T1 26 18? sí/no',
-      '📌 CAROLINA RUIZ · T1 26 18',
+      '¿Cambias a SAN ANDRÉS 4N · Carolina Ruiz (T1 26 18)? sí/no',
+      'No entendí: ¿cambias a SAN ANDRÉS 4N · Carolina Ruiz (T1 26 18)? sí/no',
+      '📌 SAN ANDRÉS 4N · Carolina Ruiz (T1 26 18)',
     ]);
   });
 
@@ -691,7 +693,7 @@ describe('Prueba en vivo del 2026-10-01: dos viajes NUEVO seguidos, una sola pre
     await llega('nuevo Laura Prueba');
     await llega('Hola, queremos ir a Cartagena, somos 2 adultos', true);
     await llega('listo');
-    expect(textos().at(-1)).toMatch(/^Laura Prueba · Entendí 1 viaje:\n1\) NUEVO Laura Prueba \(1 mensaje\)\n   1 «Hola, queremos ir a Cartagena/);
+    expect(textos().at(-1)).toMatch(/^Laura Prueba · Entendí 1 viaje:\n1\) NUEVO Laura Prueba — 1 mensaje\n   1 «Hola, queremos ir a Cartagena/);
     await llega('sí');
     expect(textos()).not.toContain('Anotado.');
     salidaModelo = laura();
@@ -701,7 +703,7 @@ describe('Prueba en vivo del 2026-10-01: dos viajes NUEVO seguidos, una sola pre
     await llega('Nuevo Diego Prueba');
     for (const x of ['para San Andrés', 'vamos 3 adultos', 'del 5 al 9 de diciembre', 'hotel todo incluido']) await llega(x, true);
     await llega('listo');
-    expect(textos().at(-1)).toMatch(/^Diego Prueba · Entendí 1 viaje:\n1\) NUEVO Diego Prueba \(4 mensajes\)/);
+    expect(textos().at(-1)).toMatch(/^Diego Prueba · Entendí 1 viaje:\n1\) NUEVO Diego Prueba — 4 mensajes/);
     await llega('Si');
     salidaModelo = diego();
     await cron();
@@ -780,7 +782,7 @@ describe('guardianes en la ejecución', () => {
     salidaModelo = valoresModelo({ destino: { valor: 'Punta Cana', frase: 'Confirmamos Punta Cana' }, ciudad_origen: { valor: 'Bogotá', frase: 'salimos de Bogotá' } });
     await correr();
     expect(ent()).toMatchObject({ estado: 'esperando_negocio', confirmacion_pendiente: 'cruce', negocio_destino_id: 'n15' });
-    expect(enviados[0].texto).toContain('Estos mensajes hablan de Punta Cana y T1 26 15 es de LUIS PRUEBA a CARTAGENA. No cargué nada.');
+    expect(enviados[0].texto).toContain('Estos mensajes hablan de Punta Cana y CARTAGENA 3N · Luis Prueba (T1 26 15) va a CARTAGENA. No cargué nada.');
     expect(bloque('b15')).toEqual({ destino: 'CARTAGENA' });
 
     await responder('sí');

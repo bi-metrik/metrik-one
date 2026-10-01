@@ -26,6 +26,7 @@ import {
   fraseNombraNumero,
   marcaDe,
   mayusculasDeViaje,
+  nombreDeViaje,
   normalizarNombre,
   normalizarTexto,
   preguntasDelMinimo,
@@ -47,6 +48,8 @@ export interface NegocioAbierto {
   /** Llave del cliente para contar sus negocios: el contacto, o el nombre si no hay. */
   cliente_id: string | null;
   destino: string | null;
+  /** El nombre del negocio («Europa 2 días»): como lo recuerda el comercial. */
+  nombre?: string | null;
   created_at: string;
   /** ¿El remitente es responsable de este negocio? */
   del_remitente: boolean;
@@ -58,6 +61,7 @@ export interface OpcionNegocio {
   codigo: string | null;
   cliente: string | null;
   destino: string | null;
+  nombre?: string | null;
   /** Lo nombran los mensajes y es su único negocio abierto: va primero. */
   propuesto?: boolean;
 }
@@ -81,7 +85,7 @@ export function nombraAlCliente(texto: string, cliente: string | null): boolean 
 const porReciente = (a: NegocioAbierto, b: NegocioAbierto) => (a.created_at < b.created_at ? 1 : a.created_at > b.created_at ? -1 : 0);
 
 function aOpcion(n: NegocioAbierto, propuesto = false): OpcionNegocio {
-  const o: OpcionNegocio = { id: n.id, codigo: n.codigo, cliente: n.cliente, destino: n.destino };
+  const o: OpcionNegocio = { id: n.id, codigo: n.codigo, cliente: n.cliente, destino: n.destino, nombre: n.nombre ?? null };
   if (propuesto) o.propuesto = true;
   return o;
 }
@@ -111,9 +115,9 @@ export function armarOpcionesNegocio(negocios: ReadonlyArray<NegocioAbierto>, te
   return lista.slice(0, MAX_OPCIONES_NEGOCIO);
 }
 
-/** «T1 26 14 · MARTA GÓMEZ · Punta Cana». Lo que falte no se escribe. */
+/** «Europa 2 días · Marta Gómez (T1 26 14)» (`nombreDeViaje`). */
 export function lineaDeOpcion(o: OpcionNegocio): string {
-  return [o.codigo, o.cliente, o.destino].filter(v => typeof v === 'string' && v.trim() !== '').join(' · ') || 'Sin código';
+  return nombreDeViaje(o);
 }
 
 const PIE_NUEVO = 'o escribe NUEVO y el nombre del cliente si es un viaje nuevo.';
@@ -129,7 +133,7 @@ export function textoPreguntaNegocio(p: { nMensajes: number; opciones: ReadonlyA
   if (p.opciones.length === 0) {
     return [...cab, `${recibi}No tienes viajes abiertos: escribe NUEVO y el nombre del cliente para crear el viaje.`].join('\n');
   }
-  const prop = p.opciones[0]?.propuesto ? [`Parece de ${p.opciones[0].cliente}: es la 1.`] : [];
+  const prop = p.opciones[0]?.propuesto ? [`Parece de ${nombreDeViaje({ cliente: p.opciones[0].cliente })}: es la 1.`] : [];
   return [
     ...cab,
     `${recibi}¿A qué viaje van?`,
@@ -386,6 +390,8 @@ function etiqueta(f: CampoEntendible | undefined, slug: string): string {
  */
 export function mensajeCargaExistente(p: {
   codigo: string | null;
+  /** Cómo se nombra el viaje (`nombreDeViaje`); sin él, el código. */
+  nombre?: string | null;
   fields: ReadonlyArray<CampoEntendible>;
   escritos: Array<{ slug: string; valor: unknown }>;
   conflictos: Conflicto[];
@@ -402,7 +408,7 @@ export function mensajeCargaExistente(p: {
   maxPreguntas?: number;
 }): string {
   const porSlug = new Map(p.fields.map(f => [f.slug, f]));
-  const cod = p.codigo ?? 'el viaje';
+  const cod = p.nombre || p.codigo || 'el viaje';
   const lineas: string[] = [];
   const actualizados = p.actualizados ?? [];
   if (p.escritos.length > 0) {
@@ -454,6 +460,8 @@ export function mensajeCargaExistente(p: {
  */
 export function lineaAvance(p: {
   codigo: string | null; cliente: string | null; fields: ReadonlyArray<CampoEntendible>; valores: Record<string, unknown>;
+  /** El nombre del negocio («CARTAGENA DIC 12-16»): la línea lo nombra como lo recuerda el comercial. */
+  nombre?: string | null;
 }): string {
   const todos = calcularNiveles(p.fields, p.valores);
   const sinAgencia = calcularNiveles(p.fields.filter(f => f.lo_llena !== LO_LLENA_AGENCIA), p.valores);
@@ -461,7 +469,7 @@ export function lineaAvance(p: {
   const minimo = todos.minimo;
   const completos = sinAgencia.minimo.completos + sinAgencia.deseable.completos;
   const total = sinAgencia.minimo.total + sinAgencia.deseable.total;
-  const quien = [p.codigo, p.cliente].filter(Boolean).join(' · ') || 'El viaje';
+  const quien = p.codigo || p.cliente || p.nombre ? nombreDeViaje({ nombre: p.nombre, cliente: p.cliente, codigo: p.codigo }) : 'El viaje';
   return `${quien} — Mínimo ${minimo.completos}/${minimo.total} (${pct(minimo.completos, minimo.total)} %) · Completo ${completos}/${total} (${pct(completos, total)} %)`;
 }
 
@@ -552,10 +560,11 @@ export function detectarCruce(p: {
   return out;
 }
 
-/** «Estos mensajes hablan de Punta Cana y T1 26 8 es de JORGE PÉREZ a CARTAGENA. ¿Seguro?» */
-export function textoAvisoCruce(p: { codigo: string | null; cliente: string | null; destino: string | null; cruces: ReadonlyArray<Cruce> }): string {
+/** «Estos mensajes hablan de Punta Cana y Cartagena Dic · Jorge Pérez (T1 26 8) va a CARTAGENA. ¿Seguro?» */
+export function textoAvisoCruce(p: { codigo: string | null; cliente: string | null; destino: string | null; nombre?: string | null; cruces: ReadonlyArray<Cruce> }): string {
   const deQue = p.cruces.map(c => c.enMensajes);
-  const viaje = [p.codigo ?? 'ese viaje', p.cliente ? `es de ${p.cliente}` : null, p.destino ? `a ${p.destino}` : null].filter(Boolean).join(' ');
+  const nombre = p.codigo || p.cliente || p.nombre ? nombreDeViaje({ nombre: p.nombre, cliente: p.cliente, codigo: p.codigo }) : 'ese viaje';
+  const viaje = [nombre, p.destino ? `va a ${p.destino}` : null].filter(Boolean).join(' ');
   return [
     `Estos mensajes hablan de ${deQue.join(' y de ')} y ${viaje}. No cargué nada.`,
     '¿Seguro que van ahí? Responde SÍ para cargarlos igual, o el número o el código del viaje correcto, o NUEVO y el nombre del cliente.',
