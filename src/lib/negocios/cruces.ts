@@ -205,7 +205,13 @@ async function resolverLado(lado: LadoCantidad, ctx: ContextoFuentes): Promise<L
       // Un documento sin ninguna fila todavía no dice cuántas personas trae.
       if (filas.length === 0) continue
       const soloNaturales = lado.solo_naturales_si ? await ctx.evaluar(lado.solo_naturales_si) : false
-      const n = soloNaturales ? filas.filter(p => !esPersonaJuridica(p)).length : filas.length
+      const naturales = filas.filter(p => !esPersonaJuridica(p)).length
+      // «Solo naturales» descuenta a la sociedad que ACOMPAÑA a una persona en el
+      // certificado (la del proyecto, el banco). Si no queda ninguna persona natural, la
+      // sociedad no acompaña a nadie: ES el titular, y descontarla dejaba «0 solicitantes»
+      // contra «un solo solicitante» (V0522, una SAS con el tipo de persona en «natural»).
+      // Ahí se cuentan todas.
+      const n = soloNaturales && naturales > 0 ? naturales : filas.length
       return { n, valor: String(n) }
     }
     if (lado.contar_campos && lado.contar_campos.length > 0) {
