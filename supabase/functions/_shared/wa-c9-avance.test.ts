@@ -73,9 +73,9 @@ describe('C9 · «bebé» con una edad de 2 o más', () => {
 describe('Avance en % tras cada carga', () => {
   const valores = { destino: 'CARTAGENA', adultos: 2, ninos: 0, infantes: 0, fecha_salida: '2026-12-20', presupuesto: 'sin_definir' };
 
-  it('la línea: «código · cliente — Mínimo a/b (x %) · Completo c/d (y %)»', () => {
-    expect(lineaAvance({ codigo: 'T1 26 11', cliente: 'Carolina', fields: FIELDS, valores }))
-      .toMatch(/^T1 26 11 · Carolina — Mínimo \d+\/\d+ \(\d+ %\) · Completo \d+\/\d+ \(\d+ %\)$/);
+  it('la línea: «nombre · cliente (código) — Mínimo a/b (x %) · Completo c/d (y %)»', () => {
+    expect(lineaAvance({ codigo: 'T1 26 11', cliente: 'CAROLINA RUIZ', nombre: 'CARTAGENA DIC 20', fields: FIELDS, valores }))
+      .toMatch(/^CARTAGENA DIC 20 · Carolina Ruiz \(T1 26 11\) — Mínimo \d+\/\d+ \(\d+ %\) · Completo \d+\/\d+ \(\d+ %\)$/);
   });
 
   it('las cuentas son las de la pantalla (calcularNiveles de src/): el bot y la barra nunca dicen números distintos', () => {

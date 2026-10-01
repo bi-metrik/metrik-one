@@ -40,7 +40,9 @@ describe('1 · el rango de presupuesto lo elige el código con la cifra', () => 
     const t = 'Tati, presupuesto como 8 millones';
     const s = leer(t, { presupuesto: { valor: '5m_8m', frase: 'presupuesto como 8 millones' } });
     expect(s.sugeridos.presupuesto).toBeUndefined();
-    expect(s.descartados[0].motivo).toContain('no cabe en un solo rango');
+    expect(s.descartados[0].motivo).toContain('queda en el borde de dos rangos');
+    // Prueba en vivo del 2026-10-01, error 7: el borde se pregunta en el acto aunque el campo sea deseable.
+    expect(s.descartados[0].pregunta).toContain('(dijeron 8 millones: queda justo entre «Entre $5 y $8 millones» y «Entre $8 y $12 millones»)');
   });
 
   it.each([
@@ -63,7 +65,7 @@ describe('1 · el rango de presupuesto lo elige el código con la cifra', () => 
     expect(rangosDeDinero(PRESUPUESTO)?.map(r => r.value)).toEqual(['menos_3m', '3m_5m', '5m_8m', '8m_12m', '12m_20m', 'mas_20m']);
     expect(rangosDeDinero(DESTINO_TIPO)).toBeNull();
     expect(cifrasEnMillones('unos 1.500 dólares')).toBe('ambiguo');
-    expect(opcionPorCifra(rangosDeDinero(PRESUPUESTO)!, 'unos 12 millones')).toMatchObject({ motivo: expect.stringContaining('no cabe') });
+    expect(opcionPorCifra(rangosDeDinero(PRESUPUESTO)!, 'unos 12 millones')).toMatchObject({ motivo: expect.stringContaining('borde'), borde: { cifra: 12 } });
   });
 });
 

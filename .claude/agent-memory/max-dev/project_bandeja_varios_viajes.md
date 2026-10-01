@@ -45,5 +45,13 @@ upsert del código viejo `on conflict (entrega_id)` se queda sin índice. `modo_
   columna: resumen en cola = `esperando_cliente` con `pregunta_enviada_at` y `pregunta_error` nulas
   (sale con `enviarPreguntasEnCola` desde wa-alerts); viaje de reparto en cola = `error` + `intentos 0`.
   El cron atiende respuestas ANTES que lo nuevo. «nuevo X» crea el contacto sin preguntar.
+- 2026-10-01 segunda prueba en vivo (PR fix/bandeja-wa-vivo-y-nombres): con la bandeja encendida MANDA LA
+  BANDEJA (N8 eliminada). Al bot solo prefijos (`gasto`, `bot …` que se quita: `prefijos_consulta`) y una
+  sesión del bot a medias (la cortan «cancelar» o un encabezado; un código no, si el estado es
+  `awaiting_selection`). Tanda ordenada por `enviado_at` fresco (`ordenarPorEnvio`); un escrito sin forma de
+  respuesta con pregunta pendiente, o un «listo», espera 6 s (`esperaEnVuelo`, las pruebas lo reemplazan).
+  Nombres: `nombreDeViaje` = «nombre · Cliente (código)»; el nombre del negocio es encabezado; negocio nuevo
+  con `negocios.metadata.nombre_auto`/`nombre_provisional`. `numero_pasajeros` solo con las tres fuentes
+  (paridad src/_shared en `wa-suma-paridad.test.ts`). Arnés de punta a punta: `wa-bandeja-vivo.test.ts`.
 - El aislamiento rechaza `cat >> archivo <<EOF` y `sed` con variables: usar Edit/Write o un .py en el worktree.
 Relacionado: [[entendimiento-bandeja-wa]], [[bandeja-negocio-existente]].

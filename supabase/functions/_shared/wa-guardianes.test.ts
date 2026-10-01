@@ -264,8 +264,8 @@ describe('N6 · viaje equivocado', () => {
   it('C1: los mensajes de Punta Cana no se cargan en el viaje de Jorge a Cartagena sin aviso', () => {
     const cruces = detectarCruce({ destinoNegocio: 'CARTAGENA', destinoMensajes: 'Punta Cana', clienteNegocio: 'JORGE PÉREZ', clienteMensajes: null });
     expect(cruces).toEqual([{ que: 'destino', enNegocio: 'CARTAGENA', enMensajes: 'Punta Cana' }]);
-    expect(textoAvisoCruce({ codigo: 'T1 26 8', cliente: 'JORGE PÉREZ', destino: 'CARTAGENA', cruces }))
-      .toBe('Estos mensajes hablan de Punta Cana y T1 26 8 es de JORGE PÉREZ a CARTAGENA. No cargué nada.\n¿Seguro que van ahí? Responde SÍ para cargarlos igual, o el número o el código del viaje correcto, o NUEVO y el nombre del cliente.');
+    expect(textoAvisoCruce({ codigo: 'T1 26 8', cliente: 'JORGE PÉREZ', destino: 'CARTAGENA', nombre: 'CARTAGENA DIC', cruces }))
+      .toBe('Estos mensajes hablan de Punta Cana y CARTAGENA DIC · Jorge Pérez (T1 26 8) va a CARTAGENA. No cargué nada.\n¿Seguro que van ahí? Responde SÍ para cargarlos igual, o el número o el código del viaje correcto, o NUEVO y el nombre del cliente.');
   });
 
   it('el mismo destino escrito distinto, o una fecha que cambia, no es un cruce', () => {
@@ -275,34 +275,28 @@ describe('N6 · viaje equivocado', () => {
   });
 });
 
-describe('N8 · ningún mensaje queda sin respuesta (regla 5 de decidirRuta)', () => {
+describe('N8 reemplazada (prueba en vivo del 2026-10-01): con la bandeja encendida, manda la bandeja', () => {
   const ENC = { [LLAVE_BANDEJA]: true };
   const e = (p: Partial<EntradaRuta>): EntradaRuta => ({
     modules: ENC, config: CONFIG_BANDEJA_POR_DEFECTO, tipo: 'text', texto: '¿cuánto vendimos en septiembre?', reenviado: false, sesionBotEsperando: false, ...p,
   });
 
-  it('B2: la consulta escrita sin tanda abierta ni pregunta pendiente va al bot de siempre', () => {
-    expect(decidirRuta(e({ entregaAbierta: false, preguntaPendiente: false }))).toBe('bot');
-    expect(decidirRuta(e({ texto: '¿cuánto me deben?', entregaAbierta: false, preguntaPendiente: false }))).toBe('bot');
-    expect(decidirRuta(e({ texto: 'gasté 25.000 en taxi', entregaAbierta: false, preguntaPendiente: false }))).toBe('bot');
-  });
-
-  it('el orden de las reglas: reenvío, sesión del bot y prefijo antes que la regla 5', () => {
-    expect(decidirRuta(e({ reenviado: true, entregaAbierta: false, preguntaPendiente: false }))).toBe('bandeja');
-    expect(decidirRuta(e({ sesionBotEsperando: true, entregaAbierta: true }))).toBe('bot');
-    expect(decidirRuta(e({ texto: 'gasto 20000 taxi', entregaAbierta: true }))).toBe('bot');
-  });
-
-  it('dentro de una tanda, con una pregunta pendiente o si es encabezado, se queda en la bandeja', () => {
-    expect(decidirRuta(e({ entregaAbierta: true }))).toBe('bandeja');
-    expect(decidirRuta(e({ texto: '2', entregaAbierta: false, preguntaPendiente: true }))).toBe('bandeja');
-    expect(decidirRuta(e({ texto: 'Carolina', entregaAbierta: false, preguntaPendiente: false, esEncabezado: true }))).toBe('bandeja');
-    // Una nota de voz propia (A2) abre tanda: la regla 5 es solo para texto.
-    expect(decidirRuta(e({ tipo: 'audio', texto: '', entregaAbierta: false, preguntaPendiente: false }))).toBe('bandeja');
-  });
-
-  it('sin saber el contexto (error de lectura) se comporta como antes', () => {
+  it('B2: una consulta escrita sin prefijo va a la bandeja (era la regla 5, que causaba la carrera del encabezado)', () => {
     expect(decidirRuta(e({}))).toBe('bandeja');
+    expect(decidirRuta(e({ texto: 'gasté 25.000 en taxi' }))).toBe('bandeja');
+  });
+
+  it('para consultar al bot está el prefijo «bot …»; «gasto …» sigue igual', () => {
+    expect(decidirRuta(e({ texto: 'bot ¿cuánto vendimos en septiembre?' }))).toBe('bot');
+    expect(decidirRuta(e({ texto: 'gasto 20000 taxi' }))).toBe('bot');
+  });
+
+  it('el orden de las reglas: reenvío antes que la sesión; la sesión solo se corta con «cancelar» o un encabezado', () => {
+    expect(decidirRuta(e({ reenviado: true, sesionBotEsperando: true }))).toBe('bandeja');
+    expect(decidirRuta(e({ sesionBotEsperando: true }))).toBe('bot');
+    expect(decidirRuta(e({ sesionBotEsperando: true, texto: 'cancelar', salidaDeSesion: 'cancelar' }))).toBe('bandeja');
+    // Una nota de voz con un gasto esperando su foto sigue en el bot.
+    expect(decidirRuta(e({ sesionBotEsperando: true, tipo: 'audio', texto: '', salidaDeSesion: 'encabezado' }))).toBe('bot');
   });
 });
 

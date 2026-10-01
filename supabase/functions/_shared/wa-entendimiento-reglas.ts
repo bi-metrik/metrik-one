@@ -424,27 +424,38 @@ export function fraseNombraOpcion(f: CampoEntendible, o: OpcionCampo, frase: str
 
 // ── Rangos de dinero: el código elige la opción con la cifra ─────────────────
 
-export interface RangoOpcion { value: string; min: number; max: number }
+export interface RangoOpcion { value: string; min: number; max: number; label?: string }
 
 /**
  * Los rangos de un campo cuyas opciones concretas son TODAS rangos en millones («Menos de $3
- * millones», «Entre $3 y $5 millones», «Más de $20 millones»). `null` si alguna no lo es: el
- * campo no es de dinero y no se toca. Sale de las etiquetas de la config, no de una lista.
+ * millones», «Entre $3 y $5 millones», «Hasta 8M», «8M a 12M», «Más de $20 millones»). `null` si
+ * alguna no lo es: el campo no es de dinero y no se toca. Sale de las etiquetas de la config, no de
+ * una lista. El borde lo dice la etiqueta: «entre», «a», «hasta» y «desde» lo INCLUYEN; «menos de»
+ * y «más de» no (prueba en vivo del 2026-10-01, error 7).
  */
 export function rangosDeDinero(f: CampoEntendible): RangoOpcion[] | null {
   const concretas = (f.opciones ?? []).filter(o => o.no_definido !== true);
   if (concretas.length < 2) return null;
   const out: RangoOpcion[] = [];
+  const N = '(\\d+(?:[.,]\\d+)?)\\s*(?:m\\b)?';
   for (const o of concretas) {
-    const t = normalizarTexto(String(o.label ?? '')).replace(/\$/g, '');
-    if (!/millon/.test(t)) return null;
+    const label = String(o.label ?? '');
+    const t = normalizarTexto(label).replace(/\$/g, '');
+    if (!/millon|\d\s*m\b/.test(t)) return null;
     const n = (x: string) => Number(x.replace(',', '.'));
-    let m = /entre\s+(\d+(?:[.,]\d+)?)\s+y\s+(\d+(?:[.,]\d+)?)/.exec(t);
-    if (m) { out.push({ value: String(o.value), min: n(m[1]), max: n(m[2]) }); continue; }
-    m = /menos de\s+(\d+(?:[.,]\d+)?)/.exec(t);
-    if (m) { out.push({ value: String(o.value), min: -Infinity, max: n(m[1]) - 1e-9 }); continue; }
-    m = /mas de\s+(\d+(?:[.,]\d+)?)/.exec(t);
-    if (m) { out.push({ value: String(o.value), min: n(m[1]) + 1e-9, max: Infinity }); continue; }
+    const r = (min: number, max: number) => out.push({ value: String(o.value), min, max, label });
+    let m = new RegExp(`entre\\s+${N}\\s+y\\s+${N}`).exec(t);
+    if (m) { r(n(m[1]), n(m[2])); continue; }
+    m = new RegExp(`menos de\\s+${N}`).exec(t);
+    if (m) { r(-Infinity, n(m[1]) - 1e-9); continue; }
+    m = new RegExp(`hasta\\s+${N}`).exec(t);
+    if (m) { r(-Infinity, n(m[1])); continue; }
+    m = new RegExp(`mas de\\s+${N}`).exec(t);
+    if (m) { r(n(m[1]) + 1e-9, Infinity); continue; }
+    m = new RegExp(`desde\\s+${N}`).exec(t) ?? new RegExp(`${N}\\s*(?:millones|millon)?\\s+(?:o|y) mas`).exec(t);
+    if (m) { r(n(m[1]), Infinity); continue; }
+    m = new RegExp(`(?:de\\s+)?${N}\\s*(?:millones|millon)?\\s*(?:a|-)\\s*${N}`).exec(t);
+    if (m) { r(n(m[1]), n(m[2])); continue; }
     return null;
   }
   return out;
@@ -467,18 +478,36 @@ export function cifrasEnMillones(texto: string): number[] | 'ambiguo' {
   return out;
 }
 
-/** La opción cuyo rango contiene la cifra. Sin cifra, con cifras en dos rangos o en el borde de dos, nada. */
-export function opcionPorCifra(rangos: ReadonlyArray<RangoOpcion>, texto: string): { valor: string } | { motivo: string } {
+/**
+ * La opción cuyo rango contiene la cifra. En el borde de dos rangos gana el que INCLUYE esa cifra
+ * según su etiqueta («Hasta 8M» y no «Más de 8M»; «8M a 12M» y no «Menos de 8M»). Si las dos
+ * etiquetas la incluyen («Entre $5 y $8» y «Entre $8 y $12»), es `borde`: no se elige y el bot
+ * pregunta el campo aunque sea deseable (prueba en vivo del 2026-10-01, error 7: «8 millones en
+ * total» se descartaba sin preguntar). Sin cifra, o con cifras en rangos distintos, nada.
+ */
+export function opcionPorCifra(
+  rangos: ReadonlyArray<RangoOpcion>, texto: string,
+): { valor: string } | { motivo: string; borde?: { cifra: number; entre: string[] } } {
   const cifras = cifrasEnMillones(texto);
   if (cifras === 'ambiguo') return { motivo: 'la cifra es por persona o en otra moneda: no se elige el rango' };
   if (cifras.length === 0) return { motivo: 'sin una cifra que ubique el rango' };
   const opciones = new Set<string>();
   for (const c of cifras) {
     const caben = rangos.filter(r => c >= r.min && c <= r.max);
-    if (caben.length !== 1) return { motivo: `la cifra ${c} millones no cabe en un solo rango` };
+    if (caben.length === 0) return { motivo: `la cifra ${c} millones no cabe en ningún rango` };
+    if (caben.length > 1) {
+      return { motivo: `la cifra ${c} millones queda en el borde de dos rangos`, borde: { cifra: c, entre: caben.map(r => r.label ?? r.value) } };
+    }
     opciones.add(caben[0].value);
   }
   return opciones.size === 1 ? { valor: [...opciones][0] } : { motivo: 'las cifras caen en rangos distintos' };
+}
+
+/** La pregunta del campo cuando la cifra quedó en el borde de dos rangos. */
+export function preguntaDelBorde(f: CampoEntendible, borde: { cifra: number; entre: string[] }): string {
+  const q = typeof f.pregunta === 'string' && f.pregunta.trim() ? f.pregunta.trim() : `¿${f.label ?? f.slug}?`;
+  const cifra = String(borde.cifra).replace('.', ',');
+  return `${q} (dijeron ${cifra} millones: queda justo entre «${borde.entre.join('» y «')}»)`;
 }
 
 /** Un número con dígitos o con letras: una preferencia concreta («cuatro o cinco estrellas», «unos 3 millones»). */
@@ -568,31 +597,66 @@ export function adultosEnumerados(frase: string): number | null {
 }
 
 /**
- * ¿La frase cierra que no viajan menores? Cuatro formas:
- *   · una negación pegada al menor: «sin niños», «ningún bebé», «no van los niños»;
+ * ¿La frase cierra que no viajan menores? Tres formas, y nada más (prueba en vivo del 2026-10-01,
+ * error 4: «somos 4», «somos 2 adultos» y «somos 3 adultos» llenaban niños = 0 e infantes = 0):
+ *   · una negación pegada al menor: «sin niños», «ningún bebé», «no van niños»;
  *   · «solo adultos», «solo nosotros»;
- *   · un total que es igual a los adultos y ninguna mención de menores: «somos dos» con 2 adultos;
  *   · una enumeración cerrada de adultos igual a los adultos: «mi esposo y yo», «mi novia y yo»,
- *     «vamos los dos» (QA de #969 v2, A4: sin esto niños e infantes quedaban vacíos y sin pregunta).
- * «Somos 4 con los niños» o «los dos niños» NO cierran nada: el 0 solo sale de aquí o de
- * `deducirCeros` (todas las edades dadas y ninguna menor de 2). QA de #969, C11.
+ *     «vamos los dos» (QA de #969 v2, A4).
+ * «Somos N» o «N adultos» NO cierran menores: dicen cuántos son, no que no haya niños. Tampoco
+ * «somos 4 con los niños» ni «los dos niños». El 0 solo sale de aquí o de `deducirCeros` (todas las
+ * edades dadas y ninguna menor de 2). QA de #969, C11.
  */
 export function fraseCierraMenores(frase: string, adultos: number | null): boolean {
   const t = ` ${normalizarTexto(frase).replace(/[^a-z0-9 ]/g, ' ').replace(/\s+/g, ' ').trim()} `;
   if (/ (sin|ningun\w*|cero|no (van|viajan|vienen|llevamos|hay)) (los |las |mis |nuestros |nuestras )?(nin|hij|beb|menor|infant|nene|peque|pelad|chiquit)/.test(t)) return true;
   if (/ solo(mente)? (adultos|nosotros|nosotras|los dos|las dos)\b/.test(t)) return true;
   if (adultos === null || RE_MENOR.test(t)) return false;
-  if (adultosEnumerados(frase) === adultos) return true;
-  const m = / (somos|seriamos|seremos|vamos|viajamos|viajariamos|iriamos) (\w+)/.exec(t);
-  if (!m) return false;
-  const n = /^\d+$/.test(m[2]) ? Number(m[2]) : (DIAS_EN_LETRAS[m[2]] ?? null);
-  return n !== null && n === adultos;
+  return adultosEnumerados(frase) === adultos;
 }
 
 /** ¿Algún mensaje nombra a un menor? Sin ninguno, una enumeración cerrada de adultos deduce 0. */
 export function nombraMenores(texto: string): boolean {
   return RE_MENOR.test(` ${normalizarTexto(texto).replace(/[^a-z0-9 ]/g, ' ').replace(/\s+/g, ' ').trim()} `);
 }
+
+// ── Lugares: cómo se escriben ────────────────────────────────────────────────
+
+/**
+ * Cómo se escriben los lugares que el cliente suele escribir pegados o con otra letra
+ * («puntacana», «curasao», «san andres»). La llave es el lugar sin tildes, espacios ni mayúsculas.
+ * Lo que no esté aquí sale con mayúscula inicial en cada palabra (prueba en vivo del 2026-10-01:
+ * el destino quedaba «PUNTACANA Y CURASAO» y el negocio «DIEGO PRUEBA2 · puntacana y curasao»).
+ */
+const LUGARES: Record<string, string> = Object.fromEntries([
+  'Punta Cana', 'Curazao', 'San Andrés', 'Providencia', 'Santa Marta', 'Cartagena', 'Medellín', 'Bogotá', 'Cali', 'Barranquilla',
+  'Cancún', 'Bariloche', 'Panamá', 'Aruba', 'Miami', 'Orlando', 'Nueva York', 'Las Vegas', 'México', 'Perú', 'Cusco',
+  'Machu Picchu', 'Río de Janeiro', 'Buenos Aires', 'Costa Rica', 'Puerto Rico', 'República Dominicana', 'Eje Cafetero',
+  'Capurganá', 'Guatapé', 'Villa de Leyva', 'Nuquí', 'Islas del Rosario', 'Barú', 'Leticia', 'Armenia', 'Pereira', 'Manizales',
+  'Europa', 'Madrid', 'París', 'Roma', 'Londres', 'Ámsterdam', 'Lisboa', 'Barcelona', 'Estambul', 'Dubái', 'Japón',
+].flatMap(l => [[normalizarTexto(l).replace(/[^a-z]/g, ''), l]]).concat([
+  ['curasao', 'Curazao'], ['cuzco', 'Cusco'], ['newyork', 'Nueva York'], ['ny', 'Nueva York'], ['ctg', 'Cartagena'],
+  ['sai', 'San Andrés'], ['dubai', 'Dubái'], ['amsterdam', 'Ámsterdam'],
+]));
+
+const CONECTORES = new Set(['y', 'e', 'o', 'de', 'del', 'la', 'las', 'los', 'el']);
+
+/** «puntacana y curasao» → «Punta Cana y Curazao»; «MADRID, PARIS y roma» → «Madrid, París y Roma». */
+export function normalizarLugar(texto: string): string {
+  const partes = String(texto ?? '').trim().replace(/\s+/g, ' ').split(/(\s*[,:;/]\s*|\s+-\s+|\s+(?:y|e|o)\s+)/i);
+  return partes.map((p, i) => {
+    if (i % 2 === 1) return p.toLocaleLowerCase('es-CO');
+    const llave = normalizarTexto(p).replace(/[^a-z]/g, '');
+    if (LUGARES[llave]) return LUGARES[llave];
+    const todoIgual = p === p.toLocaleLowerCase('es-CO') || p === p.toLocaleUpperCase('es-CO');
+    if (!todoIgual) return p;
+    return p.toLocaleLowerCase('es-CO').split(' ')
+      .map((w, k) => (k > 0 && CONECTORES.has(w) ? w : w.charAt(0).toLocaleUpperCase('es-CO') + w.slice(1)))
+      .join(' ');
+  }).join('');
+}
+
+const SLUGS_DE_LUGAR = new Set(['destino', 'ciudad_origen']);
 
 // ── Destino: varias ciudades se conservan todas ──────────────────────────────
 
@@ -749,7 +813,9 @@ export function validarSalida(
       if (rangos && opcion.no_definido !== true) {
         const elegido = opcionPorCifra(rangos, mensajeDeLaFrase(frase, textoFuente));
         if ('motivo' in elegido) {
-          out.descartados.push({ slug: f.slug, motivo: elegido.motivo });
+          // En el borde se pregunta, aunque el campo sea deseable; si el negocio ya lo tiene, no.
+          const pregunta = elegido.borde && vacio(opts.conocidos?.[f.slug]) ? preguntaDelBorde(f, elegido.borde) : undefined;
+          out.descartados.push({ slug: f.slug, motivo: elegido.motivo, ...(pregunta ? { pregunta } : {}) });
           continue;
         }
         out.sugeridos[f.slug] = { valor: elegido.valor, frase };
@@ -789,11 +855,11 @@ export function validarSalida(
       if (f.slug === SLUG_DESTINO) {
         const lugares = lugaresDespuesDelDestino(v, mensajeDeLaFrase(frase, textoFuente));
         if (lugares.length > 0) {
-          out.sugeridos[f.slug] = { valor: `${v}: ${lugares.slice(0, -1).join(', ')} y ${lugares[lugares.length - 1]}`, frase };
+          out.sugeridos[f.slug] = { valor: normalizarLugar(`${v}: ${lugares.slice(0, -1).join(', ')} y ${lugares[lugares.length - 1]}`), frase };
           continue;
         }
       }
-      out.sugeridos[f.slug] = { valor: v, frase };
+      out.sugeridos[f.slug] = { valor: SLUGS_DE_LUGAR.has(f.slug) ? normalizarLugar(v) : v, frase };
     }
   }
 
@@ -980,10 +1046,36 @@ export const EDAD_INFANTE = 2;
  * habla de meses («8 meses») o no trae ningún número: ahí no se deduce nada.
  */
 export function leerEdades(texto: unknown): number[] | null {
-  const t = normalizarTexto(String(texto ?? ''));
+  // «1 y medio» y «1,5» son año y medio (prueba en vivo del 2026-10-01: «7, 1.5» se leía como una sola edad).
+  const t = normalizarTexto(String(texto ?? '')).replace(/(\d{1,2}) y medio/g, '$1.5').replace(/(\d{1,2}),5(?!\d)/g, '$1.5');
   if (!t || /\bmes(es)?\b/.test(t)) return null;
-  const edades = [...t.matchAll(/(?<![\d.,])(\d{1,2})(?![\d.,]\d|\d)/g)].map(m => Number(m[1]));
+  const edades = [...t.matchAll(/(?<![\d.,])(\d{1,2}(?:\.5)?)(?![\d.,]\d|\d)/g)].map(m => Number(m[1]));
   return edades.length > 0 ? edades : null;
+}
+
+/** Una edad como se le dice a una persona: «1,5», «7». */
+function edadLegible(e: number): string {
+  return String(e).replace('.', ',');
+}
+
+function enLista(xs: ReadonlyArray<string>): string {
+  return xs.length <= 1 ? (xs[0] ?? '') : `${xs.slice(0, -1).join(', ')} y ${xs[xs.length - 1]}`;
+}
+
+/**
+ * Las edades con su etiqueta, para el «Entendí»: «niño: 7 años; bebé: 1,5 años». Solo separa por el
+ * corte de infante (menor de 2), que es el único que decide el bot. `null` si no se pueden leer.
+ */
+export function edadesLegibles(v: unknown): string | null {
+  const edades = leerEdades(v);
+  if (!edades) return null;
+  const grupo = (xs: number[], uno: string, varios: string) => {
+    if (xs.length === 0) return null;
+    const anios = xs.length === 1 && xs[0] === 1 ? 'año' : 'años';
+    return `${xs.length === 1 ? uno : varios}: ${enLista(xs.map(edadLegible))} ${anios}`;
+  };
+  return [grupo(edades.filter(e => e >= EDAD_INFANTE), 'niño', 'niños'), grupo(edades.filter(e => e < EDAD_INFANTE), 'bebé', 'bebés')]
+    .filter(Boolean).join('; ');
 }
 
 /**
@@ -1043,13 +1135,22 @@ export function mayusculasDeViaje(fields: ReadonlyArray<CampoEntendible>, data: 
   return out;
 }
 
-/** `suma_de` recalculado (misma regla que `campo-suma.ts`: sin ninguna fuente, no se toca). */
+/**
+ * `suma_de` recalculado. MISMA regla que `src/lib/negocios/campo-suma.ts` (paridad probada en
+ * `wa-suma-paridad.test.ts`): la suma solo cuando TODAS las fuentes tienen número; con alguna
+ * vacía, el campo queda vacío (prueba en vivo del 2026-10-01: Diego quedó con 5 pasajeros porque
+ * se sumó solo lo conocido, y eran 7); sin ninguna fuente, no se toca.
+ */
 export function aplicarSumas(fields: ReadonlyArray<CampoEntendible>, valores: Record<string, unknown>): Record<string, unknown> {
   let r = valores;
   for (const f of fields) {
     if (!Array.isArray(f.suma_de) || f.suma_de.length === 0) continue;
     const nums = f.suma_de.map(s => parsearNumeroColombiano(valores[s]));
     if (nums.every(n => n === null)) continue;
+    if (nums.some(n => n === null)) {
+      if (!vacio(r[f.slug])) r = { ...r, [f.slug]: '' };
+      continue;
+    }
     const suma = nums.reduce<number>((a, n) => a + (n ?? 0), 0);
     if (r[f.slug] !== suma) r = { ...r, [f.slug]: suma };
   }
@@ -1098,10 +1199,70 @@ export function resumenEntendido(fields: ReadonlyArray<CampoEntendible>, valores
       if (n && n > 0) partes.push(`${n} ${singular(f.label ?? f.slug, n)}`);
       continue;
     }
+    // Las edades con su etiqueta: «niño: 7 años; bebé: 1,5 años», no «7, 1.5» (prueba en vivo).
+    if (f.slug === SLUG_EDADES) {
+      partes.push(edadesLegibles(v) ?? `${(f.label ?? f.slug).toLowerCase()}: ${String(v)}`);
+      continue;
+    }
     const op = (f.opciones ?? []).find(o => String(o.value) === String(v));
-    partes.push(op?.label ?? String(v));
+    const texto = op?.label ?? String(v);
+    // Un texto sin una sola letra («7, 1.5») no se entiende suelto: va con su etiqueta.
+    partes.push(/\p{L}/u.test(texto) ? texto : `${(f.label ?? f.slug).toLowerCase()}: ${texto}`);
   }
   return partes.join(', ');
+}
+
+// ── El nombre de un viaje nuevo ──────────────────────────────────────────────
+
+const MESES_LARGOS = ['enero', 'febrero', 'marzo', 'abril', 'mayo', 'junio', 'julio', 'agosto', 'septiembre', 'octubre', 'noviembre', 'diciembre'];
+
+/**
+ * Lo que el texto del cliente dice del viaje sin ser un campo: el mes («en diciembre») y la
+ * duración («2 noches», «20 días»). Lo usa el nombre del viaje nuevo y la pregunta de la fecha.
+ */
+export function pistasDelTexto(texto: string): { mes: number | null; duracion: string | null } {
+  const t = ` ${normalizarTexto(texto).replace(/[^a-z0-9 ]/g, ' ').replace(/\s+/g, ' ')} `.replace(/ setiembre /g, ' septiembre ');
+  const mes = MESES_LARGOS.findIndex(m => t.includes(` ${m} `));
+  const noches = / (\d{1,2}) noches? /.exec(t);
+  const dias = / (\d{1,2}) dias? /.exec(t);
+  return { mes: mes >= 0 ? mes : null, duracion: noches ? `${Number(noches[1])}N` : dias ? `${Number(dias[1])}D` : null };
+}
+
+/**
+ * El nombre de un negocio creado desde la bandeja, con la convención de Trappvel: destino y mes o
+ * duración en mayúscula — «CARTAGENA DIC 12-16», «SAN ANDRÉS DIC», «ARMENIA 2N». Sin destino es
+ * PROVISIONAL («Viaje de Laura Prueba») y se cambia solo cuando llega el destino, si nadie lo
+ * editó a mano (la marca vive en `negocios.metadata.nombre_auto`).
+ */
+export function nombreViajeNuevo(p: {
+  destino?: unknown; salida?: unknown; regreso?: unknown; mes?: number | null; duracion?: string | null; cliente?: string | null;
+}): { nombre: string; provisional: boolean } {
+  const destino = typeof p.destino === 'string' && p.destino.trim() ? normalizarLugar(p.destino).toLocaleUpperCase('es-CO') : '';
+  if (!destino) {
+    const quien = nombrePropio(p.cliente);
+    return { nombre: quien ? `Viaje de ${quien}` : 'Viaje por WhatsApp', provisional: true };
+  }
+  const mesCorto = (iso: string) => MESES[Number(iso.slice(5, 7)) - 1].toUpperCase();
+  const dia = (iso: string) => Number(iso.slice(8, 10));
+  const salida = typeof p.salida === 'string' && fechaValida(p.salida) ? p.salida : null;
+  const regreso = typeof p.regreso === 'string' && fechaValida(p.regreso) ? p.regreso : null;
+  let cuando = '';
+  if (salida && regreso) {
+    cuando = mesCorto(salida) === mesCorto(regreso)
+      ? `${mesCorto(salida)} ${dia(salida)}-${dia(regreso)}`
+      : `${mesCorto(salida)} ${dia(salida)}-${mesCorto(regreso)} ${dia(regreso)}`;
+  } else if (salida) {
+    cuando = `${mesCorto(salida)} ${dia(salida)}`;
+  } else {
+    cuando = [p.mes !== null && p.mes !== undefined ? MESES[p.mes].toUpperCase() : '', p.duracion ?? ''].filter(Boolean).join(' ');
+  }
+  return { nombre: [destino, cuando].filter(Boolean).join(' '), provisional: false };
+}
+
+/** La pregunta de la salida recuerda el mes que dijeron: «¿Qué día salen? (dijeron diciembre)» (error 12). */
+export function conMesEnLaPregunta<T extends { slug?: string; pregunta: string }>(faltan: ReadonlyArray<T>, mes: number | null): T[] {
+  if (mes === null) return [...faltan];
+  return faltan.map(f => (f.slug === SLUG_SALIDA ? { ...f, pregunta: `${f.pregunta} (dijeron ${MESES_LARGOS[mes]})` } : f));
 }
 
 export const MAX_PREGUNTAS = 3;
@@ -1160,6 +1321,36 @@ export function digitosTelefono(t: string | null | undefined): string | null {
 
 export function normalizarNombre(n: string | null | undefined): string {
   return normalizarTexto(String(n ?? '')).replace(/[^a-z0-9 ]/g, ' ').replace(/\s+/g, ' ').trim();
+}
+
+// ── Cómo se nombra un viaje ──────────────────────────────────────────────────
+
+/** «MARTA GÓMEZ» → «Marta Gómez». Solo si viene todo en mayúscula; lo demás se respeta. */
+export function nombrePropio(t: string | null | undefined): string {
+  const s = String(t ?? '').trim().replace(/\s+/g, ' ');
+  if (!s || s !== s.toLocaleUpperCase('es-CO') || !/\p{L}/u.test(s)) return s;
+  const menores = new Set(['de', 'del', 'la', 'las', 'los', 'y', 'e']);
+  return s.toLocaleLowerCase('es-CO').split(' ')
+    .map((w, i) => (i > 0 && menores.has(w) ? w : w.charAt(0).toLocaleUpperCase('es-CO') + w.slice(1)))
+    .join(' ');
+}
+
+/**
+ * Como se le nombra un viaje al comercial (prueba en vivo del 2026-10-01, parte B): el NOMBRE del
+ * negocio, el cliente y el código entre paréntesis — «Europa 2 días · Carolina Ruiz (M1 26 5)». Los
+ * comerciales recuerdan el viaje por el nombre, no por el código. Si el nombre ya trae al cliente
+ * (nombres viejos «DIEGO PRUEBA · Punta Cana»), el cliente no se repite. Es el formato de 📌,
+ * «¿Cambias a…?», «¿A qué viaje van?», el resumen, la carga, los avisos y las preguntas en cola.
+ */
+export function nombreDeViaje(v: { nombre?: string | null; cliente?: string | null; codigo?: string | null }): string {
+  const limpio = (x: string | null | undefined) => String(x ?? '').trim().replace(/\s+/g, ' ');
+  const nombre = limpio(v.nombre);
+  const cliente = nombrePropio(v.cliente);
+  const yaLoTrae = !!nombre && !!cliente && normalizarNombre(nombre).includes(normalizarNombre(cliente));
+  const cabeza = [nombre, yaLoTrae ? '' : cliente].filter(Boolean).join(' · ');
+  const codigo = limpio(v.codigo);
+  if (!cabeza) return codigo || 'sin código';
+  return codigo ? `${cabeza} (${codigo})` : cabeza;
 }
 
 /** Lo que el comercial contestó, sin el teléfono que venga pegado. */

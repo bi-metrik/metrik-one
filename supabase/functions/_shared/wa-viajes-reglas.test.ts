@@ -194,9 +194,12 @@ describe('banco del QA de #971 (mensajes reales del banco; el modelo ya no asign
   for (const e of qa971.f) {
     it(`${e.id} · ${e.titulo}`, () => {
       const msgs = e.mensajes.filter(x => !(x.tipo === 'text' && !x.reenviado && empiezaConPrefijoBot(x.texto, ['gasto'])));
+      // Con la bandeja encendida manda la bandeja (prueba en vivo del 2026-10-01): una consulta al bot
+      // se escribe con el prefijo «bot …». El banco es de antes de la regla: se le pone el prefijo.
+      const comoSeEscribe = (x: (typeof msgs)[number]) => (x.ruta === 'bot' && !x.reenviado ? `bot ${x.texto}` : x.texto);
       const entrega = msgs.flatMap((x, i) => decidirRuta({
-        modules: MODULES, config: CONFIG_BANDEJA_POR_DEFECTO, tipo: x.tipo, texto: x.texto, reenviado: x.reenviado,
-        sesionBotEsperando: false, entregaAbierta: true, preguntaPendiente: false, esEncabezado: x.encabezado,
+        modules: MODULES, config: CONFIG_BANDEJA_POR_DEFECTO, tipo: x.tipo, texto: comoSeEscribe(x), reenviado: x.reenviado,
+        sesionBotEsperando: false,
       }) === 'bot' ? [] : [{ x, ms: { n: i + 1, cuerpo: x.texto, reenviado: x.reenviado, tipo: x.tipo, en: x.en } as MensajeViaje }]);
       const r = plan(entrega.map(y => y.ms), e.viajes as ViajeAbierto[], e.cerrados);
       if (!r.conEncabezados) return; // la tanda es un viaje: se pregunta como en modo uno
@@ -281,7 +284,7 @@ describe('QA de #971 v3', () => {
       // Sin respuesta: lo que sigue queda sin asignar, con aviso.
       const sin = plan(base).plan;
       expect(resumenDe(sin)).toEqual([[2, 'T1 26 11', 'carga'], [4, null, 'decidir'], [5, null, 'decidir']]);
-      expect(sin.avisos.join(' ')).toContain('«Lusia» puede ser LUISA MEJÍA · T1 26 9 y no me contestaste');
+      expect(sin.avisos.join(' ')).toContain('«Lusia» puede ser Luisa Mejía (T1 26 9) y no me contestaste');
       // «sí» (aunque llegue después de los reenvíos): la caja es de Luisa. El «sí» no es contenido.
       const si = plan([...base, enc(6, 'sí', 6)]).plan;
       expect(resumenDe(si)).toEqual([[2, 'T1 26 11', 'carga'], [4, 'T1 26 9', 'carga'], [5, 'T1 26 9', 'carga']]);
@@ -289,7 +292,7 @@ describe('QA de #971 v3', () => {
       // «no»: sin asignar, con aviso.
       const no = plan([...base, enc(6, 'no', 6)]).plan;
       expect(resumenDe(no)).toEqual([[2, 'T1 26 11', 'carga'], [4, null, 'decidir'], [5, null, 'decidir']]);
-      expect(no.avisos.join(' ')).toContain('Dijiste que «Lusia» no es LUISA MEJÍA · T1 26 9');
+      expect(no.avisos.join(' ')).toContain('Dijiste que «Lusia» no es Luisa Mejía (T1 26 9)');
       // Un «sí» bajo un encabezado EXACTO es contenido (no hay nada que confirmar).
       expect(resumenDe(plan([enc(1, 'Carolina'), m(2, 'sí')]).plan)).toEqual([[2, 'T1 26 11', 'carga']]);
     });

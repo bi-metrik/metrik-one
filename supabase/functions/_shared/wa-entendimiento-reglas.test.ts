@@ -145,11 +145,21 @@ describe('las tres entradas de prueba', () => {
       tipo_viaje: { valor: 'playa', frase: 'destino de playa' },
       destino_tipo: { valor: 'internacional', frase: 'internacional' },
     }));
-    expect(r.valores.numero_pasajeros).toBe(22);
+    // Sin infantes sabidos no hay total: el código no suma lo que conoce (prueba en vivo del 2026-10-01, error 5).
+    expect(r.valores.numero_pasajeros).toBeUndefined();
     expect(r.h.minimo.faltan.map(f => f.slug)).toEqual(['destino', 'fecha_salida', 'fecha_regreso', 'infantes', 'edades_menores']);
-    expect(r.h.deseable.faltan.map(f => f.slug)).toEqual(['acomodacion', 'permiso_salida_menores']);
+    // Acomodación se pide desde cierto número de pasajeros: sin el total, todavía no (se pide al saber los infantes).
+    expect(r.h.deseable.faltan.map(f => f.slug)).toEqual(['permiso_salida_menores']);
     expect(r.msg.split('\n').filter(l => /^\d\./.test(l))).toHaveLength(3);
     expect(r.msg).toContain('Entendí: 17 adultos, 5 niños.');
+    // Con los infantes, el total y la acomodación vuelven.
+    const conInfantes = procesar('Tatiana, somos 17 adultos y 5 menores, sin bebés', salida({
+      adultos: { valor: '17', frase: '17 adultos' },
+      ninos: { valor: '5', frase: '5 menores' },
+      infantes: { valor: '0', frase: 'sin bebés' },
+    }));
+    expect(conInfantes.valores.numero_pasajeros).toBe(22);
+    expect(conInfantes.h.deseable.faltan.map(f => f.slug)).toContain('acomodacion');
   });
 
   it('«2 pax Punta Cana del 15 al 20 de noviembre» (nota de voz): el rango da salida y regreso', () => {
@@ -449,7 +459,6 @@ describe('QA de #969 · 3: el 0 en niños o bebés solo si la frase cierra quié
   it.each([
     ['«sin niños»', 'vamos mi esposo y yo, sin niños', 'sin niños', '2'],
     ['«solo adultos»', 'al final van solo adultos, somos 3', 'van solo adultos', '3'],
-    ['«somos dos» con 2 adultos', 'somos dos, a Cartagena', 'somos dos', '2'],
     ['«no van los niños»', 'esta vez no van los niños', 'no van los niños', '2'],
     ['«mi esposo y yo» con 2 adultos (QA de #969 v2, A4)', 'Mi esposo y yo queremos Europa', 'Mi esposo y yo', '2'],
     ['«vamos los dos»', 'vamos los dos a Cartagena', 'vamos los dos', '2'],
@@ -462,6 +471,11 @@ describe('QA de #969 · 3: el 0 en niños o bebés solo si la frase cierra quié
   it.each([
     ['«somos 3» con 2 adultos', 'somos 3', 'somos 3', '2'],
     ['«somos 2 y los niños»', 'somos 2 y los niños', 'somos 2 y los niños', '2'],
+    // Prueba en vivo del 2026-10-01, error 4: «somos N» o «N adultos» dicen cuántos, no que no haya niños.
+    ['«somos dos» con 2 adultos', 'somos dos, a Cartagena', 'somos dos', '2'],
+    ['«somos 4» con 4 adultos', 'queremos ir a San Andrés en diciembre, somos 4', 'somos 4', '4'],
+    ['«somos 2 adultos»', 'Queremos ir a Medellín, somos 2 adultos, salimos de Cali', 'somos 2 adultos', '2'],
+    ['«somos 3 adultos»', 'Queremos conocer Bariloche, somos 3 adultos', 'somos 3 adultos', '3'],
   ])('no pasa: %s', (_n, texto, frase, adultos) => {
     const s = leer(texto, { adultos: { valor: adultos, frase: texto }, ninos: { valor: '0', frase } });
     expect(s.sugeridos.ninos).toBeUndefined();

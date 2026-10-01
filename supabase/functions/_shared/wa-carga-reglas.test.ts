@@ -65,8 +65,8 @@ describe('la lista de «¿A qué viaje van?»', () => {
     expect(ops.map(o => o.id)).toEqual(['3', '2', '1']);
     expect(ops[0].propuesto).toBe(true);
     const t = textoPreguntaNegocio({ nMensajes: 2, opciones: ops });
-    expect(t).toContain('Parece de MARTA GÓMEZ: es la 1.');
-    expect(t).toContain('1. T1 26 3 · MARTA GÓMEZ');
+    expect(t).toContain('Parece de Marta Gómez: es la 1.');
+    expect(t).toContain('1. Marta Gómez (T1 26 3)');
   });
 
   it('si el cliente nombrado tiene DOS negocios abiertos no se propone ninguno', () => {
@@ -84,9 +84,9 @@ describe('la lista de «¿A qué viaje van?»', () => {
     expect(nombraAlCliente('marta', 'MARTA')).toBe(false);
   });
 
-  it('cada opción: código · cliente · destino', () => {
-    const ops = armarOpcionesNegocio([neg('14', { cliente: 'MARTA GÓMEZ', destino: 'Punta Cana', del_remitente: true })], '');
-    expect(textoPreguntaNegocio({ nMensajes: 1, opciones: ops })).toContain('1. T1 26 14 · MARTA GÓMEZ · Punta Cana');
+  it('cada opción: nombre del negocio · cliente (código), como lo recuerda el comercial (prueba en vivo, parte B)', () => {
+    const ops = armarOpcionesNegocio([neg('14', { cliente: 'MARTA GÓMEZ', destino: 'Punta Cana', nombre: 'Europa 2 días', del_remitente: true })], '');
+    expect(textoPreguntaNegocio({ nMensajes: 1, opciones: ops })).toContain('1. Europa 2 días · Marta Gómez (T1 26 14)');
   });
 });
 
