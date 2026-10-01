@@ -98,6 +98,7 @@ function crearDb(t: Tablas) {
         return q;
       },
       lt: (c: string, v: number) => { filtros.push(f => (leer(f, c) as number) < v); return q; },
+      neq: (c: string, v: unknown) => { filtros.push(f => leer(f, c) !== v); return q; },
       gte: (c: string, v: string) => { filtros.push(f => String(leer(f, c) ?? '') >= v); return q; },
       ilike: (c: string, pat: string) => {
         const needle = pat.replace(/%/g, '').toLowerCase();
@@ -159,12 +160,14 @@ function base(): Tablas {
     etapas_negocio: [{ id: 'et1', linea_id: LINEA, orden: 1, stage: 'venta' }],
     bloque_configs: [{ id: 'bc1', etapa_id: 'et1', workspace_id: WS, orden: 1, config_extra: { fields: FIELDS }, bloque_definitions: { tipo: 'datos' } }],
     contactos: [],
+    staff_areas: [{ staff_id: STAFF, area: 'comercial' }],
   };
 }
 
 let t: Tablas;
 let db: ReturnType<typeof crearDb>;
 let salidaModelo: unknown;
+let colaModelo: unknown[] = [];
 let mod: typeof import('./wa-entendimiento.ts');
 
 function entrega(p: { respuesta: string; opciones: unknown; mensajes: Array<{ cuerpo: string; origen?: string }> }): string {
@@ -194,9 +197,14 @@ beforeEach(async () => {
   vi.useFakeTimers({ toFake: ['Date'] });
   vi.setSystemTime(new Date('2026-09-30T15:00:00Z'));
   (globalThis as unknown as { Deno: unknown }).Deno = { env: { get: (k: string) => (k === 'GEMINI_API_KEY' ? 'k' : undefined) } };
-  vi.stubGlobal('fetch', vi.fn(async () => new Response(JSON.stringify({
-    candidates: [{ finishReason: 'STOP', content: { parts: [{ text: JSON.stringify(salidaModelo) }] } }],
-  }), { status: 200 })));
+  vi.stubGlobal('fetch', vi.fn(async () => {
+    // Una cola de salidas: cada llamada al modelo toma la siguiente (la última se repite).
+    const s = colaModelo.length > 1 ? colaModelo.shift() : colaModelo.length === 1 ? colaModelo[0] : salidaModelo;
+    return new Response(JSON.stringify({
+      candidates: [{ finishReason: 'STOP', content: { parts: [{ text: JSON.stringify(s) }] } }],
+    }), { status: 200 });
+  }));
+  colaModelo = [];
   mod = await import('./wa-entendimiento.ts');
   t = base();
   db = crearDb(t);
@@ -393,5 +401,159 @@ describe('NUEVO y re-pregunta', () => {
     await correr();
     expect(ent()).toMatchObject({ estado: 'esperando_contacto', contacto_nombre: 'Carla Prueba' });
     expect(ent().destino).toBeUndefined();
+  });
+});
+
+// ── Varios viajes (modo mixto) y los guardianes, de punta a punta ───────────
+
+function entregaCon(p: { estado?: string; respuesta?: string | null; opciones?: unknown; mensajes: Array<{ cuerpo: string; reenviado?: boolean; min?: number }> }): string {
+  const id = nuevoId();
+  t.wa_bandeja_entregas.push({
+    id, workspace_id: WS, remitente_phone: TEL, remitente_staff_id: STAFF, estado: p.estado ?? 'con_cliente',
+    cliente_texto: p.respuesta ?? null, cliente_respondido_at: '2026-09-30T14:00:00Z', negocio_opciones: p.opciones ?? null, plan_viajes: null,
+  });
+  p.mensajes.forEach((m, i) => t.wa_bandeja_mensajes.push({
+    id: nuevoId(), workspace_id: WS, entrega_id: id, wa_message_id: `w-${id}-${i}`, papel: 'contenido', tipo: 'text',
+    cuerpo: m.cuerpo, cuerpo_origen: 'texto', reenviado: m.reenviado !== false, segmento: null,
+    recibido_at: new Date(Date.parse('2026-09-30T13:00:00Z') + (m.min ?? i) * 60_000).toISOString(),
+  }));
+  return id;
+}
+
+const valoresModelo = (valores: Record<string, { valor: string; frase: string }>, extra: Fila = {}) => {
+  const v: Record<string, unknown> = {};
+  for (const f of FIELDS) v[f.slug] = valores[f.slug] ?? { valor: 'por_definir', frase: '' };
+  return { citas: [], cliente: { nombre: '', telefono: '' }, valores: v, ...extra };
+};
+
+const responder = (texto: string) => mod.tomarRespuestaContacto(db as never, { workspaceId: WS, phone: TEL, texto, wamid: `w-${nuevoId()}`, enviadoAt: null });
+
+describe('modo mixto: el reparto se confirma y cada viaje se carga por separado', () => {
+  it('encabezados → resumen sin cargar nada → «corregir» → «sí» → dos cargas, con la asignación guardada por mensaje', async () => {
+    t.workspaces[0].config_extra = { bandeja_solicitudes: { modo_viajes: 'mixto' } };
+    const id = entregaCon({
+      estado: 'esperando_cliente',
+      mensajes: [
+        { cuerpo: 'Marta', reenviado: false }, { cuerpo: 'volvemos el 27 de noviembre' },
+        { cuerpo: 'T1 26 15', reenviado: false }, { cuerpo: 'somos de Medellín' },
+      ],
+    });
+    const antes = JSON.stringify(t.negocio_bloques);
+    colaModelo = [{ asignaciones: [] }];
+    const r = await mod.armarPreguntaNegocio(db as never, id, WS, 4);
+    expect(r!.texto).toContain('Entendí 2 viajes:');
+    expect(r!.texto).toContain('1) T1 26 14 · MARTA PRUEBA (1 mensaje)');
+    expect(r!.texto).toContain('2) T1 26 15 · LUIS PRUEBA (1 mensaje)');
+    expect(r!.texto).toContain('No cargué nada todavía');
+
+    // Lo que hace `preguntarCliente` y la respuesta del comercial («corregir»).
+    Object.assign(t.wa_bandeja_entregas.find(e => e.id === id)!, { plan_viajes: r!.plan, estado: 'con_cliente', cliente_texto: 'corregir' });
+    await correr();
+    expect(ent()).toMatchObject({ estado: 'esperando_negocio', segmento: 0 });
+    expect(enviados.at(-1)!.texto).toContain('Dime qué mensaje va a qué viaje');
+    expect(JSON.stringify(t.negocio_bloques)).toBe(antes); // nada cargado
+
+    expect(await responder('sí')).toBe(true);
+    colaModelo = [
+      valoresModelo({ fecha_regreso: { valor: '2026-11-27', frase: 'volvemos el 27 de noviembre' } }),
+      valoresModelo({ ciudad_origen: { valor: 'Medellín', frase: 'somos de Medellín' } }),
+    ];
+    await correr();
+
+    expect(t.wa_bandeja_entendimientos.map(e => [e.segmento, e.estado, e.negocio_id ?? null])).toEqual([
+      [0, 'repartida', null], [1, 'negocio_actualizado', 'n14'], [2, 'negocio_actualizado', 'n15'],
+    ]);
+    expect(bloque('b14').fecha_regreso).toBe('2026-11-27');
+    expect(bloque('b14').ciudad_origen).toBeUndefined(); // lo de Luis no cae en Marta
+    expect(bloque('b15').ciudad_origen).toBe('MEDELLÍN');
+    const ms = t.wa_bandeja_mensajes.filter(m => m.entrega_id === id && m.papel === 'contenido');
+    expect(ms.map(m => m.segmento)).toEqual([null, 1, null, 2]);
+    expect(ms.map(m => m.clase ?? null)).toEqual(['encabezado', 'cliente', 'encabezado', 'cliente']);
+    expect((ms[1].asignacion as Fila)).toMatchObject({ por: 'encabezado', destino: { negocio_id: 'n14' } });
+    expect(t.wa_bandeja_entregas.find(e => e.id === id)!.plan_confirmado_at).toBeTruthy();
+  });
+
+  it('modo `uno` (default): la pregunta sigue siendo «¿A qué viaje van?» con la lista', async () => {
+    const id = entregaCon({ estado: 'esperando_cliente', mensajes: [{ cuerpo: 'Marta', reenviado: false }, { cuerpo: 'hola' }] });
+    const r = await mod.armarPreguntaNegocio(db as never, id, WS, 2);
+    expect(r!.plan).toBeUndefined();
+    expect(r!.texto).toContain('¿A qué viaje van?');
+  });
+});
+
+describe('guardianes en la ejecución', () => {
+  it('N6 · C1: mensajes de otro destino no se cargan sin aviso; con «sí» se cargan sin volver a llamar al modelo', async () => {
+    entregaCon({ respuesta: '1', opciones: OPCIONES, mensajes: [{ cuerpo: 'Confirmamos Punta Cana, salimos de Bogotá' }] });
+    salidaModelo = valoresModelo({ destino: { valor: 'Punta Cana', frase: 'Confirmamos Punta Cana' }, ciudad_origen: { valor: 'Bogotá', frase: 'salimos de Bogotá' } });
+    await correr();
+    expect(ent()).toMatchObject({ estado: 'esperando_negocio', confirmacion_pendiente: 'cruce', negocio_destino_id: 'n15' });
+    expect(enviados[0].texto).toContain('Estos mensajes hablan de Punta Cana y T1 26 15 es de LUIS PRUEBA a CARTAGENA. No cargué nada.');
+    expect(bloque('b15')).toEqual({ destino: 'CARTAGENA' });
+
+    await responder('sí');
+    await correr();
+    expect(vi.mocked(fetch)).toHaveBeenCalledTimes(1);
+    expect(ent()).toMatchObject({ estado: 'negocio_actualizado', negocio_id: 'n15', confirmacion_pendiente: null });
+    expect(bloque('b15').ciudad_origen).toBe('BOGOTÁ');
+    expect((bloque('b15')._conflictos as Fila).destino).toMatchObject({ valor: 'Punta Cana' });
+  });
+
+  it('N4 · B3: sin solicitud no se crea un negocio; DESCARTAR lo cierra', async () => {
+    entregaCon({ respuesta: 'NUEVO Pedro Prueba', opciones: OPCIONES, mensajes: [{ cuerpo: 'jajaja' }, { cuerpo: 'buenas noches' }] });
+    salidaModelo = valoresModelo({}, { mensajes: [{ n: 1, clase: 'ruido' }, { n: 2, clase: 'ruido' }] });
+    const negocios = t.negocios.length;
+    await correr();
+    expect(enviados[0].texto).toContain('No vi una solicitud de viaje en estos 2 mensajes');
+    expect(ent()).toMatchObject({ estado: 'esperando_negocio', confirmacion_pendiente: 'sin_solicitud' });
+    expect(t.negocios.length).toBe(negocios);
+    expect(t.contactos).toEqual([]);
+    await responder('DESCARTAR');
+    await correr();
+    expect(ent()).toMatchObject({ estado: 'descartada' });
+    expect(t.negocios.length).toBe(negocios);
+  });
+
+  it('N5 · D1: dos solicitudes no se mezclan; SEPARAR muestra el reparto y cada una va por su lado', async () => {
+    entregaCon({ respuesta: 'NUEVO Carolina Prueba', opciones: OPCIONES, mensajes: [
+      { cuerpo: 'Hola, soy Carolina, queremos Aruba del 5 al 10 de diciembre' }, { cuerpo: 'Buenas, soy Luisa, para Curazao somos 2' },
+    ] });
+    salidaModelo = valoresModelo({ destino: { valor: 'Aruba', frase: 'queremos Aruba' } }, {
+      solicitudes: [{ cliente: 'Carolina', destino: 'Aruba', frase: 'soy Carolina, queremos Aruba' }, { cliente: 'Luisa', destino: 'Curazao', frase: 'soy Luisa, para Curazao' }],
+    });
+    const negocios = t.negocios.length;
+    await correr();
+    expect(enviados[0].texto).toContain('Veo dos solicitudes distintas en estos mensajes (Carolina: Aruba · Luisa: Curazao)');
+    expect(t.negocios.length).toBe(negocios);
+
+    colaModelo = [{ asignaciones: [{ n: 1, viaje: 'NUEVO Carolina', evidencia: 'Carolina' }, { n: 2, viaje: 'NUEVO Luisa', evidencia: 'Luisa' }] }];
+    await responder('SEPARAR');
+    await correr();
+    expect(enviados.at(-1)!.texto).toContain('1) NUEVO Carolina (1 mensaje)');
+    expect(enviados.at(-1)!.texto).toContain('2) NUEVO Luisa (1 mensaje)');
+    expect(t.negocios.length).toBe(negocios);
+
+    colaModelo = [
+      valoresModelo({ destino: { valor: 'Aruba', frase: 'queremos Aruba' } }),
+      valoresModelo({ destino: { valor: 'Curazao', frase: 'para Curazao' } }),
+    ];
+    await responder('sí');
+    await correr();
+    const segs = t.wa_bandeja_entendimientos.filter(e => Number(e.segmento) > 0);
+    expect(segs.map(e => [e.segmento, e.estado, e.contacto_nombre])).toEqual([[1, 'esperando_contacto', 'Carolina'], [2, 'esperando_contacto', 'Luisa']]);
+    expect((segs[0].sugeridos as Fila).destino).toMatchObject({ valor: 'Aruba' });
+    expect((segs[1].sugeridos as Fila).destino).toMatchObject({ valor: 'Curazao' });
+  });
+
+  it('N9 · NUEVO sin nombre: el bot pide el nombre y con «NUEVO Marta Gómez» crea el viaje', async () => {
+    entregaCon({ respuesta: 'NUEVO', opciones: OPCIONES, mensajes: [{ cuerpo: 'queremos ir a Aruba' }] });
+    salidaModelo = valoresModelo({ destino: { valor: 'Aruba', frase: 'ir a Aruba' } });
+    await correr();
+    expect(ent()).toMatchObject({ estado: 'esperando_contacto' });
+    expect(enviados[0].texto).toContain('Escríbeme NUEVO y su nombre');
+
+    await responder('NUEVO Marta Gómez');
+    await correr();
+    expect(ent()).toMatchObject({ estado: 'negocio_creado' });
+    expect(t.contactos.map(c => c.nombre)).toEqual(['MARTA GÓMEZ']);
   });
 });
