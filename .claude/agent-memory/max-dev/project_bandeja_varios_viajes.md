@@ -41,5 +41,9 @@ upsert del código viejo `on conflict (entrega_id)` se queda sin índice. `modo_
   (bebé + edad ≥2 pregunta, vía `descartados[].pregunta`); avance % con `lineaAvance` (calcularNiveles).
   El avance sale en el mensaje de cada viaje: NO hay un mensaje combinado por entrega (cada segmento
   carga y contesta aparte en el cron).
+- 2026-10-01 prueba en vivo: UNA pregunta abierta por remitente (`preguntaAbierta`). La cola no tiene
+  columna: resumen en cola = `esperando_cliente` con `pregunta_enviada_at` y `pregunta_error` nulas
+  (sale con `enviarPreguntasEnCola` desde wa-alerts); viaje de reparto en cola = `error` + `intentos 0`.
+  El cron atiende respuestas ANTES que lo nuevo. «nuevo X» crea el contacto sin preguntar.
 - El aislamiento rechaza `cat >> archivo <<EOF` y `sed` con variables: usar Edit/Write o un .py en el worktree.
 Relacionado: [[entendimiento-bandeja-wa]], [[bandeja-negocio-existente]].

@@ -26,6 +26,7 @@ import {
   aplicarSumas,
   conDeducciones,
   decidirContacto,
+  digitosTelefono,
   esquemaDeSalida,
   fusionarSugeridos,
   huecos,
@@ -33,7 +34,9 @@ import {
   interpretarRespuestaContacto,
   mayusculasDeViaje,
   mensajeAlComercial,
+  nombreDeLaRespuesta,
   nombreEsLugar,
+  normalizarNombre,
   palabrasDeBusqueda,
   resumenEntendido,
   MAX_PREGUNTAS,
@@ -404,7 +407,8 @@ function salidaGuardada(ent: Fila): SalidaEntendida {
 }
 
 async function preguntarContacto(supabase: SupabaseClient, ent: Fila, d: Extract<DecisionContacto, { tipo: 'preguntar' }>) {
-  const ok = await enviar(ent.remitente_phone as string, textoPreguntaContacto(d), ent.workspace_id as string);
+  const nombre = d.nombre || await nombreDelViaje(supabase, ent);
+  const ok = await enviar(ent.remitente_phone as string, conNombreDelViaje(nombre, textoPreguntaContacto(d)), ent.workspace_id as string);
   await actualizar(supabase, ent.id as string, {
     estado: 'esperando_contacto', contacto_opciones: d.opciones, contacto_nombre: d.nombre,
     pregunta_contacto_at: ok ? new Date().toISOString() : null, respuesta_contacto: null, error: ok ? null : 'envio fallido',
@@ -417,8 +421,10 @@ async function preguntarContacto(supabase: SupabaseClient, ent: Fila, d: Extract
  */
 async function preguntarYEsperar(
   supabase: SupabaseClient, ent: Fila, texto: string, confirmacion: 'cruce' | 'sin_solicitud' | 'dos_viajes' | null, extra: Fila = {},
+  opts: { sinNombre?: boolean } = {},
 ): Promise<void> {
-  const ok = await enviar(ent.remitente_phone as string, texto, ent.workspace_id as string);
+  const conNombre = opts.sinNombre ? texto : conNombreDelViaje(await nombreDelViaje(supabase, ent), texto);
+  const ok = await enviar(ent.remitente_phone as string, conNombre, ent.workspace_id as string);
   await actualizar(supabase, ent.id as string, {
     ...extra,
     estado: 'esperando_negocio', confirmacion_pendiente: confirmacion, respuesta_negocio: null, respuesta_negocio_at: null,
@@ -499,6 +505,8 @@ async function entender(supabase: SupabaseClient, ent: Fila): Promise<void> {
     // NUEVO: lo que escribió después («NUEVO Marta Gómez») es el cliente.
     clienteTexto = r.tipo === 'nuevo' ? r.cliente : null;
     await actualizar(supabase, ent.id as string, { destino: 'nuevo', confirmacion_pendiente: null });
+    await entenderNuevo(supabase, ent, crudos, clienteTexto, { revisarDosViajes: true, nuevoExplicito: r.tipo === 'nuevo' && !!r.cliente });
+    return;
   }
 
   await entenderNuevo(supabase, ent, crudos, clienteTexto, { revisarDosViajes: true });
@@ -551,7 +559,15 @@ async function atenderConfirmacion(
 /** Negocio nuevo: modelo, guardianes, N5, N4 y contacto. `previa`: salida ya entendida (se confirma). */
 async function entenderNuevo(
   supabase: SupabaseClient, ent: Fila, crudos: ReadonlyArray<MensajeCrudo>, clienteTexto: string | null,
-  opts: { previa?: SalidaEntendida; revisarDosViajes?: boolean } = {},
+  opts: {
+    previa?: SalidaEntendida; revisarDosViajes?: boolean;
+    /**
+     * El comercial escribió NUEVO y el nombre («nuevo Laura Prueba»): esa ya es la decisión. Si el
+     * nombre no está en el directorio, se crea y se carga sin volver a preguntar; solo se pregunta
+     * si ya hay un contacto con ese nombre (¿es el mismo?) o si se parece a uno o más.
+     */
+    nuevoExplicito?: boolean;
+  } = {},
 ): Promise<void> {
   const workspaceId = ent.workspace_id as string;
   const cfg = await configDeLinea(supabase, workspaceId);
@@ -607,8 +623,14 @@ async function entenderNuevo(
 
   const candidatos = await candidatosDeContacto(supabase, workspaceId, clienteTexto, salida.cliente);
   const d = decidirContacto({ clienteTexto, extraido: salida.cliente, candidatos });
-  if (d.tipo === 'unico') {
+  const nombreNuevo = opts.nuevoExplicito ? nombreDeLaRespuesta(clienteTexto) : '';
+  if (nombreNuevo && d.tipo === 'unico' && d.por === 'nombre') {
+    // Pidió NUEVO y ya hay uno con ese nombre: ¿es el mismo?
+    await preguntarContacto(supabase, ent, { tipo: 'preguntar', motivo: 'mismo', opciones: [d.contacto], nombre: nombreNuevo });
+  } else if (d.tipo === 'unico') {
     await cerrarConNegocio(supabase, ent, cfg, d.contacto.id, salida);
+  } else if (nombreNuevo && d.motivo === 'ninguno' && d.opciones.length === 0) {
+    await crearContactoYNegocio(supabase, ent, cfg, salida, digitosTelefono(clienteTexto) ?? salida.cliente.telefono, nombreNuevo);
   } else {
     await preguntarContacto(supabase, ent, d);
   }
@@ -829,8 +851,44 @@ async function negocioAbiertoPorCodigo(supabase: SupabaseClient, workspaceId: st
 
 /** El resumen puede venir en varias partes: se mandan en orden y se espera respuesta a la última. */
 async function preguntarResumen(supabase: SupabaseClient, ent: Fila, partes: string[]): Promise<void> {
-  for (const p of partes.slice(0, -1)) await enviar(ent.remitente_phone as string, p, ent.workspace_id as string);
-  await preguntarYEsperar(supabase, ent, partes[partes.length - 1], null);
+  // El nombre del viaje va al principio de la primera parte.
+  const { data: entrega } = await supabase.from('wa_bandeja_entregas').select('plan_viajes, created_at').eq('id', ent.entrega_id).maybeSingle();
+  const nombre = nombreDeLaEntrega((entrega?.plan_viajes ?? null) as PlanViajes | null, (entrega?.created_at as string | null) ?? null);
+  const con = partes.map((p, i) => (i === 0 ? conNombreDelViaje(nombre, p) : p));
+  for (const p of con.slice(0, -1)) await enviar(ent.remitente_phone as string, p, ent.workspace_id as string);
+  await preguntarYEsperar(supabase, ent, con[con.length - 1], null, {}, { sinNombre: true });
+}
+
+/** «Laura Prueba · ¿…?»: toda pregunta lleva el nombre del viaje al principio. */
+export function conNombreDelViaje(nombre: string, texto: string): string {
+  return `${nombre} · ${texto}`;
+}
+
+/** «Tanda de las 10:42»: el nombre de una tanda sin cliente todavía, por la hora de Bogotá. */
+export function nombreDeTanda(iso: string | null): string {
+  if (!iso) return 'Tanda sin nombre';
+  const hora = new Intl.DateTimeFormat('es-CO', { timeZone: 'America/Bogota', hour: '2-digit', minute: '2-digit', hour12: false }).format(new Date(iso));
+  return `Tanda de las ${hora}`;
+}
+
+/** El nombre de una entrega: los clientes de su reparto («Diego Prueba», «Carolina y Luisa»), o la hora de la tanda. */
+export function nombreDeLaEntrega(plan: PlanViajes | null, creadaAt: string | null): string {
+  const nombres = plan ? gruposDelPlan(plan).map(g => g.destino.cliente).filter((x): x is string => !!x && x.trim() !== '') : [];
+  if (nombres.length === 0) return nombreDeTanda(creadaAt);
+  return nombres.length === 1 ? nombres[0] : `${nombres.slice(0, -1).join(', ')} y ${nombres[nombres.length - 1]}`;
+}
+
+/** El nombre del viaje de un entendimiento: el cliente que dio el comercial, el que se entendió o el negocio. */
+async function nombreDelViaje(supabase: SupabaseClient, ent: Fila): Promise<string> {
+  const dado = String(ent.contacto_nombre ?? '').trim() || String((ent.cliente as Fila | null)?.nombre ?? '').trim();
+  if (dado) return dado;
+  if (ent.negocio_destino_id) {
+    const { data: n } = await supabase.from('negocios').select('codigo, contactos(nombre)').eq('id', ent.negocio_destino_id).maybeSingle();
+    const t = [n?.codigo as string | undefined, nombreRel(n?.contactos)].filter(Boolean).join(' · ');
+    if (t) return t;
+  }
+  const { data: e } = await supabase.from('wa_bandeja_entregas').select('plan_viajes, created_at').eq('id', ent.entrega_id).maybeSingle();
+  return nombreDeLaEntrega((e?.plan_viajes ?? null) as PlanViajes | null, (e?.created_at as string | null) ?? null);
 }
 
 /** La respuesta al resumen del reparto. Nada se carga hasta el «sí». */
@@ -875,7 +933,14 @@ async function resolverPlan(supabase: SupabaseClient, ent: Fila, plan: PlanViaje
       destino: g.destino.tipo, negocio_destino_id: g.destino.tipo === 'existente' ? g.destino.negocio_id : null,
       contacto_nombre: g.destino.tipo === 'nuevo' ? g.destino.cliente : null,
     }, { onConflict: 'entrega_id,segmento', ignoreDuplicates: true }).select('*').maybeSingle();
-    if (fila) await entender(supabase, fila as Fila);
+    if (!fila) continue;
+    // Una sola pregunta abierta a la vez: si el viaje anterior quedó preguntando, este espera en
+    // cola (el reintento del cron lo toma cuando se conteste).
+    if (await preguntaAbierta(supabase, workspaceId, ent.remitente_phone as string)) {
+      await actualizar(supabase, (fila as Fila).id as string, { estado: 'error', intentos: 0, error: EN_COLA });
+      continue;
+    }
+    await entender(supabase, fila as Fila);
   }
 }
 
@@ -928,7 +993,7 @@ async function entenderSegmento(
       }
     }
     if (r.tipo === 'nuevo') {
-      await entenderNuevo(supabase, ent, delGrupo, r.cliente);
+      await entenderNuevo(supabase, ent, delGrupo, r.cliente, { nuevoExplicito: !!r.cliente });
       return;
     }
     await preguntarYEsperar(supabase, ent, 'No entendí. Responde SÍ, el código del viaje correcto, o NUEVO y el nombre del cliente.', pendiente as 'cruce' | 'sin_solicitud' | 'dos_viajes');
@@ -938,7 +1003,8 @@ async function entenderSegmento(
   if (destino.tipo === 'existente') {
     await cargarEnNegocioExistente(supabase, ent, destino.negocio_id, delGrupo, []);
   } else {
-    await entenderNuevo(supabase, ent, delGrupo, destino.cliente);
+    // «nuevo Laura Prueba» en el encabezado ya es la decisión (prueba en vivo del 2026-10-01).
+    await entenderNuevo(supabase, ent, delGrupo, destino.cliente, { nuevoExplicito: !!destino.cliente });
   }
 }
 
@@ -1167,11 +1233,17 @@ async function cargarEnNegocioExistente(
 async function resolverRespuesta(supabase: SupabaseClient, ent: Fila): Promise<void> {
   const workspaceId = ent.workspace_id as string;
   const opciones = (ent.contacto_opciones ?? []) as ContactoCandidato[];
-  const r = interpretarRespuestaContacto(String(ent.respuesta_contacto ?? ''), opciones);
+  const respuestaTexto = String(ent.respuesta_contacto ?? '');
+  // Con una sola opción («¿es el mismo?»), un sí la elige: «Si», «sí», «Sí» y «SI» valen igual.
+  const r = opciones.length === 1 && esSi(respuestaTexto)
+    ? { tipo: 'elegido' as const, contacto_id: opciones[0].id }
+    : interpretarRespuestaContacto(respuestaTexto, opciones);
   const salida = salidaGuardada(ent);
 
   if (r.tipo === 'no_entendida') {
-    await preguntarContacto(supabase, ent, { tipo: 'preguntar', motivo: opciones.length > 1 ? 'varios' : 'ninguno', opciones, nombre: (ent.contacto_nombre as string) ?? '' });
+    const nombre = (ent.contacto_nombre as string) ?? '';
+    const mismo = opciones.length === 1 && normalizarNombre(opciones[0].nombre) === normalizarNombre(nombre);
+    await preguntarContacto(supabase, ent, { tipo: 'preguntar', motivo: opciones.length > 1 ? 'varios' : mismo ? 'mismo' : 'ninguno', opciones, nombre });
     return;
   }
 
@@ -1237,39 +1309,6 @@ export async function procesarEntendimientos(supabase: SupabaseClient): Promise<
   let entendidas = 0;
   let respuestas = 0;
 
-  // 1. Nuevas. El reclamo es el INSERT (entrega + segmento 0 es único): dos corridas no toman la misma.
-  const { data: entregas } = await supabase.from('wa_bandeja_entregas')
-    .select('id, workspace_id, remitente_phone, remitente_staff_id')
-    .eq('estado', 'con_cliente').order('cliente_respondido_at', { ascending: true }).limit(50);
-  const lista = (entregas ?? []) as Fila[];
-  if (lista.length > 0) {
-    const { data: ya } = await supabase.from('wa_bandeja_entendimientos').select('entrega_id').in('entrega_id', lista.map(e => e.id));
-    const tomadas = new Set(((ya ?? []) as Fila[]).map(e => e.entrega_id as string));
-    const activos = await workspacesActivos(supabase, [...new Set(lista.map(e => e.workspace_id as string))]);
-    for (const e of lista.filter(x => !tomadas.has(x.id as string) && activos.has(x.workspace_id as string)).slice(0, LOTE)) {
-      const { data: fila } = await supabase.from('wa_bandeja_entendimientos').upsert({
-        workspace_id: e.workspace_id, entrega_id: e.id, segmento: 0, remitente_phone: e.remitente_phone,
-        remitente_staff_id: e.remitente_staff_id, estado: 'procesando', intentos: 1,
-      }, { onConflict: 'entrega_id,segmento', ignoreDuplicates: true }).select('*').maybeSingle();
-      if (!fila) continue;
-      await entender(supabase, fila);
-      entendidas++;
-    }
-  }
-
-  // 2. Reintentos del modelo.
-  const { data: fallidas } = await supabase.from('wa_bandeja_entendimientos').select('*')
-    .eq('estado', 'error').lt('intentos', MAX_INTENTOS).is('negocio_id', null).is('contacto_id', null).limit(LOTE);
-  const activosF = await workspacesActivos(supabase, [...new Set(((fallidas ?? []) as Fila[]).map(e => e.workspace_id as string))]);
-  for (const f of ((fallidas ?? []) as Fila[]).filter(x => activosF.has(x.workspace_id as string))) {
-    const { data: fila } = await supabase.from('wa_bandeja_entendimientos')
-      .update({ estado: 'procesando', intentos: (f.intentos as number) + 1, updated_at: new Date().toISOString() })
-      .eq('id', f.id).eq('estado', 'error').select('*').maybeSingle();
-    if (!fila) continue;
-    await entender(supabase, fila);
-    entendidas++;
-  }
-
   // 3. Respuestas a «¿cuál contacto?».
   const { data: conRespuesta } = await supabase.from('wa_bandeja_entendimientos').select('*')
     .eq('estado', 'esperando_contacto').not('respuesta_contacto', 'is', null).limit(LOTE);
@@ -1296,8 +1335,49 @@ export async function procesarEntendimientos(supabase: SupabaseClient): Promise<
     respuestas++;
   }
 
+  // Lo nuevo y los reintentos van DESPUÉS de las respuestas: una respuesta libera la pregunta
+  // abierta del remitente y lo que esperaba turno puede correr en la misma pasada.
+  // 1. Nuevas. El reclamo es el INSERT (entrega + segmento 0 es único): dos corridas no toman la misma.
+  const { data: entregas } = await supabase.from('wa_bandeja_entregas')
+    .select('id, workspace_id, remitente_phone, remitente_staff_id')
+    .eq('estado', 'con_cliente').order('cliente_respondido_at', { ascending: true }).limit(50);
+  const lista = (entregas ?? []) as Fila[];
+  if (lista.length > 0) {
+    const { data: ya } = await supabase.from('wa_bandeja_entendimientos').select('entrega_id').in('entrega_id', lista.map(e => e.id));
+    const tomadas = new Set(((ya ?? []) as Fila[]).map(e => e.entrega_id as string));
+    const activos = await workspacesActivos(supabase, [...new Set(lista.map(e => e.workspace_id as string))]);
+    for (const e of lista.filter(x => !tomadas.has(x.id as string) && activos.has(x.workspace_id as string)).slice(0, LOTE)) {
+      // Una sola pregunta abierta a la vez por remitente: si hay otra, esta entrega espera turno.
+      if (await preguntaAbierta(supabase, e.workspace_id as string, e.remitente_phone as string)) continue;
+      const { data: fila } = await supabase.from('wa_bandeja_entendimientos').upsert({
+        workspace_id: e.workspace_id, entrega_id: e.id, segmento: 0, remitente_phone: e.remitente_phone,
+        remitente_staff_id: e.remitente_staff_id, estado: 'procesando', intentos: 1,
+      }, { onConflict: 'entrega_id,segmento', ignoreDuplicates: true }).select('*').maybeSingle();
+      if (!fila) continue;
+      await entender(supabase, fila);
+      entendidas++;
+    }
+  }
+
+  // 2. Reintentos del modelo.
+  const { data: fallidas } = await supabase.from('wa_bandeja_entendimientos').select('*')
+    .eq('estado', 'error').lt('intentos', MAX_INTENTOS).is('negocio_id', null).is('contacto_id', null).limit(LOTE);
+  const activosF = await workspacesActivos(supabase, [...new Set(((fallidas ?? []) as Fila[]).map(e => e.workspace_id as string))]);
+  for (const f of ((fallidas ?? []) as Fila[]).filter(x => activosF.has(x.workspace_id as string))) {
+    if (await preguntaAbierta(supabase, f.workspace_id as string, f.remitente_phone as string)) continue;
+    const { data: fila } = await supabase.from('wa_bandeja_entendimientos')
+      .update({ estado: 'procesando', intentos: (f.intentos as number) + 1, updated_at: new Date().toISOString() })
+      .eq('id', f.id).eq('estado', 'error').select('*').maybeSingle();
+    if (!fila) continue;
+    await entender(supabase, fila);
+    entendidas++;
+  }
+
   return { entendidas, respuestas };
 }
+
+/** Marca de un entendimiento que espera turno porque el remitente tiene otra pregunta abierta. */
+const EN_COLA = 'en cola: el comercial tiene otra pregunta abierta';
 
 /** Las dos preguntas que el paso de entendimiento puede dejar abiertas, con sus columnas. */
 const PENDIENTES = [
@@ -1319,6 +1399,62 @@ export async function hayPreguntaPendiente(supabase: SupabaseClient, workspaceId
     if (data) return true;
   }
   return false;
+}
+
+/** La pregunta abierta de un remitente, en una línea, para recordarla: «Laura Prueba · ¿Lo creo? NUEVO / celular». */
+export interface PreguntaAbierta {
+  tipo: 'entrega' | 'negocio' | 'contacto';
+  id: string;
+  nombre: string;
+  corta: string;
+}
+
+/**
+ * La pregunta abierta del remitente, si hay una: el resumen o «¿A qué viaje van?» de una entrega
+ * (`esperando_cliente` con la pregunta enviada) o una pregunta del entendimiento sin responder.
+ * Una sola a la vez por remitente (prueba en vivo del 2026-10-01): las demás esperan en cola.
+ * `excepto`: la entrega o el entendimiento que se está atendiendo.
+ */
+export async function preguntaAbierta(
+  supabase: SupabaseClient, workspaceId: string, phone: string, excepto: string[] = [],
+): Promise<PreguntaAbierta | null> {
+  const desde = new Date(Date.now() - HORAS_RESPUESTA_CONTACTO * 3600_000).toISOString();
+  const { data: ents } = await supabase.from('wa_bandeja_entendimientos')
+    .select('id, entrega_id, estado, confirmacion_pendiente, contacto_nombre, contacto_opciones, cliente, negocio_destino_id, pregunta_negocio_at, pregunta_contacto_at, respuesta_negocio, respuesta_contacto')
+    .eq('workspace_id', workspaceId).eq('remitente_phone', phone).in('estado', ['esperando_negocio', 'esperando_contacto']).limit(20);
+  for (const e of (ents ?? []) as Fila[]) {
+    if (excepto.includes(e.id as string)) continue;
+    const contacto = e.estado === 'esperando_contacto';
+    const at = (contacto ? e.pregunta_contacto_at : e.pregunta_negocio_at) as string | null;
+    const resp = contacto ? e.respuesta_contacto : e.respuesta_negocio;
+    if (!at || at < desde || resp) continue;
+    const nombre = await nombreDelViaje(supabase, e);
+    if (contacto) {
+      const n = Array.isArray(e.contacto_opciones) ? e.contacto_opciones.length : 0;
+      return { tipo: 'contacto', id: e.id as string, nombre, corta: n === 0 ? '¿Lo creo? NUEVO / celular' : n === 1 ? '¿Es el mismo? SÍ / NUEVO' : '¿Cuál contacto es? Número / NUEVO' };
+    }
+    const c = e.confirmacion_pendiente as string | null;
+    const corta = c === 'cruce' ? '¿Lo cargo ahí? SÍ / código / DESCARTAR'
+      : c === 'sin_solicitud' ? '¿Lo creo igual? SÍ / DESCARTAR'
+      : c === 'dos_viajes' ? 'DESCARTAR y reenvía con encabezados'
+      : '¿Así? SÍ o corrige';
+    return { tipo: 'negocio', id: e.id as string, nombre, corta };
+  }
+  const { data: pendientes } = await supabase.from('wa_bandeja_entregas').select('id, plan_viajes, created_at, pregunta_enviada_at')
+    .eq('workspace_id', workspaceId).eq('remitente_phone', phone).eq('estado', 'esperando_cliente').limit(20);
+  for (const e of (pendientes ?? []) as Fila[]) {
+    if (excepto.includes(e.id as string)) continue;
+    const at = e.pregunta_enviada_at as string | null;
+    if (!at || at < desde) continue;
+    const plan = (e.plan_viajes ?? null) as PlanViajes | null;
+    return { tipo: 'entrega', id: e.id as string, nombre: nombreDeLaEntrega(plan, (e.created_at as string | null) ?? null), corta: plan ? '¿Así? SÍ o corrige' : '¿A qué viaje van?' };
+  }
+  return null;
+}
+
+/** «Primero: Laura Prueba · ¿Lo creo? NUEVO / celular». */
+export function textoPrimero(p: PreguntaAbierta): string {
+  return `Primero: ${p.nombre} · ${p.corta}`;
 }
 
 /**
