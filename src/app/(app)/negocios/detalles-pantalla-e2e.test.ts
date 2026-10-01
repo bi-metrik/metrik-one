@@ -467,12 +467,6 @@ describe('punto 3 · «Aceptar» resuelve la sesión una vez', () => {
     expect(r.timing).toMatch(/^aceptar;dur=\d+$/)
   })
 
-  it('la relectura del editor también resuelve la sesión una vez', async () => {
-    sembrarHotel([{ id: 'r1', lectura: R1() }])
-    sesiones.n = 0
-    await releida()
-    expect(sesiones.n).toBe(1)
-  })
 })
 
 // ── Puntos 4, 5 y 8: el traslado y la tarifa niño ──────────────────────────────

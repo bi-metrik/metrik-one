@@ -190,3 +190,11 @@
   (`documentos/relectura-cross-check.ts`) y solo absuelve. Cambiar una comparación de texto exige
   cambiarla en `documentos/comparar-check.ts` o `negocios/comparar-valores.ts`, que comparten
   normalización y regla de nombres: no volver a copiarlas dentro de un archivo `'use server'`.
+- **El `cache()` de React NO memoiza dentro de una ruta (`route.ts`).** Sin render no hay
+  despachador y `cache(fn)` llama a `fn` cada vez. `getWorkspace` dentro de una ruta resolvía la
+  sesión una vez por acción anidada: «Aceptar» de la bandeja de Trappvel, 5 veces en serie (2026-10-01).
+  Para memoizar en una ruta, envolver el cuerpo en `enPeticionDeRuta` (`src/lib/actions/memo-de-ruta.ts`).
+- **Dos clases de Tailwind del mismo color en una etiqueta: gana la que el CSS escribe después, no la
+  que va después en el texto.** `${BTN} border-[#0E5C43] text-[#0E5C43]` dejaba el borde gris y la
+  tinta negra de `BTN` (el «Hotel / Traslado» elegido no se distinguía). Un estado elegido es una
+  cadena propia (`BTN_ELEGIDO`), sin los colores de la base.
