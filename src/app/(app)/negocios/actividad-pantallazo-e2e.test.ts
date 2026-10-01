@@ -192,7 +192,6 @@ function fila(id: string, cot: string, grupo: string, nombre: string, tarifa: un
 }
 
 const { aceptarCapturaDeBandeja, confirmarTarifaPorPasajero, leerCapturaEnBorrador, leerCasillaDeItem } = await import('./tarifa-pax-actions')
-const { firmarBorrador } = await import('@/lib/cotizaciones/firma-borrador')
 const { GET: leerVista } = await import('@/app/api/cotizaciones/[id]/vista/route')
 const { interpretarVistaFresca, lineasParaPintar } = await import('@/lib/cotizaciones/vista-fresca')
 const { default: CotizacionEditor } = await import('./cotizacion-editor')
