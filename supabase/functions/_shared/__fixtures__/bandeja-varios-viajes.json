@@ -1,0 +1,1955 @@
+{
+ "_que_es": "Grupo F del plan de QA (varios viajes en simultáneo) y el día sintético de 4 clientes, con la salida del modelo GRABADA a mano: las asignaciones reproducen las formas de falla del plan (cercanía, otro cliente nombrado, citas que no prueban nada). Todo es sintético; nada sale de producción. Generado con un script de un solo uso; se edita a mano.",
+ "viajes": [
+  {
+   "id": "n11",
+   "codigo": "T1 26 11",
+   "cliente": "CAROLINA RUIZ",
+   "destino": "PUNTA CANA"
+  },
+  {
+   "id": "n09",
+   "codigo": "T1 26 9",
+   "cliente": "JORGE PÉREZ",
+   "destino": "MADRID"
+  },
+  {
+   "id": "n12",
+   "codigo": "T1 26 12",
+   "cliente": "LUISA MEJÍA",
+   "destino": "SAN ANDRÉS"
+  },
+  {
+   "id": "n20",
+   "codigo": "T1 26 20",
+   "cliente": "PEDRO GÓMEZ",
+   "destino": "CARTAGENA"
+  }
+ ],
+ "config": {
+  "segundos_bloque": 600,
+  "horas_caja_activa": 4
+ },
+ "escenarios": [
+  {
+   "id": "F1",
+   "titulo": "Encabezado limpio",
+   "mensajes": [
+    {
+     "en": "2026-10-01T13:00:00Z",
+     "texto": "Carolina",
+     "reenviado": false
+    },
+    {
+     "en": "2026-10-01T13:01:00Z",
+     "texto": "Hola Tati, ya hablé con mi esposo",
+     "reenviado": true
+    },
+    {
+     "en": "2026-10-01T13:01:20Z",
+     "texto": "del 28 de diciembre al 3 de enero",
+     "reenviado": true
+    },
+    {
+     "en": "2026-10-01T13:02:00Z",
+     "texto": "hotel 4 estrellas",
+     "reenviado": true
+    },
+    {
+     "en": "2026-10-01T13:03:00Z",
+     "texto": "T1 26 9",
+     "reenviado": false
+    },
+    {
+     "en": "2026-10-01T13:03:30Z",
+     "texto": "Jorge aquí, confirmo Madrid",
+     "reenviado": true
+    },
+    {
+     "en": "2026-10-01T13:04:00Z",
+     "texto": "somos 2 adultos",
+     "reenviado": true
+    }
+   ],
+   "modelo": {
+    "asignaciones": [
+     {
+      "n": 6,
+      "viaje": "T1 26 9",
+      "evidencia": "Jorge"
+     },
+     {
+      "n": 3,
+      "viaje": "T1 26 11",
+      "evidencia": "del 28 de diciembre"
+     }
+    ]
+   },
+   "propuesta": {
+    "grupos": [
+     [
+      "T1 26 11",
+      [
+       2,
+       3,
+       4
+      ]
+     ],
+     [
+      "T1 26 9",
+      [
+       6,
+       7
+      ]
+     ]
+    ],
+    "sin_asignar": [],
+    "encabezados": [
+     1,
+     5
+    ]
+   },
+   "respuestas": [
+    {
+     "texto": "sí",
+     "tipo": "si"
+    }
+   ]
+  },
+  {
+   "id": "F2",
+   "titulo": "Sin encabezados, separados por tiempo",
+   "mensajes": [
+    {
+     "en": "2026-10-01T13:00:00Z",
+     "texto": "Hola, soy Carolina Ruiz",
+     "reenviado": true
+    },
+    {
+     "en": "2026-10-01T13:01:00Z",
+     "texto": "queremos ir en diciembre",
+     "reenviado": true
+    },
+    {
+     "en": "2026-10-01T13:02:00Z",
+     "texto": "somos 4",
+     "reenviado": true
+    },
+    {
+     "en": "2026-10-01T13:40:00Z",
+     "texto": "Buenas, habla Luisa",
+     "reenviado": true
+    },
+    {
+     "en": "2026-10-01T13:41:00Z",
+     "texto": "vamos 2 personas",
+     "reenviado": true
+    }
+   ],
+   "modelo": {
+    "asignaciones": [
+     {
+      "n": 1,
+      "viaje": "T1 26 11",
+      "evidencia": "Carolina Ruiz"
+     },
+     {
+      "n": 4,
+      "viaje": "T1 26 12",
+      "evidencia": "Luisa"
+     },
+     {
+      "n": 5,
+      "viaje": "T1 26 12",
+      "evidencia": "vamos 2 personas"
+     }
+    ]
+   },
+   "propuesta": {
+    "grupos": [
+     [
+      "T1 26 11",
+      [
+       1,
+       2,
+       3
+      ]
+     ],
+     [
+      "T1 26 12",
+      [
+       4,
+       5
+      ]
+     ]
+    ],
+    "sin_asignar": []
+   },
+   "respuestas": [
+    {
+     "texto": "ok pero falta uno",
+     "tipo": "no_entendida"
+    },
+    {
+     "texto": "Sí",
+     "tipo": "si"
+    }
+   ]
+  },
+  {
+   "id": "F3",
+   "titulo": "Intercalados sin encabezado (la cercanía no es evidencia)",
+   "mensajes": [
+    {
+     "en": "2026-10-01T13:00:00Z",
+     "texto": "Soy Carolina, queremos Punta Cana",
+     "reenviado": true
+    },
+    {
+     "en": "2026-10-01T13:00:30Z",
+     "texto": "Hola, soy Luisa",
+     "reenviado": true
+    },
+    {
+     "en": "2026-10-01T13:01:00Z",
+     "texto": "somos 4 personas",
+     "reenviado": true
+    },
+    {
+     "en": "2026-10-01T13:02:00Z",
+     "texto": "vamos 2",
+     "reenviado": true
+    }
+   ],
+   "modelo": {
+    "asignaciones": [
+     {
+      "n": 1,
+      "viaje": "T1 26 11",
+      "evidencia": "Carolina"
+     },
+     {
+      "n": 2,
+      "viaje": "T1 26 12",
+      "evidencia": "Luisa"
+     },
+     {
+      "n": 3,
+      "viaje": "T1 26 11",
+      "evidencia": "somos 4 personas"
+     },
+     {
+      "n": 4,
+      "viaje": "T1 26 12",
+      "evidencia": "vamos 2"
+     }
+    ]
+   },
+   "propuesta": {
+    "grupos": [
+     [
+      "T1 26 11",
+      [
+       1
+      ]
+     ],
+     [
+      "T1 26 12",
+      [
+       2
+      ]
+     ]
+    ],
+    "sin_asignar": [
+     3,
+     4
+    ]
+   }
+  },
+  {
+   "id": "F4",
+   "titulo": "Encabezado olvidado a mitad",
+   "mensajes": [
+    {
+     "en": "2026-10-01T13:00:00Z",
+     "texto": "Carolina",
+     "reenviado": false
+    },
+    {
+     "en": "2026-10-01T13:01:00Z",
+     "texto": "del 28 de diciembre",
+     "reenviado": true
+    },
+    {
+     "en": "2026-10-01T13:01:30Z",
+     "texto": "hotel 4 estrellas",
+     "reenviado": true
+    },
+    {
+     "en": "2026-10-01T13:02:00Z",
+     "texto": "Hola Tati, es Luisa, mi esposo y yo",
+     "reenviado": true
+    },
+    {
+     "en": "2026-10-01T13:03:00Z",
+     "texto": "queremos ir en enero",
+     "reenviado": true
+    }
+   ],
+   "modelo": {
+    "asignaciones": [
+     {
+      "n": 4,
+      "viaje": "T1 26 12",
+      "evidencia": "Luisa"
+     }
+    ]
+   },
+   "propuesta": {
+    "grupos": [
+     [
+      "T1 26 11",
+      [
+       2,
+       3
+      ]
+     ]
+    ],
+    "sin_asignar": [
+     4,
+     5
+    ]
+   },
+   "respuestas": [
+    {
+     "texto": "el 4 y el 5 son de Luisa",
+     "tipo": "corregir",
+     "grupos": [
+      [
+       "T1 26 11",
+       [
+        2,
+        3
+       ]
+      ],
+      [
+       "T1 26 12",
+       [
+        4,
+        5
+       ]
+      ]
+     ]
+    },
+    {
+     "texto": "dale",
+     "tipo": "si"
+    }
+   ]
+  },
+  {
+   "id": "F5",
+   "titulo": "Encabezado con error",
+   "mensajes": [
+    {
+     "en": "2026-10-01T13:00:00Z",
+     "texto": "Carlina",
+     "reenviado": false
+    },
+    {
+     "en": "2026-10-01T13:01:00Z",
+     "texto": "del 28 de diciembre",
+     "reenviado": true
+    },
+    {
+     "en": "2026-10-01T13:02:00Z",
+     "texto": "t126 9",
+     "reenviado": false
+    },
+    {
+     "en": "2026-10-01T13:03:00Z",
+     "texto": "confirmo los pasaportes",
+     "reenviado": true
+    },
+    {
+     "en": "2026-10-01T13:04:00Z",
+     "texto": "la de punta cana",
+     "reenviado": false
+    },
+    {
+     "en": "2026-10-01T13:05:00Z",
+     "texto": "y el hotel con piscina",
+     "reenviado": true
+    }
+   ],
+   "modelo": {
+    "asignaciones": []
+   },
+   "propuesta": {
+    "grupos": [
+     [
+      "T1 26 11",
+      [
+       2,
+       6
+      ]
+     ],
+     [
+      "T1 26 9",
+      [
+       4
+      ]
+     ]
+    ],
+    "sin_asignar": [],
+    "encabezados": [
+     1,
+     3,
+     5
+    ]
+   }
+  },
+  {
+   "id": "F6",
+   "titulo": "Dos clientes con el mismo nombre",
+   "viajes_extra": [
+    {
+     "id": "n14",
+     "codigo": "T1 26 14",
+     "cliente": "CAROLINA PÉREZ",
+     "destino": "CANCÚN"
+    }
+   ],
+   "mensajes": [
+    {
+     "en": "2026-10-01T13:00:00Z",
+     "texto": "Carolina",
+     "reenviado": false
+    },
+    {
+     "en": "2026-10-01T13:01:00Z",
+     "texto": "del 28 de diciembre",
+     "reenviado": true
+    },
+    {
+     "en": "2026-10-01T13:02:00Z",
+     "texto": "somos 3",
+     "reenviado": true
+    }
+   ],
+   "modelo": {
+    "asignaciones": []
+   },
+   "propuesta": {
+    "grupos": [],
+    "sin_asignar": [
+     2,
+     3
+    ],
+    "avisos": [
+     "«Carolina» puede ser T1 26 11 · CAROLINA RUIZ o T1 26 14 · CAROLINA PÉREZ"
+    ]
+   },
+   "respuestas": [
+    {
+     "texto": "el 2 y el 3 son T1 26 14",
+     "tipo": "corregir",
+     "grupos": [
+      [
+       "T1 26 14",
+       [
+        2,
+        3
+       ]
+      ]
+     ]
+    },
+    {
+     "texto": "si",
+     "tipo": "si"
+    }
+   ]
+  },
+  {
+   "id": "F7",
+   "titulo": "Mismo destino, dos clientes",
+   "viajes": [
+    {
+     "id": "n11",
+     "codigo": "T1 26 11",
+     "cliente": "CAROLINA RUIZ",
+     "destino": "PUNTA CANA"
+    },
+    {
+     "id": "n12",
+     "codigo": "T1 26 12",
+     "cliente": "LUISA MEJÍA",
+     "destino": "PUNTA CANA"
+    }
+   ],
+   "mensajes": [
+    {
+     "en": "2026-10-01T13:00:00Z",
+     "texto": "queremos Punta Cana en diciembre",
+     "reenviado": true
+    },
+    {
+     "en": "2026-10-01T13:01:00Z",
+     "texto": "somos 2",
+     "reenviado": true
+    }
+   ],
+   "modelo": {
+    "asignaciones": [
+     {
+      "n": 1,
+      "viaje": "T1 26 11",
+      "evidencia": "Punta Cana"
+     }
+    ]
+   },
+   "propuesta": {
+    "grupos": [],
+    "sin_asignar": [
+     1,
+     2
+    ]
+   }
+  },
+  {
+   "id": "F8",
+   "titulo": "Encabezado de un viaje cerrado o que no existe",
+   "cerrados": [
+    "T1263"
+   ],
+   "mensajes": [
+    {
+     "en": "2026-10-01T13:00:00Z",
+     "texto": "T1 26 3",
+     "reenviado": false
+    },
+    {
+     "en": "2026-10-01T13:01:00Z",
+     "texto": "ya pagamos el anticipo",
+     "reenviado": true
+    },
+    {
+     "en": "2026-10-01T13:10:00Z",
+     "texto": "T1 26 99",
+     "reenviado": false
+    },
+    {
+     "en": "2026-10-01T13:11:00Z",
+     "texto": "somos 2",
+     "reenviado": true
+    }
+   ],
+   "modelo": {
+    "asignaciones": []
+   },
+   "propuesta": {
+    "grupos": [],
+    "sin_asignar": [
+     2,
+     4
+    ],
+    "avisos": [
+     "El viaje T1 26 3 está cerrado",
+     "No existe un viaje abierto con el código T1 26 99"
+    ]
+   }
+  },
+  {
+   "id": "F9",
+   "titulo": "El cliente nombra a otro cliente",
+   "mensajes": [
+    {
+     "en": "2026-10-01T13:00:00Z",
+     "texto": "Carolina",
+     "reenviado": false
+    },
+    {
+     "en": "2026-10-01T13:01:00Z",
+     "texto": "Luisa me recomendó con ustedes",
+     "reenviado": true
+    },
+    {
+     "en": "2026-10-01T13:02:00Z",
+     "texto": "queremos ir en diciembre",
+     "reenviado": true
+    }
+   ],
+   "modelo": {
+    "asignaciones": [
+     {
+      "n": 2,
+      "viaje": "T1 26 12",
+      "evidencia": "Luisa"
+     }
+    ]
+   },
+   "propuesta": {
+    "grupos": [],
+    "sin_asignar": [
+     2,
+     3
+    ]
+   },
+   "respuestas": [
+    {
+     "texto": "el 2 y el 3 son de Carolina",
+     "tipo": "corregir",
+     "grupos": [
+      [
+       "T1 26 11",
+       [
+        2,
+        3
+       ]
+      ]
+     ]
+    }
+   ]
+  },
+  {
+   "id": "F10",
+   "titulo": "Corrección del resumen",
+   "viajes": [
+    {
+     "id": "n11",
+     "codigo": "T1 26 11",
+     "cliente": "CAROLINA RUIZ",
+     "destino": "PUNTA CANA"
+    },
+    {
+     "id": "n09",
+     "codigo": "T1 26 9",
+     "cliente": "JORGE PÉREZ",
+     "destino": "MADRID"
+    },
+    {
+     "id": "n20",
+     "codigo": "T1 26 20",
+     "cliente": "PEDRO GÓMEZ",
+     "destino": "CARTAGENA"
+    }
+   ],
+   "mensajes": [
+    {
+     "en": "2026-10-01T13:00:00Z",
+     "texto": "Carolina",
+     "reenviado": false
+    },
+    {
+     "en": "2026-10-01T13:01:00Z",
+     "texto": "del 28 de diciembre",
+     "reenviado": true
+    },
+    {
+     "en": "2026-10-01T13:01:30Z",
+     "texto": "hotel 4 estrellas",
+     "reenviado": true
+    },
+    {
+     "en": "2026-10-01T13:02:00Z",
+     "texto": "somos 4",
+     "reenviado": true
+    },
+    {
+     "en": "2026-10-01T13:03:00Z",
+     "texto": "nuevo Luisa",
+     "reenviado": false
+    },
+    {
+     "en": "2026-10-01T13:04:00Z",
+     "texto": "San Andrés en enero",
+     "reenviado": true
+    },
+    {
+     "en": "2026-10-01T13:05:00Z",
+     "texto": "vamos 2",
+     "reenviado": true
+    }
+   ],
+   "modelo": {
+    "asignaciones": []
+   },
+   "propuesta": {
+    "grupos": [
+     [
+      "T1 26 11",
+      [
+       2,
+       3,
+       4
+      ]
+     ],
+     [
+      "NUEVO Luisa",
+      [
+       6,
+       7
+      ]
+     ]
+    ],
+    "sin_asignar": []
+   },
+   "respuestas": [
+    {
+     "texto": "corregir",
+     "tipo": "como_corregir"
+    },
+    {
+     "texto": "el 4 es de Luisa",
+     "tipo": "corregir",
+     "grupos": [
+      [
+       "T1 26 11",
+       [
+        2,
+        3
+       ]
+      ],
+      [
+       "NUEVO Luisa",
+       [
+        4,
+        6,
+        7
+       ]
+      ]
+     ]
+    },
+    {
+     "texto": "sí",
+     "tipo": "si"
+    }
+   ]
+  },
+  {
+   "id": "F11",
+   "titulo": "Respuesta ambigua al resumen",
+   "mensajes": [
+    {
+     "en": "2026-10-01T13:00:00Z",
+     "texto": "Carolina",
+     "reenviado": false
+    },
+    {
+     "en": "2026-10-01T13:01:00Z",
+     "texto": "del 28 de diciembre",
+     "reenviado": true
+    }
+   ],
+   "modelo": {
+    "asignaciones": []
+   },
+   "propuesta": {
+    "grupos": [
+     [
+      "T1 26 11",
+      [
+       2
+      ]
+     ]
+    ],
+    "sin_asignar": []
+   },
+   "respuestas": [
+    {
+     "texto": "ok pero falta uno",
+     "tipo": "no_entendida"
+    },
+    {
+     "texto": "sí no",
+     "tipo": "no_entendida"
+    },
+    {
+     "texto": "",
+     "tipo": "no_entendida"
+    },
+    {
+     "texto": "👍",
+     "tipo": "no_entendida"
+    },
+    {
+     "texto": "ok",
+     "tipo": "no_entendida"
+    }
+   ]
+  },
+  {
+   "id": "F12",
+   "titulo": "Un solo viaje en modo mixto",
+   "mensajes": [
+    {
+     "en": "2026-10-01T13:00:00Z",
+     "texto": "Carolina",
+     "reenviado": false
+    },
+    {
+     "en": "2026-10-01T13:01:00Z",
+     "texto": "del 28 de diciembre al 3 de enero",
+     "reenviado": true
+    },
+    {
+     "en": "2026-10-01T13:02:00Z",
+     "texto": "somos 4",
+     "reenviado": true
+    },
+    {
+     "en": "2026-10-01T13:03:00Z",
+     "texto": "hotel 4 estrellas",
+     "reenviado": true
+    }
+   ],
+   "modelo": {
+    "asignaciones": []
+   },
+   "propuesta": {
+    "grupos": [
+     [
+      "T1 26 11",
+      [
+       2,
+       3,
+       4
+      ]
+     ]
+    ],
+    "sin_asignar": [],
+    "resumen_empieza": "Entendí 1 viaje:"
+   },
+   "respuestas": [
+    {
+     "texto": "sí",
+     "tipo": "si"
+    }
+   ]
+  },
+  {
+   "id": "F13",
+   "titulo": "Un mensaje con dos viajes dentro",
+   "mensajes": [
+    {
+     "en": "2026-10-01T13:00:00Z",
+     "texto": "Carolina",
+     "reenviado": false
+    },
+    {
+     "en": "2026-10-01T13:01:00Z",
+     "texto": "Lo de Carolina va para el 15 y lo de Luisa para el 20",
+     "reenviado": false
+    },
+    {
+     "en": "2026-10-01T13:02:00Z",
+     "texto": "hotel 4 estrellas",
+     "reenviado": true
+    }
+   ],
+   "modelo": {
+    "asignaciones": [
+     {
+      "n": 2,
+      "viaje": "T1 26 11",
+      "evidencia": "Lo de Carolina va para el 15"
+     }
+    ]
+   },
+   "propuesta": {
+    "grupos": [
+     [
+      "T1 26 11",
+      [
+       3
+      ]
+     ]
+    ],
+    "sin_asignar": [
+     2
+    ],
+    "varios": [
+     2
+    ]
+   },
+   "respuestas": [
+    {
+     "texto": "el 2 es de Carolina",
+     "tipo": "no_entendida",
+     "aviso": "habla de dos viajes"
+    },
+    {
+     "texto": "descartar el 2",
+     "tipo": "corregir",
+     "grupos": [
+      [
+       "T1 26 11",
+       [
+        3
+       ]
+      ]
+     ]
+    }
+   ]
+  },
+  {
+   "id": "F14",
+   "titulo": "Gasto en medio (va al bot y no parte el segmento)",
+   "mensajes": [
+    {
+     "en": "2026-10-01T13:00:00Z",
+     "texto": "Hola, soy Carolina",
+     "reenviado": true
+    },
+    {
+     "en": "2026-10-01T13:01:00Z",
+     "texto": "queremos diciembre",
+     "reenviado": true
+    },
+    {
+     "en": "2026-10-01T13:03:00Z",
+     "texto": "somos 4",
+     "reenviado": true
+    },
+    {
+     "en": "2026-10-01T13:04:00Z",
+     "texto": "hotel 4 estrellas",
+     "reenviado": true
+    }
+   ],
+   "gasto_en_medio": "gasto 30000 taxi",
+   "modelo": {
+    "asignaciones": [
+     {
+      "n": 1,
+      "viaje": "T1 26 11",
+      "evidencia": "Carolina"
+     }
+    ]
+   },
+   "propuesta": {
+    "grupos": [
+     [
+      "T1 26 11",
+      [
+       1,
+       2,
+       3,
+       4
+      ]
+     ]
+    ],
+    "sin_asignar": []
+   }
+  },
+  {
+   "id": "F15",
+   "titulo": "Caja vencida",
+   "mensajes": [
+    {
+     "en": "2026-10-01T13:00:00Z",
+     "texto": "Carolina",
+     "reenviado": false
+    },
+    {
+     "en": "2026-10-01T21:00:00Z",
+     "texto": "del 28 de diciembre",
+     "reenviado": true
+    },
+    {
+     "en": "2026-10-01T21:01:00Z",
+     "texto": "somos 4",
+     "reenviado": true
+    }
+   ],
+   "modelo": {
+    "asignaciones": []
+   },
+   "propuesta": {
+    "grupos": [],
+    "sin_asignar": [
+     2,
+     3
+    ]
+   }
+  }
+ ],
+ "dia": {
+  "viajes": [
+   {
+    "id": "n11",
+    "codigo": "T1 26 11",
+    "cliente": "CAROLINA RUIZ",
+    "destino": "PUNTA CANA"
+   },
+   {
+    "id": "n09",
+    "codigo": "T1 26 9",
+    "cliente": "JORGE PÉREZ",
+    "destino": "MADRID"
+   },
+   {
+    "id": "n20",
+    "codigo": "T1 26 20",
+    "cliente": "PEDRO GÓMEZ",
+    "destino": "CARTAGENA"
+   }
+  ],
+  "mensajes": [
+   {
+    "en": "2026-10-01T13:00:00Z",
+    "texto": "Carolina",
+    "reenviado": false,
+    "verdad": "enc"
+   },
+   {
+    "en": "2026-10-01T13:01:00Z",
+    "texto": "Hola Tati, buenos días",
+    "reenviado": true,
+    "verdad": "T1 26 11"
+   },
+   {
+    "en": "2026-10-01T13:02:00Z",
+    "texto": "ya hablé con mi esposo, del 28 de diciembre al 3 de enero",
+    "reenviado": true,
+    "verdad": "T1 26 11"
+   },
+   {
+    "en": "2026-10-01T13:03:00Z",
+    "texto": "somos mi esposo, yo y los dos niños de 9 y 4",
+    "reenviado": true,
+    "verdad": "T1 26 11"
+   },
+   {
+    "en": "2026-10-01T13:04:00Z",
+    "texto": "hotel 4 estrellas todo incluido",
+    "reenviado": true,
+    "verdad": "T1 26 11"
+   },
+   {
+    "en": "2026-10-01T13:20:00Z",
+    "texto": "T1 26 9",
+    "reenviado": false,
+    "verdad": "enc"
+   },
+   {
+    "en": "2026-10-01T13:21:00Z",
+    "texto": "Jorge aquí",
+    "reenviado": true,
+    "verdad": "T1 26 9"
+   },
+   {
+    "en": "2026-10-01T13:22:00Z",
+    "texto": "confirmo Madrid del 10 al 20 de noviembre",
+    "reenviado": true,
+    "verdad": "T1 26 9"
+   },
+   {
+    "en": "2026-10-01T13:23:00Z",
+    "texto": "vamos 2 adultos",
+    "reenviado": true,
+    "verdad": "T1 26 9"
+   },
+   {
+    "en": "2026-10-01T13:24:00Z",
+    "texto": "salimos de Medellín",
+    "reenviado": true,
+    "verdad": "T1 26 9"
+   },
+   {
+    "en": "2026-10-01T13:40:00Z",
+    "texto": "nuevo Luisa San Andrés",
+    "reenviado": false,
+    "verdad": "enc"
+   },
+   {
+    "en": "2026-10-01T13:41:00Z",
+    "texto": "Hola, quiero cotizar",
+    "reenviado": true,
+    "verdad": "NUEVO Luisa San Andrés"
+   },
+   {
+    "en": "2026-10-01T13:42:00Z",
+    "texto": "somos 2 adultos",
+    "reenviado": true,
+    "verdad": "NUEVO Luisa San Andrés"
+   },
+   {
+    "en": "2026-10-01T13:43:00Z",
+    "texto": "del 8 al 12 de enero",
+    "reenviado": true,
+    "verdad": "NUEVO Luisa San Andrés"
+   },
+   {
+    "en": "2026-10-01T13:44:00Z",
+    "texto": "hotel frente al mar",
+    "reenviado": true,
+    "verdad": "NUEVO Luisa San Andrés"
+   },
+   {
+    "en": "2026-10-01T14:30:00Z",
+    "texto": "Hola Tati, soy Carolina Ruiz otra vez",
+    "reenviado": true,
+    "verdad": "T1 26 11"
+   },
+   {
+    "en": "2026-10-01T14:31:00Z",
+    "texto": "mejor del 29 de diciembre",
+    "reenviado": true,
+    "verdad": "T1 26 11"
+   },
+   {
+    "en": "2026-10-01T14:32:00Z",
+    "texto": "mi suegra también va",
+    "reenviado": true,
+    "verdad": "T1 26 11"
+   },
+   {
+    "en": "2026-10-01T18:00:00Z",
+    "texto": "Buenas, Pedro Gómez, lo de Cartagena",
+    "reenviado": true,
+    "verdad": "T1 26 20"
+   },
+   {
+    "en": "2026-10-01T18:01:00Z",
+    "texto": "somos 6 personas",
+    "reenviado": true,
+    "verdad": "T1 26 20"
+   },
+   {
+    "en": "2026-10-01T18:02:00Z",
+    "texto": "del 2 al 6 de febrero",
+    "reenviado": true,
+    "verdad": "T1 26 20"
+   },
+   {
+    "en": "2026-10-01T18:03:00Z",
+    "texto": "queremos hotel en Bocagrande",
+    "reenviado": true,
+    "verdad": "T1 26 20"
+   },
+   {
+    "en": "2026-10-01T18:04:00Z",
+    "texto": "Jorge de nuevo: el vuelo mejor en la mañana",
+    "reenviado": true,
+    "verdad": "T1 26 9"
+   },
+   {
+    "en": "2026-10-01T18:05:00Z",
+    "texto": "y una habitación doble",
+    "reenviado": true,
+    "verdad": "T1 26 9"
+   },
+   {
+    "en": "2026-10-01T18:06:00Z",
+    "texto": "y traslado desde el aeropuerto",
+    "reenviado": true,
+    "verdad": "T1 26 20"
+   },
+   {
+    "en": "2026-10-01T20:00:00Z",
+    "texto": "Pedro",
+    "reenviado": false,
+    "verdad": "enc"
+   },
+   {
+    "en": "2026-10-01T20:01:00Z",
+    "texto": "dos de los seis son niños",
+    "reenviado": true,
+    "verdad": "T1 26 20"
+   },
+   {
+    "en": "2026-10-01T20:02:00Z",
+    "texto": "de 5 y 7 años",
+    "reenviado": true,
+    "verdad": "T1 26 20"
+   },
+   {
+    "en": "2026-10-01T20:03:00Z",
+    "texto": "presupuesto unos 20 millones",
+    "reenviado": true,
+    "verdad": "T1 26 20"
+   },
+   {
+    "en": "2026-10-01T20:04:00Z",
+    "texto": "plan con desayuno",
+    "reenviado": true,
+    "verdad": "T1 26 20"
+   },
+   {
+    "en": "2026-10-01T20:05:00Z",
+    "texto": "maleta de bodega",
+    "reenviado": true,
+    "verdad": "T1 26 20"
+   },
+   {
+    "en": "2026-10-01T20:30:00Z",
+    "texto": "la de punta cana",
+    "reenviado": false,
+    "verdad": "enc"
+   },
+   {
+    "en": "2026-10-01T20:31:00Z",
+    "texto": "el niño de 4 necesita silla en el carro",
+    "reenviado": true,
+    "verdad": "T1 26 11"
+   },
+   {
+    "en": "2026-10-01T20:32:00Z",
+    "texto": "queremos habitación familiar",
+    "reenviado": true,
+    "verdad": "T1 26 11"
+   },
+   {
+    "en": "2026-10-01T20:33:00Z",
+    "texto": "llevamos maleta de bodega",
+    "reenviado": true,
+    "verdad": "T1 26 11"
+   },
+   {
+    "en": "2026-10-01T20:34:00Z",
+    "texto": "Lo de Carolina va para el 15 y lo de Luisa para el 20",
+    "reenviado": false,
+    "verdad": null
+   },
+   {
+    "en": "2026-10-01T20:35:00Z",
+    "texto": "y el seguro de viaje para todos",
+    "reenviado": true,
+    "verdad": "T1 26 11"
+   },
+   {
+    "en": "2026-10-01T21:00:00Z",
+    "texto": "Carolina",
+    "reenviado": false,
+    "verdad": "enc"
+   },
+   {
+    "en": "2026-10-01T21:01:00Z",
+    "texto": "Luisa me recomendó con ustedes",
+    "reenviado": true,
+    "verdad": "T1 26 11"
+   },
+   {
+    "en": "2026-10-01T21:02:00Z",
+    "texto": "nos gustó mucho la propuesta",
+    "reenviado": true,
+    "verdad": "T1 26 11"
+   },
+   {
+    "en": "2026-10-01T21:03:00Z",
+    "texto": "¿se puede pagar en dos cuotas?",
+    "reenviado": true,
+    "verdad": "T1 26 11"
+   },
+   {
+    "en": "2026-10-01T22:00:00Z",
+    "texto": "T1 26 3",
+    "reenviado": false,
+    "verdad": "enc"
+   },
+   {
+    "en": "2026-10-01T22:01:00Z",
+    "texto": "ya pagamos el anticipo",
+    "reenviado": true,
+    "verdad": null
+   },
+   {
+    "en": "2026-10-01T22:02:00Z",
+    "texto": "mándame la factura",
+    "reenviado": true,
+    "verdad": null
+   },
+   {
+    "en": "2026-10-01T22:30:00Z",
+    "texto": "T1 26 9",
+    "reenviado": false,
+    "verdad": "enc"
+   },
+   {
+    "en": "2026-10-01T22:31:00Z",
+    "texto": "Jorge: al final somos 3 adultos",
+    "reenviado": true,
+    "verdad": "T1 26 9"
+   },
+   {
+    "en": "2026-10-01T22:32:00Z",
+    "texto": "va mi hermano",
+    "reenviado": true,
+    "verdad": "T1 26 9"
+   },
+   {
+    "en": "2026-10-01T22:33:00Z",
+    "texto": "nota de voz: mi hermano sale de Bogotá, nosotros de Medellín",
+    "reenviado": true,
+    "verdad": "T1 26 9"
+   },
+   {
+    "en": "2026-10-01T22:34:00Z",
+    "texto": "queremos hotel 4 estrellas",
+    "reenviado": true,
+    "verdad": "T1 26 9"
+   },
+   {
+    "en": "2026-10-01T22:35:00Z",
+    "texto": "con desayuno",
+    "reenviado": true,
+    "verdad": "T1 26 9"
+   },
+   {
+    "en": "2026-10-01T22:36:00Z",
+    "texto": "maleta de bodega",
+    "reenviado": true,
+    "verdad": "T1 26 9"
+   },
+   {
+    "en": "2026-10-01T22:37:00Z",
+    "texto": "pasaportes al día",
+    "reenviado": true,
+    "verdad": "T1 26 9"
+   },
+   {
+    "en": "2026-10-01T22:38:00Z",
+    "texto": "seguro incluido",
+    "reenviado": true,
+    "verdad": "T1 26 9"
+   },
+   {
+    "en": "2026-10-01T22:39:00Z",
+    "texto": "llegamos el 10 en la noche",
+    "reenviado": true,
+    "verdad": "T1 26 9"
+   },
+   {
+    "en": "2026-10-01T22:40:00Z",
+    "texto": "¿hay tour por Toledo?",
+    "reenviado": true,
+    "verdad": "T1 26 9"
+   },
+   {
+    "en": "2026-10-01T22:41:00Z",
+    "texto": "y uno por Segovia",
+    "reenviado": true,
+    "verdad": "T1 26 9"
+   },
+   {
+    "en": "2026-10-01T22:42:00Z",
+    "texto": "gracias Tati",
+    "reenviado": true,
+    "verdad": "T1 26 9"
+   },
+   {
+    "en": "2026-10-01T22:43:00Z",
+    "texto": "mañana te confirmo la habitación",
+    "reenviado": true,
+    "verdad": "T1 26 9"
+   },
+   {
+    "en": "2026-10-01T22:44:00Z",
+    "texto": "la triple está bien",
+    "reenviado": true,
+    "verdad": "T1 26 9"
+   },
+   {
+    "en": "2026-10-01T22:45:00Z",
+    "texto": "¿y una visita al Prado?",
+    "reenviado": true,
+    "verdad": "T1 26 9"
+   },
+   {
+    "en": "2026-10-01T22:46:00Z",
+    "texto": "perfecto",
+    "reenviado": true,
+    "verdad": "T1 26 9"
+   },
+   {
+    "en": "2026-10-01T22:47:00Z",
+    "texto": "listo, quedamos así",
+    "reenviado": true,
+    "verdad": "T1 26 9"
+   }
+  ],
+  "codigos_cerrados": [
+   "T1263"
+  ],
+  "modelos": {
+   "bueno": {
+    "asignaciones": [
+     {
+      "n": 7,
+      "viaje": "T1 26 9",
+      "evidencia": "Jorge"
+     },
+     {
+      "n": 16,
+      "viaje": "T1 26 11",
+      "evidencia": "Carolina"
+     },
+     {
+      "n": 19,
+      "viaje": "T1 26 20",
+      "evidencia": "Pedro"
+     },
+     {
+      "n": 23,
+      "viaje": "T1 26 9",
+      "evidencia": "Jorge"
+     },
+     {
+      "n": 46,
+      "viaje": "T1 26 9",
+      "evidencia": "Jorge"
+     }
+    ]
+   },
+   "cercania": {
+    "asignaciones": [
+     {
+      "n": 2,
+      "viaje": "T1 26 11",
+      "evidencia": "Hola Tati, b"
+     },
+     {
+      "n": 3,
+      "viaje": "T1 26 11",
+      "evidencia": "ya hablé con"
+     },
+     {
+      "n": 4,
+      "viaje": "T1 26 11",
+      "evidencia": "somos mi esp"
+     },
+     {
+      "n": 5,
+      "viaje": "T1 26 11",
+      "evidencia": "hotel 4 estr"
+     },
+     {
+      "n": 7,
+      "viaje": "T1 26 11",
+      "evidencia": "Jorge aquí"
+     },
+     {
+      "n": 8,
+      "viaje": "T1 26 9",
+      "evidencia": "confirmo Mad"
+     },
+     {
+      "n": 9,
+      "viaje": "T1 26 9",
+      "evidencia": "vamos 2 adul"
+     },
+     {
+      "n": 10,
+      "viaje": "T1 26 9",
+      "evidencia": "salimos de M"
+     },
+     {
+      "n": 12,
+      "viaje": "T1 26 9",
+      "evidencia": "Hola, quiero"
+     },
+     {
+      "n": 13,
+      "viaje": "NUEVO Luisa San Andrés",
+      "evidencia": "somos 2 adul"
+     },
+     {
+      "n": 14,
+      "viaje": "NUEVO Luisa San Andrés",
+      "evidencia": "del 8 al 12 "
+     },
+     {
+      "n": 15,
+      "viaje": "NUEVO Luisa San Andrés",
+      "evidencia": "hotel frente"
+     },
+     {
+      "n": 16,
+      "viaje": "NUEVO Luisa San Andrés",
+      "evidencia": "Hola Tati, s"
+     },
+     {
+      "n": 17,
+      "viaje": "T1 26 11",
+      "evidencia": "mejor del 29"
+     },
+     {
+      "n": 18,
+      "viaje": "T1 26 11",
+      "evidencia": "mi suegra ta"
+     },
+     {
+      "n": 19,
+      "viaje": "T1 26 11",
+      "evidencia": "Buenas, Pedr"
+     },
+     {
+      "n": 20,
+      "viaje": "T1 26 20",
+      "evidencia": "somos 6 pers"
+     },
+     {
+      "n": 21,
+      "viaje": "T1 26 20",
+      "evidencia": "del 2 al 6 d"
+     },
+     {
+      "n": 22,
+      "viaje": "T1 26 20",
+      "evidencia": "queremos hot"
+     },
+     {
+      "n": 23,
+      "viaje": "T1 26 20",
+      "evidencia": "Jorge de nue"
+     },
+     {
+      "n": 24,
+      "viaje": "T1 26 9",
+      "evidencia": "y una habita"
+     },
+     {
+      "n": 25,
+      "viaje": "T1 26 9",
+      "evidencia": "y traslado d"
+     },
+     {
+      "n": 27,
+      "viaje": "T1 26 20",
+      "evidencia": "dos de los s"
+     },
+     {
+      "n": 28,
+      "viaje": "T1 26 20",
+      "evidencia": "de 5 y 7 año"
+     },
+     {
+      "n": 29,
+      "viaje": "T1 26 20",
+      "evidencia": "presupuesto "
+     },
+     {
+      "n": 30,
+      "viaje": "T1 26 20",
+      "evidencia": "plan con des"
+     },
+     {
+      "n": 31,
+      "viaje": "T1 26 20",
+      "evidencia": "maleta de bo"
+     },
+     {
+      "n": 33,
+      "viaje": "T1 26 20",
+      "evidencia": "el niño de 4"
+     },
+     {
+      "n": 34,
+      "viaje": "T1 26 11",
+      "evidencia": "queremos hab"
+     },
+     {
+      "n": 35,
+      "viaje": "T1 26 11",
+      "evidencia": "llevamos mal"
+     },
+     {
+      "n": 36,
+      "viaje": "T1 26 11",
+      "evidencia": "Lo de Caroli"
+     },
+     {
+      "n": 37,
+      "viaje": "T1 26 11",
+      "evidencia": "y el seguro "
+     },
+     {
+      "n": 39,
+      "viaje": "T1 26 11",
+      "evidencia": "Luisa me rec"
+     },
+     {
+      "n": 40,
+      "viaje": "T1 26 11",
+      "evidencia": "nos gustó mu"
+     },
+     {
+      "n": 41,
+      "viaje": "T1 26 11",
+      "evidencia": "¿se puede pa"
+     },
+     {
+      "n": 43,
+      "viaje": "T1 26 11",
+      "evidencia": "ya pagamos e"
+     },
+     {
+      "n": 44,
+      "viaje": "T1 26 11",
+      "evidencia": "mándame la f"
+     },
+     {
+      "n": 46,
+      "viaje": "T1 26 11",
+      "evidencia": "Jorge: al fi"
+     },
+     {
+      "n": 47,
+      "viaje": "T1 26 9",
+      "evidencia": "va mi herman"
+     },
+     {
+      "n": 48,
+      "viaje": "T1 26 9",
+      "evidencia": "nota de voz:"
+     },
+     {
+      "n": 49,
+      "viaje": "T1 26 9",
+      "evidencia": "queremos hot"
+     },
+     {
+      "n": 50,
+      "viaje": "T1 26 9",
+      "evidencia": "con desayuno"
+     },
+     {
+      "n": 51,
+      "viaje": "T1 26 9",
+      "evidencia": "maleta de bo"
+     },
+     {
+      "n": 52,
+      "viaje": "T1 26 9",
+      "evidencia": "pasaportes a"
+     },
+     {
+      "n": 53,
+      "viaje": "T1 26 9",
+      "evidencia": "seguro inclu"
+     },
+     {
+      "n": 54,
+      "viaje": "T1 26 9",
+      "evidencia": "llegamos el "
+     },
+     {
+      "n": 55,
+      "viaje": "T1 26 9",
+      "evidencia": "¿hay tour po"
+     },
+     {
+      "n": 56,
+      "viaje": "T1 26 9",
+      "evidencia": "y uno por Se"
+     },
+     {
+      "n": 57,
+      "viaje": "T1 26 9",
+      "evidencia": "gracias Tati"
+     },
+     {
+      "n": 58,
+      "viaje": "T1 26 9",
+      "evidencia": "mañana te co"
+     },
+     {
+      "n": 59,
+      "viaje": "T1 26 9",
+      "evidencia": "la triple es"
+     },
+     {
+      "n": 60,
+      "viaje": "T1 26 9",
+      "evidencia": "¿y una visit"
+     },
+     {
+      "n": 61,
+      "viaje": "T1 26 9",
+      "evidencia": "perfecto"
+     },
+     {
+      "n": 62,
+      "viaje": "T1 26 9",
+      "evidencia": "listo, queda"
+     }
+    ]
+   },
+   "adversario": {
+    "asignaciones": [
+     {
+      "n": 2,
+      "viaje": "T1 26 9",
+      "evidencia": "Hola"
+     },
+     {
+      "n": 3,
+      "viaje": "T1 26 9",
+      "evidencia": "ya"
+     },
+     {
+      "n": 4,
+      "viaje": "T1 26 9",
+      "evidencia": "somos"
+     },
+     {
+      "n": 5,
+      "viaje": "T1 26 9",
+      "evidencia": "hotel"
+     },
+     {
+      "n": 7,
+      "viaje": "T1 26 20",
+      "evidencia": "Jorge"
+     },
+     {
+      "n": 8,
+      "viaje": "T1 26 20",
+      "evidencia": "confirmo"
+     },
+     {
+      "n": 9,
+      "viaje": "T1 26 20",
+      "evidencia": "vamos"
+     },
+     {
+      "n": 10,
+      "viaje": "T1 26 20",
+      "evidencia": "salimos"
+     },
+     {
+      "n": 12,
+      "viaje": "T1 26 11",
+      "evidencia": "Hola,"
+     },
+     {
+      "n": 13,
+      "viaje": "T1 26 11",
+      "evidencia": "somos"
+     },
+     {
+      "n": 14,
+      "viaje": "T1 26 11",
+      "evidencia": "del"
+     },
+     {
+      "n": 15,
+      "viaje": "T1 26 11",
+      "evidencia": "hotel"
+     },
+     {
+      "n": 16,
+      "viaje": "T1 26 9",
+      "evidencia": "Hola"
+     },
+     {
+      "n": 17,
+      "viaje": "T1 26 9",
+      "evidencia": "mejor"
+     },
+     {
+      "n": 18,
+      "viaje": "T1 26 9",
+      "evidencia": "mi"
+     },
+     {
+      "n": 19,
+      "viaje": "T1 26 11",
+      "evidencia": "Buenas,"
+     },
+     {
+      "n": 20,
+      "viaje": "T1 26 11",
+      "evidencia": "somos"
+     },
+     {
+      "n": 21,
+      "viaje": "T1 26 11",
+      "evidencia": "del"
+     },
+     {
+      "n": 22,
+      "viaje": "T1 26 11",
+      "evidencia": "queremos"
+     },
+     {
+      "n": 23,
+      "viaje": "T1 26 20",
+      "evidencia": "Jorge"
+     },
+     {
+      "n": 24,
+      "viaje": "T1 26 20",
+      "evidencia": "y"
+     },
+     {
+      "n": 25,
+      "viaje": "T1 26 11",
+      "evidencia": "y"
+     },
+     {
+      "n": 27,
+      "viaje": "T1 26 11",
+      "evidencia": "dos"
+     },
+     {
+      "n": 28,
+      "viaje": "T1 26 11",
+      "evidencia": "de"
+     },
+     {
+      "n": 29,
+      "viaje": "T1 26 11",
+      "evidencia": "presupuesto"
+     },
+     {
+      "n": 30,
+      "viaje": "T1 26 11",
+      "evidencia": "plan"
+     },
+     {
+      "n": 31,
+      "viaje": "T1 26 11",
+      "evidencia": "maleta"
+     },
+     {
+      "n": 33,
+      "viaje": "T1 26 9",
+      "evidencia": "el"
+     },
+     {
+      "n": 34,
+      "viaje": "T1 26 9",
+      "evidencia": "queremos"
+     },
+     {
+      "n": 35,
+      "viaje": "T1 26 9",
+      "evidencia": "llevamos"
+     },
+     {
+      "n": 36,
+      "viaje": "T1 26 11",
+      "evidencia": "Lo"
+     },
+     {
+      "n": 37,
+      "viaje": "T1 26 9",
+      "evidencia": "y"
+     },
+     {
+      "n": 39,
+      "viaje": "T1 26 9",
+      "evidencia": "Luisa"
+     },
+     {
+      "n": 40,
+      "viaje": "T1 26 9",
+      "evidencia": "nos"
+     },
+     {
+      "n": 41,
+      "viaje": "T1 26 9",
+      "evidencia": "¿se"
+     },
+     {
+      "n": 43,
+      "viaje": "T1 26 11",
+      "evidencia": "ya"
+     },
+     {
+      "n": 44,
+      "viaje": "T1 26 11",
+      "evidencia": "mándame"
+     },
+     {
+      "n": 46,
+      "viaje": "T1 26 20",
+      "evidencia": "Jorge:"
+     },
+     {
+      "n": 47,
+      "viaje": "T1 26 20",
+      "evidencia": "va"
+     },
+     {
+      "n": 48,
+      "viaje": "T1 26 20",
+      "evidencia": "nota"
+     },
+     {
+      "n": 49,
+      "viaje": "T1 26 20",
+      "evidencia": "queremos"
+     },
+     {
+      "n": 50,
+      "viaje": "T1 26 20",
+      "evidencia": "con"
+     },
+     {
+      "n": 51,
+      "viaje": "T1 26 20",
+      "evidencia": "maleta"
+     },
+     {
+      "n": 52,
+      "viaje": "T1 26 20",
+      "evidencia": "pasaportes"
+     },
+     {
+      "n": 53,
+      "viaje": "T1 26 20",
+      "evidencia": "seguro"
+     },
+     {
+      "n": 54,
+      "viaje": "T1 26 20",
+      "evidencia": "llegamos"
+     },
+     {
+      "n": 55,
+      "viaje": "T1 26 20",
+      "evidencia": "¿hay"
+     },
+     {
+      "n": 56,
+      "viaje": "T1 26 20",
+      "evidencia": "y"
+     },
+     {
+      "n": 57,
+      "viaje": "T1 26 20",
+      "evidencia": "gracias"
+     },
+     {
+      "n": 58,
+      "viaje": "T1 26 20",
+      "evidencia": "mañana"
+     },
+     {
+      "n": 59,
+      "viaje": "T1 26 20",
+      "evidencia": "la"
+     },
+     {
+      "n": 60,
+      "viaje": "T1 26 20",
+      "evidencia": "¿y"
+     },
+     {
+      "n": 61,
+      "viaje": "T1 26 20",
+      "evidencia": "perfecto"
+     },
+     {
+      "n": 62,
+      "viaje": "T1 26 20",
+      "evidencia": "listo,"
+     }
+    ]
+   }
+  }
+ }
+}

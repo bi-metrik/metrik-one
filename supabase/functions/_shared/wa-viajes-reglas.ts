@@ -16,8 +16,10 @@
 //      cercanía en el tiempo sola no es evidencia (F3).
 //   3. Nada se carga hasta el «sí». Lo ambiguo («ok pero…», un sticker) no es «sí».
 //   4. Un mensaje que nombra a dos viajes no se carga entero en ninguno (F13).
-//   5. Una evidencia de OTRO viaje dentro de la caja de un encabezado rompe la caja: lo que sigue
-//      sin evidencia propia queda sin asignar (F4: el encabezado olvidado a mitad).
+//   5. Una evidencia de OTRO viaje dentro de la caja de un encabezado no se pasa sola a ese viaje
+//      (F9: «Luisa me recomendó» sigue siendo del chat de Carolina): ese mensaje queda sin asignar
+//      con el motivo, y la caja se rompe: lo que sigue sin evidencia propia también queda sin
+//      asignar (F4: el encabezado olvidado a mitad). Lo decide el comercial.
 // ============================================================
 
 import { normalizarNombre, normalizarTexto } from './wa-entendimiento-reglas.ts';
@@ -234,13 +236,30 @@ export function textoAsignacion(mensajes: ReadonlyArray<MensajeViaje>, encabezad
     .join('\n');
 }
 
-/** Los viajes (abiertos o NUEVO de un encabezado) que un mensaje nombra por el nombre del cliente. */
-export function viajesNombrados(cuerpo: string, destinos: ReadonlyArray<DestinoPlan>): DestinoPlan[] {
-  const palabras = new Set(normalizarNombre(cuerpo).split(' '));
+/** Palabras de un nombre que no identifican a nadie. */
+const NO_IDENTIFICAN = new Set(['san', 'santa', 'del', 'las', 'los', 'familia']);
+
+/**
+ * Los viajes que un mensaje nombra SIN el modelo: por una palabra del nombre del cliente (abiertos
+ * o NUEVO de un encabezado), o por el destino si ningún otro viaje abierto va al mismo lugar. Es la
+ * evidencia determinista: no depende de que el modelo la cite.
+ */
+export function viajesNombrados(cuerpo: string, destinos: ReadonlyArray<DestinoPlan>, viajes: ReadonlyArray<ViajeAbierto> = []): DestinoPlan[] {
+  const lista = palabrasDe(cuerpo);
+  const palabras = new Set(lista);
+  const texto = ` ${lista.join(' ')} `;
   const out = new Map<string, DestinoPlan>();
   for (const d of destinos) {
-    const delNombre = palabrasDe(d.cliente).filter(w => w.length >= 3);
-    if (delNombre.length > 0 && delNombre.some(w => palabras.has(w))) out.set(claveDestino(d), d);
+    const delNombre = palabrasDe(d.cliente).filter(w => w.length >= 3 && !NO_IDENTIFICAN.has(w));
+    if (delNombre.length > 0 && delNombre.some(w => palabras.has(w))) {
+      out.set(claveDestino(d), d);
+      continue;
+    }
+    if (d.tipo !== 'existente') continue;
+    const v = viajes.find(x => x.id === d.negocio_id);
+    const dest = normalizarNombre(v?.destino ?? null);
+    if (!dest || !texto.includes(` ${dest} `)) continue;
+    if (viajes.filter(x => normalizarNombre(x.destino) === dest).length === 1) out.set(claveDestino(d), d);
   }
   return [...out.values()];
 }
@@ -344,7 +363,7 @@ function avisoEncabezado(e: NonNullable<Segmento['encabezado']>, cerrados: Reado
  * Arma el plan. `asignaciones` es lo que el modelo propuso ya validado (vacío en modo `encabezado`).
  *   · caja de un encabezado resuelto → sus mensajes van a ese viaje, salvo:
  *       - un mensaje que nombra a dos viajes → sin asignar (varios);
- *       - un mensaje con evidencia de OTRO viaje → a ese viaje, y la caja se rompe: lo que sigue
+ *       - un mensaje con evidencia de OTRO viaje → sin asignar, y la caja se rompe: lo que sigue
  *         sin evidencia propia queda sin asignar hasta que una evidencia vuelva a nombrar la caja;
  *   · caja de un encabezado ambiguo o desconocido → solo lo que trae evidencia propia;
  *   · bloque por silencio → si toda la evidencia del bloque apunta a UN viaje, el bloque va entero
@@ -374,26 +393,43 @@ export function armarPlan(p: {
       const aviso = avisoEncabezado(seg.encabezado, p.codigosCerrados ?? new Set());
       if (aviso) plan.avisos.push(aviso);
     }
-    const evidenciasDelBloque = new Map<string, DestinoPlan>();
+    // La evidencia de cada mensaje: la del modelo (validada) y la que se ve sin modelo (el nombre
+    // o el destino único). Si dicen viajes distintos, no hay evidencia: se pregunta.
+    const evidencia = new Map<number, AsignacionModelo | 'choque' | 'varios'>();
     for (const n of seg.mensajes) {
-      const a = p.asignaciones.get(n);
-      if (a) evidenciasDelBloque.set(claveDestino(a.destino), a.destino);
+      const m = porN.get(n);
+      if (!m) continue;
+      const nombrados = viajesNombrados(m.cuerpo, destinosConocidos, p.viajes);
+      const delModelo = p.asignaciones.get(n);
+      if (nombrados.length >= 2) evidencia.set(n, 'varios');
+      else if (delModelo && nombrados.length === 1 && claveDestino(nombrados[0]) !== claveDestino(delModelo.destino)) evidencia.set(n, 'choque');
+      else if (delModelo) evidencia.set(n, delModelo);
+      else if (nombrados.length === 1) evidencia.set(n, { destino: nombrados[0], evidencia: nombrados[0].cliente ?? '' });
     }
+    const evidenciasDelBloque = new Map<string, DestinoPlan>();
+    for (const e of evidencia.values()) if (typeof e === 'object') evidenciasDelBloque.set(claveDestino(e.destino), e.destino);
     let rota = false;
     for (const n of seg.mensajes) {
       const m = porN.get(n);
       if (!m) continue;
-      const nombrados = viajesNombrados(m.cuerpo, destinosConocidos);
-      if (nombrados.length >= 2) {
+      const ev = evidencia.get(n);
+      if (ev === 'varios') {
+        const nombrados = viajesNombrados(m.cuerpo, destinosConocidos, p.viajes);
         poner({ n, destino: null, por: null, evidencia: null, varios: true, motivo: `habla de dos viajes (${nombrados.map(d => d.cliente).join(' y ')})` });
         continue;
       }
-      const a = p.asignaciones.get(n);
+      if (ev === 'choque') {
+        poner({ n, destino: null, por: null, evidencia: null, motivo: 'el texto y la propuesta no coinciden en el viaje' });
+        if (seg.origen === 'encabezado') rota = true;
+        continue;
+      }
+      const a = ev;
       if (seg.origen === 'encabezado' && caja) {
         if (a && claveDestino(a.destino) !== claveDestino(caja)) {
+          // No se pasa solo al otro viaje («Luisa me recomendó» en el chat de Carolina, F9): queda
+          // sin asignar, se dice por qué, y la caja se rompe (F4: el encabezado olvidado a mitad).
           rota = true;
-          poner({ n, destino: a.destino, por: 'modelo', evidencia: a.evidencia });
-          plan.avisos.push(`El ${n} nombra a ${a.destino.cliente ?? 'otro viaje'} («${a.evidencia}») y estaba después del encabezado «${seg.encabezado!.texto}»: lo puse con ${a.destino.cliente ?? 'ese viaje'}.`);
+          poner({ n, destino: null, por: null, evidencia: a.evidencia, motivo: `nombra a ${a.destino.cliente ?? 'otro viaje'} («${a.evidencia}») y está bajo el encabezado «${seg.encabezado!.texto}»` });
           continue;
         }
         if (a) rota = false;
