@@ -18,6 +18,7 @@ import { todayBogotaISO } from './bogota.ts';
 import { aplanarBloques } from './niveles-solicitud.ts';
 import {
   aplicarSumas,
+  conDeducciones,
   decidirContacto,
   esquemaDeSalida,
   fusionarSugeridos,
@@ -41,10 +42,11 @@ import {
   mensajeCargaExistente,
   origenDeFrase,
   primerNombre,
+  sugeridosConDeducciones,
   textoPreguntaNegocio,
   trazaCarga,
 } from './wa-carga-reglas.ts';
-import type { Conflicto, NegocioAbierto, OpcionNegocio } from './wa-carga-reglas.ts';
+import type { Actualizado, Conflicto, NegocioAbierto, OpcionNegocio } from './wa-carga-reglas.ts';
 import type { SupabaseClient } from './types.ts';
 
 /** El mismo proveedor y el mismo modelo base que ONE ya usa para leer mensajes (`wa-parse.ts`). */
@@ -389,7 +391,10 @@ async function entender(supabase: SupabaseClient, ent: Fila): Promise<void> {
     return;
   }
 
-  const salida = validarSalida(lectura.json, cfg.fields, texto);
+  const validada = validarSalida(lectura.json, cfg.fields, texto);
+  // Lo que se deduce sin el modelo (infantes = 0 con las edades de todos los niños) entra como
+  // un sugerido más, con la deducción en vez de la frase.
+  const salida: SalidaEntendida = { ...validada, sugeridos: conDeducciones(cfg.fields, validada.sugeridos) };
   const valores = aplicarSumas(cfg.fields, Object.fromEntries(Object.entries(salida.sugeridos).map(([k, v]) => [k, v.valor])));
   await actualizar(supabase, ent.id as string, {
     linea_id: cfg.lineaId, historia: salida.historia, sugeridos: salida.sugeridos, descartados: salida.descartados,
@@ -608,17 +613,24 @@ async function cargarEnNegocioExistente(
     });
     return;
   }
-  const salida = validarSalida(lectura.json, campos, texto);
+  const meta = { entrega_id: ent.entrega_id as string, en: new Date().toISOString(), origenDe: (f: string) => origenDeFrase(f, mensajes) };
+  const validada = validarSalida(lectura.json, campos, texto);
+  // La deducción se hace sobre lo que el negocio QUEDARÍA teniendo: los niños pueden haber
+  // llegado en otra entrega y las edades en esta.
+  const salida: SalidaEntendida = {
+    ...validada,
+    sugeridos: sugeridosConDeducciones(bloques.map(b => ({ fields: b.fields, data: b.data })), validada.sugeridos, meta),
+  };
   await actualizar(supabase, ent.id as string, {
     linea_id: neg.linea_id ?? null, historia: salida.historia, sugeridos: salida.sugeridos, descartados: salida.descartados,
     cliente: salida.cliente, modelo: GEMINI_MODEL, finish_reason: lectura.finishReason, error: null,
   });
 
   // Cada bloque con lo suyo. Un slug repetido en dos bloques se queda con el primero.
-  const meta = { entrega_id: ent.entrega_id as string, en: new Date().toISOString(), origenDe: (f: string) => origenDeFrase(f, mensajes) };
   const vistos = new Set<string>();
   const escritos: Array<{ slug: string; valor: unknown }> = [];
   const conflictos: Conflicto[] = [];
+  const actualizados: Actualizado[] = [];
   const despues: Array<{ fields: unknown; data: unknown }> = [];
   for (const b of bloques) {
     const vistosAntes = new Set(vistos);
@@ -626,11 +638,13 @@ async function cargarEnNegocioExistente(
     let r = cargarEnExistente(b.data, b.fields, salida.sugeridos, meta, new Set(vistosAntes));
     const quedo = await escribirBloque(supabase, b, d => {
       r = cargarEnExistente(d, b.fields, salida.sugeridos, meta, new Set(vistosAntes));
-      return r.escritos.length > 0 || r.conflictos.length > 0 ? r.data : null;
+      return r.escritos.length > 0 || r.conflictos.length > 0 || r.actualizados.length > 0 ? r.data : null;
     });
     if (quedo) {
       escritos.push(...r.escritos.map(s => ({ slug: s, valor: r.data[s] })));
       conflictos.push(...r.conflictos);
+      // El valor que quedó escrito (en mayúscula si es texto del bloque de viaje).
+      actualizados.push(...r.actualizados.map(a => ({ ...a, valor: r.data[a.slug] as string | number })));
     }
     despues.push({ fields: b.fields, data: quedo ?? b.data });
   }
@@ -650,21 +664,22 @@ async function cargarEnNegocioExistente(
     tipo: 'cambio_sistema',
     autor_id: (ent.remitente_staff_id as string | null) ?? null,
     contenido: trazaCarga({
-      quien, fechaISO: todayBogotaISO(), escritos: escritos.map(e => e.slug), conflictos, fields: campos, historia: salida.historia,
+      quien, fechaISO: todayBogotaISO(), escritos: escritos.map(e => e.slug), conflictos, actualizados, fields: campos, historia: salida.historia,
     }),
   });
   if (eA) console.error(`[wa-entendimiento] negocio ${negocioId} sin traza en la actividad:`, eA.message);
 
   const wsSlug = (relUno((neg as Fila).workspaces)?.slug as string | undefined) ?? '';
   const msg = mensajeCargaExistente({
-    codigo: (neg.codigo as string | null) ?? null, fields: campos, escritos, conflictos,
+    codigo: (neg.codigo as string | null) ?? null, fields: campos, escritos, conflictos, actualizados,
     faltanMinimo: h.minimo.faltan, enlace: enlaceNegocio(wsSlug, negocioId), maxPreguntas: MAX_PREGUNTAS,
   });
   const ok = await enviar(ent.remitente_phone as string, msg, workspaceId);
   await actualizar(supabase, ent.id as string, {
     estado: 'negocio_actualizado', negocio_id: negocioId, destino: 'existente', negocio_destino_id: negocioId,
     contacto_id: (neg.contacto_id as string | null) ?? null, huecos: h,
-    cargados: escritos.map(e => e.slug), conflictos,
+    // `cargados` lleva también lo actualizado: el detalle (anterior → nuevo) vive en la marca.
+    cargados: [...escritos.map(e => e.slug), ...actualizados.map(a => a.slug)], conflictos,
     respuesta_enviada_at: ok ? new Date().toISOString() : null, error: ok ? null : 'envio fallido',
   });
 }

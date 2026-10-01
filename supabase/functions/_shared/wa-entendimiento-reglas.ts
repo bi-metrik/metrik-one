@@ -16,6 +16,15 @@
 //      lo sostenga se descarta: el modelo no inventa.
 //   3. Nunca se pisa un valor que escribió una persona, y nunca se une a un contacto por
 //      parecido de nombre: ante 0 o varios candidatos, se pregunta.
+//
+// Guardianes deterministas (2026-10-01, simulación del chat de Punta Cana). El prompt pide lo
+// mismo, pero `validarSalida` no le cree al modelo:
+//   · Un mes o una ventana no es una fecha: un valor de fecha cuya frase no nombra ese día se
+//     descarta («diciembre» no da 1-dic ni 31-dic).
+//   · Una opción marcada `no_definido` en la config («Aún no tiene presupuesto definido», «Sin
+//     preferencia») solo vale si la frase la DECLARA: preguntar el precio no es declararlo.
+//   · `deducirCeros`: con las edades de todos los niños y ninguno menor de 2 años, infantes
+//     queda en 0 como sugerido, con la deducción anotada en la marca.
 // ============================================================
 
 import { calcularNiveles, parsearNumeroColombiano, type CampoConNivel, type Faltante } from './niveles-solicitud.ts';
@@ -25,9 +34,20 @@ export const POR_DEFINIR = 'por_definir';
 /** Tipos de campo que el modelo puede llenar. El resto no captura un dato del cliente. */
 const TIPOS_ENTENDIBLES = new Set(['texto', 'numero', 'fecha', 'select', 'radio']);
 
+/**
+ * Una opción de un `select`/`radio`. `no_definido: true` la marca como «el cliente todavía no lo
+ * define» («Aún no tiene presupuesto definido», «Sin preferencia»): solo se sugiere si el cliente
+ * lo DICE. Es dato de la config, no una lista de valores en el código.
+ */
+export interface OpcionCampo {
+  value: string;
+  label?: string;
+  no_definido?: boolean;
+}
+
 export interface CampoEntendible extends CampoConNivel {
   ayuda?: string;
-  opciones?: Array<{ value: string; label?: string }>;
+  opciones?: OpcionCampo[];
   suma_de?: string[];
 }
 
@@ -81,9 +101,11 @@ export function esquemaDeSalida(fields: ReadonlyArray<CampoEntendible>): Record<
 
 function formatoDe(f: CampoEntendible): string {
   if (f.tipo === 'numero') return 'un número entero escrito con dígitos';
-  if (f.tipo === 'fecha') return 'una fecha AAAA-MM-DD';
+  if (f.tipo === 'fecha') return 'una fecha AAAA-MM-DD, solo si el mensaje nombra el día';
   const op = f.opciones ?? [];
-  if (op.length > 0) return `una de: ${op.map(o => `${o.value} (${o.label ?? o.value})`).join(', ')}`;
+  if (op.length > 0) {
+    return `una de: ${op.map(o => `${o.value} (${o.label ?? o.value}${o.no_definido ? '; solo si el cliente lo dice' : ''})`).join(', ')}`;
+  }
   return 'texto corto';
 }
 
@@ -128,8 +150,16 @@ export function instruccionesEntendimiento(
     '3. valores: para CADA campo de la lista, { valor, frase }.',
     `   - Si el mensaje no lo dice, valor = "${POR_DEFINIR}" y frase vacía. Nunca pongas "no" ni "0" por algo que no se dijo.`,
     '   - frase = las palabras EXACTAS del mensaje que sostienen el valor, copiadas tal cual.',
+    '   - Si el cliente se corrige dentro de los mensajes («somos 2… ah no, 3»), devuelve lo ÚLTIMO que dijo, con esa frase.',
+    '   - Una fecha solo se llena si el mensaje nombra un día concreto («el 27 de diciembre», «del 15 al 20 de noviembre»).',
+    `     Un mes («diciembre»), una semana («la segunda semana de enero»), «en vacaciones» o «puente festivo» son "${POR_DEFINIR}":`,
+    '     nunca pongas el primer o el último día del mes.',
     '   - Un rango de fechas («del 15 al 20 de noviembre») da la salida y el regreso.',
+    '   - Una opción marcada «solo si el cliente lo dice» vale únicamente si el cliente lo declara («no tenemos presupuesto»,',
+    `     «el que sea»). Preguntar el precio («¿cuánto sale?») no es declarar presupuesto: es "${POR_DEFINIR}".`,
     '   - «Dos personas» sin más detalle son dos adultos; los niños solo cuentan si el mensaje los nombra.',
+    '   - Un 0 en niños o bebés solo si el mensaje cierra quiénes viajan: «solo adultos» o «somos dos» dan 0 niños y 0 bebés;',
+    '     «somos mi esposo, yo y los dos niños» da 0 bebés. «Somos 4» sin más no cierra nada.',
     '',
     'Campos:',
     ...lineas,
@@ -153,6 +183,8 @@ export function normalizarTexto(t: string): string {
 export interface Sugerido {
   valor: string | number;
   frase: string;
+  /** Cuando el valor no sale de una frase sino de una deducción pura (`deducirCeros`). */
+  deduccion?: string;
 }
 
 export interface SalidaEntendida {
@@ -166,6 +198,65 @@ function fechaValida(v: string): boolean {
   if (!/^\d{4}-\d{2}-\d{2}$/.test(v)) return false;
   const d = new Date(`${v}T12:00:00Z`);
   return !Number.isNaN(d.getTime()) && d.toISOString().slice(0, 10) === v;
+}
+
+// ── Guardián 1: un mes o una ventana no es una fecha ─────────────────────────
+
+/** Los días del mes escritos con letras, como los deja una transcripción de audio. */
+const DIAS_EN_LETRAS: Record<string, number> = {
+  primero: 1, uno: 1, dos: 2, tres: 3, cuatro: 4, cinco: 5, seis: 6, siete: 7, ocho: 8, nueve: 9, diez: 10,
+  once: 11, doce: 12, trece: 13, catorce: 14, quince: 15, dieciseis: 16, diecisiete: 17, dieciocho: 18,
+  diecinueve: 19, veinte: 20, veintiuno: 21, veintiun: 21, veintidos: 22, veintitres: 23, veinticuatro: 24,
+  veinticinco: 25, veintiseis: 26, veintisiete: 27, veintiocho: 28, veintinueve: 29, treinta: 30,
+};
+
+/** Los números de día (1 a 31) que la frase nombra, con dígitos o con letras. */
+export function diasNombrados(frase: string): number[] {
+  const t = normalizarTexto(frase);
+  const out = new Set<number>();
+  // Uno o dos dígitos sueltos: «2026» no es el día 20; «15/11» sí da 15.
+  for (const m of t.matchAll(/(?<!\d)(\d{1,2})(?!\d)/g)) {
+    const n = Number(m[1]);
+    if (n >= 1 && n <= 31) out.add(n);
+  }
+  const palabras = t.replace(/[^a-z ]/g, ' ').split(/\s+/);
+  for (let i = 0; i < palabras.length; i++) {
+    const w = palabras[i];
+    if (w === 'treinta' && palabras[i + 1] === 'y' && (palabras[i + 2] === 'uno' || palabras[i + 2] === 'un')) out.add(31);
+    if (w in DIAS_EN_LETRAS) out.add(DIAS_EN_LETRAS[w]);
+  }
+  return [...out];
+}
+
+/**
+ * ¿La frase nombra el día de esta fecha? «del 15 al 20 de noviembre» nombra el 15 y el 20
+ * aunque el mes aparezca una sola vez; «diciembre» no nombra ningún día y «la segunda semana
+ * de enero» tampoco. Se exige EL día del valor, no cualquier número: «puente del 12 de
+ * octubre» no sostiene un 10-oct.
+ */
+export function fraseNombraElDia(frase: string, fechaISO: string): boolean {
+  return diasNombrados(frase).includes(Number(fechaISO.slice(8, 10)));
+}
+
+// ── Guardián 2: una opción «no definido» solo si el cliente lo dice ───────────
+
+/** Negación o indiferencia: lo que hace falta para DECLARAR que algo no está definido. */
+const MARCAS_DE_DECLARACION: RegExp[] = [
+  / no /, / sin /, / ni idea /, / cualquier\w* /, / da igual /, / da lo mismo /, / indiferente /,
+  / (el|la|lo|los|las) que (sea|sean|haya|halla) /,
+  / (el|la|lo|los|las) que (tu|usted|ustedes )?(nos |me )?recomiend\w* /,
+];
+
+/**
+ * ¿La frase DECLARA que no hay definición o preferencia? Una pregunta nunca la declara
+ * («¿cuánto sale?»); una declaración lleva una negación o una indiferencia («no tenemos
+ * presupuesto», «el que sea», «lo que nos recomiendes»). Ante la duda, NO: el campo queda
+ * vacío y el bot lo pregunta, que sale más barato que dar por definido lo que no está.
+ */
+export function declaraNoDefinido(frase: string): boolean {
+  if (/[?¿]/.test(frase)) return false;
+  const t = ` ${normalizarTexto(frase).replace(/[^a-z0-9 ]/g, ' ').replace(/\s+/g, ' ').trim()} `;
+  return MARCAS_DE_DECLARACION.some(r => r.test(t));
 }
 
 function textoONull(v: unknown): string | null {
@@ -219,10 +310,18 @@ export function validarSalida(
         out.descartados.push({ slug: f.slug, motivo: `no es una fecha AAAA-MM-DD: ${v}` });
         continue;
       }
+      if (!fraseNombraElDia(frase, v)) {
+        out.descartados.push({ slug: f.slug, motivo: `un mes o una ventana no es una fecha: «${frase}» no nombra el día ${Number(v.slice(8, 10))}` });
+        continue;
+      }
       out.sugeridos[f.slug] = { valor: v, frase };
     } else if (valoresDeOpciones(f).length > 0) {
       if (!valoresDeOpciones(f).includes(v)) {
         out.descartados.push({ slug: f.slug, motivo: `fuera de las opciones: ${v}` });
+        continue;
+      }
+      if ((f.opciones ?? []).some(o => String(o.value) === v && o.no_definido === true) && !declaraNoDefinido(frase)) {
+        out.descartados.push({ slug: f.slug, motivo: `«no definido» sin que el cliente lo diga: «${frase}»` });
         continue;
       }
       out.sugeridos[f.slug] = { valor: v, frase };
@@ -241,6 +340,18 @@ export interface MarcaSugerido {
   entrega_id: string;
   frase: string;
   en: string;
+  /** El valor no sale de una frase sino de una deducción («Edades 9, 4: …»). */
+  deduccion?: string;
+  /** Lo que había antes, si este sugerido reemplazó a otro que nadie confirmó. */
+  anterior?: string | number | null;
+}
+
+/** La marca de un sugerido. `anterior` solo cuando reemplaza a otro sugerido. */
+export function marcaDe(s: Sugerido, meta: { entrega_id: string; en: string }, anterior?: unknown): MarcaSugerido {
+  const m: MarcaSugerido = { fuente: 'whatsapp', entrega_id: meta.entrega_id, frase: s.frase, en: meta.en };
+  if (s.deduccion) m.deduccion = s.deduccion;
+  if (anterior !== undefined) m.anterior = typeof anterior === 'number' || typeof anterior === 'string' ? anterior : null;
+  return m;
 }
 
 export const CLAVE_SUGERIDOS = '_sugeridos';
@@ -273,11 +384,68 @@ export function fusionarSugeridos(
       continue;
     }
     out[f.slug] = s.valor;
-    marcas[f.slug] = { fuente: 'whatsapp', entrega_id: meta.entrega_id, frase: s.frase, en: meta.en };
+    marcas[f.slug] = marcaDe(s, meta);
     escritos.push(f.slug);
   }
   if (escritos.length > 0) out[CLAVE_SUGERIDOS] = marcas;
   return { data: out, escritos, respetados };
+}
+
+// ── Guardián 3: el mínimo tiene que poder cerrarse ───────────────────────────
+//
+// Los slugs son la convención del bloque de viaje de ONE (los mismos que `mayusculasDeViaje`
+// y la composición de la cotización). Sin los tres en la config, la deducción no corre.
+
+const SLUG_NINOS = 'ninos';
+const SLUG_INFANTES = 'infantes';
+const SLUG_EDADES = 'edades_menores';
+/** Un infante es menor de 2 años («¿Viajan bebés menores de 2 años?»). */
+const EDAD_INFANTE = 2;
+
+/**
+ * Las edades en años de un texto como «9, 4», «9 AÑOS Y 4 AÑOS» o «9, 6 y 1». `null` si
+ * habla de meses («8 meses») o no trae ningún número: ahí no se deduce nada.
+ */
+export function leerEdades(texto: unknown): number[] | null {
+  const t = normalizarTexto(String(texto ?? ''));
+  if (!t || /\bmes(es)?\b/.test(t)) return null;
+  const edades = [...t.matchAll(/(?<![\d.,])(\d{1,2})(?![\d.,]\d|\d)/g)].map(m => Number(m[1]));
+  return edades.length > 0 ? edades : null;
+}
+
+/**
+ * Lo que se deduce sin el modelo para que el mínimo pueda cerrarse. Una sola regla: si
+ * infantes está vacío, hay `n` niños y las edades dadas son exactamente `n`, todas de 2 años o
+ * más, infantes = 0. «Somos 4» sin edades no deduce nada; una edad menor de 2, tampoco.
+ *
+ * @param valores lo que queda en el negocio (lo que ya tenía más lo que llega), por slug.
+ * @returns sugeridos con `deduccion` y frase vacía, solo para campos vacíos.
+ */
+export function deducirCeros(fields: ReadonlyArray<CampoEntendible>, valores: Record<string, unknown>): Record<string, Sugerido> {
+  const slugs = new Set(fields.map(f => f.slug));
+  if (![SLUG_NINOS, SLUG_INFANTES, SLUG_EDADES].every(s => slugs.has(s))) return {};
+  if (!vacio(valores[SLUG_INFANTES])) return {};
+  const ninos = parsearNumeroColombiano(valores[SLUG_NINOS]);
+  if (ninos === null || !Number.isInteger(ninos) || ninos <= 0) return {};
+  const edades = leerEdades(valores[SLUG_EDADES]);
+  if (!edades || edades.length !== ninos || edades.some(e => e < EDAD_INFANTE)) return {};
+  const quien = ninos === 1 ? 'el niño no es menor' : `ninguno de los ${ninos} niños es menor`;
+  return {
+    [SLUG_INFANTES]: { valor: 0, frase: '', deduccion: `Edades ${edades.join(', ')}: ${quien} de ${EDAD_INFANTE} años` },
+  };
+}
+
+/**
+ * Para un negocio NUEVO: los sugeridos más lo que `deducirCeros` saca de ellos (con los
+ * `default` de la config, como los deja `crearNegocio`). Lo que el modelo ya llenó no se toca.
+ */
+export function conDeducciones(fields: ReadonlyArray<CampoEntendible>, sugeridos: Record<string, Sugerido>): Record<string, Sugerido> {
+  const valores: Record<string, unknown> = {};
+  for (const f of fields) if (f.default !== undefined) valores[f.slug] = f.default;
+  for (const [k, v] of Object.entries(sugeridos)) valores[k] = v.valor;
+  const out = { ...sugeridos };
+  for (const [slug, s] of Object.entries(deducirCeros(fields, aplicarSumas(fields, valores)))) if (!(slug in out)) out[slug] = s;
+  return out;
 }
 
 /**
