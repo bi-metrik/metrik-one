@@ -145,6 +145,16 @@ const CLASIFICACION: Record<string, Clasificacion> = {
       'los plazos del bot contra los que `purga-sql.test.ts` ejecuta la migración de la purga; ' +
       'los años de la aceptación salen de la constante canónica.',
   },
+  'supabase/functions/_shared/wa-entendimiento-reglas.ts': {
+    tipo: 'no-es-plazo',
+    razon:
+      'la EDAD de corte de un infante en la solicitud de viaje («bebés menores de 2 años»): con ' +
+      'ella el bot deduce infantes = 0. No hay plazo de conservación en este archivo.',
+  },
+  'src/lib/negocios/sugeridos.ts': {
+    tipo: 'no-es-plazo',
+    razon: 'ejemplo de la deducción que anota la marca de sugerido («ninguno … es menor de 2 años»): una edad.',
+  },
   'src/app/(onboarding)/onboarding/page.tsx': {
     tipo: 'no-es-plazo',
     razon:
