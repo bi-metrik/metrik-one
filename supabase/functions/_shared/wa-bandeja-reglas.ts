@@ -35,13 +35,11 @@ export interface ConfigBandeja {
    * Cuántos viajes puede traer una entrega (encargo 2026-10-01, varios viajes en simultáneo):
    *   · `uno` (default): como siempre, la entrega es un viaje;
    *   · `encabezado`: un escrito corto que nombra un viaje («Carolina», «T1 26 9», «nuevo Luisa»)
-   *     fija la caja de lo que sigue; lo que no tiene encabezado queda sin asignar;
-   *   · `mixto`: encabezados y, para lo que no tiene, el modelo propone con evidencia citada.
-   * En los dos últimos el bot muestra el reparto y NO carga nada hasta el «sí».
+   *     fija el viaje de todo lo que sigue (manda el encabezado; decisión de Mauricio, 2026-10-01).
+   *     Una tanda sin encabezados es un viaje y se pregunta como en `uno`. Con encabezados, el bot
+   *     muestra el reparto y NO carga nada hasta el «sí».
    */
   modoViajes: ModoViajes;
-  /** Silencio, en segundos, que separa dos bloques sin encabezado. */
-  segundosBloque: number;
   /** `siempre` (default y único en uso hasta que el QA y el uso real digan otra cosa) | `si_duda`. */
   confirmar: 'siempre' | 'si_duda';
   /** Horas que dura vigente un encabezado. */
@@ -51,8 +49,8 @@ export interface ConfigBandeja {
   edadAdultoDesde: number;
 }
 
-export type ModoViajes = 'uno' | 'encabezado' | 'mixto';
-export const MODOS_VIAJES: readonly ModoViajes[] = ['uno', 'encabezado', 'mixto'];
+export type ModoViajes = 'uno' | 'encabezado';
+export const MODOS_VIAJES: readonly ModoViajes[] = ['uno', 'encabezado'];
 
 export const CONFIG_BANDEJA_POR_DEFECTO: ConfigBandeja = {
   ventanaMinutos: 5,
@@ -60,7 +58,6 @@ export const CONFIG_BANDEJA_POR_DEFECTO: ConfigBandeja = {
   prefijosBot: ['gasto'],
   horasRespuestaCliente: 24,
   modoViajes: 'uno',
-  segundosBloque: 600,
   confirmar: 'siempre',
   horasCajaActiva: 4,
   edadInfanteMenorDe: 2,
@@ -102,7 +99,6 @@ export function leerConfigBandeja(configExtra: unknown): ConfigBandeja {
     prefijosBot: listaDePalabras(raw.prefijos_bot, d.prefijosBot),
     horasRespuestaCliente: entero(raw.horas_respuesta_cliente, 1, 168, d.horasRespuestaCliente),
     modoViajes: MODOS_VIAJES.includes(raw.modo_viajes as ModoViajes) ? (raw.modo_viajes as ModoViajes) : d.modoViajes,
-    segundosBloque: entero(raw.segundos_bloque, 30, 7200, d.segundosBloque),
     // Un valor desconocido cae a `siempre`: confirmar de más cuesta un mensaje, de menos un dato.
     confirmar: raw.confirmar === 'si_duda' ? 'si_duda' : 'siempre',
     horasCajaActiva: entero(raw.horas_caja_activa, 1, 24, d.horasCajaActiva),
@@ -159,7 +155,7 @@ export interface EntradaRuta {
   entregaAbierta?: boolean;
   /** El bot de la bandeja le hizo una pregunta que sigue sin respuesta («¿A qué viaje van?», el reparto, el contacto). */
   preguntaPendiente?: boolean;
-  /** El escrito nombra un viaje (modo `encabezado` o `mixto`): abre una caja. */
+  /** El escrito nombra un viaje (modo `encabezado`): abre una caja. */
   esEncabezado?: boolean;
 }
 

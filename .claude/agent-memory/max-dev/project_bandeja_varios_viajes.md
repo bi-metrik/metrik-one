@@ -25,5 +25,8 @@ upsert del código viejo `on conflict (entrega_id)` se queda sin índice. `modo_
   NO debe decidir el año de una fecha; el «cliente» que extrae el modelo puede ser el código o «Tati»
   (comparar solo con quien se presenta); el destino no es evidencia de asignación; un «sí» con sin
   asignar descartaba en silencio. Las propuestas reales están en `__fixtures__/bandeja-qa971.json`.
+- 2026-10-01 tarde: Mauricio decidió que MANDA EL ENCABEZADO. Se fue el modo mixto (el modelo ya no
+  asigna) y `segundos_bloque`; quedan sospechosos con «dejar / mover / descartar». Sin encabezados,
+  la tanda es un viaje como en modo uno. N5 no separa: pide reenviar con encabezados.
 - El aislamiento rechaza `cat >> archivo <<EOF` y `sed` con variables: usar Edit/Write o un .py en el worktree.
 Relacionado: [[entendimiento-bandeja-wa]], [[bandeja-negocio-existente]].

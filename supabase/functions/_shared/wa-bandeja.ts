@@ -234,7 +234,7 @@ export async function atenderEnBandeja(
   }
 }
 
-/** ¿El escrito es un encabezado? Solo en modo encabezado/mixto, y solo un texto escrito. */
+/** ¿El escrito es un encabezado? Solo en modo `encabezado`, y solo un texto escrito. */
 async function escritoEsEncabezado(supabase: SupabaseClient, workspaceId: string, message: IncomingMessage, config: ConfigBandeja): Promise<boolean> {
   if (config.modoViajes === 'uno' || message.type !== 'text' || message.reenviado === true || !(message.text || '').trim()) return false;
   const viajes = await viajesAbiertosDeLaBandeja(supabase, workspaceId);
@@ -279,7 +279,7 @@ async function enviar(phone: string, texto: string, workspaceId: string): Promis
  *
  * La pregunta es «¿A qué viaje van?» con la lista corta de negocios abiertos y NUEVO; la lista
  * ofrecida se guarda en la entrega para que «2» signifique lo mismo al contestar. En modo
- * encabezado/mixto es el resumen del reparto (`plan_viajes`), y nada se carga hasta el «sí». Si la lista
+ * `encabezado` (y con encabezados en la tanda) es el resumen del reparto (`plan_viajes`), y nada se carga hasta el «sí». Si la lista
  * no se puede armar (sin línea, error de lectura), sale la pregunta vieja «¿De qué cliente
  * es?» y la entrega sigue el camino de antes (negocio nuevo).
  */

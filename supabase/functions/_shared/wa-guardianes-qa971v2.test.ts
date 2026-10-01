@@ -15,7 +15,7 @@ import {
   validarSalida,
   type CampoEntendible,
 } from './wa-entendimiento-reglas.ts';
-import { armarPlan, armarSegmentos, sinAsignar, validarAsignaciones, type MensajeViaje, type ViajeAbierto } from './wa-viajes-reglas.ts';
+import { armarSegmentos, tieneEncabezados, type MensajeViaje, type ViajeAbierto } from './wa-viajes-reglas.ts';
 
 const PRESUPUESTO: CampoEntendible = { slug: 'presupuesto', tipo: 'select', label: 'Presupuesto aproximado del viaje', opciones: [
   { value: 'menos_3m', label: 'Menos de $3 millones' }, { value: '3m_5m', label: 'Entre $3 y $5 millones' },
@@ -97,19 +97,10 @@ describe('3 · D2m: un destino no es un cliente NUEVO', () => {
     { n: 1, cuerpo: 'Queremos Punta Cana en diciembre, del 20 al 27, mi esposo y yo', reenviado: true, tipo: 'text', en: '2026-10-01T14:00:00Z' },
     { n: 2, cuerpo: 'Y aparte, en marzo quiero llevar a mi mamá a Cartagena, del 10 al 14', reenviado: true, tipo: 'text', en: '2026-10-01T14:00:30Z' },
   ];
-  // Las 3 corridas reales propusieron lo mismo:
-  const propuesta = { asignaciones: [{ n: 1, viaje: 'NUEVO Punta Cana', evidencia: 'Punta Cana en diciembre' }, { n: 2, viaje: 'T1 26 8', evidencia: 'Cartagena' }] };
 
-  it('la propuesta «NUEVO Punta Cana» no se acepta: los dos mensajes quedan sin asignar y se pregunta', () => {
-    expect(validarAsignaciones(propuesta, ms, V).size).toBe(0);
-    const { segmentos, encabezados } = armarSegmentos(ms, V, { segundosBloque: 600, horasCajaActiva: 4 });
-    const plan = armarPlan({ mensajes: ms, viajes: V, segmentos, encabezados, asignaciones: validarAsignaciones(propuesta, ms, V) });
-    expect(sinAsignar(plan).map(m => m.n)).toEqual([1, 2]);
-  });
-
-  it('un NUEVO que el mensaje sí presenta se acepta', () => {
-    const m: MensajeViaje[] = [{ n: 1, cuerpo: 'Hola, soy Andrés Gil, quiero cotizar Cancún', reenviado: true, tipo: 'text', en: '2026-10-01T14:00:00Z' }];
-    expect(validarAsignaciones({ asignaciones: [{ n: 1, viaje: 'NUEVO Andrés Gil', evidencia: 'Andrés Gil' }] }, m, V).size).toBe(1);
+  it('sin encabezados la tanda es un viaje: no hay reparto que haga de «Punta Cana» un cliente (el modelo ya no asigna)', () => {
+    const { segmentos } = armarSegmentos(ms, V, { horasCajaActiva: 4 });
+    expect(tieneEncabezados(segmentos)).toBe(false);
   });
 
   it('al crear el viaje, un «cliente» que es el destino entendido o el de un viaje abierto no es un nombre: se pide', () => {

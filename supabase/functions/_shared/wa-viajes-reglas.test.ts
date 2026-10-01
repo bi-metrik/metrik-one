@@ -1,228 +1,210 @@
 /**
- * Varios viajes en una entrega (modo mixto): el grupo F del plan de QA y el día sintético de 4
- * clientes, con la salida del modelo GRABADA (`__fixtures__/bandeja-varios-viajes.json`), más las
- * pruebas puras de la resolución de encabezados y de la respuesta al resumen.
- *
- * Lo que tiene que pasar siempre: nada se carga antes del «sí», ningún mensaje queda en un viaje
- * que no es el suyo, y lo que no tiene evidencia queda sin asignar y se pregunta.
+ * Varios viajes por encabezado (decisión de Mauricio, 2026-10-01: MANDA EL ENCABEZADO; el modelo
+ * ya no propone a qué viaje va cada mensaje). Pruebas puras de la resolución de encabezados, los
+ * segmentos, los sospechosos y la respuesta al resumen, más dos bancos:
+ *   · el grupo F y C1m/D1m/D2m del QA de #971 (`bandeja-qa971.json`, mensajes del banco sintético);
+ *   · el día sintético con encabezados (`bandeja-dia-encabezados.json`): 2 olvidados y 1 mal escrito.
+ * Lo que tiene que pasar en todos: ningún mensaje se CARGA (sin decisión del comercial) en un viaje
+ * que no es el suyo; lo dudoso sale para decidir con su texto y su motivo.
  */
 import { describe, expect, it } from 'vitest';
-import fx from './__fixtures__/bandeja-varios-viajes.json';
+import qa971 from './__fixtures__/bandeja-qa971.json';
+import diaEnc from './__fixtures__/bandeja-dia-encabezados.json';
 import {
   aplicarCambios,
   armarPlan,
   armarSegmentos,
-  claveDestino,
   esSi,
-  evidenciaApunta,
   gruposDelPlan,
   interpretarRespuestaPlan,
-  planSinDudas,
+  MAX_LARGO_RESUMEN,
+  pendientes,
+  rangos,
   resolverEncabezado,
-  sinAsignar,
+  sinLugares,
   textoResumenPlan,
-  validarAsignaciones,
+  tieneEncabezados,
+  viajesNombrados,
   type DestinoPlan,
   type MensajeViaje,
   type PlanViajes,
   type ViajeAbierto,
 } from './wa-viajes-reglas.ts';
-import { CONFIG_BANDEJA_POR_DEFECTO, LLAVE_BANDEJA, decidirRuta, leerConfigBandeja } from './wa-bandeja-reglas.ts';
+import { CONFIG_BANDEJA_POR_DEFECTO, LLAVE_BANDEJA, decidirRuta, empiezaConPrefijoBot, leerConfigBandeja } from './wa-bandeja-reglas.ts';
 
-type Esc = (typeof fx.escenarios)[number] & {
-  viajes?: ViajeAbierto[];
-  viajes_extra?: ViajeAbierto[];
-  cerrados?: string[];
-  respuestas?: Array<{ texto: string; tipo: string; grupos?: Array<[string, number[]]>; aviso?: string }>;
-};
+const CFG = { horasCajaActiva: 4 };
+const V: ViajeAbierto[] = [
+  { id: 'n11', codigo: 'T1 26 11', cliente: 'CAROLINA RUIZ', destino: 'PUNTA CANA' },
+  { id: 'n9', codigo: 'T1 26 9', cliente: 'LUISA MEJÍA', destino: 'SAN ANDRÉS' },
+  { id: 'n8', codigo: 'T1 26 8', cliente: 'JORGE PÉREZ', destino: 'CARTAGENA' },
+];
+const t = (min: number) => new Date(Date.parse('2026-10-01T14:00:00Z') + min * 60_000).toISOString();
+const m = (n: number, cuerpo: string, opts: { min?: number; escrito?: boolean } = {}): MensajeViaje =>
+  ({ n, cuerpo, reenviado: !opts.escrito, tipo: 'text', en: t(opts.min ?? n) });
+const enc = (n: number, cuerpo: string, min?: number) => m(n, cuerpo, { escrito: true, min });
 
-const CFG = { segundosBloque: fx.config.segundos_bloque, horasCajaActiva: fx.config.horas_caja_activa };
-
-function aMensajes(ms: ReadonlyArray<{ en: string; texto: string; reenviado: boolean }>): MensajeViaje[] {
-  return ms.map((m, i) => ({ n: i + 1, cuerpo: m.texto, reenviado: m.reenviado, tipo: 'text', en: m.en }));
+function plan(ms: MensajeViaje[], viajes = V, cerrados: string[] = []): { plan: PlanViajes; conEncabezados: boolean } {
+  const { segmentos, encabezados } = armarSegmentos(ms, viajes, CFG);
+  return { plan: armarPlan({ mensajes: ms, viajes, segmentos, encabezados, codigosCerrados: new Set(cerrados) }), conEncabezados: tieneEncabezados(segmentos) };
 }
+const codigo = (d: DestinoPlan | null) => (d ? (d.tipo === 'existente' ? d.codigo : `NUEVO ${d.cliente}`) : null);
+const resumenDe = (p: PlanViajes) => p.mensajes.map(x => [x.n, codigo(x.destino), x.sospecha ? 'sospecha' : x.destino ? 'carga' : 'decidir']);
 
-function proponer(viajes: ViajeAbierto[], mensajes: MensajeViaje[], modelo: unknown, cerrados: string[] = []): PlanViajes {
-  const { segmentos, encabezados } = armarSegmentos(mensajes, viajes, CFG);
-  const asignaciones = validarAsignaciones(modelo, mensajes, viajes);
-  return armarPlan({ mensajes, viajes, segmentos, encabezados, asignaciones, codigosCerrados: new Set(cerrados) });
-}
-
-function nombre(d: DestinoPlan): string {
-  return d.tipo === 'existente' ? (d.codigo ?? '') : `NUEVO ${d.cliente ?? ''}`;
-}
-
-const grupos = (plan: PlanViajes) => gruposDelPlan(plan).map(g => [nombre(g.destino), g.mensajes]);
-
-describe('grupo F (salida del modelo grabada)', () => {
-  for (const e of fx.escenarios as Esc[]) {
-    it(`${e.id} · ${e.titulo}`, () => {
-      const viajes = [...(e.viajes ?? fx.viajes), ...(e.viajes_extra ?? [])];
-      const mensajes = aMensajes(e.mensajes);
-      const plan = proponer(viajes, mensajes, e.modelo, e.cerrados);
-      const p = e.propuesta as { grupos: Array<[string, number[]]>; sin_asignar: number[]; encabezados?: number[]; avisos?: string[]; varios?: number[]; resumen_empieza?: string };
-
-      expect(grupos(plan)).toEqual(p.grupos);
-      expect(sinAsignar(plan).map(m => m.n)).toEqual(p.sin_asignar);
-      if (p.encabezados) expect(plan.encabezados).toEqual(p.encabezados);
-      for (const a of p.avisos ?? []) expect(plan.avisos.join('\n')).toContain(a);
-      if (p.varios) expect(plan.mensajes.filter(m => m.varios).map(m => m.n)).toEqual(p.varios);
-
-      // Nada se carga antes del «sí»: el resumen lo dice y pide la confirmación.
-      const resumen = textoResumenPlan(plan, mensajes);
-      expect(resumen).toContain('No cargué nada todavía.');
-      if (p.resumen_empieza) expect(resumen.startsWith(p.resumen_empieza)).toBe(true);
-
-      let actual = plan;
-      for (const r of e.respuestas ?? []) {
-        const res = interpretarRespuestaPlan(r.texto, actual, viajes);
-        expect(res.tipo, `«${r.texto}»`).toBe(r.tipo);
-        if (r.aviso) expect((res as { aviso?: string }).aviso).toContain(r.aviso);
-        if (res.tipo === 'corregir') {
-          actual = aplicarCambios(actual, res.cambios);
-          if (r.grupos) expect(grupos(actual)).toEqual(r.grupos);
-        }
-      }
-    });
-  }
-
-  it('F14: el gasto escrito en medio va al bot de gastos y no entra a la entrega', () => {
-    const e = (fx.escenarios as Esc[]).find(x => x.id === 'F14') as Esc & { gasto_en_medio: string };
-    const modules = { [LLAVE_BANDEJA]: true };
-    expect(decidirRuta({ modules, config: CONFIG_BANDEJA_POR_DEFECTO, tipo: 'text', texto: e.gasto_en_medio, reenviado: false, sesionBotEsperando: false, entregaAbierta: true })).toBe('bot');
-  });
-
-  it('F12: con un solo viaje y `confirmar: si_duda` se podría cargar sin preguntar; con `siempre` (default) se pregunta', () => {
-    const e = (fx.escenarios as Esc[]).find(x => x.id === 'F12')!;
-    const plan = proponer(fx.viajes, aMensajes(e.mensajes), e.modelo);
-    expect(planSinDudas(plan)).toBe(true);
-    expect(leerConfigBandeja({}).confirmar).toBe('siempre');
-    expect(leerConfigBandeja({ bandeja_solicitudes: { confirmar: 'como_sea' } }).confirmar).toBe('siempre');
-    // F3 tiene dudas: nunca se cargaría sin preguntar.
-    const f3 = (fx.escenarios as Esc[]).find(x => x.id === 'F3')!;
-    expect(planSinDudas(proponer(fx.viajes, aMensajes(f3.mensajes), f3.modelo))).toBe(false);
-  });
-});
-
-describe('el día sintético: 4 clientes intercalados, 62 mensajes, encabezados olvidados y un gasto', () => {
-  const dia = fx.dia as { viajes: ViajeAbierto[]; mensajes: Array<{ en: string; texto: string; reenviado: boolean; verdad: string | null }>; codigos_cerrados: string[]; modelos: Record<string, unknown> };
-  const mensajes = aMensajes(dia.mensajes);
-
-  it('tiene más de 60 mensajes', () => {
-    expect(dia.mensajes.length).toBeGreaterThan(60);
-  });
-
-  // El modelo real se corre 10 veces en el QA (Vera); aquí, tres salidas grabadas: una buena, una
-  // que asigna por cercanía y una adversaria. En NINGUNA un mensaje cae en el viaje equivocado.
-  for (const variante of Object.keys(fx.dia.modelos)) {
-    it(`modelo «${variante}»: ningún mensaje queda en un viaje que no es el suyo`, () => {
-      const plan = proponer(dia.viajes, mensajes, dia.modelos[variante], dia.codigos_cerrados);
-      const errores: string[] = [];
-      for (const m of plan.mensajes) {
-        if (!m.destino) continue;
-        const verdad = dia.mensajes[m.n - 1].verdad;
-        if (verdad !== nombre(m.destino)) errores.push(`${m.n} «${dia.mensajes[m.n - 1].texto}» → ${nombre(m.destino)} (es de ${verdad})`);
-      }
-      expect(errores).toEqual([]);
-      // Los encabezados no son contenido; el código cerrado se dice.
-      expect(plan.encabezados.map(n => dia.mensajes[n - 1].verdad)).toEqual(plan.encabezados.map(() => 'enc'));
-      expect(plan.avisos.join('\n')).toContain('El viaje T1 26 3 está cerrado');
-    });
-  }
-
-  it('con el modelo bueno, lo que tiene encabezado queda asignado y lo dudoso se pregunta', () => {
-    const plan = proponer(dia.viajes, mensajes, dia.modelos.bueno, dia.codigos_cerrados);
-    const asignados = plan.mensajes.filter(m => m.destino).length;
-    expect(asignados).toBeGreaterThanOrEqual(35);
-    // El encabezado olvidado (Carolina en la caja de Luisa), el bloque mezclado de Pedro y Jorge,
-    // el mensaje con dos viajes, «Luisa me recomendó» y el viaje cerrado quedan para el comercial.
-    const sueltos = sinAsignar(plan).map(m => dia.mensajes[m.n - 1].texto);
-    expect(sueltos).toEqual(expect.arrayContaining([
-      'Hola Tati, soy Carolina Ruiz otra vez', 'Lo de Carolina va para el 15 y lo de Luisa para el 20',
-      'Luisa me recomendó con ustedes', 'ya pagamos el anticipo',
-    ]));
+describe('config', () => {
+  it('modo_viajes es uno | encabezado; «mixto» ya no existe y cae a uno; segundos_bloque se fue', () => {
+    expect(leerConfigBandeja({ bandeja_solicitudes: { modo_viajes: 'encabezado' } }).modoViajes).toBe('encabezado');
+    expect(leerConfigBandeja({ bandeja_solicitudes: { modo_viajes: 'mixto' } }).modoViajes).toBe('uno');
+    expect('segundosBloque' in leerConfigBandeja({})).toBe(false);
   });
 });
 
 describe('encabezados: resolución determinista contra los viajes abiertos', () => {
-  const V: ViajeAbierto[] = fx.viajes;
-
   it.each([
-    ['T1 26 9', 'n09', 'codigo'],
-    ['t1-26-9', 'n09', 'codigo'],
-    ['T1269', 'n09', 'codigo'],
-    ['Carolina', 'n11', 'nombre'],
-    ['carolina ruiz', 'n11', 'nombre'],
-    ['Carlina', 'n11', 'nombre'],
-    ['la de punta cana', 'n11', 'destino'],
-    ['cliente Jorge', 'n09', 'nombre'],
+    ['T1 26 9', 'n9', 'codigo'], ['t1-26-9', 'n9', 'codigo'], ['Carolina', 'n11', 'nombre'], ['Carlina', 'n11', 'nombre'],
+    ['la de punta cana', 'n11', 'destino'], ['cliente Jorge', 'n8', 'nombre'],
   ])('«%s» → %s (%s)', (texto, id, por) => {
     expect(resolverEncabezado(texto, V)).toMatchObject({ tipo: 'viaje', viaje: { id }, por });
   });
 
-  it('nuevo, con o sin nombre', () => {
+  it('nuevo, ambiguo, código desconocido; y lo que no es encabezado', () => {
     expect(resolverEncabezado('nuevo Luisa San Andrés', V)).toEqual({ tipo: 'nuevo', cliente: 'Luisa San Andrés' });
-    expect(resolverEncabezado('NUEVO', V)).toEqual({ tipo: 'nuevo', cliente: null });
-  });
-
-  it('dos candidatos: pregunta; nunca elige', () => {
-    const r = resolverEncabezado('Carolina', [...V, { id: 'n14', codigo: 'T1 26 14', cliente: 'CAROLINA PÉREZ', destino: 'CANCÚN' }]);
-    expect(r).toMatchObject({ tipo: 'ambiguo' });
-    expect((r as { candidatos: ViajeAbierto[] }).candidatos.map(c => c.id).sort()).toEqual(['n11', 'n14']);
-  });
-
-  it('un código cerrado o inexistente se informa; no crea ni reabre', () => {
+    expect(resolverEncabezado('Carolina', [...V, { id: 'n14', codigo: 'T1 26 14', cliente: 'CAROLINA PÉREZ', destino: 'CANCÚN' }])).toMatchObject({ tipo: 'ambiguo' });
     expect(resolverEncabezado('T1 26 3', V)).toEqual({ tipo: 'codigo_desconocido', codigo: 'T1263' });
-  });
-
-  it.each([
-    ['Carolina quiere 5 estrellas'], ['son 3 adultos'], ['ok'], ['listo, el cliente es Jorge y quiere ir el 15 de diciembre'], ['Marta'],
-  ])('«%s» no es encabezado (es contenido)', texto => {
-    expect(resolverEncabezado(texto, V)).toBeNull();
-  });
-
-  it('un reenvío nunca es encabezado, aunque diga «Carolina»', () => {
-    const ms = aMensajes([{ en: '2026-10-01T13:00:00Z', texto: 'Carolina', reenviado: true }]);
-    expect(armarSegmentos(ms, V, CFG).encabezados).toEqual([]);
+    for (const x of ['Carolina quiere 5 estrellas', 'son 3 adultos', 'ok', 'Lusia']) expect(resolverEncabezado(x, V), x).toBeNull();
   });
 });
 
-describe('la evidencia del modelo', () => {
-  const V: ViajeAbierto[] = fx.viajes;
-  const car: DestinoPlan = { tipo: 'existente', negocio_id: 'n11', codigo: 'T1 26 11', cliente: 'CAROLINA RUIZ' };
-
-  it('vale el nombre o el código; ni el destino (aunque sea único) ni una frase cualquiera', () => {
-    expect(evidenciaApunta('soy Carolina', car, V)).toBe(true);
-    expect(evidenciaApunta('lo del T1 26 11', car, V)).toBe(true);
-    expect(evidenciaApunta('Punta Cana', car, V)).toBe(false);
-    expect(evidenciaApunta('somos 4', car, V)).toBe(false);
+describe('manda el encabezado', () => {
+  it('F1: cada encabezado fija el viaje de lo que sigue; sin sospechas, un «sí» carga', () => {
+    const r = plan([enc(1, 'Carolina'), m(2, 'salimos el 28 de diciembre'), m(3, 'somos 3 adultos'), enc(4, 'T1 26 9'), m(5, 'Buenas Tati, para San Andrés del 20 al 24 de noviembre'), m(6, 'Vamos 2 adultos')]);
+    expect(resumenDe(r.plan)).toEqual([[2, 'T1 26 11', 'carga'], [3, 'T1 26 11', 'carga'], [5, 'T1 26 9', 'carga'], [6, 'T1 26 9', 'carga']]);
+    expect(interpretarRespuestaPlan('sí', r.plan, V)).toEqual({ tipo: 'si' });
   });
 
-  it('una cita que no está en ESE mensaje no cuenta', () => {
-    const ms = aMensajes([{ en: '2026-10-01T13:00:00Z', texto: 'somos 4', reenviado: true }]);
-    expect(validarAsignaciones({ asignaciones: [{ n: 1, viaje: 'T1 26 11', evidencia: 'Carolina' }] }, ms, V).size).toBe(0);
+  it('sin encabezados la tanda es un viaje: no hay reparto (se pregunta «¿A qué viaje van?»)', () => {
+    expect(plan([m(1, 'Hola, soy Carolina'), m(40, 'Buenas, habla Luisa')]).conEncabezados).toBe(false);
   });
 
-  it('las claves de destino distinguen un NUEVO por nombre', () => {
-    expect(claveDestino({ tipo: 'nuevo', cliente: 'Luisa' })).toBe(claveDestino({ tipo: 'nuevo', cliente: 'LUISA' }));
+  it('lo que llega antes del primer encabezado, con la caja vencida o bajo un encabezado ambiguo queda para decidir', () => {
+    const r = plan([m(1, 'del 28 de diciembre'), enc(2, 'Carolina'), m(3, 'somos 3 adultos'), m(4, 'hotel 4 estrellas', { min: 400 })]);
+    expect(resumenDe(r.plan)).toEqual([[1, null, 'decidir'], [3, 'T1 26 11', 'carga'], [4, null, 'decidir']]);
+  });
+
+  it('F9: nombrar a otro cliente no es sospecha («Luisa me recomendó» sigue siendo de Carolina)', () => {
+    const r = plan([enc(1, 'Carolina'), m(2, 'Luisa me recomendó con ustedes'), m(3, 'queremos ir en diciembre')]);
+    expect(resumenDe(r.plan)).toEqual([[2, 'T1 26 11', 'carga'], [3, 'T1 26 11', 'carga']]);
+  });
+});
+
+describe('sospechosos dentro de una caja (lo único que queda de la inferencia)', () => {
+  it.each([
+    ['dos viajes', [m(2, 'Lo de Carolina va para el 15 y lo de Jorge para el 8', { escrito: true }), m(3, 'hotel 4 estrellas')], [[2, null, 'sospecha'], [3, 'T1 26 11', 'sospecha']]],
+    ['otro destino', [m(2, 'hotel 5 estrellas'), m(3, 'Hola, para Cartagena somos 4 adultos')], [[2, 'T1 26 11', 'carga'], [3, 'T1 26 11', 'sospecha']]],
+    ['se presenta como otra persona', [m(2, 'hotel 5 estrellas'), m(3, 'Hola Tati, soy Andrés, quiero cotizar')], [[2, 'T1 26 11', 'carga'], [3, 'T1 26 11', 'sospecha']]],
+    ['saluda a mitad', [m(2, 'hotel 5 estrellas'), m(3, 'Hola Tati, buenas tardes')], [[2, 'T1 26 11', 'carga'], [3, 'T1 26 11', 'sospecha']]],
+    ['choca en fechas y en adultos (F4b)', [m(2, 'del 28 de diciembre al 3 de enero, somos 3 adultos'), m(3, 'nosotros mejor del 20 al 24 de noviembre'), m(4, 'Vamos 2 adultos')], [[2, 'T1 26 11', 'carga'], [3, 'T1 26 11', 'sospecha'], [4, 'T1 26 11', 'sospecha']]],
+  ])('%s', (_n, msgs, esperado) => {
+    expect(resumenDe(plan([enc(1, 'Carolina'), ...msgs]).plan)).toEqual(esperado);
+  });
+
+  it('lo que sigue a un sospechoso también, hasta que un mensaje vuelva a nombrar a la clienta', () => {
+    const r = plan([enc(1, 'Carolina'), m(2, 'Hola Tati, soy Andrés'), m(3, 'del 5 al 10 de diciembre'), m(4, 'soy Carolina otra vez, hotel 5 estrellas'), m(5, 'con desayuno')]);
+    expect(resumenDe(r.plan)).toEqual([[2, 'T1 26 11', 'sospecha'], [3, 'T1 26 11', 'sospecha'], [4, 'T1 26 11', 'carga'], [5, 'T1 26 11', 'carga']]);
+  });
+
+  it('«San Andrés» no es Andrés Gil', () => {
+    const W = [...V, { id: 'n21', codigo: 'T1 26 21', cliente: 'ANDRÉS GIL', destino: null }];
+    const D = W.map(v => ({ tipo: 'existente', negocio_id: v.id, codigo: v.codigo, cliente: v.cliente }) as DestinoPlan);
+    expect(sinLugares('para San Andrés serían del 20', W)).toBe('para serian del 20');
+    expect(viajesNombrados('para San Andrés serían del 20', D, W)).toEqual([]);
   });
 });
 
 describe('la respuesta al resumen', () => {
-  it.each(['sí', 'Si', 'SÍ.', 'dale', 'confirmo', 'así es'])('«%s» es sí', t => expect(esSi(t)).toBe(true));
-  it.each(['ok pero falta uno', 'sí no', 'ok', '', '👍', 'si, pero el 4 no', 'no'])('«%s» NO es sí', t => expect(esSi(t)).toBe(false));
+  const r = plan([enc(1, 'Carolina'), m(2, 'hotel 5 estrellas'), m(3, 'Hola Tati, soy Andrés'), m(4, 'Lo de Carolina y lo de Jorge'), m(5, 'somos 2')]).plan;
 
-  it('las formas de corregir', () => {
-    const e = (fx.escenarios as Esc[]).find(x => x.id === 'F10')!;
-    const V = e.viajes!;
-    const plan = proponer(V, aMensajes(e.mensajes), e.modelo);
-    expect(interpretarRespuestaPlan('descartar', plan, V)).toEqual({ tipo: 'descartar_todo' });
-    expect(interpretarRespuestaPlan('el 9 es de Luisa', plan, V)).toMatchObject({ tipo: 'no_entendida' });
-    expect(interpretarRespuestaPlan('el 4 es del 2', plan, V)).toMatchObject({ tipo: 'corregir', cambios: [{ ns: [4], a: { tipo: 'nuevo', cliente: 'Luisa' } }] });
-    expect(interpretarRespuestaPlan('el 4 es nuevo Pedro Gómez', plan, V)).toMatchObject({ tipo: 'corregir', cambios: [{ ns: [4], a: { tipo: 'nuevo', cliente: 'Pedro Gómez' } }] });
-    expect(interpretarRespuestaPlan('el 4 es T1 26 9; descartar el 3', plan, V)).toMatchObject({ tipo: 'corregir', cambios: [{ ns: [4] }, { ns: [3], a: 'descartar' }] });
-    expect(interpretarRespuestaPlan('el 4 es de alguien', plan, V)).toMatchObject({ tipo: 'no_entendida' });
-    const descartado = aplicarCambios(plan, [{ ns: [3], a: 'descartar' }]);
-    expect(textoResumenPlan(descartado, aMensajes(e.mensajes))).toContain('Descartados: 3');
+  it('el «sí» no vale con algo por decidir', () => {
+    expect(pendientes(r).map(x => x.n)).toEqual([3, 4, 5]);
+    expect(interpretarRespuestaPlan('sí', r, V)).toMatchObject({ tipo: 'no_entendida', aviso: expect.stringContaining('Antes del sí') });
+  });
+
+  it('dejar, mover y descartar; después, sí', () => {
+    const res = interpretarRespuestaPlan('dejar el 5; mover el 3 a Jorge; descartar el 4', r, V);
+    expect(res.tipo).toBe('corregir');
+    const p2 = aplicarCambios(r, (res as { cambios: never }).cambios);
+    expect(pendientes(p2)).toEqual([]);
+    expect(gruposDelPlan(p2).map(g => [codigo(g.destino), g.mensajes])).toEqual([['T1 26 11', [2, 5]], ['T1 26 8', [3]]]);
+    expect(interpretarRespuestaPlan('sí', p2, V)).toEqual({ tipo: 'si' });
+  });
+
+  it('«dejar todos» deja los sospechosos; uno de dos viajes no se deja ni se mueve, solo se descarta', () => {
+    const dejar = interpretarRespuestaPlan('dejar todos', r, V);
+    expect(dejar).toEqual({ tipo: 'corregir', cambios: [{ ns: [3, 5], a: 'dejar' }] });
+    expect(interpretarRespuestaPlan('dejar el 4', r, V)).toMatchObject({ tipo: 'no_entendida', aviso: expect.stringContaining('habla de dos viajes') });
+    expect(interpretarRespuestaPlan('descartar los pendientes', r, V)).toEqual({ tipo: 'corregir', cambios: [{ ns: [3, 4, 5], a: 'descartar' }] });
+  });
+
+  it.each(['sí', 'Si', 'dale', 'confirmo'])('«%s» es sí', x => expect(esSi(x)).toBe(true));
+  it.each(['ok pero falta uno', 'sí no', 'ok', '', '👍'])('«%s» NO es sí', x => expect(esSi(x)).toBe(false));
+});
+
+describe('el resumen', () => {
+  it('muestra cada sospechoso con su texto y su motivo, y no pasa de 3.800 caracteres aunque sean 60 mensajes', () => {
+    const ms = [enc(1, 'Carolina'), ...Array.from({ length: 60 }, (_, i) => m(i + 2, i % 10 === 5 ? 'Hola Tati, soy Andrés, una pregunta larga sobre el hotel y el traslado' : `mensaje número ${i + 2} con algo de texto del cliente`))];
+    const r = plan(ms).plan;
+    const txt = textoResumenPlan(r, ms);
+    expect(txt.length).toBeLessThanOrEqual(MAX_LARGO_RESUMEN);
+    for (const x of pendientes(r)) expect(txt).toContain(`\n   ${x.n} «`);
+    expect(rangos([9, 2, 3, 4, 6, 10])).toBe('2-4, 6, 9-10');
+  });
+});
+
+/** Lo que se cargaría con un «sí» directo (sin decidir nada): ningún mensaje en un viaje ajeno. */
+function cargaSinDecidir(p: PlanViajes) {
+  return p.mensajes.filter(x => x.destino && !x.sospecha && !x.descartado);
+}
+
+describe('banco del QA de #971 (mensajes reales del banco; el modelo ya no asigna)', () => {
+  const MODULES = { [LLAVE_BANDEJA]: true };
+  for (const e of qa971.f) {
+    it(`${e.id} · ${e.titulo}`, () => {
+      const msgs = e.mensajes.filter(x => !(x.tipo === 'text' && !x.reenviado && empiezaConPrefijoBot(x.texto, ['gasto'])));
+      const entrega = msgs.flatMap((x, i) => decidirRuta({
+        modules: MODULES, config: CONFIG_BANDEJA_POR_DEFECTO, tipo: x.tipo, texto: x.texto, reenviado: x.reenviado,
+        sesionBotEsperando: false, entregaAbierta: true, preguntaPendiente: false, esEncabezado: x.encabezado,
+      }) === 'bot' ? [] : [{ x, ms: { n: i + 1, cuerpo: x.texto, reenviado: x.reenviado, tipo: x.tipo, en: x.en } as MensajeViaje }]);
+      const r = plan(entrega.map(y => y.ms), e.viajes as ViajeAbierto[], e.cerrados);
+      if (!r.conEncabezados) return; // la tanda es un viaje: se pregunta como en modo uno
+      for (const c of cargaSinDecidir(r.plan)) {
+        const verdad = (entrega.find(y => y.ms.n === c.n)!.x.verdad as string[] | null) ?? [];
+        const id = c.destino!.tipo === 'existente' ? c.destino!.negocio_id : 'nuevo:*';
+        expect(verdad.some(v => v === id || (v.startsWith('nuevo') && id === 'nuevo:*')), `${c.n} «${entrega.find(y => y.ms.n === c.n)!.x.texto}» → ${id}`).toBe(true);
+      }
+    });
+  }
+});
+
+describe('el día sintético CON encabezados (2 olvidados, 1 mal escrito)', () => {
+  const nombre = (d: DestinoPlan) => (d.tipo === 'existente' ? d.codigo : `NUEVO ${d.cliente}`);
+  it('ningún mensaje se carga en un viaje ajeno sin pasar por el comercial; cuenta las preguntas del día', () => {
+    let decisiones = 0;
+    let cargados = 0;
+    const porEntrega: number[] = [];
+    for (const e of diaEnc.entregas) {
+      const ms: MensajeViaje[] = e.mensajes.map((x, i) => ({ n: i + 1, cuerpo: x.texto, reenviado: x.reenviado, tipo: x.tipo, en: x.en }));
+      const r = plan(ms, e.viajes as ViajeAbierto[]);
+      expect(r.conEncabezados).toBe(true);
+      for (const c of cargaSinDecidir(r.plan)) {
+        expect(nombre(c.destino!), `«${e.mensajes[c.n - 1].texto}»`).toBe(e.mensajes[c.n - 1].verdad);
+        cargados++;
+      }
+      const p = pendientes(r.plan).length;
+      porEntrega.push(p);
+      decisiones += p;
+      const txt = textoResumenPlan(r.plan, ms);
+      for (const x of pendientes(r.plan)) expect(txt).toContain(`\n   ${x.n} «`);
+    }
+    // El número que pidió Mauricio: 6 resúmenes (uno por entrega) y estas decisiones de mensaje.
+    expect({ resumenes: diaEnc.entregas.length, decisiones, porEntrega, cargados }).toMatchSnapshot();
   });
 });

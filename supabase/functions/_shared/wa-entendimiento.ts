@@ -9,9 +9,10 @@
 // `wa_bandeja_entendimientos`; si el modelo falla, la entrega y sus mensajes siguen intactos y
 // el paso se reintenta (hasta `MAX_INTENTOS`).
 //
-// Varios viajes (2026-10-01): con `modo_viajes` encabezado/mixto la entrega se reparte por
-// mensaje (`wa_bandeja_entregas.plan_viajes`), el comercial confirma, y cada viaje corre el
-// entendimiento y la carga por separado en su propia fila (`segmento` 1, 2…).
+// Varios viajes (2026-10-01): con `modo_viajes = encabezado` y encabezados en la tanda, la entrega
+// se reparte por mensaje según el encabezado (`wa_bandeja_entregas.plan_viajes`), el comercial
+// decide los sospechosos y confirma, y cada viaje corre el entendimiento y la carga por separado
+// en su propia fila (`segmento` 1, 2…). Sin encabezados, la tanda es un viaje, como siempre.
 //
 // Nada corre si el workspace no tiene `modules.bandeja_solicitudes_wa`.
 // ============================================================
@@ -61,14 +62,11 @@ import {
   armarPlan,
   armarSegmentos,
   esSi,
-  esquemaAsignacion,
   gruposDelPlan,
-  instruccionesAsignacion,
   interpretarRespuestaPlan,
   planSinDudas,
-  textoAsignacion,
   textoResumenPlan,
-  validarAsignaciones,
+  tieneEncabezados,
   TEXTO_COMO_CORREGIR,
 } from './wa-viajes-reglas.ts';
 import type { DestinoPlan, MensajeViaje, PlanViajes, ViajeAbierto } from './wa-viajes-reglas.ts';
@@ -456,7 +454,7 @@ async function entender(supabase: SupabaseClient, ent: Fila): Promise<void> {
     return;
   }
 
-  // Modo encabezado/mixto (o una entrega separada a pedido): el reparto se confirma primero.
+  // Modo encabezado con encabezados en la tanda: el reparto se confirma primero.
   if (entrega?.plan_viajes) {
     await resolverPlan(supabase, ent, entrega.plan_viajes as PlanViajes, crudos);
     return;
@@ -533,12 +531,11 @@ async function atenderConfirmacion(
     return true;
   }
   if (pendiente === 'dos_viajes') {
+    // No se separa sola: el comercial descarta y vuelve a reenviar con un encabezado por cliente.
     if (descartar) {
-      await descartarEntrega(supabase, ent, crudos.length, 'dos solicitudes en una tanda; el comercial descartó (N5)');
-    } else if (/^separa/.test(t)) {
-      await proponerReparto(supabase, ent, crudos, { forzarModelo: true });
+      await descartarEntrega(supabase, ent, crudos.length, 'dos solicitudes en una tanda; el comercial descartó para reenviar con encabezados (N5)');
     } else {
-      await preguntarYEsperar(supabase, ent, 'No entendí. Responde SEPARAR para ver qué mensaje va con cuál, o DESCARTAR.', 'dos_viajes');
+      await preguntarYEsperar(supabase, ent, 'No mezclo dos solicitudes. Responde DESCARTAR y vuelve a reenviarlas, cada una después de un encabezado con el nombre o el código del cliente.', 'dos_viajes');
     }
     return true;
   }
@@ -688,13 +685,13 @@ async function codigosCerrados(supabase: SupabaseClient, workspaceId: string): P
 }
 
 /**
- * El reparto de una entrega en varios viajes (modo encabezado/mixto, o «SEPARAR» tras N5):
- * segmentos por encabezado y por silencio y, si el modo es mixto (o se pidió separar), la
- * propuesta del modelo con evidencia. `null` si no se pudo armar.
+ * El reparto de una entrega por encabezados (sin modelo: manda el encabezado). `conEncabezados`
+ * dice si la tanda trae alguno; sin ninguno, la tanda es un viaje y se pregunta como siempre.
+ * `null` si no se pudo armar.
  */
 async function armarReparto(
-  supabase: SupabaseClient, entregaId: string, workspaceId: string, crudos: ReadonlyArray<MensajeCrudo>, forzarModelo = false,
-): Promise<{ plan: PlanViajes; bandeja: ConfigBandeja } | null> {
+  supabase: SupabaseClient, entregaId: string, workspaceId: string, crudos: ReadonlyArray<MensajeCrudo>,
+): Promise<{ plan: PlanViajes; bandeja: ConfigBandeja; conEncabezados: boolean } | null> {
   const l = await lineaDeLaBandeja(supabase, workspaceId);
   if (typeof l === 'string') {
     console.error(`[wa-entendimiento] sin reparto para ${entregaId}: ${l}`);
@@ -705,29 +702,19 @@ async function armarReparto(
   const viajes: ViajeAbierto[] = abiertos.map(n => ({ id: n.id, codigo: n.codigo, cliente: n.cliente, destino: n.destino }));
   const mensajes = aViaje(crudos);
   const { segmentos, encabezados } = armarSegmentos(mensajes, viajes, l.bandeja);
-
-  let asignaciones = new Map();
-  if (l.bandeja.modoViajes === 'mixto' || forzarModelo) {
-    const lectura = await leerConModelo(instruccionesAsignacion(viajes), textoAsignacion(mensajes, encabezados), esquemaAsignacion());
-    if (lectura.error || lectura.json === null) {
-      // Sin la propuesta del modelo el reparto sigue: lo que no tiene encabezado queda sin asignar.
-      console.error(`[wa-entendimiento] el modelo no propuso el reparto de ${entregaId}: ${lectura.error}`);
-    } else {
-      asignaciones = validarAsignaciones(lectura.json, mensajes, viajes);
-    }
-  }
   const desconocidos = segmentos.some(s => s.encabezado?.resolucion.tipo === 'codigo_desconocido');
   const plan = armarPlan({
-    mensajes, viajes, segmentos, encabezados, asignaciones, segundosBloque: l.bandeja.segundosBloque,
+    mensajes, viajes, segmentos, encabezados,
     codigosCerrados: desconocidos ? await codigosCerrados(supabase, workspaceId) : new Set(),
   });
-  return { plan, bandeja: l.bandeja };
+  return { plan, bandeja: l.bandeja, conEncabezados: tieneEncabezados(segmentos) };
 }
 
 /**
  * Arma lo que se le pregunta al comercial al cerrar una entrega:
  *   · modo `uno`: «¿A qué viaje van?» con la lista corta (devuelve `opciones`);
- *   · modo `encabezado`/`mixto`: el resumen del reparto (devuelve `plan`).
+ *   · modo `encabezado` con encabezados en la tanda: el resumen del reparto (devuelve `plan`);
+ *     sin encabezados, la tanda es un viaje y la pregunta es la de `uno`.
  * Devuelve `null` si no se pudo: quien llama hace la pregunta vieja.
  */
 export async function armarPreguntaNegocio(
@@ -739,13 +726,15 @@ export async function armarPreguntaNegocio(
     return null;
   }
 
-  if (l.bandeja.modoViajes !== 'uno') {
+  if (l.bandeja.modoViajes === 'encabezado') {
     const crudos = await leerMensajes(supabase, entregaId);
     if (typeof crudos === 'string') return null;
     const r = await armarReparto(supabase, entregaId, workspaceId, crudos);
     if (!r) return null;
-    const sinDudas = r.bandeja.confirmar === 'si_duda' && planSinDudas(r.plan);
-    return { texto: textoResumenPlan(r.plan, aViaje(crudos)), plan: r.plan, sinDudas };
+    if (r.conEncabezados) {
+      const sinDudas = r.bandeja.confirmar === 'si_duda' && planSinDudas(r.plan);
+      return { texto: textoResumenPlan(r.plan, aViaje(crudos)), plan: r.plan, sinDudas };
+    }
   }
 
   const { data: ent } = await supabase.from('wa_bandeja_entregas')
@@ -774,21 +763,6 @@ async function negocioAbiertoPorCodigo(supabase: SupabaseClient, workspaceId: st
 }
 
 // ── El reparto: proponer, corregir, confirmar ────────────────────────────────
-
-/** «SEPARAR» tras N5 (o el reparto que no se pudo hacer al cerrar): propone y espera el «sí». */
-async function proponerReparto(supabase: SupabaseClient, ent: Fila, crudos: ReadonlyArray<MensajeCrudo>, opts: { forzarModelo?: boolean } = {}): Promise<void> {
-  const r = await armarReparto(supabase, ent.entrega_id as string, ent.workspace_id as string, crudos, opts.forzarModelo);
-  if (!r) {
-    await actualizar(supabase, ent.id as string, { estado: 'error', error: 'no se pudo armar el reparto' });
-    return;
-  }
-  const { error } = await supabase.from('wa_bandeja_entregas').update({ plan_viajes: r.plan }).eq('id', ent.entrega_id);
-  if (error) {
-    await actualizar(supabase, ent.id as string, { estado: 'error', error: `no se pudo guardar el reparto: ${error.message}` });
-    return;
-  }
-  await preguntarYEsperar(supabase, ent, textoResumenPlan(r.plan, aViaje(crudos)), null);
-}
 
 /** La respuesta al resumen del reparto. Nada se carga hasta el «sí». */
 async function resolverPlan(supabase: SupabaseClient, ent: Fila, plan: PlanViajes, crudos: ReadonlyArray<MensajeCrudo>): Promise<void> {
@@ -850,7 +824,7 @@ async function guardarAsignacion(
     const { error } = await supabase.from('wa_bandeja_mensajes').update({
       segmento: k.get(m.n) ?? null,
       asignacion: {
-        destino: m.destino, por: m.por, evidencia: m.evidencia, motivo: m.motivo ?? null,
+        destino: m.destino, por: m.por, motivo: m.motivo ?? null,
         varios: m.varios === true, descartado: m.descartado === true, confirmado_at: en,
       },
     }).eq('id', crudo.id);

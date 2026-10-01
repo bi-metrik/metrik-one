@@ -344,7 +344,7 @@ export function lineaSolicitudes(ss: ReadonlyArray<Solicitud>): string {
 
 /** Lo que el bot dice cuando ve dos solicitudes en una tanda (N5). */
 export function textoDosViajes(ss: ReadonlyArray<Solicitud>): string {
-  return `Veo dos solicitudes distintas en estos mensajes (${lineaSolicitudes(ss)}). No las mezclo en un viaje.\nResponde SEPARAR y te muestro qué mensaje va con cuál para confirmar (ahí puedes descartar uno), o DESCARTAR.`;
+  return `Veo dos solicitudes distintas en estos mensajes (${lineaSolicitudes(ss)}). No las mezclo en un viaje.\nResponde DESCARTAR y vuelve a reenviarlas, cada una después de un encabezado con el nombre o el código del cliente («Carolina», «T1 26 9», «nuevo Luisa»).`;
 }
 
 // ── N4 · ¿hay solicitud? ─────────────────────────────────────────────────────

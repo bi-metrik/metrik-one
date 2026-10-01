@@ -8,11 +8,11 @@
 --   1. La asignación es POR MENSAJE y queda guardada (para auditar de dónde salió cada dato):
 --      · `wa_bandeja_mensajes.segmento`: el número del viaje (1, 2…) dentro de la entrega al que
 --        se cargó el mensaje; nulo = no se cargó (sin asignar, descartado, encabezado);
---      · `wa_bandeja_mensajes.asignacion`: {destino, por, evidencia, motivo, varios, descartado,
---        confirmado_at}. `por` = encabezado | modelo | bloque | comercial;
+--      · `wa_bandeja_mensajes.asignacion`: {destino, por, motivo, varios, descartado,
+--        confirmado_at}. `por` = encabezado | comercial (manda el encabezado; sin modelo);
 --      · `wa_bandeja_mensajes.clase`: quién habla (N3): cliente | comercial | tercero | ruido |
 --        encabezado. Solo lo del cliente llena campos.
---   2. `wa_bandeja_entregas.plan_viajes`: el reparto propuesto (modo encabezado/mixto) que el
+--   2. `wa_bandeja_entregas.plan_viajes`: el reparto por encabezados (modo encabezado) que el
 --      comercial confirma o corrige. Nada se carga hasta el «sí». `plan_confirmado_at`: cuándo.
 --   3. `wa_bandeja_entendimientos`:
 --      · `segmento` (0 = la entrega entera; 1, 2… = un viaje del reparto). El reclamo pasa a ser
@@ -54,7 +54,7 @@ alter table public.wa_bandeja_mensajes
 comment on column public.wa_bandeja_mensajes.segmento is
   'Viaje (1, 2…) de la entrega al que se cargó el mensaje. Nulo = no se cargó en ninguno.';
 comment on column public.wa_bandeja_mensajes.asignacion is
-  'A qué viaje va y por qué: {destino, por: encabezado|modelo|bloque|comercial, evidencia, motivo, varios, descartado, confirmado_at}.';
+  'A qué viaje va y por qué: {destino, por: encabezado|comercial, motivo, varios, descartado, confirmado_at}.';
 comment on column public.wa_bandeja_mensajes.clase is
   'Quién habla (N3): cliente | comercial | tercero | ruido | encabezado. Solo lo del cliente llena campos.';
 
@@ -68,7 +68,7 @@ alter table public.wa_bandeja_entregas
   add column plan_confirmado_at timestamptz;
 
 comment on column public.wa_bandeja_entregas.plan_viajes is
-  'Reparto por mensaje (modo encabezado/mixto): {version, mensajes:[{n, destino, por, evidencia, motivo, varios, descartado}], encabezados, avisos}. Nulo = modo uno.';
+  'Reparto por encabezados: {version, mensajes:[{n, destino, por, motivo, sospecha, varios, descartado}], encabezados, avisos}. Nulo = un solo viaje (modo uno, o tanda sin encabezados).';
 
 -- ── 3. Un entendimiento por viaje del reparto ────────────────────────────────
 alter table public.wa_bandeja_entendimientos

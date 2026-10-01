@@ -1,0 +1,683 @@
+{
+ "_que_es": "El día sintético del QA de #971 (4 clientes, clientes ficticios) con un encabezado escrito en cada cambio de cliente, salvo 2 olvidados (entrega 2 y 6, antes de Jorge) y 1 mal escrito («Lusia», entrega 3). Sale de bandeja-qa971.json; no hay salida del modelo: el reparto es determinista.",
+ "entregas": [
+  {
+   "viajes": [
+    {
+     "id": "n11",
+     "codigo": "T1 26 11",
+     "cliente": "CAROLINA RUIZ",
+     "destino": "PUNTA CANA"
+    },
+    {
+     "id": "n9",
+     "codigo": "T1 26 9",
+     "cliente": "LUISA MEJÍA",
+     "destino": "SAN ANDRÉS"
+    },
+    {
+     "id": "n8",
+     "codigo": "T1 26 8",
+     "cliente": "JORGE PÉREZ",
+     "destino": "CARTAGENA"
+    },
+    {
+     "id": "n20",
+     "codigo": "T1 26 20",
+     "cliente": "PEDRO GÓMEZ",
+     "destino": "CARTAGENA"
+    }
+   ],
+   "mensajes": [
+    {
+     "en": "2026-10-01T13:30:30Z",
+     "texto": "Carolina",
+     "reenviado": false,
+     "tipo": "text",
+     "encabezado": true,
+     "verdad": null,
+     "nota": null
+    },
+    {
+     "en": "2026-10-01T13:30:30Z",
+     "texto": "Hola Tati buenos días 😊",
+     "reenviado": true,
+     "tipo": "text",
+     "encabezado": false,
+     "verdad": "T1 26 11"
+    },
+    {
+     "en": "2026-10-01T13:31:00Z",
+     "texto": "Ya hablé con mi esposo, salimos el 28 de diciembre y volvemos el 3 de enero",
+     "reenviado": true,
+     "tipo": "text",
+     "encabezado": false,
+     "verdad": "T1 26 11"
+    },
+    {
+     "en": "2026-10-01T13:31:30Z",
+     "texto": "Tati te cuento que al final va mi suegra, o sea seríamos tres adultos y los dos niños, el de nueve y la de cuatro",
+     "reenviado": true,
+     "tipo": "audio",
+     "encabezado": false,
+     "verdad": "T1 26 11"
+    },
+    {
+     "en": "2026-10-01T13:33:00Z",
+     "texto": "nuevo Andrés Gil",
+     "reenviado": false,
+     "tipo": "text",
+     "encabezado": true,
+     "verdad": null,
+     "nota": null
+    },
+    {
+     "en": "2026-10-01T13:33:00Z",
+     "texto": "Hola, soy Andrés Gil, me pasó tu número Luisa, quiero cotizar Cancún",
+     "reenviado": true,
+     "tipo": "text",
+     "encabezado": false,
+     "verdad": "NUEVO Andrés Gil"
+    },
+    {
+     "en": "2026-10-01T13:33:30Z",
+     "texto": "Seríamos 2 adultos, del 5 al 10 de diciembre",
+     "reenviado": true,
+     "tipo": "text",
+     "encabezado": false,
+     "verdad": "NUEVO Andrés Gil"
+    },
+    {
+     "en": "2026-10-01T13:34:00Z",
+     "texto": "Saliendo de Barranquilla",
+     "reenviado": true,
+     "tipo": "text",
+     "encabezado": false,
+     "verdad": "NUEVO Andrés Gil"
+    },
+    {
+     "en": "2026-10-01T13:40:30Z",
+     "texto": "Nos gustaría todo incluido, unos 10 millones en total",
+     "reenviado": true,
+     "tipo": "text",
+     "encabezado": false,
+     "verdad": "NUEVO Andrés Gil"
+    }
+   ]
+  },
+  {
+   "viajes": [
+    {
+     "id": "n11",
+     "codigo": "T1 26 11",
+     "cliente": "CAROLINA RUIZ",
+     "destino": "PUNTA CANA"
+    },
+    {
+     "id": "n9",
+     "codigo": "T1 26 9",
+     "cliente": "LUISA MEJÍA",
+     "destino": "SAN ANDRÉS"
+    },
+    {
+     "id": "n8",
+     "codigo": "T1 26 8",
+     "cliente": "JORGE PÉREZ",
+     "destino": "CARTAGENA"
+    },
+    {
+     "id": "n20",
+     "codigo": "T1 26 20",
+     "cliente": "PEDRO GÓMEZ",
+     "destino": "CARTAGENA"
+    },
+    {
+     "id": "n21",
+     "codigo": "T1 26 21",
+     "cliente": "ANDRÉS GIL",
+     "destino": null
+    }
+   ],
+   "mensajes": [
+    {
+     "en": "2026-10-01T14:30:00Z",
+     "texto": "Luisa",
+     "reenviado": false,
+     "tipo": "text",
+     "encabezado": true,
+     "verdad": null,
+     "nota": null
+    },
+    {
+     "en": "2026-10-01T14:30:00Z",
+     "texto": "Buenas Tati, para San Andrés serían del 20 al 24 de noviembre",
+     "reenviado": true,
+     "tipo": "text",
+     "encabezado": false,
+     "verdad": "T1 26 9"
+    },
+    {
+     "en": "2026-10-01T14:30:40Z",
+     "texto": "Vamos mi esposo y yo, salimos de Medellín",
+     "reenviado": true,
+     "tipo": "text",
+     "encabezado": false,
+     "verdad": "T1 26 9"
+    },
+    {
+     "en": "2026-10-01T14:31:00Z",
+     "texto": "Hotel 4 estrellas con desayuno porfa",
+     "reenviado": true,
+     "tipo": "text",
+     "encabezado": false,
+     "verdad": "T1 26 9"
+    },
+    {
+     "en": "2026-10-01T14:36:30Z",
+     "texto": "Carolina",
+     "reenviado": false,
+     "tipo": "text",
+     "encabezado": true,
+     "verdad": null,
+     "nota": null
+    },
+    {
+     "en": "2026-10-01T14:36:30Z",
+     "texto": "Tati, la maleta de bodega para todos",
+     "reenviado": true,
+     "tipo": "text",
+     "encabezado": false,
+     "verdad": "T1 26 11"
+    },
+    {
+     "en": "2026-10-01T14:37:00Z",
+     "texto": "Hotel 5 estrellas todo incluido, presupuesto unos 15 millones",
+     "reenviado": true,
+     "tipo": "text",
+     "encabezado": false,
+     "verdad": "T1 26 11"
+    },
+    {
+     "en": "2026-10-01T14:41:00Z",
+     "texto": "Los niños ya tienen pasaporte",
+     "reenviado": true,
+     "tipo": "text",
+     "encabezado": false,
+     "verdad": "T1 26 11"
+    },
+    {
+     "en": "2026-10-01T14:50:00Z",
+     "texto": "Hola, para Cartagena somos 4 adultos y un niño de 7 años",
+     "reenviado": true,
+     "tipo": "text",
+     "encabezado": false,
+     "verdad": "T1 26 8"
+    },
+    {
+     "en": "2026-10-01T14:50:30Z",
+     "texto": "del 8 al 12 de noviembre, saliendo de Cali",
+     "reenviado": true,
+     "tipo": "text",
+     "encabezado": false,
+     "verdad": "T1 26 8"
+    },
+    {
+     "en": "2026-10-01T14:55:30Z",
+     "texto": "Tati, hotel tres estrellas está bien, lo importante es que tenga piscina para el niño",
+     "reenviado": true,
+     "tipo": "audio",
+     "encabezado": false,
+     "verdad": "T1 26 8"
+    }
+   ]
+  },
+  {
+   "viajes": [
+    {
+     "id": "n11",
+     "codigo": "T1 26 11",
+     "cliente": "CAROLINA RUIZ",
+     "destino": "PUNTA CANA"
+    },
+    {
+     "id": "n9",
+     "codigo": "T1 26 9",
+     "cliente": "LUISA MEJÍA",
+     "destino": "SAN ANDRÉS"
+    },
+    {
+     "id": "n8",
+     "codigo": "T1 26 8",
+     "cliente": "JORGE PÉREZ",
+     "destino": "CARTAGENA"
+    },
+    {
+     "id": "n20",
+     "codigo": "T1 26 20",
+     "cliente": "PEDRO GÓMEZ",
+     "destino": "CARTAGENA"
+    },
+    {
+     "id": "n21",
+     "codigo": "T1 26 21",
+     "cliente": "ANDRÉS GIL",
+     "destino": null
+    }
+   ],
+   "mensajes": [
+    {
+     "en": "2026-10-01T16:20:30Z",
+     "texto": "Lusia",
+     "reenviado": false,
+     "tipo": "text",
+     "encabezado": true,
+     "verdad": null,
+     "nota": "mal escrito"
+    },
+    {
+     "en": "2026-10-01T16:20:30Z",
+     "texto": "Tati una pregunta, ¿el vuelo incluye maleta?",
+     "reenviado": true,
+     "tipo": "text",
+     "encabezado": false,
+     "verdad": "T1 26 9"
+    },
+    {
+     "en": "2026-10-01T16:21:00Z",
+     "texto": "Mejor maleta de mano, viajamos ligeros",
+     "reenviado": true,
+     "tipo": "text",
+     "encabezado": false,
+     "verdad": "T1 26 9"
+    },
+    {
+     "en": "2026-10-01T16:22:00Z",
+     "texto": "PUNTA CANA desde $2.5M, salidas 5 y 12 de diciembre, todo incluido ✈️",
+     "reenviado": true,
+     "tipo": "text",
+     "encabezado": false,
+     "verdad": null
+    },
+    {
+     "en": "2026-10-01T16:22:30Z",
+     "texto": "Mira esto que vi, ¿ustedes tienen algo así para San Andrés?",
+     "reenviado": true,
+     "tipo": "text",
+     "encabezado": false,
+     "verdad": "T1 26 9"
+    },
+    {
+     "en": "2026-10-01T16:25:00Z",
+     "texto": "ojo, esta señora es muy tacaña y se queja de todo",
+     "reenviado": false,
+     "tipo": "text",
+     "encabezado": false,
+     "verdad": null
+    },
+    {
+     "en": "2026-10-01T16:30:00Z",
+     "texto": "abono reserva San Andrés",
+     "reenviado": false,
+     "tipo": "image",
+     "encabezado": false,
+     "verdad": null
+    },
+    {
+     "en": "2026-10-01T16:40:30Z",
+     "texto": "Andrés Gil",
+     "reenviado": false,
+     "tipo": "text",
+     "encabezado": true,
+     "verdad": null,
+     "nota": null
+    },
+    {
+     "en": "2026-10-01T16:40:30Z",
+     "texto": "Tati, ¿al final cuánto quedaría? Ya tengo vacaciones aprobadas",
+     "reenviado": true,
+     "tipo": "text",
+     "encabezado": false,
+     "verdad": "T1 26 21"
+    },
+    {
+     "en": "2026-10-01T16:41:00Z",
+     "texto": "Somos 2 adultos, confirmo",
+     "reenviado": true,
+     "tipo": "text",
+     "encabezado": false,
+     "verdad": "T1 26 21"
+    }
+   ]
+  },
+  {
+   "viajes": [
+    {
+     "id": "n11",
+     "codigo": "T1 26 11",
+     "cliente": "CAROLINA RUIZ",
+     "destino": "PUNTA CANA"
+    },
+    {
+     "id": "n9",
+     "codigo": "T1 26 9",
+     "cliente": "LUISA MEJÍA",
+     "destino": "SAN ANDRÉS"
+    },
+    {
+     "id": "n8",
+     "codigo": "T1 26 8",
+     "cliente": "JORGE PÉREZ",
+     "destino": "CARTAGENA"
+    },
+    {
+     "id": "n20",
+     "codigo": "T1 26 20",
+     "cliente": "PEDRO GÓMEZ",
+     "destino": "CARTAGENA"
+    },
+    {
+     "id": "n21",
+     "codigo": "T1 26 21",
+     "cliente": "ANDRÉS GIL",
+     "destino": null
+    }
+   ],
+   "mensajes": [
+    {
+     "en": "2026-10-01T19:00:00Z",
+     "texto": "Carolina",
+     "reenviado": false,
+     "tipo": "text",
+     "encabezado": true,
+     "verdad": null,
+     "nota": null
+    },
+    {
+     "en": "2026-10-01T19:00:00Z",
+     "texto": "Hola Tati, soy Carolina Ruiz, una cosa: mi suegra necesita silla de ruedas en el aeropuerto",
+     "reenviado": true,
+     "tipo": "text",
+     "encabezado": false,
+     "verdad": "T1 26 11"
+    },
+    {
+     "en": "2026-10-01T19:00:40Z",
+     "texto": "Y si se puede habitación con dos camas dobles",
+     "reenviado": true,
+     "tipo": "text",
+     "encabezado": false,
+     "verdad": "T1 26 11"
+    },
+    {
+     "en": "2026-10-01T19:15:00Z",
+     "texto": "Jorge",
+     "reenviado": false,
+     "tipo": "text",
+     "encabezado": true,
+     "verdad": null,
+     "nota": null
+    },
+    {
+     "en": "2026-10-01T19:15:00Z",
+     "texto": "Buenas, somos los de Cartagena, el niño tiene 7 años y ya tiene registro civil",
+     "reenviado": true,
+     "tipo": "text",
+     "encabezado": false,
+     "verdad": "T1 26 8"
+    },
+    {
+     "en": "2026-10-01T19:16:00Z",
+     "texto": "Queremos plan todo incluido también",
+     "reenviado": true,
+     "tipo": "text",
+     "encabezado": false,
+     "verdad": "T1 26 8"
+    },
+    {
+     "en": "2026-10-01T19:20:30Z",
+     "texto": "Tati, presupuesto como 8 millones",
+     "reenviado": true,
+     "tipo": "text",
+     "encabezado": false,
+     "verdad": "T1 26 8"
+    },
+    {
+     "en": "2026-10-01T19:21:00Z",
+     "texto": "Luisa",
+     "reenviado": false,
+     "tipo": "text",
+     "encabezado": true,
+     "verdad": null,
+     "nota": null
+    },
+    {
+     "en": "2026-10-01T19:21:00Z",
+     "texto": "Hola Tati, habla Luisa, al final mi hermana también se va con nosotros",
+     "reenviado": true,
+     "tipo": "audio",
+     "encabezado": false,
+     "verdad": "T1 26 9"
+    },
+    {
+     "en": "2026-10-01T19:21:30Z",
+     "texto": "ella sale desde Bogotá",
+     "reenviado": true,
+     "tipo": "text",
+     "encabezado": false,
+     "verdad": "T1 26 9"
+    },
+    {
+     "en": "2026-10-01T19:30:00Z",
+     "texto": "Lo de Carolina va para el 28 y lo de Jorge para el 8",
+     "reenviado": false,
+     "tipo": "text",
+     "encabezado": false,
+     "verdad": null
+    }
+   ]
+  },
+  {
+   "viajes": [
+    {
+     "id": "n11",
+     "codigo": "T1 26 11",
+     "cliente": "CAROLINA RUIZ",
+     "destino": "PUNTA CANA"
+    },
+    {
+     "id": "n9",
+     "codigo": "T1 26 9",
+     "cliente": "LUISA MEJÍA",
+     "destino": "SAN ANDRÉS"
+    },
+    {
+     "id": "n8",
+     "codigo": "T1 26 8",
+     "cliente": "JORGE PÉREZ",
+     "destino": "CARTAGENA"
+    },
+    {
+     "id": "n20",
+     "codigo": "T1 26 20",
+     "cliente": "PEDRO GÓMEZ",
+     "destino": "CARTAGENA"
+    },
+    {
+     "id": "n21",
+     "codigo": "T1 26 21",
+     "cliente": "ANDRÉS GIL",
+     "destino": null
+    }
+   ],
+   "mensajes": [
+    {
+     "en": "2026-10-01T21:00:30Z",
+     "texto": "Luisa",
+     "reenviado": false,
+     "tipo": "text",
+     "encabezado": true,
+     "verdad": null,
+     "nota": null
+    },
+    {
+     "en": "2026-10-01T21:00:30Z",
+     "texto": "Tati, confirmado: somos 3 adultos con mi hermana",
+     "reenviado": true,
+     "tipo": "text",
+     "encabezado": false,
+     "verdad": "T1 26 9"
+    },
+    {
+     "en": "2026-10-01T21:01:00Z",
+     "texto": "jajaja gracias por la paciencia",
+     "reenviado": true,
+     "tipo": "text",
+     "encabezado": false,
+     "verdad": "T1 26 9"
+    },
+    {
+     "en": "2026-10-01T21:01:30Z",
+     "texto": "",
+     "reenviado": true,
+     "tipo": "sticker",
+     "encabezado": false,
+     "verdad": null
+    },
+    {
+     "en": "2026-10-01T21:05:00Z",
+     "texto": "Andrés Gil",
+     "reenviado": false,
+     "tipo": "text",
+     "encabezado": true,
+     "verdad": null,
+     "nota": null
+    },
+    {
+     "en": "2026-10-01T21:05:00Z",
+     "texto": "Hola! soy Andrés otra vez, ¿me confirmas si el hotel tiene club de niños? no, perdón, eso era para mi hermano, olvídalo",
+     "reenviado": true,
+     "tipo": "text",
+     "encabezado": false,
+     "verdad": "T1 26 21"
+    },
+    {
+     "en": "2026-10-01T21:05:30Z",
+     "texto": "Lo que sí: salimos de Barranquilla el 5 de diciembre",
+     "reenviado": true,
+     "tipo": "text",
+     "encabezado": false,
+     "verdad": "T1 26 21"
+    },
+    {
+     "en": "2026-10-01T21:10:30Z",
+     "texto": "Te confirmo 2 adultos, regreso el 10 de diciembre",
+     "reenviado": true,
+     "tipo": "text",
+     "encabezado": false,
+     "verdad": "T1 26 21"
+    }
+   ]
+  },
+  {
+   "viajes": [
+    {
+     "id": "n11",
+     "codigo": "T1 26 11",
+     "cliente": "CAROLINA RUIZ",
+     "destino": "PUNTA CANA"
+    },
+    {
+     "id": "n9",
+     "codigo": "T1 26 9",
+     "cliente": "LUISA MEJÍA",
+     "destino": "SAN ANDRÉS"
+    },
+    {
+     "id": "n8",
+     "codigo": "T1 26 8",
+     "cliente": "JORGE PÉREZ",
+     "destino": "CARTAGENA"
+    },
+    {
+     "id": "n20",
+     "codigo": "T1 26 20",
+     "cliente": "PEDRO GÓMEZ",
+     "destino": "CARTAGENA"
+    },
+    {
+     "id": "n21",
+     "codigo": "T1 26 21",
+     "cliente": "ANDRÉS GIL",
+     "destino": null
+    }
+   ],
+   "mensajes": [
+    {
+     "en": "2026-10-01T22:00:20Z",
+     "texto": "Carolina",
+     "reenviado": false,
+     "tipo": "text",
+     "encabezado": true,
+     "verdad": null,
+     "nota": null
+    },
+    {
+     "en": "2026-10-01T22:00:20Z",
+     "texto": "Tati, ¿el todo incluido tiene bebidas?",
+     "reenviado": true,
+     "tipo": "text",
+     "encabezado": false,
+     "verdad": "T1 26 11"
+    },
+    {
+     "en": "2026-10-01T22:00:40Z",
+     "texto": "Ah y salimos desde Bogotá",
+     "reenviado": true,
+     "tipo": "text",
+     "encabezado": false,
+     "verdad": "T1 26 11"
+    },
+    {
+     "en": "2026-10-01T22:01:00Z",
+     "texto": "Te cuento que el niño de nueve cumple diez en diciembre, por si cambia algo",
+     "reenviado": true,
+     "tipo": "audio",
+     "encabezado": false,
+     "verdad": "T1 26 11"
+    },
+    {
+     "en": "2026-10-01T22:05:00Z",
+     "texto": "Hola Tati, buenas tardes",
+     "reenviado": true,
+     "tipo": "text",
+     "encabezado": false,
+     "verdad": "T1 26 8"
+    },
+    {
+     "en": "2026-10-01T22:05:30Z",
+     "texto": "Para lo de Cartagena, ¿hay que llevar algo del niño?",
+     "reenviado": true,
+     "tipo": "text",
+     "encabezado": false,
+     "verdad": "T1 26 8"
+    },
+    {
+     "en": "2026-10-01T22:10:30Z",
+     "texto": "Tati confirmo 4 adultos y el niño",
+     "reenviado": true,
+     "tipo": "text",
+     "encabezado": false,
+     "verdad": "T1 26 8"
+    },
+    {
+     "en": "2026-10-01T22:12:30Z",
+     "texto": "nos vemos mañana para pagar",
+     "reenviado": true,
+     "tipo": "text",
+     "encabezado": false,
+     "verdad": "T1 26 8"
+    }
+   ]
+  }
+ ]
+}
