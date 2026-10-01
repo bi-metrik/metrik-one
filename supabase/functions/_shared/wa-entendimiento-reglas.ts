@@ -296,7 +296,7 @@ export function fraseNombraNumero(frase: string, n: number): boolean {
 const MARCAS_DE_DECLARACION: RegExp[] = [
   / no /, / sin /, / ni idea /, / cualquier\w* /, / da igual /, / da lo mismo /, / indiferente /,
   / (el|la|lo|los|las) que (sea|sean|haya|halla) /,
-  / (el|la|lo|los|las) que (tu|usted|ustedes )?(nos |me )?recomiend\w* /,
+  / (el|la|lo|los|las) que (tu |usted |ustedes )?(nos |me )?recomiend\w* /,
 ];
 
 /**
