@@ -247,6 +247,17 @@ export function calcularNiveles(
 }
 
 /**
+ * ¿Se cumple el `pedir_si` de un campo con estos valores? La misma regla que usan las barras:
+ * un dato ausente no cumple la condición (salvo `vacio`). Un `pedir_si` mal escrito o ausente
+ * cuenta como cumplido: no esconde nada que la barra mostraría.
+ */
+export function cumplePedirSi(raw: unknown, valores: Record<string, unknown>): boolean {
+  const pedir = leerPedirSi(raw)
+  if ('error' in pedir) return true
+  return pedir.condiciones.every(c => cumpleUna(c, valores))
+}
+
+/**
  * Los campos y los valores de varios bloques `datos` como si fueran uno: los campos en el
  * orden de los bloques, los valores aplanados por slug (así los leen ya `viaje-negocio.ts`
  * y el gate `campos_alguno`). Un slug repetido en dos bloques se queda con el primero.

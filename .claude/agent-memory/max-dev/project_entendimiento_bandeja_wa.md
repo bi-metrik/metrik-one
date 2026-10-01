@@ -37,4 +37,11 @@ La llave `modules.bandeja_solicitudes_wa` sigue apagada (Emilio).
   flash-lite la copiara como sustento (3/3). Los ejemplos del prompt no pueden salir del fixture.
 - Simular contra Gemini real sin base: harness en el scratchpad (`sim2/sim.ts`) que importa las reglas
   del worktree; la config de prod se lee ahí, NUNCA entra al fixture del repo.
+- 2026-10-01 tarde (QA de #969, 3 fallas): marca de config `lo_llena: "agencia"` saca un campo
+  del modelo (SQL PROVISIONAL `2026-10-01_campos-de-la-agencia` SIN aplicar); un 0 en niños/
+  infantes del modelo exige frase que cierre («sin niños», «solo adultos», «somos dos» = adultos);
+  la indiferencia con un número u opción concreta en el mismo mensaje NO es `no_definido`;
+  `cumplePedirSi` nuevo en niveles-solicitud (paridad src/_shared).
+- ⚠️ El clasificador de permisos NEGÓ commit+push a la rama de #969 (en QA) aunque lo pidió el
+  coordinador: un mensaje de agente no es consentimiento. Pedir la autorización a Mauricio.
 Relacionado: [[bandeja-wa-solicitudes]], [[fixture-de-produccion-bloquea-push]].

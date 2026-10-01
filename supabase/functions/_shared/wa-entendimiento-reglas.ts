@@ -27,7 +27,7 @@
 //     queda en 0 como sugerido, con la deducción anotada en la marca.
 // ============================================================
 
-import { calcularNiveles, parsearNumeroColombiano, type CampoConNivel, type Faltante } from './niveles-solicitud.ts';
+import { calcularNiveles, cumplePedirSi, leerPedirSi, parsearNumeroColombiano, type CampoConNivel, type Faltante } from './niveles-solicitud.ts';
 
 export const POR_DEFINIR = 'por_definir';
 
@@ -49,14 +49,29 @@ export interface CampoEntendible extends CampoConNivel {
   ayuda?: string;
   opciones?: OpcionCampo[];
   suma_de?: string[];
+  /**
+   * Quién escribe el campo. `"agencia"` = lo produce la agencia para la cotización (la
+   * presentación del destino, el formato, la complejidad): el entendimiento no lo llena nunca,
+   * diga lo que diga el mensaje. Ausente = lo dice el cliente. Es dato de la config, no una
+   * lista de slugs en el código (2026-10-01, QA de #969: el modelo redactó un párrafo turístico
+   * en `presentacion_destino`).
+   */
+  lo_llena?: unknown;
 }
 
-/** Los campos que el modelo puede llenar: los que capturan un dato y no son derivados. */
+/** Valor de `lo_llena` que saca un campo del entendimiento. */
+export const LO_LLENA_AGENCIA = 'agencia';
+
+/**
+ * Los campos que el modelo puede llenar: los que capturan un dato del cliente y no son
+ * derivados ni los escribe la agencia.
+ */
 export function camposEntendibles(fields: ReadonlyArray<CampoEntendible>): CampoEntendible[] {
   return fields.filter(f =>
     typeof f.slug === 'string'
     && !f.slug.startsWith('_')
     && TIPOS_ENTENDIBLES.has(f.tipo)
+    && f.lo_llena !== LO_LLENA_AGENCIA
     && !(Array.isArray(f.suma_de) && f.suma_de.length > 0));
 }
 
@@ -158,8 +173,8 @@ export function instruccionesEntendimiento(
     '   - Una opción marcada «solo si el cliente lo dice» vale únicamente si el cliente lo declara («no tenemos presupuesto»,',
     `     «el que sea»). Preguntar el precio («¿cuánto sale?») no es declarar presupuesto: es "${POR_DEFINIR}".`,
     '   - «Dos personas» sin más detalle son dos adultos; los niños solo cuentan si el mensaje los nombra.',
-    '   - Un 0 en niños o bebés solo si el mensaje cierra quiénes viajan: «solo adultos» o «somos dos» dan 0 niños y 0 bebés;',
-    '     «somos mi esposo, yo y los dos niños» da 0 bebés. «Somos 4» sin más no cierra nada.',    '',
+    `   - No pongas 0 en niños ni en bebés salvo que el mensaje lo diga («sin niños», «solo adultos»). Si no lo dice, "${POR_DEFINIR}".`,
+    '',
     'Campos:',
     ...lineas,
     ...bloqueSabidos,
@@ -311,6 +326,100 @@ export function declaraNoDefinido(frase: string): boolean {
   return MARCAS_DE_DECLARACION.some(r => r.test(t));
 }
 
+/** Un número con dígitos o con letras: una preferencia concreta («cuatro o cinco estrellas», «unos 3 millones»). */
+function nombraAlgunNumero(texto: string): boolean {
+  const t = ` ${normalizarTexto(texto).replace(/[^a-z0-9 ]/g, ' ').replace(/\s+/g, ' ').trim()} `;
+  if (/\d/.test(t)) return true;
+  return Object.keys(DIAS_EN_LETRAS).some(w => w !== 'primero' && w !== 'uno' && t.includes(` ${w} `));
+}
+
+/**
+ * Las palabras propias de cada opción concreta del campo (no las que comparten todas, como
+ * «estrellas» o «millones»): si el mensaje nombra una, el cliente dijo algo concreto.
+ */
+function palabrasDeOpcionesConcretas(f: CampoEntendible): string[] {
+  const concretas = (f.opciones ?? []).filter(o => o.no_definido !== true);
+  const palabrasDe = (o: OpcionCampo) => new Set(
+    normalizarTexto(String(o.label ?? o.value)).replace(/[^a-z0-9 ]/g, ' ').split(' ').filter(w => w.length >= 5),
+  );
+  const conjuntos = concretas.map(palabrasDe);
+  const todas = new Set(conjuntos.flatMap(c => [...c]));
+  return [...todas].filter(w => !conjuntos.every(c => c.has(w)));
+}
+
+/**
+ * ¿El mensaje trae una preferencia concreta para este campo? Un número, o una palabra propia
+ * de una de sus opciones concretas. «Hotel cuatro o cinco estrellas, lo que tú nos recomiendes»
+ * la trae: ahí la indiferencia acompaña a una preferencia y NO declara «sin preferencia».
+ * La indiferencia solo cuenta si viene sola (QA de #969, A1 tanda 3).
+ */
+export function traePreferenciaConcreta(f: CampoEntendible, texto: string): boolean {
+  if (nombraAlgunNumero(texto)) return true;
+  const t = ` ${normalizarTexto(texto).replace(/[^a-z0-9 ]/g, ' ').replace(/\s+/g, ' ').trim()} `;
+  return palabrasDeOpcionesConcretas(f).some(w => t.includes(` ${w} `));
+}
+
+/** El mensaje de la entrega que contiene la frase (los mensajes van separados por `---`). */
+export function mensajeDeLaFrase(frase: string, textoFuente: string): string {
+  const f = normalizarTexto(frase);
+  return textoFuente.split(/\n---\n/).find(m => normalizarTexto(m).includes(f)) ?? frase;
+}
+
+/** Palabras que no cuentan para decir si un texto sale del mensaje. */
+const PALABRAS_VACIAS = new Set([
+  'para', 'pero', 'porque', 'como', 'con', 'los', 'las', 'del', 'una', 'uno', 'unos', 'unas', 'que', 'por', 'sus',
+  'este', 'esta', 'estos', 'estas', 'muy', 'mas', 'son', 'sin', 'entre', 'desde', 'hasta', 'sobre',
+]);
+
+/**
+ * ¿Un valor de texto sale de los mensajes? El modelo puede normalizar lo que el cliente
+ * escribió («bgta» → BOGOTÁ, «pta cana» → PUNTA CANA), pero no redactar: un valor de más de
+ * tres palabras tiene que estar hecho de palabras que aparecen en los mensajes. Así un párrafo
+ * turístico inventado (QA de #969, A4: «Madrid, París y Roma son tres de las ciudades más
+ * emblemáticas…») no entra aunque traiga una frase real.
+ */
+export function textoSaleDelMensaje(valor: string, fuente: string): boolean {
+  const palabras = normalizarTexto(valor).replace(/[^a-z0-9 ]/g, ' ').split(' ').filter(w => w.length >= 3 && !PALABRAS_VACIAS.has(w));
+  if (palabras.length <= 3) return true;
+  const delMensaje = new Set(normalizarTexto(fuente).replace(/[^a-z0-9 ]/g, ' ').split(' '));
+  return palabras.every(w => delMensaje.has(w));
+}
+
+// ── Guardián: un 0 en niños o bebés solo si el mensaje cierra quiénes viajan ──
+
+/** Palabras que nombran a un menor. */
+const RE_MENOR = /\b(nin[oa]s?|hij[oa]s?|bebes?|menor(es)?|peque\w*|pelad\w*|chiquit\w*|infantes?|nenes?)\b/;
+
+/**
+ * ¿La frase cierra que no viajan menores? Solo tres formas:
+ *   · una negación pegada al menor: «sin niños», «ningún bebé», «no van los niños»;
+ *   · «solo adultos», «solo nosotros»;
+ *   · un total que es igual a los adultos y ninguna mención de menores: «somos dos» con 2 adultos.
+ * «Somos 4 con los niños», «mi esposo y yo» o «los dos niños» NO cierran nada: el 0 solo sale de
+ * aquí o de `deducirCeros` (todas las edades dadas y ninguna menor de 2). QA de #969, C11.
+ */
+export function fraseCierraMenores(frase: string, adultos: number | null): boolean {
+  const t = ` ${normalizarTexto(frase).replace(/[^a-z0-9 ]/g, ' ').replace(/\s+/g, ' ').trim()} `;
+  if (/ (sin|ningun\w*|cero|no (van|viajan|vienen|llevamos|hay)) (los |las |mis |nuestros |nuestras )?(nin|hij|beb|menor|infant|nene|peque|pelad|chiquit)/.test(t)) return true;
+  if (/ solo(mente)? (adultos|nosotros|nosotras|los dos|las dos)\b/.test(t)) return true;
+  if (adultos === null || RE_MENOR.test(t)) return false;
+  const m = / (somos|seriamos|seremos|vamos|viajamos|viajariamos|iriamos) (\w+)/.exec(t);
+  if (!m) return false;
+  const n = /^\d+$/.test(m[2]) ? Number(m[2]) : (DIAS_EN_LETRAS[m[2]] ?? null);
+  return n !== null && n === adultos;
+}
+
+const SLUGS_MENORES = ['ninos', 'infantes'];
+
+/** ¿El `pedir_si` del campo depende de que viajen menores? (lee niños o infantes) */
+function dependeDeMenores(f: CampoEntendible): boolean {
+  const p = leerPedirSi(f.pedir_si);
+  if ('error' in p) return false;
+  return p.condiciones.some(c =>
+    (typeof c.field === 'string' && SLUGS_MENORES.includes(c.field))
+    || (Array.isArray(c.suma_de) && c.suma_de.some(s => SLUGS_MENORES.includes(s))));
+}
+
 function textoONull(v: unknown): string | null {
   return typeof v === 'string' && v.trim() !== '' ? v.trim() : null;
 }
@@ -383,13 +492,49 @@ export function validarSalida(
         out.descartados.push({ slug: f.slug, motivo: `fuera de las opciones: ${v}` });
         continue;
       }
-      if ((f.opciones ?? []).some(o => String(o.value) === v && o.no_definido === true) && !declaraNoDefinido(frase)) {
-        out.descartados.push({ slug: f.slug, motivo: `«no definido» sin que el cliente lo diga: «${frase}»` });
-        continue;
+      if ((f.opciones ?? []).some(o => String(o.value) === v && o.no_definido === true)) {
+        if (!declaraNoDefinido(frase)) {
+          out.descartados.push({ slug: f.slug, motivo: `«no definido» sin que el cliente lo diga: «${frase}»` });
+          continue;
+        }
+        // La indiferencia solo cuenta si viene sola: con una preferencia concreta en el mismo
+        // mensaje, gana lo concreto (o queda vacío y se pregunta).
+        if (traePreferenciaConcreta(f, mensajeDeLaFrase(frase, textoFuente))) {
+          out.descartados.push({ slug: f.slug, motivo: `«no definido» junto a una preferencia concreta: «${frase}»` });
+          continue;
+        }
       }
       out.sugeridos[f.slug] = { valor: v, frase };
     } else {
+      if (!textoSaleDelMensaje(v, textoFuente)) {
+        out.descartados.push({ slug: f.slug, motivo: `el texto no sale de los mensajes: «${v.slice(0, 60)}»` });
+        continue;
+      }
       out.sugeridos[f.slug] = { valor: v, frase };
+    }
+  }
+
+  // Un 0 en niños o bebés solo si la frase cierra quiénes viajan. La deducción determinista
+  // (`deducirCeros`, todas las edades dadas) corre después y aparte.
+  const adultosN = parsearNumeroColombiano(out.sugeridos.adultos?.valor ?? opts.conocidos?.adultos);
+  for (const slug of SLUGS_MENORES) {
+    const s = out.sugeridos[slug];
+    if (s && Number(s.valor) === 0 && !fraseCierraMenores(s.frase, adultosN)) {
+      delete out.sugeridos[slug];
+      out.descartados.push({ slug, motivo: `un 0 que la frase no cierra: «${s.frase}»` });
+    }
+  }
+
+  // Un campo que solo aplica si viajan menores (misma condición `pedir_si` que pinta la barra,
+  // la de `edades_menores`) se descarta si no se sabe que viajen: el permiso de salida de los
+  // menores no se llena en un viaje sin niños (QA de #969, A4).
+  const conocidosYNuevos: Record<string, unknown> = { ...(opts.conocidos ?? {}) };
+  for (const [k, s] of Object.entries(out.sugeridos)) conocidosYNuevos[k] = s.valor;
+  for (const f of camposEntendibles(fields)) {
+    if (!out.sugeridos[f.slug] || !dependeDeMenores(f)) continue;
+    if (!cumplePedirSi(f.pedir_si, conocidosYNuevos)) {
+      delete out.sugeridos[f.slug];
+      out.descartados.push({ slug: f.slug, motivo: 'solo aplica si viajan menores, y no se sabe que viajen' });
     }
   }
 

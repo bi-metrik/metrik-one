@@ -21,6 +21,8 @@ import {
   fraseNombraNumero,
   leerEdades,
   textoPreguntaContacto,
+  textoSaleDelMensaje,
+  traePreferenciaConcreta,
   validarSalida,
   type CampoEntendible,
   type DecisionContacto,
@@ -409,11 +411,172 @@ describe('regla 3: el mínimo tiene que poder cerrarse (infantes deducido)', () 
     expect((r.data._sugeridos as Record<string, { deduccion?: string }>).infantes.deduccion).toContain('Edades 9, 4');
   });
 
-  it('un 0 del modelo sí necesita frase; las instrucciones dicen cuándo cierra el grupo', () => {
+  it('un 0 del modelo sí necesita frase; el prompt ya no enseña a deducir 0 bebés de «los dos niños»', () => {
     const i = instruccionesEntendimiento(FIELDS, '2026-10-01');
-    expect(i).toContain('«solo adultos» o «somos dos» dan 0 niños y 0 bebés');
-    expect(i).toContain('«Somos 4» sin más no cierra nada');
+    expect(i).not.toContain('da 0 bebés');
+    expect(i).toContain('No pongas 0 en niños ni en bebés salvo que el mensaje lo diga');
     expect(validarSalida(salida({ ninos: { valor: '0', frase: '' } }), FIELDS, 'somos 4').sugeridos).toEqual({});
+  });
+});
+
+describe('QA de #969 · 3: el 0 en niños o bebés solo si la frase cierra quiénes viajan', () => {
+  const leer = (texto: string, valores: Record<string, { valor: string; frase: string }>) =>
+    validarSalida(salida(valores), FIELDS, texto, { hoyISO: '2026-10-01' });
+
+  it('C11 «Somos 4 con los niños» no da infantes 0 (falló 3/3 en la rama)', () => {
+    const t = 'Somos 4 con los niños, queremos ir a Cartagena';
+    const s = leer(t, {
+      adultos: { valor: '2', frase: 'Somos 4 con los niños' },
+      ninos: { valor: '2', frase: 'Somos 4 con los niños' },
+      infantes: { valor: '0', frase: 'Somos 4 con los niños' },
+    });
+    expect(s.sugeridos.infantes).toBeUndefined();
+    expect(s.descartados).toContainEqual({ slug: 'infantes', motivo: 'un 0 que la frase no cierra: «Somos 4 con los niños»' });
+  });
+
+  it('A1 tanda 1 «somos mi esposo, yo y los dos niños» no da 0 bebés', () => {
+    const t = 'Queremos ir en diciembre, somos mi esposo, yo y los dos niños';
+    const s = leer(t, {
+      adultos: { valor: '2', frase: 'somos mi esposo, yo' },
+      infantes: { valor: '0', frase: 'somos mi esposo, yo y los dos niños' },
+    });
+    expect(s.sugeridos.infantes).toBeUndefined();
+  });
+
+  it.each([
+    ['«sin niños»', 'vamos mi esposo y yo, sin niños', 'sin niños', '2'],
+    ['«solo adultos»', 'al final van solo adultos, somos 3', 'van solo adultos', '3'],
+    ['«somos dos» con 2 adultos', 'somos dos, a Cartagena', 'somos dos', '2'],
+    ['«no van los niños»', 'esta vez no van los niños', 'no van los niños', '2'],
+  ])('pasa: %s', (_n, texto, frase, adultos) => {
+    const s = leer(texto, { adultos: { valor: adultos, frase: texto }, ninos: { valor: '0', frase }, infantes: { valor: '0', frase } });
+    expect(s.sugeridos.ninos?.valor).toBe(0);
+    expect(s.sugeridos.infantes?.valor).toBe(0);
+  });
+
+  it.each([
+    ['«mi esposo y yo» (no cierra; el bot pregunta)', 'Mi esposo y yo queremos Europa', 'Mi esposo y yo', '2'],
+    ['«somos 3» con 2 adultos', 'somos 3', 'somos 3', '2'],
+    ['«somos 2 y los niños»', 'somos 2 y los niños', 'somos 2 y los niños', '2'],
+  ])('no pasa: %s', (_n, texto, frase, adultos) => {
+    const s = leer(texto, { adultos: { valor: adultos, frase: texto }, ninos: { valor: '0', frase } });
+    expect(s.sugeridos.ninos).toBeUndefined();
+  });
+
+  it('la deducción determinista sigue cerrando infantes con todas las edades ≥ 2', () => {
+    const t = 'somos 2 adultos y 2 niños de 9 y 4 años';
+    const s = leer(t, {
+      adultos: { valor: '2', frase: '2 adultos' }, ninos: { valor: '2', frase: '2 niños' },
+      edades_menores: { valor: '9, 4', frase: 'de 9 y 4 años' },
+    });
+    expect(conDeducciones(FIELDS, s.sugeridos).infantes).toMatchObject({ valor: 0, frase: '' });
+  });
+});
+
+describe('QA de #969 · 1: la indiferencia solo cuenta si viene sola', () => {
+  const HOTEL: CampoEntendible = { slug: 'categoria_hotel', tipo: 'select', label: 'Categoría de hotel', opciones: [
+    { value: '3', label: '3 estrellas' }, { value: '4', label: '4 estrellas' }, { value: '5', label: '5 estrellas' },
+    { value: 'sin_preferencia', label: 'Sin preferencia', no_definido: true },
+  ] };
+  const PRESUPUESTO: CampoEntendible = { slug: 'presupuesto', tipo: 'select', label: 'Presupuesto', opciones: [
+    { value: 'menos_3m', label: 'Menos de $3 millones' }, { value: '12m_20m', label: 'Entre $12 y $20 millones' },
+    { value: 'sin_definir', label: 'Aún no tiene presupuesto definido', no_definido: true },
+  ] };
+  // El mensaje exacto de la tanda 3 del chat de Punta Cana (audio de la cliente).
+  const AUDIO = 'Hola Tati, mira, hablé con mi esposo y mejor del 28 de diciembre al 3 de enero, porque él sale a vacaciones el 27. Queremos todo incluido, hotel cuatro o cinco estrellas, lo que tú nos recomiendes, y de presupuesto tenemos unos quince millones por todo.';
+
+  it.each([
+    ['con la frase entera', 'hotel cuatro o cinco estrellas, lo que tú nos recomiendes'],
+    ['con solo la indiferencia como frase', 'lo que tú nos recomiendes'],
+  ])('A1 T3 «cuatro o cinco estrellas, lo que tú nos recomiendes» NO es «sin preferencia» (%s)', (_n, frase) => {
+    const s = validarSalida({ historia: '', valores: { categoria_hotel: { valor: 'sin_preferencia', frase } } }, [HOTEL], AUDIO);
+    expect(s.sugeridos).toEqual({});
+    expect(s.descartados[0].motivo).toContain('«no definido» junto a una preferencia concreta');
+    // Con el campo vacío el mínimo NO se da por completo: el bot pregunta la categoría.
+    expect(huecos([{ ...HOTEL, nivel: 'minimo', pregunta: '¿De qué categoría?' }], {}).minimo.faltan.map(f => f.slug)).toEqual(['categoria_hotel']);
+  });
+
+  it('lo concreto sí entra: «4» con la frase de las estrellas', () => {
+    const s = validarSalida({ historia: '', valores: { categoria_hotel: { valor: '4', frase: 'hotel cuatro o cinco estrellas' } } }, [HOTEL], AUDIO);
+    expect(s.sugeridos.categoria_hotel.valor).toBe('4');
+  });
+
+  it.each([
+    ['«el que sea» solo', 'el hotel, el que sea', HOTEL, 'sin_preferencia'],
+    ['«lo que tú nos recomiendes» solo', 'Lo que tú nos recomiendes', HOTEL, 'sin_preferencia'],
+    ['«no tenemos presupuesto» solo', 'la verdad no tenemos presupuesto todavía', PRESUPUESTO, 'sin_definir'],
+  ])('la indiferencia sola sigue valiendo: %s', (_n, texto, campo, valor) => {
+    expect(validarSalida({ historia: '', valores: { [campo.slug]: { valor, frase: texto } } }, [campo], texto).sugeridos[campo.slug]?.valor).toBe(valor);
+  });
+
+  it('«no tenemos presupuesto fijo, unos 3 millones» trae un número: no es «sin definir»', () => {
+    const t = 'no tenemos presupuesto fijo, unos 3 millones';
+    expect(validarSalida({ historia: '', valores: { presupuesto: { valor: 'sin_definir', frase: t } } }, [PRESUPUESTO], t).sugeridos).toEqual({});
+  });
+
+  it('las palabras que comparten todas las opciones no cuentan como preferencia', () => {
+    expect(traePreferenciaConcreta(HOTEL, 'un hotel de muchas estrellas, el que sea')).toBe(false);
+    expect(traePreferenciaConcreta(PRESUPUESTO, 'menos de lo que cuesta, el que sea')).toBe(true);
+  });
+});
+
+describe('QA de #969 · 2: lo que escribe la agencia, lo que depende de menores y el texto redactado', () => {
+  const CAMPOS: CampoEntendible[] = [
+    ...FIELDS,
+    { slug: 'requisitos_especiales', tipo: 'texto', label: 'Requisitos' },
+    { slug: 'presentacion_destino', tipo: 'texto', label: 'Presentación del destino', lo_llena: 'agencia' },
+  ];
+  const A4 = 'Mi esposo y yo queremos Europa 20 días en mayo: Madrid, París y Roma';
+  const PARRAFO = 'Madrid, París y Roma son tres de las ciudades más emblemáticas de Europa, llenas de historia, arte y gastronomía.';
+
+  it('(a) un campo con `lo_llena: "agencia"` no está en el esquema, ni en el prompt, ni se acepta', () => {
+    expect(camposEntendibles(CAMPOS).map(f => f.slug)).not.toContain('presentacion_destino');
+    expect(Object.keys((esquemaDeSalida(CAMPOS) as Esquema).properties.valores.properties)).not.toContain('presentacion_destino');
+    expect(instruccionesEntendimiento(CAMPOS, '2026-10-01')).not.toContain('presentacion_destino');
+    const s = validarSalida({ historia: '', valores: { presentacion_destino: { valor: PARRAFO, frase: 'Madrid, París y Roma' } } }, CAMPOS, A4);
+    expect(s.sugeridos).toEqual({});
+  });
+
+  it('(b) A4: el permiso de salida de menores no se llena en un viaje sin niños', () => {
+    const base = {
+      destino_tipo: { valor: 'internacional', frase: 'Europa' },
+      adultos: { valor: '2', frase: 'Mi esposo y yo' },
+      permiso_salida_menores: { valor: 'tiene_permiso', frase: 'Mi esposo y yo' },
+    };
+    // Sin niños sabidos (el 0 de «mi esposo y yo» no pasa el guardián), y con un 0 declarado.
+    for (const extra of [{}, { ninos: { valor: '0', frase: 'sin niños' } }]) {
+      const texto = `${A4}, sin niños`;
+      const s = validarSalida(salida({ ...base, ...extra }), FIELDS, texto, { hoyISO: '2026-10-01' });
+      expect(s.sugeridos.permiso_salida_menores).toBeUndefined();
+      expect(s.descartados).toContainEqual({ slug: 'permiso_salida_menores', motivo: 'solo aplica si viajan menores, y no se sabe que viajen' });
+    }
+  });
+
+  it('(b) con niños (de este mensaje o de lo que el negocio ya tiene) el permiso sí entra', () => {
+    const t = 'los niños viajan con papá y mamá a Cancún';
+    const v = { destino_tipo: { valor: 'internacional', frase: 'Cancún' }, permiso_salida_menores: { valor: 'tiene_permiso', frase: 'los niños viajan con papá y mamá' } };
+    expect(validarSalida(salida({ ...v, ninos: { valor: '2', frase: 'los niños' } }), FIELDS, t).sugeridos.permiso_salida_menores?.valor).toBe('tiene_permiso');
+    expect(validarSalida(salida(v), FIELDS, t, { conocidos: { ninos: 2 } }).sugeridos.permiso_salida_menores?.valor).toBe('tiene_permiso');
+  });
+
+  it('(b) las edades de los menores siguen entrando con los niños', () => {
+    const t = '2 niños de 9 y 4 años';
+    const s = validarSalida(salida({ ninos: { valor: '2', frase: '2 niños' }, edades_menores: { valor: '9, 4', frase: 'de 9 y 4 años' } }), FIELDS, t);
+    expect(s.sugeridos.edades_menores?.valor).toBe('9, 4');
+  });
+
+  it('(c) un texto redactado por el modelo no entra aunque traiga una frase real', () => {
+    const s = validarSalida({ historia: '', valores: { requisitos_especiales: { valor: PARRAFO, frase: 'Madrid, París y Roma' } } }, CAMPOS, A4);
+    expect(s.sugeridos).toEqual({});
+    expect(s.descartados[0].motivo).toContain('el texto no sale de los mensajes');
+  });
+
+  it('(c) normalizar sí vale: «bgta» → BOGOTÁ, «pta cana» → PUNTA CANA, las ciudades tal cual', () => {
+    expect(textoSaleDelMensaje('Bogotá', 'saliendo de bgta')).toBe(true);
+    expect(textoSaleDelMensaje('Punta Cana', 'pta cana')).toBe(true);
+    expect(textoSaleDelMensaje('Madrid, París y Roma', A4)).toBe(true);
+    expect(textoSaleDelMensaje('ya tienen pasaporte', 'Los niños viajan con nosotros dos, ya tienen pasaporte')).toBe(true);
+    expect(textoSaleDelMensaje(PARRAFO, A4)).toBe(false);
   });
 });
 
