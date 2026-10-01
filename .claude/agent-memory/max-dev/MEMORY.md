@@ -5,6 +5,7 @@
 - ⚠️⚠️ [Trial de 5 días del Radar y cobro por ciclo](project_radar_trial_y_cobro.md) — migración SIN aplicar; la gracia de mora pasa de 3 a 5 días en TODOS los productos
 - ⚠️⚠️ [Borrar, editar y escribir en la Actividad](project_actividad_borrar_comentario.md) — DELETE/UPDATE/INSERT aplicadas; force_unlock 20260928150000 SIN aplicar
 - ⚠️⚠️ [Avisos al cliente en día hábil (#935)](project_avisos_dia_habil.md) — migración SIN aplicar; 4 funciones a desplegar; evento se guarda, estado se salta
+- ⚠️⚠️ [Freno de titulares antes de radicar](project_freno_titulares_antes_de_radicar.md) — migración 20261001100000 SIN aplicar; frena en 6 Y 7
 - ⚠️⚠️ [Datos clave y cruces de titularidad (#886)](project_datos_clave_cruces_titularidad.md) — migración ANTES del merge, backfill DESPUÉS; frena 4 casos
 - ⚠️⚠️ [Webhook de Wompi de Ferretería (#953)](project_ferreteria_webhook_wompi.md) — migración SIN aplicar; crearNegocio sin sesión; payload sin verificar
 - ⚠️⚠️ [Módulo Ferretería dimpro (#905, #917, #920)](project_modulo_ferreteria_dimpro.md) — #917 migración SIN aplicar (escribe datos); #920 tablero Marketplace

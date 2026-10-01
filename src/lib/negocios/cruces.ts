@@ -19,6 +19,10 @@
  *   contradice nada. El cruce calla hasta que los dos lados existen.
  * - Un lado cuyo bloque no le aplica al caso tampoco cuenta (el motor solo lee bloques
  *   que le aplican; un dato de una rama abandonada no decide nada).
+ * - Excepción a la regla anterior: el tipo `requeridos` existe justo para el dato que
+ *   FALTA. Ahí la ausencia es la contradicción (una copropiedad sin el RUT del segundo
+ *   titular no puede radicarse ante la UPME), pero solo cuando la `condition` del cruce
+ *   se cumple y el bloque del dato le aplica al caso.
  * - `bloquea_en_etapas` dice en qué etapas (por `orden`) el cruce FRENA el avance. En
  *   las demás solo avisa. Frenar siempre se puede omitir con el permiso de omitir gates
  *   y el motivo escrito: un control nuevo sin salida deja casos varados.
@@ -113,7 +117,30 @@ export interface CruceCoincide extends CruceBase {
   equivalencias?: string[][]
 }
 
-export type Cruce = CruceCantidad | CruceDocumentoEnLista | CruceCoincide
+/** Un dato que tiene que estar, con el nombre con que se le dice al equipo que falta. */
+export interface CampoRequerido extends FuenteValor {
+  /** «el nombre del segundo titular (RUT del solicitante 2)». */
+  label: string
+}
+
+/**
+ * Datos que TIENEN que estar cuando se cumple la `condition` (la titularidad dice
+ * copropiedad: el RUT del segundo titular, su nombre y su documento). Es el único tipo en
+ * el que un lado ausente sí es una contradicción.
+ *
+ * Un campo cuenta como presente si alguno de sus bloques (el principal o una
+ * alternativa) le aplica al caso y trae el dato. Si NINGUNO le aplica, el campo calla: un
+ * bloque que no le aplica al caso no se le puede exigir. Que el negocio no tenga todavía
+ * fila del bloque (nunca se cargó) sí cuenta como faltante: es justo el caso que se busca.
+ *
+ * Marcador del mensaje: `{faltantes}` («el nombre … y el documento …»).
+ */
+export interface CruceRequeridos extends CruceBase {
+  tipo: 'requeridos'
+  campos: CampoRequerido[]
+}
+
+export type Cruce = CruceCantidad | CruceDocumentoEnLista | CruceCoincide | CruceRequeridos
 
 export interface Contradiccion {
   slug: string
@@ -139,6 +166,11 @@ function esFuenteValor(v: unknown): v is FuenteValor {
   return esFuente(v)
 }
 
+function esCampoRequerido(v: unknown): v is CampoRequerido {
+  return esFuenteValor(v) && typeof (v as unknown as Record<string, unknown>).label === 'string' &&
+    !!String((v as unknown as Record<string, unknown>).label).trim()
+}
+
 function esCruce(v: unknown): v is Cruce {
   if (typeof v !== 'object' || v === null) return false
   const c = v as Record<string, unknown>
@@ -146,6 +178,12 @@ function esCruce(v: unknown): v is Cruce {
   if (typeof c.mensaje !== 'string' || !c.mensaje.trim()) return false
   if (c.tipo === 'cantidad') return esLado(c.a) && esLado(c.b)
   if (c.tipo === 'documento_en_lista') return esFuente(c.documento) && esFuente(c.lista)
+  if (c.tipo === 'requeridos') {
+    // Sin `condition` exigiría el dato a TODO caso de la línea: eso es trabajo de un gate de
+    // bloque, no de un cruce. Se descarta para que un descuido no frene la línea entera.
+    return typeof c.condition === 'object' && c.condition !== null &&
+      Array.isArray(c.campos) && c.campos.length > 0 && c.campos.every(esCampoRequerido)
+  }
   if (c.tipo === 'coincide') {
     return esFuenteValor(c.a) && Array.isArray(c.b) && c.b.some(esFuenteValor) &&
       (MODOS_COMPARACION as unknown[]).includes(c.modo)
@@ -177,6 +215,11 @@ export function slugsDeCruces(cruces: Cruce[]): string[] {
     } else if (c.tipo === 'documento_en_lista') {
       s.add(c.documento.source_bloque_slug)
       s.add(c.lista.source_bloque_slug)
+    } else if (c.tipo === 'requeridos') {
+      for (const f of c.campos) {
+        s.add(f.source_bloque_slug)
+        for (const alt of f.alternativas ?? []) s.add(alt)
+      }
     } else {
       for (const f of [c.a, ...c.b.filter(esFuenteValor)]) {
         s.add(f.source_bloque_slug)
@@ -249,6 +292,26 @@ async function resolverValor(f: FuenteValor, ctx: ContextoFuentes): Promise<unkn
   return undefined
 }
 
+/**
+ * ¿Falta el dato? `null` si ninguno de sus bloques le aplica al caso (no se le exige),
+ * `true` si alguno le aplica y ninguno de los que aplican lo trae.
+ */
+async function faltaRequerido(f: CampoRequerido, ctx: ContextoFuentes): Promise<boolean | null> {
+  let algunoAplica = false
+  for (const slug of [f.source_bloque_slug, ...(f.alternativas ?? [])]) {
+    if (!(await ctx.aplica(slug))) continue
+    algunoAplica = true
+    if (valorDe(ctx, slug, f.field) !== undefined) return false
+  }
+  return algunoAplica ? true : null
+}
+
+/** «a», «a y b», «a, b y c». */
+function enumerar(items: string[]): string {
+  if (items.length <= 1) return items.join('')
+  return `${items.slice(0, -1).join(', ')} y ${items[items.length - 1]}`
+}
+
 function conUnidad(n: number, unidad?: [string, string]): string {
   if (!unidad) return String(n)
   return `${n} ${n === 1 ? unidad[0] : unidad[1]}`
@@ -285,6 +348,16 @@ export async function evaluarCruces(
           b_valor: b.valor,
         }),
       })
+      continue
+    }
+
+    if (c.tipo === 'requeridos') {
+      const faltantes: string[] = []
+      for (const f of c.campos) {
+        if ((await faltaRequerido(f, ctx)) === true) faltantes.push(f.label)
+      }
+      if (faltantes.length === 0) continue
+      out.push({ slug: c.slug, bloquea, mensaje: redactar(c.mensaje, { faltantes: enumerar(faltantes) }) })
       continue
     }
 
