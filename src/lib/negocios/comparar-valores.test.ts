@@ -172,6 +172,8 @@ describe('falsos avisos del certificado (2026-10-01)', () => {
   it('sigla con puntos: «S.A.S.» es «SAS»', () => {
     expect(coinciden('Motores del Sur SAS', 'MOTORES DEL SUR, S.A.S.', 'contenido')).toBe(true)
     expect(coinciden('MOTORES DEL SUR S.A.', 'Motores del Sur SA', 'contenido')).toBe(true)
+    // Con una palabra de más a un lado ya no basta quitar los espacios: la sigla se pliega.
+    expect(coinciden('MOTORES DEL SUR S.A.S. BIC', 'Motores del Sur SAS', 'contenido')).toBe(true)
     expect(normalizarTexto('Ing. J. Perez')).toBe('ing j perez')
   })
 
