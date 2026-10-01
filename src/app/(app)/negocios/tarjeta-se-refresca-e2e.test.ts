@@ -411,6 +411,8 @@ describe('criterio 7 · el bloque y el total cambian al quitar o al aceptar una 
     })
     expect(antes.t).toContain('Habitación 2')
     expect(ahora.t).not.toContain('Habitación 2')
+    // Ya escrita, el aviso del «Deshacer» no queda (`aviso-deshacer-render.test.ts`).
+    expect(ahora.t).not.toContain('El total se actualiza cuando pase el Deshacer')
     expect(ahora.costoLinea).toBe('3.500.000')
     expect(ahora.precioOpcion).toBe(pesos(conMargen(3_500_000)))
     expect(ahora.totalCotizacion).toBe(ahora.precioOpcion)

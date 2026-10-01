@@ -26,7 +26,10 @@ escrito») se generalizó a la cotización entera.
 - Desde #967 corregir check-in/out de un hotel costeado a mano RECONFIRMA solo: el aviso de
   reconfirmar solo aparece si no pudo (pantallazo = caso dorado C). El criterio 6 del brief lo pedía
   visible: avisado a la sesión principal.
-- «Quitar habitación» de la tarjeta escribe al vencer el «Deshacer» (6 s): el total cambia ahí.
+- «Quitar habitación» de la tarjeta escribe al vencer el «Deshacer» (6 s): el total cambia ahí, y
+  mientras tanto `AvisoDeshacerTotal` lo dice con cuenta regresiva (Mauricio lo aceptó así). El
+  linter `react-hooks/purity` marca `Date.now()` aunque esté en un manejador: va por `horaActual()`.
+- Criterio 6 aceptado por Mauricio: a mano se reconfirma solo, sin aviso; el aviso es del pantallazo.
 - El arnés de render que fuerza la tarjeta abierta (`vi.mock` de `tarjeta-opcion` con
   `abierta: true`) deja leer tabla, hoja y total del editor real en un render estático.
 

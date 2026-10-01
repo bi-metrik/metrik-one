@@ -51,6 +51,14 @@ import {
   resumenDeAlojamiento,
 } from '@/lib/cotizaciones/tarjeta-opcion'
 import { parseMontoCop } from '@/lib/negocios/monto-cop'
+import {
+  agregarEspera,
+  quitarEspera,
+  segundosParaElTotal,
+  SIN_ESPERAS,
+  textoAvisoDeshacer,
+  type EsperasDeshacer,
+} from '@/lib/cotizaciones/espera-deshacer'
 import { datosManuales } from '@/lib/cotizaciones/ingreso-manual'
 
 /**
@@ -66,6 +74,8 @@ import { datosManuales } from '@/lib/cotizaciones/ingreso-manual'
  */
 
 const ESPERA_DESHACER_MS = 6000
+/** Solo desde manejadores y efectos (el clic de «Quitar habitación» y el tic del aviso). */
+const horaActual = () => Date.now()
 
 /** Lo que una persona escribe en la ficha, con el rótulo del prototipo. */
 const CAMPOS_FICHA_HOTEL: readonly { slug: string; label: string }[] = [
@@ -584,6 +594,16 @@ function Alojamiento({
       pendientes.clear()
     }
   }, [])
+  // Mientras corre el «Deshacer» el total todavía no cambió: el aviso lo dice, con la cuenta
+  // (`espera-deshacer.ts`). Se va al deshacer, o cuando la quita ya se escribió.
+  const [esperas, setEsperas] = useState<EsperasDeshacer>(SIN_ESPERAS)
+  const [ahora, setAhora] = useState(0)
+  useEffect(() => {
+    if (esperas.size === 0) return
+    const tic = setInterval(() => setAhora(horaActual()), 500)
+    return () => clearInterval(tic)
+  }, [esperas])
+  const segundosTotal = segundosParaElTotal(esperas, ahora)
 
   const porTipo = costoPorTipoDeHabitaciones(reparto)
   const visibles = reparto.habitaciones.filter(h => !quitadas.has(h.id))
@@ -591,10 +611,15 @@ function Alojamiento({
   function quitar(h: HabitacionRepartida, indice: number) {
     if (enEspera.current.has(h.id)) return
     const mostrar = () => setQuitadas(prev => { const n = new Set(prev); n.delete(h.id); return n })
+    const sinAviso = () => setEsperas(prev => quitarEspera(prev, h.id))
     setQuitadas(prev => new Set([...prev, h.id]))
+    const empieza = horaActual()
+    setAhora(empieza)
+    setEsperas(prev => agregarEspera(prev, h.id, empieza + ESPERA_DESHACER_MS))
     const ejecutar = () => {
       enEspera.current.delete(h.id)
       void quitarHabitacionDeOpcion(itemId, h.id).then(r => {
+        sinAviso()
         if (!r.success) { toast.error(r.error ?? 'No se pudo quitar la habitación.'); mostrar(); return }
         if (r.pendiente) toast.warning(r.pendiente)
         onCambio()
@@ -604,7 +629,7 @@ function Alojamiento({
     enEspera.current.set(h.id, { reloj, ejecutar })
     toast(`Quitaste la habitación ${h.numero ?? indice + 1}.`, {
       duration: ESPERA_DESHACER_MS,
-      action: { label: 'Deshacer', onClick: () => { clearTimeout(reloj); enEspera.current.delete(h.id); mostrar() } },
+      action: { label: 'Deshacer', onClick: () => { clearTimeout(reloj); enEspera.current.delete(h.id); mostrar(); sinAviso() } },
     })
   }
 
@@ -640,10 +665,29 @@ function Alojamiento({
           ))}
         </div>
       )}
+      <AvisoDeshacerTotal segundos={segundosTotal} />
       {resumen.falta && editable && (
         <PideHabitacion itemId={itemId} texto={`${resumen.falta.verbo} ${resumen.falta.quien}: pega su habitación.`} onCambio={onCambio} />
       )}
     </section>
+  )
+}
+
+/**
+ * El aviso de la ventana del «Deshacer» de «Quitar habitación»: el total cambia al vencer.
+ * `segundos: null` = nada espera y no se pinta nada.
+ */
+export function AvisoDeshacerTotal({ segundos }: { segundos: number | null }) {
+  if (segundos === null) return null
+  return (
+    <p
+      role="status"
+      aria-live="polite"
+      className="m-0 flex items-center gap-2 rounded-lg border border-[#E9C98F] bg-[#FBF1E2] px-3 py-2 text-xs font-semibold text-[#9A5F0C]"
+      data-aviso-deshacer
+    >
+      {textoAvisoDeshacer(segundos)}
+    </p>
   )
 }
 
