@@ -21,7 +21,7 @@
 - ⚠️ [«No aplica» por línea](project_no_aplica_por_linea.md) — SIN aplicar; avisa, no cierra
 - ⚠️⚠️ [Formato 010 DIAN](project_formulario_010_dian.md) — casilla 25 SIN indicativo (la DIAN rechaza)
 - ⚠️⚠️ [Transcripción a ciegas del NIT](project_confirmacion_nit_ciegas.md) — #807: la casilla NO viaja al navegador
-- ⚠️ [Barrera OFFSET 0 en RPC Comercial SOENA (#978)](project_perf_fence_venta_mes_soena.md) — SIN aplicar; origen/seccional con deriva prod≠repo
+- ⚠️ [Barrera OFFSET 0 en RPC Comercial SOENA (#978)](project_perf_fence_venta_mes_soena.md) — SIN aplicar; pagos/ventas fuera por deriva prod≠repo
 - ⚠️ [Tableros operativos por fase (#939)](project_tableros_operativos.md) — inerte hasta encender config_extra.tableros_operativos en metrik
 - ⚠️⚠️ [El preview abre un workspace (#968)](project_preview_abre_workspace.md) — `?__ws=<slug>`; base de PRODUCCION; sin GEMINI en Preview; login por código
 - ⚠️ [Publicar los términos del Radar](project_publicacion_terminos_radar.md) — APLICADO (PDF, fila, alcance plantilla); un genérico se ve por el módulo contratado; falta ejercitar la aceptación
