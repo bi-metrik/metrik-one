@@ -360,8 +360,10 @@ describe('regla 2: una opción «no definido» solo si el cliente lo dice', () =
 
   it('una opción normal no pide declaración, y sin la marca en la config todo sigue como antes', () => {
     expect(leer('unos quince millones', { presupuesto: { valor: '12m_20m', frase: 'unos quince millones' } }).sugeridos.presupuesto.valor).toBe('12m_20m');
+    // Sin la marca, la opción tampoco entra si la frase no la nombra (QA de #971 v2: el modelo no deduce opciones).
     const sinMarca = CAMPOS.map(c => ({ ...c, opciones: c.opciones!.map(o => ({ value: o.value, label: o.label })) }));
-    expect(validarSalida({ valores: { presupuesto: { valor: 'sin_definir', frase: 'cuánto sale?' } } }, sinMarca, 'cuánto sale?').sugeridos.presupuesto.valor).toBe('sin_definir');
+    expect(validarSalida({ valores: { presupuesto: { valor: 'sin_definir', frase: 'cuánto sale?' } } }, sinMarca, 'cuánto sale?').sugeridos.presupuesto).toBeUndefined();
+    expect(validarSalida({ valores: { presupuesto: { valor: 'sin_definir', frase: 'no tenemos presupuesto definido' } } }, sinMarca, 'no tenemos presupuesto definido').sugeridos.presupuesto?.valor).toBe('sin_definir');
   });
 
   it('el modelo ve qué opción es de este tipo', () => {
@@ -550,13 +552,13 @@ describe('QA de #969 · 2: lo que escribe la agencia, lo que depende de menores 
       const texto = `${A4}, sin niños`;
       const s = validarSalida(salida({ ...base, ...extra }), FIELDS, texto, { hoyISO: '2026-10-01' });
       expect(s.sugeridos.permiso_salida_menores).toBeUndefined();
-      expect(s.descartados).toContainEqual({ slug: 'permiso_salida_menores', motivo: 'solo aplica si viajan menores, y no se sabe que viajen' });
+      expect(s.descartados.map(d => d.slug)).toContain('permiso_salida_menores');
     }
   });
 
   it('(b) con niños (de este mensaje o de lo que el negocio ya tiene) el permiso sí entra', () => {
-    const t = 'los niños viajan con papá y mamá a Cancún';
-    const v = { destino_tipo: { valor: 'internacional', frase: 'Cancún' }, permiso_salida_menores: { valor: 'tiene_permiso', frase: 'los niños viajan con papá y mamá' } };
+    const t = 'los niños ya tienen el permiso de salida, vamos a Cancún';
+    const v = { permiso_salida_menores: { valor: 'tiene_permiso', frase: 'ya tienen el permiso de salida' } };
     expect(validarSalida(salida({ ...v, ninos: { valor: '2', frase: 'los niños' } }), FIELDS, t).sugeridos.permiso_salida_menores?.valor).toBe('tiene_permiso');
     expect(validarSalida(salida(v), FIELDS, t, { conocidos: { ninos: 2 } }).sugeridos.permiso_salida_menores?.valor).toBe('tiene_permiso');
   });

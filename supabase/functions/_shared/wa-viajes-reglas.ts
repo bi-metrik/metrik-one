@@ -283,6 +283,14 @@ export function evidenciaApunta(evidencia: string, d: DestinoPlan, viajes: Reado
   return !!d.codigo && normalizarTexto(evidencia).replace(/[^a-z0-9]/g, '').includes(codigoCompacto(d.codigo).toLowerCase());
 }
 
+/** ¿El mensaje presenta a esta persona? «soy X», «habla X», «me llamo X», «de parte de X». */
+export function presentaA(nombre: string, cuerpo: string): boolean {
+  const n = palabrasDe(nombre).filter(w => w.length >= 3);
+  if (n.length === 0) return false;
+  const t = ` ${palabrasDe(cuerpo).join(' ')} `;
+  return n.some(w => new RegExp(` (soy|habla|llamo|nombre es|parte de|escribe) (la |el )?${w} `).test(t));
+}
+
 export interface AsignacionModelo {
   destino: DestinoPlan;
   evidencia: string;
@@ -310,7 +318,9 @@ export function validarAsignaciones(
     let destino: DestinoPlan | null = null;
     const nuevo = /^nuev[oa]\b[\s,.:;-]*(.*)$/i.exec(viaje);
     if (nuevo) {
-      destino = nuevo[1].trim() ? { tipo: 'nuevo', cliente: nuevo[1].trim() } : null;
+      // Un cliente NUEVO solo si el mensaje lo PRESENTA («soy Andrés Gil»). «NUEVO Punta Cana» con
+      // «Punta Cana en diciembre» es un destino, no un cliente (QA de #971 v2, D2m).
+      destino = nuevo[1].trim() && presentaA(nuevo[1].trim(), m.cuerpo) ? { tipo: 'nuevo', cliente: nuevo[1].trim() } : null;
     } else {
       const v = viajes.find(x => codigoCompacto(x.codigo) === codigoCompacto(viaje));
       if (v) destino = destinoDeViaje(v);

@@ -32,6 +32,7 @@ import {
   interpretarRespuestaContacto,
   mayusculasDeViaje,
   mensajeAlComercial,
+  nombreEsLugar,
   palabrasDeBusqueda,
   resumenEntendido,
   MAX_PREGUNTAS,
@@ -594,6 +595,12 @@ async function entenderNuevo(
       return;
     }
   }
+
+  // Un «cliente» que es un lugar (el destino entendido o el de un viaje abierto) no es un nombre:
+  // sin nombre, el bot lo pide (N9). D2m: «NUEVO Punta Cana».
+  const lugares = [salida.sugeridos.destino?.valor, ...((await viajesAbiertosDeLaBandeja(supabase, workspaceId)) ?? []).map(v => v.destino)];
+  if (nombreEsLugar(clienteTexto, lugares)) clienteTexto = null;
+  if (nombreEsLugar(salida.cliente.nombre, lugares)) salida = { ...salida, cliente: { ...salida.cliente, nombre: null } };
 
   const candidatos = await candidatosDeContacto(supabase, workspaceId, clienteTexto, salida.cliente);
   const d = decidirContacto({ clienteTexto, extraido: salida.cliente, candidatos });

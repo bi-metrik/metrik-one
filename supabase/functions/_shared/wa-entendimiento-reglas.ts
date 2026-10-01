@@ -43,6 +43,12 @@ export interface OpcionCampo {
   value: string;
   label?: string;
   no_definido?: boolean;
+  /**
+   * Otras formas en que el cliente nombra la opción («mi esposo y yo» para «Pareja»). Una opción
+   * solo se carga si la frase la NOMBRA (su etiqueta, su valor o uno de estos): el modelo no la
+   * deduce (QA de #971 v2: Cartagena salía «internacional» sin que nadie lo dijera).
+   */
+  sinonimos?: string[];
 }
 
 export interface CampoEntendible extends CampoConNivel {
@@ -387,6 +393,90 @@ export function declaraNoDefinido(frase: string): boolean {
   return MARCAS_DE_DECLARACION.some(r => r.test(t));
 }
 
+const PALABRAS_DE_OPCION_VACIAS = new Set(['con', 'sin', 'solo', 'para', 'los', 'las', 'del', 'que', 'por', 'entre', 'menos', 'mas']);
+
+function palabrasDeOpcion(o: OpcionCampo): string[] {
+  return [...new Set([o.label, String(o.value).replace(/_/g, ' ')]
+    .flatMap(x => normalizarTexto(String(x ?? '')).replace(/[^a-z0-9 ]/g, ' ').split(' '))
+    .filter(w => w.length >= 4 && !PALABRAS_DE_OPCION_VACIAS.has(w)))];
+}
+
+/**
+ * ¿La frase NOMBRA esta opción? Con una palabra propia de su etiqueta o su valor (las que todas
+ * las opciones comparten no cuentan), con un número de su etiqueta («cuatro» para «4 estrellas»)
+ * o con uno de sus `sinonimos` de la config. «Cartagena» no nombra «Internacional»: esa opción la
+ * deduciría el modelo, y eso no se carga.
+ */
+export function fraseNombraOpcion(f: CampoEntendible, o: OpcionCampo, frase: string): boolean {
+  const t = ` ${normalizarTexto(frase).replace(/[^a-z0-9 ]/g, ' ').replace(/\s+/g, ' ').trim()} `;
+  if ((o.sinonimos ?? []).some(x => t.includes(` ${normalizarTexto(x).replace(/[^a-z0-9 ]/g, ' ').replace(/\s+/g, ' ').trim()} `))) return true;
+  const numeros = [...normalizarTexto(String(o.label ?? o.value)).matchAll(/\d+/g)].map(m => Number(m[0]));
+  if (numeros.some(n => fraseNombraNumero(frase, n))) return true;
+  const concretas = (f.opciones ?? []).filter(x => x.no_definido !== true);
+  const comunes = new Set(palabrasDeOpcion(concretas[0] ?? o).filter(w => concretas.every(x => palabrasDeOpcion(x).includes(w))));
+  const propias = palabrasDeOpcion(o).filter(w => !comunes.has(w) || concretas.length < 2);
+  return (propias.length > 0 ? propias : palabrasDeOpcion(o)).some(w => t.includes(` ${w} `));
+}
+
+// ── Rangos de dinero: el código elige la opción con la cifra ─────────────────
+
+export interface RangoOpcion { value: string; min: number; max: number }
+
+/**
+ * Los rangos de un campo cuyas opciones concretas son TODAS rangos en millones («Menos de $3
+ * millones», «Entre $3 y $5 millones», «Más de $20 millones»). `null` si alguna no lo es: el
+ * campo no es de dinero y no se toca. Sale de las etiquetas de la config, no de una lista.
+ */
+export function rangosDeDinero(f: CampoEntendible): RangoOpcion[] | null {
+  const concretas = (f.opciones ?? []).filter(o => o.no_definido !== true);
+  if (concretas.length < 2) return null;
+  const out: RangoOpcion[] = [];
+  for (const o of concretas) {
+    const t = normalizarTexto(String(o.label ?? '')).replace(/\$/g, '');
+    if (!/millon/.test(t)) return null;
+    const n = (x: string) => Number(x.replace(',', '.'));
+    let m = /entre\s+(\d+(?:[.,]\d+)?)\s+y\s+(\d+(?:[.,]\d+)?)/.exec(t);
+    if (m) { out.push({ value: String(o.value), min: n(m[1]), max: n(m[2]) }); continue; }
+    m = /menos de\s+(\d+(?:[.,]\d+)?)/.exec(t);
+    if (m) { out.push({ value: String(o.value), min: -Infinity, max: n(m[1]) - 1e-9 }); continue; }
+    m = /mas de\s+(\d+(?:[.,]\d+)?)/.exec(t);
+    if (m) { out.push({ value: String(o.value), min: n(m[1]) + 1e-9, max: Infinity }); continue; }
+    return null;
+  }
+  return out;
+}
+
+/**
+ * Las cifras en millones de pesos de un texto: «unos 10 millones», «quince millones», «$2.5M»,
+ * «10.000.000». `ambiguo` si es por persona o en otra moneda (dólares, euros).
+ */
+export function cifrasEnMillones(texto: string): number[] | 'ambiguo' {
+  const t = normalizarTexto(texto);
+  if (/(por persona|por cabeza|cada uno|cada una|c\/u|dolar|usd|us\$|euro|eur\b)/.test(t)) return 'ambiguo';
+  const out: number[] = [];
+  // «entre 4 y 10 millones»: las dos cifras cuentan.
+  for (const m of t.matchAll(/(\d+(?:[.,]\d+)?)\s*(?:y|a|-)\s*\d+(?:[.,]\d+)?\s*(?:millones|millon|mill|m\b)/g)) out.push(Number(m[1].replace(',', '.')));
+  for (const m of t.matchAll(/(\d+(?:[.,]\d+)?)\s*(?:millones|millon|mill|m\b)/g)) out.push(Number(m[1].replace(',', '.')));
+  for (const m of t.matchAll(/(?<![\d.])(\d{1,3}(?:\.\d{3}){2,})(?![\d.])/g)) out.push(Number(m[1].replace(/\./g, '')) / 1e6);
+  for (const m of t.matchAll(/([a-z]+)\s+millones/g)) if (m[1] in DIAS_EN_LETRAS && m[1] !== 'primero') out.push(DIAS_EN_LETRAS[m[1]]);
+  if (/\bun millon\b/.test(t)) out.push(1);
+  return out;
+}
+
+/** La opción cuyo rango contiene la cifra. Sin cifra, con cifras en dos rangos o en el borde de dos, nada. */
+export function opcionPorCifra(rangos: ReadonlyArray<RangoOpcion>, texto: string): { valor: string } | { motivo: string } {
+  const cifras = cifrasEnMillones(texto);
+  if (cifras === 'ambiguo') return { motivo: 'la cifra es por persona o en otra moneda: no se elige el rango' };
+  if (cifras.length === 0) return { motivo: 'sin una cifra que ubique el rango' };
+  const opciones = new Set<string>();
+  for (const c of cifras) {
+    const caben = rangos.filter(r => c >= r.min && c <= r.max);
+    if (caben.length !== 1) return { motivo: `la cifra ${c} millones no cabe en un solo rango` };
+    opciones.add(caben[0].value);
+  }
+  return opciones.size === 1 ? { valor: [...opciones][0] } : { motivo: 'las cifras caen en rangos distintos' };
+}
+
 /** Un número con dígitos o con letras: una preferencia concreta («cuatro o cinco estrellas», «unos 3 millones»). */
 function nombraAlgunNumero(texto: string): boolean {
   const t = ` ${normalizarTexto(texto).replace(/[^a-z0-9 ]/g, ' ').replace(/\s+/g, ' ').trim()} `;
@@ -648,7 +738,24 @@ export function validarSalida(
         out.descartados.push({ slug: f.slug, motivo: `fuera de las opciones: ${v}` });
         continue;
       }
-      if ((f.opciones ?? []).some(o => String(o.value) === v && o.no_definido === true)) {
+      const opcion = (f.opciones ?? []).find(o => String(o.value) === v)!;
+      // Rangos de dinero: el rango lo elige el código con la cifra, no el modelo (QA de #971 v2,
+      // «unos 10 millones» → «Entre $12 y $20 millones» 10/10).
+      const rangos = rangosDeDinero(f);
+      if (rangos && opcion.no_definido !== true) {
+        const elegido = opcionPorCifra(rangos, mensajeDeLaFrase(frase, textoFuente));
+        if ('motivo' in elegido) {
+          out.descartados.push({ slug: f.slug, motivo: elegido.motivo });
+          continue;
+        }
+        out.sugeridos[f.slug] = { valor: elegido.valor, frase };
+        continue;
+      }
+      if (opcion.no_definido !== true && !rangos && !fraseNombraOpcion(f, opcion, frase)) {
+        out.descartados.push({ slug: f.slug, motivo: `«${opcion.label ?? v}» deducida sin una frase que la nombre: «${frase}»` });
+        continue;
+      }
+      if (opcion.no_definido === true) {
         if (!declaraNoDefinido(frase)) {
           out.descartados.push({ slug: f.slug, motivo: `«no definido» sin que el cliente lo diga: «${frase}»` });
           continue;
@@ -722,7 +829,10 @@ export function validarSalida(
   for (const [k, s] of Object.entries(out.sugeridos)) conocidosYNuevos[k] = s.valor;
   for (const f of camposEntendibles(fields)) {
     if (!out.sugeridos[f.slug] || !dependeDeMenores(f)) continue;
-    if (!cumplePedirSi(f.pedir_si, conocidosYNuevos)) {
+    const p = leerPedirSi(f.pedir_si);
+    const deMenores = 'error' in p ? [] : p.condiciones.filter(c =>
+      (typeof c.field === 'string' && SLUGS_MENORES.includes(c.field)) || (Array.isArray(c.suma_de) && c.suma_de.some(x => SLUGS_MENORES.includes(x))));
+    if (!deMenores.every(c => cumplePedirSi(c, conocidosYNuevos))) {
       delete out.sugeridos[f.slug];
       out.descartados.push({ slug: f.slug, motivo: 'solo aplica si viajan menores, y no se sabe que viajen' });
     }
@@ -755,6 +865,20 @@ export function opcionDeOtroCampo(v: string, f: CampoEntendible, fields: Readonl
   if (!n || !/[a-z]/.test(n)) return null;
   return fields.find(o => o.slug !== f.slug && (o.opciones ?? []).some(op =>
     !op.no_definido && [op.value, op.label].some(x => x && normalizarTexto(String(x)).replace(/[^a-z0-9 ]/g, ' ').replace(/_/g, ' ').replace(/\s+/g, ' ').trim() === n))) ?? null;
+}
+
+/**
+ * ¿Este «nombre de cliente» es en realidad un lugar? Si coincide con el destino entendido o con un
+ * destino conocido (de los viajes abiertos), no es un nombre: el bot pregunta el nombre (QA de #971
+ * v2, D2m: se creó el contacto «PUNTA CANA»).
+ */
+export function nombreEsLugar(nombre: string | null | undefined, lugares: ReadonlyArray<unknown>): boolean {
+  const n = normalizarTexto(String(nombre ?? '')).replace(/[^a-z0-9 ]/g, ' ').replace(/\s+/g, ' ').trim();
+  if (!n) return false;
+  return lugares.some(l => {
+    const x = normalizarTexto(String(l ?? '')).replace(/[^a-z0-9 ]/g, ' ').replace(/\s+/g, ' ').trim();
+    return !!x && (x === n || x.split(/ o | y |: |, /).includes(n) || ` ${x} `.includes(` ${n} `));
+  });
 }
 
 /** El texto, si todas sus palabras están en el mensaje; si no, null. */

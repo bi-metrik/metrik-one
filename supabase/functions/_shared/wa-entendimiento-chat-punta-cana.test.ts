@@ -161,7 +161,8 @@ describe('el chat de Punta Cana, tanda 1 a 4, sin que nadie toque el negocio', (
     const pasos = correr();
     const fin = pasos[3];
     expect(huecos(FIELDS, fin.data).minimo.faltan).toEqual([]);
-    expect(huecos(FIELDS, fin.data).deseable.faltan).toEqual([]);
+    // El tipo de viaje («playa») el modelo lo DEDUCÍA de «Punta Cana»: ya no se carga (QA de #971 v2).
+    expect(huecos(FIELDS, fin.data).deseable.faltan.map(f => f.slug)).toEqual(['tipo_viaje']);
     expect(pasos.flatMap(p => p.conflictos)).toEqual([]);
     expect(fin.data._conflictos).toBeUndefined();
     expect(fin.mensaje.endsWith(`Ya está el mínimo para cotizar: ${ENLACE}`)).toBe(true);
