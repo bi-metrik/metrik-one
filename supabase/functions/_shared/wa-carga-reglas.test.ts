@@ -167,12 +167,71 @@ describe('cargar en un negocio que ya existe', () => {
     expect(r.data._sugeridos).toBeUndefined();
   });
 
-  it('un valor todavía sugerido de una entrega anterior tampoco se pisa', () => {
-    const data = { destino: 'CANCÚN', _sugeridos: { destino: { fuente: 'whatsapp', entrega_id: 'e1', frase: 'cancún', en: 'x' } } };
-    const r = cargarEnExistente(data, FIELDS, { destino: { valor: 'Punta Cana', frase: 'punta cana' } }, meta);
-    expect(r.data.destino).toBe('CANCÚN');
-    expect(r.conflictos.map(c => c.slug)).toEqual(['destino']);
-    expect(r.data._sugeridos).toEqual(data._sugeridos);
+  describe('regla 4: un sugerido que nadie confirmó se actualiza con un mensaje posterior', () => {
+    const sug = { fuente: 'whatsapp', entrega_id: 'e1', frase: 'somos mi esposo y yo', en: 'x' };
+
+    it('pasa: el valor nuevo reemplaza, la marca guarda el anterior y la suma se recalcula', () => {
+      const data = { adultos: 2, ninos: 2, numero_pasajeros: 4, _sugeridos: { adultos: sug } };
+      const r = cargarEnExistente(data, FIELDS, { adultos: { valor: 3, frase: 'o sea seríamos 3 adultos' } }, meta);
+      expect(r.data.adultos).toBe(3);
+      expect(r.data.numero_pasajeros).toBe(5);
+      expect(r.conflictos).toEqual([]);
+      expect(r.escritos).toEqual([]);
+      expect(r.actualizados).toEqual([{ slug: 'adultos', anterior: 2, valor: 3, frase: 'o sea seríamos 3 adultos' }]);
+      expect((r.data._sugeridos as Record<string, unknown>).adultos).toEqual({
+        fuente: 'whatsapp', entrega_id: 'e2', frase: 'o sea seríamos 3 adultos', en: meta.en, anterior: 2,
+      });
+      expect(r.data._conflictos).toBeUndefined();
+    });
+
+    it('pasa: el texto del bloque de viaje entra en mayúscula también al actualizar', () => {
+      const data = { destino: 'CANCÚN', _sugeridos: { destino: sug } };
+      const r = cargarEnExistente(data, FIELDS, { destino: { valor: 'Punta Cana', frase: 'punta cana' } }, meta);
+      expect(r.data.destino).toBe('PUNTA CANA');
+      expect(r.actualizados.map(a => [a.anterior, a.slug])).toEqual([['CANCÚN', 'destino']]);
+    });
+
+    it('pasa: un conflicto viejo sobre ese sugerido se va, gana lo último que dijo el cliente', () => {
+      const viejo = { fuente: 'whatsapp', entrega_id: 'e0', valor: 4, frase: 'cuatro', en: 'x', origen: 'mensaje' };
+      const data = { adultos: 2, _sugeridos: { adultos: sug }, _conflictos: { adultos: viejo } };
+      const r = cargarEnExistente(data, FIELDS, { adultos: { valor: 3, frase: '3 adultos' } }, meta);
+      expect(r.data.adultos).toBe(3);
+      expect(r.data._conflictos).toBeUndefined();
+    });
+
+    it('no pasa: lo confirmado por una persona (sin marca) queda en conflicto', () => {
+      const r = cargarEnExistente({ adultos: 2 }, FIELDS, { adultos: { valor: 3, frase: '3 adultos' } }, meta);
+      expect(r.data.adultos).toBe(2);
+      expect(r.actualizados).toEqual([]);
+      expect(r.conflictos.map(c => c.slug)).toEqual(['adultos']);
+    });
+
+    it('no pasa: un sugerido con corrección registrada (_ediciones) queda en conflicto', () => {
+      const data = { adultos: 2, _sugeridos: { adultos: sug }, _ediciones: { adultos: { por: 's' } } };
+      const r = cargarEnExistente(data, FIELDS, { adultos: { valor: 3, frase: '3 adultos' } }, meta);
+      expect(r.data.adultos).toBe(2);
+      expect(r.conflictos.map(c => c.slug)).toEqual(['adultos']);
+    });
+
+    it('no pasa: una deducción nunca reemplaza, solo llena vacíos', () => {
+      const data = { ninos: 1, _sugeridos: { ninos: sug } };
+      const r = cargarEnExistente(data, FIELDS, { ninos: { valor: 0, frase: '', deduccion: 'x' } }, meta);
+      expect(r.data.ninos).toBe(1);
+      expect(r.actualizados).toEqual([]);
+    });
+
+    it('el bot lo dice y la traza lo registra', () => {
+      const m = mensajeCargaExistente({
+        codigo: 'T1 26 14', fields: FIELDS, escritos: [], conflictos: [],
+        actualizados: [{ slug: 'adultos', anterior: 2, valor: 3 }], faltanMinimo: [], enlace: 'L',
+      });
+      expect(m).toBe('Actualicé adultos: 2 → 3. Lo anterior era una sugerencia que nadie había confirmado.\nYa está el mínimo para cotizar: L');
+      const t = trazaCarga({
+        quien: 'Tatiana', fechaISO: '2026-10-01', escritos: [], conflictos: [], fields: FIELDS, historia: '',
+        actualizados: [{ slug: 'adultos', anterior: 2, valor: 3 }],
+      });
+      expect(t).toBe('Se cargó 1 dato desde WhatsApp (Tatiana, 1-oct).\nActualizado (era sugerido, nadie lo había confirmado): Adultos 2 → 3.');
+    });
   });
 
   it('en un negocio vivo el default cuenta como valor (no se sabe si alguien lo dejó a propósito)', () => {

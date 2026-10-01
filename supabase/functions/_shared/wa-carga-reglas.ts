@@ -10,15 +10,20 @@
 // Reglas que no se negocian:
 //   1. Nunca se carga solo en un negocio existente: aunque los mensajes nombren a un cliente
 //      con un único negocio abierto, ese se PROPONE primero y se pregunta igual.
-//   2. En un negocio existente solo se llenan campos VACÍOS. Un valor que ya está (escrito por
-//      una persona, confirmado, o todavía sugerido) no se pisa: si el mensaje dice otra cosa,
-//      queda como conflicto en `_conflictos[slug]` y lo decide una persona.
+//   2. En un negocio existente un valor escrito o confirmado por una persona no se pisa: si el
+//      mensaje dice otra cosa, queda como conflicto en `_conflictos[slug]` y lo decide una persona.
+//   3. Lo que el bot sugirió y NADIE confirmó (sigue en `_sugeridos`, sin `_ediciones`) sí se
+//      actualiza con el mensaje nuevo (2026-10-01): el valor anterior queda en la marca
+//      (`anterior`) y el bot lo dice («Actualicé adultos: 2 → 3»).
 // ============================================================
 
-import { parsearNumeroColombiano } from './niveles-solicitud.ts';
+import { aplanarBloques, parsearNumeroColombiano } from './niveles-solicitud.ts';
 import {
   aplicarSumas,
   CLAVE_SUGERIDOS,
+  deducirCeros,
+  fraseNombraNumero,
+  marcaDe,
   mayusculasDeViaje,
   normalizarNombre,
   normalizarTexto,
@@ -215,11 +220,22 @@ export interface Conflicto {
   frase: string;
 }
 
+/** Un sugerido que nadie confirmó y el mensaje nuevo reemplazó. */
+export interface Actualizado {
+  slug: string;
+  anterior: unknown;
+  valor: string | number;
+  frase: string;
+}
+
 /**
  * Mete lo entendido en la `data` de un bloque de un negocio que YA existe.
  *   · campo vacío y sin corrección registrada → se escribe, con su marca en `_sugeridos`;
  *   · mismo valor que ya tiene → nada (el mensaje lo confirma);
- *   · otro valor → NO se toca; queda en `_conflictos[slug]`.
+ *   · otro valor sobre un SUGERIDO que nadie confirmó (sigue en `_sugeridos`, sin
+ *     `_ediciones`) → se reemplaza; la marca guarda el `anterior` y se va a `actualizados`;
+ *   · otro valor sobre lo escrito o confirmado por una persona → NO se toca; queda en
+ *     `_conflictos[slug]`.
  * A diferencia de `fusionarSugeridos` (negocio recién creado), aquí un `default` cuenta como
  * valor: en un negocio vivo no se sabe si una persona lo dejó a propósito.
  *
@@ -232,14 +248,26 @@ export function cargarEnExistente(
   sugeridos: Record<string, Sugerido>,
   meta: { entrega_id: string; en: string; origenDe: (frase: string) => 'audio' | 'mensaje' },
   yaVistos: Set<string> = new Set(),
-): { data: Record<string, unknown>; escritos: string[]; conflictos: Conflicto[]; iguales: string[] } {
+): {
+  data: Record<string, unknown>;
+  escritos: string[];
+  conflictos: Conflicto[];
+  iguales: string[];
+  actualizados: Actualizado[];
+  /** Números distintos al actual cuya frase no dice el número nuevo: no se tocan. */
+  sinSustento: string[];
+} {
   const ediciones = (data._ediciones ?? {}) as Record<string, unknown>;
-  const marcas = { ...((data[CLAVE_SUGERIDOS] ?? {}) as Record<string, MarcaSugerido>) };
+  const marcasPrevias = (data[CLAVE_SUGERIDOS] ?? {}) as Record<string, MarcaSugerido>;
+  const marcas = { ...marcasPrevias };
   const choques = { ...((data[CLAVE_CONFLICTOS] ?? {}) as Record<string, MarcaConflicto>) };
+  const habiaChoques = Object.keys(choques).length > 0;
   let out: Record<string, unknown> = { ...data };
   const escritos: string[] = [];
   const conflictos: Conflicto[] = [];
   const iguales: string[] = [];
+  const actualizados: Actualizado[] = [];
+  const sinSustento: string[] = [];
 
   for (const f of fields) {
     if (yaVistos.has(f.slug)) continue;
@@ -249,12 +277,27 @@ export function cargarEnExistente(
     const actual = data[f.slug];
     if (vacio(actual) && !ediciones[f.slug]) {
       out[f.slug] = s.valor;
-      marcas[f.slug] = { fuente: 'whatsapp', entrega_id: meta.entrega_id, frase: s.frase, en: meta.en };
+      marcas[f.slug] = marcaDe(s, meta);
       escritos.push(f.slug);
       continue;
     }
     if (mismoValor(f, actual, s.valor)) {
       iguales.push(f.slug);
+      continue;
+    }
+    // Para CAMBIAR un número que ya está, la frase tiene que decir el número nuevo: si no, ni se
+    // reemplaza ni se arma un conflicto («hablé con mi esposo» no vuelve 2 a «3 adultos»).
+    if (f.tipo === 'numero' && !fraseNombraNumero(s.frase, Number(s.valor))) {
+      sinSustento.push(f.slug);
+      continue;
+    }
+    // Un sugerido sin confirmar no es de nadie todavía: lo dicho después gana. Una deducción
+    // (`deducirCeros`) nunca reemplaza: solo llena vacíos.
+    if (marcasPrevias[f.slug] && !ediciones[f.slug] && !s.deduccion) {
+      out[f.slug] = s.valor;
+      marcas[f.slug] = marcaDe(s, meta, actual);
+      delete choques[f.slug];
+      actualizados.push({ slug: f.slug, anterior: actual, valor: s.valor, frase: s.frase });
       continue;
     }
     choques[f.slug] = {
@@ -263,13 +306,36 @@ export function cargarEnExistente(
     conflictos.push({ slug: f.slug, actual, valor: s.valor, frase: s.frase });
   }
 
-  if (escritos.length > 0) {
+  const tocados = [...escritos, ...actualizados.map(a => a.slug)];
+  if (tocados.length > 0) {
     out[CLAVE_SUGERIDOS] = marcas;
-    out = mayusculasSoloDe(fields, out, escritos);
+    out = mayusculasSoloDe(fields, out, tocados);
     out = aplicarSumas(fields, out);
   }
-  if (conflictos.length > 0) out[CLAVE_CONFLICTOS] = choques;
-  return { data: out, escritos, conflictos, iguales };
+  // Un sugerido reemplazado se lleva su conflicto viejo: lo último que dijo el cliente gana.
+  if (Object.keys(choques).length > 0) out[CLAVE_CONFLICTOS] = choques;
+  else if (habiaChoques) delete out[CLAVE_CONFLICTOS];
+  return { data: out, escritos, conflictos, iguales, actualizados, sinSustento };
+}
+
+/**
+ * Los sugeridos más lo que se DEDUCE con el negocio ya cargado (`deducirCeros`): se carga en
+ * seco cada bloque, se aplana lo que quedaría y se deduce sobre eso. Así «los niños tienen 9 y
+ * 4» cierra infantes aunque los niños hayan llegado en otra entrega. Puro: no escribe nada.
+ */
+export function sugeridosConDeducciones(
+  bloques: ReadonlyArray<{ fields: CampoEntendible[]; data: Record<string, unknown> }>,
+  sugeridos: Record<string, Sugerido>,
+  meta: { entrega_id: string; en: string; origenDe: (frase: string) => 'audio' | 'mensaje' },
+): Record<string, Sugerido> {
+  const vistos = new Set<string>();
+  const quedaria = bloques.map(b => ({ fields: b.fields, data: cargarEnExistente(b.data, b.fields, sugeridos, meta, vistos).data }));
+  const { fields, valores } = aplanarBloques(quedaria);
+  const campos = fields as CampoEntendible[];
+  const deducidos = deducirCeros(campos, aplicarSumas(campos, valores));
+  const out = { ...sugeridos };
+  for (const [slug, s] of Object.entries(deducidos)) if (!(slug in out)) out[slug] = s;
+  return out;
 }
 
 /** La mayúscula del bloque de viaje, solo sobre lo que se acaba de escribir: lo demás no se toca. */
@@ -321,6 +387,8 @@ export function mensajeCargaExistente(p: {
   fields: ReadonlyArray<CampoEntendible>;
   escritos: Array<{ slug: string; valor: unknown }>;
   conflictos: Conflicto[];
+  /** Sugeridos sin confirmar que el mensaje reemplazó: «Actualicé adultos: 2 → 3». */
+  actualizados?: ReadonlyArray<Pick<Actualizado, 'slug' | 'anterior' | 'valor'>>;
   faltanMinimo: ReadonlyArray<{ pregunta: string }>;
   enlace: string;
   maxPreguntas?: number;
@@ -328,14 +396,23 @@ export function mensajeCargaExistente(p: {
   const porSlug = new Map(p.fields.map(f => [f.slug, f]));
   const cod = p.codigo ?? 'el viaje';
   const lineas: string[] = [];
+  const actualizados = p.actualizados ?? [];
   if (p.escritos.length > 0) {
     const lista = p.escritos.map(e => {
       const f = porSlug.get(e.slug);
       return `${etiqueta(f, e.slug)} ${f ? valorLegible(f, e.valor) : String(e.valor)}`;
     });
     lineas.push(`Cargué en ${cod}: ${lista.join(', ')}.`);
-  } else {
+  } else if (actualizados.length === 0) {
     lineas.push(`No encontré datos nuevos para ${cod}.`);
+  }
+  if (actualizados.length > 0) {
+    const lista = actualizados.map(a => {
+      const f = porSlug.get(a.slug);
+      const leg = (v: unknown) => (f ? valorLegible(f, v) : String(v));
+      return `${etiqueta(f, a.slug)}: ${leg(a.anterior)} → ${leg(a.valor)}`;
+    });
+    lineas.push(`Actualicé ${lista.join('; ')}. Lo anterior era una sugerencia que nadie había confirmado.`);
   }
   if (p.conflictos.length > 0) {
     const lista = p.conflictos.map(c => {
@@ -371,17 +448,26 @@ export function trazaCarga(p: {
   fechaISO: string;
   escritos: string[];
   conflictos: Conflicto[];
+  actualizados?: ReadonlyArray<Pick<Actualizado, 'slug' | 'anterior' | 'valor'>>;
   fields: ReadonlyArray<CampoEntendible>;
   historia: string;
 }): string {
   const porSlug = new Map(p.fields.map(f => [f.slug, f]));
   const dia = diaMes(p.fechaISO);
   const quien = p.quien ? `${p.quien}, ${dia}` : dia;
-  const n = p.escritos.length;
+  const n = p.escritos.length + (p.actualizados ?? []).length;
   const cab = n === 0
     ? `No se cargaron datos nuevos desde WhatsApp (${quien})`
     : `Se ${n === 1 ? 'cargó 1 dato' : `cargaron ${n} datos`} desde WhatsApp (${quien})`;
   const partes = [`${cab}.`];
+  if ((p.actualizados ?? []).length > 0) {
+    const lista = p.actualizados!.map(a => {
+      const f = porSlug.get(a.slug);
+      const leg = (v: unknown) => (f ? valorLegible(f, v) : String(v));
+      return `${f?.label ?? a.slug} ${leg(a.anterior)} → ${leg(a.valor)}`;
+    }).join('; ');
+    partes.push(`Actualizado (era sugerido, nadie lo había confirmado): ${lista}.`);
+  }
   if (p.conflictos.length > 0) {
     const nombres = p.conflictos.map(c => porSlug.get(c.slug)?.label ?? c.slug).join(', ');
     partes.push(`En conflicto, sin cambiar: ${nombres}.`);

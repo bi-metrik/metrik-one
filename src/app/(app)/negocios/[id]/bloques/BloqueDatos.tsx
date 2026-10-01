@@ -806,7 +806,7 @@ export default function BloqueDatos({
                     ePayco verificado
                   </span>
                 )}
-                {sugeridoVigente(f.slug, saved[f.slug]) && <MarcaSugerido frase={marcasSugerido[f.slug].frase} />}
+                {sugeridoVigente(f.slug, saved[f.slug]) && <MarcaSugerido marca={marcasSugerido[f.slug]} />}
                 {conflictoVigente(f.slug, saved[f.slug]) && (
                   <MarcaConflicto marca={marcasConflicto[f.slug]} legible={valorLegibleCampo(f, marcasConflicto[f.slug].valor)} />
                 )}
@@ -948,7 +948,7 @@ export default function BloqueDatos({
                 <span className="rounded bg-papel px-1 py-px text-[8px] font-medium uppercase tracking-wide text-[#9CA3AF]">auto</span>
               )}
               {sugeridoVigente(f.slug, values[f.slug]) && (
-                <MarcaSugerido frase={marcasSugerido[f.slug].frase} onConfirmar={() => { void confirmarMarca(f.slug) }} />
+                <MarcaSugerido marca={marcasSugerido[f.slug]} onConfirmar={() => { void confirmarMarca(f.slug) }} />
               )}
               {conflictoVigente(f.slug, values[f.slug]) && (
                 <MarcaConflicto
