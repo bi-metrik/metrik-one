@@ -32,3 +32,4 @@ Memorias del motor de cotización y el documento del cliente de Trappvel (sacada
 - ⚠️ [Captura de cotización, Parte A (#839)](project_captura_cotizacion_parte_a.md) — montos por `parseMontoCop`; la casilla no usa `isPending`
 - ⚠️⚠️ [Captura de cotización, Parte B (#847)](project_captura_cotizacion_parte_b.md) — SIN mergear: migración de ranuras ANTES del merge
 - ⚠️ [Cancelación interna e ingreso manual (#949, #950, #954)](project_cancelacion_interna_ingreso_manual.md) — neto NO va a `aPagarAgencia`; vuelo sin hoja del cliente
+- ⚠️ [Corregir fechas recalcula la habitación a mano](project_corregir_fechas_recalcula.md) — costo de hotel SIEMPRE con `tarifa.correcciones`; COT-0019 pide reconfirmar

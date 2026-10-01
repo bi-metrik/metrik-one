@@ -56,7 +56,8 @@
 
 import { leerTarifaPax, type LecturaCasilla } from './tarifa-pasajero'
 import { ranuraDeGrupo, ranuraPorSlug, slugsDeRanura, type DefinicionRanura } from './ranuras-pantallazo'
-import { aplicarCorrecciones, leidosPorSlug } from './correcciones'
+import { aplicarCorrecciones, leidosPorSlug, type Correcciones } from './correcciones'
+import { fechasCorregidas } from './estadia'
 import { estrellasDesdeTexto } from './estrellas'
 import { notaDeLaLinea } from './nota-linea'
 import { datosManuales } from './ingreso-manual'
@@ -579,10 +580,17 @@ export function tramosLeidosDelItem(item: ItemConLectura): TramoVuelo[] | null {
   return conAlgo ? tramos : null
 }
 
-/** Las noches: las que dijo la captura, y si no las dijo, las que dan las dos fechas. */
-function nochesDe(d: Record<string, string>): number | null {
+/**
+ * Las noches: las que dijo la captura, y si no las dijo, las que dan las dos fechas.
+ *
+ * Con la entrada o la salida corregidas en la ficha (y las noches no), mandan las fechas: las
+ * noches leídas son las de las fechas viejas (COT-2026-0019: «35 noches» después de corregir
+ * la entrada a una estadía de 4).
+ */
+function nochesDe(d: Record<string, string>, correcciones?: Correcciones | null): number | null {
   const leidas = numero(d, 'noches')
-  if (leidas !== null && leidas > 0) return leidas
+  const mandanLasFechas = fechasCorregidas(correcciones) && !correcciones?.noches
+  if (!mandanLasFechas && leidas !== null && leidas > 0) return leidas
   const entrada = (d['check_in'] ?? '').trim()
   const salida = (d['check_out'] ?? '').trim()
   if (!/^\d{4}-\d{2}-\d{2}$/.test(entrada) || !/^\d{4}-\d{2}-\d{2}$/.test(salida)) return null
@@ -613,7 +621,7 @@ export function hotelesDeItems(items: ItemConLectura[]): HotelPDF[] {
       regimen: texto(d, 'regimen'),
       checkIn: fechaCorta(texto(d, 'check_in')),
       checkOut: fechaCorta(texto(d, 'check_out')),
-      noches: nochesDe(d),
+      noches: nochesDe(d, tarifa.correcciones),
       ocupacion: acomodacion ?? texto(d, 'ocupacion'),
       cancelacion: texto(d, 'politica_cancelacion'),
       estrellas: estrellasDesdeTexto(texto(d, 'estrellas')),

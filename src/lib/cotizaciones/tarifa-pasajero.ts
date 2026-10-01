@@ -29,6 +29,7 @@
 import { esAvisoDeAnioViejo } from './anio-fecha'
 import type { MargenProveedor } from './margen-proveedor'
 import { leerCorrecciones, type Correcciones } from './correcciones'
+import { firmaDeEstadia } from './estadia'
 
 // ── Tipos de pasajero y composición ──────────────────────────────────────────
 
@@ -964,6 +965,17 @@ export function confirmacionDesactualizada(
       mensaje: 'Cambiaron las habitaciones después de confirmar el costo: vuelve a confirmarlo.',
     }
   }
+  // Las fechas corregidas cambiaron las noches de una habitación a mano después de confirmar
+  // (o antes de que existiera el recálculo, COT-2026-0019): el costo confirmado es de otras noches.
+  const habs = tarifa.habitaciones && tarifa.habitaciones.length > 0
+    ? tarifa.habitaciones
+    : tarifa.casillas?.grupo_completo ? [{ id: 'grupo_completo', lectura: tarifa.casillas.grupo_completo }] : []
+  if ((c.firmaEstadia ?? '') !== firmaDeEstadia(habs, tarifa.correcciones)) {
+    return {
+      motivo: 'composicion',
+      mensaje: 'Cambiaron las fechas después de confirmar el costo: vuelve a confirmarlo para cobrar las noches nuevas.',
+    }
+  }
   // Normalizada: un jsonb escrito a mano sin `ninos` o `infantes` no puede leerse como otra
   // composición solo por la forma.
   const cargada = normalizarComposicion(c.composicion)
@@ -1301,6 +1313,11 @@ export interface TarifaConfirmada {
   porHabitacion?: { numero: number; ocupacion: Composicion; totalCOP: number }[]
   /** R8 · qué habitaciones y con qué papel se confirmaron (`firmaDeHabitaciones`). */
   firmaHabitaciones?: string
+  /**
+   * Las habitaciones a mano que se costearon con fechas corregidas, y a cuántas noches
+   * (`firmaDeEstadia`, `estadia.ts`). Ausente = ninguna.
+   */
+  firmaEstadia?: string
 }
 
 /** R8 · qué hace una captura dentro de una opción de hotel. */

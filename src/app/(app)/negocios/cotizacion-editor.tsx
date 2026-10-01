@@ -2635,6 +2635,7 @@ export default function CotizacionEditor({ oportunidadId, cotizacion, initialIte
               ubicaciones={ubicacionesDeOpciones}
               receptor={receptorBandeja}
               onPendientes={setPendientesEnBandeja}
+              fechasViaje={fechasViaje}
             />
           )}
           {lineasPorTipo && (
@@ -3364,6 +3365,7 @@ export default function CotizacionEditor({ oportunidadId, cotizacion, initialIte
           ubicaciones={ubicacionesDeOpciones}
           receptor={receptorBandeja}
           onPendientes={setPendientesEnBandeja}
+          fechasViaje={fechasViaje}
         />
       )}
       {lineasPorTipo ? pasosDelViaje : (

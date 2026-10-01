@@ -131,6 +131,22 @@ describe('la fila de un pantallazo leído: se revisa antes de aceptar (H4)', () 
     expect(html).toContain('role="tooltip"')
     expect(html).toContain('Revisa la moneda: la captura no la muestra.')
   })
+
+  it('el hotel fuera de las fechas del viaje se lee en la fila, sin pasar el mouse (brief del 2026-09-30)', () => {
+    const aviso = 'El hotel va del 9 oct 2026 al 13 nov 2026 y el viaje es del 9 nov 2026 al 13 nov 2026. Revisa las fechas.'
+    const solo = pintar(captura({ estado: { fase: 'lista', alertas: [aviso] } }))
+    expect(solo).toContain('data-aviso-fechas')
+    expect(solo).toContain(aviso)
+    // Sola, no deja el ícono: no hay nada más que decidir al pasar el mouse.
+    expect(solo).not.toContain('role="tooltip"')
+    // Con otra alerta, esa sigue en el ícono y el aviso de fechas sigue a la vista.
+    const con = pintar(captura({ estado: { fase: 'lista', alertas: [aviso, 'Revisa la moneda: la captura no la muestra.'] } }))
+    expect(con).toContain('data-aviso-fechas')
+    expect(con).toContain('role="tooltip"')
+    // También en la fila que pregunta si es la misma opción.
+    const parecida = pintar(captura({ estado: { fase: 'parecida', conItemId: 'item-0', donde: 'Opción 1 de Hotel', alertas: [aviso] } }))
+    expect(parecida).toContain('data-aviso-fechas')
+  })
 })
 
 describe('mientras se lee', () => {

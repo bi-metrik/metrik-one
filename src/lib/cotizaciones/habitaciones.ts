@@ -19,6 +19,7 @@
  */
 
 import type { Correcciones } from './correcciones'
+import { avisoDeEstadia, casillasConEstadia, estadiaDeHabitacion, lecturaConEstadia } from './estadia'
 import {
   claveTexto,
   describirOcupacion,
@@ -178,6 +179,11 @@ export interface HabitacionRepartida {
   total: number
   moneda: string
   lectura: LecturaCasilla
+  /**
+   * Lo que hay que decir de su estadía (`avisoDeEstadia`): un pantallazo con las fechas
+   * corregidas a otras noches, o una habitación con fechas distintas de las de la opción.
+   */
+  avisoEstadia: string | null
 }
 
 export interface RepartoHabitaciones {
@@ -227,7 +233,15 @@ function esPar(a: HabitacionRepartida, r: HabitacionRepartida): boolean {
 export function repartirHabitaciones(
   habitaciones: readonly Habitacion[],
   grupo: Composicion | null,
+  /**
+   * Las correcciones de la ficha de la opción (`tarifa.correcciones`). Con fechas corregidas,
+   * una habitación de ingreso manual cuesta las noches corregidas (`estadia.ts`); un
+   * pantallazo conserva su precio y lleva el aviso.
+   */
+  correcciones?: Correcciones | null,
 ): RepartoHabitaciones {
+  const primera = habitaciones[0]?.lectura
+  const opcion = primera ? estadiaDeHabitacion(primera, correcciones) : null
   const filas: HabitacionRepartida[] = habitaciones.map(h => ({
     id: h.id,
     numero: null,
@@ -237,9 +251,10 @@ export function repartirHabitaciones(
     // Lo que corrigió una persona manda sobre lo leído (`Habitacion.correccion`).
     ocupacion: h.correccion?.ocupacion ?? ocupacionDeHabitacion(h.lectura),
     tipoHabitacion: (h.lectura.identidad.tipo_habitacion ?? '').trim() || null,
-    total: h.correccion?.total ?? montoDeCosto(h.lectura),
+    total: h.correccion?.total ?? montoDeCosto(lecturaConEstadia(h.lectura, correcciones)),
     moneda: (h.lectura.moneda || 'COP').toUpperCase(),
     lectura: h.lectura,
+    avisoEstadia: avisoDeEstadia(h.lectura, correcciones, opcion),
   }))
 
   const cubren = () => filas
@@ -378,7 +393,7 @@ export function resolverHabitaciones(
   grupo: Composicion | null,
   opciones: { moneda?: string | null } = {},
 ): EstadoTarifa {
-  const r = repartirHabitaciones(habitacionesDeTarifa(tarifa), grupo)
+  const r = repartirHabitaciones(habitacionesDeTarifa(tarifa), grupo, tarifa.correcciones)
   const cuentan = r.habitaciones.filter(h => h.rol === 'habitacion')
   if (cuentan.length === 0) {
     return { estado: 'inconsistente', mensaje: 'Ninguna captura quedó como habitación: toca «Usar como habitación» en la que va.' }
@@ -537,7 +552,7 @@ export function resolverTarifaDeOpcion(
 ): EstadoTarifa | null {
   if (conHabitaciones(tarifa)) return resolverHabitaciones(tarifa, grupo ?? composicionLinea, opciones)
   if (!composicionLinea) return null
-  return resolverTarifa(composicionLinea, tarifa.casillas ?? {}, ranuraSlug, opciones)
+  return resolverTarifa(composicionLinea, casillasConEstadia(tarifa.casillas ?? {}, tarifa.correcciones), ranuraSlug, opciones)
 }
 
 // ── El precio por habitación (regla 8) ───────────────────────────────────────

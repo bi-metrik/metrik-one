@@ -123,8 +123,8 @@ export interface PendienteEnBandeja {
 export default function TarjetaOpcion({
   itemId,
   numero,
-  item,
-  tarifa,
+  item: itemDeLaPagina,
+  tarifa: tarifaDeLaPagina,
   composicionViaje,
   editable,
   abierta,
@@ -194,6 +194,13 @@ export default function TarjetaOpcion({
   onGuardarNota: (texto: string) => void
   onCambio: () => void
 }) {
+  // Lo que el servidor acaba de guardar desde «Corregir datos» se pinta sin esperar el
+  // refresco (COT-2026-0019: la ficha siguió diciendo las fechas viejas después de guardar).
+  // Vale solo mientras la página siga trayendo la tarifa de antes.
+  const [recienGuardada, setRecienGuardada] = useState<{ antes: unknown; ahora: TarifaPax } | null>(null)
+  const vigenteLocal = !!recienGuardada && recienGuardada.antes === itemDeLaPagina.tarifa_pax
+  const item: ItemConLectura = vigenteLocal ? { ...itemDeLaPagina, tarifa_pax: recienGuardada!.ahora } : itemDeLaPagina
+  const tarifa: TarifaPax = vigenteLocal ? recienGuardada!.ahora : tarifaDeLaPagina
   const ranura = ranuraDeGrupo(item.grupo)
   const esHotel = ranura?.slug === 'hotel_detalle'
   const esTraslado = ranura?.slug === 'traslado_detalle'
@@ -203,7 +210,7 @@ export default function TarjetaOpcion({
 
   const grupo = composicionViaje ?? tarifa.composicion ?? null
   const habitaciones = esHotel ? habitacionesDeTarifa(tarifa) : []
-  const reparto = esHotel && habitaciones.length > 0 ? repartirHabitaciones(habitaciones, grupo) : null
+  const reparto = esHotel && habitaciones.length > 0 ? repartirHabitaciones(habitaciones, grupo, tarifa.correcciones) : null
   const resumenAloj = reparto ? resumenDeAlojamiento(reparto) : null
 
   const [confirmaBorrar, setConfirmaBorrar] = useState(false)
@@ -371,7 +378,11 @@ export default function TarjetaOpcion({
               tarifa={tarifa}
               esHotel={esHotel}
               grupoItem={item.grupo}
-              onListo={() => { setEditandoFicha(false); onCambio() }}
+              onListo={guardada => {
+                if (guardada) setRecienGuardada({ antes: itemDeLaPagina.tarifa_pax, ahora: guardada })
+                setEditandoFicha(false)
+                onCambio()
+              }}
               onCancelar={() => setEditandoFicha(false)}
             />
           ) : (
@@ -495,7 +506,8 @@ function FormFicha({
   tarifa: TarifaPax
   esHotel: boolean
   grupoItem: string | null
-  onListo: () => void
+  /** Con la tarifa que quedó guardada, para pintarla sin esperar el refresco. */
+  onListo: (guardada: TarifaPax | null) => void
   onCancelar: () => void
 }) {
   const ranura = ranuraDeGrupo(grupoItem)
@@ -514,13 +526,18 @@ function FormFicha({
     const cambios = campos.filter(c => (valores[c.slug] ?? '').trim() !== (vigentes[c.slug] ?? '').trim())
     if (cambios.length === 0) { onCancelar(); return }
     startTransition(async () => {
+      let guardada: TarifaPax | null = null
+      let pendiente: string | null = null
       for (const c of cambios) {
         const v = (valores[c.slug] ?? '').trim()
         const r = await corregirCampoDeFicha(itemId, c.slug, v === '' ? null : v)
         if (!r.success) { toast.error(`${c.label}: ${r.error ?? 'no se pudo guardar'}`); return }
+        guardada = r.tarifa ?? guardada
+        pendiente = r.pendiente ?? pendiente
       }
       toast('Guardado. La vista del cliente ya muestra el cambio.')
-      onListo()
+      if (pendiente) toast.warning(pendiente)
+      onListo(guardada)
     })
   }
 
@@ -694,6 +711,12 @@ function FilaHabitacionTarjeta({
           <div className="mt-[3px] flex items-start gap-[5px] text-xs text-[#6E6A62]">
             <svg className="mt-0.5 shrink-0 text-[#0E5C43]" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" aria-hidden><circle cx="12" cy="12" r="9" /><path d="M12 8v5M12 16h.01" /></svg>
             <span>{notaEdad}</span>
+          </div>
+        )}
+        {h.avisoEstadia && (
+          <div className="mt-[3px] flex items-start gap-[5px] text-xs font-semibold text-[#9A5F0C]" data-aviso-estadia>
+            <svg className="mt-0.5 shrink-0" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" aria-hidden><path d="M12 3 2 21h20L12 3Z" /><path d="M12 10v4M12 17h.01" /></svg>
+            <span>{h.avisoEstadia}</span>
           </div>
         )}
       </div>

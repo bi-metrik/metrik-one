@@ -48,6 +48,7 @@ import {
   type TarifaPax,
 } from '@/lib/cotizaciones/tarifa-pasajero'
 import type { Correcciones } from '@/lib/cotizaciones/correcciones'
+import { casillasConEstadia } from '@/lib/cotizaciones/estadia'
 import { cifrasPorRevisar } from '@/lib/cotizaciones/ficha-linea'
 import { parseMontoCop } from '@/lib/negocios/monto-cop'
 import { formatBogotaFechaCorta } from '@/lib/dates/bogota'
@@ -167,7 +168,7 @@ export default function TarifaPasajeroItem({
   const confirmacionVieja = confirmacionDesactualizada(tarifa, composicion)
 
   const defs = composicion ? casillasDe(composicion, ranura.slug) : []
-  const estado = composicion ? resolverTarifa(composicion, casillas, ranura.slug, { moneda: monedaTarifa.moneda }) : null
+  const estado = composicion ? resolverTarifa(composicion, casillasConEstadia(casillas, tarifa.correcciones), ranura.slug, { moneda: monedaTarifa.moneda }) : null
   const primera = casillas.grupo_completo
   const primeraResuelve = !!(composicion && primera && traeDesgloseCompleto(primera, composicion))
 
