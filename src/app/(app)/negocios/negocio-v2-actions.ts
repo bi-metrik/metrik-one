@@ -128,6 +128,7 @@ import { sanearDataDelNavegador } from '@/lib/negocios/data-escribible'
 import { mayusculasDeBloqueDeViaje } from '@/lib/negocios/mayusculas'
 import { exigirModulo, MENSAJE_MODULO_NO_ACTIVO, REQUISITO } from '@/lib/modulos/exigir-modulo'
 import { refrescarVigenciaCrossCheck, type CrossCheckGuardado, type SpecVigencia } from '@/lib/documentos/refrescar-vigencia'
+import { absolverCrossCheck, type SpecRelectura } from '@/lib/documentos/relectura-cross-check'
 import { calcularDvNit, nitSinDv } from '@/lib/dian/nit'
 import { calcularTarifaUpmePorAnio } from '@/lib/upme/tarifa'
 import { registrarCorrecciones, contextoCorreccion, esCausaValida, type CampoCorregido, type CausaCorreccion } from '@/lib/correcciones/registrar'
@@ -7263,6 +7264,10 @@ export async function getNegocioDetalleCompleto(id: string): Promise<{
       // pendiente) lo escondían justo cuando hacía falta. `esBloqueReactivado` es
       // quien decide; aquí solo se aplica. Ver `src/lib/negocios/bloque-reactivado.ts`.
       const reactivables = new Set<string>()
+      // La bolsa de fuentes del historial (la de la etapa actual más las referencias de los
+      // bloques del historial, si la reactivación las cargó). La usa la relectura del
+      // veredicto de los documentos del historial.
+      let fuentesHistorial: Record<string, Record<string, unknown>> = datosPorSlug
       {
         const activa = reactivacionActiva(lineaConfigExtra)
         // ⚠️ Las bolsas de arriba se armaron SOLO con lo que declaran los bloques de
@@ -7311,6 +7316,7 @@ export async function getNegocioDetalleCompleto(id: string): Promise<{
           }
         }
         const fuentes = { porSlug, porEtapaOrden }
+        fuentesHistorial = porSlug
         // Instancias que hay que CREAR: sin fila no hay dónde escribir el dato, y un
         // bloque configurado después de que el caso pasó por su etapa nunca la tuvo.
         const nacen: Array<{ negocio_id: string; bloque_config_id: string; estado: string; data: Record<string, unknown> }> = []
@@ -7445,6 +7451,17 @@ export async function getNegocioDetalleCompleto(id: string): Promise<{
             ? { ...ceEnrichedPropuesta, _areaReadonly: true }
             : ceEnrichedPropuesta
 
+        // El certificado de una etapa que ya pasó se sigue viendo en el historial con su
+        // veredicto: se relee igual que en la etapa actual (solo absuelve), contra la bolsa
+        // del historial, que ya trae las fuentes de sus propios cross_check.
+        let instHist = inst
+        const checksHist = (ce as { cross_check?: { checks?: SpecRelectura[] } }).cross_check?.checks
+        const ccHist = (inst.data as Record<string, unknown> | null)?._cross_check as CrossCheckGuardado | undefined
+        if (def?.tipo === 'documento' && ccHist && (checksHist?.length ?? 0) > 0) {
+          const relecto = absolverCrossCheck(ccHist, checksHist, { porSlug: fuentesHistorial, porEtapaBloque: datosPorEtapaBloque })
+          if (relecto !== ccHist) instHist = { ...inst, data: { ...(inst.data ?? {}), _cross_check: relecto } }
+        }
+
         bloquesEtapasPrevias.push({
           etapa_orden: etapaInfo.orden,
           etapa_nombre: etapaInfo.nombre,
@@ -7459,7 +7476,7 @@ export async function getNegocioDetalleCompleto(id: string): Promise<{
           nombre: (cfg.nombre as string | null) ?? null,
           slug: (cfg.slug as string | null) ?? null,
           bloque_definitions: def,
-          instancia: inst,
+          instancia: instHist,
           config_extra: ceEnriched,
           items: itemsByInst.get(inst.id) ?? [],
         })
@@ -7614,8 +7631,14 @@ export async function getNegocioDetalleCompleto(id: string): Promise<{
           const valor = campos?.[spec.slug]?.value
           return valor === null || valor === undefined || valor === '' ? null : String(valor)
         })
-        if (cc !== ccGuardado) {
-          b = { ...b, instancia: { ...b.instancia, data: { ...data, _cross_check: cc } } }
+        // Las filas de texto que fallaron al cargar se vuelven a comparar con los
+        // datos de hoy y las reglas de hoy. Solo absuelve. Ver `relectura-cross-check.ts`.
+        const ccRelecto = absolverCrossCheck(cc, specCross?.checks as SpecRelectura[] | undefined, {
+          porSlug: datosPorSlug,
+          porEtapaBloque: datosPorEtapaBloque,
+        })
+        if (ccRelecto !== ccGuardado) {
+          b = { ...b, instancia: { ...b.instancia, data: { ...data, _cross_check: ccRelecto } } }
         }
       }
     }

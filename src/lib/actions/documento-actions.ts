@@ -21,16 +21,20 @@ import {
 } from '@/lib/documentos/tipo-documento'
 import { aplicarNormalizaciones } from '@/lib/documentos/normalizaciones'
 import { createSubfolderPath, uploadFileToDrive, setFilePublicByLink, deleteDriveFile, downloadDriveFile } from '@/lib/google-drive'
-import { estadoVigencia, type EstadoVigencia, type CriterioVigencia } from '@/lib/documentos/vigencia'
+import { type EstadoVigencia, type CriterioVigencia } from '@/lib/documentos/vigencia'
+import {
+  resolverDesdeFuente,
+  type CrossCheckMatchMode,
+  type CrossCheckSource,
+  type EstadoCheck,
+} from '@/lib/documentos/comparar-check'
 import { todayBogotaISO } from '@/lib/dates/bogota'
-import { montosCoinciden } from '@/lib/negocios/monto-cop'
-import { TOLERANCIA_SALDO_COP } from '@/lib/upme/modelo-dinero'
 import { registrarCorrecciones, contextoCorreccion, esCausaValida, type CausaCorreccion } from '@/lib/correcciones/registrar'
 import { resolverDestino } from '@/lib/negocios/casilla-compartida'
 import { esReemplazoHaciaAtras } from '@/lib/documentos/reemplazo-hacia-atras'
 import { extraerDriveFileId } from '@/lib/compliance/documentos'
 import { mimeEfectivo } from '@/lib/documentos/mime'
-import { checkSeSalta } from '@/lib/documentos/check-opcional'
+import { checkSeSalta, sociedadAcompananteSeSalta } from '@/lib/documentos/check-opcional'
 import type { CondicionBloque } from '@/lib/negocios/condicion-bloque'
 import { cerrarDevolucionAlCompletar } from '@/lib/negocios/cerrar-devolucion'
 import { sembrarSeccionalDesdeRut } from '@/lib/negocios/seccional-desde-documento'
@@ -119,23 +123,9 @@ async function reconocerParaBloque(
 // en bloques de etapas anteriores (RUT, Factura, etc). Devolvemos un detalle de
 // cada match. El gate del bloque solo se cumple si todas las comparaciones pasan.
 
-export type CrossCheckMatchMode = 'exact' | 'tokens' | 'subset' | 'id_prefix' | 'overlap' | 'vigencia' | 'monto'
-
-// Fuente de datos para un check: una etapa + bloque + cómo resolver el valor
-// esperado (un campo, varios concatenados, o varias alternativas de campo).
-export type CrossCheckSource = {
-  // Referencia ESTABLE al bloque fuente por su slug (atado a la identidad del
-  // bloque, no a su posición ni a su nombre editable). Prioritario sobre el par
-  // (source_etapa_orden, source_bloque_nombre), que queda como fallback legacy
-  // para refs aún no migradas. Ver docs/specs/2026-05-26_block-references-by-slug.md
-  source_bloque_slug?: string
-  source_etapa_orden: number
-  source_bloque_nombre: string
-  source_field?: string
-  source_fields?: string[]
-  source_field_alternatives?: string[]
-  join?: string
-}
+// El modo, la fuente y las comparaciones viven en `@/lib/documentos/comparar-check`
+// (puro): las comparte la relectura del negocio, que vuelve a mirar el veredicto guardado.
+export type { CrossCheckMatchMode, CrossCheckSource, EstadoCheck } from '@/lib/documentos/comparar-check'
 
 export type CrossCheckSpec = CrossCheckSource & {
   slug: string
@@ -172,21 +162,6 @@ export type CrossCheckSpec = CrossCheckSource & {
   required_when?: CondicionBloque
 }
 
-/**
- * Un check tiene TRES desenlaces, no dos.
- *
- * `ok`             — se comparó y coincide.
- * `falla`          — se comparó y no coincide.
- * `no_comprobable` — faltó un dato para comparar (hoy solo pasa en `vigencia`,
- *                    cuando el negocio aún no tiene fecha objetivo).
- *
- * ⚠️ `no_comprobable` NO es `ok`. Colapsarlo dejó 87 certificados vencidos pasando
- * el check sin que nadie los viera: no es que el control los aprobara, es que ni
- * siquiera los evaluaba. Tampoco es `falla`: no hay evidencia de que el documento
- * esté mal, así que **no bloquea** — se reporta para que la pantalla lo muestre.
- */
-export type EstadoCheck = 'ok' | 'falla' | 'no_comprobable'
-
 export type CrossCheckResult = {
   slug: string
   label: string
@@ -212,121 +187,6 @@ export type CrossCheckResult = {
    * que es exactamente la clase de inferencia que envejece mal.
    */
   criterio?: CriterioVigencia
-}
-
-function normalizeText(v: unknown): string {
-  return String(v ?? '')
-    .normalize('NFD')
-    .replace(/[\u0300-\u036f]/g, '')
-    .toLowerCase()
-    .replace(/[^a-z0-9\s]/g, ' ')
-    .replace(/\s+/g, ' ')
-    .trim()
-}
-
-function normalizeId(v: unknown): string {
-  return String(v ?? '').replace(/\D/g, '')
-}
-
-function tokensOf(s: string): string[] {
-  return normalizeText(s).split(/\s+/).filter(Boolean)
-}
-
-function compareValues(
-  expected: string,
-  extracted: string,
-  mode: CrossCheckMatchMode = 'exact',
-  opts?: { vigencia_dias?: number; tolerancia_cop?: number; hoy_iso?: string; margen_sin_cita_dias?: number },
-): boolean {
-  // El dinero se compara como NÚMERO y con margen, nunca como texto: "$ 701.812"
-  // y "701812" son el mismo monto, y "350906.00" no son 35 millones. Ver `monto-cop.ts`.
-  if (mode === 'monto') {
-    return montosCoinciden(expected, extracted, opts?.tolerancia_cop ?? TOLERANCIA_SALDO_COP)
-  }
-  // La vigencia se evalúa ANTES del guard de vacíos: en una seccional que no exige
-  // cita no hay fecha objetivo. Ese caso NO es "cumple": es "no se pudo comprobar",
-  // y lo resuelve `evaluarCheck` con su propio estado. Aquí solo interesa el
-  // veredicto binario para los consumidores que aún esperan un booleano.
-  if (mode === 'vigencia') {
-    // `extracted` = fecha de expedición del documento; `expected` = fecha objetivo
-    // (la cita). El documento debe seguir vigente ESE día, no el día que se carga:
-    // un certificado bancario de hace tres semanas sirve hoy y no sirve para una
-    // cita del mes entrante. Se delega en `estadoVigencia` (la MISMA función que usa
-    // `evaluarCheck`) en vez de repetir el criterio con `documentoVigenteEn`: dos
-    // implementaciones del mismo juicio se desincronizan, y aquí ya pasó — el margen
-    // sin cita habría quedado fuera de este camino sin que nada lo delatara.
-    const v = estadoVigencia(extracted, expected, {
-      vigenciaDias: opts?.vigencia_dias,
-      hoyISO: opts?.hoy_iso,
-      margenSinObjetivoDias: opts?.margen_sin_cita_dias,
-    })
-    return v.estado !== 'reemplazar' && v.estado !== 'esperar'
-  }
-  if (!expected || !extracted) return false
-  if (mode === 'tokens') {
-    const a = tokensOf(expected).sort()
-    const b = tokensOf(extracted).sort()
-    return a.length > 0 && a.length === b.length && a.every((t, i) => t === b[i])
-  }
-  if (mode === 'subset') {
-    const a = new Set(tokensOf(expected))
-    const b = new Set(tokensOf(extracted))
-    if (a.size === 0 || b.size === 0) return false
-    const bInA = [...b].every(t => a.has(t))
-    const aInB = [...a].every(t => b.has(t))
-    return bInA || aInB
-  }
-  if (mode === 'id_prefix') {
-    const a = normalizeId(expected)
-    const b = normalizeId(extracted)
-    if (a.length < 6 || b.length < 6) return false
-    return a === b || a.startsWith(b) || b.startsWith(a)
-  }
-  if (mode === 'overlap') {
-    // Tolerante a palabras extra: pasa si comparten al menos un token alfabético
-    // significativo (≥3 letras, excluye años/números). Útil para línea/modelo,
-    // donde el certificado UPME replica la factura con descripción más larga
-    // (ej. "Escape 2025" vs "Escape Platinum 2025").
-    const sig = (s: string) => new Set(tokensOf(s).filter(t => t.length >= 3 && !/^\d+$/.test(t)))
-    const a = sig(expected)
-    const b = sig(extracted)
-    if (a.size === 0 || b.size === 0) return false
-    return [...a].some(t => b.has(t))
-  }
-  return normalizeText(expected) === normalizeText(extracted)
-}
-
-/**
- * Evalúa un check y devuelve su estado real, distinguiendo el caso en que no se
- * pudo comprobar. Solo `vigencia` puede quedar `no_comprobable`: los demás modos
- * comparan textos o montos y siempre concluyen.
- *
- * `hoyISO` viaja como parámetro (no se lee el reloj aquí) para que todo el lote
- * comparta una sola marca y para poder probarlo; ver `estadoVigencia`.
- */
-function evaluarCheck(
-  expected: string,
-  extracted: string,
-  mode: CrossCheckMatchMode,
-  opts?: { vigencia_dias?: number; tolerancia_cop?: number; hoy_iso?: string; margen_sin_cita_dias?: number },
-): { estado: EstadoCheck; pedirDesde?: string | null; vigencia?: EstadoVigencia; criterio?: CriterioVigencia } {
-  if (mode === 'vigencia') {
-    const v = estadoVigencia(extracted, expected, {
-      vigenciaDias: opts?.vigencia_dias,
-      hoyISO: opts?.hoy_iso,
-      margenSinObjetivoDias: opts?.margen_sin_cita_dias,
-    })
-    if (v.estado === 'no_comprobable') {
-      return { estado: 'no_comprobable', pedirDesde: null, vigencia: v.estado }
-    }
-    return {
-      estado: v.estado === 'vigente' ? 'ok' : 'falla',
-      pedirDesde: v.pedirDesde,
-      vigencia: v.estado,
-      ...(v.criterio ? { criterio: v.criterio } : {}),
-    }
-  }
-  return { estado: compareValues(expected, extracted, mode, opts) ? 'ok' : 'falla' }
 }
 
 async function runCrossCheck(
@@ -375,38 +235,6 @@ async function runCrossCheck(
     }
   }
 
-  // Resuelve el valor esperado de UNA fuente (campo único, varios concatenados, o
-  // alternativas de campo) contra su srcData ya cargado.
-  const resolveFromSource = (
-    src: CrossCheckSource,
-    srcData: Record<string, unknown>,
-    extractedRaw: string,
-    mode: CrossCheckMatchMode,
-    opts?: { vigencia_dias?: number; tolerancia_cop?: number; hoy_iso?: string; margen_sin_cita_dias?: number },
-  ): { expected: string; estado: EstadoCheck; pedirDesde?: string | null; vigencia?: EstadoVigencia; criterio?: CriterioVigencia } => {
-    if (src.source_fields && src.source_fields.length > 0) {
-      const join = src.join ?? ' '
-      const expected = src.source_fields.map(f => String(srcData[f] ?? '')).filter(s => s).join(join)
-      return { expected, ...evaluarCheck(expected, extractedRaw, mode, opts) }
-    }
-    if (src.source_field_alternatives && src.source_field_alternatives.length > 0) {
-      // Probar cada alternativa de campo; pasar si CUALQUIERA matchea. Se evalúa una
-      // sola vez por candidato y se conserva el veredicto completo: quedarse solo con
-      // `estado: 'ok'` perdería el detalle de vigencia del candidato que sí pasó.
-      const candidates = src.source_field_alternatives.map(f => String(srcData[f] ?? '')).filter(s => s)
-      const evaluados = candidates.map(c => ({ expected: c, ...evaluarCheck(c, extractedRaw, mode, opts) }))
-      const matched = evaluados.find(e => e.estado === 'ok')
-      if (matched) return matched
-      const primero = evaluados[0]
-      return primero ?? { expected: '', ...evaluarCheck('', extractedRaw, mode, opts) }
-    }
-    if (src.source_field) {
-      const expected = String(srcData[src.source_field] ?? '')
-      return { expected, ...evaluarCheck(expected, extractedRaw, mode, opts) }
-    }
-    return { expected: '', estado: 'falla' }
-  }
-
   // `required_when` se resuelve con el MISMO criterio que el `condition` de un bloque en
   // pantalla (`cumpleCondicion`), contra los datos por slug que ya se cargaron arriba.
   const fuentesCondicion = { porSlug: Object.fromEntries(dataPorSlug), porEtapaOrden: {} }
@@ -449,7 +277,7 @@ async function runCrossCheck(
         (src.source_bloque_slug ? dataPorSlug.get(src.source_bloque_slug) : undefined) ??
         dataPorBloque.get(`${src.source_etapa_orden}::${src.source_bloque_nombre.trim().toLowerCase()}`) ??
         {}
-      const r = resolveFromSource(src, srcData, extractedRaw, mode, {
+      const r = resolverDesdeFuente(src, srcData, extractedRaw, mode, {
         vigencia_dias: check.vigencia_dias,
         tolerancia_cop: check.tolerancia_cop,
         hoy_iso: hoyIso,
@@ -466,7 +294,12 @@ async function runCrossCheck(
 
     // Sin fuentes evaluadas no hay evidencia de nada: `falla` es el lado seguro para
     // un control (retener, no dejar pasar), y es lo que hacía la versión anterior.
-    const estadoFinal: EstadoCheck = estado ?? 'falla'
+    let estadoFinal: EstadoCheck = estado ?? 'falla'
+    // Una sociedad en el lugar opcional del 2º beneficiario, sin RUT ni certificado contra
+    // el cual compararla, en un negocio de un solo titular: no es un error del documento.
+    if (estadoFinal === 'falla' && sociedadAcompananteSeSalta(check, extractedRaw, expectedRaw, fuentesCondicion)) {
+      estadoFinal = 'ok'
+    }
 
     results.push({
       slug: check.slug,
