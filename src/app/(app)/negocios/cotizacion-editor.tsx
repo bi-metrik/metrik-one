@@ -51,6 +51,8 @@ import BandejaCapturas, { type ReceptorDeBandeja } from '@/app/(app)/negocios/ba
 import TarjetaOpcion from '@/app/(app)/negocios/tarjeta-opcion'
 import { devolverOpcionABandeja } from '@/app/(app)/negocios/tarifa-pax-actions'
 import { MarcoCotizacionContexto } from '@/app/(app)/negocios/marco-cotizacion-contexto'
+import { usePublicarTotalVivo } from '@/app/(app)/negocios/total-vivo'
+import { laMasNueva, lineasParaPintar, traerVistaFresca, type VistaFresca } from '@/lib/cotizaciones/vista-fresca'
 import { esAvisoSoloInformativo, estadoDeBloque, resumenDeBloques, type EstadoDeBloque } from '@/lib/cotizaciones/bandeja-capturas'
 import { crearRanuraConOpcion, eliminarRanura } from '@/app/(app)/negocios/ranura-actions'
 import { avisoDeBorradoDeBloque, preguntaTarifaMarcada, tarifasMarcadasCon } from '@/lib/cotizaciones/eliminar-opciones'
@@ -334,17 +336,54 @@ interface Props {
   fechasViaje?: { inicio: string | null; fin: string | null } | null
   /** El nivel de detalle del documento del viaje: la hoja del cliente de cada opción lo respeta. */
   nivelDetalle?: NivelDetalle | null
+  /**
+   * La hora del servidor en que la página leyó la cotización (ISO). El editor del viaje la
+   * compara con su propia lectura para pintar la más nueva (`vista-fresca.ts`). Ausente = la
+   * lectura propia siempre gana cuando existe.
+   */
+  leidaEn?: string | null
 }
 
 /** Cuánto dura el «Deshacer» de un borrado de opción o de bloque (P12). */
 const ESPERA_DESHACER_MS = 6000
 
-export default function CotizacionEditor({ oportunidadId, cotizacion, initialItems, fiscalProfile, clientFiscal, backUrl, staffMembers, frozen, lineaId, umbrales = UMBRALES_MARGEN_POR_DEFECTO, itinerarios, pisoBloqueaAvance = false, politicaRecargo = RECARGO_POR_DEFECTO, composicionViaje = null, lineasPorTipo = false, adicionales = ADICIONALES_VACIOS, salida = null, textoCliente = null, configIva = CONFIG_IVA_POR_DEFECTO, mostrarResumenFiscal = true, destinoViaje = null, fechasViaje = null, nivelDetalle = null }: Props) {
+export default function CotizacionEditor({ oportunidadId, cotizacion, initialItems: itemsDeLaPagina, fiscalProfile, clientFiscal, backUrl, staffMembers, frozen, lineaId, umbrales = UMBRALES_MARGEN_POR_DEFECTO, itinerarios, pisoBloqueaAvance = false, politicaRecargo = RECARGO_POR_DEFECTO, composicionViaje = null, lineasPorTipo = false, adicionales: adicionalesDeLaPagina = ADICIONALES_VACIOS, salida = null, textoCliente = null, configIva = CONFIG_IVA_POR_DEFECTO, mostrarResumenFiscal = true, destinoViaje = null, fechasViaje = null, nivelDetalle = null, leidaEn = null }: Props) {
   // Abierto de entrada solo si hay un borrador de ONE esperando revisión: es lo único que
   // el equipo tiene que hacer aquí, y cerrado no lo vería.
   const [verTextoCliente, setVerTextoCliente] = useState(() => estadoDelTexto(textoCliente?.documento ?? null) === 'borrador')
   const router = useRouter()
   const [isPending, startTransition] = useTransition()
+
+  // ── Lo que cambia el costo se ve sin recargar (brief del 2026-10-01) ──────────
+  // En el flujo de viaje, tras cada acción el editor pide la cotización por su cuenta y pinta la
+  // lectura MÁS NUEVA entre esa y la de la página (`lib/cotizaciones/vista-fresca.ts`): con el
+  // refresco solo, la tarjeta se quedaba con los rubros y las fechas viejos hasta recargar.
+  // Todo lo que se deriva abajo (cascada, tarjeta, «Así lo ve el cliente», total) sale de
+  // `initialItems` y `adicionales`, así que basta con elegir de dónde salen esos dos.
+  // Fuera del flujo de viaje no se pide nada y el editor es el de siempre.
+  const [vistaFresca, setVistaFresca] = useState<VistaFresca | null>(null)
+  const aPintar = lineasParaPintar(
+    { items: itemsDeLaPagina, adicionalesPorItem: adicionalesDeLaPagina.porItem, leidaEn },
+    vistaFresca,
+    lineasPorTipo,
+  )
+  const initialItems: ItemRow[] = aPintar.items
+  const frescaVigente = aPintar.deLaLecturaPropia
+  // Sin lectura propia, el MISMO objeto de la página: fuera del viaje el editor no cambia en nada.
+  const adicionales: NonNullable<Props['adicionales']> = frescaVigente
+    ? { ...adicionalesDeLaPagina, porItem: aPintar.adicionalesPorItem }
+    : adicionalesDeLaPagina
+  const publicarTotal = usePublicarTotalVivo()
+  useEffect(() => {
+    publicarTotal(frescaVigente && vistaFresca ? { cotizacionId: cotizacion.id, valorTotal: vistaFresca.valorTotal } : null)
+  }, [frescaVigente, vistaFresca, cotizacion.id, publicarTotal])
+  function refrescar() {
+    router.refresh()
+    if (!lineasPorTipo) return
+    void traerVistaFresca(cotizacion.id).then(v => {
+      if (v) setVistaFresca(prev => laMasNueva(prev, v))
+    })
+  }
   // El marco del negocio (2026-09-23): la cotización de viaje se pinta dentro del mismo
   // encabezado y panel de la página del negocio. Solo en el flujo de viaje; sin marco, la
   // pantalla de siempre (R6).
@@ -414,7 +453,7 @@ export default function CotizacionEditor({ oportunidadId, cotizacion, initialIte
         await recalcularTotales(cotizacion.id)
         setShowCatalog(false)
         toast.success('Servicio agregado con costos')
-        router.refresh()
+        refrescar()
       } else {
         toast.error(res.error)
       }
@@ -491,7 +530,7 @@ export default function CotizacionEditor({ oportunidadId, cotizacion, initialIte
       const res = await enviarCotizacion(cotizacion.id)
       if (res.success) {
         toast.success('Cotización enviada')
-        router.refresh()
+        refrescar()
       } else {
         toast.error(res.error)
       }
@@ -576,7 +615,7 @@ export default function CotizacionEditor({ oportunidadId, cotizacion, initialIte
         // El campo de «Otro» se cierra al agregar: dejarlo abierto con el texto ya
         // consumido invita a volver a darle al botón sobre un campo vacío.
         setMostrarOtro(false)
-        router.refresh()
+        refrescar()
       } else {
         toast.error(res.error)
       }
@@ -606,7 +645,7 @@ export default function CotizacionEditor({ oportunidadId, cotizacion, initialIte
         const r = await crearRanuraConOpcion(cotizacion.id, tipo)
         if (!r.success) { toast.error(r.error); return }
         setExpandedItems(prev => new Set(prev).add(r.itemId))
-        router.refresh()
+        refrescar()
         return
       }
       // El grupo se calcula con lo que hay EN PANTALLA porque es lo mismo que el servidor
@@ -623,7 +662,7 @@ export default function CotizacionEditor({ oportunidadId, cotizacion, initialIte
       if (res.success && 'id' in res && res.id) {
         const nuevoId = res.id
         setExpandedItems(prev => new Set(prev).add(nuevoId))
-        router.refresh()
+        refrescar()
       } else {
         toast.error('error' in res ? res.error : 'No se pudo agregar la línea')
       }
@@ -635,7 +674,7 @@ export default function CotizacionEditor({ oportunidadId, cotizacion, initialIte
       const res = await deleteItem(itemId)
       if (res.success) {
         await recalcularTotales(cotizacion.id)
-        router.refresh()
+        refrescar()
       } else {
         toast.error(res.error)
       }
@@ -655,7 +694,7 @@ export default function CotizacionEditor({ oportunidadId, cotizacion, initialIte
         await recalcularTotales(cotizacion.id)
         setAddingRubroFor(null)
         setNewRubro({ tipo: 'mo_propia', descripcion: '', cantidad: '1', unidad: 'horas', valor_unitario: '' })
-        router.refresh()
+        refrescar()
       } else {
         toast.error(res.error)
       }
@@ -688,7 +727,7 @@ export default function CotizacionEditor({ oportunidadId, cotizacion, initialIte
         setAddingRubroFor(null)
         setEditingRubroId(null)
         setNewRubro({ tipo: 'mo_propia', descripcion: '', cantidad: '1', unidad: 'horas', valor_unitario: '' })
-        router.refresh()
+        refrescar()
       } else {
         toast.error(res.error)
       }
@@ -700,7 +739,7 @@ export default function CotizacionEditor({ oportunidadId, cotizacion, initialIte
       const res = await deleteRubro(rubroId)
       if (res.success) {
         await recalcularTotales(cotizacion.id)
-        router.refresh()
+        refrescar()
       } else {
         toast.error(res.error)
       }
@@ -991,7 +1030,7 @@ export default function CotizacionEditor({ oportunidadId, cotizacion, initialIte
           mostrar()
           return
         }
-        router.refresh()
+        refrescar()
       })
     }
     const reloj = setTimeout(ejecutar, ESPERA_DESHACER_MS)
@@ -1102,7 +1141,7 @@ export default function CotizacionEditor({ oportunidadId, cotizacion, initialIte
                 if (nombre === (cotizacion.descripcion ?? null)) return
                 startTransition(async () => {
                   const res = await updateCotizacion(cotizacion.id, { descripcion: nombre })
-                  if (res.success) router.refresh()
+                  if (res.success) refrescar()
                   else toast.error(res.error)
                 })
               }}
@@ -1380,7 +1419,7 @@ export default function CotizacionEditor({ oportunidadId, cotizacion, initialIte
                   const res = await agregarOpcionAItem(item.id, '')
                   if (!res.success) { toast.error(res.error); return }
                   toast.success(`Otra opción en «${res.grupo}». Solo una entra al precio: cárgale su costo.`)
-                  router.refresh()
+                  refrescar()
                 })
               }}
               className="flex items-center gap-1 rounded-md border bg-background px-2 py-1.5 text-xs font-medium text-muted-foreground hover:bg-accent disabled:opacity-50"
@@ -1412,7 +1451,7 @@ export default function CotizacionEditor({ oportunidadId, cotizacion, initialIte
                   tarifaPax={item.tarifa_pax}
                   costoUnitarioLinea={costoUnitario}
                   sugeridosGuardados={rubrosSugeridos}
-                  onCambio={() => router.refresh()}
+                  onCambio={() => refrescar()}
                 />
               )}
           </>
@@ -1464,7 +1503,7 @@ export default function CotizacionEditor({ oportunidadId, cotizacion, initialIte
                           itemId={item.id}
                           subtotalPesos={costoManual}
                           tarifaPax={item.tarifa_pax}
-                          onCambio={() => router.refresh()}
+                          onCambio={() => refrescar()}
                         />
                       ) : (
                         <>
@@ -1484,7 +1523,7 @@ export default function CotizacionEditor({ oportunidadId, cotizacion, initialIte
                                   const res = await updateItem(item.id, { subtotal: val })
                                   if (!res.success) { toast.error(res.error); return }
                                   await recalcularTotales(cotizacion.id)
-                                  router.refresh()
+                                  refrescar()
                                 })
                               }}
                               onKeyDown={e => { if (e.key === 'Enter') e.currentTarget.blur() }}
@@ -1511,7 +1550,7 @@ export default function CotizacionEditor({ oportunidadId, cotizacion, initialIte
                           startTransition(async () => {
                             await updateItem(item.id, { cantidad: val })
                             await recalcularTotales(cotizacion.id)
-                            router.refresh()
+                            refrescar()
                           })
                         }}
                       />
@@ -1535,7 +1574,7 @@ export default function CotizacionEditor({ oportunidadId, cotizacion, initialIte
                           startTransition(async () => {
                             await updateItem(item.id, { descuento_porcentaje: pct })
                             await recalcularTotales(cotizacion.id)
-                            router.refresh()
+                            refrescar()
                           })
                         }}
                       />
@@ -1634,7 +1673,7 @@ export default function CotizacionEditor({ oportunidadId, cotizacion, initialIte
                                 startTransition(async () => {
                                   const res = await updateItem(item.id, { base_iva: base })
                                   if (!res.success) toast.error(res.error ?? 'No se pudo guardar')
-                                  router.refresh()
+                                  refrescar()
                                 })
                               }}
                             >
@@ -1691,7 +1730,7 @@ export default function CotizacionEditor({ oportunidadId, cotizacion, initialIte
                             startTransition(async () => {
                               await updateItem(item.id, { margen_porcentaje: margenCotizacion })
                               await recalcularTotales(cotizacion.id)
-                              router.refresh()
+                              refrescar()
                             })
                           }}
                           className="text-[10px] text-primary underline underline-offset-2 hover:opacity-80 disabled:opacity-50"
@@ -1716,7 +1755,7 @@ export default function CotizacionEditor({ oportunidadId, cotizacion, initialIte
                                 startTransition(async () => {
                                   await updateItem(item.id, { margen_porcentaje: pct })
                                   await recalcularTotales(cotizacion.id)
-                                  router.refresh()
+                                  refrescar()
                                 })
                               }}
                               onKeyDown={e => { if (e.key === 'Enter') e.currentTarget.blur() }}
@@ -1762,7 +1801,7 @@ export default function CotizacionEditor({ oportunidadId, cotizacion, initialIte
                                     startTransition(async () => {
                                       await updateItem(item.id, { margen_porcentaje: nuevo })
                                       await recalcularTotales(cotizacion.id)
-                                      router.refresh()
+                                      refrescar()
                                     })
                                   }}
                                   onKeyDown={e => { if (e.key === 'Enter') e.currentTarget.blur() }}
@@ -1781,7 +1820,7 @@ export default function CotizacionEditor({ oportunidadId, cotizacion, initialIte
                                 startTransition(async () => {
                                   await updateItem(item.id, { margen_porcentaje: margenDelPantallazo })
                                   await recalcularTotales(cotizacion.id)
-                                  router.refresh()
+                                  refrescar()
                                 })
                               }}
                               className="text-[10px] text-primary underline underline-offset-2 hover:opacity-80 disabled:opacity-50"
@@ -1798,7 +1837,7 @@ export default function CotizacionEditor({ oportunidadId, cotizacion, initialIte
                                 // decisión distinta a "usa el margen de la cotización".
                                 await updateItem(item.id, { margen_porcentaje: null })
                                 await recalcularTotales(cotizacion.id)
-                                router.refresh()
+                                refrescar()
                               })
                             }}
                             className="text-[10px] text-primary underline underline-offset-2 hover:opacity-80 disabled:opacity-50"
@@ -1830,7 +1869,7 @@ export default function CotizacionEditor({ oportunidadId, cotizacion, initialIte
                                 startTransition(async () => {
                                   await updateItem(item.id, { precio_venta: val, precio_manual: true })
                                   await recalcularTotales(cotizacion.id)
-                                  router.refresh()
+                                  refrescar()
                                 })
                               }}
                               onKeyDown={e => { if (e.key === 'Enter') e.currentTarget.blur() }}
@@ -1847,7 +1886,7 @@ export default function CotizacionEditor({ oportunidadId, cotizacion, initialIte
                                 startTransition(async () => {
                                   await updateItem(item.id, { precio_manual: false })
                                   await recalcularTotales(cotizacion.id)
-                                  router.refresh()
+                                  refrescar()
                                 })
                               }}
                               className="text-[10px] text-primary underline underline-offset-2 hover:opacity-80 disabled:opacity-50"
@@ -1872,7 +1911,7 @@ export default function CotizacionEditor({ oportunidadId, cotizacion, initialIte
                                     margen_porcentaje: margenDelPantallazo,
                                   })
                                   await recalcularTotales(cotizacion.id)
-                                  router.refresh()
+                                  refrescar()
                                 })
                               }}
                               className="text-[10px] text-primary underline underline-offset-2 hover:opacity-80 disabled:opacity-50"
@@ -2107,7 +2146,7 @@ export default function CotizacionEditor({ oportunidadId, cotizacion, initialIte
                     startTransition(async () => {
                       const res = await updateItem(item.id, { descripcion: val })
                       if (!res.success) { toast.error(res.error); return }
-                      router.refresh()
+                      refrescar()
                     })
                   }}
                 />
@@ -2163,7 +2202,7 @@ export default function CotizacionEditor({ oportunidadId, cotizacion, initialIte
                         const res = await actualizarRanuraDeItem(item.id, { grupo: val })
                         if (!res.success) { toast.error(res.error); return }
                         setMoverGrupoDe(null)
-                        router.refresh()
+                        refrescar()
                       })
                     }}
                   />
@@ -2184,10 +2223,10 @@ export default function CotizacionEditor({ oportunidadId, cotizacion, initialIte
                 startTransition(async () => {
                   const res = await updateItem(item.id, { descripcion: val })
                   if (!res.success) { toast.error(res.error); return }
-                  router.refresh()
+                  refrescar()
                 })
               }}
-              onCambio={() => router.refresh()}
+              onCambio={() => refrescar()}
             />
           )
         }
@@ -2357,7 +2396,7 @@ export default function CotizacionEditor({ oportunidadId, cotizacion, initialIte
                         startTransition(async () => {
                           const res = await updateItem(item.id, { nombre: val })
                           if (!res.success) { toast.error(res.error); return }
-                          router.refresh()
+                          refrescar()
                         })
                       }}
                       onKeyDown={e => { if (e.key === 'Enter') e.currentTarget.blur() }}
@@ -2380,7 +2419,7 @@ export default function CotizacionEditor({ oportunidadId, cotizacion, initialIte
                         startTransition(async () => {
                           const res = await actualizarRanuraDeItem(item.id, { grupo: val })
                           if (!res.success) { toast.error(res.error); return }
-                          router.refresh()
+                          refrescar()
                         })
                       }}
                     />
@@ -2408,7 +2447,7 @@ export default function CotizacionEditor({ oportunidadId, cotizacion, initialIte
                           startTransition(async () => {
                             const res = await actualizarRanuraDeItem(item.id, { unidad: val })
                             if (!res.success) { toast.error(res.error); return }
-                            router.refresh()
+                            refrescar()
                           })
                         }}
                         onKeyDown={e => { if (e.key === 'Enter') e.currentTarget.blur() }}
@@ -2455,7 +2494,7 @@ export default function CotizacionEditor({ oportunidadId, cotizacion, initialIte
                           startTransition(async () => {
                             const res = await actualizarDiaDeItem(item.id, { dia_relativo: val })
                             if (!res.success) { toast.error(res.error); return }
-                            router.refresh()
+                            refrescar()
                           })
                         }}
                         onKeyDown={e => { if (e.key === 'Enter') e.currentTarget.blur() }}
@@ -2490,7 +2529,7 @@ export default function CotizacionEditor({ oportunidadId, cotizacion, initialIte
                           startTransition(async () => {
                             const res = await actualizarDiaDeItem(item.id, { entra_al_precio: val })
                             if (!res.success) { toast.error(res.error); return }
-                            router.refresh()
+                            refrescar()
                           })
                         }}
                       />
@@ -2517,7 +2556,7 @@ export default function CotizacionEditor({ oportunidadId, cotizacion, initialIte
                           startTransition(async () => {
                             const res = await actualizarDiaDeItem(item.id, { mostrar_en_sugeridos: val })
                             if (!res.success) { toast.error(res.error); return }
-                            router.refresh()
+                            refrescar()
                           })
                         }}
                       />
@@ -2551,7 +2590,7 @@ export default function CotizacionEditor({ oportunidadId, cotizacion, initialIte
                               const res = await actualizarRanuraDeItem(item.id, { grupo: val })
                               if (!res.success) { toast.error(res.error); return }
                               setMoverGrupoDe(null)
-                              router.refresh()
+                              refrescar()
                             })
                           }}
                         />
@@ -2636,6 +2675,7 @@ export default function CotizacionEditor({ oportunidadId, cotizacion, initialIte
               receptor={receptorBandeja}
               onPendientes={setPendientesEnBandeja}
               fechasViaje={fechasViaje}
+              onCambio={refrescar}
             />
           )}
           {lineasPorTipo && (
@@ -2859,7 +2899,7 @@ export default function CotizacionEditor({ oportunidadId, cotizacion, initialIte
                 if (!r.success) { toast.error(r.error); return }
                 await recalcularTotales(cotizacion.id)
                 toast.success(`${r.etiqueta} agregado por ${formatCOP(r.valor)}`)
-                router.refresh()
+                refrescar()
               })
             }
             className="shrink-0 rounded-md bg-blue-600 px-2.5 py-1.5 text-xs font-medium text-white hover:bg-blue-700 disabled:opacity-50"
@@ -2992,20 +3032,20 @@ export default function CotizacionEditor({ oportunidadId, cotizacion, initialIte
           startTransition(async () => {
             await updateCotizacion(cotizacion.id, { margen_porcentaje: pct })
             await recalcularTotales(cotizacion.id)
-            router.refresh()
+            refrescar()
           })
         }}
         onAIUChange={(adminPct, imprevPct) => {
           startTransition(async () => {
             await aplicarAIU(cotizacion.id, adminPct, imprevPct)
-            router.refresh()
+            refrescar()
           })
         }}
         onDescuentoChange={pct => {
           startTransition(async () => {
             await updateCotizacion(cotizacion.id, { descuento_porcentaje: pct })
             await recalcularTotales(cotizacion.id)
-            router.refresh()
+            refrescar()
           })
         }}
       />
@@ -3038,7 +3078,7 @@ export default function CotizacionEditor({ oportunidadId, cotizacion, initialIte
                     terminos_condiciones: valor || null,
                   })
                   if (!res.success) toast.error(res.error)
-                  router.refresh()
+                  refrescar()
                 })
               }}
               rows={5}
@@ -3366,6 +3406,7 @@ export default function CotizacionEditor({ oportunidadId, cotizacion, initialIte
           receptor={receptorBandeja}
           onPendientes={setPendientesEnBandeja}
           fechasViaje={fechasViaje}
+          onCambio={refrescar}
         />
       )}
       {lineasPorTipo ? pasosDelViaje : (

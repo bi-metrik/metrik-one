@@ -5,6 +5,7 @@ import { getCachedUser } from '@/lib/supabase/auth-user'
 import { registrarActividad } from '@/lib/activity/registrar-actividad'
 import { armarSelectorDeWorkspaces, type WorkspaceConMarca } from '@/lib/workspace/archivado'
 import type { GrupoDeWorkspace } from '@/lib/workspace/grupo'
+import { entradaDeWorkspaceEnPreview, esDeploymentDePreview } from '@/lib/tenant/tenant-preview'
 
 // ============================================================
 // Tipos compartidos (cliente + servidor)
@@ -70,6 +71,12 @@ async function generateCrossSubdomainSessionLink(
   targetSlug: string,
   pathAfter: string = '/numeros',
 ): Promise<string | null> {
+  // En un preview de Vercel el subdominio del workspace destino es PRODUCCIÓN: el enlace
+  // sacaba al revisor de la versión del PR justo al cambiar de workspace. Ahí no hace falta
+  // sembrar sesión en otro host (la cookie de sesión ya es de este), así que el destino es
+  // la entrada al workspace en el mismo host, y no se genera ningún enlace mágico.
+  if (esDeploymentDePreview()) return entradaDeWorkspaceEnPreview(targetSlug)
+
   const svc = createServiceClient()
   const baseDomain = process.env.NEXT_PUBLIC_BASE_DOMAIN || 'metrikone.co'
   const targetOrigin =

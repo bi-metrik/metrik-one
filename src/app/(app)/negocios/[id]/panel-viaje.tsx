@@ -5,6 +5,7 @@ import { ClipboardList, FileText, Plus, UserRound } from 'lucide-react'
 import { ESTADO_COTIZACION_CONFIG } from '@/lib/catalogos/constants'
 import { formatCOP } from '@/lib/cobros/format'
 import { fechaCortaBogota, type MarcoDelNegocio } from '@/lib/cotizaciones/marco-negocio'
+import { totalParaLaLista, useTotalVivo } from '@/app/(app)/negocios/total-vivo'
 
 /**
  * Lo que el negocio de viaje (Trappvel) suma al panel del contacto: la solicitud, el
@@ -36,6 +37,8 @@ export default function PanelViaje({ viaje, cotActualId }: { viaje: MarcoDelNego
   const p = viaje.perfil
   const destino = [s.destino, s.alcance?.toLowerCase()].filter(Boolean).join(' · ') || null
   const fechas = [s.fechas, s.tipoDeFechas].filter(Boolean).join(' · ') || null
+  // El total que el editor acaba de leer, si es más nuevo que el de la página (`total-vivo.tsx`).
+  const totalVivo = useTotalVivo()
 
   return (
     <>
@@ -78,6 +81,7 @@ export default function PanelViaje({ viaje, cotActualId }: { viaje: MarcoDelNego
             {viaje.cotizaciones.map(c => {
               const actual = c.id === cotActualId
               const estado = ESTADO_COTIZACION_CONFIG[c.estado as keyof typeof ESTADO_COTIZACION_CONFIG]
+              const valorTotal = totalParaLaLista(c.id, c.valorTotal, totalVivo)
               const contenido = (
                 <>
                   <span className="flex items-center justify-between gap-2">
@@ -87,7 +91,7 @@ export default function PanelViaje({ viaje, cotActualId }: { viaje: MarcoDelNego
                     </span>
                   </span>
                   <span className="mt-0.5 flex items-center justify-between gap-2 text-[11px] text-muted-foreground">
-                    <span className="tabular-nums">{c.valorTotal && c.valorTotal > 0 ? formatCOP(c.valorTotal) : 'Sin total'}</span>
+                    <span className="tabular-nums" data-total-cotizacion={c.id}>{valorTotal && valorTotal > 0 ? formatCOP(valorTotal) : 'Sin total'}</span>
                     {c.editadaEl && <span>edit. {fechaCortaBogota(c.editadaEl)}</span>}
                   </span>
                 </>
