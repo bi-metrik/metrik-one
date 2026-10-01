@@ -37,5 +37,9 @@ upsert del código viejo `on conflict (entrega_id)` se queda sin índice. `modo_
 - QA v6: el equipo se compara también por primer nombre y su prefijo de 3+ letras («Tati»); «nuevo»
   suelto pide el nombre en el acto; `leerSiNo` es el normalizador compartido (estricto para el «sí» que
   carga: «ok»/«👍» no cargan, F11). C9 («bebé de 18» como infante) espera decisión de Mauricio.
+- Antes del QA v7: cliente exacto gana sobre el apodo del equipo (María vs Mariana); C9 decidido
+  (bebé + edad ≥2 pregunta, vía `descartados[].pregunta`); avance % con `lineaAvance` (calcularNiveles).
+  El avance sale en el mensaje de cada viaje: NO hay un mensaje combinado por entrega (cada segmento
+  carga y contesta aparte en el cron).
 - El aislamiento rechaza `cat >> archivo <<EOF` y `sed` con variables: usar Edit/Write o un .py en el worktree.
 Relacionado: [[entendimiento-bandeja-wa]], [[bandeja-negocio-existente]].

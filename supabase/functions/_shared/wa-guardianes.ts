@@ -186,10 +186,30 @@ export function numerosDeGrupoPorMensaje(fuente: string): number[][] {
 /** Alguien más que se suma al viaje: «mi hermana también va», «se nos suma mi suegra». */
 const RE_SE_SUMA = /\b(mi|su|sus|mis)\s+(hermana|hermano|mama|papa|madre|padre|suegra|suegro|amiga|amigo|tia|tio|prima|primo|cunada|cunado|abuela|abuelo|novia|novio|pareja)\b[^.]{0,40}\b(tambien|se suma|se une|viene|vienen|va con|van con)\b|\bse (nos )?(suma|une|unen|suman)\b/;
 
-function quitar(s: SalidaEntendida, slug: string, motivo: string) {
+function quitar(s: SalidaEntendida, slug: string, motivo: string, pregunta?: string) {
   if (!s.sugeridos[slug]) return;
   delete s.sugeridos[slug];
-  s.descartados.push({ slug, motivo });
+  s.descartados.push({ slug, motivo, ...(pregunta ? { pregunta } : {}) });
+}
+
+/**
+ * C9 · «mi bebé de 18», «la bebé de 3»: la palabra «bebé» (o parecida) con una edad de `EDAD_INFANTE` o más.
+ * No es clasificar por edad: es una contradicción entre la palabra y la edad, y se pregunta. «El bebé
+ * de 1 año» y «el bebé de 8 meses» no contradicen nada.
+ */
+export function bebesConEdad(fuente: string): Array<{ frase: string; edad: number }> {
+  const out: Array<{ frase: string; edad: number }> = [];
+  const re = /(?<!\p{L})(beb[eé]s?|bebit[oa]s?|bb)(?!\p{L})([^.\n;?!\d]{0,40}?)(?<!\d)(\d{1,2})(?!\d)(?!\s*mes)/giu;
+  for (const m of String(fuente ?? '').matchAll(re)) {
+    const edad = Number(m[3]);
+    if (edad >= EDAD_INFANTE) out.push({ frase: m[0].replace(/\s+/g, ' ').trim(), edad });
+  }
+  return out;
+}
+
+/** La pregunta en el acto de C9. */
+export function textoBebeConEdad(frase: string): string {
+  return `Dijeron «${frase}»: ¿viaja como bebé en brazos o con su propio cupo?`;
 }
 
 /**
@@ -252,7 +272,21 @@ export function guardianPasajeros(
   const edadesSug = s.sugeridos.edades_menores ?? edadesDelModelo;
   const edades = edadesSug ? leerEdades(edadesSug.valor) : null;
 
-  // 3a. Infantes solo si el cliente habla de un bebé o da una edad menor de 2.
+  // 3a. C9 (decisión de Mauricio): «bebé» con una edad de 2 o más no llena infantes con esa persona;
+  //     se pregunta en el acto. La edad anotada se queda.
+  const contradicciones = bebesConEdad(fuente);
+  const infantesAntes = num('infantes') ?? 0;
+  if (contradicciones.length > 0) {
+    const c = contradicciones[0];
+    const motivo = `«${c.frase}»: la palabra dice bebé y la edad es ${c.edad}`;
+    // Se pregunta aunque el modelo no lo haya puesto en infantes: es la palabra contra la edad.
+    if (s.sugeridos.infantes && !s.sugeridos.infantes.deduccion && infantesAntes > 0) quitar(s, 'infantes', motivo, textoBebeConEdad(c.frase));
+    else s.descartados.push({ slug: 'infantes', motivo, pregunta: textoBebeConEdad(c.frase) });
+  }
+  // Los que salieron de infantes por la contradicción siguen contados para cuadrar las edades.
+  const contradichos = infantesAntes - (num('infantes') ?? 0);
+
+  // 3a'. Infantes solo si el cliente habla de un bebé o da una edad menor de 2.
   const inf = s.sugeridos.infantes;
   if (inf && !inf.deduccion && (num('infantes') ?? 0) > 0
     && !RE_BEBE.test(normalizarTexto(fuente)) && !(edades ?? []).some(e => e < EDAD_INFANTE)) {
@@ -261,7 +295,7 @@ export function guardianPasajeros(
 
   // 3b. Las edades cuentan una sola vez: una por cada menor contado.
   if (edadesSug && edades) {
-    const contados = (num('ninos') ?? 0) + (num('infantes') ?? 0);
+    const contados = (num('ninos') ?? 0) + (num('infantes') ?? 0) + contradichos;
     if (contados !== edades.length) {
       const motivo = `el cliente dio ${edades.length === 1 ? 'la edad' : 'las edades'} ${edades.join(', ')} y hay ${contados} ${contados === 1 ? 'menor contado' : 'menores contados'}`;
       quitar(s, 'ninos', motivo);
@@ -274,7 +308,7 @@ export function guardianPasajeros(
       if (infantesPorEdad > (num('infantes') ?? 0)) {
         const regla = (valor: number): Sugerido => ({ valor, frase: edadesSug.frase, deduccion: `Edades ${edades.join(', ')}: menor de ${EDAD_INFANTE} años es infante` });
         s.sugeridos.infantes = regla(infantesPorEdad);
-        s.sugeridos.ninos = regla(contados - infantesPorEdad);
+        s.sugeridos.ninos = regla(Math.max(0, contados - contradichos - infantesPorEdad));
       }
     }
   }

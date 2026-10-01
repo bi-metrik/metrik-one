@@ -245,7 +245,11 @@ export interface SalidaEntendida {
   historia: string;
   cliente: { nombre: string | null; telefono: string | null };
   sugeridos: Record<string, Sugerido>;
-  descartados: Array<{ slug: string; motivo: string }>;
+  /**
+   * Lo que un guardián tiró. `pregunta`: la que el bot hace en el acto, antes de las del mínimo (C9:
+   * «Dijeron "mi bebé de 18": ¿viaja como bebé en brazos o con su propio cupo?»).
+   */
+  descartados: Array<{ slug: string; motivo: string; pregunta?: string }>;
 }
 
 function fechaValida(v: string): boolean {
@@ -1117,13 +1121,21 @@ export function preguntasDelMinimo<T extends { slug?: string }>(faltan: Readonly
   return [...primero, ...resto].slice(0, Math.max(max, primero.length));
 }
 
-export function mensajeAlComercial(p: { resumen: string; faltanMinimo: Faltante[]; enlace: string; descartados?: ReadonlyArray<string> }): string {
+export function mensajeAlComercial(p: {
+  resumen: string; faltanMinimo: Faltante[]; enlace: string; descartados?: ReadonlyArray<string>;
+  /** Preguntas de un guardián (C9) que van antes de las del mínimo, aunque el mínimo esté completo. */
+  preguntasAntes?: ReadonlyArray<string>;
+  /** La línea de avance de la carga («T1 26 11 · Carolina — Mínimo 7/9 (78 %) · Completo 12/20 (60 %)»). */
+  avance?: string | null;
+}): string {
   const entendi = p.resumen ? `Entendí: ${p.resumen}.` : 'Recibí la solicitud.';
+  const cabeza = [entendi, ...(p.avance ? [p.avance] : [])];
+  const antes = p.preguntasAntes ?? [];
   if (p.faltanMinimo.length === 0) {
-    return `${entendi}\nYa está el mínimo para cotizar: ${p.enlace}`;
+    return [...cabeza, ...(antes.length ? ['Antes de cotizar:', ...antes.map((q, i) => `${i + 1}. ${q}`)] : []), `Ya está el mínimo para cotizar: ${p.enlace}`].join('\n');
   }
-  const preguntas = preguntasDelMinimo(p.faltanMinimo, p.descartados).map((f, i) => `${i + 1}. ${f.pregunta}`);
-  return [entendi, 'Para empezar a cotizar me falta:', ...preguntas].join('\n');
+  const preguntas = [...antes, ...preguntasDelMinimo(p.faltanMinimo, p.descartados).map(f => f.pregunta)].map((q, i) => `${i + 1}. ${q}`);
+  return [...cabeza, 'Para empezar a cotizar me falta:', ...preguntas].join('\n');
 }
 
 /** Los huecos, con la misma función que pinta las barras en ONE. */

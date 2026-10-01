@@ -47,6 +47,7 @@ import {
   detectarCruce,
   interpretarRespuestaNegocio,
   mensajeCargaExistente,
+  lineaAvance,
   origenDeFrase,
   primerNombre,
   sugeridosConDeducciones,
@@ -371,18 +372,26 @@ async function cerrarConNegocio(
     return;
   }
   const h = huecos(cfg.fields, r.valores);
+  const { data: creado } = await supabase.from('negocios').select('codigo, contactos(nombre)').eq('id', r.negocioId).maybeSingle();
   const msg = mensajeAlComercial({
     // El resumen con lo que el comercial dijo, no con la mayúscula del bloque.
     resumen: resumenEntendido(cfg.fields, { ...r.valores, ...Object.fromEntries(Object.entries(salida.sugeridos).map(([k, v]) => [k, v.valor])) }),
     faltanMinimo: h.minimo.faltan,
     enlace: enlaceNegocio(cfg.slug, r.negocioId),
     descartados: salida.descartados.map(d => d.slug),
+    preguntasAntes: preguntasDeGuardian(salida.descartados),
+    avance: lineaAvance({ codigo: (creado?.codigo as string | null) ?? null, cliente: nombreRel(creado?.contactos), fields: cfg.fields, valores: r.valores }),
   });
   const ok = await enviar(ent.remitente_phone as string, msg, ent.workspace_id as string);
   await actualizar(supabase, ent.id as string, {
     estado: 'negocio_creado', contacto_id: contactoId, negocio_id: r.negocioId, huecos: h, confirmacion_pendiente: null,
     respuesta_enviada_at: ok ? new Date().toISOString() : null, error: ok ? null : 'envio fallido',
   });
+}
+
+/** Las preguntas en el acto que dejó un guardián (C9), sin repetir. */
+function preguntasDeGuardian(descartados: SalidaEntendida['descartados']): string[] {
+  return [...new Set(descartados.map(d => d.pregunta).filter((q): q is string => !!q))];
 }
 
 function salidaGuardada(ent: Fila): SalidaEntendida {
@@ -1137,6 +1146,11 @@ async function cargarEnNegocioExistente(
     codigo: (neg.codigo as string | null) ?? null, fields: campos, escritos, conflictos, actualizados,
     faltanMinimo: h.minimo.faltan, enlace: enlaceNegocio(wsSlug, negocioId), maxPreguntas: MAX_PREGUNTAS,
     descartados: descartadosTodos.map(d => d.slug),
+    preguntasAntes: preguntasDeGuardian(descartadosTodos),
+    avance: lineaAvance({
+      codigo: (neg.codigo as string | null) ?? null, cliente: nombreRel(neg.contactos) ?? nombreRel(neg.empresas),
+      fields: campos, valores: aplicarSumas(campos, aplanarBloques(despues).valores),
+    }),
   });
   const ok = await enviar(ent.remitente_phone as string, msg, workspaceId);
   await actualizar(supabase, ent.id as string, {

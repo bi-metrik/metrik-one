@@ -191,10 +191,11 @@ describe('N1 · pasajeros', () => {
     expect(r2.descartados.find(d => d.slug === 'infantes')?.motivo).toContain('solo con un bebé o una edad menor de 2');
   });
 
-  it('C9: «mi bebé de 18» se queda como está y la edad queda anotada', () => {
+  it('C9: «mi bebé de 18» no llena infantes (contradicción palabra-edad, se pregunta) y la edad queda anotada', () => {
     const fuente = 'Viajo con mi esposo y mi bebé, que ya tiene 18 añitos';
     const r = guardianPasajeros(s({ adultos: { valor: 2, frase: 'Viajo con mi esposo' }, infantes: { valor: 1, frase: 'mi bebé' }, edades_menores: { valor: '18', frase: 'que ya tiene 18 añitos' } }), fuente);
-    expect([r.sugeridos.adultos?.valor, r.sugeridos.infantes?.valor, r.sugeridos.ninos, r.sugeridos.edades_menores?.valor]).toEqual([2, 1, undefined, '18']);
+    expect([r.sugeridos.adultos?.valor, r.sugeridos.infantes, r.sugeridos.ninos, r.sugeridos.edades_menores?.valor]).toEqual([2, undefined, undefined, '18']);
+    expect(r.descartados.find(d => d.slug === 'infantes')?.pregunta).toContain('¿viaja como bebé en brazos o con su propio cupo?');
     // Un niño de 20 o de 18 tampoco pasa a adulto.
     const r2 = guardianPasajeros(s({ adultos: { valor: 2, frase: '2 adultos' }, ninos: { valor: 1, frase: 'mi hijo' }, edades_menores: { valor: '18', frase: 'de 18' } }), '2 adultos y mi hijo de 18');
     expect([r2.sugeridos.adultos?.valor, r2.sugeridos.ninos?.valor]).toEqual([2, 1]);

@@ -497,6 +497,10 @@ describe('modo encabezado: manda el encabezado, el reparto se confirma y cada vi
     expect((ms[1].asignacion as Fila)).toMatchObject({ por: 'encabezado', destino: { negocio_id: 'n14' } });
     expect((ms[2].asignacion as Fila)).toMatchObject({ por: 'comercial' });
     expect(t.wa_bandeja_entregas.find(e => e.id === id)!.plan_confirmado_at).toBeTruthy();
+    // El avance en % va una vez por viaje, en el mensaje que cierra su carga; en ningún otro.
+    const avance = enviados.filter(e => /— Mínimo \d+\/\d+ \(\d+ %\) · Completo \d+\/\d+ \(\d+ %\)/.test(e.texto));
+    expect(avance.map(e => e.texto.split('\n').find(l => l.includes('— Mínimo'))!.split(' — ')[0])).toEqual(['T1 26 14 · MARTA PRUEBA', 'T1 26 15 · LUIS PRUEBA']);
+    expect(avance.every(e => e.texto.startsWith('Cargué en') || e.texto.startsWith('No encontré'))).toBe(true);
   });
 
   it('una tanda sin encabezados es un viaje: la pregunta es «¿A qué viaje van?», como en modo uno', async () => {
@@ -577,6 +581,7 @@ describe('QA v5 · lo que el bot contesta en el acto a un encabezado (atenderEnB
     const r = await mod.armarPreguntaNegocio(db as never, entrega.id as string, WS, 6);
     expect(r!.plan!.mensajes.filter(x => !x.sospecha).map(x => [x.n, x.destino && 'codigo' in x.destino ? x.destino.codigo : null])).toEqual([[2, 'T1 26 14'], [4, 'T1 26 18'], [6, 'T1 26 18']]);
     expect(r!.plan!.encabezados).toEqual([1, 3, 5]);
+    expect(enviados.some(e => e.texto.includes('— Mínimo'))).toBe(false); // los acuses no llevan el avance
   });
 
   it('con «no», lo que sigue queda sin asignar y el bot lo dice', async () => {

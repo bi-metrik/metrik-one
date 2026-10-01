@@ -17,11 +17,12 @@
 //      (`anterior`) y el bot lo dice («Actualicé adultos: 2 → 3»).
 // ============================================================
 
-import { aplanarBloques, parsearNumeroColombiano } from './niveles-solicitud.ts';
+import { aplanarBloques, calcularNiveles, parsearNumeroColombiano } from './niveles-solicitud.ts';
 import {
   aplicarSumas,
   CLAVE_SUGERIDOS,
   deducirCeros,
+  LO_LLENA_AGENCIA,
   fraseNombraNumero,
   marcaDe,
   mayusculasDeViaje,
@@ -393,6 +394,10 @@ export function mensajeCargaExistente(p: {
   faltanMinimo: ReadonlyArray<{ pregunta: string; slug?: string }>;
   /** Slugs que un guardián descartó: sus preguntas van primero y no se recortan. */
   descartados?: ReadonlyArray<string>;
+  /** Preguntas de un guardián (C9) que van antes de las del mínimo, aunque el mínimo esté completo. */
+  preguntasAntes?: ReadonlyArray<string>;
+  /** La línea de avance («T1 26 11 · Carolina — Mínimo 7/9 (78 %) · Completo 12/20 (60 %)»). */
+  avance?: string | null;
   enlace: string;
   maxPreguntas?: number;
 }): string {
@@ -425,14 +430,39 @@ export function mensajeCargaExistente(p: {
     });
     lineas.push(`No cambié ${p.conflictos.length === 1 ? 'un dato que ya tenía otro valor' : `${p.conflictos.length} datos que ya tenían otro valor`}: ${lista.join('; ')}. Queda marcado para que alguien decida.`);
   }
+  if (p.avance) lineas.push(p.avance);
   const max = p.maxPreguntas ?? 3;
+  const antes = p.preguntasAntes ?? [];
   if (p.faltanMinimo.length === 0) {
+    if (antes.length > 0) lineas.push('Antes de cotizar:', ...antes.map((q, i) => `${i + 1}. ${q}`));
     lineas.push(`Ya está el mínimo para cotizar: ${p.enlace}`);
   } else {
-    lineas.push('Para empezar a cotizar me falta:', ...preguntasDelMinimo(p.faltanMinimo, p.descartados, max).map((f, i) => `${i + 1}. ${f.pregunta}`));
+    const preguntas = [...antes, ...preguntasDelMinimo(p.faltanMinimo, p.descartados, max).map(f => f.pregunta)];
+    lineas.push('Para empezar a cotizar me falta:', ...preguntas.map((q, i) => `${i + 1}. ${q}`));
     if (p.conflictos.length > 0) lineas.push(p.enlace);
   }
   return lineas.join('\n');
+}
+
+/**
+ * La línea de avance de una carga: «T1 26 11 · Carolina — Mínimo 7/9 (78 %) · Completo 12/20 (60 %)».
+ * Las dos cuentas salen de `calcularNiveles`, la misma función de las barras de la pantalla:
+ *   · Mínimo: la barra «Mínimo para cotizar», tal cual.
+ *   · Completo: mínimo + deseable, sin los campos que llena la agencia (`lo_llena: agencia`). Los
+ *     condicionales que no aplican (edades sin menores) ya no cuentan en `calcularNiveles`.
+ * Solo va en el mensaje que cierra una carga; nunca en los acuses (📌, «¿Cambias a…?»).
+ */
+export function lineaAvance(p: {
+  codigo: string | null; cliente: string | null; fields: ReadonlyArray<CampoEntendible>; valores: Record<string, unknown>;
+}): string {
+  const todos = calcularNiveles(p.fields, p.valores);
+  const sinAgencia = calcularNiveles(p.fields.filter(f => f.lo_llena !== LO_LLENA_AGENCIA), p.valores);
+  const pct = (a: number, b: number) => (b > 0 ? Math.round((a / b) * 100) : 100);
+  const minimo = todos.minimo;
+  const completos = sinAgencia.minimo.completos + sinAgencia.deseable.completos;
+  const total = sinAgencia.minimo.total + sinAgencia.deseable.total;
+  const quien = [p.codigo, p.cliente].filter(Boolean).join(' · ') || 'El viaje';
+  return `${quien} — Mínimo ${minimo.completos}/${minimo.total} (${pct(minimo.completos, minimo.total)} %) · Completo ${completos}/${total} (${pct(completos, total)} %)`;
 }
 
 /** Primer nombre de quien reenvió: «Tatiana». */
