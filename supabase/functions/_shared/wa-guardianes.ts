@@ -248,7 +248,7 @@ export function guardianPasajeros(
   //    hotel, tour) y los define operaciones en la cotización (decisión de Mauricio, QA de #971
   //    v5). Cada persona queda en la categoría que usó el cliente: «los niños tienen 2 y 12» son 2
   //    niños; «mi bebé de 18» se queda como está, con su edad anotada. El único corte es el de
-  //    infante (menor de 2 años), que en el avión es universal.
+  //    infante (menor de `EDAD_INFANTE`), que en el avión es universal.
   const edadesSug = s.sugeridos.edades_menores ?? edadesDelModelo;
   const edades = edadesSug ? leerEdades(edadesSug.valor) : null;
 
