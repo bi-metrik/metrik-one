@@ -53,7 +53,7 @@ import {
   trazaCarga,
 } from './wa-carga-reglas.ts';
 import type { Actualizado, Conflicto, NegocioAbierto, OpcionNegocio } from './wa-carga-reglas.ts';
-import { entenderEntrega, lineaSolicitudes, textoParaModelo } from './wa-guardianes.ts';
+import { entenderEntrega, textoDosViajes, textoParaModelo, textoSinSolicitud } from './wa-guardianes.ts';
 import type { Cortes, MensajeEntrega } from './wa-guardianes.ts';
 import {
   aplicarCambios,
@@ -428,11 +428,6 @@ async function descartarEntrega(supabase: SupabaseClient, ent: Fila, nMensajes: 
   });
 }
 
-const TEXTO_SIN_SOLICITUD = (n: number) =>
-  `No vi una solicitud de viaje en ${n === 1 ? 'este mensaje' : `estos ${n} mensajes`}. No creé nada.\nResponde DESCARTAR para dejarlos así, o SÍ si de verdad es un viaje y lo creo igual.`;
-
-const TEXTO_DOS_VIAJES = (linea: string) =>
-  `Veo dos solicitudes distintas en estos mensajes (${linea}). No las mezclo en un viaje.\nResponde SEPARAR y te muestro qué mensaje va con cuál para confirmar (ahí puedes descartar uno), o DESCARTAR.`;
 
 // ── Una entrega ──────────────────────────────────────────────────────────────
 
@@ -532,7 +527,7 @@ async function atenderConfirmacion(
     } else if (esSi(respuesta)) {
       await entenderNuevo(supabase, ent, crudos, (ent.contacto_nombre as string | null) ?? null, { previa: salidaGuardada(ent) });
     } else {
-      await preguntarYEsperar(supabase, ent, TEXTO_SIN_SOLICITUD(crudos.length), 'sin_solicitud');
+      await preguntarYEsperar(supabase, ent, textoSinSolicitud(crudos.length), 'sin_solicitud');
     }
     return true;
   }
@@ -542,7 +537,7 @@ async function atenderConfirmacion(
     } else if (/^separa/.test(t)) {
       await proponerReparto(supabase, ent, crudos, { forzarModelo: true });
     } else {
-      await preguntarYEsperar(supabase, ent, TEXTO_DOS_VIAJES('ver el mensaje anterior'), 'dos_viajes');
+      await preguntarYEsperar(supabase, ent, 'No entendí. Responde SEPARAR para ver qué mensaje va con cuál, o DESCARTAR.', 'dos_viajes');
     }
     return true;
   }
@@ -590,12 +585,12 @@ async function entenderNuevo(
     });
     // N5: dos viajes en una tanda no se mezclan.
     if (opts.revisarDosViajes && e.solicitudes.length >= 2) {
-      await preguntarYEsperar(supabase, ent, TEXTO_DOS_VIAJES(lineaSolicitudes(e.solicitudes)), 'dos_viajes');
+      await preguntarYEsperar(supabase, ent, textoDosViajes(e.solicitudes), 'dos_viajes');
       return;
     }
     // N4: sin solicitud no se crea nada.
     if (!e.haySolicitud) {
-      await preguntarYEsperar(supabase, ent, TEXTO_SIN_SOLICITUD(mensajes.length), 'sin_solicitud');
+      await preguntarYEsperar(supabase, ent, textoSinSolicitud(mensajes.length), 'sin_solicitud');
       return;
     }
   }

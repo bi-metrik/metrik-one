@@ -910,7 +910,9 @@ export const MAX_PREGUNTAS = 3;
  * `max`. Si los descartados son más que `max`, van todos.
  */
 export function preguntasDelMinimo<T extends { slug?: string }>(faltan: ReadonlyArray<T>, prioridad: ReadonlyArray<string> = [], max = MAX_PREGUNTAS): T[] {
-  const prio = new Set(prioridad);
+  // Si se tiró un conteo de pasajeros, se preguntan los tres: «somos 4 con los niños» pide el desglose.
+  const conteos = ['adultos', 'ninos', 'infantes'];
+  const prio = new Set(prioridad.some(p => conteos.includes(p)) ? [...prioridad, ...conteos] : prioridad);
   const primero = faltan.filter(f => f.slug !== undefined && prio.has(f.slug));
   const resto = faltan.filter(f => !(f.slug !== undefined && prio.has(f.slug)));
   return [...primero, ...resto].slice(0, Math.max(max, primero.length));

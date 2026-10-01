@@ -74,6 +74,12 @@ export function textoDe(mensajes: ReadonlyArray<MensajeEntrega>): string {
 
 // ── N3 · quién habla ─────────────────────────────────────────────────────────
 
+/**
+ * Una nota del comercial sobre el cliente: habla de él en tercera persona o lo valora. Se mira
+ * solo en lo ESCRITO por el comercial (no reenviado): ahí es donde caben los juicios (B5).
+ */
+const RE_NOTA_COMERCIAL = /\b(ojo|esta senora|este senor|esta clienta|este cliente|la clienta|el cliente es|la senora es|el senor es|tacan\w*|pesad[oa]|groser[oa]|conflictiv[oa]|se queja|quejon\w*|cansona?|intens[oa]|dificil de|exigente|mala paga|no paga)\b/;
+
 const RE_PAGO = /\b(abono|abone|pago|pague|consignacion|consigne|transferencia|transferi|comprobante|recibo|soporte de pago)\b/;
 const RE_PROMOCION = /\b(desde \$|desde usd|precio por persona|plan(es)? desde|salidas? (los |el )?\d{1,2}( y \d{1,2})?( de \w+)?,|cupos limitados|aplican (condiciones|restricciones)|promo(cion)?\b)/;
 
@@ -81,7 +87,8 @@ const RE_PROMOCION = /\b(desde \$|desde usd|precio por persona|plan(es)? desde|s
  * La clase de cada mensaje. La del modelo, corregida por lo que se ve sin modelo:
  *   · sin texto → ruido;
  *   · un pie de foto que habla de un pago → tercero (B7: «abono reserva Cartagena»);
- *   · un precio «desde $…», salidas con fecha fija o «aplican condiciones» → tercero (B6).
+ *   · un precio «desde $…», salidas con fecha fija o «aplican condiciones» → tercero (B6);
+ *   · un escrito del comercial que habla del cliente en tercera persona o lo valora → comercial (B5).
  * Sin clase del modelo (salida vieja), el mensaje cuenta como del cliente salvo esas correcciones.
  */
 export function clasesDeMensajes(raw: unknown, mensajes: ReadonlyArray<MensajeEntrega>): Record<number, ClaseMensaje> {
@@ -100,6 +107,7 @@ export function clasesDeMensajes(raw: unknown, mensajes: ReadonlyArray<MensajeEn
     if (!m.cuerpo.trim()) out[m.n] = 'ruido';
     else if (m.origen === 'pie_de_foto' && RE_PAGO.test(t)) out[m.n] = 'tercero';
     else if (RE_PROMOCION.test(crudo)) out[m.n] = 'tercero';
+    else if (!m.reenviado && RE_NOTA_COMERCIAL.test(t)) out[m.n] = 'comercial';
     else out[m.n] = delModelo.get(m.n) ?? 'cliente';
   }
   return out;
@@ -135,6 +143,27 @@ export function totalesDeclarados(texto: string): number[] {
   return [...out];
 }
 
+/**
+ * Los números de grupo de CADA mensaje: lo que va después de «somos», «seríamos», «vamos»… («somos
+ * 4», «somos 4 adultos», «seríamos cinco»). Dos mensajes con números distintos son dos voces (D3:
+ * la mamá dice 4 y el papá 5): ninguno de los dos se elige callado.
+ */
+export function numerosDeGrupoPorMensaje(fuente: string): number[][] {
+  return fuente.split(SEPARADOR).map(msg => {
+    const tokens = normalizarTexto(msg).replace(/[^a-z0-9 ]/g, ' ').split(/\s+/).filter(Boolean);
+    const out: number[] = [];
+    tokens.forEach((w, i) => {
+      if (!/^(somos|seriamos|seremos|vamos|viajamos|viajariamos|iriamos)$/.test(w)) return;
+      const n = numeroDe(tokens[i + 1] ?? '');
+      if (n !== null && n > 0) out.push(n);
+    });
+    return out;
+  });
+}
+
+/** Alguien más que se suma al viaje: «mi hermana también va», «se nos suma mi suegra». */
+const RE_SE_SUMA = /\b(mi|su|sus|mis)\s+(hermana|hermano|mama|papa|madre|padre|suegra|suegro|amiga|amigo|tia|tio|prima|primo|cunada|cunado|abuela|abuelo|novia|novio|pareja)\b[^.]{0,40}\b(tambien|se suma|se une|viene|vienen|va con|van con)\b|\bse (nos )?(suma|une|unen|suman)\b/;
+
 function quitar(s: SalidaEntendida, slug: string, motivo: string) {
   if (!s.sugeridos[slug]) return;
   delete s.sugeridos[slug];
@@ -151,6 +180,11 @@ export function guardianPasajeros(
   fuente: string,
   cortes: Cortes = CORTES_POR_DEFECTO,
   conocidos: Record<string, unknown> = {},
+  /**
+   * Las edades que dio el modelo, aunque otra regla las haya descartado (sin niños sabidos,
+   * `edades_menores` no pasa su `pedir_si`): una edad de adulto sigue siendo una pista (C9).
+   */
+  edadesDelModelo?: Sugerido,
 ): SalidaEntendida {
   const s: SalidaEntendida = { ...entrada, sugeridos: { ...entrada.sugeridos }, descartados: [...entrada.descartados] };
   const num = (slug: string): number | null => {
@@ -169,16 +203,28 @@ export function guardianPasajeros(
     }
   }
 
-  // 2. Dos totales distintos en la entrega (dos voces: «somos 4» y «somos 5») → nada callado.
-  const totales = totalesDeclarados(fuente);
-  if (totales.length > 1) {
+  // 2. Dos voces (D3): mensajes distintos con números de grupo distintos → nada callado.
+  const porMensaje = numerosDeGrupoPorMensaje(fuente).map(ns => [...new Set(ns)]).filter(ns => ns.length > 0);
+  const distintos = [...new Set(porMensaje.flat())];
+  if (porMensaje.length > 1 && distintos.length > 1) {
     for (const slug of CONTEOS) {
-      if (s.sugeridos[slug] && !s.sugeridos[slug].deduccion) quitar(s, slug, `los mensajes dicen dos totales distintos: ${totales.join(' y ')}`);
+      if (s.sugeridos[slug] && !s.sugeridos[slug].deduccion) quitar(s, slug, `los mensajes dicen números distintos: ${distintos.join(' y ')}`);
     }
   }
 
+  // 2b. Alguien se suma en OTRO mensaje que el de los adultos («Vamos 2 adultos» y luego «mi
+  //     hermana también va», D4): el conteo de adultos ya no es seguro y se pregunta.
+  const adultosSug = s.sugeridos.adultos;
+  if (adultosSug && !adultosSug.deduccion) {
+    const msgs = fuente.split(SEPARADOR);
+    const deAdultos = msgs.find(m => normalizarTexto(m).includes(normalizarTexto(adultosSug.frase)));
+    const otro = msgs.find(m => m !== deAdultos && RE_SE_SUMA.test(` ${normalizarTexto(m).replace(/[^a-z0-9 ]/g, ' ')} `));
+    if (otro) quitar(s, 'adultos', `alguien más se suma en otro mensaje: «${otro.trim().slice(0, 60)}»`);
+  }
+  const totales = totalesDeclarados(fuente);
+
   // 3. Las edades cuentan una sola vez y con los cortes de la config.
-  const edadesSug = s.sugeridos.edades_menores;
+  const edadesSug = s.sugeridos.edades_menores ?? edadesDelModelo;
   const edades = edadesSug ? leerEdades(edadesSug.valor) : null;
   if (edadesSug && edades) {
     const deAdulto = edades.filter(e => e >= cortes.adultoDesde);
@@ -202,7 +248,8 @@ export function guardianPasajeros(
         const motivo = `hay una edad de adulto (${deAdulto.join(', ')}) entre las de los menores`;
         quitar(s, 'ninos', motivo);
         quitar(s, 'infantes', motivo);
-        quitar(s, 'edades_menores', motivo);
+        // Las edades se quedan (son lo que dijo el cliente), salvo que TODAS sean de adulto.
+        if (menores.length === 0) quitar(s, 'edades_menores', motivo);
         if (contadosComoMenores === 0) quitar(s, 'adultos', `${motivo} y no se sabe si está contada`);
       }
     } else if (s.sugeridos.ninos || s.sugeridos.infantes) {
@@ -230,6 +277,15 @@ export function guardianPasajeros(
     }
   }
   return s;
+}
+
+/** Las edades que devolvió el modelo, solo si su frase está en lo que dijo el cliente. */
+function edadesConFrase(raw: unknown, fuente: string): Sugerido | undefined {
+  const it = ((raw as { valores?: Record<string, { valor?: unknown; frase?: unknown }> } | null)?.valores ?? {}).edades_menores;
+  const valor = typeof it?.valor === 'string' ? it.valor.trim() : '';
+  const frase = typeof it?.frase === 'string' ? it.frase.trim() : '';
+  if (!valor || !frase || valor === 'por_definir' || !normalizarTexto(fuente).includes(normalizarTexto(frase))) return undefined;
+  return { valor, frase };
 }
 
 // ── N5 · dos solicitudes en una tanda ────────────────────────────────────────
@@ -273,7 +329,17 @@ export function lineaSolicitudes(ss: ReadonlyArray<Solicitud>): string {
   return ss.map(s => [s.cliente, s.destino].filter(Boolean).join(': ') || `«${s.frase.slice(0, 40)}»`).join(' · ');
 }
 
+/** Lo que el bot dice cuando ve dos solicitudes en una tanda (N5). */
+export function textoDosViajes(ss: ReadonlyArray<Solicitud>): string {
+  return `Veo dos solicitudes distintas en estos mensajes (${lineaSolicitudes(ss)}). No las mezclo en un viaje.\nResponde SEPARAR y te muestro qué mensaje va con cuál para confirmar (ahí puedes descartar uno), o DESCARTAR.`;
+}
+
 // ── N4 · ¿hay solicitud? ─────────────────────────────────────────────────────
+
+/** Lo que el bot dice cuando no ve una solicitud de viaje (N4). */
+export function textoSinSolicitud(n: number): string {
+  return `No vi una solicitud de viaje en ${n === 1 ? 'este mensaje' : `estos ${n} mensajes`}. No creé nada.\nResponde DESCARTAR para dejarlos así, o SÍ si de verdad es un viaje y lo creo igual.`;
+}
 
 /** Hay solicitud si algún mensaje es del cliente y de él salió al menos un dato. */
 export function haySolicitud(salida: SalidaEntendida, clases: Record<number, ClaseMensaje>): boolean {
@@ -310,7 +376,7 @@ export function entenderEntrega(
   // aunque relate la solicitud, no es citable (ahí es donde caben los juicios: B5).
   const citables = textoDe(delCliente.filter(m => m.reenviado));
   const validada = validarSalida(raw, fields, fuente, { hoyISO: opts.hoyISO, conocidos: opts.conocidos, citables });
-  const salida = guardianPasajeros(validada, fuente, opts.cortes ?? CORTES_POR_DEFECTO, opts.conocidos ?? {});
+  const salida = guardianPasajeros(validada, fuente, opts.cortes ?? CORTES_POR_DEFECTO, opts.conocidos ?? {}, edadesConFrase(raw, fuente));
   return {
     salida,
     clases,
