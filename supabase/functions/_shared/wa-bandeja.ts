@@ -301,6 +301,8 @@ export async function preguntarCliente(
     if (error) console.error(`[wa-bandeja] no se pudo cargar sin preguntar ${entregaId}:`, error.message);
     return;
   }
+  // Un resumen largo llega en varias partes: las primeras se mandan antes de la que espera respuesta.
+  for (const p of viaje?.antes ?? []) await enviar(phone, p, workspaceId);
   const ok = await enviar(phone, viaje?.texto ?? textoPreguntaCliente(nMensajes), workspaceId);
   const lista = viaje?.plan ? { plan_viajes: viaje.plan } : viaje?.opciones ? { negocio_opciones: viaje.opciones } : {};
   const { error } = await supabase

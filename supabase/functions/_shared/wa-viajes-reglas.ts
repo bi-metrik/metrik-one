@@ -46,7 +46,9 @@ export type ResolucionEncabezado =
   | { tipo: 'viaje'; viaje: ViajeAbierto; por: 'codigo' | 'nombre' | 'destino' }
   | { tipo: 'nuevo'; cliente: string | null }
   | { tipo: 'ambiguo'; candidatos: ViajeAbierto[] }
-  | { tipo: 'codigo_desconocido'; codigo: string };
+  | { tipo: 'codigo_desconocido'; codigo: string }
+  /** Parece un encabezado (corto, escrito) pero no se resuelve: corta la caja (QA de #971 v3). */
+  | { tipo: 'no_reconocido' };
 
 /** Palabras de relleno de un encabezado: «la de punta cana», «cliente Carolina», «el viaje de Jorge». */
 const RELLENO = new Set([
@@ -55,21 +57,37 @@ const RELLENO = new Set([
 ]);
 export const MAX_PALABRAS_ENCABEZADO = 5;
 
-function distancia(a: string, b: string): number {
-  if (Math.abs(a.length - b.length) > 1) return 2;
+/**
+ * Distancia de edición con transposición de dos letras vecinas como UN error (Damerau, variante
+ * OSA): «Lusia» está a 1 de «Luisa», igual que «Carlina» de «Carolina» y «Jorje» de «Jorge».
+ */
+export function distancia(a: string, b: string): number {
+  if (Math.abs(a.length - b.length) > 2) return 3;
   const d = Array.from({ length: a.length + 1 }, (_, i) => [i, ...Array(b.length).fill(0)]);
   for (let j = 1; j <= b.length; j++) d[0][j] = j;
   for (let i = 1; i <= a.length; i++) {
     for (let j = 1; j <= b.length; j++) {
       d[i][j] = Math.min(d[i - 1][j] + 1, d[i][j - 1] + 1, d[i - 1][j - 1] + (a[i - 1] === b[j - 1] ? 0 : 1));
+      if (i > 1 && j > 1 && a[i - 1] === b[j - 2] && a[i - 2] === b[j - 1]) d[i][j] = Math.min(d[i][j], d[i - 2][j - 2] + 1);
     }
   }
   return d[a.length][b.length];
 }
 
+/** Qué tan lejos está esta palabra del nombre: 0 igual, 1 un error de tipeo (palabras de 5+), Infinity si no. */
+function distanciaAlNombre(w: string, nombre: string | null): number {
+  let mejor = Infinity;
+  for (const p of normalizarNombre(nombre).split(' ')) {
+    if (p.length < 3) continue;
+    if (p === w) return 0;
+    if (p.length >= 5 && w.length >= 5 && distancia(p, w) <= 1) mejor = 1;
+  }
+  return mejor;
+}
+
 /** ¿Esta palabra es una palabra del nombre? Igual, o con un error de tipeo si es larga («Carlina»). */
 function palabraDelNombre(w: string, nombre: string | null): boolean {
-  return normalizarNombre(nombre).split(' ').some(p => p.length >= 3 && (p === w || (p.length >= 5 && w.length >= 5 && distancia(p, w) <= 1)));
+  return distanciaAlNombre(w, nombre) <= 1;
 }
 
 function palabrasDe(t: string | null): string[] {
@@ -103,7 +121,10 @@ export function resolverEncabezado(texto: string, viajes: ReadonlyArray<ViajeAbi
   const resto = palabrasDe(bruto).filter(w => !RELLENO.has(w));
   if (resto.length === 0) return null;
 
-  const porNombre = viajes.filter(v => resto.every(w => palabraDelNombre(w, v.cliente)));
+  // Por nombre: los candidatos a la MENOR distancia. Si quedan dos a la misma, se pregunta.
+  const distancias = viajes.map(v => ({ v, d: Math.max(...resto.map(w => distanciaAlNombre(w, v.cliente))) }));
+  const minima = Math.min(...distancias.map(x => x.d));
+  const porNombre = Number.isFinite(minima) ? distancias.filter(x => x.d === minima).map(x => x.v) : [];
   const porDestino = viajes.filter(v => {
     const d = palabrasDe(v.destino);
     return d.length > 0 && resto.length === d.length && d.every(w => resto.includes(w));
@@ -143,7 +164,8 @@ export function armarSegmentos(
   let suelto: Segmento | null = null;
   for (const m of [...mensajes].sort((a, b) => a.n - b.n)) {
     const t = Date.parse(m.en);
-    const res = !m.reenviado && m.tipo === 'text' ? resolverEncabezado(m.cuerpo, viajes) : null;
+    const escrito = !m.reenviado && m.tipo === 'text';
+    const res = escrito ? (resolverEncabezado(m.cuerpo, viajes) ?? (pareceEncabezado(m.cuerpo) ? { tipo: 'no_reconocido' } as ResolucionEncabezado : null)) : null;
     if (res) {
       encabezados.push(m.n);
       const seg: Segmento = { origen: 'encabezado', encabezado: { n: m.n, texto: m.cuerpo.trim(), resolucion: res }, mensajes: [] };
@@ -167,9 +189,30 @@ export function armarSegmentos(
   return { segmentos, encabezados };
 }
 
-/** ¿La entrega tiene al menos un encabezado? Sin ninguno, la tanda entera es UN viaje y se pregunta como siempre. */
+/** ¿La entrega tiene al menos un encabezado resuelto? Sin ninguno, la tanda entera es UN viaje y se pregunta como siempre. */
 export function tieneEncabezados(segmentos: ReadonlyArray<Segmento>): boolean {
-  return segmentos.some(s => s.encabezado !== null);
+  return segmentos.some(s => s.encabezado !== null && s.encabezado.resolucion.tipo !== 'no_reconocido');
+}
+
+/** Palabras cortas que el comercial escribe y que NO son un nombre: no cortan la caja. */
+const NO_ENCABEZADO = new Set([
+  'ok', 'okey', 'oki', 'listo', 'si', 'no', 'gracias', 'dale', 'bueno', 'perfecto', 'claro', 'vale', 'jaja', 'jajaja',
+  'ya', 'eso', 'esto', 'aja', 'hola', 'buenas', 'chao', 'genial', 'super', 'excelente', 'pendiente', 'espera', 'un', 'momento',
+]);
+
+/**
+ * ¿Un escrito del comercial PARECE un encabezado aunque no se resuelva? Una o dos palabras, sin
+ * números ni signos de pregunta ni palabras de conversación («ok», «gracias»), o algo con forma de
+ * código. Si parece y no se resuelve, corta la caja: lo que sigue no hereda el viaje anterior
+ * (QA de #971 v3: «Lusia» dejaba los mensajes de Luisa en la caja de Carolina).
+ */
+export function pareceEncabezado(texto: string): boolean {
+  const bruto = String(texto ?? '').trim();
+  if (!bruto || /[?¿]/.test(bruto)) return false;
+  if (esCodigo(codigoCompacto(bruto))) return true;
+  const palabras = palabrasDe(bruto);
+  if (palabras.length === 0 || palabras.length > 2 || palabras.some(w => /\d/.test(w) || w.length < 3)) return false;
+  return !palabras.some(w => NO_ENCABEZADO.has(w) || /^(ja)+$/.test(w));
 }
 
 // ── Destinos del plan ────────────────────────────────────────────────────────
@@ -219,6 +262,25 @@ export function viajesNombrados(cuerpo: string, destinos: ReadonlyArray<DestinoP
 export function destinosNombrados(cuerpo: string, viajes: ReadonlyArray<ViajeAbierto>): string[] {
   const t = ` ${palabrasDe(cuerpo).join(' ')} `;
   return [...new Set(viajes.map(v => normalizarNombre(v.destino)).filter(d => d && t.includes(` ${d} `)))];
+}
+
+const RELACIONES = '(esposa|esposo|mama|mamá|papa|papá|madre|padre|hija|hijo|hermana|hermano|novia|novio|pareja|suegra|suegro|mujer|marido|asistente|secretaria|nuera|yerno|cunada|cunado|prima|primo|tia|tio|abuela|abuelo)';
+
+/** ¿El mensaje dice que quien escribe es familiar (o asistente) del titular? «la esposa de Jorge». */
+export function esFamiliarDe(cuerpo: string, titular: string | null): boolean {
+  const t = ` ${palabrasDe(cuerpo).join(' ')} `;
+  return palabrasDe(titular).filter(w => w.length >= 3).some(w => new RegExp(` ${RELACIONES} de ${w} `).test(t));
+}
+
+const RE_TERCERO = /(desde \$|precio por persona|aplican (condiciones|restricciones)|cupos limitados|\babono\b|\bcomprobante\b|\bconsignaci)/;
+const RUIDO = new Set(['gracias', 'ok', 'okey', 'listo', 'dale', 'chao', 'buenas', 'noches', 'bueno', 'perfecto', 'si']);
+
+/** ¿Es una promoción, un pago o ruido (lo que la bandeja clasifica como tercero o ruido sin modelo)? */
+export function noEsDelCliente(cuerpo: string): boolean {
+  const t = normalizarTexto(cuerpo);
+  const palabras = palabrasDe(cuerpo);
+  if (palabras.length === 0 || RE_TERCERO.test(t)) return true;
+  return palabras.every(w => RUIDO.has(w) || /^(ja|je)+$/.test(w));
 }
 
 const RE_PRESENTACION = /(?:^|[\s,.;:¡!¿?])(?:soy|habla|te habla|me llamo|mi nombre es|de parte de|te escribe)\s+(?:la\s+|el\s+)?([A-ZÁÉÍÓÚÑa-záéíóúñü]+)/i;
@@ -296,6 +358,7 @@ function lineaViaje(v: ViajeAbierto): string {
 function avisoEncabezado(e: NonNullable<Segmento['encabezado']>, cerrados: ReadonlySet<string>): string | null {
   const r = e.resolucion;
   if (r.tipo === 'ambiguo') return `«${e.texto}» puede ser ${r.candidatos.map(lineaViaje).join(' o ')}: no elegí. Dime cuál.`;
+  if (r.tipo === 'no_reconocido') return `No reconocí el encabezado «${e.texto}»: lo que sigue no lo cargo en el viaje anterior. Dime de qué viaje es.`;
   if (r.tipo === 'codigo_desconocido') {
     return cerrados.has(r.codigo)
       ? `El viaje ${e.texto} está cerrado: no lo reabro ni cargo nada en él.`
@@ -358,7 +421,8 @@ export function armarPlan(p: {
         continue;
       }
       const presenta = seQuienSePresenta(m.cuerpo);
-      const presentaLaCaja = !!presenta && palabrasDe(caja.cliente).includes(presenta);
+      // «habla Marta, la esposa de Jorge» bajo «Jorge»: un familiar del titular no es otra persona.
+      const presentaLaCaja = !!presenta && (palabrasDe(caja.cliente).includes(presenta) || esFamiliarDe(m.cuerpo, caja.cliente));
       // «Soy Andrés Gil, me pasó tu número Luisa» bajo «nuevo Andrés Gil»: nombra a dos, pero se
       // presenta como el cliente de la caja. No es un mensaje de dos viajes.
       if (nombrados.length >= 2 && !presentaLaCaja) {
@@ -371,12 +435,13 @@ export function armarPlan(p: {
       const nombraLaCaja = presentaLaCaja || (nombrados.length === 1 && claveDestino(nombrados[0]) === claveDestino(caja));
       const otroDestino = destinosNombrados(m.cuerpo, p.viajes).find(d => caja.tipo === 'existente' && d !== destinoDe(caja) && !destinoDe(caja).includes(d));
       const motivo = otroDestino ? `habla de ${otroDestino.toUpperCase()} y ${caja.tipo === 'existente' ? caja.codigo : 'esta caja'} va a ${destinoDe(caja).toUpperCase() || 'otro lugar'}`
-        : presenta && !palabrasDe(caja.cliente).includes(presenta) ? `se presenta como ${presenta.toUpperCase()}`
+        : presenta && !presentaLaCaja ? `se presenta como ${presenta.toUpperCase()}`
         : enLaCaja > 0 && RE_SALUDO.test(normalizarTexto(m.cuerpo)) && !nombraLaCaja ? 'saluda a mitad de la caja: puede ser otra conversación'
         : chocaConLaCaja(datos, vistos)
           ?? (tras && !nombraLaCaja ? 'sigue a un mensaje sospechoso' : null);
       if (nombraLaCaja && !motivo) tras = false;
-      if (motivo) tras = true;
+      // Un mensaje que no es del cliente (una promoción, un pago, ruido) no contagia a los que siguen.
+      if (motivo && !noEsDelCliente(m.cuerpo)) tras = true;
       plan.mensajes.push(motivo
         ? { n, destino: caja, por: 'encabezado', sospecha: true, motivo: `${motivo} (¿es de ${nombreCaja}?)` }
         : { n, destino: caja, por: 'encabezado' });
@@ -445,52 +510,56 @@ export function rangos(ns: ReadonlyArray<number>): string {
 }
 
 /**
- * El resumen antes de cargar. Cada viaje con sus mensajes (con texto si son pocos; en rangos si
- * son muchos) y, aparte, lo que hay que decidir, SIEMPRE con su texto y su motivo. Nunca pasa de
- * `MAX_LARGO_RESUMEN`.
+ * El resumen antes de cargar, en uno o más mensajes de hasta `MAX_LARGO_RESUMEN` caracteres.
+ * Cada mensaje CARGADO de cada caja va en su propia línea con sus primeras palabras (no solo el
+ * rango): un encabezado olvidado, seguido de mensajes sin fechas ni adultos ni destino, cae en la
+ * caja anterior sin que el código lo pueda ver; así Tatiana lo ve antes del «sí» (QA de #971 v3,
+ * R2). Lo que hay que decidir va aparte, con su texto y su motivo. Si no cabe en un mensaje, se
+ * parte por líneas; el cierre con las instrucciones va siempre en el último.
  */
-export function textoResumenPlan(plan: PlanViajes, mensajes: ReadonlyArray<MensajeViaje>, aviso?: string): string {
-  const armar = (conTexto: boolean, largo: number, motivoAgrupado = false) => {
-    const porN = new Map(mensajes.map(m => [m.n, m]));
-    const linea = (n: number) => `   ${n} «${recorte(porN.get(n)?.cuerpo ?? '', largo)}»`;
-    const grupos = gruposDelPlan(plan);
-    const porDecidir = pendientes(plan);
-    const out: string[] = aviso ? [aviso] : [];
-    out.push(grupos.length === 0 ? 'No hay mensajes con un viaje asignado.' : `Entendí ${grupos.length} ${grupos.length === 1 ? 'viaje' : 'viajes'}:`);
-    for (const g of grupos) {
-      const n = g.mensajes.length;
-      out.push(`${g.k}) ${nombreDestino(g.destino)} (${n} ${n === 1 ? 'mensaje' : 'mensajes'}${conTexto ? '' : `: ${rangos(g.mensajes)}`})`);
-      if (conTexto) out.push(...g.mensajes.map(n2 => `${linea(n2)}${plan.mensajes.find(x => x.n === n2)?.sospecha ? ' ⚠' : ''}`));
-    }
-    if (porDecidir.length > 0) {
-      out.push(`⚠ Para decidir antes del sí: ${porDecidir.length} ${porDecidir.length === 1 ? 'mensaje' : 'mensajes'}`);
-      if (!motivoAgrupado) out.push(...porDecidir.map(m => `${linea(m.n)} (${m.motivo ?? 'sin viaje'})`));
-      else {
-        // Muchos: el motivo va una vez, encima de los mensajes que lo comparten; cada uno con su texto.
-        let antes = '';
-        for (const m of porDecidir) {
-          const motivo = m.motivo ?? 'sin viaje';
-          if (motivo !== antes) out.push(`  · ${motivo}:`);
-          antes = motivo;
-          out.push(linea(m.n));
-        }
-      }
-    }
-    const descartados = plan.mensajes.filter(m => m.descartado).map(m => m.n);
-    if (descartados.length > 0) out.push(`Descartados: ${rangos(descartados)}`);
-    out.push(...plan.avisos);
-    out.push(porDecidir.length > 0
-      ? 'No cargué nada todavía. Para cada uno: «dejar el 4» (o «dejar todos»), «el 4 es de Luisa» / «el 4 es del 2» / «el 4 es nuevo Pedro» para moverlo, o «descartar el 4». Después, SÍ. DESCARTAR descarta todo.'
-      : 'No cargué nada todavía. ¿Así? Responde SÍ, o corrige: «el 4 es de Luisa», «descartar el 4». DESCARTAR descarta todo.');
-    return out.join('\n');
-  };
-  const conTexto = plan.mensajes.length <= MAX_CON_TEXTO;
-  for (const largo of [40, 28, 18, 12]) {
-    for (const t of [armar(conTexto, largo), armar(false, largo), armar(false, largo, true)]) {
-      if (t.length <= MAX_LARGO_RESUMEN) return t;
+export function partesResumenPlan(plan: PlanViajes, mensajes: ReadonlyArray<MensajeViaje>, aviso?: string): string[] {
+  const porN = new Map(mensajes.map(m => [m.n, m]));
+  const linea = (n: number, largo: number) => `   ${n} «${recorte(porN.get(n)?.cuerpo ?? '', largo)}»`;
+  const grupos = gruposDelPlan(plan);
+  const porDecidir = pendientes(plan);
+  const largo = plan.mensajes.length <= MAX_CON_TEXTO ? 40 : 30;
+  const lineas: string[] = aviso ? [aviso] : [];
+  lineas.push(grupos.length === 0 ? 'No hay mensajes con un viaje asignado.' : `Entendí ${grupos.length} ${grupos.length === 1 ? 'viaje' : 'viajes'}:`);
+  for (const g of grupos) {
+    const n = g.mensajes.length;
+    lineas.push(`${g.k}) ${nombreDestino(g.destino)} (${n} ${n === 1 ? 'mensaje' : 'mensajes'})`);
+    lineas.push(...g.mensajes.map(n2 => `${linea(n2, largo)}${plan.mensajes.find(x => x.n === n2)?.sospecha ? ' ⚠' : ''}`));
+  }
+  if (porDecidir.length > 0) {
+    lineas.push(`⚠ Para decidir antes del sí: ${porDecidir.length} ${porDecidir.length === 1 ? 'mensaje' : 'mensajes'}`);
+    lineas.push(...porDecidir.map(m => `${linea(m.n, 40)} (${m.motivo ?? 'sin viaje'})`));
+  }
+  const descartados = plan.mensajes.filter(m => m.descartado).map(m => m.n);
+  if (descartados.length > 0) lineas.push(`Descartados: ${rangos(descartados)}`);
+  lineas.push(...plan.avisos);
+  lineas.push(porDecidir.length > 0
+    ? 'No cargué nada todavía. Para cada uno: «dejar el 4» (o «dejar todos»), «el 4 es de Luisa» / «el 4 es del 2» / «el 4 es nuevo Pedro» para moverlo, o «descartar el 4». Después, SÍ. DESCARTAR descarta todo.'
+    : 'No cargué nada todavía. Revisa que cada mensaje esté en su viaje. ¿Así? Responde SÍ, o corrige: «el 4 es de Luisa», «descartar el 4». DESCARTAR descarta todo.');
+
+  const partes: string[] = [];
+  let actual = '';
+  for (const l of lineas) {
+    const candidato = actual ? `${actual}\n${l}` : l;
+    if (candidato.length > MAX_LARGO_RESUMEN && actual) {
+      partes.push(actual);
+      actual = l;
+    } else {
+      actual = candidato;
     }
   }
-  return armar(false, 8, true).slice(0, MAX_LARGO_RESUMEN);
+  if (actual) partes.push(actual);
+  if (partes.length > 1) return partes.map((p, k) => `(${k + 1}/${partes.length}) ${p}`.slice(0, MAX_LARGO_RESUMEN));
+  return partes;
+}
+
+/** El resumen en un solo texto (las partes unidas). Para enviarlo, usar `partesResumenPlan`. */
+export function textoResumenPlan(plan: PlanViajes, mensajes: ReadonlyArray<MensajeViaje>, aviso?: string): string {
+  return partesResumenPlan(plan, mensajes, aviso).join('\n');
 }
 
 // ── La respuesta al resumen ──────────────────────────────────────────────────

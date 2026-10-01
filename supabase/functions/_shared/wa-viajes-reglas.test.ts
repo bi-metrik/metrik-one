@@ -23,6 +23,11 @@ import {
   resolverEncabezado,
   sinLugares,
   textoResumenPlan,
+  partesResumenPlan,
+  distancia,
+  pareceEncabezado,
+  esFamiliarDe,
+  noEsDelCliente,
   tieneEncabezados,
   viajesNombrados,
   type DestinoPlan,
@@ -70,7 +75,7 @@ describe('encabezados: resolución determinista contra los viajes abiertos', () 
     expect(resolverEncabezado('nuevo Luisa San Andrés', V)).toEqual({ tipo: 'nuevo', cliente: 'Luisa San Andrés' });
     expect(resolverEncabezado('Carolina', [...V, { id: 'n14', codigo: 'T1 26 14', cliente: 'CAROLINA PÉREZ', destino: 'CANCÚN' }])).toMatchObject({ tipo: 'ambiguo' });
     expect(resolverEncabezado('T1 26 3', V)).toEqual({ tipo: 'codigo_desconocido', codigo: 'T1263' });
-    for (const x of ['Carolina quiere 5 estrellas', 'son 3 adultos', 'ok', 'Lusia']) expect(resolverEncabezado(x, V), x).toBeNull();
+    for (const x of ['Carolina quiere 5 estrellas', 'son 3 adultos', 'ok']) expect(resolverEncabezado(x, V), x).toBeNull();
   });
 });
 
@@ -149,13 +154,25 @@ describe('la respuesta al resumen', () => {
 });
 
 describe('el resumen', () => {
-  it('muestra cada sospechoso con su texto y su motivo, y no pasa de 3.800 caracteres aunque sean 60 mensajes', () => {
+  it('R2: cada mensaje CARGADO va en su línea con sus primeras palabras; con 60 mensajes se parte en varios de hasta 3.800', () => {
     const ms = [enc(1, 'Carolina'), ...Array.from({ length: 60 }, (_, i) => m(i + 2, i % 10 === 5 ? 'Hola Tati, soy Andrés, una pregunta larga sobre el hotel y el traslado' : `mensaje número ${i + 2} con algo de texto del cliente`))];
     const r = plan(ms).plan;
-    const txt = textoResumenPlan(r, ms);
-    expect(txt.length).toBeLessThanOrEqual(MAX_LARGO_RESUMEN);
-    for (const x of pendientes(r)) expect(txt).toContain(`\n   ${x.n} «`);
+    const partes = partesResumenPlan(r, ms);
+    expect(partes.length).toBeGreaterThan(1);
+    for (const p of partes) expect(p.length).toBeLessThanOrEqual(MAX_LARGO_RESUMEN);
+    const todo = partes.join('\n');
+    for (const x of r.mensajes) expect(todo, `el ${x.n}`).toContain(`\n   ${x.n} «`);
+    expect(partes[partes.length - 1]).toContain('No cargué nada todavía');
+    expect(partes[0].startsWith('(1/')).toBe(true);
     expect(rangos([9, 2, 3, 4, 6, 10])).toBe('2-4, 6, 9-10');
+  });
+
+  it('R2 (F4c del QA v3): el encabezado olvidado sin señales cae en la caja, pero el resumen muestra esos mensajes uno por uno', () => {
+    const ms = [enc(1, 'Carolina'), m(2, 'Ya hablé con mi esposo: salimos el 28 de diciembre y volvemos el 3 de enero'),
+      m(3, 'Somos 3 adultos y 2 niños de 9 y 4 años'), m(4, 'el hotel con desayuno porfa'), m(5, 'salimos de Medellín')];
+    const txt = textoResumenPlan(plan(ms).plan, ms);
+    expect(txt).toContain('   4 «el hotel con desayuno porfa»');
+    expect(txt).toContain('   5 «salimos de Medellín»');
   });
 });
 
@@ -184,7 +201,7 @@ describe('banco del QA de #971 (mensajes reales del banco; el modelo ya no asign
   }
 });
 
-describe('el día sintético CON encabezados (2 olvidados, 1 mal escrito)', () => {
+describe('el día sintético del QA v3 CON encabezados (2 olvidados, «Lusia», «habla Marta, la esposa de Jorge»)', () => {
   const nombre = (d: DestinoPlan) => (d.tipo === 'existente' ? d.codigo : `NUEVO ${d.cliente}`);
   it('ningún mensaje se carga en un viaje ajeno sin pasar por el comercial; cuenta las preguntas del día', () => {
     let decisiones = 0;
@@ -193,9 +210,15 @@ describe('el día sintético CON encabezados (2 olvidados, 1 mal escrito)', () =
     for (const e of diaEnc.entregas) {
       const ms: MensajeViaje[] = e.mensajes.map((x, i) => ({ n: i + 1, cuerpo: x.texto, reenviado: x.reenviado, tipo: x.tipo, en: x.en }));
       const r = plan(ms, e.viajes as ViajeAbierto[]);
-      expect(r.conEncabezados).toBe(true);
+      if (!r.conEncabezados) {
+        // Una tanda sin encabezado es un viaje: una pregunta («¿A qué viaje van?»).
+        porEntrega.push(1);
+        decisiones += 1;
+        continue;
+      }
       for (const c of cargaSinDecidir(r.plan)) {
-        expect(nombre(c.destino!), `«${e.mensajes[c.n - 1].texto}»`).toBe(e.mensajes[c.n - 1].verdad);
+        // Lo que no es de ningún cliente (promoción, pago, la nota «tacaña») puede ir en la caja: el entendimiento no lo usa.
+        if (e.mensajes[c.n - 1].verdad !== null) expect(nombre(c.destino!), `«${e.mensajes[c.n - 1].texto}»`).toBe(e.mensajes[c.n - 1].verdad);
         cargados++;
       }
       const p = pendientes(r.plan).length;
@@ -204,7 +227,76 @@ describe('el día sintético CON encabezados (2 olvidados, 1 mal escrito)', () =
       const txt = textoResumenPlan(r.plan, ms);
       for (const x of pendientes(r.plan)) expect(txt).toContain(`\n   ${x.n} «`);
     }
-    // El número que pidió Mauricio: 6 resúmenes (uno por entrega) y estas decisiones de mensaje.
+    // El número que pidió Mauricio: un resumen o una pregunta por entrega, y estas decisiones de mensaje.
     expect({ resumenes: diaEnc.entregas.length, decisiones, porEntrega, cargados }).toMatchSnapshot();
+  });
+});
+
+describe('QA de #971 v3', () => {
+  const W: ViajeAbierto[] = [...V, { id: 'n21', codigo: 'T1 26 21', cliente: 'ANDRÉS GIL', destino: 'CANCÚN' }];
+
+  describe('R1 · encabezados casi exactos (Damerau/OSA: una transposición es un error)', () => {
+    it.each([['Lusia', 'n9'], ['Carlina', 'n11'], ['Jorje', 'n8'], ['Luisa Mejia', 'n9']])('«%s» → %s', (texto, id) => {
+      expect(resolverEncabezado(texto, W)).toMatchObject({ tipo: 'viaje', viaje: { id } });
+    });
+
+    it('la distancia: transposición 1, sustitución 1, dos cambios 2', () => {
+      expect([distancia('lusia', 'luisa'), distancia('jorje', 'jorge'), distancia('carlina', 'carolina'), distancia('lsuia', 'luisa')]).toEqual([1, 1, 1, 2]);
+    });
+
+    it('dos candidatos a la misma distancia: pregunta; uno exacto y otro a uno: gana el exacto', () => {
+      const X: ViajeAbierto[] = [{ id: 'a', codigo: 'T1 26 40', cliente: 'MARTA LÓPEZ', destino: null }, { id: 'b', codigo: 'T1 26 41', cliente: 'MARIA PÉREZ', destino: null }];
+      expect(resolverEncabezado('Marya', X)).toMatchObject({ tipo: 'ambiguo' });
+      expect(resolverEncabezado('Marta', X)).toMatchObject({ tipo: 'viaje', viaje: { id: 'a' } });
+      const Y: ViajeAbierto[] = [{ id: 'a', codigo: 'T1 26 40', cliente: 'LUISA LÓPEZ', destino: null }, { id: 'b', codigo: 'T1 26 41', cliente: 'LUSIA PÉREZ', destino: null }];
+      expect(resolverEncabezado('Lusia', Y)).toMatchObject({ tipo: 'viaje', viaje: { id: 'b' } });
+      const Z: ViajeAbierto[] = [{ id: 'a', codigo: 'T1 26 40', cliente: 'LUISA LÓPEZ', destino: null }, { id: 'b', codigo: 'T1 26 41', cliente: 'LUSIAA PÉREZ', destino: null }];
+      expect(resolverEncabezado('Lusia', Z)).toMatchObject({ tipo: 'ambiguo' });
+    });
+
+    it('F5h del QA v3: «Lusia» ya no deja los mensajes de Luisa en la caja de Carolina', () => {
+      const ms = [enc(1, 'Carolina', 0), m(2, 'Ya hablé con mi esposo: salimos el 28 de diciembre y volvemos el 3 de enero'), enc(3, 'Lusia', 1),
+        m(4, 'el hotel con desayuno porfa'), m(5, 'salimos de Medellín')];
+      expect(resumenDe(plan(ms).plan)).toEqual([[2, 'T1 26 11', 'carga'], [4, 'T1 26 9', 'carga'], [5, 'T1 26 9', 'carga']]);
+    });
+  });
+
+  describe('corte de caja: un escrito corto que parece encabezado y no se resuelve', () => {
+    it.each([['Caro', true], ['Lsuia', true], ['T1 26 99', true], ['ok', false], ['gracias', false], ['Jorge?', false], ['son 3 adultos', false], ['jajaja', false]])('«%s» parece encabezado: %s', (t2, si) => {
+      expect(pareceEncabezado(t2)).toBe(si);
+    });
+
+    it('lo que sigue queda sin asignar hasta el próximo encabezado, con aviso; nunca hereda la caja anterior', () => {
+      const ms = [enc(1, 'Carolina'), m(2, 'hotel 5 estrellas'), enc(3, 'Lsuia'), m(4, 'el hotel con desayuno porfa'), m(5, 'salimos de Medellín'), enc(6, 'Jorge'), m(7, 'somos 4')];
+      const r = plan(ms).plan;
+      expect(resumenDe(r)).toEqual([[2, 'T1 26 11', 'carga'], [4, null, 'decidir'], [5, null, 'decidir'], [7, 'T1 26 8', 'carga']]);
+      expect(r.avisos.join('\n')).toContain('No reconocí el encabezado «Lsuia»');
+      expect(r.encabezados).toEqual([1, 3, 6]);
+    });
+
+    it('una tanda con solo un escrito no reconocido es un viaje, como sin encabezados', () => {
+      expect(plan([enc(1, 'Caro'), m(2, 'hola')]).conEncabezados).toBe(false);
+    });
+  });
+
+  describe('falsos sospechosos', () => {
+    it('«habla Marta, la esposa de Jorge» bajo «Jorge» no es otra persona ni contagia la caja (día, 4 de 5 falsos)', () => {
+      expect(esFamiliarDe('Hola Tati, habla Marta, la esposa de Jorge', 'JORGE PÉREZ')).toBe(true);
+      const ms = [enc(1, 'Jorge'), m(2, 'Hola Tati, habla Marta, la esposa de Jorge'), m(3, 'El niño tiene 7 años y ya tiene registro civil'),
+        m(4, 'Queremos plan todo incluido también'), m(5, 'Presupuesto como 8 millones')];
+      expect(resumenDe(plan(ms).plan).map(x => x[2])).toEqual(['carga', 'carga', 'carga', 'carga']);
+      // Alguien que se presenta sin relación con el titular sigue siendo sospechoso.
+      const otro = [enc(1, 'Jorge'), m(2, 'Hola Tati, habla Marta, quiero cotizar')];
+      expect(resumenDe(plan(otro).plan)[0][2]).toBe('sospecha');
+    });
+
+    it('una promoción marcada no contagia al mensaje siguiente de Luisa (día, 1 de 5 falsos)', () => {
+      expect(noEsDelCliente('PUNTA CANA desde $2.5M, salidas 5 y 12 de diciembre, todo incluido ✈️')).toBe(true);
+      expect(noEsDelCliente('jajaja gracias')).toBe(true);
+      expect(noEsDelCliente('Mira esto que vi, ¿ustedes tienen algo así para San Andrés?')).toBe(false);
+      const ms = [enc(1, 'Luisa'), m(2, 'Mejor maleta de mano, viajamos ligeros'), m(3, 'PUNTA CANA desde $2.5M, salidas 5 y 12 de diciembre, todo incluido ✈️'),
+        m(4, 'Mira esto que vi, ¿ustedes tienen algo así para San Andrés?')];
+      expect(resumenDe(plan(ms).plan)).toEqual([[2, 'T1 26 9', 'carga'], [3, 'T1 26 9', 'sospecha'], [4, 'T1 26 9', 'carga']]);
+    });
   });
 });

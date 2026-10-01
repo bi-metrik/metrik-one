@@ -65,7 +65,7 @@ import {
   gruposDelPlan,
   interpretarRespuestaPlan,
   planSinDudas,
-  textoResumenPlan,
+  partesResumenPlan,
   tieneEncabezados,
   TEXTO_COMO_CORREGIR,
 } from './wa-viajes-reglas.ts';
@@ -719,7 +719,7 @@ async function armarReparto(
  */
 export async function armarPreguntaNegocio(
   supabase: SupabaseClient, entregaId: string, workspaceId: string, nMensajes: number,
-): Promise<{ texto: string; opciones?: OpcionNegocio[]; plan?: PlanViajes; sinDudas?: boolean } | null> {
+): Promise<{ texto: string; antes?: string[]; opciones?: OpcionNegocio[]; plan?: PlanViajes; sinDudas?: boolean } | null> {
   const l = await lineaDeLaBandeja(supabase, workspaceId);
   if (typeof l === 'string') {
     console.error(`[wa-entendimiento] sin lista de viajes para ${entregaId}: ${l}`);
@@ -733,7 +733,8 @@ export async function armarPreguntaNegocio(
     if (!r) return null;
     if (r.conEncabezados) {
       const sinDudas = r.bandeja.confirmar === 'si_duda' && planSinDudas(r.plan);
-      return { texto: textoResumenPlan(r.plan, aViaje(crudos)), plan: r.plan, sinDudas };
+      const partes = partesResumenPlan(r.plan, aViaje(crudos));
+      return { texto: partes[partes.length - 1], antes: partes.slice(0, -1), plan: r.plan, sinDudas };
     }
   }
 
@@ -764,6 +765,12 @@ async function negocioAbiertoPorCodigo(supabase: SupabaseClient, workspaceId: st
 
 // ── El reparto: proponer, corregir, confirmar ────────────────────────────────
 
+/** El resumen puede venir en varias partes: se mandan en orden y se espera respuesta a la última. */
+async function preguntarResumen(supabase: SupabaseClient, ent: Fila, partes: string[]): Promise<void> {
+  for (const p of partes.slice(0, -1)) await enviar(ent.remitente_phone as string, p, ent.workspace_id as string);
+  await preguntarYEsperar(supabase, ent, partes[partes.length - 1], null);
+}
+
 /** La respuesta al resumen del reparto. Nada se carga hasta el «sí». */
 async function resolverPlan(supabase: SupabaseClient, ent: Fila, plan: PlanViajes, crudos: ReadonlyArray<MensajeCrudo>): Promise<void> {
   const workspaceId = ent.workspace_id as string;
@@ -776,12 +783,12 @@ async function resolverPlan(supabase: SupabaseClient, ent: Fila, plan: PlanViaje
   if (r.tipo === 'corregir') {
     const nuevo = aplicarCambios(plan, r.cambios);
     await supabase.from('wa_bandeja_entregas').update({ plan_viajes: nuevo }).eq('id', ent.entrega_id);
-    await preguntarYEsperar(supabase, ent, textoResumenPlan(nuevo, mensajes, 'Corregido. Así queda:'), null);
+    await preguntarResumen(supabase, ent, partesResumenPlan(nuevo, mensajes, 'Corregido. Así queda:'));
     return;
   }
   if (r.tipo === 'como_corregir' || r.tipo === 'no_entendida') {
     const aviso = r.tipo === 'como_corregir' ? TEXTO_COMO_CORREGIR : (r.aviso ?? `No entendí «${respuesta.slice(0, 40)}». No cargué nada.`);
-    await preguntarYEsperar(supabase, ent, textoResumenPlan(plan, mensajes, aviso), null);
+    await preguntarResumen(supabase, ent, partesResumenPlan(plan, mensajes, aviso));
     return;
   }
   if (r.tipo === 'descartar_todo') {
