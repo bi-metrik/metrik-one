@@ -108,8 +108,9 @@ export function compararCheck(
   const a = normalizarTexto(expected)
   const b = normalizarTexto(extracted)
   if (!a || !b) return false
-  // El mismo texto coincide en todo modo de texto (también el modelo «X», de una letra).
-  if (a === b) return true
+  // El mismo texto coincide en todo modo de texto (también el modelo «X», de una letra),
+  // y también con otros espacios: «X3 xDrive30e» es «X3 XDRIVE 30 E».
+  if (a === b || a.replace(/ /g, '') === b.replace(/ /g, '')) return true
   if (mode === 'tokens') return nombresCoinciden(expected, extracted)
   if (mode === 'subset') {
     const x = new Set(a.split(' '))

@@ -34,7 +34,7 @@ import { resolverDestino } from '@/lib/negocios/casilla-compartida'
 import { esReemplazoHaciaAtras } from '@/lib/documentos/reemplazo-hacia-atras'
 import { extraerDriveFileId } from '@/lib/compliance/documentos'
 import { mimeEfectivo } from '@/lib/documentos/mime'
-import { checkSeSalta } from '@/lib/documentos/check-opcional'
+import { checkSeSalta, sociedadAcompananteSeSalta } from '@/lib/documentos/check-opcional'
 import type { CondicionBloque } from '@/lib/negocios/condicion-bloque'
 import { cerrarDevolucionAlCompletar } from '@/lib/negocios/cerrar-devolucion'
 import { sembrarSeccionalDesdeRut } from '@/lib/negocios/seccional-desde-documento'
@@ -294,7 +294,12 @@ async function runCrossCheck(
 
     // Sin fuentes evaluadas no hay evidencia de nada: `falla` es el lado seguro para
     // un control (retener, no dejar pasar), y es lo que hacía la versión anterior.
-    const estadoFinal: EstadoCheck = estado ?? 'falla'
+    let estadoFinal: EstadoCheck = estado ?? 'falla'
+    // Una sociedad en el lugar opcional del 2º beneficiario, sin RUT ni certificado contra
+    // el cual compararla, en un negocio de un solo titular: no es un error del documento.
+    if (estadoFinal === 'falla' && sociedadAcompananteSeSalta(check, extractedRaw, expectedRaw, fuentesCondicion)) {
+      estadoFinal = 'ok'
+    }
 
     results.push({
       slug: check.slug,

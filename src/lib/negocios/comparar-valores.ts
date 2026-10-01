@@ -132,11 +132,11 @@ export function coinciden(a: unknown, b: unknown, modo: ModoComparacion, opts: O
   const x = palabras(a, opts.equivalencias)
   const y = palabras(b, opts.equivalencias)
   if (x.size === 0 || y.size === 0) return false
+  // El mismo texto con otros espacios («RAV4» y «RAV 4») coincide en todo modo de palabras.
+  if (normalizar(a).replace(/ /g, '') === normalizar(b).replace(/ /g, '')) return true
   if (modo === 'contenido') return [...x].every(p => y.has(p)) || [...y].every(p => x.has(p))
   // palabra_comun: una palabra con letras, de 2 o más caracteres. Los números solos (el
   // año del modelo) no cuentan: dos carros distintos del mismo año no son el mismo carro.
-  // El mismo texto siempre coincide, aunque sea una sola letra (el modelo «X»).
-  if (normalizar(a) === normalizar(b)) return true
   const conLetras = (s: Set<string>) =>
     conPegadas([...s].join(' ')).filter(p => p.length >= 2 && /[a-z]/.test(p))
   const ys = new Set(conLetras(y))
