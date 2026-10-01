@@ -2678,6 +2678,7 @@ export default function CotizacionEditor({ oportunidadId, cotizacion, initialIte
               receptor={receptorBandeja}
               onPendientes={setPendientesEnBandeja}
               fechasViaje={fechasViaje}
+              destinoViaje={destinoViaje}
               onCambio={refrescar}
             />
           )}
@@ -3409,6 +3410,7 @@ export default function CotizacionEditor({ oportunidadId, cotizacion, initialIte
           receptor={receptorBandeja}
           onPendientes={setPendientesEnBandeja}
           fechasViaje={fechasViaje}
+          destinoViaje={destinoViaje}
           onCambio={refrescar}
         />
       )}

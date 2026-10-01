@@ -341,11 +341,37 @@ export function avisoFechasFueraDelViaje(
 }
 
 /**
- * ¿Esta alerta es la de `avisoFechasFueraDelViaje`? La bandeja la pinta como texto en la fila,
- * no escondida en el ícono de las demás alertas (brief del 2026-09-30, punto 2).
+ * El aviso cuando la fecha de una actividad cae fuera de las del viaje (COT-2026-0020: la
+ * excursión leída el 15 nov en un viaje del 9 al 13). Mismo criterio que el del hotel: es un
+ * AVISO, la actividad entra igual. Sin fecha leída o sin fechas del viaje no se compara nada.
+ *
+ * Acepta la fecha como la deja la lectura (`2026-11-15`, o `2026-11-15/dom` con el día de la
+ * semana): solo cuenta el AAAA-MM-DD.
+ */
+export function avisoFechaActividadFueraDelViaje(
+  fecha: string | null | undefined,
+  viaje: { inicio: string | null; fin: string | null } | null | undefined,
+): string | null {
+  const dia = (fecha ?? '').trim().slice(0, 10)
+  if (!viaje || !FECHA.test(dia)) return null
+  const inicio = viaje.inicio && FECHA.test(viaje.inicio) ? viaje.inicio : null
+  const fin = viaje.fin && FECHA.test(viaje.fin) ? viaje.fin : null
+  const fuera = (!!inicio && dia < inicio) || (!!fin && dia > fin)
+  if (!fuera) return null
+  const delViaje = inicio && fin
+    ? `del ${fechaCorta(inicio)} al ${fechaCorta(fin)}`
+    : inicio ? `desde el ${fechaCorta(inicio)}` : `hasta el ${fechaCorta(fin as string)}`
+  return `La actividad es el ${fechaCorta(dia)} y el viaje es ${delViaje}. Revisa la fecha.`
+}
+
+/**
+ * ¿Esta alerta es la de `avisoFechasFueraDelViaje` (hotel) o la de
+ * `avisoFechaActividadFueraDelViaje`? La bandeja la pinta como texto en la fila, no escondida
+ * en el ícono de las demás alertas (brief del 2026-09-30, punto 2; actividad: 2026-10-01).
  */
 export function esAvisoFechasFueraDelViaje(alerta: string): boolean {
   return /^El hotel va del .+ y el viaje es .+\. Revisa las fechas\.$/.test(alerta)
+    || /^La actividad es el .+ y el viaje es .+\. Revisa la fecha\.$/.test(alerta)
 }
 
 /**

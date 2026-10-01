@@ -302,6 +302,7 @@ export default function BandejaCapturas({
   receptor,
   onPendientes,
   fechasViaje = null,
+  destinoViaje = null,
   onCambio,
 }: {
   cotizacionId: string
@@ -320,6 +321,8 @@ export default function BandejaCapturas({
   onPendientes?: (porOpcion: Record<string, string>) => void
   /** Las fechas del viaje: el formulario manual avisa antes de llevar un hotel fuera de ellas. */
   fechasViaje?: { inicio: string | null; fin: string | null } | null
+  /** El destino del negocio: con él se nombra el bloque nuevo de una actividad sin ciudad. */
+  destinoViaje?: string | null
   /**
    * Cómo se pone al día la página después de aceptar o deshacer. El editor del viaje pasa el
    * suyo, que además relee la cotización (`vista-fresca.ts`); sin él, el refresco de siempre.
@@ -338,11 +341,13 @@ export default function BandejaCapturas({
   const itemsVivos = useRef(items)
   const ubicacionesVivas = useRef(ubicaciones)
   const composicionViva = useRef(composicion)
+  const destinoVivo = useRef(destinoViaje)
   useEffect(() => {
     itemsVivos.current = items
     ubicacionesVivas.current = ubicaciones
     composicionViva.current = composicion
-  }, [items, ubicaciones, composicion])
+    destinoVivo.current = destinoViaje
+  }, [items, ubicaciones, composicion, destinoViaje])
   // Qué captura trajo cada huella primero. Se escribe al pegar, sin esperar al render: dos
   // pegadas seguidas de la misma imagen se reconocen aunque la primera no se haya pintado.
   const huellas = useRef(new Map<string, string>())
@@ -382,6 +387,7 @@ export default function BandejaCapturas({
         lineas: itemsVivos.current,
         comparables: opcionesParaComparar(itemsVivos.current, vigentes.current, id),
         composicion: composicionViva.current,
+        destinoViaje: destinoVivo.current,
         ubicaciones: ubicacionesVivas.current,
         comparar: !forzadas.current.has(id),
       }),
@@ -452,6 +458,7 @@ export default function BandejaCapturas({
           lineas,
           comparables: opcionesParaComparar(lineas, [...nuevas, ...vigentes.current], id),
           composicion: composicionViva.current,
+        destinoViaje: destinoVivo.current,
           ubicaciones: ubicacionesVivas.current,
           comparar: true,
         })
@@ -486,6 +493,7 @@ export default function BandejaCapturas({
       lineas: itemsVivos.current,
       comparables: opcionesParaComparar(itemsVivos.current, vigentes.current, id),
       composicion: composicionViva.current,
+        destinoViaje: destinoVivo.current,
       ubicaciones: ubicacionesVivas.current,
       comparar: true,
     })
@@ -713,12 +721,12 @@ export default function BandejaCapturas({
     for (const c of capturas) {
       if (c.estado.fase !== 'lista' || !c.borrador) continue
       const r = revisarBorrador({
-        capId: c.id, borrador: c.borrador, lineas: items, comparables: [], composicion, ubicaciones, comparar: false,
+        capId: c.id, borrador: c.borrador, lineas: items, comparables: [], composicion, ubicaciones, comparar: false, destinoViaje,
       })
       m.set(c.id, { donde: r.donde, como: r.como ?? null })
     }
     return m
-  }, [capturas, items, composicion, ubicaciones])
+  }, [capturas, items, composicion, ubicaciones, destinoViaje])
 
   const visibles = capturas.filter(c => c.estado.fase !== 'descartada')
 

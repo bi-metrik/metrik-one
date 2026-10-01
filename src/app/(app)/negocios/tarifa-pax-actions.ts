@@ -27,6 +27,7 @@ import {
   describirOcupacion,
   normalizarComposicion,
   resolverTarifa,
+  sumarAlertas,
   validarLecturaEnCasilla,
   type CasillasLeidas,
   type ClaveCasilla,
@@ -65,7 +66,8 @@ import {
 } from '@/lib/cotizaciones/habitaciones'
 import { opcionLeidaDeFila, type OpcionLeida } from '@/lib/cotizaciones/bandeja-capturas'
 import { leerImagenDeCaptura } from '@/lib/cotizaciones/leer-imagen-captura'
-import { leerHotelManual, leerTrasladoManual, lecturaManual, type ErroresManual } from '@/lib/cotizaciones/ingreso-manual'
+import { avisoFechaActividadFueraDelViaje, leerHotelManual, leerTrasladoManual, lecturaManual, type ErroresManual } from '@/lib/cotizaciones/ingreso-manual'
+import { fechaDeActividad, lugarDeBloqueNuevo } from '@/lib/cotizaciones/actividad-pantallazo'
 import { borradorValido, firmarBorrador } from '@/lib/cotizaciones/firma-borrador'
 import { ubicarLectura, type LineaParaUbicar } from '@/lib/cotizaciones/ubicar-lectura'
 import { definicionDeTipo, esTipoRanura, tipoDeDefinicion, type TipoRanura } from '@/lib/cotizaciones/ranuras-cotizacion'
@@ -379,7 +381,7 @@ async function guardarLecturaEnItem(ctx: ContextoDeItem, itemId: string, clave: 
   if (!validacion.ok) {
     return { ok: false, codigo: validacion.codigo, mensaje: validacion.mensaje }
   }
-  leida.alertas = [...leida.alertas, ...validacion.alertas]
+  leida.alertas = sumarAlertas(leida.alertas, validacion.alertas)
 
   // El pantallazo que esta lectura reemplaza: su imagen ya no la usa nadie.
   let imagenAnterior: string | null = null
@@ -539,7 +541,10 @@ export async function leerCapturaEnBorrador(
   const propia = composicionDeLectura(leida) ?? ctx.viaje.composicion
   const v = validarLecturaEnCasilla({ clave: 'grupo_completo', lectura: leida, composicion: propia, casillas: {}, ranuraSlug: ranura.slug })
   if (!v.ok) return { ok: false, codigo: v.codigo, mensaje: v.mensaje }
-  leida.alertas = [...leida.alertas, ...v.alertas]
+  // Una actividad fuera de las fechas del viaje se avisa en la fila (punto 5 del brief del
+  // 2026-10-01). Es un aviso: la captura entra igual.
+  const fueraDelViaje = tipo === 'actividad' ? avisoFechaActividadFueraDelViaje(fechaDeActividad(leida), ctx.viaje.fechas) : null
+  leida.alertas = sumarAlertas(leida.alertas, v.alertas, fueraDelViaje ? [fueraDelViaje] : [])
   const lecturaJson = JSON.stringify(leida)
   const firma = firmarBorrador(cotizacionId, tipo, lecturaJson)
   if (!firma) return { ok: false, codigo: 'CONFIG', mensaje: 'Falta configurar la firma de la bandeja. Avísale a MeTRIK.' }
@@ -579,7 +584,7 @@ export async function lecturaManualEnBorrador(
   const propia = composicionDeLectura(leida) ?? ctx.viaje.composicion
   const v = validarLecturaEnCasilla({ clave: 'grupo_completo', lectura: leida, composicion: propia, casillas: {}, ranuraSlug: ranura.slug })
   if (!v.ok) return { ok: false, codigo: v.codigo, mensaje: v.mensaje }
-  leida.alertas = [...leida.alertas, ...v.alertas]
+  leida.alertas = sumarAlertas(leida.alertas, v.alertas)
   const lecturaJson = JSON.stringify(leida)
   const firma = firmarBorrador(cotizacionId, tipo, lecturaJson)
   if (!firma) return { ok: false, codigo: 'CONFIG', mensaje: 'Falta configurar la firma de la bandeja. Avísale a MeTRIK.' }
@@ -740,7 +745,9 @@ async function aceptarLectura(
   // ── Opción nueva: en la ranura que ya estaba o en una ranura nueva ──
   const creada = destino.como === 'hermana'
     ? await agregarOpcionARanura(cotizacionId, destino.grupo)
-    : await crearRanuraConOpcion(cotizacionId, b.tipo, pistas)
+    // Una actividad sin ciudad en la captura nombra su bloque con el destino del viaje, no
+    // con el nombre de la excursión que tomó el detector (punto 4 del brief del 2026-10-01).
+    : await crearRanuraConOpcion(cotizacionId, b.tipo, { ...pistas, lugar: lugarDeBloqueNuevo(b.tipo, lectura, pistas.lugar, b.correcciones) })
   if (!creada.success) return { ok: false, codigo: 'CREAR', mensaje: creada.error }
   const ctxItem = await contexto(creada.itemId)
   const g = 'error' in ctxItem
@@ -801,7 +808,7 @@ function validarHabitacion(ranuraSlug: string, leida: LecturaCasilla): { ok: tru
   if (propia) leida.paraComposicion = propia
   const v = validarLecturaEnCasilla({ clave: 'grupo_completo', lectura: leida, composicion: null, casillas: {}, ranuraSlug })
   if (!v.ok) return { ok: false, codigo: v.codigo, mensaje: v.mensaje }
-  leida.alertas = [...leida.alertas, ...v.alertas]
+  leida.alertas = sumarAlertas(leida.alertas, v.alertas)
   return { ok: true }
 }
 
