@@ -18,7 +18,14 @@ import {
   variablesAvisoSinTelefono,
 } from '../_shared/wa-sin-telefono.ts';
 import { getOrCreateSession, isAwaitingResponse, updateSession } from '../_shared/wa-session.ts';
-import { resolverEstudioChat, chatCardumenAbierto, startCardumenChat, continueCardumenChat } from '../_shared/cardumen/index.ts';
+import {
+  resolverEstudioChat,
+  chatCardumenAbierto,
+  startCardumenChat,
+  continueCardumenChat,
+  resolverEstudioMiniwebPorTrigger,
+  urlMiniwebParaParticipante,
+} from '../_shared/cardumen/index.ts';
 import { ctxCardumen } from '../_shared/cardumen/telemetria.ts';
 import { isVeTrigger, hasOpenVeChat, startVeChat, continueVeChat } from '../_shared/venezuela/index.ts';
 import { resolverCustomerTrigger, hasOpenCustomerChat, startCustomerChat, continueCustomerChat } from '../_shared/customer/index.ts';
@@ -351,6 +358,24 @@ async function processMessage(message: IncomingMessage): Promise<void> {
     const estudioChat = await resolverEstudioChat(supabase, message.text);
     if (estudioChat) {
       await startCardumenChat(supabase, message.phone, estudioChat, message.wa_message_id);
+      return;
+    }
+  }
+  // 0c-bis. Cardumen modo `miniweb` — el instrumento es una página, no una conversación.
+  //     MISMA tabla de triggers que el chat: el bloque de arriba ya se quedó con las palabras
+  //     de los estudios de chat (`cardumen` → `navigate`), así que ninguna palabra viva cambia
+  //     de dueño. El destino sale de `cardumen_estudios.url`: publicar un instrumento nuevo es
+  //     sembrar dos filas, no redesplegar esta función.
+  //     Va ANTES de los disparadores viejos (`cardumenflow`, `cardumen`, `turismo`), que se
+  //     quedan en pie por retrocompatibilidad.
+  if (message.type === 'text') {
+    const miniweb = await resolverEstudioMiniwebPorTrigger(supabase, message.text);
+    if (miniweb) {
+      const url = urlMiniwebParaParticipante(miniweb.url, message.phone);
+      const cuerpo = '🐟 *Cardumen*\n\nGracias por participar. Toca el botón para responder — toma pocos minutos y es confidencial.';
+      // CTA → abre el navegador interno de WhatsApp (un link de texto plano saca de la app).
+      await sendCtaUrl(message.phone, cuerpo, 'Abrir', url, ctxCardumen(miniweb.estudio, cuerpo));
+      console.log(`[wa-webhook] Cardumen miniweb '${miniweb.estudio}' enviado a ${message.phone}`);
       return;
     }
   }
