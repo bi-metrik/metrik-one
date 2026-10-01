@@ -30,6 +30,7 @@
  * Puro: sin red y sin base. La fecha de lectura entra por parámetro.
  */
 
+import { nochesEntre } from './estadia'
 import { construirLecturaCasilla } from './lectura-casilla'
 import { evaluarLectura, type FilaTipoPaxCruda, type LecturaCruda, type ValorLeido } from './lectura-pantallazo'
 import type { DefinicionRanura } from './ranuras-pantallazo'
@@ -137,12 +138,8 @@ function edad(v: unknown): number | null {
   return Number.isInteger(n) && n >= 0 && n <= 17 ? n : -1
 }
 
-/** Noches entre dos fechas «AAAA-MM-DD». 0 si no se puede. */
-export function nochesEntre(entrada: string, salida: string): number {
-  if (!FECHA.test(entrada) || !FECHA.test(salida)) return 0
-  const n = Math.round((Date.parse(`${salida}T00:00:00Z`) - Date.parse(`${entrada}T00:00:00Z`)) / 86_400_000)
-  return Number.isFinite(n) && n > 0 ? n : 0
-}
+/** Noches entre dos fechas «AAAA-MM-DD». 0 si no se puede. Vive en `estadia.ts`. */
+export { nochesEntre }
 
 /** Lo que llega del navegador, sin confiar en su forma. */
 export function leerHotelManual(raw: unknown): HotelManual {
@@ -331,6 +328,14 @@ export function avisoFechasFueraDelViaje(
     ? `del ${fechaCorta(inicio)} al ${fechaCorta(fin)}`
     : inicio ? `desde el ${fechaCorta(inicio)}` : `hasta el ${fechaCorta(fin as string)}`
   return `El hotel va del ${fechaCorta(entrada)} al ${fechaCorta(salida)} y el viaje es ${delViaje}. Revisa las fechas.`
+}
+
+/**
+ * ¿Esta alerta es la de `avisoFechasFueraDelViaje`? La bandeja la pinta como texto en la fila,
+ * no escondida en el ícono de las demás alertas (brief del 2026-09-30, punto 2).
+ */
+export function esAvisoFechasFueraDelViaje(alerta: string): boolean {
+  return /^El hotel va del .+ y el viaje es .+\. Revisa las fechas\.$/.test(alerta)
 }
 
 /**

@@ -63,7 +63,7 @@ export default function HabitacionesDeOpcion({
 
   const grupo = composicionViaje ?? tarifa.composicion ?? null
   const habitaciones = habitacionesDeTarifa(tarifa)
-  const reparto = repartirHabitaciones(habitaciones, grupo)
+  const reparto = repartirHabitaciones(habitaciones, grupo, tarifa.correcciones)
   const faltantes = textoDeFaltantes(reparto)
   const monedaTarifa = monedaDeTarifa(tarifa)
   const estado = resolverHabitaciones(tarifa, grupo, { moneda: monedaTarifa.moneda })
@@ -282,6 +282,7 @@ export function FilaHabitacion({
         {h.sirveParaRestar && (
           <p className="text-[10px] text-muted-foreground">Sirve para restar el precio del menor de su mismo tipo de habitación.</p>
         )}
+        {h.avisoEstadia && <p className="text-[10px] font-semibold text-[#9A5F0C]" data-aviso-estadia>{h.avisoEstadia}</p>}
       </div>
       <button
         type="button"

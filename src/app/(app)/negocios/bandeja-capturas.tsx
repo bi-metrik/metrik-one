@@ -22,7 +22,7 @@ import {
   type Pistas,
 } from '@/lib/cotizaciones/proceso-captura'
 import { aceptarPorRuta, detectarPorRuta, lecturaManualPorRuta, leerPorRuta } from '@/lib/cotizaciones/bandeja-red'
-import { esManual } from '@/lib/cotizaciones/ingreso-manual'
+import { esAvisoFechasFueraDelViaje, esManual } from '@/lib/cotizaciones/ingreso-manual'
 import IngresoManualForm, { type RespuestaManual, type TipoManual } from './ingreso-manual-form'
 import { esIdDeBorrador, revisarBorrador } from '@/lib/cotizaciones/revisar-borrador'
 import { pantallazosEnCotizacion, type OpcionLeida } from '@/lib/cotizaciones/bandeja-capturas'
@@ -301,6 +301,7 @@ export default function BandejaCapturas({
   enMarco = false,
   receptor,
   onPendientes,
+  fechasViaje = null,
 }: {
   cotizacionId: string
   /** Las líneas de la cotización: contra ellas se dice a dónde irá cada captura. */
@@ -316,6 +317,8 @@ export default function BandejaCapturas({
   receptor?: Ref<ReceptorDeBandeja>
   /** Qué opciones de hotel tienen un pantallazo esperando decisión (`pendientesPorOpcion`). */
   onPendientes?: (porOpcion: Record<string, string>) => void
+  /** Las fechas del viaje: el formulario manual avisa antes de llevar un hotel fuera de ellas. */
+  fechasViaje?: { inicio: string | null; fin: string | null } | null
 }) {
   const router = useRouter()
   const idEntrada = useId()
@@ -760,7 +763,7 @@ export default function BandejaCapturas({
         />
       </label>
       {manualAbierto ? (
-        <IngresoManualForm composicion={composicion} onEnviar={enviarManual} onCerrar={() => setManualAbierto(false)} />
+        <IngresoManualForm composicion={composicion} fechasViaje={fechasViaje} onEnviar={enviarManual} onCerrar={() => setManualAbierto(false)} />
       ) : (
         <p className="m-0 text-[13px] text-[#6E6A62]">
           ¿La tarifa viene de un portafolio o por teléfono?{' '}
@@ -853,7 +856,14 @@ export function FilaCaptura({
       <X className="h-4 w-4" aria-hidden />
     </button>
   )
-  const alertas = 'alertas' in e ? e.alertas : []
+  const todas = 'alertas' in e ? e.alertas : []
+  // El hotel fuera de las fechas del viaje se lee en la fila, sin pasar el mouse; las demás
+  // alertas siguen en el ícono.
+  const avisoFechas = todas.filter(esAvisoFechasFueraDelViaje)
+  const alertas = todas.filter(a => !esAvisoFechasFueraDelViaje(a))
+  const textoFechas = avisoFechas.length > 0
+    ? avisoFechas.map(a => <span key={a} className="text-xs font-medium text-[#9A5F0C]" data-aviso-fechas>{a}</span>)
+    : null
   const alerta = alertas.length > 0 ? (
     <AlertaDecision tip={alertas[0]}>
       {alertas.map(a => <p key={a} className="m-0">{a}</p>)}
@@ -971,6 +981,7 @@ export function FilaCaptura({
       miniatura,
       <>
         {tituloFila}
+        {textoFechas}
         <span className="text-sm">{pregunta}</span>
         <div className="mt-1 flex flex-wrap gap-2">
           {e.fase === 'parecida' ? (
@@ -1014,6 +1025,7 @@ export function FilaCaptura({
     miniatura,
     <>
       {tituloFila}
+      {textoFechas}
       {pregunta && <span className="text-sm">{pregunta}</span>}
       {sinDatos && <span className="text-[13px] text-[#6E6A62]">La lectura no dejó datos para la ficha: al aceptarla, revísala en su bloque.</span>}
       {campos.length > 0 && (

@@ -41,6 +41,7 @@ import { CONVENCION_MARGEN_POR_DEFECTO, type ConvencionMargen } from '@/lib/coti
 import { leerViajeDelNegocio } from '@/lib/cotizaciones/viaje-negocio'
 import { nombreAlConfirmarLectura } from '@/lib/cotizaciones/nombre-linea'
 import { esCorregible } from '@/lib/cotizaciones/correcciones'
+import { casillasConEstadia, firmaDeEstadia, lecturaConEstadia } from '@/lib/cotizaciones/estadia'
 import { descripcionDeLinea, descripcionReescribible, validarCorreccion } from '@/lib/cotizaciones/ficha-linea'
 import { aMayusculas } from '@/lib/negocios/mayusculas'
 import { camposDeLectura } from '@/lib/cotizaciones/campos-de-lectura'
@@ -454,7 +455,7 @@ async function guardarLecturaEnItem(ctx: ContextoDeItem, itemId: string, clave: 
 
   // El mensaje sale de lo que QUEDÓ guardado (que puede traer una casilla que otra persona
   // pegó mientras el modelo leía), no de la foto tomada al empezar.
-  const estado = resolverTarifa(composicionEfectiva, guardado.tarifa.casillas ?? {}, ranura.slug, {
+  const estado = resolverTarifa(composicionEfectiva, casillasConEstadia(guardado.tarifa.casillas ?? {}, guardado.tarifa.correcciones), ranura.slug, {
     moneda: monedaDeTarifa(guardado.tarifa).moneda,
   })
   return { ok: true, mensaje: estado.mensaje, alertas: leida.alertas, tarifa: guardado.tarifa, opcion }
@@ -1192,7 +1193,9 @@ export async function corregirHabitacion(
       if (h.id !== habitacionId) return h
       const leida = ocupacionDeHabitacion(h.lectura)
       const cambiaOcupacion = !leida || !mismaComposicion(leida, ocupacion)
-      const cambiaTotal = Math.abs(entrada.total - montoDeCosto(h.lectura)) > 0.005
+      // Contra lo que cuesta HOY la habitación: con fechas corregidas, una manual cuesta las
+      // noches corregidas (`estadia.ts`). Guardar sin tocar el precio no la congela.
+      const cambiaTotal = Math.abs(entrada.total - montoDeCosto(lecturaConEstadia(h.lectura, actual.correcciones))) > 0.005
       const { correccion: _vieja, ...resto } = h
       void _vieja
       if (!cambiaOcupacion && !cambiaTotal) return resto
@@ -1371,7 +1374,7 @@ export async function confirmarMenorNoPaga(
   const ctx = await contexto(itemId)
   if ('error' in ctx) return { success: false, error: ctx.error as string }
   if (!ctx.composicion) return { success: false, error: 'La línea no tiene composición' }
-  const estado = resolverTarifa(ctx.composicion, ctx.tarifa.casillas ?? {}, ctx.ranura.slug)
+  const estado = resolverTarifa(ctx.composicion, casillasConEstadia(ctx.tarifa.casillas ?? {}, ctx.tarifa.correcciones), ctx.ranura.slug)
   // Solo se confirma lo que el servidor ve pendiente de confirmar, en ESA casilla.
   if (estado.estado !== 'confirmar_menor_no_paga' || estado.casilla.clave !== clave) {
     return { success: false, error: 'No hay nada que confirmar en esa casilla. Recarga la cotización.' }
@@ -1510,7 +1513,7 @@ export async function confirmarTarifaPorPasajero(
   const porHabitaciones = conHabitaciones(tarifa)
   const estado = porHabitaciones
     ? resolverHabitaciones(tarifa, ctx.viaje.composicion ?? composicion, { moneda: monedaTarifa.moneda })
-    : resolverTarifa(composicion, casillas, ranura.slug, { moneda: monedaTarifa.moneda })
+    : resolverTarifa(composicion, casillasConEstadia(casillas, tarifa.correcciones), ranura.slug, { moneda: monedaTarifa.moneda })
   if (estado.estado !== 'resuelta') return { success: false, error: estado.mensaje, codigo: 'PENDIENTE' }
   // «$» sin moneda: COP está preseleccionada pero nadie la ha dicho. No pasa callada.
   if (monedaTarifa.asumida) return { success: false, error: MENSAJE_MONEDA_ASUMIDA, codigo: 'PENDIENTE' }
@@ -1666,6 +1669,7 @@ export async function confirmarTarifaPorPasajero(
     .eq('id', itemId)
   if (errItem) return { success: false, error: errItem.message, codigo: 'ERROR' }
 
+  const firmaEstadia = firmaDeEstadia(habitacionesDeTarifa(tarifa), tarifa.correcciones)
   const confirmada: TarifaConfirmada = {
     composicion,
     costos,
@@ -1683,6 +1687,9 @@ export async function confirmarTarifaPorPasajero(
     // R8 · qué habitaciones se confirmaron: cambiar una después deja la confirmación vieja.
     ...(porHabitaciones && tarifa.habitaciones ? { firmaHabitaciones: firmaDeHabitaciones(tarifa.habitaciones) } : {}),
     ...(porHabitacion.length > 0 && costos.length === 0 ? { porHabitacion } : {}),
+    // Con qué noches se costearon las habitaciones a mano de fechas corregidas. Sin ninguna, la
+    // llave no aparece: las confirmaciones de siempre se leen igual.
+    ...(firmaEstadia ? { firmaEstadia } : {}),
   }
   const guardado = await guardarTarifa(supabase, itemId, actual => {
     const siguiente: TarifaPax = {
@@ -1727,7 +1734,7 @@ export async function corregirCampoDeFicha(
   itemId: string,
   slug: string,
   valor: string | null,
-): Promise<ResultadoTarifa> {
+): Promise<ResultadoTarifa & { pendiente?: string | null }> {
   const ctx = await contexto(itemId)
   if ('error' in ctx) return { success: false, error: ctx.error as string }
   const { supabase, item, ranura, tarifa } = ctx
@@ -1786,6 +1793,15 @@ export async function corregirCampoDeFicha(
     return siguiente
   })
   if ('error' in guardado) return { success: false, error: guardado.error }
+
+  // La entrada o la salida de un hotel ya costeado: una habitación a mano cuesta las noches
+  // corregidas (`estadia.ts`), así que el costo se confirma otra vez y el total y el precio la
+  // siguen. Un pantallazo conserva su precio: confirmar de nuevo no lo mueve.
+  if ((slug === 'check_in' || slug === 'check_out') && ranura.slug === RANURA_HOTEL && guardado.tarifa.confirmada) {
+    const r = await reconfirmar(itemId)
+    if (item.negocioId) revalidatePath(`/negocios/${item.negocioId}`)
+    return { success: true, tarifa: r.tarifa ?? guardado.tarifa, ...(r.pendiente ? { pendiente: r.pendiente } : {}) }
+  }
 
   if (item.negocioId) revalidatePath(`/negocios/${item.negocioId}`)
   return { success: true, tarifa: guardado.tarifa }

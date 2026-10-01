@@ -2,7 +2,7 @@
 
 import { useId, useState, type ReactNode } from 'react'
 
-import { nochesEntre, type ErroresManual } from '@/lib/cotizaciones/ingreso-manual'
+import { avisoFechasFueraDelViaje, nochesEntre, type ErroresManual } from '@/lib/cotizaciones/ingreso-manual'
 import type { Composicion } from '@/lib/cotizaciones/tarifa-pasajero'
 import { BTN, BTN_PRIM, INPUT, INPUT_DUDOSO, SPIN } from '@/components/viaje/estilo'
 
@@ -60,9 +60,12 @@ export default function IngresoManualForm({
   onEnviar,
   onCerrar,
   tipoInicial = 'hotel',
+  fechasViaje = null,
 }: {
   /** El grupo del viaje: los pasajeros arrancan con él. */
   composicion: Composicion | null
+  /** Las fechas del viaje: un hotel fuera de ellas se avisa ANTES de llevarlo a la bandeja. */
+  fechasViaje?: { inicio: string | null; fin: string | null } | null
   /** Pide la lectura firmada y la pone en la bandeja. */
   onEnviar: (tipo: TipoManual, datos: Record<string, unknown>) => Promise<RespuestaManual>
   onCerrar: () => void
@@ -137,6 +140,8 @@ export default function IngresoManualForm({
   }
 
   const noches = tipo === 'hotel' ? nochesEntre(v.entrada ?? '', v.salida ?? '') : 0
+  // El mismo aviso que llevará la fila de la bandeja: avisa, no frena.
+  const fueraDelViaje = tipo === 'hotel' ? avisoFechasFueraDelViaje(v.entrada ?? '', v.salida ?? '', fechasViaje) : null
   const titulo = (t: string) => <span className="col-span-full mt-1 text-[11px] font-bold uppercase tracking-[.08em] text-[#6E6A62]">{t}</span>
 
   return (
@@ -226,6 +231,7 @@ export default function IngresoManualForm({
         </div>
       )}
 
+      {fueraDelViaje && <p className="m-0 text-xs font-medium text-[#9A5F0C]" data-aviso-fechas>{fueraDelViaje}</p>}
       {mensaje && <p className="m-0 text-xs font-medium text-[#B3382C]" role="alert">{mensaje}</p>}
       <div className="flex flex-wrap gap-2">
         <button type="submit" className={BTN_PRIM} disabled={enviando}>
