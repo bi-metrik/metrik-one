@@ -1019,6 +1019,11 @@ async function cargarEnNegocioExistente(
       cliente: salida.cliente, modelo: GEMINI_MODEL, finish_reason: lectura.finishReason, error: null,
       destino: 'existente', negocio_destino_id: negocioId,
     });
+    // N5: dos viajes en una tanda tampoco se mezclan en un negocio existente.
+    if (Number(ent.segmento ?? 0) === 0 && e.solicitudes.length >= 2) {
+      await preguntarYEsperar(supabase, ent, textoDosViajes(e.solicitudes), 'dos_viajes');
+      return;
+    }
   }
 
   // N6: antes de cargar, ¿los mensajes hablan de otro viaje? Se avisa y se espera el «sí».
