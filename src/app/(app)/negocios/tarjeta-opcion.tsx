@@ -34,7 +34,9 @@ import { fichaDeOpcion, resumenDeOpcion } from '@/lib/cotizaciones/opcion-viaje'
 import type { ConvencionMargen } from '@/lib/cotizaciones/precio-item'
 import { esNombreDeOpcion } from '@/lib/cotizaciones/ranuras-cotizacion'
 import { ranuraDeGrupo } from '@/lib/cotizaciones/ranuras-pantallazo'
+import { avisoFechaDeActividad, avisoTasaPendiente } from '@/lib/cotizaciones/actividad-pantallazo'
 import {
+  composicionDeLinea,
   formatoMonto,
   leerTarifaPax,
   monedaDeTarifa,
@@ -166,6 +168,7 @@ export default function TarjetaOpcion({
   nota,
   bloqueTitulo,
   general = false,
+  fechasViaje = null,
   onGuardarNota,
   onCambio,
 }: {
@@ -208,6 +211,8 @@ export default function TarjetaOpcion({
   bloqueTitulo: string
   /** El nivel de detalle del documento: «general» no nombra habitación ni régimen. */
   general?: boolean
+  /** Las fechas del viaje: una actividad fuera de ellas lo avisa (brief del 2026-10-01, punto 5). */
+  fechasViaje?: { inicio: string | null; fin: string | null } | null
   onGuardarNota: (texto: string) => void
   onCambio: () => void
 }) {
@@ -221,6 +226,7 @@ export default function TarjetaOpcion({
   const ranura = ranuraDeGrupo(item.grupo)
   const esHotel = ranura?.slug === 'hotel_detalle'
   const esTraslado = ranura?.slug === 'traslado_detalle'
+  const esActividad = ranura?.slug === 'actividad_detalle'
   const [hotel] = esHotel ? hotelesDeItems([item]) : [null]
   const nombre = (esHotel ? hotel?.hotel : null) || nombreVisibleDeLinea(item) || `Opción ${numero}`
   const estrellas = esHotel ? hotel?.estrellas ?? null : null
@@ -230,6 +236,13 @@ export default function TarjetaOpcion({
   const reparto = esHotel && habitaciones.length > 0 ? repartirHabitaciones(habitaciones, grupo, tarifa.correcciones) : null
   const resumenAloj = reparto ? resumenDeAlojamiento(reparto) : null
   const avisoPax = resumenAloj ? avisoDePasajeros(resumenAloj) : null
+  // Lo que se lee con la tarjeta CERRADA (brief del 2026-10-01, puntos 3 y 5): la actividad
+  // fuera de las fechas del viaje, y el costo que no entró porque falta la tasa de cambio. Un
+  // precio en $0 nunca pasa callado.
+  const avisosCerrada = [
+    avisoFechaDeActividad(ranura?.slug, tarifa, fechasViaje),
+    avisoTasaPendiente(tarifa, composicionDeLinea(tarifa, composicionViaje), ranura?.slug),
+  ].filter((a): a is string => !!a)
 
   const [confirmaBorrar, setConfirmaBorrar] = useState(false)
   const [editandoFicha, setEditandoFicha] = useState(false)
@@ -387,6 +400,17 @@ export default function TarjetaOpcion({
         />
       </div>
 
+      {avisosCerrada.length > 0 && (
+        <div className="-mt-1 flex flex-col gap-1 pb-2.5 pl-[42px] pr-3" data-avisos-opcion>
+          {avisosCerrada.map(a => (
+            <div key={a} className="flex items-start gap-[5px] text-xs font-semibold text-[#9A5F0C]" data-aviso-opcion>
+              <svg className="mt-0.5 shrink-0" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" aria-hidden><path d="M12 3 2 21h20L12 3Z" /><path d="M12 10v4M12 17h.01" /></svg>
+              <span>{a}</span>
+            </div>
+          ))}
+        </div>
+      )}
+
       {mover}
 
       {abierta && (
@@ -440,11 +464,11 @@ export default function TarjetaOpcion({
 
           {!confirmada && respaldo}
 
-          {/* El traslado también tiene su hoja: la línea de «Inversión» del documento. Su nota se
-              sigue escribiendo aparte, encima. El vuelo NO: al cliente le llega sobre todo como
-              su fila de la tabla «Vuelos», que esta hoja no pinta. */}
+          {/* El traslado y la actividad también tienen su hoja: la línea de «Inversión» del
+              documento. Su nota se sigue escribiendo aparte, encima. El vuelo NO: al cliente le
+              llega sobre todo como su fila de la tabla «Vuelos», que esta hoja no pinta. */}
           {!esHotel && nota}
-          {(esHotel || esTraslado) && <HojaCliente
+          {(esHotel || esTraslado || esActividad) && <HojaCliente
             item={item}
             numero={numero}
             bloqueTitulo={bloqueTitulo}

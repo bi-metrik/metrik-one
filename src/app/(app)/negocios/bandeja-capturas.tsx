@@ -23,6 +23,7 @@ import {
 } from '@/lib/cotizaciones/proceso-captura'
 import { aceptarPorRuta, detectarPorRuta, lecturaManualPorRuta, leerPorRuta } from '@/lib/cotizaciones/bandeja-red'
 import { esAvisoFechasFueraDelViaje, esManual } from '@/lib/cotizaciones/ingreso-manual'
+import { fueraDeVista, MENSAJE_PEGADO_EN_BANDEJA } from '@/lib/cotizaciones/lectura-sin-silencio'
 import IngresoManualForm, { type RespuestaManual, type TipoManual } from './ingreso-manual-form'
 import { esIdDeBorrador, revisarBorrador } from '@/lib/cotizaciones/revisar-borrador'
 import { pantallazosEnCotizacion, type OpcionLeida } from '@/lib/cotizaciones/bandeja-capturas'
@@ -338,6 +339,7 @@ export default function BandejaCapturas({
   const vigentes = useRef<Captura[]>([])
   useEffect(() => { vigentes.current = capturas }, [capturas])
   // Lo mismo para las líneas de la página, sus nombres y el grupo del viaje.
+  const raiz = useRef<HTMLElement>(null)
   const itemsVivos = useRef(items)
   const ubicacionesVivas = useRef(ubicaciones)
   const composicionViva = useRef(composicion)
@@ -531,6 +533,15 @@ export default function BandejaCapturas({
       for (const i of imagenes) {
         const archivo = i.getAsFile()
         if (archivo) agregar(archivo)
+      }
+      // Un pegado que no cayó en ninguna casilla viene aquí. Si la bandeja no está a la vista
+      // (la persona está abajo, en la tarjeta), se dice dónde quedó: sin esto, pegar el
+      // pantallazo 2 sin hacer clic en su casilla «no hacía nada» (brief del 2026-10-01, punto 7).
+      const caja = raiz.current?.getBoundingClientRect()
+      if (caja && fueraDeVista(caja, window.innerHeight)) {
+        toast(MENSAJE_PEGADO_EN_BANDEJA, {
+          action: { label: 'Ver', onClick: () => raiz.current?.scrollIntoView({ behavior: 'smooth', block: 'start' }) },
+        })
       }
     }
     window.addEventListener('paste', alPegar)
@@ -739,6 +750,7 @@ export default function BandejaCapturas({
 
   return (
     <section
+      ref={raiz}
       className="flex flex-col gap-3 rounded-xl border border-[#E2DED5] bg-white p-3.5 text-sm text-[#191713]"
       aria-labelledby={`${idEntrada}-titulo`}
       data-bandeja-capturas

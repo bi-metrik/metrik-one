@@ -52,6 +52,7 @@ import { casillasConEstadia } from '@/lib/cotizaciones/estadia'
 import { cifrasPorRevisar } from '@/lib/cotizaciones/ficha-linea'
 import { parseMontoCop } from '@/lib/negocios/monto-cop'
 import { formatBogotaFechaCorta } from '@/lib/dates/bogota'
+import { archivoComoDataUrl, leerSinSilencio, MENSAJE_ARCHIVO_ILEGIBLE } from '@/lib/cotizaciones/lectura-sin-silencio'
 
 /**
  * Pantallazos de una línea con precio por tipo de pasajero (diseño §6.1).
@@ -198,7 +199,9 @@ export default function TarifaPasajeroItem({
       try {
         // Sin moneda visible ya no hay rechazo que resolver aquí: la lectura se guarda con
         // COP supuesta y la pregunta sale DESPUÉS, persistente (`MonedaDeLaTarifa`).
-        const r = await leerCasillaDeItem(itemId, clave, dataUrl, null, enfoque)
+        // Si la llamada lanza, la casilla lo dice (`leerSinSilencio`, punto 7 del brief del
+        // 2026-10-01): antes se apagaba el «Leyendo…» y no quedaba nada, ni en pantalla ni en la base.
+        const r = await leerSinSilencio(() => leerCasillaDeItem(itemId, clave, dataUrl, null, enfoque))
         if (r.ok) {
           setGuardada(r.tarifa)
           setUltimoMensaje(r.mensaje)
@@ -207,7 +210,10 @@ export default function TarifaPasajeroItem({
         } else {
           // P8 · con opciones legibles se guarda la imagen para volver a leerla sobre la que
           // toque la persona, sin pedirle que la pegue otra vez.
-          setRechazos(x => ({ ...x, [clave]: { mensaje: r.mensaje, detalle: r.detalle, opciones: r.opciones, dataUrl } }))
+          setRechazos(x => ({
+            ...x,
+            [clave]: { mensaje: r.mensaje, detalle: 'detalle' in r ? r.detalle : undefined, opciones: 'opciones' in r ? r.opciones : undefined, dataUrl },
+          }))
         }
       } finally {
         setLeyendo(null)
@@ -215,15 +221,29 @@ export default function TarifaPasajeroItem({
     })()
   }
 
+  // Pegado o subido, el pantallazo va a SU casilla (punto 7): sin selector propio, la única
+  // forma de subir el «solo adultos» de un hotel era «Cambiar pantallazo», que reemplaza el 1.
+  function usarArchivo(clave: ClaveCasilla, archivo: File) {
+    if (!archivo.type.startsWith('image/')) {
+      setRechazos(r => ({ ...r, [clave]: { mensaje: 'Eso no es una imagen. Pega o sube el pantallazo del proveedor.' } }))
+      return
+    }
+    archivoComoDataUrl(archivo).then(
+      dataUrl => leer(clave, dataUrl),
+      (e: Error) => setRechazos(r => ({ ...r, [clave]: { mensaje: e.message } })),
+    )
+  }
+
   function pegar(clave: ClaveCasilla, e: React.ClipboardEvent) {
     const entrada = Array.from(e.clipboardData.items).find(i => i.type.startsWith('image/'))
     if (!entrada) return
     e.preventDefault()
     const archivo = entrada.getAsFile()
-    if (!archivo) return
-    const lector = new FileReader()
-    lector.onload = ev => leer(clave, ev.target?.result as string)
-    lector.readAsDataURL(archivo)
+    if (!archivo) {
+      setRechazos(r => ({ ...r, [clave]: { mensaje: MENSAJE_ARCHIVO_ILEGIBLE } }))
+      return
+    }
+    usarArchivo(clave, archivo)
   }
 
   function accion(fn: () => Promise<{ success: boolean; error?: string; tarifa?: TarifaPax }>, exito: string) {
@@ -310,6 +330,7 @@ export default function TarifaPasajeroItem({
         onToggleDetalle={() => setDetalleAbierto(x => ({ ...x, grupo_completo: !x.grupo_completo }))}
         onQuitar={() => accion(() => quitarCasillaDeItem(itemId, 'grupo_completo'), 'Pantallazo quitado.')}
         onPegar={e => pegar('grupo_completo', e)}
+        onArchivo={f => usarArchivo('grupo_completo', f)}
         onElegir={o => {
           const url = rechazos.grupo_completo?.dataUrl
           if (url) leer('grupo_completo', url, o)
@@ -379,6 +400,7 @@ export default function TarifaPasajeroItem({
               onToggleDetalle={() => setDetalleAbierto(x => ({ ...x, [d.clave]: !x[d.clave] }))}
               onQuitar={() => accion(() => quitarCasillaDeItem(itemId, d.clave), `Pantallazo ${d.numero} quitado.`)}
               onPegar={e => pegar(d.clave, e)}
+              onArchivo={f => usarArchivo(d.clave, f)}
               onElegir={o => {
                 const url = rechazos[d.clave]?.dataUrl
                 if (url) leer(d.clave, url, o)
@@ -616,6 +638,7 @@ function Casilla({
   onToggleDetalle,
   onQuitar,
   onPegar,
+  onArchivo,
   ficha,
   onElegir,
 }: {
@@ -648,6 +671,8 @@ function Casilla({
   onToggleDetalle: () => void
   onQuitar: () => void
   onPegar: (e: React.ClipboardEvent) => void
+  /** «Subir foto»: el archivo elegido va a ESTA casilla, igual que uno pegado. */
+  onArchivo: (archivo: File) => void
 }) {
   const comoSeLlama = numerada ? `el pantallazo ${def.numero}: ${def.titulo}` : 'el pantallazo del proveedor'
   return (
@@ -707,6 +732,22 @@ function Casilla({
               </span>
             )}
           </div>
+          <label className="mt-1 inline-flex cursor-pointer items-center gap-1 text-[10px] font-medium text-muted-foreground hover:text-foreground" data-subir-casilla={def.clave}>
+            <ImageIcon className="h-3 w-3" aria-hidden />
+            Subir foto
+            <input
+              type="file"
+              accept="image/*"
+              hidden
+              disabled={deshabilitado || leyendo}
+              aria-label={`Subir ${comoSeLlama}`}
+              onChange={e => {
+                const f = e.target.files?.[0]
+                e.target.value = ''
+                if (f) onArchivo(f)
+              }}
+            />
+          </label>
 
           {rechazo && (
             <div className="mt-1.5 rounded-md border border-red-300 bg-red-50 p-2">
