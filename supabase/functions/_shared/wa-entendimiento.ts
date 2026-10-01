@@ -56,7 +56,7 @@ import {
 } from './wa-carga-reglas.ts';
 import type { Actualizado, Conflicto, NegocioAbierto, OpcionNegocio } from './wa-carga-reglas.ts';
 import { entenderEntrega, textoDosViajes, textoParaModelo, textoSinSolicitud } from './wa-guardianes.ts';
-import type { Cortes, MensajeEntrega } from './wa-guardianes.ts';
+import type { MensajeEntrega } from './wa-guardianes.ts';
 import {
   aplicarCambios,
   armarPlan,
@@ -159,10 +159,6 @@ interface ConfigLinea {
   slug: string;
   origen: string;
   bandeja: ConfigBandeja;
-}
-
-function cortesDe(b: ConfigBandeja): Cortes {
-  return { infanteMenorDe: b.edadInfanteMenorDe, adultoDesde: b.edadAdultoDesde };
 }
 
 /**
@@ -570,11 +566,11 @@ async function entenderNuevo(
       });
       return;
     }
-    const e = entenderEntrega(lectura.json, cfg.fields, mensajes, { hoyISO: todayBogotaISO(), cortes: cortesDe(cfg.bandeja) });
+    const e = entenderEntrega(lectura.json, cfg.fields, mensajes, { hoyISO: todayBogotaISO() });
     await guardarClases(supabase, crudos, mensajes, e.clases);
     // Lo que se deduce sin el modelo (infantes = 0 con las edades de todos los niños) entra como
     // un sugerido más, con la deducción en vez de la frase.
-    salida = { ...e.salida, sugeridos: conDeducciones(cfg.fields, e.salida.sugeridos, cfg.bandeja.edadInfanteMenorDe) };
+    salida = { ...e.salida, sugeridos: conDeducciones(cfg.fields, e.salida.sugeridos) };
     const valores = aplicarSumas(cfg.fields, Object.fromEntries(Object.entries(salida.sugeridos).map(([k, v]) => [k, v.valor])));
     await actualizar(supabase, ent.id as string, {
       linea_id: cfg.lineaId, historia: salida.historia, sugeridos: salida.sugeridos, descartados: salida.descartados,
@@ -995,14 +991,14 @@ async function cargarEnNegocioExistente(
       });
       return;
     }
-    const e = entenderEntrega(lectura.json, campos, mensajes, { hoyISO: todayBogotaISO(), conocidos: yaTiene, cortes: cortesDe(bandeja) });
+    const e = entenderEntrega(lectura.json, campos, mensajes, { hoyISO: todayBogotaISO(), conocidos: yaTiene });
     sePresenta = e.sePresenta;
     await guardarClases(supabase, crudos, mensajes, e.clases);
     // La deducción se hace sobre lo que el negocio QUEDARÍA teniendo: los niños pueden haber
     // llegado en otra entrega y las edades en esta.
     salida = {
       ...e.salida,
-      sugeridos: sugeridosConDeducciones(bloques.map(b => ({ fields: b.fields, data: b.data })), e.salida.sugeridos, meta, bandeja.edadInfanteMenorDe),
+      sugeridos: sugeridosConDeducciones(bloques.map(b => ({ fields: b.fields, data: b.data })), e.salida.sugeridos, meta),
     };
     await actualizar(supabase, ent.id as string, {
       linea_id: neg.linea_id ?? null, historia: salida.historia, sugeridos: salida.sugeridos, descartados: salida.descartados,

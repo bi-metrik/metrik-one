@@ -13,9 +13,10 @@
 //        con precio «desde»).
 //   N7 · la historia es EXTRACTIVA: citas del cliente copiadas tal cual y verificadas contra lo
 //        que el cliente reenvió. Ni una valoración del comercial ni una paráfrasis pueden entrar.
-//   N1 · pasajeros: una edad cuenta una sola vez y con los cortes de la config; una edad de adulto
-//        no es niño («mi bebé de 18»); un total sin desglose no se reparte; la suma de categorías
-//        no pasa el total declarado; dos totales distintos dejan los conteos vacíos.
+//   N1 · pasajeros: una edad cuenta una sola vez; la edad NO mueve a nadie de categoría (niño y
+//        adulto los define operaciones en la cotización) salvo el infante, menor de 2; un total
+//        sin desglose no se reparte; la suma de categorías no pasa el total declarado; dos
+//        totales distintos dejan los conteos vacíos.
 //   N4 · ¿hay solicitud? Sin un mensaje del cliente con un dato, no se crea un negocio.
 //   N5 · ¿hay DOS solicitudes? Si el modelo ve dos viajes distintos (con frases distintas que sí
 //        están en los mensajes), no se mezclan.
@@ -27,6 +28,7 @@ import {
   DIAS_EN_LETRAS,
   fraseNombraNumero,
   leerEdades,
+  EDAD_INFANTE,
   normalizarTexto,
   validarSalida,
   type CampoEntendible,
@@ -46,24 +48,10 @@ export interface MensajeEntrega {
 }
 
 /**
- * Los cortes de edad de la config (`bandeja_solicitudes.edad_infante_menor_de` /
- * `edad_adulto_desde`). Salen SOLO de la config (QA de #971 v5, C10): `null` = el workspace no lo
- * definió, y una edad justo en ese borde no se clasifica, se pregunta.
+ * El cliente habla de un bebé: «mi bebé», «de brazos», «8 meses», «recién nacido». Con esto (o una
+ * edad menor de 2) se llena infantes; sin esto, no (QA de #971 v5, C10).
  */
-export interface Cortes {
-  infanteMenorDe: number | null;
-  adultoDesde: number | null;
-}
-
-export const SIN_CORTES: Cortes = { infanteMenorDe: null, adultoDesde: null };
-
-/**
- * Los bordes de referencia cuando la config no los trae (la regla de aerolíneas: infante menor de
- * 2, adulto desde 12). Solo clasifican las edades que quedan LEJOS del borde: la que cae justo en
- * él (2 o 12) no se decide sin la config.
- */
-const BORDE_INFANTE = 2;
-const BORDE_ADULTO = 12;
+const RE_BEBE = /\b(bebes?|bebit[oa]s?|infantes?|brazos|recien nacid[oa]s?|lactantes?|meses|mes)\b/;
 
 const SEPARADOR = '\n---\n';
 
@@ -212,7 +200,6 @@ function quitar(s: SalidaEntendida, slug: string, motivo: string) {
 export function guardianPasajeros(
   entrada: SalidaEntendida,
   fuente: string,
-  cortes: Cortes = SIN_CORTES,
   conocidos: Record<string, unknown> = {},
   /**
    * Las edades que dio el modelo, aunque otra regla las haya descartado (sin niños sabidos,
@@ -257,54 +244,37 @@ export function guardianPasajeros(
   }
   const totales = totalesDeclarados(fuente);
 
-  // 3. Las edades cuentan una sola vez y con los cortes de la config.
+  // 3. La edad NO mueve a nadie de categoría: niño y adulto dependen del componente (aerolínea,
+  //    hotel, tour) y los define operaciones en la cotización (decisión de Mauricio, QA de #971
+  //    v5). Cada persona queda en la categoría que usó el cliente: «los niños tienen 2 y 12» son 2
+  //    niños; «mi bebé de 18» se queda como está, con su edad anotada. El único corte es el de
+  //    infante (menor de 2 años), que en el avión es universal.
   const edadesSug = s.sugeridos.edades_menores ?? edadesDelModelo;
   const edades = edadesSug ? leerEdades(edadesSug.valor) : null;
-  // Una edad justo en un borde que la config no define no se clasifica: «los niños tienen 2 y
-  // 12» sin `edad_adulto_desde` no pasa el de 12 a adulto callado (QA de #971 v5, C10).
-  const enElBorde = (edades ?? []).filter(e => (cortes.adultoDesde === null && e === BORDE_ADULTO) || (cortes.infanteMenorDe === null && e === BORDE_INFANTE));
-  if (edadesSug && edades && enElBorde.length > 0) {
-    const motivo = `la edad ${[...new Set(enElBorde)].join(' y ')} está justo en un corte que la config no define: no sé si cuenta como ${enElBorde.includes(BORDE_ADULTO) ? 'adulto o niño' : 'niño o infante'}`;
-    quitar(s, 'ninos', motivo);
-    quitar(s, 'infantes', motivo);
-  } else if (edadesSug && edades) {
-    const adultoDesde = cortes.adultoDesde ?? BORDE_ADULTO;
-    const infanteMenorDe = cortes.infanteMenorDe ?? BORDE_INFANTE;
-    const deAdulto = edades.filter(e => e >= adultoDesde);
-    const menores = edades.filter(e => e < adultoDesde);
-    const infantesPorEdad = menores.filter(e => e < infanteMenorDe).length;
-    const ninosPorEdad = menores.length - infantesPorEdad;
-    const contadosComoMenores = (num('ninos') ?? 0) + (num('infantes') ?? 0);
-    const regla = (txt: string): Sugerido => ({ valor: 0, frase: edadesSug.frase, deduccion: txt });
-    const cortesTxt = `infante menor de ${infanteMenorDe}, adulto desde ${adultoDesde}`;
 
-    if (deAdulto.length > 0) {
-      // «Mi bebé, que ya tiene 18 añitos» (C9): esa persona es adulta.
-      const adultos = num('adultos');
-      if (contadosComoMenores === edades.length && adultos !== null && !s.sugeridos.adultos.deduccion) {
-        s.sugeridos.adultos = { ...regla(`Edad ${deAdulto.join(', ')}: adulto (${cortesTxt}); ${adultos} + ${deAdulto.length}`), valor: adultos + deAdulto.length };
-        s.sugeridos.ninos = { ...regla(`Edades ${edades.join(', ')}: ${ninosPorEdad} niño(s) (${cortesTxt})`), valor: ninosPorEdad };
-        s.sugeridos.infantes = { ...regla(`Edades ${edades.join(', ')}: ${infantesPorEdad} infante(s) (${cortesTxt})`), valor: infantesPorEdad };
-        if (menores.length > 0) s.sugeridos.edades_menores = { ...edadesSug, valor: menores.join(', ') };
-        else quitar(s, 'edades_menores', `${deAdulto.join(', ')} es edad de adulto, no de menor`);
-      } else {
-        const motivo = `hay una edad de adulto (${deAdulto.join(', ')}) entre las de los menores`;
-        quitar(s, 'ninos', motivo);
-        quitar(s, 'infantes', motivo);
-        // Las edades se quedan (son lo que dijo el cliente), salvo que TODAS sean de adulto.
-        if (menores.length === 0) quitar(s, 'edades_menores', motivo);
-        if (contadosComoMenores === 0) quitar(s, 'adultos', `${motivo} y no se sabe si está contada`);
-      }
-    } else if (s.sugeridos.ninos || s.sugeridos.infantes) {
-      if (contadosComoMenores === edades.length) {
-        // Mismo total: manda la edad. «2 y 12» no son 2 niños más 1 infante.
-        if (num('ninos') !== ninosPorEdad && s.sugeridos.ninos !== undefined) s.sugeridos.ninos = { ...regla(`Edades ${edades.join(', ')} (${cortesTxt})`), valor: ninosPorEdad };
-        if (num('infantes') !== infantesPorEdad && s.sugeridos.infantes !== undefined) s.sugeridos.infantes = { ...regla(`Edades ${edades.join(', ')} (${cortesTxt})`), valor: infantesPorEdad };
-      } else {
-        // C10: «Los niños tienen 2 y 12» y el modelo dio 2 niños + 1 infante (3 ≠ 2 edades).
-        const motivo = `las edades (${edades.join(', ')}) no cuadran con niños + infantes (${contadosComoMenores})`;
-        quitar(s, 'ninos', motivo);
-        quitar(s, 'infantes', motivo);
+  // 3a. Infantes solo si el cliente habla de un bebé o da una edad menor de 2.
+  const inf = s.sugeridos.infantes;
+  if (inf && !inf.deduccion && (num('infantes') ?? 0) > 0
+    && !RE_BEBE.test(normalizarTexto(fuente)) && !(edades ?? []).some(e => e < EDAD_INFANTE)) {
+    quitar(s, 'infantes', `infantes solo con un bebé o una edad menor de ${EDAD_INFANTE} años, y «${inf.frase}» no lo dice`);
+  }
+
+  // 3b. Las edades cuentan una sola vez: una por cada menor contado.
+  if (edadesSug && edades) {
+    const contados = (num('ninos') ?? 0) + (num('infantes') ?? 0);
+    if (contados !== edades.length) {
+      const motivo = `el cliente dio ${edades.length === 1 ? 'la edad' : 'las edades'} ${edades.join(', ')} y hay ${contados} ${contados === 1 ? 'menor contado' : 'menores contados'}`;
+      quitar(s, 'ninos', motivo);
+      quitar(s, 'infantes', motivo);
+      // Nadie con edad quedó contado como menor: no se sabe si está entre los adultos (C9b).
+      if (contados === 0 && s.sugeridos.adultos && !s.sugeridos.adultos.deduccion) quitar(s, 'adultos', `${motivo}: no se sabe si esa persona está contada`);
+    } else {
+      // 3c. Solo hacia infante: «2 niños de 1 y 5» son 1 niño y 1 infante. Un bebé nunca pasa a niño.
+      const infantesPorEdad = edades.filter(e => e < EDAD_INFANTE).length;
+      if (infantesPorEdad > (num('infantes') ?? 0)) {
+        const regla = (valor: number): Sugerido => ({ valor, frase: edadesSug.frase, deduccion: `Edades ${edades.join(', ')}: menor de ${EDAD_INFANTE} años es infante` });
+        s.sugeridos.infantes = regla(infantesPorEdad);
+        s.sugeridos.ninos = regla(contados - infantesPorEdad);
       }
     }
   }
@@ -427,7 +397,7 @@ export function entenderEntrega(
   raw: unknown,
   fields: ReadonlyArray<CampoEntendible>,
   mensajes: ReadonlyArray<MensajeEntrega>,
-  opts: { hoyISO?: string; conocidos?: Record<string, unknown>; cortes?: Cortes } = {},
+  opts: { hoyISO?: string; conocidos?: Record<string, unknown> } = {},
 ): Entendida {
   const clases = clasesDeMensajes(raw, mensajes);
   const delCliente = mensajes.filter(m => clases[m.n] === 'cliente');
@@ -436,7 +406,7 @@ export function entenderEntrega(
   // aunque relate la solicitud, no es citable (ahí es donde caben los juicios: B5).
   const citables = textoDe(delCliente.filter(m => m.reenviado));
   const validada = validarSalida(raw, fields, fuente, { hoyISO: opts.hoyISO, conocidos: opts.conocidos, citables });
-  const salida = guardianPasajeros(validada, fuente, opts.cortes ?? SIN_CORTES, opts.conocidos ?? {}, edadesConFrase(raw, fuente));
+  const salida = guardianPasajeros(validada, fuente, opts.conocidos ?? {}, edadesConFrase(raw, fuente));
   return {
     salida,
     clases,

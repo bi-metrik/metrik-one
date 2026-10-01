@@ -956,19 +956,19 @@
    "verdad": {
     "campos": {
      "adultos": {
-      "eq": 3
+      "eq": 2
      },
-     "ninos": {
-      "eq": 0
-     },
-     "infantes": {
-      "eq": 0
+     "edades_menores": {
+      "contiene": [
+       "18"
+      ]
      }
     },
     "prohibido": [
      "desayuno"
     ]
-   }
+   },
+   "nota_v5": "Decisión de Mauricio (QA de #971 v5): la edad no mueve a nadie de categoría; «mi bebé de 18» se queda como lo dijo el cliente y la edad queda anotada."
   },
   {
    "id": "C9b",
@@ -1115,10 +1115,10 @@
       "eq": 2
      },
      "ninos": {
-      "vacio": true
+      "eq": 2
      },
      "infantes": {
-      "vacio": true
+      "eq": 0
      },
      "edades_menores": {
       "contiene": [
@@ -1126,12 +1126,9 @@
        "12"
       ]
      }
-    },
-    "pregunta": [
-     "ninos",
-     "infantes"
-    ]
-   }
+    }
+   },
+   "nota_v5": "Decisión de Mauricio (QA de #971 v5): cada persona queda en la categoría que usó el cliente; «2 y 12» son 2 niños, sin preguntar. Infantes solo con un bebé o una edad menor de 2 (corrida 1: el modelo vio un infante en «tienen 2»). Corrida 2: la forma de la salida del QA v5."
   },
   {
    "id": "C11",

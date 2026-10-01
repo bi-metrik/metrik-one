@@ -179,57 +179,54 @@ describe('N3 · quién habla', () => {
 describe('N1 · pasajeros', () => {
   const s = (sug: Record<string, { valor: number | string; frase: string }>) => ({ historia: '', cliente: { nombre: null, telefono: null }, sugeridos: sug, descartados: [] });
 
-  it('los cortes de edad salen de la config', () => {
-    const cfg = leerConfigBandeja({ bandeja_solicitudes: { edad_infante_menor_de: 3, edad_adulto_desde: 18 } });
-    expect([cfg.edadInfanteMenorDe, cfg.edadAdultoDesde]).toEqual([3, 18]);
-    // Al revés no vale ninguno; sin config, no hay cortes en el código (QA de #971 v5, C10).
-    expect(leerConfigBandeja({ bandeja_solicitudes: { edad_infante_menor_de: 5, edad_adulto_desde: 3 } }).edadAdultoDesde).toBeNull();
-    expect([leerConfigBandeja({ bandeja_solicitudes: {} }).edadInfanteMenorDe, leerConfigBandeja(null).edadAdultoDesde]).toEqual([null, null]);
-    expect(leerConfigBandeja({ bandeja_solicitudes: { edad_adulto_desde: 12 } }).edadAdultoDesde).toBe(12);
-    // Con adulto desde 18, «2 y 12» son un infante… no: 2 < 3 infante, 12 niño.
-    const r = guardianPasajeros(s({ ninos: { valor: 2, frase: 'los niños' }, edades_menores: { valor: '2, 12', frase: 'los niños tienen 2 y 12' } }),
-      'los niños tienen 2 y 12', { infanteMenorDe: 3, adultoDesde: 18 });
-    expect([r.sugeridos.ninos?.valor, r.sugeridos.infantes]).toEqual([1, undefined]);
-  });
-
-  it('C10 (QA de #971 v5): sin cortes en la config, la edad justo en el borde se pregunta; con ellos, se decide', () => {
-    const sug = () => s({ adultos: { valor: 2, frase: 'Vamos 2 adultos' }, ninos: { valor: 2, frase: 'los niños' }, edades_menores: { valor: '2, 12', frase: 'los niños tienen 2 y 12' } });
+  it('C10 (QA de #971 v5): la edad no mueve a nadie de categoría; cada persona queda donde la puso el cliente', () => {
     const fuente = 'Vamos 2 adultos a San Andrés y los niños tienen 2 y 12';
-    // Sin config: el de 12 no pasa a adulto callado.
-    const sin = guardianPasajeros(sug(), fuente);
-    expect([sin.sugeridos.adultos?.valor, sin.sugeridos.ninos, sin.sugeridos.infantes]).toEqual([2, undefined, undefined]);
-    expect(sin.descartados.find(d => d.slug === 'ninos')?.motivo).toContain('justo en un corte que la config no define');
-    // Con los cortes de Trappvel en la config (SQL provisional): 3 adultos, 1 niño, 0 infantes.
-    const con = guardianPasajeros(sug(), fuente, { infanteMenorDe: 2, adultoDesde: 12 });
-    expect([con.sugeridos.adultos?.valor, con.sugeridos.ninos?.valor, con.sugeridos.infantes?.valor]).toEqual([3, 1, 0]);
-    // Solo el borde que falta se pregunta: con el de adulto configurado y el de infante no, «2» sigue sin decidirse.
-    const medio = guardianPasajeros(sug(), fuente, { infanteMenorDe: null, adultoDesde: 12 });
-    expect(medio.sugeridos.ninos).toBeUndefined();
-    // Lejos de los bordes, nada cambia: «9 y 4» son dos niños con o sin config.
-    const lejos = guardianPasajeros(s({ ninos: { valor: 2, frase: '2 niños' }, edades_menores: { valor: '9, 4', frase: 'tienen 9 y 4' } }), 'tienen 9 y 4');
-    expect(lejos.sugeridos.ninos?.valor).toBe(2);
+    // «Los niños tienen 2 y 12»: 2 niños y las dos edades, sin preguntar. El de 12 no pasa a adulto.
+    const r = guardianPasajeros(s({ adultos: { valor: 2, frase: 'Vamos 2 adultos' }, ninos: { valor: 2, frase: 'los niños' }, edades_menores: { valor: '2, 12', frase: 'los niños tienen 2 y 12' } }), fuente);
+    expect([r.sugeridos.adultos?.valor, r.sugeridos.ninos?.valor, r.sugeridos.edades_menores?.valor]).toEqual([2, 2, '2, 12']);
+    expect(r.descartados).toEqual([]);
+    // El modelo vio un infante en «tienen 2»: sin bebé ni edad menor de 2, infantes no se llena.
+    const r2 = guardianPasajeros(s({ ninos: { valor: 2, frase: 'los niños' }, infantes: { valor: 1, frase: 'tienen 2' }, edades_menores: { valor: '2, 12', frase: 'los niños tienen 2 y 12' } }), fuente);
+    expect([r2.sugeridos.ninos?.valor, r2.sugeridos.infantes]).toEqual([2, undefined]);
+    expect(r2.descartados.find(d => d.slug === 'infantes')?.motivo).toContain('solo con un bebé o una edad menor de 2');
   });
 
-  it('C10: el SQL provisional de Trappvel deja los dos cortes y conserva el resto de la config', async () => {
-    const pg = new PGlite();
-    await pg.exec(`create table public.workspaces (id uuid primary key, config_extra jsonb)`);
-    await pg.query(`insert into public.workspaces values ('cdd87e5d-5a55-4f6c-a563-7a6ba7800cdc', $1)`, [{ bandeja_solicitudes: { modo_viajes: 'uno' } }]);
-    const sql = readFileSync(path.join(RAIZ, 'sql/trappvel/2026-10-01_cortes-de-edad-PROVISIONAL.sql'), 'utf8');
-    await pg.exec(sql);
-    await pg.exec(sql); // idempotente
-    const r = await pg.query<{ c: unknown }>(`select config_extra as c from public.workspaces`);
-    const cfg = leerConfigBandeja(r.rows[0].c);
-    expect([cfg.edadInfanteMenorDe, cfg.edadAdultoDesde, cfg.modoViajes]).toEqual([2, 12, 'uno']);
-    await pg.close();
+  it('C9: «mi bebé de 18» se queda como está y la edad queda anotada', () => {
+    const fuente = 'Viajo con mi esposo y mi bebé, que ya tiene 18 añitos';
+    const r = guardianPasajeros(s({ adultos: { valor: 2, frase: 'Viajo con mi esposo' }, infantes: { valor: 1, frase: 'mi bebé' }, edades_menores: { valor: '18', frase: 'que ya tiene 18 añitos' } }), fuente);
+    expect([r.sugeridos.adultos?.valor, r.sugeridos.infantes?.valor, r.sugeridos.ninos, r.sugeridos.edades_menores?.valor]).toEqual([2, 1, undefined, '18']);
+    // Un niño de 20 o de 18 tampoco pasa a adulto.
+    const r2 = guardianPasajeros(s({ adultos: { valor: 2, frase: '2 adultos' }, ninos: { valor: 1, frase: 'mi hijo' }, edades_menores: { valor: '18', frase: 'de 18' } }), '2 adultos y mi hijo de 18');
+    expect([r2.sugeridos.adultos?.valor, r2.sugeridos.ninos?.valor]).toEqual([2, 1]);
   });
 
-  it('C10: infantes = 0 no se deduce con un niño de 2 justos si la config no trae el corte de infante', () => {
+  it('infantes: se llena con un bebé o una edad menor de 2; es el único corte, y solo hacia infante', () => {
+    // «2 niños de 1 y 5»: el de 1 año es infante (universal en el avión).
+    const r = guardianPasajeros(s({ ninos: { valor: 2, frase: '2 niños' }, edades_menores: { valor: '1, 5', frase: 'de 1 y 5' } }), '2 niños de 1 y 5');
+    expect([r.sugeridos.ninos?.valor, r.sugeridos.infantes?.valor]).toEqual([1, 1]);
+    // «un bebé de brazos» llena infantes sin edad.
+    const b = guardianPasajeros(s({ infantes: { valor: 1, frase: 'un bebé de brazos' } }), 'vamos con un bebé de brazos');
+    expect(b.sugeridos.infantes?.valor).toBe(1);
+    // Sin bebé ni edad: «somos 3, un pequeño» no es un infante.
+    const n = guardianPasajeros(s({ infantes: { valor: 1, frase: 'un pequeño' } }), 'somos 3, un pequeño');
+    expect(n.sugeridos.infantes).toBeUndefined();
+  });
+
+  it('las edades cuentan una sola vez: si no cuadran con los menores, se pregunta', () => {
+    const r = guardianPasajeros(s({ ninos: { valor: 3, frase: '3 niños' }, edades_menores: { valor: '5, 7', frase: 'de 5 y 7' } }), '3 niños de 5 y 7');
+    expect(r.sugeridos.ninos).toBeUndefined();
+  });
+
+  it('deducirCeros sigue con las edades: infantes = 0 si ningún niño es menor de 2', () => {
     const f = (slug: string) => ({ slug, label: slug, type: 'text' } as unknown as CampoEntendible);
     const campos = [f('ninos'), f('infantes'), f('edades_menores')];
-    const sug = { ninos: { valor: 1, frase: '1 niño' }, edades_menores: { valor: '2', frase: 'de 2' } };
-    expect(conDeducciones(campos, sug).infantes).toBeUndefined();
-    expect(conDeducciones(campos, sug, 2).infantes?.valor).toBe(0);
-    expect(conDeducciones(campos, { ...sug, edades_menores: { valor: '5', frase: 'de 5' } }).infantes?.valor).toBe(0);
+    expect(conDeducciones(campos, { ninos: { valor: 2, frase: '2' }, edades_menores: { valor: '2, 12', frase: 'x' } }).infantes?.valor).toBe(0);
+    expect(conDeducciones(campos, { ninos: { valor: 2, frase: '2' }, edades_menores: { valor: '1, 12', frase: 'x' } }).infantes).toBeUndefined();
+  });
+
+  it('la config ya no trae cortes de edad', () => {
+    const cfg = leerConfigBandeja({ bandeja_solicitudes: { edad_infante_menor_de: 3, edad_adulto_desde: 18 } }) as unknown as Record<string, unknown>;
+    expect(Object.keys(cfg).filter(k => /edad/i.test(k))).toEqual([]);
   });
 
   it('los totales y los números de grupo', () => {
