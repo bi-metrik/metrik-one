@@ -28,5 +28,11 @@ upsert del código viejo `on conflict (entrega_id)` se queda sin índice. `modo_
 - 2026-10-01 tarde: Mauricio decidió que MANDA EL ENCABEZADO. Se fue el modo mixto (el modelo ya no
   asigna) y `segundos_bloque`; quedan sospechosos con «dejar / mover / descartar». Sin encabezados,
   la tanda es un viaje como en modo uno. N5 no separa: pide reenviar con encabezados.
+- QA v5 (2026-10-01): solo un encabezado EXACTO (código, nombre de pila ± apellido) cambia la caja;
+  el aproximado (tipeo, solo apellido, destino) pregunta «¿Cambias a…? sí/no» en el acto y el «sí/no»
+  se guarda en la tanda (el reparto lo relee, no hay estado aparte). Equipo (staff + wa_collaborators)
+  nunca es candidato. NO existe marca de negocio de prueba en el esquema: no inventarla.
+- Edades: decisión de Mauricio, la edad NO mueve a nadie de categoría (niño/adulto dependen del
+  componente y los decide operaciones). Único corte: infante < 2. No hay cortes en la config.
 - El aislamiento rechaza `cat >> archivo <<EOF` y `sed` con variables: usar Edit/Write o un .py en el worktree.
 Relacionado: [[entendimiento-bandeja-wa]], [[bandeja-negocio-existente]].
