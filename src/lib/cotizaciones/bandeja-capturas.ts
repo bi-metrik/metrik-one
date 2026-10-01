@@ -159,6 +159,11 @@ export function estadoDeBloque(
      * al que le faltan o le sobran pasajeros no está completo (brief del 2026-10-01, punto 1).
      */
     pasajeros?: { corto: string; frase: string } | null
+    /**
+     * Por qué el costo leído no entró, cuando se sabe decir en una frase («El precio está en
+     * EUR: escribe la tasa de cambio para cargar el costo.», brief del 2026-10-01).
+     */
+    pendiente?: string | null
   }[],
 ): EstadoDeBloque {
   const sinCosto = opciones.filter(o => !o.conCosto)
@@ -167,7 +172,7 @@ export function estadoDeBloque(
   const conAlerta = opciones.find(o => o.alerta)
   const motivo = sinConfirmar.length > 0
     ? sinConfirmar.length === 1
-      ? `${sinConfirmar[0].nombre}: falta confirmar lo leído`
+      ? `${sinConfirmar[0].nombre}: ${sinConfirmar[0].pendiente ?? 'falta confirmar lo leído'}`
       : `${sinConfirmar.length} opciones sin confirmar`
     : sinCosto.length > 0
       ? sinCosto.length === 1 ? `${sinCosto[0].nombre}: sin costo` : `${sinCosto.length} opciones sin costo`
@@ -182,7 +187,9 @@ export function estadoDeBloque(
   if (sinConfirmar.length > 0) {
     aviso = 'Falta confirmar el costo'
     explicacion = sinConfirmar.length === 1
-      ? `ONE leyó el pantallazo de ${sinConfirmar[0].nombre}, pero su costo todavía no entró a la cotización. Ábrela y termina lo que le falta.`
+      ? sinConfirmar[0].pendiente
+        ? `ONE leyó el pantallazo de ${sinConfirmar[0].nombre}, pero su costo todavía no entró a la cotización. ${sinConfirmar[0].pendiente}`
+        : `ONE leyó el pantallazo de ${sinConfirmar[0].nombre}, pero su costo todavía no entró a la cotización. Ábrela y termina lo que le falta.`
       : `${sinConfirmar.length} opciones tienen el pantallazo leído y el costo sin confirmar. Ábrelas y termina lo que les falta.`
     opcionId = sinConfirmar.length === 1 ? sinConfirmar[0].id ?? null : null
   } else if (sinCosto.length > 0) {
