@@ -272,6 +272,11 @@ export type PropuestaEconomicaRenderPayload = {
   plan2_valor: string               // valor final Plan 2 con descuento aplicado
   plan2_descuento_pct: string       // "25%"
   plan2_ahorro: string              // base - plan2
+  // ── Tarifas por plan y ruta: '' si el plan se ofrece, 'display:none' si no ──────
+  // Para la plantilla que oculte la tarjeta del plan. Hoy ninguna lo usa: el valor del
+  // plan llega como "No aplica" y la tarjeta se sigue imprimiendo.
+  plan1_estilo?: string
+  plan2_estilo?: string
   // ── Tarifa UPME (pasante) — opcionales; el template las usa si están ─────────
   tarifa_upme?: string              // tarifa formateada ("$1.234.567")
   tarifa_upme_valor?: number        // tarifa numérica

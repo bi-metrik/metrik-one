@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useTransition } from 'react'
+import { useEffect, useState, useTransition } from 'react'
 import { Download, FileText, CheckCircle2, AlertCircle, Loader2, RefreshCw, Lock, Pencil } from 'lucide-react'
 import { toast } from 'sonner'
 import { formatCOP } from '@/lib/contacts/constants'
@@ -9,6 +9,8 @@ import {
   aprobarVersionPropuesta,
   corregirAprobacion,
   revertirAprobacionPropuesta,
+  getTarifaPropuesta,
+  type TarifaPropuestaVista,
 } from '@/lib/actions/propuesta-economica-actions'
 import { formatBogotaFechaHora } from '@/lib/dates/bogota'
 import { hrefArchivo } from '@/lib/almacenamiento/referencia'
@@ -25,6 +27,13 @@ interface PropuestaVersion {
   pdf_url: string | null
   generated_at: string
   generated_by: string | null
+  /** Presentes solo si la versión se armó con tarifas por plan y ruta. */
+  tarifa_version_id?: string
+  tarifa_version?: number
+  base_plan1?: number | null
+  base_plan2?: number | null
+  planes_ofrecidos?: Array<1 | 2>
+  cap_descuento_pct?: number
 }
 
 interface PropuestaData {
@@ -46,6 +55,8 @@ interface PropuestaData {
   aprobado_honorario?: number | null
   /** Servicio congelado al aprobar, al lado de `aprobado_plan`. */
   aprobado_servicio?: string | null
+  /** Versión de tarifas con la que se armó (ausente = esquema anterior). */
+  tarifa?: { version_id: string; version: number } | null
 }
 
 interface ConfigExtra {
@@ -114,14 +125,71 @@ function nombreServicio(servicio: string | null | undefined): string {
   return servicio || 'sin declarar'
 }
 
-export default function BloquePropuestaEconomica({
+type TarifaVigente = Extract<TarifaPropuestaVista, { esquema: 'tarifas' }>
+
+/** Planes de una versión que se pueden aprobar. Versiones del esquema anterior: los dos. */
+function planesDe(v: PropuestaVersion | undefined): Array<1 | 2> {
+  return v?.planes_ofrecidos ?? [1, 2]
+}
+
+/**
+ * La tarifa que rige la propuesta la decide el servidor (versión vigente el día en que
+ * se creó el negocio, ruta declarada hoy). Se pide antes de pintar el cuerpo porque los
+ * valores iniciales de los planes dependen de ella. Una propuesta ya emitida con el
+ * esquema anterior no la necesita: ese esquema no cambia, así que no se pregunta.
+ */
+export default function BloquePropuestaEconomica(props: Props) {
+  const data = (props.instancia?.data ?? {}) as PropuestaData
+  const nVersiones = (data.versiones ?? []).length
+  const esquemaAnteriorSeguro = nVersiones > 0 && !data.tarifa
+  const servicioVigente = props.configExtra._servicioVigente ?? null
+  const [tarifa, setTarifa] = useState<TarifaVigente | null | 'cargando'>(
+    esquemaAnteriorSeguro ? null : 'cargando',
+  )
+
+  useEffect(() => {
+    if (esquemaAnteriorSeguro) return
+    let vivo = true
+    getTarifaPropuesta(props.negocioBloqueId).then(res => {
+      if (!vivo) return
+      if (!res.ok) {
+        toast.error(res.error)
+        setTarifa(null)
+        return
+      }
+      setTarifa(res.tarifa.esquema === 'tarifas' ? res.tarifa : null)
+    })
+    return () => { vivo = false }
+    // La ruta (`servicioVigente`) y las versiones cambian lo que rige: se vuelve a pedir.
+  }, [props.negocioBloqueId, esquemaAnteriorSeguro, servicioVigente, nVersiones])
+
+  if (tarifa === 'cargando') {
+    return (
+      <div className="flex items-center gap-2 py-3 text-sm text-muted-foreground">
+        <Loader2 className="h-4 w-4 animate-spin" /> Cargando tarifas…
+      </div>
+    )
+  }
+  // La llave reinicia el cuerpo cuando cambia la ruta o la versión: los valores de los
+  // planes se recalculan desde la tarifa nueva en vez de arrastrar los de antes.
+  return (
+    <CuerpoPropuesta
+      key={tarifa ? `${tarifa.version.id}:${tarifa.ruta ?? ''}` : 'anterior'}
+      {...props}
+      tarifa={tarifa}
+    />
+  )
+}
+
+function CuerpoPropuesta({
   negocioBloqueId,
   negocioId,
   instancia,
   modo,
   configExtra,
   userRole,
-}: Props) {
+  tarifa,
+}: Props & { tarifa: TarifaVigente | null }) {
   // Corrección del valor aprobado (no genera versión ni PDF: ver la action).
   const [corrigiendoValor, setCorrigiendoValor] = useState(false)
   const [valorCorregido, setValorCorregido] = useState('')
@@ -139,18 +207,30 @@ export default function BloquePropuestaEconomica({
   const precioBase = data.precio_base_con_iva ?? 0
   const versiones = (data.versiones ?? []).slice().sort((a, b) => b.n - a.n)
   const aprobada = !!data.aprobado_at
-  const cap = configExtra.cap_descuento_pct ?? 50
   // Gate de descuento alto: sobre el umbral, aprobar requiere rol gerencial.
   const umbralAprobacion = configExtra.umbral_aprobacion_pct ?? null
   const puedeAprobarAlto = ['owner', 'admin', 'supervisor'].includes(userRole ?? '')
 
+  // ── Base de cada plan ─────────────────────────────────────────────────────
+  // Esquema anterior: los dos planes parten del mismo precio base y el tope es el del
+  // bloque. Con tarifas: cada plan parte de SU casilla (plan × ruta) y el tope es el de
+  // la versión de tarifas. Un plan que no se ofrece para la ruta no se edita ni se aprueba.
+  const conTarifas = tarifa !== null
+  const cap = conTarifas ? tarifa.cap_descuento_pct : configExtra.cap_descuento_pct ?? 50
+  const baseDe = (p: 1 | 2): number =>
+    conTarifas ? tarifa.planes.find(x => x.n === p)?.valor ?? 0 : precioBase
+  const ofrece = (p: 1 | 2): boolean =>
+    conTarifas ? tarifa.planes.find(x => x.n === p)?.ofrece === true : true
+  const nombrePlanTarifa = (p: 1 | 2, porDefecto: string): string =>
+    conTarifas ? tarifa.planes.find(x => x.n === p)?.nombre ?? porDefecto : porDefecto
+
   // Rango de precio válido según el cap de descuento (con IVA).
-  const precioMin = Math.round(precioBase * (1 - cap / 100)) // descuento = cap
-  const precioMax = Math.round(precioBase)                    // descuento = 0
+  const precioMinDe = (p: 1 | 2) => Math.round(baseDe(p) * (1 - cap / 100)) // descuento = cap
+  const precioMaxDe = (p: 1 | 2) => Math.round(baseDe(p))                    // descuento = 0
   // Conversores base ↔ % ↔ precio. El % conserva precisión (precio exacto manda).
-  const valorDeDesc = (d: number) => Math.round(precioBase * (1 - d / 100))
-  const descDeValor = (v: number) =>
-    precioBase > 0 ? Math.round((1 - v / precioBase) * 100 * 1e6) / 1e6 : 0
+  const valorDeDesc = (p: 1 | 2, d: number) => Math.round(baseDe(p) * (1 - d / 100))
+  const descDeValor = (p: 1 | 2, v: number) =>
+    baseDe(p) > 0 ? Math.round((1 - v / baseDe(p)) * 100 * 1e6) / 1e6 : 0
 
   // Inputs — defaults desde ultima version o desde data inicial
   const ultimaVersion = versiones[0]
@@ -164,9 +244,12 @@ export default function BloquePropuestaEconomica({
   // Strings visibles de los 4 inputs (permiten teclear libremente).
   const [desc1Str, setDesc1Str] = useState<string>(pctStr(desc1))
   const [desc2Str, setDesc2Str] = useState<string>(pctStr(desc2))
-  const [valor1Str, setValor1Str] = useState<string>(String(valorDeDesc(desc1)))
-  const [valor2Str, setValor2Str] = useState<string>(String(valorDeDesc(desc2)))
-  const [planSeleccionado, setPlanSeleccionado] = useState<1 | 2>(2)
+  const [valor1Str, setValor1Str] = useState<string>(String(valorDeDesc(1, desc1)))
+  const [valor2Str, setValor2Str] = useState<string>(String(valorDeDesc(2, desc2)))
+  const planesAprobables = planesDe(ultimaVersion)
+  const [planSeleccionado, setPlanSeleccionado] = useState<1 | 2>(
+    planesAprobables.includes(2) ? 2 : planesAprobables[0] ?? 2,
+  )
 
   // ── Handlers de edición bidireccional (%↔precio) ─────────────────────────
   // Editar el % recalcula el precio; editar el precio recalcula el %.
@@ -176,16 +259,16 @@ export default function BloquePropuestaEconomica({
     if (plan === 1) {
       setDesc1Str(raw)
       setDesc1(d)
-      setValor1Str(String(valorDeDesc(d)))
+      setValor1Str(String(valorDeDesc(1, d)))
     } else {
       setDesc2Str(raw)
       setDesc2(d)
-      setValor2Str(String(valorDeDesc(d)))
+      setValor2Str(String(valorDeDesc(2, d)))
     }
   }
   const onValor = (plan: 1 | 2, raw: string) => {
     const v = Number(raw) || 0
-    const d = descDeValor(v)
+    const d = descDeValor(plan, v)
     if (plan === 1) {
       setValor1Str(raw)
       setDesc1(d)
@@ -206,39 +289,48 @@ export default function BloquePropuestaEconomica({
 
   // Recalculo en vivo (desde el descuento canónico). El React Compiler lo
   // auto-memoiza; no usamos useMemo manual (rompe con los helpers de conversión).
-  const plan1Valor = Math.round(precioBase * (1 - desc1 / 100))
-  const plan2Valor = Math.round(precioBase * (1 - desc2 / 100))
+  const plan1Valor = valorDeDesc(1, desc1)
+  const plan2Valor = valorDeDesc(2, desc2)
   const calc = {
-    base: precioBase,
     plan1: plan1Valor,
     plan2: plan2Valor,
     plan1_anticipo: Math.round(plan1Valor / 2),
     plan1_exito_iva: Math.round(plan1Valor / 2),
-    ahorro_plan1: precioBase - plan1Valor,
-    ahorro_plan2: precioBase - plan2Valor,
+    ahorro_plan1: baseDe(1) - plan1Valor,
+    ahorro_plan2: baseDe(2) - plan2Valor,
     desc1,
     desc2,
-    // Fuera de rango: descuento negativo (precio > base) o sobre el cap.
-    invalid1: desc1 < 0 || desc1 > cap,
-    invalid2: desc2 < 0 || desc2 > cap,
+    // Fuera de rango: descuento negativo (precio > base) o sobre el cap. Un plan que no
+    // se ofrece no se valida: no viaja.
+    invalid1: ofrece(1) && (desc1 < 0 || desc1 > cap),
+    invalid2: ofrece(2) && (desc2 < 0 || desc2 > cap),
   }
 
   const invalido = calc.invalid1 || calc.invalid2
 
+  // Con tarifas, una versión generada con OTRA ruta ya no vale: el valor de cada plan
+  // depende de la ruta. Se pide una versión nueva (que recalcula) antes de aprobar.
+  const rutaCambio = conTarifas && !!ultimaVersion?.tarifa_version_id
+    && (ultimaVersion.servicio ?? null) !== (tarifa.ruta ?? null)
+  const sinRuta = conTarifas && !tarifa.ruta
+  const ningunPlan = conTarifas && !ofrece(1) && !ofrece(2)
+
   // Detectar cambio vs ultima version
   const hayCambios = !ultimaVersion
-    || Math.abs(ultimaVersion.descuento_pct_plan1 - desc1) > 0.0001
-    || Math.abs(ultimaVersion.descuento_pct_plan2 - desc2) > 0.0001
+    || Math.abs(ultimaVersion.descuento_pct_plan1 - (ofrece(1) ? desc1 : 0)) > 0.0001
+    || Math.abs(ultimaVersion.descuento_pct_plan2 - (ofrece(2) ? desc2 : 0)) > 0.0001
+    || (conTarifas && ultimaVersion.tarifa_version_id !== tarifa.version.id)
+    || rutaCambio
 
   const handleGenerar = () => {
     if (invalido) {
-      toast.error(`El precio de cada plan debe estar entre ${formatCOP(precioMin)} y ${formatCOP(precioMax)} (descuento 0%–${cap}%)`)
+      toast.error(`El descuento de cada plan debe estar entre 0% y ${cap}%`)
       return
     }
     startTransition(async () => {
       const res = await generarVersionPropuesta(negocioBloqueId, {
-        descuento_pct_plan1: calc.desc1,
-        descuento_pct_plan2: calc.desc2,
+        descuento_pct_plan1: ofrece(1) ? calc.desc1 : 0,
+        descuento_pct_plan2: ofrece(2) ? calc.desc2 : 0,
       })
       if (res.ok) {
         if (res.warning) {
@@ -308,6 +400,19 @@ export default function BloquePropuestaEconomica({
     const servicioVigente = configExtra._servicioVigente ?? null
     const servicioDivergente =
       !!servicioAprobado && !!servicioVigente && servicioAprobado !== servicioVigente
+    // Corrección: el descuento se mide contra la casilla del plan en la versión APROBADA
+    // (con tarifas) o contra el precio base (esquema anterior), con el tope de cada uno.
+    const versionConTarifas = !!versionMostrar?.tarifa_version_id
+    const capCorr = versionConTarifas ? Number(versionMostrar!.cap_descuento_pct ?? cap) : cap
+    const baseCorr = (p: 1 | 2): number =>
+      versionConTarifas
+        ? Number((p === 1 ? versionMostrar!.base_plan1 : versionMostrar!.base_plan2) ?? 0)
+        : precioBase
+    const planCorr: 1 | 2 = planCorregido ?? planAprobado ?? 2
+    const valorDeDescCorr = (d: number) => Math.round(baseCorr(planCorr) * (1 - d / 100))
+    // El plan va explícito porque al cambiarlo el estado todavía no se actualizó.
+    const descDeValorCorr = (v: number, p: 1 | 2 = planCorr) =>
+      baseCorr(p) > 0 ? Math.round((1 - v / baseCorr(p)) * 100 * 1e6) / 1e6 : 0
     return (
       <div className="space-y-3">
         {aprobada && versionMostrar && (
@@ -340,7 +445,8 @@ export default function BloquePropuestaEconomica({
             <span>
               La propuesta se aprobó con <strong>{nombreServicio(servicioAprobado)}</strong> y
               hoy el negocio declara <strong>{nombreServicio(servicioVigente)}</strong>. El
-              alcance y la tarifa que promete el PDF salieron del primero.
+              alcance y la tarifa que promete el PDF salieron del primero, y el valor aprobado
+              no se recalcula solo.
             </span>
           </div>
         )}
@@ -385,7 +491,7 @@ export default function BloquePropuestaEconomica({
               onClick={() => {
                 const v = data.aprobado_honorario ?? valorAprobado ?? null
                 setValorCorregido(v !== null ? String(v) : '')
-                setDescCorregidoStr(v !== null ? pctStr(descDeValor(v)) : '')
+                setDescCorregidoStr(v !== null ? pctStr(descDeValorCorr(v)) : '')
                 setPlanCorregido(planAprobado ?? null)
                 setReCongelarServicio(false)
                 setCorrigiendoValor(true)
@@ -451,25 +557,26 @@ export default function BloquePropuestaEconomica({
           // ⚠️ El MISMO gate que exige la aprobacion, evaluado aqui para no ofrecer un
           // boton que el servidor va a rechazar. La regla vive en el servidor
           // (`gate-descuento`): esto es el aviso, no el control.
-          const descCorregido = valorValido && precioBase > 0 ? descDeValor(valorNum) : null
-          const fueraDeRango = descCorregido !== null && (descCorregido < 0 || descCorregido > cap)
+          const descCorregido = valorValido && baseCorr(planCorr) > 0 ? descDeValorCorr(valorNum) : null
+          const fueraDeRango = descCorregido !== null && (descCorregido < 0 || descCorregido > capCorr)
           const sobreUmbral =
             descCorregido !== null && umbralAprobacion != null && descCorregido > umbralAprobacion
           const bloqueadoPorUmbral = sobreUmbral && !puedeAprobarAlto
+          // Con tarifas, solo los planes que se ofrecían para la ruta aprobada.
           const PLANES: Array<{ n: 1 | 2; label: string }> = [
-            { n: 1, label: 'Plan 1 · 50/50' },
-            { n: 2, label: 'Plan 2 · pago anticipado' },
-          ]
+            { n: 1 as const, label: 'Plan 1 · 50/50' },
+            { n: 2 as const, label: 'Plan 2 · pago anticipado' },
+          ].filter(p => planesDe(versionMostrar).includes(p.n))
           // Editar el % reescribe el precio y viceversa, como en la creacion.
-          const onValorCorr = (raw: string) => {
+          const onValorCorr = (raw: string, p: 1 | 2 = planCorr) => {
             setValorCorregido(raw)
             const v = Number(raw)
-            setDescCorregidoStr(Number.isFinite(v) && precioBase > 0 ? pctStr(descDeValor(v)) : '')
+            setDescCorregidoStr(Number.isFinite(v) && baseCorr(p) > 0 ? pctStr(descDeValorCorr(v, p)) : '')
           }
           const onDescCorr = (raw: string) => {
             setDescCorregidoStr(raw)
             const d = Number(raw)
-            if (Number.isFinite(d) && precioBase > 0) setValorCorregido(String(valorDeDesc(d)))
+            if (Number.isFinite(d) && baseCorr(planCorr) > 0) setValorCorregido(String(valorDeDescCorr(d)))
           }
           const puedeGuardar =
             !!motivoCorreccion.trim()
@@ -492,7 +599,7 @@ export default function BloquePropuestaEconomica({
                     onClick={() => {
                       setPlanCorregido(p.n)
                       const v = valorDePlan(p.n)
-                      if (v !== null && v > 0) onValorCorr(String(v))
+                      if (v !== null && v > 0) onValorCorr(String(v), p.n)
                     }}
                     className={`rounded-md border px-2.5 py-1.5 text-xs font-medium ${
                       planCorregido === p.n
@@ -547,9 +654,9 @@ export default function BloquePropuestaEconomica({
                   <span className="absolute right-2 top-1/2 -translate-y-1/2 text-sm text-amber-900/60">%</span>
                 </div>
               </div>
-              {precioBase > 0 && (
+              {baseCorr(planCorr) > 0 && (
                 <span className="text-[11px] text-amber-800">
-                  Rango {formatCOP(precioMin)}–{formatCOP(precioMax)} · desc. máx {cap}%.
+                  Rango {formatCOP(Math.round(baseCorr(planCorr) * (1 - capCorr / 100)))}–{formatCOP(baseCorr(planCorr))} · desc. máx {capCorr}%.
                 </span>
               )}
               {fueraDeRango && (
@@ -644,7 +751,7 @@ export default function BloquePropuestaEconomica({
   // ── Render editable ───────────────────────────────────────────────────────
   return (
     <div className="space-y-4">
-      {precioBase === 0 ? (
+      {!conTarifas && precioBase === 0 ? (
         <div className="flex items-center gap-2 rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-900">
           <AlertCircle className="h-4 w-4 shrink-0" />
           <span>
@@ -652,46 +759,92 @@ export default function BloquePropuestaEconomica({
             asociado con <code>precio_estandar</code> configurado.
           </span>
         </div>
+      ) : sinRuta || ningunPlan ? (
+        <div className="flex items-center gap-2 rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-900">
+          <AlertCircle className="h-4 w-4 shrink-0" />
+          <span>
+            {sinRuta
+              ? 'Declara qué contrató el cliente: el valor de cada plan depende de la ruta del negocio.'
+              : `La ruta «${tarifa?.rutaNombre ?? tarifa?.ruta ?? ''}» no tiene ningún plan en las tarifas v${tarifa?.version.version}. Revísalas en Mi negocio → Mis servicios.`}
+          </span>
+        </div>
       ) : (
         <>
-          {/* Tarifa base de referencia */}
-          <div className="flex items-baseline justify-between rounded-md border bg-muted/20 px-3 py-2 text-sm">
-            <span className="text-muted-foreground">Tarifa base con IVA</span>
-            <span className="font-medium">{formatCOP(precioBase)}</span>
-          </div>
+          {/* Tarifa de referencia: la base única (esquema anterior) o la versión de
+              tarifas que rige este negocio con su ruta. */}
+          {conTarifas ? (
+            <div className="rounded-md border bg-muted/20 px-3 py-2 text-sm">
+              <div className="flex items-baseline justify-between gap-2">
+                <span className="text-muted-foreground">Ruta del negocio</span>
+                <span className="font-medium">{tarifa.rutaNombre ?? nombreServicio(tarifa.ruta)}</span>
+              </div>
+              <p className="mt-0.5 text-[11px] text-muted-foreground">
+                Tarifas v{tarifa.version.version}, vigentes para negocios creados desde el{' '}
+                {tarifa.version.vigente_desde.split('-').reverse().join('/')} · descuento máx {cap}%.
+              </p>
+            </div>
+          ) : (
+            <div className="flex items-baseline justify-between rounded-md border bg-muted/20 px-3 py-2 text-sm">
+              <span className="text-muted-foreground">Tarifa base con IVA</span>
+              <span className="font-medium">{formatCOP(precioBase)}</span>
+            </div>
+          )}
 
-          {/* Editor por plan: descuento % ↔ precio final (con IVA), sincronizados */}
+          {rutaCambio && (
+            <div className="flex items-start gap-2 rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-900">
+              <AlertCircle className="mt-0.5 h-3.5 w-3.5 shrink-0" />
+              <span>
+                La v{ultimaVersion?.n} se generó con <strong>{nombreServicio(ultimaVersion?.servicio)}</strong> y
+                hoy el negocio declara <strong>{tarifa?.rutaNombre ?? nombreServicio(tarifa?.ruta)}</strong>. Los
+                valores de abajo ya están recalculados: genera una versión nueva para poder aprobar.
+              </span>
+            </div>
+          )}
+
+          {/* Editor por plan: descuento % ↔ precio final (con IVA), sincronizados.
+              Un plan que no se ofrece para la ruta no aparece. */}
           <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
-            <PlanEditor
-              titulo="Plan 1 (tarifa plena)"
-              descStr={desc1Str}
-              valorStr={valor1Str}
-              onDesc={raw => onDesc(1, raw)}
-              onValor={raw => onValor(1, raw)}
-              cap={cap}
-              precioMin={precioMin}
-              precioMax={precioMax}
-              invalid={calc.invalid1}
-            />
-            <PlanEditor
-              titulo="Plan 2 (pago anticipado)"
-              descStr={desc2Str}
-              valorStr={valor2Str}
-              onDesc={raw => onDesc(2, raw)}
-              onValor={raw => onValor(2, raw)}
-              cap={cap}
-              precioMin={precioMin}
-              precioMax={precioMax}
-              invalid={calc.invalid2}
-            />
+            {ofrece(1) && (
+              <PlanEditor
+                titulo={nombrePlanTarifa(1, 'Plan 1 (tarifa plena)')}
+                tarifa={conTarifas ? baseDe(1) : null}
+                descStr={desc1Str}
+                valorStr={valor1Str}
+                onDesc={raw => onDesc(1, raw)}
+                onValor={raw => onValor(1, raw)}
+                cap={cap}
+                precioMin={precioMinDe(1)}
+                precioMax={precioMaxDe(1)}
+                invalid={calc.invalid1}
+              />
+            )}
+            {ofrece(2) && (
+              <PlanEditor
+                titulo={nombrePlanTarifa(2, 'Plan 2 (pago anticipado)')}
+                tarifa={conTarifas ? baseDe(2) : null}
+                descStr={desc2Str}
+                valorStr={valor2Str}
+                onDesc={raw => onDesc(2, raw)}
+                onValor={raw => onValor(2, raw)}
+                cap={cap}
+                precioMin={precioMinDe(2)}
+                precioMax={precioMaxDe(2)}
+                invalid={calc.invalid2}
+              />
+            )}
           </div>
+          {conTarifas && (!ofrece(1) || !ofrece(2)) && (
+            <p className="text-xs text-muted-foreground">
+              {!ofrece(1) ? nombrePlanTarifa(1, 'El Plan 1') : nombrePlanTarifa(2, 'El Plan 2')} no se
+              ofrece para esta ruta.
+            </p>
+          )}
 
           {invalido && (
             <div className="flex items-center gap-2 rounded-md border border-red-200 bg-red-50 px-3 py-2 text-xs text-red-900">
               <AlertCircle className="h-4 w-4 shrink-0" />
               <span>
-                El precio de cada plan debe estar entre {formatCOP(precioMin)} y {formatCOP(precioMax)}{' '}
-                (descuento entre 0% y {cap}%).
+                El descuento de cada plan debe estar entre 0% y {cap}% de su tarifa.
               </span>
             </div>
           )}
@@ -699,6 +852,7 @@ export default function BloquePropuestaEconomica({
           {/* Resumen calculado */}
           <div className="rounded-lg border bg-muted/30 p-3">
             <div className="grid grid-cols-2 gap-3 text-sm">
+              {ofrece(1) && (
               <div>
                 <p className="text-xs text-muted-foreground">
                   Plan 1 — Tarifa plena{calc.desc1 > 0 ? ` · ${pct2(calc.desc1)}% desc.` : ''}
@@ -716,6 +870,8 @@ export default function BloquePropuestaEconomica({
                   )}
                 </p>
               </div>
+              )}
+              {ofrece(2) && (
               <div>
                 <p className="text-xs text-muted-foreground">
                   Plan 2 — Pago anticipado{calc.desc2 > 0 ? ` · ${pct2(calc.desc2)}% desc.` : ''}
@@ -725,6 +881,7 @@ export default function BloquePropuestaEconomica({
                   Ahorro: {formatCOP(calc.ahorro_plan2)}
                 </p>
               </div>
+              )}
             </div>
           </div>
 
@@ -754,6 +911,7 @@ export default function BloquePropuestaEconomica({
                   <legend className="px-1 text-[10px] uppercase tracking-wide text-muted-foreground">
                     Plan a aprobar
                   </legend>
+                  {planesAprobables.includes(1) && (
                   <label className="inline-flex items-center gap-1">
                     <input
                       type="radio"
@@ -764,6 +922,8 @@ export default function BloquePropuestaEconomica({
                     />
                     <span>Plan 1 · {formatCOP(ultimaVersion!.valor_final_plan1)}</span>
                   </label>
+                  )}
+                  {planesAprobables.includes(2) && (
                   <label className="inline-flex items-center gap-1">
                     <input
                       type="radio"
@@ -774,10 +934,11 @@ export default function BloquePropuestaEconomica({
                     />
                     <span>Plan 2 · {formatCOP(ultimaVersion!.valor_final_plan2)}</span>
                   </label>
+                  )}
                 </fieldset>
                 <button
                   onClick={handleAprobar}
-                  disabled={isPending || aprobacionBloqueada}
+                  disabled={isPending || aprobacionBloqueada || rutaCambio || !planesAprobables.includes(planSeleccionado)}
                   title={aprobacionBloqueada ? `Descuentos sobre ${umbralAprobacion}% requieren aprobación gerencial` : undefined}
                   className="inline-flex items-center gap-1.5 rounded-md border border-green-600 bg-green-50 px-3 py-2 text-sm font-medium text-green-700 hover:bg-green-100 disabled:opacity-50"
                 >
@@ -817,6 +978,7 @@ export default function BloquePropuestaEconomica({
 // ── Editor de un plan: descuento % ↔ precio final, enlazados ────────────────
 function PlanEditor({
   titulo,
+  tarifa = null,
   descStr,
   valorStr,
   onDesc,
@@ -827,6 +989,8 @@ function PlanEditor({
   invalid,
 }: {
   titulo: string
+  /** Valor de la casilla plan × ruta (con tarifas). `null` en el esquema anterior. */
+  tarifa?: number | null
   descStr: string
   valorStr: string
   onDesc: (raw: string) => void
@@ -839,7 +1003,10 @@ function PlanEditor({
   const borde = invalid ? 'border-red-500' : ''
   return (
     <div className="rounded-md border bg-background/50 p-3">
-      <p className="mb-2 text-xs font-medium text-muted-foreground">{titulo}</p>
+      <p className="mb-2 flex items-baseline justify-between gap-2 text-xs font-medium text-muted-foreground">
+        <span>{titulo}</span>
+        {tarifa != null && <span>Tarifa {formatCOP(tarifa)}</span>}
+      </p>
       <div className="grid grid-cols-2 gap-2">
         <div>
           <label className="mb-1 block text-[11px] text-muted-foreground">Descuento</label>
@@ -929,11 +1096,12 @@ function VersionList({
                 </p>
               ) : (
                 <p className="font-medium">
-                  Plan 1: {formatCOP(v.valor_final_plan1)} · Plan 2: {formatCOP(v.valor_final_plan2)}
+                  {planesDe(v).map(n => `Plan ${n}: ${formatCOP(n === 1 ? v.valor_final_plan1 : v.valor_final_plan2)}`).join(' · ')}
                 </p>
               )}
               <p className="text-xs text-muted-foreground">
-                P1 {pct2(v.descuento_pct_plan1)}% · P2 {pct2(v.descuento_pct_plan2)}% ·{' '}
+                {planesDe(v).map(n => `P${n} ${pct2(n === 1 ? v.descuento_pct_plan1 : v.descuento_pct_plan2)}%`).join(' · ')}
+                {v.tarifa_version != null && ` · tarifas v${v.tarifa_version}`} ·{' '}
                 {formatFechaCorta(v.generated_at)}
                 {isAprobada && <span className="ml-2 text-green-700">· Aprobada</span>}
               </p>

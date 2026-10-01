@@ -5,7 +5,7 @@ metadata:
   type: project
 ---
 
-PR #978 (rama perf/fence-venta-mes-soena, 2026-10-01): migracion `20261001140000_perf_fence_venta_mes_soena.sql` reescribe kpis, origen, plan_pago y seccional `_mes_soena` leyendo la vista desde `(SELECT * ... WHERE workspace_id = p_workspace_id OFFSET 0)`. SIN aplicar ni mergear (la aplica la sesion principal).
+PR #978 (rama perf/fence-venta-mes-soena, 2026-10-01): migracion `20261001140200_perf_fence_venta_mes_soena.sql` (nacio como 20261001140000, chocaba con la de tarifas y se renombro en #977) reescribe kpis, origen, plan_pago y seccional `_mes_soena` leyendo la vista desde `(SELECT * ... WHERE workspace_id = p_workspace_id OFFSET 0)`. SQL aplicado en prod; la fila del ledger va con la version 20261001140200.
 
 **Deriva repo-vs-prod:** origen, seccional, pagos y ventas `_mes_soena` en produccion NO coinciden con el repo. origen/seccional entraron desde `pg_get_functiondef` de prod (lo paso la sesion principal). pagos y ventas quedaron FUERA: deriva a reconciliar aparte.
 

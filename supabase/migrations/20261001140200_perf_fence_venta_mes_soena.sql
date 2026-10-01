@@ -1,5 +1,5 @@
 -- ============================================================
--- 20261001140000_perf_fence_venta_mes_soena
+-- 20261001140200_perf_fence_venta_mes_soena
 -- ============================================================
 -- Rendimiento de la pestaña Comercial de SOENA. Solo cambia el PLAN de ejecucion,
 -- no el resultado: el JSON que devuelve cada RPC queda identico.

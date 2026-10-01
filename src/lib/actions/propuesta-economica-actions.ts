@@ -40,6 +40,17 @@ import {
 import { uvtDelAnio } from '@/lib/upme/uvt'
 import { registrarActividad } from '@/lib/activity/registrar-actividad'
 import { calcularPropuesta } from '@/lib/propuesta/calculo'
+import {
+  casillasDeRuta,
+  congelar,
+  valorConDescuento,
+  PLANES,
+  type EsquemaPropuesta,
+  type MotivoEsquemaAnterior,
+  type PlanN,
+  type TarifaCongelada,
+} from '@/lib/propuesta/tarifas'
+import { resolverEsquemaPropuesta } from '@/lib/propuesta/tarifas-servidor'
 
 // ── Tipos ────────────────────────────────────────────────────────────────────
 
@@ -63,6 +74,18 @@ export type PropuestaVersion = {
   generated_by: string | null  /** Version de los terminos vigentes al generar este PDF. `null` = los del render.
    *  Sin esto, una propuesta firmada no se puede rastrear al texto que la regia. */
   terminos_version: number | null
+  // ── Solo en versiones armadas con tarifas por plan y ruta (`lib/propuesta/tarifas`) ──
+  // Ausentes = versión del esquema anterior (precio estándar + descuento manual).
+  /** Versión de tarifas con la que se armó. */
+  tarifa_version_id?: string
+  tarifa_version?: number
+  /** Valor de la casilla plan × ruta ANTES del descuento del comercial. */
+  base_plan1?: number | null
+  base_plan2?: number | null
+  /** Planes que se ofrecen para la ruta de esta versión. Un plan fuera de aquí no se aprueba. */
+  planes_ofrecidos?: PlanN[]
+  /** Tope de descuento que regía (el de la versión de tarifas). */
+  cap_descuento_pct?: number
 }
 
 export type PropuestaData = {
@@ -117,6 +140,12 @@ export type PropuestaData = {
    * otra. Se muestra, y re-congelarlo es una corrección deliberada.
    */
   aprobado_servicio?: string | null
+  /**
+   * Versión de tarifas con la que se armó la propuesta (se fija al generar la primera
+   * versión con tarifas). Ausente = esquema anterior. Una vez puesta, el negocio no cambia
+   * de versión aunque se publique otra.
+   */
+  tarifa?: TarifaCongelada | null
 }
 
 // ── Helpers de calculo ──────────────────────────────────────────────────────
@@ -156,6 +185,8 @@ function fechaEnLetras(d: DiaCivil): string {
 function pctMostrado(n: number): number {
   return Math.round(n * 100) / 100
 }
+
+const NO_APLICA = 'No aplica'
 
 // ── Lectura del bloque + servicio asociado ──────────────────────────────────
 
@@ -408,6 +439,15 @@ async function loadBloqueContext(
     }
   }
 
+  // Esquema de precio: tarifas por plan y ruta, o el anterior (precio estándar +
+  // descuento manual). Lo decide `decidirEsquema`; aquí solo se le llevan los datos.
+  const esquema: EsquemaPropuesta = await resolverEsquemaPropuesta(supabase, {
+    servicioId,
+    negocioId: b.negocio_id as string,
+    congelada: data.tarifa ?? null,
+    versionesEmitidas: (data.versiones ?? []).length,
+  })
+
   return {
     error: null as null,
     bloque: b,
@@ -444,6 +484,59 @@ async function loadBloqueContext(
     servicioContratado,
     /** Bloques declarados en `requiere_bloques` que aún no tienen respuesta. */
     requisitosFaltantes,
+    /** Tarifas por plan y ruta, o esquema anterior. */
+    esquema,
+  }
+}
+
+// ── Lectura: tarifa que rige la propuesta (para la pantalla) ────────────────
+
+export type TarifaPropuestaVista =
+  | { esquema: 'anterior'; motivo: MotivoEsquemaAnterior }
+  | {
+      esquema: 'tarifas'
+      version: { id: string; version: number; vigente_desde: string }
+      cap_descuento_pct: number
+      /** Ruta que el negocio declara HOY (`servicio_contratado`). */
+      ruta: string | null
+      rutaNombre: string | null
+      planes: Array<{ n: PlanN; nombre: string; ofrece: boolean; valor: number | null }>
+    }
+
+/**
+ * Lo que la pantalla necesita para pintar la propuesta con tarifas: la versión que rige,
+ * la ruta de hoy y el valor de cada plan para esa ruta. No escribe nada. La pantalla lo
+ * usa para MOSTRAR; generar y aprobar vuelven a decidirlo todo en el servidor.
+ */
+export async function getTarifaPropuesta(
+  bloqueId: string,
+): Promise<{ ok: true; tarifa: TarifaPropuestaVista } | { ok: false; error: string }> {
+  const { supabase, workspaceId, error: errWs } = await getWorkspace()
+  if (errWs || !workspaceId) return { ok: false, error: 'No autenticado' }
+
+  const ctx = await loadBloqueContext(supabase, workspaceId, bloqueId)
+  if (ctx.error) return { ok: false, error: ctx.error }
+
+  if (ctx.esquema.esquema === 'anterior') {
+    return { ok: true, tarifa: { esquema: 'anterior', motivo: ctx.esquema.motivo } }
+  }
+  const v = ctx.esquema.version
+  const casillas = casillasDeRuta(v, ctx.servicioContratado)
+  return {
+    ok: true,
+    tarifa: {
+      esquema: 'tarifas',
+      version: { id: v.id, version: v.version, vigente_desde: v.vigente_desde },
+      cap_descuento_pct: v.cap_descuento_pct,
+      ruta: ctx.servicioContratado,
+      rutaNombre: v.rutas.find(r => r.valor === ctx.servicioContratado)?.nombre ?? null,
+      planes: PLANES.map(n => ({
+        n,
+        nombre: v.planes.find(p => p.n === n)?.nombre ?? `Plan ${n}`,
+        ofrece: casillas[n].ofrece,
+        valor: casillas[n].valor,
+      })),
+    },
   }
 }
 
@@ -504,17 +597,64 @@ export async function generarVersionPropuesta(
   // Se conserva precisión (hasta 6 decimales, solo para matar ruido de float):
   // así el precio final tecleado por el equipo queda EXACTO al peso. El % se
   // redondea a 2 decimales únicamente al mostrarlo (PDF / UI).
-  const desc1 = Math.round((input.descuento_pct_plan1 ?? 0) * 1e6) / 1e6
-  const desc2 = Math.round((input.descuento_pct_plan2 ?? 0) * 1e6) / 1e6
+  let desc1 = Math.round((input.descuento_pct_plan1 ?? 0) * 1e6) / 1e6
+  let desc2 = Math.round((input.descuento_pct_plan2 ?? 0) * 1e6) / 1e6
 
-  for (const [label, pct] of [['Plan 1', desc1], ['Plan 2', desc2]] as const) {
-    if (pct < 0) return { ok: false, error: `Descuento ${label} no puede ser negativo` }
-    if (pct > ctx.capDescuento) {
-      return { ok: false, error: `Descuento ${label} excede el cap de ${ctx.capDescuento}%` }
+  // ── Tarifas por plan y ruta ──────────────────────────────────────────────────
+  // Con tarifas, cada plan parte del valor de SU casilla (plan × ruta del negocio) y el
+  // descuento del comercial se mide contra esa casilla, con el tope de la versión. Un
+  // plan que no se ofrece para la ruta entra en cero y no se puede aprobar.
+  const conTarifas = ctx.esquema.esquema === 'tarifas' ? ctx.esquema.version : null
+  const casillas = conTarifas ? casillasDeRuta(conTarifas, ctx.servicioContratado) : null
+  const ofrecidos: PlanN[] = casillas ? PLANES.filter(n => casillas[n].ofrece) : [1, 2]
+  if (conTarifas && ofrecidos.length === 0) {
+    return {
+      ok: false,
+      error: ctx.servicioContratado
+        ? `La ruta del negocio no tiene ningún plan en las tarifas v${conTarifas.version}. Revísalas en Mi negocio → Mis servicios.`
+        : 'Falta declarar qué contrató el cliente: el valor de cada plan depende de la ruta.',
+    }
+  }
+  if (casillas && !casillas[1].ofrece) desc1 = 0
+  if (casillas && !casillas[2].ofrece) desc2 = 0
+  const capVigente = conTarifas ? conTarifas.cap_descuento_pct : ctx.capDescuento
+
+  for (const [n, pct] of [[1, desc1], [2, desc2]] as const) {
+    if (!ofrecidos.includes(n)) continue
+    if (pct < 0) return { ok: false, error: `Descuento Plan ${n} no puede ser negativo` }
+    if (pct > capVigente) {
+      return { ok: false, error: `Descuento Plan ${n} excede el cap de ${capVigente}%` }
     }
   }
 
-  const calc = calcularPropuesta(ctx.precioBase, desc1, desc2)
+  let calc = calcularPropuesta(ctx.precioBase, desc1, desc2)
+  // Para el PDF: la "tarifa plena" contra la que se lee el ahorro del Plan 2.
+  let ahorroPctPlan2 = desc2
+  if (casillas) {
+    const base1 = casillas[1].ofrece ? casillas[1].valor! : null
+    const base2 = casillas[2].ofrece ? casillas[2].valor! : null
+    const plan1 = base1 != null ? valorConDescuento(base1, desc1) : 0
+    const plan2 = base2 != null ? valorConDescuento(base2, desc2) : 0
+    // La referencia es el Plan 1 de la ruta aunque no se ofrezca (su valor teórico
+    // existe: plan × %), que es lo que el documento llama tarifa plena.
+    const referencia = casillas[1].valor ?? base2 ?? 0
+    calc = {
+      base: referencia,
+      plan1_valor: plan1,
+      plan1_anticipo: Math.round(plan1 / 2),
+      plan1_exito_iva: Math.round(plan1 / 2),
+      plan2_valor: plan2,
+      ahorro_plan1: base1 != null ? base1 - plan1 : 0,
+      ahorro_plan2: base2 != null ? referencia - plan2 : 0,
+      descuento_pct_plan1: desc1,
+      descuento_pct_plan2: desc2,
+    }
+    ahorroPctPlan2 = base2 != null && referencia > 0
+      ? Math.round((1 - plan2 / referencia) * 100 * 1e6) / 1e6
+      : 0
+  }
+  const plan1Ofrecido = ofrecidos.includes(1)
+  const plan2Ofrecido = ofrecidos.includes(2)
 
   // Datos cliente desde negocio
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -616,20 +756,25 @@ export async function generarVersionPropuesta(
       validez_desde: fechaEnLetras(validezDesde),
       validez_hasta: fechaEnLetras(validezHasta),
       base_valor: formatCOP(calc.base),
-      plan1_valor: formatCOP(calc.plan1_valor),
-      plan1_anticipo: formatCOP(calc.plan1_anticipo),
-      plan1_exito_iva: formatCOP(calc.plan1_exito_iva),
+      // Un plan que no se ofrece para la ruta no lleva cifra: "No aplica" antes que un $0
+      // que el cliente leería como gratis. `planN_estilo` queda para la plantilla que
+      // oculte la tarjeta del plan; una plantilla que no lo use lo ignora.
+      plan1_valor: plan1Ofrecido ? formatCOP(calc.plan1_valor) : NO_APLICA,
+      plan1_anticipo: plan1Ofrecido ? formatCOP(calc.plan1_anticipo) : NO_APLICA,
+      plan1_exito_iva: plan1Ofrecido ? formatCOP(calc.plan1_exito_iva) : NO_APLICA,
       plan1_descuento_pct: `${pctMostrado(desc1)}%`,
       plan1_descuento_linea: plan1DescuentoLinea,
       plan1_ahorro: formatCOP(calc.ahorro_plan1),
-      plan2_valor: formatCOP(calc.plan2_valor),
-      plan2_descuento_pct: `${pctMostrado(desc2)}%`,
+      plan2_valor: plan2Ofrecido ? formatCOP(calc.plan2_valor) : NO_APLICA,
+      plan2_descuento_pct: `${pctMostrado(ahorroPctPlan2)}%`,
       plan2_ahorro: formatCOP(calc.ahorro_plan2),
+      plan1_estilo: plan1Ofrecido ? '' : 'display:none',
+      plan2_estilo: plan2Ofrecido ? '' : 'display:none',
       // Tarifa UPME (pasante) + total a pagar por plan = honorario + tarifa.
       tarifa_upme: formatCOP(ctx.tarifaUpme),
       tarifa_upme_valor: ctx.tarifaUpme,
-      plan1_total_con_tarifa: formatCOP(calc.plan1_valor + ctx.tarifaUpme),
-      plan2_total_con_tarifa: formatCOP(calc.plan2_valor + ctx.tarifaUpme),
+      plan1_total_con_tarifa: plan1Ofrecido ? formatCOP(calc.plan1_valor + ctx.tarifaUpme) : NO_APLICA,
+      plan2_total_con_tarifa: plan2Ofrecido ? formatCOP(calc.plan2_valor + ctx.tarifaUpme) : NO_APLICA,
       version: nuevaN,
       // Personalización (SOENA): firma del generador + vehículo de la factura
       generador_nombre: generadorNombre,
@@ -721,6 +866,16 @@ export async function generarVersionPropuesta(
     generated_at: ahora.toISOString(),
     generated_by: staffId ?? null,
     terminos_version: ctx.terminosVersion,
+    ...(conTarifas && casillas
+      ? {
+          tarifa_version_id: conTarifas.id,
+          tarifa_version: conTarifas.version,
+          base_plan1: casillas[1].ofrece ? casillas[1].valor : null,
+          base_plan2: casillas[2].ofrece ? casillas[2].valor : null,
+          planes_ofrecidos: ofrecidos,
+          cap_descuento_pct: conTarifas.cap_descuento_pct,
+        }
+      : {}),
   }
 
   const nuevoData: PropuestaData = {
@@ -742,6 +897,8 @@ export async function generarVersionPropuesta(
     aprobado_honorario: ctx.data.aprobado_honorario ?? null,
     aprobado_tarifa_upme: ctx.data.aprobado_tarifa_upme ?? null,
     aprobado_servicio: ctx.data.aprobado_servicio ?? null,
+    // La versión de tarifas queda fijada con la primera versión que la usa.
+    ...(conTarifas ? { tarifa: congelar(conTarifas) } : {}),
   }
 
   // Escribe siempre en la fila ORIGEN (`ctx.bloque.id`), nunca en `bloqueId` tal cual
@@ -790,12 +947,29 @@ export async function aprobarVersionPropuesta(
 
   const descPlan = plan === 1 ? version.descuento_pct_plan1 : version.descuento_pct_plan2
 
+  // Versión armada con tarifas por plan y ruta: el plan tiene que ofrecerse, y la ruta
+  // del negocio tiene que ser la misma con la que se calculó. Si la ruta cambió antes de
+  // aprobar, el valor ya no es el de la tarifa: se genera una versión nueva (que lo
+  // recalcula) en vez de aprobar un precio de otra ruta.
+  const versionConTarifas = !!version.tarifa_version_id
+  if (versionConTarifas) {
+    if (!(version.planes_ofrecidos ?? []).includes(plan)) {
+      return { ok: false, error: `El Plan ${plan} no se ofrece para la ruta de este negocio` }
+    }
+    if ((ctx.servicioContratado ?? null) !== (version.servicio ?? null)) {
+      return {
+        ok: false,
+        error: `La ruta del negocio cambió desde que se generó la v${versionN}. Genera una versión nueva para recalcular el valor antes de aprobar.`,
+      }
+    }
+  }
+
   // Gate de aprobación: descuentos sobre el umbral requieren rol gerencial. La regla
   // vive en `gate-descuento` porque `corregirAprobacion` fija el mismo honorario por
   // otra puerta y tiene que exigir exactamente lo mismo — dos copias se desincronizan.
   const rechazo = motivoDescuentoRechazado({
     descuentoPct: descPlan,
-    cap: ctx.capDescuento,
+    cap: versionConTarifas ? Number(version.cap_descuento_pct ?? ctx.capDescuento) : ctx.capDescuento,
     umbral: ctx.umbralAprobacion,
     role,
     etiqueta: `El Plan ${plan}`,
@@ -836,6 +1010,7 @@ export async function aprobarVersionPropuesta(
     aprobado_honorario: honorarioElegido,
     aprobado_tarifa_upme: tarifaElegida,
     aprobado_servicio: servicioElegido,
+    ...(ctx.data.tarifa ? { tarifa: ctx.data.tarifa } : {}),
   }
 
   // Marcar bloque completo + setear precio_aprobado del negocio (en transaccion ligera)
@@ -1328,6 +1503,16 @@ export async function corregirAprobacion(
     filas.map(f => f.data?.aprobado_plan).find(p => p === 1 || p === 2) as 1 | 2 | undefined
   const planNuevo = (cambios.plan ?? planAnterior) as 1 | 2 | undefined
 
+  // Versión aprobada. Si se armó con tarifas por plan y ruta, de ella salen el valor de
+  // cada casilla (la base del descuento), el tope y qué planes se ofrecen.
+  const filaConVersiones = filas.find(f => Array.isArray(f.data?.versiones))
+  const versionAprobada = ((filaConVersiones?.data?.versiones ?? []) as PropuestaVersion[])
+    .find(v => v.n === filaConVersiones?.data?.aprobado_version)
+  const aprobadaConTarifas = !!versionAprobada?.tarifa_version_id
+  if (aprobadaConTarifas && pidePlan && !(versionAprobada!.planes_ofrecidos ?? []).includes(cambios.plan!)) {
+    return { ok: false, error: `El Plan ${cambios.plan} no se ofrece para la ruta con la que se aprobó esta propuesta` }
+  }
+
   const anterior = Number(negocio.precio_aprobado ?? 0)
   let nuevo = anterior
   if (pideHonorario) {
@@ -1363,7 +1548,19 @@ export async function corregirAprobacion(
   // el umbral que sí lo frena al aprobar. La base viene de la instancia origen; si la
   // propuesta no la trae (bloques viejos), `descuentoImplicito` devuelve null y el gate
   // no frena, porque ahí falta configuración, no falta una decisión de precio.
-  if (cambiaHonorario) {
+  if (cambiaHonorario && aprobadaConTarifas) {
+    // Con tarifas, el descuento se mide contra la casilla del plan que queda aprobado,
+    // con el tope de la versión de tarifas: la misma vara que al generar y aprobar.
+    const base = Number(planNuevo === 1 ? versionAprobada!.base_plan1 : versionAprobada!.base_plan2)
+    const rechazo = motivoDescuentoRechazado({
+      descuentoPct: descuentoImplicito(nuevo, base),
+      cap: Number(versionAprobada!.cap_descuento_pct ?? capDescuento),
+      umbral: umbralAprobacion,
+      role,
+      etiqueta: `El valor corregido (${formatCOP(nuevo)})`,
+    })
+    if (rechazo) return { ok: false, error: rechazo }
+  } else if (cambiaHonorario) {
     let precioBase = Number(
       filas.map(f => f.data?.precio_base_con_iva).find(v => Number(v) > 0) ?? 0,
     )
