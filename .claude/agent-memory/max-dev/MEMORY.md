@@ -2,6 +2,7 @@
 
 ## Project memories
 
+- ⚠️⚠️ [Tarifas por plan y ruta (SOENA)](project_tarifas_plan_ruta.md) — 2 migraciones SIN aplicar; propuesta ya emitida no cambia; PDF aún imprime el plan no ofrecido
 - ⚠️⚠️ [Trial de 5 días del Radar y cobro por ciclo](project_radar_trial_y_cobro.md) — migración SIN aplicar; la gracia de mora pasa de 3 a 5 días en TODOS los productos
 - ⚠️⚠️ [Borrar, editar y escribir en la Actividad](project_actividad_borrar_comentario.md) — DELETE/UPDATE/INSERT aplicadas; force_unlock 20260928150000 SIN aplicar
 - ⚠️⚠️ [Avisos al cliente en día hábil (#935)](project_avisos_dia_habil.md) — migración SIN aplicar; 4 funciones a desplegar; evento se guarda, estado se salta
