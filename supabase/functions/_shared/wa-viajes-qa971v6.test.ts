@@ -56,6 +56,28 @@ describe('1 · apodos del equipo', () => {
   });
 });
 
+describe('1b · un cliente exacto gana sobre el apodo del equipo (ajuste antes del QA v7)', () => {
+  const equipo = ['Mariana Quiroga', 'Tatiana Lozada'];
+  const vs = viajes(['MARÍA PÉREZ', 'MARTA GIL', 'TATIANA RÍOS']);
+
+  it('con una Mariana en el equipo, «María» y «María Pérez» nombran a la clienta María', () => {
+    expect(resolverEncabezado('María', vs, equipo)).toMatchObject({ tipo: 'viaje', viaje: { id: 'v0' } });
+    expect(resolverEncabezado('Maria Perez', vs, equipo)).toMatchObject({ tipo: 'viaje', viaje: { id: 'v0' } });
+    expect(resolverEncabezado('Marta', vs, equipo)).toMatchObject({ tipo: 'viaje', viaje: { id: 'v1' } });
+  });
+
+  it('sin un cliente exacto, el apodo del equipo sigue sin efecto', () => {
+    for (const w of ['Mari', 'Mar', 'Tati']) expect(efecto(w, vs, equipo), w).toBeNull();
+  });
+
+  it('el primer nombre completo de alguien del equipo nunca es encabezado, aunque haya una clienta que se llame igual', () => {
+    expect(efecto('Tatiana', vs, equipo)).toBeNull();
+    expect(efecto('Mariana', viajes(['MARIANA SERNA']), equipo)).toBeNull();
+    // Con su apellido, sí.
+    expect(resolverEncabezado('Tatiana Ríos', vs, equipo)).toMatchObject({ tipo: 'viaje', viaje: { id: 'v2' } });
+  });
+});
+
 describe('2 · «nuevo» suelto', () => {
   const vs = viajes(['CAROLINA RUIZ']);
 
@@ -128,7 +150,9 @@ describe('4 · escritos coloquiales contra nombres sintéticos', () => {
   ];
 
   it.each(conjuntos)('ninguna mueve, pregunta ni corta (%s)', (_t, vs) => {
-    expect(NUEVAS.map(w => [w, efecto(w, vs)]).filter(([, e]) => e !== null)).toEqual([]);
+    // Un cliente que se llama exactamente «Tati» gana sobre el apodo del equipo (ajuste antes del QA v7).
+    const tatiEsCliente = vs.some(v => /^(CLIENTE )?TATI$/.test(String(v.cliente)));
+    expect(NUEVAS.map(w => [w, efecto(w, vs)]).filter(([w, e]) => e !== null && !(w === 'Tati' && tatiEsCliente && e === 'viaje'))).toEqual([]);
   });
 
   it('dos palabras de la lista juntas, en cualquier orden, tampoco', () => {

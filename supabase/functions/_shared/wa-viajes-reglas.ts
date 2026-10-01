@@ -148,6 +148,11 @@ function palabraDelEquipo(w: string, equipo: ReadonlyArray<string>): boolean {
   });
 }
 
+/** ¿Es el primer nombre completo de alguien del equipo («tatiana» de Tatiana Quiroga)? */
+function primerNombreDelEquipo(w: string, equipo: ReadonlyArray<string>): boolean {
+  return equipo.some(n => palabrasDe(n)[0] === w);
+}
+
 /** ¿Todo el escrito es de palabras comunes y nombres del equipo? «gracias Tati», «súper bien». No es encabezado. */
 function sinEfecto(palabras: ReadonlyArray<string>, equipo: ReadonlyArray<string>): boolean {
   return palabras.length > 0 && palabras.every(w => PALABRAS_COMUNES.has(w) || palabraDelEquipo(w, equipo));
@@ -190,15 +195,21 @@ export function resolverEncabezado(
   }
 
   const resto = palabrasDe(bruto).filter(w => !RELLENO.has(w));
-  if (resto.length === 0 || sinEfecto(resto, equipo)) return null;
+  if (resto.length === 0 || resto.every(w => PALABRAS_COMUNES.has(w))) return null;
+  // El primer nombre COMPLETO de alguien del equipo («Tatiana») es una firma: nunca es encabezado.
+  if (resto.every(w => PALABRAS_COMUNES.has(w) || primerNombreDelEquipo(w, equipo))) return null;
 
-  // Exacta: cada palabra está tal cual en el nombre, y una de ellas es el nombre de pila.
+  // Exacta: cada palabra está tal cual en el nombre, y una de ellas es el nombre de pila. Gana sobre
+  // un apodo del equipo: con una Mariana en el equipo, «María» sigue nombrando a la clienta María
+  // (QA de #971 v6, ajuste del coordinador).
   const exactos = viajes.filter(v => {
     const del = palabrasDelCliente(v);
     return del.length > 0 && resto.includes(del[0]) && resto.every(w => del.includes(w));
   });
   if (exactos.length === 1) return { tipo: 'viaje', viaje: exactos[0], por: 'nombre' };
   if (exactos.length > 1) return { tipo: 'ambiguo', candidatos: exactos };
+  // Sin un cliente exacto, el resto del nombre del equipo y sus apodos («Tati», «Mau») no son encabezado.
+  if (sinEfecto(resto, equipo)) return null;
 
   // Aproximada: los candidatos a la MENOR distancia (0 = solo apellidos; 1 = un error de tipeo).
   const distancias = viajes.map(v => ({ v, d: Math.max(...resto.map(w => distanciaAlNombre(w, v.cliente))) }));
