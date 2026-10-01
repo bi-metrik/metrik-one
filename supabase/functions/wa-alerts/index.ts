@@ -13,7 +13,7 @@ import { STREAK_MILESTONES } from '../_shared/types.ts';
 import { COLUMNAS_CARTERA, deudasDeCartera, TOLERANCIA_SALDO_COP } from '../_shared/cartera.ts';
 import { bogotaParts, diasDelMes, todayBogotaISO } from '../_shared/bogota.ts';
 import { debeSalirHoy, diaSemanaISO, paisDelWorkspace } from '../_shared/dias-habiles.ts';
-import { cerrarEntregasVencidas } from '../_shared/wa-bandeja.ts';
+import { cerrarEntregasVencidas, enviarPreguntasEnCola } from '../_shared/wa-bandeja.ts';
 import { procesarEntendimientos } from '../_shared/wa-entendimiento.ts';
 
 // Formas de fila que piden los .select() de este archivo. El cliente de
@@ -105,7 +105,9 @@ Deno.serve(async (req) => {
         // respuestas a «¿cuál contacto?». Nada corre sin `modules.bandeja_solicitudes_wa`.
         // Ver `_shared/wa-entendimiento.ts`.
         const r = await procesarEntendimientos(supabase);
-        return new Response(JSON.stringify({ ok: true, action, ...r }), { status: 200 });
+        // Una sola pregunta abierta por remitente: lo que esperaba turno sale cuando la anterior se contestó.
+        const cola = await enviarPreguntasEnCola(supabase);
+        return new Response(JSON.stringify({ ok: true, action, ...r, ...cola }), { status: 200 });
       }
       default:
         return new Response(JSON.stringify({ error: `Unknown action: ${action}` }), { status: 400 });

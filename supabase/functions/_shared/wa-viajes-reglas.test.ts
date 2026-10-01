@@ -21,6 +21,7 @@ import {
   pendientes,
   rangos,
   resolverEncabezado,
+  numeracion,
   sinLugares,
   textoResumenPlan,
   partesResumenPlan,
@@ -140,7 +141,8 @@ describe('la respuesta al resumen', () => {
   });
 
   it('dejar, mover y descartar; después, sí', () => {
-    const res = interpretarRespuestaPlan('dejar el 5; mover el 3 a Jorge; descartar el 4', r, V);
+    // Numeración del resumen sin el encabezado: el 1 es «hotel 5 estrellas» (prueba en vivo del 2026-10-01).
+    const res = interpretarRespuestaPlan('dejar el 4; mover el 2 a Jorge; descartar el 3', r, V);
     expect(res.tipo).toBe('corregir');
     const p2 = aplicarCambios(r, (res as { cambios: never }).cambios);
     expect(pendientes(p2)).toEqual([]);
@@ -151,7 +153,7 @@ describe('la respuesta al resumen', () => {
   it('«dejar todos» deja los sospechosos; uno de dos viajes no se deja ni se mueve, solo se descarta', () => {
     const dejar = interpretarRespuestaPlan('dejar todos', r, V);
     expect(dejar).toEqual({ tipo: 'corregir', cambios: [{ ns: [3, 5], a: 'dejar' }] });
-    expect(interpretarRespuestaPlan('dejar el 4', r, V)).toMatchObject({ tipo: 'no_entendida', aviso: expect.stringContaining('habla de dos viajes') });
+    expect(interpretarRespuestaPlan('dejar el 3', r, V)).toMatchObject({ tipo: 'no_entendida', aviso: expect.stringContaining('El 3 habla de dos viajes') });
     expect(interpretarRespuestaPlan('descartar los pendientes', r, V)).toEqual({ tipo: 'corregir', cambios: [{ ns: [3, 4, 5], a: 'descartar' }] });
   });
 
@@ -167,7 +169,7 @@ describe('el resumen', () => {
     expect(partes.length).toBeGreaterThan(1);
     for (const p of partes) expect(p.length).toBeLessThanOrEqual(MAX_LARGO_RESUMEN);
     const todo = partes.join('\n');
-    for (const x of r.mensajes) expect(todo, `el ${x.n}`).toContain(`\n   ${x.n} «`);
+    for (const x of r.mensajes) expect(todo, `el ${x.n}`).toContain(`\n   ${x.n - 1} «`); // sin contar el encabezado
     expect(partes[partes.length - 1]).toContain('No cargué nada todavía');
     expect(partes[0].startsWith('(1/')).toBe(true);
     expect(rangos([9, 2, 3, 4, 6, 10])).toBe('2-4, 6, 9-10');
@@ -177,8 +179,8 @@ describe('el resumen', () => {
     const ms = [enc(1, 'Carolina'), m(2, 'Ya hablé con mi esposo: salimos el 28 de diciembre y volvemos el 3 de enero'),
       m(3, 'Somos 3 adultos y 2 niños de 9 y 4 años'), m(4, 'el hotel con desayuno porfa'), m(5, 'salimos de Medellín')];
     const txt = textoResumenPlan(plan(ms).plan, ms);
-    expect(txt).toContain('   4 «el hotel con desayuno porfa»');
-    expect(txt).toContain('   5 «salimos de Medellín»');
+    expect(txt).toContain('   3 «el hotel con desayuno porfa»');
+    expect(txt).toContain('   4 «salimos de Medellín»');
   });
 });
 
@@ -240,7 +242,8 @@ describe('el día sintético del QA v3 CON encabezados (2 olvidados, «Lusia», 
       porEntrega.push(p);
       decisiones += p;
       const txt = textoResumenPlan(r.plan, ms);
-      for (const x of pendientes(r.plan)) expect(txt).toContain(`\n   ${x.n} «`);
+      const { visible } = numeracion(r.plan);
+      for (const x of pendientes(r.plan)) expect(txt).toContain(`\n   ${visible(x.n)} «`);
     }
     // El número que pidió Mauricio: un resumen o una pregunta por entrega, y estas decisiones de mensaje.
     expect({ resumenes: diaEnc.entregas.length, preguntasEnElActo, decisiones, porEntrega, cargados }).toMatchSnapshot();
@@ -378,7 +381,7 @@ describe('QA de #971 v4', () => {
       for (const parte of partes) expect(parte.length).toBeLessThanOrEqual(MAX_LARGO_RESUMEN);
       const lineas = partes.map(x => x.replace(/^\(\d+\/\d+\) /, '')).join('\n').split('\n');
       for (const x of p.mensajes.filter(y => y.destino)) {
-        expect(lineas.some(l => new RegExp(`^   ${x.n} «.*»${x.sospecha ? ' ⚠' : ''}$`).test(l)), `${extra}: línea del ${x.n}`).toBe(true);
+        expect(lineas.some(l => new RegExp(`^   ${x.n - 1} «.*»${x.sospecha ? ' ⚠' : ''}$`).test(l)), `${extra}: línea del ${x.n}`).toBe(true);
       }
       expect(partes[partes.length - 1].endsWith('descarta todo.')).toBe(true);
     }

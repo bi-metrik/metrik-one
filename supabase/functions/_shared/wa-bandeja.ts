@@ -11,7 +11,7 @@
 // ============================================================
 
 import { transcribeAudio, PROMPT_TRANSCRIPCION_LITERAL } from './wa-transcribe.ts';
-import { armarPreguntaNegocio, candidatosDeEncabezado, pendienteDeLaTanda, hayPreguntaPendiente, tomarRespuestaContacto } from './wa-entendimiento.ts';
+import { armarPreguntaNegocio, candidatosDeEncabezado, conNombreDelViaje, nombreDeLaEntrega, pendienteDeLaTanda, preguntaAbierta, textoPrimero, hayPreguntaPendiente, tomarRespuestaContacto } from './wa-entendimiento.ts';
 import { esNombreNuevo, leerSiNo, lineaCaja, resolverEncabezado, respuestaAlEncabezado, textoNoEntendiCambio, TEXTO_PIDE_NOMBRE_NUEVO } from './wa-viajes-reglas.ts';
 import type { ResolucionEncabezado } from './wa-viajes-reglas.ts';
 import { sendTextMessage } from './wa-respond.ts';
@@ -24,7 +24,6 @@ import {
   leerConfigBandeja,
   respuestaTrasRegistro,
   textoPreguntaCliente,
-  TEXTO_ANOTADO,
   TEXTO_NADA_PENDIENTE,
 } from './wa-bandeja-reglas.ts';
 import type { AccionRegistro, ConfigBandeja, Ruta } from './wa-bandeja-reglas.ts';
@@ -228,7 +227,11 @@ export async function atenderEnBandeja(
   // «¿Cambias a…? sí/no» y lo que sigue queda sin asignar hasta la respuesta.
   if (fila.accion === 'agregar' || fila.accion === 'abrir') {
     const aviso = enEspera ? enEspera.aviso : respuestaAlEncabezado(encabezado);
-    if (aviso) await enviar(message.phone, aviso, user.workspace_id);
+    // Un encabezado nuevo con una pregunta abierta: se recuerda la pendiente en una línea y se
+    // siguen registrando los mensajes del encabezado nuevo (prueba en vivo del 2026-10-01).
+    const pendiente = encabezado ? await preguntaAbierta(supabase, user.workspace_id, message.phone, fila.entrega ? [fila.entrega] : []) : null;
+    const texto = [aviso, pendiente ? textoPrimero(pendiente) : null].filter(Boolean).join('\n');
+    if (texto) await enviar(message.phone, texto, user.workspace_id);
   }
 
   switch (respuestaTrasRegistro(fila.accion)) {
@@ -237,9 +240,6 @@ export async function atenderEnBandeja(
       break;
     case 'nada_pendiente':
       await enviar(message.phone, TEXTO_NADA_PENDIENTE, user.workspace_id);
-      break;
-    case 'anotado':
-      await enviar(message.phone, TEXTO_ANOTADO, user.workspace_id);
       break;
     default:
       break;
@@ -333,6 +333,13 @@ export async function preguntarCliente(
   nMensajes: number,
   workspaceId: string,
 ): Promise<void> {
+  // Una sola pregunta abierta a la vez por remitente: con otra pendiente, esta espera en cola
+  // (`pregunta_enviada_at` nula) y sale cuando se conteste la primera (`enviarPreguntasEnCola`).
+  const pendiente = await preguntaAbierta(supabase, workspaceId, phone, [entregaId]);
+  if (pendiente) {
+    await enviar(phone, `${textoPrimero(pendiente)}\nLo que acabas de mandar te lo pregunto después.`, workspaceId);
+    return;
+  }
   const viaje = await armarPreguntaNegocio(supabase, entregaId, workspaceId, nMensajes);
   if (viaje?.plan && viaje.sinDudas) {
     // `confirmar: si_duda` y un reparto sin una sola duda: se carga sin preguntar, y se dice qué.
@@ -344,9 +351,13 @@ export async function preguntarCliente(
     if (error) console.error(`[wa-bandeja] no se pudo cargar sin preguntar ${entregaId}:`, error.message);
     return;
   }
+  // Toda pregunta lleva el nombre del viaje al principio («Diego Prueba · Entendí 1 viaje…»).
+  const { data: ent } = await supabase.from('wa_bandeja_entregas').select('created_at').eq('id', entregaId).maybeSingle();
+  const nombre = nombreDeLaEntrega(viaje?.plan ?? null, (ent?.created_at as string | null) ?? null);
+  const partes = [...(viaje?.antes ?? []), viaje?.texto ?? textoPreguntaCliente(nMensajes)].map((p, i) => (i === 0 ? conNombreDelViaje(nombre, p) : p));
   // Un resumen largo llega en varias partes: las primeras se mandan antes de la que espera respuesta.
-  for (const p of viaje?.antes ?? []) await enviar(phone, p, workspaceId);
-  const ok = await enviar(phone, viaje?.texto ?? textoPreguntaCliente(nMensajes), workspaceId);
+  for (const p of partes.slice(0, -1)) await enviar(phone, p, workspaceId);
+  const ok = await enviar(phone, partes[partes.length - 1], workspaceId);
   const lista = viaje?.plan ? { plan_viajes: viaje.plan } : viaje?.opciones ? { negocio_opciones: viaje.opciones } : {};
   const { error } = await supabase
     .from('wa_bandeja_entregas')
@@ -355,6 +366,29 @@ export async function preguntarCliente(
       : { pregunta_error: 'envio fallido', ...lista })
     .eq('id', entregaId);
   if (error) console.error(`[wa-bandeja] no se pudo anotar la pregunta de ${entregaId}:`, error.message);
+}
+
+/**
+ * Las preguntas en cola: entregas cerradas cuyo resumen no salió porque el remitente tenía otra
+ * pregunta abierta. Sale una por remitente, la más vieja, cuando ya no hay otra abierta. Lo
+ * llama el cron del entendimiento al terminar (ahí es donde se atienden las respuestas).
+ */
+export async function enviarPreguntasEnCola(supabase: SupabaseClient): Promise<{ enviadas: number }> {
+  const { data, error } = await supabase.from('wa_bandeja_entregas')
+    .select('id, workspace_id, remitente_phone, n_mensajes, cerrada_at')
+    .eq('estado', 'esperando_cliente').is('pregunta_enviada_at', null).is('pregunta_error', null)
+    .order('cerrada_at', { ascending: true }).limit(50);
+  if (error) {
+    console.error('[wa-bandeja] no se pudieron leer las preguntas en cola:', error.message);
+    return { enviadas: 0 };
+  }
+  let enviadas = 0;
+  for (const e of (data ?? []) as Array<{ id: string; workspace_id: string; remitente_phone: string; n_mensajes: number | null }>) {
+    if (await preguntaAbierta(supabase, e.workspace_id, e.remitente_phone, [e.id])) continue;
+    await preguntarCliente(supabase, e.id, e.remitente_phone, e.n_mensajes ?? 0, e.workspace_id);
+    enviadas++;
+  }
+  return { enviadas };
 }
 
 /** Lo que corre el cron: cierra lo vencido y pregunta, una vez por entrega. */

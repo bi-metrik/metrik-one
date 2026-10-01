@@ -120,7 +120,7 @@ describe('lo que contesta el bot', () => {
     expect(respuestaTrasRegistro('agregar')).toBeNull()
     expect(respuestaTrasRegistro('duplicado')).toBeNull()
     expect(respuestaTrasRegistro('cierre_sin_abierta')).toBe('nada_pendiente')
-    expect(respuestaTrasRegistro('respuesta_cliente')).toBe('anotado')
+    expect(respuestaTrasRegistro('respuesta_cliente')).toBeNull() // sin «Anotado.» (prueba en vivo)
   })
 
   it('la pregunta cuenta los mensajes, en singular y plural', () => {

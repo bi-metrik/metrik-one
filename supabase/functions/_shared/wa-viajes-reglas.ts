@@ -736,6 +736,17 @@ const MAX_CON_TEXTO = 25;
 /** WhatsApp corta en 4.096 caracteres; se deja margen. */
 export const MAX_LARGO_RESUMEN = 3800;
 
+/**
+ * La numeración que ve el comercial: los mensajes del resumen, 1, 2, 3…, sin contar encabezados ni
+ * respuestas («sí», el nombre de un nuevo). Las correcciones («el 2 es de…») usan la misma (prueba
+ * en vivo del 2026-10-01: «nuevo Laura Prueba» era el 1 y el primer mensaje salía como 2).
+ */
+export function numeracion(plan: PlanViajes): { visible: (n: number) => number; interno: (k: number) => number | null } {
+  const orden = [...new Set(plan.mensajes.map(m => m.n))].sort((a, b) => a - b);
+  const pos = new Map(orden.map((n, i) => [n, i + 1]));
+  return { visible: n => pos.get(n) ?? n, interno: k => orden[k - 1] ?? null };
+}
+
 /** «2-4, 6, 9-10»: los números de una lista, en rangos. */
 export function rangos(ns: ReadonlyArray<number>): string {
   const o = [...ns].sort((a, b) => a - b);
@@ -759,10 +770,11 @@ export function rangos(ns: ReadonlyArray<number>): string {
  */
 export function partesResumenPlan(plan: PlanViajes, mensajes: ReadonlyArray<MensajeViaje>, aviso?: string): string[] {
   const porN = new Map(mensajes.map(m => [m.n, m]));
+  const { visible } = numeracion(plan);
   // La nota del comercial (un juicio) no se repite: ni su texto ni una paráfrasis salen del bot.
   const linea = (n: number, largo: number) => {
     const m = porN.get(n);
-    return m && esNotaDelComercial(m.cuerpo, m.reenviado) ? `   ${n} (nota del comercial, no se guarda)` : `   ${n} «${recorte(m?.cuerpo ?? '', largo)}»`;
+    return m && esNotaDelComercial(m.cuerpo, m.reenviado) ? `   ${visible(n)} (nota del comercial, no se guarda)` : `   ${visible(n)} «${recorte(m?.cuerpo ?? '', largo)}»`;
   };
   const grupos = gruposDelPlan(plan);
   const porDecidir = pendientes(plan);
@@ -779,7 +791,7 @@ export function partesResumenPlan(plan: PlanViajes, mensajes: ReadonlyArray<Mens
     lineas.push(...porDecidir.map(m => `${linea(m.n, 40)} (${m.motivo ?? 'sin viaje'})`));
   }
   const descartados = plan.mensajes.filter(m => m.descartado).map(m => m.n);
-  if (descartados.length > 0) lineas.push(`Descartados: ${rangos(descartados)}`);
+  if (descartados.length > 0) lineas.push(`Descartados: ${rangos(descartados.map(visible))}`);
   lineas.push(...plan.avisos);
   lineas.push(porDecidir.length > 0
     ? 'No cargué nada todavía. Para cada uno: «dejar el 4» (o «dejar todos»), «el 4 es de Luisa» / «el 4 es del 2» / «el 4 es nuevo Pedro» para moverlo, o «descartar el 4». Después, SÍ. DESCARTAR descarta todo.'
@@ -870,9 +882,10 @@ export function interpretarRespuestaPlan(texto: string, plan: PlanViajes, viajes
   const bruto = String(texto ?? '').trim();
   if (!bruto) return { tipo: 'no_entendida' };
   const porDecidir = pendientes(plan);
+  const { visible, interno } = numeracion(plan);
   if (esSi(bruto)) {
     if (porDecidir.length > 0) {
-      const ns = porDecidir.map(m => m.n);
+      const ns = porDecidir.map(m => visible(m.n));
       return { tipo: 'no_entendida', aviso: `Antes del sí, decide ${ns.length === 1 ? 'el' : 'los'} ${rangos(ns)}: «dejar el ${ns[0]}», «el ${ns[0]} es de …» o «descartar el ${ns[0]}».` };
     }
     return { tipo: 'si' };
@@ -891,30 +904,32 @@ export function interpretarRespuestaPlan(texto: string, plan: PlanViajes, viajes
 
   const existentes = new Set(plan.mensajes.map(m => m.n));
   const cambios: Cambio[] = [];
+  // Los números que escribe el comercial son los del resumen; un número que no está queda negativo.
+  const leer = (t: string) => leerNumeros(t).map(k => interno(k) ?? -k);
   const partes = bruto.replace(/^corregir\s*[:,-]?\s*/i, '').split(/\s*[;\n]\s*|\.\s+/).filter(Boolean);
   for (const parte of partes) {
     const p = parte.trim();
     const desc = /^(?:descartar|descarta|quitar|quita|sacar|saca|borrar|borra)\s+(?:el|la|los|las)?\s*([\d\s,ye]+)$/i.exec(p);
-    if (desc) { cambios.push({ ns: leerNumeros(desc[1]), a: 'descartar' }); continue; }
+    if (desc) { cambios.push({ ns: leer(desc[1]), a: 'descartar' }); continue; }
     const dejar = /^(?:dejar|deja|dejalo|dejalos)\s+(?:el|la|los|las)?\s*([\d\s,ye]+)$/i.exec(p);
-    if (dejar) { cambios.push({ ns: leerNumeros(dejar[1]), a: 'dejar' }); continue; }
+    if (dejar) { cambios.push({ ns: leer(dejar[1]), a: 'dejar' }); continue; }
     const mover = /^(?:mover|mueve|pasar|pasa)\s+(?:el|la|los|las)?\s*((?:\d+)(?:\s*(?:,|y|e)\s*(?:el\s+|la\s+)?\d+)*)\s+(?:a|al|para)\s+(.+)$/i.exec(p)
       ?? /^(?:el|la|los|las|mensaje|mensajes)?\s*((?:\d+)(?:\s*(?:,|y|e)\s*(?:el\s+|la\s+)?\d+)*)\s+(?:(?:es|son|va|van)\s+)?(.+)$/i.exec(p);
     if (!mover) return { tipo: 'no_entendida' };
     const a = destinoDeCorreccion(mover[2], plan, viajes);
     if (!a) return { tipo: 'no_entendida', aviso: `No sé a qué viaje te refieres con «${recorte(mover[2], 30)}».` };
-    cambios.push({ ns: leerNumeros(mover[1]), a });
+    cambios.push({ ns: leer(mover[1]), a });
   }
   if (cambios.length === 0) return { tipo: 'no_entendida' };
   for (const c of cambios) {
     const fuera = c.ns.filter(n => !existentes.has(n));
-    if (c.ns.length === 0 || fuera.length > 0) return { tipo: 'no_entendida', aviso: `No hay mensaje ${fuera.join(', ')} en el resumen.` };
+    if (c.ns.length === 0 || fuera.length > 0) return { tipo: 'no_entendida', aviso: `No hay mensaje ${fuera.map(n => (n < 0 ? -n : visible(n))).join(', ')} en el resumen.` };
     const varios = c.ns.filter(n => plan.mensajes.find(m => m.n === n)?.varios);
     if (c.a !== 'descartar' && varios.length > 0) {
-      return { tipo: 'no_entendida', aviso: `El ${varios.join(', ')} habla de dos viajes: no lo cargo entero en uno. Descártalo y escribe el dato en la ficha de cada viaje.` };
+      return { tipo: 'no_entendida', aviso: `El ${varios.map(visible).join(', ')} habla de dos viajes: no lo cargo entero en uno. Descártalo y escribe el dato en la ficha de cada viaje.` };
     }
     const sinCaja = c.ns.filter(n => !plan.mensajes.find(m => m.n === n)?.destino);
-    if (c.a === 'dejar' && sinCaja.length > 0) return { tipo: 'no_entendida', aviso: `El ${sinCaja.join(', ')} no tiene caja: dime a qué viaje va o descártalo.` };
+    if (c.a === 'dejar' && sinCaja.length > 0) return { tipo: 'no_entendida', aviso: `El ${sinCaja.map(visible).join(', ')} no tiene caja: dime a qué viaje va o descártalo.` };
   }
   return { tipo: 'corregir', cambios };
 }

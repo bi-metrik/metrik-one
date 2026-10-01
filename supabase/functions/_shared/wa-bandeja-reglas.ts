@@ -193,7 +193,8 @@ export function respuestaTrasRegistro(accion: AccionRegistro): 'pregunta' | 'nad
   switch (accion) {
     case 'cerrar': return 'pregunta';
     case 'cierre_sin_abierta': return 'nada_pendiente';
-    case 'respuesta_cliente': return 'anotado';
+    // Sin «Anotado.» (prueba en vivo del 2026-10-01): el siguiente mensaje útil ya confirma.
+    case 'respuesta_cliente': return null;
     default: return null;
   }
 }

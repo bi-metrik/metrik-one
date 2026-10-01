@@ -1169,7 +1169,8 @@ export function nombreDeLaRespuesta(clienteTexto: string | null | undefined): st
 
 export type DecisionContacto =
   | { tipo: 'unico'; contacto: ContactoCandidato; por: 'telefono' | 'nombre' }
-  | { tipo: 'preguntar'; motivo: 'ninguno' | 'varios'; opciones: ContactoCandidato[]; nombre: string };
+  /** `mismo`: el comercial pidió NUEVO y ya hay UN contacto con ese nombre exacto: ¿es el mismo? */
+  | { tipo: 'preguntar'; motivo: 'ninguno' | 'varios' | 'mismo'; opciones: ContactoCandidato[]; nombre: string };
 
 export const MAX_OPCIONES_CONTACTO = 5;
 
@@ -1229,6 +1230,11 @@ export function textoPreguntaContacto(d: Extract<DecisionContacto, { tipo: 'preg
   // N9: sin nombre no hay a quién buscar ni a quién crear. Se pide el nombre, nunca un error mudo.
   if (!d.nombre && d.opciones.length === 0) return TEXTO_PIDE_NOMBRE;
   const quien = d.nombre ? `«${d.nombre}»` : 'al cliente';
+  if (d.motivo === 'mismo') {
+    const c = d.opciones[0];
+    return [`Ya hay un contacto ${quien} en el directorio:`, `1. ${c?.nombre ?? 'Sin nombre'}${finTelefono(c?.telefono ?? null)}`,
+      '¿Es el mismo? Responde SÍ, o NUEVO para crear otro.'].join('\n');
+  }
   const cab = d.motivo === 'varios'
     ? `Hay ${d.opciones.length} contactos que podrían ser ${d.nombre ? quien : 'el cliente'}. ¿Cuál es?`
     : d.opciones.length > 0
