@@ -33,6 +33,7 @@ import { handleAyuda, handleUnclear, handleUnclearResume } from '../_shared/hand
 import { atenderBotonTerminos, atenderPendienteTerminos } from '../_shared/aceptacion-terminos-flujo.ts';
 import { botEquipoPermitido, MENSAJE_BOT_SIN_CLARITY } from '../_shared/wa-modulos.ts';
 import { atenderEnBandeja, rutaDelMensaje } from '../_shared/wa-bandeja.ts';
+import { identificarRemitente } from '../_shared/wa-identificar.ts';
 import type { BotSession, HandlerContext, IncomingMessage, Intent, WaUser } from '../_shared/types.ts';
 import { OPERATOR_ALLOWED_INTENTS, CONTADOR_ALLOWED_INTENTS, READ_ONLY_ALLOWED_INTENTS } from '../_shared/types.ts';
 
@@ -745,76 +746,8 @@ async function identifyUser(
   supabase: ReturnType<typeof getServiceClient>,
   phone: string,
 ): Promise<WaUser | null> {
-  // Normalize phone (remove +, spaces, etc.)
-  const normalized = phone.replace(/[\s+\-()]/g, '');
-
-  // 1. Check if phone belongs to a workspace owner (via RPC — strips non-digits for matching)
-  const { data: staffRows } = await supabase.rpc('wa_identify_user', { p_phone: normalized });
-  const staffMatch = staffRows?.[0];
-
-  if (staffMatch) {
-    // Get workspace subscription info
-    const { data: workspace } = await supabase
-      .from('workspaces')
-      .select('subscription_status, modules')
-      .eq('id', staffMatch.workspace_id)
-      .single();
-
-    // Map the profile role from the DB: owner, admin, operator, supervisor, contador, read_only
-    // wa_identify_user RPC returns es_principal (bool) and optionally role
-    let role: import('../_shared/types.ts').UserRole = 'operator';
-    if (staffMatch.es_principal) {
-      role = 'owner';
-    } else if (staffMatch.role) {
-      // Trust the role from the profiles table if RPC returns it
-      const validRoles = ['owner', 'admin', 'operator', 'supervisor', 'contador', 'read_only'];
-      role = validRoles.includes(staffMatch.role) ? staffMatch.role : 'operator';
-    }
-
-    return {
-      workspace_id: staffMatch.workspace_id,
-      phone: normalized,
-      name: staffMatch.full_name,
-      role,
-      user_id: staffMatch.user_id || undefined,
-      subscription_status: workspace?.subscription_status || 'trial',
-      modulos: workspace ?? null,
-    };
-  }
-
-  // 2. Check if phone belongs to a WA collaborator (also flexible matching)
-  const { data: collabMatch } = await supabase
-    .from('wa_collaborators')
-    .select('id, workspace_id, name, phone, role')
-    .or(`phone.eq.${normalized},phone.eq.+${normalized}`)
-    .eq('is_active', true)
-    .limit(1)
-    .single();
-
-  if (collabMatch) {
-    const { data: workspace } = await supabase
-      .from('workspaces')
-      .select('subscription_status, modules')
-      .eq('id', collabMatch.workspace_id)
-      .single();
-
-    // Map collaborator role — wa_collaborators may have a 'role' column
-    const validRoles = ['owner', 'admin', 'operator', 'supervisor', 'contador', 'read_only'];
-    const collabRole: import('../_shared/types.ts').UserRole =
-      collabMatch.role && validRoles.includes(collabMatch.role) ? collabMatch.role : 'operator';
-
-    return {
-      workspace_id: collabMatch.workspace_id,
-      phone: normalized,
-      name: collabMatch.name,
-      role: collabRole,
-      collaborator_id: collabMatch.id,
-      subscription_status: workspace?.subscription_status || 'trial',
-      modulos: workspace ?? null,
-    };
-  }
-
-  return null;
+  // La logica vive en `_shared/wa-identificar.ts` (probada en `wa-identificar.test.ts`).
+  return identificarRemitente(supabase, phone);
 }
 
 // ============================================================
