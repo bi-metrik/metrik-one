@@ -1,0 +1,25 @@
+---
+name: bandeja-varios-viajes
+description: Modo mixto de la bandeja WA (varios viajes por entrega) y guardianes N1-N9 — migración 20261001120000 SIN aplicar, upsert por (entrega, segmento), límites que el QA debe conocer
+metadata:
+  type: project
+---
+
+PR `feat/bandeja-wa-varios-viajes` (2026-10-01), base main, SIN mergear: va a QA de Vera (grupo F a 5
+corridas, día sintético a 10). Migración `20261001120000` ANTES del deploy de wa-alerts y wa-webhook: el
+upsert del código viejo `on conflict (entrega_id)` se queda sin índice. `modo_viajes` nace en `uno`.
+
+**Why:** Tatiana reenvía varios clientes a la vez; un reenvío no dice de qué chat viene.
+
+**How to apply:**
+- Fila 0 = la entrega (estado `repartida` tras el «sí»); cada viaje confirmado corre en su fila
+  `segmento = k`, que filtra `wa_bandeja_mensajes.segmento = k`. Las confirmaciones N4/N5/N6 reusan
+  `esperando_negocio` + `respuesta_negocio` con `confirmacion_pendiente`: el cron NO cambió.
+- Historia extractiva: solo citas de mensajes REENVIADOS y clase cliente; la prosa del modelo se ignora.
+- Límites declarados: un encabezado olvidado cuyos primeros mensajes no nombran a nadie queda en la caja
+  vieja (solo lo ve el comercial en el resumen); N5 depende de que el modelo liste las solicitudes; D4
+  («mi hermana también va») deja adultos vacío, no lo suma.
+- Fixtures sintéticos: `__fixtures__/bandeja-varios-viajes.json` (F + día) y `bandeja-banco-bcd.json`
+  (A4/B/C/D), salidas del modelo grabadas a mano en el esquema nuevo (mensajes, citas, solicitudes).
+- El aislamiento rechaza `cat >> archivo <<EOF` y `sed` con variables: usar Edit/Write o un .py en el worktree.
+Relacionado: [[entendimiento-bandeja-wa]], [[bandeja-negocio-existente]].
