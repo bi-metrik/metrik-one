@@ -300,3 +300,81 @@ describe('guardián de frase', () => {
     expect(validarSalida({ historia: 'prosa', valores: {} }, FIELDS, 'x').historia).toBe('');
   });
 });
+
+/**
+ * QA de #971 (modo uno, Gemini real). Cada salida grabada copia lo que el log de la corrida 1
+ * registró (qa971/resultados-uno/<esc>.txt: clases, valores, cliente); la frase de cada valor es el
+ * fragmento del mensaje que lo sostiene, porque el log no guarda la salida cruda.
+ */
+describe('QA de #971 · modo uno', () => {
+  it('A3 · «un destino de playa» no es un destino: queda vacío y la preferencia va a requisitos', () => {
+    const ms = aMensajes([{ texto: 'Hola! Somos 17 personas, 4 menores, queremos un destino de playa', reenviado: true, origen: 'texto' }]);
+    // Log: [clases] {"1":"cliente"} · [ONE · valores] {"destino":"PLAYA","tipo_viaje":"playa","ninos":4,…}
+    const grabada = { mensajes: [{ n: 1, clase: 'cliente' }], valores: {
+      destino: { valor: 'Playa', frase: 'un destino de playa' }, tipo_viaje: { valor: 'playa', frase: 'destino de playa' }, ninos: { valor: '4', frase: '4 menores' },
+    } };
+    const { data, e } = correr(grabada, ms);
+    expect(data.destino).toBeUndefined();
+    expect(data.tipo_viaje).toBe('playa');
+    expect(data.requisitos_especiales).toBe('UN DESTINO DE PLAYA');
+    expect(e.salida.descartados.find(d => d.slug === 'destino')?.motivo).toContain('es una opción de');
+  });
+
+  it('A2 · la nota de voz propia que relata la solicitud es contenido; solo se excluyen los juicios', () => {
+    const ms = aMensajes([{ texto: 'Tengo dos pasajeros para Punta Cana del 15 al 20 de noviembre', reenviado: false, origen: 'transcripcion' }]);
+    // Log: [clases] {"1":"comercial"} · [haySolicitud] false · «No vi una solicitud de viaje en este mensaje».
+    const grabada = { mensajes: [{ n: 1, clase: 'comercial' }], valores: {
+      destino: { valor: 'Punta Cana', frase: 'para Punta Cana' },
+      fecha_salida: { valor: '2026-11-15', frase: 'del 15 al 20 de noviembre' }, fecha_regreso: { valor: '2026-11-20', frase: 'del 15 al 20 de noviembre' },
+      adultos: { valor: '2', frase: 'dos pasajeros' },
+    } };
+    const { data, e } = correr(grabada, ms);
+    expect(e.clases[1]).toBe('cliente');
+    expect(e.haySolicitud).toBe(true);
+    expect(data).toMatchObject({ destino: 'PUNTA CANA', fecha_salida: '2026-11-15', fecha_regreso: '2026-11-20', adultos: 2 });
+    // El juicio sí se excluye, aunque venga en nota de voz.
+    const juicio = aMensajes([{ texto: 'ojo, esta señora es muy tacaña', reenviado: false, origen: 'transcripcion' }]);
+    expect(clasesDeMensajes({ mensajes: [{ n: 1, clase: 'cliente' }] }, juicio)[1]).toBe('comercial');
+  });
+
+  it('C5 · «pta cana» llena el destino aunque el modelo marque el mensaje como ruido', () => {
+    const ms = aMensajes([
+      { texto: 'pta cana', reenviado: true, origen: 'texto' }, { texto: '2 adlts y 1 niño d 5', reenviado: true, origen: 'texto' },
+      { texto: 'saliendo de bgta', reenviado: true, origen: 'texto' },
+    ]);
+    // Log: [clases] {"1":"ruido","2":"cliente","3":"cliente"} · destino descartado «sin frase del mensaje».
+    const grabada = { mensajes: [{ n: 1, clase: 'ruido' }, { n: 2, clase: 'cliente' }, { n: 3, clase: 'cliente' }], valores: {
+      destino: { valor: 'Punta Cana', frase: 'pta cana' }, ciudad_origen: { valor: 'Bogotá', frase: 'saliendo de bgta' },
+    } };
+    const { data, e } = correr(grabada, ms);
+    expect(e.clases[1]).toBe('cliente');
+    expect(data.destino).toBe('PUNTA CANA');
+    // Un «jajaja» sin ningún valor sigue siendo ruido.
+    expect(clasesDeMensajes({ mensajes: [{ n: 1, clase: 'ruido' }], valores: {} }, aMensajes([{ texto: 'jajaja', reenviado: true, origen: 'texto' }]))[1]).toBe('ruido');
+  });
+
+  it('E2a · un marcador del prompt nunca llega a un valor: sin nombre, el bot pide el nombre', () => {
+    const ms = aMensajes([{ texto: 'Hola, queremos ir a Cartagena del 4 al 8 de diciembre, somos 2 adultos', reenviado: true, origen: 'texto' }]);
+    // Log: «No encontré a «(no lo dijo)» en el directorio.»
+    const e = entenderEntrega({ cliente: { nombre: '(no lo dijo)', telefono: '' }, valores: {} }, FIELDS, ms);
+    expect(e.salida.cliente.nombre).toBeNull();
+    expect(textoPreguntaContacto({ tipo: 'preguntar', motivo: 'ninguno', opciones: [], nombre: e.salida.cliente.nombre ?? '' })).toBe(TEXTO_PIDE_NOMBRE);
+  });
+
+  it('N6 · el nombre que se compara sale de quien se presenta en un mensaje del cliente, nunca del código ni de «Tati»', () => {
+    const f1 = aMensajes([{ texto: 'Ya hablé con mi esposo: salimos el 28 de diciembre y volvemos el 3 de enero', reenviado: true, origen: 'texto' }]);
+    // Log F1: «Estos mensajes hablan de Viaje T1 26 11 y T1 26 11 es de CAROLINA RUIZ…» (23 de 23 falsos en F).
+    const e1 = entenderEntrega({ cliente: { nombre: 'Viaje T1 26 11' }, valores: {} }, FIELDS, f1);
+    expect([e1.salida.cliente.nombre, e1.sePresenta]).toEqual([null, null]);
+    expect(detectarCruce({ destinoNegocio: 'PUNTA CANA', destinoMensajes: null, clienteNegocio: 'CAROLINA RUIZ', clienteMensajes: e1.sePresenta })).toEqual([]);
+    // Log del día: «Estos mensajes hablan de Tati y T1 26 9 es de LUISA MEJÍA…»
+    const dia = aMensajes([{ texto: 'Buenas Tati, para San Andrés serían del 20 al 24 de noviembre', reenviado: true, origen: 'texto' }]);
+    const e2 = entenderEntrega({ cliente: { nombre: 'Tati' }, valores: {} }, FIELDS, dia);
+    expect(e2.sePresenta).toBeNull();
+    // Quien sí se presenta cuenta; y si no es el cliente del negocio, el aviso es verdadero.
+    const andres = aMensajes([{ texto: 'Hola, soy Andrés Gil, me pasó tu número Luisa, quiero cotizar Cancún', reenviado: true, origen: 'texto' }]);
+    const e3 = entenderEntrega({ valores: {} }, FIELDS, andres);
+    expect(e3.sePresenta).toBe('Andrés Gil');
+    expect(detectarCruce({ destinoNegocio: null, destinoMensajes: null, clienteNegocio: 'CAROLINA RUIZ', clienteMensajes: e3.sePresenta })).toHaveLength(1);
+  });
+});

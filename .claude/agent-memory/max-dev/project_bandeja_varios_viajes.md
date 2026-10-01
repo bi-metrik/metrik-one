@@ -21,5 +21,9 @@ upsert del código viejo `on conflict (entrega_id)` se queda sin índice. `modo_
   («mi hermana también va») deja adultos vacío, no lo suma.
 - Fixtures sintéticos: `__fixtures__/bandeja-varios-viajes.json` (F + día) y `bandeja-banco-bcd.json`
   (A4/B/C/D), salidas del modelo grabadas a mano en el esquema nuevo (mensajes, citas, solicitudes).
+- QA de #971 (Gemini real) tumbó la primera versión: el día dio S1 10/10. Lecciones: el modelo
+  NO debe decidir el año de una fecha; el «cliente» que extrae el modelo puede ser el código o «Tati»
+  (comparar solo con quien se presenta); el destino no es evidencia de asignación; un «sí» con sin
+  asignar descartaba en silencio. Las propuestas reales están en `__fixtures__/bandeja-qa971.json`.
 - El aislamiento rechaza `cat >> archivo <<EOF` y `sed` con variables: usar Edit/Write o un .py en el worktree.
 Relacionado: [[entendimiento-bandeja-wa]], [[bandeja-negocio-existente]].

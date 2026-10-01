@@ -127,6 +127,41 @@ describe('la asignación por mensaje y el reparto', () => {
   })
 })
 
+describe('un encabezado no es la respuesta a una pregunta pendiente (QA de #971, punto 12)', () => {
+  const registrar = (wamid: string, texto: string, puede: boolean | null) => db.query<{ accion: string; entrega: string }>(
+    `select * from public.wa_bandeja_registrar_mensaje($1, $2, null, null, $3, 'text', $4, 'texto', false, false, null, null, null, false, 24${puede === null ? '' : ', $5'})`,
+    puede === null ? [WS, TEL, wamid, texto] : [WS, TEL, wamid, texto, puede])
+
+  it('con un resumen pendiente, «Carolina» como encabezado abre otra entrega; «sí» sigue siendo la respuesta', async () => {
+    const e = await entrega('esperando_cliente')
+    await db.query(`update public.wa_bandeja_entregas set pregunta_enviada_at = now() where id = $1`, [e])
+    const enc = (await registrar('w-enc', 'Carolina', false)).rows[0]
+    expect(enc.accion).toBe('abrir')
+    expect(enc.entrega).not.toBe(e)
+    // Se cierra la tanda nueva para que el «sí» no caiga en ella.
+    await db.query(`update public.wa_bandeja_entregas set estado = 'esperando_cliente', cerrada_at = now(), motivo_cierre = 'palabra_cierre' where id = $1`, [enc.entrega])
+    await db.query(`update public.wa_bandeja_entregas set pregunta_enviada_at = now() - interval '1 minute' where id = $1`, [enc.entrega])
+    const si = (await registrar('w-si', 'sí', null)).rows[0]
+    expect(si.accion).toBe('respuesta_cliente')
+  })
+
+  it('la firma vieja ya no existe y la nueva solo la ejecuta el servidor', async () => {
+    const r = await db.query<{ args: string; anon: boolean; svc: boolean }>(`
+      select pg_get_function_identity_arguments(p.oid) as args, has_function_privilege('anon', p.oid, 'execute') as anon,
+             has_function_privilege('service_role', p.oid, 'execute') as svc
+        from pg_proc p where p.proname = 'wa_bandeja_registrar_mensaje'`)
+    expect(r.rows).toHaveLength(1)
+    expect(r.rows[0].args).toContain('p_puede_ser_respuesta boolean')
+    expect([r.rows[0].anon, r.rows[0].svc]).toEqual([false, true])
+  })
+
+  it('la bandeja le dice a la base cuándo un escrito es encabezado, y no lo toma como respuesta', () => {
+    const fuente = readFileSync(join(process.cwd(), 'supabase/functions/_shared/wa-bandeja.ts'), 'utf8')
+    expect(fuente).toContain('p_puede_ser_respuesta: !esEncabezado')
+    expect(fuente).toContain('if (!esEncabezado && message.type === \'text\'')
+  })
+})
+
 describe('el cron no cambió', () => {
   it('un reparto confirmado (fila 0 repartida) no es trabajo; un viaje del reparto en error se reintenta', async () => {
     const e = await entrega()

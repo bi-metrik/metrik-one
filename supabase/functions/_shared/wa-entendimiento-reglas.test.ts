@@ -646,6 +646,12 @@ describe('QA de #971 · R1: el año lo pone el código, no el modelo', () => {
     expect(s.sugeridos.fecha_regreso?.valor).toBe('2027-01-03');
   });
 
+  it('el regreso de enero después de una salida de diciembre del año siguiente va al año de después', () => {
+    const t = 'volvemos el 3 de enero';
+    const s = validarSalida({ valores: { fecha_regreso: { valor: '2027-01-03', frase: t } } }, FIELDS, t, { hoyISO: '2026-10-01', conocidos: { fecha_salida: '2027-12-20' } });
+    expect(s.sugeridos.fecha_regreso?.valor).toBe('2028-01-03');
+  });
+
   it('si la frase dice el año, manda la frase', () => {
     const t = 'salimos el 28 de diciembre de 2027';
     expect(validarSalida({ valores: { fecha_salida: { valor: '2027-12-28', frase: t } } }, FIELDS, t, { hoyISO: '2026-10-01' }).sugeridos.fecha_salida?.valor).toBe('2027-12-28');

@@ -369,6 +369,9 @@ export function datosDelMensaje(cuerpo: string): { fechas: string[]; adultos: nu
   return { fechas, adultos };
 }
 
+/** Un saludo que abre una conversación: «Hola Tati, buenas tardes», «Buenos días». */
+const RE_SALUDO = /^(hola|buenas|buenos dias|buen dia|buenas tardes|buenas noches|que mas|quiubo)\b/;
+
 /** ¿El mensaje dice fechas o adultos distintos de lo que ya dijo la caja? */
 function chocaConLaCaja(m: { fechas: string[]; adultos: number[] }, caja: { fechas: Set<string>; adultos: Set<number> }): string | null {
   if (m.fechas.length > 0 && caja.fechas.size > 0 && !m.fechas.some(f => caja.fechas.has(f))) return 'dice otras fechas que lo anterior de esa caja';
@@ -455,6 +458,7 @@ export function armarPlan(p: {
     const nombreCaja = seg.encabezado ? `el encabezado «${seg.encabezado.texto}»` : `el bloque de ${caja?.cliente ?? 'ese viaje'}`;
     const vistos = { fechas: new Set<string>(), adultos: new Set<number>() };
     let rota = false;
+    let enLaCaja = 0;
     let ultimo = seg.encabezado ? Date.parse(p.mensajes.find(x => x.n === seg.encabezado!.n)?.en ?? '') : NaN;
 
     for (const n of seg.mensajes) {
@@ -499,8 +503,10 @@ export function armarPlan(p: {
         poner({ n, destino: caja, por: 'modelo', evidencia: a.evidencia });
       } else {
         const otroDestino = destinosNombrados(m.cuerpo, p.viajes).find(d => d !== destinoDe(caja) && !destinoDe(caja).includes(d));
+        const saludoAMitad = enLaCaja > 0 && RE_SALUDO.test(normalizarTexto(m.cuerpo));
         const duda = rota ? 'viene después de un mensaje dudoso, sin pista propia'
           : otroDestino && caja.tipo === 'existente' ? `habla de ${otroDestino.toUpperCase()} y ${caja.codigo ?? 'ese viaje'} va a ${destinoDe(caja).toUpperCase() || 'otro lugar'}`
+          : saludoAMitad ? 'un saludo a mitad de la caja suele abrir otra conversación'
           : trasSilencio ? `llegó después de un silencio, sin pista de que siga siendo de ${caja.cliente ?? 'ese viaje'}`
           : chocaConLaCaja(datos, vistos);
         if (duda) {
@@ -510,6 +516,7 @@ export function armarPlan(p: {
         }
         poner({ n, destino: caja, por: porQueCaja, evidencia: null });
       }
+      enLaCaja++;
       for (const f of datos.fechas) vistos.fechas.add(f);
       for (const x of datos.adultos) vistos.adultos.add(x);
     }
