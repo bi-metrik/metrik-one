@@ -420,11 +420,15 @@ async function processMessage(message: IncomingMessage): Promise<void> {
   //     propia llave, y antes del tope de 30 mensajes por hora porque una sola conversacion
   //     reenviada puede pasar de 30 y la bandeja no gasta parser. Con la llave apagada no hace
   //     ni una consulta: todo sigue exactamente como antes. Reglas en `_shared/wa-bandeja-reglas.ts`.
+  //     Con la llave encendida manda la bandeja: solo van al bot «gasto …», «bot …» (sin la palabra
+  //     «bot») y lo que contesta una conversación del bot a medias.
   const bandeja = await rutaDelMensaje(supabase, user, message);
+  if (bandeja.atendido) return;
   if (bandeja.ruta === 'bandeja' && bandeja.config) {
     await atenderEnBandeja(supabase, user, message, bandeja.config);
     return;
   }
+  if (bandeja.textoParaElBot) message.text = bandeja.textoParaElBot;
 
   // 1b. Modulo. Todo lo que sigue (gastos, contactos, actividad de negocios, numeros, cartera, y
   //     la transcripcion y el parseo con Gemini) es de Clarity. Va despues de la aceptacion de

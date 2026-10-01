@@ -18,13 +18,14 @@
 // ============================================================
 
 import { sendTextMessage } from './wa-respond.ts';
-import { bandejaActiva, leerConfigBandeja } from './wa-bandeja-reglas.ts';
+import { bandejaActiva, leerConfigBandeja, momentoDelMensaje, ordenarPorEnvio } from './wa-bandeja-reglas.ts';
 import type { ConfigBandeja } from './wa-bandeja-reglas.ts';
 import { todayBogotaISO } from './bogota.ts';
 import { aplanarBloques } from './niveles-solicitud.ts';
 import {
   aplicarSumas,
   conDeducciones,
+  conMesEnLaPregunta,
   decidirContacto,
   digitosTelefono,
   esquemaDeSalida,
@@ -35,9 +36,12 @@ import {
   mayusculasDeViaje,
   mensajeAlComercial,
   nombreDeLaRespuesta,
+  nombreDeViaje,
   nombreEsLugar,
+  nombreViajeNuevo,
   normalizarNombre,
   palabrasDeBusqueda,
+  pistasDelTexto,
   resumenEntendido,
   MAX_PREGUNTAS,
   textoPreguntaContacto,
@@ -220,16 +224,22 @@ type MensajeCrudo = {
   reenviado: boolean | null;
   tipo: string | null;
   recibido_at: string | null;
+  enviado_at?: string | null;
   segmento: number | null;
 };
 
-/** Los mensajes de contenido de la entrega, en orden de llegada. Su número (1, 2…) es su posición. */
+/**
+ * Los mensajes de contenido de la entrega, en el orden en que el comercial los MANDÓ (la hora de
+ * Meta, `ordenarPorEnvio`): un escrito registrado antes que su encabezado, por la carrera de los
+ * webhooks, queda después de él (prueba en vivo del 2026-10-01, error 1). Su número (1, 2…) es su
+ * posición.
+ */
 async function leerMensajes(supabase: SupabaseClient, entregaId: string): Promise<MensajeCrudo[] | string> {
   const { data, error } = await supabase.from('wa_bandeja_mensajes')
-    .select('id, cuerpo, cuerpo_origen, reenviado, tipo, recibido_at, segmento')
+    .select('id, cuerpo, cuerpo_origen, reenviado, tipo, recibido_at, enviado_at, segmento')
     .eq('entrega_id', entregaId).eq('papel', 'contenido').order('recibido_at', { ascending: true });
   if (error) return `no se pudieron leer los mensajes: ${error.message}`;
-  return (data ?? []) as MensajeCrudo[];
+  return ordenarPorEnvio((data ?? []) as MensajeCrudo[]);
 }
 
 function aEntrega(crudos: ReadonlyArray<MensajeCrudo>): MensajeEntrega[] {
@@ -241,7 +251,7 @@ function aEntrega(crudos: ReadonlyArray<MensajeCrudo>): MensajeEntrega[] {
 function aViaje(crudos: ReadonlyArray<MensajeCrudo>): MensajeViaje[] {
   return crudos.map((m, i) => ({
     n: i + 1, cuerpo: String(m.cuerpo ?? ''), reenviado: m.reenviado === true, tipo: m.tipo ?? 'text',
-    en: m.recibido_at ?? new Date(0).toISOString(),
+    en: new Date(momentoDelMensaje(m)).toISOString(),
   }));
 }
 
@@ -289,16 +299,24 @@ async function crearNegocio(
   supabase: SupabaseClient,
   p: {
     workspaceId: string; cfg: ConfigLinea; contactoId: string; entregaId: string;
-    staffId: string | null; salida: SalidaEntendida;
+    staffId: string | null; salida: SalidaEntendida; pistas: { mes: number | null; duracion: string | null };
   },
 ): Promise<{ negocioId: string; valores: Record<string, unknown> } | string> {
   const { data: contacto } = await supabase.from('contactos').select('nombre').eq('id', p.contactoId).maybeSingle();
-  const destino = p.salida.sugeridos.destino?.valor;
-  const nombre = [contacto?.nombre ?? 'Solicitud por WhatsApp', destino].filter(Boolean).join(' · ');
+  // El nombre con la convención de la agencia (destino y mes o duración: «CARTAGENA DIC 12-16»), o
+  // uno provisional sin destino («Viaje de Laura Prueba»). La marca dice que lo puso el bot: si
+  // alguien lo cambia a mano, el bot ya no lo toca (prueba en vivo del 2026-10-01, parte B).
+  const sug = p.salida.sugeridos;
+  const auto = nombreViajeNuevo({
+    destino: sug.destino?.valor, salida: sug.fecha_salida?.valor, regreso: sug.fecha_regreso?.valor,
+    mes: p.pistas.mes, duracion: p.pistas.duracion, cliente: (contacto?.nombre as string | null) ?? null,
+  });
+  const nombre = auto.nombre;
 
   const { data: neg, error } = await supabase.from('negocios').insert({
     workspace_id: p.workspaceId,
     nombre,
+    metadata: { nombre_auto: nombre, nombre_provisional: auto.provisional },
     linea_id: p.cfg.lineaId,
     contacto_id: p.contactoId,
     etapa_actual_id: p.cfg.etapaId,
@@ -366,30 +384,49 @@ async function cerrarConNegocio(
   contactoId: string,
   salida: SalidaEntendida,
 ): Promise<void> {
+  const pistas = await pistasDeLaEntrega(supabase, ent);
   const r = await crearNegocio(supabase, {
     workspaceId: ent.workspace_id as string, cfg, contactoId, entregaId: ent.entrega_id as string,
-    staffId: (ent.remitente_staff_id as string | null) ?? null, salida,
+    staffId: (ent.remitente_staff_id as string | null) ?? null, salida, pistas,
   });
   if (typeof r === 'string') {
     await actualizar(supabase, ent.id as string, { estado: 'error', error: r, contacto_id: contactoId });
     return;
   }
   const h = huecos(cfg.fields, r.valores);
-  const { data: creado } = await supabase.from('negocios').select('codigo, contactos(nombre)').eq('id', r.negocioId).maybeSingle();
+  const { data: creado } = await supabase.from('negocios').select('codigo, nombre, contactos(nombre)').eq('id', r.negocioId).maybeSingle();
   const msg = mensajeAlComercial({
     // El resumen con lo que el comercial dijo, no con la mayúscula del bloque.
     resumen: resumenEntendido(cfg.fields, { ...r.valores, ...Object.fromEntries(Object.entries(salida.sugeridos).map(([k, v]) => [k, v.valor])) }),
-    faltanMinimo: h.minimo.faltan,
+    faltanMinimo: conMesEnLaPregunta(h.minimo.faltan, vacioFecha(r.valores) ? pistas.mes : null),
     enlace: enlaceNegocio(cfg.slug, r.negocioId),
     descartados: salida.descartados.map(d => d.slug),
     preguntasAntes: preguntasDeGuardian(salida.descartados),
-    avance: lineaAvance({ codigo: (creado?.codigo as string | null) ?? null, cliente: nombreRel(creado?.contactos), fields: cfg.fields, valores: r.valores }),
+    avance: lineaAvance({
+      codigo: (creado?.codigo as string | null) ?? null, cliente: nombreRel(creado?.contactos), nombre: (creado?.nombre as string | null) ?? null,
+      fields: cfg.fields, valores: r.valores,
+    }),
   });
   const ok = await enviar(ent.remitente_phone as string, msg, ent.workspace_id as string);
   await actualizar(supabase, ent.id as string, {
     estado: 'negocio_creado', contacto_id: contactoId, negocio_id: r.negocioId, huecos: h, confirmacion_pendiente: null,
     respuesta_enviada_at: ok ? new Date().toISOString() : null, error: ok ? null : 'envio fallido',
   });
+}
+
+/** ¿Falta la fecha de salida? Solo entonces la pregunta recuerda el mes que dijeron. */
+function vacioFecha(valores: Record<string, unknown>): boolean {
+  const v = valores.fecha_salida;
+  return v === undefined || v === null || v === '';
+}
+
+/** El mes y la duración que dicen los mensajes de este viaje (los de su segmento, si es un reparto). */
+async function pistasDeLaEntrega(supabase: SupabaseClient, ent: Fila): Promise<{ mes: number | null; duracion: string | null }> {
+  const crudos = await leerMensajes(supabase, ent.entrega_id as string);
+  if (typeof crudos === 'string') return { mes: null, duracion: null };
+  const k = Number(ent.segmento ?? 0);
+  const delViaje = k > 0 ? crudos.filter(m => m.segmento === k) : crudos;
+  return pistasDelTexto(delViaje.map(m => String(m.cuerpo ?? '')).join('\n'));
 }
 
 /** Las preguntas en el acto que dejó un guardián (C9), sin repetir. */
@@ -689,9 +726,11 @@ async function negociosAbiertos(
   return filas.map(n => ({
     id: n.id as string,
     codigo: (n.codigo as string | null) ?? null,
-    cliente: nombreRel(n.contactos) ?? nombreRel(n.empresas) ?? ((n.nombre as string | null) ?? null),
+    // El cliente es el contacto o la empresa; el nombre del negocio va aparte (y también es encabezado).
+    cliente: nombreRel(n.contactos) ?? nombreRel(n.empresas),
     cliente_id: (n.contacto_id as string | null) ?? (n.empresa_id as string | null) ?? null,
     destino: destinos.get(n.id as string) ?? null,
+    nombre: (n.nombre as string | null) ?? null,
     created_at: n.created_at as string,
     del_remitente: suyos.has(n.id as string),
   }));
@@ -757,7 +796,7 @@ export async function viajesAbiertosDeLaBandeja(supabase: SupabaseClient, worksp
   const l = await lineaDeLaBandeja(supabase, workspaceId);
   if (typeof l === 'string') return null;
   const abiertos = await negociosAbiertos(supabase, workspaceId, l.lineaId, null);
-  return abiertos ? abiertos.map(n => ({ id: n.id, codigo: n.codigo, cliente: n.cliente, destino: n.destino })) : null;
+  return abiertos ? abiertos.map(n => ({ id: n.id, codigo: n.codigo, cliente: n.cliente, destino: n.destino, nombre: n.nombre ?? null })) : null;
 }
 
 /** Códigos (compactos) de negocios NO abiertos del workspace: «T1 26 3 está cerrado» y no «no existe». */
@@ -782,7 +821,7 @@ async function armarReparto(
   }
   const abiertos = await negociosAbiertos(supabase, workspaceId, l.lineaId, null);
   if (!abiertos) return null;
-  const viajes: ViajeAbierto[] = abiertos.map(n => ({ id: n.id, codigo: n.codigo, cliente: n.cliente, destino: n.destino }));
+  const viajes: ViajeAbierto[] = abiertos.map(n => ({ id: n.id, codigo: n.codigo, cliente: n.cliente, destino: n.destino, nombre: n.nombre ?? null }));
   const mensajes = aViaje(crudos);
   const equipo = await equipoDelWorkspace(supabase, workspaceId);
   const { segmentos, encabezados } = armarSegmentos(mensajes, viajes, { horasCajaActiva: l.bandeja.horasCajaActiva, equipo });
@@ -873,7 +912,10 @@ export function nombreDeTanda(iso: string | null): string {
 
 /** El nombre de una entrega: los clientes de su reparto («Diego Prueba», «Carolina y Luisa»), o la hora de la tanda. */
 export function nombreDeLaEntrega(plan: PlanViajes | null, creadaAt: string | null): string {
-  const nombres = plan ? gruposDelPlan(plan).map(g => g.destino.cliente).filter((x): x is string => !!x && x.trim() !== '') : [];
+  // Un viaje que ya existe se nombra como lo recuerda el comercial («Europa 2 días · Carolina Ruiz (M1 26 5)»).
+  const nombres = plan
+    ? gruposDelPlan(plan).map(g => (g.destino.tipo === 'existente' ? nombreDeViaje(g.destino) : g.destino.cliente)).filter((x): x is string => !!x && x.trim() !== '')
+    : [];
   if (nombres.length === 0) return nombreDeTanda(creadaAt);
   return nombres.length === 1 ? nombres[0] : `${nombres.slice(0, -1).join(', ')} y ${nombres[nombres.length - 1]}`;
 }
@@ -883,9 +925,8 @@ async function nombreDelViaje(supabase: SupabaseClient, ent: Fila): Promise<stri
   const dado = String(ent.contacto_nombre ?? '').trim() || String((ent.cliente as Fila | null)?.nombre ?? '').trim();
   if (dado) return dado;
   if (ent.negocio_destino_id) {
-    const { data: n } = await supabase.from('negocios').select('codigo, contactos(nombre)').eq('id', ent.negocio_destino_id).maybeSingle();
-    const t = [n?.codigo as string | undefined, nombreRel(n?.contactos)].filter(Boolean).join(' · ');
-    if (t) return t;
+    const { data: n } = await supabase.from('negocios').select('codigo, nombre, contactos(nombre)').eq('id', ent.negocio_destino_id).maybeSingle();
+    if (n) return nombreDeViaje({ nombre: (n.nombre as string | null) ?? null, cliente: nombreRel(n.contactos), codigo: (n.codigo as string | null) ?? null });
   }
   const { data: e } = await supabase.from('wa_bandeja_entregas').select('plan_viajes, created_at').eq('id', ent.entrega_id).maybeSingle();
   return nombreDeLaEntrega((e?.plan_viajes ?? null) as PlanViajes | null, (e?.created_at as string | null) ?? null);
@@ -1088,7 +1129,7 @@ async function cargarEnNegocioExistente(
 ): Promise<void> {
   const workspaceId = ent.workspace_id as string;
   const { data: neg } = await supabase.from('negocios')
-    .select('id, codigo, estado, linea_id, contacto_id, workspaces(slug), contactos(nombre), empresas(nombre)')
+    .select('id, codigo, nombre, metadata, estado, linea_id, contacto_id, workspaces(slug), contactos(nombre), empresas(nombre)')
     .eq('id', negocioId).eq('workspace_id', workspaceId).maybeSingle();
   if (!neg || neg.estado !== 'abierto') {
     await volverAPreguntarNegocio(supabase, ent, opciones, 'Ese viaje ya no está abierto.');
@@ -1152,7 +1193,8 @@ async function cargarEnNegocioExistente(
     });
     if (cruces.length > 0) {
       await preguntarYEsperar(supabase, ent, textoAvisoCruce({
-        codigo: (neg.codigo as string | null) ?? null, cliente: clienteNegocio, destino: (yaTiene.destino as string | undefined) ?? null, cruces,
+        codigo: (neg.codigo as string | null) ?? null, cliente: clienteNegocio, destino: (yaTiene.destino as string | undefined) ?? null,
+        nombre: (neg.nombre as string | null) ?? null, cruces,
       }), 'cruce', { negocio_destino_id: negocioId });
       return;
     }
@@ -1183,7 +1225,13 @@ async function cargarEnNegocioExistente(
     despues.push({ fields: b.fields, data: quedo ?? b.data });
   }
 
-  const h = huecos(campos, aplicarSumas(campos, aplanarBloques(despues).valores));
+  const valoresQuedan = aplicarSumas(campos, aplanarBloques(despues).valores);
+  const h = huecos(campos, valoresQuedan);
+
+  // El nombre PROVISIONAL («Viaje de Laura Prueba») se cambia cuando llega el destino, y solo si
+  // nadie lo editó a mano: el nombre sigue siendo el que puso el bot (`metadata.nombre_auto`).
+  const pistas = pistasDelTexto(crudos.map(m => String(m.cuerpo ?? '')).join('\n'));
+  const nombreViaje = await renombrarSiEsProvisional(supabase, neg as Fila, valoresQuedan, pistas);
 
   // La traza y la historia se AGREGAN a la actividad del negocio: nada se reemplaza.
   let quien = '';
@@ -1208,15 +1256,13 @@ async function cargarEnNegocioExistente(
     ...salida.descartados,
     ...sinSustento.map(slug => ({ slug, motivo: `la frase no dice el número nuevo: «${salida.sugeridos[slug]?.frase ?? ''}»` })),
   ];
+  const nombrado = { nombre: nombreViaje, cliente: nombreRel(neg.contactos) ?? nombreRel(neg.empresas), codigo: (neg.codigo as string | null) ?? null };
   const msg = mensajeCargaExistente({
-    codigo: (neg.codigo as string | null) ?? null, fields: campos, escritos, conflictos, actualizados,
-    faltanMinimo: h.minimo.faltan, enlace: enlaceNegocio(wsSlug, negocioId), maxPreguntas: MAX_PREGUNTAS,
+    codigo: (neg.codigo as string | null) ?? null, nombre: nombreDeViaje(nombrado), fields: campos, escritos, conflictos, actualizados,
+    faltanMinimo: conMesEnLaPregunta(h.minimo.faltan, vacioFecha(valoresQuedan) ? pistas.mes : null), enlace: enlaceNegocio(wsSlug, negocioId), maxPreguntas: MAX_PREGUNTAS,
     descartados: descartadosTodos.map(d => d.slug),
     preguntasAntes: preguntasDeGuardian(descartadosTodos),
-    avance: lineaAvance({
-      codigo: (neg.codigo as string | null) ?? null, cliente: nombreRel(neg.contactos) ?? nombreRel(neg.empresas),
-      fields: campos, valores: aplicarSumas(campos, aplanarBloques(despues).valores),
-    }),
+    avance: lineaAvance({ ...nombrado, fields: campos, valores: valoresQuedan }),
   });
   const ok = await enviar(ent.remitente_phone as string, msg, workspaceId);
   await actualizar(supabase, ent.id as string, {
@@ -1227,6 +1273,33 @@ async function cargarEnNegocioExistente(
     descartados: descartadosTodos,
     respuesta_enviada_at: ok ? new Date().toISOString() : null, error: ok ? null : 'envio fallido',
   });
+}
+
+/**
+ * Si el nombre del negocio es el PROVISIONAL que puso el bot («Viaje de Laura Prueba») y ya se sabe
+ * el destino, lo cambia por el de la convención («CARTAGENA DIC 12-16»). Un nombre editado a mano
+ * (distinto de `metadata.nombre_auto`) no se toca nunca. Devuelve el nombre que quedó.
+ */
+async function renombrarSiEsProvisional(
+  supabase: SupabaseClient, neg: Fila, valores: Record<string, unknown>, pistas: { mes: number | null; duracion: string | null },
+): Promise<string | null> {
+  const actual = (neg.nombre as string | null) ?? null;
+  const meta = (neg.metadata && typeof neg.metadata === 'object' ? neg.metadata : {}) as Fila;
+  if (!actual || meta.nombre_provisional !== true || meta.nombre_auto !== actual) return actual;
+  const nuevo = nombreViajeNuevo({
+    destino: valores.destino, salida: valores.fecha_salida, regreso: valores.fecha_regreso,
+    mes: pistas.mes, duracion: pistas.duracion, cliente: nombreRel(neg.contactos),
+  });
+  if (nuevo.provisional || nuevo.nombre === actual) return actual;
+  // Solo si el nombre sigue siendo el del bot en este instante (una edición a mano entre tanto gana).
+  const { data, error } = await supabase.from('negocios')
+    .update({ nombre: nuevo.nombre, metadata: { ...meta, nombre_auto: nuevo.nombre, nombre_provisional: false } })
+    .eq('id', neg.id).eq('nombre', actual).select('id');
+  if (error || (data ?? []).length === 0) {
+    if (error) console.error(`[wa-entendimiento] no se pudo renombrar el negocio ${neg.id}:`, error.message);
+    return actual;
+  }
+  return nuevo.nombre;
 }
 
 /** El comercial contestó «¿cuál contacto?». */

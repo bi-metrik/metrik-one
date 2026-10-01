@@ -129,7 +129,7 @@ describe('3 · sí/no con un normalizador compartido', () => {
     const duda = [...base, enc(4, 'no sé'), m(5, 'somos 2')];
     expect(destinos(duda, vs)).toEqual([[2, 'T1 26 100'], [4, null], [5, null]]);
     expect(pendienteDeLaCaja(reparto(duda, vs).segmentos)).toMatchObject({ tipo: 'cambio', viaje: { id: 'v1' } });
-    expect(textoNoEntendiCambio(vs[1])).toBe('No entendí: ¿cambias a LUISA MEJÍA · T1 26 101? sí/no');
+    expect(textoNoEntendiCambio(vs[1])).toBe('No entendí: ¿cambias a Luisa Mejía (T1 26 101)? sí/no');
   });
 });
 
