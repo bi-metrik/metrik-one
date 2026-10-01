@@ -34,5 +34,8 @@ upsert del código viejo `on conflict (entrega_id)` se queda sin índice. `modo_
   nunca es candidato. NO existe marca de negocio de prueba en el esquema: no inventarla.
 - Edades: decisión de Mauricio, la edad NO mueve a nadie de categoría (niño/adulto dependen del
   componente y los decide operaciones). Único corte: infante < 2. No hay cortes en la config.
+- QA v6: el equipo se compara también por primer nombre y su prefijo de 3+ letras («Tati»); «nuevo»
+  suelto pide el nombre en el acto; `leerSiNo` es el normalizador compartido (estricto para el «sí» que
+  carga: «ok»/«👍» no cargan, F11). C9 («bebé de 18» como infante) espera decisión de Mauricio.
 - El aislamiento rechaza `cat >> archivo <<EOF` y `sed` con variables: usar Edit/Write o un .py en el worktree.
 Relacionado: [[entendimiento-bandeja-wa]], [[bandeja-negocio-existente]].

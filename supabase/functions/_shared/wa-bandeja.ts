@@ -11,9 +11,9 @@
 // ============================================================
 
 import { transcribeAudio, PROMPT_TRANSCRIPCION_LITERAL } from './wa-transcribe.ts';
-import { armarPreguntaNegocio, cambioPorConfirmar, candidatosDeEncabezado, hayPreguntaPendiente, tomarRespuestaContacto } from './wa-entendimiento.ts';
-import { esNo, esSi, lineaCaja, resolverEncabezado, respuestaAlEncabezado } from './wa-viajes-reglas.ts';
-import type { ResolucionEncabezado, ViajeAbierto } from './wa-viajes-reglas.ts';
+import { armarPreguntaNegocio, candidatosDeEncabezado, pendienteDeLaTanda, hayPreguntaPendiente, tomarRespuestaContacto } from './wa-entendimiento.ts';
+import { esNombreNuevo, leerSiNo, lineaCaja, resolverEncabezado, respuestaAlEncabezado, textoNoEntendiCambio, TEXTO_PIDE_NOMBRE_NUEVO } from './wa-viajes-reglas.ts';
+import type { ResolucionEncabezado } from './wa-viajes-reglas.ts';
 import { sendTextMessage } from './wa-respond.ts';
 import {
   bandejaActiva,
@@ -153,10 +153,10 @@ export async function atenderEnBandeja(
   // Un encabezado («Carolina», «T1 26 9») abre una caja: nunca es la respuesta a una pregunta
   // pendiente (QA de #971: el que se escribía antes del «sí» se tomaba como respuesta al resumen).
   const encabezado = await encabezadoDelEscrito(supabase, user.workspace_id, message, config);
-  // La respuesta a «¿Cambias a…? sí/no» va a la tanda (la lee el reparto) y tampoco es la
-  // respuesta a otra pregunta (QA de #971 v5).
-  const cambio = encabezado ? null : await respuestaAlCambio(supabase, user.workspace_id, message, config);
-  const esEncabezado = encabezado !== null || cambio !== null;
+  // Si la tanda espera algo en el acto («¿Cambias a…? sí/no» o el nombre de un «nuevo»), este escrito
+  // va a la tanda (la relee el reparto) y no es la respuesta a otra pregunta (QA de #971 v5 y v6).
+  const enEspera = encabezado ? null : await respuestaEnEspera(supabase, user.workspace_id, message, config);
+  const esEncabezado = encabezado !== null || enEspera !== null;
 
   // ¿Es la respuesta a «¿cuál de estos contactos es?» del paso de entendimiento? Se mira
   // ANTES de registrar: como contenido abriría una entrega nueva y la pregunta quedaría sin
@@ -227,9 +227,7 @@ export async function atenderEnBandeja(
   // En el acto (QA de #971 v5): un encabezado exacto se confirma con «📌»; uno aproximado pregunta
   // «¿Cambias a…? sí/no» y lo que sigue queda sin asignar hasta la respuesta.
   if (fila.accion === 'agregar' || fila.accion === 'abrir') {
-    const aviso = cambio
-      ? (cambio.si ? `📌 ${lineaCaja(cambio.viaje)}` : `No cambio a ${lineaCaja(cambio.viaje)}: lo que sigue queda sin asignar hasta otro encabezado.`)
-      : respuestaAlEncabezado(encabezado);
+    const aviso = enEspera ? enEspera.aviso : respuestaAlEncabezado(encabezado);
     if (aviso) await enviar(message.phone, aviso, user.workspace_id);
   }
 
@@ -262,15 +260,28 @@ async function encabezadoDelEscrito(
   return c ? resolverEncabezado(message.text, c.viajes, c.equipo) : null;
 }
 
-/** Si el escrito es «sí» o «no» y la tanda abierta espera respuesta a «¿Cambias a…?», cuál y a qué viaje. */
-async function respuestaAlCambio(
+/**
+ * Si la tanda abierta espera algo en el acto, qué le contesta el bot a este escrito:
+ *   · «¿Cambias a…?»: un sí → «📌»; un no → «No cambio…»; otra cosa → «No entendí: ¿cambias a X? sí/no»;
+ *   · el nombre de un «nuevo» suelto: un nombre → «📌 NUEVO X»; otra cosa → se vuelve a pedir.
+ * `null`: la tanda no espera nada.
+ */
+async function respuestaEnEspera(
   supabase: SupabaseClient, workspaceId: string, message: IncomingMessage, config: ConfigBandeja,
-): Promise<{ si: boolean; viaje: ViajeAbierto } | null> {
+): Promise<{ aviso: string } | null> {
   if (!escritoEnModoEncabezado(message, config)) return null;
-  const si = esSi(message.text);
-  if (!si && !esNo(message.text)) return null;
-  const viaje = await cambioPorConfirmar(supabase, workspaceId, message.phone, config.horasCajaActiva);
-  return viaje ? { si, viaje } : null;
+  const p = await pendienteDeLaTanda(supabase, workspaceId, message.phone, config.horasCajaActiva);
+  if (!p) return null;
+  if (p.tipo === 'nombre') {
+    const nombre = esNombreNuevo(message.text, p.equipo);
+    return { aviso: nombre ? `📌 NUEVO ${nombre}` : TEXTO_PIDE_NOMBRE_NUEVO };
+  }
+  const r = leerSiNo(message.text);
+  return {
+    aviso: r === 'si' ? `📌 ${lineaCaja(p.viaje)}`
+      : r === 'no' ? `No cambio a ${lineaCaja(p.viaje)}: lo que sigue queda sin asignar hasta otro encabezado.`
+      : textoNoEntendiCambio(p.viaje),
+  };
 }
 
 /**

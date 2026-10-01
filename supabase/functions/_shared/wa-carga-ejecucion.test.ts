@@ -590,6 +590,33 @@ describe('QA v5 · lo que el bot contesta en el acto a un encabezado (atenderEnB
     expect(enviados).toHaveLength(2);
   });
 
+  it('QA v6 · lo que no se entiende recibe «No entendí» en el acto; «si claro» sí se toma', async () => {
+    t.workspaces[0].config_extra = { bandeja_solicitudes: { modo_viajes: 'encabezado' } };
+    t.negocios.push(carolina);
+    await llega('Carlina');
+    await llega('mmm no sé');
+    await llega('si claro');
+    expect(enviados.map(e => e.texto)).toEqual([
+      '¿Cambias a CAROLINA RUIZ · T1 26 18? sí/no',
+      'No entendí: ¿cambias a CAROLINA RUIZ · T1 26 18? sí/no',
+      '📌 CAROLINA RUIZ · T1 26 18',
+    ]);
+  });
+
+  it('QA v6 · «nuevo» suelto: el bot pide el nombre; con el nombre, «📌 NUEVO …»; los apodos del equipo no contestan', async () => {
+    t.workspaces[0].config_extra = { bandeja_solicitudes: { modo_viajes: 'encabezado' } };
+    await llega('nuevo');
+    await llega('vamos a Aruba', true);
+    await llega('gracias');
+    await llega('Pedro Gómez');
+    await llega('Tati');
+    expect(enviados.map(e => e.texto)).toEqual([
+      '¿Cómo se llama el cliente nuevo? Escríbeme su nombre; hasta entonces no asigno lo que sigue.',
+      '¿Cómo se llama el cliente nuevo? Escríbeme su nombre; hasta entonces no asigno lo que sigue.',
+      '📌 NUEVO Pedro Gómez',
+    ]);
+  });
+
   it('en modo `uno` un nombre escrito no contesta nada', async () => {
     t.negocios.push(carolina);
     await llega('Carolina');

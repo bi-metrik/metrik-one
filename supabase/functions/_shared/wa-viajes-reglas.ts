@@ -127,23 +127,30 @@ export const PALABRAS_COMUNES: ReadonlySet<string> = new Set([
   'hoy', 'ayer', 'pronto', 'tambien', 'igual', 'mismo', 'misma', 'este', 'esta', 'ese', 'esa', 'eso', 'otro', 'otra', 'otros', 'otras',
   'mas', 'menos', 'falta', 'faltan', 'todo', 'todos', 'nada', 'aqui', 'aca', 'alla', 'sigo', 'seguimos', 'continuo', 'continua', 'fin',
   'cliente', 'clientes', 'mensaje', 'mensajes', 'audio', 'audios', 'foto', 'fotos', 'cotizacion', 'reserva', 'pago',
+  // registro coloquial (QA de #971 v6)
+  'chevere', 'bacano', 'bacana', 'sale', 'revisa', 'revisar', 'revisalo', 'revisala', 'adelante', 'quedo', 'quedamos', 'okis', 'oka', 'okk',
+  'pues', 'bien', 'mal', 'hagale', 'hagamosle', 'dele', 'melo', 'listico', 'parce', 'parcero', 'sumerce', 'vea', 'venga', 'epa', 'uy', 'uff',
+  'ufff', 'ah', 'eh', 'aja', 'mmm', 'mm', 'jum', 'jejeje', 'jajajaja', 'buenisimo', 'buenisima', 'super', 'muy', 'todo', 'nada', 'nadita',
+  'pena', 'disculpa', 'disculpe', 'perdon', 'tranqui', 'tranquila', 'tranquilo', 'cuento', 'cuenta', 'mandame', 'mando', 'envio', 'esperame',
+  'segundo', 'minuto', 'minutico', 'dame', 'camino', 'siguiente', 'seguimos', 'continuo', 'ahi', 'tal', 'cual', 'eso', 'asi', 'que', 'pa',
+  'confirmadisimo', 'listos', 'rapido', 'rapidito', 'toca', 'regalame', 'colaborame', 'porfis', 'entonces', 'verdad', 'obvio', 'claro',
 ]);
 
-/** ¿Todas sus palabras son del español común? Entonces no es un encabezado. */
-function soloComunes(palabras: ReadonlyArray<string>): boolean {
-  return palabras.length > 0 && palabras.every(w => PALABRAS_COMUNES.has(w));
-}
 
 /**
- * ¿Todas sus palabras son del nombre de una persona del equipo (staff o colaborador del workspace)?
- * «Tatiana» o «Edgar» escritos por el equipo son una firma, no un encabezado, aunque haya un
- * negocio a su nombre (QA de #971 v5).
+ * ¿Esta palabra nombra a alguien del equipo? Una palabra de su nombre completo, o un apodo que es el
+ * comienzo (3 letras o más) de su primer nombre: «Tati» de Tatiana, «Mau» de Mauricio (QA de #971 v6).
  */
-function esDelEquipo(palabras: ReadonlyArray<string>, equipo: ReadonlyArray<string>): boolean {
-  return palabras.length > 0 && equipo.some(n => {
-    const del = new Set(palabrasDe(n));
-    return palabras.every(w => del.has(w));
+function palabraDelEquipo(w: string, equipo: ReadonlyArray<string>): boolean {
+  return equipo.some(n => {
+    const del = palabrasDe(n);
+    return del.includes(w) || (w.length >= 3 && !!del[0] && del[0].startsWith(w));
   });
+}
+
+/** ¿Todo el escrito es de palabras comunes y nombres del equipo? «gracias Tati», «súper bien». No es encabezado. */
+function sinEfecto(palabras: ReadonlyArray<string>, equipo: ReadonlyArray<string>): boolean {
+  return palabras.length > 0 && palabras.every(w => PALABRAS_COMUNES.has(w) || palabraDelEquipo(w, equipo));
 }
 
 /** Las palabras del nombre sin el relleno; la primera es el nombre de pila. */
@@ -183,7 +190,7 @@ export function resolverEncabezado(
   }
 
   const resto = palabrasDe(bruto).filter(w => !RELLENO.has(w));
-  if (resto.length === 0 || soloComunes(resto) || esDelEquipo(resto, equipo)) return null;
+  if (resto.length === 0 || sinEfecto(resto, equipo)) return null;
 
   // Exacta: cada palabra está tal cual en el nombre, y una de ellas es el nombre de pila.
   const exactos = viajes.filter(v => {
@@ -213,6 +220,7 @@ export function resolverEncabezado(
 /** Lo que el bot responde EN EL ACTO a un encabezado del comercial (QA de #971 v5). `null`: nada. */
 export function respuestaAlEncabezado(r: ResolucionEncabezado | null): string | null {
   if (r?.tipo === 'viaje') return `📌 ${lineaCaja(r.viaje)}`;
+  if (r?.tipo === 'nuevo') return r.cliente ? `📌 NUEVO ${r.cliente}` : TEXTO_PIDE_NOMBRE_NUEVO;
   if (r?.tipo === 'aproximado') return `¿Cambias a ${lineaCaja(r.viaje)}? sí/no`;
   return null;
 }
@@ -222,12 +230,74 @@ export function lineaCaja(v: ViajeAbierto): string {
   return [v.cliente, v.codigo].filter(Boolean).join(' · ') || 'sin código';
 }
 
-const NO = new Set(['no', 'nop', 'nope', 'no no', 'no es', 'no senor', 'no senora', 'negativo', 'para nada', 'ninguno', 'no cambies', 'no cambio']);
+/** Lo que el bot pide en el acto tras un «nuevo» sin nombre (como N9). */
+export const TEXTO_PIDE_NOMBRE_NUEVO = '¿Cómo se llama el cliente nuevo? Escríbeme su nombre; hasta entonces no asigno lo que sigue.';
 
-/** ¿Es un «no» sin más? Para «¿Cambias a…? sí/no». */
+/** «No entendí»: lo que el bot contesta en el acto a una respuesta que no es sí ni no. */
+export function textoNoEntendiCambio(v: ViajeAbierto): string {
+  return `No entendí: ¿cambias a ${lineaCaja(v)}? sí/no`;
+}
+
+/**
+ * ¿Este escrito es el nombre de un cliente nuevo? Corto, sin números ni preguntas, y no hecho solo de
+ * palabras comunes, del equipo ni de un sí/no.
+ */
+export function esNombreNuevo(texto: string, equipo: ReadonlyArray<string> = []): string | null {
+  const bruto = String(texto ?? '').trim();
+  if (!bruto || /[?¿\d]/.test(bruto) || leerSiNo(bruto) !== null) return null;
+  const palabras = palabrasDe(bruto).filter(w => !RELLENO.has(w));
+  if (palabras.length === 0 || palabras.length > 4 || sinEfecto(palabras, equipo)) return null;
+  return bruto.replace(/^(se llama|es|el cliente es|la cliente es)\s+/i, '').trim();
+}
+
+// ── Sí / no ──────────────────────────────────────────────────────────────────
+
+const AFIRMA = new Set(['si', 'sii', 'siii', 'sip', 'sep', 'simon', 'ok', 'oka', 'okey', 'okay', 'oki', 'okis', 'okk', 'dale', 'claro', 'correcto',
+  'exacto', 'listo', 'afirmativo', 'confirmo', 'confirmado', 'perfecto', 'obvio', 'yes', 'cargar', 'cargalos', 'asi', 'hagale', 'vale', 'de una']);
+/**
+ * Acuses que valen como «sí» a «¿Cambias a…?» (cambia UNA caja y el bot lo confirma con «📌»), pero
+ * NO como el «sí» que carga un reparto entero: ahí un «ok» o un «👍» reflejo no basta (F11).
+ */
+const ACUSES = new Set(['ok', 'oka', 'okey', 'okay', 'oki', 'okis', 'okk', 'listo', 'vale', 'perfecto']);
+const NIEGA = new Set(['no', 'nop', 'nope', 'negativo', 'nel', 'nones', 'para nada']);
+/** Lo que puede acompañar a un sí o a un no sin cambiarlo: «sí, es ella», «no señora», «así es». */
+const COLA_SI_NO = new Set(['senor', 'senora', 'es', 'ella', 'el', 'esa', 'ese', 'esta', 'mismo', 'misma', 'tal', 'cual', 'cierto', 'por',
+  'favor', 'porfa', 'gracias', 'mil', 'ya', 'claro', 'correcto', 'exacto', 'listo', 'dale', 'de', 'una', 'si', 'asi', 'cambia', 'cambies',
+  'cambio', 'ninguno', 'ninguna']);
+const EMOJI_SI = /[👍👌✅🙌🫡]/u;
+const EMOJI_NO = /[👎❌🚫]/u;
+
+/**
+ * Un normalizador de sí/no compartido: la respuesta a «¿Cambias a…?», el «sí» del resumen y las
+ * confirmaciones. «si claro», «ok», «sip», «👍», «sí, es ella» son sí; «nop», «no señora», «no, es
+ * Carolina» son no. Con un «pero» («ok pero falta uno»), las dos cosas («sí no») o algo más largo,
+ * `null`: no se adivina (F11).
+ */
+export function leerSiNo(texto: string, opts: { estricto?: boolean } = {}): 'si' | 'no' | null {
+  const bruto = String(texto ?? '').trim();
+  const emojiSi = !opts.estricto && EMOJI_SI.test(bruto);
+  const emojiNo = EMOJI_NO.test(bruto);
+  const t = normalizarTexto(bruto).replace(/[^a-z ]/g, ' ').replace(/\s+/g, ' ').trim();
+  if (!t) return emojiSi && !emojiNo ? 'si' : emojiNo && !emojiSi ? 'no' : null;
+  const ws = t.replace(/\bpara nada\b/g, 'para_nada').replace(/\bde una\b/g, 'de_una').split(' ')
+    .map(w => w.replace('para_nada', 'para nada').replace('de_una', 'de una'));
+  if (ws.length > 6 || ws.includes('pero')) return null;
+  const niega = ws.some(w => NIEGA.has(w)) || emojiNo;
+  const afirmaCon = (w: string) => AFIRMA.has(w) && w !== 'asi' && !(opts.estricto && ACUSES.has(w));
+  const afirma = ws.some(afirmaCon) || emojiSi || ws.join(' ') === 'asi es';
+  if (niega && !afirma) {
+    // «no», «nop», «no señora», «no, es Carolina»: empieza por el no y lo que sigue no lo contradice.
+    if (!NIEGA.has(ws[0])) return null;
+    const cola = ws.slice(1);
+    return cola.length === 0 || cola.every(w => COLA_SI_NO.has(w)) || cola[0] === 'es' ? 'no' : null;
+  }
+  if (afirma && !niega) return ws.every(w => (AFIRMA.has(w) && !(opts.estricto && ACUSES.has(w))) || COLA_SI_NO.has(w)) ? 'si' : null;
+  return null;
+}
+
+/** ¿Es un «no» claro? Para «¿Cambias a…? sí/no». */
 export function esNo(texto: string): boolean {
-  const t = normalizarTexto(texto).replace(/[^a-z ]/g, ' ').replace(/\s+/g, ' ').trim();
-  return NO.has(t);
+  return leerSiNo(texto) === 'no';
 }
 
 
@@ -243,6 +313,8 @@ export interface Segmento {
    * `null` = no contestó: lo de la caja queda sin asignar. `n` es el número de su respuesta.
    */
   confirmacion?: { respuesta: 'si' | 'no'; n: number } | null;
+  /** Solo con «nuevo» sin nombre: el nombre que escribió después el comercial. `null` = todavía no llega. */
+  nombre?: { texto: string; n: number } | null;
 }
 
 /** ¿La caja tiene un viaje? Un encabezado exacto, o uno aproximado con «sí». */
@@ -274,10 +346,20 @@ export function armarSegmentos(
     const escrito = !m.reenviado && m.tipo === 'text';
     // La respuesta a «¿Cambias a…? sí/no» (QA de #971 v5): la primera, y solo dentro de su caja.
     const porConfirmar = caja && caja.seg.encabezado?.resolucion.tipo === 'aproximado' && caja.seg.confirmacion === null;
-    if (escrito && porConfirmar && (esSi(m.cuerpo) || esNo(m.cuerpo))) {
-      caja!.seg.confirmacion = { respuesta: esSi(m.cuerpo) ? 'si' : 'no', n: m.n };
+    const respuesta = escrito && porConfirmar ? leerSiNo(m.cuerpo) : null;
+    if (respuesta) {
+      caja!.seg.confirmacion = { respuesta, n: m.n };
       encabezados.push(m.n);
       continue;
+    }
+    // El nombre tras un «nuevo» suelto (QA de #971 v6): el primer escrito que no es otro encabezado.
+    if (escrito && caja && caja.seg.nombre === null && resolverEncabezado(m.cuerpo, viajes, equipo) === null) {
+      const nombre = esNombreNuevo(m.cuerpo, equipo);
+      if (nombre) {
+        caja.seg.nombre = { texto: nombre, n: m.n };
+        encabezados.push(m.n);
+        continue;
+      }
     }
     const res = escrito ? (resolverEncabezado(m.cuerpo, viajes, equipo) ?? (pareceEncabezado(m.cuerpo, viajes, equipo) ? { tipo: 'no_reconocido' } as ResolucionEncabezado : null)) : null;
     if (res) {
@@ -285,6 +367,7 @@ export function armarSegmentos(
       const seg: Segmento = {
         origen: 'encabezado', encabezado: { n: m.n, texto: m.cuerpo.trim(), resolucion: res }, mensajes: [],
         ...(res.tipo === 'aproximado' ? { confirmacion: null } : {}),
+        ...(res.tipo === 'nuevo' && !res.cliente ? { nombre: null } : {}),
       };
       segmentos.push(seg);
       caja = { seg, desde: t };
@@ -311,9 +394,17 @@ export function armarSegmentos(
  * «no» escrito es la respuesta a «¿Cambias a…?» (QA de #971 v5).
  */
 export function cambioPendiente(segmentos: ReadonlyArray<Segmento>): ViajeAbierto | null {
+  const p = pendienteDeLaCaja(segmentos);
+  return p?.tipo === 'cambio' ? p.viaje : null;
+}
+
+/** Lo que espera la última caja: el «sí/no» de «¿Cambias a…?» o el nombre de un «nuevo» suelto. */
+export function pendienteDeLaCaja(segmentos: ReadonlyArray<Segmento>): { tipo: 'cambio'; viaje: ViajeAbierto } | { tipo: 'nombre' } | null {
   const ultimo = segmentos[segmentos.length - 1];
   const r = ultimo?.encabezado?.resolucion;
-  return r?.tipo === 'aproximado' && ultimo.confirmacion === null ? r.viaje : null;
+  if (r?.tipo === 'aproximado' && ultimo.confirmacion === null) return { tipo: 'cambio', viaje: r.viaje };
+  if (r?.tipo === 'nuevo' && ultimo.nombre === null) return { tipo: 'nombre' };
+  return null;
 }
 
 /** ¿La entrega tiene al menos un encabezado resuelto? Sin ninguno, la tanda entera es UN viaje y se pregunta como siempre. */
@@ -336,7 +427,7 @@ export function pareceEncabezado(texto: string, viajes: ReadonlyArray<ViajeAbier
   const palabras = palabrasDe(bruto);
   if (palabras.length === 0 || palabras.length > 2 || palabras.some(w => /\d/.test(w))) return false;
   const propias = palabras.filter(w => !RELLENO.has(w));
-  if (propias.length === 0 || soloComunes(propias) || esDelEquipo(propias, equipo)) return false;
+  if (propias.length === 0 || sinEfecto(propias, equipo)) return false;
   const delNombre = [...new Set(viajes.flatMap(v => palabrasDe(v.cliente)).filter(p => p.length >= 4))];
   return propias.every(w => w.length >= 4 && delNombre.some(p => (p.startsWith(w) && w.length >= 4) || distancia(p, w) <= 2));
 }
@@ -538,8 +629,9 @@ export function armarPlan(p: {
       if (aviso) plan.avisos.push(aviso);
     }
     const deLaCaja = viajeDeLaCaja(seg);
+    const nombreNuevo = res?.tipo === 'nuevo' ? (res.cliente ?? seg.nombre?.texto ?? null) : null;
     const caja: DestinoPlan | null = deLaCaja ? destinoDeViaje(deLaCaja)
-      : res?.tipo === 'nuevo' ? { tipo: 'nuevo', cliente: res.cliente } : null;
+      : res?.tipo === 'nuevo' && nombreNuevo ? { tipo: 'nuevo', cliente: nombreNuevo } : null;
     const nombreCaja = caja?.cliente ?? 'ese viaje';
     const vistos = { fechas: new Set<string>(), adultos: new Set<number>() };
     let tras = false;
@@ -551,6 +643,7 @@ export function armarPlan(p: {
       const nombrados = viajesNombrados(m.cuerpo, destinosConocidos, p.viajes);
       if (!caja) {
         const motivo = !seg.encabezado ? 'llegó sin encabezado'
+          : res?.tipo === 'nuevo' ? `«${seg.encabezado.texto}» sin nombre: no me dijiste cómo se llama el cliente nuevo`
           : res?.tipo === 'aproximado' ? `«${seg.encabezado.texto}» ${seg.confirmacion?.respuesta === 'no' ? 'no es' : 'puede ser'} ${lineaCaja(res.viaje)}${seg.confirmacion ? '' : ' y no contestaste'}`
           : `el encabezado «${seg.encabezado.texto}» no se pudo resolver`;
         plan.mensajes.push({ n, destino: null, por: null, motivo, ...(nombrados.length >= 2 ? { varios: true } : {}) });
@@ -713,12 +806,12 @@ export function textoResumenPlan(plan: PlanViajes, mensajes: ReadonlyArray<Mensa
 
 // ── La respuesta al resumen ──────────────────────────────────────────────────
 
-const SI = new Set(['si', 'sii', 'si senor', 'si senora', 'confirmo', 'correcto', 'dale', 'asi es', 'asi esta', 'si asi es', 'si asi esta', 'si correcto', 'si dale', 'si confirmo', 'cargar', 'cargalos']);
-
-/** ¿Es un «sí» sin peros? «ok pero falta uno», «sí no» y un sticker NO lo son (F11). */
+/**
+ * ¿Es un «sí» sin peros, de los que cargan? Mismo normalizador que «¿Cambias a…?» (`leerSiNo`), en
+ * modo estricto: «si claro», «sí, es así» sí; «ok», «👍», «ok pero falta uno» y «sí no» no (F11).
+ */
 export function esSi(texto: string): boolean {
-  const t = normalizarTexto(texto).replace(/[^a-z ]/g, ' ').replace(/\s+/g, ' ').trim();
-  return SI.has(t);
+  return leerSiNo(texto, { estricto: true }) === 'si';
 }
 
 export type Cambio = { ns: number[]; a: DestinoPlan | 'descartar' | 'dejar' };

@@ -61,7 +61,7 @@ import {
   aplicarCambios,
   armarPlan,
   armarSegmentos,
-  cambioPendiente,
+  pendienteDeLaCaja,
   esSi,
   gruposDelPlan,
   interpretarRespuestaPlan,
@@ -699,6 +699,17 @@ export async function candidatosDeEncabezado(
 export async function cambioPorConfirmar(
   supabase: SupabaseClient, workspaceId: string, phone: string, horasCajaActiva: number,
 ): Promise<ViajeAbierto | null> {
+  const p = await pendienteDeLaTanda(supabase, workspaceId, phone, horasCajaActiva);
+  return p?.tipo === 'cambio' ? p.viaje : null;
+}
+
+/**
+ * Lo que espera la tanda abierta de este remitente: el «sí/no» de «¿Cambias a…?» o el nombre de un
+ * «nuevo» suelto (QA de #971 v6). Lleva el equipo para reconocer el nombre. `null`: nada.
+ */
+export async function pendienteDeLaTanda(
+  supabase: SupabaseClient, workspaceId: string, phone: string, horasCajaActiva: number,
+): Promise<({ tipo: 'cambio'; viaje: ViajeAbierto } | { tipo: 'nombre' }) & { equipo: string[] } | null> {
   const { data: abierta, error } = await supabase.from('wa_bandeja_entregas').select('id')
     .eq('workspace_id', workspaceId).eq('remitente_phone', phone).eq('estado', 'abierta').limit(1).maybeSingle();
   if (error || !abierta) return null;
@@ -706,7 +717,8 @@ export async function cambioPorConfirmar(
   if (typeof crudos === 'string' || crudos.length === 0) return null;
   const c = await candidatosDeEncabezado(supabase, workspaceId);
   if (!c) return null;
-  return cambioPendiente(armarSegmentos(aViaje(crudos), c.viajes, { horasCajaActiva, equipo: c.equipo }).segmentos);
+  const p = pendienteDeLaCaja(armarSegmentos(aViaje(crudos), c.viajes, { horasCajaActiva, equipo: c.equipo }).segmentos);
+  return p ? { ...p, equipo: c.equipo } : null;
 }
 
 /** Los viajes abiertos de la línea de la bandeja (para encabezados y el ruteo). `null` si no se pudo. */
