@@ -103,16 +103,39 @@ export function esquemaDeSalida(fields: ReadonlyArray<CampoEntendible>): Record<
   return {
     type: 'object',
     properties: {
-      historia: { type: 'string' },
+      // N3: quién habla en cada mensaje. Solo lo del cliente llena campos (`wa-guardianes.ts`).
+      mensajes: {
+        type: 'array',
+        items: {
+          type: 'object',
+          properties: { n: { type: 'integer' }, clase: { type: 'string', enum: [...CLASES_MENSAJE] } },
+          required: ['n', 'clase'],
+        },
+      },
+      // N7: la historia es extractiva. El modelo copia frases del cliente; el código arma el texto.
+      citas: { type: 'array', items: { type: 'string' } },
+      // N5: cada solicitud de viaje distinta que aparece (otro cliente u otro viaje del mismo).
+      solicitudes: {
+        type: 'array',
+        items: {
+          type: 'object',
+          properties: { cliente: { type: 'string' }, destino: { type: 'string' }, frase: { type: 'string' } },
+          required: ['frase'],
+        },
+      },
       cliente: {
         type: 'object',
         properties: { nombre: { type: 'string' }, telefono: { type: 'string' } },
       },
       valores: { type: 'object', properties, required: campos.map(f => f.slug) },
     },
-    required: ['historia', 'valores'],
+    required: ['mensajes', 'citas', 'solicitudes', 'valores'],
   };
 }
+
+/** Quién habla en un mensaje de la entrega (N3). */
+export const CLASES_MENSAJE = ['cliente', 'comercial', 'tercero', 'ruido'] as const;
+export type ClaseMensaje = (typeof CLASES_MENSAJE)[number];
 
 function formatoDe(f: CampoEntendible): string {
   if (f.tipo === 'numero') return 'un número entero escrito con dígitos';
@@ -150,19 +173,26 @@ export function instruccionesEntendimiento(
     '   - Si el mensaje repite lo que ya se sabe, devuelve el mismo valor con su frase.',
     '   - Si el mensaje dice OTRA cosa, devuelve lo que dice el mensaje con su frase: una persona decidirá.',
     `   - Si el mensaje no lo menciona, valor = "${POR_DEFINIR}": no copies lo que ya se sabe.`,
-    '   - La historia cuenta solo lo nuevo de estos mensajes.',
+    '   - Las citas son solo de estos mensajes.',
   ];
   return [
     'Eres el asistente de una agencia. Un comercial te reenvió por WhatsApp lo que habló con un cliente',
     '(textos, transcripciones de notas de voz). Tu trabajo es entender la solicitud, no inventarla.',
+    'Los mensajes vienen numerados: «[3] (reenviado) …» o «[4] (escrito por el comercial) …».',
     '',
     `Hoy es ${hoyISO} (Bogotá). Si una fecha no dice el año, es la próxima vez que ocurra desde hoy.`,
     '',
     'Devuelve:',
-    '1. historia: dos o tres párrafos en prosa, en lenguaje de persona, contando lo que el cliente quiere.',
-    '   Solo lo que está en los mensajes. Sin juicios sobre el cliente (su carácter, su trato, su bolsillo).',
-    '2. cliente: nombre y teléfono del cliente si los mensajes los dicen; si no, déjalos vacíos.',
-    '3. valores: para CADA campo de la lista, { valor, frase }.',
+    '1. mensajes: para CADA mensaje, { n, clase }:',
+    '   - cliente: lo que pide o cuenta el cliente sobre SU viaje (también si el comercial lo relata: «tengo dos pasajeros para…»);',
+    '   - comercial: notas u opiniones del comercial sobre el cliente o sobre la venta («ojo, esta señora…»);',
+    '   - tercero: lo que no dice el cliente de su viaje: una promoción o un plan de otra agencia, un comprobante o un abono de pago, un proveedor;',
+    '   - ruido: saludos, risas, stickers, despedidas, temas personales.',
+    '2. citas: hasta 8 frases COPIADAS tal cual de mensajes del cliente que cuenten lo que quiere. Nada de resúmenes ni opiniones.',
+    '3. solicitudes: una por cada viaje DISTINTO que se pide en los mensajes (otro cliente, u otro viaje del mismo cliente con',
+    '   otro destino o en otra fecha), con el cliente, el destino y la frase exacta que lo pide. Si todo es un solo viaje, una sola.',
+    '4. cliente: nombre y teléfono del cliente si los mensajes los dicen; si no, déjalos vacíos.',
+    '5. valores: para CADA campo de la lista, { valor, frase }. Solo de mensajes del cliente.',
     `   - Si el mensaje no lo dice, valor = "${POR_DEFINIR}" y frase vacía. Nunca pongas "no" ni "0" por algo que no se dijo.`,
     '   - frase = las palabras EXACTAS del mensaje que sostienen el valor, copiadas tal cual.',
     '   - Si el cliente se corrige dentro de los mensajes («somos 2… ah no, 3»), devuelve lo ÚLTIMO que dijo, con esa frase.',
@@ -173,6 +203,10 @@ export function instruccionesEntendimiento(
     '   - Una opción marcada «solo si el cliente lo dice» vale únicamente si el cliente lo declara («no tenemos presupuesto»,',
     `     «el que sea»). Preguntar el precio («¿cuánto sale?») no es declarar presupuesto: es "${POR_DEFINIR}".`,
     '   - «Dos personas» sin más detalle son dos adultos; los niños solo cuentan si el mensaje los nombra.',
+    '   - Si el cliente nombra varias ciudades o lugares («Madrid, París y Roma»), el destino los lleva todos tal como los dijo,',
+    '     no la región que los agrupa.',
+    '   - Un total sin desglose («somos 4 con los niños») no se reparte: deja adultos y niños en "por_definir".',
+    '   - Cuenta a todos los que el mensaje dice que viajan, también los que se suman («mi hermana también va con sus 2 hijos»).',
     `   - No pongas 0 en niños ni en bebés salvo que el mensaje lo diga («sin niños», «solo adultos»). Si no lo dice, "${POR_DEFINIR}".`,
     '',
     'Campos:',
@@ -390,23 +424,77 @@ export function textoSaleDelMensaje(valor: string, fuente: string): boolean {
 /** Palabras que nombran a un menor. */
 const RE_MENOR = /\b(nin[oa]s?|hij[oa]s?|bebes?|menor(es)?|peque\w*|pelad\w*|chiquit\w*|infantes?|nenes?)\b/;
 
+/** Personas adultas por su relación con quien habla: «mi esposo», «mi suegra», «mi amiga». */
+const RELACIONES_ADULTAS = new Set([
+  'esposo', 'esposa', 'novio', 'novia', 'pareja', 'marido', 'mujer', 'companero', 'companera',
+  'mama', 'papa', 'madre', 'padre', 'suegra', 'suegro', 'hermana', 'hermano', 'amiga', 'amigo',
+  'prima', 'primo', 'tia', 'tio', 'abuela', 'abuelo', 'cunada', 'cunado', 'socia', 'socio', 'jefe', 'jefa', 'colega',
+]);
+
 /**
- * ¿La frase cierra que no viajan menores? Solo tres formas:
+ * ¿Cuántos adultos enumera la frase como grupo cerrado, sin menores? «mi esposo y yo» = 2,
+ * «mi esposa, mi suegra y yo» = 3, «vamos los dos» = 2. `null` si no es una enumeración cerrada
+ * (falta el «yo», hay un «mis …» o una relación que no es adulta).
+ */
+export function adultosEnumerados(frase: string): number | null {
+  const t = ` ${normalizarTexto(frase).replace(/[^a-z0-9 ]/g, ' ').replace(/\s+/g, ' ').trim()} `;
+  if (RE_MENOR.test(t)) return null;
+  if (/ (los|las|nosotros|nosotras) (dos|2) /.test(t)) return 2;
+  if (/ mis /.test(t) || !/ yo /.test(t)) return null;
+  const rels = [...t.matchAll(/ mi (\w+)/g)].map(m => m[1]);
+  if (rels.length === 0 || !rels.every(r => RELACIONES_ADULTAS.has(r))) return null;
+  return rels.length + 1;
+}
+
+/**
+ * ¿La frase cierra que no viajan menores? Cuatro formas:
  *   · una negación pegada al menor: «sin niños», «ningún bebé», «no van los niños»;
  *   · «solo adultos», «solo nosotros»;
- *   · un total que es igual a los adultos y ninguna mención de menores: «somos dos» con 2 adultos.
- * «Somos 4 con los niños», «mi esposo y yo» o «los dos niños» NO cierran nada: el 0 solo sale de
- * aquí o de `deducirCeros` (todas las edades dadas y ninguna menor de 2). QA de #969, C11.
+ *   · un total que es igual a los adultos y ninguna mención de menores: «somos dos» con 2 adultos;
+ *   · una enumeración cerrada de adultos igual a los adultos: «mi esposo y yo», «mi novia y yo»,
+ *     «vamos los dos» (QA de #969 v2, A4: sin esto niños e infantes quedaban vacíos y sin pregunta).
+ * «Somos 4 con los niños» o «los dos niños» NO cierran nada: el 0 solo sale de aquí o de
+ * `deducirCeros` (todas las edades dadas y ninguna menor de 2). QA de #969, C11.
  */
 export function fraseCierraMenores(frase: string, adultos: number | null): boolean {
   const t = ` ${normalizarTexto(frase).replace(/[^a-z0-9 ]/g, ' ').replace(/\s+/g, ' ').trim()} `;
   if (/ (sin|ningun\w*|cero|no (van|viajan|vienen|llevamos|hay)) (los |las |mis |nuestros |nuestras )?(nin|hij|beb|menor|infant|nene|peque|pelad|chiquit)/.test(t)) return true;
   if (/ solo(mente)? (adultos|nosotros|nosotras|los dos|las dos)\b/.test(t)) return true;
   if (adultos === null || RE_MENOR.test(t)) return false;
+  if (adultosEnumerados(frase) === adultos) return true;
   const m = / (somos|seriamos|seremos|vamos|viajamos|viajariamos|iriamos) (\w+)/.exec(t);
   if (!m) return false;
   const n = /^\d+$/.test(m[2]) ? Number(m[2]) : (DIAS_EN_LETRAS[m[2]] ?? null);
   return n !== null && n === adultos;
+}
+
+/** ¿Algún mensaje nombra a un menor? Sin ninguno, una enumeración cerrada de adultos deduce 0. */
+export function nombraMenores(texto: string): boolean {
+  return RE_MENOR.test(` ${normalizarTexto(texto).replace(/[^a-z0-9 ]/g, ' ').replace(/\s+/g, ' ').trim()} `);
+}
+
+// ── Destino: varias ciudades se conservan todas ──────────────────────────────
+
+const PALABRA_PROPIA = "[A-ZÁÉÍÓÚÑ][A-Za-zÁÉÍÓÚÑáéíóúñü'.-]+(?: (?:de |del |la |las |los |el )?[A-ZÁÉÍÓÚÑ][A-Za-zÁÉÍÓÚÑáéíóúñü'.-]+)*";
+const RE_LISTA_LUGARES = new RegExp(`(${PALABRA_PROPIA}(?:, ${PALABRA_PROPIA})*,? (?:y|e) ${PALABRA_PROPIA})`, 'g');
+
+/**
+ * Los lugares que el cliente enumera DESPUÉS del destino en el mismo mensaje: «Europa 20 días en
+ * mayo: Madrid, París y Roma» → ['Madrid', 'París', 'Roma']. Solo nombres propios escritos con
+ * mayúscula, en una lista con «y» al final, y en el mismo mensaje que nombra el destino: así un
+ * «Pedro y Juan» suelto no se vuelve destino. QA de #969 v2, A4: el destino quedaba EUROPA y las
+ * ciudades no quedaban en ningún campo.
+ */
+export function lugaresDespuesDelDestino(destino: string, mensaje: string): string[] {
+  const nd = normalizarTexto(destino);
+  const i = normalizarTexto(mensaje).indexOf(nd);
+  if (!nd || i < 0) return [];
+  const resto = mensaje.slice(i + destino.length);
+  for (const m of resto.matchAll(RE_LISTA_LUGARES)) {
+    const items = m[1].split(/, | y | e /).map(x => x.replace(/,$/, '').trim()).filter(Boolean);
+    if (items.length >= 2 && !items.some(x => normalizarTexto(x) === nd)) return items;
+  }
+  return [];
 }
 
 const SLUGS_MENORES = ['ninos', 'infantes'];
@@ -418,6 +506,34 @@ function dependeDeMenores(f: CampoEntendible): boolean {
   return p.condiciones.some(c =>
     (typeof c.field === 'string' && SLUGS_MENORES.includes(c.field))
     || (Array.isArray(c.suma_de) && c.suma_de.some(s => SLUGS_MENORES.includes(s))));
+}
+
+/** Cuántas citas lleva la historia, como máximo, y su largo. */
+export const MAX_CITAS = 8;
+const MAX_LARGO_CITA = 240;
+
+/**
+ * La historia extractiva (N7, encargo 2026-10-01): las citas que el modelo copió, SOLO si cada una
+ * aparece tal cual (normalizada) en lo que el cliente dijo con sus palabras. Sin duplicados,
+ * máximo ocho, cada una entre comillas. Una valoración del comercial no puede colarse: sus
+ * mensajes no son citables, y una paráfrasis no aparece en ningún mensaje.
+ */
+export function historiaDeCitas(citas: unknown, citables: string): string {
+  if (!Array.isArray(citas) || !citables.trim()) return '';
+  const fuente = normalizarTexto(citables);
+  const vistas: string[] = [];
+  const out: string[] = [];
+  for (const c of citas) {
+    if (typeof c !== 'string') continue;
+    const limpia = c.trim().replace(/^[«"“]+|[»"”]+$/g, '').trim();
+    const n = normalizarTexto(limpia);
+    if (n.length < 4 || limpia.length > MAX_LARGO_CITA || !fuente.includes(n)) continue;
+    if (vistas.some(v => v.includes(n))) continue;
+    vistas.push(n);
+    out.push(`«${limpia}»`);
+    if (out.length >= MAX_CITAS) break;
+  }
+  return out.length === 0 ? '' : `El cliente dijo:\n${out.join('\n')}`;
 }
 
 function textoONull(v: unknown): string | null {
@@ -438,7 +554,15 @@ export function validarSalida(
   raw: unknown,
   fields: ReadonlyArray<CampoEntendible>,
   textoFuente: string,
-  opts: { hoyISO?: string; conocidos?: Record<string, unknown> } = {},
+  opts: {
+    hoyISO?: string;
+    conocidos?: Record<string, unknown>;
+    /**
+     * Texto de donde se pueden CITAR frases para la historia (N7): solo lo que el cliente dijo
+     * con sus palabras (reenviado y clasificado como cliente). Sin él, la historia queda vacía.
+     */
+    citables?: string;
+  } = {},
 ): SalidaEntendida {
   const r = (raw && typeof raw === 'object' ? raw : {}) as Record<string, unknown>;
   const cli = (r.cliente && typeof r.cliente === 'object' ? r.cliente : {}) as Record<string, unknown>;
@@ -446,7 +570,9 @@ export function validarSalida(
   const fuente = normalizarTexto(textoFuente);
 
   const out: SalidaEntendida = {
-    historia: textoONull(r.historia) ?? '',
+    // N7: la historia NO es prosa del modelo. Se arma con citas textuales del cliente que
+    // aparecen en lo citable; una paráfrasis («tiende a ser crítica») no puede entrar.
+    historia: historiaDeCitas(r.citas, opts.citables ?? ''),
     cliente: { nombre: textoONull(cli.nombre), telefono: textoONull(cli.telefono) },
     sugeridos: {},
     descartados: [],
@@ -510,6 +636,14 @@ export function validarSalida(
         out.descartados.push({ slug: f.slug, motivo: `el texto no sale de los mensajes: «${v.slice(0, 60)}»` });
         continue;
       }
+      // Si el cliente enumera ciudades después del destino, el destino las conserva todas.
+      if (f.slug === SLUG_DESTINO) {
+        const lugares = lugaresDespuesDelDestino(v, mensajeDeLaFrase(frase, textoFuente));
+        if (lugares.length > 0) {
+          out.sugeridos[f.slug] = { valor: `${v}: ${lugares.slice(0, -1).join(', ')} y ${lugares[lugares.length - 1]}`, frase };
+          continue;
+        }
+      }
       out.sugeridos[f.slug] = { valor: v, frase };
     }
   }
@@ -522,6 +656,18 @@ export function validarSalida(
     if (s && Number(s.valor) === 0 && !fraseCierraMenores(s.frase, adultosN)) {
       delete out.sugeridos[slug];
       out.descartados.push({ slug, motivo: `un 0 que la frase no cierra: «${s.frase}»` });
+    }
+  }
+
+  // Una enumeración cerrada de adultos («mi esposo y yo») sin un solo menor nombrado en los
+  // mensajes deduce 0 niños y 0 infantes, con la regla anotada (QA de #969 v2, A4).
+  const adultos = out.sugeridos.adultos;
+  if (adultos && !nombraMenores(textoFuente) && fraseCierraMenores(adultos.frase, Number(adultos.valor))) {
+    const slugs = new Set(camposEntendibles(fields).map(f => f.slug));
+    for (const slug of SLUGS_MENORES) {
+      if (!slugs.has(slug) || out.sugeridos[slug]) continue;
+      out.sugeridos[slug] = { valor: 0, frase: adultos.frase, deduccion: `«${adultos.frase}»: viajan ${adultos.valor} adultos y ningún mensaje nombra menores` };
+      out.descartados = out.descartados.filter(d => d.slug !== slug);
     }
   }
 
@@ -549,6 +695,7 @@ export function validarSalida(
 }
 
 /** La convención del bloque de viaje para las dos fechas. Sin ellas, la comparación no corre. */
+const SLUG_DESTINO = 'destino';
 const SLUG_SALIDA = 'fecha_salida';
 const SLUG_REGRESO = 'fecha_regreso';
 

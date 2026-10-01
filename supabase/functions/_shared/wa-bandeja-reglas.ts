@@ -31,13 +31,40 @@ export interface ConfigBandeja {
   prefijosBot: string[];
   /** Horas durante las cuales el primer mensaje escrito cuenta como respuesta a «¿de qué cliente es?». */
   horasRespuestaCliente: number;
+  /**
+   * Cuántos viajes puede traer una entrega (encargo 2026-10-01, varios viajes en simultáneo):
+   *   · `uno` (default): como siempre, la entrega es un viaje;
+   *   · `encabezado`: un escrito corto que nombra un viaje («Carolina», «T1 26 9», «nuevo Luisa»)
+   *     fija la caja de lo que sigue; lo que no tiene encabezado queda sin asignar;
+   *   · `mixto`: encabezados y, para lo que no tiene, el modelo propone con evidencia citada.
+   * En los dos últimos el bot muestra el reparto y NO carga nada hasta el «sí».
+   */
+  modoViajes: ModoViajes;
+  /** Silencio, en segundos, que separa dos bloques sin encabezado. */
+  segundosBloque: number;
+  /** `siempre` (default y único en uso hasta que el QA y el uso real digan otra cosa) | `si_duda`. */
+  confirmar: 'siempre' | 'si_duda';
+  /** Horas que dura vigente un encabezado. */
+  horasCajaActiva: number;
+  /** Cortes de edad para contar pasajeros: menor de esto es infante; desde esto, adulto. */
+  edadInfanteMenorDe: number;
+  edadAdultoDesde: number;
 }
+
+export type ModoViajes = 'uno' | 'encabezado' | 'mixto';
+export const MODOS_VIAJES: readonly ModoViajes[] = ['uno', 'encabezado', 'mixto'];
 
 export const CONFIG_BANDEJA_POR_DEFECTO: ConfigBandeja = {
   ventanaMinutos: 5,
   palabrasCierre: ['listo'],
   prefijosBot: ['gasto'],
   horasRespuestaCliente: 24,
+  modoViajes: 'uno',
+  segundosBloque: 600,
+  confirmar: 'siempre',
+  horasCajaActiva: 4,
+  edadInfanteMenorDe: 2,
+  edadAdultoDesde: 12,
 };
 
 /** ¿Tiene el workspace la bandeja encendida? Solo `true` literal: nace apagada. */
@@ -66,11 +93,21 @@ export function leerConfigBandeja(configExtra: unknown): ConfigBandeja {
   const d = CONFIG_BANDEJA_POR_DEFECTO;
   const raw = (configExtra as { bandeja_solicitudes?: Record<string, unknown> } | null)?.bandeja_solicitudes;
   if (!raw || typeof raw !== 'object') return { ...d };
+  const infante = entero(raw.edad_infante_menor_de, 1, 5, d.edadInfanteMenorDe);
+  const adulto = entero(raw.edad_adulto_desde, 2, 25, d.edadAdultoDesde);
+  const cortesOk = infante < adulto;
   return {
     ventanaMinutos: entero(raw.ventana_minutos, 1, 120, d.ventanaMinutos),
     palabrasCierre: listaDePalabras(raw.palabras_cierre, d.palabrasCierre),
     prefijosBot: listaDePalabras(raw.prefijos_bot, d.prefijosBot),
     horasRespuestaCliente: entero(raw.horas_respuesta_cliente, 1, 168, d.horasRespuestaCliente),
+    modoViajes: MODOS_VIAJES.includes(raw.modo_viajes as ModoViajes) ? (raw.modo_viajes as ModoViajes) : d.modoViajes,
+    segundosBloque: entero(raw.segundos_bloque, 30, 7200, d.segundosBloque),
+    // Un valor desconocido cae a `siempre`: confirmar de más cuesta un mensaje, de menos un dato.
+    confirmar: raw.confirmar === 'si_duda' ? 'si_duda' : 'siempre',
+    horasCajaActiva: entero(raw.horas_caja_activa, 1, 24, d.horasCajaActiva),
+    edadInfanteMenorDe: cortesOk ? infante : d.edadInfanteMenorDe,
+    edadAdultoDesde: cortesOk ? adulto : d.edadAdultoDesde,
   };
 }
 
@@ -109,6 +146,16 @@ export interface EntradaRuta {
   reenviado: boolean;
   /** Hay una conversación del bot a medias (p. ej. un gasto esperando la foto del soporte). */
   sesionBotEsperando: boolean;
+  /**
+   * Lo que hace falta para la regla 5 (N8, 2026-10-01). Sin saberlo (`undefined`) el escrito va
+   * a la bandeja, como antes: la regla solo manda al bot lo que SABE que no es de la bandeja.
+   */
+  /** El remitente tiene una entrega abierta (está reenviando una tanda). */
+  entregaAbierta?: boolean;
+  /** El bot de la bandeja le hizo una pregunta que sigue sin respuesta («¿A qué viaje van?», el reparto, el contacto). */
+  preguntaPendiente?: boolean;
+  /** El escrito nombra un viaje (modo `encabezado` o `mixto`): abre una caja. */
+  esEncabezado?: boolean;
 }
 
 /**
@@ -119,9 +166,13 @@ export interface EntradaRuta {
  *      y ni siquiera un gasto a medias puede tragárselo;
  *   3. conversación del bot a medias → el bot, para no romper un gasto que espera su foto;
  *   4. escrito empezando por un prefijo del bot («gasto …») → el bot;
- *   5. todo lo demás → bandeja.
+ *   5. escrito (texto) SIN entrega abierta, SIN pregunta pendiente de la bandeja y que NO es un
+ *      encabezado → el bot de siempre (N8, QA del 2026-10-01: «¿cuánto vendimos en
+ *      septiembre?» se quedaba en la bandeja sin respuesta). Dentro de una tanda abierta un
+ *      escrito sigue siendo parte de la tanda; con una pregunta pendiente es la respuesta;
+ *   6. todo lo demás → bandeja: notas de voz, fotos, encabezados y lo escrito dentro de una tanda.
  *
- * La regla 5 es la que hace que las notas de voz y los pantallazos del comercial no terminen
+ * La regla 6 es la que hace que las notas de voz y los pantallazos del comercial no terminen
  * leídos como gastos, que es lo que pasaría hoy con `business: true`.
  */
 export function decidirRuta(e: EntradaRuta): Ruta {
@@ -129,6 +180,7 @@ export function decidirRuta(e: EntradaRuta): Ruta {
   if (e.reenviado) return 'bandeja';
   if (e.sesionBotEsperando) return 'bot';
   if (e.tipo === 'text' && empiezaConPrefijoBot(e.texto, e.config.prefijosBot)) return 'bot';
+  if (e.tipo === 'text' && e.entregaAbierta === false && e.preguntaPendiente === false && e.esEncabezado !== true) return 'bot';
   return 'bandeja';
 }
 
