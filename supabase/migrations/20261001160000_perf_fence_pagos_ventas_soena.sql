@@ -14,8 +14,17 @@
 -- acotada al workspace. La vista se calcula UNA vez para el workspace. El filtro/join
 -- con `guard` (el control de acceso) queda intacto.
 --
---   get_comercial_pagos_mes_soena    174 -> 105 ms (medido en #978)
---   get_comercial_ventas_mes_soena   sin medir aun
+-- Medido en produccion el 2026-10-01 como usuario real de SOENA (JWT), en los 11 meses
+-- con ventas o cobros (2025-12 a 2026-10), con salida identica antes/despues (md5 por mes):
+--
+--   get_comercial_ventas_mes_soena   ~9,7 s -> ~0,15 s por mes (107 s -> 1,6 s los 11 meses)
+--   get_comercial_pagos_mes_soena    sin mejora: ~2 s por mes antes y despues (22,7 s vs 23,6 s)
+--
+-- En pagos la barrera no cambia el resultado y se deja por consistencia, pero el costo
+-- esta en otra parte. La misma consulta escrita suelta con el workspace literal tarda
+-- ~70 ms, asi que el tiempo se va en como se planifica dentro de la funcion
+-- (probablemente el join con `guard` impide empujar el filtro de workspace a
+-- `v_cobro_valor`). Queda pendiente aparte, no en esta migracion.
 --
 -- Cada cuerpo es el de su ultima migracion, copiado mecanicamente; sin sus lineas de
 -- comentario su md5 coincide con el de produccion. Solo cambia la linea del FROM/JOIN
