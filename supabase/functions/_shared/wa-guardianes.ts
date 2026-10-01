@@ -45,13 +45,25 @@ export interface MensajeEntrega {
   origen: string | null;
 }
 
-/** Los cortes de edad de la config (`bandeja_solicitudes.edad_infante_menor_de` / `edad_adulto_desde`). */
+/**
+ * Los cortes de edad de la config (`bandeja_solicitudes.edad_infante_menor_de` /
+ * `edad_adulto_desde`). Salen SOLO de la config (QA de #971 v5, C10): `null` = el workspace no lo
+ * definió, y una edad justo en ese borde no se clasifica, se pregunta.
+ */
 export interface Cortes {
-  infanteMenorDe: number;
-  adultoDesde: number;
+  infanteMenorDe: number | null;
+  adultoDesde: number | null;
 }
 
-export const CORTES_POR_DEFECTO: Cortes = { infanteMenorDe: 2, adultoDesde: 12 };
+export const SIN_CORTES: Cortes = { infanteMenorDe: null, adultoDesde: null };
+
+/**
+ * Los bordes de referencia cuando la config no los trae (la regla de aerolíneas: infante menor de
+ * 2, adulto desde 12). Solo clasifican las edades que quedan LEJOS del borde: la que cae justo en
+ * él (2 o 12) no se decide sin la config.
+ */
+const BORDE_INFANTE = 2;
+const BORDE_ADULTO = 12;
 
 const SEPARADOR = '\n---\n';
 
@@ -200,7 +212,7 @@ function quitar(s: SalidaEntendida, slug: string, motivo: string) {
 export function guardianPasajeros(
   entrada: SalidaEntendida,
   fuente: string,
-  cortes: Cortes = CORTES_POR_DEFECTO,
+  cortes: Cortes = SIN_CORTES,
   conocidos: Record<string, unknown> = {},
   /**
    * Las edades que dio el modelo, aunque otra regla las haya descartado (sin niños sabidos,
@@ -248,14 +260,23 @@ export function guardianPasajeros(
   // 3. Las edades cuentan una sola vez y con los cortes de la config.
   const edadesSug = s.sugeridos.edades_menores ?? edadesDelModelo;
   const edades = edadesSug ? leerEdades(edadesSug.valor) : null;
-  if (edadesSug && edades) {
-    const deAdulto = edades.filter(e => e >= cortes.adultoDesde);
-    const menores = edades.filter(e => e < cortes.adultoDesde);
-    const infantesPorEdad = menores.filter(e => e < cortes.infanteMenorDe).length;
+  // Una edad justo en un borde que la config no define no se clasifica: «los niños tienen 2 y
+  // 12» sin `edad_adulto_desde` no pasa el de 12 a adulto callado (QA de #971 v5, C10).
+  const enElBorde = (edades ?? []).filter(e => (cortes.adultoDesde === null && e === BORDE_ADULTO) || (cortes.infanteMenorDe === null && e === BORDE_INFANTE));
+  if (edadesSug && edades && enElBorde.length > 0) {
+    const motivo = `la edad ${[...new Set(enElBorde)].join(' y ')} está justo en un corte que la config no define: no sé si cuenta como ${enElBorde.includes(BORDE_ADULTO) ? 'adulto o niño' : 'niño o infante'}`;
+    quitar(s, 'ninos', motivo);
+    quitar(s, 'infantes', motivo);
+  } else if (edadesSug && edades) {
+    const adultoDesde = cortes.adultoDesde ?? BORDE_ADULTO;
+    const infanteMenorDe = cortes.infanteMenorDe ?? BORDE_INFANTE;
+    const deAdulto = edades.filter(e => e >= adultoDesde);
+    const menores = edades.filter(e => e < adultoDesde);
+    const infantesPorEdad = menores.filter(e => e < infanteMenorDe).length;
     const ninosPorEdad = menores.length - infantesPorEdad;
     const contadosComoMenores = (num('ninos') ?? 0) + (num('infantes') ?? 0);
     const regla = (txt: string): Sugerido => ({ valor: 0, frase: edadesSug.frase, deduccion: txt });
-    const cortesTxt = `infante menor de ${cortes.infanteMenorDe}, adulto desde ${cortes.adultoDesde}`;
+    const cortesTxt = `infante menor de ${infanteMenorDe}, adulto desde ${adultoDesde}`;
 
     if (deAdulto.length > 0) {
       // «Mi bebé, que ya tiene 18 añitos» (C9): esa persona es adulta.
@@ -415,7 +436,7 @@ export function entenderEntrega(
   // aunque relate la solicitud, no es citable (ahí es donde caben los juicios: B5).
   const citables = textoDe(delCliente.filter(m => m.reenviado));
   const validada = validarSalida(raw, fields, fuente, { hoyISO: opts.hoyISO, conocidos: opts.conocidos, citables });
-  const salida = guardianPasajeros(validada, fuente, opts.cortes ?? CORTES_POR_DEFECTO, opts.conocidos ?? {}, edadesConFrase(raw, fuente));
+  const salida = guardianPasajeros(validada, fuente, opts.cortes ?? SIN_CORTES, opts.conocidos ?? {}, edadesConFrase(raw, fuente));
   return {
     salida,
     clases,

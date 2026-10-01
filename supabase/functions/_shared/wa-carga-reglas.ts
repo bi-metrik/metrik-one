@@ -328,7 +328,7 @@ export function sugeridosConDeducciones(
   bloques: ReadonlyArray<{ fields: CampoEntendible[]; data: Record<string, unknown> }>,
   sugeridos: Record<string, Sugerido>,
   meta: { entrega_id: string; en: string; origenDe: (frase: string) => 'audio' | 'mensaje' },
-  infanteMenorDe?: number,
+  infanteMenorDe: number | null = null,
 ): Record<string, Sugerido> {
   const vistos = new Set<string>();
   const quedaria = bloques.map(b => ({ fields: b.fields, data: cargarEnExistente(b.data, b.fields, sugeridos, meta, vistos).data }));

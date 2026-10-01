@@ -1075,6 +1075,38 @@
        "frase": "los niños tienen 2 y 12"
       }
      }
+    },
+    {
+     "mensajes": [
+      {
+       "n": 1,
+       "clase": "cliente"
+      }
+     ],
+     "citas": [],
+     "solicitudes": [],
+     "cliente": {
+      "nombre": "",
+      "telefono": ""
+     },
+     "valores": {
+      "destino": {
+       "valor": "San Andrés",
+       "frase": "a San Andrés"
+      },
+      "adultos": {
+       "valor": "2",
+       "frase": "Vamos 2 adultos"
+      },
+      "ninos": {
+       "valor": "2",
+       "frase": "los niños"
+      },
+      "edades_menores": {
+       "valor": "2, 12",
+       "frase": "los niños tienen 2 y 12"
+      }
+     }
     }
    ],
    "verdad": {

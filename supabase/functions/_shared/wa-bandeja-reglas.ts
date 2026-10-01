@@ -44,9 +44,12 @@ export interface ConfigBandeja {
   confirmar: 'siempre' | 'si_duda';
   /** Horas que dura vigente un encabezado. */
   horasCajaActiva: number;
-  /** Cortes de edad para contar pasajeros: menor de esto es infante; desde esto, adulto. */
-  edadInfanteMenorDe: number;
-  edadAdultoDesde: number;
+  /**
+   * Cortes de edad para contar pasajeros: menor de esto es infante; desde esto, adulto. Salen
+   * SOLO de la config (QA de #971 v5, C10): sin ellos, una edad justo en un borde se pregunta.
+   */
+  edadInfanteMenorDe: number | null;
+  edadAdultoDesde: number | null;
 }
 
 export type ModoViajes = 'uno' | 'encabezado';
@@ -60,8 +63,8 @@ export const CONFIG_BANDEJA_POR_DEFECTO: ConfigBandeja = {
   modoViajes: 'uno',
   confirmar: 'siempre',
   horasCajaActiva: 4,
-  edadInfanteMenorDe: 2,
-  edadAdultoDesde: 12,
+  edadInfanteMenorDe: null,
+  edadAdultoDesde: null,
 };
 
 /** ¿Tiene el workspace la bandeja encendida? Solo `true` literal: nace apagada. */
@@ -90,9 +93,10 @@ export function leerConfigBandeja(configExtra: unknown): ConfigBandeja {
   const d = CONFIG_BANDEJA_POR_DEFECTO;
   const raw = (configExtra as { bandeja_solicitudes?: Record<string, unknown> } | null)?.bandeja_solicitudes;
   if (!raw || typeof raw !== 'object') return { ...d };
-  const infante = entero(raw.edad_infante_menor_de, 1, 5, d.edadInfanteMenorDe);
-  const adulto = entero(raw.edad_adulto_desde, 2, 25, d.edadAdultoDesde);
-  const cortesOk = infante < adulto;
+  const infante = entero(raw.edad_infante_menor_de, 1, 5, NaN);
+  const adulto = entero(raw.edad_adulto_desde, 2, 25, NaN);
+  // Uno sin el otro vale solo; los dos al revés no valen ninguno.
+  const cortesOk = !(infante >= adulto);
   return {
     ventanaMinutos: entero(raw.ventana_minutos, 1, 120, d.ventanaMinutos),
     palabrasCierre: listaDePalabras(raw.palabras_cierre, d.palabrasCierre),
@@ -102,8 +106,8 @@ export function leerConfigBandeja(configExtra: unknown): ConfigBandeja {
     // Un valor desconocido cae a `siempre`: confirmar de más cuesta un mensaje, de menos un dato.
     confirmar: raw.confirmar === 'si_duda' ? 'si_duda' : 'siempre',
     horasCajaActiva: entero(raw.horas_caja_activa, 1, 24, d.horasCajaActiva),
-    edadInfanteMenorDe: cortesOk ? infante : d.edadInfanteMenorDe,
-    edadAdultoDesde: cortesOk ? adulto : d.edadAdultoDesde,
+    edadInfanteMenorDe: cortesOk && Number.isInteger(infante) ? infante : null,
+    edadAdultoDesde: cortesOk && Number.isInteger(adulto) ? adulto : null,
   };
 }
 

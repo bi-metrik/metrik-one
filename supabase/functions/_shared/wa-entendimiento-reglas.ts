@@ -964,8 +964,11 @@ export function fusionarSugeridos(
 const SLUG_NINOS = 'ninos';
 const SLUG_INFANTES = 'infantes';
 const SLUG_EDADES = 'edades_menores';
-/** Un infante es menor de 2 años («¿Viajan bebés menores de 2 años?»). */
-const EDAD_INFANTE = 2;
+/**
+ * El borde de referencia del infante (menor de 2 años) cuando la config no trae
+ * `edad_infante_menor_de`: sin ella, una edad de 2 justo no deduce nada (QA de #971 v5, C10).
+ */
+const BORDE_INFANTE = 2;
 
 /**
  * Las edades en años de un texto como «9, 4», «9 AÑOS Y 4 AÑOS» o «9, 6 y 1». `null` si
@@ -989,8 +992,8 @@ export function leerEdades(texto: unknown): number[] | null {
 export function deducirCeros(
   fields: ReadonlyArray<CampoEntendible>,
   valores: Record<string, unknown>,
-  /** Corte de infante de la config (`edad_infante_menor_de`): menor de esto es infante. */
-  infanteMenorDe: number = EDAD_INFANTE,
+  /** Corte de infante de la config (`edad_infante_menor_de`): menor de esto es infante. `null` = sin config. */
+  infanteMenorDe: number | null = null,
 ): Record<string, Sugerido> {
   const slugs = new Set(fields.map(f => f.slug));
   if (![SLUG_NINOS, SLUG_INFANTES, SLUG_EDADES].every(s => slugs.has(s))) return {};
@@ -998,10 +1001,12 @@ export function deducirCeros(
   const ninos = parsearNumeroColombiano(valores[SLUG_NINOS]);
   if (ninos === null || !Number.isInteger(ninos) || ninos <= 0) return {};
   const edades = leerEdades(valores[SLUG_EDADES]);
-  if (!edades || edades.length !== ninos || edades.some(e => e < infanteMenorDe)) return {};
+  // Sin el corte en la config, la edad justo en el borde (2) no se decide: se pregunta.
+  const corte = infanteMenorDe ?? BORDE_INFANTE;
+  if (!edades || edades.length !== ninos || edades.some(e => e < corte || (infanteMenorDe === null && e === BORDE_INFANTE))) return {};
   const quien = ninos === 1 ? 'el niño no es menor' : `ninguno de los ${ninos} niños es menor`;
   return {
-    [SLUG_INFANTES]: { valor: 0, frase: '', deduccion: `Edades ${edades.join(', ')}: ${quien} de ${infanteMenorDe} años` },
+    [SLUG_INFANTES]: { valor: 0, frase: '', deduccion: `Edades ${edades.join(', ')}: ${quien} de ${corte} años` },
   };
 }
 
@@ -1012,7 +1017,7 @@ export function deducirCeros(
 export function conDeducciones(
   fields: ReadonlyArray<CampoEntendible>,
   sugeridos: Record<string, Sugerido>,
-  infanteMenorDe: number = EDAD_INFANTE,
+  infanteMenorDe: number | null = null,
 ): Record<string, Sugerido> {
   const valores: Record<string, unknown> = {};
   for (const f of fields) if (f.default !== undefined) valores[f.slug] = f.default;
