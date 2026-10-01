@@ -6,6 +6,12 @@ import { destinoTrasAutenticar, esRelativo } from '@/lib/tenant/destino-tenant'
 import { destinoSiBloqueada, rutaGateada } from '@/lib/modulos/gate'
 import { leerPerfilDeAcceso, type ClientePerfil } from '@/lib/modulos/perfil-de-acceso'
 import { RUTA_DESINCRONIZADA, hayDesincronizacionDeTenant } from '@/lib/tenant/desincronizacion'
+import {
+  COOKIE_TENANT_PREVIEW,
+  PARAM_TENANT_PREVIEW,
+  accionTenantPreview,
+  slugTenantDePreview,
+} from '@/lib/tenant/tenant-preview'
 
 const IS_DEV = process.env.NODE_ENV === 'development'
 
@@ -62,7 +68,11 @@ async function getLanding(supabase: Awaited<ReturnType<typeof updateSession>>['s
 
 export async function middleware(request: NextRequest) {
   const hostname = request.headers.get('host') || ''
-  const slug = extractSlug(hostname)
+  // En un preview de Vercel (`*.vercel.app`) no hay subdominio: el inquilino lo declara la
+  // cookie que fija `?__ws=<slug>` (ver `lib/tenant/tenant-preview.ts`). Fuera de un preview
+  // `slugTenantDePreview` devuelve null, así que producción y local quedan como estaban.
+  const slug =
+    extractSlug(hostname) ?? slugTenantDePreview(request.cookies.get(COOKIE_TENANT_PREVIEW)?.value)
   const { pathname } = request.nextUrl
 
   // La tarjeta Open Graph por inquilino es publica y no depende de sesion: quien
@@ -79,6 +89,28 @@ export async function middleware(request: NextRequest) {
   // entiende. La ruta autentica sola (ver `lib/ferreteria/api.ts`). Lo mismo el webhook de Wompi
   // (`/api/ferreteria/wompi/eventos`), que se autentica por la firma del evento.
   if (pathname.startsWith('/api/ferreteria/')) return NextResponse.next()
+
+  // Preview: `?__ws=<slug>` fija el inquilino de esta pestaña y redirige a la misma URL sin
+  // el parámetro (así no se queda pegado en la barra ni en el historial). `?__ws=off` lo
+  // quita. Solo en un preview: en producción y en local `accionTenantPreview` devuelve null
+  // y el parámetro sigue de largo como antes.
+  const accionPreview = accionTenantPreview(request.nextUrl.searchParams.get(PARAM_TENANT_PREVIEW))
+  if (accionPreview) {
+    const limpia = request.nextUrl.clone()
+    limpia.searchParams.delete(PARAM_TENANT_PREVIEW)
+    const res = NextResponse.redirect(limpia)
+    if (accionPreview.tipo === 'fijar') {
+      res.cookies.set(COOKIE_TENANT_PREVIEW, accionPreview.slug, {
+        path: '/',
+        httpOnly: true,
+        sameSite: 'lax',
+        secure: true,
+      })
+    } else {
+      res.cookies.delete(COOKIE_TENANT_PREVIEW)
+    }
+    return res
+  }
 
   // Refresh Supabase session
   const { user, supabaseResponse, supabase } = await updateSession(request)

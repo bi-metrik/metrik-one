@@ -175,3 +175,12 @@
   Paso con #957: conflicto en `docs/bitacora/2026-09.md`, el archivo al que todas las sesiones
   agregan arriba. Diagnostico: `gh pr view <n> --json mergeable,mergeStateStatus`; si dice DIRTY,
   el CI no esta caido, el PR esta en conflicto.
+- **El preview de un PR abre un workspace con `?__ws=<slug>` (solo con `VERCEL_ENV=preview`).** El
+  host `*.vercel.app` no tiene subdominio, asi que el middleware toma el inquilino de la cookie
+  host-only `__preview_ws` que fija `?__ws=` (`src/lib/tenant/tenant-preview.ts`); `?__ws=off` la
+  quita. Cambiar de workspace en el preview se queda en el preview (`/?__ws=<slug>`), no salta a
+  `<slug>.metrikone.co`. ⚠️ El preview usa la base de PRODUCCION (URL y service role del scope
+  Preview = las de produccion): todo lo que se cree ahi es real. ⚠️ Entrar con el CODIGO del correo,
+  no con el enlace: si `*.vercel.app` no esta en las Redirect URLs de Supabase Auth, el enlace cae
+  en el Site URL (produccion). ⚠️ El scope Preview no tiene `GEMINI_API_KEY`: sin ella no se lee
+  ningun pantallazo en el preview.

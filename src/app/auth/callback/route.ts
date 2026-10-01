@@ -5,6 +5,7 @@ import type { User } from '@supabase/supabase-js'
 import { landingForWorkspace } from '@/lib/auth/landing'
 import { destinoTrasAutenticar, esRelativo } from '@/lib/tenant/destino-tenant'
 import { registrarActividad } from '@/lib/activity/registrar-actividad'
+import { COOKIE_TENANT_PREVIEW, esDeploymentDePreview, slugTenantDePreview } from '@/lib/tenant/tenant-preview'
 
 // Slugs reservados — mismo set que middleware.ts
 const RESERVED_SLUGS = ['www', 'api', 'admin', 'app', 'test', 'demo', 'staging', 'mail', 'ftp']
@@ -27,6 +28,20 @@ function extractSlugFromHost(host: string | null, baseDomain: string, isDev: boo
   return null
 }
 
+function leerCookie(request: Request, nombre: string): string | null {
+  const cabecera = request.headers.get('cookie') ?? ''
+  for (const parte of cabecera.split(';')) {
+    const [clave, ...resto] = parte.trim().split('=')
+    if (clave !== nombre) continue
+    try {
+      return decodeURIComponent(resto.join('='))
+    } catch {
+      return null
+    }
+  }
+  return null
+}
+
 export async function GET(request: Request) {
   const { searchParams, origin } = new URL(request.url)
   const code = searchParams.get('code')
@@ -37,7 +52,12 @@ export async function GET(request: Request) {
   const isLocalEnv = process.env.NODE_ENV === 'development'
   const forwardedHost = request.headers.get('x-forwarded-host')
   const requestHost = forwardedHost || request.headers.get('host')
-  const hostSlug = extractSlugFromHost(requestHost, baseDomain, isLocalEnv)
+  // En un preview no hay subdominio: el inquilino de la pestaña lo declara la cookie que
+  // fija el middleware con `?__ws=` (ver `lib/tenant/tenant-preview.ts`). Fuera de un
+  // preview `slugTenantDePreview` devuelve null y esto es exactamente lo de antes.
+  const hostSlug =
+    extractSlugFromHost(requestHost, baseDomain, isLocalEnv) ??
+    slugTenantDePreview(leerCookie(request, COOKIE_TENANT_PREVIEW))
   const mismoHostOrigin = forwardedHost ? `https://${forwardedHost}` : origin
 
   // Helper: post-auth routing (existing user → tenant; pending invite → /accept-invite; else → /onboarding)
@@ -81,7 +101,7 @@ export async function GET(request: Request) {
             entidad_id: hostWs.id,
             tipo: 'platform_admin_enter',
             autor_id: null,
-            contenido: `Platform admin (${user.email ?? user.id}) entro al workspace via subdomain ${hostSlug}.${baseDomain}`,
+            contenido: `Platform admin (${user.email ?? user.id}) entro al workspace via ${esDeploymentDePreview() ? `un preview (${requestHost ?? 'sin host'})` : `subdomain ${hostSlug}.${baseDomain}`}`,
           }, 'routeAfterAuth')
           // Reapuntar destino al subdomain del host (que es donde queremos quedar)
           profile.workspace_id = hostWs.id
