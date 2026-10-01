@@ -54,6 +54,7 @@ import { MarcoCotizacionContexto } from '@/app/(app)/negocios/marco-cotizacion-c
 import { usePublicarTotalVivo } from '@/app/(app)/negocios/total-vivo'
 import { laMasNueva, lineasParaPintar, traerVistaFresca, type VistaFresca } from '@/lib/cotizaciones/vista-fresca'
 import { esAvisoSoloInformativo, estadoDeBloque, resumenDeBloques, type EstadoDeBloque } from '@/lib/cotizaciones/bandeja-capturas'
+import { avisoDePasajerosDeOpcion } from '@/lib/cotizaciones/tarjeta-opcion'
 import { crearRanuraConOpcion, eliminarRanura } from '@/app/(app)/negocios/ranura-actions'
 import { avisoDeBorradoDeBloque, preguntaTarifaMarcada, tarifasMarcadasCon } from '@/lib/cotizaciones/eliminar-opciones'
 import { bloquesPorRanura, esNombreDeOpcion, tipoDeDefinicion, type BloqueDeLineas } from '@/lib/cotizaciones/ranuras-cotizacion'
@@ -995,6 +996,8 @@ export default function CotizacionEditor({ oportunidadId, cotizacion, initialIte
       sinConfirmar: !!t.casillas?.grupo_completo && !t.confirmada,
       // Un aviso que solo informa (los impuestos en destino ya van al cliente) no pide nada.
       alerta: (t.casillas?.grupo_completo?.alertas ?? []).find(a => !esAvisoSoloInformativo(a)) ?? null,
+      // Hotel: la misma cuenta de pasajeros que la tarjeta («Faltan 1 adulto y 1 infante»).
+      pasajeros: ranuraDeGrupo(i.grupo ?? null)?.slug === 'hotel_detalle' ? avisoDePasajerosDeOpcion(t, composicionViaje ?? null) : null,
     }
   }
   // P12 · borrar una opción o un bloque entero: sin diálogo y con «Deshacer». Lo borrado se

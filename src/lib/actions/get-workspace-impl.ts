@@ -4,6 +4,7 @@ import { cache } from 'react'
 import { cookies, headers } from 'next/headers'
 import { createClient, createServiceClient } from '@/lib/supabase/server'
 import { getCachedUser } from '@/lib/supabase/auth-user'
+import { memoDeRuta } from './memo-de-ruta'
 import {
   ERROR_DESINCRONIZADO,
   hayDesincronizacionDeTenant,
@@ -314,7 +315,9 @@ async function getWorkspaceImpl() {
  * El `cache()` vive aqui y no en `get-workspace.ts` porque ese archivo es `'use server'`
  * y solo puede exportar funciones async (gotcha ya documentado en CLAUDE.md).
  */
-export const getWorkspaceCached = cache(getWorkspaceImpl)
+// En una RUTA el `cache()` de React no memoiza (no hay render): ahí lo hace `memoDeRuta`, solo
+// dentro de `enPeticionDeRuta` (hoy, «Aceptar» y la relectura de la bandeja de Trappvel).
+export const getWorkspaceCached = cache(memoDeRuta(getWorkspaceImpl))
 
 // Exportado SOLO para pruebas: el `cache()` de React memoiza por request y
 // volveria no determinista un test que necesita invocar el flujo varias veces.

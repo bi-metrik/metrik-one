@@ -14,6 +14,7 @@
 import { NextResponse } from 'next/server'
 
 import { aceptarCapturaDeBandeja, type BorradorParaAceptar } from '@/app/(app)/negocios/tarifa-pax-actions'
+import { enPeticionDeRuta } from '@/lib/actions/memo-de-ruta'
 
 export const runtime = 'nodejs'
 
@@ -37,7 +38,10 @@ export async function POST(req: Request, { params }: { params: Promise<{ id: str
   ) {
     return NextResponse.json({ ok: false, codigo: 'PETICION', mensaje: 'La captura llegó incompleta. Vuelve a pegarla.' }, { status: 400 })
   }
-  const r = await aceptarCapturaDeBandeja(id, {
+  // Una sola resolución de la sesión para toda la aceptación (`memo-de-ruta.ts`): antes eran
+  // cinco en serie. `Server-Timing` deja ver en el navegador cuánto tardó el servidor.
+  const inicio = performance.now()
+  const borrador: BorradorParaAceptar = {
     tipo: cuerpo.tipo,
     lecturaJson: cuerpo.lecturaJson,
     firma: cuerpo.firma,
@@ -48,6 +52,8 @@ export async function POST(req: Request, { params }: { params: Promise<{ id: str
     correcciones: Array.isArray(cuerpo.correcciones)
       ? cuerpo.correcciones.filter(c => !!c && typeof c.slug === 'string' && typeof c.valor === 'string')
       : null,
-  })
-  return NextResponse.json(r)
+  }
+  const r = await enPeticionDeRuta(() => aceptarCapturaDeBandeja(id, borrador))
+  const ms = Math.round(performance.now() - inicio)
+  return NextResponse.json(r, { headers: { 'Server-Timing': `aceptar;dur=${ms}` } })
 }

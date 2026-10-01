@@ -148,10 +148,22 @@ export interface EstadoDeBloque {
 
 export function estadoDeBloque(
   bloque: { grupo: string; etiqueta: string },
-  opciones: readonly { id?: string; nombre: string; conCosto: boolean; sinConfirmar: boolean; alerta: string | null }[],
+  opciones: readonly {
+    id?: string
+    nombre: string
+    conCosto: boolean
+    sinConfirmar: boolean
+    alerta: string | null
+    /**
+     * Lo que dice la tarjeta del hotel de sus pasajeros (`avisoDePasajerosDeOpcion`): un bloque
+     * al que le faltan o le sobran pasajeros no está completo (brief del 2026-10-01, punto 1).
+     */
+    pasajeros?: { corto: string; frase: string } | null
+  }[],
 ): EstadoDeBloque {
   const sinCosto = opciones.filter(o => !o.conCosto)
   const sinConfirmar = opciones.filter(o => o.sinConfirmar)
+  const conPasajeros = opciones.find(o => o.pasajeros)
   const conAlerta = opciones.find(o => o.alerta)
   const motivo = sinConfirmar.length > 0
     ? sinConfirmar.length === 1
@@ -159,9 +171,11 @@ export function estadoDeBloque(
       : `${sinConfirmar.length} opciones sin confirmar`
     : sinCosto.length > 0
       ? sinCosto.length === 1 ? `${sinCosto[0].nombre}: sin costo` : `${sinCosto.length} opciones sin costo`
-      : conAlerta
-        ? `${conAlerta.nombre}: ${conAlerta.alerta}`
-        : null
+      : conPasajeros
+        ? `${conPasajeros.nombre}: ${conPasajeros.pasajeros!.corto.toLowerCase()}`
+        : conAlerta
+          ? `${conAlerta.nombre}: ${conAlerta.alerta}`
+          : null
   let aviso: string | null = null
   let explicacion: string | null = null
   let opcionId: string | null = null
@@ -177,6 +191,11 @@ export function estadoDeBloque(
       ? `${sinCosto[0].nombre} no tiene costo: pega su pantallazo o escríbelo a mano.`
       : `${sinCosto.length} opciones no tienen costo: pega su pantallazo o escríbelo a mano.`
     opcionId = sinCosto.length === 1 ? sinCosto[0].id ?? null : null
+  } else if (conPasajeros) {
+    // Las mismas palabras de la caja de la tarjeta, para que el resumen no diga otra cosa.
+    aviso = conPasajeros.pasajeros!.corto.startsWith('Falta') ? 'Faltan pasajeros' : 'Sobran pasajeros'
+    explicacion = `${conPasajeros.nombre} · ${conPasajeros.pasajeros!.frase}`
+    opcionId = conPasajeros.id ?? null
   } else if (conAlerta) {
     aviso = 'Hay algo por revisar'
     explicacion = `${conAlerta.nombre}: ${conAlerta.alerta}`

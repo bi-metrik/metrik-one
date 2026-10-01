@@ -49,6 +49,7 @@ import { avisoDelTextoEnPdf, leerDocumentoCliente, textoParaElViaje } from '@/li
 import { vigenciaEnDias } from '@/lib/cotizaciones/condiciones-comerciales'
 import { fotosDeCiudad } from '@/lib/pdf/fotos-ciudad'
 import { fotosDelViaje } from '@/lib/pdf/fotos-del-viaje'
+import { nombreVisibleDeLinea } from '@/lib/cotizaciones/nombre-visible'
 import { precioPorHabitacionDeItem, precioPorPasajeroDeItem, preciosPorPasajeroDelViaje } from '@/lib/cotizaciones/precio-pasajero-pdf'
 import { calcularFiscal, type FiscalProfile } from '@/lib/fiscal/calculos'
 import {
@@ -888,7 +889,8 @@ export async function generateCotizacionPDF(cotizacionId: string) {
     // líneas (y las otras plantillas) llegan idénticas.
     const porHabitacion = precioPorHabitacionDeItem(i, composicionViaje)
     return {
-      nombre: i.nombre ?? '',
+      // Hotel y traslado con el nombre de su lectura, no en MAYÚSCULAS (`nombre-visible.ts`).
+      nombre: nombreVisibleDeLinea(i),
       descripcion: i.descripcion ?? null,
       precio_venta: Number(i.precio_venta) || 0,
       descuento_porcentaje: descuentoVisible(i),

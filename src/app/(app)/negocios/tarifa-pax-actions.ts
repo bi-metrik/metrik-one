@@ -1021,6 +1021,61 @@ export async function cambiarRolHabitacion(
 }
 
 /**
+ * «Va» / «No va» de una habitación en la tarjeta (ajuste de Mauricio al brief del 2026-10-01,
+ * punto 2): la operadora elige qué habitaciones van. Lo que propone ONE (`repartirHabitaciones`)
+ * es solo la propuesta inicial.
+ *
+ *  · Al primer toque, TODAS las habitaciones de la opción quedan fijadas como se ven y esta
+ *    cambia. Así ONE no mueve otra a escondidas para cuadrar al grupo: si con lo elegido faltan
+ *    o sobran pasajeros, la tarjeta lo dice y no frena.
+ *  · Se guarda en `tarifa_pax.habitaciones[].rolManual` (jsonb), con quién y cuándo: sin
+ *    columna nueva. Sobrevive a recargar porque es lo guardado.
+ *  · El costo se confirma otra vez con las que van; con él cambian el precio, «Así lo ve el
+ *    cliente», el PDF y el total (`reconfirmar` → `recalcularTotales`).
+ *  · Al menos una tiene que ir: una opción sin habitaciones no tiene costo que confirmar.
+ */
+export async function marcarHabitacionQueVa(
+  itemId: string,
+  habitacionId: string,
+  va: boolean,
+): Promise<ResultadoTarifa & { pendiente?: string | null }> {
+  const ctx = await contexto(itemId)
+  if ('error' in ctx) return { success: false, error: ctx.error as string }
+  if (ctx.ranura.slug !== RANURA_HOTEL) return { success: false, error: 'Solo una opción de hotel lleva habitaciones.' }
+  if (!habitacionesDeTarifa(ctx.tarifa).some(h => h.id === habitacionId)) {
+    return { success: false, error: 'Esa habitación ya no está en la opción. Recarga la cotización.' }
+  }
+  const grupo = ctx.viaje.composicion
+  const { por, porId } = await quienEscribe(ctx.supabase)
+  const en = new Date().toISOString()
+  const rolPedido: RolHabitacion = va ? 'habitacion' : 'referencia'
+  const fijar = (actual: TarifaPax): TarifaPax => {
+    const habs = habitacionesDeTarifa(actual)
+    const comoSeVen = new Map(repartirHabitaciones(habs, grupo, actual.correcciones).habitaciones.map(h => [h.id, h.rol]))
+    const fijadas = habs.map(h => {
+      const rol: RolHabitacion = h.id === habitacionId ? rolPedido : comoSeVen.get(h.id) ?? 'habitacion'
+      if (h.id !== habitacionId && h.rolManual?.valor === rol) return h
+      return { ...h, rolManual: { valor: rol, por, porId, en } }
+    })
+    return tarifaConHabitaciones(actual, fijadas, grupo)
+  }
+  const prueba = repartirHabitaciones(habitacionesDeTarifa(fijar(ctx.tarifa)), grupo)
+  if (!prueba.habitaciones.some(h => h.rol === 'habitacion')) {
+    return { success: false, error: 'Al menos una habitación tiene que ir. Si ninguna sirve, elimina la opción.' }
+  }
+  const guardado = await guardarConHabitacion(
+    ctx.supabase,
+    itemId,
+    fijar,
+    t => habitacionesDeTarifa(t).find(h => h.id === habitacionId)?.rolManual?.valor === rolPedido,
+  )
+  if ('error' in guardado) return { success: false, error: guardado.error }
+  if (ctx.item.negocioId) revalidatePath(`/negocios/${ctx.item.negocioId}`)
+  const c = await reconfirmar(itemId)
+  return { success: true, tarifa: c.tarifa ?? guardado.tarifa, pendiente: c.pendiente }
+}
+
+/**
  * Quita una habitación. Si era la última, la opción se va entera: una opción de hotel sin
  * ninguna captura no dice nada.
  */

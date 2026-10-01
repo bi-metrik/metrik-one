@@ -11,7 +11,7 @@
  */
 
 import { aAdicional, etiquetaDeAdicional, type FilaAdicional } from './adicionales'
-import { menoresDeDosAnios, precioPorHabitacion, type RepartoHabitaciones } from './habitaciones'
+import { habitacionesDeTarifa, menoresDeDosAnios, precioPorHabitacion, repartirHabitaciones, type RepartoHabitaciones } from './habitaciones'
 import { precioConMargen, type ConvencionMargen } from './precio-item'
 import {
   aPesos,
@@ -25,6 +25,7 @@ import {
   type CostoPorTipo,
   type PreciosAMano,
   type TarifaConfirmada,
+  type TarifaPax,
   type TipoPasajero,
 } from './tarifa-pasajero'
 import { leerFecha } from '@/lib/pdf/cotizacion-trappvel-formato'
@@ -240,10 +241,21 @@ export interface ResumenAlojamiento {
   cupos: { texto: string; falta: boolean }[]
   /** «Falta» / «Faltan» y a quién: la caja ámbar que pide la habitación que falta. */
   falta: { verbo: 'Falta' | 'Faltan'; quien: string } | null
+  /**
+   * «Sobra» / «Sobran» y quiénes: las habitaciones que VAN cubren a más de los que viajan
+   * (la operadora eligió de más). Avisa, no frena.
+   */
+  sobra: { verbo: 'Sobra' | 'Sobran'; quien: string } | null
+  /** Las que van: suman al costo y salen al cliente. */
   habitaciones: number
+  /** Las que están en la opción y no van (de referencia): no suman ni salen al cliente. */
+  referencias: number
 }
 
 const habitacionesTexto = (n: number) => (n === 1 ? '1 habitación' : `${n} habitaciones`)
+
+/** «1 de referencia, no suma» / «2 de referencia, no suman». */
+export const referenciasTexto = (n: number) => `${n} de referencia, no ${n === 1 ? 'suma' : 'suman'}`
 
 /** Lo que falta, dicho como en el prototipo: «1 infante», «2 adultos y 1 niño». */
 function quienes(c: Composicion): string {
@@ -257,17 +269,61 @@ export function resumenDeAlojamiento(r: RepartoHabitaciones): ResumenAlojamiento
   const falta = r.faltan && totalPasajeros(r.faltan) > 0
     ? { verbo: (totalPasajeros(r.faltan) === 1 ? 'Falta' : 'Faltan') as 'Falta' | 'Faltan', quien: quienes(r.faltan) }
     : null
-  const titulo = falta
-    ? `${habitacionesTexto(n)} · ${falta.verbo.toLowerCase()} ${falta.quien}`
-    : g ? `${habitacionesTexto(n)} · cubre a los ${totalPasajeros(g)} viajeros` : habitacionesTexto(n)
+  const sobra = r.sobran && totalPasajeros(r.sobran) > 0
+    ? { verbo: (totalPasajeros(r.sobran) === 1 ? 'Sobra' : 'Sobran') as 'Sobra' | 'Sobran', quien: quienes(r.sobran) }
+    : null
+  const referencias = r.habitaciones.length - n
+  const cuadre = [
+    falta ? `${falta.verbo.toLowerCase()} ${falta.quien}` : null,
+    sobra ? `${sobra.verbo.toLowerCase()} ${sobra.quien}` : null,
+  ].filter(Boolean).join(' · ')
+  const titulo = [
+    habitacionesTexto(n),
+    cuadre || (g ? `cubre a los ${totalPasajeros(g)} viajeros` : null),
+    referencias > 0 ? referenciasTexto(referencias) : null,
+  ].filter(Boolean).join(' · ')
   const cupos = g
     ? TIPOS_PASAJERO.filter(t => cantidadDeTipo(g, t) > 0).map(t => {
       const cubre = cantidadDeTipo(r.cubiertos, t)
       const total = cantidadDeTipo(g, t)
-      return { texto: `${cubre}/${total} ${PALABRAS[t][total === 1 ? 0 : 1]}`, falta: cubre < total }
+      return { texto: `${cubre}/${total} ${PALABRAS[t][total === 1 ? 0 : 1]}`, falta: cubre !== total }
     })
     : []
-  return { titulo, cupos, falta, habitaciones: n }
+  return { titulo, cupos, falta, sobra, habitaciones: n, referencias }
+}
+
+/**
+ * El aviso de pasajeros de una opción de hotel, con las MISMAS palabras en la tarjeta y en el
+ * resumen de Componentes (brief del 2026-10-01, punto 1: el resumen decía «1 completo» con la
+ * tarjeta pidiendo una habitación). `null` si las habitaciones que van cubren justo al grupo.
+ *
+ *  · `corto`: «Faltan 1 adulto y 1 infante», «Sobra 1 adulto».
+ *  · `frase`: lo que dice la caja de la tarjeta, con qué hacer.
+ */
+export function avisoDePasajeros(r: Pick<ResumenAlojamiento, 'falta' | 'sobra'>): { corto: string; frase: string } | null {
+  if (r.falta) {
+    const corto = `${r.falta.verbo} ${r.falta.quien}`
+    return { corto, frase: `${corto}: pega su habitación.` }
+  }
+  if (r.sobra) {
+    const corto = `${r.sobra.verbo} ${r.sobra.quien}`
+    return { corto, frase: `${corto}: marca «No va» en la habitación que no va.` }
+  }
+  return null
+}
+
+/**
+ * El aviso de pasajeros de una opción, desde su tarifa y el grupo del negocio: la misma cuenta
+ * que hace la tarjeta (`repartirHabitaciones` contra `composicionViaje ?? tarifa.composicion`).
+ * `null` si la opción no tiene habitaciones o si cuadra.
+ */
+export function avisoDePasajerosDeOpcion(
+  tarifa: TarifaPax,
+  grupo: Composicion | null,
+): { corto: string; frase: string } | null {
+  const habs = habitacionesDeTarifa(tarifa)
+  if (habs.length === 0) return null
+  return avisoDePasajeros(resumenDeAlojamiento(repartirHabitaciones(habs, grupo ?? tarifa.composicion ?? null, tarifa.correcciones)))
 }
 
 /** Las edades que dice el texto de ocupación de la captura, por tipo de menor. */

@@ -12,13 +12,19 @@ import { NextResponse } from 'next/server'
 import { getCotizacionItems } from '@/app/(app)/negocios/cotizacion-actions'
 import { getAdicionalesDeCotizacion } from '@/app/(app)/negocios/adicional-actions'
 import { getWorkspace } from '@/lib/actions/get-workspace'
+import { enPeticionDeRuta } from '@/lib/actions/memo-de-ruta'
 
 export const runtime = 'nodejs'
 export const dynamic = 'force-dynamic'
 
 const SIN_CACHE = { 'cache-control': 'no-store' }
 
-export async function GET(_req: Request, { params }: { params: Promise<{ id: string }> }) {
+export async function GET(req: Request, ctx: { params: Promise<{ id: string }> }) {
+  // La sesión se resuelve una vez para las tres lecturas (`memo-de-ruta.ts`).
+  return enPeticionDeRuta(() => leer(req, ctx))
+}
+
+async function leer(_req: Request, { params }: { params: Promise<{ id: string }> }) {
   const { id } = await params
   // La marca se toma ANTES de leer, igual que en la página: lo leído es al menos así de nuevo.
   const leidaEn = new Date().toISOString()

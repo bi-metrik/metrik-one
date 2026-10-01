@@ -54,14 +54,14 @@
  * retiró es el documento del cliente.
  */
 
-import { leerTarifaPax, type LecturaCasilla } from './tarifa-pasajero'
+import { composicionDeLectura, describirOcupacion, leerTarifaPax, type LecturaCasilla } from './tarifa-pasajero'
 import { ranuraDeGrupo, ranuraPorSlug, slugsDeRanura, type DefinicionRanura } from './ranuras-pantallazo'
 import { aplicarCorrecciones, leidosPorSlug, type Correcciones } from './correcciones'
 import { fechasCorregidas } from './estadia'
 import { estrellasDesdeTexto } from './estrellas'
 import { notaDeLaLinea } from './nota-linea'
 import { datosManuales } from './ingreso-manual'
-import { habitacionesDeTarifa, repartirHabitaciones } from './habitaciones'
+import { habitacionesDeTarifa, repartirHabitaciones, type RepartoHabitaciones } from './habitaciones'
 import { acomodacionDeHabitaciones } from './tarjeta-opcion'
 import { vueloDesdeNombre } from '@/lib/pdf/cotizacion-trappvel-formato'
 import { parseMontoCop } from '@/lib/negocios/monto-cop'
@@ -600,6 +600,18 @@ function nochesDe(d: Record<string, string>, correcciones?: Correcciones | null)
   return n > 0 ? n : null
 }
 
+/**
+ * La acomodación de una opción con varias capturas de las que solo UNA va (las demás quedaron
+ * de referencia, brief del 2026-10-01, punto 2). Si la que va es la primera, `null`: el
+ * documento sigue diciendo lo de su pantallazo, como siempre. Si es otra, su ocupación: la
+ * ficha de la opción se lee de la primera captura y diría la ocupación de una que no va.
+ */
+function ocupacionDeLaUnicaQueVa(r: RepartoHabitaciones): string | null {
+  const van = r.habitaciones.filter(h => h.rol === 'habitacion')
+  if (van.length !== 1 || van[0].id === r.habitaciones[0]?.id || !van[0].ocupacion) return null
+  return describirOcupacion(van[0].ocupacion)
+}
+
 /** Los hoteles del documento, uno por línea de alojamiento. */
 export function hotelesDeItems(items: ItemConLectura[]): HotelPDF[] {
   const out: HotelPDF[] = []
@@ -610,9 +622,16 @@ export function hotelesDeItems(items: ItemConLectura[]): HotelPDF[] {
     // entero); la ocupación del primer pantallazo solo describe su habitación.
     const tarifa = leerTarifaPax(item.tarifa_pax)
     const habs = habitacionesDeTarifa(tarifa)
-    const acomodacion = habs.length > 1 ? acomodacionDeHabitaciones(repartirHabitaciones(habs, tarifa.composicion ?? null)) : null
+    const reparto = habs.length > 1 ? repartirHabitaciones(habs, tarifa.composicion ?? null, tarifa.correcciones) : null
+    const acomodacion = reparto ? acomodacionDeHabitaciones(reparto) ?? ocupacionDeLaUnicaQueVa(reparto) : null
     // Ingreso manual: lo que incluye y la edad del niño viven fuera de los campos de la ranura.
-    const manual = datosManuales(casillaDelItem(item) ?? habs[0]?.lectura ?? null)
+    const primera = casillaDelItem(item) ?? habs[0]?.lectura ?? null
+    const manual = datosManuales(primera)
+    // «Tarifa niño de X a Y años…» solo cuando la opción lleva al menos un niño (brief del
+    // 2026-10-01, punto 5): en un viaje de adultos e infantes la condición no le dice nada al
+    // cliente y parece que se le cobra algo que no lleva.
+    const pax = reparto?.cubiertos ?? tarifa.composicion ?? (primera ? composicionDeLectura(primera) : null)
+    const conNinos = !!pax && pax.ninos > 0
     out.push({
       linea: (item.nombre ?? '').trim(),
       hotel: texto(d, 'hotel'),
@@ -629,7 +648,7 @@ export function hotelesDeItems(items: ItemConLectura[]): HotelPDF[] {
       adicionales: item.adicionales ?? [],
       // Sin ingreso manual las llaves no aparecen: la ficha de siempre se arma igual que antes.
       ...(manual?.incluye ? { incluye: manual.incluye } : {}),
-      ...(manual?.edadNino ? { edadNino: manual.edadNino } : {}),
+      ...(manual?.edadNino && conNinos ? { edadNino: manual.edadNino } : {}),
       nota: notaDeLaLinea(item),
       // Sin foto del hotel la llave no aparece: la ficha de siempre se arma igual que antes.
       ...(tarifa.fotoHotel ? { fotoRef: tarifa.fotoHotel.ref, fotoProporcion: tarifa.fotoHotel.proporcion } : {}),

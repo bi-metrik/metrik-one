@@ -8,6 +8,7 @@ import type { PreciosAMano, TarifaConfirmada } from '@/lib/cotizaciones/tarifa-p
 import { filasDeCosto, pesos } from '@/lib/cotizaciones/tarjeta-opcion'
 import { TOKENS, textosDeTarjetaHotel } from '@/lib/pdf/cotizacion-trappvel-formato'
 import { TEXTO_AGREGAR_FOTO_HOTEL, urlDeFotoHotel } from '@/lib/cotizaciones/foto-hotel'
+import { nombreVisibleDeLinea } from '@/lib/cotizaciones/nombre-visible'
 
 /**
  * «Así lo ve el cliente» (prototipo de la tarjeta, 2026-09-24): la opción de hotel como sale en
@@ -75,7 +76,7 @@ export default function HojaCliente({
   const hoja = (tarjeta: ReactNode) => (
     <Hoja bloqueTitulo={bloqueTitulo} porPasajero={porPasajero} precioOpcion={precioOpcion}>{tarjeta}</Hoja>
   )
-  if (!h) return hoja(<LineaDelCliente numero={numero} nombre={(item.nombre ?? '').trim()} adicionales={enLaFicha} />)
+  if (!h) return hoja(<LineaDelCliente numero={numero} nombre={nombreVisibleDeLinea(item)} adicionales={enLaFicha} />)
   const t = textosDeTarjetaHotel(h, general)
 
   return hoja(
