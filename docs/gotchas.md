@@ -184,3 +184,9 @@
   no con el enlace: si `*.vercel.app` no esta en las Redirect URLs de Supabase Auth, el enlace cae
   en el Site URL (produccion). ⚠️ El scope Preview no tiene `GEMINI_API_KEY`: sin ella no se lee
   ningun pantallazo en el preview.
+- **El `_cross_check` guardado de un documento envejece aunque nadie toque el archivo.** Se calcula
+  una vez al cargar; si después llega el RUT, se corrige un dato o cambia una regla de comparación,
+  la fila sigue en falla. La lectura del negocio relee las filas que fallan
+  (`documentos/relectura-cross-check.ts`) y solo absuelve. Cambiar una comparación de texto exige
+  cambiarla en `documentos/comparar-check.ts` o `negocios/comparar-valores.ts`, que comparten
+  normalización y regla de nombres: no volver a copiarlas dentro de un archivo `'use server'`.

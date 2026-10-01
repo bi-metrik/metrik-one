@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { checkSeSalta } from './check-opcional'
+import { checkSeSalta, sociedadAcompananteSeSalta } from './check-opcional'
 import { bloqueOcultoEnHistorial } from '@/lib/negocios/bloque-oculto-historial'
 
 // El `required_when` real de SOENA sobre el 2º solicitante del certificado UPME.
@@ -32,6 +32,33 @@ describe('checkSeSalta — el 2º solicitante del certificado UPME', () => {
   it('un check sin `optional` nunca se salta, y uno sin `required_when` se comporta como antes', () => {
     expect(checkSeSalta({}, '', fuentes('copropiedad'))).toBe(false)
     expect(checkSeSalta({ optional: true }, '', fuentes('copropiedad'))).toBe(true)
+  })
+})
+
+// Datos inventados con la forma de V0321/V0323/V0537 (certificados de 2024 a nombre de la
+// persona Y de la sociedad del proyecto).
+describe('sociedadAcompananteSeSalta — la sociedad en el lugar del 2º solicitante', () => {
+  it('un solo titular, sin nada contra qué compararla: se salta (por nombre o por NIT)', () => {
+    expect(sociedadAcompananteSeSalta(SEGUNDO_SOLICITANTE, 'PROYECTOS SOLARES DEL VALLE SAS', '', fuentes('unico'))).toBe(true)
+    expect(sociedadAcompananteSeSalta(SEGUNDO_SOLICITANTE, '900987654', '', fuentes('unico'))).toBe(true)
+  })
+
+  it('copropiedad: el lugar es obligatorio, no se salta', () => {
+    expect(sociedadAcompananteSeSalta(SEGUNDO_SOLICITANTE, 'PROYECTOS SOLARES DEL VALLE SAS', '', fuentes('copropiedad'))).toBe(false)
+  })
+
+  it('sin la titularidad no se sabe si es obligatorio: no se salta', () => {
+    expect(sociedadAcompananteSeSalta(SEGUNDO_SOLICITANTE, 'PROYECTOS SOLARES DEL VALLE SAS', '', fuentes(undefined))).toBe(false)
+  })
+
+  it('una persona natural, o una sociedad con contra qué compararla, no se salta', () => {
+    expect(sociedadAcompananteSeSalta(SEGUNDO_SOLICITANTE, 'LOPEZ ROJAS ANA', '', fuentes('unico'))).toBe(false)
+    expect(sociedadAcompananteSeSalta(SEGUNDO_SOLICITANTE, '52123456', '', fuentes('unico'))).toBe(false)
+    expect(sociedadAcompananteSeSalta(SEGUNDO_SOLICITANTE, 'BANCO DEL EJEMPLO SA', 'BANCO DEL EJEMPLO S.A.', fuentes('unico'))).toBe(false)
+  })
+
+  it('un check que no es opcional nunca se salta', () => {
+    expect(sociedadAcompananteSeSalta({}, 'PROYECTOS SOLARES DEL VALLE SAS', '', fuentes('unico'))).toBe(false)
   })
 })
 

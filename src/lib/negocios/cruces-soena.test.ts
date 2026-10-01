@@ -278,6 +278,25 @@ describe('cruces de SOENA contra casos reales', () => {
     expect(r[0].mensaje).toMatch(/^El certificado UPME trae 1 solicitante/)
   })
 
+  // Datos inventados con la forma de V0522: una SAS titular única con el tipo de persona
+  // marcado «natural». Descontar a la sociedad dejaba «0 solicitantes».
+  const SOCIEDAD_TITULAR = {
+    ...NATURAL,
+    titularidad: { modalidad_solicitante: 'unico' },
+    servicio_contratado: { servicio: 'completo' },
+    concepto_upme: { nombre_certificado: 'PROYECTOS SOLARES DEL VALLE SAS', numero_identificacion_certificado: '9009876543' },
+  }
+
+  it('una sociedad sola en el certificado ES el titular: no se descuenta (no «0 solicitantes»)', async () => {
+    expect(await evaluarCruces(CRUCES, ctx(SOCIEDAD_TITULAR), CITA)).toEqual([])
+  })
+
+  it('una sociedad sola contra una copropiedad sigue avisando, con 1 solicitante', async () => {
+    const r = await evaluarCruces(CRUCES, ctx({ ...SOCIEDAD_TITULAR, titularidad: { modalidad_solicitante: 'copropiedad' } }), CITA)
+    expect(r.map(c => c.slug)).toEqual(['certificado_personas_vs_titularidad'])
+    expect(r[0].mensaje).toMatch(/^El certificado UPME trae 1 solicitante/)
+  })
+
   it('sin titularidad respondida el cruce no se evalúa (la tarjeta ya la muestra «Sin definir»)', async () => {
     const { titularidad: _t, ...sinTitularidad } = V0151
     void _t

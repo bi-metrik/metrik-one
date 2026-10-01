@@ -3,8 +3,9 @@
  * certificados UPME de SOENA el 2026-09-24 (315 certificados de casos abiertos).
  */
 import { describe, expect, it } from 'vitest'
-import { coinciden } from './comparar-valores'
+import { coinciden, nombresCoinciden } from './comparar-valores'
 import { evaluarCruces, leerCruces, slugsDeCruces } from './cruces'
+import { normalizarTexto } from './texto-normalizado'
 import type { ContextoFuentes } from './fuentes-negocio'
 
 describe('coinciden', () => {
@@ -115,5 +116,70 @@ describe('cruce coincide', () => {
       ['rut'],
     )
     expect(await evaluarCruces(cruces, c, 9)).toEqual([])
+  })
+
+  it('el certificado con una letra griega y el RUT sin el segundo apellido no avisan', async () => {
+    const c = ctx({
+      concepto_upme: { nombre_certificado: 'GARCIA MEJIA PEDRO ΑNTONIO' },
+      rut: { razon_social: 'GARCIA  PEDRO ANTONIO' },
+    })
+    expect(await evaluarCruces(cruces, c, 9)).toEqual([])
+  })
+})
+
+/**
+ * Las reglas del 2026-10-01, con datos INVENTADOS que reproducen la forma de los avisos
+ * falsos medidos en SOENA (V0507, V0521, V0531, modelos de carro con otros espacios).
+ */
+describe('falsos avisos del certificado (2026-10-01)', () => {
+  it('homoglifos: una letra griega o cirílica que imita a la latina es la latina', () => {
+    // «Ν» griega (U+039D) y «Α» griega, como las que mete la lectura del PDF.
+    expect(coinciden('PEREZ ROJAS ΝICOLAS ΑNDRES', 'PEREZ ROJAS NICOLAS ANDRES', 'tokens')).toBe(true)
+    // «С» y «О» cirílicas.
+    expect(coinciden('СASTRO LОPEZ ANA', 'CASTRO LOPEZ ANA', 'tokens')).toBe(true)
+    expect(normalizarTexto('ΤΟΥΟΤΑ')).toBe('toyota')
+  })
+
+  it('homoglifos en todo modo de texto, no solo en `tokens`', () => {
+    expect(coinciden('ΚΙΑ', 'KIA', 'palabra_comun')).toBe(true)
+    expect(coinciden('ΜOTORES DEL SUR SAS', 'MOTORES DEL SUR', 'contenido')).toBe(true)
+  })
+
+  it('una palabra menos en un lado, con tres en común: el mismo nombre', () => {
+    // El RUT leído sin el segundo apellido y con doble espacio (forma de V0521).
+    expect(coinciden('GARCIA  PEDRO ANTONIO', 'GARCIA MEJIA PEDRO ANTONIO', 'tokens')).toBe(true)
+    expect(coinciden('Pedro Antonio García Mejía', 'GARCIA PEDRO ANTONIO', 'tokens')).toBe(true)
+  })
+
+  it('dos personas distintas con apellidos en común NO coinciden', () => {
+    // Un apellido en común.
+    expect(coinciden('GARCIA MEJIA PEDRO', 'GARCIA LOPEZ LUISA', 'tokens')).toBe(false)
+    // Hermanos: dos apellidos en común, a cada lado le sobra un nombre.
+    expect(coinciden('GARCIA MEJIA PEDRO', 'GARCIA MEJIA LUISA', 'tokens')).toBe(false)
+    // Con solo dos palabras en común no alcanza, aunque a uno le falte una sola.
+    expect(coinciden('GARCIA PEDRO', 'GARCIA MEJIA PEDRO', 'tokens')).toBe(false)
+    // Faltan dos palabras: no es el mismo nombre escrito de otra forma.
+    expect(coinciden('GARCIA MEJIA PEDRO', 'GARCIA MEJIA PEDRO ANTONIO JOSE', 'tokens')).toBe(false)
+    // Una letra distinta sigue siendo otro nombre.
+    expect(coinciden('GARCIA MEJIA PEDRO', 'GARCIA MEJIA PEDRA', 'tokens')).toBe(false)
+  })
+
+  it('nombresCoinciden es la regla que usan los dos motores', () => {
+    expect(nombresCoinciden('GARCIA  PEDRO ANTONIO', 'GARCIA MEJIA PEDRO ANTONIO')).toBe(true)
+    expect(nombresCoinciden('', 'GARCIA')).toBe(false)
+  })
+
+  it('sigla con puntos: «S.A.S.» es «SAS»', () => {
+    expect(coinciden('Motores del Sur SAS', 'MOTORES DEL SUR, S.A.S.', 'contenido')).toBe(true)
+    expect(coinciden('MOTORES DEL SUR S.A.', 'Motores del Sur SA', 'contenido')).toBe(true)
+    // Con una palabra de más a un lado ya no basta quitar los espacios: la sigla se pliega.
+    expect(coinciden('MOTORES DEL SUR S.A.S. BIC', 'Motores del Sur SAS', 'contenido')).toBe(true)
+    expect(normalizarTexto('Ing. J. Perez')).toBe('ing j perez')
+  })
+
+  it('el mismo texto con otros espacios coincide; otro modelo no', () => {
+    expect(coinciden('RAV4', 'RAV 4', 'palabra_comun')).toBe(true)
+    expect(coinciden('X', 'X', 'palabra_comun')).toBe(true)
+    expect(coinciden('EV5', 'EV3', 'palabra_comun')).toBe(false)
   })
 })

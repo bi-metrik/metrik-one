@@ -31,13 +31,7 @@
  * coinciden: son dos maneras distintas de decir dónde vive alguien.
  */
 
-/** Letras griegas y cirílicas que se ven iguales a una latina (lectura de PDF). */
-const HOMOGLIFOS: Record<string, string> = {
-  Α: 'A', Β: 'B', Ε: 'E', Ζ: 'Z', Η: 'H', Ι: 'I', Κ: 'K', Μ: 'M', Ν: 'N', Ο: 'O', Ρ: 'P', Τ: 'T', Υ: 'Y', Χ: 'X',
-  α: 'a', ι: 'i', κ: 'k', ο: 'o', ρ: 'p', τ: 't', υ: 'u', χ: 'x',
-  А: 'A', В: 'B', Е: 'E', К: 'K', М: 'M', Н: 'H', О: 'O', Р: 'P', С: 'C', Т: 'T', У: 'Y', Х: 'X',
-  а: 'a', е: 'e', о: 'o', р: 'p', с: 'c', у: 'y', х: 'x', к: 'k', м: 'm', т: 't',
-}
+import { plegarHomoglifos } from './texto-normalizado'
 
 const VIAS: Record<string, string> = {}
 const UNIDADES: Record<string, string> = {}
@@ -83,8 +77,7 @@ export interface DireccionPredio {
 }
 
 function tokens(v: unknown): string[] {
-  const texto = [...String(v ?? '')].map(ch => HOMOGLIFOS[ch] ?? ch).join('')
-  return texto
+  return plegarHomoglifos(v)
     .normalize('NFD')
     .replace(/[̀-ͯ]/g, '')
     .toLowerCase()

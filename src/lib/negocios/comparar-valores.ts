@@ -11,14 +11,19 @@
  *   315 certificados). Aquí basta con 2 letras.
  * - `tokens` comparaba listas ordenadas: un nombre repetido («MAURICIO MAURICIO AFANADOR
  *   BARRIOS» contra «AFANADOR BARRIOS MAURICIO») daba NO coincide. Aquí son conjuntos.
+ *
+ * Desde el 2026-10-01 las dos validaciones comparten la normalización
+ * (`texto-normalizado.ts`) y la regla de nombres (`nombresCoinciden`): la de
+ * `documento-actions.ts` vive ahora en `documentos/comparar-check.ts` y usa estas.
  */
 
 import { direccionesCoinciden } from './direccion-predio'
 import { montosCoinciden } from './monto-cop'
+import { normalizarTexto } from './texto-normalizado'
 import { TOLERANCIA_SALDO_COP } from './tolerancia-saldo'
 
 /**
- * - `tokens`: las mismas palabras, en cualquier orden (nombres de personas).
+ * - `tokens`: el mismo nombre de persona, en cualquier orden. Ver `nombresCoinciden`.
  * - `contenido`: las palabras de uno están todas en el otro (razón social con o sin sigla).
  * - `palabra_comun`: comparten al menos una palabra con letras (marca, línea).
  * - `compacto`: iguales sin espacios ni signos (VIN, placas, series).
@@ -58,14 +63,42 @@ export interface OpcionesComparacion {
   equivalencias?: string[][]
 }
 
-function normalizar(v: unknown): string {
-  return String(v ?? '')
-    .normalize('NFD')
-    .replace(/[̀-ͯ]/g, '')
-    .toLowerCase()
-    .replace(/[^a-z0-9\s]/g, ' ')
-    .replace(/\s+/g, ' ')
-    .trim()
+const normalizar = normalizarTexto
+
+/**
+ * ¿El mismo nombre de persona? Las palabras, sin orden, sin tildes ni signos.
+ *
+ * Coincide si son las mismas, o si a uno le falta UNA sola de las del otro y comparten
+ * al menos tres. Es la forma en que el mismo nombre llega distinto de dos papeles: el RUT
+ * leído en ONE de V0521 trae «ALARCON  WILSON ALEXANDER» (sin el segundo apellido) y el
+ * certificado y la factura «ALARCON CARRASQUILLA WILSON ALEXANDER».
+ *
+ * Por qué tres en común y no menos: dos personas distintas comparten con facilidad un
+ * apellido, y una pareja o dos hermanos comparten dos palabras («GOMEZ PEREZ ANA» y
+ * «GOMEZ PEREZ LUIS»), pero en esos casos a cada lado le sobra una palabra que el otro no
+ * tiene, y eso NO coincide. Lo único que se tolera es que un lado sea el otro con una
+ * palabra menos. Que sea la misma persona lo confirma el número de documento, que tiene
+ * su propio cruce: el nombre solo no distingue a dos homónimos.
+ */
+export function nombresCoinciden(a: unknown, b: unknown, equivalencias: string[][] = []): boolean {
+  const x = palabras(a, equivalencias)
+  const y = palabras(b, equivalencias)
+  if (x.size === 0 || y.size === 0) return false
+  const [corto, largo] = x.size <= y.size ? [x, y] : [y, x]
+  if (![...corto].every(p => largo.has(p))) return false
+  return largo.size === corto.size || (largo.size - corto.size === 1 && corto.size >= 3)
+}
+
+/**
+ * Las palabras más las parejas de palabras seguidas pegadas: «RAV 4» trae también
+ * «rav4», y «X5 XDRIVE 50E» trae «xdrive50e». Un modelo de carro se escribe con y sin
+ * espacio según el papel (medido en SOENA: RAV4, X5 xDrive50e, EQA 250+).
+ */
+function conPegadas(texto: string): string[] {
+  const ps = texto.split(' ').filter(Boolean)
+  const out = [...ps]
+  for (let i = 0; i + 1 < ps.length; i++) out.push(ps[i] + ps[i + 1])
+  return out
 }
 
 function palabras(v: unknown, equivalencias: string[][] = []): Set<string> {
@@ -95,14 +128,17 @@ export function coinciden(a: unknown, b: unknown, modo: ModoComparacion, opts: O
     const y = normalizar(b).replace(/\s/g, '')
     return !!x && x === y
   }
+  if (modo === 'tokens') return nombresCoinciden(a, b, opts.equivalencias)
   const x = palabras(a, opts.equivalencias)
   const y = palabras(b, opts.equivalencias)
   if (x.size === 0 || y.size === 0) return false
-  if (modo === 'tokens') return x.size === y.size && [...x].every(p => y.has(p))
+  // El mismo texto con otros espacios («RAV4» y «RAV 4») coincide en todo modo de palabras.
+  if (normalizar(a).replace(/ /g, '') === normalizar(b).replace(/ /g, '')) return true
   if (modo === 'contenido') return [...x].every(p => y.has(p)) || [...y].every(p => x.has(p))
   // palabra_comun: una palabra con letras, de 2 o más caracteres. Los números solos (el
   // año del modelo) no cuentan: dos carros distintos del mismo año no son el mismo carro.
-  const conLetras = (s: Set<string>) => [...s].filter(p => p.length >= 2 && /[a-z]/.test(p))
+  const conLetras = (s: Set<string>) =>
+    conPegadas([...s].join(' ')).filter(p => p.length >= 2 && /[a-z]/.test(p))
   const ys = new Set(conLetras(y))
   return conLetras(x).some(p => ys.has(p))
 }
