@@ -1,6 +1,6 @@
 ---
 name: tarifas-plan-ruta
-description: Tarifas fijas por plan y ruta de la propuesta económica (SOENA, 2026-10-01) — tabla servicio_tarifas_versiones SIN aplicar; una propuesta emitida con el esquema anterior no cambia; el PDF aún imprime el plan que no se ofrece
+description: Tarifas fijas por plan y ruta de la propuesta económica (SOENA, 2026-10-01) — tabla y carga APLICADAS en prod (2026-10-01); una propuesta emitida con el esquema anterior no cambia; el PDF aún imprime el plan que no se ofrece
 metadata:
   type: project
 ---
@@ -17,8 +17,8 @@ creados ese día, 4 ya tenían propuesta emitida con precio estándar + descuent
 decisión de Mauricio, no del código.
 
 **How to apply:**
-- Migraciones `20261001140000_servicio_tarifas_versiones.sql` (DDL) y `20261001140100_soena_tarifas_plan_ruta.sql`
-  (carga, re-aplicable) se aplican ANTES del merge (main despliega solo). Sin la tabla el código cae al
+- Migraciones `20261001140000_servicio_tarifas_versiones.sql` (DDL) y `20261001140100_soena_tarifas_plan_ruta.sql` YA aplicadas;
+  la `perf_fence` del #978 chocaba en 20261001140000 y se renombró a 20261001140200. Sin la tabla el código cae al
   esquema anterior en silencio (`leerVersionesTarifa` devuelve []).
 - El tope 25 % vive en la versión; el `cap_descuento_pct` del bloque sigue en 100 para los negocios viejos.
   `umbral_aprobacion_pct` = 50 > 25 deja el gate gerencial mudo en los negocios con tarifas.

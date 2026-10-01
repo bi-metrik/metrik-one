@@ -20,6 +20,7 @@ import { definicionDeTipo, type TipoRanura } from './ranuras-cotizacion'
 import { etiquetaDeRanura } from './ranuras-pantallazo'
 import type { Composicion, LecturaCasilla } from './tarifa-pasajero'
 import { ubicarLectura, type DestinoDeLectura, type LineaParaUbicar } from './ubicar-lectura'
+import { lugarDeBloqueNuevo } from './actividad-pantallazo'
 
 /** El id de una opción que solo existe en la bandeja. Nunca llega a la base. */
 export const PREFIJO_BORRADOR = 'borrador:'
@@ -52,10 +53,17 @@ export function textoDeDestino(
   tipo: TipoRanura,
   pistas: { lugar: string | null; origen: string | null; destino: string | null },
   ubicaciones: Readonly<Record<string, Ubicacion>>,
+  /**
+   * La actividad nombra su bloque nuevo con la ciudad de la captura, o con el destino del viaje
+   * si no la muestra (`lugarDeBloqueNuevo`, el mismo criterio del servidor al aceptar).
+   */
+  actividad?: { lectura: LecturaCasilla; destinoViaje: string | null } | null,
 ): string {
   if (d.como === 'habitacion') return `Habitación de ${nombreDeOpcion(d.itemId, ubicaciones, etiquetaDeRanura(d.grupo))}`
   if (d.como === 'hermana') return `Otra opción de ${etiquetaDeRanura(d.grupo)}`
-  const lugar = pistas.destino || pistas.lugar
+  const lugar = tipo === 'actividad' && actividad
+    ? lugarDeBloqueNuevo(tipo, actividad.lectura, pistas.lugar) ?? (actividad.destinoViaje?.trim() || null)
+    : pistas.destino || pistas.lugar
   return `${definicionDeTipo(tipo).label}${lugar ? ` en ${lugar}` : ''} · nuevo`
 }
 
@@ -70,6 +78,8 @@ export function revisarBorrador(a: {
   ubicaciones: Readonly<Record<string, Ubicacion>>
   /** `false` cuando el asesor pidió procesarla igual: no se le vuelve a preguntar. */
   comparar: boolean
+  /** El destino del negocio: nombra el bloque nuevo de una actividad sin ciudad. */
+  destinoViaje?: string | null
 }): Revision {
   const { capId, borrador, ubicaciones } = a
   const destino = ubicarLectura({
@@ -80,7 +90,7 @@ export function revisarBorrador(a: {
     grupoViaje: a.composicion,
   })
   const leida = opcionDeBorrador(capId, borrador.tipo, borrador.lectura, destino.como === 'nueva' ? null : destino.grupo)
-  const donde = textoDeDestino(destino, borrador.tipo, borrador.pistas, ubicaciones)
+  const donde = textoDeDestino(destino, borrador.tipo, borrador.pistas, ubicaciones, { lectura: borrador.lectura, destinoViaje: a.destinoViaje ?? null })
   const como = destino.como
 
   // R8, regla 6: el grupo ya está cubierto en la opción de ese hotel. Se pregunta.

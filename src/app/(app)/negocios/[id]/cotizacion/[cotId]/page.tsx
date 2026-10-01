@@ -28,6 +28,12 @@ import {
   type UmbralesMargen,
 } from '@/lib/cotizaciones/convencion-margen'
 
+// Las casillas de la tarifa por pasajero leen el pantallazo con el modelo (8 a 25 s) por server
+// action, y una server action corre con la duración de ESTA página. Sin tope declarado quedaba
+// el de la cuenta; la bandeja, que lee por ruta, ya tenía 60 s (`leer-captura`). Una lectura
+// cortada por tiempo era un pantallazo que «no hacía nada» (brief del 2026-10-01, punto 7).
+export const maxDuration = 60
+
 export default async function CotizacionNegocioPage({
   params,
 }: {

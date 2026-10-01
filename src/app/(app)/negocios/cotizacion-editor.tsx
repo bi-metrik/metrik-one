@@ -90,6 +90,7 @@ import {
   precioPorPasajero,
   type Composicion,
 } from '@/lib/cotizaciones/tarifa-pasajero'
+import { avisoTasaPendiente } from '@/lib/cotizaciones/actividad-pantallazo'
 import { precioPorHabitacion } from '@/lib/cotizaciones/habitaciones'
 import { lineasDesactualizadas, motivoParaNoEnviar } from '@/lib/cotizaciones/captura-desactualizada'
 import { etiquetaDeMotivo } from '@/lib/cotizaciones/motivos-borrador'
@@ -998,6 +999,8 @@ export default function CotizacionEditor({ oportunidadId, cotizacion, initialIte
       alerta: (t.casillas?.grupo_completo?.alertas ?? []).find(a => !esAvisoSoloInformativo(a)) ?? null,
       // Hotel: la misma cuenta de pasajeros que la tarjeta («Faltan 1 adulto y 1 infante»).
       pasajeros: ranuraDeGrupo(i.grupo ?? null)?.slug === 'hotel_detalle' ? avisoDePasajerosDeOpcion(t, composicionViaje ?? null) : null,
+      // Por qué el costo leído no entró, cuando es la tasa de cambio (brief del 2026-10-01).
+      pendiente: avisoTasaPendiente(t, composicionDeLinea(t, composicionViaje ?? null), ranuraDeGrupo(i.grupo ?? null)?.slug),
     }
   }
   // P12 · borrar una opción o un bloque entero: sin diálogo y con «Deshacer». Lo borrado se
@@ -1239,6 +1242,37 @@ export default function CotizacionEditor({ oportunidadId, cotizacion, initialIte
       )}
     </>
   )
+  // Brief del 2026-10-01, punto 3 · las opciones cuyo costo no entró porque falta la tasa de
+  // cambio. El precio queda en $0 y aquí se dice, antes de enviar: nunca pasa callado.
+  const costosPendientes = lineasPorTipo
+    ? initialItems
+      .filter(i => i.es_ajuste !== true && !ocultos.has(i.id))
+      .map(i => {
+        const t = leerTarifaPax(i.tarifa_pax)
+        const texto = avisoTasaPendiente(t, composicionDeLinea(t, composicionViaje ?? null), ranuraDeGrupo(i.grupo ?? null)?.slug)
+        const u = ubicacionesDeOpciones[i.id]
+        const donde = u ? `${u.bloque}${u.opcion ? ` · Opción ${u.opcion}` : ''}` : null
+        return texto ? { id: i.id, nombre: i.nombre || 'Opción', donde, texto } : null
+      })
+      .filter((x): x is { id: string; nombre: string; donde: string | null; texto: string } => !!x)
+    : []
+  const jsxAvisoCostoPendiente = costosPendientes.length > 0 ? (
+    <div data-costo-pendiente className="rounded-lg border border-[#E9C98F] bg-[#FBF1E2] p-3 text-xs text-[#9A5F0C]">
+      <p className="flex items-center gap-1.5 font-semibold">
+        <AlertTriangle className="h-4 w-4 shrink-0" aria-hidden />
+        {costosPendientes.length === 1
+          ? 'Una opción no tiene el costo cargado: su precio está en $0.'
+          : `${costosPendientes.length} opciones no tienen el costo cargado: su precio está en $0.`}
+      </p>
+      <ul className="mt-1.5 space-y-1 pl-5">
+        {costosPendientes.map(c => (
+          <li key={c.id}>
+            <span className="font-medium">«{c.nombre}»</span>{c.donde ? ` (${c.donde})` : ''}: {c.texto}
+          </li>
+        ))}
+      </ul>
+    </div>
+  ) : null
   const jsxAvisoDesactualizadas = (
     <>
       {/* Brief del 2026-09-22 · el precio de estas líneas no corresponde a los pasajeros de
@@ -2221,6 +2255,7 @@ export default function CotizacionEditor({ oportunidadId, cotizacion, initialIte
               nota={jsxNotaOpcion}
               bloqueTitulo={ubicacionesDeOpciones[item.id]?.bloque ?? ''}
               general={nivelDetalle === 'general'}
+              fechasViaje={fechasViaje}
               onGuardarNota={texto => {
                 const val = comoSeGuarda(texto)
                 startTransition(async () => {
@@ -2678,6 +2713,7 @@ export default function CotizacionEditor({ oportunidadId, cotizacion, initialIte
               receptor={receptorBandeja}
               onPendientes={setPendientesEnBandeja}
               fechasViaje={fechasViaje}
+              destinoViaje={destinoViaje}
               onCambio={refrescar}
             />
           )}
@@ -3363,6 +3399,7 @@ export default function CotizacionEditor({ oportunidadId, cotizacion, initialIte
                   Pendiente: {viaje.motivo}.
                 </p>
               )}
+              {jsxAvisoCostoPendiente}
               {jsxAvisoDesactualizadas}
               {jsxPanelMargen}
               {jsxIvaNota}
@@ -3409,6 +3446,7 @@ export default function CotizacionEditor({ oportunidadId, cotizacion, initialIte
           receptor={receptorBandeja}
           onPendientes={setPendientesEnBandeja}
           fechasViaje={fechasViaje}
+          destinoViaje={destinoViaje}
           onCambio={refrescar}
         />
       )}

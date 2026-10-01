@@ -163,7 +163,9 @@ function mismoProducto(ranuraSlug: string): string {
  */
 export function casillasDe(c: Composicion, ranuraSlug: string): CasillaDef[] {
   const repetir = mismoProducto(ranuraSlug)
-  const hayMenores = c.ninos + c.infantes > 0
+  // Una actividad con infantes y sin niños se costea con UN pantallazo: el infante no paga
+  // (`infanteGratisEnActividad`). No hay «solo adultos» que buscar.
+  const hayMenores = c.ninos + c.infantes > 0 && !infanteGratisEnActividad(c, ranuraSlug)
   const separa = c.ninos > 0 && c.infantes > 0
     ? 'adultos, niños e infantes'
     : c.ninos > 0 ? 'adultos y niños' : 'adultos e infantes'
@@ -204,6 +206,31 @@ export function casillasDe(c: Composicion, ranuraSlug: string): CasillaDef[] {
     razonCondicional: razon,
   })
   return casillas
+}
+
+/**
+ * ¿La línea es una actividad cuyo pantallazo cubre a TODO el grupo, infantes incluidos, sin
+ * cobrarles? Decisión de Mauricio del 2026-10-01 (brief «actividad por pantallazo»): **en una
+ * actividad, el infante va gratis.** El total del pantallazo es el costo del grupo y se reparte
+ * entre los que pagan; el infante queda en $0 y no se pide el pantallazo «solo adultos», que es
+ * del diseño de hotel con tarifa diferencial.
+ *
+ * ⚠️ Solo con infantes y SIN niños. Cómo se reparte el total cuando viaja un niño no está
+ * decidido: con niños la actividad sigue el camino de siempre (pide las búsquedas que faltan).
+ */
+export function infanteGratisEnActividad(c: Composicion, ranuraSlug: string): boolean {
+  return ranuraSlug === 'actividad_detalle' && c.infantes > 0 && c.ninos === 0
+}
+
+/**
+ * Suma avisos sin repetir ninguno (brief del 2026-10-01, punto 6): la bandeja ya juzgó la
+ * captura al leerla y la vuelve a juzgar al aceptarla; sin esto, el mismo aviso quedaba dos
+ * veces en `alertas`.
+ */
+export function sumarAlertas(...listas: readonly (readonly string[] | null | undefined)[]): string[] {
+  const out: string[] = []
+  for (const l of listas) for (const a of l ?? []) if (!out.includes(a)) out.push(a)
+  return out
 }
 
 // ── Lo que se guarda de cada pantallazo ──────────────────────────────────────
@@ -1026,7 +1053,7 @@ export type EstadoTarifa =
       costos: CostoPorTipo[]
       moneda: string
       costoTotal: number
-      origen: 'desglose' | 'resta' | 'solo_adultos' | 'habitaciones'
+      origen: 'desglose' | 'resta' | 'solo_adultos' | 'habitaciones' | 'infante_gratis'
       mensaje: string
       /**
        * Con habitaciones (R8) y sin un par del mismo tipo de habitación para cada menor, el
@@ -1172,6 +1199,35 @@ export function resolverTarifa(
     }
   }
 
+  // 2b · actividad con infantes (y sin niños): el total es del grupo y el infante va gratis.
+  // Aunque el pantallazo diga «3 personas» contando al infante, no se divide entre 3: se
+  // reparte entre los que pagan (decisión de Mauricio, 2026-10-01).
+  if (infanteGratisEnActividad(c, ranuraSlug)) {
+    const costo = montoDeCosto(l1)
+    const costos: CostoPorTipo[] = [{
+      tipo: 'adulto',
+      cantidad: c.adultos,
+      total: costo,
+      unitario: dosDecimales(costo / c.adultos),
+      deDonde: `Pantallazo 1: ${formatoMonto(costo, moneda)} por el grupo` +
+        (c.adultos > 1 ? `, dividido entre los ${c.adultos} adultos` : ''),
+    }, {
+      tipo: 'infante',
+      cantidad: c.infantes,
+      total: 0,
+      unitario: 0,
+      deDonde: 'En una actividad el infante no paga',
+    }]
+    return {
+      estado: 'resuelta',
+      costos,
+      moneda,
+      costoTotal: costo,
+      origen: 'infante_gratis',
+      mensaje: `${MENSAJE_INFANTE_GRATIS} No hace falta nada más.`,
+    }
+  }
+
   // 3 · un solo total con menores: TP4, falta desglose.
   const necesarias = defs.slice(1)
   const faltan = necesarias.filter(d => !casillas[d.clave])
@@ -1273,6 +1329,10 @@ export function resolverTarifa(
     mensaje: 'Ya está el precio de cada tipo de pasajero.',
   }
 }
+
+/** Lo que la tarjeta dice del reparto de una actividad con infante (punto 1 del brief). */
+export const MENSAJE_INFANTE_GRATIS =
+  'Este pantallazo trae el precio del grupo. En una actividad el infante no paga: el total se reparte entre los adultos.'
 
 function soloTipo(tipo: TipoPasajero, cantidad: number): Composicion {
   return {
@@ -1496,7 +1556,9 @@ function leerLectura(raw: unknown): LecturaCasilla | null {
     porTipo: Array.isArray(l.porTipo) ? l.porTipo : [],
     // El aviso de «año completado con el del viaje» de las lecturas anteriores al 2026-09-23
     // ya no se muestra: hoy el año se deduce sin preguntar (`anio-fecha.ts`).
-    alertas: Array.isArray(l.alertas) ? l.alertas.filter(a => typeof a !== 'string' || !esAvisoDeAnioViejo(a)) : [],
+    // Sin repetir (punto 6 del brief del 2026-10-01): las lecturas aceptadas antes de ese día
+    // pueden traer el mismo aviso dos veces.
+    alertas: Array.isArray(l.alertas) ? sumarAlertas(l.alertas.filter(a => typeof a !== 'string' || !esAvisoDeAnioViejo(a))) : [],
     notasCliente: Array.isArray(l.notasCliente) ? l.notasCliente : [],
     campos: Array.isArray(l.campos) ? l.campos : [],
     identidad: l.identidad && typeof l.identidad === 'object' ? l.identidad : {},

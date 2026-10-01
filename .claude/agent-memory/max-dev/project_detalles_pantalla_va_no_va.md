@@ -1,11 +1,11 @@
 ---
 name: project-detalles-pantalla-va-no-va
-description: Trappvel 2026-10-01, PR #974 (sin mergear, espera C3) — «Va / No va» por habitación fija TODAS al primer toque; cache() de React no memoiza en route.ts; punto 8 del redondeo ya no se reproducía
+description: Trappvel 2026-10-01, PR #974 (mergeado 10f4fc70) — «Va / No va» por habitación fija TODAS al primer toque; cache() de React no memoiza en route.ts; punto 8 del redondeo ya no se reproducía
 metadata:
   type: project
 ---
 
-Brief `proyectos/trappvel/clarity/docs/diseno/brief-max-2026-10-01-detalles-de-pantalla.md`, PR #974, rama `max/detalles-pantalla-cotizacion`. Sin migración. NO mergear: espera el recorrido en pantalla (C3) de la sesión principal.
+Brief `proyectos/trappvel/clarity/docs/diseno/brief-max-2026-10-01-detalles-de-pantalla.md`, PR #974, mergeado el 2026-10-01 (squash 10f4fc70). Sin migración.
 
 - «Va / No va» (`marcarHabitacionQueVa`) guarda en `tarifa_pax.habitaciones[].rolManual` (ya existía, jsonb). Al primer toque fija TODAS las habitaciones como se ven: sin eso, el reparto automático degradaba otra habitación para cuadrar el grupo y la operadora veía cambiar una que no tocó.
 - El resumen de Componentes y la tarjeta comparten `avisoDePasajerosDeOpcion` (tarjeta-opcion.ts). Quien agregue otro aviso de pasajeros debe pasar por ahí.
