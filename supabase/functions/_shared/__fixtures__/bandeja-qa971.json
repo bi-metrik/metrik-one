@@ -1,0 +1,7109 @@
+{
+ "_que_es": "Salidas del modelo de asignación copiadas de las corridas REALES del QA de #971 (gemini-2.5-flash-lite, temp 0.1), líneas «[modelo propuso]» de qa971/resultados-f, resultados-mixto-cd y resultados-dia. Los mensajes son los del banco sintético de Vera (escenarios-f.json, escenarios-mixto-cd.json, dia.json): clientes ficticios, nada de producción.",
+ "f": [
+  {
+   "id": "F1",
+   "titulo": "Encabezado limpio",
+   "cerrados": [],
+   "viajes": [
+    {
+     "id": "n11",
+     "codigo": "T1 26 11",
+     "cliente": "CAROLINA RUIZ",
+     "destino": "PUNTA CANA"
+    },
+    {
+     "id": "n9",
+     "codigo": "T1 26 9",
+     "cliente": "LUISA MEJÍA",
+     "destino": "SAN ANDRÉS"
+    },
+    {
+     "id": "n8",
+     "codigo": "T1 26 8",
+     "cliente": "JORGE PÉREZ",
+     "destino": "CARTAGENA"
+    }
+   ],
+   "mensajes": [
+    {
+     "en": "2026-10-01T14:00:00Z",
+     "texto": "Carolina",
+     "reenviado": false,
+     "tipo": "text",
+     "encabezado": true,
+     "verdad": null,
+     "ruta": null
+    },
+    {
+     "en": "2026-10-01T14:00:20Z",
+     "texto": "Ya hablé con mi esposo: salimos el 28 de diciembre y volvemos el 3 de enero",
+     "reenviado": true,
+     "tipo": "text",
+     "encabezado": false,
+     "verdad": [
+      "n11"
+     ],
+     "ruta": null
+    },
+    {
+     "en": "2026-10-01T14:00:40Z",
+     "texto": "Somos 3 adultos y 2 niños de 9 y 4 años",
+     "reenviado": true,
+     "tipo": "text",
+     "encabezado": false,
+     "verdad": [
+      "n11"
+     ],
+     "ruta": null
+    },
+    {
+     "en": "2026-10-01T14:01:00Z",
+     "texto": "Nos gustaría hotel 5 estrellas todo incluido",
+     "reenviado": true,
+     "tipo": "text",
+     "encabezado": false,
+     "verdad": [
+      "n11"
+     ],
+     "ruta": null
+    },
+    {
+     "en": "2026-10-01T14:02:00Z",
+     "texto": "T1 26 9",
+     "reenviado": false,
+     "tipo": "text",
+     "encabezado": true,
+     "verdad": null,
+     "ruta": null
+    },
+    {
+     "en": "2026-10-01T14:02:20Z",
+     "texto": "Buenas Tati, para San Andrés serían del 20 al 24 de noviembre",
+     "reenviado": true,
+     "tipo": "text",
+     "encabezado": false,
+     "verdad": [
+      "n9"
+     ],
+     "ruta": null
+    },
+    {
+     "en": "2026-10-01T14:02:40Z",
+     "texto": "Vamos 2 adultos, salimos de Medellín",
+     "reenviado": true,
+     "tipo": "text",
+     "encabezado": false,
+     "verdad": [
+      "n9"
+     ],
+     "ruta": null
+    }
+   ],
+   "modelos": [
+    {
+     "asignaciones": [
+      {
+       "n": 2,
+       "viaje": "ninguno",
+       "evidencia": ""
+      },
+      {
+       "n": 3,
+       "viaje": "ninguno",
+       "evidencia": ""
+      },
+      {
+       "n": 4,
+       "viaje": "ninguno",
+       "evidencia": ""
+      },
+      {
+       "n": 6,
+       "viaje": "T1 26 9",
+       "evidencia": "San Andrés serían del 20 al 24"
+      },
+      {
+       "n": 7,
+       "viaje": "T1 26 9",
+       "evidencia": "salimos de Medellín"
+      }
+     ]
+    },
+    {
+     "asignaciones": [
+      {
+       "n": 2,
+       "viaje": "ninguno",
+       "evidencia": ""
+      },
+      {
+       "n": 3,
+       "viaje": "ninguno",
+       "evidencia": ""
+      },
+      {
+       "n": 4,
+       "viaje": "ninguno",
+       "evidencia": ""
+      },
+      {
+       "n": 6,
+       "viaje": "T1 26 9",
+       "evidencia": "San Andrés serían del 20 al 24"
+      },
+      {
+       "n": 7,
+       "viaje": "T1 26 9",
+       "evidencia": "salimos de Medellín"
+      }
+     ]
+    },
+    {
+     "asignaciones": [
+      {
+       "n": 2,
+       "viaje": "ninguno",
+       "evidencia": ""
+      },
+      {
+       "n": 3,
+       "viaje": "ninguno",
+       "evidencia": ""
+      },
+      {
+       "n": 4,
+       "viaje": "ninguno",
+       "evidencia": ""
+      },
+      {
+       "n": 6,
+       "viaje": "T1 26 9",
+       "evidencia": "San Andrés serían del 20 al 24"
+      },
+      {
+       "n": 7,
+       "viaje": "T1 26 9",
+       "evidencia": "salimos de Medellín"
+      }
+     ]
+    },
+    {
+     "asignaciones": [
+      {
+       "n": 2,
+       "viaje": "ninguno",
+       "evidencia": ""
+      },
+      {
+       "n": 3,
+       "viaje": "ninguno",
+       "evidencia": ""
+      },
+      {
+       "n": 4,
+       "viaje": "ninguno",
+       "evidencia": ""
+      },
+      {
+       "n": 6,
+       "viaje": "T1 26 9",
+       "evidencia": "San Andrés serían del 20 al 24"
+      },
+      {
+       "n": 7,
+       "viaje": "T1 26 9",
+       "evidencia": "salimos de Medellín"
+      }
+     ]
+    },
+    {
+     "asignaciones": [
+      {
+       "n": 2,
+       "viaje": "ninguno",
+       "evidencia": ""
+      },
+      {
+       "n": 3,
+       "viaje": "ninguno",
+       "evidencia": ""
+      },
+      {
+       "n": 4,
+       "viaje": "ninguno",
+       "evidencia": ""
+      },
+      {
+       "n": 6,
+       "viaje": "T1 26 9",
+       "evidencia": "San Andrés serían del 20 al 24"
+      },
+      {
+       "n": 7,
+       "viaje": "T1 26 9",
+       "evidencia": "salimos de Medellín"
+      }
+     ]
+    }
+   ]
+  },
+  {
+   "id": "F2",
+   "titulo": "Sin encabezados, separados por tiempo",
+   "cerrados": [],
+   "viajes": [
+    {
+     "id": "n11",
+     "codigo": "T1 26 11",
+     "cliente": "CAROLINA RUIZ",
+     "destino": "PUNTA CANA"
+    },
+    {
+     "id": "n9",
+     "codigo": "T1 26 9",
+     "cliente": "LUISA MEJÍA",
+     "destino": "SAN ANDRÉS"
+    },
+    {
+     "id": "n8",
+     "codigo": "T1 26 8",
+     "cliente": "JORGE PÉREZ",
+     "destino": "CARTAGENA"
+    }
+   ],
+   "mensajes": [
+    {
+     "en": "2026-10-01T14:00:00Z",
+     "texto": "Hola Tati, ya decidimos lo de Punta Cana",
+     "reenviado": true,
+     "tipo": "text",
+     "encabezado": false,
+     "verdad": [
+      "n11",
+      "sin"
+     ],
+     "ruta": null
+    },
+    {
+     "en": "2026-10-01T14:00:30Z",
+     "texto": "salimos el 28 de diciembre y volvemos el 3 de enero",
+     "reenviado": true,
+     "tipo": "text",
+     "encabezado": false,
+     "verdad": [
+      "n11",
+      "sin"
+     ],
+     "ruta": null
+    },
+    {
+     "en": "2026-10-01T14:01:00Z",
+     "texto": "Somos 3 adultos y 2 niños de 9 y 4 años",
+     "reenviado": true,
+     "tipo": "text",
+     "encabezado": false,
+     "verdad": [
+      "n11",
+      "sin"
+     ],
+     "ruta": null
+    },
+    {
+     "en": "2026-10-01T14:40:00Z",
+     "texto": "Buenas Tati, para San Andrés serían del 20 al 24 de noviembre",
+     "reenviado": true,
+     "tipo": "text",
+     "encabezado": false,
+     "verdad": [
+      "n9",
+      "sin"
+     ],
+     "ruta": null
+    },
+    {
+     "en": "2026-10-01T14:40:30Z",
+     "texto": "Vamos 2 adultos, salimos de Medellín",
+     "reenviado": true,
+     "tipo": "text",
+     "encabezado": false,
+     "verdad": [
+      "n9",
+      "sin"
+     ],
+     "ruta": null
+    }
+   ],
+   "modelos": [
+    {
+     "asignaciones": [
+      {
+       "n": 1,
+       "viaje": "T1 26 11",
+       "evidencia": "Punta Cana"
+      },
+      {
+       "n": 2,
+       "viaje": "T1 26 11",
+       "evidencia": "Punta Cana"
+      },
+      {
+       "n": 3,
+       "viaje": "T1 26 11",
+       "evidencia": "Punta Cana"
+      },
+      {
+       "n": 4,
+       "viaje": "T1 26 9",
+       "evidencia": "San Andrés"
+      },
+      {
+       "n": 5,
+       "viaje": "T1 26 9",
+       "evidencia": "San Andrés"
+      }
+     ]
+    },
+    {
+     "asignaciones": [
+      {
+       "n": 1,
+       "viaje": "T1 26 11",
+       "evidencia": "Punta Cana"
+      },
+      {
+       "n": 2,
+       "viaje": "T1 26 11",
+       "evidencia": "Punta Cana"
+      },
+      {
+       "n": 3,
+       "viaje": "T1 26 11",
+       "evidencia": "Punta Cana"
+      },
+      {
+       "n": 4,
+       "viaje": "T1 26 9",
+       "evidencia": "San Andrés"
+      },
+      {
+       "n": 5,
+       "viaje": "T1 26 9",
+       "evidencia": "San Andrés"
+      }
+     ]
+    },
+    {
+     "asignaciones": [
+      {
+       "n": 1,
+       "viaje": "T1 26 11",
+       "evidencia": "Punta Cana"
+      },
+      {
+       "n": 2,
+       "viaje": "T1 26 11",
+       "evidencia": "Punta Cana"
+      },
+      {
+       "n": 3,
+       "viaje": "T1 26 11",
+       "evidencia": "Punta Cana"
+      },
+      {
+       "n": 4,
+       "viaje": "T1 26 9",
+       "evidencia": "San Andrés"
+      },
+      {
+       "n": 5,
+       "viaje": "T1 26 9",
+       "evidencia": "San Andrés"
+      }
+     ]
+    },
+    {
+     "asignaciones": [
+      {
+       "n": 1,
+       "viaje": "T1 26 11",
+       "evidencia": "Punta Cana"
+      },
+      {
+       "n": 2,
+       "viaje": "T1 26 11",
+       "evidencia": "Punta Cana"
+      },
+      {
+       "n": 3,
+       "viaje": "T1 26 11",
+       "evidencia": "Punta Cana"
+      },
+      {
+       "n": 4,
+       "viaje": "T1 26 9",
+       "evidencia": "San Andrés"
+      },
+      {
+       "n": 5,
+       "viaje": "T1 26 9",
+       "evidencia": "San Andrés"
+      }
+     ]
+    },
+    {
+     "asignaciones": [
+      {
+       "n": 1,
+       "viaje": "T1 26 11",
+       "evidencia": "Punta Cana"
+      },
+      {
+       "n": 2,
+       "viaje": "T1 26 11",
+       "evidencia": "Punta Cana"
+      },
+      {
+       "n": 3,
+       "viaje": "T1 26 11",
+       "evidencia": "Punta Cana"
+      },
+      {
+       "n": 4,
+       "viaje": "T1 26 9",
+       "evidencia": "San Andrés"
+      },
+      {
+       "n": 5,
+       "viaje": "T1 26 9",
+       "evidencia": "San Andrés"
+      }
+     ]
+    }
+   ]
+  },
+  {
+   "id": "F3",
+   "titulo": "Intercalados sin encabezado, en 3 minutos",
+   "cerrados": [],
+   "viajes": [
+    {
+     "id": "n11",
+     "codigo": "T1 26 11",
+     "cliente": "CAROLINA RUIZ",
+     "destino": "PUNTA CANA"
+    },
+    {
+     "id": "n9",
+     "codigo": "T1 26 9",
+     "cliente": "LUISA MEJÍA",
+     "destino": "SAN ANDRÉS"
+    },
+    {
+     "id": "n8",
+     "codigo": "T1 26 8",
+     "cliente": "JORGE PÉREZ",
+     "destino": "CARTAGENA"
+    }
+   ],
+   "mensajes": [
+    {
+     "en": "2026-10-01T14:00:00Z",
+     "texto": "salimos el 28 de diciembre y volvemos el 3 de enero",
+     "reenviado": true,
+     "tipo": "text",
+     "encabezado": false,
+     "verdad": [
+      "sin"
+     ],
+     "ruta": null
+    },
+    {
+     "en": "2026-10-01T14:01:00Z",
+     "texto": "nosotros del 20 al 24 de noviembre",
+     "reenviado": true,
+     "tipo": "text",
+     "encabezado": false,
+     "verdad": [
+      "sin"
+     ],
+     "ruta": null
+    },
+    {
+     "en": "2026-10-01T14:02:00Z",
+     "texto": "somos 3 adultos y 2 niños",
+     "reenviado": true,
+     "tipo": "text",
+     "encabezado": false,
+     "verdad": [
+      "sin"
+     ],
+     "ruta": null
+    },
+    {
+     "en": "2026-10-01T14:03:00Z",
+     "texto": "vamos 2 adultos desde Medellín",
+     "reenviado": true,
+     "tipo": "text",
+     "encabezado": false,
+     "verdad": [
+      "sin"
+     ],
+     "ruta": null
+    }
+   ],
+   "modelos": [
+    {
+     "asignaciones": [
+      {
+       "n": 1,
+       "viaje": "ninguno",
+       "evidencia": "salimos el 28 de diciembre y v"
+      },
+      {
+       "n": 2,
+       "viaje": "ninguno",
+       "evidencia": "nosotros del 20 al 24 de novie"
+      },
+      {
+       "n": 3,
+       "viaje": "ninguno",
+       "evidencia": "somos 3 adultos y 2 niños"
+      },
+      {
+       "n": 4,
+       "viaje": "ninguno",
+       "evidencia": "vamos 2 adultos desde Medellín"
+      }
+     ]
+    },
+    {
+     "asignaciones": [
+      {
+       "n": 1,
+       "viaje": "ninguno",
+       "evidencia": "salimos el 28 de diciembre y v"
+      },
+      {
+       "n": 2,
+       "viaje": "ninguno",
+       "evidencia": "nosotros del 20 al 24 de novie"
+      },
+      {
+       "n": 3,
+       "viaje": "ninguno",
+       "evidencia": "somos 3 adultos y 2 niños"
+      },
+      {
+       "n": 4,
+       "viaje": "ninguno",
+       "evidencia": "vamos 2 adultos desde Medellín"
+      }
+     ]
+    },
+    {
+     "asignaciones": [
+      {
+       "n": 1,
+       "viaje": "ninguno",
+       "evidencia": "salimos el 28 de diciembre y v"
+      },
+      {
+       "n": 2,
+       "viaje": "ninguno",
+       "evidencia": "nosotros del 20 al 24 de novie"
+      },
+      {
+       "n": 3,
+       "viaje": "ninguno",
+       "evidencia": "somos 3 adultos y 2 niños"
+      },
+      {
+       "n": 4,
+       "viaje": "ninguno",
+       "evidencia": "vamos 2 adultos desde Medellín"
+      }
+     ]
+    },
+    {
+     "asignaciones": [
+      {
+       "n": 1,
+       "viaje": "ninguno",
+       "evidencia": "salimos el 28 de diciembre y v"
+      },
+      {
+       "n": 2,
+       "viaje": "ninguno",
+       "evidencia": "nosotros del 20 al 24 de novie"
+      },
+      {
+       "n": 3,
+       "viaje": "ninguno",
+       "evidencia": "somos 3 adultos y 2 niños"
+      },
+      {
+       "n": 4,
+       "viaje": "ninguno",
+       "evidencia": "vamos 2 adultos desde Medellín"
+      }
+     ]
+    },
+    {
+     "asignaciones": [
+      {
+       "n": 1,
+       "viaje": "ninguno",
+       "evidencia": "salimos el 28 de diciembre y v"
+      },
+      {
+       "n": 2,
+       "viaje": "ninguno",
+       "evidencia": "nosotros del 20 al 24 de novie"
+      },
+      {
+       "n": 3,
+       "viaje": "ninguno",
+       "evidencia": "somos 3 adultos y 2 niños"
+      },
+      {
+       "n": 4,
+       "viaje": "ninguno",
+       "evidencia": "vamos 2 adultos desde Medellín"
+      }
+     ]
+    }
+   ]
+  },
+  {
+   "id": "F4a",
+   "titulo": "Encabezado olvidado a mitad (Luisa con pista en el texto)",
+   "cerrados": [],
+   "viajes": [
+    {
+     "id": "n11",
+     "codigo": "T1 26 11",
+     "cliente": "CAROLINA RUIZ",
+     "destino": "PUNTA CANA"
+    },
+    {
+     "id": "n9",
+     "codigo": "T1 26 9",
+     "cliente": "LUISA MEJÍA",
+     "destino": "SAN ANDRÉS"
+    },
+    {
+     "id": "n8",
+     "codigo": "T1 26 8",
+     "cliente": "JORGE PÉREZ",
+     "destino": "CARTAGENA"
+    }
+   ],
+   "mensajes": [
+    {
+     "en": "2026-10-01T14:00:00Z",
+     "texto": "Carolina",
+     "reenviado": false,
+     "tipo": "text",
+     "encabezado": true,
+     "verdad": null,
+     "ruta": null
+    },
+    {
+     "en": "2026-10-01T14:00:20Z",
+     "texto": "Ya hablé con mi esposo: salimos el 28 de diciembre y volvemos el 3 de enero",
+     "reenviado": true,
+     "tipo": "text",
+     "encabezado": false,
+     "verdad": [
+      "n11"
+     ],
+     "ruta": null
+    },
+    {
+     "en": "2026-10-01T14:00:40Z",
+     "texto": "Somos 3 adultos y 2 niños de 9 y 4 años",
+     "reenviado": true,
+     "tipo": "text",
+     "encabezado": false,
+     "verdad": [
+      "n11"
+     ],
+     "ruta": null
+    },
+    {
+     "en": "2026-10-01T14:02:00Z",
+     "texto": "Buenas Tati, para San Andrés serían del 20 al 24 de noviembre",
+     "reenviado": true,
+     "tipo": "text",
+     "encabezado": false,
+     "verdad": [
+      "n9",
+      "sin"
+     ],
+     "ruta": null
+    },
+    {
+     "en": "2026-10-01T14:02:20Z",
+     "texto": "Vamos 2 adultos, salimos de Medellín",
+     "reenviado": true,
+     "tipo": "text",
+     "encabezado": false,
+     "verdad": [
+      "n9",
+      "sin"
+     ],
+     "ruta": null
+    }
+   ],
+   "modelos": [
+    {
+     "asignaciones": [
+      {
+       "n": 2,
+       "viaje": "ninguno",
+       "evidencia": ""
+      },
+      {
+       "n": 3,
+       "viaje": "ninguno",
+       "evidencia": ""
+      },
+      {
+       "n": 4,
+       "viaje": "T1 26 9",
+       "evidencia": "San Andrés"
+      },
+      {
+       "n": 5,
+       "viaje": "T1 26 9",
+       "evidencia": "San Andrés"
+      }
+     ]
+    },
+    {
+     "asignaciones": [
+      {
+       "n": 2,
+       "viaje": "ninguno",
+       "evidencia": ""
+      },
+      {
+       "n": 3,
+       "viaje": "ninguno",
+       "evidencia": ""
+      },
+      {
+       "n": 4,
+       "viaje": "T1 26 9",
+       "evidencia": "San Andrés"
+      },
+      {
+       "n": 5,
+       "viaje": "T1 26 9",
+       "evidencia": "San Andrés"
+      }
+     ]
+    },
+    {
+     "asignaciones": [
+      {
+       "n": 2,
+       "viaje": "ninguno",
+       "evidencia": ""
+      },
+      {
+       "n": 3,
+       "viaje": "ninguno",
+       "evidencia": ""
+      },
+      {
+       "n": 4,
+       "viaje": "T1 26 9",
+       "evidencia": "San Andrés"
+      },
+      {
+       "n": 5,
+       "viaje": "T1 26 9",
+       "evidencia": "San Andrés"
+      }
+     ]
+    },
+    {
+     "asignaciones": [
+      {
+       "n": 2,
+       "viaje": "ninguno",
+       "evidencia": ""
+      },
+      {
+       "n": 3,
+       "viaje": "ninguno",
+       "evidencia": ""
+      },
+      {
+       "n": 4,
+       "viaje": "T1 26 9",
+       "evidencia": "San Andrés"
+      },
+      {
+       "n": 5,
+       "viaje": "T1 26 9",
+       "evidencia": "San Andrés"
+      }
+     ]
+    },
+    {
+     "asignaciones": [
+      {
+       "n": 2,
+       "viaje": "ninguno",
+       "evidencia": ""
+      },
+      {
+       "n": 3,
+       "viaje": "ninguno",
+       "evidencia": ""
+      },
+      {
+       "n": 4,
+       "viaje": "T1 26 9",
+       "evidencia": "San Andrés"
+      },
+      {
+       "n": 5,
+       "viaje": "T1 26 9",
+       "evidencia": "San Andrés"
+      }
+     ]
+    }
+   ]
+  },
+  {
+   "id": "F4b",
+   "titulo": "Encabezado olvidado a mitad (Luisa sin pista en el texto)",
+   "cerrados": [],
+   "viajes": [
+    {
+     "id": "n11",
+     "codigo": "T1 26 11",
+     "cliente": "CAROLINA RUIZ",
+     "destino": "PUNTA CANA"
+    },
+    {
+     "id": "n9",
+     "codigo": "T1 26 9",
+     "cliente": "LUISA MEJÍA",
+     "destino": "SAN ANDRÉS"
+    },
+    {
+     "id": "n8",
+     "codigo": "T1 26 8",
+     "cliente": "JORGE PÉREZ",
+     "destino": "CARTAGENA"
+    }
+   ],
+   "mensajes": [
+    {
+     "en": "2026-10-01T14:00:00Z",
+     "texto": "Carolina",
+     "reenviado": false,
+     "tipo": "text",
+     "encabezado": true,
+     "verdad": null,
+     "ruta": null
+    },
+    {
+     "en": "2026-10-01T14:00:20Z",
+     "texto": "Ya hablé con mi esposo: salimos el 28 de diciembre y volvemos el 3 de enero",
+     "reenviado": true,
+     "tipo": "text",
+     "encabezado": false,
+     "verdad": [
+      "n11"
+     ],
+     "ruta": null
+    },
+    {
+     "en": "2026-10-01T14:00:40Z",
+     "texto": "Somos 3 adultos y 2 niños de 9 y 4 años",
+     "reenviado": true,
+     "tipo": "text",
+     "encabezado": false,
+     "verdad": [
+      "n11"
+     ],
+     "ruta": null
+    },
+    {
+     "en": "2026-10-01T14:02:00Z",
+     "texto": "nosotros mejor del 20 al 24 de noviembre",
+     "reenviado": true,
+     "tipo": "text",
+     "encabezado": false,
+     "verdad": [
+      "n9",
+      "sin"
+     ],
+     "ruta": null
+    },
+    {
+     "en": "2026-10-01T14:02:20Z",
+     "texto": "Vamos 2 adultos, salimos de Medellín",
+     "reenviado": true,
+     "tipo": "text",
+     "encabezado": false,
+     "verdad": [
+      "n9",
+      "sin"
+     ],
+     "ruta": null
+    }
+   ],
+   "modelos": [
+    {
+     "asignaciones": [
+      {
+       "n": 2,
+       "viaje": "ninguno",
+       "evidencia": ""
+      },
+      {
+       "n": 3,
+       "viaje": "ninguno",
+       "evidencia": ""
+      },
+      {
+       "n": 4,
+       "viaje": "ninguno",
+       "evidencia": ""
+      },
+      {
+       "n": 5,
+       "viaje": "ninguno",
+       "evidencia": ""
+      }
+     ]
+    },
+    {
+     "asignaciones": [
+      {
+       "n": 2,
+       "viaje": "ninguno",
+       "evidencia": ""
+      },
+      {
+       "n": 3,
+       "viaje": "ninguno",
+       "evidencia": ""
+      },
+      {
+       "n": 4,
+       "viaje": "ninguno",
+       "evidencia": ""
+      },
+      {
+       "n": 5,
+       "viaje": "ninguno",
+       "evidencia": ""
+      }
+     ]
+    },
+    {
+     "asignaciones": [
+      {
+       "n": 2,
+       "viaje": "ninguno",
+       "evidencia": ""
+      },
+      {
+       "n": 3,
+       "viaje": "ninguno",
+       "evidencia": ""
+      },
+      {
+       "n": 4,
+       "viaje": "ninguno",
+       "evidencia": ""
+      },
+      {
+       "n": 5,
+       "viaje": "ninguno",
+       "evidencia": ""
+      }
+     ]
+    },
+    {
+     "asignaciones": [
+      {
+       "n": 2,
+       "viaje": "ninguno",
+       "evidencia": ""
+      },
+      {
+       "n": 3,
+       "viaje": "ninguno",
+       "evidencia": ""
+      },
+      {
+       "n": 4,
+       "viaje": "ninguno",
+       "evidencia": ""
+      },
+      {
+       "n": 5,
+       "viaje": "ninguno",
+       "evidencia": ""
+      }
+     ]
+    },
+    {
+     "asignaciones": [
+      {
+       "n": 2,
+       "viaje": "ninguno",
+       "evidencia": ""
+      },
+      {
+       "n": 3,
+       "viaje": "ninguno",
+       "evidencia": ""
+      },
+      {
+       "n": 4,
+       "viaje": "ninguno",
+       "evidencia": ""
+      },
+      {
+       "n": 5,
+       "viaje": "ninguno",
+       "evidencia": ""
+      }
+     ]
+    }
+   ]
+  },
+  {
+   "id": "F5a",
+   "titulo": "Encabezado con error «Carlina»",
+   "cerrados": [],
+   "viajes": [
+    {
+     "id": "n11",
+     "codigo": "T1 26 11",
+     "cliente": "CAROLINA RUIZ",
+     "destino": "PUNTA CANA"
+    },
+    {
+     "id": "n9",
+     "codigo": "T1 26 9",
+     "cliente": "LUISA MEJÍA",
+     "destino": "SAN ANDRÉS"
+    },
+    {
+     "id": "n8",
+     "codigo": "T1 26 8",
+     "cliente": "JORGE PÉREZ",
+     "destino": "CARTAGENA"
+    }
+   ],
+   "mensajes": [
+    {
+     "en": "2026-10-01T14:00:00Z",
+     "texto": "Carlina",
+     "reenviado": false,
+     "tipo": "text",
+     "encabezado": true,
+     "verdad": null,
+     "ruta": null
+    },
+    {
+     "en": "2026-10-01T14:00:20Z",
+     "texto": "ya tenemos las fechas: del 5 al 10 de diciembre",
+     "reenviado": true,
+     "tipo": "text",
+     "encabezado": false,
+     "verdad": [
+      "n11"
+     ],
+     "ruta": null
+    },
+    {
+     "en": "2026-10-01T14:00:40Z",
+     "texto": "vamos 2 adultos",
+     "reenviado": true,
+     "tipo": "text",
+     "encabezado": false,
+     "verdad": [
+      "n11"
+     ],
+     "ruta": null
+    }
+   ],
+   "modelos": [
+    {
+     "asignaciones": [
+      {
+       "n": 2,
+       "viaje": "ninguno",
+       "evidencia": ""
+      },
+      {
+       "n": 3,
+       "viaje": "ninguno",
+       "evidencia": ""
+      }
+     ]
+    },
+    {
+     "asignaciones": [
+      {
+       "n": 2,
+       "viaje": "ninguno",
+       "evidencia": ""
+      },
+      {
+       "n": 3,
+       "viaje": "ninguno",
+       "evidencia": ""
+      }
+     ]
+    },
+    {
+     "asignaciones": [
+      {
+       "n": 2,
+       "viaje": "ninguno",
+       "evidencia": ""
+      },
+      {
+       "n": 3,
+       "viaje": "ninguno",
+       "evidencia": ""
+      }
+     ]
+    },
+    {
+     "asignaciones": [
+      {
+       "n": 2,
+       "viaje": "ninguno",
+       "evidencia": ""
+      },
+      {
+       "n": 3,
+       "viaje": "ninguno",
+       "evidencia": ""
+      }
+     ]
+    },
+    {
+     "asignaciones": [
+      {
+       "n": 2,
+       "viaje": "ninguno",
+       "evidencia": ""
+      },
+      {
+       "n": 3,
+       "viaje": "ninguno",
+       "evidencia": ""
+      }
+     ]
+    }
+   ]
+  },
+  {
+   "id": "F5b",
+   "titulo": "Encabezado con error «t126 9»",
+   "cerrados": [],
+   "viajes": [
+    {
+     "id": "n11",
+     "codigo": "T1 26 11",
+     "cliente": "CAROLINA RUIZ",
+     "destino": "PUNTA CANA"
+    },
+    {
+     "id": "n9",
+     "codigo": "T1 26 9",
+     "cliente": "LUISA MEJÍA",
+     "destino": "SAN ANDRÉS"
+    },
+    {
+     "id": "n8",
+     "codigo": "T1 26 8",
+     "cliente": "JORGE PÉREZ",
+     "destino": "CARTAGENA"
+    }
+   ],
+   "mensajes": [
+    {
+     "en": "2026-10-01T14:00:00Z",
+     "texto": "t126 9",
+     "reenviado": false,
+     "tipo": "text",
+     "encabezado": true,
+     "verdad": null,
+     "ruta": null
+    },
+    {
+     "en": "2026-10-01T14:00:20Z",
+     "texto": "ya tenemos las fechas: del 5 al 10 de diciembre",
+     "reenviado": true,
+     "tipo": "text",
+     "encabezado": false,
+     "verdad": [
+      "n9"
+     ],
+     "ruta": null
+    },
+    {
+     "en": "2026-10-01T14:00:40Z",
+     "texto": "vamos 2 adultos",
+     "reenviado": true,
+     "tipo": "text",
+     "encabezado": false,
+     "verdad": [
+      "n9"
+     ],
+     "ruta": null
+    }
+   ],
+   "modelos": [
+    {
+     "asignaciones": [
+      {
+       "n": 2,
+       "viaje": "ninguno",
+       "evidencia": ""
+      },
+      {
+       "n": 3,
+       "viaje": "ninguno",
+       "evidencia": ""
+      }
+     ]
+    },
+    {
+     "asignaciones": [
+      {
+       "n": 2,
+       "viaje": "ninguno",
+       "evidencia": ""
+      },
+      {
+       "n": 3,
+       "viaje": "ninguno",
+       "evidencia": ""
+      }
+     ]
+    },
+    {
+     "asignaciones": [
+      {
+       "n": 2,
+       "viaje": "ninguno",
+       "evidencia": ""
+      },
+      {
+       "n": 3,
+       "viaje": "ninguno",
+       "evidencia": ""
+      }
+     ]
+    },
+    {
+     "asignaciones": [
+      {
+       "n": 2,
+       "viaje": "ninguno",
+       "evidencia": ""
+      },
+      {
+       "n": 3,
+       "viaje": "ninguno",
+       "evidencia": ""
+      }
+     ]
+    },
+    {
+     "asignaciones": [
+      {
+       "n": 2,
+       "viaje": "ninguno",
+       "evidencia": ""
+      },
+      {
+       "n": 3,
+       "viaje": "ninguno",
+       "evidencia": ""
+      }
+     ]
+    }
+   ]
+  },
+  {
+   "id": "F5c",
+   "titulo": "Encabezado con error «la de punta cana»",
+   "cerrados": [],
+   "viajes": [
+    {
+     "id": "n11",
+     "codigo": "T1 26 11",
+     "cliente": "CAROLINA RUIZ",
+     "destino": "PUNTA CANA"
+    },
+    {
+     "id": "n9",
+     "codigo": "T1 26 9",
+     "cliente": "LUISA MEJÍA",
+     "destino": "SAN ANDRÉS"
+    },
+    {
+     "id": "n8",
+     "codigo": "T1 26 8",
+     "cliente": "JORGE PÉREZ",
+     "destino": "CARTAGENA"
+    }
+   ],
+   "mensajes": [
+    {
+     "en": "2026-10-01T14:00:00Z",
+     "texto": "la de punta cana",
+     "reenviado": false,
+     "tipo": "text",
+     "encabezado": true,
+     "verdad": null,
+     "ruta": null
+    },
+    {
+     "en": "2026-10-01T14:00:20Z",
+     "texto": "ya tenemos las fechas: del 5 al 10 de diciembre",
+     "reenviado": true,
+     "tipo": "text",
+     "encabezado": false,
+     "verdad": [
+      "n11"
+     ],
+     "ruta": null
+    },
+    {
+     "en": "2026-10-01T14:00:40Z",
+     "texto": "vamos 2 adultos",
+     "reenviado": true,
+     "tipo": "text",
+     "encabezado": false,
+     "verdad": [
+      "n11"
+     ],
+     "ruta": null
+    }
+   ],
+   "modelos": [
+    {
+     "asignaciones": [
+      {
+       "n": 2,
+       "viaje": "ninguno",
+       "evidencia": ""
+      },
+      {
+       "n": 3,
+       "viaje": "ninguno",
+       "evidencia": ""
+      }
+     ]
+    },
+    {
+     "asignaciones": [
+      {
+       "n": 2,
+       "viaje": "ninguno",
+       "evidencia": ""
+      },
+      {
+       "n": 3,
+       "viaje": "ninguno",
+       "evidencia": ""
+      }
+     ]
+    },
+    {
+     "asignaciones": [
+      {
+       "n": 2,
+       "viaje": "ninguno",
+       "evidencia": ""
+      },
+      {
+       "n": 3,
+       "viaje": "ninguno",
+       "evidencia": ""
+      }
+     ]
+    },
+    {
+     "asignaciones": [
+      {
+       "n": 2,
+       "viaje": "ninguno",
+       "evidencia": ""
+      },
+      {
+       "n": 3,
+       "viaje": "ninguno",
+       "evidencia": ""
+      }
+     ]
+    },
+    {
+     "asignaciones": [
+      {
+       "n": 2,
+       "viaje": "ninguno",
+       "evidencia": ""
+      },
+      {
+       "n": 3,
+       "viaje": "ninguno",
+       "evidencia": ""
+      }
+     ]
+    }
+   ]
+  },
+  {
+   "id": "F5d",
+   "titulo": "Encabezado con error «la de punta cana» (dos a Punta Cana)",
+   "cerrados": [],
+   "viajes": [
+    {
+     "id": "n11",
+     "codigo": "T1 26 11",
+     "cliente": "CAROLINA RUIZ",
+     "destino": "PUNTA CANA"
+    },
+    {
+     "id": "n9",
+     "codigo": "T1 26 9",
+     "cliente": "LUISA MEJÍA",
+     "destino": "PUNTA CANA"
+    },
+    {
+     "id": "n8",
+     "codigo": "T1 26 8",
+     "cliente": "JORGE PÉREZ",
+     "destino": "CARTAGENA"
+    }
+   ],
+   "mensajes": [
+    {
+     "en": "2026-10-01T14:00:00Z",
+     "texto": "la de punta cana",
+     "reenviado": false,
+     "tipo": "text",
+     "encabezado": true,
+     "verdad": null,
+     "ruta": null
+    },
+    {
+     "en": "2026-10-01T14:00:20Z",
+     "texto": "ya tenemos las fechas: del 5 al 10 de diciembre",
+     "reenviado": true,
+     "tipo": "text",
+     "encabezado": false,
+     "verdad": [
+      "sin"
+     ],
+     "ruta": null
+    },
+    {
+     "en": "2026-10-01T14:00:40Z",
+     "texto": "vamos 2 adultos",
+     "reenviado": true,
+     "tipo": "text",
+     "encabezado": false,
+     "verdad": [
+      "sin"
+     ],
+     "ruta": null
+    }
+   ],
+   "modelos": [
+    {
+     "asignaciones": [
+      {
+       "n": 2,
+       "viaje": "ninguno",
+       "evidencia": ""
+      },
+      {
+       "n": 3,
+       "viaje": "ninguno",
+       "evidencia": ""
+      }
+     ]
+    },
+    {
+     "asignaciones": [
+      {
+       "n": 2,
+       "viaje": "ninguno",
+       "evidencia": ""
+      },
+      {
+       "n": 3,
+       "viaje": "ninguno",
+       "evidencia": ""
+      }
+     ]
+    },
+    {
+     "asignaciones": [
+      {
+       "n": 2,
+       "viaje": "ninguno",
+       "evidencia": ""
+      },
+      {
+       "n": 3,
+       "viaje": "ninguno",
+       "evidencia": ""
+      }
+     ]
+    },
+    {
+     "asignaciones": [
+      {
+       "n": 2,
+       "viaje": "ninguno",
+       "evidencia": ""
+      },
+      {
+       "n": 3,
+       "viaje": "ninguno",
+       "evidencia": ""
+      }
+     ]
+    },
+    {
+     "asignaciones": [
+      {
+       "n": 2,
+       "viaje": "ninguno",
+       "evidencia": ""
+      },
+      {
+       "n": 3,
+       "viaje": "ninguno",
+       "evidencia": ""
+      }
+     ]
+    }
+   ]
+  },
+  {
+   "id": "F6",
+   "titulo": "Dos clientes con el mismo nombre",
+   "cerrados": [],
+   "viajes": [
+    {
+     "id": "n11",
+     "codigo": "T1 26 11",
+     "cliente": "CAROLINA RUIZ",
+     "destino": "PUNTA CANA"
+    },
+    {
+     "id": "n9",
+     "codigo": "T1 26 9",
+     "cliente": "LUISA MEJÍA",
+     "destino": "SAN ANDRÉS"
+    },
+    {
+     "id": "n8",
+     "codigo": "T1 26 8",
+     "cliente": "JORGE PÉREZ",
+     "destino": "CARTAGENA"
+    },
+    {
+     "id": "n12",
+     "codigo": "T1 26 12",
+     "cliente": "CAROLINA GÓMEZ",
+     "destino": "CANCÚN"
+    }
+   ],
+   "mensajes": [
+    {
+     "en": "2026-10-01T14:00:00Z",
+     "texto": "Carolina",
+     "reenviado": false,
+     "tipo": "text",
+     "encabezado": true,
+     "verdad": null,
+     "ruta": null
+    },
+    {
+     "en": "2026-10-01T14:00:20Z",
+     "texto": "ya tenemos las fechas: del 5 al 10 de diciembre",
+     "reenviado": true,
+     "tipo": "text",
+     "encabezado": false,
+     "verdad": [
+      "sin"
+     ],
+     "ruta": null
+    },
+    {
+     "en": "2026-10-01T14:00:40Z",
+     "texto": "vamos 2 adultos",
+     "reenviado": true,
+     "tipo": "text",
+     "encabezado": false,
+     "verdad": [
+      "sin"
+     ],
+     "ruta": null
+    }
+   ],
+   "modelos": [
+    {
+     "asignaciones": [
+      {
+       "n": 2,
+       "viaje": "ninguno",
+       "evidencia": ""
+      },
+      {
+       "n": 3,
+       "viaje": "ninguno",
+       "evidencia": ""
+      }
+     ]
+    },
+    {
+     "asignaciones": [
+      {
+       "n": 2,
+       "viaje": "ninguno",
+       "evidencia": ""
+      },
+      {
+       "n": 3,
+       "viaje": "ninguno",
+       "evidencia": ""
+      }
+     ]
+    },
+    {
+     "asignaciones": [
+      {
+       "n": 2,
+       "viaje": "ninguno",
+       "evidencia": ""
+      },
+      {
+       "n": 3,
+       "viaje": "ninguno",
+       "evidencia": ""
+      }
+     ]
+    },
+    {
+     "asignaciones": [
+      {
+       "n": 2,
+       "viaje": "ninguno",
+       "evidencia": ""
+      },
+      {
+       "n": 3,
+       "viaje": "ninguno",
+       "evidencia": ""
+      }
+     ]
+    },
+    {
+     "asignaciones": [
+      {
+       "n": 2,
+       "viaje": "ninguno",
+       "evidencia": ""
+      },
+      {
+       "n": 3,
+       "viaje": "ninguno",
+       "evidencia": ""
+      }
+     ]
+    }
+   ]
+  },
+  {
+   "id": "F7",
+   "titulo": "Mismo destino, dos clientes (sin encabezado)",
+   "cerrados": [],
+   "viajes": [
+    {
+     "id": "n11",
+     "codigo": "T1 26 11",
+     "cliente": "CAROLINA RUIZ",
+     "destino": "PUNTA CANA"
+    },
+    {
+     "id": "n9",
+     "codigo": "T1 26 9",
+     "cliente": "LUISA MEJÍA",
+     "destino": "PUNTA CANA"
+    },
+    {
+     "id": "n8",
+     "codigo": "T1 26 8",
+     "cliente": "JORGE PÉREZ",
+     "destino": "CARTAGENA"
+    }
+   ],
+   "mensajes": [
+    {
+     "en": "2026-10-01T14:00:00Z",
+     "texto": "Para Punta Cana sería del 28 de diciembre al 3 de enero",
+     "reenviado": true,
+     "tipo": "text",
+     "encabezado": false,
+     "verdad": [
+      "sin"
+     ],
+     "ruta": null
+    },
+    {
+     "en": "2026-10-01T14:00:30Z",
+     "texto": "somos 3 adultos",
+     "reenviado": true,
+     "tipo": "text",
+     "encabezado": false,
+     "verdad": [
+      "sin"
+     ],
+     "ruta": null
+    },
+    {
+     "en": "2026-10-01T14:30:00Z",
+     "texto": "Para Punta Cana nosotros del 20 al 24 de noviembre",
+     "reenviado": true,
+     "tipo": "text",
+     "encabezado": false,
+     "verdad": [
+      "sin"
+     ],
+     "ruta": null
+    },
+    {
+     "en": "2026-10-01T14:30:30Z",
+     "texto": "vamos 2 adultos",
+     "reenviado": true,
+     "tipo": "text",
+     "encabezado": false,
+     "verdad": [
+      "sin"
+     ],
+     "ruta": null
+    }
+   ],
+   "modelos": [
+    {
+     "asignaciones": [
+      {
+       "n": 1,
+       "viaje": "ninguno",
+       "evidencia": ""
+      },
+      {
+       "n": 2,
+       "viaje": "ninguno",
+       "evidencia": ""
+      },
+      {
+       "n": 3,
+       "viaje": "T1 26 9",
+       "evidencia": "Punta Cana nosotros del 20 al "
+      },
+      {
+       "n": 4,
+       "viaje": "ninguno",
+       "evidencia": ""
+      }
+     ]
+    },
+    {
+     "asignaciones": [
+      {
+       "n": 1,
+       "viaje": "ninguno",
+       "evidencia": ""
+      },
+      {
+       "n": 2,
+       "viaje": "ninguno",
+       "evidencia": ""
+      },
+      {
+       "n": 3,
+       "viaje": "T1 26 9",
+       "evidencia": "Punta Cana"
+      },
+      {
+       "n": 4,
+       "viaje": "ninguno",
+       "evidencia": ""
+      }
+     ]
+    },
+    {
+     "asignaciones": [
+      {
+       "n": 1,
+       "viaje": "ninguno",
+       "evidencia": ""
+      },
+      {
+       "n": 2,
+       "viaje": "ninguno",
+       "evidencia": ""
+      },
+      {
+       "n": 3,
+       "viaje": "T1 26 9",
+       "evidencia": "Punta Cana"
+      },
+      {
+       "n": 4,
+       "viaje": "ninguno",
+       "evidencia": ""
+      }
+     ]
+    },
+    {
+     "asignaciones": [
+      {
+       "n": 1,
+       "viaje": "ninguno",
+       "evidencia": ""
+      },
+      {
+       "n": 2,
+       "viaje": "ninguno",
+       "evidencia": ""
+      },
+      {
+       "n": 3,
+       "viaje": "T1 26 9",
+       "evidencia": "Punta Cana nosotros del 20 al "
+      },
+      {
+       "n": 4,
+       "viaje": "ninguno",
+       "evidencia": ""
+      }
+     ]
+    },
+    {
+     "asignaciones": [
+      {
+       "n": 1,
+       "viaje": "ninguno",
+       "evidencia": ""
+      },
+      {
+       "n": 2,
+       "viaje": "ninguno",
+       "evidencia": ""
+      },
+      {
+       "n": 3,
+       "viaje": "T1 26 9",
+       "evidencia": "Punta Cana"
+      },
+      {
+       "n": 4,
+       "viaje": "ninguno",
+       "evidencia": ""
+      }
+     ]
+    }
+   ]
+  },
+  {
+   "id": "F8a",
+   "titulo": "Encabezado de un viaje cerrado",
+   "cerrados": [
+    "T1263"
+   ],
+   "viajes": [
+    {
+     "id": "n11",
+     "codigo": "T1 26 11",
+     "cliente": "CAROLINA RUIZ",
+     "destino": "PUNTA CANA"
+    },
+    {
+     "id": "n9",
+     "codigo": "T1 26 9",
+     "cliente": "LUISA MEJÍA",
+     "destino": "SAN ANDRÉS"
+    },
+    {
+     "id": "n8",
+     "codigo": "T1 26 8",
+     "cliente": "JORGE PÉREZ",
+     "destino": "CARTAGENA"
+    }
+   ],
+   "mensajes": [
+    {
+     "en": "2026-10-01T14:00:00Z",
+     "texto": "T1 26 3",
+     "reenviado": false,
+     "tipo": "text",
+     "encabezado": true,
+     "verdad": null,
+     "ruta": null
+    },
+    {
+     "en": "2026-10-01T14:00:20Z",
+     "texto": "ya tenemos las fechas: del 5 al 10 de diciembre",
+     "reenviado": true,
+     "tipo": "text",
+     "encabezado": false,
+     "verdad": [
+      "sin"
+     ],
+     "ruta": null
+    },
+    {
+     "en": "2026-10-01T14:00:40Z",
+     "texto": "vamos 2 adultos",
+     "reenviado": true,
+     "tipo": "text",
+     "encabezado": false,
+     "verdad": [
+      "sin"
+     ],
+     "ruta": null
+    }
+   ],
+   "modelos": [
+    {
+     "asignaciones": [
+      {
+       "n": 2,
+       "viaje": "ninguno",
+       "evidencia": ""
+      },
+      {
+       "n": 3,
+       "viaje": "ninguno",
+       "evidencia": ""
+      }
+     ]
+    },
+    {
+     "asignaciones": [
+      {
+       "n": 2,
+       "viaje": "ninguno",
+       "evidencia": ""
+      },
+      {
+       "n": 3,
+       "viaje": "ninguno",
+       "evidencia": ""
+      }
+     ]
+    },
+    {
+     "asignaciones": [
+      {
+       "n": 2,
+       "viaje": "ninguno",
+       "evidencia": ""
+      },
+      {
+       "n": 3,
+       "viaje": "ninguno",
+       "evidencia": ""
+      }
+     ]
+    },
+    {
+     "asignaciones": [
+      {
+       "n": 2,
+       "viaje": "ninguno",
+       "evidencia": ""
+      },
+      {
+       "n": 3,
+       "viaje": "ninguno",
+       "evidencia": ""
+      }
+     ]
+    },
+    {
+     "asignaciones": [
+      {
+       "n": 2,
+       "viaje": "ninguno",
+       "evidencia": ""
+      },
+      {
+       "n": 3,
+       "viaje": "ninguno",
+       "evidencia": ""
+      }
+     ]
+    }
+   ]
+  },
+  {
+   "id": "F8b",
+   "titulo": "Encabezado con un código que no existe",
+   "cerrados": [
+    "T1263"
+   ],
+   "viajes": [
+    {
+     "id": "n11",
+     "codigo": "T1 26 11",
+     "cliente": "CAROLINA RUIZ",
+     "destino": "PUNTA CANA"
+    },
+    {
+     "id": "n9",
+     "codigo": "T1 26 9",
+     "cliente": "LUISA MEJÍA",
+     "destino": "SAN ANDRÉS"
+    },
+    {
+     "id": "n8",
+     "codigo": "T1 26 8",
+     "cliente": "JORGE PÉREZ",
+     "destino": "CARTAGENA"
+    }
+   ],
+   "mensajes": [
+    {
+     "en": "2026-10-01T14:00:00Z",
+     "texto": "T1 26 99",
+     "reenviado": false,
+     "tipo": "text",
+     "encabezado": true,
+     "verdad": null,
+     "ruta": null
+    },
+    {
+     "en": "2026-10-01T14:00:20Z",
+     "texto": "ya tenemos las fechas: del 5 al 10 de diciembre",
+     "reenviado": true,
+     "tipo": "text",
+     "encabezado": false,
+     "verdad": [
+      "sin"
+     ],
+     "ruta": null
+    },
+    {
+     "en": "2026-10-01T14:00:40Z",
+     "texto": "vamos 2 adultos",
+     "reenviado": true,
+     "tipo": "text",
+     "encabezado": false,
+     "verdad": [
+      "sin"
+     ],
+     "ruta": null
+    }
+   ],
+   "modelos": [
+    {
+     "asignaciones": [
+      {
+       "n": 2,
+       "viaje": "ninguno",
+       "evidencia": ""
+      },
+      {
+       "n": 3,
+       "viaje": "ninguno",
+       "evidencia": ""
+      }
+     ]
+    },
+    {
+     "asignaciones": [
+      {
+       "n": 2,
+       "viaje": "ninguno",
+       "evidencia": ""
+      },
+      {
+       "n": 3,
+       "viaje": "ninguno",
+       "evidencia": ""
+      }
+     ]
+    },
+    {
+     "asignaciones": [
+      {
+       "n": 2,
+       "viaje": "ninguno",
+       "evidencia": ""
+      },
+      {
+       "n": 3,
+       "viaje": "ninguno",
+       "evidencia": ""
+      }
+     ]
+    },
+    {
+     "asignaciones": [
+      {
+       "n": 2,
+       "viaje": "ninguno",
+       "evidencia": ""
+      },
+      {
+       "n": 3,
+       "viaje": "ninguno",
+       "evidencia": ""
+      }
+     ]
+    },
+    {
+     "asignaciones": [
+      {
+       "n": 2,
+       "viaje": "ninguno",
+       "evidencia": ""
+      },
+      {
+       "n": 3,
+       "viaje": "ninguno",
+       "evidencia": ""
+      }
+     ]
+    }
+   ]
+  },
+  {
+   "id": "F9",
+   "titulo": "El cliente nombra a otro cliente",
+   "cerrados": [],
+   "viajes": [
+    {
+     "id": "n11",
+     "codigo": "T1 26 11",
+     "cliente": "CAROLINA RUIZ",
+     "destino": "PUNTA CANA"
+    },
+    {
+     "id": "n9",
+     "codigo": "T1 26 9",
+     "cliente": "LUISA MEJÍA",
+     "destino": "SAN ANDRÉS"
+    },
+    {
+     "id": "n8",
+     "codigo": "T1 26 8",
+     "cliente": "JORGE PÉREZ",
+     "destino": "CARTAGENA"
+    }
+   ],
+   "mensajes": [
+    {
+     "en": "2026-10-01T14:00:00Z",
+     "texto": "Carolina",
+     "reenviado": false,
+     "tipo": "text",
+     "encabezado": true,
+     "verdad": null,
+     "ruta": null
+    },
+    {
+     "en": "2026-10-01T14:00:20Z",
+     "texto": "Hola Tati, Luisa me recomendó con ustedes",
+     "reenviado": true,
+     "tipo": "text",
+     "encabezado": false,
+     "verdad": [
+      "n11",
+      "sin"
+     ],
+     "ruta": null
+    },
+    {
+     "en": "2026-10-01T14:00:40Z",
+     "texto": "Somos 3 adultos y 2 niños de 9 y 4 años",
+     "reenviado": true,
+     "tipo": "text",
+     "encabezado": false,
+     "verdad": [
+      "n11",
+      "sin"
+     ],
+     "ruta": null
+    },
+    {
+     "en": "2026-10-01T14:01:00Z",
+     "texto": "queremos Punta Cana del 28 de diciembre al 3 de enero",
+     "reenviado": true,
+     "tipo": "text",
+     "encabezado": false,
+     "verdad": [
+      "n11"
+     ],
+     "ruta": null
+    }
+   ],
+   "modelos": [
+    {
+     "asignaciones": [
+      {
+       "n": 2,
+       "viaje": "ninguno",
+       "evidencia": ""
+      },
+      {
+       "n": 3,
+       "viaje": "ninguno",
+       "evidencia": ""
+      },
+      {
+       "n": 4,
+       "viaje": "T1 26 11",
+       "evidencia": "Punta Cana"
+      }
+     ]
+    },
+    {
+     "asignaciones": [
+      {
+       "n": 2,
+       "viaje": "ninguno",
+       "evidencia": "Luisa me recomendó con ustedes"
+      },
+      {
+       "n": 3,
+       "viaje": "ninguno",
+       "evidencia": "Somos 3 adultos y 2 niños de 9"
+      },
+      {
+       "n": 4,
+       "viaje": "T1 26 11",
+       "evidencia": "Punta Cana del 28 de diciembre"
+      }
+     ]
+    },
+    {
+     "asignaciones": [
+      {
+       "n": 2,
+       "viaje": "ninguno",
+       "evidencia": ""
+      },
+      {
+       "n": 3,
+       "viaje": "ninguno",
+       "evidencia": ""
+      },
+      {
+       "n": 4,
+       "viaje": "T1 26 11",
+       "evidencia": "Punta Cana"
+      }
+     ]
+    },
+    {
+     "asignaciones": [
+      {
+       "n": 2,
+       "viaje": "ninguno",
+       "evidencia": ""
+      },
+      {
+       "n": 3,
+       "viaje": "ninguno",
+       "evidencia": ""
+      },
+      {
+       "n": 4,
+       "viaje": "T1 26 11",
+       "evidencia": "Punta Cana"
+      }
+     ]
+    },
+    {
+     "asignaciones": [
+      {
+       "n": 2,
+       "viaje": "ninguno",
+       "evidencia": ""
+      },
+      {
+       "n": 3,
+       "viaje": "ninguno",
+       "evidencia": ""
+      },
+      {
+       "n": 4,
+       "viaje": "T1 26 11",
+       "evidencia": "Punta Cana"
+      }
+     ]
+    }
+   ]
+  },
+  {
+   "id": "F10",
+   "titulo": "Corrección del resumen («el 4 es de Luisa»)",
+   "cerrados": [],
+   "viajes": [
+    {
+     "id": "n11",
+     "codigo": "T1 26 11",
+     "cliente": "CAROLINA RUIZ",
+     "destino": "PUNTA CANA"
+    },
+    {
+     "id": "n9",
+     "codigo": "T1 26 9",
+     "cliente": "LUISA MEJÍA",
+     "destino": "SAN ANDRÉS"
+    },
+    {
+     "id": "n8",
+     "codigo": "T1 26 8",
+     "cliente": "JORGE PÉREZ",
+     "destino": "CARTAGENA"
+    }
+   ],
+   "mensajes": [
+    {
+     "en": "2026-10-01T14:00:00Z",
+     "texto": "Carolina",
+     "reenviado": false,
+     "tipo": "text",
+     "encabezado": true,
+     "verdad": null,
+     "ruta": null
+    },
+    {
+     "en": "2026-10-01T14:00:20Z",
+     "texto": "Ya hablé con mi esposo: salimos el 28 de diciembre y volvemos el 3 de enero",
+     "reenviado": true,
+     "tipo": "text",
+     "encabezado": false,
+     "verdad": [
+      "n11"
+     ],
+     "ruta": null
+    },
+    {
+     "en": "2026-10-01T14:00:40Z",
+     "texto": "Somos 3 adultos y 2 niños de 9 y 4 años",
+     "reenviado": true,
+     "tipo": "text",
+     "encabezado": false,
+     "verdad": [
+      "n11"
+     ],
+     "ruta": null
+    },
+    {
+     "en": "2026-10-01T14:01:00Z",
+     "texto": "nosotros vamos del 20 al 24 de noviembre",
+     "reenviado": true,
+     "tipo": "text",
+     "encabezado": false,
+     "verdad": [
+      "n9"
+     ],
+     "ruta": null
+    },
+    {
+     "en": "2026-10-01T14:02:00Z",
+     "texto": "Luisa",
+     "reenviado": false,
+     "tipo": "text",
+     "encabezado": true,
+     "verdad": null,
+     "ruta": null
+    },
+    {
+     "en": "2026-10-01T14:02:20Z",
+     "texto": "Vamos 2 adultos",
+     "reenviado": true,
+     "tipo": "text",
+     "encabezado": false,
+     "verdad": [
+      "n9"
+     ],
+     "ruta": null
+    },
+    {
+     "en": "2026-10-01T14:02:40Z",
+     "texto": "salimos de Medellín",
+     "reenviado": true,
+     "tipo": "text",
+     "encabezado": false,
+     "verdad": [
+      "n9"
+     ],
+     "ruta": null
+    }
+   ],
+   "modelos": [
+    {
+     "asignaciones": [
+      {
+       "n": 2,
+       "viaje": "ninguno",
+       "evidencia": "28 de diciembre y volvemos el "
+      },
+      {
+       "n": 3,
+       "viaje": "ninguno",
+       "evidencia": "3 adultos y 2 niños de 9 y 4 a"
+      },
+      {
+       "n": 4,
+       "viaje": "ninguno",
+       "evidencia": "20 al 24 de noviembre"
+      },
+      {
+       "n": 6,
+       "viaje": "ninguno",
+       "evidencia": "2 adultos"
+      },
+      {
+       "n": 7,
+       "viaje": "ninguno",
+       "evidencia": "salimos de Medellín"
+      }
+     ]
+    },
+    {
+     "asignaciones": [
+      {
+       "n": 2,
+       "viaje": "ninguno",
+       "evidencia": "28 de diciembre y volvemos el "
+      },
+      {
+       "n": 3,
+       "viaje": "ninguno",
+       "evidencia": "3 adultos y 2 niños de 9 y 4 a"
+      },
+      {
+       "n": 4,
+       "viaje": "ninguno",
+       "evidencia": "20 al 24 de noviembre"
+      },
+      {
+       "n": 6,
+       "viaje": "ninguno",
+       "evidencia": "2 adultos"
+      },
+      {
+       "n": 7,
+       "viaje": "ninguno",
+       "evidencia": "salimos de Medellín"
+      }
+     ]
+    },
+    {
+     "asignaciones": [
+      {
+       "n": 2,
+       "viaje": "ninguno",
+       "evidencia": ""
+      },
+      {
+       "n": 3,
+       "viaje": "ninguno",
+       "evidencia": ""
+      },
+      {
+       "n": 4,
+       "viaje": "ninguno",
+       "evidencia": ""
+      },
+      {
+       "n": 6,
+       "viaje": "ninguno",
+       "evidencia": ""
+      },
+      {
+       "n": 7,
+       "viaje": "ninguno",
+       "evidencia": ""
+      }
+     ]
+    },
+    {
+     "asignaciones": [
+      {
+       "n": 2,
+       "viaje": "ninguno",
+       "evidencia": ""
+      },
+      {
+       "n": 3,
+       "viaje": "ninguno",
+       "evidencia": ""
+      },
+      {
+       "n": 4,
+       "viaje": "ninguno",
+       "evidencia": ""
+      },
+      {
+       "n": 6,
+       "viaje": "ninguno",
+       "evidencia": ""
+      },
+      {
+       "n": 7,
+       "viaje": "ninguno",
+       "evidencia": ""
+      }
+     ]
+    },
+    {
+     "asignaciones": [
+      {
+       "n": 2,
+       "viaje": "ninguno",
+       "evidencia": ""
+      },
+      {
+       "n": 3,
+       "viaje": "ninguno",
+       "evidencia": ""
+      },
+      {
+       "n": 4,
+       "viaje": "ninguno",
+       "evidencia": ""
+      },
+      {
+       "n": 6,
+       "viaje": "ninguno",
+       "evidencia": ""
+      },
+      {
+       "n": 7,
+       "viaje": "ninguno",
+       "evidencia": ""
+      }
+     ]
+    }
+   ]
+  },
+  {
+   "id": "F11",
+   "titulo": "Respuesta ambigua al resumen",
+   "cerrados": [],
+   "viajes": [
+    {
+     "id": "n11",
+     "codigo": "T1 26 11",
+     "cliente": "CAROLINA RUIZ",
+     "destino": "PUNTA CANA"
+    },
+    {
+     "id": "n9",
+     "codigo": "T1 26 9",
+     "cliente": "LUISA MEJÍA",
+     "destino": "SAN ANDRÉS"
+    },
+    {
+     "id": "n8",
+     "codigo": "T1 26 8",
+     "cliente": "JORGE PÉREZ",
+     "destino": "CARTAGENA"
+    }
+   ],
+   "mensajes": [
+    {
+     "en": "2026-10-01T14:00:00Z",
+     "texto": "Carolina",
+     "reenviado": false,
+     "tipo": "text",
+     "encabezado": true,
+     "verdad": null,
+     "ruta": null
+    },
+    {
+     "en": "2026-10-01T14:00:20Z",
+     "texto": "Ya hablé con mi esposo: salimos el 28 de diciembre y volvemos el 3 de enero",
+     "reenviado": true,
+     "tipo": "text",
+     "encabezado": false,
+     "verdad": [
+      "n11"
+     ],
+     "ruta": null
+    },
+    {
+     "en": "2026-10-01T14:00:40Z",
+     "texto": "Somos 3 adultos y 2 niños de 9 y 4 años",
+     "reenviado": true,
+     "tipo": "text",
+     "encabezado": false,
+     "verdad": [
+      "n11"
+     ],
+     "ruta": null
+    },
+    {
+     "en": "2026-10-01T14:02:00Z",
+     "texto": "T1 26 9",
+     "reenviado": false,
+     "tipo": "text",
+     "encabezado": true,
+     "verdad": null,
+     "ruta": null
+    },
+    {
+     "en": "2026-10-01T14:02:20Z",
+     "texto": "Buenas Tati, para San Andrés serían del 20 al 24 de noviembre",
+     "reenviado": true,
+     "tipo": "text",
+     "encabezado": false,
+     "verdad": [
+      "n9"
+     ],
+     "ruta": null
+    },
+    {
+     "en": "2026-10-01T14:02:40Z",
+     "texto": "Vamos 2 adultos, salimos de Medellín",
+     "reenviado": true,
+     "tipo": "text",
+     "encabezado": false,
+     "verdad": [
+      "n9"
+     ],
+     "ruta": null
+    }
+   ],
+   "modelos": [
+    {
+     "asignaciones": [
+      {
+       "n": 2,
+       "viaje": "ninguno",
+       "evidencia": ""
+      },
+      {
+       "n": 3,
+       "viaje": "ninguno",
+       "evidencia": ""
+      },
+      {
+       "n": 5,
+       "viaje": "T1 26 9",
+       "evidencia": "San Andrés serían del 20 al 24"
+      },
+      {
+       "n": 6,
+       "viaje": "T1 26 9",
+       "evidencia": "salimos de Medellín"
+      }
+     ]
+    },
+    {
+     "asignaciones": [
+      {
+       "n": 2,
+       "viaje": "ninguno",
+       "evidencia": ""
+      },
+      {
+       "n": 3,
+       "viaje": "ninguno",
+       "evidencia": ""
+      },
+      {
+       "n": 5,
+       "viaje": "T1 26 9",
+       "evidencia": "San Andrés serían del 20 al 24"
+      },
+      {
+       "n": 6,
+       "viaje": "T1 26 9",
+       "evidencia": "salimos de Medellín"
+      }
+     ]
+    },
+    {
+     "asignaciones": [
+      {
+       "n": 2,
+       "viaje": "ninguno",
+       "evidencia": ""
+      },
+      {
+       "n": 3,
+       "viaje": "ninguno",
+       "evidencia": ""
+      },
+      {
+       "n": 5,
+       "viaje": "T1 26 9",
+       "evidencia": "San Andrés serían del 20 al 24"
+      },
+      {
+       "n": 6,
+       "viaje": "T1 26 9",
+       "evidencia": "salimos de Medellín"
+      }
+     ]
+    },
+    {
+     "asignaciones": [
+      {
+       "n": 2,
+       "viaje": "ninguno",
+       "evidencia": ""
+      },
+      {
+       "n": 3,
+       "viaje": "ninguno",
+       "evidencia": ""
+      },
+      {
+       "n": 5,
+       "viaje": "T1 26 9",
+       "evidencia": "San Andrés serían del 20 al 24"
+      },
+      {
+       "n": 6,
+       "viaje": "T1 26 9",
+       "evidencia": "salimos de Medellín"
+      }
+     ]
+    },
+    {
+     "asignaciones": [
+      {
+       "n": 2,
+       "viaje": "ninguno",
+       "evidencia": ""
+      },
+      {
+       "n": 3,
+       "viaje": "ninguno",
+       "evidencia": ""
+      },
+      {
+       "n": 5,
+       "viaje": "T1 26 9",
+       "evidencia": "San Andrés serían del 20 al 24"
+      },
+      {
+       "n": 6,
+       "viaje": "T1 26 9",
+       "evidencia": "salimos de Medellín"
+      }
+     ]
+    }
+   ]
+  },
+  {
+   "id": "F12",
+   "titulo": "Tanda de un solo viaje en modo mixto",
+   "cerrados": [],
+   "viajes": [
+    {
+     "id": "n11",
+     "codigo": "T1 26 11",
+     "cliente": "CAROLINA RUIZ",
+     "destino": "PUNTA CANA"
+    },
+    {
+     "id": "n9",
+     "codigo": "T1 26 9",
+     "cliente": "LUISA MEJÍA",
+     "destino": "SAN ANDRÉS"
+    },
+    {
+     "id": "n8",
+     "codigo": "T1 26 8",
+     "cliente": "JORGE PÉREZ",
+     "destino": "CARTAGENA"
+    }
+   ],
+   "mensajes": [
+    {
+     "en": "2026-10-01T14:00:00Z",
+     "texto": "Carolina",
+     "reenviado": false,
+     "tipo": "text",
+     "encabezado": true,
+     "verdad": null,
+     "ruta": null
+    },
+    {
+     "en": "2026-10-01T14:00:20Z",
+     "texto": "Ya hablé con mi esposo: salimos el 28 de diciembre y volvemos el 3 de enero",
+     "reenviado": true,
+     "tipo": "text",
+     "encabezado": false,
+     "verdad": [
+      "n11"
+     ],
+     "ruta": null
+    },
+    {
+     "en": "2026-10-01T14:00:40Z",
+     "texto": "Somos 3 adultos y 2 niños de 9 y 4 años",
+     "reenviado": true,
+     "tipo": "text",
+     "encabezado": false,
+     "verdad": [
+      "n11"
+     ],
+     "ruta": null
+    },
+    {
+     "en": "2026-10-01T14:01:00Z",
+     "texto": "Nos gustaría hotel 5 estrellas todo incluido, salimos de Bogotá",
+     "reenviado": true,
+     "tipo": "text",
+     "encabezado": false,
+     "verdad": [
+      "n11"
+     ],
+     "ruta": null
+    }
+   ],
+   "modelos": [
+    {
+     "asignaciones": [
+      {
+       "n": 2,
+       "viaje": "ninguno",
+       "evidencia": ""
+      },
+      {
+       "n": 3,
+       "viaje": "ninguno",
+       "evidencia": ""
+      },
+      {
+       "n": 4,
+       "viaje": "ninguno",
+       "evidencia": ""
+      }
+     ]
+    },
+    {
+     "asignaciones": [
+      {
+       "n": 2,
+       "viaje": "ninguno",
+       "evidencia": ""
+      },
+      {
+       "n": 3,
+       "viaje": "ninguno",
+       "evidencia": ""
+      },
+      {
+       "n": 4,
+       "viaje": "ninguno",
+       "evidencia": ""
+      }
+     ]
+    },
+    {
+     "asignaciones": [
+      {
+       "n": 2,
+       "viaje": "ninguno",
+       "evidencia": ""
+      },
+      {
+       "n": 3,
+       "viaje": "ninguno",
+       "evidencia": ""
+      },
+      {
+       "n": 4,
+       "viaje": "ninguno",
+       "evidencia": ""
+      }
+     ]
+    },
+    {
+     "asignaciones": [
+      {
+       "n": 2,
+       "viaje": "ninguno",
+       "evidencia": ""
+      },
+      {
+       "n": 3,
+       "viaje": "ninguno",
+       "evidencia": ""
+      },
+      {
+       "n": 4,
+       "viaje": "ninguno",
+       "evidencia": ""
+      }
+     ]
+    },
+    {
+     "asignaciones": [
+      {
+       "n": 2,
+       "viaje": "ninguno",
+       "evidencia": ""
+      },
+      {
+       "n": 3,
+       "viaje": "ninguno",
+       "evidencia": ""
+      },
+      {
+       "n": 4,
+       "viaje": "ninguno",
+       "evidencia": ""
+      }
+     ]
+    }
+   ]
+  },
+  {
+   "id": "F13",
+   "titulo": "Un mensaje con dos viajes dentro (escrito)",
+   "cerrados": [],
+   "viajes": [
+    {
+     "id": "n11",
+     "codigo": "T1 26 11",
+     "cliente": "CAROLINA RUIZ",
+     "destino": "PUNTA CANA"
+    },
+    {
+     "id": "n9",
+     "codigo": "T1 26 9",
+     "cliente": "LUISA MEJÍA",
+     "destino": "SAN ANDRÉS"
+    },
+    {
+     "id": "n8",
+     "codigo": "T1 26 8",
+     "cliente": "JORGE PÉREZ",
+     "destino": "CARTAGENA"
+    }
+   ],
+   "mensajes": [
+    {
+     "en": "2026-10-01T14:00:00Z",
+     "texto": "Carolina",
+     "reenviado": false,
+     "tipo": "text",
+     "encabezado": true,
+     "verdad": null,
+     "ruta": null
+    },
+    {
+     "en": "2026-10-01T14:00:20Z",
+     "texto": "Vamos 3 adultos",
+     "reenviado": true,
+     "tipo": "text",
+     "encabezado": false,
+     "verdad": [
+      "n11"
+     ],
+     "ruta": null
+    },
+    {
+     "en": "2026-10-01T14:01:00Z",
+     "texto": "Lo de Carolina va para el 15 y lo de Luisa para el 20",
+     "reenviado": false,
+     "tipo": "text",
+     "encabezado": false,
+     "verdad": [
+      "varios",
+      "sin"
+     ],
+     "ruta": null
+    }
+   ],
+   "modelos": [
+    {
+     "asignaciones": [
+      {
+       "n": 2,
+       "viaje": "ninguno",
+       "evidencia": ""
+      },
+      {
+       "n": 3,
+       "viaje": "ninguno",
+       "evidencia": ""
+      }
+     ]
+    },
+    {
+     "asignaciones": [
+      {
+       "n": 2,
+       "viaje": "ninguno",
+       "evidencia": ""
+      },
+      {
+       "n": 3,
+       "viaje": "T1 26 11",
+       "evidencia": "Carolina"
+      },
+      {
+       "n": 3,
+       "viaje": "T1 26 9",
+       "evidencia": "Luisa"
+      }
+     ]
+    },
+    {
+     "asignaciones": [
+      {
+       "n": 2,
+       "viaje": "ninguno",
+       "evidencia": ""
+      },
+      {
+       "n": 3,
+       "viaje": "T1 26 11",
+       "evidencia": "Carolina"
+      },
+      {
+       "n": 3,
+       "viaje": "T1 26 9",
+       "evidencia": "Luisa"
+      }
+     ]
+    },
+    {
+     "asignaciones": [
+      {
+       "n": 2,
+       "viaje": "ninguno",
+       "evidencia": ""
+      },
+      {
+       "n": 3,
+       "viaje": "ninguno",
+       "evidencia": ""
+      }
+     ]
+    },
+    {
+     "asignaciones": [
+      {
+       "n": 2,
+       "viaje": "ninguno",
+       "evidencia": ""
+      },
+      {
+       "n": 3,
+       "viaje": "T1 26 11",
+       "evidencia": "Carolina"
+      }
+     ]
+    }
+   ]
+  },
+  {
+   "id": "F14a",
+   "titulo": "Gasto en medio de la tanda",
+   "cerrados": [],
+   "viajes": [
+    {
+     "id": "n11",
+     "codigo": "T1 26 11",
+     "cliente": "CAROLINA RUIZ",
+     "destino": "PUNTA CANA"
+    },
+    {
+     "id": "n9",
+     "codigo": "T1 26 9",
+     "cliente": "LUISA MEJÍA",
+     "destino": "SAN ANDRÉS"
+    },
+    {
+     "id": "n8",
+     "codigo": "T1 26 8",
+     "cliente": "JORGE PÉREZ",
+     "destino": "CARTAGENA"
+    }
+   ],
+   "mensajes": [
+    {
+     "en": "2026-10-01T14:00:00Z",
+     "texto": "Carolina",
+     "reenviado": false,
+     "tipo": "text",
+     "encabezado": true,
+     "verdad": null,
+     "ruta": null
+    },
+    {
+     "en": "2026-10-01T14:00:20Z",
+     "texto": "Ya hablé con mi esposo: salimos el 28 de diciembre y volvemos el 3 de enero",
+     "reenviado": true,
+     "tipo": "text",
+     "encabezado": false,
+     "verdad": [
+      "n11"
+     ],
+     "ruta": null
+    },
+    {
+     "en": "2026-10-01T14:01:00Z",
+     "texto": "gasto 30000 taxi",
+     "reenviado": false,
+     "tipo": "text",
+     "encabezado": false,
+     "verdad": [
+      "bot"
+     ],
+     "ruta": "bot"
+    },
+    {
+     "en": "2026-10-01T14:01:30Z",
+     "texto": "Somos 3 adultos y 2 niños de 9 y 4 años",
+     "reenviado": true,
+     "tipo": "text",
+     "encabezado": false,
+     "verdad": [
+      "n11"
+     ],
+     "ruta": null
+    },
+    {
+     "en": "2026-10-01T14:02:00Z",
+     "texto": "salimos de Bogotá",
+     "reenviado": true,
+     "tipo": "text",
+     "encabezado": false,
+     "verdad": [
+      "n11"
+     ],
+     "ruta": null
+    }
+   ],
+   "modelos": [
+    {
+     "asignaciones": [
+      {
+       "n": 2,
+       "viaje": "ninguno",
+       "evidencia": "salimos el 28 de diciembre y v"
+      },
+      {
+       "n": 3,
+       "viaje": "ninguno",
+       "evidencia": "Somos 3 adultos y 2 niños de 9"
+      },
+      {
+       "n": 4,
+       "viaje": "ninguno",
+       "evidencia": "salimos de Bogotá"
+      }
+     ]
+    },
+    {
+     "asignaciones": [
+      {
+       "n": 2,
+       "viaje": "ninguno",
+       "evidencia": "salimos el 28 de diciembre y v"
+      },
+      {
+       "n": 3,
+       "viaje": "ninguno",
+       "evidencia": "Somos 3 adultos y 2 niños de 9"
+      },
+      {
+       "n": 4,
+       "viaje": "ninguno",
+       "evidencia": "salimos de Bogotá"
+      }
+     ]
+    },
+    {
+     "asignaciones": [
+      {
+       "n": 2,
+       "viaje": "ninguno",
+       "evidencia": "salimos el 28 de diciembre y v"
+      },
+      {
+       "n": 3,
+       "viaje": "ninguno",
+       "evidencia": "Somos 3 adultos y 2 niños de 9"
+      },
+      {
+       "n": 4,
+       "viaje": "ninguno",
+       "evidencia": "salimos de Bogotá"
+      }
+     ]
+    },
+    {
+     "asignaciones": [
+      {
+       "n": 2,
+       "viaje": "ninguno",
+       "evidencia": ""
+      },
+      {
+       "n": 3,
+       "viaje": "ninguno",
+       "evidencia": ""
+      },
+      {
+       "n": 4,
+       "viaje": "ninguno",
+       "evidencia": ""
+      }
+     ]
+    },
+    {
+     "asignaciones": [
+      {
+       "n": 2,
+       "viaje": "ninguno",
+       "evidencia": "salimos el 28 de diciembre y v"
+      },
+      {
+       "n": 3,
+       "viaje": "ninguno",
+       "evidencia": "Somos 3 adultos y 2 niños de 9"
+      },
+      {
+       "n": 4,
+       "viaje": "ninguno",
+       "evidencia": "salimos de Bogotá"
+      }
+     ]
+    }
+   ]
+  },
+  {
+   "id": "F14b",
+   "titulo": "Consulta al bot escrita en medio de la tanda",
+   "cerrados": [],
+   "viajes": [
+    {
+     "id": "n11",
+     "codigo": "T1 26 11",
+     "cliente": "CAROLINA RUIZ",
+     "destino": "PUNTA CANA"
+    },
+    {
+     "id": "n9",
+     "codigo": "T1 26 9",
+     "cliente": "LUISA MEJÍA",
+     "destino": "SAN ANDRÉS"
+    },
+    {
+     "id": "n8",
+     "codigo": "T1 26 8",
+     "cliente": "JORGE PÉREZ",
+     "destino": "CARTAGENA"
+    }
+   ],
+   "mensajes": [
+    {
+     "en": "2026-10-01T14:00:00Z",
+     "texto": "Carolina",
+     "reenviado": false,
+     "tipo": "text",
+     "encabezado": true,
+     "verdad": null,
+     "ruta": null
+    },
+    {
+     "en": "2026-10-01T14:00:20Z",
+     "texto": "Ya hablé con mi esposo: salimos el 28 de diciembre y volvemos el 3 de enero",
+     "reenviado": true,
+     "tipo": "text",
+     "encabezado": false,
+     "verdad": [
+      "n11"
+     ],
+     "ruta": null
+    },
+    {
+     "en": "2026-10-01T14:01:00Z",
+     "texto": "¿cuánto vendimos en septiembre?",
+     "reenviado": false,
+     "tipo": "text",
+     "encabezado": false,
+     "verdad": [
+      "bot"
+     ],
+     "ruta": "bot"
+    },
+    {
+     "en": "2026-10-01T14:01:30Z",
+     "texto": "Somos 3 adultos y 2 niños de 9 y 4 años",
+     "reenviado": true,
+     "tipo": "text",
+     "encabezado": false,
+     "verdad": [
+      "n11"
+     ],
+     "ruta": null
+    }
+   ],
+   "modelos": [
+    {
+     "asignaciones": [
+      {
+       "n": 2,
+       "viaje": "ninguno",
+       "evidencia": ""
+      },
+      {
+       "n": 3,
+       "viaje": "ninguno",
+       "evidencia": ""
+      },
+      {
+       "n": 4,
+       "viaje": "ninguno",
+       "evidencia": ""
+      }
+     ]
+    },
+    {
+     "asignaciones": [
+      {
+       "n": 2,
+       "viaje": "ninguno",
+       "evidencia": ""
+      },
+      {
+       "n": 3,
+       "viaje": "ninguno",
+       "evidencia": ""
+      },
+      {
+       "n": 4,
+       "viaje": "ninguno",
+       "evidencia": ""
+      }
+     ]
+    },
+    {
+     "asignaciones": [
+      {
+       "n": 2,
+       "viaje": "ninguno",
+       "evidencia": ""
+      },
+      {
+       "n": 3,
+       "viaje": "ninguno",
+       "evidencia": ""
+      },
+      {
+       "n": 4,
+       "viaje": "ninguno",
+       "evidencia": ""
+      }
+     ]
+    },
+    {
+     "asignaciones": [
+      {
+       "n": 2,
+       "viaje": "ninguno",
+       "evidencia": ""
+      },
+      {
+       "n": 3,
+       "viaje": "ninguno",
+       "evidencia": ""
+      },
+      {
+       "n": 4,
+       "viaje": "ninguno",
+       "evidencia": ""
+      }
+     ]
+    },
+    {
+     "asignaciones": [
+      {
+       "n": 2,
+       "viaje": "ninguno",
+       "evidencia": ""
+      },
+      {
+       "n": 3,
+       "viaje": "ninguno",
+       "evidencia": ""
+      },
+      {
+       "n": 4,
+       "viaje": "ninguno",
+       "evidencia": ""
+      }
+     ]
+    }
+   ]
+  },
+  {
+   "id": "F15",
+   "titulo": "Caja vencida (encabezado 8:00, reenvíos 16:00)",
+   "cerrados": [],
+   "viajes": [
+    {
+     "id": "n11",
+     "codigo": "T1 26 11",
+     "cliente": "CAROLINA RUIZ",
+     "destino": "PUNTA CANA"
+    },
+    {
+     "id": "n9",
+     "codigo": "T1 26 9",
+     "cliente": "LUISA MEJÍA",
+     "destino": "SAN ANDRÉS"
+    },
+    {
+     "id": "n8",
+     "codigo": "T1 26 8",
+     "cliente": "JORGE PÉREZ",
+     "destino": "CARTAGENA"
+    }
+   ],
+   "mensajes": [
+    {
+     "en": "2026-10-01T13:00:00Z",
+     "texto": "Carolina",
+     "reenviado": false,
+     "tipo": "text",
+     "encabezado": true,
+     "verdad": null,
+     "ruta": null
+    },
+    {
+     "en": "2026-10-01T21:00:00Z",
+     "texto": "nosotros salimos el 20 de noviembre",
+     "reenviado": true,
+     "tipo": "text",
+     "encabezado": false,
+     "verdad": [
+      "sin"
+     ],
+     "ruta": null
+    },
+    {
+     "en": "2026-10-01T21:00:30Z",
+     "texto": "vamos 2 adultos",
+     "reenviado": true,
+     "tipo": "text",
+     "encabezado": false,
+     "verdad": [
+      "sin"
+     ],
+     "ruta": null
+    }
+   ],
+   "modelos": [
+    {
+     "asignaciones": [
+      {
+       "n": 2,
+       "viaje": "ninguno",
+       "evidencia": ""
+      },
+      {
+       "n": 3,
+       "viaje": "ninguno",
+       "evidencia": ""
+      }
+     ]
+    },
+    {
+     "asignaciones": [
+      {
+       "n": 2,
+       "viaje": "ninguno",
+       "evidencia": ""
+      },
+      {
+       "n": 3,
+       "viaje": "ninguno",
+       "evidencia": ""
+      }
+     ]
+    },
+    {
+     "asignaciones": [
+      {
+       "n": 2,
+       "viaje": "ninguno",
+       "evidencia": "20 de noviembre"
+      },
+      {
+       "n": 3,
+       "viaje": "ninguno",
+       "evidencia": "2 adultos"
+      }
+     ]
+    },
+    {
+     "asignaciones": [
+      {
+       "n": 2,
+       "viaje": "ninguno",
+       "evidencia": ""
+      },
+      {
+       "n": 3,
+       "viaje": "ninguno",
+       "evidencia": ""
+      }
+     ]
+    },
+    {
+     "asignaciones": [
+      {
+       "n": 2,
+       "viaje": "ninguno",
+       "evidencia": ""
+      },
+      {
+       "n": 3,
+       "viaje": "ninguno",
+       "evidencia": ""
+      }
+     ]
+    }
+   ]
+  },
+  {
+   "id": "C1m",
+   "titulo": "C1 en mixto: encabezado «Jorge» con los mensajes de Carolina",
+   "cerrados": [],
+   "viajes": [
+    {
+     "id": "n11",
+     "codigo": "T1 26 11",
+     "cliente": "CAROLINA RUIZ",
+     "destino": "PUNTA CANA"
+    },
+    {
+     "id": "n9",
+     "codigo": "T1 26 9",
+     "cliente": "LUISA MEJÍA",
+     "destino": "SAN ANDRÉS"
+    },
+    {
+     "id": "n8",
+     "codigo": "T1 26 8",
+     "cliente": "JORGE PÉREZ",
+     "destino": "CARTAGENA"
+    }
+   ],
+   "mensajes": [
+    {
+     "en": "2026-10-01T14:00:00Z",
+     "texto": "Jorge",
+     "reenviado": false,
+     "tipo": "text",
+     "encabezado": true,
+     "verdad": null,
+     "ruta": null
+    },
+    {
+     "en": "2026-10-01T14:00:20Z",
+     "texto": "Confirmamos Punta Cana, salimos de Bogotá",
+     "reenviado": true,
+     "tipo": "text",
+     "encabezado": false,
+     "verdad": [
+      "sin",
+      "n11"
+     ],
+     "ruta": null
+    },
+    {
+     "en": "2026-10-01T14:00:40Z",
+     "texto": "Del 10 al 16 de diciembre",
+     "reenviado": true,
+     "tipo": "text",
+     "encabezado": false,
+     "verdad": [
+      "sin",
+      "n11"
+     ],
+     "ruta": null
+    },
+    {
+     "en": "2026-10-01T14:01:00Z",
+     "texto": "Los niños son 2, de 6 y 8 años",
+     "reenviado": true,
+     "tipo": "text",
+     "encabezado": false,
+     "verdad": [
+      "sin",
+      "n11"
+     ],
+     "ruta": null
+    }
+   ],
+   "modelos": [
+    {
+     "asignaciones": [
+      {
+       "n": 2,
+       "viaje": "T1 26 11",
+       "evidencia": "Punta Cana"
+      },
+      {
+       "n": 3,
+       "viaje": "ninguno",
+       "evidencia": "10 al 16 de diciembre"
+      },
+      {
+       "n": 4,
+       "viaje": "ninguno",
+       "evidencia": "niños son 2, de 6 y 8 años"
+      }
+     ]
+    },
+    {
+     "asignaciones": [
+      {
+       "n": 2,
+       "viaje": "T1 26 11",
+       "evidencia": "Punta Cana"
+      },
+      {
+       "n": 3,
+       "viaje": "ninguno",
+       "evidencia": "10 al 16 de diciembre"
+      },
+      {
+       "n": 4,
+       "viaje": "ninguno",
+       "evidencia": "niños son 2, de 6 y 8 años"
+      }
+     ]
+    },
+    {
+     "asignaciones": [
+      {
+       "n": 2,
+       "viaje": "T1 26 11",
+       "evidencia": "Punta Cana"
+      },
+      {
+       "n": 3,
+       "viaje": "ninguno",
+       "evidencia": "10 al 16 de diciembre"
+      },
+      {
+       "n": 4,
+       "viaje": "ninguno",
+       "evidencia": "niños son 2, de 6 y 8 años"
+      }
+     ]
+    }
+   ]
+  },
+  {
+   "id": "D1m",
+   "titulo": "D1 en mixto: dos clientes en una tanda",
+   "cerrados": [],
+   "viajes": [
+    {
+     "id": "n8",
+     "codigo": "T1 26 8",
+     "cliente": "JORGE PÉREZ",
+     "destino": "CARTAGENA"
+    },
+    {
+     "id": "n9",
+     "codigo": "T1 26 9",
+     "cliente": "LUISA MEJÍA",
+     "destino": "SAN ANDRÉS"
+    }
+   ],
+   "mensajes": [
+    {
+     "en": "2026-10-01T14:00:00Z",
+     "texto": "Hola Tati, soy Carolina, queremos Punta Cana del 5 al 10 de diciembre, somos 2 adultos y 2 niños",
+     "reenviado": true,
+     "tipo": "text",
+     "encabezado": false,
+     "verdad": [
+      "nuevo:carolina",
+      "sin"
+     ],
+     "ruta": null
+    },
+    {
+     "en": "2026-10-01T14:00:30Z",
+     "texto": "Buenas, soy Luisa Mejía, para San Andrés somos 2 adultos, del 20 al 24 de noviembre",
+     "reenviado": true,
+     "tipo": "text",
+     "encabezado": false,
+     "verdad": [
+      "n9",
+      "sin"
+     ],
+     "ruta": null
+    }
+   ],
+   "modelos": [
+    {
+     "asignaciones": [
+      {
+       "n": 1,
+       "viaje": "NUEVO Carolina",
+       "evidencia": "Carolina"
+      },
+      {
+       "n": 2,
+       "viaje": "T1 26 9",
+       "evidencia": "LUISA MEJÍA, SAN ANDRÉS"
+      }
+     ]
+    },
+    {
+     "asignaciones": [
+      {
+       "n": 1,
+       "viaje": "NUEVO Carolina",
+       "evidencia": "Carolina"
+      },
+      {
+       "n": 2,
+       "viaje": "T1 26 9",
+       "evidencia": "LUISA MEJÍA, SAN ANDRÉS"
+      }
+     ]
+    },
+    {
+     "asignaciones": [
+      {
+       "n": 1,
+       "viaje": "NUEVO Carolina",
+       "evidencia": "Carolina"
+      },
+      {
+       "n": 2,
+       "viaje": "T1 26 9",
+       "evidencia": "LUISA MEJÍA, SAN ANDRÉS"
+      }
+     ]
+    }
+   ]
+  },
+  {
+   "id": "D2m",
+   "titulo": "D2 en mixto: un cliente, dos viajes",
+   "cerrados": [],
+   "viajes": [
+    {
+     "id": "n8",
+     "codigo": "T1 26 8",
+     "cliente": "JORGE PÉREZ",
+     "destino": "CARTAGENA"
+    },
+    {
+     "id": "n9",
+     "codigo": "T1 26 9",
+     "cliente": "LUISA MEJÍA",
+     "destino": "SAN ANDRÉS"
+    }
+   ],
+   "mensajes": [
+    {
+     "en": "2026-10-01T14:00:00Z",
+     "texto": "Queremos Punta Cana en diciembre, del 20 al 27, mi esposo y yo",
+     "reenviado": true,
+     "tipo": "text",
+     "encabezado": false,
+     "verdad": [
+      "sin",
+      "nuevo:*"
+     ],
+     "ruta": null
+    },
+    {
+     "en": "2026-10-01T14:00:30Z",
+     "texto": "Y aparte, en marzo quiero llevar a mi mamá a Cartagena, del 10 al 14",
+     "reenviado": true,
+     "tipo": "text",
+     "encabezado": false,
+     "verdad": [
+      "sin",
+      "nuevo:*"
+     ],
+     "ruta": null
+    }
+   ],
+   "modelos": [
+    {
+     "asignaciones": [
+      {
+       "n": 1,
+       "viaje": "NUEVO Punta Cana",
+       "evidencia": "Punta Cana en diciembre"
+      },
+      {
+       "n": 2,
+       "viaje": "T1 26 8",
+       "evidencia": "Cartagena"
+      }
+     ]
+    },
+    {
+     "asignaciones": [
+      {
+       "n": 1,
+       "viaje": "NUEVO Punta Cana",
+       "evidencia": "Punta Cana en diciembre"
+      },
+      {
+       "n": 2,
+       "viaje": "T1 26 8",
+       "evidencia": "Cartagena"
+      }
+     ]
+    },
+    {
+     "asignaciones": [
+      {
+       "n": 1,
+       "viaje": "NUEVO Punta Cana",
+       "evidencia": "Punta Cana en diciembre"
+      },
+      {
+       "n": 2,
+       "viaje": "T1 26 8",
+       "evidencia": "Cartagena"
+      }
+     ]
+    }
+   ]
+  }
+ ],
+ "dia": {
+  "entregas": [
+   {
+    "viajes": [
+     {
+      "id": "n11",
+      "codigo": "T1 26 11",
+      "cliente": "CAROLINA RUIZ",
+      "destino": "PUNTA CANA"
+     },
+     {
+      "id": "n9",
+      "codigo": "T1 26 9",
+      "cliente": "LUISA MEJÍA",
+      "destino": "SAN ANDRÉS"
+     },
+     {
+      "id": "n8",
+      "codigo": "T1 26 8",
+      "cliente": "JORGE PÉREZ",
+      "destino": "CARTAGENA"
+     },
+     {
+      "id": "n20",
+      "codigo": "T1 26 20",
+      "cliente": "PEDRO GÓMEZ",
+      "destino": "CARTAGENA"
+     }
+    ],
+    "mensajes": [
+     {
+      "en": "2026-10-01T13:30:00Z",
+      "texto": "Carolina",
+      "reenviado": false,
+      "tipo": "text",
+      "encabezado": true,
+      "verdad": null
+     },
+     {
+      "en": "2026-10-01T13:30:30Z",
+      "texto": "Hola Tati buenos días 😊",
+      "reenviado": true,
+      "tipo": "text",
+      "encabezado": false,
+      "verdad": "T1 26 11"
+     },
+     {
+      "en": "2026-10-01T13:31:00Z",
+      "texto": "Ya hablé con mi esposo, salimos el 28 de diciembre y volvemos el 3 de enero",
+      "reenviado": true,
+      "tipo": "text",
+      "encabezado": false,
+      "verdad": "T1 26 11"
+     },
+     {
+      "en": "2026-10-01T13:31:30Z",
+      "texto": "Tati te cuento que al final va mi suegra, o sea seríamos tres adultos y los dos niños, el de nueve y la de cuatro",
+      "reenviado": true,
+      "tipo": "audio",
+      "encabezado": false,
+      "verdad": "T1 26 11"
+     },
+     {
+      "en": "2026-10-01T13:33:00Z",
+      "texto": "Hola, soy Andrés Gil, me pasó tu número Luisa, quiero cotizar Cancún",
+      "reenviado": true,
+      "tipo": "text",
+      "encabezado": false,
+      "verdad": "NUEVO Andrés Gil"
+     },
+     {
+      "en": "2026-10-01T13:33:30Z",
+      "texto": "Seríamos 2 adultos, del 5 al 10 de diciembre",
+      "reenviado": true,
+      "tipo": "text",
+      "encabezado": false,
+      "verdad": "NUEVO Andrés Gil"
+     },
+     {
+      "en": "2026-10-01T13:34:00Z",
+      "texto": "Saliendo de Barranquilla",
+      "reenviado": true,
+      "tipo": "text",
+      "encabezado": false,
+      "verdad": "NUEVO Andrés Gil"
+     },
+     {
+      "en": "2026-10-01T13:40:00Z",
+      "texto": "nuevo Andrés Gil",
+      "reenviado": false,
+      "tipo": "text",
+      "encabezado": true,
+      "verdad": null
+     },
+     {
+      "en": "2026-10-01T13:40:30Z",
+      "texto": "Nos gustaría todo incluido, unos 10 millones en total",
+      "reenviado": true,
+      "tipo": "text",
+      "encabezado": false,
+      "verdad": "NUEVO Andrés Gil"
+     }
+    ],
+    "modelos": [
+     {
+      "asignaciones": [
+       {
+        "n": 2,
+        "viaje": "ninguno",
+        "evidencia": ""
+       },
+       {
+        "n": 3,
+        "viaje": "ninguno",
+        "evidencia": ""
+       },
+       {
+        "n": 4,
+        "viaje": "ninguno",
+        "evidencia": ""
+       },
+       {
+        "n": 5,
+        "viaje": "NUEVO Andrés Gil",
+        "evidencia": "Andrés Gil"
+       },
+       {
+        "n": 6,
+        "viaje": "ninguno",
+        "evidencia": ""
+       },
+       {
+        "n": 7,
+        "viaje": "ninguno",
+        "evidencia": ""
+       },
+       {
+        "n": 9,
+        "viaje": "ninguno",
+        "evidencia": ""
+       }
+      ]
+     },
+     {
+      "asignaciones": [
+       {
+        "n": 2,
+        "viaje": "ninguno",
+        "evidencia": ""
+       },
+       {
+        "n": 3,
+        "viaje": "ninguno",
+        "evidencia": ""
+       },
+       {
+        "n": 4,
+        "viaje": "ninguno",
+        "evidencia": ""
+       },
+       {
+        "n": 5,
+        "viaje": "NUEVO Andrés Gil",
+        "evidencia": "Andrés Gil"
+       },
+       {
+        "n": 6,
+        "viaje": "ninguno",
+        "evidencia": ""
+       },
+       {
+        "n": 7,
+        "viaje": "ninguno",
+        "evidencia": ""
+       },
+       {
+        "n": 9,
+        "viaje": "ninguno",
+        "evidencia": ""
+       }
+      ]
+     },
+     {
+      "asignaciones": [
+       {
+        "n": 2,
+        "viaje": "ninguno",
+        "evidencia": ""
+       },
+       {
+        "n": 3,
+        "viaje": "ninguno",
+        "evidencia": ""
+       },
+       {
+        "n": 4,
+        "viaje": "ninguno",
+        "evidencia": ""
+       },
+       {
+        "n": 5,
+        "viaje": "NUEVO Andrés Gil",
+        "evidencia": "Andrés Gil"
+       },
+       {
+        "n": 6,
+        "viaje": "ninguno",
+        "evidencia": ""
+       },
+       {
+        "n": 7,
+        "viaje": "ninguno",
+        "evidencia": ""
+       },
+       {
+        "n": 9,
+        "viaje": "ninguno",
+        "evidencia": ""
+       }
+      ]
+     },
+     {
+      "asignaciones": [
+       {
+        "n": 2,
+        "viaje": "ninguno",
+        "evidencia": ""
+       },
+       {
+        "n": 3,
+        "viaje": "ninguno",
+        "evidencia": ""
+       },
+       {
+        "n": 4,
+        "viaje": "ninguno",
+        "evidencia": ""
+       },
+       {
+        "n": 5,
+        "viaje": "NUEVO Andrés Gil",
+        "evidencia": "Andrés Gil"
+       },
+       {
+        "n": 6,
+        "viaje": "ninguno",
+        "evidencia": ""
+       },
+       {
+        "n": 7,
+        "viaje": "ninguno",
+        "evidencia": ""
+       },
+       {
+        "n": 9,
+        "viaje": "ninguno",
+        "evidencia": ""
+       }
+      ]
+     },
+     {
+      "asignaciones": [
+       {
+        "n": 2,
+        "viaje": "ninguno",
+        "evidencia": ""
+       },
+       {
+        "n": 3,
+        "viaje": "ninguno",
+        "evidencia": ""
+       },
+       {
+        "n": 4,
+        "viaje": "ninguno",
+        "evidencia": ""
+       },
+       {
+        "n": 5,
+        "viaje": "NUEVO Andrés Gil",
+        "evidencia": "Andrés Gil"
+       },
+       {
+        "n": 6,
+        "viaje": "ninguno",
+        "evidencia": ""
+       },
+       {
+        "n": 7,
+        "viaje": "ninguno",
+        "evidencia": ""
+       },
+       {
+        "n": 9,
+        "viaje": "ninguno",
+        "evidencia": ""
+       }
+      ]
+     },
+     {
+      "asignaciones": [
+       {
+        "n": 2,
+        "viaje": "ninguno",
+        "evidencia": ""
+       },
+       {
+        "n": 3,
+        "viaje": "ninguno",
+        "evidencia": ""
+       },
+       {
+        "n": 4,
+        "viaje": "ninguno",
+        "evidencia": ""
+       },
+       {
+        "n": 5,
+        "viaje": "NUEVO Andrés Gil",
+        "evidencia": "Andrés Gil"
+       },
+       {
+        "n": 6,
+        "viaje": "ninguno",
+        "evidencia": ""
+       },
+       {
+        "n": 7,
+        "viaje": "ninguno",
+        "evidencia": ""
+       },
+       {
+        "n": 9,
+        "viaje": "ninguno",
+        "evidencia": ""
+       }
+      ]
+     },
+     {
+      "asignaciones": [
+       {
+        "n": 2,
+        "viaje": "ninguno",
+        "evidencia": ""
+       },
+       {
+        "n": 3,
+        "viaje": "ninguno",
+        "evidencia": ""
+       },
+       {
+        "n": 4,
+        "viaje": "ninguno",
+        "evidencia": ""
+       },
+       {
+        "n": 5,
+        "viaje": "NUEVO Andrés Gil",
+        "evidencia": "Andrés Gil"
+       },
+       {
+        "n": 6,
+        "viaje": "ninguno",
+        "evidencia": ""
+       },
+       {
+        "n": 7,
+        "viaje": "ninguno",
+        "evidencia": ""
+       },
+       {
+        "n": 9,
+        "viaje": "ninguno",
+        "evidencia": ""
+       }
+      ]
+     },
+     {
+      "asignaciones": [
+       {
+        "n": 2,
+        "viaje": "ninguno",
+        "evidencia": ""
+       },
+       {
+        "n": 3,
+        "viaje": "ninguno",
+        "evidencia": ""
+       },
+       {
+        "n": 4,
+        "viaje": "ninguno",
+        "evidencia": ""
+       },
+       {
+        "n": 5,
+        "viaje": "NUEVO Andrés Gil",
+        "evidencia": "Andrés Gil"
+       },
+       {
+        "n": 6,
+        "viaje": "ninguno",
+        "evidencia": ""
+       },
+       {
+        "n": 7,
+        "viaje": "ninguno",
+        "evidencia": ""
+       },
+       {
+        "n": 9,
+        "viaje": "ninguno",
+        "evidencia": ""
+       }
+      ]
+     },
+     {
+      "asignaciones": [
+       {
+        "n": 2,
+        "viaje": "ninguno",
+        "evidencia": ""
+       },
+       {
+        "n": 3,
+        "viaje": "ninguno",
+        "evidencia": ""
+       },
+       {
+        "n": 4,
+        "viaje": "ninguno",
+        "evidencia": ""
+       },
+       {
+        "n": 5,
+        "viaje": "NUEVO Andrés Gil",
+        "evidencia": "Andrés Gil"
+       },
+       {
+        "n": 6,
+        "viaje": "ninguno",
+        "evidencia": ""
+       },
+       {
+        "n": 7,
+        "viaje": "ninguno",
+        "evidencia": ""
+       },
+       {
+        "n": 9,
+        "viaje": "ninguno",
+        "evidencia": ""
+       }
+      ]
+     },
+     {
+      "asignaciones": [
+       {
+        "n": 2,
+        "viaje": "ninguno",
+        "evidencia": ""
+       },
+       {
+        "n": 3,
+        "viaje": "ninguno",
+        "evidencia": ""
+       },
+       {
+        "n": 4,
+        "viaje": "ninguno",
+        "evidencia": ""
+       },
+       {
+        "n": 5,
+        "viaje": "NUEVO Andrés Gil",
+        "evidencia": "Andrés Gil"
+       },
+       {
+        "n": 6,
+        "viaje": "ninguno",
+        "evidencia": ""
+       },
+       {
+        "n": 7,
+        "viaje": "ninguno",
+        "evidencia": ""
+       },
+       {
+        "n": 9,
+        "viaje": "ninguno",
+        "evidencia": ""
+       }
+      ]
+     }
+    ]
+   },
+   {
+    "viajes": [
+     {
+      "id": "n11",
+      "codigo": "T1 26 11",
+      "cliente": "CAROLINA RUIZ",
+      "destino": "PUNTA CANA"
+     },
+     {
+      "id": "n9",
+      "codigo": "T1 26 9",
+      "cliente": "LUISA MEJÍA",
+      "destino": "SAN ANDRÉS"
+     },
+     {
+      "id": "n8",
+      "codigo": "T1 26 8",
+      "cliente": "JORGE PÉREZ",
+      "destino": "CARTAGENA"
+     },
+     {
+      "id": "n20",
+      "codigo": "T1 26 20",
+      "cliente": "PEDRO GÓMEZ",
+      "destino": "CARTAGENA"
+     },
+     {
+      "id": "n21",
+      "codigo": "T1 26 21",
+      "cliente": "ANDRÉS GIL",
+      "destino": null
+     }
+    ],
+    "mensajes": [
+     {
+      "en": "2026-10-01T14:30:00Z",
+      "texto": "Buenas Tati, para San Andrés serían del 20 al 24 de noviembre",
+      "reenviado": true,
+      "tipo": "text",
+      "encabezado": false,
+      "verdad": "T1 26 9"
+     },
+     {
+      "en": "2026-10-01T14:30:40Z",
+      "texto": "Vamos mi esposo y yo, salimos de Medellín",
+      "reenviado": true,
+      "tipo": "text",
+      "encabezado": false,
+      "verdad": "T1 26 9"
+     },
+     {
+      "en": "2026-10-01T14:31:00Z",
+      "texto": "Hotel 4 estrellas con desayuno porfa",
+      "reenviado": true,
+      "tipo": "text",
+      "encabezado": false,
+      "verdad": "T1 26 9"
+     },
+     {
+      "en": "2026-10-01T14:36:00Z",
+      "texto": "Carlina",
+      "reenviado": false,
+      "tipo": "text",
+      "encabezado": true,
+      "verdad": null
+     },
+     {
+      "en": "2026-10-01T14:36:30Z",
+      "texto": "Tati, la maleta de bodega para todos",
+      "reenviado": true,
+      "tipo": "text",
+      "encabezado": false,
+      "verdad": "T1 26 11"
+     },
+     {
+      "en": "2026-10-01T14:37:00Z",
+      "texto": "Hotel 5 estrellas todo incluido, presupuesto unos 15 millones",
+      "reenviado": true,
+      "tipo": "text",
+      "encabezado": false,
+      "verdad": "T1 26 11"
+     },
+     {
+      "en": "2026-10-01T14:41:00Z",
+      "texto": "Los niños ya tienen pasaporte",
+      "reenviado": true,
+      "tipo": "text",
+      "encabezado": false,
+      "verdad": "T1 26 11"
+     },
+     {
+      "en": "2026-10-01T14:50:00Z",
+      "texto": "Hola, para Cartagena somos 4 adultos y un niño de 7 años",
+      "reenviado": true,
+      "tipo": "text",
+      "encabezado": false,
+      "verdad": "T1 26 8"
+     },
+     {
+      "en": "2026-10-01T14:50:30Z",
+      "texto": "del 8 al 12 de noviembre, saliendo de Cali",
+      "reenviado": true,
+      "tipo": "text",
+      "encabezado": false,
+      "verdad": "T1 26 8"
+     },
+     {
+      "en": "2026-10-01T14:55:00Z",
+      "texto": "T1 26 8",
+      "reenviado": false,
+      "tipo": "text",
+      "encabezado": true,
+      "verdad": null
+     },
+     {
+      "en": "2026-10-01T14:55:30Z",
+      "texto": "Tati, hotel tres estrellas está bien, lo importante es que tenga piscina para el niño",
+      "reenviado": true,
+      "tipo": "audio",
+      "encabezado": false,
+      "verdad": "T1 26 8"
+     }
+    ],
+    "modelos": [
+     {
+      "asignaciones": [
+       {
+        "n": 1,
+        "viaje": "T1 26 9",
+        "evidencia": "San Andrés"
+       },
+       {
+        "n": 2,
+        "viaje": "T1 26 9",
+        "evidencia": "San Andrés"
+       },
+       {
+        "n": 3,
+        "viaje": "ninguno",
+        "evidencia": ""
+       },
+       {
+        "n": 5,
+        "viaje": "ninguno",
+        "evidencia": ""
+       },
+       {
+        "n": 6,
+        "viaje": "ninguno",
+        "evidencia": ""
+       },
+       {
+        "n": 7,
+        "viaje": "ninguno",
+        "evidencia": ""
+       },
+       {
+        "n": 8,
+        "viaje": "T1 26 8",
+        "evidencia": "Cartagena"
+       },
+       {
+        "n": 8,
+        "viaje": "T1 26 20",
+        "evidencia": "Cartagena"
+       },
+       {
+        "n": 9,
+        "viaje": "ninguno",
+        "evidencia": ""
+       },
+       {
+        "n": 11,
+        "viaje": "ninguno",
+        "evidencia": ""
+       }
+      ]
+     },
+     {
+      "asignaciones": [
+       {
+        "n": 1,
+        "viaje": "T1 26 9",
+        "evidencia": "San Andrés"
+       },
+       {
+        "n": 2,
+        "viaje": "T1 26 9",
+        "evidencia": "esposo"
+       },
+       {
+        "n": 3,
+        "viaje": "T1 26 9",
+        "evidencia": "desayuno"
+       },
+       {
+        "n": 5,
+        "viaje": "ninguno",
+        "evidencia": "ninguno"
+       },
+       {
+        "n": 6,
+        "viaje": "ninguno",
+        "evidencia": "ninguno"
+       },
+       {
+        "n": 7,
+        "viaje": "ninguno",
+        "evidencia": "ninguno"
+       },
+       {
+        "n": 8,
+        "viaje": "T1 26 8",
+        "evidencia": "Cartagena"
+       },
+       {
+        "n": 9,
+        "viaje": "T1 26 8",
+        "evidencia": "noviembre"
+       },
+       {
+        "n": 11,
+        "viaje": "ninguno",
+        "evidencia": "ninguno"
+       }
+      ]
+     },
+     {
+      "asignaciones": [
+       {
+        "n": 1,
+        "viaje": "T1 26 9",
+        "evidencia": "San Andrés"
+       },
+       {
+        "n": 2,
+        "viaje": "T1 26 9",
+        "evidencia": "mi esposo y yo"
+       },
+       {
+        "n": 3,
+        "viaje": "T1 26 9",
+        "evidencia": "Hotel 4 estrellas con desayuno"
+       },
+       {
+        "n": 5,
+        "viaje": "T1 26 9",
+        "evidencia": "la maleta de bodega"
+       },
+       {
+        "n": 6,
+        "viaje": "ninguno",
+        "evidencia": "Hotel 5 estrellas todo incluid"
+       },
+       {
+        "n": 7,
+        "viaje": "ninguno",
+        "evidencia": "Los niños ya tienen pasaporte"
+       },
+       {
+        "n": 8,
+        "viaje": "T1 26 8",
+        "evidencia": "Cartagena somos 4 adultos y un"
+       },
+       {
+        "n": 9,
+        "viaje": "T1 26 8",
+        "evidencia": "del 8 al 12 de noviembre, sali"
+       },
+       {
+        "n": 11,
+        "viaje": "ninguno",
+        "evidencia": "hotel tres estrellas está bien"
+       }
+      ]
+     },
+     {
+      "asignaciones": [
+       {
+        "n": 1,
+        "viaje": "T1 26 9",
+        "evidencia": "San Andrés"
+       },
+       {
+        "n": 2,
+        "viaje": "T1 26 9",
+        "evidencia": "San Andrés"
+       },
+       {
+        "n": 3,
+        "viaje": "ninguno",
+        "evidencia": ""
+       },
+       {
+        "n": 5,
+        "viaje": "ninguno",
+        "evidencia": ""
+       },
+       {
+        "n": 6,
+        "viaje": "ninguno",
+        "evidencia": ""
+       },
+       {
+        "n": 7,
+        "viaje": "ninguno",
+        "evidencia": ""
+       },
+       {
+        "n": 8,
+        "viaje": "T1 26 8",
+        "evidencia": "Cartagena"
+       },
+       {
+        "n": 8,
+        "viaje": "T1 26 20",
+        "evidencia": "Cartagena"
+       },
+       {
+        "n": 9,
+        "viaje": "ninguno",
+        "evidencia": ""
+       },
+       {
+        "n": 11,
+        "viaje": "ninguno",
+        "evidencia": ""
+       }
+      ]
+     },
+     {
+      "asignaciones": [
+       {
+        "n": 1,
+        "viaje": "T1 26 9",
+        "evidencia": "San Andrés"
+       },
+       {
+        "n": 2,
+        "viaje": "T1 26 9",
+        "evidencia": "San Andrés"
+       },
+       {
+        "n": 3,
+        "viaje": "ninguno",
+        "evidencia": ""
+       },
+       {
+        "n": 5,
+        "viaje": "ninguno",
+        "evidencia": ""
+       },
+       {
+        "n": 6,
+        "viaje": "ninguno",
+        "evidencia": ""
+       },
+       {
+        "n": 7,
+        "viaje": "ninguno",
+        "evidencia": ""
+       },
+       {
+        "n": 8,
+        "viaje": "T1 26 8",
+        "evidencia": "Cartagena"
+       },
+       {
+        "n": 8,
+        "viaje": "T1 26 20",
+        "evidencia": "Cartagena"
+       },
+       {
+        "n": 9,
+        "viaje": "ninguno",
+        "evidencia": ""
+       },
+       {
+        "n": 11,
+        "viaje": "ninguno",
+        "evidencia": ""
+       }
+      ]
+     },
+     {
+      "asignaciones": [
+       {
+        "n": 1,
+        "viaje": "T1 26 9",
+        "evidencia": "San Andrés"
+       },
+       {
+        "n": 2,
+        "viaje": "T1 26 9",
+        "evidencia": "San Andrés"
+       },
+       {
+        "n": 3,
+        "viaje": "ninguno",
+        "evidencia": ""
+       },
+       {
+        "n": 5,
+        "viaje": "ninguno",
+        "evidencia": ""
+       },
+       {
+        "n": 6,
+        "viaje": "ninguno",
+        "evidencia": ""
+       },
+       {
+        "n": 7,
+        "viaje": "ninguno",
+        "evidencia": ""
+       },
+       {
+        "n": 8,
+        "viaje": "T1 26 8",
+        "evidencia": "Cartagena"
+       },
+       {
+        "n": 8,
+        "viaje": "T1 26 20",
+        "evidencia": "Cartagena"
+       },
+       {
+        "n": 9,
+        "viaje": "ninguno",
+        "evidencia": ""
+       },
+       {
+        "n": 11,
+        "viaje": "ninguno",
+        "evidencia": ""
+       }
+      ]
+     },
+     {
+      "asignaciones": [
+       {
+        "n": 1,
+        "viaje": "T1 26 9",
+        "evidencia": "San Andrés"
+       },
+       {
+        "n": 2,
+        "viaje": "T1 26 9",
+        "evidencia": "San Andrés"
+       },
+       {
+        "n": 3,
+        "viaje": "ninguno",
+        "evidencia": ""
+       },
+       {
+        "n": 5,
+        "viaje": "ninguno",
+        "evidencia": ""
+       },
+       {
+        "n": 6,
+        "viaje": "ninguno",
+        "evidencia": ""
+       },
+       {
+        "n": 7,
+        "viaje": "ninguno",
+        "evidencia": ""
+       },
+       {
+        "n": 8,
+        "viaje": "T1 26 8",
+        "evidencia": "Cartagena"
+       },
+       {
+        "n": 8,
+        "viaje": "T1 26 20",
+        "evidencia": "Cartagena"
+       },
+       {
+        "n": 9,
+        "viaje": "ninguno",
+        "evidencia": ""
+       },
+       {
+        "n": 11,
+        "viaje": "ninguno",
+        "evidencia": ""
+       }
+      ]
+     },
+     {
+      "asignaciones": [
+       {
+        "n": 1,
+        "viaje": "T1 26 9",
+        "evidencia": "San Andrés"
+       },
+       {
+        "n": 2,
+        "viaje": "T1 26 9",
+        "evidencia": "San Andrés"
+       },
+       {
+        "n": 3,
+        "viaje": "ninguno",
+        "evidencia": ""
+       },
+       {
+        "n": 5,
+        "viaje": "ninguno",
+        "evidencia": ""
+       },
+       {
+        "n": 6,
+        "viaje": "ninguno",
+        "evidencia": ""
+       },
+       {
+        "n": 7,
+        "viaje": "ninguno",
+        "evidencia": ""
+       },
+       {
+        "n": 8,
+        "viaje": "T1 26 8",
+        "evidencia": "Cartagena"
+       },
+       {
+        "n": 9,
+        "viaje": "T1 26 8",
+        "evidencia": "Cartagena"
+       },
+       {
+        "n": 11,
+        "viaje": "ninguno",
+        "evidencia": ""
+       }
+      ]
+     },
+     {
+      "asignaciones": [
+       {
+        "n": 1,
+        "viaje": "T1 26 9",
+        "evidencia": "San Andrés"
+       },
+       {
+        "n": 2,
+        "viaje": "T1 26 9",
+        "evidencia": "mi esposo y yo"
+       },
+       {
+        "n": 3,
+        "viaje": "T1 26 9",
+        "evidencia": "Hotel 4 estrellas con desayuno"
+       },
+       {
+        "n": 5,
+        "viaje": "ninguno",
+        "evidencia": "Tati, la maleta de bodega para"
+       },
+       {
+        "n": 6,
+        "viaje": "ninguno",
+        "evidencia": "Hotel 5 estrellas todo incluid"
+       },
+       {
+        "n": 7,
+        "viaje": "ninguno",
+        "evidencia": "Los niños ya tienen pasaporte"
+       },
+       {
+        "n": 8,
+        "viaje": "T1 26 8",
+        "evidencia": "Cartagena somos 4 adultos y un"
+       },
+       {
+        "n": 9,
+        "viaje": "T1 26 8",
+        "evidencia": "del 8 al 12 de noviembre, sali"
+       },
+       {
+        "n": 11,
+        "viaje": "ninguno",
+        "evidencia": "hotel tres estrellas está bien"
+       }
+      ]
+     },
+     {
+      "asignaciones": [
+       {
+        "n": 1,
+        "viaje": "T1 26 9",
+        "evidencia": "San Andrés"
+       },
+       {
+        "n": 2,
+        "viaje": "T1 26 9",
+        "evidencia": "San Andrés"
+       },
+       {
+        "n": 3,
+        "viaje": "ninguno",
+        "evidencia": ""
+       },
+       {
+        "n": 5,
+        "viaje": "ninguno",
+        "evidencia": ""
+       },
+       {
+        "n": 6,
+        "viaje": "ninguno",
+        "evidencia": ""
+       },
+       {
+        "n": 7,
+        "viaje": "ninguno",
+        "evidencia": ""
+       },
+       {
+        "n": 8,
+        "viaje": "T1 26 8",
+        "evidencia": "Cartagena"
+       },
+       {
+        "n": 8,
+        "viaje": "T1 26 20",
+        "evidencia": "Cartagena"
+       },
+       {
+        "n": 9,
+        "viaje": "ninguno",
+        "evidencia": ""
+       },
+       {
+        "n": 11,
+        "viaje": "ninguno",
+        "evidencia": ""
+       }
+      ]
+     }
+    ]
+   },
+   {
+    "viajes": [
+     {
+      "id": "n11",
+      "codigo": "T1 26 11",
+      "cliente": "CAROLINA RUIZ",
+      "destino": "PUNTA CANA"
+     },
+     {
+      "id": "n9",
+      "codigo": "T1 26 9",
+      "cliente": "LUISA MEJÍA",
+      "destino": "SAN ANDRÉS"
+     },
+     {
+      "id": "n8",
+      "codigo": "T1 26 8",
+      "cliente": "JORGE PÉREZ",
+      "destino": "CARTAGENA"
+     },
+     {
+      "id": "n20",
+      "codigo": "T1 26 20",
+      "cliente": "PEDRO GÓMEZ",
+      "destino": "CARTAGENA"
+     },
+     {
+      "id": "n21",
+      "codigo": "T1 26 21",
+      "cliente": "ANDRÉS GIL",
+      "destino": null
+     }
+    ],
+    "mensajes": [
+     {
+      "en": "2026-10-01T16:20:00Z",
+      "texto": "Luisa",
+      "reenviado": false,
+      "tipo": "text",
+      "encabezado": true,
+      "verdad": null
+     },
+     {
+      "en": "2026-10-01T16:20:30Z",
+      "texto": "Tati una pregunta, ¿el vuelo incluye maleta?",
+      "reenviado": true,
+      "tipo": "text",
+      "encabezado": false,
+      "verdad": "T1 26 9"
+     },
+     {
+      "en": "2026-10-01T16:21:00Z",
+      "texto": "Mejor maleta de mano, viajamos ligeros",
+      "reenviado": true,
+      "tipo": "text",
+      "encabezado": false,
+      "verdad": "T1 26 9"
+     },
+     {
+      "en": "2026-10-01T16:22:00Z",
+      "texto": "PUNTA CANA desde $2.5M, salidas 5 y 12 de diciembre, todo incluido ✈️",
+      "reenviado": true,
+      "tipo": "text",
+      "encabezado": false,
+      "verdad": null
+     },
+     {
+      "en": "2026-10-01T16:22:30Z",
+      "texto": "Mira esto que vi, ¿ustedes tienen algo así para San Andrés?",
+      "reenviado": true,
+      "tipo": "text",
+      "encabezado": false,
+      "verdad": "T1 26 9"
+     },
+     {
+      "en": "2026-10-01T16:25:00Z",
+      "texto": "ojo, esta señora es muy tacaña y se queja de todo",
+      "reenviado": false,
+      "tipo": "text",
+      "encabezado": false,
+      "verdad": null
+     },
+     {
+      "en": "2026-10-01T16:30:00Z",
+      "texto": "abono reserva San Andrés",
+      "reenviado": false,
+      "tipo": "image",
+      "encabezado": false,
+      "verdad": null
+     },
+     {
+      "en": "2026-10-01T16:40:00Z",
+      "texto": "la de cancún",
+      "reenviado": false,
+      "tipo": "text",
+      "encabezado": true,
+      "verdad": null
+     },
+     {
+      "en": "2026-10-01T16:40:30Z",
+      "texto": "Tati, ¿al final cuánto quedaría? Ya tengo vacaciones aprobadas",
+      "reenviado": true,
+      "tipo": "text",
+      "encabezado": false,
+      "verdad": "T1 26 21"
+     },
+     {
+      "en": "2026-10-01T16:41:00Z",
+      "texto": "Somos 2 adultos, confirmo",
+      "reenviado": true,
+      "tipo": "text",
+      "encabezado": false,
+      "verdad": "T1 26 21"
+     }
+    ],
+    "modelos": [
+     {
+      "asignaciones": [
+       {
+        "n": 2,
+        "viaje": "ninguno",
+        "evidencia": ""
+       },
+       {
+        "n": 3,
+        "viaje": "ninguno",
+        "evidencia": ""
+       },
+       {
+        "n": 4,
+        "viaje": "T1 26 11",
+        "evidencia": "PUNTA CANA"
+       },
+       {
+        "n": 5,
+        "viaje": "T1 26 9",
+        "evidencia": "San Andrés"
+       },
+       {
+        "n": 6,
+        "viaje": "ninguno",
+        "evidencia": ""
+       },
+       {
+        "n": 7,
+        "viaje": "T1 26 9",
+        "evidencia": "San Andrés"
+       },
+       {
+        "n": 8,
+        "viaje": "ninguno",
+        "evidencia": ""
+       },
+       {
+        "n": 9,
+        "viaje": "ninguno",
+        "evidencia": ""
+       },
+       {
+        "n": 10,
+        "viaje": "ninguno",
+        "evidencia": ""
+       }
+      ]
+     },
+     {
+      "asignaciones": [
+       {
+        "n": 2,
+        "viaje": "ninguno",
+        "evidencia": ""
+       },
+       {
+        "n": 3,
+        "viaje": "ninguno",
+        "evidencia": ""
+       },
+       {
+        "n": 4,
+        "viaje": "T1 26 11",
+        "evidencia": "PUNTA CANA"
+       },
+       {
+        "n": 5,
+        "viaje": "T1 26 9",
+        "evidencia": "San Andrés"
+       },
+       {
+        "n": 6,
+        "viaje": "ninguno",
+        "evidencia": ""
+       },
+       {
+        "n": 7,
+        "viaje": "T1 26 9",
+        "evidencia": "San Andrés"
+       },
+       {
+        "n": 8,
+        "viaje": "ninguno",
+        "evidencia": ""
+       },
+       {
+        "n": 9,
+        "viaje": "ninguno",
+        "evidencia": ""
+       },
+       {
+        "n": 10,
+        "viaje": "ninguno",
+        "evidencia": ""
+       }
+      ]
+     },
+     {
+      "asignaciones": [
+       {
+        "n": 2,
+        "viaje": "ninguno",
+        "evidencia": ""
+       },
+       {
+        "n": 3,
+        "viaje": "ninguno",
+        "evidencia": ""
+       },
+       {
+        "n": 4,
+        "viaje": "T1 26 11",
+        "evidencia": "PUNTA CANA"
+       },
+       {
+        "n": 5,
+        "viaje": "T1 26 9",
+        "evidencia": "San Andrés"
+       },
+       {
+        "n": 6,
+        "viaje": "ninguno",
+        "evidencia": ""
+       },
+       {
+        "n": 7,
+        "viaje": "T1 26 9",
+        "evidencia": "San Andrés"
+       },
+       {
+        "n": 8,
+        "viaje": "ninguno",
+        "evidencia": ""
+       },
+       {
+        "n": 9,
+        "viaje": "ninguno",
+        "evidencia": ""
+       },
+       {
+        "n": 10,
+        "viaje": "ninguno",
+        "evidencia": ""
+       }
+      ]
+     },
+     {
+      "asignaciones": [
+       {
+        "n": 2,
+        "viaje": "ninguno",
+        "evidencia": ""
+       },
+       {
+        "n": 3,
+        "viaje": "ninguno",
+        "evidencia": ""
+       },
+       {
+        "n": 4,
+        "viaje": "T1 26 11",
+        "evidencia": "PUNTA CANA"
+       },
+       {
+        "n": 5,
+        "viaje": "T1 26 9",
+        "evidencia": "San Andrés"
+       },
+       {
+        "n": 6,
+        "viaje": "ninguno",
+        "evidencia": ""
+       },
+       {
+        "n": 7,
+        "viaje": "T1 26 9",
+        "evidencia": "San Andrés"
+       },
+       {
+        "n": 8,
+        "viaje": "ninguno",
+        "evidencia": ""
+       },
+       {
+        "n": 9,
+        "viaje": "ninguno",
+        "evidencia": ""
+       },
+       {
+        "n": 10,
+        "viaje": "ninguno",
+        "evidencia": ""
+       }
+      ]
+     },
+     {
+      "asignaciones": [
+       {
+        "n": 2,
+        "viaje": "ninguno",
+        "evidencia": ""
+       },
+       {
+        "n": 3,
+        "viaje": "ninguno",
+        "evidencia": ""
+       },
+       {
+        "n": 4,
+        "viaje": "T1 26 11",
+        "evidencia": "PUNTA CANA"
+       },
+       {
+        "n": 5,
+        "viaje": "T1 26 9",
+        "evidencia": "San Andrés"
+       },
+       {
+        "n": 6,
+        "viaje": "ninguno",
+        "evidencia": ""
+       },
+       {
+        "n": 7,
+        "viaje": "T1 26 9",
+        "evidencia": "San Andrés"
+       },
+       {
+        "n": 8,
+        "viaje": "ninguno",
+        "evidencia": ""
+       },
+       {
+        "n": 9,
+        "viaje": "ninguno",
+        "evidencia": ""
+       },
+       {
+        "n": 10,
+        "viaje": "ninguno",
+        "evidencia": ""
+       }
+      ]
+     },
+     {
+      "asignaciones": [
+       {
+        "n": 2,
+        "viaje": "ninguno",
+        "evidencia": ""
+       },
+       {
+        "n": 3,
+        "viaje": "ninguno",
+        "evidencia": ""
+       },
+       {
+        "n": 4,
+        "viaje": "T1 26 11",
+        "evidencia": "PUNTA CANA"
+       },
+       {
+        "n": 5,
+        "viaje": "T1 26 9",
+        "evidencia": "San Andrés"
+       },
+       {
+        "n": 6,
+        "viaje": "ninguno",
+        "evidencia": ""
+       },
+       {
+        "n": 7,
+        "viaje": "T1 26 9",
+        "evidencia": "San Andrés"
+       },
+       {
+        "n": 8,
+        "viaje": "ninguno",
+        "evidencia": ""
+       },
+       {
+        "n": 9,
+        "viaje": "ninguno",
+        "evidencia": ""
+       },
+       {
+        "n": 10,
+        "viaje": "ninguno",
+        "evidencia": ""
+       }
+      ]
+     },
+     {
+      "asignaciones": [
+       {
+        "n": 2,
+        "viaje": "ninguno",
+        "evidencia": ""
+       },
+       {
+        "n": 3,
+        "viaje": "ninguno",
+        "evidencia": ""
+       },
+       {
+        "n": 4,
+        "viaje": "T1 26 11",
+        "evidencia": "PUNTA CANA"
+       },
+       {
+        "n": 5,
+        "viaje": "T1 26 9",
+        "evidencia": "San Andrés"
+       },
+       {
+        "n": 6,
+        "viaje": "ninguno",
+        "evidencia": ""
+       },
+       {
+        "n": 7,
+        "viaje": "T1 26 9",
+        "evidencia": "San Andrés"
+       },
+       {
+        "n": 8,
+        "viaje": "ninguno",
+        "evidencia": ""
+       },
+       {
+        "n": 9,
+        "viaje": "ninguno",
+        "evidencia": ""
+       },
+       {
+        "n": 10,
+        "viaje": "ninguno",
+        "evidencia": ""
+       }
+      ]
+     },
+     {
+      "asignaciones": [
+       {
+        "n": 2,
+        "viaje": "ninguno",
+        "evidencia": ""
+       },
+       {
+        "n": 3,
+        "viaje": "ninguno",
+        "evidencia": ""
+       },
+       {
+        "n": 4,
+        "viaje": "T1 26 11",
+        "evidencia": "PUNTA CANA"
+       },
+       {
+        "n": 5,
+        "viaje": "T1 26 9",
+        "evidencia": "San Andrés"
+       },
+       {
+        "n": 6,
+        "viaje": "ninguno",
+        "evidencia": ""
+       },
+       {
+        "n": 7,
+        "viaje": "T1 26 9",
+        "evidencia": "San Andrés"
+       },
+       {
+        "n": 8,
+        "viaje": "ninguno",
+        "evidencia": ""
+       },
+       {
+        "n": 9,
+        "viaje": "ninguno",
+        "evidencia": ""
+       },
+       {
+        "n": 10,
+        "viaje": "ninguno",
+        "evidencia": ""
+       }
+      ]
+     },
+     {
+      "asignaciones": [
+       {
+        "n": 2,
+        "viaje": "ninguno",
+        "evidencia": ""
+       },
+       {
+        "n": 3,
+        "viaje": "ninguno",
+        "evidencia": ""
+       },
+       {
+        "n": 4,
+        "viaje": "T1 26 11",
+        "evidencia": "PUNTA CANA"
+       },
+       {
+        "n": 5,
+        "viaje": "T1 26 9",
+        "evidencia": "San Andrés"
+       },
+       {
+        "n": 6,
+        "viaje": "ninguno",
+        "evidencia": ""
+       },
+       {
+        "n": 7,
+        "viaje": "T1 26 9",
+        "evidencia": "San Andrés"
+       },
+       {
+        "n": 8,
+        "viaje": "ninguno",
+        "evidencia": ""
+       },
+       {
+        "n": 9,
+        "viaje": "ninguno",
+        "evidencia": ""
+       },
+       {
+        "n": 10,
+        "viaje": "ninguno",
+        "evidencia": ""
+       }
+      ]
+     },
+     {
+      "asignaciones": [
+       {
+        "n": 2,
+        "viaje": "ninguno",
+        "evidencia": ""
+       },
+       {
+        "n": 3,
+        "viaje": "ninguno",
+        "evidencia": ""
+       },
+       {
+        "n": 4,
+        "viaje": "T1 26 11",
+        "evidencia": "PUNTA CANA"
+       },
+       {
+        "n": 5,
+        "viaje": "T1 26 9",
+        "evidencia": "San Andrés"
+       },
+       {
+        "n": 6,
+        "viaje": "ninguno",
+        "evidencia": ""
+       },
+       {
+        "n": 7,
+        "viaje": "T1 26 9",
+        "evidencia": "San Andrés"
+       },
+       {
+        "n": 8,
+        "viaje": "ninguno",
+        "evidencia": ""
+       },
+       {
+        "n": 9,
+        "viaje": "ninguno",
+        "evidencia": ""
+       },
+       {
+        "n": 10,
+        "viaje": "ninguno",
+        "evidencia": ""
+       }
+      ]
+     }
+    ]
+   },
+   {
+    "viajes": [
+     {
+      "id": "n11",
+      "codigo": "T1 26 11",
+      "cliente": "CAROLINA RUIZ",
+      "destino": "PUNTA CANA"
+     },
+     {
+      "id": "n9",
+      "codigo": "T1 26 9",
+      "cliente": "LUISA MEJÍA",
+      "destino": "SAN ANDRÉS"
+     },
+     {
+      "id": "n8",
+      "codigo": "T1 26 8",
+      "cliente": "JORGE PÉREZ",
+      "destino": "CARTAGENA"
+     },
+     {
+      "id": "n20",
+      "codigo": "T1 26 20",
+      "cliente": "PEDRO GÓMEZ",
+      "destino": "CARTAGENA"
+     },
+     {
+      "id": "n21",
+      "codigo": "T1 26 21",
+      "cliente": "ANDRÉS GIL",
+      "destino": null
+     }
+    ],
+    "mensajes": [
+     {
+      "en": "2026-10-01T19:00:00Z",
+      "texto": "Hola Tati, soy Carolina Ruiz, una cosa: mi suegra necesita silla de ruedas en el aeropuerto",
+      "reenviado": true,
+      "tipo": "text",
+      "encabezado": false,
+      "verdad": "T1 26 11"
+     },
+     {
+      "en": "2026-10-01T19:00:40Z",
+      "texto": "Y si se puede habitación con dos camas dobles",
+      "reenviado": true,
+      "tipo": "text",
+      "encabezado": false,
+      "verdad": "T1 26 11"
+     },
+     {
+      "en": "2026-10-01T19:15:00Z",
+      "texto": "Buenas, somos los de Cartagena, el niño tiene 7 años y ya tiene registro civil",
+      "reenviado": true,
+      "tipo": "text",
+      "encabezado": false,
+      "verdad": "T1 26 8"
+     },
+     {
+      "en": "2026-10-01T19:16:00Z",
+      "texto": "Queremos plan todo incluido también",
+      "reenviado": true,
+      "tipo": "text",
+      "encabezado": false,
+      "verdad": "T1 26 8"
+     },
+     {
+      "en": "2026-10-01T19:20:00Z",
+      "texto": "Jorge",
+      "reenviado": false,
+      "tipo": "text",
+      "encabezado": true,
+      "verdad": null
+     },
+     {
+      "en": "2026-10-01T19:20:30Z",
+      "texto": "Tati, presupuesto como 8 millones",
+      "reenviado": true,
+      "tipo": "text",
+      "encabezado": false,
+      "verdad": "T1 26 8"
+     },
+     {
+      "en": "2026-10-01T19:21:00Z",
+      "texto": "Hola Tati, habla Luisa, al final mi hermana también se va con nosotros",
+      "reenviado": true,
+      "tipo": "audio",
+      "encabezado": false,
+      "verdad": "T1 26 9"
+     },
+     {
+      "en": "2026-10-01T19:21:30Z",
+      "texto": "ella sale desde Bogotá",
+      "reenviado": true,
+      "tipo": "text",
+      "encabezado": false,
+      "verdad": "T1 26 9"
+     },
+     {
+      "en": "2026-10-01T19:30:00Z",
+      "texto": "Lo de Carolina va para el 28 y lo de Jorge para el 8",
+      "reenviado": false,
+      "tipo": "text",
+      "encabezado": false,
+      "verdad": null
+     }
+    ],
+    "modelos": [
+     {
+      "asignaciones": [
+       {
+        "n": 1,
+        "viaje": "T1 26 11",
+        "evidencia": "Carolina Ruiz"
+       },
+       {
+        "n": 2,
+        "viaje": "T1 26 11",
+        "evidencia": "habitación con dos camas doble"
+       },
+       {
+        "n": 3,
+        "viaje": "T1 26 8",
+        "evidencia": "Cartagena"
+       },
+       {
+        "n": 4,
+        "viaje": "T1 26 8",
+        "evidencia": "todo incluido"
+       },
+       {
+        "n": 6,
+        "viaje": "ninguno",
+        "evidencia": "8 millones"
+       },
+       {
+        "n": 7,
+        "viaje": "T1 26 9",
+        "evidencia": "Luisa"
+       },
+       {
+        "n": 8,
+        "viaje": "T1 26 9",
+        "evidencia": "ella sale desde Bogotá"
+       },
+       {
+        "n": 9,
+        "viaje": "T1 26 11",
+        "evidencia": "Carolina"
+       }
+      ]
+     },
+     {
+      "asignaciones": [
+       {
+        "n": 1,
+        "viaje": "T1 26 11",
+        "evidencia": "Carolina Ruiz"
+       },
+       {
+        "n": 2,
+        "viaje": "T1 26 11",
+        "evidencia": "habitación con dos camas doble"
+       },
+       {
+        "n": 3,
+        "viaje": "T1 26 8",
+        "evidencia": "Cartagena"
+       },
+       {
+        "n": 4,
+        "viaje": "T1 26 8",
+        "evidencia": "todo incluido"
+       },
+       {
+        "n": 6,
+        "viaje": "ninguno",
+        "evidencia": "8 millones"
+       },
+       {
+        "n": 7,
+        "viaje": "T1 26 9",
+        "evidencia": "Luisa"
+       },
+       {
+        "n": 8,
+        "viaje": "T1 26 9",
+        "evidencia": "ella sale desde Bogotá"
+       },
+       {
+        "n": 9,
+        "viaje": "T1 26 11",
+        "evidencia": "Carolina"
+       }
+      ]
+     },
+     {
+      "asignaciones": [
+       {
+        "n": 1,
+        "viaje": "T1 26 11",
+        "evidencia": "Carolina Ruiz"
+       },
+       {
+        "n": 2,
+        "viaje": "T1 26 11",
+        "evidencia": "habitación con dos camas doble"
+       },
+       {
+        "n": 3,
+        "viaje": "T1 26 8",
+        "evidencia": "Cartagena"
+       },
+       {
+        "n": 4,
+        "viaje": "T1 26 8",
+        "evidencia": "todo incluido"
+       },
+       {
+        "n": 6,
+        "viaje": "ninguno",
+        "evidencia": "8 millones"
+       },
+       {
+        "n": 7,
+        "viaje": "T1 26 9",
+        "evidencia": "Luisa"
+       },
+       {
+        "n": 8,
+        "viaje": "T1 26 9",
+        "evidencia": "ella sale desde Bogotá"
+       },
+       {
+        "n": 9,
+        "viaje": "T1 26 11",
+        "evidencia": "Carolina"
+       }
+      ]
+     },
+     {
+      "asignaciones": [
+       {
+        "n": 1,
+        "viaje": "T1 26 11",
+        "evidencia": "Carolina Ruiz"
+       },
+       {
+        "n": 2,
+        "viaje": "T1 26 11",
+        "evidencia": "habitación con dos camas doble"
+       },
+       {
+        "n": 3,
+        "viaje": "T1 26 8",
+        "evidencia": "Cartagena"
+       },
+       {
+        "n": 4,
+        "viaje": "T1 26 8",
+        "evidencia": "todo incluido"
+       },
+       {
+        "n": 6,
+        "viaje": "ninguno",
+        "evidencia": "8 millones"
+       },
+       {
+        "n": 7,
+        "viaje": "T1 26 9",
+        "evidencia": "Luisa"
+       },
+       {
+        "n": 8,
+        "viaje": "T1 26 9",
+        "evidencia": "ella sale desde Bogotá"
+       },
+       {
+        "n": 9,
+        "viaje": "T1 26 11",
+        "evidencia": "Carolina"
+       }
+      ]
+     },
+     {
+      "asignaciones": [
+       {
+        "n": 1,
+        "viaje": "T1 26 11",
+        "evidencia": "Carolina Ruiz"
+       },
+       {
+        "n": 2,
+        "viaje": "T1 26 11",
+        "evidencia": "habitación con dos camas doble"
+       },
+       {
+        "n": 3,
+        "viaje": "T1 26 8",
+        "evidencia": "Cartagena"
+       },
+       {
+        "n": 4,
+        "viaje": "T1 26 8",
+        "evidencia": "todo incluido"
+       },
+       {
+        "n": 6,
+        "viaje": "ninguno",
+        "evidencia": "8 millones"
+       },
+       {
+        "n": 7,
+        "viaje": "T1 26 9",
+        "evidencia": "Luisa"
+       },
+       {
+        "n": 8,
+        "viaje": "T1 26 9",
+        "evidencia": "ella sale desde Bogotá"
+       },
+       {
+        "n": 9,
+        "viaje": "T1 26 11",
+        "evidencia": "Carolina"
+       }
+      ]
+     },
+     {
+      "asignaciones": [
+       {
+        "n": 1,
+        "viaje": "T1 26 11",
+        "evidencia": "Carolina Ruiz"
+       },
+       {
+        "n": 2,
+        "viaje": "T1 26 11",
+        "evidencia": "habitación con dos camas doble"
+       },
+       {
+        "n": 3,
+        "viaje": "T1 26 8",
+        "evidencia": "Cartagena"
+       },
+       {
+        "n": 4,
+        "viaje": "T1 26 8",
+        "evidencia": "todo incluido"
+       },
+       {
+        "n": 6,
+        "viaje": "ninguno",
+        "evidencia": "8 millones"
+       },
+       {
+        "n": 7,
+        "viaje": "T1 26 9",
+        "evidencia": "Luisa"
+       },
+       {
+        "n": 8,
+        "viaje": "T1 26 9",
+        "evidencia": "ella sale desde Bogotá"
+       },
+       {
+        "n": 9,
+        "viaje": "T1 26 11",
+        "evidencia": "Carolina"
+       }
+      ]
+     },
+     {
+      "asignaciones": [
+       {
+        "n": 1,
+        "viaje": "T1 26 11",
+        "evidencia": "Carolina Ruiz"
+       },
+       {
+        "n": 2,
+        "viaje": "T1 26 11",
+        "evidencia": "habitación con dos camas doble"
+       },
+       {
+        "n": 3,
+        "viaje": "T1 26 8",
+        "evidencia": "Cartagena"
+       },
+       {
+        "n": 4,
+        "viaje": "T1 26 8",
+        "evidencia": "todo incluido"
+       },
+       {
+        "n": 6,
+        "viaje": "ninguno",
+        "evidencia": "8 millones"
+       },
+       {
+        "n": 7,
+        "viaje": "T1 26 9",
+        "evidencia": "Luisa"
+       },
+       {
+        "n": 8,
+        "viaje": "T1 26 9",
+        "evidencia": "ella sale desde Bogotá"
+       },
+       {
+        "n": 9,
+        "viaje": "T1 26 11",
+        "evidencia": "Carolina"
+       }
+      ]
+     },
+     {
+      "asignaciones": [
+       {
+        "n": 1,
+        "viaje": "T1 26 11",
+        "evidencia": "Carolina Ruiz"
+       },
+       {
+        "n": 2,
+        "viaje": "T1 26 11",
+        "evidencia": "habitación con dos camas doble"
+       },
+       {
+        "n": 3,
+        "viaje": "T1 26 8",
+        "evidencia": "Cartagena"
+       },
+       {
+        "n": 4,
+        "viaje": "T1 26 8",
+        "evidencia": "todo incluido"
+       },
+       {
+        "n": 6,
+        "viaje": "ninguno",
+        "evidencia": "8 millones"
+       },
+       {
+        "n": 7,
+        "viaje": "T1 26 9",
+        "evidencia": "Luisa"
+       },
+       {
+        "n": 8,
+        "viaje": "T1 26 9",
+        "evidencia": "ella sale desde Bogotá"
+       },
+       {
+        "n": 9,
+        "viaje": "T1 26 11",
+        "evidencia": "Carolina"
+       }
+      ]
+     },
+     {
+      "asignaciones": [
+       {
+        "n": 1,
+        "viaje": "T1 26 11",
+        "evidencia": "Carolina Ruiz"
+       },
+       {
+        "n": 2,
+        "viaje": "T1 26 11",
+        "evidencia": "habitación con dos camas doble"
+       },
+       {
+        "n": 3,
+        "viaje": "T1 26 8",
+        "evidencia": "Cartagena"
+       },
+       {
+        "n": 4,
+        "viaje": "T1 26 8",
+        "evidencia": "todo incluido"
+       },
+       {
+        "n": 6,
+        "viaje": "ninguno",
+        "evidencia": "8 millones"
+       },
+       {
+        "n": 7,
+        "viaje": "T1 26 9",
+        "evidencia": "Luisa"
+       },
+       {
+        "n": 8,
+        "viaje": "T1 26 9",
+        "evidencia": "ella sale desde Bogotá"
+       },
+       {
+        "n": 9,
+        "viaje": "T1 26 11",
+        "evidencia": "Carolina"
+       }
+      ]
+     },
+     {
+      "asignaciones": [
+       {
+        "n": 1,
+        "viaje": "T1 26 11",
+        "evidencia": "Carolina Ruiz"
+       },
+       {
+        "n": 2,
+        "viaje": "T1 26 11",
+        "evidencia": "habitación con dos camas doble"
+       },
+       {
+        "n": 3,
+        "viaje": "T1 26 8",
+        "evidencia": "Cartagena"
+       },
+       {
+        "n": 4,
+        "viaje": "T1 26 8",
+        "evidencia": "todo incluido"
+       },
+       {
+        "n": 6,
+        "viaje": "ninguno",
+        "evidencia": "8 millones"
+       },
+       {
+        "n": 7,
+        "viaje": "T1 26 9",
+        "evidencia": "Luisa"
+       },
+       {
+        "n": 8,
+        "viaje": "T1 26 9",
+        "evidencia": "ella sale desde Bogotá"
+       },
+       {
+        "n": 9,
+        "viaje": "T1 26 11",
+        "evidencia": "Carolina"
+       }
+      ]
+     }
+    ]
+   },
+   {
+    "viajes": [
+     {
+      "id": "n11",
+      "codigo": "T1 26 11",
+      "cliente": "CAROLINA RUIZ",
+      "destino": "PUNTA CANA"
+     },
+     {
+      "id": "n9",
+      "codigo": "T1 26 9",
+      "cliente": "LUISA MEJÍA",
+      "destino": "SAN ANDRÉS"
+     },
+     {
+      "id": "n8",
+      "codigo": "T1 26 8",
+      "cliente": "JORGE PÉREZ",
+      "destino": "CARTAGENA"
+     },
+     {
+      "id": "n20",
+      "codigo": "T1 26 20",
+      "cliente": "PEDRO GÓMEZ",
+      "destino": "CARTAGENA"
+     },
+     {
+      "id": "n21",
+      "codigo": "T1 26 21",
+      "cliente": "ANDRÉS GIL",
+      "destino": null
+     }
+    ],
+    "mensajes": [
+     {
+      "en": "2026-10-01T21:00:00Z",
+      "texto": "T1 26 9",
+      "reenviado": false,
+      "tipo": "text",
+      "encabezado": true,
+      "verdad": null
+     },
+     {
+      "en": "2026-10-01T21:00:30Z",
+      "texto": "Tati, confirmado: somos 3 adultos con mi hermana",
+      "reenviado": true,
+      "tipo": "text",
+      "encabezado": false,
+      "verdad": "T1 26 9"
+     },
+     {
+      "en": "2026-10-01T21:01:00Z",
+      "texto": "jajaja gracias por la paciencia",
+      "reenviado": true,
+      "tipo": "text",
+      "encabezado": false,
+      "verdad": "T1 26 9"
+     },
+     {
+      "en": "2026-10-01T21:01:30Z",
+      "texto": "",
+      "reenviado": true,
+      "tipo": "sticker",
+      "encabezado": false,
+      "verdad": null
+     },
+     {
+      "en": "2026-10-01T21:05:00Z",
+      "texto": "Hola! soy Andrés otra vez, ¿me confirmas si el hotel tiene club de niños? no, perdón, eso era para mi hermano, olvídalo",
+      "reenviado": true,
+      "tipo": "text",
+      "encabezado": false,
+      "verdad": "T1 26 21"
+     },
+     {
+      "en": "2026-10-01T21:05:30Z",
+      "texto": "Lo que sí: salimos de Barranquilla el 5 de diciembre",
+      "reenviado": true,
+      "tipo": "text",
+      "encabezado": false,
+      "verdad": "T1 26 21"
+     },
+     {
+      "en": "2026-10-01T21:10:00Z",
+      "texto": "Andrés",
+      "reenviado": false,
+      "tipo": "text",
+      "encabezado": true,
+      "verdad": null
+     },
+     {
+      "en": "2026-10-01T21:10:30Z",
+      "texto": "Te confirmo 2 adultos, regreso el 10 de diciembre",
+      "reenviado": true,
+      "tipo": "text",
+      "encabezado": false,
+      "verdad": "T1 26 21"
+     }
+    ],
+    "modelos": [
+     {
+      "asignaciones": [
+       {
+        "n": 2,
+        "viaje": "ninguno",
+        "evidencia": ""
+       },
+       {
+        "n": 3,
+        "viaje": "ninguno",
+        "evidencia": ""
+       },
+       {
+        "n": 5,
+        "viaje": "T1 26 21",
+        "evidencia": "Andrés"
+       },
+       {
+        "n": 6,
+        "viaje": "ninguno",
+        "evidencia": ""
+       },
+       {
+        "n": 8,
+        "viaje": "ninguno",
+        "evidencia": ""
+       }
+      ]
+     },
+     {
+      "asignaciones": [
+       {
+        "n": 2,
+        "viaje": "ninguno",
+        "evidencia": ""
+       },
+       {
+        "n": 3,
+        "viaje": "ninguno",
+        "evidencia": ""
+       },
+       {
+        "n": 5,
+        "viaje": "T1 26 21",
+        "evidencia": "Andrés"
+       },
+       {
+        "n": 6,
+        "viaje": "ninguno",
+        "evidencia": ""
+       },
+       {
+        "n": 8,
+        "viaje": "ninguno",
+        "evidencia": ""
+       }
+      ]
+     },
+     {
+      "asignaciones": [
+       {
+        "n": 2,
+        "viaje": "ninguno",
+        "evidencia": ""
+       },
+       {
+        "n": 3,
+        "viaje": "ninguno",
+        "evidencia": ""
+       },
+       {
+        "n": 5,
+        "viaje": "T1 26 21",
+        "evidencia": "Andrés"
+       },
+       {
+        "n": 6,
+        "viaje": "ninguno",
+        "evidencia": ""
+       },
+       {
+        "n": 8,
+        "viaje": "ninguno",
+        "evidencia": ""
+       }
+      ]
+     },
+     {
+      "asignaciones": [
+       {
+        "n": 2,
+        "viaje": "ninguno",
+        "evidencia": ""
+       },
+       {
+        "n": 3,
+        "viaje": "ninguno",
+        "evidencia": ""
+       },
+       {
+        "n": 5,
+        "viaje": "T1 26 21",
+        "evidencia": "Andrés"
+       },
+       {
+        "n": 6,
+        "viaje": "ninguno",
+        "evidencia": ""
+       },
+       {
+        "n": 8,
+        "viaje": "ninguno",
+        "evidencia": ""
+       }
+      ]
+     },
+     {
+      "asignaciones": [
+       {
+        "n": 2,
+        "viaje": "ninguno",
+        "evidencia": ""
+       },
+       {
+        "n": 3,
+        "viaje": "ninguno",
+        "evidencia": ""
+       },
+       {
+        "n": 5,
+        "viaje": "T1 26 21",
+        "evidencia": "Andrés"
+       },
+       {
+        "n": 6,
+        "viaje": "ninguno",
+        "evidencia": ""
+       },
+       {
+        "n": 8,
+        "viaje": "ninguno",
+        "evidencia": ""
+       }
+      ]
+     },
+     {
+      "asignaciones": [
+       {
+        "n": 2,
+        "viaje": "ninguno",
+        "evidencia": ""
+       },
+       {
+        "n": 3,
+        "viaje": "ninguno",
+        "evidencia": ""
+       },
+       {
+        "n": 5,
+        "viaje": "T1 26 21",
+        "evidencia": "Andrés"
+       },
+       {
+        "n": 6,
+        "viaje": "ninguno",
+        "evidencia": ""
+       },
+       {
+        "n": 8,
+        "viaje": "ninguno",
+        "evidencia": ""
+       }
+      ]
+     },
+     {
+      "asignaciones": [
+       {
+        "n": 2,
+        "viaje": "ninguno",
+        "evidencia": ""
+       },
+       {
+        "n": 3,
+        "viaje": "ninguno",
+        "evidencia": ""
+       },
+       {
+        "n": 5,
+        "viaje": "T1 26 21",
+        "evidencia": "Andrés"
+       },
+       {
+        "n": 6,
+        "viaje": "ninguno",
+        "evidencia": ""
+       },
+       {
+        "n": 8,
+        "viaje": "ninguno",
+        "evidencia": ""
+       }
+      ]
+     },
+     {
+      "asignaciones": [
+       {
+        "n": 2,
+        "viaje": "ninguno",
+        "evidencia": ""
+       },
+       {
+        "n": 3,
+        "viaje": "ninguno",
+        "evidencia": ""
+       },
+       {
+        "n": 5,
+        "viaje": "T1 26 21",
+        "evidencia": "Andrés"
+       },
+       {
+        "n": 6,
+        "viaje": "ninguno",
+        "evidencia": ""
+       },
+       {
+        "n": 8,
+        "viaje": "ninguno",
+        "evidencia": ""
+       }
+      ]
+     },
+     {
+      "asignaciones": [
+       {
+        "n": 2,
+        "viaje": "ninguno",
+        "evidencia": ""
+       },
+       {
+        "n": 3,
+        "viaje": "ninguno",
+        "evidencia": ""
+       },
+       {
+        "n": 5,
+        "viaje": "T1 26 21",
+        "evidencia": "Andrés"
+       },
+       {
+        "n": 6,
+        "viaje": "ninguno",
+        "evidencia": ""
+       },
+       {
+        "n": 8,
+        "viaje": "ninguno",
+        "evidencia": ""
+       }
+      ]
+     },
+     {
+      "asignaciones": [
+       {
+        "n": 2,
+        "viaje": "ninguno",
+        "evidencia": ""
+       },
+       {
+        "n": 3,
+        "viaje": "ninguno",
+        "evidencia": ""
+       },
+       {
+        "n": 5,
+        "viaje": "T1 26 21",
+        "evidencia": "ANDRÉS"
+       },
+       {
+        "n": 6,
+        "viaje": "ninguno",
+        "evidencia": ""
+       },
+       {
+        "n": 8,
+        "viaje": "ninguno",
+        "evidencia": ""
+       }
+      ]
+     }
+    ]
+   },
+   {
+    "viajes": [
+     {
+      "id": "n11",
+      "codigo": "T1 26 11",
+      "cliente": "CAROLINA RUIZ",
+      "destino": "PUNTA CANA"
+     },
+     {
+      "id": "n9",
+      "codigo": "T1 26 9",
+      "cliente": "LUISA MEJÍA",
+      "destino": "SAN ANDRÉS"
+     },
+     {
+      "id": "n8",
+      "codigo": "T1 26 8",
+      "cliente": "JORGE PÉREZ",
+      "destino": "CARTAGENA"
+     },
+     {
+      "id": "n20",
+      "codigo": "T1 26 20",
+      "cliente": "PEDRO GÓMEZ",
+      "destino": "CARTAGENA"
+     },
+     {
+      "id": "n21",
+      "codigo": "T1 26 21",
+      "cliente": "ANDRÉS GIL",
+      "destino": null
+     }
+    ],
+    "mensajes": [
+     {
+      "en": "2026-10-01T22:00:00Z",
+      "texto": "Carolina",
+      "reenviado": false,
+      "tipo": "text",
+      "encabezado": true,
+      "verdad": null
+     },
+     {
+      "en": "2026-10-01T22:00:20Z",
+      "texto": "Tati, ¿el todo incluido tiene bebidas?",
+      "reenviado": true,
+      "tipo": "text",
+      "encabezado": false,
+      "verdad": "T1 26 11"
+     },
+     {
+      "en": "2026-10-01T22:00:40Z",
+      "texto": "Ah y salimos desde Bogotá",
+      "reenviado": true,
+      "tipo": "text",
+      "encabezado": false,
+      "verdad": "T1 26 11"
+     },
+     {
+      "en": "2026-10-01T22:01:00Z",
+      "texto": "Te cuento que el niño de nueve cumple diez en diciembre, por si cambia algo",
+      "reenviado": true,
+      "tipo": "audio",
+      "encabezado": false,
+      "verdad": "T1 26 11"
+     },
+     {
+      "en": "2026-10-01T22:05:00Z",
+      "texto": "Hola Tati, buenas tardes",
+      "reenviado": true,
+      "tipo": "text",
+      "encabezado": false,
+      "verdad": "T1 26 8"
+     },
+     {
+      "en": "2026-10-01T22:05:30Z",
+      "texto": "Para lo de Cartagena, ¿hay que llevar algo del niño?",
+      "reenviado": true,
+      "tipo": "text",
+      "encabezado": false,
+      "verdad": "T1 26 8"
+     },
+     {
+      "en": "2026-10-01T22:10:00Z",
+      "texto": "T1 26 8",
+      "reenviado": false,
+      "tipo": "text",
+      "encabezado": true,
+      "verdad": null
+     },
+     {
+      "en": "2026-10-01T22:10:30Z",
+      "texto": "Tati confirmo 4 adultos y el niño",
+      "reenviado": true,
+      "tipo": "text",
+      "encabezado": false,
+      "verdad": "T1 26 8"
+     },
+     {
+      "en": "2026-10-01T22:12:30Z",
+      "texto": "nos vemos mañana para pagar",
+      "reenviado": true,
+      "tipo": "text",
+      "encabezado": false,
+      "verdad": "T1 26 8"
+     }
+    ],
+    "modelos": [
+     {
+      "asignaciones": [
+       {
+        "n": 2,
+        "viaje": "ninguno",
+        "evidencia": ""
+       },
+       {
+        "n": 3,
+        "viaje": "ninguno",
+        "evidencia": ""
+       },
+       {
+        "n": 4,
+        "viaje": "ninguno",
+        "evidencia": ""
+       },
+       {
+        "n": 5,
+        "viaje": "ninguno",
+        "evidencia": ""
+       },
+       {
+        "n": 6,
+        "viaje": "T1 26 8",
+        "evidencia": "Cartagena"
+       },
+       {
+        "n": 8,
+        "viaje": "T1 26 8",
+        "evidencia": "Cartagena"
+       },
+       {
+        "n": 9,
+        "viaje": "ninguno",
+        "evidencia": ""
+       }
+      ]
+     },
+     {
+      "asignaciones": [
+       {
+        "n": 2,
+        "viaje": "ninguno",
+        "evidencia": ""
+       },
+       {
+        "n": 3,
+        "viaje": "ninguno",
+        "evidencia": ""
+       },
+       {
+        "n": 4,
+        "viaje": "ninguno",
+        "evidencia": ""
+       },
+       {
+        "n": 5,
+        "viaje": "ninguno",
+        "evidencia": ""
+       },
+       {
+        "n": 6,
+        "viaje": "T1 26 8",
+        "evidencia": "Cartagena"
+       },
+       {
+        "n": 8,
+        "viaje": "T1 26 8",
+        "evidencia": "Cartagena"
+       },
+       {
+        "n": 9,
+        "viaje": "ninguno",
+        "evidencia": ""
+       }
+      ]
+     },
+     {
+      "asignaciones": [
+       {
+        "n": 2,
+        "viaje": "ninguno",
+        "evidencia": ""
+       },
+       {
+        "n": 3,
+        "viaje": "ninguno",
+        "evidencia": ""
+       },
+       {
+        "n": 4,
+        "viaje": "ninguno",
+        "evidencia": ""
+       },
+       {
+        "n": 5,
+        "viaje": "ninguno",
+        "evidencia": ""
+       },
+       {
+        "n": 6,
+        "viaje": "T1 26 8",
+        "evidencia": "Cartagena"
+       },
+       {
+        "n": 8,
+        "viaje": "T1 26 8",
+        "evidencia": "Cartagena"
+       },
+       {
+        "n": 9,
+        "viaje": "ninguno",
+        "evidencia": ""
+       }
+      ]
+     },
+     {
+      "asignaciones": [
+       {
+        "n": 2,
+        "viaje": "ninguno",
+        "evidencia": ""
+       },
+       {
+        "n": 3,
+        "viaje": "ninguno",
+        "evidencia": ""
+       },
+       {
+        "n": 4,
+        "viaje": "ninguno",
+        "evidencia": ""
+       },
+       {
+        "n": 5,
+        "viaje": "ninguno",
+        "evidencia": ""
+       },
+       {
+        "n": 6,
+        "viaje": "T1 26 8",
+        "evidencia": "Cartagena"
+       },
+       {
+        "n": 8,
+        "viaje": "T1 26 8",
+        "evidencia": "Cartagena"
+       },
+       {
+        "n": 9,
+        "viaje": "ninguno",
+        "evidencia": ""
+       }
+      ]
+     },
+     {
+      "asignaciones": [
+       {
+        "n": 2,
+        "viaje": "ninguno",
+        "evidencia": ""
+       },
+       {
+        "n": 3,
+        "viaje": "ninguno",
+        "evidencia": ""
+       },
+       {
+        "n": 4,
+        "viaje": "ninguno",
+        "evidencia": ""
+       },
+       {
+        "n": 5,
+        "viaje": "ninguno",
+        "evidencia": ""
+       },
+       {
+        "n": 6,
+        "viaje": "T1 26 8",
+        "evidencia": "Cartagena"
+       },
+       {
+        "n": 8,
+        "viaje": "T1 26 8",
+        "evidencia": "Cartagena"
+       },
+       {
+        "n": 9,
+        "viaje": "ninguno",
+        "evidencia": ""
+       }
+      ]
+     },
+     {
+      "asignaciones": [
+       {
+        "n": 2,
+        "viaje": "ninguno",
+        "evidencia": ""
+       },
+       {
+        "n": 3,
+        "viaje": "ninguno",
+        "evidencia": ""
+       },
+       {
+        "n": 4,
+        "viaje": "ninguno",
+        "evidencia": ""
+       },
+       {
+        "n": 5,
+        "viaje": "ninguno",
+        "evidencia": ""
+       },
+       {
+        "n": 6,
+        "viaje": "T1 26 8",
+        "evidencia": "Cartagena"
+       },
+       {
+        "n": 8,
+        "viaje": "T1 26 8",
+        "evidencia": "Cartagena"
+       },
+       {
+        "n": 9,
+        "viaje": "ninguno",
+        "evidencia": ""
+       }
+      ]
+     },
+     {
+      "asignaciones": [
+       {
+        "n": 2,
+        "viaje": "ninguno",
+        "evidencia": ""
+       },
+       {
+        "n": 3,
+        "viaje": "ninguno",
+        "evidencia": ""
+       },
+       {
+        "n": 4,
+        "viaje": "ninguno",
+        "evidencia": ""
+       },
+       {
+        "n": 5,
+        "viaje": "ninguno",
+        "evidencia": ""
+       },
+       {
+        "n": 6,
+        "viaje": "T1 26 8",
+        "evidencia": "Cartagena"
+       },
+       {
+        "n": 8,
+        "viaje": "T1 26 8",
+        "evidencia": "Cartagena"
+       },
+       {
+        "n": 9,
+        "viaje": "ninguno",
+        "evidencia": ""
+       }
+      ]
+     },
+     {
+      "asignaciones": [
+       {
+        "n": 2,
+        "viaje": "ninguno",
+        "evidencia": ""
+       },
+       {
+        "n": 3,
+        "viaje": "ninguno",
+        "evidencia": ""
+       },
+       {
+        "n": 4,
+        "viaje": "ninguno",
+        "evidencia": ""
+       },
+       {
+        "n": 5,
+        "viaje": "ninguno",
+        "evidencia": ""
+       },
+       {
+        "n": 6,
+        "viaje": "T1 26 8",
+        "evidencia": "Cartagena"
+       },
+       {
+        "n": 8,
+        "viaje": "T1 26 8",
+        "evidencia": "Cartagena"
+       },
+       {
+        "n": 9,
+        "viaje": "ninguno",
+        "evidencia": ""
+       }
+      ]
+     },
+     {
+      "asignaciones": [
+       {
+        "n": 2,
+        "viaje": "ninguno",
+        "evidencia": ""
+       },
+       {
+        "n": 3,
+        "viaje": "ninguno",
+        "evidencia": ""
+       },
+       {
+        "n": 4,
+        "viaje": "ninguno",
+        "evidencia": ""
+       },
+       {
+        "n": 5,
+        "viaje": "ninguno",
+        "evidencia": ""
+       },
+       {
+        "n": 6,
+        "viaje": "T1 26 8",
+        "evidencia": "Cartagena"
+       },
+       {
+        "n": 8,
+        "viaje": "T1 26 8",
+        "evidencia": "Cartagena"
+       },
+       {
+        "n": 9,
+        "viaje": "ninguno",
+        "evidencia": ""
+       }
+      ]
+     },
+     {
+      "asignaciones": [
+       {
+        "n": 2,
+        "viaje": "ninguno",
+        "evidencia": ""
+       },
+       {
+        "n": 3,
+        "viaje": "ninguno",
+        "evidencia": ""
+       },
+       {
+        "n": 4,
+        "viaje": "ninguno",
+        "evidencia": ""
+       },
+       {
+        "n": 5,
+        "viaje": "ninguno",
+        "evidencia": ""
+       },
+       {
+        "n": 6,
+        "viaje": "T1 26 8",
+        "evidencia": "Cartagena"
+       },
+       {
+        "n": 8,
+        "viaje": "T1 26 8",
+        "evidencia": "Cartagena"
+       },
+       {
+        "n": 9,
+        "viaje": "ninguno",
+        "evidencia": ""
+       }
+      ]
+     }
+    ]
+   }
+  ]
+ }
+}

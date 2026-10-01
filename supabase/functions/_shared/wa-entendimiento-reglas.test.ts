@@ -227,7 +227,7 @@ describe('el contacto: exacto o se pregunta', () => {
   it('la respuesta: número de la lista, NUEVO, un celular, o no se entiende', () => {
     expect(interpretarRespuestaContacto(' 2 ', [ana, ana2])).toEqual({ tipo: 'elegido', contacto_id: 'b' });
     expect(interpretarRespuestaContacto('3', [ana, ana2])).toEqual({ tipo: 'no_entendida' });
-    expect(interpretarRespuestaContacto('Nuevo', [])).toEqual({ tipo: 'nuevo' });
+    expect(interpretarRespuestaContacto('Nuevo', [])).toEqual({ tipo: 'nuevo', nombre: null });
     expect(interpretarRespuestaContacto('300 999 8877', [])).toEqual({ tipo: 'telefono', telefono: '3009998877' });
     expect(interpretarRespuestaContacto('la de siempre', [ana])).toEqual({ tipo: 'no_entendida' });
   });
@@ -308,6 +308,7 @@ describe('regla 1: un mes, una ventana, una duración o una fecha pasada no son 
   });
 
   it('no pasa: un regreso antes de la salida, la de este mensaje o la que ya estaba', () => {
+    // Mismo mes y antes del día de salida: es un error, no otro año.
     const t = 'salimos el 20 de diciembre y volvemos el 10 de diciembre';
     const s = fecha(t, { valor: '2026-12-20', frase: t }, { valor: '2026-12-10', frase: t });
     expect(s.sugeridos.fecha_regreso).toBeUndefined();
@@ -359,8 +360,10 @@ describe('regla 2: una opción «no definido» solo si el cliente lo dice', () =
 
   it('una opción normal no pide declaración, y sin la marca en la config todo sigue como antes', () => {
     expect(leer('unos quince millones', { presupuesto: { valor: '12m_20m', frase: 'unos quince millones' } }).sugeridos.presupuesto.valor).toBe('12m_20m');
+    // Sin la marca, la opción tampoco entra si la frase no la nombra (QA de #971 v2: el modelo no deduce opciones).
     const sinMarca = CAMPOS.map(c => ({ ...c, opciones: c.opciones!.map(o => ({ value: o.value, label: o.label })) }));
-    expect(validarSalida({ valores: { presupuesto: { valor: 'sin_definir', frase: 'cuánto sale?' } } }, sinMarca, 'cuánto sale?').sugeridos.presupuesto.valor).toBe('sin_definir');
+    expect(validarSalida({ valores: { presupuesto: { valor: 'sin_definir', frase: 'cuánto sale?' } } }, sinMarca, 'cuánto sale?').sugeridos.presupuesto).toBeUndefined();
+    expect(validarSalida({ valores: { presupuesto: { valor: 'sin_definir', frase: 'no tenemos presupuesto definido' } } }, sinMarca, 'no tenemos presupuesto definido').sugeridos.presupuesto?.valor).toBe('sin_definir');
   });
 
   it('el modelo ve qué opción es de este tipo', () => {
@@ -448,6 +451,8 @@ describe('QA de #969 · 3: el 0 en niños o bebés solo si la frase cierra quié
     ['«solo adultos»', 'al final van solo adultos, somos 3', 'van solo adultos', '3'],
     ['«somos dos» con 2 adultos', 'somos dos, a Cartagena', 'somos dos', '2'],
     ['«no van los niños»', 'esta vez no van los niños', 'no van los niños', '2'],
+    ['«mi esposo y yo» con 2 adultos (QA de #969 v2, A4)', 'Mi esposo y yo queremos Europa', 'Mi esposo y yo', '2'],
+    ['«vamos los dos»', 'vamos los dos a Cartagena', 'vamos los dos', '2'],
   ])('pasa: %s', (_n, texto, frase, adultos) => {
     const s = leer(texto, { adultos: { valor: adultos, frase: texto }, ninos: { valor: '0', frase }, infantes: { valor: '0', frase } });
     expect(s.sugeridos.ninos?.valor).toBe(0);
@@ -455,7 +460,6 @@ describe('QA de #969 · 3: el 0 en niños o bebés solo si la frase cierra quié
   });
 
   it.each([
-    ['«mi esposo y yo» (no cierra; el bot pregunta)', 'Mi esposo y yo queremos Europa', 'Mi esposo y yo', '2'],
     ['«somos 3» con 2 adultos', 'somos 3', 'somos 3', '2'],
     ['«somos 2 y los niños»', 'somos 2 y los niños', 'somos 2 y los niños', '2'],
   ])('no pasa: %s', (_n, texto, frase, adultos) => {
@@ -548,13 +552,13 @@ describe('QA de #969 · 2: lo que escribe la agencia, lo que depende de menores 
       const texto = `${A4}, sin niños`;
       const s = validarSalida(salida({ ...base, ...extra }), FIELDS, texto, { hoyISO: '2026-10-01' });
       expect(s.sugeridos.permiso_salida_menores).toBeUndefined();
-      expect(s.descartados).toContainEqual({ slug: 'permiso_salida_menores', motivo: 'solo aplica si viajan menores, y no se sabe que viajen' });
+      expect(s.descartados.map(d => d.slug)).toContain('permiso_salida_menores');
     }
   });
 
   it('(b) con niños (de este mensaje o de lo que el negocio ya tiene) el permiso sí entra', () => {
-    const t = 'los niños viajan con papá y mamá a Cancún';
-    const v = { destino_tipo: { valor: 'internacional', frase: 'Cancún' }, permiso_salida_menores: { valor: 'tiene_permiso', frase: 'los niños viajan con papá y mamá' } };
+    const t = 'los niños ya tienen el permiso de salida, vamos a Cancún';
+    const v = { permiso_salida_menores: { valor: 'tiene_permiso', frase: 'ya tienen el permiso de salida' } };
     expect(validarSalida(salida({ ...v, ninos: { valor: '2', frase: 'los niños' } }), FIELDS, t).sugeridos.permiso_salida_menores?.valor).toBe('tiene_permiso');
     expect(validarSalida(salida(v), FIELDS, t, { conocidos: { ninos: 2 } }).sugeridos.permiso_salida_menores?.valor).toBe('tiene_permiso');
   });
@@ -615,8 +619,43 @@ describe('las piezas de los guardianes', () => {
     expect(leerEdades('')).toBeNull();
   });
 
-  it('fechaDeViaje directo: hoy vale; un 29 de febrero que no vuelve a tiempo se descarta', () => {
+  it('fechaDeViaje directo: hoy vale; sin año, la próxima vez que existe; con año pasado, se descarta', () => {
     expect(fechaDeViaje('2026-10-01', 'el 1', '2026-10-01')).toEqual({ valor: '2026-10-01' });
-    expect(fechaDeViaje('2024-02-29', 'el 29 de febrero', '2026-10-01')).toEqual({ motivo: 'fecha pasada: 2024-02-29' });
+    expect(fechaDeViaje('2024-02-29', 'el 29 de febrero', '2026-10-01')).toEqual({ valor: '2028-02-29' });
+    expect(fechaDeViaje('2024-02-29', 'el 29 de febrero de 2024', '2026-10-01')).toEqual({ motivo: 'fecha pasada: 2024-02-29' });
+  });
+});
+
+describe('QA de #971 · R1: el año lo pone el código, no el modelo', () => {
+  // Salida grabada de la corrida real (qa971/resultados-f/F1.txt y dbg.ts, flash-lite, temp 0.1):
+  // al cargar en un negocio existente el modelo devolvió 2027-12-28 y 2027-01-03 para este mensaje.
+  const T = 'Ya hablé con mi esposo: salimos el 28 de diciembre y volvemos el 3 de enero';
+  const grabada = { valores: {
+    fecha_salida: { valor: '2027-12-28', frase: 'salimos el 28 de diciembre' },
+    fecha_regreso: { valor: '2027-01-03', frase: 'volvemos el 3 de enero' },
+  } };
+
+  it('la salida va a la próxima ocurrencia y el regreso de enero cae en el año siguiente', () => {
+    const s = validarSalida(grabada, FIELDS, T, { hoyISO: '2026-10-01', conocidos: { destino: 'PUNTA CANA' } });
+    expect(s.sugeridos.fecha_salida?.valor).toBe('2026-12-28');
+    expect(s.sugeridos.fecha_regreso?.valor).toBe('2027-01-03');
+    expect(s.descartados).toEqual([]);
+  });
+
+  it('el regreso solo, con la salida ya en el negocio, también va con ella', () => {
+    const t = 'volvemos el 3 de enero';
+    const s = validarSalida({ valores: { fecha_regreso: { valor: '2026-01-03', frase: t } } }, FIELDS, t, { hoyISO: '2026-10-01', conocidos: { fecha_salida: '2026-12-28' } });
+    expect(s.sugeridos.fecha_regreso?.valor).toBe('2027-01-03');
+  });
+
+  it('el regreso de enero después de una salida de diciembre del año siguiente va al año de después', () => {
+    const t = 'volvemos el 3 de enero';
+    const s = validarSalida({ valores: { fecha_regreso: { valor: '2027-01-03', frase: t } } }, FIELDS, t, { hoyISO: '2026-10-01', conocidos: { fecha_salida: '2027-12-20' } });
+    expect(s.sugeridos.fecha_regreso?.valor).toBe('2028-01-03');
+  });
+
+  it('si la frase dice el año, manda la frase', () => {
+    const t = 'salimos el 28 de diciembre de 2027';
+    expect(validarSalida({ valores: { fecha_salida: { valor: '2027-12-28', frase: t } } }, FIELDS, t, { hoyISO: '2026-10-01' }).sugeridos.fecha_salida?.valor).toBe('2027-12-28');
   });
 });

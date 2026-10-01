@@ -31,7 +31,7 @@ function leer(fila: Fila, col: string): unknown {
   return fila[col];
 }
 
-const UNICOS: Record<string, string> = { wa_bandeja_mensajes: 'wa_message_id', wa_bandeja_entendimientos: 'entrega_id' };
+const UNICOS: Record<string, string> = { wa_bandeja_mensajes: 'wa_message_id' };
 
 function crearDb(t: Tablas) {
   function from(tabla: string) {
@@ -66,8 +66,8 @@ function crearDb(t: Tablas) {
       }
       if (op === 'upsert') {
         const f = { id: nuevoId(), ...(payload as Fila) };
-        const col = upsertOpts.onConflict!;
-        if (t[tabla].some(x => x[col] === f[col])) return { data: [], error: null };
+        const cols = upsertOpts.onConflict!.split(',').map(c => c.trim());
+        if (t[tabla].some(x => cols.every(c => (x[c] ?? 0) === (f[c] ?? 0)))) return { data: [], error: null };
         t[tabla].push(f);
         return { data: [proyectar(f)], error: null };
       }
@@ -98,6 +98,7 @@ function crearDb(t: Tablas) {
         return q;
       },
       lt: (c: string, v: number) => { filtros.push(f => (leer(f, c) as number) < v); return q; },
+      neq: (c: string, v: unknown) => { filtros.push(f => leer(f, c) !== v); return q; },
       gte: (c: string, v: string) => { filtros.push(f => String(leer(f, c) ?? '') >= v); return q; },
       ilike: (c: string, pat: string) => {
         const needle = pat.replace(/%/g, '').toLowerCase();
@@ -112,7 +113,26 @@ function crearDb(t: Tablas) {
     };
     return q;
   }
-  return { from, rpc: () => { throw new Error('rpc no esperado'); } };
+  /**
+   * `wa_bandeja_registrar_mensaje`, solo los dos caminos que usa la prueba del acto (la función
+   * de verdad se prueba con PGlite): suma a la tanda abierta del remitente, o abre una.
+   */
+  async function rpc(nombre: string, a: Fila) {
+    if (nombre !== 'wa_bandeja_registrar_mensaje') throw new Error(`rpc no esperado: ${nombre}`);
+    let abierta = t.wa_bandeja_entregas.find(e => e.workspace_id === a.p_workspace_id && e.remitente_phone === a.p_remitente_phone && e.estado === 'abierta');
+    const accion = abierta ? 'agregar' : 'abrir';
+    if (!abierta) {
+      abierta = { id: nuevoId(), workspace_id: a.p_workspace_id, remitente_phone: a.p_remitente_phone, estado: 'abierta', n_mensajes: 0 };
+      t.wa_bandeja_entregas.push(abierta);
+    }
+    t.wa_bandeja_mensajes.push({
+      id: nuevoId(), workspace_id: a.p_workspace_id, entrega_id: abierta.id, wa_message_id: a.p_wa_message_id, papel: 'contenido', tipo: a.p_tipo,
+      cuerpo: a.p_cuerpo, cuerpo_origen: a.p_cuerpo_origen, reenviado: a.p_reenviado, segmento: null, recibido_at: new Date().toISOString(),
+    });
+    abierta.n_mensajes = Number(abierta.n_mensajes ?? 0) + 1;
+    return { data: [{ accion, entrega: abierta.id, mensajes: abierta.n_mensajes }], error: null };
+  }
+  return { from, rpc };
 }
 
 // ── Escenario sintético ─────────────────────────────────────────────────────
@@ -139,6 +159,7 @@ function base(): Tablas {
   return {
     workspaces: [{ id: WS, slug: 'agencia', linea_activa_id: LINEA, config_extra: {}, modules: { bandeja_solicitudes_wa: true } }],
     staff: [{ id: STAFF, workspace_id: WS, full_name: 'TATIANA PRUEBA' }],
+    wa_collaborators: [{ id: 'col-1', workspace_id: WS, name: 'EDGAR COLABORADOR' }],
     negocios: [
       { id: 'n14', workspace_id: WS, linea_id: LINEA, codigo: 'T1 26 14', nombre: 'X', estado: 'abierto', created_at: '2026-09-20T10:00:00Z', contacto_id: 'c-marta', empresa_id: null, responsable_id: STAFF, contactos: { nombre: 'MARTA PRUEBA' }, empresas: null, workspaces: { slug: 'agencia' } },
       { id: 'n15', workspace_id: WS, linea_id: LINEA, codigo: 'T1 26 15', nombre: 'Y', estado: 'abierto', created_at: '2026-09-25T10:00:00Z', contacto_id: 'c-luis', empresa_id: null, responsable_id: null, contactos: { nombre: 'LUIS PRUEBA' }, empresas: null, workspaces: { slug: 'agencia' } },
@@ -159,12 +180,14 @@ function base(): Tablas {
     etapas_negocio: [{ id: 'et1', linea_id: LINEA, orden: 1, stage: 'venta' }],
     bloque_configs: [{ id: 'bc1', etapa_id: 'et1', workspace_id: WS, orden: 1, config_extra: { fields: FIELDS }, bloque_definitions: { tipo: 'datos' } }],
     contactos: [],
+    staff_areas: [{ staff_id: STAFF, area: 'comercial' }],
   };
 }
 
 let t: Tablas;
 let db: ReturnType<typeof crearDb>;
 let salidaModelo: unknown;
+let colaModelo: unknown[] = [];
 let mod: typeof import('./wa-entendimiento.ts');
 
 function entrega(p: { respuesta: string; opciones: unknown; mensajes: Array<{ cuerpo: string; origen?: string }> }): string {
@@ -175,25 +198,33 @@ function entrega(p: { respuesta: string; opciones: unknown; mensajes: Array<{ cu
   });
   p.mensajes.forEach((m, i) => t.wa_bandeja_mensajes.push({
     id: nuevoId(), workspace_id: WS, entrega_id: id, wa_message_id: `w-${id}-${i}`, papel: 'contenido',
-    cuerpo: m.cuerpo, cuerpo_origen: m.origen ?? 'texto', recibido_at: `2026-09-30T13:0${i}:00Z`,
+    cuerpo: m.cuerpo, cuerpo_origen: m.origen ?? 'texto', recibido_at: `2026-09-30T13:0${i}:00Z`, reenviado: true, tipo: 'text',
   }));
   return id;
 }
 
-/** La salida del modelo: todo por definir salvo lo que se pase. */
-function modelo(historia: string, valores: Record<string, { valor: string; frase: string }>) {
+/**
+ * La salida del modelo: todo por definir salvo lo que se pase. La historia es extractiva (N7):
+ * `citas` son frases que el modelo copió; solo entran las que están en lo que el cliente reenvió.
+ */
+function modelo(citas: string | string[], valores: Record<string, { valor: string; frase: string }>, extra: Fila = {}) {
   const v: Record<string, unknown> = {};
   for (const f of FIELDS) v[f.slug] = valores[f.slug] ?? { valor: 'por_definir', frase: '' };
-  salidaModelo = { historia, cliente: { nombre: '', telefono: '' }, valores: v };
+  salidaModelo = { citas: Array.isArray(citas) ? citas : [citas], cliente: { nombre: '', telefono: '' }, valores: v, ...extra };
 }
 
 beforeEach(async () => {
   vi.useFakeTimers({ toFake: ['Date'] });
   vi.setSystemTime(new Date('2026-09-30T15:00:00Z'));
   (globalThis as unknown as { Deno: unknown }).Deno = { env: { get: (k: string) => (k === 'GEMINI_API_KEY' ? 'k' : undefined) } };
-  vi.stubGlobal('fetch', vi.fn(async () => new Response(JSON.stringify({
-    candidates: [{ finishReason: 'STOP', content: { parts: [{ text: JSON.stringify(salidaModelo) }] } }],
-  }), { status: 200 })));
+  vi.stubGlobal('fetch', vi.fn(async () => {
+    // Una cola de salidas: cada llamada al modelo toma la siguiente (la última se repite).
+    const s = colaModelo.length > 1 ? colaModelo.shift() : colaModelo.length === 1 ? colaModelo[0] : salidaModelo;
+    return new Response(JSON.stringify({
+      candidates: [{ finishReason: 'STOP', content: { parts: [{ text: JSON.stringify(s) }] } }],
+    }), { status: 200 });
+  }));
+  colaModelo = [];
   mod = await import('./wa-entendimiento.ts');
   t = base();
   db = crearDb(t);
@@ -310,17 +341,19 @@ describe('carga en un negocio existente', () => {
 
   it('la historia se agrega a la actividad sin borrar la anterior', async () => {
     entrega({ respuesta: '2', opciones: OPCIONES, mensajes: [{ cuerpo: 'volvemos el 27' }] });
-    modelo('Segunda conversación: regresan el 27.', { fecha_regreso: { valor: '2026-11-27', frase: 'volvemos el 27' } });
+    modelo(['volvemos el 27', 'La cliente regresa el 27'], { fecha_regreso: { valor: '2026-11-27', frase: 'volvemos el 27' } });
     await correr();
     entrega({ respuesta: '2', opciones: OPCIONES, mensajes: [{ cuerpo: 'somos de Cali' }] });
-    modelo('Tercera conversación: salen de Cali.', { ciudad_origen: { valor: 'Cali', frase: 'somos de Cali' } });
+    modelo('somos de Cali', { ciudad_origen: { valor: 'Cali', frase: 'somos de Cali' } });
     await correr();
 
     const act = t.activity_log.filter(a => a.entidad_id === 'n14').map(a => String(a.contenido));
     expect(act).toHaveLength(3);
     expect(act[0]).toBe('Historia del 20-sep: primera conversación.');
-    expect(act[1]).toContain('Historia del 30-sep:\nSegunda conversación: regresan el 27.');
-    expect(act[2]).toContain('Historia del 30-sep:\nTercera conversación: salen de Cali.');
+    // Citas del cliente, no prosa del modelo: la paráfrasis «La cliente regresa el 27» no entra.
+    expect(act[1]).toContain('Historia del 30-sep:\nEl cliente dijo:\n«volvemos el 27»');
+    expect(act[1]).not.toContain('La cliente regresa');
+    expect(act[2]).toContain('Historia del 30-sep:\nEl cliente dijo:\n«somos de Cali»');
     // Y la segunda carga no borró lo que dejó la primera.
     expect(bloque('b14')).toMatchObject({ fecha_regreso: '2026-11-27', ciudad_origen: 'CALI' });
   });
@@ -384,9 +417,283 @@ describe('NUEVO y re-pregunta', () => {
 
   it('la pregunta vieja (sin lista guardada) sigue el camino de antes: la respuesta es el cliente', async () => {
     entrega({ respuesta: 'Carla Prueba', opciones: null, mensajes: [{ cuerpo: 'quiere ir a Aruba' }] });
-    modelo('Quiere ir a Aruba.', {});
+    modelo('Quiere ir a Aruba.', { destino: { valor: 'Aruba', frase: 'ir a Aruba' } });
     await correr();
     expect(ent()).toMatchObject({ estado: 'esperando_contacto', contacto_nombre: 'Carla Prueba' });
     expect(ent().destino).toBeUndefined();
+  });
+});
+
+// ── Varios viajes (modo mixto) y los guardianes, de punta a punta ───────────
+
+function entregaCon(p: { estado?: string; respuesta?: string | null; opciones?: unknown; mensajes: Array<{ cuerpo: string; reenviado?: boolean; min?: number }> }): string {
+  const id = nuevoId();
+  t.wa_bandeja_entregas.push({
+    id, workspace_id: WS, remitente_phone: TEL, remitente_staff_id: STAFF, estado: p.estado ?? 'con_cliente',
+    cliente_texto: p.respuesta ?? null, cliente_respondido_at: '2026-09-30T14:00:00Z', negocio_opciones: p.opciones ?? null, plan_viajes: null,
+  });
+  p.mensajes.forEach((m, i) => t.wa_bandeja_mensajes.push({
+    id: nuevoId(), workspace_id: WS, entrega_id: id, wa_message_id: `w-${id}-${i}`, papel: 'contenido', tipo: 'text',
+    cuerpo: m.cuerpo, cuerpo_origen: 'texto', reenviado: m.reenviado !== false, segmento: null,
+    recibido_at: new Date(Date.parse('2026-09-30T13:00:00Z') + (m.min ?? i) * 60_000).toISOString(),
+  }));
+  return id;
+}
+
+const valoresModelo = (valores: Record<string, { valor: string; frase: string }>, extra: Fila = {}) => {
+  const v: Record<string, unknown> = {};
+  for (const f of FIELDS) v[f.slug] = valores[f.slug] ?? { valor: 'por_definir', frase: '' };
+  return { citas: [], cliente: { nombre: '', telefono: '' }, valores: v, ...extra };
+};
+
+const responder = (texto: string) => mod.tomarRespuestaContacto(db as never, { workspaceId: WS, phone: TEL, texto, wamid: `w-${nuevoId()}`, enviadoAt: null });
+
+describe('modo encabezado: manda el encabezado, el reparto se confirma y cada viaje se carga por separado', () => {
+  it('encabezados → resumen sin cargar nada → sospechoso «dejar» → «sí» → dos cargas, con la asignación guardada por mensaje', async () => {
+    t.workspaces[0].config_extra = { bandeja_solicitudes: { modo_viajes: 'encabezado' } };
+    const id = entregaCon({
+      estado: 'esperando_cliente',
+      mensajes: [
+        { cuerpo: 'Marta', reenviado: false }, { cuerpo: 'volvemos el 27 de noviembre' },
+        { cuerpo: 'Hola Tati, buenas tardes' },
+        { cuerpo: 'T1 26 15', reenviado: false }, { cuerpo: 'somos de Medellín' },
+      ],
+    });
+    const antes = JSON.stringify(t.negocio_bloques);
+    const r = await mod.armarPreguntaNegocio(db as never, id, WS, 5);
+    expect(vi.mocked(fetch)).not.toHaveBeenCalled(); // el modelo ya no asigna
+    expect(r!.texto).toContain('Entendí 2 viajes:');
+    expect(r!.texto).toContain('1) T1 26 14 · MARTA PRUEBA (2 mensajes)');
+    expect(r!.texto).toContain('2) T1 26 15 · LUIS PRUEBA (1 mensaje)');
+    expect(r!.texto).toContain('3 «Hola Tati, buenas tardes» (saluda a mitad de la caja');
+    expect(r!.texto).toContain('No cargué nada todavía');
+
+    // Lo que hace `preguntarCliente`, y el comercial contesta «sí» sin decidir el sospechoso.
+    Object.assign(t.wa_bandeja_entregas.find(e => e.id === id)!, { plan_viajes: r!.plan, estado: 'con_cliente', cliente_texto: 'sí' });
+    await correr();
+    expect(ent()).toMatchObject({ estado: 'esperando_negocio', segmento: 0 });
+    expect(enviados.at(-1)!.texto).toContain('Antes del sí, decide el 3');
+    expect(JSON.stringify(t.negocio_bloques)).toBe(antes); // nada cargado
+
+    expect(await responder('dejar el 3')).toBe(true);
+    await correr();
+    expect(enviados.at(-1)!.texto).toContain('Corregido. Así queda:');
+    expect(await responder('sí')).toBe(true);
+    colaModelo = [
+      valoresModelo({ fecha_regreso: { valor: '2026-11-27', frase: 'volvemos el 27 de noviembre' } }),
+      valoresModelo({ ciudad_origen: { valor: 'Medellín', frase: 'somos de Medellín' } }),
+    ];
+    await correr();
+
+    expect(t.wa_bandeja_entendimientos.map(e => [e.segmento, e.estado, e.negocio_id ?? null])).toEqual([
+      [0, 'repartida', null], [1, 'negocio_actualizado', 'n14'], [2, 'negocio_actualizado', 'n15'],
+    ]);
+    expect(bloque('b14').fecha_regreso).toBe('2026-11-27');
+    expect(bloque('b14').ciudad_origen).toBeUndefined(); // lo de Luis no cae en Marta
+    expect(bloque('b15').ciudad_origen).toBe('MEDELLÍN');
+    const ms = t.wa_bandeja_mensajes.filter(m => m.entrega_id === id && m.papel === 'contenido');
+    expect(ms.map(m => m.segmento)).toEqual([null, 1, 1, null, 2]);
+    expect(ms.map(m => m.clase ?? null)).toEqual(['encabezado', 'cliente', 'cliente', 'encabezado', 'cliente']);
+    expect((ms[1].asignacion as Fila)).toMatchObject({ por: 'encabezado', destino: { negocio_id: 'n14' } });
+    expect((ms[2].asignacion as Fila)).toMatchObject({ por: 'comercial' });
+    expect(t.wa_bandeja_entregas.find(e => e.id === id)!.plan_confirmado_at).toBeTruthy();
+    // El avance en % va una vez por viaje, en el mensaje que cierra su carga; en ningún otro.
+    const avance = enviados.filter(e => /— Mínimo \d+\/\d+ \(\d+ %\) · Completo \d+\/\d+ \(\d+ %\)/.test(e.texto));
+    expect(avance.map(e => e.texto.split('\n').find(l => l.includes('— Mínimo'))!.split(' — ')[0])).toEqual(['T1 26 14 · MARTA PRUEBA', 'T1 26 15 · LUIS PRUEBA']);
+    expect(avance.every(e => e.texto.startsWith('Cargué en') || e.texto.startsWith('No encontré'))).toBe(true);
+  });
+
+  it('una tanda sin encabezados es un viaje: la pregunta es «¿A qué viaje van?», como en modo uno', async () => {
+    t.workspaces[0].config_extra = { bandeja_solicitudes: { modo_viajes: 'encabezado' } };
+    const id = entregaCon({ estado: 'esperando_cliente', mensajes: [{ cuerpo: 'hola' }, { cuerpo: 'queremos Aruba' }] });
+    const r = await mod.armarPreguntaNegocio(db as never, id, WS, 2);
+    expect(r!.plan).toBeUndefined();
+    expect(r!.texto).toContain('¿A qué viaje van?');
+  });
+
+  it('QA v5 · un encabezado aproximado no cambia la caja: sin «sí» queda sin asignar; con «sí», va a su viaje', async () => {
+    t.workspaces[0].config_extra = { bandeja_solicitudes: { modo_viajes: 'encabezado' } };
+    const sin = entregaCon({ estado: 'esperando_cliente', mensajes: [{ cuerpo: 'Martha', reenviado: false }, { cuerpo: 'volvemos el 27 de noviembre' }] });
+    const r1 = await mod.armarPreguntaNegocio(db as never, sin, WS, 2);
+    expect(r1!.texto).toContain('No hay mensajes con un viaje asignado.');
+    expect(r1!.texto).toContain('«Martha» puede ser MARTA PRUEBA · T1 26 14 y no me contestaste');
+    const con = entregaCon({ estado: 'esperando_cliente', mensajes: [{ cuerpo: 'Martha', reenviado: false }, { cuerpo: 'volvemos el 27 de noviembre' }, { cuerpo: 'sí', reenviado: false }] });
+    const r2 = await mod.armarPreguntaNegocio(db as never, con, WS, 3);
+    expect(r2!.texto).toContain('1) T1 26 14 · MARTA PRUEBA (1 mensaje)');
+    expect(r2!.plan!.encabezados).toEqual([1, 3]);
+  });
+
+  it('QA v5 · ¿espera la tanda abierta un «sí/no» a «¿Cambias a…?»?', async () => {
+    t.workspaces[0].config_extra = { bandeja_solicitudes: { modo_viajes: 'encabezado' } };
+    const id = entregaCon({ estado: 'abierta', mensajes: [{ cuerpo: 'Martha', reenviado: false }, { cuerpo: 'volvemos el 27 de noviembre' }] });
+    expect(await mod.cambioPorConfirmar(db as never, WS, TEL, 4)).toMatchObject({ id: 'n14' });
+    t.wa_bandeja_mensajes.push({ id: nuevoId(), workspace_id: WS, entrega_id: id, wa_message_id: 'w-si', papel: 'contenido', tipo: 'text', cuerpo: 'sí', cuerpo_origen: 'texto', reenviado: false, segmento: null, recibido_at: '2026-09-30T13:05:00Z' });
+    expect(await mod.cambioPorConfirmar(db as never, WS, TEL, 4)).toBeNull();
+  });
+
+  it('QA v5 · el nombre de alguien del equipo (staff o colaborador) no es encabezado, aunque haya un negocio a su nombre', async () => {
+    t.workspaces[0].config_extra = { bandeja_solicitudes: { modo_viajes: 'encabezado' } };
+    t.negocios.push(
+      { id: 'n16', workspace_id: WS, linea_id: LINEA, codigo: 'T1 26 16', nombre: 'P', estado: 'abierto', created_at: '2026-09-26T10:00:00Z', contacto_id: 'c-t', empresa_id: null, responsable_id: null, contactos: { nombre: 'TATIANA PRUEBA' }, empresas: null },
+      { id: 'n17', workspace_id: WS, linea_id: LINEA, codigo: 'T1 26 17', nombre: 'Q', estado: 'abierto', created_at: '2026-09-26T10:00:00Z', contacto_id: 'c-e', empresa_id: null, responsable_id: null, contactos: { nombre: 'EDGAR COLABORADOR' }, empresas: null },
+    );
+    expect((await mod.candidatosDeEncabezado(db as never, WS))!.equipo).toEqual(['TATIANA PRUEBA', 'EDGAR COLABORADOR']);
+    for (const firma of ['Tatiana', 'Edgar']) {
+      const id = entregaCon({ estado: 'esperando_cliente', mensajes: [{ cuerpo: firma, reenviado: false }, { cuerpo: 'queremos Aruba' }] });
+      const r = await mod.armarPreguntaNegocio(db as never, id, WS, 2);
+      expect(r!.plan, firma).toBeUndefined(); // sin encabezados: «¿A qué viaje van?»
+    }
+  });
+
+  it('modo `uno` (default): la pregunta sigue siendo «¿A qué viaje van?» con la lista', async () => {
+    const id = entregaCon({ estado: 'esperando_cliente', mensajes: [{ cuerpo: 'Marta', reenviado: false }, { cuerpo: 'hola' }] });
+    const r = await mod.armarPreguntaNegocio(db as never, id, WS, 2);
+    expect(r!.plan).toBeUndefined();
+    expect(r!.texto).toContain('¿A qué viaje van?');
+  });
+});
+
+describe('QA v5 · lo que el bot contesta en el acto a un encabezado (atenderEnBandeja)', () => {
+  const USER = { workspace_id: WS, phone: TEL, name: 'X', role: 'operator', collaborator_id: 'col-1', subscription_status: 'active', modulos: { modules: { bandeja_solicitudes_wa: true } } };
+  let n = 0;
+  const llega = async (texto: string, reenviado = false) => {
+    const b = await import('./wa-bandeja.ts');
+    const cfg = { ...(await import('./wa-bandeja-reglas.ts')).leerConfigBandeja(t.workspaces[0].config_extra) };
+    await b.atenderEnBandeja(db as never, USER as never, { phone: TEL, text: texto, type: 'text', reenviado, wa_message_id: `w-acto-${++n}`, timestamp: '1790000000' } as never, cfg);
+  };
+  const carolina = { id: 'n18', workspace_id: WS, linea_id: LINEA, codigo: 'T1 26 18', nombre: 'C', estado: 'abierto', created_at: '2026-09-26T10:00:00Z', contacto_id: 'c-c', empresa_id: null, responsable_id: null, contactos: { nombre: 'CAROLINA RUIZ' }, empresas: null };
+
+  it('exacto: «📌»; aproximado: «¿Cambias a…? sí/no» y, con el «sí», «📌»; la firma del equipo no contesta nada', async () => {
+    t.workspaces[0].config_extra = { bandeja_solicitudes: { modo_viajes: 'encabezado' } };
+    t.negocios.push(carolina);
+    await llega('Marta');
+    expect(enviados.map(e => e.texto)).toEqual(['📌 MARTA PRUEBA · T1 26 14']);
+    await llega('volvemos el 27 de noviembre', true);
+    await llega('Carlina');
+    await llega('somos 3 adultos', true);
+    expect(enviados.map(e => e.texto).slice(1)).toEqual(['¿Cambias a CAROLINA RUIZ · T1 26 18? sí/no']);
+    await llega('sí');
+    await llega('Tatiana');
+    expect(enviados.map(e => e.texto).slice(2)).toEqual(['📌 CAROLINA RUIZ · T1 26 18']);
+
+    // El reparto al cerrar: lo de Marta en Marta, lo que siguió al «sí» en Carolina.
+    const entrega = t.wa_bandeja_entregas.find(e => e.estado === 'abierta')!;
+    const r = await mod.armarPreguntaNegocio(db as never, entrega.id as string, WS, 6);
+    expect(r!.plan!.mensajes.filter(x => !x.sospecha).map(x => [x.n, x.destino && 'codigo' in x.destino ? x.destino.codigo : null])).toEqual([[2, 'T1 26 14'], [4, 'T1 26 18'], [6, 'T1 26 18']]);
+    expect(r!.plan!.encabezados).toEqual([1, 3, 5]);
+    expect(enviados.some(e => e.texto.includes('— Mínimo'))).toBe(false); // los acuses no llevan el avance
+  });
+
+  it('con «no», lo que sigue queda sin asignar y el bot lo dice', async () => {
+    t.workspaces[0].config_extra = { bandeja_solicitudes: { modo_viajes: 'encabezado' } };
+    t.negocios.push(carolina);
+    await llega('Carlina');
+    await llega('no');
+    expect(enviados.map(e => e.texto)).toEqual(['¿Cambias a CAROLINA RUIZ · T1 26 18? sí/no', 'No cambio a CAROLINA RUIZ · T1 26 18: lo que sigue queda sin asignar hasta otro encabezado.']);
+    // Un segundo «no» ya no es respuesta a nada: es contenido de la tanda y no contesta.
+    await llega('no');
+    expect(enviados).toHaveLength(2);
+  });
+
+  it('QA v6 · lo que no se entiende recibe «No entendí» en el acto; «si claro» sí se toma', async () => {
+    t.workspaces[0].config_extra = { bandeja_solicitudes: { modo_viajes: 'encabezado' } };
+    t.negocios.push(carolina);
+    await llega('Carlina');
+    await llega('mmm no sé');
+    await llega('si claro');
+    expect(enviados.map(e => e.texto)).toEqual([
+      '¿Cambias a CAROLINA RUIZ · T1 26 18? sí/no',
+      'No entendí: ¿cambias a CAROLINA RUIZ · T1 26 18? sí/no',
+      '📌 CAROLINA RUIZ · T1 26 18',
+    ]);
+  });
+
+  it('QA v6 · «nuevo» suelto: el bot pide el nombre; con el nombre, «📌 NUEVO …»; los apodos del equipo no contestan', async () => {
+    t.workspaces[0].config_extra = { bandeja_solicitudes: { modo_viajes: 'encabezado' } };
+    await llega('nuevo');
+    await llega('vamos a Aruba', true);
+    await llega('gracias');
+    await llega('Pedro Gómez');
+    await llega('Tati');
+    expect(enviados.map(e => e.texto)).toEqual([
+      '¿Cómo se llama el cliente nuevo? Escríbeme su nombre; hasta entonces no asigno lo que sigue.',
+      '¿Cómo se llama el cliente nuevo? Escríbeme su nombre; hasta entonces no asigno lo que sigue.',
+      '📌 NUEVO Pedro Gómez',
+    ]);
+  });
+
+  it('en modo `uno` un nombre escrito no contesta nada', async () => {
+    t.negocios.push(carolina);
+    await llega('Carolina');
+    expect(enviados).toEqual([]);
+  });
+});
+
+describe('guardianes en la ejecución', () => {
+  it('N6 · C1: mensajes de otro destino no se cargan sin aviso; con «sí» se cargan sin volver a llamar al modelo', async () => {
+    entregaCon({ respuesta: '1', opciones: OPCIONES, mensajes: [{ cuerpo: 'Confirmamos Punta Cana, salimos de Bogotá' }] });
+    salidaModelo = valoresModelo({ destino: { valor: 'Punta Cana', frase: 'Confirmamos Punta Cana' }, ciudad_origen: { valor: 'Bogotá', frase: 'salimos de Bogotá' } });
+    await correr();
+    expect(ent()).toMatchObject({ estado: 'esperando_negocio', confirmacion_pendiente: 'cruce', negocio_destino_id: 'n15' });
+    expect(enviados[0].texto).toContain('Estos mensajes hablan de Punta Cana y T1 26 15 es de LUIS PRUEBA a CARTAGENA. No cargué nada.');
+    expect(bloque('b15')).toEqual({ destino: 'CARTAGENA' });
+
+    await responder('sí');
+    await correr();
+    expect(vi.mocked(fetch)).toHaveBeenCalledTimes(1);
+    expect(ent()).toMatchObject({ estado: 'negocio_actualizado', negocio_id: 'n15', confirmacion_pendiente: null });
+    expect(bloque('b15').ciudad_origen).toBe('BOGOTÁ');
+    expect((bloque('b15')._conflictos as Fila).destino).toMatchObject({ valor: 'Punta Cana' });
+  });
+
+  it('N4 · B3: sin solicitud no se crea un negocio; DESCARTAR lo cierra', async () => {
+    entregaCon({ respuesta: 'NUEVO Pedro Prueba', opciones: OPCIONES, mensajes: [{ cuerpo: 'jajaja' }, { cuerpo: 'buenas noches' }] });
+    salidaModelo = valoresModelo({}, { mensajes: [{ n: 1, clase: 'ruido' }, { n: 2, clase: 'ruido' }] });
+    const negocios = t.negocios.length;
+    await correr();
+    expect(enviados[0].texto).toContain('No vi una solicitud de viaje en estos 2 mensajes');
+    expect(ent()).toMatchObject({ estado: 'esperando_negocio', confirmacion_pendiente: 'sin_solicitud' });
+    expect(t.negocios.length).toBe(negocios);
+    expect(t.contactos).toEqual([]);
+    await responder('DESCARTAR');
+    await correr();
+    expect(ent()).toMatchObject({ estado: 'descartada' });
+    expect(t.negocios.length).toBe(negocios);
+  });
+
+  it('N5 · D1: dos solicitudes no se mezclan; el bot sugiere repetir con encabezados y DESCARTAR cierra', async () => {
+    entregaCon({ respuesta: 'NUEVO Carolina Prueba', opciones: OPCIONES, mensajes: [
+      { cuerpo: 'Hola, soy Carolina, queremos Aruba del 5 al 10 de diciembre' }, { cuerpo: 'Buenas, soy Luisa, para Curazao somos 2' },
+    ] });
+    salidaModelo = valoresModelo({ destino: { valor: 'Aruba', frase: 'queremos Aruba' } }, {
+      solicitudes: [{ cliente: 'Carolina', destino: 'Aruba', frase: 'soy Carolina, queremos Aruba' }, { cliente: 'Luisa', destino: 'Curazao', frase: 'soy Luisa, para Curazao' }],
+    });
+    const negocios = t.negocios.length;
+    await correr();
+    expect(enviados[0].texto).toContain('Veo dos solicitudes distintas en estos mensajes (Carolina: Aruba · Luisa: Curazao)');
+    expect(enviados[0].texto).toContain('después de un encabezado');
+    expect(t.negocios.length).toBe(negocios);
+
+    // «SEPARAR» ya no existe (el modelo no reparte): se repite la pregunta.
+    await responder('SEPARAR');
+    await correr();
+    expect(enviados.at(-1)!.texto).toContain('No mezclo dos solicitudes. Responde DESCARTAR');
+    await responder('DESCARTAR');
+    await correr();
+    expect(ent()).toMatchObject({ estado: 'descartada' });
+    expect(t.negocios.length).toBe(negocios);
+  });
+
+  it('N9 · NUEVO sin nombre: el bot pide el nombre y con «NUEVO Marta Gómez» crea el viaje', async () => {
+    entregaCon({ respuesta: 'NUEVO', opciones: OPCIONES, mensajes: [{ cuerpo: 'queremos ir a Aruba' }] });
+    salidaModelo = valoresModelo({ destino: { valor: 'Aruba', frase: 'ir a Aruba' } });
+    await correr();
+    expect(ent()).toMatchObject({ estado: 'esperando_contacto' });
+    expect(enviados[0].texto).toContain('Escríbeme NUEVO y su nombre');
+
+    await responder('NUEVO Marta Gómez');
+    await correr();
+    expect(ent()).toMatchObject({ estado: 'negocio_creado' });
+    expect(t.contactos.map(c => c.nombre)).toEqual(['MARTA GÓMEZ']);
   });
 });

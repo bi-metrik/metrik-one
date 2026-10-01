@@ -43,6 +43,12 @@ export interface OpcionCampo {
   value: string;
   label?: string;
   no_definido?: boolean;
+  /**
+   * Otras formas en que el cliente nombra la opción («mi esposo y yo» para «Pareja»). Una opción
+   * solo se carga si la frase la NOMBRA (su etiqueta, su valor o uno de estos): el modelo no la
+   * deduce (QA de #971 v2: Cartagena salía «internacional» sin que nadie lo dijera).
+   */
+  sinonimos?: string[];
 }
 
 export interface CampoEntendible extends CampoConNivel {
@@ -103,16 +109,39 @@ export function esquemaDeSalida(fields: ReadonlyArray<CampoEntendible>): Record<
   return {
     type: 'object',
     properties: {
-      historia: { type: 'string' },
+      // N3: quién habla en cada mensaje. Solo lo del cliente llena campos (`wa-guardianes.ts`).
+      mensajes: {
+        type: 'array',
+        items: {
+          type: 'object',
+          properties: { n: { type: 'integer' }, clase: { type: 'string', enum: [...CLASES_MENSAJE] } },
+          required: ['n', 'clase'],
+        },
+      },
+      // N7: la historia es extractiva. El modelo copia frases del cliente; el código arma el texto.
+      citas: { type: 'array', items: { type: 'string' } },
+      // N5: cada solicitud de viaje distinta que aparece (otro cliente u otro viaje del mismo).
+      solicitudes: {
+        type: 'array',
+        items: {
+          type: 'object',
+          properties: { cliente: { type: 'string' }, destino: { type: 'string' }, frase: { type: 'string' } },
+          required: ['frase'],
+        },
+      },
       cliente: {
         type: 'object',
         properties: { nombre: { type: 'string' }, telefono: { type: 'string' } },
       },
       valores: { type: 'object', properties, required: campos.map(f => f.slug) },
     },
-    required: ['historia', 'valores'],
+    required: ['mensajes', 'citas', 'solicitudes', 'valores'],
   };
 }
+
+/** Quién habla en un mensaje de la entrega (N3). */
+export const CLASES_MENSAJE = ['cliente', 'comercial', 'tercero', 'ruido'] as const;
+export type ClaseMensaje = (typeof CLASES_MENSAJE)[number];
 
 function formatoDe(f: CampoEntendible): string {
   if (f.tipo === 'numero') return 'un número entero escrito con dígitos';
@@ -150,19 +179,26 @@ export function instruccionesEntendimiento(
     '   - Si el mensaje repite lo que ya se sabe, devuelve el mismo valor con su frase.',
     '   - Si el mensaje dice OTRA cosa, devuelve lo que dice el mensaje con su frase: una persona decidirá.',
     `   - Si el mensaje no lo menciona, valor = "${POR_DEFINIR}": no copies lo que ya se sabe.`,
-    '   - La historia cuenta solo lo nuevo de estos mensajes.',
+    '   - Las citas son solo de estos mensajes.',
   ];
   return [
     'Eres el asistente de una agencia. Un comercial te reenvió por WhatsApp lo que habló con un cliente',
     '(textos, transcripciones de notas de voz). Tu trabajo es entender la solicitud, no inventarla.',
+    'Los mensajes vienen numerados: «[3] (reenviado) …» o «[4] (escrito por el comercial) …».',
     '',
     `Hoy es ${hoyISO} (Bogotá). Si una fecha no dice el año, es la próxima vez que ocurra desde hoy.`,
     '',
     'Devuelve:',
-    '1. historia: dos o tres párrafos en prosa, en lenguaje de persona, contando lo que el cliente quiere.',
-    '   Solo lo que está en los mensajes. Sin juicios sobre el cliente (su carácter, su trato, su bolsillo).',
-    '2. cliente: nombre y teléfono del cliente si los mensajes los dicen; si no, déjalos vacíos.',
-    '3. valores: para CADA campo de la lista, { valor, frase }.',
+    '1. mensajes: para CADA mensaje, { n, clase }:',
+    '   - cliente: lo que pide o cuenta el cliente sobre SU viaje (también si el comercial lo relata: «tengo dos pasajeros para…»);',
+    '   - comercial: notas u opiniones del comercial sobre el cliente o sobre la venta («ojo, esta señora…»);',
+    '   - tercero: lo que no dice el cliente de su viaje: una promoción o un plan de otra agencia, un comprobante o un abono de pago, un proveedor;',
+    '   - ruido: saludos, risas, stickers, despedidas, temas personales.',
+    '2. citas: hasta 8 frases COPIADAS tal cual de mensajes del cliente que cuenten lo que quiere. Nada de resúmenes ni opiniones.',
+    '3. solicitudes: una por cada viaje DISTINTO que se pide en los mensajes (otro cliente, u otro viaje del mismo cliente con',
+    '   otro destino o en otra fecha), con el cliente, el destino y la frase exacta que lo pide. Si todo es un solo viaje, una sola.',
+    '4. cliente: nombre y teléfono del cliente si los mensajes los dicen; si no, déjalos vacíos.',
+    '5. valores: para CADA campo de la lista, { valor, frase }. Solo de mensajes del cliente.',
     `   - Si el mensaje no lo dice, valor = "${POR_DEFINIR}" y frase vacía. Nunca pongas "no" ni "0" por algo que no se dijo.`,
     '   - frase = las palabras EXACTAS del mensaje que sostienen el valor, copiadas tal cual.',
     '   - Si el cliente se corrige dentro de los mensajes («somos 2… ah no, 3»), devuelve lo ÚLTIMO que dijo, con esa frase.',
@@ -173,6 +209,10 @@ export function instruccionesEntendimiento(
     '   - Una opción marcada «solo si el cliente lo dice» vale únicamente si el cliente lo declara («no tenemos presupuesto»,',
     `     «el que sea»). Preguntar el precio («¿cuánto sale?») no es declarar presupuesto: es "${POR_DEFINIR}".`,
     '   - «Dos personas» sin más detalle son dos adultos; los niños solo cuentan si el mensaje los nombra.',
+    '   - Si el cliente nombra varias ciudades o lugares («Madrid, París y Roma»), el destino los lleva todos tal como los dijo,',
+    '     no la región que los agrupa.',
+    '   - Un total sin desglose («somos 4 con los niños») no se reparte: deja adultos y niños en "por_definir".',
+    '   - Cuenta a todos los que el mensaje dice que viajan, también los que se suman («mi hermana también va con sus 2 hijos»).',
     `   - No pongas 0 en niños ni en bebés salvo que el mensaje lo diga («sin niños», «solo adultos»). Si no lo dice, "${POR_DEFINIR}".`,
     '',
     'Campos:',
@@ -205,7 +245,11 @@ export interface SalidaEntendida {
   historia: string;
   cliente: { nombre: string | null; telefono: string | null };
   sugeridos: Record<string, Sugerido>;
-  descartados: Array<{ slug: string; motivo: string }>;
+  /**
+   * Lo que un guardián tiró. `pregunta`: la que el bot hace en el acto, antes de las del mínimo (C9:
+   * «Dijeron "mi bebé de 18": ¿viaja como bebé en brazos o con su propio cupo?»).
+   */
+  descartados: Array<{ slug: string; motivo: string; pregunta?: string }>;
 }
 
 function fechaValida(v: string): boolean {
@@ -217,7 +261,7 @@ function fechaValida(v: string): boolean {
 // ── Guardián 1: un mes o una ventana no es una fecha ─────────────────────────
 
 /** Los días del mes escritos con letras, como los deja una transcripción de audio. */
-const DIAS_EN_LETRAS: Record<string, number> = {
+export const DIAS_EN_LETRAS: Record<string, number> = {
   primero: 1, uno: 1, dos: 2, tres: 3, cuatro: 4, cinco: 5, seis: 6, siete: 7, ocho: 8, nueve: 9, diez: 10,
   once: 11, doce: 12, trece: 13, catorce: 14, quince: 15, dieciseis: 16, diecisiete: 17, dieciocho: 18,
   diecinueve: 19, veinte: 20, veintiuno: 21, veintiun: 21, veintidos: 22, veintitres: 23, veinticuatro: 24,
@@ -268,16 +312,43 @@ function sumarMeses(iso: string, meses: number): string {
  */
 export function fechaDeViaje(v: string, frase: string, hoyISO: string): { valor: string } | { motivo: string } {
   let f = v;
-  if (f < hoyISO) {
-    if (/(?<!\d)(19|20)\d{2}(?!\d)/.test(frase)) return { motivo: `fecha pasada: ${v}` };
-    const mesDia = v.slice(5);
-    let candidata = `${hoyISO.slice(0, 4)}-${mesDia}`;
-    if (candidata < hoyISO) candidata = `${Number(hoyISO.slice(0, 4)) + 1}-${mesDia}`;
-    if (!fechaValida(candidata)) return { motivo: `fecha pasada: ${v}` };
-    f = candidata;
+  if (!fraseDiceElAnio(frase)) {
+    // El AÑO lo pone el código, no el modelo (QA de #971, R1: «salimos el 28 de diciembre» salía
+    // 2027-12-28 en una carga a un negocio existente): la próxima vez que ocurre ese día y mes.
+    const proxima = proximaOcurrencia(v.slice(5), hoyISO);
+    if (!proxima) return { motivo: `fecha imposible: ${v}` };
+    f = proxima;
+  } else if (f < hoyISO) {
+    return { motivo: `fecha pasada: ${v}` };
   }
   if (f > sumarMeses(hoyISO, MESES_MAXIMOS)) return { motivo: `a más de ${MESES_MAXIMOS} meses: ${f}` };
   return { valor: f };
+}
+
+/** ¿La frase dice el año («2027», «del 2026»)? Si no, el año lo infiere el código. */
+export function fraseDiceElAnio(frase: string): boolean {
+  return /(?<!\d)(19|20)\d{2}(?!\d)/.test(frase);
+}
+
+/** La próxima vez que ocurre `MM-DD` desde hoy (hoy cuenta). `null` si no existe (29-feb sin bisiesto cerca). */
+export function proximaOcurrencia(mesDia: string, hoyISO: string, desde = hoyISO): string | null {
+  const anio = Number(desde.slice(0, 4));
+  for (const a of [anio, anio + 1, anio + 2, anio + 3, anio + 4]) {
+    const c = `${a}-${mesDia}`;
+    if (fechaValida(c) && c >= desde) return c;
+  }
+  return null;
+}
+
+/**
+ * El regreso sin año va con la salida: mismo año, o el siguiente si su MES es anterior al de la
+ * salida («del 28 de diciembre al 3 de enero» → 2026-12-28 / 2027-01-03). En el mismo mes y antes
+ * del día de salida no se mueve: queda antes y se descarta (es un error, no otro año).
+ */
+export function regresoConLaSalida(regreso: string, salida: string): string | null {
+  const anio = Number(salida.slice(0, 4)) + (regreso.slice(5, 7) < salida.slice(5, 7) ? 1 : 0);
+  const c = `${anio}-${regreso.slice(5)}`;
+  return fechaValida(c) ? c : null;
 }
 
 /**
@@ -324,6 +395,90 @@ export function declaraNoDefinido(frase: string): boolean {
   if (/[?¿]/.test(frase)) return false;
   const t = ` ${normalizarTexto(frase).replace(/[^a-z0-9 ]/g, ' ').replace(/\s+/g, ' ').trim()} `;
   return MARCAS_DE_DECLARACION.some(r => r.test(t));
+}
+
+const PALABRAS_DE_OPCION_VACIAS = new Set(['con', 'sin', 'solo', 'para', 'los', 'las', 'del', 'que', 'por', 'entre', 'menos', 'mas']);
+
+function palabrasDeOpcion(o: OpcionCampo): string[] {
+  return [...new Set([o.label, String(o.value).replace(/_/g, ' ')]
+    .flatMap(x => normalizarTexto(String(x ?? '')).replace(/[^a-z0-9 ]/g, ' ').split(' '))
+    .filter(w => w.length >= 4 && !PALABRAS_DE_OPCION_VACIAS.has(w)))];
+}
+
+/**
+ * ¿La frase NOMBRA esta opción? Con una palabra propia de su etiqueta o su valor (las que todas
+ * las opciones comparten no cuentan), con un número de su etiqueta («cuatro» para «4 estrellas»)
+ * o con uno de sus `sinonimos` de la config. «Cartagena» no nombra «Internacional»: esa opción la
+ * deduciría el modelo, y eso no se carga.
+ */
+export function fraseNombraOpcion(f: CampoEntendible, o: OpcionCampo, frase: string): boolean {
+  const t = ` ${normalizarTexto(frase).replace(/[^a-z0-9 ]/g, ' ').replace(/\s+/g, ' ').trim()} `;
+  if ((o.sinonimos ?? []).some(x => t.includes(` ${normalizarTexto(x).replace(/[^a-z0-9 ]/g, ' ').replace(/\s+/g, ' ').trim()} `))) return true;
+  const numeros = [...normalizarTexto(String(o.label ?? o.value)).matchAll(/\d+/g)].map(m => Number(m[0]));
+  if (numeros.some(n => fraseNombraNumero(frase, n))) return true;
+  const concretas = (f.opciones ?? []).filter(x => x.no_definido !== true);
+  const comunes = new Set(palabrasDeOpcion(concretas[0] ?? o).filter(w => concretas.every(x => palabrasDeOpcion(x).includes(w))));
+  const propias = palabrasDeOpcion(o).filter(w => !comunes.has(w) || concretas.length < 2);
+  return (propias.length > 0 ? propias : palabrasDeOpcion(o)).some(w => t.includes(` ${w} `));
+}
+
+// ── Rangos de dinero: el código elige la opción con la cifra ─────────────────
+
+export interface RangoOpcion { value: string; min: number; max: number }
+
+/**
+ * Los rangos de un campo cuyas opciones concretas son TODAS rangos en millones («Menos de $3
+ * millones», «Entre $3 y $5 millones», «Más de $20 millones»). `null` si alguna no lo es: el
+ * campo no es de dinero y no se toca. Sale de las etiquetas de la config, no de una lista.
+ */
+export function rangosDeDinero(f: CampoEntendible): RangoOpcion[] | null {
+  const concretas = (f.opciones ?? []).filter(o => o.no_definido !== true);
+  if (concretas.length < 2) return null;
+  const out: RangoOpcion[] = [];
+  for (const o of concretas) {
+    const t = normalizarTexto(String(o.label ?? '')).replace(/\$/g, '');
+    if (!/millon/.test(t)) return null;
+    const n = (x: string) => Number(x.replace(',', '.'));
+    let m = /entre\s+(\d+(?:[.,]\d+)?)\s+y\s+(\d+(?:[.,]\d+)?)/.exec(t);
+    if (m) { out.push({ value: String(o.value), min: n(m[1]), max: n(m[2]) }); continue; }
+    m = /menos de\s+(\d+(?:[.,]\d+)?)/.exec(t);
+    if (m) { out.push({ value: String(o.value), min: -Infinity, max: n(m[1]) - 1e-9 }); continue; }
+    m = /mas de\s+(\d+(?:[.,]\d+)?)/.exec(t);
+    if (m) { out.push({ value: String(o.value), min: n(m[1]) + 1e-9, max: Infinity }); continue; }
+    return null;
+  }
+  return out;
+}
+
+/**
+ * Las cifras en millones de pesos de un texto: «unos 10 millones», «quince millones», «$2.5M»,
+ * «10.000.000». `ambiguo` si es por persona o en otra moneda (dólares, euros).
+ */
+export function cifrasEnMillones(texto: string): number[] | 'ambiguo' {
+  const t = normalizarTexto(texto);
+  if (/(por persona|por cabeza|cada uno|cada una|c\/u|dolar|usd|us\$|euro|eur\b)/.test(t)) return 'ambiguo';
+  const out: number[] = [];
+  // «entre 4 y 10 millones»: las dos cifras cuentan.
+  for (const m of t.matchAll(/(\d+(?:[.,]\d+)?)\s*(?:y|a|-)\s*\d+(?:[.,]\d+)?\s*(?:millones|millon|mill|m\b)/g)) out.push(Number(m[1].replace(',', '.')));
+  for (const m of t.matchAll(/(\d+(?:[.,]\d+)?)\s*(?:millones|millon|mill|m\b)/g)) out.push(Number(m[1].replace(',', '.')));
+  for (const m of t.matchAll(/(?<![\d.])(\d{1,3}(?:\.\d{3}){2,})(?![\d.])/g)) out.push(Number(m[1].replace(/\./g, '')) / 1e6);
+  for (const m of t.matchAll(/([a-z]+)\s+millones/g)) if (m[1] in DIAS_EN_LETRAS && m[1] !== 'primero') out.push(DIAS_EN_LETRAS[m[1]]);
+  if (/\bun millon\b/.test(t)) out.push(1);
+  return out;
+}
+
+/** La opción cuyo rango contiene la cifra. Sin cifra, con cifras en dos rangos o en el borde de dos, nada. */
+export function opcionPorCifra(rangos: ReadonlyArray<RangoOpcion>, texto: string): { valor: string } | { motivo: string } {
+  const cifras = cifrasEnMillones(texto);
+  if (cifras === 'ambiguo') return { motivo: 'la cifra es por persona o en otra moneda: no se elige el rango' };
+  if (cifras.length === 0) return { motivo: 'sin una cifra que ubique el rango' };
+  const opciones = new Set<string>();
+  for (const c of cifras) {
+    const caben = rangos.filter(r => c >= r.min && c <= r.max);
+    if (caben.length !== 1) return { motivo: `la cifra ${c} millones no cabe en un solo rango` };
+    opciones.add(caben[0].value);
+  }
+  return opciones.size === 1 ? { valor: [...opciones][0] } : { motivo: 'las cifras caen en rangos distintos' };
 }
 
 /** Un número con dígitos o con letras: una preferencia concreta («cuatro o cinco estrellas», «unos 3 millones»). */
@@ -390,23 +545,77 @@ export function textoSaleDelMensaje(valor: string, fuente: string): boolean {
 /** Palabras que nombran a un menor. */
 const RE_MENOR = /\b(nin[oa]s?|hij[oa]s?|bebes?|menor(es)?|peque\w*|pelad\w*|chiquit\w*|infantes?|nenes?)\b/;
 
+/** Personas adultas por su relación con quien habla: «mi esposo», «mi suegra», «mi amiga». */
+const RELACIONES_ADULTAS = new Set([
+  'esposo', 'esposa', 'novio', 'novia', 'pareja', 'marido', 'mujer', 'companero', 'companera',
+  'mama', 'papa', 'madre', 'padre', 'suegra', 'suegro', 'hermana', 'hermano', 'amiga', 'amigo',
+  'prima', 'primo', 'tia', 'tio', 'abuela', 'abuelo', 'cunada', 'cunado', 'socia', 'socio', 'jefe', 'jefa', 'colega',
+]);
+
 /**
- * ¿La frase cierra que no viajan menores? Solo tres formas:
+ * ¿Cuántos adultos enumera la frase como grupo cerrado, sin menores? «mi esposo y yo» = 2,
+ * «mi esposa, mi suegra y yo» = 3, «vamos los dos» = 2. `null` si no es una enumeración cerrada
+ * (falta el «yo», hay un «mis …» o una relación que no es adulta).
+ */
+export function adultosEnumerados(frase: string): number | null {
+  const t = ` ${normalizarTexto(frase).replace(/[^a-z0-9 ]/g, ' ').replace(/\s+/g, ' ').trim()} `;
+  if (RE_MENOR.test(t)) return null;
+  if (/ (los|las|nosotros|nosotras) (dos|2) /.test(t)) return 2;
+  if (/ mis /.test(t) || !/ yo /.test(t)) return null;
+  const rels = [...t.matchAll(/ mi (\w+)/g)].map(m => m[1]);
+  if (rels.length === 0 || !rels.every(r => RELACIONES_ADULTAS.has(r))) return null;
+  return rels.length + 1;
+}
+
+/**
+ * ¿La frase cierra que no viajan menores? Cuatro formas:
  *   · una negación pegada al menor: «sin niños», «ningún bebé», «no van los niños»;
  *   · «solo adultos», «solo nosotros»;
- *   · un total que es igual a los adultos y ninguna mención de menores: «somos dos» con 2 adultos.
- * «Somos 4 con los niños», «mi esposo y yo» o «los dos niños» NO cierran nada: el 0 solo sale de
- * aquí o de `deducirCeros` (todas las edades dadas y ninguna menor de 2). QA de #969, C11.
+ *   · un total que es igual a los adultos y ninguna mención de menores: «somos dos» con 2 adultos;
+ *   · una enumeración cerrada de adultos igual a los adultos: «mi esposo y yo», «mi novia y yo»,
+ *     «vamos los dos» (QA de #969 v2, A4: sin esto niños e infantes quedaban vacíos y sin pregunta).
+ * «Somos 4 con los niños» o «los dos niños» NO cierran nada: el 0 solo sale de aquí o de
+ * `deducirCeros` (todas las edades dadas y ninguna menor de 2). QA de #969, C11.
  */
 export function fraseCierraMenores(frase: string, adultos: number | null): boolean {
   const t = ` ${normalizarTexto(frase).replace(/[^a-z0-9 ]/g, ' ').replace(/\s+/g, ' ').trim()} `;
   if (/ (sin|ningun\w*|cero|no (van|viajan|vienen|llevamos|hay)) (los |las |mis |nuestros |nuestras )?(nin|hij|beb|menor|infant|nene|peque|pelad|chiquit)/.test(t)) return true;
   if (/ solo(mente)? (adultos|nosotros|nosotras|los dos|las dos)\b/.test(t)) return true;
   if (adultos === null || RE_MENOR.test(t)) return false;
+  if (adultosEnumerados(frase) === adultos) return true;
   const m = / (somos|seriamos|seremos|vamos|viajamos|viajariamos|iriamos) (\w+)/.exec(t);
   if (!m) return false;
   const n = /^\d+$/.test(m[2]) ? Number(m[2]) : (DIAS_EN_LETRAS[m[2]] ?? null);
   return n !== null && n === adultos;
+}
+
+/** ¿Algún mensaje nombra a un menor? Sin ninguno, una enumeración cerrada de adultos deduce 0. */
+export function nombraMenores(texto: string): boolean {
+  return RE_MENOR.test(` ${normalizarTexto(texto).replace(/[^a-z0-9 ]/g, ' ').replace(/\s+/g, ' ').trim()} `);
+}
+
+// ── Destino: varias ciudades se conservan todas ──────────────────────────────
+
+const PALABRA_PROPIA = "[A-ZÁÉÍÓÚÑ][A-Za-zÁÉÍÓÚÑáéíóúñü'.-]+(?: (?:de |del |la |las |los |el )?[A-ZÁÉÍÓÚÑ][A-Za-zÁÉÍÓÚÑáéíóúñü'.-]+)*";
+const RE_LISTA_LUGARES = new RegExp(`(${PALABRA_PROPIA}(?:, ${PALABRA_PROPIA})*,? (?:y|e) ${PALABRA_PROPIA})`, 'g');
+
+/**
+ * Los lugares que el cliente enumera DESPUÉS del destino en el mismo mensaje: «Europa 20 días en
+ * mayo: Madrid, París y Roma» → ['Madrid', 'París', 'Roma']. Solo nombres propios escritos con
+ * mayúscula, en una lista con «y» al final, y en el mismo mensaje que nombra el destino: así un
+ * «Pedro y Juan» suelto no se vuelve destino. QA de #969 v2, A4: el destino quedaba EUROPA y las
+ * ciudades no quedaban en ningún campo.
+ */
+export function lugaresDespuesDelDestino(destino: string, mensaje: string): string[] {
+  const nd = normalizarTexto(destino);
+  const i = normalizarTexto(mensaje).indexOf(nd);
+  if (!nd || i < 0) return [];
+  const resto = mensaje.slice(i + destino.length);
+  for (const m of resto.matchAll(RE_LISTA_LUGARES)) {
+    const items = m[1].split(/, | y | e /).map(x => x.replace(/,$/, '').trim()).filter(Boolean);
+    if (items.length >= 2 && !items.some(x => normalizarTexto(x) === nd)) return items;
+  }
+  return [];
 }
 
 const SLUGS_MENORES = ['ninos', 'infantes'];
@@ -418,6 +627,34 @@ function dependeDeMenores(f: CampoEntendible): boolean {
   return p.condiciones.some(c =>
     (typeof c.field === 'string' && SLUGS_MENORES.includes(c.field))
     || (Array.isArray(c.suma_de) && c.suma_de.some(s => SLUGS_MENORES.includes(s))));
+}
+
+/** Cuántas citas lleva la historia, como máximo, y su largo. */
+export const MAX_CITAS = 8;
+const MAX_LARGO_CITA = 240;
+
+/**
+ * La historia extractiva (N7, encargo 2026-10-01): las citas que el modelo copió, SOLO si cada una
+ * aparece tal cual (normalizada) en lo que el cliente dijo con sus palabras. Sin duplicados,
+ * máximo ocho, cada una entre comillas. Una valoración del comercial no puede colarse: sus
+ * mensajes no son citables, y una paráfrasis no aparece en ningún mensaje.
+ */
+export function historiaDeCitas(citas: unknown, citables: string): string {
+  if (!Array.isArray(citas) || !citables.trim()) return '';
+  const fuente = normalizarTexto(citables);
+  const vistas: string[] = [];
+  const out: string[] = [];
+  for (const c of citas) {
+    if (typeof c !== 'string') continue;
+    const limpia = c.trim().replace(/^[«"“]+|[»"”]+$/g, '').trim();
+    const n = normalizarTexto(limpia);
+    if (n.length < 4 || limpia.length > MAX_LARGO_CITA || !fuente.includes(n)) continue;
+    if (vistas.some(v => v.includes(n))) continue;
+    vistas.push(n);
+    out.push(`«${limpia}»`);
+    if (out.length >= MAX_CITAS) break;
+  }
+  return out.length === 0 ? '' : `El cliente dijo:\n${out.join('\n')}`;
 }
 
 function textoONull(v: unknown): string | null {
@@ -438,7 +675,15 @@ export function validarSalida(
   raw: unknown,
   fields: ReadonlyArray<CampoEntendible>,
   textoFuente: string,
-  opts: { hoyISO?: string; conocidos?: Record<string, unknown> } = {},
+  opts: {
+    hoyISO?: string;
+    conocidos?: Record<string, unknown>;
+    /**
+     * Texto de donde se pueden CITAR frases para la historia (N7): solo lo que el cliente dijo
+     * con sus palabras (reenviado y clasificado como cliente). Sin él, la historia queda vacía.
+     */
+    citables?: string;
+  } = {},
 ): SalidaEntendida {
   const r = (raw && typeof raw === 'object' ? raw : {}) as Record<string, unknown>;
   const cli = (r.cliente && typeof r.cliente === 'object' ? r.cliente : {}) as Record<string, unknown>;
@@ -446,12 +691,17 @@ export function validarSalida(
   const fuente = normalizarTexto(textoFuente);
 
   const out: SalidaEntendida = {
-    historia: textoONull(r.historia) ?? '',
-    cliente: { nombre: textoONull(cli.nombre), telefono: textoONull(cli.telefono) },
+    // N7: la historia NO es prosa del modelo. Se arma con citas textuales del cliente que
+    // aparecen en lo citable; una paráfrasis («tiende a ser crítica») no puede entrar.
+    historia: historiaDeCitas(r.citas, opts.citables ?? ''),
+    // Un nombre o un teléfono que no está en los mensajes no es del cliente: el modelo puede copiar
+    // un marcador del prompt («(no lo dijo)», «Viaje T1 26 11») (QA de #971, E2a y N6).
+    cliente: { nombre: estaEnElTexto(textoONull(cli.nombre), fuente), telefono: telefonoEnElTexto(textoONull(cli.telefono), textoFuente) },
     sugeridos: {},
     descartados: [],
   };
 
+  const preferencias: string[] = [];
   for (const f of camposEntendibles(fields)) {
     const item = valores[f.slug] as { valor?: unknown; frase?: unknown } | undefined;
     const bruto = item?.valor;
@@ -492,7 +742,24 @@ export function validarSalida(
         out.descartados.push({ slug: f.slug, motivo: `fuera de las opciones: ${v}` });
         continue;
       }
-      if ((f.opciones ?? []).some(o => String(o.value) === v && o.no_definido === true)) {
+      const opcion = (f.opciones ?? []).find(o => String(o.value) === v)!;
+      // Rangos de dinero: el rango lo elige el código con la cifra, no el modelo (QA de #971 v2,
+      // «unos 10 millones» → «Entre $12 y $20 millones» 10/10).
+      const rangos = rangosDeDinero(f);
+      if (rangos && opcion.no_definido !== true) {
+        const elegido = opcionPorCifra(rangos, mensajeDeLaFrase(frase, textoFuente));
+        if ('motivo' in elegido) {
+          out.descartados.push({ slug: f.slug, motivo: elegido.motivo });
+          continue;
+        }
+        out.sugeridos[f.slug] = { valor: elegido.valor, frase };
+        continue;
+      }
+      if (opcion.no_definido !== true && !rangos && !fraseNombraOpcion(f, opcion, frase)) {
+        out.descartados.push({ slug: f.slug, motivo: `«${opcion.label ?? v}» deducida sin una frase que la nombre: «${frase}»` });
+        continue;
+      }
+      if (opcion.no_definido === true) {
         if (!declaraNoDefinido(frase)) {
           out.descartados.push({ slug: f.slug, motivo: `«no definido» sin que el cliente lo diga: «${frase}»` });
           continue;
@@ -510,8 +777,30 @@ export function validarSalida(
         out.descartados.push({ slug: f.slug, motivo: `el texto no sale de los mensajes: «${v.slice(0, 60)}»` });
         continue;
       }
+      // Un valor que es una OPCIÓN de otro campo de la config no es un valor de este: «playa» es
+      // un tipo de viaje, no un destino (QA de #971, A3). La lista sale de la config, no del código.
+      const deOtro = opcionDeOtroCampo(v, f, fields);
+      if (deOtro) {
+        out.descartados.push({ slug: f.slug, motivo: `«${v}» es una opción de «${deOtro.label ?? deOtro.slug}», no un valor de ${f.label ?? f.slug}` });
+        preferencias.push(frase);
+        continue;
+      }
+      // Si el cliente enumera ciudades después del destino, el destino las conserva todas.
+      if (f.slug === SLUG_DESTINO) {
+        const lugares = lugaresDespuesDelDestino(v, mensajeDeLaFrase(frase, textoFuente));
+        if (lugares.length > 0) {
+          out.sugeridos[f.slug] = { valor: `${v}: ${lugares.slice(0, -1).join(', ')} y ${lugares[lugares.length - 1]}`, frase };
+          continue;
+        }
+      }
       out.sugeridos[f.slug] = { valor: v, frase };
     }
+  }
+
+  // La preferencia que no era un valor («un destino de playa») va a requisitos con su frase.
+  const slugs = new Set(camposEntendibles(fields).map(f => f.slug));
+  if (preferencias.length > 0 && slugs.has(SLUG_REQUISITOS) && !out.sugeridos[SLUG_REQUISITOS]) {
+    out.sugeridos[SLUG_REQUISITOS] = { valor: preferencias.join('; '), frase: preferencias[0], deduccion: 'Preferencia del cliente que no es un valor del campo: se anota como requisito' };
   }
 
   // Un 0 en niños o bebés solo si la frase cierra quiénes viajan. La deducción determinista
@@ -525,6 +814,18 @@ export function validarSalida(
     }
   }
 
+  // Una enumeración cerrada de adultos («mi esposo y yo») sin un solo menor nombrado en los
+  // mensajes deduce 0 niños y 0 infantes, con la regla anotada (QA de #969 v2, A4).
+  const adultos = out.sugeridos.adultos;
+  if (adultos && !nombraMenores(textoFuente) && fraseCierraMenores(adultos.frase, Number(adultos.valor))) {
+    const slugs = new Set(camposEntendibles(fields).map(f => f.slug));
+    for (const slug of SLUGS_MENORES) {
+      if (!slugs.has(slug) || out.sugeridos[slug]) continue;
+      out.sugeridos[slug] = { valor: 0, frase: adultos.frase, deduccion: `«${adultos.frase}»: viajan ${adultos.valor} adultos y ningún mensaje nombra menores` };
+      out.descartados = out.descartados.filter(d => d.slug !== slug);
+    }
+  }
+
   // Un campo que solo aplica si viajan menores (misma condición `pedir_si` que pinta la barra,
   // la de `edades_menores`) se descarta si no se sabe que viajen: el permiso de salida de los
   // menores no se llena en un viaje sin niños (QA de #969, A4).
@@ -532,15 +833,24 @@ export function validarSalida(
   for (const [k, s] of Object.entries(out.sugeridos)) conocidosYNuevos[k] = s.valor;
   for (const f of camposEntendibles(fields)) {
     if (!out.sugeridos[f.slug] || !dependeDeMenores(f)) continue;
-    if (!cumplePedirSi(f.pedir_si, conocidosYNuevos)) {
+    const p = leerPedirSi(f.pedir_si);
+    const deMenores = 'error' in p ? [] : p.condiciones.filter(c =>
+      (typeof c.field === 'string' && SLUGS_MENORES.includes(c.field)) || (Array.isArray(c.suma_de) && c.suma_de.some(x => SLUGS_MENORES.includes(x))));
+    if (!deMenores.every(c => cumplePedirSi(c, conocidosYNuevos))) {
       delete out.sugeridos[f.slug];
       out.descartados.push({ slug: f.slug, motivo: 'solo aplica si viajan menores, y no se sabe que viajen' });
     }
   }
 
+  // El regreso sin año va con la salida: mismo año, o el siguiente si su mes es anterior.
+  const salida = out.sugeridos[SLUG_SALIDA]?.valor ?? opts.conocidos?.[SLUG_SALIDA];
+  const reg0 = out.sugeridos[SLUG_REGRESO];
+  if (reg0 && typeof salida === 'string' && fechaValida(salida) && !fraseDiceElAnio(reg0.frase)) {
+    const conSalida = regresoConLaSalida(String(reg0.valor), salida);
+    if (conSalida) out.sugeridos[SLUG_REGRESO] = { ...reg0, valor: conSalida };
+  }
   // El regreso no puede quedar antes de la salida (la de este mensaje o la que ya estaba).
   const regreso = out.sugeridos[SLUG_REGRESO];
-  const salida = out.sugeridos[SLUG_SALIDA]?.valor ?? opts.conocidos?.[SLUG_SALIDA];
   if (regreso && typeof salida === 'string' && fechaValida(salida) && String(regreso.valor) < salida) {
     delete out.sugeridos[SLUG_REGRESO];
     out.descartados.push({ slug: SLUG_REGRESO, motivo: `el regreso (${regreso.valor}) queda antes de la salida (${salida})` });
@@ -549,6 +859,45 @@ export function validarSalida(
 }
 
 /** La convención del bloque de viaje para las dos fechas. Sin ellas, la comparación no corre. */
+const SLUG_DESTINO = 'destino';
+const SLUG_REQUISITOS = 'requisitos_especiales';
+
+/** El campo `select`/`radio` (otro que `f`) que tiene `v` entre sus opciones, por valor o etiqueta. */
+export function opcionDeOtroCampo(v: string, f: CampoEntendible, fields: ReadonlyArray<CampoEntendible>): CampoEntendible | null {
+  const n = normalizarTexto(v).replace(/[^a-z0-9 ]/g, ' ').replace(/\s+/g, ' ').trim();
+  // Solo palabras: un número («5» años) no es la opción «5 estrellas» de otro campo.
+  if (!n || !/[a-z]/.test(n)) return null;
+  return fields.find(o => o.slug !== f.slug && (o.opciones ?? []).some(op =>
+    !op.no_definido && [op.value, op.label].some(x => x && normalizarTexto(String(x)).replace(/[^a-z0-9 ]/g, ' ').replace(/_/g, ' ').replace(/\s+/g, ' ').trim() === n))) ?? null;
+}
+
+/**
+ * ¿Este «nombre de cliente» es en realidad un lugar? Si coincide con el destino entendido o con un
+ * destino conocido (de los viajes abiertos), no es un nombre: el bot pregunta el nombre (QA de #971
+ * v2, D2m: se creó el contacto «PUNTA CANA»).
+ */
+export function nombreEsLugar(nombre: string | null | undefined, lugares: ReadonlyArray<unknown>): boolean {
+  const n = normalizarTexto(String(nombre ?? '')).replace(/[^a-z0-9 ]/g, ' ').replace(/\s+/g, ' ').trim();
+  if (!n) return false;
+  return lugares.some(l => {
+    const x = normalizarTexto(String(l ?? '')).replace(/[^a-z0-9 ]/g, ' ').replace(/\s+/g, ' ').trim();
+    return !!x && (x === n || x.split(/ o | y |: |, /).includes(n) || ` ${x} `.includes(` ${n} `));
+  });
+}
+
+/** El texto, si todas sus palabras están en el mensaje; si no, null. */
+function estaEnElTexto(v: string | null, fuenteNormalizada: string): string | null {
+  if (!v) return null;
+  const palabras = normalizarTexto(v).replace(/[^a-z0-9 ]/g, ' ').split(' ').filter(w => w.length >= 2);
+  const del = new Set(fuenteNormalizada.replace(/[^a-z0-9 ]/g, ' ').split(' '));
+  return palabras.length > 0 && palabras.every(w => del.has(w)) ? v : null;
+}
+
+/** El teléfono, si sus dígitos están en el mensaje. */
+function telefonoEnElTexto(v: string | null, texto: string): string | null {
+  const d = String(v ?? '').replace(/\D/g, '');
+  return d.length >= 7 && texto.replace(/\D/g, '').includes(d.slice(-7)) ? v : null;
+}
 const SLUG_SALIDA = 'fecha_salida';
 const SLUG_REGRESO = 'fecha_regreso';
 
@@ -619,8 +968,12 @@ export function fusionarSugeridos(
 const SLUG_NINOS = 'ninos';
 const SLUG_INFANTES = 'infantes';
 const SLUG_EDADES = 'edades_menores';
-/** Un infante es menor de 2 años («¿Viajan bebés menores de 2 años?»). */
-const EDAD_INFANTE = 2;
+/**
+ * Un infante es menor de 2 años («¿Viajan bebés menores de 2 años?»). Es el ÚNICO corte de edad
+ * del entendimiento: la categoría de infante en el avión es universal. Niño y adulto no se
+ * deciden por edad; los define operaciones en la cotización (decisión de Mauricio, QA de #971 v5).
+ */
+export const EDAD_INFANTE = 2;
 
 /**
  * Las edades en años de un texto como «9, 4», «9 AÑOS Y 4 AÑOS» o «9, 6 y 1». `null` si
@@ -641,7 +994,10 @@ export function leerEdades(texto: unknown): number[] | null {
  * @param valores lo que queda en el negocio (lo que ya tenía más lo que llega), por slug.
  * @returns sugeridos con `deduccion` y frase vacía, solo para campos vacíos.
  */
-export function deducirCeros(fields: ReadonlyArray<CampoEntendible>, valores: Record<string, unknown>): Record<string, Sugerido> {
+export function deducirCeros(
+  fields: ReadonlyArray<CampoEntendible>,
+  valores: Record<string, unknown>,
+): Record<string, Sugerido> {
   const slugs = new Set(fields.map(f => f.slug));
   if (![SLUG_NINOS, SLUG_INFANTES, SLUG_EDADES].every(s => slugs.has(s))) return {};
   if (!vacio(valores[SLUG_INFANTES])) return {};
@@ -659,7 +1015,10 @@ export function deducirCeros(fields: ReadonlyArray<CampoEntendible>, valores: Re
  * Para un negocio NUEVO: los sugeridos más lo que `deducirCeros` saca de ellos (con los
  * `default` de la config, como los deja `crearNegocio`). Lo que el modelo ya llenó no se toca.
  */
-export function conDeducciones(fields: ReadonlyArray<CampoEntendible>, sugeridos: Record<string, Sugerido>): Record<string, Sugerido> {
+export function conDeducciones(
+  fields: ReadonlyArray<CampoEntendible>,
+  sugeridos: Record<string, Sugerido>,
+): Record<string, Sugerido> {
   const valores: Record<string, unknown> = {};
   for (const f of fields) if (f.default !== undefined) valores[f.slug] = f.default;
   for (const [k, v] of Object.entries(sugeridos)) valores[k] = v.valor;
@@ -748,13 +1107,35 @@ export function resumenEntendido(fields: ReadonlyArray<CampoEntendible>, valores
 export const MAX_PREGUNTAS = 3;
 
 /** La respuesta al comercial: lo entendido y, como máximo, tres preguntas del mínimo. */
-export function mensajeAlComercial(p: { resumen: string; faltanMinimo: Faltante[]; enlace: string }): string {
+/**
+ * Las preguntas que van al comercial: primero las de los campos del mínimo que un guardián
+ * DESCARTÓ (el bot no puede callarse lo que tiró: QA de #969 v2, A4), luego las demás, hasta
+ * `max`. Si los descartados son más que `max`, van todos.
+ */
+export function preguntasDelMinimo<T extends { slug?: string }>(faltan: ReadonlyArray<T>, prioridad: ReadonlyArray<string> = [], max = MAX_PREGUNTAS): T[] {
+  // Si se tiró un conteo de pasajeros, se preguntan los tres: «somos 4 con los niños» pide el desglose.
+  const conteos = ['adultos', 'ninos', 'infantes'];
+  const prio = new Set(prioridad.some(p => conteos.includes(p)) ? [...prioridad, ...conteos] : prioridad);
+  const primero = faltan.filter(f => f.slug !== undefined && prio.has(f.slug));
+  const resto = faltan.filter(f => !(f.slug !== undefined && prio.has(f.slug)));
+  return [...primero, ...resto].slice(0, Math.max(max, primero.length));
+}
+
+export function mensajeAlComercial(p: {
+  resumen: string; faltanMinimo: Faltante[]; enlace: string; descartados?: ReadonlyArray<string>;
+  /** Preguntas de un guardián (C9) que van antes de las del mínimo, aunque el mínimo esté completo. */
+  preguntasAntes?: ReadonlyArray<string>;
+  /** La línea de avance de la carga («T1 26 11 · Carolina — Mínimo 7/9 (78 %) · Completo 12/20 (60 %)»). */
+  avance?: string | null;
+}): string {
   const entendi = p.resumen ? `Entendí: ${p.resumen}.` : 'Recibí la solicitud.';
+  const cabeza = [entendi, ...(p.avance ? [p.avance] : [])];
+  const antes = p.preguntasAntes ?? [];
   if (p.faltanMinimo.length === 0) {
-    return `${entendi}\nYa está el mínimo para cotizar: ${p.enlace}`;
+    return [...cabeza, ...(antes.length ? ['Antes de cotizar:', ...antes.map((q, i) => `${i + 1}. ${q}`)] : []), `Ya está el mínimo para cotizar: ${p.enlace}`].join('\n');
   }
-  const preguntas = p.faltanMinimo.slice(0, MAX_PREGUNTAS).map((f, i) => `${i + 1}. ${f.pregunta}`);
-  return [entendi, 'Para empezar a cotizar me falta:', ...preguntas].join('\n');
+  const preguntas = [...antes, ...preguntasDelMinimo(p.faltanMinimo, p.descartados).map(f => f.pregunta)].map((q, i) => `${i + 1}. ${q}`);
+  return [...cabeza, 'Para empezar a cotizar me falta:', ...preguntas].join('\n');
 }
 
 /** Los huecos, con la misma función que pinta las barras en ONE. */
@@ -845,22 +1226,28 @@ function finTelefono(t: string | null): string {
 }
 
 export function textoPreguntaContacto(d: Extract<DecisionContacto, { tipo: 'preguntar' }>): string {
-  const quien = d.nombre ? `«${d.nombre}»` : 'el cliente';
+  // N9: sin nombre no hay a quién buscar ni a quién crear. Se pide el nombre, nunca un error mudo.
+  if (!d.nombre && d.opciones.length === 0) return TEXTO_PIDE_NOMBRE;
+  const quien = d.nombre ? `«${d.nombre}»` : 'al cliente';
   const cab = d.motivo === 'varios'
-    ? `Hay ${d.opciones.length} contactos que podrían ser ${quien}. ¿Cuál es?`
+    ? `Hay ${d.opciones.length} contactos que podrían ser ${d.nombre ? quien : 'el cliente'}. ¿Cuál es?`
     : d.opciones.length > 0
       ? `No encontré a ${quien} tal cual en el directorio. ¿Es alguno de estos?`
       : `No encontré a ${quien} en el directorio.`;
   const lista = d.opciones.map((c, i) => `${i + 1}. ${c.nombre ?? 'Sin nombre'}${finTelefono(c.telefono)}`);
   const pie = d.opciones.length > 0
-    ? 'Responde con el número, o escribe NUEVO para crearlo.'
-    : 'Escribe NUEVO para crearlo con ese nombre, o mándame el celular del cliente.';
+    ? 'Responde con el número, o escribe NUEVO y el nombre para crearlo.'
+    : 'Escribe NUEVO para crearlo con ese nombre (o NUEVO y otro nombre), o mándame el celular del cliente.';
   return [cab, ...lista, pie].join('\n');
 }
 
+/** N9 · NUEVO sin nombre: el bot lo pide en vez de terminar en un error mudo (E2a). */
+export const TEXTO_PIDE_NOMBRE = 'No sé el nombre del cliente y sin él no puedo crear el viaje. Escríbeme NUEVO y su nombre (ej.: NUEVO Marta Gómez), o mándame su celular.';
+
 export type RespuestaContacto =
   | { tipo: 'elegido'; contacto_id: string }
-  | { tipo: 'nuevo' }
+  /** `nombre`: lo que escribió después de NUEVO («NUEVO Marta Gómez»), o null. */
+  | { tipo: 'nuevo'; nombre: string | null }
   | { tipo: 'telefono'; telefono: string }
   | { tipo: 'no_entendida' };
 
@@ -871,7 +1258,9 @@ export function interpretarRespuestaContacto(texto: string, opciones: ContactoCa
     const i = Number(m[1]) - 1;
     return i >= 0 && i < opciones.length ? { tipo: 'elegido', contacto_id: opciones[i].id } : { tipo: 'no_entendida' };
   }
-  if (t === 'nuevo' || t === 'nueva' || t === 'crear' || t === 'crearlo') return { tipo: 'nuevo' };
+  if (t === 'nuevo' || t === 'nueva' || t === 'crear' || t === 'crearlo') return { tipo: 'nuevo', nombre: null };
+  const conNombre = /^\s*nuev[oa]\b[\s,.:;-]+([^\d]{2,})$/i.exec(String(texto ?? ''));
+  if (conNombre) return { tipo: 'nuevo', nombre: conNombre[1].trim() };
   const tel = digitosTelefono(texto);
   if (tel && tel.length >= 10) return { tipo: 'telefono', telefono: tel };
   return { tipo: 'no_entendida' };
