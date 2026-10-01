@@ -31,7 +31,7 @@ function leer(fila: Fila, col: string): unknown {
   return fila[col];
 }
 
-const UNICOS: Record<string, string> = { wa_bandeja_mensajes: 'wa_message_id', wa_bandeja_entendimientos: 'entrega_id' };
+const UNICOS: Record<string, string> = { wa_bandeja_mensajes: 'wa_message_id' };
 
 function crearDb(t: Tablas) {
   function from(tabla: string) {
@@ -66,8 +66,8 @@ function crearDb(t: Tablas) {
       }
       if (op === 'upsert') {
         const f = { id: nuevoId(), ...(payload as Fila) };
-        const col = upsertOpts.onConflict!;
-        if (t[tabla].some(x => x[col] === f[col])) return { data: [], error: null };
+        const cols = upsertOpts.onConflict!.split(',').map(c => c.trim());
+        if (t[tabla].some(x => cols.every(c => (x[c] ?? 0) === (f[c] ?? 0)))) return { data: [], error: null };
         t[tabla].push(f);
         return { data: [proyectar(f)], error: null };
       }
@@ -175,16 +175,19 @@ function entrega(p: { respuesta: string; opciones: unknown; mensajes: Array<{ cu
   });
   p.mensajes.forEach((m, i) => t.wa_bandeja_mensajes.push({
     id: nuevoId(), workspace_id: WS, entrega_id: id, wa_message_id: `w-${id}-${i}`, papel: 'contenido',
-    cuerpo: m.cuerpo, cuerpo_origen: m.origen ?? 'texto', recibido_at: `2026-09-30T13:0${i}:00Z`,
+    cuerpo: m.cuerpo, cuerpo_origen: m.origen ?? 'texto', recibido_at: `2026-09-30T13:0${i}:00Z`, reenviado: true, tipo: 'text',
   }));
   return id;
 }
 
-/** La salida del modelo: todo por definir salvo lo que se pase. */
-function modelo(historia: string, valores: Record<string, { valor: string; frase: string }>) {
+/**
+ * La salida del modelo: todo por definir salvo lo que se pase. La historia es extractiva (N7):
+ * `citas` son frases que el modelo copió; solo entran las que están en lo que el cliente reenvió.
+ */
+function modelo(citas: string | string[], valores: Record<string, { valor: string; frase: string }>, extra: Fila = {}) {
   const v: Record<string, unknown> = {};
   for (const f of FIELDS) v[f.slug] = valores[f.slug] ?? { valor: 'por_definir', frase: '' };
-  salidaModelo = { historia, cliente: { nombre: '', telefono: '' }, valores: v };
+  salidaModelo = { citas: Array.isArray(citas) ? citas : [citas], cliente: { nombre: '', telefono: '' }, valores: v, ...extra };
 }
 
 beforeEach(async () => {
@@ -310,17 +313,19 @@ describe('carga en un negocio existente', () => {
 
   it('la historia se agrega a la actividad sin borrar la anterior', async () => {
     entrega({ respuesta: '2', opciones: OPCIONES, mensajes: [{ cuerpo: 'volvemos el 27' }] });
-    modelo('Segunda conversación: regresan el 27.', { fecha_regreso: { valor: '2026-11-27', frase: 'volvemos el 27' } });
+    modelo(['volvemos el 27', 'La cliente regresa el 27'], { fecha_regreso: { valor: '2026-11-27', frase: 'volvemos el 27' } });
     await correr();
     entrega({ respuesta: '2', opciones: OPCIONES, mensajes: [{ cuerpo: 'somos de Cali' }] });
-    modelo('Tercera conversación: salen de Cali.', { ciudad_origen: { valor: 'Cali', frase: 'somos de Cali' } });
+    modelo('somos de Cali', { ciudad_origen: { valor: 'Cali', frase: 'somos de Cali' } });
     await correr();
 
     const act = t.activity_log.filter(a => a.entidad_id === 'n14').map(a => String(a.contenido));
     expect(act).toHaveLength(3);
     expect(act[0]).toBe('Historia del 20-sep: primera conversación.');
-    expect(act[1]).toContain('Historia del 30-sep:\nSegunda conversación: regresan el 27.');
-    expect(act[2]).toContain('Historia del 30-sep:\nTercera conversación: salen de Cali.');
+    // Citas del cliente, no prosa del modelo: la paráfrasis «La cliente regresa el 27» no entra.
+    expect(act[1]).toContain('Historia del 30-sep:\nEl cliente dijo:\n«volvemos el 27»');
+    expect(act[1]).not.toContain('La cliente regresa');
+    expect(act[2]).toContain('Historia del 30-sep:\nEl cliente dijo:\n«somos de Cali»');
     // Y la segunda carga no borró lo que dejó la primera.
     expect(bloque('b14')).toMatchObject({ fecha_regreso: '2026-11-27', ciudad_origen: 'CALI' });
   });
@@ -384,7 +389,7 @@ describe('NUEVO y re-pregunta', () => {
 
   it('la pregunta vieja (sin lista guardada) sigue el camino de antes: la respuesta es el cliente', async () => {
     entrega({ respuesta: 'Carla Prueba', opciones: null, mensajes: [{ cuerpo: 'quiere ir a Aruba' }] });
-    modelo('Quiere ir a Aruba.', {});
+    modelo('Quiere ir a Aruba.', { destino: { valor: 'Aruba', frase: 'ir a Aruba' } });
     await correr();
     expect(ent()).toMatchObject({ estado: 'esperando_contacto', contacto_nombre: 'Carla Prueba' });
     expect(ent().destino).toBeUndefined();

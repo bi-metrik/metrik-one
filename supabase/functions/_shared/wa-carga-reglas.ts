@@ -27,6 +27,7 @@ import {
   mayusculasDeViaje,
   normalizarNombre,
   normalizarTexto,
+  preguntasDelMinimo,
   type CampoEntendible,
   type MarcaSugerido,
   type Sugerido,
@@ -327,12 +328,13 @@ export function sugeridosConDeducciones(
   bloques: ReadonlyArray<{ fields: CampoEntendible[]; data: Record<string, unknown> }>,
   sugeridos: Record<string, Sugerido>,
   meta: { entrega_id: string; en: string; origenDe: (frase: string) => 'audio' | 'mensaje' },
+  infanteMenorDe?: number,
 ): Record<string, Sugerido> {
   const vistos = new Set<string>();
   const quedaria = bloques.map(b => ({ fields: b.fields, data: cargarEnExistente(b.data, b.fields, sugeridos, meta, vistos).data }));
   const { fields, valores } = aplanarBloques(quedaria);
   const campos = fields as CampoEntendible[];
-  const deducidos = deducirCeros(campos, aplicarSumas(campos, valores));
+  const deducidos = deducirCeros(campos, aplicarSumas(campos, valores), infanteMenorDe);
   const out = { ...sugeridos };
   for (const [slug, s] of Object.entries(deducidos)) if (!(slug in out)) out[slug] = s;
   return out;
@@ -389,7 +391,9 @@ export function mensajeCargaExistente(p: {
   conflictos: Conflicto[];
   /** Sugeridos sin confirmar que el mensaje reemplazó: «Actualicé adultos: 2 → 3». */
   actualizados?: ReadonlyArray<Pick<Actualizado, 'slug' | 'anterior' | 'valor'>>;
-  faltanMinimo: ReadonlyArray<{ pregunta: string }>;
+  faltanMinimo: ReadonlyArray<{ pregunta: string; slug?: string }>;
+  /** Slugs que un guardián descartó: sus preguntas van primero y no se recortan. */
+  descartados?: ReadonlyArray<string>;
   enlace: string;
   maxPreguntas?: number;
 }): string {
@@ -426,7 +430,7 @@ export function mensajeCargaExistente(p: {
   if (p.faltanMinimo.length === 0) {
     lineas.push(`Ya está el mínimo para cotizar: ${p.enlace}`);
   } else {
-    lineas.push('Para empezar a cotizar me falta:', ...p.faltanMinimo.slice(0, max).map((f, i) => `${i + 1}. ${f.pregunta}`));
+    lineas.push('Para empezar a cotizar me falta:', ...preguntasDelMinimo(p.faltanMinimo, p.descartados, max).map((f, i) => `${i + 1}. ${f.pregunta}`));
     if (p.conflictos.length > 0) lineas.push(p.enlace);
   }
   return lineas.join('\n');
@@ -474,4 +478,57 @@ export function trazaCarga(p: {
   }
   if (p.historia.trim()) partes.push('', `Historia del ${dia}:`, p.historia.trim());
   return partes.join('\n');
+}
+
+// ── N6 · ¿es el viaje equivocado? ────────────────────────────────────────────
+
+/** Un choque entre lo que dicen los mensajes y el negocio elegido. */
+export interface Cruce {
+  que: 'destino' | 'cliente';
+  enNegocio: string;
+  enMensajes: string;
+}
+
+function palabrasLargas(t: string | null | undefined): Set<string> {
+  return new Set(normalizarNombre(t).split(' ').filter(w => w.length >= 3));
+}
+
+/**
+ * Antes de cargar en un negocio EXISTENTE: ¿los mensajes hablan de otro viaje? (N6, C1: los datos
+ * de Carolina a Punta Cana terminaron en los campos vacíos de Jorge, que va a Cartagena.)
+ *   · destino: los dos tienen destino y ninguno contiene al otro;
+ *   · cliente: los mensajes nombran a un cliente que no comparte ni una palabra con el del negocio.
+ * Las fechas NO cuentan solas: un cliente que mueve su viaje («mejor del 28») es lo normal, y
+ * eso ya lo atiende `cargarEnExistente` (actualiza o deja en conflicto).
+ */
+export function detectarCruce(p: {
+  destinoNegocio: unknown;
+  destinoMensajes: unknown;
+  clienteNegocio: string | null;
+  clienteMensajes: string | null;
+}): Cruce[] {
+  const out: Cruce[] = [];
+  const dn = typeof p.destinoNegocio === 'string' ? p.destinoNegocio.trim() : '';
+  const dm = typeof p.destinoMensajes === 'string' ? p.destinoMensajes.trim() : '';
+  if (dn && dm) {
+    const a = normalizarTexto(dn);
+    const b = normalizarTexto(dm);
+    if (!a.includes(b) && !b.includes(a)) out.push({ que: 'destino', enNegocio: dn, enMensajes: dm });
+  }
+  const cn = palabrasLargas(p.clienteNegocio);
+  const cm = palabrasLargas(p.clienteMensajes);
+  if (cn.size > 0 && cm.size > 0 && ![...cm].some(w => cn.has(w))) {
+    out.push({ que: 'cliente', enNegocio: String(p.clienteNegocio), enMensajes: String(p.clienteMensajes) });
+  }
+  return out;
+}
+
+/** «Estos mensajes hablan de Punta Cana y T1 26 8 es de JORGE PÉREZ a CARTAGENA. ¿Seguro?» */
+export function textoAvisoCruce(p: { codigo: string | null; cliente: string | null; destino: string | null; cruces: ReadonlyArray<Cruce> }): string {
+  const deQue = p.cruces.map(c => c.enMensajes);
+  const viaje = [p.codigo ?? 'ese viaje', p.cliente ? `es de ${p.cliente}` : null, p.destino ? `a ${p.destino}` : null].filter(Boolean).join(' ');
+  return [
+    `Estos mensajes hablan de ${deQue.join(' y de ')} y ${viaje}. No cargué nada.`,
+    '¿Seguro que van ahí? Responde SÍ para cargarlos igual, o el número o el código del viaje correcto, o NUEVO y el nombre del cliente.',
+  ].join('\n');
 }

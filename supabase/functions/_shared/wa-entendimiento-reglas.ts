@@ -251,7 +251,7 @@ function fechaValida(v: string): boolean {
 // ── Guardián 1: un mes o una ventana no es una fecha ─────────────────────────
 
 /** Los días del mes escritos con letras, como los deja una transcripción de audio. */
-const DIAS_EN_LETRAS: Record<string, number> = {
+export const DIAS_EN_LETRAS: Record<string, number> = {
   primero: 1, uno: 1, dos: 2, tres: 3, cuatro: 4, cinco: 5, seis: 6, siete: 7, ocho: 8, nueve: 9, diez: 10,
   once: 11, doce: 12, trece: 13, catorce: 14, quince: 15, dieciseis: 16, diecisiete: 17, dieciocho: 18,
   diecinueve: 19, veinte: 20, veintiuno: 21, veintiun: 21, veintidos: 22, veintitres: 23, veinticuatro: 24,
@@ -788,17 +788,22 @@ export function leerEdades(texto: unknown): number[] | null {
  * @param valores lo que queda en el negocio (lo que ya tenía más lo que llega), por slug.
  * @returns sugeridos con `deduccion` y frase vacía, solo para campos vacíos.
  */
-export function deducirCeros(fields: ReadonlyArray<CampoEntendible>, valores: Record<string, unknown>): Record<string, Sugerido> {
+export function deducirCeros(
+  fields: ReadonlyArray<CampoEntendible>,
+  valores: Record<string, unknown>,
+  /** Corte de infante de la config (`edad_infante_menor_de`): menor de esto es infante. */
+  infanteMenorDe: number = EDAD_INFANTE,
+): Record<string, Sugerido> {
   const slugs = new Set(fields.map(f => f.slug));
   if (![SLUG_NINOS, SLUG_INFANTES, SLUG_EDADES].every(s => slugs.has(s))) return {};
   if (!vacio(valores[SLUG_INFANTES])) return {};
   const ninos = parsearNumeroColombiano(valores[SLUG_NINOS]);
   if (ninos === null || !Number.isInteger(ninos) || ninos <= 0) return {};
   const edades = leerEdades(valores[SLUG_EDADES]);
-  if (!edades || edades.length !== ninos || edades.some(e => e < EDAD_INFANTE)) return {};
+  if (!edades || edades.length !== ninos || edades.some(e => e < infanteMenorDe)) return {};
   const quien = ninos === 1 ? 'el niño no es menor' : `ninguno de los ${ninos} niños es menor`;
   return {
-    [SLUG_INFANTES]: { valor: 0, frase: '', deduccion: `Edades ${edades.join(', ')}: ${quien} de ${EDAD_INFANTE} años` },
+    [SLUG_INFANTES]: { valor: 0, frase: '', deduccion: `Edades ${edades.join(', ')}: ${quien} de ${infanteMenorDe} años` },
   };
 }
 
@@ -806,12 +811,16 @@ export function deducirCeros(fields: ReadonlyArray<CampoEntendible>, valores: Re
  * Para un negocio NUEVO: los sugeridos más lo que `deducirCeros` saca de ellos (con los
  * `default` de la config, como los deja `crearNegocio`). Lo que el modelo ya llenó no se toca.
  */
-export function conDeducciones(fields: ReadonlyArray<CampoEntendible>, sugeridos: Record<string, Sugerido>): Record<string, Sugerido> {
+export function conDeducciones(
+  fields: ReadonlyArray<CampoEntendible>,
+  sugeridos: Record<string, Sugerido>,
+  infanteMenorDe: number = EDAD_INFANTE,
+): Record<string, Sugerido> {
   const valores: Record<string, unknown> = {};
   for (const f of fields) if (f.default !== undefined) valores[f.slug] = f.default;
   for (const [k, v] of Object.entries(sugeridos)) valores[k] = v.valor;
   const out = { ...sugeridos };
-  for (const [slug, s] of Object.entries(deducirCeros(fields, aplicarSumas(fields, valores)))) if (!(slug in out)) out[slug] = s;
+  for (const [slug, s] of Object.entries(deducirCeros(fields, aplicarSumas(fields, valores), infanteMenorDe))) if (!(slug in out)) out[slug] = s;
   return out;
 }
 
@@ -895,12 +904,24 @@ export function resumenEntendido(fields: ReadonlyArray<CampoEntendible>, valores
 export const MAX_PREGUNTAS = 3;
 
 /** La respuesta al comercial: lo entendido y, como máximo, tres preguntas del mínimo. */
-export function mensajeAlComercial(p: { resumen: string; faltanMinimo: Faltante[]; enlace: string }): string {
+/**
+ * Las preguntas que van al comercial: primero las de los campos del mínimo que un guardián
+ * DESCARTÓ (el bot no puede callarse lo que tiró: QA de #969 v2, A4), luego las demás, hasta
+ * `max`. Si los descartados son más que `max`, van todos.
+ */
+export function preguntasDelMinimo<T extends { slug?: string }>(faltan: ReadonlyArray<T>, prioridad: ReadonlyArray<string> = [], max = MAX_PREGUNTAS): T[] {
+  const prio = new Set(prioridad);
+  const primero = faltan.filter(f => f.slug !== undefined && prio.has(f.slug));
+  const resto = faltan.filter(f => !(f.slug !== undefined && prio.has(f.slug)));
+  return [...primero, ...resto].slice(0, Math.max(max, primero.length));
+}
+
+export function mensajeAlComercial(p: { resumen: string; faltanMinimo: Faltante[]; enlace: string; descartados?: ReadonlyArray<string> }): string {
   const entendi = p.resumen ? `Entendí: ${p.resumen}.` : 'Recibí la solicitud.';
   if (p.faltanMinimo.length === 0) {
     return `${entendi}\nYa está el mínimo para cotizar: ${p.enlace}`;
   }
-  const preguntas = p.faltanMinimo.slice(0, MAX_PREGUNTAS).map((f, i) => `${i + 1}. ${f.pregunta}`);
+  const preguntas = preguntasDelMinimo(p.faltanMinimo, p.descartados).map((f, i) => `${i + 1}. ${f.pregunta}`);
   return [entendi, 'Para empezar a cotizar me falta:', ...preguntas].join('\n');
 }
 
@@ -992,22 +1013,28 @@ function finTelefono(t: string | null): string {
 }
 
 export function textoPreguntaContacto(d: Extract<DecisionContacto, { tipo: 'preguntar' }>): string {
-  const quien = d.nombre ? `«${d.nombre}»` : 'el cliente';
+  // N9: sin nombre no hay a quién buscar ni a quién crear. Se pide el nombre, nunca un error mudo.
+  if (!d.nombre && d.opciones.length === 0) return TEXTO_PIDE_NOMBRE;
+  const quien = d.nombre ? `«${d.nombre}»` : 'al cliente';
   const cab = d.motivo === 'varios'
-    ? `Hay ${d.opciones.length} contactos que podrían ser ${quien}. ¿Cuál es?`
+    ? `Hay ${d.opciones.length} contactos que podrían ser ${d.nombre ? quien : 'el cliente'}. ¿Cuál es?`
     : d.opciones.length > 0
       ? `No encontré a ${quien} tal cual en el directorio. ¿Es alguno de estos?`
       : `No encontré a ${quien} en el directorio.`;
   const lista = d.opciones.map((c, i) => `${i + 1}. ${c.nombre ?? 'Sin nombre'}${finTelefono(c.telefono)}`);
   const pie = d.opciones.length > 0
-    ? 'Responde con el número, o escribe NUEVO para crearlo.'
-    : 'Escribe NUEVO para crearlo con ese nombre, o mándame el celular del cliente.';
+    ? 'Responde con el número, o escribe NUEVO y el nombre para crearlo.'
+    : 'Escribe NUEVO para crearlo con ese nombre (o NUEVO y otro nombre), o mándame el celular del cliente.';
   return [cab, ...lista, pie].join('\n');
 }
 
+/** N9 · NUEVO sin nombre: el bot lo pide en vez de terminar en un error mudo (E2a). */
+export const TEXTO_PIDE_NOMBRE = 'No sé el nombre del cliente y sin él no puedo crear el viaje. Escríbeme NUEVO y su nombre (ej.: NUEVO Marta Gómez), o mándame su celular.';
+
 export type RespuestaContacto =
   | { tipo: 'elegido'; contacto_id: string }
-  | { tipo: 'nuevo' }
+  /** `nombre`: lo que escribió después de NUEVO («NUEVO Marta Gómez»), o null. */
+  | { tipo: 'nuevo'; nombre: string | null }
   | { tipo: 'telefono'; telefono: string }
   | { tipo: 'no_entendida' };
 
@@ -1018,7 +1045,9 @@ export function interpretarRespuestaContacto(texto: string, opciones: ContactoCa
     const i = Number(m[1]) - 1;
     return i >= 0 && i < opciones.length ? { tipo: 'elegido', contacto_id: opciones[i].id } : { tipo: 'no_entendida' };
   }
-  if (t === 'nuevo' || t === 'nueva' || t === 'crear' || t === 'crearlo') return { tipo: 'nuevo' };
+  if (t === 'nuevo' || t === 'nueva' || t === 'crear' || t === 'crearlo') return { tipo: 'nuevo', nombre: null };
+  const conNombre = /^\s*nuev[oa]\b[\s,.:;-]+([^\d]{2,})$/i.exec(String(texto ?? ''));
+  if (conNombre) return { tipo: 'nuevo', nombre: conNombre[1].trim() };
   const tel = digitosTelefono(texto);
   if (tel && tel.length >= 10) return { tipo: 'telefono', telefono: tel };
   return { tipo: 'no_entendida' };

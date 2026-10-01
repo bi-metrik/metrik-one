@@ -227,7 +227,7 @@ describe('el contacto: exacto o se pregunta', () => {
   it('la respuesta: número de la lista, NUEVO, un celular, o no se entiende', () => {
     expect(interpretarRespuestaContacto(' 2 ', [ana, ana2])).toEqual({ tipo: 'elegido', contacto_id: 'b' });
     expect(interpretarRespuestaContacto('3', [ana, ana2])).toEqual({ tipo: 'no_entendida' });
-    expect(interpretarRespuestaContacto('Nuevo', [])).toEqual({ tipo: 'nuevo' });
+    expect(interpretarRespuestaContacto('Nuevo', [])).toEqual({ tipo: 'nuevo', nombre: null });
     expect(interpretarRespuestaContacto('300 999 8877', [])).toEqual({ tipo: 'telefono', telefono: '3009998877' });
     expect(interpretarRespuestaContacto('la de siempre', [ana])).toEqual({ tipo: 'no_entendida' });
   });
@@ -448,6 +448,8 @@ describe('QA de #969 · 3: el 0 en niños o bebés solo si la frase cierra quié
     ['«solo adultos»', 'al final van solo adultos, somos 3', 'van solo adultos', '3'],
     ['«somos dos» con 2 adultos', 'somos dos, a Cartagena', 'somos dos', '2'],
     ['«no van los niños»', 'esta vez no van los niños', 'no van los niños', '2'],
+    ['«mi esposo y yo» con 2 adultos (QA de #969 v2, A4)', 'Mi esposo y yo queremos Europa', 'Mi esposo y yo', '2'],
+    ['«vamos los dos»', 'vamos los dos a Cartagena', 'vamos los dos', '2'],
   ])('pasa: %s', (_n, texto, frase, adultos) => {
     const s = leer(texto, { adultos: { valor: adultos, frase: texto }, ninos: { valor: '0', frase }, infantes: { valor: '0', frase } });
     expect(s.sugeridos.ninos?.valor).toBe(0);
@@ -455,7 +457,6 @@ describe('QA de #969 · 3: el 0 en niños o bebés solo si la frase cierra quié
   });
 
   it.each([
-    ['«mi esposo y yo» (no cierra; el bot pregunta)', 'Mi esposo y yo queremos Europa', 'Mi esposo y yo', '2'],
     ['«somos 3» con 2 adultos', 'somos 3', 'somos 3', '2'],
     ['«somos 2 y los niños»', 'somos 2 y los niños', 'somos 2 y los niños', '2'],
   ])('no pasa: %s', (_n, texto, frase, adultos) => {

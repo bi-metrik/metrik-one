@@ -11,7 +11,8 @@
 // ============================================================
 
 import { transcribeAudio, PROMPT_TRANSCRIPCION_LITERAL } from './wa-transcribe.ts';
-import { armarPreguntaNegocio, tomarRespuestaContacto } from './wa-entendimiento.ts';
+import { armarPreguntaNegocio, hayPreguntaPendiente, tomarRespuestaContacto, viajesAbiertosDeLaBandeja } from './wa-entendimiento.ts';
+import { resolverEncabezado } from './wa-viajes-reglas.ts';
 import { sendTextMessage } from './wa-respond.ts';
 import {
   bandejaActiva,
@@ -89,10 +90,43 @@ export async function rutaDelMensaje(
   const reenviado = message.reenviado === true;
   // Un reenvío va a la bandeja pase lo que pase: no hace falta preguntar por la sesión.
   const sesion = reenviado ? false : await sesionBotEsperando(supabase, message.phone, user.workspace_id);
-  const ruta = decidirRuta({
-    modules, config, tipo: message.type, texto: message.text, reenviado, sesionBotEsperando: sesion,
-  });
+  const base = { modules, config, tipo: message.type, texto: message.text, reenviado, sesionBotEsperando: sesion };
+  let ruta = decidirRuta(base);
+  // Regla 5 (N8): un escrito suelto solo se queda en la bandeja si hay una tanda abierta, una
+  // pregunta pendiente o es un encabezado. Se mira solo cuando hace falta (texto escrito que hoy
+  // iría a la bandeja), para no sumar consultas a los reenvíos.
+  if (ruta === 'bandeja' && !reenviado && message.type === 'text') {
+    ruta = decidirRuta({ ...base, ...(await contextoDelEscrito(supabase, user.workspace_id, message.phone, message.text, config)) });
+  }
   return { ruta, config };
+}
+
+/**
+ * Lo que la regla 5 de `decidirRuta` necesita saber de un escrito. Ante un error de lectura se
+ * deja `undefined`: el escrito va a la bandeja, como antes (la regla solo saca lo que SABE que no
+ * es de la bandeja).
+ */
+async function contextoDelEscrito(
+  supabase: SupabaseClient, workspaceId: string, phone: string, texto: string, config: ConfigBandeja,
+): Promise<{ entregaAbierta?: boolean; preguntaPendiente?: boolean; esEncabezado?: boolean }> {
+  const { data: abierta, error } = await supabase.from('wa_bandeja_entregas').select('id')
+    .eq('workspace_id', workspaceId).eq('remitente_phone', phone).eq('estado', 'abierta').limit(1).maybeSingle();
+  if (error) return {};
+  if (abierta) return { entregaAbierta: true };
+  const desde = new Date(Date.now() - config.horasRespuestaCliente * 3600_000).toISOString();
+  const { data: esperando, error: e2 } = await supabase.from('wa_bandeja_entregas').select('id')
+    .eq('workspace_id', workspaceId).eq('remitente_phone', phone).eq('estado', 'esperando_cliente')
+    .gte('pregunta_enviada_at', desde).limit(1).maybeSingle();
+  if (e2) return {};
+  const preguntaPendiente = !!esperando || await hayPreguntaPendiente(supabase, workspaceId, phone);
+  if (preguntaPendiente) return { entregaAbierta: false, preguntaPendiente: true };
+  let esEncabezado = false;
+  if (config.modoViajes !== 'uno') {
+    const viajes = await viajesAbiertosDeLaBandeja(supabase, workspaceId);
+    if (!viajes) return {};
+    esEncabezado = resolverEncabezado(texto, viajes) !== null;
+  }
+  return { entregaAbierta: false, preguntaPendiente: false, esEncabezado };
 }
 
 type FilaRegistro = { accion: AccionRegistro; entrega: string | null; mensajes: number | null };
@@ -229,7 +263,8 @@ async function enviar(phone: string, texto: string, workspaceId: string): Promis
  * Hace la pregunta y deja anotado si salió. La entrega ya está cerrada cuando se llama.
  *
  * La pregunta es «¿A qué viaje van?» con la lista corta de negocios abiertos y NUEVO; la lista
- * ofrecida se guarda en la entrega para que «2» signifique lo mismo al contestar. Si la lista
+ * ofrecida se guarda en la entrega para que «2» signifique lo mismo al contestar. En modo
+ * encabezado/mixto es el resumen del reparto (`plan_viajes`), y nada se carga hasta el «sí». Si la lista
  * no se puede armar (sin línea, error de lectura), sale la pregunta vieja «¿De qué cliente
  * es?» y la entrega sigue el camino de antes (negocio nuevo).
  */
@@ -241,8 +276,18 @@ export async function preguntarCliente(
   workspaceId: string,
 ): Promise<void> {
   const viaje = await armarPreguntaNegocio(supabase, entregaId, workspaceId, nMensajes);
+  if (viaje?.plan && viaje.sinDudas) {
+    // `confirmar: si_duda` y un reparto sin una sola duda: se carga sin preguntar, y se dice qué.
+    await enviar(phone, `Cargo esto sin preguntar (un solo viaje, por encabezado):\n${viaje.texto.split('\n').slice(0, -1).join('\n')}`, workspaceId);
+    const { error } = await supabase.from('wa_bandeja_entregas').update({
+      plan_viajes: viaje.plan, pregunta_enviada_at: new Date().toISOString(),
+      estado: 'con_cliente', cliente_texto: 'sí', cliente_respondido_at: new Date().toISOString(),
+    }).eq('id', entregaId);
+    if (error) console.error(`[wa-bandeja] no se pudo cargar sin preguntar ${entregaId}:`, error.message);
+    return;
+  }
   const ok = await enviar(phone, viaje?.texto ?? textoPreguntaCliente(nMensajes), workspaceId);
-  const lista = viaje ? { negocio_opciones: viaje.opciones } : {};
+  const lista = viaje?.plan ? { plan_viajes: viaje.plan } : viaje?.opciones ? { negocio_opciones: viaje.opciones } : {};
   const { error } = await supabase
     .from('wa_bandeja_entregas')
     .update(ok
