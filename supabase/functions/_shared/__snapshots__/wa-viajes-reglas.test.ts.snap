@@ -1,6 +1,6 @@
 // Vitest Snapshot v1, https://vitest.dev/guide/snapshot.html
 
-exports[`el día sintético del QA v3 CON encabezados (2 olvidados, «Lusia», «habla Marta, la esposa de Jorge») > ningún mensaje se carga en un viaje ajeno sin pasar por el comercial; cuenta las preguntas del día 1`] = `
+exports[`el día sintético del QA v3 CON encabezados (2 olvidados, «Lusia», «habla Marta, la esposa de Jorge») > ningún mensaje se carga en un viaje ajeno sin pasar por el comercial; cuenta las preguntas del día (con «sí» a cada «¿Cambias a…?») 1`] = `
 {
   "cargados": 34,
   "decisiones": 8,
@@ -13,6 +13,25 @@ exports[`el día sintético del QA v3 CON encabezados (2 olvidados, «Lusia», �
     1,
     0,
   ],
+  "preguntasEnElActo": 2,
+  "resumenes": 7,
+}
+`;
+
+exports[`el día sintético del QA v3 CON encabezados (2 olvidados, «Lusia», «habla Marta, la esposa de Jorge») > ningún mensaje se carga en un viaje ajeno sin pasar por el comercial; cuenta las preguntas del día (sin respuesta) 1`] = `
+{
+  "cargados": 29,
+  "decisiones": 13,
+  "porEntrega": [
+    0,
+    3,
+    1,
+    4,
+    2,
+    1,
+    2,
+  ],
+  "preguntasEnElActo": 2,
   "resumenes": 7,
 }
 `;

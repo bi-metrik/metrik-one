@@ -61,6 +61,7 @@ import {
   aplicarCambios,
   armarPlan,
   armarSegmentos,
+  cambioPendiente,
   esSi,
   gruposDelPlan,
   interpretarRespuestaPlan,
@@ -665,6 +666,49 @@ async function negociosAbiertos(
   }));
 }
 
+/**
+ * Los nombres de quienes escriben al bot en el workspace (staff y colaboradores de WhatsApp): nunca
+ * son candidatos a encabezado (QA de #971 v5: «Tatiana» resolvía a un negocio a su nombre). Ante un
+ * error de lectura devuelve lo que pudo leer: la lista solo QUITA candidatos.
+ */
+export async function equipoDelWorkspace(supabase: SupabaseClient, workspaceId: string): Promise<string[]> {
+  const [{ data: st, error: e1 }, { data: co, error: e2 }] = await Promise.all([
+    supabase.from('staff').select('full_name').eq('workspace_id', workspaceId).limit(500),
+    supabase.from('wa_collaborators').select('name').eq('workspace_id', workspaceId).limit(500),
+  ]);
+  if (e1 || e2) console.error('[wa-entendimiento] no se pudo leer el equipo del workspace:', e1?.message ?? e2?.message);
+  return [
+    ...((st ?? []) as Fila[]).map(x => x.full_name),
+    ...((co ?? []) as Fila[]).map(x => x.name),
+  ].filter((x): x is string => typeof x === 'string' && x.trim() !== '');
+}
+
+/** Los viajes abiertos y el equipo: lo que hace falta para resolver un encabezado. `null` si no se pudo. */
+export async function candidatosDeEncabezado(
+  supabase: SupabaseClient, workspaceId: string,
+): Promise<{ viajes: ViajeAbierto[]; equipo: string[] } | null> {
+  const [viajes, equipo] = await Promise.all([viajesAbiertosDeLaBandeja(supabase, workspaceId), equipoDelWorkspace(supabase, workspaceId)]);
+  return viajes ? { viajes, equipo } : null;
+}
+
+/**
+ * ¿La tanda abierta de este remitente espera un «sí/no» a «¿Cambias a…?»? Devuelve el viaje por
+ * el que se preguntó, o `null`. Se mira antes de registrar el escrito, que todavía no está en la
+ * tanda (QA de #971 v5).
+ */
+export async function cambioPorConfirmar(
+  supabase: SupabaseClient, workspaceId: string, phone: string, horasCajaActiva: number,
+): Promise<ViajeAbierto | null> {
+  const { data: abierta, error } = await supabase.from('wa_bandeja_entregas').select('id')
+    .eq('workspace_id', workspaceId).eq('remitente_phone', phone).eq('estado', 'abierta').limit(1).maybeSingle();
+  if (error || !abierta) return null;
+  const crudos = await leerMensajes(supabase, abierta.id as string);
+  if (typeof crudos === 'string' || crudos.length === 0) return null;
+  const c = await candidatosDeEncabezado(supabase, workspaceId);
+  if (!c) return null;
+  return cambioPendiente(armarSegmentos(aViaje(crudos), c.viajes, { horasCajaActiva, equipo: c.equipo }).segmentos);
+}
+
 /** Los viajes abiertos de la línea de la bandeja (para encabezados y el ruteo). `null` si no se pudo. */
 export async function viajesAbiertosDeLaBandeja(supabase: SupabaseClient, workspaceId: string): Promise<ViajeAbierto[] | null> {
   const l = await lineaDeLaBandeja(supabase, workspaceId);
@@ -697,7 +741,8 @@ async function armarReparto(
   if (!abiertos) return null;
   const viajes: ViajeAbierto[] = abiertos.map(n => ({ id: n.id, codigo: n.codigo, cliente: n.cliente, destino: n.destino }));
   const mensajes = aViaje(crudos);
-  const { segmentos, encabezados } = armarSegmentos(mensajes, viajes, l.bandeja);
+  const equipo = await equipoDelWorkspace(supabase, workspaceId);
+  const { segmentos, encabezados } = armarSegmentos(mensajes, viajes, { horasCajaActiva: l.bandeja.horasCajaActiva, equipo });
   const desconocidos = segmentos.some(s => s.encabezado?.resolucion.tipo === 'codigo_desconocido');
   const plan = armarPlan({
     mensajes, viajes, segmentos, encabezados,
@@ -970,8 +1015,6 @@ async function cargarEnNegocioExistente(
   // Los campos y lo que ya tiene, con la config de la línea DE ESE negocio.
   const { fields, valores: yaTiene } = aplanarBloques(bloques.map(b => ({ fields: b.fields, data: b.data })));
   const campos = fields as CampoEntendible[];
-  const l = await lineaDeLaBandeja(supabase, workspaceId);
-  const bandeja = typeof l === 'string' ? leerConfigBandeja(null) : l.bandeja;
   const mensajes = aEntrega(crudos);
   const meta = { entrega_id: ent.entrega_id as string, en: new Date().toISOString(), origenDe: (f: string) => origenDeFrase(f, crudos) };
 

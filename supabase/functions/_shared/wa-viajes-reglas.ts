@@ -44,7 +44,14 @@ export interface MensajeViaje {
 // ── Encabezados ──────────────────────────────────────────────────────────────
 
 export type ResolucionEncabezado =
-  | { tipo: 'viaje'; viaje: ViajeAbierto; por: 'codigo' | 'nombre' | 'destino' }
+  /** Coincidencia EXACTA (código, nombre o nombre + apellido): cambia la caja sola y se avisa con «📌». */
+  | { tipo: 'viaje'; viaje: ViajeAbierto; por: 'codigo' | 'nombre' }
+  /**
+   * Coincidencia APROXIMADA («Lusia», «Jorje»), solo el apellido («Gómez») o el destino («la de
+   * punta cana»): no cambia la caja sola. El bot pregunta en el acto «¿Cambias a…? sí/no» y lo que
+   * sigue queda sin asignar hasta el «sí» (QA de #971 v5).
+   */
+  | { tipo: 'aproximado'; viaje: ViajeAbierto; por: 'nombre' | 'apellido' | 'destino' }
   | { tipo: 'nuevo'; cliente: string | null }
   | { tipo: 'ambiguo'; candidatos: ViajeAbierto[] }
   | { tipo: 'codigo_desconocido'; codigo: string }
@@ -100,12 +107,66 @@ function esCodigo(compacto: string): boolean {
 }
 
 /**
+ * Palabras que un comercial escribe todo el día y que NUNCA son un encabezado, aunque un cliente
+ * se apellide así («Bueno», «Claro», «Vale», «Mañana») o se parezca («gracias» y Gracia, «mira» y
+ * Lina, «otro» y Otero). Un escrito hecho SOLO de estas palabras (y relleno) no resuelve, no
+ * pregunta y no corta la caja. Para nombrar a un cliente así basta su código o nombre + apellido
+ * (QA de #971 v5: con 80 apellidos comunes, 7 escritos cortos movían la caja).
+ */
+export const PALABRAS_COMUNES: ReadonlySet<string> = new Set([
+  // acuses y cortesías
+  'gracias', 'mil', 'muchas', 'muchisimas', 'ok', 'okey', 'okay', 'oki', 'listo', 'lista', 'listos', 'ya', 'si', 'sii', 'no',
+  'dale', 'claro', 'perfecto', 'perfecta', 'bueno', 'buena', 'buenas', 'buenos', 'buen', 'vale', 'genial', 'super', 'excelente',
+  'una', 'gusto', 'orden', 'hola', 'holi', 'chao', 'chau', 'adios', 'saludos', 'bendiciones', 'dia', 'dias', 'tardes', 'noches', 'noche',
+  'tarde', 'mano', 'hermano', 'amiga', 'amigo', 'jefe', 'jefa', 'mija', 'mijo', 'porfa', 'favor', 'please', 'pls', 'jaja', 'jajaja',
+  'entendido', 'entendida', 'anotado', 'anotada', 'recibido', 'recibida', 'enviado', 'enviada', 'confirmado', 'confirmada', 'confirmo',
+  'cotizado', 'cotizada', 'pagado', 'pagada', 'reservado', 'reservada', 'hecho', 'hecha', 'correcto', 'correcta', 'exacto', 'exacta',
+  'cierto', 'vamos', 'listico', 'ojo', 'mira', 'mire', 'oye', 'oiga', 'pilas', 'urgente', 'importante', 'nota', 'pendiente', 'pendientes',
+  // tiempo y orden
+  'espera', 'espere', 'esperame', 'momento', 'momentico', 'un', 'ahorita', 'ahora', 'casi', 'luego', 'despues', 'antes', 'manana',
+  'hoy', 'ayer', 'pronto', 'tambien', 'igual', 'mismo', 'misma', 'este', 'esta', 'ese', 'esa', 'eso', 'otro', 'otra', 'otros', 'otras',
+  'mas', 'menos', 'falta', 'faltan', 'todo', 'todos', 'nada', 'aqui', 'aca', 'alla', 'sigo', 'seguimos', 'continuo', 'continua', 'fin',
+  'cliente', 'clientes', 'mensaje', 'mensajes', 'audio', 'audios', 'foto', 'fotos', 'cotizacion', 'reserva', 'pago',
+]);
+
+/** ¿Todas sus palabras son del español común? Entonces no es un encabezado. */
+function soloComunes(palabras: ReadonlyArray<string>): boolean {
+  return palabras.length > 0 && palabras.every(w => PALABRAS_COMUNES.has(w));
+}
+
+/**
+ * ¿Todas sus palabras son del nombre de una persona del equipo (staff o colaborador del workspace)?
+ * «Tatiana» o «Edgar» escritos por el equipo son una firma, no un encabezado, aunque haya un
+ * negocio a su nombre (QA de #971 v5).
+ */
+function esDelEquipo(palabras: ReadonlyArray<string>, equipo: ReadonlyArray<string>): boolean {
+  return palabras.length > 0 && equipo.some(n => {
+    const del = new Set(palabrasDe(n));
+    return palabras.every(w => del.has(w));
+  });
+}
+
+/** Las palabras del nombre sin el relleno; la primera es el nombre de pila. */
+function palabrasDelCliente(v: ViajeAbierto): string[] {
+  return palabrasDe(v.cliente).filter(w => !RELLENO.has(w) && w.length >= 2);
+}
+
+/**
  * ¿Este escrito del comercial es un encabezado? Solo si es corto (hasta cinco palabras) y TODO lo
  * que dice se explica como una referencia a un viaje: «Carolina», «T1 26 9», «nuevo Luisa San
  * Andrés», «la de punta cana». «Carolina quiere 5 estrellas» no lo es (es contenido). `null` = no es
  * encabezado.
+ *
+ * Solo una coincidencia EXACTA cambia la caja en silencio (`viaje`): el código, o el nombre de
+ * pila con o sin apellidos, con un solo candidato. Lo demás que apunta a un único viaje es
+ * `aproximado` y se pregunta: un error de tipeo («Lusia»), solo el apellido («Gómez») o el destino.
+ * Los nombres del equipo y las palabras comunes nunca son encabezado (QA de #971 v5).
+ *
+ * @param equipo nombres de quienes escriben al bot en el workspace (staff y colaboradores).
  */
-export function resolverEncabezado(texto: string, viajes: ReadonlyArray<ViajeAbierto>): ResolucionEncabezado | null {
+export function resolverEncabezado(
+  texto: string, viajes: ReadonlyArray<ViajeAbierto>, equipo: ReadonlyArray<string> = [],
+): ResolucionEncabezado | null {
   const bruto = String(texto ?? '').trim();
   // Una pregunta («Luisa?») no es un encabezado: va al bot (regla 4b de `decidirRuta`).
   if (/[?¿]/.test(bruto)) return null;
@@ -122,9 +183,17 @@ export function resolverEncabezado(texto: string, viajes: ReadonlyArray<ViajeAbi
   }
 
   const resto = palabrasDe(bruto).filter(w => !RELLENO.has(w));
-  if (resto.length === 0) return null;
+  if (resto.length === 0 || soloComunes(resto) || esDelEquipo(resto, equipo)) return null;
 
-  // Por nombre: los candidatos a la MENOR distancia. Si quedan dos a la misma, se pregunta.
+  // Exacta: cada palabra está tal cual en el nombre, y una de ellas es el nombre de pila.
+  const exactos = viajes.filter(v => {
+    const del = palabrasDelCliente(v);
+    return del.length > 0 && resto.includes(del[0]) && resto.every(w => del.includes(w));
+  });
+  if (exactos.length === 1) return { tipo: 'viaje', viaje: exactos[0], por: 'nombre' };
+  if (exactos.length > 1) return { tipo: 'ambiguo', candidatos: exactos };
+
+  // Aproximada: los candidatos a la MENOR distancia (0 = solo apellidos; 1 = un error de tipeo).
   const distancias = viajes.map(v => ({ v, d: Math.max(...resto.map(w => distanciaAlNombre(w, v.cliente))) }));
   const minima = Math.min(...distancias.map(x => x.d));
   const porNombre = Number.isFinite(minima) ? distancias.filter(x => x.d === minima).map(x => x.v) : [];
@@ -134,10 +203,31 @@ export function resolverEncabezado(texto: string, viajes: ReadonlyArray<ViajeAbi
   });
   const candidatos = [...new Map([...porNombre, ...porDestino].map(v => [v.id, v])).values()];
   if (candidatos.length === 1) {
-    return { tipo: 'viaje', viaje: candidatos[0], por: porNombre.length === 1 ? 'nombre' : 'destino' };
+    const por = porNombre.length === 1 ? (minima === 0 ? 'apellido' : 'nombre') : 'destino';
+    return { tipo: 'aproximado', viaje: candidatos[0], por };
   }
   if (candidatos.length > 1) return { tipo: 'ambiguo', candidatos };
   return null;
+}
+
+/** Lo que el bot responde EN EL ACTO a un encabezado del comercial (QA de #971 v5). `null`: nada. */
+export function respuestaAlEncabezado(r: ResolucionEncabezado | null): string | null {
+  if (r?.tipo === 'viaje') return `📌 ${lineaCaja(r.viaje)}`;
+  if (r?.tipo === 'aproximado') return `¿Cambias a ${lineaCaja(r.viaje)}? sí/no`;
+  return null;
+}
+
+/** «Carolina · T1 26 11»: como se nombra una caja al comercial. */
+export function lineaCaja(v: ViajeAbierto): string {
+  return [v.cliente, v.codigo].filter(Boolean).join(' · ') || 'sin código';
+}
+
+const NO = new Set(['no', 'nop', 'nope', 'no no', 'no es', 'no senor', 'no senora', 'negativo', 'para nada', 'ninguno', 'no cambies', 'no cambio']);
+
+/** ¿Es un «no» sin más? Para «¿Cambias a…? sí/no». */
+export function esNo(texto: string): boolean {
+  const t = normalizarTexto(texto).replace(/[^a-z ]/g, ' ').replace(/\s+/g, ' ').trim();
+  return NO.has(t);
 }
 
 
@@ -148,6 +238,19 @@ export interface Segmento {
   origen: 'encabezado' | 'sin_encabezado';
   encabezado: { n: number; texto: string; resolucion: ResolucionEncabezado } | null;
   mensajes: number[];
+  /**
+   * Solo con un encabezado `aproximado`: lo que contestó el comercial a «¿Cambias a…? sí/no».
+   * `null` = no contestó: lo de la caja queda sin asignar. `n` es el número de su respuesta.
+   */
+  confirmacion?: { respuesta: 'si' | 'no'; n: number } | null;
+}
+
+/** ¿La caja tiene un viaje? Un encabezado exacto, o uno aproximado con «sí». */
+export function viajeDeLaCaja(seg: Segmento): ViajeAbierto | null {
+  const r = seg.encabezado?.resolucion;
+  if (r?.tipo === 'viaje') return r.viaje;
+  if (r?.tipo === 'aproximado' && seg.confirmacion?.respuesta === 'si') return r.viaje;
+  return null;
 }
 
 /**
@@ -159,8 +262,9 @@ export interface Segmento {
 export function armarSegmentos(
   mensajes: ReadonlyArray<MensajeViaje>,
   viajes: ReadonlyArray<ViajeAbierto>,
-  cfg: { horasCajaActiva: number },
+  cfg: { horasCajaActiva: number; equipo?: ReadonlyArray<string> },
 ): { segmentos: Segmento[]; encabezados: number[] } {
+  const equipo = cfg.equipo ?? [];
   const segmentos: Segmento[] = [];
   const encabezados: number[] = [];
   let caja: { seg: Segmento; desde: number } | null = null;
@@ -168,10 +272,20 @@ export function armarSegmentos(
   for (const m of [...mensajes].sort((a, b) => a.n - b.n)) {
     const t = Date.parse(m.en);
     const escrito = !m.reenviado && m.tipo === 'text';
-    const res = escrito ? (resolverEncabezado(m.cuerpo, viajes) ?? (pareceEncabezado(m.cuerpo, viajes) ? { tipo: 'no_reconocido' } as ResolucionEncabezado : null)) : null;
+    // La respuesta a «¿Cambias a…? sí/no» (QA de #971 v5): la primera, y solo dentro de su caja.
+    const porConfirmar = caja && caja.seg.encabezado?.resolucion.tipo === 'aproximado' && caja.seg.confirmacion === null;
+    if (escrito && porConfirmar && (esSi(m.cuerpo) || esNo(m.cuerpo))) {
+      caja!.seg.confirmacion = { respuesta: esSi(m.cuerpo) ? 'si' : 'no', n: m.n };
+      encabezados.push(m.n);
+      continue;
+    }
+    const res = escrito ? (resolverEncabezado(m.cuerpo, viajes, equipo) ?? (pareceEncabezado(m.cuerpo, viajes, equipo) ? { tipo: 'no_reconocido' } as ResolucionEncabezado : null)) : null;
     if (res) {
       encabezados.push(m.n);
-      const seg: Segmento = { origen: 'encabezado', encabezado: { n: m.n, texto: m.cuerpo.trim(), resolucion: res }, mensajes: [] };
+      const seg: Segmento = {
+        origen: 'encabezado', encabezado: { n: m.n, texto: m.cuerpo.trim(), resolucion: res }, mensajes: [],
+        ...(res.tipo === 'aproximado' ? { confirmacion: null } : {}),
+      };
       segmentos.push(seg);
       caja = { seg, desde: t };
       suelto = null;
@@ -192,6 +306,16 @@ export function armarSegmentos(
   return { segmentos, encabezados };
 }
 
+/**
+ * ¿La última caja es un encabezado aproximado sin contestar? Devuelve su viaje: el siguiente «sí» o
+ * «no» escrito es la respuesta a «¿Cambias a…?» (QA de #971 v5).
+ */
+export function cambioPendiente(segmentos: ReadonlyArray<Segmento>): ViajeAbierto | null {
+  const ultimo = segmentos[segmentos.length - 1];
+  const r = ultimo?.encabezado?.resolucion;
+  return r?.tipo === 'aproximado' && ultimo.confirmacion === null ? r.viaje : null;
+}
+
 /** ¿La entrega tiene al menos un encabezado resuelto? Sin ninguno, la tanda entera es UN viaje y se pregunta como siempre. */
 export function tieneEncabezados(segmentos: ReadonlyArray<Segmento>): boolean {
   return segmentos.some(s => s.encabezado !== null && s.encabezado.resolucion.tipo !== 'no_reconocido');
@@ -201,19 +325,18 @@ export function tieneEncabezados(segmentos: ReadonlyArray<Segmento>): boolean {
  * ¿Un escrito del comercial PARECE un encabezado aunque no se resuelva? Solo si tiene forma de
  * código, o si TODAS sus palabras (sin el relleno) se parecen a una palabra del nombre de algún
  * cliente con viaje abierto: a dos errores o menos, o como su comienzo («Caro» de Carolina). Las
- * palabras del español común («también», «igual», «sigue», «confirmado») no se parecen a ningún
- * nombre y no cortan la caja. No hay lista de palabras en el código: el criterio sale de los
- * viajes abiertos (QA de #971 v4: 15 de 32 escritos cortos cortaban la caja).
+ * palabras del español común (`PALABRAS_COMUNES`) y los nombres del equipo no cortan la caja
+ * (QA de #971 v4 y v5: «mira» cortaba por Lina, «otro» por Otero).
  * Si parece y no se resuelve, corta la caja: lo que sigue no hereda el viaje anterior.
  */
-export function pareceEncabezado(texto: string, viajes: ReadonlyArray<ViajeAbierto>): boolean {
+export function pareceEncabezado(texto: string, viajes: ReadonlyArray<ViajeAbierto>, equipo: ReadonlyArray<string> = []): boolean {
   const bruto = String(texto ?? '').trim();
   if (!bruto || /[?¿]/.test(bruto)) return false;
   if (esCodigo(codigoCompacto(bruto))) return true;
   const palabras = palabrasDe(bruto);
   if (palabras.length === 0 || palabras.length > 2 || palabras.some(w => /\d/.test(w))) return false;
   const propias = palabras.filter(w => !RELLENO.has(w));
-  if (propias.length === 0) return false;
+  if (propias.length === 0 || soloComunes(propias) || esDelEquipo(propias, equipo)) return false;
   const delNombre = [...new Set(viajes.flatMap(v => palabrasDe(v.cliente)).filter(p => p.length >= 4))];
   return propias.every(w => w.length >= 4 && delNombre.some(p => (p.startsWith(w) && w.length >= 4) || distancia(p, w) <= 2));
 }
@@ -358,8 +481,15 @@ function lineaViaje(v: ViajeAbierto): string {
   return [v.codigo, v.cliente].filter(Boolean).join(' · ') || 'sin código';
 }
 
-function avisoEncabezado(e: NonNullable<Segmento['encabezado']>, cerrados: ReadonlySet<string>): string | null {
+function avisoEncabezado(seg: Segmento, cerrados: ReadonlySet<string>): string | null {
+  const e = seg.encabezado!;
   const r = e.resolucion;
+  if (r.tipo === 'aproximado') {
+    if (seg.confirmacion?.respuesta === 'si') return null;
+    return seg.confirmacion?.respuesta === 'no'
+      ? `Dijiste que «${e.texto}» no es ${lineaCaja(r.viaje)}: lo que siguió no lo cargué. Dime de qué viaje es.`
+      : `«${e.texto}» puede ser ${lineaCaja(r.viaje)} y no me contestaste: lo que siguió no lo cargué. Dime de qué viaje es.`;
+  }
   if (r.tipo === 'ambiguo') return `«${e.texto}» puede ser ${r.candidatos.map(lineaViaje).join(' o ')}: no elegí. Dime cuál.`;
   if (r.tipo === 'no_reconocido') return `No reconocí el encabezado «${e.texto}»: lo que sigue no lo cargo en el viaje anterior. Dime de qué viaje es.`;
   if (r.tipo === 'codigo_desconocido') {
@@ -404,10 +534,11 @@ export function armarPlan(p: {
   for (const seg of p.segmentos) {
     const res = seg.encabezado?.resolucion ?? null;
     if (seg.encabezado) {
-      const aviso = avisoEncabezado(seg.encabezado, p.codigosCerrados ?? new Set());
+      const aviso = avisoEncabezado(seg, p.codigosCerrados ?? new Set());
       if (aviso) plan.avisos.push(aviso);
     }
-    const caja: DestinoPlan | null = res?.tipo === 'viaje' ? destinoDeViaje(res.viaje)
+    const deLaCaja = viajeDeLaCaja(seg);
+    const caja: DestinoPlan | null = deLaCaja ? destinoDeViaje(deLaCaja)
       : res?.tipo === 'nuevo' ? { tipo: 'nuevo', cliente: res.cliente } : null;
     const nombreCaja = caja?.cliente ?? 'ese viaje';
     const vistos = { fechas: new Set<string>(), adultos: new Set<number>() };
@@ -419,7 +550,9 @@ export function armarPlan(p: {
       if (!m) continue;
       const nombrados = viajesNombrados(m.cuerpo, destinosConocidos, p.viajes);
       if (!caja) {
-        const motivo = seg.encabezado ? `el encabezado «${seg.encabezado.texto}» no se pudo resolver` : 'llegó sin encabezado';
+        const motivo = !seg.encabezado ? 'llegó sin encabezado'
+          : res?.tipo === 'aproximado' ? `«${seg.encabezado.texto}» ${seg.confirmacion?.respuesta === 'no' ? 'no es' : 'puede ser'} ${lineaCaja(res.viaje)}${seg.confirmacion ? '' : ' y no contestaste'}`
+          : `el encabezado «${seg.encabezado.texto}» no se pudo resolver`;
         plan.mensajes.push({ n, destino: null, por: null, motivo, ...(nombrados.length >= 2 ? { varios: true } : {}) });
         continue;
       }
@@ -617,7 +750,9 @@ function destinoDeCorreccion(texto: string, plan: PlanViajes, viajes: ReadonlyAr
   const palabras = palabrasDe(t).filter(w => !RELLENO.has(w));
   const nuevoPorNombre = nuevos.filter(d => palabras.length > 0 && palabras.every(w => palabraDelNombre(w, d.cliente)));
   const r = resolverEncabezado(t, viajes);
-  const candidatos: DestinoPlan[] = [...nuevoPorNombre, ...(r?.tipo === 'viaje' ? [destinoDeViaje(r.viaje)] : [])];
+  // En una corrección el comercial ya está nombrando a un viaje y ve el resumen otra vez antes del
+  // «sí»: una coincidencia aproximada («Lusia», «Gómez») también vale.
+  const candidatos: DestinoPlan[] = [...nuevoPorNombre, ...(r?.tipo === 'viaje' || r?.tipo === 'aproximado' ? [destinoDeViaje(r.viaje)] : [])];
   return candidatos.length === 1 ? candidatos[0] : null;
 }
 

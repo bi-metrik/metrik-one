@@ -113,7 +113,26 @@ function crearDb(t: Tablas) {
     };
     return q;
   }
-  return { from, rpc: () => { throw new Error('rpc no esperado'); } };
+  /**
+   * `wa_bandeja_registrar_mensaje`, solo los dos caminos que usa la prueba del acto (la función
+   * de verdad se prueba con PGlite): suma a la tanda abierta del remitente, o abre una.
+   */
+  async function rpc(nombre: string, a: Fila) {
+    if (nombre !== 'wa_bandeja_registrar_mensaje') throw new Error(`rpc no esperado: ${nombre}`);
+    let abierta = t.wa_bandeja_entregas.find(e => e.workspace_id === a.p_workspace_id && e.remitente_phone === a.p_remitente_phone && e.estado === 'abierta');
+    const accion = abierta ? 'agregar' : 'abrir';
+    if (!abierta) {
+      abierta = { id: nuevoId(), workspace_id: a.p_workspace_id, remitente_phone: a.p_remitente_phone, estado: 'abierta', n_mensajes: 0 };
+      t.wa_bandeja_entregas.push(abierta);
+    }
+    t.wa_bandeja_mensajes.push({
+      id: nuevoId(), workspace_id: a.p_workspace_id, entrega_id: abierta.id, wa_message_id: a.p_wa_message_id, papel: 'contenido', tipo: a.p_tipo,
+      cuerpo: a.p_cuerpo, cuerpo_origen: a.p_cuerpo_origen, reenviado: a.p_reenviado, segmento: null, recibido_at: new Date().toISOString(),
+    });
+    abierta.n_mensajes = Number(abierta.n_mensajes ?? 0) + 1;
+    return { data: [{ accion, entrega: abierta.id, mensajes: abierta.n_mensajes }], error: null };
+  }
+  return { from, rpc };
 }
 
 // ── Escenario sintético ─────────────────────────────────────────────────────
@@ -140,6 +159,7 @@ function base(): Tablas {
   return {
     workspaces: [{ id: WS, slug: 'agencia', linea_activa_id: LINEA, config_extra: {}, modules: { bandeja_solicitudes_wa: true } }],
     staff: [{ id: STAFF, workspace_id: WS, full_name: 'TATIANA PRUEBA' }],
+    wa_collaborators: [{ id: 'col-1', workspace_id: WS, name: 'EDGAR COLABORADOR' }],
     negocios: [
       { id: 'n14', workspace_id: WS, linea_id: LINEA, codigo: 'T1 26 14', nombre: 'X', estado: 'abierto', created_at: '2026-09-20T10:00:00Z', contacto_id: 'c-marta', empresa_id: null, responsable_id: STAFF, contactos: { nombre: 'MARTA PRUEBA' }, empresas: null, workspaces: { slug: 'agencia' } },
       { id: 'n15', workspace_id: WS, linea_id: LINEA, codigo: 'T1 26 15', nombre: 'Y', estado: 'abierto', created_at: '2026-09-25T10:00:00Z', contacto_id: 'c-luis', empresa_id: null, responsable_id: null, contactos: { nombre: 'LUIS PRUEBA' }, empresas: null, workspaces: { slug: 'agencia' } },
@@ -487,11 +507,93 @@ describe('modo encabezado: manda el encabezado, el reparto se confirma y cada vi
     expect(r!.texto).toContain('¿A qué viaje van?');
   });
 
+  it('QA v5 · un encabezado aproximado no cambia la caja: sin «sí» queda sin asignar; con «sí», va a su viaje', async () => {
+    t.workspaces[0].config_extra = { bandeja_solicitudes: { modo_viajes: 'encabezado' } };
+    const sin = entregaCon({ estado: 'esperando_cliente', mensajes: [{ cuerpo: 'Martha', reenviado: false }, { cuerpo: 'volvemos el 27 de noviembre' }] });
+    const r1 = await mod.armarPreguntaNegocio(db as never, sin, WS, 2);
+    expect(r1!.texto).toContain('No hay mensajes con un viaje asignado.');
+    expect(r1!.texto).toContain('«Martha» puede ser MARTA PRUEBA · T1 26 14 y no me contestaste');
+    const con = entregaCon({ estado: 'esperando_cliente', mensajes: [{ cuerpo: 'Martha', reenviado: false }, { cuerpo: 'volvemos el 27 de noviembre' }, { cuerpo: 'sí', reenviado: false }] });
+    const r2 = await mod.armarPreguntaNegocio(db as never, con, WS, 3);
+    expect(r2!.texto).toContain('1) T1 26 14 · MARTA PRUEBA (1 mensaje)');
+    expect(r2!.plan!.encabezados).toEqual([1, 3]);
+  });
+
+  it('QA v5 · ¿espera la tanda abierta un «sí/no» a «¿Cambias a…?»?', async () => {
+    t.workspaces[0].config_extra = { bandeja_solicitudes: { modo_viajes: 'encabezado' } };
+    const id = entregaCon({ estado: 'abierta', mensajes: [{ cuerpo: 'Martha', reenviado: false }, { cuerpo: 'volvemos el 27 de noviembre' }] });
+    expect(await mod.cambioPorConfirmar(db as never, WS, TEL, 4)).toMatchObject({ id: 'n14' });
+    t.wa_bandeja_mensajes.push({ id: nuevoId(), workspace_id: WS, entrega_id: id, wa_message_id: 'w-si', papel: 'contenido', tipo: 'text', cuerpo: 'sí', cuerpo_origen: 'texto', reenviado: false, segmento: null, recibido_at: '2026-09-30T13:05:00Z' });
+    expect(await mod.cambioPorConfirmar(db as never, WS, TEL, 4)).toBeNull();
+  });
+
+  it('QA v5 · el nombre de alguien del equipo (staff o colaborador) no es encabezado, aunque haya un negocio a su nombre', async () => {
+    t.workspaces[0].config_extra = { bandeja_solicitudes: { modo_viajes: 'encabezado' } };
+    t.negocios.push(
+      { id: 'n16', workspace_id: WS, linea_id: LINEA, codigo: 'T1 26 16', nombre: 'P', estado: 'abierto', created_at: '2026-09-26T10:00:00Z', contacto_id: 'c-t', empresa_id: null, responsable_id: null, contactos: { nombre: 'TATIANA PRUEBA' }, empresas: null },
+      { id: 'n17', workspace_id: WS, linea_id: LINEA, codigo: 'T1 26 17', nombre: 'Q', estado: 'abierto', created_at: '2026-09-26T10:00:00Z', contacto_id: 'c-e', empresa_id: null, responsable_id: null, contactos: { nombre: 'EDGAR COLABORADOR' }, empresas: null },
+    );
+    expect((await mod.candidatosDeEncabezado(db as never, WS))!.equipo).toEqual(['TATIANA PRUEBA', 'EDGAR COLABORADOR']);
+    for (const firma of ['Tatiana', 'Edgar']) {
+      const id = entregaCon({ estado: 'esperando_cliente', mensajes: [{ cuerpo: firma, reenviado: false }, { cuerpo: 'queremos Aruba' }] });
+      const r = await mod.armarPreguntaNegocio(db as never, id, WS, 2);
+      expect(r!.plan, firma).toBeUndefined(); // sin encabezados: «¿A qué viaje van?»
+    }
+  });
+
   it('modo `uno` (default): la pregunta sigue siendo «¿A qué viaje van?» con la lista', async () => {
     const id = entregaCon({ estado: 'esperando_cliente', mensajes: [{ cuerpo: 'Marta', reenviado: false }, { cuerpo: 'hola' }] });
     const r = await mod.armarPreguntaNegocio(db as never, id, WS, 2);
     expect(r!.plan).toBeUndefined();
     expect(r!.texto).toContain('¿A qué viaje van?');
+  });
+});
+
+describe('QA v5 · lo que el bot contesta en el acto a un encabezado (atenderEnBandeja)', () => {
+  const USER = { workspace_id: WS, phone: TEL, name: 'X', role: 'operator', collaborator_id: 'col-1', subscription_status: 'active', modulos: { modules: { bandeja_solicitudes_wa: true } } };
+  let n = 0;
+  const llega = async (texto: string, reenviado = false) => {
+    const b = await import('./wa-bandeja.ts');
+    const cfg = { ...(await import('./wa-bandeja-reglas.ts')).leerConfigBandeja(t.workspaces[0].config_extra) };
+    await b.atenderEnBandeja(db as never, USER as never, { phone: TEL, text: texto, type: 'text', reenviado, wa_message_id: `w-acto-${++n}`, timestamp: '1790000000' } as never, cfg);
+  };
+  const carolina = { id: 'n18', workspace_id: WS, linea_id: LINEA, codigo: 'T1 26 18', nombre: 'C', estado: 'abierto', created_at: '2026-09-26T10:00:00Z', contacto_id: 'c-c', empresa_id: null, responsable_id: null, contactos: { nombre: 'CAROLINA RUIZ' }, empresas: null };
+
+  it('exacto: «📌»; aproximado: «¿Cambias a…? sí/no» y, con el «sí», «📌»; la firma del equipo no contesta nada', async () => {
+    t.workspaces[0].config_extra = { bandeja_solicitudes: { modo_viajes: 'encabezado' } };
+    t.negocios.push(carolina);
+    await llega('Marta');
+    expect(enviados.map(e => e.texto)).toEqual(['📌 MARTA PRUEBA · T1 26 14']);
+    await llega('volvemos el 27 de noviembre', true);
+    await llega('Carlina');
+    await llega('somos 3 adultos', true);
+    expect(enviados.map(e => e.texto).slice(1)).toEqual(['¿Cambias a CAROLINA RUIZ · T1 26 18? sí/no']);
+    await llega('sí');
+    await llega('Tatiana');
+    expect(enviados.map(e => e.texto).slice(2)).toEqual(['📌 CAROLINA RUIZ · T1 26 18']);
+
+    // El reparto al cerrar: lo de Marta en Marta, lo que siguió al «sí» en Carolina.
+    const entrega = t.wa_bandeja_entregas.find(e => e.estado === 'abierta')!;
+    const r = await mod.armarPreguntaNegocio(db as never, entrega.id as string, WS, 6);
+    expect(r!.plan!.mensajes.filter(x => !x.sospecha).map(x => [x.n, x.destino && 'codigo' in x.destino ? x.destino.codigo : null])).toEqual([[2, 'T1 26 14'], [4, 'T1 26 18'], [6, 'T1 26 18']]);
+    expect(r!.plan!.encabezados).toEqual([1, 3, 5]);
+  });
+
+  it('con «no», lo que sigue queda sin asignar y el bot lo dice', async () => {
+    t.workspaces[0].config_extra = { bandeja_solicitudes: { modo_viajes: 'encabezado' } };
+    t.negocios.push(carolina);
+    await llega('Carlina');
+    await llega('no');
+    expect(enviados.map(e => e.texto)).toEqual(['¿Cambias a CAROLINA RUIZ · T1 26 18? sí/no', 'No cambio a CAROLINA RUIZ · T1 26 18: lo que sigue queda sin asignar hasta otro encabezado.']);
+    // Un segundo «no» ya no es respuesta a nada: es contenido de la tanda y no contesta.
+    await llega('no');
+    expect(enviados).toHaveLength(2);
+  });
+
+  it('en modo `uno` un nombre escrito no contesta nada', async () => {
+    t.negocios.push(carolina);
+    await llega('Carolina');
+    expect(enviados).toEqual([]);
   });
 });
 

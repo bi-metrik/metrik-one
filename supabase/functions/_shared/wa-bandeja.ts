@@ -11,8 +11,9 @@
 // ============================================================
 
 import { transcribeAudio, PROMPT_TRANSCRIPCION_LITERAL } from './wa-transcribe.ts';
-import { armarPreguntaNegocio, hayPreguntaPendiente, tomarRespuestaContacto, viajesAbiertosDeLaBandeja } from './wa-entendimiento.ts';
-import { resolverEncabezado } from './wa-viajes-reglas.ts';
+import { armarPreguntaNegocio, cambioPorConfirmar, candidatosDeEncabezado, hayPreguntaPendiente, tomarRespuestaContacto } from './wa-entendimiento.ts';
+import { esNo, esSi, lineaCaja, resolverEncabezado, respuestaAlEncabezado } from './wa-viajes-reglas.ts';
+import type { ResolucionEncabezado, ViajeAbierto } from './wa-viajes-reglas.ts';
 import { sendTextMessage } from './wa-respond.ts';
 import {
   bandejaActiva,
@@ -125,9 +126,9 @@ async function contextoDelEscrito(
   if (preguntaPendiente) return { entregaAbierta: false, preguntaPendiente: true };
   let esEncabezado = false;
   if (config.modoViajes !== 'uno') {
-    const viajes = await viajesAbiertosDeLaBandeja(supabase, workspaceId);
-    if (!viajes) return {};
-    esEncabezado = resolverEncabezado(texto, viajes) !== null;
+    const c = await candidatosDeEncabezado(supabase, workspaceId);
+    if (!c) return {};
+    esEncabezado = resolverEncabezado(texto, c.viajes, c.equipo) !== null;
   }
   return { entregaAbierta: false, preguntaPendiente: false, esEncabezado };
 }
@@ -151,7 +152,11 @@ export async function atenderEnBandeja(
 
   // Un encabezado («Carolina», «T1 26 9») abre una caja: nunca es la respuesta a una pregunta
   // pendiente (QA de #971: el que se escribía antes del «sí» se tomaba como respuesta al resumen).
-  const esEncabezado = await escritoEsEncabezado(supabase, user.workspace_id, message, config);
+  const encabezado = await encabezadoDelEscrito(supabase, user.workspace_id, message, config);
+  // La respuesta a «¿Cambias a…? sí/no» va a la tanda (la lee el reparto) y tampoco es la
+  // respuesta a otra pregunta (QA de #971 v5).
+  const cambio = encabezado ? null : await respuestaAlCambio(supabase, user.workspace_id, message, config);
+  const esEncabezado = encabezado !== null || cambio !== null;
 
   // ¿Es la respuesta a «¿cuál de estos contactos es?» del paso de entendimiento? Se mira
   // ANTES de registrar: como contenido abriría una entrega nueva y la pregunta quedaría sin
@@ -219,6 +224,15 @@ export async function atenderEnBandeja(
   const fila = (Array.isArray(data) ? data[0] : data) as FilaRegistro | undefined;
   if (!fila) return;
 
+  // En el acto (QA de #971 v5): un encabezado exacto se confirma con «📌»; uno aproximado pregunta
+  // «¿Cambias a…? sí/no» y lo que sigue queda sin asignar hasta la respuesta.
+  if (fila.accion === 'agregar' || fila.accion === 'abrir') {
+    const aviso = cambio
+      ? (cambio.si ? `📌 ${lineaCaja(cambio.viaje)}` : `No cambio a ${lineaCaja(cambio.viaje)}: lo que sigue queda sin asignar hasta otro encabezado.`)
+      : respuestaAlEncabezado(encabezado);
+    if (aviso) await enviar(message.phone, aviso, user.workspace_id);
+  }
+
   switch (respuestaTrasRegistro(fila.accion)) {
     case 'pregunta':
       if (fila.entrega) await preguntarCliente(supabase, fila.entrega, message.phone, fila.mensajes ?? 0, user.workspace_id);
@@ -234,11 +248,29 @@ export async function atenderEnBandeja(
   }
 }
 
-/** ¿El escrito es un encabezado? Solo en modo `encabezado`, y solo un texto escrito. */
-async function escritoEsEncabezado(supabase: SupabaseClient, workspaceId: string, message: IncomingMessage, config: ConfigBandeja): Promise<boolean> {
-  if (config.modoViajes === 'uno' || message.type !== 'text' || message.reenviado === true || !(message.text || '').trim()) return false;
-  const viajes = await viajesAbiertosDeLaBandeja(supabase, workspaceId);
-  return !!viajes && resolverEncabezado(message.text, viajes) !== null;
+/** ¿Es un texto escrito (no reenviado) en modo `encabezado`? Solo ahí hay encabezados. */
+function escritoEnModoEncabezado(message: IncomingMessage, config: ConfigBandeja): boolean {
+  return config.modoViajes !== 'uno' && message.type === 'text' && message.reenviado !== true && !!(message.text || '').trim();
+}
+
+/** El encabezado que es este escrito, o `null`. Los nombres del equipo nunca lo son. */
+async function encabezadoDelEscrito(
+  supabase: SupabaseClient, workspaceId: string, message: IncomingMessage, config: ConfigBandeja,
+): Promise<ResolucionEncabezado | null> {
+  if (!escritoEnModoEncabezado(message, config)) return null;
+  const c = await candidatosDeEncabezado(supabase, workspaceId);
+  return c ? resolverEncabezado(message.text, c.viajes, c.equipo) : null;
+}
+
+/** Si el escrito es «sí» o «no» y la tanda abierta espera respuesta a «¿Cambias a…?», cuál y a qué viaje. */
+async function respuestaAlCambio(
+  supabase: SupabaseClient, workspaceId: string, message: IncomingMessage, config: ConfigBandeja,
+): Promise<{ si: boolean; viaje: ViajeAbierto } | null> {
+  if (!escritoEnModoEncabezado(message, config)) return null;
+  const si = esSi(message.text);
+  if (!si && !esNo(message.text)) return null;
+  const viaje = await cambioPorConfirmar(supabase, workspaceId, message.phone, config.horasCajaActiva);
+  return viaje ? { si, viaje } : null;
 }
 
 /**
