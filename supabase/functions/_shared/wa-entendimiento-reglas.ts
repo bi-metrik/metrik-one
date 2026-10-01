@@ -302,16 +302,43 @@ function sumarMeses(iso: string, meses: number): string {
  */
 export function fechaDeViaje(v: string, frase: string, hoyISO: string): { valor: string } | { motivo: string } {
   let f = v;
-  if (f < hoyISO) {
-    if (/(?<!\d)(19|20)\d{2}(?!\d)/.test(frase)) return { motivo: `fecha pasada: ${v}` };
-    const mesDia = v.slice(5);
-    let candidata = `${hoyISO.slice(0, 4)}-${mesDia}`;
-    if (candidata < hoyISO) candidata = `${Number(hoyISO.slice(0, 4)) + 1}-${mesDia}`;
-    if (!fechaValida(candidata)) return { motivo: `fecha pasada: ${v}` };
-    f = candidata;
+  if (!fraseDiceElAnio(frase)) {
+    // El AÑO lo pone el código, no el modelo (QA de #971, R1: «salimos el 28 de diciembre» salía
+    // 2027-12-28 en una carga a un negocio existente): la próxima vez que ocurre ese día y mes.
+    const proxima = proximaOcurrencia(v.slice(5), hoyISO);
+    if (!proxima) return { motivo: `fecha imposible: ${v}` };
+    f = proxima;
+  } else if (f < hoyISO) {
+    return { motivo: `fecha pasada: ${v}` };
   }
   if (f > sumarMeses(hoyISO, MESES_MAXIMOS)) return { motivo: `a más de ${MESES_MAXIMOS} meses: ${f}` };
   return { valor: f };
+}
+
+/** ¿La frase dice el año («2027», «del 2026»)? Si no, el año lo infiere el código. */
+export function fraseDiceElAnio(frase: string): boolean {
+  return /(?<!\d)(19|20)\d{2}(?!\d)/.test(frase);
+}
+
+/** La próxima vez que ocurre `MM-DD` desde hoy (hoy cuenta). `null` si no existe (29-feb sin bisiesto cerca). */
+export function proximaOcurrencia(mesDia: string, hoyISO: string, desde = hoyISO): string | null {
+  const anio = Number(desde.slice(0, 4));
+  for (const a of [anio, anio + 1, anio + 2, anio + 3, anio + 4]) {
+    const c = `${a}-${mesDia}`;
+    if (fechaValida(c) && c >= desde) return c;
+  }
+  return null;
+}
+
+/**
+ * El regreso sin año va con la salida: mismo año, o el siguiente si su MES es anterior al de la
+ * salida («del 28 de diciembre al 3 de enero» → 2026-12-28 / 2027-01-03). En el mismo mes y antes
+ * del día de salida no se mueve: queda antes y se descarta (es un error, no otro año).
+ */
+export function regresoConLaSalida(regreso: string, salida: string): string | null {
+  const anio = Number(salida.slice(0, 4)) + (regreso.slice(5, 7) < salida.slice(5, 7) ? 1 : 0);
+  const c = `${anio}-${regreso.slice(5)}`;
+  return fechaValida(c) ? c : null;
 }
 
 /**
@@ -573,11 +600,14 @@ export function validarSalida(
     // N7: la historia NO es prosa del modelo. Se arma con citas textuales del cliente que
     // aparecen en lo citable; una paráfrasis («tiende a ser crítica») no puede entrar.
     historia: historiaDeCitas(r.citas, opts.citables ?? ''),
-    cliente: { nombre: textoONull(cli.nombre), telefono: textoONull(cli.telefono) },
+    // Un nombre o un teléfono que no está en los mensajes no es del cliente: el modelo puede copiar
+    // un marcador del prompt («(no lo dijo)», «Viaje T1 26 11») (QA de #971, E2a y N6).
+    cliente: { nombre: estaEnElTexto(textoONull(cli.nombre), fuente), telefono: telefonoEnElTexto(textoONull(cli.telefono), textoFuente) },
     sugeridos: {},
     descartados: [],
   };
 
+  const preferencias: string[] = [];
   for (const f of camposEntendibles(fields)) {
     const item = valores[f.slug] as { valor?: unknown; frase?: unknown } | undefined;
     const bruto = item?.valor;
@@ -636,6 +666,14 @@ export function validarSalida(
         out.descartados.push({ slug: f.slug, motivo: `el texto no sale de los mensajes: «${v.slice(0, 60)}»` });
         continue;
       }
+      // Un valor que es una OPCIÓN de otro campo de la config no es un valor de este: «playa» es
+      // un tipo de viaje, no un destino (QA de #971, A3). La lista sale de la config, no del código.
+      const deOtro = opcionDeOtroCampo(v, f, fields);
+      if (deOtro) {
+        out.descartados.push({ slug: f.slug, motivo: `«${v}» es una opción de «${deOtro.label ?? deOtro.slug}», no un valor de ${f.label ?? f.slug}` });
+        preferencias.push(frase);
+        continue;
+      }
       // Si el cliente enumera ciudades después del destino, el destino las conserva todas.
       if (f.slug === SLUG_DESTINO) {
         const lugares = lugaresDespuesDelDestino(v, mensajeDeLaFrase(frase, textoFuente));
@@ -646,6 +684,12 @@ export function validarSalida(
       }
       out.sugeridos[f.slug] = { valor: v, frase };
     }
+  }
+
+  // La preferencia que no era un valor («un destino de playa») va a requisitos con su frase.
+  const slugs = new Set(camposEntendibles(fields).map(f => f.slug));
+  if (preferencias.length > 0 && slugs.has(SLUG_REQUISITOS) && !out.sugeridos[SLUG_REQUISITOS]) {
+    out.sugeridos[SLUG_REQUISITOS] = { valor: preferencias.join('; '), frase: preferencias[0], deduccion: 'Preferencia del cliente que no es un valor del campo: se anota como requisito' };
   }
 
   // Un 0 en niños o bebés solo si la frase cierra quiénes viajan. La deducción determinista
@@ -684,9 +728,15 @@ export function validarSalida(
     }
   }
 
+  // El regreso sin año va con la salida: mismo año, o el siguiente si su mes es anterior.
+  const salida = out.sugeridos[SLUG_SALIDA]?.valor ?? opts.conocidos?.[SLUG_SALIDA];
+  const reg0 = out.sugeridos[SLUG_REGRESO];
+  if (reg0 && typeof salida === 'string' && fechaValida(salida) && !fraseDiceElAnio(reg0.frase)) {
+    const conSalida = regresoConLaSalida(String(reg0.valor), salida);
+    if (conSalida) out.sugeridos[SLUG_REGRESO] = { ...reg0, valor: conSalida };
+  }
   // El regreso no puede quedar antes de la salida (la de este mensaje o la que ya estaba).
   const regreso = out.sugeridos[SLUG_REGRESO];
-  const salida = out.sugeridos[SLUG_SALIDA]?.valor ?? opts.conocidos?.[SLUG_SALIDA];
   if (regreso && typeof salida === 'string' && fechaValida(salida) && String(regreso.valor) < salida) {
     delete out.sugeridos[SLUG_REGRESO];
     out.descartados.push({ slug: SLUG_REGRESO, motivo: `el regreso (${regreso.valor}) queda antes de la salida (${salida})` });
@@ -696,6 +746,30 @@ export function validarSalida(
 
 /** La convención del bloque de viaje para las dos fechas. Sin ellas, la comparación no corre. */
 const SLUG_DESTINO = 'destino';
+const SLUG_REQUISITOS = 'requisitos_especiales';
+
+/** El campo `select`/`radio` (otro que `f`) que tiene `v` entre sus opciones, por valor o etiqueta. */
+export function opcionDeOtroCampo(v: string, f: CampoEntendible, fields: ReadonlyArray<CampoEntendible>): CampoEntendible | null {
+  const n = normalizarTexto(v).replace(/[^a-z0-9 ]/g, ' ').replace(/\s+/g, ' ').trim();
+  // Solo palabras: un número («5» años) no es la opción «5 estrellas» de otro campo.
+  if (!n || !/[a-z]/.test(n)) return null;
+  return fields.find(o => o.slug !== f.slug && (o.opciones ?? []).some(op =>
+    !op.no_definido && [op.value, op.label].some(x => x && normalizarTexto(String(x)).replace(/[^a-z0-9 ]/g, ' ').replace(/_/g, ' ').replace(/\s+/g, ' ').trim() === n))) ?? null;
+}
+
+/** El texto, si todas sus palabras están en el mensaje; si no, null. */
+function estaEnElTexto(v: string | null, fuenteNormalizada: string): string | null {
+  if (!v) return null;
+  const palabras = normalizarTexto(v).replace(/[^a-z0-9 ]/g, ' ').split(' ').filter(w => w.length >= 2);
+  const del = new Set(fuenteNormalizada.replace(/[^a-z0-9 ]/g, ' ').split(' '));
+  return palabras.length > 0 && palabras.every(w => del.has(w)) ? v : null;
+}
+
+/** El teléfono, si sus dígitos están en el mensaje. */
+function telefonoEnElTexto(v: string | null, texto: string): string | null {
+  const d = String(v ?? '').replace(/\D/g, '');
+  return d.length >= 7 && texto.replace(/\D/g, '').includes(d.slice(-7)) ? v : null;
+}
 const SLUG_SALIDA = 'fecha_salida';
 const SLUG_REGRESO = 'fecha_regreso';
 

@@ -240,44 +240,47 @@ export function textoAsignacion(mensajes: ReadonlyArray<MensajeViaje>, encabezad
 const NO_IDENTIFICAN = new Set(['san', 'santa', 'del', 'las', 'los', 'familia']);
 
 /**
+ * El texto sin los lugares: los destinos de los viajes abiertos y lo que va después de «San» o
+ * «Santa». Así «San Andrés» no nombra a Andrés Gil (QA de #971, el día: Luisa terminó sin datos).
+ */
+export function sinLugares(texto: string, viajes: ReadonlyArray<ViajeAbierto> = []): string {
+  let t = ` ${palabrasDe(texto).join(' ')} `;
+  const destinos = [...new Set(viajes.map(v => normalizarNombre(v.destino)).filter(Boolean))].sort((a, b) => b.length - a.length);
+  for (const d of destinos) t = t.split(` ${d} `).join(' ');
+  t = t.replace(/ (san|santa|santo) \w+/g, ' ');
+  return t.replace(/\s+/g, ' ').trim();
+}
+
+/**
  * Los viajes que un mensaje nombra SIN el modelo: por una palabra del nombre del cliente (abiertos
- * o NUEVO de un encabezado), o por el destino si ningún otro viaje abierto va al mismo lugar. Es la
- * evidencia determinista: no depende de que el modelo la cite.
+ * o NUEVO de un encabezado), con los lugares quitados antes. El destino NO cuenta como evidencia
+ * de a qué viaje va (D2m: «llevar a mi mamá a Cartagena» no es del viaje de Jorge a Cartagena).
  */
 export function viajesNombrados(cuerpo: string, destinos: ReadonlyArray<DestinoPlan>, viajes: ReadonlyArray<ViajeAbierto> = []): DestinoPlan[] {
-  const lista = palabrasDe(cuerpo);
-  const palabras = new Set(lista);
-  const texto = ` ${lista.join(' ')} `;
+  const palabras = new Set(sinLugares(cuerpo, viajes).split(' '));
   const out = new Map<string, DestinoPlan>();
   for (const d of destinos) {
     const delNombre = palabrasDe(d.cliente).filter(w => w.length >= 3 && !NO_IDENTIFICAN.has(w));
-    if (delNombre.length > 0 && delNombre.some(w => palabras.has(w))) {
-      out.set(claveDestino(d), d);
-      continue;
-    }
-    if (d.tipo !== 'existente') continue;
-    const v = viajes.find(x => x.id === d.negocio_id);
-    const dest = normalizarNombre(v?.destino ?? null);
-    if (!dest || !texto.includes(` ${dest} `)) continue;
-    if (viajes.filter(x => normalizarNombre(x.destino) === dest).length === 1) out.set(claveDestino(d), d);
+    if (delNombre.length > 0 && delNombre.some(w => palabras.has(w))) out.set(claveDestino(d), d);
   }
   return [...out.values()];
 }
 
+/** Los destinos de viajes abiertos que el mensaje nombra («para Cartagena»), normalizados. */
+export function destinosNombrados(cuerpo: string, viajes: ReadonlyArray<ViajeAbierto>): string[] {
+  const t = ` ${palabrasDe(cuerpo).join(' ')} `;
+  return [...new Set(viajes.map(v => normalizarNombre(v.destino)).filter(d => d && t.includes(` ${d} `)))];
+}
+
 /**
- * ¿La evidencia nombra a este viaje? El nombre del cliente, el código, o el destino si NINGÚN otro
- * viaje abierto va al mismo lugar (F7: dos clientes a Punta Cana).
+ * ¿La evidencia nombra a este viaje? El nombre del cliente (sin lugares) o el código. El destino
+ * no: dos clientes van al mismo lugar (F7) y un cliente puede nombrar el destino de otro (D2m).
  */
 export function evidenciaApunta(evidencia: string, d: DestinoPlan, viajes: ReadonlyArray<ViajeAbierto>): boolean {
-  const palabras = palabrasDe(evidencia);
-  if (palabras.some(w => palabraDelNombre(w, d.cliente))) return true;
+  const palabras = sinLugares(evidencia, viajes).split(' ').filter(Boolean);
+  if (palabras.some(w => !NO_IDENTIFICAN.has(w) && palabraDelNombre(w, d.cliente))) return true;
   if (d.tipo === 'nuevo') return false;
-  if (d.codigo && normalizarTexto(evidencia).replace(/[^a-z0-9]/g, '').includes(codigoCompacto(d.codigo).toLowerCase())) return true;
-  const v = viajes.find(x => x.id === d.negocio_id);
-  const dest = palabrasDe(v?.destino ?? null);
-  if (dest.length === 0 || !dest.every(w => palabras.includes(w))) return false;
-  const mismoLugar = viajes.filter(x => normalizarNombre(x.destino) === normalizarNombre(v?.destino ?? null));
-  return mismoLugar.length === 1;
+  return !!d.codigo && normalizarTexto(evidencia).replace(/[^a-z0-9]/g, '').includes(codigoCompacto(d.codigo).toLowerCase());
 }
 
 export interface AsignacionModelo {
@@ -344,6 +347,35 @@ export interface PlanViajes {
   avisos: string[];
 }
 
+const MESES_TXT = ['enero', 'febrero', 'marzo', 'abril', 'mayo', 'junio', 'julio', 'agosto', 'septiembre', 'octubre', 'noviembre', 'diciembre'];
+
+/** Lo que un mensaje dice de fechas y de adultos, para ver si choca con lo anterior de la caja. */
+export function datosDelMensaje(cuerpo: string): { fechas: string[]; adultos: number[] } {
+  const t = palabrasDe(cuerpo);
+  const fechas: string[] = [];
+  t.forEach((w, i) => {
+    const mes = MESES_TXT.indexOf(w);
+    if (mes < 0) return;
+    // Los días antes del mes: «del 20 al 24 de noviembre», «el 28 de diciembre».
+    for (let k = i - 1; k >= Math.max(0, i - 6); k--) {
+      if (/^\d{1,2}$/.test(t[k])) fechas.push(`${Number(t[k])}-${mes + 1}`);
+      else if (MESES_TXT.includes(t[k])) break;
+    }
+  });
+  const adultos: number[] = [];
+  t.forEach((w, i) => {
+    if (/^(adultos?|adlts?)$/.test(w) && /^\d{1,2}$/.test(t[i - 1] ?? '')) adultos.push(Number(t[i - 1]));
+  });
+  return { fechas, adultos };
+}
+
+/** ¿El mensaje dice fechas o adultos distintos de lo que ya dijo la caja? */
+function chocaConLaCaja(m: { fechas: string[]; adultos: number[] }, caja: { fechas: Set<string>; adultos: Set<number> }): string | null {
+  if (m.fechas.length > 0 && caja.fechas.size > 0 && !m.fechas.some(f => caja.fechas.has(f))) return 'dice otras fechas que lo anterior de esa caja';
+  if (m.adultos.length > 0 && caja.adultos.size > 0 && !m.adultos.some(a => caja.adultos.has(a))) return 'dice otro número de adultos que lo anterior de esa caja';
+  return null;
+}
+
 function lineaViaje(v: ViajeAbierto): string {
   return [v.codigo, v.cliente].filter(Boolean).join(' · ') || 'sin código';
 }
@@ -361,13 +393,16 @@ function avisoEncabezado(e: NonNullable<Segmento['encabezado']>, cerrados: Reado
 
 /**
  * Arma el plan. `asignaciones` es lo que el modelo propuso ya validado (vacío en modo `encabezado`).
- *   · caja de un encabezado resuelto → sus mensajes van a ese viaje, salvo:
- *       - un mensaje que nombra a dos viajes → sin asignar (varios);
- *       - un mensaje con evidencia de OTRO viaje → sin asignar, y la caja se rompe: lo que sigue
- *         sin evidencia propia queda sin asignar hasta que una evidencia vuelva a nombrar la caja;
+ *   · caja de un encabezado resuelto → sus mensajes van a ese viaje, salvo los DUDOSOS, que quedan
+ *     sin asignar con su motivo y rompen la caja (lo que sigue sin evidencia propia también):
+ *       - nombra a dos viajes (VARIOS) o a otro viaje (F9, F13, el día);
+ *       - nombra el destino de otro viaje abierto («para Cartagena» bajo «Carolina», que va a Punta Cana);
+ *       - llega después de un silencio de más de `segundosBloque` dentro de la caja;
+ *       - dice otras fechas u otro número de adultos que lo anterior de la caja (F4b);
+ *     una evidencia propia que vuelve a nombrar la caja la restablece;
  *   · caja de un encabezado ambiguo o desconocido → solo lo que trae evidencia propia;
- *   · bloque por silencio → si toda la evidencia del bloque apunta a UN viaje, el bloque va entero
- *     ahí; si apunta a varios, solo los mensajes con evidencia propia; sin evidencia, nada.
+ *   · bloque por silencio → si toda la evidencia del bloque apunta a UN viaje, el bloque va ahí
+ *     (con los mismos dudosos); si apunta a varios, solo los mensajes con evidencia; sin evidencia, nada.
  */
 export function armarPlan(p: {
   mensajes: ReadonlyArray<MensajeViaje>;
@@ -377,24 +412,27 @@ export function armarPlan(p: {
   asignaciones: ReadonlyMap<number, AsignacionModelo>;
   /** Códigos compactos de viajes CERRADOS del workspace, para decir «está cerrado» y no «no existe». */
   codigosCerrados?: ReadonlySet<string>;
+  /** El silencio que, dentro de una caja, hace dudoso lo que sigue (`segundos_bloque`). */
+  segundosBloque?: number;
 }): PlanViajes {
   const porN = new Map(p.mensajes.map(m => [m.n, m]));
+  const silencio = (p.segundosBloque ?? 600) * 1000;
   const destinosConocidos: DestinoPlan[] = [
     ...p.viajes.map(destinoDeViaje),
     ...p.segmentos.flatMap(s => (s.encabezado?.resolucion.tipo === 'nuevo' ? [{ tipo: 'nuevo', cliente: s.encabezado.resolucion.cliente } as DestinoPlan] : [])),
   ];
+  const destinoDe = (d: DestinoPlan | null) => (d?.tipo === 'existente' ? normalizarNombre(p.viajes.find(v => v.id === d.negocio_id)?.destino ?? null) : '');
   const plan: PlanViajes = { version: 1, mensajes: [], encabezados: [...p.encabezados], avisos: [] };
   const poner = (x: MensajePlan) => plan.mensajes.push(x);
 
   for (const seg of p.segmentos) {
     const res = seg.encabezado?.resolucion ?? null;
-    const caja: DestinoPlan | null = res?.tipo === 'viaje' ? destinoDeViaje(res.viaje) : res?.tipo === 'nuevo' ? { tipo: 'nuevo', cliente: res.cliente } : null;
     if (seg.encabezado) {
       const aviso = avisoEncabezado(seg.encabezado, p.codigosCerrados ?? new Set());
       if (aviso) plan.avisos.push(aviso);
     }
-    // La evidencia de cada mensaje: la del modelo (validada) y la que se ve sin modelo (el nombre
-    // o el destino único). Si dicen viajes distintos, no hay evidencia: se pregunta.
+    // La evidencia de cada mensaje: la del modelo (validada) y la que se ve sin modelo (el nombre).
+    // Si dicen viajes distintos, no hay evidencia: se pregunta.
     const evidencia = new Map<number, AsignacionModelo | 'choque' | 'varios'>();
     for (const n of seg.mensajes) {
       const m = porN.get(n);
@@ -408,51 +446,72 @@ export function armarPlan(p: {
     }
     const evidenciasDelBloque = new Map<string, DestinoPlan>();
     for (const e of evidencia.values()) if (typeof e === 'object') evidenciasDelBloque.set(claveDestino(e.destino), e.destino);
+
+    // La caja: la del encabezado, o la del único viaje con evidencia en un bloque por silencio.
+    const caja: DestinoPlan | null = res?.tipo === 'viaje' ? destinoDeViaje(res.viaje)
+      : res?.tipo === 'nuevo' ? { tipo: 'nuevo', cliente: res.cliente }
+      : !seg.encabezado && evidenciasDelBloque.size === 1 ? [...evidenciasDelBloque.values()][0] : null;
+    const porQueCaja: PorQue = seg.encabezado ? 'encabezado' : 'bloque';
+    const nombreCaja = seg.encabezado ? `el encabezado «${seg.encabezado.texto}»` : `el bloque de ${caja?.cliente ?? 'ese viaje'}`;
+    const vistos = { fechas: new Set<string>(), adultos: new Set<number>() };
     let rota = false;
+    let ultimo = seg.encabezado ? Date.parse(p.mensajes.find(x => x.n === seg.encabezado!.n)?.en ?? '') : NaN;
+
     for (const n of seg.mensajes) {
       const m = porN.get(n);
       if (!m) continue;
+      const t = Date.parse(m.en);
+      const trasSilencio = Number.isFinite(ultimo) && Number.isFinite(t) && t - ultimo > silencio;
+      ultimo = t;
       const ev = evidencia.get(n);
       if (ev === 'varios') {
         const nombrados = viajesNombrados(m.cuerpo, destinosConocidos, p.viajes);
         poner({ n, destino: null, por: null, evidencia: null, varios: true, motivo: `habla de dos viajes (${nombrados.map(d => d.cliente).join(' y ')})` });
+        rota = true;
         continue;
       }
       if (ev === 'choque') {
         poner({ n, destino: null, por: null, evidencia: null, motivo: 'el texto y la propuesta no coinciden en el viaje' });
-        if (seg.origen === 'encabezado') rota = true;
+        rota = true;
         continue;
       }
       const a = ev;
-      if (seg.origen === 'encabezado' && caja) {
-        if (a && claveDestino(a.destino) !== claveDestino(caja)) {
-          // No se pasa solo al otro viaje («Luisa me recomendó» en el chat de Carolina, F9): queda
-          // sin asignar, se dice por qué, y la caja se rompe (F4: el encabezado olvidado a mitad).
-          rota = true;
-          poner({ n, destino: null, por: null, evidencia: a.evidencia, motivo: `nombra a ${a.destino.cliente ?? 'otro viaje'} («${a.evidencia}») y está bajo el encabezado «${seg.encabezado!.texto}»` });
-          continue;
+      if (!caja) {
+        // Sin caja: solo lo que trae evidencia propia.
+        if (a) poner({ n, destino: a.destino, por: 'modelo', evidencia: a.evidencia });
+        else {
+          const motivo = seg.encabezado ? `${nombreCaja} no se pudo resolver`
+            : evidenciasDelBloque.size > 1 ? 'el bloque tiene mensajes de varios viajes' : 'sin pista de a qué viaje va';
+          poner({ n, destino: null, por: null, evidencia: null, motivo });
         }
-        if (a) rota = false;
-        if (rota) {
-          poner({ n, destino: null, por: null, evidencia: null, motivo: 'viene después de un mensaje de otro viaje, sin encabezado' });
-          continue;
-        }
-        poner({ n, destino: caja, por: a ? 'modelo' : 'encabezado', evidencia: a?.evidencia ?? null });
         continue;
       }
+      if (a && claveDestino(a.destino) !== claveDestino(caja)) {
+        // No se pasa solo al otro viaje («Luisa me recomendó» en el chat de Carolina, F9).
+        rota = true;
+        poner({ n, destino: null, por: null, evidencia: a.evidencia, motivo: `nombra a ${a.destino.cliente ?? 'otro viaje'} («${a.evidencia}») y está bajo ${nombreCaja}` });
+        continue;
+      }
+      const datos = datosDelMensaje(m.cuerpo);
       if (a) {
-        poner({ n, destino: a.destino, por: 'modelo', evidencia: a.evidencia });
-        continue;
+        // Una evidencia propia de la caja la restablece.
+        rota = false;
+        poner({ n, destino: caja, por: 'modelo', evidencia: a.evidencia });
+      } else {
+        const otroDestino = destinosNombrados(m.cuerpo, p.viajes).find(d => d !== destinoDe(caja) && !destinoDe(caja).includes(d));
+        const duda = rota ? 'viene después de un mensaje dudoso, sin pista propia'
+          : otroDestino && caja.tipo === 'existente' ? `habla de ${otroDestino.toUpperCase()} y ${caja.codigo ?? 'ese viaje'} va a ${destinoDe(caja).toUpperCase() || 'otro lugar'}`
+          : trasSilencio ? `llegó después de un silencio, sin pista de que siga siendo de ${caja.cliente ?? 'ese viaje'}`
+          : chocaConLaCaja(datos, vistos);
+        if (duda) {
+          rota = true;
+          poner({ n, destino: null, por: null, evidencia: null, motivo: `${duda} (¿es de ${caja.cliente ?? 'ese viaje'}?)` });
+          continue;
+        }
+        poner({ n, destino: caja, por: porQueCaja, evidencia: null });
       }
-      if (seg.origen === 'silencio' && evidenciasDelBloque.size === 1) {
-        const [unico] = evidenciasDelBloque.values();
-        poner({ n, destino: unico, por: 'bloque', evidencia: null });
-        continue;
-      }
-      const motivo = seg.origen === 'encabezado'
-        ? `el encabezado «${seg.encabezado!.texto}» no se pudo resolver`
-        : evidenciasDelBloque.size > 1 ? 'el bloque tiene mensajes de varios viajes' : 'sin pista de a qué viaje va';
-      poner({ n, destino: null, por: null, evidencia: null, motivo });
+      for (const f of datos.fechas) vistos.fechas.add(f);
+      for (const x of datos.adultos) vistos.adultos.add(x);
     }
   }
   plan.mensajes.sort((a, b) => a.n - b.n);
@@ -491,35 +550,62 @@ function recorte(t: string, n = 40): string {
 }
 
 const MAX_CON_TEXTO = 25;
+/** WhatsApp corta en 4.096 caracteres; se deja margen. */
+export const MAX_LARGO_RESUMEN = 3800;
+
+/** «2-4, 6, 9-10»: los números de una lista, en rangos. */
+export function rangos(ns: ReadonlyArray<number>): string {
+  const o = [...ns].sort((a, b) => a - b);
+  const partes: string[] = [];
+  for (let i = 0; i < o.length; i++) {
+    let j = i;
+    while (j + 1 < o.length && o[j + 1] === o[j] + 1) j++;
+    partes.push(j > i ? `${o[i]}-${o[j]}` : `${o[i]}`);
+    i = j;
+  }
+  return partes.join(', ');
+}
 
 /**
  * El resumen que ve el comercial antes de cargar:
  *   «Entendí 2 viajes: 1) T1 26 11 · CAROLINA (3 mensajes) 2) NUEVO Luisa (2 mensajes).
  *    Sin asignar: 1 mensaje. ¿Así? sí / corregir».
- * Con pocos mensajes muestra el comienzo de cada uno para que «el 4» signifique algo.
+ * Con pocos mensajes muestra el comienzo de cada uno; con muchos, los asignados van en rangos y
+ * los DUDOSOS (sin asignar) siempre con su texto y su motivo. Nunca pasa de `MAX_LARGO_RESUMEN`.
  */
 export function textoResumenPlan(plan: PlanViajes, mensajes: ReadonlyArray<MensajeViaje>, aviso?: string): string {
-  const porN = new Map(mensajes.map(m => [m.n, m]));
+  const armar = (conTexto: boolean, largo: number) => {
+    const porN = new Map(mensajes.map(m => [m.n, m]));
+    const linea = (n: number) => `   ${n} «${recorte(porN.get(n)?.cuerpo ?? '', largo)}»`;
+    const grupos = gruposDelPlan(plan);
+    const sueltos = sinAsignar(plan);
+    const out: string[] = aviso ? [aviso] : [];
+    out.push(grupos.length === 0 ? 'No pude asignar ningún mensaje a un viaje.' : `Entendí ${grupos.length} ${grupos.length === 1 ? 'viaje' : 'viajes'}:`);
+    for (const g of grupos) {
+      const n = g.mensajes.length;
+      out.push(`${g.k}) ${nombreDestino(g.destino)} (${n} ${n === 1 ? 'mensaje' : 'mensajes'}${conTexto ? '' : `: ${rangos(g.mensajes)}`})`);
+      if (conTexto) out.push(...g.mensajes.map(linea));
+    }
+    if (sueltos.length > 0) {
+      out.push(`⚠ Sin asignar (hay que decidir antes del sí): ${sueltos.length} ${sueltos.length === 1 ? 'mensaje' : 'mensajes'}`);
+      out.push(...sueltos.map(m => `${linea(m.n)} (${m.motivo ?? 'sin pista'})`));
+    }
+    const descartados = plan.mensajes.filter(m => m.descartado).map(m => m.n);
+    if (descartados.length > 0) out.push(`Descartados: ${rangos(descartados)}`);
+    out.push(...plan.avisos);
+    out.push(sueltos.length > 0
+      ? 'No cargué nada todavía. Dime qué hago con los sin asignar: «el 4 es de Luisa», «el 4 es del 2», «el 4 es nuevo Pedro», «descartar el 4» o «descartar los sin asignar». DESCARTAR descarta todo.'
+      : 'No cargué nada todavía. ¿Así? Responde SÍ, o corrige: «el 4 es de Luisa», «el 4 es del 2», «el 4 es nuevo Pedro», «descartar el 4». DESCARTAR descarta todo.');
+    return out.join('\n');
+  };
   const conTexto = plan.mensajes.length <= MAX_CON_TEXTO;
-  const linea = (n: number) => `   ${n} «${recorte(porN.get(n)?.cuerpo ?? '')}»`;
-  const grupos = gruposDelPlan(plan);
-  const sueltos = sinAsignar(plan);
-  const out: string[] = aviso ? [aviso] : [];
-  out.push(grupos.length === 0 ? 'No pude asignar ningún mensaje a un viaje.' : `Entendí ${grupos.length} ${grupos.length === 1 ? 'viaje' : 'viajes'}:`);
-  for (const g of grupos) {
-    const n = g.mensajes.length;
-    out.push(`${g.k}) ${nombreDestino(g.destino)} (${n} ${n === 1 ? 'mensaje' : 'mensajes'}${conTexto ? '' : `: ${g.mensajes.join(', ')}`})`);
-    if (conTexto) out.push(...g.mensajes.map(linea));
+  for (const largo of [40, 28, 18]) {
+    const t = armar(conTexto, largo);
+    if (t.length <= MAX_LARGO_RESUMEN) return t;
+    const sinTexto = armar(false, largo);
+    if (sinTexto.length <= MAX_LARGO_RESUMEN) return sinTexto;
   }
-  if (sueltos.length > 0) {
-    out.push(`Sin asignar: ${sueltos.length} ${sueltos.length === 1 ? 'mensaje' : 'mensajes'}`);
-    out.push(...sueltos.map(m => `${linea(m.n)} (${m.motivo ?? 'sin pista'})`));
-  }
-  const descartados = plan.mensajes.filter(m => m.descartado).map(m => m.n);
-  if (descartados.length > 0) out.push(`Descartados: ${descartados.join(', ')}`);
-  out.push(...plan.avisos);
-  out.push('No cargué nada todavía. ¿Así? Responde SÍ, o corrige: «el 4 es de Luisa», «el 4 es del 2», «el 4 es nuevo Pedro», «descartar el 4». DESCARTAR descarta todo.');
-  return out.join('\n');
+  return armar(false, 12).slice(0, MAX_LARGO_RESUMEN);
 }
 
 // ── La respuesta al resumen ──────────────────────────────────────────────────
@@ -574,9 +660,20 @@ function destinoDeCorreccion(texto: string, plan: PlanViajes, viajes: ReadonlyAr
 export function interpretarRespuestaPlan(texto: string, plan: PlanViajes, viajes: ReadonlyArray<ViajeAbierto>): RespuestaPlan {
   const bruto = String(texto ?? '').trim();
   if (!bruto) return { tipo: 'no_entendida' };
-  if (esSi(bruto)) return { tipo: 'si' };
+  if (esSi(bruto)) {
+    // Un «sí» no descarta en silencio: con mensajes sin asignar no se acepta (QA de #971, 13 por día).
+    const sueltos = sinAsignar(plan).map(m => m.n);
+    if (sueltos.length > 0) {
+      return { tipo: 'no_entendida', aviso: `Antes del sí, dime qué hago con ${sueltos.length === 1 ? 'el' : 'los'} ${rangos(sueltos)}: «el ${sueltos[0]} es de …», «descartar el ${sueltos[0]}» o «descartar los sin asignar».` };
+    }
+    return { tipo: 'si' };
+  }
   const t = normalizarTexto(bruto).replace(/[.!¡¿?]+$/g, '').trim();
   if (/^(descartar|descartar todo|descartalo todo|descarta todo|borrar todo)$/.test(t)) return { tipo: 'descartar_todo' };
+  if (/^descart\w* (los |el )?(sin asignar|sueltos|demas|resto)$/.test(t)) {
+    const sueltos = sinAsignar(plan).map(m => m.n);
+    return sueltos.length > 0 ? { tipo: 'corregir', cambios: [{ ns: sueltos, a: 'descartar' }] } : { tipo: 'no_entendida', aviso: 'No hay mensajes sin asignar.' };
+  }
   if (/^(corregir|corrijo|no|cambiar)$/.test(t)) return { tipo: 'como_corregir' };
 
   const existentes = new Set(plan.mensajes.map(m => m.n));

@@ -112,7 +112,10 @@ async function contextoDelEscrito(
   const { data: abierta, error } = await supabase.from('wa_bandeja_entregas').select('id')
     .eq('workspace_id', workspaceId).eq('remitente_phone', phone).eq('estado', 'abierta').limit(1).maybeSingle();
   if (error) return {};
-  if (abierta) return { entregaAbierta: true };
+  if (abierta) {
+    // Con la tanda abierta solo importa si hay una pregunta pendiente (regla 4b: una pregunta escrita va al bot).
+    return { entregaAbierta: true, preguntaPendiente: await hayPreguntaPendiente(supabase, workspaceId, phone) };
+  }
   const desde = new Date(Date.now() - config.horasRespuestaCliente * 3600_000).toISOString();
   const { data: esperando, error: e2 } = await supabase.from('wa_bandeja_entregas').select('id')
     .eq('workspace_id', workspaceId).eq('remitente_phone', phone).eq('estado', 'esperando_cliente')
@@ -146,10 +149,14 @@ export async function atenderEnBandeja(
   }
   const wamid = message.wa_message_id ?? `sin-wamid:${message.phone}:${message.timestamp}:${message.type}`;
 
+  // Un encabezado («Carolina», «T1 26 9») abre una caja: nunca es la respuesta a una pregunta
+  // pendiente (QA de #971: el que se escribía antes del «sí» se tomaba como respuesta al resumen).
+  const esEncabezado = await escritoEsEncabezado(supabase, user.workspace_id, message, config);
+
   // ¿Es la respuesta a «¿cuál de estos contactos es?» del paso de entendimiento? Se mira
   // ANTES de registrar: como contenido abriría una entrega nueva y la pregunta quedaría sin
   // respuesta. Solo un texto escrito (no reenviado) puede serlo.
-  if (message.type === 'text' && message.reenviado !== true && (message.text || '').trim()) {
+  if (!esEncabezado && message.type === 'text' && message.reenviado !== true && (message.text || '').trim()) {
     const tomada = await tomarRespuestaContacto(supabase, {
       workspaceId: user.workspace_id, phone: message.phone, texto: message.text.trim(),
       wamid, enviadoAt: fechaDeMeta(message.timestamp),
@@ -199,6 +206,7 @@ export async function atenderEnBandeja(
     p_enviado_at: fechaDeMeta(message.timestamp),
     p_es_cierre: esCierre,
     p_horas_respuesta_cliente: config.horasRespuestaCliente,
+    p_puede_ser_respuesta: !esEncabezado,
   });
 
   if (error) {
@@ -224,6 +232,13 @@ export async function atenderEnBandeja(
     default:
       break;
   }
+}
+
+/** ¿El escrito es un encabezado? Solo en modo encabezado/mixto, y solo un texto escrito. */
+async function escritoEsEncabezado(supabase: SupabaseClient, workspaceId: string, message: IncomingMessage, config: ConfigBandeja): Promise<boolean> {
+  if (config.modoViajes === 'uno' || message.type !== 'text' || message.reenviado === true || !(message.text || '').trim()) return false;
+  const viajes = await viajesAbiertosDeLaBandeja(supabase, workspaceId);
+  return !!viajes && resolverEncabezado(message.text, viajes) !== null;
 }
 
 /**

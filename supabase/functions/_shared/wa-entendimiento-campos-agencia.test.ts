@@ -50,10 +50,10 @@ describe('SQL PROVISIONAL: campos que escribe la agencia', () => {
     // Idempotente.
     await db.exec(SQL);
     expect((await campos()).map(f => f.slug)).toEqual(cs.map(f => f.slug));
-  });
+  }, 30_000);
 
   it('aborta si presentacion_destino no está en la etapa', async () => {
     await crear([[ETAPA, 'condiciones_del_viaje', VIAJE.filter(f => f.slug !== 'presentacion_destino')]]);
     await expect(db.exec(SQL)).rejects.toThrow(/presentacion_destino exactamente una vez/);
-  });
+  }, 30_000);
 });

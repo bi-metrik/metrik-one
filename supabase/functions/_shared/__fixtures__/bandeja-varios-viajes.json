@@ -857,16 +857,10 @@
     ]
    },
    "propuesta": {
-    "grupos": [
-     [
-      "T1 26 11",
-      [
-       3
-      ]
-     ]
-    ],
+    "grupos": [],
     "sin_asignar": [
-     2
+     2,
+     3
     ],
     "varios": [
      2
@@ -879,7 +873,12 @@
      "aviso": "habla de dos viajes"
     },
     {
-     "texto": "descartar el 2",
+     "texto": "sí",
+     "tipo": "no_entendida",
+     "aviso": "Antes del sí"
+    },
+    {
+     "texto": "descartar el 2; el 3 es de Carolina",
      "tipo": "corregir",
      "grupos": [
       [
@@ -889,6 +888,10 @@
        ]
       ]
      ]
+    },
+    {
+     "texto": "sí",
+     "tipo": "si"
     }
    ]
   },

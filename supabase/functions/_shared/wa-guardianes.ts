@@ -88,7 +88,9 @@ const RE_PROMOCION = /\b(desde \$|desde usd|precio por persona|plan(es)? desde|s
  *   · sin texto → ruido;
  *   · un pie de foto que habla de un pago → tercero (B7: «abono reserva Cartagena»);
  *   · un precio «desde $…», salidas con fecha fija o «aplican condiciones» → tercero (B6);
- *   · un escrito del comercial que habla del cliente en tercera persona o lo valora → comercial (B5).
+ *   · un escrito del comercial que habla del cliente en tercera persona o lo valora → comercial (B5);
+ *   · «ruido» del modelo sobre un mensaje que sostiene un valor → cliente (C5);
+ *   · «comercial» del modelo sin juicio → cliente: el comercial que relata la solicitud aporta (A2).
  * Sin clase del modelo (salida vieja), el mensaje cuenta como del cliente salvo esas correcciones.
  */
 export function clasesDeMensajes(raw: unknown, mensajes: ReadonlyArray<MensajeEntrega>): Record<number, ClaseMensaje> {
@@ -100,15 +102,26 @@ export function clasesDeMensajes(raw: unknown, mensajes: ReadonlyArray<MensajeEn
       if (Number.isInteger(n) && (CLASES_MENSAJE as readonly string[]).includes(String(x?.clase))) delModelo.set(n, x.clase as ClaseMensaje);
     }
   }
+  // Las frases que el modelo citó como sustento: un mensaje que sostiene un valor no es ruido.
+  const valores = ((raw && typeof raw === 'object' ? raw : {}) as { valores?: Record<string, { frase?: unknown }> }).valores ?? {};
+  const frases = Object.values(valores)
+    .map(v => (typeof v?.frase === 'string' ? normalizarTexto(v.frase) : ''))
+    .filter(f => f.length >= 4);
   const out: Record<number, ClaseMensaje> = {};
   for (const m of mensajes) {
     const t = ` ${normalizarTexto(m.cuerpo).replace(/[^a-z0-9$ ]/g, ' ').replace(/\s+/g, ' ')} `;
     const crudo = ` ${normalizarTexto(m.cuerpo)} `;
+    const modelo = delModelo.get(m.n);
     if (!m.cuerpo.trim()) out[m.n] = 'ruido';
     else if (m.origen === 'pie_de_foto' && RE_PAGO.test(t)) out[m.n] = 'tercero';
     else if (RE_PROMOCION.test(crudo)) out[m.n] = 'tercero';
     else if (!m.reenviado && RE_NOTA_COMERCIAL.test(t)) out[m.n] = 'comercial';
-    else out[m.n] = delModelo.get(m.n) ?? 'cliente';
+    else if (modelo === 'tercero') out[m.n] = 'tercero';
+    // «Ruido» del modelo solo si el mensaje no sostiene ningún valor (C5: «pta cana» era ruido).
+    else if (modelo === 'ruido') out[m.n] = frases.some(f => crudo.includes(f)) ? 'cliente' : 'ruido';
+    // «Comercial» solo lo decide el código (juicios sobre el cliente). Cuando el comercial RELATA la
+    // solicitud («tengo dos pasajeros para…», A2), eso es contenido de la solicitud.
+    else out[m.n] = 'cliente';
   }
   return out;
 }
@@ -357,6 +370,23 @@ export interface Entendida {
   haySolicitud: boolean;
   /** Lo que el cliente dijo (lo que sostiene los valores). */
   fuente: string;
+  /**
+   * El nombre con el que alguien SE PRESENTA en un mensaje del cliente («soy Andrés Gil», «habla
+   * Luisa»). Es lo único que N6 compara contra el cliente del negocio: no el «cliente» que extrae
+   * el modelo, que puede ser el código del viaje o el apodo de la comercial («Tati»).
+   */
+  sePresenta: string | null;
+}
+
+const RE_PRESENTA = /(?:^|[\s,.;:¡!¿?])(?:soy|habla|te habla|le habla|me llamo|mi nombre es|de parte de|te escribe)\s+(?:la\s+|el\s+)?([A-ZÁÉÍÓÚÑ][a-záéíóúñü]+(?:\s+[A-ZÁÉÍÓÚÑ][a-záéíóúñü]+)?)/;
+
+/** El primer nombre (con apellido, si viene) con el que alguien se presenta en estos mensajes. */
+export function nombreQueSePresenta(mensajes: ReadonlyArray<MensajeEntrega>): string | null {
+  for (const m of mensajes) {
+    const r = RE_PRESENTA.exec(m.cuerpo);
+    if (r) return r[1];
+  }
+  return null;
 }
 
 /**
@@ -383,5 +413,6 @@ export function entenderEntrega(
     solicitudes: solicitudesDistintas(raw, textoDe(mensajes)),
     haySolicitud: haySolicitud(salida, clases),
     fuente,
+    sePresenta: nombreQueSePresenta(delCliente),
   };
 }

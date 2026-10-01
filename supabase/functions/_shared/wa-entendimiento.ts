@@ -563,7 +563,7 @@ async function entenderNuevo(
     const mensajes = aEntrega(crudos);
     const lectura = await leerConModelo(
       instruccionesEntendimiento(cfg.fields, todayBogotaISO()),
-      `El comercial dice que el cliente es: ${clienteTexto ?? '(no lo dijo)'}\n\nMensajes:\n${textoParaModelo(mensajes)}`,
+      `${clienteTexto ? `El comercial dice que el cliente es: ${clienteTexto}\n\n` : ''}Mensajes:\n${textoParaModelo(mensajes)}`,
       esquemaDeSalida(cfg.fields),
     );
     if (lectura.error || lectura.json === null) {
@@ -711,7 +711,7 @@ async function armarReparto(
   }
   const desconocidos = segmentos.some(s => s.encabezado?.resolucion.tipo === 'codigo_desconocido');
   const plan = armarPlan({
-    mensajes, viajes, segmentos, encabezados, asignaciones,
+    mensajes, viajes, segmentos, encabezados, asignaciones, segundosBloque: l.bandeja.segundosBloque,
     codigosCerrados: desconocidos ? await codigosCerrados(supabase, workspaceId) : new Set(),
   });
   return { plan, bandeja: l.bandeja };
@@ -992,12 +992,13 @@ async function cargarEnNegocioExistente(
   const meta = { entrega_id: ent.entrega_id as string, en: new Date().toISOString(), origenDe: (f: string) => origenDeFrase(f, crudos) };
 
   let salida: SalidaEntendida;
+  let sePresenta: string | null = null;
   if (opts.previa) {
     salida = opts.previa;
   } else {
     const lectura = await leerConModelo(
       instruccionesEntendimiento(campos, todayBogotaISO(), yaTiene),
-      `Viaje ${neg.codigo ?? ''} (ya existe).\n\nMensajes:\n${textoParaModelo(mensajes)}`,
+      `Mensajes:\n${textoParaModelo(mensajes)}`,
       esquemaDeSalida(campos),
     );
     if (lectura.error || lectura.json === null) {
@@ -1007,6 +1008,7 @@ async function cargarEnNegocioExistente(
       return;
     }
     const e = entenderEntrega(lectura.json, campos, mensajes, { hoyISO: todayBogotaISO(), conocidos: yaTiene, cortes: cortesDe(bandeja) });
+    sePresenta = e.sePresenta;
     await guardarClases(supabase, crudos, mensajes, e.clases);
     // La deducción se hace sobre lo que el negocio QUEDARÍA teniendo: los niños pueden haber
     // llegado en otra entrega y las edades en esta.
@@ -1031,7 +1033,8 @@ async function cargarEnNegocioExistente(
   if (!opts.forzar) {
     const cruces = detectarCruce({
       destinoNegocio: yaTiene.destino, destinoMensajes: salida.sugeridos.destino?.valor,
-      clienteNegocio, clienteMensajes: salida.cliente.nombre,
+      // Solo un nombre con el que alguien se presenta en un mensaje del cliente (no el del modelo).
+      clienteNegocio, clienteMensajes: sePresenta,
     });
     if (cruces.length > 0) {
       await preguntarYEsperar(supabase, ent, textoAvisoCruce({

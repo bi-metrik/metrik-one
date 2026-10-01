@@ -137,6 +137,11 @@ export function empiezaConPrefijoBot(texto: string, prefijos: string[]): boolean
 
 export type Ruta = 'bandeja' | 'bot';
 
+/** ¿El escrito es una pregunta? Con signo de interrogación (al abrir o al cerrar). */
+export function esPregunta(texto: string): boolean {
+  return /[¿?]/.test(String(texto ?? ''));
+}
+
 export interface EntradaRuta {
   /** `workspaces.modules` del remitente. */
   modules: Record<string, unknown> | null | undefined;
@@ -166,6 +171,9 @@ export interface EntradaRuta {
  *      y ni siquiera un gasto a medias puede tragárselo;
  *   3. conversación del bot a medias → el bot, para no romper un gasto que espera su foto;
  *   4. escrito empezando por un prefijo del bot («gasto …») → el bot;
+ *   4b. escrito que es una PREGUNTA («¿cuánto vendimos en septiembre?») y no es encabezado → el bot,
+ *      aunque haya una tanda abierta (QA de #971, F14b: se la tragaba la tanda de Carolina). Lo que el
+ *      cliente pregunta llega reenviado (regla 2), no escrito;
  *   5. escrito (texto) SIN entrega abierta, SIN pregunta pendiente de la bandeja y que NO es un
  *      encabezado → el bot de siempre (N8, QA del 2026-10-01: «¿cuánto vendimos en
  *      septiembre?» se quedaba en la bandeja sin respuesta). Dentro de una tanda abierta un
@@ -180,6 +188,7 @@ export function decidirRuta(e: EntradaRuta): Ruta {
   if (e.reenviado) return 'bandeja';
   if (e.sesionBotEsperando) return 'bot';
   if (e.tipo === 'text' && empiezaConPrefijoBot(e.texto, e.config.prefijosBot)) return 'bot';
+  if (e.tipo === 'text' && esPregunta(e.texto) && e.esEncabezado !== true && e.preguntaPendiente === false) return 'bot';
   if (e.tipo === 'text' && e.entregaAbierta === false && e.preguntaPendiente === false && e.esEncabezado !== true) return 'bot';
   return 'bandeja';
 }

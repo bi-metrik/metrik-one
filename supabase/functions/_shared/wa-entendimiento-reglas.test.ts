@@ -308,6 +308,7 @@ describe('regla 1: un mes, una ventana, una duración o una fecha pasada no son 
   });
 
   it('no pasa: un regreso antes de la salida, la de este mensaje o la que ya estaba', () => {
+    // Mismo mes y antes del día de salida: es un error, no otro año.
     const t = 'salimos el 20 de diciembre y volvemos el 10 de diciembre';
     const s = fecha(t, { valor: '2026-12-20', frase: t }, { valor: '2026-12-10', frase: t });
     expect(s.sugeridos.fecha_regreso).toBeUndefined();
@@ -616,8 +617,37 @@ describe('las piezas de los guardianes', () => {
     expect(leerEdades('')).toBeNull();
   });
 
-  it('fechaDeViaje directo: hoy vale; un 29 de febrero que no vuelve a tiempo se descarta', () => {
+  it('fechaDeViaje directo: hoy vale; sin año, la próxima vez que existe; con año pasado, se descarta', () => {
     expect(fechaDeViaje('2026-10-01', 'el 1', '2026-10-01')).toEqual({ valor: '2026-10-01' });
-    expect(fechaDeViaje('2024-02-29', 'el 29 de febrero', '2026-10-01')).toEqual({ motivo: 'fecha pasada: 2024-02-29' });
+    expect(fechaDeViaje('2024-02-29', 'el 29 de febrero', '2026-10-01')).toEqual({ valor: '2028-02-29' });
+    expect(fechaDeViaje('2024-02-29', 'el 29 de febrero de 2024', '2026-10-01')).toEqual({ motivo: 'fecha pasada: 2024-02-29' });
+  });
+});
+
+describe('QA de #971 · R1: el año lo pone el código, no el modelo', () => {
+  // Salida grabada de la corrida real (qa971/resultados-f/F1.txt y dbg.ts, flash-lite, temp 0.1):
+  // al cargar en un negocio existente el modelo devolvió 2027-12-28 y 2027-01-03 para este mensaje.
+  const T = 'Ya hablé con mi esposo: salimos el 28 de diciembre y volvemos el 3 de enero';
+  const grabada = { valores: {
+    fecha_salida: { valor: '2027-12-28', frase: 'salimos el 28 de diciembre' },
+    fecha_regreso: { valor: '2027-01-03', frase: 'volvemos el 3 de enero' },
+  } };
+
+  it('la salida va a la próxima ocurrencia y el regreso de enero cae en el año siguiente', () => {
+    const s = validarSalida(grabada, FIELDS, T, { hoyISO: '2026-10-01', conocidos: { destino: 'PUNTA CANA' } });
+    expect(s.sugeridos.fecha_salida?.valor).toBe('2026-12-28');
+    expect(s.sugeridos.fecha_regreso?.valor).toBe('2027-01-03');
+    expect(s.descartados).toEqual([]);
+  });
+
+  it('el regreso solo, con la salida ya en el negocio, también va con ella', () => {
+    const t = 'volvemos el 3 de enero';
+    const s = validarSalida({ valores: { fecha_regreso: { valor: '2026-01-03', frase: t } } }, FIELDS, t, { hoyISO: '2026-10-01', conocidos: { fecha_salida: '2026-12-28' } });
+    expect(s.sugeridos.fecha_regreso?.valor).toBe('2027-01-03');
+  });
+
+  it('si la frase dice el año, manda la frase', () => {
+    const t = 'salimos el 28 de diciembre de 2027';
+    expect(validarSalida({ valores: { fecha_salida: { valor: '2027-12-28', frase: t } } }, FIELDS, t, { hoyISO: '2026-10-01' }).sugeridos.fecha_salida?.valor).toBe('2027-12-28');
   });
 });
