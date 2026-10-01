@@ -20,6 +20,7 @@
 - ⚠️⚠️ [Formato 010 DIAN](project_formulario_010_dian.md) — casilla 25 SIN indicativo (la DIAN rechaza)
 - ⚠️⚠️ [Transcripción a ciegas del NIT](project_confirmacion_nit_ciegas.md) — #807: la casilla NO viaja al navegador
 - ⚠️ [Tableros operativos por fase (#939)](project_tableros_operativos.md) — inerte hasta encender config_extra.tableros_operativos en metrik
+- ⚠️⚠️ [El preview abre un workspace (#968)](project_preview_abre_workspace.md) — `?__ws=<slug>`; base de PRODUCCION; sin GEMINI en Preview; login por código
 - ⚠️ [Publicar los términos del Radar](project_publicacion_terminos_radar.md) — APLICADO (PDF, fila, alcance plantilla); un genérico se ve por el módulo contratado; falta ejercitar la aceptación
 - ⚠️⚠️ [ONE SECOP autoservicio: registro (#961)](project_secop_autogestion_registro.md) — ENCENDIDO en producción sin ficha de catálogo; el magic link YA verifica el correo
 - ⚠️ [Radar SECOP como módulo (#952)](project_radar_secop_modulo.md) — MERGEADO y migrado; el cron NO lee disparador_cobro: enrolar el contrato no cobra
