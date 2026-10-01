@@ -1,0 +1,430 @@
+{
+ "_que_es": "Chat FICTICIO de la simulación del 2026-10-01 (Carolina Ruiz, Punta Cana en familia): proyectos/trappvel/clarity/docs/entrada/sesiones/2026-10-01_simulacion-chat-wa-solicitud.md. Nadie real: ni el cliente, ni los mensajes.",
+ "_salida_modelo": "Lo que devolvió gemini-2.5-flash-lite (temperatura 0.1, esquema generado de la config). Tanda 1: la de main e1c7995 tal como la registró la simulación (mes como fecha, «¿cuánto sale?» como presupuesto sin definir, infantes sin frase). Tandas 2 a 4: grabadas verbatim en la corrida 3 contra esta rama (2026-10-01); en la 3 el modelo inventa adultos=2 con «hablé con mi esposo». Se quitaron solo las llaves de campos de otros bloques.",
+ "tandas": [
+  {
+   "titulo": "Primer contacto (cliente de campaña)",
+   "mensajes": [
+    {
+     "cuerpo": "Hola buenas tardes 👋 vi la publicación de Punta Cana en Instagram",
+     "cuerpo_origen": "texto"
+    },
+    {
+     "cuerpo": "Queremos ir en diciembre, somos mi esposo, yo y los dos niños",
+     "cuerpo_origen": "texto"
+    },
+    {
+     "cuerpo": "Más o menos cuánto sale??",
+     "cuerpo_origen": "texto"
+    }
+   ],
+   "salida_modelo": {
+    "historia": "Carolina Ruiz está interesada en un viaje a Punta Cana para el mes de diciembre. Ella viajaría con su esposo y sus dos hijos. La consulta principal es sobre el costo aproximado del viaje.",
+    "cliente": {
+     "nombre": "Carolina Ruiz",
+     "telefono": ""
+    },
+    "valores": {
+     "destino": {
+      "valor": "Punta Cana",
+      "frase": "vi la publicación de Punta Cana en Instagram"
+     },
+     "ciudad_origen": {
+      "valor": "por_definir",
+      "frase": ""
+     },
+     "destino_tipo": {
+      "valor": "internacional",
+      "frase": "Punta Cana"
+     },
+     "tipo_viaje": {
+      "valor": "playa",
+      "frase": "Punta Cana"
+     },
+     "fechas_tipo": {
+      "valor": "fijas",
+      "frase": "Queremos ir en diciembre"
+     },
+     "fecha_salida": {
+      "valor": "2026-12-01",
+      "frase": "Queremos ir en diciembre"
+     },
+     "fecha_regreso": {
+      "valor": "2026-12-31",
+      "frase": "Queremos ir en diciembre"
+     },
+     "flexibilidad_fecha": {
+      "valor": "por_definir",
+      "frase": ""
+     },
+     "adultos": {
+      "valor": "2",
+      "frase": "somos mi esposo, yo"
+     },
+     "ninos": {
+      "valor": "2",
+      "frase": "los dos niños"
+     },
+     "infantes": {
+      "valor": "0",
+      "frase": ""
+     },
+     "edades_menores": {
+      "valor": "por_definir",
+      "frase": ""
+     },
+     "composicion": {
+      "valor": "familia",
+      "frase": "somos mi esposo, yo y los dos niños"
+     },
+     "presupuesto": {
+      "valor": "sin_definir",
+      "frase": "Más o menos cuánto sale??"
+     },
+     "categoria_hotel": {
+      "valor": "sin_preferencia",
+      "frase": ""
+     },
+     "plan_alimentacion": {
+      "valor": "por_definir",
+      "frase": ""
+     },
+     "equipaje": {
+      "valor": "por_definir",
+      "frase": ""
+     },
+     "acomodacion": {
+      "valor": "por_definir",
+      "frase": ""
+     },
+     "permiso_salida_menores": {
+      "valor": "por_definir",
+      "frase": ""
+     },
+     "requisitos_especiales": {
+      "valor": "por_definir",
+      "frase": ""
+     }
+    }
+   }
+  },
+  {
+   "titulo": "Tatiana le pregunta lo que faltó y la cliente contesta",
+   "mensajes": [
+    {
+     "cuerpo": "Los niños tienen 9 y 4 años. Ah y se nos suma mi suegra, o sea seríamos 3 adultos",
+     "cuerpo_origen": "texto"
+    },
+    {
+     "cuerpo": "Saldríamos de Bogotá",
+     "cuerpo_origen": "texto"
+    },
+    {
+     "cuerpo": "Pensábamos del 27 de diciembre al 2 de enero",
+     "cuerpo_origen": "texto"
+    }
+   ],
+   "salida_modelo": {
+    "historia": "El cliente está planeando un viaje para el cual ya existe información previa. En esta nueva comunicación, especifica que los niños que viajarán tienen 9 y 4 años. Además, informa que se les unirá su suegra, lo que incrementa el número de adultos a 3. La salida será desde Bogotá y las fechas tentativas son del 27 de diciembre al 2 de enero.",
+    "valores": {
+     "destino": {
+      "valor": "PUNTA CANA",
+      "frase": ""
+     },
+     "ciudad_origen": {
+      "valor": "Bogotá",
+      "frase": "Saldríamos de Bogotá"
+     },
+     "destino_tipo": {
+      "valor": "internacional",
+      "frase": ""
+     },
+     "tipo_viaje": {
+      "valor": "playa",
+      "frase": ""
+     },
+     "fechas_tipo": {
+      "valor": "fijas",
+      "frase": ""
+     },
+     "fecha_salida": {
+      "valor": "2026-12-27",
+      "frase": "Pensábamos del 27 de diciembre al 2 de enero"
+     },
+     "fecha_regreso": {
+      "valor": "2027-01-02",
+      "frase": "Pensábamos del 27 de diciembre al 2 de enero"
+     },
+     "flexibilidad_fecha": {
+      "valor": "por_definir",
+      "frase": ""
+     },
+     "adultos": {
+      "valor": "3",
+      "frase": "Ah y se nos suma mi suegra, o sea seríamos 3 adultos"
+     },
+     "ninos": {
+      "valor": "2",
+      "frase": ""
+     },
+     "infantes": {
+      "valor": "0",
+      "frase": ""
+     },
+     "edades_menores": {
+      "valor": "9, 4",
+      "frase": "Los niños tienen 9 y 4 años."
+     },
+     "composicion": {
+      "valor": "familia",
+      "frase": ""
+     },
+     "presupuesto": {
+      "valor": "por_definir",
+      "frase": ""
+     },
+     "categoria_hotel": {
+      "valor": "por_definir",
+      "frase": ""
+     },
+     "plan_alimentacion": {
+      "valor": "por_definir",
+      "frase": ""
+     },
+     "equipaje": {
+      "valor": "por_definir",
+      "frase": ""
+     },
+     "acomodacion": {
+      "valor": "por_definir",
+      "frase": ""
+     },
+     "permiso_salida_menores": {
+      "valor": "por_definir",
+      "frase": ""
+     },
+     "requisitos_especiales": {
+      "valor": "por_definir",
+      "frase": ""
+     },
+     "formato_cotizacion": {
+      "valor": "por_definir",
+      "frase": ""
+     }
+    },
+    "cliente": {
+     "nombre": "",
+     "telefono": ""
+    }
+   }
+  },
+  {
+   "titulo": "Nota de voz: cambian las fechas y dan preferencias",
+   "mensajes": [
+    {
+     "cuerpo": "Hola Tati, mira, hablé con mi esposo y mejor del 28 de diciembre al 3 de enero, porque él sale a vacaciones el 27. Queremos todo incluido, hotel cuatro o cinco estrellas, lo que tú nos recomiendes, y de presupuesto tenemos unos quince millones por todo.",
+     "cuerpo_origen": "transcripcion"
+    }
+   ],
+   "salida_modelo": {
+    "historia": "El cliente se comunica para ajustar las fechas de un viaje previamente existente. La salida ahora sería el 28 de diciembre y el regreso el 3 de enero, ya que su esposo inicia vacaciones el 27 de diciembre. Adicionalmente, solicita que el plan sea todo incluido, con un hotel de cuatro o cinco estrellas, dejando la elección final a recomendación, y establece un presupuesto aproximado de quince millones para todo el viaje.",
+    "valores": {
+     "destino": {
+      "valor": "PUNTA CANA",
+      "frase": ""
+     },
+     "ciudad_origen": {
+      "valor": "BOGOTÁ",
+      "frase": ""
+     },
+     "destino_tipo": {
+      "valor": "internacional",
+      "frase": ""
+     },
+     "tipo_viaje": {
+      "valor": "playa",
+      "frase": ""
+     },
+     "fechas_tipo": {
+      "valor": "fijas",
+      "frase": ""
+     },
+     "fecha_salida": {
+      "valor": "2026-12-28",
+      "frase": "del 28 de diciembre"
+     },
+     "fecha_regreso": {
+      "valor": "2027-01-03",
+      "frase": "al 3 de enero"
+     },
+     "flexibilidad_fecha": {
+      "valor": "por_definir",
+      "frase": ""
+     },
+     "adultos": {
+      "valor": "2",
+      "frase": "hablé con mi esposo"
+     },
+     "ninos": {
+      "valor": "2",
+      "frase": ""
+     },
+     "infantes": {
+      "valor": "0",
+      "frase": ""
+     },
+     "edades_menores": {
+      "valor": "9, 4",
+      "frase": ""
+     },
+     "composicion": {
+      "valor": "familia",
+      "frase": ""
+     },
+     "presupuesto": {
+      "valor": "12m_20m",
+      "frase": "de presupuesto tenemos unos quince millones"
+     },
+     "categoria_hotel": {
+      "valor": "4",
+      "frase": "hotel cuatro o cinco estrellas, lo que tú nos recomiendes"
+     },
+     "plan_alimentacion": {
+      "valor": "todo_incluido",
+      "frase": "Queremos todo incluido"
+     },
+     "equipaje": {
+      "valor": "por_definir",
+      "frase": ""
+     },
+     "acomodacion": {
+      "valor": "por_definir",
+      "frase": ""
+     },
+     "permiso_salida_menores": {
+      "valor": "por_definir",
+      "frase": ""
+     },
+     "requisitos_especiales": {
+      "valor": "por_definir",
+      "frase": ""
+     },
+     "formato_cotizacion": {
+      "valor": "por_definir",
+      "frase": ""
+     }
+    },
+    "cliente": {
+     "nombre": "",
+     "telefono": ""
+    }
+   }
+  },
+  {
+   "titulo": "Últimos detalles",
+   "mensajes": [
+    {
+     "cuerpo": "Ah se me olvidaba, cada uno lleva maleta de bodega",
+     "cuerpo_origen": "texto"
+    },
+    {
+     "cuerpo": "Los niños viajan con nosotros dos (papá y mamá), ya tienen pasaporte",
+     "cuerpo_origen": "texto"
+    }
+   ],
+   "salida_modelo": {
+    "historia": "El cliente confirma que cada uno de los viajeros llevará una maleta de bodega. Adicionalmente, aclara que los niños viajan con ambos padres y que ya cuentan con pasaporte.",
+    "valores": {
+     "destino": {
+      "valor": "PUNTA CANA",
+      "frase": ""
+     },
+     "ciudad_origen": {
+      "valor": "BOGOTÁ",
+      "frase": ""
+     },
+     "destino_tipo": {
+      "valor": "internacional",
+      "frase": ""
+     },
+     "tipo_viaje": {
+      "valor": "playa",
+      "frase": ""
+     },
+     "fechas_tipo": {
+      "valor": "fijas",
+      "frase": ""
+     },
+     "fecha_salida": {
+      "valor": "2026-12-28",
+      "frase": ""
+     },
+     "fecha_regreso": {
+      "valor": "2027-01-03",
+      "frase": ""
+     },
+     "flexibilidad_fecha": {
+      "valor": "por_definir",
+      "frase": ""
+     },
+     "adultos": {
+      "valor": "3",
+      "frase": ""
+     },
+     "ninos": {
+      "valor": "2",
+      "frase": ""
+     },
+     "infantes": {
+      "valor": "0",
+      "frase": ""
+     },
+     "edades_menores": {
+      "valor": "9, 4",
+      "frase": ""
+     },
+     "composicion": {
+      "valor": "familia",
+      "frase": ""
+     },
+     "presupuesto": {
+      "valor": "12m_20m",
+      "frase": ""
+     },
+     "categoria_hotel": {
+      "valor": "4",
+      "frase": ""
+     },
+     "plan_alimentacion": {
+      "valor": "todo_incluido",
+      "frase": ""
+     },
+     "equipaje": {
+      "valor": "bodega",
+      "frase": "cada uno lleva maleta de bodega"
+     },
+     "acomodacion": {
+      "valor": "por_definir",
+      "frase": ""
+     },
+     "permiso_salida_menores": {
+      "valor": "con_ambos_padres",
+      "frase": "Los niños viajan con nosotros dos (papá y mamá)"
+     },
+     "requisitos_especiales": {
+      "valor": "ya tienen pasaporte",
+      "frase": "ya tienen pasaporte"
+     },
+     "formato_cotizacion": {
+      "valor": "por_definir",
+      "frase": ""
+     }
+    },
+    "cliente": {
+     "nombre": "",
+     "telefono": ""
+    }
+   }
+  }
+ ]
+}

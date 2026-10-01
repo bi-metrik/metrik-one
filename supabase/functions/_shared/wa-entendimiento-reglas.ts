@@ -153,14 +153,13 @@ export function instruccionesEntendimiento(
     '   - Si el cliente se corrige dentro de los mensajes («somos 2… ah no, 3»), devuelve lo ÚLTIMO que dijo, con esa frase.',
     '   - Una fecha solo se llena si el mensaje nombra un día concreto («el 27 de diciembre», «del 15 al 20 de noviembre»).',
     `     Un mes («diciembre»), una semana («la segunda semana de enero»), «en vacaciones» o «puente festivo» son "${POR_DEFINIR}":`,
-    '     nunca pongas el primer o el último día del mes.',
+    '     nunca pongas el primer o el último día del mes. Una duración o un plazo («20 días en mayo», «en 15 días») tampoco es una fecha.',
     '   - Un rango de fechas («del 15 al 20 de noviembre») da la salida y el regreso.',
     '   - Una opción marcada «solo si el cliente lo dice» vale únicamente si el cliente lo declara («no tenemos presupuesto»,',
     `     «el que sea»). Preguntar el precio («¿cuánto sale?») no es declarar presupuesto: es "${POR_DEFINIR}".`,
     '   - «Dos personas» sin más detalle son dos adultos; los niños solo cuentan si el mensaje los nombra.',
     '   - Un 0 en niños o bebés solo si el mensaje cierra quiénes viajan: «solo adultos» o «somos dos» dan 0 niños y 0 bebés;',
-    '     «somos mi esposo, yo y los dos niños» da 0 bebés. «Somos 4» sin más no cierra nada.',
-    '',
+    '     «somos mi esposo, yo y los dos niños» da 0 bebés. «Somos 4» sin más no cierra nada.',    '',
     'Campos:',
     ...lineas,
     ...bloqueSabidos,
@@ -211,21 +210,59 @@ const DIAS_EN_LETRAS: Record<string, number> = {
 };
 
 /** Los números de día (1 a 31) que la frase nombra, con dígitos o con letras. */
+/** Un número seguido de una de estas palabras es una duración o un plazo, no un día. */
+const UNIDADES_DE_TIEMPO = new Set(['dia', 'dias', 'noche', 'noches', 'semana', 'semanas', 'mes', 'meses', 'ano', 'anos', 'hora', 'horas']);
+
+/**
+ * Los números de día (1 a 31) que la frase nombra, con dígitos o con letras. Un número que
+ * mide tiempo no es un día: «20 días en mayo» y «en 15 días» no nombran el 20 ni el 15.
+ * «2026» no es el día 20; «15/11» sí da 15.
+ */
 export function diasNombrados(frase: string): number[] {
-  const t = normalizarTexto(frase);
+  const tokens = normalizarTexto(frase).split(/[^a-z0-9]+/).filter(Boolean);
   const out = new Set<number>();
-  // Uno o dos dígitos sueltos: «2026» no es el día 20; «15/11» sí da 15.
-  for (const m of t.matchAll(/(?<!\d)(\d{1,2})(?!\d)/g)) {
-    const n = Number(m[1]);
-    if (n >= 1 && n <= 31) out.add(n);
-  }
-  const palabras = t.replace(/[^a-z ]/g, ' ').split(/\s+/);
-  for (let i = 0; i < palabras.length; i++) {
-    const w = palabras[i];
-    if (w === 'treinta' && palabras[i + 1] === 'y' && (palabras[i + 2] === 'uno' || palabras[i + 2] === 'un')) out.add(31);
-    if (w in DIAS_EN_LETRAS) out.add(DIAS_EN_LETRAS[w]);
+  for (let i = 0; i < tokens.length; i++) {
+    const w = tokens[i];
+    let n: number | null = null;
+    let fin = i;
+    if (/^\d{1,2}$/.test(w)) n = Number(w);
+    else if (w === 'treinta' && tokens[i + 1] === 'y' && (tokens[i + 2] === 'uno' || tokens[i + 2] === 'un')) { n = 31; fin = i + 2; }
+    else if (w in DIAS_EN_LETRAS) n = DIAS_EN_LETRAS[w];
+    if (n === null || n < 1 || n > 31) continue;
+    if (UNIDADES_DE_TIEMPO.has(tokens[fin + 1] ?? '')) continue;
+    out.add(n);
   }
   return [...out];
+}
+
+/** Lo más lejos que se acepta una fecha de viaje, en meses desde hoy. */
+const MESES_MAXIMOS = 18;
+
+function sumarMeses(iso: string, meses: number): string {
+  const d = new Date(`${iso}T12:00:00Z`);
+  d.setUTCMonth(d.getUTCMonth() + meses);
+  return d.toISOString().slice(0, 10);
+}
+
+/**
+ * Una fecha que el modelo propone, contra hoy:
+ *   · anterior a hoy y la frase NO dice el año → la próxima vez que ocurre ese día y mes
+ *     («salimos el 5 de septiembre» con hoy 1-oct-2026 → 2027-09-05);
+ *   · anterior a hoy y la frase dice el año → se descarta (fecha pasada);
+ *   · a más de 18 meses → se descarta.
+ */
+export function fechaDeViaje(v: string, frase: string, hoyISO: string): { valor: string } | { motivo: string } {
+  let f = v;
+  if (f < hoyISO) {
+    if (/(?<!\d)(19|20)\d{2}(?!\d)/.test(frase)) return { motivo: `fecha pasada: ${v}` };
+    const mesDia = v.slice(5);
+    let candidata = `${hoyISO.slice(0, 4)}-${mesDia}`;
+    if (candidata < hoyISO) candidata = `${Number(hoyISO.slice(0, 4)) + 1}-${mesDia}`;
+    if (!fechaValida(candidata)) return { motivo: `fecha pasada: ${v}` };
+    f = candidata;
+  }
+  if (f > sumarMeses(hoyISO, MESES_MAXIMOS)) return { motivo: `a más de ${MESES_MAXIMOS} meses: ${f}` };
+  return { valor: f };
 }
 
 /**
@@ -236,6 +273,21 @@ export function diasNombrados(frase: string): number[] {
  */
 export function fraseNombraElDia(frase: string, fechaISO: string): boolean {
   return diasNombrados(frase).includes(Number(fechaISO.slice(8, 10)));
+}
+
+/**
+ * ¿La frase dice este número? Con dígitos («3 adultos») o con letras («seríamos tres»). El
+ * cero también se dice con una negación («sin niños», «ningún bebé», «solo adultos»).
+ * Lo usa `cargarEnExistente` para CAMBIAR un número que el negocio ya tiene: «hablé con mi
+ * esposo» no cambia «3 adultos» a 2 (gemini-2.5-flash-lite lo hizo en la simulación del
+ * 2026-10-01).
+ */
+export function fraseNombraNumero(frase: string, n: number): boolean {
+  const t = ` ${normalizarTexto(frase).replace(/[^a-z0-9 ]/g, ' ').replace(/\s+/g, ' ').trim()} `;
+  if (n === 0 && / (cero|ningun\w*|sin|solo|solamente|no) /.test(t)) return true;
+  if (new RegExp(`(^|[^0-9])${n}([^0-9]|$)`).test(t)) return true;
+  if (n === 1 && / (un|una|uno) /.test(t)) return true;
+  return Object.entries(DIAS_EN_LETRAS).some(([w, v]) => v === n && w !== 'primero' && t.includes(` ${w} `));
 }
 
 // ── Guardián 2: una opción «no definido» solo si el cliente lo dice ───────────
@@ -267,11 +319,17 @@ function textoONull(v: unknown): string | null {
  * Lo que el modelo devolvió, filtrado contra la config y contra el mensaje. Un valor sale
  * como sugerido solo si: no es «por definir», cabe en el tipo del campo (y en sus opciones),
  * y trae una frase que de verdad está en los mensajes.
+ *
+ * @param opts.hoyISO    hoy en Bogotá: una fecha pasada se lleva a la próxima vez que ocurre
+ *                       (si la frase no dice el año) o se descarta; a más de 18 meses, se descarta.
+ * @param opts.conocidos lo que el negocio ya tiene: el regreso no puede quedar antes de la
+ *                       salida, venga la salida en este mensaje o de antes.
  */
 export function validarSalida(
   raw: unknown,
   fields: ReadonlyArray<CampoEntendible>,
   textoFuente: string,
+  opts: { hoyISO?: string; conocidos?: Record<string, unknown> } = {},
 ): SalidaEntendida {
   const r = (raw && typeof raw === 'object' ? raw : {}) as Record<string, unknown>;
   const cli = (r.cliente && typeof r.cliente === 'object' ? r.cliente : {}) as Record<string, unknown>;
@@ -314,7 +372,12 @@ export function validarSalida(
         out.descartados.push({ slug: f.slug, motivo: `un mes o una ventana no es una fecha: «${frase}» no nombra el día ${Number(v.slice(8, 10))}` });
         continue;
       }
-      out.sugeridos[f.slug] = { valor: v, frase };
+      const ajustada = opts.hoyISO ? fechaDeViaje(v, frase, opts.hoyISO) : { valor: v };
+      if ('motivo' in ajustada) {
+        out.descartados.push({ slug: f.slug, motivo: ajustada.motivo });
+        continue;
+      }
+      out.sugeridos[f.slug] = { valor: ajustada.valor, frase };
     } else if (valoresDeOpciones(f).length > 0) {
       if (!valoresDeOpciones(f).includes(v)) {
         out.descartados.push({ slug: f.slug, motivo: `fuera de las opciones: ${v}` });
@@ -329,8 +392,20 @@ export function validarSalida(
       out.sugeridos[f.slug] = { valor: v, frase };
     }
   }
+
+  // El regreso no puede quedar antes de la salida (la de este mensaje o la que ya estaba).
+  const regreso = out.sugeridos[SLUG_REGRESO];
+  const salida = out.sugeridos[SLUG_SALIDA]?.valor ?? opts.conocidos?.[SLUG_SALIDA];
+  if (regreso && typeof salida === 'string' && fechaValida(salida) && String(regreso.valor) < salida) {
+    delete out.sugeridos[SLUG_REGRESO];
+    out.descartados.push({ slug: SLUG_REGRESO, motivo: `el regreso (${regreso.valor}) queda antes de la salida (${salida})` });
+  }
   return out;
 }
+
+/** La convención del bloque de viaje para las dos fechas. Sin ellas, la comparación no corre. */
+const SLUG_SALIDA = 'fecha_salida';
+const SLUG_REGRESO = 'fecha_regreso';
 
 // ── Escribir en el bloque sin pisar a una persona ────────────────────────────
 

@@ -22,6 +22,7 @@ import {
   aplicarSumas,
   CLAVE_SUGERIDOS,
   deducirCeros,
+  fraseNombraNumero,
   marcaDe,
   mayusculasDeViaje,
   normalizarNombre,
@@ -247,7 +248,15 @@ export function cargarEnExistente(
   sugeridos: Record<string, Sugerido>,
   meta: { entrega_id: string; en: string; origenDe: (frase: string) => 'audio' | 'mensaje' },
   yaVistos: Set<string> = new Set(),
-): { data: Record<string, unknown>; escritos: string[]; conflictos: Conflicto[]; iguales: string[]; actualizados: Actualizado[] } {
+): {
+  data: Record<string, unknown>;
+  escritos: string[];
+  conflictos: Conflicto[];
+  iguales: string[];
+  actualizados: Actualizado[];
+  /** Números distintos al actual cuya frase no dice el número nuevo: no se tocan. */
+  sinSustento: string[];
+} {
   const ediciones = (data._ediciones ?? {}) as Record<string, unknown>;
   const marcasPrevias = (data[CLAVE_SUGERIDOS] ?? {}) as Record<string, MarcaSugerido>;
   const marcas = { ...marcasPrevias };
@@ -258,6 +267,7 @@ export function cargarEnExistente(
   const conflictos: Conflicto[] = [];
   const iguales: string[] = [];
   const actualizados: Actualizado[] = [];
+  const sinSustento: string[] = [];
 
   for (const f of fields) {
     if (yaVistos.has(f.slug)) continue;
@@ -273,6 +283,12 @@ export function cargarEnExistente(
     }
     if (mismoValor(f, actual, s.valor)) {
       iguales.push(f.slug);
+      continue;
+    }
+    // Para CAMBIAR un número que ya está, la frase tiene que decir el número nuevo: si no, ni se
+    // reemplaza ni se arma un conflicto («hablé con mi esposo» no vuelve 2 a «3 adultos»).
+    if (f.tipo === 'numero' && !fraseNombraNumero(s.frase, Number(s.valor))) {
+      sinSustento.push(f.slug);
       continue;
     }
     // Un sugerido sin confirmar no es de nadie todavía: lo dicho después gana. Una deducción
@@ -299,7 +315,7 @@ export function cargarEnExistente(
   // Un sugerido reemplazado se lleva su conflicto viejo: lo último que dijo el cliente gana.
   if (Object.keys(choques).length > 0) out[CLAVE_CONFLICTOS] = choques;
   else if (habiaChoques) delete out[CLAVE_CONFLICTOS];
-  return { data: out, escritos, conflictos, iguales, actualizados };
+  return { data: out, escritos, conflictos, iguales, actualizados, sinSustento };
 }
 
 /**

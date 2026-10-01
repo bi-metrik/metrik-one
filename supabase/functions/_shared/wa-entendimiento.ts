@@ -391,7 +391,7 @@ async function entender(supabase: SupabaseClient, ent: Fila): Promise<void> {
     return;
   }
 
-  const validada = validarSalida(lectura.json, cfg.fields, texto);
+  const validada = validarSalida(lectura.json, cfg.fields, texto, { hoyISO: todayBogotaISO() });
   // Lo que se deduce sin el modelo (infantes = 0 con las edades de todos los niños) entra como
   // un sugerido más, con la deducción en vez de la frase.
   const salida: SalidaEntendida = { ...validada, sugeridos: conDeducciones(cfg.fields, validada.sugeridos) };
@@ -614,7 +614,7 @@ async function cargarEnNegocioExistente(
     return;
   }
   const meta = { entrega_id: ent.entrega_id as string, en: new Date().toISOString(), origenDe: (f: string) => origenDeFrase(f, mensajes) };
-  const validada = validarSalida(lectura.json, campos, texto);
+  const validada = validarSalida(lectura.json, campos, texto, { hoyISO: todayBogotaISO(), conocidos: yaTiene });
   // La deducción se hace sobre lo que el negocio QUEDARÍA teniendo: los niños pueden haber
   // llegado en otra entrega y las edades en esta.
   const salida: SalidaEntendida = {
@@ -631,6 +631,7 @@ async function cargarEnNegocioExistente(
   const escritos: Array<{ slug: string; valor: unknown }> = [];
   const conflictos: Conflicto[] = [];
   const actualizados: Actualizado[] = [];
+  const sinSustento: string[] = [];
   const despues: Array<{ fields: unknown; data: unknown }> = [];
   for (const b of bloques) {
     const vistosAntes = new Set(vistos);
@@ -646,6 +647,7 @@ async function cargarEnNegocioExistente(
       // El valor que quedó escrito (en mayúscula si es texto del bloque de viaje).
       actualizados.push(...r.actualizados.map(a => ({ ...a, valor: r.data[a.slug] as string | number })));
     }
+    sinSustento.push(...r.sinSustento);
     despues.push({ fields: b.fields, data: quedo ?? b.data });
   }
 
@@ -680,6 +682,10 @@ async function cargarEnNegocioExistente(
     contacto_id: (neg.contacto_id as string | null) ?? null, huecos: h,
     // `cargados` lleva también lo actualizado: el detalle (anterior → nuevo) vive en la marca.
     cargados: [...escritos.map(e => e.slug), ...actualizados.map(a => a.slug)], conflictos,
+    descartados: [
+      ...salida.descartados,
+      ...sinSustento.map(slug => ({ slug, motivo: `la frase no dice el número nuevo: «${salida.sugeridos[slug]?.frase ?? ''}»` })),
+    ],
     respuesta_enviada_at: ok ? new Date().toISOString() : null, error: ok ? null : 'envio fallido',
   });
 }
