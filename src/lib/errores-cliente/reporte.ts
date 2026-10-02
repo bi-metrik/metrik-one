@@ -32,6 +32,11 @@ const esquemaReporte = z.object({
   userAgent: recortar(400).optional(),
   /** Cual de las dos pantallas lo mando. */
   origen: z.enum(['app', 'global']).optional(),
+  /**
+   * Si la pantalla se recargo sola (error de red o de chunk, guarda anti-bucle libre).
+   * `false` = la persona SI vio "Algo se rompió". Es lo que hay que contar.
+   */
+  autoRecarga: z.boolean().optional(),
 })
 
 export type ReporteErrorCliente = z.infer<typeof esquemaReporte>

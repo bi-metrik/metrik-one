@@ -1,6 +1,7 @@
 'use client'
 
-import { useState, useTransition } from 'react'
+import { useState } from 'react'
+import { useTransitionTolerante } from '@/hooks/use-transition-tolerante'
 import { useRouter } from 'next/navigation'
 import { CheckCircle2, Clock, AlertTriangle, Wallet, Receipt, ExternalLink } from 'lucide-react'
 import { toast } from 'sonner'
@@ -209,7 +210,7 @@ function CobroConfirmadoRow({
 
 function CobroProgramadoRow({ cobro, modo }: { cobro: Cobro; modo: 'editable' | 'visible' }) {
   const router = useRouter()
-  const [isPending, startTransition] = useTransition()
+  const [isPending, startTransition] = useTransitionTolerante()
   const vencido = cobro.vencido === true
 
   const handleConfirmar = () => {

@@ -1,6 +1,7 @@
 'use client'
 
-import { useEffect, useState, useTransition } from 'react'
+import { useEffect, useState } from 'react'
+import { useTransitionTolerante } from '@/hooks/use-transition-tolerante'
 import Link from 'next/link'
 import { ShieldCheck, ShieldAlert, ExternalLink, User } from 'lucide-react'
 import { toast } from 'sonner'
@@ -18,6 +19,8 @@ import {
   estadoAutorizacion,
   type CampoContacto,
 } from '@/lib/contactos/campos-contacto'
+import { conReintentoDeRed } from '@/lib/red/con-reintento'
+import { mensajeDeFallaDeCarga } from '@/lib/red/error-de-red'
 
 /**
  * Bloque `contacto`: la ficha de la PERSONA, editada desde dentro del negocio.
@@ -54,11 +57,11 @@ export default function BloqueContacto({
   const [ficha, setFicha] = useState<FichaContacto | null>(null)
   const [values, setValues] = useState<Record<string, unknown>>({})
   const [cargando, setCargando] = useState(true)
-  const [isPending, startTransition] = useTransition()
+  const [isPending, startTransition] = useTransitionTolerante()
 
   useEffect(() => {
     let vivo = true
-    cargarFichaContacto(negocioBloqueId).then(res => {
+    conReintentoDeRed(() => cargarFichaContacto(negocioBloqueId)).then(res => {
       if (!vivo) return
       setCargando(false)
       if (res.error) {
@@ -71,6 +74,10 @@ export default function BloqueContacto({
         for (const c of campos) iniciales[c.slug] = leerCampo(res.ficha.valores, c.slug) ?? ''
         setValues(iniciales)
       }
+    }).catch(e => {
+      if (!vivo) return
+      setCargando(false)
+      toast.error(mensajeDeFallaDeCarga(e, 'No se pudo cargar la ficha del contacto'))
     })
     return () => {
       vivo = false

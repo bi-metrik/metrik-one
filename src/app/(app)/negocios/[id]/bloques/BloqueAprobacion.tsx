@@ -1,6 +1,7 @@
 'use client'
 
-import { useState, useTransition } from 'react'
+import { useState } from 'react'
+import { useTransitionTolerante } from '@/hooks/use-transition-tolerante'
 import { ShieldCheck, ShieldX, Clock, AlertTriangle } from 'lucide-react'
 import { toast } from 'sonner'
 import { actualizarAprobacion } from '../../negocio-v2-actions'
@@ -56,7 +57,7 @@ export default function BloqueAprobacion({
 
   const [aprobadorId, setAprobadorId] = useState(data.aprobador_id ?? '')
   const [comentario, setComentario] = useState('')
-  const [isPending, startTransition] = useTransition()
+  const [isPending, startTransition] = useTransitionTolerante()
 
   const estado = data.estado ?? 'pendiente'
   // La lista y el servidor usan la misma regla: solo quien puede decidir es elegible.

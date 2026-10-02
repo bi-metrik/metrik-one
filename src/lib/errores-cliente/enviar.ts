@@ -17,6 +17,7 @@ const yaReportados = new Set<string>()
 export function reportarErrorCliente(
   error: Error & { digest?: string },
   origen: 'app' | 'global',
+  autoRecarga = false,
 ): void {
   try {
     if (typeof window === 'undefined') return
@@ -39,6 +40,7 @@ export function reportarErrorCliente(
       version: String(process.env.NEXT_DEPLOYMENT_ID || 'dev'),
       userAgent: navigator.userAgent,
       origen,
+      autoRecarga,
     })
 
     const url = '/api/errores-cliente'

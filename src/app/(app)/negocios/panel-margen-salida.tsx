@@ -1,6 +1,7 @@
 'use client'
 
-import { useState, useTransition } from 'react'
+import { useState } from 'react'
+import { useTransitionTolerante } from '@/hooks/use-transition-tolerante'
 import { useRouter } from 'next/navigation'
 import { AlertTriangle, Info, ShieldAlert, ShieldCheck } from 'lucide-react'
 import { toast } from 'sonner'
@@ -52,7 +53,7 @@ export default function PanelMargenSalida({
   const router = useRouter()
   const [pidiendoMotivo, setPidiendoMotivo] = useState(false)
   const [motivo, setMotivo] = useState('')
-  const [isPending, startTransition] = useTransition()
+  const [isPending, startTransition] = useTransitionTolerante()
 
   if (!salida || !salida.aplica) return null
   const nota = notaDeMargen(salida)

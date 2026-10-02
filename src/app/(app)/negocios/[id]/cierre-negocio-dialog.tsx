@@ -1,6 +1,7 @@
 'use client'
 
-import { useEffect, useState, useTransition } from 'react'
+import { useEffect, useState } from 'react'
+import { useTransitionTolerante } from '@/hooks/use-transition-tolerante'
 import { createPortal } from 'react-dom'
 import { useRouter } from 'next/navigation'
 import { toast } from 'sonner'
@@ -49,7 +50,7 @@ interface CierreNegocioDialogProps {
 
 function PerderForm({ negocioId, esBuzonLeads, onClose }: { negocioId: string; esBuzonLeads?: boolean; onClose: () => void }) {
   const router = useRouter()
-  const [isPending, startTransition] = useTransition()
+  const [isPending, startTransition] = useTransitionTolerante()
   const [razon, setRazon] = useState('')
   const [notas, setNotas] = useState('')
   // Desde el buzón (Recepción) se descarta un lead → razones de triage; en el
@@ -124,7 +125,7 @@ function PerderForm({ negocioId, esBuzonLeads, onClose }: { negocioId: string; e
 
 function CancelarForm({ negocioId, onClose }: { negocioId: string; onClose: () => void }) {
   const router = useRouter()
-  const [isPending, startTransition] = useTransition()
+  const [isPending, startTransition] = useTransitionTolerante()
   const [motivo, setMotivo] = useState('')
   const [descripcion, setDescripcion] = useState('')
 
@@ -218,7 +219,7 @@ function CompletarForm({
   onClose: () => void
 }) {
   const router = useRouter()
-  const [isPending, startTransition] = useTransition()
+  const [isPending, startTransition] = useTransitionTolerante()
   const [step, setStep] = useState<1 | 2>(1)
   const [lecciones, setLecciones] = useState('')
   const [cerrarSinFactura, setCerrarSinFactura] = useState(false)

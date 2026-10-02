@@ -1,6 +1,7 @@
 'use client'
 
-import { useState, useTransition, useEffect, useCallback, useRef } from 'react'
+import { useState, useEffect, useCallback, useRef } from 'react'
+import { useTransitionTolerante } from '@/hooks/use-transition-tolerante'
 import { useRouter } from 'next/navigation'
 import { ArrowLeft, ArrowRight, User, Building2, FileText, Check, Loader2, X } from 'lucide-react'
 import { toast } from 'sonner'
@@ -36,7 +37,7 @@ export default function NuevoNegocioForm({
   aliadosHabilitado?: boolean
 }) {
   const router = useRouter()
-  const [isPending, startTransition] = useTransition()
+  const [isPending, startTransition] = useTransitionTolerante()
   const [step, setStep] = useState(0)
   /** Negocios que ya existen para el contacto elegido. null = no hay que preguntar. */
   const [duplicados, setDuplicados] = useState<NegocioDelMismoContacto[] | null>(null)

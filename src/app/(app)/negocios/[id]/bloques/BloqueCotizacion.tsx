@@ -1,6 +1,7 @@
 'use client'
 
-import { useState, useTransition } from 'react'
+import { useState } from 'react'
+import { useTransitionTolerante } from '@/hooks/use-transition-tolerante'
 import Link from 'next/link'
 import { FileSpreadsheet, Plus, ExternalLink, CheckCircle2, Lock, Copy, Trash2, PencilLine } from 'lucide-react'
 import { toast } from 'sonner'
@@ -64,7 +65,7 @@ const ESTADO_ORDER: Record<string, number> = {
 }
 
 export default function BloqueCotizacion({ negocioId, modo, cotizaciones, skipEnviar, puedeCorregir = false }: BloqueCotizacionProps) {
-  const [isPending, startTransition] = useTransition()
+  const [isPending, startTransition] = useTransitionTolerante()
   const [optimisticAceptadaId, setOptimisticAceptadaId] = useState<string | null>(null)
   /**
    * La pregunta de la tarifa, abierta para una cotización. `null` = cerrada. Solo se abre

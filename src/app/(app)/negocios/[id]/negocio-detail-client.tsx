@@ -1,6 +1,7 @@
 'use client'
 
-import { useState, useTransition, useRef, useEffect, useCallback } from 'react'
+import { useState, useRef, useEffect, useCallback } from 'react'
+import { useTransitionTolerante } from '@/hooks/use-transition-tolerante'
 import { createPortal } from 'react-dom'
 import Link from 'next/link'
 import {
@@ -150,7 +151,7 @@ function CarpetaUrlEditor({
   const [editing, setEditing] = useState(false)
   const [value, setValue] = useState(initialUrl ?? '')
   const [savedUrl, setSavedUrl] = useState(initialUrl ?? '')
-  const [isPending, startTransition] = useTransition()
+  const [isPending, startTransition] = useTransitionTolerante()
   const inputRef = useRef<HTMLInputElement>(null)
 
   function startEditing() {
@@ -242,7 +243,7 @@ function NombreNegocioEditable({
   const [editing, setEditing] = useState(false)
   const [value, setValue] = useState(initialNombre)
   const [savedNombre, setSavedNombre] = useState(initialNombre)
-  const [isPending, startTransition] = useTransition()
+  const [isPending, startTransition] = useTransitionTolerante()
   const inputRef = useRef<HTMLInputElement>(null)
 
   function startEditing() {
@@ -341,7 +342,7 @@ function ResponsableSelector({
 }) {
   const [open, setOpen] = useState(false)
   const [search, setSearch] = useState('')
-  const [isPending, startTransition] = useTransition()
+  const [isPending, startTransition] = useTransitionTolerante()
   const popoverRef = useRef<HTMLDivElement>(null)
   const searchRef = useRef<HTMLInputElement>(null)
 
@@ -731,7 +732,7 @@ function SelectorEtapa({
   puedeCierreNoFacturable: boolean
   puedeOmitirGates: boolean
 }) {
-  const [isPending, startTransition] = useTransition()
+  const [isPending, startTransition] = useTransitionTolerante()
   const [gateModal, setGateModal] = useState<{
     etapaId: string
     bloques: Array<{ nombre: string; es_gate: boolean; omitible?: boolean; tipo?: string }>
@@ -1058,7 +1059,7 @@ function PausaNegocioDialog({
     return d.toISOString().slice(0, 10)
   })()
   const [fecha, setFecha] = useState(maxDate)
-  const [isPending, startTransition] = useTransition()
+  const [isPending, startTransition] = useTransitionTolerante()
 
   const pausasRestantes = MAX_PAUSAS - vecesPausado
   const esUltima = pausasRestantes === 1

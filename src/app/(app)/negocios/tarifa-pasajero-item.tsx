@@ -1,6 +1,7 @@
 'use client'
 
-import { useState, useTransition } from 'react'
+import { useState } from 'react'
+import { useTransitionTolerante } from '@/hooks/use-transition-tolerante'
 import { AlertTriangle, Check, ChevronDown, ChevronRight, Image as ImageIcon, Loader2, Pencil, X } from 'lucide-react'
 import { toast } from 'sonner'
 
@@ -134,7 +135,7 @@ export default function TarifaPasajeroItem({
   const [detalleAbierto, setDetalleAbierto] = useState<Partial<Record<ClaveCasilla | 'resultado', boolean>>>({})
   const [editandoComposicion, setEditandoComposicion] = useState(false)
   const [tasa, setTasa] = useState('')
-  const [isPending, startTransition] = useTransition()
+  const [isPending, startTransition] = useTransitionTolerante()
 
   // R8 · una opción de hotel con varias habitaciones se cotiza por sus habitaciones, contra
   // el grupo del negocio. Su bloque es otro: cupos, papel de cada captura y costo por
@@ -801,7 +802,7 @@ function MonedaDeLaTarifa({
 }) {
   const [cambiando, setCambiando] = useState(false)
   const [otra, setOtra] = useState('')
-  const [isPending, startTransition] = useTransition()
+  const [isPending, startTransition] = useTransitionTolerante()
   const apagado = deshabilitado || isPending
 
   function elegir(moneda: string | null) {
@@ -1077,7 +1078,7 @@ function ComposicionDeLinea({
   const [adultos, setAdultos] = useState(String(composicion?.adultos ?? ''))
   const [ninos, setNinos] = useState(String(composicion?.ninos ?? 0))
   const [infantes, setInfantes] = useState(String(composicion?.infantes ?? 0))
-  const [isPending, startTransition] = useTransition()
+  const [isPending, startTransition] = useTransitionTolerante()
 
   function guardar(propia: { adultos: string; ninos: string; infantes: string } | null) {
     startTransition(async () => {

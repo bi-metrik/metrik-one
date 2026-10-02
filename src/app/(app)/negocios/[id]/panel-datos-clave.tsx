@@ -1,6 +1,7 @@
 'use client'
 
-import { useState, useTransition } from 'react'
+import { useState } from 'react'
+import { useTransitionTolerante } from '@/hooks/use-transition-tolerante'
 import { AlertTriangle, CheckCircle2, FileText, History, KeyRound } from 'lucide-react'
 import { toast } from 'sonner'
 import { hrefArchivo } from '@/lib/almacenamiento/referencia'
@@ -163,7 +164,7 @@ function concordancia(v: ResultadoVoto): string {
 }
 
 function LecturaEnDisputa({ voto, corregirLectura }: { voto: ResultadoVoto; corregirLectura?: CorregirLectura }) {
-  const [pendiente, startTransition] = useTransition()
+  const [pendiente, startTransition] = useTransitionTolerante()
   const [hecho, setHecho] = useState<string | null>(null)
 
   const corregir = (f: LecturaFuente) => {

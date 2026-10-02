@@ -1,6 +1,7 @@
 'use client'
 
-import { useState, useEffect, useRef, useCallback, useTransition } from 'react'
+import { useState, useEffect, useRef, useCallback } from 'react'
+import { useTransitionTolerante } from '@/hooks/use-transition-tolerante'
 import { X, Loader2, Wallet, CheckCircle, XCircle, FileUp, Paperclip } from 'lucide-react'
 import { toast } from 'sonner'
 import { agregarPagoFab, getNegociosParaPagoFab, negocioPuedeRecibirCobro, estadoAvanceTrasPago, type NegocioParaPagoFab, type AvanceTrasPago } from '@/lib/actions/fab-pago-actions'
@@ -68,7 +69,7 @@ export default function RegistrarPagoModal({
   const [fecha, setFecha] = useState('')
   const [justificacion, setJustificacion] = useState('')
   const [needJust, setNeedJust] = useState(false)
-  const [pending, startTransition] = useTransition()
+  const [pending, startTransition] = useTransitionTolerante()
 
   // Comprobante: OPCIONAL. Un pantallazo de la transferencia ahorra la discusión
   // después, pero exigirlo para poder anotar la plata deja el ingreso sin registrar.

@@ -1,6 +1,7 @@
 'use client'
 
-import { useState, useTransition } from 'react'
+import { useState } from 'react'
+import { useTransitionTolerante } from '@/hooks/use-transition-tolerante'
 import { Loader2 } from 'lucide-react'
 import { toast } from 'sonner'
 
@@ -41,7 +42,7 @@ export default function CostoManualItem({
     vigente ? String(vigente.valor) : subtotalPesos ? subtotalPesos.toLocaleString('es-CO') : '',
   )
   const [tasa, setTasa] = useState(vigente ? String(vigente.tasa) : '')
-  const [isPending, startTransition] = useTransition()
+  const [isPending, startTransition] = useTransitionTolerante()
 
   const enCOP = moneda === 'COP'
   const entrada = { valor: numero(valor), moneda, tasa: numero(tasa) || null }

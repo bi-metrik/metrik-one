@@ -1,6 +1,7 @@
 'use client'
 
-import { Fragment, useRef, useState, useTransition } from 'react'
+import { Fragment, useRef, useState } from 'react'
+import { useTransitionTolerante } from '@/hooks/use-transition-tolerante'
 import { useRouter } from 'next/navigation'
 import { Loader2, Sparkles, Star, Trash2 } from 'lucide-react'
 import { toast } from 'sonner'
@@ -90,7 +91,7 @@ export default function TablaCombinaciones({
   explicarVacio?: boolean
 }) {
   const router = useRouter()
-  const [isPending, startTransition] = useTransition()
+  const [isPending, startTransition] = useTransitionTolerante()
   const [nombres, setNombres] = useState<Record<string, string>>({})
   const [nombresRanura, setNombresRanura] = useState<Record<string, string>>({})
   const [motivos, setMotivos] = useState<Record<string, string>>({})

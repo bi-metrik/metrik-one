@@ -1,6 +1,7 @@
 'use client'
 
-import { useEffect, useState, useTransition } from 'react'
+import { useEffect, useState } from 'react'
+import { useTransitionTolerante } from '@/hooks/use-transition-tolerante'
 import { Download, FileText, CheckCircle2, AlertCircle, Loader2, RefreshCw, Lock, Pencil } from 'lucide-react'
 import { toast } from 'sonner'
 import { formatCOP } from '@/lib/contacts/constants'
@@ -14,6 +15,8 @@ import {
 } from '@/lib/actions/propuesta-economica-actions'
 import { formatBogotaFechaHora } from '@/lib/dates/bogota'
 import { hrefArchivo } from '@/lib/almacenamiento/referencia'
+import { conReintentoDeRed } from '@/lib/red/con-reintento'
+import { mensajeDeFallaDeCarga } from '@/lib/red/error-de-red'
 
 interface PropuestaVersion {
   n: number
@@ -150,7 +153,7 @@ export default function BloquePropuestaEconomica(props: Props) {
   useEffect(() => {
     if (esquemaAnteriorSeguro) return
     let vivo = true
-    getTarifaPropuesta(props.negocioBloqueId).then(res => {
+    conReintentoDeRed(() => getTarifaPropuesta(props.negocioBloqueId)).then(res => {
       if (!vivo) return
       if (!res.ok) {
         toast.error(res.error)
@@ -158,6 +161,10 @@ export default function BloquePropuestaEconomica(props: Props) {
         return
       }
       setTarifa(res.tarifa.esquema === 'tarifas' ? res.tarifa : null)
+    }).catch(e => {
+      if (!vivo) return
+      toast.error(mensajeDeFallaDeCarga(e, 'No se pudieron cargar las tarifas'))
+      setTarifa(null)
     })
     return () => { vivo = false }
     // La ruta (`servicioVigente`) y las versiones cambian lo que rige: se vuelve a pedir.
@@ -202,7 +209,7 @@ function CuerpoPropuesta({
   // Reversión de la aprobación (sí reabre el bloque: ver la action).
   const [revirtiendo, setRevirtiendo] = useState(false)
   const [motivoReversion, setMotivoReversion] = useState('')
-  const [isPending, startTransition] = useTransition()
+  const [isPending, startTransition] = useTransitionTolerante()
   const data = (instancia?.data ?? {}) as PropuestaData
   const precioBase = data.precio_base_con_iva ?? 0
   const versiones = (data.versiones ?? []).slice().sort((a, b) => b.n - a.n)

@@ -1,6 +1,7 @@
 'use client'
 
-import { useState, useTransition, useEffect } from 'react'
+import { useState, useEffect } from 'react'
+import { useTransitionTolerante } from '@/hooks/use-transition-tolerante'
 import { useRouter } from 'next/navigation'
 import DistribuirPagoModal from '@/components/distribuir-pago-modal'
 import { Search } from 'lucide-react'
@@ -72,7 +73,7 @@ export default function BloquePagosEpayco({
   const [newRef, setNewRef] = useState('')
   const [previewDesglose, setPreviewDesglose] = useState<EpaycoDesglose | null>(null)
   const [consultando, setConsultando] = useState(false)
-  const [isPending, startTransition] = useTransition()
+  const [isPending, startTransition] = useTransitionTolerante()
   const [error, setError] = useState<string | null>(null)
   // Duplicado workspace-wide detectado: requiere justificación para forzar.
   const [duplicado, setDuplicado] = useState<NegocioExistente | null>(null)
