@@ -1172,6 +1172,15 @@ function responderLista(a: AccionModelo, opcion: string, e: EntradaValidador, re
   if (idAjeno) rechazo ??= 'V6_id_ajeno';
   let elegido: OpcionPendiente | null = enLista.find(o => o.id === opcion) ?? null;
   if (conRef || viajes.length) {
+    if (viajes.length === 1 && enLista.length === 0 && p.capa === 'entrega') {
+      // La re-pregunta del entendimiento no guarda su lista: el viaje nombrado es la respuesta (el
+      // código lo lee `interpretarRespuestaNegocio` aunque no esté en una lista).
+      const canonico = viajes[0].codigo?.trim();
+      if (!canonico) return aclaracion(e, 'V5_sin_codigo');
+      return ejecutar('bandeja.responder', {
+        p: 'responder_bandeja', canonico, interpretacion: { accion: 'responder', viaje_id: viajes[0].id, canonico, evidencia: a.evidencia ?? null }, aviso: null,
+      }, rechazo);
+    }
     if (viajes.length === 1) {
       const enOpciones = enLista.find(o => o.negocioId === viajes[0].id);
       // V7: un viaje que existe pero no está en la lista no es la respuesta: es un encabezado, y la

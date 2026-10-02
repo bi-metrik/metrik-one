@@ -80,6 +80,7 @@ import {
   planSinDudas,
   partesResumenPlan,
   tieneEncabezados,
+  viajeDeLaCaja,
   TEXTO_COMO_CORREGIR,
 } from './wa-viajes-reglas.ts';
 import type { DestinoPlan, MensajeViaje, PendienteDeLaCaja, PlanViajes, ViajeAbierto } from './wa-viajes-reglas.ts';
@@ -839,6 +840,29 @@ export async function pendienteDeLaTanda(
   if (!c) return null;
   const p = pendienteDeLaCaja(armarSegmentos(aViaje(crudos), c.viajes, { horasCajaActiva, equipo: c.equipo }).segmentos);
   return p ? { ...p, equipo: c.equipo } : null;
+}
+
+/**
+ * La tanda abierta del remitente como la ve el intérprete conversacional: cuándo se abrió, cómo se
+ * llama, cuántos mensajes irían al resumen y el viaje de su caja activa (la última). `null`: no hay.
+ * Solo la usa el intérprete, que solo corre con su interruptor encendido.
+ */
+export async function tandaAbiertaDelRemitente(
+  supabase: SupabaseClient, workspaceId: string, phone: string, horasCajaActiva: number,
+): Promise<{ id: string; creadaAt: string | null; nombre: string; n: number; cajaViajeId: string | null } | null> {
+  const { data: abierta, error } = await supabase.from('wa_bandeja_entregas').select('id, created_at')
+    .eq('workspace_id', workspaceId).eq('remitente_phone', phone).eq('estado', 'abierta').limit(1).maybeSingle();
+  if (error || !abierta) return null;
+  const { nombre, n } = await nombreYConteoDeLaTanda(supabase, abierta.id as string, workspaceId, horasCajaActiva);
+  let cajaViajeId: string | null = null;
+  const crudos = await leerMensajes(supabase, abierta.id as string);
+  const c = typeof crudos === 'string' ? null : await candidatosDeEncabezado(supabase, workspaceId);
+  if (c && typeof crudos !== 'string') {
+    const { segmentos } = armarSegmentos(aViaje(crudos), c.viajes, { horasCajaActiva, equipo: c.equipo });
+    const ultimo = segmentos[segmentos.length - 1];
+    cajaViajeId = ultimo ? (viajeDeLaCaja(ultimo)?.id ?? null) : null;
+  }
+  return { id: abierta.id as string, creadaAt: (abierta.created_at as string | null) ?? null, nombre, n, cajaViajeId };
 }
 
 /** Los viajes abiertos de la línea de la bandeja (para encabezados y el ruteo). `null` si no se pudo. */
