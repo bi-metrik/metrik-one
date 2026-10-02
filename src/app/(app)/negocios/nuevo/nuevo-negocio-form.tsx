@@ -26,6 +26,7 @@ export default function NuevoNegocioForm({
   lineasAutoNombre = [],
   aliados = [],
   aliadosHabilitado = false,
+  lineaSolicitudId = null,
 }: {
   lineas?: Linea[]
   /** Líneas cuyo negocio toma el nombre del contacto: se oculta el campo nombre. */
@@ -34,6 +35,8 @@ export default function NuevoNegocioForm({
   aliados?: AliadoOpcion[]
   /** ¿El workspace tiene el módulo aliados? Sin él no se ofrece origen 'alianza'. */
   aliadosHabilitado?: boolean
+  /** La línea de solicitud de viaje: elegirla lleva a «Nueva solicitud» (sin formulario). */
+  lineaSolicitudId?: string | null
 }) {
   const router = useRouter()
   const [isPending, startTransition] = useTransition()
@@ -498,7 +501,14 @@ export default function NuevoNegocioForm({
               <label className="mb-1 block text-xs font-medium text-muted-foreground">Línea de negocio *</label>
               <select
                 value={lineaId ?? ''}
-                onChange={e => setLineaId(e.target.value || null)}
+                onChange={e => {
+                  // La línea de solicitud de viaje no se da de alta aquí: va a «Nueva solicitud».
+                  if (lineaSolicitudId && e.target.value === lineaSolicitudId) {
+                    router.push(contactoId ? `/negocios/nueva-solicitud?contacto_id=${encodeURIComponent(contactoId)}` : '/negocios/nueva-solicitud')
+                    return
+                  }
+                  setLineaId(e.target.value || null)
+                }}
                 className="w-full rounded-md border bg-background px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary"
               >
                 {lineas.length > 1 && <option value="">Seleccionar línea...</option>}

@@ -31,6 +31,7 @@ import {
   normalizarTexto,
   preguntasDelMinimo,
   type CampoEntendible,
+  type CanalEntrega,
   type MarcaSugerido,
   type Sugerido,
 } from './wa-entendimiento-reglas.ts';
@@ -209,7 +210,7 @@ export function interpretarRespuestaNegocio(texto: string, opciones: ReadonlyArr
  * Mismo formato que lee `src/lib/negocios/sugeridos.ts`.
  */
 export interface MarcaConflicto {
-  fuente: 'whatsapp';
+  fuente: CanalEntrega;
   entrega_id: string;
   /** Lo que dijo el mensaje. */
   valor: string | number;
@@ -266,7 +267,7 @@ export function cargarEnExistente(
   data: Record<string, unknown>,
   fields: ReadonlyArray<CampoEntendible>,
   sugeridos: Record<string, Sugerido>,
-  meta: { entrega_id: string; en: string; origenDe: (frase: string) => 'audio' | 'mensaje' },
+  meta: { entrega_id: string; en: string; origenDe: (frase: string) => 'audio' | 'mensaje'; fuente?: CanalEntrega },
   yaVistos: Set<string> = new Set(),
 ): {
   data: Record<string, unknown>;
@@ -321,7 +322,7 @@ export function cargarEnExistente(
       continue;
     }
     choques[f.slug] = {
-      fuente: 'whatsapp', entrega_id: meta.entrega_id, valor: s.valor, frase: s.frase, en: meta.en, origen: meta.origenDe(s.frase),
+      fuente: meta.fuente ?? 'whatsapp', entrega_id: meta.entrega_id, valor: s.valor, frase: s.frase, en: meta.en, origen: meta.origenDe(s.frase),
     };
     conflictos.push({ slug: f.slug, actual, valor: s.valor, frase: s.frase });
   }
@@ -346,7 +347,7 @@ export function cargarEnExistente(
 export function sugeridosConDeducciones(
   bloques: ReadonlyArray<{ fields: CampoEntendible[]; data: Record<string, unknown> }>,
   sugeridos: Record<string, Sugerido>,
-  meta: { entrega_id: string; en: string; origenDe: (frase: string) => 'audio' | 'mensaje' },
+  meta: { entrega_id: string; en: string; origenDe: (frase: string) => 'audio' | 'mensaje'; fuente?: CanalEntrega },
 ): Record<string, Sugerido> {
   const vistos = new Set<string>();
   const quedaria = bloques.map(b => ({ fields: b.fields, data: cargarEnExistente(b.data, b.fields, sugeridos, meta, vistos).data }));
@@ -496,9 +497,11 @@ export function primerNombre(nombre: string | null | undefined): string {
 /**
  * La traza en la actividad del negocio, con la historia de ESTOS mensajes debajo y fechada:
  * se agrega a lo que ya había, no lo reemplaza.
- * «Se cargaron 3 datos desde WhatsApp (Tatiana, 30-sep)».
+ * «Se cargaron 3 datos desde WhatsApp (Tatiana, 30-sep)»; pegado en la web, «… desde ONE (…)».
  */
 export function trazaCarga(p: {
+  /** Por dónde llegó: sin él, WhatsApp (el bot no lo pasa). */
+  canal?: CanalEntrega;
   quien: string;
   fechaISO: string;
   escritos: string[];
@@ -511,9 +514,10 @@ export function trazaCarga(p: {
   const dia = diaMes(p.fechaISO);
   const quien = p.quien ? `${p.quien}, ${dia}` : dia;
   const n = p.escritos.length + (p.actualizados ?? []).length;
+  const desde = p.canal === 'web' ? 'ONE' : 'WhatsApp';
   const cab = n === 0
-    ? `No se cargaron datos nuevos desde WhatsApp (${quien})`
-    : `Se ${n === 1 ? 'cargó 1 dato' : `cargaron ${n} datos`} desde WhatsApp (${quien})`;
+    ? `No se cargaron datos nuevos desde ${desde} (${quien})`
+    : `Se ${n === 1 ? 'cargó 1 dato' : `cargaron ${n} datos`} desde ${desde} (${quien})`;
   const partes = [`${cab}.`];
   if ((p.actualizados ?? []).length > 0) {
     const lista = p.actualizados!.map(a => {

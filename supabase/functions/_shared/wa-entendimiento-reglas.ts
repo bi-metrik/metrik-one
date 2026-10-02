@@ -971,8 +971,11 @@ const SLUG_REGRESO = 'fecha_regreso';
 // ── Escribir en el bloque sin pisar a una persona ────────────────────────────
 
 /** La marca que deja un valor sugerido en `negocio_bloques.data._sugeridos[slug]`. */
+/** Por dónde llegó lo que se entendió: reenviado al bot o pegado en la caja de la web. */
+export type CanalEntrega = 'whatsapp' | 'web';
+
 export interface MarcaSugerido {
-  fuente: 'whatsapp';
+  fuente: CanalEntrega;
   entrega_id: string;
   frase: string;
   en: string;
@@ -983,8 +986,8 @@ export interface MarcaSugerido {
 }
 
 /** La marca de un sugerido. `anterior` solo cuando reemplaza a otro sugerido. */
-export function marcaDe(s: Sugerido, meta: { entrega_id: string; en: string }, anterior?: unknown): MarcaSugerido {
-  const m: MarcaSugerido = { fuente: 'whatsapp', entrega_id: meta.entrega_id, frase: s.frase, en: meta.en };
+export function marcaDe(s: Sugerido, meta: { entrega_id: string; en: string; fuente?: CanalEntrega }, anterior?: unknown): MarcaSugerido {
+  const m: MarcaSugerido = { fuente: meta.fuente ?? 'whatsapp', entrega_id: meta.entrega_id, frase: s.frase, en: meta.en };
   if (s.deduccion) m.deduccion = s.deduccion;
   if (anterior !== undefined) m.anterior = typeof anterior === 'number' || typeof anterior === 'string' ? anterior : null;
   return m;
@@ -1003,7 +1006,7 @@ export function fusionarSugeridos(
   data: Record<string, unknown>,
   fields: ReadonlyArray<CampoEntendible>,
   sugeridos: Record<string, Sugerido>,
-  meta: { entrega_id: string; en: string },
+  meta: { entrega_id: string; en: string; fuente?: CanalEntrega },
 ): { data: Record<string, unknown>; escritos: string[]; respetados: string[] } {
   const ediciones = (data._ediciones ?? {}) as Record<string, unknown>;
   const marcas = { ...((data[CLAVE_SUGERIDOS] ?? {}) as Record<string, MarcaSugerido>) };

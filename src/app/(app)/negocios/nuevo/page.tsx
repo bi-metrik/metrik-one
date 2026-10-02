@@ -3,8 +3,13 @@ import { redirect } from 'next/navigation'
 import { getAliadosActivos } from '@/app/(app)/directorio/aliados/actions'
 import NuevoNegocioForm from './nuevo-negocio-form'
 import { getCachedUser } from '@/lib/supabase/auth-user'
+import { lineaSolicitudTexto } from '@/lib/negocios/solicitud-texto-servidor'
 
-export default async function NuevoNegocioPage() {
+export default async function NuevoNegocioPage({
+  searchParams,
+}: {
+  searchParams: Promise<{ contacto_id?: string }>
+}) {
   const supabase = await createClient()
   const { user } = await getCachedUser()
   if (!user) redirect('/login')
@@ -26,6 +31,15 @@ export default async function NuevoNegocioPage() {
     .eq('is_active', true)
     .order('numero')
   const lineas = (lineasData ?? []) as { id: string; nombre: string; descripcion: string | null; numero: number }[]
+
+  // La solicitud de viaje sin formulario reemplaza este alta SOLO en su línea (Noor, 2026-10-02):
+  // con una sola línea activa y que es la de la solicitud, se va directo a «Nueva solicitud»;
+  // con varias, el selector manda allá cuando se elige esa línea. Lo demás queda igual.
+  const solicitud = await lineaSolicitudTexto(profile.workspace_id as string)
+  if (solicitud && lineas.length === 1 && lineas[0].id === solicitud.lineaId) {
+    const { contacto_id } = await searchParams
+    redirect(contacto_id ? `/negocios/nueva-solicitud?contacto_id=${encodeURIComponent(contacto_id)}` : '/negocios/nueva-solicitud')
+  }
 
   // Líneas con nombre automático = contacto (config_extra.negocio_codigo_format).
   // El form oculta el campo "nombre del negocio" para esas líneas.
@@ -52,6 +66,7 @@ export default async function NuevoNegocioPage() {
       lineasAutoNombre={lineasAutoNombre}
       aliados={aliados}
       aliadosHabilitado={aliadosHabilitado}
+      lineaSolicitudId={solicitud?.lineaId ?? null}
     />
   )
 }

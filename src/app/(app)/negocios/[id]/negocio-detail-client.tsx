@@ -54,6 +54,10 @@ import CierreNegocioDialog from './cierre-negocio-dialog'
 // Bloques renderers
 import BloqueEquipo from './bloques/BloqueEquipo'
 import BloqueDatos from './bloques/BloqueDatos'
+import TarjetaSolicitud from '@/components/viaje/tarjeta-solicitud'
+import type { HistoriaCliente } from '@/components/viaje/revision-solicitud'
+import type { CampoSolicitud } from '@/components/viaje/solicitud-campo'
+import { EVENTO_AVANZAR_ETAPA } from '@/components/viaje/falta-para-cotizar'
 import BloqueContacto from './bloques/BloqueContacto'
 import type { CampoContacto } from '@/lib/contactos/campos-contacto'
 import type { DatosField, ConfigTarifaConfirmacionUI } from './bloques/BloqueDatos'
@@ -132,6 +136,9 @@ const fmt = (v: number) =>
     currency: 'COP',
     maximumFractionDigits: 0,
   }).format(v)
+
+/** Data vacía con identidad fija: la tarjeta «Solicitud» se resincroniza cuando cambia la data. */
+const SIN_DATA: Record<string, unknown> = {}
 
 function formatNegocioCodigo(codigo: string | null): string {
   if (!codigo) return codigo ?? ''
@@ -783,7 +790,6 @@ function SelectorEtapa({
 
   // Si ya esta cerrado/perdido/cancelado/completado, no mostrar nada
   const estadosCerrados = ['cerrado', 'perdido', 'cancelado', 'completado']
-  if (negocioEstado && estadosCerrados.includes(negocioEstado)) return null
 
   function handleAvanzar(confirmado = false) {
     if (!siguienteEtapa) return
@@ -867,6 +873,19 @@ function SelectorEtapa({
       toast.success(`Carpeta guardada. Avanzado a: ${result.etapaDestinoNombre ?? nombreEtapa}`)
     })
   }
+
+  // «Pasar a cotización» de la tarjeta «Solicitud» avanza con ESTE flujo (gates, confirmación,
+  // carpeta): la tarjeta solo lo pide. Sin arreglo de dependencias a propósito: cada render deja
+  // escuchando la versión vigente de `handleAvanzar`.
+  useEffect(() => {
+    const avanzar = () => handleAvanzar()
+    window.addEventListener(EVENTO_AVANZAR_ETAPA, avanzar)
+    return () => window.removeEventListener(EVENTO_AVANZAR_ETAPA, avanzar)
+  })
+
+  // Si ya esta cerrado/perdido/cancelado/completado, no mostrar nada. (Va después de los
+  // manejadores y del efecto de arriba: un hook no puede quedar detrás de un `return`.)
+  if (negocioEstado && estadosCerrados.includes(negocioEstado)) return null
 
   // Detectar etapa terminal (habilita cerrar/completar). Config-driven: si la
   // línea marca una etapa con es_cierre, ESA es la única terminal (SOENA:
@@ -2237,6 +2256,11 @@ interface Props {
    */
   viaje?: MarcoDelNegocio | null
   /**
+   * La solicitud de viaje sin formulario: el bloque `datos` con mínimo y deseable que la tarjeta
+   * «Solicitud» reemplaza, y la historia del cliente. `null` en cualquier otra línea o workspace.
+   */
+  solicitudTexto?: { negocioBloqueId: string; historias: HistoriaCliente[] } | null
+  /**
    * La cotización de un negocio de viaje se pinta DENTRO de este mismo marco: mismo
    * encabezado y mismo panel, y en la zona central el editor en vez de los bloques
    * (corrección de Mauricio a #874: ir y volver no puede mover nada).
@@ -2284,6 +2308,7 @@ export default function NegocioDetailClient({
   banner,
   extras,
   viaje = null,
+  solicitudTexto = null,
   centro,
   cotActualId = null,
 }: Props) {
@@ -2387,6 +2412,17 @@ export default function NegocioDetailClient({
     }
     return raw === cond.value
   })
+
+  // La tarjeta «Solicitud» toma el lugar del bloque de datos de la solicitud, solo si ese bloque
+  // se podría editar aquí (mismo criterio que su `modo`). Si no, el bloque se ve como siempre.
+  const bloqueSolicitud = solicitudTexto
+    ? bloquesExtendidos.find(b => b.instancia?.id === solicitudTexto.negocioBloqueId
+      && !negocioCerrado
+      && b.estado !== 'visible'
+      && (b.config_extra as { _areaReadonly?: boolean })._areaReadonly !== true
+      && (b as { _forceReadOnly?: boolean })._forceReadOnly !== true) ?? null
+    : null
+  const bloquesDeLaLista = bloqueSolicitud ? bloquesExtendidos.filter(b => b !== bloqueSolicitud) : bloquesExtendidos
 
   return (
     /* Desde `lg:` el contenedor se ensancha y se parte en dos columnas: el
@@ -2659,9 +2695,22 @@ export default function NegocioDetailClient({
             />
           </div>
 
-          {bloquesExtendidos.length > 0 && (
+          {bloqueSolicitud?.instancia && (
+            <div className="mb-2">
+              <TarjetaSolicitud
+                negocioBloqueId={bloqueSolicitud.instancia.id}
+                fields={(bloqueSolicitud.config_extra.fields ?? []) as CampoSolicitud[]}
+                data={bloqueSolicitud.instancia.data ?? SIN_DATA}
+                requireConfirm={!!bloqueSolicitud.config_extra.require_confirm}
+                historias={solicitudTexto?.historias ?? []}
+                editable
+              />
+            </div>
+          )}
+
+          {bloquesDeLaLista.length > 0 && (
             <div className="space-y-2">
-              {bloquesExtendidos.map(bloque => (
+              {bloquesDeLaLista.map(bloque => (
                 <BloqueCard
                   key={bloque.id}
                   bloque={bloque}
