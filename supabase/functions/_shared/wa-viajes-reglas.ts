@@ -46,6 +46,20 @@ export interface MensajeViaje {
   tipo: string;
   /** ISO: cuándo lo mandó el comercial (`momentoDelMensaje`: la hora de Meta, o la de llegada). */
   en: string;
+  /**
+   * Lo que decidió el intérprete conversacional sobre este escrito (`wa_bandeja_mensajes.interpretacion`).
+   * `armarSegmentos` la usa PRIMERO; ausente o nula, el mensaje se lee como siempre (por su texto).
+   */
+  interpretacion?: InterpretacionDelMensaje | null;
+}
+
+/** Lo que `armarSegmentos` lee de `wa_bandeja_mensajes.interpretacion` (lo escribe `wa-interprete.ts`). */
+export interface InterpretacionDelMensaje {
+  accion: string;
+  viaje_id?: string | null;
+  nuevo?: string | null;
+  candidatos?: string[] | null;
+  con_contenido?: boolean | null;
 }
 
 // ── Encabezados ──────────────────────────────────────────────────────────────
@@ -537,6 +551,46 @@ export function armarSegmentos(
   for (const m of [...mensajes].sort((a, b) => a.n - b.n)) {
     const t = Date.parse(m.en);
     const escrito = !m.reenviado && m.tipo === 'text';
+    // Lo que decidió el intérprete, primero (diseño del bot conversacional, §1): sin esto, al cerrar la
+    // tanda «lo de Cartagena» se volvería a leer por su texto como `aproximado` y la caja se perdería.
+    const ip = escrito ? decisionDelInterprete(m, viajes, caja?.seg ?? null) : null;
+    if (ip) {
+      if (ip.tipo === 'caja') {
+        const seg: Segmento = {
+          origen: 'encabezado', encabezado: { n: m.n, texto: m.cuerpo.trim(), resolucion: ip.resolucion }, mensajes: ip.conContenido ? [m.n] : [],
+          ...(ip.resolucion.tipo === 'aproximado' || ip.resolucion.tipo === 'ambiguo' ? { eleccion: null } : {}),
+          ...(ip.resolucion.tipo === 'nuevo' && !ip.resolucion.cliente ? { nombre: null } : {}),
+        };
+        // El encabezado que también es contenido no va en `encabezados`: es un mensaje de su caja.
+        if (!ip.conContenido) encabezados.push(m.n);
+        segmentos.push(seg);
+        caja = { seg, desde: t };
+        suelto = null;
+        continue;
+      }
+      if (ip.tipo === 'eleccion') {
+        caja!.seg.eleccion = { viaje: ip.viaje, n: m.n };
+        encabezados.push(m.n);
+        continue;
+      }
+      if (ip.tipo === 'nombre') {
+        caja!.seg.nombre = { texto: ip.nombre, n: m.n };
+        encabezados.push(m.n);
+        continue;
+      }
+      // `contenido`: el intérprete dijo que es del cliente; no se relee como encabezado.
+      if (caja && !(t - caja.desde > cfg.horasCajaActiva * 3600_000)) {
+        caja.seg.mensajes.push(m.n);
+        continue;
+      }
+      caja = null;
+      if (!suelto) {
+        suelto = { origen: 'sin_encabezado', encabezado: null, mensajes: [] };
+        segmentos.push(suelto);
+      }
+      suelto.mensajes.push(m.n);
+      continue;
+    }
     // La elección de la lista numerada del encabezado (Trappvel, 2026-10-02): la primera, y solo
     // dentro de su caja. Un sí, un no o un número fuera de la lista no la contestan y tampoco son
     // contenido; otro encabezado (un código, «nuevo X») abre su propia caja.
@@ -592,6 +646,45 @@ export function armarSegmentos(
     suelto.mensajes.push(m.n);
   }
   return { segmentos, encabezados };
+}
+
+type DecisionInterprete =
+  | { tipo: 'caja'; resolucion: ResolucionEncabezado; conContenido: boolean }
+  | { tipo: 'eleccion'; viaje: ViajeAbierto }
+  | { tipo: 'nombre'; nombre: string }
+  | { tipo: 'contenido' };
+
+/**
+ * Lo que dice la `interpretacion` de un escrito, traducido al reparto. `null` = no hay, o no se puede
+ * aplicar (el viaje ya no está abierto, la caja no esperaba esa respuesta): se lee como siempre.
+ */
+function decisionDelInterprete(m: MensajeViaje, viajes: ReadonlyArray<ViajeAbierto>, caja: Segmento | null): DecisionInterprete | null {
+  const ip = m.interpretacion;
+  if (!ip || typeof ip !== 'object' || typeof ip.accion !== 'string') return null;
+  const conContenido = ip.con_contenido === true;
+  const viaje = ip.viaje_id ? viajes.find(v => v.id === ip.viaje_id) ?? null : null;
+  switch (ip.accion) {
+    case 'abrir_viaje':
+      if (viaje) return { tipo: 'caja', resolucion: { tipo: 'viaje', viaje, por: 'nombre' }, conContenido };
+      if (!ip.viaje_id) return { tipo: 'caja', resolucion: { tipo: 'nuevo', cliente: ip.nuevo?.trim() || null }, conContenido };
+      return null;
+    case 'preguntar_viaje': {
+      const cands = (ip.candidatos ?? []).map(id => viajes.find(v => v.id === id)).filter((v): v is ViajeAbierto => !!v);
+      const resolucion: ResolucionEncabezado = cands.length === 1 ? { tipo: 'aproximado', viaje: cands[0], por: 'nombre' }
+        : cands.length > 1 ? { tipo: 'ambiguo', candidatos: cands } : { tipo: 'no_reconocido' };
+      return { tipo: 'caja', resolucion, conContenido };
+    }
+    case 'responder': {
+      if (!viaje || !caja || caja.eleccion !== null) return null;
+      return candidatosDelEncabezado(caja.encabezado?.resolucion).some(v => v.id === viaje.id) ? { tipo: 'eleccion', viaje } : null;
+    }
+    case 'nombre':
+      return caja && caja.nombre === null && ip.nuevo?.trim() ? { tipo: 'nombre', nombre: ip.nuevo.trim() } : null;
+    case 'contenido':
+      return { tipo: 'contenido' };
+    default:
+      return null;
+  }
 }
 
 /** Lo que espera la caja abierta en el acto. `conContenido`: ya entró contenido después de la pregunta. */
@@ -868,7 +961,13 @@ export function armarPlan(p: {
       // traen nada de la solicitud y solo alargan la lista que el comercial revisa. Tampoco un acuse
       // escrito por el comercial («si», «no», «ok gracias»: Trappvel, 2026-10-02).
       if (esRuidoDelComercial(m)) continue;
-      const nombrados = viajesNombrados(m.cuerpo, destinosConocidos, p.viajes);
+      // El encabezado que también es contenido (solo con la `interpretacion` del intérprete): ahí el
+      // comercial nombra al cliente de la caja con sus palabras, y un apellido compartido («Daniel Pérez»
+      // con Lina Pérez abierta) no es otro viaje. Para ese mensaje, un viaje cuenta como nombrado solo
+      // con TODAS las palabras de su cliente (la regla de #986). Hoy ese caso no existe.
+      const suEncabezado = seg.encabezado?.n === n;
+      const nombrados = viajesNombrados(m.cuerpo, destinosConocidos, p.viajes)
+        .filter(d => !suEncabezado || palabrasDe(d.cliente).every(w => palabrasDe(m.cuerpo).includes(w)));
       if (!caja) {
         const motivo = !seg.encabezado ? 'llegó sin encabezado'
           : res?.tipo === 'nuevo' ? `«${seg.encabezado.texto}» sin nombre: no me dijiste cómo se llama el cliente nuevo`

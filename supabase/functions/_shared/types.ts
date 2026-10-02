@@ -97,6 +97,23 @@ export interface SessionContext {
   origen_asignacion?: 'auto' | 'sugerido' | 'manual' | 'split';
   // Para awaiting_selection de centro de costos (top-3 negocios abiertos)
   cc_negocios_options?: Array<{ id: string; label: string }>;
+  /**
+   * Gastos que el intérprete conversacional entendió en un mismo mensaje y esperan su turno: se
+   * confirman UNO A LA VEZ, cada uno con sus botones (`handlers/registro/cola-gastos.ts`). Nunca
+   * existe con el interruptor apagado.
+   */
+  gastos_en_cola?: GastoEnCola[];
+  /** Cuántos gastos traía el mensaje (para «Gasto 2 de 3»). */
+  gastos_total?: number;
+}
+
+/** Un gasto en la cola del intérprete: lo validado, todavía sin registrar. */
+export interface GastoEnCola {
+  monto: number | null;
+  descripcion: string | null;
+  negocio: { id: string; codigo: string | null; nombre: string | null } | 'empresa' | null;
+  /** El mensaje completo, que se guarda como `mensaje_original`. */
+  mensaje: string;
 }
 
 // --- Conversational Last Context (follow-up memory) ---
@@ -147,7 +164,11 @@ export interface WaUser {
   collaborator_id?: string;
   subscription_status: string;
   /** Fila de `workspaces` con sus `modules`, o `null` si no se pudo leer. Ver `wa-modulos.ts`. */
-  modulos: { modules?: Record<string, unknown> | null } | null;
+  modulos: {
+    modules?: Record<string, unknown> | null;
+    /** `config_extra.bot_conversacional` (el interruptor del intérprete). Ausente o nulo = apagado. */
+    bot_conversacional?: unknown;
+  } | null;
 }
 
 // --- WhatsApp Message ---

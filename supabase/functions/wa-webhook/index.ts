@@ -34,6 +34,7 @@ import { atenderBotonTerminos, atenderPendienteTerminos } from '../_shared/acept
 import { botEquipoPermitido, MENSAJE_BOT_SIN_CLARITY } from '../_shared/wa-modulos.ts';
 import { atenderEnBandeja, rutaDelMensaje } from '../_shared/wa-bandeja.ts';
 import { identificarRemitente } from '../_shared/wa-identificar.ts';
+import { atenderEscrito } from '../_shared/wa-interprete.ts';
 import type { BotSession, HandlerContext, IncomingMessage, Intent, WaUser } from '../_shared/types.ts';
 import { OPERATOR_ALLOWED_INTENTS, CONTADOR_ALLOWED_INTENTS, READ_ONLY_ALLOWED_INTENTS } from '../_shared/types.ts';
 
@@ -413,6 +414,13 @@ async function processMessage(message: IncomingMessage): Promise<void> {
     await atenderDesconocido(supabase, message);
     return;
   }
+
+  // 1a-int. Intérprete conversacional (opt-in por workspace: `config_extra.bot_conversacional`, que
+  //     llega en la misma lectura que identifica al remitente). Un escrito libre del equipo pasa por UN
+  //     llamado al modelo que entiende y un validador que decide; si atiende, termina aquí. Apagado, o
+  //     ante cualquier falla, devuelve `atendido: false` sin tocar la base y todo sigue exactamente
+  //     como hoy. Reenvíos, botones, audio y fotos nunca pasan. Ver `_shared/wa-interprete.ts`.
+  if ((await atenderEscrito(supabase, user, message)).atendido) return;
 
   // 1a-bandeja. Bandeja de solicitudes (opt-in por workspace: `modules.bandeja_solicitudes_wa`).
   //     Lo que un comercial reenvia o dicta queda guardado COMPLETO y agrupado por entrega, y NO

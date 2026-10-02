@@ -80,6 +80,7 @@ import {
   planSinDudas,
   partesResumenPlan,
   tieneEncabezados,
+  viajeDeLaCaja,
   TEXTO_COMO_CORREGIR,
 } from './wa-viajes-reglas.ts';
 import type { DestinoPlan, MensajeViaje, PendienteDeLaCaja, PlanViajes, ViajeAbierto } from './wa-viajes-reglas.ts';
@@ -230,6 +231,8 @@ type MensajeCrudo = {
   recibido_at: string | null;
   enviado_at?: string | null;
   segmento: number | null;
+  /** Lo que decidió el intérprete conversacional (nula con el interruptor apagado). Ver `armarSegmentos`. */
+  interpretacion?: MensajeViaje['interpretacion'];
 };
 
 /**
@@ -240,7 +243,7 @@ type MensajeCrudo = {
  */
 async function leerMensajes(supabase: SupabaseClient, entregaId: string): Promise<MensajeCrudo[] | string> {
   const { data, error } = await supabase.from('wa_bandeja_mensajes')
-    .select('id, cuerpo, cuerpo_origen, reenviado, tipo, recibido_at, enviado_at, segmento')
+    .select('id, cuerpo, cuerpo_origen, reenviado, tipo, recibido_at, enviado_at, segmento, interpretacion')
     .eq('entrega_id', entregaId).eq('papel', 'contenido').order('recibido_at', { ascending: true });
   if (error) return `no se pudieron leer los mensajes: ${error.message}`;
   return ordenarPorEnvio((data ?? []) as MensajeCrudo[]);
@@ -256,6 +259,8 @@ function aViaje(crudos: ReadonlyArray<MensajeCrudo>): MensajeViaje[] {
   return crudos.map((m, i) => ({
     n: i + 1, cuerpo: String(m.cuerpo ?? ''), reenviado: m.reenviado === true, tipo: m.tipo ?? 'text',
     en: new Date(momentoDelMensaje(m)).toISOString(),
+    // Solo si la hay: sin ella el mensaje es idéntico al de siempre.
+    ...(m.interpretacion ? { interpretacion: m.interpretacion } : {}),
   }));
 }
 
@@ -835,6 +840,29 @@ export async function pendienteDeLaTanda(
   if (!c) return null;
   const p = pendienteDeLaCaja(armarSegmentos(aViaje(crudos), c.viajes, { horasCajaActiva, equipo: c.equipo }).segmentos);
   return p ? { ...p, equipo: c.equipo } : null;
+}
+
+/**
+ * La tanda abierta del remitente como la ve el intérprete conversacional: cuándo se abrió, cómo se
+ * llama, cuántos mensajes irían al resumen y el viaje de su caja activa (la última). `null`: no hay.
+ * Solo la usa el intérprete, que solo corre con su interruptor encendido.
+ */
+export async function tandaAbiertaDelRemitente(
+  supabase: SupabaseClient, workspaceId: string, phone: string, horasCajaActiva: number,
+): Promise<{ id: string; creadaAt: string | null; nombre: string; n: number; cajaViajeId: string | null } | null> {
+  const { data: abierta, error } = await supabase.from('wa_bandeja_entregas').select('id, created_at')
+    .eq('workspace_id', workspaceId).eq('remitente_phone', phone).eq('estado', 'abierta').limit(1).maybeSingle();
+  if (error || !abierta) return null;
+  const { nombre, n } = await nombreYConteoDeLaTanda(supabase, abierta.id as string, workspaceId, horasCajaActiva);
+  let cajaViajeId: string | null = null;
+  const crudos = await leerMensajes(supabase, abierta.id as string);
+  const c = typeof crudos === 'string' ? null : await candidatosDeEncabezado(supabase, workspaceId);
+  if (c && typeof crudos !== 'string') {
+    const { segmentos } = armarSegmentos(aViaje(crudos), c.viajes, { horasCajaActiva, equipo: c.equipo });
+    const ultimo = segmentos[segmentos.length - 1];
+    cajaViajeId = ultimo ? (viajeDeLaCaja(ultimo)?.id ?? null) : null;
+  }
+  return { id: abierta.id as string, creadaAt: (abierta.created_at as string | null) ?? null, nombre, n, cajaViajeId };
 }
 
 /** Los viajes abiertos de la línea de la bandeja (para encabezados y el ruteo). `null` si no se pudo. */
@@ -1647,6 +1675,8 @@ export async function tomarRespuestaContacto(
     workspaceId: string; phone: string; texto: string; wamid: string; enviadoAt: string | null;
     /** La respuesta se toma aunque haya una tanda abierta (un «sí» corto, o la respuesta a «¿A qué viaje van?»). */
     aunConTandaAbierta?: boolean;
+    /** El crudo que se guarda, si `texto` es la forma canónica que tradujo el intérprete. Sin él, `texto`. */
+    cuerpo?: string;
   },
 ): Promise<boolean> {
   const desde = new Date(Date.now() - HORAS_RESPUESTA_CONTACTO * 3600_000).toISOString();
@@ -1676,7 +1706,7 @@ export async function tomarRespuestaContacto(
   const { error: eIns } = await supabase.from('wa_bandeja_mensajes').insert({
     workspace_id: p.workspaceId, entrega_id: pend.entrega_id, wa_message_id: p.wamid,
     remitente_phone: p.phone, remitente_staff_id: pend.remitente_staff_id ?? null,
-    tipo: 'text', papel: cual.papel, cuerpo: p.texto, cuerpo_origen: 'texto', enviado_at: p.enviadoAt,
+    tipo: 'text', papel: cual.papel, cuerpo: p.cuerpo ?? p.texto, cuerpo_origen: 'texto', enviado_at: p.enviadoAt,
   });
   if (eIns && !String(eIns.message).includes('duplicate')) {
     console.error('[wa-entendimiento] no se pudo guardar la respuesta:', eIns.message);
@@ -1695,7 +1725,11 @@ export async function tomarRespuestaContacto(
  */
 export async function tomarRespuestaDeEntrega(
   supabase: SupabaseClient,
-  p: { workspaceId: string; phone: string; texto: string; wamid: string; enviadoAt: string | null; horas: number },
+  p: {
+    workspaceId: string; phone: string; texto: string; wamid: string; enviadoAt: string | null; horas: number;
+    /** El crudo que se guarda, si `texto` es la forma canónica que tradujo el intérprete. Sin él, `texto`. */
+    cuerpo?: string;
+  },
 ): Promise<boolean> {
   const desde = new Date(Date.now() - p.horas * 3600_000).toISOString();
   const { data: e } = await supabase.from('wa_bandeja_entregas').select('id, remitente_staff_id, remitente_colaborador_id')
@@ -1705,7 +1739,7 @@ export async function tomarRespuestaDeEntrega(
   const { error: eIns } = await supabase.from('wa_bandeja_mensajes').insert({
     workspace_id: p.workspaceId, entrega_id: e.id, wa_message_id: p.wamid, remitente_phone: p.phone,
     remitente_staff_id: e.remitente_staff_id ?? null, remitente_colaborador_id: e.remitente_colaborador_id ?? null,
-    tipo: 'text', papel: 'respuesta_cliente', cuerpo: p.texto, cuerpo_origen: 'texto', enviado_at: p.enviadoAt,
+    tipo: 'text', papel: 'respuesta_cliente', cuerpo: p.cuerpo ?? p.texto, cuerpo_origen: 'texto', enviado_at: p.enviadoAt,
   });
   if (eIns) {
     if (String(eIns.message).includes('duplicate')) return true; // Meta reintentó: ya se tomó.

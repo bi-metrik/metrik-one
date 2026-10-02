@@ -61,7 +61,7 @@ const ESTADOS_ESPERANDO = [
  * `config_extra` del workspace. Solo se lee cuando la bandeja está encendida, así que para
  * cualquier otro workspace el bot no hace ni una consulta más que antes.
  */
-async function configDelWorkspace(supabase: SupabaseClient, workspaceId: string): Promise<ConfigBandeja> {
+export async function configDelWorkspace(supabase: SupabaseClient, workspaceId: string): Promise<ConfigBandeja> {
   const { data, error } = await supabase
     .from('workspaces')
     .select('config_extra')
@@ -193,12 +193,14 @@ async function hayTandaAbierta(supabase: SupabaseClient, workspaceId: string, ph
  * entendimiento (re-pregunta, confirmación, contacto) y si no, la de una entrega cerrada (el resumen o
  * «¿A qué viaje van?»). `aunConTandaAbierta`: aunque haya una caja abierta. Devuelve `true` si la tomó.
  */
-async function responderPendiente(
+export async function responderPendiente(
   supabase: SupabaseClient, workspaceId: string, phone: string, texto: string, wamid: string, enviadoAt: string | null,
   config: ConfigBandeja, aunConTandaAbierta: boolean,
+  /** El escrito tal como llegó, si `texto` es su forma canónica (lo que tradujo el intérprete). */
+  cuerpo?: string,
 ): Promise<boolean> {
-  if (await tomarRespuestaContacto(supabase, { workspaceId, phone, texto, wamid, enviadoAt, aunConTandaAbierta })) return true;
-  return tomarRespuestaDeEntrega(supabase, { workspaceId, phone, texto, wamid, enviadoAt, horas: config.horasRespuestaCliente });
+  if (await tomarRespuestaContacto(supabase, { workspaceId, phone, texto, wamid, enviadoAt, aunConTandaAbierta, cuerpo })) return true;
+  return tomarRespuestaDeEntrega(supabase, { workspaceId, phone, texto, wamid, enviadoAt, horas: config.horasRespuestaCliente, cuerpo });
 }
 
 /**
@@ -211,9 +213,22 @@ async function responderPendiente(
  * Antes «cancelar» solo descartaba la tanda abierta y «descartar» solo contestaba el resumen: con la
  * pregunta todavía en camino, el «descartar» de Edgar abrió una tanda nueva y quedó como contenido.
  */
-async function descartarTodo(
+export async function descartarTodo(
   supabase: SupabaseClient, workspaceId: string, phone: string, texto: string, wamid: string, enviadoAt: string | null, config: ConfigBandeja,
 ): Promise<void> {
+  const { partes, guardada } = await descartarTandaAbierta(supabase, workspaceId, phone, texto, wamid, enviadoAt, config);
+  partes.push(...await descartarPendientesDelRemitente(supabase, { workspaceId, phone, texto, wamid, enviadoAt, guardarRespuesta: !guardada, bandeja: config }));
+  await enviar(phone, textoDescarteTotal(partes), workspaceId);
+}
+
+/**
+ * Descarta SOLO la tanda abierta del remitente (queda cerrada, sin pregunta ni carga, con el motivo; el
+ * escrito se guarda en ella como su cierre). Es la primera mitad de `descartarTodo`, y la usa sola el
+ * intérprete cuando el «bórralo» se refiere a la tanda (H2, caso 2). `guardada`: el escrito quedó guardado.
+ */
+export async function descartarTandaAbierta(
+  supabase: SupabaseClient, workspaceId: string, phone: string, texto: string, wamid: string, enviadoAt: string | null, config: ConfigBandeja,
+): Promise<{ partes: ParteDescartada[]; guardada: boolean }> {
   const partes: ParteDescartada[] = [];
   const { data: abierta } = await supabase.from('wa_bandeja_entregas').select('id, remitente_staff_id, remitente_colaborador_id')
     .eq('workspace_id', workspaceId).eq('remitente_phone', phone).eq('estado', 'abierta').limit(1).maybeSingle();
@@ -236,8 +251,7 @@ async function descartarTodo(
       guardada = true;
     }
   }
-  partes.push(...await descartarPendientesDelRemitente(supabase, { workspaceId, phone, texto, wamid, enviadoAt, guardarRespuesta: !guardada, bandeja: config }));
-  await enviar(phone, textoDescarteTotal(partes), workspaceId);
+  return { partes, guardada };
 }
 
 /** Marca de una tanda que el comercial descartó: cerrada sin pregunta (no ocupa la cola). */
@@ -246,7 +260,7 @@ const TANDA_CANCELADA = 'descartada por el comercial: no se pregunta ni se carga
 /** Marca de una tanda que solo trajo encabezados y acuses: no hay nada que preguntar (no ocupa la cola). */
 const SIN_CONTENIDO = 'solo encabezados o acuses: no hay mensajes que repartir';
 
-async function estadoParaEsperar(
+export async function estadoParaEsperar(
   supabase: SupabaseClient, workspaceId: string, phone: string, config: ConfigBandeja,
 ): Promise<{ hayAbierta: boolean; hayPregunta: boolean }> {
   const { data: abierta } = await supabase.from('wa_bandeja_entregas').select('id')
@@ -478,7 +492,7 @@ async function respuestaEnEspera(
  * acotado al workspace: `staff.profile_id` es único en toda la base y un staff de otro
  * workspace no puede quedar como remitente de este.
  */
-async function staffIdDelRemitente(supabase: SupabaseClient, user: WaUser): Promise<string | null> {
+export async function staffIdDelRemitente(supabase: SupabaseClient, user: WaUser): Promise<string | null> {
   if (!user.user_id) return null;
   // `wa_identify_user` no vive en las migraciones del repo, así que no está escrito si su
   // `user_id` es el del perfil o el del staff: se aceptan las dos, siempre dentro del workspace.
@@ -496,7 +510,7 @@ async function staffIdDelRemitente(supabase: SupabaseClient, user: WaUser): Prom
   return data?.id ?? null;
 }
 
-async function enviar(phone: string, texto: string, workspaceId: string): Promise<boolean> {
+export async function enviar(phone: string, texto: string, workspaceId: string): Promise<boolean> {
   try {
     await sendTextMessage(phone, texto, { origen: 'bot', workspaceId, intent: INTENT_BANDEJA });
     return true;
