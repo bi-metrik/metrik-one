@@ -46,7 +46,7 @@ import {
   MAX_PREGUNTAS,
   textoPreguntaContacto,
 } from './wa-entendimiento-reglas.ts';
-import type { CampoEntendible, ClaseMensaje, ContactoCandidato, DecisionContacto, SalidaEntendida } from './wa-entendimiento-reglas.ts';
+import type { CampoEntendible, CanalEntrega, ClaseMensaje, ContactoCandidato, DecisionContacto, SalidaEntendida } from './wa-entendimiento-reglas.ts';
 import {
   armarOpcionesNegocio,
   cargarEnExistente,
@@ -84,13 +84,15 @@ import type { DestinoPlan, MensajeViaje, PlanViajes, ViajeAbierto } from './wa-v
 import type { SupabaseClient } from './types.ts';
 
 /** El mismo proveedor y el mismo modelo base que ONE ya usa para leer mensajes (`wa-parse.ts`). */
-const GEMINI_MODEL = Deno.env.get('GEMINI_ENTENDIMIENTO_MODEL') || Deno.env.get('GEMINI_PARSE_MODEL') || 'gemini-2.5-flash-lite';
+export const GEMINI_MODEL = Deno.env.get('GEMINI_ENTENDIMIENTO_MODEL') || Deno.env.get('GEMINI_PARSE_MODEL') || 'gemini-2.5-flash-lite';
 const INTENT = 'bandeja_entendimiento';
-const MAX_INTENTOS = 3;
+export const MAX_INTENTOS = 3;
 const LOTE = 5;
 /** Horas durante las cuales un texto del comercial cuenta como respuesta a «¿cuál contacto?». */
 const HORAS_RESPUESTA_CONTACTO = 24;
 const ORIGEN_POR_DEFECTO = 'contacto_directo';
+/** El canal de lo pegado en la web: el cron no lo toma (ver `procesarEntendimientos`). */
+export const CANAL_WEB = 'web';
 
 type Fila = Record<string, unknown>;
 
@@ -114,13 +116,13 @@ async function actualizar(supabase: SupabaseClient, id: string, cambios: Fila): 
 
 // ── Modelo ───────────────────────────────────────────────────────────────────
 
-interface Lectura { json: unknown | null; finishReason: string | null; error: string | null }
+export interface Lectura { json: unknown | null; finishReason: string | null; error: string | null }
 
 /**
  * Llama al modelo con el esquema dado. Verifica el MOTIVO DE TERMINACIÓN, no solo que haya
  * texto: media respuesta aceptada en silencio es un falso verde (§3 del diseño).
  */
-async function leerConModelo(instrucciones: string, texto: string, esquema: unknown): Promise<Lectura> {
+export async function leerConModelo(instrucciones: string, texto: string, esquema: unknown): Promise<Lectura> {
   const apiKey = Deno.env.get('GEMINI_API_KEY');
   if (!apiKey) return { json: null, finishReason: null, error: 'GEMINI_NO_KEY' };
   const url = `https://generativelanguage.googleapis.com/v1beta/models/${GEMINI_MODEL}:generateContent?key=${apiKey}`;
@@ -161,7 +163,7 @@ async function leerConModelo(instrucciones: string, texto: string, esquema: unkn
 
 // ── Config de la línea ───────────────────────────────────────────────────────
 
-interface ConfigLinea {
+export interface ConfigLinea {
   lineaId: string;
   etapaId: string;
   stage: string | null;
@@ -177,7 +179,7 @@ interface ConfigLinea {
  * `linea_activa_id` (la misma que usa `crearNegocio` sin línea). La etapa es la primera por
  * `orden`: la «Solicitud».
  */
-async function lineaDeLaBandeja(
+export async function lineaDeLaBandeja(
   supabase: SupabaseClient, workspaceId: string,
 ): Promise<{ lineaId: string; slug: string; cfg: Fila; bandeja: ConfigBandeja } | string> {
   const { data: ws, error } = await supabase
@@ -189,7 +191,7 @@ async function lineaDeLaBandeja(
   return { lineaId, slug: ws.slug as string, cfg, bandeja: leerConfigBandeja(ws.config_extra ?? null) };
 }
 
-async function configDeLinea(supabase: SupabaseClient, workspaceId: string): Promise<ConfigLinea | string> {
+export async function configDeLinea(supabase: SupabaseClient, workspaceId: string): Promise<ConfigLinea | string> {
   const l = await lineaDeLaBandeja(supabase, workspaceId);
   if (typeof l === 'string') return l;
   const { lineaId, cfg } = l;
@@ -219,7 +221,7 @@ async function configDeLinea(supabase: SupabaseClient, workspaceId: string): Pro
 
 // ── Los mensajes de la entrega ───────────────────────────────────────────────
 
-type MensajeCrudo = {
+export type MensajeCrudo = {
   id: string;
   cuerpo: string | null;
   cuerpo_origen: string | null;
@@ -236,7 +238,7 @@ type MensajeCrudo = {
  * webhooks, queda después de él (prueba en vivo del 2026-10-01, error 1). Su número (1, 2…) es su
  * posición.
  */
-async function leerMensajes(supabase: SupabaseClient, entregaId: string): Promise<MensajeCrudo[] | string> {
+export async function leerMensajes(supabase: SupabaseClient, entregaId: string): Promise<MensajeCrudo[] | string> {
   const { data, error } = await supabase.from('wa_bandeja_mensajes')
     .select('id, cuerpo, cuerpo_origen, reenviado, tipo, recibido_at, enviado_at, segmento')
     .eq('entrega_id', entregaId).eq('papel', 'contenido').order('recibido_at', { ascending: true });
@@ -244,7 +246,7 @@ async function leerMensajes(supabase: SupabaseClient, entregaId: string): Promis
   return ordenarPorEnvio((data ?? []) as MensajeCrudo[]);
 }
 
-function aEntrega(crudos: ReadonlyArray<MensajeCrudo>): MensajeEntrega[] {
+export function aEntrega(crudos: ReadonlyArray<MensajeCrudo>): MensajeEntrega[] {
   return crudos.map((m, i) => ({
     n: i + 1, cuerpo: String(m.cuerpo ?? ''), reenviado: m.reenviado === true, tipo: m.tipo ?? 'text', origen: m.cuerpo_origen,
   }));
@@ -258,7 +260,7 @@ function aViaje(crudos: ReadonlyArray<MensajeCrudo>): MensajeViaje[] {
 }
 
 /** N3: deja anotado quién habla en cada mensaje (auditoría de dónde salió cada dato). */
-async function guardarClases(
+export async function guardarClases(
   supabase: SupabaseClient, crudos: ReadonlyArray<MensajeCrudo>, mensajes: ReadonlyArray<MensajeEntrega>, clases: Record<number, ClaseMensaje>,
 ): Promise<void> {
   const porClase = new Map<ClaseMensaje, string[]>();
@@ -277,7 +279,7 @@ async function guardarClases(
 // ── Contacto ─────────────────────────────────────────────────────────────────
 
 /** Trae candidatos del workspace por teléfono y por palabras del nombre. La decisión es pura. */
-async function candidatosDeContacto(
+export async function candidatosDeContacto(
   supabase: SupabaseClient, workspaceId: string, clienteTexto: string | null, extraido: SalidaEntendida['cliente'],
 ): Promise<ContactoCandidato[]> {
   const out = new Map<string, ContactoCandidato>();
@@ -297,13 +299,21 @@ async function candidatosDeContacto(
 
 // ── Negocio ──────────────────────────────────────────────────────────────────
 
-async function crearNegocio(
+/**
+ * Crea el negocio con lo entendido: solo ESCRIBE (negocio, bloques con sus sugeridos, responsable e
+ * historia). Lo que se le contesta a quien lo mandó es de quien llama: el bot lo manda por WhatsApp
+ * (`cerrarConNegocio`), la web lo pinta (`solicitud-texto.ts`).
+ */
+export async function crearNegocio(
   supabase: SupabaseClient,
   p: {
     workspaceId: string; cfg: ConfigLinea; contactoId: string; entregaId: string;
     staffId: string | null; salida: SalidaEntendida; pistas: { mes: number | null; duracion: string | null };
+    /** Por dónde llegó. Sin él, WhatsApp. */
+    canal?: CanalEntrega;
   },
 ): Promise<{ negocioId: string; valores: Record<string, unknown> } | string> {
+  const canal: CanalEntrega = p.canal ?? 'whatsapp';
   const { data: contacto } = await supabase.from('contactos').select('nombre').eq('id', p.contactoId).maybeSingle();
   // El nombre con la convención de la agencia (destino y mes o duración: «CARTAGENA DIC 12-16»), o
   // uno provisional sin destino («Viaje de Laura Prueba»). La marca dice que lo puso el bot: si
@@ -338,7 +348,7 @@ async function crearNegocio(
     let data: Record<string, unknown> = {};
     for (const f of fields) if (f.default !== undefined) data[f.slug] = f.default;
     if (b.tipo === 'datos') {
-      data = fusionarSugeridos(data, fields, p.salida.sugeridos, { entrega_id: p.entregaId, en }).data;
+      data = fusionarSugeridos(data, fields, p.salida.sugeridos, { entrega_id: p.entregaId, en, fuente: canal }).data;
       data = mayusculasDeViaje(fields, aplicarSumas(fields, data));
       valores = { ...data, ...valores };
     }
@@ -367,7 +377,12 @@ async function crearNegocio(
     entidad_id: negocioId,
     tipo: 'cambio_sistema',
     autor_id: p.staffId,
-    contenido: ['Solicitud entendida desde WhatsApp. Los datos llegan como sugeridos hasta que alguien los confirme.', p.salida.historia].filter(Boolean).join('\n\n'),
+    contenido: [
+      canal === 'web'
+        ? 'Solicitud entendida desde ONE (texto pegado). Los datos llegan como sugeridos hasta que alguien los confirme.'
+        : 'Solicitud entendida desde WhatsApp. Los datos llegan como sugeridos hasta que alguien los confirme.',
+      p.salida.historia,
+    ].filter(Boolean).join('\n\n'),
   });
   if (eA) console.error(`[wa-entendimiento] negocio ${negocioId} sin historia en el timeline:`, eA.message);
 
@@ -417,7 +432,7 @@ async function cerrarConNegocio(
 }
 
 /** ¿Falta la fecha de salida? Solo entonces la pregunta recuerda el mes que dijeron. */
-function vacioFecha(valores: Record<string, unknown>): boolean {
+export function vacioFecha(valores: Record<string, unknown>): boolean {
   const v = valores.fecha_salida;
   return v === undefined || v === null || v === '';
 }
@@ -432,11 +447,11 @@ async function pistasDeLaEntrega(supabase: SupabaseClient, ent: Fila): Promise<{
 }
 
 /** Las preguntas en el acto que dejó un guardián (C9), sin repetir. */
-function preguntasDeGuardian(descartados: SalidaEntendida['descartados']): string[] {
+export function preguntasDeGuardian(descartados: SalidaEntendida['descartados']): string[] {
   return [...new Set(descartados.map(d => d.pregunta).filter((q): q is string => !!q))];
 }
 
-function salidaGuardada(ent: Fila): SalidaEntendida {
+export function salidaGuardada(ent: Fila): SalidaEntendida {
   return {
     historia: (ent.historia as string) ?? '',
     cliente: (ent.cliente as SalidaEntendida['cliente']) ?? { nombre: null, telefono: null },
@@ -730,12 +745,12 @@ async function entenderNuevo(
 // ── «¿A qué viaje van?» ──────────────────────────────────────────────────────
 
 /** Una relación embebida de PostgREST, venga como objeto o como lista. */
-function relUno(v: unknown): Fila | null {
+export function relUno(v: unknown): Fila | null {
   const x = Array.isArray(v) ? v[0] : v;
   return x && typeof x === 'object' ? (x as Fila) : null;
 }
 
-function nombreRel(v: unknown): string | null {
+export function nombreRel(v: unknown): string | null {
   const n = relUno(v)?.nombre;
   return typeof n === 'string' && n.trim() !== '' ? n : null;
 }
@@ -1113,7 +1128,7 @@ async function entenderSegmento(
 
 // ── Cargar en un negocio que ya existe ───────────────────────────────────────
 
-interface BloqueDelNegocio {
+export interface BloqueDelNegocio {
   id: string;
   data: Record<string, unknown>;
   updated_at: string | null;
@@ -1124,7 +1139,7 @@ interface BloqueDelNegocio {
  * Los bloques `datos` del negocio con su config, en el orden de las etapas y de los bloques.
  * Un espejo (`compartido_con_origen`) no se escribe: su dato vive en la fila del origen.
  */
-async function bloquesDatosDelNegocio(supabase: SupabaseClient, negocioId: string): Promise<BloqueDelNegocio[] | string> {
+export async function bloquesDatosDelNegocio(supabase: SupabaseClient, negocioId: string): Promise<BloqueDelNegocio[] | string> {
   const { data, error } = await supabase.from('negocio_bloques')
     .select('id, data, updated_at, bloque_configs(orden, config_extra, bloque_definitions(tipo), etapas_negocio(orden))')
     .eq('negocio_id', negocioId);
@@ -1260,6 +1275,61 @@ async function cargarEnNegocioExistente(
     }
   }
 
+  const c = await escribirEnNegocioExistente(supabase, {
+    workspaceId, negocioId, neg: neg as Fila, bloques, salida, meta, crudos,
+    staffId: (ent.remitente_staff_id as string | null) ?? null, canal: 'whatsapp',
+  });
+  const { escritos, conflictos, actualizados, valoresQuedan, h, nombreViaje, pistas, descartadosTodos } = c;
+  const wsSlug = (relUno((neg as Fila).workspaces)?.slug as string | undefined) ?? '';
+  const nombrado = { nombre: nombreViaje, cliente: nombreRel(neg.contactos) ?? nombreRel(neg.empresas), codigo: (neg.codigo as string | null) ?? null };
+  const msg = mensajeCargaExistente({
+    codigo: (neg.codigo as string | null) ?? null, nombre: nombreDeViaje(nombrado), fields: campos, escritos, conflictos, actualizados,
+    faltanMinimo: conMesEnLaPregunta(h.minimo.faltan, vacioFecha(valoresQuedan) ? pistas.mes : null), enlace: enlaceNegocio(wsSlug, negocioId), maxPreguntas: MAX_PREGUNTAS,
+    descartados: descartadosTodos.map(d => d.slug),
+    preguntasAntes: preguntasDeGuardian(descartadosTodos),
+    avance: lineaAvance({ ...nombrado, fields: campos, valores: valoresQuedan }),
+  });
+  const ok = await enviar(ent.remitente_phone as string, msg, workspaceId);
+  await actualizar(supabase, ent.id as string, {
+    estado: 'negocio_actualizado', negocio_id: negocioId, destino: 'existente', negocio_destino_id: negocioId,
+    contacto_id: (neg.contacto_id as string | null) ?? null, huecos: h, confirmacion_pendiente: null,
+    // `cargados` lleva también lo actualizado: el detalle (anterior → nuevo) vive en la marca.
+    cargados: [...escritos.map(e => e.slug), ...actualizados.map(a => a.slug)], conflictos,
+    descartados: descartadosTodos,
+    respuesta_enviada_at: ok ? new Date().toISOString() : null, error: ok ? null : 'envio fallido',
+  });
+}
+
+/** Lo que quedó escrito al cargar en un negocio que ya existe. */
+export interface CargaEscrita {
+  campos: CampoEntendible[];
+  escritos: Array<{ slug: string; valor: unknown }>;
+  conflictos: Conflicto[];
+  actualizados: Actualizado[];
+  /** Lo que el modelo dio y no se cargó: los descartes de los guardianes y los números sin sustento. */
+  descartadosTodos: SalidaEntendida['descartados'];
+  valoresQuedan: Record<string, unknown>;
+  h: ReturnType<typeof huecos>;
+  nombreViaje: string | null;
+  pistas: { mes: number | null; duracion: string | null };
+}
+
+/**
+ * Carga lo entendido en un negocio que ya existe: solo ESCRIBE (bloques sin pisar a una persona,
+ * nombre provisional, traza e historia en la actividad). No contesta a nadie: el bot arma su
+ * mensaje con lo que esto devuelve (`cargarEnNegocioExistente`), la web lo pinta.
+ */
+export async function escribirEnNegocioExistente(
+  supabase: SupabaseClient,
+  p: {
+    workspaceId: string; negocioId: string; neg: Fila; bloques: BloqueDelNegocio[]; salida: SalidaEntendida;
+    meta: { entrega_id: string; en: string; origenDe: (frase: string) => 'audio' | 'mensaje'; fuente?: CanalEntrega };
+    crudos: ReadonlyArray<MensajeCrudo>; staffId: string | null; canal: CanalEntrega;
+  },
+): Promise<CargaEscrita> {
+  const { workspaceId, negocioId, neg, bloques, salida, meta, crudos } = p;
+  const { fields } = aplanarBloques(bloques.map(b => ({ fields: b.fields, data: b.data })));
+  const campos = fields as CampoEntendible[];
   // Cada bloque con lo suyo. Un slug repetido en dos bloques se queda con el primero.
   const vistos = new Set<string>();
   const escritos: Array<{ slug: string; valor: unknown }> = [];
@@ -1291,12 +1361,12 @@ async function cargarEnNegocioExistente(
   // El nombre PROVISIONAL («Viaje de Laura Prueba») se cambia cuando llega el destino, y solo si
   // nadie lo editó a mano: el nombre sigue siendo el que puso el bot (`metadata.nombre_auto`).
   const pistas = pistasDelTexto(crudos.map(m => String(m.cuerpo ?? '')).join('\n'));
-  const nombreViaje = await renombrarSiEsProvisional(supabase, neg as Fila, valoresQuedan, pistas);
+  const nombreViaje = await renombrarSiEsProvisional(supabase, neg, valoresQuedan, pistas);
 
   // La traza y la historia se AGREGAN a la actividad del negocio: nada se reemplaza.
   let quien = '';
-  if (ent.remitente_staff_id) {
-    const { data: st } = await supabase.from('staff').select('full_name').eq('id', ent.remitente_staff_id).maybeSingle();
+  if (p.staffId) {
+    const { data: st } = await supabase.from('staff').select('full_name').eq('id', p.staffId).maybeSingle();
     quien = primerNombre((st?.full_name as string | null) ?? null);
   }
   const { error: eA } = await supabase.from('activity_log').insert({
@@ -1304,35 +1374,18 @@ async function cargarEnNegocioExistente(
     entidad_tipo: 'negocio',
     entidad_id: negocioId,
     tipo: 'cambio_sistema',
-    autor_id: (ent.remitente_staff_id as string | null) ?? null,
+    autor_id: p.staffId,
     contenido: trazaCarga({
-      quien, fechaISO: todayBogotaISO(), escritos: escritos.map(e => e.slug), conflictos, actualizados, fields: campos, historia: salida.historia,
+      canal: p.canal, quien, fechaISO: todayBogotaISO(), escritos: escritos.map(e => e.slug), conflictos, actualizados, fields: campos, historia: salida.historia,
     }),
   });
   if (eA) console.error(`[wa-entendimiento] negocio ${negocioId} sin traza en la actividad:`, eA.message);
 
-  const wsSlug = (relUno((neg as Fila).workspaces)?.slug as string | undefined) ?? '';
   const descartadosTodos = [
     ...salida.descartados,
     ...sinSustento.map(slug => ({ slug, motivo: `la frase no dice el número nuevo: «${salida.sugeridos[slug]?.frase ?? ''}»` })),
   ];
-  const nombrado = { nombre: nombreViaje, cliente: nombreRel(neg.contactos) ?? nombreRel(neg.empresas), codigo: (neg.codigo as string | null) ?? null };
-  const msg = mensajeCargaExistente({
-    codigo: (neg.codigo as string | null) ?? null, nombre: nombreDeViaje(nombrado), fields: campos, escritos, conflictos, actualizados,
-    faltanMinimo: conMesEnLaPregunta(h.minimo.faltan, vacioFecha(valoresQuedan) ? pistas.mes : null), enlace: enlaceNegocio(wsSlug, negocioId), maxPreguntas: MAX_PREGUNTAS,
-    descartados: descartadosTodos.map(d => d.slug),
-    preguntasAntes: preguntasDeGuardian(descartadosTodos),
-    avance: lineaAvance({ ...nombrado, fields: campos, valores: valoresQuedan }),
-  });
-  const ok = await enviar(ent.remitente_phone as string, msg, workspaceId);
-  await actualizar(supabase, ent.id as string, {
-    estado: 'negocio_actualizado', negocio_id: negocioId, destino: 'existente', negocio_destino_id: negocioId,
-    contacto_id: (neg.contacto_id as string | null) ?? null, huecos: h, confirmacion_pendiente: null,
-    // `cargados` lleva también lo actualizado: el detalle (anterior → nuevo) vive en la marca.
-    cargados: [...escritos.map(e => e.slug), ...actualizados.map(a => a.slug)], conflictos,
-    descartados: descartadosTodos,
-    respuesta_enviada_at: ok ? new Date().toISOString() : null, error: ok ? null : 'envio fallido',
-  });
+  return { campos, escritos, conflictos, actualizados, descartadosTodos, valoresQuedan, h, nombreViaje, pistas };
 }
 
 /**
@@ -1449,6 +1502,12 @@ async function workspacesActivos(supabase: SupabaseClient, ids: string[]): Promi
  *   2. entendimientos en error con intentos disponibles → se reintentan;
  *   3. respuestas a «¿cuál contacto?» → se resuelven;
  *   4. respuestas a «¿A qué viaje van?», al reparto o a una confirmación → se atienden.
+ *
+ * Solo lo que llegó por WhatsApp (`canal <> 'web'`): lo pegado en la web se entiende y se carga en
+ * la misma petición de quien lo pegó (`solicitud-texto.ts`), no tiene a quién contestarle por
+ * WhatsApp y su error no se reintenta solo. Se filtra con `<> 'web'` y no con `= 'whatsapp'`
+ * porque la columna no admite otro valor (check de la migración) y así una fila sin la columna
+ * (las de antes, o un doble de prueba) sigue siendo de WhatsApp.
  */
 export async function procesarEntendimientos(supabase: SupabaseClient): Promise<{ entendidas: number; respuestas: number }> {
   // Un error de esta misma pasada se reintenta en la siguiente (un minuto después), no enseguida: con
@@ -1459,7 +1518,7 @@ export async function procesarEntendimientos(supabase: SupabaseClient): Promise<
 
   // 3. Respuestas a «¿cuál contacto?».
   const { data: conRespuesta } = await supabase.from('wa_bandeja_entendimientos').select('*')
-    .eq('estado', 'esperando_contacto').not('respuesta_contacto', 'is', null).limit(LOTE);
+    .eq('estado', 'esperando_contacto').not('respuesta_contacto', 'is', null).neq('canal', CANAL_WEB).limit(LOTE);
   const activosR = await workspacesActivos(supabase, [...new Set(((conRespuesta ?? []) as Fila[]).map(e => e.workspace_id as string))]);
   for (const r of ((conRespuesta ?? []) as Fila[]).filter(x => activosR.has(x.workspace_id as string))) {
     const { data: fila } = await supabase.from('wa_bandeja_entendimientos')
@@ -1472,7 +1531,7 @@ export async function procesarEntendimientos(supabase: SupabaseClient): Promise<
 
   // 4. Respuestas a la re-pregunta «¿A qué viaje van?», al reparto o a una confirmación.
   const { data: conViaje } = await supabase.from('wa_bandeja_entendimientos').select('*')
-    .eq('estado', 'esperando_negocio').not('respuesta_negocio', 'is', null).limit(LOTE);
+    .eq('estado', 'esperando_negocio').not('respuesta_negocio', 'is', null).neq('canal', CANAL_WEB).limit(LOTE);
   const activosV = await workspacesActivos(supabase, [...new Set(((conViaje ?? []) as Fila[]).map(e => e.workspace_id as string))]);
   for (const r of ((conViaje ?? []) as Fila[]).filter(x => activosV.has(x.workspace_id as string))) {
     const { data: fila } = await supabase.from('wa_bandeja_entendimientos')
@@ -1488,7 +1547,7 @@ export async function procesarEntendimientos(supabase: SupabaseClient): Promise<
   // 1. Nuevas. El reclamo es el INSERT (entrega + segmento 0 es único): dos corridas no toman la misma.
   const { data: entregas } = await supabase.from('wa_bandeja_entregas')
     .select('id, workspace_id, remitente_phone, remitente_staff_id')
-    .eq('estado', 'con_cliente').order('cliente_respondido_at', { ascending: true }).limit(50);
+    .eq('estado', 'con_cliente').neq('canal', CANAL_WEB).order('cliente_respondido_at', { ascending: true }).limit(50);
   const lista = (entregas ?? []) as Fila[];
   if (lista.length > 0) {
     const { data: ya } = await supabase.from('wa_bandeja_entendimientos').select('entrega_id').in('entrega_id', lista.map(e => e.id));
@@ -1509,7 +1568,7 @@ export async function procesarEntendimientos(supabase: SupabaseClient): Promise<
 
   // 2. Reintentos del modelo.
   const { data: fallidas } = await supabase.from('wa_bandeja_entendimientos').select('*')
-    .eq('estado', 'error').lt('intentos', MAX_INTENTOS).is('negocio_id', null).is('contacto_id', null).limit(LOTE);
+    .eq('estado', 'error').lt('intentos', MAX_INTENTOS).is('negocio_id', null).is('contacto_id', null).neq('canal', CANAL_WEB).limit(LOTE);
   const activosF = await workspacesActivos(supabase, [...new Set(((fallidas ?? []) as Fila[]).map(e => e.workspace_id as string))]);
   for (const f of ((fallidas ?? []) as Fila[]).filter(x => activosF.has(x.workspace_id as string))) {
     if (f.error !== EN_COLA && String(f.updated_at ?? '') >= inicio) continue;
