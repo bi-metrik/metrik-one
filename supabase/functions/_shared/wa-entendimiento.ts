@@ -19,7 +19,7 @@
 
 import { sendTextMessage } from './wa-respond.ts';
 import { bandejaActiva, elegirFallida, leerConfigBandeja, momentoDelMensaje, ordenarPorEnvio, textoFallaEntendimiento, textoReintentarSinElegir } from './wa-bandeja-reglas.ts';
-import type { ConfigBandeja } from './wa-bandeja-reglas.ts';
+import type { ConfigBandeja, ParteDescartada } from './wa-bandeja-reglas.ts';
 import { todayBogotaISO } from './bogota.ts';
 import { aplanarBloques } from './niveles-solicitud.ts';
 import {
@@ -71,6 +71,8 @@ import {
   esNombreNuevo,
   resolverEncabezado,
   armarSegmentos,
+  mensajesDelResumen,
+  nombresDeLasCajas,
   pendienteDeLaCaja,
   esSi,
   gruposDelPlan,
@@ -80,7 +82,7 @@ import {
   tieneEncabezados,
   TEXTO_COMO_CORREGIR,
 } from './wa-viajes-reglas.ts';
-import type { DestinoPlan, MensajeViaje, PlanViajes, ViajeAbierto } from './wa-viajes-reglas.ts';
+import type { DestinoPlan, MensajeViaje, PendienteDeLaCaja, PlanViajes, ViajeAbierto } from './wa-viajes-reglas.ts';
 import type { SupabaseClient } from './types.ts';
 
 /** El mismo proveedor y el mismo modelo base que ONE ya usa para leer mensajes (`wa-parse.ts`). */
@@ -816,24 +818,14 @@ export async function candidatosDeEncabezado(
 }
 
 /**
- * ¿La tanda abierta de este remitente espera un «sí/no» a «¿Cambias a…?»? Devuelve el viaje por
- * el que se preguntó, o `null`. Se mira antes de registrar el escrito, que todavía no está en la
- * tanda (QA de #971 v5).
- */
-export async function cambioPorConfirmar(
-  supabase: SupabaseClient, workspaceId: string, phone: string, horasCajaActiva: number,
-): Promise<ViajeAbierto | null> {
-  const p = await pendienteDeLaTanda(supabase, workspaceId, phone, horasCajaActiva);
-  return p?.tipo === 'cambio' ? p.viaje : null;
-}
-
-/**
- * Lo que espera la tanda abierta de este remitente: el «sí/no» de «¿Cambias a…?» o el nombre de un
- * «nuevo» suelto (QA de #971 v6). Lleva el equipo para reconocer el nombre. `null`: nada.
+ * Lo que espera la tanda abierta de este remitente: la elección de la lista numerada de un
+ * encabezado aproximado o ambiguo, o el nombre de un «nuevo» suelto (QA de #971 v6; Trappvel,
+ * 2026-10-02). Se mira antes de registrar el mensaje, que todavía no está en la tanda. Lleva el
+ * equipo para reconocer el nombre. `null`: nada.
  */
 export async function pendienteDeLaTanda(
   supabase: SupabaseClient, workspaceId: string, phone: string, horasCajaActiva: number,
-): Promise<({ tipo: 'cambio'; viaje: ViajeAbierto } | { tipo: 'nombre' }) & { equipo: string[] } | null> {
+): Promise<(PendienteDeLaCaja & { equipo: string[] }) | null> {
   const { data: abierta, error } = await supabase.from('wa_bandeja_entregas').select('id')
     .eq('workspace_id', workspaceId).eq('remitente_phone', phone).eq('estado', 'abierta').limit(1).maybeSingle();
   if (error || !abierta) return null;
@@ -867,7 +859,7 @@ async function codigosCerrados(supabase: SupabaseClient, workspaceId: string): P
  */
 async function armarReparto(
   supabase: SupabaseClient, entregaId: string, workspaceId: string, crudos: ReadonlyArray<MensajeCrudo>,
-): Promise<{ plan: PlanViajes; bandeja: ConfigBandeja; conEncabezados: boolean } | null> {
+): Promise<{ plan: PlanViajes; bandeja: ConfigBandeja; conEncabezados: boolean; nombres: string[] } | null> {
   const l = await lineaDeLaBandeja(supabase, workspaceId);
   if (typeof l === 'string') {
     console.error(`[wa-entendimiento] sin reparto para ${entregaId}: ${l}`);
@@ -884,7 +876,7 @@ async function armarReparto(
     mensajes, viajes, segmentos, encabezados,
     codigosCerrados: desconocidos ? await codigosCerrados(supabase, workspaceId) : new Set(),
   });
-  return { plan, bandeja: l.bandeja, conEncabezados: tieneEncabezados(segmentos) };
+  return { plan, bandeja: l.bandeja, conEncabezados: tieneEncabezados(segmentos), nombres: nombresDeLasCajas(segmentos) };
 }
 
 /**
@@ -896,7 +888,11 @@ async function armarReparto(
  */
 export async function armarPreguntaNegocio(
   supabase: SupabaseClient, entregaId: string, workspaceId: string, nMensajes: number,
-): Promise<{ texto: string; antes?: string[]; opciones?: OpcionNegocio[]; plan?: PlanViajes; sinDudas?: boolean } | null> {
+): Promise<{
+  texto: string; antes?: string[]; opciones?: OpcionNegocio[]; plan?: PlanViajes; sinDudas?: boolean;
+  /** La tanda solo trajo encabezados (y acuses): no hay nada que preguntar ni cargar. El nombre de sus cajas. */
+  sinContenido?: string;
+} | null> {
   const l = await lineaDeLaBandeja(supabase, workspaceId);
   if (typeof l === 'string') {
     console.error(`[wa-entendimiento] sin lista de viajes para ${entregaId}: ${l}`);
@@ -909,6 +905,12 @@ export async function armarPreguntaNegocio(
     const r = await armarReparto(supabase, entregaId, workspaceId, crudos);
     if (!r) return null;
     if (r.conEncabezados) {
+      // Solo encabezados y acuses («nuevo Daniel Pérez», «si», «otro cliente»): nada que repartir. No
+      // se pregunta «¿Así?» por un resumen vacío (Trappvel, 2026-10-02: esa pregunta ocupaba la cola).
+      if (r.plan.mensajes.length === 0) {
+        const nombres = r.nombres.length === 0 ? 'esta tanda' : r.nombres.length === 1 ? r.nombres[0] : `${r.nombres.slice(0, -1).join(', ')} y ${r.nombres[r.nombres.length - 1]}`;
+        return { texto: '', plan: r.plan, sinContenido: nombres };
+      }
       const sinDudas = r.bandeja.confirmar === 'si_duda' && planSinDudas(r.plan);
       const partes = partesResumenPlan(r.plan, aViaje(crudos));
       return { texto: partes[partes.length - 1], antes: partes.slice(0, -1), plan: r.plan, sinDudas };
@@ -1727,16 +1729,94 @@ export async function nombreYConteoDeLaTanda(
   const crudos = await leerMensajes(supabase, entregaId);
   const c = await candidatosDeEncabezado(supabase, workspaceId);
   if (typeof crudos === 'string' || !c) return { nombre: nombreDeTanda((en?.created_at as string | null) ?? null), n: 0 };
-  const { segmentos } = armarSegmentos(aViaje(crudos), c.viajes, { horasCajaActiva, equipo: c.equipo });
-  const nombres = [...new Set(segmentos.flatMap(sg => {
-    const r = sg.encabezado?.resolucion;
-    if (r?.tipo === 'viaje') return [nombreDeViaje(r.viaje)];
-    if (r?.tipo === 'nuevo') return [r.cliente ?? sg.nombre?.texto ?? null].filter((x): x is string => !!x);
-    if (r?.tipo === 'aproximado' && sg.confirmacion?.respuesta === 'si') return [nombreDeViaje(r.viaje)];
-    return [];
-  }))];
-  const n = segmentos.reduce((a, sg) => a + sg.mensajes.length, 0);
+  const mensajes = aViaje(crudos);
+  const { segmentos } = armarSegmentos(mensajes, c.viajes, { horasCajaActiva, equipo: c.equipo });
+  const nombres = nombresDeLasCajas(segmentos);
+  // Los mensajes que irían al resumen: sin encabezados, respuestas, risas ni acuses del comercial.
+  const n = mensajesDelResumen(segmentos, mensajes);
   const nombre = nombres.length === 0 ? nombreDeTanda((en?.created_at as string | null) ?? null)
     : nombres.length === 1 ? nombres[0] : `${nombres.slice(0, -1).join(', ')} y ${nombres[nombres.length - 1]}`;
   return { nombre, n };
+}
+
+/** Marca de lo que el comercial descartó con «descartar» o «cancelar» (Trappvel, 2026-10-02, regla 4). */
+export const DESCARTE_DEL_COMERCIAL = 'descartado por el comercial (DESCARTAR): no se pregunta ni se carga';
+
+/** Cuántos mensajes del resumen tiene una entrega: los de su reparto sin descartar, o los de contenido. */
+function mensajesDeLaEntrega(e: Fila): number {
+  const plan = (e.plan_viajes ?? null) as PlanViajes | null;
+  return plan ? plan.mensajes.filter(m => !m.descartado).length : Number(e.n_mensajes ?? 0);
+}
+
+/**
+ * «descartar» (regla 4): descarta lo pendiente del remitente FUERA de la tanda abierta (de esa se
+ * encarga la bandeja):
+ *   · los entendimientos que esperan una respuesta (`esperando_negocio`, `esperando_contacto`, de
+ *     cualquier capa: el resumen, «¿A qué viaje van?», una confirmación, «¿cuál contacto?») o su turno
+ *     (en cola tras otra pregunta) → `descartada`;
+ *   · las entregas cerradas que esperan su pregunta o su respuesta, y las que el comercial ya contestó
+ *     pero el cron todavía no tomó → sin pregunta, con la marca (no vuelven a la cola ni toman la
+ *     siguiente respuesta).
+ * Nada de eso cargó nada todavía. `guardarRespuesta`: el «descartar» se guarda (como respuesta) en lo
+ * primero que descarta, para que el crudo no se pierda. Devuelve qué descartó y cuántos mensajes.
+ */
+export async function descartarPendientesDelRemitente(
+  supabase: SupabaseClient,
+  p: { workspaceId: string; phone: string; texto: string; wamid: string; enviadoAt: string | null; guardarRespuesta: boolean },
+): Promise<ParteDescartada[]> {
+  const partes: ParteDescartada[] = [];
+  let guardar = p.guardarRespuesta;
+  const guardarEn = async (entregaId: unknown, papel: string, staff: unknown, colaborador: unknown = null) => {
+    if (!guardar) return;
+    guardar = false;
+    const { error } = await supabase.from('wa_bandeja_mensajes').insert({
+      workspace_id: p.workspaceId, entrega_id: entregaId, wa_message_id: p.wamid, remitente_phone: p.phone,
+      remitente_staff_id: staff ?? null, remitente_colaborador_id: colaborador ?? null,
+      tipo: 'text', papel, cuerpo: p.texto, cuerpo_origen: 'texto', enviado_at: p.enviadoAt,
+    });
+    if (error && !String(error.message).includes('duplicate')) console.error('[wa-entendimiento] no se pudo guardar el «descartar»:', error.message);
+  };
+
+  const { data: ents } = await supabase.from('wa_bandeja_entendimientos').select('*')
+    .eq('workspace_id', p.workspaceId).eq('remitente_phone', p.phone)
+    .in('estado', ['esperando_negocio', 'esperando_contacto', 'error']).limit(50);
+  for (const e of (ents ?? []) as Fila[]) {
+    if (e.estado === 'error' && e.error !== EN_COLA) continue;
+    const { data: hecho } = await supabase.from('wa_bandeja_entendimientos')
+      .update({ estado: 'descartada', confirmacion_pendiente: null, error: DESCARTE_DEL_COMERCIAL, updated_at: new Date().toISOString() })
+      .eq('id', e.id).eq('estado', e.estado).select('id');
+    if ((hecho ?? []).length === 0) continue;
+    const segmento = Number(e.segmento ?? 0);
+    let n = 0;
+    if (segmento > 0) {
+      const { data: ms } = await supabase.from('wa_bandeja_mensajes').select('id')
+        .eq('entrega_id', e.entrega_id).eq('segmento', segmento).eq('papel', 'contenido');
+      n = (ms ?? []).length;
+    } else {
+      const { data: en } = await supabase.from('wa_bandeja_entregas').select('plan_viajes, n_mensajes').eq('id', e.entrega_id).maybeSingle();
+      n = en ? mensajesDeLaEntrega(en as Fila) : 0;
+    }
+    partes.push({ nombre: await nombreDelViaje(supabase, e), n });
+    await guardarEn(e.entrega_id, e.estado === 'esperando_contacto' ? 'respuesta_contacto' : 'respuesta_negocio', e.remitente_staff_id);
+  }
+
+  const { data: entregas } = await supabase.from('wa_bandeja_entregas')
+    .select('id, estado, plan_viajes, n_mensajes, created_at, pregunta_error, remitente_staff_id, remitente_colaborador_id')
+    .eq('workspace_id', p.workspaceId).eq('remitente_phone', p.phone).in('estado', ['esperando_cliente', 'con_cliente']).limit(50);
+  const lista = (entregas ?? []) as Fila[];
+  if (lista.length === 0) return partes;
+  const { data: tomadas } = await supabase.from('wa_bandeja_entendimientos').select('entrega_id').in('entrega_id', lista.map(e => e.id));
+  const conEntendimiento = new Set(((tomadas ?? []) as Fila[]).map(e => e.entrega_id as string));
+  for (const e of lista) {
+    if (conEntendimiento.has(e.id as string)) continue;
+    // Una entrega cerrada sin pregunta a propósito (solo ruido, cancelada, sin contenido) ya no está pendiente.
+    if (e.estado === 'esperando_cliente' && e.pregunta_error) continue;
+    const { data: hecho } = await supabase.from('wa_bandeja_entregas')
+      .update({ estado: 'esperando_cliente', pregunta_enviada_at: null, pregunta_error: DESCARTE_DEL_COMERCIAL })
+      .eq('id', e.id).eq('estado', e.estado).select('id');
+    if ((hecho ?? []).length === 0) continue;
+    partes.push({ nombre: nombreDeLaEntrega((e.plan_viajes ?? null) as PlanViajes | null, (e.created_at as string | null) ?? null), n: mensajesDeLaEntrega(e) });
+    await guardarEn(e.id, 'respuesta_cliente', e.remitente_staff_id, e.remitente_colaborador_id);
+  }
+  return partes;
 }

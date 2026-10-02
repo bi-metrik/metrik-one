@@ -12,10 +12,13 @@
 
 import { transcribeAudio, PROMPT_TRANSCRIPCION_LITERAL } from './wa-transcribe.ts';
 import {
-  armarPreguntaNegocio, candidatosDeEncabezado, conNombreDelViaje, hayPreguntaPendiente, nombreDeLaEntrega, nombreYConteoDeLaTanda,
-  pendienteDeLaTanda, preguntaAbierta, reintentarCarga, textoPrimero, tomarRespuestaContacto, tomarRespuestaDeEntrega,
+  armarPreguntaNegocio, candidatosDeEncabezado, conNombreDelViaje, descartarPendientesDelRemitente, hayPreguntaPendiente, nombreDeLaEntrega,
+  nombreYConteoDeLaTanda, pendienteDeLaTanda, preguntaAbierta, reintentarCarga, textoPrimero, tomarRespuestaContacto, tomarRespuestaDeEntrega,
 } from './wa-entendimiento.ts';
-import { esNombreNuevo, esRuidoEscrito, esSiNoCorto, leerSiNo, lineaCaja, pareceRespuesta, resolverEncabezado, respuestaAlEncabezado, textoNoEntendiCambio, TEXTO_PIDE_NOMBRE_NUEVO } from './wa-viajes-reglas.ts';
+import {
+  candidatosDelEncabezado, esNombreNuevo, esRespuestaA, esRespuestaSuelta, esRuidoEscrito, leerEleccion, lineaCaja, pareceRespuesta,
+  resolverEncabezado, respuestaAlEncabezado, textoNoEntendiEleccion, textoPreguntaEncabezadoCorta, TEXTO_PIDE_NOMBRE_NUEVO,
+} from './wa-viajes-reglas.ts';
 import type { ResolucionEncabezado } from './wa-viajes-reglas.ts';
 import { sendTextMessage } from './wa-respond.ts';
 import {
@@ -23,10 +26,9 @@ import {
   cuerpoDelMensaje,
   decidirRuta,
   empiezaConPrefijoBot,
-  esCancelar,
+  esDescartarTodo,
   leerReintentar,
-  textoTandaDescartada,
-  TEXTO_NADA_QUE_CANCELAR,
+  textoDescarteTotal,
   esPalabraCierre,
   esPedidoDeGuia,
   esPregunta,
@@ -43,7 +45,7 @@ import {
   TEXTO_NADA_PENDIENTE,
   TEXTO_SESION_CANCELADA,
 } from './wa-bandeja-reglas.ts';
-import type { AccionRegistro, ConfigBandeja, Ruta } from './wa-bandeja-reglas.ts';
+import type { AccionRegistro, ConfigBandeja, ParteDescartada, Ruta } from './wa-bandeja-reglas.ts';
 import type { IncomingMessage, SupabaseClient, WaUser } from './types.ts';
 
 /** Marca en `wa_envios.intent` de todo lo que el bot le dice al comercial desde la bandeja. */
@@ -200,39 +202,49 @@ async function responderPendiente(
 }
 
 /**
- * «cancelar» escrito con una caja abierta: la tanda se descarta (queda cerrada, sin pregunta ni
- * carga, con el motivo) y el bot dice cuál y cuántos mensajes (prueba en vivo v2, N4: se guardaba como
- * contenido y nadie contestaba). Sin caja abierta, el bot lo dice.
+ * «descartar» o «cancelar» escritos solos, en cualquier momento (Trappvel, 2026-10-02, regla 4):
+ * descartan TODO lo pendiente del remitente y el bot dice de qué y cuántos mensajes:
+ *   · la tanda abierta (queda cerrada, sin pregunta ni carga, con el motivo; el «descartar» se guarda
+ *     en ella como su cierre);
+ *   · las entregas que esperan su pregunta o su respuesta y los entendimientos que esperan una
+ *     respuesta, de cualquier capa (`descartarPendientesDelRemitente`).
+ * Antes «cancelar» solo descartaba la tanda abierta y «descartar» solo contestaba el resumen: con la
+ * pregunta todavía en camino, el «descartar» de Edgar abrió una tanda nueva y quedó como contenido.
  */
-async function cancelarTandaAbierta(
+async function descartarTodo(
   supabase: SupabaseClient, workspaceId: string, phone: string, texto: string, wamid: string, enviadoAt: string | null, config: ConfigBandeja,
 ): Promise<void> {
+  const partes: ParteDescartada[] = [];
   const { data: abierta } = await supabase.from('wa_bandeja_entregas').select('id, remitente_staff_id, remitente_colaborador_id')
     .eq('workspace_id', workspaceId).eq('remitente_phone', phone).eq('estado', 'abierta').limit(1).maybeSingle();
-  if (!abierta) {
-    await enviar(phone, TEXTO_NADA_QUE_CANCELAR, workspaceId);
-    return;
-  }
-  const { nombre, n } = await nombreYConteoDeLaTanda(supabase, abierta.id as string, workspaceId, config.horasCajaActiva);
-  const ahora = new Date().toISOString();
-  const { data: hecho, error } = await supabase.from('wa_bandeja_entregas')
-    .update({ estado: 'esperando_cliente', cerrada_at: ahora, motivo_cierre: 'palabra_cierre', pregunta_error: TANDA_CANCELADA })
-    .eq('id', abierta.id).eq('estado', 'abierta').select('id');
-  if (error || (hecho ?? []).length === 0) {
+  let guardada = false;
+  if (abierta) {
+    const { nombre, n } = await nombreYConteoDeLaTanda(supabase, abierta.id as string, workspaceId, config.horasCajaActiva);
+    const ahora = new Date().toISOString();
+    const { data: hecho, error } = await supabase.from('wa_bandeja_entregas')
+      .update({ estado: 'esperando_cliente', cerrada_at: ahora, motivo_cierre: 'palabra_cierre', pregunta_error: TANDA_CANCELADA })
+      .eq('id', abierta.id).eq('estado', 'abierta').select('id');
     if (error) console.error(`[wa-bandeja] no se pudo descartar la tanda ${abierta.id}:`, error.message);
-    return;
+    if (!error && (hecho ?? []).length > 0) {
+      partes.push({ nombre, n });
+      const { error: eIns } = await supabase.from('wa_bandeja_mensajes').insert({
+        workspace_id: workspaceId, entrega_id: abierta.id, wa_message_id: wamid, remitente_phone: phone,
+        remitente_staff_id: abierta.remitente_staff_id ?? null, remitente_colaborador_id: abierta.remitente_colaborador_id ?? null,
+        tipo: 'text', papel: 'cierre', cuerpo: texto, cuerpo_origen: 'texto', enviado_at: enviadoAt,
+      });
+      if (eIns) console.error('[wa-bandeja] no se pudo guardar el «descartar»:', eIns.message);
+      guardada = true;
+    }
   }
-  const { error: eIns } = await supabase.from('wa_bandeja_mensajes').insert({
-    workspace_id: workspaceId, entrega_id: abierta.id, wa_message_id: wamid, remitente_phone: phone,
-    remitente_staff_id: abierta.remitente_staff_id ?? null, remitente_colaborador_id: abierta.remitente_colaborador_id ?? null,
-    tipo: 'text', papel: 'cierre', cuerpo: texto, cuerpo_origen: 'texto', enviado_at: enviadoAt,
-  });
-  if (eIns) console.error('[wa-bandeja] no se pudo guardar el «cancelar»:', eIns.message);
-  await enviar(phone, textoTandaDescartada(nombre, n), workspaceId);
+  partes.push(...await descartarPendientesDelRemitente(supabase, { workspaceId, phone, texto, wamid, enviadoAt, guardarRespuesta: !guardada }));
+  await enviar(phone, textoDescarteTotal(partes), workspaceId);
 }
 
-/** Marca de una tanda que el comercial canceló: cerrada sin pregunta (no ocupa la cola). */
-const TANDA_CANCELADA = 'cancelada por el comercial: no se pregunta ni se carga';
+/** Marca de una tanda que el comercial descartó: cerrada sin pregunta (no ocupa la cola). */
+const TANDA_CANCELADA = 'descartada por el comercial: no se pregunta ni se carga';
+
+/** Marca de una tanda que solo trajo encabezados y acuses: no hay nada que preguntar (no ocupa la cola). */
+const SIN_CONTENIDO = 'solo encabezados o acuses: no hay mensajes que repartir';
 
 async function estadoParaEsperar(
   supabase: SupabaseClient, workspaceId: string, phone: string, config: ConfigBandeja,
@@ -277,8 +289,9 @@ export async function atenderEnBandeja(
       await reintentarCarga(supabase, user.workspace_id, message.phone, objetivo);
       return;
     }
-    if (esCancelar(texto)) {
-      await cancelarTandaAbierta(supabase, user.workspace_id, message.phone, texto, wamid, fechaDeMeta(message.timestamp), config);
+    // Regla 4 (Trappvel, 2026-10-02): «descartar» o «cancelar» descartan TODO lo pendiente.
+    if (esDescartarTodo(texto)) {
+      await descartarTodo(supabase, user.workspace_id, message.phone, texto, wamid, fechaDeMeta(message.timestamp), config);
       return;
     }
   }
@@ -288,23 +301,21 @@ export async function atenderEnBandeja(
   // pendiente (QA de #971: el que se escribía antes del «sí» se tomaba como respuesta al resumen).
   const encabezado = await encabezadoDelEscrito(supabase, user.workspace_id, message, config);
 
-  // N2 (prueba en vivo v2): con «¿A qué viaje van?» (o el nombre de un cliente nuevo) pendiente, un
-  // número, un código, el nombre de un viaje, «NUEVO nombre» o «DESCARTAR» son la RESPUESTA, no un
-  // encabezado: no abren caja. Se toman aunque haya una tanda abierta.
-  if (escrito && !esCierre && (pendiente?.espera === 'viaje' || pendiente?.espera === 'nombre') && (pareceRespuesta(texto) || encabezado !== null)) {
+  // Regla 3 (Trappvel, 2026-10-02; antes N1 y N2 de la prueba en vivo v2): con una pregunta abierta,
+  // lo que tiene forma de su respuesta la contesta, sea cual sea la capa que preguntó (el resumen,
+  // «¿A qué viaje van?», el entendimiento) y aunque haya una caja abierta: nunca abre una tanda ni
+  // queda como contenido. Con «¿A qué viaje van?» o el nombre de un cliente nuevo pendientes, un
+  // encabezado («P 26 2», «nuevo X», el nombre de un viaje) también es la respuesta.
+  const contesta = !!pendiente && (esRespuestaA(pendiente.espera, texto) || ((pendiente.espera === 'viaje' || pendiente.espera === 'nombre') && encabezado !== null));
+  if (escrito && !esCierre && contesta) {
     if (await responder(true)) return;
   }
 
-  // Si la tanda espera algo en el acto («¿Cambias a…? sí/no» o el nombre de un «nuevo»), este escrito
-  // va a la tanda (la relee el reparto) y no es la respuesta a otra pregunta (QA de #971 v5 y v6).
-  const enEspera = encabezado ? null : await respuestaEnEspera(supabase, user.workspace_id, message, config);
-  const esEncabezado = encabezado !== null || enEspera !== null;
-
-  // N1 (prueba en vivo v2): un «sí» o un «no» cortos, con una pregunta pendiente, se aplican a la
-  // pregunta: nunca son contenido, aunque un encabezado mandado detrás haya abierto una caja.
-  if (escrito && !esEncabezado && !esCierre && pendiente && esSiNoCorto(texto)) {
-    if (await responder(true)) return;
-  }
+  // Si la tanda abierta espera algo en el acto (la elección de la lista de un encabezado o el nombre
+  // de un «nuevo»), una respuesta va a la tanda (la relee el reparto) y no es contenido. Con otra
+  // pregunta abierta, la lista del encabezado no se pregunta en el acto (una pregunta a la vez).
+  const enEspera = encabezado ? null : await respuestaEnEspera(supabase, user.workspace_id, message, config, !!pendiente);
+  const esEncabezado = encabezado !== null || enEspera?.respuesta === true;
 
   // Un acuse suelto («ok gracias», «👍») sin tanda abierta ni pregunta no abre una tanda (v2, N7).
   if (escrito && !esEncabezado && !pendiente && esRuidoEscrito(texto) && !esCierre && !(await hayTandaAbierta(supabase, user.workspace_id, message.phone))) {
@@ -383,17 +394,23 @@ export async function atenderEnBandeja(
   const fila = (Array.isArray(data) ? data[0] : data) as FilaRegistro | undefined;
   if (!fila) return;
 
-  // En el acto (QA de #971 v5): un encabezado exacto se confirma con «📌»; uno aproximado pregunta
-  // «¿Cambias a…? sí/no» y lo que sigue queda sin asignar hasta la respuesta.
+  // En el acto (QA de #971 v5): un encabezado exacto se confirma con «📌»; uno aproximado o ambiguo
+  // pregunta con la lista numerada y lo que sigue queda sin asignar hasta que el comercial elija.
   if (fila.accion === 'agregar' || fila.accion === 'abrir') {
+    // Con una pregunta abierta, un encabezado nuevo (o el contenido que abre una tanda) la recuerda en
+    // una línea, y se siguen registrando los mensajes (prueba en vivo del 2026-10-01; regla 3 del
+    // 2026-10-02: la pregunta se vuelve a mostrar corta antes de seguir).
+    const otra = encabezado || fila.accion === 'abrir'
+      ? await preguntaAbierta(supabase, user.workspace_id, message.phone, fila.entrega ? [fila.entrega] : [])
+      : null;
+    const candidatos = candidatosDelEncabezado(encabezado);
     const aviso = enEspera ? enEspera.aviso
+      // Una pregunta a la vez: con otra abierta, la lista del encabezado se decide en el resumen.
+      : otra && candidatos.length > 0 ? `«${message.text.trim()}» puede ser ${candidatos.map(lineaCaja).join(' o ')}: lo decides en el resumen de esta tanda.`
       : respuestaAlEncabezado(encabezado, message.text)
         // Una pregunta escrita que abre una tanda: quizá era para el bot de siempre (se fue la regla N8).
         ?? (fila.accion === 'abrir' && escrito && esPregunta(message.text) ? textoPistaConsulta(config.prefijosConsulta) : null);
-    // Un encabezado nuevo con una pregunta abierta: se recuerda la pendiente en una línea y se
-    // siguen registrando los mensajes del encabezado nuevo (prueba en vivo del 2026-10-01).
-    const pendiente = encabezado ? await preguntaAbierta(supabase, user.workspace_id, message.phone, fila.entrega ? [fila.entrega] : []) : null;
-    const texto = [aviso, pendiente ? textoPrimero(pendiente) : null].filter(Boolean).join('\n');
+    const texto = [aviso, otra ? textoPrimero(otra) : null].filter(Boolean).join('\n');
     if (texto) await enviar(message.phone, texto, user.workspace_id);
   }
 
@@ -424,27 +441,36 @@ async function encabezadoDelEscrito(
 }
 
 /**
- * Si la tanda abierta espera algo en el acto, qué le contesta el bot a este escrito:
- *   · «¿Cambias a…?»: un sí → «📌»; un no → «No cambio…»; otra cosa → «No entendí: ¿cambias a X? sí/no»;
- *   · el nombre de un «nuevo» suelto: un nombre → «📌 NUEVO X»; otra cosa → se vuelve a pedir.
+ * Si la tanda abierta espera algo en el acto, qué le contesta el bot a este mensaje y si el mensaje
+ * es la RESPUESTA (`respuesta: true`: no es contenido, armarSegmentos lo aparta igual):
+ *   · la lista de un encabezado aproximado o ambiguo: un número de la lista → «📌»; un sí, un no o un
+ *     número fuera de la lista → «No entendí» y la lista otra vez; contenido (un reenvío, un escrito
+ *     largo) → la pregunta corta, solo la primera vez (Trappvel, 2026-10-02, regla 3). Con otra pregunta
+ *     abierta (`hayOtraPregunta`) esta no se hizo en el acto: nada;
+ *   · el nombre de un «nuevo» suelto u «otro cliente»: un nombre → «📌 NUEVO X»; un sí, un no o un
+ *     número → se vuelve a pedir; contenido → se pide, solo la primera vez.
  * `null`: la tanda no espera nada.
  */
 async function respuestaEnEspera(
-  supabase: SupabaseClient, workspaceId: string, message: IncomingMessage, config: ConfigBandeja,
-): Promise<{ aviso: string } | null> {
-  if (!escritoEnModoEncabezado(message, config)) return null;
+  supabase: SupabaseClient, workspaceId: string, message: IncomingMessage, config: ConfigBandeja, hayOtraPregunta: boolean,
+): Promise<{ aviso: string | null; respuesta: boolean } | null> {
+  if (config.modoViajes === 'uno') return null;
+  const escrito = escritoEnModoEncabezado(message, config);
   const p = await pendienteDeLaTanda(supabase, workspaceId, message.phone, config.horasCajaActiva);
   if (!p) return null;
   if (p.tipo === 'nombre') {
-    const nombre = esNombreNuevo(message.text, p.equipo);
-    return { aviso: nombre ? `📌 NUEVO ${nombre}` : TEXTO_PIDE_NOMBRE_NUEVO };
+    const nombre = escrito ? esNombreNuevo(message.text, p.equipo) : null;
+    if (nombre) return { aviso: `📌 NUEVO ${nombre}`, respuesta: true };
+    if (escrito && esRespuestaSuelta(message.text)) return { aviso: TEXTO_PIDE_NOMBRE_NUEVO, respuesta: true };
+    return { aviso: p.conContenido ? null : TEXTO_PIDE_NOMBRE_NUEVO, respuesta: false };
   }
-  const r = leerSiNo(message.text);
-  return {
-    aviso: r === 'si' ? `📌 ${lineaCaja(p.viaje)}`
-      : r === 'no' ? `No cambio a ${lineaCaja(p.viaje)}: lo que sigue queda sin asignar hasta otro encabezado.`
-      : textoNoEntendiCambio(p.viaje),
-  };
+  if (hayOtraPregunta) return null;
+  if (escrito) {
+    const k = leerEleccion(message.text);
+    if (k !== null && k >= 1 && k <= p.candidatos.length) return { aviso: `📌 ${lineaCaja(p.candidatos[k - 1])}`, respuesta: true };
+    if (esRespuestaSuelta(message.text)) return { aviso: textoNoEntendiEleccion(p.texto, p.candidatos), respuesta: true };
+  }
+  return { aviso: p.conContenido ? null : textoPreguntaEncabezadoCorta(p.texto, p.candidatos), respuesta: false };
 }
 
 /**
@@ -513,6 +539,13 @@ export async function preguntarCliente(
     return;
   }
   const viaje = await armarPreguntaNegocio(supabase, entregaId, workspaceId, nMensajes);
+  if (viaje?.sinContenido) {
+    // Solo encabezados y acuses: no hay nada que repartir ni cargar. Se dice y no se pregunta.
+    const { error } = await supabase.from('wa_bandeja_entregas').update({ pregunta_error: SIN_CONTENIDO }).eq('id', entregaId);
+    if (error) console.error(`[wa-bandeja] no se pudo anotar la tanda sin contenido ${entregaId}:`, error.message);
+    await enviar(phone, `${viaje.sinContenido} · No me pasaste mensajes del cliente: no creé ni cargué nada.`, workspaceId);
+    return;
+  }
   if (viaje?.plan && viaje.sinDudas) {
     // `confirmar: si_duda` y un reparto sin una sola duda: se carga sin preguntar, y se dice qué.
     await enviar(phone, `Cargo esto sin preguntar (un solo viaje, por encabezado):\n${viaje.texto.split('\n').slice(0, -1).join('\n')}`, workspaceId);

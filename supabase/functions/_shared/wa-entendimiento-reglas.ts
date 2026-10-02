@@ -1418,6 +1418,28 @@ function finTelefono(t: string | null): string {
   return d ? ` (tel. …${d.slice(-4)})` : '';
 }
 
+/**
+ * «Nuevo» en cualquier forma (prueba en vivo de Trappvel, 2026-10-02): «nuevo X», «cliente nuevo X»,
+ * «nuevo cliente X», «es nuevo X», «nueva clienta X», «cliente nueva X», «es una clienta nueva X» →
+ * `{ cliente: 'X' }`. Sin nombre («nuevo», «cliente nuevo») y el cambio de cliente sin nombre («otro
+ * cliente», «otra clienta», «cambio de cliente») → `{ cliente: null }`: el bot pide el nombre.
+ * `null`: no es un «nuevo». Antes solo se reconocía `^nuevo` al comienzo y «cliente nuevo Daniel
+ * Pérez» caía en la coincidencia aproximada con el viaje de otra persona del mismo apellido.
+ */
+export function leerNuevo(texto: string): { cliente: string | null } | null {
+  const bruto = String(texto ?? '').trim().replace(/[.!¡]+$/g, '').trim();
+  const m = /^(?:es\s+)?(?:(?:un|una|el|la)\s+)?(?:client[ea]\s+nuev[oa]|nuev[oa](?:\s+client[ea])?)(?=$|[\s,.:;-])[\s,.:;-]*([\s\S]*)$/i.exec(bruto);
+  if (m) return { cliente: m[1].trim() || null };
+  if (/^(?:(?:es\s+)?(?:otr[oa]|un[oa]?\s+otr[oa])\s+client[ea]|cambi(?:o|ar|amos)\s+(?:de\s+)?client[ea])$/.test(normalizarTexto(bruto))) return { cliente: null };
+  return null;
+}
+
+/** «otro cliente Daniel Pérez», «cambio de cliente: Lina»: lo que viene después del cambio, o `null`. */
+export function restoTrasOtroCliente(texto: string): string | null {
+  const m = /^(?:otr[oa]\s+client[ea]|cambi(?:o|ar|amos)\s+(?:de\s+)?client[ea])[\s,.:;-]+([\s\S]+)$/i.exec(String(texto ?? '').trim());
+  return m ? m[1].trim() || null : null;
+}
+
 export function textoPreguntaContacto(d: Extract<DecisionContacto, { tipo: 'preguntar' }>): string {
   // N9: sin nombre no hay a quién buscar ni a quién crear. Se pide el nombre, nunca un error mudo.
   if (!d.nombre && d.opciones.length === 0) return TEXTO_PIDE_NOMBRE;
@@ -1425,7 +1447,7 @@ export function textoPreguntaContacto(d: Extract<DecisionContacto, { tipo: 'preg
   if (d.motivo === 'mismo') {
     const c = d.opciones[0];
     return [`Ya hay un contacto ${quien} en el directorio:`, `1. ${c?.nombre ?? 'Sin nombre'}${finTelefono(c?.telefono ?? null)}`,
-      '¿Es el mismo? Responde SÍ, o NUEVO para crear otro.'].join('\n');
+      '¿Es el mismo? Responde SÍ, NUEVO para crear otro, o DESCARTAR.'].join('\n');
   }
   const cab = d.motivo === 'varios'
     ? `Hay ${d.opciones.length} contactos que podrían ser ${d.nombre ? quien : 'el cliente'}. ¿Cuál es?`
@@ -1434,13 +1456,13 @@ export function textoPreguntaContacto(d: Extract<DecisionContacto, { tipo: 'preg
       : `No encontré a ${quien} en el directorio.`;
   const lista = d.opciones.map((c, i) => `${i + 1}. ${c.nombre ?? 'Sin nombre'}${finTelefono(c.telefono)}`);
   const pie = d.opciones.length > 0
-    ? 'Responde con el número, o escribe NUEVO y el nombre para crearlo.'
-    : 'Escribe NUEVO para crearlo con ese nombre (o NUEVO y otro nombre), o mándame el celular del cliente.';
+    ? 'Responde con el número, escribe NUEVO y el nombre para crearlo, o DESCARTAR.'
+    : 'Escribe NUEVO para crearlo con ese nombre (o NUEVO y otro nombre), mándame el celular del cliente, o DESCARTAR.';
   return [cab, ...lista, pie].join('\n');
 }
 
 /** N9 · NUEVO sin nombre: el bot lo pide en vez de terminar en un error mudo (E2a). */
-export const TEXTO_PIDE_NOMBRE = 'No sé el nombre del cliente y sin él no puedo crear el viaje. Escríbeme NUEVO y su nombre (ej.: NUEVO Marta Gómez), o mándame su celular.';
+export const TEXTO_PIDE_NOMBRE = 'No sé el nombre del cliente y sin él no puedo crear el viaje. Escríbeme NUEVO y su nombre (ej.: NUEVO Marta Gómez), mándame su celular, o DESCARTAR.';
 
 export type RespuestaContacto =
   | { tipo: 'elegido'; contacto_id: string }
@@ -1456,9 +1478,11 @@ export function interpretarRespuestaContacto(texto: string, opciones: ContactoCa
     const i = Number(m[1]) - 1;
     return i >= 0 && i < opciones.length ? { tipo: 'elegido', contacto_id: opciones[i].id } : { tipo: 'no_entendida' };
   }
-  if (t === 'nuevo' || t === 'nueva' || t === 'crear' || t === 'crearlo') return { tipo: 'nuevo', nombre: null };
-  const conNombre = /^\s*nuev[oa]\b[\s,.:;-]+([^\d]{2,})$/i.exec(String(texto ?? ''));
-  if (conNombre) return { tipo: 'nuevo', nombre: conNombre[1].trim() };
+  if (t === 'crear' || t === 'crearlo') return { tipo: 'nuevo', nombre: null };
+  // «nuevo», «cliente nuevo Marta Gómez», «nueva clienta Marta» (`leerNuevo`). Un nombre con dígitos no.
+  const nuevo = leerNuevo(texto);
+  if (nuevo && !nuevo.cliente) return { tipo: 'nuevo', nombre: null };
+  if (nuevo?.cliente && /^[^\d]{2,}$/.test(nuevo.cliente)) return { tipo: 'nuevo', nombre: nuevo.cliente };
   const tel = digitosTelefono(texto);
   if (tel && tel.length >= 10) return { tipo: 'telefono', telefono: tel };
   return { tipo: 'no_entendida' };
