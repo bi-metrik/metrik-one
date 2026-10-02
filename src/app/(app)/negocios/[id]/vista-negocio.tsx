@@ -17,6 +17,9 @@ import { resolverPermisoCarpetaLocal } from '@/lib/negocios/carpeta-local-servid
 import { esAlmacenamientoExterno } from '@/lib/almacenamiento/config'
 import { leerFacturasDeCuotas } from '@/lib/valida-cda/facturas-negocio-servidor'
 import { FacturasCuotas } from './facturas-cuotas'
+import { declaraNiveles } from '@/lib/negocios/niveles-solicitud'
+import { lineaSolicitudTexto } from '@/lib/negocios/solicitud-texto-servidor'
+import type { HistoriaCliente } from '@/components/viaje/revision-solicitud'
 
 /**
  * Todo lo que la página del negocio le pasa a `NegocioDetailClient`, armado en UN sitio.
@@ -199,6 +202,37 @@ export async function cargarVistaNegocio(id: string): Promise<VistaNegocio | nul
     )
     : null
 
+  // La solicitud de viaje sin formulario (Noor, 2026-10-02): en la línea de solicitud de viaje y
+  // con el módulo del bot, el bloque de datos con mínimo y deseable se reemplaza por la tarjeta
+  // «Solicitud» (pegar, lo que falta, revisar). Cualquier otra línea o workspace queda igual.
+  let solicitudTexto: VistaNegocio['solicitudTexto'] = null
+  if (workspaceId && !cerrado && data.negocio.linea_id) {
+    const linea = await lineaSolicitudTexto(workspaceId)
+    if (linea && linea.lineaId === data.negocio.linea_id) {
+      const bloque = data.bloques.find(b =>
+        b.bloque_definitions?.tipo === 'datos'
+        && b.instancia
+        && declaraNiveles((b.config_extra?.fields ?? null) as Array<{ nivel?: unknown }> | null))
+      if (bloque?.instancia) {
+        // La historia del cliente (citas, sin juicios): la de cada entendimiento que cargó aquí.
+        const svc = createServiceClient()
+        // La tabla de la bandeja no está en los tipos generados.
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        const { data: ents } = await (svc as any).from('wa_bandeja_entendimientos')
+          .select('historia, updated_at')
+          .eq('workspace_id', workspaceId)
+          .eq('negocio_id', id)
+          .not('historia', 'is', null)
+          .order('updated_at', { ascending: true })
+          .limit(50)
+        const historias: HistoriaCliente[] = ((ents ?? []) as Array<{ historia: string | null; updated_at: string | null }>)
+          .filter(e => (e.historia ?? '').trim() !== '')
+          .map(e => ({ texto: String(e.historia), en: e.updated_at }))
+        solicitudTexto = { negocioBloqueId: bloque.instancia.id, historias }
+      }
+    }
+  }
+
   let viaje: VistaNegocio['viaje'] = null
   if (workspaceId) {
     try {
@@ -242,5 +276,6 @@ export async function cargarVistaNegocio(id: string): Promise<VistaNegocio | nul
     banner: banner,
     extras: extras,
     viaje,
+    solicitudTexto,
   }
 }

@@ -13,6 +13,8 @@ import NegociosClient from './negocios-client'
 import { usaAlmacenamientoExterno } from '@/lib/almacenamiento/proveedor'
 import { todayBogotaISO } from '@/lib/dates/bogota'
 import type { SearchParams } from '@/lib/filtros/url-estado'
+import { lineaSolicitudTexto } from '@/lib/negocios/solicitud-texto-servidor'
+import { createServiceClient } from '@/lib/supabase/server'
 
 type StageFilter = 'todos' | 'venta' | 'ejecucion' | 'cobro'
 
@@ -64,6 +66,17 @@ export default async function NegociosPage({
   const canPublicarEnDrive = ws.workspaceId
     ? !(await usaAlmacenamientoExterno(ws.workspaceId).catch(() => true))
     : false
+  // «Nueva solicitud» en la línea de solicitud de viaje (Noor, 2026-10-02). Con solo esa línea
+  // activa reemplaza a «Nuevo negocio»; con varias, el alta de siempre queda al lado.
+  const solicitud = ws.workspaceId ? await lineaSolicitudTexto(ws.workspaceId) : null
+  let soloSolicitud = false
+  if (solicitud && ws.workspaceId) {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const { data: lineasActivas } = await (createServiceClient().from('lineas_negocio') as any)
+      .select('id').eq('workspace_id', ws.workspaceId).eq('is_active', true).limit(2)
+    const ids = ((lineasActivas ?? []) as Array<{ id: string }>).map(l => l.id)
+    soloSolicitud = ids.length === 1 && ids[0] === solicitud.lineaId
+  }
   return (
     <div className="mx-auto max-w-2xl px-4 py-6">
       <div className="mb-6 flex items-center justify-between">
@@ -74,13 +87,28 @@ export default async function NegociosPage({
             {cerrados.length > 0 && ` · ${cerrados.length} cerrado${cerrados.length !== 1 ? 's' : ''}`}
           </p>
         </div>
-        <Link
-          href="/negocios/nuevo"
-          className="inline-flex items-center gap-1.5 rounded-lg bg-primary px-3 py-2 text-xs font-medium text-white shadow-sm transition-colors hover:bg-primary/90"
-        >
-          <Plus className="h-3.5 w-3.5" />
-          Nuevo negocio
-        </Link>
+        <div className="flex items-center gap-2">
+          {solicitud && (
+            <Link
+              href="/negocios/nueva-solicitud"
+              className="inline-flex items-center gap-1.5 rounded-lg bg-primary px-3 py-2 text-xs font-medium text-white shadow-sm transition-colors hover:bg-primary/90"
+            >
+              <Plus className="h-3.5 w-3.5" />
+              Nueva solicitud
+            </Link>
+          )}
+          {!soloSolicitud && (
+            <Link
+              href="/negocios/nuevo"
+              className={solicitud
+                ? 'inline-flex items-center gap-1.5 rounded-lg border px-3 py-2 text-xs font-medium text-foreground transition-colors hover:bg-muted'
+                : 'inline-flex items-center gap-1.5 rounded-lg bg-primary px-3 py-2 text-xs font-medium text-white shadow-sm transition-colors hover:bg-primary/90'}
+            >
+              <Plus className="h-3.5 w-3.5" />
+              Nuevo negocio
+            </Link>
+          )}
+        </div>
       </div>
       <NegociosClient
         negocios={abiertos}

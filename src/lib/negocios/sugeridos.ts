@@ -1,6 +1,7 @@
 /**
- * Valores SUGERIDOS en un bloque `datos`: los que escribió el paso de entendimiento de la
- * bandeja de WhatsApp y todavía no confirmó una persona.
+ * Valores SUGERIDOS en un bloque `datos`: los que escribió el paso de entendimiento (lo
+ * reenviado al bot de WhatsApp o lo pegado en la caja de la solicitud, `fuente: 'web'`) y
+ * todavía no confirmó una persona.
  *
  * La marca vive en `negocio_bloques.data._sugeridos[slug] = { fuente, entrega_id, frase, en }`.
  * Es espacio de nombres del servidor (empieza por `_`): el navegador no la escribe
@@ -13,8 +14,11 @@
 
 export const CLAVE_SUGERIDOS = '_sugeridos'
 
+/** Por dónde llegó lo entendido. Mismo vocabulario que `CanalEntrega` del motor (`_shared`). */
+export type FuenteMarca = 'whatsapp' | 'web'
+
 export interface MarcaSugerido {
-  fuente: 'whatsapp'
+  fuente: FuenteMarca
   entrega_id?: string
   /** Las palabras del mensaje que sostienen el valor. */
   frase?: string
@@ -27,7 +31,7 @@ export interface MarcaSugerido {
 
 /** El texto que se ve al pasar el cursor sobre «Sugerido»: la frase o la deducción, y lo que había antes. */
 export function textoSugerido(marca: MarcaSugerido | undefined): string {
-  const partes = ['Sugerido desde WhatsApp']
+  const partes = [marca?.fuente === 'web' ? 'Sugerido de lo que pegaste' : 'Sugerido desde WhatsApp']
   if (marca?.frase) partes[0] += `: «${marca.frase}»`
   else if (marca?.deduccion) partes[0] += ` (deducido): ${marca.deduccion}`
   if (marca?.anterior !== undefined && marca.anterior !== null && marca.anterior !== '') {
@@ -81,7 +85,7 @@ export function soltarSugeridosEditados(
 export const CLAVE_CONFLICTOS = '_conflictos'
 
 export interface MarcaConflicto {
-  fuente: 'whatsapp'
+  fuente: FuenteMarca
   entrega_id?: string
   /** Lo que dijo el mensaje. */
   valor: string | number
@@ -126,9 +130,12 @@ export function descartarConflictoEnData(data: Record<string, unknown>, slug: st
 
 const MESES_CORTOS = ['ene', 'feb', 'mar', 'abr', 'may', 'jun', 'jul', 'ago', 'sep', 'oct', 'nov', 'dic']
 
-/** «El cliente dijo 20 nov en el audio del 30-sep». El día es el de Bogotá (UTC-5, sin horario de verano). */
+/**
+ * «El cliente dijo 20 nov en el audio del 30-sep» (o «en el texto pegado del 2-oct», si llegó por
+ * la caja de la solicitud). El día es el de Bogotá (UTC-5, sin horario de verano).
+ */
 export function textoConflicto(valorLegible: string, marca: MarcaConflicto): string {
-  const dondeDijo = marca.origen === 'audio' ? 'en el audio' : 'en el mensaje'
+  const dondeDijo = marca.fuente === 'web' ? 'en el texto pegado' : marca.origen === 'audio' ? 'en el audio' : 'en el mensaje'
   const t = marca.en ? Date.parse(marca.en) : NaN
   let dia = ''
   if (!Number.isNaN(t)) {
