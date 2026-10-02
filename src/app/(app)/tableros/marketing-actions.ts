@@ -81,9 +81,19 @@ interface FilaNegocioCruda {
   recaudado: number | string | null
 }
 
+/**
+ * La pestana no pudo armar sus datos (la consulta fallo, p. ej. por statement timeout
+ * bajo carga). Es un estado PROPIO y no `null` ni una tabla vacia: `null` esconderia la
+ * pestana y una tabla vacia se leeria como "no hay campanas". La pestana se pinta y
+ * dice que no esta disponible; el resto de /tableros sigue en pie.
+ */
+export interface MarketingNoDisponible {
+  noDisponible: true
+}
+
 const num = (v: number | string | null): number => (v === null ? 0 : Number(v))
 
-export async function getMarketingData(): Promise<MarketingData | null> {
+export async function getMarketingData(): Promise<MarketingData | MarketingNoDisponible | null> {
   const { workspaceId, role } = await getWorkspace()
   if (!workspaceId) return null
   if (!ROLES_MARKETING.includes(role || '')) return null
@@ -103,43 +113,48 @@ export async function getMarketingData(): Promise<MarketingData | null> {
     .order('mes', { ascending: false })
 
   // Una pestana que no pudo armar sus datos DICE que fallo; no se degrada a una
-  // tabla vacia, que se leeria como "no hay campanas".
-  if (error) throw new Error(`Tablero de marketing: ${error.message}`)
+  // tabla vacia, que se leeria como "no hay campanas". Tampoco lanza: este loader corre
+  // dentro del `Promise.all` de `page.tsx` y un `throw` tumbaba /tableros ENTERO
+  // (64 caidas el 2026-10-01 12:04 por statement timeout bajo carga).
+  if (error) {
+    console.error('[marketing] no se pudo traer v_marketing_campana:', { workspaceId, error })
+    return { noDisponible: true }
+  }
 
   const crudas = (data ?? []) as unknown as FilaCruda[]
   // El workspace no tiene una sola interaccion de Meta: no hay pestana que dibujar.
   if (crudas.filter(f => f.campaign_id !== null).length === 0) return null
 
-  // ⚠️⚠️ LA MIGRACION VA ANTES DEL MERGE, no despues.
-  // `seccional` es una columna que agrega `20260914220000_marketing_negocio_seccional`.
-  // Contra la vista sin esa columna, PostgREST responde 400, `traerTodo` lanza y el
-  // `throw` sube por el `Promise.all` de `page.tsx`, que NO tiene catch por rama: se cae
-  // /tableros ENTERO, no solo la pestana. Medido el 2026-09-14: el modulo
-  // `marketing_campanas` esta encendido en 1 de los 17 workspaces (soena), asi que el
-  // alcance es esa cuenta, y para esa cuenta es toda la pantalla.
-  // Al reves es inofensivo: aplicar la migracion sin desplegar el codigo solo agrega una
-  // columna que nadie pide todavia.
+  // `traerTodo` LANZA si una pagina falla (timeout, 400 por una columna que falta en la
+  // vista). Se atrapa aqui: el `Promise.all` de `page.tsx` no tiene catch por rama y un
+  // `throw` tumbaria /tableros ENTERO, no solo la pestana.
   //
   // Las ventas con su ciudad, para el corte por seccional. Esta SI va paginada: son 330
   // filas en SOENA el 2026-09-14 (28 con campana + 302 sin rastro) y el conteo crece con
   // cada venta que se cierra, mes a mes. La de arriba es por (campana, mes) y no crece
   // asi; esta si, y el techo de 1.000 de PostgREST no avisa cuando lo cruza — devuelve
   // 200 con la lista recortada y la tabla mostraria menos ventas sin decirlo.
-  const ventasCrudas = await traerTodo<FilaNegocioCruda>(
-    (d, h) =>
-      svc
-        .from('v_marketing_negocio')
-        .select('negocio_id, campaign_id, mes_venta, seccional, honorario, recaudado')
-        .eq('workspace_id', workspaceId)
-        .not('fecha_venta', 'is', null)
-        // Orden estable: sin el, la pagina 2 no continua donde termino la 1.
-        .order('negocio_id')
-        .range(d, h) as unknown as PromiseLike<{
-        data: FilaNegocioCruda[] | null
-        error: { message: string } | null
-      }>,
-    { etiqueta: 'Tablero de marketing: ventas por ciudad' },
-  )
+  let ventasCrudas: FilaNegocioCruda[]
+  try {
+    ventasCrudas = await traerTodo<FilaNegocioCruda>(
+      (d, h) =>
+        svc
+          .from('v_marketing_negocio')
+          .select('negocio_id, campaign_id, mes_venta, seccional, honorario, recaudado')
+          .eq('workspace_id', workspaceId)
+          .not('fecha_venta', 'is', null)
+          // Orden estable: sin el, la pagina 2 no continua donde termino la 1.
+          .order('negocio_id')
+          .range(d, h) as unknown as PromiseLike<{
+          data: FilaNegocioCruda[] | null
+          error: { message: string } | null
+        }>,
+      { etiqueta: 'Tablero de marketing: ventas por ciudad' },
+    )
+  } catch (e) {
+    console.error('[marketing] no se pudo traer v_marketing_negocio (ventas por ciudad):', { workspaceId, error: e })
+    return { noDisponible: true }
+  }
 
   const ventas: FilaNegocioMarketing[] = ventasCrudas.map(v => ({
     campaignId: v.campaign_id,

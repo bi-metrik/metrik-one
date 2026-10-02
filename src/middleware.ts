@@ -90,6 +90,12 @@ export async function middleware(request: NextRequest) {
   // (`/api/ferreteria/wompi/eventos`), que se autentica por la firma del evento.
   if (pathname.startsWith('/api/ferreteria/')) return NextResponse.next()
 
+  // El reporte de errores del navegador (`error.tsx`, `global-error.tsx`). `global-error`
+  // puede saltar sin sesion o con la sesion vencida: sin este corte, en un subdominio el
+  // `!user` de abajo respondia 307 a /login y el reporte se perdia. No lee sesion ni
+  // workspace (ver `app/api/errores-cliente/route.ts`).
+  if (pathname === '/api/errores-cliente') return NextResponse.next()
+
   // Preview: `?__ws=<slug>` fija el inquilino de esta pestaña y redirige a la misma URL sin
   // el parámetro (así no se queda pegado en la barra ni en el historial). `?__ws=off` lo
   // quita. Solo en un preview: en producción y en local `accionTenantPreview` devuelve null

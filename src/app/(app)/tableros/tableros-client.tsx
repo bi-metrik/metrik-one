@@ -19,8 +19,8 @@ import TabFerreteria from './components/tab-ferreteria'
 import type { PilotoMarketplaceData } from './ferreteria-actions'
 import type { BandejasData } from './bandejas-actions'
 import type { DirectivoData } from './directivo-actions'
-import type { MarketingData } from './marketing-actions'
-import { ShieldCheck, LayoutDashboard } from 'lucide-react'
+import type { MarketingData, MarketingNoDisponible } from './marketing-actions'
+import { ShieldCheck, LayoutDashboard, AlertTriangle } from 'lucide-react'
 import type {
   ComercialResumenRow,
   ComercialMesResponse,
@@ -78,8 +78,11 @@ interface TablerosClientProps {
   initialComercialNegocios?: ComercialNegociosBundle | null
   initialProcesoSeccional?: ProcesoSeccionalData | null
   initialDirectivo?: DirectivoData | null
-  /** Null si el workspace no tiene el modulo, si el rol no ve dinero, o si no hay rastro de Meta. */
-  initialMarketing?: MarketingData | null
+  /**
+   * Null si el workspace no tiene el modulo, si el rol no ve dinero, o si no hay rastro de Meta.
+   * `{ noDisponible: true }` si la lectura fallo: la pestana se pinta con un aviso.
+   */
+  initialMarketing?: MarketingData | MarketingNoDisponible | null
   initialOperaciones?: OperacionesBonoData | null
   /** Null si el workspace no tiene el modulo o si el rol no ve dinero. */
   initialCalidad?: DuenoData | null
@@ -229,7 +232,11 @@ export default function TablerosClient({
             puedeEditarMetas={initialComercialNegocios.puedeEditarMetas}
           />
         )}
-        {activeTab === 'marketing' && initialMarketing && <TabMarketing datos={initialMarketing} />}
+        {activeTab === 'marketing' && initialMarketing && (
+          'noDisponible' in initialMarketing
+            ? <SeccionNoDisponible titulo="Marketing" />
+            : <TabMarketing datos={initialMarketing} />
+        )}
         {activeTab === 'operaciones' && (
           <TabOperaciones
             proceso={initialProcesoSeccional ?? null}
@@ -273,6 +280,25 @@ function EmptyState() {
  * Cumplimiento y el dueño de un call center veia un escudo verde sin
  * explicacion.
  */
+/**
+ * Una pestana cuya lectura fallo (p. ej. timeout bajo carga). Dice que fallo en vez de
+ * pintar un vacio que se leeria como "no hay datos", y deja el resto de Tableros en pie.
+ */
+function SeccionNoDisponible({ titulo }: { titulo: string }) {
+  return (
+    <div role="status" className="flex flex-col items-center justify-center py-20 text-center">
+      <div className="flex h-14 w-14 items-center justify-center rounded-full bg-amber-50 mb-4">
+        <AlertTriangle className="h-7 w-7 text-amber-600" aria-hidden="true" />
+      </div>
+      <p className="text-sm font-medium text-gray-900">{titulo} no está disponible en este momento</p>
+      <p className="mt-1 max-w-sm text-sm text-gray-500">
+        No pudimos traer estos datos. Las demás pestañas siguen funcionando; recarga la página en
+        unos minutos para volver a intentarlo.
+      </p>
+    </div>
+  )
+}
+
 function SinTableros() {
   return (
     <div className="flex flex-col items-center justify-center py-20 text-center">

@@ -1,6 +1,7 @@
 'use client'
 
 import { useEffect } from 'react'
+import { reportarErrorCliente } from '@/lib/errores-cliente/enviar'
 import { PALETA } from '@/lib/marca/paleta'
 
 /**
@@ -19,6 +20,8 @@ export default function GlobalError({
 }) {
   useEffect(() => {
     console.error('[global] error no capturado:', error)
+    // Deja rastro en los logs de Vercel (`[error-cliente]`); nunca lanza ni espera.
+    reportarErrorCliente(error, 'global')
   }, [error])
 
   return (

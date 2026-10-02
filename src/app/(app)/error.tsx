@@ -1,6 +1,7 @@
 'use client'
 
 import { useEffect } from 'react'
+import { reportarErrorCliente } from '@/lib/errores-cliente/enviar'
 import { RefreshCw } from 'lucide-react'
 
 /**
@@ -24,6 +25,8 @@ export default function AppError({
 }) {
   useEffect(() => {
     console.error('[app] error no capturado:', error)
+    // Deja rastro en los logs de Vercel (`[error-cliente]`); nunca lanza ni espera.
+    reportarErrorCliente(error, 'app')
   }, [error])
 
   return (
