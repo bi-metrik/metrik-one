@@ -225,7 +225,7 @@ describe('el contacto: exacto o se pregunta', () => {
     const d = decidirContacto({ clienteTexto: 'Ana Pérez', extraido: { nombre: null, telefono: null }, candidatos: [ana, anaG] });
     expect(d).toMatchObject({ tipo: 'preguntar', motivo: 'ninguno' });
     expect(d.tipo === 'preguntar' && d.opciones.map(o => o.id)).toEqual(['a', 'c']);
-    expect(textoPreguntaContacto(d as Preguntar)).toContain('Responde con el número, o escribe NUEVO');
+    expect(textoPreguntaContacto(d as Preguntar)).toContain('Responde con el número, escribe NUEVO y el nombre para crearlo, o DESCARTAR.');
   });
 
   it('ninguno: pregunta sin lista', () => {

@@ -24,6 +24,7 @@ import {
   deducirCeros,
   LO_LLENA_AGENCIA,
   fraseNombraNumero,
+  leerNuevo,
   marcaDe,
   mayusculasDeViaje,
   nombreDeViaje,
@@ -120,7 +121,7 @@ export function lineaDeOpcion(o: OpcionNegocio): string {
   return nombreDeViaje(o);
 }
 
-const PIE_NUEVO = 'o escribe NUEVO y el nombre del cliente si es un viaje nuevo.';
+const PIE_NUEVO = 'escribe NUEVO y el nombre del cliente si es un viaje nuevo, o DESCARTAR.';
 
 /**
  * La pregunta. Sin negocios abiertos solo se ofrece NUEVO. `aviso` antecede cuando se vuelve a
@@ -131,7 +132,7 @@ export function textoPreguntaNegocio(p: { nMensajes: number; opciones: ReadonlyA
   const recibi = n > 0 ? `Recibí ${n} ${n === 1 ? 'mensaje' : 'mensajes'}. ` : '';
   const cab = p.aviso ? [p.aviso] : [];
   if (p.opciones.length === 0) {
-    return [...cab, `${recibi}No tienes viajes abiertos: escribe NUEVO y el nombre del cliente para crear el viaje.`].join('\n');
+    return [...cab, `${recibi}No tienes viajes abiertos: escribe NUEVO y el nombre del cliente para crear el viaje, o DESCARTAR.`].join('\n');
   }
   const prop = p.opciones[0]?.propuesto ? [`Parece de ${nombreDeViaje({ cliente: p.opciones[0].cliente })}: es la 1.`] : [];
   return [
@@ -180,11 +181,9 @@ export function interpretarRespuestaNegocio(texto: string, opciones: ReadonlyArr
     const i = Number(num[1]) - 1;
     return i >= 0 && i < opciones.length ? { tipo: 'existente', negocio_id: opciones[i].id } : { tipo: 'no_entendida' };
   }
-  const nuevo = /^\s*nuev[oa]\b[\s,.:;-]*([\s\S]*)$/i.exec(bruto);
-  if (nuevo) {
-    const resto = nuevo[1].trim();
-    return { tipo: 'nuevo', cliente: resto === '' ? null : resto };
-  }
+  // «nuevo X», «cliente nuevo X», «otro cliente» (sin nombre: se pide), como en el encabezado (`leerNuevo`).
+  const nuevo = leerNuevo(bruto);
+  if (nuevo) return { tipo: 'nuevo', cliente: nuevo.cliente };
   const c = codigoCompacto(bruto);
   if (c) {
     const enLista = opciones.find(o => codigoCompacto(o.codigo) === c);

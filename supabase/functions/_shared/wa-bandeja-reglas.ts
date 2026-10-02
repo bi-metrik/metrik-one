@@ -396,14 +396,37 @@ export function textoReintentarSinElegir(objetivo: string, referencias: Readonly
   return [cab, 'Escribe REINTENTAR y una de estas:', ...referencias.map(r => `- ${r}`)].join('\n');
 }
 
-/** «cancelar» dentro de una caja abierta: la tanda se descarta y se dice cuál (prueba en vivo v2, N4). */
-export function textoTandaDescartada(nombre: string, n: number): string {
-  const de = /^Tanda de las /.test(nombre) ? nombre.replace(/^Tanda de las /, 'la tanda de las ') : `la tanda de ${nombre}`;
-  return `Descarté ${de} (${n} ${n === 1 ? 'mensaje' : 'mensajes'}). No cargué nada.`;
+/**
+ * «descartar» o «cancelar» ESCRITOS solos, en cualquier momento (Trappvel, 2026-10-02, regla 4):
+ * descartan TODO lo pendiente del remitente (la tanda abierta, las entregas que esperan su pregunta o
+ * su respuesta, los entendimientos que esperan una respuesta). Cualquier mayúscula, con o sin tilde:
+ * «DESCARTAR», «Descártalo», «descartar todo», «cancelar». «descartar el 3» no: esa es una
+ * corrección del resumen y sigue igual.
+ */
+export function esDescartarTodo(texto: string): boolean {
+  return esCancelar(texto)
+    || /^(descartar|descarta|descartalo|descartala|descartalos|descartalas|descarte|descartar todo|descarta todo|descartalo todo|descartar todos|descartar todo eso|borrar todo|borra todo)$/.test(normalizar(texto));
 }
 
-/** Lo que contesta «cancelar» sin una tanda abierta ni una conversación del bot a medias. */
-export const TEXTO_NADA_QUE_CANCELAR = 'No hay una tanda abierta para cancelar.';
+/** Una parte de lo descartado: cómo se llama (el viaje o «Tanda de las 09:28») y cuántos mensajes tenía. */
+export interface ParteDescartada { nombre: string; n: number }
+
+/** Lo que contesta «descartar» sin nada pendiente. */
+export const TEXTO_NADA_QUE_DESCARTAR = 'No tienes nada pendiente para descartar.';
+
+/**
+ * La confirmación de «descartar»: de qué y cuántos mensajes (los del resumen: sin encabezados ni
+ * respuestas). «Descarté lo pendiente de Laura Prueba5 y la tanda de las 09:28 (3 mensajes). No creé ni
+ * cargué nada.»
+ */
+export function textoDescarteTotal(partes: ReadonlyArray<ParteDescartada>): string {
+  if (partes.length === 0) return TEXTO_NADA_QUE_DESCARTAR;
+  const n = partes.reduce((a, p) => a + Math.max(0, p.n), 0);
+  const nombres = [...new Set(partes.map(p => (/^Tanda de las /.test(p.nombre) ? p.nombre.replace(/^Tanda de las /, 'la tanda de las ') : p.nombre)))];
+  const lista = nombres.length === 1 ? nombres[0] : `${nombres.slice(0, -1).join(', ')} y ${nombres[nombres.length - 1]}`;
+  const cuantos = n === 0 ? 'sin mensajes' : `${n} ${n === 1 ? 'mensaje' : 'mensajes'}`;
+  return `Descarté lo pendiente de ${lista} (${cuantos}). No creé ni cargué nada.`;
+}
 
 /** Lo que la base contesta al registrar un mensaje (`wa_bandeja_registrar_mensaje`). */
 export type AccionRegistro =

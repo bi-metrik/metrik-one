@@ -85,22 +85,25 @@ describe('a y b · exacto cambia la caja; aproximado pregunta', () => {
 
   it('lo que el bot contesta en el acto', () => {
     expect(respuestaAlEncabezado(resolverEncabezado('Carolina', vs))).toBe('📌 Carolina Ruiz (T1 26 103)');
-    expect(respuestaAlEncabezado(resolverEncabezado('Lusia', vs))).toBe('¿Cambias a Luisa Mejía (T1 26 102)? sí/no');
+    // Trappvel 2026-10-02: el aproximado pregunta con la lista numerada (nunca «¿Cambias a…? sí/no»).
+    expect(respuestaAlEncabezado(resolverEncabezado('Lusia', vs), 'Lusia')).toBe('¿De qué viaje es «Lusia»?\n1. Luisa Mejía (T1 26 102)\nResponde con el número, NUEVO y el nombre si es un cliente nuevo, o DESCARTAR. Hasta entonces no asigno lo que sigue.');
     expect(respuestaAlEncabezado(resolverEncabezado('nuevo Pedro', vs))).toBe('📌 NUEVO Pedro');
     expect(respuestaAlEncabezado(null)).toBeNull();
     expect([esNo('no'), esNo('No.'), esNo('no, la de Carolina'), esSi('sí'), esSi('sí, pero')]).toEqual([true, true, false, true, false]);
   });
 
-  it('sin «sí», lo que sigue al aproximado queda sin asignar; con «sí», va a su viaje', () => {
+  it('sin elegir, lo que sigue al aproximado queda sin asignar; con el número, va a su viaje; «sí» o «no» no eligen ni son contenido', () => {
     const base = [enc(1, 'Carolina'), m(2, 'salimos el 28 de diciembre'), enc(3, 'Lusia'), m(4, 'el hotel con desayuno'), m(5, 'somos 2')];
     const reparto = (ms: MensajeViaje[]) => {
       const { segmentos, encabezados } = armarSegmentos(ms, vs, { horasCajaActiva: 4, equipo: EQUIPO });
       return armarPlan({ mensajes: ms, viajes: vs, segmentos, encabezados }).mensajes.map(x => [x.n, x.destino?.tipo === 'existente' ? x.destino.codigo : null]);
     };
     expect(reparto(base)).toEqual([[2, 'T1 26 103'], [4, null], [5, null]]);
-    expect(reparto([...base, enc(6, 'sí')])).toEqual([[2, 'T1 26 103'], [4, 'T1 26 102'], [5, 'T1 26 102']]);
-    expect(reparto([...base.slice(0, 3), enc(4, 'Sí'), m(5, 'el hotel con desayuno')])).toEqual([[2, 'T1 26 103'], [5, 'T1 26 102']]);
+    expect(reparto([...base, enc(6, '1')])).toEqual([[2, 'T1 26 103'], [4, 'T1 26 102'], [5, 'T1 26 102']]);
+    expect(reparto([...base.slice(0, 3), enc(4, '1'), m(5, 'el hotel con desayuno')])).toEqual([[2, 'T1 26 103'], [5, 'T1 26 102']]);
+    expect(reparto([...base, enc(6, 'sí')])).toEqual([[2, 'T1 26 103'], [4, null], [5, null]]);
     expect(reparto([...base, enc(6, 'no')])).toEqual([[2, 'T1 26 103'], [4, null], [5, null]]);
+    expect(reparto([...base.slice(0, 3), enc(4, 'Sí'), m(5, 'el hotel con desayuno')])).toEqual([[2, 'T1 26 103'], [5, null]]);
   });
 });
 

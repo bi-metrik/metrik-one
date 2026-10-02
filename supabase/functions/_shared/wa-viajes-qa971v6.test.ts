@@ -18,7 +18,7 @@ import {
   pendienteDeLaCaja,
   resolverEncabezado,
   respuestaAlEncabezado,
-  textoNoEntendiCambio,
+  textoNoEntendiEleccion,
   TEXTO_PIDE_NOMBRE_NUEVO,
   type MensajeViaje,
   type ViajeAbierto,
@@ -91,12 +91,14 @@ describe('2 · «nuevo» suelto', () => {
     const base = [enc(1, 'Carolina'), m(2, 'salimos el 28'), enc(3, 'nuevo'), m(4, 'vamos a Aruba')];
     expect(destinos(base, vs)).toEqual([[2, 'T1 26 100'], [4, null]]);
     expect(reparto(base, vs).plan.mensajes[1].motivo).toContain('sin nombre');
-    expect(pendienteDeLaCaja(reparto(base, vs).segmentos)).toEqual({ tipo: 'nombre' });
+    expect(pendienteDeLaCaja(reparto(base, vs).segmentos)).toEqual({ tipo: 'nombre', conContenido: true });
     const con = [...base, enc(5, 'Pedro Gómez'), m(6, 'somos 2')];
     expect(destinos(con, vs)).toEqual([[2, 'T1 26 100'], [4, 'NUEVO Pedro Gómez'], [6, 'NUEVO Pedro Gómez']]);
     expect(pendienteDeLaCaja(reparto(con, vs).segmentos)).toBeNull();
-    // Un escrito común no es un nombre: sigue esperando.
-    expect(destinos([...base, enc(5, 'gracias'), m(6, 'somos 2')], vs)).toEqual([[2, 'T1 26 100'], [4, null], [5, null], [6, null]]);
+    // Un escrito común no es un nombre: sigue esperando (y un acuse del comercial no va al resumen: 2026-10-02).
+    expect(destinos([...base, enc(5, 'gracias'), m(6, 'somos 2')], vs)).toEqual([[2, 'T1 26 100'], [4, null], [6, null]]);
+    // Un sí, un no o un número no son el nombre ni contenido.
+    expect(destinos([...base, enc(5, 'si'), enc(6, '2'), m(7, 'somos 2')], vs)).toEqual([[2, 'T1 26 100'], [4, null], [7, null]]);
   });
 
   it('qué es un nombre', () => {
@@ -122,14 +124,16 @@ describe('3 · sí/no con un normalizador compartido', () => {
     expect(['ok', '👍', 'listo', 'ok pero falta uno'].map(esSi)).toEqual([false, false, false, false]);
   });
 
-  it('en la tanda: «ok» confirma el cambio; «no sé» no, y la caja sigue esperando', () => {
+  // Trappvel 2026-10-02: el aproximado ya no es sí/no; un «ok» no elige (ni es contenido), el número sí.
+  it('en la tanda: «ok» no elige ni es contenido; «1» elige; «no sé» no, y la caja sigue esperando', () => {
     const vs = viajes(['CAROLINA RUIZ', 'LUISA MEJÍA']);
     const base = [enc(1, 'Carolina'), m(2, 'salimos el 28'), enc(3, 'Lusia')];
-    expect(destinos([...base, enc(4, 'ok'), m(5, 'somos 2')], vs)).toEqual([[2, 'T1 26 100'], [5, 'T1 26 101']]);
+    expect(destinos([...base, enc(4, 'ok'), m(5, 'somos 2')], vs)).toEqual([[2, 'T1 26 100'], [5, null]]);
+    expect(destinos([...base, enc(4, '1'), m(5, 'somos 2')], vs)).toEqual([[2, 'T1 26 100'], [5, 'T1 26 101']]);
     const duda = [...base, enc(4, 'no sé'), m(5, 'somos 2')];
     expect(destinos(duda, vs)).toEqual([[2, 'T1 26 100'], [4, null], [5, null]]);
-    expect(pendienteDeLaCaja(reparto(duda, vs).segmentos)).toMatchObject({ tipo: 'cambio', viaje: { id: 'v1' } });
-    expect(textoNoEntendiCambio(vs[1])).toBe('No entendí: ¿cambias a Luisa Mejía (T1 26 101)? sí/no');
+    expect(pendienteDeLaCaja(reparto(duda, vs).segmentos)).toMatchObject({ tipo: 'eleccion', candidatos: [{ id: 'v1' }], conContenido: true });
+    expect(textoNoEntendiEleccion('Lusia', [vs[1]])).toBe('No entendí. ¿De qué viaje es «Lusia»?\n1. Luisa Mejía (T1 26 101)\nResponde con el número, NUEVO y el nombre si es un cliente nuevo, o DESCARTAR. Hasta entonces no asigno lo que sigue.');
   });
 });
 

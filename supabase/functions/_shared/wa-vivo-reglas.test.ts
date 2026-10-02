@@ -47,7 +47,7 @@ import {
   type ViajeAbierto,
 } from './wa-viajes-reglas';
 
-import { elegirFallida, leerReintentar, textoFallaEntendimiento, textoReintentarSinElegir, textoTandaDescartada } from './wa-bandeja-reglas';
+import { elegirFallida, leerReintentar, textoDescarteTotal, textoFallaEntendimiento, textoReintentarSinElegir } from './wa-bandeja-reglas';
 import { interpretarRespuestaNegocio } from './wa-carga-reglas';
 import { esSiNoCorto, interpretarRespuestaPlan } from './wa-viajes-reglas';
 
@@ -246,7 +246,7 @@ describe('B · el nombre del negocio', () => {
     expect(nombreDeViaje({ nombre: 'Aruba', cliente: null, codigo: null })).toBe('Aruba');
   });
 
-  it('el nombre como encabezado: exacto (sin tildes ni espacios) → viaje; repetido → pregunta cuál; aproximado → «¿Cambias a…?»', () => {
+  it('el nombre como encabezado: exacto (sin tildes ni espacios) → viaje; repetido o aproximado → la lista numerada', () => {
     expect(resolverEncabezado('europa 2 dias', V)).toMatchObject({ tipo: 'viaje', viaje: { id: 'n5' }, por: 'negocio' });
     expect(resolverEncabezado('Cartagena dic 12-16', V)).toMatchObject({ tipo: 'viaje', viaje: { id: 'l1' } });
     expect(resolverEncabezado('ARMENIA 2N', V)).toMatchObject({ tipo: 'ambiguo', candidatos: [{ id: 'n4' }, { id: 'n3' }] });
@@ -254,14 +254,16 @@ describe('B · el nombre del negocio', () => {
     expect(resolverEncabezado('M1 26 4', V)).toMatchObject({ tipo: 'viaje', viaje: { id: 'n4' }, por: 'codigo' });
     expect(respuestaAlEncabezado(resolverEncabezado('M1 26 4', V))).toBe('📌 ARMENIA 2N · Juan Prueba (M1 26 4)');
     expect(respuestaAlEncabezado(resolverEncabezado('ARMENIA 2N', V), 'ARMENIA 2N')).toBe(
-      '¿Cuál viaje? «ARMENIA 2N» puede ser:\n- ARMENIA 2N · Juan Prueba (M1 26 4)\n- ARMENIA 2N · Pedro Prueba (M1 26 3)\nEscribe su código. Hasta entonces no asigno lo que sigue.',
+      '¿De qué viaje es «ARMENIA 2N»?\n1. ARMENIA 2N · Juan Prueba (M1 26 4)\n2. ARMENIA 2N · Pedro Prueba (M1 26 3)\nResponde con el número, NUEVO y el nombre si es un cliente nuevo, o DESCARTAR. Hasta entonces no asigno lo que sigue.',
     );
     // Un contenido corto que comparte palabras con un nombre largo no es encabezado.
     expect(resolverEncabezado('2 adultos', [{ id: 'p', codigo: 'P1 26 1', cliente: null, destino: null, nombre: 'PRUEBA Cancun 12-17 nov 2 adultos' }])).toBeNull();
   });
 
-  it('error 6: «Lusia Prueba2» (apellido exacto, otro nombre de pila) pregunta en vez de escaparse', () => {
-    expect(resolverEncabezado('Lusia Prueba2', V)).toMatchObject({ tipo: 'aproximado', viaje: { id: 'l1' }, por: 'apellido' });
+  // Trappvel 2026-10-02 (regla 1): otro nombre de pila con el mismo apellido NO es candidato, ni aproximado
+  // (mismo apellido es lo normal en Colombia). Esta prueba antes pedía «¿Cambias a…?» (error 6 del 2026-10-01).
+  it('«Lusia Prueba2» (apellido exacto, otro nombre de pila) no es candidato del viaje de Laura Prueba2', () => {
+    expect(resolverEncabezado('Lusia Prueba2', V)).toBeNull();
     expect(resolverEncabezado('hola Prueba2', V)).toBeNull();
   });
 
@@ -370,8 +372,12 @@ describe('v2 · fallas del entendimiento, REINTENTAR y «cancelar»', () => {
   it('los avisos', () => {
     expect(textoFallaEntendimiento('primero', 'Laura Prueba4', 'Laura Prueba4')).toBe('No pude procesar los mensajes de Laura Prueba4 por un problema técnico; los reintento solo.');
     expect(textoFallaEntendimiento('agotado', 'CARTAGENA DIC · Laura (L 26 3)', 'L 26 3')).toBe('No pude cargar CARTAGENA DIC · Laura (L 26 3). Los mensajes quedan guardados; escribe REINTENTAR L 26 3');
-    expect(textoTandaDescartada('Laura Prueba5', 2)).toBe('Descarté la tanda de Laura Prueba5 (2 mensajes). No cargué nada.');
-    expect(textoTandaDescartada('Tanda de las 18:51', 1)).toBe('Descarté la tanda de las 18:51 (1 mensaje). No cargué nada.');
+    expect(textoDescarteTotal([{ nombre: 'Laura Prueba5', n: 2 }])).toBe('Descarté lo pendiente de Laura Prueba5 (2 mensajes). No creé ni cargué nada.');
+    expect(textoDescarteTotal([{ nombre: 'Tanda de las 18:51', n: 1 }])).toBe('Descarté lo pendiente de la tanda de las 18:51 (1 mensaje). No creé ni cargué nada.');
+    expect(textoDescarteTotal([{ nombre: 'Laura Prueba5', n: 2 }, { nombre: 'Tanda de las 18:51', n: 1 }, { nombre: 'Diego Prueba5', n: 0 }]))
+      .toBe('Descarté lo pendiente de Laura Prueba5, la tanda de las 18:51 y Diego Prueba5 (3 mensajes). No creé ni cargué nada.');
+    expect(textoDescarteTotal([{ nombre: 'Daniel Prueba', n: 0 }])).toBe('Descarté lo pendiente de Daniel Prueba (sin mensajes). No creé ni cargué nada.');
+    expect(textoDescarteTotal([])).toBe('No tienes nada pendiente para descartar.');
   });
 
   it('REINTENTAR: la palabra, y cuál carga', () => {
