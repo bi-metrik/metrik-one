@@ -1428,7 +1428,7 @@ function finTelefono(t: string | null): string {
  */
 export function leerNuevo(texto: string): { cliente: string | null } | null {
   const bruto = String(texto ?? '').trim().replace(/[.!¡]+$/g, '').trim();
-  const m = /^(?:es\s+)?(?:(?:un|una|el|la)\s+)?(?:client[ea]\s+nuev[oa]|nuev[oa](?:\s+client[ea])?)(?=$|[\s,.:;-])[\s,.:;-]*([\s\S]*)$/i.exec(bruto);
+  const m = /^(?:es\s+)?(?:(?:un|una)\s+)?(?:client[ea]\s+nuev[oa]|nuev[oa](?:\s+client[ea])?)(?=$|[\s,.:;-])[\s,.:;-]*([\s\S]*)$/i.exec(bruto);
   if (m) return { cliente: m[1].trim() || null };
   if (/^(?:(?:es\s+)?(?:otr[oa]|un[oa]?\s+otr[oa])\s+client[ea]|cambi(?:o|ar|amos)\s+(?:de\s+)?client[ea])$/.test(normalizarTexto(bruto))) return { cliente: null };
   return null;

@@ -618,13 +618,17 @@ export function pendienteDeLaCaja(segmentos: ReadonlyArray<Segmento>): Pendiente
  * cliente nuevo. Para nombrar una tanda al descartarla o cuando no trajo mensajes.
  */
 export function nombresDeLasCajas(segmentos: ReadonlyArray<Segmento>): string[] {
-  return [...new Set(segmentos.flatMap(sg => {
+  const nombres = segmentos.flatMap(sg => {
     const r = sg.encabezado?.resolucion;
     const v = viajeDeLaCaja(sg);
     if (v) return [nombreDeViaje(v)];
     if (r?.tipo === 'nuevo') return [r.cliente ?? sg.nombre?.texto ?? null].filter((x): x is string => !!x);
     return [];
-  }))];
+  });
+  // «Daniel Pérez» y «daniel perez» son el mismo: se queda el primero como se escribió.
+  const vistos = new Map<string, string>();
+  for (const x of nombres) if (!vistos.has(normalizarNombre(x))) vistos.set(normalizarNombre(x), x);
+  return [...vistos.values()];
 }
 
 /** Los mensajes de una tanda que irían al resumen: los de sus cajas, sin risas ni acuses del comercial. */

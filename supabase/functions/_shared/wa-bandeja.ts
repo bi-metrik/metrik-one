@@ -236,7 +236,7 @@ async function descartarTodo(
       guardada = true;
     }
   }
-  partes.push(...await descartarPendientesDelRemitente(supabase, { workspaceId, phone, texto, wamid, enviadoAt, guardarRespuesta: !guardada }));
+  partes.push(...await descartarPendientesDelRemitente(supabase, { workspaceId, phone, texto, wamid, enviadoAt, guardarRespuesta: !guardada, bandeja: config }));
   await enviar(phone, textoDescarteTotal(partes), workspaceId);
 }
 

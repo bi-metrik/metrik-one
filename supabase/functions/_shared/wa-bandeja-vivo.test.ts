@@ -168,6 +168,18 @@ function crearDb(t: Tablas) {
 
   /** `wa_bandeja_registrar_mensaje` como la migración 20261001120000 (sin el candado: aquí no hay hilos). */
   async function rpc(nombre: string, a: Fila) {
+    if (nombre === 'wa_bandeja_cerrar_vencidas') {
+      // Como la función SQL: cierra las abiertas sin mensajes en la ventana (5 min por defecto).
+      const ahora = Date.now();
+      const filas: Fila[] = [];
+      for (const e of t.wa_bandeja_entregas.filter(x => x.estado === 'abierta')) {
+        const ultimo = Math.max(...t.wa_bandeja_mensajes.filter(m => m.entrega_id === e.id).map(m => Date.parse(String(m.recibido_at))));
+        if (ahora - ultimo < 5 * 60_000) continue;
+        Object.assign(e, { estado: 'esperando_cliente', cerrada_at: new Date(ahora).toISOString(), motivo_cierre: 'inactividad' });
+        filas.push({ entrega: e.id, workspace: e.workspace_id, telefono: e.remitente_phone, mensajes: e.n_mensajes });
+      }
+      return { data: filas, error: null };
+    }
     if (nombre !== 'wa_bandeja_registrar_mensaje') throw new Error(`rpc no esperado: ${nombre}`);
     const ahora = new Date().toISOString();
     const dup = t.wa_bandeja_mensajes.find(m => m.wa_message_id === a.p_wa_message_id);
@@ -297,6 +309,13 @@ async function cron(seg: number) {
   vi.setSystemTime(new Date(T0 + seg * 1000));
   await ent.procesarEntendimientos(db as never);
   await bandeja.enviarPreguntasEnCola(db as never);
+}
+
+/** Los dos crons de `wa-alerts`: el cierre por inactividad (`bandeja_cierre`) y el del entendimiento. */
+async function cronConCierre(seg: number) {
+  vi.setSystemTime(new Date(T0 + seg * 1000));
+  await bandeja.cerrarEntregasVencidas(db as never);
+  await cron(seg);
 }
 
 const textos = () => enviados.map(e => e.texto);
@@ -1084,5 +1103,176 @@ describe('handleAyuda («bot ayuda»)', () => {
 📊 *Consulta:* "Mis números" · "¿Quién me debe?" · "Qué negocios tengo"
 
 Los cobros, cambios de etapa y horas se gestionan desde la app.`]);
+  });
+});
+
+// ── Trappvel, 2026-10-02: la bandeja no pega mensajes al viaje de otro cliente ─────────────────────
+// brief-max-2026-10-02-bandeja-no-confunde-clientes.md. La secuencia del comercial, mensaje por
+// mensaje y con sus tiempos, con nombres SINTÉTICOS: «Daniel Pérez» (cliente nuevo) contra un viaje
+// abierto de «Lina Pérez» (mismo apellido, otro nombre de pila).
+
+describe('Trappvel 2026-10-02: «cliente nuevo Daniel Pérez» con un viaje abierto de Lina Pérez', () => {
+  const PIDE_NOMBRE = '¿Cómo se llama el cliente nuevo? Escríbeme su nombre, o DESCARTAR. Hasta entonces no asigno lo que sigue.';
+  const CHINA = salidaModelo({ destino: { valor: 'China', frase: 'una cotizacion a China' } });
+
+  function viajeDeLina() {
+    t.negocios.push(negocioDePrueba('n-lina', 'L1 26 1', 'L1 CTG ENE 27', 'LINA PÉREZ'));
+    t.negocio_bloques.push({ id: 'b-lina', negocio_id: 'n-lina', data: { destino: 'CARTAGENA' }, updated_at: null, bloque_configs: { orden: 1, config_extra: { fields: FIELDS }, bloque_definitions: { tipo: 'datos' }, etapas_negocio: { orden: 1 } } });
+  }
+
+  /** Nada quedó trabado: ni tanda abierta, ni pregunta abierta o en cola, ni entendimiento esperando. */
+  async function nadaTrabado() {
+    expect(t.wa_bandeja_entregas.filter(e => e.estado === 'abierta')).toEqual([]);
+    expect(t.wa_bandeja_entregas.filter(e => e.estado === 'esperando_cliente' && !e.pregunta_error)).toEqual([]);
+    expect(t.wa_bandeja_entendimientos.filter(e => /^esperando_/.test(String(e.estado)))).toEqual([]);
+    expect(await ent.preguntaAbierta(db as never, WS, TEL)).toBeNull();
+  }
+
+  it('la secuencia completa: termina en un viaje NUEVO «Daniel Pérez», nada en el de Lina, ninguna tanda trabada', async () => {
+    viajeDeLina();
+    // 9:00 · «cliente nuevo …» es un NUEVO (regla 2), no «¿Cambias a L1 26 1 · Lina Pérez?».
+    await llega('cliente nuevo Daniel Pérez', { enviado: 0 });
+    expect(textos()).toEqual(['📌 NUEVO Daniel Pérez']);
+    // 9:01 · el «si» y el «no» no contestan nada (no hay pregunta) y no van al resumen.
+    await llega('si', { enviado: 42 });
+    await llega('no', { enviado: 59 });
+    // 9:02 · «otro cliente» sin nombre pide el nombre y no es contenido.
+    await llega('otro cliente', { enviado: 74 });
+    // 9:04 · «nuevo daniel perez»: el mismo cliente nuevo.
+    await llega('nuevo daniel perez', { enviado: 225 });
+    expect(textos()).toEqual(['📌 NUEVO Daniel Pérez', PIDE_NOMBRE, '📌 NUEVO daniel perez']);
+    // 9:10 · la tanda cierra por inactividad: solo trajo encabezados y acuses. No se pregunta «¿Así?».
+    await cronConCierre(545);
+    expect(textos().at(-1)).toBe('Daniel Pérez · No me pasaste mensajes del cliente: no creé ni cargué nada.');
+    expect(await ent.preguntaAbierta(db as never, WS, TEL)).toBeNull();
+
+    // 9:28 · «2» suelto (no hay pregunta): abre una tanda. «descartar» la descarta enseguida (regla 4).
+    await llega('2', { enviado: 1627 });
+    await llega('descartar', { enviado: 1646 });
+    expect(textos().at(-1)).toMatch(/^Descarté lo pendiente de la tanda de las \d\d:\d\d \(1 mensaje\)\. No creé ni cargué nada\.$/);
+    // 9:28-9:31 · «nuevo daniel perez», «otro cliente» y «DESCARTAR»: la caja sin mensajes se descarta.
+    await llega('nuevo daniel perez', { enviado: 1654 });
+    await llega('otro cliente', { enviado: 1707 });
+    await llega('DESCARTAR', { enviado: 1814 });
+    expect(textos().slice(-3)).toEqual(['📌 NUEVO daniel perez', PIDE_NOMBRE, 'Descarté lo pendiente de daniel perez (sin mensajes). No creé ni cargué nada.']);
+    // 9:32 · lo único que es del cliente.
+    await llega('El me esta pidiendo una cotizacion a China', { enviado: 1883 });
+    await cronConCierre(2200);
+    expect(textos().at(-1)).toMatch(/· Recibí 1 mensaje\. ¿A qué viaje van\?\n1\. L1 CTG ENE 27 · Lina Pérez \(L1 26 1\)\nResponde con el número o el código, escribe NUEVO y el nombre del cliente si es un viaje nuevo, o DESCARTAR\.$/);
+    // La respuesta: el cliente nuevo, en cualquier forma.
+    await llega('cliente nuevo Daniel Pérez', { enviado: 2260 });
+    expect(t.wa_bandeja_mensajes.find(m => m.wa_message_id === `wamid.vivo.${n}`)).toMatchObject({ papel: 'respuesta_cliente' });
+    colaModelo = [CHINA];
+    await cron(2320);
+
+    // Un viaje NUEVO de Daniel Pérez con lo de China; nada en el de Lina.
+    const daniel = negocioDe('DANIEL PÉREZ');
+    expect(daniel).toBeTruthy();
+    expect(datosDe('DANIEL PÉREZ')).toMatchObject({ destino: 'CHINA' });
+    expect(t.negocio_bloques.find(b => b.id === 'b-lina')!.data).toEqual({ destino: 'CARTAGENA' });
+    expect(t.wa_bandeja_entendimientos.some(e => e.negocio_id === 'n-lina' || e.negocio_destino_id === 'n-lina')).toBe(false);
+    expect(t.wa_bandeja_mensajes.some(m => JSON.stringify(m.asignacion ?? null).includes('n-lina'))).toBe(false);
+    expect(textos().some(x => x.startsWith('¿Cambias a'))).toBe(false);
+    expect(alBot).toEqual([]);
+    await nadaTrabado();
+  });
+
+  it('«Daniel Pérez» sin «nuevo» no es candidato del viaje de Lina Pérez (otro nombre de pila): no pregunta ni la toca', async () => {
+    viajeDeLina();
+    await llega('Daniel Pérez', { enviado: 0 });
+    await llega('quiere cotizar Cartagena para 2', { enviado: 3, reenviado: true });
+    expect(textos()).toEqual([]);
+    await llega('listo', { enviado: 6 });
+    expect(textos().at(-1)).toMatch(/¿A qué viaje van\?/);
+    expect(t.wa_bandeja_entregas[0].plan_viajes).toBeNull(); // sin encabezado: nada se asignó a Lina
+  });
+
+  it('solo el apellido con UN viaje: la lista numerada con NUEVO (nunca sí/no); «nuevo Daniel Pérez» abre su caja', async () => {
+    viajeDeLina();
+    await llega('Pérez', { enviado: 0 });
+    expect(textos()).toEqual(['¿De qué viaje es «Pérez»?\n1. L1 CTG ENE 27 · Lina Pérez (L1 26 1)\nResponde con el número, NUEVO y el nombre si es un cliente nuevo, o DESCARTAR. Hasta entonces no asigno lo que sigue.']);
+    await llega('si', { enviado: 3 }); // no elige
+    await llega('nuevo Daniel Pérez', { enviado: 6 });
+    await llega('quiere cotizar Cartagena para 2', { enviado: 9, reenviado: true });
+    await llega('listo', { enviado: 12 });
+    expect(textos().at(-1)).toContain('1) NUEVO Daniel Pérez — 1 mensaje');
+    expect(textos().at(-1)).not.toContain('Lina');
+  });
+});
+
+describe('Trappvel 2026-10-02 · regla 4: «descartar» descarta TODO lo pendiente del remitente', () => {
+  it('«descartar» en minúscula como primer mensaje, con preguntas pendientes en dos capas (el entendimiento y una entrega en cola): todo descartado', async () => {
+    // Capa 1: el resumen de Laura, re-preguntado por el entendimiento (esperando_negocio).
+    await llega('nuevo Laura Prueba7', { enviado: 0 });
+    await llega(CARTAGENA, { enviado: 2, reenviado: true });
+    await llega('listo', { enviado: 4 });
+    await llega('el 5 es de Pedro', { enviado: 8 });
+    await cron(60);
+    expect(textos().at(-1)).toContain('No sé a qué viaje te refieres con «de Pedro».');
+    expect(t.wa_bandeja_entendimientos).toMatchObject([{ estado: 'esperando_negocio' }]);
+    // Capa 2: la tanda de Diego cerrada con la pregunta en cola (una pregunta a la vez).
+    await llega('nuevo Diego Prueba7', { enviado: 100 });
+    await llega('Quiero un viaje para puntacana y curasao', { enviado: 102, reenviado: true });
+    await llega('listo', { enviado: 104 });
+    expect(textos().at(-1)).toBe('Primero: Laura Prueba7 · ¿Así? SÍ o corrige\nLo que acabas de mandar te lo pregunto después.');
+
+    await llega('descartar', { enviado: 200 });
+    expect(textos().at(-1)).toBe('Descarté lo pendiente de Laura Prueba7 y Diego Prueba7 (2 mensajes). No creé ni cargué nada.');
+    expect(t.wa_bandeja_entendimientos).toMatchObject([{ estado: 'descartada' }]);
+    expect(t.wa_bandeja_mensajes.find(m => m.cuerpo === 'descartar')).toMatchObject({ papel: 'respuesta_negocio' });
+    // Nada vuelve: ni el cron ni la cola preguntan o cargan algo de eso.
+    const n0 = textos().length;
+    colaModelo = [LAURA];
+    await cron(260);
+    expect(textos().length).toBe(n0);
+    expect(t.negocios).toEqual([]);
+    expect(await ent.preguntaAbierta(db as never, WS, TEL)).toBeNull();
+    // Y lo siguiente se pregunta enseguida, no en cola.
+    await llega('nuevo Sofia Prueba7', { enviado: 300 });
+    await llega('Queremos ir a Medellín, somos 2 adultos', { enviado: 302, reenviado: true });
+    await llega('listo', { enviado: 304 });
+    expect(textos().at(-1)).toMatch(/^Sofia Prueba7 · Entendí 1 viaje:/);
+  });
+
+  it('con la tanda abierta y una respuesta que el cron todavía no tomó: «Descártalo» descarta las dos', async () => {
+    await llega('nuevo Laura Prueba7', { enviado: 0 });
+    await llega(CARTAGENA, { enviado: 2, reenviado: true });
+    await llega('listo', { enviado: 4 });
+    await llega('sí', { enviado: 8 }); // contestada, el cron aún no corre
+    expect(t.wa_bandeja_entregas[0]).toMatchObject({ estado: 'con_cliente' });
+    await llega('nuevo Diego Prueba7', { enviado: 10 });
+    await llega('Quiero un viaje para puntacana y curasao', { enviado: 12, reenviado: true });
+    await llega('Descártalo', { enviado: 14 });
+    expect(textos().at(-1)).toBe('Descarté lo pendiente de Diego Prueba7 y Laura Prueba7 (2 mensajes). No creé ni cargué nada.');
+    colaModelo = [LAURA];
+    await cron(60);
+    expect(t.negocios).toEqual([]);
+    expect(t.wa_bandeja_entendimientos).toEqual([]);
+  });
+
+  it('«descartar el 1» sigue siendo una corrección del resumen, no un descarte total', async () => {
+    await llega('nuevo Laura Prueba7', { enviado: 0 });
+    await llega(CARTAGENA, { enviado: 2, reenviado: true });
+    await llega('salimos de Bogotá', { enviado: 3, reenviado: true });
+    await llega('listo', { enviado: 4 });
+    await llega('descartar el 1', { enviado: 8 });
+    expect(t.wa_bandeja_mensajes.find(m => m.cuerpo === 'descartar el 1')).toMatchObject({ papel: 'respuesta_cliente' });
+    await cron(60);
+    expect(textos().at(-1)).toContain('Corregido. Así queda:');
+    expect(textos().at(-1)).toContain('Descartados: 1');
+  });
+});
+
+describe('Trappvel 2026-10-02 · regla 3: con una pregunta abierta, su respuesta la contesta aunque haya una caja abierta', () => {
+  it('una corrección del resumen escrita con una caja abierta va al resumen, no a la caja', async () => {
+    await llega('nuevo Laura Prueba7', { enviado: 0 });
+    await llega(CARTAGENA, { enviado: 2, reenviado: true });
+    await llega('salimos de Bogotá', { enviado: 3, reenviado: true });
+    await llega('listo', { enviado: 4 });
+    await llega('nuevo Diego Prueba7', { enviado: 10 });
+    await llega('Quiero un viaje para puntacana y curasao', { enviado: 12, reenviado: true });
+    await llega('el 2 es nuevo Pedro Prueba7', { enviado: 14 });
+    expect(t.wa_bandeja_mensajes.find(m => m.cuerpo === 'el 2 es nuevo Pedro Prueba7')).toMatchObject({ papel: 'respuesta_cliente' });
+    expect(t.wa_bandeja_entregas.filter(e => e.estado === 'abierta')).toHaveLength(1); // la de Diego sigue abierta, sin ese mensaje
   });
 });

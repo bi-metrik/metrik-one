@@ -1762,7 +1762,11 @@ function mensajesDeLaEntrega(e: Fila): number {
  */
 export async function descartarPendientesDelRemitente(
   supabase: SupabaseClient,
-  p: { workspaceId: string; phone: string; texto: string; wamid: string; enviadoAt: string | null; guardarRespuesta: boolean },
+  p: {
+    workspaceId: string; phone: string; texto: string; wamid: string; enviadoAt: string | null; guardarRespuesta: boolean;
+    /** La config de la bandeja: en modo `encabezado`, una entrega sin reparto se nombra y se cuenta por sus cajas. */
+    bandeja: Pick<ConfigBandeja, 'modoViajes' | 'horasCajaActiva'>;
+  },
 ): Promise<ParteDescartada[]> {
   const partes: ParteDescartada[] = [];
   let guardar = p.guardarRespuesta;
@@ -1815,7 +1819,12 @@ export async function descartarPendientesDelRemitente(
       .update({ estado: 'esperando_cliente', pregunta_enviada_at: null, pregunta_error: DESCARTE_DEL_COMERCIAL })
       .eq('id', e.id).eq('estado', e.estado).select('id');
     if ((hecho ?? []).length === 0) continue;
-    partes.push({ nombre: nombreDeLaEntrega((e.plan_viajes ?? null) as PlanViajes | null, (e.created_at as string | null) ?? null), n: mensajesDeLaEntrega(e) });
+    // Sin reparto todavía (la pregunta esperaba turno), en modo `encabezado` se nombra por sus cajas y se
+    // cuentan los mensajes que irían al resumen (sin encabezados ni acuses).
+    const parte = !e.plan_viajes && p.bandeja.modoViajes === 'encabezado'
+      ? await nombreYConteoDeLaTanda(supabase, e.id as string, p.workspaceId, p.bandeja.horasCajaActiva)
+      : { nombre: nombreDeLaEntrega((e.plan_viajes ?? null) as PlanViajes | null, (e.created_at as string | null) ?? null), n: mensajesDeLaEntrega(e) };
+    partes.push(parte);
     await guardarEn(e.id, 'respuesta_cliente', e.remitente_staff_id, e.remitente_colaborador_id);
   }
   return partes;
