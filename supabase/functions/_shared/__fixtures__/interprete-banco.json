@@ -1,0 +1,1381 @@
+{
+ "nota": "Banco de la simulación del 2026-10-02 (escenarios.json, 45 turnos). Sintético: los clientes y negocios son inventados; el nombre del equipo se cambió por «Vale». `modelo` es lo que devuelve el modelo falso: la primera corrida de gemini-2.5-flash que acertó, convertida al esquema nuevo (viaje_* → ref), o a mano donde ninguna acertó. Cambios de expectativa: TV5 descarta la tanda (H2, caso 2) y H2 descarta solo la pregunta (H2, caso 1).",
+ "contextos": {
+  "trappvel": {
+   "viajes": [
+    {
+     "id": "n9",
+     "codigo": "T1 26 9",
+     "cliente": "LUISA MEJÍA",
+     "destino": "SAN ANDRÉS"
+    },
+    {
+     "id": "n11",
+     "codigo": "T1 26 11",
+     "cliente": "CAROLINA RUIZ",
+     "destino": "PUNTA CANA"
+    },
+    {
+     "id": "n12",
+     "codigo": "T1 26 12",
+     "cliente": "JORGE PÉREZ",
+     "destino": "MADRID"
+    },
+    {
+     "id": "n14",
+     "codigo": "T1 26 14",
+     "cliente": "LINA PÉREZ",
+     "destino": "CARTAGENA"
+    }
+   ]
+  },
+  "termotech": {
+   "negocios": [
+    {
+     "id": "a1",
+     "codigo": "C1 26 1",
+     "nombre": "Consorcio Arena Ingeniería · chiller torre B"
+    },
+    {
+     "id": "c3",
+     "codigo": "M1 26 3",
+     "nombre": "Clínica del Norte · mantenimiento preventivo"
+    },
+    {
+     "id": "e2",
+     "codigo": "C1 26 2",
+     "nombre": "Edificio Torre 80 · ductos piso 4"
+    }
+   ]
+  }
+ },
+ "turnos": [
+  {
+   "id": "TV1",
+   "turno": 1,
+   "cliente": "trappvel",
+   "texto": "me escribió un cliente nuevo, Daniel Pérez, quiere ir a China en marzo",
+   "reenviado": false,
+   "pendiente": null,
+   "pendiente_previo": null,
+   "tanda": false,
+   "control": false,
+   "modelo": {
+    "acciones": [
+     {
+      "accion": "abrir_viaje",
+      "evidencia": "me escribió un cliente nuevo, Daniel Pérez",
+      "nuevo_cliente": "Daniel Pérez"
+     },
+     {
+      "accion": "contenido",
+      "evidencia": "quiere ir a China en marzo"
+     }
+    ]
+   },
+   "origen_modelo": "grabado (flash, corrida ok)",
+   "esperado": {
+    "accion": "abrir_viaje",
+    "nuevo": "daniel perez",
+    "con_contenido": true
+   }
+  },
+  {
+   "id": "TV1",
+   "turno": 3,
+   "cliente": "trappvel",
+   "texto": "eso es todo de él",
+   "reenviado": false,
+   "pendiente": null,
+   "pendiente_previo": null,
+   "tanda": false,
+   "control": false,
+   "modelo": {
+    "acciones": [
+     {
+      "accion": "cerrar_tanda",
+      "evidencia": "eso es todo de él"
+     }
+    ]
+   },
+   "origen_modelo": "grabado (flash, corrida ok)",
+   "esperado": {
+    "accion": "cerrar_tanda"
+   }
+  },
+  {
+   "id": "TV2",
+   "turno": 1,
+   "cliente": "trappvel",
+   "texto": "lo de Cartagena",
+   "reenviado": false,
+   "pendiente": null,
+   "pendiente_previo": null,
+   "tanda": false,
+   "control": false,
+   "modelo": {
+    "acciones": [
+     {
+      "accion": "abrir_viaje",
+      "evidencia": "lo de Cartagena",
+      "ref": {
+       "destino": "Cartagena"
+      }
+     }
+    ]
+   },
+   "origen_modelo": "grabado (flash, corrida ok)",
+   "esperado": {
+    "accion": "abrir_viaje",
+    "viaje": "n14"
+   }
+  },
+  {
+   "id": "TV2",
+   "turno": 3,
+   "cliente": "trappvel",
+   "texto": "y la de Punta Cana me dijo que prefiere todo incluido",
+   "reenviado": false,
+   "pendiente": null,
+   "pendiente_previo": null,
+   "tanda": false,
+   "control": false,
+   "modelo": {
+    "acciones": [
+     {
+      "accion": "abrir_viaje",
+      "evidencia": "la de Punta Cana",
+      "ref": {
+       "destino": "Punta Cana"
+      }
+     },
+     {
+      "accion": "contenido",
+      "evidencia": "prefiere todo incluido",
+      "ref": {
+       "destino": "Punta Cana"
+      }
+     }
+    ]
+   },
+   "origen_modelo": "grabado (flash, corrida ok)",
+   "esperado": {
+    "accion": "abrir_viaje",
+    "viaje": "n11",
+    "con_contenido": true
+   }
+  },
+  {
+   "id": "TV3a",
+   "turno": 1,
+   "cliente": "trappvel",
+   "texto": "son de Carolina",
+   "reenviado": false,
+   "pendiente": {
+    "capa": "entrega",
+    "texto": "¿A qué viaje van estos 3 mensajes?\n1) T1 26 9 · Luisa Mejía\n2) T1 26 11 · Carolina Ruiz\n3) NUEVO nombre\n4) DESCARTAR",
+    "opciones": [
+     "n9",
+     "n11",
+     "nuevo",
+     "descartar"
+    ]
+   },
+   "pendiente_previo": null,
+   "tanda": true,
+   "control": false,
+   "modelo": {
+    "acciones": [
+     {
+      "accion": "responder",
+      "evidencia": "son de Carolina",
+      "ref": {
+       "cliente": "Carolina"
+      },
+      "opcion": "n11"
+     }
+    ]
+   },
+   "origen_modelo": "grabado (flash, corrida ok)",
+   "esperado": {
+    "accion": "responder",
+    "opcion": "n11"
+   }
+  },
+  {
+   "id": "TV3b",
+   "turno": 1,
+   "cliente": "trappvel",
+   "texto": "ninguno, es una clienta nueva que se llama Marta Gil",
+   "reenviado": false,
+   "pendiente": {
+    "capa": "entrega",
+    "texto": "¿A qué viaje van estos 3 mensajes?\n1) T1 26 9 · Luisa Mejía\n2) T1 26 11 · Carolina Ruiz\n3) NUEVO nombre\n4) DESCARTAR",
+    "opciones": [
+     "n9",
+     "n11",
+     "nuevo",
+     "descartar"
+    ]
+   },
+   "pendiente_previo": null,
+   "tanda": true,
+   "control": false,
+   "modelo": {
+    "acciones": [
+     {
+      "accion": "responder",
+      "evidencia": "ninguno, es una clienta nueva que se llama Marta Gil",
+      "ref": {
+       "cliente": "Marta Gil"
+      },
+      "opcion": "nuevo"
+     }
+    ]
+   },
+   "origen_modelo": "grabado (flash, corrida ok)",
+   "esperado": {
+    "accion": "responder",
+    "opcion": "nuevo",
+    "nuevo": "marta gil"
+   }
+  },
+  {
+   "id": "TV3c",
+   "turno": 1,
+   "cliente": "trappvel",
+   "texto": "los de la señora de San Andrés",
+   "reenviado": false,
+   "pendiente": {
+    "capa": "entrega",
+    "texto": "¿A qué viaje van estos 3 mensajes?\n1) T1 26 9 · Luisa Mejía\n2) T1 26 11 · Carolina Ruiz\n3) NUEVO nombre\n4) DESCARTAR",
+    "opciones": [
+     "n9",
+     "n11",
+     "nuevo",
+     "descartar"
+    ]
+   },
+   "pendiente_previo": null,
+   "tanda": true,
+   "control": false,
+   "modelo": {
+    "acciones": [
+     {
+      "accion": "responder",
+      "evidencia": "los de la señora de San Andrés",
+      "ref": {
+       "cliente": "Luisa Mejía",
+       "destino": "San Andrés"
+      },
+      "opcion": "n9"
+     }
+    ]
+   },
+   "origen_modelo": "grabado (flash, corrida ok)",
+   "esperado": {
+    "accion": "responder",
+    "opcion": "n9"
+   }
+  },
+  {
+   "id": "TV4",
+   "turno": 1,
+   "cliente": "trappvel",
+   "texto": "el último no es de ella, es de Jorge",
+   "reenviado": false,
+   "pendiente": {
+    "capa": "resumen",
+    "texto": "Entendí 1 viaje:\nT1 26 11 · Carolina Ruiz\n 1. «Salimos el 28 de diciembre…»\n 2. «Somos 3 adultos y 2 niños…»\n 3. «Para Madrid queremos hotel cerca…»\n¿Así? sí / corregir",
+    "opciones": [
+     "si",
+     "corregir"
+    ],
+    "mensajes": 3
+   },
+   "pendiente_previo": null,
+   "tanda": true,
+   "control": false,
+   "modelo": {
+    "acciones": [
+     {
+      "accion": "mover",
+      "evidencia": "el último no es de ella, es de Jorge",
+      "ref": {
+       "cliente": "Jorge"
+      },
+      "n": 3
+     }
+    ]
+   },
+   "origen_modelo": "grabado (flash, corrida ok)",
+   "esperado": {
+    "accion": "mover",
+    "n": 3,
+    "viaje": "n12"
+   }
+  },
+  {
+   "id": "TV4",
+   "turno": 2,
+   "cliente": "trappvel",
+   "texto": "dale, así está bien",
+   "reenviado": false,
+   "pendiente": {
+    "capa": "resumen",
+    "texto": "Entendí 1 viaje:\nT1 26 11 · Carolina Ruiz\n 1. «Salimos el 28 de diciembre…»\n 2. «Somos 3 adultos y 2 niños…»\n 3. «Para Madrid queremos hotel cerca…»\n¿Así? sí / corregir",
+    "opciones": [
+     "si",
+     "corregir"
+    ],
+    "mensajes": 3
+   },
+   "pendiente_previo": null,
+   "tanda": true,
+   "control": false,
+   "modelo": {
+    "acciones": [
+     {
+      "accion": "confirmar",
+      "evidencia": "dale, así está bien"
+     }
+    ]
+   },
+   "origen_modelo": "grabado (flash, corrida ok)",
+   "esperado": {
+    "accion": "confirmar"
+   }
+  },
+  {
+   "id": "TV5",
+   "turno": 1,
+   "cliente": "trappvel",
+   "texto": "uy no, eso lo mandé por error, bórralo",
+   "reenviado": false,
+   "pendiente": null,
+   "pendiente_previo": null,
+   "tanda": true,
+   "control": false,
+   "modelo": {
+    "acciones": [
+     {
+      "accion": "descartar",
+      "evidencia": "uy no, eso lo mandé por error, bórralo",
+      "alcance": "todo"
+     }
+    ]
+   },
+   "origen_modelo": "grabado (flash, corrida ok)",
+   "esperado": {
+    "accion": "descartar",
+    "alcance": "tanda"
+   }
+  },
+  {
+   "id": "TV6",
+   "turno": 1,
+   "cliente": "trappvel",
+   "texto": "oye cuántas solicitudes tengo abiertas?",
+   "reenviado": false,
+   "pendiente": null,
+   "pendiente_previo": null,
+   "tanda": true,
+   "control": false,
+   "modelo": {
+    "acciones": [
+     {
+      "accion": "consulta",
+      "evidencia": "cuántas solicitudes tengo abiertas?"
+     }
+    ]
+   },
+   "origen_modelo": "grabado (flash, corrida ok)",
+   "esperado": {
+    "accion": "consulta"
+   }
+  },
+  {
+   "id": "TV7",
+   "turno": 1,
+   "cliente": "trappvel",
+   "texto": "pagué 85 mil de taxi para ir a la reunión con Carolina",
+   "reenviado": false,
+   "pendiente": null,
+   "pendiente_previo": null,
+   "tanda": true,
+   "control": false,
+   "modelo": {
+    "acciones": [
+     {
+      "accion": "gasto",
+      "evidencia": "pagué 85 mil de taxi para ir a la reunión con Carolina",
+      "monto": 85000,
+      "negocio": "CAROLINA RUIZ"
+     }
+    ]
+   },
+   "origen_modelo": "grabado (flash, corrida ok)",
+   "esperado": {
+    "accion": "gasto",
+    "gastos": [
+     {
+      "monto": 85000
+     }
+    ]
+   }
+  },
+  {
+   "id": "TV8",
+   "turno": 1,
+   "cliente": "trappvel",
+   "texto": "ojo que esta señora es súper regatera",
+   "reenviado": false,
+   "pendiente": null,
+   "pendiente_previo": null,
+   "tanda": true,
+   "control": false,
+   "modelo": {
+    "acciones": [
+     {
+      "accion": "nota_interna",
+      "evidencia": "ojo que esta señora es súper regatera"
+     }
+    ]
+   },
+   "origen_modelo": "grabado (flash, corrida ok)",
+   "esperado": {
+    "accion": "nota_interna"
+   }
+  },
+  {
+   "id": "TV8",
+   "turno": 2,
+   "cliente": "trappvel",
+   "texto": "ella me dijo por llamada que no quiere escalas",
+   "reenviado": false,
+   "pendiente": null,
+   "pendiente_previo": null,
+   "tanda": true,
+   "control": false,
+   "modelo": {
+    "acciones": [
+     {
+      "accion": "contenido",
+      "evidencia": "ella me dijo por llamada que no quiere escalas"
+     }
+    ]
+   },
+   "origen_modelo": "grabado (flash, corrida ok)",
+   "esperado": {
+    "accion": "contenido"
+   }
+  },
+  {
+   "id": "TV9",
+   "turno": 1,
+   "cliente": "trappvel",
+   "texto": "si",
+   "reenviado": false,
+   "pendiente": null,
+   "pendiente_previo": null,
+   "tanda": true,
+   "control": false,
+   "modelo": {
+    "acciones": [
+     {
+      "accion": "acuse",
+      "evidencia": "si"
+     }
+    ]
+   },
+   "origen_modelo": "grabado (flash, corrida ok)",
+   "esperado": {
+    "accion": "acuse"
+   }
+  },
+  {
+   "id": "TV10",
+   "turno": 1,
+   "cliente": "trappvel",
+   "texto": "Pérez",
+   "reenviado": false,
+   "pendiente": null,
+   "pendiente_previo": null,
+   "tanda": false,
+   "control": false,
+   "modelo": {
+    "acciones": [
+     {
+      "accion": "abrir_viaje",
+      "evidencia": "Pérez",
+      "ref": {
+       "cliente": "Pérez"
+      }
+     }
+    ]
+   },
+   "origen_modelo": "a mano",
+   "esperado": {
+    "accion": "preguntar_viaje",
+    "candidatos": [
+     "n12",
+     "n14"
+    ]
+   }
+  },
+  {
+   "id": "TV11",
+   "turno": 1,
+   "cliente": "trappvel",
+   "texto": "Carolina confirma que salen el 28 y Luisa pregunta si hay vuelo directo desde Medellín",
+   "reenviado": false,
+   "pendiente": null,
+   "pendiente_previo": null,
+   "tanda": false,
+   "control": false,
+   "modelo": {
+    "acciones": [
+     {
+      "accion": "contenido",
+      "evidencia": "Carolina confirma que salen el 28",
+      "ref": {
+       "cliente": "CAROLINA RUIZ"
+      }
+     },
+     {
+      "accion": "contenido",
+      "evidencia": "Luisa pregunta si hay vuelo directo desde Medellín",
+      "ref": {
+       "cliente": "LUISA MEJÍA"
+      }
+     }
+    ]
+   },
+   "origen_modelo": "grabado (flash, corrida ok)",
+   "esperado": {
+    "accion": "contenido_varios",
+    "viajes": [
+     "n11",
+     "n9"
+    ]
+   }
+  },
+  {
+   "id": "TV12",
+   "turno": 1,
+   "cliente": "trappvel",
+   "texto": "buenos días!",
+   "reenviado": false,
+   "pendiente": null,
+   "pendiente_previo": null,
+   "tanda": false,
+   "control": false,
+   "modelo": {
+    "acciones": [
+     {
+      "accion": "saludo",
+      "evidencia": "buenos días!"
+     }
+    ]
+   },
+   "origen_modelo": "grabado (flash, corrida ok)",
+   "esperado": {
+    "accion": "saludo"
+   }
+  },
+  {
+   "id": "TV13",
+   "turno": 1,
+   "cliente": "trappvel",
+   "texto": "nuevo cliente",
+   "reenviado": false,
+   "pendiente": null,
+   "pendiente_previo": null,
+   "tanda": false,
+   "control": false,
+   "modelo": {
+    "acciones": [
+     {
+      "accion": "abrir_viaje",
+      "evidencia": "nuevo cliente",
+      "nuevo_sin_nombre": true
+     }
+    ]
+   },
+   "origen_modelo": "grabado (flash, corrida ok)",
+   "esperado": {
+    "accion": "pedir_nombre"
+   }
+  },
+  {
+   "id": "TV13",
+   "turno": 2,
+   "cliente": "trappvel",
+   "texto": "se llama Andrés Gómez",
+   "reenviado": false,
+   "pendiente": null,
+   "pendiente_previo": "pide_nombre",
+   "tanda": false,
+   "control": false,
+   "modelo": {
+    "acciones": [
+     {
+      "accion": "responder",
+      "evidencia": "Andrés Gómez",
+      "ref": {
+       "cliente": "Andrés Gómez"
+      },
+      "opcion": "nuevo"
+     }
+    ]
+   },
+   "origen_modelo": "grabado (flash, corrida ok)",
+   "esperado": {
+    "accion": "abrir_viaje",
+    "nuevo": "andres gomez"
+   }
+  },
+  {
+   "id": "TV14",
+   "turno": 1,
+   "cliente": "trappvel",
+   "texto": "espera, primero te paso lo de Jorge",
+   "reenviado": false,
+   "pendiente": {
+    "capa": "entrega",
+    "texto": "¿A qué viaje van estos 2 mensajes?\n1) T1 26 9 · Luisa Mejía\n2) T1 26 11 · Carolina Ruiz\n3) NUEVO nombre\n4) DESCARTAR",
+    "opciones": [
+     "n9",
+     "n11",
+     "nuevo",
+     "descartar"
+    ]
+   },
+   "pendiente_previo": null,
+   "tanda": true,
+   "control": false,
+   "modelo": {
+    "acciones": [
+     {
+      "accion": "responder",
+      "evidencia": "espera, primero te paso lo de Jorge",
+      "ref": {
+       "cliente": "Jorge"
+      },
+      "opcion": "n12"
+     }
+    ]
+   },
+   "origen_modelo": "grabado (flash, corrida ok)",
+   "esperado": {
+    "accion": "abrir_viaje",
+    "viaje": "n12"
+   }
+  },
+  {
+   "id": "TT1",
+   "turno": 1,
+   "cliente": "termotech",
+   "texto": "pagué 18.900 de peaje yendo a la obra de Arena",
+   "reenviado": false,
+   "pendiente": null,
+   "pendiente_previo": null,
+   "tanda": false,
+   "control": false,
+   "modelo": {
+    "acciones": [
+     {
+      "accion": "gasto",
+      "evidencia": "pagué 18.900 de peaje yendo a la obra de Arena",
+      "monto": 18900,
+      "negocio": "Consorcio Arena Ingeniería"
+     }
+    ]
+   },
+   "origen_modelo": "grabado (flash, corrida ok)",
+   "esperado": {
+    "accion": "gasto",
+    "gastos": [
+     {
+      "monto": 18900,
+      "negocio": "a1",
+      "desc": "peaje"
+     }
+    ]
+   }
+  },
+  {
+   "id": "TT2a",
+   "turno": 1,
+   "cliente": "termotech",
+   "texto": "Quiero saber cuánto gasté hoy",
+   "reenviado": false,
+   "pendiente": null,
+   "pendiente_previo": null,
+   "tanda": false,
+   "control": false,
+   "modelo": {
+    "acciones": [
+     {
+      "accion": "consulta",
+      "evidencia": "cuánto gasté hoy"
+     }
+    ]
+   },
+   "origen_modelo": "grabado (flash, corrida ok)",
+   "esperado": {
+    "accion": "consulta"
+   }
+  },
+  {
+   "id": "TT2b",
+   "turno": 1,
+   "cliente": "termotech",
+   "texto": "Quiero ver los egresos",
+   "reenviado": false,
+   "pendiente": null,
+   "pendiente_previo": null,
+   "tanda": false,
+   "control": false,
+   "modelo": {
+    "acciones": [
+     {
+      "accion": "consulta",
+      "evidencia": "Quiero ver los egresos"
+     }
+    ]
+   },
+   "origen_modelo": "grabado (flash, corrida ok)",
+   "esperado": {
+    "accion": "consulta"
+   }
+  },
+  {
+   "id": "TT2c",
+   "turno": 1,
+   "cliente": "termotech",
+   "texto": "Movimientos",
+   "reenviado": false,
+   "pendiente": null,
+   "pendiente_previo": null,
+   "tanda": false,
+   "control": false,
+   "modelo": {
+    "acciones": [
+     {
+      "accion": "consulta",
+      "evidencia": "Movimientos"
+     }
+    ]
+   },
+   "origen_modelo": "grabado (flash, corrida ok)",
+   "esperado": {
+    "accion": "consulta"
+   }
+  },
+  {
+   "id": "TT3",
+   "turno": 1,
+   "cliente": "termotech",
+   "texto": "Peaje",
+   "reenviado": false,
+   "pendiente": {
+    "capa": "gasto_confirmar",
+    "texto": "Gasto $18.900 · Otros gastos operativos · C1 26 1 Arena\n✅ Confirmar  ❌ Cancelar",
+    "borrador": {
+     "monto": 18900,
+     "negocio": "a1"
+    }
+   },
+   "pendiente_previo": null,
+   "tanda": false,
+   "control": false,
+   "modelo": {
+    "acciones": [
+     {
+      "accion": "corregir_gasto",
+      "evidencia": "Peaje",
+      "campo": "descripcion",
+      "valor": "Peaje"
+     }
+    ]
+   },
+   "origen_modelo": "grabado (flash, corrida ok)",
+   "esperado": {
+    "accion": "corregir_gasto",
+    "campo": "descripcion",
+    "valor": "peaje"
+   }
+  },
+  {
+   "id": "TT3",
+   "turno": 2,
+   "cliente": "termotech",
+   "texto": "ahora sí, guárdalo",
+   "reenviado": false,
+   "pendiente": {
+    "capa": "gasto_confirmar",
+    "texto": "Gasto $18.900 · Otros gastos operativos · C1 26 1 Arena\n✅ Confirmar  ❌ Cancelar",
+    "borrador": {
+     "monto": 18900,
+     "negocio": "a1"
+    }
+   },
+   "pendiente_previo": null,
+   "tanda": false,
+   "control": false,
+   "modelo": {
+    "acciones": [
+     {
+      "accion": "confirmar",
+      "evidencia": "ahora sí, guárdalo"
+     }
+    ]
+   },
+   "origen_modelo": "grabado (flash, corrida ok)",
+   "esperado": {
+    "accion": "confirmar"
+   }
+  },
+  {
+   "id": "TT4",
+   "turno": 1,
+   "cliente": "termotech",
+   "texto": "no, son 19.800",
+   "reenviado": false,
+   "pendiente": {
+    "capa": "gasto_confirmar",
+    "texto": "Gasto $18.900 · Peaje · C1 26 1 Arena\n✅ Confirmar  ❌ Cancelar",
+    "borrador": {
+     "monto": 18900,
+     "negocio": "a1",
+     "desc": "peaje"
+    }
+   },
+   "pendiente_previo": null,
+   "tanda": false,
+   "control": false,
+   "modelo": {
+    "acciones": [
+     {
+      "accion": "corregir_gasto",
+      "evidencia": "son 19.800",
+      "campo": "monto",
+      "valor": "19800"
+     }
+    ]
+   },
+   "origen_modelo": "grabado (flash, corrida ok)",
+   "esperado": {
+    "accion": "corregir_gasto",
+    "campo": "monto",
+    "valor": 19800
+   }
+  },
+  {
+   "id": "TT5",
+   "turno": 1,
+   "cliente": "termotech",
+   "texto": "pagué la ferretería",
+   "reenviado": false,
+   "pendiente": null,
+   "pendiente_previo": null,
+   "tanda": false,
+   "control": false,
+   "modelo": {
+    "acciones": [
+     {
+      "accion": "gasto",
+      "evidencia": "pagué la ferretería",
+      "descripcion": "ferretería"
+     }
+    ]
+   },
+   "origen_modelo": "a mano",
+   "esperado": {
+    "accion": "gasto",
+    "gastos": [
+     {
+      "monto": null,
+      "desc": "ferreteria"
+     }
+    ]
+   }
+  },
+  {
+   "id": "TT5",
+   "turno": 2,
+   "cliente": "termotech",
+   "texto": "85 mil",
+   "reenviado": false,
+   "pendiente": null,
+   "pendiente_previo": "gasto_monto",
+   "tanda": false,
+   "control": false,
+   "modelo": {
+    "acciones": [
+     {
+      "accion": "responder",
+      "evidencia": "85 mil",
+      "monto": 85000
+     }
+    ]
+   },
+   "origen_modelo": "grabado (flash, corrida ok)",
+   "esperado": {
+    "accion": "responder",
+    "valor": 85000
+   }
+  },
+  {
+   "id": "TT6",
+   "turno": 1,
+   "cliente": "termotech",
+   "texto": "almuerzo 25 mil, gasolina 90 mil y peaje 18.900, todo de Arena",
+   "reenviado": false,
+   "pendiente": null,
+   "pendiente_previo": null,
+   "tanda": false,
+   "control": false,
+   "modelo": {
+    "acciones": [
+     {
+      "accion": "gasto",
+      "evidencia": "almuerzo 25 mil",
+      "id": "a1",
+      "monto": 25000,
+      "negocio": "Arena"
+     },
+     {
+      "accion": "gasto",
+      "evidencia": "gasolina 90 mil",
+      "id": "a1",
+      "monto": 90000,
+      "negocio": "Arena"
+     },
+     {
+      "accion": "gasto",
+      "evidencia": "peaje 18.900",
+      "id": "a1",
+      "monto": 18900,
+      "negocio": "Arena"
+     }
+    ]
+   },
+   "origen_modelo": "grabado (flash, corrida ok)",
+   "esperado": {
+    "accion": "gasto",
+    "gastos": [
+     {
+      "monto": 25000,
+      "negocio": "a1"
+     },
+     {
+      "monto": 90000,
+      "negocio": "a1"
+     },
+     {
+      "monto": 18900,
+      "negocio": "a1"
+     }
+    ]
+   }
+  },
+  {
+   "id": "TT7",
+   "turno": 1,
+   "cliente": "termotech",
+   "texto": "el de 100 mil de anoche era hospedaje, no alimentación",
+   "reenviado": false,
+   "pendiente": null,
+   "pendiente_previo": null,
+   "tanda": false,
+   "control": false,
+   "modelo": {
+    "acciones": [
+     {
+      "accion": "fuera_de_alcance",
+      "evidencia": "el de 100 mil de anoche era hospedaje",
+      "que": "cambiar un gasto ya guardado"
+     }
+    ]
+   },
+   "origen_modelo": "a mano",
+   "esperado": {
+    "accion": "fuera_de_alcance"
+   }
+  },
+  {
+   "id": "TT8",
+   "turno": 1,
+   "cliente": "termotech",
+   "texto": "eh bueno, hoy compré dos rollos de tubería de cobre en el Homecenter por 340 mil, eso es para lo de la clínica",
+   "reenviado": false,
+   "pendiente": null,
+   "pendiente_previo": null,
+   "tanda": false,
+   "control": false,
+   "modelo": {
+    "acciones": [
+     {
+      "accion": "gasto",
+      "evidencia": "hoy compré dos rollos de tubería de cobre en el Homecenter por 340 mil, eso es para lo de la clínica",
+      "monto": 340000,
+      "negocio": "Clínica del Norte"
+     }
+    ]
+   },
+   "origen_modelo": "grabado (flash, corrida ok)",
+   "esperado": {
+    "accion": "gasto",
+    "gastos": [
+     {
+      "monto": 340000,
+      "negocio": "c3"
+     }
+    ]
+   }
+  },
+  {
+   "id": "TT9",
+   "turno": 1,
+   "cliente": "termotech",
+   "texto": "pagué el internet de la oficina, 120 mil",
+   "reenviado": false,
+   "pendiente": null,
+   "pendiente_previo": null,
+   "tanda": false,
+   "control": false,
+   "modelo": {
+    "acciones": [
+     {
+      "accion": "gasto",
+      "evidencia": "pagué el internet de la oficina, 120 mil",
+      "monto": 120000,
+      "negocio": "empresa"
+     }
+    ]
+   },
+   "origen_modelo": "grabado (flash, corrida ok)",
+   "esperado": {
+    "accion": "gasto",
+    "gastos": [
+     {
+      "monto": 120000,
+      "negocio": "empresa"
+     }
+    ]
+   }
+  },
+  {
+   "id": "TT10",
+   "turno": 1,
+   "cliente": "termotech",
+   "texto": "no me dieron factura",
+   "reenviado": false,
+   "pendiente": {
+    "capa": "soporte",
+    "texto": "¿Tienes la foto de la factura?\n📷 Enviar  ⏰ Después  🚫 No tengo",
+    "opciones": [
+     "despues",
+     "no_tengo"
+    ]
+   },
+   "pendiente_previo": null,
+   "tanda": false,
+   "control": false,
+   "modelo": {
+    "acciones": [
+     {
+      "accion": "responder",
+      "evidencia": "no me dieron factura",
+      "opcion": "no_tengo"
+     }
+    ]
+   },
+   "origen_modelo": "grabado (flash, corrida ok)",
+   "esperado": {
+    "accion": "responder",
+    "opcion": "no_tengo"
+   }
+  },
+  {
+   "id": "TT11",
+   "turno": 1,
+   "cliente": "termotech",
+   "texto": "no, déjalo, ese no era",
+   "reenviado": false,
+   "pendiente": {
+    "capa": "gasto_confirmar",
+    "texto": "Gasto $47.500 · Otros gastos operativos · M1 26 3 Clínica\n✅ Confirmar  ❌ Cancelar",
+    "borrador": {
+     "monto": 47500,
+     "negocio": "c3"
+    }
+   },
+   "pendiente_previo": null,
+   "tanda": false,
+   "control": false,
+   "modelo": {
+    "acciones": [
+     {
+      "accion": "cancelar",
+      "evidencia": "no, déjalo, ese no era"
+     }
+    ]
+   },
+   "origen_modelo": "grabado (flash, corrida ok)",
+   "esperado": {
+    "accion": "cancelar"
+   }
+  },
+  {
+   "id": "TT12",
+   "turno": 1,
+   "cliente": "termotech",
+   "texto": "Hola",
+   "reenviado": false,
+   "pendiente": null,
+   "pendiente_previo": null,
+   "tanda": false,
+   "control": false,
+   "modelo": {
+    "acciones": [
+     {
+      "accion": "saludo",
+      "evidencia": "Hola"
+     }
+    ]
+   },
+   "origen_modelo": "grabado (flash, corrida ok)",
+   "esperado": {
+    "accion": "saludo"
+   }
+  },
+  {
+   "id": "H1",
+   "turno": 1,
+   "cliente": "trappvel",
+   "texto": "Vale te paso lo de la señora Mejía",
+   "reenviado": false,
+   "pendiente": null,
+   "pendiente_previo": null,
+   "tanda": false,
+   "control": true,
+   "modelo": {
+    "acciones": [
+     {
+      "accion": "abrir_viaje",
+      "evidencia": "lo de la señora Mejía",
+      "ref": {
+       "cliente": "LUISA MEJÍA"
+      }
+     }
+    ]
+   },
+   "origen_modelo": "grabado (flash, corrida ok)",
+   "esperado": {
+    "accion": "abrir_viaje",
+    "viaje": "n9"
+   }
+  },
+  {
+   "id": "H2",
+   "turno": 1,
+   "cliente": "trappvel",
+   "texto": "a ninguno, bótalos",
+   "reenviado": false,
+   "pendiente": {
+    "capa": "entrega",
+    "texto": "¿A qué viaje van estos 3 mensajes?\n1) T1 26 9 · Luisa Mejía\n2) T1 26 11 · Carolina Ruiz\n3) NUEVO nombre\n4) DESCARTAR",
+    "opciones": [
+     "n9",
+     "n11",
+     "nuevo",
+     "descartar"
+    ]
+   },
+   "pendiente_previo": null,
+   "tanda": true,
+   "control": true,
+   "modelo": {
+    "acciones": [
+     {
+      "accion": "responder",
+      "evidencia": "a ninguno, bótalos",
+      "opcion": "descartar"
+     }
+    ]
+   },
+   "origen_modelo": "a mano",
+   "esperado": {
+    "accion": "responder",
+    "opcion": "descartar"
+   }
+  },
+  {
+   "id": "H3",
+   "turno": 1,
+   "cliente": "trappvel",
+   "texto": "ya, eso era todo lo de ella",
+   "reenviado": false,
+   "pendiente": null,
+   "pendiente_previo": null,
+   "tanda": true,
+   "control": true,
+   "modelo": {
+    "acciones": [
+     {
+      "accion": "cerrar_tanda",
+      "evidencia": "ya, eso era todo lo de ella"
+     }
+    ]
+   },
+   "origen_modelo": "grabado (flash, corrida ok)",
+   "esperado": {
+    "accion": "cerrar_tanda"
+   }
+  },
+  {
+   "id": "H4",
+   "turno": 1,
+   "cliente": "trappvel",
+   "texto": "Jorge me escribió que mejor viajan el 10 de enero",
+   "reenviado": false,
+   "pendiente": null,
+   "pendiente_previo": null,
+   "tanda": false,
+   "control": true,
+   "modelo": {
+    "acciones": [
+     {
+      "accion": "contenido",
+      "evidencia": "Jorge me escribió que mejor viajan el 10 de enero",
+      "ref": {
+       "cliente": "Jorge"
+      }
+     }
+    ]
+   },
+   "origen_modelo": "grabado (flash, corrida ok)",
+   "esperado": {
+    "accion": "abrir_viaje",
+    "viaje": "n12",
+    "con_contenido": true
+   }
+  },
+  {
+   "id": "H5",
+   "turno": 1,
+   "cliente": "termotech",
+   "texto": "es para la clínica, no para Arena",
+   "reenviado": false,
+   "pendiente": {
+    "capa": "gasto_confirmar",
+    "texto": "Gasto $47.500 · Materiales · C1 26 1 Arena\n✅ Confirmar  ❌ Cancelar",
+    "borrador": {
+     "monto": 47500,
+     "negocio": "a1",
+     "desc": "materiales"
+    }
+   },
+   "pendiente_previo": null,
+   "tanda": false,
+   "control": true,
+   "modelo": {
+    "acciones": [
+     {
+      "accion": "corregir_gasto",
+      "evidencia": "es para la clínica, no para Arena",
+      "campo": "negocio",
+      "valor": "Clínica del Norte"
+     }
+    ]
+   },
+   "origen_modelo": "grabado (flash, corrida ok)",
+   "esperado": {
+    "accion": "corregir_gasto",
+    "campo": "negocio",
+    "valor": "c3"
+   }
+  },
+  {
+   "id": "H6",
+   "turno": 1,
+   "cliente": "termotech",
+   "texto": "cuánto llevamos gastado en lo de Torre 80?",
+   "reenviado": false,
+   "pendiente": null,
+   "pendiente_previo": null,
+   "tanda": false,
+   "control": true,
+   "modelo": {
+    "acciones": [
+     {
+      "accion": "consulta",
+      "evidencia": "cuánto llevamos gastado en lo de Torre 80?",
+      "ref_negocio": "Edificio Torre 80"
+     }
+    ]
+   },
+   "origen_modelo": "grabado (flash, corrida ok)",
+   "esperado": {
+    "accion": "consulta"
+   }
+  },
+  {
+   "id": "H7",
+   "turno": 1,
+   "cliente": "termotech",
+   "texto": "gasté 60 lucas en refrigerante para el chiller",
+   "reenviado": false,
+   "pendiente": null,
+   "pendiente_previo": null,
+   "tanda": false,
+   "control": true,
+   "modelo": {
+    "acciones": [
+     {
+      "accion": "gasto",
+      "evidencia": "gasté 60 lucas en refrigerante para el chiller",
+      "monto": 60000,
+      "negocio": "chiller"
+     }
+    ]
+   },
+   "origen_modelo": "grabado (flash, corrida ok)",
+   "esperado": {
+    "accion": "gasto",
+    "gastos": [
+     {
+      "monto": 60000,
+      "negocio": "a1"
+     }
+    ]
+   }
+  },
+  {
+   "id": "H8",
+   "turno": 1,
+   "cliente": "trappvel",
+   "texto": "jajaja sí señora",
+   "reenviado": false,
+   "pendiente": null,
+   "pendiente_previo": null,
+   "tanda": true,
+   "control": true,
+   "modelo": {
+    "acciones": [
+     {
+      "accion": "acuse",
+      "evidencia": "jajaja sí señora"
+     }
+    ]
+   },
+   "origen_modelo": "grabado (flash, corrida ok)",
+   "esperado": {
+    "accion": "acuse"
+   }
+  }
+ ]
+}

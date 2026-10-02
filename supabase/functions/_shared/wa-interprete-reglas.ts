@@ -35,6 +35,7 @@ import {
 } from './wa-viajes-reglas.ts';
 import type { ResolucionEncabezado, ViajeAbierto } from './wa-viajes-reglas.ts';
 import { BTN_DESPUES, BTN_SIN_SOPORTE } from './handlers/registro/soporte-foto.ts';
+import { extraerDescripcionGasto } from './wa-gasto-descripcion.ts';
 import {
   CONTADOR_ALLOWED_INTENTS,
   OPERATOR_ALLOWED_INTENTS,
@@ -754,6 +755,17 @@ function porId(id: string | null | undefined, negocios: ReadonlyArray<NegocioCtx
   return negocios.find(n => n.alias === k) ?? null;
 }
 
+/**
+ * Solo las palabras de un dato que están ESCRITAS en el mensaje (§2.3). El modelo a veces copia el
+ * nombre completo del contexto («CAROLINA RUIZ» por «Carolina»): lo que no escribió la persona no
+ * cuenta para resolver, así que nunca resuelve más de lo que dice el mensaje. `null` si no queda nada.
+ */
+export function soloLoEscrito(dato: unknown, texto: string): string | null {
+  const t = new Set(norm(texto).split(' '));
+  const ws = norm(dato).split(' ').filter(w => w && t.has(w));
+  return ws.length ? ws.join(' ') : null;
+}
+
 /** V6 + V5: el viaje de una acción. El id del contexto vale sin volver a resolver; uno ajeno se quita. */
 function viajesDe(a: AccionModelo, e: EntradaValidador): { viajes: NegocioCtx[]; conRef: boolean; idAjeno: boolean } {
   const v = porId(a.id, e.negocios);
@@ -762,8 +774,8 @@ function viajesDe(a: AccionModelo, e: EntradaValidador): { viajes: NegocioCtx[];
   // Las palabras de `ref` deben estar escritas (o venir con un id del contexto, que ya no es el caso).
   const ref: Ref = {
     codigo: a.ref?.codigo && todoEscrito(a.ref.codigo, e.texto) ? a.ref.codigo : null,
-    cliente: a.ref?.cliente && todoEscrito(a.ref.cliente, e.texto) ? a.ref.cliente : null,
-    destino: a.ref?.destino && todoEscrito(a.ref.destino, e.texto) ? a.ref.destino : null,
+    cliente: soloLoEscrito(a.ref?.cliente, e.texto),
+    destino: soloLoEscrito(a.ref?.destino, e.texto),
   };
   const conRef = !!(ref.codigo || ref.cliente || ref.destino);
   return { viajes: conRef ? resolverViaje(ref, e.negocios) : [], conRef, idAjeno };
@@ -891,7 +903,7 @@ export function validar(crudo: unknown, e: EntradaValidador): Decision {
     }
     case 'actividad': {
       const fields: ParsedFields = { activity_text: e.texto, mensaje_original: e.texto };
-      const ref = a0.ref_negocio && todoEscrito(a0.ref_negocio, e.texto) ? a0.ref_negocio : null;
+      const ref = soloLoEscrito(a0.ref_negocio, e.texto);
       const n = porId(a0.id, e.negocios) ?? (ref ? resolverNegocio(ref, e.negocios) : null);
       if (n && n !== 'empresa' && n.codigo) fields.project_code = n.codigo;
       else if (ref) fields.entity_hint = ref;
@@ -1218,7 +1230,10 @@ function responderLista(a: AccionModelo, opcion: string, e: EntradaValidador, re
 // ── Gastos ──────────────────────────────────────────────────────────────────
 
 function negocioDelGasto(a: AccionModelo, e: EntradaValidador): GastoValidado['negocio'] {
-  const n = porId(a.id ?? a.negocio, e.negocios) ?? (a.negocio && (todoEscrito(a.negocio, e.texto) || /empresa|oficina|general/.test(norm(a.negocio))) ? resolverNegocio(a.negocio, e.negocios) : null);
+  // V12: gasto de la empresa solo si el modelo lo dice Y el mensaje lo escribe («oficina», «empresa», «general»).
+  const empresa = !!a.negocio && /\b(empresa|oficina|general)\b/.test(norm(a.negocio)) && /\b(empresa|oficina|general)\b/.test(norm(e.texto));
+  const escrito = a.negocio && todoEscrito(a.negocio, e.texto) ? a.negocio : soloLoEscrito(a.negocio, e.texto);
+  const n = porId(a.id ?? a.negocio, e.negocios) ?? (empresa ? 'empresa' : escrito ? resolverNegocio(escrito, e.negocios) : null);
   if (n === 'empresa') return 'empresa';
   return n ? { id: n.id, codigo: n.codigo, nombre: n.nombre ?? n.cliente } : null;
 }
@@ -1256,9 +1271,13 @@ function gastos(acc: AccionModelo[], e: EntradaValidador, rechazo: string | null
     const m = conMonto(a) ? Math.round(a.monto!) : null;
     // V9: un monto que no aparece escrito no se toma; el bot lo pregunta.
     if (m !== null && !montos.includes(m)) rechazo ??= 'V9_monto_no_escrito';
+    const monto = m !== null && montos.includes(m) ? m : null;
+    // Sin descripción del modelo, la de hoy: `extraerDescripcionGasto` sobre el mensaje (un gasto) o su
+    // evidencia (varios), que es como el parser de hoy saca «peaje» de «pagué 18.900 de peaje…».
+    const fuente = unidos.length === 1 ? e.texto : String(a.evidencia ?? '');
     return {
-      monto: m !== null && montos.includes(m) ? m : null,
-      descripcion: a.descripcion?.trim() || null,
+      monto,
+      descripcion: a.descripcion?.trim() || extraerDescripcionGasto(fuente, monto ?? undefined)?.trim() || null,
       negocio: negocioDelGasto(a, e),
     };
   });
