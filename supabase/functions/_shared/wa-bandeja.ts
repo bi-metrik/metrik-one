@@ -28,6 +28,7 @@ import {
   textoTandaDescartada,
   TEXTO_NADA_QUE_CANCELAR,
   esPalabraCierre,
+  esPedidoDeGuia,
   esPregunta,
   ESPERA_EN_VUELO_MS,
   fechaDeMeta,
@@ -36,6 +37,7 @@ import {
   quitarPrefijoConsulta,
   respuestaTrasRegistro,
   salidaDeLaSesion,
+  textoGuiaBandeja,
   textoPistaConsulta,
   textoPreguntaCliente,
   TEXTO_NADA_PENDIENTE,
@@ -115,7 +117,7 @@ async function encabezadoParaLaSesion(
  * Con la bandeja encendida MANDA LA BANDEJA (prueba en vivo del 2026-10-01): solo van al bot un
  * escrito con prefijo («gasto …», «bot …») y lo que contesta una conversación del bot de verdad a
  * medias. `textoParaElBot`: el escrito sin el prefijo de consulta. `atendido`: ya se contestó
- * (un «cancelar» que cortó la conversación del bot); no hay nada más que hacer.
+ * (un «cancelar» que cortó la conversación del bot, o un pedido de guía); no hay nada más que hacer.
  */
 export async function rutaDelMensaje(
   supabase: SupabaseClient,
@@ -131,15 +133,25 @@ export async function rutaDelMensaje(
   // Un reenvío va a la bandeja pase lo que pase, y un prefijo del bot va al bot: ninguno de los
   // dos necesita mirar la sesión.
   const conPrefijo = escrito && empiezaConPrefijoBot(message.text, config.prefijosBot);
-  const estado = reenviado || conPrefijo ? null : await sesionBotEsperando(supabase, message.phone, user.workspace_id);
+  // Un pedido de guía tampoco: se contesta y la conversación del bot a medias sigue como estaba.
+  const guia = escrito && !conPrefijo && esPedidoDeGuia(message.text);
+  const estado = reenviado || conPrefijo || guia ? null : await sesionBotEsperando(supabase, message.phone, user.workspace_id);
   const salida = estado && escrito
     ? salidaDeLaSesion({ texto: message.text, estadoSesion: estado, encabezado: await encabezadoParaLaSesion(supabase, user.workspace_id, message.text, config) })
     : null;
   const ruta = decidirRuta({
     modules, config, tipo: message.type, texto: message.text, reenviado, sesionBotEsperando: estado !== null, salidaDeSesion: salida,
   });
+  if (ruta === 'guia') {
+    // Solo la guía: sin registrar nada, la tanda abierta y la pregunta pendiente quedan intactas.
+    await enviar(message.phone, textoGuiaBandeja(config), user.workspace_id);
+    return { ruta, config, atendido: true };
+  }
   if (ruta === 'bot') {
     const sinPrefijo = conPrefijo ? quitarPrefijoConsulta(message.text, config.prefijosConsulta) : null;
+    // «bot ¿cómo funciona?» llega al bot como «ayuda»: el atajo del parser lo manda a `handleAyuda`
+    // sin pasar por el modelo, y ahí sale la guía de la bandeja arriba de la ayuda de siempre.
+    if (sinPrefijo && esPedidoDeGuia(sinPrefijo)) return { ruta, config, textoParaElBot: 'ayuda' };
     return sinPrefijo ? { ruta, config, textoParaElBot: sinPrefijo } : { ruta, config };
   }
   if (salida) {

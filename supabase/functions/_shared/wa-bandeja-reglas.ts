@@ -132,7 +132,80 @@ export function empiezaConPrefijoBot(texto: string, prefijos: string[]): boolean
   return primera.length > 0 && prefijos.includes(primera);
 }
 
-export type Ruta = 'bandeja' | 'bot';
+/**
+ * `guia`: un pedido de guía escrito («ayuda», «¿cómo funciona?»). Se contesta con la guía de la
+ * bandeja (`textoGuiaBandeja`) y no toca nada más: ni abre tanda, ni entra a la abierta, ni contesta
+ * la pregunta pendiente.
+ */
+export type Ruta = 'bandeja' | 'bot' | 'guia';
+
+/** Lo que pide la guía, escrito SOLO (el mensaje completo, normalizado con `normalizarGuia`). */
+export const PEDIDOS_DE_GUIA: readonly string[] = [
+  'ayuda', 'guia', 'como funciona', 'como funciona esto', 'como se usa', 'instrucciones', 'menu',
+];
+
+/** Minúsculas, sin tildes, sin signos ni emojis, espacios colapsados: «¡¿Cómo funciona?!» → «como funciona». */
+export function normalizarGuia(texto: string): string {
+  return String(texto ?? '')
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .toLowerCase()
+    .replace(/[^a-z0-9\s]/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
+/**
+ * ¿El texto entero es un pedido de guía? «Ayuda!», «AYUDA», «¿cómo funciona?», «menú», «?» sí;
+ * «necesito ayuda con el hotel» o «el menú del hotel» no: solo el mensaje completo cuenta. «?» solo
+ * (o «¿?», «??») también: sin letras, la normalización lo dejaría vacío.
+ */
+export function esPedidoDeGuia(texto: string): boolean {
+  const crudo = String(texto ?? '').replace(/\s+/g, '');
+  if (/^[¿?]+$/.test(crudo) && crudo.includes('?')) return true;
+  return PEDIDOS_DE_GUIA.includes(normalizarGuia(texto));
+}
+
+/**
+ * La guía de la bandeja, formato WhatsApp. Los prefijos y la palabra de cierre salen de la config
+ * del workspace (default: «bot», «gasto», «listo»). Cada afirmación está verificada contra el código
+ * (2026-10-02): el encabezado exacto se confirma con «📌» (`respuestaAlEncabezado`), «nuevo X» abre un
+ * viaje nuevo, el nombre del negocio y el código son encabezado (`resolverEncabezado`), con
+ * `confirmar: siempre` nada se carga sin el «sí», y la carga dice lo entendido, la línea de avance
+ * («Mínimo 7/9») y lo que falta (`mensajeAlComercial`). Las fotos solo aportan su pie (`cuerpoDelMensaje`).
+ */
+export function textoGuiaBandeja(config: Pick<ConfigBandeja, 'prefijosBot' | 'prefijosConsulta' | 'palabrasCierre'> = CONFIG_BANDEJA_POR_DEFECTO): string {
+  const consulta = config.prefijosConsulta[0] ?? 'bot';
+  const gasto = config.prefijosBot.find(p => !config.prefijosConsulta.includes(p)) ?? 'gasto';
+  const cierre = config.palabrasCierre[0] ?? 'listo';
+  return [
+    '*Cómo pasarle una solicitud de viaje al bot* ✈️',
+    '',
+    '*1. Di de quién es*',
+    'Escríbeme el cliente o el viaje:',
+    '• Cliente nuevo: `nuevo Carolina Ruiz`',
+    '• Viaje que ya existe: `Carolina Ruiz`, `Europa 2 días` o el código',
+    'Espera el 📌 con el viaje.',
+    '',
+    '*2. Pásame lo del cliente*',
+    'Reenvía los mensajes y audios del cliente, o escribe lo que te dijo. Para cambiar de cliente, escribe primero el nombre del otro.',
+    '',
+    `*3. Cierra con* \`${cierre}\``,
+    'Te muestro un resumen. Si está bien, responde `sí`. Sin el `sí` no cargo nada.',
+    '',
+    '*4. Lee lo que entendí*',
+    'Te digo qué cargué, cuánto lleva («Mínimo 7/9») y qué falta preguntarle al cliente.',
+    '',
+    '*Bueno saber*',
+    `• Los gastos siguen igual: empieza con \`${gasto}\`.`,
+    `• Para preguntarme algo, empieza con \`${consulta}\`.`,
+    '• No leo lo que hay dentro de las fotos ni los pantallazos, solo el texto que escribas.',
+    '• Escribe `ayuda` cuando quieras volver a ver esto.',
+  ].join('\n');
+}
+
+/** La guía con la config por defecto. */
+export const TEXTO_GUIA_BANDEJA = textoGuiaBandeja(CONFIG_BANDEJA_POR_DEFECTO);
 
 /** ¿El escrito es una pregunta? Con signo de interrogación (al abrir o al cerrar). */
 export function esPregunta(texto: string): boolean {
@@ -201,6 +274,10 @@ export interface EntradaRuta {
  *   2. reenviado → bandeja, siempre: un reenvío es material de una solicitud, y ni siquiera un
  *      gasto a medias puede tragárselo;
  *   3. escrito que empieza por un prefijo del bot («gasto …», «bot …») → el bot;
+ *   3b. pedido de guía escrito SOLO («ayuda», «¿cómo funciona?», `esPedidoDeGuia`) → `guia`: se contesta
+ *      con la guía y nada más. No abre tanda, no entra a la abierta y no contesta la pregunta pendiente
+ *      (la respuesta siguiente la contesta). Va antes de la 4: la conversación del bot a medias tampoco
+ *      se lo traga, y sigue a medias;
  *   4. conversación del bot de verdad a medias (un gasto esperando su foto) → el bot, salvo que el
  *      escrito la corte («cancelar» o un encabezado reconocido): entonces vuelve a la bandeja;
  *   5. todo lo demás → bandeja: notas de voz, fotos, encabezados, lo escrito con o sin tanda
@@ -215,6 +292,7 @@ export function decidirRuta(e: EntradaRuta): Ruta {
   if (!bandejaActiva(e.modules)) return 'bot';
   if (e.reenviado) return 'bandeja';
   if (e.tipo === 'text' && empiezaConPrefijoBot(e.texto, e.config.prefijosBot)) return 'bot';
+  if (e.tipo === 'text' && esPedidoDeGuia(e.texto)) return 'guia';
   if (e.sesionBotEsperando) return e.tipo === 'text' && e.salidaDeSesion ? 'bandeja' : 'bot';
   return 'bandeja';
 }
