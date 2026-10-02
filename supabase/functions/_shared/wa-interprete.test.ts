@@ -364,7 +364,8 @@ describe('despacho en el bot', () => {
     const ctx = espias.handleConsulta.mock.calls[0][0] as { parsed: { intent: string }; session: BotSession };
     expect(ctx.parsed.intent).toBe('MIS_NUMEROS');
     expect(ctx.session.id).toBe('interprete-sin-sesion');
-    expect(enviados.at(-1)).toMatch(/^Sigue pendiente: ¿Confirmo el gasto\?/);
+    // El borrador del gasto que se está confirmando, como lo vio el usuario.
+    expect(enviados.at(-1)).toMatch(/^Sigue pendiente: Gasto .* ¿Lo confirmo\?/);
   });
 
   it('el saludo → handleAyuda; un acuse no contesta nada', async () => {
@@ -474,6 +475,14 @@ describe('despacho en la bandeja', () => {
     await atenderEscrito(db, u(), escrito('gasto lo de Cartagena'), deps({ acciones: [{ accion: 'abrir_viaje', evidencia: 'lo de Cartagena', ref: { destino: 'Cartagena' } }] }));
     expect(db.ops.some(o => o.op === 'rpc')).toBe(false);
     expect(db.escrituras().find(o => o.tabla === 'wa_message_log')!.payload).toMatchObject({ interprete_rechazo: 'V2_ambito' });
+  });
+
+  it('si el modelo pide aclaración ante un encabezado ambiguo («Pérez»), lo atiende el código de hoy con su lista', async () => {
+    const db = baseFalsa();
+    expect(await atenderEscrito(db, u(), escrito('Pérez'), deps({ acciones: [{ accion: 'pedir_aclaracion', evidencia: 'Pérez' }] }))).toEqual({ atendido: false });
+    expect(db.escrituras()).toHaveLength(1);
+    expect(db.escrituras()[0].payload).toMatchObject({ interprete_resultado: 'fallback_encabezado', interprete_accion: 'bandeja.fallback' });
+    expect(enviados).toEqual([]);
   });
 
   it('un atajo exacto (un código, «descartar», «listo») no llama al modelo', async () => {

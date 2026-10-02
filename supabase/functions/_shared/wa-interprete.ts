@@ -248,6 +248,12 @@ async function atender(
     await telemetria(base, { resultado: 'fallback_esquema', accion: enBandeja ? 'bandeja.fallback' : 'bot.fallback', propuesta: r.json, rechazo: decision.rechazo, r });
     return NO;
   }
+  // El modelo no supo y el código de hoy sí tiene la respuesta exacta: un encabezado aproximado o ambiguo
+  // («Pérez» con dos viajes) lo pregunta hoy con la lista numerada. Se le deja a él.
+  if (decision.accion === 'pedir_aclaracion' && !lec.pendiente && encabezado && (encabezado.tipo === 'aproximado' || encabezado.tipo === 'ambiguo')) {
+    await telemetria(base, { resultado: 'fallback_encabezado', accion: 'bandeja.fallback', propuesta: r.json, rechazo: decision.rechazo, r });
+    return NO;
+  }
   estado.despachado = true;
   const hecho = await despachar(base, decision, lec, texto);
   if (!hecho) {
@@ -285,7 +291,16 @@ async function sesionBotAMedias(supabase: SupabaseClient, phone: string, ws: str
   return {
     state: String(data.state), pending_action: ctx.pending_action ?? null, options: (ctx.options ?? null) as SesionBotVista['options'],
     vistaAt: Number.isNaN(exp) ? null : new Date(exp - 15 * 60_000).toISOString(), context: ctx,
+    texto: String(data.state) === 'confirming' && ctx.pending_action === 'W01' ? borradorDelGasto(ctx) : null,
   };
+}
+
+/** El gasto que se está confirmando, como lo vio el usuario: «Gasto $18.900 · peaje · Arena». */
+function borradorDelGasto(c: BotSession['context']): string {
+  const monto = typeof c.amount === 'number' ? `$${Math.round(c.amount).toLocaleString('es-CO')}` : 'sin monto';
+  const detalle = c.parsed_fields?.descripcion || c.parsed_fields?.concept || 'sin detalle';
+  const destino = c.destino_tipo === 'empresa' ? 'gasto de la empresa' : (c.proyecto_nombre || 'sin negocio');
+  return `Gasto ${monto} · ${detalle} · ${destino} — ¿Lo confirmo? Confirmar / Cancelar`;
 }
 
 async function leerContexto(

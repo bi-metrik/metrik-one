@@ -15,7 +15,8 @@
 --        Las filas `bandeja.%` no cuentan para el tope de 30 por hora (`checkInboundLimit`);
 --      · `interprete_propuesta`: lo que propuso el modelo (acciones con su evidencia);
 --      · `interprete_rechazo`: nulo si se aceptó tal cual; si no, el código de la regla (`V4_estado`…);
---      · `interprete_resultado`: atendido | fallback_timeout | fallback_http | fallback_esquema | tope.
+--      · `interprete_resultado`: atendido | fallback_timeout | fallback_http | fallback_esquema |
+--        fallback_encabezado (el modelo no supo y el código de hoy tiene la lista exacta).
 --
 -- Sin tablas, vistas ni funciones nuevas: los permisos y el RLS de las dos tablas no cambian.
 -- PENDIENTE CONOCIDO: la purga de 90 días de `wa_message_log` (20260915060000) anonimiza `phone` y
@@ -56,4 +57,4 @@ comment on column public.wa_message_log.interprete_propuesta is
 comment on column public.wa_message_log.interprete_rechazo is
   'Nulo si el validador aceptó la propuesta tal cual; si no, el código de la regla (V1_evidencia, V4_estado…).';
 comment on column public.wa_message_log.interprete_resultado is
-  'atendido | fallback_timeout | fallback_http | fallback_esquema | tope.';
+  'atendido | fallback_timeout | fallback_http | fallback_esquema | fallback_encabezado.';

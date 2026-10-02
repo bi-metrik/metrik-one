@@ -242,7 +242,9 @@ describe('el esquema por ámbito y por rol', () => {
     expect(Object.keys(e.properties)).toEqual(['acciones']);
     expect(e.required).toEqual(['acciones']);
     expect(JSON.stringify(e)).not.toContain('respuesta');
-    expect(JSON.stringify(e)).toContain('"maxItems":6');
+    // Plano y sin topes de largo: con `ref` anidado y enums por campo Gemini responde 400 (medido).
+    expect(JSON.stringify(e)).not.toContain('maxItems');
+    expect(JSON.stringify(e)).toContain('"ref_cliente"');
     expect(JSON.stringify(e)).toContain('"required":["accion","evidencia"]');
   });
 
@@ -257,6 +259,11 @@ describe('el esquema por ámbito y por rol', () => {
 // ── El validador, una prueba por regla ──────────────────────────────────────
 
 describe('V0: el esquema', () => {
+  it('la referencia plana del esquema (ref_cliente…) se lee como `ref`', () => {
+    const d = ejec(validar(una({ accion: 'abrir_viaje', evidencia: 'lo de Cartagena', ref_destino: 'Cartagena' }), trappvel('lo de Cartagena')));
+    expect(d.paso).toMatchObject({ interpretacion: { viaje_id: 'v14' } });
+  });
+
   it('JSON roto, acción fuera del enum o más de 6 acciones → fallback', () => {
     expect(validar(null, trappvel('hola'))).toEqual({ tipo: 'fallback', rechazo: 'V0_esquema' });
     expect(validar({ acciones: 'x' }, trappvel('hola'))).toEqual({ tipo: 'fallback', rechazo: 'V0_esquema' });
@@ -516,6 +523,40 @@ describe('V16: sí con peros no es sí', () => {
       { accion: 'confirmar', evidencia: 'sí' }, { accion: 'corregir_gasto', evidencia: 'son 19.800', campo: 'monto', valor: '19800' },
     ] }, termotech('sí pero son 19.800', { pendiente: GASTO_CONFIRMAR })));
     expect(d.paso).toEqual({ p: 'bot_corregir', cambios: [{ campo: 'monto', valor: 19800 }] });
+  });
+});
+
+describe('un «sí» sin nada pendiente y «nuevo» que no está escrito (QA con Gemini real)', () => {
+  it('«si» sin pregunta es acuse aunque el modelo proponga abrir un viaje nuevo', () => {
+    const d = ejec(validar(una({ accion: 'abrir_viaje', evidencia: 'si', nuevo_sin_nombre: true }), trappvel('si', { tanda: { abierta: true } })));
+    expect(d).toMatchObject({ accion: 'acuse', paso: { p: 'nada' }, rechazo: 'V4_si_sin_pregunta' });
+  });
+
+  it('«Pérez» suelto nunca abre «NUEVO Pérez» (flash-lite lo propuso en la QA)', () => {
+    expect(ejec(validar(una({ accion: 'abrir_viaje', evidencia: 'Pérez', nuevo_cliente: 'Pérez' }), trappvel('Pérez'))).rechazo).toBe('V8_nuevo_no_escrito');
+  });
+
+  it('un escrito largo tomado como respuesta sin pregunta no se bota: sigue por el código de hoy', () => {
+    const d = validar(una({ accion: 'responder', evidencia: 'Jorge me escribió que mejor viajan el 10 de enero', opcion: 'n12' }), trappvel('Jorge me escribió que mejor viajan el 10 de enero'));
+    expect(d).toEqual({ tipo: 'fallback', rechazo: 'V4_estado' });
+  });
+
+  it('«nuevo» sin nombre solo si el mensaje lo dice', () => {
+    expect(ejec(validar(una({ accion: 'abrir_viaje', evidencia: 'te paso uno', nuevo_sin_nombre: true }), trappvel('te paso uno'))).rechazo).toBe('V8_nuevo_no_escrito');
+    expect(ejec(validar(una({ accion: 'abrir_viaje', evidencia: 'nuevo cliente', nuevo_sin_nombre: true }), trappvel('nuevo cliente'))).paso).toMatchObject({ interpretacion: { accion: 'abrir_viaje', nuevo: null } });
+  });
+
+  it('dos clientes devueltos como dos encabezados son contenido de dos viajes, no dos cajas', () => {
+    const d = ejec(validar({ acciones: [
+      { accion: 'abrir_viaje', evidencia: 'Carolina confirma que salen el 28', ref_cliente: 'Carolina Ruiz' },
+      { accion: 'abrir_viaje', evidencia: 'Luisa pregunta si hay vuelo directo', ref_cliente: 'Luisa Mejía' },
+    ] }, trappvel('Carolina confirma que salen el 28 y Luisa pregunta si hay vuelo directo desde Medellín')));
+    expect(d.paso).toMatchObject({ p: 'registrar', interpretacion: { accion: 'contenido', varios: ['v11', 'v9'] } });
+  });
+
+  it('H2 · «a ninguno» con la lista y la tanda abiertas contesta la lista aunque el modelo diga «tanda»', () => {
+    const d = ejec(validar(una({ accion: 'descartar', evidencia: 'a ninguno, bótalos', alcance: 'tanda' }), trappvel('a ninguno, bótalos', { pendiente: LISTA_ENTREGA, tanda: { abierta: true, nombre: 'Carolina Ruiz', cajaId: 'v11' } })));
+    expect(d.paso).toMatchObject({ p: 'responder_bandeja', canonico: 'DESCARTAR' });
   });
 });
 
