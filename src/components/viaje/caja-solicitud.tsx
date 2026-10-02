@@ -8,7 +8,7 @@
  * nada; lo cargado queda sugerido. El motor es el del bot (función `solicitud-texto`).
  */
 
-import { useEffect, useMemo, useState, useTransition } from 'react'
+import { useMemo, useState, useSyncExternalStore, useTransition } from 'react'
 import { X } from 'lucide-react'
 import { BTN, BTN_ELEGIDO, BTN_PRIM, BTN_X, INPUT, LINK, SPIN } from './estilo'
 import { cargarSolicitud, descartarSolicitud, entenderSolicitud } from '@/app/(app)/negocios/solicitud-texto-actions'
@@ -40,6 +40,8 @@ function leerQuien(): QuienEscribio | null {
     return null
   }
 }
+
+const sinSuscripcion = () => () => {}
 
 function guardarQuien(q: QuienEscribio) {
   try {
@@ -86,15 +88,16 @@ export default function CajaSolicitud({
   const nuevo = !negocioBloqueId
   const [abierta, setAbierta] = useState(!compacta)
   const [texto, setTexto] = useState('')
-  const [quien, setQuien] = useState<QuienEscribio | null>(null)
+  // La última elección de la persona (§2.2), leída sin romper la hidratación: el servidor no la sabe.
+  const quienGuardado = useSyncExternalStore(sinSuscripcion, leerQuien, () => null)
+  const [quienElegido, setQuien] = useState<QuienEscribio | null>(null)
+  const quien = quienElegido ?? quienGuardado
   const [pendiente, startTransition] = useTransition()
   const [error, setError] = useState<string | null>(null)
   const [entendido, setEntendido] = useState<Entendido | null>(null)
   const [pasarAviso, setPasarAviso] = useState(false)
   const [quitadas, setQuitadas] = useState<Set<string>>(() => new Set())
   const [paso, setPaso] = useState<'resumen' | 'quien'>('resumen')
-
-  useEffect(() => { setQuien(leerQuien()) }, [])
 
   const filasCargables = useMemo(
     () => (entendido?.filas ?? []).filter(f => f.grupo !== 'ya_estaba' && !quitadas.has(f.slug)),

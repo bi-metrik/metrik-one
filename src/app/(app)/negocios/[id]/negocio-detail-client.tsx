@@ -761,15 +761,6 @@ function SelectorEtapa({
 
   const puedePausar = pausaEnabled && stageActual === 'venta' && !pausado && negocioEstado === 'abierto'
 
-  // «Pasar a cotización» de la tarjeta «Solicitud» avanza con ESTE flujo (gates, confirmación,
-  // carpeta): la tarjeta solo lo pide. Sin arreglo de dependencias a propósito: cada render deja
-  // escuchando la versión vigente de `handleAvanzar` (declarada abajo, se eleva).
-  useEffect(() => {
-    const avanzar = () => handleAvanzar()
-    window.addEventListener(EVENTO_AVANZAR_ETAPA, avanzar)
-    return () => window.removeEventListener(EVENTO_AVANZAR_ETAPA, avanzar)
-  })
-
   function handleReactivar() {
     const ok = typeof window !== 'undefined'
       ? window.confirm('Reactivar el negocio? Vuelve al pipeline activo.')
@@ -799,7 +790,6 @@ function SelectorEtapa({
 
   // Si ya esta cerrado/perdido/cancelado/completado, no mostrar nada
   const estadosCerrados = ['cerrado', 'perdido', 'cancelado', 'completado']
-  if (negocioEstado && estadosCerrados.includes(negocioEstado)) return null
 
   function handleAvanzar(confirmado = false) {
     if (!siguienteEtapa) return
@@ -883,6 +873,19 @@ function SelectorEtapa({
       toast.success(`Carpeta guardada. Avanzado a: ${result.etapaDestinoNombre ?? nombreEtapa}`)
     })
   }
+
+  // «Pasar a cotización» de la tarjeta «Solicitud» avanza con ESTE flujo (gates, confirmación,
+  // carpeta): la tarjeta solo lo pide. Sin arreglo de dependencias a propósito: cada render deja
+  // escuchando la versión vigente de `handleAvanzar`.
+  useEffect(() => {
+    const avanzar = () => handleAvanzar()
+    window.addEventListener(EVENTO_AVANZAR_ETAPA, avanzar)
+    return () => window.removeEventListener(EVENTO_AVANZAR_ETAPA, avanzar)
+  })
+
+  // Si ya esta cerrado/perdido/cancelado/completado, no mostrar nada. (Va después de los
+  // manejadores y del efecto de arriba: un hook no puede quedar detrás de un `return`.)
+  if (negocioEstado && estadosCerrados.includes(negocioEstado)) return null
 
   // Detectar etapa terminal (habilita cerrar/completar). Config-driven: si la
   // línea marca una etapa con es_cierre, ESA es la única terminal (SOENA:

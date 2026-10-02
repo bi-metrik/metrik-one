@@ -10,7 +10,7 @@
  * `actualizarBloqueData` (mismo guard, misma limpieza de marcas al cambiar un valor).
  */
 
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { useMemo, useRef, useState } from 'react'
 import { useRouter } from 'next/navigation'
 import { toast } from 'sonner'
 import { actualizarBloqueData, confirmarSugerido, descartarConflicto, marcarBloqueCompleto } from '@/app/(app)/negocios/negocio-v2-actions'
@@ -58,12 +58,15 @@ export default function TarjetaSolicitud({
   const [dejados, setDejados] = useState<Set<string>>(() => new Set())
   const guardando = useRef(Promise.resolve())
 
-  // Lo que trae el servidor después de guardar o cargar manda sobre lo local.
-  useEffect(() => {
+  // Lo que trae el servidor después de guardar o cargar manda sobre lo local (se ajusta al
+  // render, no en un efecto: https://react.dev/learn/you-might-not-need-an-effect).
+  const [dataVista, setDataVista] = useState(data)
+  if (dataVista !== data) {
+    setDataVista(data)
     setValores(valoresDe(fields, data))
     setConfirmados(new Set())
     setDejados(new Set())
-  }, [data, fields])
+  }
 
   const sugeridos = useMemo(() => {
     const m = sugeridosDe(data)
