@@ -961,7 +961,13 @@ export function armarPlan(p: {
       // traen nada de la solicitud y solo alargan la lista que el comercial revisa. Tampoco un acuse
       // escrito por el comercial («si», «no», «ok gracias»: Trappvel, 2026-10-02).
       if (esRuidoDelComercial(m)) continue;
-      const nombrados = viajesNombrados(m.cuerpo, destinosConocidos, p.viajes);
+      // El encabezado que también es contenido (solo con la `interpretacion` del intérprete): ahí el
+      // comercial nombra al cliente de la caja con sus palabras, y un apellido compartido («Daniel Pérez»
+      // con Lina Pérez abierta) no es otro viaje. Para ese mensaje, un viaje cuenta como nombrado solo
+      // con TODAS las palabras de su cliente (la regla de #986). Hoy ese caso no existe.
+      const suEncabezado = seg.encabezado?.n === n;
+      const nombrados = viajesNombrados(m.cuerpo, destinosConocidos, p.viajes)
+        .filter(d => !suEncabezado || palabrasDe(d.cliente).every(w => palabrasDe(m.cuerpo).includes(w)));
       if (!caja) {
         const motivo = !seg.encabezado ? 'llegó sin encabezado'
           : res?.tipo === 'nuevo' ? `«${seg.encabezado.texto}» sin nombre: no me dijiste cómo se llama el cliente nuevo`
