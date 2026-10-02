@@ -1,6 +1,7 @@
 'use client'
 
-import { useEffect, useId, useRef, useState, useTransition, type DragEvent, type ReactNode } from 'react'
+import { useEffect, useId, useRef, useState, type DragEvent, type ReactNode } from 'react'
+import { useTransitionTolerante } from '@/hooks/use-transition-tolerante'
 import { toast } from 'sonner'
 
 import {
@@ -246,7 +247,7 @@ export default function TarjetaOpcion({
 
   const [confirmaBorrar, setConfirmaBorrar] = useState(false)
   const [editandoFicha, setEditandoFicha] = useState(false)
-  const [isPending, startTransition] = useTransition()
+  const [isPending, startTransition] = useTransitionTolerante()
   const { ampliar, vista } = useVistaAmpliada()
   const entradaPantallazo = useRef<HTMLInputElement>(null)
 
@@ -563,7 +564,7 @@ function FormFicha({
     .filter(c => ranura && esCorregible(ranura, c.slug))
   const [valores, setValores] = useState<Record<string, string>>(() =>
     Object.fromEntries(campos.map(c => [c.slug, vigentes[c.slug] ?? ''])))
-  const [isPending, startTransition] = useTransition()
+  const [isPending, startTransition] = useTransitionTolerante()
 
   function guardar(e: React.FormEvent) {
     e.preventDefault()
@@ -623,7 +624,7 @@ function Alojamiento({
 }) {
   // «Va» / «No va» (ajuste de Mauricio, 2026-10-01): la operadora elige qué habitaciones van.
   // Mientras se guarda, ninguna fila se puede tocar otra vez.
-  const [eligiendo, startEleccion] = useTransition()
+  const [eligiendo, startEleccion] = useTransitionTolerante()
   function elegir(h: HabitacionRepartida, va: boolean) {
     if (eligiendo || (h.rol === 'habitacion') === va) return
     startEleccion(async () => {
@@ -773,7 +774,7 @@ function FilaHabitacionTarjeta({
   onCambio: () => void
 }) {
   const [editando, setEditando] = useState(false)
-  const [isPending, startTransition] = useTransition()
+  const [isPending, startTransition] = useTransitionTolerante()
   const entrada = useRef<HTMLInputElement>(null)
   const textoOcupacion = h.lectura.campos.find(x => /ocupaci/i.test(x.label))?.valor ?? null
   const ocupacion = h.ocupacion ? ocupacionConEdades(h.ocupacion, textoOcupacion) : null
@@ -898,7 +899,7 @@ function FormHabitacion({ itemId, h, onListo, onCancelar }: { itemId: string; h:
     infantes: String(h.ocupacion?.infantes ?? 0),
     total: montoConMiles(String(Math.round(h.total))),
   })
-  const [isPending, startTransition] = useTransition()
+  const [isPending, startTransition] = useTransitionTolerante()
 
   function guardar(e: React.FormEvent) {
     e.preventDefault()

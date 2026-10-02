@@ -1,6 +1,7 @@
 'use client'
 
-import { useState, useTransition } from 'react'
+import { useState } from 'react'
+import { useTransitionTolerante } from '@/hooks/use-transition-tolerante'
 import { toast } from 'sonner'
 import { X } from 'lucide-react'
 
@@ -74,7 +75,7 @@ export default function TarjetaCosto({
   const [conAdicional, setConAdicional] = useState(false)
   const [info, setInfo] = useState(false)
   const [editandoMoneda, setEditandoMoneda] = useState(false)
-  const [isPending, startTransition] = useTransition()
+  const [isPending, startTransition] = useTransitionTolerante()
 
   // Lo que la persona está escribiendo en «Ajustar», antes de guardar.
   const [margenEscrito, setMargenEscrito] = useState<string | null>(null)
@@ -419,7 +420,7 @@ function FormAdicional({
   const [nombre, setNombre] = useState('')
   const [cantidad, setCantidad] = useState('1')
   const [costo, setCosto] = useState('')
-  const [isPending, startTransition] = useTransition()
+  const [isPending, startTransition] = useTransitionTolerante()
   const costoNum = parseMontoCop(costo) ?? 0
   const precio = precioDerivadoDeAdicional(costoNum, 'COP', margenCotizacion)
 

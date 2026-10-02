@@ -1,6 +1,7 @@
 'use client'
 
-import { useState, useTransition } from 'react'
+import { useState } from 'react'
+import { useTransitionTolerante } from '@/hooks/use-transition-tolerante'
 import { useRouter } from 'next/navigation'
 import { CheckCircle2, ExternalLink, FileText, Loader2, Sparkles, AlertTriangle, MapPin } from 'lucide-react'
 import { toast } from 'sonner'
@@ -64,7 +65,7 @@ export default function BloqueGuiaDevolucion({
   )
   const [generating, setGenerating] = useState(false)
   const [approving, setApproving] = useState(false)
-  const [, startTransition] = useTransition()
+  const [, startTransition] = useTransitionTolerante()
 
   const seccionalActual: SeccionalDIAN | undefined = SECCIONALES_DIAN.find(
     s => s.slug === (seccionalOverride || preview?.seccional_sugerida_slug),

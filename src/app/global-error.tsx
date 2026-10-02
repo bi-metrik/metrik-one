@@ -1,7 +1,8 @@
 'use client'
 
-import { useEffect } from 'react'
+import { useEffect, useState } from 'react'
 import { reportarErrorCliente } from '@/lib/errores-cliente/enviar'
+import { intentarAutoRecarga } from '@/lib/red/auto-recarga'
 import { PALETA } from '@/lib/marca/paleta'
 
 /**
@@ -10,6 +11,8 @@ import { PALETA } from '@/lib/marca/paleta'
  * no hay fuentes y no hay Tailwind cargado — de ahi los estilos en linea. Si
  * dependiera de la hoja de estilos, el caso en que hace falta (bundle roto) es
  * justo el caso en que no cargaria.
+ *
+ * Como `(app)/error.tsx`: si fue la red o un chunk, recarga sola una vez por ruta cada 60 s.
  */
 export default function GlobalError({
   error,
@@ -18,11 +21,17 @@ export default function GlobalError({
   error: Error & { digest?: string }
   reset: () => void
 }) {
+  // Se decide UNA vez, al montar: la guarda deja su marca en `sessionStorage` al decir
+  // que si, asi que consultarla en cada render la gastaria. En el servidor no hay
+  // `window` y da `false` (un error de servidor nunca es de red del telefono).
+  const [recargar] = useState(() => intentarAutoRecarga(error))
+
   useEffect(() => {
     console.error('[global] error no capturado:', error)
     // Deja rastro en los logs de Vercel (`[error-cliente]`); nunca lanza ni espera.
-    reportarErrorCliente(error, 'global')
-  }, [error])
+    reportarErrorCliente(error, 'global', recargar)
+    if (recargar) window.location.reload()
+  }, [error, recargar])
 
   return (
     <html lang="es">
@@ -42,6 +51,12 @@ export default function GlobalError({
           fontFamily: 'system-ui, -apple-system, Segoe UI, sans-serif',
         }}
       >
+        {recargar ? (
+          <p style={{ margin: 0, fontSize: '14px', color: '#525252' }}>
+            Se perdió la conexión. Recargando…
+          </p>
+        ) : (
+          <>
         <h2 style={{ margin: 0, fontSize: '18px', fontWeight: 600 }}>
           MéTRIK one no pudo cargar
         </h2>
@@ -87,6 +102,8 @@ export default function GlobalError({
           <p style={{ margin: 0, fontFamily: 'monospace', fontSize: '12px', color: '#737373' }}>
             Código de error: {error.digest}
           </p>
+        )}
+          </>
         )}
       </body>
     </html>

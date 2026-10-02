@@ -1,6 +1,7 @@
 'use client'
 
-import { useEffect, useState, useTransition } from 'react'
+import { useEffect, useState } from 'react'
+import { useTransitionTolerante } from '@/hooks/use-transition-tolerante'
 import { X, Loader2, Plus, Trash2, ArrowRightLeft, Wallet } from 'lucide-react'
 import { toast } from 'sonner'
 import { repartirPagoComercial } from '@/lib/actions/conciliacion-actions'
@@ -67,7 +68,7 @@ export default function DistribuirPagoModal({
   const [porciones, setPorciones] = useState<PorcionUI[]>([
     { negocio_id: negocioFijado?.negocio_id ?? '', monto: '' },
   ])
-  const [pending, startTransition] = useTransition()
+  const [pending, startTransition] = useTransitionTolerante()
 
   const esEpayco = fuente === 'epayco'
   const fijadoActivo = !!negocioFijado

@@ -1,6 +1,7 @@
 'use client'
 
-import { useState, useTransition } from 'react'
+import { useState } from 'react'
+import { useTransitionTolerante } from '@/hooks/use-transition-tolerante'
 import { CheckCircle2, Lock } from 'lucide-react'
 import { toast } from 'sonner'
 import { marcarBloqueCompleto } from '../../negocio-v2-actions'
@@ -28,7 +29,7 @@ export default function BloqueCompletionStamp({
   esResponsable,
   profiles,
 }: BloqueCompletionStampProps) {
-  const [isPending, startTransition] = useTransition()
+  const [isPending, startTransition] = useTransitionTolerante()
   const [optimisticDone, setOptimisticDone] = useState(false)
 
   const done = instancia?.estado === 'completo' || optimisticDone

@@ -1,6 +1,7 @@
 'use client'
 
-import { useState, useTransition, useRef } from 'react'
+import { useState, useRef } from 'react'
+import { useTransitionTolerante } from '@/hooks/use-transition-tolerante'
 import { Plus, X } from 'lucide-react'
 import { toast } from 'sonner'
 import { actualizarBloqueData, marcarBloqueCompleto } from '../../negocio-v2-actions'
@@ -50,7 +51,7 @@ export default function BloqueDatosMultiPago({
   const [pagos, setPagos] = useState<PagoRow[]>(() =>
     savedPagos.length > 0 ? savedPagos : [{ referencia_epayco: '', valor_pago: '' }]
   )
-  const [isPending, startTransition] = useTransition()
+  const [isPending, startTransition] = useTransitionTolerante()
   const saveTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
 
   // Determinar labels from fields config

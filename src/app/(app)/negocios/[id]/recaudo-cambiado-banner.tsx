@@ -28,7 +28,8 @@
  *    por atendido, que es justo lo que el aviso vino a evitar.
  */
 
-import { useState, useTransition } from 'react'
+import { useState } from 'react'
+import { useTransitionTolerante } from '@/hooks/use-transition-tolerante'
 import { Banknote, X } from 'lucide-react'
 import { toast } from 'sonner'
 import {
@@ -85,7 +86,7 @@ export function RecaudoCambiadoBanner({
    */
   puedeResolver: boolean
 }) {
-  const [isPending, startTransition] = useTransition()
+  const [isPending, startTransition] = useTransitionTolerante()
   const [modo, setModo] = useState<'resolver' | 'retroceso' | null>(null)
   const [motivo, setMotivo] = useState('')
   const [causa, setCausa] = useState<CausaRetrocesoFinanciero | null>(null)

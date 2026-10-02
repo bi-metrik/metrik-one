@@ -1,6 +1,7 @@
 'use client'
 
-import { useState, useTransition } from 'react'
+import { useState } from 'react'
+import { useTransitionTolerante } from '@/hooks/use-transition-tolerante'
 import { AlertTriangle, CheckCircle2, Loader2, Plus, Sparkles, Trash2 } from 'lucide-react'
 import { toast } from 'sonner'
 
@@ -210,8 +211,8 @@ export default function DocumentoClientePanel({
   const [guardado, setGuardado] = useState<Borrador>(() => ({ ...textoDe(inicial.documento), terminos: inicial.terminos ?? '' }))
   const [form, setForm] = useState<Borrador>(() => ({ ...textoDe(inicial.documento), terminos: apertura.valor }))
   const [foco, setFoco] = useState<Zona | null>(null)
-  const [redactando, startRedactar] = useTransition()
-  const [guardando, startGuardar] = useTransition()
+  const [redactando, startRedactar] = useTransitionTolerante()
+  const [guardando, startGuardar] = useTransitionTolerante()
 
   const doc = panel.documento
   const estado = estadoDelTexto(doc)

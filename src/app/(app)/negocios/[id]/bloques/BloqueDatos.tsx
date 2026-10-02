@@ -1,6 +1,7 @@
 'use client'
 
-import { useState, useTransition, useRef, useCallback, useEffect } from 'react'
+import { useState, useRef, useCallback, useEffect } from 'react'
+import { useTransitionTolerante } from '@/hooks/use-transition-tolerante'
 import { resolverPlantillaCampo } from '@/lib/negocios/plantilla-campo'
 import { ImageIcon, Search, FileText, ExternalLink, Download, Copy, Check, Pencil } from 'lucide-react'
 import { toast } from 'sonner'
@@ -309,7 +310,7 @@ export default function BloqueDatos({
     }
     return aplicarSumas(fields, init)
   })
-  const [isPending, startTransition] = useTransition()
+  const [isPending, startTransition] = useTransitionTolerante()
   const [pasteImgs, setPasteImgs] = useState<Record<string, string>>({})
   // Extracción IA desde pantallazo (imagen_clipboard con `extrae`).
   // `extrayendo`: por slug del campo imagen, true mientras corre Gemini.

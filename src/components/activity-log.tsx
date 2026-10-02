@@ -1,6 +1,7 @@
 'use client'
 
-import { useState, useEffect, useTransition, useRef } from 'react'
+import { useState, useEffect, useRef } from 'react'
+import { useTransitionTolerante } from '@/hooks/use-transition-tolerante'
 import {
   MessageSquare, Send, Trash2, Link as LinkIcon, AtSign,
   ArrowRight, X, CheckCircle2, XCircle, Shield, Banknote,
@@ -120,7 +121,7 @@ const showSystemPorDefecto = () => true
 export default function ActivityLog({ entidadTipo, entidadId, staffList, oportunidadId }: ActivityLogProps) {
   const [entries, setEntries] = useState<ActivityEntry[]>([])
   const [loading, setLoading] = useState(true)
-  const [isPending, startTransition] = useTransition()
+  const [isPending, startTransition] = useTransitionTolerante()
 
   // Form state
   const [content, setContent] = useState('')

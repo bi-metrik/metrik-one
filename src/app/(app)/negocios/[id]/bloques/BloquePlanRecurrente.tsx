@@ -1,6 +1,7 @@
 'use client'
 
-import { useState, useTransition } from 'react'
+import { useState } from 'react'
+import { useTransitionTolerante } from '@/hooks/use-transition-tolerante'
 import { useRouter } from 'next/navigation'
 import { Calendar, RefreshCw, CheckCircle2, AlertCircle } from 'lucide-react'
 import { toast } from 'sonner'
@@ -81,7 +82,7 @@ export default function BloquePlanRecurrente({
   configExtra,
 }: Props) {
   const router = useRouter()
-  const [isPending, startTransition] = useTransition()
+  const [isPending, startTransition] = useTransitionTolerante()
   const completado = instancia?.completado === true
   const planData = (instancia?.data ?? null) as PlanData | null
 

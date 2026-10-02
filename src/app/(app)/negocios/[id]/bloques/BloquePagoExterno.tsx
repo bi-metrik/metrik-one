@@ -1,6 +1,7 @@
 'use client'
 
-import { useState, useTransition, useEffect } from 'react'
+import { useState, useEffect } from 'react'
+import { useTransitionTolerante } from '@/hooks/use-transition-tolerante'
 import { Plus, X } from 'lucide-react'
 import { toast } from 'sonner'
 import {
@@ -62,7 +63,7 @@ export default function BloquePagoExterno({
   const [fecha, setFecha] = useState(() => todayBogotaISO())
   const [retefuente, setRetefuente] = useState('')
   const [reteica, setReteica] = useState('')
-  const [isPending, startTransition] = useTransition()
+  const [isPending, startTransition] = useTransitionTolerante()
 
   const total = pagos.reduce((s, p) => s + p.monto_bruto, 0)
 

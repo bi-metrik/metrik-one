@@ -96,6 +96,13 @@ export async function middleware(request: NextRequest) {
   // workspace (ver `app/api/errores-cliente/route.ts`).
   if (pathname === '/api/errores-cliente') return NextResponse.next()
 
+  // La version del deployment (`VersionWatcher`, cada 5 min por pestaña abierta). Publica a
+  // proposito y sin datos (ver `app/api/version/route.ts`). Pasaba por `updateSession` y por
+  // la lectura del perfil del guard: dos viajes (Auth + `/profiles`) por pestaña cada 5 min
+  // para devolver un id de deployment, y con la sesion vencida el `!user` de abajo respondia
+  // 307 a /login, justo cuando el vigilante mas necesita la respuesta.
+  if (pathname === '/api/version') return NextResponse.next()
+
   // Preview: `?__ws=<slug>` fija el inquilino de esta pestaña y redirige a la misma URL sin
   // el parámetro (así no se queda pegado en la barra ni en el historial). `?__ws=off` lo
   // quita. Solo en un preview: en producción y en local `accionTenantPreview` devuelve null

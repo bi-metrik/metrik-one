@@ -4,6 +4,8 @@ import { useState } from 'react'
 import { ChevronDown, ChevronRight, History, Loader2 } from 'lucide-react'
 import { getRastroDeMargen, type RastroMargenEntrada } from '@/app/(app)/negocios/cotizacion-actions'
 import { formatBogotaFechaHora } from '@/lib/dates/bogota'
+import { conReintentoDeRed } from '@/lib/red/con-reintento'
+import { mensajeDeFallaDeCarga } from '@/lib/red/error-de-red'
 
 /**
  * Quién movió el margen, cuándo, de cuánto a cuánto y en qué línea.
@@ -27,13 +29,16 @@ export default function RastroMargen({ cotizacionId }: { cotizacionId: string })
     setAbierto(siguiente)
     if (!siguiente || entradas !== null || cargando) return
     setCargando(true)
-    getRastroDeMargen(cotizacionId).then((res) => {
+    conReintentoDeRed(() => getRastroDeMargen(cotizacionId)).then((res) => {
       setCargando(false)
       // Un fallo se DICE. Pintar "todavía nadie ha tocado el margen" cuando lo que
       // pasó es que la consulta falló afirma lo contrario de lo que se sabe.
       if (!res.ok) { setError(res.error); return }
       setEntradas(res.entradas)
       setAlcance(res.alcance)
+    }).catch((e) => {
+      setCargando(false)
+      setError(mensajeDeFallaDeCarga(e, 'No se pudo leer el rastro del margen'))
     })
   }
 

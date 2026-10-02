@@ -9,6 +9,7 @@ import VersionWatcher from '@/components/version-watcher'
 import { getPlatformAdminState } from '@/lib/actions/platform-admin'
 import { getWorkspace } from '@/lib/actions/get-workspace'
 import { getCachedUser } from '@/lib/supabase/auth-user'
+import { leerPerfilDeSesion } from '@/lib/supabase/perfil-sesion'
 import { getNotificaciones } from '@/lib/actions/notificaciones'
 import { versionDelBuild } from '@/lib/version/build'
 import { accesoWorkspace } from '@/lib/suscripciones/estado'
@@ -39,11 +40,9 @@ export default async function AppLayout({
   // `getWorkspace` por dentro, pero los dos pasan por el mismo `cache()` de React
   // (`getWorkspaceCached`), asi que comparten la promesa en vuelo — no duplica lecturas.
   const [profileResult, workspaceCtx, platformAdminState, notificaciones] = await Promise.all([
-    supabase
-      .from('profiles')
-      .select('full_name, role, workspace_id')
-      .eq('id', user.id)
-      .single(),
+    // La MISMA fila que leen `getWorkspace` y `getPlatformAdminState`: una sola lectura
+    // compartida por `cache()` (antes eran tres a la vez, ver `perfil-sesion.ts`).
+    leerPerfilDeSesion(user.id).then((data) => ({ data })),
     getWorkspace(),
     getPlatformAdminState(),
     getNotificaciones(),

@@ -1,6 +1,7 @@
 'use client'
 
-import { Fragment, useContext, useEffect, useRef, useState, useTransition } from 'react'
+import { Fragment, useContext, useEffect, useRef, useState } from 'react'
+import { useTransitionTolerante } from '@/hooks/use-transition-tolerante'
 import { useRouter } from 'next/navigation'
 import {
   ArrowLeft, Send, Copy, Plus, Trash2, Pencil, Percent, FileDown,
@@ -140,6 +141,7 @@ import {
 import type { EstadoCotizacion } from '@/lib/catalogos/constants'
 import type { FiscalProfile, Client } from '@/types/database'
 import type { NivelDetalle } from '@/lib/cotizaciones/detalle-viaje'
+import { conReintentoDeRed } from '@/lib/red/con-reintento'
 
 interface RubroRow {
   id: string
@@ -354,7 +356,7 @@ export default function CotizacionEditor({ oportunidadId, cotizacion, initialIte
   // el equipo tiene que hacer aquí, y cerrado no lo vería.
   const [verTextoCliente, setVerTextoCliente] = useState(() => estadoDelTexto(textoCliente?.documento ?? null) === 'borrador')
   const router = useRouter()
-  const [isPending, startTransition] = useTransition()
+  const [isPending, startTransition] = useTransitionTolerante()
 
   // ── Lo que cambia el costo se ve sin recargar (brief del 2026-10-01) ──────────
   // En el flujo de viaje, tras cada acción el editor pide la cotización por su cuenta y pinta la
@@ -382,9 +384,10 @@ export default function CotizacionEditor({ oportunidadId, cotizacion, initialIte
   function refrescar() {
     router.refresh()
     if (!lineasPorTipo) return
-    void traerVistaFresca(cotizacion.id).then(v => {
+    // Si la red falla dos veces queda la vista que traiga el refresco del router.
+    void conReintentoDeRed(() => traerVistaFresca(cotizacion.id)).then(v => {
       if (v) setVistaFresca(prev => laMasNueva(prev, v))
-    })
+    }).catch(() => {})
   }
   // El marco del negocio (2026-09-23): la cotización de viaje se pinta dentro del mismo
   // encabezado y panel de la página del negocio. Solo en el flujo de viaje; sin marco, la

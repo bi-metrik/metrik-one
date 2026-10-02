@@ -1,6 +1,7 @@
 'use client'
 
-import { useState, useTransition, useRef } from 'react'
+import { useState, useRef } from 'react'
+import { useTransitionTolerante } from '@/hooks/use-transition-tolerante'
 import { useRouter } from 'next/navigation'
 import { toast } from 'sonner'
 import { CheckCircle2, Circle, Download, Copy, Check } from 'lucide-react'
@@ -93,7 +94,7 @@ function CamposForm({
   campos: CamposExtraidos
   onChange: (updated: CamposExtraidos) => void
 }) {
-  const [isPending, startTransition] = useTransition()
+  const [isPending, startTransition] = useTransitionTolerante()
 
   const handleBlur = (key: keyof CamposExtraidos, value: string) => {
     const updated = { ...campos, [key]: value || undefined }

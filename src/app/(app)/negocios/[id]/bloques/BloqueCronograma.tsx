@@ -1,14 +1,19 @@
 'use client'
 
-import { useState, useTransition, useEffect, useRef, useCallback } from 'react'
+import dynamic from 'next/dynamic'
+import { useState, useEffect, useRef, useCallback } from 'react'
+import { useTransitionTolerante } from '@/hooks/use-transition-tolerante'
 import { CalendarDays, Plus, CheckCircle2, Circle, Trash2, GanttChart } from 'lucide-react'
 import { toast } from 'sonner'
 import { marcarBloqueItem, agregarBloqueItem, actualizarBloqueItem, eliminarBloqueItem, reevaluarBloqueCronograma, inicializarBloqueItems, leerVersionCronograma, leerEquipoCronograma, type VersionCronograma } from '../../negocio-v2-actions'
 import type { NegocioBloque } from '../../negocio-v2-actions'
 import { formatBogotaFechaCortaAno } from '@/lib/dates/bogota'
-import GanttCronogramaModal from './GanttCronogramaModal'
 import ResponsableInput from './ResponsableInput'
 import { nombreResponsable, resolverMencionEscrita, type MiembroEquipo } from '@/lib/cronograma/responsable'
+import { conReintentoDeRed } from '@/lib/red/con-reintento'
+
+// El gantt solo se abre con un clic: no viaja con la ficha.
+const GanttCronogramaModal = dynamic(() => import('./GanttCronogramaModal'))
 
 /**
  * Un paso del cronograma. Las fechas van en dos pares que NO significan lo mismo:
@@ -56,7 +61,7 @@ export default function BloqueCronograma({
   preloadItems = [],
 }: BloqueCronogramaProps) {
   const [items, setItems] = useState<CronogramaItem[]>(initialItems)
-  const [isPending, startTransition] = useTransition()
+  const [isPending, startTransition] = useTransitionTolerante()
   const [editingId, setEditingId] = useState<string | null>(null)
   const [editValues, setEditValues] = useState<Partial<CronogramaItem>>({})
   const [version, setVersion] = useState<VersionCronograma | null>(null)
@@ -72,7 +77,8 @@ export default function BloqueCronograma({
   // ser el del documento que Omar le puede mandar al cliente ahora mismo.
   const refrescarVersion = useCallback(() => {
     if (!negocioBloqueId) return
-    void leerVersionCronograma(negocioBloqueId).then(setVersion)
+    // Dato secundario (el sello de versión): si la red falla dos veces, queda el anterior.
+    void conReintentoDeRed(() => leerVersionCronograma(negocioBloqueId)).then(setVersion).catch(() => {})
   }, [negocioBloqueId])
 
   useEffect(() => { refrescarVersion() }, [refrescarVersion])
@@ -82,7 +88,7 @@ export default function BloqueCronograma({
   // tener cuenta. Mezclarlos fue lo que dejó el selector anterior sin poder guardar nada.
   useEffect(() => {
     if (!negocioBloqueId) return
-    void leerEquipoCronograma(negocioBloqueId).then(setEquipo)
+    void conReintentoDeRed(() => leerEquipoCronograma(negocioBloqueId)).then(setEquipo).catch(() => {})
   }, [negocioBloqueId])
   const equipoActivo = equipo.filter(m => m.activo)
 

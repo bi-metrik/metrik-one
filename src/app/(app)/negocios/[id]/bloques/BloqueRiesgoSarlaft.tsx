@@ -1,6 +1,7 @@
 'use client'
 
-import { useState, useTransition } from 'react'
+import { useState } from 'react'
+import { useTransitionTolerante } from '@/hooks/use-transition-tolerante'
 import Link from 'next/link'
 import { Scale, ChevronRight, LayoutGrid, Save, ExternalLink, AlertTriangle } from 'lucide-react'
 import {
@@ -46,7 +47,7 @@ export default function BloqueRiesgoSarlaft({ negocioId, datosIniciales, scoreIn
   const [score, setScore] = useState<ScoreNegocioItem | null>(scoreInicial)
   const [error, setError] = useState<string | null>(null)
   const [info, setInfo] = useState<string | null>(null)
-  const [pending, startTransition] = useTransition()
+  const [pending, startTransition] = useTransitionTolerante()
 
   function guardar() {
     setError(null)

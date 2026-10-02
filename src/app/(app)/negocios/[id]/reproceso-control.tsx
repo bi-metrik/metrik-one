@@ -20,7 +20,8 @@
  * caso vuelve a la etapa de la que salió (`cierre-reproceso.ts`).
  */
 
-import { useState, useTransition } from 'react'
+import { useState } from 'react'
+import { useTransitionTolerante } from '@/hooks/use-transition-tolerante'
 import { RotateCcw, AlertTriangle, X } from 'lucide-react'
 import { toast } from 'sonner'
 import { reprocesarNegocio, cerrarReproceso, registrarErrorSinDevolver } from '@/lib/actions/reproceso-actions'
@@ -65,7 +66,7 @@ export function ReprocesoBanner({
   reproceso: ReprocesoVista | null
   userRole: string
 }) {
-  const [isPending, startTransition] = useTransition()
+  const [isPending, startTransition] = useTransitionTolerante()
   if (!reproceso?.activo) return null
 
   const puedeCerrar = GERENCIAL.includes(userRole)
@@ -233,7 +234,7 @@ export function ReprocesoBoton({
   const [causa, setCausa] = useState<CausaReproceso>('criterio_tercero')
   const [detalle, setDetalle] = useState('')
   const [sinRetorno, setSinRetorno] = useState<{ etapaActual: string; etapaRetorno: string } | null>(null)
-  const [isPending, startTransition] = useTransition()
+  const [isPending, startTransition] = useTransitionTolerante()
 
   const cerrar = () => {
     setAbierto(false)

@@ -1,5 +1,6 @@
 'use client'
-import { useEffect, useRef, useState, useTransition } from 'react'
+import { useEffect, useRef, useState } from 'react'
+import { useTransitionTolerante } from '@/hooks/use-transition-tolerante'
 import { CardLink } from '@/components/card-link'
 import Link from 'next/link'
 import { rutaRepositorioNegocio } from '@/lib/almacenamiento/referencia'
@@ -117,7 +118,7 @@ function ResponsablesInline({
 }) {
   const [open, setOpen] = useState(false)
   const [search, setSearch] = useState('')
-  const [isPending, startTransition] = useTransition()
+  const [isPending, startTransition] = useTransitionTolerante()
   const popoverRef = useRef<HTMLDivElement>(null)
 
   // Cerrar al hacer click fuera del selector.
@@ -262,7 +263,7 @@ function MarcasInline({
 }) {
   const [open, setOpen] = useState(false)
   const [nota, setNota] = useState('')
-  const [isPending, startTransition] = useTransition()
+  const [isPending, startTransition] = useTransitionTolerante()
   const popoverRef = useRef<HTMLDivElement>(null)
 
   useEffect(() => {

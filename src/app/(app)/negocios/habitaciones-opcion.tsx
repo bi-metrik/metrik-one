@@ -1,6 +1,7 @@
 'use client'
 
-import { useState, useTransition, type ReactNode } from 'react'
+import { useState, type ReactNode } from 'react'
+import { useTransitionTolerante } from '@/hooks/use-transition-tolerante'
 import { AlertTriangle, BedDouble, Check, Image as ImageIcon, Loader2, X } from 'lucide-react'
 import { toast } from 'sonner'
 
@@ -59,7 +60,7 @@ export default function HabitacionesDeOpcion({
   const [leyendo, setLeyendo] = useState(false)
   const [rechazo, setRechazo] = useState<string | null>(null)
   const [tasa, setTasa] = useState('')
-  const [isPending, startTransition] = useTransition()
+  const [isPending, startTransition] = useTransitionTolerante()
 
   const grupo = composicionViaje ?? tarifa.composicion ?? null
   const habitaciones = habitacionesDeTarifa(tarifa)
