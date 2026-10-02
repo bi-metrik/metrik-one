@@ -20,9 +20,12 @@ describe('el conflicto que deja la bandeja en un negocio existente', () => {
     // La forma escrita la prueba `wa-carga-reglas.test.ts`; aquí, que esta lectura la entiende.
     const edge = readFileSync(path.resolve(__dirname, '../../../supabase/functions/_shared/wa-carga-reglas.ts'), 'utf8')
     expect(edge).toContain(`export const CLAVE_CONFLICTOS = '${CLAVE_CONFLICTOS}';`)
-    for (const campo of ["fuente: 'whatsapp';", 'entrega_id: string;', 'valor: string | number;', 'frase: string;', 'en: string;', "origen: 'audio' | 'mensaje';"]) {
+    for (const campo of ['fuente: CanalEntrega;', 'entrega_id: string;', 'valor: string | number;', 'frase: string;', 'en: string;', "origen: 'audio' | 'mensaje';"]) {
       expect(edge).toContain(campo)
     }
+    // La fuente admite lo pegado en la web (solicitud sin formulario, 2026-10-02), igual que aquí.
+    const reglas = readFileSync(path.resolve(__dirname, '../../../supabase/functions/_shared/wa-entendimiento-reglas.ts'), 'utf8')
+    expect(reglas).toContain("export type CanalEntrega = 'whatsapp' | 'web';")
     expect(conflictosDe(guardada)).toEqual({ fecha_salida: marca })
   })
 
