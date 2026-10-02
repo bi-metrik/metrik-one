@@ -215,8 +215,9 @@ describe('banco del QA de #971 (mensajes reales del banco; el modelo ya no asign
 describe('el día sintético del QA v3 CON encabezados (2 olvidados, «Lusia», «habla Marta, la esposa de Jorge»)', () => {
   const nombre = (d: DestinoPlan) => (d.tipo === 'existente' ? d.codigo : `NUEVO ${d.cliente}`);
   // QA de #971 v5: un encabezado aproximado («Lusia», «la de cancún») no cambia la caja solo; el
-  // bot pregunta en el acto «¿Cambias a…? sí/no». Se cuenta el día sin respuesta y con el «sí».
-  it.each([['sin respuesta', false], ['con «sí» a cada «¿Cambias a…?»', true]])('ningún mensaje se carga en un viaje ajeno sin pasar por el comercial; cuenta las preguntas del día (%s)', (_t, contesta) => {
+  // bot pregunta en el acto con la lista numerada (Trappvel 2026-10-02: antes «¿Cambias a…? sí/no»).
+  // Se cuenta el día sin respuesta y eligiendo «1» (los mismos números que daba el «sí»).
+  it.each([['sin respuesta', false], ['con «1» a cada lista del aproximado', true]])('ningún mensaje se carga en un viaje ajeno sin pasar por el comercial; cuenta las preguntas del día (%s)', (_t, contesta) => {
     let decisiones = 0;
     let cargados = 0;
     let preguntasEnElActo = 0;
@@ -226,7 +227,7 @@ describe('el día sintético del QA v3 CON encabezados (2 olvidados, «Lusia», 
       const crudos = e.mensajes.flatMap(x => {
         const r = !x.reenviado && x.tipo === 'text' ? resolverEncabezado(x.texto, viajes) : null;
         if (r?.tipo === 'aproximado') preguntasEnElActo++;
-        return r?.tipo === 'aproximado' && contesta ? [x, { ...x, texto: 'sí', verdad: null }] : [x];
+        return r?.tipo === 'aproximado' && contesta ? [x, { ...x, texto: '1', verdad: null }] : [x];
       });
       const ms: MensajeViaje[] = crudos.map((x, i) => ({ n: i + 1, cuerpo: x.texto, reenviado: x.reenviado, tipo: x.tipo, en: x.en }));
       const r = plan(ms, viajes);
@@ -278,21 +279,23 @@ describe('QA de #971 v3', () => {
       expect(resolverEncabezado('Lusia', Z)).toMatchObject({ tipo: 'ambiguo' });
     });
 
-    it('F5h del QA v3: «Lusia» ya no deja los mensajes de Luisa en la caja de Carolina; van a Luisa solo con el «sí» (QA v5)', () => {
+    it('F5h del QA v3: «Lusia» ya no deja los mensajes de Luisa en la caja de Carolina; van a Luisa solo si el comercial la elige (QA v5; lista numerada 2026-10-02)', () => {
       const base = [enc(1, 'Carolina', 0), m(2, 'Ya hablé con mi esposo: salimos el 28 de diciembre y volvemos el 3 de enero'), enc(3, 'Lusia', 1),
         m(4, 'el hotel con desayuno porfa'), m(5, 'salimos de Medellín')];
       // Sin respuesta: lo que sigue queda sin asignar, con aviso.
       const sin = plan(base).plan;
       expect(resumenDe(sin)).toEqual([[2, 'T1 26 11', 'carga'], [4, null, 'decidir'], [5, null, 'decidir']]);
-      expect(sin.avisos.join(' ')).toContain('«Lusia» puede ser Luisa Mejía (T1 26 9) y no me contestaste');
-      // «sí» (aunque llegue después de los reenvíos): la caja es de Luisa. El «sí» no es contenido.
-      const si = plan([...base, enc(6, 'sí', 6)]).plan;
-      expect(resumenDe(si)).toEqual([[2, 'T1 26 11', 'carga'], [4, 'T1 26 9', 'carga'], [5, 'T1 26 9', 'carga']]);
-      expect([si.encabezados, si.avisos]).toEqual([[1, 3, 6], []]);
-      // «no»: sin asignar, con aviso.
-      const no = plan([...base, enc(6, 'no', 6)]).plan;
-      expect(resumenDe(no)).toEqual([[2, 'T1 26 11', 'carga'], [4, null, 'decidir'], [5, null, 'decidir']]);
-      expect(no.avisos.join(' ')).toContain('Dijiste que «Lusia» no es Luisa Mejía (T1 26 9)');
+      expect(sin.avisos.join(' ')).toContain('«Lusia» puede ser Luisa Mejía (T1 26 9) y no elegiste');
+      // «1» (aunque llegue después de los reenvíos): la caja es de Luisa. El «1» no es contenido.
+      const uno = plan([...base, enc(6, '1', 6)]).plan;
+      expect(resumenDe(uno)).toEqual([[2, 'T1 26 11', 'carga'], [4, 'T1 26 9', 'carga'], [5, 'T1 26 9', 'carga']]);
+      expect([uno.encabezados, uno.avisos]).toEqual([[1, 3, 6], []]);
+      // «sí» o «no»: no eligen; sin asignar, con aviso, y tampoco son contenido.
+      for (const r of ['sí', 'no']) {
+        const x = plan([...base, enc(6, r, 6)]).plan;
+        expect(resumenDe(x), r).toEqual([[2, 'T1 26 11', 'carga'], [4, null, 'decidir'], [5, null, 'decidir']]);
+        expect(x.encabezados, r).toEqual([1, 3, 6]);
+      }
       // Un «sí» bajo un encabezado EXACTO es contenido (no hay nada que confirmar).
       expect(resumenDe(plan([enc(1, 'Carolina'), m(2, 'sí')]).plan)).toEqual([[2, 'T1 26 11', 'carga']]);
     });

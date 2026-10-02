@@ -286,7 +286,7 @@ describe('«¿A qué viaje van?»', () => {
     const id = entrega({ respuesta: '', opciones: null, mensajes: [{ cuerpo: 'hola' }] });
     const r = await mod.armarPreguntaNegocio(db as never, id, WS, 1);
     expect(r!.opciones).toEqual([]);
-    expect(r!.texto).toBe('Recibí 1 mensaje. No tienes viajes abiertos: escribe NUEVO y el nombre del cliente para crear el viaje.');
+    expect(r!.texto).toBe('Recibí 1 mensaje. No tienes viajes abiertos: escribe NUEVO y el nombre del cliente para crear el viaje, o DESCARTAR.');
   });
 });
 
@@ -422,7 +422,7 @@ describe('NUEVO y re-pregunta', () => {
     modelo('Quiere ir a Aruba.', { destino: { valor: 'Aruba', frase: 'ir a Aruba' } });
     await correr();
     expect(ent()).toMatchObject({ estado: 'esperando_contacto' });
-    expect(enviados[0].texto).toBe('Carla Prueba · Ya hay un contacto «Carla Prueba» en el directorio:\n1. CARLA PRUEBA (tel. …2233)\n¿Es el mismo? Responde SÍ, o NUEVO para crear otro.');
+    expect(enviados[0].texto).toBe('Carla Prueba · Ya hay un contacto «Carla Prueba» en el directorio:\n1. CARLA PRUEBA (tel. …2233)\n¿Es el mismo? Responde SÍ, NUEVO para crear otro, o DESCARTAR.');
     expect(await responder('SI')).toBe(true);
     await correr();
     expect(ent()).toMatchObject({ estado: 'negocio_creado', contacto_id: 'c-carla' });
@@ -544,24 +544,28 @@ describe('modo encabezado: manda el encabezado, el reparto se confirma y cada vi
     expect(r!.texto).toContain('¿A qué viaje van?');
   });
 
-  it('QA v5 · un encabezado aproximado no cambia la caja: sin «sí» queda sin asignar; con «sí», va a su viaje', async () => {
+  // Trappvel 2026-10-02: la respuesta al aproximado es el número de la lista, no un «sí» (que tampoco es contenido).
+  it('un encabezado aproximado no cambia la caja: sin elegir queda sin asignar; con «1», va a su viaje; el «sí» no elige ni es contenido', async () => {
     t.workspaces[0].config_extra = { bandeja_solicitudes: { modo_viajes: 'encabezado' } };
-    const sin = entregaCon({ estado: 'esperando_cliente', mensajes: [{ cuerpo: 'Martha', reenviado: false }, { cuerpo: 'volvemos el 27 de noviembre' }] });
-    const r1 = await mod.armarPreguntaNegocio(db as never, sin, WS, 2);
+    const sin = entregaCon({ estado: 'esperando_cliente', mensajes: [{ cuerpo: 'Martha', reenviado: false }, { cuerpo: 'volvemos el 27 de noviembre' }, { cuerpo: 'sí', reenviado: false }] });
+    const r1 = await mod.armarPreguntaNegocio(db as never, sin, WS, 3);
     expect(r1!.texto).toContain('No hay mensajes con un viaje asignado.');
-    expect(r1!.texto).toContain('«Martha» puede ser PUNTA CANA NOV · Marta Prueba (T1 26 14) y no me contestaste');
-    const con = entregaCon({ estado: 'esperando_cliente', mensajes: [{ cuerpo: 'Martha', reenviado: false }, { cuerpo: 'volvemos el 27 de noviembre' }, { cuerpo: 'sí', reenviado: false }] });
+    expect(r1!.texto).toContain('«Martha» puede ser PUNTA CANA NOV · Marta Prueba (T1 26 14) y no elegiste');
+    expect(r1!.plan!.encabezados).toEqual([1, 3]);
+    const con = entregaCon({ estado: 'esperando_cliente', mensajes: [{ cuerpo: 'Martha', reenviado: false }, { cuerpo: 'volvemos el 27 de noviembre' }, { cuerpo: '1', reenviado: false }] });
     const r2 = await mod.armarPreguntaNegocio(db as never, con, WS, 3);
     expect(r2!.texto).toContain('1) PUNTA CANA NOV · Marta Prueba (T1 26 14) — 1 mensaje');
     expect(r2!.plan!.encabezados).toEqual([1, 3]);
   });
 
-  it('QA v5 · ¿espera la tanda abierta un «sí/no» a «¿Cambias a…?»?', async () => {
+  it('¿espera la tanda abierta la elección de la lista del encabezado?', async () => {
     t.workspaces[0].config_extra = { bandeja_solicitudes: { modo_viajes: 'encabezado' } };
     const id = entregaCon({ estado: 'abierta', mensajes: [{ cuerpo: 'Martha', reenviado: false }, { cuerpo: 'volvemos el 27 de noviembre' }] });
-    expect(await mod.cambioPorConfirmar(db as never, WS, TEL, 4)).toMatchObject({ id: 'n14' });
+    expect(await mod.pendienteDeLaTanda(db as never, WS, TEL, 4)).toMatchObject({ tipo: 'eleccion', texto: 'Martha', candidatos: [{ id: 'n14' }], conContenido: true });
     t.wa_bandeja_mensajes.push({ id: nuevoId(), workspace_id: WS, entrega_id: id, wa_message_id: 'w-si', papel: 'contenido', tipo: 'text', cuerpo: 'sí', cuerpo_origen: 'texto', reenviado: false, segmento: null, recibido_at: '2026-09-30T13:05:00Z' });
-    expect(await mod.cambioPorConfirmar(db as never, WS, TEL, 4)).toBeNull();
+    expect(await mod.pendienteDeLaTanda(db as never, WS, TEL, 4)).toMatchObject({ tipo: 'eleccion' }); // el «sí» no elige
+    t.wa_bandeja_mensajes.push({ id: nuevoId(), workspace_id: WS, entrega_id: id, wa_message_id: 'w-1', papel: 'contenido', tipo: 'text', cuerpo: '1', cuerpo_origen: 'texto', reenviado: false, segmento: null, recibido_at: '2026-09-30T13:06:00Z' });
+    expect(await mod.pendienteDeLaTanda(db as never, WS, TEL, 4)).toBeNull();
   });
 
   it('QA v5 · el nombre de alguien del equipo (staff o colaborador) no es encabezado, aunque haya un negocio a su nombre', async () => {
@@ -596,7 +600,10 @@ describe('QA v5 · lo que el bot contesta en el acto a un encabezado (atenderEnB
   };
   const carolina = { id: 'n18', workspace_id: WS, linea_id: LINEA, codigo: 'T1 26 18', nombre: 'SAN ANDRÉS 4N', estado: 'abierto', created_at: '2026-09-26T10:00:00Z', contacto_id: 'c-c', empresa_id: null, responsable_id: null, contactos: { nombre: 'CAROLINA RUIZ' }, empresas: null };
 
-  it('exacto: «📌»; aproximado: «¿Cambias a…? sí/no» y, con el «sí», «📌»; la firma del equipo no contesta nada', async () => {
+  const LISTA_CAROLINA = '¿De qué viaje es «Carlina»?\n1. SAN ANDRÉS 4N · Carolina Ruiz (T1 26 18)\nResponde con el número, NUEVO y el nombre si es un cliente nuevo, o DESCARTAR. Hasta entonces no asigno lo que sigue.';
+
+  // Trappvel 2026-10-02 (regla 3): el aproximado pregunta con la lista numerada, aunque haya un solo candidato.
+  it('exacto: «📌»; aproximado: la lista numerada y, con el número, «📌»; la firma del equipo no contesta nada', async () => {
     t.workspaces[0].config_extra = { bandeja_solicitudes: { modo_viajes: 'encabezado' } };
     t.negocios.push(carolina);
     await llega('Marta');
@@ -604,12 +611,16 @@ describe('QA v5 · lo que el bot contesta en el acto a un encabezado (atenderEnB
     await llega('volvemos el 27 de noviembre', true);
     await llega('Carlina');
     await llega('somos 3 adultos', true);
-    expect(enviados.map(e => e.texto).slice(1)).toEqual(['¿Cambias a SAN ANDRÉS 4N · Carolina Ruiz (T1 26 18)? sí/no']);
-    await llega('sí');
+    // El reenvío que llega antes de elegir vuelve a mostrar la pregunta, corta, una sola vez.
+    expect(enviados.map(e => e.texto).slice(1)).toEqual([
+      LISTA_CAROLINA,
+      'Antes: ¿de qué viaje es «Carlina»? 1. SAN ANDRÉS 4N · Carolina Ruiz (T1 26 18) · NUEVO y el nombre · DESCARTAR. Lo que mandes queda sin asignar hasta que respondas.',
+    ]);
+    await llega('1');
     await llega('Tatiana');
-    expect(enviados.map(e => e.texto).slice(2)).toEqual(['📌 SAN ANDRÉS 4N · Carolina Ruiz (T1 26 18)']);
+    expect(enviados.map(e => e.texto).slice(3)).toEqual(['📌 SAN ANDRÉS 4N · Carolina Ruiz (T1 26 18)']);
 
-    // El reparto al cerrar: lo de Marta en Marta, lo que siguió al «sí» en Carolina.
+    // El reparto al cerrar: lo de Marta en Marta; lo que llegó antes de elegir y lo de después, en Carolina.
     const entrega = t.wa_bandeja_entregas.find(e => e.estado === 'abierta')!;
     const r = await mod.armarPreguntaNegocio(db as never, entrega.id as string, WS, 6);
     expect(r!.plan!.mensajes.filter(x => !x.sospecha).map(x => [x.n, x.destino && 'codigo' in x.destino ? x.destino.codigo : null])).toEqual([[2, 'T1 26 14'], [4, 'T1 26 18'], [6, 'T1 26 18']]);
@@ -617,26 +628,29 @@ describe('QA v5 · lo que el bot contesta en el acto a un encabezado (atenderEnB
     expect(enviados.some(e => e.texto.includes('— Mínimo'))).toBe(false); // los acuses no llevan el avance
   });
 
-  it('con «no», lo que sigue queda sin asignar y el bot lo dice', async () => {
+  it('un «no» o un «sí» no contestan la lista ni son contenido: «No entendí» y la lista otra vez', async () => {
     t.workspaces[0].config_extra = { bandeja_solicitudes: { modo_viajes: 'encabezado' } };
     t.negocios.push(carolina);
     await llega('Carlina');
     await llega('no');
-    expect(enviados.map(e => e.texto)).toEqual(['¿Cambias a SAN ANDRÉS 4N · Carolina Ruiz (T1 26 18)? sí/no', 'No cambio a SAN ANDRÉS 4N · Carolina Ruiz (T1 26 18): lo que sigue queda sin asignar hasta otro encabezado.']);
-    // Un segundo «no» ya no es respuesta a nada: es contenido de la tanda y no contesta.
-    await llega('no');
-    expect(enviados).toHaveLength(2);
+    await llega('sí');
+    expect(enviados.map(e => e.texto)).toEqual([LISTA_CAROLINA, `No entendí. ${LISTA_CAROLINA}`, `No entendí. ${LISTA_CAROLINA}`]);
+    const entrega = t.wa_bandeja_entregas.find(e => e.estado === 'abierta')!;
+    const r = await mod.armarPreguntaNegocio(db as never, entrega.id as string, WS, 3);
+    expect(r).toMatchObject({ sinContenido: 'esta tanda' }); // nada que repartir: ni el «no» ni el «sí»
   });
 
-  it('QA v6 · lo que no se entiende recibe «No entendí» en el acto; «si claro» sí se toma', async () => {
+  it('lo que no es respuesta es contenido sin asignar (la pregunta corta, una vez); el número de la lista elige', async () => {
     t.workspaces[0].config_extra = { bandeja_solicitudes: { modo_viajes: 'encabezado' } };
     t.negocios.push(carolina);
     await llega('Carlina');
     await llega('mmm no sé');
-    await llega('si claro');
+    await llega('3');
+    await llega('1');
     expect(enviados.map(e => e.texto)).toEqual([
-      '¿Cambias a SAN ANDRÉS 4N · Carolina Ruiz (T1 26 18)? sí/no',
-      'No entendí: ¿cambias a SAN ANDRÉS 4N · Carolina Ruiz (T1 26 18)? sí/no',
+      LISTA_CAROLINA,
+      'Antes: ¿de qué viaje es «Carlina»? 1. SAN ANDRÉS 4N · Carolina Ruiz (T1 26 18) · NUEVO y el nombre · DESCARTAR. Lo que mandes queda sin asignar hasta que respondas.',
+      `No entendí. ${LISTA_CAROLINA}`,
       '📌 SAN ANDRÉS 4N · Carolina Ruiz (T1 26 18)',
     ]);
   });
@@ -648,9 +662,10 @@ describe('QA v5 · lo que el bot contesta en el acto a un encabezado (atenderEnB
     await llega('gracias');
     await llega('Pedro Gómez');
     await llega('Tati');
+    // El reenvío vuelve a pedir el nombre (la primera vez); el «gracias», ya con contenido, no.
     expect(enviados.map(e => e.texto)).toEqual([
-      '¿Cómo se llama el cliente nuevo? Escríbeme su nombre; hasta entonces no asigno lo que sigue.',
-      '¿Cómo se llama el cliente nuevo? Escríbeme su nombre; hasta entonces no asigno lo que sigue.',
+      '¿Cómo se llama el cliente nuevo? Escríbeme su nombre, o DESCARTAR. Hasta entonces no asigno lo que sigue.',
+      '¿Cómo se llama el cliente nuevo? Escríbeme su nombre, o DESCARTAR. Hasta entonces no asigno lo que sigue.',
       '📌 NUEVO Pedro Gómez',
     ]);
   });

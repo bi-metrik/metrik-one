@@ -572,7 +572,8 @@ describe('parte B: el nombre del negocio es encabezado y es como se muestra', ()
     id, workspace_id: WS, linea_id: LINEA, codigo, nombre, estado: 'abierto', created_at: created, contacto_id: `c-${id}`, empresa_id: null, responsable_id: null, contactos: { nombre: cliente }, empresas: null,
   });
 
-  it('nombre exacto → 📌; código → 📌 con el nombre; aproximado → «¿Cambias a…?»; repetido → pregunta cuál, con cliente y código', async () => {
+  // Trappvel 2026-10-02 (regla 3): aproximado y repetido preguntan con la lista numerada; se contesta con el número.
+  it('nombre exacto → 📌; código → 📌 con el nombre; aproximado y repetido → la lista numerada, que se contesta con el número', async () => {
     t.negocios.push(
       negocio('n5', 'M1 26 5', 'Europa 2 días', 'CAROLINA RUIZ'),
       negocio('n4', 'M1 26 4', 'ARMENIA 2N', 'JUAN PRUEBA'),
@@ -582,13 +583,18 @@ describe('parte B: el nombre del negocio es encabezado y es como se muestra', ()
     await llega('M1 26 4', { enviado: 5 });
     await llega('Europa 2 dia', { enviado: 10 });
     await llega('sí', { enviado: 12 });
+    await llega('1', { enviado: 14 });
     await llega('Armenia 2N', { enviado: 20 });
+    await llega('2', { enviado: 22 });
+    const pie = 'Responde con el número, NUEVO y el nombre si es un cliente nuevo, o DESCARTAR. Hasta entonces no asigno lo que sigue.';
     expect(textos()).toEqual([
       '📌 Europa 2 días · Carolina Ruiz (M1 26 5)',
       '📌 ARMENIA 2N · Juan Prueba (M1 26 4)',
-      '¿Cambias a Europa 2 días · Carolina Ruiz (M1 26 5)? sí/no',
+      `¿De qué viaje es «Europa 2 dia»?\n1. Europa 2 días · Carolina Ruiz (M1 26 5)\n${pie}`,
+      `No entendí. ¿De qué viaje es «Europa 2 dia»?\n1. Europa 2 días · Carolina Ruiz (M1 26 5)\n${pie}`,
       '📌 Europa 2 días · Carolina Ruiz (M1 26 5)',
-      '¿Cuál viaje? «Armenia 2N» puede ser:\n- ARMENIA 2N · Juan Prueba (M1 26 4)\n- ARMENIA 2N · Pedro Prueba (M1 26 3)\nEscribe su código. Hasta entonces no asigno lo que sigue.',
+      `¿De qué viaje es «Armenia 2N»?\n1. ARMENIA 2N · Juan Prueba (M1 26 4)\n2. ARMENIA 2N · Pedro Prueba (M1 26 3)\n${pie}`,
+      '📌 ARMENIA 2N · Pedro Prueba (M1 26 3)',
     ]);
   });
 
@@ -693,8 +699,10 @@ describe('v2 · N2: «¿A qué viaje van?» se contesta con cada forma que el bo
     const antes = textos().length;
     // Un reenvío del cliente abre una caja mientras tanto: la respuesta igual va a la pregunta.
     await llega('perdón, son 3 adultos', { enviado: 6, reenviado: true });
+    // Regla 3 (2026-10-02): el contenido que abre una tanda con la pregunta abierta la vuelve a mostrar, corta.
+    expect(textos().slice(antes)).toEqual([expect.stringMatching(/^Primero: Tanda de las \d\d:\d\d · ¿A qué viaje van\? Número, código, NUEVO y el nombre, o DESCARTAR$/)]);
     await llega(respuesta, { enviado: 9 });
-    expect(textos().slice(antes)).toEqual([]); // ni 📌, ni «¿Cambias a…?», ni «Primero: …»
+    expect(textos().slice(antes + 1)).toEqual([]); // ni 📌, ni la lista del encabezado, ni «Primero: …»
     expect(t.wa_bandeja_mensajes.find(m => m.cuerpo === respuesta)).toMatchObject({ papel: 'respuesta_cliente' });
     colaModelo = [pedido()];
     await cron(60);
@@ -723,11 +731,13 @@ describe('v2 · N2: «¿A qué viaje van?» se contesta con cada forma que el bo
     expect(negocioDe('VALERIA PRUEBA5')).toMatchObject({ nombre: 'Viaje de Valeria Prueba5' });
   });
 
-  it('«DESCARTAR»: descarta la tanda', async () => {
+  it('«DESCARTAR»: descarta la tanda en el acto (regla 4, 2026-10-02)', async () => {
     await preguntaDeViaje();
     await llega('DESCARTAR', { enviado: 9 });
+    expect(textos().at(-1)).toMatch(/^Descarté lo pendiente de la tanda de las \d\d:\d\d \(1 mensaje\)\. No creé ni cargué nada\.$/);
     await cron(60);
-    expect(textos().at(-1)).toBe('Listo: descarté el mensaje. No creé ni cargué nada.');
+    expect(await ent.preguntaAbierta(db as never, WS, TEL)).toBeNull();
+    expect(t.wa_bandeja_entendimientos).toEqual([]);
     expect(t.negocio_bloques.find(b => b.negocio_id === 'n-p')!.data).toEqual({ destino: 'SAN ANDRÉS' });
   });
 
@@ -768,8 +778,10 @@ describe('v2 · N1: un «sí» o un «no» cortos con una pregunta pendiente nun
   it('«sí» seguido 3 s después por un encabezado ambiguo que se procesa antes: el «sí» va al resumen', async () => {
     t.negocios.push(negocioDePrueba('n-d', 'D 26 3', 'PUNTA CANA', 'DIEGO PRUEBA5'), negocioDePrueba('n-l', 'L 26 3', 'CARTAGENA DIC 12-16', 'LAURA PRUEBA5'));
     await resumenDeLaura();
-    await llega('Lusia Prueba5', { enviado: 23, llega: 24 }); // abre caja: «¿Cuál viaje?»
-    expect(textos().at(-1)).toMatch(/^¿Cuál viaje\? «Lusia Prueba5» puede ser:/);
+    // Solo el apellido, con dos viajes: abre caja. Con el resumen abierto, la lista no se pregunta en el
+    // acto (una pregunta a la vez): se decide en el resumen de esa tanda, y se recuerda la pendiente.
+    await llega('Prueba5', { enviado: 23, llega: 24 });
+    expect(textos().at(-1)).toMatch(/^«Prueba5» puede ser PUNTA CANA · Diego Prueba5 \(D 26 3\) o CARTAGENA DIC 12-16 · Laura Prueba5 \(L 26 3\): lo decides en el resumen de esta tanda\.\nPrimero: Laura Prueba5 · ¿Así\? SÍ o corrige$/);
     await llega('sí', { enviado: 20, llega: 25 });
     expect(t.wa_bandeja_mensajes.find(m => m.cuerpo === 'sí')).toMatchObject({ papel: 'respuesta_cliente' });
     expect(t.wa_bandeja_entregas.find(e => e.cliente_texto === 'sí')).toMatchObject({ estado: 'con_cliente' });
@@ -781,7 +793,7 @@ describe('v2 · N1: un «sí» o un «no» cortos con una pregunta pendiente nun
     await llega('sí', { enviado: 10 });
     colaModelo = [LAURA];
     await cron(60);
-    expect(textos().at(-1)).toMatch(/¿Es el mismo\? Responde SÍ, o NUEVO/);
+    expect(textos().at(-1)).toMatch(/¿Es el mismo\? Responde SÍ, NUEVO para crear otro, o DESCARTAR/);
     await llega('nuevo Diego Prueba5', { enviado: 100 }); // la pregunta es de contacto: el encabezado sí abre caja
     await llega('no', { enviado: 103 });
     expect(t.wa_bandeja_mensajes.find(m => m.cuerpo === 'no')).toMatchObject({ papel: 'respuesta_contacto' });
@@ -794,7 +806,7 @@ describe('v2 · N4: «cancelar» dentro de una caja abierta', () => {
     await llega(CARTAGENA, { enviado: 2 });
     await llega('salimos de Bogotá', { enviado: 4, reenviado: true });
     await llega('cancelar', { enviado: 6 });
-    expect(textos().at(-1)).toBe('Descarté la tanda de Laura Prueba5 (2 mensajes). No cargué nada.');
+    expect(textos().at(-1)).toBe('Descarté lo pendiente de Laura Prueba5 (2 mensajes). No creé ni cargué nada.');
     expect(t.wa_bandeja_entregas[0]).toMatchObject({ estado: 'esperando_cliente', pregunta_enviada_at: null });
     expect(t.wa_bandeja_mensajes.find(m => m.cuerpo === 'cancelar')).toMatchObject({ papel: 'cierre' });
     await llega('nuevo Diego Prueba5', { enviado: 20 });
@@ -808,13 +820,15 @@ describe('v2 · N4: «cancelar» dentro de una caja abierta', () => {
     await llega(CARTAGENA, { enviado: 2 });
     await llega('listo', { enviado: 4 });
     await llega('DESCARTAR', { enviado: 8 });
+    expect(textos().at(-1)).toBe('Descarté lo pendiente de Laura Prueba5 (1 mensaje). No creé ni cargué nada.');
+    expect(t.wa_bandeja_mensajes.find(m => m.cuerpo === 'DESCARTAR')).toMatchObject({ papel: 'respuesta_cliente' });
     await cron(60);
-    expect(textos().at(-1)).toBe('Listo: descarté el mensaje. No creé ni cargué nada.');
+    expect(t.negocios).toEqual([]);
   });
 
-  it('sin caja abierta, lo dice', async () => {
+  it('sin nada pendiente, lo dice', async () => {
     await llega('cancelar', { enviado: 0 });
-    expect(textos()).toEqual(['No hay una tanda abierta para cancelar.']);
+    expect(textos()).toEqual(['No tienes nada pendiente para descartar.']);
     expect(t.wa_bandeja_entregas).toEqual([]);
   });
 });
