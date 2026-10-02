@@ -2,7 +2,7 @@
  * Lo que la IA lee de un PDF, verificado contra la capa de texto del mismo PDF.
  *
  * La IA mira la imagen del documento y a veces confunde letras: en V0514 leyó
- * «vxpatem@yahoo.com» donde el certificado dice «VXPATERN@YAHOO.COM» («RN» como «M»),
+ * en el correo del cliente la secuencia «RN» como «M» donde el certificado la imprime bien,
  * y lo guardó con confianza 1. El aviso de correo distinto que salió de ahí era falso.
  * Cuando el PDF trae capa de texto, ese texto no se equivoca de letra.
  *

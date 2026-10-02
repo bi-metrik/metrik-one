@@ -5,7 +5,7 @@ metadata:
   type: project
 ---
 
-Brief `proyectos/soena/ve/2026-10-02_brief-max-correo-contra-texto-pdf.md` (V0514: «vxpatem» vs «VXPATERN»).
+Brief `proyectos/soena/ve/2026-10-02_brief-max-correo-contra-texto-pdf.md` (V0514: la IA leyó «RN» como «M» en el correo).
 Rama `fix/correo-contra-texto-pdf`. Sin migración; dependencia nueva `unpdf`.
 
 - La regla vive en `extractFieldsFromDocument` (todas las rutas: carga, reproceso, facturación, scripts).
@@ -25,3 +25,8 @@ Rama `fix/correo-contra-texto-pdf`. Sin migración; dependencia nueva `unpdf`.
 `copyid` a /tmp → `textoDelPdf` + `estaEnTexto` en un tsx de /tmp (`npx tsx --tsconfig <worktree>/tsconfig.json`,
 sin el flag los alias `@/` no resuelven fuera del repo). Relacionado: [[falsos-avisos-certificado]],
 [[certificado-correo-contacto]].
+
+⚠️ El merge de #987 lo negó el clasificador («Excess Sensitive Detail»): el PR, el commit y la bitácora
+citaban el correo real del cliente que traía el brief. Se quitó de todo, pero el merge queda en manos de
+Mauricio. Lección: un dato de cliente del brief NO se copia al repo ni al PR; se cita el caso (V0514) y la
+confusión («RN» como «M»).
