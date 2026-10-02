@@ -2,6 +2,7 @@
 
 ## Project memories
 
+- ⚠️ [«Algo se rompió» en iPhone (red)](project_recuperacion_red_iphone.md) — no reintenta escrituras; hook tolerante solo en /negocios; Zod pesaba en el boundary
 - ⚠️⚠️ [Tarifas por plan y ruta (SOENA)](project_tarifas_plan_ruta.md) — migraciones APLICADAS; propuesta ya emitida no cambia; PDF aún imprime el plan no ofrecido
 - ⚠️⚠️ [Trial de 5 días del Radar y cobro por ciclo](project_radar_trial_y_cobro.md) — migración SIN aplicar; la gracia de mora pasa de 3 a 5 días en TODOS los productos
 - ⚠️⚠️ [Borrar, editar y escribir en la Actividad](project_actividad_borrar_comentario.md) — DELETE/UPDATE/INSERT aplicadas; force_unlock 20260928150000 SIN aplicar
@@ -138,6 +139,7 @@
 
 ## Referencias
 
+- [Build en worktree sin una dependencia](reference_build_en_worktree.md) — copiar el paquete, no symlink (raíz de Turbopack)
 - [Indice de referencias](indice_referencias.md) — 37 recetas: medir prod sin MCP, SQL de ONE, PGlite, render/PDF, vitest de handlers
 - [Frentes secundarios](indice_frentes_secundarios.md) — ~110 entradas viejas: cobros, Valida, SOENA, recetas; buscar ahí antes de crear
 
