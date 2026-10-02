@@ -430,11 +430,11 @@ describe('NUEVO y re-pregunta', () => {
   });
 
   it('una respuesta que no se entiende vuelve a preguntar con la MISMA lista; la respuesta nueva se toma y se carga', async () => {
-    entrega({ respuesta: 'el de marta', opciones: OPCIONES, mensajes: [{ cuerpo: 'volvemos el 27' }] });
+    entrega({ respuesta: 'el de la playa', opciones: OPCIONES, mensajes: [{ cuerpo: 'volvemos el 27' }] });
     modelo('Regresan el 27.', { fecha_regreso: { valor: '2026-11-27', frase: 'volvemos el 27' } });
     await correr();
     expect(ent()).toMatchObject({ estado: 'esperando_negocio' });
-    expect(enviados[0].texto).toContain('No entendí «el de marta».');
+    expect(enviados[0].texto).toContain('No entendí «el de la playa».');
     expect(enviados[0].texto).toContain('2. PUNTA CANA NOV · Marta Prueba (T1 26 14)');
     expect(vi.mocked(fetch)).not.toHaveBeenCalled(); // sin destino no se gasta el modelo
 

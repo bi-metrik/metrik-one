@@ -392,6 +392,14 @@ export function pareceRespuesta(texto: string): boolean {
   return palabrasDe(bruto).length <= 3;
 }
 
+/**
+ * Un «sí» o un «no» CORTO (hasta cuatro palabras: «sí», «no señora», «👍», «sí, así es»). Con una
+ * pregunta pendiente nunca es contenido de una caja: se aplica a la pregunta (prueba en vivo v2, N1).
+ */
+export function esSiNoCorto(texto: string): boolean {
+  return leerSiNo(texto) !== null && palabrasDe(texto).length <= 4;
+}
+
 /** ¿Es un «no» claro? Para «¿Cambias a…? sí/no». */
 export function esNo(texto: string): boolean {
   return leerSiNo(texto) === 'no';
@@ -954,14 +962,27 @@ function destinoDeCorreccion(texto: string, plan: PlanViajes, viajes: ReadonlyAr
     const g = gruposDelPlan(plan).find(x => x.k === Number(k[1]));
     return g ? g.destino : null;
   }
-  const nuevos = gruposDelPlan(plan).map(g => g.destino).filter((d): d is Extract<DestinoPlan, { tipo: 'nuevo' }> => d.tipo === 'nuevo');
+  const enPlan = gruposDelPlan(plan).map(g => g.destino);
+  const nuevos = enPlan.filter((d): d is Extract<DestinoPlan, { tipo: 'nuevo' }> => d.tipo === 'nuevo');
   const palabras = palabrasDe(t).filter(w => !RELLENO.has(w));
-  const nuevoPorNombre = nuevos.filter(d => palabras.length > 0 && palabras.every(w => palabraDelNombre(w, d.cliente)));
+  // Un viaje de ESTE resumen nombrado tal cual (cliente, nombre del negocio o código) gana sobre los demás.
+  const tal = (d: DestinoPlan) => (palabras.length > 0 && palabras.every(w => palabrasDe(d.cliente).includes(w)))
+    || (d.tipo === 'existente' && (nombreCompacto(d.nombre) === nombreCompacto(t) || (!!d.codigo && codigoCompacto(d.codigo) === codigoCompacto(t))));
+  const delResumen = enPlan.filter(tal);
+  if (delResumen.length === 1) return delResumen[0];
+  const nuevoExacto = nuevos.filter(tal);
+  const nuevoCerca = nuevos.filter(d => palabras.length > 0 && palabras.every(w => palabraDelNombre(w, d.cliente)));
   const r = resolverEncabezado(t, viajes);
-  // En una corrección el comercial ya está nombrando a un viaje y ve el resumen otra vez antes del
-  // «sí»: una coincidencia aproximada («Lusia», «Gómez») también vale.
-  const candidatos: DestinoPlan[] = [...nuevoPorNombre, ...(r?.tipo === 'viaje' || r?.tipo === 'aproximado' ? [destinoDeViaje(r.viaje)] : [])];
-  return candidatos.length === 1 ? candidatos[0] : null;
+  // Primero lo EXACTO: el NUEVO de este resumen, o un viaje por código, nombre del negocio o cliente
+  // (prueba en vivo v2, N3: «el 3 es de Mateo Prueba5» chocaba con el viaje de «Mateo Prueba2», a un
+  // error de distancia, y no se elegía ninguno). Sin uno exacto, una coincidencia aproximada única
+  // («Lusia», «Gómez») también vale: el comercial ve el resumen otra vez antes del «sí».
+  const unicos = (ds: DestinoPlan[]) => [...new Map(ds.map(d => [claveDestino(d), d])).values()];
+  const exactos = unicos([...nuevoExacto, ...(r?.tipo === 'viaje' ? [destinoDeViaje(r.viaje)] : [])]);
+  if (exactos.length === 1) return exactos[0];
+  if (exactos.length > 1) return null;
+  const cerca = unicos([...nuevoCerca, ...(r?.tipo === 'aproximado' ? [destinoDeViaje(r.viaje)] : [])]);
+  return cerca.length === 1 ? cerca[0] : null;
 }
 
 /**

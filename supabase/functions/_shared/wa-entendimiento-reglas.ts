@@ -419,7 +419,8 @@ export function fraseNombraOpcion(f: CampoEntendible, o: OpcionCampo, frase: str
   const concretas = (f.opciones ?? []).filter(x => x.no_definido !== true);
   const comunes = new Set(palabrasDeOpcion(concretas[0] ?? o).filter(w => concretas.every(x => palabrasDeOpcion(x).includes(w))));
   const propias = palabrasDeOpcion(o).filter(w => !comunes.has(w) || concretas.length < 2);
-  return (propias.length > 0 ? propias : palabrasDeOpcion(o)).some(w => t.includes(` ${w} `));
+  // Singular o plural: «2 maletas grandes» nombra «Maleta de bodega» (prueba en vivo v2, N5: el equipaje se perdía).
+  return (propias.length > 0 ? propias : palabrasDeOpcion(o)).some(w => t.includes(` ${w} `) || t.includes(` ${w}s `) || t.includes(` ${w}es `));
 }
 
 // ── Rangos de dinero: el código elige la opción con la cifra ─────────────────

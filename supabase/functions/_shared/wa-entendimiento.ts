@@ -18,7 +18,7 @@
 // ============================================================
 
 import { sendTextMessage } from './wa-respond.ts';
-import { bandejaActiva, leerConfigBandeja, momentoDelMensaje, ordenarPorEnvio } from './wa-bandeja-reglas.ts';
+import { bandejaActiva, elegirFallida, leerConfigBandeja, momentoDelMensaje, ordenarPorEnvio, textoFallaEntendimiento, textoReintentarSinElegir } from './wa-bandeja-reglas.ts';
 import type { ConfigBandeja } from './wa-bandeja-reglas.ts';
 import { todayBogotaISO } from './bogota.ts';
 import { aplanarBloques } from './niveles-solicitud.ts';
@@ -68,6 +68,8 @@ import type { MensajeEntrega } from './wa-guardianes.ts';
 import {
   aplicarCambios,
   armarPlan,
+  esNombreNuevo,
+  resolverEncabezado,
   armarSegmentos,
   pendienteDeLaCaja,
   esSi,
@@ -316,7 +318,7 @@ async function crearNegocio(
   const { data: neg, error } = await supabase.from('negocios').insert({
     workspace_id: p.workspaceId,
     nombre,
-    metadata: { nombre_auto: nombre, nombre_provisional: auto.provisional },
+    metadata: { nombre_auto: nombre, nombre_provisional: auto.provisional, nombre_pistas: p.pistas },
     linea_id: p.cfg.lineaId,
     contacto_id: p.contactoId,
     etapa_actual_id: p.cfg.etapaId,
@@ -469,6 +471,51 @@ async function preguntarYEsperar(
   });
 }
 
+/**
+ * El modelo falló (prueba en vivo v2: un 403 de cobro de Gemini dejó dos entregas en error sin que
+ * el comercial se enterara). Queda en error para el reintento del cron, y el bot avisa DOS veces como
+ * mucho: al primer error («los reintento solo») y al agotar los intentos («escribe REINTENTAR …»).
+ */
+async function falloDelModelo(supabase: SupabaseClient, ent: Fila, lectura: Lectura): Promise<void> {
+  await actualizar(supabase, ent.id as string, {
+    estado: 'error', error: lectura.error, finish_reason: lectura.finishReason, modelo: GEMINI_MODEL,
+  });
+  const intento = Number(ent.intentos ?? 1);
+  const aviso = intento >= MAX_INTENTOS ? 'agotado' : intento <= 1 ? 'primero' : null;
+  if (!aviso) return;
+  const { nombre, referencia } = await referenciaDelViaje(supabase, ent);
+  await enviar(ent.remitente_phone as string, textoFallaEntendimiento(aviso, nombre, referencia), ent.workspace_id as string);
+}
+
+/** Cómo se nombra el viaje de un entendimiento en un aviso, y cómo se pide su reintento (código o nombre). */
+async function referenciaDelViaje(supabase: SupabaseClient, ent: Fila): Promise<{ nombre: string; referencia: string }> {
+  const nombre = await nombreDelViaje(supabase, ent);
+  if (ent.negocio_destino_id) {
+    const { data: n } = await supabase.from('negocios').select('codigo').eq('id', ent.negocio_destino_id).maybeSingle();
+    if (n?.codigo) return { nombre, referencia: String(n.codigo) };
+  }
+  return { nombre, referencia: nombre };
+}
+
+/**
+ * REINTENTAR <código o nombre>: vuelve a poner en la cola del cron un entendimiento que agotó sus
+ * intentos. Sin objetivo y con una sola carga fallida, esa. Contesta siempre.
+ */
+export async function reintentarCarga(supabase: SupabaseClient, workspaceId: string, phone: string, objetivo: string): Promise<void> {
+  const { data } = await supabase.from('wa_bandeja_entendimientos').select('*')
+    .eq('workspace_id', workspaceId).eq('remitente_phone', phone).eq('estado', 'error').limit(50);
+  const agotadas = ((data ?? []) as Fila[]).filter(e => Number(e.intentos ?? 0) >= MAX_INTENTOS && e.error !== EN_COLA);
+  const fallidas = await Promise.all(agotadas.map(async e => ({ fila: e, ...(await referenciaDelViaje(supabase, e)) })));
+  const r = elegirFallida(objetivo, fallidas.map(f => ({ id: f.fila.id as string, referencias: [f.nombre, f.referencia] })));
+  if (r.tipo !== 'una') {
+    await enviar(phone, textoReintentarSinElegir(objetivo, fallidas.map(f => f.referencia)), workspaceId);
+    return;
+  }
+  const f = fallidas.find(x => x.fila.id === r.id)!;
+  await actualizar(supabase, r.id, { estado: 'error', intentos: 0, error: 'reintento pedido por el comercial' });
+  await enviar(phone, `Reintento ${f.nombre}. Te aviso cuando quede cargado.`, workspaceId);
+}
+
 async function descartarEntrega(supabase: SupabaseClient, ent: Fila, nMensajes: number, motivo: string): Promise<void> {
   const ok = await enviar(ent.remitente_phone as string, `Listo: descarté ${nMensajes === 1 ? 'el mensaje' : `los ${nMensajes} mensajes`}. No creé ni cargué nada.`, ent.workspace_id as string);
   await actualizar(supabase, ent.id as string, {
@@ -521,7 +568,16 @@ async function entender(supabase: SupabaseClient, ent: Fila): Promise<void> {
   const opciones = Array.isArray(entrega?.negocio_opciones) ? (entrega!.negocio_opciones as OpcionNegocio[]) : null;
   let clienteTexto: string | null = entrega?.cliente_texto ?? null;
   if (opciones) {
-    const r = interpretarRespuestaNegocio(respuesta, opciones);
+    let r = interpretarRespuestaNegocio(respuesta, opciones);
+    if (r.tipo === 'descartar') {
+      await descartarEntrega(supabase, ent, crudos.length, 'el comercial descartó la tanda en «¿A qué viaje van?»');
+      return;
+    }
+    if (r.tipo === 'no_entendida') {
+      // El nombre de un viaje abierto que no está en la lista corta («Europa 2 días», «Marta Gómez»).
+      const v = await viajePorNombre(supabase, workspaceId, respuesta);
+      if (v) r = { tipo: 'existente', negocio_id: v };
+    }
     if (r.tipo === 'no_entendida') {
       await volverAPreguntarNegocio(supabase, ent, opciones, `No entendí «${respuesta.slice(0, 40)}».`);
       return;
@@ -624,9 +680,7 @@ async function entenderNuevo(
       esquemaDeSalida(cfg.fields),
     );
     if (lectura.error || lectura.json === null) {
-      await actualizar(supabase, ent.id as string, {
-        estado: 'error', error: lectura.error, finish_reason: lectura.finishReason, modelo: GEMINI_MODEL,
-      });
+      await falloDelModelo(supabase, ent, lectura);
       return;
     }
     const e = entenderEntrega(lectura.json, cfg.fields, mensajes, { hoyISO: todayBogotaISO() });
@@ -874,6 +928,13 @@ export async function armarPreguntaNegocio(
   return { texto: textoPreguntaNegocio({ nMensajes, opciones }), opciones };
 }
 
+/** El viaje abierto que nombra un texto tal cual (código, nombre del negocio o cliente), o `null`. */
+async function viajePorNombre(supabase: SupabaseClient, workspaceId: string, texto: string): Promise<string | null> {
+  const viajes = await viajesAbiertosDeLaBandeja(supabase, workspaceId);
+  const r = viajes ? resolverEncabezado(texto, viajes) : null;
+  return r?.tipo === 'viaje' ? r.viaje.id : null;
+}
+
 async function volverAPreguntarNegocio(supabase: SupabaseClient, ent: Fila, opciones: OpcionNegocio[], aviso: string): Promise<void> {
   await preguntarYEsperar(supabase, ent, textoPreguntaNegocio({ nMensajes: 0, opciones, aviso }), null);
 }
@@ -954,7 +1015,8 @@ async function resolverPlan(supabase: SupabaseClient, ent: Fila, plan: PlanViaje
   }
   if (r.tipo === 'descartar_todo') {
     await guardarAsignacion(supabase, crudos, { ...plan, mensajes: plan.mensajes.map(m => ({ ...m, destino: null, descartado: true })) }, []);
-    await descartarEntrega(supabase, ent, crudos.length, 'el comercial descartó el reparto');
+    // Se cuentan los mensajes del resumen, no los encabezados ni las respuestas (prueba en vivo v2, N11).
+    await descartarEntrega(supabase, ent, plan.mensajes.length, 'el comercial descartó el reparto');
     return;
   }
 
@@ -1157,9 +1219,7 @@ async function cargarEnNegocioExistente(
       esquemaDeSalida(campos),
     );
     if (lectura.error || lectura.json === null) {
-      await actualizar(supabase, ent.id as string, {
-        estado: 'error', error: lectura.error, finish_reason: lectura.finishReason, modelo: GEMINI_MODEL,
-      });
+      await falloDelModelo(supabase, ent, lectura);
       return;
     }
     const e = entenderEntrega(lectura.json, campos, mensajes, { hoyISO: todayBogotaISO(), conocidos: yaTiene });
@@ -1276,24 +1336,30 @@ async function cargarEnNegocioExistente(
 }
 
 /**
- * Si el nombre del negocio es el PROVISIONAL que puso el bot («Viaje de Laura Prueba») y ya se sabe
- * el destino, lo cambia por el de la convención («CARTAGENA DIC 12-16»). Un nombre editado a mano
- * (distinto de `metadata.nombre_auto`) no se toca nunca. Devuelve el nombre que quedó.
+ * Si el nombre del negocio sigue siendo el que puso el bot (`metadata.nombre_auto`), se rehace con lo
+ * que el negocio tiene ahora: el provisional («Viaje de Laura Prueba») pasa a la convención cuando
+ * llega el destino, y uno automático cambia si cambia el destino o las fechas (prueba en vivo v2, N8:
+ * P 26 2 seguía «SAN ANDRÉS DIC» yendo a Santa Marta en enero). El mes y la duración que dijeron antes
+ * se recuerdan (`metadata.nombre_pistas`): un mensaje que no los repite no los borra. Un nombre editado
+ * a mano no se toca nunca. Devuelve el nombre que quedó.
  */
 async function renombrarSiEsProvisional(
   supabase: SupabaseClient, neg: Fila, valores: Record<string, unknown>, pistas: { mes: number | null; duracion: string | null },
 ): Promise<string | null> {
   const actual = (neg.nombre as string | null) ?? null;
   const meta = (neg.metadata && typeof neg.metadata === 'object' ? neg.metadata : {}) as Fila;
-  if (!actual || meta.nombre_provisional !== true || meta.nombre_auto !== actual) return actual;
+  if (!actual || meta.nombre_auto !== actual) return actual;
+  const antes = (meta.nombre_pistas && typeof meta.nombre_pistas === 'object' ? meta.nombre_pistas : {}) as { mes?: number | null; duracion?: string | null };
+  const juntas = { mes: pistas.mes ?? antes.mes ?? null, duracion: pistas.duracion ?? antes.duracion ?? null };
   const nuevo = nombreViajeNuevo({
     destino: valores.destino, salida: valores.fecha_salida, regreso: valores.fecha_regreso,
-    mes: pistas.mes, duracion: pistas.duracion, cliente: nombreRel(neg.contactos),
+    mes: juntas.mes, duracion: juntas.duracion, cliente: nombreRel(neg.contactos),
   });
+  // Un nombre con destino no vuelve a ser provisional; el provisional solo cambia con destino.
   if (nuevo.provisional || nuevo.nombre === actual) return actual;
   // Solo si el nombre sigue siendo el del bot en este instante (una edición a mano entre tanto gana).
   const { data, error } = await supabase.from('negocios')
-    .update({ nombre: nuevo.nombre, metadata: { ...meta, nombre_auto: nuevo.nombre, nombre_provisional: false } })
+    .update({ nombre: nuevo.nombre, metadata: { ...meta, nombre_auto: nuevo.nombre, nombre_provisional: false, nombre_pistas: juntas } })
     .eq('id', neg.id).eq('nombre', actual).select('id');
   if (error || (data ?? []).length === 0) {
     if (error) console.error(`[wa-entendimiento] no se pudo renombrar el negocio ${neg.id}:`, error.message);
@@ -1308,9 +1374,15 @@ async function resolverRespuesta(supabase: SupabaseClient, ent: Fila): Promise<v
   const opciones = (ent.contacto_opciones ?? []) as ContactoCandidato[];
   const respuestaTexto = String(ent.respuesta_contacto ?? '');
   // Con una sola opción («¿es el mismo?»), un sí la elige: «Si», «sí», «Sí» y «SI» valen igual.
-  const r = opciones.length === 1 && esSi(respuestaTexto)
+  let r = opciones.length === 1 && esSi(respuestaTexto)
     ? { tipo: 'elegido' as const, contacto_id: opciones[0].id }
     : interpretarRespuestaContacto(respuestaTexto, opciones);
+  // Se le pidió el nombre de un cliente nuevo y escribió solo el nombre («Valeria Prueba5»), sin NUEVO.
+  // (Un dígito pegado al nombre, «Prueba5», no lo descarta; un número suelto, «3 adultos», sí.)
+  if (r.tipo === 'no_entendida' && opciones.length === 0 && !String(ent.contacto_nombre ?? '').trim()
+    && !/(^|\s)\d/.test(respuestaTexto.trim()) && esNombreNuevo(respuestaTexto.replace(/\d/g, ''))) {
+    r = { tipo: 'nuevo', nombre: respuestaTexto.trim() };
+  }
   const salida = salidaGuardada(ent);
 
   if (r.tipo === 'no_entendida') {
@@ -1379,6 +1451,9 @@ async function workspacesActivos(supabase: SupabaseClient, ids: string[]): Promi
  *   4. respuestas a «¿A qué viaje van?», al reparto o a una confirmación → se atienden.
  */
 export async function procesarEntendimientos(supabase: SupabaseClient): Promise<{ entendidas: number; respuestas: number }> {
+  // Un error de esta misma pasada se reintenta en la siguiente (un minuto después), no enseguida: con
+  // el modelo caído, los tres intentos se gastaban en dos pasadas (prueba en vivo v2, 403 de cobro).
+  const inicio = new Date().toISOString();
   let entendidas = 0;
   let respuestas = 0;
 
@@ -1437,6 +1512,7 @@ export async function procesarEntendimientos(supabase: SupabaseClient): Promise<
     .eq('estado', 'error').lt('intentos', MAX_INTENTOS).is('negocio_id', null).is('contacto_id', null).limit(LOTE);
   const activosF = await workspacesActivos(supabase, [...new Set(((fallidas ?? []) as Fila[]).map(e => e.workspace_id as string))]);
   for (const f of ((fallidas ?? []) as Fila[]).filter(x => activosF.has(x.workspace_id as string))) {
+    if (f.error !== EN_COLA && String(f.updated_at ?? '') >= inicio) continue;
     if (await preguntaAbierta(supabase, f.workspace_id as string, f.remitente_phone as string)) continue;
     const { data: fila } = await supabase.from('wa_bandeja_entendimientos')
       .update({ estado: 'procesando', intentos: (f.intentos as number) + 1, updated_at: new Date().toISOString() })
@@ -1480,6 +1556,15 @@ export interface PreguntaAbierta {
   id: string;
   nombre: string;
   corta: string;
+  /**
+   * Qué forma tiene la respuesta que se espera:
+   *   · `viaje`: «¿A qué viaje van?» o el aviso de viaje equivocado — un número, un código, el nombre
+   *     de un viaje, «NUEVO nombre» o «DESCARTAR». Nada de eso es un encabezado (prueba en vivo v2, N2);
+   *   · `nombre`: el nombre de un cliente nuevo (`TEXTO_PIDE_NOMBRE`): «NUEVO Marta Gómez» tampoco;
+   *   · `resumen`: el «sí» o la corrección del reparto;
+   *   · `otra`: «¿es el mismo?», «¿lo creo igual?»: un sí, un no o un número.
+   */
+  espera: 'viaje' | 'nombre' | 'resumen' | 'otra';
 }
 
 /**
@@ -1493,7 +1578,7 @@ export async function preguntaAbierta(
 ): Promise<PreguntaAbierta | null> {
   const desde = new Date(Date.now() - HORAS_RESPUESTA_CONTACTO * 3600_000).toISOString();
   const { data: ents } = await supabase.from('wa_bandeja_entendimientos')
-    .select('id, entrega_id, estado, confirmacion_pendiente, contacto_nombre, contacto_opciones, cliente, negocio_destino_id, pregunta_negocio_at, pregunta_contacto_at, respuesta_negocio, respuesta_contacto')
+    .select('id, entrega_id, segmento, estado, confirmacion_pendiente, contacto_nombre, contacto_opciones, cliente, negocio_destino_id, pregunta_negocio_at, pregunta_contacto_at, respuesta_negocio, respuesta_contacto')
     .eq('workspace_id', workspaceId).eq('remitente_phone', phone).in('estado', ['esperando_negocio', 'esperando_contacto']).limit(20);
   for (const e of (ents ?? []) as Fila[]) {
     if (excepto.includes(e.id as string)) continue;
@@ -1504,14 +1589,27 @@ export async function preguntaAbierta(
     const nombre = await nombreDelViaje(supabase, e);
     if (contacto) {
       const n = Array.isArray(e.contacto_opciones) ? e.contacto_opciones.length : 0;
-      return { tipo: 'contacto', id: e.id as string, nombre, corta: n === 0 ? '¿Lo creo? NUEVO / celular' : n === 1 ? '¿Es el mismo? SÍ / NUEVO' : '¿Cuál contacto es? Número / NUEVO' };
+      const sinNombre = n === 0 && !String(e.contacto_nombre ?? '').trim();
+      return {
+        tipo: 'contacto', id: e.id as string, nombre, espera: sinNombre ? 'nombre' : 'otra',
+        corta: n === 0 ? '¿Lo creo? NUEVO / celular' : n === 1 ? '¿Es el mismo? SÍ / NUEVO' : '¿Cuál contacto es? Número / NUEVO',
+      };
     }
     const c = e.confirmacion_pendiente as string | null;
+    // Sin confirmación pendiente, la fila 0 de un reparto espera el «sí» del resumen; cualquier otra
+    // espera «¿A qué viaje van?» (la re-pregunta: antes decía «¿Así? SÍ o corrige», prueba en vivo v2).
+    let resumen = false;
+    if (!c && Number(e.segmento ?? 0) === 0) {
+      const { data: en } = await supabase.from('wa_bandeja_entregas').select('plan_viajes').eq('id', e.entrega_id).maybeSingle();
+      resumen = !!en?.plan_viajes;
+    }
     const corta = c === 'cruce' ? '¿Lo cargo ahí? SÍ / código / DESCARTAR'
       : c === 'sin_solicitud' ? '¿Lo creo igual? SÍ / DESCARTAR'
       : c === 'dos_viajes' ? 'DESCARTAR y reenvía con encabezados'
-      : '¿Así? SÍ o corrige';
-    return { tipo: 'negocio', id: e.id as string, nombre, corta };
+      : resumen ? '¿Así? SÍ o corrige'
+      : '¿A qué viaje van? Número, código, NUEVO y el nombre, o DESCARTAR';
+    const espera = c === 'cruce' || (!c && !resumen) ? 'viaje' : resumen ? 'resumen' : 'otra';
+    return { tipo: 'negocio', id: e.id as string, nombre, corta, espera };
   }
   const { data: pendientes } = await supabase.from('wa_bandeja_entregas').select('id, plan_viajes, created_at, pregunta_enviada_at')
     .eq('workspace_id', workspaceId).eq('remitente_phone', phone).eq('estado', 'esperando_cliente').limit(20);
@@ -1520,7 +1618,11 @@ export async function preguntaAbierta(
     const at = e.pregunta_enviada_at as string | null;
     if (!at || at < desde) continue;
     const plan = (e.plan_viajes ?? null) as PlanViajes | null;
-    return { tipo: 'entrega', id: e.id as string, nombre: nombreDeLaEntrega(plan, (e.created_at as string | null) ?? null), corta: plan ? '¿Así? SÍ o corrige' : '¿A qué viaje van?' };
+    return {
+      tipo: 'entrega', id: e.id as string, nombre: nombreDeLaEntrega(plan, (e.created_at as string | null) ?? null),
+      corta: plan ? '¿Así? SÍ o corrige' : '¿A qué viaje van? Número, código, NUEVO y el nombre, o DESCARTAR',
+      espera: plan ? 'resumen' : 'viaje',
+    };
   }
   return null;
 }
@@ -1539,7 +1641,11 @@ export function textoPrimero(p: PreguntaAbierta): string {
  */
 export async function tomarRespuestaContacto(
   supabase: SupabaseClient,
-  p: { workspaceId: string; phone: string; texto: string; wamid: string; enviadoAt: string | null },
+  p: {
+    workspaceId: string; phone: string; texto: string; wamid: string; enviadoAt: string | null;
+    /** La respuesta se toma aunque haya una tanda abierta (un «sí» corto, o la respuesta a «¿A qué viaje van?»). */
+    aunConTandaAbierta?: boolean;
+  },
 ): Promise<boolean> {
   const desde = new Date(Date.now() - HORAS_RESPUESTA_CONTACTO * 3600_000).toISOString();
   let pend: Fila | null = null;
@@ -1558,9 +1664,11 @@ export async function tomarRespuestaContacto(
   }
   if (!pend || !cual) return false;
 
-  const { data: abierta } = await supabase.from('wa_bandeja_entregas').select('id')
-    .eq('workspace_id', p.workspaceId).eq('remitente_phone', p.phone).eq('estado', 'abierta').limit(1).maybeSingle();
-  if (abierta) return false;
+  if (!p.aunConTandaAbierta) {
+    const { data: abierta } = await supabase.from('wa_bandeja_entregas').select('id')
+      .eq('workspace_id', p.workspaceId).eq('remitente_phone', p.phone).eq('estado', 'abierta').limit(1).maybeSingle();
+    if (abierta) return false;
+  }
 
   // El crudo se guarda igual que todo lo demás de la bandeja, con su papel.
   const { error: eIns } = await supabase.from('wa_bandeja_mensajes').insert({
@@ -1575,4 +1683,60 @@ export async function tomarRespuestaContacto(
 
   await actualizar(supabase, pend.id as string, { [cual.respuesta]: p.texto, [cual.en]: new Date().toISOString() });
   return true;
+}
+
+/**
+ * La respuesta a la pregunta de una ENTREGA cerrada («¿A qué viaje van?» o el resumen del reparto),
+ * tomada aunque haya una tanda abierta: un «sí» corto o la respuesta a «¿A qué viaje van?» no son
+ * contenido de la caja que abrió un encabezado mandado detrás (prueba en vivo v2, N1 y N2). Hace lo
+ * mismo que la rama `respuesta_cliente` de `wa_bandeja_registrar_mensaje`. Devuelve `true` si la tomó.
+ */
+export async function tomarRespuestaDeEntrega(
+  supabase: SupabaseClient,
+  p: { workspaceId: string; phone: string; texto: string; wamid: string; enviadoAt: string | null; horas: number },
+): Promise<boolean> {
+  const desde = new Date(Date.now() - p.horas * 3600_000).toISOString();
+  const { data: e } = await supabase.from('wa_bandeja_entregas').select('id, remitente_staff_id, remitente_colaborador_id')
+    .eq('workspace_id', p.workspaceId).eq('remitente_phone', p.phone).eq('estado', 'esperando_cliente')
+    .gte('pregunta_enviada_at', desde).order('cerrada_at', { ascending: false }).limit(1).maybeSingle();
+  if (!e) return false;
+  const { error: eIns } = await supabase.from('wa_bandeja_mensajes').insert({
+    workspace_id: p.workspaceId, entrega_id: e.id, wa_message_id: p.wamid, remitente_phone: p.phone,
+    remitente_staff_id: e.remitente_staff_id ?? null, remitente_colaborador_id: e.remitente_colaborador_id ?? null,
+    tipo: 'text', papel: 'respuesta_cliente', cuerpo: p.texto, cuerpo_origen: 'texto', enviado_at: p.enviadoAt,
+  });
+  if (eIns) {
+    if (String(eIns.message).includes('duplicate')) return true; // Meta reintentó: ya se tomó.
+    console.error('[wa-entendimiento] no se pudo guardar la respuesta a la entrega:', eIns.message);
+    return false;
+  }
+  const { data: hecho } = await supabase.from('wa_bandeja_entregas')
+    .update({ estado: 'con_cliente', cliente_texto: p.texto, cliente_respondido_at: new Date().toISOString() })
+    .eq('id', e.id).eq('estado', 'esperando_cliente').select('id');
+  return (hecho ?? []).length > 0;
+}
+
+/**
+ * El nombre de una tanda abierta y cuántos mensajes de contenido tiene (sin encabezados ni respuestas
+ * en el acto): «Laura Prueba (2 mensajes)». Para «cancelar» dentro de una caja abierta.
+ */
+export async function nombreYConteoDeLaTanda(
+  supabase: SupabaseClient, entregaId: string, workspaceId: string, horasCajaActiva: number,
+): Promise<{ nombre: string; n: number }> {
+  const { data: en } = await supabase.from('wa_bandeja_entregas').select('created_at').eq('id', entregaId).maybeSingle();
+  const crudos = await leerMensajes(supabase, entregaId);
+  const c = await candidatosDeEncabezado(supabase, workspaceId);
+  if (typeof crudos === 'string' || !c) return { nombre: nombreDeTanda((en?.created_at as string | null) ?? null), n: 0 };
+  const { segmentos } = armarSegmentos(aViaje(crudos), c.viajes, { horasCajaActiva, equipo: c.equipo });
+  const nombres = [...new Set(segmentos.flatMap(sg => {
+    const r = sg.encabezado?.resolucion;
+    if (r?.tipo === 'viaje') return [nombreDeViaje(r.viaje)];
+    if (r?.tipo === 'nuevo') return [r.cliente ?? sg.nombre?.texto ?? null].filter((x): x is string => !!x);
+    if (r?.tipo === 'aproximado' && sg.confirmacion?.respuesta === 'si') return [nombreDeViaje(r.viaje)];
+    return [];
+  }))];
+  const n = segmentos.reduce((a, sg) => a + sg.mensajes.length, 0);
+  const nombre = nombres.length === 0 ? nombreDeTanda((en?.created_at as string | null) ?? null)
+    : nombres.length === 1 ? nombres[0] : `${nombres.slice(0, -1).join(', ')} y ${nombres[nombres.length - 1]}`;
+  return { nombre, n };
 }
