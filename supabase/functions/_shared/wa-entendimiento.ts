@@ -230,6 +230,8 @@ type MensajeCrudo = {
   recibido_at: string | null;
   enviado_at?: string | null;
   segmento: number | null;
+  /** Lo que decidió el intérprete conversacional (nula con el interruptor apagado). Ver `armarSegmentos`. */
+  interpretacion?: MensajeViaje['interpretacion'];
 };
 
 /**
@@ -240,7 +242,7 @@ type MensajeCrudo = {
  */
 async function leerMensajes(supabase: SupabaseClient, entregaId: string): Promise<MensajeCrudo[] | string> {
   const { data, error } = await supabase.from('wa_bandeja_mensajes')
-    .select('id, cuerpo, cuerpo_origen, reenviado, tipo, recibido_at, enviado_at, segmento')
+    .select('id, cuerpo, cuerpo_origen, reenviado, tipo, recibido_at, enviado_at, segmento, interpretacion')
     .eq('entrega_id', entregaId).eq('papel', 'contenido').order('recibido_at', { ascending: true });
   if (error) return `no se pudieron leer los mensajes: ${error.message}`;
   return ordenarPorEnvio((data ?? []) as MensajeCrudo[]);
@@ -256,6 +258,8 @@ function aViaje(crudos: ReadonlyArray<MensajeCrudo>): MensajeViaje[] {
   return crudos.map((m, i) => ({
     n: i + 1, cuerpo: String(m.cuerpo ?? ''), reenviado: m.reenviado === true, tipo: m.tipo ?? 'text',
     en: new Date(momentoDelMensaje(m)).toISOString(),
+    // Solo si la hay: sin ella el mensaje es idéntico al de siempre.
+    ...(m.interpretacion ? { interpretacion: m.interpretacion } : {}),
   }));
 }
 
