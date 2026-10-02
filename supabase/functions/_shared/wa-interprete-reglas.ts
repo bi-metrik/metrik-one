@@ -13,7 +13,6 @@
 // ============================================================
 
 import {
-  bandejaActiva,
   esDescartarTodo,
   esPalabraCierre,
   esPedidoDeGuia,
@@ -366,12 +365,13 @@ function preguntaDeLaBandeja(b: PreguntaBandejaVista, alias: (id: string) => str
   const capa: Capa = b.espera === 'viaje' ? 'entrega' : b.espera === 'nombre' ? 'nombre' : b.espera === 'resumen' ? 'resumen' : 'contacto_bandeja';
   const opciones: OpcionPendiente[] =
     capa === 'entrega' ? [...opcionesDeViajes(b.opciones ?? [], alias), NUEVO, DESCARTAR]
-    : capa === 'nombre' ? [NUEVO, DESCARTAR]
+    // La pregunta del contacto sin nombre («¿Lo creo? NUEVO / celular») no ofrece DESCARTAR.
+    : capa === 'nombre' ? [NUEVO]
     : capa === 'resumen' ? [{ id: 'si', etiqueta: 'sí' }, { id: 'corregir', etiqueta: 'corregir' }, DESCARTAR]
     : [{ id: 'si', etiqueta: 'sí' }, { id: 'no', etiqueta: 'no' }, NUEVO];
   return {
     capa, origen: 'bandeja', texto: `${b.nombre} · ${b.corta}`, opciones, haceMin: minutosDesde(b.vistaAt, ahora), tambien: null,
-    ofreceDescartar: capa === 'entrega' || capa === 'resumen' || capa === 'nombre',
+    ofreceDescartar: capa === 'entrega' || capa === 'resumen',
   };
 }
 
@@ -1105,7 +1105,7 @@ function descartar(a: AccionModelo, e: EntradaValidador, rechazo: string | null)
 function descartarPregunta(a: AccionModelo, e: EntradaValidador, rechazo: string | null): Decision {
   const p = e.pendiente!;
   const sigue = e.tanda?.abierta ? (e.tanda.nombre ?? 'la tanda abierta') : null;
-  if (p.capa === 'entrega' || p.capa === 'resumen' || p.capa === 'nombre') {
+  if (p.capa === 'entrega' || p.capa === 'resumen') {
     return ejecutar('bandeja.descartar_pregunta', {
       p: 'responder_bandeja', canonico: 'DESCARTAR',
       interpretacion: { accion: 'descartar', canonico: 'DESCARTAR', evidencia: a.evidencia ?? null },
@@ -1428,9 +1428,4 @@ export function textosNuevos(): string[] {
     textoDescartePregunta('Carolina Ruiz'), textoDescartePregunta(null), textoDudaDescarte(p, 'Carolina Ruiz'), textoDudaDescarte(p, null),
     textoGastoDeLaCola(1, 3), avisoPin({ ...v, alias: 'n1' }, true), avisoNuevo('Daniel Pérez', true),
   ];
-}
-
-/** La bandeja activa para el ámbito: activa en el workspace y sin prefijo del bot. */
-export function bandejaEnElAmbito(modules: Record<string, unknown> | null | undefined, conPrefijo: boolean): boolean {
-  return bandejaActiva(modules) && !conPrefijo;
 }
