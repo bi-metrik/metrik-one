@@ -86,7 +86,10 @@ describe('wa-webhook aplica la puerta', () => {
     // `modules`, entregada en las dos ramas.
     const fuente = readFileSync('supabase/functions/_shared/wa-identificar.ts', 'utf8')
     expect(fuente.split(".from('workspaces')").length - 1).toBe(1)
-    expect(fuente).toContain(".select('subscription_status, modules')")
+    // 2026-10-02 (bot conversacional): la misma lectura trae `config_extra.bot_conversacional`, el
+    // interruptor del intérprete, para que apagado no cueste una consulta más. Aprobado por la sesión
+    // principal: solo cambia el texto fijado del select, no el comportamiento.
+    expect(fuente).toContain(".select('subscription_status, modules, bot_conversacional:config_extra->bot_conversacional')")
     expect(fuente.split('modulos: modulos ?? null').length - 1).toBe(2)
   })
 })

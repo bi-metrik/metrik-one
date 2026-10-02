@@ -14,6 +14,7 @@ import { showGastoConfirmation, proceedEmpresaGasto, handleGasto, categoriaDelGa
 import { decidirConfirmacionGasto, decidirMontoPendiente } from './monto-pendiente.ts';
 import { executeRegistro } from './execute.ts';
 import { BOTONES_SOPORTE, decidirSoporte } from './soporte-foto.ts';
+import { seguirConLaCola } from './cola-gastos.ts';
 
 const AWAITING_SELECTION_TIMEOUT_MS = 10 * 60 * 1000; // 10 min
 
@@ -88,6 +89,8 @@ export async function handleResumeRegistro(ctx: HandlerContext): Promise<void> {
       case 'cancelar':
         await ctx.sendMessage('❌ Cancelado.');
         await completeSession(supabase, session.id);
+        // Gastos del intérprete que esperan turno (sin cola, no hace nada).
+        await seguirConLaCola(ctx);
         return;
       case 'describir':
         await reconfirmarGasto(ctx, decision.fields);
@@ -207,6 +210,8 @@ export async function handleResumeRegistro(ctx: HandlerContext): Promise<void> {
     }
 
     await completeSession(supabase, session.id);
+    // Gastos del intérprete que esperan turno (sin cola, no hace nada).
+    await seguirConLaCola(ctx);
     return;
   }
 }
@@ -216,7 +221,7 @@ export async function handleResumeRegistro(ctx: HandlerContext): Promise<void> {
  * escribir. Mismo destino, mismo monto; la categoria se recalcula porque la descripcion
  * nueva puede decirla ("Peaje" -> transporte).
  */
-async function reconfirmarGasto(ctx: HandlerContext, fields: ParsedFields): Promise<void> {
+export async function reconfirmarGasto(ctx: HandlerContext, fields: ParsedFields): Promise<void> {
   const { session, supabase } = ctx;
   const c = session.context;
   // Si la descripcion nueva no dice categoria ("autopista norte"), se queda la que habia.

@@ -1651,6 +1651,8 @@ export async function tomarRespuestaContacto(
     workspaceId: string; phone: string; texto: string; wamid: string; enviadoAt: string | null;
     /** La respuesta se toma aunque haya una tanda abierta (un «sí» corto, o la respuesta a «¿A qué viaje van?»). */
     aunConTandaAbierta?: boolean;
+    /** El crudo que se guarda, si `texto` es la forma canónica que tradujo el intérprete. Sin él, `texto`. */
+    cuerpo?: string;
   },
 ): Promise<boolean> {
   const desde = new Date(Date.now() - HORAS_RESPUESTA_CONTACTO * 3600_000).toISOString();
@@ -1680,7 +1682,7 @@ export async function tomarRespuestaContacto(
   const { error: eIns } = await supabase.from('wa_bandeja_mensajes').insert({
     workspace_id: p.workspaceId, entrega_id: pend.entrega_id, wa_message_id: p.wamid,
     remitente_phone: p.phone, remitente_staff_id: pend.remitente_staff_id ?? null,
-    tipo: 'text', papel: cual.papel, cuerpo: p.texto, cuerpo_origen: 'texto', enviado_at: p.enviadoAt,
+    tipo: 'text', papel: cual.papel, cuerpo: p.cuerpo ?? p.texto, cuerpo_origen: 'texto', enviado_at: p.enviadoAt,
   });
   if (eIns && !String(eIns.message).includes('duplicate')) {
     console.error('[wa-entendimiento] no se pudo guardar la respuesta:', eIns.message);
@@ -1699,7 +1701,11 @@ export async function tomarRespuestaContacto(
  */
 export async function tomarRespuestaDeEntrega(
   supabase: SupabaseClient,
-  p: { workspaceId: string; phone: string; texto: string; wamid: string; enviadoAt: string | null; horas: number },
+  p: {
+    workspaceId: string; phone: string; texto: string; wamid: string; enviadoAt: string | null; horas: number;
+    /** El crudo que se guarda, si `texto` es la forma canónica que tradujo el intérprete. Sin él, `texto`. */
+    cuerpo?: string;
+  },
 ): Promise<boolean> {
   const desde = new Date(Date.now() - p.horas * 3600_000).toISOString();
   const { data: e } = await supabase.from('wa_bandeja_entregas').select('id, remitente_staff_id, remitente_colaborador_id')
@@ -1709,7 +1715,7 @@ export async function tomarRespuestaDeEntrega(
   const { error: eIns } = await supabase.from('wa_bandeja_mensajes').insert({
     workspace_id: p.workspaceId, entrega_id: e.id, wa_message_id: p.wamid, remitente_phone: p.phone,
     remitente_staff_id: e.remitente_staff_id ?? null, remitente_colaborador_id: e.remitente_colaborador_id ?? null,
-    tipo: 'text', papel: 'respuesta_cliente', cuerpo: p.texto, cuerpo_origen: 'texto', enviado_at: p.enviadoAt,
+    tipo: 'text', papel: 'respuesta_cliente', cuerpo: p.cuerpo ?? p.texto, cuerpo_origen: 'texto', enviado_at: p.enviadoAt,
   });
   if (eIns) {
     if (String(eIns.message).includes('duplicate')) return true; // Meta reintentó: ya se tomó.
