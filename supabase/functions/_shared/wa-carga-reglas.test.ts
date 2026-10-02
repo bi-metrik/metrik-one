@@ -119,8 +119,10 @@ describe('la respuesta: número, código o NUEVO', () => {
     expect(interpretarRespuestaNegocio('Nuevo: Marta Gómez 3001234567', ops)).toEqual({ tipo: 'nuevo', cliente: 'Marta Gómez 3001234567' });
   });
 
-  it('un nombre suelto o un texto cualquiera no se adivina', () => {
-    expect(interpretarRespuestaNegocio('Marta', ops)).toEqual({ tipo: 'no_entendida' });
+  it('el nombre de un cliente o de un negocio de la lista lo elige (prueba en vivo v2, N2); un texto cualquiera no se adivina', () => {
+    expect(interpretarRespuestaNegocio('Marta', ops)).toEqual({ tipo: 'existente', negocio_id: 'a' });
+    expect(interpretarRespuestaNegocio('Pedro', ops)).toEqual({ tipo: 'no_entendida' });
+    expect(interpretarRespuestaNegocio('DESCARTAR', ops)).toEqual({ tipo: 'descartar' });
     expect(interpretarRespuestaNegocio('el de punta cana', ops)).toEqual({ tipo: 'no_entendida' });
     expect(interpretarRespuestaNegocio('novedad', ops)).toEqual({ tipo: 'no_entendida' });
   });

@@ -151,6 +151,8 @@ export type RespuestaNegocio =
   | { tipo: 'codigo'; codigo: string }
   /** `cliente`: lo que escribió después de NUEVO («NUEVO Marta Gómez»), o null. */
   | { tipo: 'nuevo'; cliente: string | null }
+  /** «DESCARTAR»: los mensajes no son de ningún viaje (prueba en vivo v2, N2). */
+  | { tipo: 'descartar' }
   | { tipo: 'no_entendida' };
 
 /** El código sin espacios ni signos, en mayúscula: «t1 26 14» y «T12614» son el mismo. */
@@ -163,9 +165,16 @@ function pareceCodigo(compacto: string): boolean {
   return /^[A-Z]{1,3}\d{3,}$/.test(compacto) && compacto.length <= 12;
 }
 
+/**
+ * La respuesta a «¿A qué viaje van?»: el número de la lista, un código, «NUEVO nombre», «DESCARTAR» o
+ * el nombre de un negocio o de un cliente de la lista (prueba en vivo v2 del 2026-10-01, N2: la
+ * pregunta no se podía contestar). Un nombre que no está en la lista lo busca quien llama entre todos
+ * los viajes abiertos.
+ */
 export function interpretarRespuestaNegocio(texto: string, opciones: ReadonlyArray<OpcionNegocio>): RespuestaNegocio {
   const bruto = String(texto ?? '').trim();
   const t = normalizarTexto(bruto);
+  if (/^descart(ar|a|alo|alos|en)?[.!]*$/.test(t)) return { tipo: 'descartar' };
   const num = /^(\d{1,2})\.?$/.exec(t);
   if (num) {
     const i = Number(num[1]) - 1;
@@ -182,6 +191,11 @@ export function interpretarRespuestaNegocio(texto: string, opciones: ReadonlyArr
     if (enLista) return { tipo: 'existente', negocio_id: enLista.id };
     if (pareceCodigo(c)) return { tipo: 'codigo', codigo: c };
   }
+  // El nombre del negocio («Europa 2 días») o del cliente («Marta Gómez»), tal cual, en la lista.
+  const compacto = (x: string | null | undefined) => normalizarNombre(x).replace(/ /g, '');
+  const n = compacto(bruto);
+  const porNombre = n ? opciones.filter(o => compacto(o.nombre) === n || compacto(o.cliente) === n) : [];
+  if (porNombre.length === 1) return { tipo: 'existente', negocio_id: porNombre[0].id };
   return { tipo: 'no_entendida' };
 }
 

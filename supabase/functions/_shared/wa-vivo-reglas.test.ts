@@ -47,6 +47,10 @@ import {
   type ViajeAbierto,
 } from './wa-viajes-reglas';
 
+import { elegirFallida, leerReintentar, textoFallaEntendimiento, textoReintentarSinElegir, textoTandaDescartada } from './wa-bandeja-reglas';
+import { interpretarRespuestaNegocio } from './wa-carga-reglas';
+import { esSiNoCorto, interpretarRespuestaPlan } from './wa-viajes-reglas';
+
 // ── A1 · ruteo ───────────────────────────────────────────────────────────────
 
 describe('A1 · con la bandeja encendida, manda la bandeja', () => {
@@ -294,5 +298,92 @@ describe('B · el nombre del negocio', () => {
     const { segmentos, encabezados } = armarSegmentos(ms, V, { horasCajaActiva: 4 });
     const plan = armarPlan({ mensajes: ms, viajes: V, segmentos, encabezados });
     expect(plan.avisos).toEqual([]);
+  });
+});
+
+// ── Segunda vuelta en vivo (vivo-2026-10-01-v2.md) ───────────────────────────
+
+
+describe('v2 · las respuestas', () => {
+  it('«¿A qué viaje van?»: número, código, nombre del negocio o del cliente de la lista, NUEVO, DESCARTAR', () => {
+    const ops = [
+      { id: 'p', codigo: 'P 26 2', cliente: 'PEDRO PRUEBA5', destino: null, nombre: 'SAN ANDRÉS DIC' },
+      { id: 'm', codigo: 'M 26 2', cliente: 'MATEO PRUEBA5', destino: null, nombre: 'BARILOCHE JUL 3-10' },
+    ];
+    expect(interpretarRespuestaNegocio('2', ops)).toEqual({ tipo: 'existente', negocio_id: 'm' });
+    expect(interpretarRespuestaNegocio('p 26 2', ops)).toEqual({ tipo: 'existente', negocio_id: 'p' });
+    expect(interpretarRespuestaNegocio('San Andrés dic', ops)).toEqual({ tipo: 'existente', negocio_id: 'p' });
+    expect(interpretarRespuestaNegocio('Mateo Prueba5', ops)).toEqual({ tipo: 'existente', negocio_id: 'm' });
+    expect(interpretarRespuestaNegocio('nuevo Valeria Prueba5', ops)).toEqual({ tipo: 'nuevo', cliente: 'Valeria Prueba5' });
+    expect(interpretarRespuestaNegocio('DESCARTAR', ops)).toEqual({ tipo: 'descartar' });
+    expect(interpretarRespuestaNegocio('sí', ops)).toEqual({ tipo: 'no_entendida' });
+  });
+
+  it('un «sí» o un «no» cortos: hasta cuatro palabras', () => {
+    expect(['sí', 'no', 'Si', 'no señora', '👍', 'sí, así es'].map(esSiNoCorto)).toEqual([true, true, true, true, true, true]);
+    expect(['sí pero falta la mamá', 'Lusia Prueba5', 'si claro que si vamos todos'].map(esSiNoCorto)).toEqual([false, false, false]);
+  });
+
+  it('«el N es de …» elige lo exacto del resumen antes que un viaje a un error de distancia', () => {
+    const viajes: ViajeAbierto[] = [{ id: 'm2', codigo: 'M 26 1', cliente: 'MATEO PRUEBA2', destino: 'BARILOCHE', nombre: 'BARILOCHE JUL' }];
+    const ms: MensajeViaje[] = [
+      { n: 1, cuerpo: 'nuevo Mateo Prueba5', reenviado: false, tipo: 'text', en: '2026-10-01T10:00:00Z' },
+      { n: 2, cuerpo: 'Queremos conocer Bariloche', reenviado: true, tipo: 'text', en: '2026-10-01T10:00:05Z' },
+      { n: 3, cuerpo: 'nuevo Andrea Prueba5', reenviado: false, tipo: 'text', en: '2026-10-01T10:00:10Z' },
+      { n: 4, cuerpo: 'Presupuesto 8 millones', reenviado: true, tipo: 'text', en: '2026-10-01T10:00:15Z' },
+    ];
+    const { segmentos, encabezados } = armarSegmentos(ms, viajes, { horasCajaActiva: 4 });
+    const plan = armarPlan({ mensajes: ms, viajes, segmentos, encabezados });
+    expect(interpretarRespuestaPlan('el 2 es de Mateo Prueba5', plan, viajes)).toEqual({ tipo: 'corregir', cambios: [{ ns: [4], a: { tipo: 'nuevo', cliente: 'Mateo Prueba5' } }] });
+    expect(interpretarRespuestaPlan('el 2 es de BARILOCHE JUL', plan, viajes)).toMatchObject({ tipo: 'corregir', cambios: [{ a: { negocio_id: 'm2' } }] });
+    expect(interpretarRespuestaPlan('el 2 es de M 26 1', plan, viajes)).toMatchObject({ tipo: 'corregir', cambios: [{ a: { negocio_id: 'm2' } }] });
+    expect(interpretarRespuestaPlan('el 2 es de Mateo Prueba2', plan, viajes)).toMatchObject({ tipo: 'corregir', cambios: [{ a: { negocio_id: 'm2' } }] });
+  });
+
+  it('«el N es de …» prefiere el viaje que ya está en el resumen cuando el nombre se repite afuera', () => {
+    const viajes: ViajeAbierto[] = [
+      { id: 'm2', codigo: 'M 26 2', cliente: 'MATEO PRUEBA5', destino: 'BARILOCHE', nombre: 'BARILOCHE JUL 3-10' },
+      { id: 'm9', codigo: 'M 26 9', cliente: 'MATEO PRUEBA5', destino: 'EUROPA', nombre: 'EUROPA 2 DÍAS' },
+    ];
+    const ms: MensajeViaje[] = [
+      { n: 1, cuerpo: 'M 26 2', reenviado: false, tipo: 'text', en: '2026-10-01T10:00:00Z' },
+      { n: 2, cuerpo: 'Queremos conocer Bariloche', reenviado: true, tipo: 'text', en: '2026-10-01T10:00:05Z' },
+      { n: 3, cuerpo: 'nuevo Andrea Prueba5', reenviado: false, tipo: 'text', en: '2026-10-01T10:00:10Z' },
+      { n: 4, cuerpo: 'somos 3 adultos', reenviado: true, tipo: 'text', en: '2026-10-01T10:00:15Z' },
+    ];
+    const { segmentos, encabezados } = armarSegmentos(ms, viajes, { horasCajaActiva: 4 });
+    const plan = armarPlan({ mensajes: ms, viajes, segmentos, encabezados });
+    expect(interpretarRespuestaPlan('el 2 es de Mateo Prueba5', plan, viajes)).toMatchObject({ tipo: 'corregir', cambios: [{ ns: [4], a: { negocio_id: 'm2' } }] });
+  });
+
+  it('N5: «2 maletas grandes» nombra «Maleta de bodega» (singular o plural)', () => {
+    const equipaje = { slug: 'equipaje', tipo: 'select', label: 'Equipaje', nivel: 'deseable', opciones: [
+      { value: 'personal', label: 'Solo artículo personal' }, { value: 'mano', label: 'Maleta de mano' }, { value: 'bodega', label: 'Maleta de bodega' },
+    ] } as CampoEntendible;
+    const texto = 'Van a llevar 2 maletas grandes cada uno';
+    expect(validarSalida({ valores: { equipaje: { valor: 'bodega', frase: texto } } }, [equipaje], texto).sugeridos).toEqual({ equipaje: { valor: 'bodega', frase: texto } });
+    expect(validarSalida({ valores: { equipaje: { valor: 'personal', frase: texto } } }, [equipaje], texto).sugeridos).toEqual({});
+  });
+});
+
+describe('v2 · fallas del entendimiento, REINTENTAR y «cancelar»', () => {
+  it('los avisos', () => {
+    expect(textoFallaEntendimiento('primero', 'Laura Prueba4', 'Laura Prueba4')).toBe('No pude procesar los mensajes de Laura Prueba4 por un problema técnico; los reintento solo.');
+    expect(textoFallaEntendimiento('agotado', 'CARTAGENA DIC · Laura (L 26 3)', 'L 26 3')).toBe('No pude cargar CARTAGENA DIC · Laura (L 26 3). Los mensajes quedan guardados; escribe REINTENTAR L 26 3');
+    expect(textoTandaDescartada('Laura Prueba5', 2)).toBe('Descarté la tanda de Laura Prueba5 (2 mensajes). No cargué nada.');
+    expect(textoTandaDescartada('Tanda de las 18:51', 1)).toBe('Descarté la tanda de las 18:51 (1 mensaje). No cargué nada.');
+  });
+
+  it('REINTENTAR: la palabra, y cuál carga', () => {
+    expect([leerReintentar('REINTENTAR L 26 3'), leerReintentar('reintentar'), leerReintentar('reintentarlo'), leerReintentar('hola')]).toEqual(['L 26 3', '', null, null]);
+    const f = [{ id: 'a', referencias: ['CARTAGENA DIC 12-16 · Laura Prueba4 (L 26 3)', 'L 26 3'] }, { id: 'b', referencias: ['Diego Prueba4'] }];
+    expect(elegirFallida('l 26 3', f)).toEqual({ tipo: 'una', id: 'a' });
+    expect(elegirFallida('Diego Prueba4', f)).toEqual({ tipo: 'una', id: 'b' });
+    expect(elegirFallida('laura', f)).toEqual({ tipo: 'una', id: 'a' });
+    expect(elegirFallida('prueba4', f)).toEqual({ tipo: 'varias' });
+    expect(elegirFallida('', f)).toEqual({ tipo: 'varias' });
+    expect(elegirFallida('', [f[1]])).toEqual({ tipo: 'una', id: 'b' });
+    expect(elegirFallida('Pedro', f)).toEqual({ tipo: 'ninguna' });
+    expect(textoReintentarSinElegir('', [])).toBe('No tengo ninguna carga fallida para reintentar.');
   });
 });

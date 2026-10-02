@@ -30,6 +30,19 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
  *   se numeran (1) · M20 · «Dime de qué viaje es» sin nada que asignar (1) · M21 · el ejemplo dice «el 4»
  *   (2) · M22 · «bot» no se quita (1) · M23 · sin pista del prefijo (1) · M24 · la salida no recuerda el
  *   mes (2) · M25 · el cliente se repite cuando el nombre ya lo trae (2).
+ *   Segunda vuelta (vivo-2026-10-01-v2.md), mismas condiciones; todas cayeron:
+ *   V1 · con «¿A qué viaje van?» pendiente un código o «nuevo X» vuelven a ser encabezado (7) · V1b / V1c ·
+ *   la pregunta de la entrega / del entendimiento no se reconoce como de viaje (6 / 1) · V2 · DESCARTAR no
+ *   descarta (1) · V3 · el nombre en la lista no elige (2) · V3b · ni el de un viaje fuera de la lista (1)
+ *   V4 · el «sí» corto vuelve a caer en la caja (2) · V4b · solo sin caja abierta (1) · V5 · «listo» se toma
+ *   como «sí» (2) · V6 · «cancelar» vuelve a ser contenido (2) · V7 · el viaje del resumen no gana (1)
+ *   V7b · lo aproximado empata con lo exacto (1) · V8 · «maletas» no nombra «maleta» (1) · V9 · sin avisos
+ *   de falla (1) · V9b · el aviso se repite en cada intento (1) · V10 · REINTENTAR es contenido (1)
+ *   V10b · REINTENTAR no reinicia los intentos (1) · V11 · se reintenta en la misma pasada (1) · V12 · un
+ *   «ok gracias» suelto abre tanda (1) · V13 · solo el provisional se renombra (1) · V13b · se olvida el
+ *   mes (1) · V14 / V15 · el bot de siempre sin cliente en la lista / en la selección de actividad (1 / 1)
+ *   V16 · el nombre sin NUEVO no crea el contacto (1) · V17 · DESCARTAR cuenta el encabezado (1)
+ *   V18 · el recordatorio de «¿A qué viaje van?» vuelve a decir «SÍ o corrige» (1).
  *   M5b (descartada): un segundo filtro de «forma de respuesta» en `wa-bandeja.ts` no cambiaba nada
  *   observable porque `hayQueEsperarEnVuelo` ya lo mira; se quitó para que la regla viva en un solo lado.
  */
@@ -259,6 +272,8 @@ let alBot: string[] = [];
 /** Lo que llega mientras un escrito espera a los mensajes en camino. */
 let mientras: Array<() => Promise<void>> = [];
 let esperas = 0;
+/** Gemini responde 403 (cobro), como en la segunda vuelta en vivo. */
+let geminiCaido = false;
 
 const USER = { workspace_id: WS, phone: TEL, name: 'Comercial', role: 'operator', collaborator_id: 'col-1', subscription_status: 'trial', modulos: { modules: { bandeja_solicitudes_wa: true } } };
 const T0 = Date.parse('2026-10-01T19:29:39Z');
@@ -324,6 +339,7 @@ beforeEach(async () => {
   vi.setSystemTime(new Date(T0));
   (globalThis as unknown as { Deno: unknown }).Deno = { env: { get: (k: string) => (k === 'GEMINI_API_KEY' ? 'k' : undefined) } };
   vi.stubGlobal('fetch', vi.fn(async () => {
+    if (geminiCaido) return new Response('{"error":{"code":403,"message":"billing"}}', { status: 403 });
     const s = colaModelo.length > 1 ? colaModelo.shift() : colaModelo[0];
     return new Response(JSON.stringify({ candidates: [{ finishReason: 'STOP', content: { parts: [{ text: JSON.stringify(s) }] } }] }), { status: 200 });
   }));
@@ -339,6 +355,7 @@ beforeEach(async () => {
   alBot = [];
   mientras = [];
   esperas = 0;
+  geminiCaido = false;
   colaModelo = [];
 });
 
@@ -524,11 +541,12 @@ describe('con la bandeja encendida manda la bandeja (escenarios 4, 5 y 6)', () =
     expect(textos()).toEqual(['Lo guardé con las solicitudes de viaje. Si era una consulta para el bot, escríbela empezando con «bot», por ejemplo: «bot ¿cuánto vendimos en septiembre?».']);
   });
 
-  it('escenario 6: «ok gracias» suelto no termina en «¿A qué viaje van?»', async () => {
+  it('escenario 6: «ok gracias» suelto no abre una tanda (v2, N7) ni termina en «¿A qué viaje van?»', async () => {
     await llega('ok gracias', { enviado: 0 });
+    expect(t.wa_bandeja_entregas).toEqual([]);
+    expect(textos()).toEqual([]);
     await llega('listo', { enviado: 5 });
     expect(textos()).toEqual(['No tengo mensajes pendientes por agrupar.']);
-    expect(t.wa_bandeja_entregas[0]).toMatchObject({ estado: 'esperando_cliente', pregunta_enviada_at: null });
     // No ocupa la cola: lo siguiente se pregunta enseguida.
     await llega('nuevo Laura Prueba2', { enviado: 20 });
     await llega(CARTAGENA, { enviado: 22 });
@@ -631,5 +649,292 @@ describe('parte B: el nombre del negocio es encabezado y es como se muestra', ()
     expect(datosDe('PEDRO PRUEBA')).toMatchObject({ destino: 'SAN ANDRÉS', adultos: 4 });
     // «somos 4 adultos» no cerró los menores (informe, error 4).
     expect(datosDe('PEDRO PRUEBA').ninos).toBeUndefined();
+  });
+});
+
+// ── Segunda vuelta en vivo (vivo-2026-10-01-v2.md) ──────────────────────────
+
+const negocioDePrueba = (id: string, codigo: string, nombre: string, cliente: string): Fila => ({
+  id, workspace_id: WS, linea_id: LINEA, codigo, nombre, estado: 'abierto', created_at: '2026-09-20T10:00:00Z',
+  contacto_id: `c-${id}`, empresa_id: null, responsable_id: null, contactos: { nombre: cliente }, empresas: null, workspaces: { slug: 'agencia' },
+});
+
+/** Dos viajes abiertos con su bloque (P 26 2 a San Andrés, M 26 2 a Bariloche). */
+function viajesAbiertos() {
+  t.negocios.push(
+    negocioDePrueba('n-p', 'P 26 2', 'SAN ANDRÉS DIC', 'PEDRO PRUEBA5'),
+    negocioDePrueba('n-m', 'M 26 2', 'BARILOCHE JUL 3-10', 'MATEO PRUEBA5'),
+  );
+  for (const [id, destino] of [['n-p', 'SAN ANDRÉS'], ['n-m', 'BARILOCHE']]) {
+    t.negocio_bloques.push({ id: `b-${id}`, negocio_id: id, data: { destino }, updated_at: null, bloque_configs: { orden: 1, config_extra: { fields: FIELDS }, bloque_definitions: { tipo: 'datos' }, etapas_negocio: { orden: 1 } } });
+  }
+}
+
+const PEDIDO = 'Hola, quiero cotizar para 2 adultos del 8 al 12 de enero';
+const pedido = () => salidaModelo({ adultos: { valor: '2', frase: '2 adultos' } });
+
+/** Escenario 5: un escrito sin encabezado y «listo» → «¿A qué viaje van?» con la lista. */
+async function preguntaDeViaje() {
+  viajesAbiertos();
+  await llega(PEDIDO, { enviado: 0 });
+  await llega('listo', { enviado: 3 });
+  expect(textos().at(-1)).toMatch(/¿A qué viaje van\?/);
+}
+
+describe('v2 · N2: «¿A qué viaje van?» se contesta con cada forma que el bot ofrece', () => {
+  it.each([
+    ['el número de la lista (con el formato «Nombre · Cliente (código)»)', '1'],
+    ['el código', 'P 26 2'],
+    ['el nombre del negocio', 'San Andrés dic'],
+    ['el nombre del cliente', 'Pedro Prueba5'],
+  ])('%s («%s»): carga en el viaje, sin abrir una caja nueva aunque haya una abierta', async (_n, respuesta) => {
+    await preguntaDeViaje();
+    expect(textos().at(-1)).toContain('1. SAN ANDRÉS DIC · Pedro Prueba5 (P 26 2)');
+    const antes = textos().length;
+    // Un reenvío del cliente abre una caja mientras tanto: la respuesta igual va a la pregunta.
+    await llega('perdón, son 3 adultos', { enviado: 6, reenviado: true });
+    await llega(respuesta, { enviado: 9 });
+    expect(textos().slice(antes)).toEqual([]); // ni 📌, ni «¿Cambias a…?», ni «Primero: …»
+    expect(t.wa_bandeja_mensajes.find(m => m.cuerpo === respuesta)).toMatchObject({ papel: 'respuesta_cliente' });
+    colaModelo = [pedido()];
+    await cron(60);
+    expect(t.wa_bandeja_entendimientos[0]).toMatchObject({ estado: 'negocio_actualizado', negocio_id: 'n-p' });
+  });
+
+  it('el nombre de un viaje abierto que no está en la lista corta también vale', async () => {
+    t.negocios.push({ ...negocioDePrueba('n-v', 'C 26 1', 'EUROPA 2 DÍAS', 'CAROLINA RUIZ'), created_at: '2026-01-01T10:00:00Z' });
+    t.negocio_bloques.push({ id: 'b-n-v', negocio_id: 'n-v', data: { destino: 'EUROPA' }, updated_at: null, bloque_configs: { orden: 1, config_extra: { fields: FIELDS }, bloque_definitions: { tipo: 'datos' }, etapas_negocio: { orden: 1 } } });
+    for (const k of [1, 2, 3, 4]) t.negocios.push({ ...negocioDePrueba(`n-x${k}`, `X 26 ${k}`, `VIAJE ${k}`, `CLIENTE ${k}`), created_at: `2026-09-2${k}T10:00:00Z` });
+    await preguntaDeViaje();
+    expect(textos().at(-1)).not.toContain('EUROPA 2 DÍAS');
+    await llega('Europa 2 días', { enviado: 9 });
+    colaModelo = [pedido()];
+    await cron(60);
+    expect(t.wa_bandeja_entendimientos[0]).toMatchObject({ estado: 'negocio_actualizado', negocio_id: 'n-v' });
+  });
+
+  it('«nuevo Valeria Prueba5»: crea el viaje (no es un encabezado ni abre caja)', async () => {
+    await preguntaDeViaje();
+    await llega('nuevo Valeria Prueba5', { enviado: 9 });
+    expect(textos().some(x => x.startsWith('📌'))).toBe(false);
+    expect(t.wa_bandeja_entregas.filter(e => e.estado === 'abierta')).toEqual([]);
+    colaModelo = [pedido()];
+    await cron(60);
+    expect(negocioDe('VALERIA PRUEBA5')).toMatchObject({ nombre: 'Viaje de Valeria Prueba5' });
+  });
+
+  it('«DESCARTAR»: descarta la tanda', async () => {
+    await preguntaDeViaje();
+    await llega('DESCARTAR', { enviado: 9 });
+    await cron(60);
+    expect(textos().at(-1)).toBe('Listo: descarté el mensaje. No creé ni cargué nada.');
+    expect(t.negocio_bloques.find(b => b.negocio_id === 'n-p')!.data).toEqual({ destino: 'SAN ANDRÉS' });
+  });
+
+  it('tras un «sí» que no entiende, la re-pregunta también se contesta con «nuevo X», y el recordatorio dice qué responder', async () => {
+    await preguntaDeViaje();
+    await llega('sí', { enviado: 9 });
+    await cron(60);
+    expect(textos().at(-1)).toContain('No entendí «sí».');
+    expect(await ent.preguntaAbierta(db as never, WS, TEL)).toMatchObject({ espera: 'viaje', corta: '¿A qué viaje van? Número, código, NUEVO y el nombre, o DESCARTAR' });
+    await llega('nuevo Valeria Prueba5', { enviado: 100 });
+    expect(t.wa_bandeja_mensajes.find(m => m.cuerpo === 'nuevo Valeria Prueba5')).toMatchObject({ papel: 'respuesta_negocio' });
+    colaModelo = [pedido()];
+    await cron(160);
+    expect(negocioDe('VALERIA PRUEBA5')).toBeTruthy();
+  });
+
+  it('«NUEVO» solo y después el nombre sin NUEVO: crea el contacto con ese nombre', async () => {
+    await preguntaDeViaje();
+    await llega('NUEVO', { enviado: 9 });
+    colaModelo = [pedido()];
+    await cron(60);
+    expect(textos().at(-1)).toContain('No sé el nombre del cliente');
+    await llega('Valeria Prueba5', { enviado: 100 });
+    expect(textos().some(x => x.startsWith('¿Cambias a'))).toBe(false);
+    await cron(160);
+    expect(negocioDe('VALERIA PRUEBA5')).toBeTruthy();
+  });
+});
+
+describe('v2 · N1: un «sí» o un «no» cortos con una pregunta pendiente nunca son contenido', () => {
+  async function resumenDeLaura() {
+    await llega('nuevo Laura Prueba5', { enviado: 0 });
+    await llega(CARTAGENA, { enviado: 2 });
+    await llega('listo', { enviado: 4 });
+    expect(textos().at(-1)).toContain('Laura Prueba5 · Entendí 1 viaje:');
+  }
+
+  it('«sí» seguido 3 s después por un encabezado ambiguo que se procesa antes: el «sí» va al resumen', async () => {
+    t.negocios.push(negocioDePrueba('n-d', 'D 26 3', 'PUNTA CANA', 'DIEGO PRUEBA5'), negocioDePrueba('n-l', 'L 26 3', 'CARTAGENA DIC 12-16', 'LAURA PRUEBA5'));
+    await resumenDeLaura();
+    await llega('Lusia Prueba5', { enviado: 23, llega: 24 }); // abre caja: «¿Cuál viaje?»
+    expect(textos().at(-1)).toMatch(/^¿Cuál viaje\? «Lusia Prueba5» puede ser:/);
+    await llega('sí', { enviado: 20, llega: 25 });
+    expect(t.wa_bandeja_mensajes.find(m => m.cuerpo === 'sí')).toMatchObject({ papel: 'respuesta_cliente' });
+    expect(t.wa_bandeja_entregas.find(e => e.cliente_texto === 'sí')).toMatchObject({ estado: 'con_cliente' });
+  });
+
+  it('un «no» a «¿es el mismo?» va a esa pregunta aunque un encabezado haya abierto una caja', async () => {
+    t.contactos.push({ id: 'c-laura', workspace_id: WS, nombre: 'LAURA PRUEBA5', telefono: null });
+    await resumenDeLaura();
+    await llega('sí', { enviado: 10 });
+    colaModelo = [LAURA];
+    await cron(60);
+    expect(textos().at(-1)).toMatch(/¿Es el mismo\? Responde SÍ, o NUEVO/);
+    await llega('nuevo Diego Prueba5', { enviado: 100 }); // la pregunta es de contacto: el encabezado sí abre caja
+    await llega('no', { enviado: 103 });
+    expect(t.wa_bandeja_mensajes.find(m => m.cuerpo === 'no')).toMatchObject({ papel: 'respuesta_contacto' });
+  });
+});
+
+describe('v2 · N4: «cancelar» dentro de una caja abierta', () => {
+  it('descarta la tanda y dice cuál y cuántos mensajes; lo siguiente no espera en cola', async () => {
+    await llega('nuevo Laura Prueba5', { enviado: 0 });
+    await llega(CARTAGENA, { enviado: 2 });
+    await llega('salimos de Bogotá', { enviado: 4, reenviado: true });
+    await llega('cancelar', { enviado: 6 });
+    expect(textos().at(-1)).toBe('Descarté la tanda de Laura Prueba5 (2 mensajes). No cargué nada.');
+    expect(t.wa_bandeja_entregas[0]).toMatchObject({ estado: 'esperando_cliente', pregunta_enviada_at: null });
+    expect(t.wa_bandeja_mensajes.find(m => m.cuerpo === 'cancelar')).toMatchObject({ papel: 'cierre' });
+    await llega('nuevo Diego Prueba5', { enviado: 20 });
+    await llega('Quiero un viaje para puntacana y curasao', { enviado: 22 });
+    await llega('listo', { enviado: 24 });
+    expect(textos().at(-1)).toMatch(/^Diego Prueba5 · Entendí 1 viaje:/);
+  });
+
+  it('N11: «DESCARTAR» al resumen cuenta los mensajes del resumen, no el encabezado', async () => {
+    await llega('nuevo Laura Prueba5', { enviado: 0 });
+    await llega(CARTAGENA, { enviado: 2 });
+    await llega('listo', { enviado: 4 });
+    await llega('DESCARTAR', { enviado: 8 });
+    await cron(60);
+    expect(textos().at(-1)).toBe('Listo: descarté el mensaje. No creé ni cargué nada.');
+  });
+
+  it('sin caja abierta, lo dice', async () => {
+    await llega('cancelar', { enviado: 0 });
+    expect(textos()).toEqual(['No hay una tanda abierta para cancelar.']);
+    expect(t.wa_bandeja_entregas).toEqual([]);
+  });
+});
+
+describe('v2 · N3: «el 2 es de Mateo Prueba5» aunque haya un viaje de «Mateo Prueba2» a un error', () => {
+  it('por nombre del cliente, por nombre del negocio y por código', async () => {
+    t.negocios.push(negocioDePrueba('n-m2', 'M 26 1', 'BARILOCHE JUL', 'MATEO PRUEBA2'));
+    await llega('nuevo Andrea Prueba5', { enviado: 0 });
+    await llega('Queremos ir a Cancún del 10 al 15 de febrero, 2 adultos, salimos de Medellín', { enviado: 2 });
+    await llega('El presupuesto es de unos 8 millones en total', { enviado: 4 });
+    await llega('nuevo Mateo Prueba5', { enviado: 6 });
+    await llega('Queremos conocer Bariloche del 3 al 10 de julio, somos 3 adultos', { enviado: 8 });
+    await llega('listo', { enviado: 10 });
+    await llega('el 2 es de Mateo Prueba5', { enviado: 15 });
+    await cron(60);
+    expect(textos().at(-1)).toContain('Corregido. Así queda:');
+    expect(textos().at(-1)).toContain('2) NUEVO Mateo Prueba5 — 2 mensajes');
+    await llega('el 1 es de BARILOCHE JUL', { enviado: 70 });
+    await cron(120);
+    expect(textos().at(-1)).toMatch(/BARILOCHE JUL · Mateo Prueba2 \(M 26 1\) — 1 mensaje/);
+    await llega('el 2 es de M 26 1', { enviado: 130 });
+    await cron(180);
+    expect(textos().at(-1)).toMatch(/BARILOCHE JUL · Mateo Prueba2 \(M 26 1\) — 2 mensajes/);
+  });
+});
+
+describe('v2 · S1: si falla el entendimiento, el bot avisa y se puede REINTENTAR', () => {
+  it('un aviso al primer error y otro al agotar los intentos; REINTENTAR lo vuelve a correr', async () => {
+    geminiCaido = true;
+    await llega('nuevo Laura Prueba4', { enviado: 0 });
+    await llega(CARTAGENA, { enviado: 2 });
+    await llega('listo', { enviado: 4 });
+    await llega('sí', { enviado: 8 });
+    await cron(60);
+    expect(textos().at(-1)).toBe('No pude procesar los mensajes de Laura Prueba4 por un problema técnico; los reintento solo.');
+    const n = textos().length;
+    await cron(120);
+    expect(textos().length).toBe(n); // el segundo intento no repite el aviso
+    await cron(180);
+    expect(textos().at(-1)).toBe('No pude cargar Laura Prueba4. Los mensajes quedan guardados; escribe REINTENTAR Laura Prueba4');
+    await cron(240);
+    expect(textos().length).toBe(n + 1); // agotado: ni reintenta ni avisa más
+    expect(t.wa_bandeja_entendimientos.find(e => e.segmento === 1)).toMatchObject({ estado: 'error', intentos: 3 });
+
+    await llega('REINTENTAR Diego', { enviado: 300 });
+    expect(textos().at(-1)).toBe('No sé cuál es «Diego».\nEscribe REINTENTAR y una de estas:\n- Laura Prueba4');
+    geminiCaido = false;
+    await llega('reintentar laura prueba4', { enviado: 310 });
+    expect(textos().at(-1)).toBe('Reintento Laura Prueba4. Te aviso cuando quede cargado.');
+    expect(t.wa_bandeja_mensajes.some(m => /reintentar/i.test(String(m.cuerpo)))).toBe(false);
+    colaModelo = [LAURA];
+    await cron(360);
+    expect(textos().at(-1)).toContain('CARTAGENA DIC 12-16 · Laura Prueba4 (L 26 1) — Mínimo');
+  });
+});
+
+describe('v2 · S3: el nombre automático sigue al viaje', () => {
+  it('cambia si cambian el destino o las fechas y recuerda el mes; editado a mano, no', async () => {
+    await llega('nuevo Pedro Prueba5', { enviado: 0 });
+    await llega('queremos ir a San Andrés en diciembre, somos 4', { enviado: 2 });
+    await llega('listo', { enviado: 4 });
+    await llega('sí', { enviado: 6 });
+    colaModelo = [salidaModelo({ destino: { valor: 'San Andrés', frase: 'ir a San Andrés' } })];
+    await cron(60);
+    const pedro = negocioDe('PEDRO PRUEBA5')!;
+    expect(pedro.nombre).toBe('SAN ANDRÉS DIC');
+    // Un mensaje que no habla del mes no lo borra.
+    const carga = async (texto: string, salida: unknown, seg: number) => {
+      await llega('P 26 1', { enviado: seg });
+      await llega(texto, { enviado: seg + 2 });
+      await llega('listo', { enviado: seg + 4 });
+      await llega('sí', { enviado: seg + 6 });
+      colaModelo = [salida];
+      await cron(seg + 60);
+    };
+    await carga('somos 4 adultos', salidaModelo({ adultos: { valor: '4', frase: 'somos 4 adultos' } }), 100);
+    expect(pedro.nombre).toBe('SAN ANDRÉS DIC');
+    // Cambian el destino y las fechas (N8): primero el aviso de otro destino; con «sí», carga y renombra.
+    await carga('Mejor Santa Marta, del 8 al 12 de enero', salidaModelo({
+      destino: { valor: 'Santa Marta', frase: 'Mejor Santa Marta' },
+      fecha_salida: { valor: '2027-01-08', frase: 'del 8 al 12 de enero' }, fecha_regreso: { valor: '2027-01-12', frase: 'del 8 al 12 de enero' },
+    }), 200);
+    expect(textos().at(-1)).toContain('Estos mensajes hablan de Santa Marta');
+    await llega('sí', { enviado: 270 });
+    await cron(320);
+    expect(pedro.nombre).toBe('SANTA MARTA ENE 8-12');
+    pedro.nombre = 'Pedro, el de la playa';
+    await carga('Mejor del 9 al 13 de enero', salidaModelo({
+      fecha_salida: { valor: '2027-01-09', frase: 'del 9 al 13 de enero' }, fecha_regreso: { valor: '2027-01-13', frase: 'del 9 al 13 de enero' },
+    }), 400);
+    expect(pedro.nombre).toBe('Pedro, el de la playa');
+  });
+});
+
+describe('v2 · S3: el bot de siempre nombra los negocios «Nombre · Cliente (código)»', () => {
+  const ctxDe = (intent: string, salida: string[], botones: Array<{ cuerpo: string; titulos: string[] }>) => ({
+    user: USER, supabase: db, message: { phone: TEL, text: 'llamé al cliente' },
+    parsed: { intent, confidence: 1, fields: { mensaje_original: 'llamé al cliente' } },
+    session: { id: 's-bot', state: 'started', context: {} },
+    sendMessage: async (x: string) => { salida.push(x); },
+    sendButtons: async (cuerpo: string, b: Array<{ title: string }>) => { botones.push({ cuerpo, titulos: b.map(x => x.title) }); },
+    updateSession: async () => {},
+  });
+  beforeEach(() => {
+    t.bot_sessions.push({ id: 's-bot', user_phone: TEL, workspace_id: WS, state: 'started', context: {} });
+    t.negocios.push({ ...negocioDePrueba('n-s', 'S 26 2', 'MEDELLÍN NOV 5-8', 'SOFIA PRUEBA5'), stage_actual: 'venta', precio_estimado: 0, precio_aprobado: null, updated_at: '2026-10-01T10:00:00Z' });
+  });
+
+  it('«bot cuántos viajes tengo»', async () => {
+    const salida: string[] = [];
+    const { handleConsulta } = await import('./handlers/consulta.ts');
+    await handleConsulta(ctxDe('ESTADO_NEGOCIOS', salida, []) as never);
+    expect(salida[0]).toContain('• MEDELLÍN NOV 5-8 · Sofia Prueba5 (S 26 2) — ');
+  });
+
+  it('«¿En cuál negocio registro esta actividad?»: la lista con el formato y los botones con el código', async () => {
+    const botones: Array<{ cuerpo: string; titulos: string[] }> = [];
+    const { handleActividad } = await import('./handlers/actividad.ts');
+    await handleActividad(ctxDe('ACTIVIDAD', [], botones) as never);
+    expect(botones[0].cuerpo).toContain('• MEDELLÍN NOV 5-8 · Sofia Prueba5 (S 26 2)');
+    expect(botones[0].titulos).toEqual(['S 26 2']);
   });
 });

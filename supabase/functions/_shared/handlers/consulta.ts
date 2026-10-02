@@ -5,6 +5,8 @@
 import type { HandlerContext } from '../types.ts';
 import { STREAK_MILESTONES } from '../types.ts';
 import { formatCOP, formatCOPShort, bold, formatAgo, daysSince, currentMonthName, currentYear } from '../wa-format.ts';
+import { nombreDeViaje } from '../wa-entendimiento-reglas.ts';
+import { clienteDelNegocio } from '../wa-lookup.ts';
 import { completeSession, saveLastContext } from '../wa-session.ts';
 import { COLUMNAS_CARTERA, deudasDeCartera } from '../cartera.ts';
 import { bogotaRangoMes } from '../bogota.ts';
@@ -56,6 +58,8 @@ type NegocioRow = {
   precio_aprobado: number | null;
   stage_actual: string;
   updated_at: string;
+  contactos?: { nombre: string | null } | Array<{ nombre: string | null }> | null;
+  empresas?: { nombre: string | null } | Array<{ nombre: string | null }> | null;
 };
 
 // Forma que se guarda en last_context (compatible con LastContextItem).
@@ -65,7 +69,14 @@ type NegocioItem = {
   codigo: string | null;
   precio: number;
   stage: string;
+  /** El cliente, para nombrar el negocio «Nombre · Cliente (código)». */
+  cliente?: string | null;
 };
+
+/** «MEDELLÍN NOV 5-8 · Sofía Prueba (S 26 2)»: como se nombra un negocio en todo el bot (prueba en vivo v2, N6). */
+function nombreItem(n: NegocioItem): string {
+  return nombreDeViaje({ nombre: n.nombre, cliente: n.cliente ?? null, codigo: n.codigo });
+}
 
 async function handleEstadoNegocios(ctx: HandlerContext): Promise<void> {
   const { user, supabase, parsed } = ctx;
@@ -73,7 +84,7 @@ async function handleEstadoNegocios(ctx: HandlerContext): Promise<void> {
 
   let query = supabase
     .from('negocios')
-    .select('id, nombre, codigo, precio_estimado, precio_aprobado, stage_actual, updated_at')
+    .select('id, nombre, codigo, precio_estimado, precio_aprobado, stage_actual, updated_at, contactos(nombre), empresas(nombre)')
     .eq('workspace_id', user.workspace_id)
     .eq('estado', 'abierto')
     .order('updated_at', { ascending: false });
@@ -96,6 +107,7 @@ async function handleEstadoNegocios(ctx: HandlerContext): Promise<void> {
     codigo: n.codigo,
     precio: Number(n.precio_aprobado || n.precio_estimado || 0),
     stage: n.stage_actual,
+    cliente: clienteDelNegocio(n),
   }));
 
   // Single-stage view
@@ -106,8 +118,7 @@ async function handleEstadoNegocios(ctx: HandlerContext): Promise<void> {
     let msg = `📊 ${label}: ${allItems.length} negocio${allItems.length > 1 ? 's' : ''}`;
     msg += `\n💰 Total: ${formatCOPShort(totalValue)}\n`;
     for (const n of allItems.slice(0, shownCount)) {
-      const cod = n.codigo ? ` (${n.codigo})` : '';
-      msg += `\n• ${bold(n.nombre)}${cod} — ${formatCOPShort(n.precio)}`;
+      msg += `\n• ${bold(nombreItem(n))} — ${formatCOPShort(n.precio)}`;
     }
     if (allItems.length > shownCount) {
       msg += `\n… y ${allItems.length - shownCount} más. Escribe *los otros* para verlos.`;
@@ -153,8 +164,7 @@ async function handleEstadoNegocios(ctx: HandlerContext): Promise<void> {
     msg += `\n*${label}* (${items.length}):`;
     const perStageShown = Math.min(3, items.length);
     for (const n of items.slice(0, perStageShown)) {
-      const cod = n.codigo ? ` (${n.codigo})` : '';
-      msg += `\n  • ${n.nombre}${cod} — ${formatCOPShort(n.precio)}`;
+      msg += `\n  • ${nombreItem(n)} — ${formatCOPShort(n.precio)}`;
       orderedItems.push(n);
       shownCount++;
     }

@@ -274,6 +274,59 @@ export function ordenarPorEnvio<T extends { enviado_at?: string | null; recibido
     || String(a.recibido_at ?? '').localeCompare(String(b.recibido_at ?? '')));
 }
 
+// ── Cuando el entendimiento falla (prueba en vivo v2 del 2026-10-01) ─────────
+
+/**
+ * Los dos avisos de una carga que falla: al primer error y al agotar los intentos. Antes el bot se
+ * callaba: con Gemini caído por cobro, dos entregas quedaron en error y el comercial no se enteró.
+ */
+export function textoFallaEntendimiento(cuando: 'primero' | 'agotado', nombre: string, referencia: string): string {
+  return cuando === 'primero'
+    ? `No pude procesar los mensajes de ${nombre} por un problema técnico; los reintento solo.`
+    : `No pude cargar ${nombre}. Los mensajes quedan guardados; escribe REINTENTAR ${referencia}`;
+}
+
+/** «REINTENTAR L 26 3» → «L 26 3»; «reintentar» solo → «». `null`: no es la palabra. */
+export function leerReintentar(texto: string): string | null {
+  const m = /^\s*reintentar\b[\s:,.-]*([\s\S]*)$/i.exec(String(texto ?? ''));
+  return m ? m[1].trim() : null;
+}
+
+/**
+ * Cuál carga fallida pide reintentar el comercial: la que tiene esa referencia tal cual (código o
+ * nombre, sin tildes, mayúsculas ni espacios), o la única cuyo nombre contiene todas sus palabras. Sin
+ * objetivo, la única que haya.
+ */
+export function elegirFallida(
+  objetivo: string, fallidas: ReadonlyArray<{ id: string; referencias: ReadonlyArray<string> }>,
+): { tipo: 'una'; id: string } | { tipo: 'ninguna' } | { tipo: 'varias' } {
+  const compacto = (x: string) => normalizar(x).replace(/[^a-z0-9]/g, '');
+  const o = compacto(objetivo);
+  if (!o) return fallidas.length === 1 ? { tipo: 'una', id: fallidas[0].id } : fallidas.length === 0 ? { tipo: 'ninguna' } : { tipo: 'varias' };
+  const exactas = fallidas.filter(f => f.referencias.some(r => compacto(r) === o));
+  const palabras = normalizar(objetivo).split(' ').filter(Boolean);
+  const elegidas = exactas.length > 0 ? exactas
+    : fallidas.filter(f => f.referencias.some(r => palabras.every(w => normalizar(r).split(/[^a-z0-9]+/).includes(w))));
+  if (elegidas.length === 1) return { tipo: 'una', id: elegidas[0].id };
+  return elegidas.length === 0 ? { tipo: 'ninguna' } : { tipo: 'varias' };
+}
+
+/** Lo que contesta REINTENTAR cuando no sabe cuál: las cargas fallidas que hay, o que no hay ninguna. */
+export function textoReintentarSinElegir(objetivo: string, referencias: ReadonlyArray<string>): string {
+  if (referencias.length === 0) return 'No tengo ninguna carga fallida para reintentar.';
+  const cab = objetivo.trim() ? `No sé cuál es «${objetivo.trim()}».` : 'Hay más de una carga fallida.';
+  return [cab, 'Escribe REINTENTAR y una de estas:', ...referencias.map(r => `- ${r}`)].join('\n');
+}
+
+/** «cancelar» dentro de una caja abierta: la tanda se descarta y se dice cuál (prueba en vivo v2, N4). */
+export function textoTandaDescartada(nombre: string, n: number): string {
+  const de = /^Tanda de las /.test(nombre) ? nombre.replace(/^Tanda de las /, 'la tanda de las ') : `la tanda de ${nombre}`;
+  return `Descarté ${de} (${n} ${n === 1 ? 'mensaje' : 'mensajes'}). No cargué nada.`;
+}
+
+/** Lo que contesta «cancelar» sin una tanda abierta ni una conversación del bot a medias. */
+export const TEXTO_NADA_QUE_CANCELAR = 'No hay una tanda abierta para cancelar.';
+
 /** Lo que la base contesta al registrar un mensaje (`wa_bandeja_registrar_mensaje`). */
 export type AccionRegistro =
   | 'duplicado'          // Meta reintentó un mensaje ya guardado: no se hace nada

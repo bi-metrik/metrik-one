@@ -53,5 +53,11 @@ upsert del código viejo `on conflict (entrega_id)` se queda sin índice. `modo_
   Nombres: `nombreDeViaje` = «nombre · Cliente (código)»; el nombre del negocio es encabezado; negocio nuevo
   con `negocios.metadata.nombre_auto`/`nombre_provisional`. `numero_pasajeros` solo con las tres fuentes
   (paridad src/_shared en `wa-suma-paridad.test.ts`). Arnés de punta a punta: `wa-bandeja-vivo.test.ts`.
+- 2026-10-02 segunda vuelta en vivo (fix/bandeja-wa-vivo-2): `preguntaAbierta().espera` manda. Con
+  `viaje`/`nombre` pendiente, lo que tiene forma de respuesta o de encabezado ES la respuesta (aunque haya
+  caja abierta); un sí/no corto con cualquier pregunta pendiente también (nunca «listo»). «cancelar» descarta
+  la caja abierta. Fallas del modelo avisan en intento 1 y 3; el reintento espera a la pasada siguiente;
+  `REINTENTAR <ref>` reinicia intentos. Nombre automático = `metadata.nombre_auto` (+ `nombre_pistas`).
+  ⚠️ Restaurar una mutación con `git checkout` borró las pruebas sin commitear: usar `cp` de un respaldo.
 - El aislamiento rechaza `cat >> archivo <<EOF` y `sed` con variables: usar Edit/Write o un .py en el worktree.
 Relacionado: [[entendimiento-bandeja-wa]], [[bandeja-negocio-existente]].

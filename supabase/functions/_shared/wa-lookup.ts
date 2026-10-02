@@ -25,7 +25,16 @@ export type NegocioRow = {
   stage_actual: string;
   /** Only findActiveNegocios() asks for it. */
   updated_at?: string;
+  /** Only findActiveNegocios() embeds them: the client shown next to the name. */
+  contactos?: { nombre: string | null } | Array<{ nombre: string | null }> | null;
+  empresas?: { nombre: string | null } | Array<{ nombre: string | null }> | null;
 };
+
+/** El cliente de un negocio con sus relaciones embebidas (contacto, o empresa). */
+export function clienteDelNegocio(n: Pick<NegocioRow, 'contactos' | 'empresas'>): string | null {
+  const uno = (v: NegocioRow['contactos']) => (Array.isArray(v) ? v[0] : v)?.nombre ?? null;
+  return uno(n.contactos) ?? uno(n.empresas);
+}
 
 /** A negocio normalized so formatProject() can read it like a project. */
 export type NegocioDestino = Omit<NegocioRow, 'codigo'> & {
@@ -113,7 +122,7 @@ export async function findActiveProjects(supabase: SupabaseClient, workspaceId: 
 export async function findActiveNegocios(supabase: SupabaseClient, workspaceId: string) {
   const { data } = (await supabase
     .from('negocios')
-    .select('id, nombre, codigo, precio_estimado, precio_aprobado, empresa_id, contacto_id, stage_actual, updated_at')
+    .select('id, nombre, codigo, precio_estimado, precio_aprobado, empresa_id, contacto_id, stage_actual, updated_at, contactos(nombre), empresas(nombre)')
     .eq('workspace_id', workspaceId)
     .eq('estado', 'abierto')
     .order('updated_at', { ascending: false })) as { data: NegocioRow[] | null };

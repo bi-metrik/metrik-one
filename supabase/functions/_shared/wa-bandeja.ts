@@ -11,8 +11,11 @@
 // ============================================================
 
 import { transcribeAudio, PROMPT_TRANSCRIPCION_LITERAL } from './wa-transcribe.ts';
-import { armarPreguntaNegocio, candidatosDeEncabezado, conNombreDelViaje, hayPreguntaPendiente, nombreDeLaEntrega, pendienteDeLaTanda, preguntaAbierta, textoPrimero, tomarRespuestaContacto } from './wa-entendimiento.ts';
-import { esNombreNuevo, esRuidoEscrito, leerSiNo, lineaCaja, pareceRespuesta, resolverEncabezado, respuestaAlEncabezado, textoNoEntendiCambio, TEXTO_PIDE_NOMBRE_NUEVO } from './wa-viajes-reglas.ts';
+import {
+  armarPreguntaNegocio, candidatosDeEncabezado, conNombreDelViaje, hayPreguntaPendiente, nombreDeLaEntrega, nombreYConteoDeLaTanda,
+  pendienteDeLaTanda, preguntaAbierta, reintentarCarga, textoPrimero, tomarRespuestaContacto, tomarRespuestaDeEntrega,
+} from './wa-entendimiento.ts';
+import { esNombreNuevo, esRuidoEscrito, esSiNoCorto, leerSiNo, lineaCaja, pareceRespuesta, resolverEncabezado, respuestaAlEncabezado, textoNoEntendiCambio, TEXTO_PIDE_NOMBRE_NUEVO } from './wa-viajes-reglas.ts';
 import type { ResolucionEncabezado } from './wa-viajes-reglas.ts';
 import { sendTextMessage } from './wa-respond.ts';
 import {
@@ -20,6 +23,10 @@ import {
   cuerpoDelMensaje,
   decidirRuta,
   empiezaConPrefijoBot,
+  esCancelar,
+  leerReintentar,
+  textoTandaDescartada,
+  TEXTO_NADA_QUE_CANCELAR,
   esPalabraCierre,
   esPregunta,
   ESPERA_EN_VUELO_MS,
@@ -160,6 +167,61 @@ export const esperaEnVuelo = {
  * `hayQueEsperarEnVuelo`: si hay una tanda abierta y si hay una pregunta (de la entrega o del
  * entendimiento) sin contestar.
  */
+/** ¿El remitente tiene una tanda abierta? */
+async function hayTandaAbierta(supabase: SupabaseClient, workspaceId: string, phone: string): Promise<boolean> {
+  const { data } = await supabase.from('wa_bandeja_entregas').select('id')
+    .eq('workspace_id', workspaceId).eq('remitente_phone', phone).eq('estado', 'abierta').limit(1).maybeSingle();
+  return !!data;
+}
+
+/**
+ * Toma el escrito como la respuesta a la pregunta pendiente del remitente: primero una del
+ * entendimiento (re-pregunta, confirmación, contacto) y si no, la de una entrega cerrada (el resumen o
+ * «¿A qué viaje van?»). `aunConTandaAbierta`: aunque haya una caja abierta. Devuelve `true` si la tomó.
+ */
+async function responderPendiente(
+  supabase: SupabaseClient, workspaceId: string, phone: string, texto: string, wamid: string, enviadoAt: string | null,
+  config: ConfigBandeja, aunConTandaAbierta: boolean,
+): Promise<boolean> {
+  if (await tomarRespuestaContacto(supabase, { workspaceId, phone, texto, wamid, enviadoAt, aunConTandaAbierta })) return true;
+  return tomarRespuestaDeEntrega(supabase, { workspaceId, phone, texto, wamid, enviadoAt, horas: config.horasRespuestaCliente });
+}
+
+/**
+ * «cancelar» escrito con una caja abierta: la tanda se descarta (queda cerrada, sin pregunta ni
+ * carga, con el motivo) y el bot dice cuál y cuántos mensajes (prueba en vivo v2, N4: se guardaba como
+ * contenido y nadie contestaba). Sin caja abierta, el bot lo dice.
+ */
+async function cancelarTandaAbierta(
+  supabase: SupabaseClient, workspaceId: string, phone: string, texto: string, wamid: string, enviadoAt: string | null, config: ConfigBandeja,
+): Promise<void> {
+  const { data: abierta } = await supabase.from('wa_bandeja_entregas').select('id, remitente_staff_id, remitente_colaborador_id')
+    .eq('workspace_id', workspaceId).eq('remitente_phone', phone).eq('estado', 'abierta').limit(1).maybeSingle();
+  if (!abierta) {
+    await enviar(phone, TEXTO_NADA_QUE_CANCELAR, workspaceId);
+    return;
+  }
+  const { nombre, n } = await nombreYConteoDeLaTanda(supabase, abierta.id as string, workspaceId, config.horasCajaActiva);
+  const ahora = new Date().toISOString();
+  const { data: hecho, error } = await supabase.from('wa_bandeja_entregas')
+    .update({ estado: 'esperando_cliente', cerrada_at: ahora, motivo_cierre: 'palabra_cierre', pregunta_error: TANDA_CANCELADA })
+    .eq('id', abierta.id).eq('estado', 'abierta').select('id');
+  if (error || (hecho ?? []).length === 0) {
+    if (error) console.error(`[wa-bandeja] no se pudo descartar la tanda ${abierta.id}:`, error.message);
+    return;
+  }
+  const { error: eIns } = await supabase.from('wa_bandeja_mensajes').insert({
+    workspace_id: workspaceId, entrega_id: abierta.id, wa_message_id: wamid, remitente_phone: phone,
+    remitente_staff_id: abierta.remitente_staff_id ?? null, remitente_colaborador_id: abierta.remitente_colaborador_id ?? null,
+    tipo: 'text', papel: 'cierre', cuerpo: texto, cuerpo_origen: 'texto', enviado_at: enviadoAt,
+  });
+  if (eIns) console.error('[wa-bandeja] no se pudo guardar el «cancelar»:', eIns.message);
+  await enviar(phone, textoTandaDescartada(nombre, n), workspaceId);
+}
+
+/** Marca de una tanda que el comercial canceló: cerrada sin pregunta (no ocupa la cola). */
+const TANDA_CANCELADA = 'cancelada por el comercial: no se pregunta ni se carga';
+
 async function estadoParaEsperar(
   supabase: SupabaseClient, workspaceId: string, phone: string, config: ConfigBandeja,
 ): Promise<{ hayAbierta: boolean; hayPregunta: boolean }> {
@@ -189,16 +251,53 @@ export async function atenderEnBandeja(
     console.warn(`[wa-bandeja] mensaje sin wamid de ${message.phone} (${message.type})`);
   }
   const wamid = message.wa_message_id ?? `sin-wamid:${message.phone}:${message.timestamp}:${message.type}`;
+  const escrito = message.type === 'text' && message.reenviado !== true && !!(message.text || '').trim();
+  const texto = (message.text || '').trim();
+  // «listo» cierra la tanda: nunca es la respuesta a una pregunta (aunque sea también un «sí»).
+  const esCierre = escrito && esPalabraCierre(message.text, config.palabrasCierre);
+  const responder = (aunConTandaAbierta: boolean) => responderPendiente(supabase, user.workspace_id, message.phone, texto, wamid, fechaDeMeta(message.timestamp), config, aunConTandaAbierta);
 
+  // Órdenes del comercial a la bandeja (prueba en vivo v2): REINTENTAR una carga fallida y
+  // «cancelar» la tanda abierta. Ninguna de las dos es contenido.
+  if (escrito) {
+    const objetivo = leerReintentar(texto);
+    if (objetivo !== null) {
+      await reintentarCarga(supabase, user.workspace_id, message.phone, objetivo);
+      return;
+    }
+    if (esCancelar(texto)) {
+      await cancelarTandaAbierta(supabase, user.workspace_id, message.phone, texto, wamid, fechaDeMeta(message.timestamp), config);
+      return;
+    }
+  }
+
+  const pendiente = escrito ? await preguntaAbierta(supabase, user.workspace_id, message.phone) : null;
   // Un encabezado («Carolina», «T1 26 9») abre una caja: nunca es la respuesta a una pregunta
   // pendiente (QA de #971: el que se escribía antes del «sí» se tomaba como respuesta al resumen).
   const encabezado = await encabezadoDelEscrito(supabase, user.workspace_id, message, config);
+
+  // N2 (prueba en vivo v2): con «¿A qué viaje van?» (o el nombre de un cliente nuevo) pendiente, un
+  // número, un código, el nombre de un viaje, «NUEVO nombre» o «DESCARTAR» son la RESPUESTA, no un
+  // encabezado: no abren caja. Se toman aunque haya una tanda abierta.
+  if (escrito && !esCierre && (pendiente?.espera === 'viaje' || pendiente?.espera === 'nombre') && (pareceRespuesta(texto) || encabezado !== null)) {
+    if (await responder(true)) return;
+  }
+
   // Si la tanda espera algo en el acto («¿Cambias a…? sí/no» o el nombre de un «nuevo»), este escrito
   // va a la tanda (la relee el reparto) y no es la respuesta a otra pregunta (QA de #971 v5 y v6).
   const enEspera = encabezado ? null : await respuestaEnEspera(supabase, user.workspace_id, message, config);
   const esEncabezado = encabezado !== null || enEspera !== null;
-  const escrito = message.type === 'text' && message.reenviado !== true && !!(message.text || '').trim();
-  const esCierre = escrito && esPalabraCierre(message.text, config.palabrasCierre);
+
+  // N1 (prueba en vivo v2): un «sí» o un «no» cortos, con una pregunta pendiente, se aplican a la
+  // pregunta: nunca son contenido, aunque un encabezado mandado detrás haya abierto una caja.
+  if (escrito && !esEncabezado && !esCierre && pendiente && esSiNoCorto(texto)) {
+    if (await responder(true)) return;
+  }
+
+  // Un acuse suelto («ok gracias», «👍») sin tanda abierta ni pregunta no abre una tanda (v2, N7).
+  if (escrito && !esEncabezado && !pendiente && esRuidoEscrito(texto) && !esCierre && !(await hayTandaAbierta(supabase, user.workspace_id, message.phone))) {
+    return;
+  }
 
   // La carrera de los webhooks (prueba en vivo del 2026-10-01, error 1): un escrito que podría
   // tomarse como la respuesta a una pregunta pendiente, o una palabra de cierre, espera a que entre
