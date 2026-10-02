@@ -59,10 +59,14 @@ const GRUPOS: Array<{ grupo: FilaResumen['grupo']; titulo: string }> = [
   { grupo: 'ya_estaba', titulo: 'Ya estaba' },
 ]
 
-/** Pie con el primario: fijo abajo en el celular mientras hay algo sin entender o sin cargar (§2.5). */
+/**
+ * Pie con el primario: pegado abajo en el celular mientras hay algo sin entender o sin cargar
+ * (§2.5). `sticky` y no `fixed`: el contenido corre dentro de `<main>` y la barra de pestañas del
+ * celular va debajo de él; un `fixed` la taparía.
+ */
 function Pie({ children }: { children: React.ReactNode }) {
   return (
-    <div className="fixed inset-x-0 bottom-0 z-30 flex flex-wrap items-center gap-2 border-t border-[#E2DED5] bg-[#F3F1EC] px-4 py-3 sm:static sm:z-auto sm:border-0 sm:bg-transparent sm:p-0">
+    <div className="sticky bottom-0 z-10 -mx-3 flex flex-wrap items-center gap-2 border-t border-[#E2DED5] bg-[#F3F1EC] px-3 py-3 md:static md:mx-0 md:border-0 md:bg-transparent md:p-0">
       {children}
     </div>
   )
