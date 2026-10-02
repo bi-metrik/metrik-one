@@ -1,4 +1,4 @@
-import { MAX_STACK } from './reporte'
+import { MAX_STACK } from './limites'
 
 /**
  * Manda el error que pinto `error.tsx` / `global-error.tsx` a `/api/errores-cliente`.

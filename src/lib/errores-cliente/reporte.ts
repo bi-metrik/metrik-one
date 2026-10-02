@@ -12,10 +12,9 @@ import { z } from 'zod'
  * Solo viajan los campos de abajo. Nada de cookies, query string, usuario ni workspace.
  */
 
-/** Tope del cuerpo en bytes. Lo demas se rechaza con 413 sin leerlo como JSON. */
-export const MAX_BYTES_REPORTE = 8 * 1024
-/** Tope del stack que se manda y que se registra (~2 KB). */
-export const MAX_STACK = 2000
+// Los topes viven en `limites.ts` (sin Zod) para que el navegador no cargue Zod.
+import { MAX_BYTES_REPORTE, MAX_STACK } from './limites'
+export { MAX_BYTES_REPORTE, MAX_STACK }
 
 const recortar = (max: number) => z.string().transform((s) => s.slice(0, max))
 

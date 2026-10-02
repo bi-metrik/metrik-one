@@ -1,5 +1,6 @@
 'use client'
 
+import dynamic from 'next/dynamic'
 import { useState, useRef, useEffect, useCallback } from 'react'
 import { useTransitionTolerante } from '@/hooks/use-transition-tolerante'
 import { createPortal } from 'react-dom'
@@ -50,46 +51,19 @@ import type { LineaBase } from '@/lib/negocios/presupuesto-ejecucion'
 import { lineaDeclaraCierre, accionDeCierre, type EtapaCierre } from '@/lib/negocios/etapa-cierre'
 import { puedeCorregirDocumentos } from '@/lib/roles'
 import ActivityLog from '@/components/activity-log'
-import CierreNegocioDialog from './cierre-negocio-dialog'
 
 // Bloques renderers
-import BloqueEquipo from './bloques/BloqueEquipo'
-import BloqueDatos from './bloques/BloqueDatos'
-import BloqueContacto from './bloques/BloqueContacto'
 import type { CampoContacto } from '@/lib/contactos/campos-contacto'
 import type { DatosField, ConfigTarifaConfirmacionUI } from './bloques/BloqueDatos'
-import BloqueChecklist from './bloques/BloqueChecklist'
-import BloqueChecklistSoporte from './bloques/BloqueChecklistSoporte'
-import BloqueDocumentos from './bloques/BloqueDocumentos'
 import type { DocumentoConfig } from './bloques/BloqueDocumentos'
-import BloqueDocumento from './bloques/BloqueDocumento'
-import BloqueCotizacion from './bloques/BloqueCotizacion'
 import type { CotizacionResumen, FacturaDraft } from '../negocio-v2-actions'
 import type { ConfirmacionAvance } from '@/lib/negocios/confirmacion-avance'
 // Compartido con el panel que aparece tras registrar un pago: la misma entrega no puede
 // preguntarse de dos formas distintas según desde dónde se dispare.
-import ModalConfirmarAvance from '@/components/modal-confirmar-avance'
-import BloqueFacturacion from './bloques/BloqueFacturacion'
-import BloqueCobros from './bloques/BloqueCobros'
 import type { PendienteHandoff, ModeloDinero } from '@/lib/upme/modelo-dinero'
 import type { EpaycoCostoCobro } from '@/lib/epayco'
-import BloquePlanRecurrente from './bloques/BloquePlanRecurrente'
-import BloquePropuestaEconomica from './bloques/BloquePropuestaEconomica'
-import BloqueDatosMultiPago from './bloques/BloqueDatosMultiPago'
 import type { MultiPagoField } from './bloques/BloqueDatosMultiPago'
-import BloqueAprobacion from './bloques/BloqueAprobacion'
-import BloqueCronograma from './bloques/BloqueCronograma'
-import BloqueResumenFinanciero from './bloques/BloqueResumenFinanciero'
-import BloqueEjecucion from './bloques/BloqueEjecucion'
-import BloqueMovimientos from './bloques/BloqueMovimientos'
-import BloqueResultado from './bloques/BloqueResultado'
-import BloqueHistorial from './bloques/BloqueHistorial'
 import type { HistorialData } from './bloques/BloqueHistorial'
-import BloqueFormulario from './bloques/BloqueFormulario'
-import BloquePagosEpayco from './bloques/BloquePagosEpayco'
-import BloquePagoExterno from './bloques/BloquePagoExterno'
-import BloqueCompletionStamp from './bloques/BloqueCompletionStamp'
-import BloqueGuiaDevolucion from './bloques/BloqueGuiaDevolucion'
 import { STAGE_BADGE_CLASSES, type WorkflowStage } from '@/components/workflow/types'
 import { GuiaEtapaCard } from './GuiaEtapaCard'
 import { formatBogotaFechaCorta, formatBogotaFechaCortaAno, todayBogotaISO } from '@/lib/dates/bogota'
@@ -99,6 +73,38 @@ import { AlmacenamientoExternoProvider } from '@/lib/almacenamiento/contexto'
 import { LecturasProvider } from '@/lib/negocios/lecturas-contexto'
 import { rutaRepositorioNegocio } from '@/lib/almacenamiento/referencia'
 import { corregirLecturaDudosa } from '@/lib/actions/lectura-dudosa-actions'
+
+// Cada bloque y cada modal baja en su propio chunk, solo si este negocio lo pinta.
+// Antes iban todos en un chunk de ~484 KB que bajaba entero para abrir cualquier ficha
+// (2026-10-02, iPhone con mala señal: `Failed to load chunk`). Los que se pintan en el
+// servidor salen igual en el HTML; Next precarga sus chunks.
+const CierreNegocioDialog = dynamic(() => import('./cierre-negocio-dialog'))
+const BloqueEquipo = dynamic(() => import('./bloques/BloqueEquipo'))
+const BloqueDatos = dynamic(() => import('./bloques/BloqueDatos'))
+const BloqueContacto = dynamic(() => import('./bloques/BloqueContacto'))
+const BloqueChecklist = dynamic(() => import('./bloques/BloqueChecklist'))
+const BloqueChecklistSoporte = dynamic(() => import('./bloques/BloqueChecklistSoporte'))
+const BloqueDocumentos = dynamic(() => import('./bloques/BloqueDocumentos'))
+const BloqueDocumento = dynamic(() => import('./bloques/BloqueDocumento'))
+const BloqueCotizacion = dynamic(() => import('./bloques/BloqueCotizacion'))
+const ModalConfirmarAvance = dynamic(() => import('@/components/modal-confirmar-avance'))
+const BloqueFacturacion = dynamic(() => import('./bloques/BloqueFacturacion'))
+const BloqueCobros = dynamic(() => import('./bloques/BloqueCobros'))
+const BloquePlanRecurrente = dynamic(() => import('./bloques/BloquePlanRecurrente'))
+const BloquePropuestaEconomica = dynamic(() => import('./bloques/BloquePropuestaEconomica'))
+const BloqueDatosMultiPago = dynamic(() => import('./bloques/BloqueDatosMultiPago'))
+const BloqueAprobacion = dynamic(() => import('./bloques/BloqueAprobacion'))
+const BloqueCronograma = dynamic(() => import('./bloques/BloqueCronograma'))
+const BloqueResumenFinanciero = dynamic(() => import('./bloques/BloqueResumenFinanciero'))
+const BloqueEjecucion = dynamic(() => import('./bloques/BloqueEjecucion'))
+const BloqueMovimientos = dynamic(() => import('./bloques/BloqueMovimientos'))
+const BloqueResultado = dynamic(() => import('./bloques/BloqueResultado'))
+const BloqueHistorial = dynamic(() => import('./bloques/BloqueHistorial'))
+const BloqueFormulario = dynamic(() => import('./bloques/BloqueFormulario'))
+const BloquePagosEpayco = dynamic(() => import('./bloques/BloquePagosEpayco'))
+const BloquePagoExterno = dynamic(() => import('./bloques/BloquePagoExterno'))
+const BloqueCompletionStamp = dynamic(() => import('./bloques/BloqueCompletionStamp'))
+const BloqueGuiaDevolucion = dynamic(() => import('./bloques/BloqueGuiaDevolucion'))
 
 // ── Tipos auxiliares ──────────────────────────────────────────────────────────
 
@@ -1817,7 +1823,7 @@ function BloqueRenderer({
             data: bloque.instancia.data as any,
           } : null}
           modo={modo}
-          configExtra={configExtra as Parameters<typeof BloquePropuestaEconomica>[0]['configExtra']}
+          configExtra={configExtra as React.ComponentProps<typeof BloquePropuestaEconomica>['configExtra']}
           userRole={userRole}
         />
       )
@@ -1829,7 +1835,7 @@ function BloqueRenderer({
           instancia={bloque.instancia}
           modo={modo}
           configExtra={configExtra}
-          preview={configExtra._guia_preview as Parameters<typeof BloqueGuiaDevolucion>[0]['preview']}
+          preview={configExtra._guia_preview as React.ComponentProps<typeof BloqueGuiaDevolucion>['preview']}
         />
       )
 

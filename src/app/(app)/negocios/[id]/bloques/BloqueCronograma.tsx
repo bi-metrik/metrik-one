@@ -1,5 +1,6 @@
 'use client'
 
+import dynamic from 'next/dynamic'
 import { useState, useEffect, useRef, useCallback } from 'react'
 import { useTransitionTolerante } from '@/hooks/use-transition-tolerante'
 import { CalendarDays, Plus, CheckCircle2, Circle, Trash2, GanttChart } from 'lucide-react'
@@ -7,10 +8,12 @@ import { toast } from 'sonner'
 import { marcarBloqueItem, agregarBloqueItem, actualizarBloqueItem, eliminarBloqueItem, reevaluarBloqueCronograma, inicializarBloqueItems, leerVersionCronograma, leerEquipoCronograma, type VersionCronograma } from '../../negocio-v2-actions'
 import type { NegocioBloque } from '../../negocio-v2-actions'
 import { formatBogotaFechaCortaAno } from '@/lib/dates/bogota'
-import GanttCronogramaModal from './GanttCronogramaModal'
 import ResponsableInput from './ResponsableInput'
 import { nombreResponsable, resolverMencionEscrita, type MiembroEquipo } from '@/lib/cronograma/responsable'
 import { conReintentoDeRed } from '@/lib/red/con-reintento'
+
+// El gantt solo se abre con un clic: no viaja con la ficha.
+const GanttCronogramaModal = dynamic(() => import('./GanttCronogramaModal'))
 
 /**
  * Un paso del cronograma. Las fechas van en dos pares que NO significan lo mismo:
