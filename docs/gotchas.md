@@ -198,3 +198,11 @@
   que va después en el texto.** `${BTN} border-[#0E5C43] text-[#0E5C43]` dejaba el borde gris y la
   tinta negra de `BTN` (el «Hotel / Traslado» elegido no se distinguía). Un estado elegido es una
   cadena propia (`BTN_ELEGIDO`), sin los colores de la base.
+- **Lo que importa un `error.tsx` lo carga TODA página de la app.** `enviar.ts` importaba una constante
+  de `reporte.ts`, que importa Zod: 378 KB de JS en cada página para pintar la pantalla de error, la que
+  tiene que salir cuando la red no da para bajar chunks (2026-10-02). Las pantallas de error y lo que
+  importan van sin dependencias pesadas; las constantes compartidas, en un archivo sin imports.
+- **Con React 19, lo que lanza un `startTransition(async …)` sube al error boundary.** Un server action
+  que no llega (iPhone: `TypeError: Load failed`) reemplazaba la ficha entera por «Algo se rompió». En
+  pantallas de uso móvil, `useTransitionTolerante` (`src/hooks/`) en vez de `useTransition`. No
+  reintentar escrituras por red: el error no dice si la petición alcanzó al servidor.

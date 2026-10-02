@@ -4,6 +4,7 @@ import { cache } from 'react'
 import { cookies, headers } from 'next/headers'
 import { createClient, createServiceClient } from '@/lib/supabase/server'
 import { getCachedUser } from '@/lib/supabase/auth-user'
+import { leerPerfilDeSesion } from '@/lib/supabase/perfil-sesion'
 import { memoDeRuta } from './memo-de-ruta'
 import { rolPlataformaParaAutocrear } from './rol-plataforma-autocreado'
 import {
@@ -120,20 +121,12 @@ async function getWorkspaceImpl() {
   }
   // ─────────────────────────────────────────────────────────────────────
 
-  const { data: profile } = await supabase
-    .from('profiles')
-    // El slug del workspace viaja en el MISMO viaje que el perfil. El guard de
-    // desincronizacion no puede costar una consulta nueva: este helper corre en cada
-    // request y lo llaman 111 archivos (cada ida y vuelta cuesta entre 60 y 180 ms).
-    // El embed se desambigua con el nombre de la FK a proposito: `profiles` tiene DOS
-    // hacia `workspaces` (`workspace_id` y `home_workspace_id`), y sin nombrarla
-    // PostgREST responde PGRST201 "Could not embed because more than one relationship
-    // was found" (medido contra produccion el 2026-09-18).
-    .select(
-      'workspace_id, role, full_name, platform_admin, workspaces!profiles_workspace_id_fkey(slug, name)',
-    )
-    .eq('id', user.id)
-    .single()
+  // El slug del workspace viaja en el MISMO viaje que el perfil. El guard de
+  // desincronizacion no puede costar una consulta nueva: este helper corre en cada
+  // request y lo llaman 111 archivos (cada ida y vuelta cuesta entre 60 y 180 ms).
+  // La lectura la comparten el layout y la barra de plataforma en el mismo render
+  // (`leerPerfilDeSesion`, con `cache()`): antes cada uno pedia la misma fila aparte.
+  const profile = await leerPerfilDeSesion(user.id)
 
   if (!profile?.workspace_id) {
     return { supabase, workspaceId: null, userId: user.id, role: null, staffId: null, areas: [] as string[], impersonating: false, realRole: null, error: 'Sin perfil' as const }
