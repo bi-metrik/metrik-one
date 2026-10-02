@@ -63,6 +63,7 @@
 - ⚠️ [Valida paquete documental v1.1](project_valida_paquete_documental_v11.md) — #18 sin mergear
 - ⚠️ [El hook de ownership no reconoce al teammate](project_hook_ownership_no_reconoce_teammate.md) — como teammate todo se bloquea
 - ⚠️ [Vistas server-only](project_vistas_server_only.md) — revocada a `authenticated` devuelve vacío sin error
+- ⚠️ [El trigger de rol no espeja 'contador' (#988)](project_trigger_staff_rol_sin_contador.md) — staff 'contador' deja profiles.role NULL; no se autocrea
 - ⚠️ [staff: 1 fila por persona en TODA la base](project_staff_unique_global.md) — platform_admin ajeno opera con `staffId` null
 - ⚠️⚠️ [Pestaña que quedó en otro workspace](project_pestana_desincronizada.md) — el guard va en el MIDDLEWARE
 - [Canal WhatsApp propio](project_canal_wa_propio.md) — #448 sin desplegar; Gate 0 prohíbe persistir contenido
