@@ -16,6 +16,9 @@ import {
   cuerpoDelMensaje,
   decidirRuta,
   esPalabraCierre,
+  esPedidoDeGuia,
+  TEXTO_GUIA_BANDEJA,
+  textoGuiaBandeja,
   fechaDeMeta,
   leerConfigBandeja,
   respuestaTrasRegistro,
@@ -76,6 +79,61 @@ describe('decidirRuta', () => {
   it('los prefijos se configuran por workspace', () => {
     const config = leerConfigBandeja({ bandeja_solicitudes: { prefijos_bot: ['gasto', 'bot'] } })
     expect(decidirRuta(entrada({ config, texto: 'bot cartera' }))).toBe('bot')
+  })
+})
+
+describe('pedido de guía', () => {
+  it.each(['ayuda', 'Ayuda!', 'AYUDA', '¿cómo funciona?', 'Cómo funciona esto', 'como se usa', 'Guía', 'instrucciones', 'Menú', '?', ' ¿? ', 'ayuda 🙏', '  ayuda  '])('«%s» sí', t => {
+    expect(esPedidoDeGuia(t)).toBe(true)
+  })
+
+  it.each(['necesito ayuda', 'necesito ayuda con el hotel', 'el menú del hotel', 'menú del hotel', 'ayuda con Carolina', 'cómo funciona el seguro', '', '¿', 'listo', 'bot ayuda'])('«%s» no', t => {
+    expect(esPedidoDeGuia(t)).toBe(false)
+  })
+
+  it('ruta: con la bandeja encendida, escrito → `guia`; reenviado → bandeja; apagada → bot', () => {
+    expect(decidirRuta(entrada({ texto: 'Ayuda!' }))).toBe('guia')
+    expect(decidirRuta(entrada({ texto: '¿cómo funciona?', sesionBotEsperando: true }))).toBe('guia')
+    expect(decidirRuta(entrada({ texto: 'ayuda', reenviado: true }))).toBe('bandeja')
+    expect(decidirRuta(entrada({ texto: 'ayuda', modules: APAGADA }))).toBe('bot')
+    expect(decidirRuta(entrada({ texto: 'necesito ayuda con el hotel' }))).toBe('bandeja')
+    expect(decidirRuta(entrada({ texto: 'bot ayuda' }))).toBe('bot')
+    expect(decidirRuta(entrada({ tipo: 'image', texto: 'ayuda' }))).toBe('bandeja')
+  })
+
+  it('el texto, con la config por defecto, es el acordado', () => {
+    expect(TEXTO_GUIA_BANDEJA).toBe([
+      '*Cómo pasarle una solicitud de viaje al bot* ✈️',
+      '',
+      '*1. Di de quién es*',
+      'Escríbeme el cliente o el viaje:',
+      '• Cliente nuevo: `nuevo Carolina Ruiz`',
+      '• Viaje que ya existe: `Carolina Ruiz`, `Europa 2 días` o el código',
+      'Espera el 📌 con el viaje.',
+      '',
+      '*2. Pásame lo del cliente*',
+      'Reenvía los mensajes y audios del cliente, o escribe lo que te dijo. Para cambiar de cliente, escribe primero el nombre del otro.',
+      '',
+      '*3. Cierra con* `listo`',
+      'Te muestro un resumen. Si está bien, responde `sí`. Sin el `sí` no cargo nada.',
+      '',
+      '*4. Lee lo que entendí*',
+      'Te digo qué cargué, cuánto lleva («Mínimo 7/9») y qué falta preguntarle al cliente.',
+      '',
+      '*Bueno saber*',
+      '• Los gastos siguen igual: empieza con `gasto`.',
+      '• Para preguntarme algo, empieza con `bot`.',
+      '• No leo lo que hay dentro de las fotos ni los pantallazos, solo el texto que escribas.',
+      '• Escribe `ayuda` cuando quieras volver a ver esto.',
+    ].join('\n'))
+  })
+
+  it('los prefijos y la palabra de cierre salen de la config', () => {
+    const c = leerConfigBandeja({ bandeja_solicitudes: { prefijos_consulta: ['one'], palabras_cierre: ['ya'] } })
+    const g = textoGuiaBandeja(c)
+    expect(g).toContain('*3. Cierra con* `ya`')
+    expect(g).toContain('empieza con `one`.')
+    expect(g).toContain('empieza con `gasto`.')
   })
 })
 

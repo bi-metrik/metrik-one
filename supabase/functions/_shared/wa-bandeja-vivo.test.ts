@@ -938,3 +938,137 @@ describe('v2 · S3: el bot de siempre nombra los negocios «Nombre · Cliente (c
     expect(botones[0].titulos).toEqual(['S 26 2']);
   });
 });
+
+// ── «ayuda»: la guía de la bandeja (2026-10-02, bandeja encendida en Trappvel) ──────────────────
+
+describe('«ayuda» escrito contesta la guía de la bandeja y no toca nada más', () => {
+  let GUIA: string;
+  beforeEach(async () => { GUIA = (await import('./wa-bandeja-reglas.ts')).TEXTO_GUIA_BANDEJA; });
+
+  it('sin tanda: «Ayuda!» contesta la guía; no abre tanda ni va al bot', async () => {
+    await llega('Ayuda!', { enviado: 0 });
+    expect(textos()).toEqual([GUIA]);
+    expect(t.wa_bandeja_entregas).toEqual([]);
+    expect(t.wa_bandeja_mensajes).toEqual([]);
+    expect(alBot).toEqual([]);
+  });
+
+  it('con una tanda abierta: «¿cómo funciona?» no entra a la tanda; el «listo» la cierra con lo que tenía', async () => {
+    await llega('nuevo Laura Prueba2', { enviado: 0 });
+    await llega(CARTAGENA, { enviado: 3 });
+    await llega('¿cómo funciona?', { enviado: 6 });
+    expect(textos().at(-1)).toBe(GUIA);
+    expect(t.wa_bandeja_entregas.filter(e => e.estado === 'abierta')).toHaveLength(1);
+    expect(t.wa_bandeja_mensajes.some(m => m.cuerpo === '¿cómo funciona?')).toBe(false);
+    await llega('listo', { enviado: 9 });
+    expect(textos().at(-1)).toContain('1) NUEVO Laura Prueba2 — 1 mensaje');
+  });
+
+  it('con «¿A qué viaje van?» pendiente: «menú» no la consume y la respuesta siguiente la contesta', async () => {
+    await preguntaDeViaje();
+    const entregas = t.wa_bandeja_entregas.length;
+    await llega('menú', { enviado: 6 });
+    expect(textos().at(-1)).toBe(GUIA);
+    expect(t.wa_bandeja_entregas).toHaveLength(entregas);
+    expect(t.wa_bandeja_entregas[0]).toMatchObject({ estado: 'esperando_cliente' });
+    expect(t.wa_bandeja_mensajes.some(m => m.cuerpo === 'menú')).toBe(false);
+    await llega('1', { enviado: 9 });
+    expect(t.wa_bandeja_mensajes.find(m => m.cuerpo === '1')).toMatchObject({ papel: 'respuesta_cliente' });
+    colaModelo = [pedido()];
+    await cron(60);
+    expect(t.wa_bandeja_entendimientos[0]).toMatchObject({ estado: 'negocio_actualizado', negocio_id: 'n-p' });
+  });
+
+  it('con el resumen «¿Así? SÍ» pendiente: «ayuda» no lo contesta; el «sí» de después carga', async () => {
+    await llega('nuevo Laura Prueba2', { enviado: 0 });
+    await llega(CARTAGENA, { enviado: 3 });
+    await llega('listo', { enviado: 5 });
+    expect(textos().at(-1)).toContain('¿Así? Responde SÍ');
+    await llega('AYUDA', { enviado: 10 });
+    expect(textos().at(-1)).toBe(GUIA);
+    expect(t.wa_bandeja_entregas[0]).toMatchObject({ estado: 'esperando_cliente' });
+    await llega('sí', { enviado: 20 });
+    colaModelo = [LAURA];
+    await cron(30);
+    expect(negocioDe('LAURA PRUEBA2')).toBeTruthy();
+  });
+
+  it('un gasto esperando su foto: «ayuda» contesta la guía y el gasto sigue esperando', async () => {
+    const sesion = { id: 's-g', user_phone: TEL, workspace_id: WS, state: 'awaiting_image', expires_at: '2026-10-01T23:00:00Z' };
+    t.bot_sessions.push(sesion);
+    await llega('ayuda', { enviado: 0 });
+    expect(textos()).toEqual([GUIA]);
+    expect(sesion.state).toBe('awaiting_image');
+    expect(alBot).toEqual([]);
+  });
+
+  it('un reenvío que dice «ayuda» es material de la solicitud; «necesito ayuda con el hotel» también', async () => {
+    await llega('ayuda', { enviado: 0, reenviado: true });
+    await llega('necesito ayuda con el hotel', { enviado: 3 });
+    expect(textos()).not.toContain(GUIA);
+    expect(t.wa_bandeja_mensajes.map(m => m.cuerpo)).toEqual(['ayuda', 'necesito ayuda con el hotel']);
+  });
+
+  it('«bot ayuda» y «bot ¿cómo funciona?» van al bot como «ayuda» (el atajo de AYUDA del parser)', async () => {
+    const { fastPathParse } = await import('./wa-parse-reglas.ts');
+    await llega('bot ayuda', { enviado: 0 });
+    await llega('bot ¿cómo funciona?', { enviado: 3 });
+    expect(alBot).toEqual(['ayuda', 'ayuda']);
+    expect(fastPathParse('ayuda')?.intent).toBe('AYUDA');
+    expect(textos()).toEqual([]);
+  });
+
+  it('bandeja apagada: «ayuda» va al bot como siempre', async () => {
+    const apagado = { ...USER, modulos: { modules: {} } };
+    const message = { phone: TEL, text: 'ayuda', type: 'text', reenviado: false, wa_message_id: 'wamid.apagada', timestamp: String(Math.floor(T0 / 1000)) };
+    expect(await bandeja.rutaDelMensaje(db as never, apagado as never, message as never)).toEqual({ ruta: 'bot', config: null });
+    expect(textos()).toEqual([]);
+  });
+});
+
+describe('handleAyuda («bot ayuda»)', () => {
+  const ctx = (user: unknown, salida: string[]) => ({
+    user, supabase: db, message: { phone: TEL, text: 'ayuda' },
+    parsed: { intent: 'AYUDA', confidence: 1, fields: {} },
+    session: { id: 's-ayuda', state: 'started', context: {} },
+    sendMessage: async (x: string) => { salida.push(x); },
+  });
+  beforeEach(() => { t.bot_sessions.push({ id: 's-ayuda', user_phone: TEL, workspace_id: WS, state: 'started', context: {} }); });
+
+  it('con la bandeja encendida: la guía arriba y la ayuda de siempre abajo, con el prefijo que la lleva al bot', async () => {
+    const { handleAyuda, textoAyudaBotConBandeja } = await import('./handlers/ayuda.ts');
+    const { TEXTO_GUIA_BANDEJA, CONFIG_BANDEJA_POR_DEFECTO } = await import('./wa-bandeja-reglas.ts');
+    const salida: string[] = [];
+    await handleAyuda(ctx(USER, salida) as never);
+    expect(salida).toEqual([`${TEXTO_GUIA_BANDEJA}\n\n${textoAyudaBotConBandeja(CONFIG_BANDEJA_POR_DEFECTO)}`]);
+    expect(salida[0]).toContain('💰 *Gastos:* "gasto 180 mil en materiales para Pérez"');
+    expect(salida[0]).toContain('📊 *Consulta:* "bot mis números"');
+    expect(t.bot_sessions.find(s => s.id === 's-ayuda')!.state).toBe('completed');
+  });
+
+  it('el prefijo de consulta sale de la config del workspace', async () => {
+    (t.workspaces[0].config_extra as Fila).bandeja_solicitudes = { modo_viajes: 'encabezado', prefijos_consulta: ['one'] };
+    const { handleAyuda } = await import('./handlers/ayuda.ts');
+    const salida: string[] = [];
+    await handleAyuda(ctx(USER, salida) as never);
+    expect(salida[0]).toContain('• Para preguntarme algo, empieza con `one`.');
+    expect(salida[0]).toContain('"one mis números"');
+  });
+
+  it('con la bandeja apagada: la ayuda de siempre, idéntica', async () => {
+    const { handleAyuda } = await import('./handlers/ayuda.ts');
+    const salida: string[] = [];
+    await handleAyuda(ctx({ ...USER, modulos: { modules: {} } }, salida) as never);
+    expect(salida).toEqual([`👋 Soy tu asistente MéTRIK ONE. Escríbeme con naturalidad:
+
+💰 *Gastos:* "Gasté 180 mil en materiales para Pérez" · "Pagué 50K en almuerzo"
+
+📝 *Actividad:* "Llamé a Pérez" · "Reunión con Torres ayer" · "Nota: revisión pendiente"
+
+👤 *Contactos:* "Nuevo contacto Juan Pérez 3001234567"
+
+📊 *Consulta:* "Mis números" · "¿Quién me debe?" · "Qué negocios tengo"
+
+Los cobros, cambios de etapa y horas se gestionan desde la app.`]);
+  });
+});
