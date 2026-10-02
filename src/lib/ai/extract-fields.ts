@@ -15,6 +15,8 @@
 // es sintaxis de la familia 2.5 y en 3.x se ignora).
 import { normalizarMontoExtraido } from './monto-extraido'
 import { serializarPersonas, type Persona } from '@/lib/documentos/personas'
+import { textoDelPdf } from './texto-pdf'
+import { verificarContraTexto, type VerificacionTexto } from './verificar-contra-texto'
 
 const GEMINI_MODEL = 'gemini-2.5-flash'
 
@@ -75,6 +77,12 @@ export interface CampoResultado {
    * perdía al recalcular. Ver `normalizarNitYDv` y `votos.ts`.
    */
   leido?: string
+  /**
+   * De dónde salió el valor cuando no es lo que leyó la IA. `texto_pdf`: la IA leyó otra
+   * cosa (queda en `leido`) y se tomó el valor impreso en la capa de texto del PDF, que
+   * estaba a una o dos confusiones de lectura. Ver `verificar-contra-texto.ts`.
+   */
+  origen?: 'texto_pdf'
 }
 
 // ── Supported MIME types ─────────────────────────────────────────────────────
@@ -147,6 +155,28 @@ ${campos.map(c => c.tipo === 'personas'
     ? `  "${c.slug}": { "value": [{ "nombre": "...", "documento": "..." }], "confidence": 0.95 }`
     : `  "${c.slug}": { "value": "...", "confidence": 0.95 }`).join(',\n')}
 }`
+}
+
+// ── Verificación contra la capa de texto ─────────────────────────────────────
+
+/**
+ * Pasa lo leído por `verificarContraTexto` si el PDF trae capa de texto. Exportada para
+ * probarla sin Gemini; nunca lanza (sin texto legible no hace nada).
+ */
+export async function verificarConCapaDeTexto(
+  buffer: Buffer,
+  campos: CampoExtraccion[],
+  result: Record<string, CampoResultado>,
+): Promise<VerificacionTexto[]> {
+  const texto = await textoDelPdf(buffer)
+  if (!texto) return []
+  const verificaciones = verificarContraTexto(campos, result, texto)
+  for (const v of verificaciones) {
+    if (v.estado === 'corregido') {
+      console.warn(`[extract-fields] ${v.slug}: la IA leyó "${v.leido}", el texto del PDF dice "${v.valor}"`)
+    }
+  }
+  return verificaciones
 }
 
 // ── Main extractor ───────────────────────────────────────────────────────────
@@ -312,6 +342,12 @@ export async function extractFieldsFromDocument(
       } else {
         result[campo.slug] = { value, confidence, manual: false }
       }
+    }
+
+    // Lo leído contra la capa de texto del PDF (si la trae): la IA confunde «rn» con
+    // «m» mirando la imagen, el texto no. Un escaneo no trae capa y no cambia nada.
+    if (normalizedMime === 'application/pdf') {
+      await verificarConCapaDeTexto(buffer, campos, result)
     }
 
     return { data: result }
