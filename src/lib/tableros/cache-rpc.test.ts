@@ -9,47 +9,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
  * la mitad de estas pruebas son de aislamiento.
  */
 
-// Next instala `AsyncLocalStorage` en `globalThis` al arrancar su servidor; vitest no.
-// Sin esto `unstable_cache` lanza antes de mirar el almacén.
-await vi.hoisted(async () => {
-  const { AsyncLocalStorage } = await import('node:async_hooks')
-  ;(globalThis as unknown as { AsyncLocalStorage: unknown }).AsyncLocalStorage = AsyncLocalStorage
-})
-
-// ── Almacén en memoria con la interfaz que `unstable_cache` usa ─────────────
-type Entrada = { body: string; tags: string[]; lastModified: number; revalidate: number }
-const almacen = new Map<string, Entrada>()
-const cacheIncremental = {
-  isOnDemandRevalidate: false,
-  async generateCacheKey(invocationKey: string) {
-    return invocationKey
-  },
-  async get(key: string) {
-    const e = almacen.get(key)
-    if (!e) return null
-    const edad = (Date.now() - e.lastModified) / 1000
-    return {
-      isStale: edad > e.revalidate,
-      value: { kind: 'FETCH', data: { headers: {}, body: e.body, status: 200, url: '' }, revalidate: e.revalidate },
-    }
-  },
-  async set(
-    key: string,
-    data: { data: { body: string }; revalidate: number },
-    ctx: { tags?: string[] },
-  ) {
-    almacen.set(key, {
-      body: data.data.body,
-      tags: ctx.tags ?? [],
-      lastModified: Date.now(),
-      revalidate: data.revalidate,
-    })
-  },
-  revalidarTag(tag: string) {
-    for (const [k, e] of almacen) if (e.tags.includes(tag)) almacen.delete(k)
-  },
-}
-;(globalThis as unknown as { __incrementalCache: unknown }).__incrementalCache = cacheIncremental
+import { almacen, cacheIncremental } from '../../../test/cache-incremental-doble'
 
 // `updateTag` solo corre dentro de una server action; aquí borra del almacén falso.
 vi.mock('next/cache', async (original) => {
