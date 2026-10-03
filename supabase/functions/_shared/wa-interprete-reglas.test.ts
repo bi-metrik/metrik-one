@@ -15,6 +15,8 @@ import {
   negociosDelContexto,
   preguntaPendienteUnificada,
   resolverViaje,
+  TEXTO_QUE_HAGO,
+  textoNuevoIgual,
   textoRol,
   textosNuevos,
   validar,
@@ -25,7 +27,8 @@ import {
 } from './wa-interprete-reglas.ts';
 import { CONFIG_BANDEJA_POR_DEFECTO } from './wa-bandeja-reglas.ts';
 import { CONTADOR_ALLOWED_INTENTS, OPERATOR_ALLOWED_INTENTS, READ_ONLY_ALLOWED_INTENTS, type UserRole } from './types.ts';
-import { resolverEncabezado, type ViajeAbierto } from './wa-viajes-reglas.ts';
+import { resolverEncabezado, textoPideNombreEnDuda, type ViajeAbierto } from './wa-viajes-reglas.ts';
+import { textoNombreNuevoEnDuda } from './wa-entendimiento-reglas.ts';
 
 /**
  * El validador del intérprete conversacional (§3 del diseño), una prueba por regla, la decisión H2 en
@@ -772,6 +775,116 @@ describe('control de Vera · roles restringidos', () => {
     // Un acuse de verdad sigue siendo silencio.
     const ok = ejec(validar(una({ accion: 'acuse', evidencia: 'gracias' }), termotech('gracias, muy amable', { rol: 'contador' })));
     expect(ok.paso).toEqual({ p: 'nada' });
+  });
+});
+
+// ── Ajustes del segundo control sellado de Vera (2026-10-02b) ──────────────
+// Nombres y frases INVENTADOS; los viajes abiertos son los de siempre (Luisa Mejía, Carolina Ruiz, Jorge
+// Pérez, Lina Pérez).
+
+describe('control de Vera 2 · NU4: V8 no crea un cliente con un descriptor ni con el nombre de una clienta abierta', () => {
+  it('«<relación> de <clienta abierta>»: se pregunta por el viaje de esa clienta, nunca se crea', () => {
+    const texto = 'nueva, la tía de Carolina Ruiz quiere ir también';
+    for (const nombre of ['tía de Carolina Ruiz', 'la tía de Carolina', 'tía de Carolina']) {
+      const lista = ejec(validar(una({ accion: 'responder', evidencia: texto, opcion: 'nuevo', ref: { cliente: nombre } }), trappvel(texto, { pendiente: LISTA_ENTREGA })));
+      expect([nombre, lista.rechazo]).toEqual([nombre, 'V8_nombre_de_cliente_abierto']);
+      expect(lista.paso).toEqual({ p: 'decir', texto: textoNuevoIgual([va(V11)]) });
+      const encabezado = ejec(validar(una({ accion: 'abrir_viaje', evidencia: texto, nuevo_cliente: nombre }), trappvel(texto)));
+      expect(encabezado.rechazo).toBe('V8_nombre_de_cliente_abierto');
+      expect(encabezado.paso).toMatchObject({ interpretacion: { accion: 'preguntar_viaje', candidatos: ['v11'] } });
+    }
+  });
+
+  it('solo el nombre de pila de una clienta abierta, o su nombre con algo más: se pregunta', () => {
+    const texto = 'nueva Carolina, la de Punta Cana trae a su hermana';
+    const pila = ejec(validar(una({ accion: 'responder', evidencia: 'nueva Carolina', opcion: 'nuevo', ref: { cliente: 'Carolina' } }), trappvel(texto, { pendiente: LISTA_ENTREGA })));
+    expect(pila.rechazo).toBe('V8_nombre_de_cliente_abierto');
+    const t2 = 'nueva Carolina Ruiz Salgar';
+    const mas = ejec(validar(una({ accion: 'abrir_viaje', evidencia: t2, nuevo_cliente: 'Carolina Ruiz Salgar' }), trappvel(t2)));
+    expect(mas.rechazo).toBe('V8_nombre_de_cliente_abierto');
+  });
+
+  it('un descriptor sin clienta abierta: no crea; el encabezado abre la caja SIN nombre y pide nombre y apellido', () => {
+    const texto = 'nuevo, el esposo de Ximena Zuleta';
+    const d = ejec(validar(una({ accion: 'abrir_viaje', evidencia: texto, nuevo_cliente: 'esposo de Ximena Zuleta' }), trappvel(texto)));
+    expect(d.rechazo).toBe('V8_nombre_en_duda');
+    expect(d.paso).toMatchObject({ p: 'registrar', interpretacion: { accion: 'abrir_viaje', nuevo: null }, aviso: textoPideNombreEnDuda('esposo de Ximena Zuleta') });
+    const lista = ejec(validar(una({ accion: 'responder', evidencia: texto, opcion: 'nuevo', nuevo_cliente: 'esposo de Ximena Zuleta' }), trappvel(texto, { pendiente: LISTA_ENTREGA })));
+    expect(lista.paso).toEqual({ p: 'decir', texto: textoNombreNuevoEnDuda('esposo de Ximena Zuleta') });
+    // «el N es nuevo …» con el resumen: tampoco.
+    const t3 = 'el 2 es nuevo, la comadre de Ximena';
+    const mover = ejec(validar(una({ accion: 'mover', evidencia: t3, n: 2, nuevo_cliente: 'comadre de Ximena' }), trappvel(t3, { pendiente: RESUMEN })));
+    expect(mover.rechazo).toBe('V8_nombre_en_duda');
+    expect(mover.paso.p).toBe('decir');
+  });
+
+  it('una sola palabra o vocabulario de la agencia tampoco crean (la misma regla que el código de hoy)', () => {
+    for (const [t, n] of [['nueva zarandela', 'zarandela'], ['nuevo Salgar', 'Salgar'], ['nueva brindoleta grupal', 'brindoleta grupal']]) {
+      const d = ejec(validar(una({ accion: 'responder', evidencia: t, opcion: 'nuevo', nuevo_cliente: n }), trappvel(t, { pendiente: LISTA_ENTREGA })));
+      expect([t, d.rechazo]).toEqual([t, 'V8_nombre_en_duda']);
+    }
+  });
+
+  it('siguen igual: un nombre legítimo nuevo (aunque comparta el nombre de pila con una clienta) y la respuesta a «¿Cómo se llama?»', () => {
+    const t = 'nueva Carolina Zuleta';
+    const d = ejec(validar(una({ accion: 'responder', evidencia: t, opcion: 'nuevo', nuevo_cliente: 'Carolina Zuleta' }), trappvel(t, { pendiente: LISTA_ENTREGA })));
+    expect(d.paso).toMatchObject({ p: 'responder_bandeja', canonico: 'NUEVO Carolina Zuleta' });
+    const t2 = 'es nuevo, se llama Ignacio Salgar';
+    const d2 = ejec(validar(una({ accion: 'abrir_viaje', evidencia: t2, nuevo_cliente: 'Ignacio Salgar' }), trappvel(t2)));
+    expect(d2.paso).toMatchObject({ interpretacion: { accion: 'abrir_viaje', nuevo: 'Ignacio Salgar' } });
+    // A «¿Cómo se llama el cliente nuevo?» una sola palabra vale (como `esNombreNuevo`); un descriptor no.
+    const NOMBRE = preguntaPendienteUnificada({ tanda: { tipo: 'nombre' } })!;
+    const d3 = ejec(validar(una({ accion: 'responder', evidencia: 'Salgar', nuevo_cliente: 'Salgar' }), trappvel('Salgar', { pendiente: NOMBRE })));
+    expect(d3.paso).toMatchObject({ p: 'registrar', interpretacion: { accion: 'nombre', nuevo: 'Salgar' } });
+    const d4 = ejec(validar(una({ accion: 'responder', evidencia: 'el esposo de Ximena', nuevo_cliente: 'esposo de Ximena' }), trappvel('el esposo de Ximena', { pendiente: NOMBRE })));
+    expect(d4.rechazo).toBe('V8_nombre_en_duda');
+  });
+});
+
+describe('control de Vera 2 · E7: dos viajes abiertos nombrados en la frase', () => {
+  it('«contenido» con una sola referencia no se resuelve solo si el texto nombra otro viaje abierto: se pregunta con los dos', () => {
+    const texto = 'Lina Pérez ya no quiere Cartagena, ahora quiere Madrid';
+    const d = ejec(validar(una({ accion: 'contenido', evidencia: texto, ref: { destino: 'Madrid' } }), trappvel(texto)));
+    expect(d.rechazo).toBe('V5_dos_viajes_en_el_texto');
+    expect(d.paso).toMatchObject({ p: 'registrar', interpretacion: { accion: 'preguntar_viaje', con_contenido: true } });
+    expect([...(d.paso as { interpretacion: { candidatos: string[] } }).interpretacion.candidatos].sort()).toEqual(['v12', 'v14']);
+    // Con la firma del equipo delante, igual.
+    const t2 = 'Tatiana: el de Cartagena cambia a Madrid';
+    const d2 = ejec(validar(una({ accion: 'contenido', evidencia: t2, ref: { destino: 'Madrid' } }), trappvel(t2, { equipo: ['Tatiana Quiroga'] })));
+    expect(d2.rechazo).toBe('V5_dos_viajes_en_el_texto');
+  });
+
+  it('si todo lo nombrado cabe en un viaje, se resuelve como antes', () => {
+    const texto = 'Lina Pérez, Cartagena: quieren hotel con piscina';
+    const d = ejec(validar(una({ accion: 'contenido', evidencia: texto, ref: { cliente: 'Lina Pérez' } }), trappvel(texto)));
+    expect(d.paso).toMatchObject({ interpretacion: { accion: 'abrir_viaje', viaje_id: 'v14', con_contenido: true } });
+    // Un destino nuevo que no es de ningún viaje abierto no cuenta.
+    const t2 = 'el de Cartagena ahora quiere Bariloche';
+    const d2 = ejec(validar(una({ accion: 'contenido', evidencia: t2, ref: { destino: 'Cartagena' } }), trappvel(t2)));
+    expect(d2.paso).toMatchObject({ interpretacion: { accion: 'abrir_viaje', viaje_id: 'v14' } });
+  });
+});
+
+describe('control de Vera 2 · O2 y K3: roles restringidos', () => {
+  it('O2 · una pregunta de un rol sin `consulta` no abre un gasto aunque el modelo le ponga negocio', () => {
+    for (const t of ['¿cómo va la plata de Arena?', 'cuánto llevamos en Clínica del Norte', 'qué gastos tiene Arena']) {
+      const d = ejec(validar(una({ accion: 'gasto', evidencia: t, negocio: t.includes('Arena') ? 'Arena' : 'Clínica del Norte' }), termotech(t, { rol: 'supervisor' })));
+      expect([t, d.paso]).toEqual([t, { p: 'decir', texto: textoRol('supervisor') }]);
+      expect(d.rechazo).toBe('V3_rol_gasto_vacio');
+    }
+    // Un reporte con negocio sigue abriendo el gasto (el bot pide el monto).
+    const r = ejec(validar(una({ accion: 'gasto', evidencia: 'gasto del chiller de Arena', negocio: 'Arena' }), termotech('gasto del chiller de Arena', { rol: 'supervisor' })));
+    expect(r.paso).toMatchObject({ p: 'bot_gastos', gastos: [{ monto: null, negocio: { id: 'neg-a1' } }] });
+  });
+
+  it('K3 · un contador que pide anotar algo y el modelo pide aclaración: recibe el texto de su rol', () => {
+    const t = 'anota que Arena ya giró la segunda cuota';
+    const d = ejec(validar(una({ accion: 'pedir_aclaracion', evidencia: 'anota' }), termotech(t, { rol: 'contador' })));
+    expect(d.paso).toEqual({ p: 'decir', texto: textoRol('contador') });
+    expect(d.rechazo).toBe('V3_rol_aclaracion');
+    // Sin pedir registrar, la aclaración sigue siendo aclaración.
+    const q = ejec(validar(una({ accion: 'pedir_aclaracion', evidencia: 'mmm' }), termotech('mmm lo otro', { rol: 'contador' })));
+    expect(q.paso).toEqual({ p: 'decir', texto: TEXTO_QUE_HAGO });
   });
 });
 

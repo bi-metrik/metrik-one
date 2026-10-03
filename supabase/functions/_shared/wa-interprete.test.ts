@@ -396,6 +396,15 @@ describe('despacho en el bot', () => {
     expect(enviados).toEqual(['Tu rol es de consulta. Para registrar movimientos pídele apoyo a tu admin.']);
   });
 
+  it('control de Vera 2 · O2: un supervisor que pregunta por la plata de un negocio no abre un gasto; K3: un contador que pide anotar recibe su texto', async () => {
+    await atenderEscrito(baseFalsa(), usuario({ role: 'supervisor' }), escrito('¿cómo va la plata de Arena?'), deps({ acciones: [{ accion: 'gasto', evidencia: 'cómo va la plata de Arena', negocio: 'Arena' }] }));
+    expect(enviados).toEqual(['Con tu rol solo puedes registrar gastos y actividades de tus negocios.']);
+    expect(espias.handleGasto).not.toHaveBeenCalled();
+    enviados.length = 0;
+    await atenderEscrito(baseFalsa(), usuario({ role: 'contador' }), escrito('anota que Arena ya giró la segunda cuota'), deps({ acciones: [{ accion: 'pedir_aclaracion', evidencia: 'anota' }] }));
+    expect(enviados).toEqual(['Tu rol es de consulta. Para registrar movimientos pídele apoyo a tu admin.']);
+  });
+
   it('un rol restringido recibe el texto de su rol y nada se ejecuta', async () => {
     await atenderEscrito(baseFalsa(), usuario({ role: 'contador' }), escrito('pagué 20 mil de taxi'), deps({ acciones: [{ accion: 'gasto', evidencia: 'pagué 20 mil de taxi', monto: 20000 }] }));
     expect(enviados).toEqual(['Tu rol es de consulta. Para registrar movimientos pídele apoyo a tu admin.']);
@@ -442,6 +451,28 @@ describe('despacho en la bandeja', () => {
     const upd = db.ops.find(o => o.tabla === 'wa_bandeja_mensajes' && o.op === 'update')!;
     expect(upd.payload).toMatchObject({ interpretacion: { accion: 'abrir_viaje', viaje_id: 'v14', con_contenido: true } });
     expect(enviados).toEqual(['📌 Lina Pérez (T1 26 14) · anotado']);
+    sinEscriturasNuevas(db);
+  });
+
+  it('control de Vera 2 · NU4: «la tía de <clienta abierta>» no abre una caja NUEVA con ese nombre: pregunta por el viaje de la clienta', async () => {
+    const db = baseFalsa({}, { wa_bandeja_registrar_mensaje: [{ accion: 'abrir', entrega: 'e1', mensajes: 1 }] });
+    const m = escrito('nueva, la tía de Carolina Ruiz también viaja');
+    expect(await atenderEscrito(db, u(), m, deps({ acciones: [{ accion: 'abrir_viaje', evidencia: 'nueva, la tía de Carolina Ruiz', nuevo_cliente: 'tía de Carolina Ruiz' }] }))).toEqual({ atendido: true });
+    const upd = db.ops.find(o => o.tabla === 'wa_bandeja_mensajes' && o.op === 'update')!;
+    expect(upd.payload).toMatchObject({ interpretacion: { accion: 'preguntar_viaje', candidatos: ['v11'] } });
+    expect(JSON.stringify(db.ops)).not.toContain('NUEVO tía');
+    expect(enviados.join('\n')).not.toContain('📌 NUEVO');
+    sinEscriturasNuevas(db);
+  });
+
+  it('control de Vera 2 · E7: el texto nombra dos viajes abiertos y el modelo eligió uno: se pregunta con los dos', async () => {
+    const db = baseFalsa({}, { wa_bandeja_registrar_mensaje: [{ accion: 'abrir', entrega: 'e1', mensajes: 1 }] });
+    const m = escrito('Lina Pérez ya no quiere Cartagena, ahora quiere Madrid');
+    await atenderEscrito(db, u(), m, deps({ acciones: [{ accion: 'contenido', evidencia: 'ahora quiere Madrid', ref: { destino: 'Madrid' } }] }));
+    const upd = db.ops.find(o => o.tabla === 'wa_bandeja_mensajes' && o.op === 'update')!;
+    expect(upd.payload).toMatchObject({ interpretacion: { accion: 'preguntar_viaje', con_contenido: true } });
+    expect([...(upd.payload as { interpretacion: { candidatos: string[] } }).interpretacion.candidatos].sort()).toEqual(['v12', 'v14']);
+    expect(db.escrituras().find(o => o.tabla === 'wa_message_log')!.payload).toMatchObject({ interprete_rechazo: 'V5_dos_viajes_en_el_texto' });
     sinEscriturasNuevas(db);
   });
 
