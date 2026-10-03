@@ -3,6 +3,8 @@
 import { createClient } from '@/lib/supabase/client'
 import { useState, useEffect } from 'react'
 import MetrikLockup from '@/components/metrik-lockup'
+import AnimacionMarca, { type VarianteMarca } from '@/components/marca/animacion-marca'
+import { marcarIntroVista, varianteDeIntro } from '@/components/marca/intro-de-sesion'
 
 const FONT = 'var(--font-schibsted), sans-serif'
 const BASE_DOMAIN = process.env.NEXT_PUBLIC_BASE_DOMAIN || 'localhost:3000'
@@ -38,6 +40,10 @@ export default function LoginClient({ tenantBranding }: LoginClientProps) {
   // Codigo de ingreso (modo tenant). Ver el comentario de `handleCodigo`.
   const [codigo, setCodigo] = useState('')
   const [verificando, setVerificando] = useState(false)
+  // Que variante de la marca acompaña la entrada mientras se valida el codigo y carga
+  // la primera pantalla. Se decide al enviar: la intro completa solo la primera vez
+  // de la sesion (ver `intro-de-sesion.ts`).
+  const [varianteEntrada, setVarianteEntrada] = useState<VarianteMarca>('liviana')
 
   useEffect(() => {
     const baseHost = BASE_DOMAIN.split(':')[0]
@@ -109,6 +115,7 @@ export default function LoginClient({ tenantBranding }: LoginClientProps) {
    */
   const handleCodigo = async (e: React.FormEvent) => {
     e.preventDefault()
+    setVarianteEntrada(varianteDeIntro())
     setVerificando(true)
     setError('')
 
@@ -124,6 +131,8 @@ export default function LoginClient({ tenantBranding }: LoginClientProps) {
       return
     }
 
+    // Se marca solo al validar: un codigo mal escrito no gasta la intro.
+    marcarIntroVista()
     window.location.href = redirectTo || '/'
   }
 
@@ -269,6 +278,17 @@ export default function LoginClient({ tenantBranding }: LoginClientProps) {
 
           {metrikSignature}
         </div>
+
+        {/* La espera real de entrar: validar el codigo y cargar la primera pantalla. La
+            marca aparece pasados 300 ms (un codigo errado vuelve antes y no la muestra)
+            y se queda hasta que el navegador pinta la pantalla de destino. */}
+        {verificando && (
+          <AnimacionMarca
+            variante={varianteEntrada}
+            etiqueta="Entrando"
+            className="fixed inset-0 z-50 bg-background"
+          />
+        )}
       </div>
     )
   }

@@ -24,6 +24,7 @@
 - ⚠️ [«No aplica» por línea](project_no_aplica_por_linea.md) — SIN aplicar; avisa, no cierra
 - ⚠️⚠️ [Formato 010 DIAN](project_formulario_010_dian.md) — casilla 25 SIN indicativo (la DIAN rechaza)
 - ⚠️⚠️ [Transcripción a ciegas del NIT](project_confirmacion_nit_ciegas.md) — #807: la casilla NO viaja al navegador
+- ⚠️ [Animación de marca y RPC de Tableros (caída 2026-10-03)](project_animacion_marca_y_rpc_tableros.md) — loading de (app) por segmento; 12 RPC en paralelo por apertura; cacheables por ws+params
 - ⚠️ [Barrera OFFSET 0 en RPC Comercial SOENA (#978)](project_perf_fence_venta_mes_soena.md) — 6 RPC aplicadas; pagos sigue lento (guard); la "deriva" eran comentarios
 - ⚠️ [Tableros operativos por fase (#939)](project_tableros_operativos.md) — inerte hasta encender config_extra.tableros_operativos en metrik
 - ⚠️⚠️ [El preview abre un workspace (#968)](project_preview_abre_workspace.md) — `?__ws=<slug>`; base de PRODUCCION; sin GEMINI en Preview; login por código
