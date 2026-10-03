@@ -1468,7 +1468,14 @@ export function nombreNuevoCabe(cliente: string | null | undefined): boolean {
  */
 export type CalificacionNombreNuevo = 'sin_nombre' | 'nombre' | 'duda' | 'largo';
 
-export function calificarNombreNuevo(cliente: string | null | undefined): CalificacionNombreNuevo {
+export function calificarNombreNuevo(
+  cliente: string | null | undefined,
+  /**
+   * `unaPalabraVale`: la respuesta a «¿Cómo se llama el cliente?». Ahí una sola palabra que no es
+   * vocabulario («Pérez») es la respuesta a una pregunta explícita, como en `esNombreNuevo`.
+   */
+  opts: { unaPalabraVale?: boolean } = {},
+): CalificacionNombreNuevo {
   const bruto = String(cliente ?? '').trim();
   const todas = normalizarNombre(bruto).split(' ').filter(Boolean);
   if (todas.length === 0) return 'sin_nombre';
@@ -1481,7 +1488,7 @@ export function calificarNombreNuevo(cliente: string | null | undefined): Califi
   if (ps.length === 0 || CONECTORES_NOMBRE.has(ps[0]) || CONECTORES_NOMBRE.has(ps[ps.length - 1])) return 'duda';
   const delNombre = ps.filter(w => !CONECTORES_NOMBRE.has(w));
   if (delNombre.some(w => NO_ES_NOMBRE.has(w) || TITULOS.has(w) || formaDeSustantivoComun(w))) return 'duda';
-  return delNombre.filter(w => w.length >= 2).length >= 2 ? 'nombre' : 'duda';
+  return delNombre.filter(w => w.length >= 2).length >= (opts.unaPalabraVale ? 1 : 2) ? 'nombre' : 'duda';
 }
 
 /** «de», «la», «y»: unen las partes de un nombre compuesto, no son nombre. */
@@ -1532,6 +1539,10 @@ const NO_ES_NOMBRE: ReadonlySet<string> = new Set([
   'vecina', 'conocido', 'conocida', 'colega', 'socio', 'socia', 'pareja', 'familia', 'familiar', 'familiares', 'pariente', 'parientes',
   'bebe', 'nene', 'nena', 'menor', 'menores', 'adulto', 'adultos', 'adulta', 'senores', 'senoras',
   'persona', 'personas', 'gente', 'grupo', 'grupal', 'invitado', 'invitada', 'invitados', 'acompanante', 'acompanantes', 'mascota',
+  'comadre', 'compadre', 'ahijado', 'ahijada', 'padrino', 'madrina', 'hijastro', 'hijastra', 'padrastro', 'madrastra', 'bisabuelo',
+  'bisabuela', 'concunado', 'concunada', 'consuegro', 'consuegra', 'prometido', 'prometida', 'ex', 'exesposo', 'exesposa', 'nana', 'nanny',
+  'ninera', 'empleada', 'empleado', 'secretaria', 'secretario', 'asistente', 'chofer', 'conductor', 'escolta', 'patron', 'patrona',
+  'cuidadora', 'cuidador', 'enfermera', 'parcero', 'parcera', 'mejor', 'hermanastro', 'hermanastra', 'medio', 'media',
   // viajes y servicios de la agencia
   'viaje', 'viajes', 'viajero', 'viajeros', 'reserva', 'reservas', 'solicitud', 'solicitudes', 'pedido', 'pedidos', 'orden', 'ordenes',
   'cotizacion', 'pasajero', 'pasajera', 'pasajeros', 'huesped', 'huespedes', 'turista', 'turistas', 'vuelo', 'vuelos', 'tiquete',
