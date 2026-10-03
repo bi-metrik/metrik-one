@@ -12,8 +12,14 @@
  * - WebKit (Safari, y TODO navegador en iOS):  `TypeError: Load failed`
  * - Chromium:                                  `TypeError: Failed to fetch`
  * - Firefox:                                   `TypeError: NetworkError when attempting…`
- * - Chromium (fetch abortado a medias, visto el 2026-10-03 en Chrome 154 de Mac):
- *                                              `TypeError: network error` (con espacio)
+ * - Chromium (body/stream de un fetch cortado a medias, visto 12 veces el 2026-10-03 en
+ *   Chrome de Mac, /negocios/[id]):            `TypeError: network error` (con espacio)
+ * - Firefox (stream RSC cortado a medias, visto el 2026-10-03 en /negocios/[id]):
+ *                                              `TypeError: Error in input stream`
+ * - WebKit (NSURLError de la conexion, que Safari pasa tal cual al `TypeError`):
+ *                                              `The network connection was lost.` (-1005),
+ *                                              `The Internet connection appears to be offline.` (-1009)
+ * - Chromium, `import()` nativo que no bajo:   `Failed to fetch dynamically imported module: …`
  * - Turbopack / webpack (chunk que no bajo):   `ChunkLoadError`, `Failed to load chunk …`,
  *                                              `Loading chunk 123 failed`, `Loading CSS chunk …`
  * - `import()` nativo que no bajo:             `Importing a module script failed` (WebKit),
@@ -21,18 +27,44 @@
  *
  * Solo mira `name` y `message`. Un error de negocio (la accion responde `{ error }`) ni
  * siquiera llega aqui; y un `throw new Error('Negocio no encontrado')` no casa con nada.
+ *
+ * `net::ERR_…` NO esta: es lo que Chromium escribe en la consola y en DevTools, pero el
+ * `TypeError` que ve el JS dice `Failed to fetch` / `network error`, nunca `net::ERR_`.
+ *
+ * Criterio de los patrones AMBIGUOS (`PATRONES_RED_SOLO_TYPEERROR`): un texto que tambien
+ * podria escribir la app o una integracion ("Network error de la API de Siigo", "Error in
+ * input stream del PDF") solo cuenta como red si el error es `TypeError`, que es como
+ * TODOS los navegadores rechazan un `fetch` o la lectura de su body. Un `throw new
+ * Error(...)` de la app con ese texto sigue siendo error de la app. Los patrones que ya
+ * estaban antes de este criterio (`Load failed`, `Failed to fetch`) se dejan sin exigir
+ * nombre para no cambiar lo que ya recuperaba.
  */
 
+/** Casan con cualquier `name`: son frases que solo dice un navegador o el bundler. */
 const PATRONES_RED = [
   /failed to load chunk/i,
   /loading (css )?chunk/i,
   /load failed/i,
   /failed to fetch/i,
-  // `NetworkError` (Firefox) y `network error` (Chromium). Con limites de palabra para no
-  // casar con un identificador de la app (`networkErrors is not defined`).
-  /\bnetwork ?error\b/i,
+  // Firefox, frase completa: no la escribe nadie mas.
+  /networkerror when attempting to fetch resource/i,
   /importing a module script failed/i,
   /error loading dynamically imported module/i,
+]
+
+/**
+ * Casan SOLO si `name === 'TypeError'`: el texto podria venir de la app o de una API
+ * (ver el criterio arriba).
+ */
+const PATRONES_RED_SOLO_TYPEERROR = [
+  // `NetworkError` (Firefox, en otras frases) y `network error` (Chromium, body cortado).
+  // Con limites de palabra para no casar con un identificador (`networkErrors is not defined`).
+  /\bnetwork ?error\b/i,
+  // Firefox: el stream (RSC o body de un fetch) se corto a medias.
+  /\berror in input stream\b/i,
+  // WebKit: NSURLErrorNetworkConnectionLost (-1005) y NSURLErrorNotConnectedToInternet (-1009).
+  /\bthe network connection was lost\b/i,
+  /\bthe internet connection appears to be offline\b/i,
 ]
 
 const PATRONES_CHUNK = [
@@ -40,6 +72,8 @@ const PATRONES_CHUNK = [
   /loading (css )?chunk/i,
   /importing a module script failed/i,
   /error loading dynamically imported module/i,
+  // Chromium, `import()` nativo que no bajo.
+  /failed to fetch dynamically imported module/i,
 ]
 
 function nombreYMensaje(error: unknown): { name: string; message: string } {
@@ -64,8 +98,9 @@ export function esErrorDeCargaDeChunk(error: unknown): boolean {
 /** Cualquier falla de red: un `fetch`/server action que no llego, o un chunk que no bajo. */
 export function esErrorDeRed(error: unknown): boolean {
   if (esErrorDeCargaDeChunk(error)) return true
-  const { message } = nombreYMensaje(error)
-  return PATRONES_RED.some((p) => p.test(message))
+  const { name, message } = nombreYMensaje(error)
+  if (PATRONES_RED.some((p) => p.test(message))) return true
+  return name === 'TypeError' && PATRONES_RED_SOLO_TYPEERROR.some((p) => p.test(message))
 }
 
 /** Lo que ve la persona cuando una accion no alcanzo a llegar al servidor. */
