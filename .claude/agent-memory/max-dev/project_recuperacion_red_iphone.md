@@ -20,7 +20,12 @@ viejos (`version == versionServidor`). Rama `fix/recuperacion-red-iphone`, sin m
 **Why:** el aprendizaje sirve si vuelve a aparecer el error en otra pantalla o con otro cliente.
 
 **How to apply:** si un log `[error-cliente]` muestra `autoRecarga:false` con error de red, la guarda ya
-se gastó (2 fallas en 60 s) o la pantalla no usa el hook tolerante. Para medir bundles: `next
+se gastó (2 fallas en 60 s) o la pantalla no usa el hook tolerante. OJO (3-oct, PR fix/guarda-auto-recarga):
+hasta ese PR el `false` era SIEMPRE, porque la marca se reclamaba en el inicializador de `useState` y React
+renderiza el boundary 2 veces (render concurrente descartado + reintento síncrono): el render descartado la
+gastaba. Nada que escriba en sessionStorage/estado externo va en render; se reclama en el `useEffect`. La
+prueba con React real está en `src/app/auto-recarga-boundaries.test.ts` (happy-dom registrado a mano: el
+`@vitest-environment` no resuelve el paquete desde un worktree con node_modules de symlinks). Para medir bundles: `next
 experimental-analyze -o` escribe `.next/diagnostics/analyze/data/<ruta>/analyze.data` (4 bytes de largo +
 JSON con `chunk_parts`/`sources`/`output_files`); se lee con un script de 30 líneas.
 Pendiente medido y NO hecho: middleware y render resuelven Auth por separado (2 por petición), y en
