@@ -1,8 +1,8 @@
 'use client'
 
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { reportarErrorCliente } from '@/lib/errores-cliente/enviar'
-import { intentarAutoRecarga } from '@/lib/red/auto-recarga'
+import { intentarAutoRecarga, puedeAutoRecargar } from '@/lib/red/auto-recarga'
 import { textoPantallaDeError } from '@/lib/red/error-de-red'
 import { PALETA } from '@/lib/marca/paleta'
 
@@ -23,17 +23,30 @@ export default function GlobalError({
   error: Error & { digest?: string }
   reset: () => void
 }) {
-  // Se decide UNA vez, al montar: la guarda deja su marca en `sessionStorage` al decir
-  // que si, asi que consultarla en cada render la gastaria. En el servidor no hay
-  // `window` y da `false` (un error de servidor nunca es de red del telefono).
-  const [recargar] = useState(() => intentarAutoRecarga(error))
+  // El render solo CONSULTA la guarda (no escribe): decide si se pinta "Recargando…". La
+  // marca la reclama el efecto, que corre una sola vez por boundary montado. Reclamarla al
+  // renderizar la gastaba en un render que React descarta (ver `intentarAutoRecarga`). En el
+  // servidor no hay `window` y da `false` (un error de servidor nunca es de red del telefono).
+  const [recargar, setRecargar] = useState(() => puedeAutoRecargar(error))
+  // En dev, StrictMode corre el efecto dos veces sobre el mismo boundary: el segundo no
+  // vuelve a reclamar (ya hay una recarga en curso) ni repinta la pantalla de error.
+  const yaRecargo = useRef(false)
 
   useEffect(() => {
+    if (yaRecargo.current) return
     console.error('[global] error no capturado:', error)
-    // Deja rastro en los logs de Vercel (`[error-cliente]`); nunca lanza ni espera.
-    reportarErrorCliente(error, 'global', recargar)
-    if (recargar) window.location.reload()
-  }, [error, recargar])
+    const reclamo = intentarAutoRecarga(error)
+    // Deja rastro en los logs de Vercel (`[error-cliente]`) con lo que de verdad paso: el
+    // reclamo, no la consulta del render. Nunca lanza ni espera.
+    reportarErrorCliente(error, 'global', reclamo)
+    if (reclamo) {
+      yaRecargo.current = true
+      window.location.reload()
+    } else {
+      // La guarda no dejo (marca vigente o `sessionStorage` que no guarda): pantalla normal.
+      setRecargar(false)
+    }
+  }, [error])
 
   const texto = textoPantallaDeError(error, 'MéTRIK one no pudo cargar')
 

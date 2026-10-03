@@ -5,7 +5,12 @@ import {
   textoPantallaDeError,
   PANTALLA_SIN_CONEXION,
 } from './error-de-red'
-import { reclamarAutoRecarga, VENTANA_AUTO_RECARGA_MS, type AlmacenRecarga } from './auto-recarga'
+import {
+  reclamarAutoRecarga,
+  consultarAutoRecarga,
+  VENTANA_AUTO_RECARGA_MS,
+  type AlmacenRecarga,
+} from './auto-recarga'
 import { conReintentoDeRed } from './con-reintento'
 import { envolverTolerante } from './transicion-tolerante'
 
@@ -171,6 +176,35 @@ describe('reclamarAutoRecarga (guarda anti-bucle)', () => {
     const s = almacenEnMemoria()
     s.datos.set('metrik:auto-recarga:/negocios', 'basura')
     expect(reclamarAutoRecarga('/negocios', s, T0)).toBe(true)
+  })
+})
+
+describe('consultarAutoRecarga (lo que lee el render)', () => {
+  const T0 = 1_760_000_000_000
+
+  it('responde lo mismo que reclamar, pero NO deja marca', () => {
+    const s = almacenEnMemoria()
+    expect(consultarAutoRecarga('/negocios', s, T0)).toBe(true)
+    expect(consultarAutoRecarga('/negocios', s, T0)).toBe(true)
+    expect(s.datos.size).toBe(0)
+    // Consultar no gasta: el reclamo sigue disponible.
+    expect(reclamarAutoRecarga('/negocios', s, T0)).toBe(true)
+  })
+
+  it('con la marca vigente dice que no; pasada la ventana, que si', () => {
+    const s = almacenEnMemoria()
+    reclamarAutoRecarga('/negocios', s, T0)
+    expect(consultarAutoRecarga('/negocios', s, T0 + 1_000)).toBe(false)
+    expect(consultarAutoRecarga('/negocios', s, T0 + VENTANA_AUTO_RECARGA_MS)).toBe(true)
+  })
+
+  it('sin sessionStorage, o si leer lanza: no', () => {
+    expect(consultarAutoRecarga('/negocios', null, T0)).toBe(false)
+    const ilegible: AlmacenRecarga = {
+      getItem: () => { throw new Error('SecurityError') },
+      setItem: () => {},
+    }
+    expect(consultarAutoRecarga('/negocios', ilegible, T0)).toBe(false)
   })
 })
 
