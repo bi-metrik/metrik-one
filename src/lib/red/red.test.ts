@@ -18,8 +18,13 @@ describe('esErrorDeRed', () => {
     ['WebKit (iPhone, el caso del 2-oct)', new TypeError('Load failed')],
     ['Chromium', new TypeError('Failed to fetch')],
     ['Firefox', new TypeError('NetworkError when attempting to fetch resource.')],
-    ['Chromium "network error" (Chrome 154 en Mac, el caso del 3-oct)', new TypeError('network error')],
-    ['"Network Error" en mayusculas', new Error('Network Error')],
+    ['Chromium "network error" (Chrome en Mac, el caso del 3-oct)', new TypeError('network error')],
+    ['"Network Error" en mayusculas, TypeError', new TypeError('Network Error')],
+    ['Firefox, stream RSC cortado (el caso del 3-oct)', new TypeError('Error in input stream')],
+    ['WebKit, conexion perdida a medias', new TypeError('The network connection was lost.')],
+    ['WebKit, sin internet', new TypeError('The Internet connection appears to be offline.')],
+    ['Firefox, frase completa aunque llegue sin nombre', { message: 'NetworkError when attempting to fetch resource.' }],
+    ['import() en Chromium', new TypeError('Failed to fetch dynamically imported module: https://x/_next/static/chunks/a.js')],
     ['chunk de Turbopack (el caso del 2-oct)', chunkTurbopack],
     ['chunk de webpack', new Error('Loading chunk 123 failed.')],
     ['CSS chunk', new Error('Loading CSS chunk 7 failed')],
@@ -48,8 +53,25 @@ describe('esErrorDeRed', () => {
     ['undefined', undefined],
     ['string cualquiera', 'boom'],
     ['identificador de la app que contiene "networkError"', new ReferenceError('networkErrors is not defined')],
+    ['"Network error" de negocio (Error, no TypeError)', new Error('Network error de la API de Siigo')],
+    ['"Network Error" como Error a secas', new Error('Network Error')],
+    ['"Error in input stream" de la app', new Error('Error in input stream del PDF')],
+    ['"connection was lost" de la app', new Error('The network connection was lost while syncing Siigo')],
+    ['serializado sin nombre con texto ambiguo', { message: 'network error' }],
+    ['"error" a secas, aun como TypeError', new TypeError('error')],
+    ['TypeError con "input stream" pero sin la frase', new TypeError('Invalid input stream')],
   ])('%s → no', (_, e) => {
     expect(esErrorDeRed(e)).toBe(false)
+  })
+
+  it('el caso del 3-oct llega serializado con nombre: si', () => {
+    expect(esErrorDeRed({ name: 'TypeError', message: 'network error' })).toBe(true)
+    expect(esErrorDeRed({ name: 'TypeError', message: 'Error in input stream' })).toBe(true)
+  })
+
+  it('import() de Chromium es de chunk (recargar lo vuelve a pedir)', () => {
+    expect(esErrorDeCargaDeChunk(new TypeError('Failed to fetch dynamically imported module: https://x/a.js'))).toBe(true)
+    expect(esErrorDeCargaDeChunk(new TypeError('network error'))).toBe(false)
   })
 
   it('una falla de fetch NO es de chunk (solo de red)', () => {
@@ -67,8 +89,13 @@ describe('textoPantallaDeError', () => {
     expect(t.cuerpo).not.toMatch(/pestaña/i)
   })
 
-  it('"network error" de Chromium tambien es sin conexion', () => {
+  it('"network error" de Chromium y "Error in input stream" de Firefox tambien son sin conexion', () => {
     expect(textoPantallaDeError(new TypeError('network error'), 'x')).toEqual(PANTALLA_SIN_CONEXION)
+    expect(textoPantallaDeError(new TypeError('Error in input stream'), 'x')).toEqual(PANTALLA_SIN_CONEXION)
+  })
+
+  it('"Network error" de negocio NO dice sin conexion', () => {
+    expect(textoPantallaDeError(new Error('Network error de la API de Siigo'), 'x').titulo).toBe('x')
   })
 
   it('error de la app: titulo propio de la pantalla y el texto de la pestaña vieja', () => {
