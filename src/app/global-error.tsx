@@ -42,10 +42,12 @@ export default function GlobalError({
     if (reclamo) {
       yaRecargo.current = true
       window.location.reload()
-    } else {
-      // La guarda no dejo (marca vigente o `sessionStorage` que no guarda): pantalla normal.
-      setRecargar(false)
+      return
     }
+    // La guarda no dejo (marca vigente o `sessionStorage` que no guarda): pantalla normal.
+    // Diferido, no en el cuerpo sincrono del efecto (react-hooks/set-state-in-effect).
+    const t = setTimeout(() => setRecargar(false), 0)
+    return () => clearTimeout(t)
   }, [error])
 
   const texto = textoPantallaDeError(error, 'MéTRIK one no pudo cargar')
