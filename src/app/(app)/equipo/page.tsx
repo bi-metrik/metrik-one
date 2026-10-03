@@ -98,10 +98,13 @@ export default async function EquipoPage({ searchParams }: Props) {
       // un mes y podia mostrar cifras como 4925%. Numerador y denominador vuelven a
       // hablar del mismo mes.
       const { anio: anioSel, mes: mesSel } = parsearPeriodo(params.mes, bogotaYearMonth())
-      const [resumen, mesData, metasMap] = await Promise.all([
+      // El bono de operaciones entra al MISMO `Promise.all`: no depende de nada de lo
+      // comercial, y pedirlo despues sumaba su espera a la de las otras tres.
+      const [resumen, mesData, metasMap, operaciones] = await Promise.all([
         getComercialResumen(anioSel, mesSel),
         getComercialMes(anioSel, mesSel),
         getMetasPorVendedorPeriodo(anioSel, mesSel),
+        modules.operaciones_bonos ? getOperacionesBono(anioSel, mesSel) : null,
       ])
       const comercial = {
         resumen,
@@ -120,7 +123,6 @@ export default async function EquipoPage({ searchParams }: Props) {
       // pestanas (comercial y operaciones), no sobre una. Vive aqui, en el unico
       // punto que conoce las dos formas de esta pantalla.
       if (modules.operaciones_bonos) {
-        const operaciones = await getOperacionesBono(anioSel, mesSel)
         return (
           <div>
             <SelectorMesEquipo anio={anioSel} mes={mesSel} />

@@ -206,3 +206,12 @@
   que no llega (iPhone: `TypeError: Load failed`) reemplazaba la ficha entera por «Algo se rompió». En
   pantallas de uso móvil, `useTransitionTolerante` (`src/hooks/`) en vez de `useTransition`. No
   reintentar escrituras por red: el error no dice si la petición alcanzó al servidor.
+- **`unstable_cache` sirve una entrada VENCIDA una vez (stale-while-revalidate).** Con solo
+  `revalidate: 300`, la primera visita después de dos horas recibe la cifra de hace dos horas mientras se
+  refresca por detrás. Para un tope real de atraso, la ventana de tiempo va en la llave
+  (`ventanaActual()` en `src/lib/tableros/cache-rpc.ts`). Además: adentro no se puede llamar `cookies()`
+  (lanza), así que el cliente de Supabase con el JWT de la sesión se crea afuera y entra por cierre; el
+  cierre NO forma parte de la llave, solo los argumentos (`JSON.stringify(args)`) y los `keyParts`.
+  Una RPC con guarda `current_user_workspace_id()` llamada con service_role devuelve ceros, no error:
+  verificar la guarda antes de guardar (2026-10-03).
+

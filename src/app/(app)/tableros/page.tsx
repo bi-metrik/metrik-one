@@ -23,9 +23,24 @@ import { getVitrinaCopy } from '@/lib/workspace/vitrina'
 export default async function TablerosPage() {
   const { supabase, workspaceId, role } = await getWorkspace()
 
+  // La vitrina y los modulos se piden JUNTOS: ninguna depende de la otra, y en fila
+  // eran dos idas y vueltas a la base antes del `Promise.all` de abajo.
+  const [vitrina, ws] = await Promise.all([
+    getVitrinaCopy(supabase, workspaceId),
+    // `config_extra.tableros_operativos` convierte las tres genericas en bandejas por
+    // fase. Se lee en la MISMA consulta que los modulos: cero idas y vueltas nuevas.
+    workspaceId && supabase
+      ? supabase
+          .from('workspaces')
+          .select('modules, config_extra')
+          .eq('id', workspaceId)
+          .single()
+          .then(({ data }) => data)
+      : Promise.resolve(null),
+  ])
+
   // Modo vitrina: el workspace solo compró Valida. Tableros se muestra como vitrina
   // comercial de upsell a ONE — bypassa el guard de permiso canViewNumbers.
-  const vitrina = await getVitrinaCopy(supabase, workspaceId)
   if (vitrina) {
     return <VitrinaPlaceholder title="Tableros" body={vitrina.tableros} />
   }
@@ -35,23 +50,16 @@ export default async function TablerosPage() {
     // En un workspace de solo calidad, `/negocios` es un callejon sin salida:
     // el modulo no existe y la persona aterriza en una pantalla vacia. Se
     // resuelve el destino contra lo que el workspace SI tiene.
-    redirect(await destinoSinNumeros(supabase, workspaceId))
+    // Los modulos ya vinieron en la lectura de arriba: no se vuelven a pedir.
+    redirect(destinoSinNumeros(workspaceId ? (ws?.modules as Record<string, boolean> | null) ?? {} : null))
   }
 
-  // Load workspace modules
-  let modules: Record<string, boolean> = { business: true }
-  // `config_extra.tableros_operativos` convierte las tres genericas en bandejas por fase.
-  // Se lee en la MISMA consulta que los modulos: cero idas y vueltas nuevas.
-  let opciones: OpcionesTableros = {}
-  if (workspaceId && supabase) {
-    const { data: ws } = await supabase
-      .from('workspaces')
-      .select('modules, config_extra')
-      .eq('id', workspaceId)
-      .single()
-    modules = (ws?.modules as Record<string, boolean> | null) ?? { business: true }
-    opciones = { bandejasOperativas: tablerosOperativosActivos(ws?.config_extra) }
-  }
+  const modules: Record<string, boolean> = ws
+    ? ((ws.modules as Record<string, boolean> | null) ?? { business: true })
+    : { business: true }
+  const opciones: OpcionesTableros = ws
+    ? { bandejasOperativas: tablerosOperativosActivos(ws.config_extra) }
+    : {}
 
   // Gate del tablero comercial sobre negocios y de la pestaña Direccion: el modulo
   // mas un rol gerencial. Las dos miran las mismas cifras agregadas de la operacion.
@@ -255,13 +263,8 @@ async function cargarComercialNegocios(role: string | null) {
  * caia en una pantalla vacia sin forma de volver. El destino se resuelve
  * contra lo que el workspace realmente tiene.
  */
-async function destinoSinNumeros(
-  supabase: Awaited<ReturnType<typeof getWorkspace>>['supabase'],
-  workspaceId: string | null,
-): Promise<string> {
-  if (!workspaceId || !supabase) return '/negocios'
-  const { data } = await supabase.from('workspaces').select('modules').eq('id', workspaceId).single()
-  const mods = (data?.modules as Record<string, boolean> | null) ?? {}
+function destinoSinNumeros(mods: Record<string, boolean> | null): string {
+  if (!mods) return '/negocios'
   if (!mods.business && mods.calidad_llamadas) return '/calidad'
   return '/negocios'
 }
