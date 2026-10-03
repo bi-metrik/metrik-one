@@ -30,6 +30,7 @@ import {
   leerEleccion,
   leerSiNo,
   lineaCaja,
+  PALABRAS_COMUNES,
   TEXTO_PIDE_NOMBRE_NUEVO,
 } from './wa-viajes-reglas.ts';
 import type { ResolucionEncabezado, ViajeAbierto } from './wa-viajes-reglas.ts';
@@ -710,6 +711,11 @@ export interface EntradaValidador {
   pendiente: PreguntaUnificada | null;
   negocios: ReadonlyArray<NegocioCtx>;
   tanda: { abierta: boolean; nombre?: string | null; cajaId?: string | null } | null;
+  /**
+   * Los nombres de quienes escriben al bot en el workspace (staff y colaboradores), los mismos de
+   * `resolverEncabezado`: el nombre de pila de alguien del equipo es una firma y nunca resuelve un viaje.
+   */
+  equipo?: ReadonlyArray<string>;
 }
 
 interface AccionModelo {
@@ -778,19 +784,66 @@ export function soloLoEscrito(dato: unknown, texto: string): string | null {
   return ws.length ? ws.join(' ') : null;
 }
 
-/** V6 + V5: el viaje de una acción. El id del contexto vale sin volver a resolver; uno ajeno se quita. */
-function viajesDe(a: AccionModelo, e: EntradaValidador): { viajes: NegocioCtx[]; conRef: boolean; idAjeno: boolean } {
+/** ¿Es el nombre de pila COMPLETO de alguien del equipo? («tatiana» de Tatiana Quiroga; la regla de `resolverEncabezado`). */
+function nombreDePilaDelEquipo(w: string, equipo: ReadonlyArray<string>): boolean {
+  return equipo.some(n => norm(n).split(' ').filter(Boolean)[0] === w);
+}
+
+/**
+ * ¿Es una firma? Todas sus palabras son el nombre de pila de alguien del equipo o palabras comunes, y
+ * al menos una es del equipo: «Tatiana», «gracias Tatiana». La misma regla de `resolverEncabezado`:
+ * una firma nunca resuelve un viaje, aunque haya un cliente con ese nombre de pila. «Tatiana Ruiz»
+ * (con apellido) sí lo nombra.
+ */
+function esFirmaDelEquipo(dato: unknown, equipo: ReadonlyArray<string>): boolean {
+  if (!equipo.length) return false;
+  const ws = palabras(dato);
+  return ws.some(w => nombreDePilaDelEquipo(w, equipo)) && ws.every(w => PALABRAS_COMUNES.has(w) || nombreDePilaDelEquipo(w, equipo));
+}
+
+/**
+ * ¿El mensaje nombra este viaje por algo que NO es la firma de alguien del equipo? Su código, una
+ * palabra del cliente que no sea un nombre de pila del equipo, o una palabra de 4 letras o más de su
+ * destino o del nombre del negocio.
+ */
+function nombraElViaje(v: NegocioCtx, e: EntradaValidador): boolean {
+  const equipo = e.equipo ?? [];
+  const t = new Set(palabras(e.texto));
+  const cod = codigoCompacto(v.codigo);
+  if (cod && codigoCompacto(e.texto).includes(cod)) return true;
+  if (palabras(v.cliente).some(w => t.has(w) && !nombreDePilaDelEquipo(w, equipo) && !PALABRAS_COMUNES.has(w))) return true;
+  return palabras(`${v.destino ?? ''} ${v.nombre ?? ''}`).some(w => w.length >= 4 && t.has(w) && !PALABRAS_COMUNES.has(w));
+}
+
+/** ¿El id lo eligió solo la firma? El cliente del viaje tiene el nombre de pila de alguien del equipo, está escrito, y nada más lo nombra. */
+function idPorLaFirma(v: NegocioCtx, e: EntradaValidador): boolean {
+  const equipo = e.equipo ?? [];
+  const pila = palabras(v.cliente)[0];
+  return !!pila && nombreDePilaDelEquipo(pila, equipo) && palabras(e.texto).includes(pila) && !nombraElViaje(v, e);
+}
+
+/**
+ * V6 + V5: el viaje de una acción. El id del contexto vale sin volver a resolver; uno ajeno se quita.
+ * Con el equipo (control de Vera, E1): el nombre de pila de alguien del equipo nunca resuelve un viaje,
+ * ni por `ref.cliente` ni por un id que el modelo eligió solo por esa firma. `firma`: la referencia era
+ * solo la firma (no queda ninguna otra).
+ */
+function viajesDe(a: AccionModelo, e: EntradaValidador): { viajes: NegocioCtx[]; conRef: boolean; idAjeno: boolean; firma: boolean } {
+  const equipo = e.equipo ?? [];
   const v = porId(a.id, e.negocios);
-  if (v) return { viajes: [v], conRef: true, idAjeno: false };
-  const idAjeno = !!String(a.id ?? '').trim();
+  const idPorFirma = !!v && idPorLaFirma(v, e);
+  if (v && !idPorFirma) return { viajes: [v], conRef: true, idAjeno: false, firma: false };
+  const idAjeno = !v && !!String(a.id ?? '').trim();
   // Las palabras de `ref` deben estar escritas (o venir con un id del contexto, que ya no es el caso).
+  const cliente = soloLoEscrito(a.ref?.cliente, e.texto);
+  const clienteEsFirma = !!cliente && esFirmaDelEquipo(cliente, equipo);
   const ref: Ref = {
     codigo: a.ref?.codigo && todoEscrito(a.ref.codigo, e.texto) ? a.ref.codigo : null,
-    cliente: soloLoEscrito(a.ref?.cliente, e.texto),
+    cliente: clienteEsFirma ? null : cliente,
     destino: soloLoEscrito(a.ref?.destino, e.texto),
   };
   const conRef = !!(ref.codigo || ref.cliente || ref.destino);
-  return { viajes: conRef ? resolverViaje(ref, e.negocios) : [], conRef, idAjeno };
+  return { viajes: conRef ? resolverViaje(ref, e.negocios) : [], conRef, idAjeno, firma: !conRef && (idPorFirma || clienteEsFirma) };
 }
 
 function viajeAbierto(n: NegocioCtx): ViajeAbierto {
@@ -819,6 +872,16 @@ function diceTodo(texto: string): boolean {
  * ejecuta. Las reglas van en orden y la primera que rechaza decide.
  */
 export function validar(crudo: unknown, e: EntradaValidador): Decision {
+  const d = validarPropuesta(crudo, e);
+  // V3 — un rol que no registra (contador, solo lectura) y pidió registrar: el modelo no tiene la acción
+  // en su esquema y devuelve un acuse. No es silencio: el texto de su rol, como hoy.
+  if (d.tipo === 'ejecutar' && d.accion === 'acuse' && d.paso.p === 'nada' && !rolPermite(e.rol, 'gasto') && pideRegistrar(e.texto)) {
+    return decir('rol.acuse', textoRol(e.rol), d.rechazo ?? 'V3_rol_acuse');
+  }
+  return d;
+}
+
+function validarPropuesta(crudo: unknown, e: EntradaValidador): Decision {
   // V0 — el esquema.
   const propuesta = leerPropuesta(crudo);
   if (!propuesta) return { tipo: 'fallback', rechazo: 'V0_esquema' };
@@ -1011,8 +1074,23 @@ function abrirViaje(acc: AccionModelo[], e: EntradaValidador, rechazo: string | 
       p: 'registrar', interpretacion: { accion: 'abrir_viaje', nuevo: nombre, con_contenido: conContenido, evidencia: ab.evidencia ?? null }, aviso: avisoNuevo(nombre, conContenido),
     }, rechazo, recordar);
   }
-  const { viajes, idAjeno } = viajesDe(ab, e);
+  const { viajes, idAjeno, firma } = viajesDe(ab, e);
   if (idAjeno) rechazo ??= 'V6_id_ajeno';
+  // E1 del control de Vera: el «encabezado» era solo la firma de alguien del equipo. No abre nada: lo
+  // que sigue en el mensaje se atiende como contenido (que puede nombrar su propio viaje).
+  if (firma) {
+    const resto = acc.filter(a => a.accion === 'contenido');
+    return resto.length ? contenido(resto, e, rechazo ?? 'V5_firma_del_equipo') : aclaracion(e, rechazo ?? 'V5_firma_del_equipo');
+  }
+  // `abrir_viaje` y `contenido` del mismo mensaje que apuntan a viajes distintos: se pregunta.
+  if (viajes.length === 1 && conContenido) {
+    const otros = acc.filter(a => a.accion === 'contenido').map(a => viajesDe(a, e))
+      .filter(r => r.viajes.length === 1 && r.viajes[0].id !== viajes[0].id).map(r => r.viajes[0]);
+    if (otros.length) {
+      const cands = [...new Map([viajes[0], ...otros].map(v => [v.id, v])).values()];
+      return preguntarViaje(cands, ab.evidencia, true, rechazo ?? 'V5_abrir_y_contenido_distintos');
+    }
+  }
   if (viajes.length === 1) {
     const v = viajes[0];
     const mismaCaja = !!e.tanda?.cajaId && e.tanda.cajaId === v.id;
@@ -1089,24 +1167,34 @@ function descartar(a: AccionModelo, e: EntradaValidador, rechazo: string | null)
     if (diceTodo(e.texto) && diceTodo(a.evidencia ?? e.texto)) return ejecutar('bandeja.descartar_todo', { p: 'descartar', alcance: 'todo' }, rechazo);
     rechazo ??= 'V14_todo_no_escrito';
   }
-  const nums = Array.isArray(a.ns) ? a.ns : typeof a.n === 'number' ? [a.n] : [];
-  if (alcance === 'mensajes' && nums.length > 0 && p?.capa === 'resumen') {
-    const ns = nums.filter(n => Number.isInteger(n) && n > 0);
-    if (ns.length) {
-      const canonico = `descartar el ${ns.join(', ')}`;
-      return ejecutar('bandeja.descartar_mensajes', { p: 'responder_bandeja', canonico, interpretacion: { accion: 'descartar', canonico, evidencia: a.evidencia ?? null }, aviso: null }, rechazo);
+  const nums = (Array.isArray(a.ns) ? a.ns : typeof a.n === 'number' ? [a.n] : []).filter(n => Number.isInteger(n) && n > 0);
+  // H2c del control de Vera: con el resumen pendiente, un número es «mensajes» aunque el modelo no traiga
+  // el alcance. Nunca cae a descartar TODO el resumen: un número que no está escrito, o un número escrito
+  // que el modelo no devolvió, se pregunta.
+  if (p?.capa === 'resumen' && alcance !== 'tanda') {
+    const escritos = numerosEscritos(e.texto);
+    if (nums.length > 0) {
+      if (!nums.every(n => escritos.includes(n))) return aclaracion(e, 'V14_numero_no_escrito');
+      const canonico = `descartar el ${nums.join(', ')}`;
+      return ejecutar('bandeja.descartar_mensajes', {
+        p: 'responder_bandeja', canonico, interpretacion: { accion: 'descartar', canonico, evidencia: a.evidencia ?? null }, aviso: null,
+      }, rechazo ?? (alcance === 'mensajes' ? null : 'V14_numero_sin_alcance'));
     }
+    if (escritos.length > 0) return decir('bandeja.descartar_duda', textoDudaDescarte(p, tanda ? (e.tanda?.nombre ?? null) : null), rechazo ?? 'V14_numero_sin_n');
   }
   if (p && p.ofreceDescartar) {
+    // H2k del control de Vera: las dos capas abiertas y el mensaje nombra la caja de la tanda. No se
+    // confía en `alcance=pregunta` (ni en «ninguno»): con duda, se pregunta. Solo `alcance=tanda` que
+    // nombra su caja descarta la tanda.
+    if (nombraLaCajaDeLaTanda(a, e)) {
+      if (alcance === 'tanda') return ejecutar('bandeja.descartar_tanda', { p: 'descartar', alcance: 'tanda' }, rechazo);
+      return decir('bandeja.descartar_duda', textoDudaDescarte(p, e.tanda?.nombre ?? null), rechazo ?? 'V14_dos_capas');
+    }
     // «a ninguno», «ninguno de esos»: contesta la lista de la pregunta, no la tanda (§5: «los» se refiere a
     // lo que el bot acaba de preguntar). Descartar de menos cuesta un mensaje; de más, lo que sí servía.
     const contestaLaLista = /\b(ninguno|ninguna|ningun)\b/.test(norm(e.texto));
     if (alcance === 'pregunta' || !tanda || contestaLaLista) return descartarPregunta(a, e, rechazo);
-    // Las dos capas abiertas: la tanda solo si el mensaje la nombra; si no, se pregunta.
-    if (alcance === 'tanda' && e.tanda?.cajaId) {
-      const { viajes } = viajesDe(a, e);
-      if (viajes.length === 1 && viajes[0].id === e.tanda.cajaId) return ejecutar('bandeja.descartar_tanda', { p: 'descartar', alcance: 'tanda' }, rechazo);
-    }
+    // Las dos capas abiertas y el mensaje no nombra la caja: se pregunta.
     return decir('bandeja.descartar_duda', textoDudaDescarte(p, e.tanda?.nombre ?? null), rechazo ?? 'V14_duda');
   }
   if (p) return decir('bandeja.descartar_duda', textoDudaDescarte(p, tanda ? (e.tanda?.nombre ?? null) : null), rechazo ?? 'V14_duda');
@@ -1114,9 +1202,24 @@ function descartar(a: AccionModelo, e: EntradaValidador, rechazo: string | null)
   return decir('bandeja.descartar_nada', TEXTO_NADA_QUE_DESCARTAR, rechazo);
 }
 
+/** Los números de 1 o 2 cifras escritos en el mensaje («el 3 sobra», «bota el 2 y el 4»). */
+function numerosEscritos(texto: string): number[] {
+  return [...norm(texto).matchAll(/\b\d{1,2}\b/g)].map(m => Number(m[0]));
+}
+
+/** ¿Hay una tanda abierta con caja y el mensaje la nombra (por la referencia del modelo o por lo escrito)? */
+function nombraLaCajaDeLaTanda(a: AccionModelo, e: EntradaValidador): boolean {
+  const caja = e.tanda?.abierta && e.tanda.cajaId ? e.negocios.find(n => n.id === e.tanda!.cajaId) ?? null : null;
+  if (!caja) return false;
+  const r = viajesDe(a, e);
+  return (r.viajes.length === 1 && r.viajes[0].id === caja.id) || nombraElViaje(caja, e);
+}
+
 /** H2, caso 1: se descarta solo lo que pregunta la pregunta pendiente. */
 function descartarPregunta(a: AccionModelo, e: EntradaValidador, rechazo: string | null): Decision {
   const p = e.pendiente!;
+  // H2k: con las dos capas abiertas, un mensaje que nombra la caja de la tanda no contesta solo la lista.
+  if (nombraLaCajaDeLaTanda(a, e)) return decir('bandeja.descartar_duda', textoDudaDescarte(p, e.tanda?.nombre ?? null), rechazo ?? 'V14_dos_capas');
   const sigue = e.tanda?.abierta ? (e.tanda.nombre ?? 'la tanda abierta') : null;
   if (p.capa === 'entrega' || p.capa === 'resumen') {
     return ejecutar('bandeja.descartar_pregunta', {
@@ -1313,6 +1416,14 @@ function gastos(acc: AccionModelo[], e: EntradaValidador, rechazo: string | null
     if (!montos.includes(Math.round(brutos[0].monto!))) return aclaracion(e, 'V9_monto_no_escrito');
     return ejecutar('bot.responder', { p: 'bot_texto', texto: e.texto.trim() }, rechazo);
   }
+  // Rol restringido sin `consulta` en su esquema (operator, supervisor): el modelo no tiene a dónde mandar
+  // una pregunta («¿cuánto llevamos este mes?») y la vuelve un gasto vacío. Un gasto sin monto ni negocio
+  // no se abre: el texto de su rol, como hoy. Solo un reporte de gasto escrito («pagué el almuerzo») sigue
+  // y el bot pregunta el monto, como el código de hoy.
+  const capaDeGasto = capa === 'gasto_monto' || capa === 'gasto_negocio' || capa === 'soporte';
+  if (!capaDeGasto && !rolPermite(e.rol, 'consulta') && !brutos.some(conMonto) && brutos.every(g => !negocioDelGasto(g, e)) && !esReporteDeGasto(e.texto)) {
+    return decir('rol.consulta', textoRol(e.rol), 'V3_rol_gasto_vacio');
+  }
   // V10: un pedazo sin monto al lado de uno con monto es el mismo gasto partido en dos.
   const unidos: AccionModelo[] = [];
   for (const g of brutos) {
@@ -1345,6 +1456,27 @@ function gastos(acc: AccionModelo[], e: EntradaValidador, rechazo: string | null
   if (comun.length === 1 && lista.length > 1) for (const g of lista) g.negocio ??= comun[0];
   const enCola = !!e.pendiente && e.pendiente.origen === 'bot';
   return ejecutar('bot.gasto', { p: 'bot_gastos', gastos: lista, enCola }, rechazo, !!e.pendiente && !enCola);
+}
+
+/**
+ * ¿El mensaje reporta un gasto (no lo pregunta)? «pagué el almuerzo», «gasté en peajes», «gasto de
+ * taxi». Una pregunta («¿cuánto gasté?», «cuánto llevamos») no.
+ */
+export function esReporteDeGasto(texto: string): boolean {
+  const t = norm(texto);
+  if (/[?¿]/.test(texto) || /^(cuant[oa]s?|cual|cuales|que|como|quien|donde|cuando|dime|muestrame|dame)\b/.test(t)) return false;
+  return /\b(gaste|pague|compre|inverti|tanquee)\b/.test(t) || /\bgasto\s+(de|en|por|del)\b/.test(t);
+}
+
+/**
+ * ¿Pide registrar algo? Un monto escrito o un verbo de registro: «registra», «anota», «guarda», «carga»,
+ * «pagué», «gasté». Con un rol que no registra (contador, solo lectura), un acuse a esto sería silencio.
+ */
+export function pideRegistrar(texto: string): boolean {
+  const t = norm(texto);
+  return montosDelTexto(texto).length > 0
+    || /\b(registr|anot|apunt|guard|carg|ingres|agreg)\w*/.test(t)
+    || /\b(gaste|pague|compre|inverti|gasto|gastos|crea|crear|crealo|creame)\b/.test(t);
 }
 
 function corregirGasto(acc: AccionModelo[], e: EntradaValidador, rechazo: string | null): Decision {
