@@ -3,6 +3,7 @@
 import { useEffect, useState } from 'react'
 import { reportarErrorCliente } from '@/lib/errores-cliente/enviar'
 import { intentarAutoRecarga } from '@/lib/red/auto-recarga'
+import { textoPantallaDeError } from '@/lib/red/error-de-red'
 import { PALETA } from '@/lib/marca/paleta'
 
 /**
@@ -12,7 +13,8 @@ import { PALETA } from '@/lib/marca/paleta'
  * dependiera de la hoja de estilos, el caso en que hace falta (bundle roto) es
  * justo el caso en que no cargaria.
  *
- * Como `(app)/error.tsx`: si fue la red o un chunk, recarga sola una vez por ruta cada 60 s.
+ * Como `(app)/error.tsx`: si fue la red o un chunk, recarga sola una vez por ruta cada 60 s;
+ * si la guarda ya se gasto, dice "Se perdió la conexión" (`textoPantallaDeError`).
  */
 export default function GlobalError({
   error,
@@ -32,6 +34,8 @@ export default function GlobalError({
     reportarErrorCliente(error, 'global', recargar)
     if (recargar) window.location.reload()
   }, [error, recargar])
+
+  const texto = textoPantallaDeError(error, 'MéTRIK one no pudo cargar')
 
   return (
     <html lang="es">
@@ -57,12 +61,9 @@ export default function GlobalError({
           </p>
         ) : (
           <>
-        <h2 style={{ margin: 0, fontSize: '18px', fontWeight: 600 }}>
-          MéTRIK one no pudo cargar
-        </h2>
+        <h2 style={{ margin: 0, fontSize: '18px', fontWeight: 600 }}>{texto.titulo}</h2>
         <p style={{ margin: 0, maxWidth: '32rem', fontSize: '14px', color: '#525252' }}>
-          Casi siempre es una pestaña que llevaba mucho tiempo abierta. Recargar
-          la deja al día y suele bastar.
+          {texto.cuerpo}
         </p>
         <div style={{ display: 'flex', gap: '8px' }}>
           <button

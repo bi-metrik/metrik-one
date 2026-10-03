@@ -12,6 +12,8 @@
  * - WebKit (Safari, y TODO navegador en iOS):  `TypeError: Load failed`
  * - Chromium:                                  `TypeError: Failed to fetch`
  * - Firefox:                                   `TypeError: NetworkError when attempting…`
+ * - Chromium (fetch abortado a medias, visto el 2026-10-03 en Chrome 154 de Mac):
+ *                                              `TypeError: network error` (con espacio)
  * - Turbopack / webpack (chunk que no bajo):   `ChunkLoadError`, `Failed to load chunk …`,
  *                                              `Loading chunk 123 failed`, `Loading CSS chunk …`
  * - `import()` nativo que no bajo:             `Importing a module script failed` (WebKit),
@@ -26,7 +28,9 @@ const PATRONES_RED = [
   /loading (css )?chunk/i,
   /load failed/i,
   /failed to fetch/i,
-  /networkerror/i,
+  // `NetworkError` (Firefox) y `network error` (Chromium). Con limites de palabra para no
+  // casar con un identificador de la app (`networkErrors is not defined`).
+  /\bnetwork ?error\b/i,
   /importing a module script failed/i,
   /error loading dynamically imported module/i,
 ]
@@ -74,4 +78,30 @@ export const MENSAJE_SIN_CONEXION =
  */
 export function mensajeDeFallaDeCarga(error: unknown, porDefecto: string): string {
   return esErrorDeRed(error) ? MENSAJE_SIN_CONEXION : porDefecto
+}
+
+/** Lo que dice la pantalla de error cuando NO recargo sola (o la guarda ya se gasto). */
+export interface TextoPantallaDeError {
+  titulo: string
+  cuerpo: string
+}
+
+/** Para un error de red: es la señal, no una pestaña vieja ni un bug. */
+export const PANTALLA_SIN_CONEXION: TextoPantallaDeError = {
+  titulo: 'Se perdió la conexión',
+  cuerpo: 'Revisa la señal y recarga la página.',
+}
+
+const CUERPO_PESTANA_VIEJA =
+  'Casi siempre es una pestaña que llevaba mucho tiempo abierta. Recargar la deja al día y suele bastar.'
+
+/**
+ * Texto de `error.tsx` / `global-error.tsx`. Nacio del log del 2026-10-03: un iPhone con
+ * `Load failed` (guarda de 60 s ya gastada) veia "Casi siempre es una pestaña que llevaba
+ * mucho tiempo abierta", que era falso. Si fue la red se dice; la "pestaña vieja" queda
+ * solo para lo que no es de red. `tituloOtro` es el titulo propio de cada pantalla.
+ */
+export function textoPantallaDeError(error: unknown, tituloOtro: string): TextoPantallaDeError {
+  if (esErrorDeRed(error)) return PANTALLA_SIN_CONEXION
+  return { titulo: tituloOtro, cuerpo: CUERPO_PESTANA_VIEJA }
 }

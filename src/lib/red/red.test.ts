@@ -1,5 +1,10 @@
 import { describe, it, expect, vi } from 'vitest'
-import { esErrorDeRed, esErrorDeCargaDeChunk } from './error-de-red'
+import {
+  esErrorDeRed,
+  esErrorDeCargaDeChunk,
+  textoPantallaDeError,
+  PANTALLA_SIN_CONEXION,
+} from './error-de-red'
 import { reclamarAutoRecarga, VENTANA_AUTO_RECARGA_MS, type AlmacenRecarga } from './auto-recarga'
 import { conReintentoDeRed } from './con-reintento'
 import { envolverTolerante } from './transicion-tolerante'
@@ -13,6 +18,8 @@ describe('esErrorDeRed', () => {
     ['WebKit (iPhone, el caso del 2-oct)', new TypeError('Load failed')],
     ['Chromium', new TypeError('Failed to fetch')],
     ['Firefox', new TypeError('NetworkError when attempting to fetch resource.')],
+    ['Chromium "network error" (Chrome 154 en Mac, el caso del 3-oct)', new TypeError('network error')],
+    ['"Network Error" en mayusculas', new Error('Network Error')],
     ['chunk de Turbopack (el caso del 2-oct)', chunkTurbopack],
     ['chunk de webpack', new Error('Loading chunk 123 failed.')],
     ['CSS chunk', new Error('Loading CSS chunk 7 failed')],
@@ -40,6 +47,7 @@ describe('esErrorDeRed', () => {
     ['null', null],
     ['undefined', undefined],
     ['string cualquiera', 'boom'],
+    ['identificador de la app que contiene "networkError"', new ReferenceError('networkErrors is not defined')],
   ])('%s → no', (_, e) => {
     expect(esErrorDeRed(e)).toBe(false)
   })
@@ -47,6 +55,29 @@ describe('esErrorDeRed', () => {
   it('una falla de fetch NO es de chunk (solo de red)', () => {
     expect(esErrorDeCargaDeChunk(new TypeError('Load failed'))).toBe(false)
     expect(esErrorDeCargaDeChunk(chunkTurbopack)).toBe(true)
+  })
+})
+
+describe('textoPantallaDeError', () => {
+  it('error de red (iPhone, guarda ya gastada, el caso del 3-oct): dice que se perdio la conexion', () => {
+    const t = textoPantallaDeError(new TypeError('Load failed'), 'Algo se rompió en esta pantalla')
+    expect(t).toEqual(PANTALLA_SIN_CONEXION)
+    expect(t.titulo).toBe('Se perdió la conexión')
+    expect(t.cuerpo).toMatch(/revisa la señal y recarga/i)
+    expect(t.cuerpo).not.toMatch(/pestaña/i)
+  })
+
+  it('"network error" de Chromium tambien es sin conexion', () => {
+    expect(textoPantallaDeError(new TypeError('network error'), 'x')).toEqual(PANTALLA_SIN_CONEXION)
+  })
+
+  it('error de la app: titulo propio de la pantalla y el texto de la pestaña vieja', () => {
+    const t = textoPantallaDeError(
+      new TypeError("Cannot read properties of undefined (reading 'id')"),
+      'MéTRIK one no pudo cargar',
+    )
+    expect(t.titulo).toBe('MéTRIK one no pudo cargar')
+    expect(t.cuerpo).toMatch(/pestaña que llevaba mucho tiempo abierta/)
   })
 })
 
