@@ -1,6 +1,7 @@
 'use server'
 
 import { getWorkspace } from '@/lib/actions/get-workspace'
+import { rpcTablero } from '@/lib/tableros/cache-rpc'
 import type { OperacionesBonoData, OperacionesDetalleData } from './operaciones-types'
 
 /**
@@ -30,7 +31,7 @@ export async function getOperacionesBono(
   // Los tipos generados de Supabase van por detras del esquema: la RPC es nueva.
   // Mismo patron que `comercial-actions.ts`.
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const { data, error } = await (supabase as any).rpc('get_operaciones_bono_resumen', {
+  const { data, error } = await rpcTablero(supabase as any, workspaceId, 'get_operaciones_bono_resumen', {
     p_workspace_id: workspaceId,
     p_anio: anio,
     p_mes: mes,

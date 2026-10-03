@@ -1,6 +1,7 @@
 'use server'
 
 import { getWorkspace } from '@/lib/actions/get-workspace'
+import { rpcTablero } from '@/lib/tableros/cache-rpc'
 import { getRolePermissions } from '@/lib/roles'
 import { columnaDirectivo, COLUMNAS_DIRECTIVO, type ColumnaDirectivo } from '@/lib/dian/agrupacion-directivo'
 
@@ -67,7 +68,7 @@ export async function getDirectivo(anio: number, mes: number): Promise<Directivo
   if (!['owner', 'admin', 'supervisor'].includes(role || '')) return null
 
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const { data, error } = await (supabase as any).rpc('get_directivo_soena', {
+  const { data, error } = await rpcTablero(supabase as any, workspaceId, 'get_directivo_soena', {
     p_workspace_id: workspaceId,
     p_anio: anio,
     p_mes: mes,

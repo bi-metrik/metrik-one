@@ -2,6 +2,7 @@
 
 import { revalidatePath } from 'next/cache'
 import { getWorkspace } from '@/lib/actions/get-workspace'
+import { invalidarTablerosWorkspace } from '@/lib/tableros/cache-rpc'
 import {
   aNumero, aTexto, filasVacias,
   type FilaMetaAnio,
@@ -155,6 +156,9 @@ export async function guardarMetasAnio(input: {
     if (errConfig) return { ok: false, error: errConfig.message }
   }
 
+  // Las cifras de Tableros y Equipo viven en caché 5 minutos (`@/lib/tableros/cache-rpc`):
+  // sin esto la meta recién guardada no se veria hasta que venza la entrada.
+  invalidarTablerosWorkspace(workspaceId)
   revalidatePath('/tableros')
   revalidatePath('/equipo')
   revalidatePath('/numeros')

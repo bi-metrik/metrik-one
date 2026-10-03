@@ -1,6 +1,7 @@
 'use server'
 
 import { getWorkspace } from '@/lib/actions/get-workspace'
+import { rpcTablero } from '@/lib/tableros/cache-rpc'
 import { bogotaYearMonth } from '@/lib/dates/bogota'
 import { canonizarSeccional } from '@/lib/dian/seccionales'
 import { normalizarCortePlanPago } from './comercial-plan-pago'
@@ -32,7 +33,7 @@ export async function getComercialResumen(
   const { supabase, workspaceId, error } = await getWorkspace()
   if (error || !workspaceId || !supabase) return []
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const { data } = await (supabase as any).rpc('get_comercial_resumen_soena', {
+  const { data } = await rpcTablero(supabase as any, workspaceId, 'get_comercial_resumen_soena', {
     p_workspace_id: workspaceId,
     p_anio: anio,
     p_mes: mes,
@@ -53,7 +54,7 @@ export async function getComercialPerfil(
   if (!workspaceId || !supabase) return null
   const responsableId = staffId === 'sin-responsable' ? null : staffId
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const { data } = await (supabase as any).rpc('get_comercial_perfil_soena', {
+  const { data } = await rpcTablero(supabase as any, workspaceId, 'get_comercial_perfil_soena', {
     p_responsable_id: responsableId,
     p_anio: anio,
     p_mes: mes,
@@ -75,7 +76,7 @@ export async function getComercialMes(anio: number, mes: number): Promise<Comerc
   const { supabase, workspaceId, error } = await getWorkspace()
   if (error || !workspaceId || !supabase) return null
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const { data } = await (supabase as any).rpc('get_comercial_kpis_mes_soena', {
+  const { data } = await rpcTablero(supabase as any, workspaceId, 'get_comercial_kpis_mes_soena', {
     p_workspace_id: workspaceId,
     p_anio: anio,
     p_mes: mes,
@@ -88,7 +89,7 @@ export async function getComercialSerie(meses = 12): Promise<ComercialSerieRespo
   const { supabase, workspaceId, error } = await getWorkspace()
   if (error || !workspaceId || !supabase) return null
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const { data } = await (supabase as any).rpc('get_comercial_serie_mensual_soena', {
+  const { data } = await rpcTablero(supabase as any, workspaceId, 'get_comercial_serie_mensual_soena', {
     p_workspace_id: workspaceId,
     p_meses: meses,
   })
@@ -108,7 +109,7 @@ export async function getComercialSerieSeccional(
   const { supabase, workspaceId, error } = await getWorkspace()
   if (error || !workspaceId || !supabase) return null
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const { data, error: rpcError } = await (supabase as any).rpc('get_comercial_serie_seccional_soena', {
+  const { data, error: rpcError } = await rpcTablero(supabase as any, workspaceId, 'get_comercial_serie_seccional_soena', {
     p_workspace_id: workspaceId,
     p_meses: meses,
   })
@@ -133,7 +134,7 @@ export async function getComercialSerieVendedor(
   const { supabase, workspaceId, error } = await getWorkspace()
   if (error || !workspaceId || !supabase) return null
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const { data, error: rpcError } = await (supabase as any).rpc('get_comercial_serie_vendedor_soena', {
+  const { data, error: rpcError } = await rpcTablero(supabase as any, workspaceId, 'get_comercial_serie_vendedor_soena', {
     p_workspace_id: workspaceId,
     p_meses: meses,
   })
@@ -309,7 +310,7 @@ export async function getComercialOrigenMes(
   const { supabase, workspaceId, error } = await getWorkspace()
   if (error || !workspaceId || !supabase) return null
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const { data, error: rpcError } = await (supabase as any).rpc('get_comercial_origen_mes_soena', {
+  const { data, error: rpcError } = await rpcTablero(supabase as any, workspaceId, 'get_comercial_origen_mes_soena', {
     p_workspace_id: workspaceId,
     p_anio: anio,
     p_mes: mes,
@@ -379,7 +380,7 @@ export async function getComercialSeccionalMes(
   const { supabase, workspaceId, error } = await getWorkspace()
   if (error || !workspaceId || !supabase) return null
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const { data, error: rpcError } = await (supabase as any).rpc('get_comercial_seccional_mes_soena', {
+  const { data, error: rpcError } = await rpcTablero(supabase as any, workspaceId, 'get_comercial_seccional_mes_soena', {
     p_workspace_id: workspaceId,
     p_anio: anio,
     p_mes: mes,
@@ -451,7 +452,7 @@ export async function getComercialPlanPagoMes(
   const { supabase, workspaceId, error } = await getWorkspace()
   if (error || !workspaceId || !supabase) return null
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const { data, error: rpcError } = await (supabase as any).rpc('get_comercial_plan_pago_mes_soena', {
+  const { data, error: rpcError } = await rpcTablero(supabase as any, workspaceId, 'get_comercial_plan_pago_mes_soena', {
     p_workspace_id: workspaceId,
     p_anio: anio,
     p_mes: mes,
@@ -485,7 +486,7 @@ export async function getCapacidadSeccional(
   const { supabase, workspaceId, error } = await getWorkspace()
   if (error || !workspaceId || !supabase) return null
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const { data, error: rpcError } = await (supabase as any).rpc('get_capacidad_seccional_soena', {
+  const { data, error: rpcError } = await rpcTablero(supabase as any, workspaceId, 'get_capacidad_seccional_soena', {
     p_workspace_id: workspaceId,
     p_desde: desde,
     p_hasta: hasta,
