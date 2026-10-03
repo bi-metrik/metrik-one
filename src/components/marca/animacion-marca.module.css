@@ -1,0 +1,277 @@
+/*
+ * La animacion de marca de ONE (el haz que enciende MéTRIK one), en CSS puro.
+ *
+ * Antes era un overlay fijo del layout raiz, visible desde el SSR, que tapaba la
+ * pagina hasta hidratar y despues retenia 2,8 s fijos en CADA carga completa (se quito
+ * el 2026-10-03, #994). Ahora solo vive donde ya hay una espera real, y por eso:
+ *
+ * - No es `position: fixed` ni lleva temporizador: se pinta en el hueco de lo que
+ *   todavia no llego, y desaparece en cuanto el contenido lo reemplaza.
+ * - Aparece con retardo (`--retardo`, 300 ms por defecto): una navegacion rapida no
+ *   alcanza a mostrarla, asi que no parpadea.
+ * - Todo va en keyframes, sin estado de React: el estado de carga de `(app)` es un
+ *   componente de servidor y no le suma JavaScript a ninguna pagina.
+ */
+
+.raiz {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  opacity: 0;
+  animation: aparecer 220ms ease-out forwards;
+  animation-delay: var(--retardo, 300ms);
+}
+
+@keyframes aparecer {
+  to { opacity: 1; }
+}
+
+.lockup {
+  position: relative;
+  display: inline-flex;
+  flex-direction: column;
+  align-items: flex-start;
+}
+
+.fila {
+  display: flex;
+  align-items: baseline;
+  white-space: nowrap;
+}
+
+.letra,
+.one {
+  font-family: var(--font-schibsted), sans-serif;
+  font-size: var(--tamano, clamp(2.2rem, 5vw, 3.2rem));
+  line-height: 1;
+  color: var(--tinta);
+  display: inline-block;
+}
+
+.letra {
+  font-weight: 700;
+  letter-spacing: -0.02em;
+}
+
+.unoWrap {
+  position: relative;
+  display: inline-flex;
+  align-items: baseline;
+  margin-left: 0.2em;
+}
+
+.one {
+  position: relative;
+  z-index: 2;
+  font-weight: 400;
+  letter-spacing: -0.01em;
+}
+
+.pista {
+  position: relative;
+  width: 100%;
+  height: 2px;
+  margin-top: 0.18em;
+  font-size: var(--tamano, clamp(2.2rem, 5vw, 3.2rem));
+}
+
+.estela {
+  position: absolute;
+  left: 0;
+  top: 0;
+  height: 2px;
+  width: 100%;
+  border-radius: 1px;
+  background: var(--acento);
+}
+
+.orbe {
+  position: absolute;
+  top: 50%;
+  left: 0;
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: #fff;
+  transform: translate(-50%, -50%);
+  box-shadow:
+    0 0 4px 2px color-mix(in srgb, var(--acento) 70%, transparent),
+    0 0 12px 5px color-mix(in srgb, var(--acento) 35%, transparent),
+    0 0 30px 10px color-mix(in srgb, var(--acento) 12%, transparent);
+  pointer-events: none;
+  opacity: 0;
+}
+
+.destello {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  width: 140px;
+  height: 140px;
+  border-radius: 50%;
+  transform: translate(-50%, -50%) scale(0);
+  background: radial-gradient(
+    circle,
+    rgba(255, 255, 255, 1) 0%,
+    color-mix(in srgb, var(--acento) 25%, transparent) 35%,
+    color-mix(in srgb, var(--acento) 6%, transparent) 55%,
+    transparent 70%
+  );
+  pointer-events: none;
+  z-index: 1;
+  opacity: 0;
+}
+
+.brillo {
+  position: absolute;
+  inset: -3px 0;
+  border-radius: 4px;
+  background: var(--acento);
+  filter: blur(6px);
+  pointer-events: none;
+  opacity: 0;
+}
+
+/* ── Version liviana: el lockup quieto y el haz barriendo la linea ─────────── */
+
+.liviana .estela {
+  opacity: 0.25;
+}
+
+.liviana .orbe {
+  animation: barrer 1.4s cubic-bezier(0.45, 0, 0.25, 1) infinite;
+}
+
+@keyframes barrer {
+  0%   { left: 0%;   opacity: 0; }
+  15%  { opacity: 1; }
+  85%  { opacity: 1; }
+  100% { left: 100%; opacity: 0; }
+}
+
+/* ── Intro completa: una vez por sesion ───────────────────────────────────── */
+/*
+ * Coreografia del splash original, sin el temporizador que lo retenia: el haz sale a
+ * los 300 ms y recorre la linea en 1,4 s; cada letra se enciende cuando el haz pasa
+ * por ella (los retardos los fija el componente); «one» destella en verde al 60 % del
+ * recorrido y se enfria a tinta. Si la espera sigue despues, el haz pasa a barrer.
+ */
+
+.intro .letra {
+  opacity: 0.04;
+  animation: revelar 140ms ease-out forwards;
+  animation-delay: var(--d, 300ms);
+}
+
+@keyframes revelar {
+  to { opacity: 1; }
+}
+
+.intro .one {
+  opacity: 0.04;
+  animation:
+    one-enciende 80ms ease forwards 716ms,
+    one-enfria 800ms cubic-bezier(0.4, 0, 0.2, 1) forwards 1600ms;
+}
+
+@keyframes one-enciende {
+  to {
+    opacity: 1;
+    color: var(--acento);
+    text-shadow:
+      0 0 16px color-mix(in srgb, var(--acento) 40%, transparent),
+      0 0 32px color-mix(in srgb, var(--acento) 15%, transparent);
+  }
+}
+
+@keyframes one-enfria {
+  from {
+    opacity: 1;
+    color: var(--acento);
+    text-shadow:
+      0 0 16px color-mix(in srgb, var(--acento) 40%, transparent),
+      0 0 32px color-mix(in srgb, var(--acento) 15%, transparent);
+  }
+  to {
+    opacity: 1;
+    color: var(--tinta);
+    text-shadow: 0 0 0 transparent;
+  }
+}
+
+.intro .destello {
+  animation: destellar 500ms cubic-bezier(0.16, 1, 0.3, 1) forwards 716ms;
+}
+
+@keyframes destellar {
+  0%   { transform: translate(-50%, -50%) scale(0);    opacity: 0; }
+  10%  { transform: translate(-50%, -50%) scale(0.21); opacity: 1; }
+  30%  { transform: translate(-50%, -50%) scale(0.71); opacity: 0.7; }
+  60%  { transform: translate(-50%, -50%) scale(0.93); opacity: 0.25; }
+  100% { transform: translate(-50%, -50%) scale(1);    opacity: 0; }
+}
+
+.intro .estela {
+  width: 0;
+  animation: trazar 1400ms cubic-bezier(0.22, 0.61, 0.36, 1) forwards 300ms;
+}
+
+@keyframes trazar {
+  to { width: 100%; }
+}
+
+.intro .orbe {
+  animation:
+    recorrer 1400ms cubic-bezier(0.22, 0.61, 0.36, 1) forwards 300ms,
+    barrer 1.4s cubic-bezier(0.45, 0, 0.25, 1) infinite 2400ms;
+}
+
+@keyframes recorrer {
+  0%   { left: 0%;   opacity: 1; }
+  90%  { opacity: 1; }
+  100% { left: 100%; opacity: 0; }
+}
+
+.intro .brillo {
+  animation: brillar 800ms cubic-bezier(0.16, 1, 0.3, 1) forwards 2000ms;
+}
+
+@keyframes brillar {
+  0%   { opacity: 0.2; }
+  30%  { opacity: 0.08; }
+  100% { opacity: 0; }
+}
+
+/* ── Movimiento reducido: el lockup quieto, sin haz ni destello ───────────── */
+
+@media (prefers-reduced-motion: reduce) {
+  .intro .letra,
+  .intro .one {
+    animation: none;
+    opacity: 1;
+  }
+  .intro .estela {
+    animation: none;
+    width: 100%;
+  }
+  .liviana .estela {
+    opacity: 1;
+  }
+  .orbe,
+  .destello,
+  .brillo {
+    display: none;
+  }
+}
+
+.oculto {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
+}
