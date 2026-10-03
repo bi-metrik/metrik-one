@@ -3,6 +3,7 @@
 import { useEffect, useState } from 'react'
 import { reportarErrorCliente } from '@/lib/errores-cliente/enviar'
 import { intentarAutoRecarga } from '@/lib/red/auto-recarga'
+import { textoPantallaDeError } from '@/lib/red/error-de-red'
 import { RefreshCw } from 'lucide-react'
 
 /**
@@ -19,7 +20,9 @@ import { RefreshCw } from 'lucide-react'
  *
  * Desde el 2026-10-02 recarga SOLA cuando lo que rompio fue la red o un chunk que no
  * bajo (iPhone con mala señal: `Load failed`, `Failed to load chunk`), una vez por ruta
- * cada 60 s (`intentarAutoRecarga`). Si la guarda ya se gasto, esta pantalla de siempre.
+ * cada 60 s (`intentarAutoRecarga`). Si la guarda ya se gasto, esta pantalla con el texto
+ * de `textoPantallaDeError`: "Se perdió la conexión" si fue la red, y el de la pestaña vieja
+ * solo si no lo fue.
  */
 export default function AppError({
   error,
@@ -50,15 +53,12 @@ export default function AppError({
     )
   }
 
+  const texto = textoPantallaDeError(error, 'Algo se rompió en esta pantalla')
+
   return (
     <div className="flex min-h-[60vh] flex-col items-center justify-center gap-4 px-6 text-center">
-      <h2 className="text-lg font-semibold text-foreground">
-        Algo se rompió en esta pantalla
-      </h2>
-      <p className="max-w-md text-sm text-muted-foreground">
-        Casi siempre es una pestaña que llevaba mucho tiempo abierta. Recargar
-        la deja al día y suele bastar.
-      </p>
+      <h2 className="text-lg font-semibold text-foreground">{texto.titulo}</h2>
+      <p className="max-w-md text-sm text-muted-foreground">{texto.cuerpo}</p>
       <div className="flex items-center gap-2">
         <button
           type="button"
