@@ -19,7 +19,7 @@
 //   5. Un mensaje que nombra a dos viajes no se carga entero en ninguno (F13): solo se descarta.
 // ============================================================
 
-import { calificarNombreNuevo, leerNuevo, nombreDeViaje, normalizarNombre, normalizarTexto, restoTrasOtroCliente } from './wa-entendimiento-reglas.ts';
+import { calificarNombreNuevo, leerNuevo, nombreDeViaje, nombrePropio, normalizarNombre, normalizarTexto, restoTrasOtroCliente } from './wa-entendimiento-reglas.ts';
 export { nombreDeViaje, nombrePropio } from './wa-entendimiento-reglas.ts';
 import { codigoCompacto, interpretarRespuestaNegocio } from './wa-carga-reglas.ts';
 import { esNotaDelComercial } from './wa-guardianes.ts';
@@ -76,10 +76,12 @@ export type ResolucionEncabezado =
    */
   | { tipo: 'aproximado'; viaje: ViajeAbierto; por: 'nombre' | 'apellido' | 'destino' | 'negocio' }
   /**
-   * `cliente: null`: el bot pide el nombre. `en_duda`: lo que siguió a «nuevo» y no parece un nombre
-   * («nueva reserva», «nuevo Pedro»): no es el nombre, solo se cita al pedirlo (`calificarNombreNuevo`).
+   * `cliente: null`: el bot pide el nombre. `en_duda`: lo que siguió a «nuevo» y no es un nombre (solo
+   * números): no es el nombre, solo se cita al pedirlo (`calificarNombreNuevo`). `parecidos`: viajes
+   * abiertos cuyo cliente comparte un nombre o un apellido con el propuesto (`viajesParecidos`); el acuse
+   * y el resumen lo dicen. El cliente se crea solo con el «sí» al resumen.
    */
-  | { tipo: 'nuevo'; cliente: string | null; en_duda?: string }
+  | { tipo: 'nuevo'; cliente: string | null; en_duda?: string; parecidos?: ViajeAbierto[] }
   | { tipo: 'ambiguo'; candidatos: ViajeAbierto[] }
   | { tipo: 'codigo_desconocido'; codigo: string }
   /** Parece un encabezado (corto, escrito) pero no se resuelve: corta la caja (QA de #971 v3). */
@@ -261,13 +263,14 @@ export function resolverEncabezado(
 
   // «Nuevo» en cualquier forma: «nuevo X», «cliente nuevo X», «nueva clienta X», «es nuevo X». Sin
   // nombre, o «otro cliente» a secas: el bot pide el nombre (`TEXTO_PIDE_NOMBRE_NUEVO`). Con la regla del
-  // nombre (`calificarNombreNuevo`): lo que no parece un nombre («nueva reserva») tampoco es el nombre, y
-  // el bot lo pide igual; un texto más largo que el tope no es encabezado (control de Vera, NU5).
+  // nombre (`calificarNombreNuevo`): solo números no es un nombre y el bot lo pide; un texto más largo
+  // que el tope no es encabezado. Lo demás es el nombre PROPUESTO: abre su caja, y el cliente se crea
+  // solo con el «sí» al resumen, que lo muestra tal cual («Cliente nuevo: X»).
   const nuevo = leerNuevo(bruto);
   if (nuevo) {
     const c = calificarNombreNuevo(nuevo.cliente);
     if (c === 'largo') return null;
-    return c === 'duda' ? { tipo: 'nuevo', cliente: null, en_duda: nuevo.cliente ?? '' } : { tipo: 'nuevo', cliente: nuevo.cliente };
+    return c === 'duda' ? { tipo: 'nuevo', cliente: null, en_duda: nuevo.cliente ?? '' } : conParecidos(nuevo.cliente, viajes);
   }
   if (palabras.length > MAX_PALABRAS_ENCABEZADO) return null;
   // «otro cliente Lina Pérez»: lo que sigue es el encabezado. Si no nombra un viaje abierto y es un
@@ -276,8 +279,7 @@ export function resolverEncabezado(
   if (trasOtro) {
     const r = resolverEncabezado(trasOtro, viajes, equipo);
     if (r && r.tipo !== 'no_reconocido') return r;
-    const nombre = esNombreNuevo(trasOtro, equipo);
-    return { tipo: 'nuevo', cliente: nombre };
+    return conParecidos(esNombreNuevo(trasOtro, equipo), viajes);
   }
 
   const compacto = codigoCompacto(bruto);
@@ -346,7 +348,7 @@ export function candidatosDelEncabezado(r: ResolucionEncabezado | null | undefin
  */
 export function respuestaAlEncabezado(r: ResolucionEncabezado | null, texto = ''): string | null {
   if (r?.tipo === 'viaje') return `📌 ${lineaCaja(r.viaje)}`;
-  if (r?.tipo === 'nuevo') return r.cliente ? `📌 NUEVO ${r.cliente}` : r.en_duda ? textoPideNombreEnDuda(r.en_duda) : TEXTO_PIDE_NOMBRE_NUEVO;
+  if (r?.tipo === 'nuevo') return r.cliente ? textoAcuseNuevo(r.cliente, r.parecidos ?? []) : r.en_duda ? textoPideNombreEnDuda(r.en_duda) : TEXTO_PIDE_NOMBRE_NUEVO;
   const candidatos = candidatosDelEncabezado(r);
   return candidatos.length > 0 ? textoPreguntaEncabezado(texto, candidatos) : null;
 }
@@ -382,9 +384,140 @@ export function lineaCaja(v: ViajeAbierto): string {
 /** Lo que el bot pide en el acto tras un «nuevo» sin nombre o un «otro cliente» (como N9). */
 export const TEXTO_PIDE_NOMBRE_NUEVO = '¿Cómo se llama el cliente nuevo? Escríbeme su nombre, o DESCARTAR. Hasta entonces no asigno lo que sigue.';
 
-/** Tras «nuevo» con algo que no parece un nombre («nueva reserva», «nuevo Pedro»): el bot pide nombre y apellido. */
+/** Tras «nuevo» con algo que no es un nombre (solo números: «nuevo 3005551234»): el bot pide el nombre. */
 export function textoPideNombreEnDuda(propuesto: string): string {
-  return `¿Cómo se llama el cliente nuevo? Con «${String(propuesto).trim().slice(0, 40)}» no lo creo: escríbeme su nombre y apellido, o DESCARTAR. Hasta entonces no asigno lo que sigue.`;
+  return `¿Cómo se llama el cliente nuevo? Con «${String(propuesto).trim().slice(0, 40)}» no lo creo: escríbeme su nombre, o DESCARTAR. Hasta entonces no asigno lo que sigue.`;
+}
+
+// ── Cliente nuevo: nada se crea sin un «sí» ─────────────────────────────────
+//
+// Decisión de Mauricio (2026-10-03, tercer control sellado de Vera): el código no adivina si lo que sigue
+// a «nuevo» es un nombre. Ningún cliente se crea sin un «sí» explícito del comercial a un texto que
+// muestra el nombre tal cual se va a crear:
+//   · con encabezados, el resumen del reparto («Cliente nuevo: X — 2 mensajes … ¿Así? Responde SÍ»);
+//   · sin ellos, una pregunta aparte tras «¿A qué viaje van?» (`textoConfirmarNuevo`).
+// Si el nombre se parece al cliente de un viaje abierto, la confirmación lo dice (`viajesParecidos`).
+
+/** Lo más que se nombra de viajes parecidos en una confirmación. */
+const MAX_PARECIDOS = 3;
+
+/**
+ * Los viajes abiertos cuyo cliente comparte con el nombre propuesto su nombre de pila, otro de sus
+ * nombres o un apellido (igual, o a un error de tipeo en palabras de cinco letras o más). Así también
+ * cae «tiíta Ana María» (un diminutivo de parentesco y parte del nombre de Ana María Gómez). No decide
+ * nada: solo hace que la confirmación diga «Ya hay un viaje de …».
+ */
+export function viajesParecidos(nombre: string | null | undefined, viajes: ReadonlyArray<ViajeAbierto>): ViajeAbierto[] {
+  const propias = palabrasDe(nombre ?? '').filter(w => w.length >= 3 && !NO_IDENTIFICAN.has(w));
+  if (propias.length === 0) return [];
+  return viajes.filter(v => palabrasDe(v.cliente).filter(w => w.length >= 3 && !NO_IDENTIFICAN.has(w))
+    .some(c => propias.some(w => w === c || (w.length >= 5 && c.length >= 5 && distancia(w, c) <= 1))));
+}
+
+/** `{ tipo: 'nuevo' }` con sus parecidos (solo si los hay). */
+function conParecidos(cliente: string | null, viajes: ReadonlyArray<ViajeAbierto>): ResolucionEncabezado {
+  const parecidos = cliente ? viajesParecidos(cliente, viajes) : [];
+  return parecidos.length > 0 ? { tipo: 'nuevo', cliente, parecidos } : { tipo: 'nuevo', cliente };
+}
+
+/** «Ana María Gómez (T1 26 4)»: el cliente y el código de un viaje. */
+function clienteYCodigo(v: ViajeAbierto): string {
+  return nombreDeViaje({ cliente: v.cliente, codigo: v.codigo });
+}
+
+/** «A», «A y B», «A, B y C» (o con «o»: las alternativas). */
+function enumerar(xs: ReadonlyArray<string>, y = 'y'): string {
+  return xs.length <= 1 ? (xs[0] ?? '') : `${xs.slice(0, -1).join(', ')} ${y} ${xs[xs.length - 1]}`;
+}
+
+/** Cómo se elige un viaje parecido: su número en la lista que ya vio el comercial, o su código. */
+function referenciaDe(v: ViajeAbierto, numero: number | null): string {
+  return numero !== null ? String(numero) : (v.codigo?.trim() || nombrePropio(v.cliente) || 'su código');
+}
+
+/**
+ * El acuse en el acto de un «nuevo X» (encabezado, nombre tras «¿Cómo se llama?» o el intérprete): la
+ * caja se abre con ese nombre, pero el cliente se crea solo con el «sí» al resumen. Si el nombre se
+ * parece al cliente de un viaje abierto, lo dice y cómo pasarse a ese viaje.
+ */
+export function textoAcuseNuevo(nombre: string, parecidos: ReadonlyArray<ViajeAbierto> = [], conContenido = false): string {
+  const ps = parecidos.slice(0, MAX_PARECIDOS);
+  const l = [`📌 Cliente nuevo: ${String(nombre).trim()}${conContenido ? ' · anotado' : ''}. Lo creo solo cuando respondas SÍ al resumen.`];
+  if (ps.length === 1) l.push(`Ya hay un viaje de ${clienteYCodigo(ps[0])}. Si es para ese, escribe ${referenciaDe(ps[0], null)}.`);
+  else if (ps.length > 1) l.push(`Ya hay viajes de ${enumerar(ps.map(clienteYCodigo))}. Si es para uno de esos, escribe su código.`);
+  return l.join('\n');
+}
+
+/**
+ * La confirmación aparte, donde no hay resumen (la respuesta a «¿A qué viaje van?»):
+ * «¿Creo el cliente nuevo «X»? Responde SÍ, o escribe el nombre correcto, o el número del viaje». Con
+ * viajes parecidos: «Ya hay un viaje de <cliente> (<código>). ¿Es para ese (responde N) o es un cliente
+ * nuevo (responde SÍ)?». `numero`: la posición del viaje en la lista que ya vio el comercial (si está);
+ * sin ella, el código. `conLista`: el comercial tiene a la vista la lista numerada.
+ */
+export function textoConfirmarNuevo(p: {
+  nombre: string;
+  parecidos?: ReadonlyArray<{ viaje: ViajeAbierto; numero: number | null }>;
+  conLista: boolean;
+  aviso?: string | null;
+}): string {
+  const nombre = String(p.nombre).trim().slice(0, 60);
+  const ps = (p.parecidos ?? []).slice(0, MAX_PARECIDOS);
+  const l: string[] = p.aviso ? [p.aviso] : [];
+  if (ps.length === 0) {
+    l.push(`¿Creo el cliente nuevo «${nombre}»? Responde SÍ, o escribe el nombre correcto, o el ${p.conLista ? 'número' : 'código'} del viaje.`);
+  } else {
+    l.push(`¿Creo el cliente nuevo «${nombre}»?`);
+    l.push(ps.length === 1
+      ? `Ya hay un viaje de ${clienteYCodigo(ps[0].viaje)}. ¿Es para ese (responde ${referenciaDe(ps[0].viaje, ps[0].numero)}) o es un cliente nuevo (responde SÍ)?`
+      : `Ya hay viajes de ${enumerar(ps.map(x => clienteYCodigo(x.viaje)))}. ¿Es para uno de esos (responde ${enumerar(ps.map(x => referenciaDe(x.viaje, x.numero)), 'o')}) o es un cliente nuevo (responde SÍ)?`);
+    l.push('O escribe el nombre correcto.');
+  }
+  l.push('No he creado ni cargado nada.');
+  return l.join('\n');
+}
+
+export type RespuestaConfirmarNuevo =
+  | { tipo: 'si' }
+  /** Lo que escribió en vez del «sí»: el nombre correcto. Reemplaza al propuesto y se vuelve a confirmar. */
+  | { tipo: 'nombre'; nombre: string }
+  /** El número de la lista o el código de un viaje: cancela el nuevo. */
+  | { tipo: 'existente'; negocio_id: string }
+  | { tipo: 'codigo'; codigo: string }
+  | { tipo: 'descartar' }
+  | { tipo: 'no_entendida' };
+
+/**
+ * La respuesta a «¿Creo el cliente nuevo «X»?». Solo un «sí» sin peros (o NUEVO / «créalo») crea; un
+ * número de la lista o un código cancela el nuevo; un nombre (con o sin NUEVO delante) reemplaza al
+ * propuesto y vuelve a preguntar. El nombre exacto de un cliente con viaje abierto NO elige su viaje: es
+ * otro nombre propuesto, y la confirmación siguiente dice «Ya hay un viaje de …».
+ */
+export function interpretarConfirmacionNuevo(
+  texto: string, opciones: ReadonlyArray<{ id: string; codigo: string | null }>,
+): RespuestaConfirmarNuevo {
+  const bruto = String(texto ?? '').trim();
+  if (!bruto) return { tipo: 'no_entendida' };
+  if (esSi(bruto)) return { tipo: 'si' };
+  const t = normalizarNombre(bruto);
+  if (/^(?:si )?(?:nuev[oa]|crear|crealo|creala|crearlo|crearla|cliente nuev[oa])$/.test(t)) return { tipo: 'si' };
+  if (/^descart/.test(t)) return { tipo: 'descartar' };
+  const num = /^(\d{1,2})$/.exec(t);
+  if (num) {
+    const o = opciones[Number(num[1]) - 1];
+    return o ? { tipo: 'existente', negocio_id: o.id } : { tipo: 'no_entendida' };
+  }
+  const c = codigoCompacto(bruto);
+  if (esCodigo(c)) {
+    const o = opciones.find(x => codigoCompacto(x.codigo) === c);
+    return o ? { tipo: 'existente', negocio_id: o.id } : { tipo: 'codigo', codigo: c };
+  }
+  // Un «no …» o una pregunta no son un nombre: se vuelve a preguntar sin cambiar el propuesto.
+  if (/[?¿]/.test(bruto) || leerSiNo(bruto) !== null || /^(?:no|nop|nel|si|ok|okey|dale)\b/.test(t)) return { tipo: 'no_entendida' };
+  const nuevo = leerNuevo(bruto);
+  const propuesto = (nuevo ? nuevo.cliente ?? '' : bruto)
+    .replace(/^(?:(?:que\s+)?se\s+llama|llamad[oa]|de\s+nombre|el\s+nombre\s+es|es)[\s,.:;-]+/i, '').replace(/[.!]+$/, '').trim();
+  return calificarNombreNuevo(propuesto) === 'nombre' ? { tipo: 'nombre', nombre: propuesto } : { tipo: 'no_entendida' };
 }
 
 /** «No entendí»: lo que el bot contesta en el acto a una respuesta que no es de la lista del encabezado. */
@@ -1050,14 +1183,32 @@ export function sinAsignar(plan: PlanViajes): MensajePlan[] {
   return plan.mensajes.filter(m => !m.destino && !m.descartado);
 }
 
-/** ¿Se puede cargar sin preguntar? Solo con `confirmar: si_duda` y nada pendiente ni avisos. */
+/**
+ * ¿Se puede cargar sin preguntar? Solo con `confirmar: si_duda`, nada pendiente ni avisos, y sin clientes
+ * nuevos: un cliente nuevo se crea solo con el «sí» del comercial al resumen (2026-10-03).
+ */
 export function planSinDudas(plan: PlanViajes): boolean {
-  return pendientes(plan).length === 0 && plan.avisos.length === 0 && gruposDelPlan(plan).length > 0;
+  const grupos = gruposDelPlan(plan);
+  return pendientes(plan).length === 0 && plan.avisos.length === 0 && grupos.length > 0 && grupos.every(g => g.destino.tipo === 'existente');
 }
 
-/** Un destino del plan como se le muestra al comercial: «NUEVO Laura» o «Europa 2 días · Carolina Ruiz (M1 26 5)». */
+/** Un destino del plan como se le muestra al comercial: «Cliente nuevo: Laura» o «Europa 2 días · Carolina Ruiz (M1 26 5)». */
 export function nombreDestino(d: DestinoPlan): string {
-  return d.tipo === 'nuevo' ? `NUEVO ${d.cliente ?? '(sin nombre)'}` : nombreDeViaje(d);
+  return d.tipo === 'nuevo' ? `Cliente nuevo: ${d.cliente ?? '(sin nombre)'}` : nombreDeViaje(d);
+}
+
+/**
+ * Lo que el resumen dice de un cliente nuevo que se parece al de un viaje abierto: «⚠ 1) Ya hay un viaje
+ * de Ana María Gómez (T1 26 4). ¿Es para ese («el 1 y 2 es de T1 26 4») o es un cliente nuevo (responde
+ * SÍ)?». Con los números del resumen, para moverlos con la corrección de siempre.
+ */
+function avisoParecidosDelGrupo(k: number, ns: ReadonlyArray<number>, parecidos: ReadonlyArray<ViajeAbierto>): string {
+  const ps = parecidos.slice(0, MAX_PARECIDOS);
+  const destino = (v: ViajeAbierto) => v.codigo?.trim() || nombrePropio(v.cliente) || '';
+  const mover = `«el ${enumerar(ns.map(String))} ${ns.length === 1 ? 'es' : 'son'} de ${destino(ps[0])}»`;
+  return ps.length === 1
+    ? `⚠ ${k}) Ya hay un viaje de ${clienteYCodigo(ps[0])}. ¿Es para ese (${mover}) o es un cliente nuevo (responde SÍ)?`
+    : `⚠ ${k}) Ya hay viajes de ${enumerar(ps.map(clienteYCodigo))}. ¿Es para uno de esos (por ejemplo ${mover}) o es un cliente nuevo (responde SÍ)?`;
 }
 
 function recorte(t: string, n = 40): string {
@@ -1101,7 +1252,11 @@ export function rangos(ns: ReadonlyArray<number>): string {
  * R2). Lo que hay que decidir va aparte, con su texto y su motivo. Si no cabe en un mensaje, se
  * parte por líneas; el cierre con las instrucciones va siempre en el último.
  */
-export function partesResumenPlan(plan: PlanViajes, mensajes: ReadonlyArray<MensajeViaje>, aviso?: string): string[] {
+export function partesResumenPlan(
+  plan: PlanViajes, mensajes: ReadonlyArray<MensajeViaje>, aviso?: string,
+  /** Los viajes abiertos: un cliente nuevo que se parece al de uno de ellos lo dice antes del «sí». */
+  viajes: ReadonlyArray<ViajeAbierto> = [],
+): string[] {
   const porN = new Map(mensajes.map(m => [m.n, m]));
   const { visible } = numeracion(plan);
   // La nota del comercial (un juicio) no se repite: ni su texto ni una paráfrasis salen del bot.
@@ -1118,6 +1273,11 @@ export function partesResumenPlan(plan: PlanViajes, mensajes: ReadonlyArray<Mens
     const n = g.mensajes.length;
     lineas.push(`${g.k}) ${nombreDestino(g.destino)} — ${n} ${n === 1 ? 'mensaje' : 'mensajes'}`);
     lineas.push(...g.mensajes.map(n2 => `${linea(n2, largo)}${plan.mensajes.find(x => x.n === n2)?.sospecha ? ' ⚠' : ''}`));
+  }
+  for (const g of grupos) {
+    if (g.destino.tipo !== 'nuevo') continue;
+    const parecidos = viajesParecidos(g.destino.cliente, viajes);
+    if (parecidos.length > 0) lineas.push(avisoParecidosDelGrupo(g.k, g.mensajes.map(visible), parecidos));
   }
   if (porDecidir.length > 0) {
     lineas.push(`⚠ Para decidir antes del sí: ${porDecidir.length} ${porDecidir.length === 1 ? 'mensaje' : 'mensajes'}`);
@@ -1158,8 +1318,8 @@ export function partesResumenPlan(plan: PlanViajes, mensajes: ReadonlyArray<Mens
 const PREFIJO_PARTE = '(99/99) '.length;
 
 /** El resumen en un solo texto (las partes unidas). Para enviarlo, usar `partesResumenPlan`. */
-export function textoResumenPlan(plan: PlanViajes, mensajes: ReadonlyArray<MensajeViaje>, aviso?: string): string {
-  return partesResumenPlan(plan, mensajes, aviso).join('\n');
+export function textoResumenPlan(plan: PlanViajes, mensajes: ReadonlyArray<MensajeViaje>, aviso?: string, viajes: ReadonlyArray<ViajeAbierto> = []): string {
+  return partesResumenPlan(plan, mensajes, aviso, viajes).join('\n');
 }
 
 // ── La respuesta al resumen ──────────────────────────────────────────────────

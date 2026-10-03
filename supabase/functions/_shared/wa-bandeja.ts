@@ -17,7 +17,8 @@ import {
 } from './wa-entendimiento.ts';
 import {
   candidatosDelEncabezado, esNombreNuevo, esRespuestaA, esRespuestaSuelta, esRuidoEscrito, leerEleccion, lineaCaja, pareceRespuesta,
-  resolverEncabezado, respuestaAlEncabezado, textoNoEntendiEleccion, textoPreguntaEncabezadoCorta, TEXTO_PIDE_NOMBRE_NUEVO,
+  resolverEncabezado, respuestaAlEncabezado, textoAcuseNuevo, textoNoEntendiEleccion, textoPreguntaEncabezadoCorta, TEXTO_PIDE_NOMBRE_NUEVO,
+  viajesParecidos,
 } from './wa-viajes-reglas.ts';
 import type { ResolucionEncabezado } from './wa-viajes-reglas.ts';
 import { sendTextMessage } from './wa-respond.ts';
@@ -461,7 +462,7 @@ async function encabezadoDelEscrito(
  *     número fuera de la lista → «No entendí» y la lista otra vez; contenido (un reenvío, un escrito
  *     largo) → la pregunta corta, solo la primera vez (Trappvel, 2026-10-02, regla 3). Con otra pregunta
  *     abierta (`hayOtraPregunta`) esta no se hizo en el acto: nada;
- *   · el nombre de un «nuevo» suelto u «otro cliente»: un nombre → «📌 NUEVO X»; un sí, un no o un
+ *   · el nombre de un «nuevo» suelto u «otro cliente»: un nombre → «📌 Cliente nuevo: X»; un sí, un no o un
  *     número → se vuelve a pedir; contenido → se pide, solo la primera vez.
  * `null`: la tanda no espera nada.
  */
@@ -474,7 +475,7 @@ async function respuestaEnEspera(
   if (!p) return null;
   if (p.tipo === 'nombre') {
     const nombre = escrito ? esNombreNuevo(message.text, p.equipo) : null;
-    if (nombre) return { aviso: `📌 NUEVO ${nombre}`, respuesta: true };
+    if (nombre) return { aviso: textoAcuseNuevo(nombre, viajesParecidos(nombre, p.viajes)), respuesta: true };
     if (escrito && esRespuestaSuelta(message.text)) return { aviso: TEXTO_PIDE_NOMBRE_NUEVO, respuesta: true };
     return { aviso: p.conContenido ? null : TEXTO_PIDE_NOMBRE_NUEVO, respuesta: false };
   }

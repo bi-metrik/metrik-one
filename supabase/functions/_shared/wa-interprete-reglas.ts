@@ -21,7 +21,7 @@ import {
 } from './wa-bandeja-reglas.ts';
 import type { ConfigBandeja } from './wa-bandeja-reglas.ts';
 import { codigoCompacto, interpretarRespuestaNegocio } from './wa-carga-reglas.ts';
-import { calificarNombreNuevo, normalizarTexto, textoNombreNuevoEnDuda } from './wa-entendimiento-reglas.ts';
+import { calificarNombreNuevo, leerNuevo, normalizarTexto } from './wa-entendimiento-reglas.ts';
 import { fastPathParse } from './wa-parse-reglas.ts';
 import {
   esNombreNuevo,
@@ -32,7 +32,9 @@ import {
   lineaCaja,
   PALABRAS_COMUNES,
   TEXTO_PIDE_NOMBRE_NUEVO,
+  textoAcuseNuevo,
   textoPideNombreEnDuda,
+  viajesParecidos,
 } from './wa-viajes-reglas.ts';
 import type { ResolucionEncabezado, ViajeAbierto } from './wa-viajes-reglas.ts';
 import { BTN_DESPUES, BTN_SIN_SOPORTE } from './handlers/registro/soporte-foto.ts';
@@ -1030,8 +1032,9 @@ function avisoPin(v: NegocioCtx, conContenido: boolean): string {
   return `📌 ${lineaCaja(viajeAbierto(v))}${conContenido ? ' · anotado' : ''}`;
 }
 
-function avisoNuevo(nombre: string, conContenido: boolean): string {
-  return `📌 NUEVO ${nombre}${conContenido ? ' · anotado' : ''}`;
+/** El acuse de un cliente nuevo, el mismo del encabezado de hoy (`textoAcuseNuevo`): se crea solo con el «sí» al resumen. */
+function avisoNuevo(nombre: string, conContenido: boolean, negocios: ReadonlyArray<NegocioCtx> = []): string {
+  return textoAcuseNuevo(nombre, viajesParecidos(nombre, negocios.map(viajeAbierto)), conContenido);
 }
 
 /** V8: el nombre de un cliente nuevo. Todas sus palabras escritas en el mensaje; si no, `null`. */
@@ -1042,39 +1045,20 @@ function nombreNuevo(a: AccionModelo, texto: string): string | null {
 }
 
 /**
- * V8 con el tope del encabezado (`MAX_PALABRAS_NOMBRE_NUEVO`): un «nuevo» con un nombre más largo no
- * crea a nadie («nueva cotización con hotel 4 estrellas»). Se pide aclaración: con la lista pendiente,
- * la vuelve a mostrar. `null` si el nombre cabe (o no hay nombre).
+ * V8 — el nombre propuesto de un cliente nuevo, con la misma regla del código de hoy
+ * (`calificarNombreNuevo`, sin vocabulario desde el 2026-10-03): más largo que el tope
+ * (`MAX_PALABRAS_NOMBRE_NUEVO`) no crea a nadie y se pide aclaración (con la lista pendiente, la vuelve a
+ * mostrar); solo números no es un nombre y se pide. Lo demás sigue al MISMO camino del código de hoy, que
+ * no crea nada sin el «sí» del comercial: la caja «Cliente nuevo: X» hasta el resumen, o «NUEVO X» a la
+ * lista, que pregunta «¿Creo el cliente nuevo «X»?». Ahí también se dice si X se parece al cliente de un
+ * viaje abierto. `null`: sigue.
  */
-function nombreLargo(nombre: string | null, e: EntradaValidador): Decision | null {
-  return nombre && calificarNombreNuevo(nombre) === 'largo' ? aclaracion(e, 'V8_nombre_largo') : null;
-}
-
-/**
- * V8 — ¿el nombre propuesto puede crear un cliente? (control sellado de Vera 2026-10-02b, NU4). La misma
- * regla del código de hoy (`calificarNombreNuevo`) y, además, los clientes con viaje abierto:
- *   · `de_cliente`: el nombre contiene el nombre de un cliente con viaje abierto («la tía de Marta Gil»,
- *     «Marta Gil Rojas»), o es parte de él («Marta», solo el nombre de pila de la clienta). Se pregunta
- *     por ese viaje: puede ser la misma persona o alguien de su viaje.
- *   · `duda`: no parece un nombre (un descriptor de parentesco, vocabulario de la agencia, una sola
- *     palabra). Se pide nombre y apellido.
- * `null`: crea. El nombre IDÉNTICO al cliente de un viaje abierto lo sigue atendiendo `V8_nombre_igual`.
- */
-function nombreQueNoCrea(nombre: string, e: EntradaValidador, opts: { unaPalabraVale?: boolean } = {}):
-  { tipo: 'de_cliente'; viajes: NegocioCtx[] } | { tipo: 'duda' } | null {
-  const c = calificarNombreNuevo(nombre, opts);
-  const pn = palabras(nombre);
-  const delCliente = e.negocios.filter(v => {
-    const pc = palabras(v.cliente).filter(w => w.length >= 2);
-    if (!pc.length || !pn.length) return false;
-    const contiene = pc.every(w => pn.includes(w));
-    const esParte = pn.every(w => pc.includes(w));
-    // Con un descriptor («tía de Marta»), basta el nombre de pila de la clienta.
-    const nombraSuPila = c !== 'nombre' && pn.includes(pc[0]);
-    return contiene || esParte || nombraSuPila;
-  });
-  if (delCliente.length) return { tipo: 'de_cliente', viajes: delCliente };
-  return c === 'nombre' || c === 'sin_nombre' ? null : { tipo: 'duda' };
+function nombreQueNoSigue(nombre: string | null, e: EntradaValidador, pedir: (n: string) => Decision): Decision | null {
+  if (!nombre) return null;
+  const c = calificarNombreNuevo(nombre);
+  if (c === 'largo') return aclaracion(e, 'V8_nombre_largo');
+  if (c === 'duda') return pedir(nombre);
+  return null;
 }
 
 function preguntarViaje(cands: NegocioCtx[], ev: string | null | undefined, conContenido: boolean, rechazo: string | null): Decision {
@@ -1088,8 +1072,7 @@ function abrirViaje(acc: AccionModelo[], e: EntradaValidador, rechazo: string | 
   const conContenido = acc.some(a => a.accion === 'contenido');
   const recordar = !!e.pendiente;
   const nombre = nombreNuevo(ab, e.texto);
-  const largo = nombreLargo(nombre, e);
-  if (largo) return largo;
+  if (nombre && calificarNombreNuevo(nombre) === 'largo') return aclaracion(e, 'V8_nombre_largo');
   if (ab.nuevo_cliente && !nombre) rechazo ??= 'V8_nombre_no_escrito';
   // «Nuevo», con o sin nombre, solo si el mensaje lo dice («nuevo cliente», «otra clienta»): en la QA real
   // flash-lite abrió «NUEVO Pérez» con un «Pérez» suelto. Si no lo dice, no se abre nada nuevo.
@@ -1100,20 +1083,16 @@ function abrirViaje(acc: AccionModelo[], e: EntradaValidador, rechazo: string | 
         p: 'registrar', interpretacion: { accion: 'abrir_viaje', nuevo: null, con_contenido: conContenido, evidencia: ab.evidencia ?? null }, aviso: TEXTO_PIDE_NOMBRE_NUEVO,
       }, rechazo, recordar);
     }
-    // V8: un «nuevo» con el nombre IDÉNTICO al cliente de un viaje abierto se pregunta.
-    const igual = e.negocios.filter(v => norm(v.cliente) === norm(nombre));
-    if (igual.length) return preguntarViaje(igual, ab.evidencia, conContenido, 'V8_nombre_igual');
-    // NU4: con un cliente abierto dentro, se pregunta por su viaje; si no parece un nombre, se pide
-    // (la caja nueva se abre SIN nombre, como el encabezado de hoy con «nueva reserva»).
-    const no = nombreQueNoCrea(nombre, e);
-    if (no?.tipo === 'de_cliente') return preguntarViaje(no.viajes, ab.evidencia, conContenido, 'V8_nombre_de_cliente_abierto');
-    if (no?.tipo === 'duda') {
+    // V8 (2026-10-03): la misma caja que el encabezado «nuevo X» de hoy. El cliente se crea solo con el «sí»
+    // al resumen, que dice «Cliente nuevo: X» y, si X se parece al cliente de un viaje abierto, lo dice.
+    // Solo números no es un nombre: la caja se abre SIN nombre y se pide (como el encabezado de hoy).
+    if (calificarNombreNuevo(nombre) === 'duda') {
       return ejecutar('bandeja.abrir_viaje', {
         p: 'registrar', interpretacion: { accion: 'abrir_viaje', nuevo: null, con_contenido: conContenido, evidencia: ab.evidencia ?? null }, aviso: textoPideNombreEnDuda(nombre),
       }, 'V8_nombre_en_duda', recordar);
     }
     return ejecutar('bandeja.abrir_viaje', {
-      p: 'registrar', interpretacion: { accion: 'abrir_viaje', nuevo: nombre, con_contenido: conContenido, evidencia: ab.evidencia ?? null }, aviso: avisoNuevo(nombre, conContenido),
+      p: 'registrar', interpretacion: { accion: 'abrir_viaje', nuevo: nombre, con_contenido: conContenido, evidencia: ab.evidencia ?? null }, aviso: avisoNuevo(nombre, conContenido, e.negocios),
     }, rechazo, recordar);
   }
   const { viajes, idAjeno, firma } = viajesDe(ab, e);
@@ -1133,6 +1112,12 @@ function abrirViaje(acc: AccionModelo[], e: EntradaValidador, rechazo: string | 
       return preguntarViaje(cands, ab.evidencia, true, rechazo ?? 'V5_abrir_y_contenido_distintos');
     }
   }
+  // V5 (control de Vera 2026-10-03, V5): el texto nombra dos viajes abiertos distintos («Lina y Marta viajan
+  // juntas»): abrir uno solo de los dos no lo resuelve. Se pregunta.
+  if (viajes.length === 1) {
+    const dos = viajesEnConflicto(e);
+    if (dos.length > 1 && dos.some(v => v.id !== viajes[0].id)) return preguntarViaje(dos, ab.evidencia, conContenido, rechazo ?? 'V5_dos_viajes_en_el_texto');
+  }
   if (viajes.length === 1) {
     const v = viajes[0];
     const mismaCaja = !!e.tanda?.cajaId && e.tanda.cajaId === v.id;
@@ -1150,19 +1135,40 @@ function contenido(acc: AccionModelo[], e: EntradaValidador, rechazo: string | n
   const resueltos = cs.map(a => viajesDe(a, e));
   const unicos = [...new Map(resueltos.filter(r => r.viajes.length === 1).map(r => [r.viajes[0].id, r.viajes[0]])).values()];
   const recordar = !!e.pendiente;
+  // NU8 (control de Vera 2026-10-03): un «nuevo …» con una tanda abierta nunca es contenido de la caja de
+  // otro cliente. Si el código de hoy lo lee como encabezado, se hace lo mismo que él (la caja nueva, con
+  // nombre o pidiéndolo); si no (más largo que el tope), no se anota en ninguna caja y se pregunta.
+  const nv = e.tanda?.abierta ? leerNuevo(e.texto) : null;
+  if (nv) {
+    const c = calificarNombreNuevo(nv.cliente);
+    const ev = cs[0].evidencia ?? null;
+    if (c === 'nombre') {
+      return ejecutar('bandeja.abrir_viaje', {
+        p: 'registrar', interpretacion: { accion: 'abrir_viaje', nuevo: nv.cliente, evidencia: ev }, aviso: avisoNuevo(nv.cliente!, false, e.negocios),
+      }, rechazo ?? 'V8_nuevo_no_es_contenido', recordar);
+    }
+    if (c === 'sin_nombre' || c === 'duda') {
+      return ejecutar('bandeja.abrir_viaje', {
+        p: 'registrar', interpretacion: { accion: 'abrir_viaje', nuevo: null, evidencia: ev },
+        aviso: c === 'duda' ? textoPideNombreEnDuda(nv.cliente ?? '') : TEXTO_PIDE_NOMBRE_NUEVO,
+      }, rechazo ?? 'V8_nuevo_no_es_contenido', recordar);
+    }
+    return decir('bandeja.nuevo_no_anotado', TEXTO_NUEVO_NO_ANOTADO, rechazo ?? 'V8_nuevo_no_es_contenido', recordar);
+  }
   // Dos clientes en un escrito: se registra una vez, marcado `varios`; el resumen ya lo separa.
   if (cs.length > 1 && unicos.length > 1) {
     return ejecutar('bandeja.contenido_varios', {
       p: 'registrar', interpretacion: { accion: 'contenido', varios: unicos.map(v => v.id), evidencia: cs.map(c => c.evidencia).join(' · ') }, aviso: null,
     }, rechazo, recordar);
   }
+  // E7 (control de Vera 2026-10-02b) y V1 (2026-10-03): el texto nombra dos viajes abiertos distintos («el de
+  // Cartagena de Marta ahora es a Cancún», y Cancún es el viaje de otra clienta). Ni una sola referencia ni
+  // ninguna (el contenido caería en la caja de la tanda, que puede ser de un tercero) lo resuelven: se pregunta.
+  const dos = viajesEnConflicto(e);
+  if (dos.length > 1) return preguntarViaje(dos, cs[0].evidencia, true, rechazo ?? 'V5_dos_viajes_en_el_texto');
   // Un solo contenido que nombra un viaje distinto de la caja activa: es encabezado y contenido a la vez.
   if (cs.length === 1 && resueltos[0].conRef) {
     const r = resueltos[0];
-    // E7 (control de Vera 2026-10-02b): el texto nombra dos viajes abiertos distintos («el de Cartagena de
-    // Marta ahora es a Cancún», y Cancún es el viaje de otra clienta). Una sola referencia no lo resuelve.
-    const dos = r.viajes.length === 1 ? viajesEnConflicto(e) : [];
-    if (dos.length > 1) return preguntarViaje(dos, cs[0].evidencia, true, rechazo ?? 'V5_dos_viajes_en_el_texto');
     if (r.viajes.length === 1 && r.viajes[0].id !== e.tanda?.cajaId) {
       return ejecutar('bandeja.abrir_viaje', {
         p: 'registrar', interpretacion: { accion: 'abrir_viaje', viaje_id: r.viajes[0].id, con_contenido: true, evidencia: cs[0].evidencia ?? null },
@@ -1220,11 +1226,10 @@ function mover(a: AccionModelo, e: EntradaValidador, rechazo: string | null): De
   const n = typeof a.n === 'number' && Number.isInteger(a.n) && a.n > 0 ? a.n : null;
   if (!n) return aclaracion(e, 'V4_mover_sin_numero');
   const nombre = nombreNuevo(a, e.texto);
-  const largo = nombreLargo(nombre, e);
-  if (largo) return largo;
+  const no = nombreQueNoSigue(nombre, e, () => aclaracion(e, 'V8_nombre_en_duda'));
+  if (no) return no;
   if (nombre) {
-    const no = nombreQueNoCrea(nombre, e);
-    if (no) return aclaracion(e, no.tipo === 'de_cliente' ? 'V8_nombre_de_cliente_abierto' : 'V8_nombre_en_duda');
+    // El resumen se vuelve a mostrar con «Cliente nuevo: X» (y si se parece a un viaje abierto): el «sí» es ahí.
     const canonico = `el ${n} es nuevo ${nombre}`;
     return ejecutar('bandeja.mover', { p: 'responder_bandeja', canonico, interpretacion: { accion: 'mover', nuevo: nombre, canonico, evidencia: a.evidencia ?? null }, aviso: null }, rechazo);
   }
@@ -1352,14 +1357,11 @@ function responder(a: AccionModelo, e: EntradaValidador, rechazo: string | null)
       if (opcion === 'descartar') return descartarPregunta(a, e, rechazo);
       const nombre = (a.nuevo_cliente || a.ref?.cliente) && todoEscrito(a.nuevo_cliente || a.ref?.cliente, e.texto) ? String(a.nuevo_cliente || a.ref?.cliente).trim() : null;
       if (!nombre) return decir('bandeja.pide_nombre', TEXTO_PIDE_NOMBRE_NUEVO, rechazo ?? 'V8_sin_nombre');
-      const largo = nombreLargo(nombre, e);
-      if (largo) return largo;
-      // La respuesta a «¿Cómo se llama?»: una sola palabra vale (como `esNombreNuevo`), un descriptor no.
-      const no = nombreQueNoCrea(nombre, e, { unaPalabraVale: true });
-      if (no?.tipo === 'de_cliente') return decir('bandeja.nuevo_igual', textoNuevoIgual(no.viajes.map(viajeAbierto)), 'V8_nombre_de_cliente_abierto');
-      if (no?.tipo === 'duda') return decir('bandeja.pide_nombre', textoPideNombreEnDuda(nombre), 'V8_nombre_en_duda');
+      const no = nombreQueNoSigue(nombre, e, n => decir('bandeja.pide_nombre', textoPideNombreEnDuda(n), 'V8_nombre_en_duda'));
+      if (no) return no;
+      // La caja toma el nombre y el «sí» es al resumen; el del contacto se vuelve a mostrar antes de crearlo.
       if (p.capa === 'tanda_nombre') {
-        return ejecutar('bandeja.nombre', { p: 'registrar', interpretacion: { accion: 'nombre', nuevo: nombre, evidencia: a.evidencia ?? null }, aviso: avisoNuevo(nombre, false) }, rechazo);
+        return ejecutar('bandeja.nombre', { p: 'registrar', interpretacion: { accion: 'nombre', nuevo: nombre, evidencia: a.evidencia ?? null }, aviso: avisoNuevo(nombre, false, e.negocios) }, rechazo);
       }
       const canonico = `NUEVO ${nombre}`;
       return ejecutar('bandeja.responder', { p: 'responder_bandeja', canonico, interpretacion: { accion: 'responder', nuevo: nombre, canonico, evidencia: a.evidencia ?? null }, aviso: null }, rechazo);
@@ -1416,19 +1418,21 @@ function responderLista(a: AccionModelo, opcion: string, e: EntradaValidador, re
   const p = e.pendiente!;
   const enLista = p.opciones.filter(o => o.negocioId);
   if (opcion === 'descartar') return descartarPregunta(a, e, rechazo);
+  // El «sí» a «¿Creo el cliente nuevo «X»?» (que se contesta por la misma vía): el código de hoy lo lee.
+  // A «¿A qué viaje van?» un «sí» no elige nada y el código vuelve a preguntar.
+  if (opcion === 'si' && p.capa === 'entrega') {
+    return ejecutar('bandeja.responder', { p: 'responder_bandeja', canonico: 'sí', interpretacion: { accion: 'responder', canonico: 'sí', evidencia: a.evidencia ?? null }, aviso: null }, rechazo);
+  }
   if (opcion === 'nuevo' || a.nuevo_cliente) {
     const nombre = nombreNuevo({ ...a, opcion: 'nuevo' }, e.texto);
     if (!nombre) return decir('bandeja.pide_nombre', TEXTO_PIDE_NOMBRE_NUEVO, rechazo ?? 'V8_sin_nombre');
-    const largo = nombreLargo(nombre, e);
-    if (largo) return largo;
-    const igual = e.negocios.filter(v => norm(v.cliente) === norm(nombre));
-    if (igual.length) return decir('bandeja.nuevo_igual', textoNuevoIgual(igual.map(viajeAbierto)), 'V8_nombre_igual');
-    const no = nombreQueNoCrea(nombre, e);
-    if (no?.tipo === 'de_cliente') return decir('bandeja.nuevo_igual', textoNuevoIgual(no.viajes.map(viajeAbierto)), 'V8_nombre_de_cliente_abierto');
-    if (no?.tipo === 'duda') return decir('bandeja.pide_nombre', textoNombreNuevoEnDuda(nombre), 'V8_nombre_en_duda');
+    const no = nombreQueNoSigue(nombre, e, n => decir('bandeja.pide_nombre', textoPideNombreEnDuda(n), 'V8_nombre_en_duda'));
+    if (no) return no;
     if (p.capa === 'tanda_lista') {
-      return ejecutar('bandeja.abrir_viaje', { p: 'registrar', interpretacion: { accion: 'abrir_viaje', nuevo: nombre, evidencia: a.evidencia ?? null }, aviso: avisoNuevo(nombre, false) }, rechazo);
+      return ejecutar('bandeja.abrir_viaje', { p: 'registrar', interpretacion: { accion: 'abrir_viaje', nuevo: nombre, evidencia: a.evidencia ?? null }, aviso: avisoNuevo(nombre, false, e.negocios) }, rechazo);
     }
+    // «¿A qué viaje van?»: «NUEVO X» va al código de hoy, que pregunta «¿Creo el cliente nuevo «X»?» (con
+    // los viajes parecidos) y no crea nada sin el «sí».
     const canonico = `NUEVO ${nombre}`;
     return ejecutar('bandeja.responder', { p: 'responder_bandeja', canonico, interpretacion: { accion: 'responder', nuevo: nombre, canonico, evidencia: a.evidencia ?? null }, aviso: null }, rechazo);
   }
@@ -1514,9 +1518,12 @@ function gastos(acc: AccionModelo[], e: EntradaValidador, rechazo: string | null
   // y el bot pregunta el monto, como el código de hoy.
   // O2 (control de Vera 2026-10-02b): una PREGUNTA («¿cómo va la plata de Arena?») tampoco abre un gasto
   // aunque el modelo le ponga negocio: sin monto escrito, va al texto del rol.
+  // O1–O3 (control de Vera 2026-10-03): una pregunta sin signo ni palabra interrogativa al comienzo
+  // («Hola, me cuentas cómo va lo de Arena») tampoco. La regla es la inversa: un rol restringido sin monto
+  // escrito NO abre gasto, salvo que el mensaje reporte un gasto con su verbo («pagué el almuerzo»,
+  // `esReporteDeGasto`), que es la excepción que pidió Mauricio (el bot pregunta el monto, como hoy).
   const capaDeGasto = capa === 'gasto_monto' || capa === 'gasto_negocio' || capa === 'soporte';
-  if (!capaDeGasto && !rolPermite(e.rol, 'consulta') && !brutos.some(conMonto)
-    && (esPreguntaEscrita(e.texto) || (brutos.every(g => !negocioDelGasto(g, e)) && !esReporteDeGasto(e.texto)))) {
+  if (!capaDeGasto && !rolPermite(e.rol, 'consulta') && !brutos.some(conMonto) && !esReporteDeGasto(e.texto)) {
     return decir('rol.consulta', textoRol(e.rol), 'V3_rol_gasto_vacio');
   }
   // V10: un pedazo sin monto al lado de uno con monto es el mismo gasto partido en dos.
@@ -1608,6 +1615,8 @@ function corregirGasto(acc: AccionModelo[], e: EntradaValidador, rechazo: string
 
 export const TEXTO_NOTA_INTERNA = 'No lo guardo: en la historia solo va lo que pide el cliente.';
 export const TEXTO_QUE_HAGO = '¿Qué hago con esto? ¿Es algo que pidió el cliente, un gasto o una pregunta para mí?';
+/** Un «nuevo …» que no es un encabezado (más largo que el tope) con una tanda abierta: no se anota en ninguna caja. */
+export const TEXTO_NUEVO_NO_ANOTADO = '¿Es un cliente nuevo? Escribe NUEVO y su nombre (hasta 4 palabras), o el código del viaje.\nNo lo anoté en ninguna caja.';
 export const TEXTO_NO_ENCONTRE_VIAJE = '¿Es un cliente nuevo? No encontré ese viaje entre los abiertos.\nEscribe NUEVO y el nombre, o el código del viaje.';
 export const TEXTO_CIERRA_DESPUES = 'Anotado en la tanda. Para cerrarla, escribe «listo».';
 export const TEXTO_GASTO_EN_COLA = 'Lo anoto y te lo muestro cuando termines lo que está en curso.';
@@ -1640,11 +1649,6 @@ export function textoPreguntaViaje(texto: string, candidatos: ReadonlyArray<Viaj
   return `¿De qué viaje es${t ? ` «${t}»` : ''}? ${candidatos.map((v, i) => `${i + 1}. ${lineaCaja(v)}`).join(' · ')}\nResponde con el número, NUEVO y el nombre, o DESCARTAR.`;
 }
 
-/** V8: «nuevo» con el nombre exacto de un cliente con viaje abierto. */
-export function textoNuevoIgual(viajes: ReadonlyArray<ViajeAbierto>): string {
-  return `¿Es ${viajes.map(lineaCaja).join(' o ')}? Ya hay un viaje abierto con ese nombre.\nResponde con el código, o NUEVO y el nombre completo si es otra persona.`;
-}
-
 /** H2, caso 1: se descartó solo lo que preguntaba la lista; la tanda sigue. */
 export function textoDescartePregunta(tandaQueSigue: string | null): string {
   return tandaQueSigue
@@ -1673,7 +1677,7 @@ export function textosNuevos(): string[] {
     TEXTO_NOTA_INTERNA, TEXTO_QUE_HAGO, TEXTO_NO_ENCONTRE_VIAJE, TEXTO_CIERRA_DESPUES, TEXTO_GASTO_EN_COLA,
     textoFueraDeAlcance('cambiar un gasto ya guardado'), textoFueraDeAlcance(null),
     textoRol('operator'), textoRol('contador'), textoRol('read_only'),
-    textoPedirAclaracionCon(p), textoSiguePendiente(p), textoPreguntaViaje('Pérez', [v, v]), textoNuevoIgual([v]),
+    textoPedirAclaracionCon(p), textoSiguePendiente(p), textoPreguntaViaje('Pérez', [v, v]), TEXTO_NUEVO_NO_ANOTADO,
     textoDescartePregunta('Carolina Ruiz'), textoDescartePregunta(null), textoDudaDescarte(p, 'Carolina Ruiz'), textoDudaDescarte(p, null),
     textoGastoDeLaCola(1, 3), avisoPin({ ...v, alias: 'n1' }, true), avisoNuevo('Daniel Pérez', true),
   ];

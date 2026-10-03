@@ -454,14 +454,14 @@ describe('despacho en la bandeja', () => {
     sinEscriturasNuevas(db);
   });
 
-  it('control de Vera 2 · NU4: «la tía de <clienta abierta>» no abre una caja NUEVA con ese nombre: pregunta por el viaje de la clienta', async () => {
+  it('control de Vera 3 · PA3: «la tía de <clienta abierta>» abre la caja «Cliente nuevo» (se crea solo con el «sí» al resumen) y el acuse dice el viaje parecido', async () => {
     const db = baseFalsa({}, { wa_bandeja_registrar_mensaje: [{ accion: 'abrir', entrega: 'e1', mensajes: 1 }] });
     const m = escrito('nueva, la tía de Carolina Ruiz también viaja');
     expect(await atenderEscrito(db, u(), m, deps({ acciones: [{ accion: 'abrir_viaje', evidencia: 'nueva, la tía de Carolina Ruiz', nuevo_cliente: 'tía de Carolina Ruiz' }] }))).toEqual({ atendido: true });
     const upd = db.ops.find(o => o.tabla === 'wa_bandeja_mensajes' && o.op === 'update')!;
-    expect(upd.payload).toMatchObject({ interpretacion: { accion: 'preguntar_viaje', candidatos: ['v11'] } });
-    expect(JSON.stringify(db.ops)).not.toContain('NUEVO tía');
-    expect(enviados.join('\n')).not.toContain('📌 NUEVO');
+    expect(upd.payload).toMatchObject({ interpretacion: { accion: 'abrir_viaje', nuevo: 'tía de Carolina Ruiz' } });
+    expect(enviados).toEqual(['📌 Cliente nuevo: tía de Carolina Ruiz. Lo creo solo cuando respondas SÍ al resumen.\nYa hay un viaje de Carolina Ruiz (T1 26 11). Si es para ese, escribe T1 26 11.']);
+    // Nada se crea en el acto: ni contacto ni negocio.
     sinEscriturasNuevas(db);
   });
 
