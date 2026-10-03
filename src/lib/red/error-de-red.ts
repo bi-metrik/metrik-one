@@ -115,28 +115,38 @@ export function mensajeDeFallaDeCarga(error: unknown, porDefecto: string): strin
   return esErrorDeRed(error) ? MENSAJE_SIN_CONEXION : porDefecto
 }
 
-/** Lo que dice la pantalla de error cuando NO recargo sola (o la guarda ya se gasto). */
+/** Lo que dice la pantalla de error cuando ya no sigue intentando sola. */
 export interface TextoPantallaDeError {
   titulo: string
   cuerpo: string
 }
 
-/** Para un error de red: es la señal, no una pestaña vieja ni un bug. */
-export const PANTALLA_SIN_CONEXION: TextoPantallaDeError = {
-  titulo: 'Se perdió la conexión',
-  cuerpo: 'Revisa la señal y recarga la página.',
+/**
+ * Error de red con el tope de reintentos agotado (`auto-recarga.ts`). No dice "conexión" ni
+ * "revisa la señal": el 2026-10-03 se midio que la persona SI tenia internet (la ruta de su
+ * ISP hacia Vercel perdia paquetes), y culparla era falso. Dice lo que se sabe.
+ */
+export const PANTALLA_TARDANDO: TextoPantallaDeError = {
+  titulo: 'Esta página está tardando más de lo normal',
+  cuerpo: 'Lo intentamos varias veces y todavía no carga. Prueba recargar en un momento.',
 }
+
+/**
+ * Lo unico que se muestra mientras se espera a que vuelva la red, y SOLO cuando el navegador
+ * dice que no hay (`navigator.onLine === false`). Va debajo de la animacion de carga.
+ */
+export const TEXTO_SIN_INTERNET = 'Sin internet. Seguimos apenas vuelva.'
 
 const CUERPO_PESTANA_VIEJA =
   'Casi siempre es una pestaña que llevaba mucho tiempo abierta. Recargar la deja al día y suele bastar.'
 
 /**
- * Texto de `error.tsx` / `global-error.tsx`. Nacio del log del 2026-10-03: un iPhone con
- * `Load failed` (guarda de 60 s ya gastada) veia "Casi siempre es una pestaña que llevaba
- * mucho tiempo abierta", que era falso. Si fue la red se dice; la "pestaña vieja" queda
- * solo para lo que no es de red. `tituloOtro` es el titulo propio de cada pantalla.
+ * Texto de `error.tsx` / `global-error.tsx` cuando ya no intentan solas. Si fue la red:
+ * `PANTALLA_TARDANDO` (sin culpar a la señal). La "pestaña vieja" queda solo para lo que no
+ * es de red (nacio de un iPhone con `Load failed` que la veia, y era falso). `tituloOtro` es
+ * el titulo propio de cada pantalla.
  */
 export function textoPantallaDeError(error: unknown, tituloOtro: string): TextoPantallaDeError {
-  if (esErrorDeRed(error)) return PANTALLA_SIN_CONEXION
+  if (esErrorDeRed(error)) return PANTALLA_TARDANDO
   return { titulo: tituloOtro, cuerpo: CUERPO_PESTANA_VIEJA }
 }

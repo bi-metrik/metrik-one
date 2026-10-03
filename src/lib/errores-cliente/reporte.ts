@@ -36,6 +36,17 @@ const esquemaReporte = z.object({
    * `false` = la persona SI vio "Algo se rompió". Es lo que hay que contar.
    */
   autoRecarga: z.boolean().optional(),
+  // Desde 2026-10-03 la recuperacion de un error de red es una escalera (reintento suave,
+  // recargas con espera creciente, tope por ruta; ver `lib/red/auto-recarga.ts`). Todo
+  // opcional: un bundle viejo que no los manda sigue entrando.
+  /** Recargas automaticas ya hechas en la ruta (ventana de 3 min). */
+  intento: z.number().int().min(0).max(100).optional(),
+  /** Lo que decidio la pantalla: `agotado` = la persona vio "está tardando más de lo normal". */
+  accion: z.enum(['suave', 'recarga', 'esperar-red', 'agotado', 'ninguna']).optional(),
+  /** `true` = cierre del episodio: la pagina se recupero sola en ese `intento`. */
+  recuperado: z.boolean().optional(),
+  /** `navigator.onLine` al decidir. */
+  enLinea: z.boolean().optional(),
 })
 
 export type ReporteErrorCliente = z.infer<typeof esquemaReporte>
