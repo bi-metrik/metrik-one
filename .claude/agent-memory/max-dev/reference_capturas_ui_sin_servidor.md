@@ -23,9 +23,8 @@ son los componentes reales del repo, los datos son inventados.
    `renderToStaticMarkup(React.createElement(mod.default, {}))` y escribe el archivo con
    `<link>` al CSS compilado y `@font-face` con `file://` a `src/app/fonts/*.woff2`
    (definiendo `--font-schibsted`, `--font-newsreader`, `--font-martian-mono`).
-   ⚠️ **`<style>.sp{display:none!important}</style>`**: el `Splash` del layout raíz es un
-   overlay a pantalla completa que solo se apaga con JS. (Si se renderiza solo el subárbol
-   del `AppShell`, como en la 2ª pasada, el Splash no entra y no hace falta.)
+   (El `Splash` del layout raíz, que tapaba todo hasta hidratar, se quitó el 2026-10-03:
+   ya no hace falta ocultarlo.)
 4. **Foto:** el chromium de Playwright, por CLI, sin CDP ni la librería:
    `~/.cache/ms-playwright/chromium-1234/chrome-linux64/chrome --headless --disable-gpu
    --no-sandbox --hide-scrollbars --screenshot=x.png --window-size=1440,H archivo.html`.
