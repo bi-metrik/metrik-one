@@ -148,6 +148,13 @@ describe('atajoExacto: lo exacto sigue por el código de hoy', () => {
     expect(atajoExacto('3', { bandeja: null, pendiente: sesion('awaiting_selection') })).toBe('respuesta_exacta');
   });
 
+  it('«nueva …» por encima del tope de palabras no es atajo: va al modelo (I3 del control de Vera)', () => {
+    expect(atajoExacto('nueva cotización con hotel 4 estrellas', { bandeja: B, pendiente: LISTA_ENTREGA })).toBeNull();
+    for (const t of ['nuevo', 'cliente nuevo', 'nueva Daniela Rojas', 'nuevo: Juan Pablo Gómez Ruiz']) {
+      expect(atajoExacto(t, { bandeja: B, pendiente: LISTA_ENTREGA })).toBe('respuesta_exacta');
+    }
+  });
+
   it('un encabezado exacto (por código, por nombre o «nuevo» con nombre) es atajo; uno aproximado no', () => {
     expect(atajoExacto('T1 26 9', { bandeja: B, pendiente: null, encabezado: { tipo: 'viaje', viaje: va(V9), por: 'codigo' } })).toBe('encabezado_exacto');
     expect(atajoExacto('nuevo Ana Ríos', { bandeja: B, pendiente: null, encabezado: { tipo: 'nuevo', cliente: 'Ana Ríos' } })).toBe('encabezado_exacto');
@@ -436,6 +443,20 @@ describe('V8: «nuevo» con nombre', () => {
   it('un nombre que no está escrito no se toma; sin nombre se pide', () => {
     const d = ejec(validar(una({ accion: 'responder', evidencia: 'es una clienta nueva', opcion: 'nuevo', nuevo_cliente: 'Marta Gil' }), trappvel('es una clienta nueva', { pendiente: LISTA_ENTREGA })));
     expect(d.paso).toEqual({ p: 'decir', texto: '¿Cómo se llama el cliente nuevo? Escríbeme su nombre, o DESCARTAR. Hasta entonces no asigno lo que sigue.' });
+  });
+
+  it('un nombre por encima del tope (4 palabras) nunca crea un cliente: se vuelve a mostrar la pregunta', () => {
+    const texto = 'nueva cotización con hotel 4 estrellas';
+    const enLista = ejec(validar(una({ accion: 'responder', evidencia: texto, opcion: 'nuevo', nuevo_cliente: 'cotización con hotel 4 estrellas' }), trappvel(texto, { pendiente: LISTA_ENTREGA })));
+    expect(enLista.rechazo).toBe('V8_nombre_largo');
+    expect(enLista.paso.p).toBe('decir');
+    expect((enLista.paso as { texto: string }).texto).toMatch(/^No te entendí\. Tanda de las 09:28/);
+    const encabezado = ejec(validar(una({ accion: 'abrir_viaje', evidencia: texto, nuevo_cliente: 'cotización con hotel 4 estrellas' }), trappvel(texto)));
+    expect(encabezado.rechazo).toBe('V8_nombre_largo');
+    expect(encabezado.paso.p).toBe('decir');
+    // Cuatro palabras caben, como en el encabezado.
+    const cabe = ejec(validar(una({ accion: 'responder', evidencia: 'nuevo: Juan Pablo Gómez Ruiz', opcion: 'nuevo', nuevo_cliente: 'Juan Pablo Gómez Ruiz' }), trappvel('nuevo: Juan Pablo Gómez Ruiz', { pendiente: LISTA_ENTREGA })));
+    expect(cabe.paso).toMatchObject({ p: 'responder_bandeja', canonico: 'NUEVO Juan Pablo Gómez Ruiz' });
   });
 
   it('un nombre idéntico al cliente de un viaje abierto se pregunta', () => {

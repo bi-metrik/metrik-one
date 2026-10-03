@@ -25,6 +25,7 @@ import {
   LO_LLENA_AGENCIA,
   fraseNombraNumero,
   leerNuevo,
+  nombreNuevoCabe,
   marcaDe,
   mayusculasDeViaje,
   nombreDeViaje,
@@ -182,8 +183,10 @@ export function interpretarRespuestaNegocio(texto: string, opciones: ReadonlyArr
     return i >= 0 && i < opciones.length ? { tipo: 'existente', negocio_id: opciones[i].id } : { tipo: 'no_entendida' };
   }
   // «nuevo X», «cliente nuevo X», «otro cliente» (sin nombre: se pide), como en el encabezado (`leerNuevo`).
+  // Con el mismo tope de palabras del encabezado: «nueva cotización con hotel 4 estrellas» no es un
+  // cliente nuevo; no se entiende y el bot vuelve a preguntar con la lista (control de Vera, I3).
   const nuevo = leerNuevo(bruto);
-  if (nuevo) return { tipo: 'nuevo', cliente: nuevo.cliente };
+  if (nuevo) return nombreNuevoCabe(nuevo.cliente) ? { tipo: 'nuevo', cliente: nuevo.cliente } : { tipo: 'no_entendida' };
   const c = codigoCompacto(bruto);
   if (c) {
     const enLista = opciones.find(o => codigoCompacto(o.codigo) === c);

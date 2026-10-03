@@ -750,6 +750,29 @@ describe('v2 · N2: «¿A qué viaje van?» se contesta con cada forma que el bo
     expect(negocioDe('VALERIA PRUEBA5')).toMatchObject({ nombre: 'Viaje de Valeria Prueba5' });
   });
 
+  it('«nueva cotización con hotel 4 estrellas» (pasa el tope del nombre): no crea cliente, vuelve a preguntar con la lista y no es contenido (control de Vera, I3)', async () => {
+    await preguntaDeViaje();
+    const contactosAntes = t.contactos?.length ?? 0;
+    const negociosAntes = t.negocios.length;
+    // Con una caja abierta mientras tanto: la frase tampoco se vuelve contenido de esa caja.
+    await llega('perdón, son 3 adultos', { enviado: 6, reenviado: true });
+    await llega('nueva cotización con hotel 4 estrellas', { enviado: 9 });
+    expect(t.wa_bandeja_mensajes.find(m => m.cuerpo === 'nueva cotización con hotel 4 estrellas')).toMatchObject({ papel: 'respuesta_cliente' });
+    colaModelo = [pedido()];
+    await cron(60);
+    expect(textos().at(-1)).toContain('No entendí «nueva cotización con hotel 4 estr');
+    expect(textos().at(-1)).toContain('1. SAN ANDRÉS DIC · Pedro Prueba5 (P 26 2)');
+    expect(negocioDe('COTIZACION CON HOTEL 4 ESTRELLAS')).toBeFalsy();
+    expect(t.negocios.length).toBe(negociosAntes);
+    expect(t.contactos?.length ?? 0).toBe(contactosAntes);
+    expect(await ent.preguntaAbierta(db as never, WS, TEL)).toMatchObject({ espera: 'viaje' });
+    // La re-pregunta se sigue contestando como siempre.
+    await llega('nueva Daniela Rojas', { enviado: 100 });
+    colaModelo = [pedido()];
+    await cron(160);
+    expect(negocioDe('DANIELA ROJAS')).toBeTruthy();
+  });
+
   it('«DESCARTAR»: descarta la tanda en el acto (regla 4, 2026-10-02)', async () => {
     await preguntaDeViaje();
     await llega('DESCARTAR', { enviado: 9 });

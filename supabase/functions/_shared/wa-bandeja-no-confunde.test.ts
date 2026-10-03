@@ -13,6 +13,7 @@ import {
   armarPlan,
   armarSegmentos,
   esRespuestaA,
+  pareceRespuesta,
   leerEleccion,
   resolverEncabezado,
   respuestaAlEncabezado,
@@ -20,7 +21,7 @@ import {
   type MensajeViaje,
   type ViajeAbierto,
 } from './wa-viajes-reglas.ts';
-import { leerNuevo } from './wa-entendimiento-reglas.ts';
+import { leerNuevo, MAX_PALABRAS_NOMBRE_NUEVO, nombreNuevoCabe } from './wa-entendimiento-reglas.ts';
 import { interpretarRespuestaNegocio } from './wa-carga-reglas.ts';
 import { esDescartarTodo } from './wa-bandeja-reglas.ts';
 
@@ -66,6 +67,42 @@ describe('regla 2 · «nuevo» en cualquier forma', () => {
   it('la misma lectura contesta «¿A qué viaje van?» y «¿cuál contacto?»', () => {
     expect(interpretarRespuestaNegocio('cliente nuevo Daniel Pérez', [])).toEqual({ tipo: 'nuevo', cliente: 'Daniel Pérez' });
     expect(interpretarRespuestaNegocio('otro cliente', [])).toEqual({ tipo: 'nuevo', cliente: null });
+  });
+});
+
+describe('regla 2b · «nuevo …» como respuesta a la lista tiene el tope del encabezado (control de Vera, I3)', () => {
+  const OPS = [{ id: 'lina', codigo: 'L1 26 1', cliente: 'LINA PÉREZ', destino: 'CARTAGENA' }];
+
+  it('una sola constante: el encabezado y la respuesta a la lista cortan en el mismo número de palabras', () => {
+    expect(MAX_PALABRAS_NOMBRE_NUEVO).toBe(4);
+    expect(nombreNuevoCabe('Ana María Gómez Ruiz')).toBe(true);
+    expect(nombreNuevoCabe('cotización con hotel 4 estrellas')).toBe(false);
+    expect(nombreNuevoCabe(null)).toBe(true);
+  });
+
+  it.each([
+    'nueva cotización con hotel 4 estrellas',
+    'nuevo plan para la familia de cinco personas',
+    'Nueva solicitud: tiquetes y hotel para diciembre',
+  ])('«%s» no crea un cliente: no se entiende y el bot vuelve a preguntar con la lista', texto => {
+    expect(interpretarRespuestaNegocio(texto, OPS)).toEqual({ tipo: 'no_entendida' });
+    expect(interpretarRespuestaNegocio(texto, [])).toEqual({ tipo: 'no_entendida' });
+    // Tampoco es un encabezado (ya no lo era): no abre «NUEVO cotización con hotel…».
+    expect(resolverEncabezado(texto, [LINA])).toBeNull();
+    // Sigue teniendo forma de respuesta: contesta la pregunta (se re-pregunta), no queda como contenido.
+    expect(pareceRespuesta(texto)).toBe(true);
+    expect(esRespuestaA('viaje', texto)).toBe(true);
+  });
+
+  it.each([
+    ['nuevo', null],
+    ['cliente nuevo', null],
+    ['nueva Daniela Rojas', 'Daniela Rojas'],
+    ['nuevo: Juan Pablo Gómez Ruiz', 'Juan Pablo Gómez Ruiz'],
+    ['NUEVO Ana María Gómez Ruiz', 'Ana María Gómez Ruiz'],
+  ])('«%s» sigue igual: NUEVO %s', (texto, cliente) => {
+    expect(interpretarRespuestaNegocio(texto, OPS)).toEqual({ tipo: 'nuevo', cliente });
+    expect(resolverEncabezado(texto, [LINA])).toEqual({ tipo: 'nuevo', cliente });
   });
 });
 
