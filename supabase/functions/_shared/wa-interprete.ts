@@ -243,6 +243,8 @@ async function atender(
   const decision = validar(r.json, {
     texto, bandeja: enBandeja, rol: user.role, pendiente: lec.pendiente, negocios: lec.negocios,
     tanda: lec.tanda ? { abierta: true, nombre: lec.tanda.nombre, cajaId: lec.tanda.cajaViajeId } : null,
+    // Los nombres del equipo: una firma («Tatiana») nunca resuelve un viaje (control de Vera, E1).
+    equipo: cand?.equipo ?? [],
   });
   if (decision.tipo === 'fallback') {
     await telemetria(base, { resultado: 'fallback_esquema', accion: enBandeja ? 'bandeja.fallback' : 'bot.fallback', propuesta: r.json, rechazo: decision.rechazo, r });

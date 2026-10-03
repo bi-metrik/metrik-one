@@ -387,6 +387,15 @@ describe('despacho en el bot', () => {
     expect(espias.handleConsulta).not.toHaveBeenCalled();
   });
 
+  it('control de Vera · un operador que pregunta (sin consulta en su esquema) y un contador que pide registrar: el texto de su rol', async () => {
+    await atenderEscrito(baseFalsa(), usuario({ role: 'operator' }), escrito('¿cuánto llevamos gastado este mes?'), deps({ acciones: [{ accion: 'gasto', evidencia: 'cuánto llevamos gastado' }] }));
+    expect(enviados).toEqual(['Con tu rol solo puedes registrar gastos y actividades de tus negocios.']);
+    expect(espias.handleGasto).not.toHaveBeenCalled();
+    enviados.length = 0;
+    await atenderEscrito(baseFalsa(), usuario({ role: 'contador' }), escrito('registra un gasto de 50 mil'), deps({ acciones: [{ accion: 'acuse', evidencia: 'registra un gasto de 50 mil' }] }));
+    expect(enviados).toEqual(['Tu rol es de consulta. Para registrar movimientos pídele apoyo a tu admin.']);
+  });
+
   it('un rol restringido recibe el texto de su rol y nada se ejecuta', async () => {
     await atenderEscrito(baseFalsa(), usuario({ role: 'contador' }), escrito('pagué 20 mil de taxi'), deps({ acciones: [{ accion: 'gasto', evidencia: 'pagué 20 mil de taxi', monto: 20000 }] }));
     expect(enviados).toEqual(['Tu rol es de consulta. Para registrar movimientos pídele apoyo a tu admin.']);
@@ -419,6 +428,20 @@ describe('despacho en la bandeja', () => {
     expect(upd.payload).toEqual({ interpretacion: { accion: 'abrir_viaje', viaje_id: 'v14', con_contenido: false, evidencia: 'lo de Cartagena', modelo: 'gemini-2.5-flash' } });
     expect(upd.filtros).toContain(`eq:"wa_message_id",${JSON.stringify(m.wa_message_id)}`);
     expect(enviados).toEqual(['📌 Lina Pérez (T1 26 14)']);
+    sinEscriturasNuevas(db);
+  });
+
+  it('control de Vera · E1: el equipo del workspace llega al validador; la firma no abre el viaje de la clienta homónima', async () => {
+    espias.candidatosDeEncabezado.mockResolvedValue({ viajes: [...V, { id: 'v20', codigo: 'T1 26 20', cliente: 'TATIANA SALAZAR', destino: 'MEDELLÍN' }], equipo: ['Tatiana Quiroga'] });
+    const db = baseFalsa({}, { wa_bandeja_registrar_mensaje: [{ accion: 'abrir', entrega: 'e1', mensajes: 1 }] });
+    const m = escrito('Tatiana: lo de Cartagena, quieren hotel con piscina');
+    expect(await atenderEscrito(db, u(), m, deps({ acciones: [
+      { accion: 'abrir_viaje', evidencia: 'Tatiana', ref: { cliente: 'Tatiana' } },
+      { accion: 'contenido', evidencia: 'lo de Cartagena, quieren hotel con piscina', ref: { destino: 'Cartagena' } },
+    ] }))).toEqual({ atendido: true });
+    const upd = db.ops.find(o => o.tabla === 'wa_bandeja_mensajes' && o.op === 'update')!;
+    expect(upd.payload).toMatchObject({ interpretacion: { accion: 'abrir_viaje', viaje_id: 'v14', con_contenido: true } });
+    expect(enviados).toEqual(['📌 Lina Pérez (T1 26 14) · anotado']);
     sinEscriturasNuevas(db);
   });
 

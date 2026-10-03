@@ -612,6 +612,138 @@ describe('H2: con una pregunta pendiente y una tanda abierta a la vez, nada se d
   });
 });
 
+// ── Ajustes del control sellado de Vera (2026-10-02) ────────────────────────
+
+describe('control de Vera · E1: el nombre de pila de alguien del equipo nunca resuelve un viaje (V5/V6)', () => {
+  // Una clienta con el mismo nombre de pila que alguien del equipo (nombres inventados).
+  const VT: NegocioCtx = { alias: 'n20', id: 'v20', codigo: 'T1 26 20', cliente: 'TATIANA SALAZAR', destino: 'MEDELLÍN' };
+  const conEquipo = (texto: string, o: Partial<EntradaValidador> = {}) => trappvel(texto, { negocios: [...VIAJES, VT], equipo: ['Tatiana Quiroga', 'Mauricio Prueba'], ...o });
+  const texto = 'Tatiana: lo de Cartagena, quieren hotel con piscina';
+
+  it('firma + destino de otro viaje: abre el viaje del destino, nunca el de la clienta homónima', () => {
+    for (const ab of [
+      { accion: 'abrir_viaje', evidencia: 'Tatiana', ref_cliente: 'Tatiana' },
+      { accion: 'abrir_viaje', evidencia: 'Tatiana', id: 'n20' },
+    ]) {
+      const d = ejec(validar({ acciones: [ab, { accion: 'contenido', evidencia: 'lo de Cartagena, quieren hotel con piscina', ref_destino: 'Cartagena' }] }, conEquipo(texto)));
+      expect(d.paso).toMatchObject({ p: 'registrar', interpretacion: { accion: 'abrir_viaje', viaje_id: 'v14', con_contenido: true } });
+      expect(JSON.stringify(d.paso)).not.toContain('v20');
+    }
+  });
+
+  it('la firma sola no abre nada: pide aclaración y nada se escribe', () => {
+    const d = ejec(validar(una({ accion: 'abrir_viaje', evidencia: 'Tatiana', ref_cliente: 'Tatiana' }), conEquipo('gracias Tatiana')));
+    expect(d.accion).toBe('pedir_aclaracion');
+    expect(d.rechazo).toBe('V5_firma_del_equipo');
+    expect(d.paso.p).toBe('decir');
+  });
+
+  it('con el apellido sí nombra a la clienta; sin equipo, la regla de antes no cambia', () => {
+    const conApellido = ejec(validar(una({ accion: 'abrir_viaje', evidencia: 'Tatiana Salazar', ref_cliente: 'Tatiana Salazar' }), conEquipo('Tatiana Salazar')));
+    expect(conApellido.paso).toMatchObject({ interpretacion: { accion: 'abrir_viaje', viaje_id: 'v20' } });
+    const porCodigo = ejec(validar(una({ accion: 'abrir_viaje', evidencia: 'T1 26 20', id: 'n20' }), conEquipo('T1 26 20')));
+    expect(porCodigo.paso).toMatchObject({ interpretacion: { accion: 'abrir_viaje', viaje_id: 'v20' } });
+    const sinEquipo = ejec(validar(una({ accion: 'abrir_viaje', evidencia: 'Tatiana', ref_cliente: 'Tatiana' }), trappvel('Tatiana', { negocios: [...VIAJES, VT] })));
+    expect(sinEquipo.paso).toMatchObject({ interpretacion: { accion: 'abrir_viaje', viaje_id: 'v20' } });
+  });
+
+  it('abrir_viaje y contenido que apuntan a viajes distintos: se pregunta con los dos', () => {
+    const d = ejec(validar({ acciones: [
+      { accion: 'abrir_viaje', evidencia: 'Carolina', ref_cliente: 'Carolina' },
+      { accion: 'contenido', evidencia: 'lo de Cartagena con hotel', ref_destino: 'Cartagena' },
+    ] }, trappvel('Carolina: lo de Cartagena con hotel')));
+    expect(d.rechazo).toBe('V5_abrir_y_contenido_distintos');
+    expect(d.paso).toMatchObject({ p: 'registrar', interpretacion: { accion: 'preguntar_viaje', candidatos: ['v11', 'v14'], con_contenido: true } });
+    // El mismo viaje por los dos lados: se abre como antes.
+    const mismo = ejec(validar({ acciones: [
+      { accion: 'abrir_viaje', evidencia: 'Carolina', ref_cliente: 'Carolina' },
+      { accion: 'contenido', evidencia: 'lo de Punta Cana con hotel', ref_destino: 'Punta Cana' },
+    ] }, trappvel('Carolina: lo de Punta Cana con hotel')));
+    expect(mismo.paso).toMatchObject({ interpretacion: { accion: 'abrir_viaje', viaje_id: 'v11', con_contenido: true } });
+  });
+});
+
+describe('control de Vera · V14: «descartar» con dos capas y con el resumen', () => {
+  const ambas = (texto: string) => trappvel(texto, { pendiente: LISTA_ENTREGA, tanda: { abierta: true, nombre: 'Carolina Ruiz', cajaId: 'v11' } });
+
+  it('H2k · lista y tanda abiertas, el mensaje nombra la caja de la tanda: no se confía en alcance=pregunta, se pregunta', () => {
+    for (const a of [
+      { accion: 'descartar', evidencia: 'bota lo de Carolina', alcance: 'pregunta', ref_cliente: 'Carolina' },
+      { accion: 'descartar', evidencia: 'bota lo de Carolina', alcance: 'pregunta' },
+      { accion: 'responder', evidencia: 'bota lo de Carolina', opcion: 'descartar' },
+    ]) {
+      const d = ejec(validar(una(a), ambas('bota lo de Carolina')));
+      expect(d.paso.p).toBe('decir');
+      expect((d.paso as { texto: string }).texto).toMatch(/^¿Descarto lo de la pregunta pendiente o la tanda de Carolina Ruiz\?/);
+    }
+    // «a ninguno» que además nombra la caja también se pregunta.
+    const ninguno = ejec(validar(una({ accion: 'descartar', evidencia: 'a ninguno, bota lo de Carolina', alcance: 'pregunta' }), ambas('a ninguno, bota lo de Carolina')));
+    expect(ninguno.rechazo).toBe('V14_dos_capas');
+  });
+
+  it('sin nombrar la caja, «a ninguno, bótalos» sigue contestando la lista; alcance=tanda que la nombra sigue siendo la tanda', () => {
+    const lista = ejec(validar(una({ accion: 'descartar', evidencia: 'bótalos', alcance: 'pregunta' }), ambas('a ninguno, bótalos')));
+    expect(lista.paso).toMatchObject({ p: 'responder_bandeja', canonico: 'DESCARTAR' });
+    const tanda = ejec(validar(una({ accion: 'descartar', evidencia: 'bórrame lo de Carolina', alcance: 'tanda', ref_cliente: 'Carolina' }), ambas('bórrame lo de Carolina')));
+    expect(tanda.paso).toEqual({ p: 'descartar', alcance: 'tanda' });
+  });
+
+  it('H2c · con el resumen pendiente, «descartar» con número es «mensajes» aunque falte el alcance; nunca todo el resumen', () => {
+    for (const a of [
+      { accion: 'descartar', evidencia: 'el 3 sobra', n: 3 },
+      { accion: 'descartar', evidencia: 'el 3 sobra', n: 3, alcance: 'pregunta' },
+      { accion: 'descartar', evidencia: 'el 3 sobra', n: 3, alcance: 'mensajes' },
+    ]) {
+      const d = ejec(validar(una(a), trappvel('el 3 sobra', { pendiente: RESUMEN })));
+      expect(d.paso).toMatchObject({ p: 'responder_bandeja', canonico: 'descartar el 3' });
+    }
+    // El número escrito que el modelo no devolvió, o uno que no está escrito: se pregunta, no se bota el resumen.
+    const sinN = ejec(validar(una({ accion: 'descartar', evidencia: 'el 3 sobra' }), trappvel('el 3 sobra', { pendiente: RESUMEN })));
+    expect(sinN.paso.p).toBe('decir');
+    expect(sinN.rechazo).toBe('V14_numero_sin_n');
+    const otroN = ejec(validar(una({ accion: 'descartar', evidencia: 'el 3 sobra', n: 4 }), trappvel('el 3 sobra', { pendiente: RESUMEN })));
+    expect(otroN.rechazo).toBe('V14_numero_no_escrito');
+    expect(otroN.paso.p).toBe('decir');
+    // Sin números, «bota eso» al resumen sigue siendo DESCARTAR de esa pregunta.
+    const todo = ejec(validar(una({ accion: 'descartar', evidencia: 'bota eso', alcance: 'pregunta' }), trappvel('no, bota eso', { pendiente: RESUMEN })));
+    expect(todo.paso).toMatchObject({ p: 'responder_bandeja', canonico: 'DESCARTAR' });
+  });
+});
+
+describe('control de Vera · roles restringidos', () => {
+  it('un rol sin `consulta` en su esquema: un gasto sin monto ni negocio no se abre, recibe el texto de su rol', () => {
+    expect(accionesDelEsquema({ bandeja: false, rol: 'operator' })).not.toContain('consulta');
+    for (const t of ['¿cuánto llevamos gastado este mes?', 'cuánto gasté en peajes', 'dame los gastos de la semana']) {
+      const d = ejec(validar(una({ accion: 'gasto', evidencia: t }), termotech(t, { rol: 'operator' })));
+      expect(d.paso).toEqual({ p: 'decir', texto: textoRol('operator') });
+      expect(d.rechazo).toBe('V3_rol_gasto_vacio');
+    }
+  });
+
+  it('el mismo rol sigue reportando gastos: con monto, con negocio o «pagué …» (el bot pregunta el monto, como hoy)', () => {
+    const conMonto = ejec(validar(una({ accion: 'gasto', evidencia: 'pagué 18.900 de peaje', monto: 18900 }), termotech('pagué 18.900 de peaje', { rol: 'operator' })));
+    expect(conMonto.paso).toMatchObject({ p: 'bot_gastos', gastos: [{ monto: 18900 }] });
+    const conNegocio = ejec(validar(una({ accion: 'gasto', evidencia: 'gasto del chiller de Arena', negocio: 'Arena' }), termotech('gasto del chiller de Arena', { rol: 'operator' })));
+    expect(conNegocio.paso).toMatchObject({ p: 'bot_gastos', gastos: [{ monto: null, negocio: { id: 'neg-a1' } }] });
+    const reporte = ejec(validar(una({ accion: 'gasto', evidencia: 'pagué el almuerzo', descripcion: 'almuerzo' }), termotech('pagué el almuerzo', { rol: 'operator' })));
+    expect(reporte.paso).toMatchObject({ p: 'bot_gastos', gastos: [{ monto: null, descripcion: 'almuerzo' }] });
+    // Con consulta en el esquema (owner), la regla no aplica.
+    const owner = ejec(validar(una({ accion: 'gasto', evidencia: 'cuánto gasté' }), termotech('cuánto gasté')));
+    expect(owner.paso.p).toBe('bot_gastos');
+  });
+
+  it('un acuse a un contador (o solo lectura) que pidió registrar devuelve el texto de su rol, no silencio', () => {
+    const c = ejec(validar(una({ accion: 'acuse', evidencia: 'registra un gasto de 50 mil' }), termotech('registra un gasto de 50 mil en Arena', { rol: 'contador' })));
+    expect(c.paso).toEqual({ p: 'decir', texto: textoRol('contador') });
+    expect(c.rechazo).toBe('V3_rol_acuse');
+    const r = ejec(validar(una({ accion: 'acuse', evidencia: 'anota la visita' }), termotech('anota la visita a Clínica del Norte', { rol: 'read_only' })));
+    expect(r.paso).toEqual({ p: 'decir', texto: textoRol('read_only') });
+    // Un acuse de verdad sigue siendo silencio.
+    const ok = ejec(validar(una({ accion: 'acuse', evidencia: 'gracias' }), termotech('gracias, muy amable', { rol: 'contador' })));
+    expect(ok.paso).toEqual({ p: 'nada' });
+  });
+});
+
 // ── Los textos (§4) ─────────────────────────────────────────────────────────
 
 describe('los textos nuevos', () => {
