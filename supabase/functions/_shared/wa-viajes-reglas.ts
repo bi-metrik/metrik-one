@@ -19,7 +19,7 @@
 //   5. Un mensaje que nombra a dos viajes no se carga entero en ninguno (F13): solo se descarta.
 // ============================================================
 
-import { leerNuevo, nombreDeViaje, normalizarNombre, normalizarTexto, restoTrasOtroCliente } from './wa-entendimiento-reglas.ts';
+import { leerNuevo, nombreDeViaje, nombreNuevoCabe, normalizarNombre, normalizarTexto, restoTrasOtroCliente } from './wa-entendimiento-reglas.ts';
 export { nombreDeViaje, nombrePropio } from './wa-entendimiento-reglas.ts';
 import { codigoCompacto, interpretarRespuestaNegocio } from './wa-carga-reglas.ts';
 import { esNotaDelComercial } from './wa-guardianes.ts';
@@ -258,7 +258,7 @@ export function resolverEncabezado(
   // «Nuevo» en cualquier forma: «nuevo X», «cliente nuevo X», «nueva clienta X», «es nuevo X». Sin
   // nombre, o «otro cliente» a secas: el bot pide el nombre (`TEXTO_PIDE_NOMBRE_NUEVO`).
   const nuevo = leerNuevo(bruto);
-  if (nuevo) return !nuevo.cliente || palabrasDe(nuevo.cliente).length <= MAX_PALABRAS_NOMBRE_NUEVO ? { tipo: 'nuevo', cliente: nuevo.cliente } : null;
+  if (nuevo) return nombreNuevoCabe(nuevo.cliente) ? { tipo: 'nuevo', cliente: nuevo.cliente } : null;
   if (palabras.length > MAX_PALABRAS_ENCABEZADO) return null;
   // «otro cliente Lina Pérez»: lo que sigue es el encabezado. Si no nombra un viaje abierto y es un
   // nombre, es un cliente nuevo; si no, se pide el nombre (nunca queda en la caja anterior).
@@ -321,9 +321,6 @@ export function resolverEncabezado(
   if (candidatos.length > 1) return { tipo: 'ambiguo', candidatos };
   return null;
 }
-
-/** Cuántas palabras puede tener el nombre de un cliente nuevo en un encabezado («nuevo Ana María Gómez Ruiz»). */
-const MAX_PALABRAS_NOMBRE_NUEVO = 4;
 
 /** Los viajes por los que pregunta un encabezado que no es exacto (uno o varios). Vacío si no pregunta. */
 export function candidatosDelEncabezado(r: ResolucionEncabezado | null | undefined): ViajeAbierto[] {
@@ -450,6 +447,10 @@ export function pareceRespuesta(texto: string): boolean {
   if (!bruto) return false;
   if (leerSiNo(bruto) !== null) return true;
   if (interpretarRespuestaNegocio(bruto, []).tipo !== 'no_entendida') return true;
+  // «nueva cotización con hotel 4 estrellas»: empieza como un «nuevo», así que contesta la pregunta
+  // (no es contenido de la tanda), aunque su nombre pase el tope y la respuesta no se entienda: el bot
+  // vuelve a preguntar con la lista y no crea a nadie.
+  if (leerNuevo(bruto)) return true;
   // Un celular solo («300 555 1234»): un texto con fechas y edades también junta 10 dígitos.
   if (/^\+?[\d\s().-]{7,}$/.test(bruto)) return true;
   const t = normalizarTexto(bruto).replace(/^[¡!¿?.,;:\s]+/, '');

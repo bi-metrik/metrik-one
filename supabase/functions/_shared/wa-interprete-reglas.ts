@@ -21,7 +21,7 @@ import {
 } from './wa-bandeja-reglas.ts';
 import type { ConfigBandeja } from './wa-bandeja-reglas.ts';
 import { codigoCompacto, interpretarRespuestaNegocio } from './wa-carga-reglas.ts';
-import { normalizarTexto } from './wa-entendimiento-reglas.ts';
+import { nombreNuevoCabe, normalizarTexto } from './wa-entendimiento-reglas.ts';
 import { fastPathParse } from './wa-parse-reglas.ts';
 import {
   esNombreNuevo,
@@ -972,6 +972,15 @@ function nombreNuevo(a: AccionModelo, texto: string): string | null {
   return String(n).trim();
 }
 
+/**
+ * V8 con el tope del encabezado (`MAX_PALABRAS_NOMBRE_NUEVO`): un «nuevo» con un nombre más largo no
+ * crea a nadie («nueva cotización con hotel 4 estrellas»). Se pide aclaración: con la lista pendiente,
+ * la vuelve a mostrar. `null` si el nombre cabe (o no hay nombre).
+ */
+function nombreLargo(nombre: string | null, e: EntradaValidador): Decision | null {
+  return nombre && !nombreNuevoCabe(nombre) ? aclaracion(e, 'V8_nombre_largo') : null;
+}
+
 function preguntarViaje(cands: NegocioCtx[], ev: string | null | undefined, conContenido: boolean, rechazo: string | null): Decision {
   const interpretacion: Interpretacion = { accion: 'preguntar_viaje', candidatos: cands.map(c => c.id), con_contenido: conContenido, evidencia: ev ?? null };
   const aviso = cands.length > 0 ? textoPreguntaViaje(ev ?? '', cands.map(viajeAbierto)) : TEXTO_NO_ENCONTRE_VIAJE;
@@ -983,6 +992,8 @@ function abrirViaje(acc: AccionModelo[], e: EntradaValidador, rechazo: string | 
   const conContenido = acc.some(a => a.accion === 'contenido');
   const recordar = !!e.pendiente;
   const nombre = nombreNuevo(ab, e.texto);
+  const largo = nombreLargo(nombre, e);
+  if (largo) return largo;
   if (ab.nuevo_cliente && !nombre) rechazo ??= 'V8_nombre_no_escrito';
   // «Nuevo», con o sin nombre, solo si el mensaje lo dice («nuevo cliente», «otra clienta»): en la QA real
   // flash-lite abrió «NUEVO Pérez» con un «Pérez» suelto. Si no lo dice, no se abre nada nuevo.
@@ -1048,6 +1059,8 @@ function mover(a: AccionModelo, e: EntradaValidador, rechazo: string | null): De
   const n = typeof a.n === 'number' && Number.isInteger(a.n) && a.n > 0 ? a.n : null;
   if (!n) return aclaracion(e, 'V4_mover_sin_numero');
   const nombre = nombreNuevo(a, e.texto);
+  const largo = nombreLargo(nombre, e);
+  if (largo) return largo;
   if (nombre) {
     const canonico = `el ${n} es nuevo ${nombre}`;
     return ejecutar('bandeja.mover', { p: 'responder_bandeja', canonico, interpretacion: { accion: 'mover', nuevo: nombre, canonico, evidencia: a.evidencia ?? null }, aviso: null }, rechazo);
@@ -1151,6 +1164,8 @@ function responder(a: AccionModelo, e: EntradaValidador, rechazo: string | null)
       if (opcion === 'descartar') return descartarPregunta(a, e, rechazo);
       const nombre = (a.nuevo_cliente || a.ref?.cliente) && todoEscrito(a.nuevo_cliente || a.ref?.cliente, e.texto) ? String(a.nuevo_cliente || a.ref?.cliente).trim() : null;
       if (!nombre) return decir('bandeja.pide_nombre', TEXTO_PIDE_NOMBRE_NUEVO, rechazo ?? 'V8_sin_nombre');
+      const largo = nombreLargo(nombre, e);
+      if (largo) return largo;
       if (p.capa === 'tanda_nombre') {
         return ejecutar('bandeja.nombre', { p: 'registrar', interpretacion: { accion: 'nombre', nuevo: nombre, evidencia: a.evidencia ?? null }, aviso: avisoNuevo(nombre, false) }, rechazo);
       }
@@ -1212,6 +1227,8 @@ function responderLista(a: AccionModelo, opcion: string, e: EntradaValidador, re
   if (opcion === 'nuevo' || a.nuevo_cliente) {
     const nombre = nombreNuevo({ ...a, opcion: 'nuevo' }, e.texto);
     if (!nombre) return decir('bandeja.pide_nombre', TEXTO_PIDE_NOMBRE_NUEVO, rechazo ?? 'V8_sin_nombre');
+    const largo = nombreLargo(nombre, e);
+    if (largo) return largo;
     const igual = e.negocios.filter(v => norm(v.cliente) === norm(nombre));
     if (igual.length) return decir('bandeja.nuevo_igual', textoNuevoIgual(igual.map(viajeAbierto)), 'V8_nombre_igual');
     if (p.capa === 'tanda_lista') {
