@@ -44,6 +44,7 @@ import {
   pistasDelTexto,
   resumenEntendido,
   MAX_PREGUNTAS,
+  textoNombreNuevoEnDuda,
   textoPreguntaContacto,
 } from './wa-entendimiento-reglas.ts';
 import type { CampoEntendible, ClaseMensaje, ContactoCandidato, DecisionContacto, SalidaEntendida } from './wa-entendimiento-reglas.ts';
@@ -589,6 +590,11 @@ async function entender(supabase: SupabaseClient, ent: Fila): Promise<void> {
       await volverAPreguntarNegocio(supabase, ent, opciones, `No entendí «${respuesta.slice(0, 40)}».`);
       return;
     }
+    // «nueva reserva»: lo que sigue a NUEVO no parece un nombre. Se pregunta; nunca se crea (control de Vera, NU5).
+    if (r.tipo === 'nuevo_en_duda') {
+      await volverAPreguntarNegocio(supabase, ent, opciones, textoNombreNuevoEnDuda(r.propuesto));
+      return;
+    }
     let negocioId: string | null = r.tipo === 'existente' ? r.negocio_id : null;
     if (r.tipo === 'codigo') {
       negocioId = await negocioAbiertoPorCodigo(supabase, workspaceId, r.codigo);
@@ -1127,6 +1133,10 @@ async function entenderSegmento(
     }
     if (r.tipo === 'nuevo') {
       await entenderNuevo(supabase, ent, delGrupo, r.cliente, { nuevoExplicito: !!r.cliente });
+      return;
+    }
+    if (r.tipo === 'nuevo_en_duda') {
+      await preguntarYEsperar(supabase, ent, textoNombreNuevoEnDuda(r.propuesto), pendiente as 'cruce' | 'sin_solicitud' | 'dos_viajes');
       return;
     }
     await preguntarYEsperar(supabase, ent, 'No entendí. Responde SÍ, el código del viaje correcto, o NUEVO y el nombre del cliente.', pendiente as 'cruce' | 'sin_solicitud' | 'dos_viajes');

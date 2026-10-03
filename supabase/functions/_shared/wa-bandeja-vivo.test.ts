@@ -773,6 +773,58 @@ describe('v2 · N2: «¿A qué viaje van?» se contesta con cada forma que el bo
     expect(negocioDe('DANIELA ROJAS')).toBeTruthy();
   });
 
+  // Control sellado de Vera 2026-10-02b, NU5: «nuevo/nueva» + un sustantivo común creaba un cliente con ese
+  // sustantivo por nombre. Sustantivos INVENTADOS: la regla no depende de una lista de palabras.
+  it.each(['nueva zarandela', 'nuevo trompiflo', 'Nueva brindoleta.', 'nuevo Salgar'])(
+    '«%s» (una sola palabra): no crea cliente, vuelve a preguntar con la lista y pide nombre y apellido (control de Vera, NU5)',
+    async (respuesta) => {
+      await preguntaDeViaje();
+      const contactosAntes = t.contactos?.length ?? 0;
+      const negociosAntes = t.negocios.length;
+      await llega(respuesta, { enviado: 9 });
+      expect(t.wa_bandeja_mensajes.find(m => m.cuerpo === respuesta)).toMatchObject({ papel: 'respuesta_cliente' });
+      colaModelo = [pedido()];
+      await cron(60);
+      const propuesto = respuesta.replace(/^nuev[oa]\s+/i, '').replace(/\.$/, '');
+      expect(textos().at(-1)).toContain(`Para crear un cliente nuevo necesito su nombre y apellido; con «${propuesto}» no lo creo.`);
+      expect(textos().at(-1)).toContain('1. SAN ANDRÉS DIC · Pedro Prueba5 (P 26 2)');
+      expect(t.negocios.length).toBe(negociosAntes);
+      expect(t.contactos?.length ?? 0).toBe(contactosAntes);
+      expect(await ent.preguntaAbierta(db as never, WS, TEL)).toMatchObject({ espera: 'viaje' });
+      // Con nombre y apellido, se crea como siempre.
+      await llega('nuevo Ignacio Salgar', { enviado: 100 });
+      colaModelo = [pedido()];
+      await cron(160);
+      expect(negocioDe('IGNACIO SALGAR')).toBeTruthy();
+    },
+  );
+
+  it('«nueva brindoleta grupal» y «nueva tía de Rosalba Quiñones»: tampoco crean cliente (vocabulario de la agencia y parentesco)', async () => {
+    await preguntaDeViaje();
+    const negociosAntes = t.negocios.length;
+    await llega('nueva brindoleta grupal', { enviado: 9 });
+    colaModelo = [pedido()];
+    await cron(60);
+    expect(textos().at(-1)).toContain('con «brindoleta grupal» no lo creo');
+    await llega('nueva tía de Rosalba Quiñones', { enviado: 100 });
+    colaModelo = [pedido()];
+    await cron(160);
+    expect(textos().at(-1)).toContain('con «tía de Rosalba Quiñones» no lo creo');
+    expect(t.negocios.length).toBe(negociosAntes);
+  });
+
+  it('«NUEVO» a secas después de la duda: sigue el camino de siempre (el nombre sale de los mensajes)', async () => {
+    await preguntaDeViaje();
+    await llega('nuevo trompiflo', { enviado: 9 });
+    colaModelo = [pedido()];
+    await cron(60);
+    await llega('NUEVO', { enviado: 100 });
+    colaModelo = [pedido()];
+    await cron(160);
+    expect(negocioDe('TROMPIFLO')).toBeFalsy();
+    expect(t.contactos?.some(c => /trompiflo/i.test(String(c.nombre))) ?? false).toBe(false);
+  });
+
   it('«DESCARTAR»: descarta la tanda en el acto (regla 4, 2026-10-02)', async () => {
     await preguntaDeViaje();
     await llega('DESCARTAR', { enviado: 9 });

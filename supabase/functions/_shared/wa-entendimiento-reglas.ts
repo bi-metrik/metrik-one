@@ -1429,7 +1429,8 @@ function finTelefono(t: string | null): string {
 export function leerNuevo(texto: string): { cliente: string | null } | null {
   const bruto = String(texto ?? '').trim().replace(/[.!¡]+$/g, '').trim();
   const m = /^(?:es\s+)?(?:(?:un|una)\s+)?(?:client[ea]\s+nuev[oa]|nuev[oa](?:\s+client[ea])?)(?=$|[\s,.:;-])[\s,.:;-]*([\s\S]*)$/i.exec(bruto);
-  if (m) return { cliente: m[1].trim() || null };
+  // «nueva, se llama Laura Prueba»: el nombre es lo que sigue a «se llama» (control de Vera, ND2).
+  if (m) return { cliente: m[1].trim().replace(/^(?:(?:que\s+)?se\s+llama|llamad[oa]|de\s+nombre)[\s,.:;-]+/i, '').trim() || null };
   if (/^(?:(?:es\s+)?(?:otr[oa]|un[oa]?\s+otr[oa])\s+client[ea]|cambi(?:o|ar|amos)\s+(?:de\s+)?client[ea])$/.test(normalizarTexto(bruto))) return { cliente: null };
   return null;
 }
@@ -1446,6 +1447,124 @@ export const MAX_PALABRAS_NOMBRE_NUEVO = 4;
 /** ¿El nombre de un «nuevo …» cabe en el tope? Sin nombre («nuevo», «otro cliente»), sí: el bot lo pide. */
 export function nombreNuevoCabe(cliente: string | null | undefined): boolean {
   return !cliente || normalizarNombre(cliente).split(' ').filter(Boolean).length <= MAX_PALABRAS_NOMBRE_NUEVO;
+}
+
+/**
+ * Lo que va después de «nuevo/nueva» y crea un cliente:
+ *   · `sin_nombre`: «nuevo», «cliente nuevo». El bot pide el nombre (como siempre).
+ *   · `largo`: más de `MAX_PALABRAS_NOMBRE_NUEVO` palabras. Nunca es un cliente.
+ *   · `duda`: no parece el nombre de una persona. Se pregunta; nunca se crea.
+ *   · `nombre`: crea el cliente sin volver a preguntar.
+ *
+ * Parece un nombre si tiene al menos DOS palabras de nombre (nombre y apellido) y ninguna es vocabulario
+ * de la agencia, de parentesco o de la gramática (`NO_ES_NOMBRE`), ni tiene forma de sustantivo común
+ * («-ción», «-sión», «-miento», «-aje»). Una sola palabra es duda aunque sea un apellido: «nuevo
+ * Pérez» cuesta una pregunta, y «nueva reserva» no crea a la clienta «reserva» (control sellado de
+ * Vera, 2026-10-02b, NU5). Los conectores de un nombre compuesto («María de los Ángeles», «Pérez de la
+ * Rosa») y un título al comienzo («doña Marta Gómez») no cuentan como palabras de nombre.
+ *
+ * Una sola regla para la respuesta a «¿A qué viaje van?», el encabezado, el atajo del intérprete y la
+ * corrección del resumen («el 3 es de nuevo …»).
+ */
+export type CalificacionNombreNuevo = 'sin_nombre' | 'nombre' | 'duda' | 'largo';
+
+export function calificarNombreNuevo(cliente: string | null | undefined): CalificacionNombreNuevo {
+  const bruto = String(cliente ?? '').trim();
+  const todas = normalizarNombre(bruto).split(' ').filter(Boolean);
+  if (todas.length === 0) return 'sin_nombre';
+  if (todas.length > MAX_PALABRAS_NOMBRE_NUEVO) return 'largo';
+  // El celular que acompaña al nombre («nuevo Marta Gómez 3005551234») no es nombre; un número suelto, duda.
+  // Un nombre con dígitos pegados («Laura Prueba2») sí vale: así nombra el equipo sus pruebas en vivo.
+  let ps = normalizarNombre(nombreDeLaRespuesta(bruto)).split(' ').filter(Boolean);
+  if (ps.some(w => /^\d+$/.test(w))) return 'duda';
+  while (ps.length > 0 && TITULOS.has(ps[0])) ps = ps.slice(1);
+  if (ps.length === 0 || CONECTORES_NOMBRE.has(ps[0]) || CONECTORES_NOMBRE.has(ps[ps.length - 1])) return 'duda';
+  const delNombre = ps.filter(w => !CONECTORES_NOMBRE.has(w));
+  if (delNombre.some(w => NO_ES_NOMBRE.has(w) || TITULOS.has(w) || formaDeSustantivoComun(w))) return 'duda';
+  return delNombre.filter(w => w.length >= 2).length >= 2 ? 'nombre' : 'duda';
+}
+
+/** «de», «la», «y»: unen las partes de un nombre compuesto, no son nombre. */
+const CONECTORES_NOMBRE: ReadonlySet<string> = new Set(['de', 'del', 'la', 'las', 'los', 'y', 'e', 'san', 'santa']);
+
+/** El trato que se antepone al nombre («doña Marta Gómez»). Al comienzo se salta; en otro lugar es duda. */
+const TITULOS: ReadonlySet<string> = new Set([
+  'senor', 'senora', 'senorita', 'sr', 'sra', 'srta', 'don', 'dona', 'doctor', 'doctora', 'dr', 'dra', 'ing', 'ingeniero', 'ingeniera',
+  'profe', 'profesor', 'profesora', 'lic', 'licenciado', 'licenciada',
+]);
+
+/** Los nombres de pila que terminan como un sustantivo común («Concepción», «Asunción»). */
+const NOMBRES_CON_FORMA_COMUN: ReadonlySet<string> = new Set([
+  'concepcion', 'asuncion', 'encarnacion', 'ascension', 'purificacion', 'anunciacion', 'consolacion', 'visitacion', 'presentacion',
+  'resurreccion', 'adoracion', 'natividad',
+]);
+
+/** «-ción», «-sión», «-miento», «-aje»: sustantivos comunes («cotización», «excursión», «alojamiento», «pasaje»). */
+function formaDeSustantivoComun(w: string): boolean {
+  return !NOMBRES_CON_FORMA_COMUN.has(w) && w.length >= 5 && /(cion|ciones|sion|siones|miento|mientos|aje|ajes)$/.test(w);
+}
+
+/**
+ * Palabras que NO son el nombre de una persona: el vocabulario de una agencia (viajes, alojamiento,
+ * transporte, plata, papeles, mensajes), el parentesco y el trato («tía», «el esposo de»), y la
+ * gramática que no aparece en un nombre. Quedan fuera a propósito las palabras comunes que también son
+ * apellidos o nombres de pila en Colombia (Rosa, Luz, Paz, Mar, Sol, Cruz, Torres, Flores, Campos,
+ * Ríos, Vega, Prado, Castillo, Peña, Mesa, Luna, Leal, Plata, Niño, Nina, Ida…): esas no se pueden filtrar por palabra, y por
+ * eso una sola palabra siempre es duda.
+ */
+const NO_ES_NOMBRE: ReadonlySet<string> = new Set([
+  // gramática: artículos, pronombres, preposiciones, adverbios y verbos que no van en un nombre
+  'el', 'lo', 'un', 'una', 'unos', 'unas', 'este', 'esta', 'estos', 'estas', 'ese', 'esa', 'esos', 'esas', 'aquel', 'aquella', 'mi', 'mis',
+  'tu', 'tus', 'su', 'sus', 'nuestro', 'nuestra', 'nuestros', 'nuestras', 'otro', 'otra', 'otros', 'otras', 'que', 'quien', 'quienes',
+  'cual', 'cuales', 'cuando', 'como', 'donde', 'cuanto', 'cuanta', 'para', 'por', 'con', 'sin', 'en', 'sobre', 'entre', 'hasta', 'desde',
+  'hacia', 'segun', 'al', 'a', 'o', 'u', 'ni', 'pero', 'porque', 'pues', 'si', 'no', 'ya', 'tambien', 'mas', 'menos', 'muy', 'todo',
+  'todos', 'toda', 'todas', 'cada', 'algo', 'alguien', 'nada', 'nadie', 'mismo', 'misma', 'es', 'son', 'era', 'fue', 'ser', 'estar', 'esta',
+  'estan', 'va', 'van', 'voy', 'vamos', 'ir', 'viaja', 'viajan', 'viajar', 'quiere', 'quieren', 'necesita', 'necesitan', 'tiene', 'tienen',
+  'hay', 'pide', 'piden', 'pidio', 'manda', 'mando', 'envia', 'envio', 'hacer', 'hace', 'cotizar', 'reservar', 'pagar', 'confirmar',
+  'cambiar', 'agregar', 'anadir', 'incluir', 'llama', 'llaman', 'llamo', 'aqui', 'aca', 'alla', 'ahi', 'hoy', 'manana', 'ayer', 'ahora',
+  'luego', 'despues', 'antes', 'pronto', 'ok', 'listo', 'lista', 'gracias', 'hola', 'favor', 'porfa', 'nuevo', 'nueva', 'nuevos', 'nuevas',
+  'cliente', 'clienta', 'clientes', 'clientas',
+  // parentesco, relación y trato: «la tía de …», «el esposo de …» no es el nombre de nadie
+  'tia', 'tio', 'tias', 'tios', 'esposo', 'esposa', 'esposos', 'marido', 'mujer', 'hijo', 'hija', 'hijos', 'hijas', 'mama', 'papa', 'mami',
+  'papi', 'madre', 'padre', 'padres', 'hermano', 'hermana', 'hermanos', 'hermanas', 'primo', 'prima', 'primos', 'primas', 'sobrino',
+  'sobrina', 'sobrinos', 'abuelo', 'abuela', 'abuelos', 'nieto', 'nieta', 'nietos', 'suegro', 'suegra', 'suegros', 'cunado', 'cunada',
+  'yerno', 'nuera', 'novio', 'novia', 'novios', 'amigo', 'amiga', 'amigos', 'amigas', 'companero', 'companera', 'jefe', 'jefa', 'vecino',
+  'vecina', 'conocido', 'conocida', 'colega', 'socio', 'socia', 'pareja', 'familia', 'familiar', 'familiares', 'pariente', 'parientes',
+  'bebe', 'nene', 'nena', 'menor', 'menores', 'adulto', 'adultos', 'adulta', 'senores', 'senoras',
+  'persona', 'personas', 'gente', 'grupo', 'grupal', 'invitado', 'invitada', 'invitados', 'acompanante', 'acompanantes', 'mascota',
+  // viajes y servicios de la agencia
+  'viaje', 'viajes', 'viajero', 'viajeros', 'reserva', 'reservas', 'solicitud', 'solicitudes', 'pedido', 'pedidos', 'orden', 'ordenes',
+  'cotizacion', 'pasajero', 'pasajera', 'pasajeros', 'huesped', 'huespedes', 'turista', 'turistas', 'vuelo', 'vuelos', 'tiquete',
+  'tiquetes', 'boleto', 'boletos', 'ticket', 'tickets', 'hotel', 'hoteles', 'hostal', 'hostel', 'resort', 'cabana', 'cabanas', 'finca',
+  'apartamento', 'apto', 'habitacion', 'cuarto', 'cuartos', 'cama', 'camas', 'suite', 'plan', 'planes', 'paquete', 'paquetes', 'tour',
+  'tours', 'crucero', 'cruceros', 'traslado', 'traslados', 'transfer', 'transporte', 'bus', 'buseta', 'van', 'carro', 'auto', 'alquiler',
+  'renta', 'seguro', 'seguros', 'asistencia', 'visa', 'visas', 'pasaporte', 'pasaportes', 'documento', 'documentos', 'cedula', 'permiso',
+  'destino', 'destinos', 'ruta', 'rutas', 'itinerario', 'itinerarios', 'fecha', 'fechas', 'temporada', 'vacaciones', 'escapada',
+  'salida', 'salidas', 'regreso', 'vuelta', 'noche', 'noches', 'dia', 'dias', 'semana', 'semanas', 'mes', 'meses', 'ano', 'anos',
+  'desayuno', 'almuerzo', 'cena', 'comida', 'incluido', 'entrada', 'entradas', 'boleta', 'boletas', 'evento', 'eventos', 'concierto',
+  'boda', 'matrimonio', 'cumpleanos', 'aniversario', 'congreso', 'quinceanero', 'quince', 'colegio', 'corporativo', 'corporativa',
+  'nacional', 'internacional', 'especial', 'completo', 'completa', 'doble', 'triple', 'sencilla', 'sencillo', 'maleta', 'maletas',
+  'aerolinea', 'aerolineas', 'agencia', 'operador', 'proveedor', 'proveedores', 'servicio', 'servicios', 'producto', 'productos',
+  // plata y papeles
+  'precio', 'precios', 'tarifa', 'tarifas', 'valor', 'valores', 'costo', 'costos', 'total', 'saldo', 'saldos', 'abono', 'abonos',
+  'anticipo', 'pago', 'pagos', 'deposito', 'cuota', 'cuotas', 'factura', 'facturas', 'recibo', 'recibos', 'comprobante', 'comprobantes',
+  'soporte', 'soportes', 'efectivo', 'tarjeta', 'credito', 'debito', 'descuento', 'descuentos', 'promo', 'promocion', 'oferta', 'ofertas',
+  'cupo', 'cupos', 'disponibilidad', 'cambio', 'cambios', 'ajuste', 'ajustes', 'novedad', 'novedades', 'reembolso', 'reclamo', 'queja',
+  'cuenta', 'cuentas', 'contrato', 'contratos', 'venta', 'ventas', 'compra', 'compras', 'negocio', 'negocios', 'caso', 'casos', 'gasto',
+  'gastos', 'dinero',
+  // mensajes y registros
+  'pregunta', 'preguntas', 'consulta', 'consultas', 'duda', 'dudas', 'mensaje', 'mensajes', 'audio', 'audios', 'foto', 'fotos', 'imagen',
+  'imagenes', 'archivo', 'archivos', 'correo', 'correos', 'email', 'chat', 'nota', 'notas', 'dato', 'datos', 'detalle', 'detalles',
+  'propuesta', 'propuestas', 'opcion', 'alternativa', 'version', 'borrador', 'contacto', 'contactos', 'registro', 'ficha', 'carpeta',
+  'prospecto', 'prospectos', 'lead', 'leads', 'referido', 'referida', 'seguimiento', 'tarea', 'tareas', 'pendiente', 'pendientes',
+  'recordatorio', 'tema', 'asunto', 'lista', 'formulario', 'link', 'enlace', 'numero', 'celular', 'telefono', 'whatsapp',
+]);
+
+/** Lo que el bot contesta cuando lo que sigue a «nuevo» no parece un nombre: pregunta, nunca crea. */
+export function textoNombreNuevoEnDuda(propuesto: string): string {
+  const p = String(propuesto ?? '').trim().slice(0, 40);
+  return `Para crear un cliente nuevo necesito su nombre y apellido; con «${p}» no lo creo.`
+    + ' Responde NUEVO y el nombre completo (ej.: NUEVO Marta Gómez), NUEVO solo para tomarlo de los mensajes, o el número del viaje.';
 }
 
 /** «otro cliente Daniel Pérez», «cambio de cliente: Lina»: lo que viene después del cambio, o `null`. */
