@@ -1434,6 +1434,20 @@ export function leerNuevo(texto: string): { cliente: string | null } | null {
   return null;
 }
 
+/**
+ * Cuántas palabras puede tener el nombre de un cliente nuevo («nuevo Ana María Gómez Ruiz»). Una sola
+ * constante para el encabezado (`resolverEncabezado`), la respuesta a «¿A qué viaje van?»
+ * (`interpretarRespuestaNegocio`) y el intérprete (V8). Por encima del tope nunca se crea un cliente:
+ * «nueva cotización con hotel 4 estrellas» no es la clienta «cotización con hotel 4 estrellas»
+ * (control sellado de Vera, 2026-10-02, I3).
+ */
+export const MAX_PALABRAS_NOMBRE_NUEVO = 4;
+
+/** ¿El nombre de un «nuevo …» cabe en el tope? Sin nombre («nuevo», «otro cliente»), sí: el bot lo pide. */
+export function nombreNuevoCabe(cliente: string | null | undefined): boolean {
+  return !cliente || normalizarNombre(cliente).split(' ').filter(Boolean).length <= MAX_PALABRAS_NOMBRE_NUEVO;
+}
+
 /** «otro cliente Daniel Pérez», «cambio de cliente: Lina»: lo que viene después del cambio, o `null`. */
 export function restoTrasOtroCliente(texto: string): string | null {
   const m = /^(?:otr[oa]\s+client[ea]|cambi(?:o|ar|amos)\s+(?:de\s+)?client[ea])[\s,.:;-]+([\s\S]+)$/i.exec(String(texto ?? '').trim());
