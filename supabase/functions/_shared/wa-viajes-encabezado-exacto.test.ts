@@ -87,7 +87,9 @@ describe('a y b · exacto cambia la caja; aproximado pregunta', () => {
     expect(respuestaAlEncabezado(resolverEncabezado('Carolina', vs))).toBe('📌 Carolina Ruiz (T1 26 103)');
     // Trappvel 2026-10-02: el aproximado pregunta con la lista numerada (nunca «¿Cambias a…? sí/no»).
     expect(respuestaAlEncabezado(resolverEncabezado('Lusia', vs), 'Lusia')).toBe('¿De qué viaje es «Lusia»?\n1. Luisa Mejía (T1 26 102)\nResponde con el número, NUEVO y el nombre si es un cliente nuevo, o DESCARTAR. Hasta entonces no asigno lo que sigue.');
-    expect(respuestaAlEncabezado(resolverEncabezado('nuevo Pedro', vs))).toBe('📌 NUEVO Pedro');
+    expect(respuestaAlEncabezado(resolverEncabezado('nuevo Pedro Salgar', vs))).toBe('📌 NUEVO Pedro Salgar');
+    // Una sola palabra no basta para crear un cliente (control de Vera, NU5): el bot pide nombre y apellido.
+    expect(respuestaAlEncabezado(resolverEncabezado('nuevo Pedro', vs))).toBe('¿Cómo se llama el cliente nuevo? Con «Pedro» no lo creo: escríbeme su nombre y apellido, o DESCARTAR. Hasta entonces no asigno lo que sigue.');
     expect(respuestaAlEncabezado(null)).toBeNull();
     expect([esNo('no'), esNo('No.'), esNo('no, la de Carolina'), esSi('sí'), esSi('sí, pero')]).toEqual([true, true, false, true, false]);
   });

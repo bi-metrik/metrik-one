@@ -24,8 +24,8 @@ import {
   deducirCeros,
   LO_LLENA_AGENCIA,
   fraseNombraNumero,
+  calificarNombreNuevo,
   leerNuevo,
-  nombreNuevoCabe,
   marcaDe,
   mayusculasDeViaje,
   nombreDeViaje,
@@ -153,6 +153,11 @@ export type RespuestaNegocio =
   | { tipo: 'codigo'; codigo: string }
   /** `cliente`: lo que escribió después de NUEVO («NUEVO Marta Gómez»), o null. */
   | { tipo: 'nuevo'; cliente: string | null }
+  /**
+   * «nueva reserva», «nuevo Pérez»: un «nuevo» con algo que no parece un nombre (`calificarNombreNuevo`).
+   * No crea a nadie: el bot vuelve a preguntar con la lista y pide nombre y apellido (control de Vera, NU5).
+   */
+  | { tipo: 'nuevo_en_duda'; propuesto: string }
   /** «DESCARTAR»: los mensajes no son de ningún viaje (prueba en vivo v2, N2). */
   | { tipo: 'descartar' }
   | { tipo: 'no_entendida' };
@@ -182,11 +187,16 @@ export function interpretarRespuestaNegocio(texto: string, opciones: ReadonlyArr
     const i = Number(num[1]) - 1;
     return i >= 0 && i < opciones.length ? { tipo: 'existente', negocio_id: opciones[i].id } : { tipo: 'no_entendida' };
   }
-  // «nuevo X», «cliente nuevo X», «otro cliente» (sin nombre: se pide), como en el encabezado (`leerNuevo`).
-  // Con el mismo tope de palabras del encabezado: «nueva cotización con hotel 4 estrellas» no es un
-  // cliente nuevo; no se entiende y el bot vuelve a preguntar con la lista (control de Vera, I3).
+  // «nuevo X», «cliente nuevo X», «otro cliente» (sin nombre: se pide), como en el encabezado (`leerNuevo`),
+  // con la misma regla del nombre (`calificarNombreNuevo`): «nueva cotización con hotel 4 estrellas» no se
+  // entiende (control de Vera, I3) y «nueva reserva» es duda: se pregunta, nunca se crea (NU5).
   const nuevo = leerNuevo(bruto);
-  if (nuevo) return nombreNuevoCabe(nuevo.cliente) ? { tipo: 'nuevo', cliente: nuevo.cliente } : { tipo: 'no_entendida' };
+  if (nuevo) {
+    const c = calificarNombreNuevo(nuevo.cliente);
+    if (c === 'largo') return { tipo: 'no_entendida' };
+    if (c === 'duda') return { tipo: 'nuevo_en_duda', propuesto: nuevo.cliente ?? '' };
+    return { tipo: 'nuevo', cliente: nuevo.cliente };
+  }
   const c = codigoCompacto(bruto);
   if (c) {
     const enLista = opciones.find(o => codigoCompacto(o.codigo) === c);

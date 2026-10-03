@@ -25,7 +25,7 @@ import {
 } from './wa-interprete-reglas.ts';
 import { CONFIG_BANDEJA_POR_DEFECTO } from './wa-bandeja-reglas.ts';
 import { CONTADOR_ALLOWED_INTENTS, OPERATOR_ALLOWED_INTENTS, READ_ONLY_ALLOWED_INTENTS, type UserRole } from './types.ts';
-import type { ViajeAbierto } from './wa-viajes-reglas.ts';
+import { resolverEncabezado, type ViajeAbierto } from './wa-viajes-reglas.ts';
 
 /**
  * El validador del intérprete conversacional (§3 del diseño), una prueba por regla, la decisión H2 en
@@ -153,6 +153,16 @@ describe('atajoExacto: lo exacto sigue por el código de hoy', () => {
     for (const t of ['nuevo', 'cliente nuevo', 'nueva Daniela Rojas', 'nuevo: Juan Pablo Gómez Ruiz']) {
       expect(atajoExacto(t, { bandeja: B, pendiente: LISTA_ENTREGA })).toBe('respuesta_exacta');
     }
+  });
+
+  it('«nueva» + algo que no parece un nombre es atajo: el código de hoy vuelve a preguntar y no crea (NU5 del control de Vera)', () => {
+    // Una sola regla (`calificarNombreNuevo`) para la lista, el encabezado y este atajo: el atajo lleva la
+    // respuesta a `interpretarRespuestaNegocio`, que devuelve `nuevo_en_duda` y el bot pregunta.
+    for (const t of ['nueva zarandela', 'nuevo trompiflo', 'nuevo Salgar']) {
+      expect(atajoExacto(t, { bandeja: B, pendiente: LISTA_ENTREGA })).toBe('respuesta_exacta');
+    }
+    // En el encabezado, «nueva zarandela» no trae nombre: no es atajo (el bot pide el nombre o va al modelo).
+    expect(atajoExacto('nueva zarandela', { bandeja: B, pendiente: null, encabezado: resolverEncabezado('nueva zarandela', []) })).toBeNull();
   });
 
   it('un encabezado exacto (por código, por nombre o «nuevo» con nombre) es atajo; uno aproximado no', () => {

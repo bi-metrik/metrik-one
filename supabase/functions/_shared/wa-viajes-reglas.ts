@@ -19,7 +19,7 @@
 //   5. Un mensaje que nombra a dos viajes no se carga entero en ninguno (F13): solo se descarta.
 // ============================================================
 
-import { leerNuevo, nombreDeViaje, nombreNuevoCabe, normalizarNombre, normalizarTexto, restoTrasOtroCliente } from './wa-entendimiento-reglas.ts';
+import { calificarNombreNuevo, leerNuevo, nombreDeViaje, normalizarNombre, normalizarTexto, restoTrasOtroCliente } from './wa-entendimiento-reglas.ts';
 export { nombreDeViaje, nombrePropio } from './wa-entendimiento-reglas.ts';
 import { codigoCompacto, interpretarRespuestaNegocio } from './wa-carga-reglas.ts';
 import { esNotaDelComercial } from './wa-guardianes.ts';
@@ -75,7 +75,11 @@ export type ResolucionEncabezado =
    * metió en el viaje de otra clienta lo que era de un cliente nuevo).
    */
   | { tipo: 'aproximado'; viaje: ViajeAbierto; por: 'nombre' | 'apellido' | 'destino' | 'negocio' }
-  | { tipo: 'nuevo'; cliente: string | null }
+  /**
+   * `cliente: null`: el bot pide el nombre. `en_duda`: lo que siguió a «nuevo» y no parece un nombre
+   * («nueva reserva», «nuevo Pedro»): no es el nombre, solo se cita al pedirlo (`calificarNombreNuevo`).
+   */
+  | { tipo: 'nuevo'; cliente: string | null; en_duda?: string }
   | { tipo: 'ambiguo'; candidatos: ViajeAbierto[] }
   | { tipo: 'codigo_desconocido'; codigo: string }
   /** Parece un encabezado (corto, escrito) pero no se resuelve: corta la caja (QA de #971 v3). */
@@ -256,9 +260,15 @@ export function resolverEncabezado(
   if (palabras.length === 0) return null;
 
   // «Nuevo» en cualquier forma: «nuevo X», «cliente nuevo X», «nueva clienta X», «es nuevo X». Sin
-  // nombre, o «otro cliente» a secas: el bot pide el nombre (`TEXTO_PIDE_NOMBRE_NUEVO`).
+  // nombre, o «otro cliente» a secas: el bot pide el nombre (`TEXTO_PIDE_NOMBRE_NUEVO`). Con la regla del
+  // nombre (`calificarNombreNuevo`): lo que no parece un nombre («nueva reserva») tampoco es el nombre, y
+  // el bot lo pide igual; un texto más largo que el tope no es encabezado (control de Vera, NU5).
   const nuevo = leerNuevo(bruto);
-  if (nuevo) return nombreNuevoCabe(nuevo.cliente) ? { tipo: 'nuevo', cliente: nuevo.cliente } : null;
+  if (nuevo) {
+    const c = calificarNombreNuevo(nuevo.cliente);
+    if (c === 'largo') return null;
+    return c === 'duda' ? { tipo: 'nuevo', cliente: null, en_duda: nuevo.cliente ?? '' } : { tipo: 'nuevo', cliente: nuevo.cliente };
+  }
   if (palabras.length > MAX_PALABRAS_ENCABEZADO) return null;
   // «otro cliente Lina Pérez»: lo que sigue es el encabezado. Si no nombra un viaje abierto y es un
   // nombre, es un cliente nuevo; si no, se pide el nombre (nunca queda en la caja anterior).
@@ -336,7 +346,7 @@ export function candidatosDelEncabezado(r: ResolucionEncabezado | null | undefin
  */
 export function respuestaAlEncabezado(r: ResolucionEncabezado | null, texto = ''): string | null {
   if (r?.tipo === 'viaje') return `📌 ${lineaCaja(r.viaje)}`;
-  if (r?.tipo === 'nuevo') return r.cliente ? `📌 NUEVO ${r.cliente}` : TEXTO_PIDE_NOMBRE_NUEVO;
+  if (r?.tipo === 'nuevo') return r.cliente ? `📌 NUEVO ${r.cliente}` : r.en_duda ? textoPideNombreEnDuda(r.en_duda) : TEXTO_PIDE_NOMBRE_NUEVO;
   const candidatos = candidatosDelEncabezado(r);
   return candidatos.length > 0 ? textoPreguntaEncabezado(texto, candidatos) : null;
 }
@@ -371,6 +381,11 @@ export function lineaCaja(v: ViajeAbierto): string {
 
 /** Lo que el bot pide en el acto tras un «nuevo» sin nombre o un «otro cliente» (como N9). */
 export const TEXTO_PIDE_NOMBRE_NUEVO = '¿Cómo se llama el cliente nuevo? Escríbeme su nombre, o DESCARTAR. Hasta entonces no asigno lo que sigue.';
+
+/** Tras «nuevo» con algo que no parece un nombre («nueva reserva», «nuevo Pedro»): el bot pide nombre y apellido. */
+export function textoPideNombreEnDuda(propuesto: string): string {
+  return `¿Cómo se llama el cliente nuevo? Con «${String(propuesto).trim().slice(0, 40)}» no lo creo: escríbeme su nombre y apellido, o DESCARTAR. Hasta entonces no asigno lo que sigue.`;
+}
 
 /** «No entendí»: lo que el bot contesta en el acto a una respuesta que no es de la lista del encabezado. */
 export function textoNoEntendiEleccion(texto: string, candidatos: ReadonlyArray<ViajeAbierto>): string {
@@ -1170,13 +1185,23 @@ function leerNumeros(t: string): number[] {
   return [...t.matchAll(/\d+/g)].map(m => Number(m[0]));
 }
 
-/** El destino de una corrección: «Luisa», «del 2», «T1 26 9», «nuevo Pedro», «descartar». */
-function destinoDeCorreccion(texto: string, plan: PlanViajes, viajes: ReadonlyArray<ViajeAbierto>): DestinoPlan | 'descartar' | null {
+/**
+ * El destino de una corrección: «Luisa», «del 2», «T1 26 9», «nuevo Pedro Gómez», «descartar».
+ * `nombre_en_duda`: «nuevo» con algo que no parece un nombre (`calificarNombreNuevo`).
+ */
+function destinoDeCorreccion(texto: string, plan: PlanViajes, viajes: ReadonlyArray<ViajeAbierto>): DestinoPlan | 'descartar' | 'nombre_en_duda' | null {
   const t = texto.trim().replace(/^(de|del|para|al|a)\s+/i, '').trim();
   const n = normalizarTexto(t);
   if (/^(descartar|descartalo|descartalos|ninguno|ninguna|nada|basura|no va|no van|fuera)$/.test(n)) return 'descartar';
+  // «el 3 es de nuevo …»: la misma regla del nombre que la lista y el encabezado. Más largo que el tope no
+  // se entiende; lo que no parece un nombre se pregunta (control de Vera, ND). Nunca queda en el borrador.
   const nuevo = leerNuevo(t);
-  if (nuevo) return { tipo: 'nuevo', cliente: nuevo.cliente };
+  if (nuevo) {
+    const c = calificarNombreNuevo(nuevo.cliente);
+    if (c === 'largo') return null;
+    if (c === 'duda') return 'nombre_en_duda';
+    return { tipo: 'nuevo', cliente: nuevo.cliente };
+  }
   const k = /^(?:viaje\s*)?(\d{1,2})$/.exec(n);
   if (k) {
     const g = gruposDelPlan(plan).find(x => x.k === Number(k[1]));
@@ -1250,6 +1275,10 @@ export function interpretarRespuestaPlan(texto: string, plan: PlanViajes, viajes
       ?? /^(?:el|la|los|las|mensaje|mensajes)?\s*((?:\d+)(?:\s*(?:,|y|e)\s*(?:el\s+|la\s+)?\d+)*)\s+(?:(?:es|son|va|van)\s+)?(.+)$/i.exec(p);
     if (!mover) return { tipo: 'no_entendida' };
     const a = destinoDeCorreccion(mover[2], plan, viajes);
+    if (a === 'nombre_en_duda') {
+      const k = leerNumeros(mover[1])[0] ?? 1;
+      return { tipo: 'no_entendida', aviso: `Para un cliente nuevo escribe su nombre y apellido: «el ${k} es de nuevo Marta Gómez». Con «${recorte(mover[2], 30)}» no lo creo.` };
+    }
     if (!a) return { tipo: 'no_entendida', aviso: `No sé a qué viaje te refieres con «${recorte(mover[2], 30)}».` };
     cambios.push({ ns: leer(mover[1]), a });
   }
