@@ -109,6 +109,19 @@ final. Antes de `rm -rf` de cualquier carpeta suelta, comprobar que es tuya: en 
 pasada apareció un `.sustenta-build/` sin trackear **de otra sesión** trabajando la misma
 landing, y borrarlo habría sido destruir trabajo ajeno.
 
+## Animaciones CSS y componentes con CSS modules (2026-10-03, animación de marca)
+
+- **Un fotograma a la hora exacta:** `--virtual-time-budget=<ms>` en el chromium por CLI
+  congela el reloj de las animaciones CSS en ese instante (150 ms, 1000 ms, 2600 ms). ⚠️ Una
+  toma suelta salió IDÉNTICA a la de 150 ms (a 3000 ms); repetirla a 2600/5000 dio el
+  fotograma correcto: comparar el peso del PNG y re-tomar si se repite.
+- **CSS modules en el render de vitest:** config aparte con
+  `css: { include: [/.+/], modules: { classNameStrategy: 'non-scoped' } }` → las clases
+  salen con su nombre crudo, y el `.module.css` se mete en la entrada de vite con
+  `@import` como CSS global. Sin eso `estilos.x` es `undefined` y no hay estilo.
+- **Forzar estado de un client component** (pantalla «entrando» del login): `vi.mock('react')`
+  envolviendo `useState` con un contador de índice por render y un mapa índice→valor.
+
 ## Verificación
 
 La misma prueba que escribe el HTML afirma lo que debe verse (refs, badges, `92%`,

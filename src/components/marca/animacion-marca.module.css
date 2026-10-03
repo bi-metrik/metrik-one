@@ -5,7 +5,7 @@
  * pagina hasta hidratar y despues retenia 2,8 s fijos en CADA carga completa (se quito
  * el 2026-10-03, #994). Ahora solo vive donde ya hay una espera real, y por eso:
  *
- * - No es `position: fixed` ni lleva temporizador: se pinta en el hueco de lo que
+ * - No es un overlay fijo ni lleva temporizador: se pinta en el hueco de lo que
  *   todavia no llego, y desaparece en cuanto el contenido lo reemplaza.
  * - Aparece con retardo (`--retardo`, 300 ms por defecto): una navegacion rapida no
  *   alcanza a mostrarla, asi que no parpadea.
@@ -28,6 +28,7 @@
 
 .lockup {
   position: relative;
+  font-size: var(--tamano, clamp(2.2rem, 5vw, 3.2rem));
   display: inline-flex;
   flex-direction: column;
   align-items: flex-start;
@@ -42,7 +43,7 @@
 .letra,
 .one {
   font-family: var(--font-schibsted), sans-serif;
-  font-size: var(--tamano, clamp(2.2rem, 5vw, 3.2rem));
+  font-size: 1em;
   line-height: 1;
   color: var(--tinta);
   display: inline-block;
@@ -72,7 +73,6 @@
   width: 100%;
   height: 2px;
   margin-top: 0.18em;
-  font-size: var(--tamano, clamp(2.2rem, 5vw, 3.2rem));
 }
 
 .estela {
