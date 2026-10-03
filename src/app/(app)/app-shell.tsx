@@ -1,6 +1,6 @@
 'use client'
 
-import { usePathname } from 'next/navigation'
+import { usePathname, useRouter } from 'next/navigation'
 import { TZ, formatBogotaFechaLarga } from '@/lib/dates/bogota'
 import Link from 'next/link'
 import {
@@ -414,6 +414,12 @@ export default function AppShell({
   suscripcion = null,
 }: AppShellProps) {
   const pathname = usePathname()
+  // Los Link del menu NO precargan al entrar en pantalla (prefetch={false}):
+  // cada pagina disparaba ~13 descargas RSC de las rutas del menu apenas abria
+  // y en el celular competian con la carga de lo que el usuario mira
+  // (reporte de soena, 2026-10-03). En escritorio se precarga al pasar el
+  // cursor sobre el item del sidebar, como en `CardLink`.
+  const router = useRouter()
 
   // Aplica el override de roles por workspace a una lista de items del nav.
   // Si el href está en el override, sus roles efectivos son los del override.
@@ -622,7 +628,7 @@ export default function AppShell({
         {/* Sidebar header: MéTRIK branding + collapse */}
         <div className="flex h-14 items-center justify-between px-3">
           {sidebarExpanded ? (
-            <Link href={homeHref} className="flex-1 overflow-hidden">
+            <Link href={homeHref} prefetch={false} className="flex-1 overflow-hidden">
               <div className="inline-flex flex-col">
                 <div className="flex items-baseline" style={{ fontFamily: logoFont }}>
                   <span style={{ fontWeight: 700, fontSize: '0.9375rem', letterSpacing: '-0.01em', color: 'var(--sidebar-foreground)' }}>MéTRIK</span>
@@ -632,7 +638,7 @@ export default function AppShell({
               </div>
             </Link>
           ) : (
-            <Link href={homeHref} className="flex h-8 w-10 shrink-0 items-center justify-center">
+            <Link href={homeHref} prefetch={false} className="flex h-8 w-10 shrink-0 items-center justify-center">
               <div className="inline-flex flex-col items-center">
                 <div className="flex items-baseline" style={{ fontFamily: logoFont, color: 'var(--sidebar-foreground)' }}>
                   <span style={{ fontWeight: 700, fontSize: '1.125rem', letterSpacing: '-0.02em' }}>M</span>
@@ -664,6 +670,8 @@ export default function AppShell({
                     key={item.href}
                     href={item.href}
                     title={!sidebarExpanded ? item.label : undefined}
+                    prefetch={false}
+                    onMouseEnter={() => router.prefetch(item.href)}
                     className={`flex items-center gap-2.5 rounded-md px-2.5 py-2 text-[13px] font-medium transition-all ${
                       sidebarExpanded ? '' : 'justify-center'
                     } ${
@@ -700,6 +708,8 @@ export default function AppShell({
                     key={item.href}
                     href={item.href}
                     title={!sidebarExpanded ? item.label : undefined}
+                    prefetch={false}
+                    onMouseEnter={() => router.prefetch(item.href)}
                     className={`flex items-center gap-2.5 rounded-md px-2.5 py-2 text-[13px] font-medium transition-all ${
                       sidebarExpanded ? '' : 'justify-center'
                     } ${
@@ -736,6 +746,8 @@ export default function AppShell({
                     key={item.href}
                     href={item.href}
                     title={!sidebarExpanded ? item.label : undefined}
+                    prefetch={false}
+                    onMouseEnter={() => router.prefetch(item.href)}
                     className={`flex items-center gap-2.5 rounded-md px-2.5 py-2 text-[13px] font-medium transition-all ${
                       sidebarExpanded ? '' : 'justify-center'
                     } ${
@@ -772,6 +784,8 @@ export default function AppShell({
                     key={item.href}
                     href={item.href}
                     title={!sidebarExpanded ? item.label : undefined}
+                    prefetch={false}
+                    onMouseEnter={() => router.prefetch(item.href)}
                     className={`flex items-center gap-2.5 rounded-md px-2.5 py-2 text-[13px] font-medium transition-all ${
                       sidebarExpanded ? '' : 'justify-center'
                     } ${
@@ -808,6 +822,8 @@ export default function AppShell({
                     key={item.href}
                     href={item.href}
                     title={!sidebarExpanded ? item.label : undefined}
+                    prefetch={false}
+                    onMouseEnter={() => router.prefetch(item.href)}
                     className={`flex items-center gap-2.5 rounded-md px-2.5 py-2 text-[13px] font-medium transition-all ${
                       sidebarExpanded ? '' : 'justify-center'
                     } ${
@@ -859,6 +875,8 @@ export default function AppShell({
                     key={item.href}
                     href={item.href}
                     title={!sidebarExpanded ? item.label : undefined}
+                    prefetch={false}
+                    onMouseEnter={() => router.prefetch(item.href)}
                     className={`flex items-center gap-2.5 rounded-md px-2.5 py-2 text-[13px] font-medium transition-all ${
                       sidebarExpanded ? '' : 'justify-center'
                     } ${
@@ -895,6 +913,8 @@ export default function AppShell({
                     key={item.href}
                     href={item.href}
                     title={!sidebarExpanded ? item.label : undefined}
+                    prefetch={false}
+                    onMouseEnter={() => router.prefetch(item.href)}
                     className={`flex items-center gap-2.5 rounded-md px-2.5 py-2 text-[13px] font-medium transition-all ${
                       sidebarExpanded ? '' : 'justify-center'
                     } ${
@@ -926,6 +946,8 @@ export default function AppShell({
                     key={item.href}
                     href={item.href}
                     title={!sidebarExpanded ? item.label : undefined}
+                    prefetch={false}
+                    onMouseEnter={() => router.prefetch(item.href)}
                     className={`flex items-center gap-2.5 rounded-md px-2.5 py-2 text-[13px] font-medium transition-all ${
                       sidebarExpanded ? '' : 'justify-center'
                     } ${
@@ -962,6 +984,8 @@ export default function AppShell({
                     key={item.href}
                     href={item.href}
                     title={!sidebarExpanded ? item.label : undefined}
+                    prefetch={false}
+                    onMouseEnter={() => router.prefetch(item.href)}
                     className={`flex items-center gap-2.5 rounded-md px-2.5 py-2 text-[13px] font-medium transition-all ${
                       sidebarExpanded ? '' : 'justify-center'
                     } ${
@@ -990,6 +1014,8 @@ export default function AppShell({
                 return (
                   <Link
                     href="/suscripcion"
+                    prefetch={false}
+                    onMouseEnter={() => router.prefetch('/suscripcion')}
                     title={!sidebarExpanded ? 'Suscripción' : undefined}
                     className={`relative flex items-center gap-2.5 rounded-md px-2.5 py-2 text-[13px] font-medium transition-all ${
                       sidebarExpanded ? '' : 'justify-center'
@@ -1025,6 +1051,8 @@ export default function AppShell({
                   key={item.href}
                   href={item.href}
                   title={!sidebarExpanded ? item.label : undefined}
+                  prefetch={false}
+                  onMouseEnter={() => router.prefetch(item.href)}
                   className={`flex items-center gap-2.5 rounded-md px-2.5 py-2 text-[13px] font-medium transition-all ${
                     sidebarExpanded ? '' : 'justify-center'
                   } ${
@@ -1119,7 +1147,7 @@ export default function AppShell({
         {/* Mobile header — MéTRIK isotipo + company logo + avatar/logout */}
         <header className="flex h-14 items-center justify-between border-b border-border px-4 md:hidden" style={{ backgroundColor: 'var(--sidebar)', color: 'var(--sidebar-foreground)' }}>
           <div className="flex items-center gap-3">
-            <Link href={homeHref} className="flex items-center shrink-0">
+            <Link href={homeHref} prefetch={false} className="flex items-center shrink-0">
               <div className="inline-flex flex-col items-center">
                 <div className="flex items-baseline" style={{ fontFamily: logoFont, color: 'var(--sidebar-foreground)' }}>
                   <span style={{ fontWeight: 700, fontSize: '1.125rem', letterSpacing: '-0.02em' }}>M</span>
@@ -1166,6 +1194,7 @@ export default function AppShell({
                     >
                       <Link
                         href="/suscripcion"
+                        prefetch={false}
                         onClick={() => setMenuPerfilAbierto(false)}
                         className="flex items-center gap-2 px-3 py-2 hover:bg-muted"
                       >
@@ -1228,6 +1257,7 @@ export default function AppShell({
                   <Link
                     key={item.href}
                     href={item.href}
+                    prefetch={false}
                     onClick={() => setMobileMoreOpen(false)}
                     className={`flex items-center gap-3 px-5 py-3 text-sm font-medium transition-colors ${
                       i < mobileSecondary.length - 1 ? 'border-b' : ''
@@ -1254,6 +1284,7 @@ export default function AppShell({
               <Link
                 key={item.href}
                 href={item.href}
+                prefetch={false}
                 onClick={() => setMobileMoreOpen(false)}
                 className={`flex flex-col items-center gap-0.5 px-1 py-1 text-[10px] font-medium transition-colors ${
                   isActive ? 'text-primary' : 'text-muted-foreground'

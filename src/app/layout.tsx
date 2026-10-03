@@ -2,7 +2,6 @@ import type { Metadata } from 'next'
 import localFont from 'next/font/local'
 import { ThemeProvider } from 'next-themes'
 import { Toaster } from 'sonner'
-import Splash from '@/components/splash'
 import {
   DESCRIPCION_SITIO,
   IMAGEN_OG_GENERICA,
@@ -110,7 +109,6 @@ export default function RootLayout({
           enableSystem
           disableTransitionOnChange
         >
-          <Splash />
           {children}
           <Toaster position="bottom-right" richColors />
         </ThemeProvider>
