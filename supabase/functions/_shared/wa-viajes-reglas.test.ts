@@ -79,7 +79,8 @@ describe('encabezados: resolución determinista contra los viajes abiertos', () 
   });
 
   it('nuevo, ambiguo, código desconocido; y lo que no es encabezado', () => {
-    expect(resolverEncabezado('nuevo Luisa San Andrés', V)).toEqual({ tipo: 'nuevo', cliente: 'Luisa San Andrés' });
+    // Comparte el nombre de pila con Luisa Mejía: abre su caja NUEVA y el acuse lo dice (2026-10-03).
+    expect(resolverEncabezado('nuevo Luisa San Andrés', V)).toMatchObject({ tipo: 'nuevo', cliente: 'Luisa San Andrés', parecidos: [{ id: 'n9' }] });
     expect(resolverEncabezado('Carolina', [...V, { id: 'n14', codigo: 'T1 26 14', cliente: 'CAROLINA PÉREZ', destino: 'CANCÚN' }])).toMatchObject({ tipo: 'ambiguo' });
     expect(resolverEncabezado('T1 26 3', V)).toEqual({ tipo: 'codigo_desconocido', codigo: 'T1263' });
     for (const x of ['Carolina quiere 5 estrellas', 'son 3 adultos', 'ok']) expect(resolverEncabezado(x, V), x).toBeNull();

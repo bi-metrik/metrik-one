@@ -16,7 +16,7 @@ import {
   preguntaPendienteUnificada,
   resolverViaje,
   TEXTO_QUE_HAGO,
-  textoNuevoIgual,
+  TEXTO_NUEVO_NO_ANOTADO,
   textoRol,
   textosNuevos,
   validar,
@@ -27,8 +27,7 @@ import {
 } from './wa-interprete-reglas.ts';
 import { CONFIG_BANDEJA_POR_DEFECTO } from './wa-bandeja-reglas.ts';
 import { CONTADOR_ALLOWED_INTENTS, OPERATOR_ALLOWED_INTENTS, READ_ONLY_ALLOWED_INTENTS, type UserRole } from './types.ts';
-import { resolverEncabezado, textoPideNombreEnDuda, type ViajeAbierto } from './wa-viajes-reglas.ts';
-import { textoNombreNuevoEnDuda } from './wa-entendimiento-reglas.ts';
+import { resolverEncabezado, textoAcuseNuevo, textoPideNombreEnDuda, type ViajeAbierto } from './wa-viajes-reglas.ts';
 
 /**
  * El validador del intérprete conversacional (§3 del diseño), una prueba por regla, la decisión H2 en
@@ -158,14 +157,15 @@ describe('atajoExacto: lo exacto sigue por el código de hoy', () => {
     }
   });
 
-  it('«nueva» + algo que no parece un nombre es atajo: el código de hoy vuelve a preguntar y no crea (NU5 del control de Vera)', () => {
-    // Una sola regla (`calificarNombreNuevo`) para la lista, el encabezado y este atajo: el atajo lleva la
-    // respuesta a `interpretarRespuestaNegocio`, que devuelve `nuevo_en_duda` y el bot pregunta.
-    for (const t of ['nueva zarandela', 'nuevo trompiflo', 'nuevo Salgar']) {
+  it('«nuevo X» es atajo en la lista y en el encabezado: el código de hoy pide el «sí» antes de crear (2026-10-03)', () => {
+    // Una sola regla (`calificarNombreNuevo`) para la lista, el encabezado y este atajo: la lista pregunta
+    // «¿Creo el cliente nuevo «X»?» y el encabezado abre la caja «Cliente nuevo: X», que se crea con el «sí» al resumen.
+    for (const t of ['nueva zarandela', 'nuevo trompiflo', 'nuevo Salgar', 'nueva Rosalba Quiñones Tovar']) {
       expect(atajoExacto(t, { bandeja: B, pendiente: LISTA_ENTREGA })).toBe('respuesta_exacta');
+      expect(atajoExacto(t, { bandeja: B, pendiente: null, encabezado: resolverEncabezado(t, []) })).toBe('encabezado_exacto');
     }
-    // En el encabezado, «nueva zarandela» no trae nombre: no es atajo (el bot pide el nombre o va al modelo).
-    expect(atajoExacto('nueva zarandela', { bandeja: B, pendiente: null, encabezado: resolverEncabezado('nueva zarandela', []) })).toBeNull();
+    // Solo números no es un nombre: no es atajo en el encabezado.
+    expect(atajoExacto('nuevo 3005551234', { bandeja: B, pendiente: null, encabezado: resolverEncabezado('nuevo 3005551234', []) })).toBeNull();
   });
 
   it('un encabezado exacto (por código, por nombre o «nuevo» con nombre) es atajo; uno aproximado no', () => {
@@ -472,10 +472,13 @@ describe('V8: «nuevo» con nombre', () => {
     expect(cabe.paso).toMatchObject({ p: 'responder_bandeja', canonico: 'NUEVO Juan Pablo Gómez Ruiz' });
   });
 
-  it('un nombre idéntico al cliente de un viaje abierto se pregunta', () => {
+  it('un nombre idéntico al cliente de un viaje abierto: la misma caja que el encabezado de hoy, y el acuse lo dice (2026-10-03)', () => {
     const d = ejec(validar(una({ accion: 'abrir_viaje', evidencia: 'nueva clienta Lina Pérez', nuevo_cliente: 'Lina Pérez' }), trappvel('nueva clienta Lina Pérez')));
-    expect(d.rechazo).toBe('V8_nombre_igual');
-    expect(d.paso).toMatchObject({ interpretacion: { accion: 'preguntar_viaje', candidatos: ['v14'] } });
+    expect(d.paso).toEqual({
+      p: 'registrar', interpretacion: { accion: 'abrir_viaje', nuevo: 'Lina Pérez', con_contenido: false, evidencia: 'nueva clienta Lina Pérez' },
+      aviso: textoAcuseNuevo('Lina Pérez', [va(V12), va(V14)]),
+    });
+    expect((d.paso as { aviso: string }).aviso).toContain('Ya hay viajes de Jorge Pérez (T1 26 12) y Lina Pérez (T1 26 14). Si es para uno de esos, escribe su código.');
   });
 });
 
@@ -782,62 +785,68 @@ describe('control de Vera · roles restringidos', () => {
 // Nombres y frases INVENTADOS; los viajes abiertos son los de siempre (Luisa Mejía, Carolina Ruiz, Jorge
 // Pérez, Lina Pérez).
 
-describe('control de Vera 2 · NU4: V8 no crea un cliente con un descriptor ni con el nombre de una clienta abierta', () => {
-  it('«<relación> de <clienta abierta>»: se pregunta por el viaje de esa clienta, nunca se crea', () => {
+describe('control de Vera 3 · V8 termina en la misma confirmación que el código de hoy (2026-10-03)', () => {
+  // El validador ya no decide si algo «parece un nombre»: lo que propone el modelo sigue al mismo camino del
+  // código de hoy, que no crea nada sin el «sí». Un «nuevo» a la lista va como «NUEVO X» (el código pregunta
+  // «¿Creo el cliente nuevo «X»?», con los viajes parecidos); en la tanda abre la caja «Cliente nuevo: X».
+  it('a la lista: «NUEVO X» al código de hoy, también con un descriptor o el nombre de una clienta abierta', () => {
     const texto = 'nueva, la tía de Carolina Ruiz quiere ir también';
-    for (const nombre of ['tía de Carolina Ruiz', 'la tía de Carolina', 'tía de Carolina']) {
-      const lista = ejec(validar(una({ accion: 'responder', evidencia: texto, opcion: 'nuevo', ref: { cliente: nombre } }), trappvel(texto, { pendiente: LISTA_ENTREGA })));
-      expect([nombre, lista.rechazo]).toEqual([nombre, 'V8_nombre_de_cliente_abierto']);
-      expect(lista.paso).toEqual({ p: 'decir', texto: textoNuevoIgual([va(V11)]) });
-      const encabezado = ejec(validar(una({ accion: 'abrir_viaje', evidencia: texto, nuevo_cliente: nombre }), trappvel(texto)));
-      expect(encabezado.rechazo).toBe('V8_nombre_de_cliente_abierto');
-      expect(encabezado.paso).toMatchObject({ interpretacion: { accion: 'preguntar_viaje', candidatos: ['v11'] } });
+    for (const nombre of ['tía de Carolina Ruiz', 'Carolina', 'Carolina Zuleta', 'brindoleta grupal']) {
+      const t = nombre === 'tía de Carolina Ruiz' ? texto : `nueva ${nombre}`;
+      const lista = ejec(validar(una({ accion: 'responder', evidencia: t, opcion: 'nuevo', ref: { cliente: nombre } }), trappvel(t, { pendiente: LISTA_ENTREGA })));
+      expect([nombre, lista.paso]).toMatchObject([nombre, { p: 'responder_bandeja', canonico: `NUEVO ${nombre}` }]);
     }
   });
 
-  it('solo el nombre de pila de una clienta abierta, o su nombre con algo más: se pregunta', () => {
-    const texto = 'nueva Carolina, la de Punta Cana trae a su hermana';
-    const pila = ejec(validar(una({ accion: 'responder', evidencia: 'nueva Carolina', opcion: 'nuevo', ref: { cliente: 'Carolina' } }), trappvel(texto, { pendiente: LISTA_ENTREGA })));
-    expect(pila.rechazo).toBe('V8_nombre_de_cliente_abierto');
-    const t2 = 'nueva Carolina Ruiz Salgar';
-    const mas = ejec(validar(una({ accion: 'abrir_viaje', evidencia: t2, nuevo_cliente: 'Carolina Ruiz Salgar' }), trappvel(t2)));
-    expect(mas.rechazo).toBe('V8_nombre_de_cliente_abierto');
-  });
-
-  it('un descriptor sin clienta abierta: no crea; el encabezado abre la caja SIN nombre y pide nombre y apellido', () => {
-    const texto = 'nuevo, el esposo de Ximena Zuleta';
-    const d = ejec(validar(una({ accion: 'abrir_viaje', evidencia: texto, nuevo_cliente: 'esposo de Ximena Zuleta' }), trappvel(texto)));
-    expect(d.rechazo).toBe('V8_nombre_en_duda');
-    expect(d.paso).toMatchObject({ p: 'registrar', interpretacion: { accion: 'abrir_viaje', nuevo: null }, aviso: textoPideNombreEnDuda('esposo de Ximena Zuleta') });
-    const lista = ejec(validar(una({ accion: 'responder', evidencia: texto, opcion: 'nuevo', nuevo_cliente: 'esposo de Ximena Zuleta' }), trappvel(texto, { pendiente: LISTA_ENTREGA })));
-    expect(lista.paso).toEqual({ p: 'decir', texto: textoNombreNuevoEnDuda('esposo de Ximena Zuleta') });
-    // «el N es nuevo …» con el resumen: tampoco.
+  it('en la tanda: la caja «Cliente nuevo: X» con el acuse que dice el viaje parecido (PA3: diminutivo de parentesco + parte del nombre)', () => {
+    const t = 'nueva, la tiíta de Carolina';
+    const d = ejec(validar(una({ accion: 'abrir_viaje', evidencia: t, nuevo_cliente: 'tiíta de Carolina' }), trappvel(t)));
+    expect(d.paso).toMatchObject({ p: 'registrar', interpretacion: { accion: 'abrir_viaje', nuevo: 'tiíta de Carolina' } });
+    expect((d.paso as { aviso: string }).aviso).toBe(textoAcuseNuevo('tiíta de Carolina', [va(V11)]));
+    // «el N es nuevo …» con el resumen: la corrección va al código de hoy, que vuelve a mostrar el resumen antes del «sí».
     const t3 = 'el 2 es nuevo, la comadre de Ximena';
     const mover = ejec(validar(una({ accion: 'mover', evidencia: t3, n: 2, nuevo_cliente: 'comadre de Ximena' }), trappvel(t3, { pendiente: RESUMEN })));
-    expect(mover.rechazo).toBe('V8_nombre_en_duda');
-    expect(mover.paso.p).toBe('decir');
+    expect(mover.paso).toMatchObject({ p: 'responder_bandeja', canonico: 'el 2 es nuevo comadre de Ximena' });
   });
 
-  it('una sola palabra o vocabulario de la agencia tampoco crean (la misma regla que el código de hoy)', () => {
-    for (const [t, n] of [['nueva zarandela', 'zarandela'], ['nuevo Salgar', 'Salgar'], ['nueva brindoleta grupal', 'brindoleta grupal']]) {
-      const d = ejec(validar(una({ accion: 'responder', evidencia: t, opcion: 'nuevo', nuevo_cliente: n }), trappvel(t, { pendiente: LISTA_ENTREGA })));
-      expect([t, d.rechazo]).toEqual([t, 'V8_nombre_en_duda']);
-    }
+  it('solo números no es un nombre; más largo que el tope tampoco', () => {
+    const t = 'nuevo 3005551234';
+    const d = ejec(validar(una({ accion: 'abrir_viaje', evidencia: t, nuevo_cliente: '3005551234' }), trappvel(t)));
+    expect(d.rechazo).toBe('V8_nombre_en_duda');
+    expect(d.paso).toMatchObject({ p: 'registrar', interpretacion: { accion: 'abrir_viaje', nuevo: null }, aviso: textoPideNombreEnDuda('3005551234') });
+    const lista = ejec(validar(una({ accion: 'responder', evidencia: t, opcion: 'nuevo', nuevo_cliente: '3005551234' }), trappvel(t, { pendiente: LISTA_ENTREGA })));
+    expect(lista.paso).toEqual({ p: 'decir', texto: textoPideNombreEnDuda('3005551234') });
+    const largo = 'nueva cotización con hotel 4 estrellas';
+    expect(ejec(validar(una({ accion: 'abrir_viaje', evidencia: largo, nuevo_cliente: 'cotización con hotel 4 estrellas' }), trappvel(largo))).rechazo).toBe('V8_nombre_largo');
   });
 
-  it('siguen igual: un nombre legítimo nuevo (aunque comparta el nombre de pila con una clienta) y la respuesta a «¿Cómo se llama?»', () => {
-    const t = 'nueva Carolina Zuleta';
-    const d = ejec(validar(una({ accion: 'responder', evidencia: t, opcion: 'nuevo', nuevo_cliente: 'Carolina Zuleta' }), trappvel(t, { pendiente: LISTA_ENTREGA })));
-    expect(d.paso).toMatchObject({ p: 'responder_bandeja', canonico: 'NUEVO Carolina Zuleta' });
-    const t2 = 'es nuevo, se llama Ignacio Salgar';
-    const d2 = ejec(validar(una({ accion: 'abrir_viaje', evidencia: t2, nuevo_cliente: 'Ignacio Salgar' }), trappvel(t2)));
-    expect(d2.paso).toMatchObject({ interpretacion: { accion: 'abrir_viaje', nuevo: 'Ignacio Salgar' } });
-    // A «¿Cómo se llama el cliente nuevo?» una sola palabra vale (como `esNombreNuevo`); un descriptor no.
+  it('la respuesta a «¿Cómo se llama?»: una palabra vale, y la caja toma el nombre hasta el «sí» al resumen', () => {
     const NOMBRE = preguntaPendienteUnificada({ tanda: { tipo: 'nombre' } })!;
     const d3 = ejec(validar(una({ accion: 'responder', evidencia: 'Salgar', nuevo_cliente: 'Salgar' }), trappvel('Salgar', { pendiente: NOMBRE })));
-    expect(d3.paso).toMatchObject({ p: 'registrar', interpretacion: { accion: 'nombre', nuevo: 'Salgar' } });
-    const d4 = ejec(validar(una({ accion: 'responder', evidencia: 'el esposo de Ximena', nuevo_cliente: 'esposo de Ximena' }), trappvel('el esposo de Ximena', { pendiente: NOMBRE })));
-    expect(d4.rechazo).toBe('V8_nombre_en_duda');
+    expect(d3.paso).toMatchObject({ p: 'registrar', interpretacion: { accion: 'nombre', nuevo: 'Salgar' }, aviso: textoAcuseNuevo('Salgar') });
+  });
+
+  it('el «sí» a «¿Creo el cliente nuevo «X»?» (se contesta por la vía de la lista) va al código de hoy', () => {
+    const d = ejec(validar(una({ accion: 'responder', evidencia: 'sí, créalo', opcion: 'si' }), trappvel('sí, créalo', { pendiente: LISTA_ENTREGA })));
+    expect(d.paso).toMatchObject({ p: 'responder_bandeja', canonico: 'sí' });
+  });
+
+  it('NU8: un «nuevo …» con una tanda abierta nunca es contenido de la caja de otra clienta', () => {
+    const tanda = { abierta: true, nombre: 'Carolina Ruiz', cajaId: 'v11' };
+    // Más largo que el tope: no es un encabezado; no se anota en ninguna caja y se pregunta.
+    const t = 'nuevo paquete familiar todo incluido a la costa';
+    const d = ejec(validar(una({ accion: 'contenido', evidencia: t, ref: { cliente: 'Carolina' } }), trappvel(t, { tanda })));
+    expect(d.rechazo).toBe('V8_nuevo_no_es_contenido');
+    expect(d.paso).toEqual({ p: 'decir', texto: TEXTO_NUEVO_NO_ANOTADO });
+    // Dentro del tope (si llegara al modelo): la misma caja que el encabezado de hoy.
+    const t2 = 'nuevo combo playero costa';
+    const d2 = ejec(validar(una({ accion: 'contenido', evidencia: t2 }), trappvel(t2, { tanda })));
+    expect(d2.paso).toMatchObject({ p: 'registrar', interpretacion: { accion: 'abrir_viaje', nuevo: 'combo playero costa' } });
+    // «nuevo» a secas: la caja sin nombre, y se pide.
+    const d3 = ejec(validar(una({ accion: 'contenido', evidencia: 'nuevo' }), trappvel('nuevo', { tanda })));
+    expect(d3.paso).toMatchObject({ p: 'registrar', interpretacion: { accion: 'abrir_viaje', nuevo: null } });
+    // Sin tanda abierta, el contenido sigue como siempre (cae sin caja y se decide en el resumen).
+    expect(ejec(validar(una({ accion: 'contenido', evidencia: t }), trappvel(t))).paso).toMatchObject({ interpretacion: { accion: 'contenido' } });
   });
 });
 
@@ -885,6 +894,56 @@ describe('control de Vera 2 · O2 y K3: roles restringidos', () => {
     // Sin pedir registrar, la aclaración sigue siendo aclaración.
     const q = ejec(validar(una({ accion: 'pedir_aclaracion', evidencia: 'mmm' }), termotech('mmm lo otro', { rol: 'contador' })));
     expect(q.paso).toEqual({ p: 'decir', texto: TEXTO_QUE_HAGO });
+  });
+});
+
+describe('control de Vera 3 · V5 y O: lo que quedaba del intérprete (2026-10-03)', () => {
+  it('V5 · dos viajes en el texto también con `abrir_viaje`: abrir uno solo de los dos no lo resuelve', () => {
+    const t = 'Lina Pérez y Jorge Pérez viajan juntos';
+    const d = ejec(validar({ acciones: [
+      { accion: 'abrir_viaje', evidencia: 'Lina Pérez', ref: { cliente: 'Lina Pérez' } },
+      { accion: 'contenido', evidencia: 'viajan juntos', ref: { cliente: 'Lina Pérez' } },
+    ] }, trappvel(t, { tanda: { abierta: true, nombre: 'Luisa Mejía', cajaId: 'v9' } })));
+    expect(d.rechazo).toBe('V5_dos_viajes_en_el_texto');
+    expect(d.paso).toMatchObject({ p: 'registrar', interpretacion: { accion: 'preguntar_viaje', con_contenido: true } });
+    expect([...(d.paso as { interpretacion: { candidatos: string[] } }).interpretacion.candidatos].sort()).toEqual(['v12', 'v14']);
+    // Un encabezado con su propio destino no es un conflicto.
+    const t2 = 'Lina Pérez, Cartagena';
+    const d2 = ejec(validar(una({ accion: 'abrir_viaje', evidencia: t2, ref: { cliente: 'Lina Pérez', destino: 'Cartagena' } }), trappvel(t2)));
+    expect(d2.paso).toMatchObject({ interpretacion: { accion: 'abrir_viaje', viaje_id: 'v14' } });
+  });
+
+  it('V5 · `contenido` sin referencia resuelta que nombra dos viajes no cae en la caja de la tanda (de un tercero)', () => {
+    const t = 'Jorge Pérez quiere el mismo hotel que la de Cartagena';
+    const tanda = { abierta: true, nombre: 'Luisa Mejía', cajaId: 'v9' };
+    const d = ejec(validar(una({ accion: 'contenido', evidencia: t }), trappvel(t, { tanda })));
+    expect(d.rechazo).toBe('V5_dos_viajes_en_el_texto');
+    expect([...(d.paso as { interpretacion: { candidatos: string[] } }).interpretacion.candidatos].sort()).toEqual(['v12', 'v14']);
+    // Con referencias que no se resuelven (dos refs en una), tampoco.
+    const d2 = ejec(validar(una({ accion: 'contenido', evidencia: t, ref: { cliente: 'Jorge Pérez', destino: 'Cartagena' } }), trappvel(t, { tanda })));
+    expect(d2.rechazo).toBe('V5_dos_viajes_en_el_texto');
+    // Lo que solo habla de la caja sigue siendo su contenido.
+    const d3 = ejec(validar(una({ accion: 'contenido', evidencia: 'quieren hotel con piscina' }), trappvel('quieren hotel con piscina', { tanda })));
+    expect(d3.paso).toMatchObject({ interpretacion: { accion: 'contenido' } });
+  });
+
+  it('O1–O3 · una pregunta sin signo ni palabra interrogativa al comienzo no abre gasto: la regla es la inversa', () => {
+    for (const t of ['Hola, me cuentas cómo va lo de Arena', 'buenos días, sabes si ya se pagó lo de Clínica del Norte', 'porfa me averiguas lo de Arena']) {
+      for (const rol of ['operator', 'supervisor'] as const) {
+        const d = ejec(validar(una({ accion: 'gasto', evidencia: t, negocio: t.includes('Arena') ? 'Arena' : 'Clínica del Norte' }), termotech(t, { rol })));
+        expect([t, rol, d.paso, d.rechazo]).toEqual([t, rol, { p: 'decir', texto: textoRol(rol) }, 'V3_rol_gasto_vacio']);
+      }
+    }
+    // La excepción de Mauricio sigue: un gasto reportado con su verbo, sin monto, abre el gasto y el bot pide el monto.
+    for (const t of ['pagué el almuerzo de Arena', 'gasté en peajes yendo a Arena']) {
+      const d = ejec(validar(una({ accion: 'gasto', evidencia: t, negocio: 'Arena' }), termotech(t, { rol: 'operator' })));
+      expect([t, d.paso]).toMatchObject([t, { p: 'bot_gastos', gastos: [{ monto: null }] }]);
+    }
+    // Con el monto escrito, como siempre. Y un rol sin restricción no cambia.
+    const m = ejec(validar(una({ accion: 'gasto', evidencia: 'almuerzo 25 mil Arena', monto: 25000, negocio: 'Arena' }), termotech('almuerzo 25 mil Arena', { rol: 'operator' })));
+    expect(m.paso).toMatchObject({ p: 'bot_gastos', gastos: [{ monto: 25000 }] });
+    const o = ejec(validar(una({ accion: 'gasto', evidencia: 'peaje Arena', negocio: 'Arena' }), termotech('peaje Arena')));
+    expect(o.paso).toMatchObject({ p: 'bot_gastos' });
   });
 });
 

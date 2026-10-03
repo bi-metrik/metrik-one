@@ -1,41 +1,55 @@
 import { describe, expect, it } from 'vitest';
 
 /**
- * Control sellado de Vera 2026-10-02b, NU5: «nuevo/nueva» + un sustantivo común de la agencia creaba un
- * cliente con ese sustantivo por nombre, por la respuesta a la lista, por el encabezado y por «el N es de
- * nuevo …». Una sola regla (`calificarNombreNuevo`) para los tres. Nombres y sustantivos INVENTADOS: la
- * regla no puede depender de una lista hecha a la medida de unas frases.
+ * Lo que sigue a «nuevo/nueva» (decisión de Mauricio, 2026-10-03, tras el tercer control sellado de Vera):
+ * el código ya NO adivina si algo «parece un nombre» con una lista de palabras. Tres controles seguidos la
+ * rompieron con vocabulario nuevo. Ahora ningún cliente se crea sin un «sí» del comercial a un texto que
+ * muestra el nombre tal cual: el resumen del reparto («Cliente nuevo: X») o, sin él, «¿Creo el cliente
+ * nuevo «X»?». Una sola regla (`calificarNombreNuevo`) para la lista, el encabezado, el atajo del intérprete
+ * y «el N es de nuevo …»; solo quedan el tope de palabras, vacío y solo números. Nombres y sustantivos
+ * INVENTADOS. Las pruebas de punta a punta (sin el «sí» no hay cliente, negocio ni carga) están en
+ * `wa-bandeja-vivo.test.ts`.
  */
 import { calificarNombreNuevo, leerNuevo, textoNombreNuevoEnDuda } from './wa-entendimiento-reglas';
 import { interpretarRespuestaNegocio, type OpcionNegocio } from './wa-carga-reglas';
-import { armarPlan, armarSegmentos, interpretarRespuestaPlan, resolverEncabezado, type MensajeViaje, type ViajeAbierto } from './wa-viajes-reglas';
+import {
+  armarPlan, armarSegmentos, interpretarConfirmacionNuevo, interpretarRespuestaPlan, nombreDestino, partesResumenPlan, planSinDudas, resolverEncabezado,
+  respuestaAlEncabezado, textoAcuseNuevo, textoConfirmarNuevo, viajesParecidos, type MensajeViaje, type ViajeAbierto,
+} from './wa-viajes-reglas';
 
-const OPS: OpcionNegocio[] = [{ id: 'p', codigo: 'P 26 2', cliente: 'Pedro Prueba5', destino: 'SAN ANDRÉS', nombre: 'SAN ANDRÉS DIC' } as OpcionNegocio];
+const OPS: OpcionNegocio[] = [
+  { id: 'p', codigo: 'P 26 2', cliente: 'Pedro Prueba5', destino: 'SAN ANDRÉS', nombre: 'SAN ANDRÉS DIC' } as OpcionNegocio,
+  { id: 'r', codigo: 'R 26 1', cliente: 'ROSALBA QUIÑONES TOVAR', destino: 'CARTAGENA', nombre: null } as OpcionNegocio,
+];
+const ROSALBA: ViajeAbierto = { id: 'r', codigo: 'R 26 1', cliente: 'ROSALBA QUIÑONES TOVAR', destino: 'CARTAGENA' };
+const PEDRO: ViajeAbierto = { id: 'p', codigo: 'P 26 2', cliente: 'Pedro Prueba5', destino: 'SAN ANDRÉS', nombre: 'SAN ANDRÉS DIC' };
 
-describe('calificarNombreNuevo: lo que sigue a «nuevo» solo crea cliente si parece un nombre', () => {
-  it('nombres de 2 a 4 palabras, compuestos, con trato al comienzo o con el celular: nombre', () => {
-    for (const n of ['Daniela Rojas', 'Juan Pablo Gómez Ruiz', 'Ignacio Salgar', 'María de los Ángeles', 'Pérez de la Rosa',
-      'doña Rosalba Quiñones', 'Laura Prueba2', 'Concepción Arizmendi', 'Marta Gómez 3005551234', 'Luz Marina Torres', 'Ana Paz']) {
+/** Lo que pide el brief: persona de 1, 2 y 4 palabras, empresa con palabra de la agencia, apellido común y un sustantivo de agencia que no está en ninguna lista. */
+const PROPUESTOS = [
+  ['persona de 1 palabra', 'Salgar'],
+  ['persona de 2 palabras', 'Ignacio Salgar'],
+  ['persona de 4 palabras', 'Juan Pablo Ortega Zuleta'],
+  ['empresa con palabra de la agencia', 'Colegio Los Arrayanes'],
+  ['apellido común', 'Camila Nieto'],
+  ['sustantivo de la agencia que no está en ninguna lista', 'combo playero'],
+] as const;
+
+describe('calificarNombreNuevo: sin vocabulario', () => {
+  it.each(PROPUESTOS)('%s («%s»): es el nombre PROPUESTO (se confirma antes de crear)', (_q, n) => {
+    expect(calificarNombreNuevo(n)).toBe('nombre');
+  });
+
+  it('lo que antes frenaba la lista de palabras también es un nombre propuesto: el «sí» lo frena', () => {
+    for (const n of ['zarandela', 'Pérez', 'brindoleta grupal', 'tía de Rosalba Quiñones', 'Fundación Mar Abierto', 'Grupo Andino', 'Marta 3005551234']) {
       expect([n, calificarNombreNuevo(n)]).toEqual([n, 'nombre']);
     }
   });
 
-  it('una sola palabra es duda, sea sustantivo inventado o apellido: se pregunta (nunca se crea)', () => {
-    for (const n of ['zarandela', 'trompiflo', 'Salgar', 'Pérez', 'doña Rosalba', 'Marta 3005551234']) {
-      expect([n, calificarNombreNuevo(n)]).toEqual([n, 'duda']);
-    }
-  });
-
-  it('vocabulario de la agencia, parentesco, gramática o forma de sustantivo común: duda', () => {
-    for (const n of ['brindoleta grupal', 'reserva Zuleta', 'tía de Rosalba Quiñones', 'el esposo de Marta', 'la hija de Ignacio',
-      'zarandelación Quiñones', 'trompiflamiento grupal', 'Ignacio y su familia', 'plan Salgar', 'Rosalba 12', 'de la Rosa']) {
-      expect([n, calificarNombreNuevo(n)]).toEqual([n, 'duda']);
-    }
-  });
-
-  it('sin nombre y por encima del tope', () => {
+  it('sin nombre, solo números y por encima del tope', () => {
     expect(calificarNombreNuevo(null)).toBe('sin_nombre');
     expect(calificarNombreNuevo('  ')).toBe('sin_nombre');
+    expect(calificarNombreNuevo('3005551234')).toBe('duda');
+    expect(calificarNombreNuevo('25')).toBe('duda');
     expect(calificarNombreNuevo('cotización con hotel 4 estrellas')).toBe('largo');
   });
 
@@ -43,74 +57,106 @@ describe('calificarNombreNuevo: lo que sigue a «nuevo» solo crea cliente si pa
     expect(leerNuevo('nueva, se llama Rosalba Quiñones')).toEqual({ cliente: 'Rosalba Quiñones' });
     expect(leerNuevo('cliente nuevo que se llama Ignacio Salgar')).toEqual({ cliente: 'Ignacio Salgar' });
   });
-});
 
-describe('la respuesta a «¿A qué viaje van?»', () => {
-  it('lo que no parece un nombre es `nuevo_en_duda`; lo de siempre sigue igual', () => {
-    expect(interpretarRespuestaNegocio('nueva zarandela', OPS)).toEqual({ tipo: 'nuevo_en_duda', propuesto: 'zarandela' });
-    expect(interpretarRespuestaNegocio('Nuevo trompiflo.', OPS)).toEqual({ tipo: 'nuevo_en_duda', propuesto: 'trompiflo' });
-    expect(interpretarRespuestaNegocio('nuevo Salgar', OPS)).toEqual({ tipo: 'nuevo_en_duda', propuesto: 'Salgar' });
-    expect(interpretarRespuestaNegocio('nueva tía de Rosalba', OPS)).toEqual({ tipo: 'nuevo_en_duda', propuesto: 'tía de Rosalba' });
-    expect(interpretarRespuestaNegocio('nuevo', OPS)).toEqual({ tipo: 'nuevo', cliente: null });
-    expect(interpretarRespuestaNegocio('cliente nuevo', OPS)).toEqual({ tipo: 'nuevo', cliente: null });
-    expect(interpretarRespuestaNegocio('nueva Daniela Rojas', OPS)).toEqual({ tipo: 'nuevo', cliente: 'Daniela Rojas' });
-    expect(interpretarRespuestaNegocio('nuevo: Juan Pablo Gómez Ruiz', OPS)).toEqual({ tipo: 'nuevo', cliente: 'Juan Pablo Gómez Ruiz' });
-    expect(interpretarRespuestaNegocio('nueva, se llama Rosalba Quiñones', OPS)).toEqual({ tipo: 'nuevo', cliente: 'Rosalba Quiñones' });
-    expect(interpretarRespuestaNegocio('nueva cotización con hotel 4 estrellas', OPS)).toEqual({ tipo: 'no_entendida' });
-  });
-
-  it('el texto de la re-pregunta cita lo propuesto y dice cómo seguir', () => {
-    expect(textoNombreNuevoEnDuda('zarandela')).toBe('Para crear un cliente nuevo necesito su nombre y apellido; con «zarandela» no lo creo.'
+  it('el texto de la re-pregunta (solo números) cita lo propuesto y dice cómo seguir', () => {
+    expect(textoNombreNuevoEnDuda('3005551234')).toBe('Para crear un cliente nuevo necesito su nombre; con «3005551234» no lo creo.'
       + ' Responde NUEVO y el nombre completo (ej.: NUEVO Marta Gómez), NUEVO solo para tomarlo de los mensajes, o el número del viaje.');
   });
 });
 
-describe('el encabezado', () => {
-  const VS: ViajeAbierto[] = [{ id: 'r', codigo: 'R 26 1', cliente: 'ROSALBA QUIÑONES', destino: 'CARTAGENA' }];
-  it('«nueva zarandela» es un «nuevo» SIN nombre: el bot pide el nombre; con nombre y apellido, como siempre', () => {
-    expect(resolverEncabezado('nueva zarandela', VS)).toEqual({ tipo: 'nuevo', cliente: null, en_duda: 'zarandela' });
-    expect(resolverEncabezado('nuevo Salgar', VS)).toEqual({ tipo: 'nuevo', cliente: null, en_duda: 'Salgar' });
-    expect(resolverEncabezado('nuevo Ignacio Salgar', VS)).toEqual({ tipo: 'nuevo', cliente: 'Ignacio Salgar' });
-    expect(resolverEncabezado('nuevo', VS)).toEqual({ tipo: 'nuevo', cliente: null });
-    expect(resolverEncabezado('nueva cotización con hotel 4 estrellas', VS)).toBeNull();
+describe('las cuatro entradas leen lo mismo', () => {
+  it.each(PROPUESTOS)('%s («%s»): lista, encabezado y «el N es de nuevo …» proponen el mismo nombre', (_q, n) => {
+    expect(interpretarRespuestaNegocio(`nuevo ${n}`, OPS)).toEqual({ tipo: 'nuevo', cliente: n });
+    expect(resolverEncabezado(`nuevo ${n}`, [PEDRO])).toEqual({ tipo: 'nuevo', cliente: n });
+    const ms: MensajeViaje[] = [
+      { n: 1, cuerpo: 'Pedro Prueba5', reenviado: false, tipo: 'text', en: '2026-10-03T10:00:00Z' },
+      { n: 2, cuerpo: 'Queremos ir a San Andrés', reenviado: true, tipo: 'text', en: '2026-10-03T10:00:05Z' },
+    ];
+    const { segmentos, encabezados } = armarSegmentos(ms, [PEDRO], { horasCajaActiva: 4 });
+    const plan = armarPlan({ mensajes: ms, viajes: [PEDRO], segmentos, encabezados });
+    expect(interpretarRespuestaPlan(`el 1 es de nuevo ${n}`, plan, [PEDRO])).toMatchObject({ tipo: 'corregir', cambios: [{ a: { tipo: 'nuevo', cliente: n } }] });
   });
 
-  it('en la tanda, «nueva zarandela» abre una caja sin nombre: el resumen nunca dice «NUEVO zarandela»', () => {
-    const ms: MensajeViaje[] = [
-      { n: 1, cuerpo: 'nueva zarandela', reenviado: false, tipo: 'text', en: '2026-10-03T10:00:00Z' },
-      { n: 2, cuerpo: 'Queremos ir a Cartagena en diciembre', reenviado: true, tipo: 'text', en: '2026-10-03T10:00:05Z' },
-    ];
-    const { segmentos, encabezados } = armarSegmentos(ms, VS, { horasCajaActiva: 4 });
-    const plan = armarPlan({ mensajes: ms, viajes: VS, segmentos, encabezados });
-    expect(JSON.stringify(plan)).not.toMatch(/zarandela"/i);
-    expect(plan.mensajes.some(m => m.destino?.tipo === 'nuevo' && m.destino.cliente)).toBe(false);
+  it('lo de siempre sigue igual: «nuevo» a secas, solo números y el tope', () => {
+    expect(interpretarRespuestaNegocio('nuevo', OPS)).toEqual({ tipo: 'nuevo', cliente: null });
+    expect(interpretarRespuestaNegocio('cliente nuevo', OPS)).toEqual({ tipo: 'nuevo', cliente: null });
+    expect(interpretarRespuestaNegocio('nuevo 3005551234', OPS)).toEqual({ tipo: 'nuevo_en_duda', propuesto: '3005551234' });
+    expect(interpretarRespuestaNegocio('nueva cotización con hotel 4 estrellas', OPS)).toEqual({ tipo: 'no_entendida' });
+    expect(resolverEncabezado('nuevo 3005551234', [PEDRO])).toEqual({ tipo: 'nuevo', cliente: null, en_duda: '3005551234' });
+    expect(resolverEncabezado('nueva cotización con hotel 4 estrellas', [PEDRO])).toBeNull();
+    expect(interpretarRespuestaPlan('el 2 es de nuevo grupo de amigos del colegio de Ignacio', armarPlan({ mensajes: [], viajes: [], segmentos: [], encabezados: [] }), [])).toMatchObject({ tipo: 'no_entendida' });
   });
 });
 
-describe('«el N es de nuevo …» con el resumen', () => {
-  const VS: ViajeAbierto[] = [{ id: 'r', codigo: 'R 26 1', cliente: 'ROSALBA QUIÑONES', destino: 'CARTAGENA' }];
-  const ms: MensajeViaje[] = [
-    { n: 1, cuerpo: 'Rosalba Quiñones', reenviado: false, tipo: 'text', en: '2026-10-03T10:00:00Z' },
-    { n: 2, cuerpo: 'Queremos ir a Cartagena', reenviado: true, tipo: 'text', en: '2026-10-03T10:00:05Z' },
-    { n: 3, cuerpo: 'Somos 4 adultos', reenviado: true, tipo: 'text', en: '2026-10-03T10:00:10Z' },
-  ];
-  const { segmentos, encabezados } = armarSegmentos(ms, VS, { horasCajaActiva: 4 });
-  const plan = armarPlan({ mensajes: ms, viajes: VS, segmentos, encabezados });
-
-  it('con algo que no parece un nombre: no entra al borrador y se pide nombre y apellido', () => {
-    const r = interpretarRespuestaPlan('el 2 es de nuevo trompiflo', plan, VS);
-    expect(r).toEqual({ tipo: 'no_entendida', aviso: 'Para un cliente nuevo escribe su nombre y apellido: «el 2 es de nuevo Marta Gómez». Con «de nuevo trompiflo» no lo creo.' });
-    expect(interpretarRespuestaPlan('el 2 es nuevo Salgar', plan, VS)).toMatchObject({ tipo: 'no_entendida' });
-    expect(interpretarRespuestaPlan('el 2 es de nueva tía de Rosalba', plan, VS)).toMatchObject({ tipo: 'no_entendida' });
+describe('clientes con viaje abierto: la confirmación lo dice (también en el atajo)', () => {
+  it('nombre de pila, los nombres, el apellido, o un diminutivo de parentesco con parte del nombre', () => {
+    for (const n of ['Rosalba', 'Rosalba Tovar', 'Ignacio Quiñones', 'tiíta Rosalba Quiñones', 'Rosalva Quiñones']) {
+      expect([n, viajesParecidos(n, [ROSALBA, PEDRO]).map(v => v.id)]).toEqual([n, ['r']]);
+    }
+    for (const n of ['Ignacio Salgar', 'combo playero', 'de la Rosa']) expect([n, viajesParecidos(n, [ROSALBA, PEDRO])]).toEqual([n, []]);
   });
 
-  it('por encima del tope: no se entiende (antes dejaba «NUEVO <todo el texto>» en el borrador)', () => {
-    const r = interpretarRespuestaPlan('el 2 es de nuevo grupo de amigos del colegio de Ignacio', plan, VS);
-    expect(r.tipo).toBe('no_entendida');
+  it('la pregunta aparte, con el número de la lista o el código', () => {
+    expect(textoConfirmarNuevo({ nombre: 'combo playero', conLista: true })).toBe(
+      '¿Creo el cliente nuevo «combo playero»? Responde SÍ, o escribe el nombre correcto, o el número del viaje.\nNo he creado ni cargado nada.');
+    expect(textoConfirmarNuevo({ nombre: 'Rosalba Tovar', conLista: true, parecidos: [{ viaje: ROSALBA, numero: 2 }] })).toBe([
+      '¿Creo el cliente nuevo «Rosalba Tovar»?',
+      'Ya hay un viaje de Rosalba Quiñones Tovar (R 26 1). ¿Es para ese (responde 2) o es un cliente nuevo (responde SÍ)?',
+      'O escribe el nombre correcto.',
+      'No he creado ni cargado nada.',
+    ].join('\n'));
+    expect(textoConfirmarNuevo({ nombre: 'Rosalba', conLista: false, parecidos: [{ viaje: ROSALBA, numero: null }] }))
+      .toContain('¿Es para ese (responde R 26 1) o es un cliente nuevo (responde SÍ)?');
   });
 
-  it('con nombre y apellido, o «se llama …», sigue igual', () => {
-    expect(interpretarRespuestaPlan('el 2 es de nuevo Ignacio Salgar', plan, VS)).toMatchObject({ tipo: 'corregir', cambios: [{ a: { tipo: 'nuevo', cliente: 'Ignacio Salgar' } }] });
-    expect(interpretarRespuestaPlan('el 2 es de nuevo, se llama Ignacio Salgar', plan, VS)).toMatchObject({ tipo: 'corregir', cambios: [{ a: { tipo: 'nuevo', cliente: 'Ignacio Salgar' } }] });
+  it('el acuse del encabezado y el resumen del reparto', () => {
+    expect(respuestaAlEncabezado(resolverEncabezado('nueva Rosalba Tovar', [ROSALBA, PEDRO]))).toBe(
+      '📌 Cliente nuevo: Rosalba Tovar. Lo creo solo cuando respondas SÍ al resumen.\nYa hay un viaje de Rosalba Quiñones Tovar (R 26 1). Si es para ese, escribe R 26 1.');
+    expect(textoAcuseNuevo('combo playero')).toBe('📌 Cliente nuevo: combo playero. Lo creo solo cuando respondas SÍ al resumen.');
+    const ms: MensajeViaje[] = [
+      { n: 1, cuerpo: 'nueva Rosalba Tovar', reenviado: false, tipo: 'text', en: '2026-10-03T10:00:00Z' },
+      { n: 2, cuerpo: 'Queremos ir a Cartagena', reenviado: true, tipo: 'text', en: '2026-10-03T10:00:05Z' },
+      { n: 3, cuerpo: 'Somos 4 adultos', reenviado: true, tipo: 'text', en: '2026-10-03T10:00:10Z' },
+    ];
+    const { segmentos, encabezados } = armarSegmentos(ms, [ROSALBA], { horasCajaActiva: 4 });
+    const plan = armarPlan({ mensajes: ms, viajes: [ROSALBA], segmentos, encabezados });
+    const resumen = partesResumenPlan(plan, ms, undefined, [ROSALBA]).join('\n');
+    expect(resumen).toContain('1) Cliente nuevo: Rosalba Tovar — 2 mensajes');
+    expect(resumen).toContain('⚠ 1) Ya hay un viaje de Rosalba Quiñones Tovar (R 26 1). ¿Es para ese («el 1 y 2 son de R 26 1») o es un cliente nuevo (responde SÍ)?');
+    // La corrección que propone el aviso se entiende tal cual, y el «sí» sin corregir es el cliente nuevo.
+    expect(interpretarRespuestaPlan('el 1 y 2 son de R 26 1', plan, [ROSALBA])).toMatchObject({ tipo: 'corregir', cambios: [{ ns: [2, 3], a: { tipo: 'existente', negocio_id: 'r' } }] });
+    expect(interpretarRespuestaPlan('sí', plan, [ROSALBA])).toEqual({ tipo: 'si' });
+  });
+});
+
+describe('el «sí» es explícito', () => {
+  it('«Cliente nuevo: X» en el resumen, y un reparto con un cliente nuevo nunca se carga sin preguntar (`si_duda`)', () => {
+    expect(nombreDestino({ tipo: 'nuevo', cliente: 'combo playero' })).toBe('Cliente nuevo: combo playero');
+    const ms: MensajeViaje[] = [
+      { n: 1, cuerpo: 'nuevo combo playero', reenviado: false, tipo: 'text', en: '2026-10-03T10:00:00Z' },
+      { n: 2, cuerpo: 'Queremos ir a Cartagena', reenviado: true, tipo: 'text', en: '2026-10-03T10:00:05Z' },
+    ];
+    const { segmentos, encabezados } = armarSegmentos(ms, [PEDRO], { horasCajaActiva: 4 });
+    const plan = armarPlan({ mensajes: ms, viajes: [PEDRO], segmentos, encabezados });
+    expect(planSinDudas(plan)).toBe(false);
+    const ms2: MensajeViaje[] = [{ ...ms[0], cuerpo: 'P 26 2' }, ms[1]];
+    const r2 = armarSegmentos(ms2, [PEDRO], { horasCajaActiva: 4 });
+    expect(planSinDudas(armarPlan({ mensajes: ms2, viajes: [PEDRO], segmentos: r2.segmentos, encabezados: r2.encabezados }))).toBe(true);
+  });
+
+  it('la respuesta a «¿Creo el cliente nuevo «X»?»: SÍ crea; un nombre reemplaza; el número o el código cancelan', () => {
+    for (const x of ['sí', 'Si', 'SÍ', 'si señora', 'NUEVO', 'créalo', 'sí, créalo']) expect([x, interpretarConfirmacionNuevo(x, OPS)]).toEqual([x, { tipo: 'si' }]);
+    expect(interpretarConfirmacionNuevo('Ignacio Salgar', OPS)).toEqual({ tipo: 'nombre', nombre: 'Ignacio Salgar' });
+    expect(interpretarConfirmacionNuevo('nuevo Ignacio Salgar', OPS)).toEqual({ tipo: 'nombre', nombre: 'Ignacio Salgar' });
+    expect(interpretarConfirmacionNuevo('se llama Colegio Los Arrayanes', OPS)).toEqual({ tipo: 'nombre', nombre: 'Colegio Los Arrayanes' });
+    // El nombre exacto de una clienta con viaje abierto no elige su viaje: es otro nombre propuesto (y se vuelve a preguntar).
+    expect(interpretarConfirmacionNuevo('Rosalba Quiñones Tovar', OPS)).toEqual({ tipo: 'nombre', nombre: 'Rosalba Quiñones Tovar' });
+    expect(interpretarConfirmacionNuevo('2', OPS)).toEqual({ tipo: 'existente', negocio_id: 'r' });
+    expect(interpretarConfirmacionNuevo('R 26 1', OPS)).toEqual({ tipo: 'existente', negocio_id: 'r' });
+    expect(interpretarConfirmacionNuevo('T1 26 9', OPS)).toEqual({ tipo: 'codigo', codigo: 'T1269' });
+    expect(interpretarConfirmacionNuevo('DESCARTAR', OPS)).toEqual({ tipo: 'descartar' });
+    for (const x of ['ok', '👍', 'no', 'no sé', '¿cuál?', '7', 'sí pero falta uno', '', 'nueva cotización con hotel 4 estrellas']) {
+      expect([x, interpretarConfirmacionNuevo(x, OPS)]).toEqual([x, { tipo: 'no_entendida' }]);
+    }
   });
 });

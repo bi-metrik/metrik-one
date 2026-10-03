@@ -70,7 +70,10 @@ import {
   aplicarCambios,
   armarPlan,
   esNombreNuevo,
+  interpretarConfirmacionNuevo,
   resolverEncabezado,
+  textoConfirmarNuevo,
+  viajesParecidos,
   armarSegmentos,
   mensajesDelResumen,
   nombresDeLasCajas,
@@ -574,6 +577,13 @@ async function entender(supabase: SupabaseClient, ent: Fila): Promise<void> {
   // ¿A qué viaje va? Con la pregunta vieja (`negocio_opciones` nula) la respuesta es el
   // cliente y el camino es el de siempre: negocio nuevo.
   const opciones = Array.isArray(entrega?.negocio_opciones) ? (entrega!.negocio_opciones as OpcionNegocio[]) : null;
+
+  // «¿Creo el cliente nuevo «X»?» espera su «sí» (2026-10-03): la respuesta es para esa pregunta.
+  const porConfirmar = nuevoPorConfirmar(ent, null);
+  if (porConfirmar) {
+    await atenderConfirmacionNuevo(supabase, ent, porConfirmar, respuesta, crudos, opciones, { revisarDosViajes: true });
+    return;
+  }
   let clienteTexto: string | null = entrega?.cliente_texto ?? null;
   if (opciones) {
     let r = interpretarRespuestaNegocio(respuesta, opciones);
@@ -595,6 +605,12 @@ async function entender(supabase: SupabaseClient, ent: Fila): Promise<void> {
       await volverAPreguntarNegocio(supabase, ent, opciones, textoNombreNuevoEnDuda(r.propuesto));
       return;
     }
+    // «nuevo X»: ningún cliente se crea sin un «sí» a un texto que muestra su nombre tal cual (2026-10-03).
+    // Mientras tanto no se carga nada en ningún viaje.
+    if (r.tipo === 'nuevo' && r.cliente) {
+      await pedirConfirmacionNuevo(supabase, ent, r.cliente, opciones);
+      return;
+    }
     let negocioId: string | null = r.tipo === 'existente' ? r.negocio_id : null;
     if (r.tipo === 'codigo') {
       negocioId = await negocioAbiertoPorCodigo(supabase, workspaceId, r.codigo);
@@ -608,10 +624,10 @@ async function entender(supabase: SupabaseClient, ent: Fila): Promise<void> {
       await cargarEnNegocioExistente(supabase, ent, negocioId, crudos, opciones);
       return;
     }
-    // NUEVO: lo que escribió después («NUEVO Marta Gómez») es el cliente.
-    clienteTexto = r.tipo === 'nuevo' ? r.cliente : null;
-    await actualizar(supabase, ent.id as string, { destino: 'nuevo', confirmacion_pendiente: null });
-    await entenderNuevo(supabase, ent, crudos, clienteTexto, { revisarDosViajes: true, nuevoExplicito: r.tipo === 'nuevo' && !!r.cliente });
+    // NUEVO a secas: el nombre sale de los mensajes y se pregunta el contacto (que lo muestra antes de crearlo).
+    clienteTexto = null;
+    await actualizar(supabase, ent.id as string, { destino: 'nuevo', confirmacion_pendiente: null, contacto_nombre: null });
+    await entenderNuevo(supabase, ent, crudos, clienteTexto, { revisarDosViajes: true });
     return;
   }
 
@@ -740,6 +756,78 @@ async function entenderNuevo(
   }
 }
 
+// ── Cliente nuevo: nada se crea sin un «sí» ─────────────────────────────────
+
+/**
+ * ¿La fila espera el «sí» a «¿Creo el cliente nuevo «X»?»? Devuelve X o `null`. Sin migración: la marca es
+ * `destino = 'nuevo'` con `contacto_nombre` (el nombre propuesto), puestos por `pedirConfirmacionNuevo`.
+ *   · Sin reparto (`destinoDelPlan` nulo): solo ahí se escribe `destino = 'nuevo'` con un nombre, antes
+ *     de correr el modelo. Después del «sí» la marca sigue, y un reintento del cron vuelve a leer el «sí».
+ *   · Un viaje del reparto: su destino viene del resumen ya confirmado. Solo espera si el resumen lo
+ *     mandaba a un viaje EXISTENTE y el comercial pidió un cliente nuevo después (el aviso de cruce).
+ */
+export function nuevoPorConfirmar(ent: Fila, destinoDelPlan: 'nuevo' | 'existente' | null): string | null {
+  const nombre = String(ent.contacto_nombre ?? '').trim();
+  if (ent.destino !== 'nuevo' || !nombre || ent.negocio_id || ent.contacto_id) return null;
+  if (destinoDelPlan === 'nuevo') return null;
+  return nombre;
+}
+
+/**
+ * «¿Creo el cliente nuevo «X»?» (2026-10-03). Se pregunta ANTES de leer los mensajes con el modelo: nada
+ * se carga en ningún viaje ni se crea hasta el «sí». Si X se parece al cliente de un viaje abierto, la
+ * pregunta lo dice con su número en la lista (o su código).
+ */
+async function pedirConfirmacionNuevo(
+  supabase: SupabaseClient, ent: Fila, nombre: string, opciones: OpcionNegocio[] | null, aviso: string | null = null,
+): Promise<void> {
+  const viajes = (await viajesAbiertosDeLaBandeja(supabase, ent.workspace_id as string)) ?? [];
+  const parecidos = viajesParecidos(nombre, viajes).map(v => {
+    const i = (opciones ?? []).findIndex(o => o.id === v.id);
+    return { viaje: v, numero: i >= 0 ? i + 1 : null };
+  });
+  const texto = textoConfirmarNuevo({ nombre, parecidos, conLista: !!opciones && opciones.length > 0, aviso });
+  // El prefijo nombra la tanda (o el viaje del reparto), no el nombre que todavía no se confirma.
+  const prefijo = await nombreDelViaje(supabase, { ...ent, contacto_nombre: null, cliente: null });
+  await preguntarYEsperar(supabase, ent, conNombreDelViaje(prefijo, texto), null, { destino: 'nuevo', contacto_nombre: nombre }, { sinNombre: true });
+}
+
+/** La respuesta a «¿Creo el cliente nuevo «X»?». */
+async function atenderConfirmacionNuevo(
+  supabase: SupabaseClient, ent: Fila, nombre: string, respuesta: string, crudos: ReadonlyArray<MensajeCrudo>,
+  opciones: OpcionNegocio[] | null, opts: { revisarDosViajes?: boolean },
+): Promise<void> {
+  const r = interpretarConfirmacionNuevo(respuesta, opciones ?? []);
+  if (r.tipo === 'si') {
+    // El «sí»: ahora sí, el cliente con ese nombre (si ya hay un contacto igual, se pregunta «¿es el mismo?»).
+    await entenderNuevo(supabase, ent, crudos, nombre, { revisarDosViajes: opts.revisarDosViajes, nuevoExplicito: true });
+    return;
+  }
+  if (r.tipo === 'nombre') {
+    await pedirConfirmacionNuevo(supabase, ent, r.nombre, opciones);
+    return;
+  }
+  if (r.tipo === 'descartar') {
+    await descartarEntrega(supabase, ent, crudos.length, 'el comercial descartó en «¿Creo el cliente nuevo?»');
+    return;
+  }
+  let negocioId: string | null = r.tipo === 'existente' ? r.negocio_id : null;
+  if (r.tipo === 'codigo') {
+    negocioId = await negocioAbiertoPorCodigo(supabase, ent.workspace_id as string, r.codigo);
+    if (!negocioId) {
+      await pedirConfirmacionNuevo(supabase, ent, nombre, opciones, `No encontré un viaje abierto con el código «${respuesta.trim().slice(0, 20)}».`);
+      return;
+    }
+  }
+  if (negocioId) {
+    // El número o el código del viaje: se cancela el nuevo y se carga ahí.
+    await actualizar(supabase, ent.id as string, { destino: 'existente', negocio_destino_id: negocioId, contacto_nombre: null, confirmacion_pendiente: null });
+    await cargarEnNegocioExistente(supabase, { ...ent, destino: 'existente', contacto_nombre: null }, negocioId, crudos, opciones ?? []);
+    return;
+  }
+  await pedirConfirmacionNuevo(supabase, ent, nombre, opciones, `No entendí «${respuesta.trim().slice(0, 40)}».`);
+}
+
 // ── «¿A qué viaje van?» ──────────────────────────────────────────────────────
 
 /** Una relación embebida de PostgREST, venga como objeto o como lista. */
@@ -836,7 +924,7 @@ export async function candidatosDeEncabezado(
  */
 export async function pendienteDeLaTanda(
   supabase: SupabaseClient, workspaceId: string, phone: string, horasCajaActiva: number,
-): Promise<(PendienteDeLaCaja & { equipo: string[] }) | null> {
+): Promise<(PendienteDeLaCaja & { equipo: string[]; viajes: ViajeAbierto[] }) | null> {
   const { data: abierta, error } = await supabase.from('wa_bandeja_entregas').select('id')
     .eq('workspace_id', workspaceId).eq('remitente_phone', phone).eq('estado', 'abierta').limit(1).maybeSingle();
   if (error || !abierta) return null;
@@ -845,7 +933,7 @@ export async function pendienteDeLaTanda(
   const c = await candidatosDeEncabezado(supabase, workspaceId);
   if (!c) return null;
   const p = pendienteDeLaCaja(armarSegmentos(aViaje(crudos), c.viajes, { horasCajaActiva, equipo: c.equipo }).segmentos);
-  return p ? { ...p, equipo: c.equipo } : null;
+  return p ? { ...p, equipo: c.equipo, viajes: c.viajes } : null;
 }
 
 /**
@@ -893,7 +981,7 @@ async function codigosCerrados(supabase: SupabaseClient, workspaceId: string): P
  */
 async function armarReparto(
   supabase: SupabaseClient, entregaId: string, workspaceId: string, crudos: ReadonlyArray<MensajeCrudo>,
-): Promise<{ plan: PlanViajes; bandeja: ConfigBandeja; conEncabezados: boolean; nombres: string[] } | null> {
+): Promise<{ plan: PlanViajes; bandeja: ConfigBandeja; conEncabezados: boolean; nombres: string[]; viajes: ViajeAbierto[] } | null> {
   const l = await lineaDeLaBandeja(supabase, workspaceId);
   if (typeof l === 'string') {
     console.error(`[wa-entendimiento] sin reparto para ${entregaId}: ${l}`);
@@ -910,7 +998,7 @@ async function armarReparto(
     mensajes, viajes, segmentos, encabezados,
     codigosCerrados: desconocidos ? await codigosCerrados(supabase, workspaceId) : new Set(),
   });
-  return { plan, bandeja: l.bandeja, conEncabezados: tieneEncabezados(segmentos), nombres: nombresDeLasCajas(segmentos) };
+  return { plan, bandeja: l.bandeja, conEncabezados: tieneEncabezados(segmentos), nombres: nombresDeLasCajas(segmentos), viajes };
 }
 
 /**
@@ -946,7 +1034,7 @@ export async function armarPreguntaNegocio(
         return { texto: '', plan: r.plan, sinContenido: nombres };
       }
       const sinDudas = r.bandeja.confirmar === 'si_duda' && planSinDudas(r.plan);
-      const partes = partesResumenPlan(r.plan, aViaje(crudos));
+      const partes = partesResumenPlan(r.plan, aViaje(crudos), undefined, r.viajes);
       return { texto: partes[partes.length - 1], antes: partes.slice(0, -1), plan: r.plan, sinDudas };
     }
   }
@@ -1041,12 +1129,12 @@ async function resolverPlan(supabase: SupabaseClient, ent: Fila, plan: PlanViaje
   if (r.tipo === 'corregir') {
     const nuevo = aplicarCambios(plan, r.cambios);
     await supabase.from('wa_bandeja_entregas').update({ plan_viajes: nuevo }).eq('id', ent.entrega_id);
-    await preguntarResumen(supabase, ent, partesResumenPlan(nuevo, mensajes, 'Corregido. Así queda:'));
+    await preguntarResumen(supabase, ent, partesResumenPlan(nuevo, mensajes, 'Corregido. Así queda:', viajes));
     return;
   }
   if (r.tipo === 'como_corregir' || r.tipo === 'no_entendida') {
     const aviso = r.tipo === 'como_corregir' ? TEXTO_COMO_CORREGIR : (r.aviso ?? `No entendí «${respuesta.slice(0, 40)}». No cargué nada.`);
-    await preguntarResumen(supabase, ent, partesResumenPlan(plan, mensajes, aviso));
+    await preguntarResumen(supabase, ent, partesResumenPlan(plan, mensajes, aviso, viajes));
     return;
   }
   if (r.tipo === 'descartar_todo') {
@@ -1131,8 +1219,12 @@ async function entenderSegmento(
         return;
       }
     }
+    if (r.tipo === 'nuevo' && r.cliente) {
+      await pedirConfirmacionNuevo(supabase, ent, r.cliente, null);
+      return;
+    }
     if (r.tipo === 'nuevo') {
-      await entenderNuevo(supabase, ent, delGrupo, r.cliente, { nuevoExplicito: !!r.cliente });
+      await entenderNuevo(supabase, ent, delGrupo, null, {});
       return;
     }
     if (r.tipo === 'nuevo_en_duda') {
@@ -1143,10 +1235,16 @@ async function entenderSegmento(
     return;
   }
   const destino: DestinoPlan = grupo.destino;
+  // El viaje iba a uno existente y el comercial pidió un cliente nuevo: espera su «sí» (2026-10-03).
+  const porConfirmar = nuevoPorConfirmar(ent, destino.tipo);
+  if (porConfirmar) {
+    await atenderConfirmacionNuevo(supabase, ent, porConfirmar, String(ent.respuesta_negocio ?? ''), delGrupo, null, {});
+    return;
+  }
   if (destino.tipo === 'existente') {
     await cargarEnNegocioExistente(supabase, ent, destino.negocio_id, delGrupo, []);
   } else {
-    // «nuevo Laura Prueba» en el encabezado ya es la decisión (prueba en vivo del 2026-10-01).
+    // «nuevo Laura Prueba» en el encabezado: el comercial ya dijo «sí» al resumen, que decía «Cliente nuevo: Laura Prueba».
     await entenderNuevo(supabase, ent, delGrupo, destino.cliente, { nuevoExplicito: !!destino.cliente });
   }
 }
@@ -1452,6 +1550,17 @@ async function resolverRespuesta(supabase: SupabaseClient, ent: Fila): Promise<v
     return;
   }
 
+  // Un nombre que el bot no mostró («NUEVO otro nombre», o el nombre suelto tras «No sé el nombre del
+  // cliente»): no se crea así. Se vuelve a preguntar mostrándolo tal cual; NUEVO a esa pregunta lo crea
+  // (2026-10-03: ningún cliente sin un «sí» a un texto con su nombre).
+  if (r.nombre && normalizarNombre(r.nombre) !== normalizarNombre(String(ent.contacto_nombre ?? ''))) {
+    const candidatos = await candidatosDeContacto(supabase, workspaceId, r.nombre, salida.cliente);
+    const d = decidirContacto({ clienteTexto: r.nombre, extraido: salida.cliente, candidatos });
+    await preguntarContacto(supabase, ent, d.tipo === 'unico'
+      ? { tipo: 'preguntar', motivo: 'mismo', opciones: [d.contacto], nombre: r.nombre }
+      : { ...d, nombre: r.nombre });
+    return;
+  }
   await crearContactoYNegocio(supabase, ent, cfg, salida, salida.cliente.telefono, r.nombre);
 }
 
@@ -1618,7 +1727,7 @@ export async function preguntaAbierta(
 ): Promise<PreguntaAbierta | null> {
   const desde = new Date(Date.now() - HORAS_RESPUESTA_CONTACTO * 3600_000).toISOString();
   const { data: ents } = await supabase.from('wa_bandeja_entendimientos')
-    .select('id, entrega_id, segmento, estado, confirmacion_pendiente, contacto_nombre, contacto_opciones, cliente, negocio_destino_id, pregunta_negocio_at, pregunta_contacto_at, respuesta_negocio, respuesta_contacto')
+    .select('id, entrega_id, segmento, estado, confirmacion_pendiente, destino, contacto_nombre, contacto_opciones, cliente, negocio_destino_id, negocio_id, contacto_id, pregunta_negocio_at, pregunta_contacto_at, respuesta_negocio, respuesta_contacto')
     .eq('workspace_id', workspaceId).eq('remitente_phone', phone).in('estado', ['esperando_negocio', 'esperando_contacto']).limit(20);
   for (const e of (ents ?? []) as Fila[]) {
     if (excepto.includes(e.id as string)) continue;
@@ -1643,10 +1752,14 @@ export async function preguntaAbierta(
       const { data: en } = await supabase.from('wa_bandeja_entregas').select('plan_viajes').eq('id', e.entrega_id).maybeSingle();
       resumen = !!en?.plan_viajes;
     }
+    // «¿Creo el cliente nuevo «X»?» (2026-10-03): se contesta como «¿A qué viaje van?» (un sí, un nombre,
+    // un número o un código), así que espera lo mismo.
+    const porConfirmar = !c && !resumen ? nuevoPorConfirmar(e, null) : null;
     const corta = c === 'cruce' ? '¿Lo cargo ahí? SÍ / código / DESCARTAR'
       : c === 'sin_solicitud' ? '¿Lo creo igual? SÍ / DESCARTAR'
       : c === 'dos_viajes' ? 'DESCARTAR y reenvía con encabezados'
       : resumen ? '¿Así? SÍ o corrige'
+      : porConfirmar ? `¿Creo el cliente nuevo «${porConfirmar.slice(0, 40)}»? SÍ, el nombre correcto, o el número o código del viaje`
       : '¿A qué viaje van? Número, código, NUEVO y el nombre, o DESCARTAR';
     const espera = c === 'cruce' || (!c && !resumen) ? 'viaje' : resumen ? 'resumen' : 'otra';
     return { tipo: 'negocio', id: e.id as string, nombre, corta, espera };

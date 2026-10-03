@@ -84,7 +84,7 @@ describe('2 · «nuevo» suelto', () => {
   it('el bot pide el nombre en el acto', () => {
     expect(respuestaAlEncabezado(resolverEncabezado('nuevo', vs))).toBe(TEXTO_PIDE_NOMBRE_NUEVO);
     expect(respuestaAlEncabezado(resolverEncabezado('Nueva', vs))).toBe(TEXTO_PIDE_NOMBRE_NUEVO);
-    expect(respuestaAlEncabezado(resolverEncabezado('nuevo Pedro Gómez', vs))).toBe('📌 NUEVO Pedro Gómez');
+    expect(respuestaAlEncabezado(resolverEncabezado('nuevo Pedro Gómez', vs))).toBe('📌 Cliente nuevo: Pedro Gómez. Lo creo solo cuando respondas SÍ al resumen.');
   });
 
   it('sin nombre, lo que sigue queda sin asignar; con el nombre, va al NUEVO con ese nombre', () => {

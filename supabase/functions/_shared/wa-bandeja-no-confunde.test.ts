@@ -42,8 +42,11 @@ describe('regla 2 · «nuevo» en cualquier forma', () => {
     ['nuevo Daniel Pérez', 'Daniel Pérez'],
     ['NUEVO daniel perez', 'daniel perez'],
   ])('«%s» → NUEVO %s, aunque haya un viaje abierto de alguien con el mismo apellido', (texto, cliente) => {
-    expect(resolverEncabezado(texto, [LINA, LUISA])).toEqual({ tipo: 'nuevo', cliente });
-    expect(respuestaAlEncabezado(resolverEncabezado(texto, [LINA, LUISA]))).toBe(`📌 NUEVO ${cliente}`);
+    expect(resolverEncabezado(texto, [LINA, LUISA])).toMatchObject({ tipo: 'nuevo', cliente });
+    // No es candidato del viaje de la otra persona; el acuse dice que se parece (2026-10-03) y que se crea con el «sí».
+    const acuse = respuestaAlEncabezado(resolverEncabezado(texto, [LINA, LUISA]))!;
+    expect(acuse.split('\n')[0]).toBe(`📌 Cliente nuevo: ${cliente}. Lo creo solo cuando respondas SÍ al resumen.`);
+    expect(acuse.split('\n')[1]).toBe(/p[eé]rez/i.test(cliente) ? 'Ya hay un viaje de Lina Pérez (L1 26 1). Si es para ese, escribe L1 26 1.' : 'Ya hay un viaje de Luisa Gómez (L 26 4). Si es para ese, escribe L 26 4.');
   });
 
   it.each(['otro cliente', 'Otra clienta', 'otro cliente.', 'cambio de cliente', 'cliente nuevo', 'nuevo cliente', 'nueva', 'es otro cliente'])(
@@ -55,7 +58,8 @@ describe('regla 2 · «nuevo» en cualquier forma', () => {
 
   it('«otro cliente X»: X exacto es su viaje; un nombre que no está, un NUEVO', () => {
     expect(resolverEncabezado('otro cliente Lina Pérez', [LINA])).toMatchObject({ tipo: 'viaje', viaje: { id: 'lina' } });
-    expect(resolverEncabezado('otro cliente: Daniel Pérez', [LINA])).toEqual({ tipo: 'nuevo', cliente: 'Daniel Pérez' });
+    expect(resolverEncabezado('otro cliente: Daniel Pérez', [LINA])).toEqual({ tipo: 'nuevo', cliente: 'Daniel Pérez', parecidos: [LINA] });
+    expect(resolverEncabezado('otro cliente: Daniel Rojas', [LINA])).toEqual({ tipo: 'nuevo', cliente: 'Daniel Rojas' });
   });
 
   it('lo que no es un «nuevo» no lo es: «nuevos precios», una nota larga, «el cliente nuevo» en una frase', () => {
