@@ -5,6 +5,7 @@ import { useState, useRef, useEffect, useCallback } from 'react'
 import { useTransitionTolerante } from '@/hooks/use-transition-tolerante'
 import { createPortal } from 'react-dom'
 import Link from 'next/link'
+import { SenalDeEnlace } from '@/components/navegacion-pendiente'
 import {
   ChevronRight,
   FolderOpen,
@@ -2435,6 +2436,8 @@ export default function NegocioDetailClient({
         >
           <ArrowLeft className="h-3 w-3" />
           Negocios
+          {/* Volver a la lista muestra la misma animación que abrir una tarjeta. */}
+          <SenalDeEnlace />
         </Link>
       </div>
 
