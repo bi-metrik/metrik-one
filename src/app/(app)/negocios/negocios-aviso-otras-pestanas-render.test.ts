@@ -41,6 +41,7 @@ vi.mock('./descargar-excel-button', () => ({
 }))
 
 const { default: NegociosClient } = await import('./negocios-client')
+const { propsLista } = await import('../../../../test/props-lista-negocios')
 
 const fila = (codigo: string, stage: string, estado: string) =>
   ({
@@ -102,14 +103,17 @@ const CERRADOS = [
 
 const pintar = (searchParams: Record<string, string>) =>
   renderToStaticMarkup(
-    React.createElement(NegociosClient, {
-      negocios: ABIERTOS,
-      cerrados: CERRADOS,
-      stagesActivos: ['venta', 'ejecucion', 'cobro'],
-      etapas: [],
-      searchParams,
-      hoyISO: '2026-09-10',
-    }),
+    React.createElement(
+      NegociosClient,
+      propsLista({
+        negocios: ABIERTOS,
+        cerrados: CERRADOS,
+        stagesActivos: ['venta', 'ejecucion', 'cobro'],
+        etapas: [],
+        searchParams,
+        hoyISO: '2026-09-10',
+      }),
+    ),
   )
 
 describe('/negocios · aviso de coincidencias en otras pestañas', () => {

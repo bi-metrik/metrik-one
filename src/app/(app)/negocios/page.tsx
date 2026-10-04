@@ -1,60 +1,32 @@
 import Link from 'next/link'
 import { Plus } from 'lucide-react'
-import {
-  getNegociosV2,
-  getWorkspaceStagesActivos,
-  getEtapasSegmentador,
-  getStaffParaAsignarNegocio,
-} from './negocio-v2-actions'
+import { getWorkspaceStagesActivos, getStaffParaAsignarNegocio } from './negocio-v2-actions'
 import { getWorkspace } from '@/lib/actions/get-workspace'
-import { getAreasEfectivas, type Area, type Role } from '@/lib/permissions/can-edit'
 import { getRolePermissions, puedeDescargarNegocios, puedeMarcarCondicionNegocio } from '@/lib/roles'
 import NegociosClient from './negocios-client'
 import { usaAlmacenamientoExterno } from '@/lib/almacenamiento/proveedor'
-import { todayBogotaISO } from '@/lib/dates/bogota'
+import { cargarVistaLista } from '@/lib/negocios/cargar-vista-lista'
 import type { SearchParams } from '@/lib/filtros/url-estado'
-
-type StageFilter = 'todos' | 'venta' | 'ejecucion' | 'cobro'
-
-/**
- * Filtro de fase por defecto según el área del usuario (supervisor con área ve
- * su fase preseleccionada; puede cambiarla). Sin área / dirección / owner-admin
- * sin área → 'todos'. Operator ya ve solo sus negocios (filtro server).
- */
-function defaultStageFilter(role: string | null, areas: string[]): StageFilter {
-  if (!areas || areas.length === 0) return 'todos'
-  const ef = getAreasEfectivas({ id: '', role: (role ?? 'read_only') as Role, areas: areas as Area[] })
-  if (ef.has('comercial') && ef.has('operaciones') && ef.has('financiera')) return 'todos' // dirección
-  if (ef.has('comercial')) return 'venta'
-  if (ef.has('operaciones')) return 'ejecucion'
-  if (ef.has('financiera')) return 'cobro'
-  return 'todos'
-}
 
 export default async function NegociosPage({
   searchParams,
 }: {
-  // Los filtros de la lista viajan en la URL para sobrevivir al volver atrás. El
-  // servidor los resuelve aquí y se los pasa al cliente como valores iniciales: si no,
-  // el primer render sale sin filtrar y al hidratar cambia, con parpadeo y desajuste.
+  // Los filtros de la lista viajan en la URL para sobrevivir al volver atrás. El servidor
+  // los resuelve aquí: filtra, cuenta y manda SOLO la primera página de tarjetas (ver
+  // `lib/negocios/vista-lista.ts`, por qué dejó de mandar la lista entera).
   searchParams: Promise<SearchParams>
 }) {
   const sp = await searchParams
-  const [abiertos, cerrados, stagesActivos, etapas, ws, staffList] = await Promise.all([
-    getNegociosV2('abierto'),
-    // Los TRES estados de cierre, no solo el exitoso. Tiene que ser el mismo valor que
-    // pide `POST /api/negocios/export`: si la pantalla lista un negocio que la ruta del
-    // Excel no tiene en su mapa, la fila desaparece del archivo en silencio.
-    getNegociosV2('cerrado'),
-    getWorkspaceStagesActivos(),
-    getEtapasSegmentador(),
-    getWorkspace(),
-    getStaffParaAsignarNegocio(),
-  ])
-  const defaultStage = defaultStageFilter(ws.role, ws.areas)
+  const ws = await getWorkspace()
   // Mismo gate que validan `agregarResponsable`/`quitarResponsable` server-side
   // (owner/admin/supervisor): replicado en UI para no ofrecer un control que fallaría.
   const canAsignar = getRolePermissions(ws.role ?? 'read_only').canAssignResponsable
+  const [vista, stagesActivos, staffList] = await Promise.all([
+    cargarVistaLista(sp),
+    getWorkspaceStagesActivos(),
+    // El selector de responsable solo se pinta a quien puede asignar.
+    canAsignar ? getStaffParaAsignarNegocio() : Promise.resolve([]),
+  ])
   // Mismo guard que validan `agregarMarcaNegocio`/`quitarMarcaNegocio`.
   const canMarcar = puedeMarcarCondicionNegocio(ws.role)
   // Mismo gate que aplica `POST /api/negocios/export` (owner/admin/supervisor).
@@ -64,14 +36,16 @@ export default async function NegociosPage({
   const canPublicarEnDrive = ws.workspaceId
     ? !(await usaAlmacenamientoExterno(ws.workspaceId).catch(() => true))
     : false
+  const abiertos = vista?.resumen.totalAbiertos ?? 0
+  const cerrados = vista?.resumen.totalCerrados ?? 0
   return (
     <div className="mx-auto max-w-2xl px-4 py-6">
       <div className="mb-6 flex items-center justify-between">
         <div>
           <h1 className="text-lg font-bold">Negocios</h1>
           <p className="text-xs text-muted-foreground">
-            {abiertos.length} abierto{abiertos.length !== 1 ? 's' : ''}
-            {cerrados.length > 0 && ` · ${cerrados.length} cerrado${cerrados.length !== 1 ? 's' : ''}`}
+            {abiertos} abierto{abiertos !== 1 ? 's' : ''}
+            {cerrados > 0 && ` · ${cerrados} cerrado${cerrados !== 1 ? 's' : ''}`}
           </p>
         </div>
         <Link
@@ -82,20 +56,17 @@ export default async function NegociosPage({
           Nuevo negocio
         </Link>
       </div>
-      <NegociosClient
-        negocios={abiertos}
-        cerrados={cerrados}
-        stagesActivos={stagesActivos}
-        etapas={etapas}
-        defaultStage={defaultStage}
-        staffList={staffList}
-        canAsignar={canAsignar}
-        canMarcar={canMarcar}
-        canDescargar={canDescargar}
-        canPublicarEnDrive={canPublicarEnDrive}
-        searchParams={sp}
-        hoyISO={todayBogotaISO()}
-      />
+      {vista && (
+        <NegociosClient
+          vista={vista}
+          stagesActivos={stagesActivos}
+          staffList={staffList}
+          canAsignar={canAsignar}
+          canMarcar={canMarcar}
+          canDescargar={canDescargar}
+          canPublicarEnDrive={canPublicarEnDrive}
+        />
+      )}
     </div>
   )
 }
