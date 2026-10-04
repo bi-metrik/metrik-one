@@ -2,14 +2,14 @@
 
 import { useCallback, useTransition, type TransitionStartFunction } from 'react'
 import { toast } from 'sonner'
-import { MENSAJE_SIN_CONEXION } from '@/lib/red/error-de-red'
+import { mensajeDeFallaDeRed } from '@/lib/red/error-de-red'
 import { envolverTolerante } from '@/lib/red/transicion-tolerante'
 
 /** Un aviso por racha: diez acciones que fallan juntas no apilan diez toasts. */
 const ID_TOAST_SIN_CONEXION = 'sin-conexion'
 
 function avisarSinConexion() {
-  toast.error(MENSAJE_SIN_CONEXION, { id: ID_TOAST_SIN_CONEXION })
+  toast.error(mensajeDeFallaDeRed(), { id: ID_TOAST_SIN_CONEXION })
 }
 
 /**

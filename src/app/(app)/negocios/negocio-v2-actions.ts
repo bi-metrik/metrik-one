@@ -182,6 +182,7 @@ import { registrarActividad } from '@/lib/activity/registrar-actividad'
 import { bloqueoCarpetaLocal, type BloqueoGate } from '@/lib/negocios/gate-carpeta-local'
 import { exigeCarpetaLocal, normalizarCarpetaLocal } from '@/lib/negocios/carpeta-local'
 import { guardarCarpetaLocal, resolverPermisoCarpetaLocal } from '@/lib/negocios/carpeta-local-servidor'
+import { costosEjecutadosPorNegocio } from '@/lib/negocios/costos-ejecutados'
 
 // ── Tipos inline para el nuevo schema de negocios ─────────────────────────────
 // Las tablas nuevas (negocios, lineas_negocio, etapas_negocio, bloque_configs,
@@ -661,6 +662,13 @@ export async function getNegociosV2(
    */
   estado: 'abierto' | 'completado' | 'cerrado' | 'todos' = 'abierto',
   incluirPausados = false,
+  /**
+   * `false` deja `costos_ejecutados` en 0 sin leer `gastos`/`horas`. Solo para quien los
+   * pide aparte para un subconjunto (la lista paginada, `cargar-vista-lista.ts`): esas
+   * dos lecturas mandan los ids por la URL, y con el universo entero son ~18 KB por
+   * consulta. Quien no lo sepa no debe tocarlo: el 0 no es un dato.
+   */
+  conCostos = true,
 ): Promise<NegocioResumen[]> {
   const { supabase, workspaceId, userId, role, staffId, error } = await getWorkspace()
   if (error || !workspaceId) return []
@@ -705,7 +713,8 @@ export async function getNegociosV2(
       lineas_negocio(nombre, numero),
       etapas_negocio(nombre, stage, numero, config_extra),
       empresas(nombre),
-      contactos(nombre, telefono)
+      contactos(nombre, telefono),
+      negocio_responsables(assigned_at, staff:staff!negocio_responsables_staff_id_fkey(id, full_name))
     `)
     .eq('workspace_id', workspaceId)
     .order('created_at', { ascending: false })
@@ -728,16 +737,13 @@ export async function getNegociosV2(
 
   // Batch: gastos por negocio
   const negocioIds = (data as Record<string, unknown>[]).map(r => r.id as string)
-  const [gastosRes, horasRes, staffRes, wsRes, respRes, festivosRes] = await Promise.all([
-    db(supabase).from('gastos').select('negocio_id, monto').eq('workspace_id', workspaceId).in('negocio_id', negocioIds),
-    db(supabase).from('horas').select('negocio_id, horas, staff_id').eq('workspace_id', workspaceId).in('negocio_id', negocioIds),
-    supabase.from('staff').select('id, salary').eq('workspace_id', workspaceId),
+  // Los responsables ya vienen embebidos en la consulta de `negocios` (antes era una
+  // lectura aparte con los ~466 ids en la URL, ~18 KB por consulta en SOENA).
+  const [costosPorNeg, wsRes, festivosRes] = await Promise.all([
+    conCostos
+      ? costosEjecutadosPorNegocio(supabase, workspaceId, negocioIds)
+      : Promise.resolve({} as Record<string, number>),
     db(supabase).from('workspaces').select('config_extra').eq('id', workspaceId).single(),
-    db(supabase)
-      .from('negocio_responsables')
-      .select('negocio_id, assigned_at, staff:staff!negocio_responsables_staff_id_fkey(id, full_name)')
-      .in('negocio_id', negocioIds)
-      .order('assigned_at', { ascending: true }),
     // Calendario de festivos: misma tabla que usa la función SQL horas_habiles_entre.
     db(supabase).from('festivos_colombia').select('fecha'),
   ])
@@ -750,9 +756,17 @@ export async function getNegociosV2(
 
   // Responsables por negocio (orden estable por assigned_at = más antiguo primero).
   const responsablesPorNeg: Record<string, Array<{ id: string; full_name: string }>> = {}
-  for (const r of ((respRes.data ?? []) as Array<{ negocio_id: string; staff: { id: string; full_name: string | null } | null }>)) {
-    if (!r.staff) continue
-    ;(responsablesPorNeg[r.negocio_id] ??= []).push({ id: r.staff.id, full_name: r.staff.full_name ?? '—' })
+  for (const row of data as Record<string, unknown>[]) {
+    const asignaciones = ((row.negocio_responsables ?? []) as Array<{
+      assigned_at: string | null
+      staff: { id: string; full_name: string | null } | null
+    }>)
+      .slice()
+      .sort((a, b) => (a.assigned_at ?? '').localeCompare(b.assigned_at ?? ''))
+    for (const r of asignaciones) {
+      if (!r.staff) continue
+      ;(responsablesPorNeg[row.id as string] ??= []).push({ id: r.staff.id, full_name: r.staff.full_name ?? '—' })
+    }
   }
 
   // Nombre del aliado de los negocios de origen 'alianza'. Query aparte (no
@@ -775,26 +789,6 @@ export async function getNegociosV2(
     for (const a of ((aliadosRows ?? []) as Array<{ id: string; nombre: string }>)) {
       aliadoNombres[a.id] = a.nombre
     }
-  }
-
-  // Staff salary map for hour cost calculation
-  const staffSalaryMap: Record<string, number> = {}
-  for (const s of ((staffRes.data ?? []) as Array<{ id: string; salary: number | null }>)) {
-    staffSalaryMap[s.id] = s.salary ?? 0
-  }
-
-  // Sum gastos per negocio
-  const gastosPorNeg: Record<string, number> = {}
-  for (const g of ((gastosRes.data ?? []) as Array<{ negocio_id: string; monto: number }>)) {
-    gastosPorNeg[g.negocio_id] = (gastosPorNeg[g.negocio_id] ?? 0) + (g.monto ?? 0)
-  }
-
-  // Sum horas cost per negocio
-  const horasCostoPorNeg: Record<string, number> = {}
-  for (const h of ((horasRes.data ?? []) as Array<{ negocio_id: string; horas: number; staff_id: string | null }>)) {
-    const salary = h.staff_id ? (staffSalaryMap[h.staff_id] ?? 0) : 0
-    const tarifa = salary > 0 ? salary / 160 : 0
-    horasCostoPorNeg[h.negocio_id] = (horasCostoPorNeg[h.negocio_id] ?? 0) + ((h.horas ?? 0) * tarifa)
   }
 
   // ── Tarjeta config-driven: vehículo + seccional desde un bloque (ej. Factura) ──
@@ -956,17 +950,27 @@ export async function getNegociosV2(
       // bloques dan 1.510 filas sobre los negocios abiertos. PostgREST corta en
       // 1.000 sin avisar, y lo que se perdería son instancias del bloque — o sea,
       // negocios que dejarían de aparecer en su grupo o marcas que no encenderían.
-      const filas = await traerTodo<{ negocio_id: string; bloque_config_id: string; estado: string | null }>(
-        (desde, hasta) =>
-          db(supabase)
+      //
+      // Se acota por JOIN con `negocios` (mismo estado que la consulta principal), no con
+      // los ids en la URL: eran los ~466 uuid de SOENA, ~18 KB por cada página de
+      // `traerTodo`, y desde Node la petición ni salía (`fetch failed`, medido el
+      // 2026-10-03). El JOIN puede traer instancias de negocios que la lista no tiene
+      // (pausados, ajenos a un operator): se descartan abajo contra `idsDeLaLista`.
+      const idsDeLaLista = new Set(negocioIds)
+      const filasCrudas = await traerTodo<{ negocio_id: string; bloque_config_id: string; estado: string | null }>(
+        (desde, hasta) => {
+          let q = db(supabase)
             .from('negocio_bloques')
-            .select('negocio_id, bloque_config_id, estado')
-            .in('negocio_id', negocioIds)
+            .select('negocio_id, bloque_config_id, estado, negocios!inner(workspace_id)')
+            .eq('negocios.workspace_id', workspaceId)
             .in('bloque_config_id', Array.from(nombrePorConfig.keys()))
-            .order('id')
-            .range(desde, hasta),
+          if (estado === 'cerrado') q = q.in('negocios.estado', ESTADOS_CERRADOS)
+          else if (estado !== 'todos') q = q.eq('negocios.estado', estado)
+          return q.order('id').range(desde, hasta)
+        },
         { etiqueta: 'seguimiento de citas · negocio_bloques' },
       )
+      const filas = filasCrudas.filter((f) => idsDeLaLista.has(f.negocio_id))
 
       const estadosPorNeg: Record<string, Record<string, EstadoBloque>> = {}
       for (const f of filas) {
@@ -1033,7 +1037,7 @@ export async function getNegociosV2(
       contacto_nombre: (row.contactos as { nombre: string } | null)?.nombre ?? null,
       contacto_telefono:
         (row.contactos as { telefono: string | null } | null)?.telefono ?? null,
-      costos_ejecutados: Math.round((gastosPorNeg[id] ?? 0) + (horasCostoPorNeg[id] ?? 0)),
+      costos_ejecutados: costosPorNeg[id] ?? 0,
       pausado: (row.pausado as boolean) ?? false,
       pausado_hasta: (row.pausado_hasta as string) ?? null,
       motivo_pausa: (row.motivo_pausa as string) ?? null,

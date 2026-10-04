@@ -103,16 +103,35 @@ export function esErrorDeRed(error: unknown): boolean {
   return name === 'TypeError' && PATRONES_RED_SOLO_TYPEERROR.some((p) => p.test(message))
 }
 
-/** Lo que ve la persona cuando una accion no alcanzo a llegar al servidor. */
-export const MENSAJE_SIN_CONEXION =
-  'No hubo conexión con el servidor. Revisa la señal y vuelve a intentarlo.'
+/**
+ * Lo que ve la persona cuando una accion no alcanzo a llegar al servidor.
+ *
+ * Neutro A PROPOSITO: no dice "revisa la señal". El 2026-10-03 se midio que la persona SI
+ * tenia internet (la ruta de su ISP hacia Vercel perdia paquetes); culpar a su conexion era
+ * falso. La conexion solo se nombra cuando el navegador dice que no la hay
+ * (`MENSAJE_SIN_INTERNET`, ver `mensajeDeFallaDeRed`).
+ */
+export const MENSAJE_SIN_CONEXION = 'No se pudo completar. Intenta de nuevo.'
+
+/** Mismo aviso, cuando `navigator.onLine === false`: ahi si es cierto que no hay red. */
+export const MENSAJE_SIN_INTERNET = 'Sin conexión a internet. Intenta de nuevo cuando vuelva.'
+
+/**
+ * Texto del aviso de red. `enLinea` se lee de `navigator.onLine` si no se pasa; fuera del
+ * navegador (o sin el dato) se asume en linea, que es el texto neutro.
+ */
+export function mensajeDeFallaDeRed(enLinea?: boolean): string {
+  const online =
+    enLinea ?? (typeof navigator !== 'undefined' && typeof navigator.onLine === 'boolean' ? navigator.onLine : true)
+  return online ? MENSAJE_SIN_CONEXION : MENSAJE_SIN_INTERNET
+}
 
 /**
  * Texto para una LECTURA que lanzo (no para una respuesta `{ error }`, que trae el suyo):
- * si fue la red se dice; si fue otra cosa, el texto generico de quien llama.
+ * si fue la red, el aviso de red; si fue otra cosa, el texto generico de quien llama.
  */
 export function mensajeDeFallaDeCarga(error: unknown, porDefecto: string): string {
-  return esErrorDeRed(error) ? MENSAJE_SIN_CONEXION : porDefecto
+  return esErrorDeRed(error) ? mensajeDeFallaDeRed() : porDefecto
 }
 
 /** Lo que dice la pantalla de error cuando ya no sigue intentando sola. */
