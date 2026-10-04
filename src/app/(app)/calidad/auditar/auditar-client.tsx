@@ -13,6 +13,7 @@ import {
 import { leerRespuesta } from '@/lib/calidad/respuesta'
 import { BUCKET_AUDIO } from '@/lib/calidad/audio-bucket'
 import { createClient } from '@/lib/supabase/client'
+import { fetchPropio } from '@/lib/version/fetch-propio'
 
 /**
  * Auditar una llamada en vivo.
@@ -111,7 +112,7 @@ export default function AuditarClient() {
       // El archivo va DIRECTO a Storage, no dentro de una petición nuestra, y
       // ahí es donde muere el techo de 4,5 MB que dejaba esto en 17 minutos.
       setEtapa('subiendo')
-      const rP = await fetch('/api/calidad/audio-url', {
+      const rP = await fetchPropio('/api/calidad/audio-url', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -132,7 +133,7 @@ export default function AuditarClient() {
 
       // ── 2. Transcribir ──────────────────────────────────────────────────
       setEtapa('transcribiendo')
-      const rT = await fetch('/api/calidad/transcribir', {
+      const rT = await fetchPropio('/api/calidad/transcribir', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ ruta: dP.ruta }),
@@ -148,7 +149,7 @@ export default function AuditarClient() {
 
       // ── 3. Auditar ──────────────────────────────────────────────────────
       setEtapa('auditando')
-      const rA = await fetch('/api/calidad/auditar', {
+      const rA = await fetchPropio('/api/calidad/auditar', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ transcripcion: dT.transcripcion }),
@@ -159,7 +160,7 @@ export default function AuditarClient() {
 
       // ── 4. Guardar ──────────────────────────────────────────────────────
       setEtapa('guardando')
-      const rG = await fetch('/api/calidad/guardar', {
+      const rG = await fetchPropio('/api/calidad/guardar', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({

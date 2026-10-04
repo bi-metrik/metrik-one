@@ -1,4 +1,5 @@
 import { conReintentoDeRed } from '@/lib/red/con-reintento'
+import { fetchPropio } from '@/lib/version/fetch-propio'
 
 /**
  * Lo que el navegador hace con las páginas de `/negocios` (`GET /api/negocios/lista`).
@@ -54,7 +55,7 @@ export async function pedirJson<T>(
   recargar: () => void = () => window.location.reload(),
 ): Promise<T> {
   return conReintentoDeRed(async () => {
-    const r = await fetch(url, { signal, cache: 'no-store' })
+    const r = await fetchPropio(url, { signal, cache: 'no-store' })
     if (r.status === 401 || r.redirected) return irseAlFlujoDeSesion<T>(recargar)
     if (!r.ok) throw new Error(`HTTP ${r.status}`)
     if (!(r.headers.get('content-type') ?? '').includes('application/json')) {

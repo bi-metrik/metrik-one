@@ -11,6 +11,7 @@
     "test:watch": "vitest",
     "check:migraciones": "node scripts/check-migracion-grants.mjs",
     "check:migracion-version": "node scripts/check-migracion-version-duplicada.mjs",
+    "check:migracion-epoca": "node scripts/check-migracion-epoca.mjs",
     "check:muerto": "knip"
   },
   "dependencies": {

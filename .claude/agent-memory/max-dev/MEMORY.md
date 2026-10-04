@@ -4,6 +4,7 @@
 
 - ⚠️ [/negocios paginada en el servidor](project_lista_negocios_paginada.md) — viajan 30 tarjetas; `.in()` de 400+ uuid rompe por `Content-Location`
 - ⚠️ [loading.tsx de (app) no cubre la ficha](project_loading_app_no_cubre_ficha.md) — /negocios → /negocios/[id] no lo remonta, ni con precarga
+- ⚠️⚠️ [Época: un deploy ya no recarga](project_epoca_no_recargar_por_deploy.md) — PR que rompe sube EPOCA; fetch propios por `fetchPropio`; techo 8 h diferido
 - ⚠️ [Respuesta al tocar sin red (#1006)](project_respuesta_al_tocar.md) — CardLink en useTransition + capa en el shell; Link nuevo del shell lleva SenalDeEnlace
 - ⚠️ [Recuperación de errores de red](project_recuperacion_red_iphone.md) — escalera suave→backoff→tope; refresh fallido = recarga MPA; no reintenta escrituras
 - ⚠️⚠️ [Tarifas por plan y ruta (SOENA)](project_tarifas_plan_ruta.md) — migraciones APLICADAS; propuesta ya emitida no cambia; PDF aún imprime el plan no ofrecido

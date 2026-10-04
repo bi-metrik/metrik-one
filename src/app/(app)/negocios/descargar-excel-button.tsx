@@ -2,6 +2,7 @@
 import { useState } from 'react'
 import { Download, Loader2 } from 'lucide-react'
 import { toast } from 'sonner'
+import { fetchPropio } from '@/lib/version/fetch-propio'
 
 /**
  * «Descargar Excel» de la lista de negocios.
@@ -51,7 +52,7 @@ export default function DescargarExcelButton({
     try {
       const ids = await obtenerIds()
       if (ids.length === 0) throw new Error('La vista quedó sin negocios. Recarga la lista.')
-      const res = await fetch('/api/negocios/export', {
+      const res = await fetchPropio('/api/negocios/export', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ ids }),

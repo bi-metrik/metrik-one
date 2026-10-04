@@ -196,7 +196,7 @@ describe('esNavegacionInterna', () => {
     ['javascript:', { href: 'javascript:void(0)' }],
     ['sin href', { href: null }],
   ])('%s → no se toca', (_nombre, extra) => {
-    expect(esNavegacionInterna({ ...clic, href: '/x', ...extra })).toBeNull()
+    expect(esNavegacionInterna({ ...clic, href: '/x', ...(extra as object) })).toBeNull()
   })
 
   it('misma ruta con otra busqueda SI es navegacion (Next la resolveria suave)', () => {
