@@ -58,20 +58,24 @@ function SelectorDeWorkspaces({
         type="button"
         onClick={() => setOpen(o => !o)}
         disabled={isPending}
+        // En el celular el botón queda en escudo + chevron: el rótulo lo lleva `aria-label`.
+        aria-label="Platform Admin: cambiar de workspace"
+        aria-expanded={open}
         className={
-          'inline-flex items-center gap-1.5 rounded-md border px-3 py-1 text-xs font-medium disabled:opacity-50 ' +
+          'inline-flex min-h-8 items-center gap-1.5 rounded-md border px-2 py-1 text-xs font-medium disabled:opacity-50 sm:min-h-0 sm:px-3 ' +
           claseBoton
         }
       >
         <Shield className={'h-3.5 w-3.5 ' + claseEscudo} />
-        Platform Admin
+        <span className="hidden sm:inline">Platform Admin</span>
         <ChevronDown className={'h-3 w-3 ' + claseChevron} />
       </button>
 
       {open && (
         // `z-50` explícito: el panel es `absolute` dentro de una barra sticky, y así queda
         // por encima del contenido de la página en los dos modos.
-        <div className="absolute right-0 top-full z-50 mt-1 w-72 rounded-lg border border-slate-200 bg-white text-xs shadow-lg">
+        // `max-w`: en un celular de 360 px el panel no se sale por la izquierda.
+        <div className="absolute right-0 top-full z-50 mt-1 w-72 max-w-[calc(100vw-1.5rem)] rounded-lg border border-slate-200 bg-white text-xs shadow-lg">
           <div className="border-b border-slate-100 p-2">
             <input
               type="text"
@@ -165,17 +169,25 @@ export function PlatformAdminBar({ state }: { state: PlatformAdminState | null }
     })
   }
 
+  const home = state.homeWorkspace?.name ?? 'home'
+
   // ── Modo AWAY: banner amarillo destacado, con salto directo a otro workspace ──
+  //
+  // Por debajo de `sm` es UNA línea: escudo + nombre del workspace (truncado) + dos botones
+  // de solo ícono. En un iPhone la frase completa se partía palabra por palabra (6
+  // renglones) y «Regresar a MéTRIK» se salía de la pantalla. Desde `sm` se ve como antes.
   if (state.isAway) {
     return (
       <div
-        className="sticky top-0 z-50 flex items-center justify-between gap-3 border-b border-amber-300 bg-amber-50 px-4 py-2 text-sm"
+        className="sticky top-0 z-50 flex items-center justify-between gap-2 border-b border-amber-300 bg-amber-50 px-3 py-1.5 text-xs sm:gap-3 sm:px-4 sm:py-2 sm:text-sm"
         role="banner"
       >
-        <div className="flex items-center gap-2 text-amber-900">
+        <div className="flex min-w-0 items-center gap-2 text-amber-900">
           <Shield className="h-4 w-4 shrink-0" />
-          <span>
-            Modo <strong>Platform Admin</strong> — viendo workspace{' '}
+          <span className="min-w-0 truncate sm:overflow-visible sm:whitespace-normal">
+            <span className="hidden sm:inline">
+              Modo <strong>Platform Admin</strong> — viendo workspace{' '}
+            </span>
             <strong>{state.currentWorkspace?.name ?? '(desconocido)'}</strong>
           </span>
         </div>
@@ -190,14 +202,16 @@ export function PlatformAdminBar({ state }: { state: PlatformAdminState | null }
             type="button"
             onClick={handleReturnHome}
             disabled={isPending}
-            className="inline-flex items-center gap-1.5 rounded-md border border-amber-400 bg-white px-3 py-1 text-xs font-medium text-amber-900 hover:bg-amber-100 disabled:opacity-50"
+            aria-label={`Regresar a ${home}`}
+            title={`Regresar a ${home}`}
+            className="inline-flex min-h-8 items-center gap-1.5 rounded-md border border-amber-400 bg-white px-2 py-1 text-xs font-medium text-amber-900 hover:bg-amber-100 disabled:opacity-50 sm:min-h-0 sm:px-3"
           >
             {isPending ? (
               <Loader2 className="h-3.5 w-3.5 animate-spin" />
             ) : (
               <Home className="h-3.5 w-3.5" />
             )}
-            Regresar a {state.homeWorkspace?.name ?? 'home'}
+            <span className="hidden sm:inline">Regresar a {home}</span>
           </button>
         </div>
       </div>
