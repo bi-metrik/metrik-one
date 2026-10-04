@@ -280,8 +280,11 @@ export function esquemaPara(p: { bandeja: boolean; rol: UserRole }): Record<stri
  * y 3.x lo devuelve con sangría y saltos de línea, que se cobran como salida y ocupan el tope. Pedido en
  * el texto, la salida media de 3.8-flash en el banco bajó de 70 a 37 tokens (2026-10-03). 2.5 ya lo
  * devuelve compacto: a él no se le pide.
+ *
+ * `confirmaNuevo`: la línea de la pregunta «¿Creo el cliente nuevo …?» va solo cuando ESA es la pregunta
+ * pendiente. Fija en el texto, cambiaba lo que 2.5 contesta en otras capas (banco, TV14: de 5/5 a 0/5).
  */
-export function instrucciones(p: { bandeja: boolean; jsonCompacto?: boolean }): string {
+export function instrucciones(p: { bandeja: boolean; jsonCompacto?: boolean; confirmaNuevo?: boolean }): string {
   return `Eres el intérprete del bot de WhatsApp de ONE, el sistema de gestión de una empresa colombiana.
 Quien te escribe es una persona del EQUIPO de la empresa (no el cliente final). Tu único trabajo es entender qué quiere hacer con su mensaje, dado el contexto, y devolverlo como acciones. El sistema valida y ejecuta; tú no guardas nada y no le contestas nada a la persona: el sistema redacta las respuestas.
 
@@ -302,7 +305,7 @@ ${p.bandeja ? `- abrir_viaje: dice de qué cliente/viaje es lo que sigue (nombre
 - cerrar_tanda: terminó de pasar los mensajes ("listo", "eso es todo", "ya te pasé todo").
 - mover: en el resumen pendiente, dice que el mensaje número n es de otro viaje (n, y ref_* o id).
 - descartar: pide borrar u olvidar algo ("bórralo", "eso fue por error"). alcance="pregunta" si se refiere a lo que pregunta la PREGUNTA PENDIENTE ("a ninguno, bótalos" con una lista pendiente es la opción [descartar] de esa lista); "tanda" si se refiere a lo que está pasando ahora (la tanda abierta); "todo" SOLO si dice literalmente todo o todos ("todo lo pendiente"); "mensajes" con n si nombra un número del resumen.
-` : ''}- responder: contesta la pregunta pendiente. "opcion" = el id elegido entre corchetes; si eligió NUEVO, opcion="nuevo" y el nombre en nuevo_cliente; si contesta con una cifra, ponla en "monto". Si para elegir nombró un cliente o destino, cópialo también en ref_cliente o ref_destino.${p.bandeja ? `
+` : ''}- responder: contesta la pregunta pendiente. "opcion" = el id elegido entre corchetes; si eligió NUEVO, opcion="nuevo" y el nombre en nuevo_cliente; si contesta con una cifra, ponla en "monto". Si para elegir nombró un cliente o destino, cópialo también en ref_cliente o ref_destino.${p.bandeja && p.confirmaNuevo ? `
   Con la pregunta nuevo_confirmar («¿Creo el cliente nuevo …?»): un sí o «créalo» es opcion="si"; un número es la opción de la lista con ESE número; otro nombre es opcion="nuevo" con el nombre en nuevo_cliente.` : ''}
 - confirmar: aprueba lo que el bot le mostró para confirmar.
 - cancelar: rechaza lo que el bot le mostró para confirmar.

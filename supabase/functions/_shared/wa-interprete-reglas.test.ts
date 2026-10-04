@@ -124,6 +124,9 @@ describe('interruptor config_extra.bot_conversacional', () => {
   it('a los modelos que razonan se les pide el JSON compacto (3.x lo devuelve con sangría); a 2.5 no', () => {
     expect(instrucciones({ bandeja: true, jsonCompacto: piensa('gemini-3.8-flash') })).toContain('devuelve el JSON en UNA sola línea');
     expect(instrucciones({ bandeja: false, jsonCompacto: piensa('gemini-2.5-flash') })).not.toContain('UNA sola línea');
+    // La línea de «¿Creo el cliente nuevo …?» solo con esa pregunta pendiente: el resto del texto no cambia.
+    expect(instrucciones({ bandeja: true, confirmaNuevo: true })).toContain('Con la pregunta nuevo_confirmar');
+    expect(instrucciones({ bandeja: true })).not.toContain('nuevo_confirmar');
     expect([piensa('gemini-2.5-flash'), piensa('gemini-2.5-flash-lite'), piensa('gemini-3.5-flash-lite'), piensa('gemini-3.7-flash'), piensa('gemini-3.8-flash')]).toEqual([false, false, true, true, true]);
   });
 

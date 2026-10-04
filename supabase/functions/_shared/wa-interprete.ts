@@ -260,7 +260,7 @@ async function atender(
   });
   const llamar = deps.llamarModelo ?? ((p: PedidoModelo) => llamarGemini(p, deps.env ?? envDeDeno));
   const r = await llamar({
-    modelo: cfg.modelo, sistema: instrucciones({ bandeja: enBandeja, jsonCompacto: piensa(cfg.modelo) }), usuario,
+    modelo: cfg.modelo, sistema: instrucciones({ bandeja: enBandeja, jsonCompacto: piensa(cfg.modelo), confirmaNuevo: lec.pendiente?.capa === 'nuevo_confirmar' }), usuario,
     generationConfig: generacionPara(cfg.modelo, esquemaPara({ bandeja: enBandeja, rol: user.role })), timeoutMs: cfg.timeoutMs,
   });
   const base = { supabase, user, message, cfg, enBandeja };
