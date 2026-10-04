@@ -9,9 +9,17 @@
  * Mismo origen que la primera carga (`cargarVistaLista`), así que filtrar por aquí y
  * recargar la página dan lo mismo. Solo lectura: acota por workspace y rol igual que
  * `getNegociosV2` (un operator solo ve sus negocios).
+ *
+ * Corre dentro de `enPeticionDeRuta`: en una ruta el `cache()` de React no memoiza, y sin
+ * el memo la sesión (Auth + profile + staff + staff_areas) se resolvía CUATRO veces por
+ * petición (`leerUniverso`, las dos `getNegociosV2` y `getEtapasSegmentador`). Con él, una.
+ *
+ * Un fallo al leer responde 500, nunca una lista vacía con 200: el cliente conserva la
+ * lista anterior y ofrece «Reintentar».
  */
 import { NextRequest, NextResponse } from 'next/server'
 import { cargarVistaLista, idsDeVistaLista } from '@/lib/negocios/cargar-vista-lista'
+import { enPeticionDeRuta } from '@/lib/actions/memo-de-ruta'
 import type { SearchParams } from '@/lib/filtros/url-estado'
 
 export const runtime = 'nodejs'
@@ -20,6 +28,15 @@ export const dynamic = 'force-dynamic'
 const SIN_CACHE = { 'Cache-Control': 'no-store' }
 
 export async function GET(req: NextRequest) {
+  try {
+    return await enPeticionDeRuta(() => leer(req))
+  } catch (e) {
+    console.error('[api/negocios/lista]', e instanceof Error ? e.message : e)
+    return NextResponse.json({ error: 'No se pudo leer la lista' }, { status: 500, headers: SIN_CACHE })
+  }
+}
+
+async function leer(req: NextRequest) {
   const sp: SearchParams = Object.fromEntries(req.nextUrl.searchParams.entries())
 
   if (sp.solo === 'ids') {

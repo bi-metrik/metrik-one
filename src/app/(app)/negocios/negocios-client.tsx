@@ -11,7 +11,7 @@ import { GRUPO_CITA_VENCIDA } from '@/lib/negocios/agrupar-por-cita'
 import { aplicarFiltroEnQuery } from '@/lib/filtros/url-estado'
 import type { CampoFiltro } from '@/lib/filtros/campos'
 import { STAGE_LABEL } from '@/lib/negocios/stage-label'
-import { conReintentoDeRed } from '@/lib/red/con-reintento'
+import { pedirJson, pegarPagina, refrescarComienzo } from '@/lib/negocios/paginas-lista'
 import { esErrorDeRed, mensajeDeFallaDeRed } from '@/lib/red/error-de-red'
 import {
   expandirTarjeta,
@@ -74,13 +74,20 @@ function queryConParametros(queryActual: string, p: ParametrosLista, defaultStag
   return q
 }
 
-async function pedirJson<T>(url: string, signal: AbortSignal): Promise<T> {
-  // Una lectura: se reintenta UNA vez si fue la red (`con-reintento.ts`).
-  return conReintentoDeRed(async () => {
-    const r = await fetch(url, { signal, cache: 'no-store' })
-    if (!r.ok) throw new Error(`HTTP ${r.status}`)
-    return (await r.json()) as T
-  })
+/**
+ * Qué se le pide a la ruta:
+ *   - `filtros`: la vista nueva para otros filtros (reemplaza la lista);
+ *   - `mas`: la página siguiente («Ver más», se pega detrás);
+ *   - `refresco`: relee todo lo cargado tras adoptar una vista refrescada (reemplaza el
+ *     comienzo sin encoger la lista).
+ */
+type ModoPedido = 'filtros' | 'mas' | 'refresco'
+
+interface Pedido {
+  p: ParametrosLista
+  modo: ModoPedido
+  desde: number
+  cuantos?: number
 }
 
 export default function NegociosClient({
@@ -114,31 +121,42 @@ export default function NegociosClient({
   const [tarjetas, setTarjetas] = useState<TarjetaCompacta[]>(vista.tarjetas)
   const [params, setParams] = useState<ParametrosLista>(vista.parametros)
   const [qInput, setQInput] = useState(vista.parametros.q)
-  const [cargando, setCargando] = useState<'filtros' | 'mas' | null>(null)
+  const [cargando, setCargando] = useState<ModoPedido | null>(null)
   const [error, setError] = useState<string | null>(null)
 
   // Una server action (asignar, marcar…) hace `revalidatePath('/negocios')` y el servidor
   // manda una vista nueva por props: se adopta. Patrón de React para estado derivado de
   // props (en render, no en un efecto).
   const [vistaPrevia, setVistaPrevia] = useState(vista)
-  const [extraTrasRefresco, setExtraTrasRefresco] = useState(0)
+  const [cargadasTrasRefresco, setCargadasTrasRefresco] = useState(0)
   if (vista !== vistaPrevia) {
     setVistaPrevia(vista)
     setActual(vista)
     setParams(vista.parametros)
     setQInput(vista.parametros.q)
-    setTarjetas(vista.tarjetas)
-    // Si ya se habían cargado más páginas, se vuelven a pedir (con datos frescos).
-    setExtraTrasRefresco(Math.max(0, tarjetas.length - vista.tarjetas.length))
+    // El error era de la vista anterior: la nueva llegó bien.
+    setError(null)
+    if (tarjetas.length > vista.tarjetas.length) {
+      // Ya se habían cargado más páginas. La lista NO se encoge a la primera página (el
+      // scroll saltaba y la lista volvía a crecer): el comienzo se refresca ya y el resto
+      // se queda hasta que vuelva la relectura de todo lo cargado.
+      setTarjetas(refrescarComienzo(tarjetas, vista.tarjetas))
+      setCargadasTrasRefresco(tarjetas.length)
+    } else {
+      setTarjetas(vista.tarjetas)
+      setCargadasTrasRefresco(0)
+    }
   }
 
   const paramsRef = useRef(params)
   const abortRef = useRef<AbortController | null>(null)
   const turnoRef = useRef(0)
   const temporizadorRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+  // Lo último que falló: «Reintentar» repite ESO (una página de «Ver más» no vuelve a la 1).
+  const fallidoRef = useRef<Pedido | null>(null)
 
   const pedir = useCallback(
-    async (p: ParametrosLista, modo: 'filtros' | 'mas', desde = 0, cuantos?: number) => {
+    async (p: ParametrosLista, modo: ModoPedido, desde = 0, cuantos?: number) => {
       abortRef.current?.abort()
       const ac = new AbortController()
       abortRef.current = ac
@@ -151,9 +169,18 @@ export default function NegociosClient({
         const v = await pedirJson<VistaLista>(`/api/negocios/lista?${base ? `${base}&` : ''}${extra}`, ac.signal)
         if (turno !== turnoRef.current) return
         setActual(v)
-        setTarjetas((prev) => (modo === 'mas' ? [...prev.slice(0, v.desde), ...v.tarjetas] : v.tarjetas))
+        fallidoRef.current = null
+        setTarjetas((prev) =>
+          modo === 'mas'
+            ? pegarPagina(prev, v.desde, v.tarjetas)
+            : modo === 'refresco' && v.tarjetas.length < v.resumen.totalVista
+              ? // La relectura llega hasta 200 tarjetas: si había más cargadas, la cola se conserva.
+                refrescarComienzo(prev, v.tarjetas)
+              : v.tarjetas,
+        )
       } catch (e) {
         if (ac.signal.aborted || turno !== turnoRef.current) return
+        fallidoRef.current = { p, modo, desde, cuantos }
         setError(esErrorDeRed(e) ? mensajeDeFallaDeRed() : 'No se pudo cargar la lista. Intenta de nuevo.')
       } finally {
         if (turno === turnoRef.current) setCargando(null)
@@ -184,11 +211,18 @@ export default function NegociosClient({
     paramsRef.current = params
   }, [params])
 
-  // Tras adoptar una vista refrescada, se reponen las páginas que ya estaban cargadas.
+  // Tras adoptar una vista refrescada, se relee todo lo que estaba cargado (desde 0) y
+  // recién entonces se reemplaza.
   useEffect(() => {
-    if (extraTrasRefresco <= 0) return
-    void pedir(vista.parametros, 'mas', vista.tarjetas.length, extraTrasRefresco)
-  }, [vista, extraTrasRefresco, pedir])
+    if (cargadasTrasRefresco <= 0) return
+    void pedir(vista.parametros, 'refresco', 0, cargadasTrasRefresco)
+  }, [vista, cargadasTrasRefresco, pedir])
+
+  const reintentar = useCallback(() => {
+    const f = fallidoRef.current
+    if (!f) return void pedir(paramsRef.current, 'filtros')
+    void pedir(f.p, f.modo, f.desde, f.cuantos)
+  }, [pedir])
 
   // Al volver atrás, el router puede restaurar una vista guardada con otros filtros que
   // los de la URL. Manda la URL.
@@ -454,7 +488,7 @@ export default function NegociosClient({
           <span>{error}</span>
           <button
             type="button"
-            onClick={() => void pedir(paramsRef.current, 'filtros')}
+            onClick={reintentar}
             className="shrink-0 rounded font-medium underline underline-offset-2"
           >
             Reintentar

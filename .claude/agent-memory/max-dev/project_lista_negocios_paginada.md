@@ -14,8 +14,14 @@ metadata:
 - El Excel/Drive ya no recibe los ids del cliente: el botón pide `?solo=ids` con los filtros de la URL.
 - Cada filtro = una ida al servidor (antes era local e instantáneo). Si Mauricio dice que filtrar «se
   siente lento», el siguiente paso es cachear el universo por ws unos segundos, no volver a mandarlo.
-- Tras una server action (`revalidatePath('/negocios')`) el cliente ADOPTA la vista nueva en render y
-  re-pide las páginas extra que había cargado.
+- Tras una server action (`revalidatePath('/negocios')`) el cliente ADOPTA la vista nueva en render:
+  refresca el comienzo y conserva la cola hasta que vuelve la relectura `desde=0&cuantos=<cargadas>`
+  (tope 200 en `rangoDePagina`). No la encoge a 30: el scroll saltaba.
+- `getNegociosV2` y `getEtapasSegmentador` LANZAN ante un error de Supabase (desde la revisión de
+  #1004). Un caller nuevo que esperaba `[]` tiene que atrapar; el export ya devolvía 500.
+- ⚠️ Operator con `staffId` null ve TODOS los negocios (`if (role === 'operator' && staffId)`).
+  NO se cerró: medido el 2026-10-03, 2 operators de alma-afi sin staff (se autocrea al entrar,
+  así que en tiempo de ejecución casi nunca es null). Decidir con Mauricio antes de fallar cerrado.
 
 **Gotcha medido:** PostgREST devuelve la query en `Content-Location`; con 466 uuid son 18 KB y el fetch de
 Node corta en 16 KB → `{ error }` que `?? []` vuelve vacío. Desde la torre los costos de la lista daban 0

@@ -678,10 +678,12 @@ export async function getNegociosV2(
   // Otros roles (owner/admin/supervisor/read_only) ven todos. Contador no llega aqui.
   let negocioIdsPermitidos: string[] | null = null
   if (role === 'operator' && staffId) {
-    const { data: nrRows } = await db(supabase)
+    const { data: nrRows, error: errorResponsables } = await db(supabase)
       .from('negocio_responsables')
       .select('negocio_id')
       .eq('staff_id', staffId)
+    // Un fallo aquí NO es "no tiene negocios": se lanza (ver abajo).
+    if (errorResponsables) throw new Error(`negocio_responsables: ${errorResponsables.message}`)
     const ids = (nrRows ?? []).map((r: { negocio_id: string }) => r.negocio_id)
     if (ids.length === 0) return []
     negocioIdsPermitidos = ids
@@ -718,6 +720,9 @@ export async function getNegociosV2(
     `)
     .eq('workspace_id', workspaceId)
     .order('created_at', { ascending: false })
+    // Desempate: dos negocios con el mismo `created_at` (cargas por lote) salían en orden
+    // arbitrario, y la lista por páginas repetía uno y saltaba otro entre «Ver más».
+    .order('id', { ascending: true })
 
   if (estado === 'cerrado') {
     query = query.in('estado', ESTADOS_CERRADOS)
@@ -731,8 +736,12 @@ export async function getNegociosV2(
     query = query.in('id', negocioIdsPermitidos)
   }
 
-  const { data } = await query
+  const { data, error: errorLista } = await query
 
+  // Antes `if (!data) return []`: un fallo de Supabase (timeout, red, permisos) llegaba a la
+  // pantalla como «Sin negocios» con 200. Se lanza: la página lo entrega a `error.tsx`, la
+  // ruta de la lista responde 500 y el export ya respondía 500 ante un throw.
+  if (errorLista) throw new Error(`negocios: ${errorLista.message}`)
   if (!data) return []
 
   // Batch: gastos por negocio
@@ -1117,19 +1126,22 @@ export async function getEtapasSegmentador(): Promise<EtapaDelSegmentador[]> {
   const { supabase, workspaceId, error } = await getWorkspace()
   if (error || !workspaceId) return []
 
-  const { data: ws } = await db(supabase)
+  const { data: ws, error: errorWs } = await db(supabase)
     .from('workspaces')
     .select('linea_activa_id')
     .eq('id', workspaceId)
     .single()
+  // Igual que `getNegociosV2`: un fallo no es "sin etapas" (el segmentador quedaba vacío).
+  if (errorWs) throw new Error(`workspaces: ${errorWs.message}`)
   const lineaId = (ws as { linea_activa_id: string | null } | null)?.linea_activa_id
   if (!lineaId) return []
 
-  const { data } = await db(supabase)
+  const { data, error: errorEtapas } = await db(supabase)
     .from('etapas_negocio')
     .select('numero, nombre, stage, orden, config_extra')
     .eq('linea_id', lineaId)
     .order('orden', { ascending: true })
+  if (errorEtapas) throw new Error(`etapas_negocio: ${errorEtapas.message}`)
 
   type Fila = { numero: number | null; nombre: string; stage: string | null; orden: number; config_extra: Record<string, unknown> | null }
   return ((data as Fila[] | null) ?? [])
