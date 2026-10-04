@@ -214,4 +214,8 @@
   cierre NO forma parte de la llave, solo los argumentos (`JSON.stringify(args)`) y los `keyParts`.
   Una RPC con guarda `current_user_workspace_id()` llamada con service_role devuelve ceros, no error:
   verificar la guarda antes de guardar (2026-10-03).
-
+- **`.in('col', ids)` con ~420+ uuid falla desde Node aunque PostgREST responda 200.** PostgREST
+  devuelve la query entera en la cabecera `Content-Location` (18.236 bytes con 466 uuid) y el `fetch`
+  de Node (undici) corta las cabeceras en 16 KB: `HeadersOverflowError`, que supabase-js entrega como
+  `{ error }`. Un `data ?? []` lo convierte en «no hay filas» sin ruido. Lotes de 100 ids, o acotar por
+  JOIN (`tabla!inner(col)` + filtro sobre el padre) en vez de mandar la lista (2026-10-03).

@@ -158,3 +158,33 @@ describe('/negocios · chips de motivo de la pestaña Cerrados', () => {
     }
   })
 })
+
+describe('/negocios · lista por páginas', () => {
+  const pintarPagina = (searchParams: Record<string, string>, cuantos: number) =>
+    renderToStaticMarkup(
+      React.createElement(
+        NegociosClient,
+        propsLista({
+          negocios: [],
+          cerrados: CERRADOS,
+          stagesActivos: ['venta', 'ejecucion', 'cobro'],
+          etapas: [],
+          searchParams,
+          hoyISO: '2026-09-10',
+          pagina: { cuantos },
+        }),
+      ),
+    )
+
+  it('pinta solo la página que viajó y ofrece «Ver más» con cuántos faltan', () => {
+    const html = pintarPagina({ fase: 'cerrados' }, 2)
+    expect([...html.matchAll(/tarjeta:/g)]).toHaveLength(2)
+    expect(html).toContain('Ver más · 2 de 6')
+    // Los contadores siguen siendo del universo, no de la página.
+    expect(html).toContain('Todos (6)')
+  })
+
+  it('sin páginas pendientes no hay «Ver más»', () => {
+    expect(pintarPagina({ fase: 'cerrados' }, 30)).not.toContain('data-ver-mas')
+  })
+})
