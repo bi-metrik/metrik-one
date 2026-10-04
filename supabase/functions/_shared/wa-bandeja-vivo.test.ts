@@ -785,7 +785,11 @@ describe('v2 · N2: «¿A qué viaje van?» se contesta con cada forma que el bo
     expect(textos().at(-1)).toMatch(new RegExp(`^Tanda de las \\d\\d:\\d\\d · ¿Creo el cliente nuevo «${nombre}»\\? Responde SÍ, o escribe el nombre correcto, o el número del viaje\\.\\nNo he creado ni cargado nada\\.$`));
     expect(vi.mocked(fetch)).not.toHaveBeenCalled(); // nada se leyó ni se cargó todavía
     nadaCreado(negocios);
-    expect(await ent.preguntaAbierta(db as never, WS, TEL)).toMatchObject({ espera: 'viaje', corta: `¿Creo el cliente nuevo «${nombre}»? SÍ, el nombre correcto, o el número o código del viaje` });
+    expect(await ent.preguntaAbierta(db as never, WS, TEL)).toMatchObject({
+      espera: 'viaje', corta: `¿Creo el cliente nuevo «${nombre}»? SÍ, el nombre correcto, o el número o código del viaje`,
+      // El intérprete la ve como su propia pregunta, con la lista de la entrega (cuarto control de Vera, CF7).
+      nuevoPorConfirmar: nombre, entregaId: expect.any(String),
+    });
     await llega('SÍ', { enviado: 100 });
     colaModelo = [pedido()];
     await cron(160);
@@ -817,6 +821,23 @@ describe('v2 · N2: «¿A qué viaje van?» se contesta con cada forma que el bo
     expect(t.contactos).toEqual([]);
     expect(t.negocios.length).toBe(negocios);
     expect(t.wa_bandeja_entendimientos[0]).toMatchObject({ estado: 'negocio_actualizado', negocio_id: 'n-p' });
+  });
+
+  it('repetir el mismo nombre cuenta como «sí»; «el de …» señala un viaje y no es un nombre (cuarto control de Vera)', async () => {
+    await preguntaDeViaje();
+    const negocios = t.negocios.length;
+    await llega('nuevo Ignacio Salgar', { enviado: 9 });
+    await cron(60);
+    // «el de Pedro» no es el cliente «el de Pedro»: se vuelve a preguntar, sin cambiar el nombre propuesto.
+    await llega('el de Pedro', { enviado: 70 });
+    await cron(100);
+    expect(textos().at(-1)).toContain('No entendí «el de Pedro».\n¿Creo el cliente nuevo «Ignacio Salgar»?');
+    nadaCreado(negocios);
+    // El mismo nombre que muestra la pregunta: crea, con ese nombre tal cual.
+    await llega('Ignacio Salgar', { enviado: 110 });
+    colaModelo = [pedido()];
+    await cron(160);
+    expect(t.contactos.map(c => c.nombre)).toEqual(['IGNACIO SALGAR']);
   });
 
   it('«DESCARTAR» a la confirmación: descarta la tanda y no crea a nadie', async () => {

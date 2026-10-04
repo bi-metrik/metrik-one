@@ -52,6 +52,7 @@ import {
   instrucciones,
   leerConfigInterprete,
   negociosDelContexto,
+  piensa,
   preguntaPendienteUnificada,
   textoSiguePendiente,
   TEXTO_GASTO_EN_COLA,
@@ -85,9 +86,28 @@ export const PREVIEW_NOTA_INTERNA = '[nota interna: no se guarda]';
 
 // ── El modelo ────────────────────────────────────────────────────────────────
 
+/**
+ * Los tokens de un llamado, como los cuenta `usageMetadata`: entrada, respuesta (`candidatesTokenCount`) y
+ * razonamiento (`thoughtsTokenCount`, que también se cobra como salida). `null`: no vino.
+ */
+export interface UsoModelo {
+  tokensIn: number | null;
+  tokensOut: number | null;
+  tokensRazonamiento: number | null;
+}
+
 export type RespuestaModelo =
-  | { ok: true; json: unknown; tokensIn: number | null; tokensOut: number | null; ms: number }
-  | { ok: false; motivo: 'timeout' | 'http' | 'esquema'; ms: number; detalle?: string };
+  | { ok: true; json: unknown; tokensIn: number | null; tokensOut: number | null; tokensRazonamiento?: number | null; ms: number }
+  /** Una falla tras un HTTP 200 (MAX_TOKENS, JSON roto) trae su `uso`: el razonamiento se cobró igual. */
+  | { ok: false; motivo: 'timeout' | 'http' | 'esquema'; ms: number; detalle?: string; uso?: UsoModelo };
+
+function usoDe(d: unknown): UsoModelo | undefined {
+  const u = (d as { usageMetadata?: Record<string, unknown> } | null)?.usageMetadata;
+  if (!u || typeof u !== 'object') return undefined;
+  const n = (v: unknown) => (typeof v === 'number' && Number.isFinite(v) ? v : null);
+  // Sin `thoughtsTokenCount` en un 200 el modelo no pensó: 0, no «no se sabe».
+  return { tokensIn: n(u.promptTokenCount), tokensOut: n(u.candidatesTokenCount), tokensRazonamiento: n(u.thoughtsTokenCount) ?? 0 };
+}
 
 export interface PedidoModelo {
   modelo: string;
@@ -134,14 +154,19 @@ export async function llamarGemini(p: PedidoModelo, env: (k: string) => string |
   }
   const ms = Date.now() - t0;
   if (res.status !== 200) return { ok: false, motivo: 'http', ms, detalle: `HTTP ${res.status}` };
+  let uso: UsoModelo | undefined;
   try {
     const d = await res.json();
+    uso = usoDe(d);
     const c = d?.candidates?.[0];
-    if (c?.finishReason !== 'STOP') return { ok: false, motivo: 'esquema', ms, detalle: `finishReason ${c?.finishReason ?? 'ninguno'}` };
-    const json = JSON.parse(String(c?.content?.parts?.[0]?.text ?? ''));
-    return { ok: true, json, tokensIn: d?.usageMetadata?.promptTokenCount ?? null, tokensOut: d?.usageMetadata?.candidatesTokenCount ?? null, ms };
+    if (c?.finishReason !== 'STOP') return { ok: false, motivo: 'esquema', ms, detalle: `finishReason ${c?.finishReason ?? 'ninguno'}`, uso };
+    // Con razonamiento, `parts` puede traer más de una parte: la respuesta es la que no es `thought`.
+    const partes = (c?.content?.parts ?? []) as Array<{ text?: string; thought?: boolean }>;
+    const texto = partes.filter(x => !x.thought && typeof x.text === 'string').map(x => x.text).join('');
+    const json = JSON.parse(texto);
+    return { ok: true, json, ms, tokensIn: uso?.tokensIn ?? null, tokensOut: uso?.tokensOut ?? null, tokensRazonamiento: uso?.tokensRazonamiento ?? null };
   } catch (err) {
-    return { ok: false, motivo: 'esquema', ms, detalle: String(err) };
+    return { ok: false, motivo: 'esquema', ms, detalle: String(err), uso };
   }
 }
 
@@ -149,7 +174,12 @@ export async function llamarGemini(p: PedidoModelo, env: (k: string) => string |
 
 /** El interruptor del remitente. Sin base: llega en `user.modulos` (`wa-identificar.ts`). */
 export function interruptorDe(user: WaUser, env: (k: string) => string | undefined = envDeDeno): ConfigInterprete {
-  return leerConfigInterprete(user.modulos?.bot_conversacional ?? null, env('WA_INTERPRETE_APAGADO'));
+  const cfg = leerConfigInterprete(user.modulos?.bot_conversacional ?? null, env('WA_INTERPRETE_APAGADO'));
+  // Un modelo fuera de `MODELOS_PERMITIDOS` corre el de por defecto, pero queda en el log (nunca en silencio).
+  if (cfg.activo && cfg.modeloRechazado) {
+    console.warn(`[wa-interprete] el modelo «${cfg.modeloRechazado.slice(0, 60)}» de config_extra.bot_conversacional no está permitido: corre ${cfg.modelo}`);
+  }
+  return cfg;
 }
 
 /**
@@ -230,7 +260,7 @@ async function atender(
   });
   const llamar = deps.llamarModelo ?? ((p: PedidoModelo) => llamarGemini(p, deps.env ?? envDeDeno));
   const r = await llamar({
-    modelo: cfg.modelo, sistema: instrucciones({ bandeja: enBandeja }), usuario,
+    modelo: cfg.modelo, sistema: instrucciones({ bandeja: enBandeja, jsonCompacto: piensa(cfg.modelo), confirmaNuevo: lec.pendiente?.capa === 'nuevo_confirmar' }), usuario,
     generationConfig: generacionPara(cfg.modelo, esquemaPara({ bandeja: enBandeja, rol: user.role })), timeoutMs: cfg.timeoutMs,
   });
   const base = { supabase, user, message, cfg, enBandeja };
@@ -324,6 +354,14 @@ async function leerContexto(
         const { data } = await supabase.from('wa_bandeja_entregas').select('negocio_opciones, pregunta_enviada_at').eq('id', pregunta.id).maybeSingle();
         opciones = Array.isArray(data?.negocio_opciones) ? (data!.negocio_opciones as ViajeAbierto[]) : null;
         bandejaVista = { espera: pregunta.espera, nombre: pregunta.nombre, corta: pregunta.corta, opciones, vistaAt: (data?.pregunta_enviada_at as string | null) ?? null };
+      } else if (pregunta.nuevoPorConfirmar) {
+        // «¿Creo el cliente nuevo «X»?»: el modelo ve la lista del aviso (numerada) y la opción «sí». Sin ella,
+        // un número suelto se cruzaba con los alias `nN` del contexto (cuarto control de Vera, CF7).
+        const { data } = pregunta.entregaId
+          ? await supabase.from('wa_bandeja_entregas').select('negocio_opciones').eq('id', pregunta.entregaId).maybeSingle()
+          : { data: null };
+        opciones = Array.isArray(data?.negocio_opciones) ? (data!.negocio_opciones as ViajeAbierto[]) : null;
+        bandejaVista = { espera: pregunta.espera, nombre: pregunta.nombre, corta: pregunta.corta, opciones, vistaAt: null, nuevoPorConfirmar: pregunta.nuevoPorConfirmar };
       } else {
         bandejaVista = { espera: pregunta.espera, nombre: pregunta.nombre, corta: pregunta.corta, opciones: null, vistaAt: null };
       }
@@ -648,10 +686,22 @@ async function despacharAlBot(b: Base, paso: Paso, lec: Lectura, texto: string, 
 
 // ── Telemetría (§8) ──────────────────────────────────────────────────────────
 
+/** Los tokens que se guardan: los de la respuesta buena, o los de una falla tras un 200 (MAX_TOKENS también cobra). */
+export function usoParaTelemetria(r: RespuestaModelo): UsoModelo {
+  if (r.ok) return { tokensIn: r.tokensIn, tokensOut: r.tokensOut, tokensRazonamiento: r.tokensRazonamiento ?? null };
+  return r.uso ?? { tokensIn: null, tokensOut: null, tokensRazonamiento: null };
+}
+
+/** ¿El error de PostgREST es por una columna que todavía no existe (la migración no se ha aplicado)? */
+function faltaColumna(error: { code?: string; message?: string } | null, columna: string): boolean {
+  return !!error && (error.code === 'PGRST204' || error.code === '42703') && String(error.message ?? '').includes(columna);
+}
+
 async function telemetria(b: Base, t: {
   resultado: string; accion: string | null; propuesta: unknown; rechazo: string | null; r: RespuestaModelo; nota?: boolean;
 }): Promise<void> {
-  const { error } = await b.supabase.from('wa_message_log').insert({
+  const uso = usoParaTelemetria(t.r);
+  const fila: Record<string, unknown> = {
     workspace_id: b.user.workspace_id,
     phone: b.message.phone,
     direction: 'inbound',
@@ -660,14 +710,22 @@ async function telemetria(b: Base, t: {
     message_preview: t.nota ? PREVIEW_NOTA_INTERNA : String(b.message.text ?? '').slice(0, 100),
     parser_source: 'interprete',
     gemini_model: b.cfg.modelo,
-    gemini_input_tokens: t.r.ok ? t.r.tokensIn : null,
-    gemini_output_tokens: t.r.ok ? t.r.tokensOut : null,
+    gemini_input_tokens: uso.tokensIn,
+    gemini_output_tokens: uso.tokensOut,
+    gemini_thoughts_tokens: uso.tokensRazonamiento,
     gemini_latency_ms: t.r.ms,
     interprete_accion: t.accion,
     interprete_propuesta: t.nota ? sinEvidencia(t.propuesta) : t.propuesta ?? null,
     interprete_rechazo: t.rechazo,
     interprete_resultado: t.resultado,
-  });
+  };
+  let { error } = await b.supabase.from('wa_message_log').insert(fila);
+  // Sin la columna (la migración 20261003120000 todavía no se aplicó), la fila igual se guarda: de ella
+  // depende el tope de llamados por hora (`dentroDelTope`).
+  if (faltaColumna(error, 'gemini_thoughts_tokens')) {
+    const { gemini_thoughts_tokens: _sin, ...resto } = fila;
+    ({ error } = await b.supabase.from('wa_message_log').insert(resto));
+  }
   if (error) console.error('[wa-interprete] no se pudo dejar la telemetría:', error.message);
 }
 
