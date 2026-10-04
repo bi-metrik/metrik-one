@@ -1,6 +1,6 @@
 ---
 name: recuperacion-red-iphone
-description: PR fix/recuperacion-red-iphone (2026-10-02) — auto-recarga del boundary, useTransitionTolerante, bloques dinámicos de la ficha, perfil de sesión compartido; qué quedó fuera y cómo se midió
+description: PR fix/recuperacion-red-iphone (2026-10-02) y fix/pantalla-recuperacion (2026-10-03) — escalera de recuperación del boundary, useTransitionTolerante, qué quedó fuera y cómo se midió
 metadata:
   type: project
 ---
@@ -31,3 +31,12 @@ JSON con `chunk_parts`/`sources`/`output_files`); se lee con un script de 30 lí
 Pendiente medido y NO hecho: middleware y render resuelven Auth por separado (2 por petición), y en
 server actions el `cache()` no memoiza (sin `enPeticionDeRuta`). Ver [[techo-postgrest-1000-filas]] para otros
 patrones de lectura.
+
+**3-oct, fix/pantalla-recuperacion:** la guarda de 1 recarga/60 s se reemplazó por una escalera
+(suave → 2/5/15/30 s → tope 4 en 3 min → «tardando más de lo normal»), con `AnimacionMarca` mientras
+intenta. Causa medida: ISP colombianos pierden paquetes hacia Vercel con internet sano; NO culpar la
+señal. Gotchas: (1) `router.refresh()` que falla cae a navegación completa (MPA) y se salta la guarda:
+el suave se anota en sessionStorage ANTES; (2) sin sessionStorage no se hace NADA automático, ni el
+suave; (3) en tests, «recarga» = desmontar + `olvidarCargaDeLaPagina()`; un temporizador del módulo de
+una carga anterior debe chequear `cargaActual()`. Pendiente: `MENSAJE_SIN_CONEXION` (toasts de
+acciones) sigue diciendo «Revisa la señal».

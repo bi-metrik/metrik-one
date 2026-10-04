@@ -3,12 +3,17 @@ import {
   esErrorDeRed,
   esErrorDeCargaDeChunk,
   textoPantallaDeError,
-  PANTALLA_SIN_CONEXION,
+  PANTALLA_TARDANDO,
 } from './error-de-red'
 import {
-  reclamarAutoRecarga,
-  consultarAutoRecarga,
-  VENTANA_AUTO_RECARGA_MS,
+  planearRecuperacion,
+  reclamarRecarga,
+  reclamarSuave,
+  tomarPendiente,
+  olvidarRecargas,
+  ESPERAS_RECARGA_MS,
+  MAX_RECARGAS,
+  VENTANA_RECARGAS_MS,
   type AlmacenRecarga,
 } from './auto-recarga'
 import { conReintentoDeRed } from './con-reintento'
@@ -86,20 +91,20 @@ describe('esErrorDeRed', () => {
 })
 
 describe('textoPantallaDeError', () => {
-  it('error de red (iPhone, guarda ya gastada, el caso del 3-oct): dice que se perdio la conexion', () => {
+  it('error de red con los intentos agotados: "tardando más de lo normal", sin culpar la señal', () => {
     const t = textoPantallaDeError(new TypeError('Load failed'), 'Algo se rompió en esta pantalla')
-    expect(t).toEqual(PANTALLA_SIN_CONEXION)
-    expect(t.titulo).toBe('Se perdió la conexión')
-    expect(t.cuerpo).toMatch(/revisa la señal y recarga/i)
+    expect(t).toEqual(PANTALLA_TARDANDO)
+    expect(t.titulo).toBe('Esta página está tardando más de lo normal')
+    expect(`${t.titulo} ${t.cuerpo}`).not.toMatch(/conexi[oó]n|señal|desconect/i)
     expect(t.cuerpo).not.toMatch(/pestaña/i)
   })
 
-  it('"network error" de Chromium y "Error in input stream" de Firefox tambien son sin conexion', () => {
-    expect(textoPantallaDeError(new TypeError('network error'), 'x')).toEqual(PANTALLA_SIN_CONEXION)
-    expect(textoPantallaDeError(new TypeError('Error in input stream'), 'x')).toEqual(PANTALLA_SIN_CONEXION)
+  it('"network error" de Chromium y "Error in input stream" de Firefox tambien', () => {
+    expect(textoPantallaDeError(new TypeError('network error'), 'x')).toEqual(PANTALLA_TARDANDO)
+    expect(textoPantallaDeError(new TypeError('Error in input stream'), 'x')).toEqual(PANTALLA_TARDANDO)
   })
 
-  it('"Network error" de negocio NO dice sin conexion', () => {
+  it('"Network error" de negocio NO es de red: titulo propio', () => {
     expect(textoPantallaDeError(new Error('Network error de la API de Siigo'), 'x').titulo).toBe('x')
   })
 
@@ -122,89 +127,98 @@ function almacenEnMemoria(): AlmacenRecarga & { datos: Map<string, string> } {
   }
 }
 
-describe('reclamarAutoRecarga (guarda anti-bucle)', () => {
+describe('planearRecuperacion + reclamos (la escalera)', () => {
   const T0 = 1_760_000_000_000
+  const red = new TypeError('Failed to fetch')
+  const base = { message: 'Failed to fetch', name: 'TypeError', origen: 'app' as const }
+  const plan = (s: AlmacenRecarga | null, ahora: number, enLinea = true, pathname = '/negocios') =>
+    planearRecuperacion({ error: red, pathname, almacen: s, ahora, enLinea })
 
-  it('la primera vez en una ruta: si, y deja la marca', () => {
+  it('un error que no es de red: null (no se recupera solo)', () => {
+    expect(planearRecuperacion({ error: new Error('boom'), pathname: '/x', almacen: almacenEnMemoria(), ahora: T0, enLinea: true })).toBeNull()
+  })
+
+  it('primero el suave; luego recargas a 2, 5, 15 y 30 s; despues, agotado', () => {
     const s = almacenEnMemoria()
-    expect(reclamarAutoRecarga('/negocios', s, T0)).toBe(true)
-    expect([...s.datos.values()]).toEqual([String(T0)])
-  })
-
-  it('la segunda dentro de la ventana: no (corta el bucle)', () => {
-    const s = almacenEnMemoria()
-    reclamarAutoRecarga('/negocios', s, T0)
-    expect(reclamarAutoRecarga('/negocios', s, T0 + 1_000)).toBe(false)
-    expect(reclamarAutoRecarga('/negocios', s, T0 + VENTANA_AUTO_RECARGA_MS - 1)).toBe(false)
-  })
-
-  it('pasada la ventana vuelve a poder', () => {
-    const s = almacenEnMemoria()
-    reclamarAutoRecarga('/negocios', s, T0)
-    expect(reclamarAutoRecarga('/negocios', s, T0 + VENTANA_AUTO_RECARGA_MS)).toBe(true)
-  })
-
-  it('la guarda es por ruta', () => {
-    const s = almacenEnMemoria()
-    reclamarAutoRecarga('/negocios', s, T0)
-    expect(reclamarAutoRecarga('/negocios/abc', s, T0 + 10)).toBe(true)
-  })
-
-  it('sin sessionStorage no recarga', () => {
-    expect(reclamarAutoRecarga('/negocios', null, T0)).toBe(false)
-  })
-
-  it('si sessionStorage lanza (cuota, modo privado) no recarga ni lanza', () => {
-    const roto: AlmacenRecarga = {
-      getItem: () => null,
-      setItem: () => { throw new Error('QuotaExceededError') },
+    let t = T0
+    expect(plan(s, t)).toEqual({ accion: 'suave', esperaMs: 0, intento: 0 })
+    expect(reclamarSuave('/negocios', s, t, base)).toBe(true)
+    for (let i = 0; i < MAX_RECARGAS; i++) {
+      expect(plan(s, t)).toEqual({ accion: 'recarga', esperaMs: ESPERAS_RECARGA_MS[i], intento: i })
+      t += ESPERAS_RECARGA_MS[i]
+      expect(reclamarRecarga('/negocios', s, t, base)).toBe(true)
     }
-    expect(reclamarAutoRecarga('/negocios', roto, T0)).toBe(false)
-    const ilegible: AlmacenRecarga = {
-      getItem: () => { throw new Error('SecurityError') },
-      setItem: () => {},
-    }
-    expect(reclamarAutoRecarga('/negocios', ilegible, T0)).toBe(false)
+    expect(ESPERAS_RECARGA_MS).toEqual([2_000, 5_000, 15_000, 30_000])
+    expect(plan(s, t + 1_000)).toEqual({ accion: 'agotado', esperaMs: 0, intento: MAX_RECARGAS })
+    expect(reclamarRecarga('/negocios', s, t + 1_000, base)).toBe(false)
   })
 
-  it('si el setItem no guarda nada no recarga (no habria guarda)', () => {
-    const mudo: AlmacenRecarga = { getItem: () => null, setItem: () => {} }
-    expect(reclamarAutoRecarga('/negocios', mudo, T0)).toBe(false)
-  })
-
-  it('un valor basura en la marca no bloquea para siempre', () => {
+  it('el suave es UNO por episodio (si el refresh acaba en navegacion completa, no se repite)', () => {
     const s = almacenEnMemoria()
-    s.datos.set('metrik:auto-recarga:/negocios', 'basura')
-    expect(reclamarAutoRecarga('/negocios', s, T0)).toBe(true)
+    expect(reclamarSuave('/negocios', s, T0, base)).toBe(true)
+    expect(reclamarSuave('/negocios', s, T0 + 1_000, base)).toBe(false)
+    expect(plan(s, T0 + 1_000)?.accion).toBe('recarga')
+    // Pasada la ventana, un episodio nuevo vuelve a empezar por el suave.
+    expect(plan(s, T0 + VENTANA_RECARGAS_MS)?.accion).toBe('suave')
   })
-})
 
-describe('consultarAutoRecarga (lo que lee el render)', () => {
-  const T0 = 1_760_000_000_000
-
-  it('responde lo mismo que reclamar, pero NO deja marca', () => {
+  it('el tope es por ruta y por ventana deslizante de 3 min', () => {
     const s = almacenEnMemoria()
-    expect(consultarAutoRecarga('/negocios', s, T0)).toBe(true)
-    expect(consultarAutoRecarga('/negocios', s, T0)).toBe(true)
+    for (let i = 0; i < MAX_RECARGAS; i++) reclamarRecarga('/negocios', s, T0 + i, base)
+    expect(reclamarRecarga('/negocios', s, T0 + 10, base)).toBe(false)
+    expect(reclamarRecarga('/tableros', s, T0 + 10, base)).toBe(true)
+    // La primera sale de la ventana: vuelve a haber cupo para una.
+    expect(reclamarRecarga('/negocios', s, T0 + VENTANA_RECARGAS_MS, base)).toBe(true)
+    expect(reclamarRecarga('/negocios', s, T0 + VENTANA_RECARGAS_MS, base)).toBe(false)
+  })
+
+  it('sin internet: esperar la red, sin gastar nada', () => {
+    const s = almacenEnMemoria()
+    expect(plan(s, T0, false)).toEqual({ accion: 'esperar-red', esperaMs: 0, intento: 0 })
     expect(s.datos.size).toBe(0)
-    // Consultar no gasta: el reclamo sigue disponible.
-    expect(reclamarAutoRecarga('/negocios', s, T0)).toBe(true)
   })
 
-  it('con la marca vigente dice que no; pasada la ventana, que si', () => {
+  it('planear solo lee', () => {
     const s = almacenEnMemoria()
-    reclamarAutoRecarga('/negocios', s, T0)
-    expect(consultarAutoRecarga('/negocios', s, T0 + 1_000)).toBe(false)
-    expect(consultarAutoRecarga('/negocios', s, T0 + VENTANA_AUTO_RECARGA_MS)).toBe(true)
+    plan(s, T0)
+    plan(s, T0, false)
+    expect(s.datos.size).toBe(0)
   })
 
-  it('sin sessionStorage, o si leer lanza: no', () => {
-    expect(consultarAutoRecarga('/negocios', null, T0)).toBe(false)
-    const ilegible: AlmacenRecarga = {
-      getItem: () => { throw new Error('SecurityError') },
-      setItem: () => {},
-    }
-    expect(consultarAutoRecarga('/negocios', ilegible, T0)).toBe(false)
+  it('sin sessionStorage, o si lanza o no guarda: agotado y ningun reclamo', () => {
+    expect(plan(null, T0)?.accion).toBe('agotado')
+    const ilegible: AlmacenRecarga = { getItem: () => { throw new Error('SecurityError') }, setItem: () => {} }
+    expect(plan(ilegible, T0)?.accion).toBe('agotado')
+    expect(reclamarSuave('/negocios', ilegible, T0, base)).toBe(false)
+    const roto: AlmacenRecarga = { getItem: () => null, setItem: () => { throw new Error('QuotaExceededError') } }
+    expect(reclamarSuave('/negocios', roto, T0, base)).toBe(false)
+    expect(reclamarRecarga('/negocios', roto, T0, base)).toBe(false)
+    const mudo: AlmacenRecarga = { getItem: () => null, setItem: () => {} }
+    expect(reclamarRecarga('/negocios', mudo, T0, base)).toBe(false)
+  })
+
+  it('la marca vieja de #1002 (un numero) cuenta como una recarga; la basura no bloquea', () => {
+    const s = almacenEnMemoria()
+    s.datos.set('metrik:auto-recarga:/negocios', String(T0))
+    expect(plan(s, T0 + 1_000)?.intento).toBe(1)
+    s.datos.set('metrik:auto-recarga:/negocios', 'basura')
+    expect(plan(s, T0)?.accion).toBe('suave')
+  })
+
+  it('tomarPendiente: devuelve lo anotado UNA vez y conserva el historial', () => {
+    const s = almacenEnMemoria()
+    reclamarSuave('/negocios', s, T0, base)
+    reclamarRecarga('/negocios', s, T0 + 2_000, base)
+    expect(tomarPendiente('/negocios', s, T0 + 9_000)).toMatchObject({ accion: 'recarga', intento: 1, message: 'Failed to fetch', origen: 'app' })
+    expect(tomarPendiente('/negocios', s, T0 + 9_000)).toBeNull()
+    expect(plan(s, T0 + 9_000)).toMatchObject({ accion: 'recarga', intento: 1 })
+  })
+
+  it('olvidarRecargas (boton Recargar): la escalera vuelve a empezar', () => {
+    const s = almacenEnMemoria()
+    for (let i = 0; i < MAX_RECARGAS; i++) reclamarRecarga('/negocios', s, T0 + i, base)
+    olvidarRecargas('/negocios', s)
+    expect(plan(s, T0 + 10)?.accion).toBe('suave')
   })
 })
 

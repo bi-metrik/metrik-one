@@ -8,6 +8,7 @@ import {
   TARJETA_OG,
   TITULO_SITIO,
 } from '@/lib/marca/og'
+import VigiaRecuperacion from '@/components/red/vigia-recuperacion'
 import './globals.css'
 
 // Fuentes autoalojadas (subset latin, variable). No se descargan de fonts.gstatic.com
@@ -111,6 +112,7 @@ export default function RootLayout({
         >
           {children}
           <Toaster position="bottom-right" richColors />
+          <VigiaRecuperacion />
         </ThemeProvider>
       </body>
     </html>

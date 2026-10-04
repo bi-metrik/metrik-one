@@ -1,9 +1,9 @@
 'use client'
 
-import { useEffect, useRef, useState } from 'react'
-import { reportarErrorCliente } from '@/lib/errores-cliente/enviar'
-import { intentarAutoRecarga, puedeAutoRecargar } from '@/lib/red/auto-recarga'
-import { textoPantallaDeError } from '@/lib/red/error-de-red'
+import AnimacionMarca from '@/components/marca/animacion-marca'
+import { useRecuperacionDeRed } from '@/hooks/use-recuperacion-de-red'
+import { olvidarRecargas, sessionStorageSeguro } from '@/lib/red/auto-recarga'
+import { TEXTO_SIN_INTERNET, textoPantallaDeError } from '@/lib/red/error-de-red'
 import { RefreshCw } from 'lucide-react'
 
 /**
@@ -12,17 +12,16 @@ import { RefreshCw } from 'lucide-react'
  * has occurred" y sin una sola pista — que fue exactamente lo que reporto
  * Jessica el 2026-08-18 y lo que nos costo el diagnostico.
  *
- * Dos cosas que antes no habia: el `digest` visible (con el se encuentra la
- * traza real en los logs del servidor) y un boton que RECARGA, no que
- * reintenta. La causa mas comun de este error es una pestaña vieja pidiendo
- * chunks de un deployment ya retirado; `reset()` reintenta con el MISMO bundle
- * roto y vuelve a fallar. Por eso "Recargar" es la accion principal.
+ * Un error de la APP muestra su `digest` (con el se encuentra la traza en los logs del
+ * servidor) y un boton que RECARGA: la causa mas comun es una pestaña vieja pidiendo chunks
+ * de un deployment retirado, y `reset()` reintentaria con el mismo bundle roto.
  *
- * Desde el 2026-10-02 recarga SOLA cuando lo que rompio fue la red o un chunk que no
- * bajo (iPhone con mala señal: `Load failed`, `Failed to load chunk`), una vez por ruta
- * cada 60 s (`intentarAutoRecarga`). Si la guarda ya se gasto, esta pantalla con el texto
- * de `textoPantallaDeError`: "Se perdió la conexión" si fue la red, y el de la pestaña vieja
- * solo si no lo fue.
+ * Un error de RED o de chunk (`esErrorDeRed`) se recupera solo y, mientras tanto, se ve la
+ * misma animacion de carga que `loading.tsx`, sin hablar de "conexión": el 2026-10-03 se
+ * midio que la persona SI tenia internet (la ruta de su ISP hacia Vercel perdia paquetes).
+ * La escalera (reintento suave, recargas con espera creciente, tope por ruta) vive en
+ * `lib/red/auto-recarga.ts`; el texto solo cambia si el navegador dice que no hay red o
+ * cuando se agotan los intentos.
  */
 export default function AppError({
   error,
@@ -31,44 +30,25 @@ export default function AppError({
   error: Error & { digest?: string }
   reset: () => void
 }) {
-  // El render solo CONSULTA la guarda (no escribe): decide si se pinta "Recargando…". La
-  // marca la reclama el efecto, que corre una sola vez por boundary montado. Reclamarla al
-  // renderizar la gastaba en un render que React descarta (ver `intentarAutoRecarga`). En el
-  // servidor no hay `window` y da `false` (un error de servidor nunca es de red del telefono).
-  const [recargar, setRecargar] = useState(() => puedeAutoRecargar(error))
-  // En dev, StrictMode corre el efecto dos veces sobre el mismo boundary: el segundo no
-  // vuelve a reclamar (ya hay una recarga en curso) ni repinta la pantalla de error.
-  const yaRecargo = useRef(false)
+  const estado = useRecuperacionDeRed(error, reset, 'app')
 
-  useEffect(() => {
-    if (yaRecargo.current) return
-    console.error('[app] error no capturado:', error)
-    const reclamo = intentarAutoRecarga(error)
-    // Deja rastro en los logs de Vercel (`[error-cliente]`) con lo que de verdad paso: el
-    // reclamo, no la consulta del render. Nunca lanza ni espera.
-    // Va por `sendBeacon`, que sobrevive a la recarga de abajo.
-    reportarErrorCliente(error, 'app', reclamo)
-    if (reclamo) {
-      yaRecargo.current = true
-      window.location.reload()
-      return
-    }
-    // La guarda no dejo (marca vigente o `sessionStorage` que no guarda): pantalla normal.
-    // Diferido, no en el cuerpo sincrono del efecto (react-hooks/set-state-in-effect).
-    const t = setTimeout(() => setRecargar(false), 0)
-    return () => clearTimeout(t)
-  }, [error])
-
-  if (recargar) {
+  if (estado === 'recuperando' || estado === 'sin-internet') {
     return (
-      <div className="flex min-h-[60vh] items-center justify-center gap-2 px-6 text-sm text-muted-foreground">
-        <RefreshCw className="h-4 w-4 animate-spin" aria-hidden />
-        Se perdió la conexión. Recargando…
+      <div className="flex min-h-[60vh] flex-col items-center justify-center gap-4 px-6">
+        <AnimacionMarca variante="liviana" tamano="clamp(1.6rem, 4vw, 2.2rem)" />
+        {estado === 'sin-internet' && (
+          <p className="text-sm text-muted-foreground">{TEXTO_SIN_INTERNET}</p>
+        )}
       </div>
     )
   }
 
   const texto = textoPantallaDeError(error, 'Algo se rompió en esta pantalla')
+  const recargar = () => {
+    // Un clic de la persona no es un bucle: la carga siguiente vuelve a tener la escalera.
+    olvidarRecargas(window.location.pathname, sessionStorageSeguro())
+    window.location.reload()
+  }
 
   return (
     <div className="flex min-h-[60vh] flex-col items-center justify-center gap-4 px-6 text-center">
@@ -77,19 +57,21 @@ export default function AppError({
       <div className="flex items-center gap-2">
         <button
           type="button"
-          onClick={() => window.location.reload()}
+          onClick={recargar}
           className="inline-flex items-center gap-2 rounded-md bg-acento px-4 py-2 text-sm font-medium text-white transition-colors hover:bg-acento"
         >
           <RefreshCw className="h-4 w-4" aria-hidden />
           Recargar
         </button>
-        <button
-          type="button"
-          onClick={reset}
-          className="rounded-md border border-border px-4 py-2 text-sm font-medium text-foreground transition-colors hover:bg-accent"
-        >
-          Reintentar
-        </button>
+        {estado === 'error' && (
+          <button
+            type="button"
+            onClick={reset}
+            className="rounded-md border border-border px-4 py-2 text-sm font-medium text-foreground transition-colors hover:bg-accent"
+          >
+            Reintentar
+          </button>
+        )}
       </div>
       {error.digest && (
         <p className="font-mono text-xs text-muted-foreground">
