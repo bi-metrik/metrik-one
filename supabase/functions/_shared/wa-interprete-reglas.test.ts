@@ -9,10 +9,18 @@ import {
   esquemaPara,
   evidenciaValida,
   generacionPara,
+  instrucciones,
   intentDeLaAccion,
   leerConfigInterprete,
+  MAX_SALIDA,
+  MAX_SALIDA_SIN_RAZONAMIENTO,
+  MODELOS_PERMITIDOS,
   montosDelTexto,
+  RAZONAMIENTO_POR_MODELO,
+  respuestaExacta,
+  TEXTO_NUEVO_NO_CARGADO,
   negociosDelContexto,
+  piensa,
   preguntaPendienteUnificada,
   resolverViaje,
   TEXTO_QUE_HAGO,
@@ -27,7 +35,7 @@ import {
 } from './wa-interprete-reglas.ts';
 import { CONFIG_BANDEJA_POR_DEFECTO } from './wa-bandeja-reglas.ts';
 import { CONTADOR_ALLOWED_INTENTS, OPERATOR_ALLOWED_INTENTS, READ_ONLY_ALLOWED_INTENTS, type UserRole } from './types.ts';
-import { resolverEncabezado, textoAcuseNuevo, textoPideNombreEnDuda, type ViajeAbierto } from './wa-viajes-reglas.ts';
+import { interpretarConfirmacionNuevo, resolverEncabezado, senalaUnViaje, textoAcuseNuevo, textoPideNombreEnDuda, viajesParecidos, type ViajeAbierto } from './wa-viajes-reglas.ts';
 
 /**
  * El validador del intérprete conversacional (§3 del diseño), una prueba por regla, la decisión H2 en
@@ -98,11 +106,32 @@ describe('interruptor config_extra.bot_conversacional', () => {
     expect(CONFIG_INTERPRETE_POR_DEFECTO).toEqual({ activo: false, modelo: 'gemini-2.5-flash', timeoutMs: 4000, maxLlamadasHora: 120 });
   });
 
-  it('2.5 apaga el razonamiento con thinkingBudget 0; un 3.x va con thinkingLevel MINIMAL y sin thinkingBudget', () => {
+  it('el razonamiento va por modelo, en una tabla: 2.5 sin razonar, 3.5-lite MINIMAL, 3.7 y 3.8 LOW (MINIMAL les da HTTP 400)', () => {
     expect(generacionPara('gemini-2.5-flash', {}).thinkingConfig).toEqual({ thinkingBudget: 0 });
     expect(generacionPara('gemini-2.5-flash-lite', {}).thinkingConfig).toEqual({ thinkingBudget: 0 });
     expect(generacionPara('gemini-3.5-flash-lite', {}).thinkingConfig).toEqual({ thinkingLevel: 'MINIMAL' });
-    expect(generacionPara('gemini-2.5-flash', {})).toMatchObject({ temperature: 0.1, maxOutputTokens: 512, responseMimeType: 'application/json' });
+    expect(generacionPara('gemini-3.7-flash', {}).thinkingConfig).toEqual({ thinkingLevel: 'LOW' });
+    expect(generacionPara('gemini-3.8-flash', {}).thinkingConfig).toEqual({ thinkingLevel: 'LOW' });
+    // Cada modelo permitido tiene su fila; ninguno queda al azar de una expresión regular.
+    expect(Object.keys(RAZONAMIENTO_POR_MODELO).sort()).toEqual([...MODELOS_PERMITIDOS].sort());
+    // 2.5 como hoy; los que razonan, con lugar para el razonamiento MÁS la respuesta.
+    expect(generacionPara('gemini-2.5-flash', {})).toMatchObject({ temperature: 0.1, maxOutputTokens: MAX_SALIDA_SIN_RAZONAMIENTO, responseMimeType: 'application/json' });
+    expect(MAX_SALIDA_SIN_RAZONAMIENTO).toBe(512);
+    expect(generacionPara('gemini-3.8-flash', {}).maxOutputTokens).toBe(MAX_SALIDA);
+    expect(MAX_SALIDA).toBeGreaterThan(512);
+  });
+
+  it('a los modelos que razonan se les pide el JSON compacto (3.x lo devuelve con sangría); a 2.5 no', () => {
+    expect(instrucciones({ bandeja: true, jsonCompacto: piensa('gemini-3.8-flash') })).toContain('devuelve el JSON en UNA sola línea');
+    expect(instrucciones({ bandeja: false, jsonCompacto: piensa('gemini-2.5-flash') })).not.toContain('UNA sola línea');
+    expect([piensa('gemini-2.5-flash'), piensa('gemini-2.5-flash-lite'), piensa('gemini-3.5-flash-lite'), piensa('gemini-3.7-flash'), piensa('gemini-3.8-flash')]).toEqual([false, false, true, true, true]);
+  });
+
+  it('3.7 y 3.8 están permitidos; un modelo fuera de la lista corre el de por defecto pero queda dicho (no en silencio)', () => {
+    expect(leerConfigInterprete({ activo: true, modelo: 'gemini-3.8-flash' })).toMatchObject({ modelo: 'gemini-3.8-flash', modeloRechazado: null });
+    expect(leerConfigInterprete({ activo: true, modelo: 'gemini-3.7-flash' }).modelo).toBe('gemini-3.7-flash');
+    expect(leerConfigInterprete({ activo: true, modelo: 'gemini-3.9-flash' })).toMatchObject({ modelo: 'gemini-2.5-flash', modeloRechazado: 'gemini-3.9-flash' });
+    expect(leerConfigInterprete({ activo: true }).modeloRechazado).toBeNull();
   });
 
   it('solo un escrito pasa: no un reenvío, un botón, un audio, una foto ni un texto vacío', () => {
@@ -967,5 +996,122 @@ describe('los textos nuevos', () => {
       expect(m).not.toBeNull();
       expect(fuente).toContain(`'${m![1]}'`);
     }
+  });
+});
+
+// ── Cuarto control de Vera (2026-10-03): lo que destapó el 3.x ──────────────────
+
+describe('cuarto control de Vera · un «nuevo/nueva …» explícito nunca carga en un viaje existente sin el «sí»', () => {
+  it('EN6: «nueva …» que el modelo propuso como el viaje del cliente nombrado → la caja de un cliente nuevo, con el aviso', () => {
+    const tanda = { abierta: true, nombre: 'Jorge Pérez', cajaId: 'v12' };
+    const t = 'nueva Sara Pérez';
+    const d = ejec(validar(una({ accion: 'abrir_viaje', evidencia: t, ref_cliente: 'Pérez', id: 'n14' }), trappvel(t, { tanda })));
+    expect(d.rechazo).toBe('V8_nuevo_explicito');
+    expect(d.paso).toMatchObject({ p: 'registrar', interpretacion: { accion: 'abrir_viaje', nuevo: 'Sara Pérez' } });
+    expect(d.paso).not.toMatchObject({ interpretacion: { viaje_id: expect.anything() } });
+    // El acuse dice que ya hay viajes de clientes parecidos (el «sí» al resumen decide).
+    expect((d.paso as { aviso: string }).aviso).toContain('Ya hay viajes de');
+    // Sin tanda, igual.
+    const d2 = ejec(validar(una({ accion: 'abrir_viaje', evidencia: t, id: 'n14' }), trappvel(t)));
+    expect(d2.paso).toMatchObject({ p: 'registrar', interpretacion: { accion: 'abrir_viaje', nuevo: 'Sara Pérez' } });
+  });
+
+  it('EN6: más largo que el tope, no se anota en ninguna caja (ni en la del pariente)', () => {
+    const t = 'nueva, la hermana menor de Lina Pérez';
+    const d = ejec(validar(una({ accion: 'abrir_viaje', evidencia: t, ref_cliente: 'Lina Pérez' }), trappvel(t, { tanda: { abierta: true, nombre: 'la tanda', cajaId: null } })));
+    expect(d.paso).toEqual({ p: 'decir', texto: TEXTO_NUEVO_NO_ANOTADO });
+    // Como contenido sin tanda pero nombrando el viaje: tampoco se abre ese viaje.
+    const d2 = ejec(validar(una({ accion: 'contenido', evidencia: t, ref_cliente: 'Lina Pérez' }), trappvel(t)));
+    expect(d2.paso).toEqual({ p: 'decir', texto: TEXTO_NUEVO_NO_ANOTADO });
+  });
+
+  it('L3: «nuevo …» a «¿A qué viaje van?» que el modelo resolvió con la opción del cliente → NUEVO, y el código de hoy pide el «sí»', () => {
+    const t = 'nuevo sobrino de Luisa Mejía';
+    const d = ejec(validar(una({ accion: 'responder', evidencia: t, opcion: 'n9', ref_cliente: 'Luisa Mejía' }), trappvel(t, { pendiente: LISTA_ENTREGA })));
+    expect(d.rechazo).toBe('V8_nuevo_explicito');
+    expect(d.paso).toMatchObject({ p: 'responder_bandeja', canonico: 'NUEVO sobrino de Luisa Mejía' });
+    // Más largo que el tope: ni la opción ni un cliente; se pide NUEVO y el nombre.
+    const t2 = 'nuevo, la tía de Luisa Mejía Gómez';
+    const d2 = ejec(validar(una({ accion: 'responder', evidencia: t2, opcion: 'n9' }), trappvel(t2, { pendiente: LISTA_ENTREGA })));
+    expect(d2.paso).toEqual({ p: 'decir', texto: TEXTO_NUEVO_NO_CARGADO });
+    // Con la lista de la tanda: la caja nueva, nunca el viaje de la lista.
+    const LISTA_TANDA = preguntaPendienteUnificada({ tanda: { tipo: 'eleccion', texto: 'Mejía', candidatos: [va(V9)] }, alias })!;
+    const d3 = ejec(validar(una({ accion: 'responder', evidencia: t, opcion: 'n9' }), trappvel(t, { pendiente: LISTA_TANDA })));
+    expect(d3.paso).toMatchObject({ p: 'registrar', interpretacion: { accion: 'abrir_viaje', nuevo: 'sobrino de Luisa Mejía' } });
+  });
+});
+
+describe('cuarto control de Vera · «¿Creo el cliente nuevo «X»?» con su lista y su «sí» (CF7)', () => {
+  const CONFIRMA = preguntaPendienteUnificada({
+    bandeja: { espera: 'viaje', nombre: 'Tanda de las 09:28', corta: '¿Creo el cliente nuevo «Sara Mejía»? SÍ, el nombre correcto, o el número o código del viaje', opciones: [va(V11), va(V9)], nuevoPorConfirmar: 'Sara Mejía' },
+    alias,
+  })!;
+
+  it('el contexto lleva la lista del aviso numerada y la opción «sí»', () => {
+    expect(CONFIRMA.capa).toBe('nuevo_confirmar');
+    expect(CONFIRMA.opciones.map(o => o.id)).toEqual(['n11', 'n9', 'si', 'nuevo', 'descartar']);
+    const ctx = armarContexto({ empresa: 'agencia', rol: 'operator', bandeja: true, negocios: VIAJES, tanda: null, pendiente: CONFIRMA, recientes: [], mensaje: '2' });
+    expect(ctx).toContain('[n11] 1. Carolina Ruiz (T1 26 11)');
+    expect(ctx).toContain('[n9] 2. Luisa Mejía (T1 26 9)');
+    expect(ctx).toContain('[si] SÍ: crear el cliente nuevo «Sara Mejía»');
+  });
+
+  it('un número suelto, el «sí», el mismo nombre, un código y DESCARTAR no pasan por el modelo', () => {
+    for (const t of ['1', '2', 'el 2', '7', 'sí', 'créalo', 'Sara Mejía', 'NUEVO Sara Mejía', 'T1 26 12', 'DESCARTAR']) expect(respuestaExacta(t, CONFIRMA), t).toBe(true);
+    for (const t of ['Sara Mejía Ruiz', 'el número del viaje', 'sí, créalo pero con otro nombre']) expect(respuestaExacta(t, CONFIRMA), t).toBe(false);
+  });
+
+  it('CF7: un número se resuelve contra la lista del aviso, nunca contra el alias nN del contexto', () => {
+    // El modelo devolvió el alias n12 (no está en la lista) para «el 1»: va la opción 1 de la lista.
+    const d = ejec(validar(una({ accion: 'responder', evidencia: 'el 1', id: 'n12' }), trappvel('el 1', { pendiente: CONFIRMA })));
+    expect(d.paso).toMatchObject({ p: 'responder_bandeja', canonico: '1', interpretacion: { viaje_id: 'v11' } });
+    // Un número fuera de la lista no elige nada.
+    expect(paso(validar(una({ accion: 'responder', evidencia: 'el 9', id: 'n9' }), trappvel('el 9', { pendiente: CONFIRMA })))).toMatchObject({ p: 'decir' });
+  });
+
+  it('una opción de la lista solo si el mensaje escribe su número o su código; el nombre de un cliente no elige su viaje', () => {
+    const t = 'es el número 2 de la lista';
+    expect(paso(validar(una({ accion: 'responder', evidencia: t, opcion: 'n9' }), trappvel(t, { pendiente: CONFIRMA })))).toMatchObject({ p: 'responder_bandeja', canonico: '2' });
+    const t2 = 'va para el T1 26 11';
+    expect(paso(validar(una({ accion: 'responder', evidencia: t2, ref_codigo: 'T1 26 11' }), trappvel(t2, { pendiente: CONFIRMA })))).toMatchObject({ p: 'responder_bandeja', canonico: '1' });
+    const t3 = 'es lo de Luisa';
+    const d3 = ejec(validar(una({ accion: 'responder', evidencia: t3, opcion: 'n9', ref_cliente: 'Luisa' }), trappvel(t3, { pendiente: CONFIRMA })));
+    expect(d3.paso).toMatchObject({ p: 'decir' });
+    expect(d3.rechazo).toBe('V20_viaje_no_escrito');
+  });
+
+  it('«sí, créalo» confirma; un «sí» que no está escrito, no', () => {
+    expect(paso(validar(una({ accion: 'confirmar', evidencia: 'sí, créalo' }), trappvel('sí, créalo', { pendiente: CONFIRMA })))).toMatchObject({ p: 'responder_bandeja', canonico: 'sí' });
+    expect(paso(validar(una({ accion: 'responder', evidencia: 'dale, créalo así', opcion: 'si' }), trappvel('dale, créalo así', { pendiente: CONFIRMA })))).toMatchObject({ canonico: 'sí' });
+    const t = 'mejor espera un momento';
+    expect(paso(validar(una({ accion: 'responder', evidencia: t, opcion: 'si' }), trappvel(t, { pendiente: CONFIRMA })))).toMatchObject({ p: 'decir' });
+  });
+
+  it('otro nombre vuelve a confirmar (lo hace el código de hoy); el mismo cuenta como «sí»', () => {
+    const t = 'se llama Sara Mejía Ruiz';
+    expect(paso(validar(una({ accion: 'responder', evidencia: t, opcion: 'nuevo', nuevo_cliente: 'Sara Mejía Ruiz' }), trappvel(t, { pendiente: CONFIRMA })))).toMatchObject({ p: 'responder_bandeja', canonico: 'NUEVO Sara Mejía Ruiz' });
+    expect(interpretarConfirmacionNuevo('NUEVO Sara Mejía Ruiz', [], 'Sara Mejía')).toEqual({ tipo: 'nombre', nombre: 'Sara Mejía Ruiz' });
+    expect(interpretarConfirmacionNuevo('Sara Mejía', [], 'Sara Mejía')).toEqual({ tipo: 'si' });
+    expect(interpretarConfirmacionNuevo('nuevo sara mejia', [], 'Sara Mejía')).toEqual({ tipo: 'si' });
+  });
+});
+
+describe('cuarto control de Vera · ajustes de la confirmación de cliente nuevo', () => {
+  it('una frase corta que señala el viaje del aviso no es un nombre nuevo (con el interruptor apagado también)', () => {
+    for (const t of ['el de Luisa', 'la de Mejía', 'para ese', 'es para ese', 'ese viaje', 'el mismo', 'al de Carolina', 'el viaje de Luisa Mejía']) {
+      expect(senalaUnViaje(t), t).toBe(true);
+      expect(interpretarConfirmacionNuevo(t, [], 'Sara Mejía'), t).toEqual({ tipo: 'no_entendida' });
+    }
+    for (const t of ['Sara Mejía Ruiz', 'Del Valle', 'de la Torre', 'Esteban Ruiz']) expect(senalaUnViaje(t), t).toBe(false);
+    expect(interpretarConfirmacionNuevo('Esteban Ruiz', [], 'Sara Mejía')).toEqual({ tipo: 'nombre', nombre: 'Esteban Ruiz' });
+  });
+
+  it('«Ya hay un viaje de …» no usa la distancia de tipeo en nombres de pila; en apellidos sí, y el nombre igual sigue avisando', () => {
+    const viajes: ViajeAbierto[] = [{ id: 'm', codigo: 'T1 26 20', cliente: 'MARÍA GÓMEZ', destino: 'CUSCO' }, { id: 'd', codigo: 'T1 26 21', cliente: 'DANIELA ROJAS', destino: 'LIMA' }];
+    expect(viajesParecidos('Mario Ruiz', viajes)).toEqual([]);
+    expect(viajesParecidos('Daniel Ortiz', viajes)).toEqual([]);
+    expect(viajesParecidos('Pedro Gomes', viajes).map(v => v.id)).toEqual(['m']);
+    expect(viajesParecidos('María Ruiz', viajes).map(v => v.id)).toEqual(['m']);
+    expect(viajesParecidos('Ana Rojas', viajes).map(v => v.id)).toEqual(['d']);
   });
 });

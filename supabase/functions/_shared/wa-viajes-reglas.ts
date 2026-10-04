@@ -403,15 +403,25 @@ const MAX_PARECIDOS = 3;
 
 /**
  * Los viajes abiertos cuyo cliente comparte con el nombre propuesto su nombre de pila, otro de sus
- * nombres o un apellido (igual, o a un error de tipeo en palabras de cinco letras o más). Así también
- * cae «tiíta Ana María» (un diminutivo de parentesco y parte del nombre de Ana María Gómez). No decide
- * nada: solo hace que la confirmación diga «Ya hay un viaje de …».
+ * nombres o un apellido. Así también cae «tiíta Ana María» (un diminutivo de parentesco y parte del
+ * nombre de Ana María Gómez). No decide nada: solo hace que la confirmación diga «Ya hay un viaje de …».
+ *
+ * El error de tipeo (una letra, en palabras de cinco o más) solo cuenta entre APELLIDOS: entre nombres
+ * de pila es otra persona casi siempre (Mario/María, Daniel/Daniela, Diana/Dayana), y con esa regla el
+ * aviso salía en el 37 % de los nombres comunes (cuarto control de Vera, 2026-10-03). Un nombre de pila
+ * es la primera palabra; con cuatro palabras o más, las dos primeras («Ana María Gómez Ruiz»).
  */
 export function viajesParecidos(nombre: string | null | undefined, viajes: ReadonlyArray<ViajeAbierto>): ViajeAbierto[] {
-  const propias = palabrasDe(nombre ?? '').filter(w => w.length >= 3 && !NO_IDENTIFICAN.has(w));
+  const propias = conPila(palabrasDe(nombre ?? '').filter(w => w.length >= 3 && !NO_IDENTIFICAN.has(w)));
   if (propias.length === 0) return [];
-  return viajes.filter(v => palabrasDe(v.cliente).filter(w => w.length >= 3 && !NO_IDENTIFICAN.has(w))
-    .some(c => propias.some(w => w === c || (w.length >= 5 && c.length >= 5 && distancia(w, c) <= 1))));
+  return viajes.filter(v => conPila(palabrasDe(v.cliente).filter(w => w.length >= 3 && !NO_IDENTIFICAN.has(w)))
+    .some(c => propias.some(w => w.w === c.w || (!w.pila && !c.pila && w.w.length >= 5 && c.w.length >= 5 && distancia(w.w, c.w) <= 1))));
+}
+
+/** Cada palabra de un nombre, marcada si es nombre de pila (la primera; las dos primeras con cuatro o más). */
+function conPila(ws: ReadonlyArray<string>): Array<{ w: string; pila: boolean }> {
+  const n = ws.length >= 4 ? 2 : 1;
+  return ws.map((w, i) => ({ w, pila: i < n }));
 }
 
 /** `{ tipo: 'nuevo' }` con sus parecidos (solo si los hay). */
@@ -494,6 +504,28 @@ export type RespuestaConfirmarNuevo =
  * otro nombre propuesto, y la confirmación siguiente dice «Ya hay un viaje de …».
  */
 export function interpretarConfirmacionNuevo(
+  texto: string, opciones: ReadonlyArray<{ id: string; codigo: string | null }>, propuesto?: string | null,
+): RespuestaConfirmarNuevo {
+  const r = leerConfirmacionNuevo(texto, opciones);
+  // Repetir el mismo nombre que muestra la pregunta («¿Creo el cliente nuevo «Laura Prueba»?» → «Laura
+  // Prueba», o «NUEVO Laura Prueba») es un «sí» a ese texto (cuarto control de Vera, 2026-10-03).
+  if (r.tipo === 'nombre' && propuesto && normalizarNombre(r.nombre) === normalizarNombre(propuesto)) return { tipo: 'si' };
+  return r;
+}
+
+/**
+ * Una frase corta que SEÑALA un viaje en vez de nombrar a alguien: «ese», «para ese», «el de Ana», «la de
+ * Gómez», «el mismo», «el viaje de Ana María». No es el nombre de un cliente nuevo: tomarla como nombre
+ * dejaba «¿Creo el cliente nuevo «el de Ana»?» a un «sí» por reflejo (cuarto control de Vera, 2026-10-03).
+ */
+export function senalaUnViaje(texto: string): boolean {
+  const t = normalizarNombre(texto);
+  return /\b(?:ese|esa|este|esta|eso|esto|aquel|aquella|ahi|alli|viaje|reserva)\b/.test(t)
+    || /^(?:(?:es|era|seria|va|van)\s+)?(?:(?:para|pa|en|a)\s+)?(?:el|la|lo|al|los|las)\s+(?:de|del|mism[oa]|primer[oa]?|segund[oa]|tercer[oa]?|ultim[oa])\b/.test(t)
+    || /^(?:(?:es|era|seria|va|van)\s+)?(?:para|pa|al|del)\s+(?:el|la)\b/.test(t);
+}
+
+function leerConfirmacionNuevo(
   texto: string, opciones: ReadonlyArray<{ id: string; codigo: string | null }>,
 ): RespuestaConfirmarNuevo {
   const bruto = String(texto ?? '').trim();
@@ -515,6 +547,8 @@ export function interpretarConfirmacionNuevo(
   // Un «no …» o una pregunta no son un nombre: se vuelve a preguntar sin cambiar el propuesto.
   if (/[?¿]/.test(bruto) || leerSiNo(bruto) !== null || /^(?:no|nop|nel|si|ok|okey|dale)\b/.test(t)) return { tipo: 'no_entendida' };
   const nuevo = leerNuevo(bruto);
+  // «el de Ana», «para ese»: señala el viaje del aviso, no nombra a nadie. Se vuelve a preguntar.
+  if (senalaUnViaje(nuevo ? nuevo.cliente ?? '' : bruto)) return { tipo: 'no_entendida' };
   const propuesto = (nuevo ? nuevo.cliente ?? '' : bruto)
     .replace(/^(?:(?:que\s+)?se\s+llama|llamad[oa]|de\s+nombre|el\s+nombre\s+es|es)[\s,.:;-]+/i, '').replace(/[.!]+$/, '').trim();
   return calificarNombreNuevo(propuesto) === 'nombre' ? { tipo: 'nombre', nombre: propuesto } : { tipo: 'no_entendida' };

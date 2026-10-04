@@ -797,7 +797,7 @@ async function atenderConfirmacionNuevo(
   supabase: SupabaseClient, ent: Fila, nombre: string, respuesta: string, crudos: ReadonlyArray<MensajeCrudo>,
   opciones: OpcionNegocio[] | null, opts: { revisarDosViajes?: boolean },
 ): Promise<void> {
-  const r = interpretarConfirmacionNuevo(respuesta, opciones ?? []);
+  const r = interpretarConfirmacionNuevo(respuesta, opciones ?? [], nombre);
   if (r.tipo === 'si') {
     // El «sí»: ahora sí, el cliente con ese nombre (si ya hay un contacto igual, se pregunta «¿es el mismo?»).
     await entenderNuevo(supabase, ent, crudos, nombre, { revisarDosViajes: opts.revisarDosViajes, nuevoExplicito: true });
@@ -1714,6 +1714,13 @@ export interface PreguntaAbierta {
    *   · `otra`: «¿es el mismo?», «¿lo creo igual?»: un sí, un no o un número.
    */
   espera: 'viaje' | 'nombre' | 'resumen' | 'otra';
+  /** La entrega de la pregunta (para leer su `negocio_opciones`). */
+  entregaId?: string | null;
+  /**
+   * El nombre de «¿Creo el cliente nuevo «X»?» si ESA es la pregunta (X); `null` si es otra. El intérprete
+   * la muestra con su propia capa, la lista del aviso y la opción «sí» (cuarto control de Vera, CF7).
+   */
+  nuevoPorConfirmar?: string | null;
 }
 
 /**
@@ -1762,7 +1769,7 @@ export async function preguntaAbierta(
       : porConfirmar ? `¿Creo el cliente nuevo «${porConfirmar.slice(0, 40)}»? SÍ, el nombre correcto, o el número o código del viaje`
       : '¿A qué viaje van? Número, código, NUEVO y el nombre, o DESCARTAR';
     const espera = c === 'cruce' || (!c && !resumen) ? 'viaje' : resumen ? 'resumen' : 'otra';
-    return { tipo: 'negocio', id: e.id as string, nombre, corta, espera };
+    return { tipo: 'negocio', id: e.id as string, nombre, corta, espera, entregaId: (e.entrega_id as string | null) ?? null, nuevoPorConfirmar: porConfirmar };
   }
   const { data: pendientes } = await supabase.from('wa_bandeja_entregas').select('id, plan_viajes, created_at, pregunta_enviada_at')
     .eq('workspace_id', workspaceId).eq('remitente_phone', phone).eq('estado', 'esperando_cliente').limit(20);

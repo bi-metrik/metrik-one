@@ -72,7 +72,7 @@ vi.mock('./handlers/ayuda.ts', () => ({ handleAyuda: espias.handleAyuda, handleU
 vi.mock('./wa-rate-limit.ts', () => ({ checkInboundLimit: espias.checkInboundLimit }));
 vi.mock('./wa-session.ts', () => ({ getOrCreateSession: espias.getOrCreateSession, updateSession: espias.updateSession }));
 
-import { atenderEscrito, interruptorDe, llamarGemini, PREVIEW_NOTA_INTERNA, type DepsInterprete, type RespuestaModelo } from './wa-interprete.ts';
+import { atenderEscrito, interruptorDe, llamarGemini, PREVIEW_NOTA_INTERNA, usoParaTelemetria, type DepsInterprete, type RespuestaModelo } from './wa-interprete.ts';
 import { identificarRemitente } from './wa-identificar.ts';
 import type { BotSession, IncomingMessage, WaUser } from './types.ts';
 
@@ -545,5 +545,73 @@ describe('despacho en la bandeja', () => {
       expect(await atenderEscrito(baseFalsa(), u(), escrito(t), { llamarModelo: llamar, env: () => undefined })).toEqual({ atendido: false });
       expect(llamar).not.toHaveBeenCalled();
     }
+  });
+});
+
+// ── Cuarto control de Vera (2026-10-03): el razonamiento de 3.x, en la telemetría ──
+
+describe('tokens de razonamiento (thoughtsTokenCount) y el modelo fuera de la lista', () => {
+  const pedido = { modelo: 'gemini-3.8-flash', sistema: 's', usuario: 'u', generationConfig: {}, timeoutMs: 4000 };
+  const env = (k: string) => (k === 'GEMINI_API_KEY' ? 'k' : undefined);
+  const resp = (cuerpo: unknown) => vi.fn(async () => new Response(JSON.stringify(cuerpo), { status: 200 }));
+
+  it('llamarGemini devuelve el razonamiento; 0 si el modelo no pensó; y lee la respuesta aunque venga una parte de razonamiento', async () => {
+    vi.stubGlobal('fetch', resp({ candidates: [{ finishReason: 'STOP', content: { parts: [{ text: 'pensando…', thought: true }, { text: '{"acciones":[]}' }] } }], usageMetadata: { promptTokenCount: 1400, candidatesTokenCount: 60, thoughtsTokenCount: 233 } }));
+    expect(await llamarGemini(pedido, env)).toMatchObject({ ok: true, json: { acciones: [] }, tokensIn: 1400, tokensOut: 60, tokensRazonamiento: 233 });
+    vi.stubGlobal('fetch', resp({ candidates: [{ finishReason: 'STOP', content: { parts: [{ text: '{"acciones":[]}' }] } }], usageMetadata: { promptTokenCount: 9, candidatesTokenCount: 3 } }));
+    expect(await llamarGemini(pedido, env)).toMatchObject({ ok: true, tokensRazonamiento: 0 });
+  });
+
+  it('un corte por MAX_TOKENS es fallback pero conserva lo que se cobró (el razonamiento quemado)', async () => {
+    vi.stubGlobal('fetch', resp({ candidates: [{ finishReason: 'MAX_TOKENS', content: { parts: [] } }], usageMetadata: { promptTokenCount: 1500, thoughtsTokenCount: 489 } }));
+    const r = await llamarGemini(pedido, env);
+    expect(r).toMatchObject({ ok: false, motivo: 'esquema', detalle: 'finishReason MAX_TOKENS', uso: { tokensIn: 1500, tokensOut: null, tokensRazonamiento: 489 } });
+    expect(usoParaTelemetria(r)).toEqual({ tokensIn: 1500, tokensOut: null, tokensRazonamiento: 489 });
+    expect(usoParaTelemetria({ ok: false, motivo: 'timeout', ms: 4000 })).toEqual({ tokensIn: null, tokensOut: null, tokensRazonamiento: null });
+  });
+
+  it('la telemetría guarda entrada, salida y razonamiento, también en un fallback que cobró', async () => {
+    const db = baseFalsa();
+    const r: RespuestaModelo = { ok: false, motivo: 'esquema', ms: 2100, detalle: 'finishReason MAX_TOKENS', uso: { tokensIn: 1500, tokensOut: null, tokensRazonamiento: 489 } };
+    await atenderEscrito(db, usuario(), escrito('pagué 20 mil de taxi'), { llamarModelo: async () => r, env: () => undefined });
+    expect(db.escrituras()[0]).toMatchObject({ tabla: 'wa_message_log', payload: { gemini_input_tokens: 1500, gemini_output_tokens: null, gemini_thoughts_tokens: 489, interprete_resultado: 'fallback_esquema' } });
+    const db2 = baseFalsa();
+    await atenderEscrito(db2, usuario(), escrito('pagué 20 mil de taxi'), { llamarModelo: async () => ({ ok: true, json: { acciones: [{ accion: 'acuse', evidencia: 'pagué' }] }, tokensIn: 900, tokensOut: 60, tokensRazonamiento: 120, ms: 800 }), env: () => undefined });
+    expect(db2.escrituras().find(o => o.tabla === 'wa_message_log')).toMatchObject({ payload: { gemini_input_tokens: 900, gemini_output_tokens: 60, gemini_thoughts_tokens: 120 } });
+  });
+
+  it('sin la columna (migración sin aplicar) la fila igual queda, sin el razonamiento: el tope por hora depende de ella', async () => {
+    const db = baseFalsa();
+    const from0 = db.from;
+    const db2 = {
+      ...db,
+      from: (t: string) => {
+        const q = from0(t);
+        const insert = q.insert as (p: unknown) => unknown;
+        q.insert = (p: Record<string, unknown>) => {
+          insert(p);
+          if (t === 'wa_message_log' && 'gemini_thoughts_tokens' in p) {
+            q.then = (res: (v: unknown) => unknown) => Promise.resolve({ data: null, error: { code: 'PGRST204', message: "Could not find the 'gemini_thoughts_tokens' column of 'wa_message_log' in the schema cache" } }).then(res);
+          }
+          return q;
+        };
+        return q;
+      },
+    };
+    await atenderEscrito(db2, usuario(), escrito('pagué 20 mil de taxi'), { llamarModelo: async () => ({ ok: false, motivo: 'timeout', ms: 4000 }), env: () => undefined });
+    const logs = db.escrituras().filter(o => o.tabla === 'wa_message_log');
+    expect(logs).toHaveLength(2);
+    expect(logs[1].payload).not.toHaveProperty('gemini_thoughts_tokens');
+    expect(logs[1].payload).toMatchObject({ parser_source: 'interprete', interprete_resultado: 'fallback_timeout' });
+  });
+
+  it('un modelo que no está permitido corre el de por defecto y queda en el log', () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    expect(interruptorDe(usuario({ bot: { activo: true, modelo: 'gemini-3.9-flash' } }), () => undefined).modelo).toBe('gemini-2.5-flash');
+    expect(warn).toHaveBeenCalledWith(expect.stringContaining('«gemini-3.9-flash»'));
+    warn.mockClear();
+    expect(interruptorDe(usuario({ bot: { activo: true, modelo: 'gemini-3.8-flash' } }), () => undefined).modelo).toBe('gemini-3.8-flash');
+    expect(warn).not.toHaveBeenCalled();
+    warn.mockRestore();
   });
 });

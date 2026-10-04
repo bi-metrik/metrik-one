@@ -27,6 +27,7 @@ import {
   esNombreNuevo,
   esRespuestaA,
   esSiNoCorto,
+  interpretarConfirmacionNuevo,
   leerEleccion,
   leerSiNo,
   lineaCaja,
@@ -48,8 +49,13 @@ import type { Intent, ParsedFields, UserRole } from './types.ts';
 
 // ── El interruptor (§8) ─────────────────────────────────────────────────────
 
-/** Modelos que el interruptor acepta. Cualquier otro valor cae al de por defecto. */
-export const MODELOS_PERMITIDOS = ['gemini-2.5-flash', 'gemini-2.5-flash-lite', 'gemini-3.5-flash-lite'] as const;
+/**
+ * Modelos que el interruptor acepta. Cualquier otro valor cae al de por defecto, pero NO en silencio:
+ * `leerConfigInterprete` devuelve el valor rechazado en `modeloRechazado` y `wa-interprete.ts` lo deja en
+ * el log en cada llamado (con `gemini-3.8-flash` fuera de esta lista corría 2.5 sin que nadie lo viera:
+ * control de Vera del 2026-10-03).
+ */
+export const MODELOS_PERMITIDOS = ['gemini-2.5-flash', 'gemini-2.5-flash-lite', 'gemini-3.5-flash-lite', 'gemini-3.7-flash', 'gemini-3.8-flash'] as const;
 export type ModeloInterprete = (typeof MODELOS_PERMITIDOS)[number];
 
 export interface ConfigInterprete {
@@ -57,6 +63,8 @@ export interface ConfigInterprete {
   modelo: ModeloInterprete;
   timeoutMs: number;
   maxLlamadasHora: number;
+  /** El modelo que pedía la config y no está en `MODELOS_PERMITIDOS` (corre el de por defecto). `null`: ninguno. */
+  modeloRechazado?: string | null;
 }
 
 export const CONFIG_INTERPRETE_POR_DEFECTO: ConfigInterprete = {
@@ -81,27 +89,72 @@ export function leerConfigInterprete(raw: unknown, apagadoPorEntorno?: string | 
   if (String(apagadoPorEntorno ?? '').trim() === '1') return { ...d };
   if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return { ...d };
   const r = raw as Record<string, unknown>;
+  const permitido = (MODELOS_PERMITIDOS as readonly string[]).includes(r.modelo as string);
+  const pedido = r.modelo === undefined || r.modelo === null ? null : String(r.modelo);
   return {
     activo: r.activo === true,
-    modelo: (MODELOS_PERMITIDOS as readonly string[]).includes(r.modelo as string) ? (r.modelo as ModeloInterprete) : d.modelo,
+    modelo: permitido ? (r.modelo as ModeloInterprete) : d.modelo,
     timeoutMs: enteroEnRango(r.timeout_ms, 1500, 6000, d.timeoutMs),
     maxLlamadasHora: enteroEnRango(r.max_llamadas_hora, 10, 300, d.maxLlamadasHora),
+    modeloRechazado: permitido ? null : pedido,
   };
 }
 
 /**
- * La configuración de generación. Un modelo 2.5 apaga el razonamiento con `thinkingBudget: 0`; uno
- * 3.x no lo admite («use with earlier models results in an error» al revés) y va con
- * `thinkingLevel: 'MINIMAL'` (§7, fuentes oficiales del 2026-10-02).
+ * El razonamiento de cada modelo, explícito (control de Vera del 2026-10-03: antes todo `gemini-3*` iba con
+ * `MINIMAL` y 3.7/3.8 respondían HTTP 400 → 100 % fallback). Lo que se probó el 2026-10-03, con la llave
+ * de producción y una sonda neutra (un saludo, sin datos), `generateContent`:
+ *   · gemini-3.8-flash: `thinkingLevel: MINIMAL` → HTTP 400 «Thinking level MINIMAL is not supported for
+ *     this model»; `LOW` → 200, STOP, 0 tokens de razonamiento en el saludo.
+ *   · gemini-3.7-flash: igual que 3.8 (MINIMAL → 400; LOW → 200, STOP).
+ *   · gemini-3.5-flash-lite: `MINIMAL` → 200, STOP, 0 de razonamiento (y `LOW` también responde 200).
+ *   · gemini-2.5-flash y 2.5-flash-lite: `thinkingBudget: 0` → 200, STOP, 0 de razonamiento.
+ * La tabla «Controlling thinking» de https://ai.google.dev/gemini-api/docs/thinking (leída el mismo día)
+ * coincide: 3.8-flash y 3.7-flash admiten «low, medium, high»; 3.5-flash-lite «minimal, low, medium, high».
+ * Un modelo fuera de la tabla no llega aquí (`leerConfigInterprete` lo cambia por el de por defecto).
  */
+export const RAZONAMIENTO_POR_MODELO: Readonly<Record<ModeloInterprete, Readonly<{ thinkingBudget: 0 } | { thinkingLevel: 'MINIMAL' | 'LOW' }>>> = {
+  'gemini-2.5-flash': { thinkingBudget: 0 },
+  'gemini-2.5-flash-lite': { thinkingBudget: 0 },
+  'gemini-3.5-flash-lite': { thinkingLevel: 'MINIMAL' },
+  'gemini-3.7-flash': { thinkingLevel: 'LOW' },
+  'gemini-3.8-flash': { thinkingLevel: 'LOW' },
+};
+
+/**
+ * El tope de salida. En los modelos que piensan, `maxOutputTokens` cuenta el razonamiento MÁS la
+ * respuesta (doc «Token limits and max_output_tokens»: si se llega al tope pensando, la respuesta sale
+ * cortada o vacía y el razonamiento se cobra igual). Ver `MAX_SALIDA` para el número.
+ */
+export const MAX_SALIDA_SIN_RAZONAMIENTO = 512;
+/**
+ * 2048 para los modelos que razonan. Medido el 2026-10-03 (banco de 45 turnos y control de Vera):
+ *   · la respuesta más larga: 182 tokens en el control; 341 en el banco con el JSON con sangría que
+ *     devuelve 3.x, 134 con el JSON compacto que se pide ahora (`instrucciones`, `jsonCompacto`);
+ *   · el razonamiento con LOW es casi siempre 0, pero cuando aparece pasa de 490 (se cortaba con 512:
+ *     6 de 190 en 3.8, 14 de 190 en 3.7); sin tope, 3.7 llegó a 378 en el banco;
+ *   · sin tope, 3.7 tuvo una salida desbocada que llegó a 4096 (MAX_TOKENS): el tope también acota lo
+ *     que se cobra en ese caso.
+ * 2048 deja más de tres veces el razonamiento más largo visto más la respuesta más larga; el
+ * `timeoutMs` del interruptor (4 s por defecto) corta antes cualquier llamado que de verdad lo use.
+ */
+export const MAX_SALIDA = 2048;
+
+/** ¿Este modelo puede pensar con la config de la tabla? (`thinkingLevel`, no `thinkingBudget: 0`). */
+export function piensa(modelo: string): boolean {
+  const r = RAZONAMIENTO_POR_MODELO[modelo as ModeloInterprete];
+  return !!r && 'thinkingLevel' in r;
+}
+
+/** La configuración de generación del modelo (su razonamiento de la tabla y su tope de salida). */
 export function generacionPara(modelo: string, esquema: unknown): Record<string, unknown> {
-  const tresX = /^gemini-3/.test(modelo);
+  const razonamiento = RAZONAMIENTO_POR_MODELO[modelo as ModeloInterprete] ?? RAZONAMIENTO_POR_MODELO[CONFIG_INTERPRETE_POR_DEFECTO.modelo];
   return {
     temperature: 0.1,
-    maxOutputTokens: 512,
+    maxOutputTokens: piensa(modelo) ? MAX_SALIDA : MAX_SALIDA_SIN_RAZONAMIENTO,
     responseMimeType: 'application/json',
     responseSchema: esquema,
-    thinkingConfig: tresX ? { thinkingLevel: 'MINIMAL' } : { thinkingBudget: 0 },
+    thinkingConfig: { ...razonamiento },
   };
 }
 
@@ -222,8 +275,13 @@ export function esquemaPara(p: { bandeja: boolean; rol: UserRole }): Record<stri
 /**
  * Las instrucciones fijas. Las del prototipo con los tres cambios del §2.2: sin «respuesta», con el
  * `id` entre corchetes que se puede devolver y con la regla de alcance de `descartar` (§5).
+ *
+ * `jsonCompacto` (los modelos que razonan, `piensa`): la API no tiene un parámetro para el JSON compacto
+ * y 3.x lo devuelve con sangría y saltos de línea, que se cobran como salida y ocupan el tope. Pedido en
+ * el texto, la salida media de 3.8-flash en el banco bajó de 70 a 37 tokens (2026-10-03). 2.5 ya lo
+ * devuelve compacto: a él no se le pide.
  */
-export function instrucciones(p: { bandeja: boolean }): string {
+export function instrucciones(p: { bandeja: boolean; jsonCompacto?: boolean }): string {
   return `Eres el intérprete del bot de WhatsApp de ONE, el sistema de gestión de una empresa colombiana.
 Quien te escribe es una persona del EQUIPO de la empresa (no el cliente final). Tu único trabajo es entender qué quiere hacer con su mensaje, dado el contexto, y devolverlo como acciones. El sistema valida y ejecuta; tú no guardas nada y no le contestas nada a la persona: el sistema redacta las respuestas.
 
@@ -244,7 +302,8 @@ ${p.bandeja ? `- abrir_viaje: dice de qué cliente/viaje es lo que sigue (nombre
 - cerrar_tanda: terminó de pasar los mensajes ("listo", "eso es todo", "ya te pasé todo").
 - mover: en el resumen pendiente, dice que el mensaje número n es de otro viaje (n, y ref_* o id).
 - descartar: pide borrar u olvidar algo ("bórralo", "eso fue por error"). alcance="pregunta" si se refiere a lo que pregunta la PREGUNTA PENDIENTE ("a ninguno, bótalos" con una lista pendiente es la opción [descartar] de esa lista); "tanda" si se refiere a lo que está pasando ahora (la tanda abierta); "todo" SOLO si dice literalmente todo o todos ("todo lo pendiente"); "mensajes" con n si nombra un número del resumen.
-` : ''}- responder: contesta la pregunta pendiente. "opcion" = el id elegido entre corchetes; si eligió NUEVO, opcion="nuevo" y el nombre en nuevo_cliente; si contesta con una cifra, ponla en "monto". Si para elegir nombró un cliente o destino, cópialo también en ref_cliente o ref_destino.
+` : ''}- responder: contesta la pregunta pendiente. "opcion" = el id elegido entre corchetes; si eligió NUEVO, opcion="nuevo" y el nombre en nuevo_cliente; si contesta con una cifra, ponla en "monto". Si para elegir nombró un cliente o destino, cópialo también en ref_cliente o ref_destino.${p.bandeja ? `
+  Con la pregunta nuevo_confirmar («¿Creo el cliente nuevo …?»): un sí o «créalo» es opcion="si"; un número es la opción de la lista con ESE número; otro nombre es opcion="nuevo" con el nombre en nuevo_cliente.` : ''}
 - confirmar: aprueba lo que el bot le mostró para confirmar.
 - cancelar: rechaza lo que el bot le mostró para confirmar.
 - consulta: pregunta por información del sistema. tema = numeros (cómo vamos, resumen), gastos (cuánto gasté, egresos, movimientos), cartera (quién me debe), negocios (negocios, viajes o solicitudes abiertas; etapa = venta, ejecucion, cobro o cierre si la dice). negocio si pregunta por uno.
@@ -252,14 +311,16 @@ ${p.bandeja ? `- abrir_viaje: dice de qué cliente/viaje es lo que sigue (nombre
 - corregir_gasto: corrige o completa el gasto que el bot muestra para confirmar. campo = monto | descripcion | negocio, y valor. Una palabra suelta que dice en qué fue ("Peaje") es la descripcion.
 - actividad: cuenta algo que hizo en un negocio (visita, llamada, avance). texto, y negocio como lo nombró.
 - contacto_nuevo: pide guardar un contacto nuevo. nombre y telefono.
-- saludo (saluda o pide ayuda/menú), acuse, fuera_de_alcance (pide algo que el bot no hace, como corregir un gasto que YA se guardó: "el de 100 mil de anoche era hospedaje"; "que" = qué pidió), pedir_aclaracion.`;
+- saludo (saluda o pide ayuda/menú), acuse, fuera_de_alcance (pide algo que el bot no hace, como corregir un gasto que YA se guardó: "el de 100 mil de anoche era hospedaje"; "que" = qué pidió), pedir_aclaracion.${p.jsonCompacto ? `
+
+Formato: devuelve el JSON en UNA sola línea, sin sangría ni saltos de línea.` : ''}`;
 }
 
 // ── La pregunta pendiente unificada (§2.2) ──────────────────────────────────
 
 export type Capa =
   | 'gasto_confirmar' | 'gasto_monto' | 'gasto_negocio' | 'soporte' | 'continuar' | 'contacto' | 'actividad' | 'aclaracion'
-  | 'entrega' | 'nombre' | 'resumen' | 'contacto_bandeja' | 'tanda_lista' | 'tanda_nombre';
+  | 'entrega' | 'nombre' | 'resumen' | 'contacto_bandeja' | 'tanda_lista' | 'tanda_nombre' | 'nuevo_confirmar';
 
 /** Una opción de la pregunta: `id` es lo que va entre corchetes y lo que el validador acepta. */
 export interface OpcionPendiente {
@@ -282,6 +343,8 @@ export interface PreguntaUnificada {
   tambien: string | null;
   /** ¿Esta pregunta ofrece DESCARTAR? (§5, caso 1). */
   ofreceDescartar: boolean;
+  /** Capa `nuevo_confirmar`: el nombre que muestra «¿Creo el cliente nuevo «X»?» (X). */
+  nuevoPorConfirmar?: string | null;
 }
 
 /** La sesión del bot como la ve el intérprete (`bot_sessions`, sin crearla). */
@@ -303,6 +366,8 @@ export interface PreguntaBandejaVista {
   /** `negocio_opciones` de la entrega («¿A qué viaje van?» del modo `uno`), en orden. */
   opciones?: ViajeAbierto[] | null;
   vistaAt?: string | null;
+  /** Si la pregunta es «¿Creo el cliente nuevo «X»?»: X. Va con su capa (`nuevo_confirmar`). */
+  nuevoPorConfirmar?: string | null;
 }
 
 /** Lo que espera la tanda abierta (`pendienteDeLaTanda`). */
@@ -365,7 +430,22 @@ function preguntaDeLaSesion(s: SesionBotVista, ahora: number): PreguntaUnificada
   return { capa, origen: 'bot', texto: s.texto?.trim() || TEXTO_CAPA_BOT[capa], opciones, haceMin: minutosDesde(s.vistaAt, ahora), tambien: null, ofreceDescartar: false };
 }
 
+/**
+ * «¿Creo el cliente nuevo «X»?» (#999) como la vio el comercial: la lista del aviso NUMERADA (un número
+ * suelto se lee contra ella, nunca contra los alias `nN` del contexto), la opción «sí» que crea X, otro
+ * nombre y DESCARTAR (cuarto control de Vera, CF7).
+ */
+function preguntaConfirmarNuevo(b: PreguntaBandejaVista, nombre: string, alias: (id: string) => string, ahora: number): PreguntaUnificada {
+  const lista = (b.opciones ?? []).map((v, i) => ({ id: alias(v.id), etiqueta: `${i + 1}. ${lineaCaja(v)}`, negocioId: v.id, numero: i + 1 }));
+  return {
+    capa: 'nuevo_confirmar', origen: 'bandeja', texto: `${b.nombre} · ${b.corta}`,
+    opciones: [...lista, { id: 'si', etiqueta: `SÍ: crear el cliente nuevo «${nombre}»` }, { id: 'nuevo', etiqueta: 'otro nombre (el correcto)' }, DESCARTAR],
+    haceMin: minutosDesde(b.vistaAt, ahora), tambien: null, ofreceDescartar: true, nuevoPorConfirmar: nombre,
+  };
+}
+
 function preguntaDeLaBandeja(b: PreguntaBandejaVista, alias: (id: string) => string, ahora: number): PreguntaUnificada {
+  if (b.nuevoPorConfirmar?.trim()) return preguntaConfirmarNuevo(b, b.nuevoPorConfirmar.trim(), alias, ahora);
   const capa: Capa = b.espera === 'viaje' ? 'entrega' : b.espera === 'nombre' ? 'nombre' : b.espera === 'resumen' ? 'resumen' : 'contacto_bandeja';
   const opciones: OpcionPendiente[] =
     capa === 'entrega' ? [...opcionesDeViajes(b.opciones ?? [], alias), NUEVO, DESCARTAR]
@@ -548,6 +628,14 @@ export function respuestaExacta(texto: string, p: PreguntaUnificada): boolean {
       return esSiNoCorto(t) || interpretarRespuestaNegocio(t, ops).tipo !== 'no_entendida';
     }
     case 'resumen': return esRespuestaA('resumen', t);
+    case 'nuevo_confirmar': {
+      // Lo que el código de hoy lee exacto (`interpretarConfirmacionNuevo`): el «sí» (o el mismo nombre), un
+      // número (de la lista del aviso, o fuera de ella: vuelve a preguntar), un código o DESCARTAR. Un número
+      // suelto nunca llega al modelo.
+      const ops = p.opciones.filter(o => o.negocioId).map(o => ({ id: o.negocioId!, codigo: null }));
+      const r = interpretarConfirmacionNuevo(t, ops, p.nuevoPorConfirmar ?? null);
+      return leerEleccion(t) !== null || r.tipo === 'si' || r.tipo === 'existente' || r.tipo === 'codigo' || r.tipo === 'descartar';
+    }
     case 'contacto_bandeja': return esRespuestaA('otra', t);
     case 'nombre':
     case 'tanda_nombre': return esNombreNuevo(t) !== null || /^nuev[oa]\b/i.test(normalizarTexto(t));
@@ -964,6 +1052,7 @@ function validarPropuesta(crudo: unknown, e: EntradaValidador): Decision {
       entrega: ['responder'], tanda_lista: ['responder'],
       nombre: ['responder'], tanda_nombre: ['responder'],
       resumen: ['confirmar', 'mover', 'responder'],
+      nuevo_confirmar: ['confirmar', 'cancelar', 'responder'],
       contacto_bandeja: ['confirmar', 'cancelar', 'responder'], contacto: ['confirmar', 'cancelar', 'responder'], continuar: ['confirmar', 'cancelar', 'responder'],
       gasto_confirmar: ['confirmar', 'cancelar', 'corregir_gasto'],
       gasto_monto: ['responder'], gasto_negocio: ['responder'], soporte: ['responder'],
@@ -1077,6 +1166,11 @@ function abrirViaje(acc: AccionModelo[], e: EntradaValidador, rechazo: string | 
   // «Nuevo», con o sin nombre, solo si el mensaje lo dice («nuevo cliente», «otra clienta»): en la QA real
   // flash-lite abrió «NUEVO Pérez» con un «Pérez» suelto. Si no lo dice, no se abre nada nuevo.
   if ((ab.nuevo_sin_nombre || ab.nuevo_cliente) && !/\b(nuev[oa]s?|otr[oa])\b/.test(norm(e.texto))) return aclaracion(e, 'V8_nuevo_no_escrito');
+  // EN6 (cuarto control de Vera): un «nuevo/nueva …» explícito que el modelo propuso como un viaje EXISTENTE
+  // («nueva, la hermana de Ana Gómez» → el viaje de Ana Gómez). Nunca se carga ahí: es la caja de un
+  // cliente nuevo, como lo lee el código de hoy; el «sí» es al resumen, que dice si se parece a un viaje.
+  const nv = !nombre && !ab.nuevo_sin_nombre && !ab.nuevo_cliente ? leerNuevo(e.texto) : null;
+  if (nv) return cajaDeNuevo(nv, e, ab.evidencia ?? null, conContenido, rechazo ?? 'V8_nuevo_explicito', recordar);
   if (nombre || ab.nuevo_sin_nombre || (ab.nuevo_cliente && !nombre)) {
     if (!nombre) {
       return ejecutar('bandeja.abrir_viaje', {
@@ -1130,31 +1224,37 @@ function abrirViaje(acc: AccionModelo[], e: EntradaValidador, rechazo: string | 
   return preguntarViaje(viajes, ab.evidencia, conContenido, rechazo);
 }
 
+/**
+ * Un «nuevo/nueva …» explícito (`leerNuevo`), hecho como lo hace el código de hoy con ese encabezado: la
+ * caja de un cliente nuevo con su nombre (el «sí» es al resumen, con «Ya hay un viaje de …» si se parece),
+ * o pidiendo el nombre. Más largo que el tope: no se anota en ninguna caja y se pregunta.
+ */
+function cajaDeNuevo(nv: { cliente: string | null }, e: EntradaValidador, ev: string | null, conContenido: boolean, rechazo: string, recordar: boolean): Decision {
+  const c = calificarNombreNuevo(nv.cliente);
+  if (c === 'nombre') {
+    return ejecutar('bandeja.abrir_viaje', {
+      p: 'registrar', interpretacion: { accion: 'abrir_viaje', nuevo: nv.cliente, ...(conContenido ? { con_contenido: true } : {}), evidencia: ev }, aviso: avisoNuevo(nv.cliente!, conContenido, e.negocios),
+    }, rechazo, recordar);
+  }
+  if (c === 'sin_nombre' || c === 'duda') {
+    return ejecutar('bandeja.abrir_viaje', {
+      p: 'registrar', interpretacion: { accion: 'abrir_viaje', nuevo: null, ...(conContenido ? { con_contenido: true } : {}), evidencia: ev },
+      aviso: c === 'duda' ? textoPideNombreEnDuda(nv.cliente ?? '') : TEXTO_PIDE_NOMBRE_NUEVO,
+    }, rechazo, recordar);
+  }
+  return decir('bandeja.nuevo_no_anotado', TEXTO_NUEVO_NO_ANOTADO, rechazo, recordar);
+}
+
 function contenido(acc: AccionModelo[], e: EntradaValidador, rechazo: string | null): Decision {
   const cs = acc.filter(a => a.accion === 'contenido');
   const resueltos = cs.map(a => viajesDe(a, e));
   const unicos = [...new Map(resueltos.filter(r => r.viajes.length === 1).map(r => [r.viajes[0].id, r.viajes[0]])).values()];
   const recordar = !!e.pendiente;
   // NU8 (control de Vera 2026-10-03): un «nuevo …» con una tanda abierta nunca es contenido de la caja de
-  // otro cliente. Si el código de hoy lo lee como encabezado, se hace lo mismo que él (la caja nueva, con
-  // nombre o pidiéndolo); si no (más largo que el tope), no se anota en ninguna caja y se pregunta.
-  const nv = e.tanda?.abierta ? leerNuevo(e.texto) : null;
-  if (nv) {
-    const c = calificarNombreNuevo(nv.cliente);
-    const ev = cs[0].evidencia ?? null;
-    if (c === 'nombre') {
-      return ejecutar('bandeja.abrir_viaje', {
-        p: 'registrar', interpretacion: { accion: 'abrir_viaje', nuevo: nv.cliente, evidencia: ev }, aviso: avisoNuevo(nv.cliente!, false, e.negocios),
-      }, rechazo ?? 'V8_nuevo_no_es_contenido', recordar);
-    }
-    if (c === 'sin_nombre' || c === 'duda') {
-      return ejecutar('bandeja.abrir_viaje', {
-        p: 'registrar', interpretacion: { accion: 'abrir_viaje', nuevo: null, evidencia: ev },
-        aviso: c === 'duda' ? textoPideNombreEnDuda(nv.cliente ?? '') : TEXTO_PIDE_NOMBRE_NUEVO,
-      }, rechazo ?? 'V8_nuevo_no_es_contenido', recordar);
-    }
-    return decir('bandeja.nuevo_no_anotado', TEXTO_NUEVO_NO_ANOTADO, rechazo ?? 'V8_nuevo_no_es_contenido', recordar);
-  }
+  // otro cliente. Desde el cuarto control (EN6), tampoco sin tanda cuando el contenido nombra un viaje: se
+  // abría en ESE viaje. Sin tanda y sin referencia sigue como siempre (cae sin caja; decide el resumen).
+  const nv = e.tanda?.abierta || resueltos.some(r => r.conRef) ? leerNuevo(e.texto) : null;
+  if (nv) return cajaDeNuevo(nv, e, cs[0].evidencia ?? null, false, rechazo ?? 'V8_nuevo_no_es_contenido', recordar);
   // Dos clientes en un escrito: se registra una vez, marcado `varios`; el resumen ya lo separa.
   if (cs.length > 1 && unicos.length > 1) {
     return ejecutar('bandeja.contenido_varios', {
@@ -1311,7 +1411,7 @@ function descartarPregunta(a: AccionModelo, e: EntradaValidador, rechazo: string
   // H2k: con las dos capas abiertas, un mensaje que nombra la caja de la tanda no contesta solo la lista.
   if (nombraLaCajaDeLaTanda(a, e)) return decir('bandeja.descartar_duda', textoDudaDescarte(p, e.tanda?.nombre ?? null), rechazo ?? 'V14_dos_capas');
   const sigue = e.tanda?.abierta ? (e.tanda.nombre ?? 'la tanda abierta') : null;
-  if (p.capa === 'entrega' || p.capa === 'resumen') {
+  if (p.capa === 'entrega' || p.capa === 'resumen' || p.capa === 'nuevo_confirmar') {
     return ejecutar('bandeja.descartar_pregunta', {
       p: 'responder_bandeja', canonico: 'DESCARTAR',
       interpretacion: { accion: 'descartar', canonico: 'DESCARTAR', evidencia: a.evidencia ?? null },
@@ -1336,6 +1436,9 @@ function confirmarOCancelar(que: 'confirmar' | 'cancelar', e: EntradaValidador, 
     }
     case 'contacto_bandeja':
       return ejecutar(`bandeja.${que}`, { p: 'responder_bandeja', canonico: si ? 'sí' : 'no', interpretacion: { accion: 'responder', canonico: si ? 'sí' : 'no' }, aviso: null }, rechazo);
+    case 'nuevo_confirmar':
+      // «no» a «¿Creo el cliente nuevo?» no elige nada: se vuelve a mostrar la pregunta.
+      return si ? siAlNuevo(e, null, rechazo) : aclaracion(e, rechazo ?? 'V4_no_al_nuevo');
     case 'gasto_confirmar':
     case 'contacto':
       return ejecutar(`bot.${que}`, { p: 'bot_boton', boton: si ? 'btn_confirm' : 'btn_cancel' }, rechazo);
@@ -1352,6 +1455,7 @@ function responder(a: AccionModelo, e: EntradaValidador, rechazo: string | null)
   switch (p.capa) {
     case 'entrega':
     case 'tanda_lista': return responderLista(a, opcion, e, rechazo);
+    case 'nuevo_confirmar': return responderConfirmarNuevo(a, opcion, e, rechazo);
     case 'nombre':
     case 'tanda_nombre': {
       if (opcion === 'descartar') return descartarPregunta(a, e, rechazo);
@@ -1413,8 +1517,85 @@ function responder(a: AccionModelo, e: EntradaValidador, rechazo: string | null)
   }
 }
 
+/**
+ * ¿El mensaje dice que sí a crear el cliente nuevo? Un sí, «créalo», «nuevo», o el mismo nombre; sin
+ * «pero» ni «no». El modelo propone «sí» y el código lo exige escrito: un «sí» que no está en el mensaje
+ * no crea a nadie.
+ */
+export function afirmaCrear(texto: string, propuesto: string | null | undefined): boolean {
+  const t = norm(texto);
+  if (/\b(pero|no|nop|nel|espera|mejor|otro|otra)\b/.test(t)) return false;
+  const nombre = norm(propuesto);
+  if (nombre && ` ${t} `.includes(` ${nombre} `)) return true;
+  return leerSiNo(texto) === 'si' || /\b(si|crea\w*|nuev[oa]|dale|ok|listo|claro|correcto|confirmo|hagale|vale|perfecto|exacto)\b/.test(t);
+}
+
+/** El «sí» a «¿Creo el cliente nuevo «X»?»: va al código de hoy, que crea X (y pregunta si ya hay un contacto igual). */
+function siAlNuevo(e: EntradaValidador, a: AccionModelo | null, rechazo: string | null): Decision {
+  if (!afirmaCrear(e.texto, e.pendiente?.nuevoPorConfirmar)) return aclaracion(e, rechazo ?? 'V19_si_no_escrito');
+  return ejecutar('bandeja.confirmar', { p: 'responder_bandeja', canonico: 'sí', interpretacion: { accion: 'confirmar', canonico: 'sí', evidencia: a?.evidencia ?? null }, aviso: null }, rechazo);
+}
+
+/** Un viaje de la lista del aviso: va por su NÚMERO, que el código de hoy lee contra esa misma lista. */
+function elegirDelAviso(o: OpcionPendiente, a: AccionModelo, rechazo: string | null): Decision {
+  const canonico = String(o.numero);
+  return ejecutar('bandeja.responder', {
+    p: 'responder_bandeja', canonico, interpretacion: { accion: 'responder', viaje_id: o.negocioId ?? null, canonico, evidencia: a.evidencia ?? null }, aviso: null,
+  }, rechazo);
+}
+
+/**
+ * La respuesta a «¿Creo el cliente nuevo «X»?» (#999), con las reglas del código de hoy
+ * (`interpretarConfirmacionNuevo`) y sin elegir nunca un viaje que el mensaje no nombre:
+ *   · un número escrito es SOLO la opción con ese número en la lista del aviso; nunca un alias `nN` del
+ *     contexto (CF7). Fuera de la lista, se vuelve a preguntar;
+ *   · el «sí» (o «créalo», o el mismo nombre) crea X; tiene que estar escrito;
+ *   · otro nombre reemplaza a X y se vuelve a confirmar (lo hace el código de hoy);
+ *   · un viaje de la lista solo si el mensaje escribe su número o su código; un código de otro viaje
+ *     abierto va al código de hoy, que lo busca;
+ *   · el nombre de un cliente no elige su viaje (el código de hoy tampoco): se vuelve a preguntar.
+ */
+function responderConfirmarNuevo(a: AccionModelo, opcion: string, e: EntradaValidador, rechazo: string | null): Decision {
+  const p = e.pendiente!;
+  const lista = p.opciones.filter(o => o.negocioId);
+  if (opcion === 'descartar') return descartarPregunta(a, e, rechazo);
+  const num = leerEleccion(e.texto);
+  if (num !== null) {
+    const o = lista.find(x => x.numero === num);
+    return o ? elegirDelAviso(o, a, rechazo) : aclaracion(e, rechazo ?? 'V20_numero_fuera_del_aviso');
+  }
+  if (opcion === 'si') return siAlNuevo(e, a, rechazo);
+  if (opcion === 'nuevo' || a.nuevo_cliente) {
+    const nombre = nombreNuevo({ ...a, opcion: 'nuevo' }, e.texto);
+    if (!nombre) return siAlNuevo(e, a, rechazo ?? 'V8_sin_nombre');
+    const no = nombreQueNoSigue(nombre, e, n => decir('bandeja.pide_nombre', textoPideNombreEnDuda(n), 'V8_nombre_en_duda'));
+    if (no) return no;
+    // El mismo nombre cuenta como «sí»; otro se vuelve a confirmar. Lo decide `interpretarConfirmacionNuevo`.
+    const canonico = `NUEVO ${nombre}`;
+    return ejecutar('bandeja.responder', { p: 'responder_bandeja', canonico, interpretacion: { accion: 'responder', nuevo: nombre, canonico, evidencia: a.evidencia ?? null }, aviso: null }, rechazo);
+  }
+  const escritos = numerosEscritos(e.texto);
+  const codigoEscrito = (v: NegocioCtx | undefined | null) => !!v?.codigo && codigoCompacto(e.texto).includes(codigoCompacto(v.codigo));
+  const v = porId(a.id, e.negocios) ?? porId(opcion, e.negocios)
+    ?? (a.ref?.codigo && todoEscrito(a.ref.codigo, e.texto) ? e.negocios.find(n => codigoCompacto(n.codigo) === codigoCompacto(a.ref!.codigo)) ?? null : null);
+  const o = lista.find(x => x.id === opcion) ?? (v ? lista.find(x => x.negocioId === v.id) : undefined);
+  if (o) {
+    const vo = e.negocios.find(n => n.id === o.negocioId);
+    if ((o.numero != null && escritos.includes(o.numero)) || codigoEscrito(vo)) return elegirDelAviso(o, a, rechazo);
+    return aclaracion(e, rechazo ?? 'V20_viaje_no_escrito');
+  }
+  if (v && codigoEscrito(v)) {
+    const canonico = v.codigo!.trim();
+    return ejecutar('bandeja.responder', {
+      p: 'responder_bandeja', canonico, interpretacion: { accion: 'responder', viaje_id: v.id, canonico, evidencia: a.evidencia ?? null }, aviso: null,
+    }, rechazo);
+  }
+  return aclaracion(e, rechazo ?? (v || a.ref ? 'V20_nombre_no_elige' : 'V4_opcion'));
+}
+
 /** La respuesta a una lista de viajes: «¿A qué viaje van?» (entrega) o la del encabezado (tanda). */
-function responderLista(a: AccionModelo, opcion: string, e: EntradaValidador, rechazo: string | null): Decision {
+function responderLista(propuesta: AccionModelo, opcion: string, e: EntradaValidador, rechazo: string | null): Decision {
+  let a = propuesta;
   const p = e.pendiente!;
   const enLista = p.opciones.filter(o => o.negocioId);
   if (opcion === 'descartar') return descartarPregunta(a, e, rechazo);
@@ -1423,7 +1604,19 @@ function responderLista(a: AccionModelo, opcion: string, e: EntradaValidador, re
   if (opcion === 'si' && p.capa === 'entrega') {
     return ejecutar('bandeja.responder', { p: 'responder_bandeja', canonico: 'sí', interpretacion: { accion: 'responder', canonico: 'sí', evidencia: a.evidencia ?? null }, aviso: null }, rechazo);
   }
-  if (opcion === 'nuevo' || a.nuevo_cliente) {
+  // EN6/L3 (cuarto control de Vera): un «nuevo/nueva …» explícito nunca elige un viaje de la lista, aunque
+  // nombre a un cliente que tiene uno («nueva, la tía de Ana Gómez»). Va como NUEVO: el código de hoy
+  // pregunta «¿Creo el cliente nuevo …?» (con «Ya hay un viaje de …» si aplica) y no carga nada sin el «sí».
+  let esNuevo = opcion === 'nuevo' || !!a.nuevo_cliente;
+  const nv = esNuevo ? null : leerNuevo(e.texto);
+  if (nv) {
+    // Más largo que el tope no es un nombre (I3): ni se crea ni se carga; se pide «NUEVO y el nombre».
+    if (calificarNombreNuevo(nv.cliente) === 'largo') return decir('bandeja.nuevo_no_cargado', TEXTO_NUEVO_NO_CARGADO, rechazo ?? 'V8_nuevo_explicito');
+    esNuevo = true;
+    a = { ...a, opcion: 'nuevo', nuevo_cliente: nv.cliente, ref: null };
+    rechazo ??= 'V8_nuevo_explicito';
+  }
+  if (esNuevo) {
     const nombre = nombreNuevo({ ...a, opcion: 'nuevo' }, e.texto);
     if (!nombre) return decir('bandeja.pide_nombre', TEXTO_PIDE_NOMBRE_NUEVO, rechazo ?? 'V8_sin_nombre');
     const no = nombreQueNoSigue(nombre, e, n => decir('bandeja.pide_nombre', textoPideNombreEnDuda(n), 'V8_nombre_en_duda'));
@@ -1617,6 +1810,8 @@ export const TEXTO_NOTA_INTERNA = 'No lo guardo: en la historia solo va lo que p
 export const TEXTO_QUE_HAGO = '¿Qué hago con esto? ¿Es algo que pidió el cliente, un gasto o una pregunta para mí?';
 /** Un «nuevo …» que no es un encabezado (más largo que el tope) con una tanda abierta: no se anota en ninguna caja. */
 export const TEXTO_NUEVO_NO_ANOTADO = '¿Es un cliente nuevo? Escribe NUEVO y su nombre (hasta 4 palabras), o el código del viaje.\nNo lo anoté en ninguna caja.';
+/** Un «nuevo …» más largo que el tope contestando una lista: no se elige ningún viaje ni se crea nadie. */
+export const TEXTO_NUEVO_NO_CARGADO = '¿Es un cliente nuevo? Escribe NUEVO y su nombre (hasta 4 palabras), o el número del viaje.\nNo he cargado nada.';
 export const TEXTO_NO_ENCONTRE_VIAJE = '¿Es un cliente nuevo? No encontré ese viaje entre los abiertos.\nEscribe NUEVO y el nombre, o el código del viaje.';
 export const TEXTO_CIERRA_DESPUES = 'Anotado en la tanda. Para cerrarla, escribe «listo».';
 export const TEXTO_GASTO_EN_COLA = 'Lo anoto y te lo muestro cuando termines lo que está en curso.';
