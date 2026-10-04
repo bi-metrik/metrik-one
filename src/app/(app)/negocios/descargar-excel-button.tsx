@@ -6,8 +6,8 @@ import { toast } from 'sonner'
 /**
  * «Descargar Excel» de la lista de negocios.
  *
- * Manda los ids que la lista tiene a la vista (ya filtrados) a
- * `POST /api/negocios/export` y dispara la descarga con el nombre que la ruta pone en
+ * Pide al servidor los ids de la lista visible (ya filtrados y en su orden; la pantalla
+ * solo tiene una página, `obtenerIds`) y los manda a `POST /api/negocios/export` y dispara la descarga con el nombre que la ruta pone en
  * `Content-Disposition`. El gate real está en la ruta; este botón solo se pinta para
  * los roles que pasan (`puedeDescargarNegocios`, resuelto en el servidor).
  */
@@ -32,15 +32,25 @@ function descargarBlob(blob: Blob, filename: string) {
   URL.revokeObjectURL(url)
 }
 
-export default function DescargarExcelButton({ ids }: { ids: string[] }) {
+export default function DescargarExcelButton({
+  total,
+  obtenerIds,
+}: {
+  /** Largo de la lista visible, para el rótulo. */
+  total: number
+  /** Ids de la lista visible COMPLETA, en su orden (los resuelve el servidor). */
+  obtenerIds: () => Promise<string[]>
+}) {
   const [cargando, setCargando] = useState(false)
   const [error, setError] = useState<string | null>(null)
 
   const descargar = async () => {
-    if (cargando || ids.length === 0) return
+    if (cargando || total === 0) return
     setCargando(true)
     setError(null)
     try {
+      const ids = await obtenerIds()
+      if (ids.length === 0) throw new Error('La vista quedó sin negocios. Recarga la lista.')
       const res = await fetch('/api/negocios/export', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -61,7 +71,7 @@ export default function DescargarExcelButton({ ids }: { ids: string[] }) {
     }
   }
 
-  const n = ids.length
+  const n = total
   return (
     <div className="flex flex-col items-end gap-1">
       <button

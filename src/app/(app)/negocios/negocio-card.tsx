@@ -6,7 +6,7 @@ import Link from 'next/link'
 import { rutaRepositorioNegocio } from '@/lib/almacenamiento/referencia'
 import { History, FolderOpen, Pause, CheckCircle2, XCircle, Ban, User, Megaphone, Copy, Check, Plus, X, Search, Loader2, Clock, RotateCcw, Tag, FileCheck, AlertTriangle, CalendarClock } from 'lucide-react'
 import { toast } from 'sonner'
-import type { NegocioResumen } from './negocio-v2-actions'
+import type { NegocioTarjeta } from '@/lib/negocios/vista-lista'
 import { agregarResponsable, quitarResponsable } from './negocio-v2-actions'
 import { detalleAsignacion } from '@/lib/negocios/responsable-copy'
 import { agregarMarcaNegocio, quitarMarcaNegocio } from './marcas-actions'
@@ -399,7 +399,7 @@ export default function NegocioCard({
   canMarcar = false,
   mostrarLlegada = false,
 }: {
-  negocio: NegocioResumen
+  negocio: NegocioTarjeta
   staffList?: StaffAsignable[]
   canAsignar?: boolean
   /** Rol gerencial: habilita poner/quitar marcas de condición desde la lista. */

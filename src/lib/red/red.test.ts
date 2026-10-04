@@ -4,6 +4,8 @@ import {
   esErrorDeCargaDeChunk,
   textoPantallaDeError,
   PANTALLA_TARDANDO,
+  mensajeDeFallaDeRed,
+  mensajeDeFallaDeCarga,
 } from './error-de-red'
 import {
   planearRecuperacion,
@@ -278,5 +280,25 @@ describe('envolverTolerante', () => {
     await envolverTolerante(async () => { visto = await accion() }, avisar)()
     expect(visto).toEqual({ error: 'No tienes permiso' })
     expect(avisar).not.toHaveBeenCalled()
+  })
+})
+
+describe('mensajeDeFallaDeRed', () => {
+  it('con internet no culpa a la señal ni a la conexión', () => {
+    expect(mensajeDeFallaDeRed(true)).toBe('No se pudo completar. Intenta de nuevo.')
+    expect(mensajeDeFallaDeRed(true)).not.toMatch(/se[ñn]al|conexi[oó]n/i)
+  })
+
+  it('solo nombra la conexión cuando el navegador dice que no hay', () => {
+    expect(mensajeDeFallaDeRed(false)).toMatch(/internet/i)
+  })
+
+  it('una lectura que falló por red usa el mismo criterio', () => {
+    vi.stubGlobal('navigator', { onLine: true })
+    expect(mensajeDeFallaDeCarga(new TypeError('Load failed'), 'x')).toBe('No se pudo completar. Intenta de nuevo.')
+    vi.stubGlobal('navigator', { onLine: false })
+    expect(mensajeDeFallaDeCarga(new TypeError('Load failed'), 'x')).toMatch(/internet/i)
+    vi.unstubAllGlobals()
+    expect(mensajeDeFallaDeCarga(new Error('otra cosa'), 'x')).toBe('x')
   })
 })
