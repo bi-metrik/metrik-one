@@ -477,3 +477,11 @@ verify_jwt = false
 # WA_CANAL_PROPIO_VERIFY_TOKEN. Sin este flag, un redeploy aplica el default
 # true y Meta recibe 401 antes de que corra el codigo.
 verify_jwt = false
+
+[functions.cardumen-ingesta]
+# Ingesta de los instrumentos de Cardumen (modo miniweb). Quien responde NO es
+# usuario de ONE: es una pagina estatica en otro dominio y no tiene JWT de
+# Supabase que mandar. Lo que la protege esta DENTRO de la funcion: el `estudio`
+# se valida contra el catalogo (404 si no existe o esta apagado), el cuerpo tiene
+# tope de 1 MB y es solo de escritura (nunca devuelve respuestas guardadas).
+verify_jwt = false

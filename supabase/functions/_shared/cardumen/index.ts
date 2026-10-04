@@ -8,6 +8,13 @@ import { claudeHaiku } from "./model.ts";
 import { initState, elicitationOpening, nextTurn } from "./r1.ts";
 import { serialize } from "./r2.ts";
 import { resolverEstudioChatPorTrigger, specDeSesion, cargarEstudioChat, type EstudioChat } from "./estudios.ts";
+// Modo miniweb: el webhook lo despacha con un boton CTA, sin abrir conversacion. Se
+// re-exporta desde aqui para que el webhook siga teniendo UNA puerta a Cardumen.
+export {
+  resolverEstudioMiniwebPorTrigger,
+  urlMiniwebParaParticipante,
+  type EstudioMiniweb,
+} from "./estudios.ts";
 import { sendCtaUrl, sendTextWithRhythm, sendTypingIndicator, enBackground } from "../wa-respond.ts";
 import { esEstadoNavigate, startNavigate, continueNavigate } from "./navigate/index.ts";
 import type { ConversationState, StudySpec, Encuadre, ModelAdapter } from "./types.ts";

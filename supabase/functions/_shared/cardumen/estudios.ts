@@ -107,3 +107,82 @@ export async function specDeSesion(supabase: Supa, studyId: string): Promise<Stu
   }
   return e.spec;
 }
+
+// ---------------------------------------------------------------------------------------
+// Modo `miniweb`: el instrumento es una pagina, no una conversacion.
+//
+// Hasta hoy las dos mini-webs vivas se despachaban con la palabra Y el destino escritos en
+// el codigo del webhook (`isCardumenTrigger`/`isTurismoTrigger` + la constante
+// `CARDUMEN_APP_URL`). Eso sigue en pie por retrocompatibilidad, pero un instrumento nuevo
+// ya no necesita deploy: entra como fila del catalogo con `modo='miniweb'` y su `url`.
+// ---------------------------------------------------------------------------------------
+
+export interface EstudioMiniweb {
+  estudio: string;  // slug canonico; es el que la pagina debe mandar a `cardumen-ingesta`
+  nombre: string | null;
+  url: string;      // destino del instrumento, sin los parametros del participante
+}
+
+/**
+ * Estudio de mini-web que abre este texto, o null si ninguno.
+ *
+ * MISMA tabla de triggers y MISMA normalizacion que el chat: una palabra no puede abrir dos
+ * estudios (lo garantiza la PK de `cardumen_estudio_triggers`), asi que el orden en que el
+ * webhook consulte chat y miniweb no puede cambiarle el dueno a ninguna palabra existente.
+ *
+ * Dos consultas y no un join embebido, por la misma razon que `resolverEstudioChatPorTrigger`:
+ * un join mal nombrado devuelve vacio EN SILENCIO.
+ */
+export async function resolverEstudioMiniwebPorTrigger(
+  supabase: Supa,
+  text: string,
+): Promise<EstudioMiniweb | null> {
+  const palabra = normalizarTrigger(text);
+  if (!palabra) return null;
+
+  const { data: trg, error: errTrg } = await supabase
+    .from("cardumen_estudio_triggers")
+    .select("estudio")
+    .eq("palabra", palabra)
+    .maybeSingle();
+  if (errTrg) {
+    console.error("[cardumen] error resolviendo trigger de miniweb:", errTrg.message);
+    return null;
+  }
+  if (!trg?.estudio) return null;
+
+  const { data, error } = await supabase
+    .from("cardumen_estudios")
+    .select("estudio, nombre, modo, url, activo")
+    .eq("estudio", trg.estudio)
+    .maybeSingle();
+  if (error) {
+    console.error("[cardumen] error cargando estudio de miniweb:", error.message);
+    return null;
+  }
+  if (!data) return null;
+  if (data.modo !== "miniweb") return null;  // el chat lo atiende su propio bloque
+  if (data.activo === false) return null;    // apagado a proposito
+  if (!data.url) {
+    // Fila a medio sembrar. Se loguea y se devuelve null en vez de reventar: lo que sigue
+    // en el webhook son los disparadores viejos, y un throw aqui tumbaria el turno entero.
+    console.error(`[cardumen] estudio miniweb '${data.estudio}' sin url: no se despacha`);
+    return null;
+  }
+
+  return { estudio: data.estudio, nombre: data.nombre ?? null, url: data.url as string };
+}
+
+/**
+ * URL del instrumento para un participante. `p` identifica al participante y `wa` es el
+ * numero por el que escribio; hoy son el mismo dato y van con nombres distintos porque el
+ * instrumento los lee aparte y uno de los dos puede dejar de ser el telefono.
+ *
+ * Respeta la query que ya traiga la url del catalogo (`?` o `&` segun el caso) y escapa el
+ * valor: un telefono con `+` quedaria leido como un espacio del otro lado.
+ */
+export function urlMiniwebParaParticipante(url: string, phone: string): string {
+  const sep = url.includes("?") ? "&" : "?";
+  const p = encodeURIComponent(phone);
+  return `${url}${sep}p=${p}&wa=${p}`;
+}
