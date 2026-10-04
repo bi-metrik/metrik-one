@@ -1532,6 +1532,13 @@ export function afirmaCrear(texto: string, propuesto: string | null | undefined)
 
 /** El «sí» a «¿Creo el cliente nuevo «X»?»: va al código de hoy, que crea X (y pregunta si ya hay un contacto igual). */
 function siAlNuevo(e: EntradaValidador, a: AccionModelo | null, rechazo: string | null): Decision {
+  // «nuevo Sara Mejía Ruiz» con «¿Creo «Sara Mejía»?» no es un «sí» a Sara Mejía: es otro nombre, y el
+  // código de hoy lo vuelve a confirmar.
+  const hoy = interpretarConfirmacionNuevo(e.texto, [], e.pendiente?.nuevoPorConfirmar ?? null);
+  if (hoy.tipo === 'nombre' && leerNuevo(e.texto)?.cliente) {
+    const canonico = `NUEVO ${hoy.nombre}`;
+    return ejecutar('bandeja.responder', { p: 'responder_bandeja', canonico, interpretacion: { accion: 'responder', nuevo: hoy.nombre, canonico, evidencia: a?.evidencia ?? null }, aviso: null }, rechazo ?? 'V19_otro_nombre');
+  }
   if (!afirmaCrear(e.texto, e.pendiente?.nuevoPorConfirmar)) return aclaracion(e, rechazo ?? 'V19_si_no_escrito');
   return ejecutar('bandeja.confirmar', { p: 'responder_bandeja', canonico: 'sí', interpretacion: { accion: 'confirmar', canonico: 'sí', evidencia: a?.evidencia ?? null }, aviso: null }, rechazo);
 }

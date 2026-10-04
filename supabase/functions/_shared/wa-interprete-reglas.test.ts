@@ -1083,6 +1083,9 @@ describe('cuarto control de Vera · «¿Creo el cliente nuevo «X»?» con su li
   it('«sí, créalo» confirma; un «sí» que no está escrito, no', () => {
     expect(paso(validar(una({ accion: 'confirmar', evidencia: 'sí, créalo' }), trappvel('sí, créalo', { pendiente: CONFIRMA })))).toMatchObject({ p: 'responder_bandeja', canonico: 'sí' });
     expect(paso(validar(una({ accion: 'responder', evidencia: 'dale, créalo así', opcion: 'si' }), trappvel('dale, créalo así', { pendiente: CONFIRMA })))).toMatchObject({ canonico: 'sí' });
+    // «nuevo» con OTRO nombre no es un «sí» al propuesto, aunque el modelo diga «sí»: se vuelve a confirmar.
+    const tn = 'nuevo Sara Mejía Ruiz';
+    expect(paso(validar(una({ accion: 'responder', evidencia: tn, opcion: 'si' }), trappvel(tn, { pendiente: CONFIRMA })))).toMatchObject({ p: 'responder_bandeja', canonico: 'NUEVO Sara Mejía Ruiz' });
     const t = 'mejor espera un momento';
     expect(paso(validar(una({ accion: 'responder', evidencia: t, opcion: 'si' }), trappvel(t, { pendiente: CONFIRMA })))).toMatchObject({ p: 'decir' });
   });
