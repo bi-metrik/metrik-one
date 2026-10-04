@@ -43,6 +43,11 @@ import { useState } from 'react'
 import FAB from './fab'
 import { PlatformAdminBar } from '@/components/platform-admin-bar'
 import ImpersonationBar from './impersonation-bar'
+import {
+  CapaNavegacionPendiente,
+  NavegacionPendienteProvider,
+  SenalDeEnlace,
+} from '@/components/navegacion-pendiente'
 import type { PlatformAdminState } from '@/lib/actions/platform-admin'
 import { rutaPermitida, vitrinasDelEspacio } from '@/lib/modulos/gate'
 
@@ -611,6 +616,7 @@ export default function AppShell({
   const logoFont = 'var(--font-schibsted), sans-serif'
 
   return (
+    <NavegacionPendienteProvider>
     <div className="flex h-dvh flex-col bg-background" style={brandingStyle}>
       <PlatformAdminBar state={platformAdminState ?? null} />
       <ImpersonationBar />
@@ -636,6 +642,7 @@ export default function AppShell({
                 </div>
                 <div style={{ height: '2px', backgroundColor: 'var(--sidebar-linea)', borderRadius: '1px', marginTop: '3px' }} />
               </div>
+              <SenalDeEnlace />
             </Link>
           ) : (
             <Link href={homeHref} prefetch={false} className="flex h-8 w-10 shrink-0 items-center justify-center">
@@ -646,6 +653,7 @@ export default function AppShell({
                 </div>
                 <div style={{ height: '1.5px', width: '100%', backgroundColor: 'var(--sidebar-linea)', borderRadius: '1px', marginTop: '1px' }} />
               </div>
+              <SenalDeEnlace />
             </Link>
           )}
           <button
@@ -686,6 +694,7 @@ export default function AppShell({
                   >
                     <Icon className="h-4 w-4 shrink-0" />
                     {sidebarExpanded && <span>{item.label}</span>}
+                    <SenalDeEnlace />
                   </Link>
                 )
               })}
@@ -724,6 +733,7 @@ export default function AppShell({
                   >
                     <Icon className="h-4 w-4 shrink-0" />
                     {sidebarExpanded && <span className="flex-1">{item.label}</span>}
+                    <SenalDeEnlace />
                   </Link>
                 )
               })}
@@ -762,6 +772,7 @@ export default function AppShell({
                   >
                     <Icon className="h-4 w-4 shrink-0" />
                     {sidebarExpanded && <span>{item.label}</span>}
+                    <SenalDeEnlace />
                   </Link>
                 )
               })}
@@ -800,6 +811,7 @@ export default function AppShell({
                   >
                     <Icon className="h-4 w-4 shrink-0" />
                     {sidebarExpanded && <span>{item.label}</span>}
+                    <SenalDeEnlace />
                   </Link>
                 )
               })}
@@ -838,6 +850,7 @@ export default function AppShell({
                   >
                     <Icon className="h-4 w-4 shrink-0" />
                     {sidebarExpanded && <span>{item.label}</span>}
+                    <SenalDeEnlace />
                   </Link>
                 )
               })}
@@ -891,6 +904,7 @@ export default function AppShell({
                   >
                     <Icon className="h-4 w-4 shrink-0" />
                     {sidebarExpanded && <span>{item.label}</span>}
+                    <SenalDeEnlace />
                   </Link>
                 )
               })}
@@ -929,6 +943,7 @@ export default function AppShell({
                   >
                     <Icon className="h-4 w-4 shrink-0" />
                     {sidebarExpanded && <span>{item.label}</span>}
+                    <SenalDeEnlace />
                   </Link>
                 )
               })}
@@ -962,6 +977,7 @@ export default function AppShell({
                   >
                     <Icon className="h-4 w-4 shrink-0" />
                     {sidebarExpanded && <span>{item.label}</span>}
+                    <SenalDeEnlace />
                   </Link>
                 )
               })}
@@ -1000,6 +1016,7 @@ export default function AppShell({
                   >
                     <Icon className="h-4 w-4 shrink-0" />
                     {sidebarExpanded && <span>{item.label}</span>}
+                    <SenalDeEnlace />
                   </Link>
                 )
               })}
@@ -1028,6 +1045,7 @@ export default function AppShell({
                     <CreditCard className="h-4 w-4 shrink-0" />
                     {sidebarExpanded && <span>Suscripción</span>}
                     <PuntoEstado tono={suscripcion.tono} />
+                    <SenalDeEnlace />
                   </Link>
                 )
               })()}
@@ -1067,6 +1085,7 @@ export default function AppShell({
                 >
                   <Icon className="h-4 w-4 shrink-0" />
                   {sidebarExpanded && <span>{item.label}</span>}
+                  <SenalDeEnlace />
                 </Link>
               )
             })}
@@ -1155,6 +1174,7 @@ export default function AppShell({
                 </div>
                 <div style={{ height: '1.5px', width: '100%', backgroundColor: 'var(--sidebar-linea)', borderRadius: '1px', marginTop: '1px' }} />
               </div>
+              <SenalDeEnlace />
             </Link>
             {hasLogo && (
               // eslint-disable-next-line @next/next/no-img-element -- dinámico desde Supabase storage, tamaño variable
@@ -1201,6 +1221,7 @@ export default function AppShell({
                         <CreditCard className="h-4 w-4" />
                         <span>Suscripción</span>
                         <PuntoEstado tono={suscripcion.tono} />
+                        <SenalDeEnlace />
                       </Link>
                       <button
                         type="button"
@@ -1236,9 +1257,14 @@ export default function AppShell({
         </header>
 
         {/* Main content */}
-        <main className="flex-1 overflow-auto min-h-0 bg-background">
-          <div className="p-6 pb-24 md:pb-6">{children}</div>
-        </main>
+        {/* La capa de navegación pendiente es hermana del <main> (no hija): así cubre el área
+            de contenido aunque la lista esté scrolleada, sin tapar menú ni barra superior. */}
+        <div className="relative flex flex-1 min-h-0 flex-col">
+          <main className="flex-1 overflow-auto min-h-0 bg-background">
+            <div className="p-6 pb-24 md:pb-6">{children}</div>
+          </main>
+          <CapaNavegacionPendiente />
+        </div>
 
         {/* ── Mobile "Más" panel + backdrop ── */}
         {mobileMoreOpen && (
@@ -1265,6 +1291,7 @@ export default function AppShell({
                   >
                     <Icon className={`h-5 w-5 shrink-0 ${isActive ? 'text-primary' : 'text-muted-foreground'}`} />
                     {item.label}
+                    <SenalDeEnlace />
                   </Link>
                 )
               })}
@@ -1292,6 +1319,7 @@ export default function AppShell({
               >
                 <Icon className="h-5 w-5" />
                 <span className="truncate max-w-[60px]">{item.label}</span>
+                <SenalDeEnlace />
               </Link>
             )
           })}
@@ -1314,5 +1342,6 @@ export default function AppShell({
       {mod.business && !modoVitrina && <FAB role={role} registrarPagoEnabled={!!mod.fab_registrar_pago} modules={mod as Record<string, boolean | undefined>} />}
       </div>
     </div>
+    </NavegacionPendienteProvider>
   )
 }
