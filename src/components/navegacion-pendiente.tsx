@@ -14,6 +14,7 @@ import {
   type ReactNode,
 } from 'react'
 import AnimacionMarca from '@/components/marca/animacion-marca'
+import { cargarCompletoSiToca } from '@/lib/version/recarga-pendiente'
 
 /**
  * Respuesta inmediata al tocar algo que navega, sin esperar a la red.
@@ -70,6 +71,9 @@ export function NavegacionPendienteProvider({ children }: { children: ReactNode 
   const navegar = useCallback(
     (href: string) => {
       if (destinoEnCurso.current === href) return
+      // La pestaña tiene una recarga pendiente (techo de 8 h o epoca nueva): esta
+      // navegacion es el momento de ponerse al dia, como carga completa del destino.
+      if (cargarCompletoSiToca(href)) return
       destinoEnCurso.current = href
       setDestino(href)
       iniciar(() => {
