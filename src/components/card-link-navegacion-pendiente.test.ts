@@ -263,3 +263,71 @@ describe('enlaces del menu (useLinkStatus)', () => {
     expect(animando()).toBe(false)
   })
 })
+
+describe('con recarga pendiente (techo de 8 h o epoca nueva)', () => {
+  // La navegacion por codigo no pasa por un <a>: sin este gancho, la recarga pendiente
+  // nunca encontraria su momento al tocar una tarjeta.
+  let assign: ReturnType<typeof vi.fn>
+  let pendiente: typeof import('@/lib/version/recarga-pendiente')
+  let TECHO: number
+
+  beforeEach(async () => {
+    pendiente = await import('@/lib/version/recarga-pendiente')
+    TECHO = (await import('@/lib/version/decidir')).TECHO_EDAD_MS
+    assign = vi.fn()
+    Object.defineProperty(globalThis, 'location', { configurable: true, writable: true, value: { assign } })
+  })
+
+  afterEach(() => {
+    pendiente.olvidarPestana()
+    Reflect.deleteProperty(navigator, 'onLine')
+  })
+
+  it('pasado el techo, la tarjeta carga el destino completo en vez de navegar suave', async () => {
+    pendiente.registrarPestana(1, Date.now() - TECHO - 1)
+    await montar()
+    tarjeta()!.click()
+    await asentar()
+    expect(assign).toHaveBeenCalledWith('/negocios/n1')
+    expect(push).not.toHaveBeenCalled()
+  })
+
+  it('tambien fuera del shell (sin proveedor)', async () => {
+    pendiente.registrarPestana(1, Date.now() - TECHO - 1)
+    await montar({ conProveedor: false })
+    tarjeta()!.click()
+    await asentar()
+    expect(assign).toHaveBeenCalledWith('/negocios/n1')
+    expect(push).not.toHaveBeenCalled()
+  })
+
+  it('con una epoca viva mayor, igual', async () => {
+    pendiente.registrarPestana(1, Date.now())
+    pendiente.anotarEpocaViva(2)
+    await montar()
+    tarjeta()!.click()
+    await asentar()
+    expect(assign).toHaveBeenCalledWith('/negocios/n1')
+    expect(push).not.toHaveBeenCalled()
+  })
+
+  it('sin motivo (solo hubo deploys), navega suave como siempre', async () => {
+    pendiente.registrarPestana(1, Date.now())
+    pendiente.anotarEpocaViva(1)
+    await montar()
+    tarjeta()!.click()
+    await asentar()
+    expect(assign).not.toHaveBeenCalled()
+    expect(push).toHaveBeenCalledWith('/negocios/n1')
+  })
+
+  it('sin red, navega suave: una carga completa sin red deja la pantalla en blanco', async () => {
+    pendiente.registrarPestana(1, Date.now() - TECHO - 1)
+    Object.defineProperty(navigator, 'onLine', { configurable: true, get: () => false })
+    await montar()
+    tarjeta()!.click()
+    await asentar()
+    expect(assign).not.toHaveBeenCalled()
+    expect(push).toHaveBeenCalledWith('/negocios/n1')
+  })
+})

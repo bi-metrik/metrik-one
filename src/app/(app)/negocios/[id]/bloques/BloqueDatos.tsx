@@ -5,6 +5,7 @@ import { useTransitionTolerante } from '@/hooks/use-transition-tolerante'
 import { resolverPlantillaCampo } from '@/lib/negocios/plantilla-campo'
 import { ImageIcon, Search, FileText, ExternalLink, Download, Copy, Check, Pencil } from 'lucide-react'
 import { toast } from 'sonner'
+import { fetchPropio } from '@/lib/version/fetch-propio'
 import { actualizarBloqueData, marcarBloqueCompleto, consultarRetornoDeCorreccion, confirmarSugerido, descartarConflicto } from '../../negocio-v2-actions'
 import SelectorCausa from '@/components/negocios/selector-causa'
 import { LABEL_CAUSA, nuevaSesionId, type CausaCorreccion } from '@/lib/correcciones/causas'
@@ -481,7 +482,7 @@ export default function BloqueDatos({
       if (result.trigger_afi_generation && result.negocio_id) {
         const tid = toast.loading('Generando paquete documental… esto puede tardar 30-60s')
         try {
-          const res = await fetch(`/api/afi/generar/${result.negocio_id}`, { method: 'POST' })
+          const res = await fetchPropio(`/api/afi/generar/${result.negocio_id}`, { method: 'POST' })
           const json = await res.json()
           toast.dismiss(tid)
           if (json.ok) {
@@ -497,7 +498,7 @@ export default function BloqueDatos({
       if (result.trigger_afi_contrato && result.negocio_id) {
         const tid = toast.loading('Armando contrato… esto puede tardar 15-30s')
         try {
-          const res = await fetch(`/api/afi/contrato/${result.negocio_id}`, { method: 'POST' })
+          const res = await fetchPropio(`/api/afi/contrato/${result.negocio_id}`, { method: 'POST' })
           const json = await res.json()
           toast.dismiss(tid)
           if (json.ok) {

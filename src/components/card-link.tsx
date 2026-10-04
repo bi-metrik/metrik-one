@@ -4,6 +4,7 @@ import { useRouter } from 'next/navigation'
 import { useEffect, useRef, useTransition } from 'react'
 import type { HTMLAttributes, KeyboardEvent, MouseEvent, ReactNode } from 'react'
 import { useNavegacionPendiente } from '@/components/navegacion-pendiente'
+import { cargarCompletoSiToca } from '@/lib/version/recarga-pendiente'
 
 /**
  * Tarjeta entera clickable cuyo texto SE PUEDE SELECCIONAR y copiar.
@@ -54,6 +55,8 @@ export function CardLink({ href, children, className = '', ...rest }: Props) {
       return
     }
     if (enCursoLocal.current) return
+    // Con recarga pendiente (techo o epoca), carga completa del destino.
+    if (cargarCompletoSiToca(href)) return
     enCursoLocal.current = true
     iniciarLocal(() => {
       router.push(href)

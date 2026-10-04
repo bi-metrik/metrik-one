@@ -11,7 +11,7 @@ import { getWorkspace } from '@/lib/actions/get-workspace'
 import { getCachedUser } from '@/lib/supabase/auth-user'
 import { leerPerfilDeSesion } from '@/lib/supabase/perfil-sesion'
 import { getNotificaciones } from '@/lib/actions/notificaciones'
-import { versionDelBuild } from '@/lib/version/build'
+import { EPOCA } from '@/lib/version/epoca'
 import { accesoWorkspace } from '@/lib/suscripciones/estado'
 import { menuSuscripcion } from '@/lib/seccion-suscripcion/contexto-servidor'
 
@@ -217,7 +217,7 @@ export default async function AppLayout({
       {/* Vigilante de pestaña vieja: compara el build cargado contra el vivo y
           recarga (sola si no hay nada que perder, con aviso si la persona esta
           escribiendo). Techo de 8h aunque no haya deploy nuevo. */}
-      <VersionWatcher version={versionDelBuild()} />
+      <VersionWatcher epoca={EPOCA} />
       {process.env.NODE_ENV === 'development' && allWorkspaces.length > 0 && (
         <DevWorkspaceBar workspaces={allWorkspaces} activeSlug={activeSlug ?? ''} />
       )}
