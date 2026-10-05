@@ -522,7 +522,19 @@ export async function crearNegocioEnWorkspace(
   // Resuelve drive_folder_id (linea → fallback workspace), crea carpeta +
   // subcarpetas canónicas y setea carpeta_url. No bloquea la creación del negocio
   // si Drive falla (el error queda registrado en activity_log).
-  await ensureNegocioDriveFolder(supabase, workspaceId, negocioData.id)
+  //
+  // Arranca AQUÍ y se espera al FINAL (2026-10-04): Drive no depende de los bloques ni
+  // de la cotización, ni ellos de la carpeta, así que sus idas y vueltas corren
+  // mientras se crean los bloques en vez de antes. Se espera antes de responder a
+  // propósito y NO va a `after()`: la ficha que abre a continuación muestra
+  // `carpeta_url`, y una carpeta a medio crear se cruzaría con el modo puntual del cron
+  // `ensure-negocio-folders` (los dos buscarían la raíz y los dos la crearían).
+  const carpetaDrive = ensureNegocioDriveFolder(supabase, workspaceId, negocioData.id)
+    .catch((err: unknown) => {
+      // El helper no lanza; esto es solo para que un fallo imprevisto no quede como
+      // rechazo sin dueño mientras corre lo de abajo.
+      console.error('[crearNegocio] carpeta de Drive:', err instanceof Error ? err.message : err)
+    })
 
   // Derivar tipo_persona del solicitante desde la empresa del negocio (natural vs
   // jurídica). Se determina en la creación → ningún bloque manual lo pregunta; los
@@ -628,6 +640,8 @@ export async function crearNegocioEnWorkspace(
       }
     }
   }
+
+  await carpetaDrive
 
   return { negocio_id: negocioData.id, error: null }
 }
