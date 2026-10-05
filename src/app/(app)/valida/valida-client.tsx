@@ -36,6 +36,7 @@ import TutorialTour from '@/components/tutorial/TutorialTour';
 import TutorialButton from '@/components/tutorial/TutorialButton';
 import TutorialEmptyState from '@/components/tutorial/TutorialEmptyState';
 import { useFileDrop } from '@/hooks/use-file-drop';
+import { correrFilaTolerante, procesarEnParalelo } from '@/lib/valida/cargue-lote';
 import { formatFecha } from '@/lib/dates/bogota'
 import { PALETA } from '@/lib/marca/paleta'
 
@@ -723,26 +724,28 @@ function ConsultaMasivaForm({ onPersisted, modoVitrina = false }: { onPersisted:
 
     setEstado({ fase: 'procesando', loteId: lote_id, total, procesadas: 0, severidades, tituloLote });
 
-    let procesadas = 0;
-    for (const fila of filas) {
-      const sev = await procesarFila(fila, lote_id);
-      procesadas += 1;
-      severidades[sev] = (severidades[sev] ?? 0) + 1;
-      setEstado({ fase: 'procesando', loteId: lote_id, total, procesadas, severidades: { ...severidades }, tituloLote });
-    }
+    // Varias filas a la vez, cada una con tope de tiempo y un reintento si falla por red; una
+    // fila que falla queda en error y el lote sigue (ver `@/lib/valida/cargue-lote`). El
+    // contador sube cuando cada fila TERMINA, en el orden que sea.
+    await procesarEnParalelo(filas, fila => procesarFila(fila, lote_id), {
+      valorDeError: 'error' as Severidad,
+      alTerminarItem: (sev, procesadas) => {
+        severidades[sev] = (severidades[sev] ?? 0) + 1;
+        setEstado({ fase: 'procesando', loteId: lote_id, total, procesadas, severidades: { ...severidades }, tituloLote });
+      },
+    });
 
     setEstado({ fase: 'completado', loteId: lote_id, total, severidades, tituloLote });
     onPersisted();
   }
 
-  async function procesarFila(fila: FilaLotePreparada, loteId: string): Promise<Severidad> {
-    if (fila.error) {
-      // Persistimos un error sin llamar a Valida
-      await consultarValida(fila.input, { negocio_id: fila.negocio_id, lote_id: loteId });
-      return 'error';
-    }
-    const r = await consultarValida(fila.input, { negocio_id: fila.negocio_id, lote_id: loteId });
-    return r.ok ? r.data.severidad : 'error';
+  function procesarFila(fila: FilaLotePreparada, loteId: string): Promise<Severidad> {
+    return correrFilaTolerante<Severidad>(async reintento => {
+      const r = await consultarValida(fila.input, { negocio_id: fila.negocio_id, lote_id: loteId, reintento });
+      // Una fila con error de parseo igual se persiste (como error) para que cuente en el lote.
+      if (fila.error) return 'error';
+      return r.ok ? r.data.severidad : 'error';
+    }, 'error');
   }
 
   async function descargarReporteCargue() {

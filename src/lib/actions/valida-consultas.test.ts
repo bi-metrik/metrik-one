@@ -346,6 +346,44 @@ describe('consultarValida — de quien es el negocio', () => {
   })
 })
 
+describe('consultarValida — tope de tiempo y reintento del cargue masivo (2026-10-04)', () => {
+  it('la llamada a Valida lleva tope de tiempo y, si se agota, la fila se guarda como error', async () => {
+    fetchValida.mockImplementationOnce(async () => {
+      throw new DOMException('The operation timed out.', 'TimeoutError')
+    })
+    const r = await consultarValida(PERSONA, { lote_id: 'lote-1' })
+    expect(r).toEqual({ ok: false, error: 'valida_tiempo_agotado' })
+    const init = fetchValida.mock.calls[0][1] as { signal?: unknown }
+    expect(init.signal).toBeInstanceOf(AbortSignal)
+    expect(inserts).toHaveLength(1)
+    expect(inserts[0].payload.severidad).toBe('error')
+  })
+
+  it('el reintento de una fila que el primer intento ya guardo no vuelve a cobrarla', async () => {
+    const r = await consultarValida({ tipo: 'natural', nombre: 'Y' }, { lote_id: 'lote-1', reintento: true })
+    expect(r.ok).toBe(true)
+    if (r.ok) {
+      expect(r.consulta_local_id).toBe('c-lote')
+      expect(r.data.severidad).toBe('sin_hallazgo')
+    }
+    expect(fetchValida).not.toHaveBeenCalled()
+    expect(inserts).toHaveLength(0)
+  })
+
+  it('el reintento de una fila que NO quedo guardada si consulta', async () => {
+    const r = await consultarValida({ tipo: 'natural', nombre: 'Otra persona' }, { lote_id: 'lote-1', reintento: true })
+    expect(r.ok).toBe(true)
+    expect(fetchValida).toHaveBeenCalledTimes(1)
+    expect(inserts).toHaveLength(1)
+  })
+
+  it('CONTROL — sin la marca de reintento, la misma persona del lote se consulta de nuevo', async () => {
+    const r = await consultarValida({ tipo: 'natural', nombre: 'Y' }, { lote_id: 'lote-1' })
+    expect(r.ok).toBe(true)
+    expect(fetchValida).toHaveBeenCalledTimes(1)
+  })
+})
+
 describe('prepararLoteValida — el negocio del lote', () => {
   it('un negocio propio se reparte a las filas sin codigo', async () => {
     const r = await prepararLoteValida(loteSinCodigo(), { negocio_id_lote: 'neg-propio' })

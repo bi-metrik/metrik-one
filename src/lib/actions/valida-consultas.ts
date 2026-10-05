@@ -143,6 +143,14 @@ async function getWorkspaceValidaApiKey(workspaceId: string): Promise<string | n
   return key ?? null;
 }
 
+/**
+ * Tope de la llamada a la API de Valida. Sin el, una API colgada dejaba colgado el server
+ * action y, con el, la fila del cargue masivo. Al agotarse la consulta se guarda como error
+ * (`valida_tiempo_agotado`). Menor que `TIMEOUT_FILA_MS` del navegador
+ * (`@/lib/valida/cargue-lote`) para que corte primero el servidor y la fila quede guardada.
+ */
+const TIMEOUT_VALIDA_MS = 30_000;
+
 async function llamarValida(
   apiKey: string,
   input: ValidaConsultaInput
@@ -156,6 +164,7 @@ async function llamarValida(
       },
       body: JSON.stringify(input),
       cache: 'no-store',
+      signal: AbortSignal.timeout(TIMEOUT_VALIDA_MS),
     });
     if (!res.ok) {
       const body = await res.json().catch(() => ({}));
@@ -164,8 +173,61 @@ async function llamarValida(
     const data = (await res.json()) as ValidaResultado;
     return { ok: true, data };
   } catch (err) {
+    if (err instanceof Error && (err.name === 'TimeoutError' || err.name === 'AbortError')) {
+      return { ok: false, error: 'valida_tiempo_agotado' };
+    }
     return { ok: false, error: err instanceof Error ? err.message : 'error_desconocido' };
   }
+}
+
+/**
+ * En el REINTENTO de una fila del cargue masivo: ¿el primer intento ya alcanzo a guardar esta
+ * misma consulta con resultado? Un `Load failed` en el navegador no dice si el server action
+ * corrio; si corrio, la consulta ya se cobro y se guardo, y volver a llamar a Valida la
+ * cobraria dos veces y la duplicaria en el reporte del lote.
+ *
+ * Se compara por lote + persona consultada. Limite conocido: si el XLSX trae a la MISMA
+ * persona dos veces y la segunda fila cae en reintento, devuelve el resultado de la primera
+ * (mismo resultado, una fila menos en el reporte). Solo ocurre en reintentos.
+ */
+async function consultaYaGuardadaEnLote(
+  workspaceId: string,
+  loteId: string,
+  input: ValidaConsultaInput,
+): Promise<{ id: string; data: ValidaResultado } | null> {
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const svc = createServiceClient() as any;
+  const { data, error } = await svc
+    .from('valida_consultas')
+    .select('id, valida_consulta_id, severidad, total_matches, matches, hash_reporte, created_at, nombre_consultado, documento_tipo, documento_numero')
+    .eq('workspace_id', workspaceId)
+    .eq('lote_id', loteId)
+    .eq('tipo_persona', input.tipo)
+    .not('valida_consulta_id', 'is', null);
+  if (error || !Array.isArray(data)) return null;
+
+  const nombre = input.nombre || null;
+  const docTipo = input.documento?.tipo ?? null;
+  const docNumero = input.documento?.numero ?? null;
+  const fila = (data as Array<Record<string, unknown>>).find(
+    r =>
+      typeof r.valida_consulta_id === 'string' &&
+      (r.nombre_consultado ?? null) === nombre &&
+      (r.documento_tipo ?? null) === docTipo &&
+      (r.documento_numero ?? null) === docNumero,
+  );
+  if (!fila) return null;
+  return {
+    id: fila.id as string,
+    data: {
+      consulta_id: fila.valida_consulta_id as string,
+      severidad: fila.severidad as Severidad,
+      total_matches: (fila.total_matches as number) ?? 0,
+      matches: (fila.matches as ValidaMatch[]) ?? [],
+      hash_reporte: (fila.hash_reporte as string) ?? '',
+      fecha_reporte: (fila.created_at as string) ?? '',
+    },
+  };
 }
 
 async function persistirConsulta(opts: {
@@ -239,7 +301,9 @@ async function negocioEsDelWorkspace(
 
 export async function consultarValida(
   input: ValidaConsultaInput,
-  opts: { negocio_id?: string | null; lote_id?: string | null } = {}
+  // `reintento`: lo manda el cargue masivo cuando repite una fila que fallo por red (ver
+  // `consultaYaGuardadaEnLote`). Solo tiene efecto con `lote_id`.
+  opts: { negocio_id?: string | null; lote_id?: string | null; reintento?: boolean } = {}
 ): Promise<
   | { ok: true; data: ValidaResultado; consulta_local_id: string }
   | { ok: false; error: string }
@@ -258,6 +322,11 @@ export async function consultarValida(
 
   const apiKey = await getWorkspaceValidaApiKey(workspaceId);
   if (!apiKey) return { ok: false, error: 'valida_api_key_no_configurada' };
+
+  if (opts.reintento && opts.lote_id) {
+    const previa = await consultaYaGuardadaEnLote(workspaceId, opts.lote_id, input);
+    if (previa) return { ok: true, data: previa.data, consulta_local_id: previa.id };
+  }
 
   const resultado = await llamarValida(apiKey, input);
 
