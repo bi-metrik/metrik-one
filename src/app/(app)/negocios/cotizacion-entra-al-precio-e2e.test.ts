@@ -381,15 +381,17 @@ describe('(a) sugerencia con precio que NO entra al precio', () => {
 })
 
 describe('(b) la misma sugerencia marcada que SÍ entra al precio', () => {
-  it('suma al total, y se sigue imprimiendo como «no incluida»: la contradicción que avisa el editor', async () => {
+  it('suma al total y se imprime incluida, no como «no incluida» (D1 del brief del 2026-10-05)', async () => {
     sembrar({ saona: { dia_relativo: 1 }, traslado: { dia_relativo: 1 } })
     const { totalEnPantalla, subtotalPDF, texto } = await medir()
 
     expect(totalEnPantalla).toBe(TOTAL_CON_TODAS)
     expect(subtotalPDF).toBe(TOTAL_CON_TODAS)
-    expect(seccionSugeridos(texto)).toContain('Tour Isla Catalina')
-    // La columna impresa queda corta exactamente en lo que cobra la sugerencia.
-    expect((subtotalPDF ?? 0) - sumaDeLaColumnaPorDias(texto)).toBe(PRECIO_CATALINA)
+    // Hasta el 2026-10-05 la columna quedaba corta en PRECIO_CATALINA y Catalina salía como «no
+    // incluida» mientras se cobraba. Ahora la columna cuadra.
+    expect(seccionSugeridos(texto)).not.toContain('Tour Isla Catalina')
+    expect(sumaDeLaColumnaPorDias(texto)).toBe(subtotalPDF)
+    expect(PRECIO_CATALINA).toBeGreaterThan(0)
   }, 30_000)
 })
 

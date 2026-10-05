@@ -206,9 +206,9 @@ describe('así lo ve el cliente', () => {
     expect(texto(html)).toContain('INCLUYE TRASLADO')
   })
 
-  it('un vuelo no tiene hoja: su nota sigue donde estaba', () => {
+  it('el vuelo también tiene hoja (D3 del brief del 2026-10-05), y su nota sigue donde estaba', () => {
     const html = pintar(tarifa(), { item: { nombre: 'AVIANCA', grupo: 'vuelo', tarifa_pax: tarifa() }, nota: 'NOTA-DE-VUELO' })
-    expect(html).not.toContain('data-hoja-cliente')
+    expect(html).toContain('data-hoja-cliente')
     expect(html).toContain('NOTA-DE-VUELO')
   })
 })

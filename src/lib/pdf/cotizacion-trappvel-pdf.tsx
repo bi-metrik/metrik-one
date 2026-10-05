@@ -85,11 +85,11 @@ import {
   esDeLaPrincipal,
   fechaDelDia,
   fechaEnCapitulo,
+  filasDelVuelo,
   gruposPorDia,
   leerFecha,
   lugarConCodigo,
-  lugarLegible,
-  numerosDeVuelo,
+  numerosSinTramo,
   rangoCompacto,
   renglonesDeFotos,
   siglaAerolinea,
@@ -97,11 +97,11 @@ import {
   sinTildes,
   tablaDeVuelosVaEntera,
   textosDeTarjetaHotel,
-  tieneRegreso,
   tituloConAcento,
   yaLoDiceLaPortada,
   type Capitulo,
   type Fecha,
+  type FilaVuelo,
   type ListaDelCierre,
 } from './cotizacion-trappvel-formato'
 import { partirPalabraLarga } from '@/lib/cotizaciones/condiciones-comerciales'
@@ -628,70 +628,6 @@ const PESO_COLUMNA: Record<ColumnaVuelo, number> = {
 
 /** Aire entre columnas: sin él la caja de una termina donde empieza el texto de la otra. */
 const CANAL = 6
-
-interface FilaVuelo {
-  vuelo: VueloPDF
-  desde: string | null
-  hasta: string | null
-  escala: string | null
-  fecha: string | null
-  salida: string | null
-  llegada: string | null
-  numero: string | null
-}
-
-/**
- * Los números de vuelo que no se sabe a qué tramo pertenecen. Van bajo el vuelo entero, en
- * la línea gris: pegados a la ida afirmarían que el regreso no tiene vuelo.
- */
-function numerosSinTramo(v: VueloPDF): string | null {
-  const { sinAsignar } = numerosDelVuelo(v)
-  if (!sinAsignar) return null
-  return `${sinAsignar.includes('·') ? 'Vuelos' : 'Vuelo'} ${sinAsignar}`
-}
-
-/**
- * Los números de cada fila: los de los tramos del vuelo (B3) cuando vienen repartidos, y si
- * no, el reparto del número leído. ⚠️ Un número de regreso sin fila de regreso (la captura
- * leyó una hora que no se entiende) se perdería: ahí manda el reparto de siempre.
- */
-function numerosDelVuelo(v: VueloPDF): { ida: string | null; regreso: string | null; sinAsignar: string | null } {
-  const regreso = tieneRegreso(v)
-  if (v.numeros && (regreso || !v.numeros.regreso)) return v.numeros
-  return numerosDeVuelo(v.numeroVuelo, regreso)
-}
-
-function filasDelVuelo(v: VueloPDF): FilaVuelo[] {
-  const regreso = tieneRegreso(v)
-  const numeros = numerosDelVuelo(v)
-  // `escalas === 0` es la ÚNICA forma de afirmar «directo»: un `escalaIda` vacío puede ser
-  // un vuelo directo o una pantalla que no mostró el recorrido, y son cosas distintas.
-  const escala = (e: string | null) => (e ? `Escala en ${lugarLegible(e)}` : v.escalas === 0 ? 'Vuelo directo' : null)
-  const filas: FilaVuelo[] = [{
-    vuelo: v,
-    desde: lugarLegible(v.origen),
-    hasta: lugarLegible(v.destino),
-    escala: escala(v.escalaIda),
-    fecha: v.fechaSalida,
-    salida: v.horaSalida,
-    llegada: v.horaLlegada,
-    numero: numeros.ida,
-  }]
-  // El regreso existe cuando la captura leyó ALGO suyo, y su ruta es la de la ida al revés.
-  if (regreso) {
-    filas.push({
-      vuelo: v,
-      desde: lugarLegible(v.destino),
-      hasta: lugarLegible(v.origen),
-      escala: escala(v.escalaRegreso),
-      fecha: v.fechaRegreso,
-      salida: v.horaSalidaRegreso,
-      llegada: v.horaLlegadaRegreso,
-      numero: numeros.regreso,
-    })
-  }
-  return filas
-}
 
 function TablaVuelos({ vuelos, general, tarifas, titulo }: { vuelos: VueloPDF[]; general: boolean; tarifas: TarifaDoc[]; titulo?: ReactNode }) {
   const grupos = vuelos.map(v => ({ v, filas: filasDelVuelo(v) }))

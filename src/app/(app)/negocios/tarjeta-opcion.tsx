@@ -18,7 +18,7 @@ import { comprimirFotoHotel } from '@/lib/cotizaciones/foto-hotel-navegador'
 import HojaCliente from '@/app/(app)/negocios/hoja-cliente'
 import TarjetaCosto from '@/app/(app)/negocios/tarjeta-costo'
 import { AlertaDecision } from '@/components/viaje/alerta-decision'
-import { BTN, BTN_ELEGIDO, BTN_PRIM, INPUT } from '@/components/viaje/estilo'
+import { BTN, BTN_PRIM, INPUT } from '@/components/viaje/estilo'
 import { ItemMenu, MenuAcciones, SeparadorMenu } from '@/components/viaje/menu-acciones'
 import { Miniatura, MiniaturaManual, useVistaAmpliada } from '@/components/viaje/pantallazo'
 import type { FilaAdicional } from '@/lib/cotizaciones/adicionales'
@@ -67,6 +67,8 @@ import {
 } from '@/lib/cotizaciones/espera-deshacer'
 import { datosManuales, montoConMiles } from '@/lib/cotizaciones/ingreso-manual'
 import { nombreVisibleDeLinea } from '@/lib/cotizaciones/nombre-visible'
+import { CheckVa, ModoYDia, useActividad, type ActividadDeTarjeta } from '@/app/(app)/negocios/actividad-control'
+import { TEXTO_ACTIVIDAD_NO_VA } from '@/lib/cotizaciones/actividad-en-cotizacion'
 
 /**
  * La tarjeta de una opción de viaje (prototipo aprobado por Mauricio el 2026-09-24,
@@ -82,8 +84,11 @@ import { nombreVisibleDeLinea } from '@/lib/cotizaciones/nombre-visible'
 
 const ESPERA_DESHACER_MS = 6000
 
-/** La línea de una habitación que no va (de referencia). */
-export const TEXTO_NO_VA = 'No va: no suma al costo ni sale en la cotización.'
+/**
+ * La línea de una habitación que no va (de referencia). La misma frase que la actividad sin el
+ * check (brief del 2026-10-05: un solo gesto, y un solo texto, para lo mismo en toda la cotización).
+ */
+export const TEXTO_NO_VA = TEXTO_ACTIVIDAD_NO_VA
 /** Solo desde manejadores y efectos (el clic de «Quitar habitación» y el tic del aviso). */
 const horaActual = () => Date.now()
 
@@ -172,6 +177,7 @@ export default function TarjetaOpcion({
   fechasViaje = null,
   onGuardarNota,
   onCambio,
+  actividad = null,
 }: {
   itemId: string
   numero: number
@@ -216,6 +222,11 @@ export default function TarjetaOpcion({
   fechasViaje?: { inicio: string | null; fin: string | null } | null
   onGuardarNota: (texto: string) => void
   onCambio: () => void
+  /**
+   * Solo actividades (brief del 2026-10-05, punto 0): si va en la cotización, Incluida u Opcional,
+   * y su día. `null` en vuelo, hotel y traslado, que se ven como siempre.
+   */
+  actividad?: ActividadDeTarjeta | null
 }) {
   // Lo que el servidor acaba de guardar desde «Corregir datos» se pinta sin esperar el
   // refresco (COT-2026-0019: la ficha siguió diciendo las fechas viejas después de guardar).
@@ -228,6 +239,7 @@ export default function TarjetaOpcion({
   const esHotel = ranura?.slug === 'hotel_detalle'
   const esTraslado = ranura?.slug === 'traslado_detalle'
   const esActividad = ranura?.slug === 'actividad_detalle'
+  const esVuelo = ranura?.slug === 'vuelo_detalle'
   const [hotel] = esHotel ? hotelesDeItems([item]) : [null]
   const nombre = (esHotel ? hotel?.hotel : null) || nombreVisibleDeLinea(item) || `Opción ${numero}`
   const estrellas = esHotel ? hotel?.estrellas ?? null : null
@@ -244,6 +256,10 @@ export default function TarjetaOpcion({
     avisoFechaDeActividad(ranura?.slug, tarifa, fechasViaje),
     avisoTasaPendiente(tarifa, composicionDeLinea(tarifa, composicionViaje), ranura?.slug),
   ].filter((a): a is string => !!a)
+
+  // Qué va y qué no (punto 0). El hook va siempre: en las demás opciones no pinta nada.
+  const act = useActividad(itemId, actividad ?? { estado: 'incluida', dia: null, precioPorPersona: null, era: null }, onCambio)
+  const noVa = !!actividad && act.estado === 'no_va'
 
   const [confirmaBorrar, setConfirmaBorrar] = useState(false)
   const [editandoFicha, setEditandoFicha] = useState(false)
@@ -349,11 +365,15 @@ export default function TarjetaOpcion({
 
   return (
     <div
-      className={`rounded-[10px] border bg-white text-sm text-[#191713] ${abierta ? 'border-[#CFCAC0]' : 'border-[#E2DED5]'}`}
+      className={`rounded-[10px] border text-sm ${noVa ? 'bg-[#F8F7F3] text-[#6E6A62]' : 'bg-white text-[#191713]'} ${abierta ? 'border-[#CFCAC0]' : 'border-[#E2DED5]'}`}
       data-tarjeta-opcion={itemId}
       data-linea-id={itemId}
+      {...(actividad ? { 'data-actividad-estado': act.estado } : {})}
     >
       <div className="flex items-center gap-1.5 py-2.5 pl-3 pr-2">
+        {actividad && (
+          <CheckVa va={!noVa} editable={editable} ocupado={act.ocupado} onCambio={va => act.marcar({ va })} />
+        )}
         <button
           type="button"
           onClick={onAlternar}
@@ -384,8 +404,10 @@ export default function TarjetaOpcion({
           </AlertaDecision>
         )}
         <span className="shrink-0 pr-0.5 text-right max-sm:hidden">
-          <small className="block text-[11px] text-[#6E6A62]">Precio</small>
-          <b className="text-[15px] tabular-nums">{pesos(precioOpcion)}</b>
+          <small className="block text-[11px] text-[#6E6A62]">
+            {actividad && act.estado === 'opcional' ? 'Opcional · no suma' : 'Precio'}
+          </small>
+          <b className={`text-[15px] tabular-nums ${noVa ? 'font-semibold text-[#6E6A62] line-through' : ''}`}>{pesos(precioOpcion)}</b>
         </span>
         {editable && <MenuAcciones contenido={menuOpcion} />}
         <input
@@ -400,6 +422,21 @@ export default function TarjetaOpcion({
           }}
         />
       </div>
+
+      {actividad && (
+        <div className="-mt-1 pb-2.5 pl-[50px] pr-3" data-actividad-control>
+          <ModoYDia
+            estado={act.estado}
+            dia={act.dia}
+            precioPorPersona={actividad.precioPorPersona}
+            fechasViaje={fechasViaje}
+            editable={editable}
+            ocupado={act.ocupado}
+            onModo={modo => act.marcar({ modo })}
+            onDia={act.ponerDia}
+          />
+        </div>
+      )}
 
       {avisosCerrada.length > 0 && (
         <div className="-mt-1 flex flex-col gap-1 pb-2.5 pl-[42px] pr-3" data-avisos-opcion>
@@ -465,11 +502,11 @@ export default function TarjetaOpcion({
 
           {!confirmada && respaldo}
 
-          {/* El traslado y la actividad también tienen su hoja: la línea de «Inversión» del
-              documento. Su nota se sigue escribiendo aparte, encima. El vuelo NO: al cliente le
-              llega sobre todo como su fila de la tabla «Vuelos», que esta hoja no pinta. */}
+          {/* El traslado, la actividad y (desde el 2026-10-05, D3) el vuelo también tienen su
+              hoja: la línea de «Inversión» del documento y, en el vuelo, sus filas de la tabla
+              «Vuelos». Su nota se sigue escribiendo aparte, encima. */}
           {!esHotel && nota}
-          {(esHotel || esTraslado || esActividad) && <HojaCliente
+          {(esHotel || esTraslado || esActividad || esVuelo) && <HojaCliente
             item={item}
             numero={numero}
             bloqueTitulo={bloqueTitulo}
@@ -711,6 +748,7 @@ function Alojamiento({
               key={h.id}
               itemId={itemId}
               h={h}
+              posicion={reparto.habitaciones.indexOf(h) + 1}
               notaReferencia={notaDeReferencia(h.sirveParaRestar, porTipo, h.rol === 'habitacion')}
               editable={editable}
               ampliar={ampliar}
@@ -756,6 +794,7 @@ export function AvisoDeshacerTotal({ segundos }: { segundos: number | null }) {
 function FilaHabitacionTarjeta({
   itemId,
   h,
+  posicion,
   notaReferencia,
   editable,
   ampliar,
@@ -765,6 +804,11 @@ function FilaHabitacionTarjeta({
 }: {
   itemId: string
   h: HabitacionRepartida
+  /**
+   * Su lugar en la opción, el de siempre (brief del 2026-10-05, punto 16): marcar que una no va no
+   * renumera las demás ni la mueve. El número del documento (`h.numero`) cuenta solo las que van.
+   */
+  posicion: number
   notaReferencia: string | null
   editable: boolean
   ampliar: (src: string, caption: string) => void
@@ -782,7 +826,7 @@ function FilaHabitacionTarjeta({
   // La que no va (de referencia) se nombra así y dice que no suma (brief del 2026-10-01,
   // punto 2): el resumen decía «1 habitación» y no se entendía que había otra que no contaba.
   const va = h.rol === 'habitacion'
-  const titulo = h.numero ? `Habitación ${h.numero}` : 'De referencia'
+  const titulo = `Habitación ${posicion}`
   const precio = h.moneda === 'COP' ? pesos(h.total) : formatoMonto(h.total, h.moneda)
   const src = urlDePantallazo(h.lectura.imagenRef)
   const manual = datosManuales(h.lectura)
@@ -808,32 +852,14 @@ function FilaHabitacionTarjeta({
         <Miniatura src={src} caption={[titulo, ocupacion].filter(Boolean).join(' · ') || 'Pantallazo'} ancho="w-[120px] max-sm:w-[84px]" onAmpliar={ampliar} />
       )}
       <div className="min-w-0">
-        <b className={`block font-semibold ${va ? '' : 'text-[#6E6A62]'}`}>{titulo}</b>
+        <span className="flex items-center gap-1">
+          {/* El mismo check de las actividades reemplaza «Va / No va» (brief del 2026-10-05). */}
+          {eleccion && <CheckVa va={va} editable ocupado={eleccion.ocupado} onCambio={v => eleccion.onElegir(v)} />}
+          <b className={`block font-semibold ${va ? '' : 'text-[#6E6A62]'}`}>{titulo}</b>
+        </span>
         {ocupacion && <span className="text-[13px] text-[#6E6A62]">{ocupacion}</span>}
         {manual?.fuente && <span className="block text-xs text-[#6E6A62]">{manual.fuente}</span>}
         {!va && <span className="block text-xs text-[#6E6A62]" data-no-suma>{TEXTO_NO_VA}</span>}
-        {eleccion && (
-          <span className="mt-1.5 flex flex-wrap gap-1.5" role="group" aria-label="¿Va en la cotización?" data-va-no-va>
-            <button
-              type="button"
-              aria-pressed={va}
-              disabled={eleccion.ocupado}
-              onClick={() => eleccion.onElegir(true)}
-              className={`${va ? BTN_ELEGIDO : BTN} !px-2 !py-0.5 !text-xs`}
-            >
-              Va
-            </button>
-            <button
-              type="button"
-              aria-pressed={!va}
-              disabled={eleccion.ocupado}
-              onClick={() => eleccion.onElegir(false)}
-              className={`${va ? BTN : BTN_ELEGIDO} !px-2 !py-0.5 !text-xs`}
-            >
-              No va
-            </button>
-          </span>
-        )}
         {notaReferencia && (
           <div className="mt-[3px] flex items-start gap-[5px] text-xs text-[#6E6A62]">
             <svg className="mt-0.5 shrink-0 text-[#0E5C43]" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" aria-hidden><circle cx="12" cy="12" r="9" /><path d="M8 12h8" /></svg>

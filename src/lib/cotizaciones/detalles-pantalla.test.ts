@@ -83,7 +83,7 @@ describe('punto 2 · la habitación de referencia se ve, y la elección manda', 
   it('elegidas de más: «Sobra 1 adulto», con qué hacer', () => {
     const r = resumenDeAlojamiento(repartirHabitaciones([fija(R1, 'habitacion'), fija(R2, 'habitacion'), fija(R3, 'habitacion')], GRUPO))
     expect(r.titulo).toBe('3 habitaciones · sobra 1 adulto')
-    expect(avisoDePasajeros(r)?.frase).toBe('Sobra 1 adulto: marca «No va» en la habitación que no va.')
+    expect(avisoDePasajeros(r)?.frase).toBe('Sobra 1 adulto: quítale el check a la habitación que no va.')
     expect(r.cupos.find(c => c.texto.includes('adulto'))).toEqual({ texto: '3/2 adultos', falta: true })
   })
 

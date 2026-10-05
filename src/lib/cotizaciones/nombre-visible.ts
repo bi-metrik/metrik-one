@@ -9,8 +9,10 @@
  * nombre de la línea es justo el que ONE escribió desde la lectura, se muestra el de la lectura,
  * con sus mayúsculas y minúsculas. Un nombre que escribió una persona se respeta tal cual.
  *
- * Solo hotel y traslado: el resto (vuelo, actividad, líneas sin ranura) no cambia. No se toca lo
- * guardado: es presentación.
+ * Desde el brief del 2026-10-05 (punto 10) también el vuelo y la actividad: «SATENA BOGOTÁ
+ * (BOG)–PROVIDENCIA (PVA)» y «EXCURSIÓN A CAYO CANGREJO» salían así en «Inversión» del PDF, en el
+ * título de la tarjeta y en los avisos de «Revisar y enviar». Las líneas sin ranura no cambian. No
+ * se toca lo guardado: es presentación.
  *
  * Puro: sin red y sin base.
  */
@@ -19,10 +21,10 @@ import { aMayusculas } from '@/lib/negocios/mayusculas'
 import { ranuraDeGrupo } from './ranuras-pantallazo'
 import { leerTarifaPax } from './tarifa-pasajero'
 
-const RANURAS_CON_NOMBRE_LEIDO = new Set(['hotel_detalle', 'traslado_detalle'])
+const RANURAS_CON_NOMBRE_LEIDO = new Set(['hotel_detalle', 'traslado_detalle', 'vuelo_detalle', 'actividad_detalle'])
 
 export function nombreVisibleDeLinea(item: { nombre?: string | null; grupo?: string | null; tarifa_pax?: unknown }): string {
-  // Fuera de hotel y traslado, el nombre llega idéntico (el PDF de las otras plantillas no cambia).
+  // Sin ranura de viaje, el nombre llega idéntico (el PDF de las otras plantillas no cambia).
   const tal = item.nombre ?? ''
   const nombre = tal.trim()
   const slug = ranuraDeGrupo(item.grupo ?? null)?.slug

@@ -415,18 +415,37 @@ export function capitulosDelViaje(hoteles: HotelPDF[], principal: number | null,
   const otros = hoteles.filter(h => !esDeLaPrincipal(h, principal))
   const capitulos: Capitulo[] = []
   for (const h of deLaPrincipal) {
-    const clave = sinTildes(h.ciudad ?? '')
-    const ya = capitulos.find(c => sinTildes(c.ciudad ?? '') === clave)
+    const clave = claveDeCiudad(h.ciudad)
+    const ya = capitulos.find(c => claveDeCiudad(c.ciudad) === clave)
     if (ya) ya.alternativas.push(h)
-    else capitulos.push({ ciudad: h.ciudad, hotel: h, alternativas: [] })
+    else capitulos.push({ ciudad: ciudadDeCapitulo(h.ciudad), hotel: h, alternativas: [] })
   }
   if (capitulos.length === 0) capitulos.push({ ciudad: destino, hotel: null, alternativas: [] })
   for (const h of otros) {
-    const clave = sinTildes(h.ciudad ?? '')
-    const destinoCap = capitulos.find(c => sinTildes(c.ciudad ?? '') === clave) ?? capitulos[0]
+    const clave = claveDeCiudad(h.ciudad)
+    const destinoCap = capitulos.find(c => claveDeCiudad(c.ciudad) === clave) ?? capitulos[0]
     destinoCap.alternativas.push(h)
   }
   return capitulos
+}
+
+/**
+ * La ciudad de un hotel tal como nombra su capítulo: lo que va antes de la primera coma.
+ *
+ * Brief del 2026-10-05, punto 9: el hotel a mano decía «Providencia» y el de pantallazo
+ * «Providencia, San Andrés y Providencia, Colombia» (Bedsonline escribe la ciudad, el
+ * departamento y el país). Comparando el texto entero eran dos ciudades, y el PDF abría
+ * «Destino 2 de 2» para la misma isla.
+ */
+export function ciudadDeCapitulo(ciudad: string | null | undefined): string | null {
+  const t = (ciudad ?? '').split(',')[0].trim()
+  return t === '' ? null : t
+}
+
+/** La llave con que se juntan los hoteles de una misma ciudad: sin tildes, sin código ni país. */
+export function claveDeCiudad(ciudad: string | null | undefined): string {
+  const corta = ciudadDeCapitulo(ciudad) ?? ''
+  return sinTildes(lugarConCodigo(corta)?.nombre ?? corta).replace(/\s+/g, ' ').trim()
 }
 
 /** ¿Esta fecha cae dentro de la estadía del hotel del capítulo? El día de salida no. */
@@ -838,3 +857,73 @@ export function yaLoDiceLaPortada(
 export function tieneRegreso(v: VueloPDF): boolean {
   return v.fechaRegreso !== null || v.horaSalidaRegreso !== null || v.horaLlegadaRegreso !== null
 }
+
+// ── Las filas de la tabla «Vuelos» ────────────────────────────────────────────
+//
+// Viven aquí (y no en la plantilla) desde el brief del 2026-10-05, punto 18: «Así lo ve el
+// cliente» del vuelo pinta las mismas filas que la tabla del documento.
+
+export interface FilaVuelo {
+  vuelo: VueloPDF
+  desde: string | null
+  hasta: string | null
+  escala: string | null
+  fecha: string | null
+  salida: string | null
+  llegada: string | null
+  numero: string | null
+}
+
+/**
+ * Los números de vuelo que no se sabe a qué tramo pertenecen. Van bajo el vuelo entero, en
+ * la línea gris: pegados a la ida afirmarían que el regreso no tiene vuelo.
+ */
+export function numerosSinTramo(v: VueloPDF): string | null {
+  const { sinAsignar } = numerosDelVuelo(v)
+  if (!sinAsignar) return null
+  return `${sinAsignar.includes('·') ? 'Vuelos' : 'Vuelo'} ${sinAsignar}`
+}
+
+/**
+ * Los números de cada fila: los de los tramos del vuelo (B3) cuando vienen repartidos, y si
+ * no, el reparto del número leído. ⚠️ Un número de regreso sin fila de regreso (la captura
+ * leyó una hora que no se entiende) se perdería: ahí manda el reparto de siempre.
+ */
+export function numerosDelVuelo(v: VueloPDF): { ida: string | null; regreso: string | null; sinAsignar: string | null } {
+  const regreso = tieneRegreso(v)
+  if (v.numeros && (regreso || !v.numeros.regreso)) return v.numeros
+  return numerosDeVuelo(v.numeroVuelo, regreso)
+}
+
+export function filasDelVuelo(v: VueloPDF): FilaVuelo[] {
+  const regreso = tieneRegreso(v)
+  const numeros = numerosDelVuelo(v)
+  // `escalas === 0` es la ÚNICA forma de afirmar «directo»: un `escalaIda` vacío puede ser
+  // un vuelo directo o una pantalla que no mostró el recorrido, y son cosas distintas.
+  const escala = (e: string | null) => (e ? `Escala en ${lugarLegible(e)}` : v.escalas === 0 ? 'Vuelo directo' : null)
+  const filas: FilaVuelo[] = [{
+    vuelo: v,
+    desde: lugarLegible(v.origen),
+    hasta: lugarLegible(v.destino),
+    escala: escala(v.escalaIda),
+    fecha: v.fechaSalida,
+    salida: v.horaSalida,
+    llegada: v.horaLlegada,
+    numero: numeros.ida,
+  }]
+  // El regreso existe cuando la captura leyó ALGO suyo, y su ruta es la de la ida al revés.
+  if (regreso) {
+    filas.push({
+      vuelo: v,
+      desde: lugarLegible(v.destino),
+      hasta: lugarLegible(v.origen),
+      escala: escala(v.escalaRegreso),
+      fecha: v.fechaRegreso,
+      salida: v.horaSalidaRegreso,
+      llegada: v.horaLlegadaRegreso,
+      numero: numeros.regreso,
+    })
+  }
+  return filas
+}
+

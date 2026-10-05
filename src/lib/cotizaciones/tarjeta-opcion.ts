@@ -307,7 +307,8 @@ export function avisoDePasajeros(r: Pick<ResumenAlojamiento, 'falta' | 'sobra'>)
   }
   if (r.sobra) {
     const corto = `${r.sobra.verbo} ${r.sobra.quien}`
-    return { corto, frase: `${corto}: marca «No va» en la habitación que no va.` }
+    // Brief del 2026-10-05: el check reemplaza los botones «Va / No va».
+    return { corto, frase: `${corto}: quítale el check a la habitación que no va.` }
   }
   return null
 }
@@ -397,8 +398,11 @@ export function acomodacionDeHabitaciones(r: RepartoHabitaciones): string | null
 }
 
 /**
- * La nota de la habitación de solo adultos que ONE usa para restar: «ONE también la usa para
- * sacar el precio del niño (151.400) y del infante (22.000).» `null` si no sirve para restar.
+ * La nota de la habitación de solo adultos que ONE usa para restar: «También sirve para calcular
+ * cuánto pagan el niño ($151.400) y el infante ($22.000).» `null` si no sirve para restar.
+ *
+ * Brief del 2026-10-05, punto 16: «ONE la usa para sacar el precio del infante (0)» no se entendía.
+ * Texto propuesto a Noor: dice para qué sirve, en pesos, y sin el sujeto «ONE».
  */
 export function notaDeReferencia(
   sirveParaRestar: boolean,
@@ -409,9 +413,10 @@ export function notaDeReferencia(
   if (!sirveParaRestar || !porTipo) return null
   const partes = porTipo
     .filter(c => c.tipo !== 'adulto')
-    .map(c => `del ${PALABRAS[c.tipo][0]} (${mil(c.unitario)})`)
+    .map(c => `el ${PALABRAS[c.tipo][0]} (${pesos(c.unitario)})`)
   if (partes.length === 0) return null
-  return `ONE ${esHabitacion ? 'también ' : ''}la usa para sacar el precio ${partes.join(' y ')}.`
+  const verbo = partes.length === 1 ? 'paga' : 'pagan'
+  return `${esHabitacion ? 'También sirve' : 'Sirve'} para calcular cuánto ${verbo} ${partes.join(' y ')}.`
 }
 
 // ── La ficha ─────────────────────────────────────────────────────────────────

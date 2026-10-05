@@ -19,6 +19,8 @@ import { duplicarCotizacionCompleta } from '@/lib/cotizaciones/duplicar-cotizaci
 import { retirarRanuraSiQuedoVacia } from '@/lib/cotizaciones/ranuras-datos'
 import { itemsQueAportanAlTotal, normalizarGrupo } from '@/lib/cotizaciones/itinerarios'
 import { costoDeRubrosConfirmados, esConfirmado } from '@/lib/cotizaciones/rubros-sugeridos'
+import { pasajerosParaCuadre } from '@/lib/cotizaciones/cuadre-pasajero'
+import { patchDeRecalculo } from '@/lib/cotizaciones/patch-recalculo'
 import { motivoParaNoSalir, revisarExcepcionTrasCambio } from '@/lib/cotizaciones/piso-salida-datos'
 import { motivoPorCapturasDesactualizadas } from '@/lib/cotizaciones/captura-desactualizada-datos'
 import { createServiceClient } from '@/lib/supabase/server'
@@ -1092,6 +1094,8 @@ export async function recalcularTotales(cotizacionId: string) {
       margen_porcentaje: item.margen_porcentaje,
       precio_venta: conManuales !== undefined ? conManuales / (Number(item.cantidad) || 1) : item.precio_venta,
       precio_manual: conManuales !== undefined ? true : item.precio_manual,
+      // Punto 11 del brief del 2026-10-05: el precio cuadra con lo que paga cada pasajero.
+      pasajeros: pasajerosParaCuadre(item.tarifa_pax, costoDeRubros),
     }
   })
   // El MISMO emparejamiento que usa `contextoDeCotizacion`: por id de variante. Escrito
@@ -1109,23 +1113,18 @@ export async function recalcularTotales(cotizacionId: string) {
   // Con una sola ranura y sin alternativas las dos son idénticas, que es R6.
   const cascada = calcularCascada(paraCascada, params)
 
+  // Brief del 2026-10-05, punto 13 («Aceptar» tardaba 1,3–3,5 s): esto escribía TODAS las líneas,
+  // una detrás de otra, en cada recálculo, aunque no cambiara nada. Con 12 líneas eran 12 viajes
+  // a la base en serie. Ahora solo se escriben las que cambian (`patchDeRecalculo`), y en paralelo:
+  // cada una es una fila distinta y ninguna depende de otra.
+  const escrituras: PromiseLike<unknown>[] = []
   for (const linea of cascada.lineas) {
     const fila = filas.find(f => f.id === linea.id)
     if (!fila || fila.es_ajuste) continue
-    // `items.precio_venta` es UNITARIO: la plantilla del PDF lo multiplica por la
-    // cantidad. Guardar aquí el total de la línea la duplicaría en el documento.
-    const cantidad = Number(fila.cantidad) || 1
-    const patch: Record<string, unknown> = { subtotal: linea.costoUnitario }
-    if (linea.costoLinea > 0 && fila.precio_manual !== true) {
-      patch.precio_venta = Math.round(linea.precioLinea / cantidad)
-    }
-    // Precios de fila a mano: el precio de la línea es el que acaba de calcularse arriba.
-    if (linea.id && precioConManuales.has(linea.id)) {
-      patch.precio_venta = Math.round(linea.precioLinea / cantidad)
-      patch.precio_manual = true
-    }
-    await supabase.from('items').update(patch as never).eq('id', fila.id)
+    const patch = patchDeRecalculo(fila, linea, linea.id ? precioConManuales.has(linea.id) : false)
+    if (patch) escrituras.push(supabase.from('items').update(patch as never).eq('id', fila.id))
   }
+  await Promise.all(escrituras)
 
   // LEGADO: cotización con ítem de cuadre, donde alguien fijó el valor total a mano.
   // Ahí el total no se deriva: manda el número que se escribió, y el ítem de ajuste

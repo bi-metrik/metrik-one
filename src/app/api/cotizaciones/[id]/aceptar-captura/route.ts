@@ -15,6 +15,7 @@ import { NextResponse } from 'next/server'
 
 import { aceptarCapturaDeBandeja, type BorradorParaAceptar } from '@/app/(app)/negocios/tarifa-pax-actions'
 import { enPeticionDeRuta } from '@/lib/actions/memo-de-ruta'
+import { conTiempos, encabezadoServerTiming } from '@/lib/actions/tiempos-de-ruta'
 
 export const runtime = 'nodejs'
 
@@ -53,7 +54,9 @@ export async function POST(req: Request, { params }: { params: Promise<{ id: str
       ? cuerpo.correcciones.filter(c => !!c && typeof c.slug === 'string' && typeof c.valor === 'string')
       : null,
   }
-  const r = await enPeticionDeRuta(() => aceptarCapturaDeBandeja(id, borrador))
-  const ms = Math.round(performance.now() - inicio)
-  return NextResponse.json(r, { headers: { 'Server-Timing': `aceptar;dur=${ms}` } })
+  // Brief del 2026-10-05, punto 13: además del total, cada etapa (contexto, subida del
+  // pantallazo, líneas, crear la opción, guardar la lectura, confirmar el costo, ubicarla).
+  const { resultado: r, etapas } = await conTiempos(() => enPeticionDeRuta(() => aceptarCapturaDeBandeja(id, borrador)))
+  const ms = performance.now() - inicio
+  return NextResponse.json(r, { headers: { 'Server-Timing': encabezadoServerTiming(['aceptar', ms], etapas) } })
 }

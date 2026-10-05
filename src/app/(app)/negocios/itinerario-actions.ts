@@ -4,6 +4,16 @@ import { revalidatePath } from 'next/cache'
 
 import { getWorkspace } from '@/lib/actions/get-workspace'
 import { diaDeItem, puedeLlevarDia, puedeSerSugerido } from '@/lib/cotizaciones/dia-relativo'
+import {
+  cambiosDeActividad,
+  esActividad,
+  estadoDeActividad,
+  motivoDiaInvalido,
+  type EstadoActividad,
+  type PedidoActividad,
+} from '@/lib/cotizaciones/actividad-en-cotizacion'
+import { isEditable, type EstadoCotizacion } from '@/lib/cotizaciones/state-machine'
+import { leerTarifaPax } from '@/lib/cotizaciones/tarifa-pasajero'
 import { recalcularTotales } from '@/app/(app)/negocios/cotizacion-actions'
 import { UMBRALES_MARGEN_POR_DEFECTO, type UmbralesMargen } from '@/lib/cotizaciones/convencion-margen'
 import {
@@ -883,6 +893,10 @@ export async function actualizarDiaDeItem(
   if (!item) return { success: false, error: 'La línea no existe o no es de este workspace.' }
 
   if (patch.dia_relativo !== undefined && patch.dia_relativo !== null) {
+    // Brief del 2026-10-05, punto 3 · un día fuera del viaje (1 a N) no se guarda. Sin las dos
+    // fechas en el negocio no hay tope: se escribe el número (punto 1).
+    const fueraDelViaje = await motivoDiaFueraDelViaje(supabase, item.cotizacion_id as string | null, patch.dia_relativo as number)
+    if (fueraDelViaje) return { success: false, error: fueraDelViaje }
     if (!puedeLlevarDia({ id: itemId, grupo: item.grupo ?? null, es_ajuste: item.es_ajuste ?? false })) {
       // Un vuelo o un hotel se cruzan en la tabla de combinaciones: su sitio en el
       // documento lo decide el itinerario elegido, no un día. El ítem de cuadre es
@@ -943,7 +957,91 @@ export async function actualizarDiaDeItem(
   return { success: true }
 }
 
+/**
+ * El check «Va en la cotización» de una actividad y si va Incluida u Opcional (brief del
+ * 2026-10-05, punto 0, `actividad-en-cotizacion.ts`).
+ *
+ *  · Quitar el check: deja de sumar y de salir en el documento, y conserva su día. Se anota cómo
+ *    era (`tarifa_pax.noVa`) para que al marcarla vuelva igual.
+ *  · Opcional: no suma y no lleva día (el día se borra); sale en «Opcionales» con su precio.
+ *  · Incluida: suma; el día se elige en la tarjeta.
+ *
+ * Mueve plata, así que recalcula el total aquí mismo, como el interruptor de siempre.
+ *
+ * ⚠️ El grupo se lee de la BASE: solo una actividad tiene este control. Un vuelo, un hotel o una
+ * línea sin grupo no pueden salir del precio por aquí.
+ */
+export async function marcarActividadEnCotizacion(
+  itemId: string,
+  pedido: PedidoActividad,
+): Promise<{ success: boolean; error?: string; estado?: EstadoActividad }> {
+  const { supabase, error, userId } = await getWorkspace()
+  if (error) return { success: false, error: 'No autenticado' }
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const sb = supabase as any
+  const { data: item, error: errLee } = await sb
+    .from('items')
+    .select('*, cotizaciones(estado)')
+    .eq('id', itemId)
+    .maybeSingle()
+  if (errLee) return { success: false, error: errLee.message }
+  if (!item) return { success: false, error: 'La actividad no existe o no es de este workspace.' }
+  const estadoCot = ((item.cotizaciones ?? {}) as { estado?: string }).estado ?? 'borrador'
+  if (!isEditable(estadoCot as EstadoCotizacion)) {
+    return { success: false, error: 'Esta cotización ya no se edita. Duplícala para trabajar sobre una nueva.' }
+  }
+  if (!esActividad(item.grupo ?? null) || item.es_ajuste === true) {
+    return { success: false, error: 'Solo una actividad se marca como incluida, opcional o que no va.' }
+  }
+
+  const estado = estadoDeActividad(item)
+  const dia = diaDeItem({ id: itemId, dia_relativo: item.dia_relativo ?? null })
+  const tarifaCruda = (item.tarifa_pax && typeof item.tarifa_pax === 'object' ? item.tarifa_pax : {}) as Record<string, unknown>
+  const era = leerTarifaPax(item.tarifa_pax).noVa?.era ?? null
+  const cambios = cambiosDeActividad({ estado, dia, era }, pedido)
+  if (!cambios) return { success: true, estado }
+
+  // La marca se escribe sobre la tarifa CRUDA: es un dato más de la línea, no una relectura.
+  const tarifa: Record<string, unknown> = { ...tarifaCruda }
+  if (cambios.noVa) {
+    const { data: perfil } = await sb.from('profiles').select('full_name').eq('id', userId).maybeSingle()
+    tarifa.noVa = {
+      era: cambios.noVa.era,
+      por: (perfil?.full_name as string | null | undefined)?.trim() || null,
+      porId: userId ?? null,
+      en: new Date().toISOString(),
+    }
+  } else {
+    delete tarifa.noVa
+  }
+  const patch: Record<string, unknown> = {
+    entra_al_precio: cambios.entra_al_precio,
+    mostrar_en_sugeridos: cambios.mostrar_en_sugeridos,
+    // Sin tarifa guardada y sin marca que poner, la columna se queda como estaba.
+    ...(item.tarifa_pax || cambios.noVa ? { tarifa_pax: tarifa } : {}),
+    ...(cambios.dia_relativo !== undefined ? { dia_relativo: cambios.dia_relativo } : {}),
+  }
+  const { error: errUpd } = await sb.from('items').update(patch).eq('id', itemId)
+  if (errUpd) return { success: false, error: errUpd.message }
+
+  if (cambios.entra_al_precio !== (item.entra_al_precio !== false) && item.cotizacion_id) {
+    await recalcularTotales(item.cotizacion_id as string)
+  }
+  return { success: true, estado: estadoDeActividad(cambios) }
+}
+
 // ── Interno ──────────────────────────────────────────────────────────────────
+
+/** Por qué un día no se guarda: fuera de los días del viaje del negocio. `null` = sí se guarda. */
+async function motivoDiaFueraDelViaje(supabase: unknown, cotizacionId: string | null, dia: number): Promise<string | null> {
+  if (!cotizacionId) return null
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const { data: cot } = await (supabase as any).from('cotizaciones').select('negocio_id').eq('id', cotizacionId).maybeSingle()
+  const negocioId = (cot?.negocio_id ?? null) as string | null
+  if (!negocioId) return null
+  const { viaje } = await leerViajeDelNegocio(supabase, negocioId)
+  return motivoDiaInvalido(dia, viaje.fechas)
+}
 
 const ERROR_TABLAS_AUSENTES =
   'Los itinerarios todavía no están disponibles en esta base: falta aplicar la migración 20260914200000_cotizacion_itinerarios.sql'

@@ -54,7 +54,7 @@
  * retiró es el documento del cliente.
  */
 
-import { composicionDeLectura, describirOcupacion, leerTarifaPax, type LecturaCasilla } from './tarifa-pasajero'
+import { composicionDeLectura, describirOcupacion, leerTarifaPax, mismaComposicion, type LecturaCasilla } from './tarifa-pasajero'
 import { ranuraDeGrupo, ranuraPorSlug, slugsDeRanura, type DefinicionRanura } from './ranuras-pantallazo'
 import { aplicarCorrecciones, leidosPorSlug, type Correcciones } from './correcciones'
 import { fechasCorregidas } from './estadia'
@@ -62,7 +62,7 @@ import { estrellasDesdeTexto } from './estrellas'
 import { notaDeLaLinea } from './nota-linea'
 import { datosManuales } from './ingreso-manual'
 import { habitacionesDeTarifa, repartirHabitaciones, type RepartoHabitaciones } from './habitaciones'
-import { acomodacionDeHabitaciones } from './tarjeta-opcion'
+import { acomodacionDeHabitaciones, ocupacionCorta } from './tarjeta-opcion'
 import { vueloDesdeNombre } from '@/lib/pdf/cotizacion-trappvel-formato'
 import { parseMontoCop } from '@/lib/negocios/monto-cop'
 import { equipajeDeCampos, leerTramos, tramosDeCampos, type EquipajeTramo, type TramoVuelo } from './tramos-vuelo'
@@ -632,6 +632,12 @@ export function hotelesDeItems(items: ItemConLectura[]): HotelPDF[] {
     // cliente y parece que se le cobra algo que no lleva.
     const pax = reparto?.cubiertos ?? tarifa.composicion ?? (primera ? composicionDeLectura(primera) : null)
     const conNinos = !!pax && pax.ninos > 0
+    // Brief del 2026-10-05, punto 9 · una opción de UNA captura dice a quiénes cubre su costo
+    // confirmado. «Hotel Sirius QA 976» se costeó para 2 adultos + 1 infante (con el pantallazo
+    // 2 de solo adultos) y el PDF decía «Acomodación: 2 adultos», que es lo que leyó la captura.
+    const cubre = reparto ? null : tarifa.confirmada?.composicion ?? primera?.paraComposicion ?? null
+    const leida = primera ? composicionDeLectura(primera) : null
+    const acomodacionConfirmada = cubre && (!leida || !mismaComposicion(leida, cubre)) ? ocupacionCorta(cubre) : null
     out.push({
       linea: (item.nombre ?? '').trim(),
       hotel: texto(d, 'hotel'),
@@ -641,7 +647,7 @@ export function hotelesDeItems(items: ItemConLectura[]): HotelPDF[] {
       checkIn: fechaCorta(texto(d, 'check_in')),
       checkOut: fechaCorta(texto(d, 'check_out')),
       noches: nochesDe(d, tarifa.correcciones),
-      ocupacion: acomodacion ?? texto(d, 'ocupacion'),
+      ocupacion: acomodacion ?? acomodacionConfirmada ?? texto(d, 'ocupacion'),
       cancelacion: texto(d, 'politica_cancelacion'),
       estrellas: estrellasDesdeTexto(texto(d, 'estrellas')),
       localizador: null,

@@ -29,7 +29,12 @@ import { esTipoRanura, type TipoRanura } from '@/lib/cotizaciones/ranuras-cotiza
 const GEMINI_MODEL = 'gemini-2.5-flash'
 /** Clasificar no necesita pensar mucho: el presupuesto bajo es lo que la hace rápida. */
 const THINKING_BUDGET = 512
-const MAX_OUTPUT_TOKENS = 4096
+/**
+ * La respuesta son ~30 tokens y el pensamiento ~300. El tope NO es holgura: cuando el modelo se
+ * enreda (ver `rescatarCortada`) escribe saltos de línea hasta el tope, y con 4.096 eso eran dos
+ * intentos largos esperando una respuesta que ya no iba a llegar.
+ */
+const MAX_OUTPUT_TOKENS = 1024
 const TIMEOUT_MS = 20_000
 
 const MIMES_SOPORTADOS: Record<string, string> = {
@@ -77,6 +82,8 @@ const ESQUEMA = {
     destino: { type: 'STRING', nullable: true },
   },
   required: ['tipo'],
+  // El tipo primero: si la respuesta se corta, lo que se corta es el lugar (`rescatarCortada`).
+  propertyOrdering: ['tipo', 'lugar', 'origen', 'destino'],
 }
 
 /**
@@ -101,6 +108,32 @@ export function normalizarDeteccion(raw: unknown): TipoDetectado {
     origen: tipo === 'vuelo' ? textoOVacio(r.origen) : null,
     destino: tipo === 'vuelo' ? textoOVacio(r.destino) : null,
   }
+}
+
+/**
+ * El tipo de una respuesta CORTADA (`finishReason: MAX_TOKENS`), si alcanzó a escribirlo entero.
+ *
+ * ## Por qué existe (brief del 2026-10-05, punto 8)
+ *
+ * El hotel sintético «Hotel Sirius QA 976» (Bedsonline) dijo «No se pudo mirar el pantallazo»: los
+ * dos intentos terminaron en MAX_TOKENS (registro de Vercel del 2026-10-05 10:22 UTC). Medido sobre
+ * el banco de capturas: el modelo se enreda en una letra con tilde DENTRO de un texto
+ * («San Andr\n\n\n…») y escribe saltos de línea hasta el tope. El tipo, que va primero y es una
+ * palabra del enum sin tildes, ya está completo cuando eso pasa.
+ *
+ * Se rescata SOLO el tipo y los lugares que alcanzaron a cerrarse sin un salto de línea adentro:
+ * un lugar a medias no nombra nada, y el bloque cae al destino del viaje como cuando la captura no
+ * lo muestra. La lectura que sigue juzga la captura con su propio contrato, así que un tipo
+ * rescatado no deja pasar nada que un tipo normal no dejara pasar.
+ */
+export function rescatarCortada(texto: string): TipoDetectado | null {
+  const tipo = /"tipo"\s*:\s*"(vuelo|hotel|actividad|traslado|ninguno)"/.exec(texto)?.[1]
+  if (!tipo) return null
+  const campo = (nombre: string): string | null => {
+    const m = new RegExp(`"${nombre}"\\s*:\\s*"([^"\\n\\\\]*)"`).exec(texto)
+    return m ? m[1] : null
+  }
+  return normalizarDeteccion({ tipo, lugar: campo('lugar'), origen: campo('origen'), destino: campo('destino') })
 }
 
 async function unaLlamada(buffer: Buffer, mime: string, apiKey: string): Promise<ResultadoExtraccion<TipoDetectado>> {
@@ -131,12 +164,17 @@ async function unaLlamada(buffer: Buffer, mime: string, apiKey: string): Promise
     const data = await res.json()
     if (data.promptFeedback?.blockReason) return { data: null, error: `Contenido bloqueado por Gemini: ${data.promptFeedback.blockReason}` }
     const candidato = data.candidates?.[0]
-    // R-P7: una respuesta cortada puede traer JSON que parsea. Solo vale un STOP.
+    const partes = (candidato?.content?.parts ?? []) as { thought?: boolean; text?: string }[]
+    const texto = partes.find(p => !p.thought && p.text?.trim().startsWith('{'))?.text ?? ''
+    // R-P7: una respuesta cortada puede traer JSON que parsea. Solo vale un STOP… salvo el tipo
+    // ya escrito entero de una respuesta enredada (`rescatarCortada`).
+    if (candidato?.finishReason === 'MAX_TOKENS') {
+      const rescatada = rescatarCortada(texto)
+      if (rescatada) return { data: rescatada }
+    }
     if (candidato?.finishReason && candidato.finishReason !== 'STOP') {
       return { data: null, error: `La detección terminó con motivo ${candidato.finishReason}` }
     }
-    const partes = (candidato?.content?.parts ?? []) as { thought?: boolean; text?: string }[]
-    const texto = partes.find(p => !p.thought && p.text?.trim().startsWith('{'))?.text ?? ''
     if (!texto) return { data: null, error: 'Gemini no devolvió respuesta' }
     return { data: normalizarDeteccion(JSON.parse(texto)) }
   } catch (err) {

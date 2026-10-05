@@ -518,7 +518,10 @@ export default function TarifaPasajeroItem({
                 onClick={() => accion(() => confirmarTarifaPorPasajero(itemId, enCOP ? null : tasaNum), 'Costo por pasajero cargado. Revisa el margen de la línea.')}
                 className="inline-flex items-center gap-1 rounded-md bg-primary px-2.5 py-1.5 text-xs font-medium text-primary-foreground disabled:opacity-50"
               >
-                <Check className="h-3 w-3" /> Confirmar y cargar el costo
+                {/* Punto 14 del brief del 2026-10-05: mientras el servidor guarda, el botón lo dice. Si
+                    el servidor tarda (la acción espera en fila detrás del refresco), el primer clic parecía
+                    no hacer nada: el botón solo se ponía gris. La causa en producción no se reprodujo. */}
+                <Check className="h-3 w-3" /> {isPending ? 'Cargando el costo…' : 'Confirmar y cargar el costo'}
               </button>
               <p className="text-[10px] text-muted-foreground">
                 Al confirmar, esto REEMPLAZA los rubros de la línea. El precio lo calcula el margen.

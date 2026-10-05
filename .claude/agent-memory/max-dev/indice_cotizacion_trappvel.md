@@ -36,3 +36,4 @@ Memorias del motor de cotización y el documento del cliente de Trappvel (sacada
 - ⚠️ [Detalles de pantalla y «Va / No va» (#974)](project_detalles_pantalla_va_no_va.md) — mergeado 10f4fc70; el primer toque fija todas; `cache()` no memoiza en rutas
 - ⚠️ [La tarjeta relee sin recargar (brief 2026-10-01, PR 2)](project_tarjeta_relee_sin_recargar.md) — causa raíz sin reproducir; todo pasa por `refrescar` del editor
 - ⚠️ [Actividad por pantallazo, infante gratis](project_actividad_infante_gratis.md) — solo sin niños; la casilla tragaba excepciones; pegar sin foco cae en la bandeja
+- ⚠️⚠️ [Limpieza antes de presentar (2026-10-05)](project_limpieza_presentar_trappvel.md) — SIN mergear; actividad en 3 estados sin columna; el día ya no es interruptor; COT-0018 −1 peso

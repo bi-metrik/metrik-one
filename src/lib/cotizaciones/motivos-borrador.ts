@@ -23,6 +23,7 @@ export type MotivoDeBorrador =
   | 'pantallazos'
   | 'recomendada'
   | 'incompleto'
+  | 'incompleto_tasa'
   | 'margen'
   | 'iva_sin_calcular'
   | 'iva_incluido_sin_plantilla'
@@ -37,6 +38,7 @@ export const ORDEN_DE_MOTIVOS: readonly MotivoDeBorrador[] = [
   'pantallazos',
   'recomendada',
   'incompleto',
+  'incompleto_tasa',
   'margen',
   'iva_sin_calcular',
   'iva_incluido_sin_plantilla',
@@ -46,6 +48,8 @@ const ETIQUETAS: Record<MotivoDeBorrador, string> = {
   pantallazos: 'pantallazos por actualizar',
   recomendada: 'falta la tarifa Recomendada',
   incompleto: 'borrador incompleto: falta un costo',
+  // Brief del 2026-10-05, punto 12: lo mismo que «Revisar y enviar» (#1017).
+  incompleto_tasa: 'borrador incompleto: falta la tasa de cambio',
   margen: 'margen bajo el mínimo',
   iva_sin_calcular: 'IVA sin calcular',
   iva_incluido_sin_plantilla: 'IVA incluido sin plantilla',
@@ -65,6 +69,11 @@ export interface CondicionesDeBorrador {
    * recibiría un precio sin ese servicio. Opcional: ausente = no aplica.
    */
   faltaCosto?: boolean
+  /**
+   * Lo que falta en TODAS esas líneas es la tasa de cambio (el precio está en otra moneda): la
+   * marca lo dice así en vez de «falta un costo» (brief del 2026-10-05, punto 12).
+   */
+  faltaTasa?: boolean
   margen: boolean
   ivaSinCalcular: boolean
   ivaIncluidoSinPlantilla: boolean
@@ -75,7 +84,8 @@ export function motivosDeBorrador(c: CondicionesDeBorrador): MotivoDeBorrador[] 
   const aplica: Record<MotivoDeBorrador, boolean> = {
     pantallazos: c.pantallazos,
     recomendada: c.sinRecomendada,
-    incompleto: c.faltaCosto === true,
+    incompleto: c.faltaCosto === true && c.faltaTasa !== true,
+    incompleto_tasa: c.faltaCosto === true && c.faltaTasa === true,
     margen: c.margen,
     iva_sin_calcular: c.ivaSinCalcular,
     iva_incluido_sin_plantilla: c.ivaIncluidoSinPlantilla,

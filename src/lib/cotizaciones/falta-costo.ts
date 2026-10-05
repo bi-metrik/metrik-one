@@ -17,8 +17,10 @@
  * recibiría un precio sin ese servicio». Puro: lo usan el servidor y el editor.
  */
 
+import { avisoTasaPendiente } from './actividad-pantallazo'
 import { esNombreDeOpcion } from './ranuras-cotizacion'
-import { etiquetaDeRanura, resolverRanura } from './ranuras-pantallazo'
+import { etiquetaDeRanura, ranuraDeGrupo, resolverRanura } from './ranuras-pantallazo'
+import { composicionDeLinea, leerTarifaPax, type Composicion } from './tarifa-pasajero'
 
 export interface LineaSinCosto {
   id: string
@@ -72,4 +74,24 @@ export function motivoFaltaCosto(
   // Una sola línea: el texto de la tarjeta tal cual. Varias: cada uno con su línea.
   if (lineas.length === 1) return `${base} ${porTasa[0]!.texto}`
   return `${base} ${porTasa.map(x => `${x.nombre}: ${x.texto}`).join(' ')}`
+}
+
+/**
+ * Por línea, por qué no tiene costo cuando lo que falta es la tasa de cambio: el texto de la
+ * tarjeta («El precio está en EUR: escribe la tasa de cambio para cargar el costo.»). Lo usan el
+ * editor y el servidor (brief del 2026-10-05, punto 12): el rechazo de «Enviar» y la marca del PDF
+ * dicen lo mismo que «Revisar y enviar».
+ */
+export function tasasPendientesPorLinea(
+  items: readonly { id: string; grupo?: string | null; es_ajuste?: boolean | null; tarifa_pax?: unknown }[],
+  composicionViaje: Composicion | null,
+): Map<string, string> {
+  const out = new Map<string, string>()
+  for (const i of items) {
+    if (i.es_ajuste === true || !i.tarifa_pax) continue
+    const t = leerTarifaPax(i.tarifa_pax)
+    const texto = avisoTasaPendiente(t, composicionDeLinea(t, composicionViaje), ranuraDeGrupo(i.grupo ?? null)?.slug)
+    if (texto) out.set(i.id, texto)
+  }
+  return out
 }
