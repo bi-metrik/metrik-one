@@ -82,6 +82,7 @@
 - ⚠️⚠️ [Cardumen independiente y Meta del 1-oct](project_cardumen_infra_independiente.md) — servicio se cobra pasadas 1.000/numero; sin pago en WABA el bot calla
 - ⚠️ [Medicion de Cardumen en el numero de ONE](project_cardumen_medicion_wa.md) — intent `cardumen:<estudio>`; origen='cardumen' pide migracion; inerte sin deploy
 - ⚠️ [Bot Navigate (demo Grupo Progreso)](project_cardumen_navigate_demo.md) — deploy ANTES del SQL; idioma PRIMERO
+- ⚠️⚠️ [Objetos sueltos por WhatsApp](project_cardumen_objetos_sueltos.md) — comparte tabla con la demo de Navigate; la palabra de consentimiento del chat ES «LISTO»
 - ⚠️⚠️ [Miniweb por catálogo + ingesta (#980)](project_cardumen_miniweb_catalogo.md) — migración ANTES del merge; `cardumen` NO se toca; la ñ no se normaliza
 - ⚠️ [Guarda de sustento en triada G03 (#931)](project_cardumen_guarda_triada_g03.md) — SIN mergear; probar guardas re-leyendo salidas crudas
 - ⚠️ [Polaridad G22 y matiz G13 (#928)](project_cardumen_polaridad_matiz.md) — SIN mergear: benchmark primero
