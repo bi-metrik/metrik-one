@@ -70,7 +70,7 @@ import { avisoFechaActividadFueraDelViaje, leerHotelManual, leerTrasladoManual, 
 import { fechaDeActividad, lugarDeBloqueNuevo } from '@/lib/cotizaciones/actividad-pantallazo'
 import { diaDeFecha } from '@/lib/cotizaciones/actividad-en-cotizacion'
 import { borradorValido, firmarBorrador } from '@/lib/cotizaciones/firma-borrador'
-import { ubicarLectura, type LineaParaUbicar } from '@/lib/cotizaciones/ubicar-lectura'
+import { opcionElegidaDeActividad, ubicarLectura, type LineaParaUbicar } from '@/lib/cotizaciones/ubicar-lectura'
 import { definicionDeTipo, esTipoRanura, tipoDeDefinicion, type TipoRanura } from '@/lib/cotizaciones/ranuras-cotizacion'
 import { lugarDeOpcion } from '@/lib/cotizaciones/opcion-viaje'
 import { normalizarGrupo } from '@/lib/cotizaciones/itinerarios'
@@ -762,7 +762,9 @@ async function aceptarLectura(
   // ── Dónde va, contra la cotización de ESTE momento ──
   const destino = b.decision === 'habitacion'
     ? (delaCotizacion(b.destinoId) ? { como: 'habitacion' as const, itemId: b.destinoId!, grupo: '', sobra: false } : null)
-    : ubicarLectura({ tipo: b.tipo, lectura, pistas, lineas: lineas as unknown as LineaParaUbicar[], grupoViaje: ctx.viaje.composicion, sinHabitacion: b.decision === 'opcion' })
+    // Una actividad solo es opción de otra si quien cotiza lo eligió (brief del 2026-10-05,
+    // «actividades tras la limpieza»): «Agregar como otra opción» manda la actividad de al lado.
+    : (b.decision === 'opcion' ? opcionElegidaDeActividad(b.tipo, b.destinoId, lineas as unknown as LineaParaUbicar[]) : null) ?? ubicarLectura({ tipo: b.tipo, lectura, pistas, lineas: lineas as unknown as LineaParaUbicar[], grupoViaje: ctx.viaje.composicion, sinHabitacion: b.decision === 'opcion' })
   if (!destino) return { ok: false, codigo: 'DESTINO', mensaje: 'Esa opción ya no está en la cotización. Recarga la página.' }
 
   if (destino.como === 'habitacion') {

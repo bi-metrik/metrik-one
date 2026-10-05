@@ -15,6 +15,10 @@
  *     «Hotel 2 en Providencia» (H1).
  *  3. Sin fechas que comparar, el lugar, como siempre (`ubicarCaptura`).
  *
+ * ## Actividad (brief del 2026-10-05, «actividades tras la limpieza»)
+ *
+ * Siempre un bloque nuevo: dos actividades suman, no compiten.
+ *
  * Los demás tipos siguen con `ubicarCaptura`.
  *
  * Puro: las líneas de la cotización entran por parámetro.
@@ -140,6 +144,16 @@ export function ubicarLectura(args: {
     return u.como === 'hermana' ? { como: 'hermana', grupo: u.grupo } : { como: 'nueva' }
   }
 
+  // Una actividad es un componente que SUMA: nace en su propio bloque aunque otra actividad sea
+  // de la misma ciudad (brief del 2026-10-05, «actividades tras la limpieza», punto 1). Solo es
+  // opción de otra si quien cotiza lo elige («+ Opción», «Mover a otro bloque», o «Agregar como
+  // otra opción» de la misma actividad con otro precio, que resuelve el servidor por su id).
+  //
+  // ⚠️ Antes caía en `ubicarCaptura`: sin lugar leído y con UNA sola ranura de actividad iba como
+  // hermana de esa ranura (la regla de «otra opción del mismo hotel»). En COT-2026-0021 el kayak
+  // abrió la primera ranura y el buceo, sin ciudad, entró como su «Opción 2» y dejó de sumar.
+  if (tipo === 'actividad') return { como: 'nueva' }
+
   const captura: CapturaDetectada = { tipo, lugar: lugarLeido, origen: pistas.origen, destino: pistas.destino }
   const candidatas: RanuraCandidata[] = ranurasConLugar(vivas, tipo).map(r => ({
     grupo: r.grupo,
@@ -150,4 +164,23 @@ export function ubicarLectura(args: {
   }))
   const u = ubicarCaptura(captura, candidatas)
   return u.como === 'hermana' ? { como: 'hermana', grupo: u.grupo } : { como: 'nueva' }
+}
+
+/**
+ * «Agregar como otra opción» de una actividad (la bandeja la vio igual a `destinoId`, con otro
+ * precio): quien cotiza ELIGIÓ que sea opción de esa, así que va como hermana en su bloque. Es la
+ * única entrada de la bandeja que vuelve opción a una actividad (`ubicarLectura` siempre abre
+ * bloque). `null` si no es una actividad o el destino ya no es una actividad de la cotización:
+ * entonces decide `ubicarLectura`.
+ */
+export function opcionElegidaDeActividad(
+  tipo: TipoRanura,
+  destinoId: string | null | undefined,
+  lineas: readonly LineaParaUbicar[],
+): DestinoDeLectura | null {
+  if (tipo !== 'actividad' || !destinoId) return null
+  const linea = lineas.find(l => l.id === destinoId && l.es_ajuste !== true)
+  if (!linea || ranuraDeGrupo(linea.grupo ?? null)?.slug !== 'actividad_detalle') return null
+  const grupo = normalizarGrupo(linea.grupo ?? null)
+  return grupo ? { como: 'hermana', grupo } : null
 }

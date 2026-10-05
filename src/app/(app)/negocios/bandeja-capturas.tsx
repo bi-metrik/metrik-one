@@ -731,6 +731,9 @@ export default function BandejaCapturas({
   function agregarIgual(c: Captura) {
     const e = c.estado
     if (e.fase === 'parecida' && e.habitacion) return void aceptar(c, 'habitacion', e.conItemId)
+    // La misma actividad con otro precio: «Agregar como otra opción» la pone al lado de esa
+    // (`opcionElegidaDeActividad`). Sin ese id, una actividad abre su propio bloque.
+    if (e.fase === 'otro_precio' && c.tipo === 'actividad') return void aceptar(c, 'opcion', e.conItemId)
     if (e.fase === 'parecida' || e.fase === 'otro_precio') return void aceptar(c, 'opcion')
   }
 
