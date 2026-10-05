@@ -2029,10 +2029,10 @@ function corregirGasto(acc: AccionModelo[], e: EntradaValidador, rechazo: string
 export const TEXTO_NOTA_INTERNA = 'No lo guardo: en la historia solo va lo que pide el cliente.';
 export const TEXTO_QUE_HAGO = '¿Qué hago con esto? ¿Es algo que pidió el cliente, un gasto o una pregunta para mí?';
 /** Un «nuevo …» que no es un encabezado (más largo que el tope) con una tanda abierta: no se anota en ninguna caja. */
-export const TEXTO_NUEVO_NO_ANOTADO = '¿Es un cliente nuevo? Escribe NUEVO y su nombre (hasta 4 palabras), o el código del viaje.\nNo lo anoté en ninguna caja.';
+export const TEXTO_NUEVO_NO_ANOTADO = '¿Es un viaje nuevo? Escribe «nuevo» y el nombre del cliente (hasta 4 palabras), o el código del viaje.\nNo lo anoté en ninguna caja.';
 /** Un «nuevo …» más largo que el tope contestando una lista: no se elige ningún viaje ni se crea nadie. */
-export const TEXTO_NUEVO_NO_CARGADO = '¿Es un cliente nuevo? Escribe NUEVO y su nombre (hasta 4 palabras), o el número del viaje.\nNo he cargado nada.';
-export const TEXTO_NO_ENCONTRE_VIAJE = '¿Es un cliente nuevo? No encontré ese viaje entre los abiertos.\nEscribe NUEVO y el nombre, o el código del viaje.';
+export const TEXTO_NUEVO_NO_CARGADO = '¿Es un viaje nuevo? Escribe «nuevo» y el nombre del cliente (hasta 4 palabras), o el número del viaje.\nNo he cargado nada.';
+export const TEXTO_NO_ENCONTRE_VIAJE = '¿Es un viaje nuevo? No encontré ese viaje entre los abiertos.\nEscribe «nuevo» y el nombre del cliente, o el código del viaje.';
 export const TEXTO_CIERRA_DESPUES = 'Anotado en la tanda. Para cerrarla, escribe «listo».';
 export const TEXTO_GASTO_EN_COLA = 'Lo anoto y te lo muestro cuando termines lo que está en curso.';
 
@@ -2061,7 +2061,7 @@ export function textoSiguePendiente(p: PreguntaUnificada): string {
 /** La pregunta corta de un encabezado ambiguo. */
 export function textoPreguntaViaje(texto: string, candidatos: ReadonlyArray<ViajeAbierto>): string {
   const t = recortar(texto, 40);
-  return `¿De qué viaje es${t ? ` «${t}»` : ''}? ${candidatos.map((v, i) => `${i + 1}. ${lineaCaja(v)}`).join(' · ')}\nResponde con el número, NUEVO y el nombre, o DESCARTAR.`;
+  return `¿De qué viaje es${t ? ` «${t}»` : ''}? ${candidatos.map((v, i) => `${i + 1}. ${lineaCaja(v)}`).join(' · ')}\nResponde el número; si es un viaje nuevo, «nuevo» y el nombre del cliente; o «descartar».`;
 }
 
 /** H2, caso 1: se descartó solo lo que preguntaba la lista; la tanda sigue. */
@@ -2075,8 +2075,8 @@ export function textoDescartePregunta(tandaQueSigue: string | null): string {
 export function textoDudaDescarte(p: PreguntaUnificada, tanda: string | null): string {
   const pregunta = recortar(p.texto.split('\n')[0], 80);
   return tanda
-    ? `¿Descarto lo de la pregunta pendiente o la tanda de ${tanda}?\nPendiente: ${pregunta} Escribe DESCARTAR solo para descartar todo.`
-    : `¿Descarto lo de la pregunta pendiente?\nPendiente: ${pregunta} Escribe DESCARTAR solo para descartar todo.`;
+    ? `¿Descarto lo de la pregunta pendiente o la tanda de ${tanda}?\nPendiente: ${pregunta} Para descartar todo, escribe solo «descartar».`
+    : `¿Descarto lo de la pregunta pendiente?\nPendiente: ${pregunta} Para descartar todo, escribe solo «descartar».`;
 }
 
 /** Gastos múltiples: se confirman uno a la vez. */
@@ -2086,7 +2086,7 @@ export function textoGastoDeLaCola(i: number, n: number): string {
 
 /** ¿Todos los textos nuevos? (para la prueba de largo). */
 export function textosNuevos(): string[] {
-  const p: PreguntaUnificada = { capa: 'entrega', origen: 'bandeja', texto: 'Carolina Ruiz · ¿A qué viaje van? Número, código, NUEVO y el nombre, o DESCARTAR', opciones: [], haceMin: 1, tambien: null, ofreceDescartar: true };
+  const p: PreguntaUnificada = { capa: 'entrega', origen: 'bandeja', texto: 'Carolina Ruiz · ¿De qué viaje son?', opciones: [], haceMin: 1, tambien: null, ofreceDescartar: true };
   const v: ViajeAbierto = { id: 'v', codigo: 'T1 26 14', cliente: 'LINA PÉREZ', destino: 'CARTAGENA' };
   return [
     TEXTO_NOTA_INTERNA, TEXTO_QUE_HAGO, TEXTO_NO_ENCONTRE_VIAJE, TEXTO_CIERRA_DESPUES, TEXTO_GASTO_EN_COLA,

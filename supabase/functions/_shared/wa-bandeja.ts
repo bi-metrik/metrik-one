@@ -559,7 +559,8 @@ export async function preguntarCliente(
   }
   if (viaje?.plan && viaje.sinDudas) {
     // `confirmar: si_duda` y un reparto sin una sola duda: se carga sin preguntar, y se dice qué.
-    await enviar(phone, `Cargo esto sin preguntar (un solo viaje, por encabezado):\n${viaje.texto.split('\n').slice(0, -1).join('\n')}`, workspaceId);
+    // Sin la pregunta de arriba ni el pie: lo que se carga.
+    await enviar(phone, `Cargo esto sin preguntar (un solo viaje, por encabezado):\n${viaje.texto.split('\n').slice(1, -1).join('\n')}`, workspaceId);
     const { error } = await supabase.from('wa_bandeja_entregas').update({
       plan_viajes: viaje.plan, pregunta_enviada_at: new Date().toISOString(),
       estado: 'con_cliente', cliente_texto: 'sí', cliente_respondido_at: new Date().toISOString(),

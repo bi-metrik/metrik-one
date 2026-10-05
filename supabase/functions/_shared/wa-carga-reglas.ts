@@ -122,7 +122,8 @@ export function lineaDeOpcion(o: OpcionNegocio): string {
   return nombreDeViaje(o);
 }
 
-const PIE_NUEVO = 'escribe NUEVO y el nombre del cliente si es un viaje nuevo, o DESCARTAR.';
+/** El pie de la lista (2026-10-05, PR B): sin comandos en mayúsculas; lo que acepta la respuesta no cambia (también «SÍ», «NUEVO», «DESCARTAR»). */
+const PIE_LISTA = 'Responde el número o el código. Si es un viaje nuevo, escribe «nuevo» y el nombre del cliente; si no va, «descartar».';
 
 /**
  * La pregunta. Sin negocios abiertos solo se ofrece NUEVO. `aviso` antecede cuando se vuelve a
@@ -130,18 +131,17 @@ const PIE_NUEVO = 'escribe NUEVO y el nombre del cliente si es un viaje nuevo, o
  */
 export function textoPreguntaNegocio(p: { nMensajes: number; opciones: ReadonlyArray<OpcionNegocio>; aviso?: string }): string {
   const n = p.nMensajes;
-  const recibi = n > 0 ? `Recibí ${n} ${n === 1 ? 'mensaje' : 'mensajes'}. ` : '';
-  const cab = p.aviso ? [p.aviso] : [];
+  const cuales = n === 1 ? 'es el mensaje' : n > 1 ? `son los ${n} mensajes` : 'son';
+  // Una pregunta, arriba (el aviso de «No entendí…» va en la misma línea).
+  const conAviso = (q: string) => (p.aviso ? `${p.aviso} ${q}` : q);
   if (p.opciones.length === 0) {
-    return [...cab, `${recibi}No tienes viajes abiertos: escribe NUEVO y el nombre del cliente para crear el viaje, o DESCARTAR.`].join('\n');
+    return conAviso(`¿De qué cliente ${cuales}? No tienes viajes abiertos: escribe «nuevo» y su nombre, o «descartar».`);
   }
-  const prop = p.opciones[0]?.propuesto ? [`Parece de ${nombreDeViaje({ cliente: p.opciones[0].cliente })}: es la 1.`] : [];
+  const prop = p.opciones[0]?.propuesto ? ` Parece de ${nombreDeViaje({ cliente: p.opciones[0].cliente })} (el 1).` : '';
   return [
-    ...cab,
-    `${recibi}¿A qué viaje van?`,
-    ...prop,
+    conAviso(`¿De qué viaje ${cuales}?${prop}`),
     ...p.opciones.map((o, i) => `${i + 1}. ${lineaDeOpcion(o)}`),
-    `Responde con el número o el código, ${PIE_NUEVO}`,
+    PIE_LISTA,
   ].join('\n');
 }
 
@@ -590,9 +590,8 @@ export function detectarCruce(p: {
 export function textoAvisoCruce(p: { codigo: string | null; cliente: string | null; destino: string | null; nombre?: string | null; cruces: ReadonlyArray<Cruce> }): string {
   const deQue = p.cruces.map(c => c.enMensajes);
   const nombre = p.codigo || p.cliente || p.nombre ? nombreDeViaje({ nombre: p.nombre, cliente: p.cliente, codigo: p.codigo }) : 'ese viaje';
-  const viaje = [nombre, p.destino ? `va a ${p.destino}` : null].filter(Boolean).join(' ');
   return [
-    `Estos mensajes hablan de ${deQue.join(' y de ')} y ${viaje}. No cargué nada.`,
-    '¿Seguro que van ahí? Responde SÍ para cargarlos igual, o el número o el código del viaje correcto, o NUEVO y el nombre del cliente.',
+    `¿Seguro que estos mensajes van en ${nombre}? Hablan de ${deQue.join(' y de ')}${p.destino ? ` y ese viaje va a ${p.destino}` : ''}; no cargué nada.`,
+    'Responde «sí» para cargarlos igual, el número o el código del viaje correcto, o «nuevo» y el nombre del cliente.',
   ].join('\n');
 }
