@@ -3,10 +3,10 @@
 import { useId, useState, type ClipboardEvent, type DragEvent, type ReactNode } from 'react'
 
 import { adicionalEnLaFicha, aAdicional, type FilaAdicional } from '@/lib/cotizaciones/adicionales'
-import { hotelesDeItems, type ItemConLectura } from '@/lib/cotizaciones/detalle-viaje'
+import { hotelesDeItems, vuelosDeItems, type ItemConLectura, type VueloPDF } from '@/lib/cotizaciones/detalle-viaje'
 import type { PreciosAMano, TarifaConfirmada } from '@/lib/cotizaciones/tarifa-pasajero'
 import { filasDeCosto, pesos } from '@/lib/cotizaciones/tarjeta-opcion'
-import { TOKENS, textosDeTarjetaHotel } from '@/lib/pdf/cotizacion-trappvel-formato'
+import { filasDelVuelo, numerosSinTramo, TOKENS, textosDeTarjetaHotel } from '@/lib/pdf/cotizacion-trappvel-formato'
 import { TEXTO_AGREGAR_FOTO_HOTEL, urlDeFotoHotel } from '@/lib/cotizaciones/foto-hotel'
 import { nombreVisibleDeLinea } from '@/lib/cotizaciones/nombre-visible'
 
@@ -17,8 +17,9 @@ import { nombreVisibleDeLinea } from '@/lib/cotizaciones/nombre-visible'
  *
  * Un traslado sale en el documento como su línea de «Inversión»: el nombre de la línea,
  * «Incluye: …» con sus adicionales, el precio de cada pasajero y el total (`LineaPrecio` del
- * PDF). Esa es su hoja (`LineaDelCliente`). Hasta el 2026-09-28 solo el hotel tenía hoja. El
- * vuelo sigue sin ella: al cliente le llega sobre todo como su fila de la tabla «Vuelos».
+ * PDF). Esa es su hoja (`LineaDelCliente`). Hasta el 2026-09-28 solo el hotel tenía hoja. Desde
+ * el brief del 2026-10-05 (D3) el vuelo también: su línea de «Inversión» y, debajo, sus filas de la
+ * tabla «Vuelos» del documento (`filasDelVuelo`, la misma función que las imprime).
  *
  * ⚠️ Los textos NO se arman aquí: la tarjeta del hotel sale de `textosDeTarjetaHotel` (la misma
  * función que pinta el PDF) y el precio de cada pasajero de `filasDeCosto`, que reparte con la
@@ -76,6 +77,15 @@ export default function HojaCliente({
   const hoja = (tarjeta: ReactNode) => (
     <Hoja bloqueTitulo={bloqueTitulo} porPasajero={porPasajero} precioOpcion={precioOpcion}>{tarjeta}</Hoja>
   )
+  const [v] = h ? [null] : vuelosDeItems([{ ...item, adicionales: enLaFicha }])
+  if (v) {
+    return hoja(
+      <>
+        <LineaDelCliente numero={numero} nombre={nombreVisibleDeLinea(item)} adicionales={[]} />
+        <VueloDelCliente v={v} general={general} />
+      </>,
+    )
+  }
   if (!h) return hoja(<LineaDelCliente numero={numero} nombre={nombreVisibleDeLinea(item)} adicionales={enLaFicha} />)
   const t = textosDeTarjetaHotel(h, general)
 
@@ -199,6 +209,37 @@ function LineaDelCliente({ numero, nombre, adicionales }: { numero: number; nomb
       </span>
       <h5 className="m-0 mt-0.5 text-base font-bold" style={{ color: TOKENS.tinta }}>{nombre || `Opción ${numero}`}</h5>
       {adicionales.length > 0 && <span className="text-[11.5px]" style={{ color: TOKENS.gris }}>{`Incluye: ${adicionales.join(' · ')}`}</span>}
+    </div>
+  )
+}
+
+/**
+ * El vuelo como lo imprime la tabla «Vuelos» del documento: una fila por tramo (aerolínea, ruta,
+ * escala, fecha, horas, número) y la línea gris de tarifa, equipaje y adicionales. Las filas y la
+ * línea salen de las mismas funciones que la plantilla (`filasDelVuelo`, `numerosSinTramo`).
+ */
+function VueloDelCliente({ v, general }: { v: VueloPDF; general: boolean }) {
+  const filas = filasDelVuelo(v)
+  const meta = [
+    numerosSinTramo(v),
+    !general ? v.tarifa : null,
+    !general ? v.equipaje : null,
+    v.adicionales.length > 0 ? `Adicionales: ${v.adicionales.join(' · ')}` : null,
+  ].filter(Boolean).join(' · ')
+  return (
+    <div className="flex flex-col gap-1.5 rounded-lg border px-3.5 py-2.5" style={{ borderColor: TOKENS.linea }} data-vuelo-cliente>
+      {filas.map((f, i) => (
+        <div key={i} className="flex flex-wrap items-baseline gap-x-3 gap-y-0.5 text-[11.5px]" style={{ color: TOKENS.tinta }}>
+          <b>{v.aerolinea ?? v.linea}</b>
+          <span>{[f.desde, f.hasta].filter(Boolean).join(' → ')}</span>
+          {f.fecha && <span>{f.fecha}</span>}
+          {(f.salida || f.llegada) && <span className="tabular-nums">{[f.salida, f.llegada].filter(Boolean).join(' – ')}</span>}
+          {f.numero && <span>{f.numero}</span>}
+          {f.escala && <span className="w-full text-[10.5px]" style={{ color: TOKENS.gris }}>{f.escala}</span>}
+        </div>
+      ))}
+      {meta !== '' && <span className="text-[10.5px]" style={{ color: TOKENS.gris }}>{meta}</span>}
+      {v.nota && <span className="text-[10.5px]" style={{ color: TOKENS.texto }}>{v.nota}</span>}
     </div>
   )
 }

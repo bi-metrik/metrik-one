@@ -78,6 +78,7 @@ import { etiquetaDeRanura } from '@/lib/cotizaciones/ranuras-pantallazo'
 import { agregarOpcionARanura, crearRanuraConOpcion } from '@/app/(app)/negocios/ranura-actions'
 import { borrarImagenesDeCaptura, guardarImagenDeCaptura, imagenComoDataUrl, imagenesDeTarifa } from '@/lib/cotizaciones/imagen-captura'
 import { guardarFotoHotel } from '@/lib/cotizaciones/foto-hotel-almacen'
+import { medirEtapa } from '@/lib/actions/tiempos-de-ruta'
 
 /**
  * Tarifa por tipo de pasajero: leer un pantallazo en su casilla, confirmar el costo por
@@ -659,29 +660,41 @@ export async function aceptarCapturaDeBandeja(cotizacionId: string, b: BorradorP
     return { ok: false, codigo: 'FIRMA', mensaje: 'La lectura de esta captura venció o no es de esta cotización. Vuelve a pegarla.' }
   }
   const lectura = JSON.parse(b.lecturaJson) as LecturaCasilla
-  const ctx = await contextoDeCotizacion(cotizacionId)
+  const ctx = await medirEtapa('contexto', () => contextoDeCotizacion(cotizacionId))
   if ('error' in ctx) return { ok: false, codigo: 'CONTEXTO', mensaje: ctx.error as string }
-  const lineas = await lineasDeCotizacion(ctx.supabase, cotizacionId)
-  if ('error' in lineas) return { ok: false, codigo: 'CONTEXTO', mensaje: lineas.error }
+  // El pantallazo se sube ahora, al aceptar: mientras estuvo en la bandeja no se guardó. Una
+  // lectura que ya trae su imagen (volvió a la bandeja desde una opción eliminada) no la sube
+  // otra vez. Brief del 2026-10-05, punto 13: la subida va EN PARALELO con la lectura de las
+  // líneas y la creación de la opción, y se espera solo antes de escribir la lectura.
+  const { workspaceId } = await getWorkspace()
+  const subida: Promise<string | null> = lectura.imagenRef
+    ? Promise.resolve(null)
+    : medirEtapa('subida', () => guardarImagenDeCaptura({ workspaceId, negocioId: ctx.negocioId, cotizacionId, dataUrl: b.imagen, lectura }))
+  const conImagen = async () => {
+    const ref = await subida
+    if (ref) lectura.imagenRef = ref
+  }
+  const lineas = await medirEtapa('lineas', () => lineasDeCotizacion(ctx.supabase, cotizacionId))
+  if ('error' in lineas) {
+    const ref = await subida
+    if (ref) await borrarImagenesDeCaptura(workspaceId, [ref])
+    return { ok: false, codigo: 'CONTEXTO', mensaje: lineas.error }
+  }
   const pistas = {
     lugar: typeof b.pistas?.lugar === 'string' ? b.pistas.lugar.slice(0, 120) : null,
     origen: typeof b.pistas?.origen === 'string' ? b.pistas.origen.slice(0, 120) : null,
     destino: typeof b.pistas?.destino === 'string' ? b.pistas.destino.slice(0, 120) : null,
   }
-  // El pantallazo se sube ahora, al aceptar: mientras estuvo en la bandeja no se guardó. Una
-  // lectura que ya trae su imagen (volvió a la bandeja desde una opción eliminada) no la sube
-  // otra vez. Si la aceptación no termina, la imagen recién subida se borra.
-  const { workspaceId } = await getWorkspace()
-  const subida = lectura.imagenRef
-    ? null
-    : await guardarImagenDeCaptura({ workspaceId, negocioId: ctx.negocioId, cotizacionId, dataUrl: b.imagen, lectura })
-  if (subida) lectura.imagenRef = subida
-  const r = await aceptarLectura(cotizacionId, b, lectura, pistas, ctx, lineas)
-  if (!r.ok && subida) await borrarImagenesDeCaptura(workspaceId, [subida])
+  const r = await aceptarLectura(cotizacionId, b, lectura, pistas, ctx, lineas, conImagen)
+  // Si la aceptación no termina, la imagen recién subida se borra.
+  if (!r.ok) {
+    const ref = await subida
+    if (ref) await borrarImagenesDeCaptura(workspaceId, [ref])
+  }
   if (!r.ok || r.como === 'habitacion') return r
-  const fallidas = await aplicarCorreccionesDeBandeja(r.itemId, b.correcciones)
+  const fallidas = await medirEtapa('correcciones', () => aplicarCorreccionesDeBandeja(r.itemId, b.correcciones))
   // Punto 2 del brief del 2026-10-05: la actividad con fecha dentro del viaje llega con su día.
-  if (b.tipo === 'actividad') await proponerDiaDeActividad(ctx.supabase, r.itemId, ctx.viaje.fechas)
+  if (b.tipo === 'actividad') await medirEtapa('dia', () => proponerDiaDeActividad(ctx.supabase, r.itemId, ctx.viaje.fechas))
   return fallidas.length > 0 ? { ...r, correccionesFallidas: fallidas } : r
 }
 
@@ -730,6 +743,8 @@ async function aceptarLectura(
   pistas: { lugar: string | null; origen: string | null; destino: string | null },
   ctx: Exclude<Awaited<ReturnType<typeof contextoDeCotizacion>>, { error: string }>,
   lineas: Record<string, unknown>[],
+  /** Espera la subida del pantallazo y deja su referencia en la lectura. Antes de escribirla. */
+  conImagen: () => Promise<void> = async () => {},
 ): Promise<ResultadoAceptarCaptura> {
   const delaCotizacion = (id: string | null | undefined) => !!id && lineas.some(l => l.id === id)
 
@@ -738,6 +753,7 @@ async function aceptarLectura(
     if (!delaCotizacion(b.destinoId)) return { ok: false, codigo: 'DESTINO', mensaje: 'Esa opción ya no está en la cotización. Recarga la página.' }
     const ctxItem = await contexto(b.destinoId!)
     if ('error' in ctxItem) return { ok: false, codigo: 'CONTEXTO', mensaje: ctxItem.error as string }
+    await conImagen()
     const g = await guardarLecturaEnItem(ctxItem, b.destinoId!, 'grupo_completo', lectura)
     if (!g.ok) return { ok: false, codigo: g.codigo, mensaje: g.mensaje }
     return terminarAceptacion(ctx.supabase, cotizacionId, b.destinoId!, { como: 'reemplazo' })
@@ -755,6 +771,7 @@ async function aceptarLectura(
     }
     const ctxItem = await contexto(destino.itemId)
     if ('error' in ctxItem) return { ok: false, codigo: 'CONTEXTO', mensaje: ctxItem.error as string }
+    await conImagen()
     const r = await agregarHabitacionLeida({ ...ctxItem, itemId: destino.itemId, leida: lectura })
     if (!r.ok) return { ok: false, codigo: r.codigo, mensaje: r.mensaje }
     const habitacionId = r.tarifa.habitaciones?.at(-1)?.id ?? null
@@ -763,16 +780,17 @@ async function aceptarLectura(
   }
 
   // ── Opción nueva: en la ranura que ya estaba o en una ranura nueva ──
-  const creada = destino.como === 'hermana'
-    ? await agregarOpcionARanura(cotizacionId, destino.grupo)
+  const creada = await medirEtapa('crear', () => destino.como === 'hermana'
+    ? agregarOpcionARanura(cotizacionId, destino.grupo)
     // Una actividad sin ciudad en la captura nombra su bloque con el destino del viaje, no
     // con el nombre de la excursión que tomó el detector (punto 4 del brief del 2026-10-01).
-    : await crearRanuraConOpcion(cotizacionId, b.tipo, { ...pistas, lugar: lugarDeBloqueNuevo(b.tipo, lectura, pistas.lugar, b.correcciones) })
+    : crearRanuraConOpcion(cotizacionId, b.tipo, { ...pistas, lugar: lugarDeBloqueNuevo(b.tipo, lectura, pistas.lugar, b.correcciones) }))
   if (!creada.success) return { ok: false, codigo: 'CREAR', mensaje: creada.error }
   const ctxItem = await contexto(creada.itemId)
+  await conImagen()
   const g = 'error' in ctxItem
     ? { ok: false as const, codigo: 'CONTEXTO', mensaje: ctxItem.error as string }
-    : await guardarLecturaEnItem(ctxItem, creada.itemId, 'grupo_completo', lectura)
+    : await medirEtapa('guardar', () => guardarLecturaEnItem(ctxItem, creada.itemId, 'grupo_completo', lectura))
   if (!g.ok) {
     // Nada a medias en Componentes: si la lectura no entra, la opción recién creada se va.
     await deleteItem(creada.itemId)
@@ -788,9 +806,9 @@ async function terminarAceptacion(
   itemId: string,
   entrada: { como: ComoEntro; habitacionId?: string | null; habitacionNumero?: number | null },
 ): Promise<ResultadoAceptarCaptura> {
-  const c = await confirmarTarifaPorPasajero(itemId, null)
+  const c = await medirEtapa('confirmar', () => confirmarTarifaPorPasajero(itemId, null))
   const pendiente = c.success ? null : (c.error ?? 'falta un dato de la tarifa')
-  const lineas = await lineasDeCotizacion(supabase, cotizacionId)
+  const lineas = await medirEtapa('ubicacion', () => lineasDeCotizacion(supabase, cotizacionId))
   const { bloque, opcion } = 'error' in lineas ? { bloque: 'Componentes', opcion: null } : ubicacionDeOpcion(lineas, itemId)
   const lugar = opcion ? `${bloque} · Opción ${opcion}` : bloque
   const habitacion = entrada.como === 'habitacion'

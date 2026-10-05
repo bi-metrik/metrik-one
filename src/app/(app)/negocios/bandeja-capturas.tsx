@@ -1012,13 +1012,18 @@ export function FilaCaptura({
   if (e.fase === 'parecida' || e.fase === 'otro_precio') {
     const hotel = sobra && lectura && tipo ? (leidosPorSlug(definicionDeTipo(tipo), lectura.campos).hotel ?? null) : null
     const puedeReemplazar = e.fase === 'otro_precio' && !esIdDeBorrador(e.conItemId)
+    // D2 del brief del 2026-10-05 · reingresar un traslado del mismo trayecto pregunta si
+    // reemplaza el anterior: hasta ahí entraba como alternativa y había que borrar el viejo.
+    const trasladoQueReemplaza = puedeReemplazar && tipo === 'traslado'
     const pregunta = sobra
       ? `Esta habitación sobra: el grupo ya está cubierto en ${hotel ?? e.donde}. ¿La descarto?`
       : e.fase === 'parecida'
         ? `Mismo servicio, mismas fechas y mismo precio que ${e.donde}. Descártala si la pegaste dos veces.`
-        : puedeReemplazar
-          ? `Mismo servicio que ${e.donde}, pero el precio cambió. Reemplaza el de la opción que ya estaba o déjala como otra opción.`
-          : `Mismo servicio que ${e.donde}, con otro precio. Acepta primero esa, o agrega esta como otra opción.`
+        : trasladoQueReemplaza
+          ? `¿Reemplazar el traslado anterior? Es el mismo trayecto que ${e.donde}.`
+          : puedeReemplazar
+            ? `Mismo servicio que ${e.donde}, pero el precio cambió. Reemplaza el de la opción que ya estaba o déjala como otra opción.`
+            : `Mismo servicio que ${e.donde}, con otro precio. Acepta primero esa, o agrega esta como otra opción.`
     return fila(
       miniatura,
       <>
@@ -1034,9 +1039,13 @@ export function FilaCaptura({
           ) : (
             <>
               {puedeReemplazar && (
-                <button type="button" onClick={onReemplazarPrecio} className={BTN_PRIM}>Reemplazar el precio de {e.corta}</button>
+                <button type="button" onClick={onReemplazarPrecio} className={BTN_PRIM}>
+                  {trasladoQueReemplaza ? 'Reemplazar' : `Reemplazar el precio de ${e.corta}`}
+                </button>
               )}
-              <button type="button" onClick={onAgregarIgual} className={puedeReemplazar ? BTN : BTN_PRIM}>Agregar como otra opción</button>
+              <button type="button" onClick={onAgregarIgual} className={puedeReemplazar ? BTN : BTN_PRIM}>
+                {trasladoQueReemplaza ? 'Agregar como alternativa' : 'Agregar como otra opción'}
+              </button>
             </>
           )}
         </div>

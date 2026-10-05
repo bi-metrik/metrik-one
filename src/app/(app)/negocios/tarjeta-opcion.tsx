@@ -239,6 +239,7 @@ export default function TarjetaOpcion({
   const esHotel = ranura?.slug === 'hotel_detalle'
   const esTraslado = ranura?.slug === 'traslado_detalle'
   const esActividad = ranura?.slug === 'actividad_detalle'
+  const esVuelo = ranura?.slug === 'vuelo_detalle'
   const [hotel] = esHotel ? hotelesDeItems([item]) : [null]
   const nombre = (esHotel ? hotel?.hotel : null) || nombreVisibleDeLinea(item) || `Opción ${numero}`
   const estrellas = esHotel ? hotel?.estrellas ?? null : null
@@ -501,11 +502,11 @@ export default function TarjetaOpcion({
 
           {!confirmada && respaldo}
 
-          {/* El traslado y la actividad también tienen su hoja: la línea de «Inversión» del
-              documento. Su nota se sigue escribiendo aparte, encima. El vuelo NO: al cliente le
-              llega sobre todo como su fila de la tabla «Vuelos», que esta hoja no pinta. */}
+          {/* El traslado, la actividad y (desde el 2026-10-05, D3) el vuelo también tienen su
+              hoja: la línea de «Inversión» del documento y, en el vuelo, sus filas de la tabla
+              «Vuelos». Su nota se sigue escribiendo aparte, encima. */}
           {!esHotel && nota}
-          {(esHotel || esTraslado || esActividad) && <HojaCliente
+          {(esHotel || esTraslado || esActividad || esVuelo) && <HojaCliente
             item={item}
             numero={numero}
             bloqueTitulo={bloqueTitulo}

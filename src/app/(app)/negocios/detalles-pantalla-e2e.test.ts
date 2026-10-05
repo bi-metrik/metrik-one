@@ -469,7 +469,9 @@ describe('punto 3 · «Aceptar» resuelve la sesión una vez', () => {
     expect((await aceptar(false)).sesiones).toBe(4)
     const r = await aceptar(true)
     expect(r.sesiones).toBe(1)
-    expect(r.timing).toMatch(/^aceptar;dur=\d+$/)
+    // Punto 13 del brief del 2026-10-05: el total y cada etapa, para medir en producción.
+    expect(r.timing).toMatch(/^aceptar;dur=\d+(, [a-z]+;dur=\d+)+$/)
+    for (const etapa of ['contexto', 'lineas', 'confirmar', 'ubicacion']) expect(r.timing).toContain(`${etapa};dur=`)
   })
 
 })
