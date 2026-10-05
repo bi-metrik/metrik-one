@@ -1811,11 +1811,14 @@ describe('2026-10-05 · el cliente nuevo: una llave, nunca la de otro, nunca sin
       { id: 'c-tg', workspace_id: WS, nombre: 'TOMÁS GIL', telefono: '3010000001', email: null, created_at: '2026-01-10T10:00:00Z' },
     );
     await llega('nuevo Rosa Mejía 300 777 8899', { enviado: 0 });
-    expect(textos().at(-1)).toBe('Va como viaje nuevo de Rosa Mejía, el que ya tenemos (sin celular ni correo, sin viajes).\nReenvíame lo que te pidió y al final te muestro el resumen.');
+    // Octavo control de Vera (hallazgo 9): lo que se le agrega a la ficha se dice en el acuse y en el resumen.
+    expect(textos().at(-1)).toBe('Va como viaje nuevo de Rosa Mejía, el que ya tenemos (sin celular ni correo, sin viajes).\nLe agrego a su ficha el cel. 300 777 8899.\nReenvíame lo que te pidió y al final te muestro el resumen.');
     await llega('quiere Cartagena en marzo', { enviado: 3, reenviado: true });
     await llega('nuevo Tomás Gil tomas@correo.co', { enviado: 6 });
     await llega('quiere Bogotá en abril', { enviado: 9, reenviado: true });
     await llega('listo', { enviado: 12 });
+    expect(textos().at(-1)).toContain('Viaje nuevo de Rosa Mejía (ya es cliente: sin celular ni correo, sin viajes; le agrego a su ficha el cel. 300 777 8899)');
+    expect(textos().at(-1)).toContain('Viaje nuevo de Tomás Gil (ya es cliente: cel. …0001, sin viajes; le agrego a su ficha el correo tomas@correo.co)');
     await llega('sí', { enviado: 15 });
     colaModelo = [salidaModelo({ destino: { valor: 'Cartagena', frase: 'Cartagena' } }), salidaModelo({ destino: { valor: 'Bogotá', frase: 'Bogotá' } })];
     await cron(60);

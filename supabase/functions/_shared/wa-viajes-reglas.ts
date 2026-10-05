@@ -21,7 +21,7 @@
 
 import { calificarNombreNuevo, leerNuevo, leerViajeNuevo, nombreDeViaje, nombrePropio, normalizarNombre, normalizarTexto, restoTrasOtroCliente } from './wa-entendimiento-reglas.ts';
 import {
-  datoDeLaFicha, leerEleccionCliente, leerEsLaMisma, resolverConDirectorio, separarNombreYLlave, soloLlave, textoLlave, tieneLlave,
+  datoDeLaFicha, leerEleccionCliente, leerEsLaMisma, notaDeLaLlave, resolverConDirectorio, separarNombreYLlave, soloLlave, soloLlaveDelCliente, textoLlave, tieneLlave,
   TEXTO_PIDE_CLIENTE, viajesDeLaFicha,
 } from './wa-cliente-reglas.ts';
 import type { Directorio, FichaCliente, Llave, ResolucionCliente } from './wa-cliente-reglas.ts';
@@ -67,6 +67,8 @@ export interface InterpretacionDelMensaje {
   con_contenido?: boolean | null;
   /** La llave escrita en el mensaje, si el intérprete abrió un viaje nuevo con ella. */
   llave?: Llave | null;
+  /** `confirmar` con «sí»: el «sí» largo a «¿Es la misma persona?» que aceptó el intérprete. */
+  canonico?: string | null;
 }
 
 // ── Encabezados ──────────────────────────────────────────────────────────────
@@ -629,7 +631,16 @@ const VERBOS_CREAR: ReadonlySet<string> = new Set([
   ...formasDeAlta('registr'), ...formasDeAlta('ingres'), ...formasDeAlta('agreg'), ...formasDeAlta('mont'),
   'abre', 'abrelo', 'abrela', 'abrele', 'abra', 'abralo', 'abrala', 'abrale', 'abrir', 'abrirlo', 'abrirla', 'abrirle', 'abramoslo', 'abramosla',
   'procede', 'proceda', 'procedamos', 'proceder', 'hazlo', 'hagalo', 'hagamoslo', 'hacerlo',
+  // Octavo control de Vera (hallazgo 10): con los dos pronombres pegados («créaselo», «regístramelo», «ábreselo»).
+  'creaselo', 'creasela', 'creeselo', 'creesela', 'creamelo', 'creamela', 'creemelo', 'creemela', 'abreselo', 'abresela', 'abraselo', 'abrasela',
+  'abremelo', 'abremela', 'hazselo', 'hagaselo', 'hazmelo', 'hagamelo', ...formasConDosPronombres('registr'), ...formasConDosPronombres('ingres'),
+  ...formasConDosPronombres('agreg'), ...formasConDosPronombres('mont'),
 ]);
+/** «regístraselo», «regístremelo»: un verbo de alta en -ar con los dos pronombres pegados. */
+function formasConDosPronombres(raiz: string): string[] {
+  const agregue = raiz.endsWith('g') ? `${raiz}u` : raiz;
+  return ['selo', 'sela', 'melo', 'mela'].flatMap(p => [`${raiz}a${p}`, `${agregue}e${p}`]);
+}
 /** «registra», «regístralo», «registre», «regístrelo», «registrar», «registrarlo», «registrémoslo»… de un verbo en -ar. */
 function formasDeAlta(raiz: string): string[] {
   const agregue = raiz.endsWith('g') ? `${raiz}u` : raiz;
@@ -1124,8 +1135,25 @@ export function pideViajeNuevo(texto: string): boolean {
   const nv = leerNuevo(texto);
   if (nv && !nv.cliente) return true;
   const t = normalizarNombre(texto);
-  return /^(?:no\s+)?(?:(?:a\s+|en\s+)?ningun[oa]?|es\s+otr[oa]|otr[oa])(?:\s+(?:de\s+esos|de\s+esas))?(?:\s+(?:es\s+)?(?:otr[oa]|nuev[oa]|uno\s+nuevo|una\s+nueva|viaje\s+nuevo|otro\s+viaje))*$/.test(t);
+  if (/^(?:no\s+)?(?:(?:a\s+|en\s+)?ningun[oa]?|es\s+otr[oa]|otr[oa])(?:\s+(?:de\s+esos|de\s+esas))?(?:\s+(?:es\s+)?(?:otr[oa]|nuev[oa]|uno\s+nuevo|una\s+nueva|viaje\s+nuevo|otro\s+viaje))*$/.test(t)) return true;
+  // Octavo control de Vera (hallazgo 4): las otras formas de pedirlo («va aparte», «no, uno nuevo», «otra cotización
+  // distinta», «no es cliente nuevo, es de antes»). Con un número no (elige de la lista), ni con la negación pegada
+  // a lo nuevo («no uno nuevo», «no es otro viaje»).
+  if (/\d/.test(t) || niegaLoNuevo(texto)) return false;
+  return PIDE_VIAJE_NUEVO.some(re => re.test(t));
 }
+
+/** «no es nuevo», «no uno nuevo», «no es otro viaje», «no aparte»: la negación pegada a lo nuevo («no, uno nuevo» no lo es). */
+export function niegaLoNuevo(texto: string): boolean {
+  return /\bno\s+(?:es\s+|era\s+|quiero\s+|hagas\s+|va\s+)?(?:(?:un[oa]?\s+)?nuev|otr[oa]\s+(?:viaje|cotizacion|solicitud|reserva)|aparte)/.test(normalizarTexto(texto));
+}
+const PIDE_VIAJE_NUEVO: ReadonlyArray<RegExp> = [
+  /\b(?:aparte|por\s+separado|separad[oa]|independiente)\b/,
+  /\b(?:uno|una)\s+nuev[oa]\b/,
+  /\b(?:nuev[oa]|otr[oa])\s+(?:viaje|cotizacion|solicitud|reserva|paquete)\b/,
+  /\b(?:viaje|cotizacion|solicitud|reserva)\s+(?:nuev[oa]|distint[oa]|diferente|aparte)\b/,
+  /\bno\s+es\s+(?:(?:un|una)\s+)?(?:client[ea]\s+nuev[oa]|nuev[oa])\b.*\b(?:de\s+antes|antigu[oa]|ya\s+es\s+client[ea]|ya\s+(?:lo|la)\s+tenemos|existente|conocid[oa]|de\s+siempre|de\s+la\s+casa)\b/,
+];
 
 /**
  * «el de Miami», «el de Armenia», «el M1 26 3»: el ÚNICO candidato cuyo nombre, destino o código tiene todas las
@@ -1208,6 +1236,11 @@ export function armarSegmentos(
         encabezados.push(m.n);
         continue;
       }
+      if (ip.tipo === 'nuevo_del_mismo') {
+        aViajeNuevoDelMismo(caja!.seg, ip.cliente);
+        encabezados.push(m.n);
+        continue;
+      }
       if (ip.tipo === 'nombre') {
         caja!.seg.nombre = { texto: ip.nombre, n: m.n };
         encabezados.push(m.n);
@@ -1242,9 +1275,7 @@ export function armarSegmentos(
       // otro» es un viaje NUEVO de ese cliente; «el de Miami» es ese viaje.
       const mismo = actual.seg.encabezado?.resolucion.tipo === 'ambiguo' ? unSoloCliente(candidatos) : null;
       if (mismo && pideViajeNuevo(m.cuerpo)) {
-        actual.seg.encabezado!.resolucion = { tipo: 'nuevo', cliente: nombrePropio(mismo), mismo: true };
-        delete actual.seg.eleccion;
-        actual.seg.cliente = estadoClienteInicial();
+        aViajeNuevoDelMismo(actual.seg, mismo);
         encabezados.push(m.n);
         continue;
       }
@@ -1264,7 +1295,7 @@ export function armarSegmentos(
     // es?», y «sí, es ella» o «no» contestan «¿Es la misma persona?».
     if (escrito && actual && actual.seg.cliente) {
       const ec = actual.seg.cliente;
-      const k = soloLlave(m.cuerpo);
+      const k = soloLlave(m.cuerpo) ?? soloLlaveDelCliente(m.cuerpo, clienteDeCaja(actual.seg));
       if (k) {
         ec.llave = k;
         ec.elegido = null;
@@ -1282,7 +1313,8 @@ export function armarSegmentos(
         }
       }
       if (rc?.tipo === 'llave_de_otro') {
-        const s = leerEsLaMisma(m.cuerpo);
+        // El «sí» largo que el intérprete aceptó (octavo control, hallazgo 6) cuenta como el de `leerEsLaMisma`.
+        const s = leerEsLaMisma(m.cuerpo) ?? (m.interpretacion?.accion === 'confirmar' && m.interpretacion.canonico === 'sí' ? 'si' : null);
         if (s === 'si') ec.elegido = rc.ficha;
         if (s === 'no') {
           ec.descartadas.push(rc.ficha.id);
@@ -1360,9 +1392,17 @@ export function armarSegmentos(
   return { segmentos, encabezados };
 }
 
+/** La caja de la lista de un solo cliente se vuelve el viaje NUEVO de ese cliente (D1 del 2026-10-05). */
+function aViajeNuevoDelMismo(seg: Segmento, cliente: string): void {
+  seg.encabezado!.resolucion = { tipo: 'nuevo', cliente: nombrePropio(cliente), mismo: true };
+  delete seg.eleccion;
+  seg.cliente = estadoClienteInicial();
+}
+
 type DecisionInterprete =
   | { tipo: 'caja'; resolucion: ResolucionEncabezado; conContenido: boolean }
   | { tipo: 'eleccion'; viaje: ViajeAbierto }
+  | { tipo: 'nuevo_del_mismo'; cliente: string }
   | { tipo: 'nombre'; nombre: string }
   | { tipo: 'contenido' };
 
@@ -1390,7 +1430,13 @@ function decisionDelInterprete(m: MensajeViaje, viajes: ReadonlyArray<ViajeAbier
       return { tipo: 'caja', resolucion, conContenido };
     }
     case 'responder': {
-      if (!viaje || !caja || caja.eleccion !== null) return null;
+      if (!caja || caja.eleccion !== null) return null;
+      // «va aparte», «otra cotización distinta» a la lista de UN solo cliente: su viaje nuevo (octavo control, hallazgo 4).
+      if (!viaje && ip.nuevo?.trim()) {
+        const mismo = caja.encabezado?.resolucion.tipo === 'ambiguo' ? unSoloCliente(candidatosDelEncabezado(caja.encabezado.resolucion)) : null;
+        return mismo && normalizarNombre(mismo) === normalizarNombre(ip.nuevo) ? { tipo: 'nuevo_del_mismo', cliente: mismo } : null;
+      }
+      if (!viaje) return null;
       return candidatosDelEncabezado(caja.encabezado?.resolucion).some(v => v.id === viaje.id) ? { tipo: 'eleccion', viaje } : null;
     }
     case 'nombre':
@@ -1915,7 +1961,12 @@ export function planSinDudas(plan: PlanViajes): boolean {
 export function nombreDestino(d: DestinoPlan): string {
   if (d.tipo !== 'nuevo') return nombreDeViaje(d);
   // El «sí» confirma lo que se muestra: el contacto que ya existe con su dato, o el cliente nuevo con su llave.
-  if (d.contacto) return `Viaje nuevo de ${nombrePropio(d.contacto.nombre)} (ya es cliente: ${datoDeLaFicha(d.contacto)}, ${viajesDeLaFicha(d.contacto)})`;
+  if (d.contacto) {
+    // Hallazgo 9 del octavo control: lo que pasa con la llave dada (se le agrega, o la de la ficha no se cambia).
+    const nota = notaDeLaLlave(d.contacto, d.llave);
+    const extra = nota ? `; ${[nota.agrega, nota.distinto].filter(Boolean).join('; ')}` : '';
+    return `Viaje nuevo de ${nombrePropio(d.contacto.nombre)} (ya es cliente: ${datoDeLaFicha(d.contacto)}, ${viajesDeLaFicha(d.contacto)}${extra})`;
+  }
   const quien = d.cliente ? String(d.cliente).trim() : 'un cliente sin nombre';
   if (d.falta === 'llave') return `Viaje nuevo de ${quien} (no lo tengo en el directorio: falta su celular o correo)`;
   if (d.falta === 'elegir') return `Viaje nuevo de ${quien} (hay ${(d.opciones ?? []).length === 1 ? 'un contacto parecido' : 'varios contactos parecidos'}: dime cuál)`;
