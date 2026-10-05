@@ -40,7 +40,9 @@ import {
   responderPendiente,
   staffIdDelRemitente,
 } from './wa-bandeja.ts';
-import { candidatosDeEncabezado, pendienteDeLaTanda, preguntaAbierta, tandaAbiertaDelRemitente } from './wa-entendimiento.ts';
+import {
+  acuseDelClienteDeLaTanda, candidatosDeEncabezado, pendienteDeLaTanda, preguntaAbierta, simularEnLaTanda, tandaAbiertaDelRemitente, textoDeLoQueFalta,
+} from './wa-entendimiento.ts';
 import { pareceRespuesta, resolverEncabezado } from './wa-viajes-reglas.ts';
 import type { PlanViajes, ViajeAbierto } from './wa-viajes-reglas.ts';
 import {
@@ -241,6 +243,14 @@ async function atender(
     }
   }
 
+  // 3b. Lo que el código de hoy lee exacto en la caja abierta (el cliente de un viaje nuevo, su llave, cuál es, la
+  // lista de un encabezado): no pasa por el modelo. Así el resolvedor del cliente vive en UN camino, con el
+  // interruptor apagado o prendido (diseño 2026-10-05, R6).
+  if (enBandeja) {
+    const sim = await simularEnLaTanda(supabase, ws, message.phone, configB!.horasCajaActiva, texto, fechaDeMeta(message.timestamp) ?? new Date(ahora()).toISOString());
+    if (sim?.respuesta) return NO;
+  }
+
   // 4. El tope de llamados al intérprete del remitente.
   if (!(await dentroDelTope(supabase, message.phone, cfg.maxLlamadasHora, ahora()))) {
     console.warn(`[wa-interprete] ${message.phone} pasó el tope de ${cfg.maxLlamadasHora} llamados por hora: sigue el código de hoy`);
@@ -272,7 +282,7 @@ async function atender(
   // 6. Validar y despachar.
   const decision = validar(r.json, {
     texto, bandeja: enBandeja, rol: user.role, pendiente: lec.pendiente, negocios: lec.negocios,
-    tanda: lec.tanda ? { abierta: true, nombre: lec.tanda.nombre, cajaId: lec.tanda.cajaViajeId } : null,
+    tanda: lec.tanda ? { abierta: true, nombre: lec.tanda.nombre, cajaId: lec.tanda.cajaViajeId, cliente: lec.tanda.cajaCliente } : null,
     // Los nombres del equipo: una firma («Tatiana») nunca resuelve un viaje (control de Vera, E1).
     equipo: cand?.equipo ?? [],
   });
@@ -300,7 +310,9 @@ async function atender(
 function cajaDe(lec: Lectura): string | null {
   const id = lec.tanda?.cajaViajeId;
   const n = id ? lec.negocios.find(x => x.id === id) : null;
-  return n ? `[${n.alias}] ${[n.codigo, n.cliente].filter(Boolean).join(' · ')}` : null;
+  if (n) return `[${n.alias}] ${[n.codigo, n.cliente].filter(Boolean).join(' · ')}`;
+  // La caja de un viaje nuevo: su cliente es el candidato pendiente (diseño 2026-10-05, §5.2). Solo el nombre.
+  return lec.tanda?.cajaCliente ? `${lec.tanda.cajaCliente} (viaje nuevo)` : null;
 }
 
 async function dentroDelTope(supabase: SupabaseClient, phone: string, max: number, ahora: number): Promise<boolean> {
@@ -376,7 +388,10 @@ async function leerContexto(
       }
     }
     const pt = await pendienteDeLaTanda(supabase, ws, phone, configB.horasCajaActiva);
-    if (pt) tandaVista = pt.tipo === 'eleccion' ? { tipo: 'eleccion', texto: pt.texto, candidatos: pt.candidatos } : { tipo: 'nombre' };
+    if (pt) {
+      tandaVista = pt.tipo === 'eleccion' ? { tipo: 'eleccion', texto: pt.texto, candidatos: pt.candidatos }
+        : pt.tipo === 'cliente' ? { tipo: 'cliente', texto: textoDeLoQueFalta(pt) } : { tipo: 'nombre' };
+    }
     tanda = await tandaAbiertaDelRemitente(supabase, ws, phone, configB.horasCajaActiva);
   } else {
     todos = await negociosAbiertosDelBot(supabase, ws);
@@ -464,7 +479,11 @@ async function despachar(b: Base, d: Extract<Decision, { tipo: 'ejecutar' }>, le
       if (!fila) return false;
       if (fila.accion !== 'duplicado') {
         await guardarInterpretacion(b, paso.interpretacion);
-        await decirAlUsuario(paso.aviso);
+        // El acuse de un viaje nuevo es el del código de hoy, con el directorio (quién es el cliente, o qué falta).
+        const i = paso.interpretacion;
+        const deViajeNuevo = (i.accion === 'abrir_viaje' && !i.viaje_id) || i.accion === 'nombre';
+        const delCliente = deViajeNuevo && lec.bandeja ? await acuseDelClienteDeLaTanda(supabase, ws, message.phone, lec.bandeja.horasCajaActiva) : null;
+        await decirAlUsuario(delCliente ?? paso.aviso);
       }
       return true;
     }

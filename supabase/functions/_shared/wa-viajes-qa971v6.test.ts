@@ -7,6 +7,7 @@
  * Todos los nombres son SINTÉTICOS.
  */
 import { describe, expect, it } from 'vitest';
+import { leerViajeNuevo } from './wa-entendimiento-reglas.ts';
 import {
   armarPlan,
   armarSegmentos,
@@ -84,13 +85,13 @@ describe('2 · «nuevo» suelto', () => {
   it('el bot pide el nombre en el acto', () => {
     expect(respuestaAlEncabezado(resolverEncabezado('nuevo', vs))).toBe(TEXTO_PIDE_NOMBRE_NUEVO);
     expect(respuestaAlEncabezado(resolverEncabezado('Nueva', vs))).toBe(TEXTO_PIDE_NOMBRE_NUEVO);
-    expect(respuestaAlEncabezado(resolverEncabezado('nuevo Pedro Gómez', vs))).toBe('📌 Cliente nuevo: Pedro Gómez. Lo creo solo cuando respondas SÍ al resumen.');
+    expect(respuestaAlEncabezado(resolverEncabezado('nuevo Pedro Gómez', vs))).toBe('Va como viaje nuevo de Pedro Gómez. Antes del resumen reviso si ya es cliente.');
   });
 
   it('sin nombre, lo que sigue queda sin asignar; con el nombre, va al NUEVO con ese nombre', () => {
     const base = [enc(1, 'Carolina'), m(2, 'salimos el 28'), enc(3, 'nuevo'), m(4, 'vamos a Aruba')];
     expect(destinos(base, vs)).toEqual([[2, 'T1 26 100'], [4, null]]);
-    expect(reparto(base, vs).plan.mensajes[1].motivo).toContain('sin nombre');
+    expect(reparto(base, vs).plan.mensajes[1].motivo).toContain('no me dijiste para qué cliente es');
     expect(pendienteDeLaCaja(reparto(base, vs).segmentos)).toEqual({ tipo: 'nombre', conContenido: true });
     const con = [...base, enc(5, 'Pedro Gómez'), m(6, 'somos 2')];
     expect(destinos(con, vs)).toEqual([[2, 'T1 26 100'], [4, 'NUEVO Pedro Gómez'], [6, 'NUEVO Pedro Gómez']]);
@@ -163,7 +164,14 @@ describe('4 · escritos coloquiales contra nombres sintéticos', () => {
     const vs = conjuntos[2][1];
     const lista = [...PALABRAS_COMUNES].filter((_, i) => i % 3 === 0);
     const con: string[] = [];
-    for (const a of lista) for (const b of lista) if (efecto(`${a} ${b}`, vs) !== null) con.push(`${a} ${b}`);
+    // 2026-10-05: «otra cotización», «cotización nueva» son un VIAJE nuevo (diseño de cliente y conversación): esas
+    // sí abren una caja, y a propósito. Las demás combinaciones siguen sin efecto.
+    const viajeNuevo: string[] = [];
+    for (const a of lista) for (const b of lista) {
+      if (leerViajeNuevo(`${a} ${b}`)) { viajeNuevo.push(`${a} ${b}`); continue; }
+      if (efecto(`${a} ${b}`, vs) !== null) con.push(`${a} ${b}`);
+    }
     expect(con).toEqual([]);
+    expect(viajeNuevo.every(x => /\b(otr[oa]|nuev[oa])\b/.test(x) && /\b(cotizacion|reserva|viaje)\b/.test(x))).toBe(true);
   });
 });

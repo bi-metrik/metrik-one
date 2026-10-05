@@ -131,7 +131,7 @@ export function esquemaDeSalida(fields: ReadonlyArray<CampoEntendible>): Record<
       },
       cliente: {
         type: 'object',
-        properties: { nombre: { type: 'string' }, telefono: { type: 'string' } },
+        properties: { nombre: { type: 'string' }, telefono: { type: 'string' }, email: { type: 'string' } },
       },
       valores: { type: 'object', properties, required: campos.map(f => f.slug) },
     },
@@ -197,7 +197,7 @@ export function instruccionesEntendimiento(
     '2. citas: hasta 8 frases COPIADAS tal cual de mensajes del cliente que cuenten lo que quiere. Nada de resúmenes ni opiniones.',
     '3. solicitudes: una por cada viaje DISTINTO que se pide en los mensajes (otro cliente, u otro viaje del mismo cliente con',
     '   otro destino o en otra fecha), con el cliente, el destino y la frase exacta que lo pide. Si todo es un solo viaje, una sola.',
-    '4. cliente: nombre y teléfono del cliente si los mensajes los dicen; si no, déjalos vacíos.',
+    '4. cliente: nombre, teléfono y correo del cliente si los mensajes los dicen; si no, déjalos vacíos.',
     '5. valores: para CADA campo de la lista, { valor, frase }. Solo de mensajes del cliente.',
     `   - Si el mensaje no lo dice, valor = "${POR_DEFINIR}" y frase vacía. Nunca pongas "no" ni "0" por algo que no se dijo.`,
     '   - frase = las palabras EXACTAS del mensaje que sostienen el valor, copiadas tal cual.',
@@ -243,7 +243,8 @@ export interface Sugerido {
 
 export interface SalidaEntendida {
   historia: string;
-  cliente: { nombre: string | null; telefono: string | null };
+  /** `email`: el correo del cliente, solo si está escrito tal cual en los mensajes (diseño 2026-10-05). */
+  cliente: { nombre: string | null; telefono: string | null; email?: string | null };
   sugeridos: Record<string, Sugerido>;
   /**
    * Lo que un guardián tiró. `pregunta`: la que el bot hace en el acto, antes de las del mínimo (C9:
@@ -761,7 +762,10 @@ export function validarSalida(
     historia: historiaDeCitas(r.citas, opts.citables ?? ''),
     // Un nombre o un teléfono que no está en los mensajes no es del cliente: el modelo puede copiar
     // un marcador del prompt («(no lo dijo)», «Viaje T1 26 11») (QA de #971, E2a y N6).
-    cliente: { nombre: estaEnElTexto(textoONull(cli.nombre), fuente), telefono: telefonoEnElTexto(textoONull(cli.telefono), textoFuente) },
+    cliente: {
+      nombre: estaEnElTexto(textoONull(cli.nombre), fuente), telefono: telefonoEnElTexto(textoONull(cli.telefono), textoFuente),
+      email: correoEnElTexto(textoONull(cli.email), textoFuente),
+    },
     sugeridos: {},
     descartados: [],
   };
@@ -958,6 +962,12 @@ function estaEnElTexto(v: string | null, fuenteNormalizada: string): string | nu
   const palabras = normalizarTexto(v).replace(/[^a-z0-9 ]/g, ' ').split(' ').filter(w => w.length >= 2);
   const del = new Set(fuenteNormalizada.replace(/[^a-z0-9 ]/g, ' ').split(' '));
   return palabras.length > 0 && palabras.every(w => del.has(w)) ? v : null;
+}
+
+/** El correo, si está escrito tal cual (sin mayúsculas) en los mensajes; en minúsculas. */
+function correoEnElTexto(v: string | null, texto: string): string | null {
+  const c = String(v ?? '').trim().toLowerCase();
+  return /^[^\s@]+@[^\s@]+\.[a-z]{2,}$/.test(c) && texto.toLowerCase().includes(c) ? c : null;
 }
 
 /** El teléfono, si sus dígitos están en el mensaje. */
@@ -1311,6 +1321,8 @@ export interface ContactoCandidato {
   id: string;
   nombre: string | null;
   telefono: string | null;
+  /** Los 4 últimos dígitos, si el candidato viene del directorio sin el celular completo. */
+  cel4?: string | null;
 }
 
 /** Los últimos 10 dígitos: el celular colombiano con o sin indicativo. `null` si hay menos de 7. */
@@ -1356,13 +1368,18 @@ export function nombreDeViaje(v: { nombre?: string | null; cliente?: string | nu
 
 /** Lo que el comercial contestó, sin el teléfono que venga pegado. */
 export function nombreDeLaRespuesta(clienteTexto: string | null | undefined): string {
-  return String(clienteTexto ?? '').replace(/\+?[\d\s().-]{7,}/g, ' ').replace(/\s+/g, ' ').trim();
+  // Sin el «2» de «Prueba2»: el número no empieza pegado a una letra.
+  return String(clienteTexto ?? '').replace(/(?<![\p{L}\d])\+?\d[\d\s().-]{6,}/gu, ' ').replace(/\s+/g, ' ').trim();
 }
 
 export type DecisionContacto =
   | { tipo: 'unico'; contacto: ContactoCandidato; por: 'telefono' | 'nombre' }
   /** `mismo`: el comercial pidió NUEVO y ya hay UN contacto con ese nombre exacto: ¿es el mismo? */
-  | { tipo: 'preguntar'; motivo: 'ninguno' | 'varios' | 'mismo'; opciones: ContactoCandidato[]; nombre: string };
+  /**
+   * `llave`: no está en el directorio y no hay celular ni correo: se pide uno (decisión de Mauricio del 2026-10-05).
+   * `llave_de_otro`: la llave dada ya es de UNA persona con otro nombre: ¿es la misma? (nunca se crea con ella).
+   */
+  | { tipo: 'preguntar'; motivo: 'ninguno' | 'varios' | 'mismo' | 'llave' | 'llave_de_otro'; opciones: ContactoCandidato[]; nombre: string };
 
 export const MAX_OPCIONES_CONTACTO = 5;
 
@@ -1413,9 +1430,89 @@ export function palabrasDeBusqueda(clienteTexto: string | null, extraidoNombre: 
   return [...new Set(n.split(' ').filter(w => w.length >= 3))].slice(0, 4);
 }
 
-function finTelefono(t: string | null): string {
+function finTelefono(t: string | null, cel4?: string | null): string {
   const d = digitosTelefono(t);
-  return d ? ` (tel. …${d.slice(-4)})` : '';
+  return d ? ` (cel. …${d.slice(-4)})` : cel4 ? ` (cel. …${cel4})` : '';
+}
+
+/**
+ * Lo que dice un «nuevo …». `cliente`: el nombre del cliente del viaje nuevo, tal como se escribió (nunca
+ * dice si el cliente es nuevo: eso lo resuelve el código buscándolo, §3.1). `viaje`: la frase nombra un viaje
+ * nuevo («nuevo viaje», «nueva cotización», «uno nuevo»). `mismo`: habla del cliente que ya está en la
+ * conversación («es para uno nuevo», «una cotización nueva sobre un cliente antiguo», «del mismo cliente»).
+ */
+export interface LecturaNuevo {
+  cliente: string | null;
+  viaje?: boolean;
+  mismo?: boolean;
+}
+
+/** Lo que nombra un viaje nuevo junto a «nuevo/nueva/otro»: «nuevo viaje», «cotización nueva», «otra solicitud». */
+const OBJETO_VIAJE: ReadonlySet<string> = new Set(['viaje', 'viajes', 'cotizacion', 'cotizaciones', 'solicitud', 'reserva', 'negocio', 'plan', 'paquete', 'pedido']);
+const NUEVO_ADJ: ReadonlySet<string> = new Set(['nuevo', 'nueva', 'nuevos', 'nuevas']);
+/**
+ * Lo que puede ir ANTES de «nuevo viaje» sin decir nada más: «bueno, vamos a registrar un …», «no es un cliente
+ * nuevo, es una …», «quiero cotizar otro …». Una palabra fuera de aquí («Paola nueva cotización») y la frase no
+ * es un «nuevo»: sigue como siempre.
+ */
+const ANTES_DE_VIAJE_NUEVO: ReadonlySet<string> = new Set([
+  'bueno', 'ok', 'okey', 'listo', 'vale', 'dale', 'entonces', 'ahora', 'pues', 'vamos', 'voy', 'va', 'a', 'hay', 'que', 'quiero', 'necesito',
+  'toca', 'registrar', 'registra', 'registremos', 'crear', 'crea', 'creemos', 'abrir', 'abre', 'abramos', 'montar', 'monta', 'montemos', 'cotizar',
+  'cotiza', 'cotizame', 'cotizemos', 'cotizemos', 'hacer', 'haz', 'hagamos', 'ingresar', 'ingresa', 'meter', 'mete', 'empezar', 'empecemos', 'arrancar',
+  'arranquemos', 'iniciar', 'no', 'si', 'es', 'era', 'seria', 'para', 'por', 'favor', 'porfa', 'de', 'un', 'una', 'el', 'la', 'otro', 'otra', 'ya',
+  'sigue', 'siguiente', 'tengo', 'te', 'paso', 'mando', 'me', 'hola', 'buenas', 'buenos', 'dias', 'tardes', 'noches', 'cliente', 'clienta', 'nuevo',
+  'nueva', 'y', 'pero', 'mejor', 'solo', 'eso', 'esto', 'ojo', 'aqui', 'este', 'esta', 'les', 'le', 'nos', 'tenemos', 'ese', 'esa', 'mismo', 'misma',
+  'antiguo', 'antigua', 'existente', 'conocido', 'conocida',
+]);
+/** Lo que va entre «nuevo viaje» y el nombre: «de», «para», «a nombre de», «del cliente», «se llama». */
+const ANTES_DEL_NOMBRE: ReadonlySet<string> = new Set(['a', 'de', 'del', 'para', 'nombre', 'sobre', 'el', 'la', 'cliente', 'clienta', 'se', 'llama', 'llamado', 'llamada', 'es', 'un', 'una',
+  'senor', 'senora', 'sr', 'sra', 'don', 'dona']);
+const CONECTOR_DEL_NOMBRE: ReadonlySet<string> = new Set(['de', 'del', 'para', 'nombre', 'sobre', 'cliente', 'clienta', 'llama', 'es']);
+/** «sobre un cliente antiguo», «del mismo cliente», «para el que ya tenemos»: el cliente es el de la conversación. */
+const CLIENTE_DE_ANTES = /^(?:(?:un|una|el|la|ese|esa|este|esta)\s+)?(?:client[ea]\s+)?(?:antigu[oa]|existente|viej[oa]|mism[oa]|de antes|conocid[oa]|recurrente|habitual|que ya (?:existe|tenemos|esta|teniamos)|ya existente)(?:\s+client[ea])?$/;
+
+/**
+ * Un viaje nuevo dicho con sus palabras. `undefined`: la frase no nombra un viaje nuevo (se lee como siempre).
+ * `null`: lo nombra pero trae algo más que no es un nombre («nueva cotización con hotel 4 estrellas»): no es un
+ * encabezado, es contenido. Si no, `{ viaje: true, cliente, mismo }`.
+ */
+export function leerViajeNuevo(texto: string): LecturaNuevo | null | undefined {
+  const tokens = String(texto ?? '').split(/[\s,.:;!¡¿?()"«»“”]+/).filter(Boolean);
+  const n = tokens.map(t => normalizarNombre(t));
+  let i = -1;
+  let largo = 2;
+  let pronombre = false;
+  for (let k = 0; k < n.length - 1 && i < 0; k++) {
+    const a = n[k];
+    const b = n[k + 1];
+    if ((NUEVO_ADJ.has(a) && OBJETO_VIAJE.has(b)) || (OBJETO_VIAJE.has(a) && NUEVO_ADJ.has(b)) || ((a === 'otro' || a === 'otra') && OBJETO_VIAJE.has(b))) i = k;
+    // «uno nuevo», «una nueva» solos: el pronombre de un viaje del que ya se habla («es para uno nuevo»).
+    else if ((a === 'uno' || a === 'una') && NUEVO_ADJ.has(b) && !OBJETO_VIAJE.has(n[k + 2] ?? '')) { i = k; pronombre = true; }
+  }
+  if (i < 0) return undefined;
+  if (!n.slice(0, i).every(w => ANTES_DE_VIAJE_NUEVO.has(w))) return undefined;
+  // «ese mismo cliente, pero otro viaje», «la clienta antigua quiere una cotización nueva»: lo de antes dice que el
+  // cliente es el de la conversación (pero no «no es un cliente nuevo», que solo niega).
+  if (/\b(?:mism[oa]|antigu[oa]|existente|conocid[oa])\b/.test(n.slice(0, i).join(' '))) pronombre = true;
+  // «nuevo viaje nuevo», «cotización nueva de viaje»: lo repetido del objeto no cuenta como nombre.
+  while (i + largo < n.length && (OBJETO_VIAJE.has(n[i + largo]) || NUEVO_ADJ.has(n[i + largo]))) largo++;
+  const despues = tokens.slice(i + largo);
+  const nd = n.slice(i + largo);
+  if (despues.length === 0) return { cliente: null, viaje: true, ...(pronombre ? { mismo: true } : {}) };
+  let j = 0;
+  let conector = false;
+  let tras = 0;
+  while (j < nd.length && ANTES_DEL_NOMBRE.has(nd[j])) { if (CONECTOR_DEL_NOMBRE.has(nd[j])) { conector = true; tras = j + 1; } j++; }
+  // El tope del nombre cuenta desde el último «de/para/cliente»: «para la familia de cinco personas» no es un
+  // nombre (control de Vera, I3), «del cliente Juan Pablo Ortega Zuleta» sí.
+  if (conector && nd.length - tras > MAX_PALABRAS_NOMBRE_NUEVO) return null;
+  const resto = nd.slice(j).join(' ');
+  if (CLIENTE_DE_ANTES.test(nd.join(' ')) || CLIENTE_DE_ANTES.test(resto) || /^(?:(?:es|ya es)\s+)?client[ea]$/.test(resto) && nd.includes('ya')) {
+    return { cliente: null, viaje: true, mismo: true };
+  }
+  if (!conector || j >= nd.length) return null;
+  const nombre = despues.slice(j).join(' ').trim();
+  return calificarNombreNuevo(nombre) === 'largo' ? null : { cliente: nombre, viaje: true };
 }
 
 /**
@@ -1426,9 +1523,15 @@ function finTelefono(t: string | null): string {
  * `null`: no es un «nuevo». Antes solo se reconocía `^nuevo` al comienzo y «cliente nuevo Daniel
  * Pérez» caía en la coincidencia aproximada con el viaje de otra persona del mismo apellido.
  */
-export function leerNuevo(texto: string): { cliente: string | null } | null {
+export function leerNuevo(texto: string): LecturaNuevo | null {
   const bruto = String(texto ?? '').trim().replace(/[.!¡]+$/g, '').trim();
-  const m = /^(?:es\s+)?(?:(?:un|una)\s+)?(?:client[ea]\s+nuev[oa]|nuev[oa](?:\s+client[ea])?)(?=$|[\s,.:;-])[\s,.:;-]*([\s\S]*)$/i.exec(bruto);
+  // «Nuevo» quiere decir VIAJE nuevo (diseño de cliente y conversación, 2026-10-05, §3.1): «vamos a registrar
+  // un nuevo viaje», «nueva cotización para Ana Gómez», «es para uno nuevo». Si la frase nombra un viaje
+  // nuevo, manda ella: lo que sigue sin «de/para» no es un nombre (es contenido), y nunca cae en la lectura
+  // de abajo, que tomaba «cotización hotel» por el nombre de una clienta.
+  const viaje = leerViajeNuevo(bruto);
+  if (viaje !== undefined) return viaje;
+  const m =/^(?:es\s+)?(?:(?:un|una)\s+)?(?:client[ea]\s+nuev[oa]|nuev[oa](?:\s+client[ea])?)(?=$|[\s,.:;-])[\s,.:;-]*([\s\S]*)$/i.exec(bruto);
   // «nueva, se llama Laura Prueba»: el nombre es lo que sigue a «se llama» (control de Vera, ND2).
   if (m) return { cliente: m[1].trim().replace(/^(?:(?:que\s+)?se\s+llama|llamad[oa]|de\s+nombre)[\s,.:;-]+/i, '').trim() || null };
   if (/^(?:(?:es\s+)?(?:otr[oa]|un[oa]?\s+otr[oa])\s+client[ea]|cambi(?:o|ar|amos)\s+(?:de\s+)?client[ea])$/.test(normalizarTexto(bruto))) return { cliente: null };
@@ -1473,9 +1576,11 @@ export function calificarNombreNuevo(cliente: string | null | undefined): Califi
   const bruto = String(cliente ?? '').trim();
   const todas = normalizarNombre(bruto).split(' ').filter(Boolean);
   if (todas.length === 0) return 'sin_nombre';
-  if (todas.length > MAX_PALABRAS_NOMBRE_NUEVO) return 'largo';
-  // El celular que acompaña al nombre («nuevo Marta Gómez 3005551234») no es el nombre; sin nada más, duda.
-  const ps = normalizarNombre(nombreDeLaRespuesta(bruto)).split(' ').filter(Boolean);
+  // El celular, el correo o el usuario que acompañan al nombre («nuevo Marta Gómez 300 555 1234») no son el nombre
+  // ni cuentan para el tope (2026-10-05: son la llave del cliente); sin nada más, duda.
+  const sinLlave = nombreDeLaRespuesta(bruto).replace(/[^\s@]+@[^\s@]+\.[A-Za-z]{2,}/g, ' ').replace(/@[A-Za-z0-9._]{3,30}/g, ' ');
+  const ps = normalizarNombre(sinLlave).split(' ').filter(Boolean);
+  if (ps.length > MAX_PALABRAS_NOMBRE_NUEVO) return 'largo';
   return ps.length === 0 || ps.every(w => /^\d+$/.test(w)) ? 'duda' : 'nombre';
 }
 
@@ -1495,32 +1600,37 @@ export function restoTrasOtroCliente(texto: string): string | null {
 export function textoPreguntaContacto(d: Extract<DecisionContacto, { tipo: 'preguntar' }>): string {
   // N9: sin nombre no hay a quién buscar ni a quién crear. Se pide el nombre, nunca un error mudo.
   if (!d.nombre && d.opciones.length === 0) return TEXTO_PIDE_NOMBRE;
-  const quien = d.nombre ? `«${d.nombre}»` : 'al cliente';
+  const quien = d.nombre ? d.nombre : 'el cliente';
+  const linea = (c: ContactoCandidato) => `${nombrePropio(c.nombre) || 'Sin nombre'}${finTelefono(c.telefono, c.cel4)}`;
+  // Decisión de Mauricio del 2026-10-05: sin celular ni correo no se crea. Una sola pregunta, sin comandos.
+  if (d.motivo === 'llave' || (d.motivo === 'ninguno' && d.opciones.length === 0)) {
+    return `No tengo a ${quien} en el directorio. ¿Me pasas su celular o su correo? Sin uno de los dos no lo creo.`;
+  }
+  if (d.motivo === 'llave_de_otro') {
+    return `Ese celular o correo ya lo tenemos a nombre de ${linea(d.opciones[0])}. ¿Es la misma persona?`;
+  }
   if (d.motivo === 'mismo') {
-    const c = d.opciones[0];
-    return [`Ya hay un contacto ${quien} en el directorio:`, `1. ${c?.nombre ?? 'Sin nombre'}${finTelefono(c?.telefono ?? null)}`,
-      '¿Es el mismo? Responde SÍ, NUEVO para crear otro, o DESCARTAR.'].join('\n');
+    return `Ya tenemos a ${linea(d.opciones[0])}. ¿Es la misma persona?`;
   }
   const cab = d.motivo === 'varios'
-    ? `Hay ${d.opciones.length} contactos que podrían ser ${d.nombre ? quien : 'el cliente'}. ¿Cuál es?`
-    : d.opciones.length > 0
-      ? `No encontré a ${quien} tal cual en el directorio. ¿Es alguno de estos?`
-      : `No encontré a ${quien} en el directorio.`;
-  const lista = d.opciones.map((c, i) => `${i + 1}. ${c.nombre ?? 'Sin nombre'}${finTelefono(c.telefono)}`);
-  const pie = d.opciones.length > 0
-    ? 'Responde con el número, escribe NUEVO y el nombre para crearlo, o DESCARTAR.'
-    : 'Escribe NUEVO para crearlo con ese nombre (o NUEVO y otro nombre), mándame el celular del cliente, o DESCARTAR.';
-  return [cab, ...lista, pie].join('\n');
+    ? `Tengo ${d.opciones.length} contactos que pueden ser ${quien}. ¿Cuál es, o es otra persona?`
+    : `No tengo a ${quien} tal cual. ¿Es alguno de estos, o es otra persona?`;
+  const lista = d.opciones.map((c, i) => `${i + 1}. ${linea(c)}`);
+  return [cab, ...lista, 'Si es otra persona, pásame su celular o su correo.'].join('\n');
 }
 
 /** N9 · NUEVO sin nombre: el bot lo pide en vez de terminar en un error mudo (E2a). */
-export const TEXTO_PIDE_NOMBRE = 'No sé el nombre del cliente y sin él no puedo crear el viaje. Escríbeme NUEVO y su nombre (ej.: NUEVO Marta Gómez), mándame su celular, o DESCARTAR.';
+export const TEXTO_PIDE_NOMBRE = '¿Para qué cliente es? No veo su nombre en los mensajes; escríbeme su nombre, o su celular o correo.';
 
 export type RespuestaContacto =
   | { tipo: 'elegido'; contacto_id: string }
   /** `nombre`: lo que escribió después de NUEVO («NUEVO Marta Gómez»), o null. */
   | { tipo: 'nuevo'; nombre: string | null }
   | { tipo: 'telefono'; telefono: string }
+  /** Un correo o un usuario de WhatsApp/Instagram escrito solo. */
+  | { tipo: 'llave'; correo: string | null; usuario: string | null }
+  /** «es otra persona», «ninguno»: no es ninguno de los que mostró el bot. */
+  | { tipo: 'otra' }
   | { tipo: 'no_entendida' };
 
 export function interpretarRespuestaContacto(texto: string, opciones: ContactoCandidato[]): RespuestaContacto {
@@ -1537,5 +1647,10 @@ export function interpretarRespuestaContacto(texto: string, opciones: ContactoCa
   if (nuevo?.cliente && /^[^\d]{2,}$/.test(nuevo.cliente)) return { tipo: 'nuevo', nombre: nuevo.cliente };
   const tel = digitosTelefono(texto);
   if (tel && tel.length >= 10) return { tipo: 'telefono', telefono: tel };
+  const correo = /^(?:(?:su\s+)?(?:correo|email|mail)\s*(?:es)?\s*:?\s*)?([^\s@]+@[^\s@]+\.[a-z]{2,})\.?$/i.exec(String(texto ?? '').trim())?.[1];
+  if (correo) return { tipo: 'llave', correo: correo.toLowerCase(), usuario: null };
+  const usuario = /^(?:(?:su\s+)?(?:usuario|instagram|ig|insta|whatsapp)\s*(?:es)?\s*:?\s*)?@([A-Za-z0-9._]{3,30})$/i.exec(String(texto ?? '').trim())?.[1];
+  if (usuario) return { tipo: 'llave', correo: null, usuario: usuario.toLowerCase() };
+  if (/\b(?:otra persona|es otr[oa]|ningun[oa]?|nadie|no es ninguno)\b/.test(t)) return { tipo: 'otra' };
   return { tipo: 'no_entendida' };
 }

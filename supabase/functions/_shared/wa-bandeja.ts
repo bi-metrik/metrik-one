@@ -13,12 +13,13 @@
 import { transcribeAudio, PROMPT_TRANSCRIPCION_LITERAL } from './wa-transcribe.ts';
 import {
   armarPreguntaNegocio, candidatosDeEncabezado, conNombreDelViaje, descartarPendientesDelRemitente, hayPreguntaPendiente, nombreDeLaEntrega,
-  nombreYConteoDeLaTanda, pendienteDeLaTanda, preguntaAbierta, reintentarCarga, textoPrimero, tomarRespuestaContacto, tomarRespuestaDeEntrega,
+  nombreYConteoDeLaTanda, preguntaAbierta, reintentarCarga, simularEnLaTanda, textoDeLoQueFalta, textoPrimero, tomarRespuestaContacto,
+  tomarRespuestaDeEntrega,
 } from './wa-entendimiento.ts';
+import type { EnLaTanda } from './wa-entendimiento.ts';
 import {
-  candidatosDelEncabezado, esNombreNuevo, esRespuestaA, esRespuestaSuelta, esRuidoEscrito, leerEleccion, lineaCaja, pareceRespuesta,
-  resolverEncabezado, respuestaAlEncabezado, textoAcuseNuevo, textoNoEntendiEleccion, textoPreguntaEncabezadoCorta, TEXTO_PIDE_NOMBRE_NUEVO,
-  viajesParecidos,
+  candidatosDelEncabezado, esRespuestaA, esRuidoEscrito, lineaCaja, pareceRespuesta, resolverEncabezado, respuestaAlEncabezado,
+  textoPreguntaEncabezadoCorta,
 } from './wa-viajes-reglas.ts';
 import type { ResolucionEncabezado } from './wa-viajes-reglas.ts';
 import { sendTextMessage } from './wa-respond.ts';
@@ -312,9 +313,16 @@ export async function atenderEnBandeja(
   }
 
   const pendiente = escrito ? await preguntaAbierta(supabase, user.workspace_id, message.phone) : null;
+  // Lo que el escrito haría en la tanda (diseño 2026-10-05): con el directorio, la respuesta a lo que espera la
+  // caja (el cliente de un viaje nuevo, su llave, cuál de los parecidos, la lista) NO es un encabezado. En la
+  // prueba de Mauricio, «El cliente es Mauricio Moreno» tras «nuevo viaje» abría la lista de sus 5 viajes.
+  const sim = config.modoViajes !== 'uno' && !esCierre
+    ? await simularEnLaTanda(supabase, user.workspace_id, message.phone, config.horasCajaActiva, texto, fechaDeMeta(message.timestamp) ?? new Date().toISOString(),
+      { reenviado: message.reenviado === true, tipo: message.type })
+    : null;
   // Un encabezado («Carolina», «T1 26 9») abre una caja: nunca es la respuesta a una pregunta
   // pendiente (QA de #971: el que se escribía antes del «sí» se tomaba como respuesta al resumen).
-  const encabezado = await encabezadoDelEscrito(supabase, user.workspace_id, message, config);
+  const encabezado = sim?.respuesta ? null : await encabezadoDelEscrito(supabase, user.workspace_id, message, config);
 
   // Regla 3 (Trappvel, 2026-10-02; antes N1 y N2 de la prueba en vivo v2): con una pregunta abierta,
   // lo que tiene forma de su respuesta la contesta, sea cual sea la capa que preguntó (el resumen,
@@ -335,7 +343,8 @@ export async function atenderEnBandeja(
   // Si la tanda abierta espera algo en el acto (la elección de la lista de un encabezado o el nombre
   // de un «nuevo»), una respuesta va a la tanda (la relee el reparto) y no es contenido. Con otra
   // pregunta abierta, la lista del encabezado no se pregunta en el acto (una pregunta a la vez).
-  const enEspera = encabezado ? null : await respuestaEnEspera(supabase, user.workspace_id, message, config, !!pendiente);
+  // Sin la simulación (fuera del modo encabezado, o no se pudo leer la tanda) no hay nada que esperar en el acto.
+  const enEspera = sim ? enEsperaDe(sim, !!pendiente) : null;
   const esEncabezado = encabezado !== null || enEspera?.respuesta === true;
 
   // Un acuse suelto («ok gracias», «👍») sin tanda abierta ni pregunta no abre una tanda (v2, N7).
@@ -428,7 +437,7 @@ export async function atenderEnBandeja(
     const aviso = enEspera ? enEspera.aviso
       // Una pregunta a la vez: con otra abierta, la lista del encabezado se decide en el resumen.
       : otra && candidatos.length > 0 ? `«${message.text.trim()}» puede ser ${candidatos.map(lineaCaja).join(' o ')}: lo decides en el resumen de esta tanda.`
-      : respuestaAlEncabezado(encabezado, message.text)
+      : (sim?.abre ? sim.acuse : respuestaAlEncabezado(encabezado, message.text))
         // Una pregunta escrita que abre una tanda: quizá era para el bot de siempre (se fue la regla N8).
         ?? (fila.accion === 'abrir' && escrito && esPregunta(message.text) ? textoPistaConsulta(config.prefijosConsulta) : null);
     const texto = [aviso, otra ? textoPrimero(otra) : null].filter(Boolean).join('\n');
@@ -447,6 +456,20 @@ export async function atenderEnBandeja(
   }
 }
 
+/**
+ * Lo que la simulación dice que contestar si la tanda esperaba algo: la respuesta en la caja (con su acuse), o el
+ * recordatorio de lo que espera cuando llega contenido (solo la primera vez). `null`: la tanda no espera nada, o el
+ * escrito abre otra caja. Con otra pregunta abierta, la lista del encabezado no se pregunta en el acto.
+ */
+function enEsperaDe(sim: EnLaTanda, hayOtraPregunta: boolean): { aviso: string | null; respuesta: boolean } | null {
+  if (sim.respuesta) return { aviso: hayOtraPregunta && sim.antes?.tipo === 'eleccion' ? null : sim.acuse, respuesta: true };
+  if (sim.abre || !sim.antes) return null;
+  if (hayOtraPregunta && sim.antes.tipo === 'eleccion') return null;
+  if (sim.antes.conContenido) return { aviso: null, respuesta: false };
+  const a = sim.antes;
+  return { aviso: a.tipo === 'eleccion' ? textoPreguntaEncabezadoCorta(a.texto, a.candidatos) : textoDeLoQueFalta(a), respuesta: false };
+}
+
 /** ¿Es un texto escrito (no reenviado) en modo `encabezado`? Solo ahí hay encabezados. */
 function escritoEnModoEncabezado(message: IncomingMessage, config: ConfigBandeja): boolean {
   return config.modoViajes !== 'uno' && message.type === 'text' && message.reenviado !== true && !!(message.text || '').trim();
@@ -459,39 +482,6 @@ async function encabezadoDelEscrito(
   if (!escritoEnModoEncabezado(message, config)) return null;
   const c = await candidatosDeEncabezado(supabase, workspaceId);
   return c ? resolverEncabezado(message.text, c.viajes, c.equipo) : null;
-}
-
-/**
- * Si la tanda abierta espera algo en el acto, qué le contesta el bot a este mensaje y si el mensaje
- * es la RESPUESTA (`respuesta: true`: no es contenido, armarSegmentos lo aparta igual):
- *   · la lista de un encabezado aproximado o ambiguo: un número de la lista → «📌»; un sí, un no o un
- *     número fuera de la lista → «No entendí» y la lista otra vez; contenido (un reenvío, un escrito
- *     largo) → la pregunta corta, solo la primera vez (Trappvel, 2026-10-02, regla 3). Con otra pregunta
- *     abierta (`hayOtraPregunta`) esta no se hizo en el acto: nada;
- *   · el nombre de un «nuevo» suelto u «otro cliente»: un nombre → «📌 Cliente nuevo: X»; un sí, un no o un
- *     número → se vuelve a pedir; contenido → se pide, solo la primera vez.
- * `null`: la tanda no espera nada.
- */
-async function respuestaEnEspera(
-  supabase: SupabaseClient, workspaceId: string, message: IncomingMessage, config: ConfigBandeja, hayOtraPregunta: boolean,
-): Promise<{ aviso: string | null; respuesta: boolean } | null> {
-  if (config.modoViajes === 'uno') return null;
-  const escrito = escritoEnModoEncabezado(message, config);
-  const p = await pendienteDeLaTanda(supabase, workspaceId, message.phone, config.horasCajaActiva);
-  if (!p) return null;
-  if (p.tipo === 'nombre') {
-    const nombre = escrito ? esNombreNuevo(message.text, p.equipo) : null;
-    if (nombre) return { aviso: textoAcuseNuevo(nombre, viajesParecidos(nombre, p.viajes)), respuesta: true };
-    if (escrito && esRespuestaSuelta(message.text)) return { aviso: TEXTO_PIDE_NOMBRE_NUEVO, respuesta: true };
-    return { aviso: p.conContenido ? null : TEXTO_PIDE_NOMBRE_NUEVO, respuesta: false };
-  }
-  if (hayOtraPregunta) return null;
-  if (escrito) {
-    const k = leerEleccion(message.text);
-    if (k !== null && k >= 1 && k <= p.candidatos.length) return { aviso: `📌 ${lineaCaja(p.candidatos[k - 1])}`, respuesta: true };
-    if (esRespuestaSuelta(message.text)) return { aviso: textoNoEntendiEleccion(p.texto, p.candidatos), respuesta: true };
-  }
-  return { aviso: p.conContenido ? null : textoPreguntaEncabezadoCorta(p.texto, p.candidatos), respuesta: false };
 }
 
 /**

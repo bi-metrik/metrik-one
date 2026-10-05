@@ -60,6 +60,10 @@ vi.mock('./wa-entendimiento.ts', () => ({
   preguntaAbierta: espias.preguntaAbierta,
   pendienteDeLaTanda: espias.pendienteDeLaTanda,
   tandaAbiertaDelRemitente: espias.tandaAbiertaDelRemitente,
+  // La simulación de la tanda y el acuse del cliente (diseño 2026-10-05): sin directorio en este doble, no aplican.
+  simularEnLaTanda: async () => null,
+  acuseDelClienteDeLaTanda: async () => null,
+  textoDeLoQueFalta: () => '',
 }));
 vi.mock('./handlers/registro/index.ts', () => ({ handleRegistro: espias.handleRegistro }));
 vi.mock('./handlers/registro/resume.ts', () => ({ reconfirmarGasto: espias.reconfirmarGasto }));
@@ -460,7 +464,7 @@ describe('despacho en la bandeja', () => {
     expect(await atenderEscrito(db, u(), m, deps({ acciones: [{ accion: 'abrir_viaje', evidencia: 'nueva, la tía de Carolina Ruiz', nuevo_cliente: 'tía de Carolina Ruiz' }] }))).toEqual({ atendido: true });
     const upd = db.ops.find(o => o.tabla === 'wa_bandeja_mensajes' && o.op === 'update')!;
     expect(upd.payload).toMatchObject({ interpretacion: { accion: 'abrir_viaje', nuevo: 'tía de Carolina Ruiz' } });
-    expect(enviados).toEqual(['📌 Cliente nuevo: tía de Carolina Ruiz. Lo creo solo cuando respondas SÍ al resumen.\nYa hay un viaje de Carolina Ruiz (T1 26 11). Si es para ese, escribe T1 26 11.']);
+    expect(enviados).toEqual(['Va como viaje nuevo de tía de Carolina Ruiz. Antes del resumen reviso si ya es cliente.\nYa hay un viaje de Carolina Ruiz (T1 26 11): si es para ese, escribe T1 26 11.']);
     // Nada se crea en el acto: ni contacto ni negocio.
     sinEscriturasNuevas(db);
   });

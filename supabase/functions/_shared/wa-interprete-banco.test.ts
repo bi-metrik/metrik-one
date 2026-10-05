@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import BANCO from './__fixtures__/interprete-banco.json';
-import { esEscrito, leerConfirmacion, preguntaPendienteUnificada, respuestaExacta, validar, type NegocioCtx, type PreguntaUnificada } from './wa-interprete-reglas.ts';
-import { cumple, resumir, resumirConfirmacionDeHoy } from './__fixtures__/interprete-banco-resumen.ts';
+import { esEscrito, preguntaPendienteUnificada, validar, type NegocioCtx, type PreguntaUnificada } from './wa-interprete-reglas.ts';
+import { cumple, deHoy, resumir } from './__fixtures__/interprete-banco-resumen.ts';
 
 /**
  * El banco de la simulación (escenarios.json, 45 turnos: 37 + los 8 de control H1–H8; más los 11 NC de la
@@ -17,11 +17,17 @@ import { cumple, resumir, resumirConfirmacionDeHoy } from './__fixtures__/interp
 type Turno = (typeof BANCO.turnos)[number];
 type Pend = { capa: string; texto: string; opciones?: string[]; nuevo?: string } | null;
 
+export const PIDE_LLAVE = 'No tengo a Simón Arango en el directorio. ¿Me pasas su celular o su correo? Así reviso que no lo tengamos con otro nombre, y sin uno de los dos no lo creo.';
+export const CONFIRMA_LLAVE = 'Ese celular ya lo tenemos a nombre de Paola Andrea Rincón Díaz (último viaje: CARTAGENA MAR). ¿Es la misma persona?';
+
 const VIAJES: NegocioCtx[] = BANCO.contextos.trappvel.viajes.map(v => ({ alias: v.id, id: v.id, codigo: v.codigo, cliente: v.cliente, destino: v.destino }));
 const NEGOCIOS: NegocioCtx[] = BANCO.contextos.termotech.negocios.map(n => ({ alias: n.id, id: n.id, codigo: n.codigo, nombre: n.nombre, cliente: null, destino: null }));
 
 function pendiente(t: Turno): PreguntaUnificada | null {
   if (t.pendiente_previo === 'pide_nombre') return preguntaPendienteUnificada({ tanda: { tipo: 'nombre' } });
+  // 2026-10-05: la caja de un viaje nuevo espera la llave, o si el dueño de la llave es la misma persona.
+  if (t.pendiente_previo === 'pide_llave') return preguntaPendienteUnificada({ tanda: { tipo: 'cliente', texto: PIDE_LLAVE } });
+  if (t.pendiente_previo === 'confirma_llave') return preguntaPendienteUnificada({ tanda: { tipo: 'cliente', texto: CONFIRMA_LLAVE } });
   if (t.pendiente_previo === 'gasto_monto') return preguntaPendienteUnificada({ sesion: { state: 'collecting', pending_action: 'W01' } });
   const p = t.pendiente as Pend;
   if (!p) return null;
@@ -52,13 +58,15 @@ describe('banco de la simulación con un modelo falso: el validador', () => {
       }
       const trappvel = t.cliente === 'trappvel';
       const pend = pendiente(t);
-      // En la confirmación de cliente nuevo, lo que el atajo lee exacto no llega al modelo: lo hace el código de hoy.
-      const r = pend?.capa === 'nuevo_confirmar' && respuestaExacta(t.texto, pend)
-        ? resumirConfirmacionDeHoy(leerConfirmacion(t.texto, pend))
-        : resumir(validar(t.modelo, {
-          texto: t.texto, bandeja: trappvel, rol: 'owner', pendiente: pend, negocios: trappvel ? VIAJES : NEGOCIOS,
-          tanda: t.tanda ? { abierta: true, nombre: 'la tanda abierta', cajaId: null } : null,
-        }));
+      const cliente = (t as { tanda_cliente?: string }).tanda_cliente ?? null;
+      // En la bandeja, lo que el código de hoy lee exacto no llega al modelo (la confirmación de cliente nuevo, el
+      // encabezado, lo que espera la caja): se resume lo que hace el código.
+      const espera = t.pendiente_previo === 'pide_llave' ? 'llave' : t.pendiente_previo === 'confirma_llave' ? 'misma' : null;
+      const hoy = trappvel ? deHoy(t.texto, pend, BANCO.contextos.trappvel.viajes, cliente, espera) : null;
+      const r = hoy ?? resumir(validar(t.modelo, {
+        texto: t.texto, bandeja: trappvel, rol: 'owner', pendiente: pend, negocios: trappvel ? VIAJES : NEGOCIOS,
+        tanda: t.tanda ? { abierta: true, nombre: 'la tanda abierta', cajaId: null, cliente } : null,
+      }));
       const ok = cumple(r, t.esperado as Record<string, unknown>);
       resultados.push({ id: t.id, ok });
       // La descripción de un gasto se compara por contenido («peaje» dentro de «peaje yendo a la obra…»).
@@ -66,8 +74,8 @@ describe('banco de la simulación con un modelo falso: el validador', () => {
     });
   }
 
-  it('los 56 turnos están en el banco (45 + 11 de la confirmación de cliente nuevo) y todos salen como se esperaba', () => {
-    expect(BANCO.turnos).toHaveLength(56);
+  it('los 88 turnos están en el banco (45 + 11 de la confirmación de cliente nuevo + 32 de identidad) y todos salen como se esperaba', () => {
+    expect(BANCO.turnos).toHaveLength(88);
     expect(resultados.filter(r => !r.ok)).toEqual([]);
   });
 });

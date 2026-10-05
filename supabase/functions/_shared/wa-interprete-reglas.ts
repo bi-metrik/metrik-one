@@ -21,7 +21,10 @@ import {
 } from './wa-bandeja-reglas.ts';
 import type { ConfigBandeja } from './wa-bandeja-reglas.ts';
 import { codigoCompacto, interpretarRespuestaNegocio } from './wa-carga-reglas.ts';
-import { calificarNombreNuevo, leerNuevo, normalizarNombre, normalizarTexto } from './wa-entendimiento-reglas.ts';
+import { calificarNombreNuevo, leerNuevo, leerViajeNuevo, normalizarNombre, normalizarTexto } from './wa-entendimiento-reglas.ts';
+import type { LecturaNuevo } from './wa-entendimiento-reglas.ts';
+import { llavesDelTexto, separarNombreYLlave, soloLlave } from './wa-cliente-reglas.ts';
+import type { Llave } from './wa-cliente-reglas.ts';
 import { fastPathParse } from './wa-parse-reglas.ts';
 import {
   esNombreNuevo,
@@ -253,6 +256,9 @@ export function esquemaPara(p: { bandeja: boolean; rol: UserRole }): Record<stri
             id: S,
             nuevo_cliente: S,
             nuevo_sin_nombre: { type: 'BOOLEAN' },
+            cliente_existente: { type: 'BOOLEAN' },
+            celular: S,
+            correo: S,
             opcion: S,
             n: { type: 'INTEGER' },
             alcance: S,
@@ -303,7 +309,7 @@ Reglas duras:
 - Si no se puede saber qué quiere, "pedir_aclaracion".
 
 Acciones:
-${p.bandeja ? `- abrir_viaje: dice de qué cliente/viaje es lo que sigue (nombre, código o destino: "lo de Cartagena", "Carolina", "T1 26 9") o anuncia un cliente nuevo (pon el nombre en nuevo_cliente; si no dice el nombre, nuevo_sin_nombre=true). Si en la MISMA frase cuenta además algo que pidió el cliente, agrega otra acción "contenido" con eso.
+${p.bandeja ? `- abrir_viaje: dice de qué cliente/viaje es lo que sigue (nombre, código o destino: "lo de Cartagena", "Carolina", "T1 26 9") o anuncia un viaje NUEVO ("nuevo viaje", "nueva cotización", "cliente nuevo", "uno nuevo"). «Nuevo» es un viaje nuevo: si el cliente ya existe lo decide el sistema, no tú. En nuevo_cliente va el nombre del cliente SOLO si está escrito en el mensaje; si no lo escribe, nuevo_sin_nombre=true. Si dice que el cliente es antiguo, el mismo o que ya es cliente, cliente_existente=true. Si escribe el celular o el correo del cliente, cópialo tal cual en celular o correo. Si en la MISMA frase cuenta además algo que pidió el cliente, agrega otra acción "contenido" con eso.
 - contenido: el comercial escribe con sus palabras algo que dijo o pidió el CLIENTE (destino, fechas, personas, preferencias). Si nombra el viaje, llena ref_cliente, ref_destino o ref_codigo. Si habla de dos clientes, una acción "contenido" por cada uno.
 - nota_interna: opinión o juicio del comercial sobre el cliente (su carácter, si regatea, si es difícil). NO es un dato del viaje.
 - cerrar_tanda: terminó de pasar los mensajes ("listo", "eso es todo", "ya te pasé todo").
@@ -327,7 +333,9 @@ Formato: devuelve el JSON en UNA sola línea, sin sangría ni saltos de línea.`
 
 export type Capa =
   | 'gasto_confirmar' | 'gasto_monto' | 'gasto_negocio' | 'soporte' | 'continuar' | 'contacto' | 'actividad' | 'aclaracion'
-  | 'entrega' | 'nombre' | 'resumen' | 'contacto_bandeja' | 'tanda_lista' | 'tanda_nombre' | 'nuevo_confirmar';
+  | 'entrega' | 'nombre' | 'resumen' | 'contacto_bandeja' | 'tanda_lista' | 'tanda_nombre' | 'nuevo_confirmar'
+  /** La caja de un viaje nuevo espera algo de su cliente: la llave, cuál es, si es el dueño de la llave (2026-10-05). */
+  | 'tanda_cliente';
 
 /** Una opción de la pregunta: `id` es lo que va entre corchetes y lo que el validador acepta. */
 export interface OpcionPendiente {
@@ -394,7 +402,9 @@ export interface PreguntaBandejaVista {
 /** Lo que espera la tanda abierta (`pendienteDeLaTanda`). */
 export type PendienteTandaVista =
   | { tipo: 'eleccion'; texto: string; candidatos: ViajeAbierto[]; vistaAt?: string | null }
-  | { tipo: 'nombre'; vistaAt?: string | null };
+  | { tipo: 'nombre'; vistaAt?: string | null }
+  /** Lo que falta del cliente de un viaje nuevo, con la pregunta que vio el comercial (`textoDelCliente`). */
+  | { tipo: 'cliente'; texto: string; vistaAt?: string | null };
 
 const ESTADOS_ESPERANDO = ['confirming', 'awaiting_selection', 'awaiting_reason', 'awaiting_payment_status', 'awaiting_image', 'collecting', 'awaiting_timeout_confirm'];
 
@@ -483,6 +493,9 @@ function preguntaDeLaBandeja(b: PreguntaBandejaVista, alias: (id: string) => str
 }
 
 function preguntaDeLaTanda(t: PendienteTandaVista, alias: (id: string) => string, ahora: number): PreguntaUnificada {
+  if (t.tipo === 'cliente') {
+    return { capa: 'tanda_cliente', origen: 'tanda', texto: t.texto, opciones: [DESCARTAR], haceMin: minutosDesde(t.vistaAt, ahora), tambien: null, ofreceDescartar: true };
+  }
   if (t.tipo === 'nombre') {
     return { capa: 'tanda_nombre', origen: 'tanda', texto: TEXTO_PIDE_NOMBRE_NUEVO, opciones: [NUEVO, DESCARTAR], haceMin: minutosDesde(t.vistaAt, ahora), tambien: null, ofreceDescartar: true };
   }
@@ -636,7 +649,10 @@ export function atajoExacto(texto: string, e: {
     return 'respuesta_exacta';
   }
   const r = e.encabezado;
-  if (r && ((r.tipo === 'viaje') || (r.tipo === 'nuevo' && !!r.cliente))) return 'encabezado_exacto';
+  // Un «nuevo» (con o sin cliente, «es para uno nuevo», «una cotización nueva sobre un cliente antiguo») lo lee el
+  // código de hoy igual con el interruptor apagado o prendido (diseño 2026-10-05: el arreglo vive en el camino
+  // compartido). Lo que el código no lee, sigue al modelo.
+  if (r && ((r.tipo === 'viaje') || r.tipo === 'nuevo')) return 'encabezado_exacto';
   return null;
 }
 
@@ -670,6 +686,10 @@ export function respuestaExacta(texto: string, p: PreguntaUnificada): boolean {
     case 'nombre':
     case 'tanda_nombre': return esNombreNuevo(t) !== null || /^nuev[oa]\b/i.test(normalizarTexto(t));
     case 'tanda_lista': return leerEleccion(t) !== null || esSiNoCorto(t);
+    // La llave escrita sola, un sí o un no cortos, o un número: lo lee el código de hoy (`armarSegmentos`). Lo demás
+    // que el código lee («no, son dos personas distintas», «el de Miami») lo detecta la simulación de la tanda antes
+    // del modelo (`wa-interprete.ts`, paso 3b).
+    case 'tanda_cliente': return soloLlave(t) !== null || esSiNoCorto(t) || leerEleccion(t) !== null;
     case 'gasto_confirmar': return CONFIRMA_GASTO.includes(bajo) || CANCELA_GASTO.includes(bajo);
     case 'contacto': return CONFIRMA_GASTO.includes(bajo) || CANCELA_GASTO.includes(bajo) || numero;
     case 'gasto_monto': return montosDelTexto(t).length > 0 || /^\$?\s*\d+$/.test(t);
@@ -796,6 +816,8 @@ export interface Interpretacion {
   evidencia?: string | null;
   canonico?: string | null;
   modelo?: string | null;
+  /** La llave del cliente escrita en el mensaje (celular, correo, usuario), si abre un viaje nuevo. */
+  llave?: Llave | null;
 }
 
 export interface GastoValidado {
@@ -843,7 +865,11 @@ export interface EntradaValidador {
   rol: UserRole;
   pendiente: PreguntaUnificada | null;
   negocios: ReadonlyArray<NegocioCtx>;
-  tanda: { abierta: boolean; nombre?: string | null; cajaId?: string | null } | null;
+  /**
+   * `cliente`: el cliente de la caja abierta (de un viaje que existe o de uno nuevo): el «candidato pendiente» para
+   * «el mismo», «cliente antiguo», «es para uno nuevo» (diseño 2026-10-05, §5.2). Solo su nombre.
+   */
+  tanda: { abierta: boolean; nombre?: string | null; cajaId?: string | null; cliente?: string | null } | null;
   /**
    * Los nombres de quienes escriben al bot en el workspace (staff y colaboradores), los mismos de
    * `resolverEncabezado`: el nombre de pila de alguien del equipo es una firma y nunca resuelve un viaje.
@@ -858,6 +884,10 @@ interface AccionModelo {
   id?: string | null;
   nuevo_cliente?: string | null;
   nuevo_sin_nombre?: boolean | null;
+  /** El comercial dijo que el cliente ya existe («cliente antiguo», «el mismo»): el de la conversación. */
+  cliente_existente?: boolean | null;
+  celular?: string | null;
+  correo?: string | null;
   opcion?: string | null;
   n?: number | null;
   ns?: number[] | null;
@@ -1094,7 +1124,7 @@ function validarPropuesta(crudo: unknown, e: EntradaValidador): Decision {
   // V4 — estado: cada acción solo vale si la pregunta pendiente la permite.
   if (!LIBRES.has(a0.accion)) {
     const vale: Record<string, readonly string[]> = {
-      entrega: ['responder'], tanda_lista: ['responder'],
+      entrega: ['responder'], tanda_lista: ['responder'], tanda_cliente: ['responder'],
       nombre: ['responder'], tanda_nombre: ['responder'],
       resumen: ['confirmar', 'mover', 'responder'],
       nuevo_confirmar: ['confirmar', 'cancelar', 'responder'],
@@ -1186,6 +1216,46 @@ function nombreNuevo(a: AccionModelo, texto: string): string | null {
   return String(n).trim();
 }
 
+/** Lo que dice que el cliente es el de la conversación: «cliente antiguo», «el mismo», «ya es cliente», «uno nuevo». */
+const HABLA_DEL_MISMO = /\b(?:client[ea]s?\s+(?:antigu[oa]s?|existentes?|de antes|conocid[oa]s?|viej[oa]s?)|(?:el|la)\s+mism[oa](?:\s+client[ea])?$|(?:el|la)\s+mism[oa]\s+client[ea]|ya es client[ea]|ya (?:lo|la) tenemos)\b/;
+
+/**
+ * El cliente de la caja abierta, si el mensaje habla de él sin nombrarlo (V8v/V5 del diseño 2026-10-05): lo marca el
+ * modelo (`cliente_existente`) o lo dice el texto («cliente antiguo», «el mismo», «es para uno nuevo»). Nunca porque
+ * el modelo copió el nombre del contexto: el mensaje tiene que referirse a él.
+ */
+function clienteDeLaConversacion(a: AccionModelo, e: EntradaValidador): string | null {
+  const c = e.tanda?.cliente?.trim();
+  if (!c) return null;
+  const nv = leerNuevo(e.texto);
+  return a.cliente_existente === true || !!nv?.mismo || HABLA_DEL_MISMO.test(norm(e.texto)) ? c : null;
+}
+
+/** «otro viaje», «nueva cotización», «viaje nuevo», «uno nuevo»: el texto pide un viaje nuevo con el sustantivo. */
+function pideViajeNuevoExplicito(texto: string): boolean {
+  return /\b(?:nuev[oa]s?\s+(?:viaje|cotizacion|solicitud|reserva)|(?:viaje|cotizacion|solicitud|reserva)\s+nuev[oa]|otr[oa]\s+(?:viaje|cotizacion|solicitud|reserva)|uno\s+nuevo|una\s+nueva)\b/.test(norm(texto));
+}
+
+/** Las palabras de `dato` tal como están escritas en el mensaje (de la primera a la última, en orden). `null` si falta alguna. */
+function escritoTalCual(dato: unknown, texto: string): string | null {
+  const ws = norm(dato).split(' ').filter(w => w && !RELLENO.has(w));
+  if (!ws.length) return null;
+  const tokens = String(texto ?? '').split(/[\s,.;:!¡¿?]+/).filter(Boolean);
+  const ns = tokens.map(t => norm(t));
+  const ix = ws.map(w => ns.indexOf(w));
+  if (ix.some(i => i < 0)) return null;
+  const desde = Math.min(...ix);
+  const hasta = Math.max(...ix);
+  return hasta - desde + 1 === ws.length ? tokens.slice(desde, hasta + 1).join(' ') : null;
+}
+
+/** ¿El mensaje pide un viaje NUEVO? (V8v: «nuev-/otr-» escrito, o el modelo lo marcó con el «nuevo» escrito). */
+function diceViajeNuevo(a: AccionModelo, texto: string): boolean {
+  const t = norm(texto);
+  return /\bnuev[oa]s?\b/.test(t) || /\botr[oa]\s+(?:viaje|cotizacion|solicitud|reserva)\b/.test(t)
+    || ((a.nuevo_sin_nombre === true || !!a.nuevo_cliente) && /\b(?:nuev[oa]s?|otr[oa])\b/.test(t));
+}
+
 /**
  * V8 — el nombre propuesto de un cliente nuevo, con la misma regla del código de hoy
  * (`calificarNombreNuevo`, sin vocabulario desde el 2026-10-03): más largo que el tope
@@ -1211,10 +1281,44 @@ function preguntarViaje(cands: NegocioCtx[], ev: string | null | undefined, conC
 
 function abrirViaje(acc: AccionModelo[], e: EntradaValidador, rechazo: string | null): Decision {
   const ab = acc.find(a => a.accion === 'abrir_viaje')!;
-  const conContenido = acc.some(a => a.accion === 'contenido');
+  // Un viaje NUEVO con un destino escrito que no es el de ningún viaje abierto («otra cotización para Carolina
+  // Ruiz, ahora a Europa»): el destino es lo que pidió el cliente, y el mensaje es también contenido de su caja.
+  const destinoDelNuevo = !!soloLoEscrito(ab.ref?.destino, e.texto) && (!!ab.nuevo_cliente || !!ab.nuevo_sin_nombre || pideViajeNuevoExplicito(e.texto))
+    && resolverViaje({ destino: soloLoEscrito(ab.ref?.destino, e.texto) }, e.negocios).length === 0;
+  const conContenido = acc.some(a => a.accion === 'contenido') || destinoDelNuevo;
   const recordar = !!e.pendiente;
   const nombre = nombreNuevo(ab, e.texto);
   if (nombre && calificarNombreNuevo(nombre) === 'largo') return aclaracion(e, 'V8_nombre_largo');
+  // V8v y V5 con el candidato pendiente (diseño 2026-10-05, §5.2): «es para uno nuevo», «una cotización nueva sobre
+  // un cliente antiguo», «el mismo». El cliente es el de la caja abierta; el modelo no tiene que copiarlo (en la
+  // prueba de Mauricio, copiarlo era V8_nombre_no_escrito y V5_sin_candidatos).
+  // Solo sin una referencia escrita a otro viaje: «lo de Carolina» nombra a Carolina aunque diga «cliente antiguo».
+  const deAntes = !nombre && !viajesDe(ab, e).conRef ? clienteDeLaConversacion(ab, e) : null;
+  if (deAntes) {
+    if (diceViajeNuevo(ab, e.texto)) {
+      return ejecutar('bandeja.abrir_viaje', {
+        p: 'registrar', interpretacion: { accion: 'abrir_viaje', nuevo: deAntes, con_contenido: conContenido, evidencia: ab.evidencia ?? null }, aviso: avisoNuevo(deAntes, conContenido, e.negocios),
+      }, rechazo ?? 'V8v_cliente_de_la_conversacion', recordar);
+    }
+    const caja = e.tanda?.cajaId ? e.negocios.find(n => n.id === e.tanda!.cajaId) : null;
+    if (caja) {
+      return ejecutar(conContenido ? 'bandeja.contenido' : 'bandeja.abrir_viaje', {
+        p: 'registrar', interpretacion: { accion: 'abrir_viaje', viaje_id: caja.id, con_contenido: conContenido, evidencia: ab.evidencia ?? null },
+        aviso: conContenido ? null : avisoPin(caja, false),
+      }, rechazo ?? 'V5_cliente_de_la_conversacion', recordar);
+    }
+  }
+  // V8v: el texto pide un VIAJE nuevo explícito («Jorge Pérez quiere otro viaje», «nueva cotización para …») y el
+  // modelo lo devolvió como referencia a un cliente escrito: es un viaje nuevo de ese cliente, nunca uno de sus
+  // viajes abiertos (regla del 2026-10-04: un «nuevo» explícito nunca carga en un viaje existente).
+  if (!nombre && !ab.nuevo_sin_nombre && pideViajeNuevoExplicito(e.texto)) {
+    const dicho = escritoTalCual(ab.ref?.cliente ?? ab.nuevo_cliente, e.texto);
+    if (dicho && !esFirmaDelEquipo(dicho, e.equipo ?? []) && calificarNombreNuevo(dicho) === 'nombre') {
+      return ejecutar('bandeja.abrir_viaje', {
+        p: 'registrar', interpretacion: { accion: 'abrir_viaje', nuevo: dicho, con_contenido: conContenido, evidencia: ab.evidencia ?? null }, aviso: avisoNuevo(dicho, conContenido, e.negocios),
+      }, rechazo ?? 'V8v_viaje_nuevo_de_un_cliente', recordar);
+    }
+  }
   if (ab.nuevo_cliente && !nombre) rechazo ??= 'V8_nombre_no_escrito';
   // «Nuevo», con o sin nombre, solo si el mensaje lo dice («nuevo cliente», «otra clienta»): en la QA real
   // flash-lite abrió «NUEVO Pérez» con un «Pérez» suelto. Si no lo dice, no se abre nada nuevo.
@@ -1222,7 +1326,7 @@ function abrirViaje(acc: AccionModelo[], e: EntradaValidador, rechazo: string | 
   // EN6 (cuarto control de Vera): un «nuevo/nueva …» explícito que el modelo propuso como un viaje EXISTENTE
   // («nueva, la hermana de Ana Gómez» → el viaje de Ana Gómez). Nunca se carga ahí: es la caja de un
   // cliente nuevo, como lo lee el código de hoy; el «sí» es al resumen, que dice si se parece a un viaje.
-  const nv = !nombre && !ab.nuevo_sin_nombre && !ab.nuevo_cliente ? leerNuevo(e.texto) : null;
+  const nv = !nombre && !ab.nuevo_sin_nombre && !ab.nuevo_cliente ? nuevoEscrito(e.texto) : null;
   if (nv) return cajaDeNuevo(nv, e, ab.evidencia ?? null, conContenido, rechazo ?? 'V8_nuevo_explicito', recordar);
   if (nombre || ab.nuevo_sin_nombre || (ab.nuevo_cliente && !nombre)) {
     if (!nombre) {
@@ -1238,8 +1342,9 @@ function abrirViaje(acc: AccionModelo[], e: EntradaValidador, rechazo: string | 
         p: 'registrar', interpretacion: { accion: 'abrir_viaje', nuevo: null, con_contenido: conContenido, evidencia: ab.evidencia ?? null }, aviso: textoPideNombreEnDuda(nombre),
       }, 'V8_nombre_en_duda', recordar);
     }
+    const llave = llavesDelTexto(e.texto);
     return ejecutar('bandeja.abrir_viaje', {
-      p: 'registrar', interpretacion: { accion: 'abrir_viaje', nuevo: nombre, con_contenido: conContenido, evidencia: ab.evidencia ?? null }, aviso: avisoNuevo(nombre, conContenido, e.negocios),
+      p: 'registrar', interpretacion: { accion: 'abrir_viaje', nuevo: separarNombreYLlave(nombre).nombre || nombre, con_contenido: conContenido, evidencia: ab.evidencia ?? null, ...(llave ? { llave } : {}) }, aviso: avisoNuevo(nombre, conContenido, e.negocios),
     }, rechazo, recordar);
   }
   const { viajes, idAjeno, firma, idSinRespaldo } = viajesDe(ab, e);
@@ -1289,7 +1394,20 @@ function abrirViaje(acc: AccionModelo[], e: EntradaValidador, rechazo: string | 
  * caja de un cliente nuevo con su nombre (el «sí» es al resumen, con «Ya hay un viaje de …» si se parece),
  * o pidiendo el nombre. Más largo que el tope: no se anota en ninguna caja y se pregunta.
  */
-function cajaDeNuevo(nv: { cliente: string | null }, e: EntradaValidador, ev: string | null, conContenido: boolean, rechazo: string, recordar: boolean): Decision {
+/**
+ * Un «nuevo …» escrito, como lo lee el código de hoy (`leerNuevo`). `largo`: nombra un viaje nuevo pero trae algo
+ * que no es un nombre («nuevo paquete familiar todo incluido a la costa»): no se anota en ninguna caja.
+ */
+function nuevoEscrito(texto: string): LecturaNuevo | 'largo' | null {
+  return leerNuevo(texto) ?? (leerViajeNuevo(texto) === null ? 'largo' : null);
+}
+
+function cajaDeNuevo(lectura: LecturaNuevo | 'largo', e: EntradaValidador, ev: string | null, conContenido: boolean, rechazo: string, recordar: boolean): Decision {
+  if (lectura === 'largo') return decir('bandeja.nuevo_no_anotado', TEXTO_NUEVO_NO_ANOTADO, rechazo, recordar);
+  let nv = lectura;
+  // «es para uno nuevo», «sobre un cliente antiguo»: el cliente de la caja abierta (como el código de hoy).
+  const deAntes = !nv.cliente && nv.mismo ? e.tanda?.cliente?.trim() || null : null;
+  if (deAntes) nv = { ...nv, cliente: deAntes };
   const c = calificarNombreNuevo(nv.cliente);
   if (c === 'nombre') {
     return ejecutar('bandeja.abrir_viaje', {
@@ -1313,7 +1431,7 @@ function contenido(acc: AccionModelo[], e: EntradaValidador, rechazo: string | n
   // NU8 (control de Vera 2026-10-03): un «nuevo …» con una tanda abierta nunca es contenido de la caja de
   // otro cliente. Desde el cuarto control (EN6), tampoco sin tanda cuando el contenido nombra un viaje: se
   // abría en ESE viaje. Sin tanda y sin referencia sigue como siempre (cae sin caja; decide el resumen).
-  const nv = e.tanda?.abierta || resueltos.some(r => r.conRef) ? leerNuevo(e.texto) : null;
+  const nv = e.tanda?.abierta || resueltos.some(r => r.conRef) ? nuevoEscrito(e.texto) : null;
   if (nv) return cajaDeNuevo(nv, e, cs[0].evidencia ?? null, false, rechazo ?? 'V8_nuevo_no_es_contenido', recordar);
   // Dos clientes en un escrito: se registra una vez, marcado `varios`; el resumen ya lo separa.
   if (cs.length > 1 && unicos.length > 1) {
@@ -1527,6 +1645,11 @@ function responder(a: AccionModelo, e: EntradaValidador, rechazo: string | null)
     case 'entrega':
     case 'tanda_lista': return responderLista(a, opcion, e, rechazo);
     case 'nuevo_confirmar': return responderConfirmarNuevo(a, opcion, e, rechazo);
+    // Lo que el código de hoy lee de esta pregunta ya no llega al modelo (el atajo y la simulación de la tanda);
+    // lo que llega no se entendió: se vuelve a preguntar.
+    case 'tanda_cliente':
+      if (opcion === 'descartar') return descartarPregunta(a, e, rechazo);
+      return aclaracion(e, rechazo ?? 'V20_cliente_por_el_codigo');
     case 'nombre':
     case 'tanda_nombre': {
       if (opcion === 'descartar') return descartarPregunta(a, e, rechazo);

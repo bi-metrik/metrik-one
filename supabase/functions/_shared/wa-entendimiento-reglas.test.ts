@@ -225,13 +225,16 @@ describe('el contacto: exacto o se pregunta', () => {
     const d = decidirContacto({ clienteTexto: 'Ana Pérez', extraido: { nombre: null, telefono: null }, candidatos: [ana, anaG] });
     expect(d).toMatchObject({ tipo: 'preguntar', motivo: 'ninguno' });
     expect(d.tipo === 'preguntar' && d.opciones.map(o => o.id)).toEqual(['a', 'c']);
-    expect(textoPreguntaContacto(d as Preguntar)).toContain('Responde con el número, escribe NUEVO y el nombre para crearlo, o DESCARTAR.');
+    // 2026-10-05: una pregunta, sin comandos en mayúsculas; si es otra persona, se pide la llave (no se crea sin ella).
+    expect(textoPreguntaContacto(d as Preguntar)).toContain('¿Es alguno de estos, o es otra persona?');
+    expect(textoPreguntaContacto(d as Preguntar)).toContain('Si es otra persona, pásame su celular o su correo.');
   });
 
   it('ninguno: pregunta sin lista', () => {
     const d = decidirContacto({ clienteTexto: 'Luis Gómez', extraido: { nombre: null, telefono: null }, candidatos: [] });
     expect(d).toMatchObject({ tipo: 'preguntar', motivo: 'ninguno', opciones: [] });
-    expect(textoPreguntaContacto(d as Preguntar)).toContain('No encontré a «Luis Gómez» en el directorio.');
+    // Sin nadie y sin llave: se pide el celular o el correo (decisión de Mauricio del 2026-10-05).
+    expect(textoPreguntaContacto(d as Preguntar)).toBe('No tengo a Luis Gómez en el directorio. ¿Me pasas su celular o su correo? Sin uno de los dos no lo creo.');
   });
 
   it('la respuesta: número de la lista, NUEVO, un celular, o no se entiende', () => {
