@@ -79,7 +79,29 @@ export interface PasoChips {
   opciones: string[];
 }
 
-export type PasoObjetos = PasoReparto | PasoRelato | PasoChips;
+/**
+ * Texto del instrumento que el bot DICE y nada mas: se manda y la secuencia avanza sola, sin
+ * esperar respuesta y sin dejar fila (no es dato del participante).
+ *
+ * No son frases de cortesia. En el guion de adultos, "Vamos a hacerlo al reves de una
+ * encuesta: ... Yo no la interpreto" es la regla bajo la que la persona esta respondiendo
+ * (es lo que hace de esto auto-significacion y no una encuesta); "Cada uno reparte un total
+ * fijo: si subes uno, los demas ceden" es la instruccion de uso del objeto; y "Ahora salgamos
+ * de esa historia y hablemos de tu semana" es un CAMBIO DE MARCO: los tres repartos
+ * anteriores son sobre la situacion difIcil y `semana` es sobre la semana en general. Sin esa
+ * frase la persona sigue contestando sobre la situacion puntual y el dato de `semana` queda
+ * contaminado. Es error de medicion, no estetica: este texto no se puede perder.
+ */
+export interface PasoBot {
+  tipo: "bot";
+  id: string;
+  texto: string;
+}
+
+export type PasoObjetos = PasoReparto | PasoRelato | PasoChips | PasoBot;
+
+/** Los pasos que ESPERAN respuesta. Un `bot` no: se dice y se sigue. */
+export type PasoQueEspera = PasoReparto | PasoRelato | PasoChips;
 
 export interface SpecObjetos {
   base_url: string;
@@ -117,8 +139,8 @@ export function leerSpecObjetos(raw: unknown, urlDeLaFila?: string | null): Spec
 
   const pasos: PasoObjetos[] = [];
   const vistos = new Set<string>();
-  for (const crudo of crudos) {
-    const paso = leerPaso(crudo, alias);
+  for (let i = 0; i < crudos.length; i++) {
+    const paso = leerPaso(crudos[i], alias, i);
     if (!paso) return null;
     // Un id repetido hace la secuencia ambigua (dos pasos se llamarian igual, y el texto de
     // vuelta de un reparto no distinguiria cual): se rechaza el spec entero, no se adivina.
@@ -140,14 +162,17 @@ function textoUtil(v: unknown): string | null {
 }
 
 /** Un paso del spec, o null si no se puede usar. `alias` = venia de `objetos: [...]`. */
-function leerPaso(crudo: unknown, alias: boolean): PasoObjetos | null {
+function leerPaso(crudo: unknown, alias: boolean, indice: number): PasoObjetos | null {
   if (crudo === null || typeof crudo !== "object" || Array.isArray(crudo)) return null;
   const o = crudo as Record<string, unknown>;
 
-  const id = normalizarIdObjeto(typeof o.id === "string" ? o.id : "");
-  if (!id) return null;
-
   const tipo = alias ? "reparto" : (typeof o.tipo === "string" ? o.tipo : "");
+
+  // Un `bot` no tiene id en el guion del HTML (no es una respuesta): se le sintetiza uno
+  // para que los logs y el chequeo de duplicados tengan algo que nombrar.
+  const id = normalizarIdObjeto(typeof o.id === "string" ? o.id : "") ||
+    (tipo === "bot" ? `bot_${indice}` : "");
+  if (!id) return null;
 
   if (tipo === "reparto") {
     const opciones = typeof o.opciones === "number" && Number.isInteger(o.opciones) &&
@@ -163,6 +188,12 @@ function leerPaso(crudo: unknown, alias: boolean): PasoObjetos | null {
     const pregunta = textoUtil(o.pregunta);
     if (!pregunta) return null;
     return { tipo: "relato", id, pregunta };
+  }
+
+  if (tipo === "bot") {
+    const texto = textoUtil(o.texto);
+    if (!texto) return null;
+    return { tipo: "bot", id, texto };
   }
 
   if (tipo === "chips") {
@@ -350,9 +381,47 @@ export function estadoInicialObjetos(studyId: string): EstadoObjetos {
   return { modo: MODO_OBJETOS, study_id: studyId, paso: 0, recibidos: [], repreguntados: [] };
 }
 
-/** El paso en el que va la persona, o null si ya los respondio todos. */
-export function pasoPendiente(spec: SpecObjetos, estado: EstadoObjetos): PasoObjetos | null {
-  return spec.pasos[pasoSano(estado)] ?? null;
+/**
+ * El paso en el que va la persona, o null si ya los respondio todos.
+ *
+ * Salta los `bot`: el estado SIEMPRE deberia apuntar a un paso que espera respuesta (lo
+ * mantiene `tramoDesde`), pero un spec editado a mitad de una entrevista puede dejarlo
+ * apuntando a un `bot`, y ahi la secuencia quedaria trabada esperando una respuesta que
+ * nadie va a dar a un texto que no pregunta nada.
+ */
+export function pasoPendiente(spec: SpecObjetos, estado: EstadoObjetos): PasoQueEspera | null {
+  for (let i = pasoSano(estado); i < spec.pasos.length; i++) {
+    const p = spec.pasos[i];
+    if (p.tipo !== "bot") return p;
+  }
+  return null;
+}
+
+/**
+ * El tramo que sigue: los textos `bot` consecutivos y el primer paso que SI espera respuesta.
+ *
+ * Es lo que hace que un `bot` se diga y la secuencia avance sola. Devuelve tambien el estado
+ * ya apuntando al paso que espera, de modo que el invariante "`estado.paso` nunca apunta a un
+ * `bot`" lo sostiene esta funcion y no cada llamador.
+ *
+ * Los textos salen EN ORDEN y LITERALES. Quien los envie decide si los agrupa en un mensaje
+ * o los mete en el cuerpo del boton del reparto; lo que no puede es perderlos.
+ */
+export function tramoDesde(spec: SpecObjetos, estado: EstadoObjetos): {
+  textos: string[];
+  paso: PasoQueEspera | null;
+  estado: EstadoObjetos;
+} {
+  const textos: string[] = [];
+  let i = pasoSano(estado);
+  while (i < spec.pasos.length) {
+    const p = spec.pasos[i];
+    if (p.tipo !== "bot") break;
+    textos.push(p.texto);
+    i++;
+  }
+  const paso = (spec.pasos[i] ?? null) as PasoQueEspera | null;
+  return { textos, paso, estado: { ...estado, paso: i } };
 }
 
 /**
@@ -383,15 +452,21 @@ export type RespuestaDelPaso =
 
 export type DecisionObjetos =
   /** No se entendio el mensaje: se reenvia el paso pendiente, SIN error tecnico. */
-  | { tipo: "no_entendido"; pendiente: PasoObjetos }
+  | { tipo: "no_entendido"; pendiente: PasoQueEspera }
   /** Relato de una o dos palabras: UNA repregunta suave y se sigue pase lo que pase. */
   | { tipo: "repregunta"; pendiente: PasoRelato; estado: EstadoObjetos }
   /** Llego un reparto valido que NO es el pendiente (link viejo): se registra, no se retrocede. */
-  | { tipo: "fuera_de_secuencia"; paso: PasoReparto; reparto: RepartoLeido; repetido: boolean; pendiente: PasoObjetos }
-  /** El pendiente: se registra y se manda el siguiente. */
-  | { tipo: "avanza"; paso: PasoObjetos; respuesta: RespuestaDelPaso; siguiente: PasoObjetos; estado: EstadoObjetos }
-  /** El ultimo: se registra, se manda el cierre y la sesion se cierra. */
-  | { tipo: "cierra"; paso: PasoObjetos; respuesta: RespuestaDelPaso; estado: EstadoObjetos };
+  | { tipo: "fuera_de_secuencia"; paso: PasoReparto; reparto: RepartoLeido; repetido: boolean; pendiente: PasoQueEspera }
+  /**
+   * El pendiente: se registra, se dicen los `bot` que vienen (`textos`) y se manda el
+   * siguiente paso que espera respuesta.
+   */
+  | { tipo: "avanza"; paso: PasoQueEspera; respuesta: RespuestaDelPaso; textos: string[]; siguiente: PasoQueEspera; estado: EstadoObjetos }
+  /**
+   * El ultimo: se registra, se dicen los `bot` que queden (`textos` — un guion puede terminar
+   * con texto del instrumento y ese tampoco se puede perder) y se cierra la sesion.
+   */
+  | { tipo: "cierra"; paso: PasoQueEspera; respuesta: RespuestaDelPaso; textos: string[]; estado: EstadoObjetos };
 
 export interface EntradaObjetos {
   texto: string;
@@ -464,7 +539,7 @@ export function decidirObjetos(
 function decidirReparto(
   spec: SpecObjetos,
   estado: EstadoObjetos,
-  pendiente: PasoObjetos,
+  pendiente: PasoQueEspera,
   paso: PasoReparto,
   reparto: RepartoLeido,
 ): DecisionObjetos {
@@ -488,19 +563,25 @@ function decidirReparto(
 function avanzar(
   spec: SpecObjetos,
   estado: EstadoObjetos,
-  paso: PasoObjetos,
+  paso: PasoQueEspera,
   respuesta: RespuestaDelPaso,
 ): DecisionObjetos {
   const recibidos = estado.recibidos.includes(paso.id)
     ? estado.recibidos
     : [...estado.recibidos, paso.id];
-  const indice = pasoSano(estado) + 1;
-  const siguiente = spec.pasos[indice] ?? null;
-  const estadoNuevo: EstadoObjetos = { ...estado, paso: indice, recibidos };
+  // Se avanza desde el paso que SE RESPONDIO, no desde `estado.paso`. No es lo mismo: si el
+  // estado quedo apuntando a un `bot` (spec editado a mitad, o `paso` corrupto),
+  // `pasoPendiente` lo salto para encontrar a quien preguntar, y sumarle 1 al indice viejo
+  // dejaria la secuencia un paso atras y repetiria el `bot` que ya se dijo.
+  const i = spec.pasos.findIndex((p) => p.id === paso.id);
+  const desde = (i >= 0 ? i : pasoSano(estado)) + 1;
+  // `tramoDesde` recoge los `bot` que siguen y deja el estado en el proximo paso que espera
+  // respuesta: asi el texto del instrumento viaja con la decision y no se pierde.
+  const tramo = tramoDesde(spec, { ...estado, paso: desde, recibidos });
 
-  return siguiente
-    ? { tipo: "avanza", paso, respuesta, siguiente, estado: estadoNuevo }
-    : { tipo: "cierra", paso, respuesta, estado: estadoNuevo };
+  return tramo.paso
+    ? { tipo: "avanza", paso, respuesta, textos: tramo.textos, siguiente: tramo.paso, estado: tramo.estado }
+    : { tipo: "cierra", paso, respuesta, textos: tramo.textos, estado: tramo.estado };
 }
 
 // ---------------------------------------------------------------------------------------
@@ -660,7 +741,7 @@ export async function guardarRespuestaDelPaso(
   supabase: Supa,
   estudio: string,
   phone: string,
-  paso: PasoObjetos,
+  paso: PasoQueEspera,
   respuesta: RespuestaDelPaso,
 ): Promise<void> {
   const { error } = await supabase.from("cardumen_respuestas").insert({
@@ -683,7 +764,7 @@ export async function guardarRespuestaDelPaso(
 }
 
 function cuerpoDeRespuesta(
-  paso: PasoObjetos,
+  paso: PasoQueEspera,
   respuesta: RespuestaDelPaso,
 ): Record<string, unknown> {
   if (respuesta.tipo === "reparto") {

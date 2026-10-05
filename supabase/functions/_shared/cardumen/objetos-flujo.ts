@@ -24,10 +24,11 @@ import {
   hayRegistroDelObjeto,
   idBotonChip,
   pasoPendiente,
+  tramoDesde,
   urlDelObjeto,
   type EstadoObjetos,
   type EstudioObjetos,
-  type PasoObjetos,
+  type PasoQueEspera,
   type RespuestaDelPaso,
   type SpecObjetos,
 } from "./objetos.ts";
@@ -59,30 +60,41 @@ const ENCUADRE_GENERICO =
 
 const CIERRE_GENERICO = "Listo, eso era todo. Gracias: lo que contaste ya forma parte del cardumen.";
 
-function etiqueta(paso: PasoObjetos): string {
+function etiqueta(paso: PasoQueEspera): string {
   if (paso.tipo === "reparto" && paso.titulo) return paso.titulo;
   return paso.id.replace(/_/g, " ");
 }
 
 /**
- * Manda el paso.
+ * Manda el paso, con el texto del instrumento (`preludio`) que lo precede.
  *
- * `acuse` solo se usa en los pasos de reparto, donde el cuerpo del boton no es un enunciado
- * del instrumento. En relato y opcion unica el mensaje es el enunciado LITERAL y nada mas.
+ * `preludio` son los `bot` del guion, LITERALES y en orden, mas (si no hubo ninguno) el acuse
+ * generico. Donde el paso es un reparto van DENTRO del cuerpo del boton: el cuerpo no es un
+ * enunciado del instrumento, asi que ahi se pueden juntar y se ahorra un mensaje. Donde el
+ * paso es un relato o una opcion unica van en un mensaje APARTE, porque el del paso tiene que
+ * ser el enunciado literal y nada mas.
+ *
+ * Si hay texto del instrumento, ese REEMPLAZA al acuse generico: la frase del guion dice lo
+ * mismo y mejor (la de adultos empieza, literalmente, con "Gracias.").
  */
 async function mandarPaso(
   phone: string,
   estudio: string,
   spec: SpecObjetos,
-  paso: PasoObjetos,
-  acuse?: string | null,
+  paso: PasoQueEspera,
+  preludio: string[] = [],
 ): Promise<void> {
+  const previo = preludio.filter((t) => t && t.trim()).join("\n\n");
+
   if (paso.tipo === "reparto") {
     const url = urlDelObjeto(spec.base_url, estudio, paso.id, phone);
-    const cuerpo = acuse ? `${acuse}\n\n*${etiqueta(paso)}*` : `*${etiqueta(paso)}*`;
+    const cuerpo = previo ? `${previo}\n\n*${etiqueta(paso)}*` : `*${etiqueta(paso)}*`;
     await sendCtaUrl(phone, cuerpo, CTA, url, ctxCardumen(estudio, cuerpo));
     return;
   }
+
+  // El texto del instrumento NO se pega al enunciado: va en su propio mensaje, antes.
+  if (previo) await sendTextMessage(phone, previo, ctxCardumen(estudio, previo));
 
   if (paso.tipo === "chips") {
     if (paso.opciones.length <= MAX_BOTONES) {
@@ -105,18 +117,19 @@ export async function startObjetos(
   est: EstudioObjetos,
   _waMessageId?: string,
 ): Promise<void> {
-  const estado = estadoInicialObjetos(est.estudio);
-  const primero = pasoPendiente(est.spec, estado);
-  if (!primero) {
-    console.error(`[cardumen-objetos] estudio '${est.estudio}' sin pasos: no se abre`);
+  // El tramo inicial: los `bot` de apertura del guion y el primer paso que espera respuesta.
+  const tramo = tramoDesde(est.spec, estadoInicialObjetos(est.estudio));
+  if (!tramo.paso) {
+    console.error(`[cardumen-objetos] estudio '${est.estudio}' sin pasos que esperen respuesta: no se abre`);
     return;
   }
-  await guardarSesionObjetos(supabase, phone, estado, false);
-  // El encuadre va en su PROPIO mensaje: el del paso tiene que ser el enunciado literal.
+  await guardarSesionObjetos(supabase, phone, tramo.estado, false);
+  // El encuadre va SOLO, en su propio mensaje: es el aviso de datos y no se diluye con el
+  // texto del instrumento (que entra despues, en `mandarPaso`, como preludio).
   const enc = est.spec.encuadre ?? ENCUADRE_GENERICO;
   await sendTextMessage(phone, enc, ctxCardumen(est.estudio, enc));
-  await mandarPaso(phone, est.estudio, est.spec, primero, null);
-  console.log(`[cardumen-objetos] abierta '${est.estudio}' para ${phone} en '${primero.id}'`);
+  await mandarPaso(phone, est.estudio, est.spec, tramo.paso, tramo.textos);
+  console.log(`[cardumen-objetos] abierta '${est.estudio}' para ${phone} en '${tramo.paso.id}'`);
 }
 
 /**
@@ -129,7 +142,7 @@ async function registrarSiFalta(
   supabase: Supa,
   estudio: string,
   phone: string,
-  paso: PasoObjetos,
+  paso: PasoQueEspera,
   respuesta: RespuestaDelPaso,
 ): Promise<void> {
   if (await hayRegistroDelObjeto(supabase, estudio, phone, paso.id)) return;
@@ -190,7 +203,9 @@ export async function continueObjetos(
   }
 
   if (decision.tipo === "no_entendido") {
-    const acuse = decision.pendiente.tipo === "reparto" ? NO_ENTENDIDO_REPARTO : null;
+    // Se reenvia el paso, NO el texto del instrumento que ya se dijo: repetirlo entero seria
+    // ruido, y el enunciado del paso sigue saliendo literal.
+    const acuse = decision.pendiente.tipo === "reparto" ? [NO_ENTENDIDO_REPARTO] : [];
     await mandarPaso(phone, est.estudio, est.spec, decision.pendiente, acuse);
     return;
   }
@@ -207,7 +222,7 @@ export async function continueObjetos(
     // Link viejo reabierto: el registro vale, pero la secuencia NO retrocede.
     await registrarSiFalta(supabase, est.estudio, phone, decision.paso, { tipo: "reparto", reparto: decision.reparto });
     const acuse = decision.repetido ? "Ese ya lo tenía." : "Recibido.";
-    await mandarPaso(phone, est.estudio, est.spec, decision.pendiente, `${acuse} Seguimos con el que falta:`);
+    await mandarPaso(phone, est.estudio, est.spec, decision.pendiente, [`${acuse} Seguimos con el que falta:`]);
     return;
   }
 
@@ -215,22 +230,25 @@ export async function continueObjetos(
 
   if (decision.tipo === "avanza") {
     await guardarSesionObjetos(supabase, phone, decision.estado, false);
-    await mandarPaso(phone, est.estudio, est.spec, decision.siguiente, acusePara(decision.siguiente));
+    await mandarPaso(phone, est.estudio, est.spec, decision.siguiente, preludio(decision.textos, decision.siguiente));
     return;
   }
 
-  // cierra
-  await cerrar(supabase, phone, est, decision.estado);
+  // cierra. Los `bot` que queden van ANTES del cierre: un guion puede terminar con texto del
+  // instrumento y ese tampoco se puede perder.
+  await cerrar(supabase, phone, est, decision.estado, decision.textos);
   console.log(`[cardumen-objetos] ${phone} termino '${est.estudio}'`);
 }
 
 /**
- * Acuse del paso que SIGUE. Solo existe para los repartos, porque solo ahi hay un cuerpo que
- * no es enunciado del instrumento. Es neutro a proposito: no nombra ni resume lo que la
- * persona acaba de contar.
+ * Lo que va antes del paso: el texto del instrumento si lo hay, y si no el acuse generico.
+ *
+ * El acuse generico solo existe para los repartos (solo ahi hay un cuerpo que no es enunciado)
+ * y es neutro a proposito: no nombra ni resume lo que la persona acaba de contar.
  */
-function acusePara(siguiente: PasoObjetos): string | null {
-  return siguiente.tipo === "reparto" ? "Gracias — ahora una figura." : null;
+function preludio(textos: string[], siguiente: PasoQueEspera): string[] {
+  if (textos.length > 0) return textos;
+  return siguiente.tipo === "reparto" ? ["Gracias — ahora una figura."] : [];
 }
 
 async function cerrar(
@@ -238,8 +256,11 @@ async function cerrar(
   phone: string,
   est: EstudioObjetos,
   estado: EstadoObjetos,
+  textos: string[] = [],
 ): Promise<void> {
   await guardarSesionObjetos(supabase, phone, estado, true);
+  const previo = textos.filter((t) => t && t.trim()).join("\n\n");
+  if (previo) await sendTextMessage(phone, previo, ctxCardumen(est.estudio, previo));
   const t = est.spec.cierre ?? CIERRE_GENERICO;
   await sendTextMessage(phone, t, ctxCardumen(est.estudio, t));
 }
@@ -267,7 +288,7 @@ export async function recordatorioObjetos(
     est.estudio,
     est.spec,
     pendiente,
-    pendiente.tipo === "reparto" ? "¿Seguimos? Te quedó uno a medias:" : null,
+    pendiente.tipo === "reparto" ? ["¿Seguimos? Te quedó uno a medias:"] : [],
   );
   return true;
 }

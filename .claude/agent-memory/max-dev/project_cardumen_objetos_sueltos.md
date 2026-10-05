@@ -38,6 +38,20 @@ Cualquier envío proactivo en el camino crítico tira eso por la borda.
   adultos preguntan "en esa situación" y nadie había pedido la situación). El `spec` es una
   lista de `pasos` con `tipo`: `chips` (opción única), `relato` (micro-narrativa) y `reparto`.
   La página sigue sirviendo SOLO los repartos (`pasoPorId` filtra `t === 'reparto'`).
+- ⚠️⚠️ **Los cuatro `t:'bot'` del guion SON pasos (`tipo: 'bot'`), no decoración.** Entraron
+  el 2026-10-05 después de que los descarté y Mauricio los revisó uno por uno. El que más
+  pesa: *«Ahora salgamos de esa historia y hablemos de tu semana»* es un **cambio de marco**
+  — los tres repartos anteriores son sobre la situación difícil y `semana` es sobre la semana
+  en general. Sin esa frase la persona sigue contestando sobre la situación puntual y el dato
+  de `semana` mide otra cosa: **es error de medición, no estética.** Los otros dos que cargan
+  peso: *«Yo no la interpreto»* (la regla que hace de esto auto-significación) y *«si subes
+  uno, los demás ceden»* (instrucción de uso del objeto). Niños tiene sus equivalentes.
+  Se dicen y la secuencia avanza sola, sin fila. `tramoDesde` los recoge; hay una prueba que
+  verifica que **ninguno se pierde ni se repite** al recorrer la entrevista entera.
+- ⚠️ **El avance se cuenta desde el paso RESPONDIDO, no desde `estado.paso`.** Con `bot`
+  intercalados no es lo mismo: `pasoPendiente` los salta para encontrar a quién preguntar, y
+  sumarle 1 al índice viejo deja la secuencia un paso atrás y repite el texto. Lo encontró una
+  prueba, no el razonamiento.
 - ⚠️⚠️ **Los enunciados son LITERALES y el relato se guarda VERBATIM.** El bot manda
   `paso.pregunta` tal cual, en su propio mensaje y sin nada pegado; no parafrasea, no resume
   la historia ni se la repite a la persona en otras palabras, y NADA de esto pasa por un LLM.

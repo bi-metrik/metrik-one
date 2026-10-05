@@ -48,6 +48,7 @@ comment on column public.cardumen_estudios.modo is
 --      "encuadre": "<primer mensaje del bot, va en mensaje aparte>",
 --      "cierre":   "<ultimo mensaje, cierra la sesion>",
 --      "pasos": [
+--        { "tipo": "bot",     "texto": "<LITERAL>" },
 --        { "tipo": "chips",   "id": "...", "pregunta": "<LITERAL>", "opciones": ["...","..."] },
 --        { "tipo": "relato",  "id": "...", "pregunta": "<LITERAL>" },
 --        { "tipo": "reparto", "id": "...", "titulo": "<etiqueta corta>", "opciones": <cuantos> }
@@ -67,10 +68,21 @@ comment on column public.cardumen_estudios.modo is
 --    `opciones` del reparto (un numero) no es decorativo: si la cantidad de porcentajes que
 --    llega no coincide, el mensaje viene mutilado y NO se registra, se reenvia el paso.
 --
---    Los `t:'bot'` del guion (las frases de transicion del instrumento web) NO entran: en el
---    chat el acuse va pegado al boton del reparto siguiente, y mandarlos sueltos seria sumar
---    mensajes sin dato. El relato se guarda VERBATIM y el acuse es neutro: el bot no resume ni
---    le repite la historia a la persona en otras palabras.
+--    Los `t:'bot'` del guion SI entran, como `tipo: 'bot'`: el bot los dice, avanza solo y no
+--    deja fila (no son dato del participante). NO son cortesia, y por eso no se podian omitir:
+--      * "Vamos a hacerlo al reves de una encuesta: ... Yo no la interpreto" es la REGLA bajo
+--        la que la persona esta respondiendo — es lo que hace de esto auto-significacion;
+--      * "Cada uno reparte un total fijo: si subes uno, los demas ceden" es la instruccion de
+--        uso del objeto;
+--      * "Ahora salgamos de esa historia y hablemos de tu semana" es un CAMBIO DE MARCO: los
+--        tres repartos anteriores son sobre la situacion dificil y `semana` es sobre la semana
+--        en general. Sin esa frase la persona sigue contestando sobre la situacion puntual y
+--        el dato de `semana` queda contaminado. Es error de medicion, no estetica.
+--    Los `bot` consecutivos se agrupan en UN mensaje, y los que preceden a un reparto van en
+--    el cuerpo del boton (que no es un enunciado del instrumento), para no inundar el chat.
+--
+--    El relato se guarda VERBATIM: el bot no resume, no interpreta y no le repite la historia
+--    a la persona en otras palabras.
 --
 -- 3. TEXTO DEL ENCUADRE: BORRADOR. Dice lo que tiene que decir (que las respuestas se envian
 --    al estudio y que el numero de WhatsApp queda ligado como identificador), pero NO es texto
@@ -83,9 +95,14 @@ values
    'objetos',
    jsonb_build_object(
      'base_url', 'https://reframeit.metrik.com.co/adultos',
-     'encuadre', E'🐟 *Cardumen*\n\nSon unas preguntas cortas y no hay respuestas correctas. Primero tu historia; después tú mismo la ubicas. Yo no la interpreto.\n\nLo que respondas se envía al estudio y tu número de WhatsApp queda ligado a tus respuestas como identificador. Si no quieres seguir, no respondas.',
+     -- El encuadre es SOLO el aviso de datos y va en su propio mensaje: el saludo y la regla
+     -- del metodo ya los dice el guion, en los dos primeros `bot`. Repetirlos aqui seria
+     -- decir dos veces lo mismo con otras palabras.
+     'encuadre', E'🐟 *Cardumen*\n\nAntes de empezar: lo que respondas se envía al estudio y tu número de WhatsApp queda ligado a tus respuestas como identificador. Si no quieres seguir, no respondas.',
      'cierre', 'Listo, eso era todo. Gracias: lo que contaste ya forma parte del cardumen.',
      'pasos', jsonb_build_array(
+       jsonb_build_object('tipo', 'bot', 'texto', 'Hola. Soy el entrevistador de Cardumen. Esto toma unos minutos y no hay respuestas correctas.'),
+       jsonb_build_object('tipo', 'bot', 'texto', 'Vamos a hacerlo al revés de una encuesta: primero tu historia, después tú mismo la ubicas. Yo no la interpreto.'),
        jsonb_build_object(
          'tipo', 'chips', 'id', 'antiguedad',
          'pregunta', '¿Cuánto llevas en tu trabajo actual?',
@@ -93,8 +110,12 @@ values
        jsonb_build_object(
          'tipo', 'relato', 'id', 'historia',
          'pregunta', 'Cuéntame una situación reciente del trabajo que de verdad te haya costado. No necesito el contexto completo, solo lo que pasó.'),
+       jsonb_build_object('tipo', 'bot', 'texto', 'Gracias. Ahora te voy a pedir que ubiques esa misma historia en tres objetos. Cada uno reparte un total fijo: si subes uno, los demás ceden.'),
        jsonb_build_object('tipo', 'reparto', 'id', 'quien_decidio',       'titulo', 'Las tres fuerzas',         'opciones', 3),
        jsonb_build_object('tipo', 'reparto', 'id', 'sentia_vs_esperaban', 'titulo', 'La balanza',               'opciones', 2),
+       -- CAMBIO DE MARCO: lo de arriba es sobre la situacion dificil, `semana` es sobre la
+       -- semana en general. Sin este texto el dato de `semana` queda contaminado.
+       jsonb_build_object('tipo', 'bot', 'texto', 'Ahora salgamos de esa historia y hablemos de tu semana. Esta se responde con fichas, sin arrastrar nada.'),
        jsonb_build_object('tipo', 'reparto', 'id', 'semana',              'titulo', 'Tu semana en diez fichas', 'opciones', 5),
        jsonb_build_object('tipo', 'reparto', 'id', 'preocupaciones',      'titulo', 'Lo que te quita el sueño', 'opciones', 8),
        jsonb_build_object(
@@ -108,9 +129,11 @@ values
    'objetos',
    jsonb_build_object(
      'base_url', 'https://reframeit.metrik.com.co/ninos',
-     'encuadre', E'🐟 *Cardumen*\n\nSon unas preguntas cortas. No hay respuestas buenas ni malas y nadie te va a calificar.\n\nLo que respondas se envía al estudio y este número de WhatsApp queda ligado a las respuestas como identificador. Si no quieren seguir, no respondan.',
+     'encuadre', E'🐟 *Cardumen*\n\nAntes de empezar: lo que respondas se envía al estudio y este número de WhatsApp queda ligado a las respuestas como identificador. Si no quieren seguir, no respondan.',
      'cierre', '¡Listo! Eso era todo. Gracias por contármelo.',
      'pasos', jsonb_build_array(
+       jsonb_build_object('tipo', 'bot', 'texto', '¡Hola! Soy Pulpo. Vivo en el fondo del mar y me gusta que me cuenten cosas. 🐙'),
+       jsonb_build_object('tipo', 'bot', 'texto', 'No hay respuestas buenas ni malas. Nadie te va a calificar.'),
        jsonb_build_object(
          'tipo', 'chips', 'id', 'edad',
          'pregunta', 'Primero, lo más fácil: ¿cuántos años tienes?',
@@ -118,8 +141,11 @@ values
        jsonb_build_object(
          'tipo', 'relato', 'id', 'historia',
          'pregunta', 'Ahora cuéntame algo que te pasó esta semana y que todavía te acuerdas. Puede ser bueno o puede ser feo.'),
+       jsonb_build_object('tipo', 'bot', 'texto', 'Gracias por contármelo. Ahora te voy a pedir algo distinto: en vez de escribir, vas a estirarme los brazos.'),
        jsonb_build_object('tipo', 'reparto', 'id', 'peso_quien',      'titulo', 'El pulpo',     'opciones', 4),
        jsonb_build_object('tipo', 'reparto', 'id', 'como_me_dejo',    'titulo', 'La balanza',   'opciones', 2),
+       -- Cambio de instrumento: de arrastrar a sembrar objetos contables. Instruccion de uso.
+       jsonb_build_object('tipo', 'bot', 'texto', 'Ya casi. Esta última es con semillas: te doy siete y las siembras donde quieras.'),
        jsonb_build_object('tipo', 'reparto', 'id', 'donde_tranquilo', 'titulo', 'Las semillas', 'opciones', 3),
        jsonb_build_object(
          'tipo', 'chips', 'id', 'le_conte',

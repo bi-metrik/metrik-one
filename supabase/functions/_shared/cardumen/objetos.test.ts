@@ -9,7 +9,9 @@
  *      de Grupo Progreso, y la palabra de consentimiento del chat es justamente "LISTO";
  *   3. que un reintento no duplique ni salte un paso, y que un link viejo no retroceda la
  *      secuencia NI se guarde como si fuera el relato de la persona;
- *   4. que el relato se guarde VERBATIM y la longitud de una respuesta nunca bloquee.
+ *   4. que el relato se guarde VERBATIM y la longitud de una respuesta nunca bloquee;
+ *   5. que ningun texto `bot` del instrumento se pierda — en especial el cambio de marco
+ *      antes de `semana`, sin el cual ese reparto mide otra cosa.
  *
  * VISTO FALLAR (mutaciones, todas corridas):
  *   - quitando el `(?<![a-z0-9])` del regex de numeros cae `id con digito al final`;
@@ -29,6 +31,11 @@
  *   - aceptando un paso narrativo sin enunciado, o un `tipo` desconocido, cae
  *     `un paso narrativo SIN enunciado invalida el spec` / `tipo desconocido`;
  *   - marcando el relato con `origen: 'texto_whatsapp'` cae `relato: micro_narrativa ...`;
+ *   - descartando los `bot` en `tramoDesde`, o devolviendo `textos: []` en `avanza` o en
+ *     `cierra`, cae `NINGUN bot del guion se pierde` (y con el, el cambio de marco de
+ *     `semana`); aceptando un `bot` sin texto cae su caso;
+ *   - contando el avance desde `estado.paso` en vez de desde el paso RESPONDIDO, o dejando
+ *     que `pasoPendiente` no salte los `bot`, cae `un estado que quedo apuntando a un bot`;
  *   - devolviendo `estado` sin tocar en `fuera_de_secuencia` (o avanzando el paso) cae
  *     `un link viejo registra pero NO retrocede`;
  *   - quitando el `s.modo === MODO_OBJETOS` de `esEstadoObjetos` cae `una sesion de chat o de
@@ -54,6 +61,7 @@ import {
   parsearListo,
   pasoPendiente,
   relatoEsMuyCorto,
+  tramoDesde,
   resolverEstudioObjetosPorTrigger,
   urlDelObjeto,
   vectorDePorcentajes,
@@ -70,11 +78,21 @@ import {
 // prueba deja de verificar lo unico que importa de un paso narrativo.
 // ---------------------------------------------------------------------------------------
 
+// Los cuatro `bot` del guion de adultos, literales (lineas 748, 749, 755 y 770 del HTML).
+// Van en constantes porque las pruebas verifican que NINGUNO se pierda, y para eso hay que
+// compararlos caracter por caracter.
+const BOT_SALUDO = 'Hola. Soy el entrevistador de Cardumen. Esto toma unos minutos y no hay respuestas correctas.'
+const BOT_METODO = 'Vamos a hacerlo al revés de una encuesta: primero tu historia, después tú mismo la ubicas. Yo no la interpreto.'
+const BOT_REGLA_OBJETO = 'Gracias. Ahora te voy a pedir que ubiques esa misma historia en tres objetos. Cada uno reparte un total fijo: si subes uno, los demás ceden.'
+const BOT_CAMBIO_DE_MARCO = 'Ahora salgamos de esa historia y hablemos de tu semana. Esta se responde con fichas, sin arrastrar nada.'
+
 const SPEC_CRUDO = {
   base_url: 'https://reframeit.metrik.com.co/adultos',
-  encuadre: 'Son unas preguntas cortas.',
+  encuadre: 'Antes de empezar: lo que respondas se envía al estudio.',
   cierre: 'Listo, eso era todo.',
   pasos: [
+    { tipo: 'bot', texto: BOT_SALUDO },
+    { tipo: 'bot', texto: BOT_METODO },
     {
       tipo: 'chips', id: 'antiguedad', pregunta: '¿Cuánto llevas en tu trabajo actual?',
       opciones: ['Menos de 1 año', '1 a 3 años', '3 a 7 años', 'Más de 7 años'],
@@ -83,8 +101,10 @@ const SPEC_CRUDO = {
       tipo: 'relato', id: 'historia',
       pregunta: 'Cuéntame una situación reciente del trabajo que de verdad te haya costado. No necesito el contexto completo, solo lo que pasó.',
     },
+    { tipo: 'bot', texto: BOT_REGLA_OBJETO },
     { tipo: 'reparto', id: 'quien_decidio', titulo: 'Las tres fuerzas', opciones: 3 },
     { tipo: 'reparto', id: 'sentia_vs_esperaban', titulo: 'La balanza', opciones: 2 },
+    { tipo: 'bot', texto: BOT_CAMBIO_DE_MARCO },
     { tipo: 'reparto', id: 'semana', titulo: 'Tu semana en diez fichas', opciones: 5 },
     { tipo: 'reparto', id: 'preocupaciones', titulo: 'Lo que te quita el sueño', opciones: 8 },
     {
@@ -97,9 +117,22 @@ const SPEC_CRUDO = {
 const spec = leerSpecObjetos(SPEC_CRUDO) as SpecObjetos
 const ESTUDIO = 'cardumen-objetos-adultos'
 
-const CHIPS = spec.pasos[0] as PasoChips
-const HISTORIA = spec.pasos[1] as PasoRelato
-const QUIEN = spec.pasos[2] as PasoReparto
+/** Indice de un paso por su id. Las pruebas ya no pueden contar a mano: entre los pasos que
+ *  esperan respuesta hay `bot` intercalados, y un indice fijo se desalinea al tocar el guion. */
+const indiceDe = (id: string) => spec.pasos.findIndex((p) => p.id === id)
+
+const CHIPS = spec.pasos[indiceDe('antiguedad')] as PasoChips
+const HISTORIA = spec.pasos[indiceDe('historia')] as PasoRelato
+const QUIEN = spec.pasos[indiceDe('quien_decidio')] as PasoReparto
+
+/** Estado justo antes de responder el paso `id`. */
+const ante = (id: string, recibidos: string[] = [], repreguntados: string[] = []): EstadoObjetos => ({
+  modo: MODO_OBJETOS,
+  study_id: ESTUDIO,
+  paso: indiceDe(id),
+  recibidos,
+  repreguntados,
+})
 
 const estadoEn = (paso: number, recibidos: string[] = [], repreguntados: string[] = []): EstadoObjetos => ({
   modo: MODO_OBJETOS,
@@ -119,10 +152,14 @@ describe('leerSpecObjetos', () => {
   it('lee la secuencia completa, en orden, con sus tipos', () => {
     expect(spec.base_url).toBe(SPEC_CRUDO.base_url)
     expect(spec.pasos.map((p) => [p.tipo, p.id])).toEqual([
+      ['bot', 'bot_0'],              // id sintetizado: un `bot` no tiene id en el guion
+      ['bot', 'bot_1'],
       ['chips', 'antiguedad'],
       ['relato', 'historia'],
+      ['bot', 'bot_4'],
       ['reparto', 'quien_decidio'],
       ['reparto', 'sentia_vs_esperaban'],
+      ['bot', 'bot_7'],
       ['reparto', 'semana'],
       ['reparto', 'preocupaciones'],
       ['relato', 'cierre_narrativo'],
@@ -132,7 +169,7 @@ describe('leerSpecObjetos', () => {
   it('el enunciado queda LITERAL, con sus tildes y su puntuacion', () => {
     // Si esto se "limpia" en algun punto, el bot manda otra pregunta y las respuestas dejan
     // de ser comparables entre participantes.
-    expect(HISTORIA.pregunta).toBe(SPEC_CRUDO.pasos[1].pregunta)
+    expect(HISTORIA.pregunta).toBe('Cuéntame una situación reciente del trabajo que de verdad te haya costado. No necesito el contexto completo, solo lo que pasó.')
     expect(CHIPS.pregunta).toBe('¿Cuánto llevas en tu trabajo actual?')
     expect(CHIPS.opciones).toEqual(['Menos de 1 año', '1 a 3 años', '3 a 7 años', 'Más de 7 años'])
   })
@@ -197,13 +234,20 @@ describe('leerSpecObjetos', () => {
 // El guion de ninos (leido de ninos.html). Va aparte porque es el que trae los dos casos
 // que no estan en adultos: una opcion unica de CINCO opciones (arriba del tope de botones
 // interactivos de WhatsApp) y un paso de opcion unica al FINAL de la secuencia.
+const BOT_NINOS_SALUDO = '¡Hola! Soy Pulpo. Vivo en el fondo del mar y me gusta que me cuenten cosas. 🐙'
+const BOT_NINOS_SEMILLAS = 'Ya casi. Esta última es con semillas: te doy siete y las siembras donde quieras.'
+
 const SPEC_NINOS = {
   base_url: 'https://reframeit.metrik.com.co/ninos',
   pasos: [
+    { tipo: 'bot', texto: BOT_NINOS_SALUDO },
+    { tipo: 'bot', texto: 'No hay respuestas buenas ni malas. Nadie te va a calificar.' },
     { tipo: 'chips', id: 'edad', pregunta: 'Primero, lo más fácil: ¿cuántos años tienes?', opciones: ['8', '9', '10', '11', '12'] },
     { tipo: 'relato', id: 'historia', pregunta: 'Ahora cuéntame algo que te pasó esta semana y que todavía te acuerdas. Puede ser bueno o puede ser feo.' },
+    { tipo: 'bot', texto: 'Gracias por contármelo. Ahora te voy a pedir algo distinto: en vez de escribir, vas a estirarme los brazos.' },
     { tipo: 'reparto', id: 'peso_quien', titulo: 'El pulpo', opciones: 4 },
     { tipo: 'reparto', id: 'como_me_dejo', titulo: 'La balanza', opciones: 2 },
+    { tipo: 'bot', texto: BOT_NINOS_SEMILLAS },
     { tipo: 'reparto', id: 'donde_tranquilo', titulo: 'Las semillas', opciones: 3 },
     { tipo: 'chips', id: 'le_conte', pregunta: 'Una última: ¿eso que me contaste se lo habías contado a alguien más?', opciones: ['Sí, a un adulto', 'Sí, a un amigo', 'No, a nadie'] },
   ],
@@ -212,21 +256,33 @@ const SPEC_NINOS = {
 describe('el guion de ninos, tal como queda sembrado', () => {
   const sn = leerSpecObjetos(SPEC_NINOS) as SpecObjetos
 
-  it('se lee entero y en orden', () => {
-    expect(sn.pasos.map((p) => p.id)).toEqual([
+  it('se lee entero y en orden, con sus `bot` en su sitio', () => {
+    expect(sn.pasos.filter((p) => p.tipo !== 'bot').map((p) => p.id)).toEqual([
       'edad', 'historia', 'peso_quien', 'como_me_dejo', 'donde_tranquilo', 'le_conte',
     ])
+    expect(sn.pasos.filter((p) => p.tipo === 'bot')).toHaveLength(4)
+  })
+
+  it('el cambio de marco de las semillas viaja con el paso, no se pierde', () => {
+    const i = sn.pasos.findIndex((p) => p.id === 'como_me_dejo')
+    const d = decidirObjetos(sn, { modo: MODO_OBJETOS, study_id: 'x', paso: i, recibidos: [] }, entrada('Listo como_me_dejo 70-30'))
+    expect(d?.tipo).toBe('avanza')
+    if (d?.tipo !== 'avanza') return
+    expect(d.textos).toEqual([BOT_NINOS_SEMILLAS])
+    expect(d.siguiente.id).toBe('donde_tranquilo')
   })
 
   it('la opcion unica de CINCO opciones vale: el tope de 3 es de los botones, no del spec', () => {
     // Arriba de 3 el flujo manda lista numerada. Si el spec las rechazara, el paso de edad
     // de ninos (5 opciones) y el de antiguedad de adultos (4) no se podrian sembrar.
-    expect((sn.pasos[0] as PasoChips).opciones).toHaveLength(5)
-    expect(leerChips(sn.pasos[0] as PasoChips, '5')).toBe('12')
+    const edad = sn.pasos.find((p) => p.id === 'edad') as PasoChips
+    expect(edad.opciones).toHaveLength(5)
+    expect(leerChips(edad, '5')).toBe('12')
   })
 
   it('termina en una opcion unica: el ultimo paso tambien cierra', () => {
-    const d = decidirObjetos(sn, { modo: MODO_OBJETOS, study_id: 'x', paso: 5, recibidos: [] }, entrada('3'))
+    const i = sn.pasos.findIndex((p) => p.id === 'le_conte')
+    const d = decidirObjetos(sn, { modo: MODO_OBJETOS, study_id: 'x', paso: i, recibidos: [] }, entrada('3'))
     expect(d?.tipo).toBe('cierra')
     if (d?.tipo !== 'cierra') return
     expect(d.respuesta).toEqual({ tipo: 'chips', valor: 'No, a nadie' })
@@ -390,9 +446,9 @@ describe('esEstadoObjetos', () => {
 
 describe('pasoPendiente', () => {
   it('es el paso en que va, y null cuando ya se respondieron todos', () => {
-    expect(pasoPendiente(spec, estadoEn(0))?.id).toBe('antiguedad')
-    expect(pasoPendiente(spec, estadoEn(6))?.id).toBe('cierre_narrativo')
-    expect(pasoPendiente(spec, estadoEn(7))).toBe(null)
+    expect(pasoPendiente(spec, ante('antiguedad'))?.id).toBe('antiguedad')
+    expect(pasoPendiente(spec, ante('cierre_narrativo'))?.id).toBe('cierre_narrativo')
+    expect(pasoPendiente(spec, estadoEn(spec.pasos.length))).toBe(null)
   })
 })
 
@@ -402,21 +458,21 @@ describe('pasoPendiente', () => {
 
 describe('decidirObjetos — opcion unica', () => {
   it('la opcion elegida avanza y se guarda el literal, no el numero', () => {
-    const d = decidirObjetos(spec, estadoEn(0), entrada('3'))
+    const d = decidirObjetos(spec, ante('antiguedad'), entrada('3'))
     expect(d?.tipo).toBe('avanza')
     if (d?.tipo !== 'avanza') return
     expect(d.respuesta).toEqual({ tipo: 'chips', valor: '3 a 7 años' })
     expect(d.siguiente.id).toBe('historia')
-    expect(d.estado.paso).toBe(1)
+    expect(d.estado.paso).toBe(indiceDe('historia'))
   })
 
   it('el boton del paso tambien avanza', () => {
-    const d = decidirObjetos(spec, estadoEn(0), entrada('Menos de 1 año', { botonId: idBotonChip('antiguedad', 0) }))
+    const d = decidirObjetos(spec, ante('antiguedad'), entrada('Menos de 1 año', { botonId: idBotonChip('antiguedad', 0) }))
     expect(d?.tipo).toBe('avanza')
   })
 
   it('lo que no es una opcion reenvia la pregunta, sin error tecnico', () => {
-    const d = decidirObjetos(spec, estadoEn(0), entrada('pues depende'))
+    const d = decidirObjetos(spec, ante('antiguedad'), entrada('pues depende'))
     expect(d).toEqual({ tipo: 'no_entendido', pendiente: CHIPS })
   })
 })
@@ -424,7 +480,7 @@ describe('decidirObjetos — opcion unica', () => {
 describe('decidirObjetos — relato', () => {
   it('guarda el texto VERBATIM, sin tocarle nada', () => {
     const texto = '  Mi jefe me cambió el proyecto dos veces en la misma semana.  '
-    const d = decidirObjetos(spec, estadoEn(1), entrada(texto))
+    const d = decidirObjetos(spec, ante('historia'), entrada(texto))
     expect(d?.tipo).toBe('avanza')
     if (d?.tipo !== 'avanza') return
     // Solo se recortan los espacios de los extremos: ni resumen, ni tildes quitadas, ni
@@ -434,24 +490,24 @@ describe('decidirObjetos — relato', () => {
 
   it('una nota de voz transcrita queda MARCADA como tal', () => {
     // Una transcripcion no es el texto que la persona escribio.
-    const d = decidirObjetos(spec, estadoEn(1), entrada('me cambiaron el proyecto dos veces', { deAudio: true }))
+    const d = decidirObjetos(spec, ante('historia'), entrada('me cambiaron el proyecto dos veces', { deAudio: true }))
     expect(d?.tipo).toBe('avanza')
     if (d?.tipo !== 'avanza') return
     expect(d.respuesta).toEqual({ tipo: 'relato', texto: 'me cambiaron el proyecto dos veces', deAudio: true })
   })
 
   it('un relato de una palabra: UNA repregunta suave, y queda anotada', () => {
-    const d = decidirObjetos(spec, estadoEn(1), entrada('mal'))
+    const d = decidirObjetos(spec, ante('historia'), entrada('mal'))
     expect(d?.tipo).toBe('repregunta')
     if (d?.tipo !== 'repregunta') return
     expect(d.pendiente.id).toBe('historia')
     expect(d.estado.repreguntados).toEqual(['historia'])
-    expect(d.estado.paso).toBe(1) // no avanza
+    expect(d.estado.paso).toBe(indiceDe('historia')) // no avanza
   })
 
   it('la repregunta es UNA sola vez: si insiste con poco, se acepta y sigue', () => {
     // Nunca se bloquea la secuencia por la longitud de una respuesta.
-    const primera = decidirObjetos(spec, estadoEn(1), entrada('mal'))
+    const primera = decidirObjetos(spec, ante('historia'), entrada('mal'))
     expect(primera?.tipo).toBe('repregunta')
     if (primera?.tipo !== 'repregunta') return
 
@@ -463,13 +519,13 @@ describe('decidirObjetos — relato', () => {
   })
 
   it('un mensaje vacio en un relato no avanza ni se guarda', () => {
-    expect(decidirObjetos(spec, estadoEn(1), entrada('   '))?.tipo).toBe('no_entendido')
+    expect(decidirObjetos(spec, ante('historia'), entrada('   '))?.tipo).toBe('no_entendido')
   })
 
   it('un reparto de un link viejo NO se guarda como el relato', () => {
     // Si `parsearListo` no corriera ANTES de la rama del paso pendiente, este mensaje
     // quedaria archivado como la historia que conto la persona.
-    const d = decidirObjetos(spec, estadoEn(1), entrada('Listo quien_decidio 60-20-20'))
+    const d = decidirObjetos(spec, ante('historia'), entrada('Listo quien_decidio 60-20-20'))
     expect(d?.tipo).toBe('fuera_de_secuencia')
     if (d?.tipo !== 'fuera_de_secuencia') return
     expect(d.paso.id).toBe('quien_decidio')
@@ -479,7 +535,7 @@ describe('decidirObjetos — relato', () => {
 
 describe('decidirObjetos — reparto', () => {
   it('el reparto esperado avanza un paso y deja el siguiente listo', () => {
-    const d = decidirObjetos(spec, estadoEn(2), entrada('Listo quien_decidio 60-20-20'))
+    const d = decidirObjetos(spec, ante('quien_decidio'), entrada('Listo quien_decidio 60-20-20'))
     expect(d?.tipo).toBe('avanza')
     if (d?.tipo !== 'avanza') return
     expect(d.respuesta).toEqual({ tipo: 'reparto', reparto: { objeto: 'quien_decidio', porcentajes: [60, 20, 20] } })
@@ -488,22 +544,22 @@ describe('decidirObjetos — reparto', () => {
   })
 
   it('en un paso de reparto, un texto cualquiera reenvia el boton', () => {
-    const d = decidirObjetos(spec, estadoEn(2), entrada('ya lo hice'))
+    const d = decidirObjetos(spec, ante('quien_decidio'), entrada('ya lo hice'))
     expect(d).toEqual({ tipo: 'no_entendido', pendiente: QUIEN })
   })
 
   it('un `Listo` de algo que no es un reparto de este instrumento no se adivina', () => {
-    expect(decidirObjetos(spec, estadoEn(2), entrada('Listo historia 50-50'))?.tipo).toBe('no_entendido')
+    expect(decidirObjetos(spec, ante('quien_decidio'), entrada('Listo historia 50-50'))?.tipo).toBe('no_entendido')
   })
 
   it('numeros de mas o de menos: no se registra un vector de largo equivocado', () => {
     // `quien_decidio` tiene 3 opciones. Un mensaje mutilado trae 2.
-    expect(decidirObjetos(spec, estadoEn(2), entrada('Listo quien_decidio 60-40'))?.tipo).toBe('no_entendido')
-    expect(decidirObjetos(spec, estadoEn(2), entrada('Listo quien_decidio 25-25-25-25'))?.tipo).toBe('no_entendido')
+    expect(decidirObjetos(spec, ante('quien_decidio'), entrada('Listo quien_decidio 60-40'))?.tipo).toBe('no_entendido')
+    expect(decidirObjetos(spec, ante('quien_decidio'), entrada('Listo quien_decidio 25-25-25-25'))?.tipo).toBe('no_entendido')
   })
 
   it('reintento del mismo reparto: registra, NO avanza dos pasos', () => {
-    const primera = decidirObjetos(spec, estadoEn(2), entrada('Listo quien_decidio 60-20-20'))
+    const primera = decidirObjetos(spec, ante('quien_decidio'), entrada('Listo quien_decidio 60-20-20'))
     expect(primera?.tipo).toBe('avanza')
     if (primera?.tipo !== 'avanza') return
 
@@ -517,7 +573,7 @@ describe('decidirObjetos — reparto', () => {
 
   it('un link viejo registra pero NO retrocede la secuencia', () => {
     // Va en `semana` y le llega el reparto de `quien_decidio`, reabierto desde el chat.
-    const estado = estadoEn(4, ['antiguedad', 'historia', 'quien_decidio', 'sentia_vs_esperaban'])
+    const estado = ante('semana', ['antiguedad', 'historia', 'quien_decidio', 'sentia_vs_esperaban'])
     const d = decidirObjetos(spec, estado, entrada('Listo quien_decidio 10-10-80'))
     expect(d?.tipo).toBe('fuera_de_secuencia')
     if (d?.tipo !== 'fuera_de_secuencia') return
@@ -527,7 +583,7 @@ describe('decidirObjetos — reparto', () => {
   })
 
   it('un reparto posterior adelantado tambien registra sin mover el pendiente', () => {
-    const d = decidirObjetos(spec, estadoEn(2), entrada('Listo semana 2-2-2-2-2'))
+    const d = decidirObjetos(spec, ante('quien_decidio'), entrada('Listo semana 2-2-2-2-2'))
     expect(d?.tipo).toBe('fuera_de_secuencia')
     if (d?.tipo !== 'fuera_de_secuencia') return
     expect(d.repetido).toBe(false)
@@ -537,10 +593,10 @@ describe('decidirObjetos — reparto', () => {
 
 describe('decidirObjetos — cierre y bordes', () => {
   it('el ultimo paso cierra la secuencia', () => {
-    const d = decidirObjetos(spec, estadoEn(6), entrada('Cambiaría haber hablado antes con mi jefe.'))
+    const d = decidirObjetos(spec, ante('cierre_narrativo'), entrada('Cambiaría haber hablado antes con mi jefe.'))
     expect(d?.tipo).toBe('cierra')
     if (d?.tipo !== 'cierra') return
-    expect(d.estado.paso).toBe(7)
+    expect(d.estado.paso).toBe(spec.pasos.length)
     expect(pasoPendiente(spec, d.estado)).toBe(null)
   })
 
@@ -567,14 +623,128 @@ describe('decidirObjetos — cierre y bordes', () => {
   })
 
   it('secuencia agotada con la sesion abierta: null (el flujo la cierra)', () => {
-    expect(decidirObjetos(spec, estadoEn(7), entrada('Listo semana 2-2-2-2-2'))).toBe(null)
+    expect(decidirObjetos(spec, estadoEn(spec.pasos.length), entrada('Listo semana 2-2-2-2-2'))).toBe(null)
   })
 
   it('un paso corrupto en el estado se trata como el primero, no revienta', () => {
-    const d = decidirObjetos(spec, { ...estadoEn(0), paso: -3 }, entrada('1'))
+    // `paso: -3` se trata como 0, que en este guion es un `bot`: el tramo inicial se dice y
+    // la respuesta la contesta `antiguedad`.
+    const d = decidirObjetos(spec, { ...ante('antiguedad'), paso: -3 }, entrada('1'))
     expect(d?.tipo).toBe('avanza')
     if (d?.tipo !== 'avanza') return
-    expect(d.estado.paso).toBe(1)
+    expect(d.paso.id).toBe('antiguedad')
+    expect(d.estado.paso).toBe(indiceDe('historia'))
+  })
+})
+
+// ---------------------------------------------------------------------------------------
+// Los `bot`: texto del instrumento que el bot DICE y no espera respuesta.
+//
+// No son cortesia. "Yo no la interpreto" es la regla bajo la que la persona responde, "si
+// subes uno, los demas ceden" es la instruccion de uso del objeto, y "Ahora salgamos de esa
+// historia y hablemos de tu semana" es un CAMBIO DE MARCO: los tres repartos anteriores son
+// sobre la situacion difIcil y `semana` es sobre la semana en general. Sin esa frase el dato
+// de `semana` queda contaminado. Lo que estas pruebas protegen es que ninguno se PIERDA.
+// ---------------------------------------------------------------------------------------
+
+describe('pasos `bot`', () => {
+  it('un `bot` sin texto invalida el spec', () => {
+    for (const paso of [{ tipo: 'bot' }, { tipo: 'bot', texto: '  ' }]) {
+      expect(leerSpecObjetos({ base_url: 'https://x.co', pasos: [paso, { tipo: 'relato', id: 'h', pregunta: 'x' }] }), JSON.stringify(paso)).toBe(null)
+    }
+  })
+
+  it('tramoDesde: el tramo de apertura trae los dos `bot` y aterriza en el primer paso que espera', () => {
+    const t = tramoDesde(spec, estadoInicialObjetos(ESTUDIO))
+    expect(t.textos).toEqual([BOT_SALUDO, BOT_METODO])
+    expect(t.paso?.id).toBe('antiguedad')
+    // El estado queda apuntando al paso que espera, nunca a un `bot`.
+    expect(t.estado.paso).toBe(indiceDe('antiguedad'))
+  })
+
+  it('tramoDesde no inventa textos donde no hay `bot`', () => {
+    const t = tramoDesde(spec, ante('quien_decidio'))
+    expect(t.textos).toEqual([])
+    expect(t.paso?.id).toBe('quien_decidio')
+  })
+
+  it('la instruccion del objeto viaja al avanzar desde la historia', () => {
+    const d = decidirObjetos(spec, ante('historia'), entrada('Mi jefe me cambio el proyecto dos veces'))
+    expect(d?.tipo).toBe('avanza')
+    if (d?.tipo !== 'avanza') return
+    expect(d.textos).toEqual([BOT_REGLA_OBJETO])
+    expect(d.siguiente.id).toBe('quien_decidio')
+  })
+
+  it('EL CAMBIO DE MARCO viaja al pasar de la situacion a la semana', () => {
+    // Es el caso que mas importa: sin este texto la persona sigue contestando `semana` sobre
+    // la situacion puntual y el dato queda contaminado. Error de medicion, no estetica.
+    const d = decidirObjetos(spec, ante('sentia_vs_esperaban'), entrada('Listo sentia_vs_esperaban 70-30'))
+    expect(d?.tipo).toBe('avanza')
+    if (d?.tipo !== 'avanza') return
+    expect(d.textos).toEqual([BOT_CAMBIO_DE_MARCO])
+    expect(d.siguiente.id).toBe('semana')
+  })
+
+  it('entre dos repartos seguidos no hay texto que decir', () => {
+    const d = decidirObjetos(spec, ante('quien_decidio'), entrada('Listo quien_decidio 60-20-20'))
+    expect(d?.tipo).toBe('avanza')
+    if (d?.tipo !== 'avanza') return
+    expect(d.textos).toEqual([])
+  })
+
+  it('NINGUN `bot` del guion se pierde ni se repite al recorrer la entrevista entera', () => {
+    // La prueba de verdad: se recoge todo el texto que el flujo llegaria a enviar (el tramo de
+    // apertura mas el de cada avance) y se compara con los `bot` del spec, en orden.
+    const dichos: string[] = [...tramoDesde(spec, estadoInicialObjetos(ESTUDIO)).textos]
+    let estado = tramoDesde(spec, estadoInicialObjetos(ESTUDIO)).estado
+    const turnos = [
+      '2',
+      'Mi jefe me cambio el proyecto dos veces',
+      'Listo quien_decidio 60-20-20',
+      'Listo sentia vs esperaban 70-30',
+      'Listo semana 4/2/1/2/1',
+      'Listo preocupaciones 20-20-20-10-10-10-5-5',
+      'Cambiaria haber hablado antes',
+    ]
+    for (const texto of turnos) {
+      const d = decidirObjetos(spec, estado, entrada(texto))
+      expect(d?.tipo, texto).toMatch(/^(avanza|cierra)$/)
+      if (d?.tipo !== 'avanza' && d?.tipo !== 'cierra') return
+      dichos.push(...d.textos)
+      estado = d.estado
+    }
+
+    const delSpec = spec.pasos.filter((p) => p.tipo === 'bot').map((p) => (p as { texto: string }).texto)
+    expect(dichos).toEqual(delSpec)
+    expect(dichos).toEqual([BOT_SALUDO, BOT_METODO, BOT_REGLA_OBJETO, BOT_CAMBIO_DE_MARCO])
+  })
+
+  it('un guion que TERMINA en `bot` manda ese texto antes del cierre', () => {
+    const s2 = leerSpecObjetos({
+      base_url: 'https://x.co/a',
+      pasos: [
+        { tipo: 'relato', id: 'historia', pregunta: '¿Qué pasó?' },
+        { tipo: 'bot', texto: 'Eso era todo lo que te quería preguntar.' },
+      ],
+    }) as SpecObjetos
+    const d = decidirObjetos(s2, { modo: MODO_OBJETOS, study_id: 'x', paso: 0, recibidos: [] }, entrada('me fue bastante mal'))
+    expect(d?.tipo).toBe('cierra')
+    if (d?.tipo !== 'cierra') return
+    expect(d.textos).toEqual(['Eso era todo lo que te quería preguntar.'])
+  })
+
+  it('un estado que quedo apuntando a un `bot` no traba la secuencia', () => {
+    // Pasa si el spec se edita a mitad de una entrevista. `pasoPendiente` salta el `bot` para
+    // encontrar a quien preguntar, y el avance se cuenta desde el paso RESPONDIDO: si se
+    // contara desde `estado.paso`, la secuencia se quedaria un paso atras repitiendo texto.
+    const estado = estadoEn(indiceDe('bot_7'), ['quien_decidio'])
+    expect(pasoPendiente(spec, estado)?.id).toBe('semana')
+    const d = decidirObjetos(spec, estado, entrada('Listo semana 2-2-2-2-2'))
+    expect(d?.tipo).toBe('avanza')
+    if (d?.tipo !== 'avanza') return
+    expect(d.siguiente.id).toBe('preocupaciones')
+    expect(d.textos).toEqual([])
   })
 })
 
@@ -690,7 +860,7 @@ describe('resolverEstudioObjetosPorTrigger', () => {
   it('resuelve el estudio por su palabra y lee la secuencia', async () => {
     const r = await resolverEstudioObjetosPorTrigger(catalogo(), 'objetos adultos')
     expect(r?.estudio).toBe(ESTUDIO)
-    expect(r?.spec.pasos).toHaveLength(7)
+    expect(r?.spec.pasos).toHaveLength(11)
   })
 
   it('normaliza como el chat: mayusculas, espacios y puntuacion', async () => {
