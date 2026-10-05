@@ -113,3 +113,41 @@ Entradas que vivían en la sección «Referencias» de MEMORY.md (proyectos viej
 - ⚠️⚠️ [Trabajar sobre otro repo desde el worktree aislado](reference_publicar_otro_repo_desde_worktree.md) — `gh repo clone` DENTRO del worktree da git completo; «git» en cualquier palabra tumba el guard
 - ⚠️⚠️ [Árbol limpio por tarball](reference_arbol_limpio_por_tarball.md) — el checkout compartido puede ir BEHIND main y mentir en silencio
 - ⚠️ [Docs de Wompi verificadas](reference_wompi_docs_verificado.md) — ya responden (no 403); referencia duplicada = 422; sin reembolso por API; `/merchants/:llave` muere 31-oct
+
+## Movidas desde MEMORY.md el 2026-10-05 (por tamaño del índice)
+
+- ⚠️ [Cotizar por rubros](project_cotizacion_margen_rubros.md) — #514 sin mergear; el backfill decide $7,17M
+- ⚠️⚠️ [/negocios como hoja de Google](project_export_negocios_a_drive.md) — #625 sin mergear: migración SIN aplicar
+- ⚠️ [El cierre se deriva de `estado`](project_cierre_desde_estado.md) — #609 sin mergear: el mapa es lista CERRADA
+- ⚠️⚠️ [Un cerrado sale de circulación](project_negocio_cerrado_solo_lectura.md) — #610 sin mergear: el recibo NO se corta
+- ⚠️ [El buscador avisa de otras pestañas](project_aviso_otras_pestanas.md) — #611 sin mergear
+- ⚠️ [Sucursal de Siigo y adopción de factura](project_siigo_sucursal_adopcion.md) — los 6 candidatos NO son lista para aplicar
+- ⚠️⚠️ [Factura: herencia sin copias y soporte](project_factura_soporte_tesoreria.md) — limpieza 1B SIN aplicar
+- ⚠️⚠️ [PQR rechazado](project_pqr_rechazado_desenlace.md) — config SOENA SIN aplicar
+- ⚠️⚠️ [Ruta de IVA por servicio](project_ruta_iva_por_servicio.md) — SQL pendiente DESPUÉS del deploy
+- ⚠️⚠️ [Aviso de sobrepago a financiera](project_aviso_sobrepago_financiera.md) — config SOENA sin aplicar
+- ⚠️⚠️ [Conciliación por referencia](project_conciliacion_por_referencia.md) — backfill de 9 filas NO aplicado
+- ⚠️⚠️ [Panel de recibos: destinatario y autor](project_panel_destinatario_y_autor.md) — #814 sin mergear: migración ANTES
+- ⚠️⚠️ [Un recibo por concepto](project_recibo_por_concepto.md) — la marca tiene DOS formas y un consumidor SQL lee una
+- ⚠️⚠️ [Recibo solo UPME y abono automático](project_factura_libre_abono.md) — #828 SIN mergear: duplicado = misma factura
+- ⚠️⚠️ [Titular corregido de la factura](project_titular_corregido_factura.md) — #833 SIN mergear: el PUT va DESPUÉS de resolver el tercero
+- ⚠️⚠️ [El correo del recibo](project_correo_recibo_dos_documentos.md) — #804 sin mergear; SQL de copy DESPUÉS de `notificar-etapa`
+- ⚠️⚠️ [Tarifa UPME mal digitada](project_tarifa_upme_mal_digitada.md) — config SOENA sin aplicar; caso V0497
+- ⚠️⚠️ [Seguimiento de citas DIAN](project_seguimiento_citas_dian.md) — config SOENA sin aplicar
+- ⚠️ [Firma de webhooks de Meta (#925, #927)](project_firma_wa_webhook.md) — wa-firma.ts compartido; meta-leads SIN redesplegar
+- ⚠️ [Lector de Navigate = Gemini 3.1 Flash-Lite](project_navigate_lector_gemini.md) — wa-webhook sin redesplegar
+- ⚠️ [Duplicados: solo facturas libres](project_duplicado_hermanos_siigo.md) — #561 sin mergear; el vínculo es la marca
+- ⚠️ [Icono de app Pino](project_icono_app_pino.md) — #602 sin mergear: el `.ico` gana sobre el `.svg`
+- ⚠️ [QA de tildes de compliance](project_qa_tildes_compliance.md) — quedan 7 erratas
+- ⚠️⚠️ [Landing de Sustenta](project_landing_sustenta.md) — franja de normas = ejemplos, NUNCA cobertura
+- ⚠️ ["Plata" vetada en copy público](project_lexico_plata_vetada.md) — quedan ~19 visibles
+- ⚠️⚠️ [Dedup de contactos por WhatsApp](project_dedup_contactos_webhook.md) — #565 sin mergear: migración ANTES del deploy
+- ⚠️⚠️ [Reproceso de documentos migrados](project_reproceso_documentos_migrados.md) — puede BORRAR datos, no es idempotente
+- ⚠️ [Routing respeta el `condition`](project_routing_condition_bloque.md) — cambia UN routing en todo el sistema
+- ⚠️ [Aviso de recaudo sin salida](project_aviso_recaudo_sin_salida.md) — el listón es `valorARecaudar`
+- ⚠️⚠️ [Avanzar tras registrar el pago](project_avance_tras_pago_fab.md) — #707 sin mergear: falso «retenido»
+- ⚠️⚠️ [Acuses de Resend](project_acuses_resend_avisos_cliente.md) — #596 sin mergear: el orden de despliegue manda
+- ⚠️⚠️ [El plazo de retención en CI](project_retencion_control_en_ci.md) — el KYC sigue en CINCO años
+- ⚠️⚠️ [Cierre del frente KYC](project_valida_privacidad_v13.md) — diez (10) años; 5 superficies
+- ⚠️⚠️ [Valida Diligencia v2](project_valida_diligencia_v2.md) — patch SIN commit ni PR
+- ⚠️ [Guards de items y aprobación](project_guard_bloque_items.md) — quién aprueba lo decide `puedeSerAprobador`
