@@ -19,6 +19,7 @@ import { duplicarCotizacionCompleta } from '@/lib/cotizaciones/duplicar-cotizaci
 import { retirarRanuraSiQuedoVacia } from '@/lib/cotizaciones/ranuras-datos'
 import { itemsQueAportanAlTotal, normalizarGrupo } from '@/lib/cotizaciones/itinerarios'
 import { costoDeRubrosConfirmados, esConfirmado } from '@/lib/cotizaciones/rubros-sugeridos'
+import { pasajerosParaCuadre } from '@/lib/cotizaciones/cuadre-pasajero'
 import { motivoParaNoSalir, revisarExcepcionTrasCambio } from '@/lib/cotizaciones/piso-salida-datos'
 import { motivoPorCapturasDesactualizadas } from '@/lib/cotizaciones/captura-desactualizada-datos'
 import { createServiceClient } from '@/lib/supabase/server'
@@ -1092,6 +1093,8 @@ export async function recalcularTotales(cotizacionId: string) {
       margen_porcentaje: item.margen_porcentaje,
       precio_venta: conManuales !== undefined ? conManuales / (Number(item.cantidad) || 1) : item.precio_venta,
       precio_manual: conManuales !== undefined ? true : item.precio_manual,
+      // Punto 11 del brief del 2026-10-05: el precio cuadra con lo que paga cada pasajero.
+      pasajeros: pasajerosParaCuadre(item.tarifa_pax, costoDeRubros),
     }
   })
   // El MISMO emparejamiento que usa `contextoDeCotizacion`: por id de variante. Escrito

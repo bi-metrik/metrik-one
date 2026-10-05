@@ -1583,7 +1583,13 @@ export async function confirmarTarifaPorPasajero(
   const moneda = estado.moneda
   const costos: TarifaConfirmada['costos'] = []
   for (const c of estado.costos) {
-    const unitarioCOP = aPesos(c.unitario, moneda, tasaCambio)
+    // Brief del 2026-10-05, punto 11 · se pasa a pesos el TOTAL del tipo y después se divide. Antes
+    // se pasaba el unitario ya redondeado al centavo en la otra moneda: EUR 233,37 / 2 = 116,685 →
+    // 116,69 × 4.500 × 2 dejaba 45 pesos de más sobre 233,37 × 4.500. En pesos no cambia nada.
+    const totalDelTipoCOP = aPesos(c.total, moneda, tasaCambio)
+    const unitarioCOP = totalDelTipoCOP === null
+      ? null
+      : Math.round((totalDelTipoCOP / Math.max(1, c.cantidad)) * 100) / 100
     if (unitarioCOP === null) {
       return {
         success: false,

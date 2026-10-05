@@ -92,7 +92,8 @@ import {
   type Composicion,
 } from '@/lib/cotizaciones/tarifa-pasajero'
 import { avisoTasaPendiente } from '@/lib/cotizaciones/actividad-pantallazo'
-import { motivoFaltaCosto } from '@/lib/cotizaciones/falta-costo'
+import { motivoFaltaCosto, tasasPendientesPorLinea } from '@/lib/cotizaciones/falta-costo'
+import { pasajerosParaCuadre } from '@/lib/cotizaciones/cuadre-pasajero'
 import { precioPorHabitacion } from '@/lib/cotizaciones/habitaciones'
 import { lineasDesactualizadas, motivoParaNoEnviar } from '@/lib/cotizaciones/captura-desactualizada'
 import { etiquetaDeMotivo } from '@/lib/cotizaciones/motivos-borrador'
@@ -762,17 +763,20 @@ export default function CotizacionEditor({ oportunidadId, cotizacion, initialIte
   // pantalla mostraba un total y la base guardaba otro.
   const paraCascada = initialItems.map(item => {
     const rubros = item.rubros ?? []
+    const delDesglose = costoDeRubrosConfirmados(rubros)
     return {
       id: item.id,
       es_ajuste: item.es_ajuste,
       cantidad: item.cantidad,
       subtotal: item.subtotal,
       // R-P1 · los SUGERIDOS no entran al costo hasta que alguien confirme.
-      ...costoDeRubrosConfirmados(rubros),
+      ...delDesglose,
       descuento_porcentaje: item.descuento_porcentaje,
       margen_porcentaje: item.margen_porcentaje,
       precio_venta: item.precio_venta,
       precio_manual: item.precio_manual,
+      // Punto 11 del brief del 2026-10-05: lo mismo que `recalcularTotales`.
+      pasajeros: pasajerosParaCuadre(item.tarifa_pax, delDesglose.costoDeRubros),
     }
   })
   const paramsCascada = {
@@ -939,13 +943,8 @@ export default function CotizacionEditor({ oportunidadId, cotizacion, initialIte
   // Brief del 2026-10-05 · si una línea no tiene costo porque falta la tasa de cambio, el motivo
   // lo dice con el texto de la tarjeta («El precio está en EUR: escribe la tasa…»), no solo
   // «Falta el costo». Lo sabe el editor: el servidor manda qué líneas faltan.
-  const tasaPendientePorId = new Map<string, string>()
-  for (const i of initialItems) {
-    if (i.es_ajuste === true) continue
-    const t = leerTarifaPax(i.tarifa_pax)
-    const texto = avisoTasaPendiente(t, composicionDeLinea(t, composicionViaje ?? null), ranuraDeGrupo(i.grupo ?? null)?.slug)
-    if (texto) tasaPendientePorId.set(i.id, texto)
-  }
+  // La misma cuenta que hace el servidor al rechazar «Enviar» y al marcar el PDF (punto 12).
+  const tasaPendientePorId = tasasPendientesPorLinea(initialItems, composicionViaje ?? null)
   const salidaVista: SalidaVista | null = salida && salida.faltaCosto && salida.faltaCostoLineas?.length && tasaPendientePorId.size > 0
     ? { ...salida, faltaCosto: motivoFaltaCosto(salida.faltaCostoLineas, tasaPendientePorId) ?? salida.faltaCosto }
     : salida

@@ -47,6 +47,7 @@
 
 import { cascadaDeItinerario, margenMedible, motivoDeRechazo, nombreDeItinerario, ranurasSinResolver } from './itinerarios'
 import { etiquetaDeRanura } from './ranuras-pantallazo'
+import { nombreVisibleDeLinea } from './nombre-visible'
 import { cascadaVigente, type ContextoCotizacion, type FilaItinerario } from './itinerarios-datos'
 
 /** Lo que se mide: una tarifa marcada para la propuesta, o la cotización entera. */
@@ -207,7 +208,8 @@ function conteoDeLineas(
     .filter(([, sinCosto]) => sinCosto)
     .map(([id]) => {
       const item = porId.get(id)
-      return { id, nombre: item?.nombre ?? null, grupo: (item?.grupo ?? null) as string | null }
+      // Como se lee, no en MAYÚSCULAS (brief del 2026-10-05, punto 10).
+      return { id, nombre: item ? nombreVisibleDeLinea(item) || null : null, grupo: (item?.grupo ?? null) as string | null }
     })
   return { lineas: vistas.size, sinCosto: faltantes.length, faltantes }
 }

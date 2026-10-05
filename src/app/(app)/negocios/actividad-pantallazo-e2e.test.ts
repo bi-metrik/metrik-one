@@ -390,10 +390,9 @@ describe('criterio 2 · EUR sin tasa: lo dicen la tarjeta cerrada y «Revisar y 
     // Escribo la tasa (lo que hace «Confirmar y cargar el costo» con la tasa escrita).
     const r = await confirmarTarifaPorPasajero('item-1', 4500)
     expect(r.success, r.error).toBe(true)
-    // ⚠️ El unitario en EUR se redondea al centavo ANTES de pasar a pesos (`resolverTarifa`, igual
-    // que en «solo adultos» de siempre): 233,37 / 2 = 116,685 → 116,69 × 4.500 × 2 = 1.050.210, 45
-    // pesos sobre 233,37 × 4.500. Es del motor de antes, no de este cambio: queda anotado.
-    const costo = Math.round(233.37 / 2 * 100) / 100 * 4500 * 2
+    // Brief del 2026-10-05, punto 11: se pasa a pesos el total y después se divide. 233,37 × 4.500
+    // = 1.050.165 exactos (antes 116,69 × 4.500 × 2 = 1.050.210, 45 pesos de más).
+    const costo = 1_050_165
     vista.abierta = true
     for (const s of [await releida(), recargada()]) {
       expect(s.avisosTarjeta).not.toContain(aviso)

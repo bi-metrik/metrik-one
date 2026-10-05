@@ -37,6 +37,7 @@ import {
 import { faltanLasTablasDeItinerarios } from './tolerar-itinerarios'
 import { idDelPrincipal } from './tarifas'
 import { costoDeRubrosConfirmados } from './rubros-sugeridos'
+import { pasajerosParaCuadre, type FilaDePasajeros } from './cuadre-pasajero'
 import { esBaseIvaLinea, type BaseIvaLinea } from '@/lib/fiscal/iva-cotizacion'
 import {
   adjuntarAdicionales,
@@ -118,6 +119,10 @@ export interface ItemDeCotizacion extends ItemConGrupo {
    * la trae `undefined`, y eso es exactamente «sigue al workspace».
    */
   base_iva?: BaseIvaLinea | null
+  /** `cuadre-pasajero.ts`: con quiénes se reparte el precio. `null` fuera del viaje. */
+  pasajeros?: FilaDePasajeros[] | null
+  /** `items.tarifa_pax` crudo. `null` fuera del viaje. */
+  tarifa_pax?: unknown
 }
 
 export interface ContextoCotizacion {
@@ -247,6 +252,11 @@ export async function contextoDeCotizacion(
       precio_venta: fila.precio_venta ?? 0,
       precio_manual: fila.precio_manual ?? false,
       base_iva: esBaseIvaLinea(fila.base_iva) ? fila.base_iva : null,
+      // Punto 11 del brief del 2026-10-05: lo mismo que `recalcularTotales` y el editor.
+      pasajeros: pasajerosParaCuadre(fila.tarifa_pax, costoDeRubros),
+      // Lo leído del pantallazo: el motivo de «falta el costo» dice si lo que falta es la tasa
+      // de cambio (punto 12) y nombra la línea como se lee (punto 10).
+      tarifa_pax: fila.tarifa_pax ?? null,
     }
   })
 

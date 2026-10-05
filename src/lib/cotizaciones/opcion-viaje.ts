@@ -121,7 +121,9 @@ export function fichaDeOpcion(item: ItemConLectura, composicion: Composicion | n
     // ida es directa y el regreso no dice escala (la captura muestra los dos tramos iguales).
     const idaDirecta = ida?.directo === true
     const numeros = [v.numeros?.ida, v.numeros?.regreso].filter(Boolean).join(' / ') || v.numeroVuelo || null
-    const cabecera = [v.aerolinea, numeros, v.tarifa ? `Tarifa ${v.tarifa}` : null].filter(Boolean).join(' · ')
+    // «Tarifa Tarifa Económica» (brief del 2026-10-05, punto 10): la captura ya escribe la palabra.
+    const tarifa = v.tarifa ? (/^tarifa\b/i.test(v.tarifa.trim()) ? v.tarifa.trim() : `Tarifa ${v.tarifa}`) : null
+    const cabecera = [v.aerolinea, numeros, tarifa].filter(Boolean).join(' · ')
     const equipaje = ida ? equipajeCorto(ida.equipaje) : null
     const leido = [
       cabecera || null,

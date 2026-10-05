@@ -18,7 +18,8 @@
  * esté bajo el piso sale como borrador, que es el lado seguro.
  */
 
-import { motivoFaltaCosto } from './falta-costo'
+import { motivoFaltaCosto, tasasPendientesPorLinea } from './falta-costo'
+import { leerViajeDelNegocio } from './viaje-negocio'
 import { createHash } from 'node:crypto'
 
 import { registrarActividad } from '@/lib/activity/registrar-actividad'
@@ -69,6 +70,8 @@ export interface SalidaDeCotizacion {
    * `null` = no falta ningún costo en lo que sale.
    */
   faltaCosto: string | null
+  /** Lo que falta en todas esas líneas es la tasa de cambio (punto 12 del brief del 2026-10-05). */
+  faltaTasa?: boolean
 }
 
 const SIN_REGLA: SalidaDeCotizacion = {
@@ -145,6 +148,12 @@ export async function evaluarSalida(
     perdida = { excepcion: ultima, causa: ultima.perdidaCausa ?? 'Cambió un precio, un costo o un margen.' }
   }
 
+  // Punto 12 del brief del 2026-10-05: si lo que falta es la tasa de cambio, el rechazo y la marca
+  // lo dicen. Solo se leen los pasajeros del viaje cuando falta algún costo.
+  const tasas = medicion.conteo.faltantes.length > 0
+    ? tasasPendientesPorLinea(ctx.items, (await leerViajeDelNegocio(supabase, ctx.negocioId)).viaje.composicion)
+    : new Map<string, string>()
+
   const bajoPiso = medicion.bajoPiso.length > 0
   const bloquea = bajoPiso && excepcion === null
   const dueno = bajoPiso ? await nombreDelDueno(servicio, args.workspaceId) : null
@@ -160,7 +169,8 @@ export async function evaluarSalida(
     mensaje: bloquea ? mensajeDeSalida(medicion.bajoPiso, medicion.pisoPct, dueno) : '',
     dueno,
     excepcionesDisponibles: disponible,
-    faltaCosto: motivoFaltaCosto(medicion.conteo.faltantes),
+    faltaCosto: motivoFaltaCosto(medicion.conteo.faltantes, tasas),
+    faltaTasa: medicion.conteo.faltantes.length > 0 && medicion.conteo.faltantes.every(f => tasas.has(f.id)),
   }
 }
 

@@ -511,15 +511,18 @@ describe('punto 5 · «Tarifa niño…» solo si el viaje lleva un niño', () =>
 describe('punto 8 · un solo redondeo: tabla = «Así lo ve el cliente» = PDF = total', () => {
   // 45.000 por trayecto, ida y regreso, 2 adultos + 1 infante sin costo: 180.000 → 211.765.
   // Y el criterio 8: 45.000 in-out × 2 adultos → 90.000 → 105.882 (el infante va en 0).
-  for (const [caso, lectura, costo] of [
-    ['por trayecto, 2 adultos + 1 infante', () => traslado(), 180_000],
-    ['in-out, 2 adultos (+ 1 infante sin costo)', () => traslado({ precio: 'in_out' }), 90_000],
+  // Brief del 2026-10-05, punto 11: 180.000 → 211.764,7 se reparte en 105.882 × 2 = 211.764. El
+  // precio de la línea es la suma de lo que paga cada pasajero (antes 211.765, y 105.883 × 2 =
+  // 211.766 en la vista del cliente).
+  for (const [caso, lectura, costo, precio] of [
+    ['por trayecto, 2 adultos + 1 infante', () => traslado(), 180_000, 211_764],
+    ['in-out, 2 adultos (+ 1 infante sin costo)', () => traslado({ precio: 'in_out' }), 90_000, 105_882],
   ] as const) {
     it(caso, async () => {
       sembrarTraslado(lectura())
       expect((await confirmarTarifaPorPasajero(ITEM_T, null)).success).toBe(true)
       const s = recargada()
-      const precio = conMargen(costo)
+      expect(Math.abs(precio - conMargen(costo))).toBeLessThanOrEqual(2)
       expect(s.costoLinea).toBe(pesos(costo))
       expect(s.precioOpcion).toBe(pesos(precio))
       expect(s.enLaHoja).toBe(pesos(precio))
@@ -532,6 +535,8 @@ describe('punto 8 · un solo redondeo: tabla = «Así lo ve el cliente» = PDF =
       expect(adultoTabla).toBeDefined()
       expect(adultoHoja).toBe(adultoTabla)
       expect(adultoPdf !== undefined ? pesos(adultoPdf) : null).toBe(adultoTabla)
+      // Ficha = vista del cliente = PDF = total: los 2 adultos suman el precio de la línea.
+      expect(pesos(precio / 2)).toBe(adultoTabla)
     })
   }
 })

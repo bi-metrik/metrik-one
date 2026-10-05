@@ -43,6 +43,7 @@ import {
   type ConvencionMargen,
 } from './precio-item'
 import { totalesDeAdicionales, type AdicionalParaSuma } from './adicionales'
+import { precioCuadradoPorPasajero, type FilaDePasajeros } from './cuadre-pasajero'
 
 export interface ItemParaCascada {
   id?: string
@@ -69,6 +70,13 @@ export interface ItemParaCascada {
    * `if`. Ver `adicionales.ts`: cuelgan del ítem, nunca de la ranura.
    */
   adicionales?: readonly AdicionalParaSuma[] | null
+  /**
+   * Los pasajeros entre los que se reparte el precio de la línea (`cuadre-pasajero.ts`, brief
+   * del 2026-10-05, punto 11). Con ellos, el precio de la línea es la suma de los precios por
+   * pasajero ya redondeados. Ausente o `null` en toda línea que no se vende por pasajero, que es
+   * todo lo que no es Trappvel: la cascada da exactamente lo de antes.
+   */
+  pasajeros?: readonly FilaDePasajeros[] | null
 }
 
 export interface ParametrosCascada {
@@ -249,7 +257,12 @@ export function calcularCascada(items: ItemParaCascada[], params: ParametrosCasc
     // de redondear la suma exacta y la columna del PDF sumaba unos pesos distintos:
     // un documento que no cuadra consigo mismo, y el cliente sí suma la columna.
     const cantidadLinea = Number(item.cantidad) || 1
-    precioLinea = Math.round(precioLinea / cantidadLinea) * cantidadLinea
+    // Una línea que se vende por pasajero cuadra con lo que paga cada uno (punto 11 del brief
+    // del 2026-10-05). Solo la que sale del margen: un precio escrito a mano manda tal cual.
+    const porPasajero = costoLinea > 0 && item.precio_manual !== true && item.es_ajuste !== true && item.pasajeros
+    precioLinea = porPasajero
+      ? precioCuadradoPorPasajero(precioLinea / cantidadLinea, item.pasajeros) * cantidadLinea
+      : Math.round(precioLinea / cantidadLinea) * cantidadLinea
 
     // El adicional se suma DESPUÉS del cuadre por unidad, no antes: su cantidad es la
     // suya (seis maletas para seis adultos) y no tiene por qué ser múltiplo de la del
