@@ -86,7 +86,7 @@ describe('a y b · exacto cambia la caja; aproximado pregunta', () => {
   it('lo que el bot contesta en el acto', () => {
     expect(respuestaAlEncabezado(resolverEncabezado('Carolina', vs))).toBe('📌 Carolina Ruiz (T1 26 103)');
     // Trappvel 2026-10-02: el aproximado pregunta con la lista numerada (nunca «¿Cambias a…? sí/no»).
-    expect(respuestaAlEncabezado(resolverEncabezado('Lusia', vs), 'Lusia')).toBe('¿De qué viaje es «Lusia»? Hasta que me digas, no asigno lo que sigue.\n1. Luisa Mejía (T1 26 102)\nResponde el número; si es un viaje nuevo, «nuevo» y el nombre del cliente; o «descartar».');
+    expect(respuestaAlEncabezado(resolverEncabezado('Lusia', vs), 'Lusia')).toBe('¿De qué viaje es «Lusia»? Hasta que me digas, no asigno lo que sigue.\n1. Luisa Mejía (T1 26 102)\nDime cuál (por ejemplo «el de Luisa»). Si es un viaje nuevo, «nuevo» y el nombre del cliente; o «descartar».');
     // El cliente se crea solo con el «sí» al resumen (2026-10-03); una sola palabra también es un nombre propuesto.
     expect(respuestaAlEncabezado(resolverEncabezado('nuevo Pedro Salgar', vs))).toBe('Va como viaje nuevo de Pedro Salgar. Antes del resumen reviso si ya es cliente.');
     expect(respuestaAlEncabezado(resolverEncabezado('nuevo Pedro', vs))).toBe('Va como viaje nuevo de Pedro. Antes del resumen reviso si ya es cliente.');

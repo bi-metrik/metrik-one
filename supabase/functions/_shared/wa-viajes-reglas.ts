@@ -1995,8 +1995,7 @@ export function nombreDestino(d: DestinoPlan): string {
  */
 function avisoParecidosDelGrupo(k: number, ns: ReadonlyArray<number>, parecidos: ReadonlyArray<ViajeAbierto>): string {
   const ps = parecidos.slice(0, MAX_PARECIDOS);
-  // Al viaje por su nombre (`destinoDeCorreccion` lo lee tal cual); el código solo si no tiene nombre.
-  const destino = (v: ViajeAbierto) => v.nombre?.trim() || v.codigo?.trim() || nombrePropio(v.cliente) || '';
+  const destino = (v: ViajeAbierto) => v.codigo?.trim() || nombrePropio(v.cliente) || '';
   const mover = `«el ${enumerar(ns.map(String))} ${ns.length === 1 ? 'es' : 'son'} de ${destino(ps[0])}»`;
   return ps.length === 1
     ? `⚠ ${k}) Ya hay un viaje de ${clienteYCodigo(ps[0])}: si es para ese, escribe ${mover}; si es un viaje nuevo, déjalo así.`

@@ -103,11 +103,11 @@ describe('clientes con viaje abierto: la confirmación lo dice (también en el a
       '¿Creo el cliente nuevo «combo playero»? Responde «sí», el nombre correcto, o dime el viaje si es uno que ya existe.\nNo he creado ni cargado nada.');
     expect(textoConfirmarNuevo({ nombre: 'Rosalba Tovar', conLista: true, parecidos: [{ viaje: ROSALBA, numero: 2 }] })).toBe([
       '¿Creo el cliente nuevo «Rosalba Tovar»?',
-      'Ya hay un viaje de Rosalba Quiñones Tovar (R 26 1): si es para ese, responde 2; si es un cliente nuevo, «sí»; o escríbeme el nombre correcto.',
+      'Ya hay un viaje de Rosalba Quiñones Tovar (R 26 1): si es para ese, responde «el de Cartagena»; si es un cliente nuevo, «sí»; o escríbeme el nombre correcto.',
       'No he creado ni cargado nada.',
     ].join('\n'));
     expect(textoConfirmarNuevo({ nombre: 'Rosalba', conLista: false, parecidos: [{ viaje: ROSALBA, numero: null }] }))
-      .toContain('si es para ese, responde R 26 1; si es un cliente nuevo, «sí»');
+      .toContain('si es para ese, responde «el de Cartagena»; si es un cliente nuevo, «sí»');
   });
 
   it('el acuse del encabezado y el resumen del reparto', () => {

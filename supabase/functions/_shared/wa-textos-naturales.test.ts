@@ -77,7 +77,7 @@ describe('PR B · los textos fijos de la bandeja', () => {
       '¿De qué viaje son los 3 mensajes? Parece de Lina Pérez (el 1).',
       '1. CARTAGENA DIC · Lina Pérez (T1 26 14)',
       '2. MADRID 8N · Jorge Pérez (T1 26 12)',
-      'Responde el número o el código. Si es un viaje nuevo, escribe «nuevo» y el nombre del cliente; si no va, «descartar».',
+      'Dime cuál (por ejemplo «el de Cartagena»). Si es un viaje nuevo, escribe «nuevo» y el nombre del cliente; si no va, «descartar».',
     ].join('\n'));
     expect(TEXTOS['resumen listo'].split('\n')[0]).toBe('¿Lo cargo así?');
     expect(TEXTOS['resumen listo'].split('\n').at(-1)).toBe('No cargué nada todavía. Responde «sí» para cargarlo, o corrige: «el 2 es de Luisa», «descartar el 2». Con «descartar» no cargo nada.');
