@@ -12,6 +12,8 @@ import { ErrorAlmacenamiento } from '@/lib/almacenamiento/config'
 import { almacenamientoExternoDe, type AlmacenamientoSupabaseExterno } from '@/lib/almacenamiento/supabase-externo'
 import { agruparRepositorio } from '@/lib/almacenamiento/repositorio'
 import RepositorioArchivos, { type EstadoRepositorio } from './repositorio-archivos'
+import { negocioCerrado } from '@/lib/negocios/motivo-cierre'
+import { AnunciarNegocioEnPantalla } from '@/lib/negocios/negocio-en-pantalla'
 
 interface Props {
   params: Promise<{ id: string }>
@@ -46,7 +48,7 @@ export default async function ArchivosNegocioPage({ params }: Props) {
   const db = supabase as any
   const { data: negocioRow } = await db
     .from('negocios')
-    .select('codigo, nombre, linea_id')
+    .select('codigo, nombre, linea_id, estado')
     .eq('id', id)
     .eq('workspace_id', acceso.workspaceId)
     .maybeSingle()
@@ -74,7 +76,15 @@ export default async function ArchivosNegocioPage({ params }: Props) {
     }
   }
 
-  return <RepositorioArchivos negocioId={id} negocio={negocio} estado={estado} />
+  return (
+    <>
+      {/* El FAB del shell sabe por aquí si este negocio está cerrado (no monta la ficha). */}
+      {negocioRow && (
+        <AnunciarNegocioEnPantalla negocioId={id} cerrado={negocioCerrado(negocioRow.estado as string | null)} />
+      )}
+      <RepositorioArchivos negocioId={id} negocio={negocio} estado={estado} />
+    </>
+  )
 }
 
 /**

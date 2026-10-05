@@ -13,15 +13,20 @@ export interface ImpersonationOption {
   role: string
 }
 
-/**
- * Lista los usuarios del workspace para el selector "Ver como".
- * Devuelve ok=false (y lista vacía) si el usuario no es platform_admin.
- */
-export async function getImpersonationOptions(): Promise<{
+export interface OpcionesImpersonacion {
   ok: boolean
   users: ImpersonationOption[]
   current: string | null
-}> {
+}
+
+/**
+ * Lista los usuarios del workspace para el selector "Ver como".
+ * Devuelve ok=false (y lista vacía) si el usuario no es platform_admin.
+ *
+ * La llama el layout de `(app)` (solo para un platform_admin) y le pasa el resultado a la
+ * barra: el navegador ya no la invoca como server action.
+ */
+export async function getImpersonationOptions(): Promise<OpcionesImpersonacion> {
   const supabase = await createClient()
   const { user } = await getCachedUser()
   if (!user) return { ok: false, users: [], current: null }

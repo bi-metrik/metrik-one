@@ -6,6 +6,7 @@
 - [Cargue masivo de Valida concurrente](project_valida_cargue_concurrente.md) — 3 filas; reintento de red no recobra; PDF de lote ya no sigue el orden del XLSX
 - ⚠️ [/negocios paginada en el servidor](project_lista_negocios_paginada.md) — viajan 30 tarjetas; `.in()` de 400+ uuid rompe por `Content-Location`
 - ⚠️ [loading.tsx de (app) no cubre la ficha](project_loading_app_no_cubre_ficha.md) — /negocios → /negocios/[id] no lo remonta, ni con precarga
+- ⚠️ [RUM y lecturas sin server actions (C y D)](project_rum_y_lecturas_sin_actions.md) — `[error-cliente]` se cuenta por `id`; `--query` sin corchetes
 - ⚠️⚠️ [Época: un deploy ya no recarga](project_epoca_no_recargar_por_deploy.md) — PR que rompe sube EPOCA; fetch propios por `fetchPropio`; techo 8 h diferido
 - ⚠️ [Respuesta al tocar sin red (#1006)](project_respuesta_al_tocar.md) — CardLink en useTransition + capa en el shell; Link nuevo del shell lleva SenalDeEnlace
 - ⚠️ [Recuperación de errores de red](project_recuperacion_red_iphone.md) — escalera suave→backoff→tope; refresh fallido = recarga MPA; no reintenta escrituras

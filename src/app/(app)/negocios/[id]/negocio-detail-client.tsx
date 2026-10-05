@@ -51,7 +51,8 @@ import { negocioCerrado as estaCerrado } from '@/lib/negocios/motivo-cierre'
 import type { LineaBase } from '@/lib/negocios/presupuesto-ejecucion'
 import { lineaDeclaraCierre, accionDeCierre, type EtapaCierre } from '@/lib/negocios/etapa-cierre'
 import { puedeCorregirDocumentos } from '@/lib/roles'
-import ActivityLog from '@/components/activity-log'
+import ActivityLog, { type ActivityEntry } from '@/components/activity-log'
+import { useAnunciarNegocioEnPantalla } from '@/lib/negocios/negocio-en-pantalla'
 
 // Bloques renderers
 import type { CampoContacto } from '@/lib/contactos/campos-contacto'
@@ -2199,6 +2200,11 @@ interface Props {
     created_at: string
     autor_nombre: string | null
   }>
+  /**
+   * La actividad completa para la tarjeta «Actividad», ya leída en el servidor
+   * (`cargarVistaNegocio`). `undefined` = no se pudo leer: la tarjeta la pide como antes.
+   */
+  actividadLog?: ActivityEntry[]
   staffList: Array<{ id: string; full_name: string }>
   datosOtrasEtapas: Record<number, Record<string, unknown>>
   datosPorSlug?: Record<string, Record<string, unknown>>
@@ -2276,6 +2282,7 @@ export default function NegocioDetailClient({
   resumenFinanciero,
   ejecucionData,
   historialData,
+  actividadLog,
   staffList,
   datosOtrasEtapas,
   datosPorSlug = {},
@@ -2319,6 +2326,9 @@ export default function NegocioDetailClient({
   // con el criterio unico del producto — NO de `cierre_motivo`, que es NULL en todo
   // cierre real de esta linea.
   const negocioCerrado = estaCerrado(negocio.estado)
+  // El FAB del shell lo lee de aquí (`negocio-en-pantalla.ts`) en vez de preguntárselo
+  // al servidor con una server action en cada navegación a una ficha.
+  useAnunciarNegocioEnPantalla(negocio.id, negocioCerrado)
 
   // Corregir una lectura dudosa al valor de la mayoría. El servidor revalida la ruta, así
   // que la tarjeta se vuelve a pintar con el voto ya resuelto.
@@ -2729,6 +2739,7 @@ export default function NegocioDetailClient({
               entidadTipo="negocio"
               entidadId={negocio.id}
               staffList={staffList}
+              entradasIniciales={actividadLog}
             />
           </div>
         </div>
