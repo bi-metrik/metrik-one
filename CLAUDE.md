@@ -99,6 +99,14 @@ Lo que hay hoy es un guard, no el arreglo: el middleware compara el slug del hos
 
 **Dev local**: `localhost:3000` (marketing), no hay subdomain routing en dev — todo opera en el mismo host.
 
+## Backups (public.backup_*)
+
+**Un backup vence a los 30 dias** (decision de Mauricio, 2026-10-05; habeas data, temporalidad). Guardan copias de datos personales y no tienen RLS ni dueno.
+- Nombre `backup_<tema>_<YYYYMMDD>`; la fecha del sufijo manda. Con `revoke all ... from public, anon, authenticated` + RLS, como cualquier tabla.
+- Si de verdad hay que conservarlo mas, se declara con `COMMENT ON TABLE ... 'NO BORRAR: <razon>, decide <quien>'`; sin ese comentario se borra.
+- Limpieza: cada migracion de limpieza lista las tablas por nombre (nunca patron), con bloque dry-run `DO` + `RAISE NOTICE`, y retira sus entradas de `src/types/database.ts`. Ejemplo: `20261005200000_drop_backups_mayores_30_dias.sql`.
+- Antes de borrar: verificar por SELECT que ninguna vista, funcion, FK o trigger las referencia, y `git grep` en `src/ supabase/ scripts/ sql/`.
+
 ## Convenciones de base de datos (toda migration nueva)
 
 **Desde el 2026-08-10 una tabla nueva no concede nada a nadie.** Antes de esa fecha esta sección afirmaba lo contrario de lo que hacía la base, y esa contradicción es la que hay que tener presente al leer migraciones viejas: hasta ese día **toda tabla nueva nacía con los SIETE privilegios para `anon` y `authenticated`** (medido: 135 tablas de `public` así para `anon`, 146 para `authenticated`), y lo único que separaba a un visitante sin sesión de los datos era el RLS. La convención existía en este archivo; el `ALTER DEFAULT PRIVILEGES` de la base decía otra cosa. Corregido en `20260810120200_default_privileges_no_conceden_a_anon.sql`.
