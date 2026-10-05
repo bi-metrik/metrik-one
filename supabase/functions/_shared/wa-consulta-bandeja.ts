@@ -137,7 +137,7 @@ export function leerConsultaBandeja(texto: string, o: { reenviado: boolean }): C
     return conAlcance({ tipo: 'viaje', ref: refDelViaje(t, bruto) }, t);
   }
   // Los viajes abiertos de un cliente.
-  if (/\b(?:(?:que|cuales|cuantos)\s+(?:viajes|cotizaciones)(?:\s+abiertos)?\s+(?:tiene|tenemos\s+de|hay\s+de|hay\s+para|abiertos|de|del)|(?:que|cuales|cuantos)\s+(?:viajes|cotizaciones)\s+(?:estan|siguen|quedan|hay|tengo|tenemos|tiene)\s+abiert|viajes\s+(?:abiertos\s+)?(?:tiene|de|del)|tiene\s+(?:viajes|otros\s+viajes|algo\s+abierto|cotizaciones))\b/.test(t)
+  if (/\b(?:(?:que|cuales|cuantos)\s+(?:viajes|cotizaciones)(?:\s+abiertos)?\s+(?:tiene|tenemos\s+de|hay\s+de|hay\s+para|abiertos|de|del)|(?:que|cuales|cuantos)\s+(?:viajes|cotizaciones)\s+(?:estan|siguen|quedan|hay|tengo|tenemos|tiene)\s+abiert\w*|viajes\s+(?:abiertos\s+)?(?:tiene|de|del)|tiene\s+(?:viajes|otros\s+viajes|algo\s+abierto|cotizaciones))\b/.test(t)
     || (PIDE.test(t) && /\bviajes\b/.test(t))) {
     return { tipo: 'viajes', cliente: nombreEn(bruto) };
   }
