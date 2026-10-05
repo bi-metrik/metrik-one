@@ -1,3 +1,4 @@
+-- epoca: no-rompe solo borra tablas backup_* que ninguna pantalla, vista ni funcion lee
 -- Borra 47 tablas public.backup_* con mas de 30 dias al 2026-10-05 (creadas 2026-08-10 a 2026-09-03).
 -- Decision de Mauricio 2026-10-05 (proyectos/metrik/valida/docs/crecimiento-mrr/10-decisiones-mauricio.md,
 -- "Revision de tablas backup"): copias de datos personales sin vencimiento (habeas data, temporalidad).
