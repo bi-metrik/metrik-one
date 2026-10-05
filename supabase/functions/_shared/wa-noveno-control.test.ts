@@ -101,6 +101,15 @@ describe('regla 3 · el relato del cliente es contenido, en cualquier posición'
   });
   const paso = (d: Decision) => (d.tipo === 'ejecutar' ? d.paso : null);
 
+  it('el modelo hace de quien pregunta un cliente nuevo sin que el escrito diga «nuevo»: es contenido', () => {
+    const texto = 'Bernardo pregunta si el paquete a Mompox incluye traslados';
+    const d = validar({ acciones: [
+      { accion: 'abrir_viaje', evidencia: 'Bernardo', nuevo_cliente: 'Bernardo' },
+      { accion: 'contenido', evidencia: 'pregunta si el paquete a Mompox incluye traslados' },
+    ] }, entrada(texto));
+    expect(paso(d)).toMatchObject({ p: 'registrar', interpretacion: { accion: 'contenido' } });
+  });
+
   it.each([
     ['viajes', 'Renata pregunta qué viajes tienen abiertos para enero'],
     ['numeros', 'el señor anda preguntando cómo vamos con lo de él'],
