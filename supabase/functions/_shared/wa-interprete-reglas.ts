@@ -1103,6 +1103,11 @@ const SI_AL_COMIENZO = /^(?:si|sii|sip|dale|ok|okey|listo|claro|perfecto|de una|
 /** Lo que el modelo devuelve para un «sí, pero …» que no es una corrección. */
 const SIN_PESO_ANTE_EL_SI: ReadonlySet<string> = new Set(['confirmar', 'acuse', 'nota_interna', 'contenido', 'saludo', 'pedir_aclaracion']);
 
+/** La primera acción de una propuesta, para volverla contenido sin perder su evidencia. */
+function a0Relato(acc: AccionModelo[]): AccionModelo {
+  return { ...acc[0], ref: null, id: null, nuevo_cliente: null, nuevo_sin_nombre: null };
+}
+
 function validarPropuesta(crudo: unknown, e: EntradaValidador): Decision {
   // V0 — el esquema.
   const propuesta = leerPropuesta(crudo);
@@ -1127,6 +1132,21 @@ function validarPropuesta(crudo: unknown, e: EntradaValidador): Decision {
   if (enAmbito.length < acc.length) marcar('V2_ambito');
   acc = enAmbito;
   if (acc.length === 0) return aclaracion(e, 'V2_ambito');
+
+  // Noveno control (hallazgo 3): con la bandeja, un escrito que relata lo que pregunta o dice el cliente es contenido,
+  // nunca una consulta (ni de la bandeja ni del bot de siempre), diga lo que diga el modelo.
+  if (e.bandeja && relataAlCliente(e.texto)) {
+    // El nombre de quien pregunta no es un cliente NUEVO si el escrito no dice «nuevo» («Renata pregunta si …»): el
+    // modelo lo propone como encabezado de un cliente nuevo y no lo es; lo que cuenta es contenido.
+    const diceNuevo = /\b(?:nuev[oa]s?|otr[oa])\b/.test(norm(e.texto));
+    const sinNuevoInventado = acc.filter(a => !(a.accion === 'abrir_viaje' && (a.nuevo_cliente || a.nuevo_sin_nombre) && !diceNuevo));
+    const cambia = sinNuevoInventado.length < acc.length || acc.some(a => a.accion === 'consulta');
+    if (cambia) {
+      acc = (sinNuevoInventado.length ? sinNuevoInventado : [{ ...a0Relato(acc), accion: 'contenido' }])
+        .map(a => (a.accion === 'consulta' ? { ...a, accion: 'contenido', ref: null, id: null } : a));
+      marcar('V2_relato_es_contenido');
+    }
+  }
 
   // V3 — rol. Lo que el rol no puede hacer recibe el texto de su rol de hoy; nada se escribe.
   const restringido = intentsDelRol(e.rol) !== null;

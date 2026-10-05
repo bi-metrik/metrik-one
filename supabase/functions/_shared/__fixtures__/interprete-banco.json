@@ -1,5 +1,5 @@
 {
- "nota": "Banco de la simulación del 2026-10-02 (escenarios.json, 45 turnos). Sintético: los clientes y negocios son inventados; el nombre del equipo se cambió por «Vale». `modelo` es lo que devuelve el modelo falso: la primera corrida de gemini-2.5-flash que acertó, convertida al esquema nuevo (viaje_* → ref), o a mano donde ninguna acertó. Cambios de expectativa: TV5 descarta la tanda (H2, caso 2) y H2 descarta solo la pregunta (H2, caso 1). Sexto control de Vera (2026-10-04): 11 turnos NC1–NC11 de «¿Creo el cliente nuevo «X»?» con textos inventados; los que lee exacto el código de hoy (el atajo) no llegan al modelo y su `esperado` es lo que hace el código de hoy. · 2026-10-05: +32 turnos de identidad (ID1–ID32, PR A del diseño de cliente y conversación): «nuevo» es un viaje nuevo, el candidato pendiente (`tanda_cliente`) y lo que espera la caja de un viaje nuevo (`pide_llave`, `confirma_llave`). Los que el código lee exactos no llegan al modelo. Octavo control de Vera (2026-10-05): 12 turnos OC1–OC12 con textos inventados: el «sí» con reserva al resumen (OC1–OC4, y OC5–OC6 de control sin reserva), el nombre con fórmula tras «¿Para qué cliente es?» (OC7–OC9, los lee el código) y el nombre del cliente dentro de la caja de su viaje nuevo (OC10–OC11; OC12 de control: su destino sí cambia de viaje). Preguntas sin prefijo (2026-10-05): 13 turnos, PQ1–PQ8 preguntas ESCRITAS al bot (consulta de la bandeja, en solo lectura; PQ1–PQ4 las lee el código) y PR1–PR5 preguntas del cliente (PR1–PR2 relatadas por el comercial, PR3–PR5 reenviadas): contenido de la tanda.",
+ "nota": "Banco de la simulación del 2026-10-02 (escenarios.json, 45 turnos). Sintético: los clientes y negocios son inventados; el nombre del equipo se cambió por «Vale». `modelo` es lo que devuelve el modelo falso: la primera corrida de gemini-2.5-flash que acertó, convertida al esquema nuevo (viaje_* → ref), o a mano donde ninguna acertó. Cambios de expectativa: TV5 descarta la tanda (H2, caso 2) y H2 descarta solo la pregunta (H2, caso 1). Sexto control de Vera (2026-10-04): 11 turnos NC1–NC11 de «¿Creo el cliente nuevo «X»?» con textos inventados; los que lee exacto el código de hoy (el atajo) no llegan al modelo y su `esperado` es lo que hace el código de hoy. · 2026-10-05: +32 turnos de identidad (ID1–ID32, PR A del diseño de cliente y conversación): «nuevo» es un viaje nuevo, el candidato pendiente (`tanda_cliente`) y lo que espera la caja de un viaje nuevo (`pide_llave`, `confirma_llave`). Los que el código lee exactos no llegan al modelo. Octavo control de Vera (2026-10-05): 12 turnos OC1–OC12 con textos inventados: el «sí» con reserva al resumen (OC1–OC4, y OC5–OC6 de control sin reserva), el nombre con fórmula tras «¿Para qué cliente es?» (OC7–OC9, los lee el código) y el nombre del cliente dentro de la caja de su viaje nuevo (OC10–OC11; OC12 de control: su destino sí cambia de viaje). Preguntas sin prefijo (2026-10-05): 13 turnos, PQ1–PQ8 preguntas ESCRITAS al bot (consulta de la bandeja, en solo lectura; PQ1–PQ4 las lee el código) y PR1–PR5 preguntas del cliente (PR1–PR2 relatadas por el comercial, PR3–PR5 reenviadas): contenido de la tanda. Noveno control de Vera (2026-10-05): 8 turnos NV1–NV8 con textos inventados: el relato del cliente tomado por consulta (NV1–NV2, contenido), el «sí» con otro verbo de seguir (NV3–NV4) y con reserva (NV5), abrir o montar un viaje sin «nuevo» (NV6–NV7) y la consulta de viajes con palabras de más (NV8).",
  "contextos": {
   "trappvel": {
    "viajes": [
@@ -2936,6 +2936,203 @@
    "origen_modelo": "reenvío: no llega al modelo",
    "esperado": {
     "accion": "contenido"
+   }
+  },
+  {
+   "id": "NV1",
+   "turno": 1,
+   "cliente": "trappvel",
+   "texto": "Renata pregunta si tienen algo para Mompox en enero",
+   "reenviado": false,
+   "pendiente": null,
+   "pendiente_previo": null,
+   "tanda": true,
+   "tanda_cliente": "JORGE PÉREZ",
+   "control": false,
+   "modelo": {
+    "acciones": [
+     {
+      "accion": "consulta",
+      "tema": "viajes",
+      "evidencia": "Renata pregunta si tienen algo para Mompox en enero"
+     }
+    ]
+   },
+   "origen_modelo": "a mano (noveno control, 2026-10-05): lo que propondría el modelo",
+   "esperado": {
+    "accion": "contenido"
+   }
+  },
+  {
+   "id": "NV2",
+   "turno": 1,
+   "cliente": "trappvel",
+   "texto": "la señora anda preguntando qué viajes hay abiertos",
+   "reenviado": false,
+   "pendiente": null,
+   "pendiente_previo": null,
+   "tanda": true,
+   "tanda_cliente": "JORGE PÉREZ",
+   "control": false,
+   "modelo": {
+    "acciones": [
+     {
+      "accion": "consulta",
+      "tema": "negocios",
+      "evidencia": "la señora anda preguntando qué viajes hay abiertos"
+     }
+    ]
+   },
+   "origen_modelo": "a mano (noveno control, 2026-10-05): lo que propondría el modelo",
+   "esperado": {
+    "accion": "contenido"
+   }
+  },
+  {
+   "id": "NV3",
+   "turno": 1,
+   "cliente": "trappvel",
+   "texto": "sí, súbelo",
+   "reenviado": false,
+   "pendiente": {
+    "capa": "resumen",
+    "texto": "Entendí 1 viaje:\nT1 26 11 · Carolina Ruiz\n 1. «Salimos el 28 de diciembre…»\n 2. «Somos 3 adultos y 2 niños…»\n 3. «Para Madrid queremos hotel cerca…»\n¿Así? sí / corregir",
+    "opciones": [
+     "si",
+     "corregir"
+    ],
+    "mensajes": 3
+   },
+   "pendiente_previo": null,
+   "tanda": true,
+   "control": true,
+   "modelo": {
+    "acciones": [
+     {
+      "accion": "confirmar",
+      "evidencia": "sí, súbelo"
+     }
+    ]
+   },
+   "origen_modelo": "a mano (noveno control, 2026-10-05): lo que propondría el modelo",
+   "esperado": {
+    "accion": "confirmar"
+   }
+  },
+  {
+   "id": "NV4",
+   "turno": 1,
+   "cliente": "trappvel",
+   "texto": "sí señor, déjalo creado de una vez",
+   "reenviado": false,
+   "pendiente": {
+    "capa": "resumen",
+    "texto": "Entendí 1 viaje:\nT1 26 11 · Carolina Ruiz\n 1. «Salimos el 28 de diciembre…»\n 2. «Somos 3 adultos y 2 niños…»\n 3. «Para Madrid queremos hotel cerca…»\n¿Así? sí / corregir",
+    "opciones": [
+     "si",
+     "corregir"
+    ],
+    "mensajes": 3
+   },
+   "pendiente_previo": null,
+   "tanda": true,
+   "control": false,
+   "modelo": {
+    "acciones": [
+     {
+      "accion": "confirmar",
+      "evidencia": "sí señor, déjalo creado de una vez"
+     }
+    ]
+   },
+   "origen_modelo": "a mano (noveno control, 2026-10-05): lo que propondría el modelo",
+   "esperado": {
+    "accion": "confirmar"
+   }
+  },
+  {
+   "id": "NV5",
+   "turno": 1,
+   "cliente": "trappvel",
+   "texto": "sí, súbelo pero cuando confirme el hotel",
+   "reenviado": false,
+   "pendiente": {
+    "capa": "resumen",
+    "texto": "Entendí 1 viaje:\nT1 26 11 · Carolina Ruiz\n 1. «Salimos el 28 de diciembre…»\n 2. «Somos 3 adultos y 2 niños…»\n 3. «Para Madrid queremos hotel cerca…»\n¿Así? sí / corregir",
+    "opciones": [
+     "si",
+     "corregir"
+    ],
+    "mensajes": 3
+   },
+   "pendiente_previo": null,
+   "tanda": true,
+   "control": true,
+   "modelo": {
+    "acciones": [
+     {
+      "accion": "confirmar",
+      "evidencia": "sí, súbelo pero cuando confirme el hotel"
+     }
+    ]
+   },
+   "origen_modelo": "a mano (noveno control, 2026-10-05): lo que propondría el modelo",
+   "esperado": {
+    "accion": "pedir_aclaracion"
+   }
+  },
+  {
+   "id": "NV6",
+   "turno": 1,
+   "cliente": "trappvel",
+   "texto": "ábrele un viaje a Bernardo Lizcano",
+   "reenviado": false,
+   "pendiente": null,
+   "pendiente_previo": null,
+   "tanda": true,
+   "tanda_cliente": "JORGE PÉREZ",
+   "control": false,
+   "modelo": null,
+   "origen_modelo": "atajo: lo lee el código de hoy, no llega al modelo",
+   "esperado": {
+    "accion": "abrir_viaje",
+    "nuevo": "bernardo lizcano"
+   }
+  },
+  {
+   "id": "NV7",
+   "turno": 1,
+   "cliente": "trappvel",
+   "texto": "móntale una cotización a Renata Osorio",
+   "reenviado": false,
+   "pendiente": null,
+   "pendiente_previo": null,
+   "tanda": true,
+   "tanda_cliente": "JORGE PÉREZ",
+   "control": false,
+   "modelo": null,
+   "origen_modelo": "atajo: lo lee el código de hoy, no llega al modelo",
+   "esperado": {
+    "accion": "abrir_viaje",
+    "nuevo": "renata osorio"
+   }
+  },
+  {
+   "id": "NV8",
+   "turno": 1,
+   "cliente": "trappvel",
+   "texto": "¿qué viajes tiene abiertos ahorita Carolina Ruiz?",
+   "reenviado": false,
+   "pendiente": null,
+   "pendiente_previo": null,
+   "tanda": true,
+   "tanda_cliente": "JORGE PÉREZ",
+   "control": false,
+   "modelo": null,
+   "origen_modelo": "atajo: lo lee el código de hoy, no llega al modelo",
+   "esperado": {
+    "accion": "consulta",
+    "tipo": "viajes"
    }
   }
  ]

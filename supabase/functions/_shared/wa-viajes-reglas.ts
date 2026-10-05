@@ -1306,7 +1306,9 @@ export function armarSegmentos(
     // es?», y «sí, es ella» o «no» contestan «¿Es la misma persona?».
     if (escrito && actual && actual.seg.cliente) {
       const ec = actual.seg.cliente;
-      const k = soloLlave(m.cuerpo) ?? soloLlaveDelCliente(m.cuerpo, clienteDeCaja(actual.seg));
+      // Con el nombre en duda (noveno control), lo que trae el nombre limpio y la llave es la respuesta al nombre (abajo).
+      const nombreEnDuda = actual.seg.nombre !== null && !!dir && clienteDeLaCaja(actual.seg, dir)?.tipo === 'sin_nombre';
+      const k = soloLlave(m.cuerpo) ?? (nombreEnDuda ? null : soloLlaveDelCliente(m.cuerpo, clienteDeCaja(actual.seg)));
       if (k) {
         ec.llave = k;
         ec.elegido = null;
@@ -1341,8 +1343,11 @@ export function armarSegmentos(
     // «¿Para qué cliente es?», el nombre de un cliente con viajes abiertos es el cliente del viaje NUEVO, no un
     // encabezado de uno de sus viajes (la prueba de Mauricio del 2026-10-05, turno 2): solo un código o un
     // «nuevo X» abren otra caja.
-    const necesitaNombre = !!actual && actual.seg.nombre === null
-      && (!tieneLlave(actual.seg.cliente?.llave) || !dir || clienteDeLaCaja(actual.seg, dir)?.tipo === 'sin_nombre');
+    const necesitaNombre = !!actual && ((actual.seg.nombre === null
+      && (!tieneLlave(actual.seg.cliente?.llave) || !dir || clienteDeLaCaja(actual.seg, dir)?.tipo === 'sin_nombre'))
+      // Noveno control (hallazgo 1): el nombre que se dio arrancaba con una fórmula que no es de nadie («la persona es
+      // …»): el bot pidió el nombre otra vez, y el que llega ahora lo reemplaza.
+      || (actual.seg.nombre !== null && !!dir && actual.seg.encabezado?.resolucion.tipo === 'nuevo' && clienteDeLaCaja(actual.seg, dir)?.tipo === 'sin_nombre'));
     if (escrito && actual && necesitaNombre) {
       const r = resolverEncabezado(m.cuerpo, viajes, equipo);
       const otro = !!r && ((r.tipo === 'nuevo' && (!!r.cliente || !!r.llave)) || r.tipo === 'codigo_desconocido' || (r.tipo === 'viaje' && r.por === 'codigo'));
@@ -2151,8 +2156,36 @@ export function esSiSinReserva(texto: string): boolean {
   t = t.replace(/\s+/g, ' ').trim();
   if (NIEGA_EN_CONFIRMACION.test(t) || /[?¿]/.test(bruto) || t.split(' ').some(w => DEICTICOS.has(w))) return false;
   // «cárgalo», «cárguelos», «cargar»: en el resumen, cargar es el verbo de alta.
-  return esSiCompleto(t.split(' ').map(w => VERBOS_CARGAR.has(w) ? 'crea' : w).join(' '), null);
+  if (esSiCompleto(t.split(' ').map(w => VERBOS_CARGAR.has(w) ? 'crea' : w).join(' '), null)) return true;
+  return siConVerboDeSeguir(t);
 }
+
+/**
+ * Noveno control de Vera (hallazgo 4): la reserva la define lo que viene después del «sí» (una condición, una espera,
+ * una negación, una pregunta o una corrección), no una lista de verbos. Un «sí» seguido solo de verbos de seguir
+ * adelante («súbelo», «déjalo creado», «móntalo de una»), con cortesía, es el «sí».
+ */
+function siConVerboDeSeguir(t: string): boolean {
+  let s = ` ${t} `;
+  for (const f of CORTESIA_FRASES) s = s.split(` ${f} `).join(' ');
+  const ws = s.replace(/\bde una\b/g, 'de_una').replace(/\bde una vez\b/g, 'de_una').split(' ').filter(Boolean);
+  if (ws.length < 2 || /\d/.test(t)) return false;
+  if (!(SI_FIRME.has(ws[0]) || (AFIRMA.has(ws[0]) && !ACUSES.has(ws[0])))) return false;
+  const resto = ws.slice(1);
+  if (resto.some(w => RESERVA_TRAS_EL_SI.has(w))) return false;
+  const deSeguir = (w: string) => VERBO_DE_SEGUIR.test(w) && !RESERVA_TRAS_EL_SI.has(w);
+  return resto.some(deSeguir)
+    && resto.every(w => deSeguir(w) || SI_FIRME.has(w) || AFIRMA.has(w) || ACOMPANA_CREAR.has(w) || OBJETO_DEL_ALTA.has(w) || TRAS_EL_VERBO.has(w));
+}
+/** Verbos de seguir adelante, con o sin pronombres pegados, y sus participios («súbelo», «déjalo creado», «móntalo»). */
+const VERBO_DE_SEGUIR = /^(?:sub|dej|mont|carg|cre|abr|registr|guard|agreg|ingres|mand|proced|segu|sig|continu|aplic|termin|met|pon|hag|haz|envi|confirm|activ|arm)[a-z]*$/;
+/** Lo que marca una reserva después del «sí»: condición, espera, negación, corrección, algo que falta. */
+const RESERVA_TRAS_EL_SI: ReadonlySet<string> = new Set(['pero', 'aunque', 'cuando', 'si', 'apenas', 'despues', 'luego', 'manana', 'tarde', 'espera',
+  'esperame', 'esperemos', 'esperar', 'aguanta', 'aguardame', 'todavia', 'aun', 'no', 'ni', 'nunca', 'excepto', 'menos', 'salvo', 'solo', 'falta',
+  'faltan', 'faltaria', 'quita', 'quitale', 'cambia', 'cambiale', 'mueve', 'muevelo', 'corrige', 'corrigelo', 'sin', 'hasta', 'mientras', 'antes',
+  'primero', 'revisa', 'revisalo', 'confirmame', 'confirmo']);
+/** Lo que acompaña al verbo sin cambiar nada: «déjalo listo», «súbelo todo», «créalo así». */
+const TRAS_EL_VERBO: ReadonlySet<string> = new Set(['listo', 'lista', 'listos', 'ya', 'todo', 'toda', 'todos', 'asi', 'de_una', 'tambien', 'igual', 'nomas']);
 const RESUMEN_BIEN: ReadonlyArray<string> = ['todo esta bien', 'asi esta bien', 'asi esta perfecto', 'esta bien', 'esta perfecto', 'todo bien',
   'todo correcto', 'todo ok', 'asi es', 'asi esta', 'tal cual', 'quedo bien', 'asi quedo', 'como esta'];
 const VERBOS_CARGAR: ReadonlySet<string> = new Set([...formasDeAlta('carg'), 'cargalos', 'cargalas', 'carguelos', 'carguelas', 'carguemoslos']);

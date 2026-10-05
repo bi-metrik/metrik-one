@@ -242,6 +242,66 @@ function distancia(a: string, b: string): number {
   return d[a.length][b.length];
 }
 
+/**
+ * Palabras con las que nunca empieza un nombre propio (noveno control de Vera, hallazgo 1): artículos, posesivos,
+ * pronombres, preposiciones, «la persona», verbos de presentación. No es una lista de lo que ES un nombre: solo sirve
+ * para no crear «cliente nuevo» con un nombre que arranca con una fórmula que no se pudo quitar.
+ */
+const NO_EMPIEZA_NOMBRE: ReadonlySet<string> = new Set([
+  'el', 'la', 'los', 'las', 'lo', 'un', 'una', 'unos', 'unas', 'mi', 'mis', 'tu', 'tus', 'su', 'sus', 'nuestro', 'nuestra', 'nuestros', 'nuestras',
+  'yo', 'ella', 'ellos', 'ellas', 'usted', 'ustedes', 'este', 'esta', 'ese', 'esa', 'aquel', 'aquella', 'esto', 'eso', 'quien', 'que', 'cual',
+  'a', 'al', 'de', 'del', 'para', 'por', 'con', 'en', 'sin', 'sobre', 'hacia', 'persona', 'cliente', 'clienta', 'pasajero', 'pasajera',
+  'titular', 'nombre', 'contacto', 'senor', 'senora', 'es', 'son', 'era', 'fue', 'sera', 'seria', 'se', 'le', 'les', 'me', 'te', 'nos', 'va',
+  'van', 'viene', 'vienen', 'corresponde', 'corresponden', 'trata', 'llama', 'llaman', 'llamado', 'llamada', 'dice', 'dicen', 'quiere', 'quieren',
+  'esta', 'estan', 'hay', 'tiene', 'tienen', 'viaja', 'viajan', 'sale', 'salen', 'tambien', 'ahora', 'ya', 'solo', 'mejor', 'y', 'o', 'pues',
+]);
+
+/**
+ * Los tramos de 2 a 4 palabras seguidas de un nombre escrito, del más largo al más corto y de atrás hacia adelante,
+ * hechos solo de palabras que pueden ser de un nombre (noveno control, hallazgo 1): «la persona se llama Ana Ruiz»
+ * → «Ana Ruiz»; «Ana Ruiz Cartagena» → «Ana Ruiz Cartagena», «Ruiz Cartagena», «Ana Ruiz».
+ */
+export function tramosDelNombre(nombre: string | null | undefined): string[] {
+  const tokens = String(nombre ?? '').split(/[\s,.;:!¡¿?()"«»]+/).filter(Boolean);
+  const corridas: string[][] = [];
+  let actual: string[] = [];
+  for (const t of tokens) {
+    const n = normalizarNombre(t);
+    if (!n || /\d/.test(n) || NO_EMPIEZA_NOMBRE.has(n)) {
+      if (actual.length) corridas.push(actual);
+      actual = [];
+    } else actual.push(t);
+  }
+  if (actual.length) corridas.push(actual);
+  const tramos: string[] = [];
+  for (let largo = 4; largo >= 2; largo--) {
+    for (const c of [...corridas].reverse()) {
+      for (let i = c.length - largo; i >= 0; i--) tramos.push(c.slice(i, i + largo).join(' '));
+    }
+  }
+  return [...new Set(tramos)];
+}
+
+/**
+ * El nombre del cliente que dice el escrito, contra el directorio (noveno control de Vera, hallazgo 1). Si el nombre
+ * entero no es exacto el de nadie pero un tramo suyo sí («la persona se llama Ana Ruiz», «para Ana Ruiz», «Ana Ruiz
+ * Cartagena»), el cliente es ese tramo y lo demás se descarta. Sin coincidencia, un nombre que empieza por una
+ * palabra que no es de un nombre propio es `dudoso`: se pregunta «¿cómo se llama?», nunca se crea con el prefijo.
+ */
+export function nombreEnElDirectorio(nombre: string | null | undefined, dir: Directorio): { nombre: string; dudoso: boolean } {
+  const entero = String(nombre ?? '').trim();
+  const identicos = (n: string) => (dir.porNombre(n) ?? []).filter(f => nombreIdentico(n, f.nombre));
+  if (!entero || identicos(entero).length > 0) return { nombre: entero, dudoso: false };
+  for (const t of tramosDelNombre(entero)) {
+    if (normalizarNombre(t) !== normalizarNombre(entero) && identicos(t).length > 0) return { nombre: t, dudoso: false };
+  }
+  // Un artículo solo puede empezar el nombre de una empresa («La Riviera», «Los Andes»); con otra palabra que no es de
+  // un nombre detrás («la persona …», «el señor …»), o cualquier otra palabra así delante («para …», «mi …»), no.
+  const [primera = '', segunda = ''] = normalizarNombre(entero).split(' ');
+  const articulo = ['el', 'la', 'los', 'las'].includes(primera);
+  return { nombre: entero, dudoso: NO_EMPIEZA_NOMBRE.has(primera) && (!articulo || NO_EMPIEZA_NOMBRE.has(segunda)) };
+}
+
 /** ¿El nombre dado es EXACTAMENTE el del contacto? (sin tildes, mayúsculas ni signos) */
 export function nombreIdentico(dado: string | null | undefined, contacto: string | null | undefined): boolean {
   const a = normalizarNombre(dado);
@@ -426,7 +486,7 @@ const RELLENO_ELECCION: ReadonlySet<string> = new Set(['el', 'la', 'los', 'las',
   'vez', 'antes', 'anterior', 'viajo', 'ese', 'esa', 'mismo', 'misma', 'persona', 'senor', 'senora', 'don', 'dona', 'lo', 'le', 'ahi', 'aparece', 'sale',
   'dice', 'dijiste', 'pusiste', 'mostraste', 'lista', 'opcion']);
 /** El dato que el bot muestra de cada ficha, nombrado con relleno («el del correo», «la que no tiene celular»). */
-const DICE_CORREO = /\b(?:correo|mail|email|e mail|gmail|hotmail|outlook)\b/;
+const DICE_CORREO = /\b(?:correo|correos|mail|email|e mail|emails|gmail|hotmail|outlook|yahoo|icloud|electronico)\b/;
 const DICE_USUARIO = /\b(?:usuario|instagram|insta|arroba)\b/;
 const DICE_SIN_DATOS = /\b(?:sin|no\s+tiene|no\s+tenia)\s+(?:celular|cel|numero|telefono|datos|nada)\b/;
 const DICE_CELULAR = /\b(?:celular|cel|numero|telefono|whatsapp)\b/;
@@ -459,6 +519,17 @@ export function leerEleccionCliente(texto: string, opciones: ReadonlyArray<Ficha
   }
   // «sí», «es ella», «esa misma» con una sola opción.
   if (opciones.length === 1 && ws.every(w => SI_ES.has(w))) return { tipo: 'ficha', ficha: opciones[0] };
+  // Noveno control (hallazgo 5): haber viajado o no, dicho con sus palabras («el que ya viajó con nosotros», «el que
+  // nunca ha viajado»), si solo una de las opciones lo cumple.
+  const unico = (cumple: (f: FichaCliente) => boolean) => { const f = opciones.filter(cumple); return f.length === 1 ? { tipo: 'ficha' as const, ficha: f[0] } : null; };
+  const conViajes = (f: FichaCliente) => f.abiertos.length > 0 || !!f.cerrado;
+  if (/\b(?:nunca\s+(?:ha\s+)?viaj\w*|no\s+ha\s+viajado|sin\s+viajes|no\s+tiene\s+viajes|el\s+nuevo|la\s+nueva)\b/.test(t)) {
+    const r = unico(f => !conViajes(f));
+    if (r) return r;
+  } else if (/\b(?:ya\s+(?:viajo|ha\s+viajado|habia\s+viajado|fue\s+cliente|compro)|ha\s+viajado|viajo\s+con\s+nosotros|tiene\s+viajes|el\s+de\s+antes|el\s+antiguo|la\s+antigua|el\s+conocido|la\s+conocida)\b/.test(t)) {
+    const r = unico(conViajes);
+    if (r) return r;
+  }
   // El dato que el bot mostró y que la distingue («el del correo», «el que no tiene celular»), si lo tiene una sola.
   const porDato = (cumple: (f: FichaCliente) => boolean) => { const f = opciones.filter(cumple); return f.length === 1 ? { tipo: 'ficha' as const, ficha: f[0] } : null; };
   const dato = DICE_SIN_DATOS.test(t) ? porDato(f => !f.cel4 && !f.correo && !f.usuario)
@@ -466,7 +537,7 @@ export function leerEleccionCliente(texto: string, opciones: ReadonlyArray<Ficha
     : DICE_USUARIO.test(t) ? porDato(f => !f.cel4 && !f.correo && !!f.usuario)
     : DICE_CELULAR.test(t) && !/\bno\b/.test(t) ? porDato(f => !!f.cel4)
     : null;
-  if (dato && ws.filter(w => !RELLENO_ELECCION.has(w)).every(w => /^(?:correo|mail|email|e|gmail|hotmail|outlook|usuario|instagram|insta|arroba|sin|no|ni|tiene|tenia|celular|cel|numero|telefono|whatsapp|datos|nada|ficha|contacto)$/.test(w))) return dato;
+  if (dato && ws.filter(w => !RELLENO_ELECCION.has(w)).every(w => /^(?:correo|correos|mail|email|emails|electronico|e|gmail|hotmail|outlook|yahoo|icloud|usuario|instagram|insta|arroba|sin|no|ni|tiene|tenia|celular|cel|numero|telefono|whatsapp|datos|nada|ficha|contacto)$/.test(w))) return dato;
   // «el de Miami», «Paola Andrea»: las palabras que quedan están en lo de UN solo contacto.
   const resto = ws.filter(w => !RELLENO_ELECCION.has(w));
   if (resto.length === 0) return null;
@@ -524,7 +595,10 @@ export function directorioDesde(
 export function resolverConDirectorio(dir: Directorio, p: {
   nombre: string | null | undefined; llave: Llave | null | undefined; descartadas?: ReadonlyArray<string>; otraPersona?: boolean;
 }): ResolucionCliente {
-  const nombre = String(p.nombre ?? '').trim();
+  // Noveno control (hallazgo 1): el cliente es el tramo del escrito que el directorio tiene exacto; un nombre que
+  // arranca con una fórmula que no es de nadie se pregunta («¿cómo se llama?»), no se crea con el prefijo.
+  const leido = p.otraPersona ? { nombre: String(p.nombre ?? '').trim(), dudoso: false } : nombreEnElDirectorio(p.nombre, dir);
+  const nombre = leido.dudoso ? '' : leido.nombre;
   const llave = tieneLlave(p.llave) ? p.llave : null;
   const porLlave = llave ? dir.porLlave(llave) : undefined;
   const porNombre = nombre && !p.otraPersona ? dir.porNombre(nombre) : undefined;

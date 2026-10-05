@@ -13,8 +13,10 @@
 // ============================================================
 
 import {
-  claveDeLlave, claveDeNombre, directorioDesde, digitosCelular, resolverCliente, resolverConDirectorio, tieneLlave,
+  claveDeLlave, claveDeNombre, directorioDesde, digitosCelular, nombreEnElDirectorio, nombreIdentico, resolverCliente, resolverConDirectorio,
+  tieneLlave, tramosDelNombre,
 } from './wa-cliente-reglas.ts';
+import { normalizarNombre } from './wa-entendimiento-reglas.ts';
 import type { Directorio, FichaCliente, Llave, ResolucionCliente } from './wa-cliente-reglas.ts';
 import { armarSegmentos, nombreDelViajeNuevo } from './wa-viajes-reglas.ts';
 import type { DestinoNuevo, MensajeViaje, PlanViajes, ViajeAbierto } from './wa-viajes-reglas.ts';
@@ -92,7 +94,8 @@ export async function directorioPara(
 ): Promise<Directorio> {
   const nombres = new Map<string, FichaCliente[] | null>();
   const llaves = new Map<string, FichaCliente[] | null>();
-  for (const n of p.nombres) {
+  // Cada nombre y sus tramos (noveno control: el cliente se busca también por la parte del escrito que es su nombre).
+  for (const n of p.nombres.flatMap(x => [x, ...tramosDelNombre(x)])) {
     const k = claveDeNombre(n);
     if (k && !nombres.has(k)) nombres.set(k, await fichasPorNombre(supabase, workspaceId, n));
   }
@@ -162,8 +165,19 @@ export type ResultadoCrear =
 export async function crearContactoConGuardian(
   supabase: SupabaseClient, workspaceId: string, p: { nombre: string; llave: Llave | null | undefined },
 ): Promise<ResultadoCrear> {
-  const nombre = String(p.nombre ?? '').trim();
-  if (!nombre) return { tipo: 'no_creado', resolucion: { tipo: 'sin_nombre', llave: p.llave ?? null } };
+  const dado = String(p.nombre ?? '').trim();
+  if (!dado) return { tipo: 'no_creado', resolucion: { tipo: 'sin_nombre', llave: p.llave ?? null } };
+  // Noveno control (hallazgo 1): justo antes de crear, el nombre se vuelve a mirar contra el directorio por sus tramos.
+  // Si un tramo es exacto el de alguien, no se crea (es ese, o se pregunta cuál); si arranca con una fórmula que no es
+  // de nadie, se pregunta el nombre.
+  const dirNombre = await directorioPara(supabase, workspaceId, { nombres: [dado], llaves: [] });
+  const leido = nombreEnElDirectorio(dado, dirNombre);
+  if (leido.dudoso) return { tipo: 'no_creado', resolucion: tieneLlave(p.llave) ? { tipo: 'sin_nombre', llave: p.llave } : { tipo: 'sin_nombre' } };
+  const nombre = leido.nombre;
+  if (normalizarNombre(nombre) !== normalizarNombre(dado)) {
+    const fichas = (dirNombre.porNombre(nombre) ?? []).filter(f => nombreIdentico(nombre, f.nombre));
+    if (fichas.length > 0) return { tipo: 'no_creado', resolucion: resolverCliente({ nombre, llave: null, porNombre: fichas }) };
+  }
   if (!tieneLlave(p.llave)) return { tipo: 'no_creado', resolucion: { tipo: 'pedir_llave', nombre } };
   const duenos = await fichasPorLlave(supabase, workspaceId, p.llave);
   if (duenos === null) return { tipo: 'error', motivo: 'no se pudo comprobar si la llave ya es de alguien: no se crea el contacto' };

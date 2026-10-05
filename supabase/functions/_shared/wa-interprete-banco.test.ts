@@ -74,8 +74,8 @@ describe('banco de la simulación con un modelo falso: el validador', () => {
     });
   }
 
-  it('los 113 turnos están en el banco (45 + 11 de la confirmación de cliente nuevo + 32 de identidad + 12 del octavo control + 13 de preguntas sin prefijo) y todos salen como se esperaba', () => {
-    expect(BANCO.turnos).toHaveLength(113);
+  it('los 121 turnos están en el banco (45 + 11 de la confirmación de cliente nuevo + 32 de identidad + 12 del octavo control + 13 de preguntas sin prefijo + 8 del noveno control) y todos salen como se esperaba', () => {
+    expect(BANCO.turnos).toHaveLength(121);
     expect(resultados.filter(r => !r.ok)).toEqual([]);
   });
 });
