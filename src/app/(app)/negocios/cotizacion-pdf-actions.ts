@@ -49,7 +49,7 @@ import { avisoDelTextoEnPdf, leerDocumentoCliente, textoParaElViaje } from '@/li
 import { vigenciaEnDias } from '@/lib/cotizaciones/condiciones-comerciales'
 import { fotosDeCiudad } from '@/lib/pdf/fotos-ciudad'
 import { fotosDelViaje } from '@/lib/pdf/fotos-del-viaje'
-import { nombreVisibleDeLinea } from '@/lib/cotizaciones/nombre-visible'
+import { descripcionVisibleDeLinea, nombreVisibleDeLinea } from '@/lib/cotizaciones/nombre-visible'
 import { precioPorHabitacionDeItem, precioPorPasajeroDeItem, preciosPorPasajeroDelViaje } from '@/lib/cotizaciones/precio-pasajero-pdf'
 import { calcularFiscal, type FiscalProfile } from '@/lib/fiscal/calculos'
 import {
@@ -1020,8 +1020,10 @@ export async function generateCotizacionPDF(cotizacionId: string) {
         // opcional es lo que el cliente pagaría si la toma.
         .map(conIva)
         .map(i => ({
-          nombre: i.nombre ?? '',
-          descripcion: i.descripcion ?? null,
+          // Como en «Inversión»: el nombre y el detalle de la lectura, no en MAYÚSCULAS (brief del
+          // 2026-10-05, «actividades tras la limpieza», punto 4). Sin ranura llegan idénticos.
+          nombre: nombreVisibleDeLinea(i),
+          descripcion: descripcionVisibleDeLinea(i),
           precio_venta: Number(i.precio_venta) || 0,
           cantidad: Number(i.cantidad) || 1,
           unidad: i.unidad ?? null,

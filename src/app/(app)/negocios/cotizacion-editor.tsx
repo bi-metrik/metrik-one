@@ -101,7 +101,7 @@ import {
   textoFaltaDia,
   textoNoVan,
 } from '@/lib/cotizaciones/actividad-en-cotizacion'
-import { avisoTasaPendiente } from '@/lib/cotizaciones/actividad-pantallazo'
+import { avisoTasaPendiente, esAvisoResueltoEnActividad } from '@/lib/cotizaciones/actividad-pantallazo'
 import { nombreVisibleDeLinea } from '@/lib/cotizaciones/nombre-visible'
 import { motivoFaltaCosto, tasasPendientesPorLinea } from '@/lib/cotizaciones/falta-costo'
 import { pasajerosParaCuadre } from '@/lib/cotizaciones/cuadre-pasajero'
@@ -1024,13 +1024,17 @@ export default function CotizacionEditor({ oportunidadId, cotizacion, initialIte
   // P7 · cada opción y cada bloque dicen si están completos o qué les falta.
   const estadoDeOpcion = (i: ItemRow) => {
     const t = leerTarifaPax(i.tarifa_pax)
+    const deActividad = esActividad(i.grupo)
     return {
       id: i.id,
       nombre: i.nombre || 'Opción',
       conCosto: (lineaPorItem.get(i.id)?.costoLinea ?? 0) > 0,
       sinConfirmar: !!t.casillas?.grupo_completo && !t.confirmada,
-      // Un aviso que solo informa (los impuestos en destino ya van al cliente) no pide nada.
-      alerta: (t.casillas?.grupo_completo?.alertas ?? []).find(a => !esAvisoSoloInformativo(a)) ?? null,
+      // Un aviso que solo informa (los impuestos en destino ya van al cliente) no pide nada. En
+      // una actividad tampoco el del infante gratis ni el de la ciudad que no se ve (punto 3 del
+      // brief del 2026-10-05, «actividades tras la limpieza»).
+      alerta: (t.casillas?.grupo_completo?.alertas ?? [])
+        .find(a => !esAvisoSoloInformativo(a) && !(deActividad && esAvisoResueltoEnActividad(a))) ?? null,
       // Hotel: la misma cuenta de pasajeros que la tarjeta («Faltan 1 adulto y 1 infante»).
       pasajeros: ranuraDeGrupo(i.grupo ?? null)?.slug === 'hotel_detalle' ? avisoDePasajerosDeOpcion(t, composicionViaje ?? null) : null,
       // Por qué el costo leído no entró, cuando es la tasa de cambio (brief del 2026-10-01).

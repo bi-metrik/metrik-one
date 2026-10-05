@@ -53,6 +53,7 @@ import {
   ocupacionConEdades,
   pesos,
   avisoDePasajeros,
+  preguntaEliminarOpcion,
   referenciasTexto,
   resumenDeAlojamiento,
 } from '@/lib/cotizaciones/tarjeta-opcion'
@@ -65,7 +66,7 @@ import {
   textoAvisoDeshacer,
   type EsperasDeshacer,
 } from '@/lib/cotizaciones/espera-deshacer'
-import { datosManuales, montoConMiles } from '@/lib/cotizaciones/ingreso-manual'
+import { datosManuales, esManual, montoConMiles } from '@/lib/cotizaciones/ingreso-manual'
 import { nombreVisibleDeLinea } from '@/lib/cotizaciones/nombre-visible'
 import { CheckVa, ModoYDia, useActividad, type ActividadDeTarjeta } from '@/app/(app)/negocios/actividad-control'
 import { TEXTO_ACTIVIDAD_NO_VA } from '@/lib/cotizaciones/actividad-en-cotizacion'
@@ -339,7 +340,7 @@ export default function TarjetaOpcion({
 
   const menuOpcion = (cerrar: () => void) => confirmaBorrar ? (
     <span className="flex flex-col gap-2 px-2.5 py-2 text-[13px]" data-confirma-borrar>
-      <span>¿Eliminas {nombre} de este bloque? Sus habitaciones vuelven a la bandeja.</span>
+      <span>{preguntaEliminarOpcion(nombre, { esHotel, tieneLectura: !!tarifa.casillas?.grupo_completo, manual: esManual(tarifa.casillas?.grupo_completo) })}</span>
       <span className="flex gap-2">
         <button
           type="button"

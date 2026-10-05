@@ -183,13 +183,15 @@ describe('punto 0 · los tres estados y cómo se pasa de uno a otro', () => {
     expect(cambiosDeActividad({ estado: 'no_va', dia: 2, era: 'incluida' }, { va: true }))
       .toEqual({ entra_al_precio: true, mostrar_en_sugeridos: true, noVa: null })
     expect(cambiosDeActividad({ estado: 'no_va', dia: null, era: 'opcional' }, { va: true }))
-      .toEqual({ entra_al_precio: false, mostrar_en_sugeridos: true, dia_relativo: null, noVa: null })
+      .toEqual({ entra_al_precio: false, mostrar_en_sugeridos: true, noVa: null })
     // Sin la marca (quitada antes de existir), vuelve Incluida: D5.
     expect(cambiosDeActividad({ estado: 'no_va', dia: null, era: null }, { va: true })?.entra_al_precio).toBe(true)
   })
 
-  it('Opcional borra el día; Incluida u Opcional solo con el check puesto; lo que ya está así no escribe', () => {
-    expect(cambiosDeActividad({ estado: 'incluida', dia: 3, era: null }, { modo: 'opcional' })?.dia_relativo).toBeNull()
+  // Brief del 2026-10-05, «actividades tras la limpieza», punto 2: Opcional YA NO borra el día.
+  it('Opcional conserva el día; Incluida u Opcional solo con el check puesto; lo que ya está así no escribe', () => {
+    expect(cambiosDeActividad({ estado: 'incluida', dia: 3, era: null }, { modo: 'opcional' }))
+      .toEqual({ entra_al_precio: false, mostrar_en_sugeridos: true, noVa: null })
     expect(cambiosDeActividad({ estado: 'no_va', dia: null, era: null }, { modo: 'incluida' })).toBeNull()
     expect(cambiosDeActividad({ estado: 'opcional', dia: null, era: null }, { modo: 'opcional' })).toBeNull()
     expect(cambiosDeActividad({ estado: 'incluida', dia: null, era: null }, { va: true })).toBeNull()

@@ -52,9 +52,9 @@ export function useActividad(itemId: string, base: ActividadDeTarjeta, onCambio:
   function marcar(p: PedidoActividad) {
     const cambios = cambiosDeActividad({ estado, dia, era: base.era }, p)
     if (!cambios) return
-    // Al quitar el check, el día se queda; al volver, lo decide el servidor (con lo que guardó).
+    // El día se queda en los tres estados: ninguno lo borra.
     const siguiente = estadoDeActividad(cambios)
-    setPedido({ estado: siguiente, dia: cambios.dia_relativo === null ? null : dia, antes: firmaBase })
+    setPedido({ estado: siguiente, dia, antes: firmaBase })
     startTransition(async () => {
       const r = await marcarActividadEnCotizacion(itemId, p)
       if (!r.success) { setPedido(null); toast.error(r.error ?? 'No se pudo guardar.'); return }

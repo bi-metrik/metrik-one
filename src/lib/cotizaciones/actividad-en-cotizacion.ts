@@ -10,8 +10,13 @@
  * | estado     | va en la cotización | suma | día | dónde sale en el PDF                  |
  * |------------|---------------------|------|-----|---------------------------------------|
  * | `incluida` | sí                  | sí   | sí  | «Día a día» (con día) y lo incluido   |
- * | `opcional` | sí                  | no   | no  | «Opcionales», con su precio           |
+ * | `opcional` | sí                  | no   | lo guarda | «Opcionales», con su precio     |
  * | `no_va`    | no                  | no   | lo guarda | no sale                         |
+ *
+ * El día se conserva en los tres (brief del 2026-10-05, «actividades tras la limpieza», punto 2:
+ * Kayak en Día 2 → Opcional → Incluida volvía «Sin día»). Una opcional no sale en «Día a día» por
+ * estar fuera del precio (`diasDelItinerario`), no por no tener día; al volver a Incluida recupera
+ * el suyo.
  *
  * ## Sin columna nueva: los dos interruptores que ya existían
  *
@@ -19,13 +24,13 @@
  * describen los tres estados sin una migración:
  *
  *  · incluida = entra al precio.
- *  · opcional = fuera del precio y a la vista.
+ *  · opcional = fuera del precio y a la vista. Conserva su `dia_relativo`.
  *  · no va    = fuera del precio y oculta. Conserva su `dia_relativo`.
  *
- * Lo único que esas dos columnas no dicen es si una «No va» SIN día era incluida u opcional antes
- * de quitarle el check. Eso se guarda en `tarifa_pax.noVa.era` mientras dure, para que al marcarla
+ * Lo único que esas dos columnas no dicen es si una «No va» era incluida u opcional antes de
+ * quitarle el check. Eso se guarda en `tarifa_pax.noVa.era` mientras dure, para que al marcarla
  * otra vez vuelva exactamente como estaba. Sin la marca vuelve Incluida (D5: lo nuevo entra
- * Incluido); con día, siempre era Incluida (una opcional no lleva día).
+ * Incluido).
  *
  * Puro: sin red ni base. Lo usan la tarjeta, el editor, la acción del servidor y la bandeja.
  */
@@ -51,12 +56,13 @@ export function estadoDeActividad(item: Pick<ItemConDia, 'entra_al_precio' | 'mo
 /** Lo que pide la operadora: marcar o quitar el check, o pasar de Incluida a Opcional. */
 export type PedidoActividad = { va: boolean } | { modo: 'incluida' | 'opcional' }
 
-/** Lo que hay que escribir en la línea para cumplir el pedido. `null` = ya está así. */
+/**
+ * Lo que hay que escribir en la línea para cumplir el pedido. `null` = ya está así. Nunca toca el
+ * día: ningún cambio de estado lo borra.
+ */
 export interface CambiosDeActividad {
   entra_al_precio: boolean
   mostrar_en_sugeridos: boolean
-  /** Solo cuando cambia. Ausente = el día se queda como está (también en una «No va»). */
-  dia_relativo?: null
   /** La marca de cómo era antes de quitarle el check; `null` la retira. */
   noVa: { era: 'incluida' | 'opcional' } | null
 }
@@ -75,14 +81,14 @@ export function cambiosDeActividad(
     const era = actual.era ?? 'incluida'
     return era === 'incluida'
       ? { entra_al_precio: true, mostrar_en_sugeridos: true, noVa: null }
-      : { entra_al_precio: false, mostrar_en_sugeridos: true, dia_relativo: null, noVa: null }
+      : { entra_al_precio: false, mostrar_en_sugeridos: true, noVa: null }
   }
   // Incluida u Opcional solo se eligen con el check puesto.
   if (actual.estado === 'no_va' || actual.estado === pedido.modo) return null
   return pedido.modo === 'incluida'
     ? { entra_al_precio: true, mostrar_en_sugeridos: true, noVa: null }
-    // Opcional no lleva día: cuando el cliente la elija, se pasa a Incluida y se le pide.
-    : { entra_al_precio: false, mostrar_en_sugeridos: true, dia_relativo: null, noVa: null }
+    // Opcional guarda su día: no sale en «Día a día» y al volver a Incluida lo recupera.
+    : { entra_al_precio: false, mostrar_en_sugeridos: true, noVa: null }
 }
 
 // ── Los días del viaje ────────────────────────────────────────────────────────

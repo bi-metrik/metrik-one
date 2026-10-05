@@ -963,7 +963,9 @@ export async function actualizarDiaDeItem(
  *
  *  · Quitar el check: deja de sumar y de salir en el documento, y conserva su día. Se anota cómo
  *    era (`tarifa_pax.noVa`) para que al marcarla vuelva igual.
- *  · Opcional: no suma y no lleva día (el día se borra); sale en «Opcionales» con su precio.
+ *  · Opcional: no suma y conserva su día (no sale en «Día a día»); sale en «Opcionales» con su
+ *    precio. Al volver a Incluida recupera el día (brief del 2026-10-05, «actividades tras la
+ *    limpieza», punto 2).
  *  · Incluida: suma; el día se elige en la tarjeta.
  *
  * Mueve plata, así que recalcula el total aquí mismo, como el interruptor de siempre.
@@ -1019,7 +1021,6 @@ export async function marcarActividadEnCotizacion(
     mostrar_en_sugeridos: cambios.mostrar_en_sugeridos,
     // Sin tarifa guardada y sin marca que poner, la columna se queda como estaba.
     ...(item.tarifa_pax || cambios.noVa ? { tarifa_pax: tarifa } : {}),
-    ...(cambios.dia_relativo !== undefined ? { dia_relativo: cambios.dia_relativo } : {}),
   }
   const { error: errUpd } = await sb.from('items').update(patch).eq('id', itemId)
   if (errUpd) return { success: false, error: errUpd.message }

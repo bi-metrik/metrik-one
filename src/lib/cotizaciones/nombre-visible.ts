@@ -18,6 +18,7 @@
  */
 
 import { aMayusculas } from '@/lib/negocios/mayusculas'
+import { descripcionDeLinea } from './ficha-linea'
 import { ranuraDeGrupo } from './ranuras-pantallazo'
 import { leerTarifaPax } from './tarifa-pasajero'
 
@@ -32,4 +33,24 @@ export function nombreVisibleDeLinea(item: { nombre?: string | null; grupo?: str
   const t = leerTarifaPax(item.tarifa_pax)
   const leido = (t.casillas?.grupo_completo?.nombre ?? t.habitaciones?.[0]?.lectura.nombre ?? '').trim()
   return leido && nombre === aMayusculas(leido) ? leido : tal
+}
+
+/**
+ * La descripción con que se MUESTRA una línea de viaje: la que ONE escribió desde la lectura, con
+ * sus mayúsculas y minúsculas, si la guardada es justo esa en mayúscula. Lo que escribió una
+ * persona se respeta tal cual, y las líneas sin ranura llegan idénticas.
+ *
+ * Brief del 2026-10-05, «actividades tras la limpieza», punto 4: «Opcionales» del PDF decía
+ * «FECHA: FECHA ABIERTA · DURACIÓN: 2 HORAS · PROVEEDOR: CIVITATIS» (la columna guarda la
+ * descripción en mayúscula, `aMayusculas` al confirmar). Mismo criterio que el nombre.
+ */
+export function descripcionVisibleDeLinea(item: { descripcion?: string | null; grupo?: string | null; tarifa_pax?: unknown }): string | null {
+  const tal = item.descripcion ?? null
+  const guardada = (tal ?? '').trim()
+  const ranura = ranuraDeGrupo(item.grupo ?? null)
+  if (!guardada || !ranura || !RANURAS_CON_NOMBRE_LEIDO.has(ranura.slug)) return tal
+  const t = leerTarifaPax(item.tarifa_pax)
+  if (!t.casillas?.grupo_completo) return tal
+  const leida = descripcionDeLinea(ranura, t.casillas, t.correcciones, null).trim()
+  return leida && guardada === aMayusculas(leida).trim() ? leida : tal
 }
