@@ -1,5 +1,5 @@
 {
- "nota": "Banco de la simulación del 2026-10-02 (escenarios.json, 45 turnos). Sintético: los clientes y negocios son inventados; el nombre del equipo se cambió por «Vale». `modelo` es lo que devuelve el modelo falso: la primera corrida de gemini-2.5-flash que acertó, convertida al esquema nuevo (viaje_* → ref), o a mano donde ninguna acertó. Cambios de expectativa: TV5 descarta la tanda (H2, caso 2) y H2 descarta solo la pregunta (H2, caso 1). Sexto control de Vera (2026-10-04): 11 turnos NC1–NC11 de «¿Creo el cliente nuevo «X»?» con textos inventados; los que lee exacto el código de hoy (el atajo) no llegan al modelo y su `esperado` es lo que hace el código de hoy. · 2026-10-05: +32 turnos de identidad (ID1–ID32, PR A del diseño de cliente y conversación): «nuevo» es un viaje nuevo, el candidato pendiente (`tanda_cliente`) y lo que espera la caja de un viaje nuevo (`pide_llave`, `confirma_llave`). Los que el código lee exactos no llegan al modelo. Octavo control de Vera (2026-10-05): 12 turnos OC1–OC12 con textos inventados: el «sí» con reserva al resumen (OC1–OC4, y OC5–OC6 de control sin reserva), el nombre con fórmula tras «¿Para qué cliente es?» (OC7–OC9, los lee el código) y el nombre del cliente dentro de la caja de su viaje nuevo (OC10–OC11; OC12 de control: su destino sí cambia de viaje). Preguntas sin prefijo (2026-10-05): 13 turnos, PQ1–PQ8 preguntas ESCRITAS al bot (consulta de la bandeja, en solo lectura; PQ1–PQ4 las lee el código) y PR1–PR5 preguntas del cliente (PR1–PR2 relatadas por el comercial, PR3–PR5 reenviadas): contenido de la tanda. Noveno control de Vera (2026-10-05): 8 turnos NV1–NV8 con textos inventados: el relato del cliente tomado por consulta (NV1–NV2, contenido), el «sí» con otro verbo de seguir (NV3–NV4) y con reserva (NV5), abrir o montar un viaje sin «nuevo» (NV6–NV7) y la consulta de viajes con palabras de más (NV8).",
+ "nota": "Banco de la simulación del 2026-10-02 (escenarios.json, 45 turnos). Sintético: los clientes y negocios son inventados; el nombre del equipo se cambió por «Vale». `modelo` es lo que devuelve el modelo falso: la primera corrida de gemini-2.5-flash que acertó, convertida al esquema nuevo (viaje_* → ref), o a mano donde ninguna acertó. Cambios de expectativa: TV5 descarta la tanda (H2, caso 2) y H2 descarta solo la pregunta (H2, caso 1). Sexto control de Vera (2026-10-04): 11 turnos NC1–NC11 de «¿Creo el cliente nuevo «X»?» con textos inventados; los que lee exacto el código de hoy (el atajo) no llegan al modelo y su `esperado` es lo que hace el código de hoy. · 2026-10-05: +32 turnos de identidad (ID1–ID32, PR A del diseño de cliente y conversación): «nuevo» es un viaje nuevo, el candidato pendiente (`tanda_cliente`) y lo que espera la caja de un viaje nuevo (`pide_llave`, `confirma_llave`). Los que el código lee exactos no llegan al modelo. Octavo control de Vera (2026-10-05): 12 turnos OC1–OC12 con textos inventados: el «sí» con reserva al resumen (OC1–OC4, y OC5–OC6 de control sin reserva), el nombre con fórmula tras «¿Para qué cliente es?» (OC7–OC9, los lee el código) y el nombre del cliente dentro de la caja de su viaje nuevo (OC10–OC11; OC12 de control: su destino sí cambia de viaje). Preguntas sin prefijo (2026-10-05): 13 turnos, PQ1–PQ8 preguntas ESCRITAS al bot (consulta de la bandeja, en solo lectura; PQ1–PQ4 las lee el código) y PR1–PR5 preguntas del cliente (PR1–PR2 relatadas por el comercial, PR3–PR5 reenviadas): contenido de la tanda. Noveno control de Vera (2026-10-05): 8 turnos NV1–NV8 con textos inventados: el relato del cliente tomado por consulta (NV1–NV2, contenido), el «sí» con otro verbo de seguir (NV3–NV4) y con reserva (NV5), abrir o montar un viaje sin «nuevo» (NV6–NV7) y la consulta de viajes con palabras de más (NV8). Conversación con memoria (2026-10-05): 4 turnos MM1–MM4 (la pregunta por lo que falta «para completo», la afirmación que corrige al bot y «qué viajes están abiertos»), que lee el código.",
  "contextos": {
   "trappvel": {
    "viajes": [
@@ -3127,6 +3127,77 @@
    "pendiente_previo": null,
    "tanda": true,
    "tanda_cliente": "JORGE PÉREZ",
+   "control": false,
+   "modelo": null,
+   "origen_modelo": "atajo: lo lee el código de hoy, no llega al modelo",
+   "esperado": {
+    "accion": "consulta",
+    "tipo": "viajes"
+   }
+  },
+  {
+   "id": "MM1",
+   "turno": 1,
+   "cliente": "trappvel",
+   "texto": "Pero faltan 4 puntos para que quede completo",
+   "reenviado": false,
+   "pendiente": null,
+   "pendiente_previo": null,
+   "tanda": false,
+   "control": false,
+   "modelo": null,
+   "origen_modelo": "atajo: lo lee el código de hoy, no llega al modelo",
+   "esperado": {
+    "accion": "consulta",
+    "tipo": "viaje",
+    "alcance": "completo"
+   }
+  },
+  {
+   "id": "MM2",
+   "turno": 1,
+   "cliente": "trappvel",
+   "texto": "que faltaría para entregarlo completo?",
+   "reenviado": false,
+   "pendiente": null,
+   "pendiente_previo": null,
+   "tanda": false,
+   "control": false,
+   "modelo": null,
+   "origen_modelo": "atajo: lo lee el código de hoy, no llega al modelo",
+   "esperado": {
+    "accion": "consulta",
+    "tipo": "viaje",
+    "alcance": "completo"
+   }
+  },
+  {
+   "id": "MM3",
+   "turno": 1,
+   "cliente": "trappvel",
+   "texto": "que queda pendiente para completar la solicitud del viaje de Jorge Pérez",
+   "reenviado": false,
+   "pendiente": null,
+   "pendiente_previo": null,
+   "tanda": false,
+   "control": false,
+   "modelo": null,
+   "origen_modelo": "atajo: lo lee el código de hoy, no llega al modelo",
+   "esperado": {
+    "accion": "consulta",
+    "tipo": "viaje",
+    "alcance": "completo"
+   }
+  },
+  {
+   "id": "MM4",
+   "turno": 1,
+   "cliente": "trappvel",
+   "texto": "que viajes están abiertos?",
+   "reenviado": false,
+   "pendiente": null,
+   "pendiente_previo": null,
+   "tanda": false,
    "control": false,
    "modelo": null,
    "origen_modelo": "atajo: lo lee el código de hoy, no llega al modelo",
