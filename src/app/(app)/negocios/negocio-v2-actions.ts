@@ -157,7 +157,7 @@ import { hayCotizacionEditableEnEtapa } from '@/lib/cotizaciones/etapa-editable'
 import { evaluarGateMargen } from '@/lib/cotizaciones/gate-margen-datos'
 import { esDuenoDelWorkspace, leerPlatformAdmin } from '@/lib/permissions/dueno-workspace'
 import { crearClienteSiigoAlAvanzar } from '@/lib/siigo/clientes'
-import { abonarAlRegistrarPago } from '@/lib/siigo/recibo-automatico'
+import { abonarEnSegundoPlano } from '@/lib/siigo/segundo-plano'
 import { avisarSobrepagoSiCorresponde } from '@/lib/cobros/aviso-sobrepago-servidor'
 import { cerrarReprocesoSiSeRehizoElTramo } from '@/lib/negocios/cierre-reproceso-servidor'
 import { crearCobrosSoenaCore, leerModeloDineroNegocio, leerModeloDineroCompleto } from '@/lib/actions/conciliacion-actions'
@@ -5404,7 +5404,7 @@ async function autoCrearCobros(
     if (!res.success) return { error: res.error }
     await reevaluarBloquesCobros(negocioId)
     // Con factura, el honorario de este pago se abona solo. Nunca devuelve error.
-    await abonarAlRegistrarPago(workspaceId, negocioId)
+    await abonarEnSegundoPlano(workspaceId, [negocioId])
     revalidatePath(`/negocios/${negocioId}`)
     return { error: null }
   }
@@ -5430,7 +5430,7 @@ async function autoCrearCobros(
       external_ref: referenciaEpayco ?? null,
     }).eq('id', (existente as Record<string, unknown>[])[0].id)
     await reevaluarBloquesCobros(negocioId)
-    await abonarAlRegistrarPago(workspaceId, negocioId)
+    await abonarEnSegundoPlano(workspaceId, [negocioId])
     revalidatePath(`/negocios/${negocioId}`)
     return { error: null }
   }
@@ -5450,7 +5450,7 @@ async function autoCrearCobros(
   if (insertError) return { error: (insertError as { message: string }).message }
 
   await reevaluarBloquesCobros(negocioId)
-  await abonarAlRegistrarPago(workspaceId, negocioId)
+  await abonarEnSegundoPlano(workspaceId, [negocioId])
   revalidatePath(`/negocios/${negocioId}`)
   return { error: null }
 }
@@ -5518,7 +5518,7 @@ async function autoCrearCobrosMulti(
     const { error: insertError } = await (supabase as any).from('cobros').insert(nuevos)
     if (insertError) return { error: (insertError as { message: string }).message }
     // Con factura, el honorario de estos pagos se abona solo. Nunca devuelve error.
-    await abonarAlRegistrarPago(workspaceId, negocioId)
+    await abonarEnSegundoPlano(workspaceId, [negocioId])
   }
 
   await reevaluarBloquesCobros(negocioId)
