@@ -1469,3 +1469,85 @@ describe('Trappvel 2026-10-02 · regla 3: con una pregunta abierta, su respuesta
     expect(t.wa_bandeja_entregas.filter(e => e.estado === 'abierta')).toHaveLength(1); // la de Diego sigue abierta, sin ese mensaje
   });
 });
+
+describe('sexto control de Vera, con el interruptor apagado (la ruta de producción hoy)', () => {
+  /** Nada creado ni cargado en los viajes de prueba. */
+  function nadaCreado(negociosAntes: number) {
+    expect(t.contactos).toEqual([]);
+    expect(t.negocios.length).toBe(negociosAntes);
+    expect(t.negocio_bloques.find(b => b.negocio_id === 'n-p')!.data).toEqual({ destino: 'SAN ANDRÉS' });
+    expect(t.negocio_bloques.find(b => b.negocio_id === 'n-m')!.data).toEqual({ destino: 'BARILOCHE' });
+  }
+  /** La confirmación «¿Creo el cliente nuevo «Valentina Arce»?» pendiente, con una tanda abierta en la caja de Mateo Prueba5. */
+  async function confirmacionConTandaAbierta() {
+    await preguntaDeViaje();
+    await llega('nuevo Valentina Arce', { enviado: 9 });
+    // La tanda de otro cliente se abre antes de que el cron pregunte: su encabezado no contesta nada.
+    await llega('Mateo Prueba5', { enviado: 20 });
+    await llega('quieren salir el 3 de julio', { enviado: 22, reenviado: true });
+    await cron(60);
+    expect(textos().at(-1)).toContain('¿Creo el cliente nuevo «Valentina Arce»?');
+    expect(t.wa_bandeja_entregas.filter(e => e.estado === 'abierta')).toHaveLength(1);
+  }
+  const papelDe = (cuerpo: string) => t.wa_bandeja_mensajes.find(m => m.cuerpo === cuerpo)?.papel;
+
+  it('C: con una tanda abierta, la respuesta a la confirmación nunca entra a su caja, aunque sea larga; la cortesía con verbo de alta crea', async () => {
+    await confirmacionConTandaAbierta();
+    const negocios = t.negocios.length;
+    // Una respuesta larga que no se entiende: es la respuesta (no contenido de la caja de Mateo) y se vuelve a preguntar.
+    const larga = 'espéreme un ratico que le confirmo bien el apellido';
+    await llega(larga, { enviado: 70 });
+    expect(papelDe(larga)).toBe('respuesta_negocio');
+    await cron(100);
+    expect(textos().at(-1)).toContain(`No entendí «${larga.slice(0, 40)}».\n¿Creo el cliente nuevo «Valentina Arce»?`);
+    expect(textos().some(x => x.includes(`¿Creo el cliente nuevo «${larga}`))).toBe(false); // B: no es un nombre
+    nadaCreado(negocios);
+    // La cortesía con el verbo de alta (más de tres palabras): también es la respuesta, y crea a Valentina Arce.
+    const si = 'hágame el favor y la registra de una vez';
+    await llega(si, { enviado: 110 });
+    expect(papelDe(si)).toBe('respuesta_negocio');
+    colaModelo = [pedido()];
+    await cron(160);
+    expect(t.contactos.map(c => c.nombre)).toEqual(['VALENTINA ARCE']);
+    // La caja de Mateo sigue con lo suyo: ninguna de las dos respuestas quedó como su contenido.
+    const tanda = t.wa_bandeja_entregas.find(e => e.estado === 'abierta')!;
+    expect(t.wa_bandeja_mensajes.filter(m => m.entrega_id === tanda.id && m.papel === 'contenido').map(m => m.cuerpo)).toEqual(['Mateo Prueba5', 'quieren salir el 3 de julio']);
+  });
+
+  it('B: un acuse, «espéreme» o «es otra …» no se vuelven el nombre propuesto; «bótalo» descarta', async () => {
+    await preguntaDeViaje();
+    const negocios = t.negocios.length;
+    await llega('nuevo Valentina Arce', { enviado: 9 });
+    await cron(60);
+    for (const [k, r] of ['listo jefe, ya miro', 'déjeme y le confirmo', 'es otra Valentina Arce'].entries()) {
+      await llega(r, { enviado: 70 + k * 30 });
+      await cron(90 + k * 30);
+      expect(textos().at(-1)).toContain(`No entendí «${r}».\n¿Creo el cliente nuevo «Valentina Arce»?`);
+      expect(textos().some(x => x.includes(`¿Creo el cliente nuevo «${r}»?`))).toBe(false);
+    }
+    nadaCreado(negocios);
+    await llega('bótalo', { enviado: 200 });
+    await cron(260);
+    nadaCreado(negocios);
+    expect(await ent.preguntaAbierta(db as never, WS, TEL)).toBeNull();
+  });
+
+  it('C: un mensaje que nombra a otro cliente con viaje abierto queda en la caja marcado, y el «sí» no lo carga sin decidir', async () => {
+    viajesAbiertos();
+    t.negocios.push(negocioDePrueba('n-r', 'R 26 4', 'LIMA OCT', 'RAQUEL ORTIZ'));
+    t.negocio_bloques.push({ id: 'b-n-r', negocio_id: 'n-r', data: { destino: 'LIMA' }, updated_at: null, bloque_configs: { orden: 1, config_extra: { fields: FIELDS }, bloque_definitions: { tipo: 'datos' }, etapas_negocio: { orden: 1 } } });
+    await llega('Pedro Prueba5', { enviado: 0 });
+    await llega('somos 2 adultos', { enviado: 2, reenviado: true });
+    await llega('Raquel Ortiz pregunta si el hotel tiene piscina', { enviado: 4 });
+    await llega('listo', { enviado: 6 });
+    expect(textos().at(-1)).toContain('⚠ Para decidir antes del sí: 1 mensaje\n   2 «Raquel Ortiz pregunta si el hotel tiene…» (nombra a Raquel Ortiz (R 26 4), que tiene un viaje abierto');
+    await llega('sí', { enviado: 10 });
+    await cron(60);
+    expect(textos().at(-1)).toContain('Antes del sí, decide el 2');
+    expect(t.negocio_bloques.find(b => b.negocio_id === 'n-p')!.data).toEqual({ destino: 'SAN ANDRÉS' });
+    // Decidido: «el 2 es de Raquel Ortiz» lo mueve, y el «sí» carga cada uno en su viaje.
+    await llega('el 2 es de Raquel Ortiz', { enviado: 70 });
+    await cron(120);
+    expect(textos().at(-1)).toContain('Corregido. Así queda:');
+  });
+});

@@ -321,7 +321,13 @@ export async function atenderEnBandeja(
   // «¿A qué viaje van?», el entendimiento) y aunque haya una caja abierta: nunca abre una tanda ni
   // queda como contenido. Con «¿A qué viaje van?» o el nombre de un cliente nuevo pendientes, un
   // encabezado («P 26 2», «nuevo X», el nombre de un viaje) también es la respuesta.
-  const contesta = !!pendiente && (esRespuestaA(pendiente.espera, texto) || ((pendiente.espera === 'viaje' || pendiente.espera === 'nombre') && encabezado !== null));
+  //
+  // Sexto control de Vera (hallazgo 7): mientras espera el «sí» a «¿Creo el cliente nuevo «X»?», TODO lo escrito
+  // (que no sea la palabra de cierre) es su respuesta, aunque no tenga forma de respuesta y aunque haya una tanda
+  // abierta: nunca entra a la caja de esa tanda. Si no se entiende, se vuelve a preguntar (H2). Los reenvíos sí
+  // siguen siendo contenido: son del cliente, no una respuesta del comercial.
+  const contesta = !!pendiente && (esRespuestaA(pendiente.espera, texto) || ((pendiente.espera === 'viaje' || pendiente.espera === 'nombre') && encabezado !== null)
+    || !!pendiente.nuevoPorConfirmar);
   if (escrito && !esCierre && contesta) {
     if (await responder(true)) return;
   }

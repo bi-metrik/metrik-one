@@ -42,7 +42,7 @@ import {
 } from './wa-bandeja.ts';
 import { candidatosDeEncabezado, pendienteDeLaTanda, preguntaAbierta, tandaAbiertaDelRemitente } from './wa-entendimiento.ts';
 import { pareceRespuesta, resolverEncabezado } from './wa-viajes-reglas.ts';
-import type { ViajeAbierto } from './wa-viajes-reglas.ts';
+import type { PlanViajes, ViajeAbierto } from './wa-viajes-reglas.ts';
 import {
   armarContexto,
   atajoExacto,
@@ -361,7 +361,16 @@ async function leerContexto(
           ? await supabase.from('wa_bandeja_entregas').select('negocio_opciones').eq('id', pregunta.entregaId).maybeSingle()
           : { data: null };
         opciones = Array.isArray(data?.negocio_opciones) ? (data!.negocio_opciones as ViajeAbierto[]) : null;
-        bandejaVista = { espera: pregunta.espera, nombre: pregunta.nombre, corta: pregunta.corta, opciones, vistaAt: null, nuevoPorConfirmar: pregunta.nuevoPorConfirmar };
+        // Con los viajes abiertos: el aviso «Ya hay un viaje de …» puede nombrar uno fuera de la lista (sexto control).
+        bandejaVista = { espera: pregunta.espera, nombre: pregunta.nombre, corta: pregunta.corta, opciones, vistaAt: null, nuevoPorConfirmar: pregunta.nuevoPorConfirmar, viajesAbiertos: viajes ?? [] };
+      } else if (pregunta.espera === 'resumen') {
+        // El resumen con su reparto: el atajo es exacto solo si el código de hoy entiende la respuesta (sexto control).
+        const entregaId = pregunta.tipo === 'entrega' ? pregunta.id : pregunta.entregaId;
+        const { data } = entregaId ? await supabase.from('wa_bandeja_entregas').select('plan_viajes').eq('id', entregaId).maybeSingle() : { data: null };
+        bandejaVista = {
+          espera: pregunta.espera, nombre: pregunta.nombre, corta: pregunta.corta, opciones: null, vistaAt: null,
+          plan: (data?.plan_viajes ?? null) as PlanViajes | null, viajesAbiertos: viajes ?? [],
+        };
       } else {
         bandejaVista = { espera: pregunta.espera, nombre: pregunta.nombre, corta: pregunta.corta, opciones: null, vistaAt: null };
       }
