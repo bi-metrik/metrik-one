@@ -371,6 +371,8 @@ const nuevo = (nombre: string) => `nuevo ${nombre} ${celEscrito(nombre)}`;
 const acuse = (nombre: string, ...parecidos: string[]) => [
   `Va como viaje nuevo de ${nombre}, cliente nuevo (cel. ${celEscrito(nombre)}). Lo creo cuando me digas que sí en el resumen.`,
   'Reenvíame lo que te pidió y al final te muestro el resumen.', ...parecidos].join('\n');
+/** Nunca silencio (2026-10-05): lo que dice un escrito que abre una tanda sin cliente. */
+const TANDA_SIN_CLIENTE = 'Lo guardo en una tanda nueva. Escríbeme de qué cliente o viaje es (el código sirve), o «nuevo» y el nombre del cliente. Cuando termines, «listo».';
 /** Cómo el resumen nombra el viaje nuevo de ese cliente. */
 const grupo = (nombre: string) => `Viaje nuevo de ${nombre} (cliente nuevo, cel. ${celEscrito(nombre)})`;
 /** El destino guardado de un viaje nuevo de un cliente nuevo, con su llave. */
@@ -449,7 +451,8 @@ describe('escenario 1 de la prueba en vivo: Laura Prueba2 y Diego Prueba2, al ri
     // Cartagena, mandado 3 s después del encabezado, se procesa ANTES (la carrera de la prueba).
     await llega(CARTAGENA, { enviado: 3, llega: 4 });
     await llega(nuevo('Laura Prueba2'), { enviado: 0, llega: 6 });
-    expect(textos()).toEqual([acuse('Laura Prueba2')]);
+    // El escrito abrió la tanda sin cliente (su encabezado venía en camino): el bot lo dice, nunca calla (2026-10-05).
+    expect(textos()).toEqual([TANDA_SIN_CLIENTE, acuse('Laura Prueba2')]);
     await llega('listo', { enviado: 5, llega: 7 });
     expect(alBot).toEqual([]); // nada al bot de actividades
     expect(textos().at(-1)).toBe([
@@ -1441,7 +1444,8 @@ describe('Trappvel 2026-10-02: «cliente nuevo Daniel Pérez» con un viaje abie
     viajeDeLina();
     await llega('Daniel Pérez', { enviado: 0 });
     await llega('quiere cotizar Cartagena para 2', { enviado: 3, reenviado: true });
-    expect(textos()).toEqual([]);
+    // No la toca ni pregunta por Lina; dice que lo guardó y qué espera (nunca silencio, 2026-10-05).
+    expect(textos()).toEqual([TANDA_SIN_CLIENTE]);
     await llega('listo', { enviado: 6 });
     expect(textos().at(-1)).toMatch(/¿De qué viaje (?:es|son)/);
     expect(t.wa_bandeja_entregas[0].plan_viajes).toBeNull(); // sin encabezado: nada se asignó a Lina

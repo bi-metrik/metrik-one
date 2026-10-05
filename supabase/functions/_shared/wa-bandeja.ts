@@ -16,7 +16,7 @@ import {
   nombreYConteoDeLaTanda, pendienteDeLaTanda, preguntaAbierta, procesarEntendimientos, reintentarCarga, textoDeLaConsulta, simularEnLaTanda,
   textoDeLoQueFalta, textoPrimero, tomarRespuestaContacto, tomarRespuestaDeEntrega, cargarDatoEnElViaje, nombreDelViajeDeId, viajesAbiertosDeLaBandeja,
 } from './wa-entendimiento.ts';
-import { anotarConsultaPendiente, consultaVigente, focosVigentes, leerConversacion } from './wa-foco.ts';
+import { anotarConsultaPendiente, consultaVigente, focosVigentes, leerConversacion, viajeEnFoco } from './wa-foco.ts';
 import type { ConsultaPendiente } from './wa-foco.ts';
 import { leerNuevo, leerViajeNuevo } from './wa-entendimiento-reglas.ts';
 import type { EnLaTanda, PreguntaAbierta } from './wa-entendimiento.ts';
@@ -505,7 +505,9 @@ export async function atenderEnBandeja(
       : otra && candidatos.length > 0 ? `«${message.text.trim()}» puede ser ${candidatos.map(lineaCaja).join(' o ')}: lo decides en el resumen de esta tanda.`
       : (sim?.abre ? sim.acuse : respuestaAlEncabezado(encabezado, message.text))
         // Una pregunta escrita que abre una tanda: quizá era para el bot de siempre (se fue la regla N8).
-        ?? (fila.accion === 'abrir' && escrito && esPregunta(message.text) ? textoPistaConsulta(config.prefijosConsulta) : null);
+        ?? (fila.accion === 'abrir' && escrito && esPregunta(message.text) ? textoPistaConsulta(config.prefijosConsulta) : null)
+        // Nunca silencio (2026-10-05, punto 7): un escrito que abre una tanda sin cliente lo dice en una línea y qué espera.
+        ?? (fila.accion === 'abrir' && escrito && config.modoViajes !== 'uno' ? await textoTandaSinCliente(supabase, user.workspace_id, message.phone, config) : null);
     const texto = [aviso, otra ? textoPrimero(otra) : null].filter(Boolean).join('\n');
     if (texto) await enviar(message.phone, texto, user.workspace_id);
   }
@@ -650,6 +652,14 @@ function viajeQueNombra(texto: string, cands: ReadonlyArray<ViajeAbierto>, numer
     if (k !== null && cands[k - 1]) return cands[k - 1];
   }
   return null;
+}
+
+/** «Lo guardo en una tanda nueva. ¿De qué viaje es? …»: con el viaje en foco como ejemplo, si lo hay. */
+async function textoTandaSinCliente(supabase: SupabaseClient, ws: string, phone: string, config: ConfigBandeja): Promise<string> {
+  const f = viajeEnFoco((await leerConversacion(supabase, ws, phone)).focos, Date.now(), config.minutosFoco);
+  const v = f.tipo === 'uno' ? ((await viajesAbiertosDeLaBandeja(supabase, ws)) ?? []).find(x => x.id === f.foco.negocio_id) ?? null : null;
+  const ejemplo = v?.codigo ? ` Si es de ${nombreDeViaje(v)}, escribe «${v.codigo}».` : '';
+  return `Lo guardo en una tanda nueva. Escríbeme de qué cliente o viaje es (el código sirve), o «nuevo» y el nombre del cliente.${ejemplo} Cuando termines, «${config.palabrasCierre[0] ?? 'listo'}».`;
 }
 
 /** Hace lo que decidió la memoria. `false`: no pudo (sigue el camino de hoy). */

@@ -32,6 +32,7 @@ import type { AccionRegistro, ConfigBandeja } from './wa-bandeja-reglas.ts';
 import {
   configDelWorkspace,
   contestarConsulta,
+  decidirConMemoria,
   descartarTandaAbierta,
   descartarTodo,
   enviar,
@@ -250,6 +251,9 @@ async function atender(
   if (enBandeja) {
     const sim = await simularEnLaTanda(supabase, ws, message.phone, configB!.horasCajaActiva, texto, fechaDeMeta(message.timestamp) ?? new Date(ahora()).toISOString());
     if (sim?.respuesta) return NO;
+    // 3c. La memoria de la conversación (2026-10-05): la consulta que esperaba su viaje, la respuesta a «me falta» (directo
+    // al viaje en foco) o la carga en vuelo. La atiende la ruta de hoy, igual con el interruptor apagado o prendido.
+    if (await decidirConMemoria(supabase, ws, message.phone, texto, configB!, { wamid: wamidDe(message), enviadoAt: fechaDeMeta(message.timestamp) })) return NO;
   }
 
   // 4. El tope de llamados al intérprete del remitente.
