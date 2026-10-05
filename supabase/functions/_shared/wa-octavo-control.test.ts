@@ -155,6 +155,8 @@ describe('regla 3 · el nombre sin la fórmula que lo presenta', () => {
     ['A nombre de Ximena Duarte', 'Ximena Duarte'],
     ['de Ximena Duarte', 'Ximena Duarte'],
     ['La clienta es: Ximena Duarte', 'Ximena Duarte'],
+    ['a nombre de la señora Ximena Duarte', 'Ximena Duarte'],
+    ['la clienta Ximena Duarte', 'Ximena Duarte'],
   ])('«%s» → «%s»', (texto, nombre) => {
     expect(sinPresentacion(texto)).toBe(nombre);
     expect(esNombreNuevo(texto)).toBe(nombre);

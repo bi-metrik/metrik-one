@@ -1,5 +1,5 @@
 {
- "nota": "Banco de la simulación del 2026-10-02 (escenarios.json, 45 turnos). Sintético: los clientes y negocios son inventados; el nombre del equipo se cambió por «Vale». `modelo` es lo que devuelve el modelo falso: la primera corrida de gemini-2.5-flash que acertó, convertida al esquema nuevo (viaje_* → ref), o a mano donde ninguna acertó. Cambios de expectativa: TV5 descarta la tanda (H2, caso 2) y H2 descarta solo la pregunta (H2, caso 1). Sexto control de Vera (2026-10-04): 11 turnos NC1–NC11 de «¿Creo el cliente nuevo «X»?» con textos inventados; los que lee exacto el código de hoy (el atajo) no llegan al modelo y su `esperado` es lo que hace el código de hoy. · 2026-10-05: +32 turnos de identidad (ID1–ID32, PR A del diseño de cliente y conversación): «nuevo» es un viaje nuevo, el candidato pendiente (`tanda_cliente`) y lo que espera la caja de un viaje nuevo (`pide_llave`, `confirma_llave`). Los que el código lee exactos no llegan al modelo.",
+ "nota": "Banco de la simulación del 2026-10-02 (escenarios.json, 45 turnos). Sintético: los clientes y negocios son inventados; el nombre del equipo se cambió por «Vale». `modelo` es lo que devuelve el modelo falso: la primera corrida de gemini-2.5-flash que acertó, convertida al esquema nuevo (viaje_* → ref), o a mano donde ninguna acertó. Cambios de expectativa: TV5 descarta la tanda (H2, caso 2) y H2 descarta solo la pregunta (H2, caso 1). Sexto control de Vera (2026-10-04): 11 turnos NC1–NC11 de «¿Creo el cliente nuevo «X»?» con textos inventados; los que lee exacto el código de hoy (el atajo) no llegan al modelo y su `esperado` es lo que hace el código de hoy. · 2026-10-05: +32 turnos de identidad (ID1–ID32, PR A del diseño de cliente y conversación): «nuevo» es un viaje nuevo, el candidato pendiente (`tanda_cliente`) y lo que espera la caja de un viaje nuevo (`pide_llave`, `confirma_llave`). Los que el código lee exactos no llegan al modelo. Octavo control de Vera (2026-10-05): 12 turnos OC1–OC12 con textos inventados: el «sí» con reserva al resumen (OC1–OC4, y OC5–OC6 de control sin reserva), el nombre con fórmula tras «¿Para qué cliente es?» (OC7–OC9, los lee el código) y el nombre del cliente dentro de la caja de su viaje nuevo (OC10–OC11; OC12 de control: su destino sí cambia de viaje).",
  "contextos": {
   "trappvel": {
    "viajes": [
@@ -2353,6 +2353,312 @@
    "esperado": {
     "accion": "abrir_viaje",
     "nuevo": "lina perez"
+   }
+  },
+  {
+   "id": "OC1",
+   "turno": 1,
+   "cliente": "trappvel",
+   "texto": "sí, pero espérame que me manda las edades de los niños",
+   "reenviado": false,
+   "pendiente": {
+    "capa": "resumen",
+    "texto": "Entendí 1 viaje:\nT1 26 11 · Carolina Ruiz\n 1. «Salimos el 28 de diciembre…»\n 2. «Somos 3 adultos y 2 niños…»\n 3. «Para Madrid queremos hotel cerca…»\n¿Así? sí / corregir",
+    "opciones": [
+     "si",
+     "corregir"
+    ],
+    "mensajes": 3
+   },
+   "pendiente_previo": null,
+   "tanda": true,
+   "control": false,
+   "modelo": {
+    "acciones": [
+     {
+      "accion": "confirmar",
+      "evidencia": "sí, pero espérame que me manda las edades de los niños"
+     }
+    ]
+   },
+   "origen_modelo": "a mano (octavo control, 2026-10-05): lo que propondría el modelo",
+   "esperado": {
+    "accion": "pedir_aclaracion"
+   }
+  },
+  {
+   "id": "OC2",
+   "turno": 1,
+   "cliente": "trappvel",
+   "texto": "sí cuando me confirme si va la suegra",
+   "reenviado": false,
+   "pendiente": {
+    "capa": "resumen",
+    "texto": "Entendí 1 viaje:\nT1 26 11 · Carolina Ruiz\n 1. «Salimos el 28 de diciembre…»\n 2. «Somos 3 adultos y 2 niños…»\n 3. «Para Madrid queremos hotel cerca…»\n¿Así? sí / corregir",
+    "opciones": [
+     "si",
+     "corregir"
+    ],
+    "mensajes": 3
+   },
+   "pendiente_previo": null,
+   "tanda": true,
+   "control": false,
+   "modelo": {
+    "acciones": [
+     {
+      "accion": "confirmar",
+      "evidencia": "sí cuando me confirme si va la suegra"
+     }
+    ]
+   },
+   "origen_modelo": "a mano (octavo control, 2026-10-05): lo que propondría el modelo",
+   "esperado": {
+    "accion": "pedir_aclaracion"
+   }
+  },
+  {
+   "id": "OC3",
+   "turno": 1,
+   "cliente": "trappvel",
+   "texto": "dale, aunque falta que me pase el pasaporte",
+   "reenviado": false,
+   "pendiente": {
+    "capa": "resumen",
+    "texto": "Entendí 1 viaje:\nT1 26 11 · Carolina Ruiz\n 1. «Salimos el 28 de diciembre…»\n 2. «Somos 3 adultos y 2 niños…»\n 3. «Para Madrid queremos hotel cerca…»\n¿Así? sí / corregir",
+    "opciones": [
+     "si",
+     "corregir"
+    ],
+    "mensajes": 3
+   },
+   "pendiente_previo": null,
+   "tanda": true,
+   "control": false,
+   "modelo": {
+    "acciones": [
+     {
+      "accion": "confirmar",
+      "evidencia": "dale, aunque falta que me pase el pasaporte"
+     }
+    ]
+   },
+   "origen_modelo": "a mano (octavo control, 2026-10-05): lo que propondría el modelo",
+   "esperado": {
+    "accion": "pedir_aclaracion"
+   }
+  },
+  {
+   "id": "OC4",
+   "turno": 1,
+   "cliente": "trappvel",
+   "texto": "sí, pero no lo cargues hasta el lunes",
+   "reenviado": false,
+   "pendiente": {
+    "capa": "resumen",
+    "texto": "Entendí 1 viaje:\nT1 26 11 · Carolina Ruiz\n 1. «Salimos el 28 de diciembre…»\n 2. «Somos 3 adultos y 2 niños…»\n 3. «Para Madrid queremos hotel cerca…»\n¿Así? sí / corregir",
+    "opciones": [
+     "si",
+     "corregir"
+    ],
+    "mensajes": 3
+   },
+   "pendiente_previo": null,
+   "tanda": true,
+   "control": false,
+   "modelo": {
+    "acciones": [
+     {
+      "accion": "confirmar",
+      "evidencia": "sí, pero no lo cargues hasta el lunes"
+     }
+    ]
+   },
+   "origen_modelo": "a mano (octavo control, 2026-10-05): lo que propondría el modelo",
+   "esperado": {
+    "accion": "pedir_aclaracion"
+   }
+  },
+  {
+   "id": "OC5",
+   "turno": 1,
+   "cliente": "trappvel",
+   "texto": "sí, créalo de una",
+   "reenviado": false,
+   "pendiente": {
+    "capa": "resumen",
+    "texto": "Entendí 1 viaje:\nT1 26 11 · Carolina Ruiz\n 1. «Salimos el 28 de diciembre…»\n 2. «Somos 3 adultos y 2 niños…»\n 3. «Para Madrid queremos hotel cerca…»\n¿Así? sí / corregir",
+    "opciones": [
+     "si",
+     "corregir"
+    ],
+    "mensajes": 3
+   },
+   "pendiente_previo": null,
+   "tanda": true,
+   "control": true,
+   "modelo": {
+    "acciones": [
+     {
+      "accion": "confirmar",
+      "evidencia": "sí, créalo de una"
+     }
+    ]
+   },
+   "origen_modelo": "a mano (octavo control, 2026-10-05): lo que propondría el modelo",
+   "esperado": {
+    "accion": "confirmar"
+   }
+  },
+  {
+   "id": "OC6",
+   "turno": 1,
+   "cliente": "trappvel",
+   "texto": "sí señor, cárguelo así",
+   "reenviado": false,
+   "pendiente": {
+    "capa": "resumen",
+    "texto": "Entendí 1 viaje:\nT1 26 11 · Carolina Ruiz\n 1. «Salimos el 28 de diciembre…»\n 2. «Somos 3 adultos y 2 niños…»\n 3. «Para Madrid queremos hotel cerca…»\n¿Así? sí / corregir",
+    "opciones": [
+     "si",
+     "corregir"
+    ],
+    "mensajes": 3
+   },
+   "pendiente_previo": null,
+   "tanda": true,
+   "control": true,
+   "modelo": {
+    "acciones": [
+     {
+      "accion": "confirmar",
+      "evidencia": "sí señor, cárguelo así"
+     }
+    ]
+   },
+   "origen_modelo": "a mano (octavo control, 2026-10-05): lo que propondría el modelo",
+   "esperado": {
+    "accion": "confirmar"
+   }
+  },
+  {
+   "id": "OC7",
+   "turno": 1,
+   "cliente": "trappvel",
+   "texto": "La clienta es Ximena Duarte",
+   "reenviado": false,
+   "pendiente": null,
+   "pendiente_previo": "pide_nombre",
+   "tanda": true,
+   "control": false,
+   "modelo": null,
+   "origen_modelo": "atajo: lo lee el código de hoy, no llega al modelo",
+   "esperado": {
+    "accion": "abrir_viaje",
+    "nuevo": "ximena duarte"
+   }
+  },
+  {
+   "id": "OC8",
+   "turno": 1,
+   "cliente": "trappvel",
+   "texto": "es para Rogelio Mantilla",
+   "reenviado": false,
+   "pendiente": null,
+   "pendiente_previo": "pide_nombre",
+   "tanda": true,
+   "control": false,
+   "modelo": null,
+   "origen_modelo": "atajo: lo lee el código de hoy, no llega al modelo",
+   "esperado": {
+    "accion": "abrir_viaje",
+    "nuevo": "rogelio mantilla"
+   }
+  },
+  {
+   "id": "OC9",
+   "turno": 1,
+   "cliente": "trappvel",
+   "texto": "a nombre de la señora Inés Barrera",
+   "reenviado": false,
+   "pendiente": null,
+   "pendiente_previo": "pide_nombre",
+   "tanda": true,
+   "control": false,
+   "modelo": null,
+   "origen_modelo": "atajo: lo lee el código de hoy, no llega al modelo",
+   "esperado": {
+    "accion": "abrir_viaje",
+    "nuevo": "ines barrera"
+   }
+  },
+  {
+   "id": "OC10",
+   "turno": 1,
+   "cliente": "trappvel",
+   "texto": "don Jorge prefiere hotel con desayuno incluido",
+   "reenviado": false,
+   "pendiente": null,
+   "pendiente_previo": null,
+   "tanda": true,
+   "tanda_cliente": "JORGE PÉREZ",
+   "control": false,
+   "modelo": {
+    "acciones": [
+     {
+      "accion": "contenido",
+      "evidencia": "don Jorge prefiere hotel con desayuno incluido",
+      "ref_cliente": "Jorge"
+     }
+    ]
+   },
+   "origen_modelo": "a mano (octavo control, 2026-10-05): lo que propondría el modelo",
+   "esperado": {
+    "accion": "contenido"
+   }
+  },
+  {
+   "id": "OC11",
+   "turno": 1,
+   "cliente": "trappvel",
+   "texto": "Jorge",
+   "reenviado": false,
+   "pendiente": null,
+   "pendiente_previo": null,
+   "tanda": true,
+   "tanda_cliente": "JORGE PÉREZ",
+   "control": false,
+   "modelo": null,
+   "origen_modelo": "atajo: lo lee el código de hoy, no llega al modelo",
+   "esperado": {
+    "accion": "contenido"
+   }
+  },
+  {
+   "id": "OC12",
+   "turno": 1,
+   "cliente": "trappvel",
+   "texto": "lo de Madrid de Jorge",
+   "reenviado": false,
+   "pendiente": null,
+   "pendiente_previo": null,
+   "tanda": true,
+   "tanda_cliente": "JORGE PÉREZ",
+   "control": true,
+   "modelo": {
+    "acciones": [
+     {
+      "accion": "abrir_viaje",
+      "evidencia": "lo de Madrid de Jorge",
+      "ref_cliente": "Jorge",
+      "ref_destino": "Madrid"
+     }
+    ]
+   },
+   "origen_modelo": "a mano (octavo control, 2026-10-05): lo que propondría el modelo",
+   "esperado": {
+    "accion": "abrir_viaje",
+    "viaje": "n12"
    }
   }
  ]

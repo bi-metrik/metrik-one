@@ -910,7 +910,7 @@ export function esNombreNuevo(texto: string, equipo: ReadonlyArray<string> = [])
  * preposiciones que lo introducen («para», «de», «a nombre de», «es para»). Con el prefijo, el nombre pedía la
  * llave de alguien que ya existe y, con un celular nuevo y el «sí», creaba un duplicado con el prefijo.
  */
-const PRESENTA_NOMBRE = /^(?:(?:(?:el|la)\s+)?(?:client[ea]|se[ñn]or|se[ñn]ora|pasajer[oa]|titular)\s+(?:es|se\s+llama)|(?:(?:su|el)\s+)?nombre\s+es|(?:que\s+)?se\s+llama|llamad[oa]|a\s+nombre\s+de|para|de|es)(?:[\s,:;-]+)/i;
+const PRESENTA_NOMBRE = /^(?:(?:(?:el|la)\s+)?(?:client[ea]|se[ñn]or|se[ñn]ora|pasajer[oa]|titular)(?:\s+(?:es|se\s+llama))?|(?:(?:su|el)\s+)?nombre\s+es|(?:que\s+)?se\s+llama|llamad[oa]|a\s+nombre\s+de|para|de|es)(?:[\s,:;-]+)/i;
 export function sinPresentacion(texto: string): string {
   let s = String(texto ?? '').trim();
   for (let i = 0; i < 3; i++) {
