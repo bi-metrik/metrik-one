@@ -23,8 +23,11 @@ import { codigoCompacto, ejemploDeReferencia } from './wa-carga-reglas.ts';
 export type ConsultaBandeja =
   /** Los viajes abiertos de un cliente. `cliente`: el que nombra; `null`: el de la tanda abierta («¿qué viajes tiene?»). */
   | { tipo: 'viajes'; cliente: string | null }
-  /** Cómo va o qué le falta a un viaje. `ref`: el código o el nombre que nombra; `null`: el de la tanda abierta. */
-  | { tipo: 'viaje'; ref: string | null }
+  /**
+   * Cómo va o qué le falta a un viaje. `ref`: el código o el nombre que nombra; `null`: el de la tanda abierta o el viaje
+   * en foco. `alcance` (2026-10-05): «para completo» o «para cotizar»; sin él, los dos.
+   */
+  | { tipo: 'viaje'; ref: string | null; alcance?: 'minimo' | 'completo' }
   /** Qué lleva la tanda abierta. */
   | { tipo: 'tanda' };
 
@@ -40,6 +43,9 @@ const NO_ES_NOMBRE: ReadonlySet<string> = new Set([
   'mira', 'y', 'oye', 'bueno', 'ok', 'por', 'favor', 'porfa', 'en', 'con', 'nosotros', 'todavia', 'aun', 'cuantas', 'se', 'le', 'me', 'lista',
   'todo', 'todos', 'cosa', 'cosas', 'eso', 'esto', 'falta', 'va', 'como', 'algo', 'nada', 'alguno', 'alguna', 'mio', 'mia', 'suyo', 'suya',
   'enero', 'febrero', 'marzo', 'abril', 'mayo', 'junio', 'julio', 'agosto', 'septiembre', 'octubre', 'noviembre', 'diciembre', 'hoy', 'semana',
+  // La pregunta por lo que falta (2026-10-05): «… para entregarlo completo», «… para que quede completa la solicitud».
+  'entregarlo', 'entregarla', 'entregar', 'completo', 'completa', 'completar', 'completarlo', 'cotizar', 'cotizarlo', 'quede', 'queda',
+  'pendiente', 'pendientes', 'solicitud', 'puntos', 'datos', 'campos', 'minimo', 'lo', 'faltaria', 'faltarian', 'faltan', 'estan', 'que',
 ]);
 
 /**
@@ -86,6 +92,25 @@ function nombreEn(bruto: string, parte: string = bruto): string | null {
   return quedan.join(' ');
 }
 
+/** «pero faltan 4 puntos para que quede completo», «todavía le faltan datos para cotizar». */
+const CORRIGE_LO_QUE_FALTA = /^(?:(?:pero|y|oye|ojo|no|mira)\s+)*(?:todavia\s+|aun\s+)?(?:le\s+)?faltan?\s+(?:\d+|un|una|dos|tres|cuatro|cinco|varios|varias|datos|puntos|campos|cosas)\b.*\b(?:complet\w*|cotiz\w*|entreg\w*|minimo)\b/;
+
+/** El viaje que nombra la pregunta: su código, o el nombre tras «del viaje de …» / «le falta al …». */
+function refDelViaje(t: string, bruto: string): string | null {
+  const cod = /\b([a-z]{1,3}\d?\s*\d{2}\s*\d{1,4})\b/.exec(t)?.[1];
+  if (cod && codigoCompacto(cod).length >= 4) return cod.toUpperCase();
+  const de = /\b(?:viaje|cotizacion|solicitud)\s+(?:de|del)\s+(.+)$/.exec(t)?.[1]
+    ?? /\b(?:falta\w*|va|queda(?:\s+pendiente)?)\s+(?:(?:a|al|el|la)\s+)?(?:(?:viaje|cotizacion)\s+(?:de|del)\s+)?(.+)$/.exec(t)?.[1] ?? null;
+  return de ? nombreEn(bruto, de) : null;
+}
+
+/** El alcance de la pregunta: «para completo» / «para entregarlo», o «para cotizar» / «el mínimo»; sin eso, los dos. */
+function conAlcance(c: { tipo: 'viaje'; ref: string | null }, t: string): ConsultaBandeja {
+  if (/\b(?:complet\w*|entreg\w*|al\s+100|cien\s+por\s+ciento|todo\s+lo\s+que\s+falta)\b/.test(t)) return { ...c, alcance: 'completo' };
+  if (/\b(?:cotiz\w*|minimo|empezar)\b/.test(t)) return { ...c, alcance: 'minimo' };
+  return c;
+}
+
 /**
  * ¿Este escrito del comercial es una pregunta al bot sobre la bandeja? `null`: no (sigue como siempre). Un reenvío
  * nunca lo es (regla 1 de la frontera).
@@ -95,7 +120,11 @@ export function leerConsultaBandeja(texto: string, o: { reenviado: boolean }): C
   const bruto = String(texto ?? '').trim();
   if (!bruto || bruto.length > 140) return null;
   const t = normalizarNombre(normalizarTexto(bruto));
-  if (!t || relataAlCliente(bruto) || !esPreguntaOPedido(t, bruto)) return null;
+  if (!t || relataAlCliente(bruto)) return null;
+  // Conversación con memoria (2026-10-05, punto 3): una afirmación que corrige al bot sobre lo que falta («pero faltan 4
+  // puntos para que quede completo») es una pregunta por ese viaje, aunque no tenga signo.
+  if (CORRIGE_LO_QUE_FALTA.test(t)) return conAlcance({ tipo: 'viaje', ref: refDelViaje(t, bruto) }, t);
+  if (!esPreguntaOPedido(t, bruto)) return null;
   // Noveno control (hallazgo 6): un pedido de hacer algo («borra lo que te mandé», «pásalo al de Cartagena») no es una
   // consulta aunque use su vocabulario.
   if (PIDE_UNA_ACCION.test(t)) return null;
@@ -104,15 +133,11 @@ export function leerConsultaBandeja(texto: string, o: { reenviado: boolean }): C
     return { tipo: 'tanda' };
   }
   // Cómo va o qué le falta a un viaje.
-  if (/\b(?:que\s+(?:le\s+)?falta|cuanto\s+(?:le\s+)?falta|como\s+va|en\s+que\s+va|que\s+tiene\s+(?:el|ese|este)\s+viaje|(?:estado|avance)\s+del?\s+viaje)\b/.test(t)) {
-    const cod = /\b([a-z]{1,3}\d?\s*\d{2}\s*\d{1,4})\b/.exec(t)?.[1];
-    if (cod && codigoCompacto(cod).length >= 4) return { tipo: 'viaje', ref: cod.toUpperCase() };
-    const de = /\b(?:viaje|cotizacion)\s+(?:de|del)\s+(.+)$/.exec(t)?.[1] ?? /\b(?:falta|va)\s+(?:(?:a|al|el|la)\s+)?(?:(?:viaje|cotizacion)\s+(?:de|del)\s+)?(.+)$/.exec(t)?.[1] ?? null;
-    const ref = de ? nombreEn(bruto, de) : null;
-    return { tipo: 'viaje', ref };
+  if (/\b(?:que\s+(?:le\s+)?falta\w*|cuanto\s+(?:le\s+)?falta\w*|que\s+(?:le\s+)?queda(?:\s+pendiente)?|como\s+va|en\s+que\s+va|que\s+tiene\s+(?:el|ese|este)\s+viaje|(?:estado|avance)\s+del?\s+viaje)\b/.test(t)) {
+    return conAlcance({ tipo: 'viaje', ref: refDelViaje(t, bruto) }, t);
   }
   // Los viajes abiertos de un cliente.
-  if (/\b(?:(?:que|cuales|cuantos)\s+(?:viajes|cotizaciones)(?:\s+abiertos)?\s+(?:tiene|tenemos\s+de|hay\s+de|hay\s+para|abiertos|de|del)|viajes\s+(?:abiertos\s+)?(?:tiene|de|del)|tiene\s+(?:viajes|otros\s+viajes|algo\s+abierto|cotizaciones))\b/.test(t)
+  if (/\b(?:(?:que|cuales|cuantos)\s+(?:viajes|cotizaciones)(?:\s+abiertos)?\s+(?:tiene|tenemos\s+de|hay\s+de|hay\s+para|abiertos|de|del)|(?:que|cuales|cuantos)\s+(?:viajes|cotizaciones)\s+(?:estan|siguen|quedan|hay|tengo|tenemos|tiene)\s+abiert|viajes\s+(?:abiertos\s+)?(?:tiene|de|del)|tiene\s+(?:viajes|otros\s+viajes|algo\s+abierto|cotizaciones))\b/.test(t)
     || (PIDE.test(t) && /\bviajes\b/.test(t))) {
     return { tipo: 'viajes', cliente: nombreEn(bruto) };
   }
@@ -164,9 +189,21 @@ export function textoTandaEnResumen(p: { nombre: string; n: number }): string {
 }
 
 /** «CARTAGENA DIC · Lina Pérez (T1 26 14) — Mínimo 7/9 … / Le falta: …» */
-export function textoEstadoViaje(p: { avance: string; faltan: ReadonlyArray<string> }): string {
-  if (p.faltan.length === 0) return `${p.avance}\nYa tiene todo lo mínimo para cotizar.`;
-  const max = 6;
-  const lista = p.faltan.slice(0, max).join(', ') + (p.faltan.length > max ? ` y ${p.faltan.length - max} más` : '');
-  return `${p.avance}\nLe falta: ${lista}.`;
+export function textoEstadoViaje(p: {
+  avance: string;
+  /** Lo que falta del mínimo para cotizar. */
+  faltan: ReadonlyArray<string>;
+  /** Lo que falta para completo (mínimo y deseable). Sin él, solo se dice el mínimo. */
+  faltanCompleto?: ReadonlyArray<string>;
+  /** Lo que preguntó (2026-10-05): para completo, para cotizar, o los dos. */
+  alcance?: 'minimo' | 'completo';
+}): string {
+  const lista = (xs: ReadonlyArray<string>, max = 6) => xs.slice(0, max).join(', ') + (xs.length > max ? ` y ${xs.length - max} más` : '');
+  const minimo = p.faltan.length === 0 ? 'Ya tiene todo lo mínimo para cotizar.' : `Le falta para cotizar: ${lista(p.faltan)}.`;
+  const completo = !p.faltanCompleto ? null
+    : p.faltanCompleto.length === 0 ? 'Ya está completo.'
+    : `Le ${p.faltanCompleto.length === 1 ? 'falta 1 dato' : `faltan ${p.faltanCompleto.length} datos`} para completo: ${lista(p.faltanCompleto, 8)}.`;
+  if (p.alcance === 'completo' && completo) return `${p.avance}\n${completo}`;
+  if (p.alcance === 'minimo' || !completo) return `${p.avance}\n${minimo}`;
+  return `${p.avance}\n${minimo}\n${completo}`;
 }

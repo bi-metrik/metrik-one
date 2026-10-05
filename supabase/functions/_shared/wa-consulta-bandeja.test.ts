@@ -73,7 +73,7 @@ describe('lo que contesta', () => {
 
   it('la tanda, el estado de un viaje y la duda: cortos y sin pedir números', () => {
     expect(textoTanda({ nombre: 'Martín Robledo (viaje nuevo)', n: 2, cierre: 'listo' })).toBe('Llevas 2 mensajes de Martín Robledo (viaje nuevo). Cuando termines, escribe «listo».');
-    expect(textoEstadoViaje({ avance: 'MIAMI 7N · Martín Robledo (M1 26 1) — mínimo 5/7', faltan: ['fecha de salida', 'adultos'] })).toBe('MIAMI 7N · Martín Robledo (M1 26 1) — mínimo 5/7\nLe falta: fecha de salida, adultos.');
+    expect(textoEstadoViaje({ avance: 'MIAMI 7N · Martín Robledo (M1 26 1) — mínimo 5/7', faltan: ['fecha de salida', 'adultos'] })).toBe('MIAMI 7N · Martín Robledo (M1 26 1) — mínimo 5/7\nLe falta para cotizar: fecha de salida, adultos.');
     expect(textoEstadoViaje({ avance: 'X', faltan: [] })).toBe('X\nYa tiene todo lo mínimo para cotizar.');
     const duda = textoConsultaAmbigua('Rosaura', [
       { linea: 'SANTA MARTA ENE · Rosaura Pinzón (R 26 1)', cliente: 'ROSAURA PINZÓN', destino: 'SANTA MARTA' },

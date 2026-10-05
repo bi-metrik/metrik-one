@@ -1750,7 +1750,7 @@ describe('2026-10-05 · la prueba de Mauricio, parafraseada: viaje nuevo de un c
     await llega('M1 26 1', { enviado: 0 });
     await llega('¿qué le falta?', { enviado: 5 });
     expect(textos().at(-1)).toMatch(/MIAMI 7N/);
-    expect(textos().at(-1)).toMatch(/\nLe falta: |\nYa tiene todo lo mínimo para cotizar\./);
+    expect(textos().at(-1)).toMatch(/\nLe falta para cotizar: |\nYa tiene todo lo mínimo para cotizar\./);
     expect(t.wa_bandeja_mensajes.filter(m => String(m.cuerpo).includes('le falta'))).toEqual([]);
   });
 

@@ -18,6 +18,7 @@
 // ============================================================
 
 import { sendTextMessage } from './wa-respond.ts';
+import { anotarConsultaPendiente, anotarFoco, leerConversacion, viajeEnFoco } from './wa-foco.ts';
 import { bandejaActiva, elegirFallida, leerConfigBandeja, momentoDelMensaje, ordenarPorEnvio, textoFallaEntendimiento, textoReintentarSinElegir } from './wa-bandeja-reglas.ts';
 import type { ConfigBandeja, ParteDescartada } from './wa-bandeja-reglas.ts';
 import { todayBogotaISO } from './bogota.ts';
@@ -30,6 +31,7 @@ import {
   esquemaDeSalida,
   fusionarSugeridos,
   huecos,
+  LO_LLENA_AGENCIA,
   instruccionesEntendimiento,
   interpretarRespuestaContacto,
   mayusculasDeViaje,
@@ -2361,7 +2363,8 @@ export async function textoDeLaConsulta(
     return textoTanda({ nombre: tanda.nombre, n: tanda.n, cierre: bandeja.palabrasCierre[0] ?? 'listo' });
   }
   if (consulta.tipo === 'viajes') {
-    const dicho = consulta.cliente ?? tanda?.cajaCliente ?? null;
+    // Sin nombre: el cliente de la tanda abierta, o el del viaje en foco (conversación con memoria, 2026-10-05).
+    const dicho = consulta.cliente ?? tanda?.cajaCliente ?? await clienteDelFoco(supabase, workspaceId, phone, bandeja);
     if (!dicho) return TEXTO_CONSULTA_DE_QUIEN;
     // Noveno control (hallazgo 2): el cliente es el contacto que el escrito nombra exacto, por la parte que coincide con
     // el directorio («qué tiene abierto ahorita Ana Ruiz» → Ana Ruiz). Sin eso, solo un parecido de lo dicho entero.
@@ -2401,7 +2404,21 @@ export async function textoDeLaConsulta(
   } else if (tanda?.cajaCliente) {
     return `El viaje nuevo de ${nombrePropio(tanda.cajaCliente)} todavía no está creado: lo creo cuando me digas que sí en el resumen. Llevas ${tanda.n} ${tanda.n === 1 ? 'mensaje' : 'mensajes'}.`;
   } else {
-    return TEXTO_CONSULTA_DE_QUE_VIAJE;
+    // Conversación con memoria (2026-10-05, punto 1): sin referencia, el viaje en foco. Con dos en la ventana, se
+    // pregunta una vez nombrando los dos; sin ninguno, «¿De qué viaje?». En los dos casos la pregunta queda pendiente:
+    // el escrito que nombre el viaje la contesta con el mismo alcance.
+    const conv = await leerConversacion(supabase, workspaceId, phone);
+    const f = viajeEnFoco(conv.focos, Date.now(), bandeja.minutosFoco);
+    if (f.tipo === 'uno') negocioId = f.foco.negocio_id;
+    else {
+      await anotarConsultaPendiente(supabase, workspaceId, phone, {
+        tipo: 'viaje', ...(consulta.alcance ? { alcance: consulta.alcance } : {}), at: new Date().toISOString(),
+        ...(f.tipo === 'dos' ? { candidatos: f.focos.map(x => x.negocio_id) } : {}),
+      });
+      if (f.tipo === 'ninguno') return TEXTO_CONSULTA_DE_QUE_VIAJE;
+      const dos = await viajesPorId(supabase, workspaceId, f.focos.map(x => x.negocio_id));
+      return textoConsultaAmbigua('Lo que preguntas', dos.map(v => ({ linea: nombreDeViaje(v), cliente: v.cliente, destino: v.destino, nombre: v.nombre })));
+    }
   }
   const { data: neg } = await supabase.from('negocios').select('id, codigo, nombre, contactos(nombre), empresas(nombre)').eq('id', negocioId).maybeSingle();
   const bloques = await bloquesDatosDelNegocio(supabase, negocioId);
@@ -2411,5 +2428,27 @@ export async function textoDeLaConsulta(
   const avance = lineaAvance({
     codigo: (neg.codigo as string | null) ?? null, cliente: nombreRel(neg.contactos) ?? nombreRel(neg.empresas), nombre: (neg.nombre as string | null) ?? null, fields, valores,
   });
-  return textoEstadoViaje({ avance, faltan: huecos(fields, valores).minimo.faltan.map(f => f.label.toLowerCase()) });
+  // Lo que se pregunta (punto 3): «para completo» lista lo de completo (mínimo y deseable, sin lo que llena la agencia,
+  // como la barra «Completo»); «para cotizar», lo del mínimo; «cómo va», los dos.
+  const sinAgencia = huecos(fields.filter(f => f.lo_llena !== LO_LLENA_AGENCIA), valores);
+  await anotarFoco(supabase, workspaceId, phone, { negocio_id: negocioId, por: 'consulta' });
+  return textoEstadoViaje({
+    avance, alcance: consulta.alcance,
+    faltan: huecos(fields, valores).minimo.faltan.map(f => f.label.toLowerCase()),
+    faltanCompleto: [...sinAgencia.minimo.faltan, ...sinAgencia.deseable.faltan].map(f => f.label.toLowerCase()),
+  });
+}
+
+/** El cliente del viaje en foco, si hay uno solo en la ventana. */
+async function clienteDelFoco(supabase: SupabaseClient, workspaceId: string, phone: string, bandeja: ConfigBandeja): Promise<string | null> {
+  const f = viajeEnFoco((await leerConversacion(supabase, workspaceId, phone)).focos, Date.now(), bandeja.minutosFoco);
+  if (f.tipo !== 'uno') return null;
+  const [v] = await viajesPorId(supabase, workspaceId, [f.foco.negocio_id]);
+  return v?.cliente ? nombrePropio(v.cliente) : null;
+}
+
+/** Los viajes de unos ids, como los ve la bandeja (código, cliente, destino, nombre). */
+async function viajesPorId(supabase: SupabaseClient, workspaceId: string, ids: string[]): Promise<ViajeAbierto[]> {
+  const todos = (await viajesAbiertosDeLaBandeja(supabase, workspaceId)) ?? [];
+  return ids.map(id => todos.find(v => v.id === id)).filter((v): v is ViajeAbierto => !!v);
 }

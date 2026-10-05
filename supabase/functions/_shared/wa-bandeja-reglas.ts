@@ -50,6 +50,11 @@ export interface ConfigBandeja {
   modoViajes: ModoViajes;
   /** `siempre` (default y único en uso hasta que el QA y el uso real digan otra cosa) | `si_duda`. */
   confirmar: 'siempre' | 'si_duda';
+  /**
+   * Minutos durante los cuales el último viaje que el bot cargó, mostró o nombró con un remitente sigue «en foco»: una
+   * pregunta o un dato sin referencia va a ese viaje (conversación con memoria, 2026-10-05). `minutos_foco`.
+   */
+  minutosFoco: number;
   /** Horas que dura vigente un encabezado. */
   horasCajaActiva: number;
 }
@@ -66,6 +71,7 @@ export const CONFIG_BANDEJA_POR_DEFECTO: ConfigBandeja = {
   modoViajes: 'uno',
   confirmar: 'siempre',
   horasCajaActiva: 4,
+  minutosFoco: 60,
 };
 
 /** ¿Tiene el workspace la bandeja encendida? Solo `true` literal: nace apagada. */
@@ -105,6 +111,7 @@ export function leerConfigBandeja(configExtra: unknown): ConfigBandeja {
     // Un valor desconocido cae a `siempre`: confirmar de más cuesta un mensaje, de menos un dato.
     confirmar: raw.confirmar === 'si_duda' ? 'si_duda' : 'siempre',
     horasCajaActiva: entero(raw.horas_caja_activa, 1, 24, d.horasCajaActiva),
+    minutosFoco: entero(raw.minutos_foco, 5, 720, d.minutosFoco),
   };
 }
 
