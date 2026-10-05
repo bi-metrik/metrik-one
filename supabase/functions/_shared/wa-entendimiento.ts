@@ -93,14 +93,13 @@ import {
 } from './wa-viajes-reglas.ts';
 import type { Segmento } from './wa-viajes-reglas.ts';
 import {
-  completarLlave, crearContactoConGuardian, directorioDeLaTanda, directorioDelPlan, empresaEspejo, resolverClienteEnBase,
+  completarLlave, crearContactoConGuardian, directorioDeLaTanda, directorioDelPlan, directorioPara, empresaEspejo, resolverClienteEnBase,
 } from './wa-cliente.ts';
-import { fichasPorNombre } from './wa-cliente.ts';
 import {
-  textoConsultaAmbigua, textoEstadoViaje, textoTanda, textoViajesDelCliente, TEXTO_CONSULTA_DE_QUE_VIAJE, TEXTO_CONSULTA_DE_QUIEN, TEXTO_SIN_TANDA,
+  textoConsultaAmbigua, textoEstadoViaje, textoTanda, textoTandaEnResumen, textoViajesDelCliente, TEXTO_CONSULTA_DE_QUE_VIAJE, TEXTO_CONSULTA_DE_QUIEN, TEXTO_SIN_TANDA,
 } from './wa-consulta-bandeja.ts';
 import type { ConsultaBandeja } from './wa-consulta-bandeja.ts';
-import { datoDeLaFicha, leerEsLaMisma, llavesDelTexto, pareceNombre, separarNombreYLlave, soloLlave, textoDelCliente, textoLlave, textoNoEsLaMisma, tieneLlave, unirLlaves } from './wa-cliente-reglas.ts';
+import { datoDeLaFicha, leerEsLaMisma, llavesDelTexto, nombreEnElDirectorio, pareceNombre, separarNombreYLlave, soloLlave, textoDelCliente, textoLlave, textoNoEsLaMisma, tieneLlave, unirLlaves } from './wa-cliente-reglas.ts';
 import type { Directorio, FichaCliente, Llave, ResolucionCliente } from './wa-cliente-reglas.ts';
 import type { SupabaseClient } from './types.ts';
 
@@ -2337,17 +2336,34 @@ export async function textoDeLaConsulta(
 ): Promise<string> {
   const tanda = await tandaAbiertaDelRemitente(supabase, workspaceId, phone, bandeja.horasCajaActiva);
   if (consulta.tipo === 'tanda') {
-    if (!tanda) return TEXTO_SIN_TANDA;
+    if (!tanda) {
+      // Noveno control (hallazgo 7): la tanda ya se cerró y su resumen espera: se cuentan sus mensajes.
+      const abierta = await preguntaAbierta(supabase, workspaceId, phone);
+      const entregaId = abierta?.espera === 'resumen' ? (abierta.tipo === 'entrega' ? abierta.id : abierta.entregaId ?? null) : null;
+      if (abierta && entregaId) {
+        const { data: e } = await supabase.from('wa_bandeja_entregas').select('plan_viajes').eq('id', entregaId).maybeSingle();
+        const plan = (e?.plan_viajes ?? null) as PlanViajes | null;
+        const n = plan ? plan.mensajes.filter(m => !m.descartado).length : 0;
+        return textoTandaEnResumen({ nombre: abierta.nombre, n });
+      }
+      return TEXTO_SIN_TANDA;
+    }
     return textoTanda({ nombre: tanda.nombre, n: tanda.n, cierre: bandeja.palabrasCierre[0] ?? 'listo' });
   }
   if (consulta.tipo === 'viajes') {
-    const quien = consulta.cliente ?? tanda?.cajaCliente ?? null;
-    if (!quien) return TEXTO_CONSULTA_DE_QUIEN;
-    const fichas = await fichasPorNombre(supabase, workspaceId, quien);
+    const dicho = consulta.cliente ?? tanda?.cajaCliente ?? null;
+    if (!dicho) return TEXTO_CONSULTA_DE_QUIEN;
+    // Noveno control (hallazgo 2): el cliente es el contacto que el escrito nombra exacto, por la parte que coincide con
+    // el directorio («qué tiene abierto ahorita Ana Ruiz» → Ana Ruiz). Sin eso, solo un parecido de lo dicho entero.
+    const dir = await directorioPara(supabase, workspaceId, { nombres: [dicho], llaves: [] });
+    const leido = nombreEnElDirectorio(dicho, dir);
+    const quien = leido.nombre;
+    const fichas = dir.porNombre(quien);
     if (fichas === null) return 'No pude revisar el directorio de clientes. Pregúntame otra vez en un momento.';
-    const exactos = fichas.filter(f => normalizarNombre(f.nombre) === normalizarNombre(quien));
-    const usadas = exactos.length > 0 ? exactos : fichas.filter(f => pareceNombre(quien, f.nombre)).slice(0, 1);
-    if (usadas.length === 0) return textoViajesDelCliente({ cliente: nombrePropio(quien), viajes: [], noExiste: true });
+    const exactos = (fichas ?? []).filter(f => normalizarNombre(f.nombre) === normalizarNombre(quien));
+    const usadas = exactos.length > 0 ? exactos : leido.dudoso ? [] : (fichas ?? []).filter(f => pareceNombre(quien, f.nombre)).slice(0, 1);
+    // Nunca «no lo tengo» con un nombre que no se pudo aislar: se pregunta de qué cliente.
+    if (usadas.length === 0) return TEXTO_CONSULTA_DE_QUIEN;
     return usadas.map(f => textoViajesDelCliente({
       cliente: nombrePropio(f.nombre) + (usadas.length > 1 ? ` (${datoDeLaFicha(f)})` : ''),
       viajes: f.abiertos.map(v => ({ linea: nombreDeViaje({ nombre: v.nombre, codigo: v.codigo }) })),

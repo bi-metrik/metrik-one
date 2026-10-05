@@ -1128,6 +1128,13 @@ function validarPropuesta(crudo: unknown, e: EntradaValidador): Decision {
   acc = enAmbito;
   if (acc.length === 0) return aclaracion(e, 'V2_ambito');
 
+  // Noveno control (hallazgo 3): con la bandeja, un escrito que relata lo que pregunta o dice el cliente es contenido,
+  // nunca una consulta (ni de la bandeja ni del bot de siempre), diga lo que diga el modelo.
+  if (e.bandeja && acc.some(a => a.accion === 'consulta') && relataAlCliente(e.texto)) {
+    acc = acc.map(a => (a.accion === 'consulta' ? { ...a, accion: 'contenido', ref: null, id: null } : a));
+    marcar('V2_relato_es_contenido');
+  }
+
   // V3 — rol. Lo que el rol no puede hacer recibe el texto de su rol de hoy; nada se escribe.
   const restringido = intentsDelRol(e.rol) !== null;
   for (const a of acc) {

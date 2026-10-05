@@ -72,7 +72,9 @@ export interface OpcionNegocio {
 /** Lo que acompaña una referencia a un viaje de la lista sin nombrarlo: «el de», «la que va a», «el del cliente». */
 const RELLENO_REFERENCIA: ReadonlySet<string> = new Set(['el', 'la', 'los', 'las', 'lo', 'de', 'del', 'que', 'va', 'van', 'a', 'al', 'para', 'viaje',
   'cotizacion', 'es', 'era', 'seria', 'ese', 'esa', 'este', 'esta', 'en', 'con', 'cliente', 'clienta', 'senor', 'senora', 'por', 'favor', 'porfa', 'uno',
-  'una', 'mismo', 'misma', 'destino', 'hacia', 'sale', 'salen', 'rumbo', 'pa', 'y']);
+  'una', 'mismo', 'misma', 'destino', 'hacia', 'sale', 'salen', 'rumbo', 'pa', 'y',
+  // Noveno control (hallazgo 8): el demostrativo plural y el verbo de ir («esos van en el de Cartagena»).
+  'esos', 'esas', 'estos', 'estas', 'aquellos', 'aquellas', 'ir', 'vamos', 'vaya', 'vayan', 'iria', 'irian', 'iran']);
 /** «el de», «la de», «la que va a», «del»: la respuesta SEÑALA un viaje, no nombra a una persona. */
 const SENALA_VIAJE = /^(?:(?:es|era|seria)\s+)?(?:(?:para|pa|en|a)\s+)?(?:el|la|lo|al|del)\s+(?:de|del|que)?\b|^del?\b/;
 

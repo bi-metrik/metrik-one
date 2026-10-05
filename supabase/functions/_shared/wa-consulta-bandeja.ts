@@ -42,9 +42,29 @@ const NO_ES_NOMBRE: ReadonlySet<string> = new Set([
   'enero', 'febrero', 'marzo', 'abril', 'mayo', 'junio', 'julio', 'agosto', 'septiembre', 'octubre', 'noviembre', 'diciembre', 'hoy', 'semana',
 ]);
 
-/** Regla 3 de la frontera: ¿el escrito relata lo que preguntó o dijo el cliente («me pregunta …», «dice que …»)? */
+/**
+ * Noveno control de Vera (hallazgo 3): el verbo de relato en CUALQUIER posición y con un sujeto que no es el comercial
+ * («Ana Ruiz pregunta…», «la señora anda preguntando…», «él quiere saber…», «dijeron que…»): tercera persona, pasado o
+ * gerundio. «te pregunto» o «quiero saber» (el comercial al bot) no lo son. «una consulta» como sustantivo, tampoco.
+ */
+const RELATO_EN_CUALQUIER_PARTE = /\b(?:pregunta|preguntan|preguntaba|preguntaban|preguntaron|preguntando|quiere\s+saber|quieren\s+saber|queria\s+saber|querian\s+saber|quiso\s+saber|quisieron\s+saber|dice|dicen|decia|decian|dijo|dijeron|diciendo|escribe|escriben|escribia|escribio|escribieron|escribiendo|consultan|consultaba|consultaron|consultando)\b/;
+/** Las formas con tilde que en minúscula sin tilde serían también del comercial («preguntó» / «pregunto»). */
+const RELATO_CON_TILDE = /\b(?:pregunt[oó]|consult[oó])\b/;
+
+/** Un imperativo (o infinitivo) de acción: descartar, borrar, quitar, mover, pasar, cargar, crear. */
+const PIDE_UNA_ACCION = /\b(?:(?:descart|borr|quit|elimin|sac|bot)(?:a|e|ar|alo|ala|alos|alas|elo|ela|elos|arlo|arla|arlos)|mueve|muevelo|muevela|muevelos|mover|moverlo|moverla|pasalo|pasala|pasalos|pasalas|pasarlo|pasarla|carga|cargalo|cargala|cargalos|cargar|cargarlo|crea|crealo|creala|crear|crearlo|crearla)\b/;
+
+/** Regla 3 de la frontera: ¿el escrito relata lo que preguntó o dijo el cliente? */
 export function relataAlCliente(texto: string): boolean {
-  return RELATA.test(normalizarNombre(normalizarTexto(String(texto ?? '').trim())));
+  const bruto = String(texto ?? '').trim();
+  const t = normalizarNombre(normalizarTexto(bruto));
+  if (RELATA.test(t)) return true;
+  // «te pregunto», «le pregunto»: el comercial pregunta (al bot o al cliente); no es un relato.
+  const sinElComercial = t.replace(/\b(?:te|le|yo)\s+(?:pregunto|consulto|digo|escribo)\b/g, ' ');
+  if (RELATO_EN_CUALQUIER_PARTE.test(sinElComercial)) return true;
+  // «preguntó», «consultó» (con tilde): tercera persona del pasado. Sin tilde no se adivina.
+  const m = RELATO_CON_TILDE.exec(bruto.toLowerCase());
+  return !!m && /[óÓ]$/.test(m[0]);
 }
 
 /** ¿Tiene forma de pregunta o de pedido al bot? */
@@ -75,7 +95,10 @@ export function leerConsultaBandeja(texto: string, o: { reenviado: boolean }): C
   const bruto = String(texto ?? '').trim();
   if (!bruto || bruto.length > 140) return null;
   const t = normalizarNombre(normalizarTexto(bruto));
-  if (!t || RELATA.test(t) || !esPreguntaOPedido(t, bruto)) return null;
+  if (!t || relataAlCliente(bruto) || !esPreguntaOPedido(t, bruto)) return null;
+  // Noveno control (hallazgo 6): un pedido de hacer algo («borra lo que te mandé», «pásalo al de Cartagena») no es una
+  // consulta aunque use su vocabulario.
+  if (PIDE_UNA_ACCION.test(t)) return null;
   // Qué lleva la tanda.
   if (/\b(?:que\s+(?:llevo|llevamos|llevas|te\s+he\s+mandado|te\s+he\s+pasado|te\s+mande|te\s+pase|tienes\s+en\s+la\s+tanda|hay\s+en\s+la\s+tanda|va\s+en\s+la\s+tanda)|cuantos\s+mensajes\s+(?:llevo|llevamos|van|te\s+he\s+mandado|tienes))\b/.test(t)) {
     return { tipo: 'tanda' };
@@ -133,6 +156,11 @@ export const TEXTO_SIN_TANDA = 'No tienes una tanda abierta: no me has pasado na
 export function textoTanda(p: { nombre: string; n: number; cierre: string }): string {
   const cuantos = p.n === 0 ? 'todavía ningún mensaje' : `${p.n} ${p.n === 1 ? 'mensaje' : 'mensajes'}`;
   return `Llevas ${cuantos} de ${p.nombre}. Cuando termines, escribe «${p.cierre}».`;
+}
+
+/** La tanda ya cerrada con su resumen esperando (noveno control, hallazgo 7). */
+export function textoTandaEnResumen(p: { nombre: string; n: number }): string {
+  return `La tanda de ${p.nombre} ya se cerró con ${p.n} ${p.n === 1 ? 'mensaje' : 'mensajes'} y espera tu respuesta al resumen («sí» para cargarla).`;
 }
 
 /** «CARTAGENA DIC · Lina Pérez (T1 26 14) — Mínimo 7/9 … / Le falta: …» */

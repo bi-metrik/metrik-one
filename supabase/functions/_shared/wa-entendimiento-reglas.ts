@@ -1464,6 +1464,8 @@ const ANTES_DE_VIAJE_NUEVO: ReadonlySet<string> = new Set([
   'nueva', 'y', 'pero', 'mejor', 'solo', 'eso', 'esto', 'ojo', 'aqui', 'este', 'esta', 'les', 'le', 'nos', 'tenemos', 'ese', 'esa', 'mismo', 'misma',
   'antiguo', 'antigua', 'existente', 'conocido', 'conocida',
 ]);
+/** «abre», «ábrele», «abrirle», «monta», «móntale», «crea», «créale», «arma», «ármale», «hazle»: abrir un viaje. */
+const VERBO_DE_ABRIR = /^(?:abr|mont|cre|arm|haz|hacer|hag)[a-z]*$/;
 /** Lo que va entre «nuevo viaje» y el nombre: «de», «para», «a nombre de», «del cliente», «se llama». */
 const ANTES_DEL_NOMBRE: ReadonlySet<string> = new Set(['a', 'de', 'del', 'para', 'nombre', 'sobre', 'el', 'la', 'cliente', 'clienta', 'se', 'llama', 'llamado', 'llamada', 'es', 'un', 'una',
   'senor', 'senora', 'sr', 'sra', 'don', 'dona']);
@@ -1482,15 +1484,24 @@ export function leerViajeNuevo(texto: string): LecturaNuevo | null | undefined {
   let i = -1;
   let largo = 2;
   let pronombre = false;
+  let verbo = -1;
+  let dativo = false;
   for (let k = 0; k < n.length - 1 && i < 0; k++) {
     const a = n[k];
     const b = n[k + 1];
     if ((NUEVO_ADJ.has(a) && OBJETO_VIAJE.has(b)) || (OBJETO_VIAJE.has(a) && NUEVO_ADJ.has(b)) || ((a === 'otro' || a === 'otra') && OBJETO_VIAJE.has(b))) i = k;
+    // Noveno control (hallazgo 9): «ábrele un viaje a …», «móntale una cotización a …», «créale un viaje»: el verbo de
+    // abrir o montar con «un viaje» es un viaje nuevo, aunque no diga «nuevo».
+    else if (VERBO_DE_ABRIR.test(a) && (b === 'un' || b === 'una') && OBJETO_VIAJE.has(n[k + 2] ?? '') && !NUEVO_ADJ.has(n[k + 3] ?? '')) {
+      i = k + 1;
+      verbo = k;
+      dativo = /(?:le|les)$/.test(a);
+    }
     // «uno nuevo», «una nueva» solos: el pronombre de un viaje del que ya se habla («es para uno nuevo»).
     else if ((a === 'uno' || a === 'una') && NUEVO_ADJ.has(b) && !OBJETO_VIAJE.has(n[k + 2] ?? '')) { i = k; pronombre = true; }
   }
   if (i < 0) return undefined;
-  if (!n.slice(0, i).every(w => ANTES_DE_VIAJE_NUEVO.has(w))) return undefined;
+  if (!n.slice(0, verbo >= 0 ? verbo : i).every(w => ANTES_DE_VIAJE_NUEVO.has(w))) return undefined;
   // «ese mismo cliente, pero otro viaje», «la clienta antigua quiere una cotización nueva»: lo de antes dice que el
   // cliente es el de la conversación (pero no «no es un cliente nuevo», que solo niega).
   if (/\b(?:mism[oa]|antigu[oa]|existente|conocid[oa])\b/.test(n.slice(0, i).join(' '))) pronombre = true;
@@ -1502,7 +1513,8 @@ export function leerViajeNuevo(texto: string): LecturaNuevo | null | undefined {
   let j = 0;
   let conector = false;
   let tras = 0;
-  while (j < nd.length && ANTES_DEL_NOMBRE.has(nd[j])) { if (CONECTOR_DEL_NOMBRE.has(nd[j])) { conector = true; tras = j + 1; } j++; }
+  // Con el pronombre de a quién («ábrele un viaje a Ana Ruiz»), la «a» introduce a la persona.
+  while (j < nd.length && ANTES_DEL_NOMBRE.has(nd[j])) { if (CONECTOR_DEL_NOMBRE.has(nd[j]) || (dativo && nd[j] === 'a')) { conector = true; tras = j + 1; } j++; }
   // El tope del nombre cuenta desde el último «de/para/cliente»: «para la familia de cinco personas» no es un
   // nombre (control de Vera, I3), «del cliente Juan Pablo Ortega Zuleta» sí.
   if (conector && nd.length - tras > MAX_PALABRAS_NOMBRE_NUEVO) return null;
