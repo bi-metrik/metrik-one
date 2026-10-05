@@ -1,4 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { rpcDelDirectorio } from './__fixtures__/directorio-doble.ts';
 
 /**
  * El paso de entendimiento de punta a punta, contra una base en memoria que APLICA los filtros
@@ -118,6 +119,8 @@ function crearDb(t: Tablas) {
    * de verdad se prueba con PGlite): suma a la tanda abierta del remitente, o abre una.
    */
   async function rpc(nombre: string, a: Fila) {
+    const delDirectorio = rpcDelDirectorio(t, nombre, a);
+    if (delDirectorio) return delDirectorio;
     if (nombre !== 'wa_bandeja_registrar_mensaje') throw new Error(`rpc no esperado: ${nombre}`);
     const ahora = new Date().toISOString();
     let abierta = t.wa_bandeja_entregas.find(e => e.workspace_id === a.p_workspace_id && e.remitente_phone === a.p_remitente_phone && e.estado === 'abierta');
@@ -197,6 +200,7 @@ function base(): Tablas {
     etapas_negocio: [{ id: 'et1', linea_id: LINEA, orden: 1, stage: 'venta' }],
     bloque_configs: [{ id: 'bc1', etapa_id: 'et1', workspace_id: WS, orden: 1, config_extra: { fields: FIELDS }, bloque_definitions: { tipo: 'datos' } }],
     contactos: [],
+    empresas: [],
     staff_areas: [{ staff_id: STAFF, area: 'comercial' }],
   };
 }
@@ -405,47 +409,54 @@ describe('carga en un negocio existente', () => {
 // ── NUEVO y respuestas que no se entienden ──────────────────────────────────
 
 describe('NUEVO y re-pregunta', () => {
-  it('«NUEVO Carla Prueba» pide el «sí» con el nombre tal cual (2026-10-03); sin él no hay cliente, negocio ni carga; con él, crea y carga', async () => {
+  it('«NUEVO Carla Prueba» pide el «sí» mostrando lo que dice el directorio; con el «sí» y sin llave pide el celular (decisión 1 del 2026-10-05); con él, crea y carga', async () => {
     entrega({ respuesta: 'NUEVO Carla Prueba', opciones: OPCIONES, mensajes: [{ cuerpo: 'quiere ir a Aruba' }] });
     modelo('Quiere ir a Aruba.', { destino: { valor: 'Aruba', frase: 'ir a Aruba' } });
     const antes = t.negocio_bloques.filter(b => b.negocio_id !== undefined).map(b => JSON.stringify(b));
     const negocios = t.negocios.length;
     await correr();
     expect(enviados.map(e => e.texto)).toEqual([
-      // Comparte el apellido con tres clientes que tienen viaje abierto: la confirmación lo dice (dos están en la lista).
+      // «Nuevo» es un viaje nuevo: el directorio no la tiene, y comparte el apellido con tres clientes con viaje abierto.
       [
-        'Tanda sin nombre · ¿Creo el cliente nuevo «Carla Prueba»?',
-        'Ya hay viajes de Luis Prueba (T1 26 15), Marta Prueba (T1 26 14) y Ana Prueba (T1 26 9). ¿Es para uno de esos (responde 1, 2 o T1 26 9) o es un cliente nuevo (responde SÍ)?',
-        'O escribe el nombre correcto.',
-        'No he creado ni cargado nada.',
+        'Tanda sin nombre · ¿Va como viaje nuevo de Carla Prueba? No lo tengo en el directorio: después del sí te pido su celular o correo (sin uno de los dos no lo creo).',
+        'Ya hay viajes de Luis Prueba (T1 26 15), Marta Prueba (T1 26 14) y Ana Prueba (T1 26 9): si es para uno de esos, responde 1, 2 o T1 26 9.',
+        'Responde sí, o el número del viaje si es uno que ya existe. No he creado ni cargado nada.',
       ].join('\n'),
     ]);
     expect(ent()).toMatchObject({ estado: 'esperando_negocio', destino: 'nuevo', contacto_nombre: 'Carla Prueba', confirmacion_pendiente: null });
     expect(vi.mocked(fetch)).not.toHaveBeenCalled(); // ni siquiera se leyó con el modelo
     expect([t.contactos, t.negocios.length]).toEqual([[], negocios]);
     expect(t.negocio_bloques.map(b => JSON.stringify(b))).toEqual(antes);
-    expect(await mod.preguntaAbierta(db as never, WS, TEL)).toMatchObject({ espera: 'viaje', corta: '¿Creo el cliente nuevo «Carla Prueba»? SÍ, el nombre correcto, o el número o código del viaje' });
+    expect(await mod.preguntaAbierta(db as never, WS, TEL)).toMatchObject({ espera: 'viaje', corta: '¿Va como viaje nuevo de Carla Prueba? Sí, el nombre correcto, o el número o código del viaje' });
     expect(await responder('sí')).toBe(true);
     await correr();
+    // Sin celular ni correo no se crea: se pide, y nada se crea mientras tanto.
+    expect(ent()).toMatchObject({ estado: 'esperando_contacto' });
+    expect(enviados.at(-1)!.texto).toBe('Carla Prueba · No tengo a Carla Prueba en el directorio. ¿Me pasas su celular o su correo? Sin uno de los dos no lo creo.');
+    expect([t.contactos, t.negocios.length]).toEqual([[], negocios]);
+    expect(await responder('300 765 4321')).toBe(true);
+    await correr();
     expect(ent()).toMatchObject({ destino: 'nuevo', estado: 'negocio_creado' });
-    expect(t.contactos.map(c => c.nombre)).toEqual(['CARLA PRUEBA']);
+    expect(t.contactos.map(c => [c.nombre, c.telefono])).toEqual([['CARLA PRUEBA', '3007654321']]);
+    // La empresa espejo, como la crea la app (diseño 2026-10-05, §1).
+    const neg = t.negocios.find(n => n.contacto_id === t.contactos[0].id)!;
+    expect(t.empresas).toEqual([expect.objectContaining({ nombre: 'CARLA PRUEBA', tipo_persona: 'natural', contacto_id: t.contactos[0].id })]);
+    expect(neg.empresa_id).toBe(t.empresas[0].id);
     expect(t.negocio_bloques.slice(0, antes.length).map(b => JSON.stringify(b))).toEqual(antes); // los existentes no se tocan
-    expect(enviados.some(e => e.texto.includes('No encontré'))).toBe(false);
   });
 
-  it('«NUEVO Carla Prueba» con una Carla Prueba en el directorio pregunta si es la misma; «SI» la elige', async () => {
+  it('«NUEVO Carla Prueba» con UNA Carla Prueba en el directorio: la confirmación la muestra con su celular y el «sí» la usa (decisión 2 del 2026-10-05)', async () => {
     t.contactos.push({ id: 'c-carla', workspace_id: WS, nombre: 'CARLA PRUEBA', telefono: '3001112233' });
     entrega({ respuesta: 'NUEVO Carla Prueba', opciones: OPCIONES, mensajes: [{ cuerpo: 'quiere ir a Aruba' }] });
     modelo('Quiere ir a Aruba.', { destino: { valor: 'Aruba', frase: 'ir a Aruba' } });
     await correr();
+    expect(enviados[0].texto).toContain('¿Va como viaje nuevo de Carla Prueba? Ya es cliente: Carla Prueba (cel. …2233); va a su nombre.');
     expect(await responder('sí')).toBe(true);
     await correr();
-    expect(ent()).toMatchObject({ estado: 'esperando_contacto' });
-    expect(enviados[1].texto).toBe('Carla Prueba · Ya hay un contacto «Carla Prueba» en el directorio:\n1. CARLA PRUEBA (tel. …2233)\n¿Es el mismo? Responde SÍ, NUEVO para crear otro, o DESCARTAR.');
-    expect(await responder('SI')).toBe(true);
-    await correr();
+    // Sin un turno aparte de «¿es el mismo?»: el viaje nuevo va a la ficha que ya existía.
     expect(ent()).toMatchObject({ estado: 'negocio_creado', contacto_id: 'c-carla' });
     expect(t.contactos).toHaveLength(1);
+    expect(enviados.at(-1)!.texto).toContain('Lo dejé a nombre de Carla Prueba (cel. …2233), que ya era cliente.');
   });
 
   it('una respuesta que no se entiende vuelve a preguntar con la MISMA lista; la respuesta nueva se toma y se carga', async () => {
@@ -674,7 +685,7 @@ describe('QA v5 · lo que el bot contesta en el acto a un encabezado (atenderEnB
     ]);
   });
 
-  it('QA v6 · «nuevo» suelto: el bot pide el nombre; con el nombre, «📌 NUEVO …»; los apodos del equipo no contestan', async () => {
+  it('QA v6 · «nuevo» suelto: el bot pregunta de quién es; con el nombre, lo busca; los apodos del equipo no contestan', async () => {
     t.workspaces[0].config_extra = { bandeja_solicitudes: { modo_viajes: 'encabezado' } };
     await llega('nuevo');
     await llega('vamos a Aruba', true);
@@ -682,10 +693,12 @@ describe('QA v5 · lo que el bot contesta en el acto a un encabezado (atenderEnB
     await llega('Pedro Gómez');
     await llega('Tati');
     // El reenvío vuelve a pedir el nombre (la primera vez); el «gracias», ya con contenido, no.
+    // 2026-10-05: «nuevo» es un viaje nuevo («¿Para qué cliente es?»); con el nombre, el bot lo busca en el directorio
+    // y, como no lo tiene, pide una llave (sin ella no lo crea).
     expect(enviados.map(e => e.texto)).toEqual([
-      '¿Cómo se llama el cliente nuevo? Escríbeme su nombre, o DESCARTAR. Hasta entonces no asigno lo que sigue.',
-      '¿Cómo se llama el cliente nuevo? Escríbeme su nombre, o DESCARTAR. Hasta entonces no asigno lo que sigue.',
-      '📌 Cliente nuevo: Pedro Gómez. Lo creo solo cuando respondas SÍ al resumen.',
+      'Listo, un viaje nuevo. ¿Para qué cliente es?',
+      'Listo, un viaje nuevo. ¿Para qué cliente es?',
+      'No tengo a Pedro Gómez en el directorio. ¿Me pasas su celular o su correo? Así reviso que no lo tengamos con otro nombre, y sin uno de los dos no lo creo.',
     ]);
   });
 
@@ -724,25 +737,27 @@ describe('Prueba en vivo del 2026-10-01: dos viajes NUEVO seguidos, una sola pre
   });
 
   it('la secuencia exacta: los dos viajes quedan cargados, sin «Anotado.» y ninguna respuesta va al viaje equivocado', async () => {
-    await llega('nuevo Laura Prueba');
+    // 2026-10-05: el cliente nuevo viene con su celular en el encabezado (sin llave no se crea: decisión 1).
+    await llega('nuevo Laura Prueba 300 111 2233');
+    // Comparte el apellido con tres clientes con viaje abierto: el acuse lo dice (cuarto control de Vera).
+    expect(textos().at(-1)).toBe('Va como viaje nuevo de Laura Prueba, cliente nuevo (cel. 300 111 2233). Lo creo cuando me digas que sí en el resumen.\nReenvíame lo que te pidió y al final te muestro el resumen.\nYa hay viajes de Luis Prueba (T1 26 15), Marta Prueba (T1 26 14) y Ana Prueba (T1 26 9): si es para uno de esos, escribe su código.');
     await llega('Hola, queremos ir a Cartagena, somos 2 adultos', true);
     await llega('listo');
-    expect(textos().at(-1)).toMatch(/^Laura Prueba · Entendí 1 viaje:\n1\) Cliente nuevo: Laura Prueba — 1 mensaje\n   1 «Hola, queremos ir a Cartagena/);
+    expect(textos().at(-1)).toMatch(/^Laura Prueba · Entendí 1 viaje:\n1\) Viaje nuevo de Laura Prueba \(cliente nuevo, cel\. 300 111 2233\) — 1 mensaje\n   1 «Hola, queremos ir a Cartagena/);
     await llega('sí');
     expect(textos()).not.toContain('Anotado.');
     salidaModelo = laura();
     await cron();
-    // NUEVO con nombre en el encabezado ya es la decisión: se crea sin «No encontré…».
-    expect(textos().some(x => x.includes('No encontré'))).toBe(false);
-    await llega('Nuevo Diego Prueba');
+    expect(textos().some(x => x.includes('No tengo'))).toBe(false);
+    await llega('Nuevo Diego Prueba 300 444 5566');
     for (const x of ['para San Andrés', 'vamos 3 adultos', 'del 5 al 9 de diciembre', 'hotel todo incluido']) await llega(x, true);
     await llega('listo');
-    expect(textos().at(-1)).toMatch(/^Diego Prueba · Entendí 1 viaje:\n1\) Cliente nuevo: Diego Prueba — 4 mensajes/);
+    expect(textos().at(-1)).toMatch(/^Diego Prueba · Entendí 1 viaje:\n1\) Viaje nuevo de Diego Prueba \(cliente nuevo, cel\. 300 444 5566\) — 4 mensajes/);
     await llega('Si');
     salidaModelo = diego();
     await cron();
 
-    expect(t.contactos.map(c => c.nombre).sort()).toEqual(['DIEGO PRUEBA', 'LAURA PRUEBA']);
+    expect(t.contactos.map(c => [c.nombre, c.telefono]).sort()).toEqual([['DIEGO PRUEBA', '3004445566'], ['LAURA PRUEBA', '3001112233']]);
     const creados = t.wa_bandeja_entendimientos.filter(e => e.estado === 'negocio_creado');
     expect(creados).toHaveLength(2);
     const porContacto = new Map(t.contactos.map(c => [c.id, c.nombre]));
@@ -755,33 +770,40 @@ describe('Prueba en vivo del 2026-10-01: dos viajes NUEVO seguidos, una sola pre
     expect(t.wa_bandeja_entregas.every(e => e.estado === 'con_cliente')).toBe(true);
   });
 
-  it('con una pregunta abierta (Laura ya existe: ¿es la misma?), Diego espera turno y el «Si» va a la única pregunta abierta', async () => {
-    t.contactos.push({ id: 'c-laura', workspace_id: WS, nombre: 'LAURA PRUEBA', telefono: '3005550000' });
+  it('con el resumen de Laura esperando su celular (sin llave no se crea), Diego espera turno y la llave va a la única pregunta abierta', async () => {
     await llega('nuevo Laura Prueba');
+    expect(textos().at(-1)).toBe('No tengo a Laura Prueba en el directorio. ¿Me pasas su celular o su correo? Así reviso que no lo tengamos con otro nombre, y sin uno de los dos no lo creo.\nYa hay viajes de Luis Prueba (T1 26 15), Marta Prueba (T1 26 14) y Ana Prueba (T1 26 9): si es para uno de esos, escribe su código.');
     await llega('Hola, queremos ir a Cartagena, somos 2 adultos', true);
     await llega('listo');
+    expect(textos().at(-1)).toContain('1) Viaje nuevo de Laura Prueba (no lo tengo en el directorio: falta su celular o correo) — 1 mensaje');
+    expect(textos().at(-1)).toContain('No cargué nada todavía. Antes del sí: ¿Me pasas el celular o el correo de Laura Prueba?');
+    // El «sí» no crea sin la llave.
     await llega('sí');
-    salidaModelo = laura();
     await cron();
-    expect(textos().at(-1)).toMatch(/^Laura Prueba · Ya hay un contacto «Laura Prueba» en el directorio/);
+    expect(textos().at(-1)).toContain('Antes del sí: ¿Me pasas el celular o el correo de Laura Prueba?');
+    expect(t.contactos).toEqual([]);
 
-    // Un encabezado nuevo con la pregunta abierta: 📌 y se recuerda la pendiente en una línea.
-    await llega('Nuevo Diego Prueba');
+    // Un encabezado nuevo con la pregunta abierta: su acuse y se recuerda la pendiente en una línea.
+    await llega('Nuevo Diego Prueba 300 444 5566');
     expect(textos().at(-1)).toBe([
-      '📌 Cliente nuevo: Diego Prueba. Lo creo solo cuando respondas SÍ al resumen.',
-      'Ya hay viajes de Luis Prueba (T1 26 15), Marta Prueba (T1 26 14) y Ana Prueba (T1 26 9). Si es para uno de esos, escribe su código.',
-      'Primero: Laura Prueba · ¿Es el mismo? SÍ / NUEVO',
+      'Va como viaje nuevo de Diego Prueba, cliente nuevo (cel. 300 444 5566). Lo creo cuando me digas que sí en el resumen.',
+      'Reenvíame lo que te pidió y al final te muestro el resumen.',
+      'Ya hay viajes de Luis Prueba (T1 26 15), Marta Prueba (T1 26 14) y Ana Prueba (T1 26 9): si es para uno de esos, escribe su código.',
+      'Primero: Laura Prueba · ¿Así? SÍ o corrige',
     ].join('\n'));
     for (const x of ['para San Andrés', 'vamos 3 adultos', 'del 5 al 9 de diciembre', 'hotel todo incluido']) await llega(x, true);
     await llega('listo');
     // El resumen de Diego no sale: espera turno.
-    expect(textos().at(-1)).toBe('Primero: Laura Prueba · ¿Es el mismo? SÍ / NUEVO\nLo que acabas de mandar te lo pregunto después.');
+    expect(textos().at(-1)).toBe('Primero: Laura Prueba · ¿Así? SÍ o corrige\nLo que acabas de mandar te lo pregunto después.');
     expect(textos().some(x => x.startsWith('Diego Prueba · Entendí'))).toBe(false);
 
-    await llega('Si'); // va a la única pregunta abierta: la de Laura
+    await llega('300 111 2233'); // la llave va a la única pregunta abierta: la de Laura
+    await cron();
+    expect(textos().at(-1)).toContain('1) Viaje nuevo de Laura Prueba (cliente nuevo, cel. 300 111 2233) — 1 mensaje');
+    await llega('sí');
     salidaModelo = laura();
     await cron();
-    expect(t.wa_bandeja_entendimientos.find(e => e.contacto_id === 'c-laura')).toMatchObject({ estado: 'negocio_creado' });
+    expect(t.contactos.map(c => c.nombre)).toEqual(['LAURA PRUEBA']);
     // Contestada la de Laura, sale la de Diego.
     expect(textos().at(-1)).toMatch(/^Diego Prueba · Entendí 1 viaje:/);
     await llega('SI');
@@ -789,28 +811,24 @@ describe('Prueba en vivo del 2026-10-01: dos viajes NUEVO seguidos, una sola pre
     await cron();
     expect(t.contactos.map(c => c.nombre).sort()).toEqual(['DIEGO PRUEBA', 'LAURA PRUEBA']);
     expect(t.wa_bandeja_entendimientos.filter(e => e.estado === 'negocio_creado')).toHaveLength(2);
-    expect(t.wa_bandeja_mensajes.filter(m => m.papel === 'respuesta_contacto').map(m => m.cuerpo)).toEqual(['Si']);
   });
 
-  it('dos viajes en un resumen que preguntan los dos: el segundo espera turno hasta que se conteste el primero', async () => {
-    t.contactos.push({ id: 'c-laura', workspace_id: WS, nombre: 'LAURA PRUEBA', telefono: null }, { id: 'c-diego', workspace_id: WS, nombre: 'DIEGO PRUEBA', telefono: null });
+  it('dos viajes nuevos de clientes que ya existen (nombre idéntico y único): el resumen los muestra y el «sí» los carga en sus fichas, sin crear a nadie', async () => {
+    t.contactos.push({ id: 'c-laura', workspace_id: WS, nombre: 'LAURA PRUEBA', telefono: null }, { id: 'c-diego', workspace_id: WS, nombre: 'DIEGO PRUEBA', telefono: '3009998877' });
     await llega('nuevo Laura Prueba');
     await llega('Hola, queremos ir a Cartagena, somos 2 adultos', true);
     await llega('nuevo Diego Prueba');
     await llega('vamos 3 adultos para San Andrés', true);
     await llega('listo');
+    const resumen = textos().at(-1)!;
+    expect(resumen).toContain('1) Viaje nuevo de Laura Prueba (ya es cliente: sin celular ni correo, sin viajes) — 1 mensaje');
+    expect(resumen).toContain('2) Viaje nuevo de Diego Prueba (ya es cliente: cel. …8877, sin viajes) — 1 mensaje');
     await llega('Sí');
     colaModelo = [laura(), diego()];
     await cron();
-    const preguntas = textos().filter(x => x.includes('¿Es el mismo?'));
-    expect(preguntas.map(x => x.split(' · ')[0])).toEqual(['Laura Prueba']); // una sola abierta
-    expect(t.wa_bandeja_entendimientos.find(e => e.segmento === 2)).toMatchObject({ estado: 'error', intentos: 0 });
-    await llega('sí');
-    await cron();
-    expect(textos().filter(x => x.includes('¿Es el mismo?')).map(x => x.split(' · ')[0])).toEqual(['Laura Prueba', 'Diego Prueba']);
-    await llega('sí');
-    await cron();
+    expect(textos().some(x => x.includes('¿Es la misma persona?'))).toBe(false);
     expect(t.wa_bandeja_entendimientos.filter(e => e.estado === 'negocio_creado').map(e => e.contacto_id).sort()).toEqual(['c-diego', 'c-laura']);
+    expect(t.contactos).toHaveLength(2);
   });
 });
 
@@ -822,11 +840,16 @@ describe('guardianes en la ejecución', () => {
     expect(ent()).toMatchObject({ confirmacion_pendiente: 'cruce' });
     await responder('nuevo Ignacio Salgar');
     await correr();
-    expect(enviados.at(-1)!.texto).toContain('¿Creo el cliente nuevo «Ignacio Salgar»? Responde SÍ, o escribe el nombre correcto, o el número del viaje.');
+    expect(enviados.at(-1)!.texto).toContain('¿Va como viaje nuevo de Ignacio Salgar? No lo tengo en el directorio: después del sí te pido su celular o correo');
     expect(t.contactos).toEqual([]);
     await responder('sí');
     await correr();
-    expect(t.contactos.map(c => c.nombre)).toEqual(['IGNACIO SALGAR']);
+    // Sin llave no se crea (2026-10-05): se pide, y con ella se crea.
+    expect(t.contactos).toEqual([]);
+    expect(enviados.at(-1)!.texto).toContain('¿Me pasas su celular o su correo?');
+    await responder('ignacio.salgar@correo.co');
+    await correr();
+    expect(t.contactos.map(c => [c.nombre, c.email])).toEqual([['IGNACIO SALGAR', 'ignacio.salgar@correo.co']]);
     expect(ent()).toMatchObject({ estado: 'negocio_creado', destino: 'nuevo' });
     expect(bloque('b15')).toEqual({ destino: 'CARTAGENA' });
   });
@@ -840,9 +863,10 @@ describe('guardianes en la ejecución', () => {
     await correr();
     const seg = () => t.wa_bandeja_entendimientos.find(e => e.segmento === 1)!;
     expect(seg()).toMatchObject({ confirmacion_pendiente: 'cruce', destino: 'existente' });
-    await responder('nuevo Ignacio Salgar');
+    await responder('nuevo Ignacio Salgar 3201234567');
     await correr();
-    expect(enviados.at(-1)!.texto).toContain('¿Creo el cliente nuevo «Ignacio Salgar»? Responde SÍ, o escribe el nombre correcto, o el código del viaje.');
+    expect(enviados.at(-1)!.texto).toContain('¿Va como viaje nuevo de Ignacio Salgar? No lo tengo en el directorio: lo creo como cliente nuevo, con cel. 320 123 4567.');
+    expect(enviados.at(-1)!.texto).toContain('Responde sí, o el código del viaje si es uno que ya existe.');
     expect(seg()).toMatchObject({ estado: 'esperando_negocio', destino: 'nuevo', contacto_nombre: 'Ignacio Salgar' });
     expect(t.contactos).toEqual([]);
     expect(bloque('b15')).toEqual({ destino: 'CARTAGENA' });
@@ -911,22 +935,25 @@ describe('guardianes en la ejecución', () => {
     expect(t.negocios.length).toBe(negocios);
   });
 
-  it('N9 · NUEVO sin nombre: el bot pide el nombre; «NUEVO Marta Gómez» se muestra tal cual y NUEVO lo crea', async () => {
+  it('N9 · NUEVO sin nombre: el bot pide el nombre; «NUEVO Marta Gómez» se muestra tal cual; sin llave no se crea, con ella sí', async () => {
     entregaCon({ respuesta: 'NUEVO', opciones: OPCIONES, mensajes: [{ cuerpo: 'queremos ir a Aruba' }] });
     salidaModelo = valoresModelo({ destino: { valor: 'Aruba', frase: 'ir a Aruba' } });
     await correr();
     expect(ent()).toMatchObject({ estado: 'esperando_contacto' });
-    expect(enviados[0].texto).toContain('Escríbeme NUEVO y su nombre');
+    expect(enviados[0].texto).toContain('¿Para qué cliente es? No veo su nombre en los mensajes; escríbeme su nombre, o su celular o correo.');
 
     await responder('NUEVO Marta Gómez');
     await correr();
-    // Un nombre que el bot no había mostrado no se crea así: se muestra tal cual (2026-10-03).
+    // Un nombre que el bot no había mostrado no se crea así: se muestra tal cual (2026-10-03), y sin llave se pide (2026-10-05).
     expect(ent()).toMatchObject({ estado: 'esperando_contacto', contacto_nombre: 'Marta Gómez' });
-    expect(enviados.at(-1)!.texto).toContain('No encontré a «Marta Gómez» en el directorio.');
+    expect(enviados.at(-1)!.texto).toContain('No tengo a Marta Gómez en el directorio. ¿Me pasas su celular o su correo? Sin uno de los dos no lo creo.');
     expect(t.contactos).toEqual([]);
     await responder('NUEVO');
     await correr();
+    expect(t.contactos).toEqual([]); // NUEVO a secas no basta: falta la llave
+    await responder('@martagomez.viajes');
+    await correr();
     expect(ent()).toMatchObject({ estado: 'negocio_creado' });
-    expect(t.contactos.map(c => c.nombre)).toEqual(['MARTA GÓMEZ']);
+    expect(t.contactos.map(c => [c.nombre, c.usuario_whatsapp])).toEqual([['MARTA GÓMEZ', 'martagomez.viajes']]);
   });
 });

@@ -19,7 +19,12 @@
 //   5. Un mensaje que nombra a dos viajes no se carga entero en ninguno (F13): solo se descarta.
 // ============================================================
 
-import { calificarNombreNuevo, leerNuevo, nombreDeViaje, nombrePropio, normalizarNombre, normalizarTexto, restoTrasOtroCliente } from './wa-entendimiento-reglas.ts';
+import { calificarNombreNuevo, leerNuevo, leerViajeNuevo, nombreDeViaje, nombrePropio, normalizarNombre, normalizarTexto, restoTrasOtroCliente } from './wa-entendimiento-reglas.ts';
+import {
+  datoDeLaFicha, leerEleccionCliente, leerEsLaMisma, resolverConDirectorio, separarNombreYLlave, soloLlave, textoLlave, tieneLlave,
+  TEXTO_PIDE_CLIENTE, viajesDeLaFicha,
+} from './wa-cliente-reglas.ts';
+import type { Directorio, FichaCliente, Llave, ResolucionCliente } from './wa-cliente-reglas.ts';
 export { nombreDeViaje, nombrePropio } from './wa-entendimiento-reglas.ts';
 import { codigoCompacto, interpretarRespuestaNegocio } from './wa-carga-reglas.ts';
 import { esNotaDelComercial } from './wa-guardianes.ts';
@@ -60,6 +65,8 @@ export interface InterpretacionDelMensaje {
   nuevo?: string | null;
   candidatos?: string[] | null;
   con_contenido?: boolean | null;
+  /** La llave escrita en el mensaje, si el intérprete abrió un viaje nuevo con ella. */
+  llave?: Llave | null;
 }
 
 // ── Encabezados ──────────────────────────────────────────────────────────────
@@ -81,7 +88,16 @@ export type ResolucionEncabezado =
    * abiertos cuyo cliente comparte un nombre o un apellido con el propuesto (`viajesParecidos`); el acuse
    * y el resumen lo dicen. El cliente se crea solo con el «sí» al resumen.
    */
-  | { tipo: 'nuevo'; cliente: string | null; en_duda?: string; parecidos?: ViajeAbierto[] }
+  | {
+    tipo: 'nuevo'; cliente: string | null; en_duda?: string; parecidos?: ViajeAbierto[];
+    /** La llave que vino con el nombre («nuevo Ana Gómez 300 555 1234») o sola («nuevo 3005551234»). */
+    llave?: Llave | null;
+    /**
+     * Habla del cliente que ya está en la conversación («es para uno nuevo», «una cotización nueva sobre un
+     * cliente antiguo»): `armarSegmentos` le pone el cliente de la caja anterior (diseño 2026-10-05, D1).
+     */
+    mismo?: boolean;
+  }
   | { tipo: 'ambiguo'; candidatos: ViajeAbierto[] }
   | { tipo: 'codigo_desconocido'; codigo: string }
   /** Parece un encabezado (corto, escrito) pero no se resuelve: corta la caja (QA de #971 v3). */
@@ -266,11 +282,18 @@ export function resolverEncabezado(
   // nombre (`calificarNombreNuevo`): solo números no es un nombre y el bot lo pide; un texto más largo
   // que el tope no es encabezado. Lo demás es el nombre PROPUESTO: abre su caja, y el cliente se crea
   // solo con el «sí» al resumen, que lo muestra tal cual («Cliente nuevo: X»).
+  // «Nuevo» quiere decir VIAJE nuevo (2026-10-05): el cliente lo resuelve el código buscándolo
+  // (`wa-cliente-reglas.ts`). La llave que venga con el nombre se separa; un número solo es una llave, no un nombre.
+  if (leerViajeNuevo(bruto) === null) return null;
   const nuevo = leerNuevo(bruto);
   if (nuevo) {
     const c = calificarNombreNuevo(nuevo.cliente);
     if (c === 'largo') return null;
-    return c === 'duda' ? { tipo: 'nuevo', cliente: null, en_duda: nuevo.cliente ?? '' } : conParecidos(nuevo.cliente, viajes);
+    const { nombre, llave } = separarNombreYLlave(nuevo.cliente);
+    const conLlave = llave ? { llave } : {};
+    const mismo = nuevo.mismo ? { mismo: true } : {};
+    if (c === 'duda') return llave ? { tipo: 'nuevo', cliente: null, ...conLlave, ...mismo } : { tipo: 'nuevo', cliente: null, en_duda: nuevo.cliente ?? '', ...mismo };
+    return { ...conParecidos(nombre || null, viajes), ...conLlave, ...mismo } as ResolucionEncabezado;
   }
   if (palabras.length > MAX_PALABRAS_ENCABEZADO) return null;
   // «otro cliente Lina Pérez»: lo que sigue es el encabezado. Si no nombra un viaje abierto y es un
@@ -358,6 +381,17 @@ export function respuestaAlEncabezado(r: ResolucionEncabezado | null, texto = ''
  * (o el código, que es otro encabezado), «NUEVO nombre» o DESCARTAR.
  */
 export function textoPreguntaEncabezado(texto: string, candidatos: ReadonlyArray<ViajeAbierto>): string {
+  // Todos del mismo cliente («Mauricio Moreno» con 5 viajes abiertos, D1): la pregunta es si va en uno de esos o
+  // es un viaje nuevo. La lista numerada solo con 4 o más, y acepta también el nombre del viaje.
+  const mismo = unSoloCliente(candidatos);
+  if (mismo) {
+    const nombre = nombrePropio(mismo);
+    const viaje = (v: ViajeAbierto) => nombreDeViaje({ nombre: v.nombre, codigo: v.codigo }) || nombreDeViaje(v);
+    return candidatos.length >= 4
+      ? [`${nombre} tiene ${candidatos.length} viajes abiertos. ¿Va en uno de esos o es un viaje nuevo?`,
+        ...candidatos.map((v, i) => `${i + 1}. ${viaje(v)}`)].join('\n')
+      : `${nombre} tiene ${candidatos.length} viajes abiertos: ${enumerar(candidatos.map(viaje))}. ¿Va en uno de esos o es un viaje nuevo?`;
+  }
   return [
     `¿De qué viaje es «${String(texto).trim()}»?`,
     ...candidatos.map((v, i) => `${i + 1}. ${lineaCaja(v)}`),
@@ -410,11 +444,15 @@ export function lineaCaja(v: ViajeAbierto): string {
 }
 
 /** Lo que el bot pide en el acto tras un «nuevo» sin nombre o un «otro cliente» (como N9). */
-export const TEXTO_PIDE_NOMBRE_NUEVO = '¿Cómo se llama el cliente nuevo? Escríbeme su nombre, o DESCARTAR. Hasta entonces no asigno lo que sigue.';
+/**
+ * Lo que el bot pide en el acto tras «nuevo viaje» sin cliente o un «otro cliente» (D1, 2026-10-05): ya no
+ * «¿cómo se llama el cliente nuevo?», que daba por hecho que el cliente era nuevo.
+ */
+export const TEXTO_PIDE_NOMBRE_NUEVO = TEXTO_PIDE_CLIENTE;
 
-/** Tras «nuevo» con algo que no es un nombre (solo números: «nuevo 3005551234»): el bot pide el nombre. */
+/** Tras «nuevo» con algo que no es un nombre ni una llave («nuevo 123»): el bot pregunta de quién es. */
 export function textoPideNombreEnDuda(propuesto: string): string {
-  return `¿Cómo se llama el cliente nuevo? Con «${String(propuesto).trim().slice(0, 40)}» no lo creo: escríbeme su nombre, o DESCARTAR. Hasta entonces no asigno lo que sigue.`;
+  return `¿Para qué cliente es el viaje nuevo? «${String(propuesto).trim().slice(0, 40)}» no es un nombre ni un celular.`;
 }
 
 // ── Cliente nuevo: nada se crea sin un «sí» ─────────────────────────────────
@@ -479,11 +517,20 @@ function referenciaDe(v: ViajeAbierto, numero: number | null): string {
  * parece al cliente de un viaje abierto, lo dice y cómo pasarse a ese viaje.
  */
 export function textoAcuseNuevo(nombre: string, parecidos: ReadonlyArray<ViajeAbierto> = [], conContenido = false): string {
+  // Sin el directorio a la vista (el bot lo consulta al responder: `wa-cliente.ts`), el acuse no dice si ya es cliente.
+  return [`Va como viaje nuevo de ${String(nombre).trim()}${conContenido ? '; ya anoté lo que dijiste' : ''}. Antes del resumen reviso si ya es cliente.`,
+    ...lineasDeParecidos(parecidos)].join('\n');
+}
+
+/**
+ * «Ya hay un viaje de Lina Pérez (L1 26 1): si es para ese, escribe L1 26 1.»: los viajes abiertos cuyo cliente se
+ * parece al nombre del viaje nuevo, para que el comercial vea si quería uno de esos (cuarto control de Vera).
+ */
+export function lineasDeParecidos(parecidos: ReadonlyArray<ViajeAbierto>): string[] {
   const ps = parecidos.slice(0, MAX_PARECIDOS);
-  const l = [`📌 Cliente nuevo: ${String(nombre).trim()}${conContenido ? ' · anotado' : ''}. Lo creo solo cuando respondas SÍ al resumen.`];
-  if (ps.length === 1) l.push(`Ya hay un viaje de ${clienteYCodigo(ps[0])}. Si es para ese, escribe ${referenciaDe(ps[0], null)}.`);
-  else if (ps.length > 1) l.push(`Ya hay viajes de ${enumerar(ps.map(clienteYCodigo))}. Si es para uno de esos, escribe su código.`);
-  return l.join('\n');
+  if (ps.length === 1) return [`Ya hay un viaje de ${clienteYCodigo(ps[0])}: si es para ese, escribe ${referenciaDe(ps[0], null)}.`];
+  if (ps.length > 1) return [`Ya hay viajes de ${enumerar(ps.map(clienteYCodigo))}: si es para uno de esos, escribe su código.`];
+  return [];
 }
 
 /**
@@ -498,10 +545,21 @@ export function textoConfirmarNuevo(p: {
   parecidos?: ReadonlyArray<{ viaje: ViajeAbierto; numero: number | null }>;
   conLista: boolean;
   aviso?: string | null;
+  /** Lo que dijo el directorio de ese nombre (diseño 2026-10-05): si ya es cliente, o qué falta para crearlo. */
+  cliente?: string | null;
 }): string {
   const nombre = String(p.nombre).trim().slice(0, 60);
   const ps = (p.parecidos ?? []).slice(0, MAX_PARECIDOS);
   const l: string[] = p.aviso ? [p.aviso] : [];
+  if (p.cliente) {
+    // Con el directorio, la pregunta es por el VIAJE nuevo y el cliente se muestra como es. Si el nombre se parece
+    // al cliente de un viaje abierto, se dice cómo ir a ese viaje.
+    l.push(`¿Va como viaje nuevo de ${nombre}? ${p.cliente}`);
+    if (ps.length === 1) l.push(`Ya hay un viaje de ${clienteYCodigo(ps[0].viaje)}: si es para ese, responde ${referenciaDe(ps[0].viaje, ps[0].numero)}.`);
+    else if (ps.length > 1) l.push(`Ya hay viajes de ${enumerar(ps.map(x => clienteYCodigo(x.viaje)))}: si es para uno de esos, responde ${enumerar(ps.map(x => referenciaDe(x.viaje, x.numero)), 'o')}.`);
+    l.push(`Responde sí, o el ${p.conLista ? 'número' : 'código'} del viaje si es uno que ya existe. No he creado ni cargado nada.`);
+    return l.join('\n');
+  }
   if (ps.length === 0) {
     l.push(`¿Creo el cliente nuevo «${nombre}»? Responde SÍ, o escribe el nombre correcto, o el ${p.conLista ? 'número' : 'código'} del viaje.`);
   } else {
@@ -897,7 +955,8 @@ export function pareceRespuesta(texto: string): boolean {
   // «nueva cotización con hotel 4 estrellas»: empieza como un «nuevo», así que contesta la pregunta
   // (no es contenido de la tanda), aunque su nombre pase el tope y la respuesta no se entienda: el bot
   // vuelve a preguntar con la lista y no crea a nadie.
-  if (leerNuevo(bruto)) return true;
+  // «Nueva solicitud: tiquetes y hotel para diciembre» tampoco es un nombre, pero sí la forma de una respuesta.
+  if (leerNuevo(bruto) || leerViajeNuevo(bruto) === null) return true;
   // Un celular solo («300 555 1234»): un texto con fechas y edades también junta 10 dígitos.
   if (/^\+?[\d\s().-]{7,}$/.test(bruto)) return true;
   const t = normalizarTexto(bruto).replace(/^[¡!¿?.,;:\s]+/, '');
@@ -924,8 +983,10 @@ export function esRespuestaA(espera: 'viaje' | 'nombre' | 'resumen' | 'otra', te
   if (!bruto) return false;
   if (espera === 'viaje' || espera === 'nombre') return pareceRespuesta(bruto);
   if (esSiNoCorto(bruto) || leerEleccion(bruto) !== null) return true;
+  // La llave escrita sola contesta el resumen que la espera (2026-10-05: sin llave no se crea el cliente nuevo).
+  if (espera === 'resumen' && soloLlave(bruto)) return true;
   if (espera === 'otra') {
-    return /^\+?[\d\s().-]{7,}$/.test(bruto) || /^(nuev[oa]|crear|crearlo)$/.test(normalizarTexto(bruto).replace(/[.!]+$/, ''));
+    return /^\+?[\d\s().-]{7,}$/.test(bruto) || soloLlave(bruto) !== null || /^(nuev[oa]|crear|crearlo)$/.test(normalizarTexto(bruto).replace(/[.!]+$/, ''));
   }
   const t = normalizarTexto(bruto).replace(/^[¡!¿?.,;:\s]+/, '').replace(/[.!]+$/, '');
   if (/^(corregir|corrijo|cambiar)$/.test(t)) return true;
@@ -962,6 +1023,82 @@ export interface Segmento {
   eleccion?: { viaje: ViajeAbierto; n: number } | null;
   /** Solo con «nuevo» sin nombre: el nombre que escribió después el comercial. `null` = todavía no llega. */
   nombre?: { texto: string; n: number } | null;
+  /** Solo en la caja de un viaje nuevo: lo que el comercial dijo de su cliente (la llave, cuál es, si es otra persona). */
+  cliente?: EstadoCliente;
+}
+
+/**
+ * Lo que se sabe del cliente de un viaje nuevo por lo que escribió el comercial en su caja (diseño 2026-10-05,
+ * §3.3). Quién es se resuelve contra el directorio (`clienteDeLaCaja`); aquí solo lo dicho.
+ */
+export interface EstadoCliente {
+  /** La llave del encabezado o la que escribió sola en la caja («300 555 1234», «ana@x.co», «@laurapc»). */
+  llave: Llave | null;
+  /** El contacto que eligió entre los parecidos, o el dueño de la llave que confirmó («sí, es ella»). */
+  elegido: FichaCliente | null;
+  /** «Es otra persona» a los parecidos: el nombre ya no busca, falta la llave. */
+  otraPersona: boolean;
+  /** Los dueños de una llave que dijo que NO son (el bot nunca crea con esa llave). */
+  descartadas: string[];
+}
+
+function estadoClienteInicial(llave: Llave | null | undefined = null): EstadoCliente {
+  return { llave: llave ?? null, elegido: null, otraPersona: false, descartadas: [] };
+}
+
+/** El nombre del cliente de un viaje nuevo: el del encabezado o el que escribió después. `null`: no lo ha dicho. */
+export function nombreDelViajeNuevo(seg: Segmento): string | null {
+  const r = seg.encabezado?.resolucion;
+  return r?.tipo === 'nuevo' ? (r.cliente ?? seg.nombre?.texto ?? null) : null;
+}
+
+/**
+ * ¿Quién es el cliente del viaje nuevo de esta caja? Con el directorio, la resolución (§3.2); el contacto que
+ * eligió el comercial gana siempre. `null`: la caja no es de un viaje nuevo, todavía no hay nombre ni llave, o
+ * no hay directorio (sin él, el cliente se resuelve al crear).
+ */
+export function clienteDeLaCaja(seg: Segmento, dir?: Directorio | null): ResolucionCliente | null {
+  if (seg.encabezado?.resolucion.tipo !== 'nuevo') return null;
+  const ec = seg.cliente ?? estadoClienteInicial();
+  const nombre = nombreDelViajeNuevo(seg);
+  if (ec.elegido) return { tipo: 'existente', ficha: ec.elegido, por: 'eleccion', nombre, llave: ec.llave };
+  if (!dir || (!nombre && !tieneLlave(ec.llave))) return null;
+  return resolverConDirectorio(dir, { nombre, llave: ec.llave, descartadas: ec.descartadas, otraPersona: ec.otraPersona });
+}
+
+/** El cliente de las cajas (con viaje existente o nuevo), para heredarlo en «es para uno nuevo». */
+export function clienteDeCaja(seg: Segmento): string | null {
+  const v = viajeDeLaCaja(seg);
+  if (v) return v.cliente;
+  if (seg.encabezado?.resolucion.tipo === 'nuevo') return seg.cliente?.elegido?.nombre ?? nombreDelViajeNuevo(seg);
+  return null;
+}
+
+/** ¿Todos los candidatos de la lista son del MISMO cliente? Devuelve su nombre («Mauricio Moreno tiene 5 viajes abiertos»). */
+export function unSoloCliente(candidatos: ReadonlyArray<ViajeAbierto>): string | null {
+  if (candidatos.length < 2) return null;
+  const n = normalizarNombre(candidatos[0].cliente);
+  return n && candidatos.every(v => normalizarNombre(v.cliente) === n) ? candidatos[0].cliente : null;
+}
+
+/** «nuevo», «uno nuevo», «es nuevo», «ninguno, es otro», «otro viaje»: la respuesta que pide un viaje NUEVO a «¿Va en uno de esos?». */
+export function pideViajeNuevo(texto: string): boolean {
+  const nv = leerNuevo(texto);
+  if (nv && !nv.cliente) return true;
+  const t = normalizarNombre(texto);
+  return /^(?:no\s+)?(?:(?:a\s+|en\s+)?ningun[oa]?|es\s+otr[oa]|otr[oa])(?:\s+(?:de\s+esos|de\s+esas))?(?:\s+(?:es\s+)?(?:otr[oa]|nuev[oa]|uno\s+nuevo|una\s+nueva|viaje\s+nuevo|otro\s+viaje))*$/.test(t);
+}
+
+/**
+ * «el de Miami», «el de Armenia», «el M1 26 3»: el ÚNICO candidato cuyo nombre, destino o código tiene todas las
+ * palabras que quedan sin el relleno. `null` si no queda uno solo.
+ */
+export function candidatoNombrado(texto: string, candidatos: ReadonlyArray<ViajeAbierto>): ViajeAbierto | null {
+  const ws = palabrasDe(texto).filter(w => !RELLENO_SENALA.has(w) && !DEICTICOS.has(w) && !RELLENO.has(w));
+  if (ws.length === 0) return null;
+  const del = (v: ViajeAbierto) => new Set(palabrasDe(`${v.nombre ?? ''} ${v.destino ?? ''} ${v.codigo ?? ''}`));
+  const cuales = candidatos.filter(v => { const d = del(v); return ws.every(w => d.has(w)); });
+  return cuales.length === 1 ? cuales[0] : null;
 }
 
 /** ¿La caja tiene un viaje? Un encabezado exacto, o uno aproximado o ambiguo con el viaje elegido de la lista. */
@@ -989,13 +1126,33 @@ export function esRespuestaSuelta(texto: string): boolean {
 export function armarSegmentos(
   mensajes: ReadonlyArray<MensajeViaje>,
   viajes: ReadonlyArray<ViajeAbierto>,
-  cfg: { horasCajaActiva: number; equipo?: ReadonlyArray<string> },
+  cfg: {
+    horasCajaActiva: number; equipo?: ReadonlyArray<string>;
+    /**
+     * Lo que dijo la base de los nombres y llaves de la tanda (`wa-cliente.ts`). Con él, la caja de un viaje
+     * nuevo lee en el acto las respuestas a «¿Cuál es?» y «¿Es la misma persona?». Sin él, solo las llaves.
+     */
+    directorio?: Directorio | null;
+  },
 ): { segmentos: Segmento[]; encabezados: number[] } {
   const equipo = cfg.equipo ?? [];
+  const dir = cfg.directorio ?? null;
   const segmentos: Segmento[] = [];
   const encabezados: number[] = [];
-  let caja: { seg: Segmento; desde: number } | null = null;
-  let suelto: Segmento | null = null;
+  let caja = null as { seg: Segmento; desde: number } | null;
+  let suelto = null as Segmento | null;
+  const abrirCaja = (m: MensajeViaje, t: number, resolucion: ResolucionEncabezado, conContenido = false): void => {
+    const seg: Segmento = {
+      origen: 'encabezado', encabezado: { n: m.n, texto: m.cuerpo.trim(), resolucion }, mensajes: conContenido ? [m.n] : [],
+      ...(resolucion.tipo === 'aproximado' || resolucion.tipo === 'ambiguo' ? { eleccion: null } : {}),
+      ...(resolucion.tipo === 'nuevo' && !resolucion.cliente ? { nombre: null } : {}),
+      ...(resolucion.tipo === 'nuevo' ? { cliente: estadoClienteInicial(resolucion.llave) } : {}),
+    };
+    if (!conContenido) encabezados.push(m.n);
+    segmentos.push(seg);
+    caja = { seg, desde: t };
+    suelto = null;
+  };
   for (const m of [...mensajes].sort((a, b) => a.n - b.n)) {
     const t = Date.parse(m.en);
     const escrito = !m.reenviado && m.tipo === 'text';
@@ -1004,16 +1161,8 @@ export function armarSegmentos(
     const ip = escrito ? decisionDelInterprete(m, viajes, caja?.seg ?? null) : null;
     if (ip) {
       if (ip.tipo === 'caja') {
-        const seg: Segmento = {
-          origen: 'encabezado', encabezado: { n: m.n, texto: m.cuerpo.trim(), resolucion: ip.resolucion }, mensajes: ip.conContenido ? [m.n] : [],
-          ...(ip.resolucion.tipo === 'aproximado' || ip.resolucion.tipo === 'ambiguo' ? { eleccion: null } : {}),
-          ...(ip.resolucion.tipo === 'nuevo' && !ip.resolucion.cliente ? { nombre: null } : {}),
-        };
         // El encabezado que también es contenido no va en `encabezados`: es un mensaje de su caja.
-        if (!ip.conContenido) encabezados.push(m.n);
-        segmentos.push(seg);
-        caja = { seg, desde: t };
-        suelto = null;
+        abrirCaja(m, t, ip.resolucion, ip.conContenido);
         continue;
       }
       if (ip.tipo === 'eleccion') {
@@ -1039,14 +1188,31 @@ export function armarSegmentos(
       suelto.mensajes.push(m.n);
       continue;
     }
+    const actual = caja as { seg: Segmento; desde: number } | null;
     // La elección de la lista numerada del encabezado (Trappvel, 2026-10-02): la primera, y solo
     // dentro de su caja. Un sí, un no o un número fuera de la lista no la contestan y tampoco son
     // contenido; otro encabezado (un código, «nuevo X») abre su propia caja.
-    const candidatos = caja && caja.seg.eleccion === null ? candidatosDelEncabezado(caja.seg.encabezado?.resolucion) : [];
-    if (escrito && candidatos.length > 0) {
+    const candidatos = actual && actual.seg.eleccion === null ? candidatosDelEncabezado(actual.seg.encabezado?.resolucion) : [];
+    if (escrito && actual && candidatos.length > 0) {
       const k = leerEleccion(m.cuerpo);
       if (k !== null && k >= 1 && k <= candidatos.length) {
-        caja!.seg.eleccion = { viaje: candidatos[k - 1], n: m.n };
+        actual.seg.eleccion = { viaje: candidatos[k - 1], n: m.n };
+        encabezados.push(m.n);
+        continue;
+      }
+      // «Mauricio Moreno» con 5 viajes abiertos (diseño 2026-10-05, D1): «nuevo», «uno nuevo» o «ninguno, es
+      // otro» es un viaje NUEVO de ese cliente; «el de Miami» es ese viaje.
+      const mismo = actual.seg.encabezado?.resolucion.tipo === 'ambiguo' ? unSoloCliente(candidatos) : null;
+      if (mismo && pideViajeNuevo(m.cuerpo)) {
+        actual.seg.encabezado!.resolucion = { tipo: 'nuevo', cliente: nombrePropio(mismo), mismo: true };
+        delete actual.seg.eleccion;
+        actual.seg.cliente = estadoClienteInicial();
+        encabezados.push(m.n);
+        continue;
+      }
+      const senalado = mismo ? candidatoNombrado(m.cuerpo, candidatos) : null;
+      if (senalado) {
+        actual.seg.eleccion = { viaje: senalado, n: m.n };
         encabezados.push(m.n);
         continue;
       }
@@ -1055,35 +1221,88 @@ export function armarSegmentos(
         continue;
       }
     }
-    // El nombre tras un «nuevo» suelto (QA de #971 v6): el primer escrito que no es otro encabezado.
-    if (escrito && caja && caja.seg.nombre === null && resolverEncabezado(m.cuerpo, viajes, equipo) === null) {
-      const nombre = esNombreNuevo(m.cuerpo, equipo);
-      if (nombre) {
-        caja.seg.nombre = { texto: nombre, n: m.n };
+    // La caja de un viaje nuevo espera algo de su cliente (diseño 2026-10-05, §3.3): la llave escrita sola es
+    // siempre la llave, nunca contenido; con el directorio, «el de Miami» o «es otra persona» contestan «¿Cuál
+    // es?», y «sí, es ella» o «no» contestan «¿Es la misma persona?».
+    if (escrito && actual && actual.seg.cliente) {
+      const ec = actual.seg.cliente;
+      const k = soloLlave(m.cuerpo);
+      if (k) {
+        ec.llave = k;
+        ec.elegido = null;
         encabezados.push(m.n);
         continue;
       }
-      if (esRespuestaSuelta(m.cuerpo)) {
-        encabezados.push(m.n);
-        continue;
+      const rc = actual.seg.nombre === null && !tieneLlave(ec.llave) ? null : clienteDeLaCaja(actual.seg, dir);
+      if (rc?.tipo === 'elegir') {
+        const e = leerEleccionCliente(m.cuerpo, rc.opciones);
+        if (e) {
+          if (e.tipo === 'ficha') ec.elegido = e.ficha;
+          else ec.otraPersona = true;
+          encabezados.push(m.n);
+          continue;
+        }
+      }
+      if (rc?.tipo === 'llave_de_otro') {
+        const s = leerEsLaMisma(m.cuerpo);
+        if (s === 'si') ec.elegido = rc.ficha;
+        if (s === 'no') {
+          ec.descartadas.push(rc.ficha.id);
+          ec.llave = null;
+        }
+        if (s) {
+          encabezados.push(m.n);
+          continue;
+        }
+      }
+    }
+    // El nombre tras un «nuevo» suelto (QA de #971 v6): el primer escrito que no es otro encabezado. Tras
+    // «¿Para qué cliente es?», el nombre de un cliente con viajes abiertos es el cliente del viaje NUEVO, no un
+    // encabezado de uno de sus viajes (la prueba de Mauricio del 2026-10-05, turno 2): solo un código o un
+    // «nuevo X» abren otra caja.
+    const necesitaNombre = !!actual && actual.seg.nombre === null
+      && (!tieneLlave(actual.seg.cliente?.llave) || !dir || clienteDeLaCaja(actual.seg, dir)?.tipo === 'sin_nombre');
+    if (escrito && actual && necesitaNombre) {
+      const r = resolverEncabezado(m.cuerpo, viajes, equipo);
+      const otro = !!r && ((r.tipo === 'nuevo' && (!!r.cliente || !!r.llave)) || r.tipo === 'codigo_desconocido' || (r.tipo === 'viaje' && r.por === 'codigo'));
+      if (!otro) {
+        const { nombre: sinLlave, llave } = separarNombreYLlave(m.cuerpo);
+        const nombre = esNombreNuevo(llave ? sinLlave : m.cuerpo, equipo);
+        if (nombre) {
+          actual.seg.nombre = { texto: nombre, n: m.n };
+          if (llave && actual.seg.cliente) actual.seg.cliente.llave = llave;
+          encabezados.push(m.n);
+          continue;
+        }
+        if (esRespuestaSuelta(m.cuerpo)) {
+          encabezados.push(m.n);
+          continue;
+        }
       }
     }
     const res = escrito ? (resolverEncabezado(m.cuerpo, viajes, equipo) ?? (pareceEncabezado(m.cuerpo, viajes, equipo) ? { tipo: 'no_reconocido' } as ResolucionEncabezado : null)) : null;
     if (res) {
-      encabezados.push(m.n);
-      const seg: Segmento = {
-        origen: 'encabezado', encabezado: { n: m.n, texto: m.cuerpo.trim(), resolucion: res }, mensajes: [],
-        ...(res.tipo === 'aproximado' || res.tipo === 'ambiguo' ? { eleccion: null } : {}),
-        ...(res.tipo === 'nuevo' && !res.cliente ? { nombre: null } : {}),
-      };
-      segmentos.push(seg);
-      caja = { seg, desde: t };
-      suelto = null;
+      // «es para uno nuevo», «una cotización nueva sobre un cliente antiguo»: el cliente es el de la caja que
+      // estaba abierta (D1, turnos 4 y 5 de la prueba de Mauricio). En la caja de un viaje nuevo, nada cambia; en
+      // la de un viaje que ya existe, se vuelve un viaje NUEVO de su cliente.
+      const vigente = actual && !(t - actual.desde > cfg.horasCajaActiva * 3600_000) ? actual : null;
+      if (res.tipo === 'nuevo' && res.mismo && !res.cliente && !res.llave && vigente) {
+        const quien = clienteDeCaja(vigente.seg);
+        if (quien && vigente.seg.encabezado?.resolucion.tipo === 'nuevo') {
+          encabezados.push(m.n);
+          continue;
+        }
+        if (quien) {
+          abrirCaja(m, t, { tipo: 'nuevo', cliente: nombrePropio(quien), mismo: true });
+          continue;
+        }
+      }
+      abrirCaja(m, t, res);
       continue;
     }
     if (!m.cuerpo.trim()) continue; // un sticker o una foto sin pie no es contenido
-    if (caja && !(t - caja.desde > cfg.horasCajaActiva * 3600_000)) {
-      caja.seg.mensajes.push(m.n);
+    if (actual && !(t - actual.desde > cfg.horasCajaActiva * 3600_000)) {
+      actual.seg.mensajes.push(m.n);
       continue;
     }
     caja = null;
@@ -1091,7 +1310,7 @@ export function armarSegmentos(
       suelto = { origen: 'sin_encabezado', encabezado: null, mensajes: [] };
       segmentos.push(suelto);
     }
-    suelto.mensajes.push(m.n);
+    (suelto as Segmento).mensajes.push(m.n);
   }
   return { segmentos, encabezados };
 }
@@ -1114,7 +1333,10 @@ function decisionDelInterprete(m: MensajeViaje, viajes: ReadonlyArray<ViajeAbier
   switch (ip.accion) {
     case 'abrir_viaje':
       if (viaje) return { tipo: 'caja', resolucion: { tipo: 'viaje', viaje, por: 'nombre' }, conContenido };
-      if (!ip.viaje_id) return { tipo: 'caja', resolucion: { tipo: 'nuevo', cliente: ip.nuevo?.trim() || null }, conContenido };
+      if (!ip.viaje_id) {
+        const llave = tieneLlave(ip.llave) ? { llave: ip.llave } : {};
+        return { tipo: 'caja', resolucion: { tipo: 'nuevo', cliente: ip.nuevo?.trim() || null, ...llave }, conContenido };
+      }
       return null;
     case 'preguntar_viaje': {
       const cands = (ip.candidatos ?? []).map(id => viajes.find(v => v.id === id)).filter((v): v is ViajeAbierto => !!v);
@@ -1138,19 +1360,28 @@ function decisionDelInterprete(m: MensajeViaje, viajes: ReadonlyArray<ViajeAbier
 /** Lo que espera la caja abierta en el acto. `conContenido`: ya entró contenido después de la pregunta. */
 export type PendienteDeLaCaja =
   | { tipo: 'eleccion'; texto: string; candidatos: ViajeAbierto[]; conContenido: boolean }
-  | { tipo: 'nombre'; conContenido: boolean };
+  | { tipo: 'nombre'; conContenido: boolean }
+  /**
+   * El cliente de un viaje nuevo: falta la llave, elegir entre parecidos o confirmar al dueño de la llave (con el
+   * directorio). También `listo`: ya se sabe quién es (para el acuse de la respuesta que lo resolvió).
+   */
+  | { tipo: 'cliente'; resolucion: ResolucionCliente; nombre: string | null; conContenido: boolean };
 
 /**
  * Lo que espera la última caja: la elección de la lista numerada de un encabezado aproximado o
  * ambiguo, o el nombre de un «nuevo» suelto / «otro cliente». `null`: nada.
  */
-export function pendienteDeLaCaja(segmentos: ReadonlyArray<Segmento>): PendienteDeLaCaja | null {
+export function pendienteDeLaCaja(segmentos: ReadonlyArray<Segmento>, dir?: Directorio | null): PendienteDeLaCaja | null {
   const ultimo = segmentos[segmentos.length - 1];
   const r = ultimo?.encabezado?.resolucion;
   const conContenido = (ultimo?.mensajes.length ?? 0) > 0;
   const candidatos = candidatosDelEncabezado(r);
   if (candidatos.length > 0 && ultimo.eleccion === null) return { tipo: 'eleccion', texto: ultimo.encabezado!.texto, candidatos, conContenido };
-  if (r?.tipo === 'nuevo' && ultimo.nombre === null) return { tipo: 'nombre', conContenido };
+  if (r?.tipo === 'nuevo' && ultimo.nombre === null && !tieneLlave(ultimo.cliente?.llave)) return { tipo: 'nombre', conContenido };
+  const rc = ultimo ? clienteDeLaCaja(ultimo, dir) : null;
+  if (rc && (rc.tipo === 'pedir_llave' || rc.tipo === 'elegir' || rc.tipo === 'llave_de_otro' || rc.tipo === 'sin_nombre' || rc.tipo === 'error')) {
+    return { tipo: 'cliente', resolucion: rc, nombre: nombreDelViajeNuevo(ultimo), conContenido };
+  }
   return null;
 }
 
@@ -1163,7 +1394,7 @@ export function nombresDeLasCajas(segmentos: ReadonlyArray<Segmento>): string[] 
     const r = sg.encabezado?.resolucion;
     const v = viajeDeLaCaja(sg);
     if (v) return [nombreDeViaje(v)];
-    if (r?.tipo === 'nuevo') return [r.cliente ?? sg.nombre?.texto ?? null].filter((x): x is string => !!x);
+    if (r?.tipo === 'nuevo') return [sg.cliente?.elegido ? nombrePropio(sg.cliente.elegido.nombre) : (r.cliente ?? sg.nombre?.texto ?? null)].filter((x): x is string => !!x);
     return [];
   });
   // «Daniel Pérez» y «daniel perez» son el mismo: se queda el primero como se escribió.
@@ -1208,10 +1439,123 @@ export function pareceEncabezado(texto: string, viajes: ReadonlyArray<ViajeAbier
 /** A dónde va un mensaje. */
 export type DestinoPlan =
   | { tipo: 'existente'; negocio_id: string; codigo: string | null; cliente: string | null; nombre?: string | null }
-  | { tipo: 'nuevo'; cliente: string | null };
+  | DestinoNuevo;
+
+/**
+ * Un viaje NUEVO (diseño 2026-10-05: «nuevo» es viaje nuevo). Su cliente se resuelve contra el directorio al
+ * armar el resumen (`resolverClientesDelPlan`) y el «sí» del resumen confirma lo que muestra:
+ *   · `contacto`: el cliente ya existe (por la llave, por el nombre idéntico y único, o porque el comercial lo
+ *     eligió); se muestra con sus 4 dígitos y sus viajes;
+ *   · `llave` sin `contacto` ni `falta`: cliente nuevo; se crea con el «sí», con esa llave;
+ *   · `falta`: lo que hay que saber antes del «sí» (la llave, cuál de los parecidos, si es el dueño de la llave,
+ *     el nombre, o la búsqueda falló). Con algo que falta, el «sí» no carga.
+ * Sin ninguno de los tres: no se resolvió (sin directorio); el cliente se resuelve al crear.
+ */
+export interface DestinoNuevo {
+  tipo: 'nuevo';
+  cliente: string | null;
+  contacto?: FichaCliente | null;
+  llave?: Llave | null;
+  falta?: FaltaCliente | null;
+  /** Con `falta: elegir`, los parecidos; con `falta: confirmar`, el dueño de la llave. */
+  opciones?: FichaCliente[];
+  /** Lo que dijo el comercial (en la caja o al resumen), para volver a resolver. */
+  elegido?: FichaCliente | null;
+  otraPersona?: boolean;
+  descartadas?: string[];
+  /** Ya pasó por el directorio (`resolverClientesDelPlan`): lo que muestra el resumen es lo que dijo la base. */
+  resuelto?: boolean;
+}
+
+export type FaltaCliente = 'llave' | 'elegir' | 'confirmar' | 'nombre' | 'error';
 
 export function claveDestino(d: DestinoPlan): string {
-  return d.tipo === 'existente' ? `e:${d.negocio_id}` : `n:${normalizarNombre(d.cliente)}`;
+  if (d.tipo === 'existente') return `e:${d.negocio_id}`;
+  return d.contacto ? `c:${d.contacto.id}` : `n:${normalizarNombre(d.cliente)}`;
+}
+
+/** ¿El viaje nuevo ya pasó por el directorio? (Una llave dada no basta: hay que buscarla.) */
+export function clienteResuelto(d: DestinoNuevo): boolean {
+  return d.resuelto === true;
+}
+
+/** El destino de un viaje nuevo con lo que dijo el directorio (`ResolucionCliente`). */
+export function destinoConResolucion(d: DestinoNuevo, r: ResolucionCliente): DestinoNuevo {
+  const base: DestinoNuevo = {
+    tipo: 'nuevo', cliente: d.cliente, resuelto: true,
+    ...(tieneLlave(d.llave) ? { llave: d.llave } : {}),
+    ...(d.elegido ? { elegido: d.elegido } : {}),
+    ...(d.otraPersona ? { otraPersona: true } : {}),
+    ...(d.descartadas?.length ? { descartadas: [...d.descartadas] } : {}),
+  };
+  switch (r.tipo) {
+    case 'existente': return { ...base, cliente: d.cliente ?? nombrePropio(r.ficha.nombre), contacto: r.ficha };
+    case 'nuevo': return { ...base, llave: r.llave };
+    case 'pedir_llave': return { ...base, falta: 'llave' };
+    case 'elegir': return { ...base, falta: 'elegir', opciones: r.opciones };
+    case 'llave_de_otro': return { ...base, falta: 'confirmar', opciones: [r.ficha] };
+    case 'sin_nombre': return { ...base, falta: 'nombre' };
+    case 'error': return { ...base, falta: 'error' };
+  }
+}
+
+/**
+ * Resuelve el cliente de cada viaje nuevo del plan con el directorio (`wa-cliente.ts` lo arma antes). Los que ya
+ * están resueltos no se tocan; un contacto elegido por el comercial gana. Devuelve un plan nuevo.
+ */
+export function resolverClientesDelPlan(plan: PlanViajes, dir: Directorio): PlanViajes {
+  const hechos = new Map<string, DestinoNuevo>();
+  const mensajes = plan.mensajes.map(m => {
+    const d = m.destino;
+    if (!d || d.tipo !== 'nuevo' || clienteResuelto(d)) return { ...m };
+    const k = `${normalizarNombre(d.cliente)}|${d.elegido?.id ?? ''}|${d.otraPersona ? 1 : 0}|${(d.descartadas ?? []).join(',')}`;
+    if (!hechos.has(k)) {
+      const r: ResolucionCliente = d.elegido
+        ? { tipo: 'existente', ficha: d.elegido, por: 'eleccion', nombre: d.cliente, llave: d.llave ?? null }
+        : resolverConDirectorio(dir, { nombre: d.cliente, llave: d.llave, descartadas: d.descartadas, otraPersona: d.otraPersona });
+      hechos.set(k, destinoConResolucion(d, r));
+    }
+    return { ...m, destino: hechos.get(k)! };
+  });
+  return { ...plan, mensajes };
+}
+
+/** Los viajes nuevos del plan a los que les falta algo de su cliente, en orden (el primero se pregunta). */
+export function clientesPorResolver(plan: PlanViajes): Array<{ k: number; destino: DestinoNuevo }> {
+  return gruposDelPlan(plan).filter(g => g.destino.tipo === 'nuevo' && !!g.destino.falta)
+    .map(g => ({ k: g.k, destino: g.destino as DestinoNuevo }));
+}
+
+/** La pregunta de lo que falta del cliente de un viaje nuevo (una sola, arriba; §3.3). */
+export function textoFaltaCliente(d: DestinoNuevo): string {
+  const nombre = d.cliente ? nombrePropio(d.cliente) : 'este cliente';
+  switch (d.falta) {
+    case 'llave': return `¿Me pasas el celular o el correo de ${nombre}? Sin uno de los dos no lo creo (también vale su usuario de WhatsApp o Instagram).`;
+    case 'elegir': {
+      const ops = d.opciones ?? [];
+      return ops.length === 1
+        ? `¿${nombre} es ${nombrePropio(ops[0].nombre)} (${datoDeLaFicha(ops[0])}, ${viajesDeLaFicha(ops[0])}), o es otra persona?`
+        : `¿Cuál ${nombre} es: ${ops.map((f, i) => `${['el primero', 'el segundo', 'el tercero', 'el cuarto', 'el quinto'][i]}, ${datoDeLaFicha(f)} (${viajesDeLaFicha(f)})`).join('; ')}? ¿O es otra persona?`;
+    }
+    case 'confirmar': {
+      const f = d.opciones?.[0];
+      return `El ${d.llave?.celular ? 'celular' : d.llave?.correo ? 'correo' : 'usuario'} que me diste ya es de ${f ? nombrePropio(f.nombre) : 'otro contacto'}. ¿Es la misma persona?`;
+    }
+    case 'nombre': return `¿Cómo se llama el cliente con ${textoLlave(d.llave)}?`;
+    case 'error': return 'No pude revisar el directorio de clientes y no creo a nadie sin revisarlo. Responde sí en un momento y lo intento de nuevo.';
+    default: return '';
+  }
+}
+
+/** El viaje nuevo de una caja, con lo que el comercial dijo de su cliente (se resuelve después, con el directorio). */
+function destinoNuevoDeLaCaja(nombre: string | null, ec: EstadoCliente | undefined): DestinoNuevo {
+  return {
+    tipo: 'nuevo', cliente: nombre ?? (ec?.elegido ? nombrePropio(ec.elegido.nombre) : null),
+    ...(tieneLlave(ec?.llave) ? { llave: ec!.llave } : {}),
+    ...(ec?.elegido ? { elegido: ec.elegido } : {}),
+    ...(ec?.otraPersona ? { otraPersona: true } : {}),
+    ...(ec?.descartadas?.length ? { descartadas: [...ec.descartadas] } : {}),
+  };
 }
 
 function destinoDeViaje(v: ViajeAbierto): DestinoPlan {
@@ -1416,8 +1760,9 @@ export function armarPlan(p: {
     }
     const deLaCaja = viajeDeLaCaja(seg);
     const nombreNuevo = res?.tipo === 'nuevo' ? (res.cliente ?? seg.nombre?.texto ?? null) : null;
+    const ec = seg.cliente;
     const caja: DestinoPlan | null = deLaCaja ? destinoDeViaje(deLaCaja)
-      : res?.tipo === 'nuevo' && nombreNuevo ? { tipo: 'nuevo', cliente: nombreNuevo } : null;
+      : res?.tipo === 'nuevo' && (nombreNuevo || ec?.elegido || tieneLlave(ec?.llave)) ? destinoNuevoDeLaCaja(nombreNuevo, ec) : null;
     const nombreCaja = caja?.cliente ?? 'ese viaje';
     const vistos = { fechas: new Set<string>(), adultos: new Set<number>() };
     let tras = false;
@@ -1435,11 +1780,16 @@ export function armarPlan(p: {
       // con Lina Pérez abierta) no es otro viaje. Para ese mensaje, un viaje cuenta como nombrado solo
       // con TODAS las palabras de su cliente (la regla de #986). Hoy ese caso no existe.
       const suEncabezado = seg.encabezado?.n === n;
+      // En la caja de un viaje NUEVO de un cliente que ya tiene viajes abiertos (D1), nombrarlo no es hablar de
+      // «otro viaje»: es el mismo cliente.
+      const delMismoCliente = (d: DestinoPlan) => caja?.tipo === 'nuevo' && d.tipo === 'existente' && !!caja.cliente
+        && normalizarNombre(d.cliente) === normalizarNombre(caja.cliente);
       const nombrados = viajesNombrados(m.cuerpo, destinosConocidos, p.viajes)
-        .filter(d => !suEncabezado || palabrasDe(d.cliente).every(w => palabrasDe(m.cuerpo).includes(w)));
+        .filter(d => !suEncabezado || palabrasDe(d.cliente).every(w => palabrasDe(m.cuerpo).includes(w)))
+        .filter(d => !delMismoCliente(d));
       if (!caja) {
         const motivo = !seg.encabezado ? 'llegó sin encabezado'
-          : res?.tipo === 'nuevo' ? `«${seg.encabezado.texto}» sin nombre: no me dijiste cómo se llama el cliente nuevo`
+          : res?.tipo === 'nuevo' ? `«${seg.encabezado.texto}»: no me dijiste para qué cliente es`
           : res?.tipo === 'aproximado' ? `«${seg.encabezado.texto}» puede ser ${lineaCaja(res.viaje)} y no elegiste`
           : `el encabezado «${seg.encabezado.texto}» no se pudo resolver`;
         plan.mensajes.push({ n, destino: null, por: null, motivo, ...(nombrados.length >= 2 ? { varios: true } : {}) });
@@ -1518,7 +1868,17 @@ export function planSinDudas(plan: PlanViajes): boolean {
 
 /** Un destino del plan como se le muestra al comercial: «Cliente nuevo: Laura» o «Europa 2 días · Carolina Ruiz (M1 26 5)». */
 export function nombreDestino(d: DestinoPlan): string {
-  return d.tipo === 'nuevo' ? `Cliente nuevo: ${d.cliente ?? '(sin nombre)'}` : nombreDeViaje(d);
+  if (d.tipo !== 'nuevo') return nombreDeViaje(d);
+  // El «sí» confirma lo que se muestra: el contacto que ya existe con su dato, o el cliente nuevo con su llave.
+  if (d.contacto) return `Viaje nuevo de ${nombrePropio(d.contacto.nombre)} (ya es cliente: ${datoDeLaFicha(d.contacto)}, ${viajesDeLaFicha(d.contacto)})`;
+  const quien = d.cliente ? String(d.cliente).trim() : 'un cliente sin nombre';
+  if (d.falta === 'llave') return `Viaje nuevo de ${quien} (no lo tengo en el directorio: falta su celular o correo)`;
+  if (d.falta === 'elegir') return `Viaje nuevo de ${quien} (hay ${(d.opciones ?? []).length === 1 ? 'un contacto parecido' : 'varios contactos parecidos'}: dime cuál)`;
+  if (d.falta === 'confirmar') return `Viaje nuevo de ${quien} (${textoLlave(d.llave)}, que ya es de ${nombrePropio(d.opciones?.[0]?.nombre ?? 'otro contacto')})`;
+  if (d.falta === 'nombre') return `Viaje nuevo de un cliente sin nombre (${textoLlave(d.llave)})`;
+  if (d.falta === 'error') return `Viaje nuevo de ${quien} (no pude revisar el directorio)`;
+  if (tieneLlave(d.llave)) return d.resuelto ? `Viaje nuevo de ${quien} (cliente nuevo, ${textoLlave(d.llave)})` : `Viaje nuevo de ${quien} (${textoLlave(d.llave)})`;
+  return `Viaje nuevo de ${quien}`;
 }
 
 /**
@@ -1599,10 +1959,13 @@ export function partesResumenPlan(
     lineas.push(...g.mensajes.map(n2 => `${linea(n2, largo)}${plan.mensajes.find(x => x.n === n2)?.sospecha ? ' ⚠' : ''}`));
   }
   for (const g of grupos) {
-    if (g.destino.tipo !== 'nuevo') continue;
+    // Un cliente ya resuelto contra el directorio se muestra tal cual (arriba); el aviso de parecidos queda para
+    // el que no pasó por él.
+    if (g.destino.tipo !== 'nuevo' || g.destino.contacto) continue;
     const parecidos = viajesParecidos(g.destino.cliente, viajes);
     if (parecidos.length > 0) lineas.push(avisoParecidosDelGrupo(g.k, g.mensajes.map(visible), parecidos));
   }
+  const faltan = clientesPorResolver(plan);
   if (porDecidir.length > 0) {
     lineas.push(`⚠ Para decidir antes del sí: ${porDecidir.length} ${porDecidir.length === 1 ? 'mensaje' : 'mensajes'}`);
     lineas.push(...porDecidir.map(m => `${linea(m.n, 40)} (${m.motivo ?? 'sin viaje'})`));
@@ -1612,7 +1975,9 @@ export function partesResumenPlan(
   lineas.push(...plan.avisos);
   // Los ejemplos usan un número que está en el resumen (error 8: «el 4» salía con un solo mensaje).
   const k = porDecidir.length > 0 ? visible(porDecidir[0].n) : Math.max(1, ...plan.mensajes.map(m => visible(m.n)));
-  lineas.push(porDecidir.length > 0
+  lineas.push(faltan.length > 0 && porDecidir.length === 0
+    ? `No cargué nada todavía. Antes del sí: ${textoFaltaCliente(faltan[0].destino)}`
+    : porDecidir.length > 0
     ? `No cargué nada todavía. Para cada uno: «dejar el ${k}» (o «dejar todos»), «el ${k} es de Luisa» / «el ${k} es del 2» / «el ${k} es nuevo Pedro» para moverlo, o «descartar el ${k}». Después, SÍ. DESCARTAR descarta todo.`
     : `No cargué nada todavía. Revisa que cada mensaje esté en su viaje. ¿Así? Responde SÍ, o corrige: «el ${k} es de Luisa», «descartar el ${k}». DESCARTAR descarta todo.`);
 
@@ -1658,8 +2023,43 @@ export function esSi(texto: string): boolean {
 
 export type Cambio = { ns: number[]; a: DestinoPlan | 'descartar' | 'dejar' };
 
+/** Lo que el comercial dijo del cliente de un viaje nuevo al resumen. */
+export interface CambioCliente {
+  llave?: Llave;
+  elegido?: FichaCliente;
+  otraPersona?: boolean;
+  /** «No es la misma persona»: el dueño de la llave que NO es. La llave se va con él. */
+  descartar?: string;
+  nombre?: string;
+}
+
+/**
+ * Aplica al plan lo que el comercial dijo del cliente de un viaje nuevo (`clave`: la de su destino). El destino
+ * queda SIN resolver: quien llama lo vuelve a resolver con el directorio (`resolverClientesDelPlan`).
+ */
+export function aplicarCambioCliente(plan: PlanViajes, clave: string, c: CambioCliente): PlanViajes {
+  const mensajes = plan.mensajes.map(m => {
+    const d = m.destino;
+    if (!d || d.tipo !== 'nuevo' || claveDestino(d) !== clave) return { ...m };
+    const cambiaQuien = !!(c.llave || c.otraPersona || c.descartar || c.nombre);
+    const llave = c.llave ?? (c.descartar ? null : d.llave ?? null);
+    const elegido = c.elegido ?? (cambiaQuien ? null : d.elegido ?? null);
+    const descartadas = [...(d.descartadas ?? []), ...(c.descartar ? [c.descartar] : [])];
+    const nuevo: DestinoNuevo = {
+      tipo: 'nuevo', cliente: c.nombre ?? d.cliente,
+      ...(tieneLlave(llave) ? { llave } : {}),
+      ...(elegido ? { elegido } : {}),
+      ...(c.otraPersona || d.otraPersona ? { otraPersona: true } : {}),
+      ...(descartadas.length ? { descartadas } : {}),
+    };
+    return { ...m, destino: nuevo };
+  });
+  return { ...plan, mensajes };
+}
+
 export type RespuestaPlan =
   | { tipo: 'si' }
+  | { tipo: 'cliente'; clave: string; cambio: CambioCliente }
   | { tipo: 'descartar_todo' }
   | { tipo: 'corregir'; cambios: Cambio[] }
   | { tipo: 'como_corregir' }
@@ -1730,7 +2130,32 @@ export function interpretarRespuestaPlan(texto: string, plan: PlanViajes, viajes
       const ns = porDecidir.map(m => visible(m.n));
       return { tipo: 'no_entendida', aviso: `Antes del sí, decide ${ns.length === 1 ? 'el' : 'los'} ${rangos(ns)}: «dejar el ${ns[0]}», «el ${ns[0]} es de …» o «descartar el ${ns[0]}».` };
     }
+    // Un viaje nuevo al que le falta algo de su cliente (la llave, cuál es, si es el dueño de la llave): el «sí»
+    // no lo crea (decisión de Mauricio del 2026-10-05: sin llave no se crea).
+    const falta = clientesPorResolver(plan)[0];
+    if (falta) return { tipo: 'no_entendida', aviso: `Antes del sí: ${textoFaltaCliente(falta.destino)}` };
     return { tipo: 'si' };
+  }
+  // La respuesta a lo que falta del cliente de un viaje nuevo: la llave escrita sola, cuál de los parecidos, o si
+  // es el dueño de la llave. Va antes que «no» (corregir): con «¿Es la misma persona?» pendiente, «no» es «no es».
+  const falta = clientesPorResolver(plan)[0];
+  if (falta) {
+    const clave = claveDestino(falta.destino);
+    const llave = soloLlave(bruto);
+    if (llave) return { tipo: 'cliente', clave, cambio: { llave } };
+    if (falta.destino.falta === 'elegir') {
+      const e = leerEleccionCliente(bruto, falta.destino.opciones ?? []);
+      if (e) return { tipo: 'cliente', clave, cambio: e.tipo === 'ficha' ? { elegido: e.ficha } : { otraPersona: true } };
+    }
+    if (falta.destino.falta === 'confirmar' && falta.destino.opciones?.[0]) {
+      const r = leerEsLaMisma(bruto);
+      if (r === 'si') return { tipo: 'cliente', clave, cambio: { elegido: falta.destino.opciones[0] } };
+      if (r === 'no') return { tipo: 'cliente', clave, cambio: { descartar: falta.destino.opciones[0].id } };
+    }
+    if (falta.destino.falta === 'nombre') {
+      const nombre = esNombreNuevo(bruto);
+      if (nombre) return { tipo: 'cliente', clave, cambio: { nombre } };
+    }
   }
   const t = normalizarTexto(bruto).replace(/[.!¡¿?]+$/g, '').trim();
   if (/^(descartar|descartar todo|descartalo todo|descarta todo|borrar todo)$/.test(t)) return { tipo: 'descartar_todo' };

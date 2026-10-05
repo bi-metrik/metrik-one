@@ -45,8 +45,8 @@ describe('regla 2 · «nuevo» en cualquier forma', () => {
     expect(resolverEncabezado(texto, [LINA, LUISA])).toMatchObject({ tipo: 'nuevo', cliente });
     // No es candidato del viaje de la otra persona; el acuse dice que se parece (2026-10-03) y que se crea con el «sí».
     const acuse = respuestaAlEncabezado(resolverEncabezado(texto, [LINA, LUISA]))!;
-    expect(acuse.split('\n')[0]).toBe(`📌 Cliente nuevo: ${cliente}. Lo creo solo cuando respondas SÍ al resumen.`);
-    expect(acuse.split('\n')[1]).toBe(/p[eé]rez/i.test(cliente) ? 'Ya hay un viaje de Lina Pérez (L1 26 1). Si es para ese, escribe L1 26 1.' : 'Ya hay un viaje de Luisa Gómez (L 26 4). Si es para ese, escribe L 26 4.');
+    expect(acuse.split('\n')[0]).toBe(`Va como viaje nuevo de ${cliente}. Antes del resumen reviso si ya es cliente.`);
+    expect(acuse.split('\n')[1]).toBe(/p[eé]rez/i.test(cliente) ? 'Ya hay un viaje de Lina Pérez (L1 26 1): si es para ese, escribe L1 26 1.' : 'Ya hay un viaje de Luisa Gómez (L 26 4): si es para ese, escribe L 26 4.');
   });
 
   it.each(['otro cliente', 'Otra clienta', 'otro cliente.', 'cambio de cliente', 'cliente nuevo', 'nuevo cliente', 'nueva', 'es otro cliente'])(

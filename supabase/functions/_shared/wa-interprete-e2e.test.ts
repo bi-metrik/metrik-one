@@ -1,4 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { rpcDelDirectorio } from './__fixtures__/directorio-doble.ts';
 
 /**
  * De punta a punta con la base en memoria de `wa-bandeja-vivo.test.ts` (copiada tal cual: emula
@@ -146,6 +147,8 @@ function crearDb(t: Tablas) {
       }
       return { data: filas, error: null };
     }
+    const delDirectorio = rpcDelDirectorio(t, nombre, a);
+    if (delDirectorio) return delDirectorio;
     if (nombre !== 'wa_bandeja_registrar_mensaje') throw new Error(`rpc no esperado: ${nombre}`);
     const ahora = new Date().toISOString();
     const dup = t.wa_bandeja_mensajes.find(m => m.wa_message_id === a.p_wa_message_id);
@@ -236,7 +239,7 @@ function base(): Tablas {
     negocios: VIAJES.map(v => v.n), negocio_responsables: [], negocio_bloques: VIAJES.map(v => v.b), activity_log: [],
     wa_bandeja_entregas: [], wa_bandeja_mensajes: [], wa_bandeja_entendimientos: [],
     etapas_negocio: [{ id: 'et-solicitud', linea_id: LINEA, orden: 1, stage: 'venta' }],
-    bloque_configs: [BLOQUE_CONFIG], contactos: [], staff_areas: [], bot_sessions: [], wa_message_log: [], wa_envios: [],
+    bloque_configs: [BLOQUE_CONFIG], contactos: [], empresas: [], staff_areas: [], bot_sessions: [], wa_message_log: [], wa_envios: [],
   };
 }
 

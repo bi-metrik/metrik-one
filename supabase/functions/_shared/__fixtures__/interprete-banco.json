@@ -1,5 +1,5 @@
 {
- "nota": "Banco de la simulación del 2026-10-02 (escenarios.json, 45 turnos). Sintético: los clientes y negocios son inventados; el nombre del equipo se cambió por «Vale». `modelo` es lo que devuelve el modelo falso: la primera corrida de gemini-2.5-flash que acertó, convertida al esquema nuevo (viaje_* → ref), o a mano donde ninguna acertó. Cambios de expectativa: TV5 descarta la tanda (H2, caso 2) y H2 descarta solo la pregunta (H2, caso 1). Sexto control de Vera (2026-10-04): 11 turnos NC1–NC11 de «¿Creo el cliente nuevo «X»?» con textos inventados; los que lee exacto el código de hoy (el atajo) no llegan al modelo y su `esperado` es lo que hace el código de hoy.",
+ "nota": "Banco de la simulación del 2026-10-02 (escenarios.json, 45 turnos). Sintético: los clientes y negocios son inventados; el nombre del equipo se cambió por «Vale». `modelo` es lo que devuelve el modelo falso: la primera corrida de gemini-2.5-flash que acertó, convertida al esquema nuevo (viaje_* → ref), o a mano donde ninguna acertó. Cambios de expectativa: TV5 descarta la tanda (H2, caso 2) y H2 descarta solo la pregunta (H2, caso 1). Sexto control de Vera (2026-10-04): 11 turnos NC1–NC11 de «¿Creo el cliente nuevo «X»?» con textos inventados; los que lee exacto el código de hoy (el atajo) no llegan al modelo y su `esperado` es lo que hace el código de hoy. · 2026-10-05: +32 turnos de identidad (ID1–ID32, PR A del diseño de cliente y conversación): «nuevo» es un viaje nuevo, el candidato pendiente (`tanda_cliente`) y lo que espera la caja de un viaje nuevo (`pide_llave`, `confirma_llave`). Los que el código lee exactos no llegan al modelo.",
  "contextos": {
   "trappvel": {
    "viajes": [
@@ -1692,6 +1692,667 @@
    "origen_modelo": "a mano (sexto control de Vera)",
    "esperado": {
     "accion": "pedir_aclaracion"
+   }
+  },
+  {
+   "id": "ID1",
+   "turno": 1,
+   "cliente": "trappvel",
+   "texto": "Bueno, vamos a registrar un viaje nuevo",
+   "reenviado": false,
+   "pendiente": null,
+   "pendiente_previo": null,
+   "tanda": false,
+   "control": true,
+   "modelo": null,
+   "origen_modelo": "atajo: lo lee el código de hoy, no llega al modelo",
+   "esperado": {
+    "accion": "pedir_nombre"
+   }
+  },
+  {
+   "id": "ID2",
+   "turno": 1,
+   "cliente": "trappvel",
+   "texto": "el cliente es Jorge Pérez",
+   "reenviado": false,
+   "pendiente": null,
+   "pendiente_previo": "pide_nombre",
+   "tanda": false,
+   "control": true,
+   "modelo": null,
+   "origen_modelo": "atajo: lo lee el código de hoy, no llega al modelo",
+   "esperado": {
+    "accion": "abrir_viaje",
+    "nuevo": "jorge perez"
+   }
+  },
+  {
+   "id": "ID3",
+   "turno": 1,
+   "cliente": "trappvel",
+   "texto": "nuevo Jorge Pérez",
+   "reenviado": false,
+   "pendiente": null,
+   "pendiente_previo": null,
+   "tanda": false,
+   "control": true,
+   "modelo": null,
+   "origen_modelo": "atajo: lo lee el código de hoy, no llega al modelo",
+   "esperado": {
+    "accion": "abrir_viaje",
+    "nuevo": "jorge perez"
+   }
+  },
+  {
+   "id": "ID4",
+   "turno": 1,
+   "cliente": "trappvel",
+   "texto": "No. Es para uno nuevo",
+   "reenviado": false,
+   "pendiente": null,
+   "pendiente_previo": null,
+   "tanda": true,
+   "tanda_cliente": "JORGE PÉREZ",
+   "control": true,
+   "modelo": null,
+   "origen_modelo": "atajo: lo lee el código de hoy, no llega al modelo",
+   "esperado": {
+    "accion": "abrir_viaje",
+    "nuevo": "jorge perez"
+   }
+  },
+  {
+   "id": "ID5",
+   "turno": 1,
+   "cliente": "trappvel",
+   "texto": "No es un cliente nuevo, es una cotización nueva sobre un cliente antiguo",
+   "reenviado": false,
+   "pendiente": null,
+   "pendiente_previo": null,
+   "tanda": true,
+   "tanda_cliente": "JORGE PÉREZ",
+   "control": true,
+   "modelo": null,
+   "origen_modelo": "atajo: lo lee el código de hoy, no llega al modelo",
+   "esperado": {
+    "accion": "abrir_viaje",
+    "nuevo": "jorge perez"
+   }
+  },
+  {
+   "id": "ID6",
+   "turno": 1,
+   "cliente": "trappvel",
+   "texto": "ya es cliente, ábrele otra cotización",
+   "reenviado": false,
+   "pendiente": null,
+   "pendiente_previo": null,
+   "tanda": true,
+   "tanda_cliente": "JORGE PÉREZ",
+   "control": false,
+   "modelo": {
+    "acciones": [
+     {
+      "accion": "abrir_viaje",
+      "evidencia": "ábrele otra cotización",
+      "nuevo_sin_nombre": true,
+      "cliente_existente": true
+     }
+    ]
+   },
+   "origen_modelo": "a mano (2026-10-05): lo que propondría el modelo con el prompt nuevo",
+   "esperado": {
+    "accion": "abrir_viaje",
+    "nuevo": "jorge perez"
+   }
+  },
+  {
+   "id": "ID7",
+   "turno": 1,
+   "cliente": "trappvel",
+   "texto": "Jorge Pérez quiere otro viaje, esta vez a Cancún en mayo",
+   "reenviado": false,
+   "pendiente": null,
+   "pendiente_previo": null,
+   "tanda": false,
+   "control": false,
+   "modelo": {
+    "acciones": [
+     {
+      "accion": "abrir_viaje",
+      "evidencia": "Jorge Pérez quiere otro viaje",
+      "nuevo_cliente": "Jorge Pérez"
+     },
+     {
+      "accion": "contenido",
+      "evidencia": "esta vez a Cancún en mayo"
+     }
+    ]
+   },
+   "origen_modelo": "a mano (2026-10-05): lo que propondría el modelo con el prompt nuevo",
+   "esperado": {
+    "accion": "abrir_viaje",
+    "nuevo": "jorge perez",
+    "con_contenido": true
+   }
+  },
+  {
+   "id": "ID8",
+   "turno": 1,
+   "cliente": "trappvel",
+   "texto": "ábrele otro viaje a Lina Pérez",
+   "reenviado": false,
+   "pendiente": null,
+   "pendiente_previo": null,
+   "tanda": false,
+   "control": false,
+   "modelo": {
+    "acciones": [
+     {
+      "accion": "abrir_viaje",
+      "evidencia": "ábrele otro viaje a Lina Pérez",
+      "nuevo_cliente": "Lina Pérez"
+     }
+    ]
+   },
+   "origen_modelo": "a mano (2026-10-05): lo que propondría el modelo con el prompt nuevo",
+   "esperado": {
+    "accion": "abrir_viaje",
+    "nuevo": "lina perez"
+   }
+  },
+  {
+   "id": "ID9",
+   "turno": 1,
+   "cliente": "trappvel",
+   "texto": "nuevo viaje para Rosa Mejía",
+   "reenviado": false,
+   "pendiente": null,
+   "pendiente_previo": null,
+   "tanda": false,
+   "control": false,
+   "modelo": null,
+   "origen_modelo": "atajo: lo lee el código de hoy, no llega al modelo",
+   "esperado": {
+    "accion": "abrir_viaje",
+    "nuevo": "rosa mejia"
+   }
+  },
+  {
+   "id": "ID10",
+   "turno": 1,
+   "cliente": "trappvel",
+   "texto": "la señora Rosa Mejía ya viajó con nosotros, quiere otro viaje a Santa Marta",
+   "reenviado": false,
+   "pendiente": null,
+   "pendiente_previo": null,
+   "tanda": false,
+   "control": false,
+   "modelo": {
+    "acciones": [
+     {
+      "accion": "abrir_viaje",
+      "evidencia": "Rosa Mejía ya viajó con nosotros, quiere otro viaje",
+      "nuevo_cliente": "Rosa Mejía",
+      "cliente_existente": true
+     },
+     {
+      "accion": "contenido",
+      "evidencia": "quiere otro viaje a Santa Marta"
+     }
+    ]
+   },
+   "origen_modelo": "a mano (2026-10-05): lo que propondría el modelo con el prompt nuevo",
+   "esperado": {
+    "accion": "abrir_viaje",
+    "nuevo": "rosa mejia",
+    "con_contenido": true
+   }
+  },
+  {
+   "id": "ID11",
+   "turno": 1,
+   "cliente": "trappvel",
+   "texto": "cliente nuevo: Carolina Ruiz",
+   "reenviado": false,
+   "pendiente": null,
+   "pendiente_previo": null,
+   "tanda": false,
+   "control": false,
+   "modelo": null,
+   "origen_modelo": "atajo: lo lee el código de hoy, no llega al modelo",
+   "esperado": {
+    "accion": "abrir_viaje",
+    "nuevo": "carolina ruiz"
+   }
+  },
+  {
+   "id": "ID12",
+   "turno": 1,
+   "cliente": "trappvel",
+   "texto": "nueva clienta Paola Rincón 300 555 1234",
+   "reenviado": false,
+   "pendiente": null,
+   "pendiente_previo": null,
+   "tanda": false,
+   "control": false,
+   "modelo": null,
+   "origen_modelo": "atajo: lo lee el código de hoy, no llega al modelo",
+   "esperado": {
+    "accion": "abrir_viaje",
+    "nuevo": "paola rincon"
+   }
+  },
+  {
+   "id": "ID13",
+   "turno": 1,
+   "cliente": "trappvel",
+   "texto": "nuevo Tomás Gil tomas.gil@correo.co",
+   "reenviado": false,
+   "pendiente": null,
+   "pendiente_previo": null,
+   "tanda": false,
+   "control": false,
+   "modelo": null,
+   "origen_modelo": "atajo: lo lee el código de hoy, no llega al modelo",
+   "esperado": {
+    "accion": "abrir_viaje",
+    "nuevo": "tomas gil"
+   }
+  },
+  {
+   "id": "ID14",
+   "turno": 1,
+   "cliente": "trappvel",
+   "texto": "nueva cotización para Andrés Gómez",
+   "reenviado": false,
+   "pendiente": null,
+   "pendiente_previo": null,
+   "tanda": false,
+   "control": false,
+   "modelo": null,
+   "origen_modelo": "atajo: lo lee el código de hoy, no llega al modelo",
+   "esperado": {
+    "accion": "abrir_viaje",
+    "nuevo": "andres gomez"
+   }
+  },
+  {
+   "id": "ID15",
+   "turno": 1,
+   "cliente": "trappvel",
+   "texto": "nuevo viaje para Lina",
+   "reenviado": false,
+   "pendiente": null,
+   "pendiente_previo": null,
+   "tanda": false,
+   "control": false,
+   "modelo": null,
+   "origen_modelo": "atajo: lo lee el código de hoy, no llega al modelo",
+   "esperado": {
+    "accion": "abrir_viaje",
+    "nuevo": "lina"
+   }
+  },
+  {
+   "id": "ID16",
+   "turno": 1,
+   "cliente": "trappvel",
+   "texto": "es para la hermana de Lina Pérez, otro viaje",
+   "reenviado": false,
+   "pendiente": null,
+   "pendiente_previo": null,
+   "tanda": false,
+   "control": false,
+   "modelo": {
+    "acciones": [
+     {
+      "accion": "abrir_viaje",
+      "evidencia": "es para la hermana de Lina Pérez, otro viaje",
+      "nuevo_cliente": "hermana de Lina Pérez"
+     }
+    ]
+   },
+   "origen_modelo": "a mano (2026-10-05): lo que propondría el modelo con el prompt nuevo",
+   "esperado": {
+    "sin": [
+     "viaje"
+    ]
+   },
+   "nota": "«la hermana de …» no es un viaje de Lina Pérez: abrir un viaje nuevo con ese nombre o preguntar para quién es valen; cargarlo en el de Lina, no."
+  },
+  {
+   "id": "ID17",
+   "turno": 1,
+   "cliente": "trappvel",
+   "texto": "nueva cotización para el Colegio Los Arrayanes",
+   "reenviado": false,
+   "pendiente": null,
+   "pendiente_previo": null,
+   "tanda": false,
+   "control": false,
+   "modelo": null,
+   "origen_modelo": "atajo: lo lee el código de hoy, no llega al modelo",
+   "esperado": {
+    "accion": "abrir_viaje",
+    "nuevo": "colegio los arrayanes"
+   }
+  },
+  {
+   "id": "ID18",
+   "turno": 1,
+   "cliente": "trappvel",
+   "texto": "es una cotización nueva para la misma clienta",
+   "reenviado": false,
+   "pendiente": null,
+   "pendiente_previo": null,
+   "tanda": true,
+   "tanda_cliente": "LINA PÉREZ",
+   "control": false,
+   "modelo": null,
+   "origen_modelo": "atajo: lo lee el código de hoy, no llega al modelo",
+   "esperado": {
+    "accion": "abrir_viaje",
+    "nuevo": "lina perez"
+   }
+  },
+  {
+   "id": "ID19",
+   "turno": 1,
+   "cliente": "trappvel",
+   "texto": "ese mismo cliente pero otro viaje",
+   "reenviado": false,
+   "pendiente": null,
+   "pendiente_previo": null,
+   "tanda": true,
+   "tanda_cliente": "JORGE PÉREZ",
+   "control": false,
+   "modelo": null,
+   "origen_modelo": "atajo: lo lee el código de hoy, no llega al modelo",
+   "esperado": {
+    "accion": "abrir_viaje",
+    "nuevo": "jorge perez"
+   }
+  },
+  {
+   "id": "ID20",
+   "turno": 1,
+   "cliente": "trappvel",
+   "texto": "mejor no, es para el viaje de Carolina",
+   "reenviado": false,
+   "pendiente": null,
+   "pendiente_previo": null,
+   "tanda": true,
+   "tanda_cliente": "JORGE PÉREZ",
+   "control": false,
+   "modelo": {
+    "acciones": [
+     {
+      "accion": "abrir_viaje",
+      "evidencia": "es para el viaje de Carolina",
+      "ref_cliente": "Carolina"
+     }
+    ]
+   },
+   "origen_modelo": "a mano (2026-10-05): lo que propondría el modelo con el prompt nuevo",
+   "esperado": {
+    "accion": "abrir_viaje",
+    "viaje": "n11"
+   }
+  },
+  {
+   "id": "ID21",
+   "turno": 1,
+   "cliente": "trappvel",
+   "texto": "no tengo el celular todavía",
+   "reenviado": false,
+   "pendiente": null,
+   "pendiente_previo": "pide_llave",
+   "tanda": false,
+   "control": false,
+   "modelo": {
+    "acciones": [
+     {
+      "accion": "responder",
+      "evidencia": "no tengo el celular todavía"
+     }
+    ]
+   },
+   "origen_modelo": "a mano (2026-10-05): lo que propondría el modelo con el prompt nuevo",
+   "esperado": {
+    "accion": "pedir_aclaracion"
+   }
+  },
+  {
+   "id": "ID22",
+   "turno": 1,
+   "cliente": "trappvel",
+   "texto": "300 555 1234",
+   "reenviado": false,
+   "pendiente": null,
+   "pendiente_previo": "pide_llave",
+   "tanda": false,
+   "control": false,
+   "modelo": null,
+   "origen_modelo": "atajo: lo lee el código de hoy, no llega al modelo",
+   "esperado": {
+    "accion": "responder",
+    "opcion": "llave"
+   }
+  },
+  {
+   "id": "ID23",
+   "turno": 1,
+   "cliente": "trappvel",
+   "texto": "su correo es ana.gomez@correo.co",
+   "reenviado": false,
+   "pendiente": null,
+   "pendiente_previo": "pide_llave",
+   "tanda": false,
+   "control": false,
+   "modelo": null,
+   "origen_modelo": "atajo: lo lee el código de hoy, no llega al modelo",
+   "esperado": {
+    "accion": "responder",
+    "opcion": "llave"
+   }
+  },
+  {
+   "id": "ID24",
+   "turno": 1,
+   "cliente": "trappvel",
+   "texto": "sí, es ella",
+   "reenviado": false,
+   "pendiente": null,
+   "pendiente_previo": "confirma_llave",
+   "tanda": false,
+   "control": false,
+   "modelo": null,
+   "origen_modelo": "atajo: lo lee el código de hoy, no llega al modelo",
+   "esperado": {
+    "accion": "responder",
+    "opcion": "si"
+   }
+  },
+  {
+   "id": "ID25",
+   "turno": 1,
+   "cliente": "trappvel",
+   "texto": "no, son dos personas distintas",
+   "reenviado": false,
+   "pendiente": null,
+   "pendiente_previo": "confirma_llave",
+   "tanda": false,
+   "control": false,
+   "modelo": null,
+   "origen_modelo": "atajo: lo lee el código de hoy, no llega al modelo",
+   "esperado": {
+    "accion": "responder",
+    "opcion": "no"
+   }
+  },
+  {
+   "id": "ID26",
+   "turno": 1,
+   "cliente": "trappvel",
+   "texto": "otra cotización para Carolina Ruiz, ahora a Europa",
+   "reenviado": false,
+   "pendiente": null,
+   "pendiente_previo": null,
+   "tanda": false,
+   "control": false,
+   "modelo": {
+    "acciones": [
+     {
+      "accion": "abrir_viaje",
+      "evidencia": "otra cotización para Carolina Ruiz",
+      "nuevo_cliente": "Carolina Ruiz"
+     },
+     {
+      "accion": "contenido",
+      "evidencia": "ahora a Europa"
+     }
+    ]
+   },
+   "origen_modelo": "a mano (2026-10-05): lo que propondría el modelo con el prompt nuevo",
+   "esperado": {
+    "accion": "abrir_viaje",
+    "nuevo": "carolina ruiz",
+    "con_contenido": true
+   }
+  },
+  {
+   "id": "ID27",
+   "turno": 1,
+   "cliente": "trappvel",
+   "texto": "Luisa Mejía otra vez, nuevo viaje a Bariloche",
+   "reenviado": false,
+   "pendiente": null,
+   "pendiente_previo": null,
+   "tanda": false,
+   "control": false,
+   "modelo": {
+    "acciones": [
+     {
+      "accion": "abrir_viaje",
+      "evidencia": "Luisa Mejía otra vez, nuevo viaje",
+      "nuevo_cliente": "Luisa Mejía"
+     },
+     {
+      "accion": "contenido",
+      "evidencia": "nuevo viaje a Bariloche"
+     }
+    ]
+   },
+   "origen_modelo": "a mano (2026-10-05): lo que propondría el modelo con el prompt nuevo",
+   "esperado": {
+    "accion": "abrir_viaje",
+    "nuevo": "luisa mejia",
+    "con_contenido": true
+   }
+  },
+  {
+   "id": "ID28",
+   "turno": 1,
+   "cliente": "trappvel",
+   "texto": "viaje nuevo, el cliente es Andrés Gómez",
+   "reenviado": false,
+   "pendiente": null,
+   "pendiente_previo": null,
+   "tanda": false,
+   "control": false,
+   "modelo": null,
+   "origen_modelo": "atajo: lo lee el código de hoy, no llega al modelo",
+   "esperado": {
+    "accion": "abrir_viaje",
+    "nuevo": "andres gomez"
+   }
+  },
+  {
+   "id": "ID29",
+   "turno": 1,
+   "cliente": "trappvel",
+   "texto": "es otro viaje de Jorge, no el de Madrid",
+   "reenviado": false,
+   "pendiente": null,
+   "pendiente_previo": null,
+   "tanda": false,
+   "control": false,
+   "modelo": {
+    "acciones": [
+     {
+      "accion": "abrir_viaje",
+      "evidencia": "es otro viaje de Jorge",
+      "nuevo_cliente": "Jorge"
+     }
+    ]
+   },
+   "origen_modelo": "a mano (2026-10-05): lo que propondría el modelo con el prompt nuevo",
+   "esperado": {
+    "accion": "abrir_viaje",
+    "nuevo": "jorge"
+   }
+  },
+  {
+   "id": "ID30",
+   "turno": 1,
+   "cliente": "trappvel",
+   "texto": "un nuevo viaje para la señora Luisa Mejía",
+   "reenviado": false,
+   "pendiente": null,
+   "pendiente_previo": null,
+   "tanda": false,
+   "control": false,
+   "modelo": null,
+   "origen_modelo": "atajo: lo lee el código de hoy, no llega al modelo",
+   "esperado": {
+    "accion": "abrir_viaje",
+    "nuevo": "luisa mejia"
+   }
+  },
+  {
+   "id": "ID31",
+   "turno": 1,
+   "cliente": "trappvel",
+   "texto": "otra cotización",
+   "reenviado": false,
+   "pendiente": null,
+   "pendiente_previo": null,
+   "tanda": true,
+   "tanda_cliente": "LINA PÉREZ",
+   "control": false,
+   "modelo": null,
+   "origen_modelo": "atajo: lo lee el código de hoy, no llega al modelo",
+   "esperado": {
+    "accion": "pedir_nombre"
+   }
+  },
+  {
+   "id": "ID32",
+   "turno": 1,
+   "cliente": "trappvel",
+   "texto": "el mismo cliente de antes, ábrele una cotización nueva",
+   "reenviado": false,
+   "pendiente": null,
+   "pendiente_previo": null,
+   "tanda": true,
+   "tanda_cliente": "LINA PÉREZ",
+   "control": false,
+   "modelo": {
+    "acciones": [
+     {
+      "accion": "abrir_viaje",
+      "evidencia": "ábrele una cotización nueva",
+      "nuevo_sin_nombre": true,
+      "cliente_existente": true
+     }
+    ]
+   },
+   "origen_modelo": "a mano (2026-10-05): lo que propondría el modelo con el prompt nuevo",
+   "esperado": {
+    "accion": "abrir_viaje",
+    "nuevo": "lina perez"
    }
   }
  ]

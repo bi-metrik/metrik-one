@@ -82,7 +82,9 @@ describe('las cuatro entradas leen lo mismo', () => {
     expect(interpretarRespuestaNegocio('cliente nuevo', OPS)).toEqual({ tipo: 'nuevo', cliente: null });
     expect(interpretarRespuestaNegocio('nuevo 3005551234', OPS)).toEqual({ tipo: 'nuevo_en_duda', propuesto: '3005551234' });
     expect(interpretarRespuestaNegocio('nueva cotización con hotel 4 estrellas', OPS)).toEqual({ tipo: 'no_entendida' });
-    expect(resolverEncabezado('nuevo 3005551234', [PEDRO])).toEqual({ tipo: 'nuevo', cliente: null, en_duda: '3005551234' });
+    // 2026-10-05: un número solo después de «nuevo» es la LLAVE del cliente (se busca con ella), no un nombre en duda.
+    expect(resolverEncabezado('nuevo 3005551234', [PEDRO])).toEqual({ tipo: 'nuevo', cliente: null, llave: { celular: '3005551234' } });
+    expect(resolverEncabezado('nuevo 123', [PEDRO])).toEqual({ tipo: 'nuevo', cliente: null, en_duda: '123' });
     expect(resolverEncabezado('nueva cotización con hotel 4 estrellas', [PEDRO])).toBeNull();
     expect(interpretarRespuestaPlan('el 2 es de nuevo grupo de amigos del colegio de Ignacio', armarPlan({ mensajes: [], viajes: [], segmentos: [], encabezados: [] }), [])).toMatchObject({ tipo: 'no_entendida' });
   });
@@ -111,8 +113,8 @@ describe('clientes con viaje abierto: la confirmación lo dice (también en el a
 
   it('el acuse del encabezado y el resumen del reparto', () => {
     expect(respuestaAlEncabezado(resolverEncabezado('nueva Rosalba Tovar', [ROSALBA, PEDRO]))).toBe(
-      '📌 Cliente nuevo: Rosalba Tovar. Lo creo solo cuando respondas SÍ al resumen.\nYa hay un viaje de Rosalba Quiñones Tovar (R 26 1). Si es para ese, escribe R 26 1.');
-    expect(textoAcuseNuevo('combo playero')).toBe('📌 Cliente nuevo: combo playero. Lo creo solo cuando respondas SÍ al resumen.');
+      'Va como viaje nuevo de Rosalba Tovar. Antes del resumen reviso si ya es cliente.\nYa hay un viaje de Rosalba Quiñones Tovar (R 26 1): si es para ese, escribe R 26 1.');
+    expect(textoAcuseNuevo('combo playero')).toBe('Va como viaje nuevo de combo playero. Antes del resumen reviso si ya es cliente.');
     const ms: MensajeViaje[] = [
       { n: 1, cuerpo: 'nueva Rosalba Tovar', reenviado: false, tipo: 'text', en: '2026-10-03T10:00:00Z' },
       { n: 2, cuerpo: 'Queremos ir a Cartagena', reenviado: true, tipo: 'text', en: '2026-10-03T10:00:05Z' },
@@ -121,7 +123,7 @@ describe('clientes con viaje abierto: la confirmación lo dice (también en el a
     const { segmentos, encabezados } = armarSegmentos(ms, [ROSALBA], { horasCajaActiva: 4 });
     const plan = armarPlan({ mensajes: ms, viajes: [ROSALBA], segmentos, encabezados });
     const resumen = partesResumenPlan(plan, ms, undefined, [ROSALBA]).join('\n');
-    expect(resumen).toContain('1) Cliente nuevo: Rosalba Tovar — 2 mensajes');
+    expect(resumen).toContain('1) Viaje nuevo de Rosalba Tovar — 2 mensajes');
     expect(resumen).toContain('⚠ 1) Ya hay un viaje de Rosalba Quiñones Tovar (R 26 1). ¿Es para ese («el 1 y 2 son de R 26 1») o es un cliente nuevo (responde SÍ)?');
     // La corrección que propone el aviso se entiende tal cual, y el «sí» sin corregir es el cliente nuevo.
     expect(interpretarRespuestaPlan('el 1 y 2 son de R 26 1', plan, [ROSALBA])).toMatchObject({ tipo: 'corregir', cambios: [{ ns: [2, 3], a: { tipo: 'existente', negocio_id: 'r' } }] });
@@ -131,7 +133,7 @@ describe('clientes con viaje abierto: la confirmación lo dice (también en el a
 
 describe('el «sí» es explícito', () => {
   it('«Cliente nuevo: X» en el resumen, y un reparto con un cliente nuevo nunca se carga sin preguntar (`si_duda`)', () => {
-    expect(nombreDestino({ tipo: 'nuevo', cliente: 'combo playero' })).toBe('Cliente nuevo: combo playero');
+    expect(nombreDestino({ tipo: 'nuevo', cliente: 'combo playero' })).toBe('Viaje nuevo de combo playero');
     const ms: MensajeViaje[] = [
       { n: 1, cuerpo: 'nuevo combo playero', reenviado: false, tipo: 'text', en: '2026-10-03T10:00:00Z' },
       { n: 2, cuerpo: 'Queremos ir a Cartagena', reenviado: true, tipo: 'text', en: '2026-10-03T10:00:05Z' },

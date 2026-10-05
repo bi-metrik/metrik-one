@@ -198,14 +198,16 @@ describe('atajoExacto: lo exacto sigue por el código de hoy', () => {
       expect(atajoExacto(t, { bandeja: B, pendiente: LISTA_ENTREGA })).toBe('respuesta_exacta');
       expect(atajoExacto(t, { bandeja: B, pendiente: null, encabezado: resolverEncabezado(t, []) })).toBe('encabezado_exacto');
     }
-    // Solo números no es un nombre: no es atajo en el encabezado.
-    expect(atajoExacto('nuevo 3005551234', { bandeja: B, pendiente: null, encabezado: resolverEncabezado('nuevo 3005551234', []) })).toBeNull();
+    // 2026-10-05: «nuevo» y un celular es un viaje nuevo con su llave; el código de hoy lo lee (busca al cliente por ella).
+    expect(atajoExacto('nuevo 3005551234', { bandeja: B, pendiente: null, encabezado: resolverEncabezado('nuevo 3005551234', []) })).toBe('encabezado_exacto');
   });
 
   it('un encabezado exacto (por código, por nombre o «nuevo» con nombre) es atajo; uno aproximado no', () => {
     expect(atajoExacto('T1 26 9', { bandeja: B, pendiente: null, encabezado: { tipo: 'viaje', viaje: va(V9), por: 'codigo' } })).toBe('encabezado_exacto');
     expect(atajoExacto('nuevo Ana Ríos', { bandeja: B, pendiente: null, encabezado: { tipo: 'nuevo', cliente: 'Ana Ríos' } })).toBe('encabezado_exacto');
-    expect(atajoExacto('nuevo cliente', { bandeja: B, pendiente: null, encabezado: { tipo: 'nuevo', cliente: null } })).toBeNull();
+    // 2026-10-05: «nuevo» sin cliente también lo lee el código de hoy («¿Para qué cliente es?»), con el interruptor
+    // apagado o prendido; y «es para uno nuevo» hereda el cliente de la caja (el mismo camino).
+    expect(atajoExacto('nuevo cliente', { bandeja: B, pendiente: null, encabezado: { tipo: 'nuevo', cliente: null } })).toBe('encabezado_exacto');
     expect(atajoExacto('lo de Cartagena', { bandeja: B, pendiente: null, encabezado: { tipo: 'aproximado', viaje: va(V14), por: 'destino' } })).toBeNull();
   });
 });
@@ -489,7 +491,8 @@ describe('V8: «nuevo» con nombre', () => {
 
   it('un nombre que no está escrito no se toma; sin nombre se pide', () => {
     const d = ejec(validar(una({ accion: 'responder', evidencia: 'es una clienta nueva', opcion: 'nuevo', nuevo_cliente: 'Marta Gil' }), trappvel('es una clienta nueva', { pendiente: LISTA_ENTREGA })));
-    expect(d.paso).toEqual({ p: 'decir', texto: '¿Cómo se llama el cliente nuevo? Escríbeme su nombre, o DESCARTAR. Hasta entonces no asigno lo que sigue.' });
+    // 2026-10-05: «nuevo» es un viaje nuevo; sin cliente escrito se pregunta para quién es (no «¿cómo se llama el cliente nuevo?»).
+    expect(d.paso).toEqual({ p: 'decir', texto: 'Listo, un viaje nuevo. ¿Para qué cliente es?' });
   });
 
   it('un nombre por encima del tope (4 palabras) nunca crea un cliente: se vuelve a mostrar la pregunta', () => {
@@ -512,7 +515,7 @@ describe('V8: «nuevo» con nombre', () => {
       p: 'registrar', interpretacion: { accion: 'abrir_viaje', nuevo: 'Lina Pérez', con_contenido: false, evidencia: 'nueva clienta Lina Pérez' },
       aviso: textoAcuseNuevo('Lina Pérez', [va(V12), va(V14)]),
     });
-    expect((d.paso as { aviso: string }).aviso).toContain('Ya hay viajes de Jorge Pérez (T1 26 12) y Lina Pérez (T1 26 14). Si es para uno de esos, escribe su código.');
+    expect((d.paso as { aviso: string }).aviso).toContain('Ya hay viajes de Jorge Pérez (T1 26 12) y Lina Pérez (T1 26 14): si es para uno de esos, escribe su código.');
   });
 });
 
@@ -1395,5 +1398,80 @@ describe('sexto control de Vera · regla 7: con la bandeja, una «actividad» so
     expect(ejec(validar(una({ accion: 'actividad', evidencia: t, id: 'n12' }), trappvel(t))).accion).toBe('bot.actividad');
     const t2 = 'visité la obra de Arena';
     expect(ejec(validar(una({ accion: 'actividad', evidencia: t2, ref_negocio: 'Arena' }), termotech(t2))).accion).toBe('bot.actividad');
+  });
+});
+
+// ── 2026-10-05: el candidato pendiente y «nuevo» = viaje nuevo (diseño de cliente y conversación, §5.2) ────────
+
+describe('V8v y V5 con el candidato pendiente: «es para uno nuevo», «cliente antiguo» (la prueba de Mauricio)', () => {
+  // La caja abierta es el viaje de Lina Pérez (T1 26 14): su cliente es el candidato.
+  const tanda = { abierta: true, nombre: 'Lina Pérez', cajaId: 'v14', cliente: 'LINA PÉREZ' };
+
+  it('turno 4: el modelo copia el cliente que NO está escrito (antes V8_nombre_no_escrito): es un viaje nuevo de Lina Pérez', () => {
+    const texto = 'No. Es para uno nuevo';
+    const d = ejec(validar(una({ accion: 'abrir_viaje', evidencia: 'Es para uno nuevo', nuevo_cliente: 'Lina Pérez' }), trappvel(texto, { tanda })));
+    expect(d.paso).toMatchObject({ p: 'registrar', interpretacion: { accion: 'abrir_viaje', nuevo: 'LINA PÉREZ' } });
+    expect(d.rechazo).toBe('V8v_cliente_de_la_conversacion');
+  });
+
+  it('turno 5: «cotización nueva sobre un cliente antiguo» con `ref_cliente` no escrito (antes V5_sin_candidatos): viaje nuevo del candidato', () => {
+    const texto = 'No es un cliente nuevo, es una cotización nueva sobre un cliente antiguo';
+    const d = ejec(validar(una({ accion: 'abrir_viaje', evidencia: 'una cotización nueva sobre un cliente antiguo', ref_cliente: 'Lina Pérez' }), trappvel(texto, { tanda })));
+    expect(d.paso).toMatchObject({ p: 'registrar', interpretacion: { accion: 'abrir_viaje', nuevo: 'LINA PÉREZ' } });
+  });
+
+  it('`cliente_existente` sin «nuevo» escrito: es el viaje de la caja (V5), con 📌', () => {
+    const texto = 'es la clienta de antes, la misma';
+    const d = ejec(validar(una({ accion: 'abrir_viaje', evidencia: 'la clienta de antes', cliente_existente: true }), trappvel(texto, { tanda })));
+    expect(d.paso).toMatchObject({ p: 'registrar', interpretacion: { accion: 'abrir_viaje', viaje_id: 'v14' }, aviso: '📌 Lina Pérez (T1 26 14)' });
+  });
+
+  it('nunca sin que el mensaje se refiera a él: «nuevo viaje» a secas pregunta para quién; una referencia escrita gana', () => {
+    const d = ejec(validar(una({ accion: 'abrir_viaje', evidencia: 'nuevo viaje', nuevo_sin_nombre: true }), trappvel('nuevo viaje', { tanda })));
+    expect(d.paso).toMatchObject({ p: 'registrar', interpretacion: { accion: 'abrir_viaje', nuevo: null }, aviso: 'Listo, un viaje nuevo. ¿Para qué cliente es?' });
+    const texto = 'lo de Carolina, el mismo cliente de siempre';
+    const c = ejec(validar(una({ accion: 'abrir_viaje', evidencia: 'lo de Carolina', ref_cliente: 'Carolina', cliente_existente: true }), trappvel(texto, { tanda })));
+    expect(c.paso).toMatchObject({ interpretacion: { viaje_id: 'v11' } });
+    // Sin caja abierta no hay candidato: sigue como siempre.
+    const s = ejec(validar(una({ accion: 'abrir_viaje', evidencia: 'Es para uno nuevo', nuevo_cliente: 'Lina Pérez' }), trappvel('No. Es para uno nuevo')));
+    expect(s.paso).toMatchObject({ interpretacion: { nuevo: null } });
+  });
+
+  it('«Jorge Pérez quiere otro viaje» devuelto como referencia a su cliente: viaje NUEVO de Jorge Pérez, nunca su viaje abierto (V8v)', () => {
+    const texto = 'Jorge Pérez quiere otro viaje, esta vez a Cancún en mayo';
+    const d = ejec(validar({ acciones: [{ accion: 'abrir_viaje', evidencia: 'Jorge Pérez quiere otro viaje', ref_cliente: 'Jorge Pérez', ref_destino: 'Cancún' }, { accion: 'contenido', evidencia: 'esta vez a Cancún en mayo' }] }, trappvel(texto)));
+    expect(d.paso).toMatchObject({ p: 'registrar', interpretacion: { accion: 'abrir_viaje', nuevo: 'Jorge Pérez', con_contenido: true } });
+    expect(d.rechazo).toBe('V8v_viaje_nuevo_de_un_cliente');
+    // Sin «otro viaje» ni «nuevo», «lo de Jorge Pérez» sigue siendo su viaje abierto.
+    expect(ejec(validar(una({ accion: 'abrir_viaje', evidencia: 'lo de Jorge Pérez', ref_cliente: 'Jorge Pérez' }), trappvel('lo de Jorge Pérez'))).paso).toMatchObject({ interpretacion: { viaje_id: 'v12' } });
+  });
+
+  it('el destino escrito de un viaje nuevo (que no es de un viaje abierto) es contenido de su caja', () => {
+    const texto = 'otra cotización para Carolina Ruiz, ahora a Europa';
+    const d = ejec(validar(una({ accion: 'abrir_viaje', evidencia: texto, nuevo_cliente: 'Carolina Ruiz', ref_destino: 'Europa' }), trappvel(texto)));
+    expect(d.paso).toMatchObject({ interpretacion: { accion: 'abrir_viaje', nuevo: 'Carolina Ruiz', con_contenido: true } });
+  });
+
+  it('el celular escrito con el nombre va como la llave del viaje nuevo (y no en el nombre)', () => {
+    const texto = 'nueva clienta Paola Rincón 300 555 1234';
+    const d = ejec(validar(una({ accion: 'abrir_viaje', evidencia: texto, nuevo_cliente: 'Paola Rincón 300 555 1234', celular: '300 555 1234' }), trappvel(texto)));
+    expect(d.paso).toMatchObject({ interpretacion: { accion: 'abrir_viaje', nuevo: 'Paola Rincón', llave: { celular: '3005551234' } } });
+  });
+
+  it('el esquema y el prompt: «nuevo» es viaje nuevo, el sistema decide si el cliente existe; campos para el candidato y la llave', () => {
+    const props = ((esquemaPara({ bandeja: true, rol: 'owner' }).properties as Record<string, { items: { properties: Record<string, unknown> } }>).acciones.items.properties);
+    expect(Object.keys(props)).toEqual(expect.arrayContaining(['cliente_existente', 'celular', 'correo']));
+    expect(instrucciones({ bandeja: true })).toContain('«Nuevo» es un viaje nuevo: si el cliente ya existe lo decide el sistema, no tú.');
+  });
+
+  it('la caja que espera la llave o «¿cuál es?»: lo que el código lee no llega al modelo; lo demás se vuelve a preguntar (nunca crea)', () => {
+    const p = preguntaPendienteUnificada({ tanda: { tipo: 'cliente', texto: 'No tengo a Simón Arango en el directorio. ¿Me pasas su celular o su correo?' } });
+    expect(p).toMatchObject({ capa: 'tanda_cliente' });
+    const bandeja = { palabrasCierre: ['listo'] };
+    expect(atajoExacto('300 555 1234', { bandeja, pendiente: p })).toBe('respuesta_exacta');
+    expect(atajoExacto('no, es otra', { bandeja, pendiente: p })).toBe('respuesta_exacta');
+    const d = ejec(validar(una({ accion: 'responder', evidencia: 'luego te lo paso', opcion: 'nuevo' }), trappvel('luego te lo paso', { pendiente: p })));
+    expect(d.paso.p).toBe('decir');
+    expect(d.rechazo).toBe('V20_cliente_por_el_codigo');
   });
 });
