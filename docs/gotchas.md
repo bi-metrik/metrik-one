@@ -220,3 +220,14 @@
   `{ error }`. Un `data ?? []` lo convierte en «no hay filas» sin ruido. Lotes de 100 ids, o acotar por
   JOIN (`tabla!inner(col)` + filtro sobre el padre) en vez de mandar la lista (2026-10-03).
 - **Un deploy ya no recarga la pestaña: la que manda es la ÉPOCA.** (2026-10-03, fix/no-recargar-por-deploy). Una pestaña vieja puede vivir hasta 8 h con el código de antes contra la base de hoy. Si un PR borra, renombra o cambia de tipo algo que el código viejo usa, **sube `EPOCA` en `src/lib/version/epoca.ts` en el mismo PR** (la guarda `check-migracion-epoca` lo exige para migraciones). Y todo `fetch('/api/...')` nuevo del cliente va por `fetchPropio`: Skew Protection no sella los `fetch` propios, solo assets, RSC y server actions. `/api/version` es la excepción, debe llegar al deployment vivo. Si alguien baja Maximum Age de Skew Protection (hoy 7 días) por debajo de 8 h, las pestañas viejas vuelven a quedarse sin assets.
+- **Next pone las server actions en fila: una lectura al montar retrasa la acción que viene detrás.**
+  (2026-10-05, #1019). Sobre una red lenta, un `useEffect` que pide datos por server action hace esperar
+  el guardado o el cambio de etapa que la persona toca después. Lo que se lee al montar llega del
+  servidor (layout o página, en el mismo `Promise.all`) o por un `GET` de ruta con `pedirJson` (que
+  pasa por `fetchPropio`) dentro de `enPeticionDeRuta`, llamando a la misma función que la action. Las
+  escrituras siguen siendo server actions. Para medir: `vercel metrics vercel.function_invocation.count
+  --group-by server_action_name`.
+- **Un `fetch` con `cache: 'no-cache'` a una ruta con ETag recibe el 304 como el 200 guardado.** El
+  navegador revalida con `If-None-Match` y JS ve el cuerpo anterior con status 200: no hay rama de 304
+  que escribir. La ruta responde `Cache-Control: private, no-cache` (ningún CDN la comparte) y acepta
+  ETag débil `W/`, por si la compresión de Vercel lo debilita (`src/lib/http/etag.ts`, 2026-10-05).
