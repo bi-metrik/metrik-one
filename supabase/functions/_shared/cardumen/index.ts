@@ -15,8 +15,19 @@ export {
   urlMiniwebParaParticipante,
   type EstudioMiniweb,
 } from "./estudios.ts";
+// Modo objetos: MISMA tabla de sesiones que el chat, motor aparte. El webhook desvia la
+// sesion con `esEstadoObjetos` dentro del bloque 0b, antes de cualquier otra cosa: sin esa
+// rama, el motor de chat intentaria leer "Listo preocupaciones 50-30-20" como una narrativa.
+export {
+  esEstadoObjetos,
+  resolverEstudioObjetosPorTrigger,
+  type EstadoObjetos,
+  type EstudioObjetos,
+} from "./objetos.ts";
+export { startObjetos, continueObjetos } from "./objetos-flujo.ts";
 import { sendCtaUrl, sendTextWithRhythm, sendTypingIndicator, enBackground } from "../wa-respond.ts";
 import { esEstadoNavigate, startNavigate, continueNavigate } from "./navigate/index.ts";
+import { esEstadoObjetos } from "./objetos.ts";
 import type { ConversationState, StudySpec, Encuadre, ModelAdapter } from "./types.ts";
 import { conTelemetria, ctxCardumen, registrarLlamadaModelo } from "./telemetria.ts";
 import { TEXTO_ESTUDIO_NO_DISPONIBLE, entrevistadorLibreHabilitado } from "./entrevistador-libre.ts";
@@ -62,7 +73,7 @@ export async function hasOpenCardumenChat(supabase: Supa, phone: string): Promis
 export async function chatCardumenAbierto(
   supabase: Supa,
   phone: string,
-): Promise<{ estudio: string | null } | null> {
+): Promise<{ estudio: string | null; state: unknown } | null> {
   const { data } = await supabase
     .from("cardumen_chat_sessions")
     .select("state")
@@ -70,7 +81,11 @@ export async function chatCardumenAbierto(
     .eq("closed", false)
     .maybeSingle();
   if (!data) return null;
-  return { estudio: (data.state as { study_id?: string } | null)?.study_id ?? null };
+  // `state` sale TAMBIEN crudo porque en esta misma tabla viven las secuencias de modo
+  // `objetos`, que NO son conversaciones: el webhook las desvia leyendo `esEstadoObjetos`
+  // sobre este valor, y asi no hace una segunda consulta identica en el camino caliente de
+  // todo mensaje entrante.
+  return { estudio: (data.state as { study_id?: string } | null)?.study_id ?? null, state: data.state };
 }
 
 export async function startCardumenChat(
@@ -184,6 +199,16 @@ export async function continueCardumenChat(
   // Todo lo que sale de aqui queda marcado con el estudio de la sesion (ver telemetria.ts).
   const estudio = (row.state as { study_id?: string } | null)?.study_id ?? null;
   const enviarTexto = (t: string) => sendTextMessage(phone, t, ctxCardumen(estudio, t));
+
+  // Sesion de modo `objetos`: NO es una conversacion, la atiende `continueObjetos` y el
+  // webhook la desvia antes de llegar aqui (bloque 0b-obj). Esta guarda es el cinturon de
+  // seguridad: si alguien quita ese bloque, el texto de vuelta "Listo <objeto> <numeros>"
+  // entraria al entrevistador — y la palabra de consentimiento por defecto del encuadre de
+  // chat es justamente "LISTO", asi que el dano seria silencioso.
+  if (esEstadoObjetos(row.state)) {
+    console.warn(`[cardumen-chat] sesion de objetos de ${phone} llego al motor de chat: no se procesa`);
+    return;
+  }
 
   // Sesion de Navigate: la atiende su motor (expiracion, borrado y cierre incluidos).
   if (esEstadoNavigate(row.state)) {

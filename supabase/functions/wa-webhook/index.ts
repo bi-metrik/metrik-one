@@ -25,6 +25,10 @@ import {
   continueCardumenChat,
   resolverEstudioMiniwebPorTrigger,
   urlMiniwebParaParticipante,
+  esEstadoObjetos,
+  resolverEstudioObjetosPorTrigger,
+  startObjetos,
+  continueObjetos,
 } from '../_shared/cardumen/index.ts';
 import { ctxCardumen } from '../_shared/cardumen/telemetria.ts';
 import { isVeTrigger, hasOpenVeChat, startVeChat, continueVeChat } from '../_shared/venezuela/index.ts';
@@ -337,6 +341,19 @@ async function processMessage(message: IncomingMessage): Promise<void> {
   //     Un audio (u otro mensaje) en medio de Cardumen NUNCA debe caer en el flujo de gastos/intents.
   const chatCardumen = await chatCardumenAbierto(supabase, message.phone);
   if (chatCardumen) {
+    // 0b-obj. Cardumen modo `objetos` — se desvia ANTES de todo lo demas de este bloque.
+    //     La secuencia de objetos sueltos guarda su estado en la MISMA tabla
+    //     `cardumen_chat_sessions` que Navigate (la demo viva de Grupo Progreso), asi que
+    //     esta consulta tambien la ve. Sin esta rama, el texto de vuelta de la pagina
+    //     ("Listo preocupaciones 50-30-20") entraria al entrevistador de chat como si fuera
+    //     una narrativa — y la palabra de consentimiento por defecto del encuadre de chat es
+    //     justamente "LISTO". Lo que distingue la sesion es `state.modo = 'objetos'`.
+    //     Va antes de la transcripcion: un audio a mitad de la secuencia no es una respuesta
+    //     y no vale gastar una transcripcion en el.
+    if (esEstadoObjetos(chatCardumen.state)) {
+      await continueObjetos(supabase, message.phone, chatCardumen.state, message.text || '');
+      return;
+    }
     // Lo que el webhook contesta aqui tambien es Cardumen: va marcado con el estudio.
     const avisarCardumen = (t: string) => sendTextMessage(message.phone, t, ctxCardumen(chatCardumen.estudio, t));
     let texto = message.text || '';
@@ -384,6 +401,17 @@ async function processMessage(message: IncomingMessage): Promise<void> {
       // CTA → abre el navegador interno de WhatsApp (un link de texto plano saca de la app).
       await sendCtaUrl(message.phone, cuerpo, 'Abrir', url, ctxCardumen(miniweb.estudio, cuerpo));
       console.log(`[wa-webhook] Cardumen miniweb '${miniweb.estudio}' enviado a ${message.phone}`);
+      return;
+    }
+  }
+  // 0c-ter. Cardumen modo `objetos` — la entrevista vive en el chat y la pagina sirve UN
+  //     paso de reparto por vez (`?obj=<id>`). MISMA tabla de triggers que el chat y el
+  //     miniweb: los bloques de arriba ya se quedaron con las palabras de los estudios
+  //     vivos, y la PK de `cardumen_estudio_triggers` impide que una palabra abra dos.
+  if (message.type === 'text') {
+    const objetos = await resolverEstudioObjetosPorTrigger(supabase, message.text);
+    if (objetos) {
+      await startObjetos(supabase, message.phone, objetos, message.wa_message_id);
       return;
     }
   }
