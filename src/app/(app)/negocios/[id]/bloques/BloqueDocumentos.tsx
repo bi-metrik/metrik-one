@@ -2,7 +2,6 @@
 
 import { useState, useRef } from 'react'
 import { useTransitionTolerante } from '@/hooks/use-transition-tolerante'
-import { useRouter } from 'next/navigation'
 import { toast } from 'sonner'
 import { CheckCircle2, Circle, Download, Copy, Check } from 'lucide-react'
 import { createClient } from '@/lib/supabase/client'
@@ -144,7 +143,6 @@ export default function BloqueDocumentos({
   modo,
   documentos,
 }: BloqueDocumentosProps) {
-  const router = useRouter()
   const saved = (instancia?.data ?? {}) as Record<string, unknown>
   const savedDocs = (saved.docs as Record<string, string>) ?? {}
 
@@ -268,8 +266,8 @@ export default function BloqueDocumentos({
       if (shouldComplete && instancia?.estado !== 'completo') {
         // No pasar docs del cliente — el servidor ya tiene todos via confirmarUploadDocumentoNegocio
         const res = await marcarBloqueCompleto(negocioBloqueId, {})
+        // Sin router.refresh(): `marcarBloqueCompleto` ya revalida la ficha (2026-10-04).
         if (res.error) toast.error(res.error)
-        else router.refresh()
       }
 
       // 5. AI processing para slugs conocidos

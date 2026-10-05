@@ -29,6 +29,16 @@ describe('memoDeRuta', () => {
     expect(new Set([a, b]).size).toBe(2)
   })
 
+  it('una petición dentro de otra (acción envuelta que llama a otra) REUSA el memo de afuera', async () => {
+    let n = 0
+    const sesion = memoDeRuta(async () => { n++ })
+    await enPeticionDeRuta(async () => {
+      await sesion()
+      await enPeticionDeRuta(() => sesion())
+    })
+    expect(n).toBe(1)
+  })
+
   it('fuera de una petición de ruta no memoiza: el resto de la app sigue igual', async () => {
     let n = 0
     const sesion = memoDeRuta(async () => { n++ })

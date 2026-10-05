@@ -3,6 +3,7 @@
 import { revalidatePath } from 'next/cache'
 import { cerrarNegocioSiQuedaResuelto } from '@/app/(app)/negocios/negocio-v2-actions'
 import { getWorkspace } from '@/lib/actions/get-workspace'
+import { enPeticionDeRuta } from '@/lib/actions/memo-de-ruta'
 import { guardEditarBloque } from '@/lib/permissions/guard-negocio'
 import { createServiceClient } from '@/lib/supabase/server'
 import { getServerKey } from '@/lib/server-keys'
@@ -464,6 +465,36 @@ export async function procesarDocumento(
   documento_rechazado?: DocumentoRechazado
   error?: string
 }> {
+  // Una sola sesión por guardado: en una server action el `cache()` de React no memoiza.
+  return enPeticionDeRuta(() => procesarDocumentoSinMemo(negocioBloqueId, negocioId, storagePath, fileName, correccion))
+}
+
+async function procesarDocumentoSinMemo(
+  negocioBloqueId: string,
+  negocioId: string,
+  storagePath: string,
+  fileName: string,
+  /**
+   * Solo viaja cuando se REEMPLAZA el archivo desde el modo visible de una etapa ya
+   * superada: eso es una corrección, y entonces la causa es obligatoria (mismo
+   * criterio que `actualizarBloqueData` y que `actualizarCampoDocumento`). El
+   * `sesion_id` es el del bloque, así que reemplazar el archivo y corregir sus campos
+   * en el mismo acto queda como UNA corrección y no como dos.
+   */
+  correccion?: { causa?: string; sesion_id?: string },
+): Promise<{
+  success: boolean
+  drive_url?: string
+  campos?: Record<string, CampoResultado>
+  extraction_status?: 'ok' | 'failed' | 'no_key'
+  extraction_error?: string
+  /**
+   * Presente SOLO cuando el bloque se rechazó porque el archivo no es el documento que
+   * espera. La pantalla lo pinta para que el operador vea QUÉ llegó, no solo que falló.
+   */
+  documento_rechazado?: DocumentoRechazado
+  error?: string
+}> {
   const { supabase, workspaceId, userId, staffId, error } = await getWorkspace()
   if (error || !workspaceId) return { success: false, error: 'No autenticado' }
 
@@ -875,6 +906,20 @@ export async function procesarDocumento(
  * la configuración de campos_extraccion.
  */
 export async function reprocesarDocumento(
+  negocioBloqueId: string,
+  negocioId: string,
+): Promise<{
+  success: boolean
+  campos?: Record<string, CampoResultado>
+  /** Ver `procesarDocumento`: presente solo cuando el archivo no es el documento esperado. */
+  documento_rechazado?: DocumentoRechazado
+  error?: string
+}> {
+  // Una sola sesión por guardado: en una server action el `cache()` de React no memoiza.
+  return enPeticionDeRuta(() => reprocesarDocumentoSinMemo(negocioBloqueId, negocioId))
+}
+
+async function reprocesarDocumentoSinMemo(
   negocioBloqueId: string,
   negocioId: string,
 ): Promise<{
