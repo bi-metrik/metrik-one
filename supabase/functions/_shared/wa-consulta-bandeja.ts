@@ -18,7 +18,7 @@
 // ============================================================
 
 import { normalizarNombre, normalizarTexto } from './wa-entendimiento-reglas.ts';
-import { codigoCompacto } from './wa-carga-reglas.ts';
+import { codigoCompacto, ejemploDeReferencia } from './wa-carga-reglas.ts';
 
 export type ConsultaBandeja =
   /** Los viajes abiertos de un cliente. `cliente`: el que nombra; `null`: el de la tanda abierta («¿qué viajes tiene?»). */
@@ -38,20 +38,30 @@ const NO_ES_NOMBRE: ReadonlySet<string> = new Set([
   'ahora', 'ya', 'otros', 'otras', 'mas', 'el', 'la', 'los', 'las', 'de', 'del', 'para', 'a', 'al', 'cliente', 'clienta', 'ese', 'esa', 'este', 'esta',
   'mismo', 'misma', 'senor', 'senora', 'don', 'dona', 'el', 'ella', 'dime', 'digame', 'dame', 'muestrame', 'mostrame', 'listame', 'pasame', 'revisa',
   'mira', 'y', 'oye', 'bueno', 'ok', 'por', 'favor', 'porfa', 'en', 'con', 'nosotros', 'todavia', 'aun', 'cuantas', 'se', 'le', 'me', 'lista',
-  'todo', 'todos', 'cosa', 'cosas', 'eso', 'esto', 'falta', 'va', 'como',
+  'todo', 'todos', 'cosa', 'cosas', 'eso', 'esto', 'falta', 'va', 'como', 'algo', 'nada', 'alguno', 'alguna', 'mio', 'mia', 'suyo', 'suya',
+  'enero', 'febrero', 'marzo', 'abril', 'mayo', 'junio', 'julio', 'agosto', 'septiembre', 'octubre', 'noviembre', 'diciembre', 'hoy', 'semana',
 ]);
+
+/** Regla 3 de la frontera: ¿el escrito relata lo que preguntó o dijo el cliente («me pregunta …», «dice que …»)? */
+export function relataAlCliente(texto: string): boolean {
+  return RELATA.test(normalizarNombre(normalizarTexto(String(texto ?? '').trim())));
+}
 
 /** ¿Tiene forma de pregunta o de pedido al bot? */
 function esPreguntaOPedido(t: string, bruto: string): boolean {
   return /[¿?]/.test(bruto) || PIDE.test(t) || /^(?:que|cuales|cuantos|cuantas|como|en\s+que|tiene)\b/.test(t);
 }
 
-/** El nombre que queda después de quitar lo que no es nombre: «… tiene abiertos Lina Pérez» → «Lina Pérez». */
-function nombreEn(bruto: string): string | null {
+/**
+ * El nombre que queda después de quitar lo que no es nombre: «… tiene abiertos Lina Pérez» → «Lina Pérez». `parte`:
+ * el trozo (ya normalizado) donde buscarlo; las palabras salen como las escribió el comercial en `bruto`.
+ */
+function nombreEn(bruto: string, parte: string = bruto): string | null {
+  const enParte = new Set(normalizarNombre(parte).split(' ').filter(w => w && !NO_ES_NOMBRE.has(w)));
   const tokens = String(bruto ?? '').split(/[\s,.;:!¡¿?]+/).filter(Boolean);
-  const quedan = tokens.filter(w => !NO_ES_NOMBRE.has(normalizarNombre(w)));
+  const quedan = tokens.filter(w => !NO_ES_NOMBRE.has(normalizarNombre(w)) && enParte.has(normalizarNombre(w)));
   if (quedan.length === 0 || quedan.length > 4) return null;
-  // Un pronombre o algo con números no es un nombre de cliente.
+  // Algo con números no es un nombre de cliente.
   if (quedan.some(w => /\d/.test(w))) return null;
   return quedan.join(' ');
 }
@@ -71,11 +81,11 @@ export function leerConsultaBandeja(texto: string, o: { reenviado: boolean }): C
     return { tipo: 'tanda' };
   }
   // Cómo va o qué le falta a un viaje.
-  if (/\b(?:que\s+(?:le\s+)?falta|cuanto\s+(?:le\s+)?falta|como\s+va|como\s+vamos|en\s+que\s+va|que\s+tiene\s+(?:el|ese|este)\s+viaje|(?:estado|avance)\s+del?\s+viaje)\b/.test(t)) {
+  if (/\b(?:que\s+(?:le\s+)?falta|cuanto\s+(?:le\s+)?falta|como\s+va|en\s+que\s+va|que\s+tiene\s+(?:el|ese|este)\s+viaje|(?:estado|avance)\s+del?\s+viaje)\b/.test(t)) {
     const cod = /\b([a-z]{1,3}\d?\s*\d{2}\s*\d{1,4})\b/.exec(t)?.[1];
     if (cod && codigoCompacto(cod).length >= 4) return { tipo: 'viaje', ref: cod.toUpperCase() };
-    const de = /\b(?:viaje|cotizacion)\s+(?:de|del)\s+(.+)$/.exec(t)?.[1] ?? /\b(?:falta|va)\s+(?:a|al|el|la)?\s*(?:viaje\s+(?:de|del)\s+)?(.+)$/.exec(t)?.[1] ?? null;
-    const ref = de ? nombreEn(de) : null;
+    const de = /\b(?:viaje|cotizacion)\s+(?:de|del)\s+(.+)$/.exec(t)?.[1] ?? /\b(?:falta|va)\s+(?:(?:a|al|el|la)\s+)?(?:(?:viaje|cotizacion)\s+(?:de|del)\s+)?(.+)$/.exec(t)?.[1] ?? null;
+    const ref = de ? nombreEn(bruto, de) : null;
     return { tipo: 'viaje', ref };
   }
   // Los viajes abiertos de un cliente.
@@ -88,7 +98,7 @@ export function leerConsultaBandeja(texto: string, o: { reenviado: boolean }): C
 
 // ── Lo que contesta (los hechos los pone quien llama) ────────────────────────
 
-/** «Martín Robledo tiene 5 viajes abiertos:» y la lista; o que no tiene; con una pregunta como mucho. */
+/** «Martín Robledo tiene 5 viajes abiertos:» y la lista (sin números: no es una pregunta que se conteste con uno); o que no tiene. */
 export function textoViajesDelCliente(p: {
   cliente: string;
   viajes: ReadonlyArray<{ linea: string }>;
@@ -100,7 +110,18 @@ export function textoViajesDelCliente(p: {
   if (p.noExiste) return `No tengo a ${p.cliente} en el directorio, así que no tiene viajes.`;
   if (p.viajes.length === 0) return `${p.cliente} no tiene viajes abiertos${p.cerrado ? ` (el último fue ${p.cerrado})` : ''}.`;
   if (p.viajes.length === 1) return `${p.cliente} tiene un viaje abierto: ${p.viajes[0].linea}.`;
-  return [`${p.cliente} tiene ${p.viajes.length} viajes abiertos:`, ...p.viajes.map((v, i) => `${i + 1}. ${v.linea}`)].join('\n');
+  return [`${p.cliente} tiene ${p.viajes.length} viajes abiertos:`, ...p.viajes.map(v => `- ${v.linea}`)].join('\n');
+}
+
+/**
+ * «Lina puede ser CARTAGENA DIC · Lina Pérez (T1 26 14) o MADRID 8N · Lina Gómez (T1 26 12). Pregúntame por uno, por
+ * ejemplo «¿cómo va el de Cartagena?».» Sin lista numerada: no es una pregunta pendiente que se conteste con un número.
+ */
+export function textoConsultaAmbigua(ref: string, viajes: ReadonlyArray<{ linea: string; cliente?: string | null; destino?: string | null; nombre?: string | null }>): string {
+  const ej = ejemploDeReferencia(viajes);
+  const lineas = viajes.map(v => v.linea);
+  const enum_ = lineas.length <= 1 ? (lineas[0] ?? '') : `${lineas.slice(0, -1).join(', ')} o ${lineas[lineas.length - 1]}`;
+  return `«${ref}» puede ser ${enum_}. Pregúntame por uno${ej ? `, por ejemplo «¿cómo va ${ej}?»` : ''}.`;
 }
 
 /** Lo que se dice cuando no se sabe de qué cliente o de qué viaje pregunta. */

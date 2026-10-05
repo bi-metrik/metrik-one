@@ -1697,6 +1697,61 @@ describe('2026-10-05 · la prueba de Mauricio, parafraseada: viaje nuevo de un c
     expect(textos().at(-1)).toBe('📌 MIAMI 7N · Martín Robledo (M1 26 1)');
   });
 
+  for (const modo of ['apagado', 'prendido'] as const) {
+    it(`la secuencia de las 09:26, interruptor ${modo}: «¿Qué viajes tiene abiertos?» se contesta en solo lectura y nunca es contenido`, async () => {
+      clienteConCincoViajes();
+      const llamadas = { n: 0 };
+      const interprete = modo === 'prendido' ? { llamadas } : undefined;
+      const bloquesAntes = JSON.stringify(t.negocio_bloques);
+      await llega('Vamos a hacer una nueva cotización para Martín Robledo', { enviado: 0, interprete });
+      expect(textos().at(-1)).toBe(YA_LO_TENEMOS);
+      const registrados = t.wa_bandeja_mensajes.length;
+      // 09:26 · la pregunta al bot: «tiene» es el cliente de la tanda abierta.
+      await llega('Que viajes tiene abiertos?', { enviado: 10, interprete });
+      expect(textos().at(-1)).toBe(['Martín Robledo tiene 5 viajes abiertos:', '- MIAMI 7N (M1 26 1)', '- ARMENIA 2N (M1 26 2)', '- ARMENIA 2N (M1 26 3)',
+        '- EUROPA 20D (M1 26 4)', '- EUROPA 2 DÍAS (M1 26 5)'].join('\n'));
+      expect(textos().some(x => /¿Qué hago con esto\?|No te entendí/.test(x))).toBe(false);
+      // Solo lectura: no se registra en la tanda.
+      expect(t.wa_bandeja_mensajes.length).toBe(registrados);
+      // Lo que el cliente pregunta, reenviado, sí es contenido (regla 1 de la frontera).
+      await llega('¿cuánto cuesta el de 7 noches? ¿y qué viajes tienen abiertos para enero?', { enviado: 20, reenviado: true });
+      expect(t.wa_bandeja_mensajes.length).toBe(registrados + 1);
+      // Otra pregunta al bot: qué lleva la tanda.
+      await llega('¿qué te he mandado?', { enviado: 30, interprete });
+      expect(textos().at(-1)).toMatch(/^Llevas 1 mensaje de .*Martín Robledo.*\. Cuando termines, escribe «listo»\.$/);
+      // Y del viaje nuevo: todavía no existe.
+      await llega('qué le falta?', { enviado: 35, interprete });
+      expect(textos().at(-1)).toMatch(/^El viaje nuevo de Martín Robledo todavía no está creado/);
+      expect(t.wa_bandeja_mensajes.length).toBe(registrados + 1);
+      // Con el interruptor prendido, el código de hoy las lee exactas: el modelo no se llama.
+      expect(llamadas.n).toBe(0);
+      await llega('listo', { enviado: 40 });
+      const resumen = textos().at(-1)!;
+      expect(resumen).toMatch(/1\) Viaje nuevo de Martín Robledo \(ya es cliente: cel\. …9444, 5 viajes abiertos\) — 1 mensaje\n   1 «¿cuánto cuesta el de 7 noches\?/);
+      expect(resumen).not.toContain('Que viajes tiene');
+      expect(JSON.stringify(t.negocio_bloques)).toBe(bloquesAntes);
+    });
+  }
+
+  it('prendido: una paráfrasis que solo lee el modelo («me haces la lista de lo que tiene abierto?») también es la consulta', async () => {
+    clienteConCincoViajes();
+    await llega('Vamos a hacer una nueva cotización para Martín Robledo', { enviado: 0 });
+    const registrados = t.wa_bandeja_mensajes.length;
+    const texto = 'oye y me haces la lista de lo que tiene abierto?';
+    await llega(texto, { enviado: 10, interprete: { modelo: { acciones: [{ accion: 'consulta', evidencia: texto, tema: 'viajes' }] } } });
+    expect(textos().at(-1)).toMatch(/^Martín Robledo tiene 5 viajes abiertos:\n- MIAMI 7N \(M1 26 1\)/);
+    expect(t.wa_bandeja_mensajes.length).toBe(registrados);
+  });
+
+  it('en la caja de un viaje que ya existe, «¿qué le falta?» dice su avance y lo que falta; la pregunta abierta se recuerda', async () => {
+    clienteConCincoViajes();
+    await llega('M1 26 1', { enviado: 0 });
+    await llega('¿qué le falta?', { enviado: 5 });
+    expect(textos().at(-1)).toMatch(/MIAMI 7N/);
+    expect(textos().at(-1)).toMatch(/\nLe falta: |\nYa tiene todo lo mínimo para cotizar\./);
+    expect(t.wa_bandeja_mensajes.filter(m => String(m.cuerpo).includes('le falta'))).toEqual([]);
+  });
+
   it('un cliente con TODOS sus viajes cerrados también se encuentra (R3)', async () => {
     t.contactos.push({ id: 'c-rm', workspace_id: WS, nombre: 'ROSA MEJÍA', telefono: null, email: 'rosa@correo.co', created_at: '2026-01-10T10:00:00Z' });
     t.negocios.push({ ...negocioDePrueba('n-rm', 'R 26 1', 'CARTAGENA MAR', 'ROSA MEJÍA'), contacto_id: 'c-rm', estado: 'completado' });

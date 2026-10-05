@@ -24,7 +24,7 @@ import { codigoCompacto, interpretarRespuestaNegocio, pieDeLista } from './wa-ca
 import { calificarNombreNuevo, leerNuevo, leerViajeNuevo, nombrePropio, normalizarNombre, normalizarTexto } from './wa-entendimiento-reglas.ts';
 import type { LecturaNuevo } from './wa-entendimiento-reglas.ts';
 import { llavesDelTexto, separarNombreYLlave, soloLlave } from './wa-cliente-reglas.ts';
-import { leerConsultaBandeja } from './wa-consulta-bandeja.ts';
+import { leerConsultaBandeja, relataAlCliente } from './wa-consulta-bandeja.ts';
 import type { ConsultaBandeja } from './wa-consulta-bandeja.ts';
 import type { Llave } from './wa-cliente-reglas.ts';
 import { fastPathParse } from './wa-parse-reglas.ts';
@@ -1224,11 +1224,14 @@ function validarPropuesta(crudo: unknown, e: EntradaValidador): Decision {
       // La bandeja: los viajes de un cliente, cómo va un viaje, qué lleva la tanda (2026-10-05). Solo lo escrito cuenta
       // para nombrar al cliente o al viaje; sin nombrarlo, es el de la tanda abierta.
       if (e.bandeja && TEMAS_BANDEJA.has(String(a0.tema ?? ''))) {
+        // Regla 3 de la frontera: lo que el comercial relata que preguntó el cliente («me pregunta qué viajes hay a
+        // Cancún») es contenido de la tanda, aunque el modelo lo lea como consulta.
+        if (e.tanda?.abierta && relataAlCliente(e.texto)) return contenido([{ ...a0, accion: 'contenido', ref: null, id: null }], e, rechazo ?? 'V2_relato_es_contenido');
         const cliente = escritoTalCual(a0.ref?.cliente, e.texto);
         const codigo = a0.ref?.codigo && todoEscrito(a0.ref.codigo, e.texto) ? String(a0.ref.codigo) : null;
         const consulta: ConsultaBandeja = a0.tema === 'tanda' ? { tipo: 'tanda' }
           : a0.tema === 'viajes' ? { tipo: 'viajes', cliente }
-          : { tipo: 'viaje', ref: codigo ?? cliente ?? soloLoEscrito(a0.ref?.destino, e.texto) };
+          : { tipo: 'viaje', ref: codigo ?? cliente ?? escritoTalCual(a0.ref?.destino, e.texto) };
         return ejecutar('bandeja.consulta', { p: 'bandeja_consulta', consulta }, rechazo, false);
       }
       const intent = intentDeLaAccion('consulta', a0.tema) as Intent;

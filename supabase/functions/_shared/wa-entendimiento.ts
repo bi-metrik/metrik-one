@@ -97,7 +97,7 @@ import {
 } from './wa-cliente.ts';
 import { fichasPorNombre } from './wa-cliente.ts';
 import {
-  textoEstadoViaje, textoTanda, textoViajesDelCliente, TEXTO_CONSULTA_DE_QUE_VIAJE, TEXTO_CONSULTA_DE_QUIEN, TEXTO_SIN_TANDA,
+  textoConsultaAmbigua, textoEstadoViaje, textoTanda, textoViajesDelCliente, TEXTO_CONSULTA_DE_QUE_VIAJE, TEXTO_CONSULTA_DE_QUIEN, TEXTO_SIN_TANDA,
 } from './wa-consulta-bandeja.ts';
 import type { ConsultaBandeja } from './wa-consulta-bandeja.ts';
 import { datoDeLaFicha, leerEsLaMisma, llavesDelTexto, pareceNombre, separarNombreYLlave, soloLlave, textoDelCliente, textoLlave, textoNoEsLaMisma, tieneLlave, unirLlaves } from './wa-cliente-reglas.ts';
@@ -2363,9 +2363,10 @@ export async function textoDeLaConsulta(
       const viajes = (await viajesAbiertosDeLaBandeja(supabase, workspaceId)) ?? [];
       const r = resolverEncabezado(consulta.ref, viajes);
       if (r?.tipo === 'viaje') negocioId = r.viaje.id;
-      else if (r?.tipo === 'ambiguo' || r?.tipo === 'aproximado') {
-        const cands = r.tipo === 'ambiguo' ? r.candidatos : [r.viaje];
-        return [`¿De cuál de estos? ${consulta.ref} puede ser:`, ...cands.slice(0, 5).map((v, i) => `${i + 1}. ${nombreDeViaje(v)}`)].join('\n');
+      else if (r?.tipo === 'aproximado') negocioId = r.viaje.id; // solo lectura: con un solo candidato, ese
+      else if (r?.tipo === 'ambiguo') {
+        const cands = r.candidatos;
+        return textoConsultaAmbigua(consulta.ref, cands.slice(0, 5).map(v => ({ linea: nombreDeViaje(v), cliente: v.cliente, destino: v.destino, nombre: v.nombre })));
       }
     }
     if (!negocioId) return `No encontré un viaje abierto de «${consulta.ref}». ${TEXTO_CONSULTA_DE_QUE_VIAJE}`;
