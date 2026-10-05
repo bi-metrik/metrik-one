@@ -840,6 +840,29 @@ describe('v2 · N2: «¿A qué viaje van?» se contesta con cada forma que el bo
     expect(t.contactos.map(c => c.nombre)).toEqual(['IGNACIO SALGAR']);
   });
 
+  it('quinto control de Vera, con el interruptor apagado: un «sí» con reserva no crea; un número con artículo fuera de la lista vuelve a preguntar y dentro de ella elige el viaje; nunca es un nombre', async () => {
+    await preguntaDeViaje();
+    const negocios = t.negocios.length;
+    await llega('nuevo Matilde Osorio', { enviado: 9 });
+    await cron(60);
+    await llega('sí, aunque falta el segundo apellido', { enviado: 70 });
+    await cron(100);
+    expect(textos().at(-1)).toContain('No entendí «sí, aunque falta el segundo apellido».\n¿Creo el cliente nuevo «Matilde Osorio»?');
+    nadaCreado(negocios);
+    await llega('opción 9', { enviado: 110 });
+    await cron(150);
+    expect(textos().at(-1)).toContain('No entendí «opción 9».\n¿Creo el cliente nuevo «Matilde Osorio»?');
+    expect(textos().some(x => x.includes('¿Creo el cliente nuevo «opción 9»?'))).toBe(false);
+    nadaCreado(negocios);
+    const n = textos().find(x => x.includes('¿A qué viaje van?'))!.split('\n').find(l => l.includes('Pedro Prueba5'))!.charAt(0);
+    await llega(`la ${n}`, { enviado: 170 });
+    colaModelo = [pedido()];
+    await cron(220);
+    expect(t.contactos).toEqual([]);
+    expect(t.negocios.length).toBe(negocios);
+    expect(t.wa_bandeja_entendimientos[0]).toMatchObject({ estado: 'negocio_actualizado', negocio_id: 'n-p' });
+  });
+
   it('«DESCARTAR» a la confirmación: descarta la tanda y no crea a nadie', async () => {
     await preguntaDeViaje();
     const negocios = t.negocios.length;

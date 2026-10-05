@@ -376,6 +376,34 @@ export function leerEleccion(texto: string): number | null {
   return m ? Number(m[1]) : null;
 }
 
+const ORDINALES: Readonly<Record<string, number>> = {
+  primero: 1, primera: 1, primer: 1, segundo: 2, segunda: 2, tercero: 3, tercera: 3, tercer: 3, cuarto: 4, cuarta: 4, quinto: 5, quinta: 5,
+};
+const CARDINALES: Readonly<Record<string, number>> = { uno: 1, dos: 2, tres: 3, cuatro: 4, cinco: 5 };
+
+/**
+ * La opción de una lista numerada, escrita como número u ordinal: lo de `leerEleccion` («2», «el 2», «opción
+ * 2») y además «el segundo», «la primera», «2do», «opción dos», «el viaje 3», «la segunda opción». `null` si
+ * no es eso. Un número en palabras necesita el artículo o «opción» («la dos»; «dos» solo, no). Lo usa la
+ * confirmación de cliente nuevo, en el código de hoy y en el atajo del intérprete por igual (quinto control
+ * de Vera, 2026-10-04): un número u ordinal nunca es un nombre.
+ */
+export function leerOpcionEscrita(texto: string): number | null {
+  const k = leerEleccion(texto);
+  if (k !== null) return k;
+  const t = normalizarNombre(texto).replace(/^(?:(?:es|era|seria|va|van)\s+)?(?:(?:para|pa|en|a)\s+)?/, '');
+  const m = /^(?:(el|la|lo|al|del)\s+)?(?:(opcion|numero|viaje)\s+)?([a-z0-9]+)(?:\s+(?:opcion|viaje))?$/.exec(t);
+  if (!m) return null;
+  const [, art, sust, w] = m;
+  const conPrefijo = !!(art || sust);
+  if (/^\d{1,2}$/.test(w)) return conPrefijo ? Number(w) : null;
+  const ord = /^(\d)(?:o|a|ro|ra|do|da|er|ero|era|to|ta)$/.exec(w);
+  if (ord) return Number(ord[1]);
+  if (ORDINALES[w]) return ORDINALES[w];
+  if (CARDINALES[w] && conPrefijo) return CARDINALES[w];
+  return null;
+}
+
 /** «Europa 2 días · Carolina Ruiz (T1 26 11)»: como se nombra una caja al comercial (`nombreDeViaje`). */
 export function lineaCaja(v: ViajeAbierto): string {
   return nombreDeViaje(v);
@@ -503,14 +531,78 @@ export type RespuestaConfirmarNuevo =
  * propuesto y vuelve a preguntar. El nombre exacto de un cliente con viaje abierto NO elige su viaje: es
  * otro nombre propuesto, y la confirmación siguiente dice «Ya hay un viaje de …».
  */
+/**
+ * Una opción de la lista que vio el comercial en la confirmación. Con el cliente y el destino (los trae
+ * `negocio_opciones`), una frase que señala el viaje («el de Cartagena», «ese mismo») se puede resolver.
+ */
+export interface OpcionConfirmarNuevo {
+  id: string;
+  codigo: string | null;
+  cliente?: string | null;
+  destino?: string | null;
+  nombre?: string | null;
+}
+
 export function interpretarConfirmacionNuevo(
-  texto: string, opciones: ReadonlyArray<{ id: string; codigo: string | null }>, propuesto?: string | null,
+  texto: string, opciones: ReadonlyArray<OpcionConfirmarNuevo>, propuesto?: string | null,
 ): RespuestaConfirmarNuevo {
-  const r = leerConfirmacionNuevo(texto, opciones);
+  const r = leerConfirmacionNuevo(texto, opciones, propuesto ?? null);
   // Repetir el mismo nombre que muestra la pregunta («¿Creo el cliente nuevo «Laura Prueba»?» → «Laura
-  // Prueba», o «NUEVO Laura Prueba») es un «sí» a ese texto (cuarto control de Vera, 2026-10-03).
+  // Prueba», o «NUEVO Laura Prueba») es un «sí» a ese texto (cuarto control de Vera, 2026-10-03). Se decide
+  // sobre el texto COMPLETO, y un texto con una negación nunca llega aquí como nombre (quinto control).
   if (r.tipo === 'nombre' && propuesto && normalizarNombre(r.nombre) === normalizarNombre(propuesto)) return { tipo: 'si' };
   return r;
+}
+
+/** Una negación en cualquier parte: con ella, la respuesta nunca es un «sí» ni un nombre (quinto control de Vera). */
+const NIEGA_EN_CONFIRMACION = /\b(?:no|nop|nope|nel|negativo|ni|tampoco|nunca|jamas)\b/;
+/** Las formas de «crear» que cuentan como «sí» en una respuesta completa («sí, créalo», «dale, créala por favor»). */
+const VERBOS_CREAR: ReadonlySet<string> = new Set(['crea', 'crealo', 'creala', 'crear', 'crearlo', 'crearla', 'creelo', 'creela', 'creemoslo', 'creemosla', 'cree']);
+/** Lo que puede acompañar al verbo sin cambiar la respuesta. Nada más: un texto con otra palabra no es este «sí». */
+const ACOMPANA_CREAR: ReadonlySet<string> = new Set(['el', 'la', 'lo', 'a', 'al', 'cliente', 'nuevo', 'nueva', 'por', 'favor', 'porfa', 'gracias',
+  'mil', 'ya', 'asi', 'de', 'una', 'entonces', 'pues', 'senor', 'senora', 'tal', 'cual']);
+/** Señalan un viaje («ese», «el mismo»): con un «sí» al lado, la respuesta es ambigua y se vuelve a preguntar. */
+const DEICTICOS: ReadonlySet<string> = new Set(['ese', 'esa', 'este', 'esta', 'eso', 'esto', 'aquel', 'aquella', 'mismo', 'misma', 'ahi', 'alli']);
+/** Lo que acompaña a una frase que señala un viaje sin nombrar nada («es para ese», «el de …», «al mismo viaje»). */
+const RELLENO_SENALA: ReadonlySet<string> = new Set(['es', 'era', 'seria', 'va', 'van', 'para', 'pa', 'en', 'a', 'al', 'del', 'de', 'el', 'la',
+  'lo', 'los', 'las', 'viaje', 'reserva', 'que', 'por', 'favor', 'porfa']);
+/** Con estas, una frase que señala un viaje dice lo contrario o es otra cosa: no se resuelve. */
+const CONTRADICE_SENALA = /\b(?:otr[oa]s?|nuev[oa]s?|distint[oa]s?|diferentes?|ningun[oa]?|crea\w*)\b/;
+
+/**
+ * El «sí» a crear dicho con el verbo, como respuesta completa: «sí, créalo», «dale créala por favor», «créalo
+ * así», «sí, crea a Sara Mejía» (con el nombre propuesto entero). Todas las palabras son de un «sí» firme,
+ * del verbo o de cortesía, y al menos una es el verbo. Un «ok» o un «listo» solos no bastan (F11): con el
+ * verbo al lado, sí. Una palabra de más («sí créalo, falta el pasaporte») ya no es este «sí».
+ */
+function esSiACrear(t: string, propuesto: string | null): boolean {
+  const nombre = normalizarNombre(propuesto);
+  const sinNombre = nombre ? ` ${t} `.replace(` ${nombre} `, ' ').trim() : t;
+  const ws = sinNombre.split(' ').filter(Boolean);
+  if (!ws.some(w => VERBOS_CREAR.has(w))) return false;
+  return ws.every(w => VERBOS_CREAR.has(w) || AFIRMA.has(w) || ACOMPANA_CREAR.has(w));
+}
+
+/**
+ * Una frase que SEÑALA el viaje del aviso «Ya hay un viaje de …» («el de Cartagena», «ese mismo», «para
+ * ese»): ese viaje, si queda uno solo. Sin nombrar nada («ese», «el mismo»), vale si el aviso nombra un solo
+ * viaje de la lista; con el destino (o el nombre del viaje) escrito, vale si es de un solo viaje del aviso.
+ * El nombre del cliente no elige su viaje (como hoy), una palabra de más, una negación o un «otro»/«nuevo»
+ * dejan `null`: se vuelve a preguntar.
+ */
+function viajeSenalado(t: string, opciones: ReadonlyArray<OpcionConfirmarNuevo>, propuesto: string | null): string | null {
+  if (!propuesto || CONTRADICE_SENALA.test(t) || NIEGA_EN_CONFIRMACION.test(t)) return null;
+  const conCliente = opciones.filter(o => o.cliente).map(o => ({ id: o.id, codigo: o.codigo, cliente: o.cliente ?? null, destino: o.destino ?? null, nombre: o.nombre ?? null }));
+  const avisados = viajesParecidos(propuesto, conCliente);
+  if (avisados.length === 0) return null;
+  const ws = t.split(' ').filter(Boolean);
+  const delViaje = (o: ViajeAbierto) => palabrasDe(`${o.destino ?? ''} ${o.nombre ?? ''}`).filter(w => !PALABRAS_COMUNES.has(w));
+  const resto = ws.filter(w => !DEICTICOS.has(w) && !RELLENO_SENALA.has(w));
+  if (resto.length === 0) return ws.some(w => DEICTICOS.has(w)) && avisados.length === 1 ? avisados[0].id : null;
+  // «el de San Andrés»: todas las palabras que quedan son del destino (o del nombre) de ese viaje, y una de ellas dice algo (4 letras o más).
+  if (!resto.some(w => w.length >= 4)) return null;
+  const nombrados = avisados.filter(o => resto.every(w => delViaje(o).includes(w)));
+  return nombrados.length === 1 ? nombrados[0].id : null;
 }
 
 /**
@@ -526,17 +618,24 @@ export function senalaUnViaje(texto: string): boolean {
 }
 
 function leerConfirmacionNuevo(
-  texto: string, opciones: ReadonlyArray<{ id: string; codigo: string | null }>,
+  texto: string, opciones: ReadonlyArray<OpcionConfirmarNuevo>, propuesto: string | null,
 ): RespuestaConfirmarNuevo {
   const bruto = String(texto ?? '').trim();
   if (!bruto) return { tipo: 'no_entendida' };
-  if (esSi(bruto)) return { tipo: 'si' };
   const t = normalizarNombre(bruto);
+  const ws = t.split(' ').filter(Boolean);
+  // «sí, ese» o «sí, el mismo» a «¿Es para ese (responde 1) o es un cliente nuevo (responde SÍ)?» dice las dos
+  // cosas: se vuelve a preguntar (H2: con duda, se pregunta).
+  const senala = ws.some(w => DEICTICOS.has(w));
+  if (!senala && esSi(bruto)) return { tipo: 'si' };
   if (/^(?:si )?(?:nuev[oa]|crear|crealo|creala|crearlo|crearla|cliente nuev[oa])$/.test(t)) return { tipo: 'si' };
+  if (!senala && !NIEGA_EN_CONFIRMACION.test(t) && esSiACrear(t, propuesto)) return { tipo: 'si' };
   if (/^descart/.test(t)) return { tipo: 'descartar' };
-  const num = /^(\d{1,2})$/.exec(t);
-  if (num) {
-    const o = opciones[Number(num[1]) - 1];
+  // El número u ordinal de la lista, como lo lee el atajo del intérprete («2», «el 2», «opción 2», «el
+  // segundo»). Fuera de la lista se vuelve a preguntar: nunca es un nombre.
+  const num = leerOpcionEscrita(bruto);
+  if (num !== null) {
+    const o = opciones[num - 1];
     return o ? { tipo: 'existente', negocio_id: o.id } : { tipo: 'no_entendida' };
   }
   const c = codigoCompacto(bruto);
@@ -544,14 +643,20 @@ function leerConfirmacionNuevo(
     const o = opciones.find(x => codigoCompacto(x.codigo) === c);
     return o ? { tipo: 'existente', negocio_id: o.id } : { tipo: 'codigo', codigo: c };
   }
-  // Un «no …» o una pregunta no son un nombre: se vuelve a preguntar sin cambiar el propuesto.
+  // Un «no …» (en cualquier parte), una pregunta, un «sí» con reserva o el verbo «crear» con algo más no son
+  // un nombre: se vuelve a preguntar sin cambiar el propuesto.
   if (/[?¿]/.test(bruto) || leerSiNo(bruto) !== null || /^(?:no|nop|nel|si|ok|okey|dale)\b/.test(t)) return { tipo: 'no_entendida' };
+  if (NIEGA_EN_CONFIRMACION.test(t) || ws.some(w => VERBOS_CREAR.has(w))) return { tipo: 'no_entendida' };
   const nuevo = leerNuevo(bruto);
-  // «el de Ana», «para ese»: señala el viaje del aviso, no nombra a nadie. Se vuelve a preguntar.
-  if (senalaUnViaje(nuevo ? nuevo.cliente ?? '' : bruto)) return { tipo: 'no_entendida' };
-  const propuesto = (nuevo ? nuevo.cliente ?? '' : bruto)
+  // «el de Cartagena», «ese mismo»: señala un viaje, no nombra a nadie. Si queda un solo viaje de la lista
+  // (por lo que nombra, o el del aviso), es ese; si no, se vuelve a preguntar.
+  if (senalaUnViaje(nuevo ? nuevo.cliente ?? '' : bruto)) {
+    const id = nuevo ? null : viajeSenalado(t, opciones, propuesto);
+    return id ? { tipo: 'existente', negocio_id: id } : { tipo: 'no_entendida' };
+  }
+  const escrito = (nuevo ? nuevo.cliente ?? '' : bruto)
     .replace(/^(?:(?:que\s+)?se\s+llama|llamad[oa]|de\s+nombre|el\s+nombre\s+es|es)[\s,.:;-]+/i, '').replace(/[.!]+$/, '').trim();
-  return calificarNombreNuevo(propuesto) === 'nombre' ? { tipo: 'nombre', nombre: propuesto } : { tipo: 'no_entendida' };
+  return calificarNombreNuevo(escrito) === 'nombre' ? { tipo: 'nombre', nombre: escrito } : { tipo: 'no_entendida' };
 }
 
 /** «No entendí»: lo que el bot contesta en el acto a una respuesta que no es de la lista del encabezado. */
