@@ -17,6 +17,7 @@
  * `tarifa-pasajero.ts` (`infanteGratisEnActividad`).
  */
 
+import { ciudadEsLugarDelNombre } from './ciudad-actividad'
 import type { Correcciones } from './correcciones'
 import { casillasConEstadia } from './estadia'
 import { conHabitaciones, resolverHabitaciones } from './habitaciones'
@@ -44,7 +45,8 @@ function campoLeido(l: LecturaCasilla | null | undefined, rotulo: string): strin
  * ficha), y si no, la que leyó la captura. `null` = la captura no la muestra.
  *
  * ⚠️ Nunca el nombre de la actividad ni lo que diga el detector del lugar: «Cayo Cangrejo» es
- * la excursión, no la ciudad.
+ * la excursión, no la ciudad. Tampoco la ciudad leída cuando es un lugar del nombre del tour
+ * (`ciudadEsLugarDelNombre`): la corregida a mano sí se respeta siempre.
  */
 export function ciudadDeActividad(
   lectura: LecturaCasilla | null | undefined,
@@ -54,7 +56,12 @@ export function ciudadDeActividad(
     ? correcciones.find(c => c.slug === 'ciudad')?.valor
     : (correcciones as Correcciones | null | undefined)?.ciudad?.valor
   if (typeof corregida === 'string' && corregida.trim() !== '') return corregida.trim()
-  return campoLeido(lectura, 'Ciudad')
+  const leida = campoLeido(lectura, 'Ciudad')
+  // Brief del 2026-10-05 · un lugar del nombre del tour no es la ciudad («Tour en lancha por la
+  // bahía de Manzanillo» leído con «Ciudad: Manzanillo»). La lectura nueva ya lo descarta
+  // (`evaluarLectura`); esto cubre los borradores leídos antes.
+  const nombre = lectura?.nombre || lectura?.identidad?.nombre || campoLeido(lectura, 'Actividad')
+  return ciudadEsLugarDelNombre(leida, nombre) ? null : leida
 }
 
 /**

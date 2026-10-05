@@ -645,7 +645,7 @@ const ACTIVIDAD: DefinicionRanura = {
   campos: [
     { slug: 'proveedor', label: 'Proveedor', tipo: 'texto', min: true, descripcion_ai: 'Quién vende la actividad: Civitatis, GetYourGuide, Viator, o el operador directo.' },
     { slug: 'nombre', label: 'Actividad', tipo: 'texto', min: true, descripcion_ai: 'Nombre de la actividad tal como aparece.' },
-    { slug: 'ciudad', label: 'Ciudad', tipo: 'texto', min: true, descripcion_ai: 'Ciudad donde se presta. Si no aparece, null: no la deduzcas del viaje.' },
+    { slug: 'ciudad', label: 'Ciudad', tipo: 'texto', min: true, descripcion_ai: 'Ciudad o destino donde se presta, SOLO si la pantalla lo muestra escrito como ciudad o destino (un rótulo «Ciudad» o «Destino», la ruta del sitio «Colombia > Providencia», «Actividades en Providencia»). Un lugar que hace parte del nombre de la actividad (una bahía, playa, cayo, isla, parque, laguna) NO es la ciudad: «Tour en lancha por la bahía de Manzanillo» no dice que la ciudad sea Manzanillo. Si no la ves escrita como ciudad o destino, null: no la deduzcas del nombre de la actividad ni del viaje.' },
     { slug: 'fecha', label: 'Fecha', tipo: 'fecha', min: false, descripcion_ai: 'Fecha de la actividad en formato AAAA-MM-DD. Si la pantalla muestra día y mes pero NO el año, devuelve --MM-DD (ej. --10-23): NUNCA inventes el año. Si también muestra el día de la semana, agrégalo tras una barra: --10-23/vie.' },
     { slug: 'duracion', label: 'Duración', tipo: 'texto', min: false, descripcion_ai: 'Duración tal como aparece (3 horas, día completo...).' },
     { slug: 'idioma', label: 'Idioma', tipo: 'texto', min: false, descripcion_ai: 'Idioma en que se presta el servicio.' },
