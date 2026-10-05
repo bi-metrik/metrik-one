@@ -477,6 +477,20 @@ function ocupacionNoCoincide(observada: OcupacionLeida, esperada: Composicion): 
   return false
 }
 
+function soloAdultosDe(c: Composicion): Composicion {
+  return { adultos: c.adultos, ninos: 0, infantes: 0 }
+}
+
+/**
+ * ¿La captura de una actividad con infante gratis muestra SOLO a los que pagan? (brief del
+ * 2026-10-05, punto 7). Vale en la casilla 1 de una actividad con infantes y sin niños
+ * (`infanteGratisEnActividad`): «2 personas» o «2 adultos» en un viaje de 2 adultos y 1 infante.
+ */
+function soloLosQuePagan(observada: OcupacionLeida, esperada: Composicion, clave: ClaveCasilla, ranuraSlug: string): boolean {
+  if (clave !== 'grupo_completo' || !infanteGratisEnActividad(esperada, ranuraSlug)) return false
+  return !ocupacionNoCoincide(observada, soloAdultosDe(esperada))
+}
+
 function sinOcupacionVisible(o: OcupacionLeida): boolean {
   return o.adultos === null && o.ninos === null && o.infantes === null && o.total === null
 }
@@ -642,6 +656,13 @@ export function validarLecturaEnCasilla(args: {
     alertas.push(
       `El pantallazo no muestra la ocupación: se toma la de la casilla (${describirOcupacion(def.ocupacion, 'y')}). ` +
       'Confirma que esa fue la búsqueda.',
+    )
+  } else if (soloLosQuePagan(observada, def.ocupacion, clave, ranuraSlug)) {
+    // Brief del 2026-10-05, punto 7 · «2 personas» en un viaje 2A+1I: son los que pagan. El
+    // infante va gratis en la actividad (2026-10-01) y el reparto lo hace `resolverTarifa`.
+    alertas.push(
+      `El pantallazo dice ${describirObservada(observada)}: son ${describirOcupacion(soloAdultosDe(def.ocupacion), 'y')}. ` +
+      `${def.ocupacion.infantes === 1 ? 'El infante no paga' : 'Los infantes no pagan'} en la actividad.`,
     )
   } else if (ocupacionNoCoincide(observada, def.ocupacion)) {
     return {
@@ -811,6 +832,10 @@ function desactualizadasTodas(
     if (!l) continue
     const buscada = ocupacionBuscada(l, def.clave, ranuraSlug)
     if (!buscada || mismaComposicion(buscada, def.ocupacion)) continue
+    // La actividad con infante gratis acepta la captura de los que pagan (punto 7 del brief del
+    // 2026-10-05): no está vieja por no contar al infante.
+    if (def.clave === 'grupo_completo' && infanteGratisEnActividad(actual, ranuraSlug)
+      && mismaComposicion(buscada, soloAdultosDe(actual))) continue
     out.push({
       clave: def.clave,
       numero: def.numero,
