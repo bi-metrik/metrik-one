@@ -413,6 +413,8 @@ beforeEach(async () => {
   }));
   ent = await import('./wa-entendimiento.ts');
   bandeja = await import('./wa-bandeja.ts');
+  // Estas pruebas miden el cron de cada minuto; las de la conversación con memoria lo prenden.
+  bandeja.procesarEnElActo.activo = false;
   bandeja.esperaEnVuelo.dormir = async () => {
     esperas++;
     for (const f of mientras.splice(0)) await f();

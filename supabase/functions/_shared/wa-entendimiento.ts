@@ -1929,7 +1929,17 @@ async function workspacesActivos(supabase: SupabaseClient, ids: string[]): Promi
  *   3. respuestas a «¿cuál contacto?» → se resuelven;
  *   4. respuestas a «¿A qué viaje van?», al reparto o a una confirmación → se atienden.
  */
-export async function procesarEntendimientos(supabase: SupabaseClient): Promise<{ entendidas: number; respuestas: number }> {
+export async function procesarEntendimientos(
+  supabase: SupabaseClient,
+  /**
+   * Solo lo de un remitente (2026-10-05, conversación con memoria): la bandeja lo corre EN EL ACTO cuando toma una
+   * respuesta, sin esperar al cron de cada minuto (de ahí salían los 55 s y los 37 s de la prueba de Mauricio). Los
+   * reclamos son actualizaciones condicionadas: correr junto al cron no toma dos veces lo mismo.
+   */
+  de?: { workspaceId: string; phone: string },
+): Promise<{ entendidas: number; respuestas: number }> {
+  // deno-lint-ignore no-explicit-any
+  const delRemitente = <Q extends { eq: (c: string, v: string) => any }>(q: Q): Q => (de ? q.eq('workspace_id', de.workspaceId).eq('remitente_phone', de.phone) : q);
   // Un error de esta misma pasada se reintenta en la siguiente (un minuto después), no enseguida: con
   // el modelo caído, los tres intentos se gastaban en dos pasadas (prueba en vivo v2, 403 de cobro).
   const inicio = new Date().toISOString();
@@ -1937,7 +1947,7 @@ export async function procesarEntendimientos(supabase: SupabaseClient): Promise<
   let respuestas = 0;
 
   // 3. Respuestas a «¿cuál contacto?».
-  const { data: conRespuesta } = await supabase.from('wa_bandeja_entendimientos').select('*')
+  const { data: conRespuesta } = await delRemitente(supabase.from('wa_bandeja_entendimientos').select('*'))
     .eq('estado', 'esperando_contacto').not('respuesta_contacto', 'is', null).limit(LOTE);
   const activosR = await workspacesActivos(supabase, [...new Set(((conRespuesta ?? []) as Fila[]).map(e => e.workspace_id as string))]);
   for (const r of ((conRespuesta ?? []) as Fila[]).filter(x => activosR.has(x.workspace_id as string))) {
@@ -1950,7 +1960,7 @@ export async function procesarEntendimientos(supabase: SupabaseClient): Promise<
   }
 
   // 4. Respuestas a la re-pregunta «¿A qué viaje van?», al reparto o a una confirmación.
-  const { data: conViaje } = await supabase.from('wa_bandeja_entendimientos').select('*')
+  const { data: conViaje } = await delRemitente(supabase.from('wa_bandeja_entendimientos').select('*'))
     .eq('estado', 'esperando_negocio').not('respuesta_negocio', 'is', null).limit(LOTE);
   const activosV = await workspacesActivos(supabase, [...new Set(((conViaje ?? []) as Fila[]).map(e => e.workspace_id as string))]);
   for (const r of ((conViaje ?? []) as Fila[]).filter(x => activosV.has(x.workspace_id as string))) {
@@ -1965,8 +1975,8 @@ export async function procesarEntendimientos(supabase: SupabaseClient): Promise<
   // Lo nuevo y los reintentos van DESPUÉS de las respuestas: una respuesta libera la pregunta
   // abierta del remitente y lo que esperaba turno puede correr en la misma pasada.
   // 1. Nuevas. El reclamo es el INSERT (entrega + segmento 0 es único): dos corridas no toman la misma.
-  const { data: entregas } = await supabase.from('wa_bandeja_entregas')
-    .select('id, workspace_id, remitente_phone, remitente_staff_id')
+  const { data: entregas } = await delRemitente(supabase.from('wa_bandeja_entregas')
+    .select('id, workspace_id, remitente_phone, remitente_staff_id'))
     .eq('estado', 'con_cliente').order('cliente_respondido_at', { ascending: true }).limit(50);
   const lista = (entregas ?? []) as Fila[];
   if (lista.length > 0) {
@@ -1987,7 +1997,7 @@ export async function procesarEntendimientos(supabase: SupabaseClient): Promise<
   }
 
   // 2. Reintentos del modelo.
-  const { data: fallidas } = await supabase.from('wa_bandeja_entendimientos').select('*')
+  const { data: fallidas } = await delRemitente(supabase.from('wa_bandeja_entendimientos').select('*'))
     .eq('estado', 'error').lt('intentos', MAX_INTENTOS).is('negocio_id', null).is('contacto_id', null).limit(LOTE);
   const activosF = await workspacesActivos(supabase, [...new Set(((fallidas ?? []) as Fila[]).map(e => e.workspace_id as string))]);
   for (const f of ((fallidas ?? []) as Fila[]).filter(x => activosF.has(x.workspace_id as string))) {

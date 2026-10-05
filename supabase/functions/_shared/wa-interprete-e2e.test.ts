@@ -272,6 +272,8 @@ beforeEach(async () => {
   bandeja = await import('./wa-bandeja.ts');
   interprete = await import('./wa-interprete.ts');
   bandeja.esperaEnVuelo.dormir = async () => {};
+  // Estas pruebas miden el cron de cada minuto: lo que se procesa en el acto (2026-10-05) va aparte.
+  bandeja.procesarEnElActo.activo = false;
   t = base();
   db = crearDb(t);
   enviados.length = 0;

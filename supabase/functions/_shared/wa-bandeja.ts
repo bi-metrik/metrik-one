@@ -13,14 +13,16 @@
 import { transcribeAudio, PROMPT_TRANSCRIPCION_LITERAL } from './wa-transcribe.ts';
 import {
   armarPreguntaNegocio, candidatosDeEncabezado, conNombreDelViaje, descartarPendientesDelRemitente, hayPreguntaPendiente, nombreDeLaEntrega,
-  nombreYConteoDeLaTanda, pendienteDeLaTanda, preguntaAbierta, reintentarCarga, textoDeLaConsulta, simularEnLaTanda, textoDeLoQueFalta, textoPrimero, tomarRespuestaContacto,
-  tomarRespuestaDeEntrega,
+  nombreYConteoDeLaTanda, pendienteDeLaTanda, preguntaAbierta, procesarEntendimientos, reintentarCarga, textoDeLaConsulta, simularEnLaTanda,
+  textoDeLoQueFalta, textoPrimero, tomarRespuestaContacto, tomarRespuestaDeEntrega,
 } from './wa-entendimiento.ts';
-import type { EnLaTanda } from './wa-entendimiento.ts';
+import type { EnLaTanda, PreguntaAbierta } from './wa-entendimiento.ts';
+import { interpretarRespuestaNegocio } from './wa-carga-reglas.ts';
+import type { OpcionNegocio } from './wa-carga-reglas.ts';
 import { leerConsultaBandeja } from './wa-consulta-bandeja.ts';
 import type { ConsultaBandeja } from './wa-consulta-bandeja.ts';
 import {
-  candidatosDelEncabezado, esRespuestaA, esRuidoEscrito, lineaCaja, pareceRespuesta, resolverEncabezado, respuestaAlEncabezado,
+  candidatosDelEncabezado, esRespuestaA, esRuidoEscrito, esSiNoCorto, lineaCaja, nombreDeViaje, pareceRespuesta, resolverEncabezado, respuestaAlEncabezado,
   textoPreguntaEncabezadoCorta,
 } from './wa-viajes-reglas.ts';
 import type { ResolucionEncabezado } from './wa-viajes-reglas.ts';
@@ -203,8 +205,50 @@ export async function responderPendiente(
   /** El escrito tal como llegó, si `texto` es su forma canónica (lo que tradujo el intérprete). */
   cuerpo?: string,
 ): Promise<boolean> {
-  if (await tomarRespuestaContacto(supabase, { workspaceId, phone, texto, wamid, enviadoAt, aunConTandaAbierta, cuerpo })) return true;
-  return tomarRespuestaDeEntrega(supabase, { workspaceId, phone, texto, wamid, enviadoAt, horas: config.horasRespuestaCliente, cuerpo });
+  const antes = procesarEnElActo.activo ? await preguntaAbierta(supabase, workspaceId, phone) : null;
+  const tomada = await tomarRespuestaContacto(supabase, { workspaceId, phone, texto, wamid, enviadoAt, aunConTandaAbierta, cuerpo })
+    || await tomarRespuestaDeEntrega(supabase, { workspaceId, phone, texto, wamid, enviadoAt, horas: config.horasRespuestaCliente, cuerpo });
+  if (tomada) await seguirEnElActo(supabase, workspaceId, phone, { texto, antes });
+  return tomada;
+}
+
+/**
+ * Conversación con memoria (2026-10-05, punto 5): lo que el bot toma como respuesta («1», «sí», un nombre, un código)
+ * se acusa en una línea y se procesa EN EL ACTO, sin esperar al cron de cada minuto. En la prueba de Mauricio el «1»
+ * tardó 55 s y el «sí» 37 s: la respuesta quedaba guardada hasta la siguiente pasada del cron (hasta 60 s) y después
+ * corría el modelo. El cron sigue igual, como red: si algo falla aquí, lo toma en su pasada. Es un objeto para que las
+ * pruebas que miden el cron lo puedan apagar.
+ */
+export const procesarEnElActo = { activo: true };
+
+export async function seguirEnElActo(
+  supabase: SupabaseClient, workspaceId: string, phone: string, p: { texto?: string; antes?: PreguntaAbierta | null } = {},
+): Promise<void> {
+  if (!procesarEnElActo.activo) return;
+  const acuse = p.texto ? await acuseDeLaRespuesta(supabase, p.texto, p.antes ?? null) : null;
+  if (acuse) await enviar(phone, acuse, workspaceId);
+  try {
+    await procesarEntendimientos(supabase, { workspaceId, phone });
+    await enviarPreguntasEnCola(supabase, { workspaceId, phone });
+  } catch (err) {
+    // El cron lo vuelve a tomar en su pasada: nada se pierde.
+    console.error(`[wa-bandeja] no se pudo procesar en el acto lo de ${phone}:`, err);
+  }
+}
+
+/** La línea que acusa una respuesta antes del trabajo lento: a qué viaje va, o que se está cargando. */
+async function acuseDeLaRespuesta(supabase: SupabaseClient, texto: string, antes: PreguntaAbierta | null): Promise<string | null> {
+  const t = texto.trim();
+  if (!t || esDescartarTodo(t) || /^descart/i.test(t)) return null;
+  if (antes?.espera === 'resumen') return esSiNoCorto(t) && /^(?:s[ií]|dale|claro|listo|ok)/i.test(t) ? 'Listo, lo cargo. Te aviso en cuanto quede.' : 'Recibido, lo estoy revisando.';
+  if (antes?.tipo === 'entrega' && antes.espera === 'viaje') {
+    const { data: e } = await supabase.from('wa_bandeja_entregas').select('negocio_opciones').eq('id', antes.id).maybeSingle();
+    const opciones = Array.isArray(e?.negocio_opciones) ? (e!.negocio_opciones as OpcionNegocio[]) : [];
+    const r = interpretarRespuestaNegocio(t, opciones);
+    const o = r.tipo === 'existente' ? opciones.find(x => x.id === r.negocio_id) : null;
+    if (o) return `Listo, va a ${nombreDeViaje({ nombre: o.nombre ?? null, cliente: o.cliente ?? null, codigo: o.codigo ?? null })}. Lo estoy leyendo.`;
+  }
+  return 'Recibido, lo estoy leyendo. Te aviso en un momento.';
 }
 
 /**
@@ -381,7 +425,10 @@ export async function atenderEnBandeja(
       workspaceId: user.workspace_id, phone: message.phone, texto: message.text.trim(),
       wamid, enviadoAt: fechaDeMeta(message.timestamp),
     });
-    if (tomada) return;
+    if (tomada) {
+      await seguirEnElActo(supabase, user.workspace_id, message.phone, { texto: message.text.trim() });
+      return;
+    }
   }
 
   let { cuerpo, origen } = cuerpoDelMensaje(message);
@@ -628,9 +675,9 @@ async function soloRuidoEscrito(supabase: SupabaseClient, entregaId: string): Pr
  * pregunta abierta. Sale una por remitente, la más vieja, cuando ya no hay otra abierta. Lo
  * llama el cron del entendimiento al terminar (ahí es donde se atienden las respuestas).
  */
-export async function enviarPreguntasEnCola(supabase: SupabaseClient): Promise<{ enviadas: number }> {
-  const { data, error } = await supabase.from('wa_bandeja_entregas')
-    .select('id, workspace_id, remitente_phone, n_mensajes, cerrada_at')
+export async function enviarPreguntasEnCola(supabase: SupabaseClient, de?: { workspaceId: string; phone: string }): Promise<{ enviadas: number }> {
+  const base = supabase.from('wa_bandeja_entregas').select('id, workspace_id, remitente_phone, n_mensajes, cerrada_at');
+  const { data, error } = await (de ? base.eq('workspace_id', de.workspaceId).eq('remitente_phone', de.phone) : base)
     .eq('estado', 'esperando_cliente').is('pregunta_enviada_at', null).is('pregunta_error', null)
     .order('cerrada_at', { ascending: true }).limit(50);
   if (error) {
