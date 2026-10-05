@@ -1148,6 +1148,13 @@ function validarPropuesta(crudo: unknown, e: EntradaValidador): Decision {
     }
   }
 
+  // Conversación con memoria (2026-10-05, punto 6): con la bandeja, «¿qué viajes están abiertos?» es la consulta de solo
+  // lectura de la bandeja del propio remitente, no la de negocios del bot: un rol que no ve los negocios igual la hace
+  // (en la prueba de Mauricio, un colaborador recibió el texto de su rol). Los temas de plata siguen con su regla.
+  if (e.bandeja) {
+    acc = acc.map(a => (a.accion === 'consulta' && a.tema === 'negocios' && !rolPermite(e.rol, 'consulta', 'negocios') ? { ...a, tema: 'viajes' } : a));
+  }
+
   // V3 — rol. Lo que el rol no puede hacer recibe el texto de su rol de hoy; nada se escribe.
   const restringido = intentsDelRol(e.rol) !== null;
   for (const a of acc) {

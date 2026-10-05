@@ -54,6 +54,8 @@ vi.mock('./wa-bandeja.ts', () => ({
   esperaEnVuelo: { ms: 0, dormir: async () => {} },
   estadoParaEsperar: vi.fn(async () => ({ hayAbierta: true, hayPregunta: false })),
   staffIdDelRemitente: vi.fn(async () => null),
+  // La memoria de la conversación (2026-10-05) tiene sus pruebas aparte: aquí no toma nada.
+  decidirConMemoria: vi.fn(async () => null),
 }));
 vi.mock('./wa-entendimiento.ts', () => ({
   candidatosDeEncabezado: espias.candidatosDeEncabezado,

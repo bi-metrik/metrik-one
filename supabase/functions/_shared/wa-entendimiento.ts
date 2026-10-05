@@ -18,6 +18,7 @@
 // ============================================================
 
 import { sendTextMessage } from './wa-respond.ts';
+import { anotarConsultaPendiente, anotarFoco, leerConversacion, viajeEnFoco } from './wa-foco.ts';
 import { bandejaActiva, elegirFallida, leerConfigBandeja, momentoDelMensaje, ordenarPorEnvio, textoFallaEntendimiento, textoReintentarSinElegir } from './wa-bandeja-reglas.ts';
 import type { ConfigBandeja, ParteDescartada } from './wa-bandeja-reglas.ts';
 import { todayBogotaISO } from './bogota.ts';
@@ -30,6 +31,7 @@ import {
   esquemaDeSalida,
   fusionarSugeridos,
   huecos,
+  LO_LLENA_AGENCIA,
   instruccionesEntendimiento,
   interpretarRespuestaContacto,
   mayusculasDeViaje,
@@ -426,6 +428,8 @@ async function cerrarConNegocio(
     }),
   });
   const ok = await enviar(ent.remitente_phone as string, [msg, extra.nota, ...avisosLlave].filter(Boolean).join('\n'), ent.workspace_id as string);
+  // El viaje que acaba de cargar queda en foco (con lo que pidió «me falta»): la respuesta a eso va directo a él.
+  await anotarFoco(supabase, ent.workspace_id as string, ent.remitente_phone as string, { negocio_id: r.negocioId, por: 'carga', faltan: h.minimo.faltan.length });
   await actualizar(supabase, ent.id as string, {
     estado: 'negocio_creado', contacto_id: contactoId, negocio_id: r.negocioId, huecos: h, confirmacion_pendiente: null,
     respuesta_enviada_at: ok ? new Date().toISOString() : null, error: ok ? null : 'envio fallido',
@@ -1753,6 +1757,7 @@ async function cargarEnNegocioExistente(
     avance: lineaAvance({ ...nombrado, fields: campos, valores: valoresQuedan }),
   });
   const ok = await enviar(ent.remitente_phone as string, msg, workspaceId);
+  await anotarFoco(supabase, workspaceId, ent.remitente_phone as string, { negocio_id: negocioId, por: 'carga', faltan: h.minimo.faltan.length });
   await actualizar(supabase, ent.id as string, {
     estado: 'negocio_actualizado', negocio_id: negocioId, destino: 'existente', negocio_destino_id: negocioId,
     contacto_id: (neg.contacto_id as string | null) ?? null, huecos: h, confirmacion_pendiente: null,
@@ -1929,7 +1934,16 @@ async function workspacesActivos(supabase: SupabaseClient, ids: string[]): Promi
  *   3. respuestas a «¿cuál contacto?» → se resuelven;
  *   4. respuestas a «¿A qué viaje van?», al reparto o a una confirmación → se atienden.
  */
-export async function procesarEntendimientos(supabase: SupabaseClient): Promise<{ entendidas: number; respuestas: number }> {
+export async function procesarEntendimientos(
+  supabase: SupabaseClient,
+  /**
+   * Solo lo de un remitente (2026-10-05, conversación con memoria): la bandeja lo corre EN EL ACTO cuando toma una
+   * respuesta, sin esperar al cron de cada minuto (de ahí salían los 55 s y los 37 s de la prueba de Mauricio). Los
+   * reclamos son actualizaciones condicionadas: correr junto al cron no toma dos veces lo mismo.
+   */
+  de?: { workspaceId: string; phone: string },
+): Promise<{ entendidas: number; respuestas: number }> {
+  const delRemitente = <Q extends { eq: (c: string, v: string) => Q }>(q: Q): Q => (de ? q.eq('workspace_id', de.workspaceId).eq('remitente_phone', de.phone) : q);
   // Un error de esta misma pasada se reintenta en la siguiente (un minuto después), no enseguida: con
   // el modelo caído, los tres intentos se gastaban en dos pasadas (prueba en vivo v2, 403 de cobro).
   const inicio = new Date().toISOString();
@@ -1937,7 +1951,7 @@ export async function procesarEntendimientos(supabase: SupabaseClient): Promise<
   let respuestas = 0;
 
   // 3. Respuestas a «¿cuál contacto?».
-  const { data: conRespuesta } = await supabase.from('wa_bandeja_entendimientos').select('*')
+  const { data: conRespuesta } = await delRemitente(supabase.from('wa_bandeja_entendimientos').select('*'))
     .eq('estado', 'esperando_contacto').not('respuesta_contacto', 'is', null).limit(LOTE);
   const activosR = await workspacesActivos(supabase, [...new Set(((conRespuesta ?? []) as Fila[]).map(e => e.workspace_id as string))]);
   for (const r of ((conRespuesta ?? []) as Fila[]).filter(x => activosR.has(x.workspace_id as string))) {
@@ -1950,7 +1964,7 @@ export async function procesarEntendimientos(supabase: SupabaseClient): Promise<
   }
 
   // 4. Respuestas a la re-pregunta «¿A qué viaje van?», al reparto o a una confirmación.
-  const { data: conViaje } = await supabase.from('wa_bandeja_entendimientos').select('*')
+  const { data: conViaje } = await delRemitente(supabase.from('wa_bandeja_entendimientos').select('*'))
     .eq('estado', 'esperando_negocio').not('respuesta_negocio', 'is', null).limit(LOTE);
   const activosV = await workspacesActivos(supabase, [...new Set(((conViaje ?? []) as Fila[]).map(e => e.workspace_id as string))]);
   for (const r of ((conViaje ?? []) as Fila[]).filter(x => activosV.has(x.workspace_id as string))) {
@@ -1965,8 +1979,8 @@ export async function procesarEntendimientos(supabase: SupabaseClient): Promise<
   // Lo nuevo y los reintentos van DESPUÉS de las respuestas: una respuesta libera la pregunta
   // abierta del remitente y lo que esperaba turno puede correr en la misma pasada.
   // 1. Nuevas. El reclamo es el INSERT (entrega + segmento 0 es único): dos corridas no toman la misma.
-  const { data: entregas } = await supabase.from('wa_bandeja_entregas')
-    .select('id, workspace_id, remitente_phone, remitente_staff_id')
+  const { data: entregas } = await delRemitente(supabase.from('wa_bandeja_entregas')
+    .select('id, workspace_id, remitente_phone, remitente_staff_id'))
     .eq('estado', 'con_cliente').order('cliente_respondido_at', { ascending: true }).limit(50);
   const lista = (entregas ?? []) as Fila[];
   if (lista.length > 0) {
@@ -1987,7 +2001,7 @@ export async function procesarEntendimientos(supabase: SupabaseClient): Promise<
   }
 
   // 2. Reintentos del modelo.
-  const { data: fallidas } = await supabase.from('wa_bandeja_entendimientos').select('*')
+  const { data: fallidas } = await delRemitente(supabase.from('wa_bandeja_entendimientos').select('*'))
     .eq('estado', 'error').lt('intentos', MAX_INTENTOS).is('negocio_id', null).is('contacto_id', null).limit(LOTE);
   const activosF = await workspacesActivos(supabase, [...new Set(((fallidas ?? []) as Fila[]).map(e => e.workspace_id as string))]);
   for (const f of ((fallidas ?? []) as Fila[]).filter(x => activosF.has(x.workspace_id as string))) {
@@ -2351,7 +2365,8 @@ export async function textoDeLaConsulta(
     return textoTanda({ nombre: tanda.nombre, n: tanda.n, cierre: bandeja.palabrasCierre[0] ?? 'listo' });
   }
   if (consulta.tipo === 'viajes') {
-    const dicho = consulta.cliente ?? tanda?.cajaCliente ?? null;
+    // Sin nombre: el cliente de la tanda abierta, o el del viaje en foco (conversación con memoria, 2026-10-05).
+    const dicho = consulta.cliente ?? tanda?.cajaCliente ?? await clienteDelFoco(supabase, workspaceId, phone, bandeja);
     if (!dicho) return TEXTO_CONSULTA_DE_QUIEN;
     // Noveno control (hallazgo 2): el cliente es el contacto que el escrito nombra exacto, por la parte que coincide con
     // el directorio («qué tiene abierto ahorita Ana Ruiz» → Ana Ruiz). Sin eso, solo un parecido de lo dicho entero.
@@ -2391,7 +2406,21 @@ export async function textoDeLaConsulta(
   } else if (tanda?.cajaCliente) {
     return `El viaje nuevo de ${nombrePropio(tanda.cajaCliente)} todavía no está creado: lo creo cuando me digas que sí en el resumen. Llevas ${tanda.n} ${tanda.n === 1 ? 'mensaje' : 'mensajes'}.`;
   } else {
-    return TEXTO_CONSULTA_DE_QUE_VIAJE;
+    // Conversación con memoria (2026-10-05, punto 1): sin referencia, el viaje en foco. Con dos en la ventana, se
+    // pregunta una vez nombrando los dos; sin ninguno, «¿De qué viaje?». En los dos casos la pregunta queda pendiente:
+    // el escrito que nombre el viaje la contesta con el mismo alcance.
+    const conv = await leerConversacion(supabase, workspaceId, phone);
+    const f = viajeEnFoco(conv.focos, Date.now(), bandeja.minutosFoco);
+    if (f.tipo === 'uno') negocioId = f.foco.negocio_id;
+    else {
+      await anotarConsultaPendiente(supabase, workspaceId, phone, {
+        tipo: 'viaje', ...(consulta.alcance ? { alcance: consulta.alcance } : {}), at: new Date().toISOString(),
+        ...(f.tipo === 'dos' ? { candidatos: f.focos.map(x => x.negocio_id) } : {}),
+      });
+      if (f.tipo === 'ninguno') return TEXTO_CONSULTA_DE_QUE_VIAJE;
+      const dos = await viajesPorId(supabase, workspaceId, f.focos.map(x => x.negocio_id));
+      return textoConsultaAmbigua('Lo que preguntas', dos.map(v => ({ linea: nombreDeViaje(v), cliente: v.cliente, destino: v.destino, nombre: v.nombre })));
+    }
   }
   const { data: neg } = await supabase.from('negocios').select('id, codigo, nombre, contactos(nombre), empresas(nombre)').eq('id', negocioId).maybeSingle();
   const bloques = await bloquesDatosDelNegocio(supabase, negocioId);
@@ -2401,5 +2430,75 @@ export async function textoDeLaConsulta(
   const avance = lineaAvance({
     codigo: (neg.codigo as string | null) ?? null, cliente: nombreRel(neg.contactos) ?? nombreRel(neg.empresas), nombre: (neg.nombre as string | null) ?? null, fields, valores,
   });
-  return textoEstadoViaje({ avance, faltan: huecos(fields, valores).minimo.faltan.map(f => f.label.toLowerCase()) });
+  // Lo que se pregunta (punto 3): «para completo» lista lo de completo (mínimo y deseable, sin lo que llena la agencia,
+  // como la barra «Completo»); «para cotizar», lo del mínimo; «cómo va», los dos.
+  const sinAgencia = huecos(fields.filter(f => f.lo_llena !== LO_LLENA_AGENCIA), valores);
+  await anotarFoco(supabase, workspaceId, phone, { negocio_id: negocioId, por: 'consulta' });
+  return textoEstadoViaje({
+    avance, alcance: consulta.alcance,
+    faltan: huecos(fields, valores).minimo.faltan.map(f => f.label.toLowerCase()),
+    faltanCompleto: [...sinAgencia.minimo.faltan, ...sinAgencia.deseable.faltan].map(f => f.label.toLowerCase()),
+  });
+}
+
+/**
+ * Conversación con memoria (2026-10-05, punto 2): un dato escrito que responde a «me falta» se carga EN EL ACTO en el
+ * viaje en foco, sin tanda, resumen ni «sí». Nace una entrega cerrada (`respuesta_a_lo_que_falta`) con el reparto ya
+ * confirmado a ese viaje, y el entendimiento la corre como cualquier carga en un viaje existente: lee SOLO lo nuevo, lo
+ * compara con lo que el viaje ya tenía (el aviso de viaje equivocado sigue: si habla de otro destino o de otro cliente,
+ * pregunta antes de cargar) y contesta qué anotó y cuánto falta. `false`: no se pudo crear (sigue como hoy).
+ */
+export async function cargarDatoEnElViaje(
+  supabase: SupabaseClient,
+  p: { workspaceId: string; phone: string; staffId: string | null; colaboradorId: string | null; wamid: string; cuerpo: string; enviadoAt: string | null; negocioId: string },
+): Promise<boolean> {
+  const [v] = await viajesPorId(supabase, p.workspaceId, [p.negocioId]);
+  if (!v) return false;
+  const ahora = new Date().toISOString();
+  const plan: PlanViajes = {
+    version: 2,
+    mensajes: [{ n: 1, destino: { tipo: 'existente', negocio_id: v.id, codigo: v.codigo, cliente: v.cliente, nombre: v.nombre ?? null }, por: 'comercial' }],
+    encabezados: [],
+    avisos: [],
+  };
+  const { data: e, error } = await supabase.from('wa_bandeja_entregas').insert({
+    workspace_id: p.workspaceId, remitente_phone: p.phone, remitente_staff_id: p.staffId, remitente_colaborador_id: p.colaboradorId,
+    estado: 'con_cliente', abierta_at: ahora, ultimo_mensaje_at: ahora, n_mensajes: 1, cerrada_at: ahora, motivo_cierre: 'respuesta_a_lo_que_falta',
+    pregunta_enviada_at: ahora, cliente_texto: 'sí', cliente_respondido_at: ahora, plan_viajes: plan,
+  }).select('id').single();
+  if (error || !e) {
+    console.error('[wa-entendimiento] no se pudo crear la entrega del dato:', error?.message);
+    return false;
+  }
+  const { error: eM } = await supabase.from('wa_bandeja_mensajes').insert({
+    workspace_id: p.workspaceId, entrega_id: e.id, wa_message_id: p.wamid, remitente_phone: p.phone, remitente_staff_id: p.staffId,
+    remitente_colaborador_id: p.colaboradorId, tipo: 'text', papel: 'contenido', cuerpo: p.cuerpo, cuerpo_origen: 'texto', reenviado: false, enviado_at: p.enviadoAt,
+  });
+  if (eM) {
+    // Meta reintentó el mismo mensaje: ya se tomó (la entrega nueva queda sin mensajes y el entendimiento la descarta).
+    console.error('[wa-entendimiento] no se pudo guardar el dato:', eM.message);
+    await supabase.from('wa_bandeja_entregas').update({ estado: 'esperando_cliente', pregunta_error: 'dato duplicado' }).eq('id', e.id);
+    return String(eM.message).includes('duplicate');
+  }
+  return true;
+}
+
+/** El viaje de un id, como lo nombra la bandeja («D1 26 1 · Diego Torres»). */
+export async function nombreDelViajeDeId(supabase: SupabaseClient, workspaceId: string, negocioId: string): Promise<string | null> {
+  const [v] = await viajesPorId(supabase, workspaceId, [negocioId]);
+  return v ? nombreDeViaje(v) : null;
+}
+
+/** El cliente del viaje en foco, si hay uno solo en la ventana. */
+async function clienteDelFoco(supabase: SupabaseClient, workspaceId: string, phone: string, bandeja: ConfigBandeja): Promise<string | null> {
+  const f = viajeEnFoco((await leerConversacion(supabase, workspaceId, phone)).focos, Date.now(), bandeja.minutosFoco);
+  if (f.tipo !== 'uno') return null;
+  const [v] = await viajesPorId(supabase, workspaceId, [f.foco.negocio_id]);
+  return v?.cliente ? nombrePropio(v.cliente) : null;
+}
+
+/** Los viajes de unos ids, como los ve la bandeja (código, cliente, destino, nombre). */
+async function viajesPorId(supabase: SupabaseClient, workspaceId: string, ids: string[]): Promise<ViajeAbierto[]> {
+  const todos = (await viajesAbiertosDeLaBandeja(supabase, workspaceId)) ?? [];
+  return ids.map(id => todos.find(v => v.id === id)).filter((v): v is ViajeAbierto => !!v);
 }

@@ -74,7 +74,9 @@ const RELLENO_REFERENCIA: ReadonlySet<string> = new Set(['el', 'la', 'los', 'las
   'cotizacion', 'es', 'era', 'seria', 'ese', 'esa', 'este', 'esta', 'en', 'con', 'cliente', 'clienta', 'senor', 'senora', 'por', 'favor', 'porfa', 'uno',
   'una', 'mismo', 'misma', 'destino', 'hacia', 'sale', 'salen', 'rumbo', 'pa', 'y',
   // Noveno control (hallazgo 8): el demostrativo plural y el verbo de ir («esos van en el de Cartagena»).
-  'esos', 'esas', 'estos', 'estas', 'aquellos', 'aquellas', 'ir', 'vamos', 'vaya', 'vayan', 'iria', 'irian', 'iran']);
+  'esos', 'esas', 'estos', 'estas', 'aquellos', 'aquellas', 'ir', 'vamos', 'vaya', 'vayan', 'iria', 'irian', 'iran',
+  // El tratamiento del cliente («el de San Andrés de don Diego»: conversación con memoria, 2026-10-05).
+  'don', 'dona', 'sr', 'sra']);
 /** «el de», «la de», «la que va a», «del»: la respuesta SEÑALA un viaje, no nombra a una persona. */
 const SENALA_VIAJE = /^(?:(?:es|era|seria)\s+)?(?:(?:para|pa|en|a)\s+)?(?:el|la|lo|al|del)\s+(?:de|del|que)?\b|^del?\b/;
 

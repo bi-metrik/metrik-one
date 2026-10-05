@@ -249,6 +249,8 @@ beforeEach(async () => {
   mod = await import('./wa-entendimiento.ts');
   // La espera por los mensajes en camino (la carrera de los webhooks) no corre con reloj de verdad aquí.
   (await import('./wa-bandeja.ts')).esperaEnVuelo.dormir = async () => {};
+  // Estas pruebas miden el cron de cada minuto: lo que se procesa en el acto (2026-10-05) va aparte.
+  (await import('./wa-bandeja.ts')).procesarEnElActo.activo = false;
   t = base();
   db = crearDb(t);
   enviados.length = 0;

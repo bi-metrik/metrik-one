@@ -120,7 +120,13 @@ function crearDb(t: Tablas) {
       if (op === 'upsert') {
         const f = { id: nuevoId(), ...(payload as Fila) };
         const cols = upsertOpts.onConflict!.split(',').map(c => c.trim());
-        if (t[tabla].some(x => cols.every(c => (x[c] ?? 0) === (f[c] ?? 0)))) return { data: [], error: null };
+        const ya = t[tabla].find(x => cols.every(c => (x[c] ?? 0) === (f[c] ?? 0)));
+        // Como la base: con `ignoreDuplicates` no toca la fila que ya está; sin él, la actualiza con lo dado.
+        if (ya && upsertOpts.ignoreDuplicates) return { data: [], error: null };
+        if (ya) {
+          Object.assign(ya, payload as Fila);
+          return { data: [proyectar(ya)], error: null };
+        }
         t[tabla].push(f);
         return { data: [proyectar(f)], error: null };
       }
@@ -270,6 +276,7 @@ function base(): Tablas {
     wa_bandeja_entregas: [],
     wa_bandeja_mensajes: [],
     wa_bandeja_entendimientos: [],
+    wa_bandeja_conversacion: [],
     etapas_negocio: [{ id: 'et-solicitud', linea_id: LINEA, orden: 1, stage: 'venta' }],
     bloque_configs: [BLOQUE_CONFIG],
     contactos: [],
@@ -364,6 +371,8 @@ const nuevo = (nombre: string) => `nuevo ${nombre} ${celEscrito(nombre)}`;
 const acuse = (nombre: string, ...parecidos: string[]) => [
   `Va como viaje nuevo de ${nombre}, cliente nuevo (cel. ${celEscrito(nombre)}). Lo creo cuando me digas que sí en el resumen.`,
   'Reenvíame lo que te pidió y al final te muestro el resumen.', ...parecidos].join('\n');
+/** Nunca silencio (2026-10-05): lo que dice un escrito que abre una tanda sin cliente. */
+const TANDA_SIN_CLIENTE = 'Lo guardo en una tanda nueva. Escríbeme de qué cliente o viaje es (el código sirve), o «nuevo» y el nombre del cliente. Cuando termines, «listo».';
 /** Cómo el resumen nombra el viaje nuevo de ese cliente. */
 const grupo = (nombre: string) => `Viaje nuevo de ${nombre} (cliente nuevo, cel. ${celEscrito(nombre)})`;
 /** El destino guardado de un viaje nuevo de un cliente nuevo, con su llave. */
@@ -413,6 +422,8 @@ beforeEach(async () => {
   }));
   ent = await import('./wa-entendimiento.ts');
   bandeja = await import('./wa-bandeja.ts');
+  // Estas pruebas miden el cron de cada minuto; las de la conversación con memoria lo prenden.
+  bandeja.procesarEnElActo.activo = false;
   bandeja.esperaEnVuelo.dormir = async () => {
     esperas++;
     for (const f of mientras.splice(0)) await f();
@@ -440,7 +451,8 @@ describe('escenario 1 de la prueba en vivo: Laura Prueba2 y Diego Prueba2, al ri
     // Cartagena, mandado 3 s después del encabezado, se procesa ANTES (la carrera de la prueba).
     await llega(CARTAGENA, { enviado: 3, llega: 4 });
     await llega(nuevo('Laura Prueba2'), { enviado: 0, llega: 6 });
-    expect(textos()).toEqual([acuse('Laura Prueba2')]);
+    // El escrito abrió la tanda sin cliente (su encabezado venía en camino): el bot lo dice, nunca calla (2026-10-05).
+    expect(textos()).toEqual([TANDA_SIN_CLIENTE, acuse('Laura Prueba2')]);
     await llega('listo', { enviado: 5, llega: 7 });
     expect(alBot).toEqual([]); // nada al bot de actividades
     expect(textos().at(-1)).toBe([
@@ -1432,7 +1444,8 @@ describe('Trappvel 2026-10-02: «cliente nuevo Daniel Pérez» con un viaje abie
     viajeDeLina();
     await llega('Daniel Pérez', { enviado: 0 });
     await llega('quiere cotizar Cartagena para 2', { enviado: 3, reenviado: true });
-    expect(textos()).toEqual([]);
+    // No la toca ni pregunta por Lina; dice que lo guardó y qué espera (nunca silencio, 2026-10-05).
+    expect(textos()).toEqual([TANDA_SIN_CLIENTE]);
     await llega('listo', { enviado: 6 });
     expect(textos().at(-1)).toMatch(/¿De qué viaje (?:es|son)/);
     expect(t.wa_bandeja_entregas[0].plan_viajes).toBeNull(); // sin encabezado: nada se asignó a Lina
@@ -1748,7 +1761,7 @@ describe('2026-10-05 · la prueba de Mauricio, parafraseada: viaje nuevo de un c
     await llega('M1 26 1', { enviado: 0 });
     await llega('¿qué le falta?', { enviado: 5 });
     expect(textos().at(-1)).toMatch(/MIAMI 7N/);
-    expect(textos().at(-1)).toMatch(/\nLe falta: |\nYa tiene todo lo mínimo para cotizar\./);
+    expect(textos().at(-1)).toMatch(/\nLe falta para cotizar: |\nYa tiene todo lo mínimo para cotizar\./);
     expect(t.wa_bandeja_mensajes.filter(m => String(m.cuerpo).includes('le falta'))).toEqual([]);
   });
 
@@ -2096,5 +2109,149 @@ describe('noveno control de Vera (2026-10-05): la fórmula delante del nombre no
     colaModelo = [salidaModelo({ destino: { valor: 'Mompox', frase: 'ir a Mompox' } })];
     await cron(60);
     expect(t.contactos.map(c => c.nombre)).toEqual(['BERNARDO LIZCANO']);
+  });
+});
+
+describe('2026-10-05 · conversación con memoria: la secuencia de las 12:15, de punta a punta (textos inventados)', () => {
+  /** Un viaje abierto de Fermín Ocampo a San Andrés, con lo poco que tiene. */
+  function viajeDeFermin() {
+    t.contactos.push({ id: 'c-fo', workspace_id: WS, nombre: 'FERMÍN OCAMPO', telefono: '3006661122', email: null, created_at: '2026-01-10T10:00:00Z' });
+    t.negocios.push({ ...negocioDePrueba('n-fo', 'F 26 1', 'SAN ANDRÉS DIC', 'FERMÍN OCAMPO'), contacto_id: 'c-fo' });
+    t.negocio_bloques.push({ id: 'b-n-fo', negocio_id: 'n-fo', data: { destino: 'SAN ANDRÉS' }, updated_at: null, bloque_configs: { orden: 1, config_extra: { fields: FIELDS }, bloque_definitions: { tipo: 'datos' }, etapas_negocio: { orden: 1 } } });
+  }
+  /** Y otro de Gloria Arbeláez a Cartagena. */
+  function viajeDeGloria() {
+    t.contactos.push({ id: 'c-ga', workspace_id: WS, nombre: 'GLORIA ARBELÁEZ', telefono: '3007773344', email: null, created_at: '2026-01-10T10:00:00Z' });
+    t.negocios.push({ ...negocioDePrueba('n-ga', 'G 26 1', 'CARTAGENA ENE', 'GLORIA ARBELÁEZ'), contacto_id: 'c-ga' });
+    t.negocio_bloques.push({ id: 'b-n-ga', negocio_id: 'n-ga', data: { destino: 'CARTAGENA' }, updated_at: null, bloque_configs: { orden: 1, config_extra: { fields: FIELDS }, bloque_definitions: { tipo: 'datos' }, etapas_negocio: { orden: 1 } } });
+  }
+  const datosDel = (id: string) => t.negocio_bloques.find(b => b.negocio_id === id)!.data as Fila;
+  const PRIMERA_CARGA = salidaModelo({
+    destino: { valor: 'San Andrés', frase: 'San Andrés' }, fecha_salida: { valor: '2026-12-10', frase: 'del 10 al 15 de diciembre' },
+    fecha_regreso: { valor: '2026-12-15', frase: 'del 10 al 15 de diciembre' }, adultos: { valor: '2', frase: '2 adultos' }, ninos: { valor: '1', frase: 'un niño' },
+  });
+  /** La tanda sin encabezado de Fermín, el «listo» y el «1» a la lista: la carga corre en el acto. */
+  async function cargaDeFermin(interprete?: { llamadas: { n: number } }) {
+    await llega('quieren ir a San Andrés del 10 al 15 de diciembre, son 2 adultos y un niño', { enviado: 0, reenviado: true });
+    await llega('listo', { enviado: 5, interprete });
+    expect(textos().at(-1)).toMatch(/¿De qué viaje es el mensaje\?\n1\. SAN ANDRÉS DIC · Fermín Ocampo \(F 26 1\)/);
+    colaModelo = [PRIMERA_CARGA];
+    await llega('1', { enviado: 10, interprete });
+  }
+  beforeEach(() => { bandeja.procesarEnElActo.activo = true; });
+
+  for (const modo of ['apagado', 'prendido'] as const) {
+    it(`interruptor ${modo}: «1» se acusa y carga en el acto; «me falta» va directo al viaje; las preguntas contestan lo que preguntan y nunca «¿De qué viaje?»`, async () => {
+      viajeDeFermin();
+      const llamadas = { n: 0 };
+      const interprete = modo === 'prendido' ? { llamadas } : undefined;
+      await cargaDeFermin(interprete);
+      // 12:16 · el «1» se acusa en el acto y la carga corre ya: sin `cron`, los datos ya están y el bot dijo qué falta.
+      expect(textos().slice(-2)).toEqual([
+        'Listo, va a SAN ANDRÉS DIC · Fermín Ocampo (F 26 1). Lo estoy leyendo.',
+        expect.stringMatching(/^Cargué en SAN ANDRÉS DIC · Fermín Ocampo \(F 26 1\): [\s\S]*\nPara empezar a cotizar me falta:\n1\. ¿Desde qué ciudad salen\?/),
+      ]);
+      expect(datosDel('n-fo')).toMatchObject({ adultos: 2, ninos: 1 });
+      // 12:17 · lo que pedía «me falta», escrito: directo al viaje, sin tanda ni resumen ni «sí», con lo que quedó.
+      colaModelo = [salidaModelo({ categoria_hotel: { valor: '4', frase: 'lo quieren 4 estrellas' }, ciudad_origen: { valor: 'Medellín', frase: 'salen de Medellín' }, edades_menores: { valor: '8', frase: 'el niño tiene 8' } })];
+      const antes2 = textos().length;
+      await llega('El hotel lo quieren 4 estrellas, salen de Medellín y el niño tiene 8', { enviado: 30, interprete });
+      expect(textos().slice(antes2)).toEqual([
+        'Lo anoto en SAN ANDRÉS DIC · Fermín Ocampo (F 26 1). Lo estoy leyendo; te digo qué quedó.',
+        expect.stringMatching(/^Cargué en SAN ANDRÉS DIC · Fermín Ocampo \(F 26 1\): [\s\S]*ciudad de salida MEDELLÍN[\s\S]*Mínimo 9\/9 \(100 %\)/),
+      ]);
+      expect(t.wa_bandeja_entregas.filter(e => e.estado === 'abierta')).toEqual([]);
+      expect(datosDel('n-fo')).toMatchObject({ ciudad_origen: 'MEDELLÍN', categoria_hotel: '4' });
+      // 12:19 · las preguntas por lo que falta: el viaje en foco, contestando lo que preguntan (completo: lo que queda).
+      const antes3 = textos().length;
+      await llega('que queda pendiente para completar la solicitud del viaje de Fermín Ocampo', { enviado: 60, interprete });
+      await llega('que faltaría para entregarlo completo?', { enviado: 70, interprete });
+      await llega('Pero faltan 4 puntos para que quede completo', { enviado: 80, interprete });
+      await llega('y para cotizar qué le falta?', { enviado: 90, interprete });
+      const completo = 'SAN ANDRÉS DIC · Fermín Ocampo (F 26 1) — Mínimo 9/9 (100 %) · Completo 9/10 (90 %)\nLe falta 1 dato para completo: presupuesto aproximado del viaje.';
+      expect(textos().slice(antes3)).toEqual([completo, completo, completo,
+        'SAN ANDRÉS DIC · Fermín Ocampo (F 26 1) — Mínimo 9/9 (100 %) · Completo 9/10 (90 %)\nYa tiene todo lo mínimo para cotizar.']);
+      expect(textos().some(x => /¿De qué viaje\?/.test(x))).toBe(false);
+      // Con el interruptor prendido, el código las lee: el modelo no se llama.
+      expect(llamadas.n).toBe(0);
+    });
+  }
+
+  it('sin viaje en foco, «¿qué falta para completo?» pregunta de qué viaje y la respuesta («Del de San Andrés de don Fermín») la contesta con el mismo alcance', async () => {
+    viajeDeFermin();
+    await llega('qué falta para completo?', { enviado: 0 });
+    expect(textos().at(-1)).toBe('¿De qué viaje? Dime el cliente o el nombre del viaje y te digo cómo va.');
+    await llega('Del de San Andrés de don Fermín', { enviado: 5 });
+    expect(textos().at(-1)).toMatch(/^SAN ANDRÉS DIC · Fermín Ocampo \(F 26 1\) — .*\nLe faltan \d+ datos para completo: /);
+    expect(t.wa_bandeja_entregas).toEqual([]);
+  });
+
+  it('dos viajes con lo que falta: el dato que no nombra ninguno pregunta una vez cuál; «el de Cartagena» lo carga ahí', async () => {
+    viajeDeFermin();
+    viajeDeGloria();
+    await cargaDeFermin();
+    await llega('quieren ir a Cartagena en enero, son 3 adultos', { enviado: 20, reenviado: true });
+    await llega('listo', { enviado: 25 });
+    colaModelo = [salidaModelo({ destino: { valor: 'Cartagena', frase: 'Cartagena' }, adultos: { valor: '3', frase: '3 adultos' } })];
+    const lista = textos().at(-1)!;
+    const k = lista.split('\n').find(l => l.includes('Gloria Arbeláez'))!.charAt(0);
+    await llega(k, { enviado: 30 });
+    expect(datosDel('n-ga')).toMatchObject({ adultos: 3 });
+    const antes = textos().length;
+    await llega('prefieren hotel todo incluido', { enviado: 40 });
+    expect(textos().slice(antes)).toEqual([expect.stringMatching(/^¿Para cuál viaje es lo que me escribiste: CARTAGENA ENE · Gloria Arbeláez \(G 26 1\) o SAN ANDRÉS DIC · Fermín Ocampo \(F 26 1\)\? Dime cuál/)]);
+    expect(t.wa_bandeja_entregas.filter(e => e.estado === 'abierta')).toEqual([]);
+    colaModelo = [salidaModelo({ categoria_hotel: { valor: '5', frase: 'hotel todo incluido' } })];
+    await llega('el de Cartagena', { enviado: 45 });
+    expect(textos().some(x => x.startsWith('Lo anoto en CARTAGENA ENE · Gloria Arbeláez (G 26 1).'))).toBe(true);
+    expect(t.wa_bandeja_mensajes.filter(m => m.cuerpo === 'prefieren hotel todo incluido')).toHaveLength(1);
+  });
+
+  it('una consulta durante una carga en vuelo espera y lo dice; un escrito que repite la respuesta no abre tanda', async () => {
+    viajeDeFermin();
+    // Una carga del mismo remitente en vuelo (un entendimiento procesando para F 26 1).
+    t.wa_bandeja_entendimientos.push({ id: 'e-vuelo', workspace_id: WS, entrega_id: 'x', segmento: 1, remitente_phone: TEL, estado: 'procesando', negocio_destino_id: 'n-fo', updated_at: new Date(T0).toISOString() });
+    bandeja.esperaDeCarga.ms = 0;
+    bandeja.esperaDeCarga.dormir = async () => { t.wa_bandeja_entendimientos.find(e => e.id === 'e-vuelo')!.estado = 'negocio_actualizado'; };
+    vi.setSystemTime(new Date(T0));
+    await llega('el de San Andrés', { enviado: 0, llega: 1 });
+    expect(textos().at(-1)).toBe(bandeja.TEXTO_EN_VUELO);
+    expect(t.wa_bandeja_entregas).toEqual([]);
+    await llega('qué le falta al de San Andrés?', { enviado: 2, llega: 3 });
+    expect(textos().slice(-2)).toEqual(['Lo estoy cargando; te digo en un momento.', expect.stringMatching(/^SAN ANDRÉS DIC · Fermín Ocampo \(F 26 1\) — /)]);
+  });
+
+  it('la frontera: tras la carga, «nuevo Lucía Prueba» abre su viaje (no es un dato de Fermín); un reenvío del cliente va a la tanda', async () => {
+    viajeDeFermin();
+    await cargaDeFermin();
+    await llega(nuevo('Lucía Prueba'), { enviado: 30 });
+    expect(textos().at(-1)).toBe(acuse('Lucía Prueba'));
+    await llega('listo', { enviado: 35 });
+    await llega('sí', { enviado: 36 });
+    // Un reenvío del cliente con las respuestas: es la voz del cliente y puede ser otro pedido; va a la tanda (el resumen
+    // dice a qué viaje), nunca directo al viaje en foco.
+    await llega('salimos de Pereira, el niño tiene 6', { enviado: 60, reenviado: true });
+    expect(t.wa_bandeja_entregas.filter(e => e.estado === 'abierta')).toHaveLength(1);
+  });
+
+  it('la respuesta a lo que falta en dos mensajes: cada uno va al viaje en foco', async () => {
+    viajeDeFermin();
+    await cargaDeFermin();
+    colaModelo = [salidaModelo({ ciudad_origen: { valor: 'Medellín', frase: 'salen de Medellín' } })];
+    await llega('salen de Medellín', { enviado: 30 });
+    colaModelo = [salidaModelo({ edades_menores: { valor: '8', frase: 'el niño tiene 8 años' } })];
+    await llega('el niño tiene 8 años', { enviado: 40 });
+    expect(datosDel('n-fo')).toMatchObject({ ciudad_origen: 'MEDELLÍN', edades_menores: '8' });
+    expect(t.wa_bandeja_entregas.filter(e => e.motivo_cierre === 'respuesta_a_lo_que_falta')).toHaveLength(2);
+  });
+
+  it('las listas numeradas aceptan el número: «¿De qué viaje es el mensaje?» al cerrar la tanda y la del encabezado aproximado', async () => {
+    viajeDeFermin();
+    await cargaDeFermin();
+    expect(datosDel('n-fo')).toMatchObject({ adultos: 2 });
+    await llega('Ocampo', { enviado: 30 });
+    expect(textos().at(-1)).toMatch(/^¿De qué viaje es «Ocampo»\?/);
+    await llega('1', { enviado: 31 });
+    expect(textos().at(-1)).toBe('📌 SAN ANDRÉS DIC · Fermín Ocampo (F 26 1)');
   });
 });
