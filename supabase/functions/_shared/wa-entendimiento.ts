@@ -95,7 +95,12 @@ import type { Segmento } from './wa-viajes-reglas.ts';
 import {
   completarLlave, crearContactoConGuardian, directorioDeLaTanda, directorioDelPlan, empresaEspejo, resolverClienteEnBase,
 } from './wa-cliente.ts';
-import { datoDeLaFicha, leerEsLaMisma, llavesDelTexto, separarNombreYLlave, soloLlave, textoDelCliente, textoLlave, textoNoEsLaMisma, tieneLlave, unirLlaves } from './wa-cliente-reglas.ts';
+import { fichasPorNombre } from './wa-cliente.ts';
+import {
+  textoConsultaAmbigua, textoEstadoViaje, textoTanda, textoViajesDelCliente, TEXTO_CONSULTA_DE_QUE_VIAJE, TEXTO_CONSULTA_DE_QUIEN, TEXTO_SIN_TANDA,
+} from './wa-consulta-bandeja.ts';
+import type { ConsultaBandeja } from './wa-consulta-bandeja.ts';
+import { datoDeLaFicha, leerEsLaMisma, llavesDelTexto, pareceNombre, separarNombreYLlave, soloLlave, textoDelCliente, textoLlave, textoNoEsLaMisma, tieneLlave, unirLlaves } from './wa-cliente-reglas.ts';
 import type { Directorio, FichaCliente, Llave, ResolucionCliente } from './wa-cliente-reglas.ts';
 import type { SupabaseClient } from './types.ts';
 
@@ -1516,7 +1521,7 @@ async function entenderSegmento(
       await preguntarYEsperar(supabase, ent, textoNombreNuevoEnDuda(r.propuesto), pendiente as 'cruce' | 'sin_solicitud' | 'dos_viajes');
       return;
     }
-    await preguntarYEsperar(supabase, ent, 'No entendí. ¿Los cargo ahí? Responde «sí», el código del viaje correcto, o «nuevo» y el nombre del cliente.', pendiente as 'cruce' | 'sin_solicitud' | 'dos_viajes');
+    await preguntarYEsperar(supabase, ent, 'No entendí. ¿Los cargo ahí? Responde «sí», dime cuál es el viaje correcto, o «nuevo» y el nombre del cliente.', pendiente as 'cruce' | 'sin_solicitud' | 'dos_viajes');
     return;
   }
   const destino: DestinoPlan = grupo.destino;
@@ -2092,7 +2097,7 @@ export async function preguntaAbierta(
       : c === 'sin_solicitud' ? '¿Es una solicitud de viaje?'
       : c === 'dos_viajes' ? '¿Me las reenvías por separado?'
       : resumen ? '¿Lo cargo así?'
-      : porConfirmar ? `¿Va como viaje nuevo de ${porConfirmar.slice(0, 40)}? Sí, el nombre correcto, o el número o código del viaje`
+      : porConfirmar ? `¿Va como viaje nuevo de ${porConfirmar.slice(0, 40)}? Sí, el nombre correcto, o dime el viaje si ya existe`
       : '¿De qué viaje son?';
     const espera = c === 'cruce' || (!c && !resumen) ? 'viaje' : resumen ? 'resumen' : 'otra';
     return { tipo: 'negocio', id: e.id as string, nombre, corta, espera, entregaId: (e.entrega_id as string | null) ?? null, nuevoPorConfirmar: porConfirmar };
@@ -2318,4 +2323,67 @@ export async function descartarPendientesDelRemitente(
     await guardarEn(e.id, 'respuesta_cliente', e.remitente_staff_id, e.remitente_colaborador_id);
   }
   return partes;
+}
+
+// ── Preguntas al bot dentro de la bandeja (solo lectura) ─────────────────────
+
+/**
+ * Lo que el bot contesta a una pregunta escrita sobre la bandeja (`leerConsultaBandeja`): los viajes abiertos de un
+ * cliente, cómo va o qué le falta a un viaje, o qué lleva la tanda abierta. SOLO LECTURA: no registra el mensaje,
+ * no crea, no mueve ni cierra nada. «tiene», «ese cliente» son el cliente de la tanda abierta.
+ */
+export async function textoDeLaConsulta(
+  supabase: SupabaseClient, workspaceId: string, phone: string, consulta: ConsultaBandeja, bandeja: ConfigBandeja,
+): Promise<string> {
+  const tanda = await tandaAbiertaDelRemitente(supabase, workspaceId, phone, bandeja.horasCajaActiva);
+  if (consulta.tipo === 'tanda') {
+    if (!tanda) return TEXTO_SIN_TANDA;
+    return textoTanda({ nombre: tanda.nombre, n: tanda.n, cierre: bandeja.palabrasCierre[0] ?? 'listo' });
+  }
+  if (consulta.tipo === 'viajes') {
+    const quien = consulta.cliente ?? tanda?.cajaCliente ?? null;
+    if (!quien) return TEXTO_CONSULTA_DE_QUIEN;
+    const fichas = await fichasPorNombre(supabase, workspaceId, quien);
+    if (fichas === null) return 'No pude revisar el directorio de clientes. Pregúntame otra vez en un momento.';
+    const exactos = fichas.filter(f => normalizarNombre(f.nombre) === normalizarNombre(quien));
+    const usadas = exactos.length > 0 ? exactos : fichas.filter(f => pareceNombre(quien, f.nombre)).slice(0, 1);
+    if (usadas.length === 0) return textoViajesDelCliente({ cliente: nombrePropio(quien), viajes: [], noExiste: true });
+    return usadas.map(f => textoViajesDelCliente({
+      cliente: nombrePropio(f.nombre) + (usadas.length > 1 ? ` (${datoDeLaFicha(f)})` : ''),
+      viajes: f.abiertos.map(v => ({ linea: nombreDeViaje({ nombre: v.nombre, codigo: v.codigo }) })),
+      cerrado: f.cerrado ? nombreDeViaje({ nombre: f.cerrado.nombre, codigo: f.cerrado.codigo }) : null,
+    })).join('\n');
+  }
+  // Cómo va o qué le falta a un viaje: el que nombra (código o cliente/nombre del viaje), o el de la tanda.
+  let negocioId: string | null = null;
+  if (consulta.ref) {
+    const cod = codigoCompacto(consulta.ref);
+    negocioId = /\d/.test(cod) ? await negocioAbiertoPorCodigo(supabase, workspaceId, cod) : null;
+    if (!negocioId) {
+      const viajes = (await viajesAbiertosDeLaBandeja(supabase, workspaceId)) ?? [];
+      const r = resolverEncabezado(consulta.ref, viajes);
+      if (r?.tipo === 'viaje') negocioId = r.viaje.id;
+      else if (r?.tipo === 'aproximado') negocioId = r.viaje.id; // solo lectura: con un solo candidato, ese
+      else if (r?.tipo === 'ambiguo') {
+        const cands = r.candidatos;
+        return textoConsultaAmbigua(consulta.ref, cands.slice(0, 5).map(v => ({ linea: nombreDeViaje(v), cliente: v.cliente, destino: v.destino, nombre: v.nombre })));
+      }
+    }
+    if (!negocioId) return `No encontré un viaje abierto de «${consulta.ref}». ${TEXTO_CONSULTA_DE_QUE_VIAJE}`;
+  } else if (tanda?.cajaViajeId) {
+    negocioId = tanda.cajaViajeId;
+  } else if (tanda?.cajaCliente) {
+    return `El viaje nuevo de ${nombrePropio(tanda.cajaCliente)} todavía no está creado: lo creo cuando me digas que sí en el resumen. Llevas ${tanda.n} ${tanda.n === 1 ? 'mensaje' : 'mensajes'}.`;
+  } else {
+    return TEXTO_CONSULTA_DE_QUE_VIAJE;
+  }
+  const { data: neg } = await supabase.from('negocios').select('id, codigo, nombre, contactos(nombre), empresas(nombre)').eq('id', negocioId).maybeSingle();
+  const bloques = await bloquesDatosDelNegocio(supabase, negocioId);
+  if (!neg || typeof bloques === 'string') return 'No pude leer ese viaje. Pregúntame otra vez en un momento.';
+  const fields = bloques.flatMap(b => b.fields);
+  const valores = Object.assign({}, ...bloques.map(b => b.data)) as Record<string, unknown>;
+  const avance = lineaAvance({
+    codigo: (neg.codigo as string | null) ?? null, cliente: nombreRel(neg.contactos) ?? nombreRel(neg.empresas), nombre: (neg.nombre as string | null) ?? null, fields, valores,
+  });
+  return textoEstadoViaje({ avance, faltan: huecos(fields, valores).minimo.faltan.map(f => f.label.toLowerCase()) });
 }

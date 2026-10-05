@@ -265,7 +265,7 @@ describe('N6 · viaje equivocado', () => {
     const cruces = detectarCruce({ destinoNegocio: 'CARTAGENA', destinoMensajes: 'Punta Cana', clienteNegocio: 'JORGE PÉREZ', clienteMensajes: null });
     expect(cruces).toEqual([{ que: 'destino', enNegocio: 'CARTAGENA', enMensajes: 'Punta Cana' }]);
     expect(textoAvisoCruce({ codigo: 'T1 26 8', cliente: 'JORGE PÉREZ', destino: 'CARTAGENA', nombre: 'CARTAGENA DIC', cruces }))
-      .toBe('¿Seguro que estos mensajes van en CARTAGENA DIC · Jorge Pérez (T1 26 8)? Hablan de Punta Cana y ese viaje va a CARTAGENA; no cargué nada.\nResponde «sí» para cargarlos igual, el número o el código del viaje correcto, o «nuevo» y el nombre del cliente.');
+      .toBe('¿Seguro que estos mensajes van en CARTAGENA DIC · Jorge Pérez (T1 26 8)? Hablan de Punta Cana y ese viaje va a CARTAGENA; no cargué nada.\nResponde «sí» para cargarlos igual, dime cuál es el viaje correcto, o «nuevo» y el nombre del cliente.');
   });
 
   it('el mismo destino escrito distinto, o una fecha que cambia, no es un cruce', () => {

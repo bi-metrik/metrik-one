@@ -5,6 +5,7 @@ import { atajoExacto, leerConfirmacion, norm, respuestaExacta, type Decision, ty
 import { candidatosDelEncabezado, esNombreNuevo, resolverEncabezado, soloNombraAlCliente } from '../wa-viajes-reglas.ts';
 import type { RespuestaConfirmarNuevo, ResolucionEncabezado, ViajeAbierto } from '../wa-viajes-reglas.ts';
 import { leerEsLaMisma, separarNombreYLlave, soloLlave } from '../wa-cliente-reglas.ts';
+import { leerConsultaBandeja } from '../wa-consulta-bandeja.ts';
 
 /**
  * Lo que hace el código de hoy con un escrito que NO llega al modelo en la bandeja (como en producción: el atajo
@@ -26,6 +27,11 @@ export function deHoy(
   }
   const enc = resolverEncabezado(texto, viajes);
   const atajo = atajoExacto(texto, { bandeja: { palabrasCierre: ['listo'] }, pendiente: pend, encabezado: enc });
+  // Una pregunta escrita al bot sobre la bandeja: la contesta el código de hoy, en solo lectura (2026-10-05).
+  if (atajo === 'consulta_bandeja') {
+    const c = leerConsultaBandeja(texto, { reenviado: false })!;
+    return { accion: 'consulta', ...c };
+  }
   // Con «¿Creo el cliente nuevo …?» pendiente, lo exacto (también un nombre que es encabezado) lo contesta.
   if (atajo && pend?.capa === 'nuevo_confirmar' && (atajo === 'respuesta_exacta' || atajo === 'encabezado_exacto')) {
     return atajo === 'respuesta_exacta' ? resumirConfirmacionDeHoy(leerConfirmacion(texto, pend)) : null;
@@ -115,6 +121,7 @@ export function resumir(d: Decision): Record<string, unknown> {
     case 'bot_boton': return { accion: p.boton === 'btn_confirm' ? 'confirmar' : p.boton === 'btn_cancel' ? 'cancelar' : 'responder', ...(p.boton === 'btn_sin_soporte' ? { opcion: 'no_tengo' } : {}) };
     case 'bot_texto': return { accion: 'responder', valor: Number(p.texto.replace(/\D/g, '')) * (/mil/.test(p.texto) ? 1000 : 1) };
     case 'bot_consulta': return { accion: 'consulta' };
+    case 'bandeja_consulta': return { accion: 'consulta', ...p.consulta };
     case 'bot_ayuda': return { accion: 'saludo' };
     case 'nada': return { accion: 'acuse' };
     case 'decir': return { accion: d.accion === 'fuera_de_alcance' ? 'fuera_de_alcance' : d.accion };

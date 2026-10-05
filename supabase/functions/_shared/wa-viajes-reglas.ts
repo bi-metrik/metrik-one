@@ -26,7 +26,7 @@ import {
 } from './wa-cliente-reglas.ts';
 import type { Directorio, FichaCliente, Llave, ResolucionCliente } from './wa-cliente-reglas.ts';
 export { nombreDeViaje, nombrePropio } from './wa-entendimiento-reglas.ts';
-import { codigoCompacto, interpretarRespuestaNegocio } from './wa-carga-reglas.ts';
+import { codigoCompacto, interpretarRespuestaNegocio, opcionNombrada, pieDeLista } from './wa-carga-reglas.ts';
 import { esNotaDelComercial } from './wa-guardianes.ts';
 
 /** Un viaje abierto de la línea, como lo ofrece la bandeja. */
@@ -397,7 +397,7 @@ export function textoPreguntaEncabezado(texto: string, candidatos: ReadonlyArray
   return [
     `¿De qué viaje es «${String(texto).trim()}»? Hasta que me digas, no asigno lo que sigue.`,
     ...candidatos.map((v, i) => `${i + 1}. ${lineaCaja(v)}`),
-    'Responde el número; si es un viaje nuevo, «nuevo» y el nombre del cliente; o «descartar».',
+    pieDeLista(candidatos, 'Si es un viaje nuevo, «nuevo» y el nombre del cliente; o «descartar».'),
   ].join('\n');
 }
 
@@ -510,7 +510,14 @@ function enumerar(xs: ReadonlyArray<string>, y = 'y'): string {
 
 /** Cómo se elige un viaje parecido: su número en la lista que ya vio el comercial, o su código. */
 function referenciaDe(v: ViajeAbierto, numero: number | null): string {
+  // 2026-10-05: se señala por el destino («el de Cartagena»), no por el número ni el código (siguen valiendo).
+  if (v.destino?.trim()) return `«el de ${nombrePropio(v.destino.trim())}»`;
   return numero !== null ? String(numero) : (v.codigo?.trim() || nombrePropio(v.cliente) || 'su código');
+}
+
+/** Cómo se nombra un viaje como encabezado: su nombre (exacto, `resolverEncabezado`), o su código si no tiene. */
+function encabezadoDe(v: ViajeAbierto): string {
+  return v.nombre?.trim() ? `«${v.nombre.trim()}»` : (v.codigo?.trim() || nombrePropio(v.cliente) || 'su código');
 }
 
 /**
@@ -530,8 +537,8 @@ export function textoAcuseNuevo(nombre: string, parecidos: ReadonlyArray<ViajeAb
  */
 export function lineasDeParecidos(parecidos: ReadonlyArray<ViajeAbierto>): string[] {
   const ps = parecidos.slice(0, MAX_PARECIDOS);
-  if (ps.length === 1) return [`Ya hay un viaje de ${clienteYCodigo(ps[0])}: si es para ese, escribe ${referenciaDe(ps[0], null)}.`];
-  if (ps.length > 1) return [`Ya hay viajes de ${enumerar(ps.map(clienteYCodigo))}: si es para uno de esos, escribe su código.`];
+  if (ps.length === 1) return [`Ya hay un viaje de ${clienteYCodigo(ps[0])}: si es para ese, escribe ${encabezadoDe(ps[0])}.`];
+  if (ps.length > 1) return [`Ya hay viajes de ${enumerar(ps.map(clienteYCodigo))}: si es para uno de esos, escribe ${ps[0].nombre?.trim() ? 'su nombre' : 'cuál'} (por ejemplo ${encabezadoDe(ps[0])}).`];
   return [];
 }
 
@@ -559,11 +566,11 @@ export function textoConfirmarNuevo(p: {
     l.push(`¿Va como viaje nuevo de ${nombre}? ${p.cliente}`);
     if (ps.length === 1) l.push(`Ya hay un viaje de ${clienteYCodigo(ps[0].viaje)}: si es para ese, responde ${referenciaDe(ps[0].viaje, ps[0].numero)}.`);
     else if (ps.length > 1) l.push(`Ya hay viajes de ${enumerar(ps.map(x => clienteYCodigo(x.viaje)))}: si es para uno de esos, responde ${enumerar(ps.map(x => referenciaDe(x.viaje, x.numero)), 'o')}.`);
-    l.push(`Responde sí, o el ${p.conLista ? 'número' : 'código'} del viaje si es uno que ya existe. No he creado ni cargado nada.`);
+    l.push('Responde sí, o dime el viaje si es uno que ya existe. No he creado ni cargado nada.');
     return l.join('\n');
   }
   if (ps.length === 0) {
-    l.push(`¿Creo el cliente nuevo «${nombre}»? Responde «sí», el nombre correcto, o el ${p.conLista ? 'número' : 'código'} del viaje.`);
+    l.push(`¿Creo el cliente nuevo «${nombre}»? Responde «sí», el nombre correcto, o dime el viaje si es uno que ya existe.`);
   } else {
     l.push(`¿Creo el cliente nuevo «${nombre}»?`);
     l.push(ps.length === 1
@@ -1281,7 +1288,9 @@ export function armarSegmentos(
         encabezados.push(m.n);
         continue;
       }
-      const senalado = mismo ? candidatoNombrado(m.cuerpo, candidatos) : null;
+      // «el de Miami», «la de Lina»: el viaje de la lista que señala con sus palabras (2026-10-05: la lista ya no pide
+      // «el número o el código»).
+      const senalado = (mismo ? candidatoNombrado(m.cuerpo, candidatos) : null) ?? opcionNombrada(m.cuerpo, candidatos);
       if (senalado) {
         actual.seg.eleccion = { viaje: senalado, n: m.n };
         encabezados.push(m.n);

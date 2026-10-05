@@ -31,6 +31,7 @@ import {
 import type { AccionRegistro, ConfigBandeja } from './wa-bandeja-reglas.ts';
 import {
   configDelWorkspace,
+  contestarConsulta,
   descartarTandaAbierta,
   descartarTodo,
   enviar,
@@ -500,6 +501,12 @@ async function despachar(b: Base, d: Extract<Decision, { tipo: 'ejecutar' }>, le
       if (!ok) return false;
       await guardarInterpretacion(b, paso.interpretacion);
       if (paso.aviso) await enviar(message.phone, paso.aviso, ws);
+      return true;
+    }
+    case 'bandeja_consulta': {
+      // Solo lectura: no se registra en la tanda (2026-10-05).
+      if (!lec.bandeja) return false;
+      await contestarConsulta(supabase, ws, message.phone, paso.consulta, lec.bandeja);
       return true;
     }
     case 'descartar': {

@@ -134,7 +134,7 @@ describe('3 · sí/no con un normalizador compartido', () => {
     const duda = [...base, enc(4, 'no sé'), m(5, 'somos 2')];
     expect(destinos(duda, vs)).toEqual([[2, 'T1 26 100'], [4, null], [5, null]]);
     expect(pendienteDeLaCaja(reparto(duda, vs).segmentos)).toMatchObject({ tipo: 'eleccion', candidatos: [{ id: 'v1' }], conContenido: true });
-    expect(textoNoEntendiEleccion('Lusia', [vs[1]])).toBe('No entendí. ¿De qué viaje es «Lusia»? Hasta que me digas, no asigno lo que sigue.\n1. Luisa Mejía (T1 26 101)\nResponde el número; si es un viaje nuevo, «nuevo» y el nombre del cliente; o «descartar».');
+    expect(textoNoEntendiEleccion('Lusia', [vs[1]])).toBe('No entendí. ¿De qué viaje es «Lusia»? Hasta que me digas, no asigno lo que sigue.\n1. Luisa Mejía (T1 26 101)\nDime cuál (por ejemplo «el de Luisa»). Si es un viaje nuevo, «nuevo» y el nombre del cliente; o «descartar».');
   });
 });
 

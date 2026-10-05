@@ -20,10 +20,12 @@ import {
   TEXTO_NADA_QUE_DESCARTAR,
 } from './wa-bandeja-reglas.ts';
 import type { ConfigBandeja } from './wa-bandeja-reglas.ts';
-import { codigoCompacto, interpretarRespuestaNegocio } from './wa-carga-reglas.ts';
+import { codigoCompacto, interpretarRespuestaNegocio, pieDeLista } from './wa-carga-reglas.ts';
 import { calificarNombreNuevo, leerNuevo, leerViajeNuevo, nombrePropio, normalizarNombre, normalizarTexto } from './wa-entendimiento-reglas.ts';
 import type { LecturaNuevo } from './wa-entendimiento-reglas.ts';
 import { llavesDelTexto, separarNombreYLlave, soloLlave } from './wa-cliente-reglas.ts';
+import { leerConsultaBandeja, relataAlCliente } from './wa-consulta-bandeja.ts';
+import type { ConsultaBandeja } from './wa-consulta-bandeja.ts';
 import type { Llave } from './wa-cliente-reglas.ts';
 import { fastPathParse } from './wa-parse-reglas.ts';
 import {
@@ -216,7 +218,14 @@ export function intentDeLaAccion(accion: string, tema?: string | null): Intent |
   }
 }
 
+/**
+ * Las consultas de la bandeja (2026-10-05): los viajes abiertos de un cliente, cómo va un viaje y qué lleva la tanda.
+ * Son de solo lectura y de lo que el comercial mismo está pasando: cualquier rol que usa la bandeja las puede hacer.
+ */
+export const TEMAS_BANDEJA: ReadonlySet<string> = new Set(['viajes', 'viaje', 'tanda']);
+
 function rolPermite(rol: UserRole, accion: string, tema?: string | null): boolean {
+  if (accion === 'consulta' && TEMAS_BANDEJA.has(String(tema ?? ''))) return true;
   const intents = intentsDelRol(rol);
   const intent = intentDeLaAccion(accion, tema);
   if (!intents || !intent) return true;
@@ -232,7 +241,8 @@ function rolPermite(rol: UserRole, accion: string, tema?: string | null): boolea
 export function accionesDelEsquema(p: { bandeja: boolean; rol: UserRole }): Accion[] {
   return [
     ...(p.bandeja ? ACCIONES_BANDEJA : []),
-    ...ACCIONES_BOT.filter(a => rolPermite(p.rol, a)),
+    // Con la bandeja, «consulta» existe para todos: sus preguntas de solo lectura (TEMAS_BANDEJA).
+    ...ACCIONES_BOT.filter(a => rolPermite(p.rol, a) || (p.bandeja && a === 'consulta')),
     ...ACCIONES_COMUNES,
   ] as Accion[];
 }
@@ -325,7 +335,7 @@ ${p.bandeja ? `- abrir_viaje: dice de qué cliente/viaje es lo que sigue (nombre
   Con la pregunta nuevo_confirmar («¿Creo el cliente nuevo …?»): un sí o «créalo» es opcion="si"; un número es la opción de la lista con ESE número; otro nombre es opcion="nuevo" con el nombre en nuevo_cliente.` : ''}
 - confirmar: aprueba lo que el bot le mostró para confirmar.
 - cancelar: rechaza lo que el bot le mostró para confirmar.
-- consulta: pregunta por información del sistema. tema = numeros (cómo vamos, resumen), gastos (cuánto gasté, egresos, movimientos), cartera (quién me debe), negocios (negocios, viajes o solicitudes abiertas; etapa = venta, ejecucion, cobro o cierre si la dice). negocio si pregunta por uno.
+- consulta: pregunta por información del sistema. tema = numeros (cómo vamos, resumen), gastos (cuánto gasté, egresos, movimientos), cartera (quién me debe), negocios (todos los negocios o solicitudes abiertas de la empresa; etapa = venta, ejecucion, cobro o cierre si la dice). negocio si pregunta por uno.${p.bandeja ? ` Con la bandeja también: viajes (los viajes abiertos de UN cliente: «qué viajes tiene», «tiene algo abierto»; el cliente en ref_cliente si lo nombra; si dice «tiene» o «ese cliente» sin nombrarlo, es el de la tanda abierta y ref_cliente va vacío), viaje (cómo va o qué le falta a un viaje; ref_codigo o ref_cliente si lo nombra) y tanda (qué lleva la tanda, qué le has pasado). Una pregunta escrita por el comercial al bot es "consulta", nunca "contenido".` : ''}
 - gasto: reporta un gasto que pagó la empresa. UNA acción por gasto: monto en pesos (25 mil = 25000; 18.900 = 18900; 60 lucas = 60000), descripcion (en qué fue), negocio (como lo nombró, o el id; "empresa" si es un gasto general de la oficina; vacío si no lo dice). Si no dice el monto, igual es "gasto": deja monto vacío y el sistema lo pregunta.
 - corregir_gasto: corrige o completa el gasto que el bot muestra para confirmar. campo = monto | descripcion | negocio, y valor. Una palabra suelta que dice en qué fue ("Peaje") es la descripcion.
 - actividad: cuenta algo que hizo en un negocio (visita, llamada, avance). texto, y negocio como lo nombró.
@@ -645,6 +655,8 @@ export function atajoExacto(texto: string, e: {
   const t = String(texto ?? '').trim();
   if (!t) return 'vacio';
   if (esPedidoDeGuia(t)) return 'guia';
+  // Una pregunta escrita al bot sobre la bandeja que el código de hoy lee exacta (2026-10-05): la contesta él.
+  if (e.bandeja && leerConsultaBandeja(t, { reenviado: false })) return 'consulta_bandeja';
   // Regla 4 del 2-oct: «descartar» o «cancelar» solos. No se toca.
   if (esDescartarTodo(t)) return 'descartar_todo';
   if (e.bandeja) {
@@ -849,6 +861,8 @@ export type Paso =
   | { p: 'bot_corregir'; cambios: Array<{ campo: 'monto'; valor: number } | { campo: 'descripcion'; valor: string } | { campo: 'negocio'; valor: GastoValidado['negocio'] }> }
   | { p: 'bot_gastos'; gastos: GastoValidado[]; enCola: boolean }
   | { p: 'bot_consulta'; intent: Intent; fields: ParsedFields }
+  /** Una pregunta de la bandeja, en solo lectura (`contestarConsulta`): nunca se registra en la tanda. */
+  | { p: 'bandeja_consulta'; consulta: ConsultaBandeja }
   | { p: 'bot_actividad'; fields: ParsedFields }
   | { p: 'bot_contacto'; fields: ParsedFields }
   | { p: 'bot_ayuda' }
@@ -1207,6 +1221,19 @@ function validarPropuesta(crudo: unknown, e: EntradaValidador): Decision {
     case 'gasto': return gastos(acc, e, rechazo);
     case 'corregir_gasto': return corregirGasto(acc, e, rechazo);
     case 'consulta': {
+      // La bandeja: los viajes de un cliente, cómo va un viaje, qué lleva la tanda (2026-10-05). Solo lo escrito cuenta
+      // para nombrar al cliente o al viaje; sin nombrarlo, es el de la tanda abierta.
+      if (e.bandeja && TEMAS_BANDEJA.has(String(a0.tema ?? ''))) {
+        // Regla 3 de la frontera: lo que el comercial relata que preguntó el cliente («me pregunta qué viajes hay a
+        // Cancún») es contenido de la tanda, aunque el modelo lo lea como consulta.
+        if (e.tanda?.abierta && relataAlCliente(e.texto)) return contenido([{ ...a0, accion: 'contenido', ref: null, id: null }], e, rechazo ?? 'V2_relato_es_contenido');
+        const cliente = escritoTalCual(a0.ref?.cliente, e.texto);
+        const codigo = a0.ref?.codigo && todoEscrito(a0.ref.codigo, e.texto) ? String(a0.ref.codigo) : null;
+        const consulta: ConsultaBandeja = a0.tema === 'tanda' ? { tipo: 'tanda' }
+          : a0.tema === 'viajes' ? { tipo: 'viajes', cliente }
+          : { tipo: 'viaje', ref: codigo ?? cliente ?? escritoTalCual(a0.ref?.destino, e.texto) };
+        return ejecutar('bandeja.consulta', { p: 'bandeja_consulta', consulta }, rechazo, false);
+      }
       const intent = intentDeLaAccion('consulta', a0.tema) as Intent;
       const fields: ParsedFields = { mensaje_original: e.texto };
       if (intent === 'ESTADO_NEGOCIOS') fields.stage_filter = (['venta', 'ejecucion', 'cobro', 'cierre'].includes(String(a0.etapa)) ? a0.etapa : 'all') as ParsedFields['stage_filter'];
@@ -2184,12 +2211,12 @@ function corregirGasto(acc: AccionModelo[], e: EntradaValidador, rechazo: string
 // ── Textos (§4): máximo 2 líneas, la pregunta en la primera ─────────────────
 
 export const TEXTO_NOTA_INTERNA = 'No lo guardo: en la historia solo va lo que pide el cliente.';
-export const TEXTO_QUE_HAGO = '¿Qué hago con esto? ¿Es algo que pidió el cliente, un gasto o una pregunta para mí?';
+export const TEXTO_QUE_HAGO = '¿Es algo que pidió el cliente, un gasto o una pregunta para mí? No te entendí.';
 /** Un «nuevo …» que no es un encabezado (más largo que el tope) con una tanda abierta: no se anota en ninguna caja. */
-export const TEXTO_NUEVO_NO_ANOTADO = '¿Es un viaje nuevo? Escribe «nuevo» y el nombre del cliente (hasta 4 palabras), o el código del viaje.\nNo lo anoté en ninguna caja.';
+export const TEXTO_NUEVO_NO_ANOTADO = '¿Es un viaje nuevo? Escribe «nuevo» y el nombre del cliente (hasta 4 palabras), o dime de qué viaje es.\nNo lo anoté en ninguna caja.';
 /** Un «nuevo …» más largo que el tope contestando una lista: no se elige ningún viaje ni se crea nadie. */
-export const TEXTO_NUEVO_NO_CARGADO = '¿Es un viaje nuevo? Escribe «nuevo» y el nombre del cliente (hasta 4 palabras), o el número del viaje.\nNo he cargado nada.';
-export const TEXTO_NO_ENCONTRE_VIAJE = '¿Es un viaje nuevo? No encontré ese viaje entre los abiertos.\nEscribe «nuevo» y el nombre del cliente, o el código del viaje.';
+export const TEXTO_NUEVO_NO_CARGADO = '¿Es un viaje nuevo? Escribe «nuevo» y el nombre del cliente (hasta 4 palabras), o dime de qué viaje es.\nNo he cargado nada.';
+export const TEXTO_NO_ENCONTRE_VIAJE = '¿Es un viaje nuevo? No encontré ese viaje entre los abiertos.\nEscribe «nuevo» y el nombre del cliente, o dime el viaje por su cliente o su destino.';
 export const TEXTO_CIERRA_DESPUES = 'Anotado en la tanda. Para cerrarla, escribe «listo».';
 export const TEXTO_GASTO_EN_COLA = 'Lo anoto y te lo muestro cuando termines lo que está en curso.';
 
@@ -2218,7 +2245,7 @@ export function textoSiguePendiente(p: PreguntaUnificada): string {
 /** La pregunta corta de un encabezado ambiguo. */
 export function textoPreguntaViaje(texto: string, candidatos: ReadonlyArray<ViajeAbierto>): string {
   const t = recortar(texto, 40);
-  return `¿De qué viaje es${t ? ` «${t}»` : ''}? ${candidatos.map((v, i) => `${i + 1}. ${lineaCaja(v)}`).join(' · ')}\nResponde el número; si es un viaje nuevo, «nuevo» y el nombre del cliente; o «descartar».`;
+  return `¿De qué viaje es${t ? ` «${t}»` : ''}? ${candidatos.map((v, i) => `${i + 1}. ${lineaCaja(v)}`).join(' · ')}\n${pieDeLista(candidatos, 'Si es un viaje nuevo, «nuevo» y el nombre del cliente; o «descartar».')}`;
 }
 
 /** H2, caso 1: se descartó solo lo que preguntaba la lista; la tanda sigue. */

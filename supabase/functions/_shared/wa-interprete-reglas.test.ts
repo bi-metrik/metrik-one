@@ -515,7 +515,7 @@ describe('V8: «nuevo» con nombre', () => {
       p: 'registrar', interpretacion: { accion: 'abrir_viaje', nuevo: 'Lina Pérez', con_contenido: false, evidencia: 'nueva clienta Lina Pérez' },
       aviso: textoAcuseNuevo('Lina Pérez', [va(V12), va(V14)]),
     });
-    expect((d.paso as { aviso: string }).aviso).toContain('Ya hay viajes de Jorge Pérez (T1 26 12) y Lina Pérez (T1 26 14): si es para uno de esos, escribe su código.');
+    expect((d.paso as { aviso: string }).aviso).toContain('Ya hay viajes de Jorge Pérez (T1 26 12) y Lina Pérez (T1 26 14): si es para uno de esos, escribe cuál (por ejemplo T1 26 12).');
   });
 });
 

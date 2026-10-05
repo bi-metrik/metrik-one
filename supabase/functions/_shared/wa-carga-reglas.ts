@@ -29,6 +29,7 @@ import {
   marcaDe,
   mayusculasDeViaje,
   nombreDeViaje,
+  nombrePropio,
   normalizarNombre,
   normalizarTexto,
   preguntasDelMinimo,
@@ -66,6 +67,39 @@ export interface OpcionNegocio {
   nombre?: string | null;
   /** Lo nombran los mensajes y es su único negocio abierto: va primero. */
   propuesto?: boolean;
+}
+
+/** Lo que acompaña una referencia a un viaje de la lista sin nombrarlo: «el de», «la que va a», «el del cliente». */
+const RELLENO_REFERENCIA: ReadonlySet<string> = new Set(['el', 'la', 'los', 'las', 'lo', 'de', 'del', 'que', 'va', 'van', 'a', 'al', 'para', 'viaje',
+  'cotizacion', 'es', 'era', 'seria', 'ese', 'esa', 'este', 'esta', 'en', 'con', 'cliente', 'clienta', 'senor', 'senora', 'por', 'favor', 'porfa', 'uno',
+  'una', 'mismo', 'misma', 'destino', 'hacia', 'sale', 'salen', 'rumbo', 'pa', 'y']);
+/** «el de», «la de», «la que va a», «del»: la respuesta SEÑALA un viaje, no nombra a una persona. */
+const SENALA_VIAJE = /^(?:(?:es|era|seria)\s+)?(?:(?:para|pa|en|a)\s+)?(?:el|la|lo|al|del)\s+(?:de|del|que)?\b|^del?\b/;
+
+/**
+ * El viaje de la lista que la respuesta nombra con sus palabras (2026-10-05: las listas ya no piden «el número o el
+ * código»): «el de Cartagena», «la de Lina», «Europa 2 días», «el que va a Miami». Todas las palabras que quedan sin
+ * el relleno tienen que estar en el nombre, el destino o el cliente de UNA sola opción. Si solo coinciden palabras del
+ * cliente, tiene que señalar («el de Lina»): «Ana Ríos» a secas puede ser el nombre de un cliente nuevo. Con dígitos,
+ * no (el número y el código ya se leen aparte). `null`: ninguna o más de una.
+ */
+export function opcionNombrada<T extends { codigo?: string | null; cliente?: string | null; destino?: string | null; nombre?: string | null }>(
+  texto: string, opciones: ReadonlyArray<T>,
+): T | null {
+  const t = normalizarNombre(texto);
+  if (!t || /\d/.test(t)) return null;
+  const ws = t.split(' ').filter(w => w && !RELLENO_REFERENCIA.has(w));
+  if (ws.length === 0 || ws.length > 5) return null;
+  const senala = SENALA_VIAJE.test(t);
+  const delViaje = (o: T) => new Set(normalizarNombre(`${o.nombre ?? ''} ${o.destino ?? ''}`).split(' ').filter(Boolean));
+  const delCliente = (o: T) => new Set(normalizarNombre(o.cliente).split(' ').filter(Boolean));
+  const cuales = opciones.filter(o => {
+    const v = delViaje(o);
+    const c = delCliente(o);
+    if (!ws.every(w => v.has(w) || c.has(w))) return false;
+    return senala || ws.some(w => v.has(w));
+  });
+  return cuales.length === 1 ? cuales[0] : null;
 }
 
 function palabrasDelNombre(nombre: string | null): string[] {
@@ -123,7 +157,33 @@ export function lineaDeOpcion(o: OpcionNegocio): string {
 }
 
 /** El pie de la lista (2026-10-05, PR B): sin comandos en mayúsculas; lo que acepta la respuesta no cambia (también «SÍ», «NUEVO», «DESCARTAR»). */
-const PIE_LISTA = 'Responde el número o el código. Si es un viaje nuevo, escribe «nuevo» y el nombre del cliente; si no va, «descartar».';
+/**
+ * Cómo se le dice al comercial que señale un viaje de la lista sin pedirle el número ni el código (2026-10-05): «el de
+ * Cartagena» (el destino de una sola opción) o «el de Lina» (el primer nombre de un solo cliente). `null`: nada que
+ * distinga. La respuesta la lee `opcionNombrada`; el número y el código siguen valiendo, sin anunciarse.
+ */
+export function ejemploDeReferencia(opciones: ReadonlyArray<{ cliente?: string | null; destino?: string | null; nombre?: string | null }>): string | null {
+  const unico = (k: (o: typeof opciones[number]) => string) => opciones.map(k).find(x => !!x && opciones.filter(o => k(o) === x).length === 1) ?? null;
+  // El destino entero («el de San Andrés», no «el de Andrés», que parece una persona).
+  const destino = unico(o => normalizarNombre(o.destino));
+  if (destino) {
+    const o = opciones.find(x => normalizarNombre(x.destino) === destino)!;
+    return `el de ${nombrePropio(String(o.destino ?? '').trim().toLocaleUpperCase('es-CO'))}`;
+  }
+  const pila = unico(o => normalizarNombre(o.cliente).split(' ')[0] ?? '');
+  if (pila) {
+    const o = opciones.find(x => normalizarNombre(x.cliente).split(' ')[0] === pila)!;
+    return `el de ${nombrePropio(String(o.cliente ?? '').trim().split(/\s+/)[0])}`;
+  }
+  return null;
+}
+
+/** El pie de una lista de viajes: dime cuál, con un ejemplo de cómo; sin «el número o el código». */
+export function pieDeLista(opciones: ReadonlyArray<{ cliente?: string | null; destino?: string | null; nombre?: string | null }>, cierre: string): string {
+  const ej = ejemploDeReferencia(opciones);
+  return `Dime cuál${ej ? ` (por ejemplo «${ej}»)` : ''}. ${cierre}`;
+}
+const PIE_NUEVO = 'Si es un viaje nuevo, escribe «nuevo» y el nombre del cliente; si no va, «descartar».';
 
 /**
  * La pregunta. Sin negocios abiertos solo se ofrece NUEVO. `aviso` antecede cuando se vuelve a
@@ -141,7 +201,7 @@ export function textoPreguntaNegocio(p: { nMensajes: number; opciones: ReadonlyA
   return [
     conAviso(`¿De qué viaje ${cuales}?${prop}`),
     ...p.opciones.map((o, i) => `${i + 1}. ${lineaDeOpcion(o)}`),
-    PIE_LISTA,
+    pieDeLista(p.opciones, PIE_NUEVO),
   ].join('\n');
 }
 
@@ -208,6 +268,9 @@ export function interpretarRespuestaNegocio(texto: string, opciones: ReadonlyArr
   const n = compacto(bruto);
   const porNombre = n ? opciones.filter(o => compacto(o.nombre) === n || compacto(o.cliente) === n) : [];
   if (porNombre.length === 1) return { tipo: 'existente', negocio_id: porNombre[0].id };
+  // «el de Cartagena», «la de Lina»: el viaje de la lista que la respuesta señala con sus palabras.
+  const nombrada = opcionNombrada(bruto, opciones);
+  if (nombrada) return { tipo: 'existente', negocio_id: nombrada.id };
   return { tipo: 'no_entendida' };
 }
 
@@ -592,6 +655,6 @@ export function textoAvisoCruce(p: { codigo: string | null; cliente: string | nu
   const nombre = p.codigo || p.cliente || p.nombre ? nombreDeViaje({ nombre: p.nombre, cliente: p.cliente, codigo: p.codigo }) : 'ese viaje';
   return [
     `¿Seguro que estos mensajes van en ${nombre}? Hablan de ${deQue.join(' y de ')}${p.destino ? ` y ese viaje va a ${p.destino}` : ''}; no cargué nada.`,
-    'Responde «sí» para cargarlos igual, el número o el código del viaje correcto, o «nuevo» y el nombre del cliente.',
+    'Responde «sí» para cargarlos igual, dime cuál es el viaje correcto, o «nuevo» y el nombre del cliente.',
   ].join('\n');
 }

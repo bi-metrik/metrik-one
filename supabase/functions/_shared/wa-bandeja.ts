@@ -13,10 +13,12 @@
 import { transcribeAudio, PROMPT_TRANSCRIPCION_LITERAL } from './wa-transcribe.ts';
 import {
   armarPreguntaNegocio, candidatosDeEncabezado, conNombreDelViaje, descartarPendientesDelRemitente, hayPreguntaPendiente, nombreDeLaEntrega,
-  nombreYConteoDeLaTanda, preguntaAbierta, reintentarCarga, simularEnLaTanda, textoDeLoQueFalta, textoPrimero, tomarRespuestaContacto,
+  nombreYConteoDeLaTanda, pendienteDeLaTanda, preguntaAbierta, reintentarCarga, textoDeLaConsulta, simularEnLaTanda, textoDeLoQueFalta, textoPrimero, tomarRespuestaContacto,
   tomarRespuestaDeEntrega,
 } from './wa-entendimiento.ts';
 import type { EnLaTanda } from './wa-entendimiento.ts';
+import { leerConsultaBandeja } from './wa-consulta-bandeja.ts';
+import type { ConsultaBandeja } from './wa-consulta-bandeja.ts';
 import {
   candidatosDelEncabezado, esRespuestaA, esRuidoEscrito, lineaCaja, pareceRespuesta, resolverEncabezado, respuestaAlEncabezado,
   textoPreguntaEncabezadoCorta,
@@ -310,6 +312,14 @@ export async function atenderEnBandeja(
       await descartarTodo(supabase, user.workspace_id, message.phone, texto, wamid, fechaDeMeta(message.timestamp), config);
       return;
     }
+    // Una pregunta ESCRITA al bot sobre la bandeja («¿qué viajes tiene abiertos?», «¿qué le falta?», «¿qué llevo?»;
+    // prueba de Mauricio del 2026-10-05, 09:26): se contesta en el acto, en solo lectura, y no se registra: nunca es
+    // contenido de la tanda. Un reenvío nunca llega aquí (`escrito`). La pregunta abierta, si la hay, se recuerda.
+    const consulta = esCierre ? null : leerConsultaBandeja(texto, { reenviado: false });
+    if (consulta) {
+      await contestarConsulta(supabase, user.workspace_id, message.phone, consulta, config);
+      return;
+    }
   }
 
   const pendiente = escrito ? await preguntaAbierta(supabase, user.workspace_id, message.phone) : null;
@@ -470,6 +480,20 @@ function enEsperaDe(sim: EnLaTanda, hayOtraPregunta: boolean): { aviso: string |
   if (sim.antes.conContenido) return { aviso: null, respuesta: false };
   const a = sim.antes;
   return { aviso: a.tipo === 'eleccion' ? textoPreguntaEncabezadoCorta(a.texto, a.candidatos) : textoDeLoQueFalta(a), respuesta: false };
+}
+
+/**
+ * Contesta una pregunta al bot sobre la bandeja (solo lectura) y recuerda en una línea lo que sigue pendiente: la
+ * pregunta abierta del remitente, o lo que espera su tanda. Lo usan la ruta de hoy y el intérprete.
+ */
+export async function contestarConsulta(
+  supabase: SupabaseClient, workspaceId: string, phone: string, consulta: ConsultaBandeja, config: ConfigBandeja,
+): Promise<void> {
+  const respuesta = await textoDeLaConsulta(supabase, workspaceId, phone, consulta, config);
+  const abierta = await preguntaAbierta(supabase, workspaceId, phone);
+  const deLaTanda = abierta || config.modoViajes === 'uno' ? null : await pendienteDeLaTanda(supabase, workspaceId, phone, config.horasCajaActiva);
+  const sigue = abierta ? textoPrimero(abierta) : deLaTanda ? `Sigue pendiente: ${textoDeLoQueFalta(deLaTanda)}` : null;
+  await enviar(phone, [respuesta, sigue].filter(Boolean).join('\n'), workspaceId);
 }
 
 /** ¿Es un texto escrito (no reenviado) en modo `encabezado`? Solo ahí hay encabezados. */

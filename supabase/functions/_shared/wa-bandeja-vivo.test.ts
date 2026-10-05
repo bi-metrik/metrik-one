@@ -654,14 +654,14 @@ describe('parte B: el nombre del negocio es encabezado y es como se muestra', ()
     await llega('1', { enviado: 14 });
     await llega('Armenia 2N', { enviado: 20 });
     await llega('2', { enviado: 22 });
-    const pie = 'Responde el número; si es un viaje nuevo, «nuevo» y el nombre del cliente; o «descartar».';
+    const pie = (ej: string) => `Dime cuál (por ejemplo «el de ${ej}»). Si es un viaje nuevo, «nuevo» y el nombre del cliente; o «descartar».`;
     expect(textos()).toEqual([
       '📌 Europa 2 días · Carolina Ruiz (M1 26 5)',
       '📌 ARMENIA 2N · Juan Prueba (M1 26 4)',
-      `¿De qué viaje es «Europa 2 dia»? Hasta que me digas, no asigno lo que sigue.\n1. Europa 2 días · Carolina Ruiz (M1 26 5)\n${pie}`,
-      `No entendí. ¿De qué viaje es «Europa 2 dia»? Hasta que me digas, no asigno lo que sigue.\n1. Europa 2 días · Carolina Ruiz (M1 26 5)\n${pie}`,
+      `¿De qué viaje es «Europa 2 dia»? Hasta que me digas, no asigno lo que sigue.\n1. Europa 2 días · Carolina Ruiz (M1 26 5)\n${pie('Carolina')}`,
+      `No entendí. ¿De qué viaje es «Europa 2 dia»? Hasta que me digas, no asigno lo que sigue.\n1. Europa 2 días · Carolina Ruiz (M1 26 5)\n${pie('Carolina')}`,
       '📌 Europa 2 días · Carolina Ruiz (M1 26 5)',
-      `¿De qué viaje es «Armenia 2N»? Hasta que me digas, no asigno lo que sigue.\n1. ARMENIA 2N · Juan Prueba (M1 26 4)\n2. ARMENIA 2N · Pedro Prueba (M1 26 3)\n${pie}`,
+      `¿De qué viaje es «Armenia 2N»? Hasta que me digas, no asigno lo que sigue.\n1. ARMENIA 2N · Juan Prueba (M1 26 4)\n2. ARMENIA 2N · Pedro Prueba (M1 26 3)\n${pie('Juan')}`,
       '📌 ARMENIA 2N · Pedro Prueba (M1 26 3)',
     ]);
   });
@@ -809,7 +809,7 @@ describe('v2 · N2: «¿A qué viaje van?» se contesta con cada forma que el bo
     // viajes de la lista: la confirmación lo dice, con su número.
     const conf = textos().at(-1)!;
     expect(conf.startsWith(`Tanda de las ${conf.slice(13, 18)} · ¿Va como viaje nuevo de Valeria Prueba5? No lo tengo en el directorio: lo creo como cliente nuevo, con cel. ${celEscrito('Valeria Prueba5')}.\n`)).toBe(true);
-    expect(conf).toMatch(/\nYa hay viajes de (Pedro|Mateo) Prueba5 \([PM] 26 2\) y (Pedro|Mateo) Prueba5 \([PM] 26 2\): si es para uno de esos, responde 1 o 2\.\nResponde sí, o el número del viaje si es uno que ya existe\. No he creado ni cargado nada\.$/);
+    expect(conf).toMatch(/\nYa hay viajes de (Pedro|Mateo) Prueba5 \([PM] 26 2\) y (Pedro|Mateo) Prueba5 \([PM] 26 2\): si es para uno de esos, responde «el de (San Andrés|Bariloche)» o «el de (San Andrés|Bariloche)»\.\nResponde sí, o dime el viaje si es uno que ya existe\. No he creado ni cargado nada\.$/);
     nadaCreado(negocios);
     await llega('sí', { enviado: 100 });
     colaModelo = [pedido()];
@@ -832,11 +832,11 @@ describe('v2 · N2: «¿A qué viaje van?» se contesta con cada forma que el bo
     await llega(nuevo(nombre), { enviado: 9 });
     colaModelo = [pedido()];
     await cron(60);
-    expect(textos().at(-1)!.replace(/^Tanda de las \d\d:\d\d · /, '')).toBe(`¿Va como viaje nuevo de ${nombre}? No lo tengo en el directorio: lo creo como cliente nuevo, con cel. ${celEscrito(nombre)}.\nResponde sí, o el número del viaje si es uno que ya existe. No he creado ni cargado nada.`);
+    expect(textos().at(-1)!.replace(/^Tanda de las \d\d:\d\d · /, '')).toBe(`¿Va como viaje nuevo de ${nombre}? No lo tengo en el directorio: lo creo como cliente nuevo, con cel. ${celEscrito(nombre)}.\nResponde sí, o dime el viaje si es uno que ya existe. No he creado ni cargado nada.`);
     expect(vi.mocked(fetch)).not.toHaveBeenCalled(); // nada se leyó ni se cargó todavía
     nadaCreado(negocios);
     expect(await ent.preguntaAbierta(db as never, WS, TEL)).toMatchObject({
-      espera: 'viaje', corta: `¿Va como viaje nuevo de ${nombre}? Sí, el nombre correcto, o el número o código del viaje`,
+      espera: 'viaje', corta: `¿Va como viaje nuevo de ${nombre}? Sí, el nombre correcto, o dime el viaje si ya existe`,
       // El intérprete la ve como su propia pregunta, con la lista de la entrega (cuarto control de Vera, CF7).
       nuevoPorConfirmar: nombre, entregaId: expect.any(String),
     });
@@ -924,18 +924,17 @@ describe('v2 · N2: «¿A qué viaje van?» se contesta con cada forma que el bo
     expect(await ent.preguntaAbierta(db as never, WS, TEL)).toBeNull();
   });
 
-  it('PI3: los dos nombres de pila de una clienta con viaje abierto (el atajo): la confirmación lo dice y su número carga en su viaje', async () => {
+  it('PI3: los dos nombres de pila de una clienta con viaje abierto (el atajo): la confirmación lo dice y «el de Cancún» carga en su viaje', async () => {
     t.negocios.push(negocioDePrueba('n-am', 'A 26 7', 'CANCÚN NOV', 'ANA MARÍA QUIÑONES'));
     t.negocio_bloques.push({ id: 'b-n-am', negocio_id: 'n-am', data: { destino: 'CANCÚN' }, updated_at: null, bloque_configs: { orden: 1, config_extra: { fields: FIELDS }, bloque_definitions: { tipo: 'datos' }, etapas_negocio: { orden: 1 } } });
     await preguntaDeViaje();
-    const lista = textos().at(-1)!;
-    const k = lista.split('\n').find(l => l.includes('Ana María Quiñones'))!.charAt(0);
     const negocios = t.negocios.length;
     await llega('nueva Ana María', { enviado: 9 });
     await cron(60);
-    expect(textos().at(-1)).toContain(`¿Va como viaje nuevo de Ana María? No lo tengo en el directorio: después del sí te pido su celular o correo (sin uno de los dos no lo creo).\nYa hay un viaje de Ana María Quiñones (A 26 7): si es para ese, responde ${k}.`);
+    expect(textos().at(-1)).toContain(`¿Va como viaje nuevo de Ana María? No lo tengo en el directorio: después del sí te pido su celular o correo (sin uno de los dos no lo creo).\nYa hay un viaje de Ana María Quiñones (A 26 7): si es para ese, responde «el de Cancún».`);
     expect(t.contactos).toEqual([]);
-    await llega(k, { enviado: 100 });
+    // Lo que la confirmación ofrece (el número de la lista sigue valiendo, sin anunciarse).
+    await llega('el de Cancún', { enviado: 100 });
     colaModelo = [pedido()];
     await cron(160);
     expect(t.contactos).toEqual([]);
@@ -1355,7 +1354,7 @@ Los cobros, cambios de etapa y horas se gestionan desde la app.`]);
 describe('Trappvel 2026-10-02: «cliente nuevo Daniel Pérez» con un viaje abierto de Lina Pérez', () => {
   // 2026-10-05: «otro cliente» sin nombre pregunta para quién es el viaje nuevo.
   const PIDE_NOMBRE = 'Listo, un viaje nuevo. ¿Para qué cliente es?';
-  const LINA = 'Ya hay un viaje de Lina Pérez (L1 26 1): si es para ese, escribe L1 26 1.';
+  const LINA = 'Ya hay un viaje de Lina Pérez (L1 26 1): si es para ese, escribe «L1 CTG ENE 27».';
   /** «cliente nuevo Daniel Pérez» sin celular: el bot no lo tiene y pide una llave (decisión 1 del 2026-10-05). */
   const PIDE_LLAVE_DANIEL = 'No tengo a Daniel Pérez en el directorio. ¿Me pasas su celular o su correo? Así reviso que no lo tengamos con otro nombre, y sin uno de los dos no lo creo.';
   const CHINA = salidaModelo({ destino: { valor: 'China', frase: 'una cotizacion a China' } });
@@ -1405,13 +1404,13 @@ describe('Trappvel 2026-10-02: «cliente nuevo Daniel Pérez» con un viaje abie
     // 9:32 · lo único que es del cliente.
     await llega('El me esta pidiendo una cotizacion a China', { enviado: 1883 });
     await cronConCierre(2200);
-    expect(textos().at(-1)).toMatch(/· ¿De qué viaje es el mensaje\?\n1\. L1 CTG ENE 27 · Lina Pérez \(L1 26 1\)\nResponde el número o el código\. Si es un viaje nuevo, escribe «nuevo» y el nombre del cliente; si no va, «descartar»\.$/);
+    expect(textos().at(-1)).toMatch(/· ¿De qué viaje es el mensaje\?\n1\. L1 CTG ENE 27 · Lina Pérez \(L1 26 1\)\nDime cuál \(por ejemplo «el de Cartagena»\)\. Si es un viaje nuevo, escribe «nuevo» y el nombre del cliente; si no va, «descartar»\.$/);
     // La respuesta: el cliente nuevo, en cualquier forma.
     await llega(`cliente nuevo Daniel Pérez ${celEscrito('Daniel Pérez')}`, { enviado: 2260 });
     expect(t.wa_bandeja_mensajes.find(m => m.wa_message_id === `wamid.vivo.${n}`)).toMatchObject({ papel: 'respuesta_cliente' });
     await cron(2320);
     // La confirmación dice el viaje de Lina con su número; el «sí» es el viaje nuevo de Daniel Pérez, cliente nuevo.
-    expect(textos().at(-1)).toContain(`¿Va como viaje nuevo de Daniel Pérez? No lo tengo en el directorio: lo creo como cliente nuevo, con cel. ${celEscrito('Daniel Pérez')}.\nYa hay un viaje de Lina Pérez (L1 26 1): si es para ese, responde 1.`);
+    expect(textos().at(-1)).toContain(`¿Va como viaje nuevo de Daniel Pérez? No lo tengo en el directorio: lo creo como cliente nuevo, con cel. ${celEscrito('Daniel Pérez')}.\nYa hay un viaje de Lina Pérez (L1 26 1): si es para ese, responde «el de Cartagena».`);
     expect(negocioDe('DANIEL PÉREZ')).toBeFalsy();
     await llega('sí', { enviado: 2330 });
     colaModelo = [CHINA];
@@ -1442,7 +1441,7 @@ describe('Trappvel 2026-10-02: «cliente nuevo Daniel Pérez» con un viaje abie
   it('solo el apellido con UN viaje: la lista numerada con NUEVO (nunca sí/no); «nuevo Daniel Pérez» abre su caja', async () => {
     viajeDeLina();
     await llega('Pérez', { enviado: 0 });
-    expect(textos()).toEqual(['¿De qué viaje es «Pérez»? Hasta que me digas, no asigno lo que sigue.\n1. L1 CTG ENE 27 · Lina Pérez (L1 26 1)\nResponde el número; si es un viaje nuevo, «nuevo» y el nombre del cliente; o «descartar».']);
+    expect(textos()).toEqual(['¿De qué viaje es «Pérez»? Hasta que me digas, no asigno lo que sigue.\n1. L1 CTG ENE 27 · Lina Pérez (L1 26 1)\nDime cuál (por ejemplo «el de Cartagena»). Si es un viaje nuevo, «nuevo» y el nombre del cliente; o «descartar».']);
     await llega('si', { enviado: 3 }); // no elige
     await llega(nuevo('Daniel Pérez'), { enviado: 6 });
     await llega('quiere cotizar Cartagena para 2', { enviado: 9, reenviado: true });
@@ -1696,6 +1695,61 @@ describe('2026-10-05 · la prueba de Mauricio, parafraseada: viaje nuevo de un c
     expect(textos().at(-1)).toMatch(/^Martín Robledo tiene 5 viajes abiertos\. ¿Va en uno de esos o es un viaje nuevo\?/);
     await llega('el de Miami', { enviado: 15 });
     expect(textos().at(-1)).toBe('📌 MIAMI 7N · Martín Robledo (M1 26 1)');
+  });
+
+  for (const modo of ['apagado', 'prendido'] as const) {
+    it(`la secuencia de las 09:26, interruptor ${modo}: «¿Qué viajes tiene abiertos?» se contesta en solo lectura y nunca es contenido`, async () => {
+      clienteConCincoViajes();
+      const llamadas = { n: 0 };
+      const interprete = modo === 'prendido' ? { llamadas } : undefined;
+      const bloquesAntes = JSON.stringify(t.negocio_bloques);
+      await llega('Vamos a hacer una nueva cotización para Martín Robledo', { enviado: 0, interprete });
+      expect(textos().at(-1)).toBe(YA_LO_TENEMOS);
+      const registrados = t.wa_bandeja_mensajes.length;
+      // 09:26 · la pregunta al bot: «tiene» es el cliente de la tanda abierta.
+      await llega('Que viajes tiene abiertos?', { enviado: 10, interprete });
+      expect(textos().at(-1)).toBe(['Martín Robledo tiene 5 viajes abiertos:', '- MIAMI 7N (M1 26 1)', '- ARMENIA 2N (M1 26 2)', '- ARMENIA 2N (M1 26 3)',
+        '- EUROPA 20D (M1 26 4)', '- EUROPA 2 DÍAS (M1 26 5)'].join('\n'));
+      expect(textos().some(x => /¿Qué hago con esto\?|No te entendí/.test(x))).toBe(false);
+      // Solo lectura: no se registra en la tanda.
+      expect(t.wa_bandeja_mensajes.length).toBe(registrados);
+      // Lo que el cliente pregunta, reenviado, sí es contenido (regla 1 de la frontera).
+      await llega('¿cuánto cuesta el de 7 noches? ¿y qué viajes tienen abiertos para enero?', { enviado: 20, reenviado: true });
+      expect(t.wa_bandeja_mensajes.length).toBe(registrados + 1);
+      // Otra pregunta al bot: qué lleva la tanda.
+      await llega('¿qué te he mandado?', { enviado: 30, interprete });
+      expect(textos().at(-1)).toMatch(/^Llevas 1 mensaje de .*Martín Robledo.*\. Cuando termines, escribe «listo»\.$/);
+      // Y del viaje nuevo: todavía no existe.
+      await llega('qué le falta?', { enviado: 35, interprete });
+      expect(textos().at(-1)).toMatch(/^El viaje nuevo de Martín Robledo todavía no está creado/);
+      expect(t.wa_bandeja_mensajes.length).toBe(registrados + 1);
+      // Con el interruptor prendido, el código de hoy las lee exactas: el modelo no se llama.
+      expect(llamadas.n).toBe(0);
+      await llega('listo', { enviado: 40 });
+      const resumen = textos().at(-1)!;
+      expect(resumen).toMatch(/1\) Viaje nuevo de Martín Robledo \(ya es cliente: cel\. …9444, 5 viajes abiertos\) — 1 mensaje\n   1 «¿cuánto cuesta el de 7 noches\?/);
+      expect(resumen).not.toContain('Que viajes tiene');
+      expect(JSON.stringify(t.negocio_bloques)).toBe(bloquesAntes);
+    });
+  }
+
+  it('prendido: una paráfrasis que solo lee el modelo («me haces la lista de lo que tiene abierto?») también es la consulta', async () => {
+    clienteConCincoViajes();
+    await llega('Vamos a hacer una nueva cotización para Martín Robledo', { enviado: 0 });
+    const registrados = t.wa_bandeja_mensajes.length;
+    const texto = 'oye y me haces la lista de lo que tiene abierto?';
+    await llega(texto, { enviado: 10, interprete: { modelo: { acciones: [{ accion: 'consulta', evidencia: texto, tema: 'viajes' }] } } });
+    expect(textos().at(-1)).toMatch(/^Martín Robledo tiene 5 viajes abiertos:\n- MIAMI 7N \(M1 26 1\)/);
+    expect(t.wa_bandeja_mensajes.length).toBe(registrados);
+  });
+
+  it('en la caja de un viaje que ya existe, «¿qué le falta?» dice su avance y lo que falta; la pregunta abierta se recuerda', async () => {
+    clienteConCincoViajes();
+    await llega('M1 26 1', { enviado: 0 });
+    await llega('¿qué le falta?', { enviado: 5 });
+    expect(textos().at(-1)).toMatch(/MIAMI 7N/);
+    expect(textos().at(-1)).toMatch(/\nLe falta: |\nYa tiene todo lo mínimo para cotizar\./);
+    expect(t.wa_bandeja_mensajes.filter(m => String(m.cuerpo).includes('le falta'))).toEqual([]);
   });
 
   it('un cliente con TODOS sus viajes cerrados también se encuentra (R3)', async () => {

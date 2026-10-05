@@ -421,15 +421,15 @@ describe('NUEVO y re-pregunta', () => {
       // «Nuevo» es un viaje nuevo: el directorio no la tiene, y comparte el apellido con tres clientes con viaje abierto.
       [
         'Tanda sin nombre · ¿Va como viaje nuevo de Carla Prueba? No lo tengo en el directorio: después del sí te pido su celular o correo (sin uno de los dos no lo creo).',
-        'Ya hay viajes de Luis Prueba (T1 26 15), Marta Prueba (T1 26 14) y Ana Prueba (T1 26 9): si es para uno de esos, responde 1, 2 o T1 26 9.',
-        'Responde sí, o el número del viaje si es uno que ya existe. No he creado ni cargado nada.',
+        'Ya hay viajes de Luis Prueba (T1 26 15), Marta Prueba (T1 26 14) y Ana Prueba (T1 26 9): si es para uno de esos, responde «el de Cartagena», «el de Punta Cana» o T1 26 9.',
+        'Responde sí, o dime el viaje si es uno que ya existe. No he creado ni cargado nada.',
       ].join('\n'),
     ]);
     expect(ent()).toMatchObject({ estado: 'esperando_negocio', destino: 'nuevo', contacto_nombre: 'Carla Prueba', confirmacion_pendiente: null });
     expect(vi.mocked(fetch)).not.toHaveBeenCalled(); // ni siquiera se leyó con el modelo
     expect([t.contactos, t.negocios.length]).toEqual([[], negocios]);
     expect(t.negocio_bloques.map(b => JSON.stringify(b))).toEqual(antes);
-    expect(await mod.preguntaAbierta(db as never, WS, TEL)).toMatchObject({ espera: 'viaje', corta: '¿Va como viaje nuevo de Carla Prueba? Sí, el nombre correcto, o el número o código del viaje' });
+    expect(await mod.preguntaAbierta(db as never, WS, TEL)).toMatchObject({ espera: 'viaje', corta: '¿Va como viaje nuevo de Carla Prueba? Sí, el nombre correcto, o dime el viaje si ya existe' });
     expect(await responder('sí')).toBe(true);
     await correr();
     // Sin celular ni correo no se crea: se pide, y nada se crea mientras tanto.
@@ -632,7 +632,7 @@ describe('QA v5 · lo que el bot contesta en el acto a un encabezado (atenderEnB
   };
   const carolina = { id: 'n18', workspace_id: WS, linea_id: LINEA, codigo: 'T1 26 18', nombre: 'SAN ANDRÉS 4N', estado: 'abierto', created_at: '2026-09-26T10:00:00Z', contacto_id: 'c-c', empresa_id: null, responsable_id: null, contactos: { nombre: 'CAROLINA RUIZ' }, empresas: null };
 
-  const LISTA_CAROLINA = '¿De qué viaje es «Carlina»? Hasta que me digas, no asigno lo que sigue.\n1. SAN ANDRÉS 4N · Carolina Ruiz (T1 26 18)\nResponde el número; si es un viaje nuevo, «nuevo» y el nombre del cliente; o «descartar».';
+  const LISTA_CAROLINA = '¿De qué viaje es «Carlina»? Hasta que me digas, no asigno lo que sigue.\n1. SAN ANDRÉS 4N · Carolina Ruiz (T1 26 18)\nDime cuál (por ejemplo «el de Carolina»). Si es un viaje nuevo, «nuevo» y el nombre del cliente; o «descartar».';
 
   // Trappvel 2026-10-02 (regla 3): el aproximado pregunta con la lista numerada, aunque haya un solo candidato.
   it('exacto: «📌»; aproximado: la lista numerada y, con el número, «📌»; la firma del equipo no contesta nada', async () => {
@@ -742,7 +742,7 @@ describe('Prueba en vivo del 2026-10-01: dos viajes NUEVO seguidos, una sola pre
     // 2026-10-05: el cliente nuevo viene con su celular en el encabezado (sin llave no se crea: decisión 1).
     await llega('nuevo Laura Prueba 300 111 2233');
     // Comparte el apellido con tres clientes con viaje abierto: el acuse lo dice (cuarto control de Vera).
-    expect(textos().at(-1)).toBe('Va como viaje nuevo de Laura Prueba, cliente nuevo (cel. 300 111 2233). Lo creo cuando me digas que sí en el resumen.\nReenvíame lo que te pidió y al final te muestro el resumen.\nYa hay viajes de Luis Prueba (T1 26 15), Marta Prueba (T1 26 14) y Ana Prueba (T1 26 9): si es para uno de esos, escribe su código.');
+    expect(textos().at(-1)).toBe('Va como viaje nuevo de Laura Prueba, cliente nuevo (cel. 300 111 2233). Lo creo cuando me digas que sí en el resumen.\nReenvíame lo que te pidió y al final te muestro el resumen.\nYa hay viajes de Luis Prueba (T1 26 15), Marta Prueba (T1 26 14) y Ana Prueba (T1 26 9): si es para uno de esos, escribe su nombre (por ejemplo «CARTAGENA 3N»).');
     await llega('Hola, queremos ir a Cartagena, somos 2 adultos', true);
     await llega('listo');
     expect(textos().at(-1)).toMatch(/^Laura Prueba · ¿Lo cargo así\?\nEntendí 1 viaje:\n1\) Viaje nuevo de Laura Prueba \(cliente nuevo, cel\. 300 111 2233\) — 1 mensaje\n   1 «Hola, queremos ir a Cartagena/);
@@ -774,7 +774,7 @@ describe('Prueba en vivo del 2026-10-01: dos viajes NUEVO seguidos, una sola pre
 
   it('con el resumen de Laura esperando su celular (sin llave no se crea), Diego espera turno y la llave va a la única pregunta abierta', async () => {
     await llega('nuevo Laura Prueba');
-    expect(textos().at(-1)).toBe('No tengo a Laura Prueba en el directorio. ¿Me pasas su celular o su correo? Así reviso que no lo tengamos con otro nombre, y sin uno de los dos no lo creo.\nYa hay viajes de Luis Prueba (T1 26 15), Marta Prueba (T1 26 14) y Ana Prueba (T1 26 9): si es para uno de esos, escribe su código.');
+    expect(textos().at(-1)).toBe('No tengo a Laura Prueba en el directorio. ¿Me pasas su celular o su correo? Así reviso que no lo tengamos con otro nombre, y sin uno de los dos no lo creo.\nYa hay viajes de Luis Prueba (T1 26 15), Marta Prueba (T1 26 14) y Ana Prueba (T1 26 9): si es para uno de esos, escribe su nombre (por ejemplo «CARTAGENA 3N»).');
     await llega('Hola, queremos ir a Cartagena, somos 2 adultos', true);
     await llega('listo');
     expect(textos().at(-1)).toContain('1) Viaje nuevo de Laura Prueba (no lo tengo en el directorio: falta su celular o correo) — 1 mensaje');
@@ -790,7 +790,7 @@ describe('Prueba en vivo del 2026-10-01: dos viajes NUEVO seguidos, una sola pre
     expect(textos().at(-1)).toBe([
       'Va como viaje nuevo de Diego Prueba, cliente nuevo (cel. 300 444 5566). Lo creo cuando me digas que sí en el resumen.',
       'Reenvíame lo que te pidió y al final te muestro el resumen.',
-      'Ya hay viajes de Luis Prueba (T1 26 15), Marta Prueba (T1 26 14) y Ana Prueba (T1 26 9): si es para uno de esos, escribe su código.',
+      'Ya hay viajes de Luis Prueba (T1 26 15), Marta Prueba (T1 26 14) y Ana Prueba (T1 26 9): si es para uno de esos, escribe su nombre (por ejemplo «CARTAGENA 3N»).',
       'Primero: Laura Prueba · ¿Lo cargo así?',
     ].join('\n'));
     for (const x of ['para San Andrés', 'vamos 3 adultos', 'del 5 al 9 de diciembre', 'hotel todo incluido']) await llega(x, true);
@@ -868,7 +868,7 @@ describe('guardianes en la ejecución', () => {
     await responder('nuevo Ignacio Salgar 3201234567');
     await correr();
     expect(enviados.at(-1)!.texto).toContain('¿Va como viaje nuevo de Ignacio Salgar? No lo tengo en el directorio: lo creo como cliente nuevo, con cel. 320 123 4567.');
-    expect(enviados.at(-1)!.texto).toContain('Responde sí, o el código del viaje si es uno que ya existe.');
+    expect(enviados.at(-1)!.texto).toContain('Responde sí, o dime el viaje si es uno que ya existe.');
     expect(seg()).toMatchObject({ estado: 'esperando_negocio', destino: 'nuevo', contacto_nombre: 'Ignacio Salgar' });
     expect(t.contactos).toEqual([]);
     expect(bloque('b15')).toEqual({ destino: 'CARTAGENA' });

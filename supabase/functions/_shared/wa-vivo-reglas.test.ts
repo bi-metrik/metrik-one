@@ -254,7 +254,7 @@ describe('B · el nombre del negocio', () => {
     expect(resolverEncabezado('M1 26 4', V)).toMatchObject({ tipo: 'viaje', viaje: { id: 'n4' }, por: 'codigo' });
     expect(respuestaAlEncabezado(resolverEncabezado('M1 26 4', V))).toBe('📌 ARMENIA 2N · Juan Prueba (M1 26 4)');
     expect(respuestaAlEncabezado(resolverEncabezado('ARMENIA 2N', V), 'ARMENIA 2N')).toBe(
-      '¿De qué viaje es «ARMENIA 2N»? Hasta que me digas, no asigno lo que sigue.\n1. ARMENIA 2N · Juan Prueba (M1 26 4)\n2. ARMENIA 2N · Pedro Prueba (M1 26 3)\nResponde el número; si es un viaje nuevo, «nuevo» y el nombre del cliente; o «descartar».',
+      '¿De qué viaje es «ARMENIA 2N»? Hasta que me digas, no asigno lo que sigue.\n1. ARMENIA 2N · Juan Prueba (M1 26 4)\n2. ARMENIA 2N · Pedro Prueba (M1 26 3)\nDime cuál (por ejemplo «el de Juan»). Si es un viaje nuevo, «nuevo» y el nombre del cliente; o «descartar».',
     );
     // Un contenido corto que comparte palabras con un nombre largo no es encabezado.
     expect(resolverEncabezado('2 adultos', [{ id: 'p', codigo: 'P1 26 1', cliente: null, destino: null, nombre: 'PRUEBA Cancun 12-17 nov 2 adultos' }])).toBeNull();

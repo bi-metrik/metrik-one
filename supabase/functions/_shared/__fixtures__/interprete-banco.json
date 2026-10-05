@@ -1,5 +1,5 @@
 {
- "nota": "Banco de la simulación del 2026-10-02 (escenarios.json, 45 turnos). Sintético: los clientes y negocios son inventados; el nombre del equipo se cambió por «Vale». `modelo` es lo que devuelve el modelo falso: la primera corrida de gemini-2.5-flash que acertó, convertida al esquema nuevo (viaje_* → ref), o a mano donde ninguna acertó. Cambios de expectativa: TV5 descarta la tanda (H2, caso 2) y H2 descarta solo la pregunta (H2, caso 1). Sexto control de Vera (2026-10-04): 11 turnos NC1–NC11 de «¿Creo el cliente nuevo «X»?» con textos inventados; los que lee exacto el código de hoy (el atajo) no llegan al modelo y su `esperado` es lo que hace el código de hoy. · 2026-10-05: +32 turnos de identidad (ID1–ID32, PR A del diseño de cliente y conversación): «nuevo» es un viaje nuevo, el candidato pendiente (`tanda_cliente`) y lo que espera la caja de un viaje nuevo (`pide_llave`, `confirma_llave`). Los que el código lee exactos no llegan al modelo. Octavo control de Vera (2026-10-05): 12 turnos OC1–OC12 con textos inventados: el «sí» con reserva al resumen (OC1–OC4, y OC5–OC6 de control sin reserva), el nombre con fórmula tras «¿Para qué cliente es?» (OC7–OC9, los lee el código) y el nombre del cliente dentro de la caja de su viaje nuevo (OC10–OC11; OC12 de control: su destino sí cambia de viaje).",
+ "nota": "Banco de la simulación del 2026-10-02 (escenarios.json, 45 turnos). Sintético: los clientes y negocios son inventados; el nombre del equipo se cambió por «Vale». `modelo` es lo que devuelve el modelo falso: la primera corrida de gemini-2.5-flash que acertó, convertida al esquema nuevo (viaje_* → ref), o a mano donde ninguna acertó. Cambios de expectativa: TV5 descarta la tanda (H2, caso 2) y H2 descarta solo la pregunta (H2, caso 1). Sexto control de Vera (2026-10-04): 11 turnos NC1–NC11 de «¿Creo el cliente nuevo «X»?» con textos inventados; los que lee exacto el código de hoy (el atajo) no llegan al modelo y su `esperado` es lo que hace el código de hoy. · 2026-10-05: +32 turnos de identidad (ID1–ID32, PR A del diseño de cliente y conversación): «nuevo» es un viaje nuevo, el candidato pendiente (`tanda_cliente`) y lo que espera la caja de un viaje nuevo (`pide_llave`, `confirma_llave`). Los que el código lee exactos no llegan al modelo. Octavo control de Vera (2026-10-05): 12 turnos OC1–OC12 con textos inventados: el «sí» con reserva al resumen (OC1–OC4, y OC5–OC6 de control sin reserva), el nombre con fórmula tras «¿Para qué cliente es?» (OC7–OC9, los lee el código) y el nombre del cliente dentro de la caja de su viaje nuevo (OC10–OC11; OC12 de control: su destino sí cambia de viaje). Preguntas sin prefijo (2026-10-05): 13 turnos, PQ1–PQ8 preguntas ESCRITAS al bot (consulta de la bandeja, en solo lectura; PQ1–PQ4 las lee el código) y PR1–PR5 preguntas del cliente (PR1–PR2 relatadas por el comercial, PR3–PR5 reenviadas): contenido de la tanda.",
  "contextos": {
   "trappvel": {
    "viajes": [
@@ -2659,6 +2659,283 @@
    "esperado": {
     "accion": "abrir_viaje",
     "viaje": "n12"
+   }
+  },
+  {
+   "id": "PQ1",
+   "turno": 1,
+   "cliente": "trappvel",
+   "texto": "Que viajes tiene abiertos?",
+   "reenviado": false,
+   "pendiente": null,
+   "pendiente_previo": null,
+   "tanda": true,
+   "tanda_cliente": "JORGE PÉREZ",
+   "control": true,
+   "modelo": null,
+   "origen_modelo": "atajo: lo lee el código de hoy, no llega al modelo",
+   "esperado": {
+    "accion": "consulta",
+    "tipo": "viajes"
+   }
+  },
+  {
+   "id": "PQ2",
+   "turno": 1,
+   "cliente": "trappvel",
+   "texto": "¿qué viajes tiene Carolina Ruiz?",
+   "reenviado": false,
+   "pendiente": null,
+   "pendiente_previo": null,
+   "tanda": true,
+   "tanda_cliente": "JORGE PÉREZ",
+   "control": false,
+   "modelo": null,
+   "origen_modelo": "atajo: lo lee el código de hoy, no llega al modelo",
+   "esperado": {
+    "accion": "consulta",
+    "tipo": "viajes"
+   }
+  },
+  {
+   "id": "PQ3",
+   "turno": 1,
+   "cliente": "trappvel",
+   "texto": "qué le falta al de Madrid?",
+   "reenviado": false,
+   "pendiente": null,
+   "pendiente_previo": null,
+   "tanda": true,
+   "tanda_cliente": "JORGE PÉREZ",
+   "control": false,
+   "modelo": null,
+   "origen_modelo": "atajo: lo lee el código de hoy, no llega al modelo",
+   "esperado": {
+    "accion": "consulta",
+    "tipo": "viaje"
+   }
+  },
+  {
+   "id": "PQ4",
+   "turno": 1,
+   "cliente": "trappvel",
+   "texto": "¿qué te he mandado?",
+   "reenviado": false,
+   "pendiente": null,
+   "pendiente_previo": null,
+   "tanda": true,
+   "tanda_cliente": "JORGE PÉREZ",
+   "control": false,
+   "modelo": null,
+   "origen_modelo": "atajo: lo lee el código de hoy, no llega al modelo",
+   "esperado": {
+    "accion": "consulta",
+    "tipo": "tanda"
+   }
+  },
+  {
+   "id": "PQ5",
+   "turno": 1,
+   "cliente": "trappvel",
+   "texto": "oye y me haces la lista de lo que tiene abierto?",
+   "reenviado": false,
+   "pendiente": null,
+   "pendiente_previo": null,
+   "tanda": true,
+   "tanda_cliente": "JORGE PÉREZ",
+   "control": false,
+   "modelo": {
+    "acciones": [
+     {
+      "accion": "consulta",
+      "evidencia": "oye y me haces la lista de lo que tiene abierto?",
+      "tema": "viajes"
+     }
+    ]
+   },
+   "origen_modelo": "a mano (2026-10-05, preguntas sin prefijo): lo que propondría el modelo",
+   "esperado": {
+    "accion": "consulta",
+    "tipo": "viajes"
+   }
+  },
+  {
+   "id": "PQ6",
+   "turno": 1,
+   "cliente": "trappvel",
+   "texto": "y lo de Cartagena en qué quedó, ya está completo?",
+   "reenviado": false,
+   "pendiente": null,
+   "pendiente_previo": null,
+   "tanda": true,
+   "tanda_cliente": "JORGE PÉREZ",
+   "control": false,
+   "modelo": {
+    "acciones": [
+     {
+      "accion": "consulta",
+      "evidencia": "y lo de Cartagena en qué quedó, ya está completo?",
+      "tema": "viaje",
+      "ref_destino": "Cartagena"
+     }
+    ]
+   },
+   "origen_modelo": "a mano (2026-10-05, preguntas sin prefijo): lo que propondría el modelo",
+   "esperado": {
+    "accion": "consulta",
+    "tipo": "viaje"
+   }
+  },
+  {
+   "id": "PQ7",
+   "turno": 1,
+   "cliente": "trappvel",
+   "texto": "a ver, cuántas cotizaciones abiertas tiene él",
+   "reenviado": false,
+   "pendiente": null,
+   "pendiente_previo": null,
+   "tanda": true,
+   "tanda_cliente": "JORGE PÉREZ",
+   "control": false,
+   "modelo": {
+    "acciones": [
+     {
+      "accion": "consulta",
+      "evidencia": "a ver, cuántas cotizaciones abiertas tiene él",
+      "tema": "viajes"
+     }
+    ]
+   },
+   "origen_modelo": "a mano (2026-10-05, preguntas sin prefijo): lo que propondría el modelo",
+   "esperado": {
+    "accion": "consulta",
+    "tipo": "viajes"
+   }
+  },
+  {
+   "id": "PQ8",
+   "turno": 1,
+   "cliente": "trappvel",
+   "texto": "recuérdame cuántas cosas te he pasado de este señor",
+   "reenviado": false,
+   "pendiente": null,
+   "pendiente_previo": null,
+   "tanda": true,
+   "tanda_cliente": "JORGE PÉREZ",
+   "control": false,
+   "modelo": {
+    "acciones": [
+     {
+      "accion": "consulta",
+      "evidencia": "recuérdame cuántas cosas te he pasado de este señor",
+      "tema": "tanda"
+     }
+    ]
+   },
+   "origen_modelo": "a mano (2026-10-05, preguntas sin prefijo): lo que propondría el modelo",
+   "esperado": {
+    "accion": "consulta",
+    "tipo": "tanda"
+   }
+  },
+  {
+   "id": "PR1",
+   "turno": 1,
+   "cliente": "trappvel",
+   "texto": "me pregunta qué viajes tienen para Cancún en diciembre",
+   "reenviado": false,
+   "pendiente": null,
+   "pendiente_previo": null,
+   "tanda": true,
+   "tanda_cliente": "JORGE PÉREZ",
+   "control": true,
+   "modelo": {
+    "acciones": [
+     {
+      "accion": "consulta",
+      "evidencia": "me pregunta qué viajes tienen para Cancún en diciembre",
+      "tema": "viajes"
+     }
+    ]
+   },
+   "origen_modelo": "a mano (2026-10-05, preguntas sin prefijo): lo que propondría el modelo",
+   "esperado": {
+    "accion": "contenido"
+   }
+  },
+  {
+   "id": "PR2",
+   "turno": 1,
+   "cliente": "trappvel",
+   "texto": "la clienta dice que si tienen algo abierto para Semana Santa",
+   "reenviado": false,
+   "pendiente": null,
+   "pendiente_previo": null,
+   "tanda": true,
+   "tanda_cliente": "JORGE PÉREZ",
+   "control": false,
+   "modelo": {
+    "acciones": [
+     {
+      "accion": "contenido",
+      "evidencia": "la clienta dice que si tienen algo abierto para Semana Santa"
+     }
+    ]
+   },
+   "origen_modelo": "a mano (2026-10-05, preguntas sin prefijo): lo que propondría el modelo",
+   "esperado": {
+    "accion": "contenido"
+   }
+  },
+  {
+   "id": "PR3",
+   "turno": 1,
+   "cliente": "trappvel",
+   "texto": "¿cuánto cuesta?",
+   "reenviado": true,
+   "pendiente": null,
+   "pendiente_previo": null,
+   "tanda": true,
+   "tanda_cliente": "JORGE PÉREZ",
+   "control": false,
+   "modelo": null,
+   "origen_modelo": "reenvío: no llega al modelo",
+   "esperado": {
+    "accion": "contenido"
+   }
+  },
+  {
+   "id": "PR4",
+   "turno": 1,
+   "cliente": "trappvel",
+   "texto": "¿qué viajes tienen abiertos para enero?",
+   "reenviado": true,
+   "pendiente": null,
+   "pendiente_previo": null,
+   "tanda": true,
+   "tanda_cliente": "JORGE PÉREZ",
+   "control": false,
+   "modelo": null,
+   "origen_modelo": "reenvío: no llega al modelo",
+   "esperado": {
+    "accion": "contenido"
+   }
+  },
+  {
+   "id": "PR5",
+   "turno": 1,
+   "cliente": "trappvel",
+   "texto": "¿Me falta algo para la reserva?",
+   "reenviado": true,
+   "pendiente": null,
+   "pendiente_previo": null,
+   "tanda": true,
+   "tanda_cliente": "JORGE PÉREZ",
+   "control": false,
+   "modelo": null,
+   "origen_modelo": "reenvío: no llega al modelo",
+   "esperado": {
+    "accion": "contenido"
    }
   }
  ]
