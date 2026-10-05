@@ -45,8 +45,17 @@ export function nombreDeLineaSinCosto(l: Pick<LineaSinCosto, 'nombre' | 'grupo'>
 /**
  * El motivo para no enviar. `null` = no hay líneas sin costo en el total que sale.
  * Con más de dos se nombran las dos primeras y «N más».
+ *
+ * @param pendientes Por id de línea, POR QUÉ no tiene costo cuando lo que falta es la tasa de
+ *   cambio (brief del 2026-10-05): el MISMO texto de la tarjeta («El precio está en EUR:
+ *   escribe la tasa de cambio para cargar el costo.»), que se agrega al motivo. Solo lo sabe
+ *   el editor (necesita la lectura y los pasajeros del viaje); sin él, el motivo es el de
+ *   siempre.
  */
-export function motivoFaltaCosto(lineas: readonly Pick<LineaSinCosto, 'nombre' | 'grupo'>[]): string | null {
+export function motivoFaltaCosto(
+  lineas: readonly (Pick<LineaSinCosto, 'nombre' | 'grupo'> & { id?: string })[],
+  pendientes?: ReadonlyMap<string, string> | null,
+): string | null {
   if (lineas.length === 0) return null
   const nombres = lineas.map(nombreDeLineaSinCosto)
   const lista = nombres.length === 1
@@ -55,5 +64,12 @@ export function motivoFaltaCosto(lineas: readonly Pick<LineaSinCosto, 'nombre' |
       ? `${nombres[0]} y ${nombres[1]}`
       : `${nombres[0]}, ${nombres[1]} y ${nombres.length - 2} más`
   const servicio = nombres.length === 1 ? 'ese servicio' : 'esos servicios'
-  return `Falta el costo de ${lista}: el cliente recibiría un precio sin ${servicio}.`
+  const base = `Falta el costo de ${lista}: el cliente recibiría un precio sin ${servicio}.`
+  const porTasa = lineas
+    .map((l, i) => ({ nombre: nombres[i], texto: l.id ? pendientes?.get(l.id) ?? null : null }))
+    .filter((x): x is { nombre: string; texto: string } => !!x.texto)
+  if (porTasa.length === 0) return base
+  // Una sola línea: el texto de la tarjeta tal cual. Varias: cada uno con su línea.
+  if (lineas.length === 1) return `${base} ${porTasa[0]!.texto}`
+  return `${base} ${porTasa.map(x => `${x.nombre}: ${x.texto}`).join(' ')}`
 }
