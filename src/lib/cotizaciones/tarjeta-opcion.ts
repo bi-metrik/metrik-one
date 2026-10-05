@@ -440,3 +440,23 @@ export function fechasDeEstadia(entrada: string | null | undefined, salida: stri
 
 /** «2 noches». */
 export const nochesTexto = (n: number | null | undefined) => (n && n > 0 ? `${n} ${n === 1 ? 'noche' : 'noches'}` : null)
+
+/**
+ * La pregunta antes de eliminar una opción desde su tarjeta. Lo que vuelve a la bandeja depende
+ * de qué es: un hotel devuelve sus habitaciones; las demás opciones, su pantallazo o los datos
+ * escritos a mano; sin nada leído, no vuelve nada (brief del 2026-10-05, «actividades tras la
+ * limpieza», punto 4: eliminar un traslado decía «Sus habitaciones vuelven a la bandeja»).
+ */
+export function preguntaEliminarOpcion(
+  nombre: string,
+  o: { esHotel: boolean; tieneLectura: boolean; manual: boolean },
+): string {
+  const vuelve = o.esHotel
+    ? ' Sus habitaciones vuelven a la bandeja.'
+    : !o.tieneLectura
+      ? ''
+      : o.manual
+        ? ' Sus datos vuelven a la bandeja.'
+        : ' Su pantallazo vuelve a la bandeja.'
+  return `¿Eliminas ${nombre} de este bloque?${vuelve}`
+}

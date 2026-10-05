@@ -81,6 +81,25 @@ export function lugarDeBloqueNuevo(
   return ciudadDeActividad(lectura, correcciones)
 }
 
+/**
+ * ¿Este aviso de la lectura de una actividad solo cuenta lo que ONE ya resolvió, sin pedir nada?
+ * Entonces no deja el bloque en «Necesita tu decisión» (brief del 2026-10-05, «actividades tras
+ * la limpieza», punto 3). Siguen en la tarjeta; solo dejan de contar para el estado del bloque.
+ *
+ *  · «El pantallazo dice 2 personas: son 2 adultos. El infante no paga en la actividad.»: el
+ *    costo ya se repartió entre los adultos con el infante en $0 (`soloLosQuePagan`).
+ *  · «La captura no muestra: ciudad. …»: una actividad sin ciudad nombra su bloque con el destino
+ *    del viaje (`lugarDeBloqueNuevo`); no falta nada para cotizar. Solo si la ciudad es lo ÚNICO
+ *    que no muestra: otro campo faltante (la moneda, el proveedor) sigue pidiendo atención.
+ *
+ * ⚠️ Solo actividades: en un hotel la ciudad arma el capítulo del documento.
+ */
+export function esAvisoResueltoEnActividad(aviso: string | null | undefined): boolean {
+  if (!aviso) return false
+  if (/^El pantallazo dice .+: son .+\. (?:El infante no paga|Los infantes no pagan) en la actividad\.$/.test(aviso)) return true
+  return /^La captura no muestra: ciudad\. La línea conserva los datos que ya tiene/.test(aviso)
+}
+
 /** La fecha de la actividad: la corregida en la ficha, y si no, la leída. */
 export function fechaDeActividad(lectura: LecturaCasilla | null | undefined, correcciones?: Correcciones | null): string | null {
   const corregida = correcciones?.fecha?.valor

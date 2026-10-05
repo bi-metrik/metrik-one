@@ -62,7 +62,7 @@ import { estrellasDesdeTexto } from './estrellas'
 import { notaDeLaLinea } from './nota-linea'
 import { datosManuales } from './ingreso-manual'
 import { habitacionesDeTarifa, repartirHabitaciones, type RepartoHabitaciones } from './habitaciones'
-import { acomodacionDeHabitaciones, ocupacionCorta } from './tarjeta-opcion'
+import { acomodacionDeHabitaciones, ocupacionConEdades, ocupacionCorta } from './tarjeta-opcion'
 import { vueloDesdeNombre } from '@/lib/pdf/cotizacion-trappvel-formato'
 import { parseMontoCop } from '@/lib/negocios/monto-cop'
 import { equipajeDeCampos, leerTramos, tramosDeCampos, type EquipajeTramo, type TramoVuelo } from './tramos-vuelo'
@@ -638,6 +638,11 @@ export function hotelesDeItems(items: ItemConLectura[]): HotelPDF[] {
     const cubre = reparto ? null : tarifa.confirmada?.composicion ?? primera?.paraComposicion ?? null
     const leida = primera ? composicionDeLectura(primera) : null
     const acomodacionConfirmada = cubre && (!leida || !mismaComposicion(leida, cubre)) ? ocupacionCorta(cubre) : null
+    // Brief del 2026-10-05, «actividades tras la limpieza», punto 4: la ocupación leída sale con
+    // las palabras de ONE («2 adultos + 1 infante»), no como la escribió la captura («2 Adultos 1
+    // Infante»). Lo que una persona corrigió en la ficha se respeta tal cual.
+    const ocupacionLeida = texto(d, 'ocupacion')
+    const acomodacionLeida = leida && !tarifa.correcciones?.ocupacion ? ocupacionConEdades(leida, ocupacionLeida) || null : null
     out.push({
       linea: (item.nombre ?? '').trim(),
       hotel: texto(d, 'hotel'),
@@ -647,7 +652,7 @@ export function hotelesDeItems(items: ItemConLectura[]): HotelPDF[] {
       checkIn: fechaCorta(texto(d, 'check_in')),
       checkOut: fechaCorta(texto(d, 'check_out')),
       noches: nochesDe(d, tarifa.correcciones),
-      ocupacion: acomodacion ?? acomodacionConfirmada ?? texto(d, 'ocupacion'),
+      ocupacion: acomodacion ?? acomodacionConfirmada ?? acomodacionLeida ?? ocupacionLeida,
       cancelacion: texto(d, 'politica_cancelacion'),
       estrellas: estrellasDesdeTexto(texto(d, 'estrellas')),
       localizador: null,

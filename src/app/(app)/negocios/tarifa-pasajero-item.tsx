@@ -30,6 +30,7 @@ import {
   confirmadaVigente,
   describirOcupacion,
   faltanPorAcomodar,
+  textoFaltanPorAcomodar,
   formatoMonto,
   leerTarifaPax,
   lineaPorPasajero,
@@ -186,7 +187,7 @@ export default function TarifaPasajeroItem({
   // De dónde salió la ocupación de la línea, y a quién del viaje le falta sitio (§2.4).
   const ocupacionLeida = primera ? composicionDeLectura(primera) : null
   const laPusoElPantallazo = !!(tarifa.composicion && ocupacionLeida && mismaComposicion(ocupacionLeida, tarifa.composicion))
-  const faltan = composicion ? faltanPorAcomodar(composicion, composicionViaje) : null
+  const faltan = composicion ? faltanPorAcomodar(composicion, composicionViaje, ranura.slug) : null
   // La pregunta que la lectura no resolvió: sale DESPUÉS de pegar y diciendo por qué.
   const pedirComposicion = !composicion && !!primera
   const mostrarComposicion = !!composicion && (!!primera || !!tarifa.composicion)
@@ -1119,7 +1120,7 @@ function ComposicionDeLinea({
             queda sin sitio. Que la línea cubra de más es una decisión de quien cotiza. */}
         {faltan && (
           <p className="mt-0.5 text-[11px] font-medium text-amber-800">
-            Faltan {describirOcupacion(faltan, 'y')} por acomodar.
+            {textoFaltanPorAcomodar(faltan)}
           </p>
         )}
       </div>

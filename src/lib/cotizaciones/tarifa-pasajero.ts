@@ -394,14 +394,22 @@ export function composicionDeLectura(l: LecturaCasilla): Composicion | null {
  * ⚠️ Solo cuenta lo que FALTA. Una línea que cubre de más no se reporta: el sistema compara
  * para avisar de un hueco, no para discutir una decisión de quien cotiza.
  */
-export function faltanPorAcomodar(linea: Composicion, viaje: Composicion | null): Composicion | null {
+export function faltanPorAcomodar(linea: Composicion, viaje: Composicion | null, ranuraSlug?: string | null): Composicion | null {
   if (!viaje) return null
   const falta: Composicion = {
     adultos: Math.max(0, viaje.adultos - linea.adultos),
     ninos: Math.max(0, viaje.ninos - linea.ninos),
-    infantes: Math.max(0, viaje.infantes - linea.infantes),
+    // Brief del 2026-10-05, «actividades tras la limpieza», punto 3: en una actividad el infante
+    // no se acomoda (va gratis, `infanteGratisEnActividad`). «2 adultos» en un viaje 2A+1I
+    // decía «Faltan 1 infante por acomodar». Hotel y vuelo siguen contándolo.
+    infantes: ranuraSlug === 'actividad_detalle' ? 0 : Math.max(0, viaje.infantes - linea.infantes),
   }
   return totalPasajeros(falta) > 0 ? falta : null
+}
+
+/** «Falta 1 infante por acomodar.» / «Faltan 2 adultos y 1 infante por acomodar.» */
+export function textoFaltanPorAcomodar(falta: Composicion): string {
+  return `${totalPasajeros(falta) === 1 ? 'Falta' : 'Faltan'} ${describirOcupacion(falta, 'y')} por acomodar.`
 }
 
 /** La ocupación que ACREDITA la captura: la de las filas si hay desglose, la leída si no. */
