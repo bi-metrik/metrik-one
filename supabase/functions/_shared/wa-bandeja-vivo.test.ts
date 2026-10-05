@@ -832,7 +832,7 @@ describe('v2 · N2: «¿A qué viaje van?» se contesta con cada forma que el bo
     await llega(nuevo(nombre), { enviado: 9 });
     colaModelo = [pedido()];
     await cron(60);
-    expect(textos().at(-1)!.replace(/^Tanda de las \d\d:\d\d · /, '')).toBe(`¿Va como viaje nuevo de ${nombre}? No lo tengo en el directorio: lo creo como cliente nuevo, con cel. ${celEscrito(nombre)}.\nResponde sí, o el número del viaje si es uno que ya existe. No he creado ni cargado nada.`);
+    expect(textos().at(-1)!.replace(/^Tanda de las \d\d:\d\d · /, '')).toBe(`¿Va como viaje nuevo de ${nombre}? No lo tengo en el directorio: lo creo como cliente nuevo, con cel. ${celEscrito(nombre)}.\nResponde sí, o dime el viaje si es uno que ya existe. No he creado ni cargado nada.`);
     expect(vi.mocked(fetch)).not.toHaveBeenCalled(); // nada se leyó ni se cargó todavía
     nadaCreado(negocios);
     expect(await ent.preguntaAbierta(db as never, WS, TEL)).toMatchObject({

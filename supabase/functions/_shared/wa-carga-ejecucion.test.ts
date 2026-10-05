@@ -422,7 +422,7 @@ describe('NUEVO y re-pregunta', () => {
       [
         'Tanda sin nombre · ¿Va como viaje nuevo de Carla Prueba? No lo tengo en el directorio: después del sí te pido su celular o correo (sin uno de los dos no lo creo).',
         'Ya hay viajes de Luis Prueba (T1 26 15), Marta Prueba (T1 26 14) y Ana Prueba (T1 26 9): si es para uno de esos, responde 1, 2 o T1 26 9.',
-        'Responde sí, o el número del viaje si es uno que ya existe. No he creado ni cargado nada.',
+        'Responde sí, o dime el viaje si es uno que ya existe. No he creado ni cargado nada.',
       ].join('\n'),
     ]);
     expect(ent()).toMatchObject({ estado: 'esperando_negocio', destino: 'nuevo', contacto_nombre: 'Carla Prueba', confirmacion_pendiente: null });
@@ -868,7 +868,7 @@ describe('guardianes en la ejecución', () => {
     await responder('nuevo Ignacio Salgar 3201234567');
     await correr();
     expect(enviados.at(-1)!.texto).toContain('¿Va como viaje nuevo de Ignacio Salgar? No lo tengo en el directorio: lo creo como cliente nuevo, con cel. 320 123 4567.');
-    expect(enviados.at(-1)!.texto).toContain('Responde sí, o el código del viaje si es uno que ya existe.');
+    expect(enviados.at(-1)!.texto).toContain('Responde sí, o dime el viaje si es uno que ya existe.');
     expect(seg()).toMatchObject({ estado: 'esperando_negocio', destino: 'nuevo', contacto_nombre: 'Ignacio Salgar' });
     expect(t.contactos).toEqual([]);
     expect(bloque('b15')).toEqual({ destino: 'CARTAGENA' });

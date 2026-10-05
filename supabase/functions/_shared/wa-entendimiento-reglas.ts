@@ -1588,7 +1588,7 @@ export function calificarNombreNuevo(cliente: string | null | undefined): Califi
 export function textoNombreNuevoEnDuda(propuesto: string): string {
   const p = String(propuesto ?? '').trim().slice(0, 40);
   return `¿Para qué cliente es el viaje nuevo? Con «${p}» no sé quién es.\n`
-    + 'Escribe «nuevo» y su nombre (por ejemplo «nuevo Marta Gómez»), «nuevo» solo para tomarlo de los mensajes, o el número del viaje.';
+    + 'Escribe «nuevo» y su nombre (por ejemplo «nuevo Marta Gómez»), «nuevo» solo para tomarlo de los mensajes, o dime el viaje si es uno que ya existe.';
 }
 
 /** «otro cliente Daniel Pérez», «cambio de cliente: Lina»: lo que viene después del cambio, o `null`. */

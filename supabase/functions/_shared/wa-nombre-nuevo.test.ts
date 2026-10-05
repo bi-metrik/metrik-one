@@ -60,7 +60,7 @@ describe('calificarNombreNuevo: sin vocabulario', () => {
 
   it('el texto de la re-pregunta (solo números) cita lo propuesto y dice cómo seguir', () => {
     expect(textoNombreNuevoEnDuda('3005551234')).toBe('¿Para qué cliente es el viaje nuevo? Con «3005551234» no sé quién es.\n'
-      + 'Escribe «nuevo» y su nombre (por ejemplo «nuevo Marta Gómez»), «nuevo» solo para tomarlo de los mensajes, o el número del viaje.');
+      + 'Escribe «nuevo» y su nombre (por ejemplo «nuevo Marta Gómez»), «nuevo» solo para tomarlo de los mensajes, o dime el viaje si es uno que ya existe.');
   });
 });
 
@@ -100,7 +100,7 @@ describe('clientes con viaje abierto: la confirmación lo dice (también en el a
 
   it('la pregunta aparte, con el número de la lista o el código', () => {
     expect(textoConfirmarNuevo({ nombre: 'combo playero', conLista: true })).toBe(
-      '¿Creo el cliente nuevo «combo playero»? Responde «sí», el nombre correcto, o el número del viaje.\nNo he creado ni cargado nada.');
+      '¿Creo el cliente nuevo «combo playero»? Responde «sí», el nombre correcto, o dime el viaje si es uno que ya existe.\nNo he creado ni cargado nada.');
     expect(textoConfirmarNuevo({ nombre: 'Rosalba Tovar', conLista: true, parecidos: [{ viaje: ROSALBA, numero: 2 }] })).toBe([
       '¿Creo el cliente nuevo «Rosalba Tovar»?',
       'Ya hay un viaje de Rosalba Quiñones Tovar (R 26 1): si es para ese, responde 2; si es un cliente nuevo, «sí»; o escríbeme el nombre correcto.',
