@@ -12,7 +12,8 @@ import { rpcDelDirectorio } from './__fixtures__/directorio-doble.ts';
 const enviados: Array<{ phone: string; texto: string }> = [];
 vi.mock('./wa-respond.ts', () => ({
   sendTextMessage: vi.fn(async (phone: string, texto: string) => { enviados.push({ phone, texto }); }),
-  sendButtons: vi.fn(async () => {}),
+  // Los botones de respuesta (2026-10-05): el cuerpo cuenta como lo que se le dijo.
+  sendButtons: vi.fn(async (phone: string, texto: string) => { enviados.push({ phone, texto }); return 'wamid.botones'; }),
 }));
 
 type Tablas = Record<string, Fila[]>;
@@ -290,8 +291,7 @@ describe('de punta a punta: la caja que decidió el intérprete llega al resumen
     await llega('Vale al final vamos 4, se suma mi cuñada', { seg: 5, reenviado: true });
     await llega('listo', { seg: 10 });
     const resumen = textos().at(-1)!;
-    expect(resumen).toMatch(/Entendí 1 viaje/);
-    expect(resumen).toMatch(/Lina Pérez \(T1 26 14\) — 1 mensaje/);
+    expect(resumen).toMatch(/^¿Cargo este viaje\?\n\n\*Lina Pérez \(T1 26 14\)\*\n\n1\. «Vale al final vamos 4/);
     expect(resumen).not.toMatch(/De qué viaje es/);
     // La telemetría del escrito atendido: una fila, con la acción de la bandeja (no cuenta para el tope de 30).
     expect(t.wa_message_log).toHaveLength(1);
@@ -312,6 +312,6 @@ describe('de punta a punta: la caja que decidió el intérprete llega al resumen
     await llega('listo', { seg: 10 });
     expect(textos()).toContain('No lo guardo: en la historia solo va lo que pide el cliente.');
     expect(t.wa_bandeja_mensajes.some(m => String(m.cuerpo).includes('regatera'))).toBe(false);
-    expect(textos().at(-1)).toMatch(/Lina Pérez \(T1 26 14\) — 1 mensaje/);
+    expect(textos().at(-1)).toMatch(/\*Lina Pérez \(T1 26 14\)\*\n\n1\. «Hola Vale, somos 2 adultos»\n\n/);
   });
 });

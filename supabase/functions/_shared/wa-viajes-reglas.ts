@@ -26,6 +26,8 @@ import {
 } from './wa-cliente-reglas.ts';
 import type { Directorio, FichaCliente, Llave, ResolucionCliente } from './wa-cliente-reglas.ts';
 export { nombreDeViaje, nombrePropio } from './wa-entendimiento-reglas.ts';
+import { huella, idBoton, TITULO_CARGAR, TITULO_DESCARTAR, TITULO_NO_ES, TITULO_SI_ES } from './wa-botones-bandeja.ts';
+import type { BotonBandeja } from './wa-botones-bandeja.ts';
 import { codigoCompacto, interpretarRespuestaNegocio, opcionNombrada, pieDeLista } from './wa-carga-reglas.ts';
 import { esNotaDelComercial } from './wa-guardianes.ts';
 
@@ -1994,6 +1996,46 @@ export function nombreDestino(d: DestinoPlan): string {
 }
 
 /**
+ * El bloque de un viaje en el resumen: el viaje (va en negrita) y, debajo, el cliente con su llave en una línea.
+ * Dice lo mismo que `nombreDestino`, partido para leerse de un vistazo.
+ */
+export function bloqueDelDestino(d: DestinoPlan): { titulo: string; detalle: string | null } {
+  if (d.tipo !== 'nuevo') return { titulo: nombreDeViaje(d), detalle: null };
+  if (d.contacto) {
+    const nota = notaDeLaLlave(d.contacto, d.llave);
+    const extra = nota ? ` · ${[nota.agrega, nota.distinto].filter(Boolean).join('; ')}` : '';
+    return { titulo: `Viaje nuevo · ${nombrePropio(d.contacto.nombre)}`, detalle: `Ya es cliente · ${datoDeLaFicha(d.contacto)} · ${viajesDeLaFicha(d.contacto)}${extra}` };
+  }
+  const quien = d.cliente ? String(d.cliente).trim() : 'un cliente sin nombre';
+  const titulo = `Viaje nuevo · ${quien}`;
+  if (d.falta === 'llave') return { titulo, detalle: 'No lo tengo en el directorio: falta su celular o correo' };
+  if (d.falta === 'elegir') return { titulo, detalle: `Hay ${(d.opciones ?? []).length === 1 ? 'un contacto parecido' : 'varios contactos parecidos'}: dime cuál` };
+  if (d.falta === 'confirmar') return { titulo, detalle: `${textoLlave(d.llave)}, que ya es de ${nombrePropio(d.opciones?.[0]?.nombre ?? 'otro contacto')}` };
+  if (d.falta === 'nombre') return { titulo: 'Viaje nuevo · un cliente sin nombre', detalle: textoLlave(d.llave) };
+  if (d.falta === 'error') return { titulo, detalle: 'No pude revisar el directorio' };
+  if (tieneLlave(d.llave)) return { titulo, detalle: d.resuelto ? `Cliente nuevo · ${textoLlave(d.llave)}` : textoLlave(d.llave) };
+  return { titulo, detalle: null };
+}
+
+/**
+ * Los botones del resumen (2026-10-05). «Cargar» solo cuando el «sí» carga de verdad: con un mensaje por decidir (⚠)
+ * o algo que falta del cliente, no hay «Cargar»; va la pregunta y «Descartar». Si lo que falta es «¿Es la misma
+ * persona?», sus dos respuestas. `version`: la huella del reparto (un toque de un resumen anterior no vale).
+ */
+export function botonesDelResumen(plan: PlanViajes, entregaId: string): BotonBandeja[] {
+  const version = huella(plan);
+  const des = { id: idBoton('r', 'des', entregaId, version), title: TITULO_DESCARTAR };
+  if (gruposDelPlan(plan).length === 0) return [des];
+  if (pendientes(plan).length > 0) return [des];
+  const falta = clientesPorResolver(plan)[0];
+  if (falta?.destino.falta === 'confirmar') {
+    return [{ id: idBoton('r', 'si', entregaId, version), title: TITULO_SI_ES }, { id: idBoton('r', 'no', entregaId, version), title: TITULO_NO_ES }, des];
+  }
+  if (falta) return [des];
+  return [{ id: idBoton('r', 'si', entregaId, version), title: TITULO_CARGAR }, des];
+}
+
+/**
  * Lo que el resumen dice de un cliente nuevo que se parece al de un viaje abierto: «⚠ 1) Ya hay un viaje
  * de Ana María Gómez (T1 26 4). ¿Es para ese («el 1 y 2 es de T1 26 4») o es un cliente nuevo (responde
  * SÍ)?». Con los números del resumen, para moverlos con la corrección de siempre.
@@ -2058,7 +2100,7 @@ export function partesResumenPlan(
   // La nota del comercial (un juicio) no se repite: ni su texto ni una paráfrasis salen del bot.
   const linea = (n: number, largo: number) => {
     const m = porN.get(n);
-    return m && esNotaDelComercial(m.cuerpo, m.reenviado) ? `   ${visible(n)} (nota del comercial, no se guarda)` : `   ${visible(n)} «${recorte(m?.cuerpo ?? '', largo)}»`;
+    return m && esNotaDelComercial(m.cuerpo, m.reenviado) ? `${visible(n)}. (nota del comercial, no se guarda)` : `${visible(n)}. «${recorte(m?.cuerpo ?? '', largo)}»`;
   };
   const grupos = gruposDelPlan(plan);
   const porDecidir = pendientes(plan);
@@ -2066,38 +2108,43 @@ export function partesResumenPlan(
   const faltan = clientesPorResolver(plan);
   // Los ejemplos usan un número que está en el resumen (error 8: «el 4» salía con un solo mensaje).
   const k = porDecidir.length > 0 ? visible(porDecidir[0].n) : Math.max(1, ...plan.mensajes.map(m => visible(m.n)));
-  // PR B (2026-10-05): UNA pregunta, arriba; el bloque del resumen debajo; sin comandos en mayúsculas.
+  // PR B (2026-10-05): UNA pregunta, arriba. Desde el resumen con botones (pedido de Mauricio, 2026-10-05): cada viaje
+  // en su bloque (el viaje en negrita, el cliente y su llave en una línea, los mensajes en una lista corta) y una sola
+  // línea de cómo corregir. «No cargué nada todavía» ya no se repite: lo dicen los botones «Cargar» y «Descartar».
   const marcados = porDecidir.map(m => visible(m.n));
   const pregunta = porDecidir.length > 0 ? `¿Qué hago con ${marcados.length === 1 ? `el ${marcados[0]}` : `los ${rangos(marcados)}`} (⚠)?`
     : faltan.length > 0 ? textoFaltaCliente(faltan[0].destino)
-    : '¿Lo cargo así?';
+    : grupos.length > 1 ? `¿Cargo estos ${grupos.length} viajes?` : '¿Cargo este viaje?';
   // Un aviso corto («Corregido.», «No entendí «x».») va en la misma línea que la pregunta; uno largo, encima.
   const lineas: string[] = !aviso ? [pregunta] : aviso.length <= 60 ? [`${aviso} ${pregunta}`] : [aviso, pregunta];
-  lineas.push(grupos.length === 0 ? 'No hay mensajes con un viaje asignado.' : `Entendí ${grupos.length} ${grupos.length === 1 ? 'viaje' : 'viajes'}:`);
+  if (grupos.length === 0) lineas.push('', 'No hay mensajes con un viaje asignado.');
   for (const g of grupos) {
-    const n = g.mensajes.length;
-    lineas.push(`${g.k}) ${nombreDestino(g.destino)} — ${n} ${n === 1 ? 'mensaje' : 'mensajes'}`);
-    lineas.push(...g.mensajes.map(n2 => `${linea(n2, largo)}${plan.mensajes.find(x => x.n === n2)?.sospecha ? ' ⚠' : ''}`));
+    const b = bloqueDelDestino(g.destino);
+    lineas.push('', `*${grupos.length > 1 ? `${g.k}) ` : ''}${b.titulo}*`);
+    if (b.detalle) lineas.push(b.detalle);
+    lineas.push('', ...g.mensajes.map(n2 => `${linea(n2, largo)}${plan.mensajes.find(x => x.n === n2)?.sospecha ? ' ⚠' : ''}`));
   }
+  const notas: string[] = [];
   for (const g of grupos) {
     // Un cliente ya resuelto contra el directorio se muestra tal cual (arriba); el aviso de parecidos queda para
     // el que no pasó por él.
     if (g.destino.tipo !== 'nuevo' || g.destino.contacto) continue;
     const parecidos = viajesParecidos(g.destino.cliente, viajes);
-    if (parecidos.length > 0) lineas.push(avisoParecidosDelGrupo(g.k, g.mensajes.map(visible), parecidos));
+    if (parecidos.length > 0) notas.push(avisoParecidosDelGrupo(g.k, g.mensajes.map(visible), parecidos));
   }
   if (porDecidir.length > 0) {
-    lineas.push(`⚠ Por decidir antes del sí: ${porDecidir.length} ${porDecidir.length === 1 ? 'mensaje' : 'mensajes'}`);
-    lineas.push(...porDecidir.map(m => `${linea(m.n, 40)} (${m.motivo ?? 'sin viaje'})`));
+    notas.push(`⚠ Por decidir: ${porDecidir.length} ${porDecidir.length === 1 ? 'mensaje' : 'mensajes'}`);
+    notas.push(...porDecidir.map(m => `${linea(m.n, 40)} (${m.motivo ?? 'sin viaje'})`));
   }
   const descartados = plan.mensajes.filter(m => m.descartado).map(m => m.n);
-  if (descartados.length > 0) lineas.push(`Descartados: ${rangos(descartados.map(visible))}`);
-  lineas.push(...plan.avisos);
-  lineas.push(porDecidir.length > 0
-    ? `No cargué nada todavía. Para cada uno: «dejar el ${k}» (o «dejar todos»), «el ${k} es de Luisa», «el ${k} es del 2», «el ${k} es nuevo Pedro» o «descartar el ${k}»; después, «sí».`
+  if (descartados.length > 0) notas.push(`Descartados: ${rangos(descartados.map(visible))}`);
+  notas.push(...plan.avisos);
+  if (notas.length > 0) lineas.push('', ...notas);
+  lineas.push('', porDecidir.length > 0
+    ? `Para cada uno, escríbeme: «dejar el ${k}» (o «dejar todos»), «el ${k} es de Luisa», «el ${k} es del 2», «el ${k} es nuevo Pedro» o «quita el ${k}». Después te muestro el resumen para cargarlo.`
     : faltan.length > 0
-    ? 'No cargué nada todavía: con eso te lo vuelvo a mostrar.'
-    : `No cargué nada todavía. Responde «sí» para cargarlo, o corrige: «el ${k} es de Luisa», «descartar el ${k}». Con «descartar» no cargo nada.`);
+    ? 'Con eso te lo vuelvo a mostrar para cargarlo.'
+    : `Para mover o quitar uno, escríbeme: «el ${k} es de Luisa» o «quita el ${k}».`);
 
   const empacar = (tope: number): string[] => {
     const partes: string[] = [];
@@ -2105,14 +2152,14 @@ export function partesResumenPlan(
     for (const l of lineas) {
       const candidato = actual ? `${actual}\n${l}` : l;
       if (candidato.length > tope && actual) {
-        partes.push(actual);
+        partes.push(actual.trimEnd());
         actual = l;
       } else {
         actual = candidato;
       }
     }
-    if (actual) partes.push(actual);
-    return partes;
+    if (actual.trim()) partes.push(actual.trim());
+    return partes.map(p => p.trim());
   };
   const una = empacar(MAX_LARGO_RESUMEN);
   if (una.length === 1) return una;

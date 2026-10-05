@@ -19,6 +19,12 @@
 
 import { sendTextMessage } from './wa-respond.ts';
 import { anotarConsultaPendiente, anotarFoco, leerConversacion, viajeEnFoco } from './wa-foco.ts';
+import { enviarConBotones } from './wa-enviar-botones.ts';
+import {
+  botonesSiNo, idBoton, TEXTO_BOTONES_APARTE, TEXTO_BOTONES_APARTE_SIN_CARGAR, TITULO_CARGAR, TITULO_DESCARTAR, TITULO_NO_ES, TITULO_SI_CARGARLOS,
+  TITULO_SI_CREALO, TITULO_SI_ES,
+} from './wa-botones-bandeja.ts';
+import type { BotonBandeja } from './wa-botones-bandeja.ts';
 import { bandejaActiva, elegirFallida, leerConfigBandeja, momentoDelMensaje, ordenarPorEnvio, textoFallaEntendimiento, textoReintentarSinElegir } from './wa-bandeja-reglas.ts';
 import type { ConfigBandeja, ParteDescartada } from './wa-bandeja-reglas.ts';
 import { todayBogotaISO } from './bogota.ts';
@@ -70,6 +76,7 @@ import type { MensajeEntrega } from './wa-guardianes.ts';
 import {
   aplicarCambios,
   armarPlan,
+  botonesDelResumen,
   esNombreNuevo,
   sinPresentacion,
   interpretarConfirmacionNuevo,
@@ -476,7 +483,10 @@ function llaveDeLaSalida(salida: SalidaEntendida): Llave | null {
 
 async function preguntarContacto(supabase: SupabaseClient, ent: Fila, d: Extract<DecisionContacto, { tipo: 'preguntar' }>, texto?: string) {
   const nombre = d.nombre || await nombreDelViaje(supabase, ent);
-  const ok = await enviar(ent.remitente_phone as string, conNombreDelViaje(nombre, texto ?? textoPreguntaContacto(d)), ent.workspace_id as string);
+  // «¿Es la misma persona?» (una sola ficha): con sus dos botones (2026-10-05). Contestan «sí» o «no», como escritos.
+  const misma = (d.motivo === 'llave_de_otro' || d.motivo === 'mismo') && d.opciones.length === 1;
+  const botones = misma ? botonesSiNo('p', ent.id as string, { si: TITULO_SI_ES, no: TITULO_NO_ES }) : [];
+  const ok = await enviarConBotones(ent.remitente_phone as string, conNombreDelViaje(nombre, texto ?? textoPreguntaContacto(d)), botones, { workspaceId: ent.workspace_id as string, intent: INTENT });
   await actualizar(supabase, ent.id as string, {
     estado: 'esperando_contacto', contacto_opciones: d.opciones, contacto_nombre: d.nombre,
     pregunta_contacto_at: ok ? new Date().toISOString() : null, respuesta_contacto: null, error: ok ? null : 'envio fallido',
@@ -489,15 +499,25 @@ async function preguntarContacto(supabase: SupabaseClient, ent: Fila, d: Extract
  */
 async function preguntarYEsperar(
   supabase: SupabaseClient, ent: Fila, texto: string, confirmacion: 'cruce' | 'sin_solicitud' | 'dos_viajes' | null, extra: Fila = {},
-  opts: { sinNombre?: boolean } = {},
+  opts: { sinNombre?: boolean; botones?: BotonBandeja[]; aparte?: string } = {},
 ): Promise<void> {
   const conNombre = opts.sinNombre ? texto : conNombreDelViaje(await nombreDelViaje(supabase, ent), texto);
-  const ok = await enviar(ent.remitente_phone as string, conNombre, ent.workspace_id as string);
+  // Las confirmaciones de sí/no llevan sus botones (2026-10-05): «¿Seguro que van en …?», «¿Es una solicitud de viaje?».
+  const botones = opts.botones ?? botonesDeLaConfirmacion(ent.id as string, confirmacion);
+  const ok = await enviarConBotones(ent.remitente_phone as string, conNombre, botones, { workspaceId: ent.workspace_id as string, intent: INTENT, aparte: opts.aparte });
   await actualizar(supabase, ent.id as string, {
     ...extra,
     estado: 'esperando_negocio', confirmacion_pendiente: confirmacion, respuesta_negocio: null, respuesta_negocio_at: null,
     pregunta_negocio_at: ok ? new Date().toISOString() : null, error: ok ? null : 'envio fallido',
   });
+}
+
+/** Los botones de una confirmación del entendimiento: contestan lo mismo que su «sí» o su «descartar» escritos. */
+function botonesDeLaConfirmacion(entId: string, c: 'cruce' | 'sin_solicitud' | 'dos_viajes' | null): BotonBandeja[] {
+  if (c === 'cruce') return botonesSiNo('p', entId, { si: TITULO_SI_CARGARLOS, des: true });
+  if (c === 'sin_solicitud') return botonesSiNo('p', entId, { si: TITULO_SI_CREALO, des: true });
+  if (c === 'dos_viajes') return [{ id: idBoton('p', 'des', entId), title: TITULO_DESCARTAR }];
+  return [];
 }
 
 /**
@@ -1337,12 +1357,35 @@ async function negocioAbiertoPorCodigo(supabase: SupabaseClient, workspaceId: st
 
 /** El resumen puede venir en varias partes: se mandan en orden y se espera respuesta a la última. */
 async function preguntarResumen(supabase: SupabaseClient, ent: Fila, partes: string[]): Promise<void> {
-  // El nombre del viaje va al principio de la primera parte.
-  const { data: entrega } = await supabase.from('wa_bandeja_entregas').select('plan_viajes, created_at').eq('id', ent.entrega_id).maybeSingle();
-  const nombre = nombreDeLaEntrega((entrega?.plan_viajes ?? null) as PlanViajes | null, (entrega?.created_at as string | null) ?? null);
-  const con = partes.map((p, i) => (i === 0 ? conNombreDelViaje(nombre, p) : p));
-  for (const p of con.slice(0, -1)) await enviar(ent.remitente_phone as string, p, ent.workspace_id as string);
-  await preguntarYEsperar(supabase, ent, con[con.length - 1], null, {}, { sinNombre: true });
+  // 2026-10-05: el resumen ya nombra cada viaje en su bloque (sin el nombre de la tanda delante) y lleva sus botones,
+  // con la huella del reparto que acaba de quedar guardado.
+  const { data: entrega } = await supabase.from('wa_bandeja_entregas').select('plan_viajes').eq('id', ent.entrega_id).maybeSingle();
+  const plan = (entrega?.plan_viajes ?? null) as PlanViajes | null;
+  for (const p of partes.slice(0, -1)) await enviar(ent.remitente_phone as string, p, ent.workspace_id as string);
+  const botones = plan ? botonesDelResumen(plan, ent.entrega_id as string) : [];
+  await preguntarYEsperar(supabase, ent, partes[partes.length - 1], null, {}, { sinNombre: true, botones, aparte: textoBotonesAparte(botones) });
+}
+
+/**
+ * El resumen vigente de una entrega, armado de su reparto guardado (el mismo que recibió la última corrección): para
+ * volver a mostrarlo con sus botones ante un toque viejo. `null`: la entrega no tiene reparto o no se pudo leer.
+ */
+export async function resumenGuardado(
+  supabase: SupabaseClient, workspaceId: string, entregaId: string,
+): Promise<{ partes: string[]; botones: BotonBandeja[]; aparte: string } | null> {
+  const { data: e } = await supabase.from('wa_bandeja_entregas').select('plan_viajes').eq('id', entregaId).eq('workspace_id', workspaceId).maybeSingle();
+  const plan = (e?.plan_viajes ?? null) as PlanViajes | null;
+  if (!plan) return null;
+  const crudos = await leerMensajes(supabase, entregaId);
+  if (typeof crudos === 'string') return null;
+  const viajes = (await viajesAbiertosDeLaBandeja(supabase, workspaceId)) ?? [];
+  const botones = botonesDelResumen(plan, entregaId);
+  return { partes: partesResumenPlan(plan, aViaje(crudos), undefined, viajes), botones, aparte: textoBotonesAparte(botones) };
+}
+
+/** El mensaje corto de los botones cuando el resumen no cabe en su cuerpo. */
+export function textoBotonesAparte(botones: ReadonlyArray<BotonBandeja>): string {
+  return botones.some(b => b.title === TITULO_CARGAR) ? TEXTO_BOTONES_APARTE : TEXTO_BOTONES_APARTE_SIN_CARGAR;
 }
 
 /** «Laura Prueba · ¿…?»: toda pregunta lleva el nombre del viaje al principio. */

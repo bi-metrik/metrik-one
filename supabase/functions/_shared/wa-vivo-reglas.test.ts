@@ -286,8 +286,8 @@ describe('B · el nombre del negocio', () => {
     ];
     const { segmentos, encabezados } = armarSegmentos(ms, V, { horasCajaActiva: 4 });
     const texto = partesResumenPlan(armarPlan({ mensajes: ms, viajes: V, segmentos, encabezados }), ms).join('\n');
-    expect(texto).toContain('1) Europa 2 días · Carolina Ruiz (M1 26 5) — 1 mensaje');
-    expect(texto).toContain('corrige: «el 1 es de Luisa», «descartar el 1»');
+    expect(texto).toContain('*Europa 2 días · Carolina Ruiz (M1 26 5)*\n\n1. «somos 2 adultos»');
+    expect(texto).toContain('escríbeme: «el 1 es de Luisa» o «quita el 1»');
   });
 
   it('error 11: tras un «no» a «¿Cambias a…?» sin nada después, no se pide «de qué viaje es»', () => {

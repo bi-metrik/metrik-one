@@ -13,22 +13,29 @@
 import { transcribeAudio, PROMPT_TRANSCRIPCION_LITERAL } from './wa-transcribe.ts';
 import {
   armarPreguntaNegocio, candidatosDeEncabezado, conNombreDelViaje, descartarPendientesDelRemitente, hayPreguntaPendiente, nombreDeLaEntrega,
-  nombreYConteoDeLaTanda, pendienteDeLaTanda, preguntaAbierta, procesarEntendimientos, reintentarCarga, textoDeLaConsulta, simularEnLaTanda,
-  textoDeLoQueFalta, textoPrimero, tomarRespuestaContacto, tomarRespuestaDeEntrega, cargarDatoEnElViaje, nombreDelViajeDeId, viajesAbiertosDeLaBandeja,
+  nombreYConteoDeLaTanda, pendienteDeLaTanda, preguntaAbierta, procesarEntendimientos, reintentarCarga, resumenGuardado, tandaAbiertaDelRemitente,
+  textoBotonesAparte, textoDeLaConsulta, simularEnLaTanda, textoDeLoQueFalta, textoPrimero, tomarRespuestaContacto, tomarRespuestaDeEntrega,
+  cargarDatoEnElViaje, nombreDelViajeDeId, viajesAbiertosDeLaBandeja,
 } from './wa-entendimiento.ts';
 import { anotarConsultaPendiente, consultaVigente, focosVigentes, leerConversacion, viajeEnFoco } from './wa-foco.ts';
 import type { ConsultaPendiente } from './wa-foco.ts';
 import { leerNuevo, leerViajeNuevo } from './wa-entendimiento-reglas.ts';
+import {
+  botonesSiNo, canonicoDelToque, esBotonDeBandeja, leerToque, TEXTO_TOQUE_CERRADO, TEXTO_TOQUE_SIN_PREGUNTA, TEXTO_TOQUE_VIEJO, TITULO_NO_ES,
+  TITULO_SI_ES,
+} from './wa-botones-bandeja.ts';
+import type { AccionBoton } from './wa-botones-bandeja.ts';
+import { enviarConBotones } from './wa-enviar-botones.ts';
 import type { EnLaTanda, PreguntaAbierta } from './wa-entendimiento.ts';
 import { interpretarRespuestaNegocio, opcionNombrada, pieDeLista } from './wa-carga-reglas.ts';
 import type { OpcionNegocio } from './wa-carga-reglas.ts';
 import { leerConsultaBandeja } from './wa-consulta-bandeja.ts';
 import type { ConsultaBandeja } from './wa-consulta-bandeja.ts';
 import {
-  candidatosDelEncabezado, esRespuestaA, esRuidoEscrito, esSiNoCorto, leerEleccion, lineaCaja, nombreDeViaje, pareceEncabezado, pareceRespuesta, resolverEncabezado,
-  respuestaAlEncabezado, textoPreguntaEncabezadoCorta,
+  botonesDelResumen, candidatosDelEncabezado, esRespuestaA, esRuidoEscrito, esSiNoCorto, leerEleccion, lineaCaja, nombreDeViaje, pareceEncabezado,
+  pareceRespuesta, resolverEncabezado, respuestaAlEncabezado, textoPreguntaEncabezadoCorta,
 } from './wa-viajes-reglas.ts';
-import type { ResolucionEncabezado, ViajeAbierto } from './wa-viajes-reglas.ts';
+import type { PlanViajes, ResolucionEncabezado, ViajeAbierto } from './wa-viajes-reglas.ts';
 import { sendTextMessage } from './wa-respond.ts';
 import {
   bandejaActiva,
@@ -139,6 +146,8 @@ export async function rutaDelMensaje(
   if (!bandejaActiva(modules)) return { ruta: 'bot', config: null };
 
   const config = await configDelWorkspace(supabase, user.workspace_id);
+  // Un botón de la bandeja (el resumen, una confirmación) va a la bandeja aunque el bot espere otra cosa.
+  if (message.type === 'interactive' && esBotonDeBandeja(message.interactive_reply)) return { ruta: 'bandeja', config };
   const reenviado = message.reenviado === true;
   const escrito = message.type === 'text' && !reenviado;
   // Un reenvío va a la bandeja pase lo que pase, y un prefijo del bot va al bot: ninguno de los
@@ -333,6 +342,8 @@ export async function atenderEnBandeja(
   message: IncomingMessage,
   config: ConfigBandeja,
 ): Promise<void> {
+  // Un toque en un botón de la bandeja (el resumen, una confirmación de sí/no): nunca es contenido.
+  if (await atenderToqueDeBandeja(supabase, user, message, config)) return;
   if (!message.wa_message_id) {
     // Sin wamid no hay forma de deduplicar lo que Meta reintenta. No debería pasar: el payload
     // lo pone en todos los tipos. Se deja constancia y se sigue guardando con un id sintético
@@ -461,6 +472,11 @@ export async function atenderEnBandeja(
     }
   }
 
+  // Lo que el registro puede tomar como la respuesta a la pregunta de la entrega (el «sí» con reserva, un nombre): la
+  // pregunta de antes, para acusarla y procesarla en el acto como las demás respuestas (2026-10-05, punto 5).
+  const puedeSerRespuesta = !esEncabezado && message.type === 'text' && message.reenviado !== true && !!(message.text || '').trim();
+  const antesDelRegistro = procesarEnElActo.activo && puedeSerRespuesta ? await preguntaAbierta(supabase, user.workspace_id, message.phone) : null;
+
   const { data, error } = await supabase.rpc('wa_bandeja_registrar_mensaje', {
     p_workspace_id: user.workspace_id,
     p_remitente_phone: message.phone,
@@ -509,7 +525,14 @@ export async function atenderEnBandeja(
         // Nunca silencio (2026-10-05, punto 7): un escrito que abre una tanda sin cliente lo dice en una línea y qué espera.
         ?? (fila.accion === 'abrir' && escrito && config.modoViajes !== 'uno' ? await textoTandaSinCliente(supabase, user.workspace_id, message.phone, config) : null);
     const texto = [aviso, otra ? textoPrimero(otra) : null].filter(Boolean).join('\n');
-    if (texto) await enviar(message.phone, texto, user.workspace_id);
+    if (texto) await enviarAcuseDeLaCaja(message.phone, texto, otra ? null : fila.entrega ?? null, user.workspace_id);
+  }
+
+  // Tomado como la respuesta a la pregunta de la entrega: se acusa y se procesa en el acto, sin esperar al cron (antes
+  // un «sí, pero espera …» al resumen quedaba en silencio hasta la siguiente pasada).
+  if (fila.accion === 'respuesta_cliente' && puedeSerRespuesta) {
+    await seguirEnElActo(supabase, user.workspace_id, message.phone, { texto: message.text.trim(), antes: antesDelRegistro });
+    return;
   }
 
   switch (respuestaTrasRegistro(fila.accion)) {
@@ -736,6 +759,78 @@ export async function viajesEnVuelo(supabase: SupabaseClient, workspaceId: strin
   return hay ? viajes : null;
 }
 
+/**
+ * Un toque en un botón de la bandeja (2026-10-05: el resumen con «Cargar» y «Descartar», y las confirmaciones de
+ * sí/no). Si la pregunta del botón sigue abierta y es la misma (el resumen con la misma huella del reparto), se contesta
+ * EXACTAMENTE como su texto escrito, por el camino de hoy: «Cargar» es un «sí» sin ambigüedad (no pasa por el modelo
+ * ni por la lectura del «sí» escrito). Un toque viejo (de un resumen ya corregido, de otra tanda, o de una tanda que ya
+ * se cerró) no confirma nada: se dice y se vuelve a mostrar lo vigente. `false`: no es un botón de la bandeja.
+ */
+export async function atenderToqueDeBandeja(
+  supabase: SupabaseClient, user: WaUser, message: IncomingMessage, config: ConfigBandeja,
+): Promise<boolean> {
+  if (message.type !== 'interactive' || !esBotonDeBandeja(message.interactive_reply)) return false;
+  const ws = user.workspace_id;
+  const phone = message.phone;
+  const t = leerToque(message.interactive_reply);
+  const abierta = await preguntaAbierta(supabase, ws, phone);
+  const wamid = message.wa_message_id ?? `toque:${phone}:${message.timestamp}`;
+  const contestar = (accion: AccionBoton) =>
+    responderPendiente(supabase, ws, phone, canonicoDelToque(accion), wamid, fechaDeMeta(message.timestamp), config, true, `[botón] ${message.text || canonicoDelToque(accion)}`);
+  if (t?.capa === 'r') {
+    const delResumen = abierta && abierta.espera === 'resumen' && (abierta.tipo === 'entrega' ? abierta.id : abierta.entregaId) === t.ref;
+    const { data: e } = await supabase.from('wa_bandeja_entregas').select('id, plan_viajes').eq('id', t.ref).eq('workspace_id', ws).eq('remitente_phone', phone).maybeSingle();
+    const plan = (e?.plan_viajes ?? null) as PlanViajes | null;
+    // El botón tiene que ser uno de los que ofrece el resumen vigente (con ⚠ no hay «Cargar»).
+    const vigente = !!delResumen && !!plan && botonesDelResumen(plan, t.ref).some(b => b.id === message.interactive_reply);
+    if (vigente && await contestar(t.accion)) return true;
+    await avisarToqueViejo(supabase, ws, phone, delResumen && plan ? TEXTO_TOQUE_VIEJO : e ? TEXTO_TOQUE_CERRADO : TEXTO_TOQUE_SIN_PREGUNTA, abierta);
+    return true;
+  }
+  if (t?.capa === 'p') {
+    const vigente = !!abierta && (abierta.tipo === 'negocio' || abierta.tipo === 'contacto') && abierta.id === t.ref;
+    if (vigente && await contestar(t.accion)) return true;
+    await avisarToqueViejo(supabase, ws, phone, TEXTO_TOQUE_SIN_PREGUNTA, abierta);
+    return true;
+  }
+  if (t?.capa === 't' && t.accion !== 'des') {
+    // «¿Es la misma persona?» de la caja abierta: el toque entra como su «sí» o su «no» escrito, en la misma tanda.
+    const tanda = await tandaAbiertaDelRemitente(supabase, ws, phone, config.horasCajaActiva);
+    const falta = tanda?.id === t.ref ? await pendienteDeLaTanda(supabase, ws, phone, config.horasCajaActiva) : null;
+    if (falta?.tipo === 'cliente' && falta.resolucion.tipo === 'llave_de_otro') {
+      await atenderEnBandeja(supabase, user, { ...message, type: 'text', text: canonicoDelToque(t.accion), interactive_reply: undefined, reenviado: false }, config);
+      return true;
+    }
+    await avisarToqueViejo(supabase, ws, phone, tanda ? TEXTO_TOQUE_SIN_PREGUNTA : TEXTO_TOQUE_CERRADO, abierta);
+    return true;
+  }
+  await avisarToqueViejo(supabase, ws, phone, TEXTO_TOQUE_SIN_PREGUNTA, abierta);
+  return true;
+}
+
+/** Ante un toque viejo: lo dice y vuelve a mostrar lo vigente (el resumen con sus botones, o la pregunta abierta). */
+async function avisarToqueViejo(
+  supabase: SupabaseClient, ws: string, phone: string, motivo: string, abierta: Awaited<ReturnType<typeof preguntaAbierta>>,
+): Promise<void> {
+  const entregaDelResumen = abierta?.espera === 'resumen' ? (abierta.tipo === 'entrega' ? abierta.id : abierta.entregaId ?? null) : null;
+  const r = entregaDelResumen ? await resumenGuardado(supabase, ws, entregaDelResumen) : null;
+  if (r) {
+    const partes = [...r.partes];
+    partes[0] = `${motivo} Este es el resumen vigente:\n${partes[0]}`;
+    for (const p of partes.slice(0, -1)) await enviar(phone, p, ws);
+    await enviarConBotones(phone, partes[partes.length - 1], r.botones, { workspaceId: ws, intent: INTENT_BANDEJA, aparte: r.aparte });
+    return;
+  }
+  await enviar(phone, [motivo, abierta ? textoPrimero(abierta) : null].filter(Boolean).join('\n'), ws);
+}
+
+/** «¿Es la misma persona?» que contesta lo que espera la caja abierta: con sus dos botones. Lo demás, texto. */
+export async function enviarAcuseDeLaCaja(phone: string, texto: string, entregaId: string | null, workspaceId: string): Promise<boolean> {
+  const misma = !!entregaId && /¿Es la misma persona\?$/.test(texto.trim());
+  if (!misma) return enviar(phone, texto, workspaceId);
+  return enviarConBotones(phone, texto, botonesSiNo('t', entregaId!, { si: TITULO_SI_ES, no: TITULO_NO_ES }), { workspaceId, intent: INTENT_BANDEJA });
+}
+
 /** ¿Es un texto escrito (no reenviado) en modo `encabezado`? Solo ahí hay encabezados. */
 function escritoEnModoEncabezado(message: IncomingMessage, config: ConfigBandeja): boolean {
   return config.modoViajes !== 'uno' && message.type === 'text' && message.reenviado !== true && !!(message.text || '').trim();
@@ -834,13 +929,15 @@ export async function preguntarCliente(
     if (error) console.error(`[wa-bandeja] no se pudo cargar sin preguntar ${entregaId}:`, error.message);
     return;
   }
-  // Toda pregunta lleva el nombre del viaje al principio («Diego Prueba · Entendí 1 viaje…»).
+  // Toda pregunta lleva el nombre del viaje al principio («Diego Prueba · ¿De qué viaje son?»). El resumen no: desde
+  // el 2026-10-05 nombra cada viaje en su bloque, y lleva los botones «Cargar» y «Descartar» (con la huella del reparto).
   const { data: ent } = await supabase.from('wa_bandeja_entregas').select('created_at').eq('id', entregaId).maybeSingle();
   const nombre = nombreDeLaEntrega(viaje?.plan ?? null, (ent?.created_at as string | null) ?? null);
-  const partes = [...(viaje?.antes ?? []), viaje?.texto ?? textoPreguntaCliente(nMensajes)].map((p, i) => (i === 0 ? conNombreDelViaje(nombre, p) : p));
+  const partes = [...(viaje?.antes ?? []), viaje?.texto ?? textoPreguntaCliente(nMensajes)].map((p, i) => (i === 0 && !viaje?.plan ? conNombreDelViaje(nombre, p) : p));
   // Un resumen largo llega en varias partes: las primeras se mandan antes de la que espera respuesta.
   for (const p of partes.slice(0, -1)) await enviar(phone, p, workspaceId);
-  const ok = await enviar(phone, partes[partes.length - 1], workspaceId);
+  const botones = viaje?.plan ? botonesDelResumen(viaje.plan, entregaId) : [];
+  const ok = await enviarConBotones(phone, partes[partes.length - 1], botones, { workspaceId, intent: INTENT_BANDEJA, aparte: textoBotonesAparte(botones) });
   const lista = viaje?.plan ? { plan_viajes: viaje.plan } : viaje?.opciones ? { negocio_opciones: viaje.opciones } : {};
   const { error } = await supabase
     .from('wa_bandeja_entregas')
