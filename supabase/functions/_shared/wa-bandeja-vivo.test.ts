@@ -1686,7 +1686,14 @@ describe('2026-10-05 · la prueba de Mauricio, parafraseada: viaje nuevo de un c
       '1. MIAMI 7N (M1 26 1)', '2. ARMENIA 2N (M1 26 2)', '3. ARMENIA 2N (M1 26 3)', '4. EUROPA 20D (M1 26 4)', '5. EUROPA 2 DÍAS (M1 26 5)'].join('\n'));
     await llega('uno nuevo', { enviado: 5 });
     expect(textos().at(-1)).toBe(YA_LO_TENEMOS);
+    // Octavo control de Vera (bloqueante 2): dentro de la caja de su viaje nuevo, su nombre es contenido de esa caja;
+    // ya no vuelve a abrir la lista de sus viajes.
+    const antes = textos().length;
     await llega('Martín Robledo', { enviado: 10 });
+    expect(textos()).toHaveLength(antes);
+    await llega('descartar', { enviado: 12 });
+    await llega('Martín Robledo', { enviado: 14 });
+    expect(textos().at(-1)).toMatch(/^Martín Robledo tiene 5 viajes abiertos\. ¿Va en uno de esos o es un viaje nuevo\?/);
     await llega('el de Miami', { enviado: 15 });
     expect(textos().at(-1)).toBe('📌 MIAMI 7N · Martín Robledo (M1 26 1)');
   });
@@ -1834,5 +1841,85 @@ describe('2026-10-05 · el cliente nuevo: una llave, nunca la de otro, nunca sin
     colaModelo = [salidaModelo({ destino: { valor: 'Leticia', frase: 'Leticia' } })];
     await cron(120);
     expect(t.contactos.map(c => [c.nombre, c.telefono])).toEqual([['HUGO PRIETO', celDe('Hugo Prieto')]]);
+  });
+});
+
+describe('octavo control de Vera (2026-10-05): el «sí» con reserva y el cliente de la caja nueva, de punta a punta', () => {
+  /** Un cliente con UN viaje abierto: el caso en que nombrarlo sacaba la tanda del viaje nuevo sin preguntar. */
+  function clienteConUnViaje() {
+    t.contactos.push({ id: 'c-gq', workspace_id: WS, nombre: 'GERARDO QUINTERO', telefono: '3004447788', email: null, created_at: '2026-01-10T10:00:00Z' });
+    t.negocios.push({ ...negocioDePrueba('n-gq1', 'G 26 1', 'VILLA DE LEYVA 2N', 'GERARDO QUINTERO'), contacto_id: 'c-gq' });
+    t.negocio_bloques.push({ id: 'b-n-gq1', negocio_id: 'n-gq1', data: { destino: 'Villa de Leyva' }, updated_at: null, bloque_configs: { orden: 1, config_extra: { fields: FIELDS }, bloque_definitions: { tipo: 'datos' }, etapas_negocio: { orden: 1 } } });
+  }
+  const confirmar = (evidencia: string) => ({ acciones: [{ accion: 'confirmar', evidencia }] });
+
+  it('bloqueante 1, prendido: «sí, pero espérame …» al resumen de un viaje nuevo no lo crea ni lo carga; «sí, créalo» sí', async () => {
+    const llamadas = { n: 0 };
+    await llega(nuevo('Octavio Prueba8'), { enviado: 0 });
+    await llega('queremos ir a Capurganá en febrero, somos 4 adultos', { enviado: 3, reenviado: true });
+    await llega('listo', { enviado: 6 });
+    expect(textos().at(-1)).toContain(`1) ${grupo('Octavio Prueba8')} — 1 mensaje`);
+    const antes = textos().length;
+    for (const [i, reserva] of ['sí, pero espérame que me manda las edades', 'sí cuando me confirme el hotel'].entries()) {
+      await llega(reserva, { enviado: 10 + i, interprete: { llamadas, modelo: confirmar(reserva) } });
+      expect(textos().at(-1)).toMatch(/¿Lo cargo así\?$/);
+      await cron(60 + i);
+    }
+    expect(llamadas.n).toBe(2);
+    expect(t.contactos).toEqual([]);
+    expect(t.negocios).toEqual([]);
+    expect(textos().slice(antes).some(x => /^Entendí|Cargué|Creé/.test(x))).toBe(false);
+    await llega('sí, créalo', { enviado: 70, interprete: { llamadas, modelo: confirmar('sí, créalo') } });
+    colaModelo = [salidaModelo({ destino: { valor: 'Capurganá', frase: 'ir a Capurganá' } })];
+    await cron(120);
+    expect(t.contactos.map(c => c.nombre)).toEqual(['OCTAVIO PRUEBA8']);
+    expect(t.negocios).toHaveLength(1);
+  });
+
+  it('bloqueante 1, prendido: con un viaje que ya existe, «sí aunque falta un mensaje» tampoco carga nada en su ficha', async () => {
+    clienteConUnViaje();
+    const bloquesAntes = JSON.stringify(t.negocio_bloques);
+    await llega('G 26 1', { enviado: 0 });
+    await llega('ahora son 3 noches, no 2', { enviado: 3, reenviado: true });
+    await llega('listo', { enviado: 6 });
+    const reserva = 'sí aunque falta un mensaje que me va a mandar';
+    await llega(reserva, { enviado: 10, interprete: { modelo: confirmar(reserva) } });
+    colaModelo = [salidaModelo({ destino: { valor: 'Villa de Leyva', frase: '' } })];
+    await cron(60);
+    expect(JSON.stringify(t.negocio_bloques)).toBe(bloquesAntes);
+    expect(textos().at(-1)).toMatch(/¿Lo cargo así\?$/);
+  });
+
+  for (const modo of ['apagado', 'prendido'] as const) {
+    it(`bloqueante 2, ${modo}: en la caja del viaje NUEVO de Gerardo Quintero, «Gerardo quiere …» no se va a su viaje abierto`, async () => {
+      clienteConUnViaje();
+      const bloquesAntes = JSON.stringify(t.negocio_bloques);
+      const conModelo = (modelo: unknown) => (modo === 'prendido' ? { interprete: { modelo } } : {});
+      await llega('vamos a hacer una cotización nueva para Gerardo Quintero', { enviado: 0 });
+      expect(textos().at(-1)).toMatch(/^Va como viaje nuevo de Gerardo Quintero, el que ya tenemos/);
+      await llega('quiere ir a Jardín, Antioquia en semana santa', { enviado: 3, reenviado: true });
+      // El nombre de pila con su tratamiento, y una frase con el nombre: el modelo los devuelve como su viaje abierto.
+      await llega('don Gerardo', { enviado: 6, ...conModelo({ acciones: [{ accion: 'abrir_viaje', evidencia: 'don Gerardo', ref_cliente: 'Gerardo' }] }) });
+      await llega('Gerardo prefiere que sea finca con piscina', {
+        enviado: 9, ...conModelo({ acciones: [{ accion: 'contenido', evidencia: 'Gerardo prefiere que sea finca con piscina', ref_cliente: 'Gerardo' }] }),
+      });
+      expect(textos().some(x => x.startsWith('📌'))).toBe(false);
+      await llega('listo', { enviado: 12 });
+      const resumen = textos().at(-1)!;
+      expect(resumen).toMatch(/^Gerardo Quintero · ¿Lo cargo así\?\nEntendí 1 viaje:\n1\) Viaje nuevo de Gerardo Quintero \(ya es cliente/);
+      expect(resumen).not.toContain('G 26 1');
+      expect(resumen).toContain('— 3 mensajes');
+      expect(resumen).toContain('«Gerardo prefiere que sea finca');
+      expect(JSON.stringify(t.negocio_bloques)).toBe(bloquesAntes);
+    });
+  }
+
+  it('bloqueante 2, prendido: el destino de su viaje abierto («lo de Villa de Leyva») sí cambia a ese viaje', async () => {
+    clienteConUnViaje();
+    await llega('vamos a hacer una cotización nueva para Gerardo Quintero', { enviado: 0 });
+    await llega('lo de Villa de Leyva de Gerardo', {
+      enviado: 3, interprete: { modelo: { acciones: [{ accion: 'abrir_viaje', evidencia: 'lo de Villa de Leyva de Gerardo', ref_cliente: 'Gerardo', ref_destino: 'Villa de Leyva' }] } },
+    });
+    expect(textos().at(-1)).toBe('📌 VILLA DE LEYVA 2N · Gerardo Quintero (G 26 1)');
   });
 });

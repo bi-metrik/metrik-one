@@ -41,6 +41,7 @@ import {
   lineaCaja,
   PALABRAS_COMUNES,
   sinPresentacion,
+  soloNombraAlCliente,
   TEXTO_PIDE_NOMBRE_NUEVO,
   textoAcuseNuevo,
   textoPideNombreEnDuda,
@@ -1000,20 +1001,7 @@ function clienteDeLaCajaNueva(e: EntradaValidador): string | null {
  * uno lo nombra SOLO con palabras del cliente de la caja.
  */
 function soloNombraAlClienteDeLaCajaNueva(a: AccionModelo, e: EntradaValidador): boolean {
-  const cliente = clienteDeLaCajaNueva(e);
-  if (!cliente) return false;
-  const { viajes } = viajesDe(a, e);
-  if (viajes.length === 0) return false;
-  const delCliente = new Set(palabras(cliente));
-  const t = new Set(palabras(e.texto));
-  const escrito = codigoCompacto(e.texto);
-  return viajes.every(v => {
-    const cod = codigoCompacto(v.codigo);
-    if (cod && escrito.includes(cod)) return false;
-    if (palabras(`${v.destino ?? ''} ${v.nombre ?? ''}`).some(w => w.length >= 4 && t.has(w) && !PALABRAS_COMUNES.has(w))) return false;
-    const dichas = palabras(v.cliente).filter(w => t.has(w));
-    return dichas.length > 0 && dichas.every(w => delCliente.has(w));
-  });
+  return soloNombraAlCliente(e.texto, viajesDe(a, e).viajes, clienteDeLaCajaNueva(e));
 }
 
 /** El escrito que nombra al cliente de la caja nueva: contenido de esa caja (bloqueante 2 del octavo control). */

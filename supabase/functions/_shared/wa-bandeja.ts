@@ -322,7 +322,9 @@ export async function atenderEnBandeja(
     : null;
   // Un encabezado («Carolina», «T1 26 9») abre una caja: nunca es la respuesta a una pregunta
   // pendiente (QA de #971: el que se escribía antes del «sí» se tomaba como respuesta al resumen).
-  const encabezado = sim?.respuesta ? null : await encabezadoDelEscrito(supabase, user.workspace_id, message, config);
+  // Lo que la tanda toma como contenido de su caja (el nombre del cliente de un viaje nuevo, octavo control de Vera)
+  // tampoco es un encabezado, aunque su texto resuelva un viaje.
+  const encabezado = sim?.respuesta || sim?.contenido ? null : await encabezadoDelEscrito(supabase, user.workspace_id, message, config);
 
   // Regla 3 (Trappvel, 2026-10-02; antes N1 y N2 de la prueba en vivo v2): con una pregunta abierta,
   // lo que tiene forma de su respuesta la contesta, sea cual sea la capa que preguntó (el resumen,

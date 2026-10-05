@@ -1090,6 +1090,28 @@ export function clienteDeCaja(seg: Segmento): string | null {
   return null;
 }
 
+/**
+ * Octavo control de Vera (bloqueante 2): con la caja de un viaje NUEVO de X abierta, ¿el escrito nombra estos viajes
+ * SOLO por palabras del nombre de X («don Gerardo», «Gerardo Quintero», «Gerardo prefiere …»)? Entonces habla del
+ * cliente de esa caja, no de uno de sus viajes abiertos (como `delMismoCliente` del reparto): es contenido de la
+ * caja. Su código o un destino (o el nombre) de uno de esos viajes sí lo señalan, y cambian de viaje.
+ */
+export function soloNombraAlCliente(
+  texto: string, viajes: ReadonlyArray<{ codigo: string | null; cliente: string | null; destino: string | null; nombre?: string | null }>, cliente: string | null,
+): boolean {
+  if (!cliente || viajes.length === 0) return false;
+  const delCliente = new Set(palabrasDe(cliente));
+  const t = new Set(palabrasDe(texto));
+  const escrito = codigoCompacto(texto);
+  return viajes.every(v => {
+    const cod = codigoCompacto(v.codigo);
+    if (cod && escrito.includes(cod)) return false;
+    if (palabrasDe(`${v.destino ?? ''} ${v.nombre ?? ''}`).some(w => w.length >= 4 && t.has(w) && !PALABRAS_COMUNES.has(w))) return false;
+    const dichas = palabrasDe(v.cliente).filter(w => t.has(w));
+    return dichas.length > 0 && dichas.every(w => delCliente.has(w));
+  });
+}
+
 /** ¿Todos los candidatos de la lista son del MISMO cliente? Devuelve su nombre («Mauricio Moreno tiene 5 viajes abiertos»). */
 export function unSoloCliente(candidatos: ReadonlyArray<ViajeAbierto>): string | null {
   if (candidatos.length < 2) return null;
@@ -1302,6 +1324,13 @@ export function armarSegmentos(
       // estaba abierta (D1, turnos 4 y 5 de la prueba de Mauricio). En la caja de un viaje nuevo, nada cambia; en
       // la de un viaje que ya existe, se vuelve un viaje NUEVO de su cliente.
       const vigente = actual && !(t - actual.desde > cfg.horasCajaActiva * 3600_000) ? actual : null;
+      // Bloqueante 2 del octavo control: en la caja de un viaje NUEVO de X, nombrar a X por su nombre (no por el código
+      // ni el destino de uno de sus viajes) es contenido de esa caja, no un encabezado de su viaje abierto.
+      const porNombre = res.tipo === 'viaje' ? (res.por === 'nombre' ? [res.viaje] : []) : candidatosDelEncabezado(res);
+      if (vigente && vigente.seg.encabezado?.resolucion.tipo === 'nuevo' && soloNombraAlCliente(m.cuerpo, porNombre, clienteDeCaja(vigente.seg))) {
+        vigente.seg.mensajes.push(m.n);
+        continue;
+      }
       if (res.tipo === 'nuevo' && res.mismo && !res.cliente && !res.llave && vigente) {
         const quien = clienteDeCaja(vigente.seg);
         if (quien && vigente.seg.encabezado?.resolucion.tipo === 'nuevo') {
