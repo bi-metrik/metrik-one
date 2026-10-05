@@ -92,6 +92,7 @@ import {
   type Composicion,
 } from '@/lib/cotizaciones/tarifa-pasajero'
 import { avisoTasaPendiente } from '@/lib/cotizaciones/actividad-pantallazo'
+import { motivoFaltaCosto } from '@/lib/cotizaciones/falta-costo'
 import { precioPorHabitacion } from '@/lib/cotizaciones/habitaciones'
 import { lineasDesactualizadas, motivoParaNoEnviar } from '@/lib/cotizaciones/captura-desactualizada'
 import { etiquetaDeMotivo } from '@/lib/cotizaciones/motivos-borrador'
@@ -934,7 +935,21 @@ export default function CotizacionEditor({ oportunidadId, cotizacion, initialIte
   // P1 del ensayo del 2026-09-23 · el margen mínimo en la salida dicho por su causa real.
   // Solo donde la línea lo exige (`salida.aplica`); en el resto `notaDeMargen` es 'nada'.
   // El servidor frena igual: el botón apagado es la puerta visible, no el control.
-  const notaMargen = notaDeMargen(salida)
+  //
+  // Brief del 2026-10-05 · si una línea no tiene costo porque falta la tasa de cambio, el motivo
+  // lo dice con el texto de la tarjeta («El precio está en EUR: escribe la tasa…»), no solo
+  // «Falta el costo». Lo sabe el editor: el servidor manda qué líneas faltan.
+  const tasaPendientePorId = new Map<string, string>()
+  for (const i of initialItems) {
+    if (i.es_ajuste === true) continue
+    const t = leerTarifaPax(i.tarifa_pax)
+    const texto = avisoTasaPendiente(t, composicionDeLinea(t, composicionViaje ?? null), ranuraDeGrupo(i.grupo ?? null)?.slug)
+    if (texto) tasaPendientePorId.set(i.id, texto)
+  }
+  const salidaVista: SalidaVista | null = salida && salida.faltaCosto && salida.faltaCostoLineas?.length && tasaPendientePorId.size > 0
+    ? { ...salida, faltaCosto: motivoFaltaCosto(salida.faltaCostoLineas, tasaPendientePorId) ?? salida.faltaCosto }
+    : salida
+  const notaMargen = notaDeMargen(salidaVista)
   const motivoMargen = 'motivoBoton' in notaMargen ? notaMargen.motivoBoton : null
   const motivoBotonEnviar = motivoEnvio ?? motivoMargen
 
@@ -1215,7 +1230,7 @@ export default function CotizacionEditor({ oportunidadId, cotizacion, initialIte
   )
   const jsxPanelMargen = (
     <>
-      <PanelMargenSalida cotizacionId={cotizacion.id} salida={salida} />
+      <PanelMargenSalida cotizacionId={cotizacion.id} salida={salidaVista} />
     </>
   )
   const jsxPanelTexto = (
@@ -1251,8 +1266,7 @@ export default function CotizacionEditor({ oportunidadId, cotizacion, initialIte
     ? initialItems
       .filter(i => i.es_ajuste !== true && !ocultos.has(i.id))
       .map(i => {
-        const t = leerTarifaPax(i.tarifa_pax)
-        const texto = avisoTasaPendiente(t, composicionDeLinea(t, composicionViaje ?? null), ranuraDeGrupo(i.grupo ?? null)?.slug)
+        const texto = tasaPendientePorId.get(i.id) ?? null
         const u = ubicacionesDeOpciones[i.id]
         const donde = u ? `${u.bloque}${u.opcion ? ` · Opción ${u.opcion}` : ''}` : null
         return texto ? { id: i.id, nombre: i.nombre || 'Opción', donde, texto } : null

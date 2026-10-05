@@ -8,7 +8,9 @@
 //   · `atenderBotonTerminos`   — va PRIMERO en processMessage: un toque de "Acepto"/"No acepto"
 //                                 no puede caer en Cardumen, Venezuela ni en el flujo de gastos.
 //   · `atenderPendienteTerminos` — va justo antes del "no reconozco este numero", y tambien
-//                                 corre para numeros registrados.
+//                                 corre para numeros registrados. NO atiende las filas del aviso
+//                                 de datos del bot (`aviso_datos_version`): esas son de la puerta
+//                                 de `aviso-datos-bot-flujo.ts`, que reusa el envio de aqui.
 // ============================================================
 
 import { sendButtons, sendDocument, sendTextMessage, sendTextoExacto } from './wa-respond.ts';
@@ -43,17 +45,18 @@ import {
   telefonoE164,
 } from './aceptacion-terminos.ts';
 import type { DecisionBoton, FilaAceptacion, ResultadoAccion } from './aceptacion-terminos.ts';
+import { MENSAJE_AVISO_ANTERIOR, MENSAJE_AVISO_VENCIDO } from './aviso-datos-bot.ts';
 
-const TABLA = 'aceptaciones_terminos';
+export const TABLA = 'aceptaciones_terminos';
 const ACCIONES = 'aceptaciones_terminos_acciones';
 
 // Todo menos `payload_respuesta`, que lleva el cuerpo crudo del webhook y no hace falta leer.
-const COLUMNAS = [
+export const COLUMNAS = [
   'id', 'workspace_id', 'negocio_id', 'telefono', 'nombre_aceptante', 'calidad',
   'empresa_nombre', 'empresa_nit', 'documento_titulo', 'documento_version', 'documento_url',
   'documento_sha256', 'texto_aceptacion', 'estado', 'prompt_wamid', 'documento_wamid',
   'reply_wamid', 'button_id', 'enviado_at', 'ultimo_intento_at', 'respondido_at', 'expira_at',
-  'created_at',
+  'created_at', 'aviso_datos_version', 'revocada_at',
 ].join(', ');
 
 /** Tope de lo que se descarga para verificar el hash. Meta acepta documentos hasta 100 MB, pero
@@ -71,6 +74,13 @@ function ctxEnvio(fila: Pick<FilaAceptacion, 'workspace_id'>): EnvioCtx {
 // ── Toque de boton ─────────────────────────────────────────────────────────────────────
 
 /**
+ * Lo que hace el webhook cuando el toque registrado es el del aviso de datos del bot (fila con
+ * `aviso_datos_version`): confirma, procesa lo retenido o lo borra. Vive en `aviso-datos-bot-flujo.ts`
+ * y entra por parametro para no importar en circulo.
+ */
+export type AlResponderAviso = (fila: FilaAceptacion, decision: DecisionBoton, respondidoAt: string) => Promise<void>;
+
+/**
  * Registra un toque de "Acepto"/"No acepto". Devuelve true si el mensaje era de este flujo
  * (aunque no se haya podido registrar), false si no tiene nada que ver y debe seguir su camino.
  *
@@ -78,7 +88,11 @@ function ctxEnvio(fila: Pick<FilaAceptacion, 'workspace_id'>): EnvioCtx {
  * `reply_wamid` es unico. Un reintento de Meta del mismo toque encuentra la fila ya respondida
  * con su mismo wamid y no hace nada: ni segunda confirmacion ni segundo aviso.
  */
-export async function atenderBotonTerminos(supabase: SupabaseClient, message: IncomingMessage): Promise<boolean> {
+export async function atenderBotonTerminos(
+  supabase: SupabaseClient,
+  message: IncomingMessage,
+  opciones: { alResponderAviso?: AlResponderAviso } = {},
+): Promise<boolean> {
   if (message.type !== 'interactive' || !esIdDeTerminos(message.interactive_reply)) return false;
 
   const respuesta = leerRespuestaBoton(message.meta_mensaje);
@@ -126,6 +140,13 @@ export async function atenderBotonTerminos(supabase: SupabaseClient, message: In
   const fila = (aplicadas?.[0] ?? null) as FilaAceptacion | null;
   if (fila) {
     await logMessage(supabase, message.phone, 'inbound', fila.workspace_id, INTENT_ACEPTACION, `[boton] ${respuesta.titulo ?? respuesta.decision}`);
+    // El aviso de datos del bot no tiene acciones ni avisa cada aceptacion: confirma y procesa lo
+    // que la persona escribio mientras tanto (o lo borra, si no acepto).
+    if (fila.aviso_datos_version && opciones.alResponderAviso) {
+      await opciones.alResponderAviso(fila, respuesta.decision, respondidoAt);
+      await mostrarSiguientePendiente(supabase, message.phone, telefono);
+      return true;
+    }
     await sendTextMessage(message.phone, mensajeConfirmacion(fila, respuesta.decision, respondidoAt), ctxEnvio(fila));
     // Las acciones solo corren aqui, en el UPDATE que gano. Un reintento de Meta cae en
     // `duplicado` y nunca llega a esta linea, asi que la llave no sale dos veces.
@@ -173,6 +194,15 @@ async function atenderToqueNoAplicado(
       return;
     case 'ya_respondida': {
       const f = fila as FilaAceptacion;
+      if (f.aviso_datos_version) {
+        // Tocar «Acepto» en el aviso que ya rechazo (o cuya aceptacion se revoco): esa respuesta no
+        // se cambia, pero si vuelve a escribir se le muestra el aviso otra vez y lo puede aceptar.
+        // Sin aviso interno.
+        const anterior = (f.estado === 'rechazado' && decision === 'acepto') || !!f.revocada_at;
+        const texto = anterior ? MENSAJE_AVISO_ANTERIOR : mensajeYaRespondida(f);
+        await sendTextMessage(phone, texto, ctxEnvio(f));
+        return;
+      }
       await sendTextMessage(phone, mensajeYaRespondida(f), ctxEnvio(f));
       // Tocar el otro boton despues de responder es intentar cambiar la respuesta: eso lo tiene
       // que saber quien opera, porque por aqui no se cambia.
@@ -187,6 +217,11 @@ async function atenderToqueNoAplicado(
     case 'vencida': {
       const f = fila as FilaAceptacion;
       if (f.estado === 'pendiente') await expirar(supabase, telefono);
+      if (f.aviso_datos_version) {
+        // El aviso no lo reenvia nadie a mano: se vuelve a mostrar en cuanto escriba.
+        await sendTextMessage(phone, MENSAJE_AVISO_VENCIDO, ctxEnvio(f));
+        return;
+      }
       await sendTextMessage(phone, MENSAJE_VENCIDA, ctxEnvio(f));
       await avisarAdmin(
         `⏰ ${f.nombre_aceptante} (${f.telefono}) tocó un botón de «${f.documento_titulo}» cuando la solicitud ya había vencido. No se registró; si todavía aplica, crea una fila nueva.`,
@@ -220,6 +255,8 @@ export async function atenderPendienteTerminos(
     .select(COLUMNAS)
     .eq('telefono', telefono)
     .eq('estado', 'pendiente')
+    // Las del aviso de datos del bot las atiende su propia puerta (`aviso-datos-bot-flujo.ts`).
+    .is('aviso_datos_version', null)
     .order('created_at', { ascending: true })
     .limit(20);
   if (error) {
@@ -259,6 +296,7 @@ async function mostrarSiguientePendiente(supabase: SupabaseClient, phone: string
     .select(COLUMNAS)
     .eq('telefono', telefono)
     .eq('estado', 'pendiente')
+    .is('aviso_datos_version', null)
     .gt('expira_at', ahora.toISOString())
     .order('created_at', { ascending: true })
     .limit(1);
@@ -280,7 +318,7 @@ async function mostrarSiguientePendiente(supabase: SupabaseClient, phone: string
  * solo si salieron LOS DOS: sin botones no hubo nada que aceptar, y el siguiente intento vuelve a
  * mandar el documento.
  */
-async function enviarDocumentoYBotones(supabase: SupabaseClient, phone: string, fila: FilaAceptacion): Promise<void> {
+export async function enviarDocumentoYBotones(supabase: SupabaseClient, phone: string, fila: FilaAceptacion): Promise<void> {
   const verificacion = await verificarDocumento(fila.documento_url, fila.documento_sha256);
   if (!verificacion.ok) {
     console.error(`[aceptacion] documento de ${fila.id} no verificado: ${verificacion.motivo}`);
@@ -321,7 +359,7 @@ async function enviarDocumentoYBotones(supabase: SupabaseClient, phone: string, 
 }
 
 /** Ya se mostro el documento: solo vuelven los botones, con el mismo texto exacto. */
-async function recordarBotones(supabase: SupabaseClient, phone: string, fila: FilaAceptacion): Promise<void> {
+export async function recordarBotones(supabase: SupabaseClient, phone: string, fila: FilaAceptacion): Promise<void> {
   const promptWamid = await sendButtons(phone, fila.texto_aceptacion, botonesAceptacion(fila.id), ctxEnvio(fila));
   if (promptWamid) await marcar(supabase, fila.id, { prompt_wamid: promptWamid });
 }
@@ -336,7 +374,7 @@ async function recordarBotones(supabase: SupabaseClient, phone: string, fila: Fi
  * se puede verificar, el siguiente mensaje de la persona no dispara otra descarga ni otro aviso
  * interno hasta que pase el enfriamiento.
  */
-async function reclamarIntento(supabase: SupabaseClient, id: string, ahora: Date, minutos: number): Promise<boolean> {
+export async function reclamarIntento(supabase: SupabaseClient, id: string, ahora: Date, minutos: number): Promise<boolean> {
   const limite = new Date(ahora.getTime() - minutos * 60_000).toISOString();
   const { data, error } = await supabase
     .from(TABLA)
@@ -594,7 +632,7 @@ async function avisarRespuesta(
 }
 
 /** Canal de alertas internas que ya usa el bot (`WA_ADMIN_NOTIFY_PHONE`). Nunca tumba el flujo. */
-async function avisarAdmin(texto: string, variables: Record<string, string | number | null | undefined>): Promise<void> {
+export async function avisarAdmin(texto: string, variables: Record<string, string | number | null | undefined>): Promise<void> {
   const admin = (Deno.env.get('WA_ADMIN_NOTIFY_PHONE') || '').replace(/\D/g, '');
   if (!admin) {
     console.warn(`[aceptacion] sin aviso interno (falta WA_ADMIN_NOTIFY_PHONE): ${texto.slice(0, 200)}`);

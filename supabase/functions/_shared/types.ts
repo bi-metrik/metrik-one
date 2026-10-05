@@ -168,6 +168,8 @@ export interface WaUser {
     modules?: Record<string, unknown> | null;
     /** `config_extra.bot_conversacional` (el interruptor del intérprete). Ausente o nulo = apagado. */
     bot_conversacional?: unknown;
+    /** `config_extra.aviso_datos_bot` (la puerta del aviso de datos, `aviso-datos-bot.ts`). Ausente = apagada. */
+    aviso_datos_bot?: unknown;
   } | null;
 }
 

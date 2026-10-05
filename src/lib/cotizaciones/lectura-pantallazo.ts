@@ -34,6 +34,7 @@ import { parseMontoCop } from '@/lib/negocios/monto-cop'
 
 import type { CampoRanura, DefinicionRanura } from './ranuras-pantallazo'
 import { camposMinimos, MINIMOS_DE_COSTO } from './ranuras-pantallazo'
+import { ciudadEsLugarDelNombre } from './ciudad-actividad'
 import { estrellasDesdeTexto } from './estrellas'
 import { tramosDeCampos, textoDeTramo } from './tramos-vuelo'
 import { deducirAnio, esFechaSinAnio, fechaSinDiaDeLaSemana } from './anio-fecha'
@@ -332,6 +333,17 @@ export function evaluarLectura(
   })
   const porSlug = new Map(campos.map(c => [c.slug, c]))
   const avisosDelItem: string[] = []
+
+  // Brief del 2026-10-05 · la ciudad de una actividad no sale del nombre del tour. Si el
+  // lector devolvió como ciudad un lugar del nombre («bahía de Manzanillo» → Manzanillo), se
+  // descarta: queda como no leída y el bloque usa la ciudad del viaje.
+  if (ranura.slug === 'actividad_detalle') {
+    const ciudad = porSlug.get('ciudad')
+    if (ciudad && ciudadEsLugarDelNombre(ciudad.valor, porSlug.get('nombre')?.valor)) {
+      ciudad.valor = null
+      ciudad.confidence = 0
+    }
+  }
 
   // RX3 · la moneda que la persona indicó porque la captura solo muestra «$».
   const moneda = porSlug.get('moneda')

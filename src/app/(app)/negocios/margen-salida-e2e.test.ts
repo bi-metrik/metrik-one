@@ -546,6 +546,16 @@ describe('6 · una línea con margen que no se puede medir', () => {
     expect(env.error).toContain('no tiene un margen que se pueda medir')
   })
 
+  it('una línea sin costo NI precio: la vista trae el motivo y las líneas, con su id (brief del 2026-10-05)', async () => {
+    sembrar({ items: [linea('paquete', 700, 1000), linea('actividad', 0, 0, { grupo: 'actividad: Actividad en Providencia', nombre: 'Opción 1', precio_manual: false })] })
+    const vista = await getSalidaDeCotizacion(COT)
+    expect(vista.faltaCosto).toBe('Falta el costo de Actividad en Providencia · Opción 1: el cliente recibiría un precio sin ese servicio.')
+    expect(vista.faltaCostoLineas).toEqual([{ id: 'actividad', nombre: 'Opción 1', grupo: 'actividad: Actividad en Providencia' }])
+    // Sin nada faltante, la lista va vacía.
+    sembrar({ items: [linea('paquete', 700, 1000)] })
+    expect((await getSalidaDeCotizacion(COT)).faltaCostoLineas).toEqual([])
+  })
+
   it('una línea sin costo dentro de una cotización con costo NO la vuelve inmedible (es el recargo)', async () => {
     sembrar({ items: [linea('paquete', 700, 1000), linea('recargo', 0, 100_000 / 1000)] })
     expect((await enviarCotizacion(COT)).success).toBe(true)

@@ -12,11 +12,23 @@ import { AsyncLocalStorage } from 'node:async_hooks'
  *
  * Opt-in: solo memoiza dentro de `enPeticionDeRuta(...)`. Fuera de ella, `memoDeRuta(fn)` es
  * `fn` tal cual, así que ninguna otra ruta, acción ni página cambia.
+ *
+ * ⚠️ Las SERVER ACTIONS tampoco tienen render: el `cache()` de React no memoiza ahí y cada
+ * `getWorkspace` del camino (la acción, su guard, los helpers) volvía a ir a la base. Las
+ * acciones de guardado de la ficha se envuelven igual (2026-10-04). El memo vive en el
+ * contexto asíncrono de ESA invocación: no lo ve otra petición ni otro usuario, y tampoco el
+ * render que Next hace después con el `revalidatePath` (ese corre fuera y resuelve fresco).
  */
 const almacen = new AsyncLocalStorage<Map<unknown, unknown>>()
 
-/** Corre `fn` con su propio memo: lo memoizado vive lo que dura esta petición. */
+/**
+ * Corre `fn` con su propio memo: lo memoizado vive lo que dura esta petición.
+ *
+ * Si ya hay uno abierto (una acción envuelta que llama a otra envuelta), se REUSA: es la
+ * misma petición y la misma persona, y abrir otro volvería a resolver la sesión.
+ */
 export function enPeticionDeRuta<T>(fn: () => Promise<T>): Promise<T> {
+  if (almacen.getStore()) return fn()
   return almacen.run(new Map(), fn)
 }
 
