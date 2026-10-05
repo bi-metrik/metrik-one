@@ -411,8 +411,10 @@ describe('criterio 3 · sin ciudad en el pantallazo, el bloque lleva la ciudad d
     expect(bloquesPedidos.lugares).toEqual([null])
     expect(lineaDeLaBase('item-1').grupo).toBe('actividad: Actividad en Providencia')
     for (const s of [await releida(), recargada()]) {
-      expect(s.t).toContain('Actividad en Providencia')
-      expect(s.t).not.toContain('Actividad en Cayo Cangrejo')
+      // D4 del brief del 2026-10-05: el título del bloque es la actividad y su día; el nombre de
+      // la ranura (la ciudad) queda de subtítulo, en el campo que la renombra.
+      expect(s.html).toContain('value="Actividad en Providencia"')
+      expect(s.html).not.toContain('Actividad en Cayo Cangrejo')
     }
     // Lo que la fila de la bandeja dice antes de aceptar es lo mismo.
     const rev = revisarBorrador({
@@ -567,8 +569,8 @@ describe('brief 2026-10-05 · criterio 1 · «Tour en lancha por la bahía de Ma
       expect(bloquesPedidos.lugares).toEqual([null])
       expect(lineaDeLaBase('item-1').grupo).toBe('actividad: Actividad en Providencia')
       for (const s of [await releida(), recargada()]) {
-        expect(s.t).toContain('Actividad en Providencia')
-        expect(s.t).not.toContain('Actividad en Manzanillo')
+        expect(s.html).toContain('value="Actividad en Providencia"')
+        expect(s.html).not.toContain('Actividad en Manzanillo')
         // Lo que no cambia: 300.000 para 3 personas, Adulto 150.000 × 2, Infante $0.
         expect(s.costoLinea).toBe('300.000')
         expect(s.tabla).toMatch(/Adulto 2 150\.000/)
@@ -613,7 +615,7 @@ describe('brief 2026-10-05 · criterio 3 · «Snorkel en Crab Cay» sin ciudad s
     })
     await pegarYAceptar(lectura, 'Crab Cay')
     expect(bloquesPedidos.lugares).toEqual([null])
-    for (const s of [await releida(), recargada()]) expect(s.t).toContain('Actividad en Providencia')
+    for (const s of [await releida(), recargada()]) expect(s.html).toContain('value="Actividad en Providencia"')
   })
 })
 

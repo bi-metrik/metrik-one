@@ -55,7 +55,7 @@ import { MarcoCotizacionContexto } from '@/app/(app)/negocios/marco-cotizacion-c
 import { usePublicarTotalVivo } from '@/app/(app)/negocios/total-vivo'
 import { laMasNueva, lineasParaPintar, traerVistaFresca, type VistaFresca } from '@/lib/cotizaciones/vista-fresca'
 import { esAvisoSoloInformativo, estadoDeBloque, resumenDeBloques, type EstadoDeBloque } from '@/lib/cotizaciones/bandeja-capturas'
-import { avisoDePasajerosDeOpcion } from '@/lib/cotizaciones/tarjeta-opcion'
+import { avisoDePasajerosDeOpcion, pesos as pesosTarjeta } from '@/lib/cotizaciones/tarjeta-opcion'
 import { crearRanuraConOpcion, eliminarRanura } from '@/app/(app)/negocios/ranura-actions'
 import { avisoDeBorradoDeBloque, preguntaTarifaMarcada, tarifasMarcadasCon } from '@/lib/cotizaciones/eliminar-opciones'
 import { bloquesPorRanura, esNombreDeOpcion, tipoDeDefinicion, type BloqueDeLineas } from '@/lib/cotizaciones/ranuras-cotizacion'
@@ -88,10 +88,21 @@ import {
   describirOcupacion,
   formatoMonto,
   lineaPorPasajero,
+  NOMBRE_TIPO,
   precioPorPasajero,
   type Composicion,
 } from '@/lib/cotizaciones/tarifa-pasajero'
+import {
+  actividadesQueNoVan,
+  actividadesSinDia,
+  esActividad,
+  estadoDeActividad,
+  notaDeActividadesFuera,
+  textoFaltaDia,
+  textoNoVan,
+} from '@/lib/cotizaciones/actividad-en-cotizacion'
 import { avisoTasaPendiente } from '@/lib/cotizaciones/actividad-pantallazo'
+import { nombreVisibleDeLinea } from '@/lib/cotizaciones/nombre-visible'
 import { motivoFaltaCosto, tasasPendientesPorLinea } from '@/lib/cotizaciones/falta-costo'
 import { pasajerosParaCuadre } from '@/lib/cotizaciones/cuadre-pasajero'
 import { precioPorHabitacion } from '@/lib/cotizaciones/habitaciones'
@@ -505,11 +516,17 @@ export default function CotizacionEditor({ oportunidadId, cotizacion, initialIte
   // Dónde vive cada opción («Opción 2 de Vuelo 1 · BOG → ADZ»): la bandeja la nombra así al
   // avisar de un pantallazo repetido (P10).
   const ubicacionesDeOpciones: Record<string, { bloque: string; opcion: number }> = {}
+  // El nombre del bloque en «Así lo ve el cliente»: el de la ranura, que es el que imprime el
+  // documento. Solo cambia en la actividad, cuyo título de pantalla lleva su día (D4).
+  const bloqueParaLaHoja: Record<string, string> = {}
   if (lineasPorTipo) {
     for (const b of bloquesDeLineas) {
       if (!b.grupo) continue
       const bloque = tituloDeBloque(b, numeroDeVuelo.get(b.grupo) ?? null).titulo
-      b.lineas.forEach((l, i) => { ubicacionesDeOpciones[l.id] = { bloque, opcion: i + 1 } })
+      b.lineas.forEach((l, i) => {
+        ubicacionesDeOpciones[l.id] = { bloque, opcion: i + 1 }
+        bloqueParaLaHoja[l.id] = b.tipo === 'actividad' ? b.etiqueta ?? bloque : bloque
+      })
     }
   }
   const idDeBloque = (grupo: string) => `bloque-${grupo.replace(/[^a-z0-9]+/gi, '-')}`
@@ -1117,7 +1134,8 @@ export default function CotizacionEditor({ oportunidadId, cotizacion, initialIte
       .filter(b => b.grupo !== null)
       .map(b => estadoDeBloque(
         { grupo: b.grupo as string, etiqueta: tituloDeBloque(b, numeroDeVuelo.get(b.grupo as string) ?? null).titulo },
-        b.lineas.map(estadoDeOpcion),
+        // Una actividad que no va no deja el bloque por atender: no sale en la cotización (punto 0).
+        b.lineas.filter(l => !(esActividad(l.grupo) && estadoDeActividad(l) === 'no_va')).map(estadoDeOpcion),
       ))
     : []
   const costoTotal = cascadaTotal.costoDirecto
@@ -1263,12 +1281,14 @@ export default function CotizacionEditor({ oportunidadId, cotizacion, initialIte
   // cambio. El precio queda en $0 y aquí se dice, antes de enviar: nunca pasa callado.
   const costosPendientes = lineasPorTipo
     ? initialItems
-      .filter(i => i.es_ajuste !== true && !ocultos.has(i.id))
+      // Una actividad que no va no pide nada: no sale en la cotización (punto 0).
+      .filter(i => i.es_ajuste !== true && !ocultos.has(i.id) && !(esActividad(i.grupo) && estadoDeActividad(i) === 'no_va'))
       .map(i => {
         const texto = tasaPendientePorId.get(i.id) ?? null
         const u = ubicacionesDeOpciones[i.id]
         const donde = u ? `${u.bloque}${u.opcion ? ` · Opción ${u.opcion}` : ''}` : null
-        return texto ? { id: i.id, nombre: i.nombre || 'Opción', donde, texto } : null
+        // Como se lee, no en MAYÚSCULAS (punto 10).
+        return texto ? { id: i.id, nombre: nombreVisibleDeLinea(i) || i.nombre || 'Opción', donde, texto } : null
       })
       .filter((x): x is { id: string; nombre: string; donde: string | null; texto: string } => !!x)
     : []
@@ -1287,6 +1307,30 @@ export default function CotizacionEditor({ oportunidadId, cotizacion, initialIte
           </li>
         ))}
       </ul>
+    </div>
+  ) : null
+  // Punto 0 y D1 del brief del 2026-10-05 · lo que «Revisar y enviar» dice de las actividades,
+  // como información y sin bloquear: cuáles no van, y cuáles suman y no tienen día.
+  const lineasConNombre = lineasPorTipo
+    ? initialItems
+      .filter(i => i.es_ajuste !== true && !ocultos.has(i.id))
+      .map(i => ({
+        id: i.id,
+        nombre: nombreVisibleDeLinea(i) || i.nombre || 'Actividad',
+        grupo: i.grupo ?? null,
+        dia_relativo: i.dia_relativo ?? null,
+        entra_al_precio: i.entra_al_precio ?? null,
+        mostrar_en_sugeridos: i.mostrar_en_sugeridos ?? null,
+        orden: i.orden ?? 0,
+      }))
+    : []
+  // «Con el itinerario en uso»: algún día en cualquier línea que va (`actividadesSinDia`).
+  const avisoFaltaDia = textoFaltaDia(actividadesSinDia(lineasConNombre, aportanAlTotal))
+  const avisoNoVan = textoNoVan(actividadesQueNoVan(lineasConNombre))
+  const jsxAvisoActividades = avisoFaltaDia || avisoNoVan ? (
+    <div data-avisos-actividades className="space-y-1 rounded-lg border bg-muted/20 p-3 text-xs">
+      {avisoFaltaDia && <p className="m-0 font-medium text-[#9A5F0C]" data-falta-dia>{avisoFaltaDia}</p>}
+      {avisoNoVan && <p className="m-0 text-[#6E6A62]" data-no-van>{avisoNoVan}</p>}
     </div>
   ) : null
   const jsxAvisoDesactualizadas = (
@@ -2269,7 +2313,7 @@ export default function CotizacionEditor({ oportunidadId, cotizacion, initialIte
                 </div>
               ) : null}
               nota={jsxNotaOpcion}
-              bloqueTitulo={ubicacionesDeOpciones[item.id]?.bloque ?? ''}
+              bloqueTitulo={bloqueParaLaHoja[item.id] ?? ''}
               general={nivelDetalle === 'general'}
               fechasViaje={fechasViaje}
               onGuardarNota={texto => {
@@ -2281,6 +2325,15 @@ export default function CotizacionEditor({ oportunidadId, cotizacion, initialIte
                 })
               }}
               onCambio={() => refrescar()}
+              actividad={esActividad(item.grupo) ? {
+                estado: estadoDeActividad(item),
+                dia: diaDeItem({ id: item.id, dia_relativo: item.dia_relativo ?? null }),
+                // Lo que se le muestra al cliente de una opcional: su precio por persona.
+                precioPorPersona: precioPorPax && precioPorPax.length > 0
+                  ? precioPorPax.map(p => `${NOMBRE_TIPO[p.tipo]} ${pesosTarjeta(p.precioUnitario)}`).join(' · ')
+                  : null,
+                era: tarifaDelItem.noVa?.era ?? null,
+              } : null}
             />
           )
         }
@@ -3285,6 +3338,9 @@ export default function CotizacionEditor({ oportunidadId, cotizacion, initialIte
     estadoCotizacion: cotizacion.estado,
   })
   const enPropuesta = (itinerarios?.itinerarios ?? []).filter(i => i.vaEnPropuesta)
+  // Las actividades opcionales y las que no van se cuentan aparte, sin sumarlas (punto 0).
+  const notaFuera = notaDeActividadesFuera(itemsParaDia)
+  const resumenDeComponentes = `${resumenDeBloques(estadosDeBloque)}${notaFuera ? ` · ${notaFuera}` : ''}`
   // P9 · el viaje no es un paso: es el encabezado fijo de la cotización. Sale del negocio
   // y aquí no se edita; en ámbar si al negocio le faltan fechas o pasajeros.
   const viaje = encabezadoDelViaje({ destino: destinoViaje, fechas: fechasViaje, composicion: composicionViaje })
@@ -3319,7 +3375,7 @@ export default function CotizacionEditor({ oportunidadId, cotizacion, initialIte
           ...estadoPasos.componentes,
           // P7 · con bloques, el encabezado los cuenta: «3 bloques · 2 completos · 1 requiere atención».
           ...(estadosDeBloque.length > 0 ? {
-            detalle: resumenDeBloques(estadosDeBloque),
+            detalle: resumenDeComponentes,
             ...(estadosDeBloque.some(e => !e.completo)
               ? { estado: 'error' as const, problemas: estadosDeBloque.filter(e => !e.completo).length }
               : {}),
@@ -3336,7 +3392,7 @@ export default function CotizacionEditor({ oportunidadId, cotizacion, initialIte
                   }}
                   className="w-full rounded-md border bg-background px-3 py-1.5 text-left text-xs font-medium text-[#1A1A1A] hover:bg-accent"
                 >
-                  {resumenDeBloques(estadosDeBloque)}
+                  {resumenDeComponentes}
                   {estadosDeBloque.some(e => !e.completo) && (
                     <span className="ml-1 text-primary underline underline-offset-2">Ir al primero que falta</span>
                   )}
@@ -3416,6 +3472,7 @@ export default function CotizacionEditor({ oportunidadId, cotizacion, initialIte
                 </p>
               )}
               {jsxAvisoCostoPendiente}
+              {jsxAvisoActividades}
               {jsxAvisoDesactualizadas}
               {jsxPanelMargen}
               {jsxIvaNota}

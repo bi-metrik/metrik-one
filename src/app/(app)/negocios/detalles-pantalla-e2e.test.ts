@@ -370,13 +370,14 @@ describe('punto 2 · la operadora elige qué habitaciones van', () => {
   }
   const filaDe = (html: string, id: string) => texto(html.match(new RegExp(`data-habitacion="${id}"[\\s\\S]*?(?=data-habitacion="|<\\/section>)`))?.[0] ?? '')
 
-  it('la que sobra se ve «De referencia», dice que no suma, y el resumen la cuenta aparte; el total no cambia', async () => {
+  it('la que sobra conserva su número, dice que no suma, y el resumen la cuenta aparte; el total no cambia', async () => {
     await conLaQueSobra()
     const s = await releida()
     expect(s.alojamiento).toContain('2 habitaciones · cubre a los 3 viajeros · 1 de referencia, no suma')
-    expect(filaDe(s.html, 'r3')).toContain('De referencia')
+    // Brief del 2026-10-05, punto 16: nada se renumera; el check «Va en la cotización» queda sin marcar.
+    expect(filaDe(s.html, 'r3')).toContain('Habitación 3')
     expect(filaDe(s.html, 'r3')).toContain(TEXTO_NO_VA)
-    expect(s.html).toMatch(/data-habitacion="r3"[\s\S]*?aria-pressed="true"[^>]*>No va</)
+    expect(s.html).toMatch(/data-habitacion="r3"[\s\S]*?data-check-va[\s\S]*?<input type="checkbox"(?![^>]*checked)[^>]*aria-label="Va en la cotización"/)
     expect(s.costoLinea).toBe('800.000')
     expect(s.totalCotizacion).toBe(pesos(conMargen(800_000)))
     expect(s.resumen).toBe('1 bloque · 1 completo')
@@ -387,7 +388,7 @@ describe('punto 2 · la operadora elige qué habitaciones van', () => {
     const r = await marcarHabitacionQueVa(ITEM, 'r3', true)
     expect(r.success, r.error).toBe(true)
     for (const s of [await releida(), recargada()]) {
-      expect(s.alojamiento).toContain('Sobra 1 adulto: marca «No va» en la habitación que no va.')
+      expect(s.alojamiento).toContain('Sobra 1 adulto: quítale el check a la habitación que no va.')
       expect(s.resumen).toBe('1 bloque · 0 completos · 1 requiere atención')
       expect(s.costoLinea).toBe('1.280.000')
     }
@@ -399,8 +400,12 @@ describe('punto 2 · la operadora elige qué habitaciones van', () => {
     expect((await marcarHabitacionQueVa(ITEM, 'r1', false)).success).toBe(true)
     const precio = pesos(conMargen(880_000))
     for (const s of [await releida(), recargada()]) {
-      expect(filaDe(s.html, 'r1')).toContain('De referencia')
-      expect(filaDe(s.html, 'r3')).toContain('Habitación')
+      // Cada una en su sitio y con su número: la 1 no va, la 3 sí (punto 16 del 2026-10-05).
+      expect(filaDe(s.html, 'r1')).toContain('Habitación 1')
+      expect(filaDe(s.html, 'r1')).toContain(TEXTO_NO_VA)
+      expect(filaDe(s.html, 'r3')).toContain('Habitación 3')
+      expect(filaDe(s.html, 'r3')).not.toContain(TEXTO_NO_VA)
+      expect(s.html.indexOf('data-habitacion="r1"')).toBeLessThan(s.html.indexOf('data-habitacion="r2"'))
       expect(s.alojamiento).toContain('2 habitaciones · cubre a los 3 viajeros · 1 de referencia, no suma')
       expect(s.alojamiento).not.toMatch(/Sobra|Falta/)
       expect(s.costoLinea).toBe('880.000')
@@ -429,7 +434,7 @@ describe('punto 2 · la operadora elige qué habitaciones van', () => {
   it('con una sola captura no hay «Va / No va»: la única siempre va', async () => {
     sembrarHotel([{ id: 'r1', lectura: R1() }])
     expect((await confirmarTarifaPorPasajero(ITEM, null)).success).toBe(true)
-    expect(recargada().html).not.toContain('data-va-no-va')
+    expect(recargada().html).not.toContain('data-check-va')
   })
 })
 

@@ -28,7 +28,8 @@ import {
 } from './detalle-viaje'
 import { describirOcupacion, type Composicion } from './tarifa-pasajero'
 import type { EquipajeTramo, TramoVuelo } from './tramos-vuelo'
-import type { TipoRanura } from './ranuras-cotizacion'
+import { esNombreDeOpcion, type TipoRanura } from './ranuras-cotizacion'
+import { nombreVisibleDeLinea } from './nombre-visible'
 import { diaDeLaSemana, leerFecha, lugarConCodigo } from '@/lib/pdf/cotizacion-trappvel-formato'
 
 // ── La nota para el cliente ──────────────────────────────────────────────────
@@ -254,6 +255,17 @@ export function tituloDeBloque(
   numeroDeVuelo: number | null,
 ): { titulo: string; subtitulo: string | null } {
   const etiqueta = bloque.etiqueta ?? ''
+  // D4 del brief del 2026-10-05: una actividad se nombra con la actividad y su día («Día 3 ·
+  // Snorkel en Crab Cay»), no «Actividad 4 · Actividad en Providencia». El nombre de la ranura
+  // (con la ciudad de #1017, que arma el capítulo del PDF) queda de subtítulo.
+  if (bloque.tipo === 'actividad') {
+    const primera = bloque.lineas[0] as (ItemConLectura & { dia_relativo?: number | null }) | undefined
+    const nombre = primera ? nombreVisibleDeLinea(comoLectura(primera)).trim() : ''
+    if (!nombre || esNombreDeOpcion(nombre)) return { titulo: etiqueta, subtitulo: null }
+    const dia = primera?.dia_relativo
+    const conDia = typeof dia === 'number' && Number.isInteger(dia) && dia >= 1 ? `Día ${dia} · ${nombre}` : nombre
+    return { titulo: conDia, subtitulo: etiqueta || null }
+  }
   if (bloque.tipo !== 'vuelo' || numeroDeVuelo === null) return { titulo: etiqueta, subtitulo: null }
   const ruta = bloque.lineas.map(l => rutaDeOpcion(comoLectura(l))).find((r): r is string => r !== null) ?? null
   return {

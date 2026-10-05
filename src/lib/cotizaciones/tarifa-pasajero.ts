@@ -1510,6 +1510,27 @@ export interface TarifaPax {
    * Ausente = sin foto: el documento sale como antes.
    */
   fotoHotel?: FotoDelHotel
+  /**
+   * Una actividad a la que le quitaron el check «Va en la cotización»: cómo era antes, para que al
+   * marcarla otra vez vuelva igual (brief del 2026-10-05, `actividad-en-cotizacion.ts`). Ausente =
+   * la actividad va, o se quitó antes de esta marca (vuelve Incluida).
+   */
+  noVa?: MarcaNoVa
+}
+
+/** Cómo era una actividad antes de quitarle el check, con quién y cuándo. */
+export interface MarcaNoVa {
+  era: 'incluida' | 'opcional'
+  por: string | null
+  porId: string | null
+  en: string
+}
+
+function leerMarcaNoVa(raw: unknown): MarcaNoVa | null {
+  if (!raw || typeof raw !== 'object') return null
+  const r = raw as Record<string, unknown>
+  if ((r.era !== 'incluida' && r.era !== 'opcional') || typeof r.en !== 'string') return null
+  return { era: r.era, por: typeof r.por === 'string' ? r.por : null, porId: typeof r.porId === 'string' ? r.porId : null, en: r.en }
 }
 
 /** Una foto de hotel guardada en el almacenamiento propio del workspace. */
@@ -1682,6 +1703,7 @@ export function leerTarifaPax(raw: unknown): TarifaPax {
   const habitaciones = leerHabitaciones(r.habitaciones)
   const preciosAMano = leerPreciosAMano(r.preciosAMano)
   const fotoHotel = leerFotoDelHotel(r.fotoHotel)
+  const noVa = leerMarcaNoVa(r.noVa)
   return {
     composicion: normalizarComposicion(r.composicion),
     casillas,
@@ -1700,6 +1722,8 @@ export function leerTarifaPax(raw: unknown): TarifaPax {
     ...(Object.keys(preciosAMano).length > 0 ? { preciosAMano } : {}),
     // Igual: sin foto del hotel la llave no aparece.
     ...(fotoHotel ? { fotoHotel } : {}),
+    // Igual: sin la marca de «No va» la llave no aparece.
+    ...(noVa ? { noVa } : {}),
   }
 }
 

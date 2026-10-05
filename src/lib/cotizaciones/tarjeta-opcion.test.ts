@@ -166,7 +166,7 @@ describe('el alojamiento', () => {
     const reparto = repartirHabitaciones(ROOMS, GRUPO)
     const ref = reparto.habitaciones.find(h => h.id === 'h3')!
     expect(notaDeReferencia(ref.sirveParaRestar, costoPorTipoDeHabitaciones(reparto)))
-      .toBe('ONE también la usa para sacar el precio del niño (151.400) y del infante (22.000).')
+      .toBe('También sirve para calcular cuánto pagan el niño ($151.400) y el infante ($22.000).')
     expect(notaDeReferencia(false, costoPorTipoDeHabitaciones(reparto))).toBeNull()
   })
 
@@ -215,6 +215,6 @@ describe('la acomodación de todas las habitaciones (documento y vista previa)',
     const ref = r.habitaciones.find(h => h.rol !== 'habitacion')
     expect(ref).toBeDefined()
     expect(acomodacionDeHabitaciones(r)).toBe('3 habitaciones: 2 adultos + 1 niño; 2 adultos + 1 infante; 2 adultos')
-    expect(notaDeReferencia(true, costoPorTipoDeHabitaciones(r), false)).toMatch(/^ONE la usa para sacar el precio del niño \(/)
+    expect(notaDeReferencia(true, costoPorTipoDeHabitaciones(r), false)).toMatch(/^Sirve para calcular cuánto pagan el niño \(\$/)
   })
 })

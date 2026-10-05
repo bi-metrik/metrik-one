@@ -68,6 +68,7 @@ import { opcionLeidaDeFila, type OpcionLeida } from '@/lib/cotizaciones/bandeja-
 import { leerImagenDeCaptura } from '@/lib/cotizaciones/leer-imagen-captura'
 import { avisoFechaActividadFueraDelViaje, leerHotelManual, leerTrasladoManual, lecturaManual, type ErroresManual } from '@/lib/cotizaciones/ingreso-manual'
 import { fechaDeActividad, lugarDeBloqueNuevo } from '@/lib/cotizaciones/actividad-pantallazo'
+import { diaDeFecha } from '@/lib/cotizaciones/actividad-en-cotizacion'
 import { borradorValido, firmarBorrador } from '@/lib/cotizaciones/firma-borrador'
 import { ubicarLectura, type LineaParaUbicar } from '@/lib/cotizaciones/ubicar-lectura'
 import { definicionDeTipo, esTipoRanura, tipoDeDefinicion, type TipoRanura } from '@/lib/cotizaciones/ranuras-cotizacion'
@@ -679,7 +680,26 @@ export async function aceptarCapturaDeBandeja(cotizacionId: string, b: BorradorP
   if (!r.ok && subida) await borrarImagenesDeCaptura(workspaceId, [subida])
   if (!r.ok || r.como === 'habitacion') return r
   const fallidas = await aplicarCorreccionesDeBandeja(r.itemId, b.correcciones)
+  // Punto 2 del brief del 2026-10-05: la actividad con fecha dentro del viaje llega con su día.
+  if (b.tipo === 'actividad') await proponerDiaDeActividad(ctx.supabase, r.itemId, ctx.viaje.fechas)
   return fallidas.length > 0 ? { ...r, correccionesFallidas: fallidas } : r
+}
+
+/**
+ * El día con que llega una actividad aceptada desde la bandeja: el de su fecha, si cae dentro
+ * del viaje (13 nov en un viaje 9–13 nov → Día 5). Sin fecha, o fuera del viaje, se queda «Sin
+ * día» y la tarjeta lo pide. Solo propone: un día que ya tenga la opción no se toca, ni el de una
+ * que no va en la cotización. Después de las correcciones de la fila, que pueden traer la fecha.
+ */
+async function proponerDiaDeActividad(supabase: unknown, itemId: string, fechas: { inicio: string | null; fin: string | null }) {
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const sb = supabase as any
+  const { data: item } = await sb.from('items').select('*').eq('id', itemId).maybeSingle()
+  if (!item || item.dia_relativo != null || item.entra_al_precio === false) return
+  const t = leerTarifaPax(item.tarifa_pax)
+  const dia = diaDeFecha(fechaDeActividad(t.casillas?.grupo_completo, t.correcciones), fechas)
+  if (dia === null) return
+  await sb.from('items').update({ dia_relativo: dia }).eq('id', itemId)
 }
 
 /** Tope de correcciones por captura: la fila tiene seis campos. */
