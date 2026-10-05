@@ -1,6 +1,6 @@
 /**
  * Brief del 2026-10-05, «última limpieza de la cotización de Trappvel antes de presentar»:
- * puntos 9, 10 y 11, puros. Los recorridos por el editor están en
+ * puntos 0 a 4, 6, 9 a 13, 15 y 17, puros. Los recorridos por el editor están en
  * `src/app/(app)/negocios/limpieza-presentar-e2e.test.ts`.
  */
 import { describe, expect, it } from 'vitest'
@@ -15,6 +15,27 @@ import { precioPorPasajero, type LecturaCasilla, type TarifaConfirmada } from '.
 import { aMayusculas } from '@/lib/negocios/mayusculas'
 import { motivoFaltaCosto, tasasPendientesPorLinea } from './falta-costo'
 import { motivosDeBorrador, textoDeMarca } from './motivos-borrador'
+import {
+  actividadesQueNoVan,
+  actividadesSinDia,
+  avisoDiaFueraDelViaje,
+  cambiosDeActividad,
+  diaDeFecha,
+  diasDelViaje,
+  estadoDeActividad,
+  etiquetaDeDiaDelViaje,
+  motivoDiaInvalido,
+  notaDeActividadesFuera,
+  opcionesDeDia,
+  textoFaltaDia,
+  textoNoVan,
+} from './actividad-en-cotizacion'
+import { tituloDeBloque } from './opcion-viaje'
+import { patchDeRecalculo } from './patch-recalculo'
+import { pendienteResuelto } from './bandeja-capturas'
+import { lecturaManual } from './ingreso-manual'
+import { ranuraPorSlug } from './ranuras-pantallazo'
+import { revisarBorrador } from './revisar-borrador'
 
 const hotel = (over: Partial<HotelPDF>): HotelPDF => ({
   linea: 'HOTEL', hotel: 'Hotel', ciudad: 'Providencia', habitacion: null, regimen: null, checkIn: null,
@@ -146,5 +167,137 @@ describe('punto 12 · moneda sin tasa: el rechazo y la marca dicen la tasa', () 
       .toBe('BORRADOR · borrador incompleto: falta la tasa de cambio · no enviar')
     expect(textoDeMarca(motivosDeBorrador({ ...base, faltaCosto: true }))).toBe('BORRADOR · borrador incompleto: falta un costo · no enviar')
     expect(motivosDeBorrador({ ...base, faltaTasa: true })).toEqual([])
+  })
+})
+
+describe('punto 0 · los tres estados y cómo se pasa de uno a otro', () => {
+  it('se leen de los dos interruptores que ya existían', () => {
+    expect(estadoDeActividad({})).toBe('incluida')
+    expect(estadoDeActividad({ entra_al_precio: false })).toBe('opcional')
+    expect(estadoDeActividad({ entra_al_precio: false, mostrar_en_sugeridos: false })).toBe('no_va')
+  })
+
+  it('quitar el check conserva el día y anota cómo era; ponerlo vuelve igual', () => {
+    expect(cambiosDeActividad({ estado: 'incluida', dia: 2, era: null }, { va: false }))
+      .toEqual({ entra_al_precio: false, mostrar_en_sugeridos: false, noVa: { era: 'incluida' } })
+    expect(cambiosDeActividad({ estado: 'no_va', dia: 2, era: 'incluida' }, { va: true }))
+      .toEqual({ entra_al_precio: true, mostrar_en_sugeridos: true, noVa: null })
+    expect(cambiosDeActividad({ estado: 'no_va', dia: null, era: 'opcional' }, { va: true }))
+      .toEqual({ entra_al_precio: false, mostrar_en_sugeridos: true, dia_relativo: null, noVa: null })
+    // Sin la marca (quitada antes de existir), vuelve Incluida: D5.
+    expect(cambiosDeActividad({ estado: 'no_va', dia: null, era: null }, { va: true })?.entra_al_precio).toBe(true)
+  })
+
+  it('Opcional borra el día; Incluida u Opcional solo con el check puesto; lo que ya está así no escribe', () => {
+    expect(cambiosDeActividad({ estado: 'incluida', dia: 3, era: null }, { modo: 'opcional' })?.dia_relativo).toBeNull()
+    expect(cambiosDeActividad({ estado: 'no_va', dia: null, era: null }, { modo: 'incluida' })).toBeNull()
+    expect(cambiosDeActividad({ estado: 'opcional', dia: null, era: null }, { modo: 'opcional' })).toBeNull()
+    expect(cambiosDeActividad({ estado: 'incluida', dia: null, era: null }, { va: true })).toBeNull()
+  })
+})
+
+describe('puntos 1 a 3 · los días del viaje', () => {
+  const VIAJE = { inicio: '2026-11-09', fin: '2026-11-13' }
+
+  it('9 al 13 nov son 5 días, cada uno con su fecha', () => {
+    expect(diasDelViaje(VIAJE)).toBe(5)
+    expect(opcionesDeDia(VIAJE).map(o => o.etiqueta)).toEqual([
+      'Día 1 · lunes 9 nov', 'Día 2 · martes 10 nov', 'Día 3 · miércoles 11 nov', 'Día 4 · jueves 12 nov', 'Día 5 · viernes 13 nov',
+    ])
+    expect(etiquetaDeDiaDelViaje(3, { inicio: null, fin: null })).toBe('Día 3')
+  })
+
+  it('la fecha de la actividad propone el día; fuera del viaje o sin fecha, ninguno', () => {
+    expect(diaDeFecha('2026-11-13', VIAJE)).toBe(5)
+    expect(diaDeFecha('2026-11-13/vie', VIAJE)).toBe(5)
+    expect(diaDeFecha('2026-11-15', VIAJE)).toBeNull()
+    expect(diaDeFecha('2026-11-08', VIAJE)).toBeNull()
+    expect(diaDeFecha(null, VIAJE)).toBeNull()
+    expect(diaDeFecha('2026-11-13', { inicio: null, fin: null })).toBeNull()
+  })
+
+  it('un día fuera de 1..N no se guarda; sin fechas del viaje no hay tope', () => {
+    expect(motivoDiaInvalido(6, VIAJE)).toBe('El viaje tiene 5 días: elige un día del 1 al 5.')
+    expect(motivoDiaInvalido(5, VIAJE)).toBeNull()
+    expect(motivoDiaInvalido(40, { inicio: null, fin: null })).toBeNull()
+    expect(motivoDiaInvalido(0, { inicio: null, fin: null })).toBe('El día tiene que ser un número entero desde 1.')
+    expect(avisoDiaFueraDelViaje(7, VIAJE)).toBe('Tiene el Día 7 y el viaje ahora tiene 5 días: elige otro día.')
+    expect(avisoDiaFueraDelViaje(5, VIAJE)).toBeNull()
+  })
+
+  it('«Revisar y enviar»: falta el día solo con el itinerario en uso y solo en lo que suma', () => {
+    const conDia = { id: 'a', nombre: 'Cayo Cangrejo', grupo: 'actividad', dia_relativo: 5 }
+    const sinDia = { id: 'b', nombre: 'Snorkel', grupo: 'actividad 2' }
+    const opcional = { id: 'c', nombre: 'Catamarán', grupo: 'actividad 3', entra_al_precio: false }
+    expect(textoFaltaDia(actividadesSinDia([conDia, sinDia, opcional], ['a', 'b']))).toBe('Falta el día de Snorkel.')
+    expect(actividadesSinDia([sinDia], ['b'])).toEqual([])
+    expect(textoNoVan(actividadesQueNoVan([{ ...sinDia, entra_al_precio: false, mostrar_en_sugeridos: false }, { ...conDia, entra_al_precio: false, mostrar_en_sugeridos: false }])))
+      .toBe('2 actividades no van: Snorkel y Cayo Cangrejo.')
+    expect(notaDeActividadesFuera([opcional, { ...sinDia, entra_al_precio: false, mostrar_en_sugeridos: false }])).toBe('1 opcional, no suma · 1 no va')
+  })
+})
+
+describe('punto 6 (D4) · el título del bloque de una actividad', () => {
+  const lectura1 = lectura({ nombre: 'Snorkel en Crab Cay' })
+  const bloque = (dia: number | null) => ({
+    grupo: 'actividad 4: Actividad en Providencia', etiqueta: 'Actividad 4 · Actividad en Providencia', tipo: 'actividad' as const,
+    lineas: [{ id: 'x', nombre: 'SNORKEL EN CRAB CAY', grupo: 'actividad 4: Actividad en Providencia', tarifa_pax: { casillas: { grupo_completo: lectura1 } }, dia_relativo: dia }],
+  })
+  it('«Día 3 · Snorkel en Crab Cay», con la ranura de subtítulo; sin día, el nombre solo', () => {
+    expect(tituloDeBloque(bloque(3), null)).toEqual({ titulo: 'Día 3 · Snorkel en Crab Cay', subtitulo: 'Actividad 4 · Actividad en Providencia' })
+    expect(tituloDeBloque(bloque(null), null).titulo).toBe('Snorkel en Crab Cay')
+  })
+})
+
+describe('punto 13 · el recálculo solo escribe lo que cambia', () => {
+  const linea = { costoUnitario: 180_000, costoLinea: 180_000, precioLinea: 211_764 }
+  it('una línea que ya dice eso no se escribe', () => {
+    expect(patchDeRecalculo({ cantidad: 1, subtotal: 180_000, precio_venta: 211_764, precio_manual: false }, linea, false)).toBeNull()
+    expect(patchDeRecalculo({ cantidad: 1, subtotal: '180000.00', precio_venta: '211764', precio_manual: false }, linea, false)).toBeNull()
+  })
+  it('una que cambió, sí, con lo de siempre', () => {
+    expect(patchDeRecalculo({ cantidad: 1, subtotal: 180_000, precio_venta: 211_765, precio_manual: false }, linea, false))
+      .toEqual({ subtotal: 180_000, precio_venta: 211_764 })
+    expect(patchDeRecalculo({ cantidad: 1, subtotal: null, precio_venta: 0, precio_manual: true }, { costoUnitario: 0, costoLinea: 0, precioLinea: 0 }, false))
+      .toEqual({ subtotal: 0 })
+    expect(patchDeRecalculo({ cantidad: 1, subtotal: 180_000, precio_venta: 211_764, precio_manual: false }, linea, true))
+      .toEqual({ subtotal: 180_000, precio_venta: 211_764, precio_manual: true })
+  })
+})
+
+describe('punto 15 · el aviso del pendiente se va cuando se resolvió', () => {
+  it('con el pantallazo 2 leído o el costo confirmado', () => {
+    const l = lectura({})
+    expect(pendienteResuelto({ casillas: { grupo_completo: l } })).toBe(false)
+    expect(pendienteResuelto({ casillas: { grupo_completo: l, solo_adultos: l } })).toBe(true)
+    expect(pendienteResuelto({ casillas: { grupo_completo: l }, confirmada: { composicion: { adultos: 2, ninos: 0, infantes: 1 }, costos: [], costoTotalCOP: 1 } })).toBe(true)
+  })
+})
+
+describe('punto 17 (D2) · reingresar un traslado del mismo trayecto pregunta si reemplaza', () => {
+  const TRASLADO = ranuraPorSlug('traslado_detalle')!
+  const lee = (neto: number, idaYRegreso: boolean) => {
+    const r = lecturaManual({
+      ranura: TRASLADO,
+      entrada: { tipo: 'traslado', datos: { ruta: 'Aeropuerto Providencia - hotel', fecha: '2026-11-09', adultos: 2, ninos: 0, infantes: 1, cobro: 'por_persona', precio: 'por_trayecto', neto, netoNino: null, netoInfante: 0, idaYRegreso, fuente: 'Dolphins' } },
+      leidaEn: '2026-10-05T12:00:00Z',
+      hoy: '2026-10-05',
+    })
+    if (!r.ok) throw new Error('lectura')
+    return r.lectura
+  }
+  const revisar = (nueva: LecturaCasilla, vieja: LecturaCasilla) => {
+    const lineas = [{ id: 'it1', nombre: 'AEROPUERTO PROVIDENCIA - HOTEL', grupo: 'traslado: Traslado en Providencia', tarifa_pax: { casillas: { grupo_completo: vieja } } }]
+    return revisarBorrador({
+      capId: 'c', borrador: { tipo: 'traslado', lectura: nueva, lecturaJson: '', firma: '', pistas: { lugar: null, origen: null, destino: null } },
+      lineas, comparables: lineas, composicion: { adultos: 2, ninos: 0, infantes: 1 },
+      ubicaciones: { it1: { bloque: 'Traslado en Providencia', opcion: 1 } }, comparar: true,
+    })
+  }
+  it('otro precio: pregunta con «Reemplazar»', () => {
+    expect(revisar(lee(50_000, true), lee(45_000, true)).pregunta).toMatchObject({ fase: 'otro_precio', conItemId: 'it1' })
+  })
+  it('de «solo ida» a «ida y regreso» es el mismo trayecto', () => {
+    expect(revisar(lee(45_000, true), lee(45_000, false)).pregunta).toMatchObject({ fase: 'otro_precio', conItemId: 'it1' })
   })
 })
