@@ -96,6 +96,11 @@ export async function middleware(request: NextRequest) {
   // workspace (ver `app/api/errores-cliente/route.ts`).
   if (pathname === '/api/errores-cliente') return NextResponse.next()
 
+  // La medicion del navegador (`[rum]`, ver `app/api/rum/route.ts`). Mismo caso: el beacon
+  // sale al ocultar o cerrar la pestaña, a veces con la sesion vencida, y un 307 a /login lo
+  // perderia. Tampoco tiene por que gastar un viaje a Auth por beacon. No lee sesion.
+  if (pathname === '/api/rum') return NextResponse.next()
+
   // La version del deployment (`VersionWatcher`, cada 5 min por pestaña abierta). Publica a
   // proposito y sin datos (ver `app/api/version/route.ts`). Pasaba por `updateSession` y por
   // la lectura del perfil del guard: dos viajes (Auth + `/profiles`) por pestaña cada 5 min

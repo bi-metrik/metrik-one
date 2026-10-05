@@ -18,6 +18,20 @@ export { MAX_BYTES_REPORTE, MAX_STACK }
 
 const recortar = (max: number) => z.string().transform((s) => s.slice(0, max))
 
+/**
+ * `navigator.connection` (solo Chrome/Android). Un valor raro NO tumba el reporte: el
+ * error es lo que importa, la red es contexto. Por eso `.catch(undefined)`.
+ */
+export const esquemaRed = z
+  .object({
+    tipo: recortar(10).optional(),
+    rtt: z.number().min(0).max(600_000).optional(),
+    bajadaMbps: z.number().min(0).max(100_000).optional(),
+    ahorroDatos: z.boolean().optional(),
+  })
+  .optional()
+  .catch(undefined)
+
 const esquemaReporte = z.object({
   // Sin `message` no hay nada que diagnosticar: es el filtro minimo contra ruido.
   message: z.string().trim().min(1).transform((s) => s.slice(0, 1000)),
@@ -47,6 +61,19 @@ const esquemaReporte = z.object({
   recuperado: z.boolean().optional(),
   /** `navigator.onLine` al decidir. */
   enLinea: z.boolean().optional(),
+  // Desde 2026-10-05: cola de reenvio y red del navegador. Todo opcional (bundles viejos).
+  /**
+   * Id del reporte. Un reporte puede llegar dos veces (la cola lo reenvia si no vio la
+   * respuesta): al contar en los logs, contar por `id` distinto.
+   */
+  id: z.string().regex(/^[A-Za-z0-9-]{1,40}$/).optional(),
+  /** Cuantas veces salio desde la cola (ausente = primer envio). */
+  reenvio: z.number().int().min(1).max(20).optional(),
+  /** Segundos entre que se armo el reporte y este reenvio. */
+  edadS: z.number().int().min(0).max(7 * 24 * 3600).optional(),
+  /** Segundos desde la carga de la pagina hasta el error. */
+  segDesdeCarga: z.number().min(0).max(10_000_000).optional(),
+  red: esquemaRed,
 })
 
 export type ReporteErrorCliente = z.infer<typeof esquemaReporte>

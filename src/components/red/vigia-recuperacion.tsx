@@ -1,7 +1,7 @@
 'use client'
 
 import { useEffect } from 'react'
-import { reportarRecuperacion } from '@/lib/errores-cliente/enviar'
+import { iniciarColaDeReenvio, reportarRecuperacion } from '@/lib/errores-cliente/enviar'
 import {
   ESPERA_CONFIRMAR_RECUPERACION_MS,
   erroresDeRuta,
@@ -18,8 +18,13 @@ import {
  * que sigue a `global-error`), mira a los `ESPERA_CONFIRMAR_RECUPERACION_MS`: si la ruta no
  * volvio a fallar en esta carga, manda el beacon `recuperado: true` con el intento en que
  * se recupero. No pinta nada; sin anotacion no hace nada.
+ *
+ * Tambien arranca la cola de reenvio de `[error-cliente]` (`errores-cliente/cola.ts`): lo
+ * que una carga anterior no logro mandar sale unos segundos despues y al volver `online`.
  */
 export default function VigiaRecuperacion() {
+  useEffect(() => iniciarColaDeReenvio(), [])
+
   useEffect(() => {
     const pathname = window.location.pathname
     const t = setTimeout(() => {

@@ -50,6 +50,7 @@ vi.mock('@/lib/errores-cliente/enviar', () => ({
   reportarRecuperacion: (p: { accion: string; intento: number }) => {
     recuperados.push({ accion: p.accion, intento: p.intento })
   },
+  iniciarColaDeReenvio: () => () => {},
 }))
 
 const refresh = vi.fn(() => {
