@@ -129,6 +129,26 @@ export function soloLlave(texto: string | null | undefined): Llave | null {
   return resto.every(w => CON_LA_LLAVE.has(w)) ? l : null;
 }
 
+/** Verbos de anotar que pueden ir con la llave: «anótale», «apunta», «guárdale», «regístrale», «agrégale», «ponle». */
+const ANOTAR = /^(?:anot|apunt|guard|registr|agreg|pon|coloc|carg)[a-z]*$/;
+const TRATAMIENTO: ReadonlySet<string> = new Set(['don', 'dona', 'senor', 'senora', 'sr', 'sra', 'doctor', 'doctora', 'dr', 'dra']);
+const CON_LA_LLAVE_Y_EL_CLIENTE: ReadonlySet<string> = new Set(['a', 'al', 'para', 'que', 'como', 'tambien', 'y', 'datos', 'dato', 'contacto']);
+
+/**
+ * Octavo control de Vera (hallazgo 7): en la caja de un viaje nuevo, un escrito cuya única información es la llave,
+ * con un verbo de anotar y el nombre del cliente de esa caja (con o sin tratamiento): «anótale a don Gerardo el cel
+ * 300 111 2222». Es la llave, como `soloLlave`. Con cualquier otra palabra («el de la esposa es …») no lo es.
+ */
+export function soloLlaveDelCliente(texto: string | null | undefined, cliente: string | null | undefined): Llave | null {
+  const t = String(texto ?? '').trim();
+  const l = llavesDelTexto(t);
+  if (!l || !cliente) return null;
+  const delCliente = new Set(palabrasDelNombre(cliente));
+  const sin = t.replace(RE_CORREO, ' ').replace(/@[A-Za-z0-9._]{3,30}/g, ' ').replace(RE_CELULAR, ' ');
+  const resto = normalizarNombre(sin).split(' ').filter(Boolean);
+  return resto.every(w => CON_LA_LLAVE.has(w) || TRATAMIENTO.has(w) || delCliente.has(w) || ANOTAR.test(w) || CON_LA_LLAVE_Y_EL_CLIENTE.has(w)) ? l : null;
+}
+
 /**
  * El nombre y la llave de «Ana Gómez 300 555 1234», «Ana Gómez, ana@x.co», «@laurapc»: el nombre sin la llave
  * (ni las palabras que la anuncian: «cel», «correo»), y la llave. Sin llave, el nombre tal cual.
@@ -164,6 +184,34 @@ export function textoLlave(l: Llave | null | undefined): string {
   }
   if (l.correo) return `correo ${l.correo}`;
   return `usuario @${l.usuario}`;
+}
+
+/**
+ * Octavo control de Vera (hallazgo 9): lo que pasa con la llave que dio el comercial cuando el cliente ya existe. Lo
+ * que la ficha no tiene se le agrega al cargar (`completarLlave`, sin pisar nada); un celular distinto del de la
+ * ficha no la reemplaza. Las dos cosas se dicen. `null`: nada que decir (la llave es la de la ficha, o no hay).
+ */
+export function notaDeLaLlave(f: FichaCliente, l: Llave | null | undefined): { agrega: string | null; distinto: string | null } | null {
+  if (!tieneLlave(l)) return null;
+  const agrega: string[] = [];
+  let distinto: string | null = null;
+  if (l!.celular) {
+    const c4 = l!.celular.slice(-4);
+    if (!f.cel4) agrega.push(textoLlave({ celular: l!.celular }));
+    else if (f.cel4 !== c4) distinto = `su ficha tiene otro celular (…${f.cel4}); el que me diste (…${c4}) no lo cambio`;
+  }
+  if (l!.correo && !f.correo) agrega.push(textoLlave({ correo: l!.correo }));
+  if (l!.usuario && !f.usuario) agrega.push(textoLlave({ usuario: l!.usuario }));
+  if (agrega.length === 0 && !distinto) return null;
+  return { agrega: agrega.length ? `le agrego a su ficha el ${agrega.join(' y el ')}` : null, distinto };
+}
+
+/** La nota de la llave como una frase («Le agrego a su ficha el cel. 300 111 2222.»). */
+export function fraseDeLaLlave(f: FichaCliente, l: Llave | null | undefined): string | null {
+  const n = notaDeLaLlave(f, l);
+  if (!n) return null;
+  const s = [n.agrega, n.distinto].filter(Boolean).join('; ');
+  return `${s.charAt(0).toUpperCase()}${s.slice(1)}.`;
 }
 
 /** «celular», «correo» o «usuario»: qué llave es. */
@@ -317,8 +365,10 @@ const SIGUE = 'Reenvíame lo que te pidió y al final te muestro el resumen.';
 export function textoDelCliente(r: ResolucionCliente, opts: { conContenido?: boolean } = {}): string {
   const sigue = opts.conContenido ? 'Ya lo anoté; reenvíame lo demás y al final te muestro el resumen.' : SIGUE;
   switch (r.tipo) {
-    case 'existente':
-      return `Va como viaje nuevo de ${nombrePropio(r.ficha.nombre)}, el que ya tenemos (${datoDeLaFicha(r.ficha)}, ${viajesDeLaFicha(r.ficha)}).\n${sigue}`;
+    case 'existente': {
+      const nota = fraseDeLaLlave(r.ficha, r.llave);
+      return `Va como viaje nuevo de ${nombrePropio(r.ficha.nombre)}, el que ya tenemos (${datoDeLaFicha(r.ficha)}, ${viajesDeLaFicha(r.ficha)}).${nota ? `\n${nota}` : ''}\n${sigue}`;
+    }
     case 'nuevo':
       return `Va como viaje nuevo de ${String(r.nombre).trim()}, cliente nuevo (${textoLlave(r.llave)}). Lo creo cuando me digas que sí en el resumen.\n${sigue}`;
     case 'pedir_llave':
@@ -370,7 +420,16 @@ const OTRA_PERSONA = /\b(?:otra\s+persona|es\s+otr[oa]|otr[oa]\s+client[ea]|ning
 /** Lo que acompaña una elección sin decir nada: «el de …», «es la que …», «la del cel …». */
 const RELLENO_ELECCION: ReadonlySet<string> = new Set(['el', 'la', 'los', 'las', 'de', 'del', 'que', 'es', 'era', 'ese', 'esa', 'este', 'esta', 'con', 'cel',
   'celular', 'numero', 'viajo', 'viaja', 'va', 'a', 'al', 'en', 'para', 'si', 'uno', 'una', 'mismo', 'misma', 'cliente', 'clienta', 'por', 'favor', 'tiene',
-  'correo', 'termina', 'terminado', 'viaje', 'cotizacion', 'fue']);
+  'correo', 'termina', 'terminado', 'viaje', 'cotizacion', 'fue',
+  // Octavo control de Vera (hallazgo 5): el relleno de una respuesta más larga («me refiero al que tiene el correo»).
+  'me', 'refiero', 'quise', 'decir', 'creo', 'seria', 'pues', 'entonces', 'ya', 'ok', 'y', 'su', 'sus', 'tenia', 'cual', 'quien', 'ultimo', 'ultima',
+  'vez', 'antes', 'anterior', 'viajo', 'ese', 'esa', 'mismo', 'misma', 'persona', 'senor', 'senora', 'don', 'dona', 'lo', 'le', 'ahi', 'aparece', 'sale',
+  'dice', 'dijiste', 'pusiste', 'mostraste', 'lista', 'opcion']);
+/** El dato que el bot muestra de cada ficha, nombrado con relleno («el del correo», «la que no tiene celular»). */
+const DICE_CORREO = /\b(?:correo|mail|email|e mail|gmail|hotmail|outlook)\b/;
+const DICE_USUARIO = /\b(?:usuario|instagram|insta|arroba)\b/;
+const DICE_SIN_DATOS = /\b(?:sin|no\s+tiene|no\s+tenia)\s+(?:celular|cel|numero|telefono|datos|nada)\b/;
+const DICE_CELULAR = /\b(?:celular|cel|numero|telefono|whatsapp)\b/;
 const ORDINAL: Readonly<Record<string, number>> = { primero: 1, primera: 1, primer: 1, segundo: 2, segunda: 2, tercero: 3, tercera: 3, tercer: 3, cuarto: 4, cuarta: 4, quinto: 5, quinta: 5 };
 const SI_ES: ReadonlySet<string> = new Set(['si', 'sii', 'sip', 'claro', 'exacto', 'correcto', 'dale', 'es', 'ella', 'el', 'esa', 'ese', 'misma', 'mismo', 'la', 'persona', 'asi', 'eso']);
 
@@ -388,7 +447,9 @@ export function leerEleccionCliente(texto: string, opciones: ReadonlyArray<Ficha
   const ws = t.split(' ').filter(Boolean);
   // Número u ordinal: «2», «el 2», «la segunda», «opción 2».
   const num = /^(?:(?:el|la|opcion|numero)\s+)?(\d)$/.exec(t)?.[1];
-  const k = num ? Number(num) : ws.length <= 3 ? ws.map(w => ORDINAL[w]).find(x => !!x) ?? null : null;
+  // El ordinal, también dentro de una frase («me refiero al segundo que me mostraste»), si es el único.
+  const ordinales = [...new Set(ws.map(w => ORDINAL[w]).filter(x => !!x))];
+  const k = num ? Number(num) : ws.length <= 8 && ordinales.length === 1 && !/\d/.test(t) ? ordinales[0] : null;
   if (k) return opciones[k - 1] ? { tipo: 'ficha', ficha: opciones[k - 1] } : null;
   // Los 4 últimos dígitos.
   const dig = /\b(\d{4})\b/.exec(t)?.[1];
@@ -398,6 +459,14 @@ export function leerEleccionCliente(texto: string, opciones: ReadonlyArray<Ficha
   }
   // «sí», «es ella», «esa misma» con una sola opción.
   if (opciones.length === 1 && ws.every(w => SI_ES.has(w))) return { tipo: 'ficha', ficha: opciones[0] };
+  // El dato que el bot mostró y que la distingue («el del correo», «el que no tiene celular»), si lo tiene una sola.
+  const porDato = (cumple: (f: FichaCliente) => boolean) => { const f = opciones.filter(cumple); return f.length === 1 ? { tipo: 'ficha' as const, ficha: f[0] } : null; };
+  const dato = DICE_SIN_DATOS.test(t) ? porDato(f => !f.cel4 && !f.correo && !f.usuario)
+    : DICE_CORREO.test(t) ? porDato(f => !f.cel4 && f.correo)
+    : DICE_USUARIO.test(t) ? porDato(f => !f.cel4 && !f.correo && !!f.usuario)
+    : DICE_CELULAR.test(t) && !/\bno\b/.test(t) ? porDato(f => !!f.cel4)
+    : null;
+  if (dato && ws.filter(w => !RELLENO_ELECCION.has(w)).every(w => /^(?:correo|mail|email|e|gmail|hotmail|outlook|usuario|instagram|insta|arroba|sin|no|ni|tiene|tenia|celular|cel|numero|telefono|whatsapp|datos|nada|ficha|contacto)$/.test(w))) return dato;
   // «el de Miami», «Paola Andrea»: las palabras que quedan están en lo de UN solo contacto.
   const resto = ws.filter(w => !RELLENO_ELECCION.has(w));
   if (resto.length === 0) return null;

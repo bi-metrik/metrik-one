@@ -2,7 +2,7 @@
 // corrida de QA con Gemini real (fuera del CI): la decisión del validador en la forma del `esperado`
 // de la simulación, y cuándo cumple. Solo para pruebas: no se despliega con ninguna función.
 import { atajoExacto, leerConfirmacion, norm, respuestaExacta, type Decision, type PreguntaUnificada } from '../wa-interprete-reglas.ts';
-import { esNombreNuevo, resolverEncabezado } from '../wa-viajes-reglas.ts';
+import { candidatosDelEncabezado, esNombreNuevo, resolverEncabezado, soloNombraAlCliente } from '../wa-viajes-reglas.ts';
 import type { RespuestaConfirmarNuevo, ResolucionEncabezado, ViajeAbierto } from '../wa-viajes-reglas.ts';
 import { leerEsLaMisma, separarNombreYLlave, soloLlave } from '../wa-cliente-reglas.ts';
 
@@ -42,6 +42,11 @@ export function deHoy(
       return s ? { accion: 'responder', opcion: s } : { accion: 'pedir_aclaracion' };
     }
     return null;
+  }
+  // En la caja de un viaje NUEVO de X, el nombre de X es contenido de esa caja (octavo control de Vera, bloqueante 2).
+  if (atajo === 'encabezado_exacto' && enc && !pend && cliente) {
+    const porNombre = enc.tipo === 'viaje' ? (enc.por === 'nombre' ? [enc.viaje] : []) : candidatosDelEncabezado(enc);
+    if (soloNombraAlCliente(texto, porNombre, cliente)) return { accion: 'contenido' };
   }
   if (atajo === 'encabezado_exacto' && enc && !pend) return resumirEncabezadoDeHoy(enc, cliente);
   return null;

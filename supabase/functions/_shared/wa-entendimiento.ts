@@ -69,6 +69,7 @@ import {
   aplicarCambios,
   armarPlan,
   esNombreNuevo,
+  sinPresentacion,
   interpretarConfirmacionNuevo,
   resolverEncabezado,
   textoConfirmarNuevo,
@@ -1080,6 +1081,11 @@ export interface EnLaTanda {
   acuse: string | null;
   /** Lo que esperaba la caja abierta antes de este escrito. */
   antes: PendienteDeLaCaja | null;
+  /**
+   * Es contenido de la caja abierta aunque su texto resuelva un viaje: el nombre del cliente de la caja de un viaje
+   * NUEVO (octavo control de Vera, bloqueante 2). No es un encabezado y no se contesta «📌».
+   */
+  contenido?: boolean;
 }
 
 /**
@@ -1126,7 +1132,7 @@ export async function simularEnLaTanda(
     }
     return { respuesta: true, abre: false, acuse: acuseDeLaCaja(ultimo, directorio, texto) ?? (despuesP ? textoDeLoQueFalta(despuesP) : null), antes: pendAntes };
   }
-  return { respuesta: false, abre: false, acuse: null, antes: pendAntes };
+  return { respuesta: false, abre: false, acuse: null, antes: pendAntes, contenido: !!ultimo?.mensajes.includes(este.n) };
 }
 
 /** Lo que el bot dice de una caja: el viaje (📌), la lista, o el cliente del viaje nuevo (§3.3). */
@@ -1865,9 +1871,10 @@ async function resolverRespuesta(supabase: SupabaseClient, ent: Fila): Promise<v
   }
   // Se le pidió el nombre y escribió solo el nombre («Valeria Prueba5»), sin NUEVO.
   let nuevoNombre: string | null = r.tipo === 'nuevo' ? r.nombre : null;
+  // Sin la fórmula que lo presenta («la clienta es …», «para …»: octavo control de Vera, hallazgo 3).
   if (r.tipo === 'no_entendida' && opciones.length === 0 && !nombreMostrado
     && !/(^|\s)\d/.test(respuestaTexto.trim()) && esNombreNuevo(respuestaTexto.replace(/\d/g, ''))) {
-    nuevoNombre = respuestaTexto.trim();
+    nuevoNombre = sinPresentacion(respuestaTexto.trim());
   }
   if (r.tipo === 'no_entendida' && !nuevoNombre) {
     await repreguntar();

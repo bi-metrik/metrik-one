@@ -390,7 +390,7 @@ async function leerContexto(
     const pt = await pendienteDeLaTanda(supabase, ws, phone, configB.horasCajaActiva);
     if (pt) {
       tandaVista = pt.tipo === 'eleccion' ? { tipo: 'eleccion', texto: pt.texto, candidatos: pt.candidatos }
-        : pt.tipo === 'cliente' ? { tipo: 'cliente', texto: textoDeLoQueFalta(pt) } : { tipo: 'nombre' };
+        : pt.tipo === 'cliente' ? { tipo: 'cliente', texto: textoDeLoQueFalta(pt), ...(pt.resolucion.tipo === 'llave_de_otro' ? { esLaMisma: true } : {}) } : { tipo: 'nombre' };
     }
     tanda = await tandaAbiertaDelRemitente(supabase, ws, phone, configB.horasCajaActiva);
   } else {
@@ -481,7 +481,7 @@ async function despachar(b: Base, d: Extract<Decision, { tipo: 'ejecutar' }>, le
         await guardarInterpretacion(b, paso.interpretacion);
         // El acuse de un viaje nuevo es el del código de hoy, con el directorio (quién es el cliente, o qué falta).
         const i = paso.interpretacion;
-        const deViajeNuevo = (i.accion === 'abrir_viaje' && !i.viaje_id) || i.accion === 'nombre';
+        const deViajeNuevo = (i.accion === 'abrir_viaje' && !i.viaje_id) || i.accion === 'nombre' || (i.accion === 'responder' && !i.viaje_id && !!i.nuevo) || i.accion === 'confirmar';
         const delCliente = deViajeNuevo && lec.bandeja ? await acuseDelClienteDeLaTanda(supabase, ws, message.phone, lec.bandeja.horasCajaActiva) : null;
         await decirAlUsuario(delCliente ?? paso.aviso);
       }
