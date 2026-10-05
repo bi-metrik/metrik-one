@@ -1943,8 +1943,7 @@ export async function procesarEntendimientos(
    */
   de?: { workspaceId: string; phone: string },
 ): Promise<{ entendidas: number; respuestas: number }> {
-  // deno-lint-ignore no-explicit-any
-  const delRemitente = <Q extends { eq: (c: string, v: string) => any }>(q: Q): Q => (de ? q.eq('workspace_id', de.workspaceId).eq('remitente_phone', de.phone) : q);
+  const delRemitente = <Q extends { eq: (c: string, v: string) => Q }>(q: Q): Q => (de ? q.eq('workspace_id', de.workspaceId).eq('remitente_phone', de.phone) : q);
   // Un error de esta misma pasada se reintenta en la siguiente (un minuto después), no enseguida: con
   // el modelo caído, los tres intentos se gastaban en dos pasadas (prueba en vivo v2, 403 de cobro).
   const inicio = new Date().toISOString();
