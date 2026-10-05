@@ -15,6 +15,9 @@ import { evaluarCruces, leerCruces, slugsDeCruces } from './cruces'
 import { leerConfigDatosClave, resolverDatosClave, slugsDeDatosClave } from './datos-clave'
 import type { ContextoFuentes } from './fuentes-negocio'
 
+/** La huella (llave de la excepción con motivo) se prueba en `cruces-avance.test.ts`. */
+const sinHuella = <T extends { huella?: string }>(cs: T[]) => cs.map(({ huella: _h, ...resto }) => resto)
+
 const SQL = readFileSync(
   join(process.cwd(), 'supabase/migrations/20260924190000_soena_datos_clave_y_titularidad.sql'),
   'utf8',
@@ -145,7 +148,7 @@ describe('cruces de SOENA contra casos reales', () => {
 
   it('V0207 con los compradores leídos: la contradicción sale en rojo, y en Cita no frena', async () => {
     const r = await evaluarCruces(CRUCES, ctx(V0207_CON_COMPRADORES), CITA)
-    expect(r).toEqual([{
+    expect(sinHuella(r)).toEqual([{
       slug: 'factura_compradores_vs_titularidad',
       mensaje: 'La factura trae 2 compradores y la titularidad dice «Un solo solicitante».',
       bloquea: false,
@@ -159,7 +162,7 @@ describe('cruces de SOENA contra casos reales', () => {
 
   it('V0151: el certificado a una persona en una copropiedad frena en Cita', async () => {
     const r = await evaluarCruces(CRUCES, ctx(V0151), CITA)
-    expect(r).toEqual([{
+    expect(sinHuella(r)).toEqual([{
       slug: 'certificado_personas_vs_titularidad',
       mensaje: 'El certificado UPME trae 1 solicitante y la titularidad dice «Copropiedad (dos personas naturales)».',
       bloquea: true,
@@ -180,7 +183,7 @@ describe('cruces de SOENA contra casos reales', () => {
       ...V0142,
       rut: { numero_identificacion: '99999999' },
     }), DOCUMENTACION)
-    expect(r).toEqual([{
+    expect(sinHuella(r)).toEqual([{
       slug: 'rut_entre_compradores',
       mensaje: 'El documento del RUT (99999999) no está entre los compradores de la factura: SANTIAGO BENAVIDES MORENO (1022424269).',
       bloquea: true,

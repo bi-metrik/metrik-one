@@ -5,7 +5,7 @@ import { useTransitionTolerante } from '@/hooks/use-transition-tolerante'
 import {
   MessageSquare, Send, Trash2, Link as LinkIcon, AtSign,
   ArrowRight, X, CheckCircle2, XCircle, Shield, Banknote,
-  CheckSquare, FolderOpen, Filter, Users,
+  CheckSquare, FolderOpen, Filter, Users, AlertTriangle,
 } from 'lucide-react'
 import { toast } from 'sonner'
 import { getActivityLog, addComment, deleteActivity, type AreaMencionable } from '@/app/(app)/activity-actions'
@@ -655,6 +655,24 @@ function ChangeEntry({ entry }: { entry: ActivityEntry }) {
           <span>{checked ? 'completo' : 'desmarco'}</span>
           <span className="font-medium text-foreground">{entry.contenido ?? 'item'}</span>
           <span className="text-[10px]">{timestamp}</span>
+        </div>
+      </div>
+    )
+  }
+
+  // Cruce avanzado con motivo: la diferencia NO se corrigio, alguien autorizado siguio.
+  if (campo === 'cruce_avanzado') {
+    return (
+      <div className="flex items-start gap-2 rounded-lg px-3 py-2 text-[11px] text-muted-foreground">
+        <AlertTriangle className="mt-0.5 h-3.5 w-3.5 shrink-0 text-amber-500" />
+        <div className="min-w-0 space-y-0.5">
+          <div className="flex flex-wrap items-center gap-1">
+            <Autor nombre={autorName} />
+            <span>avanzo sin corregir el cruce</span>
+            <span className="text-[10px]">{timestamp}</span>
+          </div>
+          {entry.valor_anterior && <p className="text-foreground/80">{entry.valor_anterior}</p>}
+          {entry.contenido && <p className="italic">Motivo: {entry.contenido}</p>}
         </div>
       </div>
     )

@@ -26,6 +26,10 @@
  * - `bloquea_en_etapas` dice en qué etapas (por `orden`) el cruce FRENA el avance. En
  *   las demás solo avisa. Frenar siempre se puede omitir con el permiso de omitir gates
  *   y el motivo escrito: un control nuevo sin salida deja casos varados.
+ * - Un cruce que frena también se puede AVANZAR, solo él, con motivo: quien el workspace
+ *   declare en `config_extra.avanzar_cruces.staff_ids` deja una excepción para ESE cruce
+ *   en ESE negocio con ESE valor de los datos (`huella`). Si los datos cambian y el cruce
+ *   vuelve a fallar, vuelve a frenar. Ver `cruces-avance.ts`.
  *
  * Configuración: `lineas_negocio.config_extra.cruces` (lista). Sin la clave, nada cambia.
  */
@@ -79,6 +83,11 @@ interface CruceBase {
   condition?: Record<string, unknown>
   /** Etapas (por `orden`) en las que el cruce frena el avance. Vacío = solo avisa. */
   bloquea_en_etapas?: number[]
+  /**
+   * Lo que cuesta avanzar sin corregir el dato. Se muestra en la confirmación de
+   * «Avanzar de todas formas» («la UPME puede emitir el certificado incompleto…»).
+   */
+  advertencia?: string
 }
 
 export interface CruceCantidad extends CruceBase {
@@ -147,6 +156,16 @@ export interface Contradiccion {
   mensaje: string
   /** ¿Frena el avance en la etapa en la que está el negocio? */
   bloquea: boolean
+  /**
+   * Los valores que se contradicen, en una forma estable. Es la llave de la excepción
+   * (`cruces-avance.ts`): un avance vale mientras la huella sea la misma. Solo la traen
+   * los cruces de línea; un voto en disputa no se avanza por aquí.
+   */
+  huella?: string
+  /** El texto de costo del cruce, para la confirmación (ver `CruceBase.advertencia`). */
+  advertencia?: string
+  /** Alguien autorizado avanzó con este cruce, con estos mismos datos. */
+  avanzado?: { autor: string | null; motivo: string; fecha: string }
 }
 
 function esLado(v: unknown): v is LadoCantidad {
@@ -322,6 +341,16 @@ function redactar(plantilla: string, valores: Record<string, string>): string {
 }
 
 /**
+ * La huella de los valores que se contradicen y el texto de costo del cruce. La huella es
+ * texto plano con los datos del caso: no sale del servidor sin pasar por un hash
+ * (`cruces-avance.ts` → `hashHuella`).
+ */
+function extra(c: Cruce, valores: Array<string | number>): Pick<Contradiccion, 'huella' | 'advertencia'> {
+  const adv = typeof c.advertencia === 'string' && c.advertencia.trim() ? c.advertencia.trim() : undefined
+  return { huella: JSON.stringify(valores), ...(adv ? { advertencia: adv } : {}) }
+}
+
+/**
  * Las contradicciones vigentes de un negocio. Una lista vacía no dice que todo esté
  * bien: dice que ningún par de datos presentes se contradice.
  */
@@ -341,6 +370,7 @@ export async function evaluarCruces(
       out.push({
         slug: c.slug,
         bloquea,
+        ...extra(c, ['cantidad', a.n, a.valor, b.n, b.valor]),
         mensaje: redactar(c.mensaje, {
           a: conUnidad(a.n, c.a.unidad),
           b: conUnidad(b.n, c.b.unidad),
@@ -357,7 +387,12 @@ export async function evaluarCruces(
         if ((await faltaRequerido(f, ctx)) === true) faltantes.push(f.label)
       }
       if (faltantes.length === 0) continue
-      out.push({ slug: c.slug, bloquea, mensaje: redactar(c.mensaje, { faltantes: enumerar(faltantes) }) })
+      out.push({
+        slug: c.slug,
+        bloquea,
+        ...extra(c, ['requeridos', ...faltantes]),
+        mensaje: redactar(c.mensaje, { faltantes: enumerar(faltantes) }),
+      })
       continue
     }
 
@@ -375,6 +410,7 @@ export async function evaluarCruces(
       out.push({
         slug: c.slug,
         bloquea,
+        ...extra(c, ['coincide', String(a), ...[...new Set(bs.map(String))].sort()]),
         mensaje: redactar(c.mensaje, { a_valor: String(a), b_valor: [...new Set(bs.map(String))].join(' / ') }),
       })
       continue
@@ -392,6 +428,11 @@ export async function evaluarCruces(
     out.push({
       slug: c.slug,
       bloquea,
+      ...extra(c, [
+        'documento_en_lista',
+        String(doc).replace(/\D/g, ''),
+        ...personas.map(p => `${p.nombre ?? ''}|${p.documento ?? ''}`).sort(),
+      ]),
       mensaje: redactar(c.mensaje, {
         documento: String(doc).replace(/\D/g, ''),
         lista: personas.map(p => (p.documento ? `${p.nombre} (${p.documento})` : p.nombre)).join('; '),
