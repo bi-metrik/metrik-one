@@ -49,6 +49,8 @@ import {
   SenalDeEnlace,
 } from '@/components/navegacion-pendiente'
 import type { PlatformAdminState } from '@/lib/actions/platform-admin'
+import type { OpcionesImpersonacion } from '@/lib/actions/impersonation'
+import type { ActiveTimer } from './timer-actions'
 import { rutaPermitida, vitrinasDelEspacio } from '@/lib/modulos/gate'
 
 interface BrandingProps {
@@ -123,6 +125,12 @@ interface AppShellProps {
    * El tono pinta el punto de estado; `null` = sin punto.
    */
   suscripcion?: { tono: 'verde' | 'ambar' | 'rojo' | null } | null
+  /**
+   * Lecturas que antes pedía el navegador al montar con una server action, ahora resueltas
+   * en el layout: las opciones de «Ver como» (solo platform_admin) y el timer corriendo.
+   */
+  impersonacion?: OpcionesImpersonacion | null
+  timerActivo?: ActiveTimer | null
 }
 
 const COLOR_PUNTO = { verde: '#10B981', ambar: '#D97706', rojo: '#DC2626' } as const
@@ -417,6 +425,8 @@ export default function AppShell({
   notificationBell,
   platformAdminState,
   suscripcion = null,
+  impersonacion = null,
+  timerActivo = null,
 }: AppShellProps) {
   const pathname = usePathname()
   // Los Link del menu NO precargan al entrar en pantalla (prefetch={false}):
@@ -619,7 +629,7 @@ export default function AppShell({
     <NavegacionPendienteProvider>
     <div className="flex h-dvh flex-col bg-background" style={brandingStyle}>
       <PlatformAdminBar state={platformAdminState ?? null} />
-      <ImpersonationBar />
+      <ImpersonationBar opciones={impersonacion} />
       <div className="flex flex-1 min-h-0 overflow-hidden">
       {/* ── Desktop Sidebar ── */}
       <aside
@@ -1339,7 +1349,7 @@ export default function AppShell({
 
       {/* FAB — solo en workspaces con modulo business activo (no aplica en compliance-only como ALMA).
           En modo vitrina se oculta: el shell es comercial, no operativo. */}
-      {mod.business && !modoVitrina && <FAB role={role} registrarPagoEnabled={!!mod.fab_registrar_pago} modules={mod as Record<string, boolean | undefined>} />}
+      {mod.business && !modoVitrina && <FAB role={role} registrarPagoEnabled={!!mod.fab_registrar_pago} modules={mod as Record<string, boolean | undefined>} timerActivo={timerActivo} />}
       </div>
     </div>
     </NavegacionPendienteProvider>

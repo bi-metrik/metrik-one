@@ -17,7 +17,6 @@ import {
 } from 'lucide-react'
 import {
   generarFormulario,
-  resolverFormularioParaEdicion,
   guardarFormularioOverrides,
   guardarSeccional,
   confirmarNitFormulario,
@@ -27,6 +26,8 @@ import {
 } from '@/lib/actions/formulario-actions'
 import type { NegocioBloque } from '../../negocio-v2-actions'
 import { hrefArchivo } from '@/lib/almacenamiento/referencia'
+import { leerFormularioParaEdicion } from '@/lib/formularios/leer-para-edicion'
+import { mensajeDeFallaDeCarga } from '@/lib/red/error-de-red'
 
 interface BloqueFormularioProps {
   negocioBloqueId: string
@@ -85,8 +86,17 @@ export default function BloqueFormulario({
   const driveUrl = (saved.drive_url as string) ?? null
   const versionActual = (saved.version_actual as number) ?? versiones[0]?.version_n ?? null
 
+  // Lectura por GET (`/api/negocios/<id>/formulario/<bloque>`), no por server action: una
+  // action al montar se ponía en fila delante de la primera acción real en la ficha.
   async function cargar() {
-    const res = await resolverFormularioParaEdicion(negocioBloqueId, negocioId)
+    let res: Awaited<ReturnType<typeof leerFormularioParaEdicion>>
+    try {
+      res = await leerFormularioParaEdicion(negocioId, negocioBloqueId)
+    } catch (e) {
+      toast.error(mensajeDeFallaDeCarga(e, 'No se pudo cargar el formulario'))
+      setLoading(false)
+      return
+    }
     if (res.error) { toast.error(res.error); setLoading(false); return }
     setCasillas(res.casillas)
     setVersiones(res.versiones)

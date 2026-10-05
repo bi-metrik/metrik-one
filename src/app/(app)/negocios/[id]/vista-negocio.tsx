@@ -17,6 +17,8 @@ import { resolverPermisoCarpetaLocal } from '@/lib/negocios/carpeta-local-servid
 import { esAlmacenamientoExterno } from '@/lib/almacenamiento/config'
 import { leerFacturasDeCuotas } from '@/lib/valida-cda/facturas-negocio-servidor'
 import { FacturasCuotas } from './facturas-cuotas'
+import { getActivityLog } from '@/app/(app)/activity-actions'
+import type { ActivityEntry } from '@/components/activity-log'
 
 /**
  * Todo lo que la página del negocio le pasa a `NegocioDetailClient`, armado en UN sitio.
@@ -34,6 +36,20 @@ export type VistaNegocio = Omit<ComponentProps<typeof NegocioDetailClient>, 'err
 export async function cargarVistaNegocio(id: string): Promise<VistaNegocio | null> {
   const data = await getNegocioDetalleCompleto(id)
   if (!data) return null
+
+  // La actividad del negocio, para que la tarjeta «Actividad» llegue pintada. Antes la
+  // pedía el navegador al montar con una server action (`getActivityLog`, 876 llamadas en
+  // 7 días, medido 2026-10-05) que se ponía en fila delante de la primera acción real.
+  // Arranca aquí y corre en paralelo con el resto del armado; la misma función, el mismo
+  // alcance por workspace y la misma regla de `puede_borrar`.
+  const actividadLogP = getActivityLog('negocio', id).then(
+    (filas) => filas as unknown as ActivityEntry[],
+    (e) => {
+      // Sin la actividad la ficha se pinta igual: la tarjeta la pide como antes.
+      console.warn('[negocio] no se pudo leer la actividad:', e instanceof Error ? e.message : e)
+      return undefined
+    },
+  )
 
   // Cargar consultas Valida solo si el workspace tiene el flag activo
   const { supabase, workspaceId, staffId, role, areas } = await getWorkspace()
@@ -226,6 +242,7 @@ export async function cargarVistaNegocio(id: string): Promise<VistaNegocio | nul
     ejecucionData: data.ejecucionData,
     historialData: data.historialData,
     actividad: data.actividad,
+    actividadLog: await actividadLogP,
     staffList: data.staffList,
     datosOtrasEtapas: data.datosOtrasEtapas,
     datosPorSlug: data.datosPorSlug,

@@ -6,12 +6,13 @@ import { Bell, Check, X, CheckCheck, Flame, FolderKanban, AtSign, TrendingDown, 
 import { LoadingSpinner } from '@/components/ui/loading-spinner'
 import { createClient } from '@/lib/supabase/client'
 import {
-  getNotificaciones,
   marcarCompletada,
   descartarNotificacion,
   marcarTodasCompletadas,
   type NotificacionItem,
 } from '@/lib/actions/notificaciones'
+import { leerNotificaciones, REFRESCO_MINIMO_AL_VOLVER_MS } from '@/lib/notificaciones/leer'
+import { toast } from 'sonner'
 
 // ── Helpers ───────────────────────────────────────────
 
@@ -83,26 +84,41 @@ export default function NotificationBell({ userId, initialItems, initialTotal }:
   const panelRef = useRef<HTMLDivElement>(null)
   const router = useRouter()
 
-  // Cargar notificaciones
+  // Cuándo se leyó por última vez (la primera lectura llegó con la página).
+  const ultimaLectura = useRef(Date.now())
+
+  // Cargar notificaciones. Una lectura que falla deja lo que había: la campana no se vacía
+  // por un corte de red.
   const cargar = useCallback(async () => {
     setLoading(true)
-    const { items: data, total: t } = await getNotificaciones()
-    setItems(data)
-    setTotal(t)
-    setLoading(false)
+    ultimaLectura.current = Date.now()
+    try {
+      const { items: data, total: t } = await leerNotificaciones()
+      setItems(data)
+      setTotal(t)
+    } catch {
+      // Se reintenta al abrir el panel o al volver a la pestaña.
+    } finally {
+      setLoading(false)
+    }
   }, [])
 
   // Traer la siguiente página. Con backlog alto (hay usuarios con 68 pendientes)
   // las más viejas quedaban fuera del corte y eran invisibles.
   const cargarMas = useCallback(async () => {
     setCargandoMas(true)
-    const { items: data, total: t } = await getNotificaciones(items.length)
-    setItems(prev => {
-      const vistos = new Set(prev.map(n => n.id))
-      return [...prev, ...data.filter(n => !vistos.has(n.id))]
-    })
-    setTotal(t)
-    setCargandoMas(false)
+    try {
+      const { items: data, total: t } = await leerNotificaciones(items.length)
+      setItems(prev => {
+        const vistos = new Set(prev.map(n => n.id))
+        return [...prev, ...data.filter(n => !vistos.has(n.id))]
+      })
+      setTotal(t)
+    } catch {
+      toast.error('No se pudieron cargar más notificaciones')
+    } finally {
+      setCargandoMas(false)
+    }
   }, [items.length])
 
   // Abrir panel carga datos
@@ -114,10 +130,13 @@ export default function NotificationBell({ userId, initialItems, initialTotal }:
 
   // Refresco al volver a la pestaña. Respaldo del realtime: si el canal se cayó
   // (o la tabla no está en la publicación), el conteo igual se pone al día
-  // cuando el usuario regresa, sin polling permanente.
+  // cuando el usuario regresa, sin polling permanente. Con la pestaña oculta no se pide
+  // nada, y al volver solo si pasó un minuto desde la última lectura.
   useEffect(() => {
     const onVisible = () => {
-      if (document.visibilityState === 'visible') cargar()
+      if (document.visibilityState !== 'visible') return
+      if (Date.now() - ultimaLectura.current < REFRESCO_MINIMO_AL_VOLVER_MS) return
+      cargar()
     }
     document.addEventListener('visibilitychange', onVisible)
     return () => document.removeEventListener('visibilitychange', onVisible)
