@@ -6,6 +6,7 @@ import { getWorkspace } from '@/lib/actions/get-workspace'
 import { getServerKey } from '@/lib/server-keys'
 import { exigirModulo, MENSAJE_MODULO_NO_ACTIVO, REQUISITO } from '@/lib/modulos/exigir-modulo'
 import { detectarTipoDeCaptura } from '@/lib/ai/detectar-tipo-captura'
+import { MENSAJE_SIN_DETECCION } from '@/lib/cotizaciones/proceso-captura'
 import { normalizarGrupo } from '@/lib/cotizaciones/itinerarios'
 import {
   bloquesPorRanura,
@@ -313,7 +314,12 @@ export async function detectarCaptura(cotizacionId: string, dataUrl: string): Pr
   if (!apiKey) return { ok: false, codigo: 'CONFIG', mensaje: 'Falta configurar la lectura de capturas. Avísale a MeTRIK.' }
 
   const r = await detectarTipoDeCaptura(Buffer.from(m[2], 'base64'), m[1], apiKey)
-  if (!r.data) return { ok: false, codigo: 'LECTURA', mensaje: 'No se pudo mirar el pantallazo. Vuelve a intentarlo.' }
+  // Brief del 2026-10-05, punto 8: no es una falla que la persona tenga que arreglar. La bandeja
+  // pide el tipo con los botones «Es hotel», «Es vuelo»… y con eso la lectura sigue.
+  if (!r.data) {
+    if (r.error) console.warn(`[detectar-tipo] sin tipo: ${r.error}`)
+    return { ok: false, codigo: 'LECTURA', mensaje: MENSAJE_SIN_DETECCION }
+  }
   if (!r.data.tipo) {
     return {
       ok: false,

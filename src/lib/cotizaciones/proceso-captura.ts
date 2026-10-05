@@ -107,7 +107,13 @@ export interface DependenciasDeProceso {
 }
 
 const LECTURA_CAIDA = 'No se pudo leer el pantallazo. Vuelve a pegarlo.'
-const DETECCION_CAIDA = 'No se pudo mirar el pantallazo. Dinos qué es o vuelve a pegarlo.'
+/**
+ * Cuando ONE no alcanza a decir qué es (la llamada se cortó o el modelo no terminó). No suena a
+ * falla porque no lo es para quien cotiza: dice qué es con un clic y la lectura sigue (brief del
+ * 2026-10-05, punto 8: «No se pudo mirar» sonaba a que la llamada se cayó).
+ */
+export const MENSAJE_SIN_DETECCION = 'ONE no alcanzó a reconocer qué es. Dinos qué es y lo lee.'
+const DETECCION_CAIDA = MENSAJE_SIN_DETECCION
 
 /** Informa solo si la pasada sigue vigente. */
 function si(deps: DependenciasDeProceso, cambio: CambioDeCaptura) {
