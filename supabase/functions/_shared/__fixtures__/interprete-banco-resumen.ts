@@ -2,6 +2,22 @@
 // corrida de QA con Gemini real (fuera del CI): la decisión del validador en la forma del `esperado`
 // de la simulación, y cuándo cumple. Solo para pruebas: no se despliega con ninguna función.
 import { norm, type Decision } from '../wa-interprete-reglas.ts';
+import type { RespuestaConfirmarNuevo } from '../wa-viajes-reglas.ts';
+
+/**
+ * Lo que hace el código de hoy con una respuesta a «¿Creo el cliente nuevo «X»?» que el atajo lee exacta (no llega
+ * al modelo), en la misma forma del `esperado`. El banco la usa para los turnos NC (sexto control de Vera).
+ */
+export function resumirConfirmacionDeHoy(r: RespuestaConfirmarNuevo): Record<string, unknown> {
+  switch (r.tipo) {
+    case 'si': return { accion: 'confirmar' };
+    case 'existente': return { accion: 'responder', opcion: r.negocio_id };
+    case 'codigo': return { accion: 'responder', opcion: r.codigo };
+    case 'descartar': return { accion: 'responder', opcion: 'descartar' };
+    case 'nombre': return { accion: 'responder', opcion: 'nuevo', nuevo: norm(r.nombre) };
+    default: return { accion: 'pedir_aclaracion' };
+  }
+}
 
 /** La decisión en la forma del `esperado` de la simulación (la del prototipo). */
 export function resumir(d: Decision): Record<string, unknown> {

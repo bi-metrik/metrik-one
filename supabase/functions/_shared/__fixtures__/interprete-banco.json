@@ -1,5 +1,5 @@
 {
- "nota": "Banco de la simulación del 2026-10-02 (escenarios.json, 45 turnos). Sintético: los clientes y negocios son inventados; el nombre del equipo se cambió por «Vale». `modelo` es lo que devuelve el modelo falso: la primera corrida de gemini-2.5-flash que acertó, convertida al esquema nuevo (viaje_* → ref), o a mano donde ninguna acertó. Cambios de expectativa: TV5 descarta la tanda (H2, caso 2) y H2 descarta solo la pregunta (H2, caso 1).",
+ "nota": "Banco de la simulación del 2026-10-02 (escenarios.json, 45 turnos). Sintético: los clientes y negocios son inventados; el nombre del equipo se cambió por «Vale». `modelo` es lo que devuelve el modelo falso: la primera corrida de gemini-2.5-flash que acertó, convertida al esquema nuevo (viaje_* → ref), o a mano donde ninguna acertó. Cambios de expectativa: TV5 descarta la tanda (H2, caso 2) y H2 descarta solo la pregunta (H2, caso 1). Sexto control de Vera (2026-10-04): 11 turnos NC1–NC11 de «¿Creo el cliente nuevo «X»?» con textos inventados; los que lee exacto el código de hoy (el atajo) no llegan al modelo y su `esperado` es lo que hace el código de hoy.",
  "contextos": {
   "trappvel": {
    "viajes": [
@@ -1375,6 +1375,323 @@
    "origen_modelo": "grabado (flash, corrida ok)",
    "esperado": {
     "accion": "acuse"
+   }
+  },
+  {
+   "id": "NC1",
+   "turno": 1,
+   "cliente": "trappvel",
+   "texto": "sí, Esteban Pérez",
+   "reenviado": false,
+   "pendiente": {
+    "capa": "nuevo_confirmar",
+    "texto": "¿Creo el cliente nuevo «Esteban Pérez»?\nYa hay viajes de Jorge Pérez (T1 26 12) y Lina Pérez (T1 26 14). ¿Es para uno de esos (responde 1 o T1 26 14) o es un cliente nuevo (responde SÍ)?\nO escribe el nombre correcto.\nNo he creado ni cargado nada.",
+    "opciones": [
+     "n12",
+     "n9"
+    ],
+    "nuevo": "Esteban Pérez"
+   },
+   "pendiente_previo": null,
+   "tanda": false,
+   "control": false,
+   "modelo": null,
+   "origen_modelo": "atajo: lo lee el código de hoy, no llega al modelo",
+   "esperado": {
+    "accion": "confirmar"
+   }
+  },
+  {
+   "id": "NC2",
+   "turno": 1,
+   "cliente": "trappvel",
+   "texto": "regístrelo de una vez por favor",
+   "reenviado": false,
+   "pendiente": {
+    "capa": "nuevo_confirmar",
+    "texto": "¿Creo el cliente nuevo «Esteban Pérez»?\nYa hay viajes de Jorge Pérez (T1 26 12) y Lina Pérez (T1 26 14). ¿Es para uno de esos (responde 1 o T1 26 14) o es un cliente nuevo (responde SÍ)?\nO escribe el nombre correcto.\nNo he creado ni cargado nada.",
+    "opciones": [
+     "n12",
+     "n9"
+    ],
+    "nuevo": "Esteban Pérez"
+   },
+   "pendiente_previo": null,
+   "tanda": false,
+   "control": false,
+   "modelo": null,
+   "origen_modelo": "atajo: lo lee el código de hoy, no llega al modelo",
+   "esperado": {
+    "accion": "confirmar"
+   }
+  },
+  {
+   "id": "NC3",
+   "turno": 1,
+   "cliente": "trappvel",
+   "texto": "me refiero al de Cartagena",
+   "reenviado": false,
+   "pendiente": {
+    "capa": "nuevo_confirmar",
+    "texto": "¿Creo el cliente nuevo «Esteban Pérez»?\nYa hay viajes de Jorge Pérez (T1 26 12) y Lina Pérez (T1 26 14). ¿Es para uno de esos (responde 1 o T1 26 14) o es un cliente nuevo (responde SÍ)?\nO escribe el nombre correcto.\nNo he creado ni cargado nada.",
+    "opciones": [
+     "n12",
+     "n9"
+    ],
+    "nuevo": "Esteban Pérez"
+   },
+   "pendiente_previo": null,
+   "tanda": false,
+   "control": false,
+   "modelo": null,
+   "origen_modelo": "atajo: lo lee el código de hoy, no llega al modelo",
+   "esperado": {
+    "accion": "responder",
+    "opcion": "n14"
+   }
+  },
+  {
+   "id": "NC4",
+   "turno": 1,
+   "cliente": "trappvel",
+   "texto": "hablo del primero",
+   "reenviado": false,
+   "pendiente": {
+    "capa": "nuevo_confirmar",
+    "texto": "¿Creo el cliente nuevo «Esteban Pérez»?\nYa hay viajes de Jorge Pérez (T1 26 12) y Lina Pérez (T1 26 14). ¿Es para uno de esos (responde 1 o T1 26 14) o es un cliente nuevo (responde SÍ)?\nO escribe el nombre correcto.\nNo he creado ni cargado nada.",
+    "opciones": [
+     "n12",
+     "n9"
+    ],
+    "nuevo": "Esteban Pérez"
+   },
+   "pendiente_previo": null,
+   "tanda": false,
+   "control": false,
+   "modelo": null,
+   "origen_modelo": "atajo: lo lee el código de hoy, no llega al modelo",
+   "esperado": {
+    "accion": "responder",
+    "opcion": "n12"
+   }
+  },
+  {
+   "id": "NC5",
+   "turno": 1,
+   "cliente": "trappvel",
+   "texto": "la segunda opción por favor",
+   "reenviado": false,
+   "pendiente": {
+    "capa": "nuevo_confirmar",
+    "texto": "¿Creo el cliente nuevo «Esteban Pérez»?\nYa hay viajes de Jorge Pérez (T1 26 12) y Lina Pérez (T1 26 14). ¿Es para uno de esos (responde 1 o T1 26 14) o es un cliente nuevo (responde SÍ)?\nO escribe el nombre correcto.\nNo he creado ni cargado nada.",
+    "opciones": [
+     "n12",
+     "n9"
+    ],
+    "nuevo": "Esteban Pérez"
+   },
+   "pendiente_previo": null,
+   "tanda": false,
+   "control": false,
+   "modelo": null,
+   "origen_modelo": "atajo: lo lee el código de hoy, no llega al modelo",
+   "esperado": {
+    "accion": "responder",
+    "opcion": "n9"
+   }
+  },
+  {
+   "id": "NC6",
+   "turno": 1,
+   "cliente": "trappvel",
+   "texto": "bótelo",
+   "reenviado": false,
+   "pendiente": {
+    "capa": "nuevo_confirmar",
+    "texto": "¿Creo el cliente nuevo «Esteban Pérez»?\nYa hay viajes de Jorge Pérez (T1 26 12) y Lina Pérez (T1 26 14). ¿Es para uno de esos (responde 1 o T1 26 14) o es un cliente nuevo (responde SÍ)?\nO escribe el nombre correcto.\nNo he creado ni cargado nada.",
+    "opciones": [
+     "n12",
+     "n9"
+    ],
+    "nuevo": "Esteban Pérez"
+   },
+   "pendiente_previo": null,
+   "tanda": false,
+   "control": false,
+   "modelo": null,
+   "origen_modelo": "atajo: lo lee el código de hoy, no llega al modelo",
+   "esperado": {
+    "accion": "responder",
+    "opcion": "descartar"
+   }
+  },
+  {
+   "id": "NC7",
+   "turno": 1,
+   "cliente": "trappvel",
+   "texto": "no, se llama Esteban Pardo",
+   "reenviado": false,
+   "pendiente": {
+    "capa": "nuevo_confirmar",
+    "texto": "¿Creo el cliente nuevo «Esteban Pérez»?\nYa hay viajes de Jorge Pérez (T1 26 12) y Lina Pérez (T1 26 14). ¿Es para uno de esos (responde 1 o T1 26 14) o es un cliente nuevo (responde SÍ)?\nO escribe el nombre correcto.\nNo he creado ni cargado nada.",
+    "opciones": [
+     "n12",
+     "n9"
+    ],
+    "nuevo": "Esteban Pérez"
+   },
+   "pendiente_previo": null,
+   "tanda": false,
+   "control": false,
+   "modelo": {
+    "acciones": [
+     {
+      "accion": "responder",
+      "evidencia": "se llama Esteban Pardo",
+      "opcion": "nuevo",
+      "nuevo_cliente": "Esteban Pardo"
+     }
+    ]
+   },
+   "origen_modelo": "a mano (sexto control de Vera)",
+   "esperado": {
+    "accion": "responder",
+    "opcion": "nuevo",
+    "nuevo": "esteban pardo"
+   }
+  },
+  {
+   "id": "NC8",
+   "turno": 1,
+   "cliente": "trappvel",
+   "texto": "Esteban Pérez Gil, cliente nuevo",
+   "reenviado": false,
+   "pendiente": {
+    "capa": "nuevo_confirmar",
+    "texto": "¿Creo el cliente nuevo «Esteban Pérez»?\nYa hay viajes de Jorge Pérez (T1 26 12) y Lina Pérez (T1 26 14). ¿Es para uno de esos (responde 1 o T1 26 14) o es un cliente nuevo (responde SÍ)?\nO escribe el nombre correcto.\nNo he creado ni cargado nada.",
+    "opciones": [
+     "n12",
+     "n9"
+    ],
+    "nuevo": "Esteban Pérez"
+   },
+   "pendiente_previo": null,
+   "tanda": false,
+   "control": false,
+   "modelo": {
+    "acciones": [
+     {
+      "accion": "responder",
+      "evidencia": "Esteban Pérez Gil, cliente nuevo",
+      "opcion": "nuevo",
+      "nuevo_cliente": "Esteban Pérez Gil"
+     }
+    ]
+   },
+   "origen_modelo": "a mano (sexto control de Vera)",
+   "esperado": {
+    "accion": "responder",
+    "opcion": "nuevo",
+    "nuevo": "esteban perez gil"
+   }
+  },
+  {
+   "id": "NC9",
+   "turno": 1,
+   "cliente": "trappvel",
+   "texto": "el de Jorge",
+   "reenviado": false,
+   "pendiente": {
+    "capa": "nuevo_confirmar",
+    "texto": "¿Creo el cliente nuevo «Esteban Pérez»?\nYa hay viajes de Jorge Pérez (T1 26 12) y Lina Pérez (T1 26 14). ¿Es para uno de esos (responde 1 o T1 26 14) o es un cliente nuevo (responde SÍ)?\nO escribe el nombre correcto.\nNo he creado ni cargado nada.",
+    "opciones": [
+     "n12",
+     "n9"
+    ],
+    "nuevo": "Esteban Pérez"
+   },
+   "pendiente_previo": null,
+   "tanda": false,
+   "control": false,
+   "modelo": {
+    "acciones": [
+     {
+      "accion": "responder",
+      "evidencia": "el de Jorge",
+      "opcion": "n12"
+     }
+    ]
+   },
+   "origen_modelo": "a mano (sexto control de Vera)",
+   "esperado": {
+    "accion": "pedir_aclaracion"
+   }
+  },
+  {
+   "id": "NC10",
+   "turno": 1,
+   "cliente": "trappvel",
+   "texto": "Esteban Pérez no, es para el viaje de Jorge",
+   "reenviado": false,
+   "pendiente": {
+    "capa": "nuevo_confirmar",
+    "texto": "¿Creo el cliente nuevo «Esteban Pérez»?\nYa hay viajes de Jorge Pérez (T1 26 12) y Lina Pérez (T1 26 14). ¿Es para uno de esos (responde 1 o T1 26 14) o es un cliente nuevo (responde SÍ)?\nO escribe el nombre correcto.\nNo he creado ni cargado nada.",
+    "opciones": [
+     "n12",
+     "n9"
+    ],
+    "nuevo": "Esteban Pérez"
+   },
+   "pendiente_previo": null,
+   "tanda": false,
+   "control": false,
+   "modelo": {
+    "acciones": [
+     {
+      "accion": "responder",
+      "evidencia": "es para el viaje de Jorge",
+      "opcion": "n12",
+      "ref": {
+       "cliente": "Jorge"
+      }
+     }
+    ]
+   },
+   "origen_modelo": "a mano (sexto control de Vera)",
+   "esperado": {
+    "accion": "pedir_aclaracion"
+   }
+  },
+  {
+   "id": "NC11",
+   "turno": 1,
+   "cliente": "trappvel",
+   "texto": "créelo pero con el apellido Pardo",
+   "reenviado": false,
+   "pendiente": {
+    "capa": "nuevo_confirmar",
+    "texto": "¿Creo el cliente nuevo «Esteban Pérez»?\nYa hay viajes de Jorge Pérez (T1 26 12) y Lina Pérez (T1 26 14). ¿Es para uno de esos (responde 1 o T1 26 14) o es un cliente nuevo (responde SÍ)?\nO escribe el nombre correcto.\nNo he creado ni cargado nada.",
+    "opciones": [
+     "n12",
+     "n9"
+    ],
+    "nuevo": "Esteban Pérez"
+   },
+   "pendiente_previo": null,
+   "tanda": false,
+   "control": false,
+   "modelo": {
+    "acciones": [
+     {
+      "accion": "responder",
+      "evidencia": "créelo",
+      "opcion": "si"
+     }
+    ]
+   },
+   "origen_modelo": "a mano (sexto control de Vera)",
+   "esperado": {
+    "accion": "pedir_aclaracion"
    }
   }
  ]
