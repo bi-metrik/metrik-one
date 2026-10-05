@@ -5,6 +5,8 @@ metadata:
   type: project
 ---
 
+⚠️⚠️ **CADUCÓ la regla «sin día cae a sugerida»** (brief del 2026-10-05, [[project-limpieza-presentar-trappvel]]): hoy una sugerencia es SOLO lo que salió del precio.
+
 ⚠️ **CADUCÓ lo de «sin mergear»:** #718 entró como `aeadee74` y la migración
 `20260915000000` está aplicada (medido 2026-09-15). Los dos interruptores ya existen:
 ver [[entra-al-precio]] (#728).

@@ -780,11 +780,11 @@ async function aceptarLectura(
   }
 
   // ── Opción nueva: en la ranura que ya estaba o en una ranura nueva ──
-  const creada = await medirEtapa('crear', () => destino.como === 'hermana'
-    ? agregarOpcionARanura(cotizacionId, destino.grupo)
+  const creada = destino.como === 'hermana'
+    ? await medirEtapa('crear', () => agregarOpcionARanura(cotizacionId, destino.grupo))
     // Una actividad sin ciudad en la captura nombra su bloque con el destino del viaje, no
     // con el nombre de la excursión que tomó el detector (punto 4 del brief del 2026-10-01).
-    : crearRanuraConOpcion(cotizacionId, b.tipo, { ...pistas, lugar: lugarDeBloqueNuevo(b.tipo, lectura, pistas.lugar, b.correcciones) }))
+    : await medirEtapa('crear', () => crearRanuraConOpcion(cotizacionId, b.tipo, { ...pistas, lugar: lugarDeBloqueNuevo(b.tipo, lectura, pistas.lugar, b.correcciones) }))
   if (!creada.success) return { ok: false, codigo: 'CREAR', mensaje: creada.error }
   const ctxItem = await contexto(creada.itemId)
   await conImagen()
