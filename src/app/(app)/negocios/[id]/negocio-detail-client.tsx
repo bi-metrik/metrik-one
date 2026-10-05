@@ -28,9 +28,15 @@ import type {
   BloqueConfig,
   NegocioBloque,
 } from '../negocio-v2-actions'
-import { cambiarEtapaNegocioConGate, pausarNegocio, reactivarNegocio, actualizarCarpetaUrlNegocio, actualizarCarpetaLocalNegocio, actualizarNombreNegocio, agregarResponsable, quitarResponsable } from '../negocio-v2-actions'
+import { avanzarCrucesConMotivo, cambiarEtapaNegocioConGate, pausarNegocio, reactivarNegocio, actualizarCarpetaUrlNegocio, actualizarCarpetaLocalNegocio, actualizarNombreNegocio, agregarResponsable, quitarResponsable } from '../negocio-v2-actions'
 import { CarpetaLocalEditor, CarpetaLocalGateForm } from './carpeta-local'
 import { gateSeResuelveConCarpeta, leerCarpetaLocal } from '@/lib/negocios/carpeta-local'
+import {
+  MOTIVO_AVANCE_MAX,
+  MOTIVO_AVANCE_MIN,
+  advertenciasDeCruces,
+  crucesQueSeAvanzan,
+} from '@/lib/negocios/cruces-avance'
 import { detalleAsignacion } from '@/lib/negocios/responsable-copy'
 import { ReprocesoBoton, ReprocesoBanner, type ReprocesoVista } from './reproceso-control'
 import { ReversaRutaBanner, type ReversaPendienteVista } from './reversa-ruta-banner'
@@ -544,14 +550,25 @@ function BarraProgreso({
 
 // ── Modal de gates bloqueados ─────────────────────────────────────────────────
 
+/** Un bloqueo tal como llega en `bloquesPendientes` (ver `BloquePendienteGate`). */
+type BloqueGateModal = {
+  nombre: string
+  es_gate: boolean
+  omitible?: boolean
+  tipo?: string
+  cruce_slug?: string
+  advertencia?: string
+}
+
 function ModalGateBloqueado({
   bloques,
   puedeOmitir,
   onClose,
   onOverride,
   carpeta,
+  cruces,
 }: {
-  bloques: Array<{ nombre: string; es_gate: boolean; omitible?: boolean; tipo?: string }>
+  bloques: BloqueGateModal[]
   /**
    * El usuario puede omitir gates con motivo (owner/admin o `omitir_gate.staff_ids`).
    * Lo resuelve `page.tsx` con la misma función del guard del servidor.
@@ -561,9 +578,28 @@ function ModalGateBloqueado({
   onOverride: (motivo: string) => void
   /** Resolver el gate de carpeta del cerebro aquí mismo: guardarla y reintentar. */
   carpeta?: { pendiente: boolean; error: string | null; onGuardar: (carpeta: string) => void }
+  /**
+   * «Avanzar de todas formas» sobre cruces que frenan: solo si el usuario está en
+   * `avanzar_cruces.staff_ids` (lo resuelve `vista-negocio.tsx` con la misma función del
+   * guard del servidor) y TODO lo que frena son cruces.
+   */
+  cruces?: {
+    puedeAvanzar: boolean
+    pendiente: boolean
+    error: string | null
+    onAvanzar: (motivo: string, slugs: string[]) => void
+  }
 }) {
   const [motivo, setMotivo] = useState('')
   const [showOverride, setShowOverride] = useState(false)
+  const [motivoCruce, setMotivoCruce] = useState('')
+  const [showAvanceCruce, setShowAvanceCruce] = useState(false)
+
+  const slugsCruces = crucesQueSeAvanzan(bloques)
+  const avanzaCruces = cruces?.puedeAvanzar === true && slugsCruces.length > 0
+  const advertencias = advertenciasDeCruces(bloques)
+  const largoMotivoCruce = motivoCruce.trim().length
+  const motivoCruceOk = largoMotivoCruce >= MOTIVO_AVANCE_MIN && largoMotivoCruce <= MOTIVO_AVANCE_MAX
 
   // Hay gates que NO ceden al override (hoy: el aviso de recaudo cambiado). Ofrecer el
   // botón igual dejaba al operador reintentando algo que el servidor vuelve a rechazar,
@@ -605,11 +641,15 @@ function ModalGateBloqueado({
         <div className="flex shrink-0 items-start gap-3 border-b border-[#E5E7EB] p-4">
           <AlertTriangle className="h-5 w-5 text-amber-500 shrink-0 mt-0.5" />
           <div className="flex-1">
-            <h3 className="text-sm font-semibold text-tinta">Bloques gate pendientes</h3>
+            <h3 className="text-sm font-semibold text-tinta">
+              {slugsCruces.length > 0 ? 'Datos que no cuadran' : 'Bloques gate pendientes'}
+            </h3>
             <p className="mt-0.5 text-xs text-tinta-suave">
               {resuelveConCarpeta
                 ? 'Registra la carpeta del cerebro y el negocio avanza:'
-                : 'Los siguientes bloques deben completarse antes de avanzar:'}
+                : slugsCruces.length > 0
+                  ? 'Estos datos del negocio se contradicen. Corrígelos antes de avanzar:'
+                  : 'Los siguientes bloques deben completarse antes de avanzar:'}
             </p>
           </div>
           <button onClick={onClose} className="shrink-0 text-tinta-suave hover:text-tinta">
@@ -622,7 +662,7 @@ function ModalGateBloqueado({
             <div key={i} className="flex items-center gap-2 rounded-lg border border-amber-100 bg-amber-50 px-3 py-2">
               <AlertTriangle className="h-3.5 w-3.5 text-amber-500 shrink-0" />
               <span className="text-xs text-tinta">{b.nombre}</span>
-              <span className="ml-auto text-[10px] font-semibold text-amber-600">GATE</span>
+              <span className="ml-auto text-[10px] font-semibold text-amber-600">{b.tipo === 'cruce' ? 'CRUCE' : 'GATE'}</span>
             </div>
           ))}
         </div>
@@ -635,6 +675,62 @@ function ModalGateBloqueado({
               onVolver={onClose}
               onGuardar={carpeta.onGuardar}
             />
+          ) : avanzaCruces && cruces ? (
+            !showAvanceCruce ? (
+              <div className="flex gap-2">
+                <button
+                  onClick={onClose}
+                  className="flex-1 rounded-lg border border-[#E5E7EB] py-2 text-xs font-medium text-tinta hover:bg-slate-50"
+                >
+                  Volver
+                </button>
+                <button
+                  onClick={() => setShowAvanceCruce(true)}
+                  className="flex-1 rounded-lg border border-amber-200 bg-amber-50 py-2 text-xs font-medium text-amber-700 hover:bg-amber-100"
+                >
+                  Avanzar de todas formas
+                </button>
+              </div>
+            ) : (
+              <div className="space-y-2">
+                {advertencias.map(a => (
+                  <p key={a} className="rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-[11px] font-medium leading-snug text-red-800">
+                    {a}
+                  </p>
+                ))}
+                <label className="block text-[11px] font-medium text-tinta-suave">
+                  ¿Por qué avanzas sin corregir el dato? <span className="text-red-500">*</span>
+                </label>
+                <textarea
+                  value={motivoCruce}
+                  onChange={e => setMotivoCruce(e.target.value)}
+                  maxLength={MOTIVO_AVANCE_MAX}
+                  placeholder="Escribe el motivo en una frase. Queda en el historial del negocio."
+                  rows={3}
+                  className="w-full rounded-lg border border-[#E5E7EB] px-3 py-2 text-xs focus:border-acento focus:outline-none focus:ring-2 focus:ring-acento/15"
+                />
+                {largoMotivoCruce > 0 && largoMotivoCruce < MOTIVO_AVANCE_MIN && (
+                  <p className="text-[11px] text-tinta-suave">Mínimo {MOTIVO_AVANCE_MIN} caracteres.</p>
+                )}
+                {cruces.error && <p className="text-[11px] text-red-600">{cruces.error}</p>}
+                <div className="flex gap-2">
+                  <button
+                    onClick={() => setShowAvanceCruce(false)}
+                    disabled={cruces.pendiente}
+                    className="flex-1 rounded-lg border border-[#E5E7EB] py-2 text-xs font-medium text-tinta-suave"
+                  >
+                    Cancelar
+                  </button>
+                  <button
+                    onClick={() => motivoCruceOk && cruces.onAvanzar(motivoCruce.trim(), slugsCruces)}
+                    disabled={!motivoCruceOk || cruces.pendiente}
+                    className="flex-1 rounded-lg bg-amber-500 py-2 text-xs font-semibold text-white hover:bg-amber-600 disabled:opacity-40"
+                  >
+                    {cruces.pendiente ? 'Avanzando…' : 'Confirmar y avanzar'}
+                  </button>
+                </div>
+              </div>
+            )
           ) : hayNoOmitible ? (
             <div className="space-y-3">
               <p className="text-[11px] leading-relaxed text-tinta-suave">
@@ -723,6 +819,7 @@ function SelectorEtapa({
   reprocesoMarca,
   puedeCierreNoFacturable,
   puedeOmitirGates,
+  puedeAvanzarCruces,
 }: {
   negocioId: string
   etapasLinea: EtapaNegocio[]
@@ -739,11 +836,12 @@ function SelectorEtapa({
   reprocesoMarca: ReprocesoVista | null
   puedeCierreNoFacturable: boolean
   puedeOmitirGates: boolean
+  puedeAvanzarCruces: boolean
 }) {
   const [isPending, startTransition] = useTransitionTolerante()
   const [gateModal, setGateModal] = useState<{
     etapaId: string
-    bloques: Array<{ nombre: string; es_gate: boolean; omitible?: boolean; tipo?: string }>
+    bloques: BloqueGateModal[]
     /**
      * Cómo fue el intento que frenó el gate. Resolver la carpeta REINTENTA ese mismo
      * intento: sin el motivo, un override volvería a toparse con los gates que omitió;
@@ -753,6 +851,7 @@ function SelectorEtapa({
     motivo?: string
   } | null>(null)
   const [errorCarpeta, setErrorCarpeta] = useState<string | null>(null)
+  const [errorAvanceCruce, setErrorAvanceCruce] = useState<string | null>(null)
   const [confirmarModal, setConfirmarModal] = useState<{
     etapaId: string
     nombreFallback: string
@@ -874,6 +973,42 @@ function SelectorEtapa({
         return
       }
       toast.success(`Carpeta guardada. Avanzado a: ${result.etapaDestinoNombre ?? nombreEtapa}`)
+    })
+  }
+
+  // «Avanzar de todas formas» sobre cruces: el servidor guarda la excepción (solo para
+  // esos cruces con esos datos) y se reintenta el MISMO avance, que pasa por todos los
+  // demás gates como siempre. Si aparece otro bloqueo, el modal pasa a mostrarlo.
+  function handleAvanzarCruces(motivo: string, slugs: string[]) {
+    if (!gateModal) return
+    const intento = gateModal
+    setErrorAvanceCruce(null)
+    startTransition(async () => {
+      const avance = await avanzarCrucesConMotivo(negocioId, slugs, motivo)
+      if (avance.error) {
+        setErrorAvanceCruce(avance.error)
+        return
+      }
+      const result = await cambiarEtapaNegocioConGate(negocioId, intento.etapaId, intento.motivo, intento.confirmado)
+      if (result.error === 'gate_bloqueado') {
+        setGateModal({ ...intento, bloques: result.bloquesPendientes ?? [] })
+        return
+      }
+      setGateModal(null)
+      const nombreEtapa = etapasLinea.find(e => e.id === intento.etapaId)?.nombre ?? 'la siguiente etapa'
+      if (result.error === 'requiere_confirmacion' && result.confirmacion) {
+        setConfirmarModal({
+          etapaId: intento.etapaId,
+          nombreFallback: result.etapaDestinoNombre ?? nombreEtapa,
+          confirmacion: result.confirmacion,
+        })
+        return
+      }
+      if (result.error) {
+        toast.error('El motivo quedó guardado, pero el negocio no avanzó: ' + result.error)
+        return
+      }
+      toast.success(`Avanzado a: ${result.etapaDestinoNombre ?? nombreEtapa}`)
     })
   }
 
@@ -1005,9 +1140,15 @@ function SelectorEtapa({
         <ModalGateBloqueado
           bloques={gateModal.bloques}
           puedeOmitir={puedeOmitirGates}
-          onClose={() => { setGateModal(null); setErrorCarpeta(null) }}
+          onClose={() => { setGateModal(null); setErrorCarpeta(null); setErrorAvanceCruce(null) }}
           onOverride={motivo => handleOverride(gateModal.etapaId, motivo)}
           carpeta={{ pendiente: isPending, error: errorCarpeta, onGuardar: handleResolverCarpeta }}
+          cruces={{
+            puedeAvanzar: puedeAvanzarCruces,
+            pendiente: isPending,
+            error: errorAvanceCruce,
+            onAvanzar: handleAvanzarCruces,
+          }}
         />
       )}
 
@@ -2218,6 +2359,8 @@ interface Props {
   puedeCierreNoFacturable?: boolean
   /** Owner/admin o persona en `config_extra.omitir_gate.staff_ids`: ve "Omitir gate". */
   puedeOmitirGates?: boolean
+  /** Persona en `config_extra.avanzar_cruces.staff_ids`: ve «Avanzar de todas formas» en un cruce. */
+  puedeAvanzarCruces?: boolean
   /**
    * El usuario pertenece al area financiera y puede cerrar el aviso de recaudo cambiado.
    * Se resuelve en `page.tsx` con el MISMO predicado del guard del servidor.
@@ -2292,6 +2435,7 @@ export default function NegocioDetailClient({
   registrarPagoSimple = false,
   puedeCierreNoFacturable = false,
   puedeOmitirGates = false,
+  puedeAvanzarCruces = false,
   puedeResolverAvisoRecaudo = false,
   carpetaLocal,
   almacenamientoExterno = false,
@@ -2510,6 +2654,7 @@ export default function NegocioDetailClient({
             reprocesoMarca={reprocesoMarca}
             puedeCierreNoFacturable={puedeCierreNoFacturable}
             puedeOmitirGates={puedeOmitirGates}
+            puedeAvanzarCruces={puedeAvanzarCruces}
           />
         </div>
         </div>

@@ -14,6 +14,7 @@
 - ⚠️⚠️ [Trial de 5 días del Radar y cobro por ciclo](project_radar_trial_y_cobro.md) — migración SIN aplicar; la gracia de mora pasa de 3 a 5 días en TODOS los productos
 - ⚠️⚠️ [Borrar, editar y escribir en la Actividad](project_actividad_borrar_comentario.md) — DELETE/UPDATE/INSERT aplicadas; force_unlock 20260928150000 SIN aplicar
 - ⚠️⚠️ [Avisos al cliente en día hábil (#935)](project_avisos_dia_habil.md) — migración SIN aplicar; 4 funciones a desplegar; evento se guarda, estado se salta
+- ⚠️ [Avanzar un cruce con motivo](project_avanzar_cruces_con_motivo.md) — #1016; migraciones YA aplicadas, no tocarlas; solo service_role escribe la excepción
 - ⚠️⚠️ [Freno de titulares antes de radicar](project_freno_titulares_antes_de_radicar.md) — migración 20261001100000 SIN aplicar; frena en 6 Y 7
 - ⚠️⚠️ [Datos clave y cruces de titularidad (#886)](project_datos_clave_cruces_titularidad.md) — migración ANTES del merge, backfill DESPUÉS; frena 4 casos
 - ⚠️⚠️ [Webhook de Wompi de Ferretería (#953)](project_ferreteria_webhook_wompi.md) — migración SIN aplicar; crearNegocio sin sesión; payload sin verificar
@@ -95,41 +96,6 @@
 - ⚠️⚠️ [IVA sobre el ingreso propio (Trappvel)](project_iva_ingreso_propio.md) — config viva infla el total hasta el PR de iva_incluido + su SQL
 - ⚠️⚠️ [Margen y recargo configurables (Trappvel)](project_margen_recargo_configurables_trappvel.md) — el guardado de #712 NUNCA escribió (0 filas sin error); exige el CHECK de activity_log ANTES del merge
 - ⚠️⚠️ [Archivos de trappvel en su Supabase](project_almacenamiento_supabase_externo.md) — #716 sin mergear: corte de Drive DESPUÉS
-- ⚠️ [Cotizar por rubros](project_cotizacion_margen_rubros.md) — #514 sin mergear; el backfill decide $7,17M
-- ⚠️⚠️ [/negocios como hoja de Google](project_export_negocios_a_drive.md) — #625 sin mergear: migración SIN aplicar
-- ⚠️ [El cierre se deriva de `estado`](project_cierre_desde_estado.md) — #609 sin mergear: el mapa es lista CERRADA
-- ⚠️⚠️ [Un cerrado sale de circulación](project_negocio_cerrado_solo_lectura.md) — #610 sin mergear: el recibo NO se corta
-- ⚠️ [El buscador avisa de otras pestañas](project_aviso_otras_pestanas.md) — #611 sin mergear
-- ⚠️ [Sucursal de Siigo y adopción de factura](project_siigo_sucursal_adopcion.md) — los 6 candidatos NO son lista para aplicar
-- ⚠️⚠️ [Factura: herencia sin copias y soporte](project_factura_soporte_tesoreria.md) — limpieza 1B SIN aplicar
-- ⚠️⚠️ [PQR rechazado](project_pqr_rechazado_desenlace.md) — config SOENA SIN aplicar
-- ⚠️⚠️ [Ruta de IVA por servicio](project_ruta_iva_por_servicio.md) — SQL pendiente DESPUÉS del deploy
-- ⚠️⚠️ [Aviso de sobrepago a financiera](project_aviso_sobrepago_financiera.md) — config SOENA sin aplicar
-- ⚠️⚠️ [Conciliación por referencia](project_conciliacion_por_referencia.md) — backfill de 9 filas NO aplicado
-- ⚠️⚠️ [Panel de recibos: destinatario y autor](project_panel_destinatario_y_autor.md) — #814 sin mergear: migración ANTES
-- ⚠️⚠️ [Un recibo por concepto](project_recibo_por_concepto.md) — la marca tiene DOS formas y un consumidor SQL lee una
-- ⚠️⚠️ [Recibo solo UPME y abono automático](project_factura_libre_abono.md) — #828 SIN mergear: duplicado = misma factura
-- ⚠️⚠️ [Titular corregido de la factura](project_titular_corregido_factura.md) — #833 SIN mergear: el PUT va DESPUÉS de resolver el tercero
-- ⚠️⚠️ [El correo del recibo](project_correo_recibo_dos_documentos.md) — #804 sin mergear; SQL de copy DESPUÉS de `notificar-etapa`
-- ⚠️⚠️ [Tarifa UPME mal digitada](project_tarifa_upme_mal_digitada.md) — config SOENA sin aplicar; caso V0497
-- ⚠️⚠️ [Seguimiento de citas DIAN](project_seguimiento_citas_dian.md) — config SOENA sin aplicar
-- ⚠️ [Firma de webhooks de Meta (#925, #927)](project_firma_wa_webhook.md) — wa-firma.ts compartido; meta-leads SIN redesplegar
-- ⚠️ [Lector de Navigate = Gemini 3.1 Flash-Lite](project_navigate_lector_gemini.md) — wa-webhook sin redesplegar
-- ⚠️ [Duplicados: solo facturas libres](project_duplicado_hermanos_siigo.md) — #561 sin mergear; el vínculo es la marca
-- ⚠️ [Icono de app Pino](project_icono_app_pino.md) — #602 sin mergear: el `.ico` gana sobre el `.svg`
-- ⚠️ [QA de tildes de compliance](project_qa_tildes_compliance.md) — quedan 7 erratas
-- ⚠️⚠️ [Landing de Sustenta](project_landing_sustenta.md) — franja de normas = ejemplos, NUNCA cobertura
-- ⚠️ ["Plata" vetada en copy público](project_lexico_plata_vetada.md) — quedan ~19 visibles
-- ⚠️⚠️ [Dedup de contactos por WhatsApp](project_dedup_contactos_webhook.md) — #565 sin mergear: migración ANTES del deploy
-- ⚠️⚠️ [Reproceso de documentos migrados](project_reproceso_documentos_migrados.md) — puede BORRAR datos, no es idempotente
-- ⚠️ [Routing respeta el `condition`](project_routing_condition_bloque.md) — cambia UN routing en todo el sistema
-- ⚠️ [Aviso de recaudo sin salida](project_aviso_recaudo_sin_salida.md) — el listón es `valorARecaudar`
-- ⚠️⚠️ [Avanzar tras registrar el pago](project_avance_tras_pago_fab.md) — #707 sin mergear: falso «retenido»
-- ⚠️⚠️ [Acuses de Resend](project_acuses_resend_avisos_cliente.md) — #596 sin mergear: el orden de despliegue manda
-- ⚠️⚠️ [El plazo de retención en CI](project_retencion_control_en_ci.md) — el KYC sigue en CINCO años
-- ⚠️⚠️ [Cierre del frente KYC](project_valida_privacidad_v13.md) — diez (10) años; 5 superficies
-- ⚠️⚠️ [Valida Diligencia v2](project_valida_diligencia_v2.md) — patch SIN commit ni PR
-- ⚠️ [Guards de items y aprobación](project_guard_bloque_items.md) — quién aprueba lo decide `puedeSerAprobador`
 - ⚠️⚠️ [Corregir hacia atrás sin área](project_correccion_hacia_atras_sin_area.md) — SOLO SOENA declara el opt-in
 - ⚠️ [Omitir gates por persona](project_omitir_gate_por_persona.md) — inerte hasta que SOENA lo cargue
 - ⚠️⚠️ [Gate de carpeta local](project_gate_carpeta_local.md) — #702 sin QA en pantalla
@@ -152,7 +118,7 @@
 
 - [Build en worktree sin una dependencia](reference_build_en_worktree.md) — copiar el paquete, no symlink (raíz de Turbopack)
 - [Indice de referencias](indice_referencias.md) — 37 recetas: medir prod sin MCP, SQL de ONE, PGlite, render/PDF, vitest de handlers
-- [Frentes secundarios](indice_frentes_secundarios.md) — ~110 entradas viejas: cobros, Valida, SOENA, recetas; buscar ahí antes de crear
+- [Frentes secundarios](indice_frentes_secundarios.md) — ~145 entradas viejas: cobros, Valida, SOENA, recibos, Siigo, recetas; buscar ahí antes de crear
 
 ## Feedback
 

@@ -12,6 +12,7 @@ import BloqueRiesgoSarlaft from './bloques/BloqueRiesgoSarlaft'
 import CerradoHeaderBanner from './cerrado-header-banner'
 import { negocioCerrado } from '@/lib/negocios/motivo-cierre'
 import { puedeOmitirGatesConMotivo } from '@/lib/permissions/omitir-gates'
+import { puedeAvanzarCruces as puedeAvanzarCrucesConMotivo } from '@/lib/negocios/cruces-avance'
 import { exigeCarpetaLocal } from '@/lib/negocios/carpeta-local'
 import { resolverPermisoCarpetaLocal } from '@/lib/negocios/carpeta-local-servidor'
 import { esAlmacenamientoExterno } from '@/lib/almacenamiento/config'
@@ -117,6 +118,9 @@ export async function cargarVistaNegocio(id: string): Promise<VistaNegocio | nul
   // `config_extra.omitir_gate.staff_ids`. MISMA función que el guard de
   // `cambiarEtapaNegocioConGate`: el botón no se ofrece a quien el servidor rechaza.
   let puedeOmitirGates = false
+  // «Avanzar de todas formas» sobre un cruce: solo la lista `avanzar_cruces.staff_ids`.
+  // MISMA función que el guard de `avanzarCrucesConMotivo`.
+  let puedeAvanzarCruces = false
   // Carpeta del cerebro: el campo solo existe donde el workspace exige la carpeta, y se
   // edita con el MISMO resolvedor que usa `actualizarCarpetaLocalNegocio`.
   const carpetaLocal = { visible: false, puedeEditar: false }
@@ -132,6 +136,7 @@ export async function cargarVistaNegocio(id: string): Promise<VistaNegocio | nul
       .single()
     const modules = (ws?.modules ?? {}) as Record<string, boolean>
     puedeOmitirGates = puedeOmitirGatesConMotivo({ role, staffId }, ws?.config_extra ?? null)
+    puedeAvanzarCruces = puedeAvanzarCrucesConMotivo(staffId, ws?.config_extra ?? null)
     almacenamientoExterno = esAlmacenamientoExterno(ws?.config_extra ?? null)
     if (exigeCarpetaLocal(ws?.config_extra ?? null)) {
       carpetaLocal.visible = true
@@ -253,6 +258,7 @@ export async function cargarVistaNegocio(id: string): Promise<VistaNegocio | nul
     registrarPagoSimple: pagoSimpleActivo,
     puedeCierreNoFacturable: puedeCierreNoFacturable,
     puedeOmitirGates: puedeOmitirGates,
+    puedeAvanzarCruces: puedeAvanzarCruces,
     puedeResolverAvisoRecaudo: puedeResolverAvisoRecaudo,
     carpetaLocal: carpetaLocal,
     almacenamientoExterno: almacenamientoExterno,

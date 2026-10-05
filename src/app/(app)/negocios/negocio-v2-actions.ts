@@ -112,6 +112,12 @@ import { soloSiCumple, type SoloSiBloque } from '@/lib/negocios/condicion-bloque
 import { puedeOmitirGate, marcaOmitido, CLAVE_OMITIDO } from '@/lib/negocios/gate-omitible'
 import { puedeOmitirGatesConMotivo } from '@/lib/permissions/omitir-gates'
 import {
+  CAMPO_CRUCE_AVANZADO,
+  esAvanzable,
+  puedeAvanzarCruces,
+  validarMotivoAvance,
+} from '@/lib/negocios/cruces-avance'
+import {
   resumenCampanasContacto,
   type InteraccionCampana,
   type OrigenCampana,
@@ -3085,6 +3091,20 @@ async function camposDecisionDelNegocio(
 
 // ── Cambiar etapa con gate check ──────────────────────────────────────────────
 
+/**
+ * Un bloqueo del avance tal como lo pinta el modal. `tipo: 'cruce'` es un cruce de la
+ * línea que quien está en `avanzar_cruces.staff_ids` puede avanzar con motivo
+ * (`avanzarCrucesConMotivo`); trae su `cruce_slug` y, si lo declara, el texto de costo.
+ */
+export type BloquePendienteGate = {
+  nombre: string
+  es_gate: boolean
+  omitible?: boolean
+  tipo?: BloqueoGate['tipo'] | 'cruce'
+  cruce_slug?: string
+  advertencia?: string
+}
+
 export async function cambiarEtapaNegocioConGate(
   negocioId: string,
   nuevaEtapaId: string,
@@ -3106,7 +3126,7 @@ export async function cambiarEtapaNegocioConGate(
    * `tipo: 'carpeta_local'` marca el gate que el modal resuelve ahí mismo: pide la
    * carpeta del cerebro, la guarda y reintenta el avance.
    */
-  bloquesPendientes?: Array<{ nombre: string; es_gate: boolean; omitible?: boolean; tipo?: BloqueoGate['tipo'] }>
+  bloquesPendientes?: BloquePendienteGate[]
   /** Nombre de la etapa destino REAL (tras resolver el routing), para el feedback. */
   etapaDestinoNombre?: string
   /** Presente solo con `error === 'requiere_confirmacion'`. */
@@ -3898,7 +3918,15 @@ export async function cambiarEtapaNegocioConGate(
     if (bloqueantes.length > 0) {
       return {
         error: 'gate_bloqueado',
-        bloquesPendientes: bloqueantes.map(c => ({ nombre: c.mensaje, es_gate: true })),
+        bloquesPendientes: bloqueantes.map(c => (esAvanzable(c)
+          ? {
+              nombre: c.mensaje,
+              es_gate: true,
+              tipo: 'cruce' as const,
+              cruce_slug: c.slug,
+              ...(c.advertencia ? { advertencia: c.advertencia } : {}),
+            }
+          : { nombre: c.mensaje, es_gate: true })),
       }
     }
   }
@@ -4270,6 +4298,112 @@ export async function cambiarEtapaNegocioConGate(
 }
 
 // ── Marcar bloque completo ─────────────────────────────────────────────────────
+
+// ── Avanzar un cruce con motivo ───────────────────────────────────────────────
+
+/**
+ * Deja la excepción para los cruces que frenan HOY el avance del negocio, con el motivo
+ * de quien los avanza. No mueve el negocio: la pantalla reintenta el avance después, y
+ * ese avance pasa por todos los demás gates como siempre.
+ *
+ * - Lo puede hacer solo quien está en `workspaces.config_extra.avanzar_cruces.staff_ids`
+ *   (`puedeAvanzarCruces`, la misma función que decide si la pantalla dibuja el botón), y
+ *   además tiene que poder avanzar la fase (`guardAvanzarStage`).
+ * - La excepción vale para ese cruce, en ese negocio, con esos datos (la huella que
+ *   devuelve `contradiccionesQueBloquean`, recalculada aquí: no se le cree al cliente).
+ *   Un slug que hoy no frena no deja nada.
+ * - Queda en `negocio_cruces_avanzados` (solo la escribe service_role) y en el historial
+ *   del negocio, con quién, qué cruce y el motivo.
+ */
+export async function avanzarCrucesConMotivo(
+  negocioId: string,
+  cruceSlugs: string[],
+  motivo: string,
+): Promise<{ error: string | null; avanzados?: number }> {
+  const { supabase, workspaceId, staffId, error } = await getWorkspace()
+  if (error || !workspaceId) return { error: 'No autenticado' }
+
+  const errMotivo = validarMotivoAvance(motivo)
+  if (errMotivo) return { error: errMotivo }
+  const motivoLimpio = motivo.trim()
+  const slugs = [...new Set((Array.isArray(cruceSlugs) ? cruceSlugs : []).filter(x => typeof x === 'string' && x))]
+  if (slugs.length === 0) return { error: 'No hay cruces para avanzar' }
+
+  const svc = createServiceClient()
+  const { data: ws } = await db(svc).from('workspaces').select('config_extra').eq('id', workspaceId).maybeSingle()
+  if (!puedeAvanzarCruces(staffId, (ws as { config_extra?: unknown } | null)?.config_extra ?? null)) {
+    return { error: 'No tienes permiso para avanzar cruces' }
+  }
+
+  const { data: negocioRaw } = await db(supabase)
+    .from('negocios')
+    .select('etapa_actual_id, stage_actual')
+    .eq('id', negocioId)
+    .eq('workspace_id', workspaceId)
+    .maybeSingle()
+  const negocio = negocioRaw as { etapa_actual_id: string | null; stage_actual: string | null } | null
+  if (!negocio?.etapa_actual_id) return { error: 'Negocio no encontrado' }
+
+  const { data: etapaRaw } = await db(supabase)
+    .from('etapas_negocio')
+    .select('orden, linea_id, nombre, config_extra')
+    .eq('id', negocio.etapa_actual_id)
+    .maybeSingle()
+  const etapa = etapaRaw as {
+    orden: number; linea_id: string; nombre: string | null; config_extra: { areas_que_avanzan?: unknown } | null
+  } | null
+  if (!etapa) return { error: 'Etapa no encontrada' }
+
+  const gAvance = await guardAvanzarStage(
+    negocioId,
+    (negocio.stage_actual ?? 'venta') as Stage,
+    (etapa.config_extra?.areas_que_avanzan ?? []) as Area[],
+  )
+  if (!gAvance.ok) return { error: gAvance.error ?? 'Sin permiso' }
+
+  const { data: lineaRaw } = await db(supabase)
+    .from('lineas_negocio').select('config_extra').eq('id', etapa.linea_id).maybeSingle()
+  const bloqueantes = await contradiccionesQueBloquean(supabase, {
+    negocioId,
+    lineaId: etapa.linea_id,
+    etapaActualId: negocio.etapa_actual_id,
+    etapaOrden: etapa.orden,
+    configLinea: (lineaRaw as { config_extra?: Record<string, unknown> | null } | null)?.config_extra ?? null,
+  })
+  const aAvanzar = bloqueantes.filter(c => esAvanzable(c) && slugs.includes(c.slug))
+  if (aAvanzar.length === 0) return { error: null, avanzados: 0 }
+
+  const { error: errIns } = await db(svc).from('negocio_cruces_avanzados').insert(aAvanzar.map(c => ({
+    workspace_id: workspaceId,
+    negocio_id: negocioId,
+    cruce_slug: c.slug,
+    huella: c.huella,
+    mensaje: c.mensaje,
+    motivo: motivoLimpio,
+    etapa_id: negocio.etapa_actual_id,
+    autor_id: staffId,
+  })))
+  if (errIns) {
+    console.error('[avanzarCrucesConMotivo] insert:', errIns)
+    return { error: 'No se pudo guardar el avance del cruce' }
+  }
+
+  for (const c of aAvanzar) {
+    await registrarActividad(db(svc), {
+      workspace_id: workspaceId,
+      entidad_tipo: 'negocio',
+      entidad_id: negocioId,
+      tipo: 'cambio',
+      autor_id: staffId,
+      campo_modificado: CAMPO_CRUCE_AVANZADO,
+      valor_anterior: c.mensaje,
+      valor_nuevo: c.slug,
+      contenido: motivoLimpio,
+    }, 'avanzarCrucesConMotivo')
+  }
+
+  return { error: null, avanzados: aAvanzar.length }
+}
 
 /**
  * Guardar un bloque completo. Corre dentro de `enPeticionDeRuta`: el guard, los helpers y la
