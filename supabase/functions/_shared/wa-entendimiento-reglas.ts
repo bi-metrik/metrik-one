@@ -1533,7 +1533,10 @@ export function leerNuevo(texto: string): LecturaNuevo | null {
   if (viaje !== undefined) return viaje;
   const m =/^(?:es\s+)?(?:(?:un|una)\s+)?(?:client[ea]\s+nuev[oa]|nuev[oa](?:\s+client[ea])?)(?=$|[\s,.:;-])[\s,.:;-]*([\s\S]*)$/i.exec(bruto);
   // «nueva, se llama Laura Prueba»: el nombre es lo que sigue a «se llama» (control de Vera, ND2).
-  if (m) return { cliente: m[1].trim().replace(/^(?:(?:que\s+)?se\s+llama|llamad[oa]|de\s+nombre)[\s,.:;-]+/i, '').trim() || null };
+  // Noveno control (hallazgo 1): también la preposición que lo introduce («nuevo para Ana Ruiz», «nueva a nombre de …»).
+  if (m) {
+    return { cliente: m[1].trim().replace(/^(?:(?:que\s+)?se\s+llama|llamad[oa]|de\s+nombre|(?:va\s+)?a\s+nombre\s+de|para|del?)[\s,.:;-]+/i, '').trim() || null };
+  }
   if (/^(?:(?:es\s+)?(?:otr[oa]|un[oa]?\s+otr[oa])\s+client[ea]|cambi(?:o|ar|amos)\s+(?:de\s+)?client[ea])$/.test(normalizarTexto(bruto))) return { cliente: null };
   return null;
 }
