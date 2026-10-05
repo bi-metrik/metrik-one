@@ -8,6 +8,8 @@
 import { getServiceClient } from "../_shared/supabase-client.ts";
 import { sendTextMessage } from "../_shared/wa-respond.ts";
 import { ctxCardumen } from "../_shared/cardumen/telemetria.ts";
+import { esEstadoObjetos } from "../_shared/cardumen/objetos.ts";
+import { recordatorioObjetos } from "../_shared/cardumen/objetos-flujo.ts";
 
 const REMINDER =
   "🐟 ¿Seguimos? Te quedaste a mitad de tu historia sobre hacer negocios en La Araucanía. " +
@@ -44,6 +46,23 @@ Deno.serve(async (req) => {
     // demo) no lo recibe: se filtra aqui y no en la consulta, porque `state->>motor` es NULL
     // en todas las demas y un `neq` contra NULL las excluiria a todas.
     if ((r.state as { motor?: string } | null)?.motor === "navigate") continue;
+    // Una secuencia de objetos sueltos no tiene "ultima respuesta" que reenviar: su
+    // recordatorio es el BOTON del paso pendiente. Mismo mecanismo (`reminded_at`, misma
+    // ventana 2-24h), otro mensaje. Se marca igual que el del chat, asi que es UNO solo.
+    if (esEstadoObjetos(r.state)) {
+      try {
+        if (await recordatorioObjetos(supabase, r.phone, r.state)) {
+          await supabase
+            .from("cardumen_chat_sessions")
+            .update({ reminded_at: new Date().toISOString() })
+            .eq("phone", r.phone);
+          reminded++;
+        }
+      } catch (e) {
+        console.error(`[cardumen-cron] error recordando objetos a ${r.phone}:`, (e as Error).message);
+      }
+      continue;
+    }
     try {
       const estudio = (r.state as { study_id?: string } | null)?.study_id ?? null;
       await sendTextMessage(r.phone, REMINDER, ctxCardumen(estudio, REMINDER));

@@ -98,6 +98,18 @@ describe('los cinco estados', () => {
     expect(r.mensaje).not.toMatch(/!|¡|urgente/i)
   })
 
+  it('la licencia de ONE no se pausa: vencida es vencida, sin prometer ni amenazar con una pausa', () => {
+    for (const mora of [
+      { estado: 'en_mora' as const, vencio: '2026-10-05', corteDesde: '2026-11-05' },
+      { estado: 'suspendido' as const, vencio: '2026-10-05', corteDesde: '2026-11-05' },
+    ]) {
+      const r = resumenEstado({ terminos: APROBADA, pago: pendiente('2026-10-05'), mora, hoy: '2026-11-10', producto: 'one' })
+      expect(r).toMatchObject({ estado: 'en_mora', tono: 'ambar_fuerte', chip: 'Cuota vencida' })
+      expect(r.mensaje).toBe('Tu cuota del 5-oct está vencida.')
+      expect(r.mensaje).not.toMatch(/pausa|Valida/i)
+    }
+  })
+
   it('sin poder leer el pago no afirma nada', () => {
     expect(resumenEstado({ terminos: APROBADA, pago: null, mora: AL_DIA, hoy: '2026-10-01' }).estado).toBe('desconocido')
   })

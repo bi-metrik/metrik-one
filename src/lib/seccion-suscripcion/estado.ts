@@ -28,6 +28,12 @@
  *
  * Los términos pendientes mandan sobre el pago: mientras no se acepten, la tarjeta de pago cede su
  * lugar al botón «Revisar y aceptar».
+ *
+ * ## La licencia de ONE (Clarity)
+ *
+ * Mismos estados, salvo `pausado`: ONE no se pausa por mora (la regla de los 30 días es la cláusula
+ * 11.1 de los términos de Valida), así que una cuota vencida hace más de 30 días sigue siendo
+ * `en_mora`, y el texto no promete ni amenaza con una pausa que no existe.
  */
 
 import { leerPeriodoEnConcepto } from '@/lib/cobros/periodo-en-concepto'
@@ -97,7 +103,10 @@ export function resumenEstado(p: {
   pago: ProximoPago | null
   mora: EstadoMora
   hoy: string
+  /** De qué suscripción se habla. Por defecto, Valida de los CDA. */
+  producto?: 'valida_cda' | 'one'
 }): ResumenEstado {
+  const esOne = p.producto === 'one'
   if (p.terminos.estado === 'pendiente') {
     if (p.terminos.enPlazo && p.terminos.plazoHasta) {
       return {
@@ -117,7 +126,7 @@ export function resumenEstado(p: {
     }
   }
 
-  if (p.mora.estado === 'suspendido') {
+  if (p.mora.estado === 'suspendido' && !esOne) {
     return {
       estado: 'pausado',
       tono: 'rojo',
@@ -127,13 +136,15 @@ export function resumenEstado(p: {
     }
   }
 
-  if (p.mora.estado === 'en_mora') {
+  if (p.mora.estado === 'en_mora' || p.mora.estado === 'suspendido') {
     const periodo = p.pago?.estado === 'pendiente' ? periodoCorto(p.pago.concepto, p.pago.fechaVencimiento) : fechaDiaMes(p.mora.vencio)
     return {
       estado: 'en_mora',
       tono: 'ambar_fuerte',
       chip: 'Cuota vencida',
-      mensaje: `Tu cuota del ${periodo} está vencida. Paga antes del ${fechaDiaMes(p.mora.corteDesde)} para evitar la pausa del servicio.`,
+      mensaje: esOne
+        ? `Tu cuota del ${periodo} está vencida.`
+        : `Tu cuota del ${periodo} está vencida. Paga antes del ${fechaDiaMes(p.mora.corteDesde)} para evitar la pausa del servicio.`,
       requiereAccion: true,
     }
   }
