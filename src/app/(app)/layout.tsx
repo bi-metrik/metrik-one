@@ -6,7 +6,10 @@ import { RUTA_DESINCRONIZADA, hayDesincronizacionDeTenant } from '@/lib/tenant/d
 import NotificationBell from '@/components/notification-bell'
 import DevWorkspaceBar from '@/components/dev-workspace-bar'
 import VersionWatcher from '@/components/version-watcher'
+import RumRed from '@/components/rum/rum-red'
 import { getPlatformAdminState } from '@/lib/actions/platform-admin'
+import { getImpersonationOptions } from '@/lib/actions/impersonation'
+import { getActiveTimer } from './timer-actions'
 import { getWorkspace } from '@/lib/actions/get-workspace'
 import { getCachedUser } from '@/lib/supabase/auth-user'
 import { leerPerfilDeSesion } from '@/lib/supabase/perfil-sesion'
@@ -39,14 +42,25 @@ export default async function AppLayout({
   // Son independientes: ninguna usa el resultado de otra. `getNotificaciones` llama a
   // `getWorkspace` por dentro, pero los dos pasan por el mismo `cache()` de React
   // (`getWorkspaceCached`), asi que comparten la promesa en vuelo — no duplica lecturas.
-  const [profileResult, workspaceCtx, platformAdminState, notificaciones] = await Promise.all([
-    // La MISMA fila que leen `getWorkspace` y `getPlatformAdminState`: una sola lectura
-    // compartida por `cache()` (antes eran tres a la vez, ver `perfil-sesion.ts`).
-    leerPerfilDeSesion(user.id).then((data) => ({ data })),
-    getWorkspace(),
-    getPlatformAdminState(),
-    getNotificaciones(),
-  ])
+  //
+  // Las dos ultimas las pedia el navegador al montar el shell, cada una con su server action
+  // (2026-10-05): las opciones de «Ver como» y el timer del FAB. Next pone las server actions
+  // en fila, asi que esas lecturas retrasaban la primera accion real de la persona, y con la
+  // red de Claro/Telmex cada viaje cuesta segundos. Aqui van en paralelo con lo demas.
+  const [profileResult, workspaceCtx, { platformAdminState, impersonacion }, notificaciones, timerActivo] =
+    await Promise.all([
+      // La MISMA fila que leen `getWorkspace` y `getPlatformAdminState`: una sola lectura
+      // compartida por `cache()` (antes eran tres a la vez, ver `perfil-sesion.ts`).
+      leerPerfilDeSesion(user.id).then((data) => ({ data })),
+      getWorkspace(),
+      // «Ver como» es solo del platform_admin: a los demas no se les pregunta nada.
+      getPlatformAdminState().then(async (estado) => ({
+        platformAdminState: estado,
+        impersonacion: estado ? await getImpersonationOptions() : null,
+      })),
+      getNotificaciones(),
+      getActiveTimer(),
+    ])
 
   const profile = profileResult.data
   if (!profile) {
@@ -204,6 +218,8 @@ export default async function AppLayout({
         modoVitrina={modoVitrina}
         hasLineas={hasLineas}
         suscripcion={suscripcion}
+        impersonacion={impersonacion}
+        timerActivo={timerActivo}
         notificationBell={
           <NotificationBell
             userId={user.id}
@@ -218,6 +234,9 @@ export default async function AppLayout({
           recarga (sola si no hay nada que perder, con aviso si la persona esta
           escribiendo). Techo de 8h aunque no haya deploy nuevo. */}
       <VersionWatcher epoca={EPOCA} />
+      {/* Medicion desde el navegador (`[rum]`): web vitals y navegaciones suaves, un
+          beacon por ciclo de pagina. No pinta nada. */}
+      <RumRed />
       {process.env.NODE_ENV === 'development' && allWorkspaces.length > 0 && (
         <DevWorkspaceBar workspaces={allWorkspaces} activeSlug={activeSlug ?? ''} />
       )}

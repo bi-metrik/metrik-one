@@ -5,10 +5,10 @@ import { useRouter, usePathname } from 'next/navigation'
 import { Plus, X, Clock, Play, Square } from 'lucide-react'
 import { toast } from 'sonner'
 import {
-  startTimer, stopTimer, getActiveTimer, getDestinosParaTimer,
+  startTimer, stopTimer, getDestinosParaTimer, type ActiveTimer,
 } from './timer-actions'
 import { accionesVisiblesFab, MenuAccionesFab, type AccionFab } from './fab-acciones'
-import { negocioDeContextoCerrado } from '@/lib/actions/negocio-estado-actions'
+import { useNegocioCerrado } from '@/lib/negocios/negocio-en-pantalla'
 // El formulario de pago vive aparte: lo comparten el FAB global y el bloque de
 // Movimientos de la ficha (allí con el negocio ya fijado).
 import RegistrarPagoModal from '@/components/registrar-pago-modal'
@@ -23,6 +23,11 @@ interface FABProps {
   registrarPagoEnabled?: boolean
   /** `workspaces.modules`, para las acciones que son opt-in por workspace. */
   modules?: Record<string, boolean | undefined>
+  /**
+   * El timer corriendo del workspace, resuelto en el layout (`getActiveTimer`). Antes el FAB
+   * lo pedia al montar con una server action, en cada carga completa de cualquier pantalla.
+   */
+  timerActivo?: ActiveTimer | null
 }
 
 const STORAGE_KEY = 'metrik-timer-v2'
@@ -41,9 +46,15 @@ const DEFAULT_TIMER: TimerLocal = {
   inicio: null,
 }
 
+/** El timer del servidor, en la forma que guarda el FAB. */
+function desdeServidor(t: ActiveTimer | null | undefined): TimerLocal {
+  if (!t) return DEFAULT_TIMER
+  return { isRunning: true, proyectoId: t.proyecto_id, proyectoNombre: t.proyecto_nombre, inicio: t.inicio }
+}
+
 // ── FAB Component ─────────────────────────────────────
 
-export default function FAB({ role, registrarPagoEnabled = false, modules }: FABProps) {
+export default function FAB({ role, registrarPagoEnabled = false, modules, timerActivo = null }: FABProps) {
   const [open, setOpen] = useState(false)
   const [timerPanel, setTimerPanel] = useState(false)
   const [pagoModal, setPagoModal] = useState(false)
@@ -54,28 +65,19 @@ export default function FAB({ role, registrarPagoEnabled = false, modules }: FAB
   const contextNegocioId = negocioContextMatch?.[1] ?? null
   const contextEntityId = contextNegocioId
 
-  // ¿El negocio del contexto esta cerrado? El FAB solo conoce el `pathname`, asi que
-  // lo pregunta al servidor. Se guarda el ID que resulto cerrado, NO un booleano: al
-  // navegar a otro negocio el estado se apaga solo porque el id deja de coincidir, en
-  // vez de quedarse prendido con el resultado del anterior mientras la consulta del
-  // nuevo esta en vuelo. Mismo patron que `negocioSinHonorario` en el modal de pago.
-  const [negocioCerradoId, setNegocioCerradoId] = useState<string | null>(null)
-  const contextoCerrado = negocioCerradoId !== null && negocioCerradoId === contextNegocioId
-
-  useEffect(() => {
-    if (!contextNegocioId) return
-    let cancel = false
-    negocioDeContextoCerrado(contextNegocioId).then((res) => {
-      if (!cancel && res.cerrado) setNegocioCerradoId(contextNegocioId)
-    })
-    return () => { cancel = true }
-  }, [contextNegocioId])
+  // ¿El negocio del contexto esta cerrado? Lo anuncia la ficha que lo pinta
+  // (`negocio-en-pantalla.ts`): antes el FAB se lo preguntaba al servidor con una server
+  // action en cada navegacion a una ficha, que se ponia en fila delante de la accion real.
+  // Al navegar a otro negocio se apaga solo porque se lee por id.
+  const contextoCerrado = useNegocioCerrado(contextNegocioId)
 
   // Timer state
-  const [timer, setTimer] = useState<TimerLocal>(DEFAULT_TIMER)
+  const [timer, setTimer] = useState<TimerLocal>(() => desdeServidor(timerActivo))
   const [elapsed, setElapsed] = useState(0)
-  const [projects, setProjects] = useState<{ id: string; name: string; code: string }[]>([])
-  const [timerLoaded, setTimerLoaded] = useState(false)
+  // Los destinos (negocios abiertos) se piden al abrir el panel del timer, no al montar:
+  // eran TODOS los negocios abiertos del workspace en cada carga de cualquier pantalla,
+  // para decidir si se mostraba un boton.
+  const [projects, setProjects] = useState<{ id: string; name: string; code: string }[] | null>(null)
   const [isPending, startTransition] = useTransition()
   const intervalRef = useRef<ReturnType<typeof setInterval> | null>(null)
 
@@ -87,38 +89,28 @@ export default function FAB({ role, registrarPagoEnabled = false, modules }: FAB
     try { localStorage.setItem(STORAGE_KEY, JSON.stringify(s)) } catch { /* */ }
   }, [])
 
-  // ── Hydrate timer from server ──────────────────────
-
+  // ── Timer del servidor ─────────────────────────────
+  // Llega resuelto del layout. Si el layout se vuelve a pintar (revalidacion tras iniciar o
+  // detener), manda el servidor.
+  const timerId = timerActivo?.id ?? null
+  const timerInicio = timerActivo?.inicio ?? null
   useEffect(() => {
-    async function hydrate() {
-      const [activeTimer, destinos] = await Promise.all([
-        getActiveTimer(),
-        getDestinosParaTimer(),
-      ])
-      setProjects(destinos.negocios)
-
-      if (activeTimer) {
-        const s: TimerLocal = {
-          isRunning: true,
-          proyectoId: activeTimer.proyecto_id,
-          proyectoNombre: activeTimer.proyecto_nombre,
-          inicio: activeTimer.inicio,
+    const s = desdeServidor(timerActivo)
+    setTimer(s)
+    if (s.isRunning) {
+      persist(s)
+    } else {
+      try {
+        const saved = localStorage.getItem(STORAGE_KEY)
+        if (saved) {
+          const parsed = JSON.parse(saved) as TimerLocal
+          if (parsed.isRunning) localStorage.removeItem(STORAGE_KEY)
         }
-        setTimer(s)
-        persist(s)
-      } else {
-        try {
-          const saved = localStorage.getItem(STORAGE_KEY)
-          if (saved) {
-            const parsed = JSON.parse(saved) as TimerLocal
-            if (parsed.isRunning) localStorage.removeItem(STORAGE_KEY)
-          }
-        } catch { /* ignore */ }
-      }
-      setTimerLoaded(true)
+      } catch { /* ignore */ }
     }
-    hydrate()
-  }, [persist])
+    // Solo cuando cambia el timer de verdad, no en cada render del layout.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [timerId, timerInicio, persist])
 
   // ── Timer tick ─────────────────────────────────────
 
@@ -169,6 +161,14 @@ export default function FAB({ role, registrarPagoEnabled = false, modules }: FAB
   }, [router, contextNegocioId, contextoCerrado])
 
   const handleOpenTimer = () => {
+    if (projects === null) {
+      void getDestinosParaTimer()
+        .then((d) => setProjects(d.negocios))
+        .catch(() => {
+          setProjects([])
+          toast.error('No se pudieron cargar los negocios abiertos')
+        })
+    }
     setOpen(false)
     setTimerPanel(true)
   }
@@ -243,13 +243,15 @@ export default function FAB({ role, registrarPagoEnabled = false, modules }: FAB
           <select
             value={timer.proyectoId ?? ''}
             onChange={e => {
-              const proj = projects.find(p => p.id === e.target.value)
+              const proj = (projects ?? []).find(p => p.id === e.target.value)
               setTimer(prev => ({ ...prev, proyectoId: e.target.value || null, proyectoNombre: proj?.name || '' }))
             }}
             className="w-full rounded-lg border bg-background px-3 py-2 text-sm"
           >
-            <option value="">Seleccionar...</option>
-            {projects.map(p => (
+            <option value="">
+              {projects === null ? 'Cargando…' : projects.length === 0 ? 'No hay negocios abiertos' : 'Seleccionar...'}
+            </option>
+            {(projects ?? []).map(p => (
               <option key={p.id} value={p.id}>{p.code ? `${p.code} · ${p.name}` : p.name}</option>
             ))}
           </select>
@@ -269,7 +271,7 @@ export default function FAB({ role, registrarPagoEnabled = false, modules }: FAB
       {open && (
         <div className="fixed bottom-[9.5rem] right-6 z-50 w-56 overflow-hidden rounded-2xl border bg-card shadow-xl">
           {/* Vista simplificada cuando hay timer corriendo */}
-          {timer.isRunning && timerLoaded ? (
+          {timer.isRunning ? (
             <>
               {/* Timer activo con proyecto */}
               <div className="flex items-center gap-2 border-b px-4 py-3">
@@ -300,15 +302,13 @@ export default function FAB({ role, registrarPagoEnabled = false, modules }: FAB
           ) : (
             <>
               {/* Timer start action (when not running) */}
-              {timerLoaded && projects.length > 0 && (
-                <button
-                  onClick={handleOpenTimer}
-                  className="flex w-full items-center gap-3 px-4 py-3 text-sm font-medium text-violet-600 hover:bg-violet-50 dark:hover:bg-violet-950/20 transition-colors border-b"
-                >
-                  <Clock className="h-4 w-4 shrink-0" />
-                  Iniciar timer
-                </button>
-              )}
+              <button
+                onClick={handleOpenTimer}
+                className="flex w-full items-center gap-3 px-4 py-3 text-sm font-medium text-violet-600 hover:bg-violet-50 dark:hover:bg-violet-950/20 transition-colors border-b"
+              >
+                <Clock className="h-4 w-4 shrink-0" />
+                Iniciar timer
+              </button>
 
               {/* Regular actions */}
               <MenuAccionesFab
@@ -322,7 +322,7 @@ export default function FAB({ role, registrarPagoEnabled = false, modules }: FAB
       )}
 
       {/* ── Active timer pill (above FAB — hidden when menu open) ── */}
-      {timer.isRunning && timerLoaded && !open && (
+      {timer.isRunning && !open && (
         <div className="fixed bottom-[8.5rem] right-6 z-50 flex items-center gap-2 rounded-full border bg-card pl-3 pr-1.5 py-1.5 shadow-lg">
           <div className="h-2 w-2 rounded-full bg-green-500 animate-pulse" />
           <span className="text-xs font-mono font-semibold tabular-nums">{formatTime(elapsed)}</span>

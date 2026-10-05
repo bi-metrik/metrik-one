@@ -15,6 +15,7 @@ import {
 } from 'react'
 import AnimacionMarca from '@/components/marca/animacion-marca'
 import { cargarCompletoSiToca } from '@/lib/version/recarga-pendiente'
+import { marcarInicioNavegacion } from '@/lib/rum/navegacion'
 
 /**
  * Respuesta inmediata al tocar algo que navega, sin esperar a la red.
@@ -75,6 +76,8 @@ export function NavegacionPendienteProvider({ children }: { children: ReactNode 
       // navegacion es el momento de ponerse al dia, como carga completa del destino.
       if (cargarCompletoSiToca(href)) return
       destinoEnCurso.current = href
+      // RUM: desde el toque hasta que pinta el destino (lo cierra `rum-red.tsx`).
+      marcarInicioNavegacion('tarjeta', href)
       setDestino(href)
       iniciar(() => {
         router.push(href)

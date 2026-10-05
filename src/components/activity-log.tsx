@@ -24,7 +24,7 @@ interface StaffOption {
   full_name: string
 }
 
-interface ActivityEntry {
+export interface ActivityEntry {
   id: string
   tipo: string
   contenido: string | null
@@ -44,6 +44,12 @@ interface ActivityLogProps {
   entidadId: string
   staffList: StaffOption[]
   oportunidadId?: string | null
+  /**
+   * La actividad ya leída en el servidor (`getActivityLog`). Con ella la tarjeta no la
+   * vuelve a pedir al montar: esa server action se ponía en fila delante de la primera
+   * acción real de la persona. Sin ella (p. ej. el 360 del contacto), la pide como antes.
+   */
+  entradasIniciales?: ActivityEntry[]
 }
 
 const CAMPO_LABELS: Record<string, string> = {
@@ -118,9 +124,10 @@ const claveShowSystem = (tipo: string) =>
   tipo === 'contacto' ? 'activity-log:show-system:contacto' : SHOW_SYSTEM_KEY
 const showSystemPorDefecto = () => true
 
-export default function ActivityLog({ entidadTipo, entidadId, staffList, oportunidadId }: ActivityLogProps) {
-  const [entries, setEntries] = useState<ActivityEntry[]>([])
-  const [loading, setLoading] = useState(true)
+export default function ActivityLog({ entidadTipo, entidadId, staffList, oportunidadId, entradasIniciales }: ActivityLogProps) {
+  const [entries, setEntries] = useState<ActivityEntry[]>(entradasIniciales ?? [])
+  const [loading, setLoading] = useState(entradasIniciales === undefined)
+  const conIniciales = entradasIniciales !== undefined
   const [isPending, startTransition] = useTransitionTolerante()
 
   // Form state
@@ -153,14 +160,27 @@ export default function ActivityLog({ entidadTipo, entidadId, staffList, oportun
     })
   }
 
+  // Llegó del servidor: si la página se vuelve a pintar (revalidación, otro negocio), manda
+  // lo nuevo. Se ajusta en el render (no en un efecto), como recomienda React para estado
+  // que deriva de una prop.
+  const [inicialesVistas, setInicialesVistas] = useState(entradasIniciales)
+  if (entradasIniciales !== inicialesVistas) {
+    setInicialesVistas(entradasIniciales)
+    if (entradasIniciales) {
+      setEntries(entradasIniciales)
+      setLoading(false)
+    }
+  }
+
   useEffect(() => {
+    if (conIniciales) return
     async function load() {
       const data = await getActivityLog(entidadTipo, entidadId, oportunidadId)
       setEntries(data as ActivityEntry[])
       setLoading(false)
     }
     load()
-  }, [entidadTipo, entidadId, oportunidadId])
+  }, [entidadTipo, entidadId, oportunidadId, conIniciales])
 
   const visibleEntries = showSystem
     ? entries

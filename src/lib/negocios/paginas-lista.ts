@@ -48,14 +48,19 @@ export function refrescarComienzo<T extends ConId>(previas: T[], frescas: T[]): 
  * eso reventaba en `r.json()` y la persona quedaba con un error sin salida. Ahora se
  * recarga la página completa, para que el flujo de login o de pestaña desincronizada la
  * tome, y la promesa no se resuelve nunca (la página se va).
+ *
+ * `cache`: `no-store` por defecto. Una ruta que contesta con ETag (la campana) pide
+ * `no-cache`: el navegador guarda la respuesta y la revalida con `If-None-Match`; si el
+ * servidor dice 304, `fetch` entrega el cuerpo guardado como un 200.
  */
 export async function pedirJson<T>(
   url: string,
-  signal: AbortSignal,
+  signal: AbortSignal | undefined,
   recargar: () => void = () => window.location.reload(),
+  cache: RequestCache = 'no-store',
 ): Promise<T> {
   return conReintentoDeRed(async () => {
-    const r = await fetchPropio(url, { signal, cache: 'no-store' })
+    const r = await fetchPropio(url, { signal, cache })
     if (r.status === 401 || r.redirected) return irseAlFlujoDeSesion<T>(recargar)
     if (!r.ok) throw new Error(`HTTP ${r.status}`)
     if (!(r.headers.get('content-type') ?? '').includes('application/json')) {
