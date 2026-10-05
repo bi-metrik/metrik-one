@@ -106,17 +106,12 @@ const traslado = (over = {}) => item({ id: 'traslado', nombre: 'Traslado aeropue
 const saona = (over = {}) => item({ id: 'saona', nombre: 'Tour Isla Saona', grupo: 'tour', subtotal: 540_000, precio_venta: 620_690, ...over })
 
 describe('⚠️⚠️ el aviso de dinero se PINTA donde la comercial mira', () => {
-  it('nombra la línea, dice cuánto suma y ofrece las dos salidas', () => {
-    // Un tour con día (la cotización usa días) y un traslado con precio y sin día.
+  it('un traslado con precio y sin día ya NO se avisa: se imprime incluido (D1 del 2026-10-05)', () => {
+    // Un tour con día (la cotización usa días) y un traslado con precio y sin día. Hasta el
+    // 2026-10-05 caía a «no incluidas» y el aviso rojo lo decía; ahora sin día sigue incluido.
     const html = pintar([vuelo(), hotel(), traslado(), saona({ dia_relativo: 2 })])
-
-    expect(html).toContain('se va a imprimir como')
-    expect(html).toContain('no incluida')
-    expect(html).toContain('Traslado aeropuerto')
-    expect(html).toContain('229.885')
-    // Las dos salidas, dichas con todas las letras.
-    expect(html).toContain('asígnale un día')
-    expect(html).toContain('déjala en cero')
+    expect(html).not.toContain('se va a imprimir como')
+    expect(html).not.toContain('Sugerida')
   })
 
   it('CONTROL · sin un solo día asignado NO hay aviso, aunque el traslado tenga precio', () => {
@@ -140,23 +135,14 @@ describe('⚠️⚠️ el aviso de dinero se PINTA donde la comercial mira', () 
     expect(html).not.toContain('se va a imprimir como')
   })
 
-  it('dos líneas: el aviso las lista y suma la plata de las dos', () => {
+  it('dos líneas sin día con precio tampoco disparan el aviso', () => {
     const html = pintar([
       vuelo(),
       traslado(),
       item({ id: 'catalina', nombre: 'Tour Isla Catalina', grupo: 'excursion', subtotal: 480_000, precio_venta: 551_724 }),
       saona({ dia_relativo: 1 }),
     ])
-    expect(html).toContain('se van a imprimir como')
-    expect(html).toContain('Traslado aeropuerto')
-    expect(html).toContain('Tour Isla Catalina')
-    // 229.885 + 551.724 = 781.609
-    expect(html).toContain('781.609')
-  })
-
-  it('⚠️ una sugerencia OCULTA que cobra dice además que el cliente ni la ve', () => {
-    const html = pintar([vuelo(), traslado({ mostrar_en_sugeridos: false }), saona({ dia_relativo: 1 })])
-    expect(html).toContain('el cliente ni la ve')
+    expect(html).not.toContain('se van a imprimir como')
   })
 })
 
@@ -172,16 +158,16 @@ describe('el campo del día y el check, en la ficha de la línea', () => {
     expect(html).not.toContain('Día del viaje')
   })
 
-  it('el check de mostrar solo aparece cuando la línea ES una sugerencia', () => {
-    const conDias = pintar([traslado(), saona({ dia_relativo: 1 })])
-    expect(conDias).toContain('Mostrarla al cliente entre las actividades sugeridas')
-    // Sin días no hay sugerencias, así que el check no tiene sentido y no se pinta.
-    const sinDias = pintar([traslado(), saona()])
-    expect(sinDias).not.toContain('Mostrarla al cliente entre las actividades sugeridas')
+  it('el check de mostrar solo aparece cuando la línea ES una sugerencia (fuera del precio)', () => {
+    const fuera = pintar([traslado({ entra_al_precio: false }), saona({ dia_relativo: 1 })])
+    expect(fuera).toContain('Mostrarla al cliente entre las actividades sugeridas')
+    // Sin día y sumando NO es sugerencia (D1 del 2026-10-05): el check no tiene sentido.
+    const dentro = pintar([traslado(), saona({ dia_relativo: 1 })])
+    expect(dentro).not.toContain('Mostrarla al cliente entre las actividades sugeridas')
   })
 
   it('el día y la marca de sugerida se ven SIN abrir la línea', () => {
-    const html = pintar([traslado(), saona({ dia_relativo: 3 })])
+    const html = pintar([traslado({ entra_al_precio: false }), saona({ dia_relativo: 3 })])
     expect(html).toContain('Día 3')
     expect(html).toContain('Sugerida')
   })

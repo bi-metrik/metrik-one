@@ -122,7 +122,7 @@ describe('(a) y (b) · el aviso rojo, en la pantalla donde la comercial mira', (
     expect(html).toContain('No suma al total')
   })
 
-  it('(b) la misma, entrando al precio, SÍ dispara el aviso con su plata', () => {
+  it('(b) la misma, entrando al precio, ya no es sugerencia: sin aviso (D1 del 2026-10-05)', () => {
     const html = pintar([
       vuelo(),
       hotel(),
@@ -130,11 +130,7 @@ describe('(a) y (b) · el aviso rojo, en la pantalla donde la comercial mira', (
       saona({ dia_relativo: 1 }),
       catalina({ entra_al_precio: true }),
     ])
-    expect(html).toContain('se va a imprimir como')
-    expect(html).toContain('Tour Isla Catalina')
-    expect(html).toContain('551.724')
-    // La salida nueva, dicha con todas las letras.
-    expect(html).toContain('desmarca «Entra al precio»')
+    expect(html).not.toContain('se va a imprimir como')
     expect(html).not.toContain('No suma al total')
   })
 

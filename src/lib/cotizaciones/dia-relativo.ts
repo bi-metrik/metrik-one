@@ -200,7 +200,10 @@ export function puedeSerSugerido(item: ItemConDia): boolean {
  */
 export function fueraDelPrecio(item: ItemConDia): boolean {
   if (item.entra_al_precio !== false) return false
-  if (diaDeItem(item) !== null) return false
+  // ⚠️ Desde el brief del 2026-10-05 el día YA NO es condición. Una actividad con día que se
+  // desmarca («No va») sale del precio y conserva su día para cuando la vuelvan a marcar. Ya no
+  // hay riesgo de «una línea del itinerario con precio que no suma»: una línea fuera del precio
+  // no entra al itinerario (`diasDelItinerario` la salta) ni a lo incluido del documento.
   return puedeSerSugerido(item)
 }
 
@@ -211,7 +214,9 @@ export function fueraDelPrecio(item: ItemConDia): boolean {
  * `false`, ni el itinerario ni los sugeridos existen y el documento es el de hoy.
  */
 export function hayDiasAsignados(items: ItemConDia[]): boolean {
-  return items.some(i => diaDeItem(i) !== null)
+  // Solo cuentan las líneas que van en el precio: el día guardado de una «No va» no arma
+  // itinerario (brief del 2026-10-05).
+  return items.some(i => diaDeItem(i) !== null && !fueraDelPrecio(i))
 }
 
 /**
@@ -227,6 +232,8 @@ export function diasDelItinerario(items: ItemConDia[]): DiaDelItinerario[] {
   for (const item of ordenados(items)) {
     const dia = diaDeItem(item)
     if (dia === null) continue
+    // Una línea fuera del precio no está en el itinerario aunque guarde su día («No va»).
+    if (fueraDelPrecio(item)) continue
     const lista = porDia.get(dia) ?? []
     lista.push(item.id)
     porDia.set(dia, lista)
@@ -253,12 +260,10 @@ export function diasDelItinerario(items: ItemConDia[]): DiaDelItinerario[] {
  * las ocultas — una línea que el cliente no ve y sí paga es peor, no mejor.
  */
 export function itemsSugeridos(items: ItemConDia[]): string[] {
-  if (!hayDiasAsignados(items)) {
-    return ordenados(items).filter(fueraDelPrecio).map(i => i.id)
-  }
-  return ordenados(items)
-    .filter(i => diaDeItem(i) === null && puedeSerSugerido(i))
-    .map(i => i.id)
+  // Brief del 2026-10-05 (D1): «no incluida» es SOLO lo que alguien sacó del precio a propósito
+  // (Opcional, o No va). Una actividad que suma y no tiene día se imprime en lo incluido: hasta
+  // ese día caía aquí con los días en uso, y el documento decía «no incluida» mientras la cobraba.
+  return ordenados(items).filter(fueraDelPrecio).map(i => i.id)
 }
 
 /** De los sugeridos, los que el PDF sí imprime (el check encendido, o ausente). */

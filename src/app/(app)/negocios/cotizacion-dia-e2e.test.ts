@@ -231,7 +231,7 @@ const COT = 'cot-1'
  * `dias` dice qué día lleva cada línea. `{}` = ninguna, que es el caso de las 20
  * cotizaciones que hoy existen en producción (medido el 2026-09-14).
  */
-function sembrar(dias: Record<string, number> = {}, ocultos: string[] = []) {
+function sembrar(dias: Record<string, number> = {}, ocultos: string[] = [], fuera: string[] = []) {
   ausentes = new Set(['cotizacion_itinerarios', 'itinerario_opciones'])
   const item = (
     id: string,
@@ -257,6 +257,8 @@ function sembrar(dias: Record<string, number> = {}, ocultos: string[] = []) {
     unidad: null,
     dia_relativo: dias[id] ?? null,
     mostrar_en_sugeridos: !ocultos.includes(id),
+    // Opcional (o No va, con `ocultos`): fuera del precio a propósito (brief del 2026-10-05).
+    entra_al_precio: !fuera.includes(id),
   })
 
   tablas = {
@@ -348,7 +350,7 @@ describe('criterio 1 · sin un solo dia, el PDF sale IGUAL que hoy', () => {
 })
 
 describe('criterio 2 · dos tours con dia y uno sin dia', () => {
-  it('el dia por dia imprime los dos, y el tercero sale al final como adicional', async () => {
+  it('el dia por dia imprime los dos, y el traslado sin día sigue incluido (D1 del 2026-10-05)', async () => {
     sembrar({ saona: 2, catalina: 3 })
     const { texto } = await medir()
 
@@ -358,8 +360,14 @@ describe('criterio 2 · dos tours con dia y uno sin dia', () => {
     expect(texto).toContain('Tour Isla Saona')
     expect(texto).toContain('Tour Isla Catalina')
 
-    // El traslado (grupo no combinable, sin dia) cae al paquete de sugeridos.
-    expect(texto.toLowerCase()).toContain('actividades adicionales no incluidas')
+    // Sin día ya NO es «no incluida»: el traslado suma y se imprime con lo incluido.
+    expect(texto.toLowerCase()).not.toContain('actividades adicionales no incluidas')
+    expect(texto.slice(texto.toLowerCase().indexOf('incluye también'))).toContain('Traslado aeropuerto')
+  }, 30_000)
+
+  it('la que se sacó del precio (Opcional) sí sale al final como adicional', async () => {
+    sembrar({ saona: 2, catalina: 3 }, [], ['traslado'])
+    const { texto } = await medir()
     const seccion = texto.slice(texto.toLowerCase().indexOf('actividades adicionales'))
     expect(seccion).toContain('Traslado aeropuerto')
   }, 30_000)
@@ -437,21 +445,14 @@ describe('⚠️⚠️ la contradiccion que el aviso existe para evitar, medida'
     })()
   }, 30_000)
 
-  it('con la sugerencia CON PRECIO, la columna NO suma el Subtotal — y la diferencia ES la sugerencia', () => {
-    // El estado CONTRADICTORIO. Se fija aqui con su numero para que nadie lo descubra
-    // en un documento del cliente: mientras «asignar dia es incluirlo» sea el unico
-    // interruptor, una sugerencia con precio sigue aportando al total y el documento
-    // la declara no incluida. Lo unico que lo frena es el aviso rojo del editor.
-    //
-    // Las dos alternativas se descartaron a proposito: imprimirla TAMBIEN en el detalle
-    // seria el mismo documento diciendo que esta y que no esta incluida; descontarla
-    // del total seria arreglarlo solo, que es lo que el encargo prohibe.
+  it('con las líneas sin día CON PRECIO, la columna también suma el Subtotal (D1 del 2026-10-05)', () => {
+    // Era el estado contradictorio: traslado 229.885 + catalina 551.724 = 781.609 salían como
+    // «no incluidas» mientras sumaban. Desde el brief del 2026-10-05 lo que suma se imprime en lo
+    // incluido, y la contradicción ya no se puede armar con los datos de la pantalla.
     return (async () => {
       sembrar({ saona: 1 })
       const { subtotalPDF, texto } = await medir()
-      const columna = sumaDeLaColumnaPorDias(texto)
-      // traslado 229.885 + catalina 551.724 = 781.609 de sugerencias con precio.
-      expect((subtotalPDF ?? 0) - columna).toBe(781_609)
+      expect(sumaDeLaColumnaPorDias(texto)).toBe(subtotalPDF)
     })()
   }, 30_000)
 })
@@ -472,7 +473,7 @@ describe('criterio 5 · un vuelo sin dia NO cae nunca a sugeridos', () => {
   }, 30_000)
 
   it('⚠️ con sugerencias presentes, el vuelo NO esta entre ellas', async () => {
-    sembrar({ saona: 1 })
+    sembrar({ saona: 1 }, [], ['traslado', 'catalina'])
     const { texto } = await medir()
 
     const seccion = texto.slice(texto.toLowerCase().indexOf('actividades adicionales'))
@@ -485,7 +486,7 @@ describe('criterio 5 · un vuelo sin dia NO cae nunca a sugeridos', () => {
 
 describe('el check de mostrar u ocultar una sugerencia', () => {
   it('la oculta NO se imprime, y la visible si', async () => {
-    sembrar({ saona: 1 }, ['catalina'])
+    sembrar({ saona: 1 }, ['catalina'], ['traslado', 'catalina'])
     const { texto } = await medir()
 
     const seccion = texto.slice(texto.toLowerCase().indexOf('actividades adicionales'))

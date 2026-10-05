@@ -37,8 +37,8 @@ describe('la regla: fuera del precio exige las tres condiciones a la vez', () =>
     expect(fueraDelPrecio({ ...tour, entra_al_precio: true })).toBe(false)
   })
 
-  it('⚠️ con día NO está fuera: con día está en el itinerario, o sea incluida', () => {
-    expect(fueraDelPrecio({ ...tour, dia_relativo: 2, entra_al_precio: false })).toBe(false)
+  it('con día también está fuera: es la «No va» que guarda su día (brief del 2026-10-05)', () => {
+    expect(fueraDelPrecio({ ...tour, dia_relativo: 2, entra_al_precio: false })).toBe(true)
   })
 
   it('⚠️ un vuelo o un hotel marcados fuera se IGNORAN: nunca se imprimen como no incluidos', () => {
@@ -84,9 +84,9 @@ describe('quién aporta al total: la sugerencia fuera del precio no', () => {
     expect(itemsQueAportanAlTotal(items)).toContain('avianca')
   })
 
-  it('⚠️ con día aporta aunque la marca diga false (dato por SQL): el documento sigue sumando', () => {
+  it('con día y fuera del precio («No va») NO aporta: el día no la devuelve al total', () => {
     const items = viaje({ catalina: { entra_al_precio: false, dia_relativo: 3 } })
-    expect(itemsQueAportanAlTotal(items)).toContain('catalina')
+    expect(itemsQueAportanAlTotal(items)).not.toContain('catalina')
   })
 
   it('tampoco es componente fijo del itinerario', () => {
@@ -108,9 +108,9 @@ describe('quién aporta al total: la sugerencia fuera del precio no', () => {
 })
 
 describe('las sugerencias: fuera del precio siempre se ofrece', () => {
-  it('con la cotización por días, está entre las sugeridas como cualquier otra', () => {
+  it('con la cotización por días, es la única sugerida: el traslado sin día sigue incluido (D1)', () => {
     const items = viaje({ saona: { dia_relativo: 1 }, catalina: { entra_al_precio: false } })
-    expect(itemsSugeridos(items)).toEqual(['traslado', 'catalina'])
+    expect(itemsSugeridos(items)).toEqual(['catalina'])
   })
 
   it('⚠️ SIN un solo día asignado, la fuera del precio se ofrece igual (y solo ella)', () => {
@@ -137,16 +137,15 @@ describe('⚠️⚠️ el aviso rojo, alimentado por el MISMO juego de ids', () 
     expect(avisoSugeridosQueCobran(items, itemsQueAportanAlTotal(items))).toEqual([])
   })
 
-  it('(b) la misma marcada que SÍ entra: avisa con su plata', () => {
+  it('(b) la misma marcada que SÍ entra: ya no es sugerencia, se imprime incluida y no avisa (D1)', () => {
     const items = viaje({ saona: { dia_relativo: 1 }, traslado: { dia_relativo: 1 } })
-    expect(avisoSugeridosQueCobran(items, itemsQueAportanAlTotal(items))).toEqual([
-      { id: 'catalina', precioLinea: 551_724, oculta: false },
-    ])
+    expect(avisoSugeridosQueCobran(items, itemsQueAportanAlTotal(items))).toEqual([])
+    expect(itemsSugeridos(items)).toEqual([])
   })
 
-  it('las dos a la vez: solo avisa la que cobra', () => {
+  it('el aviso solo salta si un llamador cuenta en el total una que salió del precio', () => {
     const items = viaje({ saona: { dia_relativo: 1 }, catalina: { entra_al_precio: false } })
-    expect(avisoSugeridosQueCobran(items, itemsQueAportanAlTotal(items)).map(a => a.id)).toEqual(['traslado'])
+    expect(avisoSugeridosQueCobran(items, items.map(i => i.id)).map(a => a.id)).toEqual(['catalina'])
   })
 })
 

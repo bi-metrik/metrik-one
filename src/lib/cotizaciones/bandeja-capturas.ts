@@ -17,6 +17,7 @@
  */
 
 import type { TipoRanura } from './ranuras-cotizacion'
+import { leerTarifaPax } from './tarifa-pasajero'
 
 /** Lo que el detector dijo de una captura (`detectarTipoDeCaptura`). */
 export interface CapturaDetectada {
@@ -282,4 +283,22 @@ export function pantallazosEnCotizacion(items: readonly { id: string; tarifa_pax
     })
   }
   return [...new Set(llaves)]
+}
+
+// ── El aviso flotante del pendiente ──────────────────────────────────────────
+
+/** El id del aviso «Quedó un pendiente en …» de una opción: uno por opción, nunca apilados. */
+export const idAvisoPendiente = (itemId: string) => `pendiente-${itemId}`
+
+/**
+ * ¿Lo que quedó pendiente al aceptar ya se resolvió? (brief del 2026-10-05, punto 15: «Falta el
+ * 2» seguía flotando después de que el pantallazo 2 entró). Al aceptar desde la bandeja la opción
+ * tiene UNA captura y sin costo confirmado; el pendiente es otra captura o la tasa. Se resolvió
+ * cuando la opción ya tiene el costo confirmado, otra casilla leída o otra habitación.
+ */
+export function pendienteResuelto(tarifaPax: unknown): boolean {
+  const t = leerTarifaPax(tarifaPax)
+  if (t.confirmada) return true
+  if ((t.habitaciones?.length ?? 0) > 1) return true
+  return Object.keys(t.casillas ?? {}).some(k => k !== 'grupo_completo')
 }

@@ -26,7 +26,7 @@ import { esAvisoFechasFueraDelViaje, esManual } from '@/lib/cotizaciones/ingreso
 import { fueraDeVista, MENSAJE_PEGADO_EN_BANDEJA } from '@/lib/cotizaciones/lectura-sin-silencio'
 import IngresoManualForm, { type RespuestaManual, type TipoManual } from './ingreso-manual-form'
 import { esIdDeBorrador, revisarBorrador } from '@/lib/cotizaciones/revisar-borrador'
-import { pantallazosEnCotizacion, type OpcionLeida } from '@/lib/cotizaciones/bandeja-capturas'
+import { idAvisoPendiente, pantallazosEnCotizacion, pendienteResuelto, type OpcionLeida } from '@/lib/cotizaciones/bandeja-capturas'
 import {
   huellaDeImagen,
   mensajeMismaImagen,
@@ -350,6 +350,18 @@ export default function BandejaCapturas({
     composicionViva.current = composicion
     destinoVivo.current = destinoViaje
   }, [items, ubicaciones, composicion, destinoViaje])
+  // Punto 15 del brief del 2026-10-05 · el aviso «Quedó un pendiente en …» se va solo cuando la
+  // opción lo resolvió (entró el pantallazo 2, o el costo se confirmó), no se queda flotando.
+  const avisosPendientes = useRef(new Set<string>())
+  useEffect(() => {
+    for (const itemId of [...avisosPendientes.current]) {
+      // Recién aceptada, la opción puede no haber llegado todavía a la página: se espera.
+      const item = items.find(i => i.id === itemId)
+      if (!item || !pendienteResuelto(item.tarifa_pax)) continue
+      toast.dismiss(idAvisoPendiente(itemId))
+      avisosPendientes.current.delete(itemId)
+    }
+  }, [items])
   // Qué captura trajo cada huella primero. Se escribe al pegar, sin esperar al render: dos
   // pegadas seguidas de la misma imagen se reconocen aunque la primera no se haya pintado.
   const huellas = useRef(new Map<string, string>())
@@ -708,7 +720,10 @@ export default function BandejaCapturas({
     })
     // H3 · la fila dice dónde quedó; un faltante de la tarifa se avisa aparte.
     const ver = onOpcionCreada ? { label: 'Ver', onClick: () => onOpcionCreada(d.itemId) } : undefined
-    if (d.pendiente) toast.warning(`Quedó un pendiente en ${d.donde}: ${d.pendiente}`, ver ? { action: ver } : undefined)
+    if (d.pendiente) {
+      toast.warning(`Quedó un pendiente en ${d.donde}: ${d.pendiente}`, { id: idAvisoPendiente(d.itemId), ...(ver ? { action: ver } : {}) })
+      avisosPendientes.current.add(d.itemId)
+    }
     refrescar()
   }
 
