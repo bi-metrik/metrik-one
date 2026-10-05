@@ -33,11 +33,28 @@ Cualquier envío proactivo en el camino crítico tira eso por la borda.
 - **Por eso la url del paso lleva `&e=<slug>` explícito.** La página, sin `e`, asume el slug
   del instrumento completo (`PARAMS.get('e') || 'cardumen-instrumento-adultos'`) y el POST
   mezclaría las dos formas de captura en el mismo `estudio`.
-- **La secuencia solo puede tener pasos de tipo `reparto`**: en modo objeto la página filtra
-  `t === 'reparto'` (`pasoPorId`). Los pasos narrativos del instrumento (`historia`,
-  `cierre_narrativo`, los `chips` de edad/antigüedad) NO están, y eso deja un hueco REAL:
-  los dos primeros objetos de adultos preguntan "en esa situación" / "eso que contaste" y
-  nadie pidió la situación. El bot que conduzca la parte narrativa no existe todavía.
+- **El bot conduce la entrevista COMPLETA, no solo los repartos** (autorizado por Mauricio
+  el 2026-10-05, cerrando el hueco que dejó la primera versión: los dos primeros repartos de
+  adultos preguntan "en esa situación" y nadie había pedido la situación). El `spec` es una
+  lista de `pasos` con `tipo`: `chips` (opción única), `relato` (micro-narrativa) y `reparto`.
+  La página sigue sirviendo SOLO los repartos (`pasoPorId` filtra `t === 'reparto'`).
+- ⚠️⚠️ **Los enunciados son LITERALES y el relato se guarda VERBATIM.** El bot manda
+  `paso.pregunta` tal cual, en su propio mensaje y sin nada pegado; no parafrasea, no resume
+  la historia ni se la repite a la persona en otras palabras, y NADA de esto pasa por un LLM.
+  Un paso narrativo sin `pregunta` invalida el spec a propósito. Si el enunciado cambia entre
+  participantes las respuestas dejan de ser comparables, y un resumen del bot mete la
+  interpretación del modelo dentro del dato. El acuse solo existe en el cuerpo del botón de
+  un reparto, que no es un enunciado.
+- ⚠️ **`sendButtons` recorta a 3 EN SILENCIO** (`buttons.slice(0, 3)`). Dos pasos del
+  instrumento tienen 4 y 5 opciones (`antiguedad` de adultos, `edad` de niños), así que arriba
+  de 3 va `sendNumberedMenu` — el mismo camino que ya eligió Navigate para sus 12 sectores.
+  `leerChips` acepta el id del botón, el número de la lista y el literal escrito.
+- **`normalizarTexto` SÍ normaliza la ñ** (NFD + quitar marcas), al contrario de
+  `normalizarTrigger`: quien escribe "mas de 7 anos" igual contesta. Medido, no supuesto.
+- **La voz se transcribe solo si el paso pendiente es un `relato`**, y la fila queda con
+  `transcrito_de_audio: true`: una transcripción no es el texto que la persona escribió.
+- **Un relato corto nunca bloquea**: UNA repregunta neutra (`estado.repreguntados`) y después
+  se acepta como venga.
 - **El vector autoritativo es el del POST, no el del texto.** El texto sirve para AVANZAR.
   Solo si no hay fila para `(estudio, token, payload->>objeto)` se guarda el derivado del
   texto, marcado `origen: 'texto_whatsapp'` y bajo la clave `vector_aproximado` (no

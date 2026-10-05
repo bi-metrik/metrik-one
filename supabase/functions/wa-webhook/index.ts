@@ -348,10 +348,17 @@ async function processMessage(message: IncomingMessage): Promise<void> {
     //     ("Listo preocupaciones 50-30-20") entraria al entrevistador de chat como si fuera
     //     una narrativa — y la palabra de consentimiento por defecto del encuadre de chat es
     //     justamente "LISTO". Lo que distingue la sesion es `state.modo = 'objetos'`.
-    //     Va antes de la transcripcion: un audio a mitad de la secuencia no es una respuesta
-    //     y no vale gastar una transcripcion en el.
+    //     Va antes de la transcripcion de este bloque: quien decide si vale la pena
+    //     transcribir es `continueObjetos`, que sabe en que paso va la persona.
     if (esEstadoObjetos(chatCardumen.state)) {
-      await continueObjetos(supabase, message.phone, chatCardumen.state, message.text || '');
+      // El audio NO se transcribe aqui: `continueObjetos` lo hace solo si el paso pendiente
+      // es un relato (en un paso de reparto la respuesta llega por el enlace de vuelta, y
+      // transcribir seria gastar una llamada para nada).
+      await continueObjetos(supabase, message.phone, chatCardumen.state, {
+        texto: message.text || '',
+        audioId: message.type === 'audio' ? (message.audio_id ?? null) : null,
+        botonId: message.interactive_reply ?? null,
+      });
       return;
     }
     // Lo que el webhook contesta aqui tambien es Cardumen: va marcado con el estudio.
