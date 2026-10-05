@@ -59,8 +59,8 @@ describe('calificarNombreNuevo: sin vocabulario', () => {
   });
 
   it('el texto de la re-pregunta (solo números) cita lo propuesto y dice cómo seguir', () => {
-    expect(textoNombreNuevoEnDuda('3005551234')).toBe('Para crear un cliente nuevo necesito su nombre; con «3005551234» no lo creo.'
-      + ' Responde NUEVO y el nombre completo (ej.: NUEVO Marta Gómez), NUEVO solo para tomarlo de los mensajes, o el número del viaje.');
+    expect(textoNombreNuevoEnDuda('3005551234')).toBe('¿Para qué cliente es el viaje nuevo? Con «3005551234» no sé quién es.\n'
+      + 'Escribe «nuevo» y su nombre (por ejemplo «nuevo Marta Gómez»), «nuevo» solo para tomarlo de los mensajes, o el número del viaje.');
   });
 });
 
@@ -100,15 +100,14 @@ describe('clientes con viaje abierto: la confirmación lo dice (también en el a
 
   it('la pregunta aparte, con el número de la lista o el código', () => {
     expect(textoConfirmarNuevo({ nombre: 'combo playero', conLista: true })).toBe(
-      '¿Creo el cliente nuevo «combo playero»? Responde SÍ, o escribe el nombre correcto, o el número del viaje.\nNo he creado ni cargado nada.');
+      '¿Creo el cliente nuevo «combo playero»? Responde «sí», el nombre correcto, o el número del viaje.\nNo he creado ni cargado nada.');
     expect(textoConfirmarNuevo({ nombre: 'Rosalba Tovar', conLista: true, parecidos: [{ viaje: ROSALBA, numero: 2 }] })).toBe([
       '¿Creo el cliente nuevo «Rosalba Tovar»?',
-      'Ya hay un viaje de Rosalba Quiñones Tovar (R 26 1). ¿Es para ese (responde 2) o es un cliente nuevo (responde SÍ)?',
-      'O escribe el nombre correcto.',
+      'Ya hay un viaje de Rosalba Quiñones Tovar (R 26 1): si es para ese, responde 2; si es un cliente nuevo, «sí»; o escríbeme el nombre correcto.',
       'No he creado ni cargado nada.',
     ].join('\n'));
     expect(textoConfirmarNuevo({ nombre: 'Rosalba', conLista: false, parecidos: [{ viaje: ROSALBA, numero: null }] }))
-      .toContain('¿Es para ese (responde R 26 1) o es un cliente nuevo (responde SÍ)?');
+      .toContain('si es para ese, responde R 26 1; si es un cliente nuevo, «sí»');
   });
 
   it('el acuse del encabezado y el resumen del reparto', () => {
@@ -124,7 +123,7 @@ describe('clientes con viaje abierto: la confirmación lo dice (también en el a
     const plan = armarPlan({ mensajes: ms, viajes: [ROSALBA], segmentos, encabezados });
     const resumen = partesResumenPlan(plan, ms, undefined, [ROSALBA]).join('\n');
     expect(resumen).toContain('1) Viaje nuevo de Rosalba Tovar — 2 mensajes');
-    expect(resumen).toContain('⚠ 1) Ya hay un viaje de Rosalba Quiñones Tovar (R 26 1). ¿Es para ese («el 1 y 2 son de R 26 1») o es un cliente nuevo (responde SÍ)?');
+    expect(resumen).toContain('⚠ 1) Ya hay un viaje de Rosalba Quiñones Tovar (R 26 1): si es para ese, escribe «el 1 y 2 son de R 26 1»; si es un viaje nuevo, déjalo así.');
     // La corrección que propone el aviso se entiende tal cual, y el «sí» sin corregir es el cliente nuevo.
     expect(interpretarRespuestaPlan('el 1 y 2 son de R 26 1', plan, [ROSALBA])).toMatchObject({ tipo: 'corregir', cambios: [{ ns: [2, 3], a: { tipo: 'existente', negocio_id: 'r' } }] });
     expect(interpretarRespuestaPlan('sí', plan, [ROSALBA])).toEqual({ tipo: 'si' });

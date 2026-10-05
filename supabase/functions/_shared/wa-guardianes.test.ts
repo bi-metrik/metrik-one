@@ -248,7 +248,7 @@ describe('N4 · sin solicitud no se crea nada', () => {
   it('sin un mensaje del cliente con un dato, no hay solicitud', () => {
     expect(haySolicitud({ historia: '', cliente: { nombre: null, telefono: null }, sugeridos: {}, descartados: [] }, { 1: 'cliente' })).toBe(false);
     expect(haySolicitud({ historia: '', cliente: { nombre: null, telefono: null }, sugeridos: { destino: { valor: 'X', frase: 'x' } }, descartados: [] }, { 1: 'ruido' })).toBe(false);
-    expect(textoSinSolicitud(4)).toContain('No vi una solicitud de viaje en estos 4 mensajes');
+    expect(textoSinSolicitud(4)).toBe('¿Es una solicitud de viaje? No la vi en estos 4 mensajes y no creé nada.\nResponde «sí» y lo creo igual, o «descartar» para dejarlos así.');
   });
 });
 
@@ -265,7 +265,7 @@ describe('N6 · viaje equivocado', () => {
     const cruces = detectarCruce({ destinoNegocio: 'CARTAGENA', destinoMensajes: 'Punta Cana', clienteNegocio: 'JORGE PÉREZ', clienteMensajes: null });
     expect(cruces).toEqual([{ que: 'destino', enNegocio: 'CARTAGENA', enMensajes: 'Punta Cana' }]);
     expect(textoAvisoCruce({ codigo: 'T1 26 8', cliente: 'JORGE PÉREZ', destino: 'CARTAGENA', nombre: 'CARTAGENA DIC', cruces }))
-      .toBe('Estos mensajes hablan de Punta Cana y CARTAGENA DIC · Jorge Pérez (T1 26 8) va a CARTAGENA. No cargué nada.\n¿Seguro que van ahí? Responde SÍ para cargarlos igual, o el número o el código del viaje correcto, o NUEVO y el nombre del cliente.');
+      .toBe('¿Seguro que estos mensajes van en CARTAGENA DIC · Jorge Pérez (T1 26 8)? Hablan de Punta Cana y ese viaje va a CARTAGENA; no cargué nada.\nResponde «sí» para cargarlos igual, el número o el código del viaje correcto, o «nuevo» y el nombre del cliente.');
   });
 
   it('el mismo destino escrito distinto, o una fecha que cambia, no es un cruce', () => {

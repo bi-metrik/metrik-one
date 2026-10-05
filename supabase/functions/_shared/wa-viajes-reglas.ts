@@ -393,15 +393,15 @@ export function textoPreguntaEncabezado(texto: string, candidatos: ReadonlyArray
       : `${nombre} tiene ${candidatos.length} viajes abiertos: ${enumerar(candidatos.map(viaje))}. ¿Va en uno de esos o es un viaje nuevo?`;
   }
   return [
-    `¿De qué viaje es «${String(texto).trim()}»?`,
+    `¿De qué viaje es «${String(texto).trim()}»? Hasta que me digas, no asigno lo que sigue.`,
     ...candidatos.map((v, i) => `${i + 1}. ${lineaCaja(v)}`),
-    `Responde con el número, NUEVO y el nombre si es un cliente nuevo, o DESCARTAR. Hasta entonces no asigno lo que sigue.`,
+    'Responde el número; si es un viaje nuevo, «nuevo» y el nombre del cliente; o «descartar».',
   ].join('\n');
 }
 
 /** La misma pregunta en una línea, para volver a mostrarla cuando llega contenido antes de la respuesta. */
 export function textoPreguntaEncabezadoCorta(texto: string, candidatos: ReadonlyArray<ViajeAbierto>): string {
-  return `Antes: ¿de qué viaje es «${String(texto).trim()}»? ${candidatos.map((v, i) => `${i + 1}. ${lineaCaja(v)}`).join(' · ')} · NUEVO y el nombre · DESCARTAR. Lo que mandes queda sin asignar hasta que respondas.`;
+  return `Antes: ¿de qué viaje es «${String(texto).trim()}»? ${candidatos.map((v, i) => `${i + 1}. ${lineaCaja(v)}`).join(' · ')}. Lo que mandes queda sin asignar hasta que me digas.`;
 }
 
 /** La elección de la lista del encabezado: «2», «2.», «el 2», «la 2». `null` si no es un número. */
@@ -561,13 +561,12 @@ export function textoConfirmarNuevo(p: {
     return l.join('\n');
   }
   if (ps.length === 0) {
-    l.push(`¿Creo el cliente nuevo «${nombre}»? Responde SÍ, o escribe el nombre correcto, o el ${p.conLista ? 'número' : 'código'} del viaje.`);
+    l.push(`¿Creo el cliente nuevo «${nombre}»? Responde «sí», el nombre correcto, o el ${p.conLista ? 'número' : 'código'} del viaje.`);
   } else {
     l.push(`¿Creo el cliente nuevo «${nombre}»?`);
     l.push(ps.length === 1
-      ? `Ya hay un viaje de ${clienteYCodigo(ps[0].viaje)}. ¿Es para ese (responde ${referenciaDe(ps[0].viaje, ps[0].numero)}) o es un cliente nuevo (responde SÍ)?`
-      : `Ya hay viajes de ${enumerar(ps.map(x => clienteYCodigo(x.viaje)))}. ¿Es para uno de esos (responde ${enumerar(ps.map(x => referenciaDe(x.viaje, x.numero)), 'o')}) o es un cliente nuevo (responde SÍ)?`);
-    l.push('O escribe el nombre correcto.');
+      ? `Ya hay un viaje de ${clienteYCodigo(ps[0].viaje)}: si es para ese, responde ${referenciaDe(ps[0].viaje, ps[0].numero)}; si es un cliente nuevo, «sí»; o escríbeme el nombre correcto.`
+      : `Ya hay viajes de ${enumerar(ps.map(x => clienteYCodigo(x.viaje)))}: si es para uno de esos, responde ${enumerar(ps.map(x => referenciaDe(x.viaje, x.numero)), 'o')}; si es un cliente nuevo, «sí»; o escríbeme el nombre correcto.`);
   }
   l.push('No he creado ni cargado nada.');
   return l.join('\n');
@@ -1822,7 +1821,7 @@ export function armarPlan(p: {
       // Un mensaje que no es del cliente (una promoción, un pago, ruido) no contagia a los que siguen.
       if (motivo && !noEsDelCliente(m.cuerpo)) tras = true;
       plan.mensajes.push(motivo
-        ? { n, destino: caja, por: 'encabezado', sospecha: true, motivo: `${motivo} (¿es de ${nombreCaja}?)` }
+        ? { n, destino: caja, por: 'encabezado', sospecha: true, motivo: `${motivo}; puede no ser de ${nombreCaja}` }
         : { n, destino: caja, por: 'encabezado' });
       if (!motivo) {
         for (const f of datos.fechas) vistos.fechas.add(f);
@@ -1891,8 +1890,8 @@ function avisoParecidosDelGrupo(k: number, ns: ReadonlyArray<number>, parecidos:
   const destino = (v: ViajeAbierto) => v.codigo?.trim() || nombrePropio(v.cliente) || '';
   const mover = `«el ${enumerar(ns.map(String))} ${ns.length === 1 ? 'es' : 'son'} de ${destino(ps[0])}»`;
   return ps.length === 1
-    ? `⚠ ${k}) Ya hay un viaje de ${clienteYCodigo(ps[0])}. ¿Es para ese (${mover}) o es un cliente nuevo (responde SÍ)?`
-    : `⚠ ${k}) Ya hay viajes de ${enumerar(ps.map(clienteYCodigo))}. ¿Es para uno de esos (por ejemplo ${mover}) o es un cliente nuevo (responde SÍ)?`;
+    ? `⚠ ${k}) Ya hay un viaje de ${clienteYCodigo(ps[0])}: si es para ese, escribe ${mover}; si es un viaje nuevo, déjalo así.`
+    : `⚠ ${k}) Ya hay viajes de ${enumerar(ps.map(clienteYCodigo))}: si es para uno de esos, escribe por ejemplo ${mover}; si es un viaje nuevo, déjalo así.`;
 }
 
 function recorte(t: string, n = 40): string {
@@ -1951,7 +1950,16 @@ export function partesResumenPlan(
   const grupos = gruposDelPlan(plan);
   const porDecidir = pendientes(plan);
   const largo = plan.mensajes.length <= MAX_CON_TEXTO ? 40 : 30;
-  const lineas: string[] = aviso ? [aviso] : [];
+  const faltan = clientesPorResolver(plan);
+  // Los ejemplos usan un número que está en el resumen (error 8: «el 4» salía con un solo mensaje).
+  const k = porDecidir.length > 0 ? visible(porDecidir[0].n) : Math.max(1, ...plan.mensajes.map(m => visible(m.n)));
+  // PR B (2026-10-05): UNA pregunta, arriba; el bloque del resumen debajo; sin comandos en mayúsculas.
+  const marcados = porDecidir.map(m => visible(m.n));
+  const pregunta = porDecidir.length > 0 ? `¿Qué hago con ${marcados.length === 1 ? `el ${marcados[0]}` : `los ${rangos(marcados)}`} (⚠)?`
+    : faltan.length > 0 ? textoFaltaCliente(faltan[0].destino)
+    : '¿Lo cargo así?';
+  // Un aviso corto («Corregido.», «No entendí «x».») va en la misma línea que la pregunta; uno largo, encima.
+  const lineas: string[] = !aviso ? [pregunta] : aviso.length <= 60 ? [`${aviso} ${pregunta}`] : [aviso, pregunta];
   lineas.push(grupos.length === 0 ? 'No hay mensajes con un viaje asignado.' : `Entendí ${grupos.length} ${grupos.length === 1 ? 'viaje' : 'viajes'}:`);
   for (const g of grupos) {
     const n = g.mensajes.length;
@@ -1965,21 +1973,18 @@ export function partesResumenPlan(
     const parecidos = viajesParecidos(g.destino.cliente, viajes);
     if (parecidos.length > 0) lineas.push(avisoParecidosDelGrupo(g.k, g.mensajes.map(visible), parecidos));
   }
-  const faltan = clientesPorResolver(plan);
   if (porDecidir.length > 0) {
-    lineas.push(`⚠ Para decidir antes del sí: ${porDecidir.length} ${porDecidir.length === 1 ? 'mensaje' : 'mensajes'}`);
+    lineas.push(`⚠ Por decidir antes del sí: ${porDecidir.length} ${porDecidir.length === 1 ? 'mensaje' : 'mensajes'}`);
     lineas.push(...porDecidir.map(m => `${linea(m.n, 40)} (${m.motivo ?? 'sin viaje'})`));
   }
   const descartados = plan.mensajes.filter(m => m.descartado).map(m => m.n);
   if (descartados.length > 0) lineas.push(`Descartados: ${rangos(descartados.map(visible))}`);
   lineas.push(...plan.avisos);
-  // Los ejemplos usan un número que está en el resumen (error 8: «el 4» salía con un solo mensaje).
-  const k = porDecidir.length > 0 ? visible(porDecidir[0].n) : Math.max(1, ...plan.mensajes.map(m => visible(m.n)));
-  lineas.push(faltan.length > 0 && porDecidir.length === 0
-    ? `No cargué nada todavía. Antes del sí: ${textoFaltaCliente(faltan[0].destino)}`
-    : porDecidir.length > 0
-    ? `No cargué nada todavía. Para cada uno: «dejar el ${k}» (o «dejar todos»), «el ${k} es de Luisa» / «el ${k} es del 2» / «el ${k} es nuevo Pedro» para moverlo, o «descartar el ${k}». Después, SÍ. DESCARTAR descarta todo.`
-    : `No cargué nada todavía. Revisa que cada mensaje esté en su viaje. ¿Así? Responde SÍ, o corrige: «el ${k} es de Luisa», «descartar el ${k}». DESCARTAR descarta todo.`);
+  lineas.push(porDecidir.length > 0
+    ? `No cargué nada todavía. Para cada uno: «dejar el ${k}» (o «dejar todos»), «el ${k} es de Luisa», «el ${k} es del 2», «el ${k} es nuevo Pedro» o «descartar el ${k}»; después, «sí».`
+    : faltan.length > 0
+    ? 'No cargué nada todavía: con eso te lo vuelvo a mostrar.'
+    : `No cargué nada todavía. Responde «sí» para cargarlo, o corrige: «el ${k} es de Luisa», «descartar el ${k}». Con «descartar» no cargo nada.`);
 
   const empacar = (tope: number): string[] => {
     const partes: string[] = [];
@@ -2128,12 +2133,12 @@ export function interpretarRespuestaPlan(texto: string, plan: PlanViajes, viajes
   if (esSi(bruto)) {
     if (porDecidir.length > 0) {
       const ns = porDecidir.map(m => visible(m.n));
-      return { tipo: 'no_entendida', aviso: `Antes del sí, decide ${ns.length === 1 ? 'el' : 'los'} ${rangos(ns)}: «dejar el ${ns[0]}», «el ${ns[0]} es de …» o «descartar el ${ns[0]}».` };
+      return { tipo: 'no_entendida', aviso: 'Todavía no lo cargo.' };
     }
     // Un viaje nuevo al que le falta algo de su cliente (la llave, cuál es, si es el dueño de la llave): el «sí»
     // no lo crea (decisión de Mauricio del 2026-10-05: sin llave no se crea).
     const falta = clientesPorResolver(plan)[0];
-    if (falta) return { tipo: 'no_entendida', aviso: `Antes del sí: ${textoFaltaCliente(falta.destino)}` };
+    if (falta) return { tipo: 'no_entendida', aviso: 'Todavía no lo cargo.' };
     return { tipo: 'si' };
   }
   // La respuesta a lo que falta del cliente de un viaje nuevo: la llave escrita sola, cuál de los parecidos, o si
@@ -2221,4 +2226,4 @@ export function aplicarCambios(plan: PlanViajes, cambios: ReadonlyArray<Cambio>)
 }
 
 /** Cómo se decide, cuando la respuesta fue «corregir» a secas. */
-export const TEXTO_COMO_CORREGIR = 'Dime qué hago con cada uno: «dejar el 4» (o «dejar todos»), «el 4 es de Luisa» o «el 4 es del 2» para moverlo, «el 6 es nuevo Pedro», o «descartar el 6».';
+export const TEXTO_COMO_CORREGIR = 'Dime qué corrijo: «dejar el 4» (o «dejar todos»), «el 4 es de Luisa» o «el 4 es del 2» para moverlo, «el 6 es nuevo Pedro», o «descartar el 6».';

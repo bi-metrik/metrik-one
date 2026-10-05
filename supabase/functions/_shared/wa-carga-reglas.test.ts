@@ -46,12 +46,12 @@ describe('la lista de «¿A qué viaje van?»', () => {
     expect(ops.map(o => o.id)).toEqual(['2', '1']);
   });
 
-  it('sin negocios abiertos no hay opciones y la pregunta solo ofrece NUEVO', () => {
+  it('sin negocios abiertos no hay opciones y la pregunta solo ofrece un viaje nuevo (sin comandos en mayúsculas)', () => {
     const ops = armarOpcionesNegocio([], 'hola');
     expect(ops).toEqual([]);
     const t = textoPreguntaNegocio({ nMensajes: 3, opciones: ops });
-    expect(t).toContain('Recibí 3 mensajes.');
-    expect(t).toContain('NUEVO');
+    expect(t).toBe('¿De qué cliente son los 3 mensajes? No tienes viajes abiertos: escribe «nuevo» y su nombre, o «descartar».');
+    expect(t).not.toMatch(/\b(?:NUEVO|DESCARTAR|SÍ)\b/);
     expect(t).not.toMatch(/^1\./m);
   });
 
@@ -65,7 +65,7 @@ describe('la lista de «¿A qué viaje van?»', () => {
     expect(ops.map(o => o.id)).toEqual(['3', '2', '1']);
     expect(ops[0].propuesto).toBe(true);
     const t = textoPreguntaNegocio({ nMensajes: 2, opciones: ops });
-    expect(t).toContain('Parece de Marta Gómez: es la 1.');
+    expect(t.split('\n')[0]).toBe('¿De qué viaje son los 2 mensajes? Parece de Marta Gómez (el 1).');
     expect(t).toContain('1. Marta Gómez (T1 26 3)');
   });
 

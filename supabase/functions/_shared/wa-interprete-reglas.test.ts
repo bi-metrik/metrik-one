@@ -63,10 +63,10 @@ const alias = (id: string) => [...VIAJES, ...NEGOCIOS].find(n => n.id === id)?.a
 
 /** «¿A qué viaje van estos 3 mensajes? 1) Luisa 2) Carolina 3) NUEVO 4) DESCARTAR» (una entrega cerrada). */
 const LISTA_ENTREGA = preguntaPendienteUnificada({
-  bandeja: { espera: 'viaje', nombre: 'Tanda de las 09:28', corta: '¿A qué viaje van? Número, código, NUEVO y el nombre, o DESCARTAR', opciones: [va(V9), va(V11)] },
+  bandeja: { espera: 'viaje', nombre: 'Tanda de las 09:28', corta: '¿De qué viaje son?', opciones: [va(V9), va(V11)] },
   alias,
 })!;
-const RESUMEN = preguntaPendienteUnificada({ bandeja: { espera: 'resumen', nombre: 'Carolina Ruiz', corta: '¿Así? SÍ o corrige' }, alias })!;
+const RESUMEN = preguntaPendienteUnificada({ bandeja: { espera: 'resumen', nombre: 'Carolina Ruiz', corta: '¿Lo cargo así?' }, alias })!;
 const sesion = (state: string, pending_action = 'W01', options?: Array<{ id: string; label: string }>) =>
   preguntaPendienteUnificada({ sesion: { state, pending_action, options } })!;
 const GASTO_CONFIRMAR = sesion('confirming');
@@ -1349,7 +1349,7 @@ describe('sexto control de Vera · la confirmación de cliente nuevo', () => {
 describe('sexto control de Vera · regla 4: el atajo del resumen solo es exacto si el código de hoy entiende la respuesta', () => {
   const caja: DestinoPlan = { tipo: 'existente', negocio_id: 'v11', codigo: 'T1 26 11', cliente: 'CAROLINA RUIZ' };
   const plan: PlanViajes = { version: 2, mensajes: [1, 2, 3].map(n => ({ n, destino: caja, por: 'encabezado' as const })), encabezados: [], avisos: [] };
-  const CON_PLAN = preguntaPendienteUnificada({ bandeja: { espera: 'resumen', nombre: 'Carolina Ruiz', corta: '¿Así? SÍ o corrige', plan, viajesAbiertos: VIAJES.map(va) }, alias })!;
+  const CON_PLAN = preguntaPendienteUnificada({ bandeja: { espera: 'resumen', nombre: 'Carolina Ruiz', corta: '¿Lo cargo así?', plan, viajesAbiertos: VIAJES.map(va) }, alias })!;
 
   it('lo que entiende el código de hoy sigue por el atajo', () => {
     for (const t of ['sí', 'el 2 es de Luisa', 'descartar el 3', 'el 1 es nuevo Marcela Gil', 'corregir']) {

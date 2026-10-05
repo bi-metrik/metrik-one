@@ -254,7 +254,7 @@ describe('B · el nombre del negocio', () => {
     expect(resolverEncabezado('M1 26 4', V)).toMatchObject({ tipo: 'viaje', viaje: { id: 'n4' }, por: 'codigo' });
     expect(respuestaAlEncabezado(resolverEncabezado('M1 26 4', V))).toBe('📌 ARMENIA 2N · Juan Prueba (M1 26 4)');
     expect(respuestaAlEncabezado(resolverEncabezado('ARMENIA 2N', V), 'ARMENIA 2N')).toBe(
-      '¿De qué viaje es «ARMENIA 2N»?\n1. ARMENIA 2N · Juan Prueba (M1 26 4)\n2. ARMENIA 2N · Pedro Prueba (M1 26 3)\nResponde con el número, NUEVO y el nombre si es un cliente nuevo, o DESCARTAR. Hasta entonces no asigno lo que sigue.',
+      '¿De qué viaje es «ARMENIA 2N»? Hasta que me digas, no asigno lo que sigue.\n1. ARMENIA 2N · Juan Prueba (M1 26 4)\n2. ARMENIA 2N · Pedro Prueba (M1 26 3)\nResponde el número; si es un viaje nuevo, «nuevo» y el nombre del cliente; o «descartar».',
     );
     // Un contenido corto que comparte palabras con un nombre largo no es encabezado.
     expect(resolverEncabezado('2 adultos', [{ id: 'p', codigo: 'P1 26 1', cliente: null, destino: null, nombre: 'PRUEBA Cancun 12-17 nov 2 adultos' }])).toBeNull();
@@ -371,7 +371,7 @@ describe('v2 · las respuestas', () => {
 describe('v2 · fallas del entendimiento, REINTENTAR y «cancelar»', () => {
   it('los avisos', () => {
     expect(textoFallaEntendimiento('primero', 'Laura Prueba4', 'Laura Prueba4')).toBe('No pude procesar los mensajes de Laura Prueba4 por un problema técnico; los reintento solo.');
-    expect(textoFallaEntendimiento('agotado', 'CARTAGENA DIC · Laura (L 26 3)', 'L 26 3')).toBe('No pude cargar CARTAGENA DIC · Laura (L 26 3). Los mensajes quedan guardados; escribe REINTENTAR L 26 3');
+    expect(textoFallaEntendimiento('agotado', 'CARTAGENA DIC · Laura (L 26 3)', 'L 26 3')).toBe('No pude cargar CARTAGENA DIC · Laura (L 26 3). Los mensajes quedan guardados; cuando quieras, escribe «reintentar L 26 3».');
     expect(textoDescarteTotal([{ nombre: 'Laura Prueba5', n: 2 }])).toBe('Descarté lo pendiente de Laura Prueba5 (2 mensajes). No creé ni cargué nada.');
     expect(textoDescarteTotal([{ nombre: 'Tanda de las 18:51', n: 1 }])).toBe('Descarté lo pendiente de la tanda de las 18:51 (1 mensaje). No creé ni cargué nada.');
     expect(textoDescarteTotal([{ nombre: 'Laura Prueba5', n: 2 }, { nombre: 'Tanda de las 18:51', n: 1 }, { nombre: 'Diego Prueba5', n: 0 }]))

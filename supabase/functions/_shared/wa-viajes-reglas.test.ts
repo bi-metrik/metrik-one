@@ -138,7 +138,9 @@ describe('la respuesta al resumen', () => {
 
   it('el «sí» no vale con algo por decidir', () => {
     expect(pendientes(r).map(x => x.n)).toEqual([3, 4, 5]);
-    expect(interpretarRespuestaPlan('sí', r, V)).toMatchObject({ tipo: 'no_entendida', aviso: expect.stringContaining('Antes del sí') });
+    expect(interpretarRespuestaPlan('sí', r, V)).toMatchObject({ tipo: 'no_entendida', aviso: 'Todavía no lo cargo.' });
+    // El resumen que vuelve a salir pregunta por los marcados, arriba.
+    expect(partesResumenPlan(r, [], 'Todavía no lo cargo.', V)[0]).toMatch(/^Todavía no lo cargo\. ¿Qué hago con los 2-4 \(⚠\)\?/);
   });
 
   it('dejar, mover y descartar; después, sí', () => {
@@ -390,7 +392,7 @@ describe('QA de #971 v4', () => {
       for (const x of p.mensajes.filter(y => y.destino)) {
         expect(lineas.some(l => new RegExp(`^   ${x.n - 1} «.*»${x.sospecha ? ' ⚠' : ''}$`).test(l)), `${extra}: línea del ${x.n}`).toBe(true);
       }
-      expect(partes[partes.length - 1].endsWith('descarta todo.')).toBe(true);
+      expect(/(?:después, «sí»|Con «descartar» no cargo nada)\.$/.test(partes[partes.length - 1])).toBe(true);
     }
     expect(partidos).toBeGreaterThan(50);
   });
@@ -401,8 +403,9 @@ describe('sexto control de Vera · C: lo que nombra al cliente de OTRO viaje abi
     for (const cuerpo of ['Jorge Pérez pregunta si hay cupo en marzo', 'el T1 26 8 ya mandó los pasaportes', 'lo de jorge perez lo vemos el lunes']) {
       const r = plan([enc(1, 'Carolina'), m(2, 'somos 3 adultos'), m(3, cuerpo, { escrito: true })]).plan;
       expect([cuerpo, resumenDe(r)]).toEqual([cuerpo, [[2, 'T1 26 11', 'carga'], [3, 'T1 26 11', 'sospecha']]]);
-      expect(r.mensajes.find(x => x.n === 3)!.motivo).toBe('nombra a Jorge Pérez (T1 26 8), que tiene un viaje abierto (¿es de CAROLINA RUIZ?)');
-      expect(interpretarRespuestaPlan('sí', r, V)).toMatchObject({ tipo: 'no_entendida', aviso: expect.stringContaining('Antes del sí, decide el 2') });
+      expect(r.mensajes.find(x => x.n === 3)!.motivo).toBe('nombra a Jorge Pérez (T1 26 8), que tiene un viaje abierto; puede no ser de CAROLINA RUIZ');
+      expect(interpretarRespuestaPlan('sí', r, V)).toMatchObject({ tipo: 'no_entendida', aviso: 'Todavía no lo cargo.' });
+      expect(partesResumenPlan(r, [], undefined, V)[0]).toMatch(/^¿Qué hago con el 2 \(⚠\)\?/);
     }
   });
 

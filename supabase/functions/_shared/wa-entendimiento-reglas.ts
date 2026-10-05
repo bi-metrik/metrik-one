@@ -1587,8 +1587,8 @@ export function calificarNombreNuevo(cliente: string | null | undefined): Califi
 /** Lo que el bot contesta cuando lo que sigue a «nuevo» no es un nombre (solo números): pregunta, nunca crea. */
 export function textoNombreNuevoEnDuda(propuesto: string): string {
   const p = String(propuesto ?? '').trim().slice(0, 40);
-  return `Para crear un cliente nuevo necesito su nombre; con «${p}» no lo creo.`
-    + ' Responde NUEVO y el nombre completo (ej.: NUEVO Marta Gómez), NUEVO solo para tomarlo de los mensajes, o el número del viaje.';
+  return `¿Para qué cliente es el viaje nuevo? Con «${p}» no sé quién es.\n`
+    + 'Escribe «nuevo» y su nombre (por ejemplo «nuevo Marta Gómez»), «nuevo» solo para tomarlo de los mensajes, o el número del viaje.';
 }
 
 /** «otro cliente Daniel Pérez», «cambio de cliente: Lina»: lo que viene después del cambio, o `null`. */

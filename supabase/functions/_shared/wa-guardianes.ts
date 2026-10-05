@@ -378,14 +378,14 @@ export function lineaSolicitudes(ss: ReadonlyArray<Solicitud>): string {
 
 /** Lo que el bot dice cuando ve dos solicitudes en una tanda (N5). */
 export function textoDosViajes(ss: ReadonlyArray<Solicitud>): string {
-  return `Veo dos solicitudes distintas en estos mensajes (${lineaSolicitudes(ss)}). No las mezclo en un viaje.\nResponde DESCARTAR y vuelve a reenviarlas, cada una después de un encabezado con el nombre o el código del cliente («Carolina», «T1 26 9», «nuevo Luisa»).`;
+  return `¿Me las reenvías por separado? Veo dos solicitudes distintas (${lineaSolicitudes(ss)}) y no las mezclo en un viaje.\nResponde «descartar» y reenvía cada una después de su encabezado («Carolina», «T1 26 9», «nuevo Luisa»).`;
 }
 
 // ── N4 · ¿hay solicitud? ─────────────────────────────────────────────────────
 
 /** Lo que el bot dice cuando no ve una solicitud de viaje (N4). */
 export function textoSinSolicitud(n: number): string {
-  return `No vi una solicitud de viaje en ${n === 1 ? 'este mensaje' : `estos ${n} mensajes`}. No creé nada.\nResponde DESCARTAR para dejarlos así, o SÍ si de verdad es un viaje y lo creo igual.`;
+  return `¿Es una solicitud de viaje? No la vi en ${n === 1 ? 'este mensaje' : `estos ${n} mensajes`} y no creé nada.\nResponde «sí» y lo creo igual, o «descartar» para dejarlos así.`;
 }
 
 /** Hay solicitud si algún mensaje es del cliente y de él salió al menos un dato. */

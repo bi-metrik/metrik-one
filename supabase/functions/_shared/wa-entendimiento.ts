@@ -680,7 +680,7 @@ async function atenderConfirmacion(
     if (descartar) {
       await descartarEntrega(supabase, ent, crudos.length, 'dos solicitudes en una tanda; el comercial descartó para reenviar con encabezados (N5)');
     } else {
-      await preguntarYEsperar(supabase, ent, 'No mezclo dos solicitudes. Responde DESCARTAR y vuelve a reenviarlas, cada una después de un encabezado con el nombre o el código del cliente.', 'dos_viajes');
+      await preguntarYEsperar(supabase, ent, '¿Me las reenvías por separado? No mezclo dos solicitudes: responde «descartar» y reenvía cada una después de su encabezado.', 'dos_viajes');
     }
     return true;
   }
@@ -1510,7 +1510,7 @@ async function entenderSegmento(
       await preguntarYEsperar(supabase, ent, textoNombreNuevoEnDuda(r.propuesto), pendiente as 'cruce' | 'sin_solicitud' | 'dos_viajes');
       return;
     }
-    await preguntarYEsperar(supabase, ent, 'No entendí. Responde SÍ, el código del viaje correcto, o NUEVO y el nombre del cliente.', pendiente as 'cruce' | 'sin_solicitud' | 'dos_viajes');
+    await preguntarYEsperar(supabase, ent, 'No entendí. ¿Los cargo ahí? Responde «sí», el código del viaje correcto, o «nuevo» y el nombre del cliente.', pendiente as 'cruce' | 'sin_solicitud' | 'dos_viajes');
     return;
   }
   const destino: DestinoPlan = grupo.destino;
@@ -2067,7 +2067,7 @@ export async function preguntaAbierta(
       const sinNombre = n === 0 && !String(e.contacto_nombre ?? '').trim();
       return {
         tipo: 'contacto', id: e.id as string, nombre, espera: sinNombre ? 'nombre' : 'otra',
-        corta: n === 0 ? '¿Lo creo? NUEVO / celular' : n === 1 ? '¿Es el mismo? SÍ / NUEVO' : '¿Cuál contacto es? Número / NUEVO',
+        corta: n === 0 ? '¿Me pasas su celular o su correo?' : n === 1 ? '¿Es la misma persona?' : '¿Cuál contacto es?',
       };
     }
     const c = e.confirmacion_pendiente as string | null;
@@ -2081,12 +2081,12 @@ export async function preguntaAbierta(
     // «¿Creo el cliente nuevo «X»?» (2026-10-03): se contesta como «¿A qué viaje van?» (un sí, un nombre,
     // un número o un código), así que espera lo mismo.
     const porConfirmar = !c && !resumen ? nuevoPorConfirmar(e, null) : null;
-    const corta = c === 'cruce' ? '¿Lo cargo ahí? SÍ / código / DESCARTAR'
-      : c === 'sin_solicitud' ? '¿Lo creo igual? SÍ / DESCARTAR'
-      : c === 'dos_viajes' ? 'DESCARTAR y reenvía con encabezados'
-      : resumen ? '¿Así? SÍ o corrige'
+    const corta = c === 'cruce' ? '¿Los cargo en ese viaje?'
+      : c === 'sin_solicitud' ? '¿Es una solicitud de viaje?'
+      : c === 'dos_viajes' ? '¿Me las reenvías por separado?'
+      : resumen ? '¿Lo cargo así?'
       : porConfirmar ? `¿Va como viaje nuevo de ${porConfirmar.slice(0, 40)}? Sí, el nombre correcto, o el número o código del viaje`
-      : '¿A qué viaje van? Número, código, NUEVO y el nombre, o DESCARTAR';
+      : '¿De qué viaje son?';
     const espera = c === 'cruce' || (!c && !resumen) ? 'viaje' : resumen ? 'resumen' : 'otra';
     return { tipo: 'negocio', id: e.id as string, nombre, corta, espera, entregaId: (e.entrega_id as string | null) ?? null, nuevoPorConfirmar: porConfirmar };
   }
@@ -2099,14 +2099,14 @@ export async function preguntaAbierta(
     const plan = (e.plan_viajes ?? null) as PlanViajes | null;
     return {
       tipo: 'entrega', id: e.id as string, nombre: nombreDeLaEntrega(plan, (e.created_at as string | null) ?? null),
-      corta: plan ? '¿Así? SÍ o corrige' : '¿A qué viaje van? Número, código, NUEVO y el nombre, o DESCARTAR',
+      corta: plan ? '¿Lo cargo así?' : '¿De qué viaje son?',
       espera: plan ? 'resumen' : 'viaje',
     };
   }
   return null;
 }
 
-/** «Primero: Laura Prueba · ¿Lo creo? NUEVO / celular». */
+/** «Primero: Laura Prueba · ¿Me pasas su celular o su correo?». */
 export function textoPrimero(p: PreguntaAbierta): string {
   return `Primero: ${p.nombre} · ${p.corta}`;
 }

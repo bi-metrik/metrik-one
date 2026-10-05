@@ -232,8 +232,9 @@ describe('el resumen y su «sí» (se mantiene el «sí» del resumen)', () => {
     const ms = [escrito('nuevo Simón Arango'), reenvio('Santa Marta')];
     const { segmentos, encabezados } = armarSegmentos(ms, [], cfg);
     const plan = resolverClientesDelPlan(armarPlan({ mensajes: ms, viajes: [], segmentos, encabezados }), DIR);
-    expect(partesResumenPlan(plan, ms).join('\n')).toContain('No cargué nada todavía. Antes del sí: ¿Me pasas el celular o el correo de Simón Arango?');
-    expect(interpretarRespuestaPlan('sí', plan, [])).toEqual({ tipo: 'no_entendida', aviso: 'Antes del sí: ¿Me pasas el celular o el correo de Simón Arango? Sin uno de los dos no lo creo (también vale su usuario de WhatsApp o Instagram).' });
+    // PR B: la pregunta de lo que falta va arriba del resumen.
+    expect(partesResumenPlan(plan, ms).join('\n')).toMatch(/^¿Me pasas el celular o el correo de Simón Arango\? Sin uno de los dos no lo creo/);
+    expect(interpretarRespuestaPlan('sí', plan, [])).toEqual({ tipo: 'no_entendida', aviso: 'Todavía no lo cargo.' });
     const r = interpretarRespuestaPlan('simon@correo.co', plan, []);
     expect(r).toEqual({ tipo: 'cliente', clave: claveDestino(plan.mensajes[0].destino!), cambio: { llave: { correo: 'simon@correo.co' } } });
     const conLlave = resolverClientesDelPlan(aplicarCambioCliente(plan, (r as { clave: string }).clave, (r as { cambio: object }).cambio),

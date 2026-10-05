@@ -28,7 +28,7 @@ import { esDescartarTodo } from './wa-bandeja-reglas.ts';
 const LINA: ViajeAbierto = { id: 'lina', codigo: 'L1 26 1', cliente: 'LINA PÉREZ', destino: 'CARTAGENA', nombre: 'L1 CTG ENE 27' };
 const LUISA: ViajeAbierto = { id: 'luisa', codigo: 'L 26 4', cliente: 'LUISA GÓMEZ', destino: 'SAN ANDRÉS', nombre: null };
 const PEDRO: ViajeAbierto = { id: 'pedro', codigo: 'P 26 2', cliente: 'PEDRO GÓMEZ', destino: 'ARUBA', nombre: null };
-const PIE = 'Responde con el número, NUEVO y el nombre si es un cliente nuevo, o DESCARTAR. Hasta entonces no asigno lo que sigue.';
+const PIE = 'Responde el número; si es un viaje nuevo, «nuevo» y el nombre del cliente; o «descartar».';
 
 describe('regla 2 · «nuevo» en cualquier forma', () => {
   it.each([
@@ -128,19 +128,19 @@ describe('regla 1 · un viaje existente solo con evidencia exacta', () => {
   it('el tipeo del MISMO nombre completo se pregunta con la lista numerada (un solo candidato, nunca sí/no)', () => {
     const r = resolverEncabezado('Lusia Gómez', [LUISA, LINA]);
     expect(r).toMatchObject({ tipo: 'aproximado', viaje: { id: 'luisa' }, por: 'nombre' });
-    expect(respuestaAlEncabezado(r, 'Lusia Gómez')).toBe(`¿De qué viaje es «Lusia Gómez»?\n1. Luisa Gómez (L 26 4)\n${PIE}`);
+    expect(respuestaAlEncabezado(r, 'Lusia Gómez')).toBe(`¿De qué viaje es «Lusia Gómez»? Hasta que me digas, no asigno lo que sigue.\n1. Luisa Gómez (L 26 4)\n${PIE}`);
   });
 
   it('solo el apellido con UN viaje: la lista numerada con NUEVO, nunca en silencio ni sí/no', () => {
     const r = resolverEncabezado('Pérez', [LINA, LUISA]);
     expect(r).toMatchObject({ tipo: 'aproximado', viaje: { id: 'lina' }, por: 'apellido' });
-    expect(respuestaAlEncabezado(r, 'Pérez')).toBe(`¿De qué viaje es «Pérez»?\n1. L1 CTG ENE 27 · Lina Pérez (L1 26 1)\n${PIE}`);
+    expect(respuestaAlEncabezado(r, 'Pérez')).toBe(`¿De qué viaje es «Pérez»? Hasta que me digas, no asigno lo que sigue.\n1. L1 CTG ENE 27 · Lina Pérez (L1 26 1)\n${PIE}`);
   });
 
   it('solo el apellido con DOS viajes: la lista numerada con los dos', () => {
     const r = resolverEncabezado('Gómez', [LUISA, PEDRO, LINA]);
     expect(r).toMatchObject({ tipo: 'ambiguo', candidatos: [{ id: 'luisa' }, { id: 'pedro' }] });
-    expect(respuestaAlEncabezado(r, 'Gómez')).toBe(`¿De qué viaje es «Gómez»?\n1. Luisa Gómez (L 26 4)\n2. Pedro Gómez (P 26 2)\n${PIE}`);
+    expect(respuestaAlEncabezado(r, 'Gómez')).toBe(`¿De qué viaje es «Gómez»? Hasta que me digas, no asigno lo que sigue.\n1. Luisa Gómez (L 26 4)\n2. Pedro Gómez (P 26 2)\n${PIE}`);
   });
 
   it('en la tanda, la elección es el número; el «sí» no elige y no es contenido; lo demás queda sin asignar', () => {

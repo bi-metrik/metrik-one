@@ -107,7 +107,7 @@ describe('pedido de guía', () => {
       '',
       '*1. Di de quién es*',
       'Escríbeme el cliente o el viaje:',
-      '• Cliente nuevo: `nuevo Carolina Ruiz`',
+      '• Viaje nuevo: `nuevo viaje` o `nuevo Carolina Ruiz` (si ya es cliente, lo busco yo)',
       '• Viaje que ya existe: `Carolina Ruiz`, `Europa 2 días` o el código',
       'Espera el 📌 con el viaje.',
       '',
@@ -182,8 +182,8 @@ describe('lo que contesta el bot', () => {
   })
 
   it('la pregunta cuenta los mensajes, en singular y plural', () => {
-    expect(textoPreguntaCliente(6)).toBe('Recibí 6 mensajes. ¿De qué cliente es?')
-    expect(textoPreguntaCliente(1)).toBe('Recibí 1 mensaje. ¿De qué cliente es?')
+    expect(textoPreguntaCliente(6)).toBe('¿De qué cliente son los 6 mensajes?')
+    expect(textoPreguntaCliente(1)).toBe('¿De qué cliente es el mensaje?')
   })
 })
 

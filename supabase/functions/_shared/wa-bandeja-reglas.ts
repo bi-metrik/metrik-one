@@ -183,7 +183,7 @@ export function textoGuiaBandeja(config: Pick<ConfigBandeja, 'prefijosBot' | 'pr
     '',
     '*1. Di de quién es*',
     'Escríbeme el cliente o el viaje:',
-    '• Cliente nuevo: `nuevo Carolina Ruiz`',
+    '• Viaje nuevo: `nuevo viaje` o `nuevo Carolina Ruiz` (si ya es cliente, lo busco yo)',
     '• Viaje que ya existe: `Carolina Ruiz`, `Europa 2 días` o el código',
     'Espera el 📌 con el viaje.',
     '',
@@ -361,7 +361,7 @@ export function ordenarPorEnvio<T extends { enviado_at?: string | null; recibido
 export function textoFallaEntendimiento(cuando: 'primero' | 'agotado', nombre: string, referencia: string): string {
   return cuando === 'primero'
     ? `No pude procesar los mensajes de ${nombre} por un problema técnico; los reintento solo.`
-    : `No pude cargar ${nombre}. Los mensajes quedan guardados; escribe REINTENTAR ${referencia}`;
+    : `No pude cargar ${nombre}. Los mensajes quedan guardados; cuando quieras, escribe «reintentar ${referencia}».`;
 }
 
 /** «REINTENTAR L 26 3» → «L 26 3»; «reintentar» solo → «». `null`: no es la palabra. */
@@ -392,8 +392,8 @@ export function elegirFallida(
 /** Lo que contesta REINTENTAR cuando no sabe cuál: las cargas fallidas que hay, o que no hay ninguna. */
 export function textoReintentarSinElegir(objetivo: string, referencias: ReadonlyArray<string>): string {
   if (referencias.length === 0) return 'No tengo ninguna carga fallida para reintentar.';
-  const cab = objetivo.trim() ? `No sé cuál es «${objetivo.trim()}».` : 'Hay más de una carga fallida.';
-  return [cab, 'Escribe REINTENTAR y una de estas:', ...referencias.map(r => `- ${r}`)].join('\n');
+  const cab = objetivo.trim() ? `¿Cuál reintento? No sé cuál es «${objetivo.trim()}».` : '¿Cuál reintento? Hay más de una carga fallida.';
+  return [cab, 'Escribe «reintentar» y una de estas:', ...referencias.map(r => `- ${r}`)].join('\n');
 }
 
 /**
@@ -451,7 +451,7 @@ export function respuestaTrasRegistro(accion: AccionRegistro): 'pregunta' | 'nad
 /** La única pregunta que hace la bandeja mientras no exista el paso de entendimiento. */
 export function textoPreguntaCliente(nMensajes: number): string {
   const n = Math.max(0, Math.trunc(nMensajes));
-  return `Recibí ${n} ${n === 1 ? 'mensaje' : 'mensajes'}. ¿De qué cliente es?`;
+  return `¿De qué cliente ${n === 1 ? 'es el mensaje' : `son los ${n} mensajes`}?`;
 }
 
 export const TEXTO_NADA_PENDIENTE = 'No tengo mensajes pendientes por agrupar.';
