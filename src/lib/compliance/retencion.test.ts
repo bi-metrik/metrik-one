@@ -145,6 +145,13 @@ const CLASIFICACION: Record<string, Clasificacion> = {
       'los plazos del bot contra los que `purga-sql.test.ts` ejecuta la migración de la purga; ' +
       'los años de la aceptación salen de la constante canónica.',
   },
+  'supabase/migrations/20261005170000_cardumen_modo_objetos.sql': {
+    tipo: 'no-es-plazo',
+    razon:
+      'las cuatro cifras son los rangos de ANTIGÜEDAD en el trabajo que el instrumento de ' +
+      'Cardumen ofrece como opciones («1 a 3 años», «3 a 7 años»): es el enunciado literal ' +
+      'de una pregunta del estudio. No hay plazo de conservación en este archivo.',
+  },
   'supabase/functions/_shared/wa-entendimiento-reglas.ts': {
     tipo: 'no-es-plazo',
     razon:

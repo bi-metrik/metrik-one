@@ -81,4 +81,15 @@ Cualquier envío proactivo en el camino crítico tira eso por la borda.
   y que el número queda ligado como identificador, pero lo revisa Emilio (CLO), y el de
   niños ni siquiera tiene decidido quién consiente.
 
-Relacionado: [[pruebas-por-mutacion]], [[valida-migracion-antes-del-merge]].
+- ⚠️ **El nombre de la migración lo pone la hora, no un contador: dos sesiones del mismo día
+  chocan.** Esta nació `20261005120000` y mientras estaba abierta entró a main
+  `20261005120000_negocio_cruces_avanzados.sql` (#1016), ya aplicada en producción. Mismo
+  timestamp = orden de aplicación indefinido, y **`check:migraciones` dijo «sin problemas»
+  porque corría contra una base sin la otra**. Renumerada a `20261005170000`. Antes de dar por
+  verde una rama con migración: traer `origin/main` y comparar contra su timestamp más alto.
+- ⚠️ Sus opciones `'1 a 3 años'` / `'3 a 7 años'` la hacen caer en el barrido de
+  [[retencion-control-en-ci]]: tiene entrada `no-es-plazo` en `retencion.test.ts`, **indexada
+  por ruta**, así que renumerarla otra vez vuelve a tumbar esa prueba.
+
+Relacionado: [[pruebas-por-mutacion]], [[valida-migracion-antes-del-merge]],
+[[retencion-control-en-ci]].
