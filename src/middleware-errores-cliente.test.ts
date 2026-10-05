@@ -34,6 +34,14 @@ describe('middleware: reporte de errores del navegador', () => {
     expect(res.headers.get('location')).toBeNull()
   })
 
+  it('/api/rum (beacon de medicion) tambien pasa sin sesion', async () => {
+    updateSession.mockClear()
+    const res = await middleware(post('http://soena.localhost:3000/api/rum', 'soena.localhost:3000'))
+    expect(res.status).not.toBe(307)
+    expect(res.headers.get('location')).toBeNull()
+    expect(updateSession).not.toHaveBeenCalled()
+  })
+
   it('control: otra ruta del subdominio sin sesion SI va a /login', async () => {
     const res = await middleware(
       new NextRequest(new URL('http://soena.localhost:3000/negocios'), { headers: { host: 'soena.localhost:3000' } }),

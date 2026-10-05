@@ -6,6 +6,7 @@ import { RUTA_DESINCRONIZADA, hayDesincronizacionDeTenant } from '@/lib/tenant/d
 import NotificationBell from '@/components/notification-bell'
 import DevWorkspaceBar from '@/components/dev-workspace-bar'
 import VersionWatcher from '@/components/version-watcher'
+import RumRed from '@/components/rum/rum-red'
 import { getPlatformAdminState } from '@/lib/actions/platform-admin'
 import { getWorkspace } from '@/lib/actions/get-workspace'
 import { getCachedUser } from '@/lib/supabase/auth-user'
@@ -218,6 +219,9 @@ export default async function AppLayout({
           recarga (sola si no hay nada que perder, con aviso si la persona esta
           escribiendo). Techo de 8h aunque no haya deploy nuevo. */}
       <VersionWatcher epoca={EPOCA} />
+      {/* Medicion desde el navegador (`[rum]`): web vitals y navegaciones suaves, un
+          beacon por ciclo de pagina. No pinta nada. */}
+      <RumRed />
       {process.env.NODE_ENV === 'development' && allWorkspaces.length > 0 && (
         <DevWorkspaceBar workspaces={allWorkspaces} activeSlug={activeSlug ?? ''} />
       )}

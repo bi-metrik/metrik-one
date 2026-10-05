@@ -51,4 +51,26 @@ describe('leerReporte', () => {
       expect(r.reporte).not.toHaveProperty('email')
     }
   })
+
+  it('acepta id, reenvio, edad y red del navegador (2026-10-05)', () => {
+    const r = leerReporte(
+      JSON.stringify({
+        ...base,
+        id: 'b3c1a2d4-0000-4000-8000-000000000001',
+        reenvio: 2,
+        edadS: 340,
+        segDesdeCarga: 12.4,
+        enLinea: false,
+        red: { tipo: '3g', rtt: 600, bajadaMbps: 0.4, ahorroDatos: true },
+      }),
+    )
+    expect(r.ok && r.reporte).toMatchObject({ id: 'b3c1a2d4-0000-4000-8000-000000000001', reenvio: 2, edadS: 340, red: { tipo: '3g' } })
+  })
+
+  it('una red rara no tumba el reporte de error; un id con caracteres raros si', () => {
+    const r = leerReporte(JSON.stringify({ ...base, red: { rtt: 'x' } }))
+    expect(r.ok).toBe(true)
+    if (r.ok) expect(r.reporte.red).toBeUndefined()
+    expect(leerReporte(JSON.stringify({ ...base, id: 'a@b.co' }))).toEqual({ ok: false, status: 400 })
+  })
 })
