@@ -52,6 +52,10 @@ export interface FilaAceptacion {
   respondido_at: string | null;
   expira_at: string;
   created_at: string;
+  /** No nula = la fila es la aceptacion del aviso de datos del bot, de esa version. */
+  aviso_datos_version?: string | null;
+  /** Solo filas del aviso: la aceptacion se revoco (por SQL, a pedido de la empresa) y ya no vale. */
+  revocada_at?: string | null;
 }
 
 const TITULO_BOTON: Record<DecisionBoton, string> = {
