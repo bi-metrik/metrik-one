@@ -100,10 +100,10 @@ const abierto = (n: number, sufijo = '') =>
  */
 let universo = Array.from({ length: 70 }, (_, i) => abierto(70 - i))
 
-function vistaDe(pagina: { desde?: number; cuantos?: number } = {}) {
+function vistaDe(pagina: { desde?: number; cuantos?: number } = {}, sp: Record<string, string> = {}) {
   return armarVistaLista(
     { abiertos: universo, cerrados: [], etapas: [], defaultStage: 'todos', hoyISO: '2026-10-03' },
-    {},
+    sp,
     pagina,
   ).vista
 }
@@ -117,7 +117,8 @@ const fetchFalso = vi.fn((entrada: string) => {
       url,
       entregar: () => {
         const sp = url.searchParams
-        const v = vistaDe({ desde: Number(sp.get('desde') ?? 0), cuantos: sp.has('cuantos') ? Number(sp.get('cuantos')) : undefined })
+        const filtros = Object.fromEntries([...sp.entries()].filter(([k]) => k !== 'desde' && k !== 'cuantos'))
+        const v = vistaDe({ desde: Number(sp.get('desde') ?? 0), cuantos: sp.has('cuantos') ? Number(sp.get('cuantos')) : undefined }, filtros)
         resolve(new Response(JSON.stringify(v), { status: 200, headers: { 'content-type': 'application/json' } }))
       },
       fallar: () =>
@@ -152,6 +153,7 @@ afterEach(() => {
   root?.unmount()
   root = null
   contenedor.remove()
+  history.replaceState(null, '', '/negocios')
 })
 
 async function verMas() {
@@ -237,5 +239,57 @@ describe('/negocios · adoptar una vista refrescada', () => {
     root!.render(React.createElement(NegociosClient as never, props(vistaDe())))
     await asentar()
     expect(contenedor.querySelector('[role="alert"]')).toBeNull()
+  })
+})
+
+describe('/negocios · asignar con filtros puestos', () => {
+  /**
+   * El router de Next no se entera de los filtros (se escriben con `replaceState` sobre su
+   * propio estado), así que tras una server action el servidor manda la vista SIN filtros.
+   * Antes se adoptaba y la lista volvía a «todos» con cada asignación.
+   */
+  it('la vista que llega con la URL vieja no borra los filtros: se relee con ellos', async () => {
+    // La persona busca «V006» desde la lista (la URL lo refleja, el router no).
+    const buscador = contenedor.querySelector('input') as HTMLInputElement
+    const set = Object.getOwnPropertyDescriptor(Object.getPrototypeOf(buscador), 'value')!.set!
+    set.call(buscador, 'V006')
+    buscador.dispatchEvent(new Event('input', { bubbles: true }))
+    await new Promise((r) => setTimeout(r, 400))
+    await asentar()
+    pedidos.at(-1)!.entregar()
+    await asentar()
+    expect(location.search).toContain('q=V006')
+    const filtradas = codigos()
+    expect(filtradas.length).toBeGreaterThan(0)
+    expect(filtradas.every((c) => c!.startsWith('V006'))).toBe(true)
+
+    // Asigna en V0065: `revalidatePath` pinta la página con la URL de la carga, sin filtros.
+    universo = universo.map((n) => (n.id === 'id-65' ? abierto(65, '*') : n))
+    fetchFalso.mockClear()
+    root!.render(React.createElement(NegociosClient as never, props(vistaDe())))
+    await asentar()
+
+    // Siguen los filtros y la lista filtrada, no las 30 de «todos».
+    expect(location.search).toContain('q=V006')
+    expect((contenedor.querySelector('input') as HTMLInputElement).value).toBe('V006')
+    expect(codigos()).toEqual(filtradas)
+
+    // Y se relee con los filtros puestos, que trae la asignación.
+    const relectura = pedidos.at(-1)!
+    expect(fetchFalso).toHaveBeenCalledTimes(1)
+    expect(relectura.url.searchParams.get('q')).toBe('V006')
+    relectura.entregar()
+    await asentar()
+    expect(codigos()).toContain('V0065*')
+    expect(codigos().every((c) => c!.startsWith('V006'))).toBe(true)
+  })
+
+  it('una navegación de verdad a otros filtros sí se adopta', async () => {
+    history.replaceState(null, '', '/negocios?q=V005')
+    root!.render(React.createElement(NegociosClient as never, props(vistaDe({}, { q: 'V005' }))))
+    await asentar()
+    expect(fetchFalso).not.toHaveBeenCalled()
+    expect(codigos().length).toBeGreaterThan(0)
+    expect(codigos().every((c) => c!.startsWith('V005'))).toBe(true)
   })
 })

@@ -231,3 +231,11 @@
   navegador revalida con `If-None-Match` y JS ve el cuerpo anterior con status 200: no hay rama de 304
   que escribir. La ruta responde `Cache-Control: private, no-cache` (ningún CDN la comparte) y acepta
   ETag débil `W/`, por si la compresión de Vercel lo debilita (`src/lib/http/etag.ts`, 2026-10-05).
+- **`history.replaceState(window.history.state, …)` no le avisa al router de Next.** El estado que se
+  pasa lleva la marca interna `__NA` y Next lo deja pasar sin sincronizar su URL (`canonicalUrl`).
+  Toda server action con `revalidatePath` vuelve a pintar la página con la URL de la ÚLTIMA navegación,
+  no con la que muestra la barra. En `/negocios` eso borraba los filtros al asignar responsable desde
+  la tarjeta: el servidor mandaba la vista sin filtros y la lista la adoptaba. Arreglo: la lista no
+  adopta una vista cuyos parámetros no coinciden con la URL (`vistaDeOtraUrl` en `negocios-client.tsx`)
+  y relee con los filtros puestos (2026-10-05). Un server component que dependa de `searchParams`
+  escritos así tiene el mismo problema.

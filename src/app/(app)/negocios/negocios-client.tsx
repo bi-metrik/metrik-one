@@ -18,6 +18,7 @@ import {
   leerParametrosLista,
   parametrosPorDefecto,
   SIN_SERVICIO,
+  TAMANO_PAGINA,
   type FaseFilter,
   type MotivoCierre,
   type ParametrosLista,
@@ -75,6 +76,22 @@ function queryConParametros(queryActual: string, p: ParametrosLista, defaultStag
 }
 
 /**
+ * ¿La vista que mandó el servidor se armó con otros filtros que los de la URL?
+ *
+ * Pasa tras toda server action (asignar, marcar…). Los filtros se escriben con
+ * `replaceState(window.history.state, …)`, y ese estado lleva la marca interna de Next
+ * (`__NA`), así que el router NO se entera del cambio: su URL sigue siendo la de la carga.
+ * El `revalidatePath` vuelve a pintar la página con ESA URL, sin los filtros, y adoptar esa
+ * vista los borraba. Una navegación de verdad (otro enlace a `/negocios?…`) cambia la URL
+ * antes de que llegue la vista, así que ahí sí coinciden y se adopta.
+ */
+function vistaDeOtraUrl(v: VistaLista): boolean {
+  if (typeof window === 'undefined') return false
+  const sp = Object.fromEntries(new URLSearchParams(window.location.search).entries())
+  return JSON.stringify(leerParametrosLista(sp, v.defaultStage)) !== JSON.stringify(v.parametros)
+}
+
+/**
  * Qué se le pide a la ruta:
  *   - `filtros`: la vista nueva para otros filtros (reemplaza la lista);
  *   - `mas`: la página siguiente («Ver más», se pega detrás);
@@ -129,14 +146,21 @@ export default function NegociosClient({
   // props (en render, no en un efecto).
   const [vistaPrevia, setVistaPrevia] = useState(vista)
   const [cargadasTrasRefresco, setCargadasTrasRefresco] = useState(0)
-  if (vista !== vistaPrevia) {
+  if (vista !== vistaPrevia && vistaDeOtraUrl(vista)) {
+    // La vista es de la URL vieja (ver `vistaDeOtraUrl`): no se adopta. Se queda lo que hay,
+    // con los filtros puestos, y se relee todo lo cargado con esos filtros.
+    setVistaPrevia(vista)
+    setCargadasTrasRefresco(Math.max(tarjetas.length, TAMANO_PAGINA))
+  } else if (vista !== vistaPrevia) {
     setVistaPrevia(vista)
     setActual(vista)
     setParams(vista.parametros)
     setQInput(vista.parametros.q)
     // El error era de la vista anterior: la nueva llegó bien.
     setError(null)
-    if (tarjetas.length > vista.tarjetas.length) {
+    // Con otros filtros la cola cargada es de otra lista: no se conserva.
+    const mismosFiltros = JSON.stringify(vista.parametros) === JSON.stringify(actual.parametros)
+    if (mismosFiltros && tarjetas.length > vista.tarjetas.length) {
       // Ya se habían cargado más páginas. La lista NO se encoge a la primera página (el
       // scroll saltaba y la lista volvía a crecer): el comienzo se refresca ya y el resto
       // se queda hasta que vuelva la relectura de todo lo cargado.
@@ -212,10 +236,11 @@ export default function NegociosClient({
   }, [params])
 
   // Tras adoptar una vista refrescada, se relee todo lo que estaba cargado (desde 0) y
-  // recién entonces se reemplaza.
+  // recién entonces se reemplaza. Con los filtros de la persona, no con los de la vista:
+  // si la vista era de la URL vieja, esos son justo los que no hay que pedir.
   useEffect(() => {
     if (cargadasTrasRefresco <= 0) return
-    void pedir(vista.parametros, 'refresco', 0, cargadasTrasRefresco)
+    void pedir(paramsRef.current, 'refresco', 0, cargadasTrasRefresco)
   }, [vista, cargadasTrasRefresco, pedir])
 
   const reintentar = useCallback(() => {
