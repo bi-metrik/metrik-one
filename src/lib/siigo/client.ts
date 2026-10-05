@@ -150,11 +150,12 @@ async function getAccessToken(workspaceId: string, creds: SiigoCredentials): Pro
   const cached = tokenCache.get(workspaceId)
   if (cached && cached.expiresAt > Date.now()) return cached.token
 
-  const res = await fetch(`${SIIGO_BASE}/auth`, {
+  const res = await conTimeout(TIMEOUT_LECTURA_MS, 'POST /auth', signal => fetch(`${SIIGO_BASE}/auth`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json', 'Partner-Id': creds.partnerId },
     body: JSON.stringify({ username: creds.username, access_key: creds.accessKey }),
-  })
+    signal,
+  }))
 
   if (!res.ok) {
     // El cuerpo del error de auth puede venir con eco de lo enviado: NO lo
@@ -182,6 +183,41 @@ export function invalidarTokenSiigo(workspaceId: string): void {
   tokenCache.delete(workspaceId)
 }
 
+// ── Timeout ──────────────────────────────────────────────────────────────────
+
+/**
+ * Cuánto se espera, como máximo, CADA intento contra Siigo. Hasta el 2026-10-04 no había
+ * ninguno: un Siigo colgado dejaba la acción esperando hasta que Vercel mataba la función.
+ *
+ * Dos valores porque no cuestan lo mismo. Una lectura que se corta solo se repite. Una
+ * escritura cortada pudo quedar hecha del lado de Siigo: las de documento llevan
+ * `Idempotency-Key` (reintentarla devuelve el mismo) y el cliente se busca por
+ * identificación antes de crearlo, pero igual se le da margen de sobra a la DIAN.
+ * La espera de un 429 (`maxEspera429Ms`) NO cuenta aquí: va entre dos intentos.
+ */
+export const TIMEOUT_LECTURA_MS = 20_000
+export const TIMEOUT_ESCRITURA_MS = 45_000
+
+/** Corre `pedir` con un tope; si se pasa, lanza un `SiigoError` que dice qué y cuánto. */
+async function conTimeout(
+  ms: number,
+  que: string,
+  pedir: (signal: AbortSignal) => Promise<Response>,
+): Promise<Response> {
+  const control = new AbortController()
+  const reloj = setTimeout(() => control.abort(), ms)
+  try {
+    return await pedir(control.signal)
+  } catch (e) {
+    if (control.signal.aborted) {
+      throw new SiigoError(`Siigo no respondió en ${Math.round(ms / 1000)} s (${que})`, 0, ['timeout'])
+    }
+    throw e
+  } finally {
+    clearTimeout(reloj)
+  }
+}
+
 // ── Petición ─────────────────────────────────────────────────────────────────
 
 interface RequestOpts {
@@ -206,6 +242,11 @@ interface RequestOpts {
    * las 100 peticiones seguidas y Siigo pide ~19 s de pausa.
    */
   maxEspera429Ms?: number
+  /**
+   * Tope de CADA intento, en ms. Por defecto `TIMEOUT_LECTURA_MS` en GET y
+   * `TIMEOUT_ESCRITURA_MS` en POST/PUT/DELETE.
+   */
+  timeoutMs?: number
 }
 
 /** Segundos que Siigo pide esperar, del header o del texto del error. */
@@ -268,6 +309,7 @@ export async function siigoRequest<T>(
 ): Promise<T> {
   const creds = await resolveCredentials(workspaceId)
   const { method = 'GET', body, idempotencyKey, maxEspera429Ms = 0 } = opts
+  const timeoutMs = opts.timeoutMs ?? (method === 'GET' ? TIMEOUT_LECTURA_MS : TIMEOUT_ESCRITURA_MS)
 
   const ejecutar = async (token: string): Promise<Response> => {
     const headers: Record<string, string> = {
@@ -277,12 +319,13 @@ export async function siigoRequest<T>(
     if (body !== undefined) headers['Content-Type'] = 'application/json'
     // Solo en POST: en GET/PUT/DELETE el header no tiene efecto.
     if (idempotencyKey && method === 'POST') headers['Idempotency-Key'] = idempotencyKey
-    return fetch(`${SIIGO_BASE}${path}`, {
+    return conTimeout(timeoutMs, `${method} ${path}`, signal => fetch(`${SIIGO_BASE}${path}`, {
       method,
       headers,
       body: body === undefined ? undefined : JSON.stringify(body),
       cache: 'no-store',
-    })
+      signal,
+    }))
   }
 
   let token = await getAccessToken(workspaceId, creds)

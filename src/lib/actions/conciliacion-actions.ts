@@ -51,7 +51,7 @@ import type {
 } from '@/lib/negocios/retroceso-financiero'
 import { recalcularNegocioPorCambioDeRecaudo, cambiarEtapaNegocio } from '@/app/(app)/negocios/negocio-v2-actions'
 import { avisarSobrepagoSiCorresponde } from '@/lib/cobros/aviso-sobrepago-servidor'
-import { abonarAlRegistrarPago } from '@/lib/siigo/recibo-automatico'
+import { abonarEnSegundoPlano } from '@/lib/siigo/segundo-plano'
 import { registrarActividad } from '@/lib/activity/registrar-actividad'
 import { negocioCerrado, MENSAJE_NEGOCIO_CERRADO } from '@/lib/negocios/motivo-cierre'
 
@@ -328,8 +328,8 @@ async function repartirPagoCore(
   // El honorario de cada porción se abona a la factura del negocio que ya la tenga. Una
   // porción que el comercial PROPUSO espera a que la financiera la acepte (lo decide
   // `porQueNoSeAbona`): el abono de ese reparto sale desde `aceptarRepartoComercial`.
-  // Nunca devuelve error.
-  for (const id of negocioIds) await abonarAlRegistrarPago(workspaceId, id)
+  // Nunca devuelve error. Corre DESPUÉS de responder (`segundo-plano.ts`).
+  await abonarEnSegundoPlano(workspaceId, negocioIds)
 
   for (const id of negocioIds) revalidatePath(`/negocios/${id}`)
   revalidatePath('/conciliacion')
@@ -1523,8 +1523,9 @@ export async function registrarPagoEnNegocio(
 
   // Si el negocio ya tiene factura, el honorario de este pago se le abona solo (brief del
   // 2026-09-22: el abono es 100 % automático y no depende de `recibo_automatico`). Nunca
-  // devuelve error: el pago ya quedó registrado, que es lo que la persona pidió.
-  await abonarAlRegistrarPago(workspaceId, negocioId)
+  // devuelve error: el pago ya quedó registrado, que es lo que la persona pidió. Corre
+  // DESPUÉS de responder: la persona no espera a Siigo (`segundo-plano.ts`).
+  await abonarEnSegundoPlano(workspaceId, [negocioId])
 
   revalidatePath(`/negocios/${negocioId}`)
   revalidatePath('/conciliacion')
@@ -1934,7 +1935,8 @@ export async function aceptarRepartoComercial(
 
   // Y ahora sí es plata del negocio: su honorario se abona a la factura, si la hay. Es el
   // momento que `porQueNoSeAbona` le reservó a las porciones propuestas por el comercial.
-  for (const id of negociosTocados) await abonarAlRegistrarPago(workspaceId, id)
+  // Corre DESPUÉS de responder (`segundo-plano.ts`): era lo que llevaba «Conciliar» a 19,7 s.
+  await abonarEnSegundoPlano(workspaceId, negociosTocados)
 
   for (const id of negociosTocados) revalidatePath(`/negocios/${id}`)
   revalidatePath('/conciliacion')
@@ -2392,7 +2394,8 @@ export async function redistribuirReferencia(input: {
   // Las porciones nuevas o ajustadas se abonan a la factura de su negocio, si la hay. Un
   // abono YA emitido sobre una porción que esta redistribución anuló o bajó NO se deshace
   // desde aquí: queda en Siigo y lo anula Tesorería (ONE no borra documentos contables).
-  for (const negocioId of plan.negociosAfectados) await abonarAlRegistrarPago(workspaceId, negocioId)
+  // Corre DESPUÉS de responder (`segundo-plano.ts`).
+  await abonarEnSegundoPlano(workspaceId, plan.negociosAfectados)
 
   revalidatePath('/conciliacion')
   for (const negocioId of plan.negociosAfectados) revalidatePath(`/negocios/${negocioId}`)
