@@ -456,6 +456,30 @@ describe('criterio 3 · la actividad de los adultos queda «Completo», sin avis
     }
   })
 
+  it('el buceo de COT-2026-0021: la línea cubre «2 adultos» (sin el infante) y no falta nadie', async () => {
+    const { actualizarComposicionDeItem, confirmarTarifaPorPasajero } = await import('./tarifa-pax-actions')
+    const { aceptada } = await pegarYAceptar(BUCEO(), null)
+    // Como quedó en producción: la línea dice 2 adultos y el costo se confirmó para ellos.
+    expect((await actualizarComposicionDeItem(aceptada.itemId, { adultos: 2, ninos: 0, infantes: 0 })).success).toBe(true)
+    expect((await confirmarTarifaPorPasajero(aceptada.itemId, null)).success).toBe(true)
+    expect(leerTarifaPax(lineaDeLaBase(aceptada.itemId).tarifa_pax).composicion).toEqual({ adultos: 2, ninos: 0, infantes: 0 })
+    for (const s of [await releida(), recargada()]) {
+      expect(s.html).not.toContain('data-estado-bloque')
+      expect(s.t).toContain('1 bloque · 1 completo')
+    }
+    // La casilla del pantallazo («Esta línea cubre: …»), donde salía «Faltan 1 infante por acomodar».
+    const { default: TarifaPasajeroItem } = await import('./tarifa-pasajero-item')
+    const { definicionDeTipo } = await import('@/lib/cotizaciones/ranuras-cotizacion')
+    const casilla = (ranura: 'actividad' | 'hotel') => texto(renderToStaticMarkup(React.createElement(TarifaPasajeroItem, {
+      itemId: aceptada.itemId, ranura: definicionDeTipo(ranura), composicionViaje: GRUPO,
+      tarifaPax: lineaDeLaBase(aceptada.itemId).tarifa_pax, costoUnitarioLinea: 0, onCambio: () => {},
+    })))
+    expect(casilla('actividad')).toContain('Esta línea cubre: 2 adultos')
+    expect(casilla('actividad')).not.toContain('por acomodar')
+    // Un hotel con la misma ocupación sigue diciendo quién falta, en singular.
+    expect(casilla('hotel')).toContain('Falta 1 infante por acomodar.')
+  })
+
   it('la de 3 personas (2 adultos + 1 bebé) sigue completa', async () => {
     await pegarYAceptar(sinCiudadNiFecha('Snorkel en Crab Cay', 600_000, 'tres'), 'Providencia y Santa Catalina')
     const s = recargada()
