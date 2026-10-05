@@ -21,14 +21,16 @@ import {
 } from './wa-bandeja-reglas.ts';
 import type { ConfigBandeja } from './wa-bandeja-reglas.ts';
 import { codigoCompacto, interpretarRespuestaNegocio } from './wa-carga-reglas.ts';
-import { calificarNombreNuevo, leerNuevo, normalizarTexto } from './wa-entendimiento-reglas.ts';
+import { calificarNombreNuevo, leerNuevo, normalizarNombre, normalizarTexto } from './wa-entendimiento-reglas.ts';
 import { fastPathParse } from './wa-parse-reglas.ts';
 import {
   esNombreNuevo,
   esRespuestaA,
+  esRuidoEscrito,
   esSiNoCorto,
   interpretarConfirmacionNuevo,
   leerEleccion,
+  leerOpcionEscrita,
   leerSiNo,
   lineaCaja,
   PALABRAS_COMUNES,
@@ -37,7 +39,7 @@ import {
   textoPideNombreEnDuda,
   viajesParecidos,
 } from './wa-viajes-reglas.ts';
-import type { ResolucionEncabezado, ViajeAbierto } from './wa-viajes-reglas.ts';
+import type { OpcionConfirmarNuevo, ResolucionEncabezado, ViajeAbierto } from './wa-viajes-reglas.ts';
 import { BTN_DESPUES, BTN_SIN_SOPORTE } from './handlers/registro/soporte-foto.ts';
 import { extraerDescripcionGasto } from './wa-gasto-descripcion.ts';
 import {
@@ -333,6 +335,8 @@ export interface OpcionPendiente {
   negocioId?: string;
   /** Posición en la lista que vio el usuario (1, 2…), si la lista es numerada. */
   numero?: number;
+  /** Capa `nuevo_confirmar`: el viaje de la opción (código, cliente, destino), para leer la respuesta como el código de hoy. */
+  viaje?: ViajeAbierto;
 }
 
 export interface PreguntaUnificada {
@@ -439,7 +443,7 @@ function preguntaDeLaSesion(s: SesionBotVista, ahora: number): PreguntaUnificada
  * nombre y DESCARTAR (cuarto control de Vera, CF7).
  */
 function preguntaConfirmarNuevo(b: PreguntaBandejaVista, nombre: string, alias: (id: string) => string, ahora: number): PreguntaUnificada {
-  const lista = (b.opciones ?? []).map((v, i) => ({ id: alias(v.id), etiqueta: `${i + 1}. ${lineaCaja(v)}`, negocioId: v.id, numero: i + 1 }));
+  const lista = (b.opciones ?? []).map((v, i) => ({ id: alias(v.id), etiqueta: `${i + 1}. ${lineaCaja(v)}`, negocioId: v.id, numero: i + 1, viaje: v }));
   return {
     capa: 'nuevo_confirmar', origen: 'bandeja', texto: `${b.nombre} · ${b.corta}`,
     opciones: [...lista, { id: 'si', etiqueta: `SÍ: crear el cliente nuevo «${nombre}»` }, { id: 'nuevo', etiqueta: 'otro nombre (el correcto)' }, DESCARTAR],
@@ -632,12 +636,11 @@ export function respuestaExacta(texto: string, p: PreguntaUnificada): boolean {
     }
     case 'resumen': return esRespuestaA('resumen', t);
     case 'nuevo_confirmar': {
-      // Lo que el código de hoy lee exacto (`interpretarConfirmacionNuevo`): el «sí» (o el mismo nombre), un
-      // número (de la lista del aviso, o fuera de ella: vuelve a preguntar), un código o DESCARTAR. Un número
-      // suelto nunca llega al modelo.
-      const ops = p.opciones.filter(o => o.negocioId).map(o => ({ id: o.negocioId!, codigo: null }));
-      const r = interpretarConfirmacionNuevo(t, ops, p.nuevoPorConfirmar ?? null);
-      return leerEleccion(t) !== null || r.tipo === 'si' || r.tipo === 'existente' || r.tipo === 'codigo' || r.tipo === 'descartar';
+      // Lo que el código de hoy lee exacto (`interpretarConfirmacionNuevo`, con las mismas opciones): el «sí»
+      // (o el mismo nombre), un número u ordinal (de la lista del aviso, o fuera de ella: vuelve a preguntar),
+      // un código, el viaje que señala o DESCARTAR. Un número nunca llega al modelo.
+      const r = interpretarConfirmacionNuevo(t, opcionesDelAviso(p), p.nuevoPorConfirmar ?? null);
+      return leerOpcionEscrita(t) !== null || r.tipo === 'si' || r.tipo === 'existente' || r.tipo === 'codigo' || r.tipo === 'descartar';
     }
     case 'contacto_bandeja': return esRespuestaA('otra', t);
     case 'nombre':
@@ -652,6 +655,13 @@ export function respuestaExacta(texto: string, p: PreguntaUnificada): boolean {
     case 'aclaracion': return numero;
     case 'soporte': return false;
   }
+}
+
+/** Las opciones de «¿Creo el cliente nuevo «X»?» como las lee el código de hoy (`negocio_opciones`: id, código, cliente, destino). */
+export function opcionesDelAviso(p: PreguntaUnificada): OpcionConfirmarNuevo[] {
+  return p.opciones.filter(o => o.negocioId).map(o => ({
+    id: o.negocioId!, codigo: o.viaje?.codigo ?? null, cliente: o.viaje?.cliente ?? null, destino: o.viaje?.destino ?? null, nombre: o.viaje?.nombre ?? null,
+  }));
 }
 
 // ── Utilidades del validador ─────────────────────────────────────────────────
@@ -922,11 +932,14 @@ function idPorLaFirma(v: NegocioCtx, e: EntradaValidador): boolean {
  * ni por `ref.cliente` ni por un id que el modelo eligió solo por esa firma. `firma`: la referencia era
  * solo la firma (no queda ninguna otra).
  */
-function viajesDe(a: AccionModelo, e: EntradaValidador): { viajes: NegocioCtx[]; conRef: boolean; idAjeno: boolean; firma: boolean } {
+function viajesDe(a: AccionModelo, e: EntradaValidador): { viajes: NegocioCtx[]; conRef: boolean; idAjeno: boolean; firma: boolean; idSinRespaldo: boolean } {
   const equipo = e.equipo ?? [];
   const v = porId(a.id, e.negocios);
   const idPorFirma = !!v && idPorLaFirma(v, e);
-  if (v && !idPorFirma) return { viajes: [v], conRef: true, idAjeno: false, firma: false };
+  // Quinto control de Vera (H4): el id del contexto vale solo si el mensaje nombra ese viaje (su código, su
+  // cliente o su destino), como ya se le exige a `ref`. Un id que el texto no respalda no elige nada.
+  if (v && !idPorFirma && nombraElViaje(v, e)) return { viajes: [v], conRef: true, idAjeno: false, firma: false, idSinRespaldo: false };
+  const idSinRespaldo = !!v && !idPorFirma;
   const idAjeno = !v && !!String(a.id ?? '').trim();
   // Las palabras de `ref` deben estar escritas (o venir con un id del contexto, que ya no es el caso).
   const cliente = soloLoEscrito(a.ref?.cliente, e.texto);
@@ -937,7 +950,7 @@ function viajesDe(a: AccionModelo, e: EntradaValidador): { viajes: NegocioCtx[];
     destino: soloLoEscrito(a.ref?.destino, e.texto),
   };
   const conRef = !!(ref.codigo || ref.cliente || ref.destino);
-  return { viajes: conRef ? resolverViaje(ref, e.negocios) : [], conRef, idAjeno, firma: !conRef && (idPorFirma || clienteEsFirma) };
+  return { viajes: conRef ? resolverViaje(ref, e.negocios) : [], conRef, idAjeno, firma: !conRef && (idPorFirma || clienteEsFirma), idSinRespaldo: idSinRespaldo && !conRef };
 }
 
 function viajeAbierto(n: NegocioCtx): ViajeAbierto {
@@ -1192,8 +1205,15 @@ function abrirViaje(acc: AccionModelo[], e: EntradaValidador, rechazo: string | 
       p: 'registrar', interpretacion: { accion: 'abrir_viaje', nuevo: nombre, con_contenido: conContenido, evidencia: ab.evidencia ?? null }, aviso: avisoNuevo(nombre, conContenido, e.negocios),
     }, rechazo, recordar);
   }
-  const { viajes, idAjeno, firma } = viajesDe(ab, e);
+  const { viajes, idAjeno, firma, idSinRespaldo } = viajesDe(ab, e);
   if (idAjeno) rechazo ??= 'V6_id_ajeno';
+  // H4 (quinto control de Vera): el modelo abrió un viaje por su id y el mensaje no lo nombra. Nada se abre:
+  // un acuse («gracias», «ok, recibido») es un acuse; lo demás se atiende como contenido (lo de hoy).
+  if (idSinRespaldo) {
+    if (esRuidoEscrito(e.texto)) return ejecutar('acuse', { p: 'nada' }, rechazo ?? 'V6_id_sin_respaldo', recordar);
+    const resto = acc.filter(a => a.accion === 'contenido');
+    return contenido(resto.length ? resto : [{ ...ab, accion: 'contenido', id: null }], e, rechazo ?? 'V6_id_sin_respaldo');
+  }
   // E1 del control de Vera: el «encabezado» era solo la firma de alguien del equipo. No abre nada: lo
   // que sigue en el mensaje se atiende como contenido (que puede nombrar su propio viaje).
   if (firma) {
@@ -1521,29 +1541,33 @@ function responder(a: AccionModelo, e: EntradaValidador, rechazo: string | null)
 }
 
 /**
- * ¿El mensaje dice que sí a crear el cliente nuevo? Un sí, «créalo», «nuevo», o el mismo nombre; sin
- * «pero» ni «no». El modelo propone «sí» y el código lo exige escrito: un «sí» que no está en el mensaje
- * no crea a nadie.
+ * El «sí» a «¿Creo el cliente nuevo «X»?»: va al código de hoy, que crea X (y pregunta si ya hay un contacto
+ * igual). Quinto control de Vera (2026-10-04): hay UN solo «sí», el de `interpretarConfirmacionNuevo` sobre el
+ * texto COMPLETO que escribió el comercial. Lo que proponga el modelo (`opcion:"si"`, `confirmar`) nunca
+ * alcanza solo: un acuse corto, un «sí» con una reserva o un escrito que trae el verbo «crear» vuelven a
+ * preguntar, como con el interruptor apagado.
  */
-export function afirmaCrear(texto: string, propuesto: string | null | undefined): boolean {
-  const t = norm(texto);
-  if (/\b(pero|no|nop|nel|espera|mejor|otro|otra)\b/.test(t)) return false;
-  const nombre = norm(propuesto);
-  if (nombre && ` ${t} `.includes(` ${nombre} `)) return true;
-  return leerSiNo(texto) === 'si' || /\b(si|crea\w*|nuev[oa]|dale|ok|listo|claro|correcto|confirmo|hagale|vale|perfecto|exacto)\b/.test(t);
+function siAlNuevo(e: EntradaValidador, a: AccionModelo | null, rechazo: string | null): Decision {
+  const p = e.pendiente!;
+  const propuesto = p.nuevoPorConfirmar ?? null;
+  const hoy = interpretarConfirmacionNuevo(e.texto, opcionesDelAviso(p), propuesto);
+  if (hoy.tipo === 'si') {
+    return ejecutar('bandeja.confirmar', { p: 'responder_bandeja', canonico: 'sí', interpretacion: { accion: 'confirmar', canonico: 'sí', evidencia: a?.evidencia ?? null }, aviso: null }, rechazo);
+  }
+  // «nuevo Sara Mejía Ruiz» con «¿Creo «Sara Mejía»?» no es un «sí» a Sara Mejía: es otro nombre, y el
+  // código de hoy lo vuelve a confirmar. Sin el «nuevo» escrito, el modelo dijo «sí» a algo que no lo es: se
+  // vuelve a preguntar lo mismo.
+  if (hoy.tipo === 'nombre' && leerNuevo(e.texto)?.cliente) return otroNombre(hoy.nombre, e, a, rechazo ?? 'V19_otro_nombre');
+  return aclaracion(e, rechazo ?? 'V19_si_no_escrito');
 }
 
-/** El «sí» a «¿Creo el cliente nuevo «X»?»: va al código de hoy, que crea X (y pregunta si ya hay un contacto igual). */
-function siAlNuevo(e: EntradaValidador, a: AccionModelo | null, rechazo: string | null): Decision {
-  // «nuevo Sara Mejía Ruiz» con «¿Creo «Sara Mejía»?» no es un «sí» a Sara Mejía: es otro nombre, y el
-  // código de hoy lo vuelve a confirmar.
-  const hoy = interpretarConfirmacionNuevo(e.texto, [], e.pendiente?.nuevoPorConfirmar ?? null);
-  if (hoy.tipo === 'nombre' && leerNuevo(e.texto)?.cliente) {
-    const canonico = `NUEVO ${hoy.nombre}`;
-    return ejecutar('bandeja.responder', { p: 'responder_bandeja', canonico, interpretacion: { accion: 'responder', nuevo: hoy.nombre, canonico, evidencia: a?.evidencia ?? null }, aviso: null }, rechazo ?? 'V19_otro_nombre');
-  }
-  if (!afirmaCrear(e.texto, e.pendiente?.nuevoPorConfirmar)) return aclaracion(e, rechazo ?? 'V19_si_no_escrito');
-  return ejecutar('bandeja.confirmar', { p: 'responder_bandeja', canonico: 'sí', interpretacion: { accion: 'confirmar', canonico: 'sí', evidencia: a?.evidencia ?? null }, aviso: null }, rechazo);
+/** Otro nombre en la confirmación: «NUEVO <nombre>» al código de hoy, que lo vuelve a confirmar. Nunca el propuesto. */
+function otroNombre(nombre: string, e: EntradaValidador, a: AccionModelo | null, rechazo: string | null): Decision {
+  if (normalizarNombre(nombre) === normalizarNombre(e.pendiente?.nuevoPorConfirmar)) return aclaracion(e, rechazo ?? 'V19_mismo_nombre_sin_si');
+  const no = nombreQueNoSigue(nombre, e, n => decir('bandeja.pide_nombre', textoPideNombreEnDuda(n), 'V8_nombre_en_duda'));
+  if (no) return no;
+  const canonico = `NUEVO ${nombre}`;
+  return ejecutar('bandeja.responder', { p: 'responder_bandeja', canonico, interpretacion: { accion: 'responder', nuevo: nombre, canonico, evidencia: a?.evidencia ?? null }, aviso: null }, rechazo);
 }
 
 /** Un viaje de la lista del aviso: va por su NÚMERO, que el código de hoy lee contra esa misma lista. */
@@ -1569,20 +1593,28 @@ function responderConfirmarNuevo(a: AccionModelo, opcion: string, e: EntradaVali
   const p = e.pendiente!;
   const lista = p.opciones.filter(o => o.negocioId);
   if (opcion === 'descartar') return descartarPregunta(a, e, rechazo);
-  const num = leerEleccion(e.texto);
+  const num = leerOpcionEscrita(e.texto);
   if (num !== null) {
     const o = lista.find(x => x.numero === num);
     return o ? elegirDelAviso(o, a, rechazo) : aclaracion(e, rechazo ?? 'V20_numero_fuera_del_aviso');
   }
+  // Lo que el código de hoy lee en el texto completo: un viaje de la lista (por lo que señala) va por su número.
+  const hoy = interpretarConfirmacionNuevo(e.texto, opcionesDelAviso(p), p.nuevoPorConfirmar ?? null);
+  if (hoy.tipo === 'existente') {
+    const o = lista.find(x => x.negocioId === hoy.negocio_id);
+    if (o) return elegirDelAviso(o, a, rechazo);
+  }
   if (opcion === 'si') return siAlNuevo(e, a, rechazo);
   if (opcion === 'nuevo' || a.nuevo_cliente) {
+    // Quinto control de Vera (RP7): «mismo nombre = sí» se decide sobre el texto completo, no sobre la parte que
+    // eligió el modelo. Si el texto es un «sí» (o el nombre propuesto, entero y solo), crea; si el texto trae
+    // otro nombre, ese se vuelve a confirmar; si el modelo propone el MISMO nombre y el texto no es un «sí»
+    // («no, es otra …»), se vuelve a preguntar.
+    if (hoy.tipo === 'si') return siAlNuevo(e, a, rechazo);
+    if (hoy.tipo === 'nombre') return otroNombre(hoy.nombre, e, a, rechazo);
     const nombre = nombreNuevo({ ...a, opcion: 'nuevo' }, e.texto);
-    if (!nombre) return siAlNuevo(e, a, rechazo ?? 'V8_sin_nombre');
-    const no = nombreQueNoSigue(nombre, e, n => decir('bandeja.pide_nombre', textoPideNombreEnDuda(n), 'V8_nombre_en_duda'));
-    if (no) return no;
-    // El mismo nombre cuenta como «sí»; otro se vuelve a confirmar. Lo decide `interpretarConfirmacionNuevo`.
-    const canonico = `NUEVO ${nombre}`;
-    return ejecutar('bandeja.responder', { p: 'responder_bandeja', canonico, interpretacion: { accion: 'responder', nuevo: nombre, canonico, evidencia: a.evidencia ?? null }, aviso: null }, rechazo);
+    if (!nombre) return aclaracion(e, rechazo ?? 'V8_sin_nombre');
+    return otroNombre(nombre, e, a, rechazo);
   }
   const escritos = numerosEscritos(e.texto);
   const codigoEscrito = (v: NegocioCtx | undefined | null) => !!v?.codigo && codigoCompacto(e.texto).includes(codigoCompacto(v.codigo));
