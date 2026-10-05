@@ -86,6 +86,7 @@
 - ⚠️ [Navigate no es canal de ayuda (#933)](project_cardumen_sin_canal_de_ayuda.md) — SIN mergear; SEN se aparta sin prometer ayuda; caida_filtro.ts roto
 - ⚠️ [Techo de 1.000 filas de PostgREST](project_techo_postgrest.md) — `traerTodo` para lecturas por lote
 - ⚠️ [Marcas de Siigo en SOENA](project_marcas_siigo_soena.md) — FV-2-244 con la cédula truncada NO se toca
+- [Ciudad de actividad y tasa en Revisar (Trappvel)](project_ciudad_actividad_nombre_tour.md) — regla ANGOSTA (Punta Cana es destino); tasa solo en el editor
 - ⚠️⚠️ [Cotización Trappvel (30 frentes)](indice_cotizacion_trappvel.md) — ranuras, tarifas, pasajeros, PDF del cliente, captura A/B
 - ⚠️ [Montos de SOENA por parseMontoCop (#842)](project_soena_parse_monto_cop.md) — el regex viejo daba NaN con 2+ puntos; extractor cerrado en #843
 - ⚠️⚠️ [Trappvel: las tres reglas del 15](project_trappvel_reglas_reunion_15.md) — las tres INERTES sin config
