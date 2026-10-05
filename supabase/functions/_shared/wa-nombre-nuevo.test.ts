@@ -122,7 +122,7 @@ describe('clientes con viaje abierto: la confirmación lo dice (también en el a
     const { segmentos, encabezados } = armarSegmentos(ms, [ROSALBA], { horasCajaActiva: 4 });
     const plan = armarPlan({ mensajes: ms, viajes: [ROSALBA], segmentos, encabezados });
     const resumen = partesResumenPlan(plan, ms, undefined, [ROSALBA]).join('\n');
-    expect(resumen).toContain('1) Viaje nuevo de Rosalba Tovar — 2 mensajes');
+    expect(resumen).toContain('*Viaje nuevo · Rosalba Tovar*\n\n1. «Queremos ir a Cartagena»\n2. «Somos 4 adultos»');
     expect(resumen).toContain('⚠ 1) Ya hay un viaje de Rosalba Quiñones Tovar (R 26 1): si es para ese, escribe «el 1 y 2 son de R 26 1»; si es un viaje nuevo, déjalo así.');
     // La corrección que propone el aviso se entiende tal cual, y el «sí» sin corregir es el cliente nuevo.
     expect(interpretarRespuestaPlan('el 1 y 2 son de R 26 1', plan, [ROSALBA])).toMatchObject({ tipo: 'corregir', cambios: [{ ns: [2, 3], a: { tipo: 'existente', negocio_id: 'r' } }] });

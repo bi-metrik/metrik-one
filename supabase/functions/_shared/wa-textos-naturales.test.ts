@@ -68,7 +68,8 @@ describe('PR B · los textos fijos de la bandeja', () => {
   });
 
   it.each(Object.entries(TEXTOS))('%s: corto (dos líneas más el bloque de la lista o del resumen)', (_k, t) => {
-    const bloque = /^(?:\d+[.)] |   \d+ |⚠ |Entendí |Descartados|- )/;
+    // El bloque: la lista, y en el resumen (2026-10-05) el viaje en negrita con la línea de su cliente y las líneas en blanco.
+    const bloque = /^(?:\d+[.)] |   \d+ |⚠ |Entendí |Descartados|- |\*.*\*$|Ya es cliente · |Cliente nuevo · |No lo tengo |$)/;
     expect(t.split('\n').filter(l => !bloque.test(l)).length).toBeLessThanOrEqual(3);
   });
 
@@ -79,8 +80,9 @@ describe('PR B · los textos fijos de la bandeja', () => {
       '2. MADRID 8N · Jorge Pérez (T1 26 12)',
       'Dime cuál (por ejemplo «el de Cartagena»). Si es un viaje nuevo, escribe «nuevo» y el nombre del cliente; si no va, «descartar».',
     ].join('\n'));
-    expect(TEXTOS['resumen listo'].split('\n')[0]).toBe('¿Lo cargo así?');
-    expect(TEXTOS['resumen listo'].split('\n').at(-1)).toBe('No cargué nada todavía. Responde «sí» para cargarlo, o corrige: «el 2 es de Luisa», «descartar el 2». Con «descartar» no cargo nada.');
+    expect(TEXTOS['resumen listo'].split('\n')[0]).toBe('¿Cargo este viaje?');
+    // 2026-10-05: «No cargué nada todavía» lo dicen ahora los botones «Cargar» y «Descartar»; queda cómo corregir.
+    expect(TEXTOS['resumen listo'].split('\n').at(-1)).toBe('Para mover o quitar uno, escríbeme: «el 2 es de Luisa» o «quita el 2».');
     expect(TEXTOS['resumen con un marcado'].split('\n')[0]).toBe('¿Qué hago con el 2 (⚠)?');
     expect(TEXTOS['dos solicitudes']).toBe('¿Me las reenvías por separado? Veo dos solicitudes distintas (Lina: Cartagena · Andrés: Madrid) y no las mezclo en un viaje.\nResponde «descartar» y reenvía cada una después de su encabezado («Carolina», «T1 26 9», «nuevo Luisa»).');
   });

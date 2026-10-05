@@ -13,9 +13,17 @@ import { rpcDelDirectorio } from './__fixtures__/directorio-doble.ts';
 const enviados: Array<{ phone: string; texto: string }> = [];
 vi.mock('./wa-respond.ts', () => ({
   sendTextMessage: vi.fn(async (phone: string, texto: string) => { enviados.push({ phone, texto }); }),
+  // Los botones de respuesta (2026-10-05): el cuerpo cuenta como lo que se le dijo.
+  sendButtons: vi.fn(async (phone: string, texto: string) => { enviados.push({ phone, texto }); return 'wamid.botones'; }),
 }));
 
 type Fila = Record<string, unknown>;
+/** Los títulos de los botones del último mensaje que los llevó (2026-10-05). */
+const tituloDeBotones = async () => {
+  const { sendButtons } = await import('./wa-respond.ts');
+  const c = vi.mocked(sendButtons).mock.calls.at(-1) as unknown as [string, string, Array<{ title: string }>] | undefined;
+  return c ? c[2].map(b => b.title) : [];
+};
 type Tablas = Record<string, Fila[]>;
 
 // ── Base en memoria ─────────────────────────────────────────────────────────
@@ -529,11 +537,12 @@ describe('modo encabezado: manda el encabezado, el reparto se confirma y cada vi
     const antes = JSON.stringify(t.negocio_bloques);
     const r = await mod.armarPreguntaNegocio(db as never, id, WS, 5);
     expect(vi.mocked(fetch)).not.toHaveBeenCalled(); // el modelo ya no asigna
-    expect(r!.texto).toContain('Entendí 2 viajes:');
-    expect(r!.texto).toContain('1) PUNTA CANA NOV · Marta Prueba (T1 26 14) — 2 mensajes');
-    expect(r!.texto).toContain('2) CARTAGENA 3N · Luis Prueba (T1 26 15) — 1 mensaje');
-    expect(r!.texto).toContain('   2 «Hola Tati, buenas tardes» (saluda a mitad de la caja'); // numerado sin los encabezados
-    expect(r!.texto).toContain('No cargué nada todavía');
+    // Con algo por decidir (⚠), la pregunta de arriba es esa: no hay «¿Cargo …?» ni botón «Cargar».
+    expect(r!.texto).toMatch(/^¿Qué hago con el 2 \(⚠\)\?\n\n/);
+    expect(r!.texto).toContain('*1) PUNTA CANA NOV · Marta Prueba (T1 26 14)*\n\n1. «volvemos el 27 de noviembre»\n2. «Hola Tati, buenas tardes» ⚠');
+    expect(r!.texto).toContain('*2) CARTAGENA 3N · Luis Prueba (T1 26 15)*\n\n3. «somos de Medellín»');
+    expect(r!.texto).toContain('\n2. «Hola Tati, buenas tardes» (saluda a mitad de la caja'); // numerado sin los encabezados
+    expect(r!.texto).not.toContain('No cargué nada todavía');
 
     // Lo que hace `preguntarCliente`, y el comercial contesta «sí» sin decidir el sospechoso.
     Object.assign(t.wa_bandeja_entregas.find(e => e.id === id)!, { plan_viajes: r!.plan, estado: 'con_cliente', cliente_texto: 'sí' });
@@ -588,7 +597,7 @@ describe('modo encabezado: manda el encabezado, el reparto se confirma y cada vi
     expect(r1!.plan!.encabezados).toEqual([1, 3]);
     const con = entregaCon({ estado: 'esperando_cliente', mensajes: [{ cuerpo: 'Martha', reenviado: false }, { cuerpo: 'volvemos el 27 de noviembre' }, { cuerpo: '1', reenviado: false }] });
     const r2 = await mod.armarPreguntaNegocio(db as never, con, WS, 3);
-    expect(r2!.texto).toContain('1) PUNTA CANA NOV · Marta Prueba (T1 26 14) — 1 mensaje');
+    expect(r2!.texto).toContain('*PUNTA CANA NOV · Marta Prueba (T1 26 14)*\n\n1. «volvemos el 27 de noviembre»');
     expect(r2!.plan!.encabezados).toEqual([1, 3]);
   });
 
@@ -747,7 +756,7 @@ describe('Prueba en vivo del 2026-10-01: dos viajes NUEVO seguidos, una sola pre
     expect(textos().at(-1)).toBe('Va como viaje nuevo de Laura Prueba, cliente nuevo (cel. 300 111 2233). Lo creo cuando me digas que sí en el resumen.\nReenvíame lo que te pidió y al final te muestro el resumen.\nYa hay viajes de Luis Prueba (T1 26 15), Marta Prueba (T1 26 14) y Ana Prueba (T1 26 9): si es para uno de esos, escribe su nombre (por ejemplo «CARTAGENA 3N»).');
     await llega('Hola, queremos ir a Cartagena, somos 2 adultos', true);
     await llega('listo');
-    expect(textos().at(-1)).toMatch(/^Laura Prueba · ¿Lo cargo así\?\nEntendí 1 viaje:\n1\) Viaje nuevo de Laura Prueba \(cliente nuevo, cel\. 300 111 2233\) — 1 mensaje\n   1 «Hola, queremos ir a Cartagena/);
+    expect(textos().at(-1)).toMatch(/^¿Cargo este viaje\?\n\n\*Viaje nuevo · Laura Prueba\*\nCliente nuevo · cel\. 300 111 2233\n\n1\. «Hola, queremos ir a Cartagena/);
     await llega('sí');
     expect(textos()).not.toContain('Anotado.');
     salidaModelo = laura();
@@ -756,7 +765,7 @@ describe('Prueba en vivo del 2026-10-01: dos viajes NUEVO seguidos, una sola pre
     await llega('Nuevo Diego Prueba 300 444 5566');
     for (const x of ['para San Andrés', 'vamos 3 adultos', 'del 5 al 9 de diciembre', 'hotel todo incluido']) await llega(x, true);
     await llega('listo');
-    expect(textos().at(-1)).toMatch(/^Diego Prueba · ¿Lo cargo así\?\nEntendí 1 viaje:\n1\) Viaje nuevo de Diego Prueba \(cliente nuevo, cel\. 300 444 5566\) — 4 mensajes/);
+    expect(textos().at(-1)).toMatch(/^¿Cargo este viaje\?\n\n\*Viaje nuevo · Diego Prueba\*\nCliente nuevo · cel\. 300 444 5566\n\n1\. «para San Andrés»\n2\. «vamos 3 adultos»\n3\. «del 5 al 9 de diciembre»\n4\. «hotel todo incluido»/);
     await llega('Si');
     salidaModelo = diego();
     await cron();
@@ -779,12 +788,12 @@ describe('Prueba en vivo del 2026-10-01: dos viajes NUEVO seguidos, una sola pre
     expect(textos().at(-1)).toBe('No tengo a Laura Prueba en el directorio. ¿Me pasas su celular o su correo? Así reviso que no lo tengamos con otro nombre, y sin uno de los dos no lo creo.\nYa hay viajes de Luis Prueba (T1 26 15), Marta Prueba (T1 26 14) y Ana Prueba (T1 26 9): si es para uno de esos, escribe su nombre (por ejemplo «CARTAGENA 3N»).');
     await llega('Hola, queremos ir a Cartagena, somos 2 adultos', true);
     await llega('listo');
-    expect(textos().at(-1)).toContain('1) Viaje nuevo de Laura Prueba (no lo tengo en el directorio: falta su celular o correo) — 1 mensaje');
-    expect(textos().at(-1)).toMatch(/^Laura Prueba · ¿Me pasas el celular o el correo de Laura Prueba\?/);
+    expect(textos().at(-1)).toContain('*Viaje nuevo · Laura Prueba*\nNo lo tengo en el directorio: falta su celular o correo\n\n1. «Hola, queremos ir a Cartagena');
+    expect(textos().at(-1)).toMatch(/^¿Me pasas el celular o el correo de Laura Prueba\?/);
     // El «sí» no crea sin la llave.
     await llega('sí');
     await cron();
-    expect(textos().at(-1)).toMatch(/^Laura Prueba · Todavía no lo cargo\. ¿Me pasas el celular o el correo de Laura Prueba\?/);
+    expect(textos().at(-1)).toMatch(/^Todavía no lo cargo\. ¿Me pasas el celular o el correo de Laura Prueba\?/);
     expect(t.contactos).toEqual([]);
 
     // Un encabezado nuevo con la pregunta abierta: su acuse y se recuerda la pendiente en una línea.
@@ -799,17 +808,17 @@ describe('Prueba en vivo del 2026-10-01: dos viajes NUEVO seguidos, una sola pre
     await llega('listo');
     // El resumen de Diego no sale: espera turno.
     expect(textos().at(-1)).toBe('Primero: Laura Prueba · ¿Lo cargo así?\nLo que acabas de mandar te lo pregunto después.');
-    expect(textos().some(x => x.startsWith('Diego Prueba · Entendí'))).toBe(false);
+    expect(textos().some(x => x.includes('*Viaje nuevo · Diego Prueba*'))).toBe(false);
 
     await llega('300 111 2233'); // la llave va a la única pregunta abierta: la de Laura
     await cron();
-    expect(textos().at(-1)).toContain('1) Viaje nuevo de Laura Prueba (cliente nuevo, cel. 300 111 2233) — 1 mensaje');
+    expect(textos().at(-1)).toContain('*Viaje nuevo · Laura Prueba*\nCliente nuevo · cel. 300 111 2233\n\n1. «Hola, queremos ir a Cartagena');
     await llega('sí');
     salidaModelo = laura();
     await cron();
     expect(t.contactos.map(c => c.nombre)).toEqual(['LAURA PRUEBA']);
     // Contestada la de Laura, sale la de Diego.
-    expect(textos().at(-1)).toMatch(/^Diego Prueba · ¿Lo cargo así\?\nEntendí 1 viaje:/);
+    expect(textos().at(-1)).toMatch(/^¿Cargo este viaje\?\n\n\*Viaje nuevo · Diego Prueba\*/);
     await llega('SI');
     salidaModelo = diego();
     await cron();
@@ -825,8 +834,8 @@ describe('Prueba en vivo del 2026-10-01: dos viajes NUEVO seguidos, una sola pre
     await llega('vamos 3 adultos para San Andrés', true);
     await llega('listo');
     const resumen = textos().at(-1)!;
-    expect(resumen).toContain('1) Viaje nuevo de Laura Prueba (ya es cliente: sin celular ni correo, sin viajes) — 1 mensaje');
-    expect(resumen).toContain('2) Viaje nuevo de Diego Prueba (ya es cliente: cel. …8877, sin viajes) — 1 mensaje');
+    expect(resumen).toContain('*1) Viaje nuevo · Laura Prueba*\nYa es cliente · sin celular ni correo · sin viajes\n\n1. «Hola, queremos ir a Cartagena');
+    expect(resumen).toContain('*2) Viaje nuevo · Diego Prueba*\nYa es cliente · cel. …8877 · sin viajes\n\n2. «vamos 3 adultos para San Andrés»');
     await llega('Sí');
     colaModelo = [laura(), diego()];
     await cron();
@@ -887,6 +896,7 @@ describe('guardianes en la ejecución', () => {
     await correr();
     expect(ent()).toMatchObject({ estado: 'esperando_negocio', confirmacion_pendiente: 'cruce', negocio_destino_id: 'n15' });
     expect(enviados[0].texto).toContain('¿Seguro que estos mensajes van en CARTAGENA 3N · Luis Prueba (T1 26 15)? Hablan de Punta Cana y ese viaje va a CARTAGENA; no cargué nada.');
+    expect(await tituloDeBotones()).toEqual(['✅ Sí, cargarlos', '🗑 Descartar']);
     expect(bloque('b15')).toEqual({ destino: 'CARTAGENA' });
 
     await responder('sí');
@@ -905,6 +915,7 @@ describe('guardianes en la ejecución', () => {
     await responder('sí'); // «¿Creo el cliente nuevo «Pedro Prueba»?»
     await correr();
     expect(enviados[1].texto).toContain('¿Es una solicitud de viaje? No la vi en estos 2 mensajes');
+    expect(await tituloDeBotones()).toEqual(['✅ Sí, créalo', '🗑 Descartar']);
     expect(ent()).toMatchObject({ estado: 'esperando_negocio', confirmacion_pendiente: 'sin_solicitud' });
     expect(t.negocios.length).toBe(negocios);
     expect(t.contactos).toEqual([]);
@@ -927,6 +938,7 @@ describe('guardianes en la ejecución', () => {
     await correr();
     expect(enviados[1].texto).toContain('¿Me las reenvías por separado? Veo dos solicitudes distintas (Carolina: Aruba · Luisa: Curazao)');
     expect(enviados[1].texto).toContain('después de su encabezado');
+    expect(await tituloDeBotones()).toEqual(['🗑 Descartar']);
     expect(t.negocios.length).toBe(negocios);
 
     // «SEPARAR» ya no existe (el modelo no reparte): se repite la pregunta.

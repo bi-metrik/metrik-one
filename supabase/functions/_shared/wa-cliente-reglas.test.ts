@@ -239,7 +239,7 @@ describe('el resumen y su «sí» (se mantiene el «sí» del resumen)', () => {
     expect(r).toEqual({ tipo: 'cliente', clave: claveDestino(plan.mensajes[0].destino!), cambio: { llave: { correo: 'simon@correo.co' } } });
     const conLlave = resolverClientesDelPlan(aplicarCambioCliente(plan, (r as { clave: string }).clave, (r as { cambio: object }).cambio),
       directorioDesde(new Map([[claveDeNombre('Simón Arango'), []]]), new Map([[claveDeLlave({ correo: 'simon@correo.co' }), []]])));
-    expect(partesResumenPlan(conLlave, ms).join('\n')).toContain('1) Viaje nuevo de Simón Arango (cliente nuevo, correo simon@correo.co) — 1 mensaje');
+    expect(partesResumenPlan(conLlave, ms).join('\n')).toContain('*Viaje nuevo · Simón Arango*\nCliente nuevo · correo simon@correo.co\n\n1. «Santa Marta»');
     expect(interpretarRespuestaPlan('sí', conLlave, [])).toEqual({ tipo: 'si' });
   });
 
@@ -248,7 +248,7 @@ describe('el resumen y su «sí» (se mantiene el «sí» del resumen)', () => {
     const ms = [escrito('nuevo Martín Robledo'), reenvio('Cartagena')];
     const { segmentos, encabezados } = armarSegmentos(ms, VIAJES_MR, cfg);
     const plan = resolverClientesDelPlan(armarPlan({ mensajes: ms, viajes: VIAJES_MR, segmentos, encabezados }), DIR);
-    expect(partesResumenPlan(plan, ms, undefined, VIAJES_MR).join('\n')).toContain('1) Viaje nuevo de Martín Robledo (ya es cliente: cel. …9444, 2 viajes abiertos) — 1 mensaje');
+    expect(partesResumenPlan(plan, ms, undefined, VIAJES_MR).join('\n')).toContain('*Viaje nuevo · Martín Robledo*\nYa es cliente · cel. …9444 · 2 viajes abiertos\n\n1. «Cartagena»');
     expect(interpretarRespuestaPlan('sí', plan, VIAJES_MR)).toEqual({ tipo: 'si' });
     // Nombrar al cliente en un reenvío no es «hablar de otro viaje»: es el mismo cliente.
     expect(plan.mensajes.every(m => !m.sospecha)).toBe(true);

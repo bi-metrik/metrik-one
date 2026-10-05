@@ -36,6 +36,7 @@ import {
   descartarTandaAbierta,
   descartarTodo,
   enviar,
+  enviarAcuseDeLaCaja,
   esperaEnVuelo,
   estadoParaEsperar,
   preguntarCliente,
@@ -488,7 +489,9 @@ async function despachar(b: Base, d: Extract<Decision, { tipo: 'ejecutar' }>, le
         const i = paso.interpretacion;
         const deViajeNuevo = (i.accion === 'abrir_viaje' && !i.viaje_id) || i.accion === 'nombre' || (i.accion === 'responder' && !i.viaje_id && !!i.nuevo) || i.accion === 'confirmar';
         const delCliente = deViajeNuevo && lec.bandeja ? await acuseDelClienteDeLaTanda(supabase, ws, message.phone, lec.bandeja.horasCajaActiva) : null;
-        await decirAlUsuario(delCliente ?? paso.aviso);
+        // «¿Es la misma persona?» de la caja va con sus dos botones (2026-10-05), como en la ruta de hoy.
+        if (delCliente && !recordar && b.enBandeja) await enviarAcuseDeLaCaja(message.phone, delCliente, fila.entrega, ws);
+        else await decirAlUsuario(delCliente ?? paso.aviso);
       }
       return true;
     }
