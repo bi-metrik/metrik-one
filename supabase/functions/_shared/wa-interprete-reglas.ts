@@ -1280,7 +1280,7 @@ function clienteDeLaLista(e: EntradaValidador): string | null {
 function nuevoDelClienteDeLaLista(a: AccionModelo, e: EntradaValidador, rechazo: string | null): Decision | null {
   const c = clienteDeLaLista(e);
   if (!c) return null;
-  const pide = a.opcion === 'nuevo' || a.nuevo_sin_nombre === true || !!a.nuevo_cliente || a.cliente_existente === true || pideViajeNuevo(e.texto);
+  const pide = a.opcion === 'nuevo' || a.nuevo_sin_nombre === true || !!a.nuevo_cliente || pideViajeNuevo(e.texto);
   if (!pide || niegaLoNuevo(e.texto) || leerEleccion(e.texto) !== null) return null;
   const nombre = escritoTalCual(a.nuevo_cliente ?? (a.opcion === 'nuevo' ? a.ref?.cliente : null), e.texto) ?? leerNuevo(e.texto)?.cliente ?? null;
   if (nombre && !palabras(nombre).every(w => palabras(c).includes(w))) return null;
@@ -2140,7 +2140,7 @@ export function pideRegistrar(texto: string): boolean {
     || /\b(registr|anot|apunt|guard|carg|ingres|agreg)\w*/.test(t)
     || /\b(gaste|pague|compre|inverti|gasto|gastos|crea|crear|crealo|creame)\b/.test(t)
     // Octavo control de Vera (hallazgo 10, Termotech): otros verbos de registrar un gasto o un movimiento.
-    || /\b(?:pag(?:amos|aron|o|ue)|compr(?:amos|aron|o)|gast(?:amos|aron|o)|tanque\w*|legaliz\w*|reembols\w*|contabiliz\w*|factur\w*|report(?:a|ale|alo|ar|e)|sub(?:e|ir|elo|ela|ilo|ime|eme))\b/.test(t);
+    || /\b(?:pagamos|pagaron|compramos|compraron|gastamos|gastaron|tanque\w*|legaliz\w*|reembols\w*|contabiliz\w*|report(?:ale|alo|ar)|sub(?:ir|elo|ela|ilo|ime|eme))\b/.test(t);
 }
 
 function corregirGasto(acc: AccionModelo[], e: EntradaValidador, rechazo: string | null): Decision {
