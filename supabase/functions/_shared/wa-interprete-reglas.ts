@@ -27,8 +27,10 @@ import {
   esNombreNuevo,
   esRespuestaA,
   esRuidoEscrito,
+  esSi,
   esSiNoCorto,
   interpretarConfirmacionNuevo,
+  interpretarRespuestaPlan,
   leerEleccion,
   leerOpcionEscrita,
   leerSiNo,
@@ -39,7 +41,7 @@ import {
   textoPideNombreEnDuda,
   viajesParecidos,
 } from './wa-viajes-reglas.ts';
-import type { OpcionConfirmarNuevo, ResolucionEncabezado, ViajeAbierto } from './wa-viajes-reglas.ts';
+import type { OpcionConfirmarNuevo, PlanViajes, RespuestaConfirmarNuevo, ResolucionEncabezado, ViajeAbierto } from './wa-viajes-reglas.ts';
 import { BTN_DESPUES, BTN_SIN_SOPORTE } from './handlers/registro/soporte-foto.ts';
 import { extraerDescripcionGasto } from './wa-gasto-descripcion.ts';
 import {
@@ -352,6 +354,14 @@ export interface PreguntaUnificada {
   ofreceDescartar: boolean;
   /** Capa `nuevo_confirmar`: el nombre que muestra «¿Creo el cliente nuevo «X»?» (X). */
   nuevoPorConfirmar?: string | null;
+  /**
+   * Capas `nuevo_confirmar` y `resumen`: los viajes abiertos, como los lee el código de hoy. En la confirmación, el
+   * aviso «Ya hay un viaje de …» puede nombrar uno que no está en la lista; en el resumen, una corrección resuelve
+   * contra ellos (sexto control de Vera).
+   */
+  viajesAbiertos?: ViajeAbierto[] | null;
+  /** Capa `resumen`: el reparto que muestra el resumen, para saber si el código de hoy entiende la respuesta. */
+  plan?: PlanViajes | null;
 }
 
 /** La sesión del bot como la ve el intérprete (`bot_sessions`, sin crearla). */
@@ -375,6 +385,10 @@ export interface PreguntaBandejaVista {
   vistaAt?: string | null;
   /** Si la pregunta es «¿Creo el cliente nuevo «X»?»: X. Va con su capa (`nuevo_confirmar`). */
   nuevoPorConfirmar?: string | null;
+  /** Los viajes abiertos de la bandeja (`viajesAbiertosDeLaBandeja`): los lee la confirmación y el resumen. */
+  viajesAbiertos?: ViajeAbierto[] | null;
+  /** Con `espera: 'resumen'`: el reparto de la entrega (`plan_viajes`). */
+  plan?: PlanViajes | null;
 }
 
 /** Lo que espera la tanda abierta (`pendienteDeLaTanda`). */
@@ -448,6 +462,7 @@ function preguntaConfirmarNuevo(b: PreguntaBandejaVista, nombre: string, alias: 
     capa: 'nuevo_confirmar', origen: 'bandeja', texto: `${b.nombre} · ${b.corta}`,
     opciones: [...lista, { id: 'si', etiqueta: `SÍ: crear el cliente nuevo «${nombre}»` }, { id: 'nuevo', etiqueta: 'otro nombre (el correcto)' }, DESCARTAR],
     haceMin: minutosDesde(b.vistaAt, ahora), tambien: null, ofreceDescartar: true, nuevoPorConfirmar: nombre,
+    ...(b.viajesAbiertos?.length ? { viajesAbiertos: b.viajesAbiertos } : {}),
   };
 }
 
@@ -463,6 +478,7 @@ function preguntaDeLaBandeja(b: PreguntaBandejaVista, alias: (id: string) => str
   return {
     capa, origen: 'bandeja', texto: `${b.nombre} · ${b.corta}`, opciones, haceMin: minutosDesde(b.vistaAt, ahora), tambien: null,
     ofreceDescartar: capa === 'entrega' || capa === 'resumen',
+    ...(capa === 'resumen' && b.plan ? { plan: b.plan, viajesAbiertos: b.viajesAbiertos ?? [] } : {}),
   };
 }
 
@@ -634,12 +650,20 @@ export function respuestaExacta(texto: string, p: PreguntaUnificada): boolean {
       const ops = p.opciones.filter(o => o.negocioId).map(o => ({ id: o.negocioId!, codigo: null, cliente: null, destino: null }));
       return esSiNoCorto(t) || interpretarRespuestaNegocio(t, ops).tipo !== 'no_entendida';
     }
-    case 'resumen': return esRespuestaA('resumen', t);
+    case 'resumen': {
+      if (!esRespuestaA('resumen', t)) return false;
+      // Sexto control de Vera (hallazgo 4): con la forma de una corrección, el atajo solo es exacto si el código de
+      // hoy la entiende. Si `interpretarRespuestaPlan` no la entiende («el 3 es de otra persona, sácalo»), va al
+      // modelo. El «sí» con mensajes por decidir sí la entiende (dice cuáles faltan). Sin el reparto a la vista,
+      // como antes: por la forma.
+      if (!p.plan) return true;
+      return esSi(t) || interpretarRespuestaPlan(t, p.plan, p.viajesAbiertos ?? []).tipo !== 'no_entendida';
+    }
     case 'nuevo_confirmar': {
-      // Lo que el código de hoy lee exacto (`interpretarConfirmacionNuevo`, con las mismas opciones): el «sí»
-      // (o el mismo nombre), un número u ordinal (de la lista del aviso, o fuera de ella: vuelve a preguntar),
-      // un código, el viaje que señala o DESCARTAR. Un número nunca llega al modelo.
-      const r = interpretarConfirmacionNuevo(t, opcionesDelAviso(p), p.nuevoPorConfirmar ?? null);
+      // Lo que el código de hoy lee exacto (`interpretarConfirmacionNuevo`, con las mismas opciones y los mismos
+      // viajes): el «sí» (o el mismo nombre), un número u ordinal (de la lista del aviso, o fuera de ella: vuelve
+      // a preguntar), un código, el viaje que señala o DESCARTAR. Un número nunca llega al modelo.
+      const r = leerConfirmacion(t, p);
       return leerOpcionEscrita(t) !== null || r.tipo === 'si' || r.tipo === 'existente' || r.tipo === 'codigo' || r.tipo === 'descartar';
     }
     case 'contacto_bandeja': return esRespuestaA('otra', t);
@@ -655,6 +679,11 @@ export function respuestaExacta(texto: string, p: PreguntaUnificada): boolean {
     case 'aclaracion': return numero;
     case 'soporte': return false;
   }
+}
+
+/** «¿Creo el cliente nuevo «X»?» leída como la lee el código de hoy: las opciones del aviso, X y los viajes abiertos. */
+export function leerConfirmacion(texto: string, p: PreguntaUnificada): RespuestaConfirmarNuevo {
+  return interpretarConfirmacionNuevo(texto, opcionesDelAviso(p), p.nuevoPorConfirmar ?? null, p.viajesAbiertos ?? []);
 }
 
 /** Las opciones de «¿Creo el cliente nuevo «X»?» como las lee el código de hoy (`negocio_opciones`: id, código, cliente, destino). */
@@ -1112,6 +1141,14 @@ function validarPropuesta(crudo: unknown, e: EntradaValidador): Decision {
       const fields: ParsedFields = { activity_text: e.texto, mensaje_original: e.texto };
       const ref = soloLoEscrito(a0.ref_negocio ?? a0.negocio, e.texto);
       const n = porId(a0.id, e.negocios) ?? (ref ? resolverNegocio(ref, e.negocios) : null);
+      // Sexto control de Vera (hallazgo 6, solo 2.5): con la bandeja, una «actividad» sobre un viaje abierto es
+      // contenido de ese viaje. Registrarla como actividad del bot la sacaba de la bandeja y no llegaba a su caja.
+      if (e.bandeja) {
+        const sobre = viajesDeLaActividad(a0, n, e);
+        if (sobre.length > 0) {
+          return contenido([{ ...a0, accion: 'contenido', id: sobre.length === 1 ? sobre[0].alias : null, ref: null }], e, rechazo ?? 'V2_actividad_es_contenido');
+        }
+      }
       if (n && n !== 'empresa' && n.codigo) fields.project_code = n.codigo;
       else if (ref) fields.entity_hint = ref;
       return ejecutar('bot.actividad', { p: 'bot_actividad', fields }, rechazo, !!capa);
@@ -1301,6 +1338,17 @@ function contenido(acc: AccionModelo[], e: EntradaValidador, rechazo: string | n
     if (r.viajes.length > 1) return preguntarViaje(r.viajes, cs[0].evidencia, true, rechazo);
   }
   return ejecutar('bandeja.contenido', { p: 'registrar', interpretacion: { accion: 'contenido', evidencia: cs[0].evidencia ?? null }, aviso: null }, rechazo, recordar);
+}
+
+/**
+ * Los viajes abiertos de los que habla una `actividad` en la bandeja: el que eligió el modelo, si el texto lo
+ * nombra (su id con el viaje escrito, o su referencia escrita), o los que el texto nombra por su destino o por el
+ * nombre y apellido del cliente. `[]`: no habla de ningún viaje abierto.
+ */
+function viajesDeLaActividad(a: AccionModelo, n: NegocioCtx | 'empresa' | null, e: EntradaValidador): NegocioCtx[] {
+  const porId0 = porId(a.id, e.negocios);
+  if (n && n !== 'empresa' && (n !== porId0 || nombraElViaje(n, e))) return [n];
+  return [...new Map(mencionesDeViajes(e).flat().map(v => [v.id, v])).values()];
 }
 
 /**
@@ -1548,9 +1596,7 @@ function responder(a: AccionModelo, e: EntradaValidador, rechazo: string | null)
  * preguntar, como con el interruptor apagado.
  */
 function siAlNuevo(e: EntradaValidador, a: AccionModelo | null, rechazo: string | null): Decision {
-  const p = e.pendiente!;
-  const propuesto = p.nuevoPorConfirmar ?? null;
-  const hoy = interpretarConfirmacionNuevo(e.texto, opcionesDelAviso(p), propuesto);
+  const hoy = leerConfirmacion(e.texto, e.pendiente!);
   if (hoy.tipo === 'si') {
     return ejecutar('bandeja.confirmar', { p: 'responder_bandeja', canonico: 'sí', interpretacion: { accion: 'confirmar', canonico: 'sí', evidencia: a?.evidencia ?? null }, aviso: null }, rechazo);
   }
@@ -1599,10 +1645,19 @@ function responderConfirmarNuevo(a: AccionModelo, opcion: string, e: EntradaVali
     return o ? elegirDelAviso(o, a, rechazo) : aclaracion(e, rechazo ?? 'V20_numero_fuera_del_aviso');
   }
   // Lo que el código de hoy lee en el texto completo: un viaje de la lista (por lo que señala) va por su número.
-  const hoy = interpretarConfirmacionNuevo(e.texto, opcionesDelAviso(p), p.nuevoPorConfirmar ?? null);
+  const hoy = leerConfirmacion(e.texto, p);
   if (hoy.tipo === 'existente') {
     const o = lista.find(x => x.negocioId === hoy.negocio_id);
     if (o) return elegirDelAviso(o, a, rechazo);
+    // Un viaje que nombró el aviso y no está en la lista (sexto control de Vera): va por su código, que el código
+    // de hoy busca entre los viajes abiertos.
+    const v = (p.viajesAbiertos ?? []).find(x => x.id === hoy.negocio_id);
+    if (v?.codigo) {
+      const canonico = v.codigo.trim();
+      return ejecutar('bandeja.responder', {
+        p: 'responder_bandeja', canonico, interpretacion: { accion: 'responder', viaje_id: v.id, canonico, evidencia: a.evidencia ?? null }, aviso: null,
+      }, rechazo);
+    }
   }
   if (opcion === 'si') return siAlNuevo(e, a, rechazo);
   if (opcion === 'nuevo' || a.nuevo_cliente) {

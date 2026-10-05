@@ -797,7 +797,10 @@ async function atenderConfirmacionNuevo(
   supabase: SupabaseClient, ent: Fila, nombre: string, respuesta: string, crudos: ReadonlyArray<MensajeCrudo>,
   opciones: OpcionNegocio[] | null, opts: { revisarDosViajes?: boolean },
 ): Promise<void> {
-  const r = interpretarConfirmacionNuevo(respuesta, opciones ?? [], nombre);
+  // Con los viajes abiertos, como los leyó la confirmación: una frase que señala un viaje resuelve también contra
+  // los que el aviso «Ya hay un viaje de …» nombró por su código, fuera de la lista (sexto control de Vera).
+  const viajes = (await viajesAbiertosDeLaBandeja(supabase, ent.workspace_id as string)) ?? [];
+  const r = interpretarConfirmacionNuevo(respuesta, opciones ?? [], nombre, viajes);
   if (r.tipo === 'si') {
     // El «sí»: ahora sí, el cliente con ese nombre (si ya hay un contacto igual, se pregunta «¿es el mismo?»).
     await entenderNuevo(supabase, ent, crudos, nombre, { revisarDosViajes: opts.revisarDosViajes, nuevoExplicito: true });

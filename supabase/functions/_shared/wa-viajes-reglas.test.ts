@@ -395,3 +395,24 @@ describe('QA de #971 v4', () => {
     expect(partidos).toBeGreaterThan(50);
   });
 });
+
+describe('sexto control de Vera · C: lo que nombra al cliente de OTRO viaje abierto no se carga en la caja sin preguntar', () => {
+  it('su nombre y apellido, o su código, bajo la caja de otro cliente: queda marcado y el «sí» espera a que se decida', () => {
+    for (const cuerpo of ['Jorge Pérez pregunta si hay cupo en marzo', 'el T1 26 8 ya mandó los pasaportes', 'lo de jorge perez lo vemos el lunes']) {
+      const r = plan([enc(1, 'Carolina'), m(2, 'somos 3 adultos'), m(3, cuerpo, { escrito: true })]).plan;
+      expect([cuerpo, resumenDe(r)]).toEqual([cuerpo, [[2, 'T1 26 11', 'carga'], [3, 'T1 26 11', 'sospecha']]]);
+      expect(r.mensajes.find(x => x.n === 3)!.motivo).toBe('nombra a Jorge Pérez (T1 26 8), que tiene un viaje abierto (¿es de CAROLINA RUIZ?)');
+      expect(interpretarRespuestaPlan('sí', r, V)).toMatchObject({ tipo: 'no_entendida', aviso: expect.stringContaining('Antes del sí, decide el 2') });
+    }
+  });
+
+  it('el nombre de pila o el apellido solos no bastan (F9 sigue igual); el cliente de la propia caja tampoco', () => {
+    expect(resumenDe(plan([enc(1, 'Carolina'), m(2, 'Jorge me dijo que te escribiera')]).plan)).toEqual([[2, 'T1 26 11', 'carga']]);
+    expect(resumenDe(plan([enc(1, 'Carolina'), m(2, 'los Pérez también quieren ir')]).plan)).toEqual([[2, 'T1 26 11', 'carga']]);
+    expect(resumenDe(plan([enc(1, 'Jorge'), m(2, 'Jorge Pérez confirma 2 adultos')]).plan)).toEqual([[2, 'T1 26 8', 'carga']]);
+  });
+
+  it('lo que cuesta: una referencia con nombre y apellido de otro cliente también se pregunta (con duda, se pregunta)', () => {
+    expect(resumenDe(plan([enc(1, 'Carolina'), m(2, 'Luisa Mejía me recomendó con ustedes')]).plan)).toEqual([[2, 'T1 26 11', 'sospecha']]);
+  });
+});
