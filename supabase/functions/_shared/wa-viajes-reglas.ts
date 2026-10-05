@@ -1132,6 +1132,8 @@ export function unSoloCliente(candidatos: ReadonlyArray<ViajeAbierto>): string |
 
 /** «nuevo», «uno nuevo», «es nuevo», «ninguno, es otro», «otro viaje»: la respuesta que pide un viaje NUEVO a «¿Va en uno de esos?». */
 export function pideViajeNuevo(texto: string): boolean {
+  // La negación pegada a lo nuevo, sin coma («no uno nuevo», «no es otro viaje»): con duda, no (octavo control).
+  if (niegaLoNuevo(texto)) return false;
   const nv = leerNuevo(texto);
   if (nv && !nv.cliente) return true;
   const t = normalizarNombre(texto);
@@ -1139,7 +1141,7 @@ export function pideViajeNuevo(texto: string): boolean {
   // Octavo control de Vera (hallazgo 4): las otras formas de pedirlo («va aparte», «no, uno nuevo», «otra cotización
   // distinta», «no es cliente nuevo, es de antes»). Con un número no (elige de la lista), ni con la negación pegada
   // a lo nuevo («no uno nuevo», «no es otro viaje»).
-  if (/\d/.test(t) || niegaLoNuevo(texto)) return false;
+  if (/\d/.test(t)) return false;
   return PIDE_VIAJE_NUEVO.some(re => re.test(t));
 }
 

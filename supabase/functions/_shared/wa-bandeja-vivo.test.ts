@@ -1917,6 +1917,59 @@ describe('octavo control de Vera (2026-10-05): el «sí» con reserva y el clien
     });
   }
 
+  /** Un cliente con dos viajes abiertos: «¿Va en uno de esos o es un viaje nuevo?». */
+  function clienteConDosViajes() {
+    t.contactos.push({ id: 'c-bc', workspace_id: WS, nombre: 'BRUNO CIFUENTES', telefono: '3006665544', email: null, created_at: '2026-01-10T10:00:00Z' });
+    for (const [id, codigo, nombre] of [['n-bc1', 'B 26 1', 'GUATAPÉ 2N'], ['n-bc2', 'B 26 2', 'TAYRONA 3N']]) {
+      t.negocios.push({ ...negocioDePrueba(id, codigo, nombre, 'BRUNO CIFUENTES'), contacto_id: 'c-bc' });
+    }
+  }
+  const BRUNO_YA = 'Va como viaje nuevo de Bruno Cifuentes, el que ya tenemos (cel. …5544, 2 viajes abiertos).\nReenvíame lo que te pidió y al final te muestro el resumen.';
+
+  for (const modo of ['apagado', 'prendido'] as const) {
+    it(`hallazgo 4, ${modo}: a la lista de un solo cliente, «va aparte» es su viaje nuevo sin otra vuelta`, async () => {
+      clienteConDosViajes();
+      const llamadas = { n: 0 };
+      const interprete = modo === 'prendido' ? { llamadas } : undefined;
+      await llega('Bruno Cifuentes', { enviado: 0, interprete });
+      expect(textos().at(-1)).toMatch(/^Bruno Cifuentes tiene 2 viajes abiertos.*¿Va en uno de esos o es un viaje nuevo\?$/);
+      const antes = llamadas.n;
+      await llega('va aparte', { enviado: 3, interprete });
+      expect(textos().at(-1)).toBe(BRUNO_YA);
+      // Prendido, lo lee el código de hoy (la simulación de la tanda): el modelo no se llama.
+      expect(llamadas.n).toBe(antes);
+    });
+  }
+
+  it('hallazgo 4, prendido: una forma que solo lee el modelo («es otra cosa, ábrela por fuera») también', async () => {
+    clienteConDosViajes();
+    await llega('Bruno Cifuentes', { enviado: 0 });
+    await llega('es otra cosa, ábrela por fuera', { enviado: 3, interprete: { modelo: { acciones: [{ accion: 'responder', opcion: 'nuevo', evidencia: 'es otra cosa, ábrela por fuera' }] } } });
+    expect(textos().at(-1)).toBe(BRUNO_YA);
+    await llega('quiere ir a Salento en junio', { enviado: 6, reenviado: true });
+    await llega('listo', { enviado: 9 });
+    expect(textos().at(-1)).toMatch(/^Bruno Cifuentes · ¿Lo cargo así\?\nEntendí 1 viaje:\n1\) Viaje nuevo de Bruno Cifuentes \(ya es cliente: cel\. …5544, 2 viajes abiertos\) — 1 mensaje/);
+  });
+
+  it('hallazgo 6, prendido: «sí, es ella, se casó y cambió el apellido» contesta «¿Es la misma persona?»', async () => {
+    t.contactos.push({ id: 'c-lv', workspace_id: WS, nombre: 'LUCÍA VARGAS', telefono: '3009990011', email: null, created_at: '2026-01-10T10:00:00Z' });
+    await llega('nueva clienta Lucía Rendón 300 999 0011', { enviado: 0 });
+    expect(textos().at(-1)).toMatch(/a nombre de Lucía Vargas .*¿Es la misma persona\?$/);
+    const texto = 'sí, es ella, se casó y cambió el apellido';
+    await llega(texto, { enviado: 3, interprete: { modelo: { acciones: [{ accion: 'confirmar', evidencia: texto }] } } });
+    expect(textos().at(-1)).toMatch(/^Va como viaje nuevo de Lucía Vargas, el que ya tenemos/);
+  });
+
+  it('hallazgo 7, apagado: «anótale a don Simeón el cel …» en su caja es la llave, no contenido', async () => {
+    await llega('nuevo Simeón Arcila', { enviado: 0 });
+    expect(textos().at(-1)).toMatch(/^No tengo a Simeón Arcila en el directorio\. ¿Me pasas su celular o su correo\?/);
+    await llega('anótale a don Simeón el cel 300 222 3344', { enviado: 3 });
+    expect(textos().at(-1)).toMatch(/^Va como viaje nuevo de Simeón Arcila, cliente nuevo \(cel\. 300 222 3344\)/);
+    await llega('quiere ir a Nuquí en agosto', { enviado: 6, reenviado: true });
+    await llega('listo', { enviado: 9 });
+    expect(textos().at(-1)).toContain('1) Viaje nuevo de Simeón Arcila (cliente nuevo, cel. 300 222 3344) — 1 mensaje');
+  });
+
   it('bloqueante 2, prendido: el destino de su viaje abierto («lo de Villa de Leyva») sí cambia a ese viaje', async () => {
     clienteConUnViaje();
     await llega('vamos a hacer una cotización nueva para Gerardo Quintero', { enviado: 0 });

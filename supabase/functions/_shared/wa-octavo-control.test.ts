@@ -6,14 +6,20 @@ import {
   type EntradaValidador,
   type NegocioCtx,
 } from './wa-interprete-reglas.ts';
-import { armarSegmentos, esNombreNuevo, esSiSinReserva, sinPresentacion, type MensajeViaje, type ViajeAbierto } from './wa-viajes-reglas.ts';
+import {
+  armarSegmentos, esNombreNuevo, esSiSinReserva, interpretarConfirmacionNuevo, nombreDestino, pideViajeNuevo, sinPresentacion, type MensajeViaje, type ViajeAbierto,
+} from './wa-viajes-reglas.ts';
+import { leerEleccionCliente, soloLlaveDelCliente, textoDelCliente, type FichaCliente } from './wa-cliente-reglas.ts';
+import { pideRegistrar } from './wa-interprete-reglas.ts';
 
 /**
  * Lo que dejó el octavo control de Vera sobre #1024 (2026-10-05), una prueba por regla. Textos y nombres inventados
- * para estas pruebas (Teodoro Salcedo, Teodoro Ibarra, Ximena Duarte), ninguno de la prueba de Vera.
+ * para estas pruebas (Teodoro Salcedo, Teodoro Ibarra, Ximena Duarte, Bruno Cifuentes), ninguno de la prueba de Vera.
  *   1. El «sí» del resumen con una condición no carga: vuelve a preguntar.
  *   2. En la caja de un viaje NUEVO de X, nombrar a X es contenido de esa caja, no un viaje abierto de X.
  *   3. El nombre tras «¿Para qué cliente es?» pierde la fórmula que lo presenta, en los dos géneros.
+ *   4–10. Las vueltas de más: la lista de un solo cliente, «¿Cuál es?», «¿Es la misma persona?», la llave con palabras,
+ *   el cliente sin viajes abiertos al corregir, los avisos de la llave y las cortesías.
  */
 
 const SALCEDO: NegocioCtx = { alias: 'n3', id: 'v-salcedo', codigo: 'S 26 3', cliente: 'TEODORO SALCEDO', destino: 'BARICHARA' };
@@ -174,5 +180,146 @@ describe('regla 3 · el nombre sin la fórmula que lo presenta', () => {
     const NOMBRE = preguntaPendienteUnificada({ bandeja: { espera: 'nombre', nombre: 'Tanda de las 10:02', corta: '¿Para qué cliente es?' }, alias })!;
     const d = ejec(validar(una({ accion: 'responder', nuevo_cliente: 'la clienta es Ximena Duarte', evidencia: 'la clienta es Ximena Duarte' }), entrada('la clienta es Ximena Duarte', { pendiente: NOMBRE })));
     expect(d.paso).toMatchObject({ p: 'responder_bandeja', canonico: 'NUEVO Ximena Duarte' });
+  });
+});
+
+// ── Vueltas de más (hallazgos 4 a 10) ───────────────────────────────────────
+
+const B1: NegocioCtx = { alias: 'b1', id: 'v-b1', codigo: 'B 26 1', cliente: 'BRUNO CIFUENTES', destino: 'GUATAPÉ' };
+const B2: NegocioCtx = { alias: 'b2', id: 'v-b2', codigo: 'B 26 2', cliente: 'BRUNO CIFUENTES', destino: 'TAYRONA' };
+const LISTA_BRUNO = preguntaPendienteUnificada({
+  tanda: { tipo: 'eleccion', texto: 'Bruno Cifuentes', candidatos: [B1, B2].map(v => ({ id: v.id, codigo: v.codigo, cliente: v.cliente, destino: v.destino })) },
+  alias: id => [B1, B2].find(v => v.id === id)?.alias ?? id,
+})!;
+
+describe('hallazgo 4 · la lista de un solo cliente: pedir un viaje nuevo es su viaje nuevo', () => {
+  it.each(['va aparte', 'cotízalo por separado', 'no, uno nuevo', 'otra cotización distinta', 'es una cotización diferente', 'no es cliente nuevo, es de antes', 'mejor una nueva'])(
+    'el código lee «%s»', texto => expect(pideViajeNuevo(texto)).toBe(true));
+
+  it.each(['no es nuevo', 'no uno nuevo', 'el 2', 'no es otro viaje', 'no va aparte'])('el código NO lee «%s» como viaje nuevo', texto => expect(pideViajeNuevo(texto)).toBe(false));
+
+  it.each([
+    ['ábrele una aparte', { accion: 'responder', opcion: 'nuevo' }],
+    ['que sea otro, independiente de esos', { accion: 'responder', opcion: 'nuevo' }],
+    ['nuevo Bruno Cifuentes', { accion: 'responder', opcion: 'nuevo', nuevo_cliente: 'Bruno Cifuentes' }],
+    ['es otra solicitud suya', { accion: 'abrir_viaje', nuevo_sin_nombre: true, cliente_existente: true }],
+  ])('el modelo propone «nuevo» para «%s» → viaje nuevo de Bruno Cifuentes, sin pedir el nombre', (texto, propuesta) => {
+    const d = ejec(validar(una({ evidencia: texto, ...propuesta }), entrada(texto, { pendiente: LISTA_BRUNO, negocios: [B1, B2, OTRA] })));
+    expect(d.paso).toMatchObject({ p: 'registrar', interpretacion: { accion: 'responder', nuevo: 'Bruno Cifuentes' } });
+  });
+
+  it('con otro nombre, con la negación o con el destino de uno de sus viajes, no', () => {
+    const otra = ejec(validar(una({ accion: 'responder', opcion: 'nuevo', nuevo_cliente: 'Rosaura Pinzón', evidencia: 'nuevo Rosaura Pinzón' }), entrada('nuevo Rosaura Pinzón', { pendiente: LISTA_BRUNO, negocios: [B1, B2, OTRA] })));
+    expect(otra.paso).not.toMatchObject({ interpretacion: { nuevo: 'Bruno Cifuentes' } });
+    const niega = ejec(validar(una({ accion: 'responder', opcion: 'nuevo', evidencia: 'no es nuevo' }), entrada('no es nuevo', { pendiente: LISTA_BRUNO, negocios: [B1, B2, OTRA] })));
+    expect(niega.paso).not.toMatchObject({ interpretacion: { nuevo: 'Bruno Cifuentes' } });
+    const destino = ejec(validar(una({ accion: 'responder', opcion: 'nuevo', evidencia: 'el nuevo de Tayrona' }), entrada('el nuevo de Tayrona', { pendiente: LISTA_BRUNO, negocios: [B1, B2, OTRA] })));
+    expect(destino.paso).not.toMatchObject({ interpretacion: { nuevo: 'Bruno Cifuentes' } });
+  });
+
+  it('el reparto: la interpretación «nuevo del mismo» vuelve la caja de la lista su viaje nuevo (sin abrir otra)', () => {
+    const t = (min: number) => new Date(Date.parse('2026-10-05T14:00:00Z') + min * 60_000).toISOString();
+    const viajes: ViajeAbierto[] = [B1, B2].map(v => ({ id: v.id, codigo: v.codigo, cliente: v.cliente, destino: v.destino }));
+    const ms: MensajeViaje[] = [
+      { n: 1, cuerpo: 'Bruno Cifuentes', reenviado: false, tipo: 'text', en: t(1) },
+      { n: 2, cuerpo: 'ábrele una aparte', reenviado: false, tipo: 'text', en: t(2), interpretacion: { accion: 'responder', nuevo: 'Bruno Cifuentes' } },
+      { n: 3, cuerpo: 'queremos ir a Salento', reenviado: true, tipo: 'text', en: t(3) },
+    ];
+    const { segmentos, encabezados } = armarSegmentos(ms, viajes, { horasCajaActiva: 2 });
+    expect(segmentos).toHaveLength(1);
+    expect(segmentos[0].encabezado?.resolucion).toMatchObject({ tipo: 'nuevo', cliente: 'Bruno Cifuentes', mismo: true });
+    expect(segmentos[0].mensajes).toEqual([3]);
+    expect(encabezados).toEqual([1, 2]);
+  });
+});
+
+const ficha = (id: string, o: Partial<FichaCliente> = {}): FichaCliente => ({ id, nombre: 'BRUNO CIFUENTES', cel4: null, correo: false, abiertos: [], ...o });
+
+describe('hallazgo 5 · «¿Cuál es?» de los homónimos', () => {
+  const OPS = [ficha('f1', { cel4: '4410' }), ficha('f2', { correo: true }), ficha('f3')];
+  it.each([
+    ['me refiero al segundo que me mostraste', 'f2'],
+    ['creo que es el tercero de la lista', 'f3'],
+    ['es el del correo', 'f2'],
+    ['el que tiene el correo', 'f2'],
+    ['la ficha que no tiene celular ni nada', 'f3'],
+    ['el que no tiene datos', 'f3'],
+    ['el del celular', 'f1'],
+  ])('«%s» → %s', (texto, id) => {
+    const r = leerEleccionCliente(texto, OPS);
+    expect(r).toMatchObject({ tipo: 'ficha', ficha: { id } });
+  });
+
+  it('dos ordinales, o el dato que comparten dos, no eligen', () => {
+    expect(leerEleccionCliente('el primero o el segundo', OPS)).toBeNull();
+    expect(leerEleccionCliente('el del correo', [ficha('a', { correo: true }), ficha('b', { correo: true })])).toBeNull();
+  });
+});
+
+describe('hallazgo 6 · «¿Es la misma persona?» con una afirmación larga', () => {
+  const MISMA = preguntaPendienteUnificada({ tanda: { tipo: 'cliente', texto: 'Ese celular ya lo tenemos a nombre de Bruno Cifuentes. ¿Es la misma persona?', esLaMisma: true } })!;
+  it('empieza por «sí» y no tiene reserva: va a la tanda como «sí»', () => {
+    const texto = 'sí, es él, se registró hace dos años con otro correo';
+    for (const propuesta of [{ accion: 'confirmar', evidencia: texto }, { accion: 'responder', opcion: 'si', evidencia: texto }]) {
+      expect(ejec(validar(una(propuesta), entrada(texto, { pendiente: MISMA }))).paso).toMatchObject({ p: 'registrar', interpretacion: { accion: 'confirmar', canonico: 'sí' } });
+    }
+  });
+  it.each(['sí, pero déjame confirmar', 'creo que sí es él', 'sí? no estoy seguro', 'sí, aunque no sé si es el papá'])('«%s» vuelve a preguntar', texto => {
+    expect(ejec(validar(una({ accion: 'confirmar', evidencia: texto }), entrada(texto, { pendiente: MISMA }))).paso.p).toBe('decir');
+  });
+  it('si la pregunta no es «¿Es la misma persona?», el «sí» del modelo no vale', () => {
+    const OTRA_CLIENTE = preguntaPendienteUnificada({ tanda: { tipo: 'cliente', texto: '¿Me pasas su celular o su correo?' } })!;
+    expect(ejec(validar(una({ accion: 'confirmar', evidencia: 'sí, es él' }), entrada('sí, es él', { pendiente: OTRA_CLIENTE }))).paso.p).toBe('decir');
+  });
+});
+
+describe('hallazgo 7 · la llave con palabras de más, en la caja de un viaje nuevo', () => {
+  it.each(['anótale a don Bruno el cel 300 111 2222', 'regístrale el correo bruno.c@correo.co a Bruno', 'apunta: Bruno Cifuentes 300 111 2222'])('«%s» es la llave', texto => {
+    expect(soloLlaveDelCliente(texto, 'Bruno Cifuentes')).not.toBeNull();
+  });
+  it.each(['el de la esposa es 300 111 2222', 'anótale a Rosaura el cel 300 111 2222', 'quiere ir el 12, cel 300 111 2222'])('«%s» no', texto => {
+    expect(soloLlaveDelCliente(texto, 'Bruno Cifuentes')).toBeNull();
+  });
+});
+
+describe('hallazgo 8 · un cliente sin viajes abiertos, nombrado al corregir', () => {
+  it('con la lista pendiente, «es de Marcela Ortiz» (sin viajes abiertos) es su viaje nuevo, no «no encontré»', () => {
+    const d = ejec(validar(una({ accion: 'responder', ref_cliente: 'Marcela Ortiz', evidencia: 'es de Marcela Ortiz' }), entrada('es de Marcela Ortiz', { pendiente: LISTA_BRUNO, negocios: [B1, B2, OTRA] })));
+    expect(d.paso).toMatchObject({ p: 'registrar', interpretacion: { accion: 'abrir_viaje', nuevo: 'Marcela Ortiz' } });
+  });
+  it('«no, era de Marcela Ortiz» como encabezado: lo mismo', () => {
+    const d = ejec(validar(una({ accion: 'abrir_viaje', ref_cliente: 'Marcela Ortiz', evidencia: 'no, era de Marcela Ortiz' }), entrada('no, era de Marcela Ortiz', { tanda: { abierta: true, cajaId: 'v-otra', cliente: 'Rosaura Pinzón' } })));
+    expect(d.paso).toMatchObject({ interpretacion: { accion: 'abrir_viaje', nuevo: 'Marcela Ortiz' } });
+  });
+  it('un nombre de pila suelto, o sin contexto de corrección, sigue como hoy', () => {
+    const pila = ejec(validar(una({ accion: 'abrir_viaje', ref_cliente: 'Marcela', evidencia: 'no, era de Marcela' }), entrada('no, era de Marcela')));
+    expect(pila.paso).toMatchObject({ interpretacion: { accion: 'preguntar_viaje' } });
+    const sinContexto = ejec(validar(una({ accion: 'abrir_viaje', ref_cliente: 'Marcela Ortiz', evidencia: 'Marcela Ortiz' }), entrada('Marcela Ortiz')));
+    expect(sinContexto.paso).toMatchObject({ interpretacion: { accion: 'preguntar_viaje' } });
+  });
+});
+
+describe('hallazgo 9 · los avisos de la llave', () => {
+  it('celular distinto del de la ficha: se dice que no se cambia', () => {
+    const r = { tipo: 'existente' as const, ficha: ficha('f1', { cel4: '7788' }), por: 'nombre' as const, nombre: 'Bruno Cifuentes', llave: { celular: '3001112222' } };
+    expect(textoDelCliente(r)).toContain('Su ficha tiene otro celular (…7788); el que me diste (…2222) no lo cambio.');
+  });
+  it('la ficha sin celular: el acuse y el resumen dicen que se le agrega', () => {
+    const f = ficha('f1');
+    expect(textoDelCliente({ tipo: 'existente', ficha: f, por: 'nombre', nombre: 'Bruno Cifuentes', llave: { celular: '3001112222' } })).toContain('Le agrego a su ficha el cel. 300 111 2222.');
+    expect(nombreDestino({ tipo: 'nuevo', cliente: 'Bruno Cifuentes', contacto: f, llave: { celular: '3001112222' }, resuelto: true }))
+      .toBe('Viaje nuevo de Bruno Cifuentes (ya es cliente: sin celular ni correo, sin viajes; le agrego a su ficha el cel. 300 111 2222)');
+  });
+  it('la llave que es la de la ficha: nada que decir', () => {
+    expect(textoDelCliente({ tipo: 'existente', ficha: ficha('f1', { cel4: '2222' }), por: 'llave', nombre: null, llave: { celular: '3001112222' } })).not.toMatch(/ficha/);
+  });
+});
+
+describe('hallazgo 10 · cortesías y roles', () => {
+  it.each(['sí, créaselo', 'sí, regístraselo por favor', 'dale, ábremelo'])('«%s» a «¿Creo el cliente nuevo …?» es el «sí»', texto => {
+    expect(interpretarConfirmacionNuevo(texto, [], 'Bruno Cifuentes')).toEqual({ tipo: 'si' });
+  });
+  it.each(['legalízame el peaje de ayer', 'súbeme esta factura', 'tanqueé la camioneta', 'pagamos el parqueadero'])('«%s» pide registrar (un rol que no registra recibe el texto de su rol)', texto => {
+    expect(pideRegistrar(texto)).toBe(true);
   });
 });

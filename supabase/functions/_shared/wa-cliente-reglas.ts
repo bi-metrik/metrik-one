@@ -466,7 +466,7 @@ export function leerEleccionCliente(texto: string, opciones: ReadonlyArray<Ficha
     : DICE_USUARIO.test(t) ? porDato(f => !f.cel4 && !f.correo && !!f.usuario)
     : DICE_CELULAR.test(t) && !/\bno\b/.test(t) ? porDato(f => !!f.cel4)
     : null;
-  if (dato && ws.filter(w => !RELLENO_ELECCION.has(w)).every(w => /^(?:correo|mail|email|e|gmail|hotmail|outlook|usuario|instagram|insta|arroba|sin|no|tiene|tenia|celular|cel|numero|telefono|whatsapp|datos|nada)$/.test(w))) return dato;
+  if (dato && ws.filter(w => !RELLENO_ELECCION.has(w)).every(w => /^(?:correo|mail|email|e|gmail|hotmail|outlook|usuario|instagram|insta|arroba|sin|no|ni|tiene|tenia|celular|cel|numero|telefono|whatsapp|datos|nada|ficha|contacto)$/.test(w))) return dato;
   // «el de Miami», «Paola Andrea»: las palabras que quedan están en lo de UN solo contacto.
   const resto = ws.filter(w => !RELLENO_ELECCION.has(w));
   if (resto.length === 0) return null;
