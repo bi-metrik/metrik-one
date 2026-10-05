@@ -1,0 +1,1216 @@
+{
+ "_fuente": "Gemini real (gemini-2.5-flash) sobre proyectos/trappvel/clarity/docs/entrada/capturas/2026-10-05-alejandra-n1-26-1, grabado el 2026-10-05. Regrabar: CASO_ALEJANDRA=gemini GRABAR=1 npx vitest run caso-alejandra",
+ "capturas": [
+  {
+   "archivo": "captura-1.jpeg",
+   "bytes": 96730,
+   "deteccion": {
+    "tipo": "vuelo",
+    "lugar": null,
+    "origen": "Bogotá BOG",
+    "destino": "San Andrés Isla ADZ"
+   },
+   "extraccion": {
+    "veredicto": "detalle_unico",
+    "observacion": "Se muestra el detalle de un itinerario de vuelo de Avianca de Bogotá a San Andrés Isla y regreso, con el precio total y un desglose por tipo de pasajero.",
+    "campos": {
+     "aerolinea": {
+      "value": "Avianca",
+      "confidence": 0.9
+     },
+     "origen": {
+      "value": "Bogotá",
+      "confidence": 1
+     },
+     "destino": {
+      "value": "San Andrés Isla",
+      "confidence": 1
+     },
+     "fecha_salida": {
+      "value": "--11-23/lun",
+      "confidence": 0.9
+     },
+     "fecha_regreso": {
+      "value": "--11-28/sab",
+      "confidence": 0.9
+     },
+     "hora_salida": {
+      "value": "06:50",
+      "confidence": 1
+     },
+     "hora_llegada": {
+      "value": "09:00",
+      "confidence": 1
+     },
+     "hora_salida_regreso": {
+      "value": "18:45",
+      "confidence": 1
+     },
+     "hora_llegada_regreso": {
+      "value": "20:55",
+      "confidence": 1
+     },
+     "numero_vuelo": {
+      "value": "9782, 9779",
+      "confidence": 0.9
+     },
+     "escalas": {
+      "value": "0",
+      "confidence": 1
+     },
+     "escala_ida": {
+      "value": null,
+      "confidence": 0
+     },
+     "escala_regreso": {
+      "value": null,
+      "confidence": 0
+     },
+     "familia_tarifa": {
+      "value": "BASIC Economy",
+      "confidence": 1
+     },
+     "equipaje_personal": {
+      "value": "true",
+      "confidence": 0.9
+     },
+     "equipaje_mano": {
+      "value": "false",
+      "confidence": 0.9
+     },
+     "equipaje_bodega": {
+      "value": "false",
+      "confidence": 0.9
+     },
+     "equipaje_personal_cantidad": {
+      "value": null,
+      "confidence": 0
+     },
+     "equipaje_personal_kg": {
+      "value": null,
+      "confidence": 0
+     },
+     "equipaje_mano_cantidad": {
+      "value": null,
+      "confidence": 0
+     },
+     "equipaje_mano_kg": {
+      "value": null,
+      "confidence": 0
+     },
+     "equipaje_bodega_cantidad": {
+      "value": null,
+      "confidence": 0
+     },
+     "equipaje_bodega_kg": {
+      "value": null,
+      "confidence": 0
+     },
+     "pax": {
+      "value": "8",
+      "confidence": 1
+     },
+     "ocupacion_adultos": {
+      "value": "6",
+      "confidence": 1
+     },
+     "ocupacion_ninos": {
+      "value": "1",
+      "confidence": 1
+     },
+     "ocupacion_infantes": {
+      "value": "1",
+      "confidence": 1
+     },
+     "ocupacion_total": {
+      "value": "8",
+      "confidence": 1
+     },
+     "moneda": {
+      "value": "COP",
+      "confidence": 1
+     },
+     "precio_total": {
+      "value": "6208296",
+      "confidence": 1
+     },
+     "base_precio": {
+      "value": "total",
+      "confidence": 1
+     },
+     "total_a_pagar_agencia": {
+      "value": null,
+      "confidence": 0
+     },
+     "comision_agencia_valor": {
+      "value": null,
+      "confidence": 0
+     },
+     "comision_agencia_pct": {
+      "value": null,
+      "confidence": 0
+     },
+     "precio_por_pax": {
+      "value": null,
+      "confidence": 0
+     }
+    },
+    "desglose": [],
+    "porTipoPax": [
+     {
+      "tipo": "adulto",
+      "cantidad": 6,
+      "subtotal_tipo": 5547822,
+      "moneda": "COP",
+      "confidence": 1
+     },
+     {
+      "tipo": "nino",
+      "cantidad": 1,
+      "subtotal_tipo": 649137,
+      "moneda": "COP",
+      "confidence": 1
+     },
+     {
+      "tipo": "infante",
+      "cantidad": 1,
+      "subtotal_tipo": 11337,
+      "moneda": "COP",
+      "confidence": 1
+     }
+    ],
+    "totalGeneral": 6208296,
+    "opcionesVisibles": 1,
+    "opcionesVistas": [
+     {
+      "nombre": "Vuelo Bogotá - San Andrés Isla",
+      "precio": "COP 6,208,296",
+      "seleccionada": true
+     }
+    ],
+    "iconosEquipaje": [
+     {
+      "dibujo": "bolso",
+      "color": "azul",
+      "clasificado": "encendido",
+      "estado": "encendido"
+     },
+     {
+      "dibujo": "maleta de cabina con ruedas",
+      "color": "gris oscuro",
+      "clasificado": "apagado",
+      "estado": "apagado"
+     },
+     {
+      "dibujo": "maleta grande",
+      "color": "gris oscuro",
+      "clasificado": "apagado",
+      "estado": "apagado"
+     }
+    ]
+   }
+  },
+  {
+   "archivo": "captura-2.jpeg",
+   "bytes": 133289,
+   "deteccion": {
+    "tipo": "hotel",
+    "lugar": "Providencia Island",
+    "origen": null,
+    "destino": null
+   },
+   "extraccion": {
+    "veredicto": "detalle_unico",
+    "observacion": "Se muestra el detalle de una habitación de hotel con su precio total y fechas, y los impuestos a pagar en destino.",
+    "campos": {
+     "hotel": {
+      "value": "Hotel Cabañas Agua Dulce",
+      "confidence": 1
+     },
+     "ciudad": {
+      "value": "Providencia Island",
+      "confidence": 1
+     },
+     "tipo_habitacion": {
+      "value": "Cuadruple Tres Ca...",
+      "confidence": 0.9
+     },
+     "regimen": {
+      "value": "Alojamiento y desayuno",
+      "confidence": 1
+     },
+     "check_in": {
+      "value": "--11-23",
+      "confidence": 1
+     },
+     "check_out": {
+      "value": "--11-25",
+      "confidence": 1
+     },
+     "noches": {
+      "value": "2",
+      "confidence": 1
+     },
+     "ocupacion": {
+      "value": "2 adultos, 1 niño (0 años), 1 habitación",
+      "confidence": 1
+     },
+     "politica_cancelacion": {
+      "value": "Cancelación gratuita hasta 20/11/2026",
+      "confidence": 1
+     },
+     "impuestos_incluidos": {
+      "value": "false",
+      "confidence": 1
+     },
+     "impuestos_destino_valor": {
+      "value": "85.60",
+      "confidence": 1
+     },
+     "impuestos_destino_moneda": {
+      "value": "USD",
+      "confidence": 1
+     },
+     "ocupacion_adultos": {
+      "value": "2",
+      "confidence": 1
+     },
+     "ocupacion_ninos": {
+      "value": "0",
+      "confidence": 1
+     },
+     "ocupacion_infantes": {
+      "value": "1",
+      "confidence": 1
+     },
+     "ocupacion_total": {
+      "value": "3",
+      "confidence": 0.8
+     },
+     "moneda": {
+      "value": "COP",
+      "confidence": 1
+     },
+     "precio_total": {
+      "value": "1514098.91",
+      "confidence": 1
+     },
+     "base_precio": {
+      "value": "total",
+      "confidence": 1
+     },
+     "total_a_pagar_agencia": {
+      "value": null,
+      "confidence": 0
+     },
+     "comision_agencia_valor": {
+      "value": null,
+      "confidence": 0
+     },
+     "comision_agencia_pct": {
+      "value": null,
+      "confidence": 0
+     },
+     "estrellas": {
+      "value": "3",
+      "confidence": 0.9
+     }
+    },
+    "desglose": [],
+    "porTipoPax": [],
+    "totalGeneral": null,
+    "opcionesVisibles": 1,
+    "opcionesVistas": [
+     {
+      "nombre": "1 x Cuadruple Tres Ca... AD",
+      "precio": "1.514.098,91 COP",
+      "seleccionada": true
+     }
+    ],
+    "iconosEquipaje": [],
+    "estrellasDeteccion": {
+     "valor": 3,
+     "corridas": [
+      3,
+      3
+     ],
+     "error": null
+    }
+   }
+  },
+  {
+   "archivo": "captura-3.jpeg",
+   "bytes": 120552,
+   "deteccion": {
+    "tipo": "hotel",
+    "lugar": "Providencia Island",
+    "origen": null,
+    "destino": null
+   },
+   "extraccion": {
+    "veredicto": "detalle_unico",
+    "observacion": "Se muestra una única opción de hotel con habitación y régimen seleccionados, y el precio total de la estadía, incluyendo impuestos a pagar en destino.",
+    "campos": {
+     "hotel": {
+      "value": "Cabañas Agua Dulce",
+      "confidence": 1
+     },
+     "ciudad": {
+      "value": "Providencia Island / Providencia Island",
+      "confidence": 1
+     },
+     "tipo_habitacion": {
+      "value": "Triple Basic",
+      "confidence": 1
+     },
+     "regimen": {
+      "value": "Alojamiento y desayuno",
+      "confidence": 1
+     },
+     "check_in": {
+      "value": "--11-23",
+      "confidence": 1
+     },
+     "check_out": {
+      "value": "--11-25",
+      "confidence": 1
+     },
+     "noches": {
+      "value": "2",
+      "confidence": 1
+     },
+     "ocupacion": {
+      "value": "2 adultos",
+      "confidence": 1
+     },
+     "politica_cancelacion": {
+      "value": "Cancelación gratuita hasta 18/11/2026",
+      "confidence": 1
+     },
+     "impuestos_incluidos": {
+      "value": "false",
+      "confidence": 1
+     },
+     "impuestos_destino_valor": {
+      "value": "82.31",
+      "confidence": 1
+     },
+     "impuestos_destino_moneda": {
+      "value": "USD",
+      "confidence": 1
+     },
+     "ocupacion_adultos": {
+      "value": "2",
+      "confidence": 1
+     },
+     "ocupacion_ninos": {
+      "value": "0",
+      "confidence": 1
+     },
+     "ocupacion_infantes": {
+      "value": "0",
+      "confidence": 1
+     },
+     "ocupacion_total": {
+      "value": "2",
+      "confidence": 0.8
+     },
+     "moneda": {
+      "value": "COP",
+      "confidence": 1
+     },
+     "precio_total": {
+      "value": "1419369.47",
+      "confidence": 1
+     },
+     "base_precio": {
+      "value": "total",
+      "confidence": 1
+     },
+     "total_a_pagar_agencia": {
+      "value": null,
+      "confidence": 0
+     },
+     "comision_agencia_valor": {
+      "value": null,
+      "confidence": 0
+     },
+     "comision_agencia_pct": {
+      "value": null,
+      "confidence": 0
+     },
+     "estrellas": {
+      "value": "3",
+      "confidence": 0.9
+     }
+    },
+    "desglose": [],
+    "porTipoPax": [],
+    "totalGeneral": null,
+    "opcionesVisibles": 1,
+    "opcionesVistas": [
+     {
+      "nombre": "1 x Triple Basic AD",
+      "precio": "1.419.369,47 COP",
+      "seleccionada": true
+     }
+    ],
+    "iconosEquipaje": [],
+    "estrellasDeteccion": {
+     "valor": 3,
+     "corridas": [
+      3,
+      3
+     ],
+     "error": null
+    }
+   }
+  },
+  {
+   "archivo": "captura-4.jpeg",
+   "bytes": 112151,
+   "deteccion": {
+    "tipo": "hotel",
+    "lugar": "Providencia Island",
+    "origen": null,
+    "destino": null
+   },
+   "extraccion": {
+    "veredicto": "detalle_unico",
+    "observacion": "Se muestra el detalle de una estancia buscada para Cabañas Agua Dulce con una habitación Triple Basic AD y el precio total, además de impuestos a pagar en destino y política de cancelación.",
+    "campos": {
+     "hotel": {
+      "value": "Cabañas Agua Dulce",
+      "confidence": 1
+     },
+     "ciudad": {
+      "value": "Providencia Island / Providencia Island",
+      "confidence": 0.9
+     },
+     "tipo_habitacion": {
+      "value": "Triple Basic",
+      "confidence": 0.9
+     },
+     "regimen": {
+      "value": "Alojamiento y desayuno",
+      "confidence": 0.9
+     },
+     "check_in": {
+      "value": "--11-23",
+      "confidence": 0.9
+     },
+     "check_out": {
+      "value": "--11-25",
+      "confidence": 0.9
+     },
+     "noches": {
+      "value": "2",
+      "confidence": 1
+     },
+     "ocupacion": {
+      "value": "2 adultos, 1 niño (5 años), 1 habitación",
+      "confidence": 0.9
+     },
+     "politica_cancelacion": {
+      "value": "Cancelación gratuita hasta 18/11/2026",
+      "confidence": 1
+     },
+     "impuestos_incluidos": {
+      "value": "false",
+      "confidence": 1
+     },
+     "impuestos_destino_valor": {
+      "value": "82.31",
+      "confidence": 1
+     },
+     "impuestos_destino_moneda": {
+      "value": "USD",
+      "confidence": 1
+     },
+     "ocupacion_adultos": {
+      "value": "2",
+      "confidence": 1
+     },
+     "ocupacion_ninos": {
+      "value": "1",
+      "confidence": 1
+     },
+     "ocupacion_infantes": {
+      "value": "0",
+      "confidence": 1
+     },
+     "ocupacion_total": {
+      "value": "3",
+      "confidence": 0.9
+     },
+     "moneda": {
+      "value": "COP",
+      "confidence": 1
+     },
+     "precio_total": {
+      "value": "1419369.47",
+      "confidence": 1
+     },
+     "base_precio": {
+      "value": "total",
+      "confidence": 1
+     },
+     "total_a_pagar_agencia": {
+      "value": null,
+      "confidence": 0
+     },
+     "comision_agencia_valor": {
+      "value": null,
+      "confidence": 0
+     },
+     "comision_agencia_pct": {
+      "value": null,
+      "confidence": 0
+     },
+     "estrellas": {
+      "value": "3",
+      "confidence": 0.9
+     }
+    },
+    "desglose": [],
+    "porTipoPax": [],
+    "totalGeneral": null,
+    "opcionesVisibles": 1,
+    "opcionesVistas": [
+     {
+      "nombre": "1 x Triple Basic AD",
+      "precio": "1.419.369,47 COP",
+      "seleccionada": true
+     }
+    ],
+    "iconosEquipaje": [],
+    "estrellasDeteccion": {
+     "valor": 3,
+     "corridas": [
+      3,
+      3
+     ],
+     "error": null
+    }
+   }
+  },
+  {
+   "archivo": "captura-5.jpeg",
+   "bytes": 105576,
+   "deteccion": {
+    "tipo": "hotel",
+    "lugar": "Providencia Island",
+    "origen": null,
+    "destino": null
+   },
+   "extraccion": {
+    "veredicto": "detalle_unico",
+    "observacion": "Se muestra el detalle de una habitación seleccionada en Posada Enilda con su precio total y política de cancelación, además de impuestos a pagar en destino.",
+    "campos": {
+     "hotel": {
+      "value": "Posada Enilda",
+      "confidence": 1
+     },
+     "ciudad": {
+      "value": "Providencia Island",
+      "confidence": 1
+     },
+     "tipo_habitacion": {
+      "value": "Doble Standard",
+      "confidence": 1
+     },
+     "regimen": {
+      "value": "Alojamiento y desayuno",
+      "confidence": 1
+     },
+     "check_in": {
+      "value": "--11-23",
+      "confidence": 1
+     },
+     "check_out": {
+      "value": "--11-25",
+      "confidence": 1
+     },
+     "noches": {
+      "value": "2",
+      "confidence": 1
+     },
+     "ocupacion": {
+      "value": "2 adultos, 1 niño (0 años), 1 habitación",
+      "confidence": 1
+     },
+     "politica_cancelacion": {
+      "value": "Cancelación gratuita hasta 21/11/2026",
+      "confidence": 1
+     },
+     "impuestos_incluidos": {
+      "value": "false",
+      "confidence": 1
+     },
+     "impuestos_destino_valor": {
+      "value": "23.93",
+      "confidence": 1
+     },
+     "impuestos_destino_moneda": {
+      "value": "USD",
+      "confidence": 1
+     },
+     "ocupacion_adultos": {
+      "value": "2",
+      "confidence": 1
+     },
+     "ocupacion_ninos": {
+      "value": "0",
+      "confidence": 1
+     },
+     "ocupacion_infantes": {
+      "value": "1",
+      "confidence": 1
+     },
+     "ocupacion_total": {
+      "value": "3",
+      "confidence": 0.8
+     },
+     "moneda": {
+      "value": "COP",
+      "confidence": 1
+     },
+     "precio_total": {
+      "value": "412689.86",
+      "confidence": 1
+     },
+     "base_precio": {
+      "value": "total",
+      "confidence": 1
+     },
+     "total_a_pagar_agencia": {
+      "value": null,
+      "confidence": 0
+     },
+     "comision_agencia_valor": {
+      "value": null,
+      "confidence": 0
+     },
+     "comision_agencia_pct": {
+      "value": null,
+      "confidence": 0
+     },
+     "estrellas": {
+      "value": "3",
+      "confidence": 0.9
+     }
+    },
+    "desglose": [],
+    "porTipoPax": [],
+    "totalGeneral": null,
+    "opcionesVisibles": 1,
+    "opcionesVistas": [
+     {
+      "nombre": "1 x Doble Standard AD",
+      "precio": "412.689,86 COP",
+      "seleccionada": true
+     }
+    ],
+    "iconosEquipaje": [],
+    "estrellasDeteccion": {
+     "valor": 3,
+     "corridas": [
+      3,
+      3
+     ],
+     "error": null
+    }
+   }
+  },
+  {
+   "archivo": "captura-6.jpeg",
+   "bytes": 103567,
+   "deteccion": {
+    "tipo": "hotel",
+    "lugar": "Providencia Island",
+    "origen": null,
+    "destino": null
+   },
+   "extraccion": {
+    "veredicto": "detalle_unico",
+    "observacion": "Se muestra el detalle de una estancia en Posada Enilda con una habitación Doble Standard y régimen AD, con el precio total y los impuestos a pagar en destino.",
+    "campos": {
+     "hotel": {
+      "value": "Posada Enilda",
+      "confidence": 1
+     },
+     "ciudad": {
+      "value": "Providencia Island / Providencia Island",
+      "confidence": 0.9
+     },
+     "tipo_habitacion": {
+      "value": "Doble Standard",
+      "confidence": 1
+     },
+     "regimen": {
+      "value": "Alojamiento y desayuno",
+      "confidence": 0.9
+     },
+     "check_in": {
+      "value": "--11-23",
+      "confidence": 1
+     },
+     "check_out": {
+      "value": "--11-25",
+      "confidence": 1
+     },
+     "noches": {
+      "value": "2",
+      "confidence": 1
+     },
+     "ocupacion": {
+      "value": "2 adultos, 1 niño (5 años), 1 habitación",
+      "confidence": 1
+     },
+     "politica_cancelacion": {
+      "value": "Cancelación gratuita hasta 21/11/2026",
+      "confidence": 1
+     },
+     "impuestos_incluidos": {
+      "value": "false",
+      "confidence": 1
+     },
+     "impuestos_destino_valor": {
+      "value": "23.93",
+      "confidence": 1
+     },
+     "impuestos_destino_moneda": {
+      "value": "USD",
+      "confidence": 1
+     },
+     "ocupacion_adultos": {
+      "value": "2",
+      "confidence": 1
+     },
+     "ocupacion_ninos": {
+      "value": "1",
+      "confidence": 1
+     },
+     "ocupacion_infantes": {
+      "value": "0",
+      "confidence": 1
+     },
+     "ocupacion_total": {
+      "value": "3",
+      "confidence": 0.8
+     },
+     "moneda": {
+      "value": "COP",
+      "confidence": 1
+     },
+     "precio_total": {
+      "value": "412689.86",
+      "confidence": 1
+     },
+     "base_precio": {
+      "value": "total",
+      "confidence": 1
+     },
+     "total_a_pagar_agencia": {
+      "value": null,
+      "confidence": 0
+     },
+     "comision_agencia_valor": {
+      "value": null,
+      "confidence": 0
+     },
+     "comision_agencia_pct": {
+      "value": null,
+      "confidence": 0
+     },
+     "estrellas": {
+      "value": "2",
+      "confidence": 0.9
+     }
+    },
+    "desglose": [],
+    "porTipoPax": [],
+    "totalGeneral": null,
+    "opcionesVisibles": 1,
+    "opcionesVistas": [
+     {
+      "nombre": "1 x Doble Standard AD",
+      "precio": "412.689,86 COP",
+      "seleccionada": true
+     }
+    ],
+    "iconosEquipaje": [],
+    "estrellasDeteccion": {
+     "valor": 2,
+     "corridas": [
+      2,
+      2
+     ],
+     "error": null
+    }
+   }
+  },
+  {
+   "archivo": "captura-7.jpeg",
+   "bytes": 100994,
+   "deteccion": {
+    "tipo": "hotel",
+    "lugar": "Providencia Island",
+    "origen": null,
+    "destino": null
+   },
+   "extraccion": {
+    "veredicto": "detalle_unico",
+    "observacion": "Se muestra el detalle de una habitación seleccionada en Posada Enilda con el precio total de la estadía y los impuestos a pagar en destino.",
+    "campos": {
+     "hotel": {
+      "value": "Posada Enilda",
+      "confidence": 1
+     },
+     "ciudad": {
+      "value": "Providencia Island",
+      "confidence": 1
+     },
+     "tipo_habitacion": {
+      "value": "Habitación 2 Cam...",
+      "confidence": 0.9
+     },
+     "regimen": {
+      "value": "AD",
+      "confidence": 1
+     },
+     "check_in": {
+      "value": "--11-23",
+      "confidence": 1
+     },
+     "check_out": {
+      "value": "--11-25",
+      "confidence": 1
+     },
+     "noches": {
+      "value": "2",
+      "confidence": 1
+     },
+     "ocupacion": {
+      "value": "2 adultos, 1 habitación",
+      "confidence": 1
+     },
+     "politica_cancelacion": {
+      "value": "Cancelación gratuita hasta 21/11/2026",
+      "confidence": 1
+     },
+     "impuestos_incluidos": {
+      "value": "false",
+      "confidence": 1
+     },
+     "impuestos_destino_valor": {
+      "value": "23.41",
+      "confidence": 1
+     },
+     "impuestos_destino_moneda": {
+      "value": "USD",
+      "confidence": 1
+     },
+     "ocupacion_adultos": {
+      "value": "2",
+      "confidence": 1
+     },
+     "ocupacion_ninos": {
+      "value": "0",
+      "confidence": 1
+     },
+     "ocupacion_infantes": {
+      "value": "0",
+      "confidence": 1
+     },
+     "ocupacion_total": {
+      "value": null,
+      "confidence": 0
+     },
+     "moneda": {
+      "value": "COP",
+      "confidence": 1
+     },
+     "precio_total": {
+      "value": "403718.34",
+      "confidence": 1
+     },
+     "base_precio": {
+      "value": "total",
+      "confidence": 1
+     },
+     "total_a_pagar_agencia": {
+      "value": null,
+      "confidence": 0
+     },
+     "comision_agencia_valor": {
+      "value": null,
+      "confidence": 0
+     },
+     "comision_agencia_pct": {
+      "value": null,
+      "confidence": 0
+     },
+     "estrellas": {
+      "value": null,
+      "confidence": 0
+     }
+    },
+    "desglose": [],
+    "porTipoPax": [],
+    "totalGeneral": null,
+    "opcionesVisibles": 1,
+    "opcionesVistas": [
+     {
+      "nombre": "1 x Habitación 2 Cam... AD",
+      "precio": "403.718,34 COP",
+      "seleccionada": true
+     }
+    ],
+    "iconosEquipaje": [],
+    "estrellasDeteccion": {
+     "valor": null,
+     "corridas": [
+      2,
+      3
+     ],
+     "error": null
+    }
+   }
+  },
+  {
+   "archivo": "captura-8.jpeg",
+   "bytes": 148525,
+   "deteccion": {
+    "tipo": "vuelo",
+    "lugar": null,
+    "origen": "San Andrés Isla",
+    "destino": "Providencia"
+   },
+   "extraccion": {
+    "veredicto": "detalle_unico",
+    "observacion": "Se muestra el detalle de un itinerario de vuelo de ida y vuelta con desglose de tarifa por tipo de pasajero.",
+    "campos": {
+     "aerolinea": {
+      "value": "SATENA",
+      "confidence": 1
+     },
+     "origen": {
+      "value": "San Andrés Isla ADZ",
+      "confidence": 1
+     },
+     "destino": {
+      "value": "Providencia PVA",
+      "confidence": 1
+     },
+     "fecha_salida": {
+      "value": "--11-23/lun",
+      "confidence": 1
+     },
+     "fecha_regreso": {
+      "value": "--11-25/mie",
+      "confidence": 1
+     },
+     "hora_salida": {
+      "value": "11:40",
+      "confidence": 1
+     },
+     "hora_llegada": {
+      "value": "12:17",
+      "confidence": 1
+     },
+     "hora_salida_regreso": {
+      "value": "10:30",
+      "confidence": 1
+     },
+     "hora_llegada_regreso": {
+      "value": "11:06",
+      "confidence": 1
+     },
+     "numero_vuelo": {
+      "value": "8814 · 8833",
+      "confidence": 1
+     },
+     "escalas": {
+      "value": "0",
+      "confidence": 1
+     },
+     "escala_ida": {
+      "value": null,
+      "confidence": 0
+     },
+     "escala_regreso": {
+      "value": null,
+      "confidence": 0
+     },
+     "familia_tarifa": {
+      "value": "BASIC Economy",
+      "confidence": 0.9
+     },
+     "equipaje_personal": {
+      "value": "true",
+      "confidence": 0.9
+     },
+     "equipaje_mano": {
+      "value": "false",
+      "confidence": 0.9
+     },
+     "equipaje_bodega": {
+      "value": "true",
+      "confidence": 0.9
+     },
+     "equipaje_personal_cantidad": {
+      "value": null,
+      "confidence": 0
+     },
+     "equipaje_personal_kg": {
+      "value": null,
+      "confidence": 0
+     },
+     "equipaje_mano_cantidad": {
+      "value": null,
+      "confidence": 0
+     },
+     "equipaje_mano_kg": {
+      "value": null,
+      "confidence": 0
+     },
+     "equipaje_bodega_cantidad": {
+      "value": null,
+      "confidence": 0
+     },
+     "equipaje_bodega_kg": {
+      "value": null,
+      "confidence": 0
+     },
+     "pax": {
+      "value": "8",
+      "confidence": 1
+     },
+     "ocupacion_adultos": {
+      "value": "6",
+      "confidence": 1
+     },
+     "ocupacion_ninos": {
+      "value": "1",
+      "confidence": 1
+     },
+     "ocupacion_infantes": {
+      "value": "1",
+      "confidence": 1
+     },
+     "ocupacion_total": {
+      "value": "8",
+      "confidence": 1
+     },
+     "moneda": {
+      "value": "COP",
+      "confidence": 1
+     },
+     "precio_total": {
+      "value": "3292196",
+      "confidence": 1
+     },
+     "base_precio": {
+      "value": "total",
+      "confidence": 1
+     },
+     "total_a_pagar_agencia": {
+      "value": null,
+      "confidence": 0
+     },
+     "comision_agencia_valor": {
+      "value": null,
+      "confidence": 0
+     },
+     "comision_agencia_pct": {
+      "value": null,
+      "confidence": 0
+     },
+     "precio_por_pax": {
+      "value": null,
+      "confidence": 0
+     }
+    },
+    "desglose": [
+     {
+      "concepto": "Total Tarifa",
+      "cantidad": 1,
+      "unidad": null,
+      "valor_unitario": 2934100,
+      "moneda": "COP",
+      "confidence": 1
+     },
+     {
+      "concepto": "Tasa de Embarque",
+      "cantidad": 1,
+      "unidad": null,
+      "valor_unitario": 267400,
+      "moneda": "COP",
+      "confidence": 1
+     },
+     {
+      "concepto": "Fee",
+      "cantidad": 1,
+      "unidad": null,
+      "valor_unitario": 90696,
+      "moneda": "COP",
+      "confidence": 1
+     }
+    ],
+    "porTipoPax": [
+     {
+      "tipo": "adulto",
+      "cantidad": 6,
+      "subtotal_tipo": 2877222,
+      "moneda": "COP",
+      "confidence": 1
+     },
+     {
+      "tipo": "nino",
+      "cantidad": 1,
+      "subtotal_tipo": 403637,
+      "moneda": "COP",
+      "confidence": 1
+     },
+     {
+      "tipo": "infante",
+      "cantidad": 1,
+      "subtotal_tipo": 11337,
+      "moneda": "COP",
+      "confidence": 1
+     }
+    ],
+    "totalGeneral": 3292196,
+    "opcionesVisibles": 1,
+    "opcionesVistas": [
+     {
+      "nombre": "Vuelo San Andrés Isla ADZ - Providencia PVA y regreso",
+      "precio": "3,292,196",
+      "seleccionada": true
+     }
+    ],
+    "iconosEquipaje": [
+     {
+      "dibujo": "bolso",
+      "color": "azul",
+      "clasificado": "encendido",
+      "estado": "encendido"
+     },
+     {
+      "dibujo": "maleta de cabina con ruedas",
+      "color": "gris",
+      "clasificado": "apagado",
+      "estado": "apagado"
+     },
+     {
+      "dibujo": "maleta grande",
+      "color": "azul",
+      "clasificado": "encendido",
+      "estado": "encendido"
+     }
+    ]
+   }
+  }
+ ]
+}
