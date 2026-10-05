@@ -120,7 +120,13 @@ function crearDb(t: Tablas) {
       if (op === 'upsert') {
         const f = { id: nuevoId(), ...(payload as Fila) };
         const cols = upsertOpts.onConflict!.split(',').map(c => c.trim());
-        if (t[tabla].some(x => cols.every(c => (x[c] ?? 0) === (f[c] ?? 0)))) return { data: [], error: null };
+        const ya = t[tabla].find(x => cols.every(c => (x[c] ?? 0) === (f[c] ?? 0)));
+        // Como la base: con `ignoreDuplicates` no toca la fila que ya está; sin él, la actualiza con lo dado.
+        if (ya && upsertOpts.ignoreDuplicates) return { data: [], error: null };
+        if (ya) {
+          Object.assign(ya, payload as Fila);
+          return { data: [proyectar(ya)], error: null };
+        }
         t[tabla].push(f);
         return { data: [proyectar(f)], error: null };
       }
@@ -270,6 +276,7 @@ function base(): Tablas {
     wa_bandeja_entregas: [],
     wa_bandeja_mensajes: [],
     wa_bandeja_entendimientos: [],
+    wa_bandeja_conversacion: [],
     etapas_negocio: [{ id: 'et-solicitud', linea_id: LINEA, orden: 1, stage: 'venta' }],
     bloque_configs: [BLOQUE_CONFIG],
     contactos: [],

@@ -11,7 +11,12 @@
 -- nombró con cada remitente. Esta tabla guarda eso: los últimos viajes en foco (con cuándo y por qué) y la consulta
 -- que quedó esperando que el comercial dijera de qué viaje era. Una fila por remitente y workspace.
 --
--- No guarda texto del cliente: ids de negocio, horas y el alcance de una pregunta («completo», «mínimo»).
+-- No guarda texto del cliente salvo un dato escrito por el comercial que espera saber a cuál de DOS viajes en foco va
+-- (`consulta_pendiente.texto`, vence a los 10 minutos): ids de negocio, horas y el alcance de una pregunta.
+--
+-- Además: la respuesta a «me falta» se carga en el acto en el viaje en foco, como una entrega que nace cerrada y con el
+-- reparto ya confirmado. Su motivo de cierre es nuevo: `respuesta_a_lo_que_falta` (se amplía la restricción; ninguna
+-- fila cambia).
 --
 -- epoca: no-rompe tabla nueva; no borra, renombra ni cambia nada que use el código de hoy.
 
@@ -35,3 +40,8 @@ alter table public.wa_bandeja_conversacion enable row level security;
 -- server-only: la escribe y la lee solo el bot de la bandeja (edge functions con service_role); la app no la usa.
 revoke all on public.wa_bandeja_conversacion from anon, authenticated;
 grant all on public.wa_bandeja_conversacion to service_role;
+
+-- El motivo de cierre de la entrega que nace cerrada con la respuesta a «me falta» (solo se agrega un valor).
+alter table public.wa_bandeja_entregas drop constraint wa_bandeja_entregas_motivo;
+alter table public.wa_bandeja_entregas add constraint wa_bandeja_entregas_motivo
+  check (motivo_cierre in ('inactividad', 'palabra_cierre', 'respuesta_a_lo_que_falta'));

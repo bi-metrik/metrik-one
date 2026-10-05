@@ -46,7 +46,10 @@ export const MINUTOS_CONSULTA_PENDIENTE = 10;
 
 /** El foco nuevo, primero; sin repetir el viaje; los últimos `MAX_FOCOS`. */
 export function agregarFoco(focos: ReadonlyArray<FocoViaje>, nuevo: FocoViaje): FocoViaje[] {
-  return [nuevo, ...focos.filter(f => f.negocio_id !== nuevo.negocio_id)].slice(0, MAX_FOCOS);
+  // Lo que faltaba tras la última carga se conserva cuando el mismo viaje vuelve a foco por una consulta.
+  const antes = focos.find(f => f.negocio_id === nuevo.negocio_id);
+  const conFaltan = nuevo.faltan === undefined && antes?.faltan !== undefined ? { ...nuevo, faltan: antes.faltan } : nuevo;
+  return [conFaltan, ...focos.filter(f => f.negocio_id !== nuevo.negocio_id)].slice(0, MAX_FOCOS);
 }
 
 /** Los focos dentro de la ventana, del más reciente al más viejo. */

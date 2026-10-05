@@ -14,18 +14,21 @@ import { transcribeAudio, PROMPT_TRANSCRIPCION_LITERAL } from './wa-transcribe.t
 import {
   armarPreguntaNegocio, candidatosDeEncabezado, conNombreDelViaje, descartarPendientesDelRemitente, hayPreguntaPendiente, nombreDeLaEntrega,
   nombreYConteoDeLaTanda, pendienteDeLaTanda, preguntaAbierta, procesarEntendimientos, reintentarCarga, textoDeLaConsulta, simularEnLaTanda,
-  textoDeLoQueFalta, textoPrimero, tomarRespuestaContacto, tomarRespuestaDeEntrega,
+  textoDeLoQueFalta, textoPrimero, tomarRespuestaContacto, tomarRespuestaDeEntrega, cargarDatoEnElViaje, nombreDelViajeDeId, viajesAbiertosDeLaBandeja,
 } from './wa-entendimiento.ts';
+import { anotarConsultaPendiente, consultaVigente, focosVigentes, leerConversacion } from './wa-foco.ts';
+import type { ConsultaPendiente } from './wa-foco.ts';
+import { leerNuevo, leerViajeNuevo } from './wa-entendimiento-reglas.ts';
 import type { EnLaTanda, PreguntaAbierta } from './wa-entendimiento.ts';
-import { interpretarRespuestaNegocio } from './wa-carga-reglas.ts';
+import { interpretarRespuestaNegocio, opcionNombrada, pieDeLista } from './wa-carga-reglas.ts';
 import type { OpcionNegocio } from './wa-carga-reglas.ts';
 import { leerConsultaBandeja } from './wa-consulta-bandeja.ts';
 import type { ConsultaBandeja } from './wa-consulta-bandeja.ts';
 import {
-  candidatosDelEncabezado, esRespuestaA, esRuidoEscrito, esSiNoCorto, lineaCaja, nombreDeViaje, pareceRespuesta, resolverEncabezado, respuestaAlEncabezado,
-  textoPreguntaEncabezadoCorta,
+  candidatosDelEncabezado, esRespuestaA, esRuidoEscrito, esSiNoCorto, leerEleccion, lineaCaja, nombreDeViaje, pareceEncabezado, pareceRespuesta, resolverEncabezado,
+  respuestaAlEncabezado, textoPreguntaEncabezadoCorta,
 } from './wa-viajes-reglas.ts';
-import type { ResolucionEncabezado } from './wa-viajes-reglas.ts';
+import type { ResolucionEncabezado, ViajeAbierto } from './wa-viajes-reglas.ts';
 import { sendTextMessage } from './wa-respond.ts';
 import {
   bandejaActiva,
@@ -364,6 +367,10 @@ export async function atenderEnBandeja(
       await contestarConsulta(supabase, user.workspace_id, message.phone, consulta, config);
       return;
     }
+    // Conversación con memoria (2026-10-05): la consulta que esperaba su viaje, la respuesta a «me falta» (directo al
+    // viaje en foco, sin tanda), la pregunta de a cuál de dos viajes va, o la carga que sigue en vuelo.
+    const memoria = esCierre ? null : await decidirConMemoria(supabase, user.workspace_id, message.phone, texto, config, { wamid, enviadoAt: fechaDeMeta(message.timestamp) });
+    if (memoria && await actuarConMemoria(supabase, user, message.phone, memoria, config)) return;
   }
 
   const pendiente = escrito ? await preguntaAbierta(supabase, user.workspace_id, message.phone) : null;
@@ -536,11 +543,187 @@ function enEsperaDe(sim: EnLaTanda, hayOtraPregunta: boolean): { aviso: string |
 export async function contestarConsulta(
   supabase: SupabaseClient, workspaceId: string, phone: string, consulta: ConsultaBandeja, config: ConfigBandeja,
 ): Promise<void> {
+  // Nada de datos viejos (2026-10-05, punto 4): con una carga del remitente en vuelo, la consulta de un viaje espera a
+  // que termine y lo dice; en la prueba de Mauricio contestó con lo de antes de la carga y a los 5 s ya era otra cosa.
+  if (consulta.tipo !== 'tanda' && await cargaEnVuelo(supabase, workspaceId, phone)) {
+    await enviar(phone, 'Lo estoy cargando; te digo en un momento.', workspaceId);
+    for (let i = 0; i < esperaDeCarga.intentos && await cargaEnVuelo(supabase, workspaceId, phone); i++) await esperaDeCarga.dormir(esperaDeCarga.ms);
+  }
   const respuesta = await textoDeLaConsulta(supabase, workspaceId, phone, consulta, config);
   const abierta = await preguntaAbierta(supabase, workspaceId, phone);
   const deLaTanda = abierta || config.modoViajes === 'uno' ? null : await pendienteDeLaTanda(supabase, workspaceId, phone, config.horasCajaActiva);
   const sigue = abierta ? textoPrimero(abierta) : deLaTanda ? `Sigue pendiente: ${textoDeLoQueFalta(deLaTanda)}` : null;
   await enviar(phone, [respuesta, sigue].filter(Boolean).join('\n'), workspaceId);
+}
+
+// ── Conversación con memoria (2026-10-05) ──────────────────────────────────
+
+/** Cuánto espera una consulta a que termine la carga en vuelo (un objeto para que las pruebas intercalen la carga). */
+export const esperaDeCarga = {
+  ms: 1500,
+  intentos: 30,
+  dormir: (ms: number): Promise<void> => new Promise(r => setTimeout(r, ms)),
+};
+
+/** Lo que hace la memoria con un escrito: contestar la consulta que esperaba su viaje, cargar el dato que responde a «me falta», preguntar a cuál de dos viajes va, o decir que la carga sigue en vuelo. */
+export type DecisionMemoria =
+  | { tipo: 'consulta'; consulta: ConsultaBandeja }
+  | { tipo: 'dato'; negocioId: string; cuerpo: string; wamid: string; enviadoAt: string | null; deLaPendiente: boolean }
+  | { tipo: 'preguntar'; texto: string; pendiente: ConsultaPendiente }
+  | { tipo: 'en_vuelo'; texto: string };
+
+/** «Lo estoy cargando»: un escrito que repite la respuesta o nombra el viaje mientras la carga sigue en vuelo. */
+export const TEXTO_EN_VUELO = 'Ya lo estoy cargando; te aviso en cuanto quede.';
+
+/**
+ * ¿Qué hace la memoria con este escrito? `null`: nada (sigue el camino de hoy). Solo sin tanda abierta ni pregunta
+ * pendiente, y solo en modo encabezado (donde el reparto va por viaje). Lo usan la ruta de hoy y el intérprete (que,
+ * si la memoria lo toma, no llama al modelo): funciona igual con el interruptor apagado o prendido.
+ */
+export async function decidirConMemoria(
+  supabase: SupabaseClient, workspaceId: string, phone: string, texto: string, config: ConfigBandeja,
+  msg: { wamid: string; enviadoAt: string | null },
+): Promise<DecisionMemoria | null> {
+  const t = texto.trim();
+  if (!t || config.modoViajes === 'uno') return null;
+  if (await hayTandaAbierta(supabase, workspaceId, phone)) return null;
+  if (await preguntaAbierta(supabase, workspaceId, phone)) return null;
+  const conv = await leerConversacion(supabase, workspaceId, phone);
+  const ahora = Date.now();
+  const viajes = (await viajesAbiertosDeLaBandeja(supabase, workspaceId)) ?? [];
+  const porId = (ids: string[]) => ids.map(id => viajes.find(v => v.id === id)).filter((v): v is ViajeAbierto => !!v);
+
+  // 1. La consulta (o el dato) que esperaba saber de qué viaje es: el escrito que nombra el viaje la contesta.
+  const pendiente = consultaVigente(conv.consulta, ahora);
+  if (pendiente) {
+    const cands = pendiente.candidatos?.length ? porId(pendiente.candidatos) : viajes;
+    const v = viajeQueNombra(t, cands, !!pendiente.candidatos?.length);
+    if (v && pendiente.tipo === 'viaje') {
+      return { tipo: 'consulta', consulta: { tipo: 'viaje', ref: v.codigo ?? v.cliente ?? null, ...(pendiente.alcance && pendiente.alcance !== 'ambos' ? { alcance: pendiente.alcance } : {}) } };
+    }
+    if (v && pendiente.tipo === 'dato' && pendiente.texto) {
+      return { tipo: 'dato', negocioId: v.id, cuerpo: pendiente.texto, wamid: pendiente.wamid ?? msg.wamid, enviadoAt: pendiente.enviadoAt ?? null, deLaPendiente: true };
+    }
+  }
+
+  const enc = resolverEncabezado(t, viajes);
+  // 2. Una carga del mismo remitente sigue en vuelo: un escrito que repite la respuesta («1», «el de San Andrés») o
+  // nombra el MISMO viaje no abre tanda. Un encabezado de otro viaje sí (es otra cosa).
+  const vuelo = await viajesEnVuelo(supabase, workspaceId, phone);
+  if (vuelo) {
+    const nombrados = candidatosDelEncabezado(enc).concat(enc?.tipo === 'viaje' ? [enc.viaje] : []).map(v => v.id);
+    const mismo = nombrados.length > 0 && nombrados.some(id => vuelo.has(id));
+    // Repetir la respuesta: un número de la lista, «el de …», o un sí/no corto (no un nombre nuevo ni otra cosa).
+    const repite = !enc && (leerEleccion(t) !== null || /^(?:del?|el|la)\s+(?:de|del)\b/i.test(t) || esSiNoCorto(t));
+    if (mismo || repite) return { tipo: 'en_vuelo', texto: TEXTO_EN_VUELO };
+  }
+
+  // 3. La respuesta a «me falta»: un dato escrito, sin tanda, cuando el viaje en foco es el que el bot acaba de cargar y le
+  // pidió datos. No si es una pregunta, un acuse, un «nuevo …» o nombra otro viaje (eso sigue el camino de hoy).
+  const vigentes = focosVigentes(conv.focos, ahora, config.minutosFoco);
+  const conFaltantes = vigentes.filter(f => (f.faltan ?? 0) > 0);
+  if (conFaltantes.length === 0 || (vigentes[0].faltan ?? 0) === 0) return null;
+  // Un encabezado (aun del mismo viaje: abre su caja, como siempre) tampoco.
+  if (esPregunta(t) || esRuidoEscrito(t) || leerNuevo(t) || leerViajeNuevo(t) !== undefined || enc || pareceEncabezado(t, viajes)) return null;
+  const cands = porId(conFaltantes.slice(0, 2).map(f => f.negocio_id));
+  if (cands.length === 1) return { tipo: 'dato', negocioId: cands[0].id, cuerpo: t, wamid: msg.wamid, enviadoAt: msg.enviadoAt, deLaPendiente: false };
+  if (cands.length === 0) return null;
+  // Dos viajes con faltantes en la ventana: va al que nombre el texto; si no nombra ninguno, se pregunta una vez.
+  const v = viajeQueNombra(t, cands, false);
+  if (v) return { tipo: 'dato', negocioId: v.id, cuerpo: t, wamid: msg.wamid, enviadoAt: msg.enviadoAt, deLaPendiente: false };
+  return {
+    tipo: 'preguntar',
+    texto: `¿Para cuál viaje es lo que me escribiste: ${cands.map(lineaCaja).join(' o ')}? ${pieDeLista(cands, 'Si es un viaje nuevo, «nuevo» y el nombre del cliente.')}`,
+    pendiente: { tipo: 'dato', texto: t, wamid: msg.wamid, enviadoAt: msg.enviadoAt, candidatos: cands.map(c => c.id), at: new Date().toISOString() },
+  };
+}
+
+/** El viaje que el texto señala entre unos candidatos: por su código o nombre, «el de Cartagena», o el número de la lista. */
+function viajeQueNombra(texto: string, cands: ReadonlyArray<ViajeAbierto>, numerada: boolean): ViajeAbierto | null {
+  if (cands.length === 0) return null;
+  const r = resolverEncabezado(texto, cands);
+  if (r?.tipo === 'viaje' || r?.tipo === 'aproximado') return r.viaje;
+  const o = opcionNombrada(texto, cands);
+  if (o) return o;
+  if (numerada) {
+    const k = leerEleccion(texto);
+    if (k !== null && cands[k - 1]) return cands[k - 1];
+  }
+  return null;
+}
+
+/** Hace lo que decidió la memoria. `false`: no pudo (sigue el camino de hoy). */
+export async function actuarConMemoria(
+  supabase: SupabaseClient, user: WaUser, phone: string, d: DecisionMemoria, config: ConfigBandeja,
+): Promise<boolean> {
+  const ws = user.workspace_id;
+  if (d.tipo === 'consulta') {
+    await anotarConsultaPendiente(supabase, ws, phone, null);
+    await contestarConsulta(supabase, ws, phone, d.consulta, config);
+    return true;
+  }
+  if (d.tipo === 'preguntar') {
+    await anotarConsultaPendiente(supabase, ws, phone, d.pendiente);
+    await enviar(phone, d.texto, ws);
+    return true;
+  }
+  if (d.tipo === 'en_vuelo') {
+    await enviar(phone, d.texto, ws);
+    return true;
+  }
+  // El dato: se acusa en el acto (qué viaje) y se carga sin tanda, resumen ni «sí»; la respuesta dice qué anotó y cuánto falta.
+  const nombre = await nombreDelViajeDeId(supabase, ws, d.negocioId);
+  const staffId = user.collaborator_id ? null : await staffIdDelRemitente(supabase, user);
+  const ok = await cargarDatoEnElViaje(supabase, {
+    workspaceId: ws, phone, staffId, colaboradorId: user.collaborator_id ?? null, wamid: d.wamid, cuerpo: d.cuerpo, enviadoAt: d.enviadoAt, negocioId: d.negocioId,
+  });
+  if (!ok) return false;
+  if (d.deLaPendiente) await anotarConsultaPendiente(supabase, ws, phone, null);
+  await enviar(phone, `Lo anoto en ${nombre ?? 'ese viaje'}. Lo estoy leyendo; te digo qué quedó.`, ws);
+  await seguirEnElActo(supabase, ws, phone);
+  return true;
+}
+
+/**
+ * ¿Hay una carga del remitente en vuelo? Un entendimiento procesando (de hace menos de 3 minutos), una respuesta que
+ * se tomó y todavía no se procesó, o una entrega lista que el entendimiento todavía no tomó.
+ */
+export async function cargaEnVuelo(supabase: SupabaseClient, workspaceId: string, phone: string): Promise<boolean> {
+  return (await viajesEnVuelo(supabase, workspaceId, phone)) !== null;
+}
+
+/**
+ * Los viajes de la carga en vuelo del remitente (los que se saben: el destino de un entendimiento, o el viaje que eligió
+ * la respuesta tomada de la lista). `null`: no hay carga en vuelo. Un conjunto vacío: hay, pero no se sabe a qué viaje.
+ */
+export async function viajesEnVuelo(supabase: SupabaseClient, workspaceId: string, phone: string): Promise<Set<string> | null> {
+  const hace = new Date(Date.now() - 3 * 60_000).toISOString();
+  const viajes = new Set<string>();
+  let hay = false;
+  const { data: ents } = await supabase.from('wa_bandeja_entendimientos')
+    .select('estado, updated_at, respuesta_negocio, respuesta_contacto, negocio_destino_id, entrega_id')
+    .eq('workspace_id', workspaceId).eq('remitente_phone', phone).in('estado', ['procesando', 'esperando_negocio', 'esperando_contacto']).limit(20);
+  for (const e of (ents ?? []) as Array<Record<string, unknown>>) {
+    const enVuelo = (e.estado === 'procesando' && String(e.updated_at ?? '') >= hace)
+      || (e.estado === 'esperando_negocio' && !!e.respuesta_negocio) || (e.estado === 'esperando_contacto' && !!e.respuesta_contacto);
+    if (!enVuelo) continue;
+    hay = true;
+    if (e.negocio_destino_id) viajes.add(String(e.negocio_destino_id));
+  }
+  const { data: listas } = await supabase.from('wa_bandeja_entregas').select('id, cliente_texto, negocio_opciones')
+    .eq('workspace_id', workspaceId).eq('remitente_phone', phone).eq('estado', 'con_cliente').limit(20);
+  const filas = (listas ?? []) as Array<Record<string, unknown>>;
+  if (filas.length > 0) {
+    const { data: tomadas } = await supabase.from('wa_bandeja_entendimientos').select('entrega_id').in('entrega_id', filas.map(x => x.id));
+    const ya = new Set(((tomadas ?? []) as Array<{ entrega_id: string }>).map(x => x.entrega_id));
+    for (const f of filas.filter(x => !ya.has(String(x.id)))) {
+      hay = true;
+      const opciones = Array.isArray(f.negocio_opciones) ? (f.negocio_opciones as OpcionNegocio[]) : [];
+      const r = interpretarRespuestaNegocio(String(f.cliente_texto ?? ''), opciones);
+      if (r.tipo === 'existente') viajes.add(r.negocio_id);
+    }
+  }
+  return hay ? viajes : null;
 }
 
 /** ¿Es un texto escrito (no reenviado) en modo `encabezado`? Solo ahí hay encabezados. */
