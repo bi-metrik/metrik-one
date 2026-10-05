@@ -1306,7 +1306,9 @@ export function armarSegmentos(
     // es?», y «sí, es ella» o «no» contestan «¿Es la misma persona?».
     if (escrito && actual && actual.seg.cliente) {
       const ec = actual.seg.cliente;
-      const k = soloLlave(m.cuerpo) ?? soloLlaveDelCliente(m.cuerpo, clienteDeCaja(actual.seg));
+      // Con el nombre en duda (noveno control), lo que trae el nombre limpio y la llave es la respuesta al nombre (abajo).
+      const nombreEnDuda = actual.seg.nombre !== null && !!dir && clienteDeLaCaja(actual.seg, dir)?.tipo === 'sin_nombre';
+      const k = soloLlave(m.cuerpo) ?? (nombreEnDuda ? null : soloLlaveDelCliente(m.cuerpo, clienteDeCaja(actual.seg)));
       if (k) {
         ec.llave = k;
         ec.elegido = null;
@@ -1341,8 +1343,11 @@ export function armarSegmentos(
     // «¿Para qué cliente es?», el nombre de un cliente con viajes abiertos es el cliente del viaje NUEVO, no un
     // encabezado de uno de sus viajes (la prueba de Mauricio del 2026-10-05, turno 2): solo un código o un
     // «nuevo X» abren otra caja.
-    const necesitaNombre = !!actual && actual.seg.nombre === null
-      && (!tieneLlave(actual.seg.cliente?.llave) || !dir || clienteDeLaCaja(actual.seg, dir)?.tipo === 'sin_nombre');
+    const necesitaNombre = !!actual && ((actual.seg.nombre === null
+      && (!tieneLlave(actual.seg.cliente?.llave) || !dir || clienteDeLaCaja(actual.seg, dir)?.tipo === 'sin_nombre'))
+      // Noveno control (hallazgo 1): el nombre que se dio arrancaba con una fórmula que no es de nadie («la persona es
+      // …»): el bot pidió el nombre otra vez, y el que llega ahora lo reemplaza.
+      || (actual.seg.nombre !== null && !!dir && actual.seg.encabezado?.resolucion.tipo === 'nuevo' && clienteDeLaCaja(actual.seg, dir)?.tipo === 'sin_nombre'));
     if (escrito && actual && necesitaNombre) {
       const r = resolverEncabezado(m.cuerpo, viajes, equipo);
       const otro = !!r && ((r.tipo === 'nuevo' && (!!r.cliente || !!r.llave)) || r.tipo === 'codigo_desconocido' || (r.tipo === 'viaje' && r.por === 'codigo'));

@@ -2033,3 +2033,68 @@ describe('octavo control de Vera (2026-10-05): el «sí» con reserva y el clien
     expect(textos().at(-1)).toBe('📌 VILLA DE LEYVA 2N · Gerardo Quintero (G 26 1)');
   });
 });
+
+describe('noveno control de Vera (2026-10-05): la fórmula delante del nombre no crea un duplicado, de punta a punta', () => {
+  function renata() {
+    t.contactos.push({ id: 'c-ro', workspace_id: WS, nombre: 'RENATA OSORIO', telefono: '3004424411', email: null, created_at: '2026-01-10T10:00:00Z' });
+    t.negocios.push({ ...negocioDePrueba('n-ro', 'R 25 3', 'BARICHARA MAR', 'RENATA OSORIO'), contacto_id: 'c-ro', estado: 'completado' });
+  }
+
+  for (const modo of ['apagado', 'prendido'] as const) {
+    it(`interruptor ${modo}: «es mi clienta de siempre, Renata Osorio» tras «¿Para qué cliente es?» es la que ya tenemos; el «sí» no crea otra`, async () => {
+      renata();
+      const interprete = modo === 'prendido' ? {} : undefined;
+      await llega('Bueno, vamos a montar un viaje nuevo', { enviado: 0, interprete });
+      expect(textos().at(-1)).toBe('Listo, un viaje nuevo. ¿Para qué cliente es?');
+      await llega('es mi clienta de siempre, Renata Osorio', { enviado: 5, interprete });
+      expect(textos().at(-1)).toMatch(/^Va como viaje nuevo de Renata Osorio, el que ya tenemos \(cel\. …4411/);
+      await llega('quiere ir a Mompox en semana santa, son 2', { enviado: 8, reenviado: true });
+      await llega('listo', { enviado: 10 });
+      expect(textos().at(-1)).toContain('Viaje nuevo de Renata Osorio (ya es cliente: cel. …4411');
+      await llega('sí', { enviado: 15 });
+      colaModelo = [salidaModelo({ destino: { valor: 'Mompox', frase: 'ir a Mompox' } })];
+      await cron(60);
+      expect(t.contactos.map(c => c.nombre)).toEqual(['RENATA OSORIO']);
+      expect(t.negocios.filter(x => x.contacto_id === 'c-ro' && x.estado === 'abierto')).toHaveLength(1);
+    });
+  }
+
+  it('«nuevo para Renata Osorio» con un celular nuevo: es ella (se le agrega el celular), nunca una ficha nueva', async () => {
+    t.contactos.push({ id: 'c-ro', workspace_id: WS, nombre: 'RENATA OSORIO', telefono: null, email: null, created_at: '2026-01-10T10:00:00Z' });
+    await llega('nuevo para Renata Osorio 300 777 1122', { enviado: 0 });
+    expect(textos().at(-1)).toMatch(/^Va como viaje nuevo de Renata Osorio, el que ya tenemos/);
+    await llega('quiere ir a Mompox', { enviado: 3, reenviado: true });
+    await llega('listo', { enviado: 5 });
+    await llega('sí', { enviado: 8 });
+    colaModelo = [salidaModelo({ destino: { valor: 'Mompox', frase: 'ir a Mompox' } })];
+    await cron(60);
+    expect(t.contactos.map(c => [c.nombre, c.telefono])).toEqual([['RENATA OSORIO', '3007771122']]);
+  });
+
+  it('sin nadie con ese nombre, «la persona que viaja es Bernardo Lizcano» pregunta cómo se llama y no crea con el prefijo', async () => {
+    await llega('Bueno, vamos a montar un viaje nuevo', { enviado: 0 });
+    await llega('la persona que viaja es Bernardo Lizcano 300 555 6677', { enviado: 5 });
+    // Pide el nombre otra vez (no lo toma con la fórmula delante).
+    expect(textos().at(-1)).toMatch(/¿Cómo se llama\?|¿Para qué cliente es\?/);
+    await llega('quiere ir a Mompox', { enviado: 8, reenviado: true });
+    await llega('listo', { enviado: 10 });
+    await llega('sí', { enviado: 15 });
+    colaModelo = [salidaModelo({ destino: { valor: 'Mompox', frase: 'ir a Mompox' } })];
+    await cron(60);
+    expect(t.contactos.filter(c => /PERSONA/.test(String(c.nombre)))).toEqual([]);
+  });
+
+  it('«la persona es Bernardo Lizcano» (corto, sin nadie así): se pregunta el nombre; con el nombre limpio y su celular, se crea limpio', async () => {
+    await llega('Bueno, vamos a montar un viaje nuevo', { enviado: 0 });
+    await llega('la persona es Bernardo Lizcano', { enviado: 5 });
+    expect(textos().at(-1)).toMatch(/¿Cómo se llama\?|¿Para qué cliente es\?/);
+    await llega('Bernardo Lizcano 300 555 6677', { enviado: 7 });
+    expect(textos().at(-1)).toMatch(/^Va como viaje nuevo de Bernardo Lizcano, cliente nuevo/);
+    await llega('quiere ir a Mompox', { enviado: 8, reenviado: true });
+    await llega('listo', { enviado: 10 });
+    await llega('sí', { enviado: 15 });
+    colaModelo = [salidaModelo({ destino: { valor: 'Mompox', frase: 'ir a Mompox' } })];
+    await cron(60);
+    expect(t.contactos.map(c => c.nombre)).toEqual(['BERNARDO LIZCANO']);
+  });
+});
