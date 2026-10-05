@@ -51,6 +51,11 @@ export interface SalidaVista {
    * («Falta el costo de Vuelo a Providencia · Opción 1: …»). `null`/ausente = no aplica.
    */
   faltaCosto?: string | null
+  /**
+   * Las líneas detrás de `faltaCosto`, con su id: el editor las cruza con las que esperan la
+   * tasa de cambio para decirlo en «Revisar y enviar» (brief del 2026-10-05).
+   */
+  faltaCostoLineas?: { id: string; nombre: string | null; grupo: string | null }[]
 }
 
 const SIN_REGLA: SalidaVista = {
@@ -114,6 +119,7 @@ export async function getSalidaDeCotizacion(cotizacionId: string): Promise<Salid
     lineasSinCosto: salida.medicion?.conteo.sinCosto,
     bajoMinimo: (salida.medicion?.bajoPiso ?? []).map(s => ({ nombre: s.nombre, margenPct: s.margenRealPct })),
     faltaCosto: salida.faltaCosto,
+    faltaCostoLineas: salida.faltaCosto ? (salida.medicion?.conteo.faltantes ?? []) : [],
   }
 }
 

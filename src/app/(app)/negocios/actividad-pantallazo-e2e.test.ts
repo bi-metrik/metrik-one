@@ -19,6 +19,8 @@ import { precioPorPasajeroDeItem } from '@/lib/cotizaciones/precio-pasajero-pdf'
 import { casillasDe, leerTarifaPax, resolverTarifa, type Composicion, type LecturaCasilla } from '@/lib/cotizaciones/tarifa-pasajero'
 import { esAvisoFechasFueraDelViaje } from '@/lib/cotizaciones/ingreso-manual'
 import { revisarBorrador } from '@/lib/cotizaciones/revisar-borrador'
+import { motivoFaltaCosto } from '@/lib/cotizaciones/falta-costo'
+import type { SalidaVista } from './margen-salida-actions'
 
 type Fila = Record<string, unknown>
 
@@ -266,8 +268,9 @@ async function pegarYAceptar(lectura: LecturaCasilla, pistaDelDetector: string |
   return { borrador: b, aceptada: r }
 }
 
-function pintar(items: unknown[]) {
+function pintar(items: unknown[], salida: SalidaVista | null = null) {
   return renderToStaticMarkup(React.createElement(CotizacionEditor, {
+    salida,
     oportunidadId: 'neg-1',
     cotizacion: {
       id: COT, codigo: 'COT-2026-0020', consecutivo: 'COT-2026-0020', modo: 'detallada', estado: 'borrador',
@@ -288,8 +291,8 @@ const texto = (html: string) => html.replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' 
 const pesos = (n: number) => n.toLocaleString('es-CO')
 const veces = (t: string, aguja: string) => t.split(aguja).length - 1
 
-function superficies(items: unknown[]) {
-  const html = pintar(items)
+function superficies(items: unknown[], salida: SalidaVista | null = null) {
+  const html = pintar(items, salida)
   const t = texto(html)
   const tabla = texto(html.match(/<section aria-label="Costo y precio"[\s\S]*?<\/section>/)?.[0] ?? '')
   const hoja = texto(html.match(/<section aria-label="Así lo ve el cliente"[\s\S]*?<\/section>/)?.[0] ?? '')
@@ -532,5 +535,120 @@ describe('criterio 7 · hotel con infante: el pantallazo 2 queda en su casilla',
       expect(s.html).toContain('data-subir-casilla="grupo_completo"')
       expect(s.html).toContain('data-subir-casilla="solo_adultos"')
     }
+  })
+})
+
+// ── Brief del 2026-10-05 · la ciudad de una actividad no sale del nombre del tour ─────
+
+/** Ítem `d15ce887…` de COT-2026-0020: «Tour en lancha por la bahía de Manzanillo», 300.000 COP. */
+function lecturaManzanillo(ciudadInventada: string | null): LecturaCasilla {
+  return lecturaCop({
+    total: 300000,
+    nombre: 'Tour en lancha por la bahía de Manzanillo',
+    identidad: { fecha: '2026-11-10', nombre: 'Tour en lancha por la bahía de Manzanillo' },
+    campos: [
+      { label: 'Proveedor', valor: 'Civitatis' },
+      { label: 'Actividad', valor: 'Tour en lancha por la bahía de Manzanillo' },
+      ...(ciudadInventada ? [{ label: 'Ciudad', valor: ciudadInventada }] : []),
+      { label: 'Fecha', valor: '2026-11-10' },
+      { label: 'Personas', valor: '3' },
+      { label: 'Moneda', valor: 'COP' },
+      { label: 'Precio', valor: '300000' },
+    ],
+    descripcion: '',
+  })
+}
+
+describe('brief 2026-10-05 · criterio 1 · «Tour en lancha por la bahía de Manzanillo» sin ciudad', () => {
+  // Con la lectura nueva la ciudad ya llega vacía (`evaluarLectura`); con la que el lector
+  // devolvió el 2026-10-03 llega «Manzanillo». Las dos nombran el bloque con el viaje.
+  for (const [caso, ciudad] of [['lectura nueva, sin ciudad', null], ['lectura como la del C3, «Ciudad: Manzanillo»', 'Manzanillo']] as const) {
+    it(`${caso}: «Actividad en Providencia», en la bandeja, al aceptar, sin recargar y recargando`, async () => {
+      const { borrador } = await pegarYAceptar(lecturaManzanillo(ciudad), 'Manzanillo')
+      expect(bloquesPedidos.lugares).toEqual([null])
+      expect(lineaDeLaBase('item-1').grupo).toBe('actividad: Actividad en Providencia')
+      for (const s of [await releida(), recargada()]) {
+        expect(s.t).toContain('Actividad en Providencia')
+        expect(s.t).not.toContain('Actividad en Manzanillo')
+        // Lo que no cambia: 300.000 para 3 personas, Adulto 150.000 × 2, Infante $0.
+        expect(s.costoLinea).toBe('300.000')
+        expect(s.tabla).toMatch(/Adulto 2 150\.000/)
+        expect(s.tabla).toMatch(/Infante 1 0 /)
+      }
+      const rev = revisarBorrador({
+        capId: 'c1', borrador: { tipo: 'actividad', lectura: borrador.lectura, lecturaJson: borrador.lecturaJson, firma: borrador.firma, pistas: { lugar: 'Manzanillo', origen: null, destino: null } },
+        lineas: [], comparables: [], composicion: GRUPO, ubicaciones: {}, comparar: false, destinoViaje: DESTINO,
+      })
+      expect(rev.donde).toBe('Actividad en Providencia · nuevo')
+    })
+  }
+})
+
+describe('brief 2026-10-05 · criterio 2 · el pantallazo sí dice «Ciudad: San Andrés»', () => {
+  it('«Actividad en San Andrés» en la bandeja y al aceptar', async () => {
+    const lectura = lecturaManzanillo('San Andrés')
+    const { borrador } = await pegarYAceptar(lectura, 'Manzanillo')
+    expect(bloquesPedidos.lugares).toEqual(['San Andrés'])
+    const rev = revisarBorrador({
+      capId: 'c1', borrador: { tipo: 'actividad', lectura: borrador.lectura, lecturaJson: borrador.lecturaJson, firma: borrador.firma, pistas: { lugar: 'Manzanillo', origen: null, destino: null } },
+      lineas: [], comparables: [], composicion: GRUPO, ubicaciones: {}, comparar: false, destinoViaje: DESTINO,
+    })
+    expect(rev.donde).toBe('Actividad en San Andrés · nuevo')
+  })
+})
+
+describe('brief 2026-10-05 · criterio 3 · «Snorkel en Crab Cay» sin ciudad sigue en Providencia', () => {
+  it('«Actividad en Providencia»', async () => {
+    const lectura = lecturaCop({
+      total: 180000,
+      nombre: 'Snorkel en Crab Cay',
+      identidad: { fecha: '2026-11-12', nombre: 'Snorkel en Crab Cay' },
+      campos: [
+        { label: 'Proveedor', valor: 'Civitatis' },
+        { label: 'Actividad', valor: 'Snorkel en Crab Cay' },
+        { label: 'Fecha', valor: '2026-11-12' },
+        { label: 'Personas', valor: '3' },
+        { label: 'Moneda', valor: 'COP' },
+        { label: 'Precio', valor: '180000' },
+      ],
+    })
+    await pegarYAceptar(lectura, 'Crab Cay')
+    expect(bloquesPedidos.lugares).toEqual([null])
+    for (const s of [await releida(), recargada()]) expect(s.t).toContain('Actividad en Providencia')
+  })
+})
+
+describe('brief 2026-10-05 · criterio 4 · EUR sin tasa: «Revisar y enviar» dice que falta la tasa', () => {
+  it('el motivo para no enviar (paso y botón) trae el texto de la tarjeta; con la tasa, se va', async () => {
+    await pegarYAceptar(lecturaEur(), 'Cayo Cangrejo')
+    const aviso = 'El precio está en EUR: escribe la tasa de cambio para cargar el costo.'
+    // Lo que manda el servidor (`getSalidaDeCotizacion`): la línea sin costo que entra al total.
+    const servidor = (): SalidaVista => {
+      const faltantes = lineasConRubros(COT).map(i => ({ id: String(i.id), nombre: (i.nombre ?? null) as string | null, grupo: (i.grupo ?? null) as string | null }))
+      return {
+        aplica: true, bajoPiso: true, bloquea: true, mensaje: '', pisoPct: 5, excepcion: null, perdida: null,
+        puedeAutorizar: false, dueno: null, excepcionesDisponibles: true, lineas: 1, lineasSinCosto: 1, bajoMinimo: [],
+        faltaCosto: motivoFaltaCosto(faltantes), faltaCostoLineas: faltantes,
+      }
+    }
+    expect(servidor().faltaCosto).not.toContain('tasa')
+    const esperado = `Falta el costo de Actividad en Providencia · EXCURSIÓN A CAYO CANGREJO: el cliente recibiría un precio sin ese servicio. ${aviso}`
+    for (const s of [superficies(lineasConRubros(COT), servidor()), await (async () => {
+      const r = await leerVista(new Request(`https://x/api/cotizaciones/${COT}/vista`), { params: Promise.resolve({ id: COT }) })
+      const fresca = interpretarVistaFresca(await r.json())
+      const pagina = { leidaEn: new Date(0).toISOString(), items: [] as unknown[], adicionalesPorItem: {} }
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      return superficies(lineasParaPintar(pagina as any, fresca, true).items, servidor())
+    })()]) {
+      // Las tres superficies del motivo: el detalle del paso, la nota del margen y debajo de «Enviar».
+      expect(veces(s.t, esperado)).toBe(3)
+      expect(s.t).not.toMatch(/sin ese servicio\. (?!El precio)/)
+      expect(s.revisar).toContain(aviso)
+    }
+    // Escribo la tasa: ya no falta nada y el motivo no habla de la tasa.
+    const r = await confirmarTarifaPorPasajero('item-1', 4500)
+    expect(r.success, r.error).toBe(true)
+    const sinFalta: SalidaVista = { ...servidor(), faltaCosto: null, faltaCostoLineas: [], bloquea: false, bajoPiso: false, lineasSinCosto: 0 }
+    expect(superficies(lineasConRubros(COT), sinFalta).t).not.toContain('escribe la tasa de cambio')
   })
 })

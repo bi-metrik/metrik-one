@@ -28,3 +28,24 @@ describe('el motivo', () => {
     expect(motivoFaltaCosto(tres)).toBe('Falta el costo de A, B y 1 más: el cliente recibiría un precio sin esos servicios.')
   })
 })
+
+describe('cuando lo que falta es la tasa de cambio (brief del 2026-10-05)', () => {
+  const TASA = 'El precio está en EUR: escribe la tasa de cambio para cargar el costo.'
+  const actividad = { id: 'a', grupo: 'actividad: Actividad en Providencia', nombre: 'Opción 1' }
+  it('una línea: el motivo de siempre y el texto de la tarjeta, tal cual', () => {
+    expect(motivoFaltaCosto([actividad], new Map([['a', TASA]]))).toBe(
+      `Falta el costo de Actividad en Providencia · Opción 1: el cliente recibiría un precio sin ese servicio. ${TASA}`,
+    )
+  })
+  it('varias: cada tasa con su línea; las que no esperan tasa no agregan nada', () => {
+    const vuelo = { id: 'v', grupo: 'vuelo 3: Vuelo a Providencia', nombre: 'OPCIÓN 1' }
+    expect(motivoFaltaCosto([vuelo, actividad], new Map([['a', TASA]]))).toBe(
+      'Falta el costo de Vuelo a Providencia · Opción 1 y Actividad en Providencia · Opción 1: el cliente recibiría un precio sin esos servicios. ' +
+      `Actividad en Providencia · Opción 1: ${TASA}`,
+    )
+  })
+  it('sin tasas pendientes (o sin el mapa, como lo arma el servidor), el motivo de siempre', () => {
+    expect(motivoFaltaCosto([actividad], new Map())).toBe('Falta el costo de Actividad en Providencia · Opción 1: el cliente recibiría un precio sin ese servicio.')
+    expect(motivoFaltaCosto([actividad])).toBe('Falta el costo de Actividad en Providencia · Opción 1: el cliente recibiría un precio sin ese servicio.')
+  })
+})
