@@ -4,7 +4,8 @@ import { createServiceClient } from '@/lib/supabase/server'
 import { BUCKET_DOCUMENTOS_SERVICIO, nombreDescargaRecibo } from '@/lib/valida-api/recibo-manual'
 import { esUuid } from '@/lib/valida-api/reglas'
 import { nombreDescargaFactura } from './factura-cuota'
-import { entradaValidaCda, puedeVerPagosCda } from './puerta'
+import { entradaSuscripcion } from '@/lib/seccion-suscripcion/entrada-servidor'
+import { puedeVerPagosCda } from './puerta'
 
 /**
  * Qué archivo de la pestaña Pagos de `/valida` pide un CDA, y si puede bajarlo. La ruta
@@ -21,6 +22,9 @@ import { entradaValidaCda, puedeVerPagosCda } from './puerta'
  * Exige la entrada del CDA con los términos aceptados (la pestaña no existe sin ella) y quien pida
  * tiene que poder ver la plata (dueño, administrador o persona designada). La mora NO cierra la
  * descarga: con Valida pausada, la factura es justo lo que se necesita para pagar.
+ *
+ * La entrada es la de `/suscripcion` (`entradaSuscripcion`), así que también baja los archivos de la
+ * licencia de ONE de un cliente de Clarity: la pestaña Pagos es la misma.
  */
 
 export const CLASES_ARCHIVO_CDA = ['factura_pdf', 'factura_xml', 'recibo'] as const
@@ -39,8 +43,9 @@ function esClase(c: string): c is ClaseArchivoCda {
 export async function resolverArchivoCda(clase: string, id: string): Promise<ArchivoCda> {
   if (!esClase(clase) || !esUuid(id)) return NO_ENCONTRADO
 
-  const entrada = await entradaValidaCda()
-  if (entrada.tipo !== 'ok') return { tipo: 'error', status: 403, error: 'sin_acceso' }
+  const e = await entradaSuscripcion()
+  if (e.tipo !== 'ok') return { tipo: 'error', status: 403, error: 'sin_acceso' }
+  const { entrada } = e
   if (entrada.estado.estado !== 'aprobada') return { tipo: 'error', status: 403, error: 'entrada_pendiente' }
   if (!entrada.servicioContratadoId || !(await puedeVerPagosCda(entrada))) {
     return { tipo: 'error', status: 403, error: 'sin_acceso' }

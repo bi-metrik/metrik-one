@@ -189,9 +189,10 @@ export default async function AppLayout({
   const modoVitrina = (workspace.config_extra as { modo_vitrina?: boolean } | null)
     ?.modo_vitrina === true
   const hasLineas = (lineasResult.count ?? 0) > 0
-  // Suscripción: solo en un espacio con Valida (los CDA), y solo para quien la maneja. La misma
-  // resolución (cacheada por request) la usan `/suscripcion` y la franja de `/valida`.
-  const suscripcion = workspaceModules.valida_consulta ? await menuSuscripcion() : null
+  // Suscripción: en un espacio con Valida (los CDA) o con Clarity (la licencia de ONE por cuotas), y
+  // solo para quien la maneja. La misma resolución (cacheada por request) la usan `/suscripcion` y la
+  // franja de `/valida`.
+  const suscripcion = workspaceModules.valida_consulta || workspaceModules.business ? await menuSuscripcion() : null
 
   // Notificaciones pendientes resueltas aquí (server) para que la campana pinte
   // el contador en el primer render. Antes el componente arrancaba vacío y solo
