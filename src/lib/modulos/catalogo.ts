@@ -62,6 +62,9 @@ export const MODULOS = {
       '/negocios', '/numeros', '/equipo', '/movimientos', '/directorio', '/contactos',
       '/tableros', '/flujo', '/gastos', '/facturacion', '/cobros-recurrentes',
       '/conciliacion', '/revision', '/promotores', '/nuevo',
+      // La licencia de ONE que el cliente paga por cuotas (próxima cuota, enlace de pago, pagos).
+      // La ruta exige además ser la persona designada del contrato que el espacio paga.
+      '/suscripcion',
     ],
     funciones: [
       'comercial_negocios', 'conciliacion', 'cobros_recurrentes', 'aliados', 'causacion',
@@ -78,7 +81,7 @@ export const MODULOS = {
     clave: 'valida_consulta',
     inicio: '/valida',
     // /suscripcion: la licencia que el CDA paga (pagos, usuarios, términos). La ruta misma exige
-    // además ser dueño, administrador o persona designada del espacio que paga el contrato.
+    // además ser la persona designada del contrato que el espacio paga. También es de Clarity.
     rutas: ['/valida', '/suscripcion'],
     funciones: [],
   },

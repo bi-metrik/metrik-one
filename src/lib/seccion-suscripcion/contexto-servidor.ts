@@ -2,9 +2,10 @@ import 'server-only'
 import { cache } from 'react'
 import { createServiceClient } from '@/lib/supabase/server'
 import { designacionDelEspacio } from '@/lib/valida-api/terminos-servidor'
-import { entradaValidaCda, moraValidaCda, type EntradaValidaCda } from '@/lib/valida-cda/puerta'
-import type { LecturaPago } from '@/lib/valida-cda/pago-servidor'
-import type { EstadoMora } from '@/lib/valida-cda/plazos'
+import { leerProximoPagoCda, type LecturaPago } from '@/lib/valida-cda/pago-servidor'
+import { moraValidaCda } from '@/lib/valida-cda/puerta'
+import { estadoMora, type EstadoMora } from '@/lib/valida-cda/plazos'
+import { entradaSuscripcion, type EntradaOk, type ProductoSuscripcion } from './entrada-servidor'
 import { puedeOperarSuscripcion, puedeVerSuscripcion, resumenEstado, tonoDelPunto, type ResumenEstado, type TerminosDeEntrada } from './estado'
 
 /**
@@ -13,7 +14,8 @@ import { puedeOperarSuscripcion, puedeVerSuscripcion, resumenEstado, tonoDelPunt
  * espacio paga y el estado. Una sola resolución por request (`cache`): la usan el layout (punto del
  * menú), `/suscripcion`, la franja de `/valida` y cada acción.
  *
- * Hoy la sección existe para un espacio que PAGA un contrato del módulo Valida (los CDA). Un
+ * La sección existe para un espacio que PAGA un contrato: del módulo Valida (los CDA) o una licencia
+ * de ONE (Clarity, `contrato-one.ts`); de cuál, lo dice `producto` (`entrada-servidor.ts`). Un
  * beneficiario que no paga, AFI, metrik o un espacio sin contrato: `no_aplica`, y la ruta responde
  * 404. La gestión de usuarios que cuelga de aquí es genérica (`src/lib/usuarios-espacio/`): llevarla
  * a Clarity es darle otro contexto, no reescribirla.
@@ -44,7 +46,9 @@ export type ContextoSuscripcion =
   | { tipo: 'no_disponible' }
   | {
       tipo: 'ok'
-      entrada: Extract<EntradaValidaCda, { tipo: 'ok' }>
+      /** Por qué puerta se llegó: el CDA de Valida o la licencia de ONE. */
+      producto: ProductoSuscripcion
+      entrada: EntradaOk
       workspaceId: string
       /** La persona REAL de la sesión: la que actúa en las acciones. */
       usuarioId: string
@@ -77,11 +81,9 @@ interface FilaContrato {
 }
 
 async function resolver(): Promise<ContextoSuscripcion> {
-  const entrada = await entradaValidaCda()
-  if (entrada.tipo === 'no_disponible') return { tipo: 'no_disponible' }
-  if (entrada.tipo !== 'ok') return { tipo: 'no_aplica' }
-  if (entrada.estado.estado === 'no_disponible') return { tipo: 'no_disponible' }
-  if (!entrada.servicioContratadoId) return { tipo: 'no_aplica' }
+  const e = await entradaSuscripcion()
+  if (e.tipo !== 'ok') return e
+  const { entrada, producto } = e
 
   const designacion = await designacionDelEspacio(entrada.workspaceId)
   if (designacion === 'error') return { tipo: 'no_disponible' }
@@ -110,9 +112,19 @@ async function resolver(): Promise<ContextoSuscripcion> {
   const fila = contratoR.data as FilaContrato
   const catalogo = ((catalogoR.data ?? []) as { slug: string; nombre: string }[]).find((c) => c.slug === fila.servicio_slug)
 
-  const mora = await moraValidaCda()
-  const pago = mora.tipo === 'ok' ? mora.lectura : null
-  const estadoMora: EstadoMora = mora.tipo === 'ok' ? mora.mora : { estado: 'al_dia' }
+  // La mora de Valida la mide su puerta (la misma lectura que pausa el módulo). La de ONE se mide aquí
+  // con la misma regla, sobre las mismas RPC de cuotas y cobros; ONE no se pausa por ella.
+  let pago: LecturaPago | null
+  let mora: EstadoMora
+  if (producto === 'valida_cda') {
+    const m = await moraValidaCda()
+    pago = m.tipo === 'ok' ? m.lectura : null
+    mora = m.tipo === 'ok' ? m.mora : { estado: 'al_dia' }
+  } else {
+    pago = await leerProximoPagoCda(entrada.servicioContratadoId, entrada.hoy)
+    // Sin poder leer las cuotas no hay prueba de mora (el criterio de `moraValidaCda`).
+    mora = pago.estado === 'ok' ? estadoMora(pago.pago, entrada.hoy) : { estado: 'al_dia' }
+  }
   const terminos: TerminosDeEntrada =
     entrada.estado.estado === 'aprobada'
       ? { estado: 'aprobada' }
@@ -120,6 +132,7 @@ async function resolver(): Promise<ContextoSuscripcion> {
 
   return {
     tipo: 'ok',
+    producto,
     entrada,
     workspaceId: entrada.workspaceId,
     usuarioId: entrada.usuarioId,
@@ -145,12 +158,13 @@ async function resolver(): Promise<ContextoSuscripcion> {
       comision: fila.comision,
     },
     pago,
-    mora: estadoMora,
+    mora,
     resumen: resumenEstado({
       terminos,
       pago: pago && pago.estado === 'ok' ? pago.pago : null,
-      mora: estadoMora,
+      mora,
       hoy: entrada.hoy,
+      producto,
     }),
   }
 }
