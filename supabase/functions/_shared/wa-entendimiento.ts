@@ -69,6 +69,7 @@ import {
   aplicarCambios,
   armarPlan,
   esNombreNuevo,
+  sinPresentacion,
   interpretarConfirmacionNuevo,
   resolverEncabezado,
   textoConfirmarNuevo,
@@ -1865,9 +1866,10 @@ async function resolverRespuesta(supabase: SupabaseClient, ent: Fila): Promise<v
   }
   // Se le pidió el nombre y escribió solo el nombre («Valeria Prueba5»), sin NUEVO.
   let nuevoNombre: string | null = r.tipo === 'nuevo' ? r.nombre : null;
+  // Sin la fórmula que lo presenta («la clienta es …», «para …»: octavo control de Vera, hallazgo 3).
   if (r.tipo === 'no_entendida' && opciones.length === 0 && !nombreMostrado
     && !/(^|\s)\d/.test(respuestaTexto.trim()) && esNombreNuevo(respuestaTexto.replace(/\d/g, ''))) {
-    nuevoNombre = respuestaTexto.trim();
+    nuevoNombre = sinPresentacion(respuestaTexto.trim());
   }
   if (r.tipo === 'no_entendida' && !nuevoNombre) {
     await repreguntar();

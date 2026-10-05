@@ -886,11 +886,28 @@ export function textoNoEntendiEleccion(texto: string, candidatos: ReadonlyArray<
  * palabras comunes, del equipo ni de un sí/no.
  */
 export function esNombreNuevo(texto: string, equipo: ReadonlyArray<string> = []): string | null {
-  const bruto = String(texto ?? '').trim();
+  const bruto = sinPresentacion(String(texto ?? '').trim());
   if (!bruto || /[?¿\d]/.test(bruto) || leerSiNo(bruto) !== null) return null;
   const palabras = palabrasDe(bruto).filter(w => !RELLENO.has(w));
   if (palabras.length === 0 || palabras.length > 4 || sinEfecto(palabras, equipo)) return null;
-  return bruto.replace(/^(se llama|es|el cliente es|la cliente es)\s+/i, '').trim();
+  return bruto;
+}
+
+/**
+ * Lo que presenta un nombre y no es parte de él (octavo control de Vera, hallazgo 3): las fórmulas en los dos
+ * géneros («el cliente es», «la clienta es», «la señora se llama», «su nombre es», «se llama», «es») y las
+ * preposiciones que lo introducen («para», «de», «a nombre de», «es para»). Con el prefijo, el nombre pedía la
+ * llave de alguien que ya existe y, con un celular nuevo y el «sí», creaba un duplicado con el prefijo.
+ */
+const PRESENTA_NOMBRE = /^(?:(?:(?:el|la)\s+)?(?:client[ea]|se[ñn]or|se[ñn]ora|pasajer[oa]|titular)\s+(?:es|se\s+llama)|(?:(?:su|el)\s+)?nombre\s+es|(?:que\s+)?se\s+llama|llamad[oa]|a\s+nombre\s+de|para|de|es)(?:[\s,:;-]+)/i;
+export function sinPresentacion(texto: string): string {
+  let s = String(texto ?? '').trim();
+  for (let i = 0; i < 3; i++) {
+    const r = s.replace(PRESENTA_NOMBRE, '').trim();
+    if (r === s || !r) break;
+    s = r;
+  }
+  return s;
 }
 
 // ── Sí / no ──────────────────────────────────────────────────────────────────
@@ -2025,6 +2042,29 @@ export function textoResumenPlan(plan: PlanViajes, mensajes: ReadonlyArray<Mensa
 export function esSi(texto: string): boolean {
   return leerSiNo(texto, { estricto: true }) === 'si';
 }
+
+/**
+ * El «sí» que carga el resumen (y, en el de un viaje nuevo, crea el viaje) cuando lo propone el intérprete: la misma
+ * lectura que ya tiene «¿Creo el cliente nuevo …?» (octavo control de Vera, bloqueante 1). Solo una afirmación
+ * sola, con cortesía o con el verbo de cargar o de crear («sí, cárguelo por favor», «sí, adelante», «dale, créalo»).
+ * Con una condición o un pedido de espera («sí, pero espera el pasaporte», «sí cuando me confirme»), con una
+ * negación, una pregunta o algo que señala («sí, ese»): no es este «sí», y se vuelve a preguntar.
+ */
+export function esSiSinReserva(texto: string): boolean {
+  const bruto = String(texto ?? '').trim();
+  if (!bruto) return false;
+  if (esSi(bruto)) return true;
+  // «así está bien», «todo correcto»: dicen que el resumen está bien, no señalan nada.
+  let t = ` ${normalizarNombre(bruto)} `;
+  for (const f of RESUMEN_BIEN) t = t.split(` ${f} `).join(' ');
+  t = t.replace(/\s+/g, ' ').trim();
+  if (NIEGA_EN_CONFIRMACION.test(t) || /[?¿]/.test(bruto) || t.split(' ').some(w => DEICTICOS.has(w))) return false;
+  // «cárgalo», «cárguelos», «cargar»: en el resumen, cargar es el verbo de alta.
+  return esSiCompleto(t.split(' ').map(w => VERBOS_CARGAR.has(w) ? 'crea' : w).join(' '), null);
+}
+const RESUMEN_BIEN: ReadonlyArray<string> = ['todo esta bien', 'asi esta bien', 'asi esta perfecto', 'esta bien', 'esta perfecto', 'todo bien',
+  'todo correcto', 'todo ok', 'asi es', 'asi esta', 'tal cual', 'quedo bien', 'asi quedo', 'como esta'];
+const VERBOS_CARGAR: ReadonlySet<string> = new Set([...formasDeAlta('carg'), 'cargalos', 'cargalas', 'carguelos', 'carguelas', 'carguemoslos']);
 
 export type Cambio = { ns: number[]; a: DestinoPlan | 'descartar' | 'dejar' };
 
