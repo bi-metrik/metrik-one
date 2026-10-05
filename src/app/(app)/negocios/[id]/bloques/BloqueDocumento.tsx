@@ -1,7 +1,6 @@
 'use client'
 
 import { useState, useRef } from 'react'
-import { useRouter } from 'next/navigation'
 import { toast } from 'sonner'
 import {
   FileText,
@@ -665,7 +664,6 @@ export default function BloqueDocumento({
   configExtra,
   esResponsable,
 }: BloqueDocumentoProps) {
-  const router = useRouter()
   // Workspace con almacenamiento externo: la subida va directo al proyecto del cliente.
   const almacenamientoExterno = useAlmacenamientoExterno()
   // Los votos entre documentos del negocio: dicen si otro documento respalda cada campo.
@@ -735,7 +733,8 @@ export default function BloqueDocumento({
         ? `"${res.bloqueNombre}" quedo devuelto. El caso volvio a ${res.movidoA}.`
         : `"${res.bloqueNombre}" quedo devuelto para correccion`,
     )
-    router.refresh()
+    // Sin router.refresh(): la acción ya hace revalidatePath de la ficha y Next aplica
+    // ese render en la misma respuesta. Refrescar aquí la renderizaba DOS veces (2026-10-04).
   }
 
   const [uploadState, setUploadState] = useState<UploadState>(() => {
@@ -774,7 +773,8 @@ export default function BloqueDocumento({
       if (res.campos) setCampos(res.campos)
       setExtractionStatus('ok')
       toast.success('Documento reprocesado con IA')
-      router.refresh()
+      // Sin router.refresh(): la acción ya hace revalidatePath de la ficha y Next aplica
+      // ese render en la misma respuesta. Refrescar aquí la renderizaba DOS veces (2026-10-04).
     } finally {
       setReprocessing(false)
     }
@@ -928,7 +928,8 @@ export default function BloqueDocumento({
         toast.success(`${label} subido correctamente`)
       }
 
-      router.refresh()
+      // Sin router.refresh(): la acción ya hace revalidatePath de la ficha y Next aplica
+      // ese render en la misma respuesta. Refrescar aquí la renderizaba DOS veces (2026-10-04).
     } catch (err) {
       setUploadState('error')
       const msg = err instanceof Error ? err.message : String(err)

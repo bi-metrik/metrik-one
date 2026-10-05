@@ -1,6 +1,7 @@
 'use server'
 
 import { getWorkspace } from '@/lib/actions/get-workspace'
+import { enPeticionDeRuta } from '@/lib/actions/memo-de-ruta'
 import { revalidatePath } from 'next/cache'
 import { RAZONES_PERDIDA_NEGOCIO, MOTIVOS_CANCELACION, MOTIVOS_PAUSA, MAX_PAUSAS, MAX_DIAS_PAUSA, SAFETY_NET_HORAS, leerMarcasDeMetadata, origenDesdeFuenteInteraccion, type MarcaCondicion } from '@/lib/negocios/constants'
 import {
@@ -4270,7 +4271,20 @@ export async function cambiarEtapaNegocioConGate(
 
 // ── Marcar bloque completo ─────────────────────────────────────────────────────
 
+/**
+ * Guardar un bloque completo. Corre dentro de `enPeticionDeRuta`: el guard, los helpers y la
+ * propia acción piden `getWorkspace` y, en una server action, el `cache()` de React no
+ * memoiza (no hay render). Así la sesión se resuelve UNA vez por guardado.
+ */
 export async function marcarBloqueCompleto(
+  negocioBloqueId: string,
+  data: Record<string, unknown>,
+  opts?: { correccion?: { causa?: string; sesion_id?: string } }
+): Promise<{ error: string | null; trigger_afi_generation?: boolean; trigger_afi_contrato?: boolean; negocio_id?: string }> {
+  return enPeticionDeRuta(() => marcarBloqueCompletoSinMemo(negocioBloqueId, data, opts))
+}
+
+async function marcarBloqueCompletoSinMemo(
   negocioBloqueId: string,
   data: Record<string, unknown>,
   // Ver `actualizarBloqueData`. Un bloque de una etapa superada casi siempre está
@@ -5007,7 +5021,17 @@ export async function consultarRetornoDeCorreccion(
   return { aviso: posibles[0].aviso, etapa: posibles[0].etapaNombre }
 }
 
+/** Guardar un campo de la ficha. Ver `marcarBloqueCompleto`: una sola sesión por guardado. */
 export async function actualizarBloqueData(
+  negocioBloqueId: string,
+  data: Record<string, unknown>,
+  negocioId?: string,
+  opts?: { revalidate?: boolean; correccion?: { causa?: string; sesion_id?: string } }
+): Promise<{ error: string | null }> {
+  return enPeticionDeRuta(() => actualizarBloqueDataSinMemo(negocioBloqueId, data, negocioId, opts))
+}
+
+async function actualizarBloqueDataSinMemo(
   negocioBloqueId: string,
   data: Record<string, unknown>,
   negocioId?: string,
@@ -6520,6 +6544,79 @@ export async function getNegocioDetalleCompleto(id: string): Promise<{
 
   if (!base) return null
 
+  // ── Segunda ola: todo lo que solo necesita `base` (2026-10-04) ────────────
+  //
+  // Después de la primera ola quedaban ONCE lecturas más en fila india, aunque ninguna
+  // usa el resultado de otra: solo `id`, la línea y los bloques de `base`. Se lanzan
+  // todas aquí y cada una se espera donde se usaba, en el mismo orden de siempre, así
+  // que lo que cambia es CUÁNDO salen, no qué se lee ni cómo se procesa. Ninguna
+  // escribe; las dos escrituras de esta función siguen más abajo, después de todas.
+  // `Promise.resolve` es lo que las DISPARA: el builder de PostgREST no sale hasta que
+  // alguien llama a su `then`.
+  const lineaIdBase = base.negocio.linea_id
+  const bloqueConfigIds = base.bloques.map(b => b.id)
+  const negocioBloqueIds = base.bloques.map(b => b.instancia?.id).filter(Boolean) as string[]
+  const tieneGuia = base.bloques.some(b =>
+    (b as { bloque_definitions?: { tipo?: string } | null }).bloque_definitions?.tipo === 'guia_devolucion'
+  )
+  const olaLineaConfig = lineaIdBase
+    ? Promise.resolve(db(supabase).from('lineas_negocio').select('config_extra').eq('id', lineaIdBase).maybeSingle())
+    : null
+  const olaPropuestaCero = lineaIdBase && (base.negocio.precio_aprobado ?? 0) <= 0
+    ? Promise.resolve(db(supabase)
+        .from('negocio_bloques')
+        .select('data, bloque_configs!inner(bloque_definitions!inner(tipo))')
+        .eq('negocio_id', id)
+        .eq('bloque_configs.bloque_definitions.tipo', 'propuesta_economica'))
+    : null
+  const olaConfigsExtra = bloqueConfigIds.length > 0
+    ? Promise.resolve(db(supabase).from('bloque_configs').select('id, config_extra').in('id', bloqueConfigIds))
+    : null
+  const olaItemsBloques = negocioBloqueIds.length > 0
+    ? Promise.resolve(db(supabase)
+        .from('bloque_items')
+        .select('id, negocio_bloque_id, label, tipo, completado, completado_por, completado_at, link_url, imagen_data, orden, fecha_inicio, fecha_fin, fecha_inicio_real, fecha_fin_real, responsable_id, responsable_texto')
+        .in('negocio_bloque_id', negocioBloqueIds)
+        .order('orden', { ascending: true }))
+    : null
+  const olaBloquesGuia = tieneGuia
+    ? Promise.resolve(db(supabase)
+        .from('negocio_bloques')
+        .select('data, bloque_configs!inner(nombre, slug, config_extra)')
+        .eq('negocio_id', id))
+    : null
+  const olaConfigsLinea = lineaIdBase
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    ? Promise.resolve((db(supabase) as any)
+        .from('bloque_configs')
+        .select('config_extra, etapas_negocio!inner(linea_id, orden)')
+        .eq('etapas_negocio.linea_id', lineaIdBase))
+    : null
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const olaPropuestas = Promise.resolve((db(supabase) as any)
+    .from('negocio_bloques')
+    .select('data, bloque_configs!inner(etapa_id, slug, bloque_definitions!inner(tipo), etapas_negocio!inner(orden))')
+    .eq('negocio_id', id)
+    .eq('bloque_configs.bloque_definitions.tipo', 'propuesta_economica'))
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const olaServicio = Promise.resolve((db(supabase) as any)
+    .from('negocio_bloques')
+    .select('data, bloque_configs!inner(slug)')
+    .eq('negocio_id', id)
+    .eq('bloque_configs.slug', 'servicio_contratado'))
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const olaDocumentos = Promise.resolve((db(supabase) as any)
+    .from('negocio_bloques')
+    .select('data, bloque_configs!inner(nombre, slug, etapa_id, config_extra, bloque_definitions!inner(tipo, nombre), etapas_negocio!inner(orden))')
+    .eq('negocio_id', id)
+    .eq('bloque_configs.bloque_definitions.tipo', 'documento'))
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const olaDatos = Promise.resolve((db(supabase) as any)
+    .from('negocio_bloques')
+    .select('data, bloque_configs!inner(slug, bloque_definitions!inner(tipo))')
+    .eq('negocio_id', id)
+    .eq('bloque_configs.bloque_definitions.tipo', 'datos'))
+
   const negMetaRow = negMetaRes.data
   const seccional010DelNegocio = (negMetaRow?.metadata as Record<string, unknown> | null)?.seccional as string | undefined
 
@@ -6543,9 +6640,8 @@ export async function getNegocioDetalleCompleto(id: string): Promise<{
   // etapas previas la necesita para el opt-in `reactivar_bloques`, y volver a
   // consultarla ahí sería una segunda consulta por la misma fila.
   let lineaConfigExtra: Record<string, unknown> | null = null
-  if (base.negocio.linea_id) {
-    const lineaCobroRes = await db(supabase)
-      .from('lineas_negocio').select('config_extra').eq('id', base.negocio.linea_id).maybeSingle()
+  if (base.negocio.linea_id && olaLineaConfig) {
+    const lineaCobroRes = await olaLineaConfig
     lineaConfigExtra = (lineaCobroRes.data as { config_extra?: Record<string, unknown> } | null)?.config_extra ?? null
     // Un honorario en cero puede ser una DECISION (propuesta aprobada regalando
     // el servicio) y no un dato que falta. El criterio no se reimplementa acá:
@@ -6554,12 +6650,8 @@ export async function getNegocioDetalleCompleto(id: string): Promise<{
     // que es el único caso en que puede cambiar la respuesta: así el detalle no
     // paga una consulta más en los negocios que sí tienen honorario.
     let ceroDeliberado = false
-    if ((base.negocio.precio_aprobado ?? 0) <= 0) {
-      const { data: propRows } = await db(supabase)
-        .from('negocio_bloques')
-        .select('data, bloque_configs!inner(bloque_definitions!inner(tipo))')
-        .eq('negocio_id', id)
-        .eq('bloque_configs.bloque_definitions.tipo', 'propuesta_economica')
+    if ((base.negocio.precio_aprobado ?? 0) <= 0 && olaPropuestaCero) {
+      const { data: propRows } = await olaPropuestaCero
       ceroDeliberado = esCeroDeliberado(
         (propRows ?? []) as Array<{ data: Record<string, unknown> | null }>,
         base.negocio.precio_aprobado,
@@ -6606,8 +6698,12 @@ export async function getNegocioDetalleCompleto(id: string): Promise<{
   // aquí no tumba la ficha: la tarjeta simplemente no se pinta. Se lanza AQUÍ y se
   // espera al final: corre en paralelo con el resto del detalle en vez de sumarle
   // sus idas y vueltas a la base.
+  //
+  // ⚠️ Hasta el 2026-10-04 aquí había un `await` que contradecía este comentario: los
+  // datos clave se esperaban EN SERIE antes de seguir. Sin él, la promesa se espera
+  // donde siempre se leyó (`datosClave: await datosClavePromesa`, al armar la ficha).
   const datosClavePromesa = base.negocio.linea_id
-    ? await datosClaveDelNegocio(supabase, {
+    ? datosClaveDelNegocio(supabase, {
         negocioId: id,
         lineaId: base.negocio.linea_id,
         etapaActualId: base.negocio.etapa_actual_id,
@@ -6633,13 +6729,9 @@ export async function getNegocioDetalleCompleto(id: string): Promise<{
   const puedeCorregirPrecioWs = role === 'owner' || (!!staffId && staffIdsPrecio.includes(staffId))
 
   // Cargar config_extra de los bloque_configs
-  const bloqueConfigIds = base.bloques.map(b => b.id)
   const bloqueConfigsExtra: Record<string, Record<string, unknown>> = {}
-  if (bloqueConfigIds.length > 0) {
-    const { data: extras } = await db(supabase)
-      .from('bloque_configs')
-      .select('id, config_extra')
-      .in('id', bloqueConfigIds)
+  if (olaConfigsExtra) {
+    const { data: extras } = await olaConfigsExtra
     if (extras) {
       for (const e of extras as Record<string, unknown>[]) {
         bloqueConfigsExtra[e.id as string] = (e.config_extra ?? {}) as Record<string, unknown>
@@ -6648,14 +6740,9 @@ export async function getNegocioDetalleCompleto(id: string): Promise<{
   }
 
   // Cargar bloque_items de todos los negocio_bloques
-  const negocioBloqueIds = base.bloques.map(b => b.instancia?.id).filter(Boolean) as string[]
   const itemsByBloqueId: Record<string, unknown[]> = {}
-  if (negocioBloqueIds.length > 0) {
-    const { data: itemsData } = await db(supabase)
-      .from('bloque_items')
-      .select('id, negocio_bloque_id, label, tipo, completado, completado_por, completado_at, link_url, imagen_data, orden, fecha_inicio, fecha_fin, fecha_inicio_real, fecha_fin_real, responsable_id, responsable_texto')
-      .in('negocio_bloque_id', negocioBloqueIds)
-      .order('orden', { ascending: true })
+  if (olaItemsBloques) {
+    const { data: itemsData } = await olaItemsBloques
     if (itemsData) {
       for (const item of itemsData as Record<string, unknown>[]) {
         const bid = item.negocio_bloque_id as string
@@ -6849,19 +6936,13 @@ export async function getNegocioDetalleCompleto(id: string): Promise<{
   // de RUT, Factura y Fecha cita DIAN. Se resuelven por IDENTIDAD DE BLOQUE
   // (nombre), no por orden de etapa — robusto a reordenamientos. Mapa nombre→data
   // (campos AI aplanados), ignorando heredados readonly (sin campos propios).
-  const tieneGuia = base.bloques.some(b =>
-    (b as { bloque_definitions?: { tipo?: string } | null }).bloque_definitions?.tipo === 'guia_devolucion'
-  )
   const datosGuiaPorNombre: Record<string, Record<string, unknown>> = {}
   // Índice por slug ESTABLE del bloque (vía preferida; robusto a renames, a
   // diferencia de datosGuiaPorNombre que se rompió cuando "Factura de venta" pasó
   // a "Factura Venta Vehículo"). Ver docs/specs/2026-05-26_block-references-by-slug.md
   const datosGuiaPorSlug: Record<string, Record<string, unknown>> = {}
-  if (tieneGuia) {
-    const { data: bloquesGuia } = await db(supabase)
-      .from('negocio_bloques')
-      .select('data, bloque_configs!inner(nombre, slug, config_extra)')
-      .eq('negocio_id', id)
+  if (olaBloquesGuia) {
+    const { data: bloquesGuia } = await olaBloquesGuia
     for (const b of ((bloquesGuia ?? []) as Record<string, unknown>[])) {
       const cfg = b.bloque_configs as { nombre?: string; slug?: string | null; config_extra?: Record<string, unknown> | null }
       if ((cfg?.config_extra as { source_etapa_orden?: unknown } | null)?.source_etapa_orden !== undefined) continue
@@ -6885,12 +6966,8 @@ export async function getNegocioDetalleCompleto(id: string): Promise<{
   // bloques de etapas previas (ej. DA6/DA7 en E6 con auto_fill desde E2/E5).
   // Sin esto, datosOtrasEtapas queda vacio para los rangos que el historial
   // necesita y los bloques readonly quedan filtrados del historial.
-  if (base.negocio.linea_id) {
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const { data: allConfigs } = await (db(supabase) as any)
-      .from('bloque_configs')
-      .select('config_extra, etapas_negocio!inner(linea_id, orden)')
-      .eq('etapas_negocio.linea_id', base.negocio.linea_id)
+  if (olaConfigsLinea) {
+    const { data: allConfigs } = await olaConfigsLinea
     for (const c of ((allConfigs ?? []) as Record<string, unknown>[])) {
       const ce = c.config_extra as { fields?: Array<{ auto_fill?: { source_etapa_orden?: number } }> } | null
       const fields = ce?.fields ?? []
@@ -6994,12 +7071,7 @@ export async function getNegocioDetalleCompleto(id: string): Promise<{
   // Índice por slug estable del bloque origen (vía preferida de la herencia readonly).
   const propuestaDataPorSlug: Record<string, Record<string, unknown>> = {}
   {
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const { data: propuestaBlocks } = await (db(supabase) as any)
-      .from('negocio_bloques')
-      .select('data, bloque_configs!inner(etapa_id, slug, bloque_definitions!inner(tipo), etapas_negocio!inner(orden))')
-      .eq('negocio_id', id)
-      .eq('bloque_configs.bloque_definitions.tipo', 'propuesta_economica')
+    const { data: propuestaBlocks } = await olaPropuestas
     if (propuestaBlocks) {
       for (const pb of (propuestaBlocks as Record<string, unknown>[])) {
         const cfg = pb.bloque_configs as Record<string, unknown>
@@ -7021,12 +7093,7 @@ export async function getNegocioDetalleCompleto(id: string): Promise<{
   // Se lee su bloque, no el campo derivado (misma regla que `niegaCertificacionUpme`).
   let servicioVigenteNeg: string | null = null
   {
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const { data: servBlocks } = await (db(supabase) as any)
-      .from('negocio_bloques')
-      .select('data, bloque_configs!inner(slug)')
-      .eq('negocio_id', id)
-      .eq('bloque_configs.slug', 'servicio_contratado')
+    const { data: servBlocks } = await olaServicio
     // Un negocio trae varias filas del bloque (las copias readonly viajan con el entre
     // etapas): gana la que tenga respuesta, no la primera que llegue.
     for (const sb_ of ((servBlocks ?? []) as Array<{ data: Record<string, unknown> | null }>)) {
@@ -7048,12 +7115,7 @@ export async function getNegocioDetalleCompleto(id: string): Promise<{
   // heredar además del archivo. Ver `devolucion_habilitada` más abajo.
   const documentoConfigPorSlug = new Map<string, Record<string, unknown>>()
   {
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const { data: docBlocks } = await (db(supabase) as any)
-      .from('negocio_bloques')
-      .select('data, bloque_configs!inner(nombre, slug, etapa_id, config_extra, bloque_definitions!inner(tipo, nombre), etapas_negocio!inner(orden))')
-      .eq('negocio_id', id)
-      .eq('bloque_configs.bloque_definitions.tipo', 'documento')
+    const { data: docBlocks } = await olaDocumentos
     if (docBlocks) {
       for (const db_ of (docBlocks as Record<string, unknown>[])) {
         const cfg = db_.bloque_configs as Record<string, unknown>
@@ -7088,12 +7150,7 @@ export async function getNegocioDetalleCompleto(id: string): Promise<{
   // `datos` heredados COPIAN el dato en su propia fila; aqui hace falta compartirlo.
   const datosCompartidosPorSlug = new Map<string, Record<string, unknown>>()
   {
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const { data: datosBlocks } = await (db(supabase) as any)
-      .from('negocio_bloques')
-      .select('data, bloque_configs!inner(slug, bloque_definitions!inner(tipo))')
-      .eq('negocio_id', id)
-      .eq('bloque_configs.bloque_definitions.tipo', 'datos')
+    const { data: datosBlocks } = await olaDatos
     for (const row of ((datosBlocks ?? []) as Record<string, unknown>[])) {
       const cfg = row.bloque_configs as Record<string, unknown>
       const slug = cfg.slug as string | null

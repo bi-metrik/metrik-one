@@ -209,7 +209,6 @@ function CobroConfirmadoRow({
 }
 
 function CobroProgramadoRow({ cobro, modo }: { cobro: Cobro; modo: 'editable' | 'visible' }) {
-  const router = useRouter()
   const [isPending, startTransition] = useTransitionTolerante()
   const vencido = cobro.vencido === true
 
@@ -218,7 +217,7 @@ function CobroProgramadoRow({ cobro, modo }: { cobro: Cobro; modo: 'editable' | 
       const res = await confirmarCobroProgramado(cobro.id)
       if (res.success) {
         toast.success('Cobro confirmado')
-        router.refresh()
+        // Sin router.refresh(): la acción ya revalida la ficha (2026-10-04).
       } else {
         toast.error(res.error ?? 'Error confirmando cobro')
       }
