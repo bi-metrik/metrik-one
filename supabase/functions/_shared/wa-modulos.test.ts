@@ -89,7 +89,7 @@ describe('wa-webhook aplica la puerta', () => {
     // 2026-10-02 (bot conversacional): la misma lectura trae `config_extra.bot_conversacional`, el
     // interruptor del intérprete, para que apagado no cueste una consulta más. Aprobado por la sesión
     // principal: solo cambia el texto fijado del select, no el comportamiento.
-    expect(fuente).toContain(".select('subscription_status, modules, bot_conversacional:config_extra->bot_conversacional')")
+    expect(fuente).toContain(".select('subscription_status, modules, bot_conversacional:config_extra->bot_conversacional, aviso_datos_bot:config_extra->aviso_datos_bot')")
     expect(fuente.split('modulos: modulos ?? null').length - 1).toBe(2)
   })
 })

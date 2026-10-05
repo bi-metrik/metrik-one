@@ -89,15 +89,21 @@ export async function identificarRemitente(
  * La fila del workspace del remitente. `bot_conversacional` es SOLO la llave
  * `config_extra.bot_conversacional` (el interruptor del intérprete, `wa-interprete-reglas.ts`): va en
  * esta misma lectura para que el interruptor apagado no cueste ni una consulta más. Ausente o nula
- * (workspaces que no la tienen) = apagado.
+ * (workspaces que no la tienen) = apagado. Igual `aviso_datos_bot` (la puerta del aviso de datos,
+ * `aviso-datos-bot.ts`): misma lectura, y ausente = apagada.
  */
 async function leerWorkspace(
   supabase: SupabaseClient,
   workspaceId: string,
-): Promise<{ subscription_status?: string; modules?: Record<string, unknown> | null; bot_conversacional?: unknown } | null> {
+): Promise<{
+  subscription_status?: string;
+  modules?: Record<string, unknown> | null;
+  bot_conversacional?: unknown;
+  aviso_datos_bot?: unknown;
+} | null> {
   const { data, error } = await supabase
     .from('workspaces')
-    .select('subscription_status, modules, bot_conversacional:config_extra->bot_conversacional')
+    .select('subscription_status, modules, bot_conversacional:config_extra->bot_conversacional, aviso_datos_bot:config_extra->aviso_datos_bot')
     .eq('id', workspaceId)
     .single();
   if (error) {

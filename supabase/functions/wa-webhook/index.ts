@@ -38,6 +38,7 @@ import { handleConsulta } from '../_shared/handlers/consulta.ts';
 import { handleActividad } from '../_shared/handlers/actividad.ts';
 import { handleAyuda, handleUnclear, handleUnclearResume } from '../_shared/handlers/ayuda.ts';
 import { atenderBotonTerminos, atenderPendienteTerminos } from '../_shared/aceptacion-terminos-flujo.ts';
+import { atenderAvisoDatos, cerrarAviso } from '../_shared/aviso-datos-bot-flujo.ts';
 import { botEquipoPermitido, MENSAJE_BOT_SIN_CLARITY } from '../_shared/wa-modulos.ts';
 import { atenderEnBandeja, rutaDelMensaje } from '../_shared/wa-bandeja.ts';
 import { identificarRemitente } from '../_shared/wa-identificar.ts';
@@ -111,9 +112,11 @@ Deno.serve(async (req) => {
       }
       const message = entrante.mensaje;
 
-      // Un toque de boton puede ser la aceptacion de un documento: se guarda el cuerpo tal cual
-      // llego y su firma, que es lo unico que permite demostrar despues que lo mando Meta.
-      if (message.type === 'interactive') {
+      // Un toque de boton puede ser la aceptacion de un documento, y un texto puede ser el «acepto»
+      // escrito del aviso de datos del bot: se guarda el cuerpo tal cual llego y su firma, que es lo
+      // unico que permite demostrar despues que lo mando Meta. Solo en memoria: no se guarda salvo
+      // que sea esa respuesta.
+      if (message.type === 'interactive' || message.type === 'text') {
         message.webhook_crudo = { cuerpo: body, firma: signature };
       }
 
@@ -282,7 +285,11 @@ async function processMessage(message: IncomingMessage): Promise<void> {
   // 0. Aceptacion de terminos — toque de "Acepto" / "No acepto". Va PRIMERO, antes que cualquier
   //    aislamiento: el id del boton es inequivoco (`terminos:...`) y ese toque no puede terminar
   //    como texto dentro de una entrevista de Cardumen o en el flujo de gastos.
-  if (await atenderBotonTerminos(supabase, message)) return;
+  //    Si el toque es el del aviso de datos del bot, `cerrarAviso` confirma y procesa (aqui mismo,
+  //    en orden) lo que la persona escribio antes de aceptar.
+  if (await atenderBotonTerminos(supabase, message, {
+    alResponderAviso: (fila, decision, respondidoAt) => cerrarAviso(supabase, fila, decision, respondidoAt, processMessage),
+  })) return;
 
   // 0a. Cardumen — Flow completado: guardar la respuesta y agradecer. Va PRIMERO (participantes ≠ usuarios ONE).
   if (message.type === 'flow_response') {
@@ -439,6 +446,13 @@ async function processMessage(message: IncomingMessage): Promise<void> {
     await atenderDesconocido(supabase, message);
     return;
   }
+
+  // 1a-aviso. Aviso de datos del bot (opt-in por workspace: `config_extra.aviso_datos_bot`, que llega en
+  //     la misma lectura que identifica al remitente). Dueño, miembro o colaborador que no haya aceptado
+  //     la versión vigente: el mensaje se RETIENE sin procesar y se le muestra el aviso. Va antes del
+  //     intérprete, la bandeja, el módulo, la transcripción y el parser: nada retenido llega a Gemini.
+  //     Apagado, no hace ni una consulta. Ver `_shared/aviso-datos-bot.ts`.
+  if (await atenderAvisoDatos(supabase, user, message, processMessage)) return;
 
   // 1a-int. Intérprete conversacional (opt-in por workspace: `config_extra.bot_conversacional`, que
   //     llega en la misma lectura que identifica al remitente). Un escrito libre del equipo pasa por UN
