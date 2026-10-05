@@ -1084,6 +1084,11 @@ export function validar(crudo: unknown, e: EntradaValidador): Decision {
   return d;
 }
 
+/** Un escrito que arranca afirmando: «sí …», «dale …», «ok …», «claro …». */
+const SI_AL_COMIENZO = /^(?:si|sii|sip|dale|ok|okey|listo|claro|perfecto|de una|hagale|bueno|vale)\b/;
+/** Lo que el modelo devuelve para un «sí, pero …» que no es una corrección. */
+const SIN_PESO_ANTE_EL_SI: ReadonlySet<string> = new Set(['confirmar', 'acuse', 'nota_interna', 'contenido', 'saludo', 'pedir_aclaracion']);
+
 function validarPropuesta(crudo: unknown, e: EntradaValidador): Decision {
   // V0 — el esquema.
   const propuesta = leerPropuesta(crudo);
@@ -1134,6 +1139,14 @@ function validarPropuesta(crudo: unknown, e: EntradaValidador): Decision {
   if (acc.some(a => a.accion === 'confirmar') && acc.some(a => ['corregir_gasto', 'mover', 'cancelar', 'descartar'].includes(a.accion))) {
     acc = acc.filter(a => a.accion !== 'confirmar');
     marcar('V16_si_con_peros');
+  }
+  // Octavo control de Vera (bloqueante 1): con el resumen (o «¿Lo creo igual?») pendiente, un «sí» con reserva («sí,
+  // pero no lo cargues hasta el lunes») ni carga, ni entra como contenido o nota a una caja, ni queda en silencio,
+  // aunque el modelo lo parta en confirmar + nota o lo tome como un acuse: se vuelve a preguntar. Una corrección
+  // («sí, pero el 3 es de Jorge») sigue a V16.
+  if ((e.pendiente?.capa === 'resumen' || e.pendiente?.capa === 'contacto_bandeja') && SI_AL_COMIENZO.test(norm(e.texto)) && !esSiSinReserva(e.texto)
+    && acc.every(a => SIN_PESO_ANTE_EL_SI.has(a.accion) || (a.accion === 'responder' && String(a.opcion ?? '').toLowerCase() === 'si'))) {
+    return aclaracion(e, 'V21_si_con_reserva');
   }
   // Un «sí, pero …» que el modelo devolvió como confirmar + responder también es un pero.
   if (acc.some(a => a.accion === 'confirmar') && acc.length > 1) {

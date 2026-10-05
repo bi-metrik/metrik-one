@@ -68,6 +68,23 @@ describe('regla 1 · el «sí» del resumen con una condición no carga', () => 
     expect(d.paso).toMatchObject({ p: 'responder_bandeja', canonico: 'sí' });
   });
 
+  it('el modelo parte el «sí» con reserva en confirmar + nota o contenido, o lo toma como acuse: tampoco carga, ni anota, ni calla', () => {
+    const texto = 'sí, pero no lo cargues hasta el lunes';
+    for (const acciones of [
+      [{ accion: 'confirmar', evidencia: 'sí' }, { accion: 'nota_interna', evidencia: 'pero no lo cargues hasta el lunes' }],
+      [{ accion: 'confirmar', evidencia: 'sí' }, { accion: 'contenido', evidencia: 'no lo cargues hasta el lunes' }],
+      [{ accion: 'acuse', evidencia: texto }],
+    ]) {
+      expect(ejec(validar({ acciones }, entrada(texto, { pendiente: RESUMEN })))).toMatchObject({ paso: { p: 'decir' }, rechazo: 'V21_si_con_reserva' });
+    }
+  });
+
+  it('una corrección con el «sí» («sí, pero el 2 es de Rosaura») sigue siendo la corrección (V16), no se vuelve a preguntar', () => {
+    const texto = 'sí, pero el 2 es de Rosaura';
+    const d = ejec(validar({ acciones: [{ accion: 'confirmar', evidencia: 'sí' }, { accion: 'mover', evidencia: 'el 2 es de Rosaura', n: 2, ref_cliente: 'Rosaura' }] }, entrada(texto, { pendiente: RESUMEN })));
+    expect(d.paso).toMatchObject({ p: 'responder_bandeja', interpretacion: { accion: 'mover' } });
+  });
+
   it('el resumen de un viaje nuevo (la caja de Teodoro Salcedo sin viaje): el mismo «sí», que es el que crea el viaje', () => {
     const tanda = { abierta: true, nombre: 'Teodoro Salcedo', cajaId: null, cliente: 'Teodoro Salcedo' };
     const reserva = 'sí, pero créalo cuando me pase el correo';
