@@ -4422,6 +4422,12 @@ export async function avanzarCrucesConMotivo(
 }
 
 /**
+ * Cuántas veces se repite un guardado que chocó con otro guardado del mismo bloque antes de
+ * escribir sin condición (ver «Escritura condicionada» en `marcarBloqueCompletoSinMemo`).
+ */
+const INTENTOS_GUARDADO_BLOQUE = 3
+
+/**
  * Guardar un bloque completo. Corre dentro de `enPeticionDeRuta`: el guard, los helpers y la
  * propia acción piden `getWorkspace` y, en una server action, el `cache()` de React no
  * memoiza (no hay render). Así la sesión se resuelve UNA vez por guardado.
@@ -4441,14 +4447,18 @@ async function marcarBloqueCompletoSinMemo(
   // COMPLETO, así que la corrección entra por acá y no por el guardado de borrador:
   // sin este tratamiento, el camino más común de corrección era justo el que no
   // dejaba ni marca de autoría ni traza (hueco detectado el 2026-08-02).
-  opts?: { correccion?: { causa?: string; sesion_id?: string } }
+  opts?: { correccion?: { causa?: string; sesion_id?: string } },
+  // Ver `INTENTOS_GUARDADO_BLOQUE`: un guardado que choca con otro se repite desde arriba.
+  intento = 1,
 ): Promise<{ error: string | null; trigger_afi_generation?: boolean; trigger_afi_contrato?: boolean; negocio_id?: string }> {
   const { supabase, workspaceId, userId, staffId, error } = await getWorkspace()
   if (error || !workspaceId) return { error: 'No autenticado' }
 
   // Guard server-side de permisos (rol+área+responsable). La UI es solo UX.
-  const guard = await guardEditarBloque(negocioBloqueId)
-  if (!guard.ok) return { error: guard.error ?? 'Sin permiso' }
+  if (intento === 1) {
+    const guard = await guardEditarBloque(negocioBloqueId)
+    if (!guard.ok) return { error: guard.error ?? 'Sin permiso' }
+  }
 
   // Bloque compartido entre etapas: el DATO vive en la fila del origen, pero la
   // COMPLETITUD es de cada etapa (cada una tiene su propio gate). Por eso se separan:
@@ -4460,12 +4470,13 @@ async function marcarBloqueCompletoSinMemo(
   // Leer datos actuales + negocio_id del servidor y hacer merge (evita sobreescribir campos AI)
   const { data: currentBloque } = await db(supabase)
     .from('negocio_bloques')
-    .select('data, negocio_id')
+    .select('data, negocio_id, updated_at')
     .eq('id', destinoId)
     .single()
 
   const negocioId = (currentBloque as Record<string, unknown> | null)?.negocio_id as string | null
   const currentData = (currentBloque?.data as Record<string, unknown>) ?? {}
+  const versionDato = (currentBloque as { updated_at?: string | null } | null)?.updated_at ?? null
 
   // ── Cómo se cierra este tipo de bloque ────────────────────────────────────
   //
@@ -4476,9 +4487,13 @@ async function marcarBloqueCompletoSinMemo(
   // cuenta como ítem marcado ni como documento subido). Los manuales siguen igual.
   const { data: cfgRaw } = await db(supabase)
     .from('negocio_bloques')
-    .select('bloque_configs!inner(es_gate, config_extra, bloque_definitions!inner(tipo))')
+    .select('estado, updated_at, bloque_configs!inner(es_gate, config_extra, bloque_definitions!inner(tipo))')
     .eq('id', negocioBloqueId)
     .single()
+  // Estado y versión de la fila LOCAL leídos en la misma lectura: la escritura de abajo se
+  // condiciona a esa versión, así que `estadoPrevio` es cierto en el momento de escribir.
+  const estadoPrevio = (cfgRaw as { estado?: string | null } | null)?.estado ?? null
+  const versionLocal = (cfgRaw as { updated_at?: string | null } | null)?.updated_at ?? null
   const cfg = (cfgRaw as { bloque_configs?: { es_gate?: boolean; config_extra?: Record<string, unknown> | null; bloque_definitions?: { tipo?: string } | null } } | null)?.bloque_configs
   const tipoBloque = cfg?.bloque_definitions?.tipo
   const configExtraBloque = cfg?.config_extra ?? {}
@@ -4577,30 +4592,68 @@ async function marcarBloqueCompletoSinMemo(
     }
   }
 
-  if (destinoId !== negocioBloqueId) {
-    const { error: dataError } = await db(supabase)
-      .from('negocio_bloques')
-      .update({ data: mergedData, updated_at: new Date().toISOString() })
-      .eq('id', destinoId)
+  // ── Escritura condicionada a lo leído (dos guardados a la vez) ─────────────
+  //
+  // Todo lo de arriba (la mezcla, la corrección, el diff del historial) se calculó sobre
+  // `currentData`. Si otro guardado del MISMO bloque escribió entre esa lectura y esta
+  // escritura —la misma acción repetida por el navegador, dos pestañas, un doble toque—,
+  // los dos creían ser el primero: dos líneas idénticas de historial y dos veces lo que
+  // cuelga del guardado (medido el 2026-10-06: 663 pares de `bloque_datos` en soena, la
+  // mitad a menos de 2 s). Ahora la escritura exige que la fila siga en la versión leída
+  // (`updated_at`); si no, se repite todo desde la lectura y el segundo ve lo que dejó
+  // el primero. El último intento escribe sin condición: nunca se pierde un guardado.
+  const ultimoIntento = intento >= INTENTOS_GUARDADO_BLOQUE
+  const compartido = destinoId !== negocioBloqueId
+  const versionEscritura = compartido ? versionLocal : (versionDato === versionLocal ? versionLocal : null)
+  // Sin compartir, dato y estado son la misma fila leída dos veces: si la versión cambió
+  // entre las dos lecturas, lo leído no es una foto coherente y se vuelve a empezar.
+  if (!compartido && !ultimoIntento && versionDato !== versionLocal) {
+    return marcarBloqueCompletoSinMemo(negocioBloqueId, data, opts, intento + 1)
+  }
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const siSigueEn = (q: any, version: string | null) =>
+    !ultimoIntento && typeof version === 'string' ? q.eq('updated_at', version) : q
+  const seAdelantoOtro = (filas: unknown, version: string | null) =>
+    !ultimoIntento && typeof version === 'string' && Array.isArray(filas) && filas.length === 0
+
+  if (compartido) {
+    const { data: filasDato, error: dataError } = await siSigueEn(
+      db(supabase)
+        .from('negocio_bloques')
+        .update({ data: mergedData, updated_at: new Date().toISOString() })
+        .eq('id', destinoId),
+      versionDato,
+    ).select('id')
     if (dataError) return { error: (dataError as { message: string }).message }
+    if (seAdelantoOtro(filasDato, versionDato)) return marcarBloqueCompletoSinMemo(negocioBloqueId, data, opts, intento + 1)
   }
 
-  const { error: updateError } = await db(supabase)
-    .from('negocio_bloques')
-    .update({
-      estado: 'completo',
-      // Si el bloque es compartido, el dato ya quedó en el origen; escribirlo también
-      // aquí recrearía la copia divergente que este mecanismo viene a eliminar.
-      ...(destinoId === negocioBloqueId ? { data: mergedData } : {}),
-      completado_at: new Date().toISOString(),
-      // FK → profiles(id) y el display resuelve por profiles. Debe ser el
-      // profile.id (userId), NO staff.id. Antes usaba staffId → violaba la FK.
-      completado_por: userId ?? null,
-      updated_at: new Date().toISOString(),
-    })
-    .eq('id', negocioBloqueId)
+  const { data: filasLocal, error: updateError } = await siSigueEn(
+    db(supabase)
+      .from('negocio_bloques')
+      .update({
+        estado: 'completo',
+        // Si el bloque es compartido, el dato ya quedó en el origen; escribirlo también
+        // aquí recrearía la copia divergente que este mecanismo viene a eliminar.
+        ...(compartido ? {} : { data: mergedData }),
+        completado_at: new Date().toISOString(),
+        // FK → profiles(id) y el display resuelve por profiles. Debe ser el
+        // profile.id (userId), NO staff.id. Antes usaba staffId → violaba la FK.
+        completado_por: userId ?? null,
+        updated_at: new Date().toISOString(),
+      })
+      .eq('id', negocioBloqueId),
+    versionEscritura,
+  ).select('id')
 
   if (updateError) return { error: (updateError as { message: string }).message }
+  if (seAdelantoOtro(filasLocal, versionEscritura)) return marcarBloqueCompletoSinMemo(negocioBloqueId, data, opts, intento + 1)
+
+  // ¿Este guardado cambió algo? Pasó a completo, o cambió al menos un campo respecto de lo
+  // que había. Un re-guardado idéntico de un bloque ya completo no es un hecho nuevo: no
+  // deja historial ni vuelve a disparar lo que cuelga del guardado (los cobros automáticos).
+  const camposCambiados = Object.keys(data).filter(key => JSON.stringify(currentData[key]) !== JSON.stringify(data[key]))
+  const huboCambio = estadoPrevio !== 'completo' || camposCambiados.length > 0
 
   // Igual que en `actualizarBloqueData`: la respuesta y sus campos derivados se escriben
   // juntos. Hace falta en AMBOS caminos — el cliente manda por aquí cuando el bloque queda
@@ -4673,7 +4726,7 @@ async function marcarBloqueCompletoSinMemo(
     const triggers = (configExtra.triggers ?? []) as Array<{ event: string; action: string; params?: Record<string, unknown> }>
 
     const autoCobros = triggers.find(t => t.action === 'auto_cobros')
-    if (tipo === 'datos' && autoCobros) {
+    if (tipo === 'datos' && autoCobros && huboCambio) {
       const valorAnticipo = mergedData.valor_anticipo as number | undefined
       const referenciaEpayco = mergedData.referencia_anticipo as string | undefined
       if (valorAnticipo) {
@@ -4682,7 +4735,7 @@ async function marcarBloqueCompletoSinMemo(
     }
 
     const autoCobrosMulti = triggers.find(t => t.action === 'auto_cobros_multi')
-    if (tipo === 'datos' && autoCobrosMulti) {
+    if (tipo === 'datos' && autoCobrosMulti && huboCambio) {
       const pagos = (mergedData.pagos ?? []) as Array<{ referencia_epayco: string; valor_pago: number }>
       if (pagos.length > 0) {
         await autoCrearCobrosMulti(bloque.negocio_id, pagos)
@@ -4712,16 +4765,11 @@ async function marcarBloqueCompletoSinMemo(
       return { error: null, trigger_afi_contrato: true, negocio_id: bloque.negocio_id }
     }
 
-    // Registrar en activity_log con detalle de campos que cambiaron
-    if (staffId && workspaceId) {
+    // Registrar en activity_log con detalle de campos que cambiaron. Solo si cambió algo:
+    // ver `huboCambio` arriba.
+    if (staffId && workspaceId && huboCambio) {
       const bloqueNombre = bloque.bloque_configs?.nombre ?? bloque.bloque_configs?.bloque_definitions?.nombre ?? 'Bloque'
-      // Diff: detectar qué campos cambiaron respecto a los datos anteriores
-      const changedFields: string[] = []
-      for (const key of Object.keys(data)) {
-        if (JSON.stringify(currentData[key]) !== JSON.stringify(data[key])) {
-          changedFields.push(key)
-        }
-      }
+      const changedFields = camposCambiados
       const detalle = changedFields.length > 0
         ? `Bloque "${bloqueNombre}" completado (${changedFields.join(', ')})`
         : `Bloque "${bloqueNombre}" completado`

@@ -273,3 +273,11 @@
   ACTUALIZA, y el interruptor de apagado (`APAGADO = true` en el archivo) llega por la actualización.
   Segunda llave: `SW_PILOTO_ACTIVO` en `src/lib/red/piloto.ts`.
 
+- **Leer-calcular-escribir sin condición no aguanta dos peticiones iguales.** (2026-10-06,
+  fix/idempotencia-guardado-bloque). `marcarBloqueCompleto` leía el bloque, calculaba el diff y escribía:
+  dos guardados del mismo bloque a la vez (POST repetido por Chromium, doble toque, dos pestañas) leían lo
+  mismo y los dos se creían el primero. Resultado medido: 663 pares de historial `bloque_datos` en soena;
+  en prueba, también dos veces los cobros de `auto_cobros_multi`. Ahora la escritura va con
+  `.eq('updated_at', <versión leída>)` y, si no toca filas, se repite desde la lectura (3 intentos; el
+  último sin condición). Y un re-guardado idéntico de un bloque ya completo no deja historial ni dispara
+  los cobros. Patrón reusable para cualquier «leer, mezclar, escribir» sobre una fila con `updated_at`.
