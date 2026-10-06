@@ -233,6 +233,13 @@ let llegadas: { accion: Accion; bytes: number }[] = []
  * no las contó). `Infinity` = la red no vuelve.
  */
 let cortes: Partial<Record<Accion, number>> = {}
+/**
+ * Cortes de UN pantallazo: `leer-captura|captura-2.jpeg` → cuántas de sus peticiones se cortan.
+ * Con dos pantallazos a la vez, así cada uno pierde la suya, lea Gemini rápido o lento.
+ */
+let cortesDe: Record<string, number> = {}
+/** De qué pantallazo es cada data URL que viaja (se anota al pegar). */
+const archivoDeDataUrl = new Map<string, string>()
 /** Peticiones que SÍ llegan y se ejecutan, pero cuya respuesta se pierde en el camino. */
 let respuestasPerdidas: Partial<Record<Accion, number>> = {}
 /** Las líneas que la bandeja manda al log de Vercel (`reportarFalloDeBandeja`). */
@@ -245,12 +252,15 @@ const fetchLocal: typeof fetch = async (entrada, init) => {
   const m = /^\/api\/cotizaciones\/([^/]+)\/([a-z-]+)$/.exec(url)
   if (!m || !(m[2] in RUTAS)) throw new Error(`ruta inesperada ${url}`)
   const accion = m[2] as Accion
-  if ((cortes[accion] ?? 0) > 0) {
-    cortes[accion] = (cortes[accion] ?? 0) - 1
+  const cuerpo = String(init?.body ?? '')
+  const { dataUrl, imagen } = JSON.parse(cuerpo) as { dataUrl?: string; imagen?: string }
+  const clave = `${accion}|${archivoDeDataUrl.get(dataUrl ?? imagen ?? '') ?? '?'}`
+  if ((cortes[accion] ?? 0) > 0 || (cortesDe[clave] ?? 0) > 0) {
+    if ((cortesDe[clave] ?? 0) > 0) cortesDe[clave]--
+    else cortes[accion] = (cortes[accion] ?? 0) - 1
     // Lo que lanza Chromium cuando la conexión se cae antes de que la petición llegue.
     throw new TypeError('Failed to fetch')
   }
-  const cuerpo = String(init?.body ?? '')
   llegadas.push({ accion, bytes: cuerpo.length })
   const req = new Request(`https://trappvel.metrikone.co${url}`, { method: 'POST', body: cuerpo, headers: { 'content-type': 'application/json' } })
   const res = await RUTAS[accion](req, { params: Promise.resolve({ id: decodeURIComponent(m[1]) }) })
@@ -289,6 +299,7 @@ function deps(c: Captura) {
 /** Pega un pantallazo y deja que la bandeja lo mire y lo lea (`agregar` + `procesar`). */
 async function pegar(archivo: string): Promise<Captura> {
   const dataUrl = dataUrlDe(archivo)
+  archivoDeDataUrl.set(dataUrl, archivo)
   if (MODO_GEMINI) archivoPorHuella.set(Buffer.from(dataUrl.split(',')[1], 'base64').subarray(0, 4096).toString('base64'), archivo)
   const c: Captura = {
     id: `cap-${++contador}-${archivo.replace(/\W/g, '')}`, preview: dataUrl, dataUrl, estado: { fase: 'mirando' }, tipo: null, pistas: null,
@@ -332,7 +343,11 @@ async function aceptar(c: Captura) {
   return d
 }
 
-/** Lo que Componentes muestra: bloques, opciones y la ocupación de cada habitación. */
+/**
+ * Lo que Componentes muestra: bloques, opciones (por su proveedor) y la ocupación de cada
+ * habitación. El proveedor y no el nombre entero: contra Gemini real la ciudad se lee a veces
+ * «Providencia Island» y a veces «Providencia Island / Providencia Island».
+ */
 function componentes() {
   const porBloque: Record<string, { nombre: string; habitaciones: string[] }[]> = {}
   for (const i of lineas()) {
@@ -341,18 +356,19 @@ function componentes() {
       const o = h.lectura.paraComposicion
       return o ? `${o.adultos}A+${o.ninos}N+${o.infantes}I` : '?'
     })
-    ;(porBloque[bloque] ??= []).push({ nombre: String(i.nombre), habitaciones: habs })
+    const nombre = /AVIANCA|SATENA|CABAÑAS AGUA DULCE|POSADA ENILDA/.exec(String(i.nombre))?.[0] ?? String(i.nombre)
+    ;(porBloque[bloque] ??= []).push({ nombre, habitaciones: habs })
   }
   return porBloque
 }
 
 /** El mismo viaje armado: dos vuelos y dos hoteles de tres habitaciones (6A + 1N + 1I cada uno). */
 const ESPERADO = {
-  'Vuelo Bogotá–San Andrés Isla': [{ nombre: 'AVIANCA BOGOTÁ–SAN ANDRÉS ISLA', habitaciones: ['6A+1N+1I'] }],
-  'Vuelo 2 · Vuelo San Andrés Isla–Providencia': [{ nombre: 'SATENA SAN ANDRÉS ISLA ADZ–PROVIDENCIA PVA', habitaciones: ['6A+1N+1I'] }],
+  'Vuelo Bogotá–San Andrés Isla': [{ nombre: 'AVIANCA', habitaciones: ['6A+1N+1I'] }],
+  'Vuelo 2 · Vuelo San Andrés Isla–Providencia': [{ nombre: 'SATENA', habitaciones: ['6A+1N+1I'] }],
   'Hotel en Providencia Island': [
-    { nombre: 'CABAÑAS AGUA DULCE · PROVIDENCIA ISLAND / PROVIDENCIA ISLAND', habitaciones: ['2A+1N+0I', '2A+0N+1I', '2A+0N+0I'] },
-    { nombre: 'POSADA ENILDA · PROVIDENCIA ISLAND', habitaciones: ['2A+0N+1I', '2A+1N+0I', '2A+0N+0I'] },
+    { nombre: 'CABAÑAS AGUA DULCE', habitaciones: ['2A+1N+0I', '2A+0N+1I', '2A+0N+0I'] },
+    { nombre: 'POSADA ENILDA', habitaciones: ['2A+0N+1I', '2A+1N+0I', '2A+0N+0I'] },
   ],
 }
 
@@ -373,6 +389,7 @@ beforeEach(() => {
   capturas = []
   llegadas = []
   cortes = {}
+  cortesDe = {}
   respuestasPerdidas = {}
   reportes = []
   esperas = 0
@@ -424,7 +441,7 @@ describe.runIf(!MODO_GEMINI || existsSync(DIR_CAPTURAS))('caso Alejandra (N1 26 
     cortes = { 'aceptar-captura': 2 }
     expect((await aceptar(cabanas)).tipo).toBe('aceptada')
     // Los dos que pegó a la vez (16:46:09): la detección llegó, la lectura de los dos se cortó.
-    cortes = { 'leer-captura': 2 }
+    cortesDe = { 'leer-captura|captura-2.jpeg': 1, 'leer-captura|captura-3.jpeg': 1 }
     const [a, b] = await Promise.all([pegar('captura-2.jpeg'), pegar('captura-3.jpeg')])
     expect([a.estado.fase, b.estado.fase]).toEqual(['lista', 'lista'])
     for (const c of [a, b]) expect((await aceptar(c)).tipo).toBe('aceptada')
@@ -443,7 +460,10 @@ describe.runIf(!MODO_GEMINI || existsSync(DIR_CAPTURAS))('caso Alejandra (N1 26 
   })
 
   it('criterio 3 · dos pegados en el mismo segundo, con la red cortando a los dos, entran los dos', async () => {
-    cortes = { 'detectar-captura': 2, 'leer-captura': 2 }
+    cortesDe = {
+      'detectar-captura|captura-5.jpeg': 1, 'detectar-captura|captura-6.jpeg': 1,
+      'leer-captura|captura-5.jpeg': 1, 'leer-captura|captura-6.jpeg': 1,
+    }
     const [enilda1, enilda2] = await Promise.all([pegar('captura-5.jpeg'), pegar('captura-6.jpeg')])
     expect([enilda1.estado.fase, enilda2.estado.fase]).toEqual(['lista', 'lista'])
     // Aceptados los dos a la vez (la fila los manda en cola, como `colaAceptar`).
@@ -451,8 +471,11 @@ describe.runIf(!MODO_GEMINI || existsSync(DIR_CAPTURAS))('caso Alejandra (N1 26 
     const d1 = await aceptar(enilda1)
     const d2 = await aceptar(enilda2)
     expect([d1.tipo, d2.tipo]).toEqual(['aceptada', 'aceptada'])
+    // Cinco cortes, cinco recuperaciones registradas; ninguna fila vio un error.
+    expect(reportes.filter(r => r.recuperado)).toHaveLength(5)
+    expect([enilda1.error, enilda2.error]).toEqual([null, null])
     expect(componentes()['Hotel en Providencia Island']).toEqual([
-      { nombre: 'POSADA ENILDA · PROVIDENCIA ISLAND', habitaciones: ['2A+0N+1I', '2A+1N+0I'] },
+      { nombre: 'POSADA ENILDA', habitaciones: ['2A+0N+1I', '2A+1N+0I'] },
     ])
   })
 
@@ -481,7 +504,7 @@ describe.runIf(!MODO_GEMINI || existsSync(DIR_CAPTURAS))('caso Alejandra (N1 26 
     // Sin detección no hubo lugar leído: el bloque toma el destino del viaje, como siempre.
     expect(componentes()).toEqual({
       'Hotel en San Andrés - Providencia': [
-        { nombre: 'CABAÑAS AGUA DULCE · PROVIDENCIA ISLAND / PROVIDENCIA ISLAND', habitaciones: ['2A+1N+0I'] },
+        { nombre: 'CABAÑAS AGUA DULCE', habitaciones: ['2A+1N+0I'] },
       ],
     })
     sinTextosViejos()
@@ -519,11 +542,12 @@ describe.runIf(!MODO_GEMINI || existsSync(DIR_CAPTURAS))('caso Alejandra (N1 26 
       addEventListener: () => {},
       removeEventListener: () => {},
     })
-    // El reporte es pequeño y sí sale: va a la ruta real de errores del cliente.
-    vi.stubGlobal('fetch', async (url: string, init: RequestInit) => erroresPOST(new Request(`https://trappvel.metrikone.co${url}`, { method: 'POST', body: init.body as string })))
     const { reportarFalloDeBandeja } = await import('@/lib/errores-cliente/enviar')
-    // La bandeja real (sin `reportar` de prueba): el aceptar de Cabañas no llega.
     const c = await pegar('captura-4.jpeg')
+    // El reporte es pequeño y sí sale: va a la ruta real de errores del cliente. (Después de
+    // pegar: contra Gemini real la lectura usa el `fetch` global.)
+    vi.stubGlobal('fetch', async (url: string, init: RequestInit) => erroresPOST(new Request(`https://trappvel.metrikone.co${url}`, { method: 'POST', body: init.body as string })))
+    // La bandeja real (sin `reportar` de prueba): el aceptar de Cabañas no llega.
     cortes = { 'aceptar-captura': Infinity }
     const b = c.borrador!
     await red.aceptarPorRuta(COT, {
@@ -553,7 +577,7 @@ describe.runIf(!MODO_GEMINI || existsSync(DIR_CAPTURAS))('caso Alejandra (N1 26 
     expect(d).toMatchObject({ tipo: 'aceptada', como: 'habitacion', habitacionNumero: 2 })
     expect(llegadas.filter(l => l.accion === 'aceptar-captura')).toHaveLength(5)
     expect(componentes()['Hotel en Providencia Island']).toEqual([
-      { nombre: 'CABAÑAS AGUA DULCE · PROVIDENCIA ISLAND / PROVIDENCIA ISLAND', habitaciones: ['2A+1N+0I', '2A+0N+1I'] },
+      { nombre: 'CABAÑAS AGUA DULCE', habitaciones: ['2A+1N+0I', '2A+0N+1I'] },
     ])
   })
 
