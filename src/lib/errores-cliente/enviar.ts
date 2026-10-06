@@ -137,7 +137,9 @@ function enviar(cuerpoBase: Record<string, unknown>, clave: string): void {
     // inlina `deploymentId` (= VERCEL_DEPLOYMENT_ID) como NEXT_DEPLOYMENT_ID en el
     // bundle del navegador. Es la version del bundle que fallo, no la del servidor.
     version: String(process.env.NEXT_DEPLOYMENT_ID || 'dev'),
-    userAgent: navigator.userAgent,
+    // Sin `navigator` (Node 20, el de CI) leer `.userAgent` lanzaba, el `catch` del llamador
+    // se lo tragaba y el reporte no salía: un dato accesorio no puede tumbar la línea.
+    userAgent: typeof navigator === 'undefined' ? undefined : navigator.userAgent,
   }
   const almacen = localStorageSeguro()
   encolar(almacen, { id, creado: Date.now(), reenvios: 0, cuerpo }, Date.now())
@@ -205,5 +207,45 @@ export function reportarRecuperacion(p: {
     )
   } catch {
     // Idem.
+  }
+}
+
+/** Lo que la bandeja de pantallazos cuenta de un envío que no llegó (ver `reporte.ts`). */
+export interface FalloDeBandeja {
+  ruta: 'detectar-captura' | 'leer-captura' | 'aceptar-captura' | 'lectura-manual'
+  /** `RED` = el fetch lanzó; `RESPUESTA` = volvió algo que no es JSON; `PESADA` = 413. */
+  codigo: string
+  cotizacionId: string
+  bytesImagen?: number
+  intentos: number
+  status?: number
+  ms?: number
+  /** `true` = falló y salió en un reintento: nadie lo vio, pero es señal de red. */
+  recuperado?: boolean
+}
+
+let fallosDeBandeja = 0
+
+/**
+ * Deja la línea `[error-cliente]` con `origen: 'bandeja'` en el log de Vercel (caso Alejandra,
+ * 2026-10-05: sus pantallazos no llegaron y no quedó rastro). Va por la misma cola que los
+ * errores de pantalla: si la red tampoco deja salir este reporte (es pequeño, casi siempre
+ * pasa), se reenvía en la siguiente carga o al volver `online`. NUNCA lanza.
+ */
+export function reportarFalloDeBandeja(f: FalloDeBandeja): void {
+  try {
+    if (typeof window === 'undefined') return
+    enviar(
+      {
+        message: `Bandeja: ${f.ruta} ${f.codigo}${f.recuperado ? ' (recuperado)' : ''}`,
+        name: 'FalloDeBandeja',
+        origen: 'bandeja',
+        bandeja: f,
+      },
+      // Cada fallo es una línea: dos pantallazos que fallan juntos son dos.
+      ['bandeja', ++fallosDeBandeja, f.ruta, f.codigo].join('|'),
+    )
+  } catch {
+    // El reporte es lo de menos: la bandeja sigue.
   }
 }

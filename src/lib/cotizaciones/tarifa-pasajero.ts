@@ -325,6 +325,12 @@ export interface LecturaCasilla {
    */
   imagenRef?: string | null
   /**
+   * La llave del «Aceptar» de la bandeja que trajo esta lectura (`aceptacion-idempotente.ts`):
+   * un reintento del mismo «Aceptar» la encuentra y no escribe otra vez. Ausente en las lecturas
+   * aceptadas antes del 2026-10-05 y en las que se pegaron en su casilla.
+   */
+  aceptacion?: string
+  /**
    * `manual` = la escribió una persona en el formulario de ingreso manual
    * (`ingreso-manual.ts`): no hay imagen detrás. Ausente = salió de un pantallazo.
    */

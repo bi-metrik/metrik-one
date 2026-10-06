@@ -19,6 +19,7 @@
  */
 
 import type { OpcionLeida } from './bandeja-capturas'
+import { esErrorDeEnvio, MENSAJE_PANTALLAZO_PESADO } from './bandeja-red'
 import type { TipoRanura } from './ranuras-cotizacion'
 import type { LecturaCasilla } from './tarifa-pasajero'
 
@@ -33,7 +34,12 @@ export type EstadoDeProceso =
   | { fase: 'lista'; alertas: string[] }
   | { fase: 'eligiendo_tipo'; motivo: string }
   | { fase: 'eligiendo_opcion'; mensaje: string; opciones: OpcionDeLectura[] }
-  | { fase: 'rechazada'; mensaje: string; detalle?: string }
+  /**
+   * `reintentar`: no fue la captura sino la conexión (caso Alejandra, 2026-10-05). La fila
+   * ofrece «Reintentar» con la misma imagen: volver a buscar el pantallazo y pegarlo es lo
+   * que no hay que pedirle a nadie.
+   */
+  | { fase: 'rechazada'; mensaje: string; detalle?: string; reintentar?: boolean }
   /**
    * P10 · otra imagen con el mismo servicio y el mismo precio que una opción que ya estaba.
    * `habitacion`: R8, regla 6 — una habitación más de un hotel cuyo grupo ya está cubierto;
@@ -80,7 +86,7 @@ export type Deteccion =
 
 export type LecturaDeBorrador =
   | { ok: true; lectura: LecturaCasilla; lecturaJson: string; firma: string; alertas: string[] }
-  | { ok: false; mensaje: string; detalle?: string; opciones?: OpcionDeLectura[] }
+  | { ok: false; mensaje: string; detalle?: string; opciones?: OpcionDeLectura[]; reintentar?: boolean }
 
 /** Cómo entra una captura a Componentes: habitación de una opción, otra opción o ranura nueva. */
 export type ComoQueda = 'habitacion' | 'hermana' | 'nueva'
@@ -106,7 +112,31 @@ export interface DependenciasDeProceso {
   informar: (cambio: CambioDeCaptura) => void
 }
 
-const LECTURA_CAIDA = 'No se pudo leer el pantallazo. Vuelve a pegarlo.'
+/**
+ * Por qué no se leyó cuando el pantallazo no alcanzó a ONE (caso Alejandra, N1 26 1): la red
+ * se cortó y la bandeja ya lo intentó 3 veces (`bandeja-red.ts`). Dice qué pasó y qué hacer;
+ * antes decía «No se pudo leer el pantallazo. Vuelve a pegarlo.», que sonaba a que la captura
+ * estaba mal.
+ */
+export const MENSAJE_LECTURA_SIN_RED =
+  'No llegó a ONE: la conexión se cortó al mandar el pantallazo (lo intentamos 3 veces). Revisa tu internet y toca «Reintentar».'
+export const MENSAJE_LECTURA_SIN_RESPUESTA =
+  'ONE no respondió al leer el pantallazo (lo intentamos 3 veces). Toca «Reintentar» en un momento.'
+/** Un error que no es de la red ni del servidor (no debería pasar): igual se puede reintentar. */
+export const MENSAJE_LECTURA_FALLIDA =
+  'Algo falló en esta pantalla al leer el pantallazo. Toca «Reintentar»; si se repite, avísale a MeTRIK.'
+/** La detección no alcanzó a ONE: elegir el tipo vuelve a mandar la imagen. */
+export const MENSAJE_DETECCION_SIN_RED =
+  'La conexión se cortó antes de que ONE viera el pantallazo. Dinos qué es y lo mandamos otra vez.'
+
+/** Lo que dice la fila cuando la lectura no volvió del servidor. */
+function lecturaCaida(e: unknown): LecturaDeBorrador & { ok: false } {
+  if (esErrorDeEnvio(e)) {
+    if (e.codigo === 'PESADA') return { ok: false, mensaje: MENSAJE_PANTALLAZO_PESADO }
+    return { ok: false, mensaje: e.codigo === 'RESPUESTA' ? MENSAJE_LECTURA_SIN_RESPUESTA : MENSAJE_LECTURA_SIN_RED, reintentar: true }
+  }
+  return { ok: false, mensaje: MENSAJE_LECTURA_FALLIDA, reintentar: true }
+}
 /**
  * Cuando ONE no alcanza a decir qué es (la llamada se cortó o el modelo no terminó). No suena a
  * falla porque no lo es para quien cotiza: dice qué es con un clic y la lectura sigue (brief del
@@ -134,9 +164,9 @@ export async function leerCaptura(
   let lectura: LecturaDeBorrador
   try {
     lectura = await deps.leer(tipo, enfoque)
-  } catch {
+  } catch (e) {
     // La acción se cayó (tiempo agotado, red): antes la fila quedaba en «Leyendo…» para siempre.
-    lectura = { ok: false, mensaje: LECTURA_CAIDA }
+    lectura = lecturaCaida(e)
   }
   if (!deps.vigente()) return
   if (!lectura.ok) {
@@ -144,7 +174,11 @@ export async function leerCaptura(
       deps.informar({ estado: { fase: 'eligiendo_opcion', mensaje: lectura.mensaje, opciones: lectura.opciones ?? [] }, abierta: true })
       return
     }
-    deps.informar({ estado: { fase: 'rechazada', mensaje: lectura.mensaje, detalle: lectura.detalle }, leida: null, borrador: null })
+    deps.informar({
+      estado: { fase: 'rechazada', mensaje: lectura.mensaje, detalle: lectura.detalle, ...(lectura.reintentar ? { reintentar: true } : {}) },
+      leida: null,
+      borrador: null,
+    })
     return
   }
   const borrador: Borrador = { tipo, lectura: lectura.lectura, lecturaJson: lectura.lecturaJson, firma: lectura.firma, pistas }
@@ -171,8 +205,12 @@ export async function procesarCaptura(deps: DependenciasDeProceso, tipoElegido?:
     let r: Deteccion
     try {
       r = await deps.detectar()
-    } catch {
-      r = { ok: false, codigo: 'LECTURA', mensaje: DETECCION_CAIDA }
+    } catch (e) {
+      // Sin respuesta: se pide el tipo y elegirlo vuelve a mandar la imagen. Un pantallazo que
+      // pesa demasiado no se arregla eligiendo: se dice por qué.
+      r = esErrorDeEnvio(e) && e.codigo === 'PESADA'
+        ? { ok: false, codigo: 'PESADA', mensaje: MENSAJE_PANTALLAZO_PESADO }
+        : { ok: false, codigo: 'LECTURA', mensaje: esErrorDeEnvio(e) ? MENSAJE_DETECCION_SIN_RED : DETECCION_CAIDA }
     }
     if (!deps.vigente()) return
     if (!r.ok) {

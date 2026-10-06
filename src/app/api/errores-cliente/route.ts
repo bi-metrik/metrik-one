@@ -24,7 +24,7 @@ export async function POST(request: Request) {
   // Un `recuperado: true` no es un error: cierra el episodio de uno de red que se curo solo.
   // Misma etiqueta (se buscan juntos), nivel warning para no inflar la cuenta de errores.
   const linea = JSON.stringify({ ...r.reporte, versionServidor: versionDelBuild() })
-  if (r.reporte.recuperado) console.warn('[error-cliente]', linea)
+  if (r.reporte.recuperado || r.reporte.bandeja?.recuperado) console.warn('[error-cliente]', linea)
   else console.error('[error-cliente]', linea)
   return new NextResponse(null, { status: 204 })
 }

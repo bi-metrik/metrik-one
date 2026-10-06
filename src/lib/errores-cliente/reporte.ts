@@ -43,8 +43,29 @@ const esquemaReporte = z.object({
   host: recortar(200).optional(),
   version: recortar(100).optional(),
   userAgent: recortar(400).optional(),
-  /** Cual de las dos pantallas lo mando. */
-  origen: z.enum(['app', 'global']).optional(),
+  /**
+   * Cual de las dos pantallas lo mando, o `bandeja`: un envio de la bandeja de pantallazos de
+   * Trappvel que no llego a ONE (ver `bandeja` abajo).
+   */
+  origen: z.enum(['app', 'global', 'bandeja']).optional(),
+  /**
+   * Desde 2026-10-05 (caso Alejandra, N1 26 1): un pantallazo que no llego al servidor no deja
+   * rastro en Vercel, porque la peticion nunca entro. La bandeja lo cuenta despues por aqui:
+   * que ruta, que paso (`RED` = el fetch lanzo; `RESPUESTA` = volvio algo que no es JSON),
+   * de que cotizacion y cuanto pesaba la imagen. `recuperado` = salio en un reintento.
+   */
+  bandeja: z
+    .object({
+      ruta: z.enum(['detectar-captura', 'leer-captura', 'aceptar-captura', 'lectura-manual']),
+      codigo: recortar(40),
+      cotizacionId: z.string().regex(/^[A-Za-z0-9-]{1,64}$/),
+      bytesImagen: z.number().int().min(0).max(100_000_000).optional(),
+      intentos: z.number().int().min(1).max(20),
+      status: z.number().int().min(0).max(999).optional(),
+      ms: z.number().int().min(0).max(3_600_000).optional(),
+      recuperado: z.boolean().optional(),
+    })
+    .optional(),
   /**
    * Si la pantalla se recargo sola (error de red o de chunk, guarda anti-bucle libre).
    * `false` = la persona SI vio "Algo se rompió". Es lo que hay que contar.

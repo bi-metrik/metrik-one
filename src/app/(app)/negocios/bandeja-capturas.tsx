@@ -14,6 +14,7 @@ import {
 } from '@/app/(app)/negocios/tarifa-pax-actions'
 import {
   leerCaptura,
+  MENSAJE_DETECCION_SIN_RED,
   procesarCaptura,
   type Borrador,
   type ComoQueda,
@@ -21,7 +22,7 @@ import {
   type EstadoDeProceso,
   type Pistas,
 } from '@/lib/cotizaciones/proceso-captura'
-import { aceptarPorRuta, detectarPorRuta, lecturaManualPorRuta, leerPorRuta } from '@/lib/cotizaciones/bandeja-red'
+import { aceptarPorRuta, detectarPorRuta, lecturaManualPorRuta, leerPorRuta, MENSAJE_ACEPTAR_SIN_RED } from '@/lib/cotizaciones/bandeja-red'
 import { esAvisoFechasFueraDelViaje, esManual } from '@/lib/cotizaciones/ingreso-manual'
 import { fueraDeVista, MENSAJE_PEGADO_EN_BANDEJA } from '@/lib/cotizaciones/lectura-sin-silencio'
 import IngresoManualForm, { type RespuestaManual, type TipoManual } from './ingreso-manual-form'
@@ -147,6 +148,13 @@ export interface Captura {
   aceptada?: Aceptacion | null
 }
 
+/**
+ * La llave de «Aceptar» de una captura (caso Alejandra, 2026-10-05): la misma en cada reintento
+ * y en cada toque, para que el servidor reconozca una aceptación que ya escribió y no la repita
+ * (`aceptacion-idempotente.ts`). Es el id de la captura, único en la pestaña y entre pestañas.
+ */
+export const idDeAceptacion = (c: Pick<Captura, 'id'>) => c.id
+
 export interface ItemDeBandeja {
   id: string
   nombre?: string | null
@@ -230,6 +238,14 @@ export function enProceso(e: Estado): boolean {
   return e.fase === 'mirando' || e.fase === 'leyendo'
 }
 
+/**
+ * Un `ok:false` que llegó sin mensaje (no debería: las rutas lo completan) igual dice qué pasó
+ * y qué hacer, con el código para buscarlo en el registro.
+ */
+export function mensajeSinTexto(codigo: string | null | undefined): string {
+  return `ONE no pudo agregar la captura (código ${codigo || 'sin código'}). La captura sigue aquí: toca «Aceptar» otra vez; si se repite, avísale a MeTRIK con ese código.`
+}
+
 /** Lo que dice el servidor al aceptar, en el idioma de la fila. */
 export function desenlaceDeAceptacion(r: ResultadoAceptarCaptura | null):
   | {
@@ -246,7 +262,9 @@ export function desenlaceDeAceptacion(r: ResultadoAceptarCaptura | null):
     }
   | { tipo: 'sobra'; conItemId: string; mensaje: string }
   | { tipo: 'error'; mensaje: string } {
-  if (!r) return { tipo: 'error', mensaje: 'No se pudo agregar la captura. Inténtalo otra vez.' }
+  // Sin respuesta (la conexión se cortó): `aceptarPorRuta` ya no devuelve `null`, pero la fila
+  // no puede quedarse sin decir qué pasó si algún día vuelve a pasar.
+  if (!r) return { tipo: 'error', mensaje: MENSAJE_ACEPTAR_SIN_RED }
   if (r.ok) {
     return {
       tipo: 'aceptada',
@@ -262,7 +280,7 @@ export function desenlaceDeAceptacion(r: ResultadoAceptarCaptura | null):
     }
   }
   if (r.codigo === 'SOBRA' && 'conItemId' in r) return { tipo: 'sobra', conItemId: r.conItemId, mensaje: r.mensaje }
-  return { tipo: 'error', mensaje: r.mensaje || 'No se pudo agregar la captura. Inténtalo otra vez.' }
+  return { tipo: 'error', mensaje: r.mensaje || mensajeSinTexto(r.codigo) }
 }
 
 /**
@@ -291,7 +309,9 @@ export function textoDelPie(otros: number): string | null {
 
 let contador = 0
 const SIN_UBICACIONES: Record<string, Ubicacion> = {}
-const nuevoId = () => `cap-${Date.now()}-${++contador}`
+// Con azar: el id es también la llave de «Aceptar» (`idDeAceptacion`) y no puede repetirse
+// entre dos pestañas que pegan en el mismo milisegundo.
+const nuevoId = () => `cap-${Date.now().toString(36)}-${++contador}-${Math.random().toString(36).slice(2, 10)}`
 
 export default function BandejaCapturas({
   cotizacionId,
@@ -665,6 +685,20 @@ export default function BandejaCapturas({
     actualizar(c.id, { estado: c.estado.antes })
   }
 
+  /**
+   * «Reintentar» de una fila que no llegó a ONE (caso Alejandra): la misma imagen, sin volver a
+   * pegarla. Con el tipo ya sabido solo se vuelve a leer; sin él, el recorrido completo.
+   */
+  function reintentar(c: Captura) {
+    nuevoTurno(c.id)
+    actualizar(c.id, { estado: { fase: c.tipo ? 'leyendo' : 'mirando' }, error: null })
+    if (c.tipo) {
+      void leerCaptura(dependencias(c.id, c.dataUrl), c.tipo, c.pistas ?? { lugar: null, origen: null, destino: null }, null)
+      return
+    }
+    void procesar(c.id, c.dataUrl)
+  }
+
   /** «¿Cuál de estas?»: la segunda lectura, con el tipo y el lugar que ya se sabían. */
   function elegirOpcion(c: Captura, o: { nombre: string; precio: string | null }) {
     if (!c.tipo) return
@@ -690,6 +724,7 @@ export default function BandejaCapturas({
       tipo: b.tipo, lecturaJson: b.lecturaJson, firma: b.firma, pistas: b.pistas, decision,
       destinoId: destinoId ?? null, imagen: c.dataUrl || null,
       correcciones: correcciones.length > 0 ? correcciones : null,
+      idAceptacion: idDeAceptacion(c),
     }
     const turno = colaAceptar.current.then(() => aceptarPorRuta(cotizacionId, cuerpo))
     colaAceptar.current = turno.catch(() => undefined)
@@ -829,6 +864,7 @@ export default function BandejaCapturas({
                 onDescartar={() => borrar(c, 'descartada')}
                 onDeshacer={() => void deshacer(c)}
                 onElegirTipo={t => void procesar(c.id, c.dataUrl, t)}
+                onReintentar={() => reintentar(c)}
                 onElegirOpcion={o => elegirOpcion(c, o)}
                 onAgregarIgual={() => agregarIgual(c)}
                 onReemplazarPrecio={() => reemplazarPrecio(c)}
@@ -856,6 +892,7 @@ export function FilaCaptura({
   onDescartar = NADA,
   onDeshacer = NADA,
   onElegirTipo = NADA,
+  onReintentar = NADA,
   onElegirOpcion = NADA,
   onAgregarIgual = NADA,
   onReemplazarPrecio = NADA,
@@ -872,6 +909,8 @@ export function FilaCaptura({
   onDescartar?: () => void
   onDeshacer?: () => void
   onElegirTipo?: (t: TipoRanura) => void
+  /** «Reintentar» de una fila que no llegó a ONE: la misma imagen, sin volver a pegarla. */
+  onReintentar?: () => void
   onElegirOpcion?: (o: { nombre: string; precio: string | null }) => void
   /** P10 · «Agregar igual» / «Agregar como otra opción» / «Es una habitación más». */
   onAgregarIgual?: () => void
@@ -969,7 +1008,7 @@ export function FilaCaptura({
       miniatura,
       <>
         {tituloFila}
-        {estado('No se reconoce qué es')}
+        {estado(e.motivo === MENSAJE_DETECCION_SIN_RED ? 'Se cortó la conexión' : 'No se reconoce qué es')}
         <span className="text-[13px] text-[#6E6A62]">{e.motivo}</span>
         <div className="mt-1 flex flex-wrap gap-2">
           {TIPOS_RANURA.map(t => (
@@ -1008,6 +1047,11 @@ export function FilaCaptura({
         {tituloFila}
         {estado(e.mensaje, 'text-[#B3382C]')}
         {e.detalle && <span className="text-xs text-[#6E6A62]">{e.detalle}</span>}
+        {e.reintentar && (
+          <div className="mt-1 flex flex-wrap gap-2">
+            <button type="button" onClick={onReintentar} className={BTN_PRIM} data-reintentar-captura>Reintentar</button>
+          </div>
+        )}
       </>,
       quitar,
     )
