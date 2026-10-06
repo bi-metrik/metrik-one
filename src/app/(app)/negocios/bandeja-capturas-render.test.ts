@@ -324,3 +324,34 @@ describe('el ⚠ de la tarjeta: qué opción tiene un pantallazo esperando (R8, 
     expect(pendientesPorOpcion([{ id: 'c1', estado: { fase: 'lista' as const, alertas: [] } }])).toEqual({})
   })
 })
+
+describe('caso Alejandra (2026-10-05): lo que no llegó a ONE dice qué pasó y se retoma sin volver a pegarlo', () => {
+  it('una lectura que no llegó ofrece «Reintentar» y no pide volver a pegarla', async () => {
+    const { MENSAJE_LECTURA_SIN_RED } = await import('@/lib/cotizaciones/proceso-captura')
+    const html = pintar(captura({ estado: { fase: 'rechazada', mensaje: MENSAJE_LECTURA_SIN_RED, reintentar: true }, borrador: null, tipo: 'hotel' }))
+    expect(html).toContain('No llegó a ONE: la conexión se cortó al mandar el pantallazo')
+    expect(html).toMatch(/data-reintentar-captura[^>]*>Reintentar</)
+    expect(html).not.toContain('Vuelve a pegarlo')
+  })
+
+  it('un rechazo de la captura (no de la red) no ofrece «Reintentar»: reintentar no lo cambiaría', () => {
+    const html = pintar(captura({ estado: { fase: 'rechazada', mensaje: 'Esta captura no trae precio.' }, borrador: null }))
+    expect(html).not.toContain('data-reintentar-captura')
+  })
+
+  it('la detección que no llegó dice «Se cortó la conexión», no «No se reconoce qué es»', async () => {
+    const { MENSAJE_DETECCION_SIN_RED } = await import('@/lib/cotizaciones/proceso-captura')
+    const html = pintar(captura({ estado: { fase: 'eligiendo_tipo', motivo: MENSAJE_DETECCION_SIN_RED }, borrador: null, tipo: null }))
+    expect(html).toContain('Se cortó la conexión')
+    expect(html).not.toContain('No se reconoce qué es')
+    expect(html).toContain('Es hotel')
+  })
+
+  it('«Aceptar» sin respuesta, o con un ok:false sin texto, igual dice qué pasó y qué hacer', () => {
+    expect(desenlaceDeAceptacion(null)).toEqual({ tipo: 'error', mensaje: expect.stringMatching(/^No llegó a ONE: la conexión se cortó al aceptar/) })
+    expect(desenlaceDeAceptacion({ ok: false, codigo: 'CREAR', mensaje: '' })).toEqual({ tipo: 'error', mensaje: expect.stringContaining('código CREAR') })
+    for (const r of [desenlaceDeAceptacion(null), desenlaceDeAceptacion({ ok: false, codigo: 'X', mensaje: '' })]) {
+      expect(r).not.toEqual({ tipo: 'error', mensaje: 'No se pudo agregar la captura. Inténtalo otra vez.' })
+    }
+  })
+})

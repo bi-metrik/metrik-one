@@ -73,4 +73,14 @@ describe('leerReporte', () => {
     if (r.ok) expect(r.reporte.red).toBeUndefined()
     expect(leerReporte(JSON.stringify({ ...base, id: 'a@b.co' }))).toEqual({ ok: false, status: 400 })
   })
+
+  it('el envío de la bandeja que no llegó (caso Alejandra): ruta, código, cotización, tamaño e intentos', () => {
+    const bandeja = { ruta: 'aceptar-captura', codigo: 'RED', cotizacionId: '0514d1b7-4c52-43aa-9bbd-164bf20a5cd5', bytesImagen: 365_000, intentos: 3, ms: 9200 }
+    const r = leerReporte(JSON.stringify({ ...base, origen: 'bandeja', bandeja }))
+    expect(r.ok).toBe(true)
+    if (r.ok) expect(r.reporte).toMatchObject({ origen: 'bandeja', bandeja })
+    // Una ruta que no es de la bandeja, o un id con otra forma, no entra.
+    expect(leerReporte(JSON.stringify({ ...base, origen: 'bandeja', bandeja: { ...bandeja, ruta: 'otra' } }))).toEqual({ ok: false, status: 400 })
+    expect(leerReporte(JSON.stringify({ ...base, origen: 'bandeja', bandeja: { ...bandeja, cotizacionId: 'a b' } }))).toEqual({ ok: false, status: 400 })
+  })
 })
