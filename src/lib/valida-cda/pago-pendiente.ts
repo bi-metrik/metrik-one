@@ -30,7 +30,7 @@
  * `plazos.ts` (`estadoMora`), y se mide sobre la cuota que devuelve `proximoPago`.
  */
 
-import { saldoCuadrado } from '@/lib/negocios/tolerancia-saldo'
+import { saldoCuadrado, TOLERANCIA_SALDO_COP } from '@/lib/negocios/tolerancia-saldo'
 import { TODOS_LOS_DOMINIOS_DE_PAGO } from '@/lib/suscripciones/pasarela/dominios'
 
 export interface CuotaDeServicio {
@@ -119,6 +119,79 @@ export interface CuotaConEstado {
   /** El enlace de pago, solo si la cuota tiene saldo y el enlace es de una pasarela conocida, https y vigente. */
   enlacePago: string | null
   factura: FacturaDeCuota | null
+  /**
+   * El último pago que le abonó a la cuota (ver `ultimoPagoDeCadaCuota`). Solo se llena para la
+   * pestaña Pagos; `null` o ausente = la cuota no ha recibido nada.
+   */
+  ultimoPago?: PagoDeCuota | null
+}
+
+/** Lo que la pestaña Pagos muestra del pago que cubrió una cuota: fecha, medio y su recibo. */
+export interface PagoDeCuota {
+  cobroId: string
+  /** 'YYYY-MM-DD' */
+  fecha: string
+  fuente: string | null
+  reciboDescargable: boolean
+}
+
+/** Un pago recibido con lo que el reparto necesita para decir a qué cuota fue. */
+export interface PagoParaReparto extends Omit<PagoDeCuota, 'fecha'> {
+  fecha: string | null
+  monto: number
+  estado: 'pagado' | 'programado' | 'anulado'
+  retencionIva?: number
+}
+
+/**
+ * Qué pago le abonó a cada cuota, con el MISMO reparto FIFO de `cuotasConEstado`: los pagos, del
+ * más viejo al más nuevo, van llenando las cuotas en su orden. A cada cuota le toca el ÚLTIMO pago
+ * que le aportó.
+ *
+ * No se empareja por `plan_cobro_id` + `numero_cuota`: `mis_cobros_de_servicio()` no los devuelve,
+ * y un pago suelto del negocio (sin plan ni cuota, como el de 4D SOFT) también cubre cuotas. Lo que
+ * la tabla dice «Pagada» y el pago que muestra al lado salen de la misma cuenta.
+ *
+ * Un pago que solo le toca a la cuota unos pesos de redondeo (el piso de `saldoCuadrado`) no
+ * desplaza al que de verdad la pagó, salvo que sea el único que le aportó.
+ *
+ * `cuotas` es la salida de `cuotasConEstado` (ya en orden de reparto); devuelve un arreglo paralelo.
+ * Los pagos llegan como los da la RPC: del más reciente al más viejo.
+ */
+export function ultimoPagoDeCadaCuota(
+  cuotas: readonly Pick<CuotaConEstado, 'monto'>[],
+  pagos: readonly PagoParaReparto[],
+): (PagoDeCuota | null)[] {
+  const num = (n: number | undefined) => (typeof n === 'number' && Number.isFinite(n) ? n : 0)
+  // La RPC ordena por fecha desc y, dentro del día, por creación desc: al revés queda cronológico;
+  // el sort estable por fecha solo corrige lo que viniera desordenado.
+  const enOrden = pagos
+    .filter((p): p is PagoParaReparto & { fecha: string } => p.estado === 'pagado' && !!p.fecha)
+    .reverse()
+    .sort((a, b) => a.fecha.localeCompare(b.fecha))
+
+  let acumulado = 0
+  const tramos = enOrden.map((p) => {
+    const desde = acumulado
+    acumulado += num(p.monto) + num(p.retencionIva)
+    return { pago: p, desde, hasta: acumulado }
+  })
+
+  let inicio = 0
+  return cuotas.map((cuota) => {
+    const fin = inicio + cuota.monto
+    let ultimo: PagoDeCuota | null = null
+    let ultimoDeRedondeo: PagoDeCuota | null = null
+    for (const t of tramos) {
+      const aporte = Math.min(t.hasta, fin) - Math.max(t.desde, inicio)
+      if (aporte <= 0) continue
+      const pago = { cobroId: t.pago.cobroId, fecha: t.pago.fecha, fuente: t.pago.fuente, reciboDescargable: t.pago.reciboDescargable }
+      if (aporte > TOLERANCIA_SALDO_COP) ultimo = pago
+      else ultimoDeRedondeo = pago
+    }
+    inicio = fin
+    return ultimo ?? ultimoDeRedondeo
+  })
 }
 
 /** Las cuotas con monto, de la más vieja a la más nueva: el orden del reparto. */

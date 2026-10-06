@@ -9,6 +9,7 @@ import {
   type CuotaConEstado,
   type CuotaDeServicio,
   type ProximoPago,
+  ultimoPagoDeCadaCuota,
 } from './pago-pendiente'
 
 /**
@@ -59,6 +60,8 @@ export interface PagoRecibidoCda {
   estado: 'pagado' | 'programado' | 'anulado'
   reciboNumero: string | null
   reciboDescargable: boolean
+  /** La retención de IVA del pago: también cubre la cuota (ver `CobroRecibido.retencionIva`). */
+  retencionIva?: number
 }
 
 export type LecturaCuenta =
@@ -134,6 +137,7 @@ async function leerCuenta(servicioContratadoId: string): Promise<LecturaCuenta> 
         estado: estadoCobro(c.estado),
         reciboNumero: c.recibo_numero,
         reciboDescargable: Boolean(c.recibo_path),
+        retencionIva: Number(c.retencion_iva ?? 0),
       }),
     ),
   }
@@ -159,9 +163,12 @@ export async function leerPestanaPagosCda(
 ): Promise<LecturaPestanaPagos> {
   const cuenta = await leerCuentaCda(servicioContratadoId)
   if (cuenta.estado !== 'ok') return cuenta
+  const cuotas = cuotasConEstado({ cuotas: cuenta.cuotas, cobros: cuenta.cobros, hoy, ahoraISO })
+  // La fecha y el medio del pago que cubrió cada cuota, por el mismo reparto que le dio su estado.
+  const ultimos = ultimoPagoDeCadaCuota(cuotas, cuenta.pagos)
   return {
     estado: 'ok',
-    cuotas: cuotasConEstado({ cuotas: cuenta.cuotas, cobros: cuenta.cobros, hoy, ahoraISO }),
+    cuotas: cuotas.map((c, i) => ({ ...c, ultimoPago: c.abonado > 0 ? ultimos[i] : null })),
     // Lo que entró, del más reciente al más viejo (el orden de la RPC). Los programados no son
     // plata todavía: su lugar es la cuota, con su enlace.
     pagos: cuenta.pagos.filter((p) => p.estado !== 'programado'),
