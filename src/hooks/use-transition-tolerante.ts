@@ -5,6 +5,7 @@ import { toast } from 'sonner'
 import { mensajeDeFallaDeRed } from '@/lib/red/error-de-red'
 import { envolverTolerante } from '@/lib/red/transicion-tolerante'
 import { alNoConfirmarse, type OpcionesSinConfirmar } from '@/lib/red/accion-sin-confirmar'
+import { anotarFallaRed } from '@/lib/red/bandeja-red'
 
 /** Un aviso por racha: diez acciones que fallan juntas no apilan diez toasts. */
 const ID_TOAST_SIN_CONEXION = 'sin-conexion'
@@ -28,7 +29,9 @@ export function useTransitionTolerante(
 ): [boolean, TransitionStartFunction] {
   const [isPending, start] = useTransition()
   const startTolerante = useCallback<TransitionStartFunction>(
-    (cb) => start(envolverTolerante(cb, () => {
+    (cb) => start(envolverTolerante(cb, (error) => {
+      // Piloto de red: la acción que no llegó cuenta como falla de la superficie «acción».
+      anotarFallaRed({ superficie: 'accion', error })
       const o = sinConfirmar
       if (!o) return avisarSinConexion()
       alNoConfirmarse(o, (a) => toast.error(a.mensaje, {

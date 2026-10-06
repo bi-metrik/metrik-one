@@ -4,6 +4,7 @@ import { startTransition, useEffect, useState } from 'react'
 import { useRouter } from 'next/navigation'
 import { reportarErrorCliente, reportarRecuperacion } from '@/lib/errores-cliente/enviar'
 import { esErrorDeRed } from '@/lib/red/error-de-red'
+import { anotarFallaRed } from '@/lib/red/bandeja-red'
 import {
   ESPERA_CONFIRMAR_RECUPERACION_MS,
   cargaActual,
@@ -71,6 +72,9 @@ export function useRecuperacionDeRed(
     }
 
     const pathname = window.location.pathname
+    // Piloto de red: una pantalla que cayó por la red cuenta como falla de navegación. En un
+    // temporizador, como todo lo que escribe aquí: en StrictMode solo sobrevive uno.
+    programar(() => anotarFallaRed({ superficie: 'navegacion', error, ruta: pathname }), 0)
     const base = { message: String(error?.message ?? '') || String(error), name: error?.name, origen }
 
     const agotar = (intento: number, reportar: boolean) => {

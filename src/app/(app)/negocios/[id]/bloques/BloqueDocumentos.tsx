@@ -16,6 +16,7 @@ import {
   type CamposExtraidos,
 } from '@/lib/actions/ve-documentos-negocio'
 import { subirAUrlFirmada } from '@/lib/almacenamiento/subir-navegador'
+import { anotarFallaRed, relojRed } from '@/lib/red/bandeja-red'
 import { hrefArchivo } from '@/lib/almacenamiento/referencia'
 import DocUploadSlot from './DocUploadSlot'
 import type { SlotState } from './DocUploadSlot'
@@ -209,6 +210,7 @@ export default function BloqueDocumentos({
     }
 
     setSlotStates(prev => ({ ...prev, [slug]: 'uploading' }))
+    const inicioSubida = relojRed()
 
     try {
       // 1. Obtener URL firmada
@@ -225,6 +227,7 @@ export default function BloqueDocumentos({
       if (uploadInfo.signedUrl) {
         const subida = await subirAUrlFirmada(uploadInfo.signedUrl, file, file.type || 'application/octet-stream')
         if (!subida.ok) {
+          anotarFallaRed({ superficie: 'subida', error: subida.error, desde: inicioSubida })
           setSlotStates(prev => ({ ...prev, [slug]: 'error' }))
           toast.error(subida.error)
           return
@@ -237,6 +240,7 @@ export default function BloqueDocumentos({
             contentType: file.type || 'application/octet-stream',
           })
         if (uploadError) {
+          anotarFallaRed({ superficie: 'subida', error: uploadError, desde: inicioSubida })
           setSlotStates(prev => ({ ...prev, [slug]: 'error' }))
           toast.error(`Error al subir: ${uploadError.message}`)
           return
@@ -282,6 +286,8 @@ export default function BloqueDocumentos({
         }
       }
     } catch (err) {
+      // Piloto de red: la subida o una de sus acciones no llegó.
+      anotarFallaRed({ superficie: 'subida', error: err, desde: inicioSubida })
       setSlotStates(prev => ({ ...prev, [slug]: 'error' }))
       toast.error(`Error: ${err instanceof Error ? err.message : String(err)}`)
     }
