@@ -20,6 +20,8 @@
 import { sendTextMessage } from './wa-respond.ts';
 import { anotarConsultaPendiente, anotarFoco, leerConversacion, viajeEnFoco } from './wa-foco.ts';
 import { enviarConBotones } from './wa-enviar-botones.ts';
+import { textoRedactado } from './wa-redaccion.ts';
+import type { PedidoRedaccion } from './wa-redaccion.ts';
 import {
   botonesSiNo, idBoton, TEXTO_BOTONES_APARTE, TEXTO_BOTONES_APARTE_SIN_CARGAR, TITULO_CARGAR, TITULO_DESCARTAR, TITULO_NO_ES, TITULO_SI_CARGARLOS,
   TITULO_SI_CREALO, TITULO_SI_ES,
@@ -434,7 +436,7 @@ async function cerrarConNegocio(
       fields: cfg.fields, valores: r.valores,
     }),
   });
-  const ok = await enviar(ent.remitente_phone as string, [msg, extra.nota, ...avisosLlave].filter(Boolean).join('\n'), ent.workspace_id as string);
+  const ok = await enviar(ent.remitente_phone as string, await redactado(supabase, ent, { tipo: 'carga', fijo: [msg, extra.nota, ...avisosLlave].filter(Boolean).join('\n') }), ent.workspace_id as string);
   // El viaje que acaba de cargar queda en foco (con lo que pidió «me falta»): la respuesta a eso va directo a él.
   await anotarFoco(supabase, ent.workspace_id as string, ent.remitente_phone as string, { negocio_id: r.negocioId, por: 'carga', faltan: h.minimo.faltan.length });
   await actualizar(supabase, ent.id as string, {
@@ -486,7 +488,8 @@ async function preguntarContacto(supabase: SupabaseClient, ent: Fila, d: Extract
   // «¿Es la misma persona?» (una sola ficha): con sus dos botones (2026-10-05). Contestan «sí» o «no», como escritos.
   const misma = (d.motivo === 'llave_de_otro' || d.motivo === 'mismo') && d.opciones.length === 1;
   const botones = misma ? botonesSiNo('p', ent.id as string, { si: TITULO_SI_ES, no: TITULO_NO_ES }) : [];
-  const ok = await enviarConBotones(ent.remitente_phone as string, conNombreDelViaje(nombre, texto ?? textoPreguntaContacto(d)), botones, { workspaceId: ent.workspace_id as string, intent: INTENT });
+  const fijo = conNombreDelViaje(nombre, texto ?? textoPreguntaContacto(d));
+  const ok = await enviarConBotones(ent.remitente_phone as string, await redactado(supabase, ent, { tipo: 'pregunta', fijo, botones: botones.map(b => b.title) }), botones, { workspaceId: ent.workspace_id as string, intent: INTENT });
   await actualizar(supabase, ent.id as string, {
     estado: 'esperando_contacto', contacto_opciones: d.opciones, contacto_nombre: d.nombre,
     pregunta_contacto_at: ok ? new Date().toISOString() : null, respuesta_contacto: null, error: ok ? null : 'envio fallido',
@@ -499,17 +502,25 @@ async function preguntarContacto(supabase: SupabaseClient, ent: Fila, d: Extract
  */
 async function preguntarYEsperar(
   supabase: SupabaseClient, ent: Fila, texto: string, confirmacion: 'cruce' | 'sin_solicitud' | 'dos_viajes' | null, extra: Fila = {},
-  opts: { sinNombre?: boolean; botones?: BotonBandeja[]; aparte?: string } = {},
+  opts: { sinNombre?: boolean; botones?: BotonBandeja[]; aparte?: string; resumen?: boolean; sinRedaccion?: boolean } = {},
 ): Promise<void> {
   const conNombre = opts.sinNombre ? texto : conNombreDelViaje(await nombreDelViaje(supabase, ent), texto);
   // Las confirmaciones de sí/no llevan sus botones (2026-10-05): «¿Seguro que van en …?», «¿Es una solicitud de viaje?».
   const botones = opts.botones ?? botonesDeLaConfirmacion(ent.id as string, confirmacion);
-  const ok = await enviarConBotones(ent.remitente_phone as string, conNombre, botones, { workspaceId: ent.workspace_id as string, intent: INTENT, aparte: opts.aparte });
+  // El modelo redacta el texto (con el interruptor prendido); los títulos de los botones quedan fijos.
+  const final = opts.sinRedaccion ? conNombre
+    : await redactado(supabase, ent, { tipo: opts.resumen ? 'resumen' : confirmacion ? 'confirmacion' : 'pregunta', fijo: conNombre, botones: botones.map(b => b.title) });
+  const ok = await enviarConBotones(ent.remitente_phone as string, final, botones, { workspaceId: ent.workspace_id as string, intent: INTENT, aparte: opts.aparte });
   await actualizar(supabase, ent.id as string, {
     ...extra,
     estado: 'esperando_negocio', confirmacion_pendiente: confirmacion, respuesta_negocio: null, respuesta_negocio_at: null,
     pregunta_negocio_at: ok ? new Date().toISOString() : null, error: ok ? null : 'envio fallido',
   });
+}
+
+/** El texto que se envía: el que redacta el modelo si el interruptor está prendido y pasa la validación; si no, el fijo. */
+function redactado(supabase: SupabaseClient, ent: Fila, p: PedidoRedaccion): Promise<string> {
+  return textoRedactado(supabase, { workspaceId: ent.workspace_id as string, phone: ent.remitente_phone as string }, p);
 }
 
 /** Los botones de una confirmación del entendimiento: contestan lo mismo que su «sí» o su «descartar» escritos. */
@@ -1363,7 +1374,8 @@ async function preguntarResumen(supabase: SupabaseClient, ent: Fila, partes: str
   const plan = (entrega?.plan_viajes ?? null) as PlanViajes | null;
   for (const p of partes.slice(0, -1)) await enviar(ent.remitente_phone as string, p, ent.workspace_id as string);
   const botones = plan ? botonesDelResumen(plan, ent.entrega_id as string) : [];
-  await preguntarYEsperar(supabase, ent, partes[partes.length - 1], null, {}, { sinNombre: true, botones, aparte: textoBotonesAparte(botones) });
+  // Un resumen en varias partes no se redacta: la última sola no es el resumen.
+  await preguntarYEsperar(supabase, ent, partes[partes.length - 1], null, {}, { sinNombre: true, botones, aparte: textoBotonesAparte(botones), resumen: true, sinRedaccion: partes.length > 1 });
 }
 
 /**
@@ -1799,7 +1811,7 @@ async function cargarEnNegocioExistente(
     preguntasAntes: preguntasDeGuardian(descartadosTodos),
     avance: lineaAvance({ ...nombrado, fields: campos, valores: valoresQuedan }),
   });
-  const ok = await enviar(ent.remitente_phone as string, msg, workspaceId);
+  const ok = await enviar(ent.remitente_phone as string, await redactado(supabase, ent, { tipo: 'carga', fijo: msg }), workspaceId);
   await anotarFoco(supabase, workspaceId, ent.remitente_phone as string, { negocio_id: negocioId, por: 'carga', faltan: h.minimo.faltan.length });
   await actualizar(supabase, ent.id as string, {
     estado: 'negocio_actualizado', negocio_id: negocioId, destino: 'existente', negocio_destino_id: negocioId,
