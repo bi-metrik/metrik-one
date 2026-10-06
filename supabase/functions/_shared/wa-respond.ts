@@ -30,21 +30,28 @@ function getHeaders(): Record<string, string> {
  * tuteo colombiano, y eso se garantiza aqui y no en el prompt (ver es-neutro.ts).
  */
 export async function sendTextMessage(phone: string, text: string, ctx: EnvioCtx = {}): Promise<void> {
+  await sendTextoConId(phone, text, ctx);
+}
+
+/** Lo mismo que `sendTextMessage`, y devuelve el wamid del último pedazo (o null si Meta lo rechazó). */
+export async function sendTextoConId(phone: string, text: string, ctx: EnvioCtx = {}): Promise<string | null> {
   const neutro = aEspanolNeutro(text);
   if (neutro.correcciones.length) {
     console.warn(`[wa-respond] voseo corregido antes de enviar: ${neutro.correcciones.join(', ')}`);
   }
   const chunks = splitMessage(neutro.texto);
+  let ultimo: string | null = null;
   for (const chunk of chunks) {
     // No artificial delay — Meta keeps ordering within a single phone_number_id.
     // Removing the 1s sleep shaves ~2-3s off multi-chunk flows (Sprint 1, Yuto).
-    await postMessage(phone, {
+    ultimo = await postMessage(phone, {
       messaging_product: 'whatsapp',
       to: phone,
       type: 'text',
       text: { body: chunk },
     }, ctx);
   }
+  return ultimo;
 }
 
 /**
