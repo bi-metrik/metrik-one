@@ -359,7 +359,12 @@ export function pareceNombre(dado: string | null | undefined, contacto: string |
   const ws = palabrasDelNombre(dado);
   const suyas = palabrasDelNombre(contacto);
   if (ws.length === 0 || suyas.length === 0) return false;
-  return ws.every(w => suyas.some(s => s === w || (w.length >= 5 && s.length >= 5 && distancia(w, s) <= 1)));
+  const igual = (a: string, b: string) => a === b || (a.length >= 5 && b.length >= 5 && distancia(a, b) <= 1);
+  if (ws.every(w => suyas.some(s => igual(w, s)))) return true;
+  // Undécimo control de Vera (hallazgo 8; bot híbrido, 2026-10-06): el nombre dado CONTIENE entero el de un contacto (de
+  // dos palabras o más) y trae más («Celmira Rojas Peña» con «Celmira Rojas» en el directorio): también se parece. Antes
+  // un apellido de más lo volvía otra persona y el «Cargar» creaba un duplicado sin preguntar.
+  return suyas.length >= 2 && suyas.every(s => ws.some(w => igual(w, s)));
 }
 
 // ── El resolvedor (§3.2) ────────────────────────────────────────────────────

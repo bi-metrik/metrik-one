@@ -15,7 +15,17 @@ vi.mock('./wa-respond.ts', () => ({
   sendTextMessage: vi.fn(async (phone: string, texto: string) => { enviados.push({ phone, texto }); }),
   // Los botones de respuesta (2026-10-05): el cuerpo cuenta como lo que se le dijo.
   sendButtons: vi.fn(async (phone: string, texto: string) => { enviados.push({ phone, texto }); return 'wamid.botones'; }),
+  // Las listas del bot híbrido (2026-10-06): el cuerpo cuenta como lo que se le dijo.
+  sendList: vi.fn(async (phone: string, texto: string) => { enviados.push({ phone, texto }); return 'wamid.lista'; }),
 }));
+
+/**
+ * El modelo falso del punto de decisión (bot híbrido, 2026-10-06), por el texto exacto del escrito. Lo que no se declara:
+ * un acuse o un «sí»/«no» sueltos son «no sé»; lo demás, «contenido».
+ */
+let decisiones = new Map<string, unknown>();
+const decide = (texto: string, json: unknown) => { decisiones.set(texto, json); };
+const porDefecto = (texto: string): unknown => (/^(?:s[ií]+|no|ok|dale)$/i.test(texto.trim()) ? { tipo: 'no_se' } : { tipo: 'contenido' });
 
 type Fila = Record<string, unknown>;
 /** Los títulos de los botones del último mensaje que los llevó (2026-10-05). */
@@ -259,6 +269,11 @@ beforeEach(async () => {
   (await import('./wa-bandeja.ts')).esperaEnVuelo.dormir = async () => {};
   // Estas pruebas miden el cron de cada minuto: lo que se procesa en el acto (2026-10-05) va aparte.
   (await import('./wa-bandeja.ts')).procesarEnElActo.activo = false;
+  decisiones = new Map();
+  (await import('./wa-decision.ts')).modeloDeDecision.llamar = async (p) => {
+    const texto = /Mensaje del comercial: ([\s\S]*)$/.exec(p.usuario)?.[1] ?? '';
+    return { ok: true as const, json: decisiones.has(texto) ? decisiones.get(texto) : porDefecto(texto), ms: 1 };
+  };
   t = base();
   db = crearDb(t);
   enviados.length = 0;
@@ -677,7 +692,9 @@ describe('QA v5 · lo que el bot contesta en el acto a un encabezado (atenderEnB
     await llega('Carlina');
     await llega('no');
     await llega('sí');
-    expect(enviados.map(e => e.texto)).toEqual([LISTA_CAROLINA, `No entendí. ${LISTA_CAROLINA}`, `No entendí. ${LISTA_CAROLINA}`]);
+    // Bot híbrido: la lista no tiene un «sí» ni un «no»; el modelo no sabe y se vuelve a preguntar, en corto, con la lista.
+    const otraVez = 'No me quedó claro. ¿De qué viaje es «Carlina»?';
+    expect(enviados.map(e => e.texto)).toEqual([LISTA_CAROLINA, otraVez, otraVez]);
     const entrega = t.wa_bandeja_entregas.find(e => e.estado === 'abierta')!;
     const r = await mod.armarPreguntaNegocio(db as never, entrega.id as string, WS, 3);
     expect(r).toMatchObject({ sinContenido: 'esta tanda' }); // nada que repartir: ni el «no» ni el «sí»
@@ -693,7 +710,8 @@ describe('QA v5 · lo que el bot contesta en el acto a un encabezado (atenderEnB
     expect(enviados.map(e => e.texto)).toEqual([
       LISTA_CAROLINA,
       'Antes: ¿de qué viaje es «Carlina»? 1. SAN ANDRÉS 4N · Carolina Ruiz (T1 26 18). Lo que mandes queda sin asignar hasta que me digas.',
-      `No entendí. ${LISTA_CAROLINA}`,
+      // Un número fuera de la lista lo lee el código (sin el modelo) y se vuelve a preguntar.
+      'Ese número no está en la lista. ¿De qué viaje es «Carlina»?',
       '📌 SAN ANDRÉS 4N · Carolina Ruiz (T1 26 18)',
     ]);
   });
@@ -703,6 +721,8 @@ describe('QA v5 · lo que el bot contesta en el acto a un encabezado (atenderEnB
     await llega('nuevo');
     await llega('vamos a Aruba', true);
     await llega('gracias');
+    // «¿Para qué cliente es?» es un punto de decisión: el nombre lo copia el modelo tal cual.
+    decide('Pedro Gómez', { tipo: 'nombre', nombre: 'Pedro Gómez' });
     await llega('Pedro Gómez');
     await llega('Tati');
     // El reenvío vuelve a pedir el nombre (la primera vez); el «gracias», ya con contenido, no.
@@ -792,8 +812,9 @@ describe('Prueba en vivo del 2026-10-01: dos viajes NUEVO seguidos, una sola pre
     expect(textos().at(-1)).toMatch(/^¿Me pasas el celular o el correo de Laura Prueba\?/);
     // El «sí» no crea sin la llave.
     await llega('sí');
+    // Sin «Cargar» (falta la llave): el «sí» escrito no carga y el bot dice qué falta, en el acto.
+    expect(textos().at(-1)).toBe('Todavía no lo cargo. Laura Prueba · ¿Me pasas su celular o su correo?');
     await cron();
-    expect(textos().at(-1)).toMatch(/^Todavía no lo cargo\. ¿Me pasas el celular o el correo de Laura Prueba\?/);
     expect(t.contactos).toEqual([]);
 
     // Un encabezado nuevo con la pregunta abierta: su acuse y se recuerda la pendiente en una línea.

@@ -157,8 +157,10 @@ describe('un encabezado no es la respuesta a una pregunta pendiente (QA de #971,
 
   it('la bandeja le dice a la base cuándo un escrito es encabezado, y no lo toma como respuesta', () => {
     const fuente = readFileSync(join(process.cwd(), 'supabase/functions/_shared/wa-bandeja.ts'), 'utf8')
-    expect(fuente).toContain('p_puede_ser_respuesta: !esEncabezado')
-    expect(fuente).toContain('if (!esEncabezado && message.type === \'text\'')
+    // Bot híbrido (2026-10-06): un escrito nunca es la respuesta por adivinanza en la base; si había una pregunta
+    // abierta, la leyó antes el punto de decisión.
+    expect(fuente).toContain('p_puede_ser_respuesta: !esEncabezado && !escrito')
+    expect(fuente).toContain('await atenderEnPuntoDeDecision(supabase, user, message, config)')
   })
 })
 

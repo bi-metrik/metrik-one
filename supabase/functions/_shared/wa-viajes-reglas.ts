@@ -1254,6 +1254,8 @@ export function armarSegmentos(
       }
       if (ip.tipo === 'nombre') {
         caja!.seg.nombre = { texto: ip.nombre, n: m.n };
+        // La llave que venía con el nombre («Bernardo Lizcano 300 555 6677»; bot híbrido, 2026-10-06).
+        if (ip.llave && caja!.seg.cliente) caja!.seg.cliente.llave = ip.llave;
         encabezados.push(m.n);
         continue;
       }
@@ -1423,7 +1425,7 @@ type DecisionInterprete =
   | { tipo: 'caja'; resolucion: ResolucionEncabezado; conContenido: boolean }
   | { tipo: 'eleccion'; viaje: ViajeAbierto }
   | { tipo: 'nuevo_del_mismo'; cliente: string }
-  | { tipo: 'nombre'; nombre: string }
+  | { tipo: 'nombre'; nombre: string; llave?: Llave | null }
   | { tipo: 'contenido' };
 
 /**
@@ -1460,7 +1462,7 @@ function decisionDelInterprete(m: MensajeViaje, viajes: ReadonlyArray<ViajeAbier
       return candidatosDelEncabezado(caja.encabezado?.resolucion).some(v => v.id === viaje.id) ? { tipo: 'eleccion', viaje } : null;
     }
     case 'nombre':
-      return caja && caja.nombre === null && ip.nuevo?.trim() ? { tipo: 'nombre', nombre: ip.nuevo.trim() } : null;
+      return caja && caja.nombre === null && ip.nuevo?.trim() ? { tipo: 'nombre', nombre: ip.nuevo.trim(), ...(tieneLlave(ip.llave) ? { llave: ip.llave } : {}) } : null;
     case 'contenido':
       return { tipo: 'contenido' };
     default:
@@ -2362,11 +2364,14 @@ function destinoDeCorreccion(texto: string, plan: PlanViajes, viajes: ReadonlyAr
  * pendientes». Si UNA parte no se entiende, no se aplica ninguna.
  */
 export function interpretarRespuestaPlan(texto: string, plan: PlanViajes, viajes: ReadonlyArray<ViajeAbierto>): RespuestaPlan {
-  const bruto = String(texto ?? '').trim();
+  // Bot híbrido (2026-10-06): «corregir: …» es lo que el punto de decisión manda cuando el modelo dijo que el escrito es
+  // una corrección. Se lee SOLO como corrección: nunca como el «sí» ni como la respuesta sobre el cliente.
+  const marcada = /^corregir:\s+/i.exec(String(texto ?? '').trim());
+  const bruto = String(texto ?? '').trim().slice(marcada ? marcada[0].length : 0).trim();
   if (!bruto) return { tipo: 'no_entendida' };
   const porDecidir = pendientes(plan);
   const { visible, interno } = numeracion(plan);
-  if (esSi(bruto)) {
+  if (!marcada && esSi(bruto)) {
     if (porDecidir.length > 0) {
       const ns = porDecidir.map(m => visible(m.n));
       return { tipo: 'no_entendida', aviso: 'Todavía no lo cargo.' };
@@ -2379,7 +2384,7 @@ export function interpretarRespuestaPlan(texto: string, plan: PlanViajes, viajes
   }
   // La respuesta a lo que falta del cliente de un viaje nuevo: la llave escrita sola, cuál de los parecidos, o si
   // es el dueño de la llave. Va antes que «no» (corregir): con «¿Es la misma persona?» pendiente, «no» es «no es».
-  const falta = clientesPorResolver(plan)[0];
+  const falta = marcada ? null : clientesPorResolver(plan)[0];
   if (falta) {
     const clave = claveDestino(falta.destino);
     const llave = soloLlave(bruto);

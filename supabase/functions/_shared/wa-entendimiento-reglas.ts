@@ -1673,7 +1673,8 @@ export function interpretarRespuestaContacto(texto: string, opciones: ContactoCa
   // «nuevo», «cliente nuevo Marta Gómez», «nueva clienta Marta» (`leerNuevo`). Un nombre con dígitos no.
   const nuevo = leerNuevo(texto);
   if (nuevo && !nuevo.cliente) return { tipo: 'nuevo', nombre: null };
-  if (nuevo?.cliente && /^[^\d]{2,}$/.test(nuevo.cliente)) return { tipo: 'nuevo', nombre: nuevo.cliente };
+  // Un nombre no lleva una palabra que es solo números (eso es el celular); «Prueba5» sí puede ser un nombre de prueba.
+  if (nuevo?.cliente && nuevo.cliente.trim().length >= 2 && !/(^|\s)\d+(\s|$)/.test(nuevo.cliente.trim())) return { tipo: 'nuevo', nombre: nuevo.cliente };
   const tel = digitosTelefono(texto);
   if (tel && tel.length >= 10) return { tipo: 'telefono', telefono: tel };
   const correo = /^(?:(?:su\s+)?(?:correo|email|mail)\s*(?:es)?\s*:?\s*)?([^\s@]+@[^\s@]+\.[a-z]{2,})\.?$/i.exec(String(texto ?? '').trim())?.[1];

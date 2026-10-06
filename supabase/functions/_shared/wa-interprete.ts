@@ -47,10 +47,11 @@ import {
   staffIdDelRemitente,
 } from './wa-bandeja.ts';
 import {
-  acuseDelClienteDeLaTanda, candidatosDeEncabezado, pendienteDeLaTanda, preguntaAbierta, simularEnLaTanda, tandaAbiertaDelRemitente, textoDeLoQueFalta,
+  acuseDelClienteDeLaTanda, candidatosDeEncabezado, preguntaAbierta, simularEnLaTanda, tandaAbiertaDelRemitente,
 } from './wa-entendimiento.ts';
 import { pareceRespuesta, resolverEncabezado } from './wa-viajes-reglas.ts';
-import type { PlanViajes, ViajeAbierto } from './wa-viajes-reglas.ts';
+import { atenderEnPuntoDeDecision, volverAlPunto } from './wa-decision.ts';
+import type { ViajeAbierto } from './wa-viajes-reglas.ts';
 import {
   armarContexto,
   atajoExacto,
@@ -73,7 +74,6 @@ import type {
   Interpretacion,
   NegocioCtx,
   Paso,
-  PreguntaBandejaVista,
   PreguntaUnificada,
   SesionBotVista,
 } from './wa-interprete-reglas.ts';
@@ -249,11 +249,25 @@ async function atender(
     }
   }
 
+  // 3a. Bot híbrido (2026-10-06): con un punto de decisión vigente (la pregunta abierta, o lo que espera la caja), el
+  // escrito se lee ahí primero, igual que con el interruptor apagado: el toque, el número, el código, o el modelo con
+  // las opciones vigentes. Si elige, ya está atendido. Si es «contenido» o una «pregunta», sigue aquí, pero ya nunca
+  // como la respuesta a esa pregunta (el contexto no la muestra).
+  if (enBandeja && !message.decisionLeida) {
+    const d = await atenderEnPuntoDeDecision(supabase, user, message, configB!, { desdeInterprete: true });
+    if (d === 'atendido') {
+      estado.despachado = true;
+      return SI;
+    }
+    if (d) message.decisionLeida = d;
+  }
+
   // 3b. Lo que el código de hoy lee exacto en la caja abierta (el cliente de un viaje nuevo, su llave, cuál es, la
   // lista de un encabezado): no pasa por el modelo. Así el resolvedor del cliente vive en UN camino, con el
   // interruptor apagado o prendido (diseño 2026-10-05, R6).
   if (enBandeja) {
-    const sim = await simularEnLaTanda(supabase, ws, message.phone, configB!.horasCajaActiva, texto, fechaDeMeta(message.timestamp) ?? new Date(ahora()).toISOString());
+    const sim = message.decisionLeida ? null
+      : await simularEnLaTanda(supabase, ws, message.phone, configB!.horasCajaActiva, texto, fechaDeMeta(message.timestamp) ?? new Date(ahora()).toISOString());
     if (sim?.respuesta) return NO;
     // 3c. La memoria de la conversación (2026-10-05): la consulta que esperaba su viaje, la respuesta a «me falta» (directo
     // al viaje en foco) o la carga en vuelo. La atiende la ruta de hoy, igual con el interruptor apagado o prendido.
@@ -362,53 +376,21 @@ async function leerContexto(
 ): Promise<Lectura> {
   const ws = user.workspace_id;
   const sesion = await sesionBotAMedias(supabase, phone, ws, ahora);
-  let pregunta: Lectura['pregunta'] = null;
-  let bandejaVista: PreguntaBandejaVista | null = null;
-  let tandaVista: Parameters<typeof preguntaPendienteUnificada>[0]['tanda'] = null;
+  // Bot híbrido (2026-10-06): las preguntas de la bandeja (la abierta y lo que espera la caja) son puntos de decisión y
+  // las lee `wa-decision.ts` ANTES de llegar aquí. El intérprete ya no las ve ni las contesta: solo la conversación del
+  // bot de siempre (un gasto a medias) queda como pregunta pendiente en su contexto.
+  const pregunta: Lectura['pregunta'] = null;
   let tanda: Lectura['tanda'] = null;
   let todos: Array<Omit<NegocioCtx, 'alias'>>;
   if (enBandeja && configB) {
     todos = (viajes ?? []).map(v => ({ id: v.id, codigo: v.codigo, cliente: v.cliente, destino: v.destino, nombre: v.nombre ?? null }));
-    pregunta = await preguntaAbierta(supabase, ws, phone);
-    if (pregunta) {
-      let opciones: ViajeAbierto[] | null = null;
-      if (pregunta.tipo === 'entrega' && pregunta.espera === 'viaje') {
-        const { data } = await supabase.from('wa_bandeja_entregas').select('negocio_opciones, pregunta_enviada_at').eq('id', pregunta.id).maybeSingle();
-        opciones = Array.isArray(data?.negocio_opciones) ? (data!.negocio_opciones as ViajeAbierto[]) : null;
-        bandejaVista = { espera: pregunta.espera, nombre: pregunta.nombre, corta: pregunta.corta, opciones, vistaAt: (data?.pregunta_enviada_at as string | null) ?? null };
-      } else if (pregunta.nuevoPorConfirmar) {
-        // «¿Creo el cliente nuevo «X»?»: el modelo ve la lista del aviso (numerada) y la opción «sí». Sin ella,
-        // un número suelto se cruzaba con los alias `nN` del contexto (cuarto control de Vera, CF7).
-        const { data } = pregunta.entregaId
-          ? await supabase.from('wa_bandeja_entregas').select('negocio_opciones').eq('id', pregunta.entregaId).maybeSingle()
-          : { data: null };
-        opciones = Array.isArray(data?.negocio_opciones) ? (data!.negocio_opciones as ViajeAbierto[]) : null;
-        // Con los viajes abiertos: el aviso «Ya hay un viaje de …» puede nombrar uno fuera de la lista (sexto control).
-        bandejaVista = { espera: pregunta.espera, nombre: pregunta.nombre, corta: pregunta.corta, opciones, vistaAt: null, nuevoPorConfirmar: pregunta.nuevoPorConfirmar, viajesAbiertos: viajes ?? [] };
-      } else if (pregunta.espera === 'resumen') {
-        // El resumen con su reparto: el atajo es exacto solo si el código de hoy entiende la respuesta (sexto control).
-        const entregaId = pregunta.tipo === 'entrega' ? pregunta.id : pregunta.entregaId;
-        const { data } = entregaId ? await supabase.from('wa_bandeja_entregas').select('plan_viajes').eq('id', entregaId).maybeSingle() : { data: null };
-        bandejaVista = {
-          espera: pregunta.espera, nombre: pregunta.nombre, corta: pregunta.corta, opciones: null, vistaAt: null,
-          plan: (data?.plan_viajes ?? null) as PlanViajes | null, viajesAbiertos: viajes ?? [],
-        };
-      } else {
-        bandejaVista = { espera: pregunta.espera, nombre: pregunta.nombre, corta: pregunta.corta, opciones: null, vistaAt: null };
-      }
-    }
-    const pt = await pendienteDeLaTanda(supabase, ws, phone, configB.horasCajaActiva);
-    if (pt) {
-      tandaVista = pt.tipo === 'eleccion' ? { tipo: 'eleccion', texto: pt.texto, candidatos: pt.candidatos }
-        : pt.tipo === 'cliente' ? { tipo: 'cliente', texto: textoDeLoQueFalta(pt), ...(pt.resolucion.tipo === 'llave_de_otro' ? { esLaMisma: true } : {}) } : { tipo: 'nombre' };
-    }
     tanda = await tandaAbiertaDelRemitente(supabase, ws, phone, configB.horasCajaActiva);
   } else {
     todos = await negociosAbiertosDelBot(supabase, ws);
   }
   const negocios = negociosDelContexto(todos, texto);
   const alias = (id: string) => negocios.find(n => n.id === id)?.alias ?? id;
-  const pendiente = preguntaPendienteUnificada({ sesion, bandeja: bandejaVista, tanda: tandaVista, alias, ahora });
+  const pendiente = preguntaPendienteUnificada({ sesion, alias, ahora });
   return { texto, bandeja: configB, sesion, pregunta, pendiente, negocios, tanda };
 }
 
@@ -477,6 +459,11 @@ async function despachar(b: Base, d: Extract<Decision, { tipo: 'ejecutar' }>, le
   const ws = user.workspace_id;
   const paso = d.paso;
   const recordar = d.recordar && lec.pendiente ? textoSiguePendiente(lec.pendiente) : null;
+  // Una «pregunta» del punto de decisión que el intérprete quiere guardar como contenido o tomar como respuesta: no. Se
+  // vuelve a mostrar la pregunta vigente (bot híbrido, 2026-10-06).
+  if (message.decisionLeida === 'pregunta' && b.enBandeja && lec.bandeja && ['registrar', 'cerrar_tanda', 'responder_bandeja'].includes(paso.p)) {
+    return await volverAlPunto(supabase, user, message.phone, lec.bandeja);
+  }
   const decirAlUsuario = async (t: string | null) => {
     const todo = [t, recordar].filter(Boolean).join('\n');
     if (!todo) return;
@@ -510,7 +497,7 @@ async function despachar(b: Base, d: Extract<Decision, { tipo: 'ejecutar' }>, le
           && b.enBandeja && lec.bandeja && lec.bandeja.modoViajes !== 'uno'
           ? await textoRedactado(supabase, { workspaceId: ws, phone: message.phone }, { tipo: 'aviso', fijo: await textoTandaSinCliente(supabase, ws, message.phone, lec.bandeja) })
           : null;
-        if (delCliente && !recordar && b.enBandeja) await enviarAcuseDeLaCaja(message.phone, delCliente, fila.entrega, ws);
+        if (delCliente && !recordar && b.enBandeja) await enviarAcuseDeLaCaja(message.phone, delCliente, fila.entrega, ws, lec.bandeja ? { supabase, config: lec.bandeja } : undefined);
         else await decirAlUsuario(delCliente ?? paso.aviso ?? sinCliente);
       }
       return true;

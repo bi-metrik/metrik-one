@@ -135,6 +135,41 @@ export async function sendButtons(
 }
 
 /**
+ * Mensaje de lista interactiva (bot híbrido de la bandeja, 2026-10-06). Límites de la documentación oficial de Meta
+ * (interactive-list-messages, leída el 2026-10-06): cuerpo ≤ 4096, texto del botón ≤ 20, una sección con título
+ * ≤ 24, hasta 10 filas, título de fila ≤ 24, descripción ≤ 72, id ≤ 200. Quien llama ya recorta; aquí se vuelve a
+ * cortar para que Meta nunca lo rechace por largo. La fila tocada llega como `list_reply` con su id.
+ */
+export async function sendList(
+  phone: string,
+  body: string,
+  boton: string,
+  filas: Array<{ id: string; title: string; description?: string }>,
+  ctx: EnvioCtx = {},
+): Promise<string | null> {
+  return await postMessage(phone, {
+    messaging_product: 'whatsapp',
+    to: phone,
+    type: 'interactive',
+    interactive: {
+      type: 'list',
+      body: { text: body.slice(0, 4096) },
+      action: {
+        button: [...boton].slice(0, 20).join(''),
+        sections: [{
+          title: 'Opciones',
+          rows: filas.slice(0, 10).map((f) => ({
+            id: f.id.slice(0, 200),
+            title: [...f.title].slice(0, 24).join(''),
+            ...(f.description ? { description: [...f.description].slice(0, 72).join('') } : {}),
+          })),
+        }],
+      },
+    },
+  }, ctx);
+}
+
+/**
  * Envia un documento por URL (dentro de la ventana de 24 h). Meta lo DESCARGA de `link`, asi que
  * tiene que ser https y publico o firmado; si no puede bajarlo, el POST igual devuelve wamid y el
  * fallo llega despues como acuse `failed` en `wa_envios`. Devuelve el wamid, o null si la Graph

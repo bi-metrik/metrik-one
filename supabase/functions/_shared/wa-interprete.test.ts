@@ -16,6 +16,8 @@ const botones: Array<{ body: string; ids: string[] }> = [];
 vi.mock('./wa-respond.ts', () => ({
   sendTextMessage: vi.fn(async (_p: string, t: string) => { enviados.push(t); }),
   sendButtons: vi.fn(async (_p: string, body: string, b: Array<{ id: string }>) => { botones.push({ body, ids: b.map(x => x.id) }); }),
+  // Las listas del bot híbrido (2026-10-06): como los botones, el cuerpo y los ids de las filas.
+  sendList: vi.fn(async (_p: string, body: string, _b: string, f: Array<{ id: string }>) => { botones.push({ body, ids: f.map(x => x.id) }); }),
 }));
 
 const espias = vi.hoisted(() => ({
@@ -66,6 +68,10 @@ vi.mock('./wa-entendimiento.ts', () => ({
   simularEnLaTanda: async () => null,
   acuseDelClienteDeLaTanda: async () => null,
   textoDeLoQueFalta: () => '',
+  // El punto de decisión (bot híbrido, 2026-10-06) lee los viajes abiertos y las marcas de la pregunta.
+  viajesAbiertosDeLaBandeja: async () => [],
+  nuevoPorConfirmar: () => null,
+  botonesDeLaConfirmacion: () => [],
 }));
 vi.mock('./handlers/registro/index.ts', () => ({ handleRegistro: espias.handleRegistro }));
 vi.mock('./handlers/registro/resume.ts', () => ({ reconfirmarGasto: espias.reconfirmarGasto }));
@@ -79,6 +85,7 @@ vi.mock('./wa-rate-limit.ts', () => ({ checkInboundLimit: espias.checkInboundLim
 vi.mock('./wa-session.ts', () => ({ getOrCreateSession: espias.getOrCreateSession, updateSession: espias.updateSession }));
 
 import { atenderEscrito, interruptorDe, llamarGemini, PREVIEW_NOTA_INTERNA, usoParaTelemetria, type DepsInterprete, type RespuestaModelo } from './wa-interprete.ts';
+import { modeloDeDecision } from './wa-decision.ts';
 import { identificarRemitente } from './wa-identificar.ts';
 import type { BotSession, IncomingMessage, WaUser } from './types.ts';
 
@@ -147,6 +154,7 @@ beforeEach(() => {
   espias.candidatosDeEncabezado.mockResolvedValue({ viajes: [], equipo: [] });
   espias.checkInboundLimit.mockResolvedValue(true);
   espias.responderPendiente.mockResolvedValue(true);
+  modeloDeDecision.llamar = null;
 });
 afterEach(() => vi.unstubAllGlobals());
 
@@ -482,27 +490,43 @@ describe('despacho en la bandeja', () => {
     sinEscriturasNuevas(db);
   });
 
-  it('la respuesta a «¿A qué viaje van?» con palabras → responderPendiente con el código, guardando el crudo', async () => {
+  // Bot híbrido (2026-10-06): «¿A qué viaje van?» es un punto de decisión. El escrito lo lee el punto (con su modelo y
+  // las opciones vigentes) ANTES del intérprete, igual que con el interruptor apagado: el intérprete ya no lo contesta.
+  it('la respuesta a «¿A qué viaje van?» con palabras → el punto de decisión: el modelo elige la fila y entra su número, con el crudo', async () => {
     espias.preguntaAbierta.mockResolvedValue({ tipo: 'entrega', id: 'e9', nombre: 'Tanda de las 09:28', corta: '¿A qué viaje van?', espera: 'viaje' });
     const db = baseFalsa({ wa_bandeja_entregas: [{ negocio_opciones: [V[0], V[1]], pregunta_enviada_at: new Date().toISOString() }] });
-    await atenderEscrito(db, u(), escrito('son de Carolina'), deps({ acciones: [{ accion: 'responder', evidencia: 'son de Carolina', ref: { cliente: 'Carolina' } }] }));
+    modeloDeDecision.llamar = vi.fn(async () => ({ ok: true as const, json: { tipo: 'opcion', opcion: 'v2' }, ms: 5 }));
+    const interprete = deps({ acciones: [{ accion: 'responder', evidencia: 'son de Carolina', ref: { cliente: 'Carolina' } }] });
+    expect(await atenderEscrito(db, u(), escrito('son de Carolina'), interprete)).toEqual({ atendido: true });
     expect(espias.responderPendiente).toHaveBeenCalledTimes(1);
     const a = espias.responderPendiente.mock.calls[0] as unknown[];
-    expect(a[3]).toBe('T1 26 11'); // la entrada canónica
+    expect(a[3]).toBe('2'); // la entrada canónica: el número de la fila de Carolina Ruiz en la lista
     expect(a[8]).toBe('son de Carolina'); // el crudo
-    expect(db.ops.find(o => o.tabla === 'wa_bandeja_mensajes' && o.op === 'update')!.payload).toMatchObject({ interpretacion: { accion: 'responder', viaje_id: 'v11', canonico: 'T1 26 11' } });
+    expect(interprete.llamarModelo).not.toHaveBeenCalled();
     sinEscriturasNuevas(db);
   });
 
-  it('H2 · «a ninguno, bótalos» con la lista y una tanda abierta → DESCARTAR a la pregunta, la tanda sigue', async () => {
+  it('H2 · «a ninguno, bótalos» con la lista y una tanda abierta → «Descartar» de esa pregunta (la tanda sigue)', async () => {
     espias.preguntaAbierta.mockResolvedValue({ tipo: 'entrega', id: 'e9', nombre: 'Tanda de las 09:28', corta: '¿A qué viaje van?', espera: 'viaje' });
     espias.tandaAbiertaDelRemitente.mockResolvedValue({ id: 't1', creadaAt: new Date().toISOString(), nombre: 'Carolina Ruiz', n: 2, cajaViajeId: 'v11' });
     const db = baseFalsa({ wa_bandeja_entregas: [{ negocio_opciones: [V[0], V[1]] }] });
+    modeloDeDecision.llamar = vi.fn(async () => ({ ok: true as const, json: { tipo: 'opcion', opcion: 'des' }, ms: 5 }));
     await atenderEscrito(db, u(), escrito('a ninguno, bótalos'), deps({ acciones: [{ accion: 'responder', evidencia: 'a ninguno, bótalos', opcion: 'descartar' }] }));
-    expect((espias.responderPendiente.mock.calls[0] as unknown[])[3]).toBe('DESCARTAR');
+    expect((espias.responderPendiente.mock.calls[0] as unknown[])[3]).toBe('descartar');
     expect(espias.descartarTodo).not.toHaveBeenCalled();
     expect(espias.descartarTandaAbierta).not.toHaveBeenCalled();
-    expect(enviados).toEqual(['Descarté los mensajes de esa pregunta. La tanda de Carolina Ruiz sigue abierta.']);
+  });
+
+  it('con el modelo del punto caído, el escrito no se adivina: «No te entendí; toca una opción» con la lista, y nada se contesta', async () => {
+    espias.preguntaAbierta.mockResolvedValue({ tipo: 'entrega', id: 'e9', nombre: 'Tanda de las 09:28', corta: '¿A qué viaje van?', espera: 'viaje' });
+    const db = baseFalsa({ wa_bandeja_entregas: [{ negocio_opciones: [V[0], V[1]] }] });
+    modeloDeDecision.llamar = vi.fn(async () => ({ ok: false as const, motivo: 'timeout' as const, ms: 4000 }));
+    const interprete = deps({ acciones: [{ accion: 'responder', evidencia: 'son de Carolina', ref: { cliente: 'Carolina' } }] });
+    expect(await atenderEscrito(db, u(), escrito('son de Carolina'), interprete)).toEqual({ atendido: true });
+    expect(espias.responderPendiente).not.toHaveBeenCalled();
+    expect(interprete.llamarModelo).not.toHaveBeenCalled();
+    expect(botones.at(-1)!.body).toBe('No te entendí; toca una opción.\nTanda de las 09:28 · ¿De qué viaje son?');
+    expect(botones.at(-1)!.ids.map(i => i.split('|')[2])).toEqual(['v1', 'v2', 'nuevo', 'des']);
   });
 
   it('«bórralo» sin pregunta y con tanda → solo la tanda (descartarTandaAbierta), nunca todo', async () => {

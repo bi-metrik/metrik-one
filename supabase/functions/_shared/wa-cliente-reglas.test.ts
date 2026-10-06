@@ -115,6 +115,11 @@ describe('el resolvedor (§3.2)', () => {
     expect(pareceNombre('Mauricio', 'MAURICIO MORENO')).toBe(true);
     expect(pareceNombre('Andrés Gomes', 'ANDRÉS GÓMEZ')).toBe(true);
     expect(pareceNombre('Daniel Pérez', 'LINA PÉREZ')).toBe(false);
+    // Undécimo control de Vera (hallazgo 8): el nombre dado contiene entero el de un contacto de dos palabras o más.
+    expect(pareceNombre('Celmira Rojas Peña', 'CELMIRA ROJAS')).toBe(true);
+    expect(pareceNombre('Leonor Cuesta Villa', 'LEONOR CUESTA')).toBe(true);
+    expect(pareceNombre('Mauricio Moreno Díaz', 'MAURICIO')).toBe(false); // una palabra sola no basta
+    expect(pareceNombre('Celmira Peña', 'CELMIRA ROJAS')).toBe(false);
   });
 });
 

@@ -2,6 +2,7 @@
 
 ## Project memories
 
+- ⚠️⚠️ [Bot híbrido de la bandeja (2026-10-06)](project_bandeja_hibrida.md) — puntos de decisión; banco Gemini pendiente de llave de pruebas; 2 decisiones a confirmar
 - ⚠️⚠️ [Doble guardado e idempotencia (#1047-#1053)](project_doble_guardado_idempotencia.md) — #1049/#1052 migración SIN aplicar; POST cortado se repite vía Vercel
 - ⚠️ [Letras no latinas: bloqueo en todo ONE](project_pdf_cirilico_winansi.md) — `texto-latino.ts` + copia exacta en `_shared/`; guarda de CI sobre drawText
 - ⚠️ [Copia de la factura escribe en su origen](project_factura_copia_escribe_origen.md) — criterio único `copiaDeSoloLectura`; origen ambiguo rechaza
