@@ -31,7 +31,12 @@ import {
 } from '@/lib/documentos/comparar-check'
 import { todayBogotaISO } from '@/lib/dates/bogota'
 import { registrarCorrecciones, contextoCorreccion, esCausaValida, type CausaCorreccion } from '@/lib/correcciones/registrar'
-import { resolverDestino } from '@/lib/negocios/casilla-compartida'
+import { resolverDestino, type DestinoBloque } from '@/lib/negocios/casilla-compartida'
+import {
+  copiaDeSoloLectura,
+  mensajeCopiaDeSoloLectura,
+  MENSAJE_ORIGEN_NO_RESUELTO,
+} from '@/lib/negocios/copia-heredada'
 import { esReemplazoHaciaAtras } from '@/lib/documentos/reemplazo-hacia-atras'
 import { extraerDriveFileId } from '@/lib/compliance/documentos'
 import { mimeEfectivo } from '@/lib/documentos/mime'
@@ -330,22 +335,31 @@ async function runCrossCheck(
   }
 }
 
-// ── Instancias heredadas: copias de solo lectura ─────────────────────────────
+// ── Instancias heredadas: a dónde se escribe desde una copia ──────────────────
 //
-// Un bloque cuyo `config_extra.source_etapa_orden` está definido es una COPIA de
-// solo lectura del bloque de esa etapa de origen. Escribir sobre él falla EN
-// SILENCIO, por dos vías:
+// Un bloque cuyo `config_extra.source_etapa_orden` está definido es una COPIA del bloque
+// de esa etapa de origen. Escribir sobre su fila propia falla EN SILENCIO, por dos vías:
 //   (a) el render sobrescribe el `data` de la copia con el del origen
 //       (negocio-v2-actions, herencia readonly de documento) → la corrección
 //       desaparece de pantalla al recargar;
 //   (b) `resolverCamposFuente` indexa los bloques por slug y estas copias tienen
 //       `slug = null` → el valor corregido nunca llega al PDF del formulario.
-// Por eso se rechaza con un mensaje que apunta a la etapa de origen, en vez de
-// dejar que el usuario "corrija" en el vacío.
-async function bloqueHeredadoError(
+//
+// Por eso una copia o escribe en la fila de su ORIGEN o no escribe. Lo decide
+// `copia-heredada.ts`, el mismo criterio que usa la pantalla para ofrecer subir:
+//   - copia con `editable_siempre` y slug de origen → `resolverDestino` la redirige al
+//     origen (creándolo si el caso nunca pasó por esa etapa);
+//   - cualquier otra copia → se rechaza con un mensaje que apunta a la etapa de origen.
+// Y si la copia sí escribe pero el origen no se pudo resolver, también se rechaza: caer a
+// la fila local sería volver a (a) y (b).
+//
+// Hasta el 2026-10-06 toda copia se rechazaba aquí, y la pantalla dejaba subir la
+// «Factura emitida» desde las etapas posteriores (`editable_siempre`): el usuario veía
+// procesar el PDF y al final recibía «copia de solo lectura».
+async function destinoDeEscritura(
   supabase: unknown,
   negocioBloqueId: string,
-): Promise<string | null> {
+): Promise<{ ok: true; destino: DestinoBloque } | { ok: false; error: string }> {
   const { data } = await db(supabase)
     .from('negocio_bloques')
     .select('bloque_configs(config_extra)')
@@ -355,10 +369,11 @@ async function bloqueHeredadoError(
   const cfg =
     ((data?.bloque_configs as { config_extra?: Record<string, unknown> } | null)?.config_extra ??
       {}) as Record<string, unknown>
-  const srcOrden = cfg.source_etapa_orden
-  if (typeof srcOrden !== 'number') return null
+  if (copiaDeSoloLectura(cfg)) return { ok: false, error: mensajeCopiaDeSoloLectura(cfg) }
 
-  return `Este bloque es una copia de solo lectura de la etapa ${srcOrden}. Corrige el documento en su etapa de origen.`
+  const destino = await resolverDestino(supabase, negocioBloqueId)
+  if (destino.copiaHeredada && !destino.redirigido) return { ok: false, error: MENSAJE_ORIGEN_NO_RESUELTO }
+  return { ok: true, destino }
 }
 
 // ── Almacenamiento externo (proveedor `supabase_externo`) ─────────────────────
@@ -623,15 +638,13 @@ async function procesarDocumentoSinMemo(
   const guard = await guardEditarBloque(negocioBloqueId)
   if (!guard.ok) return { success: false, error: guard.error ?? 'Sin permiso' }
 
-  const heredado = await bloqueHeredadoError(supabase, negocioBloqueId)
-  if (heredado) return { success: false, error: heredado }
-
-  // Casilla compartida: el permiso lo da la etapa donde el usuario ESTÁ trabajando (los dos
-  // guards de arriba), pero el archivo se escribe en la fila canónica. Se lee también de ella,
-  // así la subcarpeta de Drive, los campos de extracción y los cross-checks salen de la config
-  // del origen y el bloque espejo se comporta igual sin copiarle nada.
-  const destino = await resolverDestino(supabase, negocioBloqueId)
-  const bloqueId = destino.id
+  // Casilla compartida o copia heredada escribible: el permiso lo da la etapa donde el usuario
+  // ESTÁ trabajando (el guard de arriba), pero el archivo se escribe en la fila canónica. Se lee
+  // también de ella, así la subcarpeta de Drive, los campos de extracción y los cross-checks
+  // salen de la config del origen y el bloque espejo se comporta igual sin copiarle nada.
+  const escritura = await destinoDeEscritura(supabase, negocioBloqueId)
+  if (!escritura.ok) return { success: false, error: escritura.error }
+  const bloqueId = escritura.destino.id
 
   // ── ¿Este archivo REEMPLAZA a otro en una etapa ya superada? ───────────────
   // Entonces no es cargar un documento, es corregir el expediente: mismo opt-in, misma
@@ -1130,11 +1143,11 @@ async function reprocesarDocumentoSinMemo(
     return { success: false, error: guard.error ?? 'Tu área no permite reprocesar este documento' }
   }
 
-  const heredado = await bloqueHeredadoError(supabase, negocioBloqueId)
-  if (heredado) return { success: false, error: heredado }
-
-  // Casilla compartida: se relee y reescribe la fila canónica (ver `procesarDocumento`).
-  const bloqueId = (await resolverDestino(supabase, negocioBloqueId)).id
+  // Casilla compartida o copia escribible: se relee y reescribe la fila canónica (ver
+  // `procesarDocumento`). Así origen y copia no pueden quedar con datos distintos.
+  const escritura = await destinoDeEscritura(supabase, negocioBloqueId)
+  if (!escritura.ok) return { success: false, error: escritura.error }
+  const bloqueId = escritura.destino.id
 
   try {
     // 1. Leer bloque + config
@@ -1425,14 +1438,13 @@ export async function actualizarCampoDocumento(
     return { success: false, error: guard.error ?? 'Tu área no permite corregir este campo' }
   }
 
-  const heredado = await bloqueHeredadoError(supabase, negocioBloqueId)
-  if (heredado) return { success: false, error: heredado }
-
-  // Casilla compartida: se escribe en la fila canónica, igual que la subida del archivo. El
-  // contexto de corrección de más abajo SÍ se mide contra el bloque que el usuario tiene
-  // abierto: lo que decide si esto es una corrección es la etapa donde él está parado, no
-  // dónde viva la fila.
-  const bloqueId = (await resolverDestino(supabase, negocioBloqueId)).id
+  // Casilla compartida o copia escribible: se escribe en la fila canónica, igual que la subida
+  // del archivo. El contexto de corrección de más abajo SÍ se mide contra el bloque que el
+  // usuario tiene abierto: lo que decide si esto es una corrección es la etapa donde él está
+  // parado, no dónde viva la fila.
+  const escritura = await destinoDeEscritura(supabase, negocioBloqueId)
+  if (!escritura.ok) return { success: false, error: escritura.error }
+  const bloqueId = escritura.destino.id
 
   // Nombre del editor para la marca de trazabilidad (snapshot).
   let editorNombre = 'Usuario'

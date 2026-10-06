@@ -54,6 +54,7 @@ import type { EtapaNoAplica } from '@/lib/negocios/ruta-descartada-negocio'
 import { MOTIVOS_PAUSA, MAX_DIAS_PAUSA, MAX_PAUSAS } from '@/lib/negocios/constants'
 import { siguienteEtapaPorDefecto } from '@/lib/negocios/flujo'
 import { soloLecturaPorDatoLleno } from '@/lib/negocios/editable-si-vacio'
+import { copiaDeSoloLectura } from '@/lib/negocios/copia-heredada'
 import { negocioCerrado as estaCerrado } from '@/lib/negocios/motivo-cierre'
 import type { LineaBase } from '@/lib/negocios/presupuesto-ejecucion'
 import { lineaDeclaraCierre, accionDeCierre, type EtapaCierre } from '@/lib/negocios/etapa-cierre'
@@ -1558,6 +1559,14 @@ function BloqueRenderer({
   const GERENCIAL = ['owner', 'admin']
   const SUPERVISOR_UP = ['owner', 'admin', 'supervisor']
 
+  // `editable_siempre` NO abre una copia heredada que no pueda escribir en su origen: el
+  // servidor la rechazaría al final (`documento-actions.destinoDeEscritura`), con este mismo
+  // criterio (`copia-heredada.ts`). Ofrecer subir y rechazar después es el defecto del
+  // 2026-10-05. Solo `documento`: los formularios no se heredan como copia.
+  const abiertoSiempre =
+    (configExtra as { editable_siempre?: boolean }).editable_siempre === true
+    && !(tipo === 'documento' && copiaDeSoloLectura(configExtra))
+
   function getBloqueMode(): 'editable' | 'visible' {
     // editable_siempre: formularios (010/1668) regenerables aun completados o
     // heredados — la DIAN devuelve requerimientos tras avanzar de etapa.
@@ -1575,7 +1584,7 @@ function BloqueRenderer({
     // sigue siendo supervisor+.
     if (
       (tipo === 'formulario' || tipo === 'documento') &&
-      (configExtra as { editable_siempre?: boolean }).editable_siempre === true &&
+      abiertoSiempre &&
       SUPERVISOR_UP.includes(userRole)
     ) return 'editable'
     // Config-level: bloque marked as read-only (inherited/visible)
@@ -1659,7 +1668,7 @@ function BloqueRenderer({
   const faltaHonorarioConfirmado =
     (configExtra as { _faltaHonorarioConfirmado?: boolean })._faltaHonorarioConfirmado === true
   const editableSiempre =
-    (configExtra as { editable_siempre?: boolean }).editable_siempre === true
+    abiertoSiempre
     || (tipo === 'propuesta_economica' && faltaHonorarioConfirmado)
   // Bloque REACTIVADO: aplica hoy porque alguien corrigió la decisión que lo
   // gobierna, y su etapa ya pasó. El historial fuerza solo lectura a todo, así que
