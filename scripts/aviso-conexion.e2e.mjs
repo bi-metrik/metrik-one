@@ -41,6 +41,8 @@ async function escenario(ruta, preparar, esperaMs, despues, captura) {
   const ctx = await browser.newContext()
   const page = await ctx.newPage()
   const reportes = []
+  const consola = []
+  page.on('console', (m) => { if (m.type() === 'error') consola.push(m.text().slice(0, 200)) })
   await page.route('**/api/errores-cliente', async (r) => {
     reportes.push(JSON.parse(r.request().postData() || '{}'))
     await r.fulfill({ status: 204 })
@@ -78,14 +80,14 @@ async function escenario(ruta, preparar, esperaMs, despues, captura) {
   final.pintado = !!cuadro
   if (cuadro && captura && process.env.SHOTS) writeFileSync(`${process.env.SHOTS}/${captura}.png`, Buffer.from(cuadro, 'base64'))
   await ctx.close()
-  return { aparecio, desaparecio, ...final, avisos }
+  return { aparecio, desaparecio, ...final, avisos, consola }
 }
 
 const chunks = '**/_next/static/chunks/**'
 const casos = {
   async A() {
     const r = await escenario('/login?redirectTo=%2Fnegocios', null, 25_000)
-    comprobar('A normal: sin aviso, hidrata, formulario', r.aparecio === null && r.hidratada && r.form && r.avisos.length === 0, r)
+    comprobar('A normal: sin aviso, hidrata, formulario', r.aparecio === null && r.hidratada && r.form && r.avisos.length === 0 && !r.consola.some((c) => /hydrat/i.test(c)), r)
   },
   async B() {
     const r = await escenario('/login?redirectTo=%2Fnegocios', (p) => p.route(chunks, (x) => x.abort('connectionreset')), 8_000)
