@@ -1,9 +1,10 @@
 /**
  * Casilla compartida: la MISMA casilla vista desde dos etapas distintas.
  *
- * No es una copia de solo lectura (eso es `source_etapa_orden`, que muestra el archivo del
- * origen y no deja escribir). Aquí hay UNA fila y dos puertas de entrada, porque el mismo
- * papel puede llegar por dos caminos según la rama que tome el caso.
+ * No es una copia heredada (eso es `source_etapa_orden`, que muestra el archivo del origen).
+ * Aquí hay UNA fila y dos puertas de entrada, porque el mismo papel puede llegar por dos
+ * caminos según la rama que tome el caso. Desde el 2026-10-06 la copia heredada que declara
+ * `editable_siempre` usa la misma puerta (ver `copia-heredada.ts`): escribe en su origen.
  *
  * Caso que lo obliga (SOENA VE): el certificado UPME lo pide Certificación, pero el tramo de
  * solo devolución de IVA no pasa por Certificación y aun así no se puede ejecutar sin él.
@@ -20,6 +21,8 @@
  * La fila se crea `pendiente` y vacía. Quien llama escribe inmediatamente después.
  */
 
+import { esCopiaHeredada, origenDeCopiaEscribible } from './copia-heredada'
+
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type Cliente = any
 
@@ -32,6 +35,12 @@ export type DestinoBloque = {
   redirigido: boolean
   /** true cuando hubo que crear la fila del origen. */
   creado: boolean
+  /**
+   * true cuando la fila abierta es una COPIA heredada (`source_etapa_orden`). Una copia no
+   * puede caer a «escribir donde el usuario está»: su fila propia no se pinta nunca (ver
+   * `copia-heredada.ts`). Si `redirigido` es false, quien llama tiene que rechazar.
+   */
+  copiaHeredada?: boolean
 }
 
 /**
@@ -70,6 +79,10 @@ export function origenUnico<T extends { id: string }>(candidatos: readonly T[] |
  *
  * Devuelve la fila recibida cuando el bloque no es compartido, cuando el origen es ambiguo
  * o cuando algo falla: ante la duda se escribe donde el usuario está, nunca se pierde el dato.
+ *
+ * ⚠️ Salvo en una COPIA heredada: ahí la fila local no se pinta nunca, así que «escribir donde
+ * el usuario está» es perder el dato en silencio. Por eso el destino lleva `copiaHeredada`, y
+ * quien llama rechaza cuando viene sin `redirigido` (`documento-actions.destinoDeEscritura`).
  */
 export async function resolverDestino(
   supabase: Cliente,
@@ -83,10 +96,17 @@ export async function resolverDestino(
 
   const ceLocal = ((actual?.bloque_configs as { config_extra?: ConfigExtra } | null)?.config_extra
     ?? {}) as ConfigExtra
-  const local: DestinoBloque = { id: negocioBloqueId, redirigido: false, creado: false }
+  const local: DestinoBloque = {
+    id: negocioBloqueId,
+    redirigido: false,
+    creado: false,
+    ...(esCopiaHeredada(ceLocal) ? { copiaHeredada: true } : {}),
+  }
   if (!actual) return local
 
-  const srcSlug = origenCompartido(ceLocal)
+  // Dos configuraciones escriben en el origen: la casilla compartida y la copia heredada que
+  // declara `editable_siempre` (la «Factura emitida» de SOENA desde las etapas posteriores).
+  const srcSlug = origenCompartido(ceLocal) ?? origenDeCopiaEscribible(ceLocal)
   if (!srcSlug) return local
 
   const negocioId = (actual as { negocio_id: string }).negocio_id
@@ -100,7 +120,7 @@ export async function resolverDestino(
 
   const filaOrigen = origenUnico((origen ?? []) as Array<{ id: string }>)
   if (filaOrigen) {
-    return { id: filaOrigen.id, redirigido: true, creado: false }
+    return { ...local, id: filaOrigen.id, redirigido: true, creado: false }
   }
   // Más de una fila con el mismo slug: configuración ambigua, no se elige por cuenta propia.
   if ((origen?.length ?? 0) > 1) {
@@ -180,7 +200,7 @@ async function crearCasillaOrigen(
   const id = (creada as { id?: string } | null)?.id
   if (!id) return local
 
-  return { id, redirigido: true, creado: true }
+  return { ...local, id, redirigido: true, creado: true }
 }
 
 /** Compatibilidad con los llamadores que solo necesitan la fila destino. */
