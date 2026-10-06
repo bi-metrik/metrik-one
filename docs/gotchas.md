@@ -268,3 +268,10 @@
   ACTUALIZA, y el interruptor de apagado (`APAGADO = true` en el archivo) llega por la actualización.
   Segunda llave: `SW_PILOTO_ACTIVO` en `src/lib/red/piloto.ts`.
 
+- **Un trigger que busca filas que llegan en el VIAJE SIGUIENTE no las ve.** (2026-10-06,
+  fix/idempotencia-menciones). `addComment` escribía `activity_log` con `mencion_id` y después, en otra
+  petición, `activity_menciones`. La guarda de `fn_notif_mencion` («si ya hay filas en
+  `activity_menciones`, no avisar») corría en el primer insert, cuando esas filas aún no existían: la
+  primera persona mencionada recibía dos avisos (72 pares a 0,2 s). Dos escrituras por PostgREST son dos
+  transacciones; una guarda entre ellas solo sirve si el dato que mira ya está escrito. Arreglo: con
+  menciones nuevas `mencion_id` va null y el distintivo sale de `activity_menciones`.

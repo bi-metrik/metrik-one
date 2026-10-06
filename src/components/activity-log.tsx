@@ -9,6 +9,7 @@ import {
 } from 'lucide-react'
 import { toast } from 'sonner'
 import { getActivityLog, addComment, deleteActivity, type AreaMencionable } from '@/app/(app)/activity-actions'
+import { etiquetasDeMencion } from '@/lib/activity/etiquetas-mencion'
 import { formatBogotaFechaCorta } from '@/lib/dates/bogota'
 import { resolverStatusContacto } from '@/lib/catalogos/constants'
 
@@ -35,6 +36,8 @@ export interface ActivityEntry {
   created_at: string | null
   autor: { id: string; full_name: string } | null
   mencion: { id: string; full_name: string } | null
+  /** Personas (por nombre) y equipos (`@area`) mencionados. Vacío en comentarios viejos. */
+  menciones?: string[]
   /** Lo calcula el servidor con la misma regla que aplica al borrar. */
   puede_borrar?: boolean
 }
@@ -483,13 +486,13 @@ function CommentEntry({ entry, onDelete }: { entry: ActivityEntry; onDelete: (id
 
       <p className="mt-1.5 text-sm whitespace-pre-wrap">{entry.contenido}</p>
 
-      {/* Mention badge */}
-      {entry.mencion && (
-        <span className="mt-1.5 inline-flex items-center gap-0.5 rounded-full bg-blue-100 px-1.5 py-0.5 text-[10px] font-medium text-blue-700 dark:bg-blue-900/30 dark:text-blue-300">
+      {/* Mention badges: las de `activity_menciones`; en comentarios viejos, la única de `mencion_id`. */}
+      {etiquetasDeMencion(entry).map(etiqueta => (
+        <span key={etiqueta} className="mt-1.5 mr-1 inline-flex items-center gap-0.5 rounded-full bg-blue-100 px-1.5 py-0.5 text-[10px] font-medium text-blue-700 dark:bg-blue-900/30 dark:text-blue-300">
           <AtSign className="h-2.5 w-2.5" />
-          {entry.mencion.full_name}
+          {etiqueta.replace(/^@/, '')}
         </span>
-      )}
+      ))}
 
       {/* Link */}
       {entry.link_url && (

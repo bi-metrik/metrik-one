@@ -23,9 +23,47 @@ export async function getActivityLog(entidadTipo: string, entidadId: string, opo
     .order('created_at', { ascending: false })
     .limit(50)
 
+  const entradas = data ?? []
+  const menciones = await mencionesDe(supabase, workspaceId, entradas.filter(e => e.tipo === 'comentario').map(e => e.id))
+
   // `puede_borrar` lo decide la misma regla que aplica `deleteActivity`: la pantalla
   // solo dibuja el botón donde el servidor va a dejar borrar.
-  return (data ?? []).map(e => ({ ...e, puede_borrar: puedeBorrarEntrada(e, { staffId, role }) }))
+  return entradas.map(e => ({
+    ...e,
+    menciones: menciones.get(e.id) ?? [],
+    puede_borrar: puedeBorrarEntrada(e, { staffId, role }),
+  }))
+}
+
+/**
+ * A quién se mencionó en cada comentario: personas por nombre y equipos como `@area`.
+ *
+ * Es lectura aparte, no un embed del select principal: si fallara, el timeline se
+ * muestra igual (sin los distintivos) en vez de quedar vacío.
+ */
+async function mencionesDe(
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  supabase: any,
+  workspaceId: string,
+  ids: string[],
+): Promise<Map<string, string[]>> {
+  const out = new Map<string, string[]>()
+  if (ids.length === 0) return out
+  const { data, error } = await supabase
+    .from('activity_menciones')
+    .select('activity_log_id, area, persona:staff(full_name)')
+    .eq('workspace_id', workspaceId)
+    .in('activity_log_id', ids)
+  if (error) {
+    console.error('[getActivityLog] no se pudieron leer las menciones:', error.message)
+    return out
+  }
+  for (const m of (data ?? []) as Array<{ activity_log_id: string; area: string | null; persona: { full_name: string | null } | null }>) {
+    const etiqueta = m.area ? `@${m.area}` : m.persona?.full_name
+    if (!etiqueta) continue
+    out.set(m.activity_log_id, [...(out.get(m.activity_log_id) ?? []), etiqueta])
+  }
+  return out
 }
 
 /** Equipos que se pueden etiquetar en un comentario. */
@@ -62,9 +100,13 @@ export async function addComment(
     tipo: 'comentario',
     autor_id: staffId,
     contenido: contenido.trim(),
-    // Se conserva para que el timeline siga mostrando a quién se mencionó.
-    // Ya NO es la fuente del aviso: de eso se encarga `activity_menciones`.
-    mencion_id: mencionId || staffIds[0] || null,
+    // ⚠️ Con menciones nuevas va NULL. `mencion_id` dispara su propio trigger
+    // (`trg_notif_mencion`) en ESTE insert, antes de que existan las filas de
+    // `activity_menciones` que su guarda busca, y la persona recibía el aviso dos
+    // veces (72 pares a 0,2 s, medido el 2026-10-06). El distintivo del timeline
+    // ahora sale de `activity_menciones` (ver `getActivityLog`). Solo el camino
+    // legado (un `mencionId` suelto, sin la lista) lo sigue escribiendo.
+    mencion_id: staffIds.length > 0 || areas.length > 0 ? null : (mencionId || null),
     link_url: linkUrl?.trim() || null,
   }, 'addComment')
 
