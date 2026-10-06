@@ -17,6 +17,8 @@
 //    con el valor del plan elegido y persiste aprobado_plan
 // ============================================================
 
+import { accionIdempotente } from '@/lib/idempotencia/accion'
+import { MENSAJE_EN_CURSO } from '@/lib/idempotencia/clave'
 import { getWorkspace } from '@/lib/actions/get-workspace'
 import { getCachedUser } from '@/lib/supabase/auth-user'
 import { guardEditarBloque } from '@/lib/permissions/guard-negocio'
@@ -542,7 +544,7 @@ export async function getTarifaPropuesta(
 
 // ── Action: generar nueva version ───────────────────────────────────────────
 
-export async function generarVersionPropuesta(
+async function generarVersionPropuestaSinClave(
   bloqueId: string,
   input: { descuento_pct_plan1: number; descuento_pct_plan2: number },
 ): Promise<{ ok: boolean; error?: string; version?: PropuestaVersion; warning?: string }> {
@@ -1698,4 +1700,16 @@ export async function corregirAprobacion(
 
   revalidatePath(`/negocios/${negocioId}`)
   return { ok: true }
+}
+
+// ── Idempotencia por intención (brief del doble guardado, 2026-10-06) ──────────────────
+// Las acciones de abajo son la puerta pública; su cuerpo vive en `<nombre>SinClave`. Con la
+// clave del navegador (`useIntencion`), la misma intención repetida (POST que Chromium
+// reenvía, doble toque, «Reintentar» tras «No se confirmó») se ejecuta una sola vez.
+
+export async function generarVersionPropuesta(bloqueId: string, input: { descuento_pct_plan1: number; descuento_pct_plan2: number }, intencion?: string) {
+  return accionIdempotente<Awaited<ReturnType<typeof generarVersionPropuestaSinClave>>>(
+    { accion: 'generarVersionPropuesta', clave: intencion, args: [bloqueId, input], enCurso: () => ({ ok: false, error: MENSAJE_EN_CURSO }) },
+    () => generarVersionPropuestaSinClave(bloqueId, input),
+  )
 }

@@ -1,5 +1,7 @@
 'use server'
 
+import { accionIdempotente } from '@/lib/idempotencia/accion'
+import { MENSAJE_EN_CURSO } from '@/lib/idempotencia/clave'
 import { consultarTransaccionEpayco, type EpaycoDesglose } from '@/lib/epayco'
 import { getWorkspace } from '@/lib/actions/get-workspace'
 import { exigirModulo, REQUISITO } from '@/lib/modulos/exigir-modulo'
@@ -216,7 +218,7 @@ export interface RegistrarPagoEpaycoOpts {
   justificacion?: string
 }
 
-export async function registrarPagoEpayco(
+async function registrarPagoEpaycoSinClave(
   negocioBloqueId: string,
   negocioId: string,
   desglose: EpaycoDesglose,
@@ -446,4 +448,16 @@ export async function registrarPagoEpayco(
     console.error('[ePayco registrar]', message)
     return { success: false, error: message }
   }
+}
+
+// ── Idempotencia por intención (brief del doble guardado, 2026-10-06) ──────────────────
+// Las acciones de abajo son la puerta pública; su cuerpo vive en `<nombre>SinClave`. Con la
+// clave del navegador (`useIntencion`), la misma intención repetida (POST que Chromium
+// reenvía, doble toque, «Reintentar» tras «No se confirmó») se ejecuta una sola vez.
+
+export async function registrarPagoEpayco(negocioBloqueId: string, negocioId: string, desglose: EpaycoDesglose, tipoCobro: string, opts: RegistrarPagoEpaycoOpts = {}, intencion?: string) {
+  return accionIdempotente<Awaited<ReturnType<typeof registrarPagoEpaycoSinClave>>>(
+    { accion: 'registrarPagoEpayco', clave: intencion, args: [negocioBloqueId, negocioId, desglose, tipoCobro, opts], enCurso: () => ({ success: false, error: MENSAJE_EN_CURSO }) },
+    () => registrarPagoEpaycoSinClave(negocioBloqueId, negocioId, desglose, tipoCobro, opts),
+  )
 }

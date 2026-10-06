@@ -1,5 +1,7 @@
 'use server'
 
+import { accionIdempotente } from '@/lib/idempotencia/accion'
+import { MENSAJE_EN_CURSO } from '@/lib/idempotencia/clave'
 import { getWorkspace } from '@/lib/actions/get-workspace'
 import { getRolePermissions } from '@/lib/roles'
 import { STATUS_CONTACTO } from '@/lib/catalogos/constants'
@@ -304,7 +306,7 @@ export async function getContacto(id: string) {
   return data
 }
 
-export async function createContacto(formData: FormData) {
+async function createContactoSinClave(formData: FormData) {
   const { supabase, workspaceId, error } = await getWorkspace()
   if (error || !workspaceId) return { success: false, error: 'No autenticado' }
 
@@ -1109,4 +1111,16 @@ export async function tieneModuloAliados(): Promise<boolean> {
 
   const modules = (ws as { modules: Record<string, boolean> | null } | null)?.modules
   return Boolean(modules?.aliados)
+}
+
+// ── Idempotencia por intención (brief del doble guardado, 2026-10-06) ──────────────────
+// Las acciones de abajo son la puerta pública; su cuerpo vive en `<nombre>SinClave`. Con la
+// clave del navegador (`useIntencion`), la misma intención repetida (POST que Chromium
+// reenvía, doble toque, «Reintentar» tras «No se confirmó») se ejecuta una sola vez.
+
+export async function createContacto(formData: FormData, intencion?: string) {
+  return accionIdempotente<Awaited<ReturnType<typeof createContactoSinClave>>>(
+    { accion: 'createContacto', clave: intencion, args: [[...formData.entries()].map(([k, v]) => [k, typeof v === 'string' ? v : v.name])], enCurso: () => ({ success: false, error: MENSAJE_EN_CURSO }) },
+    () => createContactoSinClave(formData),
+  )
 }

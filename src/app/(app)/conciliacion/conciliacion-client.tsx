@@ -53,6 +53,7 @@ import {
   type TitularEnPantalla,
 } from '@/lib/facturacion/titular-revision'
 import type { FiltroSaldo, PestanaConciliacion } from './destino-inicial'
+import { useIntencion } from '@/hooks/use-intencion'
 
 const fmtCOP = (n: number) =>
   new Intl.NumberFormat('es-CO', { style: 'currency', currency: 'COP', maximumFractionDigits: 0 }).format(n)
@@ -218,6 +219,8 @@ function TabBandeja({ pendientes, onDone }: { pendientes: ReferenciaPago[]; onDo
 
 function RepartoCard({ ref_: r, onDone }: { ref_: ReferenciaPago; onDone: () => void }) {
   const [pending, startTransition] = useTransition()
+  // Una clave por intención: un reintento de la misma acción no la ejecuta dos veces.
+  const intencion = useIntencion()
   const [rechazando, setRechazando] = useState(false)
   const [nota, setNota] = useState('')
 
@@ -230,7 +233,8 @@ function RepartoCard({ ref_: r, onDone }: { ref_: ReferenciaPago; onDone: () => 
 
   function aceptar() {
     startTransition(async () => {
-      const res = await aceptarRepartoComercial(r.external_ref)
+      const res = await aceptarRepartoComercial(r.external_ref, intencion.clave())
+      intencion.cerrar()
       if (res.success) { toast.success('Pago conciliado'); onDone() }
       else toast.error(res.error)
     })
@@ -1203,6 +1207,8 @@ export function FilaPorFacturar({
   // Emitir puede tardar decenas de segundos (Siigo). Si la respuesta se pierde, la factura
   // pudo salir igual: se relee la cola en vez de invitar a emitir otra vez.
   const [isPending, startTransition] = useTransitionTolerante({ releer: onCambio })
+  // Una clave por intención: un reintento de la misma acción no la ejecuta dos veces.
+  const intencion = useIntencion()
   const [pidiendoMotivo, setPidiendoMotivo] = useState(false)
   const [motivo, setMotivo] = useState('')
   // Tres pasos a propósito: revisar la prefactura, confirmar, emitir. Una factura
@@ -1245,7 +1251,8 @@ export function FilaPorFacturar({
       const r = await emitirFacturaDeNegocio(caso.negocio_id, {
         justificacionDuplicado,
         datos: datosEditados(),
-      })
+      }, intencion.clave())
+      intencion.cerrar()
       if (r.duplicados) {
         setDuplicados(r.duplicados); setHermanos(r.hermanos ?? []); setConfirmando(false); return
       }

@@ -18,6 +18,7 @@ import { formatBogotaFechaHora } from '@/lib/dates/bogota'
 import { hrefArchivo } from '@/lib/almacenamiento/referencia'
 import { conReintentoDeRed } from '@/lib/red/con-reintento'
 import { mensajeDeFallaDeCarga } from '@/lib/red/error-de-red'
+import { useIntencion } from '@/hooks/use-intencion'
 
 interface PropuestaVersion {
   n: number
@@ -200,6 +201,8 @@ function CuerpoPropuesta({
 }: Props & { tarifa: TarifaVigente | null }) {
   // Corrección del valor aprobado (no genera versión ni PDF: ver la action).
   const [corrigiendoValor, setCorrigiendoValor] = useState(false)
+  // Una clave por intención: un reintento de la misma acción no la ejecuta dos veces.
+  const intencion = useIntencion()
   const [valorCorregido, setValorCorregido] = useState('')
   // El % de la correccion vive aparte del precio, igual que en `PlanEditor`: los dos
   // se editan y cada uno reescribe al otro, y el que se teclea conserva su texto.
@@ -342,7 +345,8 @@ function CuerpoPropuesta({
       const res = await generarVersionPropuesta(negocioBloqueId, {
         descuento_pct_plan1: ofrece(1) ? calc.desc1 : 0,
         descuento_pct_plan2: ofrece(2) ? calc.desc2 : 0,
-      })
+      }, intencion.clave())
+      intencion.cerrar()
       if (res.ok) {
         if (res.warning) {
           toast.warning(`Versión v${res.version?.n} guardada (sin PDF)`, {

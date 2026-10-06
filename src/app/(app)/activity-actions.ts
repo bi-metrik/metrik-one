@@ -1,5 +1,7 @@
 'use server'
 
+import { accionIdempotente } from '@/lib/idempotencia/accion'
+import { MENSAJE_EN_CURSO } from '@/lib/idempotencia/clave'
 import { getWorkspace } from '@/lib/actions/get-workspace'
 import { registrarActividad } from '@/lib/activity/registrar-actividad'
 // Solo el tipo, e **importado** — nunca re-exportado. En un archivo `'use server'` un
@@ -31,7 +33,7 @@ export async function getActivityLog(entidadTipo: string, entidadId: string, opo
 /** Equipos que se pueden etiquetar en un comentario. */
 export type AreaMencionable = 'comercial' | 'operaciones' | 'financiera'
 
-export async function addComment(
+async function addCommentSinClave(
   entidadTipo: string,
   entidadId: string,
   contenido: string,
@@ -171,4 +173,16 @@ export async function logSystemChange(
     valor_nuevo: valorNuevo,
     ...(opts?.contenido ? { contenido: opts.contenido } : {}),
   }, 'logSystemChange')
+}
+
+// ── Idempotencia por intención (brief del doble guardado, 2026-10-06) ──────────────────
+// Las acciones de abajo son la puerta pública; su cuerpo vive en `<nombre>SinClave`. Con la
+// clave del navegador (`useIntencion`), la misma intención repetida (POST que Chromium
+// reenvía, doble toque, «Reintentar» tras «No se confirmó») se ejecuta una sola vez.
+
+export async function addComment(entidadTipo: string, entidadId: string, contenido: string, mencionId?: string | null, linkUrl?: string | null, menciones?: { staffIds?: string[]; areas?: AreaMencionable[] }, intencion?: string) {
+  return accionIdempotente<Awaited<ReturnType<typeof addCommentSinClave>>>(
+    { accion: 'addComment', clave: intencion, args: [entidadTipo, entidadId, contenido, mencionId, linkUrl, menciones], enCurso: () => ({ error: MENSAJE_EN_CURSO }) },
+    () => addCommentSinClave(entidadTipo, entidadId, contenido, mencionId, linkUrl, menciones),
+  )
 }

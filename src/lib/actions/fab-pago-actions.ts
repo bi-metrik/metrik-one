@@ -1,5 +1,7 @@
 'use server'
 
+import { accionIdempotente } from '@/lib/idempotencia/accion'
+import { MENSAJE_EN_CURSO } from '@/lib/idempotencia/clave'
 import { getWorkspace } from '@/lib/actions/get-workspace'
 import { exigirModulo, MENSAJE_MODULO_NO_ACTIVO, REQUISITO } from '@/lib/modulos/exigir-modulo'
 import { getAreasEfectivas, type Area, type Role, type Stage } from '@/lib/permissions/can-edit'
@@ -190,7 +192,7 @@ export async function negocioPuedeRecibirCobro(
  * NO abre el editor de la etapa: es un formulario aislado de captura. NO bypasea
  * ninguna barrera de control — solo desacopla el PERMISO de STAGE_TO_AREA.
  */
-export async function agregarPagoFab(
+async function agregarPagoFabSinClave(
   input: AgregarPagoInput & { soporte_subido?: SoporteSubidoInput },
 ): Promise<
   | { success: true }
@@ -450,4 +452,16 @@ async function motivosQueRetienen(
   }
 
   return motivos
+}
+
+// ── Idempotencia por intención (brief del doble guardado, 2026-10-06) ──────────────────
+// Las acciones de abajo son la puerta pública; su cuerpo vive en `<nombre>SinClave`. Con la
+// clave del navegador (`useIntencion`), la misma intención repetida (POST que Chromium
+// reenvía, doble toque, «Reintentar» tras «No se confirmó») se ejecuta una sola vez.
+
+export async function agregarPagoFab(input: AgregarPagoInput & { soporte_subido?: SoporteSubidoInput }, intencion?: string) {
+  return accionIdempotente<Awaited<ReturnType<typeof agregarPagoFabSinClave>>>(
+    { accion: 'agregarPagoFab', clave: intencion, args: [input], enCurso: () => ({ success: false, error: MENSAJE_EN_CURSO }) },
+    () => agregarPagoFabSinClave(input),
+  )
 }
