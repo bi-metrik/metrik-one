@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from 'react'
 import { useTransitionTolerante } from '@/hooks/use-transition-tolerante'
+import { useRouter } from 'next/navigation'
 import { Download, FileText, CheckCircle2, AlertCircle, Loader2, RefreshCw, Lock, Pencil } from 'lucide-react'
 import { toast } from 'sonner'
 import { formatCOP } from '@/lib/contacts/constants'
@@ -209,7 +210,10 @@ function CuerpoPropuesta({
   // Reversión de la aprobación (sí reabre el bloque: ver la action).
   const [revirtiendo, setRevirtiendo] = useState(false)
   const [motivoReversion, setMotivoReversion] = useState('')
-  const [isPending, startTransition] = useTransitionTolerante()
+  const router = useRouter()
+  // Generar una versión tarda (PDF + Drive) y cada intento crea una versión nueva: si la
+  // respuesta se pierde, se relee la ficha en vez de ofrecer generarla otra vez.
+  const [isPending, startTransition] = useTransitionTolerante({ releer: () => router.refresh() })
   const data = (instancia?.data ?? {}) as PropuestaData
   const precioBase = data.precio_base_con_iva ?? 0
   const versiones = (data.versiones ?? []).slice().sort((a, b) => b.n - a.n)

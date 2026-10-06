@@ -62,7 +62,9 @@ describe('banco de la simulación con un modelo falso: el validador', () => {
       // En la bandeja, lo que el código de hoy lee exacto no llega al modelo (la confirmación de cliente nuevo, el
       // encabezado, lo que espera la caja): se resume lo que hace el código.
       const espera = t.pendiente_previo === 'pide_llave' ? 'llave' : t.pendiente_previo === 'confirma_llave' ? 'misma' : null;
-      const hoy = trappvel ? deHoy(t.texto, pend, BANCO.contextos.trappvel.viajes, cliente, espera) : null;
+      // Décimo control: con un viaje en foco, la carga directa (la memoria) va antes del modelo.
+      const foco = (t as { foco?: string }).foco ? { viaje: (t as { foco: string }).foco, otrosClientes: (t as { directorio_otros?: string[] }).directorio_otros ?? [] } : null;
+      const hoy = trappvel ? deHoy(t.texto, pend, BANCO.contextos.trappvel.viajes, cliente, espera, foco) : null;
       const r = hoy ?? resumir(validar(t.modelo, {
         texto: t.texto, bandeja: trappvel, rol: 'owner', pendiente: pend, negocios: trappvel ? VIAJES : NEGOCIOS,
         tanda: t.tanda ? { abierta: true, nombre: 'la tanda abierta', cajaId: null, cliente } : null,
@@ -74,8 +76,8 @@ describe('banco de la simulación con un modelo falso: el validador', () => {
     });
   }
 
-  it('los 125 turnos están en el banco (45 + 11 de la confirmación de cliente nuevo + 32 de identidad + 12 del octavo control + 13 de preguntas sin prefijo + 8 del noveno control + 4 de la conversación con memoria) y todos salen como se esperaba', () => {
-    expect(BANCO.turnos).toHaveLength(125);
+  it('los 137 turnos están en el banco (45 + 11 de la confirmación de cliente nuevo + 32 de identidad + 12 del octavo control + 13 de preguntas sin prefijo + 8 del noveno control + 4 de la conversación con memoria + 12 de la carga directa del décimo control) y todos salen como se esperaba', () => {
+    expect(BANCO.turnos).toHaveLength(137);
     expect(resultados.filter(r => !r.ok)).toEqual([]);
   });
 });

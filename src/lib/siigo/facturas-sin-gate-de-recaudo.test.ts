@@ -168,7 +168,7 @@ describe('emitirFacturaNegocio — al emitir se abonan los pagos anteriores', ()
 
   it('lo que salió viaja al llamador, para decirlo en pantalla y en el timeline', async () => {
     const r = await emitir()
-    expect(r.ok && r.abonos.emitidos).toEqual([{ cobro_id: 'cob-1', numero: 'RC-1-90', valor: 425_000 }])
+    expect(r.ok && r.abonos!.emitidos).toEqual([{ cobro_id: 'cob-1', numero: 'RC-1-90', valor: 425_000 }])
   })
 
   it('si la factura NO sale, no se abona nada', async () => {

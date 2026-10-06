@@ -128,10 +128,17 @@ export async function directorioDeLaTanda(
   const { segmentos } = armarSegmentos(mensajes, viajes, cfg);
   const nombres: string[] = [];
   const llaves: Llave[] = [];
+  const porN = new Map(mensajes.map(m => [m.n, m]));
   for (const sg of segmentos) {
     if (sg.encabezado?.resolucion.tipo !== 'nuevo') continue;
     const n = nombreDelViajeNuevo(sg);
     if (n) nombres.push(n);
+    // Décimo control (hallazgo 8): sin nombre, la respuesta escrita a «¿Para qué cliente es?» puede traerlo con un verbo o
+    // una fórmula delante. Se buscan sus tramos (los dos primeros escritos cortos de la caja) para leerla con el directorio.
+    else {
+      const escritos = sg.mensajes.map(k => porN.get(k)).filter(m => !!m && !m.reenviado && m.cuerpo.trim().split(/\s+/).length <= 10).slice(0, 2);
+      for (const m of escritos) nombres.push(m!.cuerpo);
+    }
     if (tieneLlave(sg.cliente?.llave)) llaves.push(sg.cliente!.llave!);
   }
   return directorioPara(supabase, workspaceId, { nombres, llaves });

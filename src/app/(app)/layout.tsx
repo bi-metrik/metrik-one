@@ -7,6 +7,7 @@ import NotificationBell from '@/components/notification-bell'
 import DevWorkspaceBar from '@/components/dev-workspace-bar'
 import VersionWatcher from '@/components/version-watcher'
 import RumRed from '@/components/rum/rum-red'
+import PilotoRed from '@/components/red/piloto-red'
 import { getPlatformAdminState } from '@/lib/actions/platform-admin'
 import { getImpersonationOptions } from '@/lib/actions/impersonation'
 import { getActiveTimer } from './timer-actions'
@@ -238,6 +239,9 @@ export default async function AppLayout({
       {/* Medicion desde el navegador (`[rum]`): web vitals y navegaciones suaves, un
           beacon por ciclo de pagina. No pinta nada. */}
       <RumRed />
+      {/* Piloto de red (solo los workspaces de `WORKSPACES_PILOTO_RED`): pulso de conexión
+          hacia Vercel y fuera de Vercel, y bandeja de fallas por superficie. No pinta nada. */}
+      <PilotoRed slug={workspace.slug} />
       {process.env.NODE_ENV === 'development' && allWorkspaces.length > 0 && (
         <DevWorkspaceBar workspaces={allWorkspaces} activeSlug={activeSlug ?? ''} />
       )}

@@ -2184,12 +2184,18 @@ describe('2026-10-05 · conversación con memoria: la secuencia de las 12:15, de
         expect.stringMatching(/^Cargué en SAN ANDRÉS DIC · Fermín Ocampo \(F 26 1\): [\s\S]*\nPara empezar a cotizar me falta:\n1\. ¿Desde qué ciudad salen\?/),
       ]);
       expect(datosDel('n-fo')).toMatchObject({ adultos: 2, ninos: 1 });
-      // 12:17 · lo que pedía «me falta», escrito: directo al viaje, sin tanda ni resumen ni «sí», con lo que quedó.
+      // 12:17 · lo que pedía «me falta», escrito: el foco sugiere el viaje en un resumen corto con «Cargar» (2026-10-06);
+      // sin tanda, pero nada se carga hasta el «sí» o el toque.
       colaModelo = [salidaModelo({ categoria_hotel: { valor: '4', frase: 'lo quieren 4 estrellas' }, ciudad_origen: { valor: 'Medellín', frase: 'salen de Medellín' }, edades_menores: { valor: '8', frase: 'el niño tiene 8' } })];
       const antes2 = textos().length;
+      const datosAntes = JSON.stringify(datosDel('n-fo'));
       await llega('El hotel lo quieren 4 estrellas, salen de Medellín y el niño tiene 8', { enviado: 30, interprete });
-      expect(textos().slice(antes2)).toEqual([
-        'Lo anoto en SAN ANDRÉS DIC · Fermín Ocampo (F 26 1). Lo estoy leyendo; te digo qué quedó.',
+      expect(textos().slice(antes2)).toEqual(['Anoto en SAN ANDRÉS DIC · Fermín Ocampo (F 26 1): «El hotel lo quieren 4 estrellas, salen de Medellín y el niño tiene 8».']);
+      expect(enviados.at(-1)!.botones!.map(b => b.title)).toEqual(['✅ Cargar', '🗑 Descartar']);
+      expect(JSON.stringify(datosDel('n-fo'))).toBe(datosAntes);
+      await llega('sí', { enviado: 32, interprete });
+      expect(textos().slice(-2)).toEqual([
+        'Listo, lo cargo. Te aviso en cuanto quede.',
         expect.stringMatching(/^Cargué en SAN ANDRÉS DIC · Fermín Ocampo \(F 26 1\): [\s\S]*ciudad de salida MEDELLÍN[\s\S]*Mínimo 9\/9 \(100 %\)/),
       ]);
       expect(t.wa_bandeja_entregas.filter(e => e.estado === 'abierta')).toEqual([]);
@@ -2235,8 +2241,13 @@ describe('2026-10-05 · conversación con memoria: la secuencia de las 12:15, de
     expect(t.wa_bandeja_entregas.filter(e => e.estado === 'abierta')).toEqual([]);
     colaModelo = [salidaModelo({ categoria_hotel: { valor: '5', frase: 'hotel todo incluido' } })];
     await llega('el de Cartagena', { enviado: 45 });
-    expect(textos().some(x => x.startsWith('Lo anoto en CARTAGENA ENE · Gloria Arbeláez (G 26 1).'))).toBe(true);
+    expect(textos().at(-1)).toBe('Anoto en CARTAGENA ENE · Gloria Arbeláez (G 26 1): «prefieren hotel todo incluido».');
     expect(t.wa_bandeja_mensajes.filter(m => m.cuerpo === 'prefieren hotel todo incluido')).toHaveLength(1);
+    expect(datosDel('n-ga')).not.toHaveProperty('categoria_hotel');
+    await toca(enviados.at(-1)!.botones![0], { enviado: 50 });
+    // Con el toque se carga en CARTAGENA (la guarda de la frase decide qué valor entra; aquí, ninguno nuevo).
+    expect(textos().at(-1)).toMatch(/^(?:Cargué en|No encontré datos nuevos para) CARTAGENA ENE · Gloria Arbeláez \(G 26 1\)/);
+    expect(t.wa_bandeja_entendimientos.some(e => e.negocio_id === 'n-ga' && String(e.estado).startsWith('negocio_actualizado'))).toBe(true);
   });
 
   it('una consulta durante una carga en vuelo espera y lo dice; un escrito que repite la respuesta no abre tanda', async () => {
@@ -2272,9 +2283,19 @@ describe('2026-10-05 · conversación con memoria: la secuencia de las 12:15, de
     colaModelo = [salidaModelo({ ciudad_origen: { valor: 'Medellín', frase: 'salen de Medellín' } })];
     await llega('salen de Medellín', { enviado: 30 });
     colaModelo = [salidaModelo({ edades_menores: { valor: '8', frase: 'el niño tiene 8 años' } })];
+    const primero = enviados.at(-1)!;
     await llega('el niño tiene 8 años', { enviado: 40 });
+    // El segundo se agrega al mismo resumen corto, que se vuelve a mostrar con los dos (y botones nuevos).
+    expect(textos().at(-1)).toBe('Anoto en SAN ANDRÉS DIC · Fermín Ocampo (F 26 1): «salen de Medellín» y «el niño tiene 8 años».');
+    expect(enviados.at(-1)!.botones![0].id).not.toBe(primero.botones![0].id);
+    expect(t.wa_bandeja_entregas.filter(e => e.motivo_cierre === 'respuesta_a_lo_que_falta')).toHaveLength(1);
+    expect(datosDel('n-fo')).not.toHaveProperty('ciudad_origen');
+    // El botón del primer resumen ya no sirve; el del segundo carga los dos.
+    await toca(primero.botones![0], { enviado: 45 });
+    expect(datosDel('n-fo')).not.toHaveProperty('ciudad_origen');
+    colaModelo = [salidaModelo({ ciudad_origen: { valor: 'Medellín', frase: 'salen de Medellín' }, edades_menores: { valor: '8', frase: 'el niño tiene 8 años' } })];
+    await toca(enviados.filter(e => e.botones?.length).at(-1)!.botones![0], { enviado: 50 });
     expect(datosDel('n-fo')).toMatchObject({ ciudad_origen: 'MEDELLÍN', edades_menores: '8' });
-    expect(t.wa_bandeja_entregas.filter(e => e.motivo_cierre === 'respuesta_a_lo_que_falta')).toHaveLength(2);
   });
 
   it('las listas numeradas aceptan el número: «¿De qué viaje es el mensaje?» al cerrar la tanda y la del encabezado aproximado', async () => {
@@ -2332,7 +2353,9 @@ describe('2026-10-05 · el resumen con botones «Cargar» y «Descartar», de pu
       expect((t.wa_bandeja_conversacion[0].focos as Array<{ negocio_id: string; por: string }>)[0]).toMatchObject({ negocio_id: 'n-fo', por: 'carga' });
       colaModelo = [salidaModelo({ ciudad_origen: { valor: 'Medellín', frase: 'salen de Medellín' } })];
       await llega('salen de Medellín', { enviado: 30, interprete });
-      expect(textos().at(-2)).toBe('Lo anoto en SAN ANDRÉS DIC · Fermín Ocampo (F 26 1). Lo estoy leyendo; te digo qué quedó.');
+      expect(textos().at(-1)).toBe('Anoto en SAN ANDRÉS DIC · Fermín Ocampo (F 26 1): «salen de Medellín».');
+      expect(datosDel('n-fo')).not.toHaveProperty('ciudad_origen');
+      await toca(boton('✅ Cargar'), { enviado: 32, interprete });
       expect(datosDel('n-fo')).toMatchObject({ ciudad_origen: 'MEDELLÍN' });
       // El mismo «Cargar» otra vez (un doble toque, o uno tardío): la tanda ya se cerró y no se carga dos veces.
       const ents = t.wa_bandeja_entendimientos.length;
@@ -2450,5 +2473,222 @@ describe('2026-10-05 · el resumen con botones «Cargar» y «Descartar», de pu
     colaModelo = [CARGA];
     await toca(boton('✅ Cargar'), { enviado: 40 });
     expect(datosDel('n-fo')).toMatchObject({ adultos: 2 });
+  });
+});
+
+describe('2026-10-05 · el modelo redacta, de punta a punta (`bot_conversacional.redaccion`; textos inventados)', () => {
+  function fermin() {
+    t.contactos.push({ id: 'c-fo', workspace_id: WS, nombre: 'FERMÍN OCAMPO', telefono: '3006661122', email: null, created_at: '2026-01-10T10:00:00Z' });
+    t.negocios.push({ ...negocioDePrueba('n-fo', 'F 26 1', 'SAN ANDRÉS DIC', 'FERMÍN OCAMPO'), contacto_id: 'c-fo' });
+    t.negocio_bloques.push({ id: 'b-n-fo', negocio_id: 'n-fo', data: { destino: 'SAN ANDRÉS' }, updated_at: null, bloque_configs: { orden: 1, config_extra: { fields: FIELDS }, bloque_definitions: { tipo: 'datos' }, etapas_negocio: { orden: 1 } } });
+  }
+  const CARGA = salidaModelo({ destino: { valor: 'San Andrés', frase: 'San Andrés' }, adultos: { valor: '2', frase: '2 adultos' } });
+  const datosDel = (id: string) => t.negocio_bloques.find(b => b.negocio_id === id)!.data as Fila;
+  /** Lo que el modelo de redacción recibió (el texto fijo y la entrada completa) y cómo responde. */
+  const vistos: Array<{ fijo: string; usuario: string }> = [];
+  let responde: 'natural' | 'trampa' | 'falla' = 'natural';
+  let original: typeof redaccion.redaccionDeps.llamarModelo;
+  let redaccion: typeof import('./wa-redaccion.ts');
+  beforeEach(async () => {
+    redaccion = await import('./wa-redaccion.ts');
+    original = redaccion.redaccionDeps.llamarModelo;
+    bandeja.procesarEnElActo.activo = true;
+    vistos.length = 0;
+    responde = 'natural';
+    redaccion.redaccionDeps.llamarModelo = async (p) => {
+      const fijo = /TEXTO FIJO:\n<<<\n([\s\S]*?)\n>>>/.exec(p.usuario)![1];
+      vistos.push({ fijo, usuario: p.usuario });
+      if (responde === 'falla') return { ok: false, motivo: 'timeout', ms: 3000 };
+      // «natural»: una redacción válida (una palabra común delante). «trampa»: datos que solo están en los turnos o en ningún lado.
+      const texto = responde === 'natural' ? `Mira: ${fijo}` : `${fijo}\nYa quedó cargado para Juan Pérez, 5 estrellas, el 20 de enero.`;
+      return { ok: true, json: { texto }, ms: 5, tokensIn: 1, tokensOut: 1, tokensRazonamiento: 0 };
+    };
+  });
+  afterEach(() => { redaccion.redaccionDeps.llamarModelo = original; });
+  const prender = () => { (t.workspaces[0].config_extra as Fila).bot_conversacional = { redaccion: true }; };
+
+  /** La tanda de Fermín, el resumen, «Cargar» y la pregunta por lo que falta. */
+  async function secuencia(interprete?: { llamadas: { n: number } }) {
+    await llega('F 26 1', { enviado: 0, interprete });
+    await llega('el cliente dijo que quiere 5 estrellas, se llama Juan Pérez', { enviado: 1, interprete: undefined });
+    await llega('quieren ir a San Andrés, son 2 adultos', { enviado: 2, reenviado: true });
+    await llega('listo', { enviado: 5, interprete });
+    const resumen = enviados.at(-1)!;
+    colaModelo = [CARGA];
+    await toca(boton('✅ Cargar'), { enviado: 10, interprete });
+    const tras = textos().slice(-2);
+    await llega('qué le falta para cotizar?', { enviado: 30, interprete });
+    return { resumen, tras, consulta: textos().at(-1)! };
+  }
+
+  it('apagado (por defecto): el modelo de redacción no se llama y salen los textos fijos', async () => {
+    fermin();
+    const r = await secuencia();
+    expect(vistos).toEqual([]);
+    expect(r.resumen.texto).toMatch(/^¿Cargo este viaje\?/);
+    expect(r.tras[0]).toBe('Listo, lo cargo. Te aviso en cuanto quede.');
+    expect(r.tras[1]).toMatch(/^Cargué en SAN ANDRÉS DIC · Fermín Ocampo \(F 26 1\)/);
+  });
+
+  for (const modo of ['apagado', 'prendido'] as const) {
+    it(`prendido, intérprete ${modo}: el modelo redacta el resumen (los botones quedan fijos), la carga y la consulta; los acuses no pasan por él`, async () => {
+      fermin();
+      prender();
+      const r = await secuencia(modo === 'prendido' ? { llamadas: { n: 0 } } : undefined);
+      expect(r.resumen.texto).toMatch(/^Mira: ¿Cargo este viaje\?\n\n\*SAN ANDRÉS DIC · Fermín Ocampo \(F 26 1\)\*/);
+      expect(r.resumen.botones!.map(b => b.title)).toEqual(['✅ Cargar', '🗑 Descartar']);
+      expect(r.tras[0]).toBe('Listo, lo cargo. Te aviso en cuanto quede.');
+      expect(r.tras[1]).toMatch(/^Mira: Cargué en SAN ANDRÉS DIC · Fermín Ocampo \(F 26 1\)/);
+      expect(r.consulta).toMatch(/^Mira: SAN ANDRÉS DIC · Fermín Ocampo \(F 26 1\) — Mínimo/);
+      expect(datosDel('n-fo')).toMatchObject({ adultos: 2 });
+      // Los turnos: lo que escribió el comercial y lo que dijo el bot, nunca el reenvío del cliente.
+      const ultimo = vistos.at(-1)!.usuario;
+      expect(ultimo).toContain('- comercial: el cliente dijo que quiere 5 estrellas, se llama Juan Pérez');
+      expect(ultimo).not.toContain('quieren ir a San Andrés, son 2 adultos');
+    });
+  }
+
+  it('hechos trampa: el modelo mete datos de los turnos y de ningún lado; la validación los rechaza y salen los fijos (0 datos inventados)', async () => {
+    fermin();
+    prender();
+    responde = 'trampa';
+    const r = await secuencia();
+    expect(vistos.length).toBeGreaterThanOrEqual(3);
+    expect(textos().filter(x => /Juan Pérez|20 de enero|quedó cargado/.test(x) && !x.startsWith('el cliente'))).toEqual([]);
+    expect(r.resumen.texto).toMatch(/^¿Cargo este viaje\?/);
+    expect(r.tras[1]).toMatch(/^Cargué en SAN ANDRÉS DIC/);
+    expect(r.consulta).toMatch(/^SAN ANDRÉS DIC · Fermín Ocampo \(F 26 1\) — Mínimo/);
+  });
+
+  it('el modelo falla (timeout): salen los fijos, nunca silencio', async () => {
+    fermin();
+    prender();
+    responde = 'falla';
+    const r = await secuencia();
+    expect(vistos.length).toBeGreaterThanOrEqual(3);
+    expect(r.resumen.texto).toMatch(/^¿Cargo este viaje\?/);
+    expect(r.tras[1]).toMatch(/^Cargué en SAN ANDRÉS DIC/);
+    expect(r.consulta).toMatch(/^SAN ANDRÉS DIC · Fermín Ocampo \(F 26 1\) — Mínimo/);
+  });
+});
+
+describe('décimo control de Vera (2026-10-05): la carga directa en el viaje en foco solo con el dato pedido y sin otro cliente ni otro viaje, de punta a punta', () => {
+  function viajeDe(id: string, codigo: string, nombre: string, cliente: string, destino: string) {
+    t.contactos.push({ id: `c-${id}`, workspace_id: WS, nombre: cliente, telefono: celDe(cliente), email: null, created_at: '2026-01-10T10:00:00Z' });
+    t.negocios.push({ ...negocioDePrueba(id, codigo, nombre, cliente), contacto_id: `c-${id}` });
+    t.negocio_bloques.push({ id: `b-${id}`, negocio_id: id, data: { destino }, updated_at: null, bloque_configs: { orden: 1, config_extra: { fields: FIELDS }, bloque_definitions: { tipo: 'datos' }, etapas_negocio: { orden: 1 } } });
+  }
+  const datosDel = (id: string) => t.negocio_bloques.find(b => b.negocio_id === id)!.data as Fila;
+  /** Isidro Ballesteros va a Leticia (el viaje en foco); Teodora Quiceno tiene otro viaje abierto, a Pasto. */
+  async function focoDeIsidro(interprete?: { modelo?: unknown }) {
+    viajeDe('n-ib', 'I 26 1', 'LETICIA MAR', 'ISIDRO BALLESTEROS', 'LETICIA');
+    viajeDe('n-tq', 'T 26 4', 'PASTO ABR', 'TEODORA QUICENO', 'PASTO');
+    await llega('I 26 1', { enviado: 0, interprete });
+    await llega('van a Leticia en marzo, son 2 adultos', { enviado: 2, reenviado: true });
+    await llega('listo', { enviado: 4, interprete });
+    colaModelo = [salidaModelo({ destino: { valor: 'Leticia', frase: 'van a Leticia' }, adultos: { valor: '2', frase: '2 adultos' } })];
+    await llega('sí', { enviado: 6, interprete });
+    expect(textos().at(-1)).toMatch(/^Cargué en LETICIA MAR · Isidro Ballesteros \(I 26 1\)[\s\S]*me falta:/);
+  }
+  beforeEach(() => { bandeja.procesarEnElActo.activo = true; });
+
+  for (const modo of ['apagado', 'prendido'] as const) {
+    it(`interruptor ${modo}: lo de otro cliente o de otro viaje, una pregunta sin signo o una orden NO se cargan en el viaje en foco; el dato pedido sí`, async () => {
+      const contenido = (texto: string) => (modo === 'prendido' ? { modelo: { acciones: [{ accion: 'contenido', evidencia: texto }] } } : undefined);
+      await focoDeIsidro(modo === 'prendido' ? {} : undefined);
+      const antes = JSON.stringify(datosDel('n-ib'));
+      const ents = t.wa_bandeja_entendimientos.length;
+      for (const [i, texto] of [
+        'la señora Teodora sale desde Ipiales',            // otro cliente del directorio, por el nombre de pila
+        'los de Pasto viajan con 3 niños',                 // el destino de otro viaje abierto
+        'T 26 4: salen el 20 de abril',                    // el código de otro viaje
+        'cuándo fue que dijeron que salían',               // pregunta sin signo
+        'bórrale la fecha de salida',                      // una orden
+        'no, eso de los niños era para el de Pasto',       // una corrección
+      ].entries()) {
+        await llega(texto, { enviado: 20 + i * 3, interprete: contenido(texto) });
+        // Nunca silencio: con o sin el intérprete, dice algo.
+        expect(textos().at(-1)).not.toMatch(/^Anoto en LETICIA MAR/);
+        await llega('descartar', { enviado: 21 + i * 3 });
+      }
+      expect(JSON.stringify(datosDel('n-ib'))).toBe(antes);
+      expect(t.wa_bandeja_entendimientos.filter(e => e.negocio_destino_id === 'n-ib' || e.negocio_id === 'n-ib').length).toBe(1);
+      expect(t.wa_bandeja_entendimientos.length).toBe(ents);
+      // El dato que se pidió, sin nombrar a nadie más: el resumen corto con «Cargar» (2026-10-06); carga con el «sí».
+      colaModelo = [salidaModelo({ ciudad_origen: { valor: 'Bogotá', frase: 'salen desde Bogotá' } })];
+      await llega('salen desde Bogotá', { enviado: 60, interprete: contenido('salen desde Bogotá') });
+      expect(textos().at(-1)).toBe('Anoto en LETICIA MAR · Isidro Ballesteros (I 26 1): «salen desde Bogotá».');
+      expect(datosDel('n-ib')).not.toHaveProperty('ciudad_origen');
+      await llega('sí', { enviado: 62 });
+      expect(datosDel('n-ib')).toMatchObject({ ciudad_origen: 'BOGOTÁ' });
+    });
+  }
+
+  for (const modo of ['apagado', 'prendido'] as const) {
+    it(`interruptor ${modo}: con el foco abierto, NINGÚN escrito carga en el viaje sin el toque o el «sí» al resumen corto; el «sí» y el toque sí cargan (2026-10-06)`, async () => {
+      const contenido = (texto: string) => (modo === 'prendido' ? { modelo: { acciones: [{ accion: 'contenido', evidencia: texto }] } } : undefined);
+      await focoDeIsidro(modo === 'prendido' ? {} : undefined);
+      const antes = JSON.stringify(datosDel('n-ib'));
+      const cargas = () => t.wa_bandeja_entendimientos.filter(e => e.negocio_id === 'n-ib' && String(e.estado).startsWith('negocio_actualizado')).length;
+      const c0 = cargas();
+      // Lo que antes podía ir directo y no debía: un apodo, un deíctico, alguien que el directorio no tiene, una pregunta
+      // indirecta. Ahora, como mucho, sale el resumen corto: nada se carga.
+      for (const [i, texto] of [
+        'la Mona sale de Pereira con los 2 niños',
+        'la otra señora prefiere hotel 5 estrellas',
+        'Gerardina Pulido también va, saldría de Neiva',
+        'me averiguas si salen desde Cali o desde Buga',
+        'salen desde Bogotá',
+      ].entries()) {
+        await llega(texto, { enviado: 20 + i * 4, interprete: contenido(texto) });
+        expect(JSON.stringify(datosDel('n-ib'))).toBe(antes);
+        expect(cargas()).toBe(c0);
+        // Acuses, un «sí» con reserva o una pregunta tampoco cargan el resumen corto.
+        for (const r of ['ok', 'sí, pero espera que confirme', '¿lo cargo?']) {
+          await llega(r, { enviado: 21 + i * 4 });
+          expect(cargas()).toBe(c0);
+        }
+        await llega('descartar', { enviado: 23 + i * 4 });
+      }
+      expect(JSON.stringify(datosDel('n-ib'))).toBe(antes);
+      // El «sí» al resumen corto carga.
+      colaModelo = [salidaModelo({ ciudad_origen: { valor: 'Bogotá', frase: 'salen desde Bogotá' } })];
+      await llega('salen desde Bogotá', { enviado: 60, interprete: contenido('salen desde Bogotá') });
+      const resumenCorto = enviados.at(-1)!;
+      expect(resumenCorto.texto).toBe('Anoto en LETICIA MAR · Isidro Ballesteros (I 26 1): «salen desde Bogotá».');
+      await llega('sí', { enviado: 62 });
+      expect(datosDel('n-ib')).toMatchObject({ ciudad_origen: 'BOGOTÁ' });
+      expect(cargas()).toBe(c0 + 1);
+      // El toque del mismo resumen ya cargado no carga otra vez.
+      await toca(resumenCorto.botones![0], { enviado: 64 });
+      expect(cargas()).toBe(c0 + 1);
+      // Y el toque de un resumen corto nuevo, sí.
+      colaModelo = [salidaModelo({ categoria_hotel: { valor: '4', frase: 'hotel 4 estrellas' } })];
+      await llega('quieren hotel 4 estrellas', { enviado: 70, interprete: contenido('quieren hotel 4 estrellas') });
+      await toca(boton('✅ Cargar'), { enviado: 72 });
+      expect(datosDel('n-ib')).toMatchObject({ categoria_hotel: '4' });
+      expect(cargas()).toBe(c0 + 2);
+    });
+  }
+
+  it.each([
+    'ponlo a nombre de la señora Leonor Pardo', 'anótalo para doña Leonor Pardo', 'cárgaselo a Leonor Pardo', 'es para mi clienta Leonor Pardo',
+    'créalo con Leonor Pardo', 'ese viaje es de la señora Leonor Pardo', 'apúntalo a Leonor Pardo por favor',
+  ])('interruptor apagado: tras «¿Para qué cliente es?», «%s» lee el nombre con el verbo o la fórmula delante: es la que ya tenemos (regla 8)', async (respuesta) => {
+    t.contactos.push({ id: 'c-lp', workspace_id: WS, nombre: 'LEONOR PARDO', telefono: '3001239876', email: null, created_at: '2026-01-10T10:00:00Z' });
+    await llega('vamos a montar un viaje nuevo', { enviado: 0 });
+    expect(textos().at(-1)).toBe('Listo, un viaje nuevo. ¿Para qué cliente es?');
+    await llega(respuesta, { enviado: 3 });
+    await llega('quieren ir a Guatapé un fin de semana', { enviado: 5, reenviado: true });
+    await llega('listo', { enviado: 8 });
+    expect(textos().at(-1)).toContain('*Viaje nuevo · Leonor Pardo*\nYa es cliente · cel. …9876');
+  });
+
+  it('interruptor prendido: un escrito que el validador registra como contenido y abre una tanda sin cliente dice qué espera (nunca silencio)', async () => {
+    const texto = 'son dos parejas y quieren algo con playa';
+    const n0 = textos().length;
+    await llega(texto, { enviado: 0, interprete: { modelo: { acciones: [{ accion: 'contenido', evidencia: texto }] } } });
+    expect(t.wa_bandeja_entregas.filter(e => e.estado === 'abierta')).toHaveLength(1);
+    expect(textos().slice(n0)).toEqual([TANDA_SIN_CLIENTE]);
   });
 });

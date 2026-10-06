@@ -3205,6 +3205,293 @@
     "accion": "consulta",
     "tipo": "viajes"
    }
+  },
+  {
+   "id": "CD1",
+   "texto": "salen desde Bogotá",
+   "turno": 1,
+   "cliente": "trappvel",
+   "reenviado": false,
+   "pendiente": null,
+   "pendiente_previo": null,
+   "tanda": false,
+   "control": false,
+   "foco": "n12",
+   "modelo": null,
+   "origen_modelo": "atajo: lo carga el código de hoy (viaje en foco), no llega al modelo",
+   "esperado": {
+    "accion": "dato_directo",
+    "viaje": "n12"
+   }
+  },
+  {
+   "id": "CD2",
+   "texto": "quieren hotel 4 estrellas",
+   "turno": 1,
+   "cliente": "trappvel",
+   "reenviado": false,
+   "pendiente": null,
+   "pendiente_previo": null,
+   "tanda": false,
+   "control": false,
+   "foco": "n12",
+   "modelo": null,
+   "origen_modelo": "atajo: lo carga el código de hoy (viaje en foco), no llega al modelo",
+   "esperado": {
+    "accion": "dato_directo",
+    "viaje": "n12"
+   }
+  },
+  {
+   "id": "CD3",
+   "texto": "el 15 de junio salen",
+   "turno": 1,
+   "cliente": "trappvel",
+   "reenviado": false,
+   "pendiente": null,
+   "pendiente_previo": null,
+   "tanda": false,
+   "control": false,
+   "foco": "n12",
+   "modelo": null,
+   "origen_modelo": "atajo: lo carga el código de hoy (viaje en foco), no llega al modelo",
+   "esperado": {
+    "accion": "dato_directo",
+    "viaje": "n12"
+   }
+  },
+  {
+   "id": "CD4",
+   "texto": "el niño de Lina tiene 9 años",
+   "turno": 1,
+   "cliente": "trappvel",
+   "reenviado": false,
+   "pendiente": null,
+   "pendiente_previo": null,
+   "tanda": false,
+   "control": false,
+   "foco": "n12",
+   "modelo": {
+    "acciones": [
+     {
+      "accion": "contenido",
+      "evidencia": "el niño de Lina tiene 9 años"
+     }
+    ]
+   },
+   "origen_modelo": "a mano (décimo control, 2026-10-05): lo que propondría el modelo",
+   "esperado": {
+    "no_accion": "dato_directo",
+    "no_viaje": "n12"
+   }
+  },
+  {
+   "id": "CD5",
+   "texto": "los de Punta Cana salen el 3 de mayo",
+   "turno": 1,
+   "cliente": "trappvel",
+   "reenviado": false,
+   "pendiente": null,
+   "pendiente_previo": null,
+   "tanda": false,
+   "control": false,
+   "foco": "n12",
+   "modelo": {
+    "acciones": [
+     {
+      "accion": "contenido",
+      "evidencia": "los de Punta Cana salen el 3 de mayo"
+     }
+    ]
+   },
+   "origen_modelo": "a mano (décimo control, 2026-10-05): lo que propondría el modelo",
+   "esperado": {
+    "no_accion": "dato_directo",
+    "no_viaje": "n12"
+   }
+  },
+  {
+   "id": "CD6",
+   "texto": "Marcela sale desde Cali con los 2 niños",
+   "turno": 1,
+   "cliente": "trappvel",
+   "reenviado": false,
+   "pendiente": null,
+   "pendiente_previo": null,
+   "tanda": false,
+   "control": false,
+   "foco": "n12",
+   "directorio_otros": [
+    "MARCELA ROJAS"
+   ],
+   "modelo": {
+    "acciones": [
+     {
+      "accion": "contenido",
+      "evidencia": "Marcela sale desde Cali con los 2 niños"
+     }
+    ]
+   },
+   "origen_modelo": "a mano (décimo control, 2026-10-05): lo que propondría el modelo",
+   "esperado": {
+    "no_accion": "dato_directo",
+    "no_viaje": "n12"
+   }
+  },
+  {
+   "id": "CD7",
+   "texto": "averíguame si hay vuelo directo desde Bogotá",
+   "turno": 1,
+   "cliente": "trappvel",
+   "reenviado": false,
+   "pendiente": null,
+   "pendiente_previo": null,
+   "tanda": false,
+   "control": false,
+   "foco": "n12",
+   "modelo": {
+    "acciones": [
+     {
+      "accion": "pedir_aclaracion",
+      "evidencia": "averíguame si hay vuelo directo desde Bogotá"
+     }
+    ]
+   },
+   "origen_modelo": "a mano (décimo control, 2026-10-05): lo que propondría el modelo",
+   "esperado": {
+    "no_accion": "dato_directo",
+    "no_viaje": "n12"
+   }
+  },
+  {
+   "id": "CD8",
+   "texto": "bórrale lo de los 2 niños",
+   "turno": 1,
+   "cliente": "trappvel",
+   "reenviado": false,
+   "pendiente": null,
+   "pendiente_previo": null,
+   "tanda": false,
+   "control": false,
+   "foco": "n12",
+   "modelo": {
+    "acciones": [
+     {
+      "accion": "pedir_aclaracion",
+      "evidencia": "bórrale lo de los 2 niños"
+     }
+    ]
+   },
+   "origen_modelo": "a mano (décimo control, 2026-10-05): lo que propondría el modelo",
+   "esperado": {
+    "no_accion": "dato_directo",
+    "no_viaje": "n12"
+   }
+  },
+  {
+   "id": "CD9",
+   "texto": "no, lo del hotel 4 estrellas era para Carolina",
+   "turno": 1,
+   "cliente": "trappvel",
+   "reenviado": false,
+   "pendiente": null,
+   "pendiente_previo": null,
+   "tanda": false,
+   "control": false,
+   "foco": "n12",
+   "modelo": {
+    "acciones": [
+     {
+      "accion": "contenido",
+      "evidencia": "no, lo del hotel 4 estrellas era para Carolina"
+     }
+    ]
+   },
+   "origen_modelo": "a mano (décimo control, 2026-10-05): lo que propondría el modelo",
+   "esperado": {
+    "no_accion": "dato_directo",
+    "no_viaje": "n12"
+   }
+  },
+  {
+   "id": "CD10",
+   "texto": "cotízale a Ramiro Cuesta un plan con hotel 4 estrellas",
+   "turno": 1,
+   "cliente": "trappvel",
+   "reenviado": false,
+   "pendiente": null,
+   "pendiente_previo": null,
+   "tanda": false,
+   "control": false,
+   "foco": "n12",
+   "modelo": {
+    "acciones": [
+     {
+      "accion": "abrir_viaje",
+      "nuevo_cliente": "Ramiro Cuesta",
+      "evidencia": "cotízale a Ramiro Cuesta"
+     },
+     {
+      "accion": "contenido",
+      "evidencia": "un plan con hotel 4 estrellas"
+     }
+    ]
+   },
+   "origen_modelo": "a mano (décimo control, 2026-10-05): lo que propondría el modelo",
+   "esperado": {
+    "no_accion": "dato_directo",
+    "no_viaje": "n12"
+   }
+  },
+  {
+   "id": "CD11",
+   "texto": "todavía no saben de qué ciudad salen",
+   "turno": 1,
+   "cliente": "trappvel",
+   "reenviado": false,
+   "pendiente": null,
+   "pendiente_previo": null,
+   "tanda": false,
+   "control": false,
+   "foco": "n12",
+   "modelo": {
+    "acciones": [
+     {
+      "accion": "contenido",
+      "evidencia": "todavía no saben de qué ciudad salen"
+     }
+    ]
+   },
+   "origen_modelo": "a mano (décimo control, 2026-10-05): lo que propondría el modelo",
+   "esperado": {
+    "no_accion": "dato_directo",
+    "no_viaje": "n12"
+   }
+  },
+  {
+   "id": "CD12",
+   "texto": "los Pérez de Cartagena salen el 2 de julio",
+   "turno": 1,
+   "cliente": "trappvel",
+   "reenviado": false,
+   "pendiente": null,
+   "pendiente_previo": null,
+   "tanda": false,
+   "control": false,
+   "foco": "n12",
+   "modelo": {
+    "acciones": [
+     {
+      "accion": "contenido",
+      "evidencia": "los Pérez de Cartagena salen el 2 de julio"
+     }
+    ]
+   },
+   "origen_modelo": "a mano (décimo control, 2026-10-05): lo que propondría el modelo",
+   "esperado": {
+    "no_accion": "dato_directo",
+    "no_viaje": "n12"
+   }
   }
  ]
 }

@@ -2,6 +2,7 @@
 
 import { useMemo, useState, useTransition, type Dispatch, type SetStateAction } from 'react'
 import { useRouter } from 'next/navigation'
+import { useTransitionTolerante } from '@/hooks/use-transition-tolerante'
 import { toast } from 'sonner'
 import Link from 'next/link'
 import {
@@ -1199,7 +1200,9 @@ export function FilaPorFacturar({
   workspaceNombre?: string | null
   onCambio: () => void
 }) {
-  const [isPending, startTransition] = useTransition()
+  // Emitir puede tardar decenas de segundos (Siigo). Si la respuesta se pierde, la factura
+  // pudo salir igual: se relee la cola en vez de invitar a emitir otra vez.
+  const [isPending, startTransition] = useTransitionTolerante({ releer: onCambio })
   const [pidiendoMotivo, setPidiendoMotivo] = useState(false)
   const [motivo, setMotivo] = useState('')
   // Tres pasos a propósito: revisar la prefactura, confirmar, emitir. Una factura
@@ -1249,7 +1252,11 @@ export function FilaPorFacturar({
       if (!r.ok) { toast.error(r.error ?? 'No se pudo emitir'); return }
       // Si el PDF no quedó en el negocio hay que decirlo: la factura salió igual,
       // pero el expediente queda incompleto y en silencio nadie lo notaría.
-      if (r.archivada === false) {
+      if (r.completando) {
+        // La factura salió y quedó marcada. El PDF y los abonos se hacen después de
+        // responder: lo que no salga queda escrito en la actividad del negocio.
+        toast.success(`Factura ${r.numero} emitida. El PDF y los abonos se completan en segundo plano`)
+      } else if (r.archivada === false) {
         toast.warning(`Factura ${r.numero} emitida, pero el PDF no quedó cargado en el negocio`)
       } else {
         toast.success(`Factura ${r.numero} emitida y archivada en el negocio`)

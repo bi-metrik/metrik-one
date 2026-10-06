@@ -15,17 +15,20 @@ import {
   armarPreguntaNegocio, candidatosDeEncabezado, conNombreDelViaje, descartarPendientesDelRemitente, hayPreguntaPendiente, nombreDeLaEntrega,
   nombreYConteoDeLaTanda, pendienteDeLaTanda, preguntaAbierta, procesarEntendimientos, reintentarCarga, resumenGuardado, tandaAbiertaDelRemitente,
   textoBotonesAparte, textoDeLaConsulta, simularEnLaTanda, textoDeLoQueFalta, textoPrimero, tomarRespuestaContacto, tomarRespuestaDeEntrega,
-  cargarDatoEnElViaje, nombreDelViajeDeId, viajesAbiertosDeLaBandeja,
+  agregarDatoAlResumenCorto, proponerDatoEnElViaje, viajesAbiertosDeLaBandeja,
 } from './wa-entendimiento.ts';
 import { anotarConsultaPendiente, consultaVigente, focosVigentes, leerConversacion, viajeEnFoco } from './wa-foco.ts';
 import type { ConsultaPendiente } from './wa-foco.ts';
-import { leerNuevo, leerViajeNuevo } from './wa-entendimiento-reglas.ts';
+import { leerNuevo, leerViajeNuevo, normalizarNombre } from './wa-entendimiento-reglas.ts';
 import {
   botonesSiNo, canonicoDelToque, esBotonDeBandeja, leerToque, TEXTO_TOQUE_CERRADO, TEXTO_TOQUE_SIN_PREGUNTA, TEXTO_TOQUE_VIEJO, TITULO_NO_ES,
   TITULO_SI_ES,
 } from './wa-botones-bandeja.ts';
 import type { AccionBoton } from './wa-botones-bandeja.ts';
 import { enviarConBotones } from './wa-enviar-botones.ts';
+import { textoRedactado } from './wa-redaccion.ts';
+import { candidatoNombradoEnLaFrase, cargaDirecta, posiblesNombres } from './wa-carga-directa-reglas.ts';
+import { fichasPorNombre } from './wa-cliente.ts';
 import type { EnLaTanda, PreguntaAbierta } from './wa-entendimiento.ts';
 import { interpretarRespuestaNegocio, opcionNombrada, pieDeLista } from './wa-carga-reglas.ts';
 import type { OpcionNegocio } from './wa-carga-reglas.ts';
@@ -516,6 +519,7 @@ export async function atenderEnBandeja(
       ? await preguntaAbierta(supabase, user.workspace_id, message.phone, fila.entrega ? [fila.entrega] : [])
       : null;
     const candidatos = candidatosDelEncabezado(encabezado);
+    let sinCliente: string | null = null;
     const aviso = enEspera ? enEspera.aviso
       // Una pregunta a la vez: con otra abierta, la lista del encabezado se decide en el resumen.
       : otra && candidatos.length > 0 ? `«${message.text.trim()}» puede ser ${candidatos.map(lineaCaja).join(' o ')}: lo decides en el resumen de esta tanda.`
@@ -523,8 +527,12 @@ export async function atenderEnBandeja(
         // Una pregunta escrita que abre una tanda: quizá era para el bot de siempre (se fue la regla N8).
         ?? (fila.accion === 'abrir' && escrito && esPregunta(message.text) ? textoPistaConsulta(config.prefijosConsulta) : null)
         // Nunca silencio (2026-10-05, punto 7): un escrito que abre una tanda sin cliente lo dice en una línea y qué espera.
-        ?? (fila.accion === 'abrir' && escrito && config.modoViajes !== 'uno' ? await textoTandaSinCliente(supabase, user.workspace_id, message.phone, config) : null);
-    const texto = [aviso, otra ? textoPrimero(otra) : null].filter(Boolean).join('\n');
+        ?? (fila.accion === 'abrir' && escrito && config.modoViajes !== 'uno' ? (sinCliente = await textoTandaSinCliente(supabase, user.workspace_id, message.phone, config)) : null);
+    const fijo = [aviso, otra ? textoPrimero(otra) : null].filter(Boolean).join('\n');
+    // El aviso de la tanda sin cliente lo redacta el modelo (con el interruptor prendido); los acuses en la caja («📌 …») van fijos.
+    const texto = fijo && sinCliente && aviso === sinCliente
+      ? await textoRedactado(supabase, { workspaceId: user.workspace_id, phone: message.phone }, { tipo: 'aviso', fijo })
+      : fijo;
     if (texto) await enviarAcuseDeLaCaja(message.phone, texto, otra ? null : fila.entrega ?? null, user.workspace_id);
   }
 
@@ -578,7 +586,8 @@ export async function contestarConsulta(
   const abierta = await preguntaAbierta(supabase, workspaceId, phone);
   const deLaTanda = abierta || config.modoViajes === 'uno' ? null : await pendienteDeLaTanda(supabase, workspaceId, phone, config.horasCajaActiva);
   const sigue = abierta ? textoPrimero(abierta) : deLaTanda ? `Sigue pendiente: ${textoDeLoQueFalta(deLaTanda)}` : null;
-  await enviar(phone, [respuesta, sigue].filter(Boolean).join('\n'), workspaceId);
+  const fijo = [respuesta, sigue].filter(Boolean).join('\n');
+  await enviar(phone, await textoRedactado(supabase, { workspaceId, phone }, { tipo: 'consulta', fijo }), workspaceId);
 }
 
 // ── Conversación con memoria (2026-10-05) ──────────────────────────────────
@@ -595,7 +604,9 @@ export type DecisionMemoria =
   | { tipo: 'consulta'; consulta: ConsultaBandeja }
   | { tipo: 'dato'; negocioId: string; cuerpo: string; wamid: string; enviadoAt: string | null; deLaPendiente: boolean }
   | { tipo: 'preguntar'; texto: string; pendiente: ConsultaPendiente }
-  | { tipo: 'en_vuelo'; texto: string };
+  | { tipo: 'en_vuelo'; texto: string }
+  /** Otro dato para el mismo viaje mientras su resumen corto espera el «sí»: se agrega a esa entrega y se vuelve a mostrar. */
+  | { tipo: 'dato_agrega'; entregaId: string; negocioId: string; cuerpo: string; wamid: string; enviadoAt: string | null };
 
 /** «Lo estoy cargando»: un escrito que repite la respuesta o nombra el viaje mientras la carga sigue en vuelo. */
 export const TEXTO_EN_VUELO = 'Ya lo estoy cargando; te aviso en cuanto quede.';
@@ -612,7 +623,8 @@ export async function decidirConMemoria(
   const t = texto.trim();
   if (!t || config.modoViajes === 'uno') return null;
   if (await hayTandaAbierta(supabase, workspaceId, phone)) return null;
-  if (await preguntaAbierta(supabase, workspaceId, phone)) return null;
+  const abierta = await preguntaAbierta(supabase, workspaceId, phone);
+  if (abierta) return await otroDatoAlResumenCorto(supabase, workspaceId, phone, t, abierta, msg);
   const conv = await leerConversacion(supabase, workspaceId, phone);
   const ahora = Date.now();
   const viajes = (await viajesAbiertosDeLaBandeja(supabase, workspaceId)) ?? [];
@@ -644,18 +656,35 @@ export async function decidirConMemoria(
   }
 
   // 3. La respuesta a «me falta»: un dato escrito, sin tanda, cuando el viaje en foco es el que el bot acaba de cargar y le
-  // pidió datos. No si es una pregunta, un acuse, un «nuevo …» o nombra otro viaje (eso sigue el camino de hoy).
+  // pidió datos. Décimo control de Vera: por inclusión (`cargaDirecta`), no por exclusión. Va directo solo si trae el
+  // valor de un dato pedido y no nombra, en ninguna parte, a otro cliente del directorio ni a otro viaje abierto; una
+  // pregunta sin signo, una orden, una corrección o un pedido nuevo nunca. Lo demás sigue el camino de hoy (la tanda, o el
+  // modelo con el viaje en foco en el contexto), con resumen y «sí».
   const vigentes = focosVigentes(conv.focos, ahora, config.minutosFoco);
   const conFaltantes = vigentes.filter(f => (f.faltan ?? 0) > 0);
   if (conFaltantes.length === 0 || (vigentes[0].faltan ?? 0) === 0) return null;
   // Un encabezado (aun del mismo viaje: abre su caja, como siempre) tampoco.
   if (esPregunta(t) || esRuidoEscrito(t) || leerNuevo(t) || leerViajeNuevo(t) !== undefined || enc || pareceEncabezado(t, viajes)) return null;
   const cands = porId(conFaltantes.slice(0, 2).map(f => f.negocio_id));
-  if (cands.length === 1) return { tipo: 'dato', negocioId: cands[0].id, cuerpo: t, wamid: msg.wamid, enviadoAt: msg.enviadoAt, deLaPendiente: false };
   if (cands.length === 0) return null;
-  // Dos viajes con faltantes en la ventana: va al que nombre el texto; si no nombra ninguno, se pregunta una vez.
-  const v = viajeQueNombra(t, cands, false);
-  if (v) return { tipo: 'dato', negocioId: v.id, cuerpo: t, wamid: msg.wamid, enviadoAt: msg.enviadoAt, deLaPendiente: false };
+  const pedidosDe = (id: string) => conFaltantes.find(f => f.negocio_id === id)?.pedidos;
+  // Dos viajes con faltantes en la ventana: va al que nombre el texto (en cualquier parte de la frase); si no nombra
+  // ninguno, se pregunta una vez, solo si el escrito pasa la regla para alguno de los dos.
+  const elegido = cands.length === 1 ? cands[0] : viajeQueNombra(t, cands, false);
+  const fuera = (ids: string[]) => viajes.filter(v => !ids.includes(v.id));
+  if (elegido) {
+    const otrosClientes = await clientesNombrados(supabase, workspaceId, t, [elegido.cliente]);
+    const d = cargaDirecta(t, { pedidos: pedidosDe(elegido.id), foco: elegido, viajes: fuera([elegido.id]), otrosClientes });
+    if (!d.ok) {
+      console.log(`[wa-bandeja] no va directo al viaje en foco (${d.motivo}): sigue el camino de siempre`);
+      return null;
+    }
+    return { tipo: 'dato', negocioId: elegido.id, cuerpo: t, wamid: msg.wamid, enviadoAt: msg.enviadoAt, deLaPendiente: false };
+  }
+  const otrosClientes = await clientesNombrados(supabase, workspaceId, t, cands.map(c => c.cliente));
+  const pedidos = cands.flatMap(c => pedidosDe(c.id) ?? []);
+  const d = cargaDirecta(t, { pedidos, foco: null, viajes: fuera(cands.map(c => c.id)), otrosClientes });
+  if (!d.ok) return null;
   return {
     tipo: 'preguntar',
     texto: `¿Para cuál viaje es lo que me escribiste: ${cands.map(lineaCaja).join(' o ')}? ${pieDeLista(cands, 'Si es un viaje nuevo, «nuevo» y el nombre del cliente.')}`,
@@ -663,7 +692,36 @@ export async function decidirConMemoria(
   };
 }
 
-/** El viaje que el texto señala entre unos candidatos: por su código o nombre, «el de Cartagena», o el número de la lista. */
+/**
+ * Con el resumen corto de un dato esperando el «sí» (2026-10-06), otro dato para ese mismo viaje («y el niño tiene 8») no
+ * contesta el resumen: se agrega a esa entrega y el resumen se vuelve a mostrar con lo nuevo (los botones viejos dejan de
+ * servir, porque cambia la huella del reparto). Solo con la misma regla de la carga directa para ese viaje; si no, `null`
+ * y el escrito sigue el camino de siempre (la respuesta a la pregunta abierta).
+ */
+async function otroDatoAlResumenCorto(
+  supabase: SupabaseClient, ws: string, phone: string, t: string, abierta: PreguntaAbierta, msg: { wamid: string; enviadoAt: string | null },
+): Promise<DecisionMemoria | null> {
+  if (abierta.tipo !== 'entrega' || abierta.espera !== 'resumen') return null;
+  if (esSiNoCorto(t) || /^descart/i.test(t.trim())) return null;
+  const { data: e } = await supabase.from('wa_bandeja_entregas').select('id, motivo_cierre, plan_viajes').eq('id', abierta.id).maybeSingle();
+  const plan = (e?.plan_viajes ?? null) as PlanViajes | null;
+  if (!e || e.motivo_cierre !== 'respuesta_a_lo_que_falta' || !plan) return null;
+  const d = plan.mensajes[0]?.destino;
+  if (!d || d.tipo !== 'existente') return null;
+  const conv = await leerConversacion(supabase, ws, phone);
+  const f = conv.focos.find(x => x.negocio_id === d.negocio_id);
+  const viajes = (await viajesAbiertosDeLaBandeja(supabase, ws)) ?? [];
+  const v = viajes.find(x => x.id === d.negocio_id);
+  if (!f || !v) return null;
+  const otrosClientes = await clientesNombrados(supabase, ws, t, [v.cliente]);
+  const r = cargaDirecta(t, { pedidos: f.pedidos, foco: v, viajes: viajes.filter(x => x.id !== v.id), otrosClientes });
+  return r.ok ? { tipo: 'dato_agrega', entregaId: e.id as string, negocioId: v.id, cuerpo: t, wamid: msg.wamid, enviadoAt: msg.enviadoAt } : null;
+}
+
+/**
+ * El viaje que el texto señala entre unos candidatos: por su código o nombre, «el de Cartagena», el número de la lista, o
+ * (décimo control, hallazgo 6) su destino, su cliente o su código en cualquier parte de la frase.
+ */
 function viajeQueNombra(texto: string, cands: ReadonlyArray<ViajeAbierto>, numerada: boolean): ViajeAbierto | null {
   if (cands.length === 0) return null;
   const r = resolverEncabezado(texto, cands);
@@ -674,11 +732,30 @@ function viajeQueNombra(texto: string, cands: ReadonlyArray<ViajeAbierto>, numer
     const k = leerEleccion(texto);
     if (k !== null && cands[k - 1]) return cands[k - 1];
   }
-  return null;
+  return cands.length > 1 ? candidatoNombradoEnLaFrase(texto, cands) : null;
+}
+
+/**
+ * Los clientes del directorio que el escrito nombra (también solo por el nombre de pila) y no son los de `excluir`
+ * (el del viaje en foco). Busca cada palabra que puede ser un nombre (`posiblesNombres`). Si el directorio no responde,
+ * se toma como nombrado: ante la duda, no va directo.
+ */
+async function clientesNombrados(supabase: SupabaseClient, ws: string, texto: string, excluir: ReadonlyArray<string | null>): Promise<string[]> {
+  const propios = excluir.map(c => normalizarNombre(c)).filter(Boolean);
+  const out = new Set<string>();
+  for (const w of posiblesNombres(texto, excluir.filter(Boolean).join(' '))) {
+    const fichas = await fichasPorNombre(supabase, ws, w);
+    if (fichas === null) return ['(directorio sin respuesta)'];
+    for (const f of fichas) {
+      const nom = normalizarNombre(f.nombre);
+      if (nom.split(' ').includes(w) && !propios.includes(nom)) out.add(f.nombre);
+    }
+  }
+  return [...out];
 }
 
 /** «Lo guardo en una tanda nueva. ¿De qué viaje es? …»: con el viaje en foco como ejemplo, si lo hay. */
-async function textoTandaSinCliente(supabase: SupabaseClient, ws: string, phone: string, config: ConfigBandeja): Promise<string> {
+export async function textoTandaSinCliente(supabase: SupabaseClient, ws: string, phone: string, config: ConfigBandeja): Promise<string> {
   const f = viajeEnFoco((await leerConversacion(supabase, ws, phone)).focos, Date.now(), config.minutosFoco);
   const v = f.tipo === 'uno' ? ((await viajesAbiertosDeLaBandeja(supabase, ws)) ?? []).find(x => x.id === f.foco.negocio_id) ?? null : null;
   const ejemplo = v?.codigo ? ` Si es de ${nombreDeViaje(v)}, escribe «${v.codigo}».` : '';
@@ -697,24 +774,46 @@ export async function actuarConMemoria(
   }
   if (d.tipo === 'preguntar') {
     await anotarConsultaPendiente(supabase, ws, phone, d.pendiente);
-    await enviar(phone, d.texto, ws);
+    await enviar(phone, await textoRedactado(supabase, { workspaceId: ws, phone }, { tipo: 'pregunta', fijo: d.texto }), ws);
     return true;
   }
   if (d.tipo === 'en_vuelo') {
     await enviar(phone, d.texto, ws);
     return true;
   }
-  // El dato: se acusa en el acto (qué viaje) y se carga sin tanda, resumen ni «sí»; la respuesta dice qué anotó y cuánto falta.
-  const nombre = await nombreDelViajeDeId(supabase, ws, d.negocioId);
+  if (d.tipo === 'dato_agrega') {
+    const staffId = user.collaborator_id ? null : await staffIdDelRemitente(supabase, user);
+    const p = await agregarDatoAlResumenCorto(supabase, { workspaceId: ws, phone, staffId, colaboradorId: user.collaborator_id ?? null, wamid: d.wamid, cuerpo: d.cuerpo, enviadoAt: d.enviadoAt, entregaId: d.entregaId });
+    if (!p) return false;
+    const botones = botonesDelResumen(p.plan, d.entregaId);
+    const fijo = textoResumenDelDato(p.nombre, p.cuerpos);
+    const texto = await textoRedactado(supabase, { workspaceId: ws, phone }, { tipo: 'resumen', fijo, botones: botones.map(b => b.title) });
+    await enviarConBotones(phone, texto, botones, { workspaceId: ws, intent: INTENT_BANDEJA, aparte: textoBotonesAparte(botones) });
+    return true;
+  }
+  // El dato (2026-10-06): el foco solo sugiere el viaje. Sale un resumen corto de una línea con «Cargar» y «Descartar»; se
+  // carga con el toque o con un «sí» a ESE resumen (la confirmación queda atada a la entrega y a su reparto), nunca solo.
   const staffId = user.collaborator_id ? null : await staffIdDelRemitente(supabase, user);
-  const ok = await cargarDatoEnElViaje(supabase, {
+  const p = await proponerDatoEnElViaje(supabase, {
     workspaceId: ws, phone, staffId, colaboradorId: user.collaborator_id ?? null, wamid: d.wamid, cuerpo: d.cuerpo, enviadoAt: d.enviadoAt, negocioId: d.negocioId,
   });
-  if (!ok) return false;
+  if (!p) return false;
   if (d.deLaPendiente) await anotarConsultaPendiente(supabase, ws, phone, null);
-  await enviar(phone, `Lo anoto en ${nombre ?? 'ese viaje'}. Lo estoy leyendo; te digo qué quedó.`, ws);
-  await seguirEnElActo(supabase, ws, phone);
+  const botones = botonesDelResumen(p.plan, p.entregaId);
+  const fijo = textoResumenDelDato(p.nombre, [d.cuerpo]);
+  const texto = await textoRedactado(supabase, { workspaceId: ws, phone }, { tipo: 'resumen', fijo, botones: botones.map(b => b.title) });
+  await enviarConBotones(phone, texto, botones, { workspaceId: ws, intent: INTENT_BANDEJA, aparte: textoBotonesAparte(botones) });
   return true;
+}
+
+/**
+ * El resumen corto de la respuesta a «me falta»: «Anoto en SAN ANDRÉS DIC · Fermín Ocampo (F 26 1): «salen de Cali».». Con
+ * varios escritos, cada uno entre comillas.
+ */
+export function textoResumenDelDato(viaje: string, cuerpos: ReadonlyArray<string>): string {
+  const corto = (c: string) => { const t = c.replace(/\s+/g, ' ').trim(); return `«${t.length > 120 ? `${t.slice(0, 119)}…` : t}»`; };
+  const xs = cuerpos.map(corto);
+  return `Anoto en ${viaje}: ${xs.length > 1 ? `${xs.slice(0, -1).join(', ')} y ${xs[xs.length - 1]}` : xs[0]}.`;
 }
 
 /**
@@ -937,7 +1036,12 @@ export async function preguntarCliente(
   // Un resumen largo llega en varias partes: las primeras se mandan antes de la que espera respuesta.
   for (const p of partes.slice(0, -1)) await enviar(phone, p, workspaceId);
   const botones = viaje?.plan ? botonesDelResumen(viaje.plan, entregaId) : [];
-  const ok = await enviarConBotones(phone, partes[partes.length - 1], botones, { workspaceId, intent: INTENT_BANDEJA, aparte: textoBotonesAparte(botones) });
+  // El modelo redacta el resumen o la pregunta (con el interruptor prendido); los títulos de los botones quedan fijos. Un
+  // resumen en varias partes no se redacta: la última sola no es el resumen.
+  const ultima = partes[partes.length - 1];
+  const final = partes.length > 1 ? ultima
+    : await textoRedactado(supabase, { workspaceId, phone }, { tipo: viaje?.plan ? 'resumen' : 'pregunta', fijo: ultima, botones: botones.map(b => b.title) });
+  const ok = await enviarConBotones(phone, final, botones, { workspaceId, intent: INTENT_BANDEJA, aparte: textoBotonesAparte(botones) });
   const lista = viaje?.plan ? { plan_viajes: viaje.plan } : viaje?.opciones ? { negocio_opciones: viaje.opciones } : {};
   const { error } = await supabase
     .from('wa_bandeja_entregas')

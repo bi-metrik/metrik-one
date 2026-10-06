@@ -3,6 +3,7 @@
 import dynamic from 'next/dynamic'
 import { useState, useRef, useEffect, useCallback } from 'react'
 import { useTransitionTolerante } from '@/hooks/use-transition-tolerante'
+import { useRouter } from 'next/navigation'
 import { createPortal } from 'react-dom'
 import Link from 'next/link'
 import { SenalDeEnlace } from '@/components/navegacion-pendiente'
@@ -838,7 +839,10 @@ function SelectorEtapa({
   puedeOmitirGates: boolean
   puedeAvanzarCruces: boolean
 }) {
-  const [isPending, startTransition] = useTransitionTolerante()
+  const router = useRouter()
+  // Avanzar escribe (mueve la etapa, avisa, cierra): si la respuesta se pierde, el caso pudo
+  // moverse igual. Se relee la ficha; reintentar a ciegas lo intentaría mover otra vez.
+  const [isPending, startTransition] = useTransitionTolerante({ releer: () => router.refresh() })
   const [gateModal, setGateModal] = useState<{
     etapaId: string
     bloques: BloqueGateModal[]

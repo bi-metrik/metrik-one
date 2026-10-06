@@ -6,6 +6,19 @@ import { candidatosDelEncabezado, esNombreNuevo, resolverEncabezado, soloNombraA
 import type { RespuestaConfirmarNuevo, ResolucionEncabezado, ViajeAbierto } from '../wa-viajes-reglas.ts';
 import { leerEsLaMisma, separarNombreYLlave, soloLlave } from '../wa-cliente-reglas.ts';
 import { leerConsultaBandeja } from '../wa-consulta-bandeja.ts';
+import { cargaDirecta, type PedidoFoco } from '../wa-carga-directa-reglas.ts';
+import { esPregunta } from '../wa-bandeja-reglas.ts';
+import { leerNuevo, leerViajeNuevo } from '../wa-entendimiento-reglas.ts';
+import { esRuidoEscrito, pareceEncabezado } from '../wa-viajes-reglas.ts';
+
+/** Lo que el bot pidió en la carga del viaje en foco, en los turnos del banco con foco (décimo control). */
+export const PEDIDOS_DEL_BANCO: PedidoFoco[] = [
+  { slug: 'ciudad_origen', label: 'Ciudad de salida', tipo: 'texto' },
+  { slug: 'fecha_salida', label: 'Fecha de salida', tipo: 'fecha' },
+  { slug: 'ninos', label: 'Niños', tipo: 'numero' },
+  { slug: 'edades_menores', label: 'Edades de los niños e infantes', tipo: 'texto' },
+  { slug: 'categoria_hotel', label: 'Categoría de hotel', tipo: 'select', opciones: ['3 estrellas', '4 estrellas', '5 estrellas', 'Sin preferencia'] },
+];
 
 /**
  * Lo que hace el código de hoy con un escrito que NO llega al modelo en la bandeja (como en producción: el atajo
@@ -18,6 +31,11 @@ export function deHoy(
   texto: string, pend: PreguntaUnificada | null, viajes: ReadonlyArray<ViajeAbierto>, cliente: string | null,
   /** Con la caja de un viaje nuevo esperando: la llave, o si el dueño de la llave es la misma persona (lo lee la simulación de la tanda). */
   espera: 'llave' | 'misma' | null = null,
+  /**
+   * Décimo control: el viaje en foco con lo que se le pidió, y los clientes del directorio (que no son el suyo) que nombra
+   * el escrito. La memoria va antes del modelo: lo que pasa `cargaDirecta` va directo al viaje (`dato_directo`).
+   */
+  foco: { viaje: string; otrosClientes?: string[] } | null = null,
 ): Record<string, unknown> | null {
   // La simulación de la tanda (`wa-interprete.ts`, 3b): lo que la caja consume no llega al modelo.
   if (espera) {
@@ -26,6 +44,13 @@ export function deHoy(
     if (s) return { accion: 'responder', opcion: s };
   }
   const enc = resolverEncabezado(texto, viajes);
+  if (foco && !pend) {
+    const v = viajes.find(x => x.id === foco.viaje) ?? null;
+    const excluye = esPregunta(texto) || esRuidoEscrito(texto) || !!leerNuevo(texto) || leerViajeNuevo(texto) !== undefined || !!enc || pareceEncabezado(texto, viajes);
+    if (!excluye && v && cargaDirecta(texto, { pedidos: PEDIDOS_DEL_BANCO, foco: v, viajes: viajes.filter(x => x.id !== v.id), otrosClientes: foco.otrosClientes ?? [] }).ok) {
+      return { accion: 'dato_directo', viaje: v.id };
+    }
+  }
   const atajo = atajoExacto(texto, { bandeja: { palabrasCierre: ['listo'] }, pendiente: pend, encabezado: enc });
   // Una pregunta escrita al bot sobre la bandeja: la contesta el código de hoy, en solo lectura (2026-10-05).
   if (atajo === 'consulta_bandeja') {
@@ -140,6 +165,9 @@ export function cumple(r: Record<string, unknown>, e: Record<string, unknown>): 
       continue;
     }
     if (k === 'nuevo') { if (norm(r.nuevo) !== norm(v)) return false; continue; }
+    // Décimo control: lo que NO puede pasar (una acción, o terminar en un viaje: el viaje en foco con el dato de otro).
+    if (k === 'no_accion') { if (r.accion === v) return false; continue; }
+    if (k === 'no_viaje') { if (r.viaje === v) return false; continue; }
     // `sin`: claves que NO pueden venir (un viaje nuevo nunca termina en un viaje existente).
     if (k === 'sin') { if ((v as string[]).some(x => r[x] !== undefined)) return false; continue; }
     if (k === 'valor' && typeof v === 'string') { if (norm(r.valor) !== norm(v)) return false; continue; }

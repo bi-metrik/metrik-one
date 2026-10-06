@@ -52,6 +52,7 @@ import type { NegocioBloque } from '../../negocio-v2-actions'
 import type { CampoExtraccion, CampoResultado, CampoEdicion } from '@/lib/ai/extract-fields'
 import { formatFecha } from '@/lib/dates/bogota'
 import { pedirJson } from '@/lib/negocios/paginas-lista'
+import { anotarFallaRed, relojRed } from '@/lib/red/bandeja-red'
 import {
   MENSAJE_LECTURA_VENCIDA,
   esperarLectura,
@@ -918,7 +919,12 @@ export default function BloqueDocumento({
     const ac = new AbortController()
     const url = `/api/negocios/${negocioId}/lectura/${esperando.bloqueId}`
     void esperarLectura({
-      pedir: signal => pedirJson<RespuestaLectura>(url, signal),
+      pedir: signal =>
+        pedirJson<RespuestaLectura>(url, signal).catch((e: unknown) => {
+          // Piloto de red: la consulta de la lectura que no llegó (la espera sigue sola).
+          if (!signal?.aborted) anotarFallaRed({ superficie: 'lectura', error: e })
+          throw e
+        }),
       signal: ac.signal,
     }).then(fin => {
       if (!ac.signal.aborted) alTerminarLectura(fin, esperando)
@@ -1065,6 +1071,7 @@ export default function BloqueDocumento({
     setFileName(file.name)
     setErrorMsg(null)
     setDocRechazado(null)
+    const inicioSubida = relojRed()
 
     try {
       const ext = file.name.split('.').pop()?.toLowerCase() || 'pdf'
@@ -1082,6 +1089,7 @@ export default function BloqueDocumento({
         }
         const subida = await subirAUrlFirmada(prep.signedUrl, file, resolvedType)
         if (!subida.ok) {
+          anotarFallaRed({ superficie: 'subida', error: subida.error, desde: inicioSubida })
           setUploadState('error')
           setErrorMsg(subida.error)
           toast.error(subida.error)
@@ -1101,6 +1109,7 @@ export default function BloqueDocumento({
           })
 
         if (uploadErr) {
+          anotarFallaRed({ superficie: 'subida', error: uploadErr, desde: inicioSubida })
           setUploadState('error')
           setErrorMsg(uploadErr.message)
           toast.error(`Error subiendo: ${uploadErr.message}`)
@@ -1112,6 +1121,7 @@ export default function BloqueDocumento({
       setPendingStoragePath(storagePath)
       setUploadState('pending_confirm')
     } catch (err) {
+      anotarFallaRed({ superficie: 'subida', error: err, desde: inicioSubida })
       setUploadState('error')
       const msg = err instanceof Error ? err.message : String(err)
       setErrorMsg(msg)
@@ -1189,6 +1199,7 @@ export default function BloqueDocumento({
     } catch (err) {
       // La acción no se confirmó (casi siempre la red). La lectura pudo haber arrancado en
       // el servidor: «Reintentar» la reemplaza sin duplicar (gana la última).
+      anotarFallaRed({ superficie: 'accion', error: err })
       setUploadState('error')
       const msg = err instanceof Error ? err.message : String(err)
       setErrorMsg(`No se confirmó: ${msg}`)
