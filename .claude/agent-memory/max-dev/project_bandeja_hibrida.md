@@ -1,29 +1,28 @@
 ---
 name: bandeja-hibrida
-description: Bot híbrido de la bandeja WA (2026-10-06) — puntos de decisión con botones/listas y modelo; qué se quitó, qué quedó muerto, el banco pendiente de la llave de pruebas y las decisiones que hay que confirmar
+description: Bot híbrido de la bandeja WA (#1056, 2026-10-06) — puntos de decisión con botones/listas y modelo; soloToque en todo lo que escribe; timeouts de 3.8 al 19 %; banco ×1 con llave de pruebas
 metadata:
   type: project
 ---
 
-PR `feat/bandeja-hibrida` (2026-10-06), sin migración. Capa en `_shared/wa-decision.ts` (I/O) y `wa-decision-reglas.ts`
-(puro). Corre ANTES de la memoria en `atenderEnBandeja` y en el paso 3a del intérprete: igual apagado o prendido.
+PR #1056 `feat/bandeja-hibrida` (2026-10-06), sin migración. Capa en `_shared/wa-decision.ts` (I/O) y
+`wa-decision-reglas.ts` (puro). Corre ANTES de la memoria en `atenderEnBandeja` y en el paso 3a del intérprete.
 
-**Why:** cada control sellado de Vera encontraba vocabulario nuevo en los lectores de texto libre de las preguntas
-(«sí» con reserva, nombre tras «nuevo», «el de …»). Mauricio: «vamos con la mezcla».
+**Why:** cada control sellado de Vera encontraba vocabulario nuevo en los lectores de texto libre de las preguntas.
+Mauricio: «vamos con la mezcla». Tras la corrida real (SR3 «👌» → creó el viaje) pidió: nada que escriba sale del modelo.
 
 **How to apply:**
-- Una opción entra por el camino de siempre con su `canonico` («sí», «2», «descartar», «nuevo X 300…», código, «corregir:
-  el 2 es de T1 26 9», `CANONICO_NO_ES_NUEVO`). Los lectores viejos quedan como lectores de canónicos.
-- Tipos que devuelve el modelo: opcion, nombre (literal), llave, correccion (con `cambios` que el código valida),
-  contenido, pregunta, no_se. Timeout = «No te entendí; toca una opción».
-- Decisiones MÍAS a confirmar con Mauricio: (1) «sí»/«no» escritos solos se leen sin modelo (el brief solo nombraba
-  toque, número y código); (2) crear cliente = toque o «sí» solo; un escrito libre que dice crear pide el toque. Eso
-  baja 6 turnos del conjunto de desarrollo que main acertaba (SR6, CF1, CF7, CF8, V15, S5): cambiar `soloToque`.
-- El modelo de la decisión sale de `bot_conversacional.modelo`/`timeout_ms` AUNQUE `activo` sea false;
-  `WA_INTERPRETE_APAGADO=1` también lo apaga (todo escrito libre pide tocar).
-- Quedó código muerto desde la bandeja (no se borró): ramas de pendiente de bandeja del validador del intérprete,
-  `esSiSinReserva`, `interpretarConfirmacionNuevo` y sus listas, lectores en caja de `armarSegmentos`. PR de limpieza.
-- Banco con Gemini: `scratchpad/comparador/hibrido/correr.sh` → vitest `-t "banco con Gemini"`; SOLO llave de pruebas.
-- Fixture `__fixtures__/bandeja-hibrida-desarrollo.json` = turnos de controles 8–11 en un punto de decisión (sintéticos).
-- Gotcha: el aislamiento niega heredocs y `cat >` fuera del worktree; escribir el archivo con Write en `.ed/` y `cp`.
+- Una opción entra por el camino de siempre con su `canonico`; los lectores viejos quedan como lectores de canónicos.
+- `soloToque` = la opción escribe en un viaje o crea algo (Cargar, «sí» de cruce/sin_solicitud, elegir viaje en lista,
+  parecidos u ocultos, «Sí, es la misma» y ficha del contacto, Crear). Solo el toque, número, código o «sí» solo la
+  aplican. NO lo son: «Viaje nuevo» (muestra el cliente antes de crear), correcciones, preguntas de la caja abierta (no
+  escriben). Opción nueva que escriba ⇒ marcarla `soloToque` y que el texto de la pregunta no invite a escribirla.
+- Decisiones 1 y 2 aceptadas por Mauricio el 2026-10-06. Decisión 5 (elegir viaje con palabras pide toque) a confirmar.
+- Banco real: `scratchpad/comparador/hibrido/correr.sh`, una sola corrida ×1, SOLO llave de pruebas (fila «Gemini API
+  Key (pruebas)»). Latencia con `performance.now()` (Date es falso en el vivo). 3.8 a 4 s: ~19 % timeouts, 0 × 429; la
+  latencia correlaciona con el razonamiento (0,6), no con la entrada.
+- Quedó código muerto desde la bandeja (validador del intérprete, `interpretarConfirmacionNuevo`, lectores de la caja):
+  PR de limpieza aparte.
+- Gotcha: el aislamiento niega heredocs que escriben fuera del worktree y comandos compuestos complejos; escribir el .py
+  con Write en `.ed/` y correrlo solo.
 Relacionado: [[entendimiento-bandeja-wa]], [[bandeja-varios-viajes]].
