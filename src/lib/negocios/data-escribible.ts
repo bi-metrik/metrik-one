@@ -23,6 +23,7 @@
  */
 
 import { duenoDeReferencia, esReferenciaOne } from '@/lib/almacenamiento/referencia'
+import { textoLatinoProfundo } from '@/lib/texto/texto-latino'
 
 type Data = Record<string, unknown>
 
@@ -131,7 +132,9 @@ export function sanearDataDelNavegador({ entrante, guardada, tipo, configExtra, 
       else delete resultado[k]
       continue
     }
-    resultado[k] = v
+    // Las letras de otro alfabeto que se ven igual (В cirílica por B) se guardan latinas: el
+    // bloqueo de todo ONE (2026-10-06, `src/lib/texto/texto-latino.ts`).
+    resultado[k] = textoLatinoProfundo(v)
   }
   return resultado
 }

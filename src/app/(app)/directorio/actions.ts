@@ -1,5 +1,6 @@
 'use server'
 
+import { formularioLatino } from '@/lib/texto/texto-latino'
 import { getWorkspace } from '@/lib/actions/get-workspace'
 import { getRolePermissions } from '@/lib/roles'
 import { STATUS_CONTACTO } from '@/lib/catalogos/constants'
@@ -304,7 +305,22 @@ export async function getContacto(id: string) {
   return data
 }
 
+/** Cómo ve la persona cada campo del formulario (para el mensaje de letras no válidas). */
+const ETIQUETAS_DIRECTORIO: Record<string, string> = {
+  nombre: 'Nombre',
+  email: 'Correo',
+  numero_documento: 'Número de documento',
+  contacto_nombre: 'Nombre del contacto',
+  contacto_email: 'Correo del contacto',
+}
+
 export async function createContacto(formData: FormData) {
+  // Bloqueo de todo ONE (`texto-latino.ts`): letras de otro alfabeto que se ven igual se
+  // guardan latinas; un nombre, documento o correo con una letra imposible no se guarda.
+  const latino = formularioLatino(formData, (c) => ETIQUETAS_DIRECTORIO[c] ?? c.replace(/_/g, ' '))
+  if (!latino.ok) return { success: false, error: latino.mensaje }
+  formData = latino.formData
+
   const { supabase, workspaceId, error } = await getWorkspace()
   if (error || !workspaceId) return { success: false, error: 'No autenticado' }
 
@@ -363,6 +379,12 @@ export async function createContacto(formData: FormData) {
 }
 
 export async function updateContacto(id: string, formData: FormData) {
+  // Bloqueo de todo ONE (`texto-latino.ts`): letras de otro alfabeto que se ven igual se
+  // guardan latinas; un nombre, documento o correo con una letra imposible no se guarda.
+  const latino = formularioLatino(formData, (c) => ETIQUETAS_DIRECTORIO[c] ?? c.replace(/_/g, ' '))
+  if (!latino.ok) return { success: false, error: latino.mensaje }
+  formData = latino.formData
+
   const { supabase, workspaceId, role, staffId, error } = await getWorkspace()
   if (error || !workspaceId) return { success: false, error: 'No autenticado' }
 
@@ -747,6 +769,12 @@ export async function getEmpresa(id: string) {
 }
 
 export async function createEmpresa(formData: FormData) {
+  // Bloqueo de todo ONE (`texto-latino.ts`): letras de otro alfabeto que se ven igual se
+  // guardan latinas; un nombre, documento o correo con una letra imposible no se guarda.
+  const latino = formularioLatino(formData, (c) => ETIQUETAS_DIRECTORIO[c] ?? c.replace(/_/g, ' '))
+  if (!latino.ok) return { success: false, error: latino.mensaje }
+  formData = latino.formData
+
   const { supabase, workspaceId, error } = await getWorkspace()
   if (error || !workspaceId) return { success: false, error: 'No autenticado' }
 
@@ -780,6 +808,12 @@ export async function createEmpresa(formData: FormData) {
 }
 
 export async function updateEmpresa(id: string, formData: FormData) {
+  // Bloqueo de todo ONE (`texto-latino.ts`): letras de otro alfabeto que se ven igual se
+  // guardan latinas; un nombre, documento o correo con una letra imposible no se guarda.
+  const latino = formularioLatino(formData, (c) => ETIQUETAS_DIRECTORIO[c] ?? c.replace(/_/g, ' '))
+  if (!latino.ok) return { success: false, error: latino.mensaje }
+  formData = latino.formData
+
   const { supabase, error } = await getWorkspace()
   if (error) return { success: false, error: 'No autenticado' }
 

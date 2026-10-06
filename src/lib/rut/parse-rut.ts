@@ -4,6 +4,7 @@
 // Pattern: wa-transcribe.ts (inline_data base64)
 // ============================================================
 
+import { textoLatinoProfundo } from '@/lib/texto/texto-latino'
 import type { RutParseResult, RutField } from './types'
 import { validateNit } from './validate-nit'
 
@@ -190,12 +191,12 @@ export async function parseRut(
     // Fallback: repair common malformations if it still fails.
     let raw: Record<string, RutField<unknown>>
     try {
-      raw = JSON.parse(debugRaw)
+      raw = textoLatinoProfundo(JSON.parse(debugRaw))
     } catch {
       console.warn('[parse-rut] Direct parse failed, attempting repair...')
       const repaired = repairJson(debugRaw)
       try {
-        raw = JSON.parse(repaired)
+        raw = textoLatinoProfundo(JSON.parse(repaired))
       } catch (e2) {
         console.error('[parse-rut] Repair also failed. Raw:', debugRaw.slice(0, 600))
         throw new Error(`JSON invalido de Gemini: ${String(e2).slice(0, 80)}`)

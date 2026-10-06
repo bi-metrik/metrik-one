@@ -1,5 +1,6 @@
 'use server'
 
+import { primerCampoOficialNoValido, textoLatinoProfundo } from '@/lib/texto/texto-latino'
 import { createClient } from '@/lib/supabase/server'
 import { revalidatePath } from 'next/cache'
 import { getCachedUser } from '@/lib/supabase/auth-user'
@@ -71,6 +72,13 @@ export async function createContact(formData: {
   promoter_id?: string
   referred_by_id?: string
 }) {
+  // Bloqueo de todo ONE (`texto-latino.ts`): dobles cirílicos/griegos a latín; un campo
+  // oficial con una letra imposible no se guarda.
+  formData = textoLatinoProfundo(formData)
+  {
+    const malo = primerCampoOficialNoValido(formData as Record<string, unknown>)
+    if (malo) return { error: malo.mensaje }
+  }
   const { supabase, workspaceId } = await getWorkspace()
 
   const { error } = await supabase.from('contacts').insert({
@@ -114,6 +122,13 @@ export async function updateContact(
     referred_by_id?: string | null
   }
 ) {
+  // Bloqueo de todo ONE (`texto-latino.ts`): dobles cirílicos/griegos a latín; un campo
+  // oficial con una letra imposible no se guarda.
+  formData = textoLatinoProfundo(formData)
+  {
+    const malo = primerCampoOficialNoValido(formData as Record<string, unknown>)
+    if (malo) return { error: malo.mensaje }
+  }
   const { supabase, workspaceId } = await getWorkspace()
 
   const { error } = await supabase
@@ -226,6 +241,13 @@ export async function createCompany(formData: {
   city?: string
   notes?: string
 }) {
+  // Bloqueo de todo ONE (`texto-latino.ts`): dobles cirílicos/griegos a latín; un campo
+  // oficial con una letra imposible no se guarda.
+  formData = textoLatinoProfundo(formData)
+  {
+    const malo = primerCampoOficialNoValido(formData as Record<string, unknown>)
+    if (malo) return { error: malo.mensaje }
+  }
   const { supabase, workspaceId } = await getWorkspace()
 
   const { data, error } = await supabase
@@ -271,6 +293,13 @@ export async function updateCompany(
     notes?: string | null
   }
 ) {
+  // Bloqueo de todo ONE (`texto-latino.ts`): dobles cirílicos/griegos a latín; un campo
+  // oficial con una letra imposible no se guarda.
+  formData = textoLatinoProfundo(formData)
+  {
+    const malo = primerCampoOficialNoValido(formData as Record<string, unknown>)
+    if (malo) return { error: malo.mensaje }
+  }
   const { supabase, workspaceId } = await getWorkspace()
 
   const { error } = await supabase

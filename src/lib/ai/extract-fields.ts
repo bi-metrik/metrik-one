@@ -14,6 +14,7 @@
 // config previa mezclaba `gemini-3.1-flash-lite` con `thinkingBudget:0`, que
 // es sintaxis de la familia 2.5 y en 3.x se ignora).
 import { normalizarMontoExtraido } from './monto-extraido'
+import { revisarLetrasLeidas } from '@/lib/texto/texto-latino'
 import { serializarPersonas, type Persona } from '@/lib/documentos/personas'
 import { textoDelPdf } from './texto-pdf'
 import { verificarContraTexto, type VerificacionTexto } from './verificar-contra-texto'
@@ -83,6 +84,12 @@ export interface CampoResultado {
    * estaba a una o dos confusiones de lectura. Ver `verificar-contra-texto.ts`.
    */
   origen?: 'texto_pdf'
+  /**
+   * Letras de otro alfabeto que quedaron en lo leído y no se pudieron convertir con seguridad
+   * (la IA escribió «МЕЛА» por «MEJIA», V0167). El campo va a revisión (`manual`) con el valor
+   * a la vista para que la persona lo corrija. Ver `src/lib/texto/texto-latino.ts`.
+   */
+  letras_no_validas?: string[]
 }
 
 // ── Supported MIME types ─────────────────────────────────────────────────────
@@ -336,9 +343,17 @@ export async function extractFieldsFromDocument(
         value = normalizarMontoExtraido(value)
       }
 
+      // Letras de otro alfabeto (la IA leyó «В» cirílica por «B», V0121): los dobles exactos se
+      // convierten; si queda alguna que no se puede convertir, el campo va a revisión con el
+      // valor a la vista. Así el error aparece en el cargue y no al generar el formulario.
+      const letras = value ? revisarLetrasLeidas(value) : null
+      if (letras) value = letras.valor
+
       // Confidence < 0.70 → manual required, value forced to null
       if (confidence < 0.70) {
         result[campo.slug] = { value: null, confidence, manual: true }
+      } else if (letras && letras.noValidas.length > 0) {
+        result[campo.slug] = { value, confidence, manual: true, letras_no_validas: letras.noValidas }
       } else {
         result[campo.slug] = { value, confidence, manual: false }
       }

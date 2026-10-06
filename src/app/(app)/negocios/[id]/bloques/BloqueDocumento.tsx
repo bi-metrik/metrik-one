@@ -23,6 +23,7 @@ import {
 } from 'lucide-react'
 import { createClient } from '@/lib/supabase/client'
 import { procesarDocumento, actualizarCampoDocumento, reprocesarDocumento } from '@/lib/actions/documento-actions'
+import { copiaDeSoloLectura } from '@/lib/negocios/copia-heredada'
 import { prepararSubidaExterna, descartarSubidaExterna } from '@/lib/actions/almacenamiento-actions'
 import { useAlmacenamientoExterno } from '@/lib/almacenamiento/contexto'
 import { subirAUrlFirmada } from '@/lib/almacenamiento/subir-navegador'
@@ -780,7 +781,10 @@ export default function BloqueDocumento({
   const camposConfig = configExtra.campos_extraccion ?? []
   const camposVisibles = configExtra.campos_visibles ?? null
   const maxSizeMb = configExtra.max_size_mb ?? 20
-  const editarExtraidos = configExtra.editar_extraidos === true
+  // Una copia heredada que no escribe en su origen no ofrece corregir nada: el servidor lo
+  // rechazaría al guardar (`copia-heredada.ts`, el mismo criterio en los dos lados).
+  const soloLecturaPorCopia = copiaDeSoloLectura(configExtra as unknown as Record<string, unknown>)
+  const editarExtraidos = configExtra.editar_extraidos === true && !soloLecturaPorCopia
   // Qué documento espera el bloque, en palabras. Se dice ANTES de subir: es la mitad
   // barata del control — el operador que lee «aquí va el RUT» rara vez sube la Cámara.
   const expectativaDoc = expectativaDeDocumento(configExtra as unknown as Record<string, unknown>)
@@ -798,7 +802,7 @@ export default function BloqueDocumento({
   const corregirGerencial = configExtra.corregir_campos_gerencial === true
   const areaReadonly = configExtra._areaReadonly === true
   const puedeCorregirVisible =
-    !areaReadonly && (puedeCorregirDocumentos(userRole) || esResponsable === true)
+    !areaReadonly && !soloLecturaPorCopia && (puedeCorregirDocumentos(userRole) || esResponsable === true)
   // Causa de la corrección, elegida en un clic y compartida por todos los campos del
   // bloque: corregir tres campos del mismo documento por el mismo motivo es UNA
   // corrección, no tres. `sesionDoc` es lo que las agrupa en el registro.

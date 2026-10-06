@@ -16,6 +16,7 @@
  * porque decidir a quién se cierra es lo que hay que poder probar.
  */
 
+import { textoLatinoProfundo } from '@/lib/texto/texto-latino'
 import * as XLSX from 'xlsx';
 import { revalidatePath } from 'next/cache';
 import { createServiceClient } from '@/lib/supabase/server';
@@ -172,10 +173,10 @@ export async function previsualizarCargueSujetos(
 
   // `raw: false` para que una cédula formateada como número no llegue en
   // notación científica, que es como se pierden documentos largos en silencio.
-  const todas = XLSX.utils.sheet_to_json<Record<string, unknown>>(workbook.Sheets[sheetName], {
+  const todas = textoLatinoProfundo(XLSX.utils.sheet_to_json<Record<string, unknown>>(workbook.Sheets[sheetName], {
     defval: null,
     raw: false,
-  });
+  }));
   if (todas.length === 0) return { ok: false, error: 'xlsx_vacio' };
 
   const truncado = todas.length > LIMITE_FILAS_CARGUE;
