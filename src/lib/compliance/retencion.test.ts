@@ -164,6 +164,12 @@ const CLASIFICACION: Record<string, Clasificacion> = {
       'el glosario del reglamento de prueba del núcleo conversacional define infante como «menor de 2 años»: ' +
       'una EDAD de pasajero. No hay plazo de conservación en este archivo.',
   },
+  'supabase/functions/_shared/agente/arnes/conjuntos.ts': {
+    tipo: 'no-es-plazo',
+    razon:
+      'el arnés re-actúa una pregunta real del bot («¿Viajan bebés (menores de 2 años)?»): una EDAD de pasajero. ' +
+      'No hay plazo de conservación en este archivo.',
+  },
   'src/lib/negocios/sugeridos.ts': {
     tipo: 'no-es-plazo',
     razon: 'ejemplo de la deducción que anota la marca de sugerido («ninguno … es menor de 2 años»): una edad.',
