@@ -3,6 +3,7 @@
 ## Project memories
 
 - ⚠️⚠️ [Cargue en segundo plano y acciones largas (#1035, #1036)](project_cargue_segundo_plano.md) — marca `data._lectura`; #1036 emisión SIN mergear; /conciliacion tiene 300 s
+- [Columna Pago de cuotas CDA](project_columna_pago_cuota_cda.md) — pago↔cuota por FIFO (RPC sin plan/cuota); la UI no nombra a Bold
 - ⚠️ [Acciones lentas SOENA (#1010-#1012)](project_acciones_lentas_soena.md) — `cache()` no memoiza en server actions; `after()` lanza fuera de request
 - [Cargue masivo de Valida concurrente](project_valida_cargue_concurrente.md) — 3 filas; reintento de red no recobra; PDF de lote ya no sigue el orden del XLSX
 - ⚠️ [/negocios paginada en el servidor](project_lista_negocios_paginada.md) — viajan 30 tarjetas; `.in()` de 400+ uuid rompe por `Content-Location`
