@@ -4,6 +4,7 @@ import {
   leerExacto, leerToqueDecision, MAX_DESCRIPCION_FILA, MAX_FILAS_LISTA, MAX_ID_FILA, MAX_TITULO_BOTON_RESPUESTA, MAX_TITULO_FILA, nombreLiteral,
   puntoCliente, puntoConfirmacion, puntoContacto, puntoDeLaCaja, puntoDelNuevo, puntoDelResumen, puntoDelViaje, puntoTanda, siSinCargar,
   textoVolverAPreguntar, TEXTO_NO_TE_ENTENDI, validarDecision, versionDe,
+  esViajePropuesto, etiquetaDeViaje, opcionPropuesta, textoPropuesta, modeloDeLaDecision, MODELO_DECISION_POR_DEFECTO,
 } from './wa-decision-reglas.ts';
 import type { PuntoDecision } from './wa-decision-reglas.ts';
 import { botonesDelResumen } from './wa-viajes-reglas.ts';
@@ -115,9 +116,24 @@ describe('lo que el código lee sin el modelo: el número de la lista, el códig
     expect(leerExacto('2', p)).toMatchObject({ tipo: 'opcion', opcion: { clave: 'v2', canonico: '2' } });
     expect(leerExacto('2.', p)).toMatchObject({ tipo: 'opcion', opcion: { clave: 'v2' } });
     expect(leerExacto('9', p)).toEqual({ tipo: 'fuera' });
-    // Con palabras ya no es exacto: lo lee el modelo.
-    expect(leerExacto('el 2', p)).toBeNull();
-    expect(leerExacto('la dos', p)).toBeNull();
+    // Escrito con su artículo (2026-10-06): «la dos», «el segundo», «la 2», «el primero» son el número.
+    for (const t of ['el 2', 'la 2', 'la dos', 'La Dos.', 'el segundo', 'la segunda', 'en la segunda', 'la opción 2', 'el número 2']) {
+      expect([t, leerExacto(t, p)]).toMatchObject([t, { tipo: 'opcion', opcion: { clave: 'v2' } }]);
+    }
+    expect(leerExacto('el primero', p)).toMatchObject({ tipo: 'opcion', opcion: { clave: 'v1' } });
+    expect(leerExacto('la novena', p)).toEqual({ tipo: 'fuera' });
+    expect(leerExacto('el 9', p)).toEqual({ tipo: 'fuera' });
+    // Sin el artículo, en plural o con más palabras, no: lo lee el modelo («los dos» es «ambos», no el 2).
+    for (const t of ['dos', 'segundo', 'los dos', 'las dos', 'el segundo de arriba', 'el primero que pusiste', 'el de dos']) expect([t, leerExacto(t, p)]).toEqual([t, null]);
+  });
+  it('«el último» solo si la lista lo deja claro: todos los viajes en ella, del 1 al último', () => {
+    // La lista corta no tiene todos los viajes abiertos (hay uno oculto): «el último» no es claro.
+    expect(p.hayMas).toBe(true);
+    expect(leerExacto('el último', p)).toBeNull();
+    const todos = puntoDelViaje('entrega', 'ent-1', 'Tanda', OPCIONES, V.slice(0, 3));
+    expect(todos.hayMas).toBe(false);
+    expect(leerExacto('el último', todos)).toMatchObject({ tipo: 'opcion', opcion: { clave: 'v3' } });
+    expect(leerExacto('la última', todos)).toMatchObject({ tipo: 'opcion', opcion: { clave: 'v3' } });
   });
   it('un código exacto de la lista, o de un viaje abierto fuera de ella (opción oculta con su código)', () => {
     expect(leerExacto('T1 26 14', p)).toMatchObject({ tipo: 'opcion', opcion: { clave: 'v2' } });
@@ -280,6 +296,43 @@ describe('lo que escribe en un viaje o crea algo sale solo de lo exacto, nunca d
     expect(t(cruce, 'si')).toMatch(/^Para seguir, toca «Sí, van ahí»\. No he cargado nada\./);
     const conCliente = puntoDelResumen('e', huellaDelPlanParaPruebas('ninguna'), '', 'entrega', V);
     expect(t({ ...conCliente, creaCliente: true }, 'si')).toMatch(/^Para cargarlo y crear el cliente, toca «.+»\. No he cargado nada\./);
+  });
+});
+
+describe('la propuesta de un viaje (2026-10-06): el viaje que reconoce el modelo se propone con [Sí, ese]', () => {
+  it('solo los viajes de «¿A qué viaje van?» y de «¿Creo el cliente nuevo?»: la lista, los parecidos y los de fuera de la lista', () => {
+    const p = viaje();
+    const nuevo = puntoDelNuevo('e', '', 'Luisa Mejía', OPCIONES, V);
+    expect(['v1', 'v3', 'xj262'].map(k => esViajePropuesto(p, p.opciones.find(o => o.clave === k)))).toEqual([true, true, true]);
+    expect(['nuevo', 'des'].map(k => esViajePropuesto(p, p.opciones.find(o => o.clave === k)))).toEqual([false, false]);
+    expect(esViajePropuesto(nuevo, nuevo.opciones.find(o => o.clave === 'p1'))).toBe(true);
+    expect(esViajePropuesto(nuevo, nuevo.opciones.find(o => o.clave === 'crear'))).toBe(false);
+    const resumen = puntoDelResumen('e', huellaDelPlanParaPruebas('ninguna'), '', 'entrega', V);
+    expect(esViajePropuesto(resumen, resumen.opciones.find(o => o.clave === 'xj262'))).toBe(false);
+  });
+  it('el texto nombra el viaje con su cliente y su código; el parecido, sin repetir el cliente', () => {
+    const p = viaje();
+    expect(textoPropuesta(p.opciones.find(o => o.clave === 'v2')!)).toBe('¿Van en «CARTAGENA 3N · Lina Pérez · T1 26 14»? Toca «Sí, ese» o responde «sí». No he cargado nada.');
+    const nuevo = puntoDelNuevo('e', '', 'Luisa Mejía', OPCIONES, V);
+    expect(etiquetaDeViaje(nuevo.opciones.find(o => o.clave === 'p1')!)).toBe('Luisa Mejía · SAN ANDRÉS · T1 26 9');
+  });
+  it('la propuesta guardada vale solo para la misma pregunta con la misma huella', () => {
+    const p = viaje();
+    expect(opcionPropuesta(p, { ref: 'ent-1', version: p.version, clave: 'v2' })).toMatchObject({ clave: 'v2', canonico: '2' });
+    expect(opcionPropuesta(p, { ref: 'ent-1', version: 'otra', clave: 'v2' })).toBeNull();
+    expect(opcionPropuesta(p, { ref: 'ent-2', version: p.version, clave: 'v2' })).toBeNull();
+    expect(opcionPropuesta(p, { ref: 'ent-1', version: p.version, clave: 'des' })).toBeNull();
+    expect(opcionPropuesta(p, null)).toBeNull();
+  });
+});
+
+describe('el modelo del llamado de decisión (2026-10-06): propio, gemini-3.5-flash-lite por defecto', () => {
+  it('por defecto 3.5-flash-lite aunque la conversación abierta use 3.8; `modelo_decision` lo cambia; uno no permitido cae al de por defecto', () => {
+    expect(MODELO_DECISION_POR_DEFECTO).toBe('gemini-3.5-flash-lite');
+    expect(modeloDeLaDecision(null)).toEqual({ modelo: 'gemini-3.5-flash-lite', rechazado: null });
+    expect(modeloDeLaDecision({ activo: true, modelo: 'gemini-3.8-flash', timeout_ms: 4000 })).toEqual({ modelo: 'gemini-3.5-flash-lite', rechazado: null });
+    expect(modeloDeLaDecision({ modelo_decision: 'gemini-3.8-flash' })).toEqual({ modelo: 'gemini-3.8-flash', rechazado: null });
+    expect(modeloDeLaDecision({ modelo_decision: 'gpt-9' })).toEqual({ modelo: 'gemini-3.5-flash-lite', rechazado: 'gpt-9' });
   });
 });
 

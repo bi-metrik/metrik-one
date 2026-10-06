@@ -31,6 +31,8 @@ import type { BotonBandeja } from './wa-botones-bandeja.ts';
 import { nombreDeViaje, nombrePropio, normalizarNombre, normalizarTexto } from './wa-entendimiento-reglas.ts';
 import type { ContactoCandidato } from './wa-entendimiento-reglas.ts';
 import { codigoCompacto } from './wa-carga-reglas.ts';
+import { MODELOS_PERMITIDOS } from './wa-interprete-reglas.ts';
+import type { ModeloInterprete } from './wa-interprete-reglas.ts';
 import type { OpcionNegocio } from './wa-carga-reglas.ts';
 import { datoDeLaFicha, llavesDelTexto, soloLlave, viajesDeLaFicha } from './wa-cliente-reglas.ts';
 import type { FichaCliente, Llave } from './wa-cliente-reglas.ts';
@@ -255,10 +257,47 @@ export function formaDeCodigo(texto: string): boolean {
   return /^[A-Z]{1,3}\d{3,}$/.test(c) && c.length <= 12 && /^[\sA-Za-z0-9-]+$/.test(String(texto ?? '').trim());
 }
 
+const CARDINALES: Readonly<Record<string, number>> = {
+  uno: 1, una: 1, dos: 2, tres: 3, cuatro: 4, cinco: 5, seis: 6, siete: 7, ocho: 8, nueve: 9, diez: 10,
+};
+const ORDINALES: Readonly<Record<string, number>> = {
+  primero: 1, primera: 1, primer: 1, segundo: 2, segunda: 2, tercero: 3, tercera: 3, tercer: 3, cuarto: 4, cuarta: 4,
+  quinto: 5, quinta: 5, sexto: 6, sexta: 6, septimo: 7, septima: 7, setimo: 7, setima: 7, octavo: 8, octava: 8,
+  noveno: 9, novena: 9, decimo: 10, decima: 10,
+};
+
 /**
- * Solo lo que no tiene ambigüedad, y siempre el mensaje ENTERO: un número de la lista («2», «2.»), un código de
- * viaje exacto, un «sí» o un «no» solos (en una pregunta que tiene esas salidas) y, donde se pide, la llave sola.
- * Todo lo demás (también «el 2», «sí, pero…», «sii», «dale») va al modelo. `null`: no es nada de eso.
+ * El número de la lista escrito con su artículo (2026-10-06, Mauricio): «la dos», «el segundo», «la 2», «el primero»,
+ * «la opción 3», «en la tercera», y «el último» solo si la lista lo deja claro (todos sus viajes están en ella y van
+ * del 1 al último sin huecos). Siempre el mensaje ENTERO y con el artículo en singular (o «opción», «número»): «dos»
+ * o «segundo» solos no son exactos, y «los dos» es «ambos», no el 2. `null`: no es un número escrito; `'ultimo_dudoso'`: «el último» de una lista que no lo deja claro.
+ */
+export function numeroEscrito(texto: string, p: PuntoDecision): number | 'ultimo_dudoso' | null {
+  const t = normalizarTexto(String(texto ?? '')).replace(/[.!¡]+$/g, '').trim();
+  const m = /^(?:(?:en|es|son|va|van|esta|esa|ese)\s+)?(?:(el|la)\s+)?(?:(opcion|numero)\s+)?([a-z]+|\d{1,2})$/.exec(t);
+  if (!m || (!m[1] && !m[2])) return null;
+  const w = m[3];
+  if (/^\d+$/.test(w)) return Number(w);
+  if (CARDINALES[w] !== undefined) return CARDINALES[w];
+  if (ORDINALES[w] !== undefined) return ORDINALES[w];
+  if (w === 'ultimo' || w === 'ultima') {
+    const ns = p.opciones.filter(o => o.numero !== undefined && o.visible).map(o => o.numero!).sort((a, b) => a - b);
+    const claro = ns.length > 0 && !p.hayMas && ns.every((n, i) => n === i + 1);
+    return claro ? ns[ns.length - 1] : 'ultimo_dudoso';
+  }
+  return null;
+}
+
+/** Un «sí» escrito solo («sí», «Si.», «SÍ!»). */
+export function esSiEscritoSolo(texto: string): boolean {
+  return normalizarTexto(String(texto ?? '')).replace(/[.!¡]+$/g, '').trim() === 'si';
+}
+
+/**
+ * Solo lo que no tiene ambigüedad, y siempre el mensaje ENTERO: un número de la lista («2», «2.», o escrito con su
+ * artículo: «la dos», «el segundo», «la 2»), un código de viaje exacto, un «sí» o un «no» solos (en una pregunta que
+ * tiene esas salidas) y, donde se pide, la llave sola. Todo lo demás («sí, pero…», «sii», «dale», «el de Cartagena») va
+ * al modelo. `null`: no es nada de eso.
  */
 export function leerExacto(texto: string, p: PuntoDecision, codigosAbiertos: ReadonlyArray<string> = []): LecturaExacta | null {
   const t = String(texto ?? '').trim();
@@ -267,6 +306,12 @@ export function leerExacto(texto: string, p: PuntoDecision, codigosAbiertos: Rea
   const numeradas = p.opciones.filter(o => o.numero !== undefined);
   if (num && numeradas.length > 0) {
     const o = numeradas.find(x => x.numero === Number(num[1]));
+    return o ? { tipo: 'opcion', opcion: o } : { tipo: 'fuera' };
+  }
+  const escrito = numeradas.length > 0 ? numeroEscrito(t, p) : null;
+  if (escrito === 'ultimo_dudoso') return null;
+  if (escrito !== null) {
+    const o = numeradas.find(x => x.numero === escrito);
     return o ? { tipo: 'opcion', opcion: o } : { tipo: 'fuera' };
   }
   if (formaDeCodigo(t)) {
@@ -288,6 +333,23 @@ export function leerExacto(texto: string, p: PuntoDecision, codigosAbiertos: Rea
 }
 
 // ── El modelo ────────────────────────────────────────────────────────────────
+
+/**
+ * El modelo del llamado de decisión (2026-10-06): uno propio, más rápido que el de la conversación abierta (que sigue en
+ * `bot_conversacional.modelo`). Con 3.8 a 4 s, 1 de cada 5 llamados terminaba en timeout (corrida ×1 con la llave de
+ * pruebas): la latencia la marca el razonamiento, no la entrada. Por defecto `gemini-3.5-flash-lite` con su razonamiento
+ * más bajo, `minimal` (tabla «Controlling thinking» de https://ai.google.dev/gemini-api/docs/thinking, leída el
+ * 2026-10-06: 3.5-flash-lite admite minimal, low, medium y high; `RAZONAMIENTO_POR_MODELO` ya lo pide así). Se cambia
+ * con `bot_conversacional.modelo_decision` (uno de `MODELOS_PERMITIDOS`; otro valor cae al de por defecto).
+ */
+export const MODELO_DECISION_POR_DEFECTO: ModeloInterprete = 'gemini-3.5-flash-lite';
+
+export function modeloDeLaDecision(botConversacional: unknown): { modelo: ModeloInterprete; rechazado: string | null } {
+  const r = (botConversacional && typeof botConversacional === 'object' ? botConversacional : {}) as { modelo_decision?: unknown };
+  const pedido = r.modelo_decision === undefined || r.modelo_decision === null ? null : String(r.modelo_decision);
+  if (pedido && (MODELOS_PERMITIDOS as readonly string[]).includes(pedido)) return { modelo: pedido as ModeloInterprete, rechazado: null };
+  return { modelo: MODELO_DECISION_POR_DEFECTO, rechazado: pedido };
+}
 
 export const TIPOS_DE_RESPUESTA = ['opcion', 'nombre', 'llave', 'correccion', 'contenido', 'pregunta', 'no_se'] as const;
 
@@ -501,6 +563,40 @@ export function textoVolverAPreguntar(
   return `No me quedó claro. ${q}`;
 }
 
+// ── La propuesta de un viaje (2026-10-06, Mauricio) ──────────────────────────
+// Cuando el modelo reconoce un viaje por su nombre o por un dato («van en el de Esneider»), el bot no carga: lo propone
+// con un solo botón [Sí, ese] y vuelve a mostrar la lista para elegir otro. Solo el toque o un «sí» escrito solo
+// (mientras esa propuesta sea lo último que dijo el bot de esa pregunta) cargan.
+
+export const TITULO_SI_ESE = 'Sí, ese';
+export const TEXTO_SI_NO_ES_ESE = 'Si no es ese, elige en la lista.';
+
+/** ¿La opción que leyó el modelo es un viaje que el bot propone, en «¿A qué viaje van?» o «¿Creo el cliente nuevo?»? */
+export function esViajePropuesto(p: PuntoDecision, o: OpcionDecision | null | undefined): o is OpcionDecision {
+  return !!o && (p.tipo === 'viaje' || p.tipo === 'nuevo') && !!o.ref && /^[vxp]/.test(o.clave);
+}
+
+/** El viaje como se nombra en la propuesta: «SAN ANDRÉS DIC · Diego Torres · D1 26 1». */
+export function etiquetaDeViaje(o: OpcionDecision): string {
+  const t = o.titulo.replace(/^\d+\.\s*/, '').replace(/^Es\s+/, '');
+  return o.descripcion ? `${t} · ${o.descripcion}` : t;
+}
+
+/** «¿Van en «X»? Toca «Sí, ese» o responde «sí». No he cargado nada.» */
+export function textoPropuesta(o: OpcionDecision): string {
+  return `¿Van en «${recortar(etiquetaDeViaje(o), 120)}»? Toca «${TITULO_SI_ESE}» o responde «sí». No he cargado nada.`;
+}
+
+/** Lo que se guarda de la propuesta (en la telemetría de la decisión): de qué pregunta, con qué huella y qué viaje. */
+export interface PropuestaGuardada { ref: string; version: string; clave: string }
+
+/** La opción propuesta, si la propuesta es de la pregunta vigente (mismo punto, misma huella). */
+export function opcionPropuesta(p: PuntoDecision, g: PropuestaGuardada | null | undefined): OpcionDecision | null {
+  if (!g || g.ref !== p.ref || g.version !== p.version) return null;
+  const o = p.opciones.find(x => x.clave === g.clave);
+  return esViajePropuesto(p, o) ? o : null;
+}
+
 /** Lo que pide el bot cuando el modelo leyó algo que escribe o crea: tocar la opción (y que no hizo nada). */
 function textoSoloToque(p: PuntoDecision, o: OpcionDecision | null): string {
   if (!o) return 'Escríbeme solo el celular o el correo, sin más texto. No he creado nada.';
@@ -648,6 +744,11 @@ export function puntoNuevo(p: {
     ...pars.map((x, i) => ({
       ...opcionDeViaje(x.viaje, i + 1, `p${i + 1}`, x.numero !== null ? String(x.numero) : String(x.viaje.codigo ?? ''), true),
       titulo: `Es ${nombreDeViaje({ cliente: x.viaje.cliente, codigo: null }) || x.viaje.codigo || 'ese viaje'}`,
+      // Debajo, el viaje (su nombre o su destino, y su código): el cliente ya va en el título.
+      ...(() => {
+        const d = [x.viaje.nombre?.trim() || x.viaje.destino?.trim() || '', x.viaje.codigo ?? ''].filter(Boolean).join(' · ');
+        return d ? { descripcion: recortar(d, MAX_DESCRIPCION_FILA) } : {};
+      })(),
       // Su número en la lista de «¿A qué viaje van?» sigue valiendo escrito solo.
       numero: x.numero ?? undefined,
       soloToque: true,

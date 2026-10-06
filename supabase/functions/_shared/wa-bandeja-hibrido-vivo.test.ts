@@ -394,7 +394,9 @@ async function llega(
   const base = { phone: TEL, text: texto, wa_message_id: `wamid.vivo.${++n}`, timestamp: String(Math.floor((T0 + p.enviado * 1000) / 1000)) };
   const message = p.boton ? { ...base, type: 'interactive', interactive_reply: p.boton.id } : { ...base, type: 'text', reenviado: p.reenviado === true };
   if (p.interprete) {
-    const user = { ...USER, modulos: { ...USER.modulos, bot_conversacional: { activo: true, modelo: 'gemini-3.8-flash' } } };
+    // El banco con Gemini real elige el modelo de la decisión como lo haría el workspace (`modelo_decision`).
+    const banco = process.env.BANCO_DECISION_MODELO ? { modelo_decision: process.env.BANCO_DECISION_MODELO } : {};
+    const user = { ...USER, modulos: { ...USER.modulos, bot_conversacional: { activo: true, modelo: 'gemini-3.8-flash', ...banco } } };
     const { atenderEscrito } = await import('./wa-interprete.ts');
     const cuenta = p.interprete.llamadas;
     const llamarModelo = async () => {
@@ -435,6 +437,16 @@ const boton = (titulo: string) => {
   if (!b) throw new Error(`no hay botón «${titulo}» en ${JSON.stringify(ultimosBotones())}`);
   return b;
 };
+/** Un botón de cualquier mensaje enviado (el más reciente con ese título): «Sí, ese» va en su propio mensaje, antes de la lista. */
+const botonEnviado = (titulo: string) => {
+  for (const e of [...enviados].reverse()) {
+    const b = e.botones?.find(x => x.title === titulo);
+    if (b) return b;
+  }
+  throw new Error(`no se envió ningún botón «${titulo}»`);
+};
+/** La propuesta de un viaje (2026-10-06): «¿Van en «X»?» con [Sí, ese] y, aparte, la lista para elegir otro. */
+const PROPUESTA = /^¿Van en «.+»\? Toca «Sí, ese» o responde «sí»\. No he cargado nada\.$/;
 /**
  * Decisión 1 de Mauricio (2026-10-05): un cliente nuevo no se crea sin celular, correo o usuario. Cada cliente
  * sintético de estas pruebas trae su celular en el encabezado: inventado, fijo por nombre (sin tildes ni mayúsculas,
@@ -863,6 +875,172 @@ async function preguntaDeViaje() {
   expect(textos().at(-1)).toMatch(/¿De qué viaje (?:es|son)/);
 }
 
+// ── Elegir viaje con palabras (2026-10-06, Mauricio): los números escritos y la propuesta [Sí, ese] ──────────────
+// El código lee los números escritos con su artículo como el número de la lista («la dos», «el segundo», «la 2», «el
+// último» si la lista lo deja claro). Cuando el modelo reconoce un viaje por su nombre o por un dato, el bot no carga:
+// lo propone con un solo botón [Sí, ese] y la lista para elegir otro. Solo el toque o el «sí» escrito solo cargan.
+// ── El interruptor (`config_extra.bot_conversacional.hibrido`), de punta a punta ─────────────────────────────
+// Apagado, la bandeja se porta como antes (todo `wa-bandeja-vivo.test.ts`, tal cual está en `main`, corre así). Aquí la
+// misma secuencia con la llave apagada y prendida, en el mismo workspace de prueba.
+describe('el modelo del llamado de decisión: gemini-3.5-flash-lite por defecto; el intérprete sigue con el suyo', () => {
+  beforeEach(() => { bandeja.procesarEnElActo.activo = true; });
+  it.each([
+    [{ hibrido: true }, 'gemini-3.5-flash-lite'],
+    [{ hibrido: true, activo: true, modelo: 'gemini-3.8-flash', timeout_ms: 4000 }, 'gemini-3.5-flash-lite'],
+    [{ hibrido: true, modelo_decision: 'gemini-3.8-flash' }, 'gemini-3.8-flash'],
+  ])('bot_conversacional %j → la decisión pide %s, con el tiempo máximo del workspace', async (bot, esperado) => {
+    (t.workspaces[0].config_extra as Fila).bot_conversacional = bot;
+    await preguntaDeViaje();
+    const pedidos: Array<{ modelo: string; timeoutMs: number }> = [];
+    decision.modeloDeDecision.llamar = async (p) => { pedidos.push({ modelo: p.modelo, timeoutMs: p.timeoutMs }); return { ok: true as const, json: { tipo: 'no_se' }, ms: 1 }; };
+    const user = { ...USER, modulos: { ...USER.modulos, bot_conversacional: bot } };
+    await bandeja.atenderEnBandeja(db as never, user as never, { phone: TEL, type: 'text', text: 'esto con palabras', timestamp: String(Math.floor(Date.now() / 1000)), wa_message_id: 'w-modelo' } as never, await (async () => (await import('./wa-bandeja-reglas.ts')).leerConfigBandeja(t.workspaces[0].config_extra))());
+    expect(pedidos).toEqual([{ modelo: esperado, timeoutMs: 4000 }]);
+  });
+});
+
+describe('el interruptor bot_conversacional.hibrido: la misma secuencia apagado y prendido', () => {
+  beforeEach(() => { bandeja.procesarEnElActo.activo = true; });
+  const interruptor = (hibrido: boolean) => {
+    const ce = t.workspaces[0].config_extra as Fila;
+    ce.bot_conversacional = hibrido ? { hibrido: true } : {};
+  };
+
+  it('apagado: «¿A qué viaje van?» sale como texto, «el de san andrés» lo lee el lector de siempre y carga, sin el modelo de decisión', async () => {
+    interruptor(false);
+    await preguntaDeViaje();
+    expect(enviados.at(-1)!.lista).toBeFalsy();
+    expect(textos().at(-1)).toContain('Dime cuál (por ejemplo «el de San Andrés»)');
+    await llega('el de san andrés', { enviado: 9 });
+    expect(alModeloDeDecision).toEqual([]);
+    colaModelo = [pedido()];
+    await cron(60);
+    expect(t.wa_bandeja_entendimientos[0]).toMatchObject({ estado: 'negocio_actualizado', negocio_id: 'n-p' });
+    expect(enviados.some(e => e.lista)).toBe(false);
+  });
+
+  it('prendido: la misma pregunta sale como lista; «el de san andrés» lo lee el modelo y el bot propone el viaje, sin cargar', async () => {
+    interruptor(true);
+    await preguntaDeViaje();
+    expect(enviados.at(-1)!.lista).toBe(true);
+    expect(textos().at(-1)).toContain('Tócalo en la lista o escribe su número.');
+    elige('el de san andrés', 'v1');
+    await llega('el de san andrés', { enviado: 9 });
+    expect(alModeloDeDecision).toEqual(['el de san andrés']);
+    expect(textos().at(-2)).toMatch(PROPUESTA);
+    expect(t.wa_bandeja_entendimientos).toEqual([]);
+    await llega('sí', { enviado: 12 });
+    colaModelo = [pedido()];
+    await cron(60);
+    expect(t.wa_bandeja_entendimientos[0]).toMatchObject({ estado: 'negocio_actualizado', negocio_id: 'n-p' });
+  });
+
+  it('apagado: «👌» al resumen no pasa por el modelo de decisión (lo lee el código de siempre)', async () => {
+    interruptor(false);
+    await llega(nuevo('Octavio Prueba8'), { enviado: 0 });
+    await llega('queremos ir a Capurganá en febrero, somos 4 adultos', { enviado: 3, reenviado: true });
+    await llega('listo', { enviado: 6 });
+    await llega('👌', { enviado: 10 });
+    expect(alModeloDeDecision).toEqual([]);
+    expect(enviados.some(e => e.lista)).toBe(false);
+  });
+});
+
+describe('bot híbrido: elegir viaje con palabras, los números escritos y la propuesta [Sí, ese]', () => {
+  beforeEach(() => { bandeja.procesarEnElActo.activo = true; });
+  const cargadoEn = async (id: string) => {
+    colaModelo = [pedido()];
+    await cron(60);
+    return t.wa_bandeja_entendimientos.some(e => e.estado === 'negocio_actualizado' && e.negocio_id === id);
+  };
+
+  it.each(['la dos', 'el segundo', 'la 2', 'La segunda.', 'el último'])('«%s» lo lee el código, sin el modelo, y carga en el viaje 2', async (texto) => {
+    await preguntaDeViaje();
+    expect(textos().at(-1)).toContain('2. BARILOCHE JUL 3-10 · Mateo Prueba5 (M 26 2)');
+    await llega(texto, { enviado: 9 });
+    expect(alModeloDeDecision).toEqual([]);
+    expect(await cargadoEn('n-m')).toBe(true);
+  });
+
+  it.each(['la quinta', 'el 9', 'la opción 7'])('«%s», fuera de la lista: «Ese número no está en la lista», sin el modelo y sin cargar', async (texto) => {
+    await preguntaDeViaje();
+    await llega(texto, { enviado: 9 });
+    expect(alModeloDeDecision).toEqual([]);
+    expect(textos().at(-1)).toMatch(/^Ese número no está en la lista\. .*¿De qué viaje son\?$/);
+    expect(enviados.at(-1)!.lista).toBe(true);
+    expect(await cargadoEn('n-m')).toBe(false);
+    expect(t.wa_bandeja_entendimientos).toEqual([]);
+  });
+
+  it('«van en el de Mateo»: el bot propone el viaje con [Sí, ese] y la lista; no carga. El toque de «Sí, ese» carga', async () => {
+    await preguntaDeViaje();
+    elige('van en el de Mateo', 'v2');
+    await llega('van en el de Mateo', { enviado: 9 });
+    expect(textos().slice(-2)).toEqual(['¿Van en «BARILOCHE JUL 3-10 · Mateo Prueba5 · M 26 2»? Toca «Sí, ese» o responde «sí». No he cargado nada.', 'Si no es ese, elige en la lista.']);
+    expect(enviados.at(-2)!.botones!.map(b => b.title)).toEqual(['Sí, ese']);
+    expect(enviados.at(-1)!.lista).toBe(true);
+    expect(t.wa_bandeja_entendimientos).toEqual([]);
+    expect(t.wa_bandeja_entregas.every(e => e.estado !== 'con_cliente')).toBe(true);
+    await toca(botonEnviado('Sí, ese'), { enviado: 12 });
+    expect(await cargadoEn('n-m')).toBe(true);
+  });
+
+  it('«van en el de Mateo» y después «sí» escrito solo: carga en el viaje propuesto, sin volver al modelo', async () => {
+    await preguntaDeViaje();
+    elige('van en el de Mateo', 'v2');
+    await llega('van en el de Mateo', { enviado: 9 });
+    const m = alModeloDeDecision.length;
+    await llega('sí', { enviado: 12 });
+    expect(alModeloDeDecision.length).toBe(m);
+    expect(await cargadoEn('n-m')).toBe(true);
+  });
+
+  it('un «sí» con más palabras no es el «sí» a la propuesta: lo lee el modelo y no carga', async () => {
+    await preguntaDeViaje();
+    elige('van en el de Mateo', 'v2');
+    await llega('van en el de Mateo', { enviado: 9 });
+    decide('sí, pero espérame', { tipo: 'no_se' });
+    await llega('sí, pero espérame', { enviado: 12 });
+    expect(textos().at(-1)).toMatch(/^No me quedó claro\. /);
+    // Y después de otra decisión, la propuesta ya no vale: el «sí» solo no carga.
+    await llega('sí', { enviado: 15 });
+    expect(await cargadoEn('n-m')).toBe(false);
+    expect(t.wa_bandeja_entendimientos).toEqual([]);
+  });
+
+  it('el toque viejo de «Sí, ese» (de una pregunta que ya cambió) no carga: lo dice y vuelve a mostrar la pregunta vigente', async () => {
+    await preguntaDeViaje();
+    elige('van en el de Mateo', 'v2');
+    await llega('van en el de Mateo', { enviado: 9 });
+    const b = botonEnviado('Sí, ese');
+    const partes = b.id.split('|');
+    partes[4] = `${partes[4]}-vieja`;
+    await toca({ id: partes.join('|'), title: b.title }, { enviado: 12 });
+    expect(textos().at(-1)).toMatch(/^Ese botón es de/);
+    expect(await cargadoEn('n-m')).toBe(false);
+    expect(t.wa_bandeja_entendimientos).toEqual([]);
+  });
+
+  it('en «¿Creo el cliente nuevo …?», el «sí» después de proponer un viaje es el «sí» a ese viaje: no crea a nadie', async () => {
+    await preguntaDeViaje();
+    const negocios = t.negocios.length;
+    elige(nuevo('Mateo Prueba'), 'nuevo', 'Mateo Prueba');
+    await llega(nuevo('Mateo Prueba'), { enviado: 9 });
+    colaModelo = [pedido()];
+    await cron(60);
+    expect(textos().at(-1)).toMatch(/¿Creo el cliente nuevo «Mateo Prueba»\?|¿Va como viaje nuevo de Mateo Prueba\?/);
+    elige('no, es el de Bariloche', 'p2');
+    await llega('no, es el de Bariloche', { enviado: 70 });
+    expect(textos().at(-2)).toMatch(PROPUESTA);
+    await llega('sí', { enviado: 75 });
+    colaModelo = [pedido()];
+    await cron(120);
+    expect(t.contactos.filter(c => /MATEO PRUEBA$/.test(String(c.nombre)))).toEqual([]);
+    expect(t.negocios.length).toBe(negocios);
+    expect(t.wa_bandeja_entendimientos[0]).toMatchObject({ estado: 'negocio_actualizado', negocio_id: 'n-m' });
+  });
+});
+
 describe('v2 · N2: «¿A qué viaje van?» se contesta con cada forma que el bot ofrece', () => {
   it.each([
     ['el número de la lista (con el formato «Nombre · Cliente (código)»)', '1'],
@@ -878,15 +1056,15 @@ describe('v2 · N2: «¿A qué viaje van?» se contesta con cada forma que el bo
     // Regla 3 (2026-10-02): el contenido que abre una tanda con la pregunta abierta la vuelve a mostrar, corta.
     expect(textos().slice(antes)).toEqual([expect.stringMatching(/^Primero: Tanda de las \d\d:\d\d · ¿De qué viaje son\?$/)]);
     // Bot híbrido (2026-10-06): el número y el código los lee el código; el nombre del viaje o del cliente, el modelo
-    // (con la fila del viaje como opción). Elegir el viaje carga en él: lo que leyó el modelo pide el toque.
+    // (con la fila del viaje como opción). Elegir el viaje carga en él: el bot lo propone con [Sí, ese] y el «sí» carga.
     const exacto = /^(?:\d+|P 26 2)$/.test(respuesta);
     if (!exacto) {
       elige(respuesta, 'v1');
       await llega(respuesta, { enviado: 9 });
-      expect(textos().slice(antes + 1)).toEqual([expect.stringMatching(/^Si es «SAN ANDRÉS DIC», tócalo en la lista\. No he cargado nada\.\n/)]);
+      expect(textos().slice(antes + 1)).toEqual(['¿Van en «SAN ANDRÉS DIC · Pedro Prueba5 · P 26 2»? Toca «Sí, ese» o responde «sí». No he cargado nada.', 'Si no es ese, elige en la lista.']);
       expect(t.wa_bandeja_mensajes.find(m => m.cuerpo === respuesta)).toBeUndefined();
       expect(t.wa_bandeja_entendimientos).toEqual([]);
-      await toca(boton('1. SAN ANDRÉS DIC'), { enviado: 10 });
+      await llega('sí', { enviado: 10 });
     } else {
       await llega(respuesta, { enviado: 9 });
       expect(textos().slice(antes + 1)).toEqual([]); // ni 📌, ni la lista del encabezado, ni «Primero: …»
@@ -903,13 +1081,13 @@ describe('v2 · N2: «¿A qué viaje van?» se contesta con cada forma que el bo
     for (const k of [1, 2, 3, 4]) t.negocios.push({ ...negocioDePrueba(`n-x${k}`, `X 26 ${k}`, `VIAJE ${k}`, `CLIENTE ${k}`), created_at: `2026-09-2${k}T10:00:00Z` });
     await preguntaDeViaje();
     expect(textos().at(-1)).not.toContain('EUROPA 2 DÍAS');
-    // Fuera de la lista: el modelo lo ve como opción oculta (con su código), y el código la valida. Cargar ahí pide lo
-    // exacto: el bot dice cuál entendió; el código escrito tal cual lo elige.
+    // Fuera de la lista: el modelo lo ve como opción oculta (con su código), y el código la valida. Cargar ahí no sale
+    // de lo leído: el bot lo propone con [Sí, ese] (que se puede tocar aunque no esté en la lista) y el toque lo carga.
     elige('Europa 2 días', 'xc261');
     await llega('Europa 2 días', { enviado: 9 });
-    expect(textos().at(-1)).toMatch(/^Si es «EUROPA 2 DÍAS», tócalo en la lista\. No he cargado nada\.\n/);
+    expect(textos().slice(-2)).toEqual(['¿Van en «EUROPA 2 DÍAS · Carolina Ruiz · C 26 1»? Toca «Sí, ese» o responde «sí». No he cargado nada.', 'Si no es ese, elige en la lista.\nSi no está, escríbeme el código o el nombre.']);
     expect(t.wa_bandeja_entendimientos).toEqual([]);
-    await llega('C 26 1', { enviado: 10 });
+    await toca(botonEnviado('Sí, ese'), { enviado: 10 });
     colaModelo = [pedido()];
     await cron(60);
     expect(t.wa_bandeja_entendimientos[0]).toMatchObject({ estado: 'negocio_actualizado', negocio_id: 'n-v' });
@@ -1033,24 +1211,24 @@ describe('v2 · N2: «¿A qué viaje van?» se contesta con cada forma que el bo
     elige(nuevo('Matilde Osorio'), 'nuevo', 'Matilde Osorio');
     await llega(nuevo('Matilde Osorio'), { enviado: 9 });
     await cron(60);
-    // El «sí» con reserva y «opción 9» no son exactos: el modelo (falso) no sabe, y se vuelve a preguntar en el acto.
+    // El «sí» con reserva no es exacto: el modelo (falso) no sabe, y se vuelve a preguntar en el acto. «opción 9» es un
+    // número escrito (2026-10-06) fuera de la lista: lo lee el código, sin el modelo, y vuelve a preguntar.
     decide('sí, aunque falta el segundo apellido', { tipo: 'no_se' });
     await llega('sí, aunque falta el segundo apellido', { enviado: 70 });
     expect(textos().at(-1)).toMatch(/^No me quedó claro\. .*¿Creo el cliente nuevo «Matilde Osorio»\?$/);
     nadaCreado(negocios);
-    decide('opción 9', { tipo: 'no_se' });
+    const m9 = alModeloDeDecision.length;
     await llega('opción 9', { enviado: 110 });
-    expect(textos().at(-1)).toMatch(/^No me quedó claro\. .*¿Creo el cliente nuevo «Matilde Osorio»\?$/);
+    expect(alModeloDeDecision.length).toBe(m9);
+    expect(textos().at(-1)).toMatch(/^Ese número no está en la lista\. .*¿Creo el cliente nuevo «Matilde Osorio»\?$/);
     expect(textos().some(x => x.includes('¿Va como viaje nuevo de opción 9?'))).toBe(false);
     nadaCreado(negocios);
     const n = textos().find(x => x.includes('¿De qué viaje '))!.split('\n').find(l => l.includes('Pedro Prueba5'))!.charAt(0);
-    // «la 2» no es exacto: el modelo elige la fila de ese viaje (oculta en la confirmación, con su número), pero cargar
-    // en un viaje sale solo de lo exacto: pide el toque. El número escrito solo lo elige.
-    elige(`la ${n}`, `v${n}`);
+    // «la 2» es el número de la lista escrito con su artículo (2026-10-06): lo lee el código, sin el modelo, y elige esa
+    // fila (oculta en la confirmación, con su número).
+    const m0 = alModeloDeDecision.length;
     await llega(`la ${n}`, { enviado: 170 });
-    expect(textos().at(-1)).toMatch(/^Si es «SAN ANDRÉS DIC», tócalo en la lista\. No he cargado nada\.\n/);
-    nadaCreado(negocios);
-    await llega(n, { enviado: 175 });
+    expect(alModeloDeDecision.length).toBe(m0);
     colaModelo = [pedido()];
     await cron(220);
     expect(t.contactos).toEqual([]);
@@ -1069,7 +1247,7 @@ describe('v2 · N2: «¿A qué viaje van?» se contesta con cada forma que el bo
     expect(await ent.preguntaAbierta(db as never, WS, TEL)).toBeNull();
   });
 
-  it('PI3: los dos nombres de pila de una clienta con viaje abierto (el atajo): la confirmación lo dice; «el de Cancún» pide el toque y el toque carga en su viaje', async () => {
+  it('PI3: los dos nombres de pila de una clienta con viaje abierto (el atajo): la confirmación lo dice; «el de Cancún» propone su viaje y el toque lo carga', async () => {
     t.negocios.push(negocioDePrueba('n-am', 'A 26 7', 'CANCÚN NOV', 'ANA MARÍA QUIÑONES'));
     t.negocio_bloques.push({ id: 'b-n-am', negocio_id: 'n-am', data: { destino: 'CANCÚN' }, updated_at: null, bloque_configs: { orden: 1, config_extra: { fields: FIELDS }, bloque_definitions: { tipo: 'datos' }, etapas_negocio: { orden: 1 } } });
     await preguntaDeViaje();
@@ -1084,7 +1262,7 @@ describe('v2 · N2: «¿A qué viaje van?» se contesta con cada forma que el bo
     expect(ultimosBotones().map(b => b.title)).toEqual(['Crear', 'Es Ana María Quiñones', 'No es nuevo', '🗑 Descartar']);
     elige('el de Cancún', 'p1');
     await llega('el de Cancún', { enviado: 100 });
-    expect(textos().at(-1)).toMatch(/^Para ir a ese viaje, toca «Es Ana María Quiñones»\. No he cargado nada\.\n/);
+    expect(textos().slice(-2)).toEqual([expect.stringMatching(/^¿Van en «Ana María Quiñones · .*A 26 7»\? Toca «Sí, ese» o responde «sí»\. No he cargado nada\.$/), 'Si no es ese, elige en la lista.']);
     expect(t.wa_bandeja_entendimientos[0]).not.toMatchObject({ negocio_id: 'n-am' });
     await toca(boton('Es Ana María Quiñones'), { enviado: 110 });
     colaModelo = [pedido()];
@@ -2947,6 +3125,8 @@ describe('bot híbrido (2026-10-06): cada punto de decisión, de punta a punta',
      * libre no se aplica, se pide el toque (2026-10-06, SR3 «👌»).
      */
     escribe?: boolean;
+    /** Elegir ese viaje con palabras no carga: el bot lo propone con [Sí, ese] y la lista; el «sí» solo lo carga. */
+    propone?: boolean;
     /** ¿Se aplicó la elección? */
     elegido: () => Promise<boolean> | boolean;
   }
@@ -2958,7 +3138,7 @@ describe('bot híbrido (2026-10-06): cada punto de decisión, de punta a punta',
   const PUNTOS: Record<string, Punto> = {
     '«¿A qué viaje van?» (lista de viajes)': {
       montar: preguntaDeViaje,
-      toque: '1. SAN ANDRÉS DIC', numero: '1', codigo: 'P 26 2', idValido: { tipo: 'opcion', opcion: 'v1' }, escribe: true,
+      toque: '1. SAN ANDRÉS DIC', numero: '1', codigo: 'P 26 2', idValido: { tipo: 'opcion', opcion: 'v1' }, escribe: true, propone: true,
       elegido: () => t.wa_bandeja_entregas.some(e => e.estado === 'con_cliente') || t.wa_bandeja_entendimientos.some(e => e.negocio_destino_id === 'n-p'),
     },
     'el resumen (Cargar / Descartar)': {
@@ -3086,7 +3266,19 @@ describe('bot híbrido (2026-10-06): cada punto de decisión, de punta a punta',
         decide(texto, p.idValido);
         await llega(texto, { enviado: 30, interprete });
         expect(alModeloDeDecision.slice(modeloAntes)).toEqual([texto]);
-        if (p.escribe) {
+        if (p.propone) {
+          // Un viaje reconocido por su nombre o por un dato: se propone con [Sí, ese] y la lista; nada se carga.
+          expect(textos().slice(-2)).toEqual([expect.stringMatching(PROPUESTA), 'Si no es ese, elige en la lista.']);
+          expect(enviados.at(-2)!.botones!.map(b => b.title)).toEqual(['Sí, ese']);
+          conPregunta();
+          nadaGuardado();
+          await sinCambio();
+          // El «sí» escrito solo, sin el modelo, carga en el viaje propuesto.
+          const m = alModeloDeDecision.length;
+          await llega('sí', { enviado: 40, interprete });
+          expect(alModeloDeDecision.length).toBe(m);
+          expect(await p.elegido()).toBe(true);
+        } else if (p.escribe) {
           // Lo que escribe en un viaje no sale de lo que el modelo leyó: pide el toque, con la pregunta, y no hace nada.
           expect(textos().at(-1)).toMatch(/(?:tócalo en la lista|toca «.+»)\. No he cargado nada\.\n/);
           conPregunta();
@@ -3370,7 +3562,7 @@ describe('bot híbrido (2026-10-06): el conjunto de desarrollo (controles 8 a 11
     }
     for (const x of textos().slice(antes.textos)) {
       // Volver a preguntar lo mismo es «pregunta» (lo que repite de la pregunta no es un efecto nuevo).
-      if (/^(?:No me quedó claro|No te entendí|Todavía no lo cargo|Para crear|Para cargarlo|Para seguir|Para ir a ese viaje|Si es «|Escríbeme solo|Eso te lo contesto|Ese número no está|No entendí|Ese botón)/.test(x)) {
+      if (/^(?:No me quedó claro|No te entendí|Todavía no lo cargo|Para crear|Para cargarlo|Para seguir|Para ir a ese viaje|Si es «|Escríbeme solo|Eso te lo contesto|Ese número no está|No entendí|Ese botón|¿Van en «|Si no es ese)/.test(x)) {
         ef.push('pregunta');
         continue;
       }
@@ -3508,9 +3700,9 @@ describe('bot híbrido (2026-10-06): el conjunto de desarrollo (controles 8 a 11
     const { esquemaDecision } = await import('./wa-decision-reglas.ts');
     let res: Response;
     try {
-      res = await fetchReal(`https://generativelanguage.googleapis.com/v1beta/models/${BANCO}:generateContent`, {
+      res = await fetchReal(`https://generativelanguage.googleapis.com/v1beta/models/${p.modelo}:generateContent`, {
         method: 'POST', headers: { 'Content-Type': 'application/json', 'x-goog-api-key': process.env.GEMINI_API_KEY ?? '' },
-        body: JSON.stringify({ system_instruction: { parts: [{ text: p.sistema }] }, contents: [{ role: 'user', parts: [{ text: p.usuario }] }], generationConfig: generacionPara(BANCO, esquemaDecision()) }),
+        body: JSON.stringify({ system_instruction: { parts: [{ text: p.sistema }] }, contents: [{ role: 'user', parts: [{ text: p.usuario }] }], generationConfig: generacionPara(p.modelo, esquemaDecision()) }),
         signal: AbortSignal.timeout(p.timeoutMs),
       });
     } catch (err) {
@@ -3538,8 +3730,9 @@ describe('bot híbrido (2026-10-06): el conjunto de desarrollo (controles 8 a 11
    * Por qué el bot volvió a preguntar en el turno (lo dice su texto). `toque` = lo que el modelo leyó escribía o creaba y
    * se pide el toque (decisión 2 y su extensión del 2026-10-06): esperado. `fallback` = el modelo no respondió.
    */
-  function vueltaDe(desde: number): 'toque' | 'fallback' | 'no_se' | 'todavia' | 'pregunta' | 'fuera' | null {
+  function vueltaDe(desde: number): 'propuesta' | 'toque' | 'fallback' | 'no_se' | 'todavia' | 'pregunta' | 'fuera' | null {
     for (const x of textos().slice(desde)) {
+      if (/^¿Van en «/.test(x)) return 'propuesta';
       if (/^(?:Para cargarlo|Para crear|Para seguir|Para ir a ese viaje|Si es «|Escríbeme solo)/.test(x)) return 'toque';
       if (/^No te entendí; toca una opción/.test(x)) return 'fallback';
       if (/^No me quedó claro/.test(x)) return 'no_se';
@@ -3566,6 +3759,8 @@ describe('bot híbrido (2026-10-06): el conjunto de desarrollo (controles 8 a 11
         decision.modeloDeDecision.llamar = async (p) => {
           alModeloDeDecision.push(caso.texto);
           timeouts.add(p.timeoutMs);
+          // El banco corre el modelo que elige la capa (`bot_conversacional.modelo_decision`, por defecto 3.5-flash-lite).
+          if (p.modelo !== BANCO) throw new Error(`la capa pidió ${p.modelo} y el banco es de ${BANCO}`);
           const r = await llamarReal(p);
           llamadas++;
           msModelo.push(r.ms);
@@ -3723,16 +3918,16 @@ describe('bot híbrido (2026-10-06): la prueba de Mauricio de 12:01 a 12:21, de 
         colaModelo = [CARGA];
         const antesModelo = alModeloDeDecision.length;
         // 12:16 · la respuesta: el número (el código lo lee), unas palabras (las lee el modelo) o el toque de la fila. Con
-        // palabras, el modelo elige la fila pero cargar en un viaje sale solo de lo exacto (2026-10-06, SR3): pide el
-        // toque, sin cargar nada, y el toque carga.
+        // palabras, el modelo reconoce el viaje pero no carga (2026-10-06): lo propone con [Sí, ese] y la lista, y el «sí»
+        // escrito solo lo carga.
         if (como === 'número') await llega('1', { enviado: 20, interprete });
         if (como === 'palabras') {
           elige('el de san andrés de don diego', 'v1');
           await llega('el de san andrés de don diego', { enviado: 20, interprete });
-          expect(textos().at(-1)).toMatch(/^Si es «SAN ANDRÉS DIC», tócalo en la lista\. No he cargado nada\.\n/);
+          expect(textos().slice(-2)).toEqual(['¿Van en «SAN ANDRÉS DIC · Diego Torres · D1 26 1»? Toca «Sí, ese» o responde «sí». No he cargado nada.', 'Si no es ese, elige en la lista.']);
           expect(enviados.at(-1)!.lista).toBe(true);
           expect(t.wa_bandeja_entendimientos).toEqual([]);
-          await toca(boton('1. SAN ANDRÉS DIC'), { enviado: 22, interprete });
+          await llega('sí', { enviado: 22, interprete });
         }
         if (como === 'toque') await toca(boton('1. SAN ANDRÉS DIC'), { enviado: 20, interprete });
         expect(alModeloDeDecision.length - antesModelo).toBe(como === 'palabras' ? 1 : 0);

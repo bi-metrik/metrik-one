@@ -2469,7 +2469,7 @@ export async function textoDeLaConsulta(
     const fichas = dir.porNombre(quien);
     if (fichas === null) return 'No pude revisar el directorio de clientes. Pregúntame otra vez en un momento.';
     const exactos = (fichas ?? []).filter(f => normalizarNombre(f.nombre) === normalizarNombre(quien));
-    const usadas = exactos.length > 0 ? exactos : leido.dudoso ? [] : (fichas ?? []).filter(f => pareceNombre(quien, f.nombre)).slice(0, 1);
+    const usadas = exactos.length > 0 ? exactos : leido.dudoso ? [] : (fichas ?? []).filter(f => pareceNombre(quien, f.nombre, { contiene: dir.contiene })).slice(0, 1);
     // Nunca «no lo tengo» con un nombre que no se pudo aislar: se pregunta de qué cliente.
     if (usadas.length === 0) return TEXTO_CONSULTA_DE_QUIEN;
     return usadas.map(f => textoViajesDelCliente({

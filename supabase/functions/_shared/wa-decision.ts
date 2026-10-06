@@ -15,9 +15,10 @@
 import {
   canonicoDe, CANONICO_NO_ES_NUEVO, conLlaveDelTexto, contextoDecision, esquemaDecision, instruccionesDecision, leerExacto, leerToqueDecision, puntoCliente, puntoConfirmacion,
   puntoDeLaCaja, puntoDelContacto, puntoDelNuevo, puntoDelResumen, puntoDelViaje, siSinCargar, textoVolverAPreguntar, validarDecision,
+  esSiEscritoSolo, esViajePropuesto, idDecision, modeloDeLaDecision, opcionPropuesta, textoPropuesta, TEXTO_SI_NO_ES_ESE, TITULO_SI_ESE,
 } from './wa-decision-reglas.ts';
-import type { OpcionDecision, PuntoDecision, Veredicto } from './wa-decision-reglas.ts';
-import { enviarPunto } from './wa-enviar-botones.ts';
+import type { OpcionDecision, PropuestaGuardada, PuntoDecision, Veredicto } from './wa-decision-reglas.ts';
+import { enviarConBotones, enviarPunto } from './wa-enviar-botones.ts';
 import { sendTextMessage } from './wa-respond.ts';
 import {
   botonesDeLaConfirmacion, nuevoPorConfirmar, pendienteDeLaTanda, preguntaAbierta, viajesAbiertosDeLaBandeja,
@@ -28,7 +29,7 @@ import type { OpcionNegocio } from './wa-carga-reglas.ts';
 import { fechaDeMeta } from './wa-bandeja-reglas.ts';
 import { llavesDelTexto } from './wa-cliente-reglas.ts';
 import type { ConfigBandeja } from './wa-bandeja-reglas.ts';
-import { CONFIG_INTERPRETE_POR_DEFECTO, generacionPara, leerConfigInterprete } from './wa-interprete-reglas.ts';
+import { generacionPara, leerConfigInterprete } from './wa-interprete-reglas.ts';
 import type { ContactoCandidato } from './wa-entendimiento-reglas.ts';
 import type { IncomingMessage, SupabaseClient, WaUser } from './types.ts';
 
@@ -137,6 +138,15 @@ export async function atenderEnPuntoDeDecision(
   const ws = user.workspace_id;
   const punto = await puntoDeDecision(supabase, ws, message.phone, config);
   if (!punto) return null;
+  // El «sí» escrito solo a la propuesta de un viaje («¿Van en «X»?»): carga ahí, como el toque de «Sí, ese». Vale si la
+  // propuesta es lo último que el bot decidió con ese comercial y la pregunta no cambió.
+  if ((punto.tipo === 'viaje' || punto.tipo === 'nuevo') && esSiEscritoSolo(texto)) {
+    const propuesta = opcionPropuesta(punto, await propuestaGuardada(supabase, ws, message.phone));
+    if (propuesta) {
+      await aplicar(supabase, user, message, config, punto, propuesta.canonico, texto);
+      return 'atendido';
+    }
+  }
   const viajes = (await viajesAbiertosDeLaBandeja(supabase, ws)) ?? [];
   const exacto = leerExacto(texto, punto, viajes.map(v => v.codigo ?? '').filter(Boolean));
   if (exacto?.tipo === 'opcion') {
@@ -155,8 +165,11 @@ export async function atenderEnPuntoDeDecision(
   // El código de otro viaje abierto en la caja abierta: es un encabezado que abre su caja (no contesta la lista).
   if (exacto?.tipo === 'codigo_ajeno' && punto.origen === 'tanda') return 'contenido';
 
+  // El tiempo máximo es el del intérprete (`bot_conversacional.timeout_ms`); el modelo, el propio de la decisión
+  // (`bot_conversacional.modelo_decision`, por defecto gemini-3.5-flash-lite). El de la conversación abierta no cambia.
   const cfg = leerConfigInterprete(user.modulos?.bot_conversacional ?? null, null);
-  const modelo = cfg.modelo ?? CONFIG_INTERPRETE_POR_DEFECTO.modelo;
+  const { modelo, rechazado } = modeloDeLaDecision(user.modulos?.bot_conversacional ?? null);
+  if (rechazado) console.warn(`[wa-decision] el modelo «${rechazado.slice(0, 60)}» de bot_conversacional.modelo_decision no está permitido: corre ${modelo}`);
   const r = await llamarModelo({
     modelo, sistema: instruccionesDecision(), usuario: contextoDecision(punto, texto),
     generationConfig: generacionPara(modelo, esquemaDecision()), timeoutMs: cfg.timeoutMs,
@@ -167,6 +180,13 @@ export async function atenderEnPuntoDeDecision(
     return await volverAPreguntar(message.phone, ws, punto, 'modelo');
   }
   const v = validarDecision(r.json, punto, texto);
+  // El modelo reconoció un viaje («van en el de Esneider»): no se carga; se propone con [Sí, ese] y la lista otra vez.
+  if (v.tipo === 'solo_toque' && esViajePropuesto(punto, v.opcion)) {
+    const guardada: PropuestaGuardada = { ref: punto.ref, version: punto.version, clave: v.opcion.clave };
+    await telemetria(supabase, user, message, punto, 'propuesta', { ...(r.json as Record<string, unknown>), propuesta: guardada }, modelo, r.ms);
+    await enviarPropuesta(message.phone, ws, punto, v.opcion);
+    return 'atendido';
+  }
   await telemetria(supabase, user, message, punto, v.tipo, r.json, modelo, r.ms);
   return await actuar(supabase, user, message, config, punto, v, texto, opts);
 }
@@ -243,6 +263,28 @@ async function aplicar(
   if (!ok) await enviarTexto(message.phone, `${textoVolverAPreguntar(punto, 'viejo')}`, ws);
 }
 
+/** La propuesta de un viaje: un solo botón [Sí, ese] y, aparte, la pregunta con su lista para elegir otro. */
+async function enviarPropuesta(phone: string, ws: string, punto: PuntoDecision, o: OpcionDecision): Promise<void> {
+  await enviarConBotones(phone, textoPropuesta(o), [{ id: idDecision(o.clave, punto.ref, punto.version), title: TITULO_SI_ESE }], { workspaceId: ws, intent: INTENT });
+  await enviarPunto(phone, TEXTO_SI_NO_ES_ESE, punto, { workspaceId: ws, intent: INTENT });
+}
+
+/**
+ * La última decisión del bot con ese comercial, si fue la propuesta de un viaje. Cualquier decisión posterior (otro
+ * escrito leído por el modelo, un timeout) la deja sin efecto. Si no se puede leer, no hay propuesta (no se carga).
+ */
+async function propuestaGuardada(supabase: SupabaseClient, ws: string, phone: string): Promise<PropuestaGuardada | null> {
+  try {
+    const { data, error } = await supabase.from('wa_message_log').select('interprete_resultado, interprete_propuesta, created_at')
+      .eq('workspace_id', ws).eq('phone', phone).eq('parser_source', 'decision').order('created_at', { ascending: false }).limit(1).maybeSingle();
+    if (error || !data || data.interprete_resultado !== 'propuesta') return null;
+    const g = (data.interprete_propuesta as { propuesta?: PropuestaGuardada } | null)?.propuesta;
+    return g && typeof g.ref === 'string' && typeof g.version === 'string' && typeof g.clave === 'string' ? g : null;
+  } catch {
+    return null;
+  }
+}
+
 /** Vuelve a preguntar una vez, en corto, con los botones o la lista. */
 async function volverAPreguntar(
   phone: string, ws: string, punto: PuntoDecision, motivo: Parameters<typeof textoVolverAPreguntar>[1], opcion?: OpcionDecision | null,
@@ -281,7 +323,9 @@ export async function atenderToqueDeDecision(
   if (!t) return false;
   const ws = user.workspace_id;
   const punto = await puntoDeDecision(supabase, ws, message.phone, config);
-  const opcion = punto && punto.ref === t.ref && punto.version === t.version ? punto.opciones.find(o => o.clave === t.clave && o.visible) : null;
+  // Una opción oculta (un viaje fuera de la lista) solo se toca desde el botón [Sí, ese] de su propuesta: los ids los
+  // arma el bot con la huella de la pregunta.
+  const opcion = punto && punto.ref === t.ref && punto.version === t.version ? punto.opciones.find(o => o.clave === t.clave) : null;
   if (!punto || !opcion) {
     if (punto) await volverAPreguntar(message.phone, ws, punto, 'viejo');
     else await enviarTexto(message.phone, 'Ese botón es de una pregunta que ya no está abierta: no hice nada.', ws);
@@ -306,7 +350,7 @@ async function telemetria(
 ): Promise<void> {
   try {
     const { error } = await supabase.from('wa_message_log').insert({
-      workspace_id: user.workspace_id, phone: message.phone, direction: 'inbound', intent: `bandeja.decision.${punto.tipo}`,
+      workspace_id: user.workspace_id, phone: message.phone, direction: 'inbound', intent: `bandeja.decision.${punto.tipo}`, created_at: new Date().toISOString(),
       message_preview: String(message.text ?? '').slice(0, 100), parser_source: 'decision', gemini_model: modelo, gemini_latency_ms: ms,
       interprete_accion: `decision.${punto.tipo}`, interprete_propuesta: propuesta ?? null, interprete_resultado: resultado,
     });
