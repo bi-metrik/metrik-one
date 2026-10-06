@@ -127,6 +127,13 @@ export function claveEscalera(pathname: string): string {
  *
  * - `version`: id del deployment, para el reporte (mismo valor que `NEXT_DEPLOYMENT_ID`).
  *
+ * Va como `<script type="module" async>` (ver `app/layout.tsx`): asi no espera a las hojas de
+ * estilo de Next. Y antes de pintar el aviso QUITA las hojas que siguen colgadas (`sheet`
+ * nulo): una hoja pendiente en el `<head>` bloquea el pintado de toda la pagina, que es la
+ * pantalla en blanco de `/tableros`. Sin quitarlas, el aviso existiria en el DOM y nadie lo
+ * veria. Las hojas que si bajaron se quedan, y las quitadas vuelven al `<head>` si React
+ * termina hidratando (carga lenta pero exitosa). Codigo valido en modo estricto (los modulos lo son).
+ *
  * El reporte se anota en la cola de `[error-cliente]` (`errores-cliente/cola.ts`, mismo
  * formato) y sale por `fetch` con `keepalive`; si la red no lo deja salir, la carga
  * siguiente lo reenvía. Tope de 5 avisos reportados por carga.
@@ -153,7 +160,7 @@ export function scriptAvisoConexion(version: string): string {
   return `(function(){try{
 var C=${conf},w=window,d=document,t0=Date.now(),enviados=0;
 if(w.__oneAvisoConexion)return;
-var api=w.__oneAvisoConexion={};
+var api=w.__oneAvisoConexion={},quitadas=[];
 function nid(){try{if(w.crypto&&crypto.randomUUID)return crypto.randomUUID()}catch(e){}return Date.now().toString(36)+'-'+Math.random().toString(36).slice(2,10)}
 function reportar(causa){try{
 if(enviados>=5)return;enviados++;
@@ -179,6 +186,7 @@ if(d.getElementById(C.id))return;
 reportar(el.getAttribute(C.ac)||'espera-ruta')},true);
 function pintar(causa){
 if(w.__oneHidratada||d.getElementById(C.id)||!d.body)return;
+var ls2=d.querySelectorAll('link[rel="stylesheet"]');for(var i=0;i<ls2.length;i++){if(!ls2[i].sheet&&ls2[i].parentNode){quitadas.push(ls2[i]);ls2[i].parentNode.removeChild(ls2[i])}}
 var r=d.createElement('div');r.id=C.id;r.setAttribute('role','alert');
 r.style.cssText='position:fixed;inset:0;z-index:2147483647;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:16px;padding:24px;text-align:center;background:#fff;color:'+C.ct+';font-family:system-ui,-apple-system,Segoe UI,sans-serif';
 var h=d.createElement('h2');h.textContent=C.t;h.style.cssText='margin:0;font-size:18px;font-weight:600';
@@ -189,7 +197,8 @@ r.appendChild(h);r.appendChild(p);r.appendChild(bt);d.body.appendChild(r);
 reportar(causa)}
 api.pintar=pintar;
 var tm=setTimeout(function(){pintar('sin-hidratar')},C.lh),tc=null;
-api.hidratada=function(){clearTimeout(tm);if(tc)clearTimeout(tc);var r=d.getElementById(C.id);if(r&&r.parentNode)r.parentNode.removeChild(r)};
+api.hidratada=function(){clearTimeout(tm);if(tc)clearTimeout(tc);var r=d.getElementById(C.id);if(r&&r.parentNode)r.parentNode.removeChild(r);
+while(quitadas.length)d.head.appendChild(quitadas.shift())};
 w.addEventListener('error',function(e){
 var s=e.target;if(w.__oneHidratada||tc||!s||!s.tagName)return;
 var u=s.src||s.href||'';if(String(u).indexOf('/_next/static/')<0)return;

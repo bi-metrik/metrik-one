@@ -114,6 +114,25 @@ describe('script en linea: React no hidrato (login en la portada, tableros en bl
     expect(e.reload).not.toHaveBeenCalled()
   })
 
+  it('quita las hojas de estilo colgadas (bloquean el pintado) y las devuelve si React hidrata', async () => {
+    const e = montar()
+    const colgada = e.doc.createElement('link')
+    colgada.setAttribute('rel', 'stylesheet')
+    colgada.setAttribute('href', '/_next/static/chunks/colgada.css')
+    Object.defineProperty(colgada, 'sheet', { value: null })
+    const cargada = e.doc.createElement('link')
+    cargada.setAttribute('rel', 'stylesheet')
+    cargada.setAttribute('href', '/_next/static/chunks/cargada.css')
+    Object.defineProperty(cargada, 'sheet', { value: {} })
+    e.doc.head.append(colgada, cargada)
+    await vi.advanceTimersByTimeAsync(LIMITE_HIDRATACION_MS)
+    expect(aviso(e)).not.toBeNull()
+    expect(colgada.isConnected).toBe(false)
+    expect(cargada.isConnected).toBe(true)
+    marcarHidratada()
+    expect(colgada.parentNode).toBe(e.doc.head)
+  })
+
   it('una carga lenta que hidrata antes del limite no ve el aviso', async () => {
     const e = montar()
     await vi.advanceTimersByTimeAsync(15_000)

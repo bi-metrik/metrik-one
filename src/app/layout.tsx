@@ -113,7 +113,15 @@ export default function RootLayout({
       */}
       <head>
         <style dangerouslySetInnerHTML={{ __html: ESTILO_AVISO_CONEXION }} />
+        {/*
+          `type="module" async`, no un script clasico: Next pone sus hojas de estilo ANTES en el
+          <head>, y un script clasico no corre hasta que esas hojas bajen. Si la red las deja
+          colgadas (la pantalla en blanco), el respaldo tampoco correria. Un modulo `async` en
+          linea corre apenas se lee, sin esperar las hojas (medido en Chromium, 2026-10-06).
+        */}
         <script
+          type="module"
+          async
           dangerouslySetInnerHTML={{
             __html: scriptAvisoConexion(String(process.env.NEXT_DEPLOYMENT_ID || 'dev')),
           }}
