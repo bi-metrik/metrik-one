@@ -62,7 +62,9 @@ type Fila = Record<string, unknown>;
 let tablas: Record<string, Fila[]>;
 let seq = 0;
 const uuid = () => `00000000-0000-4000-8000-${String(++seq).padStart(12, '0')}`;
-const DE_LA_PUERTA = new Set(['aceptaciones_terminos', 'wa_mensajes_retenidos', 'documentos_contractuales_versiones', 'wa_collaborators', 'workspaces', 'wa_message_log', 'wa_envios']);
+// `claves_idempotencia`: el reclamo del `wa_message_id` (`wa-mensaje-unico.ts`) va ANTES de la
+// puerta y solo guarda el id del mensaje; no es un tercero ni procesa el contenido.
+const DE_LA_PUERTA = new Set(['aceptaciones_terminos', 'wa_mensajes_retenidos', 'documentos_contractuales_versiones', 'wa_collaborators', 'workspaces', 'wa_message_log', 'wa_envios', 'claves_idempotencia']);
 
 function crearDb() {
   function from(tabla: string) {
