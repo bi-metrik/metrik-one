@@ -108,6 +108,12 @@ export async function middleware(request: NextRequest) {
   // 307 a /login, justo cuando el vigilante mas necesita la respuesta.
   if (pathname === '/api/version') return NextResponse.next()
 
+  // El service worker del piloto de red (`public/sw.js`). Es un archivo estatico, pero `.js` no
+  // esta excluido del matcher: sin este corte, una pestaña sin sesion recibia un 307 a /login y
+  // el navegador rechaza registrar (o ACTUALIZAR, que es por donde llega el interruptor de
+  // apagado) un service worker que redirige.
+  if (pathname === '/sw.js') return NextResponse.next()
+
   // Preview: `?__ws=<slug>` fija el inquilino de esta pestaña y redirige a la misma URL sin
   // el parámetro (así no se queda pegado en la barra ni en el historial). `?__ws=off` lo
   // quita. Solo en un preview: en producción y en local `accionTenantPreview` devuelve null
