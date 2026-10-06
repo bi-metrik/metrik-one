@@ -23,17 +23,18 @@
  * | terminos_pendientes   | ámbar  | términos sin aceptar, dentro del plazo (rojo sin plazo)     |
  * | al_dia                | verde  | sin cuota pendiente, o la pendiente vence en más de 5 días   |
  * | por_vencer            | ámbar  | la cuota pendiente vence en 5 días o menos                  |
- * | en_mora               | ámbar fuerte | cuota vencida, dentro de los 30 días de la cláusula 11.1 |
- * | pausado               | rojo   | más de 30 días de mora                                      |
+ * | en_mora               | ámbar fuerte | cuota vencida, antes de la restricción (cláusula 11.2)   |
+ * | restringido           | rojo   | más de 5 días: sin consultas nuevas (11.1, desde 5-nov-2026) |
+ * | pausado               | rojo   | más de 30 días de mora (11.3)                               |
  *
  * Los términos pendientes mandan sobre el pago: mientras no se acepten, la tarjeta de pago cede su
  * lugar al botón «Revisar y aceptar».
  *
  * ## La licencia de ONE (Clarity)
  *
- * Mismos estados, salvo `pausado`: ONE no se pausa por mora (la regla de los 30 días es la cláusula
- * 11.1 de los términos de Valida), así que una cuota vencida hace más de 30 días sigue siendo
- * `en_mora`, y el texto no promete ni amenaza con una pausa que no existe.
+ * Mismos estados, salvo `restringido` y `pausado`: ONE no se restringe ni se pausa por mora (son las
+ * cláusulas 11.1 y 11.3 de los términos de Valida), así que una cuota vencida sigue siendo `en_mora`
+ * a los 5 y a los 30 días, y el texto no promete ni amenaza con algo que no existe.
  */
 
 import { leerPeriodoEnConcepto } from '@/lib/cobros/periodo-en-concepto'
@@ -66,7 +67,14 @@ export function puedeOperarSuscripcion(p: {
 /** Días antes del vencimiento en que la cuota pasa a «próxima a vencer». */
 export const DIAS_AVISO_VENCIMIENTO = 5
 
-export type EstadoSuscripcion = 'terminos_pendientes' | 'al_dia' | 'por_vencer' | 'en_mora' | 'pausado' | 'desconocido'
+export type EstadoSuscripcion =
+  | 'terminos_pendientes'
+  | 'al_dia'
+  | 'por_vencer'
+  | 'en_mora'
+  | 'restringido'
+  | 'pausado'
+  | 'desconocido'
 export type Tono = 'verde' | 'ambar' | 'ambar_fuerte' | 'rojo' | 'gris'
 
 export interface ResumenEstado {
@@ -136,15 +144,30 @@ export function resumenEstado(p: {
     }
   }
 
-  if (p.mora.estado === 'en_mora' || p.mora.estado === 'suspendido') {
+  if (p.mora.estado === 'restringido' && !esOne) {
+    return {
+      estado: 'restringido',
+      tono: 'rojo',
+      chip: 'Consultas restringidas',
+      mensaje:
+        `Las consultas nuevas de Valida están restringidas por una cuota vencida. Al pagar se habilitan de nuevo; ` +
+        `si no, Valida se pausa desde el ${fechaDiaMes(p.mora.corteDesde)}.`,
+      requiereAccion: true,
+    }
+  }
+
+  if (p.mora.estado !== 'al_dia') {
     const periodo = p.pago?.estado === 'pendiente' ? periodoCorto(p.pago.concepto, p.pago.fechaVencimiento) : fechaDiaMes(p.mora.vencio)
+    const restringeDesde = p.mora.estado === 'en_mora' ? p.mora.restringeDesde : null
     return {
       estado: 'en_mora',
       tono: 'ambar_fuerte',
       chip: 'Cuota vencida',
       mensaje: esOne
         ? `Tu cuota del ${periodo} está vencida.`
-        : `Tu cuota del ${periodo} está vencida. Paga antes del ${fechaDiaMes(p.mora.corteDesde)} para evitar la pausa del servicio.`,
+        : restringeDesde
+          ? `Tu cuota del ${periodo} está vencida. Paga antes del ${fechaDiaMes(restringeDesde)} para seguir haciendo consultas nuevas.`
+          : `Tu cuota del ${periodo} está vencida. Paga antes del ${fechaDiaMes(p.mora.corteDesde)} para evitar la pausa del servicio.`,
       requiereAccion: true,
     }
   }
@@ -198,6 +221,6 @@ export function franjaValida(r: ResumenEstado, pago: ProximoPago | null): string
   if (r.estado === 'por_vencer' && pago?.estado === 'pendiente') {
     return `Tu cuota vence el ${fechaDiaMes(pago.fechaVencimiento)}`
   }
-  if (r.estado === 'en_mora') return 'Tienes una cuota vencida'
+  if (r.estado === 'en_mora' || r.estado === 'restringido') return 'Tienes una cuota vencida'
   return null
 }

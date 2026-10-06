@@ -113,6 +113,11 @@ type Props = {
    * Lo que se muestra EN LUGAR de las consultas cuando Valida está pausada (mora de más de 30 días).
    */
   consultasEnPausa?: React.ReactNode;
+  /**
+   * Lo que se muestra EN LUGAR de los formularios de consulta puntual y masiva cuando las consultas
+   * nuevas están restringidas por mora (cláusula 11.1): el historial y sus descargas siguen abiertos.
+   */
+  consultasRestringidas?: React.ReactNode;
 };
 
 export default function ValidaClient({
@@ -123,8 +128,9 @@ export default function ValidaClient({
   modoVitrina = false,
   encabezado = null,
   consultasEnPausa = null,
+  consultasRestringidas = null,
 }: Props) {
-  const [tab, setTab] = useState<TabKey>(negocioInicial ? 'historial' : 'puntual');
+  const [tab, setTab] = useState<TabKey>(negocioInicial || consultasRestringidas ? 'historial' : 'puntual');
   const [historial, setHistorial] = useState<ConsultaHistorialItem[]>(historialInicial);
   const [historialError, setHistorialError] = useState<string | null>(errorHistorial);
   const [tourTrigger, setTourTrigger] = useState(0);
@@ -163,7 +169,7 @@ export default function ValidaClient({
 
       <div className="space-y-6">
       {consultasEnPausa ? consultasEnPausa : (<>
-      {mostrarEmpty && (
+      {mostrarEmpty && !consultasRestringidas && (
         <TutorialEmptyState
           onStartDemo={dispararTutorial}
           onTryConsulta={() => setTab('puntual')}
@@ -196,8 +202,9 @@ export default function ValidaClient({
         </TabButton>
       </div>
 
-      {tab === 'puntual' && <ConsultaPuntualForm onPersisted={() => refrescarHistorial()} modoVitrina={modoVitrina} />}
-      {tab === 'masiva' && <ConsultaMasivaForm onPersisted={() => refrescarHistorial()} modoVitrina={modoVitrina} />}
+      {tab !== 'historial' && consultasRestringidas}
+      {tab === 'puntual' && !consultasRestringidas && <ConsultaPuntualForm onPersisted={() => refrescarHistorial()} modoVitrina={modoVitrina} />}
+      {tab === 'masiva' && !consultasRestringidas && <ConsultaMasivaForm onPersisted={() => refrescarHistorial()} modoVitrina={modoVitrina} />}
       {tab === 'historial' && (
         <Historial
           consultas={historial}
@@ -210,7 +217,7 @@ export default function ValidaClient({
       </>)}
       </div>
 
-      {!consultasEnPausa && (tutorialNuncaVisto || tourTrigger > 0) && (
+      {!consultasEnPausa && !consultasRestringidas && (tutorialNuncaVisto || tourTrigger > 0) && (
         <TutorialTour slug="valida_standalone" forceStart={tourTrigger} />
       )}
     </div>

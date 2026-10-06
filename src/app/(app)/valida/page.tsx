@@ -10,7 +10,14 @@ import { contextoSuscripcion } from '@/lib/seccion-suscripcion/contexto-servidor
 import { franjaValida } from '@/lib/seccion-suscripcion/estado';
 import { entradaValidaCda, moraValidaCda, puedeVerPagosCda } from '@/lib/valida-cda/puerta';
 import ValidaClient from './valida-client';
-import { AvisoMora, AvisoPlazoTerminos, FranjaSuscripcion, PausaPorMora } from './avisos-cda';
+import {
+  AvisoMora,
+  AvisoPlazoTerminos,
+  AvisoRestriccion,
+  ConsultasRestringidas,
+  FranjaSuscripcion,
+  PausaPorMora,
+} from './avisos-cda';
 import { TerminosCda } from './terminos-cda';
 
 export const dynamic = 'force-dynamic';
@@ -90,10 +97,13 @@ export default async function ValidaPage({ searchParams }: Props) {
     ) : null;
   }
 
-  // La mora (cláusula 11.1) y quién ve la plata. Una sola lectura de cuotas y pagos por request.
+  // La mora (cláusula 11) y quién ve la plata. Una sola lectura de cuotas y pagos por request, sin
+  // caché entre requests: el pago aprobado levanta la restricción en la navegación siguiente.
   const [mora, vePagos] = await Promise.all([moraValidaCda(), puedeVerPagosCda(entrada)]);
   const estadoMora = mora.tipo === 'ok' ? mora.mora : null;
   const enPausa = estadoMora?.estado === 'suspendido' ? estadoMora : null;
+  // Restringido (11.1): sin consultas nuevas, con el historial y las descargas abiertos.
+  const restringido = estadoMora?.estado === 'restringido' ? estadoMora : null;
 
   // Modo vitrina (workspaces Valida-only): oculta la asociación a negocio en
   // consulta puntual / carga masiva / historial y quita la columna negocio_codigo
@@ -137,15 +147,16 @@ export default async function ValidaPage({ searchParams }: Props) {
       : null;
   // El aviso del plazo de los Términos lo ven TODOS los usuarios del espacio: quien no es la persona
   // designada ve su nombre y no el botón, y así puede pedirle que acepte antes de la suspensión.
-  // Cuota y plata son solo de la persona designada del contrato (la misma regla que `/suscripcion`,
-  // `puedeVerPagosCda`): a los demás solo les llega el aviso obligatorio de servicio pausado por mora,
-  // sin montos ni botones (`PausaPorMora`).
-  const moraVisible = vePagos && estadoMora?.estado === 'en_mora' ? estadoMora : null;
+  // También TODOS ven el aviso de mora con la fecha de la restricción (cláusula 11.2), la restricción
+  // (11.1) y la pausa (11.3), sin montos. Cuota y plata son solo de la persona designada del contrato
+  // (la misma regla que `/suscripcion`, `puedeVerPagosCda`): la franja y el enlace a Suscripción.
+  const enMora = estadoMora?.estado === 'en_mora' ? estadoMora : null;
   const encabezado =
-    avisoPlazo || franja || moraVisible ? (
+    avisoPlazo || franja || enMora || restringido ? (
       <div className="space-y-3">
         {avisoPlazo}
-        {moraVisible && <AvisoMora mora={moraVisible} />}
+        {enMora && <AvisoMora mora={enMora} />}
+        {restringido && <AvisoRestriccion mora={restringido} vePagos={vePagos} />}
         {franja && <FranjaSuscripcion texto={franja} />}
       </div>
     ) : null;
@@ -154,11 +165,12 @@ export default async function ValidaPage({ searchParams }: Props) {
     <ValidaClient
       historialInicial={historial?.ok ? historial.consultas : []}
       errorHistorial={historial && !historial.ok ? historial.error : null}
-      tutorialNuncaVisto={!enPausa && tutorialProgress === null}
+      tutorialNuncaVisto={!enPausa && !restringido && tutorialProgress === null}
       negocioInicial={modoVitrina ? null : negocioInicial}
       modoVitrina={modoVitrina}
       encabezado={encabezado}
       consultasEnPausa={enPausa ? <PausaPorMora mora={enPausa} vePagos={vePagos} /> : null}
+      consultasRestringidas={restringido ? <ConsultasRestringidas /> : null}
     />
   );
 }
