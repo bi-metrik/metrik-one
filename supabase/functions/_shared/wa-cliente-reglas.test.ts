@@ -115,11 +115,20 @@ describe('el resolvedor (§3.2)', () => {
     expect(pareceNombre('Mauricio', 'MAURICIO MORENO')).toBe(true);
     expect(pareceNombre('Andrés Gomes', 'ANDRÉS GÓMEZ')).toBe(true);
     expect(pareceNombre('Daniel Pérez', 'LINA PÉREZ')).toBe(false);
-    // Undécimo control de Vera (hallazgo 8): el nombre dado contiene entero el de un contacto de dos palabras o más.
-    expect(pareceNombre('Celmira Rojas Peña', 'CELMIRA ROJAS')).toBe(true);
-    expect(pareceNombre('Leonor Cuesta Villa', 'LEONOR CUESTA')).toBe(true);
-    expect(pareceNombre('Mauricio Moreno Díaz', 'MAURICIO')).toBe(false); // una palabra sola no basta
-    expect(pareceNombre('Celmira Peña', 'CELMIRA ROJAS')).toBe(false);
+  });
+
+  it('bot híbrido (hallazgo 8 del undécimo control): el nombre dado que contiene entero el de un contacto de dos palabras o más también parece; apagado, no', () => {
+    expect(pareceNombre('Celmira Rojas Peña', 'CELMIRA ROJAS', { contiene: true })).toBe(true);
+    expect(pareceNombre('Leonor Cuesta Villa', 'LEONOR CUESTA', { contiene: true })).toBe(true);
+    expect(pareceNombre('Mauricio Moreno Díaz', 'MAURICIO', { contiene: true })).toBe(false); // una palabra sola no basta
+    expect(pareceNombre('Celmira Peña', 'CELMIRA ROJAS', { contiene: true })).toBe(false);
+    // Sin el bot híbrido, como antes: un apellido de más lo vuelve otra persona.
+    expect(pareceNombre('Celmira Rojas Peña', 'CELMIRA ROJAS')).toBe(false);
+    // El directorio lleva el interruptor hasta el resolvedor.
+    const fichas = [{ id: 'c-cr', nombre: 'CELMIRA ROJAS', cel4: '4410', correo: false, abiertos: [] }];
+    const nombres = new Map([['celmira rojas pena', fichas]]);
+    const con = { ...directorioDesde(nombres, new Map()), contiene: true };
+    expect(resolverConDirectorio(con, { nombre: 'Celmira Rojas Peña', llave: null })).toMatchObject({ tipo: 'elegir', motivo: 'parecidos' });
   });
 });
 

@@ -12,6 +12,7 @@
 //     (`src/lib/negocios/crear-negocio.ts`, «Persona natural: auto-crear empresa vinculada al contacto»).
 // ============================================================
 
+import { hibridoDelWorkspace } from './wa-hibrido.ts';
 import {
   claveDeLlave, claveDeNombre, directorioDesde, digitosCelular, nombreEnElDirectorio, nombreIdentico, resolverCliente, resolverConDirectorio,
   tieneLlave, tramosDelNombre,
@@ -104,7 +105,9 @@ export async function directorioPara(
     const k = claveDeLlave(l);
     if (!llaves.has(k)) llaves.set(k, await fichasPorLlave(supabase, workspaceId, l));
   }
-  return directorioDesde(nombres, llaves);
+  const dir = directorioDesde(nombres, llaves);
+  // El parecido por contención (hallazgo 8) solo con el bot híbrido del workspace.
+  return await hibridoDelWorkspace(supabase, workspaceId) ? { ...dir, contiene: true } : dir;
 }
 
 /** ¿Quién es el cliente? Con la base, en el acto (§3.2). */

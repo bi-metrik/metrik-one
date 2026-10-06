@@ -1,3 +1,6 @@
+// `wa-carga-ejecucion.test.ts` con el bot híbrido prendido (`bot_conversacional.hibrido = true`, 2026-10-06). El
+// original corre apagado, tal cual está en `main`.
+
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { rpcDelDirectorio } from './__fixtures__/directorio-doble.ts';
 
@@ -15,7 +18,17 @@ vi.mock('./wa-respond.ts', () => ({
   sendTextMessage: vi.fn(async (phone: string, texto: string) => { enviados.push({ phone, texto }); }),
   // Los botones de respuesta (2026-10-05): el cuerpo cuenta como lo que se le dijo.
   sendButtons: vi.fn(async (phone: string, texto: string) => { enviados.push({ phone, texto }); return 'wamid.botones'; }),
+  // Las listas del bot híbrido (2026-10-06): el cuerpo cuenta como lo que se le dijo.
+  sendList: vi.fn(async (phone: string, texto: string) => { enviados.push({ phone, texto }); return 'wamid.lista'; }),
 }));
+
+/**
+ * El modelo falso del punto de decisión (bot híbrido, 2026-10-06), por el texto exacto del escrito. Lo que no se declara:
+ * un acuse o un «sí»/«no» sueltos son «no sé»; lo demás, «contenido».
+ */
+let decisiones = new Map<string, unknown>();
+const decide = (texto: string, json: unknown) => { decisiones.set(texto, json); };
+const porDefecto = (texto: string): unknown => (/^(?:s[ií]+|no|ok|dale)$/i.test(texto.trim()) ? { tipo: 'no_se' } : { tipo: 'contenido' });
 
 type Fila = Record<string, unknown>;
 /** Los títulos de los botones del último mensaje que los llevó (2026-10-05). */
@@ -185,7 +198,7 @@ function bloqueConfig() {
 
 function base(): Tablas {
   return {
-    workspaces: [{ id: WS, slug: 'agencia', linea_activa_id: LINEA, config_extra: {}, modules: { bandeja_solicitudes_wa: true } }],
+    workspaces: [{ id: WS, slug: 'agencia', linea_activa_id: LINEA, config_extra: { bot_conversacional: { hibrido: true } }, modules: { bandeja_solicitudes_wa: true } }],
     staff: [{ id: STAFF, workspace_id: WS, full_name: 'TATIANA PRUEBA' }],
     wa_collaborators: [{ id: 'col-1', workspace_id: WS, name: 'EDGAR COLABORADOR' }],
     negocios: [
@@ -259,6 +272,11 @@ beforeEach(async () => {
   (await import('./wa-bandeja.ts')).esperaEnVuelo.dormir = async () => {};
   // Estas pruebas miden el cron de cada minuto: lo que se procesa en el acto (2026-10-05) va aparte.
   (await import('./wa-bandeja.ts')).procesarEnElActo.activo = false;
+  decisiones = new Map();
+  (await import('./wa-decision.ts')).modeloDeDecision.llamar = async (p) => {
+    const texto = /Mensaje del comercial: ([\s\S]*)$/.exec(p.usuario)?.[1] ?? '';
+    return { ok: true as const, json: decisiones.has(texto) ? decisiones.get(texto) : porDefecto(texto), ms: 1 };
+  };
   t = base();
   db = crearDb(t);
   enviados.length = 0;
@@ -431,8 +449,8 @@ describe('NUEVO y re-pregunta', () => {
       // «Nuevo» es un viaje nuevo: el directorio no la tiene, y comparte el apellido con tres clientes con viaje abierto.
       [
         'Tanda sin nombre · ¿Va como viaje nuevo de Carla Prueba? No lo tengo en el directorio: después del sí te pido su celular o correo (sin uno de los dos no lo creo).',
-        'Ya hay viajes de Luis Prueba (T1 26 15), Marta Prueba (T1 26 14) y Ana Prueba (T1 26 9): si es para uno de esos, responde «el de Cartagena», «el de Punta Cana» o T1 26 9.',
-        'Responde sí, o dime el viaje si es uno que ya existe. No he creado ni cargado nada.',
+        'Ya hay viajes de Luis Prueba (T1 26 15), Marta Prueba (T1 26 14) y Ana Prueba (T1 26 9): si es para uno de esos, tócalo o responde 1, 2 o T1 26 9.',
+        'Toca «Crear» o responde sí; si es un viaje que ya existe, toca «No es nuevo». No he creado ni cargado nada.',
       ].join('\n'),
     ]);
     expect(ent()).toMatchObject({ estado: 'esperando_negocio', destino: 'nuevo', contacto_nombre: 'Carla Prueba', confirmacion_pendiente: null });
@@ -525,7 +543,7 @@ const responder = (texto: string) => mod.tomarRespuestaContacto(db as never, { w
 
 describe('modo encabezado: manda el encabezado, el reparto se confirma y cada viaje se carga por separado', () => {
   it('encabezados → resumen sin cargar nada → sospechoso «dejar» → «sí» → dos cargas, con la asignación guardada por mensaje', async () => {
-    t.workspaces[0].config_extra = { bandeja_solicitudes: { modo_viajes: 'encabezado' } };
+    t.workspaces[0].config_extra = { bandeja_solicitudes: { modo_viajes: 'encabezado' }, bot_conversacional: { hibrido: true } };
     const id = entregaCon({
       estado: 'esperando_cliente',
       mensajes: [
@@ -580,7 +598,7 @@ describe('modo encabezado: manda el encabezado, el reparto se confirma y cada vi
   });
 
   it('una tanda sin encabezados es un viaje: la pregunta es «¿A qué viaje van?», como en modo uno', async () => {
-    t.workspaces[0].config_extra = { bandeja_solicitudes: { modo_viajes: 'encabezado' } };
+    t.workspaces[0].config_extra = { bandeja_solicitudes: { modo_viajes: 'encabezado' }, bot_conversacional: { hibrido: true } };
     const id = entregaCon({ estado: 'esperando_cliente', mensajes: [{ cuerpo: 'hola' }, { cuerpo: 'queremos Aruba' }] });
     const r = await mod.armarPreguntaNegocio(db as never, id, WS, 2);
     expect(r!.plan).toBeUndefined();
@@ -589,7 +607,7 @@ describe('modo encabezado: manda el encabezado, el reparto se confirma y cada vi
 
   // Trappvel 2026-10-02: la respuesta al aproximado es el número de la lista, no un «sí» (que tampoco es contenido).
   it('un encabezado aproximado no cambia la caja: sin elegir queda sin asignar; con «1», va a su viaje; el «sí» no elige ni es contenido', async () => {
-    t.workspaces[0].config_extra = { bandeja_solicitudes: { modo_viajes: 'encabezado' } };
+    t.workspaces[0].config_extra = { bandeja_solicitudes: { modo_viajes: 'encabezado' }, bot_conversacional: { hibrido: true } };
     const sin = entregaCon({ estado: 'esperando_cliente', mensajes: [{ cuerpo: 'Martha', reenviado: false }, { cuerpo: 'volvemos el 27 de noviembre' }, { cuerpo: 'sí', reenviado: false }] });
     const r1 = await mod.armarPreguntaNegocio(db as never, sin, WS, 3);
     expect(r1!.texto).toContain('No hay mensajes con un viaje asignado.');
@@ -602,7 +620,7 @@ describe('modo encabezado: manda el encabezado, el reparto se confirma y cada vi
   });
 
   it('¿espera la tanda abierta la elección de la lista del encabezado?', async () => {
-    t.workspaces[0].config_extra = { bandeja_solicitudes: { modo_viajes: 'encabezado' } };
+    t.workspaces[0].config_extra = { bandeja_solicitudes: { modo_viajes: 'encabezado' }, bot_conversacional: { hibrido: true } };
     const id = entregaCon({ estado: 'abierta', mensajes: [{ cuerpo: 'Martha', reenviado: false }, { cuerpo: 'volvemos el 27 de noviembre' }] });
     expect(await mod.pendienteDeLaTanda(db as never, WS, TEL, 4)).toMatchObject({ tipo: 'eleccion', texto: 'Martha', candidatos: [{ id: 'n14' }], conContenido: true });
     t.wa_bandeja_mensajes.push({ id: nuevoId(), workspace_id: WS, entrega_id: id, wa_message_id: 'w-si', papel: 'contenido', tipo: 'text', cuerpo: 'sí', cuerpo_origen: 'texto', reenviado: false, segmento: null, recibido_at: '2026-09-30T13:05:00Z' });
@@ -612,7 +630,7 @@ describe('modo encabezado: manda el encabezado, el reparto se confirma y cada vi
   });
 
   it('QA v5 · el nombre de alguien del equipo (staff o colaborador) no es encabezado, aunque haya un negocio a su nombre', async () => {
-    t.workspaces[0].config_extra = { bandeja_solicitudes: { modo_viajes: 'encabezado' } };
+    t.workspaces[0].config_extra = { bandeja_solicitudes: { modo_viajes: 'encabezado' }, bot_conversacional: { hibrido: true } };
     t.negocios.push(
       { id: 'n16', workspace_id: WS, linea_id: LINEA, codigo: 'T1 26 16', nombre: 'P', estado: 'abierto', created_at: '2026-09-26T10:00:00Z', contacto_id: 'c-t', empresa_id: null, responsable_id: null, contactos: { nombre: 'TATIANA PRUEBA' }, empresas: null },
       { id: 'n17', workspace_id: WS, linea_id: LINEA, codigo: 'T1 26 17', nombre: 'Q', estado: 'abierto', created_at: '2026-09-26T10:00:00Z', contacto_id: 'c-e', empresa_id: null, responsable_id: null, contactos: { nombre: 'EDGAR COLABORADOR' }, empresas: null },
@@ -647,7 +665,7 @@ describe('QA v5 · lo que el bot contesta en el acto a un encabezado (atenderEnB
 
   // Trappvel 2026-10-02 (regla 3): el aproximado pregunta con la lista numerada, aunque haya un solo candidato.
   it('exacto: «📌»; aproximado: la lista numerada y, con el número, «📌»; la firma del equipo no contesta nada', async () => {
-    t.workspaces[0].config_extra = { bandeja_solicitudes: { modo_viajes: 'encabezado' } };
+    t.workspaces[0].config_extra = { bandeja_solicitudes: { modo_viajes: 'encabezado' }, bot_conversacional: { hibrido: true } };
     t.negocios.push(carolina);
     await llega('Marta');
     expect(enviados.map(e => e.texto)).toEqual(['📌 PUNTA CANA NOV · Marta Prueba (T1 26 14)']);
@@ -672,19 +690,21 @@ describe('QA v5 · lo que el bot contesta en el acto a un encabezado (atenderEnB
   });
 
   it('un «no» o un «sí» no contestan la lista ni son contenido: «No entendí» y la lista otra vez', async () => {
-    t.workspaces[0].config_extra = { bandeja_solicitudes: { modo_viajes: 'encabezado' } };
+    t.workspaces[0].config_extra = { bandeja_solicitudes: { modo_viajes: 'encabezado' }, bot_conversacional: { hibrido: true } };
     t.negocios.push(carolina);
     await llega('Carlina');
     await llega('no');
     await llega('sí');
-    expect(enviados.map(e => e.texto)).toEqual([LISTA_CAROLINA, `No entendí. ${LISTA_CAROLINA}`, `No entendí. ${LISTA_CAROLINA}`]);
+    // Bot híbrido: la lista no tiene un «sí» ni un «no»; el modelo no sabe y se vuelve a preguntar, en corto, con la lista.
+    const otraVez = 'No me quedó claro. ¿De qué viaje es «Carlina»?';
+    expect(enviados.map(e => e.texto)).toEqual([LISTA_CAROLINA, otraVez, otraVez]);
     const entrega = t.wa_bandeja_entregas.find(e => e.estado === 'abierta')!;
     const r = await mod.armarPreguntaNegocio(db as never, entrega.id as string, WS, 3);
     expect(r).toMatchObject({ sinContenido: 'esta tanda' }); // nada que repartir: ni el «no» ni el «sí»
   });
 
   it('lo que no es respuesta es contenido sin asignar (la pregunta corta, una vez); el número de la lista elige', async () => {
-    t.workspaces[0].config_extra = { bandeja_solicitudes: { modo_viajes: 'encabezado' } };
+    t.workspaces[0].config_extra = { bandeja_solicitudes: { modo_viajes: 'encabezado' }, bot_conversacional: { hibrido: true } };
     t.negocios.push(carolina);
     await llega('Carlina');
     await llega('mmm no sé');
@@ -693,16 +713,19 @@ describe('QA v5 · lo que el bot contesta en el acto a un encabezado (atenderEnB
     expect(enviados.map(e => e.texto)).toEqual([
       LISTA_CAROLINA,
       'Antes: ¿de qué viaje es «Carlina»? 1. SAN ANDRÉS 4N · Carolina Ruiz (T1 26 18). Lo que mandes queda sin asignar hasta que me digas.',
-      `No entendí. ${LISTA_CAROLINA}`,
+      // Un número fuera de la lista lo lee el código (sin el modelo) y se vuelve a preguntar.
+      'Ese número no está en la lista. ¿De qué viaje es «Carlina»?',
       '📌 SAN ANDRÉS 4N · Carolina Ruiz (T1 26 18)',
     ]);
   });
 
   it('QA v6 · «nuevo» suelto: el bot pregunta de quién es; con el nombre, lo busca; los apodos del equipo no contestan', async () => {
-    t.workspaces[0].config_extra = { bandeja_solicitudes: { modo_viajes: 'encabezado' } };
+    t.workspaces[0].config_extra = { bandeja_solicitudes: { modo_viajes: 'encabezado' }, bot_conversacional: { hibrido: true } };
     await llega('nuevo');
     await llega('vamos a Aruba', true);
     await llega('gracias');
+    // «¿Para qué cliente es?» es un punto de decisión: el nombre lo copia el modelo tal cual.
+    decide('Pedro Gómez', { tipo: 'nombre', nombre: 'Pedro Gómez' });
     await llega('Pedro Gómez');
     await llega('Tati');
     // El reenvío vuelve a pedir el nombre (la primera vez); el «gracias», ya con contenido, no.
@@ -745,7 +768,7 @@ describe('Prueba en vivo del 2026-10-01: dos viajes NUEVO seguidos, una sola pre
   const diego = () => valoresModelo({ destino: { valor: 'San Andrés', frase: 'para San Andrés' }, adultos: { valor: '3', frase: 'vamos 3 adultos' } });
 
   beforeEach(() => {
-    t.workspaces[0].config_extra = { bandeja_solicitudes: { modo_viajes: 'encabezado' } };
+    t.workspaces[0].config_extra = { bandeja_solicitudes: { modo_viajes: 'encabezado' }, bot_conversacional: { hibrido: true } };
     reloj = Date.parse('2026-09-30T15:00:00Z');
   });
 
@@ -792,8 +815,9 @@ describe('Prueba en vivo del 2026-10-01: dos viajes NUEVO seguidos, una sola pre
     expect(textos().at(-1)).toMatch(/^¿Me pasas el celular o el correo de Laura Prueba\?/);
     // El «sí» no crea sin la llave.
     await llega('sí');
+    // Sin «Cargar» (falta la llave): el «sí» escrito no carga y el bot dice qué falta, en el acto.
+    expect(textos().at(-1)).toBe('Todavía no lo cargo. Laura Prueba · ¿Me pasas su celular o su correo?');
     await cron();
-    expect(textos().at(-1)).toMatch(/^Todavía no lo cargo\. ¿Me pasas el celular o el correo de Laura Prueba\?/);
     expect(t.contactos).toEqual([]);
 
     // Un encabezado nuevo con la pregunta abierta: su acuse y se recuerda la pendiente en una línea.
@@ -868,7 +892,7 @@ describe('guardianes en la ejecución', () => {
   });
 
   it('un viaje del reparto con el aviso de viaje equivocado: «nuevo X» pide el «sí» (con el código, no hay lista) y el «sí» crea', async () => {
-    t.workspaces[0].config_extra = { bandeja_solicitudes: { modo_viajes: 'encabezado' } };
+    t.workspaces[0].config_extra = { bandeja_solicitudes: { modo_viajes: 'encabezado' }, bot_conversacional: { hibrido: true } };
     const id = entregaCon({ estado: 'esperando_cliente', mensajes: [{ cuerpo: 'T1 26 15', reenviado: false }, { cuerpo: 'Confirmamos Curazao, salimos de Bogotá' }] });
     const r = await mod.armarPreguntaNegocio(db as never, id, WS, 2);
     Object.assign(t.wa_bandeja_entregas.find(e => e.id === id)!, { plan_viajes: r!.plan, estado: 'con_cliente', cliente_texto: 'sí' });
@@ -879,7 +903,7 @@ describe('guardianes en la ejecución', () => {
     await responder('nuevo Ignacio Salgar 3201234567');
     await correr();
     expect(enviados.at(-1)!.texto).toContain('¿Va como viaje nuevo de Ignacio Salgar? No lo tengo en el directorio: lo creo como cliente nuevo, con cel. 320 123 4567.');
-    expect(enviados.at(-1)!.texto).toContain('Responde sí, o dime el viaje si es uno que ya existe.');
+    expect(enviados.at(-1)!.texto).toContain('Toca «Crear» o responde sí; si es un viaje que ya existe, toca «No es nuevo».');
     expect(seg()).toMatchObject({ estado: 'esperando_negocio', destino: 'nuevo', contacto_nombre: 'Ignacio Salgar' });
     expect(t.contactos).toEqual([]);
     expect(bloque('b15')).toEqual({ destino: 'CARTAGENA' });

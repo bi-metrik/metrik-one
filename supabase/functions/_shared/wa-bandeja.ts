@@ -28,6 +28,7 @@ import type { AccionBoton } from './wa-botones-bandeja.ts';
 import { enviarConBotones, enviarPunto } from './wa-enviar-botones.ts';
 import { atenderEnPuntoDeDecision, atenderToqueDeDecision, canonicoDeBoton, puntoDeLaCaja, puntoDelResumen, puntoDelViaje, volverAlPunto } from './wa-decision.ts';
 import { puntoCliente } from './wa-decision-reglas.ts';
+import { hibridoDelWorkspace } from './wa-hibrido.ts';
 import { textoRedactado } from './wa-redaccion.ts';
 import { candidatoNombradoEnLaFrase, cargaDirecta, posiblesNombres } from './wa-carga-directa-reglas.ts';
 import { fichasPorNombre } from './wa-cliente.ts';
@@ -37,7 +38,7 @@ import type { OpcionNegocio } from './wa-carga-reglas.ts';
 import { leerConsultaBandeja } from './wa-consulta-bandeja.ts';
 import type { ConsultaBandeja } from './wa-consulta-bandeja.ts';
 import {
-  botonesDelResumen, candidatosDelEncabezado, esRuidoEscrito, esSiNoCorto, leerEleccion, lineaCaja, nombreDeViaje, pareceEncabezado,
+  botonesDelResumen, candidatosDelEncabezado, esRespuestaA, esRuidoEscrito, esSiNoCorto, leerEleccion, lineaCaja, nombreDeViaje, pareceEncabezado,
   pareceRespuesta, resolverEncabezado, respuestaAlEncabezado, textoPreguntaEncabezadoCorta,
 } from './wa-viajes-reglas.ts';
 import type { PlanViajes, ResolucionEncabezado, ViajeAbierto } from './wa-viajes-reglas.ts';
@@ -360,6 +361,7 @@ export async function atenderEnBandeja(
   const texto = (message.text || '').trim();
   // «listo» cierra la tanda: nunca es la respuesta a una pregunta (aunque sea también un «sí»).
   const esCierre = escrito && esPalabraCierre(message.text, config.palabrasCierre);
+  const responder = (aunConTandaAbierta: boolean) => responderPendiente(supabase, user.workspace_id, message.phone, texto, wamid, fechaDeMeta(message.timestamp), config, aunConTandaAbierta);
 
   // Órdenes del comercial a la bandeja (prueba en vivo v2): REINTENTAR una carga fallida y
   // «cancelar» la tanda abierta. Ninguna de las dos es contenido.
@@ -386,7 +388,8 @@ export async function atenderEnBandeja(
     // escrito se lee sin adivinar: el número de la lista, el código exacto, un «sí» o un «no» solos; lo demás lo lee el
     // modelo con las opciones vigentes. Si elige, entra por el camino de siempre; si no contesta la pregunta
     // («contenido»), sigue su camino y nunca se toma como la respuesta; sin modelo, el bot pide tocar una opción.
-    if (!esCierre && !message.decisionLeida) {
+    // Solo con el interruptor `bot_conversacional.hibrido` del workspace: apagado, todo sigue como antes.
+    if (config.hibrido && !esCierre && !message.decisionLeida) {
       const d = await atenderEnPuntoDeDecision(supabase, user, message, config);
       if (d === 'atendido') return;
       if (d) message.decisionLeida = d;
@@ -425,9 +428,24 @@ export async function atenderEnBandeja(
   // tampoco es un encabezado, aunque su texto resuelva un viaje.
   const encabezado = sim?.respuesta || sim?.contenido || comoContenido ? null : await encabezadoDelEscrito(supabase, user.workspace_id, message, config);
 
-  // Bot híbrido (2026-10-06): se fue el atajo de la regla 3 (lo que «tiene forma de respuesta» la contestaba, y con
-  // «¿Creo el cliente nuevo «X»?» TODO lo escrito era su respuesta). Con una pregunta abierta, el escrito ya pasó por el
-  // punto de decisión: si llegó aquí, no la contesta.
+  // Regla 3 (Trappvel, 2026-10-02; antes N1 y N2 de la prueba en vivo v2): con una pregunta abierta,
+  // lo que tiene forma de su respuesta la contesta, sea cual sea la capa que preguntó (el resumen,
+  // «¿A qué viaje van?», el entendimiento) y aunque haya una caja abierta: nunca abre una tanda ni
+  // queda como contenido. Con «¿A qué viaje van?» o el nombre de un cliente nuevo pendientes, un
+  // encabezado («P 26 2», «nuevo X», el nombre de un viaje) también es la respuesta.
+  //
+  // Sexto control de Vera (hallazgo 7): mientras espera el «sí» a «¿Creo el cliente nuevo «X»?», TODO lo escrito
+  // (que no sea la palabra de cierre) es su respuesta, aunque no tenga forma de respuesta y aunque haya una tanda
+  // abierta: nunca entra a la caja de esa tanda. Si no se entiende, se vuelve a preguntar (H2). Los reenvíos sí
+  // siguen siendo contenido: son del cliente, no una respuesta del comercial.
+  //
+  // Con el bot híbrido (2026-10-06) este atajo no corre: con una pregunta abierta, el escrito ya pasó por el punto de
+  // decisión, y si llegó aquí no la contesta.
+  const contesta = !config.hibrido && !!pendiente && (esRespuestaA(pendiente.espera, texto) || ((pendiente.espera === 'viaje' || pendiente.espera === 'nombre') && encabezado !== null)
+    || !!pendiente.nuevoPorConfirmar);
+  if (escrito && !esCierre && contesta) {
+    if (await responder(true)) return;
+  }
 
   // Si la tanda abierta espera algo en el acto (la elección de la lista de un encabezado o el nombre
   // de un «nuevo»), una respuesta va a la tanda (la relee el reparto) y no es contenido. Con otra
@@ -450,8 +468,20 @@ export async function atenderEnBandeja(
     if (hayQueEsperarEnVuelo({ escrito, esEncabezado, esCierre, pareceRespuesta: respuesta, ...e })) await esperaEnVuelo.dormir(esperaEnVuelo.ms);
   }
 
-  // Bot híbrido (2026-10-06): la respuesta a «¿Cuál de estos contactos es?» ya no se adivina aquí (antes todo escrito
-  // sin forma de encabezado se probaba como esa respuesta): la pregunta del contacto es un punto de decisión.
+  // ¿Es la respuesta a «¿cuál de estos contactos es?» del paso de entendimiento? Se mira
+  // ANTES de registrar: como contenido abriría una entrega nueva y la pregunta quedaría sin
+  // respuesta. Solo un texto escrito (no reenviado) puede serlo. Con el bot híbrido no: la pregunta del contacto es un
+  // punto de decisión y ya leyó el escrito.
+  if (!esEncabezado && message.type === 'text' && message.reenviado !== true && (message.text || '').trim() && !config.hibrido) {
+    const tomada = await tomarRespuestaContacto(supabase, {
+      workspaceId: user.workspace_id, phone: message.phone, texto: message.text.trim(),
+      wamid, enviadoAt: fechaDeMeta(message.timestamp),
+    });
+    if (tomada) {
+      await seguirEnElActo(supabase, user.workspace_id, message.phone, { texto: message.text.trim() });
+      return;
+    }
+  }
 
   let { cuerpo, origen } = cuerpoDelMensaje(message);
   let errorTranscripcion: string | null = null;
@@ -497,9 +527,9 @@ export async function atenderEnBandeja(
     p_enviado_at: fechaDeMeta(message.timestamp),
     p_es_cierre: esCierre,
     p_horas_respuesta_cliente: config.horasRespuestaCliente,
-    // Un escrito nunca se toma aquí como la respuesta a la pregunta de una entrega: si había una, el punto de decisión
-    // ya lo leyó (bot híbrido). Un audio sigue como hoy.
-    p_puede_ser_respuesta: !esEncabezado && !escrito,
+    // Con el bot híbrido, un escrito nunca se toma aquí como la respuesta a la pregunta de una entrega: si había una, el
+    // punto de decisión ya lo leyó. Un audio sigue como hoy.
+    p_puede_ser_respuesta: !esEncabezado && !(config.hibrido && escrito),
   });
 
   if (error) {
@@ -885,16 +915,16 @@ export async function atenderToqueDeBandeja(
 ): Promise<boolean> {
   if (message.type !== 'interactive' || !esBotonDeBandeja(message.interactive_reply)) return false;
   // Un botón o una fila de un punto de decisión (bot híbrido, 2026-10-06): su lector, con su huella.
-  if (await atenderToqueDeDecision(supabase, user, message, config)) return true;
+  if (config.hibrido && await atenderToqueDeDecision(supabase, user, message, config)) return true;
   const ws = user.workspace_id;
   const phone = message.phone;
   const t = leerToque(message.interactive_reply);
   const abierta = await preguntaAbierta(supabase, ws, phone);
   const wamid = message.wa_message_id ?? `toque:${phone}:${message.timestamp}`;
-  // El canónico de cada botón sale del punto vigente: «Sí, es la misma» del resumen contesta «¿Es la misma persona?»
-  // (antes entraba como «sí», que el resumen con un cliente por confirmar no carga: «Todavía no lo cargo»).
+  // Con el bot híbrido, el canónico de cada botón sale del punto vigente: «Sí, es la misma» del resumen contesta «¿Es la
+  // misma persona?» (sin él entra como «sí», que el resumen con un cliente por confirmar no carga: «Todavía no lo cargo»).
   const contestar = async (accion: AccionBoton) => {
-    const canon = (await canonicoDeBoton(supabase, ws, phone, config, accion)) ?? canonicoDelToque(accion);
+    const canon = (config.hibrido ? await canonicoDeBoton(supabase, ws, phone, config, accion) : null) ?? canonicoDelToque(accion);
     return responderPendiente(supabase, ws, phone, canon, wamid, fechaDeMeta(message.timestamp), config, true, `[botón] ${message.text || canonicoDelToque(accion)}`);
   };
   if (t?.capa === 'r') {
@@ -952,7 +982,7 @@ export async function enviarAcuseDeLaCaja(
   phone: string, texto: string, entregaId: string | null, workspaceId: string,
   ctx?: { supabase: SupabaseClient; config: ConfigBandeja },
 ): Promise<boolean> {
-  if (entregaId && ctx && ctx.config.modoViajes !== 'uno') {
+  if (entregaId && ctx && ctx.config.hibrido && ctx.config.modoViajes !== 'uno') {
     const p = await pendienteDeLaTanda(ctx.supabase, workspaceId, phone, ctx.config.horasCajaActiva);
     const punto = p ? puntoDeLaCaja(entregaId, p) : null;
     if (punto) return enviarPunto(phone, texto, punto, { workspaceId, intent: INTENT_BANDEJA });
@@ -1076,10 +1106,15 @@ export async function preguntarCliente(
     : await textoRedactado(supabase, { workspaceId, phone }, { tipo: viaje?.plan ? 'resumen' : 'pregunta', fijo: ultima, botones: botones.map(b => b.title) });
   // Bot híbrido (2026-10-06): la pregunta es un punto de decisión y sale con su mensaje interactivo: el resumen con sus
   // botones (o la lista de «¿Cuál es?»), «¿A qué viaje van?» con la lista de viajes, «¿De qué cliente es?» con «Descartar».
-  const punto = viaje?.plan ? puntoDelResumen(entregaId, viaje.plan, nombre)
+  // Apagado (`bot_conversacional.hibrido`), como antes: el texto con los botones de #1034.
+  const hibrido = await hibridoDelWorkspace(supabase, workspaceId);
+  const punto = !hibrido ? null
+    : viaje?.plan ? puntoDelResumen(entregaId, viaje.plan, nombre)
     : viaje?.opciones ? puntoDelViaje('entrega', entregaId, nombre, viaje.opciones, (await viajesAbiertosDeLaBandeja(supabase, workspaceId)) ?? [])
     : puntoCliente({ ref: entregaId, nombre, pregunta: final });
-  const ok = await enviarPunto(phone, final, punto, { workspaceId, intent: INTENT_BANDEJA, aparte: textoBotonesAparte(botones) });
+  const ok = punto
+    ? await enviarPunto(phone, final, punto, { workspaceId, intent: INTENT_BANDEJA, aparte: textoBotonesAparte(botones) })
+    : await enviarConBotones(phone, final, botones, { workspaceId, intent: INTENT_BANDEJA, aparte: textoBotonesAparte(botones) });
   const lista = viaje?.plan ? { plan_viajes: viaje.plan } : viaje?.opciones ? { negocio_opciones: viaje.opciones } : {};
   const { error } = await supabase
     .from('wa_bandeja_entregas')

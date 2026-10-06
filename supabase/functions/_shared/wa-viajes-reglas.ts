@@ -511,10 +511,13 @@ function enumerar(xs: ReadonlyArray<string>, y = 'y'): string {
 }
 
 /** Cómo se elige un viaje parecido: su número en la lista que ya vio el comercial, o su código. */
-function referenciaDe(v: ViajeAbierto, numero: number | null): string {
-  // 2026-10-06: ir a ese viaje carga en él, y eso sale solo de lo exacto (el toque, el número o el código). Lo que el
-  // modelo lea de «el de Cartagena» pide el toque, así que la pregunta ya no lo ofrece.
-  return numero !== null ? String(numero) : (v.codigo?.trim() || 'su código');
+function referenciaDe(v: ViajeAbierto, numero: number | null, hibrido = false): string {
+  // Bot híbrido (2026-10-06): ir a ese viaje carga en él, y eso sale del toque, el número, el código o el «sí» a la
+  // propuesta del bot. La pregunta señala por el número o el código.
+  if (hibrido) return numero !== null ? String(numero) : (v.codigo?.trim() || 'su código');
+  // 2026-10-05: se señala por el destino («el de Cartagena»), no por el número ni el código (siguen valiendo).
+  if (v.destino?.trim()) return `«el de ${nombrePropio(v.destino.trim())}»`;
+  return numero !== null ? String(numero) : (v.codigo?.trim() || nombrePropio(v.cliente) || 'su código');
 }
 
 /** Cómo se nombra un viaje como encabezado: su nombre (exacto, `resolverEncabezado`), o su código si no tiene. */
@@ -558,16 +561,44 @@ export function textoConfirmarNuevo(p: {
   aviso?: string | null;
   /** Lo que dijo el directorio de ese nombre (diseño 2026-10-05): si ya es cliente, o qué falta para crearlo. */
   cliente?: string | null;
+  /** Con el bot híbrido (`bot_conversacional.hibrido`): sale con [Crear] [No es nuevo] y el viaje se señala por número. */
+  hibrido?: boolean;
 }): string {
   const nombre = String(p.nombre).trim().slice(0, 60);
   const ps = (p.parecidos ?? []).slice(0, MAX_PARECIDOS);
   const l: string[] = p.aviso ? [p.aviso] : [];
+  if (p.hibrido) return textoConfirmarNuevoHibrido(l, nombre, ps, p.cliente ?? null);
   if (p.cliente) {
     // Con el directorio, la pregunta es por el VIAJE nuevo y el cliente se muestra como es. Si el nombre se parece
     // al cliente de un viaje abierto, se dice cómo ir a ese viaje.
     l.push(`¿Va como viaje nuevo de ${nombre}? ${p.cliente}`);
-    if (ps.length === 1) l.push(`Ya hay un viaje de ${clienteYCodigo(ps[0].viaje)}: si es para ese, tócalo o responde ${referenciaDe(ps[0].viaje, ps[0].numero)}.`);
-    else if (ps.length > 1) l.push(`Ya hay viajes de ${enumerar(ps.map(x => clienteYCodigo(x.viaje)))}: si es para uno de esos, tócalo o responde ${enumerar(ps.map(x => referenciaDe(x.viaje, x.numero)), 'o')}.`);
+    if (ps.length === 1) l.push(`Ya hay un viaje de ${clienteYCodigo(ps[0].viaje)}: si es para ese, responde ${referenciaDe(ps[0].viaje, ps[0].numero)}.`);
+    else if (ps.length > 1) l.push(`Ya hay viajes de ${enumerar(ps.map(x => clienteYCodigo(x.viaje)))}: si es para uno de esos, responde ${enumerar(ps.map(x => referenciaDe(x.viaje, x.numero)), 'o')}.`);
+    l.push('Responde sí, o dime el viaje si es uno que ya existe. No he creado ni cargado nada.');
+    return l.join('\n');
+  }
+  if (ps.length === 0) {
+    l.push(`¿Creo el cliente nuevo «${nombre}»? Responde «sí», el nombre correcto, o dime el viaje si es uno que ya existe.`);
+  } else {
+    l.push(`¿Creo el cliente nuevo «${nombre}»?`);
+    l.push(ps.length === 1
+      ? `Ya hay un viaje de ${clienteYCodigo(ps[0].viaje)}: si es para ese, responde ${referenciaDe(ps[0].viaje, ps[0].numero)}; si es un cliente nuevo, «sí»; o escríbeme el nombre correcto.`
+      : `Ya hay viajes de ${enumerar(ps.map(x => clienteYCodigo(x.viaje)))}: si es para uno de esos, responde ${enumerar(ps.map(x => referenciaDe(x.viaje, x.numero)), 'o')}; si es un cliente nuevo, «sí»; o escríbeme el nombre correcto.`);
+  }
+  l.push('No he creado ni cargado nada.');
+  return l.join('\n');
+}
+
+/** «¿Creo el cliente nuevo …?» con el bot híbrido (2026-10-06): botones [Crear] [No es nuevo]; el viaje, con el número. */
+function textoConfirmarNuevoHibrido(
+  l: string[], nombre: string, ps: ReadonlyArray<{ viaje: ViajeAbierto; numero: number | null }>, cliente: string | null,
+): string {
+  if (cliente) {
+    // Con el directorio, la pregunta es por el VIAJE nuevo y el cliente se muestra como es. Si el nombre se parece
+    // al cliente de un viaje abierto, se dice cómo ir a ese viaje.
+    l.push(`¿Va como viaje nuevo de ${nombre}? ${cliente}`);
+    if (ps.length === 1) l.push(`Ya hay un viaje de ${clienteYCodigo(ps[0].viaje)}: si es para ese, tócalo o responde ${referenciaDe(ps[0].viaje, ps[0].numero, true)}.`);
+    else if (ps.length > 1) l.push(`Ya hay viajes de ${enumerar(ps.map(x => clienteYCodigo(x.viaje)))}: si es para uno de esos, tócalo o responde ${enumerar(ps.map(x => referenciaDe(x.viaje, x.numero, true)), 'o')}.`);
     l.push('Toca «Crear» o responde sí; si es un viaje que ya existe, toca «No es nuevo». No he creado ni cargado nada.');
     return l.join('\n');
   }
@@ -576,8 +607,8 @@ export function textoConfirmarNuevo(p: {
   } else {
     l.push(`¿Creo el cliente nuevo «${nombre}»?`);
     l.push(ps.length === 1
-      ? `Ya hay un viaje de ${clienteYCodigo(ps[0].viaje)}: si es para ese, tócalo o responde ${referenciaDe(ps[0].viaje, ps[0].numero)}; si es un cliente nuevo, «Crear» o «sí»; o escríbeme el nombre correcto.`
-      : `Ya hay viajes de ${enumerar(ps.map(x => clienteYCodigo(x.viaje)))}: si es para uno de esos, tócalo o responde ${enumerar(ps.map(x => referenciaDe(x.viaje, x.numero)), 'o')}; si es un cliente nuevo, «Crear» o «sí»; o escríbeme el nombre correcto.`);
+      ? `Ya hay un viaje de ${clienteYCodigo(ps[0].viaje)}: si es para ese, tócalo o responde ${referenciaDe(ps[0].viaje, ps[0].numero, true)}; si es un cliente nuevo, «Crear» o «sí»; o escríbeme el nombre correcto.`
+      : `Ya hay viajes de ${enumerar(ps.map(x => clienteYCodigo(x.viaje)))}: si es para uno de esos, tócalo o responde ${enumerar(ps.map(x => referenciaDe(x.viaje, x.numero, true)), 'o')}; si es un cliente nuevo, «Crear» o «sí»; o escríbeme el nombre correcto.`);
   }
   l.push('No he creado ni cargado nada.');
   return l.join('\n');

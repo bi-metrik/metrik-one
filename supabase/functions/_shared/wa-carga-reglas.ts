@@ -193,7 +193,7 @@ const PIE_NUEVO = 'Si es un viaje nuevo, escribe «nuevo» y el nombre del clien
  * La pregunta. Sin negocios abiertos solo se ofrece NUEVO. `aviso` antecede cuando se vuelve a
  * preguntar («No entendí…»).
  */
-export function textoPreguntaNegocio(p: { nMensajes: number; opciones: ReadonlyArray<OpcionNegocio>; aviso?: string }): string {
+export function textoPreguntaNegocio(p: { nMensajes: number; opciones: ReadonlyArray<OpcionNegocio>; aviso?: string; hibrido?: boolean }): string {
   const n = p.nMensajes;
   const cuales = n === 1 ? 'es el mensaje' : n > 1 ? `son los ${n} mensajes` : 'son';
   // Una pregunta, arriba (el aviso de «No entendí…» va en la misma línea).
@@ -205,9 +205,9 @@ export function textoPreguntaNegocio(p: { nMensajes: number; opciones: ReadonlyA
   return [
     conAviso(`¿De qué viaje ${cuales}?${prop}`),
     ...p.opciones.map((o, i) => `${i + 1}. ${lineaDeOpcion(o)}`),
-    // Elegir el viaje carga en él: con el toque o el número (2026-10-06). Lo que el modelo lea de «el de Cartagena» pide
-    // el toque, así que la pregunta ya no lo ofrece. (En la caja abierta sí: allí elegir no carga todavía.)
-    `Tócalo en la lista o escribe su número. ${PIE_NUEVO}`,
+    // Bot híbrido (2026-10-06): la pregunta sale con la lista; elegir el viaje con el toque o el número. Con palabras, el
+    // bot propone el viaje y pide el toque o el «sí». Sin el bot híbrido, como antes: «el de Cartagena».
+    p.hibrido ? `Tócalo en la lista o escribe su número. ${PIE_NUEVO}` : pieDeLista(p.opciones, PIE_NUEVO),
   ].join('\n');
 }
 

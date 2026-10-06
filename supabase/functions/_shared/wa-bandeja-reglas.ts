@@ -16,6 +16,8 @@
 // ============================================================
 
 /** Llave de función en `workspaces.modules` (catálogo: `src/lib/modulos/catalogo.ts`). */
+import { leerHibrido } from './wa-hibrido.ts';
+
 export const LLAVE_BANDEJA = 'bandeja_solicitudes_wa';
 
 /** Lo que el workspace puede ajustar en `config_extra.bandeja_solicitudes`. */
@@ -57,6 +59,11 @@ export interface ConfigBandeja {
   minutosFoco: number;
   /** Horas que dura vigente un encabezado. */
   horasCajaActiva: number;
+  /**
+   * El bot híbrido (2026-10-06): `config_extra.bot_conversacional.hibrido`. Prendido, las preguntas que esperan una
+   * elección son puntos de decisión (`wa-decision.ts`); apagado (por defecto), todo sigue como antes.
+   */
+  hibrido: boolean;
 }
 
 export type ModoViajes = 'uno' | 'encabezado';
@@ -72,6 +79,7 @@ export const CONFIG_BANDEJA_POR_DEFECTO: ConfigBandeja = {
   confirmar: 'siempre',
   horasCajaActiva: 4,
   minutosFoco: 60,
+  hibrido: false,
 };
 
 /** ¿Tiene el workspace la bandeja encendida? Solo `true` literal: nace apagada. */
@@ -99,7 +107,8 @@ function listaDePalabras(v: unknown, def: string[]): string[] {
 export function leerConfigBandeja(configExtra: unknown): ConfigBandeja {
   const d = CONFIG_BANDEJA_POR_DEFECTO;
   const raw = (configExtra as { bandeja_solicitudes?: Record<string, unknown> } | null)?.bandeja_solicitudes;
-  if (!raw || typeof raw !== 'object') return { ...d };
+  const hibrido = leerHibrido((configExtra as { bot_conversacional?: unknown } | null)?.bot_conversacional);
+  if (!raw || typeof raw !== 'object') return { ...d, hibrido };
   return {
     ventanaMinutos: entero(raw.ventana_minutos, 1, 120, d.ventanaMinutos),
     palabrasCierre: listaDePalabras(raw.palabras_cierre, d.palabrasCierre),
@@ -112,6 +121,7 @@ export function leerConfigBandeja(configExtra: unknown): ConfigBandeja {
     confirmar: raw.confirmar === 'si_duda' ? 'si_duda' : 'siempre',
     horasCajaActiva: entero(raw.horas_caja_activa, 1, 24, d.horasCajaActiva),
     minutosFoco: entero(raw.minutos_foco, 5, 720, d.minutosFoco),
+    hibrido,
   };
 }
 

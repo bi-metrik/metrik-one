@@ -20,6 +20,8 @@ vi.mock('./wa-respond.ts', () => ({
   sendList: vi.fn(async (_p: string, body: string, _b: string, f: Array<{ id: string }>) => { botones.push({ body, ids: f.map(x => x.id) }); }),
 }));
 
+/** El interruptor del bot híbrido (`bot_conversacional.hibrido`): apagado salvo en sus pruebas. */
+const interruptor = vi.hoisted(() => ({ hibrido: false }));
 const espias = vi.hoisted(() => ({
   responderPendiente: vi.fn(async () => true),
   descartarTodo: vi.fn(async () => {}),
@@ -46,7 +48,7 @@ const espias = vi.hoisted(() => ({
 vi.mock('./wa-bandeja.ts', () => ({
   configDelWorkspace: vi.fn(async () => ({
     ventanaMinutos: 5, palabrasCierre: ['listo'], prefijosBot: ['gasto', 'bot'], prefijosConsulta: ['bot'],
-    horasRespuestaCliente: 24, modoViajes: 'encabezado', confirmar: 'siempre', horasCajaActiva: 4,
+    horasRespuestaCliente: 24, modoViajes: 'encabezado', confirmar: 'siempre', horasCajaActiva: 4, hibrido: interruptor.hibrido,
   })),
   responderPendiente: espias.responderPendiente,
   descartarTodo: espias.descartarTodo,
@@ -155,6 +157,7 @@ beforeEach(() => {
   espias.checkInboundLimit.mockResolvedValue(true);
   espias.responderPendiente.mockResolvedValue(true);
   modeloDeDecision.llamar = null;
+  interruptor.hibrido = false;
 });
 afterEach(() => vi.unstubAllGlobals());
 
@@ -490,9 +493,33 @@ describe('despacho en la bandeja', () => {
     sinEscriturasNuevas(db);
   });
 
-  // Bot híbrido (2026-10-06): «¿A qué viaje van?» es un punto de decisión. El escrito lo lee el punto (con su modelo y
-  // las opciones vigentes) ANTES del intérprete, igual que con el interruptor apagado: el intérprete ya no lo contesta.
-  it('la respuesta a «¿A qué viaje van?» con palabras → el punto de decisión: el modelo elige la fila, pero cargar en un viaje pide el toque (ni el intérprete ni la respuesta)', async () => {
+  it('la respuesta a «¿A qué viaje van?» con palabras → responderPendiente con el código, guardando el crudo', async () => {
+    espias.preguntaAbierta.mockResolvedValue({ tipo: 'entrega', id: 'e9', nombre: 'Tanda de las 09:28', corta: '¿A qué viaje van?', espera: 'viaje' });
+    const db = baseFalsa({ wa_bandeja_entregas: [{ negocio_opciones: [V[0], V[1]], pregunta_enviada_at: new Date().toISOString() }] });
+    await atenderEscrito(db, u(), escrito('son de Carolina'), deps({ acciones: [{ accion: 'responder', evidencia: 'son de Carolina', ref: { cliente: 'Carolina' } }] }));
+    expect(espias.responderPendiente).toHaveBeenCalledTimes(1);
+    const a = espias.responderPendiente.mock.calls[0] as unknown[];
+    expect(a[3]).toBe('T1 26 11'); // la entrada canónica
+    expect(a[8]).toBe('son de Carolina'); // el crudo
+    expect(db.ops.find(o => o.tabla === 'wa_bandeja_mensajes' && o.op === 'update')!.payload).toMatchObject({ interpretacion: { accion: 'responder', viaje_id: 'v11', canonico: 'T1 26 11' } });
+    sinEscriturasNuevas(db);
+  });
+
+  it('H2 · «a ninguno, bótalos» con la lista y una tanda abierta → DESCARTAR a la pregunta, la tanda sigue', async () => {
+    espias.preguntaAbierta.mockResolvedValue({ tipo: 'entrega', id: 'e9', nombre: 'Tanda de las 09:28', corta: '¿A qué viaje van?', espera: 'viaje' });
+    espias.tandaAbiertaDelRemitente.mockResolvedValue({ id: 't1', creadaAt: new Date().toISOString(), nombre: 'Carolina Ruiz', n: 2, cajaViajeId: 'v11' });
+    const db = baseFalsa({ wa_bandeja_entregas: [{ negocio_opciones: [V[0], V[1]] }] });
+    await atenderEscrito(db, u(), escrito('a ninguno, bótalos'), deps({ acciones: [{ accion: 'responder', evidencia: 'a ninguno, bótalos', opcion: 'descartar' }] }));
+    expect((espias.responderPendiente.mock.calls[0] as unknown[])[3]).toBe('DESCARTAR');
+    expect(espias.descartarTodo).not.toHaveBeenCalled();
+    expect(espias.descartarTandaAbierta).not.toHaveBeenCalled();
+    expect(enviados).toEqual(['Descarté los mensajes de esa pregunta. La tanda de Carolina Ruiz sigue abierta.']);
+  });
+
+  // Bot híbrido (2026-10-06, `bot_conversacional.hibrido`): «¿A qué viaje van?» es un punto de decisión. El escrito lo
+  // lee el punto (con su modelo y las opciones vigentes) ANTES del intérprete: el intérprete ya no lo contesta.
+  it('bot híbrido · la respuesta a «¿A qué viaje van?» con palabras → el punto de decisión: el modelo elige la fila, pero cargar en un viaje pide el toque (ni el intérprete ni la respuesta)', async () => {
+    interruptor.hibrido = true;
     espias.preguntaAbierta.mockResolvedValue({ tipo: 'entrega', id: 'e9', nombre: 'Tanda de las 09:28', corta: '¿A qué viaje van?', espera: 'viaje' });
     const db = baseFalsa({ wa_bandeja_entregas: [{ negocio_opciones: [V[0], V[1]], pregunta_enviada_at: new Date().toISOString() }] });
     modeloDeDecision.llamar = vi.fn(async () => ({ ok: true as const, json: { tipo: 'opcion', opcion: 'v2' }, ms: 5 }));
@@ -505,7 +532,8 @@ describe('despacho en la bandeja', () => {
     sinEscriturasNuevas(db);
   });
 
-  it('H2 · «a ninguno, bótalos» con la lista y una tanda abierta → «Descartar» de esa pregunta (la tanda sigue)', async () => {
+  it('bot híbrido · H2 · «a ninguno, bótalos» con la lista y una tanda abierta → «Descartar» de esa pregunta (la tanda sigue)', async () => {
+    interruptor.hibrido = true;
     espias.preguntaAbierta.mockResolvedValue({ tipo: 'entrega', id: 'e9', nombre: 'Tanda de las 09:28', corta: '¿A qué viaje van?', espera: 'viaje' });
     espias.tandaAbiertaDelRemitente.mockResolvedValue({ id: 't1', creadaAt: new Date().toISOString(), nombre: 'Carolina Ruiz', n: 2, cajaViajeId: 'v11' });
     const db = baseFalsa({ wa_bandeja_entregas: [{ negocio_opciones: [V[0], V[1]] }] });
@@ -516,7 +544,8 @@ describe('despacho en la bandeja', () => {
     expect(espias.descartarTandaAbierta).not.toHaveBeenCalled();
   });
 
-  it('con el modelo del punto caído, el escrito no se adivina: «No te entendí; toca una opción» con la lista, y nada se contesta', async () => {
+  it('bot híbrido · con el modelo del punto caído, el escrito no se adivina: «No te entendí; toca una opción» con la lista, y nada se contesta', async () => {
+    interruptor.hibrido = true;
     espias.preguntaAbierta.mockResolvedValue({ tipo: 'entrega', id: 'e9', nombre: 'Tanda de las 09:28', corta: '¿A qué viaje van?', espera: 'viaje' });
     const db = baseFalsa({ wa_bandeja_entregas: [{ negocio_opciones: [V[0], V[1]] }] });
     modeloDeDecision.llamar = vi.fn(async () => ({ ok: false as const, motivo: 'timeout' as const, ms: 4000 }));

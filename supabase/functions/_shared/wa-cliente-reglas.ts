@@ -355,16 +355,16 @@ export function nombreIdentico(dado: string | null | undefined, contacto: string
  * Andrea Rincón Díaz»; «Mauricio» en «Mauricio Moreno»), cada una tal cual o con un error de tipeo si es de
  * cinco letras o más («Gomes» por «Gómez»). Nunca une: solo hace que se pregunte.
  */
-export function pareceNombre(dado: string | null | undefined, contacto: string | null | undefined): boolean {
+export function pareceNombre(dado: string | null | undefined, contacto: string | null | undefined, opts: { contiene?: boolean } = {}): boolean {
   const ws = palabrasDelNombre(dado);
   const suyas = palabrasDelNombre(contacto);
   if (ws.length === 0 || suyas.length === 0) return false;
   const igual = (a: string, b: string) => a === b || (a.length >= 5 && b.length >= 5 && distancia(a, b) <= 1);
   if (ws.every(w => suyas.some(s => igual(w, s)))) return true;
-  // Undécimo control de Vera (hallazgo 8; bot híbrido, 2026-10-06): el nombre dado CONTIENE entero el de un contacto (de
-  // dos palabras o más) y trae más («Celmira Rojas Peña» con «Celmira Rojas» en el directorio): también se parece. Antes
-  // un apellido de más lo volvía otra persona y el «Cargar» creaba un duplicado sin preguntar.
-  return suyas.length >= 2 && suyas.every(s => ws.some(w => igual(w, s)));
+  // Undécimo control de Vera (hallazgo 8; bot híbrido, 2026-10-06, solo con `bot_conversacional.hibrido`): el nombre dado
+  // CONTIENE entero el de un contacto (de dos palabras o más) y trae más («Celmira Rojas Peña» con «Celmira Rojas» en el
+  // directorio): también se parece. Sin esto, un apellido de más lo vuelve otra persona y el «Cargar» crea un duplicado.
+  return !!opts.contiene && suyas.length >= 2 && suyas.every(s => ws.some(w => igual(w, s)));
 }
 
 // ── El resolvedor (§3.2) ────────────────────────────────────────────────────
@@ -391,6 +391,8 @@ export function resolverCliente(p: {
   descartadas?: ReadonlyArray<string>;
   /** El comercial dijo que no es ninguno de los parecidos: el nombre ya no busca. */
   otraPersona?: boolean;
+  /** Bot híbrido: un nombre que contiene entero el de un contacto también se le parece (`pareceNombre`). */
+  contiene?: boolean;
 }): ResolucionCliente {
   const nombre = String(p.nombre ?? '').trim() || null;
   const llave = tieneLlave(p.llave) ? p.llave : null;
@@ -415,7 +417,7 @@ export function resolverCliente(p: {
     const identicos = filas.filter(c => nombreIdentico(nombre, c.nombre));
     if (identicos.length === 1) return { tipo: 'existente', ficha: identicos[0], por: 'nombre', nombre, llave };
     if (identicos.length > 1) return { tipo: 'elegir', opciones: identicos.slice(0, MAX_OPCIONES_CLIENTE), motivo: 'homonimos', nombre, llave };
-    const parecidos = filas.filter(c => pareceNombre(nombre, c.nombre));
+    const parecidos = filas.filter(c => pareceNombre(nombre, c.nombre, { contiene: p.contiene }));
     if (parecidos.length > 0) return { tipo: 'elegir', opciones: parecidos.slice(0, MAX_OPCIONES_CLIENTE), motivo: 'parecidos', nombre, llave };
   }
   return llave ? { tipo: 'nuevo', nombre, llave } : { tipo: 'pedir_llave', nombre };
@@ -613,6 +615,8 @@ export function leerEsLaMisma(texto: string): 'si' | 'no' | null {
 export interface Directorio {
   porNombre(nombre: string): ReadonlyArray<FichaCliente> | null | undefined;
   porLlave(llave: Llave): ReadonlyArray<FichaCliente> | null | undefined;
+  /** Bot híbrido (`bot_conversacional.hibrido`): un nombre que contiene entero el de un contacto se le parece. */
+  contiene?: boolean;
 }
 
 /** La llave como clave de un mapa: «c:3005551234|m:|u:». */
@@ -651,7 +655,7 @@ export function resolverConDirectorio(dir: Directorio, p: {
   const porLlave = llave ? dir.porLlave(llave) : undefined;
   const porNombre = nombre && !p.otraPersona ? dir.porNombre(nombre) : undefined;
   return resolverCliente({
-    nombre, llave, descartadas: p.descartadas, otraPersona: p.otraPersona,
+    nombre, llave, descartadas: p.descartadas, otraPersona: p.otraPersona, contiene: dir.contiene,
     porLlave: llave ? (porLlave === undefined ? null : porLlave) : undefined,
     porNombre: nombre && !p.otraPersona ? (porNombre === undefined ? null : porNombre) : undefined,
   });
