@@ -125,8 +125,14 @@ vi.mock('@/lib/supabase/server', () => ({
 // `cache()` de React deduplica por request; en la prueba cada caso es un request nuevo.
 vi.mock('react', async (original) => ({ ...(await original<typeof import('react')>()), cache: <T,>(f: T) => f }))
 
-const { entradaValidaCda, puedeVerPagosCda, terminosValidaPermitenOperar, validaCdaPermiteOperar, MENSAJE_TERMINOS_PENDIENTES } =
-  await import('./puerta')
+const {
+  entradaValidaCda,
+  puedeVerPagosCda,
+  terminosValidaPermitenOperar,
+  validaCdaPermiteConsultar,
+  validaCdaPermiteOperar,
+  MENSAJE_TERMINOS_PENDIENTES,
+} = await import('./puerta')
 
 beforeEach(() => {
   sesionWs.role = 'operator'
@@ -316,6 +322,63 @@ describe('mora de más de 30 días (cláusula 11.1)', () => {
     escenario.hoy = '2026-12-31'
     escenario.servicios = { data: [], error: null }
     expect(await validaCdaPermiteOperar()).toEqual({ ok: true })
+  })
+})
+
+describe('restricción de consultas nuevas a los 5 días (cláusula 11.1 v1.4, rige el 5-nov-2026)', () => {
+  // Cuota 2 de los CDA, que vence el 10-nov: la restricción corre desde el 16-nov, la pausa desde el 11-dic.
+  const CUOTA_NOV = { ...CUOTA_1, cuota_id: '66666666-6666-4666-8666-666666666666', numero: 2, fecha_vencimiento: '2026-11-10' }
+  beforeEach(() => {
+    escenario.documentos = [DOC_ACEPTADO]
+    escenario.cuotas = { data: [CUOTA_NOV], error: null }
+  })
+
+  it('15-nov (D+5): consulta y opera', async () => {
+    escenario.hoy = '2026-11-15'
+    expect(await validaCdaPermiteConsultar()).toEqual({ ok: true })
+    expect(await validaCdaPermiteOperar()).toEqual({ ok: true })
+  })
+
+  it('16-nov (D+6): no consulta, pero opera (lista y descarga reportes)', async () => {
+    escenario.hoy = '2026-11-16'
+    const r = await validaCdaPermiteConsultar()
+    expect(r.ok).toBe(false)
+    expect(!r.ok && r.error).toContain('consultas nuevas están restringidas desde el 16-nov')
+    expect(await validaCdaPermiteOperar()).toEqual({ ok: true })
+  })
+
+  it('11-dic (D+31): pausa completa, ni consulta ni opera', async () => {
+    escenario.hoy = '2026-12-11'
+    expect((await validaCdaPermiteOperar()).ok).toBe(false)
+    const r = await validaCdaPermiteConsultar()
+    expect(!r.ok && r.error).toContain('pausada desde el 11-dic')
+  })
+
+  it('el pago registrado (el webhook marca el cobro como pagado) levanta la restricción en la petición siguiente', async () => {
+    escenario.hoy = '2026-11-20'
+    expect((await validaCdaPermiteConsultar()).ok).toBe(false)
+    escenario.cobros = { data: [{ monto: '150000', estado: 'pagado' }], error: null }
+    expect(await validaCdaPermiteConsultar()).toEqual({ ok: true })
+  })
+
+  it('sin poder leer las cuotas NO se restringe', async () => {
+    const log = vi.spyOn(console, 'error').mockImplementation(() => {})
+    escenario.hoy = '2026-11-20'
+    escenario.cuotas = { data: null, error: { message: 'caída' } }
+    expect(await validaCdaPermiteConsultar()).toEqual({ ok: true })
+    log.mockRestore()
+  })
+
+  it('con los términos pendientes y sin plazo, ni consulta: los términos mandan', async () => {
+    escenario.hoy = '2026-11-15'
+    escenario.documentos = [DOC]
+    expect(await validaCdaPermiteConsultar()).toEqual({ ok: false, error: MENSAJE_TERMINOS_PENDIENTES })
+  })
+
+  it('sin contrato de Valida (AFI, metrik) nada cambia', async () => {
+    escenario.hoy = '2026-11-20'
+    escenario.servicios = { data: [], error: null }
+    expect(await validaCdaPermiteConsultar()).toEqual({ ok: true })
   })
 })
 

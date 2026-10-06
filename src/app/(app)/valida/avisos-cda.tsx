@@ -1,17 +1,18 @@
 import Link from 'next/link'
-import { AlertTriangle, CalendarClock, PauseCircle } from 'lucide-react'
+import { AlertTriangle, Ban, CalendarClock, PauseCircle } from 'lucide-react'
 import {
   mensajeSuspendidoPorMora,
   textoAvisoMora,
+  textoAvisoRestriccion,
   textoAvisoPlazo,
   type EstadoMora,
 } from '@/lib/valida-cda/plazos'
 
 /**
- * Los avisos de `/valida` de un CDA. La pausa por mora (sin montos) y el plazo de los términos los
- * ven TODOS los usuarios del espacio (el plazo, para que quien no es la persona designada le pida
- * aceptar a tiempo); la mora dentro de los 30 días y la franja de una línea que lleva a Suscripción,
- * solo la persona designada del contrato (`puedeVerSuscripcion`), que es quien la maneja.
+ * Los avisos de `/valida` de un CDA. El aviso de mora con la fecha de la restricción (cláusula 11.2),
+ * la restricción de las consultas nuevas (11.1), la pausa (11.3) y el plazo de los términos los ven
+ * TODOS los usuarios del espacio, sin montos; la franja de una línea que lleva a Suscripción, solo la
+ * persona designada del contrato (`puedeVerSuscripcion`), que es quien la maneja.
  *
  * Los textos salen de `plazos.ts`, los mismos que devuelven las acciones del servidor: la pantalla y
  * el rechazo no pueden decir fechas distintas.
@@ -60,7 +61,7 @@ export function AvisoPlazoTerminos({
   )
 }
 
-/** Cuota vencida, dentro de los 30 días que tolera la cláusula 11.1. */
+/** Cuota vencida, antes de la restricción: la fecha en que se restringe (cláusula 11.2). */
 export function AvisoMora({ mora }: { mora: Extract<EstadoMora, { estado: 'en_mora' }> }) {
   return (
     <section
@@ -69,6 +70,53 @@ export function AvisoMora({ mora }: { mora: Extract<EstadoMora, { estado: 'en_mo
     >
       <AlertTriangle className="mt-0.5 h-5 w-5 shrink-0" />
       <p className="font-semibold">{textoAvisoMora(mora)}</p>
+    </section>
+  )
+}
+
+/**
+ * Más de 5 días de mora (cláusula 11.1): arriba, para todos. El histórico sigue a la vista; la consulta
+ * puntual y la masiva muestran `ConsultasRestringidas` en lugar del formulario.
+ */
+export function AvisoRestriccion({
+  mora,
+  vePagos,
+}: {
+  mora: Extract<EstadoMora, { estado: 'restringido' }>
+  vePagos: boolean
+}) {
+  return (
+    <section
+      data-aviso-restriccion
+      className="flex items-start gap-3 rounded-lg border border-red-300 bg-red-50 p-4 text-sm text-red-900"
+    >
+      <Ban className="mt-0.5 h-5 w-5 shrink-0" />
+      <div className="space-y-1">
+        <p className="font-semibold">{textoAvisoRestriccion(mora)}</p>
+        <p>
+          {vePagos ? (
+            <>
+              En{' '}
+              <Link href="/suscripcion?tab=pagos" className="font-semibold underline">
+                Suscripción
+              </Link>{' '}
+              está la cuota vencida, con su enlace de pago.
+            </>
+          ) : (
+            'La persona designada por tu empresa puede ver y pagar la cuota.'
+          )}
+        </p>
+      </div>
+    </section>
+  )
+}
+
+/** En lugar del formulario de consulta puntual o masiva, con las consultas restringidas. */
+export function ConsultasRestringidas() {
+  return (
+    <section data-consultas-restringidas className="rounded-lg border border-border bg-white p-4 text-sm text-tinta sm:p-5">
+      <p className="font-semibold">Las consultas nuevas están restringidas hasta que se registre el pago.</p>
+      <p className="mt-1 text-tinta-suave">En la pestaña Historial puedes ver y descargar los reportes ya generados.</p>
     </section>
   )
 }

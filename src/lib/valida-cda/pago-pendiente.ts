@@ -26,7 +26,7 @@
  * enlace que no pasa, o que ya venció, no se pinta: la tarjeta dice que el enlace llega, en vez de
  * ofrecer uno dudoso o muerto.
  *
- * El pago NO bloquea el módulo antes de 30 días de mora (cláusula 11.1): esa regla vive en
+ * La mora (restricción de consultas nuevas a los 5 días desde el 5-nov-2026, pausa a los 30) vive en
  * `plazos.ts` (`estadoMora`), y se mide sobre la cuota que devuelve `proximoPago`.
  */
 

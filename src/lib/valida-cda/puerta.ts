@@ -10,7 +10,13 @@ import { esFuncionAusente } from '@/lib/valida-api/mapeo'
 import { designacionDelEspacio, documentosDelCliente, perfilReal } from '@/lib/valida-api/terminos-servidor'
 import { leerProximoPagoCda, type LecturaPago } from './pago-servidor'
 import { puedeVerSuscripcion } from '@/lib/seccion-suscripcion/estado'
-import { enPlazoParaAceptar, estadoMora, mensajeSuspendidoPorMora, type EstadoMora } from './plazos'
+import {
+  enPlazoParaAceptar,
+  estadoMora,
+  mensajeConsultasRestringidas,
+  mensajeSuspendidoPorMora,
+  type EstadoMora,
+} from './plazos'
 
 /**
  * La puerta de Valida para los CDA: antes de consultar listas, la persona designada por la empresa
@@ -37,7 +43,9 @@ import { enPlazoParaAceptar, estadoMora, mensajeSuspendidoPorMora, type EstadoMo
  *
  * En la página `/valida` (que se renderiza en cada navegación, a diferencia de un layout) y en
  * `accesoValida()` de `valida-consultas.ts`, por donde pasan TODAS las acciones del módulo: lo que
- * la pantalla no muestra también se niega por POST. Las dos preguntan a `validaCdaPermiteOperar()`.
+ * la pantalla no muestra también se niega por POST. Las dos preguntan a `validaCdaPermiteOperar()`;
+ * las dos acciones que hacen una CONSULTA NUEVA (`consultarValida` y `prepararLoteValida`) preguntan
+ * además a `validaCdaPermiteConsultar()`, que niega con las consultas restringidas por mora.
  *
  * ## El plazo para aceptar y la mora (2026-09-23)
  *
@@ -46,7 +54,9 @@ import { enPlazoParaAceptar, estadoMora, mensajeSuspendidoPorMora, type EstadoMo
  *   - con `terminos_plazo_hasta` y hoy dentro del plazo, los términos PENDIENTES no pausan: el
  *     espacio opera con un aviso (`enPlazo`). Solo los pendientes: una lectura caída o unos términos
  *     sin registrar siguen cerrando, con plazo o sin él;
- *   - la mora de más de 30 días sobre la cuota impaga más vieja pausa el módulo (cláusula 11.1).
+ *   - la mora de más de 30 días sobre la cuota impaga más vieja pausa el módulo (cláusula 11.3 de
+ *     la v1.4) y, desde el 2026-11-05, la de más de 5 días restringe las consultas nuevas con el
+ *     histórico abierto (11.1). Ver `plazos.ts`.
  *
  * La mora solo se mide para el espacio que PAGA (las RPC de cuotas no responden a un beneficiario) y,
  * a diferencia de los términos, NO cierra ante una lectura caída: pausar a un cliente exige la
@@ -202,14 +212,28 @@ async function resolverMora(): Promise<MoraValidaCda> {
 export const moraValidaCda = cache(resolverMora)
 
 /**
- * ¿El espacio puede operar Valida? La pregunta que hacen la página y TODAS las acciones: los
- * términos (con su plazo) y, después, la mora de más de 30 días.
+ * ¿El espacio puede operar Valida (entrar, listar, ver y descargar reportes)? La pregunta que hacen la
+ * página y TODAS las acciones: los términos (con su plazo) y, después, la mora de más de 30 días. La
+ * restricción de los 5 días NO cierra aquí: la cláusula 11.1 deja el histórico abierto.
  */
 export async function validaCdaPermiteOperar(): Promise<{ ok: true } | { ok: false; error: string }> {
   const terminos = await terminosValidaPermitenOperar()
   if (!terminos.ok) return terminos
   const m = await moraValidaCda()
   if (m.tipo === 'ok' && m.mora.estado === 'suspendido') return { ok: false, error: mensajeSuspendidoPorMora(m.mora) }
+  return { ok: true }
+}
+
+/**
+ * ¿El espacio puede hacer una CONSULTA NUEVA (individual o masiva)? Lo de `validaCdaPermiteOperar` y,
+ * además, que la mora no tenga las consultas restringidas (cláusula 11.1, v1.4). Una lectura caída de
+ * cuotas no restringe (`moraValidaCda`).
+ */
+export async function validaCdaPermiteConsultar(): Promise<{ ok: true } | { ok: false; error: string }> {
+  const operar = await validaCdaPermiteOperar()
+  if (!operar.ok) return operar
+  const m = await moraValidaCda()
+  if (m.tipo === 'ok' && m.mora.estado === 'restringido') return { ok: false, error: mensajeConsultasRestringidas(m.mora) }
   return { ok: true }
 }
 
