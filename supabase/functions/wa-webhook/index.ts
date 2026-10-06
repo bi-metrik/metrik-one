@@ -49,6 +49,7 @@ import { identificarRemitente } from '../_shared/wa-identificar.ts';
 import { atenderEscrito } from '../_shared/wa-interprete.ts';
 import { aLetraLatina } from '../_shared/texto-latino.ts';
 import { primeraVezDelMensaje } from '../_shared/wa-mensaje-unico.ts';
+import { completarTexto, registrarEntrante } from '../_shared/wa-conversacion.ts';
 import type { BotSession, HandlerContext, IncomingMessage, Intent, WaUser } from '../_shared/types.ts';
 import { OPERATOR_ALLOWED_INTENTS, CONTADOR_ALLOWED_INTENTS, READ_ONLY_ALLOWED_INTENTS } from '../_shared/types.ts';
 
@@ -502,6 +503,11 @@ async function processMessage(message: IncomingMessage): Promise<void> {
   //     Apagado, no hace ni una consulta. Ver `_shared/aviso-datos-bot.ts`.
   if (await atenderAvisoDatos(supabase, user, message, processMessage)) return;
 
+  // 1a-conv. La conversación completa (`wa_conversacion`, ver `_shared/wa-conversacion.ts`): solo en los workspaces con
+  //     la bandeja o el bot conversacional configurado, y solo DESPUÉS del aviso de datos (lo retenido no se guarda).
+  //     Fuera de esos workspaces no hace ni una consulta. Se escribe aunque el agente esté apagado.
+  await registrarEntrante(supabase, user, message);
+
   // 1a-int. Intérprete conversacional (opt-in por workspace: `config_extra.bot_conversacional`, que
   //     llega en la misma lectura que identifica al remitente). Un escrito libre del equipo pasa por UN
   //     llamado al modelo que entiende y un validador que decide; si atiende, termina aquí. Apagado, o
@@ -558,6 +564,7 @@ async function processMessage(message: IncomingMessage): Promise<void> {
       return;
     }
     message.text = result.text;
+    await completarTexto(supabase, message.wa_message_id, result.text);
     // Echo so user can verify what was understood
     await sendTextMessage(message.phone, `_${result.text}_`);
     console.log(`[wa-webhook] Audio transcribed: "${result.text.slice(0, 100)}"`);

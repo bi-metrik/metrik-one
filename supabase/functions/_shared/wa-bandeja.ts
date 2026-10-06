@@ -67,6 +67,7 @@ import {
   TEXTO_NADA_PENDIENTE,
   TEXTO_SESION_CANCELADA,
 } from './wa-bandeja-reglas.ts';
+import { completarTexto } from './wa-conversacion.ts';
 import type { AccionRegistro, ConfigBandeja, ParteDescartada, Ruta } from './wa-bandeja-reglas.ts';
 import type { IncomingMessage, SupabaseClient, WaUser } from './types.ts';
 
@@ -498,6 +499,7 @@ export async function atenderEnBandeja(
       if (r.text) {
         cuerpo = r.text;
         origen = 'transcripcion';
+        await completarTexto(supabase, wamid, r.text);
       } else {
         errorTranscripcion = r.error ?? 'sin texto';
       }
