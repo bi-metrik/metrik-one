@@ -73,13 +73,15 @@ export default function BloquePagosEpayco({
   const [newRef, setNewRef] = useState('')
   const [previewDesglose, setPreviewDesglose] = useState<EpaycoDesglose | null>(null)
   const [consultando, setConsultando] = useState(false)
-  const [isPending, startTransition] = useTransitionTolerante()
   const [error, setError] = useState<string | null>(null)
   // Duplicado workspace-wide detectado: requiere justificación para forzar.
   const [duplicado, setDuplicado] = useState<NegocioExistente | null>(null)
   const [justificacion, setJustificacion] = useState('')
   const [showReparto, setShowReparto] = useState(false)
   const router = useRouter()
+  // Registrar el pago consulta ePayco y escribe el cobro: si la respuesta se pierde, se
+  // relee la ficha para ver si el pago quedó antes de registrarlo otra vez.
+  const [isPending, startTransition] = useTransitionTolerante({ releer: () => router.refresh() })
 
   const total = pagos.reduce((s, p) => s + p.monto_bruto, 0)
 

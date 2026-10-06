@@ -1,6 +1,6 @@
 ---
 name: cargue-segundo-plano
-description: Brief blindaje de red (2026-10-05) — procesarDocumento/reprocesarDocumento leen con after() y marca data._lectura; emisión de factura y acciones largas (fases 2 y 3)
+description: Brief blindaje de red (2026-10-05) — #1035 cargue con after() y marca data._lectura; #1036 emisión SIN mergear (espera a Mauricio); fase 3 useTransitionTolerante({releer})
 metadata:
   type: project
 ---
@@ -26,3 +26,13 @@ Brief `proyectos/soena/ve/2026-10-05_brief-max-blindaje-red-cargue-y-acciones-la
 compra tiempo: sigue el `maxDuration` de la página que llamó. Medir el después con
 `vercel metrics ... --group-by server_action_name` (ver [[rum-y-lecturas-sin-actions]]).
 Relacionado: [[acciones-lentas-soena]], [[recuperacion-red-iphone]].
+
+**Fase 2 (#1036, SIN mergear: cambia el orden de la emisión, lo aprueba Mauricio).** La premisa del
+brief («tocó el tope de 60») era falsa: `/conciliacion` no declara `maxDuration` y el proyecto da 300 s.
+V0549 terminó; el riesgo real era el hueco de ~20 s entre el POST a Siigo y la marca (esperaba el PDF).
+`despuesDeResponder` en línea YA corre la tarea: usar `agenda.resultado`, no volver a llamarla (la
+prueba de abonos lo cazó con abonos dobles).
+
+**Fase 3.** `useTransitionTolerante({ releer, reintentar? })` para escrituras largas. Sin `reintentar`
+salvo idempotencia demostrada.
+

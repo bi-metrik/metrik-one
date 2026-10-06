@@ -2,6 +2,7 @@
 
 import { useMemo, useState, useTransition, type Dispatch, type SetStateAction } from 'react'
 import { useRouter } from 'next/navigation'
+import { useTransitionTolerante } from '@/hooks/use-transition-tolerante'
 import { toast } from 'sonner'
 import Link from 'next/link'
 import {
@@ -1199,7 +1200,9 @@ export function FilaPorFacturar({
   workspaceNombre?: string | null
   onCambio: () => void
 }) {
-  const [isPending, startTransition] = useTransition()
+  // Emitir puede tardar decenas de segundos (Siigo). Si la respuesta se pierde, la factura
+  // pudo salir igual: se relee la cola en vez de invitar a emitir otra vez.
+  const [isPending, startTransition] = useTransitionTolerante({ releer: onCambio })
   const [pidiendoMotivo, setPidiendoMotivo] = useState(false)
   const [motivo, setMotivo] = useState('')
   // Tres pasos a propósito: revisar la prefactura, confirmar, emitir. Una factura
