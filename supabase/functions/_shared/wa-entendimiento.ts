@@ -19,7 +19,10 @@
 
 import { sendTextMessage } from './wa-respond.ts';
 import { anotarConsultaPendiente, anotarFoco, pedidosDeLaCarga, leerConversacion, viajeEnFoco } from './wa-foco.ts';
-import { enviarConBotones } from './wa-enviar-botones.ts';
+import { enviarConBotones, enviarPunto } from './wa-enviar-botones.ts';
+import { CANONICO_NO_ES_NUEVO, leerConfirmacionNuevoCanonica, puntoDelContacto, puntoDelNuevo, puntoDelResumen, puntoDelViaje } from './wa-decision-reglas.ts';
+import type { PuntoDecision } from './wa-decision-reglas.ts';
+import { hibridoDelWorkspace } from './wa-hibrido.ts';
 import { textoRedactado } from './wa-redaccion.ts';
 import type { PedidoRedaccion } from './wa-redaccion.ts';
 import {
@@ -489,7 +492,18 @@ async function preguntarContacto(supabase: SupabaseClient, ent: Fila, d: Extract
   const misma = (d.motivo === 'llave_de_otro' || d.motivo === 'mismo') && d.opciones.length === 1;
   const botones = misma ? botonesSiNo('p', ent.id as string, { si: TITULO_SI_ES, no: TITULO_NO_ES }) : [];
   const fijo = conNombreDelViaje(nombre, texto ?? textoPreguntaContacto(d));
-  const ok = await enviarConBotones(ent.remitente_phone as string, await redactado(supabase, ent, { tipo: 'pregunta', fijo, botones: botones.map(b => b.title) }), botones, { workspaceId: ent.workspace_id as string, intent: INTENT });
+  // Bot híbrido (2026-10-06): la pregunta del contacto es un punto de decisión, con su mensaje interactivo («¿Es la
+  // misma persona?» con sus botones; «¿Cuál es?» con la lista; «¿Lo creo?» con «Crear»; la llave o el nombre con
+  // «Descartar»). Lo que se preguntó sale del motivo, igual que lo relee `puntoDeDecision` de `cliente.pregunta`.
+  // Solo con `bot_conversacional.hibrido`; apagado, como antes (texto, con los botones de «¿Es la misma persona?»).
+  const pide = d.motivo === 'llave_de_otro' ? 'llave_de_otro' : d.motivo === 'llave' ? 'llave'
+    : d.opciones.length > 0 ? (misma ? null : 'elegir') : texto ? 'crear' : null;
+  const punto = await hibridoDelWorkspace(supabase, ent.workspace_id as string)
+    ? puntoDelContacto(ent.id as string, nombre, pide, d.opciones, d.nombre ?? '', misma ? botones : undefined) : null;
+  const final = await redactado(supabase, ent, { tipo: 'pregunta', fijo, botones: botones.map(b => b.title) });
+  const ok = punto
+    ? await enviarPunto(ent.remitente_phone as string, final, punto, { workspaceId: ent.workspace_id as string, intent: INTENT })
+    : await enviarConBotones(ent.remitente_phone as string, final, botones, { workspaceId: ent.workspace_id as string, intent: INTENT });
   await actualizar(supabase, ent.id as string, {
     estado: 'esperando_contacto', contacto_opciones: d.opciones, contacto_nombre: d.nombre,
     pregunta_contacto_at: ok ? new Date().toISOString() : null, respuesta_contacto: null, error: ok ? null : 'envio fallido',
@@ -502,7 +516,7 @@ async function preguntarContacto(supabase: SupabaseClient, ent: Fila, d: Extract
  */
 async function preguntarYEsperar(
   supabase: SupabaseClient, ent: Fila, texto: string, confirmacion: 'cruce' | 'sin_solicitud' | 'dos_viajes' | null, extra: Fila = {},
-  opts: { sinNombre?: boolean; botones?: BotonBandeja[]; aparte?: string; resumen?: boolean; sinRedaccion?: boolean } = {},
+  opts: { sinNombre?: boolean; botones?: BotonBandeja[]; aparte?: string; resumen?: boolean; sinRedaccion?: boolean; punto?: PuntoDecision | null } = {},
 ): Promise<void> {
   const conNombre = opts.sinNombre ? texto : conNombreDelViaje(await nombreDelViaje(supabase, ent), texto);
   // Las confirmaciones de sí/no llevan sus botones (2026-10-05): «¿Seguro que van en …?», «¿Es una solicitud de viaje?».
@@ -510,7 +524,10 @@ async function preguntarYEsperar(
   // El modelo redacta el texto (con el interruptor prendido); los títulos de los botones quedan fijos.
   const final = opts.sinRedaccion ? conNombre
     : await redactado(supabase, ent, { tipo: opts.resumen ? 'resumen' : confirmacion ? 'confirmacion' : 'pregunta', fijo: conNombre, botones: botones.map(b => b.title) });
-  const ok = await enviarConBotones(ent.remitente_phone as string, final, botones, { workspaceId: ent.workspace_id as string, intent: INTENT, aparte: opts.aparte });
+  // Bot híbrido (2026-10-06): una pregunta que es punto de decisión sale con su mensaje interactivo.
+  const ok = opts.punto
+    ? await enviarPunto(ent.remitente_phone as string, final, opts.punto, { workspaceId: ent.workspace_id as string, intent: INTENT, aparte: opts.aparte })
+    : await enviarConBotones(ent.remitente_phone as string, final, botones, { workspaceId: ent.workspace_id as string, intent: INTENT, aparte: opts.aparte });
   await actualizar(supabase, ent.id as string, {
     ...extra,
     estado: 'esperando_negocio', confirmacion_pendiente: confirmacion, respuesta_negocio: null, respuesta_negocio_at: null,
@@ -524,7 +541,7 @@ function redactado(supabase: SupabaseClient, ent: Fila, p: PedidoRedaccion): Pro
 }
 
 /** Los botones de una confirmación del entendimiento: contestan lo mismo que su «sí» o su «descartar» escritos. */
-function botonesDeLaConfirmacion(entId: string, c: 'cruce' | 'sin_solicitud' | 'dos_viajes' | null): BotonBandeja[] {
+export function botonesDeLaConfirmacion(entId: string, c: 'cruce' | 'sin_solicitud' | 'dos_viajes' | null): BotonBandeja[] {
   if (c === 'cruce') return botonesSiNo('p', entId, { si: TITULO_SI_CARGARLOS, des: true });
   if (c === 'sin_solicitud') return botonesSiNo('p', entId, { si: TITULO_SI_CREALO, des: true });
   if (c === 'dos_viajes') return [{ id: idBoton('p', 'des', entId), title: TITULO_DESCARTAR }];
@@ -640,9 +657,10 @@ async function entender(supabase: SupabaseClient, ent: Fila): Promise<void> {
       await descartarEntrega(supabase, ent, crudos.length, 'el comercial descartó la tanda en «¿A qué viaje van?»');
       return;
     }
-    if (r.tipo === 'no_entendida') {
-      // El nombre de un viaje abierto que no está en la lista corta («Europa 2 días», «Marta Gómez»).
-      const v = await viajePorNombre(supabase, workspaceId, respuesta);
+    // El nombre de un viaje abierto que no está en la lista corta («Europa 2 días», «Marta Gómez»). Con el bot híbrido
+    // la respuesta llega canónica: un viaje fuera de la lista lo elige el modelo entre las opciones ocultas, con su código.
+    if (r.tipo === 'no_entendida' && !(await hibridoDelWorkspace(supabase, ent.workspace_id as string))) {
+      const v = await viajePorNombre(supabase, ent.workspace_id as string, respuesta);
       if (v) r = { tipo: 'existente', negocio_id: v };
     }
     if (r.tipo === 'no_entendida') {
@@ -934,10 +952,13 @@ async function pedirConfirmacionNuevo(
   // Quién es, contra todo el directorio (diseño 2026-10-05): el «sí» confirma lo que se muestra.
   const llave = llaveDe(salidaGuardada(ent));
   const r = await resolverClienteEnBase(supabase, ent.workspace_id as string, { nombre, llave });
-  const texto = textoConfirmarNuevo({ nombre, parecidos, conLista: !!opciones && opciones.length > 0, aviso, cliente: sobreElCliente(r) });
+  const hibrido = await hibridoDelWorkspace(supabase, ent.workspace_id as string);
+  const texto = textoConfirmarNuevo({ nombre, parecidos, conLista: !!opciones && opciones.length > 0, aviso, cliente: sobreElCliente(r), hibrido });
   // El prefijo nombra la tanda (o el viaje del reparto), no el nombre que todavía no se confirma.
   const prefijo = await nombreDelViaje(supabase, { ...ent, contacto_nombre: null, cliente: null });
-  await preguntarYEsperar(supabase, ent, conNombreDelViaje(prefijo, texto), null, { destino: 'nuevo', contacto_nombre: nombre, ...(clienteConLlave ? { cliente: clienteConLlave } : {}) }, { sinNombre: true });
+  // Punto 5 del bot híbrido: [Crear] [No es nuevo] [Descartar]; con viajes parecidos, en una lista. Crear, solo con el toque.
+  const punto = hibrido ? puntoDelNuevo(ent.id as string, '', nombre, opciones ?? [], viajes) : null;
+  await preguntarYEsperar(supabase, ent, conNombreDelViaje(prefijo, texto), null, { destino: 'nuevo', contacto_nombre: nombre, ...(clienteConLlave ? { cliente: clienteConLlave } : {}) }, { sinNombre: true, punto });
 }
 
 /** Lo que la confirmación dice del cliente, según el directorio. */
@@ -958,9 +979,7 @@ async function atenderConfirmacionNuevo(
   supabase: SupabaseClient, ent: Fila, nombre: string, respuesta: string, crudos: ReadonlyArray<MensajeCrudo>,
   opciones: OpcionNegocio[] | null, opts: { revisarDosViajes?: boolean },
 ): Promise<void> {
-  // Con los viajes abiertos, como los leyó la confirmación: una frase que señala un viaje resuelve también contra
-  // los que el aviso «Ya hay un viaje de …» nombró por su código, fuera de la lista (sexto control de Vera).
-  const viajes = (await viajesAbiertosDeLaBandeja(supabase, ent.workspace_id as string)) ?? [];
+  const hibrido = await hibridoDelWorkspace(supabase, ent.workspace_id as string);
   // La llave escrita sola: se guarda y se vuelve a preguntar mostrándola (el «sí» es a lo que se muestra).
   const llave = soloLlave(respuesta);
   if (llave) {
@@ -968,7 +987,16 @@ async function atenderConfirmacionNuevo(
     await pedirConfirmacionNuevo(supabase, { ...ent, cliente: { ...salidaGuardada(ent).cliente, llave } }, nombre, opciones);
     return;
   }
-  const r = interpretarConfirmacionNuevo(respuesta, opciones ?? [], nombre, viajes);
+  // «No es nuevo» (el botón del punto 5, o el modelo): no se crea a nadie y vuelve «¿A qué viaje van?» con la lista.
+  if (hibrido && respuesta.trim() === CANONICO_NO_ES_NUEVO) {
+    await volverAPreguntarNegocio(supabase, ent, opciones ?? [], 'Entonces no creo a nadie.', { destino: null, contacto_nombre: null });
+    return;
+  }
+  // Bot híbrido (2026-10-06): la respuesta llega canónica desde el punto de decisión; aquí no se adivina texto libre.
+  // Sin él, como antes: el lector del texto libre, con los viajes abiertos como los leyó la confirmación (una frase que
+  // señala un viaje resuelve también contra los que el aviso «Ya hay un viaje de …» nombró fuera de la lista).
+  const r = hibrido ? leerConfirmacionNuevoCanonica(respuesta, opciones ?? [])
+    : interpretarConfirmacionNuevo(respuesta, opciones ?? [], nombre, (await viajesAbiertosDeLaBandeja(supabase, ent.workspace_id as string)) ?? []);
   if (r.tipo === 'si') {
     // El «sí»: ahora sí, el cliente con ese nombre (si ya hay un contacto igual, se pregunta «¿es el mismo?»).
     await entenderNuevo(supabase, ent, crudos, nombre, { revisarDosViajes: opts.revisarDosViajes, nuevoExplicito: true });
@@ -1135,7 +1163,7 @@ export interface EnLaTanda {
 export async function simularEnLaTanda(
   supabase: SupabaseClient, workspaceId: string, phone: string, horasCajaActiva: number, texto: string, enviadoAt: string,
   /** Un reenvío (o un audio, una foto) nunca contesta nada: solo puede recordar lo que espera la caja. */
-  como: { reenviado?: boolean; tipo?: string } = {},
+  como: { reenviado?: boolean; tipo?: string; interpretacion?: Record<string, unknown> | null } = {},
 ): Promise<EnLaTanda | null> {
   const { data: abierta, error } = await supabase.from('wa_bandeja_entregas').select('id')
     .eq('workspace_id', workspaceId).eq('remitente_phone', phone).eq('estado', 'abierta').limit(1).maybeSingle();
@@ -1145,7 +1173,10 @@ export async function simularEnLaTanda(
   const c = await candidatosDeEncabezado(supabase, workspaceId);
   if (!c) return null;
   const mensajes = aViaje(crudos);
-  const este: MensajeViaje = { n: mensajes.length + 1, cuerpo: texto, reenviado: como.reenviado === true, tipo: como.tipo ?? 'text', en: enviadoAt };
+  const este: MensajeViaje = {
+    n: mensajes.length + 1, cuerpo: texto, reenviado: como.reenviado === true, tipo: como.tipo ?? 'text', en: enviadoAt,
+    ...(como.interpretacion ? { interpretacion: como.interpretacion as unknown as MensajeViaje['interpretacion'] } : {}),
+  };
   const cfg = { horasCajaActiva, equipo: c.equipo };
   const directorio = await directorioDeLaTanda(supabase, workspaceId, [...mensajes, este], c.viajes, cfg);
   const antes = armarSegmentos(mensajes, c.viajes, { ...cfg, directorio });
@@ -1342,18 +1373,21 @@ export async function armarPreguntaNegocio(
     .select('cuerpo').eq('entrega_id', entregaId).eq('papel', 'contenido');
   const texto = ((msgs ?? []) as Fila[]).map(m => String(m.cuerpo ?? '')).join('\n');
   const opciones = armarOpcionesNegocio(abiertos, texto);
-  return { texto: textoPreguntaNegocio({ nMensajes, opciones }), opciones };
+  return { texto: textoPreguntaNegocio({ nMensajes, opciones, hibrido: await hibridoDelWorkspace(supabase, workspaceId) }), opciones };
 }
 
-/** El viaje abierto que nombra un texto tal cual (código, nombre del negocio o cliente), o `null`. */
+/** El nombre de un viaje abierto que nombra un texto tal cual (código, nombre del negocio o cliente), o `null`. */
 async function viajePorNombre(supabase: SupabaseClient, workspaceId: string, texto: string): Promise<string | null> {
   const viajes = await viajesAbiertosDeLaBandeja(supabase, workspaceId);
   const r = viajes ? resolverEncabezado(texto, viajes) : null;
   return r?.tipo === 'viaje' ? r.viaje.id : null;
 }
 
-async function volverAPreguntarNegocio(supabase: SupabaseClient, ent: Fila, opciones: OpcionNegocio[], aviso: string): Promise<void> {
-  await preguntarYEsperar(supabase, ent, textoPreguntaNegocio({ nMensajes: 0, opciones, aviso }), null);
+async function volverAPreguntarNegocio(supabase: SupabaseClient, ent: Fila, opciones: OpcionNegocio[], aviso: string, extra: Fila = {}): Promise<void> {
+  // Bot híbrido (2026-10-06): con la lista de viajes, «Viaje nuevo» y «Descartar». Apagado, como antes (solo el texto).
+  const hibrido = await hibridoDelWorkspace(supabase, ent.workspace_id as string);
+  const punto = hibrido ? puntoDelViaje('negocio', ent.id as string, '', opciones, (await viajesAbiertosDeLaBandeja(supabase, ent.workspace_id as string)) ?? []) : null;
+  await preguntarYEsperar(supabase, { ...ent, ...extra }, textoPreguntaNegocio({ nMensajes: 0, opciones, aviso, hibrido }), null, extra, { punto });
 }
 
 /** Un código que no estaba en la lista: se busca entre los abiertos del workspace. */
@@ -1374,8 +1408,10 @@ async function preguntarResumen(supabase: SupabaseClient, ent: Fila, partes: str
   const plan = (entrega?.plan_viajes ?? null) as PlanViajes | null;
   for (const p of partes.slice(0, -1)) await enviar(ent.remitente_phone as string, p, ent.workspace_id as string);
   const botones = plan ? botonesDelResumen(plan, ent.entrega_id as string) : [];
+  // Con «¿Cuál es?» del cliente de un viaje nuevo, el resumen sale con la lista (bot híbrido, 2026-10-06).
+  const punto = plan && await hibridoDelWorkspace(supabase, ent.workspace_id as string) ? puntoDelResumen(ent.entrega_id as string, plan, '', 'negocio') : null;
   // Un resumen en varias partes no se redacta: la última sola no es el resumen.
-  await preguntarYEsperar(supabase, ent, partes[partes.length - 1], null, {}, { sinNombre: true, botones, aparte: textoBotonesAparte(botones), resumen: true, sinRedaccion: partes.length > 1 });
+  await preguntarYEsperar(supabase, ent, partes[partes.length - 1], null, {}, { sinNombre: true, botones, aparte: textoBotonesAparte(botones), resumen: true, sinRedaccion: partes.length > 1, punto });
 }
 
 /**
@@ -1919,7 +1955,8 @@ async function resolverRespuesta(supabase: SupabaseClient, ent: Fila): Promise<v
     await decidir({ llave: nuevaLlave, confirmado: !!nombre });
     return;
   }
-  const r = interpretarRespuestaContacto(respuestaTexto, opciones);
+  const hibrido = await hibridoDelWorkspace(supabase, workspaceId);
+  const r = interpretarRespuestaContacto(respuestaTexto, opciones, { hibrido });
   if (r.tipo === 'elegido') {
     await cerrarConNegocio(supabase, ent, cfg, r.contacto_id, salida, { llave });
     return;
@@ -1935,9 +1972,10 @@ async function resolverRespuesta(supabase: SupabaseClient, ent: Fila): Promise<v
   }
   // Se le pidió el nombre y escribió solo el nombre («Valeria Prueba5»), sin NUEVO.
   let nuevoNombre: string | null = r.tipo === 'nuevo' ? r.nombre : null;
-  // Sin la fórmula que lo presenta («la clienta es …», «para …»: octavo control de Vera, hallazgo 3).
+  // Sin la fórmula que lo presenta («la clienta es …», «para …»: octavo control de Vera, hallazgo 3). Con el bot híbrido
+  // (2026-10-06) no se adivina: el nombre llega canónico, «nuevo X», con lo que el modelo copió tal cual.
   if (r.tipo === 'no_entendida' && opciones.length === 0 && !nombreMostrado
-    && !/(^|\s)\d/.test(respuestaTexto.trim()) && esNombreNuevo(respuestaTexto.replace(/\d/g, ''))) {
+    && !/(^|\s)\d/.test(respuestaTexto.trim()) && esNombreNuevo(respuestaTexto.replace(/\d/g, '')) && !hibrido) {
     nuevoNombre = sinPresentacion(respuestaTexto.trim());
   }
   if (r.tipo === 'no_entendida' && !nuevoNombre) {
@@ -2431,7 +2469,7 @@ export async function textoDeLaConsulta(
     const fichas = dir.porNombre(quien);
     if (fichas === null) return 'No pude revisar el directorio de clientes. Pregúntame otra vez en un momento.';
     const exactos = (fichas ?? []).filter(f => normalizarNombre(f.nombre) === normalizarNombre(quien));
-    const usadas = exactos.length > 0 ? exactos : leido.dudoso ? [] : (fichas ?? []).filter(f => pareceNombre(quien, f.nombre)).slice(0, 1);
+    const usadas = exactos.length > 0 ? exactos : leido.dudoso ? [] : (fichas ?? []).filter(f => pareceNombre(quien, f.nombre, { contiene: dir.contiene })).slice(0, 1);
     // Nunca «no lo tengo» con un nombre que no se pudo aislar: se pregunta de qué cliente.
     if (usadas.length === 0) return TEXTO_CONSULTA_DE_QUIEN;
     return usadas.map(f => textoViajesDelCliente({

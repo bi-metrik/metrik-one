@@ -50,6 +50,7 @@ import {
   acuseDelClienteDeLaTanda, candidatosDeEncabezado, pendienteDeLaTanda, preguntaAbierta, simularEnLaTanda, tandaAbiertaDelRemitente, textoDeLoQueFalta,
 } from './wa-entendimiento.ts';
 import { pareceRespuesta, resolverEncabezado } from './wa-viajes-reglas.ts';
+import { atenderEnPuntoDeDecision, volverAlPunto } from './wa-decision.ts';
 import type { PlanViajes, ViajeAbierto } from './wa-viajes-reglas.ts';
 import {
   armarContexto,
@@ -249,11 +250,26 @@ async function atender(
     }
   }
 
+  // 3a. Bot híbrido (2026-10-06): con un punto de decisión vigente (la pregunta abierta, o lo que espera la caja), el
+  // escrito se lee ahí primero, igual que con el interruptor apagado: el toque, el número, el código, o el modelo con
+  // las opciones vigentes. Si elige, ya está atendido. Si es «contenido» o una «pregunta», sigue aquí, pero ya nunca
+  // como la respuesta a esa pregunta (el contexto no la muestra).
+  // Solo con el interruptor `bot_conversacional.hibrido` del workspace: apagado, todo sigue como antes.
+  if (enBandeja && configB!.hibrido && !message.decisionLeida) {
+    const d = await atenderEnPuntoDeDecision(supabase, user, message, configB!, { desdeInterprete: true });
+    if (d === 'atendido') {
+      estado.despachado = true;
+      return SI;
+    }
+    if (d) message.decisionLeida = d;
+  }
+
   // 3b. Lo que el código de hoy lee exacto en la caja abierta (el cliente de un viaje nuevo, su llave, cuál es, la
   // lista de un encabezado): no pasa por el modelo. Así el resolvedor del cliente vive en UN camino, con el
   // interruptor apagado o prendido (diseño 2026-10-05, R6).
   if (enBandeja) {
-    const sim = await simularEnLaTanda(supabase, ws, message.phone, configB!.horasCajaActiva, texto, fechaDeMeta(message.timestamp) ?? new Date(ahora()).toISOString());
+    const sim = message.decisionLeida ? null
+      : await simularEnLaTanda(supabase, ws, message.phone, configB!.horasCajaActiva, texto, fechaDeMeta(message.timestamp) ?? new Date(ahora()).toISOString());
     if (sim?.respuesta) return NO;
     // 3c. La memoria de la conversación (2026-10-05): la consulta que esperaba su viaje, la respuesta a «me falta» (directo
     // al viaje en foco) o la carga en vuelo. La atiende la ruta de hoy, igual con el interruptor apagado o prendido.
@@ -369,7 +385,10 @@ async function leerContexto(
   let todos: Array<Omit<NegocioCtx, 'alias'>>;
   if (enBandeja && configB) {
     todos = (viajes ?? []).map(v => ({ id: v.id, codigo: v.codigo, cliente: v.cliente, destino: v.destino, nombre: v.nombre ?? null }));
-    pregunta = await preguntaAbierta(supabase, ws, phone);
+    // Bot híbrido (2026-10-06): las preguntas de la bandeja (la abierta y lo que espera la caja) son puntos de decisión
+    // y las lee `wa-decision.ts` ANTES de llegar aquí. El intérprete ya no las ve ni las contesta: solo la conversación
+    // del bot de siempre (un gasto a medias) queda como pregunta pendiente en su contexto. Sin el bot híbrido, como antes.
+    pregunta = configB.hibrido ? null : await preguntaAbierta(supabase, ws, phone);
     if (pregunta) {
       let opciones: ViajeAbierto[] | null = null;
       if (pregunta.tipo === 'entrega' && pregunta.espera === 'viaje') {
@@ -397,7 +416,7 @@ async function leerContexto(
         bandejaVista = { espera: pregunta.espera, nombre: pregunta.nombre, corta: pregunta.corta, opciones: null, vistaAt: null };
       }
     }
-    const pt = await pendienteDeLaTanda(supabase, ws, phone, configB.horasCajaActiva);
+    const pt = configB.hibrido ? null : await pendienteDeLaTanda(supabase, ws, phone, configB.horasCajaActiva);
     if (pt) {
       tandaVista = pt.tipo === 'eleccion' ? { tipo: 'eleccion', texto: pt.texto, candidatos: pt.candidatos }
         : pt.tipo === 'cliente' ? { tipo: 'cliente', texto: textoDeLoQueFalta(pt), ...(pt.resolucion.tipo === 'llave_de_otro' ? { esLaMisma: true } : {}) } : { tipo: 'nombre' };
@@ -477,6 +496,11 @@ async function despachar(b: Base, d: Extract<Decision, { tipo: 'ejecutar' }>, le
   const ws = user.workspace_id;
   const paso = d.paso;
   const recordar = d.recordar && lec.pendiente ? textoSiguePendiente(lec.pendiente) : null;
+  // Una «pregunta» del punto de decisión que el intérprete quiere guardar como contenido o tomar como respuesta: no. Se
+  // vuelve a mostrar la pregunta vigente (bot híbrido, 2026-10-06).
+  if (message.decisionLeida === 'pregunta' && b.enBandeja && lec.bandeja && ['registrar', 'cerrar_tanda', 'responder_bandeja'].includes(paso.p)) {
+    return await volverAlPunto(supabase, user, message.phone, lec.bandeja);
+  }
   const decirAlUsuario = async (t: string | null) => {
     const todo = [t, recordar].filter(Boolean).join('\n');
     if (!todo) return;
@@ -510,7 +534,7 @@ async function despachar(b: Base, d: Extract<Decision, { tipo: 'ejecutar' }>, le
           && b.enBandeja && lec.bandeja && lec.bandeja.modoViajes !== 'uno'
           ? await textoRedactado(supabase, { workspaceId: ws, phone: message.phone }, { tipo: 'aviso', fijo: await textoTandaSinCliente(supabase, ws, message.phone, lec.bandeja) })
           : null;
-        if (delCliente && !recordar && b.enBandeja) await enviarAcuseDeLaCaja(message.phone, delCliente, fila.entrega, ws);
+        if (delCliente && !recordar && b.enBandeja) await enviarAcuseDeLaCaja(message.phone, delCliente, fila.entrega, ws, lec.bandeja ? { supabase, config: lec.bandeja } : undefined);
         else await decirAlUsuario(delCliente ?? paso.aviso ?? sinCliente);
       }
       return true;

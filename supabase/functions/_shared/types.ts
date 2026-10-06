@@ -212,6 +212,14 @@ export interface IncomingMessage {
    * es lo que permite comprobar despues que el toque vino de Meta.
    */
   webhook_crudo?: { cuerpo: string; firma: string | null };
+  /**
+   * Bot híbrido de la bandeja (2026-10-06), solo en memoria: lo que ya se leyó de este escrito en un punto de decisión.
+   * `contenido` / `pregunta`: no contesta la pregunta (sigue su camino, nunca como respuesta). `respuesta`: es el
+   * canónico de una opción elegida para la caja abierta (no se vuelve a leer como decisión).
+   */
+  decisionLeida?: 'contenido' | 'pregunta' | 'respuesta';
+  /** Con `decisionLeida: respuesta`: la interpretación que se guarda con el mensaje en la tanda (la relee el reparto). */
+  interpretacionDecision?: Record<string, unknown>;
 }
 
 // --- Handler Context ---

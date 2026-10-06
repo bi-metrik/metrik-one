@@ -395,7 +395,7 @@ describe('QA de #971 v4', () => {
       expect(/(?:Después te muestro el resumen para cargarlo|«quita el \d+»)\.$/.test(partes[partes.length - 1])).toBe(true);
     }
     expect(partidos).toBeGreaterThan(50);
-  });
+  }, 30_000); // Recorre cientos de resúmenes: con toda la carpeta en paralelo pasaba de los 5 s por defecto.
 });
 
 describe('sexto control de Vera · C: lo que nombra al cliente de OTRO viaje abierto no se carga en la caja sin preguntar', () => {

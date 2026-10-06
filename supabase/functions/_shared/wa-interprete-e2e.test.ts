@@ -14,6 +14,8 @@ vi.mock('./wa-respond.ts', () => ({
   sendTextMessage: vi.fn(async (phone: string, texto: string) => { enviados.push({ phone, texto }); }),
   // Los botones de respuesta (2026-10-05): el cuerpo cuenta como lo que se le dijo.
   sendButtons: vi.fn(async (phone: string, texto: string) => { enviados.push({ phone, texto }); return 'wamid.botones'; }),
+  // Las listas del bot híbrido (2026-10-06): el cuerpo cuenta como lo que se le dijo.
+  sendList: vi.fn(async (phone: string, texto: string) => { enviados.push({ phone, texto }); return 'wamid.lista'; }),
 }));
 
 type Tablas = Record<string, Fila[]>;

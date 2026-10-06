@@ -1662,7 +1662,7 @@ export type RespuestaContacto =
   | { tipo: 'otra' }
   | { tipo: 'no_entendida' };
 
-export function interpretarRespuestaContacto(texto: string, opciones: ContactoCandidato[]): RespuestaContacto {
+export function interpretarRespuestaContacto(texto: string, opciones: ContactoCandidato[], opts: { hibrido?: boolean } = {}): RespuestaContacto {
   const t = normalizarTexto(texto);
   const m = /^(\d{1,2})\.?$/.exec(t);
   if (m) {
@@ -1673,7 +1673,11 @@ export function interpretarRespuestaContacto(texto: string, opciones: ContactoCa
   // «nuevo», «cliente nuevo Marta Gómez», «nueva clienta Marta» (`leerNuevo`). Un nombre con dígitos no.
   const nuevo = leerNuevo(texto);
   if (nuevo && !nuevo.cliente) return { tipo: 'nuevo', nombre: null };
-  if (nuevo?.cliente && /^[^\d]{2,}$/.test(nuevo.cliente)) return { tipo: 'nuevo', nombre: nuevo.cliente };
+  // Con el bot híbrido (2026-10-06) el nombre llega canónico, «nuevo X» (con la llave detrás si la traía): un nombre no
+  // lleva una palabra que es solo números (eso es el celular), pero «Prueba5» sí puede ser un nombre de prueba.
+  if (opts.hibrido) {
+    if (nuevo?.cliente && nuevo.cliente.trim().length >= 2 && !/(^|\s)\d+(\s|$)/.test(nuevo.cliente.trim())) return { tipo: 'nuevo', nombre: nuevo.cliente };
+  } else if (nuevo?.cliente && /^[^\d]{2,}$/.test(nuevo.cliente)) return { tipo: 'nuevo', nombre: nuevo.cliente };
   const tel = digitosTelefono(texto);
   if (tel && tel.length >= 10) return { tipo: 'telefono', telefono: tel };
   const correo = /^(?:(?:su\s+)?(?:correo|email|mail)\s*(?:es)?\s*:?\s*)?([^\s@]+@[^\s@]+\.[a-z]{2,})\.?$/i.exec(String(texto ?? '').trim())?.[1];

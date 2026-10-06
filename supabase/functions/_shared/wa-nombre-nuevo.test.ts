@@ -110,6 +110,18 @@ describe('clientes con viaje abierto: la confirmación lo dice (también en el a
       .toContain('si es para ese, responde «el de Cartagena»; si es un cliente nuevo, «sí»');
   });
 
+  it('bot híbrido (`bot_conversacional.hibrido`): la pregunta nombra los botones y señala el viaje por su número o su código', () => {
+    expect(textoConfirmarNuevo({ nombre: 'combo playero', conLista: true, hibrido: true })).toBe(
+      '¿Creo el cliente nuevo «combo playero»? Toca «Crear» o responde «sí»; escríbeme el nombre correcto, o toca «No es nuevo» si es un viaje que ya existe.\nNo he creado ni cargado nada.');
+    expect(textoConfirmarNuevo({ nombre: 'Rosalba Tovar', conLista: true, parecidos: [{ viaje: ROSALBA, numero: 2 }], hibrido: true })).toBe([
+      '¿Creo el cliente nuevo «Rosalba Tovar»?',
+      'Ya hay un viaje de Rosalba Quiñones Tovar (R 26 1): si es para ese, tócalo o responde 2; si es un cliente nuevo, «Crear» o «sí»; o escríbeme el nombre correcto.',
+      'No he creado ni cargado nada.',
+    ].join('\n'));
+    expect(textoConfirmarNuevo({ nombre: 'Rosalba', conLista: false, parecidos: [{ viaje: ROSALBA, numero: null }], hibrido: true }))
+      .toContain('si es para ese, tócalo o responde R 26 1; si es un cliente nuevo, «Crear» o «sí»');
+  });
+
   it('el acuse del encabezado y el resumen del reparto', () => {
     expect(respuestaAlEncabezado(resolverEncabezado('nueva Rosalba Tovar', [ROSALBA, PEDRO]))).toBe(
       'Va como viaje nuevo de Rosalba Tovar. Antes del resumen reviso si ya es cliente.\nYa hay un viaje de Rosalba Quiñones Tovar (R 26 1): si es para ese, escribe R 26 1.');

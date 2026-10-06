@@ -80,6 +80,9 @@ describe('PR B · los textos fijos de la bandeja', () => {
       '2. MADRID 8N · Jorge Pérez (T1 26 12)',
       'Dime cuál (por ejemplo «el de Cartagena»). Si es un viaje nuevo, escribe «nuevo» y el nombre del cliente; si no va, «descartar».',
     ].join('\n'));
+    // Con el bot híbrido (`bot_conversacional.hibrido`), la lista sale como mensaje de lista: se toca o se escribe el número.
+    expect(textoPreguntaNegocio({ nMensajes: 3, opciones: [{ ...L, propuesto: true }, J], hibrido: true }).split('\n').at(-1))
+      .toBe('Tócalo en la lista o escribe su número. Si es un viaje nuevo, escribe «nuevo» y el nombre del cliente; si no va, «descartar».');
     expect(TEXTOS['resumen listo'].split('\n')[0]).toBe('¿Cargo este viaje?');
     // 2026-10-05: «No cargué nada todavía» lo dicen ahora los botones «Cargar» y «Descartar»; queda cómo corregir.
     expect(TEXTOS['resumen listo'].split('\n').at(-1)).toBe('Para mover o quitar uno, escríbeme: «el 2 es de Luisa» o «quita el 2».');
