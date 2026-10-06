@@ -82,6 +82,7 @@ export function crearDoble(tablas: Tablas) {
       is: (c: string, v: unknown) => (filtros.push((f) => (f[c] ?? null) === v), chain),
       in: (c: string, vs: unknown[]) => (filtros.push((f) => vs.includes(f[c])), chain),
       lte: (c: string, v: string) => (filtros.push((f) => String(f[c]) <= v), chain),
+      gt: (c: string, v: number) => (filtros.push((f) => Number(f[c]) > v), chain),
       order: (c: string) => ((orden = c), chain),
       range: (a: number, b: number) => ((rango = [a, b]), chain),
       limit: (n: number) => ((tope = n), chain),

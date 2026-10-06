@@ -9,6 +9,7 @@ import { evaluarConDesignacion, leerAceptacionesUsuario } from '@/lib/valida-api
 import { esFuncionAusente } from '@/lib/valida-api/mapeo'
 import { designacionDelEspacio, documentosDelCliente, perfilReal } from '@/lib/valida-api/terminos-servidor'
 import { leerProximoPagoCda, type LecturaPago } from './pago-servidor'
+import { TIPOS_CUOTA_SIN_MORA } from './plan-anual'
 import { puedeVerSuscripcion } from '@/lib/seccion-suscripcion/estado'
 import { enPlazoParaAceptar, estadoMora, mensajeSuspendidoPorMora, type EstadoMora } from './plazos'
 
@@ -192,9 +193,15 @@ export type MoraValidaCda =
 async function resolverMora(): Promise<MoraValidaCda> {
   const e = await entradaValidaCda()
   if (e.tipo !== 'ok' || !e.servicioContratadoId) return { tipo: 'no_aplica' }
-  const lectura = await leerProximoPagoCda(e.servicioContratadoId, e.hoy)
+  const ahoraISO = new Date().toISOString()
+  const [lectura, delServicio] = await Promise.all([
+    leerProximoPagoCda(e.servicioContratadoId, e.hoy, ahoraISO),
+    // La mora es del SERVICIO: una cuota de usuarios adicionales impaga (período del Plan Anual) no
+    // restringe ni pausa Valida; deshabilita a ese usuario (anexo del Plan Anual, 5.2 y 6.1).
+    leerProximoPagoCda(e.servicioContratadoId, e.hoy, ahoraISO, TIPOS_CUOTA_SIN_MORA),
+  ])
   // Sin poder leer las cuotas no hay prueba de mora: no se pausa (ver el encabezado).
-  const mora: EstadoMora = lectura.estado === 'ok' ? estadoMora(lectura.pago, e.hoy) : { estado: 'al_dia' }
+  const mora: EstadoMora = delServicio.estado === 'ok' ? estadoMora(delServicio.pago, e.hoy) : { estado: 'al_dia' }
   return { tipo: 'ok', lectura, mora }
 }
 

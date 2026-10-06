@@ -1,6 +1,7 @@
 import 'server-only'
 import { createServiceClient } from '@/lib/supabase/server'
 import { cuotasConEstado, type CuotaDeServicio } from '@/lib/valida-cda/pago-pendiente'
+import { TIPO_CUOTA_ANUAL } from '@/lib/valida-cda/plan-anual'
 import type { ContextoSuscripcion } from './contexto-servidor'
 import { parametroEntero, parametroMonto } from './contexto-servidor'
 import {
@@ -124,7 +125,9 @@ async function leerPlan(ctx: Ctx, hoy: string): Promise<PlanLeido | 'error'> {
     console.error('[suscripcion] cuotas o cobros:', cuotas.error?.message ?? cobros.error?.message)
     return 'error'
   }
-  const filasCuota = (cuotas.data ?? []) as FilaCuotaPlan[]
+  // La cuota anual (Plan Anual) paga doce períodos de una vez: no lleva cargos de licencias. Los
+  // usuarios adicionales de esos períodos van en sus cuotas `usuarios_adicionales`, una por período.
+  const filasCuota = ((cuotas.data ?? []) as FilaCuotaPlan[]).filter((q) => q.tipo !== TIPO_CUOTA_ANUAL)
   const filasCobro = (cobros.data ?? []) as FilaCobro[]
 
   const cargos = filasCuota.length
@@ -173,7 +176,9 @@ async function leerPlan(ctx: Ctx, hoy: string): Promise<PlanLeido | 'error'> {
       concepto: q.concepto_detalle,
       base: conceptoBase(q.concepto_detalle),
       fechaVencimiento: q.fecha_vencimiento,
-      modificable: !conCobro.has(`${q.plan_cobro_id}#${q.numero}`) && sinPlata.has(q.id),
+      // Una cuota en cero (usuarios adicionales de un período del Plan Anual, sin ninguno) no entra al
+      // reparto, así que tampoco tiene plata: se puede tocar si no tiene cobro.
+      modificable: !conCobro.has(`${q.plan_cobro_id}#${q.numero}`) && (sinPlata.has(q.id) || Number(q.monto) === 0),
     })),
     cargosVivos: ((cargos.data ?? []) as FilaCargo[]).map((c) => ({
       id: c.id,

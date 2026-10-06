@@ -298,6 +298,26 @@ describe('mora de más de 30 días (cláusula 11.1)', () => {
     expect(await validaCdaPermiteOperar()).toEqual({ ok: true })
   })
 
+  it('con el plan anual pagado, una cuota de usuarios adicionales impaga no pausa el servicio (anexo 5.2 y 6.1)', async () => {
+    escenario.hoy = '2027-03-15'
+    escenario.cuotas = {
+      data: [
+        CUOTA_1,
+        { ...CUOTA_1, cuota_id: '77777777-7777-4777-8777-777777777777', numero: 14, tipo: 'anual', monto: '1650000', fecha_vencimiento: '2026-10-09' },
+        { ...CUOTA_1, cuota_id: '88888888-8888-4888-8888-888888888888', numero: 4, tipo: 'usuarios_adicionales', monto: '50000', fecha_vencimiento: '2026-12-30' },
+      ],
+      error: null,
+    }
+    escenario.cobros = { data: [{ monto: '150000', estado: 'pagado' }, { monto: '1650000', estado: 'pagado' }], error: null }
+    expect(await validaCdaPermiteOperar()).toEqual({ ok: true })
+    // CONTROL — la misma cuota impaga si fuera del servicio sí pausaría.
+    escenario.cuotas = {
+      data: [...(escenario.cuotas.data ?? []).slice(0, 2), { ...CUOTA_1, cuota_id: '88888888-8888-4888-8888-888888888888', numero: 4, monto: '50000', fecha_vencimiento: '2026-12-30' }],
+      error: null,
+    }
+    expect((await validaCdaPermiteOperar()).ok).toBe(false)
+  })
+
   it('sin poder leer las cuotas NO se pausa: pausar exige la prueba de la deuda', async () => {
     const log = vi.spyOn(console, 'error').mockImplementation(() => {})
     escenario.hoy = '2026-12-31'

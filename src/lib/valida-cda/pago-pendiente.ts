@@ -262,6 +262,12 @@ export function proximoPago(p: {
   hoy: string
   /** El instante de ahora, ISO-8601, para comparar contra el vencimiento del enlace. */
   ahoraISO: string
+  /**
+   * Tipos de cuota que nunca son «la pendiente»: reciben su parte del reparto como cualquiera, pero si
+   * quedan sin cubrir se saltan. La mora del servicio ignora así las cuotas de usuarios adicionales
+   * (`TIPOS_CUOTA_SIN_MORA`, Plan Anual 5.2).
+   */
+  ignorarTipos?: readonly string[]
 }): ProximoPago {
   const cuotas = cuotasEnOrden(p.cuotas)
   if (cuotas.length === 0) return { estado: 'sin_cuotas' }
@@ -273,8 +279,8 @@ export function proximoPago(p: {
     const abonado = Math.max(0, Math.min(disponible, cuota.monto))
     const saldo = cuota.monto - abonado
     // El piso de materialidad del sistema: unos pesos de redondeo no dejan una cuota «pendiente».
-    if (saldo <= 0 || saldoCuadrado(saldo)) {
-      disponible -= cuota.monto
+    if (saldo <= 0 || saldoCuadrado(saldo) || p.ignorarTipos?.includes(cuota.tipo)) {
+      disponible = Math.max(0, disponible - cuota.monto)
       continue
     }
     const { enlace, vencido: enlaceVencido } = enlaceDeCuota(cuota, p.ahoraISO)

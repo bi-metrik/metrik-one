@@ -5,6 +5,7 @@ import { todayBogotaISO } from '@/lib/dates/bogota'
 import { adapterPara } from '@/lib/suscripciones/pasarela/registro'
 import type { EventoPasarela, PasarelaAdapter } from '@/lib/suscripciones/pasarela/adapter'
 import { createServiceClient } from '@/lib/supabase/server'
+import { activarPlanAnualSiCorresponde } from '@/lib/valida-cda/plan-anual-activacion-servidor'
 import { confirmarPagoCobroProgramado } from './confirmar-cobro-programado'
 import { procesarEventoPasarela, type CobroParaPago, type RepoPagoEnLinea } from './pago-en-linea'
 
@@ -131,6 +132,15 @@ export function repoPagoEnLinea(dbCliente: SupabaseClient, pasarela: string, ada
 
     confirmarPago(c) {
       return confirmarPagoCobroProgramado(dbCliente, c)
+    },
+
+    async trasPagoRegistrado(cobro) {
+      const r = await activarPlanAnualSiCorresponde(dbCliente, cobro.id)
+      if (r.tipo === 'no_aplica') return null
+      if (r.tipo === 'requiere_revision') {
+        return { revisar: true, detalle: `Plan anual NO activado: ${r.detalle} Revisar y devolver el pago si corresponde.` }
+      }
+      return { revisar: false, detalle: r.tipo === 'activado' ? 'Plan anual activado.' : 'El plan anual ya estaba activo.' }
     },
 
     async anotarEnNegocio(cobro, texto) {
