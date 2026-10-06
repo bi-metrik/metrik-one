@@ -18,6 +18,18 @@
 // (`abonos-factura.ts`), y los que entren después se abonan con el pago. Lo demás
 // sigue igual: RUT, honorario aprobado, datos de la factura, negocio abierto.
 //
+// ── Lo que pasa DESPUÉS de crearla (2026-10-05) ──────────────────────────────
+//
+// Medido en SOENA (V0549, FV-2-602): la acción tardó 61 s, y la marca del negocio se
+// guardó 41 s después de empezar porque esperaba al PDF (que no respondió en 20 s) y al
+// archivo. En ese hueco la factura existía en Siigo y ONE no lo sabía: un corte ahí y un
+// reintento llevaban al guardián de duplicados con la factura recién hecha como «libre».
+//
+// Ahora la marca se guarda en cuanto Siigo devuelve la factura, y lo que es consecuencia
+// (PDF y archivo, abonos de los pagos anteriores, cierre automático) corre después de
+// responder (`despuesDeResponder`). Lo que se le manda a Siigo NO cambia. Fuera de un
+// request corre en línea y el resultado es el de siempre.
+//
 // Server-only.
 // ============================================================
 
@@ -41,6 +53,8 @@ import { guardarMarcaEnMetadata } from '@/lib/negocios/marca-metadata'
 import { traerTodo } from '@/lib/supabase/paginar'
 import { cerrarNegocioSiQuedaResuelto } from '@/app/(app)/negocios/negocio-v2-actions'
 import { todayBogotaISO } from '@/lib/dates/bogota'
+import { despuesDeResponder } from '@/lib/segundo-plano'
+import { registrarActividad } from '@/lib/activity/registrar-actividad'
 
 /**
  * Emitir SÍ aguanta la pausa del límite de peticiones de Siigo (pide ~19 s).
@@ -48,6 +62,9 @@ import { todayBogotaISO } from '@/lib/dates/bogota'
  * que le digan que lo intente de nuevo y volver a pasar por las confirmaciones.
  */
 const ESPERA_429_EMISION_MS = 30_000
+
+const formatoCop = (v: number): string =>
+  new Intl.NumberFormat('es-CO', { style: 'currency', currency: 'COP', maximumFractionDigits: 0 }).format(v)
 
 /** Factura que Siigo ya tiene para ese cliente, sea del servicio que sea. */
 export interface FacturaEnSiigo {
@@ -288,14 +305,22 @@ export interface OpcionesEmision {
 export type ResultadoEmision =
   | {
       ok: true; numero: string; siigo_id: string; total: number; emitida: boolean
-      /** `false` si la factura salió pero su PDF no se pudo dejar en el negocio. */
-      archivada: boolean
+      /**
+       * `false` si la factura salió pero su PDF no se pudo dejar en el negocio.
+       * `null` cuando el PDF se archiva después de responder (`completando`).
+       */
+      archivada: boolean | null
       /**
        * Lo que pasó con los pagos que el negocio ya tenía: los abonos que salieron,
        * los que quedaron para Tesorería y los que fallaron. Vacío si la línea no
-       * abona el honorario a la factura o si no había pagos.
+       * abona el honorario a la factura o si no había pagos. `null` con `completando`.
        */
-      abonos: ResultadoAbonosFactura
+      abonos: ResultadoAbonosFactura | null
+      /**
+       * PDF, abonos y cierre corren después de responder: su resultado queda en la
+       * actividad del negocio (y en el control de recibos), no en esta respuesta.
+       */
+      completando?: boolean
     }
   | { ok: false; motivo: 'faltan_datos'; faltantes: string[] }
   | { ok: false; motivo: 'ya_facturado_en_one'; numero: string }
@@ -547,34 +572,17 @@ export async function emitirFacturaNegocio(
       },
     )
 
-    // ── 6. Archivar el PDF dentro del negocio ────────────────────────────────
-    // La factura YA existe y es irreversible: de aquí en adelante nada puede
-    // convertir la emisión en un fallo. Lo que salga mal se reporta como
-    // pendiente de archivar, no como factura no emitida.
-    let cufe: string | null = null
-    let archivoUrl: string | null = null
-    if (creada.id) {
-      const doc = await pdfDeFactura(workspaceId, creada.id)
-      cufe = doc?.cufe ?? null
-      if (doc && opciones.bloqueFacturaSlug) {
-        const nombre = `${(creada.name ?? 'factura').replace(/[^\w.-]+/g, '-')}.pdf`
-        const arch = await archivarPdfEnBloque(
-          workspaceId, negocioId, opciones.bloqueFacturaSlug, doc.pdf, nombre,
-          // El consecutivo lo devolvió Siigo: se guarda para que se vea en el
-          // bloque sin que nadie lo copie del PDF.
-          { numero_factura: creada.name ?? '' },
-        )
-        if (arch.ok) archivoUrl = arch.url ?? null
-        else console.error('[siigo] factura emitida pero SIN archivar en el negocio:', arch.error)
-      }
-    }
-
+    // ── 6. La marca, en cuanto la factura existe ─────────────────────────────
+    // La factura YA existe y es irreversible: de aquí en adelante nada puede convertir la
+    // emisión en un fallo. La marca va PRIMERO (antes del PDF y del archivo): es lo que
+    // impide re-emitir, y hasta el 2026-10-05 se guardaba después de esperar al PDF, que
+    // puede tardar 20 s en fallar. CUFE y archivo se le agregan después.
     const marca: MarcaFactura = {
       numero: creada.name ?? '(sin número)',
       siigo_id: creada.id ?? '',
       total: honorario,
-      cufe,
-      archivo_url: archivoUrl,
+      cufe: null,
+      archivo_url: null,
       emitida: opciones.emitir,
       at: new Date().toISOString(),
       por: staffNombre,
@@ -599,35 +607,169 @@ export async function emitirFacturaNegocio(
       console.error('[siigo] factura emitida pero NO marcada en el negocio:', guardada.mensaje)
     }
 
-    // ── 7. Los pagos que ya habían entrado se abonan a esta factura ─────────
-    // Solo con la marca guardada: el abono lee la factura DE la marca, y sin ella no
-    // sabría a qué cruzar. Nunca lanza (ver `abonos-factura.ts`): lo que no salga queda
-    // pendiente en el control de recibos, y la factura sigue siendo un éxito.
-    const abonos: ResultadoAbonosFactura = guardada.ok
-      ? await abonarPagosDelNegocio(workspaceId, negocioId, staffNombre)
-      : { emitidos: [], a_mano: [], fallidos: [] }
-
-    // Si el caso ya estaba ESPERANDO en su etapa de cierre, la factura que acaba de
-    // emitirse es justo lo que le faltaba. Nada de lo que pase aqui puede convertir una
-    // emision exitosa en un fallo: la factura ya existe en Siigo y es irreversible.
-    if (guardada.ok) {
-      try {
-        await cerrarNegocioSiQuedaResuelto(svc, workspaceId, negocioId, contexto.staffId ?? null)
-      } catch (e) {
-        console.error('[siigo] no se pudo evaluar el cierre automatico:', (e as Error).message)
+    // ── 7-9. Lo que es consecuencia, después de responder ────────────────────
+    const consecuencias = () => completarFacturaEmitida({
+      workspaceId,
+      negocioId,
+      staffNombre,
+      staffId: contexto.staffId ?? null,
+      bloqueFacturaSlug: opciones.bloqueFacturaSlug,
+      creada,
+      marca,
+      marcaGuardada: guardada.ok,
+    })
+    // Después de responder nadie está mirando: lo que salga mal queda en la actividad. En
+    // línea no hace falta, la acción lo pone en su propia entrada.
+    let agendado = false
+    const agenda = despuesDeResponder(`consecuencias de la factura ${marca.numero}`, async () => {
+      const c = await consecuencias()
+      if (agendado) await anotarConsecuencias(workspaceId, negocioId, contexto.staffId ?? null, marca.numero, c)
+      return c
+    })
+    agendado = agenda.agendado
+    if (agenda.agendado) {
+      return {
+        ok: true, numero: marca.numero, siigo_id: marca.siigo_id,
+        total: honorario, emitida: opciones.emitir,
+        archivada: null, abonos: null, completando: true,
       }
     }
-
+    // Fuera de un request (script, prueba): ya corrió en línea; se espera su resultado.
+    const c = await agenda.resultado
     return {
       ok: true, numero: marca.numero, siigo_id: marca.siigo_id,
       total: honorario, emitida: opciones.emitir,
-      archivada: !opciones.bloqueFacturaSlug || archivoUrl != null,
-      abonos,
+      archivada: !opciones.bloqueFacturaSlug || c.archivoUrl != null,
+      abonos: c.abonos,
     }
   } catch (e) {
     const mensaje = e instanceof SiigoError ? e.message : (e as Error).message
     return { ok: false, motivo: 'error', mensaje }
   }
+}
+
+/** Lo que dejaron las consecuencias de una emisión. */
+interface ConsecuenciasFactura {
+  archivoUrl: string | null
+  /** El bloque de la factura está declarado y el PDF NO quedó en él. */
+  sinArchivar: boolean
+  abonos: ResultadoAbonosFactura
+}
+
+/**
+ * PDF y archivo, abonos de los pagos anteriores y cierre automático de una factura que
+ * YA existe en Siigo y YA está marcada. Nunca lanza: nada de esto convierte la emisión en
+ * un fallo. Es el cuerpo que hasta el 2026-10-05 corría dentro de la acción.
+ */
+async function completarFacturaEmitida(a: {
+  workspaceId: string
+  negocioId: string
+  staffNombre: string | null
+  staffId: string | null
+  bloqueFacturaSlug: string | undefined
+  creada: { id?: string; name?: string }
+  marca: MarcaFactura
+  marcaGuardada: boolean
+}): Promise<ConsecuenciasFactura> {
+  const { workspaceId, negocioId, staffNombre, creada, marca } = a
+  const svc = createServiceClient()
+  let cufe: string | null = null
+  let archivoUrl: string | null = null
+  try {
+    // ── 7. Archivar el PDF dentro del negocio ──────────────────────────────
+    if (creada.id) {
+      const doc = await pdfDeFactura(workspaceId, creada.id)
+      cufe = doc?.cufe ?? null
+      if (doc && a.bloqueFacturaSlug) {
+        const nombre = `${(creada.name ?? 'factura').replace(/[^\w.-]+/g, '-')}.pdf`
+        const arch = await archivarPdfEnBloque(
+          workspaceId, negocioId, a.bloqueFacturaSlug, doc.pdf, nombre,
+          // El consecutivo lo devolvió Siigo: se guarda para que se vea en el
+          // bloque sin que nadie lo copie del PDF.
+          { numero_factura: creada.name ?? '' },
+        )
+        if (arch.ok) archivoUrl = arch.url ?? null
+        else console.error('[siigo] factura emitida pero SIN archivar en el negocio:', arch.error)
+      }
+    }
+    // CUFE y archivo se le agregan a la marca ya guardada (se relee: fusiona sobre lo de ahora).
+    if (a.marcaGuardada && (cufe || archivoUrl)) {
+      const r = await guardarMarcaEnMetadata(
+        svc, workspaceId, negocioId, 'siigo_factura', { ...marca, cufe, archivo_url: archivoUrl },
+      )
+      if (!r.ok) console.error('[siigo] no se pudo agregar el CUFE/archivo a la marca:', r.mensaje)
+    }
+  } catch (e) {
+    console.error('[siigo] falló el archivo de la factura emitida:', (e as Error).message)
+  }
+
+  // ── 8. Los pagos que ya habían entrado se abonan a esta factura ─────────
+  // Solo con la marca guardada: el abono lee la factura DE la marca, y sin ella no
+  // sabría a qué cruzar. Nunca lanza (ver `abonos-factura.ts`): lo que no salga queda
+  // pendiente en el control de recibos, y la factura sigue siendo un éxito.
+  const abonos: ResultadoAbonosFactura = a.marcaGuardada
+    ? await abonarPagosDelNegocio(workspaceId, negocioId, staffNombre)
+    : { emitidos: [], a_mano: [], fallidos: [] }
+
+  // ── 9. Si el caso ya estaba ESPERANDO en su etapa de cierre ──────────────
+  // La factura es justo lo que le faltaba. Nada de lo que pase aquí puede convertir una
+  // emisión exitosa en un fallo: la factura ya existe en Siigo y es irreversible.
+  if (a.marcaGuardada) {
+    try {
+      await cerrarNegocioSiQuedaResuelto(svc, workspaceId, negocioId, a.staffId)
+    } catch (e) {
+      console.error('[siigo] no se pudo evaluar el cierre automatico:', (e as Error).message)
+    }
+  }
+
+  return { archivoUrl, sinArchivar: !!a.bloqueFacturaSlug && archivoUrl == null, abonos }
+}
+
+/**
+ * Lo que dice la actividad del negocio de lo que salió DESPUÉS de responder. Sin esto, un
+ * PDF que no se archivó o un abono que no salió quedarían en silencio: la pantalla ya no
+ * está esperando para decirlo. Vacío = no se escribe nada.
+ */
+export function textoDeConsecuencias(numero: string, c: Pick<ConsecuenciasFactura, 'sinArchivar' | 'abonos'>): string {
+  const partes: string[] = []
+  if (c.sinArchivar) partes.push('el PDF no quedó cargado en el negocio')
+  const ab = textoDeAbonos(c.abonos)
+  if (ab) partes.push(ab)
+  return partes.length > 0 ? `Factura ${numero}: ${partes.join(' · ')}`.slice(0, 280) : ''
+}
+
+/** Lo que el timeline dice de los abonos que salieron con la factura. Vacío si no hubo. */
+export function textoDeAbonos(a: { emitidos: Array<{ numero: string; valor: number }>; a_mano: unknown[]; fallidos: unknown[] }): string {
+  const partes: string[] = []
+  if (a.emitidos.length > 0) {
+    const total = a.emitidos.reduce((s, x) => s + x.valor, 0)
+    partes.push(`abonos de pagos anteriores: ${a.emitidos.map(x => x.numero).join(', ')} (${formatoCop(total)})`)
+  }
+  if (a.a_mano.length > 0) partes.push(`${a.a_mano.length} abono(s) quedan para Tesorería`)
+  if (a.fallidos.length > 0) partes.push(`${a.fallidos.length} abono(s) sin emitir: ver control de recibos`)
+  return partes.join(' · ')
+}
+
+async function anotarConsecuencias(
+  workspaceId: string,
+  negocioId: string,
+  staffId: string | null,
+  numero: string,
+  c: ConsecuenciasFactura,
+): Promise<void> {
+  const contenido = textoDeConsecuencias(numero, c)
+  if (!contenido || !staffId) return
+  // `tipo` DEBE estar en el CHECK de activity_log o el insert falla en silencio.
+  // `autor_id` es FK a staff(id), NO a profiles.
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  await registrarActividad((createServiceClient() as any), {
+    workspace_id: workspaceId,
+    entidad_tipo: 'negocio',
+    entidad_id: negocioId,
+    tipo: 'sistema',
+    autor_id: staffId,
+    contenido,
+  }, 'completarFacturaEmitida')
 }
 
 // ── Adoptar una factura que YA existe en Siigo ───────────────────────────────

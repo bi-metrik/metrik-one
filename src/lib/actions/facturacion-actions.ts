@@ -41,6 +41,7 @@ import {
   adoptarFacturaDeSiigo,
   emitirFacturaNegocio,
   facturasAdoptablesDelNegocio,
+  textoDeAbonos,
   type FacturaAdoptable,
   type FacturaEnSiigo,
   type FacturaHermana,
@@ -283,10 +284,6 @@ async function ctxFinanciero(): Promise<
 const TOTALES_VACIOS: ColaFacturacion['totales'] = {
   listos: 0, incompletos: 0, ya_facturados: 0, descartados: 0, valor_listo: 0,
 }
-
-/** Pesos sin decimales para los mensajes de este archivo. No se exporta (`'use server'`). */
-const fmtCOP = (v: number): string =>
-  new Intl.NumberFormat('es-CO', { style: 'currency', currency: 'COP', maximumFractionDigits: 0 }).format(v)
 
 export async function getColaFacturacion(): Promise<{ data: ColaFacturacion | null; error?: string }> {
   const ctx = await ctxFinanciero()
@@ -804,6 +801,11 @@ export interface ResultadoEmitir {
    * expediente queda incompleto y en silencio nadie lo notaría.
    */
   archivada?: boolean
+  /**
+   * La factura salió y quedó marcada; el PDF, los abonos y el cierre corren después de
+   * responder y lo que pase con ellos queda en la actividad del negocio.
+   */
+  completando?: boolean
   error?: string
   /**
    * Facturas del cliente que **ningún negocio reclama**. La pantalla debe
@@ -985,39 +987,37 @@ export async function emitirFacturaDeNegocio(
       entidad_id: negocioId,
       tipo: 'sistema',
       autor_id: staffId,
-      // Los abonos van en la MISMA entrada que la emisión: salieron en el mismo acto.
+      // Los abonos van en la MISMA entrada que la emisión cuando salieron en el mismo acto.
+      // Con `completando` salen después y los anota su propia entrada.
       // `activity_log.contenido` tiene CHECK de 280 caracteres: se recorta.
       contenido: ((r.emitida
         ? `Factura ${r.numero} emitida en Siigo`
         : `Factura ${r.numero} creada en Siigo SIN radicar ante la DIAN`)
-        + textoDeAbonos(r.abonos)).slice(0, 280),
+        + (r.abonos ? textoDeAbonosConPunto(r.abonos) : '')).slice(0, 280),
     }, 'emitirFacturaDeNegocio')
   }
 
   revalidatePath('/conciliacion')
   return {
-    ok: true, numero: r.numero, borrador: !r.emitida, archivada: r.archivada,
-    abonos: {
-      emitidos: r.abonos.emitidos.map(a => a.numero),
-      a_mano: r.abonos.a_mano.length,
-      fallidos: r.abonos.fallidos.length,
-    },
+    ok: true, numero: r.numero, borrador: !r.emitida,
+    ...(r.completando ? { completando: true } : {}),
+    ...(r.archivada != null ? { archivada: r.archivada } : {}),
+    ...(r.abonos
+      ? {
+          abonos: {
+            emitidos: r.abonos.emitidos.map(a => a.numero),
+            a_mano: r.abonos.a_mano.length,
+            fallidos: r.abonos.fallidos.length,
+          },
+        }
+      : {}),
   }
 }
 
-/**
- * Lo que el timeline dice de los abonos que salieron con la factura. Vacío si no hubo.
- * No se exporta: este archivo es `'use server'`.
- */
-function textoDeAbonos(a: { emitidos: Array<{ numero: string; valor: number }>; a_mano: unknown[]; fallidos: unknown[] }): string {
-  const partes: string[] = []
-  if (a.emitidos.length > 0) {
-    const total = a.emitidos.reduce((s, x) => s + x.valor, 0)
-    partes.push(`abonos de pagos anteriores: ${a.emitidos.map(x => x.numero).join(', ')} (${fmtCOP(total)})`)
-  }
-  if (a.a_mano.length > 0) partes.push(`${a.a_mano.length} abono(s) quedan para Tesorería`)
-  if (a.fallidos.length > 0) partes.push(`${a.fallidos.length} abono(s) sin emitir: ver control de recibos`)
-  return partes.length > 0 ? ` · ${partes.join(' · ')}` : ''
+/** Los abonos, en la misma entrada que la emisión. Vacío si no hubo. */
+function textoDeAbonosConPunto(a: Parameters<typeof textoDeAbonos>[0]): string {
+  const t = textoDeAbonos(a)
+  return t ? ` · ${t}` : ''
 }
 
 // ── Adoptar una factura que YA existe en Siigo ───────────────────────────────
