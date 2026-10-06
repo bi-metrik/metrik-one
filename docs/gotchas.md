@@ -262,8 +262,11 @@
   revisar si tiene copias fue lo que dejó a SOENA subir la factura y recibir el rechazo al final.
 - **Chromium repite UNA vez un POST cuyo socket reusado se cierra sin responder, con o sin service
   worker.** Medido el 2026-10-06 (`scripts/sw-piloto.e2e.mjs`, servidor local HTTP/1.1 con keep-alive):
-  una server action cortada así llegó DOS veces al servidor desde una pestaña sin SW. Contra Vercel
-  (HTTP/2) no se midió. Una action «que no se confirmó» puede haberse ejecutado dos veces aunque nadie
+  una server action cortada así llegó DOS veces al servidor desde una pestaña sin SW. **Contra Vercel
+  también** (2026-10-06, `scripts/post-cortado-vercel.e2e.mjs`, 4 de 4): con la respuesta perdida,
+  Chromium abre otra conexión y REENVÍA el POST, y la página recibe la respuesta de la segunda como si
+  nada. Conexión que se cae: 0,7 s. Señal que se pierde sin cerrar: 10 s si la conexión estaba en reposo
+  (falla el PING de HTTP/2) y 75 s si no. HTTP/3 no se probó. Una action «que no se confirmó» puede haberse ejecutado dos veces aunque nadie
   reintentó: la idempotencia del lado del servidor no es opcional.
 - **Service worker del piloto de red (`public/sw.js`, solo soena).** No guarda respuestas; solo toca GET
   de navegación (reintenta y, sin red, «Reconectando») y RSC sin prefetch (lee la respuesta ENTERA para
