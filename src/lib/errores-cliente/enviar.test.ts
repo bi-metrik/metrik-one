@@ -158,4 +158,14 @@ describe('reportarErrorCliente con cola de reenvio', () => {
     expect(m.llamadas).toHaveLength(1)
     expect(m.llamadas[0].cuerpo).toMatchObject({ message: 'sin almacen', origen: 'global' })
   })
+
+  it('sin `navigator` (Node 20, el de CI) el fallo de la bandeja sale igual, sin userAgent', async () => {
+    const m = montar()
+    vi.stubGlobal('navigator', undefined)
+    const { reportarFalloDeBandeja } = await import('./enviar')
+    reportarFalloDeBandeja({ ruta: 'aceptar-captura', codigo: 'RED', cotizacionId: 'c1', intentos: 3 })
+    expect(m.llamadas).toHaveLength(1)
+    expect(m.llamadas[0].cuerpo).toMatchObject({ origen: 'bandeja', message: 'Bandeja: aceptar-captura RED' })
+    expect(m.llamadas[0].cuerpo).not.toHaveProperty('userAgent')
+  })
 })

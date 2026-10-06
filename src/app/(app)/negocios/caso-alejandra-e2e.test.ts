@@ -554,10 +554,13 @@ describe.runIf(!MODO_GEMINI || existsSync(DIR_CAPTURAS))('caso Alejandra (N1 26 
       tipo: b.tipo, lecturaJson: b.lecturaJson, firma: b.firma, pistas: b.pistas, decision: 'auto',
       destinoId: null, imagen: c.dataUrl, correcciones: null, idAceptacion: idDeAceptacion(c),
     }, fetchLocal, { dormir: async () => {}, reportar: reportarFalloDeBandeja })
-    await new Promise(r => setTimeout(r, 0))
-    const linea = lineasDelLog.find(l => l.startsWith('[error-cliente]'))
-    expect(linea).toBeDefined()
-    const json = JSON.parse(linea!.slice('[error-cliente] '.length))
+    // El reporte sale sin esperarse (`void fetch`): se espera a que la línea exista, no un tick.
+    const linea = await vi.waitFor(() => {
+      const l = lineasDelLog.find(x => x.startsWith('[error-cliente]'))
+      if (!l) throw new Error('aún no llega la línea [error-cliente]')
+      return l
+    })
+    const json = JSON.parse(linea.slice('[error-cliente] '.length))
     expect(json).toMatchObject({
       origen: 'bandeja',
       message: 'Bandeja: aceptar-captura RED',

@@ -137,7 +137,9 @@ function enviar(cuerpoBase: Record<string, unknown>, clave: string): void {
     // inlina `deploymentId` (= VERCEL_DEPLOYMENT_ID) como NEXT_DEPLOYMENT_ID en el
     // bundle del navegador. Es la version del bundle que fallo, no la del servidor.
     version: String(process.env.NEXT_DEPLOYMENT_ID || 'dev'),
-    userAgent: navigator.userAgent,
+    // Sin `navigator` (Node 20, el de CI) leer `.userAgent` lanzaba, el `catch` del llamador
+    // se lo tragaba y el reporte no salía: un dato accesorio no puede tumbar la línea.
+    userAgent: typeof navigator === 'undefined' ? undefined : navigator.userAgent,
   }
   const almacen = localStorageSeguro()
   encolar(almacen, { id, creado: Date.now(), reenvios: 0, cuerpo }, Date.now())
