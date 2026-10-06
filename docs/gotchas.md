@@ -239,3 +239,12 @@
   adopta una vista cuyos parámetros no coinciden con la URL (`vistaDeOtraUrl` en `negocios-client.tsx`)
   y relee con los filtros puestos (2026-10-05). Un server component que dependa de `searchParams`
   escritos así tiene el mismo problema.
+- **La lectura de un documento termina DESPUÉS de responder: no la esperes en la acción.** (2026-10-05,
+  fix/cargue-segundo-plano). `procesarDocumento`/`reprocesarDocumento` devuelven `leyendo: true` y el
+  resultado queda en `data._lectura` (`src/lib/documentos/lectura-en-curso.ts`). Quien escriba `data` de
+  un bloque documental debe conservar `_lectura` (spread de la fila, como hoy) y no borrar la marca de
+  otro. Mientras lee, el bloque está `pendiente` aunque tuviera documento: no es un dato perdido, es la
+  marca. Todo trabajo en `after()` sigue sujeto al `maxDuration` de la página que llamó (60 s en la
+  ficha) y no tiene a quién entregarle un `revalidatePath`: la pantalla refresca sola. Dentro de
+  `after()` lanzado desde una server action `cookies()` SÍ funciona (Next lo permite si el padre es
+  `action`); desde un render, no.

@@ -190,6 +190,7 @@ import { bloqueoCarpetaLocal, type BloqueoGate } from '@/lib/negocios/gate-carpe
 import { exigeCarpetaLocal, normalizarCarpetaLocal } from '@/lib/negocios/carpeta-local'
 import { guardarCarpetaLocal, resolverPermisoCarpetaLocal } from '@/lib/negocios/carpeta-local-servidor'
 import { costosEjecutadosPorNegocio } from '@/lib/negocios/costos-ejecutados'
+import { documentosLeyendo, mensajeDocumentoLeyendo } from '@/lib/negocios/documentos-leyendo'
 
 // ── Tipos inline para el nuevo schema de negocios ─────────────────────────────
 // Las tablas nuevas (negocios, lineas_negocio, etapas_negocio, bloque_configs,
@@ -3182,6 +3183,21 @@ export async function cambiarEtapaNegocioConGate(
 
   const gAvance = await guardAvanzarStage(negocioId, (negocio.stage_actual ?? 'venta') as Stage, areasQueAvanzan)
   if (!gAvance.ok) return { error: gAvance.error ?? 'Sin permiso' }
+
+  // Un documento que se está leyendo (en segundo plano, ver `lectura-en-curso`) frena el
+  // avance, también con override: los cruces y gates todavía ven el documento anterior.
+  // Dura lo que tarda la lectura (segundos); una lectura vencida ya no frena.
+  const leyendo = await documentosLeyendo(supabase, negocioId)
+  if (leyendo.length > 0) {
+    return {
+      error: 'gate_bloqueado',
+      bloquesPendientes: leyendo.map(nombre => ({
+        nombre: mensajeDocumentoLeyendo(nombre),
+        es_gate: true,
+        omitible: false,
+      })),
+    }
+  }
 
   // resolvedEtapaId puede cambiar si routing auto-corrige el destino
   let resolvedEtapaId = nuevaEtapaId

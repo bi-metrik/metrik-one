@@ -53,6 +53,8 @@ import {
 } from '@/lib/almacenamiento/referencia'
 import { descargarDeOne } from '@/lib/almacenamiento/one'
 import { archivoDriveOperable } from '@/lib/almacenamiento/drive-del-workspace'
+import { leerMarca, nuevoToken, type MarcaLectura } from '@/lib/documentos/lectura-en-curso'
+import { despuesDeResponder } from '@/lib/segundo-plano'
 
 const BUCKET = BUCKET_DOCUMENTOS_ONE
 
@@ -424,6 +426,139 @@ async function consolidarDocumentoExterno(a: {
   return { ok: true, buffer: guardado.buffer, referencia: guardado.referencia }
 }
 
+// ── La marca de lectura en curso (`data._lectura`) ───────────────────────────
+//
+// El porqué y las reglas viven en `@/lib/documentos/lectura-en-curso`. Aquí solo el IO.
+// Todas escriben con el cliente de SESIÓN: el trigger `avisar_documento_cargado` exige
+// `auth.uid()` para avisarle al cliente, y la lectura en segundo plano sigue siendo de la
+// persona que subió el archivo.
+
+const LECTURA_REEMPLAZADA = 'Otra carga reemplazó esta lectura'
+
+type ResultadoProcesar = {
+  success: boolean
+  /**
+   * La lectura quedó corriendo en segundo plano: el resultado llega por
+   * `GET /api/negocios/<negocioId>/lectura/<lectura.bloque_id>`.
+   */
+  leyendo?: boolean
+  /** `bloque_id` es la fila que se escribe (la canónica, si la casilla es compartida). */
+  lectura?: { bloque_id: string; token: string }
+  drive_url?: string
+  campos?: Record<string, CampoResultado>
+  extraction_status?: 'ok' | 'failed' | 'no_key'
+  extraction_error?: string
+  /**
+   * Presente SOLO cuando el bloque se rechazó porque el archivo no es el documento que
+   * espera. La pantalla lo pinta para que el operador vea QUÉ llegó, no solo que falló.
+   */
+  documento_rechazado?: DocumentoRechazado
+  error?: string
+}
+
+async function dataActual(supabase: unknown, bloqueId: string): Promise<Record<string, unknown>> {
+  const { data } = await db(supabase)
+    .from('negocio_bloques')
+    .select('data')
+    .eq('id', bloqueId)
+    .maybeSingle()
+  return ((data as { data?: Record<string, unknown> | null } | null)?.data ?? {}) as Record<string, unknown>
+}
+
+/**
+ * Deja la marca «leyendo» y el bloque `pendiente`. Si ya había una lectura en curso, esta
+ * la reemplaza (gana el último) y hereda su `estado_previo`: el `pendiente` de ahora lo puso
+ * la marca anterior, no es el estado real del bloque.
+ */
+async function marcarLeyendo(
+  supabase: unknown,
+  bloqueId: string,
+  base: Pick<MarcaLectura, 'tipo' | 'file_name' | 'storage_path'>,
+): Promise<{ ok: true; marca: MarcaLectura } | { ok: false; error: string }> {
+  const { data: fila } = await db(supabase)
+    .from('negocio_bloques')
+    .select('data, estado')
+    .eq('id', bloqueId)
+    .maybeSingle()
+  if (!fila) return { ok: false, error: 'Bloque no encontrado' }
+  const data = ((fila as { data?: Record<string, unknown> | null }).data ?? {}) as Record<string, unknown>
+  const estado = (fila as { estado?: string | null }).estado === 'completo' ? 'completo' : 'pendiente'
+  const previa = leerMarca(data)
+  const marca: MarcaLectura = {
+    ...base,
+    token: nuevoToken(),
+    estado: 'leyendo',
+    iniciada_at: new Date().toISOString(),
+    estado_previo: previa?.estado === 'leyendo' ? (previa.estado_previo ?? estado) : estado,
+  }
+  const { error } = await db(supabase)
+    .from('negocio_bloques')
+    .update({ data: { ...data, _lectura: marca }, estado: 'pendiente', updated_at: new Date().toISOString() })
+    .eq('id', bloqueId)
+  if (error) return { ok: false, error: 'No se pudo empezar a leer el documento. Intenta de nuevo.' }
+  return { ok: true, marca }
+}
+
+async function esMiLectura(supabase: unknown, bloqueId: string, token: string): Promise<boolean> {
+  return leerMarca(await dataActual(supabase, bloqueId))?.token === token
+}
+
+/**
+ * Update condicional al token de la marca (compare-and-set en la base). `false` si la fila
+ * ya no tiene ESTA lectura: otra la reemplazó entre que se leyó y se escribe.
+ */
+async function escribirSiEsMia(
+  supabase: unknown,
+  bloqueId: string,
+  token: string,
+  cambios: Record<string, unknown>,
+): Promise<boolean> {
+  const { data, error } = await db(supabase)
+    .from('negocio_bloques')
+    .update(cambios)
+    .eq('id', bloqueId)
+    .eq('data->_lectura->>token', token)
+    .select('id')
+  if (error) throw new Error(error.message ?? String(error))
+  return Array.isArray(data) && data.length > 0
+}
+
+/**
+ * Una lectura que no prospera: queda escrita en la marca (la tarjeta la muestra con
+ * «Reintentar») y el bloque vuelve al estado que tenía. Nunca lanza: es el camino de error.
+ */
+async function cerrarLectura(
+  supabase: unknown,
+  bloqueId: string,
+  marca: MarcaLectura,
+  cambios: Pick<MarcaLectura, 'estado' | 'error' | 'documento_rechazado'>,
+): Promise<void> {
+  try {
+    const data = await dataActual(supabase, bloqueId)
+    if (leerMarca(data)?.token !== marca.token) return
+    await escribirSiEsMia(supabase, bloqueId, marca.token, {
+      data: { ...data, _lectura: { ...marca, ...cambios, terminada_at: new Date().toISOString() } },
+      estado: marca.estado_previo ?? 'pendiente',
+      updated_at: new Date().toISOString(),
+    })
+  } catch (e) {
+    console.error('[documento] no se pudo guardar el error de la lectura:', e instanceof Error ? e.message : e)
+  }
+}
+
+/**
+ * `revalidatePath` en segundo plano no tiene a quién entregarle el render (la respuesta ya
+ * salió) y Next puede rechazarlo ahí: la tarjeta refresca la ficha cuando ve la lectura
+ * terminada. Se intenta igual para el camino en línea.
+ */
+function revalidarFicha(negocioId: string) {
+  try {
+    revalidatePath(`/negocios/${negocioId}`)
+  } catch {
+    // Fuera del request: la tarjeta refresca.
+  }
+}
+
 // ── 1. Procesar documento ya subido a Storage ─────────────────────────────────
 
 /**
@@ -438,6 +573,10 @@ async function consolidarDocumentoExterno(a: {
  *   · el id del archivo anterior de Drive, que se borraba con las credenciales del
  *     workspace (o con las globales de MeTRIK, que guardan archivos de varios clientes).
  *     Ya no es un parámetro: se lee de la fila que se va a reemplazar.
+ *
+ * Desde el 2026-10-05 la acción solo VALIDA y responde (`leyendo: true`); la lectura corre
+ * después de responder (`leerCarga`) y su resultado queda en `data._lectura`. Fuera de un
+ * request (pruebas, scripts) corre en línea y devuelve el resultado completo, como antes.
  */
 export async function procesarDocumento(
   negocioBloqueId: string,
@@ -452,19 +591,7 @@ export async function procesarDocumento(
    * en el mismo acto queda como UNA corrección y no como dos.
    */
   correccion?: { causa?: string; sesion_id?: string },
-): Promise<{
-  success: boolean
-  drive_url?: string
-  campos?: Record<string, CampoResultado>
-  extraction_status?: 'ok' | 'failed' | 'no_key'
-  extraction_error?: string
-  /**
-   * Presente SOLO cuando el bloque se rechazó porque el archivo no es el documento que
-   * espera. La pantalla lo pinta para que el operador vea QUÉ llegó, no solo que falló.
-   */
-  documento_rechazado?: DocumentoRechazado
-  error?: string
-}> {
+): Promise<ResultadoProcesar> {
   // Una sola sesión por guardado: en una server action el `cache()` de React no memoiza.
   return enPeticionDeRuta(() => procesarDocumentoSinMemo(negocioBloqueId, negocioId, storagePath, fileName, correccion))
 }
@@ -482,19 +609,7 @@ async function procesarDocumentoSinMemo(
    * en el mismo acto queda como UNA corrección y no como dos.
    */
   correccion?: { causa?: string; sesion_id?: string },
-): Promise<{
-  success: boolean
-  drive_url?: string
-  campos?: Record<string, CampoResultado>
-  extraction_status?: 'ok' | 'failed' | 'no_key'
-  extraction_error?: string
-  /**
-   * Presente SOLO cuando el bloque se rechazó porque el archivo no es el documento que
-   * espera. La pantalla lo pinta para que el operador vea QUÉ llegó, no solo que falló.
-   */
-  documento_rechazado?: DocumentoRechazado
-  error?: string
-}> {
+): Promise<ResultadoProcesar> {
   const { supabase, workspaceId, userId, staffId, error } = await getWorkspace()
   if (error || !workspaceId) return { success: false, error: 'No autenticado' }
 
@@ -532,9 +647,87 @@ async function procesarDocumentoSinMemo(
     }
   }
 
+  // ── La lectura corre DESPUÉS de responder (ver `@/lib/documentos/lectura-en-curso`) ──
+  // Hasta aquí todo es validar: rápido y sin tocar nada. La marca «leyendo» deja el bloque
+  // pendiente (los gates no lo cuentan) y la tarjeta pregunta por el resultado con un GET.
+  const marcada = await marcarLeyendo(supabase, bloqueId, {
+    tipo: 'carga',
+    file_name: fileName,
+    storage_path: storagePath,
+  })
+  if (!marcada.ok) return { success: false, error: marcada.error }
+
+  const ctx: ContextoCarga = {
+    supabase,
+    workspaceId,
+    userId: userId ?? undefined,
+    staffId: staffId ?? null,
+    negocioId,
+    negocioBloqueId,
+    bloqueId,
+    storagePath,
+    fileName,
+    correccion,
+    reemplazoHaciaAtras,
+    marca: marcada.marca,
+  }
+  const agenda = despuesDeResponder(`lectura del bloque ${bloqueId}`, () => leerCarga(ctx))
+  if (agenda.agendado) {
+    return { success: true, leyendo: true, lectura: { bloque_id: bloqueId, token: marcada.marca.token } }
+  }
+  // Fuera de un request (script, prueba): en línea, con el resultado de siempre.
+  return agenda.resultado
+}
+
+type ContextoCarga = {
+  supabase: unknown
+  workspaceId: string
+  userId: string | undefined
+  staffId: string | null
+  negocioId: string
+  negocioBloqueId: string
+  bloqueId: string
+  storagePath: string
+  fileName: string
+  correccion: { causa?: string; sesion_id?: string } | undefined
+  reemplazoHaciaAtras: Awaited<ReturnType<typeof esReemplazoHaciaAtras>>
+  marca: MarcaLectura
+}
+
+/**
+ * La lectura de un archivo nuevo: identificar, Drive, extraer, cruces, guardar. Es el cuerpo
+ * que hasta el 2026-10-05 corría dentro de `procesarDocumento`, con tres cambios:
+ *   · cada salida sin éxito queda PERSISTIDA en la marca (la tarjeta ya no está esperando
+ *     la respuesta) y repone el estado del bloque;
+ *   · antes de lo destructivo comprueba que la marca sigue siendo suya (gana el último);
+ *   · la escritura final es condicional al token.
+ */
+async function leerCarga(ctx: ContextoCarga): Promise<ResultadoProcesar> {
+  const {
+    supabase, workspaceId, userId, staffId, negocioId, negocioBloqueId, bloqueId,
+    storagePath, fileName, correccion, reemplazoHaciaAtras, marca,
+  } = ctx
   const admin = createServiceClient()
   const mimeType = mimeTypeFromName(fileName)
   const ext = fileName.split('.').pop()?.toLowerCase() || 'pdf'
+
+  // Toda salida sin éxito pasa por aquí: queda en la marca, el bloque vuelve a su estado.
+  const fallar = async (
+    error: string,
+    documentoRechazado?: DocumentoRechazado,
+  ): Promise<ResultadoProcesar> => {
+    await cerrarLectura(supabase, bloqueId, marca, {
+      estado: documentoRechazado ? 'rechazado' : 'error',
+      error,
+      ...(documentoRechazado ? { documento_rechazado: documentoRechazado } : {}),
+    })
+    return { success: false, error, ...(documentoRechazado ? { documento_rechazado: documentoRechazado } : {}) }
+  }
+  // Otra carga (o un reintento) tomó el bloque: esta se retira sin tocar la fila.
+  const retirada = (): ResultadoProcesar => {
+    console.warn(`[documento] lectura ${marca.token} de ${bloqueId} reemplazada por una más nueva`)
+    return { success: false, error: LECTURA_REEMPLAZADA }
+  }
 
   try {
     // ── 2. Leer config del bloque (label, campos_extraccion) ────────────
@@ -594,18 +787,17 @@ async function procesarDocumentoSinMemo(
         `[documento] rechazado en ${bloqueId}: espera ${expectativa.tipos.join('|')}, ` +
         `llegó ${reconocimiento.tipo} (${reconocimiento.confianza})`,
       )
-      return {
-        success: false,
-        error: mensajeDocumentoRechazado(expectativa, reconocimiento),
-        documento_rechazado: {
-          esperado: etiquetaEsperado(expectativa),
-          visto: etiquetaTipo(reconocimiento.tipo),
-          visto_tipo: reconocimiento.tipo,
-          confianza: reconocimiento.confianza,
-          evidencia: reconocimiento.evidencia,
-        },
-      }
+      return fallar(mensajeDocumentoRechazado(expectativa, reconocimiento), {
+        esperado: etiquetaEsperado(expectativa),
+        visto: etiquetaTipo(reconocimiento.tipo),
+        visto_tipo: reconocimiento.tipo,
+        confianza: reconocimiento.confianza,
+        evidencia: reconocimiento.evidencia,
+      })
     }
+
+    // ── Lo que sigue es destructivo: solo si esta lectura sigue siendo la última ──
+    if (!(await esMiLectura(supabase, bloqueId, marca.token))) return retirada()
 
     let buffer: Buffer
     let driveUrl: string | null = null
@@ -626,7 +818,7 @@ async function procesarDocumentoSinMemo(
         mime: mimeType,
         anterior: (bloqueData?.data as Record<string, unknown> | null)?.drive_url,
       })
-      if (!externo.ok) return { success: false, error: externo.error }
+      if (!externo.ok) return fallar(externo.error)
       buffer = externo.buffer
       driveUrl = externo.referencia
     } else {
@@ -642,7 +834,7 @@ async function procesarDocumentoSinMemo(
 
         if (dlError || !fileData) {
           console.error('[documento] Step 1 FAILED:', dlError?.message)
-          return { success: false, error: `Error leyendo archivo: ${dlError?.message ?? 'no data'}` }
+          return fallar(`No se pudo leer el archivo subido (${dlError?.message ?? 'sin datos'}). Vuelve a cargarlo.`)
         }
 
         const arrayBuf = await fileData.arrayBuffer()
@@ -676,9 +868,7 @@ async function procesarDocumentoSinMemo(
           .eq('workspace_id', workspaceId)
           .single()
 
-        if (!negocio) {
-          return { success: false, error: 'Negocio no encontrado en este workspace' }
-        }
+        if (!negocio) return fallar('Negocio no encontrado en este workspace')
 
         const carpetaUrl = negocio.carpeta_url as string | null
         if (carpetaUrl) {
@@ -741,7 +931,9 @@ async function procesarDocumentoSinMemo(
     }
 
     // ── 8. Guardar en negocio_bloques.data ──────────────────────────────
-    const currentData = (bloqueData?.data as Record<string, unknown>) ?? {}
+    // Se parte de la fila FRESCA: la lectura tardó segundos y otra mano pudo escribir en
+    // `data` mientras tanto (una devolución, un campo). Lo de esta lectura se pone encima.
+    const currentData = await dataActual(supabase, bloqueId)
     const newData: Record<string, unknown> = {
       ...currentData,
       // Qué documento dijo el lector que es este archivo. Se guarda también cuando el
@@ -824,29 +1016,37 @@ async function procesarDocumentoSinMemo(
       isComplete = false
     }
 
+    newData._lectura = { ...marca, estado: 'lista', terminada_at: new Date().toISOString() } satisfies MarcaLectura
+
+    // Escritura condicional al token: si otra lectura tomó el bloque mientras esta leía,
+    // no se pisa lo suyo. El archivo que esta subió a Drive queda huérfano: se borra.
+    let escrita: boolean
     if (isComplete) {
       // El documento bueno ya llego: si este bloque estaba devuelto, la devolucion se
       // cierra AQUI y la marca sale en el MISMO update. Escribirlo aparte dejaria una
       // ventana en la que el bloque ya esta completo y la pantalla sigue pidiendo que
       // lo corrijan. Ver `cerrar-devolucion.ts`.
       const dataFinal = await cerrarDevolucionAlCompletar(bloqueId, newData, staffId ?? null)
-      await db(supabase)
-        .from('negocio_bloques')
-        .update({
-          data: dataFinal,
-          estado: 'completo',
-          completado_at: new Date().toISOString(),
-          updated_at: new Date().toISOString(),
-        })
-        .eq('id', bloqueId)
+      escrita = await escribirSiEsMia(supabase, bloqueId, marca.token, {
+        data: dataFinal,
+        estado: 'completo',
+        completado_at: new Date().toISOString(),
+        updated_at: new Date().toISOString(),
+      })
     } else {
-      await db(supabase)
-        .from('negocio_bloques')
-        .update({
-          data: newData,
-          updated_at: new Date().toISOString(),
-        })
-        .eq('id', bloqueId)
+      // Incompleto: el estado vuelve al de antes de la lectura, que es lo que hacía este
+      // camino cuando no tocaba el estado (la marca lo había puesto en pendiente).
+      escrita = await escribirSiEsMia(supabase, bloqueId, marca.token, {
+        data: newData,
+        estado: marca.estado_previo ?? 'pendiente',
+        updated_at: new Date().toISOString(),
+      })
+    }
+    if (!escrita) {
+      if (driveFileId) {
+        try { await deleteDriveFile(driveFileId, workspaceId) } catch { /* huérfano, no rompe nada */ }
+      }
+      return retirada()
     }
 
 
@@ -882,7 +1082,7 @@ async function procesarDocumentoSinMemo(
     // Un fallo evaluando el cierre NO puede tumbar el guardado del documento.
   }
 
-    revalidatePath(`/negocios/${negocioId}`)
+    revalidarFicha(negocioId)
     console.log('[documento] DONE — all steps completed')
 
     return {
@@ -894,7 +1094,7 @@ async function procesarDocumentoSinMemo(
     }
   } catch (err) {
     console.error('[documento-actions] Error:', err)
-    return { success: false, error: `Error: ${String(err).slice(0, 200)}` }
+    return fallar(`Error: ${String(err).slice(0, 200)}`)
   }
 }
 
@@ -908,13 +1108,7 @@ async function procesarDocumentoSinMemo(
 export async function reprocesarDocumento(
   negocioBloqueId: string,
   negocioId: string,
-): Promise<{
-  success: boolean
-  campos?: Record<string, CampoResultado>
-  /** Ver `procesarDocumento`: presente solo cuando el archivo no es el documento esperado. */
-  documento_rechazado?: DocumentoRechazado
-  error?: string
-}> {
+): Promise<ResultadoReprocesar> {
   // Una sola sesión por guardado: en una server action el `cache()` de React no memoiza.
   return enPeticionDeRuta(() => reprocesarDocumentoSinMemo(negocioBloqueId, negocioId))
 }
@@ -922,13 +1116,7 @@ export async function reprocesarDocumento(
 async function reprocesarDocumentoSinMemo(
   negocioBloqueId: string,
   negocioId: string,
-): Promise<{
-  success: boolean
-  campos?: Record<string, CampoResultado>
-  /** Ver `procesarDocumento`: presente solo cuando el archivo no es el documento esperado. */
-  documento_rechazado?: DocumentoRechazado
-  error?: string
-}> {
+): Promise<ResultadoReprocesar> {
   const { supabase, workspaceId, error } = await getWorkspace()
   if (error || !workspaceId) return { success: false, error: 'No autenticado' }
 
@@ -995,19 +1183,94 @@ async function reprocesarDocumentoSinMemo(
     const apiKey = getServerKey('gemini')
     if (!apiKey) return { success: false, error: 'API key de Gemini no configurada' }
 
+    // La referencia vive en `data`, que tiene más de un escritor. Se lee con el cliente
+    // de servicio, así que la ruta tiene que ser de ESTE workspace antes de bajar nada.
+    if (referenciaOne && duenoDeReferencia(referenciaOne)?.workspaceId !== workspaceId.toLowerCase()) {
+      return { success: false, error: 'Archivo no encontrado' }
+    }
+
+    // ── Hasta aquí, validar. La lectura corre después de responder (ver `procesarDocumento`) ──
+    const marcada = await marcarLeyendo(supabase, bloqueId, { tipo: 'reproceso', file_name: fileName })
+    if (!marcada.ok) return { success: false, error: marcada.error }
+
+    const ctx: ContextoReproceso = {
+      supabase,
+      workspaceId,
+      negocioId,
+      bloqueId,
+      negocioDelBloque: (bloqueData.negocio_id as string | undefined) ?? null,
+      fileName,
+      driveFileId,
+      referenciaOne,
+      referenciaExterna,
+      configExtra,
+      camposExtraccion,
+      apiKey,
+      marca: marcada.marca,
+    }
+    const agenda = despuesDeResponder(`reproceso del bloque ${bloqueId}`, () => leerReproceso(ctx))
+    if (agenda.agendado) {
+      return { success: true, leyendo: true, lectura: { bloque_id: bloqueId, token: marcada.marca.token } }
+    }
+    return agenda.resultado
+  } catch (err) {
+    console.error('[reprocesar-documento] Error:', err)
+    return { success: false, error: `Error: ${String(err).slice(0, 200)}` }
+  }
+}
+
+type ResultadoReprocesar = {
+  success: boolean
+  /** Ver `procesarDocumento`: la lectura quedó corriendo en segundo plano. */
+  leyendo?: boolean
+  lectura?: { bloque_id: string; token: string }
+  campos?: Record<string, CampoResultado>
+  /** Ver `procesarDocumento`: presente solo cuando el archivo no es el documento esperado. */
+  documento_rechazado?: DocumentoRechazado
+  error?: string
+}
+
+type ContextoReproceso = {
+  supabase: unknown
+  workspaceId: string
+  negocioId: string
+  bloqueId: string
+  negocioDelBloque: string | null
+  fileName: string
+  driveFileId: string | undefined
+  referenciaOne: string | null
+  referenciaExterna: string | null
+  configExtra: Record<string, unknown>
+  camposExtraccion: CampoExtraccion[]
+  apiKey: string
+  marca: MarcaLectura
+}
+
+/** La relectura del archivo ya guardado. Mismas reglas que `leerCarga`. */
+async function leerReproceso(ctx: ContextoReproceso): Promise<ResultadoReprocesar> {
+  const {
+    supabase, workspaceId, negocioId, bloqueId, negocioDelBloque, fileName, driveFileId,
+    referenciaOne, referenciaExterna, configExtra, camposExtraccion, apiKey, marca,
+  } = ctx
+
+  const fallar = async (error: string, documentoRechazado?: DocumentoRechazado): Promise<ResultadoReprocesar> => {
+    await cerrarLectura(supabase, bloqueId, marca, {
+      estado: documentoRechazado ? 'rechazado' : 'error',
+      error,
+      ...(documentoRechazado ? { documento_rechazado: documentoRechazado } : {}),
+    })
+    return { success: false, error, ...(documentoRechazado ? { documento_rechazado: documentoRechazado } : {}) }
+  }
+
+  try {
     // 3. Descargar archivo de Drive (o del almacenamiento externo del workspace)
     let buffer: Buffer
     if (referenciaOne) {
-      // La referencia vive en `data`, que tiene más de un escritor. Se lee con el cliente
-      // de servicio, así que la ruta tiene que ser de ESTE workspace antes de bajar nada.
-      if (duenoDeReferencia(referenciaOne)?.workspaceId !== workspaceId.toLowerCase()) {
-        return { success: false, error: 'Archivo no encontrado' }
-      }
       buffer = (await descargarDeOne(referenciaOne)).buffer
     } else if (referenciaExterna) {
       const almacenamiento = await almacenamientoExternoDe(workspaceId)
       if (!almacenamiento) {
-        return { success: false, error: 'El archivo está en almacenamiento externo y este espacio usa Drive' }
+        return fallar('El archivo está en almacenamiento externo y este espacio usa Drive')
       }
       buffer = (await almacenamiento.descargar(referenciaExterna)).buffer
     } else {
@@ -1016,9 +1279,9 @@ async function reprocesarDocumentoSinMemo(
       const operable = await archivoDriveOperable({
         fileId: driveFileId as string,
         workspaceId,
-        negocioId: (bloqueData.negocio_id as string | undefined) ?? null,
+        negocioId: negocioDelBloque,
       })
-      if (!operable) return { success: false, error: 'Archivo no encontrado' }
+      if (!operable) return fallar('Archivo no encontrado')
       console.log(`[reprocesar] Downloading ${driveFileId} from Drive...`)
       buffer = await downloadDriveFile(driveFileId as string, workspaceId)
     }
@@ -1044,26 +1307,24 @@ async function reprocesarDocumentoSinMemo(
         `[reprocesar] rechazado en ${bloqueId}: espera ${expectativa.tipos.join('|')}, ` +
         `el archivo es ${reconocimiento.tipo} (${reconocimiento.confianza})`,
       )
-      return {
-        success: false,
-        error: mensajeDocumentoRechazado(expectativa, reconocimiento),
-        documento_rechazado: {
-          esperado: etiquetaEsperado(expectativa),
-          visto: etiquetaTipo(reconocimiento.tipo),
-          visto_tipo: reconocimiento.tipo,
-          confianza: reconocimiento.confianza,
-          evidencia: reconocimiento.evidencia,
-        },
-      }
+      return fallar(mensajeDocumentoRechazado(expectativa, reconocimiento), {
+        esperado: etiquetaEsperado(expectativa),
+        visto: etiquetaTipo(reconocimiento.tipo),
+        visto_tipo: reconocimiento.tipo,
+        confianza: reconocimiento.confianza,
+        evidencia: reconocimiento.evidencia,
+      })
     }
 
     console.log(`[reprocesar] AI extraction (${camposExtraccion.length} campos)...`)
     const extraction = await extractWithRetry(buffer, mimeType, camposExtraccion, apiKey, 'reprocesar')
     if (!extraction.data) {
-      return { success: false, error: extraction.error ?? 'Error en extracción AI' }
+      return fallar(extraction.error ?? 'Error en extracción AI')
     }
 
-    // 5. Merge con data existente preservando campos manuales
+    // 5. Merge con data existente preservando campos manuales. La fila se relee: mientras
+    // el modelo leía, alguien pudo corregir un campo a mano, y esa corrección manda.
+    const currentData = await dataActual(supabase, bloqueId)
     const existingCampos = (currentData.campos as Record<string, CampoResultado>) ?? {}
     const mergedCampos: Record<string, CampoResultado> = { ...extraction.data }
     for (const [slug, campo] of Object.entries(existingCampos)) {
@@ -1093,32 +1354,35 @@ async function reprocesarDocumentoSinMemo(
     }
 
     const now = new Date().toISOString()
-    const newData: Record<string, unknown> = { ...currentData, campos: mergedCampos, _extraction_status: 'ok' }
+    const newData: Record<string, unknown> = {
+      ...currentData,
+      campos: mergedCampos,
+      _extraction_status: 'ok',
+      _lectura: { ...marca, estado: 'lista', terminada_at: now } satisfies MarcaLectura,
+    }
     delete newData._extraction_error
     if (reconocimiento) {
       newData._documento = { ...reconocimiento, motivo: veredicto.motivo, visto_at: now }
     }
     if (ccResult) newData._cross_check = { ...ccResult, solo_alerta: crossCheckSoloAlerta }
 
-    await db(supabase)
-      .from('negocio_bloques')
-      .update({
-        data: newData,
-        ...(isComplete ? { estado: 'completo', completado_at: now } : { estado: 'pendiente', completado_at: null }),
-        updated_at: now,
-      })
-      .eq('id', bloqueId)
+    const escrita = await escribirSiEsMia(supabase, bloqueId, marca.token, {
+      data: newData,
+      ...(isComplete ? { estado: 'completo', completado_at: now } : { estado: 'pendiente', completado_at: null }),
+      updated_at: now,
+    })
+    if (!escrita) return { success: false, error: LECTURA_REEMPLAZADA }
 
     // La seccional del caso nace aquí, con el RUT, no cuando una rama concreta del flujo
     // se activa. Nunca lanza: el documento ya se guardó bien.
     await sembrarSeccionalDesdeRut(supabase, { negocioId, bloqueId, campos: mergedCampos })
 
-    revalidatePath(`/negocios/${negocioId}`)
+    revalidarFicha(negocioId)
 
     return { success: true, campos: mergedCampos }
   } catch (err) {
     console.error('[reprocesar-documento] Error:', err)
-    return { success: false, error: `Error: ${String(err).slice(0, 200)}` }
+    return fallar(`Error: ${String(err).slice(0, 200)}`)
   }
 }
 
