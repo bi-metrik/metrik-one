@@ -1,6 +1,6 @@
 ---
 name: doble-guardado-idempotencia
-description: Doble guardado (2026-10-06) — #1047/#1048/#1051 sin migración; #1049 (migración) + #1050/#1053 apilados SIN mergear; #1052 migración SIN aplicar; el POST cortado se repite también vía Vercel
+description: Doble guardado (2026-10-06) — #1047 y #1048 MERGEADOS, #1051 sin migración; #1049 (migración) + #1050/#1053 apilados SIN mergear; #1052 migración SIN aplicar; el POST cortado se repite también vía Vercel
 metadata:
   type: project
 ---
