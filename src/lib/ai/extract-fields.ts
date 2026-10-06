@@ -14,7 +14,7 @@
 // config previa mezclaba `gemini-3.1-flash-lite` con `thinkingBudget:0`, que
 // es sintaxis de la familia 2.5 y en 3.x se ignora).
 import { normalizarMontoExtraido } from './monto-extraido'
-import { revisarLetrasLeidas } from '@/lib/texto/caracteres-pdf'
+import { revisarLetrasLeidas } from '@/lib/texto/texto-latino'
 import { serializarPersonas, type Persona } from '@/lib/documentos/personas'
 import { textoDelPdf } from './texto-pdf'
 import { verificarContraTexto, type VerificacionTexto } from './verificar-contra-texto'
@@ -87,7 +87,7 @@ export interface CampoResultado {
   /**
    * Letras de otro alfabeto que quedaron en lo leído y no se pudieron convertir con seguridad
    * (la IA escribió «МЕЛА» por «MEJIA», V0167). El campo va a revisión (`manual`) con el valor
-   * a la vista para que la persona lo corrija. Ver `src/lib/texto/caracteres-pdf.ts`.
+   * a la vista para que la persona lo corrija. Ver `src/lib/texto/texto-latino.ts`.
    */
   letras_no_validas?: string[]
 }

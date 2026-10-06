@@ -1,5 +1,6 @@
 import 'server-only'
 import { registrarActividad } from '@/lib/activity/registrar-actividad'
+import { primerCampoOficialNoValido, textoLatinoProfundo } from '@/lib/texto/texto-latino'
 import { esOrigenNegocioValido, ORIGEN_ALIANZA } from '@/lib/catalogos/constants'
 import { buscarContactoDuplicado } from '@/lib/contactos/dedup'
 import { terminosInicialesDeCotizacion } from '@/lib/cotizaciones/terminos-al-crear'
@@ -268,9 +269,17 @@ async function crearCotizacionAutomatica(
 
 export async function crearNegocioEnWorkspace(
   ctx: ContextoCrearNegocio,
-  input: EntradaCrearNegocio,
+  inputCrudo: EntradaCrearNegocio,
 ): Promise<ResultadoCrearNegocio> {
   const { supabase, workspaceId, userId, role, staffId } = ctx
+  // Bloqueo de todo ONE (`texto-latino.ts`): dobles cirílicos/griegos a latín en todo lo que
+  // llega (nombre del negocio, del contacto, documento…); un campo oficial con una letra
+  // imposible no crea nada.
+  const input = textoLatinoProfundo(inputCrudo)
+  {
+    const malo = primerCampoOficialNoValido(input as unknown as Record<string, unknown>)
+    if (malo) return { negocio_id: null, error: malo.mensaje }
+  }
   // ── Origen: validación server-side (la del formulario es solo UX) ──
   // Se exige AL CREAR y no después: un origen que se pide "más tarde" no se
   // registra nunca. El catálogo vive en src/lib/catalogos/constants.ts.

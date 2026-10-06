@@ -12,7 +12,7 @@ import {
   datosParaPdf,
   revisarLetrasLeidas,
   textoParaPdf,
-} from './caracteres-pdf'
+} from './texto-latino'
 import { generarFormulario010, type Formulario010Datos, type Formulario010Constantes } from '@/lib/pdf/formulario-010'
 import { generarFormulario1668, type Formulario1668Datos, type Formulario1668Constantes } from '@/lib/pdf/formulario-1668'
 

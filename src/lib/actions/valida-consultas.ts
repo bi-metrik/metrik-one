@@ -1,5 +1,6 @@
 'use server';
 
+import { textoLatinoProfundo } from '@/lib/texto/texto-latino'
 import { createServiceClient } from '@/lib/supabase/server';
 import { leerSecretosWorkspace, secretoConRespaldo } from '@/lib/secretos/workspace';
 import { resolverNombresUsuarios } from './_usuarios';
@@ -453,7 +454,7 @@ export async function prepararLoteValida(
     const wb = XLSX.read(buf, { type: 'buffer' });
     const sheet = wb.Sheets[wb.SheetNames[0]];
     if (!sheet) return { ok: false, error: 'archivo_sin_hojas' };
-    rows = XLSX.utils.sheet_to_json<FilaXLSX>(sheet, { defval: '' });
+    rows = textoLatinoProfundo(XLSX.utils.sheet_to_json<FilaXLSX>(sheet, { defval: '' }));
   } catch {
     return { ok: false, error: 'archivo_no_legible' };
   }

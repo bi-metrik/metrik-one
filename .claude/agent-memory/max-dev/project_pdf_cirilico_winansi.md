@@ -1,18 +1,27 @@
 ---
 name: pdf-cirilico-winansi
-description: La IA mete letras cirílicas en el RUT (В por B, «МЕЛА» por MEJIA); el 010/1668 se caía con «WinAnsi cannot encode». Dobles exactos se convierten, el resto se nombra (2026-10-06)
+description: Bloqueo de letras no latinas en TODO ONE (2026-10-06) — `texto-latino.ts` sin imports con copia EXACTA en `_shared/`; dobles se convierten, lo demás frena guardado, gate y 010; guarda de CI sobre drawText
 metadata:
   type: project
 ---
 
-`src/lib/texto/caracteres-pdf.ts` es la regla única: `aLetraLatina` (dobles exactos cirílico/griego →
-latín), `textoParaPdf` (lanza `CaracterNoImprimibleError` con mensaje para la persona) y
-`revisarLetrasLeidas` (la extracción manda el campo a revisión, `manual: true` con el valor visible y
-`letras_no_validas`). `sanitize()` de `acroform.ts` la usa; `generarFormulario` valida `datosFinal` con
-`datosParaPdf` y nombra el campo.
+Origen: la IA metió cirílico en el RUT (V0121 «В» por B tumbó el 010 con «WinAnsi cannot encode»;
+«МЕЛА» por MEJIA) y el barrido halló griego («ΤΟ», «JOHΝ») y un contacto en cirílico por lead de Meta.
+#1054 = arreglo mínimo del PDF; la pieza completa va en el PR del bloqueo.
 
-**Why:** «Л» no tiene doble (la IA convierte «JI» en «Л»): adivinar escribiría mal un nombre ante la DIAN.
+`src/lib/texto/texto-latino.ts` es la regla única y NO importa nada: `supabase/functions/_shared/texto-latino.ts`
+es copia byte a byte (la prueba `guarda-texto-pdf.test.ts` falla si se separan, y también si un
+`drawText(` dibuja algo que no sea `textoParaPdf(...)` o una variable saneada listada).
 
-**How to apply:** todo PDF nuevo con `StandardFonts` estampa por `sanitize`/`textoParaPdf`, nunca el
-texto crudo. Los datos malos de V0121, V0143 y V0167 NO se corrigieron (los corrige la persona o
-Mauricio). Relacionado: [[formulario-010-dian]].
+Entradas cubiertas: extract-fields (marca `manual` + `letras_no_validas`), parse-rut, parse-ve-docs,
+`sanearDataDelNavegador` + rechazo en actualizar/marcar bloque, `actualizarCampoDocumento`, contactos y
+empresas (directorio y contactos legacy), `crearNegocioEnWorkspace`, lead de Meta, bot WA (texto del
+equipo), XLSX de compliance/Valida. Frenos: guardar (campo oficial), avance de etapa (también con
+override) y generación del formulario.
+
+**Why:** «Л» no tiene doble: adivinar escribiría mal un nombre ante la DIAN. Solo LETRAS de otra escritura
+frenan (un «→» o un emoji no); el PDF sí exige WinAnsi estricto aparte.
+
+**How to apply:** entrada nueva de texto → `textoLatinoProfundo`/`formularioLatino` + `primerCampoOficialNoValido`;
+PDF nuevo → `textoParaPdf`. Al tocar la pieza, copiar el archivo a `_shared/` y redesplegar
+`wa-webhook` y `meta-leads-webhook`. Detección a pedido: `scripts/detectar-letras-no-latinas.sql`.
