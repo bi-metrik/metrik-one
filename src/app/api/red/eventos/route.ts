@@ -13,10 +13,13 @@
  * Exige sesión: es lo que impide que cualquiera llene la medición. Sin sesión el middleware
  * responde 307 a /login y el navegador conserva el lote para la próxima.
  *
- * Contar: `node scripts/red-resumen.mjs --bajar 2d` (deduplica por `id` de evento).
+ * Además lo guarda en `public.red_eventos` (server-only) después de responder; el resumen diario
+ * por persona es la vista `v_red_resumen_diario`. Sin la tabla, la línea del log sigue sirviendo:
+ * `node scripts/red-resumen.mjs --bajar 2d` (deduplica por `id` de evento).
  */
-import { NextResponse } from 'next/server'
-import { createClient } from '@/lib/supabase/server'
+import { NextResponse, after } from 'next/server'
+import { createClient, createServiceClient } from '@/lib/supabase/server'
+import { guardarEventosRed, workspaceIdDeSlug } from '@/lib/red/guardar-eventos'
 import { usuarioDesdeToken } from '@/lib/supabase/claims-user'
 import { leerLoteRed } from '@/lib/red/eventos-servidor'
 import { MAX_BYTES_LOTE_RED } from '@/lib/red/eventos'
@@ -85,5 +88,28 @@ export async function POST(request: Request) {
     versionServidor: versionDelBuild(),
   }
   console.log('[red-piloto]', JSON.stringify(linea))
+
+  // Copia consultable por SQL (`red_eventos`, server-only), después de responder: la medición no
+  // demora a nadie. Si falla, queda la línea de arriba.
+  if (lote.eventos.length > 0) {
+    after(async () => {
+      const svc = createServiceClient()
+      const workspaceId = await workspaceIdDeSlug(svc, slug!)
+      if (!workspaceId) return
+      await guardarEventosRed(
+        svc,
+        {
+          workspaceId,
+          personaStaffId: linea.persona_id,
+          operador: linea.operador,
+          asn: linea.asn,
+          ciudad: linea.ciudad,
+          region: linea.region,
+          dispositivo: linea.dispositivo,
+        },
+        lote.eventos,
+      )
+    })
+  }
   return new NextResponse(null, { status: 204, headers: SIN_CUERPO })
 }

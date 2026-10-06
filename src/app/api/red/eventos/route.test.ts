@@ -4,9 +4,24 @@ let usuario: { id: string } | null = { id: 'u-1' }
 let staff: { id: string; full_name: string; workspaces: { slug: string } | null } | null = null
 let ipConsultada: string | null | undefined
 
+const pendientes: Array<() => Promise<unknown>> = []
+const guardados: Array<{ ctx: unknown; n: number }> = []
+
+vi.mock('next/server', async (original) => ({
+  ...(await original<typeof import('next/server')>()),
+  after: (fn: () => Promise<unknown>) => pendientes.push(fn),
+}))
+vi.mock('@/lib/red/guardar-eventos', () => ({
+  workspaceIdDeSlug: async (_svc: unknown, slug: string) => (slug === 'soena' ? 'ws-soena' : null),
+  guardarEventosRed: async (_svc: unknown, ctx: unknown, eventos: unknown[]) => {
+    guardados.push({ ctx, n: eventos.length })
+    return true
+  },
+}))
 vi.mock('@/lib/version/build', () => ({ versionDelBuild: () => 'dpl_x' }))
 vi.mock('@/lib/supabase/claims-user', () => ({ usuarioDesdeToken: async () => ({ user: usuario, error: null }) }))
 vi.mock('@/lib/supabase/server', () => ({
+  createServiceClient: () => ({}),
   createClient: async () => ({
     from: () => ({
       select: () => ({ eq: () => ({ maybeSingle: () => Promise.resolve({ data: staff }) }) }),
@@ -25,6 +40,8 @@ const { POST } = await import('./route')
 
 let logSpy: ReturnType<typeof vi.spyOn>
 beforeEach(() => {
+  pendientes.length = 0
+  guardados.length = 0
   usuario = { id: 'u-1' }
   staff = null
   ipConsultada = undefined
@@ -58,6 +75,7 @@ describe('POST /api/red/eventos', () => {
     expect((await enviar('trappvel')).status).toBe(204)
     expect((await enviar(null)).status).toBe(204)
     expect(linea()).toBeNull()
+    expect(pendientes).toHaveLength(0)
   })
 
   it('sin sesión: 401 (el navegador conserva el lote)', async () => {
@@ -82,6 +100,15 @@ describe('POST /api/red/eventos', () => {
     })
     expect(ipConsultada).toBe('186.81.102.19')
     expect(JSON.stringify(l)).not.toContain('186.81.102.19')
+    // Y la copia en `red_eventos`, después de responder.
+    expect(guardados).toHaveLength(0)
+    await Promise.all(pendientes.map((f) => f()))
+    expect(guardados).toEqual([
+      {
+        ctx: expect.objectContaining({ workspaceId: 'ws-soena', personaStaffId: 'staff-camila', operador: 'Claro', asn: 14080, ciudad: 'Bogotá' }),
+        n: 1,
+      },
+    ])
   })
 
   it('persona fuera de la lista o de otro workspace: sin identificador', async () => {

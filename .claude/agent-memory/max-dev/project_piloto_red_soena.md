@@ -1,6 +1,6 @@
 ---
 name: piloto-red-soena
-description: Piloto de red en soena (2026-10-06) — Fase 0 contradijo «descargas y procesamiento»; pulso + [red-piloto] por persona (#1042), service worker con interruptor (pieza 2), tabla SIN aplicar (pieza 3)
+description: Piloto de red en soena (2026-10-06) — Fase 0 contradijo «descargas y procesamiento»; pulso + [red-piloto] por persona (#1042), service worker con interruptor (#1045), tabla red_eventos SIN aplicar (pieza 3, PR abierto)
 metadata:
   type: project
 ---
@@ -28,6 +28,10 @@ subidas (IndexedDB) NO se construyó: sin evidencia de falla; primero medir con 
 probar cambios del SW con `scripts/sw-piloto.e2e.mjs` (playwright-core en el scratchpad, Chromium en
 `~/.cache/ms-playwright/chromium-1243/chrome-linux64/chrome`). Relacionado: [[cargue-segundo-plano]],
 [[recuperacion-red-iphone]], [[rum-y-lecturas-sin-actions]].
+
+**Pieza 3 (feat/red-eventos-tabla, SIN mergear):** migración `20261006121500_red_eventos_piloto.sql` crea
+`red_eventos` + `v_red_resumen_diario` (server-only, sin grant). La aplica la sesión principal ANTES del
+merge; el código escribe con `after()` y si falta la tabla solo loguea el error. Probada en PGlite.
 
 **Gotchas del entorno:** `vercel logs --json` con ventana larga devuelve UNA ventana de filas repetidas
 (3000 filas = 50 reportes): bajar en tramos de 15-30 min. `vercel metrics` de 14 días con varios

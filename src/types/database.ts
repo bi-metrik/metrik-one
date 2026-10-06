@@ -12716,6 +12716,75 @@ export type Database = {
           },
         ]
       }
+      red_eventos: {
+        Row: {
+          asn: number | null
+          ciudad: string | null
+          detalle: Json
+          dispositivo: string | null
+          dur_ms: number | null
+          id: string
+          ocurrido_at: string
+          operador: string | null
+          persona_staff_id: string | null
+          recibido_at: string
+          region: string | null
+          superficie: string | null
+          sw: boolean | null
+          tipo: string
+          workspace_id: string
+        }
+        Insert: {
+          asn?: number | null
+          ciudad?: string | null
+          detalle?: Json
+          dispositivo?: string | null
+          dur_ms?: number | null
+          id: string
+          ocurrido_at: string
+          operador?: string | null
+          persona_staff_id?: string | null
+          recibido_at?: string
+          region?: string | null
+          superficie?: string | null
+          sw?: boolean | null
+          tipo: string
+          workspace_id: string
+        }
+        Update: {
+          asn?: number | null
+          ciudad?: string | null
+          detalle?: Json
+          dispositivo?: string | null
+          dur_ms?: number | null
+          id?: string
+          ocurrido_at?: string
+          operador?: string | null
+          persona_staff_id?: string | null
+          recibido_at?: string
+          region?: string | null
+          superficie?: string | null
+          sw?: boolean | null
+          tipo?: string
+          workspace_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "red_eventos_persona_staff_id_fkey"
+            columns: ["persona_staff_id"]
+            isOneToOne: false
+            referencedRelation: "staff"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "red_eventos_workspace_id_fkey"
+            columns: ["workspace_id"]
+            isOneToOne: false
+            referencedRelation: "workspaces"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       ref_tarifas_ica: {
         Row: {
           ciiu_desde: string
