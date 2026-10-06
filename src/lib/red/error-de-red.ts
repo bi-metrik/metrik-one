@@ -1,3 +1,5 @@
+import { AVISO_CONEXION } from './aviso-conexion'
+
 /**
  * ¿Este error es de RED (o de carga de un chunk), y no de la app?
  *
@@ -141,13 +143,18 @@ export interface TextoPantallaDeError {
 }
 
 /**
- * Error de red con el tope de reintentos agotado (`auto-recarga.ts`). No dice "conexión" ni
- * "revisa la señal": el 2026-10-03 se midio que la persona SI tenia internet (la ruta de su
- * ISP hacia Vercel perdia paquetes), y culparla era falso. Dice lo que se sabe.
+ * Error de red con el tope de reintentos agotado (`auto-recarga.ts`): el mismo aviso que
+ * sale cuando una carga no termina (`aviso-conexion.ts`).
+ *
+ * Historia: el 2026-10-03 este texto evitaba nombrar la conexión ("Esta página está tardando
+ * más de lo normal"), porque se midio que la persona SI tenia internet y era la ruta de su
+ * ISP hacia Vercel la que perdia paquetes. El 2026-10-06 Mauricio aprobo el aviso unico, que
+ * dice "puede ser" y da lo que de verdad lo arregla en ese caso: otra red o los datos del
+ * celular (otra ruta hacia Vercel).
  */
 export const PANTALLA_TARDANDO: TextoPantallaDeError = {
-  titulo: 'Esta página está tardando más de lo normal',
-  cuerpo: 'Lo intentamos varias veces y todavía no carga. Prueba recargar en un momento.',
+  titulo: AVISO_CONEXION.titulo,
+  cuerpo: AVISO_CONEXION.cuerpo,
 }
 
 /**

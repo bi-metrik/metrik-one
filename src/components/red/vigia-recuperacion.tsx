@@ -8,6 +8,7 @@ import {
   sessionStorageSeguro,
   tomarPendiente,
 } from '@/lib/red/auto-recarga'
+import { marcarHidratada } from '@/lib/red/aviso-conexion'
 
 /**
  * Cierra el episodio de un error de red que se curo con una RECARGA automatica.
@@ -19,11 +20,14 @@ import {
  * volvio a fallar en esta carga, manda el beacon `recuperado: true` con el intento en que
  * se recupero. No pinta nada; sin anotacion no hace nada.
  *
- * Tambien arranca la cola de reenvio de `[error-cliente]` (`errores-cliente/cola.ts`): lo
+ * Tambien avisa que React hidrato (`marcarHidratada`) y arranca la cola de reenvio de `[error-cliente]` (`errores-cliente/cola.ts`): lo
  * que una carga anterior no logro mandar sale unos segundos despues y al volver `online`.
  */
 export default function VigiaRecuperacion() {
   useEffect(() => iniciarColaDeReenvio(), [])
+  // React ya monto el layout raiz: el aviso a pantalla completa del script en linea
+  // (`aviso-conexion.ts`) se cancela, o se quita si una carga lenta ya lo habia pintado.
+  useEffect(() => marcarHidratada(), [])
 
   useEffect(() => {
     const pathname = window.location.pathname

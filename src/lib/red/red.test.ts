@@ -93,11 +93,13 @@ describe('esErrorDeRed', () => {
 })
 
 describe('textoPantallaDeError', () => {
-  it('error de red con los intentos agotados: "tardando más de lo normal", sin culpar la señal', () => {
+  it('error de red con los intentos agotados: el aviso unico de conexion (2026-10-06)', () => {
     const t = textoPantallaDeError(new TypeError('Load failed'), 'Algo se rompió en esta pantalla')
     expect(t).toEqual(PANTALLA_TARDANDO)
-    expect(t.titulo).toBe('Esta página está tardando más de lo normal')
-    expect(`${t.titulo} ${t.cuerpo}`).not.toMatch(/conexi[oó]n|señal|desconect/i)
+    expect(t.titulo).toBe('No pudimos conectar con ONE')
+    // Da la salida que de verdad funciona con una ruta mala del ISP: otra red.
+    expect(t.cuerpo).toMatch(/otra red o con los datos del celular/)
+    expect(`${t.titulo} ${t.cuerpo}`).not.toMatch(/proceso|señal/i)
     expect(t.cuerpo).not.toMatch(/pestaña/i)
   })
 

@@ -43,12 +43,17 @@ interface Beacon {
 }
 const beacons: Beacon[] = []
 const recuperados: { accion: string; intento: number }[] = []
+/** Cada aparicion del aviso "No pudimos conectar con ONE" (`reportarAvisoConexion`). */
+const avisos: string[] = []
 vi.mock('@/lib/errores-cliente/enviar', () => ({
   reportarErrorCliente: (_e: unknown, _o: unknown, autoRecarga: boolean, d: Omit<Beacon, 'autoRecarga'> = {}) => {
     beacons.push({ autoRecarga, ...d })
   },
   reportarRecuperacion: (p: { accion: string; intento: number }) => {
     recuperados.push({ accion: p.accion, intento: p.intento })
+  },
+  reportarAvisoConexion: (causa: string) => {
+    avisos.push(causa)
   },
   iniciarColaDeReenvio: () => () => {},
 }))
@@ -161,6 +166,7 @@ beforeEach(() => {
   vi.setSystemTime(new Date('2026-10-03T15:00:00-05:00'))
   beacons.length = 0
   recuperados.length = 0
+  avisos.length = 0
   refresh.mockClear()
   enLinea = true
   rota = true
@@ -187,7 +193,11 @@ afterEach(() => {
 })
 
 const chunk = () => Object.assign(new Error('Failed to load chunk /_next/static/chunks/a.js'), { name: 'ChunkLoadError' })
+// Mientras se reintenta solo, la pantalla no habla de conexion: solo la animacion.
 const PROHIBIDAS = /conexi[oó]n|desconect|señal/i
+// El aviso final (2026-10-06) si nombra la conexion ("puede ser"), pero nunca "proceso" ni "señal".
+const AVISO = 'No pudimos conectar con ONE'
+const PROHIBIDAS_AVISO = /proceso|señal/i
 
 describe.each([
   ['(app)/error.tsx', () => AppError],
@@ -214,7 +224,7 @@ describe.each([
     expect(texto()).not.toMatch(/Recargar|Reintentar/)
   })
 
-  it('back-off: suave, luego recargas a 2, 5, 15 y 30 s; agotado el tope, pantalla tranquila', async () => {
+  it('back-off: suave, luego recargas a 2, 5, 15 y 30 s; agotado el tope, el aviso con Reintentar', async () => {
         await cargar(pantalla())
     expect(refresh).toHaveBeenCalledTimes(1)
     for (const espera of [2_000, 5_000, 15_000, 30_000]) {
@@ -230,14 +240,17 @@ describe.each([
     // Cuatro recargas en menos de 3 min: no hay quinta.
     await avanzar(120_000)
     expect(reload).not.toHaveBeenCalled()
-    expect(texto()).toContain('Esta página está tardando más de lo normal')
-    expect(texto()).toContain('Recargar')
-    expect(texto()).not.toContain('Reintentar')
-    expect(texto()).not.toMatch(PROHIBIDAS)
+    expect(texto()).toContain(AVISO)
+    expect(texto()).toContain('otra red o con los datos del celular')
+    expect(texto()).toContain('Reintentar')
+    expect(texto()).not.toContain('Recargar')
+    expect(texto()).not.toMatch(PROHIBIDAS_AVISO)
     expect(beacons.map((b) => `${b.accion}:${b.intento}`)).toEqual([
       'suave:0', 'recarga:0', 'recarga:1', 'recarga:2', 'recarga:3', 'agotado:4',
     ])
     expect(beacons.at(-1)?.autoRecarga).toBe(false)
+    // Un reporte del aviso por aparicion: solo la ultima carga lo mostro.
+    expect(avisos).toEqual(['agotado'])
   })
 
   it('ChunkLoadError: tambien entra a la escalera', async () => {
@@ -253,7 +266,7 @@ describe.each([
     sessionStorage.setItem('metrik:auto-recarga:/negocios', JSON.stringify({ r: [t - 4, t - 3, t - 2, t - 1], s: t - 5 }))
         await cargar(pantalla())
     expect(refresh).not.toHaveBeenCalled()
-    expect(texto()).toContain('tardando más de lo normal')
+    expect(texto()).toContain(AVISO)
 
     location.pathname = '/tableros'
     beacons.length = 0
@@ -302,6 +315,7 @@ describe.each([
     expect(refresh).not.toHaveBeenCalled()
     expect(sessionStorage.length).toBe(0)
     expect(beacons).toEqual([{ autoRecarga: false, accion: 'ninguna' }])
+    expect(avisos).toEqual([])
     expect(texto()).toMatch(/Algo se rompió en esta pantalla|MéTRIK one no pudo cargar/)
     expect(texto()).toContain('Reintentar')
     expect(animando()).toBe(false)
@@ -329,9 +343,10 @@ describe.each([
     await avanzar(60_000)
     expect(refresh).not.toHaveBeenCalled()
     expect(reload).not.toHaveBeenCalled()
-    expect(texto()).toContain('tardando más de lo normal')
-    expect(texto()).not.toMatch(PROHIBIDAS)
+    expect(texto()).toContain(AVISO)
+    expect(texto()).not.toMatch(PROHIBIDAS_AVISO)
     expect(beacons.at(-1)).toMatchObject({ accion: 'agotado', autoRecarga: false })
+    expect(avisos).toEqual(['agotado'])
   })
 
   it('si leer sessionStorage lanza: nada automatico', async () => {
@@ -346,13 +361,14 @@ describe.each([
     expect(refresh).not.toHaveBeenCalled()
     expect(reload).not.toHaveBeenCalled()
     expect(beacons).toEqual([{ autoRecarga: false, accion: 'agotado', intento: 0, enLinea: true }])
+    expect(avisos).toEqual(['agotado'])
   })
 
-  it('el boton Recargar de la pantalla agotada borra el historial de la ruta', async () => {
+  it('el boton Reintentar de la pantalla agotada recarga y borra el historial de la ruta', async () => {
     const t = Date.now()
     sessionStorage.setItem('metrik:auto-recarga:/negocios', JSON.stringify({ r: [t - 4, t - 3, t - 2, t - 1], s: t - 5 }))
         await cargar(pantalla())
-    const boton = [...contenedor.querySelectorAll('button')].find((b) => b.textContent?.includes('Recargar'))
+    const boton = [...contenedor.querySelectorAll('button')].find((b) => b.textContent?.includes('Reintentar'))
     boton?.dispatchEvent(new (ventana as never as { MouseEvent: typeof MouseEvent }).MouseEvent('click', { bubbles: true }))
     await asentar()
     expect(reload).toHaveBeenCalledTimes(1)

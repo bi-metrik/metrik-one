@@ -1,4 +1,4 @@
-import AnimacionMarca from '@/components/marca/animacion-marca'
+import { EsperaDeRuta } from '@/components/red/aviso-conexion'
 
 /**
  * Estado de carga de las vistas de `(app)`: mientras la pagina trae sus datos, el hueco
@@ -8,13 +8,11 @@ import AnimacionMarca from '@/components/marca/animacion-marca'
  * parpadea en las navegaciones rapidas: la animacion aparece pasados 300 ms (CSS, sin
  * JavaScript). Un cambio de filtro por la URL dentro de la misma vista no lo vuelve a
  * mostrar: el limite de carga se monta por segmento, no por parametros de busqueda.
+ *
+ * Con tope (2026-10-06, Deisy en `/negocios/[id]`): si a los 25 s la pagina no llego (el
+ * stream se corto o se quedo colgado), la animacion cede al aviso "No pudimos conectar con
+ * ONE" con Reintentar. Lo hace CSS: funciona aunque este fallback nunca hidrate.
  */
 export default function Loading() {
-  return (
-    <AnimacionMarca
-      variante="liviana"
-      tamano="clamp(1.6rem, 4vw, 2.2rem)"
-      className="min-h-[60vh]"
-    />
-  )
+  return <EsperaDeRuta className="min-h-[60vh]" />
 }

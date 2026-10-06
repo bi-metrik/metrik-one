@@ -2,7 +2,12 @@
 
 import { startTransition, useEffect, useState } from 'react'
 import { useRouter } from 'next/navigation'
-import { reportarErrorCliente, reportarRecuperacion } from '@/lib/errores-cliente/enviar'
+import {
+  reportarAvisoConexion,
+  reportarErrorCliente,
+  reportarRecuperacion,
+} from '@/lib/errores-cliente/enviar'
+import { marcarHidratada } from '@/lib/red/aviso-conexion'
 import { esErrorDeRed } from '@/lib/red/error-de-red'
 import { anotarFallaRed } from '@/lib/red/bandeja-red'
 import {
@@ -23,7 +28,7 @@ import {
  * Que pinta la pantalla de error:
  * - `recuperando`: la animacion de carga de la marca (se esta reintentando solo).
  * - `sin-internet`: la animacion + "Sin internet. Seguimos apenas vuelva." (`onLine` false).
- * - `agotado`: error de red sin mas intentos: "Esta página está tardando más de lo normal".
+ * - `agotado`: error de red sin mas intentos: "No pudimos conectar con ONE" con Reintentar.
  * - `error`: no es de red: la pantalla de siempre.
  */
 export type EstadoPantalla = 'recuperando' | 'sin-internet' | 'agotado' | 'error'
@@ -48,6 +53,9 @@ export function useRecuperacionDeRed(
   const [estado, setEstado] = useState<EstadoPantalla>(esRed ? 'recuperando' : 'error')
 
   useEffect(() => {
+    // React esta vivo (pinto esta pantalla): el aviso a pantalla completa del script en linea
+    // no aplica. Importa en `global-error`, que reemplaza el layout raiz y su vigia.
+    marcarHidratada()
     let vivo = true
     const temporizadores = new Set<ReturnType<typeof setTimeout>>()
     let quitarOnline: (() => void) | null = null
@@ -82,6 +90,8 @@ export function useRecuperacionDeRed(
       tomarPendiente(pathname, sessionStorageSeguro(), Date.now())
       setEstado('agotado')
       if (reportar) reportarErrorCliente(error, origen, false, { accion: 'agotado', intento, enLinea: enLinea() })
+      // Una linea por aparicion del aviso: `agotar` corre una sola vez por pantalla montada.
+      reportarAvisoConexion('agotado')
     }
 
     const esperarRed = () => {
