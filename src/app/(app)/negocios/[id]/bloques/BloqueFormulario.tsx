@@ -68,7 +68,8 @@ export default function BloqueFormulario({
   const [seccional, setSeccional] = useState<string | null>(null)
   const [seccionalSugerida, setSeccionalSugerida] = useState(false)
   const [state, setState] = useState<GenerateState>('idle')
-  const [isPending, startTransition] = useTransitionTolerante()
+  // Generar el formulario crea una versión con su PDF: si la respuesta se pierde, se relee.
+  const [isPending, startTransition] = useTransitionTolerante({ releer: () => router.refresh() })
   const [verHistorial, setVerHistorial] = useState(false)
   // ── Transcripción a ciegas del NIT ──────────────────────────────────────
   const [confirmNit, setConfirmNit] = useState<EstadoConfirmacionNit | undefined>(undefined)

@@ -248,3 +248,11 @@
   ficha) y no tiene a quién entregarle un `revalidatePath`: la pantalla refresca sola. Dentro de
   `after()` lanzado desde una server action `cookies()` SÍ funciona (Next lo permite si el padre es
   `action`); desde un render, no.
+- **Una página SIN `maxDuration` corre con el tope del proyecto (300 s, fluid), no con 60.** (2026-10-05).
+  `/negocios/[id]` declara 60; `/conciliacion` no declara nada. Una server action hereda el tope de la
+  página desde la que se llama: la emisión de factura de 61 s (V0549) salía de `/conciliacion` y NO tocó
+  ningún tope. Leer el valor real: `vercel api /v9/projects/<id>` → `defaultResourceConfig.functionDefaultTimeout`.
+- **Escritura larga + red mala: `useTransitionTolerante({ releer })`, no el aviso de «intenta de nuevo».**
+  (2026-10-05). En Claro/Telmex la petición llega y lo que se pierde es la respuesta: repetir puede duplicar.
+  `reintentar` solo para acciones idempotentes.
+
