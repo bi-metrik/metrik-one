@@ -2,6 +2,7 @@
 
 ## Project memories
 
+- ⚠️⚠️ [Núcleo conversacional (#1060-#1062)](project_nucleo_conversacional.md) — pila de 3 PR; 2 migraciones SIN aplicar; p90 7,4 s > 5 s
 - ⚠️⚠️ [Bot híbrido de la bandeja (#1056)](project_bandeja_hibrida.md) — detrás de bot_conversacional.hibrido (apagado = main); propuesta [Sí, ese]; decisión con 3.5-lite
 - ⚠️⚠️ [Doble guardado e idempotencia (#1047-#1053)](project_doble_guardado_idempotencia.md) — #1049/#1052 migración SIN aplicar; POST cortado se repite vía Vercel
 - ⚠️ [Letras no latinas: bloqueo en todo ONE](project_pdf_cirilico_winansi.md) — `texto-latino.ts` + copia exacta en `_shared/`; guarda de CI sobre drawText
