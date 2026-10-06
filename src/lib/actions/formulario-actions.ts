@@ -16,6 +16,7 @@ import CartaAutorizacionPDF from '@/lib/pdf/carta-autorizacion-pdf'
 import RelacionFacturasPDF from '@/lib/pdf/relacion-facturas-pdf'
 import { getCasillasMeta, metaDeCasilla } from '@/lib/pdf/formulario-casillas'
 import { calcularDvNit } from '@/lib/dian/nit'
+import { CaracterNoImprimibleError, datosParaPdf } from '@/lib/texto/caracteres-pdf'
 import { nitConDvPegadoEnFormulario, separarSondas, sondasDeIdentificacion } from '@/lib/dian/guarda-nit-formulario'
 import {
   identificacionConPrefijoEnFormulario,
@@ -658,6 +659,15 @@ export async function generarFormularioCore(
       }
     }
 
+    // Letras que la IA mete al leer (В cirílica por B, V0121 2026-10-06): los dobles exactos
+    // se convierten; lo que no se puede imprimir corta aquí con el campo a corregir, nunca con
+    // el «WinAnsi cannot encode» de pdf-lib. Ver `src/lib/texto/caracteres-pdf.ts`.
+    const imprimibles = datosParaPdf(datosFinal, etiquetaCampoFormulario)
+    if (!imprimibles.ok) {
+      return { success: false, campos_usados: datosFinal, error: imprimibles.mensaje }
+    }
+    Object.assign(datosFinal, imprimibles.datos)
+
     const codigoNegocio = (negocio?.codigo as string) ?? negocioId.slice(0, 8)
     const fechaGeneracion = new Date().toISOString()
 
@@ -789,9 +799,33 @@ export async function generarFormularioCore(
       version_n: versionN,
     }
   } catch (err) {
+    // Última barrera: un carácter que llegó al estampado por otro lado (una constante del
+    // formato, la seccional). La persona ve qué corregir, no el error de la fuente.
+    if (err instanceof CaracterNoImprimibleError) return { success: false, error: err.message }
     console.error('[formulario-actions] Error:', err)
     return { success: false, error: `Error: ${String(err).slice(0, 200)}` }
   }
+}
+
+/** Nombre del campo en el mensaje de «carácter no válido»: el que la persona reconoce. */
+const ETIQUETAS_CAMPO: Record<string, string> = {
+  direccion: 'Dirección',
+  primer_apellido: 'Primer apellido',
+  segundo_apellido: 'Segundo apellido',
+  primer_nombre: 'Primer nombre',
+  otros_nombres: 'Otros nombres',
+  razon_social: 'Razón social',
+  nombre_suscriptor: 'Nombre del suscriptor',
+  nombre_certificado: 'Nombre',
+  municipio: 'Municipio',
+  departamento: 'Departamento',
+  correo_electronico: 'Correo electrónico',
+  entidad_financiera: 'Entidad financiera',
+  direccion_seccional: 'Dirección seccional',
+}
+
+function etiquetaCampoFormulario(campo: string): string {
+  return ETIQUETAS_CAMPO[campo] ?? campo.replace(/_/g, ' ')
 }
 
 // ── Capa editable de casillas ────────────────────────────────────────────────
