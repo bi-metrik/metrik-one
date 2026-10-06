@@ -14,6 +14,7 @@ import {
   type ReactNode,
 } from 'react'
 import AnimacionMarca from '@/components/marca/animacion-marca'
+import { EsperaConLimite } from '@/components/red/aviso-conexion'
 import { cargarCompletoSiToca } from '@/lib/version/recarga-pendiente'
 import { marcarInicioNavegacion } from '@/lib/rum/navegacion'
 
@@ -37,6 +38,7 @@ import { marcarInicioNavegacion } from '@/lib/rum/navegacion'
  *     mientras cualquiera de las dos cosas esté pendiente.
  *
  * Nada de esto pide red ni temporizadores: el estado cambia en el mismo evento del toque.
+ * El tope de la espera tambien es CSS (`EsperaConLimite`).
  */
 
 interface NavegacionPendiente {
@@ -146,13 +148,23 @@ export function SenalDeEnlace() {
 export function CapaNavegacionPendiente() {
   const ctx = useContext(Contexto)
   if (!ctx?.pendiente) return null
+  // Con tope (2026-10-06): Next no le pone limite a una navegacion, y si el payload RSC se
+  // queda colgado en la ruta de Claro/Telmex la capa quedaba para siempre. A los 25 s cede al
+  // aviso "No pudimos conectar con ONE"; Reintentar carga el destino completo (si la
+  // navegacion es de una tarjeta) o la pagina actual (enlace del menu, cuyo destino no se
+  // conoce aqui).
   return (
-    <AnimacionMarca
-      variante="liviana"
-      etiqueta="Abriendo"
-      retardoMs={120}
-      tamano="clamp(1.6rem, 4vw, 2.2rem)"
+    <EsperaConLimite
+      causa="navegacion"
+      destino={ctx.destino}
       className="absolute inset-0 z-20 bg-background"
-    />
+    >
+      <AnimacionMarca
+        variante="liviana"
+        etiqueta="Abriendo"
+        retardoMs={120}
+        tamano="clamp(1.6rem, 4vw, 2.2rem)"
+      />
+    </EsperaConLimite>
   )
 }

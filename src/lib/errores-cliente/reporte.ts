@@ -14,6 +14,7 @@ import { z } from 'zod'
 
 // Los topes viven en `limites.ts` (sin Zod) para que el navegador no cargue Zod.
 import { MAX_BYTES_REPORTE, MAX_STACK } from './limites'
+import { CAUSAS_AVISO_CONEXION } from '@/lib/red/aviso-conexion'
 export { MAX_BYTES_REPORTE, MAX_STACK }
 
 const recortar = (max: number) => z.string().transform((s) => s.slice(0, max))
@@ -76,8 +77,13 @@ const esquemaReporte = z.object({
   // opcional: un bundle viejo que no los manda sigue entrando.
   /** Recargas automaticas ya hechas en la ruta (ventana de 3 min). */
   intento: z.number().int().min(0).max(100).optional(),
-  /** Lo que decidio la pantalla: `agotado` = la persona vio "está tardando más de lo normal". */
+  /** Lo que decidio la pantalla: `agotado` = la persona vio "No pudimos conectar con ONE". */
   accion: z.enum(['suave', 'recarga', 'esperar-red', 'agotado', 'ninguna']).optional(),
+  /**
+   * Desde 2026-10-06: con `message: 'aviso-conexion-mostrado'`, por que la persona vio "No
+   * pudimos conectar con ONE" (`lib/red/aviso-conexion.ts`). Un valor raro no tumba el reporte.
+   */
+  causa: z.enum(CAUSAS_AVISO_CONEXION).optional().catch(undefined),
   /** `true` = cierre del episodio: la pagina se recupero sola en ese `intento`. */
   recuperado: z.boolean().optional(),
   /** `navigator.onLine` al decidir. */

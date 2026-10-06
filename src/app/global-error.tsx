@@ -6,6 +6,7 @@ import { useRecuperacionDeRed } from '@/hooks/use-recuperacion-de-red'
 import { olvidarRecargas, sessionStorageSeguro } from '@/lib/red/auto-recarga'
 import { TEXTO_SIN_INTERNET, textoPantallaDeError } from '@/lib/red/error-de-red'
 import { PALETA } from '@/lib/marca/paleta'
+import { AVISO_CONEXION } from '@/lib/red/aviso-conexion'
 
 /**
  * Ultimo recurso: se activa cuando el error revienta el layout raiz, asi que
@@ -86,7 +87,7 @@ export default function GlobalError({
               cursor: 'pointer',
             }}
           >
-            Recargar
+            {estado === 'agotado' ? AVISO_CONEXION.boton : 'Recargar'}
           </button>
           {estado === 'error' && (
             <button

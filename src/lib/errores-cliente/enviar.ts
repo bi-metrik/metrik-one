@@ -9,6 +9,7 @@ import {
   type Almacen,
 } from './cola'
 import { leerContextoRed } from '@/lib/red/contexto-red'
+import { MENSAJE_REPORTE_AVISO, type CausaAvisoConexion } from '@/lib/red/aviso-conexion'
 
 /**
  * Manda el error que pinto `error.tsx` / `global-error.tsx` a `/api/errores-cliente`.
@@ -204,6 +205,26 @@ export function reportarRecuperacion(p: {
         recuperado: true,
       },
       ['recuperado', p.origen, window.location.pathname, p.intento, p.accion].join('|'),
+    )
+  } catch {
+    // Idem.
+  }
+}
+
+let avisosDeConexion = 0
+
+/**
+ * La persona vio "No pudimos conectar con ONE" (`aviso-conexion.ts`). Una línea por
+ * aparición, con la causa: así se cuenta cuántas veces ONE se rindió ante la red. Los avisos
+ * que pinta el script en línea (sin hidratar, chunk, espera de ruta) se reportan desde el
+ * script; este es el de las pantallas de error con la escalera agotada. NUNCA lanza.
+ */
+export function reportarAvisoConexion(causa: CausaAvisoConexion): void {
+  try {
+    if (typeof window === 'undefined') return
+    enviar(
+      { message: MENSAJE_REPORTE_AVISO, name: 'AvisoConexion', causa },
+      ['aviso', ++avisosDeConexion, causa].join('|'),
     )
   } catch {
     // Idem.

@@ -9,6 +9,7 @@ import {
   TITULO_SITIO,
 } from '@/lib/marca/og'
 import VigiaRecuperacion from '@/components/red/vigia-recuperacion'
+import { ESTILO_AVISO_CONEXION, scriptAvisoConexion } from '@/lib/red/aviso-conexion'
 import './globals.css'
 
 // Fuentes autoalojadas (subset latin, variable). No se descargan de fonts.gstatic.com
@@ -103,6 +104,21 @@ export default function RootLayout({
 }>) {
   return (
     <html lang="es" suppressHydrationWarning>
+      {/*
+        Respaldo sin chunks (2026-10-06): si la red corta el JS antes de que React hidrate,
+        la pagina quedaba en blanco o en el splash para siempre. Este CSS y este script van
+        EN el HTML: pintan "No pudimos conectar con ONE" con Reintentar a los 20 s sin
+        hidratar, y le ponen tope a las esperas de carga. Ver `lib/red/aviso-conexion.ts`.
+        Sin CSP en ONE (revisado 2026-10-06): si un dia se agrega, este script necesita nonce.
+      */}
+      <head>
+        <style dangerouslySetInnerHTML={{ __html: ESTILO_AVISO_CONEXION }} />
+        <script
+          dangerouslySetInnerHTML={{
+            __html: scriptAvisoConexion(String(process.env.NEXT_DEPLOYMENT_ID || 'dev')),
+          }}
+        />
+      </head>
       <body className={`${schibsted.variable} ${newsreader.variable} ${martianMono.variable} antialiased`}>
         <ThemeProvider
           attribute="class"

@@ -1,6 +1,7 @@
 'use client'
 
 import AnimacionMarca from '@/components/marca/animacion-marca'
+import { AvisoConexion } from '@/components/red/aviso-conexion'
 import { useRecuperacionDeRed } from '@/hooks/use-recuperacion-de-red'
 import { olvidarRecargas, sessionStorageSeguro } from '@/lib/red/auto-recarga'
 import { TEXTO_SIN_INTERNET, textoPantallaDeError } from '@/lib/red/error-de-red'
@@ -21,7 +22,7 @@ import { RefreshCw } from 'lucide-react'
  * midio que la persona SI tenia internet (la ruta de su ISP hacia Vercel perdia paquetes).
  * La escalera (reintento suave, recargas con espera creciente, tope por ruta) vive en
  * `lib/red/auto-recarga.ts`; el texto solo cambia si el navegador dice que no hay red o
- * cuando se agotan los intentos.
+ * cuando se agotan los intentos ("No pudimos conectar con ONE" con Reintentar).
  */
 export default function AppError({
   error,
@@ -48,6 +49,11 @@ export default function AppError({
     // Un clic de la persona no es un bucle: la carga siguiente vuelve a tener la escalera.
     olvidarRecargas(window.location.pathname, sessionStorageSeguro())
     window.location.reload()
+  }
+
+  // Red, sin mas intentos automaticos: el aviso unico de conexion (`aviso-conexion.ts`).
+  if (estado === 'agotado') {
+    return <AvisoConexion onReintentar={recargar} className="min-h-[60vh]" />
   }
 
   return (
