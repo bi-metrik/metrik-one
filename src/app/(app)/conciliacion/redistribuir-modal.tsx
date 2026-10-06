@@ -7,6 +7,7 @@ import { toast } from 'sonner'
 import { redistribuirReferencia, buscarNegociosParaReparto } from '@/lib/actions/conciliacion-actions'
 import type { ReferenciaPago } from '@/lib/actions/conciliacion-actions'
 import { cuentasReparto, lineaSinNegocio, type CuentasReparto } from '@/lib/cobros/reparto-en-pantalla'
+import { useIntencion } from '@/hooks/use-intencion'
 
 const CARBON = 'var(--tinta)'
 const GRIS = 'var(--tinta-suave)'
@@ -63,6 +64,8 @@ export function RedistribuirModal({
         facturado: false,
       })),
   )
+  // Una clave por intención: un reintento de la misma acción no la ejecuta dos veces.
+  const intencion = useIntencion()
   const [motivo, setMotivo] = useState('')
   const [isPending, startTransition] = useTransition()
 
@@ -94,7 +97,8 @@ export function RedistribuirModal({
           .filter(l => l.negocioId && l.monto > 0)
           .map(l => ({ negocioId: l.negocioId, monto: l.monto, porDevolver: l.porDevolver })),
         motivo,
-      })
+      }, intencion.clave())
+      intencion.cerrar()
 
       if (!res.ok) {
         toast.error(res.error)

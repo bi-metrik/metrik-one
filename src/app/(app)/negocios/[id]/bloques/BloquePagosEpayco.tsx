@@ -10,6 +10,7 @@ import { consultarEpayco, registrarPagoEpayco, type NegocioExistente } from '@/l
 import type { EpaycoDesglose } from '@/lib/epayco'
 import type { NegocioBloque } from '../../negocio-v2-actions'
 import AvisoHonorarioPendiente from './AvisoHonorarioPendiente'
+import { useIntencion } from '@/hooks/use-intencion'
 
 export interface PagoRegistrado {
   ref_payco: number
@@ -60,6 +61,8 @@ export default function BloquePagosEpayco({
   const [pagos, setPagos] = useState<PagoRegistrado[]>(
     () => ((instancia?.data as { pagos?: PagoRegistrado[] } | null)?.pagos) ?? []
   )
+  // Una clave por intención: un reintento de la misma acción no la ejecuta dos veces.
+  const intencion = useIntencion()
 
   // Re-sincronizar pagos cuando la prop instancia.data cambia (tras revalidatePath).
   // Sin esto, registrar pago actualiza state local pero al re-render del padre
@@ -127,7 +130,8 @@ export default function BloquePagosEpayco({
     startTransition(async () => {
       const result = await registrarPagoEpayco(negocioBloqueId, negocioId, previewDesglose, tipoCobro, {
         validarEpayco,
-      })
+      }, intencion.clave())
+      intencion.cerrar()
       if (!result.success) {
         toast.error(result.error)
         if (result.code === 'referencia_duplicada' && result.negocio_existente) {
@@ -163,7 +167,8 @@ export default function BloquePagosEpayco({
       const result = await registrarPagoEpayco(negocioBloqueId, negocioId, minimalDesglose as EpaycoDesglose, tipoCobro, {
         validarEpayco,
         justificacion: just,
-      })
+      }, intencion.clave())
+      intencion.cerrar()
       if (!result.success) {
         toast.error(result.error)
       } else {

@@ -1,5 +1,7 @@
 'use server'
 
+import { accionIdempotente } from '@/lib/idempotencia/accion'
+import { MENSAJE_EN_CURSO } from '@/lib/idempotencia/clave'
 import { getWorkspace } from '@/lib/actions/get-workspace'
 import { canEditBloque, type UserContext, type Role, type Area } from '@/lib/permissions/can-edit'
 import { revalidatePath } from 'next/cache'
@@ -346,7 +348,7 @@ async function repartirPagoCore(
  * (techo de plata) vía `consultarTransaccionEpayco`. Manual: el comercial declara el
  * total (sin re-consulta externa).
  */
-export async function repartirPagoComercial(
+async function repartirPagoComercialSinClave(
   input: RepartirPagoInput & { fuente?: 'epayco' | 'manual' },
 ): Promise<{ success: true; split_id: string } | { success: false; error: string }> {
   const ctx = await ctxFabPago()
@@ -1821,7 +1823,7 @@ export async function crearCobrosSoenaCore(
  *
  * Permisos: solo área financiera (Diana) vía ctxFinanciero.
  */
-export async function aceptarRepartoComercial(
+async function aceptarRepartoComercialSinClave(
   externalRef: string,
 ): Promise<{ success: true; conciliados: number } | { success: false; error: string }> {
   const ctx = await ctxFinanciero()
@@ -2186,7 +2188,7 @@ export async function buscarNegociosParaReparto(
  * Las reglas viven en `src/lib/cobros/redistribucion.ts` (puro, 15 pruebas). Aquí solo
  * se resuelven contra la base y se ejecutan.
  */
-export async function redistribuirReferencia(input: {
+async function redistribuirReferenciaSinClave(input: {
   externalRef: string
   /** Valor real del pago que llegó. Se usa como techo. */
   pagoOriginal: number
@@ -2538,4 +2540,30 @@ export async function resolverAvisoRecaudo(input: {
 
 function fmtCop(n: number): string {
   return `$${Math.round(n).toLocaleString('es-CO')}`
+}
+
+// ── Idempotencia por intención (brief del doble guardado, 2026-10-06) ──────────────────
+// Las acciones de abajo son la puerta pública; su cuerpo vive en `<nombre>SinClave`. Con la
+// clave del navegador (`useIntencion`), la misma intención repetida (POST que Chromium
+// reenvía, doble toque, «Reintentar» tras «No se confirmó») se ejecuta una sola vez.
+
+export async function repartirPagoComercial(input: RepartirPagoInput & { fuente?: 'epayco' | 'manual' }, intencion?: string) {
+  return accionIdempotente<Awaited<ReturnType<typeof repartirPagoComercialSinClave>>>(
+    { accion: 'repartirPagoComercial', clave: intencion, args: [input], enCurso: () => ({ success: false, error: MENSAJE_EN_CURSO }) },
+    () => repartirPagoComercialSinClave(input),
+  )
+}
+
+export async function aceptarRepartoComercial(externalRef: string, intencion?: string) {
+  return accionIdempotente<Awaited<ReturnType<typeof aceptarRepartoComercialSinClave>>>(
+    { accion: 'aceptarRepartoComercial', clave: intencion, args: [externalRef], enCurso: () => ({ success: false, error: MENSAJE_EN_CURSO }) },
+    () => aceptarRepartoComercialSinClave(externalRef),
+  )
+}
+
+export async function redistribuirReferencia(input: Parameters<typeof redistribuirReferenciaSinClave>[0], intencion?: string) {
+  return accionIdempotente<Awaited<ReturnType<typeof redistribuirReferenciaSinClave>>>(
+    { accion: 'redistribuirReferencia', clave: intencion, args: [input], enCurso: () => ({ ok: false, error: MENSAJE_EN_CURSO }) },
+    () => redistribuirReferenciaSinClave(input),
+  )
 }

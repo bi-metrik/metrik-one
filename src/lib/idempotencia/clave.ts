@@ -51,3 +51,9 @@ export function resultadoEsFalla(r: unknown): boolean {
   if (o.ok === false || o.success === false) return true
   return typeof o.error === 'string' && o.error.length > 0
 }
+
+/**
+ * Lo que recibe una repetición mientras la primera ejecución de la MISMA intención sigue
+ * corriendo. No dice «intenta de nuevo»: repetir es justo lo que no hace falta.
+ */
+export const MENSAJE_EN_CURSO = 'Esto ya se está procesando. Revisa en unos segundos cómo quedó antes de repetirlo.'

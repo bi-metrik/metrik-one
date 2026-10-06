@@ -1,5 +1,7 @@
 'use server'
 
+import { accionIdempotente } from '@/lib/idempotencia/accion'
+import { MENSAJE_EN_CURSO } from '@/lib/idempotencia/clave'
 import { getWorkspace } from '@/lib/actions/get-workspace'
 import { enPeticionDeRuta } from '@/lib/actions/memo-de-ruta'
 import { revalidatePath } from 'next/cache'
@@ -2142,7 +2144,7 @@ export async function getDatosNuevoNegocio(): Promise<{
 
 // ── Crear negocio ─────────────────────────────────────────────────────────────
 
-export async function crearNegocio(input: EntradaCrearNegocio): Promise<ResultadoCrearNegocio> {
+async function crearNegocioSinClave(input: EntradaCrearNegocio): Promise<ResultadoCrearNegocio> {
   const { supabase, workspaceId, userId, role, staffId, error } = await getWorkspace()
   if (error || !workspaceId) return { negocio_id: null, error: 'No autenticado' }
   // Crear un negocio es la puerta a todo Clarity (bloques, carpeta de Drive, cobros): un
@@ -3114,7 +3116,7 @@ export type BloquePendienteGate = {
   advertencia?: string
 }
 
-export async function cambiarEtapaNegocioConGate(
+async function cambiarEtapaNegocioConGateSinClave(
   negocioId: string,
   nuevaEtapaId: string,
   motivoOverride?: string,
@@ -9467,4 +9469,23 @@ export async function descartarConflicto(negocioBloqueId: string, slug: string):
     .eq('id', destinoId)
   if (errEsc) return { error: (errEsc as { message: string }).message }
   return { error: null }
+}
+
+// ── Idempotencia por intención (brief del doble guardado, 2026-10-06) ──────────────────
+// Las acciones de abajo son la puerta pública; su cuerpo vive en `<nombre>SinClave`. Con la
+// clave del navegador (`useIntencion`), la misma intención repetida (POST que Chromium
+// reenvía, doble toque, «Reintentar» tras «No se confirmó») se ejecuta una sola vez.
+
+export async function crearNegocio(input: EntradaCrearNegocio, intencion?: string) {
+  return accionIdempotente<Awaited<ReturnType<typeof crearNegocioSinClave>>>(
+    { accion: 'crearNegocio', clave: intencion, args: [input], enCurso: () => ({ negocio_id: null, error: MENSAJE_EN_CURSO }) },
+    () => crearNegocioSinClave(input),
+  )
+}
+
+export async function cambiarEtapaNegocioConGate(negocioId: string, nuevaEtapaId: string, motivoOverride?: string, confirmado?: boolean, intencion?: string) {
+  return accionIdempotente<Awaited<ReturnType<typeof cambiarEtapaNegocioConGateSinClave>>>(
+    { accion: 'cambiarEtapaNegocioConGate', clave: intencion, args: [negocioId, nuevaEtapaId, motivoOverride, confirmado], enCurso: () => ({ error: MENSAJE_EN_CURSO }) },
+    () => cambiarEtapaNegocioConGateSinClave(negocioId, nuevaEtapaId, motivoOverride, confirmado),
+  )
 }

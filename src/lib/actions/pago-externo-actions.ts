@@ -1,5 +1,7 @@
 'use server'
 
+import { accionIdempotente } from '@/lib/idempotencia/accion'
+import { MENSAJE_EN_CURSO } from '@/lib/idempotencia/clave'
 import { getWorkspace } from '@/lib/actions/get-workspace'
 import { guardEditarBloque } from '@/lib/permissions/guard-negocio'
 import { revalidatePath } from 'next/cache'
@@ -47,7 +49,7 @@ export interface RegistrarPagoExternoInput {
  * Idempotencia: por `external_ref` (referencia) dentro del negocio — un doble
  * click no duplica el cobro.
  */
-export async function registrarPagoExterno(
+async function registrarPagoExternoSinClave(
   negocioBloqueId: string,
   negocioId: string,
   input: RegistrarPagoExternoInput,
@@ -184,4 +186,16 @@ export async function registrarPagoExterno(
     console.error('[pago externo]', message)
     return { success: false, error: message }
   }
+}
+
+// ── Idempotencia por intención (brief del doble guardado, 2026-10-06) ──────────────────
+// Las acciones de abajo son la puerta pública; su cuerpo vive en `<nombre>SinClave`. Con la
+// clave del navegador (`useIntencion`), la misma intención repetida (POST que Chromium
+// reenvía, doble toque, «Reintentar» tras «No se confirmó») se ejecuta una sola vez.
+
+export async function registrarPagoExterno(negocioBloqueId: string, negocioId: string, input: RegistrarPagoExternoInput, intencion?: string) {
+  return accionIdempotente<Awaited<ReturnType<typeof registrarPagoExternoSinClave>>>(
+    { accion: 'registrarPagoExterno', clave: intencion, args: [negocioBloqueId, negocioId, input], enCurso: () => ({ success: false, error: MENSAJE_EN_CURSO }) },
+    () => registrarPagoExternoSinClave(negocioBloqueId, negocioId, input),
+  )
 }

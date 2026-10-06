@@ -10,6 +10,7 @@ import { searchContactos, searchEmpresas } from '@/app/(app)/directorio/actions'
 import { SECTORES_EMPRESA, ORIGENES_NEGOCIO, ORIGEN_ALIANZA } from '@/lib/catalogos/constants'
 import { PhoneInput } from '@/components/phone-input'
 import { DialogoNegocioDuplicado } from '@/components/negocios/dialogo-negocio-duplicado'
+import { useIntencion } from '@/hooks/use-intencion'
 
 type ContactoResult = { id: string; nombre: string; telefono: string | null; email: string | null }
 type EmpresaResult = { id: string; nombre: string; sector: string | null }
@@ -37,6 +38,8 @@ export default function NuevoNegocioForm({
   aliadosHabilitado?: boolean
 }) {
   const router = useRouter()
+  // Una clave por intención: un reintento de la misma acción no la ejecuta dos veces.
+  const intencion = useIntencion()
   const [isPending, startTransition] = useTransitionTolerante()
   const [step, setStep] = useState(0)
   /** Negocios que ya existen para el contacto elegido. null = no hay que preguntar. */
@@ -199,7 +202,8 @@ export default function NuevoNegocioForm({
         origen,
         aliado_id: esAlianza ? aliadoId : undefined,
         confirmar_duplicado: confirmarDuplicado,
-      })
+      }, intencion.clave())
+      intencion.cerrar()
 
       // El teléfono tecleado ya era de otro contacto: no se creó una segunda
       // ficha, se usó la que existe. Se dice siempre, incluso cuando no hay

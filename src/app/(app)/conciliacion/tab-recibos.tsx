@@ -32,6 +32,7 @@ import type {
 } from '@/lib/actions/recibos-control-actions'
 import { docDeRecibo, hrefArchivoDeCobro } from '@/lib/almacenamiento/archivo-de-cobro'
 import type { ComponenteRecibo } from '@/lib/siigo/recibo-componentes'
+import { useIntencion } from '@/hooks/use-intencion'
 
 /**
  * Cómo se le nombra cada componente a una persona.
@@ -172,6 +173,8 @@ export default function TabRecibos(
  */
 export function FilaPago({ pago, onCambio }: { pago: PagoConRecibo; onCambio: () => void }) {
   const [pendiente, startTransition] = useTransition()
+  // Una clave por intención: un reintento de la misma acción no la ejecuta dos veces.
+  const intencion = useIntencion()
   const [abierto, setAbierto] = useState(false)
   const [justificacion, setJustificacion] = useState('')
   const [duplicados, setDuplicados] = useState<Array<{ numero: string; fecha: string; valor: number }> | null>(null)
@@ -183,7 +186,8 @@ export function FilaPago({ pago, onCambio }: { pago: PagoConRecibo; onCambio: ()
       const r = await emitirReciboDeNegocio(pago.negocio_id, {
         cobroId: pago.cobro_id,
         justificacionDuplicado: justificacion.trim() || undefined,
-      })
+      }, intencion.clave())
+      intencion.cerrar()
       if (r.ok) {
         toast.success(
           r.archivada

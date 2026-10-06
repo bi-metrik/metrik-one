@@ -6,6 +6,7 @@ import { X, Loader2, Plus, Trash2, ArrowRightLeft, Wallet } from 'lucide-react'
 import { toast } from 'sonner'
 import { repartirPagoComercial } from '@/lib/actions/conciliacion-actions'
 import { getNegociosParaPagoFab, type NegocioParaPagoFab } from '@/lib/actions/fab-pago-actions'
+import { useIntencion } from '@/hooks/use-intencion'
 
 const VERDE = 'var(--acento)'
 const FONT = { fontFamily: 'var(--font-schibsted), sans-serif' }
@@ -56,6 +57,8 @@ export default function DistribuirPagoModal({
   contextoEpayco?: boolean
 }) {
   const [negocios, setNegocios] = useState<NegocioParaPagoFab[]>([])
+  // Una clave por intención: un reintento de la misma acción no la ejecuta dos veces.
+  const intencion = useIntencion()
   const [loading, setLoading] = useState(true)
   const [loadError, setLoadError] = useState<string | null>(null)
 
@@ -161,7 +164,8 @@ export default function DistribuirPagoModal({
         porciones: limpias,
         fuente: tipoFuente,
         fecha: fecha || undefined,
-      })
+      }, intencion.clave())
+      intencion.cerrar()
       if (res.success) {
         toast.success(
           limpias.length > 1
