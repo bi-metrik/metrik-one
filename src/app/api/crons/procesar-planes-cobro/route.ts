@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server'
+import { candadoDeCron } from '@/lib/idempotencia/candado-cron'
 import { createClient } from '@supabase/supabase-js'
 import { todayBogotaISO } from '@/lib/dates/bogota'
 import { generarCuentasCobroPeriodo } from '@/lib/cobros/generar-cuentas-cobro'
@@ -93,6 +94,10 @@ export async function GET(req: NextRequest) {
   if (!cronHeader && authHeader !== `Bearer ${process.env.CRON_SECRET}`) {
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
   }
+
+  // Una sola corrida aunque Vercel entregue el cron dos veces (ver `candadoDeCron`).
+  const otraCorrida = await candadoDeCron('procesar-planes-cobro', req)
+  if (otraCorrida) return otraCorrida
 
   const supabase = createClient(
     process.env.NEXT_PUBLIC_SUPABASE_URL!,
