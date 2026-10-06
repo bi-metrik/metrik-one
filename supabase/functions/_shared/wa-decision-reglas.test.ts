@@ -155,7 +155,9 @@ describe('lo que el código lee sin el modelo: el número de la lista, el códig
 describe('lo que el código acepta del modelo: un id vigente, «contenido», «pregunta», «no sé», y donde se pide, el nombre, la llave o la corrección', () => {
   const p = viaje();
   it('un id vigente; uno inventado es «no sé»', () => {
-    expect(validarDecision({ tipo: 'opcion', opcion: 'v3' }, p, 'el de San Andrés')).toMatchObject({ tipo: 'opcion', opcion: { canonico: '3' } });
+    // Elegir un viaje escribe en él: el id es vigente, pero lo leído de un escrito pide el toque.
+    expect(validarDecision({ tipo: 'opcion', opcion: 'v3' }, p, 'el de San Andrés')).toMatchObject({ tipo: 'solo_toque', opcion: { canonico: '3' } });
+    expect(validarDecision({ tipo: 'opcion', opcion: 'des' }, p, 'eso no va')).toMatchObject({ tipo: 'opcion', opcion: { canonico: 'descartar' } });
     expect(validarDecision({ tipo: 'opcion', opcion: 'v7' }, p, 'el séptimo')).toEqual({ tipo: 'no_se', motivo: 'id_inventado' });
     expect(validarDecision({ tipo: 'opcion', opcion: 'n2' }, p, 'el 2')).toEqual({ tipo: 'no_se', motivo: 'id_inventado' });
   });
@@ -206,6 +208,78 @@ describe('lo que el código acepta del modelo: un id vigente, «contenido», «p
     expect(nombreLiteral('Valeria Prueba5', 'nuevo Valeria Prueba5 300 1')).toBe('Valeria Prueba5');
     expect(nombreLiteral('Ana 300', 'Ana 300 555')).toBeNull();
     expect(nombreLiteral('Juan Pablo Ortega Zuleta Ruiz', 'Juan Pablo Ortega Zuleta Ruiz')).toBeNull();
+  });
+});
+
+describe('lo que escribe en un viaje o crea algo sale solo de lo exacto, nunca de lo que el modelo leyó (2026-10-06, SR3 «👌»)', () => {
+  const resumen = puntoDelResumen('e', huellaDelPlanParaPruebas('ninguna'), '', 'entrega', V);
+  const nuevo = puntoDelNuevo('e', '', 'Ignacio Salgar', OPCIONES, V);
+  const cruce = puntoConfirmacion({ ref: 'n', nombre: '', pregunta: '', corta: '¿Van a T1 26 9?', c: 'cruce', botones: [{ id: 'bdj|p|si|n|-', title: 'Sí, van ahí' }] });
+  const sinSolicitud = puntoConfirmacion({ ref: 'n', nombre: '', pregunta: '', corta: '¿Abro el viaje?', c: 'sin_solicitud', botones: [{ id: 'bdj|p|si|n|-', title: 'Sí, ábrelo' }] });
+  const misma = puntoContacto({ ref: 'x', nombre: '', pregunta: '', pide: 'misma', fichas: [{ id: 'c', nombre: 'X' }] });
+  const elegir = puntoContacto({ ref: 'x', nombre: '', pregunta: '', pide: 'elegir', fichas: [{ id: 'c1', nombre: 'Ana Gómez' }, { id: 'c2', nombre: 'Ana Gomez' }] });
+  const crear = puntoContacto({ ref: 'x', nombre: '', pregunta: '', pide: 'crear', fichas: [], propuesto: 'Ignacio Salgar' });
+  it('SR3 y sus variantes: «👌», «👍», «ok», «dale» al resumen no cargan; el toque, el número y el «sí» solo, sí', () => {
+    for (const texto of ['👌', '👍', 'ok', 'dale', 'Dale pues', 'okis 👌']) {
+      expect(leerExacto(texto, resumen)).toBeNull();
+      const v = validarDecision({ tipo: 'opcion', opcion: 'si' }, resumen, texto);
+      expect(v).toMatchObject({ tipo: 'solo_toque', opcion: { clave: 'si' } });
+      expect(textoVolverAPreguntar(resumen, 'solo_toque', v.tipo === 'solo_toque' ? v.opcion : null)).toMatch(/^Para cargarlo, toca «.+»\. No he cargado nada\.\n/);
+    }
+    for (const texto of ['sí', 'Si', 'SÍ.', 'si!']) expect(leerExacto(texto, resumen)).toMatchObject({ tipo: 'opcion', opcion: { clave: 'si' } });
+    // «Descartar» y la corrección no escriben en un viaje: siguen saliendo del modelo.
+    expect(validarDecision({ tipo: 'opcion', opcion: 'des' }, resumen, 'bórralo todo')).toMatchObject({ tipo: 'opcion' });
+    expect(resumen.opciones.map(o => o.clave)).toEqual(['si', 'des', 'g1', 'xt12611', 'xt12614', 'xt1269', 'xj262']);
+  });
+  it('cada opción que escribe o crea, en cada punto, pide el toque; lo que no escribe, no', () => {
+    const casos: Array<[string, PuntoDecision, string, boolean]> = [
+      ['resumen · Cargar', resumen, 'si', true],
+      ['viaje · un viaje de la lista', viaje(), 'v2', true],
+      ['viaje · un viaje fuera de la lista', viaje(), 'xj262', true],
+      ['viaje · «Viaje nuevo» a secas (muestra el cliente antes de crearlo)', viaje(), 'nuevo', false],
+      ['viaje · Descartar', viaje(), 'des', false],
+      ['nuevo · Crear', nuevo, 'crear', true],
+      ['nuevo · un viaje que ya existe', nuevo, 'v1', true],
+      ['nuevo · No es nuevo', nuevo, 'no_nuevo', false],
+      ['cruce · Sí', cruce, 'si', true],
+      ['cruce · Es otro viaje', cruce, 'no', false],
+      ['sin solicitud · Sí', sinSolicitud, 'si', true],
+      ['contacto · Sí, es la misma', misma, 'si', true],
+      ['contacto · No, es otra', misma, 'no', false],
+      ['contacto · una ficha', elegir, 'c1', true],
+      ['contacto · Otra persona', elegir, 'otra', false],
+      ['contacto · Crear', crear, 'crear', true],
+    ];
+    for (const [nombre, punto, clave, toque] of casos) {
+      expect(punto.opciones.some(o => o.clave === clave), nombre).toBe(true);
+      expect(validarDecision({ tipo: 'opcion', opcion: clave }, punto, 'algo escrito').tipo, nombre).toBe(toque ? 'solo_toque' : 'opcion');
+    }
+  });
+  it('lo exacto sí aplica: el número de la lista, el código y el «sí» escrito solo', () => {
+    expect(leerExacto('2', viaje())).toMatchObject({ tipo: 'opcion', opcion: { clave: 'v2' } });
+    expect(leerExacto('T1 26 9', viaje())).toMatchObject({ tipo: 'opcion', opcion: { clave: 'v3' } });
+    expect(leerExacto('sí', cruce)).toMatchObject({ tipo: 'opcion', opcion: { clave: 'si' } });
+    expect(leerExacto('300 555 1234', crear)).toMatchObject({ tipo: 'llave' });
+  });
+  it('«Viaje nuevo» con el nombre copiado va a la confirmación (otro toque); el nombre propuesto repetido pide el toque', () => {
+    expect(validarDecision({ tipo: 'opcion', opcion: 'nuevo', nombre: 'Marta Gómez' }, viaje(), 'es nuevo, de Marta Gómez')).toMatchObject({ tipo: 'opcion', nombre: 'Marta Gómez' });
+    expect(validarDecision({ tipo: 'nombre', nombre: 'Ignacio Salgar' }, crear, 'sí, Ignacio Salgar')).toMatchObject({ tipo: 'solo_toque', opcion: { clave: 'crear' } });
+    expect(validarDecision({ tipo: 'nombre', nombre: 'Ignacio Salgado' }, crear, 'no, es Ignacio Salgado')).toEqual({ tipo: 'nombre', nombre: 'Ignacio Salgado' });
+  });
+  it('en el contacto de un viaje nuevo la llave cierra o crea: leída del escrito, se pide escrita sola; en la caja, no', () => {
+    const v = validarDecision({ tipo: 'llave' }, crear, 'sí, créalo con el 300 555 1234');
+    expect(v).toEqual({ tipo: 'solo_toque', opcion: null });
+    expect(textoVolverAPreguntar(crear, 'solo_toque', null)).toMatch(/^Escríbeme solo el celular o el correo, sin más texto\. No he creado nada\.\n/);
+    const caja = puntoTanda({ ref: 't', nombre: '', pregunta: '', pendiente: { tipo: 'llave' } });
+    expect(validarDecision({ tipo: 'llave' }, caja, 'anótale el cel 300 222 3344')).toEqual({ tipo: 'llave', canonico: '3002223344' });
+  });
+  it('los textos dicen qué tocar y que no hizo nada', () => {
+    const t = (p: PuntoDecision, clave: string) => textoVolverAPreguntar(p, 'solo_toque', p.opciones.find(o => o.clave === clave));
+    expect(t(viaje(), 'v2')).toMatch(/^Si es «CARTAGENA 3N», tócalo en la lista\. No he cargado nada\./);
+    expect(t(nuevo, 'crear')).toMatch(/^Para crear el cliente, toca «Crear»\. No he creado nada\./);
+    expect(t(cruce, 'si')).toMatch(/^Para seguir, toca «Sí, van ahí»\. No he cargado nada\./);
+    const conCliente = puntoDelResumen('e', huellaDelPlanParaPruebas('ninguna'), '', 'entrega', V);
+    expect(t({ ...conCliente, creaCliente: true }, 'si')).toMatch(/^Para cargarlo y crear el cliente, toca «.+»\. No he cargado nada\./);
   });
 });
 

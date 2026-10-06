@@ -205,7 +205,9 @@ export function textoPreguntaNegocio(p: { nMensajes: number; opciones: ReadonlyA
   return [
     conAviso(`¿De qué viaje ${cuales}?${prop}`),
     ...p.opciones.map((o, i) => `${i + 1}. ${lineaDeOpcion(o)}`),
-    pieDeLista(p.opciones, PIE_NUEVO),
+    // Elegir el viaje carga en él: con el toque o el número (2026-10-06). Lo que el modelo lea de «el de Cartagena» pide
+    // el toque, así que la pregunta ya no lo ofrece. (En la caja abierta sí: allí elegir no carga todavía.)
+    `Tócalo en la lista o escribe su número. ${PIE_NUEVO}`,
   ].join('\n');
 }
 

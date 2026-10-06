@@ -15,7 +15,9 @@
 //
 // Cada opción lleva su `canonico`: el texto exacto que el lector de hoy ya entiende sin adivinar («sí», «2»,
 // «descartar», «nuevo Ana Ruiz», un código). Así la decisión entra por el mismo camino de siempre y el cron la lee
-// igual. Crear un cliente nunca sale de un escrito: esas opciones son `soloToque`.
+// igual. Lo que escribe en un viaje o crea algo (cargar, crear el cliente, mandar los mensajes a un viaje) nunca sale
+// de lo que el modelo leyó en un escrito libre: esas opciones son `soloToque` (2026-10-06, tras el «👌» de SR3 que el
+// modelo leyó como «Cargar»). El toque, el número, el código y el «sí» escrito solo sí valen.
 //
 // Límites de Meta, leídos en la documentación oficial el 2026-10-06 (developers.facebook.com/docs/whatsapp/cloud-api/
 // messages/interactive-reply-buttons-messages e interactive-list-messages):
@@ -98,8 +100,10 @@ export interface OpcionDecision {
   /** «Viaje nuevo» con el nombre del cliente («es nuevo, de Marta Gómez»). */
   aceptaNombre?: boolean;
   /**
-   * Crear un cliente: con el toque, o con un «sí» escrito solo (tan exacto como el toque). Lo que el modelo lee de un
-   * escrito libre («sí, créalo de una») nunca crea: pide el toque.
+   * La opción escribe en un viaje o crea algo (cargar el reparto, crear el cliente, mandar los mensajes a un viaje,
+   * cerrar el contacto): solo con lo exacto (el toque, el número, el código o el «sí» escrito solo). Lo que el modelo
+   * lee de un escrito libre («👌», «dale», «sí, créalo de una», «el de San Andrés») nunca la aplica: pide el toque.
+   * Con `aceptaNombre`, el nombre copiado del escrito sí vale: lleva a la confirmación de crear, que es otro toque.
    */
   soloToque?: boolean;
   /** El «sí» o el «no» escritos solos. */
@@ -131,6 +135,8 @@ export interface PuntoDecision {
   propuesto?: string | null;
   /** Los números de los mensajes del resumen, como los ve el comercial (una corrección solo puede nombrar esos). */
   numeros?: number[];
+  /** En el resumen: el «sí» crearía un cliente (cambia lo que dice el bot al pedir el toque). */
+  creaCliente?: boolean;
 }
 
 /**
@@ -348,8 +354,11 @@ export function contextoDecision(p: PuntoDecision, texto: string): string {
 
 export type Veredicto =
   | { tipo: 'opcion'; opcion: OpcionDecision; nombre?: string }
-  /** El modelo eligió crear un cliente: solo con el toque. */
-  | { tipo: 'solo_toque'; opcion: OpcionDecision }
+  /**
+   * El modelo leyó algo que escribe o crea: solo con el toque. `opcion: null` es la llave que el modelo vio en un escrito
+   * del contacto de un viaje nuevo: ahí la llave cierra o crea el cliente, así que se pide escrita sola.
+   */
+  | { tipo: 'solo_toque'; opcion: OpcionDecision | null }
   | { tipo: 'nombre'; nombre: string }
   /** La llave que trae el escrito, como la lee el código (`llavesDelTexto`): celular, correo o usuario. */
   | { tipo: 'llave'; canonico: string }
@@ -394,7 +403,10 @@ export function validarDecision(json: unknown, p: PuntoDecision, texto: string):
     if (!p.pide?.llave) return { tipo: 'no_se', motivo: 'llave_no_permitida' };
     // La llave la lee el código del mensaje (dígitos, correo o usuario): el modelo solo dice que el escrito la trae.
     const canonico = conLlaveDelTexto('', texto).trim();
-    return canonico ? { tipo: 'llave', canonico } : { tipo: 'no_se', motivo: 'llave_no_escrita' };
+    if (!canonico) return { tipo: 'no_se', motivo: 'llave_no_escrita' };
+    // En el contacto de un viaje nuevo la llave cierra el contacto o crea el cliente: escrita sola (lo exacto), no leída.
+    if (p.origen === 'contacto') return { tipo: 'solo_toque', opcion: null };
+    return { tipo: 'llave', canonico };
   }
   if (tipo === 'nombre') {
     if (!p.pide?.nombre) return { tipo: 'no_se', motivo: 'nombre_no_permitido' };
@@ -410,12 +422,13 @@ export function validarDecision(json: unknown, p: PuntoDecision, texto: string):
   if (tipo === 'opcion') {
     const o = p.opciones.find(x => x.clave === String(j.opcion ?? ''));
     if (!o) return { tipo: 'no_se', motivo: 'id_inventado' };
-    if (o.soloToque) return { tipo: 'solo_toque', opcion: o };
     if (o.aceptaNombre && j.nombre) {
       const nombre = nombreLiteral(j.nombre, texto);
       if (!nombre) return { tipo: 'no_se', motivo: 'nombre_no_escrito' };
+      // El nombre lleva a «¿Creo el cliente nuevo …?», que se confirma con otro toque.
       return { tipo: 'opcion', opcion: o, nombre };
     }
+    if (o.soloToque) return { tipo: 'solo_toque', opcion: o };
     return { tipo: 'opcion', opcion: o };
   }
   return { tipo: 'no_se', motivo: tipo === 'no_se' ? 'modelo_no_sabe' : 'tipo_desconocido' };
@@ -475,15 +488,28 @@ export function conLlaveDelTexto(canonico: string, texto?: string | null): strin
 /** Timeout o error del modelo en un punto de decisión: el bot no adivina. */
 export const TEXTO_NO_TE_ENTENDI = 'No te entendí; toca una opción.';
 /** Lo que se dice al volver a preguntar (una vez, en corto). */
-export function textoVolverAPreguntar(p: PuntoDecision, motivo: 'no_se' | 'fuera' | 'modelo' | 'solo_toque' | 'pregunta' | 'viejo' | 'todavia'): string {
+export function textoVolverAPreguntar(
+  p: PuntoDecision, motivo: 'no_se' | 'fuera' | 'modelo' | 'solo_toque' | 'pregunta' | 'viejo' | 'todavia', opcion?: OpcionDecision | null,
+): string {
   const q = `${p.nombre ? `${p.nombre} · ` : ''}${p.corta}`;
   if (motivo === 'todavia') return `Todavía no lo cargo. ${q}`;
   if (motivo === 'modelo') return `${TEXTO_NO_TE_ENTENDI}\n${q}`;
   if (motivo === 'fuera') return `Ese número no está en la lista. ${q}`;
-  if (motivo === 'solo_toque') return `${p.tipo === 'resumen' ? 'Para cargarlo y crear el cliente, toca el botón.' : 'Para crear el cliente, toca «Crear».'} No he creado nada.\n${q}`;
+  if (motivo === 'solo_toque') return `${textoSoloToque(p, opcion ?? null)}\n${q}`;
   if (motivo === 'pregunta') return `Eso te lo contesto después. Primero: ${q}`;
   if (motivo === 'viejo') return `${TEXTO_TOQUE_SIN_PREGUNTA}\n${q}`;
   return `No me quedó claro. ${q}`;
+}
+
+/** Lo que pide el bot cuando el modelo leyó algo que escribe o crea: tocar la opción (y que no hizo nada). */
+function textoSoloToque(p: PuntoDecision, o: OpcionDecision | null): string {
+  if (!o) return 'Escríbeme solo el celular o el correo, sin más texto. No he creado nada.';
+  const titulo = o.titulo.replace(/^\d+\.\s*/, '');
+  if (p.tipo === 'resumen') return p.creaCliente ? `Para cargarlo y crear el cliente, toca «${titulo}». No he cargado nada.` : `Para cargarlo, toca «${titulo}». No he cargado nada.`;
+  if (o.clave === 'crear') return 'Para crear el cliente, toca «Crear». No he creado nada.';
+  if (p.tipo === 'confirmacion') return `Para seguir, toca «${titulo}». No he cargado nada.`;
+  if (/^Es /.test(titulo)) return `Para ir a ese viaje, toca «${titulo}». No he cargado nada.`;
+  return `Si es «${titulo}», tócalo en la lista. No he cargado nada.`;
 }
 
 // ── Los puntos de cada pregunta ──────────────────────────────────────────────
@@ -514,11 +540,13 @@ export function puntoViaje(p: {
   opciones: ReadonlyArray<ViajeDeLista>; otros?: ReadonlyArray<ViajeDeLista>;
 }): PuntoDecision {
   const lista = p.opciones.slice(0, MAX_VIAJES_EN_LISTA);
+  // Elegir un viaje carga los mensajes en él: solo con lo exacto. «Viaje nuevo» no escribe todavía: con o sin el nombre,
+  // el bot muestra el cliente antes de crearlo («¿Creo el cliente nuevo …?», que es otro toque).
   const opciones: OpcionDecision[] = [
-    ...lista.map((v, i) => opcionDeViaje(v, i + 1, `v${i + 1}`, String(i + 1), true)),
+    ...lista.map((v, i) => ({ ...opcionDeViaje(v, i + 1, `v${i + 1}`, String(i + 1), true), soloToque: true })),
     { clave: 'nuevo', titulo: 'Viaje nuevo', descripcion: 'Un viaje que todavía no existe', canonico: 'nuevo', visible: true, aceptaNombre: true },
     { clave: 'des', titulo: 'Descartar', descripcion: 'No es de ningún viaje', canonico: 'descartar', visible: true },
-    ...ocultos(p.otros ?? [], lista),
+    ...ocultos(p.otros ?? [], lista).map(o => ({ ...o, soloToque: true })),
   ];
   return conVersion({
     origen: p.origen, ref: p.ref, tipo: 'viaje', nombre: p.nombre, pregunta: p.pregunta, corta: '¿De qué viaje son?', opciones,
@@ -567,7 +595,9 @@ export function puntoResumen(p: {
   const si = titulo('si');
   // «No pude revisar el directorio … Responde sí en un momento y lo intento de nuevo»: el «sí» reintenta (no carga).
   if (!si && p.falta?.tipo === 'error') opciones.push({ clave: 'si', titulo: 'Reintentar', canonico: 'sí', visible: false, sentido: 'si' });
-  if (si) opciones.push({ clave: 'si', titulo: si, canonico: p.falta?.tipo === 'confirmar' ? 'es la misma' : 'sí', visible: true, sentido: 'si', ...(p.creaCliente && p.falta?.tipo !== 'confirmar' ? { soloToque: true } : {}) });
+  // El «sí» carga (y, si hace falta, crea el cliente): solo con lo exacto. «Sí, es la misma» solo elige el cliente y
+  // vuelve al resumen: no escribe.
+  if (si) opciones.push({ clave: 'si', titulo: si, canonico: p.falta?.tipo === 'confirmar' ? 'es la misma' : 'sí', visible: true, sentido: 'si', ...(p.falta?.tipo !== 'confirmar' ? { soloToque: true } : {}) });
   const no = titulo('no');
   if (no) opciones.push({ clave: 'no', titulo: no, canonico: 'no', visible: true, sentido: 'no' });
   if (p.falta?.tipo === 'elegir') opciones.push(...opcionesDeFichas(p.falta.fichas ?? [], 'es otra persona'));
@@ -582,6 +612,7 @@ export function puntoResumen(p: {
       : p.falta?.tipo === 'nombre' ? '¿Cómo se llama el cliente?' : '¿Lo cargo así?',
     opciones, pide: { correccion: true, llave: p.falta?.tipo === 'llave' || p.falta?.tipo === 'nombre', nombre: p.falta?.tipo === 'nombre' },
     ...(lista ? {} : { botones: p.botones }), version: p.version, ...(p.numeros ? { numeros: p.numeros } : {}),
+    ...(p.creaCliente ? { creaCliente: true } : {}),
   };
 }
 
@@ -590,7 +621,8 @@ export function puntoConfirmacion(p: {
   ref: string; nombre: string; pregunta: string; corta: string; c: 'cruce' | 'sin_solicitud' | 'dos_viajes'; botones: BotonBandeja[];
 }): PuntoDecision {
   const opciones: OpcionDecision[] = [];
-  if (p.c !== 'dos_viajes') opciones.push({ clave: 'si', titulo: p.botones[0]?.title ?? 'Sí', canonico: 'sí', visible: true, sentido: 'si' });
+  // El «sí» carga en el viaje (cruce) o abre uno (sin solicitud): solo con lo exacto.
+  if (p.c !== 'dos_viajes') opciones.push({ clave: 'si', titulo: p.botones[0]?.title ?? 'Sí', canonico: 'sí', visible: true, sentido: 'si', soloToque: true });
   // «No van ahí»: en el cruce, la lista de viajes otra vez; «no es una solicitud»: descartar.
   if (p.c === 'cruce') opciones.push({ clave: 'no', titulo: 'Es otro viaje', canonico: 'no', visible: false, sentido: 'no' });
   if (p.c === 'sin_solicitud') opciones.push({ clave: 'no', titulo: 'No es una solicitud', canonico: 'descartar', visible: false, sentido: 'no' });
@@ -618,15 +650,16 @@ export function puntoNuevo(p: {
       titulo: `Es ${nombreDeViaje({ cliente: x.viaje.cliente, codigo: null }) || x.viaje.codigo || 'ese viaje'}`,
       // Su número en la lista de «¿A qué viaje van?» sigue valiendo escrito solo.
       numero: x.numero ?? undefined,
+      soloToque: true,
     })).filter(o => o.canonico),
     { clave: 'no_nuevo', titulo: 'No es nuevo', descripcion: 'Elegir el viaje que ya existe', canonico: CANONICO_NO_ES_NUEVO, visible: true },
     { clave: 'des', titulo: TITULO_DESCARTAR, canonico: 'descartar', visible: true },
     // Los viajes de la lista y los demás abiertos: el modelo los puede elegir; su número o su código escritos valen.
     ...enLista.filter(v => !pars.some(x => x.viaje.id === v.id)).map(v => {
       const k = p.opciones.indexOf(v) + 1;
-      return { ...opcionDeViaje(v, k, `v${k}`, String(k), false), numero: k };
+      return { ...opcionDeViaje(v, k, `v${k}`, String(k), false), numero: k, soloToque: true };
     }),
-    ...ocultos(p.otros ?? [], [...enLista, ...pars.map(x => x.viaje)]),
+    ...ocultos(p.otros ?? [], [...enLista, ...pars.map(x => x.viaje)]).map(o => ({ ...o, soloToque: true })),
   ];
   return conVersion({
     origen: 'negocio', ref: p.ref, tipo: 'nuevo', nombre: p.nombre, pregunta: p.pregunta,
@@ -638,6 +671,8 @@ export function puntoNuevo(p: {
 export function puntoContacto(p: {
   ref: string; nombre: string; pregunta: string; pide: 'crear' | 'llave' | 'nombre' | 'misma' | 'elegir';
   fichas: ReadonlyArray<FichaDeLista>; botones?: BotonBandeja[];
+  /** El nombre que el bot mostró al preguntar: repetirlo es el «sí» a crear (solo con el toque). */
+  propuesto?: string | null;
 }): PuntoDecision {
   const des: OpcionDecision = { clave: 'des', titulo: TITULO_DESCARTAR, canonico: 'descartar', visible: true };
   const base = { origen: 'contacto' as const, ref: p.ref, nombre: p.nombre, pregunta: p.pregunta };
@@ -645,7 +680,8 @@ export function puntoContacto(p: {
     return conVersion({
       ...base, tipo: 'misma', corta: '¿Es la misma persona?',
       opciones: [
-        { clave: 'si', titulo: p.botones?.[0]?.title ?? 'Sí, es la misma', canonico: 'sí', visible: true, sentido: 'si' },
+        // Cierra el contacto y crea el viaje: solo con lo exacto.
+        { clave: 'si', titulo: p.botones?.[0]?.title ?? 'Sí, es la misma', canonico: 'sí', visible: true, sentido: 'si', soloToque: true },
         { clave: 'no', titulo: p.botones?.[1]?.title ?? 'No, es otra', canonico: 'no', visible: true, sentido: 'no' },
         { ...des, visible: false },
       ],
@@ -653,12 +689,15 @@ export function puntoContacto(p: {
     });
   }
   if (p.pide === 'elegir') {
-    return conVersion({ ...base, tipo: 'elegir_cliente', corta: '¿Cuál contacto es, o es otra persona?', opciones: [...opcionesDeFichas(p.fichas, 'es otra persona'), des], pide: { llave: true } });
+    // Elegir una ficha cierra el contacto y crea el viaje: solo con lo exacto. «Otra persona» vuelve a preguntar.
+    const fichas = opcionesDeFichas(p.fichas, 'es otra persona').map(o => (o.clave === 'otra' ? o : { ...o, soloToque: true }));
+    return conVersion({ ...base, tipo: 'elegir_cliente', corta: '¿Cuál contacto es, o es otra persona?', opciones: [...fichas, des], pide: { llave: true } });
   }
   if (p.pide === 'crear') {
     return conVersion({
       ...base, tipo: 'crear', corta: '¿Lo creo como cliente nuevo?',
       opciones: [{ clave: 'crear', titulo: 'Crear', canonico: 'sí', visible: true, soloToque: true, sentido: 'si' }, des], pide: { llave: true, nombre: true },
+      ...(p.propuesto?.trim() ? { propuesto: p.propuesto.trim() } : {}),
     });
   }
   if (p.pide === 'llave') return conVersion({ ...base, tipo: 'llave', corta: '¿Me pasas su celular o su correo?', opciones: [des], pide: { llave: true } });
@@ -758,7 +797,7 @@ export function puntoDelContacto(
     : opciones.length > 1 ? 'elegir'
     : nombreDado.trim() ? 'llave' : 'nombre';
   const bs = pide === 'misma' ? botones ?? botonesSiNo('p', entId, { si: TITULO_SI_ES, no: TITULO_NO_ES }) : undefined;
-  return puntoContacto({ ref: entId, nombre, pregunta: `${nombre} · ${pregunta ?? ''}`.trim(), pide, fichas: opciones.map(filaDeCandidato), botones: bs });
+  return puntoContacto({ ref: entId, nombre, pregunta: `${nombre} · ${pregunta ?? ''}`.trim(), pide, fichas: opciones.map(filaDeCandidato), botones: bs, propuesto: nombreDado });
 }
 
 /** El punto de «¿A qué viaje van?» de una entrega o de un entendimiento. */

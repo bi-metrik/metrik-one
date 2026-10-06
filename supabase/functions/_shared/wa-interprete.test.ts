@@ -492,16 +492,15 @@ describe('despacho en la bandeja', () => {
 
   // Bot híbrido (2026-10-06): «¿A qué viaje van?» es un punto de decisión. El escrito lo lee el punto (con su modelo y
   // las opciones vigentes) ANTES del intérprete, igual que con el interruptor apagado: el intérprete ya no lo contesta.
-  it('la respuesta a «¿A qué viaje van?» con palabras → el punto de decisión: el modelo elige la fila y entra su número, con el crudo', async () => {
+  it('la respuesta a «¿A qué viaje van?» con palabras → el punto de decisión: el modelo elige la fila, pero cargar en un viaje pide el toque (ni el intérprete ni la respuesta)', async () => {
     espias.preguntaAbierta.mockResolvedValue({ tipo: 'entrega', id: 'e9', nombre: 'Tanda de las 09:28', corta: '¿A qué viaje van?', espera: 'viaje' });
     const db = baseFalsa({ wa_bandeja_entregas: [{ negocio_opciones: [V[0], V[1]], pregunta_enviada_at: new Date().toISOString() }] });
     modeloDeDecision.llamar = vi.fn(async () => ({ ok: true as const, json: { tipo: 'opcion', opcion: 'v2' }, ms: 5 }));
     const interprete = deps({ acciones: [{ accion: 'responder', evidencia: 'son de Carolina', ref: { cliente: 'Carolina' } }] });
     expect(await atenderEscrito(db, u(), escrito('son de Carolina'), interprete)).toEqual({ atendido: true });
-    expect(espias.responderPendiente).toHaveBeenCalledTimes(1);
-    const a = espias.responderPendiente.mock.calls[0] as unknown[];
-    expect(a[3]).toBe('2'); // la entrada canónica: el número de la fila de Carolina Ruiz en la lista
-    expect(a[8]).toBe('son de Carolina'); // el crudo
+    expect(modeloDeDecision.llamar).toHaveBeenCalledTimes(1);
+    // Elegir el viaje carga en él: lo leído de un escrito no se aplica (2026-10-06, SR3 «👌»); el bot pide el toque.
+    expect(espias.responderPendiente).not.toHaveBeenCalled();
     expect(interprete.llamarModelo).not.toHaveBeenCalled();
     sinEscriturasNuevas(db);
   });

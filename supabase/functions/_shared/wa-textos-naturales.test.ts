@@ -78,7 +78,7 @@ describe('PR B · los textos fijos de la bandeja', () => {
       '¿De qué viaje son los 3 mensajes? Parece de Lina Pérez (el 1).',
       '1. CARTAGENA DIC · Lina Pérez (T1 26 14)',
       '2. MADRID 8N · Jorge Pérez (T1 26 12)',
-      'Dime cuál (por ejemplo «el de Cartagena»). Si es un viaje nuevo, escribe «nuevo» y el nombre del cliente; si no va, «descartar».',
+      'Tócalo en la lista o escribe su número. Si es un viaje nuevo, escribe «nuevo» y el nombre del cliente; si no va, «descartar».',
     ].join('\n'));
     expect(TEXTOS['resumen listo'].split('\n')[0]).toBe('¿Cargo este viaje?');
     // 2026-10-05: «No cargué nada todavía» lo dicen ahora los botones «Cargar» y «Descartar»; queda cómo corregir.

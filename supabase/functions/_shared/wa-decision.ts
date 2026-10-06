@@ -16,7 +16,7 @@ import {
   canonicoDe, CANONICO_NO_ES_NUEVO, conLlaveDelTexto, contextoDecision, esquemaDecision, instruccionesDecision, leerExacto, leerToqueDecision, puntoCliente, puntoConfirmacion,
   puntoDeLaCaja, puntoDelContacto, puntoDelNuevo, puntoDelResumen, puntoDelViaje, siSinCargar, textoVolverAPreguntar, validarDecision,
 } from './wa-decision-reglas.ts';
-import type { PuntoDecision, Veredicto } from './wa-decision-reglas.ts';
+import type { OpcionDecision, PuntoDecision, Veredicto } from './wa-decision-reglas.ts';
 import { enviarPunto } from './wa-enviar-botones.ts';
 import { sendTextMessage } from './wa-respond.ts';
 import {
@@ -140,8 +140,8 @@ export async function atenderEnPuntoDeDecision(
   const viajes = (await viajesAbiertosDeLaBandeja(supabase, ws)) ?? [];
   const exacto = leerExacto(texto, punto, viajes.map(v => v.codigo ?? '').filter(Boolean));
   if (exacto?.tipo === 'opcion') {
-    // Crear un cliente: con el toque o con un «sí» escrito solo a la pregunta que muestra su nombre y el botón «Crear»
-    // (tan exacto como el toque). Un escrito libre que dice crear nunca crea: lo lee el modelo y pide el toque.
+    // Lo exacto (el número, el código, el «sí» escrito solo) vale como el toque, también para lo que escribe en un viaje o
+    // crea algo. Un escrito libre que dice cargar o crear nunca lo hace: lo lee el modelo y se pide el toque (`soloToque`).
     await aplicar(supabase, user, message, config, punto, exacto.opcion.canonico, texto);
     return 'atendido';
   }
@@ -181,7 +181,7 @@ async function actuar(
       await aplicar(supabase, user, message, config, punto, canonicoDe(v.opcion, v.nombre, texto), texto);
       return 'atendido';
     case 'solo_toque':
-      return await volverAPreguntar(message.phone, ws, punto, 'solo_toque');
+      return await volverAPreguntar(message.phone, ws, punto, 'solo_toque', v.opcion);
     case 'nombre':
       await aplicar(supabase, user, message, config, punto, canonicoDelNombre(punto, v.nombre, texto), texto, {
         accion: 'nombre', nuevo: v.nombre, ...(llavesDelTexto(texto) ? { llave: llavesDelTexto(texto) } : {}),
@@ -244,8 +244,10 @@ async function aplicar(
 }
 
 /** Vuelve a preguntar una vez, en corto, con los botones o la lista. */
-async function volverAPreguntar(phone: string, ws: string, punto: PuntoDecision, motivo: Parameters<typeof textoVolverAPreguntar>[1]): Promise<'atendido'> {
-  await enviarPunto(phone, textoVolverAPreguntar(punto, motivo), punto, { workspaceId: ws, intent: INTENT });
+async function volverAPreguntar(
+  phone: string, ws: string, punto: PuntoDecision, motivo: Parameters<typeof textoVolverAPreguntar>[1], opcion?: OpcionDecision | null,
+): Promise<'atendido'> {
+  await enviarPunto(phone, textoVolverAPreguntar(punto, motivo, opcion), punto, { workspaceId: ws, intent: INTENT });
   return 'atendido';
 }
 

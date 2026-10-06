@@ -859,7 +859,7 @@ describe('v2 · N2: «¿A qué viaje van?» se contesta con cada forma que el bo
     ['el código', 'P 26 2'],
     ['el nombre del negocio', 'San Andrés dic'],
     ['el nombre del cliente', 'Pedro Prueba5'],
-  ])('%s («%s»): carga en el viaje, sin abrir una caja nueva aunque haya una abierta', async (_n, respuesta) => {
+  ])('%s («%s»): carga en el viaje, sin abrir una caja nueva aunque haya una abierta (con palabras, tras el toque)', async (_n, respuesta) => {
     await preguntaDeViaje();
     expect(textos().at(-1)).toContain('1. SAN ANDRÉS DIC · Pedro Prueba5 (P 26 2)');
     const antes = textos().length;
@@ -868,11 +868,20 @@ describe('v2 · N2: «¿A qué viaje van?» se contesta con cada forma que el bo
     // Regla 3 (2026-10-02): el contenido que abre una tanda con la pregunta abierta la vuelve a mostrar, corta.
     expect(textos().slice(antes)).toEqual([expect.stringMatching(/^Primero: Tanda de las \d\d:\d\d · ¿De qué viaje son\?$/)]);
     // Bot híbrido (2026-10-06): el número y el código los lee el código; el nombre del viaje o del cliente, el modelo
-    // (con la fila del viaje como opción).
-    elige(respuesta, 'v1');
-    await llega(respuesta, { enviado: 9 });
-    expect(textos().slice(antes + 1)).toEqual([]); // ni 📌, ni la lista del encabezado, ni «Primero: …»
-    expect(t.wa_bandeja_mensajes.find(m => m.cuerpo === respuesta)).toMatchObject({ papel: 'respuesta_cliente' });
+    // (con la fila del viaje como opción). Elegir el viaje carga en él: lo que leyó el modelo pide el toque.
+    const exacto = /^(?:\d+|P 26 2)$/.test(respuesta);
+    if (!exacto) {
+      elige(respuesta, 'v1');
+      await llega(respuesta, { enviado: 9 });
+      expect(textos().slice(antes + 1)).toEqual([expect.stringMatching(/^Si es «SAN ANDRÉS DIC», tócalo en la lista\. No he cargado nada\.\n/)]);
+      expect(t.wa_bandeja_mensajes.find(m => m.cuerpo === respuesta)).toBeUndefined();
+      expect(t.wa_bandeja_entendimientos).toEqual([]);
+      await toca(boton('1. SAN ANDRÉS DIC'), { enviado: 10 });
+    } else {
+      await llega(respuesta, { enviado: 9 });
+      expect(textos().slice(antes + 1)).toEqual([]); // ni 📌, ni la lista del encabezado, ni «Primero: …»
+      expect(t.wa_bandeja_mensajes.find(m => m.cuerpo === respuesta)).toMatchObject({ papel: 'respuesta_cliente' });
+    }
     colaModelo = [pedido()];
     await cron(60);
     expect(t.wa_bandeja_entendimientos[0]).toMatchObject({ estado: 'negocio_actualizado', negocio_id: 'n-p' });
@@ -884,9 +893,13 @@ describe('v2 · N2: «¿A qué viaje van?» se contesta con cada forma que el bo
     for (const k of [1, 2, 3, 4]) t.negocios.push({ ...negocioDePrueba(`n-x${k}`, `X 26 ${k}`, `VIAJE ${k}`, `CLIENTE ${k}`), created_at: `2026-09-2${k}T10:00:00Z` });
     await preguntaDeViaje();
     expect(textos().at(-1)).not.toContain('EUROPA 2 DÍAS');
-    // Fuera de la lista: el modelo lo ve como opción oculta (con su código), y el código la valida.
+    // Fuera de la lista: el modelo lo ve como opción oculta (con su código), y el código la valida. Cargar ahí pide lo
+    // exacto: el bot dice cuál entendió; el código escrito tal cual lo elige.
     elige('Europa 2 días', 'xc261');
     await llega('Europa 2 días', { enviado: 9 });
+    expect(textos().at(-1)).toMatch(/^Si es «EUROPA 2 DÍAS», tócalo en la lista\. No he cargado nada\.\n/);
+    expect(t.wa_bandeja_entendimientos).toEqual([]);
+    await llega('C 26 1', { enviado: 10 });
     colaModelo = [pedido()];
     await cron(60);
     expect(t.wa_bandeja_entendimientos[0]).toMatchObject({ estado: 'negocio_actualizado', negocio_id: 'n-v' });
@@ -913,7 +926,7 @@ describe('v2 · N2: «¿A qué viaje van?» se contesta con cada forma que el bo
     // viajes de la lista: la confirmación lo dice, con su número.
     const conf = textos().at(-1)!;
     expect(conf.startsWith(`Tanda de las ${conf.slice(13, 18)} · ¿Va como viaje nuevo de Valeria Prueba5? No lo tengo en el directorio: lo creo como cliente nuevo, con cel. ${celEscrito('Valeria Prueba5')}.\n`)).toBe(true);
-    expect(conf).toMatch(/\nYa hay viajes de (Pedro|Mateo) Prueba5 \([PM] 26 2\) y (Pedro|Mateo) Prueba5 \([PM] 26 2\): si es para uno de esos, responde «el de (San Andrés|Bariloche)» o «el de (San Andrés|Bariloche)»\.\nResponde sí, o dime el viaje si es uno que ya existe\. No he creado ni cargado nada\.$/);
+    expect(conf).toMatch(/\nYa hay viajes de (Pedro|Mateo) Prueba5 \([PM] 26 2\) y (Pedro|Mateo) Prueba5 \([PM] 26 2\): si es para uno de esos, tócalo o responde 1 o 2\.\nToca «Crear» o responde sí; si es un viaje que ya existe, toca «No es nuevo»\. No he creado ni cargado nada\.$/);
     nadaCreado(negocios);
     await llega('sí', { enviado: 100 });
     colaModelo = [pedido()];
@@ -937,7 +950,7 @@ describe('v2 · N2: «¿A qué viaje van?» se contesta con cada forma que el bo
     await llega(nuevo(nombre), { enviado: 9 });
     colaModelo = [pedido()];
     await cron(60);
-    expect(textos().at(-1)!.replace(/^Tanda de las \d\d:\d\d · /, '')).toBe(`¿Va como viaje nuevo de ${nombre}? No lo tengo en el directorio: lo creo como cliente nuevo, con cel. ${celEscrito(nombre)}.\nResponde sí, o dime el viaje si es uno que ya existe. No he creado ni cargado nada.`);
+    expect(textos().at(-1)!.replace(/^Tanda de las \d\d:\d\d · /, '')).toBe(`¿Va como viaje nuevo de ${nombre}? No lo tengo en el directorio: lo creo como cliente nuevo, con cel. ${celEscrito(nombre)}.\nToca «Crear» o responde sí; si es un viaje que ya existe, toca «No es nuevo». No he creado ni cargado nada.`);
     expect(vi.mocked(fetch)).not.toHaveBeenCalled(); // nada se leyó ni se cargó todavía
     nadaCreado(negocios);
     expect(await ent.preguntaAbierta(db as never, WS, TEL)).toMatchObject({
@@ -1021,9 +1034,13 @@ describe('v2 · N2: «¿A qué viaje van?» se contesta con cada forma que el bo
     expect(textos().some(x => x.includes('¿Va como viaje nuevo de opción 9?'))).toBe(false);
     nadaCreado(negocios);
     const n = textos().find(x => x.includes('¿De qué viaje '))!.split('\n').find(l => l.includes('Pedro Prueba5'))!.charAt(0);
-    // «la 2» no es exacto: el modelo elige la fila de ese viaje (oculta en la confirmación, con su número).
+    // «la 2» no es exacto: el modelo elige la fila de ese viaje (oculta en la confirmación, con su número), pero cargar
+    // en un viaje sale solo de lo exacto: pide el toque. El número escrito solo lo elige.
     elige(`la ${n}`, `v${n}`);
     await llega(`la ${n}`, { enviado: 170 });
+    expect(textos().at(-1)).toMatch(/^Si es «SAN ANDRÉS DIC», tócalo en la lista\. No he cargado nada\.\n/);
+    nadaCreado(negocios);
+    await llega(n, { enviado: 175 });
     colaModelo = [pedido()];
     await cron(220);
     expect(t.contactos).toEqual([]);
@@ -1042,7 +1059,7 @@ describe('v2 · N2: «¿A qué viaje van?» se contesta con cada forma que el bo
     expect(await ent.preguntaAbierta(db as never, WS, TEL)).toBeNull();
   });
 
-  it('PI3: los dos nombres de pila de una clienta con viaje abierto (el atajo): la confirmación lo dice y «el de Cancún» carga en su viaje', async () => {
+  it('PI3: los dos nombres de pila de una clienta con viaje abierto (el atajo): la confirmación lo dice; «el de Cancún» pide el toque y el toque carga en su viaje', async () => {
     t.negocios.push(negocioDePrueba('n-am', 'A 26 7', 'CANCÚN NOV', 'ANA MARÍA QUIÑONES'));
     t.negocio_bloques.push({ id: 'b-n-am', negocio_id: 'n-am', data: { destino: 'CANCÚN' }, updated_at: null, bloque_configs: { orden: 1, config_extra: { fields: FIELDS }, bloque_definitions: { tipo: 'datos' }, etapas_negocio: { orden: 1 } } });
     await preguntaDeViaje();
@@ -1050,12 +1067,16 @@ describe('v2 · N2: «¿A qué viaje van?» se contesta con cada forma que el bo
     elige('nueva Ana María', 'nuevo', 'Ana María');
     await llega('nueva Ana María', { enviado: 9 });
     await cron(60);
-    expect(textos().at(-1)).toContain(`¿Va como viaje nuevo de Ana María? No lo tengo en el directorio: después del sí te pido su celular o correo (sin uno de los dos no lo creo).\nYa hay un viaje de Ana María Quiñones (A 26 7): si es para ese, responde «el de Cancún».`);
+    expect(textos().at(-1)).toContain(`¿Va como viaje nuevo de Ana María? No lo tengo en el directorio: después del sí te pido su celular o correo (sin uno de los dos no lo creo).\nYa hay un viaje de Ana María Quiñones (A 26 7): si es para ese, tócalo o responde 1.`);
     expect(t.contactos).toEqual([]);
-    // Lo que la confirmación ofrece: el viaje parecido es una fila de la lista; el modelo la elige.
+    // Lo que la confirmación ofrece: el viaje parecido es una fila de la lista. Escrito, el modelo la elige, pero cargar
+    // en un viaje sale solo de lo exacto: pide el toque, y el toque carga.
     expect(ultimosBotones().map(b => b.title)).toEqual(['Crear', 'Es Ana María Quiñones', 'No es nuevo', '🗑 Descartar']);
     elige('el de Cancún', 'p1');
     await llega('el de Cancún', { enviado: 100 });
+    expect(textos().at(-1)).toMatch(/^Para ir a ese viaje, toca «Es Ana María Quiñones»\. No he cargado nada\.\n/);
+    expect(t.wa_bandeja_entendimientos[0]).not.toMatchObject({ negocio_id: 'n-am' });
+    await toca(boton('Es Ana María Quiñones'), { enviado: 110 });
     colaModelo = [pedido()];
     await cron(160);
     expect(t.contactos).toEqual([]);
@@ -1534,14 +1555,14 @@ describe('Trappvel 2026-10-02: «cliente nuevo Daniel Pérez» con un viaje abie
     // 9:32 · lo único que es del cliente.
     await llega('El me esta pidiendo una cotizacion a China', { enviado: 1883 });
     await cronConCierre(2200);
-    expect(textos().at(-1)).toMatch(/· ¿De qué viaje es el mensaje\?\n1\. L1 CTG ENE 27 · Lina Pérez \(L1 26 1\)\nDime cuál \(por ejemplo «el de Cartagena»\)\. Si es un viaje nuevo, escribe «nuevo» y el nombre del cliente; si no va, «descartar»\.$/);
+    expect(textos().at(-1)).toMatch(/· ¿De qué viaje es el mensaje\?\n1\. L1 CTG ENE 27 · Lina Pérez \(L1 26 1\)\nTócalo en la lista o escribe su número\. Si es un viaje nuevo, escribe «nuevo» y el nombre del cliente; si no va, «descartar»\.$/);
     // La respuesta: el cliente nuevo, en cualquier forma (la lee el modelo: «Viaje nuevo», con el nombre tal cual).
     elige(`cliente nuevo Daniel Pérez ${celEscrito('Daniel Pérez')}`, 'nuevo', 'Daniel Pérez');
     await llega(`cliente nuevo Daniel Pérez ${celEscrito('Daniel Pérez')}`, { enviado: 2260 });
     expect(t.wa_bandeja_mensajes.find(m => m.wa_message_id === `wamid.vivo.${n}`)).toMatchObject({ papel: 'respuesta_cliente' });
     await cron(2320);
     // La confirmación dice el viaje de Lina con su número; el «sí» es el viaje nuevo de Daniel Pérez, cliente nuevo.
-    expect(textos().at(-1)).toContain(`¿Va como viaje nuevo de Daniel Pérez? No lo tengo en el directorio: lo creo como cliente nuevo, con cel. ${celEscrito('Daniel Pérez')}.\nYa hay un viaje de Lina Pérez (L1 26 1): si es para ese, responde «el de Cartagena».`);
+    expect(textos().at(-1)).toContain(`¿Va como viaje nuevo de Daniel Pérez? No lo tengo en el directorio: lo creo como cliente nuevo, con cel. ${celEscrito('Daniel Pérez')}.\nYa hay un viaje de Lina Pérez (L1 26 1): si es para ese, tócalo o responde 1.`);
     expect(negocioDe('DANIEL PÉREZ')).toBeFalsy();
     await llega('sí', { enviado: 2330 });
     colaModelo = [CHINA];
@@ -1809,8 +1830,12 @@ describe('2026-10-05 · la prueba de Mauricio, parafraseada: viaje nuevo de un c
       const resumen = textos().at(-1)!;
       expect(resumen).toMatch(/^¿Cargo este viaje\?\n\n\*Viaje nuevo · Martín Robledo\*\nYa es cliente · cel\. …9444 · 5 viajes abiertos\n\n1\. «Hola, quiero ir a Cartagena/);
       expect(resumen).not.toContain('Ya hay un viaje');
+      // «dale» lo lee el modelo como «Cargar», pero cargar sale solo de lo exacto (2026-10-06, SR3): pide el toque.
       elige('dale', 'si');
       await llega('dale', { enviado: 70 });
+      expect(textos().at(-1)).toMatch(/^Para cargarlo, toca «✅ Cargar»\. No he cargado nada\.\n/);
+      expect(t.negocios.filter(x => x.contacto_id === 'c-mr' && !String(x.id).startsWith('n-mr'))).toEqual([]);
+      await toca(boton('✅ Cargar'), { enviado: 72 });
       colaModelo = [LAURA];
       await cron(120);
       // Un viaje NUEVO en la ficha que ya existía: ningún contacto nuevo, y la empresa espejo como la crea la app.
@@ -2103,13 +2128,62 @@ describe('octavo control de Vera (2026-10-05): el «sí» con reserva y el clien
     // «sí, créalo» lo lee el modelo como «Cargar», pero crear al cliente pasa por el botón (punto 5): se toca.
     elige('sí, créalo', 'si');
     await llega('sí, créalo', { enviado: 70, interprete: { llamadas, modelo: confirmar('sí, créalo') } });
-    expect(textos().at(-1)).toMatch(/^Para cargarlo y crear el cliente, toca el botón\./);
+    expect(textos().at(-1)).toMatch(/^Para cargarlo y crear el cliente, toca «.+»\. No he cargado nada\./);
     expect(t.contactos).toEqual([]);
     await toca(boton('✅ Cargar'), { enviado: 72 });
     colaModelo = [salidaModelo({ destino: { valor: 'Capurganá', frase: 'ir a Capurganá' } })];
     await cron(120);
     expect(t.contactos.map(c => c.nombre)).toEqual(['OCTAVIO PRUEBA8']);
     expect(t.negocios).toHaveLength(1);
+  });
+
+  // SR3 (corrida ×1 con Gemini real, 2026-10-06): el modelo leyó «👌» como «Cargar» y creó el viaje. Lo que escribe en un
+  // viaje o crea algo sale solo de lo exacto: el toque o el «sí» escrito solo. Aquí el modelo falso hace lo mismo que el
+  // real (devuelve «si») y el bot pide el toque, en los dos modos y con un viaje nuevo o uno que ya existe.
+  for (const modo of ['apagado', 'prendido'] as const) {
+    for (const texto of ['👌', '👍', 'ok', 'dale']) {
+      it(`SR3, ${modo}: «${texto}» al resumen, leído como «Cargar» por el modelo, no carga ni crea; pide el toque y el toque carga`, async () => {
+        const llamadas = { n: 0 };
+        const interprete = modo === 'prendido' ? { llamadas, modelo: confirmar(texto) } : undefined;
+        await llega(nuevo('Octavio Prueba8'), { enviado: 0 });
+        await llega('queremos ir a Capurganá en febrero, somos 4 adultos', { enviado: 3, reenviado: true });
+        await llega('listo', { enviado: 6 });
+        elige(texto, 'si');
+        await llega(texto, { enviado: 10, interprete });
+        expect(alModeloDeDecision.at(-1)).toBe(texto);
+        expect(textos().at(-1)).toMatch(/^Para cargarlo y crear el cliente, toca «.+»\. No he cargado nada\.\n.*¿Lo cargo así\?$/s);
+        expect(enviados.at(-1)!.botones?.length ?? 0).toBeGreaterThan(0);
+        await cron(60);
+        expect(t.contactos).toEqual([]);
+        expect(t.negocios).toEqual([]);
+        expect(llamadas.n).toBe(0);
+        await toca(boton('✅ Cargar'), { enviado: 70 });
+        colaModelo = [salidaModelo({ destino: { valor: 'Capurganá', frase: 'ir a Capurganá' } })];
+        await cron(120);
+        expect(t.contactos.map(c => c.nombre)).toEqual(['OCTAVIO PRUEBA8']);
+        expect(t.negocios).toHaveLength(1);
+      });
+    }
+  }
+
+  it('SR3 con un viaje que ya existe: «👌» no carga en su ficha; el «sí» escrito solo, sin el modelo, sí', async () => {
+    clienteConUnViaje();
+    const bloquesAntes = JSON.stringify(t.negocio_bloques);
+    await llega('G 26 1', { enviado: 0 });
+    await llega('ahora son 3 noches, no 2', { enviado: 3, reenviado: true });
+    await llega('listo', { enviado: 6 });
+    elige('👌', 'si');
+    await llega('👌', { enviado: 10 });
+    expect(textos().at(-1)).toMatch(/^Para cargarlo, toca «.+»\. No he cargado nada\./);
+    colaModelo = [salidaModelo({ destino: { valor: 'Villa de Leyva', frase: '' } })];
+    await cron(60);
+    expect(JSON.stringify(t.negocio_bloques)).toBe(bloquesAntes);
+    expect(t.wa_bandeja_entregas.map(e => e.cliente_texto ?? null)).toEqual([null]);
+    const m0 = alModeloDeDecision.length;
+    await llega('sí', { enviado: 70 });
+    expect(alModeloDeDecision.length).toBe(m0);
+    // El «sí» escrito solo es la respuesta al resumen (como el toque): queda tomado para cargar.
+    expect(t.wa_bandeja_entregas.map(e => [e.estado, e.cliente_texto])).toEqual([['con_cliente', 'sí']]);
   });
 
   it('bloqueante 1, prendido: con un viaje que ya existe, «sí aunque falta un mensaje» tampoco carga nada en su ficha', async () => {
@@ -2858,6 +2932,11 @@ describe('bot híbrido (2026-10-06): cada punto de decisión, de punta a punta',
     codigo?: string;
     /** Lo que el modelo devuelve para elegir una opción con un escrito libre. */
     idValido: unknown;
+    /**
+     * La opción que elige el modelo escribe en un viaje (cargar, mandar los mensajes a un viaje): leída de un escrito
+     * libre no se aplica, se pide el toque (2026-10-06, SR3 «👌»).
+     */
+    escribe?: boolean;
     /** ¿Se aplicó la elección? */
     elegido: () => Promise<boolean> | boolean;
   }
@@ -2869,7 +2948,7 @@ describe('bot híbrido (2026-10-06): cada punto de decisión, de punta a punta',
   const PUNTOS: Record<string, Punto> = {
     '«¿A qué viaje van?» (lista de viajes)': {
       montar: preguntaDeViaje,
-      toque: '1. SAN ANDRÉS DIC', numero: '1', codigo: 'P 26 2', idValido: { tipo: 'opcion', opcion: 'v1' },
+      toque: '1. SAN ANDRÉS DIC', numero: '1', codigo: 'P 26 2', idValido: { tipo: 'opcion', opcion: 'v1' }, escribe: true,
       elegido: () => t.wa_bandeja_entregas.some(e => e.estado === 'con_cliente') || t.wa_bandeja_entendimientos.some(e => e.negocio_destino_id === 'n-p'),
     },
     'el resumen (Cargar / Descartar)': {
@@ -2882,7 +2961,7 @@ describe('bot híbrido (2026-10-06): cada punto de decisión, de punta a punta',
         await llega('listo', { enviado: 4 });
         colaModelo = [salidaModelo({ destino: { valor: 'San Andrés', frase: 'San Andrés' } })];
       },
-      toque: '✅ Cargar', idValido: { tipo: 'opcion', opcion: 'si' },
+      toque: '✅ Cargar', idValido: { tipo: 'opcion', opcion: 'si' }, escribe: true,
       elegido: () => t.wa_bandeja_entregas.some(e => e.cliente_texto === 'sí'),
     },
     '«¿Creo el cliente nuevo «X»?» ([Crear] [No es nuevo] [Descartar])': {
@@ -2898,9 +2977,9 @@ describe('bot híbrido (2026-10-06): cada punto de decisión, de punta a punta',
     '«¿Para qué cliente es?» del contacto (el nombre, o «Descartar»)': {
       montar: async () => {
         await preguntaDeViaje();
-        elige('NUEVO', 'nuevo');
+        // «Viaje nuevo» a secas abre un viaje: con el toque (escrito, el modelo lo leería y pediría el toque).
         colaModelo = [pedido()];
-        await llega('NUEVO', { enviado: 9 });
+        await toca(boton('Viaje nuevo'), { enviado: 9 });
       },
       idValido: { tipo: 'nombre', nombre: 'Gabriela Ossa' },
       // Con el nombre, la pregunta pasa a ser la de su llave (ya no espera el nombre).
@@ -2997,7 +3076,15 @@ describe('bot híbrido (2026-10-06): cada punto de decisión, de punta a punta',
         decide(texto, p.idValido);
         await llega(texto, { enviado: 30, interprete });
         expect(alModeloDeDecision.slice(modeloAntes)).toEqual([texto]);
-        expect(await p.elegido()).toBe(true);
+        if (p.escribe) {
+          // Lo que escribe en un viaje no sale de lo que el modelo leyó: pide el toque, con la pregunta, y no hace nada.
+          expect(textos().at(-1)).toMatch(/(?:tócalo en la lista|toca «.+»)\. No he cargado nada\.\n/);
+          conPregunta();
+          nadaGuardado();
+          await sinCambio();
+        } else {
+          expect(await p.elegido()).toBe(true);
+        }
         break;
       case 'id_inventado':
       case 'no_se':
@@ -3273,7 +3360,7 @@ describe('bot híbrido (2026-10-06): el conjunto de desarrollo (controles 8 a 11
     }
     for (const x of textos().slice(antes.textos)) {
       // Volver a preguntar lo mismo es «pregunta» (lo que repite de la pregunta no es un efecto nuevo).
-      if (/^(?:No me quedó claro|No te entendí|Todavía no lo cargo|Para crear|Para cargarlo|Eso te lo contesto|Ese número no está|No entendí|Ese botón)/.test(x)) {
+      if (/^(?:No me quedó claro|No te entendí|Todavía no lo cargo|Para crear|Para cargarlo|Para seguir|Para ir a ese viaje|Si es «|Escríbeme solo|Eso te lo contesto|Ese número no está|No entendí|Ese botón)/.test(x)) {
         ef.push('pregunta');
         continue;
       }
@@ -3337,7 +3424,7 @@ describe('bot híbrido (2026-10-06): el conjunto de desarrollo (controles 8 a 11
   });
 
   /** Un turno de punta a punta: el mundo, el estado, el escrito y su efecto calificado. `salida`: lo que devuelve el modelo. */
-  async function turno(c: Ctl, caso: CasoDes, modo: 'apagado' | 'prendido', salida: (p: PuntoDecision) => unknown | 'real') {
+  async function turno(c: Ctl, caso: CasoDes, modo: 'apagado' | 'prendido', salida: (p: PuntoDecision) => unknown | 'real', antesDelTurno?: () => void) {
     // Cada turno con la base limpia: el mundo del control y su estado.
     t = base(); db = crearDb(t); enviados.length = 0; decisiones = new Map(); alModeloDeDecision = [];
     mundo(c);
@@ -3351,6 +3438,7 @@ describe('bot híbrido (2026-10-06): el conjunto de desarrollo (controles 8 a 11
       contactos: new Set(t.contactos.map(x => String(x.id))), negocios: new Set(t.negocios.map(x => String(x.id))), mensajes: t.wa_bandeja_mensajes.length, textos: enviados.length,
       planes: new Map(t.wa_bandeja_entregas.filter(e => e.plan_viajes).map(e => [String(e.id), JSON.stringify(e.plan_viajes)])),
     };
+    antesDelTurno?.();
     await llega(caso.texto, { enviado: 600, interprete: modo === 'prendido' ? { modelo: { acciones: [{ accion: 'pedir_aclaracion', evidencia: caso.texto }] } } : undefined });
     const pd = await preguntaDespues(p);
     const ef = [efecto(c, antes, caso.texto), pd].filter(x => x && x !== 'nada').join(';') || 'nada';
@@ -3386,59 +3474,120 @@ describe('bot híbrido (2026-10-06): el conjunto de desarrollo (controles 8 a 11
     }
   }
 
-  // ── El banco con Gemini real (pendiente: necesita la llave de PRUEBAS) ─────────────────────────────────────
+  // ── El banco con Gemini real: UNA corrida, solo con la llave de PRUEBAS ─────────────────────────────────────
   // No corre en CI ni sin la variable. Lo lanza `comparador/hibrido/correr.sh`, que solo exporta la llave de pruebas
-  // (nunca la de producción) en GEMINI_API_KEY. Escribe, por control, el formato que lee `comparador/comparar.ts`
-  // (`proto/res/<control>-<etiqueta>.json`), para comparar el mismo turno contra main (los resultados de `hoy/`).
+  // (nunca la de producción) en GEMINI_API_KEY. Regla de gasto del 2026-10-06: todo se desarrolla con el modelo falso; con
+  // Gemini real, como máximo una corrida ×1 del conjunto de desarrollo, al final y con 0 dañinas en el falso. El control
+  // que decide lo corre Vera aparte. Escribe, por control, el formato que lee `comparador/comparar.ts`
+  // (`proto/res/<control>-<etiqueta>.json`) con los llamados, los tokens, la latencia y por qué volvió a preguntar.
+  // El tiempo máximo es el de Trappvel en producción (`bot_conversacional.timeout_ms`, leído con SELECT el 2026-10-06:
+  // 4000 ms, que es también el valor por defecto); el banco verifica que la capa lo pase así. La latencia se mide con
+  // `performance.now()`: en estas pruebas `Date` es falso (por eso la corrida anterior marcó p50/p90 en 0).
   const BANCO = process.env.BANCO_DECISION_MODELO ?? '';
+  const TIMEOUT_DE_PRODUCCION_MS = 4000;
   const fetchReal = globalThis.fetch;
   const NOMBRE_DEL_CONTROL: Record<string, string> = { '08': '05', '09': '05b', '10': '05c', '11': '06' };
-  async function llamarReal(p: { modelo: string; sistema: string; usuario: string; timeoutMs: number }): Promise<{ ok: true; json: unknown; ms: number } | { ok: false; motivo: 'timeout' | 'http' | 'esquema'; ms: number }> {
-    const t0 = Date.now();
+  type Uso = { tokensIn: number; tokensOut: number; tokensRazonamiento: number };
+  /** Por qué no hubo respuesta del modelo: el tiempo máximo, un 429 (cuota), otro HTTP, la red, o una salida rota. */
+  type Caida = 'timeout' | 'http429' | 'http' | 'red' | 'esquema';
+  type Real = ({ ok: true; json: unknown; ms: number } | { ok: false; motivo: 'timeout' | 'http' | 'esquema'; ms: number; detalle: string }) & { uso: Uso | null; caida: Caida | null };
+  async function llamarReal(p: { modelo: string; sistema: string; usuario: string; timeoutMs: number }): Promise<Real> {
+    const t0 = performance.now();
+    const ms = () => Math.round(performance.now() - t0);
     const { generacionPara } = await import('./wa-interprete-reglas.ts');
     const { esquemaDecision } = await import('./wa-decision-reglas.ts');
+    let res: Response;
     try {
-      const res = await fetchReal(`https://generativelanguage.googleapis.com/v1beta/models/${BANCO}:generateContent`, {
+      res = await fetchReal(`https://generativelanguage.googleapis.com/v1beta/models/${BANCO}:generateContent`, {
         method: 'POST', headers: { 'Content-Type': 'application/json', 'x-goog-api-key': process.env.GEMINI_API_KEY ?? '' },
         body: JSON.stringify({ system_instruction: { parts: [{ text: p.sistema }] }, contents: [{ role: 'user', parts: [{ text: p.usuario }] }], generationConfig: generacionPara(BANCO, esquemaDecision()) }),
         signal: AbortSignal.timeout(p.timeoutMs),
       });
-      if (res.status !== 200) return { ok: false, motivo: 'http', ms: Date.now() - t0 };
-      const d = await res.json() as { candidates?: Array<{ finishReason?: string; content?: { parts?: Array<{ text?: string; thought?: boolean }> } }> };
-      const cand = d.candidates?.[0];
-      if (cand?.finishReason !== 'STOP') return { ok: false, motivo: 'esquema', ms: Date.now() - t0 };
-      return { ok: true, json: JSON.parse((cand.content?.parts ?? []).filter(x => !x.thought).map(x => x.text ?? '').join('')), ms: Date.now() - t0 };
     } catch (err) {
       const n = (err as { name?: string })?.name ?? '';
-      return { ok: false, motivo: n === 'TimeoutError' || n === 'AbortError' ? 'timeout' : 'http', ms: Date.now() - t0 };
+      const timeout = n === 'TimeoutError' || n === 'AbortError';
+      return { ok: false, motivo: timeout ? 'timeout' : 'http', ms: ms(), detalle: n || 'red', uso: null, caida: timeout ? 'timeout' : 'red' };
+    }
+    if (res.status !== 200) {
+      await res.text().catch(() => '');
+      return { ok: false, motivo: 'http', ms: ms(), detalle: `HTTP ${res.status}`, uso: null, caida: res.status === 429 ? 'http429' : 'http' };
+    }
+    try {
+      const d = await res.json() as { usageMetadata?: Record<string, number>; candidates?: Array<{ finishReason?: string; content?: { parts?: Array<{ text?: string; thought?: boolean }> } }> };
+      const u = d.usageMetadata ?? {};
+      const uso = { tokensIn: u.promptTokenCount ?? 0, tokensOut: u.candidatesTokenCount ?? 0, tokensRazonamiento: u.thoughtsTokenCount ?? 0 };
+      const cand = d.candidates?.[0];
+      if (cand?.finishReason !== 'STOP') return { ok: false, motivo: 'esquema', ms: ms(), detalle: `finishReason ${cand?.finishReason ?? 'ninguno'}`, uso, caida: 'esquema' };
+      const json = JSON.parse((cand.content?.parts ?? []).filter(x => !x.thought).map(x => x.text ?? '').join(''));
+      return { ok: true, json, ms: ms(), uso, caida: null };
+    } catch (err) {
+      return { ok: false, motivo: 'esquema', ms: ms(), detalle: String(err), uso: null, caida: 'esquema' };
     }
   }
+  /**
+   * Por qué el bot volvió a preguntar en el turno (lo dice su texto). `toque` = lo que el modelo leyó escribía o creaba y
+   * se pide el toque (decisión 2 y su extensión del 2026-10-06): esperado. `fallback` = el modelo no respondió.
+   */
+  function vueltaDe(desde: number): 'toque' | 'fallback' | 'no_se' | 'todavia' | 'pregunta' | 'fuera' | null {
+    for (const x of textos().slice(desde)) {
+      if (/^(?:Para cargarlo|Para crear|Para seguir|Para ir a ese viaje|Si es «|Escríbeme solo)/.test(x)) return 'toque';
+      if (/^No te entendí; toca una opción/.test(x)) return 'fallback';
+      if (/^No me quedó claro/.test(x)) return 'no_se';
+      if (/^Todavía no lo cargo/.test(x)) return 'todavia';
+      if (/^Eso te lo contesto después/.test(x)) return 'pregunta';
+      if (/^Ese número no está/.test(x)) return 'fuera';
+    }
+    return null;
+  }
   for (const c of DES.controles) {
-    it.skipIf(!BANCO)(`banco con Gemini (${BANCO || 'sin modelo'}): control ${c.control}, interruptor prendido, ${process.env.BANCO_CORRIDAS ?? 5} corridas por turno`, async () => {
-      const corridas = Number(process.env.BANCO_CORRIDAS ?? 5);
-      const filas: Array<{ id: string; texto: string; efs: string[]; ms: number[] }> = [];
+    it.skipIf(!BANCO)(`banco con Gemini (${BANCO || 'sin modelo'}): control ${c.control}, interruptor prendido, una corrida por turno`, async () => {
+      if (Number(process.env.BANCO_CORRIDAS ?? 1) !== 1) throw new Error('Con Gemini real, una sola corrida (regla de gasto del 2026-10-06).');
+      const filas: Array<{ id: string; texto: string; efs: string[]; ms: number[]; llamadas: number; uso: Uso; vuelta: string | null; caida: string | null; detalle: string | null; veredicto: string | null }> = [];
+      const total = { llamadas: 0, tokensIn: 0, tokensOut: 0, tokensRazonamiento: 0, fallbacks: 0 };
+      const clases: Record<string, number> = { bien: 0, parcial: 0, falla: 0, danina: 0, fallback: 0 };
+      const caidas: Record<Caida, number> = { timeout: 0, http429: 0, http: 0, red: 0, esquema: 0 };
+      const vueltas: Record<string, number> = {};
+      const msModelo: number[] = [];
+      const timeouts = new Set<number>();
       for (const caso of c.casos) {
-        const efs: string[] = [];
-        const ms: number[] = [];
-        for (let i = 0; i < corridas; i++) {
-          let ultimo = { ms: 0, motivo: '' };
-          decision.modeloDeDecision.llamar = async (p) => {
-            alModeloDeDecision.push(caso.texto);
-            const r = await llamarReal(p);
-            ultimo = { ms: r.ms, motivo: r.ok ? '' : r.motivo };
-            return r;
-          };
-          const r = await turno(c, caso, 'prendido', () => 'real');
-          if (!r) continue;
-          efs.push(ultimo.motivo === 'timeout' || ultimo.motivo === 'http' ? `fallback:${r.ef}` : `${r.clase}:${r.ef}`);
-          ms.push(ultimo.ms);
-        }
-        filas.push({ id: caso.id, texto: caso.texto, efs, ms });
+        const uso: Uso = { tokensIn: 0, tokensOut: 0, tokensRazonamiento: 0 };
+        let llamadas = 0;
+        let ultimo: { ms: number; caida: Caida | null; detalle: string | null; json: unknown } = { ms: 0, caida: null, detalle: null, json: null };
+        decision.modeloDeDecision.llamar = async (p) => {
+          alModeloDeDecision.push(caso.texto);
+          timeouts.add(p.timeoutMs);
+          const r = await llamarReal(p);
+          llamadas++;
+          msModelo.push(r.ms);
+          ultimo = { ms: r.ms, caida: r.caida, detalle: r.ok ? null : r.detalle, json: r.ok ? r.json : null };
+          if (r.caida) caidas[r.caida]++;
+          if (r.uso) { uso.tokensIn += r.uso.tokensIn; uso.tokensOut += r.uso.tokensOut; uso.tokensRazonamiento += r.uso.tokensRazonamiento; }
+          return r;
+        };
+        let desde = 0;
+        const r = await turno(c, caso, 'prendido', () => 'real', () => { desde = enviados.length; });
+        if (!r) continue;
+        const vuelta = vueltaDe(desde);
+        const fallback = !!ultimo.caida;
+        const clase = fallback ? 'fallback' : r.clase;
+        clases[clase]++;
+        if (vuelta) vueltas[vuelta] = (vueltas[vuelta] ?? 0) + 1;
+        total.llamadas += llamadas; total.tokensIn += uso.tokensIn; total.tokensOut += uso.tokensOut; total.tokensRazonamiento += uso.tokensRazonamiento;
+        if (fallback) total.fallbacks++;
+        const veredicto = ultimo.json && typeof ultimo.json === 'object' ? JSON.stringify(ultimo.json) : null;
+        filas.push({ id: caso.id, texto: caso.texto, efs: [`${clase}:${r.ef}`], ms: [ultimo.ms], llamadas, uso, vuelta, caida: ultimo.caida, detalle: ultimo.detalle, veredicto });
       }
-      const resumen = { modelo: BANCO, corridas, control: c.control, danina: filas.reduce((a, f) => a + f.efs.filter(e => e.startsWith('danina')).length, 0) };
+      // El tiempo máximo que usó la capa en cada llamado es el de producción.
+      expect([...timeouts]).toEqual(timeouts.size ? [TIMEOUT_DE_PRODUCCION_MS] : []);
+      const q = (xs: number[], f: number) => { const o = [...xs].sort((x, y) => x - y); return o.length ? o[Math.min(o.length - 1, Math.floor(o.length * f))] : null; };
+      const resumen = {
+        modelo: BANCO, corridas: 1, control: c.control, timeoutMs: [...timeouts][0] ?? null, turnos: filas.length, clases, caidas, vueltas, ...total,
+        msP50: q(msModelo, 0.5), msP90: q(msModelo, 0.9), msMax: q(msModelo, 1),
+      };
       const salida = process.env.BANCO_SALIDA;
       if (salida) writeFileSync(join(salida, `${NOMBRE_DEL_CONTROL[c.control]}-hibrido-${BANCO}.json`), JSON.stringify({ resumen, filas }, null, 1));
       console.log(`[banco] ${JSON.stringify(resumen)}`);
+      expect(clases.danina).toBe(0);
     }, 3_600_000);
   }
 });
@@ -3563,9 +3712,18 @@ describe('bot híbrido (2026-10-06): la prueba de Mauricio de 12:01 a 12:21, de 
         expect(enviados.at(-1)!.lista).toBe(true);
         colaModelo = [CARGA];
         const antesModelo = alModeloDeDecision.length;
-        // 12:16 · la respuesta: el número (el código lo lee), unas palabras (las lee el modelo) o el toque de la fila.
+        // 12:16 · la respuesta: el número (el código lo lee), unas palabras (las lee el modelo) o el toque de la fila. Con
+        // palabras, el modelo elige la fila pero cargar en un viaje sale solo de lo exacto (2026-10-06, SR3): pide el
+        // toque, sin cargar nada, y el toque carga.
         if (como === 'número') await llega('1', { enviado: 20, interprete });
-        if (como === 'palabras') { elige('el de san andrés de don diego', 'v1'); await llega('el de san andrés de don diego', { enviado: 20, interprete }); }
+        if (como === 'palabras') {
+          elige('el de san andrés de don diego', 'v1');
+          await llega('el de san andrés de don diego', { enviado: 20, interprete });
+          expect(textos().at(-1)).toMatch(/^Si es «SAN ANDRÉS DIC», tócalo en la lista\. No he cargado nada\.\n/);
+          expect(enviados.at(-1)!.lista).toBe(true);
+          expect(t.wa_bandeja_entendimientos).toEqual([]);
+          await toca(boton('1. SAN ANDRÉS DIC'), { enviado: 22, interprete });
+        }
         if (como === 'toque') await toca(boton('1. SAN ANDRÉS DIC'), { enviado: 20, interprete });
         expect(alModeloDeDecision.length - antesModelo).toBe(como === 'palabras' ? 1 : 0);
         expect(textos().slice(-2)).toEqual([
