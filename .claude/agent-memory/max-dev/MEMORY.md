@@ -3,7 +3,8 @@
 ## Project memories
 
 - ⚠️ [Copia de la factura escribe en su origen](project_factura_copia_escribe_origen.md) — criterio único `copiaDeSoloLectura`; origen ambiguo rechaza
-- ⚠️⚠️ [Cargue en segundo plano y acciones largas (#1035, #1036)](project_cargue_segundo_plano.md) — marca `data._lectura`; #1036 emisión SIN mergear; /conciliacion tiene 300 s
+- ⚠️ [Piloto de red en soena (#1042 y siguientes)](project_piloto_red_soena.md) — falla carga/RSC, no descargas; SW con interruptor; tabla SIN aplicar
+- ⚠️ [Cargue en segundo plano y acciones largas (#1035, #1036)](project_cargue_segundo_plano.md) — marca `data._lectura`; #1036 mergeado; /conciliacion tiene 300 s
 - [Columna Pago de cuotas CDA](project_columna_pago_cuota_cda.md) — pago↔cuota por FIFO (RPC sin plan/cuota); la UI no nombra a Bold
 - ⚠️ [Acciones lentas SOENA (#1010-#1012)](project_acciones_lentas_soena.md) — `cache()` no memoiza en server actions; `after()` lanza fuera de request
 - [Cargue masivo de Valida concurrente](project_valida_cargue_concurrente.md) — 3 filas; reintento de red no recobra; PDF de lote ya no sigue el orden del XLSX

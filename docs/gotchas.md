@@ -260,3 +260,16 @@
   (`editable_siempre` + `source_bloque_slug`, vía `resolverDestino`) o es de solo lectura, y la pantalla y el
   servidor lo deciden con la MISMA función (`copiaDeSoloLectura`). Abrir `editable_siempre` en un bloque sin
   revisar si tiene copias fue lo que dejó a SOENA subir la factura y recibir el rechazo al final.
+- **Chromium repite UNA vez un POST cuyo socket reusado se cierra sin responder, con o sin service
+  worker.** Medido el 2026-10-06 (`scripts/sw-piloto.e2e.mjs`, servidor local HTTP/1.1 con keep-alive):
+  una server action cortada así llegó DOS veces al servidor desde una pestaña sin SW. Contra Vercel
+  (HTTP/2) no se midió. Una action «que no se confirmó» puede haberse ejecutado dos veces aunque nadie
+  reintentó: la idempotencia del lado del servidor no es opcional.
+- **Service worker del piloto de red (`public/sw.js`, solo soena).** No guarda respuestas; solo toca GET
+  de navegación (reintenta y, sin red, «Reconectando») y RSC sin prefetch (lee la respuesta ENTERA para
+  poder repetirla: se pierde el pintado parcial del stream). Una respuesta RSC redirigida va tal cual: Next
+  mira `redirected`/`url`. Nunca `/api/`, `/auth/` (el código del enlace mágico es de un solo uso), POST
+  ni otro dominio. `/sw.js` pasa el middleware sin sesión: un SW que redirige no se registra NI SE
+  ACTUALIZA, y el interruptor de apagado (`APAGADO = true` en el archivo) llega por la actualización.
+  Segunda llave: `SW_PILOTO_ACTIVO` en `src/lib/red/piloto.ts`.
+

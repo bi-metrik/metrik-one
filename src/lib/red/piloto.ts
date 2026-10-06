@@ -25,6 +25,16 @@ export const PERSONAS_MEDIDAS: Readonly<Record<string, readonly string[]>> = {
   soena: ['maria camila garzon david', 'jessica tejada', 'jenny tatiana cepeda aldana'],
 }
 
+/**
+ * Interruptor del service worker del piloto (`public/sw.js`). En `false`, toda pestaña del
+ * piloto que cargue desregistra el SW. Para equipos que no logren cargar la app, el interruptor
+ * que manda es `APAGADO` dentro de `public/sw.js`: el navegador lo revisa en cada navegación.
+ */
+export const SW_PILOTO_ACTIVO = true
+
+/** Ruta del service worker. Se registra con alcance `/` del subdominio. */
+export const RUTA_SW_PILOTO = '/sw.js'
+
 export function esPilotoRed(slug: string | null | undefined): boolean {
   return !!slug && WORKSPACES_PILOTO_RED.includes(slug)
 }

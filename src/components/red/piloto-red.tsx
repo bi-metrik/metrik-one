@@ -3,7 +3,8 @@
 import { useEffect } from 'react'
 import { activarPilotoRed, anotarEventoRed, nuevoIdRed, vaciarBandejaRed } from '@/lib/red/bandeja-red'
 import { rutaNormalizada } from '@/lib/red/eventos'
-import { esPilotoRed } from '@/lib/red/piloto'
+import { SW_PILOTO_ACTIVO, esPilotoRed } from '@/lib/red/piloto'
+import { sincronizarSwPiloto } from '@/lib/red/registro-sw'
 import { ESPERA_SONDA_MS, VENTANA_MS, crearMedidor, type Medidor, type ResultadoSonda } from '@/lib/red/pulso'
 import { leerRed } from '@/lib/red/contexto-red'
 
@@ -11,8 +12,10 @@ import { leerRed } from '@/lib/red/contexto-red'
  * Piloto de red (brief 2026-10-06), montado en `(app)/layout.tsx`. No pinta nada.
  *
  * Solo en los workspaces de `WORKSPACES_PILOTO_RED`: enciende la bandeja de eventos (para que
- * las superficies puedan anotar sus fallas) y, mientras la pestaña está visible, toma el pulso
- * de la conexión hacia Vercel y hacia el punto de control (ver `lib/red/pulso.ts`).
+ * las superficies puedan anotar sus fallas), registra el service worker del piloto
+ * (`public/sw.js`: «Reconectando» en vez del error de Chrome) y, mientras la pestaña está
+ * visible, toma el pulso de la conexión hacia Vercel y hacia el punto de control
+ * (ver `lib/red/pulso.ts`).
  */
 
 /** Archivo estático del propio dominio (CDN de Vercel). Extensión excluida del middleware. */
@@ -59,6 +62,13 @@ function redDelNavegador() {
 
 export default function PilotoRed({ slug }: { slug: string | null }) {
   const activo = esPilotoRed(slug)
+
+  // Service worker del piloto (`public/sw.js`): se registra en el piloto y se retira fuera de
+  // él o con el interruptor `SW_PILOTO_ACTIVO` apagado. Después de la carga, sin competir con ella.
+  useEffect(() => {
+    const t = setTimeout(() => void sincronizarSwPiloto(activo && SW_PILOTO_ACTIVO), 3_000)
+    return () => clearTimeout(t)
+  }, [activo])
 
   useEffect(() => {
     if (!activo) return
