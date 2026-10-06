@@ -47,6 +47,7 @@ import { botEquipoPermitido, MENSAJE_BOT_SIN_CLARITY } from '../_shared/wa-modul
 import { atenderEnBandeja, rutaDelMensaje } from '../_shared/wa-bandeja.ts';
 import { identificarRemitente } from '../_shared/wa-identificar.ts';
 import { atenderEscrito } from '../_shared/wa-interprete.ts';
+import { primeraVezDelMensaje } from '../_shared/wa-mensaje-unico.ts';
 import type { BotSession, HandlerContext, IncomingMessage, Intent, WaUser } from '../_shared/types.ts';
 import { OPERATOR_ALLOWED_INTENTS, CONTADOR_ALLOWED_INTENTS, READ_ONLY_ALLOWED_INTENTS } from '../_shared/types.ts';
 
@@ -122,6 +123,13 @@ Deno.serve(async (req) => {
       // que sea esa respuesta.
       if (message.type === 'interactive' || message.type === 'text') {
         message.webhook_crudo = { cuerpo: body, firma: signature };
+      }
+
+      // Meta reenvía el MISMO mensaje si no recibió el 200 a tiempo: se procesa una sola vez
+      // por `wa_message_id` (ver `_shared/wa-mensaje-unico.ts`).
+      if (!(await primeraVezDelMensaje(getServiceClient(), message.wa_message_id))) {
+        console.log(`[wa-webhook] ${message.wa_message_id} ya se proceso: reenvio de Meta, se ignora`);
+        return new Response('OK', { status: 200 });
       }
 
       // Process async — respond 200 immediately (Meta expects < 20s).
