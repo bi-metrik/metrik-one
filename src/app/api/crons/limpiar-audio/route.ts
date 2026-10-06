@@ -25,6 +25,7 @@
  * alguien sube. Esto de aqui es la red de abajo.
  */
 import { NextRequest, NextResponse } from 'next/server'
+import { candadoDeCron } from '@/lib/idempotencia/candado-cron'
 import { createServiceClient } from '@/lib/supabase/server'
 import { BUCKET_AUDIO, huerfanos } from '@/lib/calidad/audio-bucket'
 
@@ -37,6 +38,10 @@ export async function GET(req: NextRequest) {
   if (!cronHeader && authHeader !== `Bearer ${process.env.CRON_SECRET}`) {
     return NextResponse.json({ error: 'No autorizado' }, { status: 401 })
   }
+
+  // Una sola corrida aunque Vercel entregue el cron dos veces (ver `candadoDeCron`).
+  const otraCorrida = await candadoDeCron('limpiar-audio', req)
+  if (otraCorrida) return otraCorrida
 
   const supabase = createServiceClient()
   const ahora = Date.now()

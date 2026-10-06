@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server'
+import { candadoDeCron } from '@/lib/idempotencia/candado-cron'
 import { createServiceClient } from '@/lib/supabase/server'
 import { seleccionarDelDia, type ReunionDescartada } from '@/lib/actas/seleccion'
 import { generarActa } from '@/lib/actas/generacion'
@@ -44,6 +45,10 @@ export async function GET(req: NextRequest) {
   if (!cronHeader && authHeader !== `Bearer ${process.env.CRON_SECRET}`) {
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
   }
+
+  // Una sola corrida aunque Vercel entregue el cron dos veces (ver `candadoDeCron`).
+  const otraCorrida = await candadoDeCron('actas-diarias', req)
+  if (otraCorrida) return otraCorrida
 
   const apiKey = process.env.GEMINI_API_KEY
   if (!apiKey) {
