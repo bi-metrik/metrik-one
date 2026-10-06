@@ -1,5 +1,6 @@
 'use client'
 
+import { MENSAJE_LECTURA_INTERRUMPIDA } from '@/lib/cotizaciones/lectura-sin-silencio'
 import { useEffect, useId, useRef, useState, type DragEvent, type ReactNode } from 'react'
 import { useTransitionTolerante } from '@/hooks/use-transition-tolerante'
 import { toast } from 'sonner'
@@ -980,7 +981,7 @@ function PideHabitacion({ itemId, texto, onCambio }: { itemId: string; texto: st
         if (r.pendiente) toast.warning(r.pendiente)
         onCambio()
       } catch {
-        setRechazo('No se pudo leer el pantallazo. Vuelve a pegarlo.')
+        setRechazo(MENSAJE_LECTURA_INTERRUMPIDA)
       } finally {
         setLeyendo(false)
       }

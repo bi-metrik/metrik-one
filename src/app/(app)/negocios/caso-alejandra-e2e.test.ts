@@ -208,16 +208,18 @@ function consulta(tabla: string) {
 const { POST: detectarPOST } = await import('@/app/api/cotizaciones/[id]/detectar-captura/route')
 const { POST: leerPOST } = await import('@/app/api/cotizaciones/[id]/leer-captura/route')
 const { POST: aceptarPOST } = await import('@/app/api/cotizaciones/[id]/aceptar-captura/route')
-const { procesarCaptura } = await import('@/lib/cotizaciones/proceso-captura')
+const proceso = await import('@/lib/cotizaciones/proceso-captura')
+const { procesarCaptura, leerCaptura } = proceso
 const red = await import('@/lib/cotizaciones/bandeja-red')
 const { revisarBorrador } = await import('@/lib/cotizaciones/revisar-borrador')
-const { desenlaceDeAceptacion, opcionesParaComparar } = await import('./bandeja-capturas')
+const { desenlaceDeAceptacion, idDeAceptacion, opcionesParaComparar } = await import('./bandeja-capturas')
 const { leerTarifaPax } = await import('@/lib/cotizaciones/tarifa-pasajero')
 const { habitacionesDeTarifa } = await import('@/lib/cotizaciones/habitaciones')
 const { etiquetaDeRanura } = await import('@/lib/cotizaciones/ranuras-pantallazo')
 
 type Captura = import('./bandeja-capturas').Captura
 type CambioDeCaptura = import('@/lib/cotizaciones/proceso-captura').CambioDeCaptura
+type FalloDeBandeja = import('@/lib/errores-cliente/enviar').FalloDeBandeja
 
 // ── La red entre la bandeja y Vercel ─────────────────────────────────────────
 
@@ -226,8 +228,17 @@ type Accion = keyof typeof RUTAS
 
 /** Lo que llegó a «Vercel» (las rutas), en orden. */
 let llegadas: { accion: Accion; bytes: number }[] = []
-/** Cuántas peticiones de cada ruta se cortan ANTES de llegar, como las de Alejandra. */
+/**
+ * Peticiones que se cortan ANTES de llegar, por ruta (como las de Alejandra: el borde de Vercel
+ * no las contó). `Infinity` = la red no vuelve.
+ */
 let cortes: Partial<Record<Accion, number>> = {}
+/** Peticiones que SÍ llegan y se ejecutan, pero cuya respuesta se pierde en el camino. */
+let respuestasPerdidas: Partial<Record<Accion, number>> = {}
+/** Las líneas que la bandeja manda al log de Vercel (`reportarFalloDeBandeja`). */
+let reportes: FalloDeBandeja[] = []
+/** Cuántas veces esperó la bandeja antes de reintentar. */
+let esperas = 0
 
 const fetchLocal: typeof fetch = async (entrada, init) => {
   const url = String(entrada)
@@ -242,8 +253,15 @@ const fetchLocal: typeof fetch = async (entrada, init) => {
   const cuerpo = String(init?.body ?? '')
   llegadas.push({ accion, bytes: cuerpo.length })
   const req = new Request(`https://trappvel.metrikone.co${url}`, { method: 'POST', body: cuerpo, headers: { 'content-type': 'application/json' } })
-  return RUTAS[accion](req, { params: Promise.resolve({ id: decodeURIComponent(m[1]) }) })
+  const res = await RUTAS[accion](req, { params: Promise.resolve({ id: decodeURIComponent(m[1]) }) })
+  if ((respuestasPerdidas[accion] ?? 0) > 0) {
+    respuestasPerdidas[accion] = (respuestasPerdidas[accion] ?? 0) - 1
+    throw new TypeError('Failed to fetch')
+  }
+  return res
 }
+
+const RED = { dormir: async () => { esperas++ }, reportar: (f: FalloDeBandeja) => void reportes.push(f) }
 
 // ── La bandeja, como la corre el componente ──────────────────────────────────
 
@@ -254,57 +272,99 @@ function lineas(): Fila[] {
   return (tablas.items ?? []).filter(i => i.cotizacion_id === COT).map(i => structuredClone(i))
 }
 
-/** Pega un pantallazo y deja que la bandeja lo mire y lo lea, como `agregar` + `procesar`. */
-async function pegar(archivo: string): Promise<Captura> {
-  const id = `cap-${++contador}`
-  const dataUrl = dataUrlDe(archivo)
-  if (MODO_GEMINI) archivoPorHuella.set(Buffer.from(dataUrl.split(',')[1], 'base64').subarray(0, 4096).toString('base64'), archivo)
-  const c: Captura = {
-    id, preview: dataUrl, dataUrl, estado: { fase: 'mirando' }, tipo: null, pistas: null, borrador: null,
-    itemId: null, donde: null, leida: null, error: null,
-  }
-  capturas.push(c)
-  const actualizar = (cambio: CambioDeCaptura) => Object.assign(c, cambio)
-  await procesarCaptura({
-    detectar: () => red.detectarPorRuta(COT, dataUrl, fetchLocal),
-    leer: (tipo, enfoque) => red.leerPorRuta(COT, tipo, dataUrl, enfoque, fetchLocal),
-    revisar: borrador => revisarBorrador({
-      capId: id, borrador, lineas: lineas() as never, comparables: opcionesParaComparar(lineas() as never, capturas, id),
+/** Las dependencias de una pasada (`dependencias` del componente), con la red de la prueba. */
+function deps(c: Captura) {
+  return {
+    detectar: () => red.detectarPorRuta(COT, c.dataUrl, fetchLocal, RED),
+    leer: (tipo: Parameters<typeof red.leerPorRuta>[1], enfoque: Parameters<typeof red.leerPorRuta>[3]) => red.leerPorRuta(COT, tipo, c.dataUrl, enfoque, fetchLocal, RED),
+    revisar: (borrador: Parameters<typeof revisarBorrador>[0]['borrador']) => revisarBorrador({
+      capId: c.id, borrador, lineas: lineas() as never, comparables: opcionesParaComparar(lineas() as never, capturas, c.id),
       composicion: GRUPO, destinoViaje: DESTINO, ubicaciones: {}, comparar: true,
     }),
     vigente: () => true,
-    informar: actualizar,
-  })
+    informar: (cambio: CambioDeCaptura) => void Object.assign(c, cambio),
+  }
+}
+
+/** Pega un pantallazo y deja que la bandeja lo mire y lo lea (`agregar` + `procesar`). */
+async function pegar(archivo: string): Promise<Captura> {
+  const dataUrl = dataUrlDe(archivo)
+  if (MODO_GEMINI) archivoPorHuella.set(Buffer.from(dataUrl.split(',')[1], 'base64').subarray(0, 4096).toString('base64'), archivo)
+  const c: Captura = {
+    id: `cap-${++contador}-${archivo.replace(/\W/g, '')}`, preview: dataUrl, dataUrl, estado: { fase: 'mirando' }, tipo: null, pistas: null,
+    borrador: null, itemId: null, donde: null, leida: null, error: null,
+  }
+  capturas.push(c)
+  await procesarCaptura(deps(c))
   return c
 }
 
+/** «Reintentar» de la fila (`reintentar` del componente): la misma imagen, sin volver a pegarla. */
+async function reintentarFila(c: Captura) {
+  if (c.tipo) await leerCaptura(deps(c), c.tipo, c.pistas ?? { lugar: null, origen: null, destino: null }, null)
+  else await procesarCaptura(deps(c))
+}
+
+/** «Elegir el tipo» de la fila: la lectura sigue con ese tipo (`procesar(id, dataUrl, t)`). */
+async function elegirTipo(c: Captura, tipo: 'hotel' | 'vuelo') {
+  await procesarCaptura(deps(c), tipo)
+}
+
+/** La decisión que toma la fila con «Aceptar» / «Es una habitación más». */
+function decisionDe(c: Captura): { decision: 'auto' | 'habitacion'; destinoId: string | null } {
+  const e = c.estado
+  if (e.fase === 'parecida' && e.habitacion) return { decision: 'habitacion', destinoId: e.conItemId }
+  return { decision: 'auto', destinoId: null }
+}
+
 /** «Aceptar» de la fila (`aceptar` del componente): el mismo cuerpo, por la misma ruta. */
-async function aceptar(c: Captura, decision: 'auto' | 'opcion' | 'habitacion' | 'reemplazar' = 'auto', destinoId: string | null = null) {
+async function aceptar(c: Captura) {
   const b = c.borrador
   if (!b) throw new Error(`${c.id} no tiene borrador: ${JSON.stringify(c.estado)}`)
+  const { decision, destinoId } = decisionDe(c)
   const r = await red.aceptarPorRuta(COT, {
     tipo: b.tipo, lecturaJson: b.lecturaJson, firma: b.firma, pistas: b.pistas, decision,
-    destinoId, imagen: c.dataUrl || null, correcciones: null,
-  }, fetchLocal)
+    destinoId, imagen: c.dataUrl || null, correcciones: null, idAceptacion: idDeAceptacion(c),
+  }, fetchLocal, RED)
   const d = desenlaceDeAceptacion(r)
   if (d.tipo === 'aceptada') Object.assign(c, { estado: { fase: 'aceptada' }, itemId: d.itemId, donde: d.donde, error: null })
   else Object.assign(c, { error: d.mensaje })
   return d
 }
 
-/** Lo que Componentes muestra: bloque, opción y habitaciones. */
+/** Lo que Componentes muestra: bloques, opciones y la ocupación de cada habitación. */
 function componentes() {
-  const porBloque = new Map<string, { nombre: string; habitaciones: string[] }[]>()
+  const porBloque: Record<string, { nombre: string; habitaciones: string[] }[]> = {}
   for (const i of lineas()) {
     const bloque = etiquetaDeRanura(i.grupo as string)
-    const t = leerTarifaPax(i.tarifa_pax)
-    const habs = habitacionesDeTarifa(t).map(h => {
-      const o = h.lectura.paraComposicion ?? null
+    const habs = habitacionesDeTarifa(leerTarifaPax(i.tarifa_pax)).map(h => {
+      const o = h.lectura.paraComposicion
       return o ? `${o.adultos}A+${o.ninos}N+${o.infantes}I` : '?'
     })
-    porBloque.set(bloque, [...(porBloque.get(bloque) ?? []), { nombre: String(i.nombre), habitaciones: habs }])
+    ;(porBloque[bloque] ??= []).push({ nombre: String(i.nombre), habitaciones: habs })
   }
-  return Object.fromEntries(porBloque)
+  return porBloque
+}
+
+/** El mismo viaje armado: dos vuelos y dos hoteles de tres habitaciones (6A + 1N + 1I cada uno). */
+const ESPERADO = {
+  'Vuelo Bogotá–San Andrés Isla': [{ nombre: 'AVIANCA BOGOTÁ–SAN ANDRÉS ISLA', habitaciones: ['6A+1N+1I'] }],
+  'Vuelo 2 · Vuelo San Andrés Isla–Providencia': [{ nombre: 'SATENA SAN ANDRÉS ISLA ADZ–PROVIDENCIA PVA', habitaciones: ['6A+1N+1I'] }],
+  'Hotel en Providencia Island': [
+    { nombre: 'CABAÑAS AGUA DULCE · PROVIDENCIA ISLAND / PROVIDENCIA ISLAND', habitaciones: ['2A+1N+0I', '2A+0N+1I', '2A+0N+0I'] },
+    { nombre: 'POSADA ENILDA · PROVIDENCIA ISLAND', habitaciones: ['2A+0N+1I', '2A+1N+0I', '2A+0N+0I'] },
+  ],
+}
+
+/** El orden de Alejandra: Avianca, SATENA, Cabañas Triple Basic 2A + 1 niño, y el resto. */
+const ORDEN = ['captura-1.jpeg', 'captura-8.jpeg', 'captura-4.jpeg', 'captura-2.jpeg', 'captura-3.jpeg', 'captura-5.jpeg', 'captura-6.jpeg', 'captura-7.jpeg']
+
+const TEXTOS_VIEJOS = ['No se pudo agregar la captura. Inténtalo otra vez.', 'No se pudo leer el pantallazo. Vuelve a pegarlo.']
+const sinTextosViejos = () => {
+  for (const c of capturas) {
+    const t = JSON.stringify({ estado: c.estado, error: c.error })
+    for (const v of TEXTOS_VIEJOS) expect(t).not.toContain(v)
+  }
 }
 
 beforeEach(() => {
@@ -313,34 +373,218 @@ beforeEach(() => {
   capturas = []
   llegadas = []
   cortes = {}
+  respuestasPerdidas = {}
+  reportes = []
+  esperas = 0
   secuencia = 0
 })
-afterEach(() => vi.unstubAllEnvs())
+afterEach(() => {
+  vi.unstubAllEnvs()
+  vi.unstubAllGlobals()
+  vi.restoreAllMocks()
+})
 afterAll(() => {
   if (!GRABAR) return
   const capturasNuevas = fixture.capturas.map(c => ({ ...c, ...grabado.get(c.archivo) }))
   writeFileSync(RUTA_FIXTURE, `${JSON.stringify({ ...fixture, capturas: capturasNuevas }, null, 1)}\n`)
 })
 
-const ARCHIVOS = fixture.capturas.map(c => c.archivo)
-
 describe.runIf(!MODO_GEMINI || existsSync(DIR_CAPTURAS))('caso Alejandra (N1 26 1): 6A + 1N + 1I, dos vuelos, hoteles por habitación', () => {
-  it('reproducción: el orden de Alejandra con la red sana', async () => {
-    const avianca = await pegar('captura-1.jpeg')
-    expect(avianca.estado.fase).toBe('lista')
-    expect((await aceptar(avianca)).tipo).toBe('aceptada')
-    const satena = await pegar('captura-8.jpeg')
-    expect((await aceptar(satena)).tipo).toBe('aceptada')
-    const cabanas = await pegar('captura-4.jpeg')
-    console.log(cabanas.estado, cabanas.donde)
-    const d = await aceptar(cabanas)
-    console.log(d)
-    for (const a of ['captura-2.jpeg', 'captura-3.jpeg', 'captura-5.jpeg', 'captura-6.jpeg', 'captura-7.jpeg']) {
-      const c = await pegar(a)
-      console.log(a, c.estado.fase, 'mensaje' in c.estado ? c.estado.mensaje : '', c.donde)
-      if (c.borrador) console.log(a, await aceptar(c, c.estado.fase === 'parecida' && 'habitacion' in c.estado && c.estado.habitacion ? 'habitacion' : 'auto', c.estado.fase === 'parecida' ? c.estado.conItemId : null))
+  it('el fixture son sus 8 pantallazos', () => {
+    expect(fixture.capturas.map(c => c.archivo).sort()).toEqual([...ORDEN].sort())
+  })
+
+  it('criterios 1 y 2 · con la red sana los 8 entran; Cabañas Triple Basic 2A + 1 niño queda como habitación del hotel', async () => {
+    for (const archivo of ORDEN) {
+      const c = await pegar(archivo)
+      expect(c.borrador, `${archivo}: ${JSON.stringify(c.estado)}`).not.toBeNull()
+      expect((await aceptar(c)).tipo, archivo).toBe('aceptada')
     }
-    console.log(JSON.stringify(componentes(), null, 1))
-    expect(ARCHIVOS).toHaveLength(8)
-  }, 120_000)
+    expect(componentes()).toEqual(ESPERADO)
+    // Cabañas 2A + 1N fue la primera del hotel: es la habitación 1 de su opción.
+    const cabanas = capturas[2]
+    expect(cabanas.donde).toBe('Hotel en Providencia Island · Opción 1')
+    const opcion = lineas().find(i => i.id === cabanas.itemId)!
+    const habitaciones = habitacionesDeTarifa(leerTarifaPax(opcion.tarifa_pax))
+    expect(habitaciones[0].lectura.identidad.hotel).toBe('Cabañas Agua Dulce')
+    expect(habitaciones[0].lectura.paraComposicion).toEqual({ adultos: 2, ninos: 1, infantes: 0 })
+    expect(capturas.every(c => c.estado.fase === 'aceptada')).toBe(true)
+    expect(reportes).toEqual([])
+  })
+
+  it('criterios 1 y 3 · la red se corta donde se le cortó a Alejandra y los 8 entran igual, sin repetidos', async () => {
+    const avianca = await pegar('captura-1.jpeg')
+    await aceptar(avianca)
+    const satena = await pegar('captura-8.jpeg')
+    await aceptar(satena)
+    // Cabañas: su detección y su «Aceptar» no llegaron a Vercel (16:44–16:46).
+    cortes = { 'detectar-captura': 1 }
+    const cabanas = await pegar('captura-4.jpeg')
+    expect(cabanas.estado.fase).toBe('lista')
+    cortes = { 'aceptar-captura': 2 }
+    expect((await aceptar(cabanas)).tipo).toBe('aceptada')
+    // Los dos que pegó a la vez (16:46:09): la detección llegó, la lectura de los dos se cortó.
+    cortes = { 'leer-captura': 2 }
+    const [a, b] = await Promise.all([pegar('captura-2.jpeg'), pegar('captura-3.jpeg')])
+    expect([a.estado.fase, b.estado.fase]).toEqual(['lista', 'lista'])
+    for (const c of [a, b]) expect((await aceptar(c)).tipo).toBe('aceptada')
+    for (const archivo of ['captura-5.jpeg', 'captura-6.jpeg', 'captura-7.jpeg']) await aceptar(await pegar(archivo))
+
+    expect(componentes()).toEqual(ESPERADO)
+    sinTextosViejos()
+    // Cada corte que se recuperó deja su línea: es la señal de que la red de ese PC falla.
+    expect(reportes).toEqual([
+      expect.objectContaining({ ruta: 'detectar-captura', codigo: 'RED', cotizacionId: COT, intentos: 2, recuperado: true }),
+      expect.objectContaining({ ruta: 'aceptar-captura', codigo: 'RED', cotizacionId: COT, intentos: 3, recuperado: true }),
+      expect.objectContaining({ ruta: 'leer-captura', codigo: 'RED', cotizacionId: COT, intentos: 2, recuperado: true }),
+      expect.objectContaining({ ruta: 'leer-captura', codigo: 'RED', cotizacionId: COT, intentos: 2, recuperado: true }),
+    ])
+    for (const r of reportes) expect(r.bytesImagen).toBeGreaterThan(0)
+  })
+
+  it('criterio 3 · dos pegados en el mismo segundo, con la red cortando a los dos, entran los dos', async () => {
+    cortes = { 'detectar-captura': 2, 'leer-captura': 2 }
+    const [enilda1, enilda2] = await Promise.all([pegar('captura-5.jpeg'), pegar('captura-6.jpeg')])
+    expect([enilda1.estado.fase, enilda2.estado.fase]).toEqual(['lista', 'lista'])
+    // Aceptados los dos a la vez (la fila los manda en cola, como `colaAceptar`).
+    cortes = { 'aceptar-captura': 1 }
+    const d1 = await aceptar(enilda1)
+    const d2 = await aceptar(enilda2)
+    expect([d1.tipo, d2.tipo]).toEqual(['aceptada', 'aceptada'])
+    expect(componentes()['Hotel en Providencia Island']).toEqual([
+      { nombre: 'POSADA ENILDA · PROVIDENCIA ISLAND', habitaciones: ['2A+0N+1I', '2A+1N+0I'] },
+    ])
+  })
+
+  it('criterio 1 · si la red no vuelve, cada fila dice qué pasó y qué hacer; nada queda a medias y todo se puede retomar', async () => {
+    // La detección no llega: se pide el tipo diciendo que fue la conexión.
+    cortes = { 'detectar-captura': Infinity }
+    const cabanas = await pegar('captura-4.jpeg')
+    expect(cabanas.estado).toEqual({ fase: 'eligiendo_tipo', motivo: proceso.MENSAJE_DETECCION_SIN_RED })
+    // Elige «Es hotel» y la lectura tampoco llega: «Reintentar», sin volver a pegarla.
+    cortes = { 'leer-captura': Infinity }
+    await elegirTipo(cabanas, 'hotel')
+    expect(cabanas.estado).toEqual({ fase: 'rechazada', mensaje: proceso.MENSAJE_LECTURA_SIN_RED, reintentar: true })
+    // Vuelve la red: «Reintentar» la lee.
+    cortes = {}
+    await reintentarFila(cabanas)
+    expect(cabanas.estado.fase).toBe('lista')
+    // «Aceptar» sin red: lo dice, la captura sigue en la bandeja y en Componentes no hay nada.
+    cortes = { 'aceptar-captura': Infinity }
+    const d = await aceptar(cabanas)
+    expect(d).toEqual({ tipo: 'error', mensaje: red.MENSAJE_ACEPTAR_SIN_RED })
+    expect(cabanas.borrador).not.toBeNull()
+    expect(lineas()).toEqual([])
+    // Con la red de vuelta, el mismo «Aceptar» entra.
+    cortes = {}
+    expect((await aceptar(cabanas)).tipo).toBe('aceptada')
+    // Sin detección no hubo lugar leído: el bloque toma el destino del viaje, como siempre.
+    expect(componentes()).toEqual({
+      'Hotel en San Andrés - Providencia': [
+        { nombre: 'CABAÑAS AGUA DULCE · PROVIDENCIA ISLAND / PROVIDENCIA ISLAND', habitaciones: ['2A+1N+0I'] },
+      ],
+    })
+    sinTextosViejos()
+  })
+
+  it('criterio 4 · cada envío que no llegó deja su línea: ruta, código, cotización, tamaño de la imagen e intentos', async () => {
+    cortes = { 'detectar-captura': Infinity }
+    const c = await pegar('captura-4.jpeg')
+    cortes = { 'leer-captura': Infinity }
+    await elegirTipo(c, 'hotel')
+    cortes = {}
+    await reintentarFila(c)
+    cortes = { 'aceptar-captura': Infinity }
+    await aceptar(c)
+    const bytes = Math.floor((c.dataUrl.length - c.dataUrl.indexOf(',') - 1) * 3 / 4)
+    expect(reportes).toEqual([
+      { ruta: 'detectar-captura', codigo: 'RED', cotizacionId: COT, bytesImagen: bytes, intentos: 3, ms: expect.any(Number) },
+      { ruta: 'leer-captura', codigo: 'RED', cotizacionId: COT, bytesImagen: bytes, intentos: 3, ms: expect.any(Number) },
+      { ruta: 'aceptar-captura', codigo: 'RED', cotizacionId: COT, bytesImagen: bytes, intentos: 3, ms: expect.any(Number) },
+    ])
+    // Y ninguna de esas peticiones llegó al servidor: como en Vercel el 2026-10-05.
+    expect(llegadas.map(l => l.accion)).toEqual(['leer-captura'])
+    // Entre intento e intento la bandeja esperó (1,5 s y 4 s en producción).
+    expect(esperas).toBe(6)
+  })
+
+  it('criterio 4 · la línea llega al log de Vercel por /api/errores-cliente con origen «bandeja»', async () => {
+    const { POST: erroresPOST } = await import('@/app/api/errores-cliente/route')
+    const lineasDelLog: string[] = []
+    vi.spyOn(console, 'error').mockImplementation((...a: unknown[]) => void lineasDelLog.push(a.map(String).join(' ')))
+    const datos = new Map<string, string>()
+    vi.stubGlobal('window', {
+      location: { pathname: `/negocios/neg-n1-26-1/cotizacion/${COT}`, host: 'trappvel.metrikone.co' },
+      localStorage: { getItem: (k: string) => datos.get(k) ?? null, setItem: (k: string, v: string) => void datos.set(k, v), removeItem: (k: string) => void datos.delete(k) },
+      addEventListener: () => {},
+      removeEventListener: () => {},
+    })
+    // El reporte es pequeño y sí sale: va a la ruta real de errores del cliente.
+    vi.stubGlobal('fetch', async (url: string, init: RequestInit) => erroresPOST(new Request(`https://trappvel.metrikone.co${url}`, { method: 'POST', body: init.body as string })))
+    const { reportarFalloDeBandeja } = await import('@/lib/errores-cliente/enviar')
+    // La bandeja real (sin `reportar` de prueba): el aceptar de Cabañas no llega.
+    const c = await pegar('captura-4.jpeg')
+    cortes = { 'aceptar-captura': Infinity }
+    const b = c.borrador!
+    await red.aceptarPorRuta(COT, {
+      tipo: b.tipo, lecturaJson: b.lecturaJson, firma: b.firma, pistas: b.pistas, decision: 'auto',
+      destinoId: null, imagen: c.dataUrl, correcciones: null, idAceptacion: idDeAceptacion(c),
+    }, fetchLocal, { dormir: async () => {}, reportar: reportarFalloDeBandeja })
+    await new Promise(r => setTimeout(r, 0))
+    const linea = lineasDelLog.find(l => l.startsWith('[error-cliente]'))
+    expect(linea).toBeDefined()
+    const json = JSON.parse(linea!.slice('[error-cliente] '.length))
+    expect(json).toMatchObject({
+      origen: 'bandeja',
+      message: 'Bandeja: aceptar-captura RED',
+      host: 'trappvel.metrikone.co',
+      bandeja: { ruta: 'aceptar-captura', codigo: 'RED', cotizacionId: COT, intentos: 3, bytesImagen: expect.any(Number) },
+    })
+  })
+
+  it('«Aceptar» que llegó pero perdió la respuesta: el reintento no duplica la opción ni la habitación', async () => {
+    const cabanas = await pegar('captura-4.jpeg')
+    respuestasPerdidas = { 'aceptar-captura': 1 }
+    expect((await aceptar(cabanas)).tipo).toBe('aceptada')
+    expect(cabanas.donde).toBe('Hotel en Providencia Island · Opción 1')
+    const otra = await pegar('captura-2.jpeg')
+    respuestasPerdidas = { 'aceptar-captura': 2 }
+    const d = await aceptar(otra)
+    expect(d).toMatchObject({ tipo: 'aceptada', como: 'habitacion', habitacionNumero: 2 })
+    expect(llegadas.filter(l => l.accion === 'aceptar-captura')).toHaveLength(5)
+    expect(componentes()['Hotel en Providencia Island']).toEqual([
+      { nombre: 'CABAÑAS AGUA DULCE · PROVIDENCIA ISLAND / PROVIDENCIA ISLAND', habitaciones: ['2A+1N+0I', '2A+0N+1I'] },
+    ])
+  })
+
+  it('ninguna salida ok:false del servidor sin mensaje ni sin su línea [bandeja] en el log', async () => {
+    const avisos: string[] = []
+    const errores: string[] = []
+    vi.spyOn(console, 'warn').mockImplementation((...a: unknown[]) => void avisos.push(a.map(String).join(' ')))
+    vi.spyOn(console, 'error').mockImplementation((...a: unknown[]) => void errores.push(a.map(String).join(' ')))
+    const c = await pegar('captura-4.jpeg')
+    const b = c.borrador!
+    // Una firma que no es la de la lectura: FIRMA, con su mensaje y su línea.
+    const r = await red.aceptarPorRuta(COT, {
+      tipo: b.tipo, lecturaJson: b.lecturaJson, firma: 'otra', pistas: b.pistas, decision: 'auto',
+      destinoId: null, imagen: c.dataUrl, correcciones: null, idAceptacion: idDeAceptacion(c),
+    }, fetchLocal, RED)
+    expect(r).toMatchObject({ ok: false, codigo: 'FIRMA', mensaje: expect.stringMatching(/\S/) })
+    const linea = avisos.find(l => l.startsWith('[bandeja]') && l.includes('"FIRMA"'))
+    expect(JSON.parse(linea!.slice('[bandeja] '.length))).toEqual({
+      ruta: 'aceptar-captura', codigo: 'FIRMA', cotizacionId: COT, bytesImagen: expect.any(Number), mensaje: expect.stringMatching(/\S/),
+    })
+    // La acción lanza (la base se cae a mitad): sale ok:false con ERROR y su línea, no un 500 ilegible.
+    const original = tablas.items
+    Object.defineProperty(tablas, 'items', { get: () => { throw new Error('se cayó la base') }, configurable: true })
+    const r2 = await red.aceptarPorRuta(COT, {
+      tipo: b.tipo, lecturaJson: b.lecturaJson, firma: b.firma, pistas: b.pistas, decision: 'auto',
+      destinoId: null, imagen: c.dataUrl, correcciones: null, idAceptacion: idDeAceptacion(c),
+    }, fetchLocal, RED)
+    Object.defineProperty(tablas, 'items', { value: original, writable: true, configurable: true, enumerable: true })
+    expect(r2).toMatchObject({ ok: false, codigo: 'ERROR', mensaje: expect.stringMatching(/^ONE tuvo un error/) })
+    expect(errores.some(l => l.startsWith('[bandeja]') && l.includes('se cayó la base') && l.includes(COT))).toBe(true)
+    // La desconocida sin mensaje: la fila igual dice qué pasó, con el código.
+    expect(desenlaceDeAceptacion({ ok: false, codigo: 'X', mensaje: '' })).toEqual({ tipo: 'error', mensaje: expect.stringContaining('código X') })
+  })
 })

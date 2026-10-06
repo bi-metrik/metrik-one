@@ -1,5 +1,6 @@
 'use client'
 
+import { MENSAJE_LECTURA_INTERRUMPIDA } from '@/lib/cotizaciones/lectura-sin-silencio'
 import { useState, type ReactNode } from 'react'
 import { useTransitionTolerante } from '@/hooks/use-transition-tolerante'
 import { AlertTriangle, BedDouble, Check, Image as ImageIcon, Loader2, X } from 'lucide-react'
@@ -104,7 +105,7 @@ export default function HabitacionesDeOpcion({
           setRechazo(r.mensaje)
         }
       } catch {
-        setRechazo('No se pudo leer el pantallazo. Vuelve a pegarlo.')
+        setRechazo(MENSAJE_LECTURA_INTERRUMPIDA)
       } finally {
         setLeyendo(false)
       }
@@ -343,7 +344,7 @@ export function PegarOtraHabitacion({
             setRechazo(r.mensaje)
           }
         } catch {
-          setRechazo('No se pudo leer el pantallazo. Vuelve a pegarlo.')
+          setRechazo(MENSAJE_LECTURA_INTERRUMPIDA)
         } finally {
           setLeyendo(false)
         }

@@ -71,6 +71,7 @@ import { fechaDeActividad, lugarDeBloqueNuevo } from '@/lib/cotizaciones/activid
 import { diaDeFecha } from '@/lib/cotizaciones/actividad-en-cotizacion'
 import { borradorValido, firmarBorrador } from '@/lib/cotizaciones/firma-borrador'
 import { opcionElegidaDeActividad, ubicarLectura, type LineaParaUbicar } from '@/lib/cotizaciones/ubicar-lectura'
+import { aceptacionPrevia, idAceptacionValido } from '@/lib/cotizaciones/aceptacion-idempotente'
 import { definicionDeTipo, esTipoRanura, tipoDeDefinicion, type TipoRanura } from '@/lib/cotizaciones/ranuras-cotizacion'
 import { lugarDeOpcion } from '@/lib/cotizaciones/opcion-viaje'
 import { normalizarGrupo } from '@/lib/cotizaciones/itinerarios'
@@ -618,6 +619,12 @@ export interface BorradorParaAceptar {
    * datos son los de la opción a la que se suma.
    */
   correcciones?: { slug: string; valor: string }[] | null
+  /**
+   * La llave de este «Aceptar» (caso Alejandra, 2026-10-05): la misma en cada reintento. Si ya
+   * hay una lectura de la cotización con ella, la aceptación ya quedó y no se escribe otra vez
+   * (`aceptacion-idempotente.ts`).
+   */
+  idAceptacion?: string | null
 }
 
 /** Cómo entró la captura: otra opción, una ranura nueva, una habitación o sobre una opción. */
@@ -660,6 +667,9 @@ export async function aceptarCapturaDeBandeja(cotizacionId: string, b: BorradorP
     return { ok: false, codigo: 'FIRMA', mensaje: 'La lectura de esta captura venció o no es de esta cotización. Vuelve a pegarla.' }
   }
   const lectura = JSON.parse(b.lecturaJson) as LecturaCasilla
+  // La llave viaja con la lectura que se escribe: un reintento la encuentra (ver abajo).
+  const idAceptacion = idAceptacionValido(b.idAceptacion)
+  if (idAceptacion) lectura.aceptacion = idAceptacion
   const ctx = await medirEtapa('contexto', () => contextoDeCotizacion(cotizacionId))
   if ('error' in ctx) return { ok: false, codigo: 'CONTEXTO', mensaje: ctx.error as string }
   // El pantallazo se sube ahora, al aceptar: mientras estuvo en la bandeja no se guardó. Una
@@ -679,6 +689,20 @@ export async function aceptarCapturaDeBandeja(cotizacionId: string, b: BorradorP
     const ref = await subida
     if (ref) await borrarImagenesDeCaptura(workspaceId, [ref])
     return { ok: false, codigo: 'CONTEXTO', mensaje: lineas.error }
+  }
+  // Caso Alejandra · un reintento de un «Aceptar» que SÍ llegó (se perdió la respuesta): lo que
+  // ya quedó se devuelve tal cual y no se escribe otra opción ni otra habitación.
+  const previa = aceptacionPrevia(lineas, idAceptacion)
+  if (previa) {
+    const ref = await subida
+    if (ref) await borrarImagenesDeCaptura(workspaceId, [ref])
+    if (previa.como === 'habitacion') {
+      const tarifa = leerTarifaPax(lineas.find(l => l.id === previa.itemId)?.tarifa_pax)
+      const { numero } = dondeQuedo(tarifa, previa.habitacionId, ctx.viaje.composicion, null)
+      return terminarAceptacion(ctx.supabase, cotizacionId, previa.itemId, { como: 'habitacion', habitacionId: previa.habitacionId, habitacionNumero: numero })
+    }
+    const como: ComoEntro = b.decision === 'reemplazar' ? 'reemplazo' : previa.sola ? 'nueva' : 'hermana'
+    return terminarAceptacion(ctx.supabase, cotizacionId, previa.itemId, { como })
   }
   const pistas = {
     lugar: typeof b.pistas?.lugar === 'string' ? b.pistas.lugar.slice(0, 120) : null,
@@ -787,7 +811,7 @@ async function aceptarLectura(
     // Una actividad sin ciudad en la captura nombra su bloque con el destino del viaje, no
     // con el nombre de la excursión que tomó el detector (punto 4 del brief del 2026-10-01).
     : await medirEtapa('crear', () => crearRanuraConOpcion(cotizacionId, b.tipo, { ...pistas, lugar: lugarDeBloqueNuevo(b.tipo, lectura, pistas.lugar, b.correcciones) }))
-  if (!creada.success) return { ok: false, codigo: 'CREAR', mensaje: creada.error }
+  if (!creada.success) return { ok: false, codigo: 'CREAR', mensaje: creada.error || 'No se pudo abrir la opción para esta captura. Toca «Aceptar» otra vez.' }
   const ctxItem = await contexto(creada.itemId)
   await conImagen()
   const g = 'error' in ctxItem

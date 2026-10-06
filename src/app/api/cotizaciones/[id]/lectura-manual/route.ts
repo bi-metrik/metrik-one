@@ -6,6 +6,7 @@
 import { NextResponse } from 'next/server'
 
 import { lecturaManualEnBorrador } from '@/app/(app)/negocios/tarifa-pax-actions'
+import { registrarEnBandeja, responderBandeja } from '@/lib/cotizaciones/bandeja-registro'
 
 export const runtime = 'nodejs'
 
@@ -18,7 +19,9 @@ export async function POST(req: Request, { params }: { params: Promise<{ id: str
     cuerpo = null
   }
   if (!id || !cuerpo || (cuerpo.tipo !== 'hotel' && cuerpo.tipo !== 'traslado') || !cuerpo.datos || typeof cuerpo.datos !== 'object') {
+    registrarEnBandeja('warn', { ruta: 'lectura-manual', codigo: 'PETICION', cotizacionId: id ?? '', bytesImagen: null })
     return NextResponse.json({ ok: false, codigo: 'PETICION', mensaje: 'El formulario llegó incompleto. Vuelve a enviarlo.' }, { status: 400 })
   }
-  return NextResponse.json(await lecturaManualEnBorrador(id, cuerpo.tipo, cuerpo.datos))
+  const { tipo, datos } = cuerpo
+  return NextResponse.json(await responderBandeja('lectura-manual', id, null, () => lecturaManualEnBorrador(id, tipo, datos)))
 }

@@ -90,9 +90,12 @@ describe('la bandeja habla por rutas, no por server actions', () => {
     await Promise.all(leyendo)
   })
 
-  it('sin respuesta del servidor, «Aceptar» devuelve null (la bandeja lo muestra como error)', async () => {
-    const roto = (async () => { throw new Error('red') }) as unknown as typeof fetch
-    expect(await aceptarPorRuta(COT, borrador(SEIS[0]), roto)).toBeNull()
+  it('sin respuesta del servidor, «Aceptar» reintenta y devuelve ok:false con su código y qué hacer (caso Alejandra)', async () => {
+    let llamadas = 0
+    const roto = (async () => { llamadas++; throw new TypeError('Failed to fetch') }) as unknown as typeof fetch
+    const r = await aceptarPorRuta(COT, borrador(SEIS[0]), roto, { dormir: async () => {}, reportar: () => {} })
+    expect(llamadas).toBe(3)
+    expect(r).toEqual({ ok: false, codigo: 'RED', mensaje: expect.stringMatching(/^No llegó a ONE: la conexión se cortó/) })
   })
 
   it('la bandeja no importa las lecturas como server action: esas bloquean el refresco de Componentes', () => {

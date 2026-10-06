@@ -16,6 +16,7 @@ import { NextResponse } from 'next/server'
 import { aceptarCapturaDeBandeja, type BorradorParaAceptar } from '@/app/(app)/negocios/tarifa-pax-actions'
 import { enPeticionDeRuta } from '@/lib/actions/memo-de-ruta'
 import { conTiempos, encabezadoServerTiming } from '@/lib/actions/tiempos-de-ruta'
+import { bytesDeImagen, registrarEnBandeja, responderBandeja } from '@/lib/cotizaciones/bandeja-registro'
 
 export const runtime = 'nodejs'
 
@@ -37,6 +38,7 @@ export async function POST(req: Request, { params }: { params: Promise<{ id: str
     typeof cuerpo.firma !== 'string' ||
     !DECISIONES.has(String(cuerpo.decision))
   ) {
+    registrarEnBandeja('warn', { ruta: 'aceptar-captura', codigo: 'PETICION', cotizacionId: id ?? '', bytesImagen: bytesDeImagen(cuerpo?.imagen) })
     return NextResponse.json({ ok: false, codigo: 'PETICION', mensaje: 'La captura llegó incompleta. Vuelve a pegarla.' }, { status: 400 })
   }
   // Una sola resolución de la sesión para toda la aceptación (`memo-de-ruta.ts`): antes eran
@@ -53,10 +55,13 @@ export async function POST(req: Request, { params }: { params: Promise<{ id: str
     correcciones: Array.isArray(cuerpo.correcciones)
       ? cuerpo.correcciones.filter(c => !!c && typeof c.slug === 'string' && typeof c.valor === 'string')
       : null,
+    idAceptacion: typeof cuerpo.idAceptacion === 'string' ? cuerpo.idAceptacion : null,
   }
   // Brief del 2026-10-05, punto 13: además del total, cada etapa (contexto, subida del
   // pantallazo, líneas, crear la opción, guardar la lectura, confirmar el costo, ubicarla).
-  const { resultado: r, etapas } = await conTiempos(() => enPeticionDeRuta(() => aceptarCapturaDeBandeja(id, borrador)))
+  // Caso Alejandra (2026-10-05): todo `ok:false` con mensaje y con su línea en el log.
+  const { resultado: r, etapas } = await conTiempos(() =>
+    responderBandeja('aceptar-captura', id, bytesDeImagen(borrador.imagen), () => enPeticionDeRuta(() => aceptarCapturaDeBandeja(id, borrador))))
   const ms = performance.now() - inicio
   return NextResponse.json(r, { headers: { 'Server-Timing': encabezadoServerTiming(['aceptar', ms], etapas) } })
 }
