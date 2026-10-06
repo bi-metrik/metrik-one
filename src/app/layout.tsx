@@ -106,7 +106,7 @@ export default function RootLayout({
     <html lang="es" suppressHydrationWarning>
       {/*
         Respaldo sin chunks (2026-10-06): si la red corta el JS antes de que React hidrate,
-        la pagina quedaba en blanco o en el splash para siempre. Este CSS y este script van
+        la pagina quedaba en blanco o en la portada del login para siempre. Este CSS y este script van
         EN el HTML: pintan "No pudimos conectar con ONE" con Reintentar a los 20 s sin
         hidratar, y le ponen tope a las esperas de carga. Ver `lib/red/aviso-conexion.ts`.
         Sin CSP en ONE (revisado 2026-10-06): si un dia se agrega, este script necesita nonce.
