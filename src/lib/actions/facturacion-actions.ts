@@ -13,6 +13,8 @@
  * `emitirFacturaDeNegocio`, y siempre por decisión de una persona.
  */
 
+import { accionIdempotente } from '@/lib/idempotencia/accion'
+import { MENSAJE_EN_CURSO } from '@/lib/idempotencia/clave'
 import { getWorkspace } from '@/lib/actions/get-workspace'
 import { nombreDeQuienActua } from '@/lib/activity/nombre-de-quien-actua'
 import { todayBogotaISO } from '@/lib/dates/bogota'
@@ -858,7 +860,7 @@ async function slugDelBloqueDeFactura(
  * del negocio y, si aplica, la justificación. Nunca el valor ni la identificación.
  * Una pantalla vieja no puede facturar por un monto que ya cambió.
  */
-export async function emitirFacturaDeNegocio(
+async function emitirFacturaDeNegocioSinClave(
   negocioId: string,
   opciones?: {
     emitir?: boolean
@@ -1428,7 +1430,7 @@ const MENSAJE_SIN_TARIFA_UPME =
  * el abono sale solo, sin botón (`abonarAlRegistrarPago`, al facturar y en el lote del
  * rezago, que es un script y no una server action).
  */
-export async function emitirReciboDeNegocio(
+async function emitirReciboDeNegocioSinClave(
   negocioId: string,
   opciones?: { justificacionDuplicado?: string; cobroId?: string },
 ): Promise<ResultadoRecibo> {
@@ -1555,4 +1557,23 @@ export async function emitirReciboDeNegocio(
     archivada: r.archivada,
     recibos: r.recibos.map(x => ({ numero: x.numero, valor: x.valor })),
   }
+}
+
+// ── Idempotencia por intención (brief del doble guardado, 2026-10-06) ──────────────────
+// Las acciones de abajo son la puerta pública; su cuerpo vive en `<nombre>SinClave`. Con la
+// clave del navegador (`useIntencion`), la misma intención repetida (POST que Chromium
+// reenvía, doble toque, «Reintentar» tras «No se confirmó») se ejecuta una sola vez.
+
+export async function emitirFacturaDeNegocio(negocioId: string, opciones?: Parameters<typeof emitirFacturaDeNegocioSinClave>[1], intencion?: string) {
+  return accionIdempotente<Awaited<ReturnType<typeof emitirFacturaDeNegocioSinClave>>>(
+    { accion: 'emitirFacturaDeNegocio', clave: intencion, args: [negocioId, opciones], enCurso: () => ({ ok: false, error: MENSAJE_EN_CURSO }) },
+    () => emitirFacturaDeNegocioSinClave(negocioId, opciones),
+  )
+}
+
+export async function emitirReciboDeNegocio(negocioId: string, opciones?: Parameters<typeof emitirReciboDeNegocioSinClave>[1], intencion?: string) {
+  return accionIdempotente<Awaited<ReturnType<typeof emitirReciboDeNegocioSinClave>>>(
+    { accion: 'emitirReciboDeNegocio', clave: intencion, args: [negocioId, opciones], enCurso: () => ({ ok: false, error: MENSAJE_EN_CURSO }) },
+    () => emitirReciboDeNegocioSinClave(negocioId, opciones),
+  )
 }

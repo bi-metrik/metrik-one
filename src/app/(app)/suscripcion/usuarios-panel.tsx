@@ -22,6 +22,7 @@ import {
   retirarDelEspacio,
   type CotizacionVisible,
 } from './acciones'
+import { useIntencion } from '@/hooks/use-intencion'
 
 export interface FilaUsuario extends UsuarioDelEspacio {
   acciones: AccionesUsuario
@@ -143,6 +144,8 @@ export function UsuariosPanel({ datos }: { datos: DatosUsuarios }) {
 
 function FormularioInvitacion({ onCerrar }: { onCerrar: () => void }) {
   const router = useRouter()
+  // Una clave por intención: un reintento de la misma acción no la ejecuta dos veces.
+  const intencion = useIntencion()
   const [correo, setCorreo] = useState('')
   const [nombre, setNombre] = useState('')
   const [rol, setRol] = useState<'operator' | 'admin'>('operator')
@@ -151,7 +154,8 @@ function FormularioInvitacion({ onCerrar }: { onCerrar: () => void }) {
   function invitar(e: React.FormEvent) {
     e.preventDefault()
     iniciar(async () => {
-      const r = await invitarAlEspacio({ correo, nombre, rol })
+      const r = await invitarAlEspacio({ correo, nombre, rol }, intencion.clave())
+      intencion.cerrar()
       if (!r.ok) {
         toast.error(r.error)
         return
@@ -302,6 +306,8 @@ function AgregarLicencia({
 
 function FilaDeUsuario({ usuario: u, liberable }: { usuario: FilaUsuario; liberable: boolean }) {
   const router = useRouter()
+  // Una clave por intención: un reintento de la misma acción no la ejecuta dos veces.
+  const intencion = useIntencion()
   const [confirmando, setConfirmando] = useState(false)
   const [dejarDePagar, setDejarDePagar] = useState(true)
   const [pendiente, iniciar] = useTransition()
@@ -334,7 +340,8 @@ function FilaDeUsuario({ usuario: u, liberable }: { usuario: FilaUsuario; libera
 
   function reenviar() {
     iniciar(async () => {
-      const r = await reenviarInvitacionEspacio({ usuarioId: u.id })
+      const r = await reenviarInvitacionEspacio({ usuarioId: u.id }, intencion.clave())
+      intencion.cerrar()
       if (!r.ok) toast.error(r.error)
       else toast.success(`Le reenviamos la invitación a ${u.correo ?? u.nombre}.`)
     })

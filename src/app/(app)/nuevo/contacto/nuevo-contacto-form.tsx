@@ -7,16 +7,20 @@ import { ArrowLeft } from 'lucide-react'
 import { toast } from 'sonner'
 import { createContacto } from '@/app/(app)/directorio/actions'
 import { FUENTES_ADQUISICION } from '@/lib/catalogos/constants'
+import { useIntencion } from '@/hooks/use-intencion'
 
 export default function NuevoContactoForm() {
   const router = useRouter()
+  // Una clave por intención: un reintento de la misma acción no la ejecuta dos veces.
+  const intencion = useIntencion()
   const [isPending, startTransition] = useTransition()
 
   const handleSubmit = (e: React.FormEvent<HTMLFormElement>) => {
     e.preventDefault()
     const fd = new FormData(e.currentTarget)
     startTransition(async () => {
-      const res = await createContacto(fd)
+      const res = await createContacto(fd, intencion.clave())
+      intencion.cerrar()
       if (res.success) {
         toast.success('Contacto creado')
         router.back()
