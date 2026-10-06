@@ -26,6 +26,7 @@ import {
 } from './wa-botones-bandeja.ts';
 import type { AccionBoton } from './wa-botones-bandeja.ts';
 import { enviarConBotones } from './wa-enviar-botones.ts';
+import { textoRedactado } from './wa-redaccion.ts';
 import type { EnLaTanda, PreguntaAbierta } from './wa-entendimiento.ts';
 import { interpretarRespuestaNegocio, opcionNombrada, pieDeLista } from './wa-carga-reglas.ts';
 import type { OpcionNegocio } from './wa-carga-reglas.ts';
@@ -516,6 +517,7 @@ export async function atenderEnBandeja(
       ? await preguntaAbierta(supabase, user.workspace_id, message.phone, fila.entrega ? [fila.entrega] : [])
       : null;
     const candidatos = candidatosDelEncabezado(encabezado);
+    let sinCliente: string | null = null;
     const aviso = enEspera ? enEspera.aviso
       // Una pregunta a la vez: con otra abierta, la lista del encabezado se decide en el resumen.
       : otra && candidatos.length > 0 ? `«${message.text.trim()}» puede ser ${candidatos.map(lineaCaja).join(' o ')}: lo decides en el resumen de esta tanda.`
@@ -523,8 +525,12 @@ export async function atenderEnBandeja(
         // Una pregunta escrita que abre una tanda: quizá era para el bot de siempre (se fue la regla N8).
         ?? (fila.accion === 'abrir' && escrito && esPregunta(message.text) ? textoPistaConsulta(config.prefijosConsulta) : null)
         // Nunca silencio (2026-10-05, punto 7): un escrito que abre una tanda sin cliente lo dice en una línea y qué espera.
-        ?? (fila.accion === 'abrir' && escrito && config.modoViajes !== 'uno' ? await textoTandaSinCliente(supabase, user.workspace_id, message.phone, config) : null);
-    const texto = [aviso, otra ? textoPrimero(otra) : null].filter(Boolean).join('\n');
+        ?? (fila.accion === 'abrir' && escrito && config.modoViajes !== 'uno' ? (sinCliente = await textoTandaSinCliente(supabase, user.workspace_id, message.phone, config)) : null);
+    const fijo = [aviso, otra ? textoPrimero(otra) : null].filter(Boolean).join('\n');
+    // El aviso de la tanda sin cliente lo redacta el modelo (con el interruptor prendido); los acuses en la caja («📌 …») van fijos.
+    const texto = fijo && sinCliente && aviso === sinCliente
+      ? await textoRedactado(supabase, { workspaceId: user.workspace_id, phone: message.phone }, { tipo: 'aviso', fijo })
+      : fijo;
     if (texto) await enviarAcuseDeLaCaja(message.phone, texto, otra ? null : fila.entrega ?? null, user.workspace_id);
   }
 
@@ -578,7 +584,8 @@ export async function contestarConsulta(
   const abierta = await preguntaAbierta(supabase, workspaceId, phone);
   const deLaTanda = abierta || config.modoViajes === 'uno' ? null : await pendienteDeLaTanda(supabase, workspaceId, phone, config.horasCajaActiva);
   const sigue = abierta ? textoPrimero(abierta) : deLaTanda ? `Sigue pendiente: ${textoDeLoQueFalta(deLaTanda)}` : null;
-  await enviar(phone, [respuesta, sigue].filter(Boolean).join('\n'), workspaceId);
+  const fijo = [respuesta, sigue].filter(Boolean).join('\n');
+  await enviar(phone, await textoRedactado(supabase, { workspaceId, phone }, { tipo: 'consulta', fijo }), workspaceId);
 }
 
 // ── Conversación con memoria (2026-10-05) ──────────────────────────────────
@@ -697,7 +704,7 @@ export async function actuarConMemoria(
   }
   if (d.tipo === 'preguntar') {
     await anotarConsultaPendiente(supabase, ws, phone, d.pendiente);
-    await enviar(phone, d.texto, ws);
+    await enviar(phone, await textoRedactado(supabase, { workspaceId: ws, phone }, { tipo: 'pregunta', fijo: d.texto }), ws);
     return true;
   }
   if (d.tipo === 'en_vuelo') {
@@ -937,7 +944,12 @@ export async function preguntarCliente(
   // Un resumen largo llega en varias partes: las primeras se mandan antes de la que espera respuesta.
   for (const p of partes.slice(0, -1)) await enviar(phone, p, workspaceId);
   const botones = viaje?.plan ? botonesDelResumen(viaje.plan, entregaId) : [];
-  const ok = await enviarConBotones(phone, partes[partes.length - 1], botones, { workspaceId, intent: INTENT_BANDEJA, aparte: textoBotonesAparte(botones) });
+  // El modelo redacta el resumen o la pregunta (con el interruptor prendido); los títulos de los botones quedan fijos. Un
+  // resumen en varias partes no se redacta: la última sola no es el resumen.
+  const ultima = partes[partes.length - 1];
+  const final = partes.length > 1 ? ultima
+    : await textoRedactado(supabase, { workspaceId, phone }, { tipo: viaje?.plan ? 'resumen' : 'pregunta', fijo: ultima, botones: botones.map(b => b.title) });
+  const ok = await enviarConBotones(phone, final, botones, { workspaceId, intent: INTENT_BANDEJA, aparte: textoBotonesAparte(botones) });
   const lista = viaje?.plan ? { plan_viajes: viaje.plan } : viaje?.opciones ? { negocio_opciones: viaje.opciones } : {};
   const { error } = await supabase
     .from('wa_bandeja_entregas')

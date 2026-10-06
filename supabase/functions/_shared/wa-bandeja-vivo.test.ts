@@ -2452,3 +2452,99 @@ describe('2026-10-05 · el resumen con botones «Cargar» y «Descartar», de pu
     expect(datosDel('n-fo')).toMatchObject({ adultos: 2 });
   });
 });
+
+describe('2026-10-05 · el modelo redacta, de punta a punta (`bot_conversacional.redaccion`; textos inventados)', () => {
+  function fermin() {
+    t.contactos.push({ id: 'c-fo', workspace_id: WS, nombre: 'FERMÍN OCAMPO', telefono: '3006661122', email: null, created_at: '2026-01-10T10:00:00Z' });
+    t.negocios.push({ ...negocioDePrueba('n-fo', 'F 26 1', 'SAN ANDRÉS DIC', 'FERMÍN OCAMPO'), contacto_id: 'c-fo' });
+    t.negocio_bloques.push({ id: 'b-n-fo', negocio_id: 'n-fo', data: { destino: 'SAN ANDRÉS' }, updated_at: null, bloque_configs: { orden: 1, config_extra: { fields: FIELDS }, bloque_definitions: { tipo: 'datos' }, etapas_negocio: { orden: 1 } } });
+  }
+  const CARGA = salidaModelo({ destino: { valor: 'San Andrés', frase: 'San Andrés' }, adultos: { valor: '2', frase: '2 adultos' } });
+  const datosDel = (id: string) => t.negocio_bloques.find(b => b.negocio_id === id)!.data as Fila;
+  /** Lo que el modelo de redacción recibió (el texto fijo y la entrada completa) y cómo responde. */
+  const vistos: Array<{ fijo: string; usuario: string }> = [];
+  let responde: 'natural' | 'trampa' | 'falla' = 'natural';
+  let original: typeof redaccion.redaccionDeps.llamarModelo;
+  let redaccion: typeof import('./wa-redaccion.ts');
+  beforeEach(async () => {
+    redaccion = await import('./wa-redaccion.ts');
+    original = redaccion.redaccionDeps.llamarModelo;
+    bandeja.procesarEnElActo.activo = true;
+    vistos.length = 0;
+    responde = 'natural';
+    redaccion.redaccionDeps.llamarModelo = async (p) => {
+      const fijo = /TEXTO FIJO:\n<<<\n([\s\S]*?)\n>>>/.exec(p.usuario)![1];
+      vistos.push({ fijo, usuario: p.usuario });
+      if (responde === 'falla') return { ok: false, motivo: 'timeout', ms: 3000 };
+      // «natural»: una redacción válida (una palabra común delante). «trampa»: datos que solo están en los turnos o en ningún lado.
+      const texto = responde === 'natural' ? `Mira: ${fijo}` : `${fijo}\nYa quedó cargado para Juan Pérez, 5 estrellas, el 20 de enero.`;
+      return { ok: true, json: { texto }, ms: 5, tokensIn: 1, tokensOut: 1, tokensRazonamiento: 0 };
+    };
+  });
+  afterEach(() => { redaccion.redaccionDeps.llamarModelo = original; });
+  const prender = () => { (t.workspaces[0].config_extra as Fila).bot_conversacional = { redaccion: true }; };
+
+  /** La tanda de Fermín, el resumen, «Cargar» y la pregunta por lo que falta. */
+  async function secuencia(interprete?: { llamadas: { n: number } }) {
+    await llega('F 26 1', { enviado: 0, interprete });
+    await llega('el cliente dijo que quiere 5 estrellas, se llama Juan Pérez', { enviado: 1, interprete: undefined });
+    await llega('quieren ir a San Andrés, son 2 adultos', { enviado: 2, reenviado: true });
+    await llega('listo', { enviado: 5, interprete });
+    const resumen = enviados.at(-1)!;
+    colaModelo = [CARGA];
+    await toca(boton('✅ Cargar'), { enviado: 10, interprete });
+    const tras = textos().slice(-2);
+    await llega('qué le falta para cotizar?', { enviado: 30, interprete });
+    return { resumen, tras, consulta: textos().at(-1)! };
+  }
+
+  it('apagado (por defecto): el modelo de redacción no se llama y salen los textos fijos', async () => {
+    fermin();
+    const r = await secuencia();
+    expect(vistos).toEqual([]);
+    expect(r.resumen.texto).toMatch(/^¿Cargo este viaje\?/);
+    expect(r.tras[0]).toBe('Listo, lo cargo. Te aviso en cuanto quede.');
+    expect(r.tras[1]).toMatch(/^Cargué en SAN ANDRÉS DIC · Fermín Ocampo \(F 26 1\)/);
+  });
+
+  for (const modo of ['apagado', 'prendido'] as const) {
+    it(`prendido, intérprete ${modo}: el modelo redacta el resumen (los botones quedan fijos), la carga y la consulta; los acuses no pasan por él`, async () => {
+      fermin();
+      prender();
+      const r = await secuencia(modo === 'prendido' ? { llamadas: { n: 0 } } : undefined);
+      expect(r.resumen.texto).toMatch(/^Mira: ¿Cargo este viaje\?\n\n\*SAN ANDRÉS DIC · Fermín Ocampo \(F 26 1\)\*/);
+      expect(r.resumen.botones!.map(b => b.title)).toEqual(['✅ Cargar', '🗑 Descartar']);
+      expect(r.tras[0]).toBe('Listo, lo cargo. Te aviso en cuanto quede.');
+      expect(r.tras[1]).toMatch(/^Mira: Cargué en SAN ANDRÉS DIC · Fermín Ocampo \(F 26 1\)/);
+      expect(r.consulta).toMatch(/^Mira: SAN ANDRÉS DIC · Fermín Ocampo \(F 26 1\) — Mínimo/);
+      expect(datosDel('n-fo')).toMatchObject({ adultos: 2 });
+      // Los turnos: lo que escribió el comercial y lo que dijo el bot, nunca el reenvío del cliente.
+      const ultimo = vistos.at(-1)!.usuario;
+      expect(ultimo).toContain('- comercial: el cliente dijo que quiere 5 estrellas, se llama Juan Pérez');
+      expect(ultimo).not.toContain('quieren ir a San Andrés, son 2 adultos');
+    });
+  }
+
+  it('hechos trampa: el modelo mete datos de los turnos y de ningún lado; la validación los rechaza y salen los fijos (0 datos inventados)', async () => {
+    fermin();
+    prender();
+    responde = 'trampa';
+    const r = await secuencia();
+    expect(vistos.length).toBeGreaterThanOrEqual(3);
+    expect(textos().filter(x => /Juan Pérez|20 de enero|quedó cargado/.test(x) && !x.startsWith('el cliente'))).toEqual([]);
+    expect(r.resumen.texto).toMatch(/^¿Cargo este viaje\?/);
+    expect(r.tras[1]).toMatch(/^Cargué en SAN ANDRÉS DIC/);
+    expect(r.consulta).toMatch(/^SAN ANDRÉS DIC · Fermín Ocampo \(F 26 1\) — Mínimo/);
+  });
+
+  it('el modelo falla (timeout): salen los fijos, nunca silencio', async () => {
+    fermin();
+    prender();
+    responde = 'falla';
+    const r = await secuencia();
+    expect(vistos.length).toBeGreaterThanOrEqual(3);
+    expect(r.resumen.texto).toMatch(/^¿Cargo este viaje\?/);
+    expect(r.tras[1]).toMatch(/^Cargué en SAN ANDRÉS DIC/);
+    expect(r.consulta).toMatch(/^SAN ANDRÉS DIC · Fermín Ocampo \(F 26 1\) — Mínimo/);
+  });
+});
