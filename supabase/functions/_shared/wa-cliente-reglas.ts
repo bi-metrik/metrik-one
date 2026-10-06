@@ -292,15 +292,57 @@ export function nombreEnElDirectorio(nombre: string | null | undefined, dir: Dir
   const entero = String(nombre ?? '').trim();
   const identicos = (n: string) => (dir.porNombre(n) ?? []).filter(f => nombreIdentico(n, f.nombre));
   if (!entero || identicos(entero).length > 0) return { nombre: entero, dudoso: false };
-  for (const t of tramosDelNombre(entero)) {
-    if (normalizarNombre(t) !== normalizarNombre(entero) && identicos(t).length > 0) return { nombre: t, dudoso: false };
-  }
+  const tramo = tramoExacto(entero, dir);
+  if (tramo) return { nombre: tramo, dudoso: false };
   // Un artículo solo puede empezar el nombre de una empresa («La Riviera», «Los Andes»); con otra palabra que no es de
   // un nombre detrás («la persona …», «el señor …»), o cualquier otra palabra así delante («para …», «mi …»), no.
   const [primera = '', segunda = ''] = normalizarNombre(entero).split(' ');
   const articulo = ['el', 'la', 'los', 'las'].includes(primera);
   return { nombre: entero, dudoso: NO_EMPIEZA_NOMBRE.has(primera) && (!articulo || NO_EMPIEZA_NOMBRE.has(segunda)) };
 }
+
+/**
+ * El tramo del escrito que el directorio tiene exacto (noveno control, hallazgo 1), con la regla del décimo (hallazgo 7):
+ * vale cuando lo que sobra va DELANTE (una fórmula: «la persona se llama Ana Ruiz», «doña Ana Ruiz») o DETRÁS es un
+ * destino o relleno («Ana Ruiz Cartagena», «Ana Ruiz diciembre»). Si detrás sobra una palabra de nombre pegada («Ana Ruiz
+ * Gómez»), no: puede ser otra persona con un apellido más, y se pregunta («¿es la misma persona?») con el nombre entero.
+ * `null`: ningún tramo vale.
+ */
+export function tramoExacto(entero: string, dir: Directorio): string | null {
+  const identicos = (n: string) => (dir.porNombre(n) ?? []).filter(f => nombreIdentico(n, f.nombre));
+  const tokens = String(entero ?? '').split(/[\s,.;:!¡¿?()"«»]+/).filter(Boolean);
+  const ns = tokens.map(t => normalizarNombre(t));
+  for (const t of tramosDelNombre(entero)) {
+    const tn = normalizarNombre(t);
+    if (tn === normalizarNombre(entero) || identicos(t).length === 0) continue;
+    const largo = tn.split(' ').length;
+    // Dónde está el tramo en el escrito, y lo que va pegado detrás (palabras que pueden ser de un nombre).
+    const i = ns.findIndex((_, k) => ns.slice(k, k + largo).join(' ') === tn);
+    if (i < 0) continue;
+    const detras: string[] = [];
+    for (let k = i + largo; k < ns.length && ns[k] && !/\d/.test(ns[k]) && !NO_EMPIEZA_NOMBRE.has(ns[k]); k++) detras.push(ns[k]);
+    if (detras.length === 0 || esDestinoORelleno(detras)) return t;
+  }
+  return null;
+}
+
+/** Lo que puede ir pegado detrás de un nombre sin ser un apellido: un destino conocido, un mes, un relleno. */
+function esDestinoORelleno(ws: ReadonlyArray<string>): boolean {
+  const txt = ws.join(' ');
+  if (DESTINOS_COMUNES.some(d => txt === d || txt.startsWith(`${d} `))) return true;
+  return ws.every(w => MESES_Y_RELLENO.has(w) || DESTINOS_COMUNES.includes(w));
+}
+const MESES_Y_RELLENO: ReadonlySet<string> = new Set(['enero', 'febrero', 'marzo', 'abril', 'mayo', 'junio', 'julio', 'agosto', 'septiembre',
+  'octubre', 'noviembre', 'diciembre', 'ene', 'feb', 'mar', 'abr', 'may', 'jun', 'jul', 'ago', 'sep', 'oct', 'nov', 'dic', 'semana', 'santa',
+  'puente', 'vacaciones', 'viaje', 'cotizacion', 'reserva', 'hotel', 'tiquetes', 'vuelos', 'plan', 'paquete', 'gracias', 'porfa', 'favor']);
+/** Destinos frecuentes de una agencia en Colombia: pegados detrás de un nombre no son un apellido. */
+const DESTINOS_COMUNES: ReadonlyArray<string> = [
+  'cartagena', 'san andres', 'santa marta', 'medellin', 'bogota', 'cali', 'barranquilla', 'pereira', 'manizales', 'armenia', 'eje cafetero',
+  'bucaramanga', 'villa de leyva', 'leticia', 'amazonas', 'capurgana', 'providencia', 'guatape', 'salento', 'jardin', 'mompox', 'barichara',
+  'tayrona', 'palomino', 'la guajira', 'cabo de la vela', 'punta cana', 'cancun', 'aruba', 'curazao', 'panama', 'miami', 'orlando', 'nueva york',
+  'madrid', 'barcelona', 'paris', 'roma', 'europa', 'peru', 'cusco', 'lima', 'mexico', 'buenos aires', 'chile', 'santiago', 'brasil', 'rio',
+  'bariloche', 'disney', 'republica dominicana', 'costa rica', 'ecuador', 'quito', 'galapagos', 'cuba', 'la habana', 'japon', 'turquia', 'egipto',
+];
 
 /** ¿El nombre dado es EXACTAMENTE el del contacto? (sin tildes, mayúsculas ni signos) */
 export function nombreIdentico(dado: string | null | undefined, contacto: string | null | undefined): boolean {
@@ -484,7 +526,7 @@ const RELLENO_ELECCION: ReadonlySet<string> = new Set(['el', 'la', 'los', 'las',
   // Octavo control de Vera (hallazgo 5): el relleno de una respuesta más larga («me refiero al que tiene el correo»).
   'me', 'refiero', 'quise', 'decir', 'creo', 'seria', 'pues', 'entonces', 'ya', 'ok', 'y', 'su', 'sus', 'tenia', 'cual', 'quien', 'ultimo', 'ultima',
   'vez', 'antes', 'anterior', 'viajo', 'ese', 'esa', 'mismo', 'misma', 'persona', 'senor', 'senora', 'don', 'dona', 'lo', 'le', 'ahi', 'aparece', 'sale',
-  'dice', 'dijiste', 'pusiste', 'mostraste', 'lista', 'opcion']);
+  'dice', 'dijiste', 'pusiste', 'mostraste', 'lista', 'opcion', 'hizo', 'hecho', 'ha', 'habia', 'hicimos', 'con', 'nosotros']);
 /** El dato que el bot muestra de cada ficha, nombrado con relleno («el del correo», «la que no tiene celular»). */
 const DICE_CORREO = /\b(?:correo|correos|mail|email|e mail|emails|gmail|hotmail|outlook|yahoo|icloud|electronico)\b/;
 const DICE_USUARIO = /\b(?:usuario|instagram|insta|arroba)\b/;
@@ -523,10 +565,11 @@ export function leerEleccionCliente(texto: string, opciones: ReadonlyArray<Ficha
   // nunca ha viajado»), si solo una de las opciones lo cumple.
   const unico = (cumple: (f: FichaCliente) => boolean) => { const f = opciones.filter(cumple); return f.length === 1 ? { tipo: 'ficha' as const, ficha: f[0] } : null; };
   const conViajes = (f: FichaCliente) => f.abiertos.length > 0 || !!f.cerrado;
-  if (/\b(?:nunca\s+(?:ha\s+)?viaj\w*|no\s+ha\s+viajado|sin\s+viajes|no\s+tiene\s+viajes|el\s+nuevo|la\s+nueva)\b/.test(t)) {
+  // Décimo control (hallazgo 10): también con el verbo hacer («el que ya hizo un viaje», «la que nunca ha hecho viajes»).
+  if (/\b(?:nunca\s+(?:ha\s+)?viaj\w*|no\s+ha\s+viajado|sin\s+viajes|no\s+tiene\s+viajes|el\s+nuevo|la\s+nueva|nunca\s+(?:ha\s+)?hecho\s+(?:un\s+|ningun\s+)?viajes?|no\s+ha\s+hecho\s+(?:un\s+|ningun\s+)?viajes?|no\s+hizo\s+(?:un\s+|ningun\s+)?viajes?)\b/.test(t)) {
     const r = unico(f => !conViajes(f));
     if (r) return r;
-  } else if (/\b(?:ya\s+(?:viajo|ha\s+viajado|habia\s+viajado|fue\s+cliente|compro)|ha\s+viajado|viajo\s+con\s+nosotros|tiene\s+viajes|el\s+de\s+antes|el\s+antiguo|la\s+antigua|el\s+conocido|la\s+conocida)\b/.test(t)) {
+  } else if (/\b(?:ya\s+(?:viajo|ha\s+viajado|habia\s+viajado|fue\s+cliente|compro)|ha\s+viajado|viajo\s+con\s+nosotros|tiene\s+viajes|el\s+de\s+antes|el\s+antiguo|la\s+antigua|el\s+conocido|la\s+conocida|(?:hizo|ha\s+hecho|habia\s+hecho|hicimos|le\s+hicimos)\s+(?:un\s+|el\s+|algun\s+|varios\s+|otros?\s+)?viajes?)\b/.test(t)) {
     const r = unico(conViajes);
     if (r) return r;
   }

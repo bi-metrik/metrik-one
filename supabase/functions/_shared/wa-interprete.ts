@@ -29,6 +29,8 @@ import {
   TEXTO_NADA_PENDIENTE,
 } from './wa-bandeja-reglas.ts';
 import type { AccionRegistro, ConfigBandeja } from './wa-bandeja-reglas.ts';
+import { focosVigentes, leerConversacion } from './wa-foco.ts';
+import { textoRedactado } from './wa-redaccion.ts';
 import {
   configDelWorkspace,
   contestarConsulta,
@@ -37,6 +39,7 @@ import {
   descartarTodo,
   enviar,
   enviarAcuseDeLaCaja,
+  textoTandaSinCliente,
   esperaEnVuelo,
   estadoParaEsperar,
   preguntarCliente,
@@ -273,6 +276,7 @@ async function atender(
     rol: user.role, bandeja: enBandeja, negocios: lec.negocios,
     tanda: enBandeja ? { abierta: !!lec.tanda, haceMin: lec.tanda?.creadaAt ? Math.round((ahora() - Date.parse(lec.tanda.creadaAt)) / 60000) : null, caja: cajaDe(lec), mensajes: lec.tanda?.n ?? null } : null,
     pendiente: lec.pendiente, recientes, mensaje: texto,
+    foco: enBandeja ? await focoParaElModelo(supabase, ws, message.phone, configB!, lec.negocios, ahora()) : null,
   });
   const llamar = deps.llamarModelo ?? ((p: PedidoModelo) => llamarGemini(p, deps.env ?? envDeDeno));
   const r = await llamar({
@@ -447,6 +451,16 @@ async function mensajesRecientes(
   return out.sort((a, b) => a.en.localeCompare(b.en)).slice(-5).map(({ tipo, texto }) => ({ tipo, texto }));
 }
 
+/** El viaje en foco con faltantes, con el alias que tiene en el contexto. `null`: no hay, o no está en la lista. */
+async function focoParaElModelo(
+  supabase: SupabaseClient, ws: string, phone: string, config: ConfigBandeja, negocios: ReadonlyArray<NegocioCtx>, ahora: number,
+): Promise<{ alias: string; faltan: string[] } | null> {
+  const f = focosVigentes((await leerConversacion(supabase, ws, phone)).focos, ahora, config.minutosFoco)[0];
+  if (!f || !(f.faltan ?? 0)) return null;
+  const n = negocios.find(x => x.id === f.negocio_id);
+  return n ? { alias: n.alias, faltan: (f.pedidos ?? []).map(p => p.label.toLowerCase()) } : null;
+}
+
 // ── El despacho (§4) ─────────────────────────────────────────────────────────
 
 interface Base {
@@ -490,8 +504,14 @@ async function despachar(b: Base, d: Extract<Decision, { tipo: 'ejecutar' }>, le
         const deViajeNuevo = (i.accion === 'abrir_viaje' && !i.viaje_id) || i.accion === 'nombre' || (i.accion === 'responder' && !i.viaje_id && !!i.nuevo) || i.accion === 'confirmar';
         const delCliente = deViajeNuevo && lec.bandeja ? await acuseDelClienteDeLaTanda(supabase, ws, message.phone, lec.bandeja.horasCajaActiva) : null;
         // «¿Es la misma persona?» de la caja va con sus dos botones (2026-10-05), como en la ruta de hoy.
+        // Décimo control de Vera (hallazgo 2): «nunca silencio» también en esta ruta. Un escrito que el validador registra
+        // como contenido y abre una tanda sin cliente dice, como en la ruta de hoy, que la guarda y qué espera.
+        const sinCliente = !delCliente && !paso.aviso && fila.accion === 'abrir' && !deViajeNuevo && i.accion !== 'abrir_viaje'
+          && b.enBandeja && lec.bandeja && lec.bandeja.modoViajes !== 'uno'
+          ? await textoRedactado(supabase, { workspaceId: ws, phone: message.phone }, { tipo: 'aviso', fijo: await textoTandaSinCliente(supabase, ws, message.phone, lec.bandeja) })
+          : null;
         if (delCliente && !recordar && b.enBandeja) await enviarAcuseDeLaCaja(message.phone, delCliente, fila.entrega, ws);
-        else await decirAlUsuario(delCliente ?? paso.aviso);
+        else await decirAlUsuario(delCliente ?? paso.aviso ?? sinCliente);
       }
       return true;
     }

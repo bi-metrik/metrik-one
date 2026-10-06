@@ -19,7 +19,7 @@ import {
 } from './wa-entendimiento.ts';
 import { anotarConsultaPendiente, consultaVigente, focosVigentes, leerConversacion, viajeEnFoco } from './wa-foco.ts';
 import type { ConsultaPendiente } from './wa-foco.ts';
-import { leerNuevo, leerViajeNuevo } from './wa-entendimiento-reglas.ts';
+import { leerNuevo, leerViajeNuevo, normalizarNombre } from './wa-entendimiento-reglas.ts';
 import {
   botonesSiNo, canonicoDelToque, esBotonDeBandeja, leerToque, TEXTO_TOQUE_CERRADO, TEXTO_TOQUE_SIN_PREGUNTA, TEXTO_TOQUE_VIEJO, TITULO_NO_ES,
   TITULO_SI_ES,
@@ -27,6 +27,8 @@ import {
 import type { AccionBoton } from './wa-botones-bandeja.ts';
 import { enviarConBotones } from './wa-enviar-botones.ts';
 import { textoRedactado } from './wa-redaccion.ts';
+import { candidatoNombradoEnLaFrase, cargaDirecta, posiblesNombres } from './wa-carga-directa-reglas.ts';
+import { fichasPorNombre } from './wa-cliente.ts';
 import type { EnLaTanda, PreguntaAbierta } from './wa-entendimiento.ts';
 import { interpretarRespuestaNegocio, opcionNombrada, pieDeLista } from './wa-carga-reglas.ts';
 import type { OpcionNegocio } from './wa-carga-reglas.ts';
@@ -651,18 +653,35 @@ export async function decidirConMemoria(
   }
 
   // 3. La respuesta a «me falta»: un dato escrito, sin tanda, cuando el viaje en foco es el que el bot acaba de cargar y le
-  // pidió datos. No si es una pregunta, un acuse, un «nuevo …» o nombra otro viaje (eso sigue el camino de hoy).
+  // pidió datos. Décimo control de Vera: por inclusión (`cargaDirecta`), no por exclusión. Va directo solo si trae el
+  // valor de un dato pedido y no nombra, en ninguna parte, a otro cliente del directorio ni a otro viaje abierto; una
+  // pregunta sin signo, una orden, una corrección o un pedido nuevo nunca. Lo demás sigue el camino de hoy (la tanda, o el
+  // modelo con el viaje en foco en el contexto), con resumen y «sí».
   const vigentes = focosVigentes(conv.focos, ahora, config.minutosFoco);
   const conFaltantes = vigentes.filter(f => (f.faltan ?? 0) > 0);
   if (conFaltantes.length === 0 || (vigentes[0].faltan ?? 0) === 0) return null;
   // Un encabezado (aun del mismo viaje: abre su caja, como siempre) tampoco.
   if (esPregunta(t) || esRuidoEscrito(t) || leerNuevo(t) || leerViajeNuevo(t) !== undefined || enc || pareceEncabezado(t, viajes)) return null;
   const cands = porId(conFaltantes.slice(0, 2).map(f => f.negocio_id));
-  if (cands.length === 1) return { tipo: 'dato', negocioId: cands[0].id, cuerpo: t, wamid: msg.wamid, enviadoAt: msg.enviadoAt, deLaPendiente: false };
   if (cands.length === 0) return null;
-  // Dos viajes con faltantes en la ventana: va al que nombre el texto; si no nombra ninguno, se pregunta una vez.
-  const v = viajeQueNombra(t, cands, false);
-  if (v) return { tipo: 'dato', negocioId: v.id, cuerpo: t, wamid: msg.wamid, enviadoAt: msg.enviadoAt, deLaPendiente: false };
+  const pedidosDe = (id: string) => conFaltantes.find(f => f.negocio_id === id)?.pedidos;
+  // Dos viajes con faltantes en la ventana: va al que nombre el texto (en cualquier parte de la frase); si no nombra
+  // ninguno, se pregunta una vez, solo si el escrito pasa la regla para alguno de los dos.
+  const elegido = cands.length === 1 ? cands[0] : viajeQueNombra(t, cands, false);
+  const fuera = (ids: string[]) => viajes.filter(v => !ids.includes(v.id));
+  if (elegido) {
+    const otrosClientes = await clientesNombrados(supabase, workspaceId, t, [elegido.cliente]);
+    const d = cargaDirecta(t, { pedidos: pedidosDe(elegido.id), foco: elegido, viajes: fuera([elegido.id]), otrosClientes });
+    if (!d.ok) {
+      console.log(`[wa-bandeja] no va directo al viaje en foco (${d.motivo}): sigue el camino de siempre`);
+      return null;
+    }
+    return { tipo: 'dato', negocioId: elegido.id, cuerpo: t, wamid: msg.wamid, enviadoAt: msg.enviadoAt, deLaPendiente: false };
+  }
+  const otrosClientes = await clientesNombrados(supabase, workspaceId, t, cands.map(c => c.cliente));
+  const pedidos = cands.flatMap(c => pedidosDe(c.id) ?? []);
+  const d = cargaDirecta(t, { pedidos, foco: null, viajes: fuera(cands.map(c => c.id)), otrosClientes });
+  if (!d.ok) return null;
   return {
     tipo: 'preguntar',
     texto: `¿Para cuál viaje es lo que me escribiste: ${cands.map(lineaCaja).join(' o ')}? ${pieDeLista(cands, 'Si es un viaje nuevo, «nuevo» y el nombre del cliente.')}`,
@@ -670,7 +689,10 @@ export async function decidirConMemoria(
   };
 }
 
-/** El viaje que el texto señala entre unos candidatos: por su código o nombre, «el de Cartagena», o el número de la lista. */
+/**
+ * El viaje que el texto señala entre unos candidatos: por su código o nombre, «el de Cartagena», el número de la lista, o
+ * (décimo control, hallazgo 6) su destino, su cliente o su código en cualquier parte de la frase.
+ */
 function viajeQueNombra(texto: string, cands: ReadonlyArray<ViajeAbierto>, numerada: boolean): ViajeAbierto | null {
   if (cands.length === 0) return null;
   const r = resolverEncabezado(texto, cands);
@@ -681,11 +703,30 @@ function viajeQueNombra(texto: string, cands: ReadonlyArray<ViajeAbierto>, numer
     const k = leerEleccion(texto);
     if (k !== null && cands[k - 1]) return cands[k - 1];
   }
-  return null;
+  return cands.length > 1 ? candidatoNombradoEnLaFrase(texto, cands) : null;
+}
+
+/**
+ * Los clientes del directorio que el escrito nombra (también solo por el nombre de pila) y no son los de `excluir`
+ * (el del viaje en foco). Busca cada palabra que puede ser un nombre (`posiblesNombres`). Si el directorio no responde,
+ * se toma como nombrado: ante la duda, no va directo.
+ */
+async function clientesNombrados(supabase: SupabaseClient, ws: string, texto: string, excluir: ReadonlyArray<string | null>): Promise<string[]> {
+  const propios = excluir.map(c => normalizarNombre(c)).filter(Boolean);
+  const out = new Set<string>();
+  for (const w of posiblesNombres(texto, excluir.filter(Boolean).join(' '))) {
+    const fichas = await fichasPorNombre(supabase, ws, w);
+    if (fichas === null) return ['(directorio sin respuesta)'];
+    for (const f of fichas) {
+      const nom = normalizarNombre(f.nombre);
+      if (nom.split(' ').includes(w) && !propios.includes(nom)) out.add(f.nombre);
+    }
+  }
+  return [...out];
 }
 
 /** «Lo guardo en una tanda nueva. ¿De qué viaje es? …»: con el viaje en foco como ejemplo, si lo hay. */
-async function textoTandaSinCliente(supabase: SupabaseClient, ws: string, phone: string, config: ConfigBandeja): Promise<string> {
+export async function textoTandaSinCliente(supabase: SupabaseClient, ws: string, phone: string, config: ConfigBandeja): Promise<string> {
   const f = viajeEnFoco((await leerConversacion(supabase, ws, phone)).focos, Date.now(), config.minutosFoco);
   const v = f.tipo === 'uno' ? ((await viajesAbiertosDeLaBandeja(supabase, ws)) ?? []).find(x => x.id === f.foco.negocio_id) ?? null : null;
   const ejemplo = v?.codigo ? ` Si es de ${nombreDeViaje(v)}, escribe «${v.codigo}».` : '';
