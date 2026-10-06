@@ -16,7 +16,7 @@
  */
 
 // deno-lint-ignore no-explicit-any
-type Cliente = { from: (tabla: string) => any };
+type Cliente = { from: (tabla: string) => any }; // eslint-disable-line @typescript-eslint/no-explicit-any
 
 const VIGENCIA_MS = 7 * 24 * 60 * 60 * 1000;
 
