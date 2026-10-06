@@ -37,17 +37,23 @@ const seco = args.includes('--seco');
 const LLAVE = Deno.env.get('GEMINI_API_KEY') ?? '';
 const MODELO_SIMULADOR = { modelo: 'gemini-3.5-flash-lite', razonamiento: 'MINIMAL' };
 
-async function humo(): Promise<void> {
+/** UNA llamada mínima al modelo principal. `cuota`: 429 o RESOURCE_EXHAUSTED (hay que parar). */
+export async function llamadaDeHumo(llave: string): Promise<{ status: number; ms: number; uso: string; cuota: boolean }> {
   const t0 = performance.now();
   const res = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${CONFIG_POR_DEFECTO.principal.modelo}:generateContent`, {
-    method: 'POST', headers: { 'Content-Type': 'application/json', 'x-goog-api-key': LLAVE },
+    method: 'POST', headers: { 'Content-Type': 'application/json', 'x-goog-api-key': llave },
     body: JSON.stringify({ contents: [{ role: 'user', parts: [{ text: 'Responde solo: ok' }] }], generationConfig: { maxOutputTokens: 64, thinkingConfig: { thinkingLevel: 'LOW' } } }),
   });
   const cuerpo = await res.text();
   let uso = '';
   try { const u = JSON.parse(cuerpo).usageMetadata ?? {}; uso = `entrada ${u.promptTokenCount ?? 0}, salida ${u.candidatesTokenCount ?? 0}, razonamiento ${u.thoughtsTokenCount ?? 0}`; } catch { /* sin json */ }
-  console.log(JSON.stringify({ humo: res.status, ms: Math.round(performance.now() - t0), uso, cuota: res.status === 429 || /quota|RESOURCE_EXHAUSTED/i.test(cuerpo) }));
-  if (res.status !== 200) Deno.exit(3);
+  return { status: res.status, ms: Math.round(performance.now() - t0), uso, cuota: res.status === 429 || /quota|RESOURCE_EXHAUSTED/i.test(cuerpo) };
+}
+
+async function humo(): Promise<void> {
+  const r = await llamadaDeHumo(LLAVE);
+  console.log(JSON.stringify({ humo: r.status, ms: r.ms, uso: r.uso, cuota: r.cuota }));
+  if (r.status !== 200) Deno.exit(3);
 }
 
 function modeloParaCaso(): Modelo {
