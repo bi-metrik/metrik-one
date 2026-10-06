@@ -1,6 +1,7 @@
 'use client'
 
-import { useState, useRef } from 'react'
+import { useState, useRef, useEffect } from 'react'
+import { useRouter } from 'next/navigation'
 import { toast } from 'sonner'
 import {
   FileText,
@@ -17,6 +18,8 @@ import {
   HelpCircle,
   CalendarClock,
   Undo2,
+  RotateCw,
+  X,
 } from 'lucide-react'
 import { createClient } from '@/lib/supabase/client'
 import { procesarDocumento, actualizarCampoDocumento, reprocesarDocumento } from '@/lib/actions/documento-actions'
@@ -48,6 +51,16 @@ import { LABEL_CAUSA, nuevaSesionId, type CausaCorreccion } from '@/lib/correcci
 import type { NegocioBloque } from '../../negocio-v2-actions'
 import type { CampoExtraccion, CampoResultado, CampoEdicion } from '@/lib/ai/extract-fields'
 import { formatFecha } from '@/lib/dates/bogota'
+import { pedirJson } from '@/lib/negocios/paginas-lista'
+import {
+  MENSAJE_LECTURA_VENCIDA,
+  esperarLectura,
+  leerMarca,
+  type FinLectura,
+  type MarcaLectura,
+  type RespuestaLectura,
+  type TipoLectura,
+} from '@/lib/documentos/lectura-en-curso'
 
 // ── Types ────────────────────────────────────────────────────────────────────
 
@@ -97,6 +110,97 @@ interface BloqueDocumentoProps {
 }
 
 type UploadState = 'empty' | 'uploading' | 'pending_confirm' | 'processing' | 'uploaded' | 'error'
+
+/**
+ * Una lectura que no terminó bien, a la vista con su salida. La lectura corre después de
+ * responder (`@/lib/documentos/lectura-en-curso`): sin esto, una falla en segundo plano
+ * sería un spinner que nunca acaba.
+ *  · `error` / `vencida`: «Reintentar» relee el MISMO archivo (la marca guarda la ruta).
+ *  · `sin_confirmar`: la red no dejó saber cómo terminó; la lectura pudo quedar bien, así
+ *    que se ofrece volver a consultar, no repetirla.
+ */
+type AvisoLectura = {
+  tipo: 'error' | 'vencida' | 'sin_confirmar'
+  mensaje: string
+  bloqueId: string
+  reintento: { tipo: 'reproceso' } | { tipo: 'carga'; storage_path: string; file_name: string } | null
+  /** Para `sin_confirmar`: qué lectura volver a consultar. */
+  lectura?: { tipo: TipoLectura }
+}
+
+function reintentoDeMarca(marca: MarcaLectura): AvisoLectura['reintento'] {
+  if (marca.tipo === 'reproceso') return { tipo: 'reproceso' }
+  if (marca.storage_path && marca.file_name) {
+    return { tipo: 'carga', storage_path: marca.storage_path, file_name: marca.file_name }
+  }
+  return null
+}
+
+/** El aviso que deja una marca guardada al abrir la ficha (otra pestaña, una recarga). */
+function avisoDeMarca(marca: MarcaLectura | null, bloqueId: string): AvisoLectura | null {
+  if (!marca || marca.estado !== 'error') return null
+  return {
+    tipo: 'error',
+    mensaje: marca.error ?? 'La lectura del documento falló.',
+    bloqueId,
+    reintento: reintentoDeMarca(marca),
+  }
+}
+
+function AvisoLecturaPanel({
+  aviso,
+  ocupado,
+  onReintentar,
+  onConsultar,
+  onCerrar,
+}: {
+  aviso: AvisoLectura
+  ocupado: boolean
+  onReintentar: () => void
+  onConsultar: () => void
+  onCerrar: () => void
+}) {
+  return (
+    <div
+      role="alert"
+      data-aviso-lectura={aviso.tipo}
+      className="flex items-start gap-2 rounded-lg border border-red-200 bg-red-50/60 px-3 py-2"
+    >
+      <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0 text-red-600" />
+      <div className="min-w-0 flex-1">
+        <p className="text-[11px] text-red-800">{aviso.mensaje}</p>
+        <div className="mt-1.5 flex flex-wrap gap-1.5">
+          {aviso.tipo === 'sin_confirmar' ? (
+            <button
+              type="button"
+              data-accion="consultar-lectura"
+              onClick={onConsultar}
+              disabled={ocupado}
+              className="inline-flex items-center gap-1 rounded-md border border-red-300 bg-white px-2 py-0.5 text-[11px] font-medium text-red-700 hover:bg-red-50 disabled:opacity-50"
+            >
+              <RotateCw className="h-3 w-3" />
+              Consultar de nuevo
+            </button>
+          ) : aviso.reintento ? (
+            <button
+              type="button"
+              data-accion="reintentar-lectura"
+              onClick={onReintentar}
+              disabled={ocupado}
+              className="inline-flex items-center gap-1 rounded-md bg-red-600 px-2 py-0.5 text-[11px] font-medium text-white hover:bg-red-700 disabled:opacity-50"
+            >
+              <RotateCw className="h-3 w-3" />
+              Reintentar
+            </button>
+          ) : null}
+        </div>
+      </div>
+      <button type="button" onClick={onCerrar} title="Cerrar" className="shrink-0 text-red-400 hover:text-red-600">
+        <X className="h-3.5 w-3.5" />
+      </button>
+    </div>
+  )
+}
 
 const BUCKET = BUCKET_DOCUMENTOS_ONE
 
@@ -737,7 +841,20 @@ export default function BloqueDocumento({
     // ese render en la misma respuesta. Refrescar aquí la renderizaba DOS veces (2026-10-04).
   }
 
+  const router = useRouter()
+  // La lectura del documento corre después de responder: si la ficha se abre mientras
+  // lee (otra pestaña, una recarga), la tarjeta retoma la espera desde la marca guardada.
+  const marcaGuardada = leerMarca(saved)
+  const leyendoAlAbrir = marcaGuardada?.estado === 'leyendo' ? marcaGuardada : null
+  const [esperando, setEsperando] = useState<{ bloqueId: string; tipo: TipoLectura } | null>(() =>
+    leyendoAlAbrir ? { bloqueId: negocioBloqueId, tipo: leyendoAlAbrir.tipo } : null,
+  )
+  const [avisoLectura, setAvisoLectura] = useState<AvisoLectura | null>(() =>
+    avisoDeMarca(marcaGuardada, negocioBloqueId),
+  )
+
   const [uploadState, setUploadState] = useState<UploadState>(() => {
+    if (leyendoAlAbrir?.tipo === 'carga') return 'processing'
     if (saved.drive_url) return 'uploaded'
     return 'empty'
   })
@@ -750,17 +867,27 @@ export default function BloqueDocumento({
   const [errorMsg, setErrorMsg] = useState<string | null>(null)
   // Qué documento llegó cuando el bloque se rechazó. Va aparte del `errorMsg` porque lo
   // que hace accionable el rechazo no es el mensaje: es ver QUÉ se subió.
-  const [docRechazado, setDocRechazado] = useState<DocumentoRechazado | null>(null)
+  const [docRechazado, setDocRechazado] = useState<DocumentoRechazado | null>(
+    () => (marcaGuardada?.estado === 'rechazado' ? marcaGuardada.documento_rechazado ?? null : null),
+  )
   const [pendingStoragePath, setPendingStoragePath] = useState<string | null>(null)
-  const [reprocessing, setReprocessing] = useState(false)
+  const [reprocessing, setReprocessing] = useState(leyendoAlAbrir?.tipo === 'reproceso')
   const [extractionStatus, setExtractionStatus] = useState<'ok' | 'failed' | 'no_key' | null>(
     () => (saved._extraction_status as 'ok' | 'failed' | 'no_key' | undefined) ?? null,
   )
 
   const handleReprocesar = async () => {
     setReprocessing(true)
+    setAvisoLectura(null)
+    let enEspera = false
     try {
       const res = await reprocesarDocumento(negocioBloqueId, negocioId)
+      if (res.success && res.leyendo && res.lectura) {
+        // La relectura corre en el servidor; el resultado llega por la espera de abajo.
+        enEspera = true
+        setEsperando({ bloqueId: res.lectura.bloque_id, tipo: 'reproceso' })
+        return
+      }
       if (!res.success) {
         // Reprocesar reescribe todos los campos: si el archivo guardado no es el
         // documento que el bloque espera, se dice qué es. NO se toca `uploadState`:
@@ -775,9 +902,127 @@ export default function BloqueDocumento({
       toast.success('Documento reprocesado con IA')
       // Sin router.refresh(): la acción ya hace revalidatePath de la ficha y Next aplica
       // ese render en la misma respuesta. Refrescar aquí la renderizaba DOS veces (2026-10-04).
+    } catch (err) {
+      // La acción no se confirmó (red). Nada se reintenta solo: la persona decide.
+      toast.error(err instanceof Error && err.message ? `No se confirmó: ${err.message}` : 'No se confirmó el reproceso')
     } finally {
-      setReprocessing(false)
+      if (!enEspera) setReprocessing(false)
     }
+  }
+
+  // ── Espera de la lectura en segundo plano ─────────────────────────────────
+  // Pregunta por GET (no por server action: van en fila) hasta que la marca termina. Nunca
+  // queda girando: vencida o sin red, termina con un aviso que tiene salida.
+  useEffect(() => {
+    if (!esperando) return
+    const ac = new AbortController()
+    const url = `/api/negocios/${negocioId}/lectura/${esperando.bloqueId}`
+    void esperarLectura({
+      pedir: signal => pedirJson<RespuestaLectura>(url, signal),
+      signal: ac.signal,
+    }).then(fin => {
+      if (!ac.signal.aborted) alTerminarLectura(fin, esperando)
+    })
+    return () => ac.abort()
+    // `alTerminarLectura` solo escribe estado: no hace falta como dependencia.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [esperando, negocioId])
+
+  function alTerminarLectura(fin: FinLectura, lectura: { bloqueId: string; tipo: TipoLectura }) {
+    setEsperando(null)
+    const esCarga = lectura.tipo === 'carga'
+    if (!esCarga) setReprocessing(false)
+
+    if (fin.tipo === 'lista') {
+      const b = fin.respuesta.bloque
+      const nuevosCampos = (b?.campos ?? null) as Record<string, CampoResultado> | null
+      setDocRechazado(null)
+      setAvisoLectura(null)
+      if (b) {
+        setDriveUrl(b.drive_url)
+        if (b.file_name) setFileName(b.file_name)
+        if (nuevosCampos) setCampos(nuevosCampos)
+        setExtractionStatus(b.extraction_status)
+      }
+      setUploadState('uploaded')
+      setPendingStoragePath(null)
+      if (!esCarga) {
+        toast.success('Documento reprocesado con IA')
+      } else if (camposConfig.length > 0 && b?.extraction_status === 'failed') {
+        toast.error('La extracción con IA falló. Reintenta o completa los campos manualmente.')
+      } else if (camposConfig.length > 0 && nuevosCampos) {
+        if (Object.values(nuevosCampos).some(c => c?.manual)) toast.info('Algunos campos requieren verificación manual')
+        else toast.success(`Datos extraídos de ${label}`)
+      } else {
+        toast.success(`${label} subido correctamente`)
+      }
+      // La lectura terminó después de responder: nadie revalidó la ficha. Se refresca para
+      // que los gates, los cruces y los demás bloques vean el documento nuevo.
+      router.refresh()
+      return
+    }
+
+    if (fin.tipo === 'rechazado') {
+      // Nada se guardó: el archivo que el bloque ya tenía sigue intacto.
+      const msg = fin.marca.error ?? 'El archivo no es el documento que espera este bloque'
+      setDocRechazado(fin.marca.documento_rechazado ?? null)
+      if (esCarga) {
+        setUploadState('error')
+        setErrorMsg(msg)
+      }
+      toast.error(msg)
+      return
+    }
+
+    if (fin.tipo === 'sin_lectura') {
+      if (esCarga) setUploadState(driveUrl ? 'uploaded' : 'empty')
+      router.refresh()
+      return
+    }
+
+    const aviso: AvisoLectura =
+      fin.tipo === 'sin_confirmar'
+        ? {
+            tipo: 'sin_confirmar',
+            mensaje: 'No se pudo confirmar cómo terminó la lectura: la conexión falló. El documento pudo quedar bien.',
+            bloqueId: lectura.bloqueId,
+            reintento: null,
+            lectura: { tipo: lectura.tipo },
+          }
+        : {
+            tipo: fin.tipo,
+            mensaje: fin.tipo === 'vencida' ? MENSAJE_LECTURA_VENCIDA : fin.marca.error ?? 'La lectura del documento falló.',
+            bloqueId: lectura.bloqueId,
+            reintento: reintentoDeMarca(fin.marca),
+          }
+    setAvisoLectura(aviso)
+    if (esCarga) {
+      setUploadState(driveUrl ? 'uploaded' : 'error')
+      setErrorMsg(aviso.mensaje)
+    }
+    toast.error(aviso.mensaje)
+  }
+
+  function consultarDeNuevo() {
+    const a = avisoLectura
+    if (!a?.lectura) return
+    setAvisoLectura(null)
+    if (a.lectura.tipo === 'carga') setUploadState('processing')
+    else setReprocessing(true)
+    setEsperando({ bloqueId: a.bloqueId, tipo: a.lectura.tipo })
+  }
+
+  function reintentarLectura() {
+    const r = avisoLectura?.reintento
+    setAvisoLectura(null)
+    if (!r) return
+    if (r.tipo === 'reproceso') {
+      void handleReprocesar()
+      return
+    }
+    setFileName(r.file_name)
+    setPendingStoragePath(r.storage_path)
+    void confirmarCon(r.storage_path, r.file_name)
   }
 
   // ── Handler upload ──────────────────────────────────────────────────────
@@ -876,8 +1121,12 @@ export default function BloqueDocumento({
 
   const handleConfirm = async () => {
     if (!pendingStoragePath || !fileName) return
+    await confirmarCon(pendingStoragePath, fileName)
+  }
 
+  async function confirmarCon(storagePath: string, nombre: string) {
     setUploadState('processing')
+    setAvisoLectura(null)
 
     try {
       // El archivo anterior de Drive lo resuelve el servidor desde la fila que reemplaza.
@@ -889,12 +1138,19 @@ export default function BloqueDocumento({
       const result = await procesarDocumento(
         negocioBloqueId,
         negocioId,
-        pendingStoragePath,
-        fileName,
+        storagePath,
+        nombre,
         causaDoc && sesionDoc.current
           ? { causa: causaDoc, sesion_id: sesionDoc.current }
           : undefined,
       )
+
+      if (result.success && result.leyendo && result.lectura) {
+        // La lectura corre en el servidor después de responder: la tarjeta sigue en
+        // «procesando» y el resultado llega por la espera (GET), sin retener la pestaña.
+        setEsperando({ bloqueId: result.lectura.bloque_id, tipo: 'carga' })
+        return
+      }
 
       if (!result.success) {
         setUploadState('error')
@@ -931,10 +1187,18 @@ export default function BloqueDocumento({
       // Sin router.refresh(): la acción ya hace revalidatePath de la ficha y Next aplica
       // ese render en la misma respuesta. Refrescar aquí la renderizaba DOS veces (2026-10-04).
     } catch (err) {
+      // La acción no se confirmó (casi siempre la red). La lectura pudo haber arrancado en
+      // el servidor: «Reintentar» la reemplaza sin duplicar (gana la última).
       setUploadState('error')
       const msg = err instanceof Error ? err.message : String(err)
-      setErrorMsg(msg)
-      toast.error(`Error: ${msg}`)
+      setErrorMsg(`No se confirmó: ${msg}`)
+      setAvisoLectura({
+        tipo: 'error',
+        mensaje: 'No se confirmó la carga del documento. Puedes reintentar sin volver a subirlo.',
+        bloqueId: negocioBloqueId,
+        reintento: { tipo: 'carga', storage_path: storagePath, file_name: nombre },
+      })
+      toast.error(`No se confirmó: ${msg}`)
     }
   }
 
@@ -1153,6 +1417,15 @@ export default function BloqueDocumento({
         {docRechazado && (
           <DocumentoRechazadoPanel rechazo={docRechazado} onCerrar={() => setDocRechazado(null)} />
         )}
+        {avisoLectura && (
+          <AvisoLecturaPanel
+            aviso={avisoLectura}
+            ocupado={reprocessing || uploadState === 'processing'}
+            onReintentar={reintentarLectura}
+            onConsultar={consultarDeNuevo}
+            onCerrar={() => setAvisoLectura(null)}
+          />
+        )}
         {uploadState === 'error' && errorMsg && !docRechazado && (
           <p className="rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-[11px] text-red-700">{errorMsg}</p>
         )}
@@ -1271,6 +1544,16 @@ export default function BloqueDocumento({
         onConfirmar={handleDevolver}
       />
 
+      {avisoLectura && (
+        <AvisoLecturaPanel
+          aviso={avisoLectura}
+          ocupado={reprocessing || uploadState === 'processing'}
+          onReintentar={reintentarLectura}
+          onConsultar={consultarDeNuevo}
+          onCerrar={() => setAvisoLectura(null)}
+        />
+      )}
+
       {/* Upload zone */}
       {uploadState === 'empty' && (
         <button
@@ -1356,7 +1639,7 @@ export default function BloqueDocumento({
             <Sparkles className="h-5 w-5 animate-pulse text-primary shrink-0" />
             <div>
               <span className="text-sm font-medium text-primary">{label}</span>
-              <p className="text-[11px] text-primary/70">Procesando con IA...</p>
+              <p className="text-[11px] text-primary/70">Leyendo el documento con IA… puedes seguir trabajando.</p>
             </div>
           </div>
         ) : (
@@ -1364,7 +1647,7 @@ export default function BloqueDocumento({
             <Loader2 className="h-5 w-5 animate-spin text-blue-500 shrink-0" />
             <div>
               <span className="text-sm font-medium text-blue-700">{label}</span>
-              <p className="text-[11px] text-blue-500">Guardando en Drive...</p>
+              <p className="text-[11px] text-blue-500">Guardando en Drive… puedes seguir trabajando.</p>
             </div>
           </div>
         )
