@@ -255,4 +255,8 @@
 - **Escritura larga + red mala: `useTransitionTolerante({ releer })`, no el aviso de «intenta de nuevo».**
   (2026-10-05). En Claro/Telmex la petición llega y lo que se pierde es la respuesta: repetir puede duplicar.
   `reintentar` solo para acciones idempotentes.
-
+- **Una copia heredada (`source_etapa_orden`) nunca escribe en su propia fila.** (2026-10-06). El render le
+  pinta el `data` del origen, así que lo escrito en la copia desaparece al recargar. O escribe en el origen
+  (`editable_siempre` + `source_bloque_slug`, vía `resolverDestino`) o es de solo lectura, y la pantalla y el
+  servidor lo deciden con la MISMA función (`copiaDeSoloLectura`). Abrir `editable_siempre` en un bloque sin
+  revisar si tiene copias fue lo que dejó a SOENA subir la factura y recibir el rechazo al final.
