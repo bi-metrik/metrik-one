@@ -127,6 +127,7 @@ import {
 import { soloLecturaPorDatoLleno } from '@/lib/negocios/editable-si-vacio'
 import { origenDeCopiaHeredada } from '@/lib/negocios/devolucion'
 import { documentoCompartidoQuedaResuelto } from '@/lib/negocios/casilla-compartida'
+import { formulariosOrigenDeCopias, slugsDeCopiasSinOrigen } from '@/lib/negocios/copia-de-formulario'
 import { recolectarReferenciasFuente, referenciasFaltantes, aplanarDataBloque } from '@/lib/negocios/referencias-fuente'
 import { bloqueOcultoEnHistorial } from '@/lib/negocios/bloque-oculto-historial'
 import { datosClaveDelNegocio, contradiccionesQueBloquean } from '@/lib/negocios/datos-clave-servidor'
@@ -7852,6 +7853,24 @@ export async function getNegocioDetalleCompleto(id: string): Promise<{
     dataFacturaParaCopias = dataDeFacturaParaCopias(original, resolucion, gate?.numero_campo)
   }
 
+  // ── Copias de documento cuyo origen es un FORMULARIO generado ──────────────
+  // La copia readonly de un documento puede apuntar (`source_bloque_slug`) a un bloque
+  // `formulario`: SOENA muestra el borrador de la carta de autorización, que se genera
+  // en Documentación, desde etapas posteriores donde el equipo no lo encontraba (solo
+  // vivía en el historial cerrado). La copia solo pinta el PDF: el formulario se genera
+  // en su etapa, nunca desde aquí. Se consulta solo si alguna copia de esta etapa quedó
+  // sin origen entre los documentos, y solo trae filas de tipo `formulario`.
+  const formularioDataPorSlug = await formulariosOrigenDeCopias(
+    supabase, id,
+    slugsDeCopiasSinOrigen(
+      base.bloques.map(b => ({
+        tipo: (b as { bloque_definitions?: { tipo?: string } | null }).bloque_definitions?.tipo,
+        configExtra: bloqueConfigsExtra[b.id],
+      })),
+      documentoDataPorSlug,
+    ),
+  )
+
   const bloquesConExtra = base.bloques.map(b => {
     const configExtra = bloqueConfigsExtra[b.id] ?? {}
 
@@ -7886,6 +7905,8 @@ export async function getNegocioDetalleCompleto(id: string): Promise<{
       const srcData = srcSlug === slugFacturaLinea
         ? dataFacturaParaCopias
         : (srcSlug ? documentoDataPorSlug.get(srcSlug) : undefined)
+          // Origen formulario (la carta de autorización generada): solo por slug.
+          ?? (srcSlug ? formularioDataPorSlug.get(srcSlug) : undefined)
           ?? documentoDataPorEtapaNombre.get(`${srcOrden}::${bNombre}`)
           // Con el origen declarado por slug y sin fila de origen, la copia NO muestra
           // su propia data: la llenó la herencia, y antes del 2026-09-14 la herencia

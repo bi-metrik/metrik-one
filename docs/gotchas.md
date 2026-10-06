@@ -290,3 +290,8 @@
   primera persona mencionada recibía dos avisos (72 pares a 0,2 s). Dos escrituras por PostgREST son dos
   transacciones; una guarda entre ellas solo sirve si el dato que mira ya está escrito. Arreglo: con
   menciones nuevas `mencion_id` va null y el distintivo sale de `activity_menciones`.
+- **Para mostrar un formulario generado en otra etapa, la copia es un `documento` readonly, no otro
+  `formulario`.** (2026-10-06). Un `formulario` con la misma plantilla es un bloque independiente con su
+  propia fila: el `formulario_dian_envio` muestra vacío en 217 de 244 casos aunque el 010 ya exista. La
+  copia `documento` con `source_etapa_orden` + `source_bloque_slug` del formulario lee su `drive_url`
+  (`copia-de-formulario.ts`, solo por slug) y no genera ni sube nada.
