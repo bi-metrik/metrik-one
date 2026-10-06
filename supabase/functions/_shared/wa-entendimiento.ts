@@ -2497,18 +2497,19 @@ export async function textoDeLaConsulta(
 }
 
 /**
- * Conversación con memoria (2026-10-05, punto 2): un dato escrito que responde a «me falta» se carga EN EL ACTO en el
- * viaje en foco, sin tanda, resumen ni «sí». Nace una entrega cerrada (`respuesta_a_lo_que_falta`) con el reparto ya
- * confirmado a ese viaje, y el entendimiento la corre como cualquier carga en un viaje existente: lee SOLO lo nuevo, lo
- * compara con lo que el viaje ya tenía (el aviso de viaje equivocado sigue: si habla de otro destino o de otro cliente,
- * pregunta antes de cargar) y contesta qué anotó y cuánto falta. `false`: no se pudo crear (sigue como hoy).
+ * La respuesta a «me falta» para el viaje en foco (2026-10-06, decisión de Mauricio tras el undécimo control de Vera): el
+ * foco solo SUGIERE el viaje y nunca carga solo. El escrito queda en una entrega propia, ya repartida a ese viaje y con
+ * su resumen corto enviado (`esperando_cliente`): se carga con el toque de «Cargar» o con un «sí» a ESE resumen, como
+ * cualquier tanda (la confirmación queda atada a la entrega y a la huella del reparto, #1034); «Descartar» la descarta.
+ * Antes (#1033) nacía con el «sí» ya puesto y se cargaba en el acto: el undécimo control encontró 4 dañinas vivas así.
+ * `null`: no se pudo (sigue el camino de hoy).
  */
-export async function cargarDatoEnElViaje(
+export async function proponerDatoEnElViaje(
   supabase: SupabaseClient,
   p: { workspaceId: string; phone: string; staffId: string | null; colaboradorId: string | null; wamid: string; cuerpo: string; enviadoAt: string | null; negocioId: string },
-): Promise<boolean> {
+): Promise<{ entregaId: string; plan: PlanViajes; nombre: string } | null> {
   const [v] = await viajesPorId(supabase, p.workspaceId, [p.negocioId]);
-  if (!v) return false;
+  if (!v) return null;
   const ahora = new Date().toISOString();
   const plan: PlanViajes = {
     version: 2,
@@ -2518,24 +2519,50 @@ export async function cargarDatoEnElViaje(
   };
   const { data: e, error } = await supabase.from('wa_bandeja_entregas').insert({
     workspace_id: p.workspaceId, remitente_phone: p.phone, remitente_staff_id: p.staffId, remitente_colaborador_id: p.colaboradorId,
-    estado: 'con_cliente', abierta_at: ahora, ultimo_mensaje_at: ahora, n_mensajes: 1, cerrada_at: ahora, motivo_cierre: 'respuesta_a_lo_que_falta',
-    pregunta_enviada_at: ahora, cliente_texto: 'sí', cliente_respondido_at: ahora, plan_viajes: plan,
+    estado: 'esperando_cliente', abierta_at: ahora, ultimo_mensaje_at: ahora, n_mensajes: 1, cerrada_at: ahora, motivo_cierre: 'respuesta_a_lo_que_falta',
+    pregunta_enviada_at: ahora, plan_viajes: plan,
   }).select('id').single();
   if (error || !e) {
     console.error('[wa-entendimiento] no se pudo crear la entrega del dato:', error?.message);
-    return false;
+    return null;
   }
   const { error: eM } = await supabase.from('wa_bandeja_mensajes').insert({
     workspace_id: p.workspaceId, entrega_id: e.id, wa_message_id: p.wamid, remitente_phone: p.phone, remitente_staff_id: p.staffId,
     remitente_colaborador_id: p.colaboradorId, tipo: 'text', papel: 'contenido', cuerpo: p.cuerpo, cuerpo_origen: 'texto', reenviado: false, enviado_at: p.enviadoAt,
   });
   if (eM) {
-    // Meta reintentó el mismo mensaje: ya se tomó (la entrega nueva queda sin mensajes y el entendimiento la descarta).
+    // Meta reintentó el mismo mensaje: ya se tomó. La entrega nueva queda sin pregunta (no se muestra ni se carga).
     console.error('[wa-entendimiento] no se pudo guardar el dato:', eM.message);
-    await supabase.from('wa_bandeja_entregas').update({ estado: 'esperando_cliente', pregunta_error: 'dato duplicado' }).eq('id', e.id);
-    return String(eM.message).includes('duplicate');
+    await supabase.from('wa_bandeja_entregas').update({ pregunta_enviada_at: null, pregunta_error: 'dato duplicado' }).eq('id', e.id);
+    return null;
   }
-  return true;
+  return { entregaId: e.id as string, plan, nombre: nombreDeViaje(v) };
+}
+
+/** Agrega otro dato a la entrega del resumen corto que espera el «sí» y la deja lista para volver a mostrarse. */
+export async function agregarDatoAlResumenCorto(
+  supabase: SupabaseClient,
+  p: { workspaceId: string; phone: string; staffId: string | null; colaboradorId: string | null; wamid: string; cuerpo: string; enviadoAt: string | null; entregaId: string },
+): Promise<{ plan: PlanViajes; nombre: string; cuerpos: string[] } | null> {
+  const { data: e } = await supabase.from('wa_bandeja_entregas').select('id, plan_viajes, n_mensajes').eq('id', p.entregaId).eq('estado', 'esperando_cliente').maybeSingle();
+  const plan = (e?.plan_viajes ?? null) as PlanViajes | null;
+  const d = plan?.mensajes[0]?.destino;
+  if (!e || !plan || !d || d.tipo !== 'existente') return null;
+  const { error: eM } = await supabase.from('wa_bandeja_mensajes').insert({
+    workspace_id: p.workspaceId, entrega_id: e.id, wa_message_id: p.wamid, remitente_phone: p.phone, remitente_staff_id: p.staffId,
+    remitente_colaborador_id: p.colaboradorId, tipo: 'text', papel: 'contenido', cuerpo: p.cuerpo, cuerpo_origen: 'texto', reenviado: false, enviado_at: p.enviadoAt,
+  });
+  if (eM) {
+    console.error('[wa-entendimiento] no se pudo agregar el dato:', eM.message);
+    return null;
+  }
+  const n = Math.max(0, ...plan.mensajes.map(m => m.n)) + 1;
+  const nuevo: PlanViajes = { ...plan, mensajes: [...plan.mensajes, { n, destino: d, por: 'comercial' }] };
+  const ahora = new Date().toISOString();
+  await supabase.from('wa_bandeja_entregas').update({ plan_viajes: nuevo, n_mensajes: n, ultimo_mensaje_at: ahora, pregunta_enviada_at: ahora }).eq('id', e.id);
+  const { data: ms } = await supabase.from('wa_bandeja_mensajes').select('cuerpo, recibido_at').eq('entrega_id', e.id).order('recibido_at', { ascending: true });
+  const [v] = await viajesPorId(supabase, p.workspaceId, [d.negocio_id]);
+  return { plan: nuevo, nombre: v ? nombreDeViaje(v) : nombreDeViaje({ nombre: d.nombre ?? null, cliente: d.cliente, codigo: d.codigo }), cuerpos: ((ms ?? []) as Array<{ cuerpo: string }>).map(x => String(x.cuerpo ?? '')) };
 }
 
 /** El viaje de un id, como lo nombra la bandeja («D1 26 1 · Diego Torres»). */
