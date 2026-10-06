@@ -58,7 +58,11 @@ export async function GET(req: NextRequest) {
 
   for (const n of negocios) {
     // Reactivar: preserva veces_pausado (pausa YA se consumió al hacerla)
-    const { error: updErr } = await supabase
+    //
+    // La reactivación RECLAMA el negocio: solo la corrida que lo pasa de pausado a activo
+    // deja la línea de actividad y avisa. Si Vercel entrega el cron dos veces, la segunda
+    // ya no lo encuentra pausado y no vuelve a avisar (2026-10-06, brief del doble guardado).
+    const { data: reclamado, error: updErr } = await supabase
       .from('negocios')
       .update({
         pausado: false,
@@ -68,11 +72,14 @@ export async function GET(req: NextRequest) {
         updated_at: now,
       })
       .eq('id', n.id)
+      .eq('pausado', true)
+      .select('id')
 
     if (updErr) {
       console.error('[pausa-sla] Error reactivando', n.id, updErr)
       continue
     }
+    if (!reclamado || reclamado.length === 0) continue
 
     reactivados++
 

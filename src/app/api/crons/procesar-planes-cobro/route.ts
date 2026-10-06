@@ -173,10 +173,20 @@ export async function GET(req: NextRequest) {
     .lte('fecha_esperada', fechaLimiteStr)
 
   for (const cobro of cobrosPorVencer ?? []) {
-    await supabase
+    // RECLAMAR el cobro: solo la corrida que lo pasa de no vencido a vencido avisa. Antes el
+    // update no tenía condición y dos corridas cruzadas (Vercel puede entregar el cron dos
+    // veces) avisaban las dos: 2 pares `cobro_vencido` en advise (medido el 2026-10-06).
+    const { data: reclamado, error: errVencer } = await supabase
       .from('cobros')
       .update({ vencido: true, vencido_at: new Date().toISOString() })
       .eq('id', cobro.id)
+      .eq('vencido', false)
+      .select('id')
+    if (errVencer) {
+      console.error('[procesar-planes-cobro] no se pudo marcar vencido', cobro.id, errVencer.message)
+      continue
+    }
+    if (!reclamado || reclamado.length === 0) continue
 
     cobrosVencidos++
 
