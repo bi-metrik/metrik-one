@@ -54,6 +54,16 @@ const NO_ES_NOMBRE: ReadonlySet<string> = new Set([
  * gerundio. «te pregunto» o «quiero saber» (el comercial al bot) no lo son. «una consulta» como sustantivo, tampoco.
  */
 const RELATO_EN_CUALQUIER_PARTE = /\b(?:pregunta|preguntan|preguntaba|preguntaban|preguntaron|preguntando|quiere\s+saber|quieren\s+saber|queria\s+saber|querian\s+saber|quiso\s+saber|quisieron\s+saber|dice|dicen|decia|decian|dijo|dijeron|diciendo|escribe|escriben|escribia|escribio|escribieron|escribiendo|consultan|consultaba|consultaron|consultando)\b/;
+/**
+ * Décimo control de Vera (hallazgo 3): el relato no es una lista de verbos. Dos construcciones con un sujeto que no es el
+ * comercial, en cualquier tiempo y posición, son contenido:
+ *   · el encargo del cliente al comercial: un verbo de pedir o encargar + «que» + un verbo de decir o averiguar en
+ *     subjuntivo («me pidió que le averigüe…», «quiere que le confirme…», «nos encargaron que les cotizáramos…»);
+ *   · el interés en tercera persona: un verbo de interés o deseo + «saber» («le interesa saber…», «les gustaría saber…»).
+ */
+const ENCARGO_DEL_CLIENTE = /\b(?:pide|piden|pidio|pidieron|pedia|pedian|ha\s+pedido|han\s+pedido|encargo|encargaron|encarga|encargan|quiere|quieren|queria|querian|quisiera|quisieran|necesita|necesitan|necesitaba|necesitaban|insiste\s+en|insisten\s+en)\s+que\s+(?:(?:le|les|se|lo|la|los|las|me|nos)\s+){0,2}(?:diga|digamos|dijera|dijeramos|averigue|averiguemos|averiguara|averiguaramos|cuente|contemos|contara|confirme|confirmemos|confirmara|consiga|consigamos|cotice|coticemos|cotizara|cotizaramos|busque|busquemos|buscara|mande|mandemos|mandara|envie|enviemos|enviara|pase|pasemos|pasara|informe|informemos|informara|revise|revisemos|revisara|mire|miremos|mirara|pregunte|preguntemos|preguntara|explique|expliquemos|explicara|consulte|consultemos|consultara|verifique|verifiquemos|verificara|reserve|reservemos|reservara|ayude|ayudemos|ayudara)\b/;
+const INTERES_DE_TERCERO = /\b(?:le|les)\s+(?:interesa|interesaria|interesaba|gustaria|gusta|gustaba|encantaria|intriga)\s+saber\b|\b(?:desea|desean|deseaba|deseaban|quisiera|quisieran|necesita|necesitan|necesitaba|necesitaban|anda|andan|esta|estan)\s+(?:interesad[oa]s?\s+en\s+)?(?:saber|averiguando|preguntando)\b|\b(?:tiene|tienen)\s+(?:curiosidad|la\s+duda|dudas?)\s+(?:de|sobre|por)\b/;
+
 /** Las formas con tilde que en minúscula sin tilde serían también del comercial («preguntó» / «pregunto»). */
 const RELATO_CON_TILDE = /\b(?:pregunt[oó]|consult[oó])\b/;
 
@@ -68,6 +78,7 @@ export function relataAlCliente(texto: string): boolean {
   // «te pregunto», «le pregunto»: el comercial pregunta (al bot o al cliente); no es un relato.
   const sinElComercial = t.replace(/\b(?:te|le|yo)\s+(?:pregunto|consulto|digo|escribo)\b/g, ' ');
   if (RELATO_EN_CUALQUIER_PARTE.test(sinElComercial)) return true;
+  if (ENCARGO_DEL_CLIENTE.test(sinElComercial) || INTERES_DE_TERCERO.test(sinElComercial)) return true;
   // «preguntó», «consultó» (con tilde): tercera persona del pasado. Sin tilde no se adivina.
   const m = RELATO_CON_TILDE.exec(bruto.toLowerCase());
   return !!m && /[óÓ]$/.test(m[0]);
@@ -104,12 +115,34 @@ function refDelViaje(t: string, bruto: string): string | null {
   return de ? nombreEn(bruto, de) : null;
 }
 
+/**
+ * El alcance de una pregunta por lo que falta, sacado del texto (décimo control, hallazgo 5: en toda consulta de viaje,
+ * también en la que viene del modelo). Completo: complet*, deseable, lo que falta en total, entregar, terminar o dejar
+ * lista la solicitud. Mínimo: cotiz*, mínimo, empezar. Sin nada de eso, `undefined` (se contestan los dos).
+ */
+export function alcanceDelTexto(texto: string): 'minimo' | 'completo' | undefined {
+  const t = normalizarNombre(normalizarTexto(String(texto ?? '')));
+  if (/\b(?:complet\w*|deseable\w*|entreg\w*|al\s+100|cien\s+por\s+ciento|todo\s+lo\s+que\s+falta|en\s+total|termin\w*|dej\w*\s+(?:la\s+|lo\s+)?(?:solicitud\s+)?list[oa]s?|quede\s+list[oa]|cerrar\s+la\s+solicitud|barra|sin\s+llenar|por\s+llenar)\b/.test(t)) return 'completo';
+  if (/\b(?:cotiz\w*|minimo|empez\w*|empiez\w*|arrancar)\b/.test(t)) return 'minimo';
+  return undefined;
+}
+
 /** El alcance de la pregunta: «para completo» / «para entregarlo», o «para cotizar» / «el mínimo»; sin eso, los dos. */
 function conAlcance(c: { tipo: 'viaje'; ref: string | null }, t: string): ConsultaBandeja {
-  if (/\b(?:complet\w*|entreg\w*|al\s+100|cien\s+por\s+ciento|todo\s+lo\s+que\s+falta)\b/.test(t)) return { ...c, alcance: 'completo' };
-  if (/\b(?:cotiz\w*|minimo|empezar)\b/.test(t)) return { ...c, alcance: 'minimo' };
-  return c;
+  const alcance = alcanceDelTexto(t);
+  return alcance ? { ...c, alcance } : c;
 }
+
+/**
+ * Décimo control (hallazgo 5b): la corrección al bot SIN cifra («le faltan los datos de hotel y presupuesto», «hay campos
+ * sin llenar», «la barra no está llena», «todavía no está completo»), sin un sujeto cliente, es la pregunta de completo
+ * del viaje en foco.
+ */
+const CORRIGE_SIN_CIFRA = /^(?:(?:pero|y|oye|ojo|no|mira|bueno)\s+)*(?:todavia\s+|aun\s+)?(?:(?:le\s+)?faltan?\s+(?:(?:los|las|unos|unas|varios|varias)\s+)?(?:datos|campos|cosas|puntos|casillas)\b|(?:hay|quedan|quedaron|tiene|tienen|siguen)\s+(?:(?:unos|unas|varios|varias|muchos|muchas)\s+)?(?:datos|campos|cosas|puntos|casillas)\s+(?:sin|por)\s+(?:llenar|completar|diligenciar)|la\s+barra\s+(?:no\s+)?(?:esta|va|sigue|queda|quedo)\b|(?:no|todavia\s+no|aun\s+no)\s+(?:esta|queda|quedo|ha\s+quedado)\s+complet\w*|(?:esta|quedo|sigue)\s+incomplet\w*)/;
+/** Lo que falta DEL CLIENTE («falta que me mande…», «el cliente no ha mandado…»): contenido, no la corrección al bot. */
+const FALTA_DEL_CLIENTE = /\b(?:que\s+(?:me|nos|le)\s+(?:mande|manden|envie|envien|pase|pasen|confirme|confirmen)|(?:cliente|clienta|senor|senora)\s+(?:no\s+)?(?:ha|han|me|nos|manda|mando|dijo|envio))\b/;
+/** Con palabras de plata, «cómo va» no es la consulta de un viaje (décimo control, hallazgo 9). */
+const PLATA = /\b(?:cartera|ventas?|vendid[oa]s?|vendimos|vendemos|gastos?|gastad[oa]|gastamos|numeros|facturad[oa]|facturacion|facturamos|utilidad|utilidades|plata|recaudo|recaudad[oa]|cobrad[oa]|cobros?|ingresos?|caja|flujo|margen|rentabilidad|ebitda)\b/;
 
 /**
  * ¿Este escrito del comercial es una pregunta al bot sobre la bandeja? `null`: no (sigue como siempre). Un reenvío
@@ -124,7 +157,9 @@ export function leerConsultaBandeja(texto: string, o: { reenviado: boolean }): C
   // Conversación con memoria (2026-10-05, punto 3): una afirmación que corrige al bot sobre lo que falta («pero faltan 4
   // puntos para que quede completo») es una pregunta por ese viaje, aunque no tenga signo.
   if (CORRIGE_LO_QUE_FALTA.test(t)) return conAlcance({ tipo: 'viaje', ref: refDelViaje(t, bruto) }, t);
+  if (CORRIGE_SIN_CIFRA.test(t) && !FALTA_DEL_CLIENTE.test(t)) return { tipo: 'viaje', ref: refDelViaje(t, bruto), alcance: 'completo' };
   if (!esPreguntaOPedido(t, bruto)) return null;
+  if (PLATA.test(t)) return null;
   // Noveno control (hallazgo 6): un pedido de hacer algo («borra lo que te mandé», «pásalo al de Cartagena») no es una
   // consulta aunque use su vocabulario.
   if (PIDE_UNA_ACCION.test(t)) return null;

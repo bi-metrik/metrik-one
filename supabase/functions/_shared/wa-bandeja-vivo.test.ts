@@ -2548,3 +2548,75 @@ describe('2026-10-05 · el modelo redacta, de punta a punta (`bot_conversacional
     expect(r.consulta).toMatch(/^SAN ANDRÉS DIC · Fermín Ocampo \(F 26 1\) — Mínimo/);
   });
 });
+
+describe('décimo control de Vera (2026-10-05): la carga directa en el viaje en foco solo con el dato pedido y sin otro cliente ni otro viaje, de punta a punta', () => {
+  function viajeDe(id: string, codigo: string, nombre: string, cliente: string, destino: string) {
+    t.contactos.push({ id: `c-${id}`, workspace_id: WS, nombre: cliente, telefono: celDe(cliente), email: null, created_at: '2026-01-10T10:00:00Z' });
+    t.negocios.push({ ...negocioDePrueba(id, codigo, nombre, cliente), contacto_id: `c-${id}` });
+    t.negocio_bloques.push({ id: `b-${id}`, negocio_id: id, data: { destino }, updated_at: null, bloque_configs: { orden: 1, config_extra: { fields: FIELDS }, bloque_definitions: { tipo: 'datos' }, etapas_negocio: { orden: 1 } } });
+  }
+  const datosDel = (id: string) => t.negocio_bloques.find(b => b.negocio_id === id)!.data as Fila;
+  /** Isidro Ballesteros va a Leticia (el viaje en foco); Teodora Quiceno tiene otro viaje abierto, a Pasto. */
+  async function focoDeIsidro(interprete?: { modelo?: unknown }) {
+    viajeDe('n-ib', 'I 26 1', 'LETICIA MAR', 'ISIDRO BALLESTEROS', 'LETICIA');
+    viajeDe('n-tq', 'T 26 4', 'PASTO ABR', 'TEODORA QUICENO', 'PASTO');
+    await llega('I 26 1', { enviado: 0, interprete });
+    await llega('van a Leticia en marzo, son 2 adultos', { enviado: 2, reenviado: true });
+    await llega('listo', { enviado: 4, interprete });
+    colaModelo = [salidaModelo({ destino: { valor: 'Leticia', frase: 'van a Leticia' }, adultos: { valor: '2', frase: '2 adultos' } })];
+    await llega('sí', { enviado: 6, interprete });
+    expect(textos().at(-1)).toMatch(/^Cargué en LETICIA MAR · Isidro Ballesteros \(I 26 1\)[\s\S]*me falta:/);
+  }
+  beforeEach(() => { bandeja.procesarEnElActo.activo = true; });
+
+  for (const modo of ['apagado', 'prendido'] as const) {
+    it(`interruptor ${modo}: lo de otro cliente o de otro viaje, una pregunta sin signo o una orden NO se cargan en el viaje en foco; el dato pedido sí`, async () => {
+      const contenido = (texto: string) => (modo === 'prendido' ? { modelo: { acciones: [{ accion: 'contenido', evidencia: texto }] } } : undefined);
+      await focoDeIsidro(modo === 'prendido' ? {} : undefined);
+      const antes = JSON.stringify(datosDel('n-ib'));
+      const ents = t.wa_bandeja_entendimientos.length;
+      for (const [i, texto] of [
+        'la señora Teodora sale desde Ipiales',            // otro cliente del directorio, por el nombre de pila
+        'los de Pasto viajan con 3 niños',                 // el destino de otro viaje abierto
+        'T 26 4: salen el 20 de abril',                    // el código de otro viaje
+        'cuándo fue que dijeron que salían',               // pregunta sin signo
+        'bórrale la fecha de salida',                      // una orden
+        'no, eso de los niños era para el de Pasto',       // una corrección
+      ].entries()) {
+        await llega(texto, { enviado: 20 + i * 3, interprete: contenido(texto) });
+        // Nunca silencio: con o sin el intérprete, dice algo.
+        expect(textos().at(-1)).not.toMatch(/^Lo anoto en LETICIA MAR/);
+        await llega('descartar', { enviado: 21 + i * 3 });
+      }
+      expect(JSON.stringify(datosDel('n-ib'))).toBe(antes);
+      expect(t.wa_bandeja_entendimientos.filter(e => e.negocio_destino_id === 'n-ib' || e.negocio_id === 'n-ib').length).toBe(1);
+      expect(t.wa_bandeja_entendimientos.length).toBe(ents);
+      // El dato que se pidió, sin nombrar a nadie más: directo, como en #1033.
+      colaModelo = [salidaModelo({ ciudad_origen: { valor: 'Bogotá', frase: 'salen desde Bogotá' } })];
+      await llega('salen desde Bogotá', { enviado: 60, interprete: contenido('salen desde Bogotá') });
+      expect(textos().at(-2)).toBe('Lo anoto en LETICIA MAR · Isidro Ballesteros (I 26 1). Lo estoy leyendo; te digo qué quedó.');
+      expect(datosDel('n-ib')).toMatchObject({ ciudad_origen: 'BOGOTÁ' });
+    });
+  }
+
+  it.each([
+    'ponlo a nombre de la señora Leonor Pardo', 'anótalo para doña Leonor Pardo', 'cárgaselo a Leonor Pardo', 'es para mi clienta Leonor Pardo',
+    'créalo con Leonor Pardo', 'ese viaje es de la señora Leonor Pardo', 'apúntalo a Leonor Pardo por favor',
+  ])('interruptor apagado: tras «¿Para qué cliente es?», «%s» lee el nombre con el verbo o la fórmula delante: es la que ya tenemos (regla 8)', async (respuesta) => {
+    t.contactos.push({ id: 'c-lp', workspace_id: WS, nombre: 'LEONOR PARDO', telefono: '3001239876', email: null, created_at: '2026-01-10T10:00:00Z' });
+    await llega('vamos a montar un viaje nuevo', { enviado: 0 });
+    expect(textos().at(-1)).toBe('Listo, un viaje nuevo. ¿Para qué cliente es?');
+    await llega(respuesta, { enviado: 3 });
+    await llega('quieren ir a Guatapé un fin de semana', { enviado: 5, reenviado: true });
+    await llega('listo', { enviado: 8 });
+    expect(textos().at(-1)).toContain('*Viaje nuevo · Leonor Pardo*\nYa es cliente · cel. …9876');
+  });
+
+  it('interruptor prendido: un escrito que el validador registra como contenido y abre una tanda sin cliente dice qué espera (nunca silencio)', async () => {
+    const texto = 'son dos parejas y quieren algo con playa';
+    const n0 = textos().length;
+    await llega(texto, { enviado: 0, interprete: { modelo: { acciones: [{ accion: 'contenido', evidencia: texto }] } } });
+    expect(t.wa_bandeja_entregas.filter(e => e.estado === 'abierta')).toHaveLength(1);
+    expect(textos().slice(n0)).toEqual([TANDA_SIN_CLIENTE]);
+  });
+});

@@ -12,6 +12,7 @@
 // ============================================================
 
 import type { SupabaseClient } from './types.ts';
+import type { PedidoFoco } from './wa-carga-directa-reglas.ts';
 
 /** Por qué un viaje quedó en foco. */
 export type PorQueFoco = 'carga' | 'consulta' | 'nombrado';
@@ -23,6 +24,11 @@ export interface FocoViaje {
   por: PorQueFoco;
   /** En una carga: cuántos datos del mínimo quedaron faltando (la respuesta a «me falta» va directo a este viaje). */
   faltan?: number;
+  /**
+   * Décimo control de Vera: los datos que el bot pidió en esa carga. La respuesta a «me falta» va directo solo si trae
+   * el valor de alguno de ellos (`cargaDirecta`). Un foco sin esto (de antes) nunca carga directo.
+   */
+  pedidos?: PedidoFoco[];
 }
 
 /** El alcance de una pregunta por lo que falta: lo del mínimo para cotizar, lo de completo, o los dos. */
@@ -48,7 +54,7 @@ export const MINUTOS_CONSULTA_PENDIENTE = 10;
 export function agregarFoco(focos: ReadonlyArray<FocoViaje>, nuevo: FocoViaje): FocoViaje[] {
   // Lo que faltaba tras la última carga se conserva cuando el mismo viaje vuelve a foco por una consulta.
   const antes = focos.find(f => f.negocio_id === nuevo.negocio_id);
-  const conFaltan = nuevo.faltan === undefined && antes?.faltan !== undefined ? { ...nuevo, faltan: antes.faltan } : nuevo;
+  const conFaltan = nuevo.faltan === undefined && antes?.faltan !== undefined ? { ...nuevo, faltan: antes.faltan, ...(antes.pedidos ? { pedidos: antes.pedidos } : {}) } : nuevo;
   return [conFaltan, ...focos.filter(f => f.negocio_id !== nuevo.negocio_id)].slice(0, MAX_FOCOS);
 }
 
@@ -114,4 +120,16 @@ export async function anotarFoco(
 /** Deja (o quita, con `null`) la consulta que espera saber de qué viaje es. */
 export async function anotarConsultaPendiente(supabase: SupabaseClient, workspaceId: string, phone: string, consulta: ConsultaPendiente | null): Promise<void> {
   await guardar(supabase, workspaceId, phone, { consulta_pendiente: consulta });
+}
+
+/** Los datos pedidos de una carga, con lo necesario para reconocer su valor en un escrito (la etiqueta y las opciones). */
+export function pedidosDeLaCarga(
+  faltan: ReadonlyArray<{ slug: string; label: string }>,
+  fields: ReadonlyArray<{ slug: string; tipo?: string; label?: string; opciones?: unknown }>,
+): PedidoFoco[] {
+  return faltan.map(f => {
+    const c = fields.find(x => x.slug === f.slug);
+    const ops = Array.isArray(c?.opciones) ? (c!.opciones as Array<{ label?: unknown }>).map(o => String(o?.label ?? '')).filter(Boolean) : [];
+    return { slug: f.slug, label: f.label, tipo: String(c?.tipo ?? 'texto'), ...(ops.length ? { opciones: ops } : {}) };
+  });
 }

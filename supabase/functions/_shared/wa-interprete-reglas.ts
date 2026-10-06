@@ -24,7 +24,7 @@ import { codigoCompacto, interpretarRespuestaNegocio, pieDeLista } from './wa-ca
 import { calificarNombreNuevo, leerNuevo, leerViajeNuevo, nombrePropio, normalizarNombre, normalizarTexto } from './wa-entendimiento-reglas.ts';
 import type { LecturaNuevo } from './wa-entendimiento-reglas.ts';
 import { llavesDelTexto, separarNombreYLlave, soloLlave } from './wa-cliente-reglas.ts';
-import { leerConsultaBandeja, relataAlCliente } from './wa-consulta-bandeja.ts';
+import { alcanceDelTexto, leerConsultaBandeja, relataAlCliente } from './wa-consulta-bandeja.ts';
 import type { ConsultaBandeja } from './wa-consulta-bandeja.ts';
 import type { Llave } from './wa-cliente-reglas.ts';
 import { fastPathParse } from './wa-parse-reglas.ts';
@@ -61,6 +61,12 @@ import {
   READ_ONLY_ALLOWED_INTENTS,
 } from './types.ts';
 import type { Intent, ParsedFields, UserRole } from './types.ts';
+
+/** Décimo control (hallazgo 5): el alcance de la pregunta sale del texto también en la consulta que propone el modelo. */
+function conAlcanceDelTexto(texto: string): { alcance?: 'minimo' | 'completo' } {
+  const a = alcanceDelTexto(texto);
+  return a ? { alcance: a } : {};
+}
 
 // ── El interruptor (§8) ─────────────────────────────────────────────────────
 
@@ -595,6 +601,11 @@ export interface EntradaContexto {
   pendiente: PreguntaUnificada | null;
   recientes: ReadonlyArray<{ tipo: 'reenviado' | 'escrito' | 'bot'; texto: string }>;
   mensaje: string;
+  /**
+   * Décimo control de Vera: el viaje en foco (el último que el bot cargó con el comercial y le pidió datos), si el escrito
+   * no pasó la regla de la carga directa. El modelo lo ve para poder abrir su caja; nunca se carga sin el «sí».
+   */
+  foco?: { alias: string; faltan: string[] } | null;
 }
 
 function recortar(t: string, n: number): string {
@@ -618,6 +629,9 @@ export function armarContexto(e: EntradaContexto): string {
     l.push(t?.abierta
       ? `Tanda abierta: sí${t.haceMin != null ? `, desde hace ${t.haceMin} min` : ''}${t.caja ? `, caja activa ${t.caja}` : ''}${t.mensajes != null ? `, ${t.mensajes} mensajes` : ''}`
       : 'Tanda abierta: no');
+  }
+  if (e.bandeja && e.foco) {
+    l.push(`Viaje en foco: [${e.foco.alias}] (el bot lo acaba de cargar con el comercial${e.foco.faltan.length ? ` y le pidió: ${e.foco.faltan.join(', ')}` : ''}). Si el MENSAJE NUEVO es un dato para ese viaje y no nombra a otro cliente ni a otro viaje, es abrir_viaje con [${e.foco.alias}] más contenido con el dato; si nombra a otro cliente u otro viaje, NO es de este.`);
   }
   const p = e.pendiente;
   if (p) {
@@ -1258,7 +1272,7 @@ function validarPropuesta(crudo: unknown, e: EntradaValidador): Decision {
         const codigo = a0.ref?.codigo && todoEscrito(a0.ref.codigo, e.texto) ? String(a0.ref.codigo) : null;
         const consulta: ConsultaBandeja = a0.tema === 'tanda' ? { tipo: 'tanda' }
           : a0.tema === 'viajes' ? { tipo: 'viajes', cliente }
-          : { tipo: 'viaje', ref: codigo ?? cliente ?? escritoTalCual(a0.ref?.destino, e.texto) };
+          : { tipo: 'viaje', ref: codigo ?? cliente ?? escritoTalCual(a0.ref?.destino, e.texto), ...conAlcanceDelTexto(e.texto) };
         return ejecutar('bandeja.consulta', { p: 'bandeja_consulta', consulta }, rechazo, false);
       }
       const intent = intentDeLaAccion('consulta', a0.tema) as Intent;

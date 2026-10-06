@@ -22,7 +22,7 @@
 import { calificarNombreNuevo, leerNuevo, leerViajeNuevo, nombreDeViaje, nombrePropio, normalizarNombre, normalizarTexto, restoTrasOtroCliente } from './wa-entendimiento-reglas.ts';
 import {
   datoDeLaFicha, leerEleccionCliente, leerEsLaMisma, notaDeLaLlave, resolverConDirectorio, separarNombreYLlave, soloLlave, soloLlaveDelCliente, textoLlave, tieneLlave,
-  TEXTO_PIDE_CLIENTE, viajesDeLaFicha,
+  TEXTO_PIDE_CLIENTE, tramoExacto, viajesDeLaFicha,
 } from './wa-cliente-reglas.ts';
 import type { Directorio, FichaCliente, Llave, ResolucionCliente } from './wa-cliente-reglas.ts';
 export { nombreDeViaje, nombrePropio } from './wa-entendimiento-reglas.ts';
@@ -1355,7 +1355,9 @@ export function armarSegmentos(
       const otro = !!r && ((r.tipo === 'nuevo' && (!!r.cliente || !!r.llave)) || r.tipo === 'codigo_desconocido' || (r.tipo === 'viaje' && r.por === 'codigo'));
       if (!otro) {
         const { nombre: sinLlave, llave } = separarNombreYLlave(m.cuerpo);
-        const nombre = esNombreNuevo(llave ? sinLlave : m.cuerpo, equipo);
+        // Décimo control (hallazgo 8): con un verbo o una fórmula delante («ponlo a nombre de Ana Ruiz», «es mi clienta de
+        // siempre, Ana Ruiz»), el tramo que el directorio tiene exacto es el nombre, igual que en el encabezado.
+        const nombre = esNombreNuevo(llave ? sinLlave : m.cuerpo, equipo) ?? (dir ? tramoExacto(llave ? sinLlave : m.cuerpo, dir) : null);
         if (nombre) {
           actual.seg.nombre = { texto: nombre, n: m.n };
           if (llave && actual.seg.cliente) actual.seg.cliente.llave = llave;
@@ -2200,11 +2202,34 @@ export function esSiSinReserva(texto: string): boolean {
   // «así está bien», «todo correcto»: dicen que el resumen está bien, no señalan nada.
   let t = ` ${normalizarNombre(bruto)} `;
   for (const f of RESUMEN_BIEN) t = t.split(` ${f} `).join(' ');
-  t = t.replace(/\s+/g, ' ').trim();
+  t = sinCortesiaDelSi(t.replace(/\s+/g, ' ').trim());
+  if (!t) return false;
   if (NIEGA_EN_CONFIRMACION.test(t) || /[?¿]/.test(bruto) || t.split(' ').some(w => DEICTICOS.has(w))) return false;
+  if (esSi(t)) return true;
   // «cárgalo», «cárguelos», «cargar»: en el resumen, cargar es el verbo de alta.
   if (esSiCompleto(t.split(' ').map(w => VERBOS_CARGAR.has(w) ? 'crea' : w).join(' '), null)) return true;
   return siConVerboDeSeguir(t);
+}
+
+/**
+ * Décimo control de Vera (hallazgo 4): la reserva la marcan la condición, la espera, la negación, la pregunta, el número o
+ * la corrección. Lo que es cortesía se quita antes de leer el «sí»:
+ *   · una interjección de asentimiento antes del «sí» («ah sí», «ajá, sí», «bueno sí», «uy sí claro»);
+ *   · un tratamiento en cualquier parte («sí señor», «sí jefe, cárguelo», «dale parce»);
+ *   · un cuantificador o una locución de énfasis detrás del verbo («cárgalo todo», «súbelo ya mismo», «créalo de una
+ *     vez por todas», «cárgalo sin falta»).
+ */
+const INTERJECCION_ANTES_DEL_SI = /^(?:(?:ah+|aja+|aha|uy+|eh+|mm+|uhm+|ay+|ja(?:ja)*|uf+|bueno|bno|listo|ok|okey|okay|oki|vale|perfecto|ah\s+bueno|ah\s+ok|ahora)\s+)+(?=(?:si+|sip|claro|dale|de una|hagale|adelante|obvio|correcto|exacto)\b)/;
+const TRATAMIENTOS = /\b(?:senor(?:a|ita)?|jef(?:e|a|ecit[oa])|doctor(?:a)?|doc|dotor|herman(?:o|a|it[oa])|mano|parce(?:ro|ra)?|mij[oa]|mi\s+(?:rey|reina|amor|vida)|amig(?:o|a|ui)|compa|compadre|comadre|quierid[oa]|profe|patron|patrona|jefazo|bro)\b/g;
+const ENFASIS_TRAS_EL_VERBO = /\b(?:de\s+una\s+vez\s+por\s+todas|de\s+una\s+vez|de\s+inmediato|inmediatamente|ya\s+mismo|ahora\s+mismo|ahorita\s+mismo|ahorita|enseguida|en\s+seguida|sin\s+falta|sin\s+problema|sin\s+lio|sin\s+mas|rapidito|rapido|todo\s+completo|completico|completito|completo|completa|enterito|entero|entera|todito|todo|toda|todos|todas|tal\s+cual|asi\s+como\s+esta|como\s+esta|con\s+toda|con\s+todo|nomas|pues|entonces)\b/g;
+function sinCortesiaDelSi(t: string): string {
+  let s = t.replace(INTERJECCION_ANTES_DEL_SI, '');
+  s = s.replace(TRATAMIENTOS, ' ').replace(/\s+/g, ' ').trim();
+  // El énfasis solo cuenta como cortesía si hay un «sí» o un verbo de seguir: «todo» solo no es un «sí».
+  if (/\b(?:si+|sip|claro|dale|hagale|adelante|de una)\b/.test(s) || s.split(' ').some(w => VERBO_DE_SEGUIR.test(w))) {
+    s = s.replace(ENFASIS_TRAS_EL_VERBO, ' ').replace(/\s+/g, ' ').trim();
+  }
+  return s;
 }
 
 /**

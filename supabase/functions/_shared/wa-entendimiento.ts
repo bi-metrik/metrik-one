@@ -18,7 +18,7 @@
 // ============================================================
 
 import { sendTextMessage } from './wa-respond.ts';
-import { anotarConsultaPendiente, anotarFoco, leerConversacion, viajeEnFoco } from './wa-foco.ts';
+import { anotarConsultaPendiente, anotarFoco, pedidosDeLaCarga, leerConversacion, viajeEnFoco } from './wa-foco.ts';
 import { enviarConBotones } from './wa-enviar-botones.ts';
 import { textoRedactado } from './wa-redaccion.ts';
 import type { PedidoRedaccion } from './wa-redaccion.ts';
@@ -438,7 +438,7 @@ async function cerrarConNegocio(
   });
   const ok = await enviar(ent.remitente_phone as string, await redactado(supabase, ent, { tipo: 'carga', fijo: [msg, extra.nota, ...avisosLlave].filter(Boolean).join('\n') }), ent.workspace_id as string);
   // El viaje que acaba de cargar queda en foco (con lo que pidió «me falta»): la respuesta a eso va directo a él.
-  await anotarFoco(supabase, ent.workspace_id as string, ent.remitente_phone as string, { negocio_id: r.negocioId, por: 'carga', faltan: h.minimo.faltan.length });
+  await anotarFoco(supabase, ent.workspace_id as string, ent.remitente_phone as string, { negocio_id: r.negocioId, por: 'carga', faltan: h.minimo.faltan.length, pedidos: pedidosDeLaCarga(h.minimo.faltan, cfg.fields) });
   await actualizar(supabase, ent.id as string, {
     estado: 'negocio_creado', contacto_id: contactoId, negocio_id: r.negocioId, huecos: h, confirmacion_pendiente: null,
     respuesta_enviada_at: ok ? new Date().toISOString() : null, error: ok ? null : 'envio fallido',
@@ -1812,7 +1812,7 @@ async function cargarEnNegocioExistente(
     avance: lineaAvance({ ...nombrado, fields: campos, valores: valoresQuedan }),
   });
   const ok = await enviar(ent.remitente_phone as string, await redactado(supabase, ent, { tipo: 'carga', fijo: msg }), workspaceId);
-  await anotarFoco(supabase, workspaceId, ent.remitente_phone as string, { negocio_id: negocioId, por: 'carga', faltan: h.minimo.faltan.length });
+  await anotarFoco(supabase, workspaceId, ent.remitente_phone as string, { negocio_id: negocioId, por: 'carga', faltan: h.minimo.faltan.length, pedidos: pedidosDeLaCarga(h.minimo.faltan, campos) });
   await actualizar(supabase, ent.id as string, {
     estado: 'negocio_actualizado', negocio_id: negocioId, destino: 'existente', negocio_destino_id: negocioId,
     contacto_id: (neg.contacto_id as string | null) ?? null, huecos: h, confirmacion_pendiente: null,

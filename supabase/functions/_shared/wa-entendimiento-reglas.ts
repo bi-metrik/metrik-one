@@ -1463,9 +1463,15 @@ const ANTES_DE_VIAJE_NUEVO: ReadonlySet<string> = new Set([
   'sigue', 'siguiente', 'tengo', 'te', 'paso', 'mando', 'me', 'hola', 'buenas', 'buenos', 'dias', 'tardes', 'noches', 'cliente', 'clienta', 'nuevo',
   'nueva', 'y', 'pero', 'mejor', 'solo', 'eso', 'esto', 'ojo', 'aqui', 'este', 'esta', 'les', 'le', 'nos', 'tenemos', 'ese', 'esa', 'mismo', 'misma',
   'antiguo', 'antigua', 'existente', 'conocido', 'conocida',
+  // Décimo control (hallazgo 10): la perífrasis de obligación o de pedido delante del verbo («debemos crear…», «tocaría
+  // abrir…», «puedes montar…»).
+  'debemos', 'debo', 'deberiamos', 'deberia', 'tocaria', 'tendriamos', 'tendria', 'necesitamos', 'puedes', 'podrias', 'puede', 'podria',
+  'podemos', 'favor', 'urgente',
 ]);
 /** «abre», «ábrele», «abrirle», «monta», «móntale», «crea», «créale», «arma», «ármale», «hazle»: abrir un viaje. */
 const VERBO_DE_ABRIR = /^(?:abr|mont|cre|arm|haz|hacer|hag)[a-z]*$/;
+/** «empecemos», «empieza», «arranquemos», «iniciemos»: con «uno» y a quién, un viaje nuevo (décimo control). */
+const VERBO_DE_EMPEZAR = /^(?:empez|empiez|empec|empiec|arranc|arranqu|inici|comenz|comienz|comenc)[a-z]*$/;
 /** Lo que va entre «nuevo viaje» y el nombre: «de», «para», «a nombre de», «del cliente», «se llama». */
 const ANTES_DEL_NOMBRE: ReadonlySet<string> = new Set(['a', 'de', 'del', 'para', 'nombre', 'sobre', 'el', 'la', 'cliente', 'clienta', 'se', 'llama', 'llamado', 'llamada', 'es', 'un', 'una',
   'senor', 'senora', 'sr', 'sra', 'don', 'dona']);
@@ -1494,6 +1500,14 @@ export function leerViajeNuevo(texto: string): LecturaNuevo | null | undefined {
     // abrir o montar con «un viaje» es un viaje nuevo, aunque no diga «nuevo».
     else if (VERBO_DE_ABRIR.test(a) && (b === 'un' || b === 'una') && OBJETO_VIAJE.has(n[k + 2] ?? '') && !NUEVO_ADJ.has(n[k + 3] ?? '')) {
       i = k + 1;
+      verbo = k;
+      dativo = /(?:le|les)$/.test(a);
+    }
+    // Décimo control (hallazgo 10): un verbo de abrir o de empezar con el pronombre «uno» y a quién («empecemos uno para
+    // Ana Ruiz», «ábrele uno a Ana Ruiz»): un viaje nuevo.
+    else if ((VERBO_DE_ABRIR.test(a) || VERBO_DE_EMPEZAR.test(a)) && (b === 'uno' || b === 'una') && ['para', 'a', 'de', 'del'].includes(n[k + 2] ?? '')) {
+      i = k + 1;
+      largo = 1;
       verbo = k;
       dativo = /(?:le|les)$/.test(a);
     }
