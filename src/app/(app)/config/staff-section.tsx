@@ -12,6 +12,7 @@ import { createStaffMember, updateStaffMember, deleteStaffMember, inviteStaffToP
 import { updateStaffAreas } from '@/lib/actions/equipo-areas'
 import { PhoneInput } from '@/components/phone-input'
 import { textoCupo } from '@/lib/usuarios-espacio/reglas'
+import { useIntencion } from '@/hooks/use-intencion'
 
 interface StaffSectionProps {
   initialData: Staff[]
@@ -73,6 +74,8 @@ const fmt = (v: number) =>
 
 export default function StaffSection({ initialData, licenseUsed, licenseMax, licenseAdminSinCostoId = null, currentUserRole, staffAreas = {}, negociosCount = {} }: StaffSectionProps) {
   const router = useRouter()
+  // Una clave por intención: un reintento de la misma acción no la ejecuta dos veces.
+  const intencion = useIntencion()
   const [staff, setStaff] = useState<Staff[]>(initialData)
   const [showForm, setShowForm] = useState(false)
   const [showDetails, setShowDetails] = useState(false)
@@ -177,7 +180,8 @@ export default function StaffSection({ initialData, licenseUsed, licenseMax, lic
       return
     }
     setSendingInvite(true)
-    const res = await inviteStaffToPlataform(staffId, inviteEmail)
+    const res = await inviteStaffToPlataform(staffId, inviteEmail, intencion.clave())
+    intencion.cerrar()
     if ('success' in res && res.success) {
       toast.success(`Magic link enviado a ${res.email}`)
       setInvitingId(null)

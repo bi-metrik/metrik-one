@@ -7,6 +7,7 @@ import { toast } from 'sonner'
 import { useRouter } from 'next/navigation'
 import EmitirPeriodoDialog from './emitir-periodo-dialog'
 import RegistrarPagoDialog, { type CobroDeCuentaUI } from './registrar-pago-dialog'
+import { useIntencion } from '@/hooks/use-intencion'
 
 const MESES_NOMBRES = [
   '', 'Enero', 'Febrero', 'Marzo', 'Abril', 'Mayo', 'Junio',
@@ -72,6 +73,8 @@ const ESTADO_POR_DEFECTO = 'enviada'
 
 export default function CobrosRecurrentesClient({ cuentas, cobros, role }: Props) {
   const [filtroEstado, setFiltroEstado] = useState<string>(ESTADO_POR_DEFECTO)
+  // Una clave por intención: un reintento de la misma acción no la ejecuta dos veces.
+  const intencion = useIntencion()
   const [filtroAnio, setFiltroAño] = useState<number>(new Date().getFullYear())
   const [aprobandoId, setAprobandoId] = useState<string | null>(null)
   const [reenviandoId, setReenviandoId] = useState<string | null>(null)
@@ -85,7 +88,8 @@ export default function CobrosRecurrentesClient({ cuentas, cobros, role }: Props
     if (!window.confirm(`Aprobar y enviar cuenta ${numero} a ${destLabel}?`)) return
     setAprobandoId(cuentaId)
     startTransition(async () => {
-      const res = await aprobarYEnviarCuentaCobro(cuentaId)
+      const res = await aprobarYEnviarCuentaCobro(cuentaId, intencion.clave())
+      intencion.cerrar()
       setAprobandoId(null)
       if (res.success) {
         toast.success(`Cuenta ${numero} aprobada y enviada`)
@@ -103,7 +107,8 @@ export default function CobrosRecurrentesClient({ cuentas, cobros, role }: Props
     if (!window.confirm(`Reenviar cuenta ${numero} a ${destLabel}?`)) return
     setReenviandoId(cuentaId)
     startTransition(async () => {
-      const res = await reenviarCuentaCobro(cuentaId)
+      const res = await reenviarCuentaCobro(cuentaId, intencion.clave())
+      intencion.cerrar()
       setReenviandoId(null)
       if (res.success) {
         toast.success(`Cuenta ${numero} reenviada`)

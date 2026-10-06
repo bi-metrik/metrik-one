@@ -83,6 +83,7 @@ import { AlmacenamientoExternoProvider } from '@/lib/almacenamiento/contexto'
 import { LecturasProvider } from '@/lib/negocios/lecturas-contexto'
 import { rutaRepositorioNegocio } from '@/lib/almacenamiento/referencia'
 import { corregirLecturaDudosa } from '@/lib/actions/lectura-dudosa-actions'
+import { useIntencion } from '@/hooks/use-intencion'
 
 // Cada bloque y cada modal baja en su propio chunk, solo si este negocio lo pinta.
 // Antes iban todos en un chunk de ~484 KB que bajaba entero para abrir cualquier ficha
@@ -841,6 +842,8 @@ function SelectorEtapa({
   puedeAvanzarCruces: boolean
 }) {
   const router = useRouter()
+  // Una clave por intención: un reintento de la misma acción no la ejecuta dos veces.
+  const intencion = useIntencion()
   // Avanzar escribe (mueve la etapa, avisa, cierra): si la respuesta se pierde, el caso pudo
   // moverse igual. Se relee la ficha; reintentar a ciegas lo intentaría mover otra vez.
   const [isPending, startTransition] = useTransitionTolerante({ releer: () => router.refresh() })
@@ -901,7 +904,8 @@ function SelectorEtapa({
   function handleAvanzar(confirmado = false) {
     if (!siguienteEtapa) return
     startTransition(async () => {
-      const result = await cambiarEtapaNegocioConGate(negocioId, siguienteEtapa.id, undefined, confirmado)
+      const result = await cambiarEtapaNegocioConGate(negocioId, siguienteEtapa.id, undefined, confirmado, intencion.clave())
+      intencion.cerrar()
       if (result.error === 'gate_bloqueado') {
         setErrorCarpeta(null)
         setGateModal({ etapaId: siguienteEtapa.id, bloques: result.bloquesPendientes ?? [], confirmado })
@@ -926,7 +930,8 @@ function SelectorEtapa({
   function handleOverride(etapaId: string, motivo: string) {
     setGateModal(null)
     startTransition(async () => {
-      const result = await cambiarEtapaNegocioConGate(negocioId, etapaId, motivo)
+      const result = await cambiarEtapaNegocioConGate(negocioId, etapaId, motivo, undefined, intencion.clave())
+      intencion.cerrar()
 
       // ⚠️ Hay gates que NO ceden al override (el aviso de recaudo cambiado). Sin esto,
       // el operador recibía el literal "Error: gate_bloqueado": frenaba sin decir por qué,
@@ -957,7 +962,8 @@ function SelectorEtapa({
         setErrorCarpeta(guardado.error)
         return
       }
-      const result = await cambiarEtapaNegocioConGate(negocioId, intento.etapaId, intento.motivo, intento.confirmado)
+      const result = await cambiarEtapaNegocioConGate(negocioId, intento.etapaId, intento.motivo, intento.confirmado, intencion.clave())
+      intencion.cerrar()
       if (result.error === 'gate_bloqueado') {
         setGateModal({ ...intento, bloques: result.bloquesPendientes ?? [] })
         return
@@ -994,7 +1000,8 @@ function SelectorEtapa({
         setErrorAvanceCruce(avance.error)
         return
       }
-      const result = await cambiarEtapaNegocioConGate(negocioId, intento.etapaId, intento.motivo, intento.confirmado)
+      const result = await cambiarEtapaNegocioConGate(negocioId, intento.etapaId, intento.motivo, intento.confirmado, intencion.clave())
+      intencion.cerrar()
       if (result.error === 'gate_bloqueado') {
         setGateModal({ ...intento, bloques: result.bloquesPendientes ?? [] })
         return

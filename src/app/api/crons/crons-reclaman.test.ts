@@ -59,6 +59,10 @@ function consulta(tabla: string) {
 vi.mock('@supabase/supabase-js', () => ({
   createClient: () => ({ from: (t: string) => consulta(t), rpc: async () => ({ data: null, error: null }) }),
 }))
+// El candado de crons (#1049) es la primera capa y aquí se apaga: esta prueba mide la segunda, el
+// reclamo del ítem, que es la que protege cuando el candado no está (migración ausente, base caída
+// al tomarlo, o `?forzar=1`). Con el candado puesto, el doble de `rpc` haría que ninguna corriera.
+vi.mock('@/lib/idempotencia/candado-cron', () => ({ candadoDeCron: async () => null }))
 vi.mock('@/lib/activity/registrar-actividad', () => ({
   registrarActividad: async (_s: unknown, fila: Fila) => {
     actividad.push(fila)

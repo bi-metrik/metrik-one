@@ -1,5 +1,7 @@
 'use server'
 
+import { accionIdempotente } from '@/lib/idempotencia/accion'
+import { MENSAJE_EN_CURSO } from '@/lib/idempotencia/clave'
 import { createClient, createServiceClient } from '@/lib/supabase/server'
 import { revalidatePath } from 'next/cache'
 import { getCachedUser } from '@/lib/supabase/auth-user'
@@ -166,7 +168,7 @@ export async function getLicenseInfo(): Promise<{ used: number; max: number; adm
 }
 
 /** Invite a staff member to the platform via Supabase magic link */
-export async function inviteStaffToPlataform(staffId: string, email: string) {
+async function inviteStaffToPlataformSinClave(staffId: string, email: string) {
   try {
     const supabase = await createClient()
     const { user } = await getCachedUser()
@@ -293,4 +295,16 @@ export async function inviteStaffToPlataform(staffId: string, email: string) {
   } catch (err) {
     return { error: err instanceof Error ? err.message : 'Error inesperado al invitar' }
   }
+}
+
+// ── Idempotencia por intención (brief del doble guardado, 2026-10-06) ──────────────────
+// Las acciones de abajo son la puerta pública; su cuerpo vive en `<nombre>SinClave`. Con la
+// clave del navegador (`useIntencion`), la misma intención repetida (POST que Chromium
+// reenvía, doble toque, «Reintentar» tras «No se confirmó») se ejecuta una sola vez.
+
+export async function inviteStaffToPlataform(staffId: string, email: string, intencion?: string) {
+  return accionIdempotente<Awaited<ReturnType<typeof inviteStaffToPlataformSinClave>>>(
+    { accion: 'inviteStaffToPlataform', clave: intencion, args: [staffId, email], enCurso: () => ({ error: MENSAJE_EN_CURSO }) },
+    () => inviteStaffToPlataformSinClave(staffId, email),
+  )
 }

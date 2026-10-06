@@ -12,6 +12,7 @@ import { getActivityLog, addComment, deleteActivity, type AreaMencionable } from
 import { etiquetasDeMencion } from '@/lib/activity/etiquetas-mencion'
 import { formatBogotaFechaCorta } from '@/lib/dates/bogota'
 import { resolverStatusContacto } from '@/lib/catalogos/constants'
+import { useIntencion } from '@/hooks/use-intencion'
 
 /**
  * Equipos etiquetables. Son las áreas que ya gobiernan permisos y routing en el
@@ -129,6 +130,8 @@ const showSystemPorDefecto = () => true
 
 export default function ActivityLog({ entidadTipo, entidadId, staffList, oportunidadId, entradasIniciales }: ActivityLogProps) {
   const [entries, setEntries] = useState<ActivityEntry[]>(entradasIniciales ?? [])
+  // Una clave por intención: un reintento de la misma acción no la ejecuta dos veces.
+  const intencion = useIntencion()
   const [loading, setLoading] = useState(entradasIniciales === undefined)
   const conIniciales = entradasIniciales !== undefined
   const [isPending, startTransition] = useTransitionTolerante()
@@ -200,7 +203,9 @@ export default function ActivityLog({ entidadTipo, entidadId, staffList, oportun
         null,
         linkUrl || null,
         { staffIds: mencionIds, areas: areasSel },
+        intencion.clave(),
       )
+      intencion.cerrar()
       if (res.success) {
         // Reload to get full entry with joins
         const data = await getActivityLog(entidadTipo, entidadId, oportunidadId)

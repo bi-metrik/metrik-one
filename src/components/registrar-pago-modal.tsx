@@ -20,6 +20,7 @@ import {
   motivoRechazoComprobante,
   nombreDeComprobantePegado,
 } from '@/lib/cobros/comprobante-pegado'
+import { useIntencion } from '@/hooks/use-intencion'
 
 const VERDE = 'var(--acento)'
 
@@ -52,6 +53,8 @@ export default function RegistrarPagoModal({
   negocioFijado?: NegocioFijadoPago
 }) {
   const [negocios, setNegocios] = useState<NegocioParaPagoFab[]>([])
+  // Una clave por intención: un reintento de la misma acción no la ejecuta dos veces.
+  const intencion = useIntencion()
   const [loadingNegocios, setLoadingNegocios] = useState(true)
   const [loadError, setLoadError] = useState<string | null>(null)
 
@@ -221,7 +224,8 @@ export default function RegistrarPagoModal({
         fecha: fecha || undefined,
         justificacion: needJust ? justificacion.trim() : undefined,
         soporte_subido: soporte ?? undefined,
-      })
+      }, intencion.clave())
+      intencion.cerrar()
       if (res.success) {
         toast.success('Pago registrado')
         // El pago YA quedó. Lo que sigue solo puede AGREGAR una oferta, nunca deshacerlo:
@@ -250,7 +254,8 @@ export default function RegistrarPagoModal({
     const etapaDestinoId = resultado?.etapaDestinoId
     if (!etapaDestinoId) return
     startTransition(async () => {
-      const res = await cambiarEtapaNegocioConGate(negocioId, etapaDestinoId, undefined, confirmado)
+      const res = await cambiarEtapaNegocioConGate(negocioId, etapaDestinoId, undefined, confirmado, intencion.clave())
+      intencion.cerrar()
 
       if (res.error === 'gate_bloqueado') {
         // Los gates que este panel no puede ver (saldo, handoff, campo, conciliación,
