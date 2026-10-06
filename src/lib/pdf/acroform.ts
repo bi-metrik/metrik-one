@@ -1,5 +1,5 @@
 import { PDFFont, PDFPage, rgb } from 'pdf-lib'
-import { textoParaPdf } from '@/lib/texto/caracteres-pdf'
+import { textoParaPdf } from '@/lib/texto/texto-latino'
 
 // Helpers compartidos para ESTAMPAR los formularios DIAN sobre el PDF oficial.
 //
@@ -20,7 +20,7 @@ export type Cell = { x: number; y: number; maxWidth?: number; size?: number }
  * Texto listo para Helvetica estándar (WinAnsi): el español pasa; los dobles cirílicos/griegos
  * que mete la IA (В por B) se convierten; lo que no se puede escribir (Л) lanza
  * `CaracterNoImprimibleError` con un mensaje para la persona, nunca el «WinAnsi cannot encode»
- * de pdf-lib (V0121, 2026-10-06). Ver `src/lib/texto/caracteres-pdf.ts`.
+ * de pdf-lib (V0121, 2026-10-06). Ver `src/lib/texto/texto-latino.ts`.
  */
 export function sanitize(v: string | null | undefined): string {
   if (v == null) return ''

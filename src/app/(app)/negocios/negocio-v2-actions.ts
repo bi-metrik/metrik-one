@@ -14,6 +14,7 @@ import {
   type ResultadoCrearNegocio,
 } from '@/lib/negocios/crear-negocio'
 import { esAlmacenamientoExterno } from '@/lib/almacenamiento/config'
+import { camposOficialesNoValidos, primerCampoOficialNoValido } from '@/lib/texto/texto-latino'
 import { faltaHonorarioConfirmado, type ConfigCobro } from '@/lib/negocios/honorario-confirmado'
 import { esSuperficieDeCapturaDeCobro } from '@/lib/negocios/superficie-cobro'
 import { esBloqueReactivado, reactivacionActiva } from '@/lib/negocios/bloque-reactivado'
@@ -2486,6 +2487,12 @@ export async function descartarInteraccion(
   return { success: true }
 }
 
+/** La etiqueta que la persona ve para un campo del bloque (para el mensaje de letras no válidas). */
+function etiquetaDeCampoBloque(configExtra: unknown): (campo: string) => string {
+  const campos = ((configExtra as { fields?: Array<{ slug?: string; label?: string }> } | null)?.fields ?? [])
+  return (campo) => campos.find(f => f.slug === campo)?.label ?? campo.replace(/_/g, ' ')
+}
+
 // ── Cambiar etapa del negocio ─────────────────────────────────────────────────
 
 export async function cambiarEtapaNegocio(
@@ -3322,6 +3329,30 @@ export async function cambiarEtapaNegocioConGate(
   // en un caso que NO se movió. Por eso la VALIDACIÓN se queda donde está y la
   // ESCRITURA se difiere hasta que el avance sea seguro.
   let aplicarOmisiones: (() => Promise<string | null>) | null = null
+
+  // Bloqueo de todo ONE (`texto-latino.ts`): un campo que va a un documento oficial con una
+  // letra que no se puede escribir (la IA leyó «МЕЛА» por «MEJIA») frena el avance, también con
+  // override: el formulario de la DIAN no saldría. El mensaje dice qué campo y qué letra.
+  {
+    const { data: filasLetras } = await db(supabase)
+      .from('negocio_bloques')
+      .select('data, bloque_configs(nombre)')
+      .eq('negocio_id', negocioId)
+    const malos = camposOficialesNoValidos(
+      ((filasLetras ?? []) as Array<{ data: unknown; bloque_configs: { nombre: string | null } | null }>)
+        .map(f => ({ bloque: f.bloque_configs?.nombre ?? null, data: f.data })),
+    )
+    if (malos.length > 0) {
+      return {
+        error: 'gate_bloqueado',
+        bloquesPendientes: malos.map(m => ({
+          nombre: `Corregir «${m.campo.replace(/_/g, ' ')}»${m.bloque ? ` en ${m.bloque}` : ''}: carácter no válido ${m.caracteres.map(c => `"${c}"`).join(', ')}`,
+          es_gate: true,
+          omitible: false,
+        })),
+      }
+    }
+  }
 
   // Verificar gates si no hay motivo de override
   if (!motivoOverride && negocio.etapa_actual_id) {
@@ -4494,6 +4525,12 @@ async function marcarBloqueCompletoSinMemo(
     workspaceId,
     modo: 'mezcla',
   })
+  // Un campo que va a un documento oficial no se guarda con letras que no se pueden escribir
+  // (bloqueo de todo ONE, `texto-latino.ts`). Solo lo que la persona acaba de mandar.
+  {
+    const malo = primerCampoOficialNoValido(mergedData, etiquetaDeCampoBloque(configExtraBloque), Object.keys(data))
+    if (malo) return { error: malo.mensaje }
+  }
   // Campos `suma_de` (ej. número de pasajeros = adultos + niños + infantes): el servidor
   // los vuelve a calcular sobre lo ya saneado. Lo que manda el navegador es UX. Ver `campo-suma.ts`.
   mergedData = aplicarSumas(configExtraBloque.fields as CampoConSuma[] | undefined, mergedData)
@@ -5261,6 +5298,13 @@ async function actualizarBloqueDataSinMemo(
       }),
     ),
   )
+
+  // Bloqueo de todo ONE (`texto-latino.ts`): un campo oficial con letras que no se pueden
+  // escribir no se guarda. Solo lo que la persona acaba de mandar.
+  {
+    const malo = primerCampoOficialNoValido(dataSaneada, etiquetaDeCampoBloque(ce), Object.keys(data))
+    if (malo) return { error: malo.mensaje }
+  }
 
   // ── Corrección post-avance ────────────────────────────────────────────────
   // Escribir en un bloque de una etapa YA SUPERADA no es trabajo de la etapa, es

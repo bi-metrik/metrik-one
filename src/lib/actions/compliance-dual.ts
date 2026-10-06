@@ -1,5 +1,6 @@
 'use server';
 
+import { textoLatinoProfundo } from '@/lib/texto/texto-latino'
 import { createServiceClient } from '@/lib/supabase/server';
 import { getWorkspace } from './get-workspace';
 import { exigirModulo, REQUISITO } from '@/lib/modulos/exigir-modulo';
@@ -1024,10 +1025,10 @@ export async function prepararLoteDual(
   if (!sheetName) return { ok: false, error: 'xlsx_sin_hojas' };
 
   const sheet = workbook.Sheets[sheetName];
-  const rows = XLSX.utils.sheet_to_json<Record<string, unknown>>(sheet, {
+  const rows = textoLatinoProfundo(XLSX.utils.sheet_to_json<Record<string, unknown>>(sheet, {
     defval: null,
     raw: false,
-  });
+  }));
 
   if (rows.length === 0) return { ok: false, error: 'xlsx_vacio' };
   if (rows.length > LOTE_LIMITE) {

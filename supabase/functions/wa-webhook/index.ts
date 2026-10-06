@@ -47,6 +47,7 @@ import { botEquipoPermitido, MENSAJE_BOT_SIN_CLARITY } from '../_shared/wa-modul
 import { atenderEnBandeja, rutaDelMensaje } from '../_shared/wa-bandeja.ts';
 import { identificarRemitente } from '../_shared/wa-identificar.ts';
 import { atenderEscrito } from '../_shared/wa-interprete.ts';
+import { aLetraLatina } from '../_shared/texto-latino.ts';
 import type { BotSession, HandlerContext, IncomingMessage, Intent, WaUser } from '../_shared/types.ts';
 import { OPERATOR_ALLOWED_INTENTS, CONTADOR_ALLOWED_INTENTS, READ_ONLY_ALLOWED_INTENTS } from '../_shared/types.ts';
 
@@ -481,6 +482,10 @@ async function processMessage(message: IncomingMessage): Promise<void> {
     await atenderDesconocido(supabase, message);
     return;
   }
+
+  // Bloqueo de todo ONE (`_shared/texto-latino.ts`): lo que el equipo escribe al bot (gastos,
+  // contactos, datos de negocios) entra con los dobles cirílicos/griegos ya latinos.
+  if (message.text) message.text = aLetraLatina(message.text);
 
   // 1a-aviso. Aviso de datos del bot (opt-in por workspace: `config_extra.aviso_datos_bot`, que llega en
   //     la misma lectura que identifica al remitente). Dueño, miembro o colaborador que no haya aceptado

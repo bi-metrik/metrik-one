@@ -42,6 +42,7 @@ import {
   type CandidatoContacto,
 } from '../_shared/meta-leads/dedup-lead.ts';
 import { verificarFirmaMeta } from '../_shared/wa-firma.ts';
+import { textoLatinoProfundo } from '../_shared/texto-latino.ts';
 
 const GRAPH_VERSION = 'v21.0';
 
@@ -458,7 +459,10 @@ async function handleLead(supabase: SupabaseClient, c: LeadgenChange): Promise<R
     console.error('[meta-leads] Graph API error:', JSON.stringify(lead.error));
     return { estado: 'error', motivo: `graph_api: ${JSON.stringify(lead.error).slice(0, 500)}`, workspaceId };
   }
-  const fieldData: Array<{ name: string; values: string[] }> = lead.field_data ?? [];
+  // Bloqueo de todo ONE (`_shared/texto-latino.ts`): un nombre escrito con letras cirílicas o
+  // griegas que se ven igual entra latino. Lo que no tiene doble queda tal cual (un webhook no se
+  // rechaza) y lo frena la generación del formulario con el campo a corregir.
+  const fieldData: Array<{ name: string; values: string[] }> = textoLatinoProfundo(lead.field_data ?? []);
   const getField = (names: string[]): string | null => {
     for (const n of names) {
       const f = fieldData.find((fd) => fd.name?.toLowerCase() === n.toLowerCase());

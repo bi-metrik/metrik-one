@@ -15,6 +15,7 @@
  * salir un borrador limpio.
  */
 
+import { textoParaPdf } from '@/lib/texto/texto-latino'
 import { PDFDocument, StandardFonts, degrees, rgb, type PDFFont } from 'pdf-lib'
 
 import { lineaDeMotivos, textoDeMarca, type MotivoDeBorrador } from '@/lib/cotizaciones/motivos-borrador'
@@ -95,7 +96,7 @@ function dibujarCentrado(
   // Origen = centro − R(ángulo)·(ancho/2, alto/2).
   const x = mx - (cos * ancho) / 2 + (sin * alto) / 2
   const y = my - (sin * ancho) / 2 - (cos * alto) / 2
-  pagina.drawText(texto, {
+  pagina.drawText(textoParaPdf(texto), {
     x,
     y,
     size: tamano,

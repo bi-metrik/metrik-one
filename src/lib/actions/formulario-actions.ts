@@ -16,7 +16,7 @@ import CartaAutorizacionPDF from '@/lib/pdf/carta-autorizacion-pdf'
 import RelacionFacturasPDF from '@/lib/pdf/relacion-facturas-pdf'
 import { getCasillasMeta, metaDeCasilla } from '@/lib/pdf/formulario-casillas'
 import { calcularDvNit } from '@/lib/dian/nit'
-import { CaracterNoImprimibleError, datosParaPdf } from '@/lib/texto/caracteres-pdf'
+import { CaracterNoImprimibleError, datosParaPdf } from '@/lib/texto/texto-latino'
 import { nitConDvPegadoEnFormulario, separarSondas, sondasDeIdentificacion } from '@/lib/dian/guarda-nit-formulario'
 import {
   identificacionConPrefijoEnFormulario,
@@ -661,7 +661,7 @@ export async function generarFormularioCore(
 
     // Letras que la IA mete al leer (В cirílica por B, V0121 2026-10-06): los dobles exactos
     // se convierten; lo que no se puede imprimir corta aquí con el campo a corregir, nunca con
-    // el «WinAnsi cannot encode» de pdf-lib. Ver `src/lib/texto/caracteres-pdf.ts`.
+    // el «WinAnsi cannot encode» de pdf-lib. Ver `src/lib/texto/texto-latino.ts`.
     const imprimibles = datosParaPdf(datosFinal, etiquetaCampoFormulario)
     if (!imprimibles.ok) {
       return { success: false, campos_usados: datosFinal, error: imprimibles.mensaje }

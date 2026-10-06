@@ -19,6 +19,7 @@
  * corre en memoria y lo que queda es el informe.
  */
 
+import { textoLatinoProfundo } from '@/lib/texto/texto-latino'
 import * as XLSX from 'xlsx';
 import { createServiceClient } from '@/lib/supabase/server';
 import { getWorkspace } from './get-workspace';
@@ -269,10 +270,10 @@ export async function auditarBaseDeCompras(
     : workbook.SheetNames[0];
   if (!sheetName) return { ok: false, error: 'xlsx_sin_hojas' };
 
-  const todasLasFilas = XLSX.utils.sheet_to_json<Record<string, unknown>>(
+  const todasLasFilas = textoLatinoProfundo(XLSX.utils.sheet_to_json<Record<string, unknown>>(
     workbook.Sheets[sheetName],
     { defval: null, raw: false },
-  );
+  ));
   if (todasLasFilas.length === 0) return { ok: false, error: 'xlsx_vacio' };
 
   const truncado = todasLasFilas.length > LIMITE_FILAS;

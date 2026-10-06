@@ -1,5 +1,6 @@
 'use server'
 
+import { aLetraLatina, primerCampoOficialNoValido } from '@/lib/texto/texto-latino'
 import { revalidatePath } from 'next/cache'
 import { cerrarNegocioSiQuedaResuelto } from '@/app/(app)/negocios/negocio-v2-actions'
 import { getWorkspace } from '@/lib/actions/get-workspace'
@@ -1417,6 +1418,15 @@ export async function actualizarCampoDocumento(
   // Validar que slug existe en camposExtraccion
   const slugValido = camposExtraccion.some(c => c.slug === slug)
   if (!slugValido) return { success: false, error: 'Campo no válido' }
+
+  // Bloqueo de todo ONE (`texto-latino.ts`): los dobles cirílicos/griegos se guardan latinos;
+  // un campo oficial con una letra que no se puede escribir no se guarda.
+  value = aLetraLatina(value)
+  {
+    const etiqueta = camposExtraccion.find(c => c.slug === slug)?.label ?? slug
+    const malo = primerCampoOficialNoValido({ [slug]: value }, () => etiqueta)
+    if (malo) return { success: false, error: malo.mensaje }
+  }
 
   // Guard de permiso: EL ÁREA MANDA, sin importar el rol (decisión de Mauricio,
   // 2026-07-29). `guardEditarBloque` resuelve área + stage + responsable y es la
