@@ -93,7 +93,7 @@
 - ⚠️ [Techo de 1.000 filas de PostgREST](project_techo_postgrest.md) — `traerTodo` para lecturas por lote
 - ⚠️ [Marcas de Siigo en SOENA](project_marcas_siigo_soena.md) — FV-2-244 con la cédula truncada NO se toca
 - [Ciudad de actividad y tasa en Revisar (Trappvel)](project_ciudad_actividad_nombre_tour.md) — regla ANGOSTA (Punta Cana es destino); tasa solo en el editor
-- ⚠️⚠️ [Cotización Trappvel (30 frentes)](indice_cotizacion_trappvel.md) — ranuras, tarifas, pasajeros, PDF del cliente, captura A/B
+- ⚠️⚠️ [Cotización Trappvel (31 frentes)](indice_cotizacion_trappvel.md) — ranuras, tarifas, pasajeros, PDF, captura A/B; bandeja caso Alejandra
 - ⚠️ [Montos de SOENA por parseMontoCop (#842)](project_soena_parse_monto_cop.md) — el regex viejo daba NaN con 2+ puntos; extractor cerrado en #843
 - ⚠️⚠️ [Trappvel: las tres reglas del 15](project_trappvel_reglas_reunion_15.md) — las tres INERTES sin config
 - ⚠️⚠️ [IVA sobre el ingreso propio (Trappvel)](project_iva_ingreso_propio.md) — config viva infla el total hasta el PR de iva_incluido + su SQL

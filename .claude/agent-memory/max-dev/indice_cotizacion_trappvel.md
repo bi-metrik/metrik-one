@@ -38,3 +38,4 @@ Memorias del motor de cotización y el documento del cliente de Trappvel (sacada
 - ⚠️ [Actividad por pantallazo, infante gratis](project_actividad_infante_gratis.md) — solo sin niños; la casilla tragaba excepciones; pegar sin foco cae en la bandeja
 - ⚠️⚠️ [Limpieza antes de presentar (2026-10-05)](project_limpieza_presentar_trappvel.md) — mergeado #1023 (95d3da8c); actividad en 3 estados sin columna; el día ya no es interruptor; COT-0018 −1 peso
 - ⚠️ [Actividades tras la limpieza (2026-10-05)](project_actividades_tras_limpieza.md) — actividad siempre abre bloque; Opcional guarda el día; los avisos de la lectura NUNCA se limpian y frenan el bloque
+- ⚠️ [Retroceso de la bandeja: caso Alejandra (2026-10-05)](project_bandeja_retroceso_alejandra.md) — envíos que NUNCA llegaron a Vercel; reintento + idempotencia + registro; prueba fija con Gemini grabado

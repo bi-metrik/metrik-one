@@ -248,3 +248,9 @@
   ficha) y no tiene a quién entregarle un `revalidatePath`: la pantalla refresca sola. Dentro de
   `after()` lanzado desde una server action `cookies()` SÍ funciona (Next lo permite si el padre es
   `action`); desde un render, no.
+- **Una petición que no llegó a Vercel no deja rastro en ningún log de Vercel.** `vercel logs` y
+  `function_invocation` solo ven lo que entró; para saber si un `fetch` del navegador llegó, contar en
+  `vercel metrics vercel.request.count` (el borde, antes del firewall) filtrando por `request_path`, y
+  `vercel.firewall_action.count` para descartar un bloqueo. El caso Alejandra (2026-10-05) se cerró así:
+  sus 4 envíos fallidos no estaban ni como error. Lo que el navegador no logró mandar lo cuenta él
+  después por `/api/errores-cliente` (`origen: 'bandeja'` en la bandeja de Trappvel).
