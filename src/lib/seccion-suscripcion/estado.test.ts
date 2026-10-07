@@ -46,7 +46,7 @@ const pendiente = (fechaVencimiento: string, concepto: string | null = null): Pr
 const APROBADA = { estado: 'aprobada' as const }
 const AL_DIA = { estado: 'al_dia' as const }
 
-describe('los cinco estados', () => {
+describe('los estados', () => {
   it('términos pendientes con plazo: ámbar, con la fecha', () => {
     const r = resumenEstado({
       terminos: { estado: 'pendiente', plazoHasta: '2026-09-30', enPlazo: true },
@@ -80,11 +80,35 @@ describe('los cinco estados', () => {
     const r = resumenEstado({
       terminos: APROBADA,
       pago: pendiente('2026-09-30', 'Licencia VALIDA · Starter — periodo del 23/09/2026 al 22/10/2026'),
-      mora: { estado: 'en_mora', vencio: '2026-09-30', corteDesde: '2026-10-31' },
+      mora: { estado: 'en_mora', vencio: '2026-09-30', restringeDesde: null, corteDesde: '2026-10-31' },
       hoy: '2026-10-05',
     })
     expect(r).toMatchObject({ estado: 'en_mora', tono: 'ambar_fuerte' })
     expect(r.mensaje).toBe('Tu cuota del 23-sep al 22-oct está vencida. Paga antes del 31-oct para evitar la pausa del servicio.')
+  })
+
+  it('en aviso de mora desde la v1.4: la fecha de la restricción', () => {
+    const r = resumenEstado({
+      terminos: APROBADA,
+      pago: pendiente('2026-11-10'),
+      mora: { estado: 'en_mora', vencio: '2026-11-10', restringeDesde: '2026-11-16', corteDesde: '2026-12-11' },
+      hoy: '2026-11-12',
+    })
+    expect(r).toMatchObject({ estado: 'en_mora', tono: 'ambar_fuerte' })
+    expect(r.mensaje).toBe('Tu cuota del 10-nov está vencida. Paga antes del 16-nov para seguir haciendo consultas nuevas.')
+  })
+
+  it('restringido: más de 5 días, rojo, sin montos y con la fecha de la pausa', () => {
+    const r = resumenEstado({
+      terminos: APROBADA,
+      pago: pendiente('2026-11-10'),
+      mora: { estado: 'restringido', vencio: '2026-11-10', restringeDesde: '2026-11-16', corteDesde: '2026-12-11' },
+      hoy: '2026-11-20',
+    })
+    expect(r).toMatchObject({ estado: 'restringido', tono: 'rojo', chip: 'Consultas restringidas' })
+    expect(r.mensaje).toContain('11-dic')
+    expect(r.mensaje).not.toMatch(/\$/)
+    expect(franjaValida(r, pendiente('2026-11-10'))).toBe('Tienes una cuota vencida')
   })
 
   it('pausado: más de 30 días', () => {
@@ -98,15 +122,16 @@ describe('los cinco estados', () => {
     expect(r.mensaje).not.toMatch(/!|¡|urgente/i)
   })
 
-  it('la licencia de ONE no se pausa: vencida es vencida, sin prometer ni amenazar con una pausa', () => {
+  it('la licencia de ONE no se restringe ni se pausa: vencida es vencida, sin prometer ni amenazar', () => {
     for (const mora of [
-      { estado: 'en_mora' as const, vencio: '2026-10-05', corteDesde: '2026-11-05' },
+      { estado: 'en_mora' as const, vencio: '2026-10-05', restringeDesde: null, corteDesde: '2026-11-05' },
+      { estado: 'restringido' as const, vencio: '2026-10-05', restringeDesde: '2026-11-05', corteDesde: '2026-11-05' },
       { estado: 'suspendido' as const, vencio: '2026-10-05', corteDesde: '2026-11-05' },
     ]) {
       const r = resumenEstado({ terminos: APROBADA, pago: pendiente('2026-10-05'), mora, hoy: '2026-11-10', producto: 'one' })
       expect(r).toMatchObject({ estado: 'en_mora', tono: 'ambar_fuerte', chip: 'Cuota vencida' })
       expect(r.mensaje).toBe('Tu cuota del 5-oct está vencida.')
-      expect(r.mensaje).not.toMatch(/pausa|Valida/i)
+      expect(r.mensaje).not.toMatch(/pausa|Valida|consultas/i)
     }
   })
 

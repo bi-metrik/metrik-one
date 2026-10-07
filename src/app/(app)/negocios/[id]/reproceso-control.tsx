@@ -26,6 +26,7 @@ import { RotateCcw, AlertTriangle, X } from 'lucide-react'
 import { toast } from 'sonner'
 import { reprocesarNegocio, cerrarReproceso, registrarErrorSinDevolver } from '@/lib/actions/reproceso-actions'
 import type { TipoReproceso, CausaReproceso } from '@/lib/negocios/atribucion-reproceso'
+import { etiquetaMotivo, motivoDelTipo, motivosDelTipo } from '@/lib/negocios/motivos-reproceso'
 
 const GERENCIAL = ['owner', 'admin', 'supervisor']
 
@@ -34,6 +35,7 @@ export type ReprocesoVista = {
   tipo?: string
   ciclo?: number
   causa?: string
+  motivo?: string | null
   detalle?: string
   etapa_retorno?: string | null
   abierto_por_nombre?: string | null
@@ -81,6 +83,7 @@ export function ReprocesoBanner({
           </p>
           <p className="mt-0.5 text-xs text-muted-foreground">
             {reproceso.etapa_retorno ? `El caso volvió a ${reproceso.etapa_retorno}. ` : ''}
+            {etiquetaMotivo(reproceso.tipo, reproceso.motivo) ? `Motivo: ${etiquetaMotivo(reproceso.tipo, reproceso.motivo)}. ` : ''}
             {reproceso.causa === 'error_propio' ? 'Causa: error propio.' : 'Causa: criterio del tercero.'}
             {reproceso.abierto_por_nombre ? ` Abierto por ${reproceso.abierto_por_nombre}.` : ''}
           </p>
@@ -223,14 +226,24 @@ export function ReprocesoBoton({
   negocioId,
   reprocesoAbierto,
   userRole,
+  tiposOperativo = [],
 }: {
   negocioId: string
   /** El ciclo vigente, si hay uno abierto. Ya NO esconde el botón: lo explica. */
   reprocesoAbierto: ReprocesoVista | null
   userRole: string
+  /**
+   * Tipos que la etapa actual le abre al operativo del caso (`reproceso_operativo`), ya
+   * filtrados por quien mira: vacío si no es responsable. SOE-001. El servidor vuelve a
+   * comprobar el puesto; esto solo decide si se dibuja el botón.
+   */
+  tiposOperativo?: TipoReproceso[]
 }) {
+  const esGerencial = GERENCIAL.includes(userRole)
+  const tiposPermitidos: TipoReproceso[] = esGerencial ? ['devolucion_dian', 'certificacion_upme'] : tiposOperativo
   const [abierto, setAbierto] = useState(false)
-  const [tipo, setTipo] = useState<TipoReproceso>('devolucion_dian')
+  const [tipo, setTipo] = useState<TipoReproceso>(tiposPermitidos[0] ?? 'devolucion_dian')
+  const [motivo, setMotivo] = useState('')
   const [causa, setCausa] = useState<CausaReproceso>('criterio_tercero')
   const [detalle, setDetalle] = useState('')
   const [sinRetorno, setSinRetorno] = useState<{ etapaActual: string; etapaRetorno: string } | null>(null)
@@ -250,7 +263,17 @@ export function ReprocesoBoton({
   // nadie cerraba (medido 2026-09-18), eso alcanzaba a casi todos los que ya habían tenido
   // uno. Fue el síntoma que abrió este frente (V0388). En vez de esconderlo, el modal
   // explica qué ciclo está abierto y que confirmar lo cierra.
-  if (!GERENCIAL.includes(userRole)) return null
+  //
+  // SOE-001: el operativo del caso también lo ve, solo en las etapas que se lo abren.
+  if (tiposPermitidos.length === 0) return null
+
+  // El motivo sugiere la causa; dirección y supervisión la pueden cambiar, el operativo no.
+  const motivoElegido = motivoDelTipo(tipo, motivo)
+  const elegirMotivo = (valor: string) => {
+    setMotivo(valor)
+    const m = motivoDelTipo(tipo, valor)
+    if (m) setCausa(m.causa)
+  }
 
   return (
     <>
@@ -291,7 +314,7 @@ export function ReprocesoBoton({
                 onVolver={() => setSinRetorno(null)}
                 onConfirmar={() =>
                   startTransition(async () => {
-                    const r = await registrarErrorSinDevolver(negocioId, { tipo, causa, detalle })
+                    const r = await registrarErrorSinDevolver(negocioId, { tipo, causa, motivo, detalle })
                     if (r.ok) {
                       toast.success(`Error registrado. El caso sigue en ${sinRetorno.etapaActual}.`)
                       cerrar()
@@ -315,25 +338,52 @@ export function ReprocesoBoton({
             <label className="mb-1 block text-xs font-medium">¿Qué hay que rehacer?</label>
             <select
               value={tipo}
-              onChange={e => setTipo(e.target.value as TipoReproceso)}
+              onChange={e => { setTipo(e.target.value as TipoReproceso); setMotivo('') }}
               className="mb-3 w-full rounded-md border border-border bg-background px-2 py-1.5 text-xs"
             >
-              <option value="devolucion_dian">Devolución DIAN — la DIAN rechazó la solicitud</option>
-              <option value="certificacion_upme">Certificación UPME — el certificado salió malo</option>
+              {tiposPermitidos.includes('devolucion_dian') && (
+                <option value="devolucion_dian">Devolución DIAN — la DIAN rechazó la solicitud</option>
+              )}
+              {tiposPermitidos.includes('certificacion_upme') && (
+                <option value="certificacion_upme">Certificación UPME — el certificado salió malo</option>
+              )}
+            </select>
+
+            <label className="mb-1 block text-xs font-medium">Motivo</label>
+            <select
+              value={motivo}
+              onChange={e => elegirMotivo(e.target.value)}
+              className="mb-3 w-full rounded-md border border-border bg-background px-2 py-1.5 text-xs"
+            >
+              <option value="" disabled>Elige el motivo…</option>
+              {motivosDelTipo(tipo).map(m => (
+                <option key={m.value} value={m.value}>{m.label}</option>
+              ))}
             </select>
 
             <label className="mb-1 block text-xs font-medium">¿De quién fue la causa?</label>
-            <select
-              value={causa}
-              onChange={e => setCausa(e.target.value as CausaReproceso)}
-              className="mb-1 w-full rounded-md border border-border bg-background px-2 py-1.5 text-xs"
-            >
-              <option value="criterio_tercero">Criterio del funcionario — no cuenta como falla nuestra</option>
-              <option value="error_propio">Error propio — cuenta en el indicador de calidad</option>
-            </select>
+            {esGerencial ? (
+              <select
+                value={causa}
+                onChange={e => setCausa(e.target.value as CausaReproceso)}
+                className="mb-1 w-full rounded-md border border-border bg-background px-2 py-1.5 text-xs"
+              >
+                <option value="criterio_tercero">Criterio del funcionario — no cuenta como falla nuestra</option>
+                <option value="error_propio">Error propio — cuenta en el indicador de calidad</option>
+              </select>
+            ) : (
+              <p className="mb-1 rounded-md border border-border bg-muted/40 px-2 py-1.5 text-xs">
+                {!motivoElegido
+                  ? 'La define el motivo.'
+                  : motivoElegido.causa === 'error_propio'
+                    ? 'Error propio — cuenta en el indicador de calidad.'
+                    : 'Criterio del tercero — no cuenta como falla nuestra.'}
+              </p>
+            )}
             <p className="mb-3 text-[10px] text-muted-foreground">
-              Este dato alimenta el indicador de calidad del mes. Si la devolución fue porque el
-              funcionario interpretó distinto el procedimiento, no penaliza.
+              {esGerencial
+                ? 'Este dato alimenta el indicador de calidad del mes. Si la devolución fue porque el funcionario interpretó distinto el procedimiento, no penaliza.'
+                : 'La causa sale del motivo que elijas: si ninguno describe lo que pasó, elige «Otro» y cuéntalo abajo.'}
             </p>
 
             <label className="mb-1 block text-xs font-medium">¿Qué pasó?</label>
@@ -353,10 +403,10 @@ export function ReprocesoBoton({
                 Cancelar
               </button>
               <button
-                disabled={isPending || !detalle.trim()}
+                disabled={isPending || !detalle.trim() || !motivoElegido}
                 onClick={() =>
                   startTransition(async () => {
-                    const r = await reprocesarNegocio(negocioId, { tipo, causa, detalle })
+                    const r = await reprocesarNegocio(negocioId, { tipo, causa, motivo, detalle })
                     if (r.ok) {
                       toast.success(`Reproceso ${r.ciclo} abierto. El caso volvió a ${r.etapaNombre}.`)
                       // El retorno puede no ser el declarado (un caso sin cita vuelve a
@@ -364,8 +414,10 @@ export function ReprocesoBoton({
                       if (r.aviso) toast.warning(r.aviso, { duration: 10000 })
                       cerrar()
                       setDetalle('')
-                    } else if (r.antesDelRetorno) {
+                    } else if (r.antesDelRetorno && esGerencial) {
                       // Sin tramo que rehacer: se ofrece registrar el error sin mover el caso.
+                      // Solo a dirección y supervisión: registrar un error de calidad sin
+                      // devolver el caso no es parte de lo que se le abrió al operativo.
                       setSinRetorno(r.antesDelRetorno)
                     } else {
                       toast.error(r.error ?? 'No se pudo abrir el reproceso')

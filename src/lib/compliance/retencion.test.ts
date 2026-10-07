@@ -158,6 +158,12 @@ const CLASIFICACION: Record<string, Clasificacion> = {
       'la EDAD de corte de un infante en la solicitud de viaje («bebés menores de 2 años»): con ' +
       'ella el bot deduce infantes = 0. No hay plazo de conservación en este archivo.',
   },
+  'supabase/functions/_shared/agente/bandeja/reglamento-anexo-a.ts': {
+    tipo: 'no-es-plazo',
+    razon:
+      'el glosario del reglamento de prueba del núcleo conversacional define infante como «menor de 2 años»: ' +
+      'una EDAD de pasajero. No hay plazo de conservación en este archivo.',
+  },
   'src/lib/negocios/sugeridos.ts': {
     tipo: 'no-es-plazo',
     razon: 'ejemplo de la deducción que anota la marca de sugerido («ninguno … es menor de 2 años»): una edad.',

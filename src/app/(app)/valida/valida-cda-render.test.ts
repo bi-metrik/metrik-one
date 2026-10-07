@@ -22,9 +22,21 @@ vi.mock('sonner', () => ({ toast: { error: () => {}, success: () => {} } }))
 // Las acciones arrastran `server-only` y el cliente de Supabase; la pantalla solo necesita sus referencias.
 vi.mock('@/lib/valida-api/acciones', () => ({ aprobarEntradaValidaApi: async () => ({ ok: true, yaEstaba: false }) }))
 vi.mock('@/lib/valida-cda/acciones', () => ({ aprobarEntradaValidaCda: async () => ({ ok: true, yaEstaba: false }) }))
+vi.mock('@/lib/actions/valida-consultas', () => ({
+  consultarValida: async () => ({ ok: false, error: 'x' }),
+  descargarPlantillaValida: async () => ({ ok: false, error: 'x' }),
+  prepararLoteValida: async () => ({ ok: false, error: 'x' }),
+  descargarPDFConsultaValida: async () => ({ ok: false, error: 'x' }),
+  generarPDFLoteValida: async () => ({ ok: false, error: 'x' }),
+  listarConsultasValida: async () => ({ ok: true, consultas: [] }),
+  buscarNegociosParaValida: async () => ({ ok: true, negocios: [] }),
+}))
+vi.mock('@/components/tutorial/TutorialTour', () => ({ default: () => null }))
 
 const { TerminosCda } = await import('./terminos-cda')
-const { AvisoMora, AvisoPlazoTerminos, FranjaSuscripcion, PausaPorMora } = await import('./avisos-cda')
+const { AvisoMora, AvisoPlazoTerminos, AvisoRestriccion, ConsultasRestringidas, FranjaSuscripcion, PausaPorMora } =
+  await import('./avisos-cda')
+const { default: ValidaClient } = await import('./valida-client')
 const { PestanaTerminos } = await import('@/components/terminos/pestana-terminos')
 
 function texto(html: string): string {
@@ -141,12 +153,61 @@ describe('los avisos que ven todos (plazo y mora)', () => {
   it('la mora dice la fecha de corte y no dice montos', () => {
     const t = texto(
       renderToStaticMarkup(
-        React.createElement(AvisoMora, { mora: { estado: 'en_mora', vencio: '2026-09-30', corteDesde: '2026-10-31' } }),
+        React.createElement(AvisoMora, {
+          mora: { estado: 'en_mora', vencio: '2026-09-30', restringeDesde: null, corteDesde: '2026-10-31' },
+        }),
       ),
     )
     expect(t).toContain('vencido desde el 30-sep')
     expect(t).toContain('Valida se pausa desde el 31-oct')
     expect(t).not.toMatch(/\$/)
+  })
+
+  it('la mora desde la v1.4 dice la fecha de la restricción y que el histórico sigue abierto', () => {
+    const t = texto(
+      renderToStaticMarkup(
+        React.createElement(AvisoMora, {
+          mora: { estado: 'en_mora', vencio: '2026-11-10', restringeDesde: '2026-11-16', corteDesde: '2026-12-11' },
+        }),
+      ),
+    )
+    expect(t).toContain('desde el 16-nov no se podrán hacer consultas nuevas')
+    expect(t).toContain('los reportes ya generados seguirán disponibles')
+    expect(t).not.toMatch(/\$/)
+  })
+
+  it('la restricción dice desde cuándo, que los reportes siguen y manda a Suscripción a quien paga', () => {
+    const mora = { estado: 'restringido' as const, vencio: '2026-11-10', restringeDesde: '2026-11-16', corteDesde: '2026-12-11' }
+    const html = renderToStaticMarkup(React.createElement(AvisoRestriccion, { mora, vePagos: true }))
+    const t = texto(html)
+    expect(t).toContain('Las consultas nuevas están restringidas desde el 16-nov')
+    expect(t).toContain('Los reportes ya generados siguen disponibles')
+    expect(t).toContain('Valida se pausa desde el 11-dic')
+    expect(t).not.toMatch(/\$/)
+    expect(html).toContain('href="/suscripcion?tab=pagos"')
+    const otro = texto(renderToStaticMarkup(React.createElement(AvisoRestriccion, { mora, vePagos: false })))
+    expect(otro).toContain('La persona designada por tu empresa puede ver y pagar')
+  })
+
+  it('restringido: abre en el Historial, con las pestañas, y sin el formulario de consulta', () => {
+    const html = renderToStaticMarkup(
+      React.createElement(ValidaClient, {
+        historialInicial: [],
+        errorHistorial: null,
+        modoVitrina: true,
+        consultasRestringidas: React.createElement(ConsultasRestringidas),
+      }),
+    )
+    const t = texto(html)
+    expect(html).not.toMatch(/<form/)
+    expect(t).toContain('Historial')
+    expect(t).toContain('Consulta puntual')
+    expect(t).not.toContain('Las consultas nuevas están restringidas hasta que se registre el pago')
+    // CONTROL — sin la restricción, abre en la consulta puntual.
+    const libre = renderToStaticMarkup(
+      React.createElement(ValidaClient, { historialInicial: [], errorHistorial: null, modoVitrina: true }),
+    )
+    expect(libre).toMatch(/<form/)
   })
 
   it('la pausa manda a Suscripción a quien puede pagar', () => {

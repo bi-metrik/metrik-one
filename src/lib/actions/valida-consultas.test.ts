@@ -101,11 +101,18 @@ vi.mock('@/lib/modulos/exigir-modulo', async () =>
 // La puerta de términos de los CDA (`valida-cda/puerta.ts`). Su lógica se prueba aparte; aquí se fija
 // que TODA acción del módulo la consulta y que su «no» corta antes de la red y de la base.
 const puertaTerminos: { resultado: { ok: true } | { ok: false; error: string } } = { resultado: { ok: true } }
+// La restricción de las consultas nuevas por mora (cláusula 11.1 v1.4): solo la pregunta
+// `validaCdaPermiteConsultar`, que además exige lo de `validaCdaPermiteOperar`.
+const puertaConsulta: { resultado: { ok: true } | { ok: false; error: string } } = { resultado: { ok: true } }
 const consultasPuerta = vi.fn()
 vi.mock('@/lib/valida-cda/puerta', () => ({
   validaCdaPermiteOperar: async () => {
     consultasPuerta()
     return puertaTerminos.resultado
+  },
+  validaCdaPermiteConsultar: async () => {
+    consultasPuerta()
+    return puertaTerminos.resultado.ok ? puertaConsulta.resultado : puertaTerminos.resultado
   },
 }))
 
@@ -204,6 +211,7 @@ beforeEach(() => {
   llave.delWorkspace = 'llave-de-prueba'
   process.env.VALIDA_API_KEY = 'llave-global-de-metrik'
   puertaTerminos.resultado = { ok: true }
+  puertaConsulta.resultado = { ok: true }
   consultasPuerta.mockClear()
 })
 
@@ -239,6 +247,39 @@ describe('un CDA con los términos sin aceptar no opera Valida (2026-09-23)', ()
     reiniciarModulo('ws-1', { ...MODULES.cuatroDSoft })
     expect(await consultarValida(PERSONA)).toEqual({ ok: false, error: 'modulo_no_activo' })
     expect(consultasPuerta).not.toHaveBeenCalled()
+  })
+})
+
+describe('consultas restringidas por mora: el histórico sigue abierto (cláusula 11.1 v1.4)', () => {
+  const RESTRINGIDO = {
+    ok: false as const,
+    error: 'Las consultas nuevas están restringidas desde el 16-nov por un pago de la suscripción vencido desde el 10-nov.',
+  }
+  beforeEach(() => {
+    reiniciarModulo('ws-1', { ...MODULES.cda })
+    puertaConsulta.resultado = RESTRINGIDO
+  })
+
+  it('la consulta individual y la masiva se niegan antes de llegar a Valida o a la base', async () => {
+    expect(await consultarValida(PERSONA)).toEqual(RESTRINGIDO)
+    expect(await prepararLoteValida(loteSinCodigo())).toEqual(RESTRINGIDO)
+    expect(fetchValida).not.toHaveBeenCalled()
+    expect(inserts).toHaveLength(0)
+  })
+
+  it('listar el historial, descargar un reporte, el PDF del lote y buscar negocios siguen abiertos', async () => {
+    expect((await listarConsultasValida()).ok).toBe(true)
+    expect(await descargarPDFConsultaValida('val-1')).not.toEqual(RESTRINGIDO)
+    expect(await generarPDFLoteValida('lote-1')).not.toEqual(RESTRINGIDO)
+    expect((await buscarNegociosParaValida('P')).ok).toBe(true)
+    // Las cuatro preguntaron a la puerta (la de operar), no se la saltaron.
+    expect(consultasPuerta).toHaveBeenCalledTimes(4)
+  })
+
+  it('CONTROL — al registrarse el pago, la siguiente consulta pasa', async () => {
+    puertaConsulta.resultado = { ok: true }
+    expect((await consultarValida(PERSONA)).ok).toBe(true)
+    expect(fetchValida).toHaveBeenCalledTimes(1)
   })
 })
 

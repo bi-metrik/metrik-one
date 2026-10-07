@@ -5,7 +5,7 @@ import { createServiceClient } from '@/lib/supabase/server';
 import { leerSecretosWorkspace, secretoConRespaldo } from '@/lib/secretos/workspace';
 import { resolverNombresUsuarios } from './_usuarios';
 import { exigirModulo, REQUISITO } from '@/lib/modulos/exigir-modulo';
-import { validaCdaPermiteOperar } from '@/lib/valida-cda/puerta';
+import { validaCdaPermiteConsultar, validaCdaPermiteOperar } from '@/lib/valida-cda/puerta';
 import * as XLSX from 'xlsx';
 import { getCachedUser } from '@/lib/supabase/auth-user'
 
@@ -108,14 +108,18 @@ export type FilaLotePreparada = {
  * negocio de un workspace que lo tenga). La sesión no basta: un workspace sin el módulo
  * (4D SOFT, con solo `valida_api`) no consulta, no lista ni descarga reportes aquí.
  */
-async function accesoValida(): Promise<{ ok: true; workspaceId: string } | { ok: false; error: string }> {
+async function accesoValida(
+  opts: { consultaNueva?: boolean } = {},
+): Promise<{ ok: true; workspaceId: string } | { ok: false; error: string }> {
   const r = await exigirModulo(REQUISITO.validaConsulta);
   if (!r.ok) return { ok: false, error: r.error === 'no_autenticado' ? 'workspace_no_encontrado' : r.error };
   // Los CDA con contrato directo con METRIK IA S.A.S. no operan hasta que la persona designada
   // acepte sus términos (cláusula 16.3), salvo dentro del plazo para aceptar, ni con más de 30 días
-  // de mora (cláusula 11.1). Un espacio sin contrato de Valida (AFI, metrik) pasa igual que antes:
-  // la puerta no le aplica. Ver `src/lib/valida-cda/puerta.ts`.
-  const puerta = await validaCdaPermiteOperar();
+  // de mora (cláusula 11.3). Desde el 2026-11-05, con más de 5 días de mora no hacen CONSULTAS
+  // NUEVAS (`consultaNueva`), pero listan y descargan lo ya generado (cláusula 11.1, v1.4). Un
+  // espacio sin contrato de Valida (AFI, metrik) pasa igual que antes: la puerta no le aplica. Ver
+  // `src/lib/valida-cda/puerta.ts`.
+  const puerta = opts.consultaNueva ? await validaCdaPermiteConsultar() : await validaCdaPermiteOperar();
   if (!puerta.ok) return puerta;
   return r;
 }
@@ -309,7 +313,7 @@ export async function consultarValida(
   | { ok: true; data: ValidaResultado; consulta_local_id: string }
   | { ok: false; error: string }
 > {
-  const acceso = await accesoValida();
+  const acceso = await accesoValida({ consultaNueva: true });
   if (!acceso.ok) return acceso;
   const workspaceId = acceso.workspaceId;
 
@@ -440,7 +444,7 @@ export async function prepararLoteValida(
   | { ok: true; data: { lote_id: string; total: number; filas: FilaLotePreparada[] } }
   | { ok: false; error: string }
 > {
-  const acceso = await accesoValida();
+  const acceso = await accesoValida({ consultaNueva: true });
   if (!acceso.ok) return acceso;
   const workspaceId = acceso.workspaceId;
 

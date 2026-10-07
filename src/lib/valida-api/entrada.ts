@@ -40,7 +40,14 @@
 import { POLITICA_DATOS_VALIDA, requiereAceptacion } from './politica'
 import { PRODUCTOS_ENTRADA, type ProductoEntrada } from './producto'
 import type { DocumentoContractual } from './resultados'
-import { estadoTerminos, puedeAceptarTerminos, vigentesConAceptacion, type RazonNoAcepta } from './terminos'
+import {
+  cubiertaPorAviso,
+  estadoTerminos,
+  modificacionesPorAceptar,
+  puedeAceptarTerminos,
+  vigentesConAceptacion,
+  type RazonNoAcepta,
+} from './terminos'
 
 /** Una fila de `documentos_aceptaciones_usuario` del usuario, tal como la lee el servidor. */
 export interface AceptacionUsuarioRegistrada {
@@ -120,16 +127,21 @@ export function evaluarEntrada(p: {
   if (p.documentos === null || p.aceptacionesUsuario === null) return { estado: 'no_disponible' }
   const producto = PRODUCTOS_ENTRADA[p.producto ?? 'valida_api']
 
-  const contrato = estadoTerminos(p.documentos, p.hoy)
+  const todos = p.documentos
+  const contrato = estadoTerminos(todos, p.hoy)
   if (contrato.estado === 'sin_documentos') return { estado: 'sin_documentos' }
 
   const filas = p.aceptacionesUsuario
   const politicaAceptada = !requiereAceptacion(filas.filter((f) => f.documento_slug === POLITICA_DATOS_VALIDA.slug))
-  const documentos = vigentesConAceptacion(p.documentos, p.hoy).map(({ doc, aceptado }) => ({
-    doc,
-    contratoAceptado: aceptado,
-    leidoPorUsuario: usuarioLeyoDocumento(doc, filas),
-  }))
+  // Una modificación por aviso cubierta por lo ya aceptado no entra a la entrada: rige sin firma y no
+  // aceptarla nunca cierra el módulo (cláusula 13.1). Se ofrece aparte (`evaluarModificacionPorAviso`).
+  const documentos = vigentesConAceptacion(todos, p.hoy)
+    .filter(({ doc, aceptado }) => aceptado || !cubiertaPorAviso(doc, todos))
+    .map(({ doc, aceptado }) => ({
+      doc,
+      contratoAceptado: aceptado,
+      leidoPorUsuario: usuarioLeyoDocumento(doc, filas),
+    }))
   const contratoPendiente = contrato.estado === 'pendientes' ? contrato.pendientes : []
 
   const usuarioAlDia = politicaAceptada && documentos.every((d) => d.leidoPorUsuario)
@@ -157,6 +169,45 @@ export function evaluarEntrada(p: {
     designadoNombre: p.designacion?.designadoNombre ?? null,
     // Un conflicto solo impide completar la aprobación PROPIA del usuario. Donde esa aprobación no
     // se exige (los CDA), no puede frenar la firma del contrato: el upsert la omite sin error.
+    conflictos: producto.exigeAprobacionPorUsuario
+      ? documentos.filter((d) => !d.leidoPorUsuario && enConflicto(d.doc, filas)).map((d) => d.doc)
+      : [],
+  }
+}
+
+/**
+ * La aceptación VOLUNTARIA de una modificación por aviso (cláusula 13.1), con el mismo mecanismo y la
+ * misma constancia que la entrada: un estado `pendiente` cuyos documentos son solo las modificaciones
+ * publicadas que el contrato no aceptó (`modificacionesPorAceptar`). Lo consume la misma pantalla
+ * (`EntradaTerminos`) y la misma acción (`registrarAprobacionEntrada`).
+ *
+ * `null` = no hay modificación que ofrecer. Solo tiene sentido con la entrada ya `aprobada`: es lo que
+ * garantiza que esto nunca cierra nada (la puerta no lo mira para dejar operar).
+ */
+export function evaluarModificacionPorAviso(p: Parameters<typeof evaluarEntrada>[0]): EstadoEntrada | null {
+  if (p.documentos === null || p.aceptacionesUsuario === null) return { estado: 'no_disponible' }
+  const modificaciones = modificacionesPorAceptar(p.documentos, p.hoy)
+  if (modificaciones.length === 0) return null
+  const producto = PRODUCTOS_ENTRADA[p.producto ?? 'valida_api']
+  const filas = p.aceptacionesUsuario
+  // Sin el perfil real no se puede decidir quién firma: no se adivina.
+  if (!p.perfil) return { estado: 'no_disponible' }
+  const documentos = modificaciones.map((doc) => ({
+    doc,
+    contratoAceptado: false,
+    leidoPorUsuario: usuarioLeyoDocumento(doc, filas),
+  }))
+  return {
+    estado: 'pendiente',
+    documentos,
+    politicaAceptada: !requiereAceptacion(filas.filter((f) => f.documento_slug === POLITICA_DATOS_VALIDA.slug)),
+    contratoPendiente: modificaciones,
+    aceptante: puedeAceptarTerminos(p.perfil, p.workspaceId, {
+      designadoId: p.designacion?.designadoId ?? null,
+      exigida: producto.exigeDesignado,
+      usuarioId: p.usuarioId ?? null,
+    }),
+    designadoNombre: p.designacion?.designadoNombre ?? null,
     conflictos: producto.exigeAprobacionPorUsuario
       ? documentos.filter((d) => !d.leidoPorUsuario && enConflicto(d.doc, filas)).map((d) => d.doc)
       : [],

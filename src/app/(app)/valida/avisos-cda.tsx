@@ -1,17 +1,24 @@
 import Link from 'next/link'
-import { AlertTriangle, CalendarClock, PauseCircle } from 'lucide-react'
+import { AlertTriangle, Ban, CalendarClock, FileText, PauseCircle } from 'lucide-react'
 import {
   mensajeSuspendidoPorMora,
   textoAvisoMora,
+  textoAvisoRestriccion,
   textoAvisoPlazo,
   type EstadoMora,
 } from '@/lib/valida-cda/plazos'
+import {
+  rutaPdfTerminos,
+  textoQuienAceptaModificacion,
+  textosAvisoModificacion,
+} from '@/lib/valida-cda/modificacion-terminos'
+import type { DocumentoContractual } from '@/lib/valida-api/resultados'
 
 /**
- * Los avisos de `/valida` de un CDA. La pausa por mora (sin montos) y el plazo de los términos los
- * ven TODOS los usuarios del espacio (el plazo, para que quien no es la persona designada le pida
- * aceptar a tiempo); la mora dentro de los 30 días y la franja de una línea que lleva a Suscripción,
- * solo la persona designada del contrato (`puedeVerSuscripcion`), que es quien la maneja.
+ * Los avisos de `/valida` de un CDA. El aviso de mora con la fecha de la restricción (cláusula 11.2),
+ * la restricción de las consultas nuevas (11.1), la pausa (11.3) y el plazo de los términos los ven
+ * TODOS los usuarios del espacio, sin montos; la franja de una línea que lleva a Suscripción, solo la
+ * persona designada del contrato (`puedeVerSuscripcion`), que es quien la maneja.
  *
  * Los textos salen de `plazos.ts`, los mismos que devuelven las acciones del servidor: la pantalla y
  * el rechazo no pueden decir fechas distintas.
@@ -60,7 +67,63 @@ export function AvisoPlazoTerminos({
   )
 }
 
-/** Cuota vencida, dentro de los 30 días que tolera la cláusula 11.1. */
+/**
+ * Una modificación de los Términos por la cláusula 13.1 (la v1.4): lo ven TODOS los usuarios del CDA
+ * desde la publicación hasta que la persona designada la acepte. Qué cambia en simple, desde cuándo
+ * rige, el documento completo y su PDF, y el derecho a terminar sin penalidad antes de la vigencia.
+ *
+ * No condiciona nada: Valida opera igual con o sin la aceptación. La persona designada ve el botón para
+ * aceptarla; los demás, a quién le toca y que no es obligatorio.
+ */
+export function AvisoModificacionTerminos({
+  doc,
+  hoy,
+  puedeAceptar,
+  designadoNombre,
+}: {
+  doc: Pick<DocumentoContractual, 'documentoId' | 'slug' | 'version' | 'titulo' | 'vigenteDesde' | 'publicadaAt'>
+  hoy: string
+  /** Quien entra es la persona designada y puede aceptar ahora. */
+  puedeAceptar: boolean
+  designadoNombre: string | null
+}) {
+  const t = textosAvisoModificacion(doc, hoy)
+  return (
+    <section
+      data-aviso-modificacion-terminos
+      className="flex flex-col gap-3 rounded-lg border border-sky-300 bg-sky-50 p-4 text-sm text-sky-950"
+    >
+      <div className="flex items-start gap-3">
+        <FileText className="mt-0.5 hidden h-5 w-5 shrink-0 sm:block" />
+        <div className="min-w-0 space-y-2">
+          <p className="font-semibold">{t.titulo}</p>
+          <p>{t.queCambia}</p>
+          <p className="font-semibold">{t.vigencia}</p>
+          {t.derecho && <p>{t.derecho}</p>}
+          {!puedeAceptar && <p>{textoQuienAceptaModificacion(designadoNombre, doc)}</p>}
+          {t.publicado && <p className="text-xs text-sky-800">{t.publicado}</p>}
+        </div>
+      </div>
+      <div className="flex flex-wrap items-center gap-3 sm:pl-8">
+        <Link
+          href="/valida?modificacion=1"
+          className={
+            puedeAceptar
+              ? 'inline-flex items-center justify-center rounded-md bg-acento px-4 py-2 text-sm font-semibold text-white'
+              : 'font-semibold underline underline-offset-2'
+          }
+        >
+          {puedeAceptar ? 'Leer y aceptar la nueva versión' : 'Leer el documento completo'}
+        </Link>
+        <a href={rutaPdfTerminos(doc.documentoId)} className="font-semibold underline underline-offset-2">
+          Descargar el PDF
+        </a>
+      </div>
+    </section>
+  )
+}
+
+/** Cuota vencida, antes de la restricción: la fecha en que se restringe (cláusula 11.2). */
 export function AvisoMora({ mora }: { mora: Extract<EstadoMora, { estado: 'en_mora' }> }) {
   return (
     <section
@@ -69,6 +132,53 @@ export function AvisoMora({ mora }: { mora: Extract<EstadoMora, { estado: 'en_mo
     >
       <AlertTriangle className="mt-0.5 h-5 w-5 shrink-0" />
       <p className="font-semibold">{textoAvisoMora(mora)}</p>
+    </section>
+  )
+}
+
+/**
+ * Más de 5 días de mora (cláusula 11.1): arriba, para todos. El histórico sigue a la vista; la consulta
+ * puntual y la masiva muestran `ConsultasRestringidas` en lugar del formulario.
+ */
+export function AvisoRestriccion({
+  mora,
+  vePagos,
+}: {
+  mora: Extract<EstadoMora, { estado: 'restringido' }>
+  vePagos: boolean
+}) {
+  return (
+    <section
+      data-aviso-restriccion
+      className="flex items-start gap-3 rounded-lg border border-red-300 bg-red-50 p-4 text-sm text-red-900"
+    >
+      <Ban className="mt-0.5 h-5 w-5 shrink-0" />
+      <div className="space-y-1">
+        <p className="font-semibold">{textoAvisoRestriccion(mora)}</p>
+        <p>
+          {vePagos ? (
+            <>
+              En{' '}
+              <Link href="/suscripcion?tab=pagos" className="font-semibold underline">
+                Suscripción
+              </Link>{' '}
+              está la cuota vencida, con su enlace de pago.
+            </>
+          ) : (
+            'La persona designada por tu empresa puede ver y pagar la cuota.'
+          )}
+        </p>
+      </div>
+    </section>
+  )
+}
+
+/** En lugar del formulario de consulta puntual o masiva, con las consultas restringidas. */
+export function ConsultasRestringidas() {
+  return (
+    <section data-consultas-restringidas className="rounded-lg border border-border bg-white p-4 text-sm text-tinta sm:p-5">
+      <p className="font-semibold">Las consultas nuevas están restringidas hasta que se registre el pago.</p>
+      <p className="mt-1 text-tinta-suave">En la pestaña Historial puedes ver y descargar los reportes ya generados.</p>
     </section>
   )
 }
