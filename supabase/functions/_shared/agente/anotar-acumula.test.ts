@@ -283,8 +283,9 @@ describe('planDeCarga: el código respeta lo que clasificó el modelo', () => {
       fecha_salida: { valor: '2026-11-11', frase: 'desde el 11 de noviembre' },
       fecha_regreso: { valor: '2026-11-16', frase: 'Son 5 noches', calculo: 'salida 2026-11-11 + 5 noches' },
     })
-    expect(p.plan.sugeridos.fecha_regreso).toEqual({ valor: '2026-11-16', frase: 'Son 5 noches', deduccion: 'salida 2026-11-11 + 5 noches' })
-    expect(p.entendido).toContain('Fecha de regreso: 16 nov')
+    // Sin `como`, un valor con su cálculo se marca deducido: lo que no está escrito tal cual siempre lleva marca.
+    expect(p.plan.sugeridos.fecha_regreso).toEqual({ valor: '2026-11-16', frase: 'Son 5 noches', deduccion: 'salida 2026-11-11 + 5 noches', como: 'deducido' })
+    expect(p.entendido).toContain('Fecha de regreso: 16 nov (deducido)')
     const sin = plan(t, { fecha_salida: { valor: '2026-11-11', frase: 'desde el 11 de noviembre' } })
     expect(sin.plan.sugeridos.fecha_regreso).toBeUndefined()
     expect(sin.falta).toContain('Fecha de regreso')
@@ -310,7 +311,7 @@ describe('planDeCarga: el código respeta lo que clasificó el modelo', () => {
       extraer: async ({ textos }) => crudo(textos, { adultos: { valor: '2', frase: 'él con su esposa', calculo: 'él y su esposa' } }),
     })
     const prep = await puerto.prepararCarga('v-9', t)
-    expect(prep.entendido).toEqual(['Adultos: 2'])
+    expect(prep.entendido).toEqual(['Adultos: 2 (deducido)'])
     await puerto.cargar('v-9', prep.plan)
     expect(puerto.viajes[0].datos.adultos).toBe(2)
   })
@@ -357,7 +358,7 @@ describe('el prompt de la extracción', () => {
   })
   it('el esquema cierra las opciones y deja explicar el cálculo', () => {
     const e = esquemaCarga(CAMPOS) as { properties: { valores: { properties: Record<string, { properties: Record<string, { enum?: string[] }> }> } } }
-    expect(e.properties.valores.properties.categoria_hotel.properties.valor.enum).toEqual(['3', '4', '5', 'sin_preferencia', 'por_definir'])
+    expect(e.properties.valores.properties.categoria_hotel.properties.valor.enum).toEqual(['3', '4', '5', 'sin_preferencia', 'por_definir', 'quitar'])
     expect(e.properties.valores.properties.fecha_regreso.properties.calculo).toBeDefined()
     // Los derivados no los llena el modelo.
     expect(e.properties.valores.properties.numero_pasajeros).toBeUndefined()

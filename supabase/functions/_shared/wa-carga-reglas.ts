@@ -346,6 +346,10 @@ export interface Actualizado {
  *                 esposa» son 2 adultos) y qué calculó (su `deduccion` es la explicación del cálculo, no una
  *                 deducción del código), y el comercial lo confirma con su toque. Así no corren las dos reglas del
  *                 flujo viejo de la bandeja: la frase tiene que decir la cifra nueva, y una deducción no reemplaza.
+ * @param opts.quitar campos que el comercial pidió QUITAR («el presupuesto está abierto», núcleo conversacional,
+ *                 2026-10-07). Acción explícita, nunca implícita: un campo que falta en `sugeridos` no se toca. Se
+ *                 quita solo un SUGERIDO sin confirmar (con marca en `_sugeridos`, sin `_ediciones`); lo que
+ *                 escribió o confirmó una persona en ONE, o un valor sin marca, no se toca y va a `noQuitados`.
  */
 export function cargarEnExistente(
   data: Record<string, unknown>,
@@ -353,7 +357,7 @@ export function cargarEnExistente(
   sugeridos: Record<string, Sugerido>,
   meta: { entrega_id: string; en: string; origenDe: (frase: string) => 'audio' | 'mensaje' },
   yaVistos: Set<string> = new Set(),
-  opts: { delModelo?: boolean } = {},
+  opts: { delModelo?: boolean; quitar?: Record<string, { frase: string }> } = {},
 ): {
   data: Record<string, unknown>;
   escritos: string[];
@@ -362,6 +366,10 @@ export function cargarEnExistente(
   actualizados: Actualizado[];
   /** Números distintos al actual cuya frase no dice el número nuevo: no se tocan. */
   sinSustento: string[];
+  /** Campos que se quitaron (`opts.quitar`). */
+  quitados: string[];
+  /** Campos que se pidió quitar pero los escribió o confirmó una persona: no se tocan. */
+  noQuitados: string[];
 } {
   const ediciones = (data._ediciones ?? {}) as Record<string, unknown>;
   const marcasPrevias = (data[CLAVE_SUGERIDOS] ?? {}) as Record<string, MarcaSugerido>;
@@ -374,10 +382,24 @@ export function cargarEnExistente(
   const iguales: string[] = [];
   const actualizados: Actualizado[] = [];
   const sinSustento: string[] = [];
+  const quitados: string[] = [];
+  const noQuitados: string[] = [];
 
   for (const f of fields) {
     if (yaVistos.has(f.slug)) continue;
     yaVistos.add(f.slug);
+    if (opts.quitar?.[f.slug] && !sugeridos[f.slug]) {
+      if (vacio(data[f.slug])) continue;
+      if (marcasPrevias[f.slug] && !ediciones[f.slug]) {
+        delete out[f.slug];
+        delete marcas[f.slug];
+        delete choques[f.slug];
+        quitados.push(f.slug);
+      } else {
+        noQuitados.push(f.slug);
+      }
+      continue;
+    }
     const s = sugeridos[f.slug];
     if (!s) continue;
     const actual = data[f.slug];
@@ -414,14 +436,16 @@ export function cargarEnExistente(
 
   const tocados = [...escritos, ...actualizados.map(a => a.slug)];
   if (tocados.length > 0) {
-    out[CLAVE_SUGERIDOS] = marcas;
     out = mayusculasSoloDe(fields, out, tocados);
+  }
+  if (tocados.length > 0 || quitados.length > 0) {
+    out[CLAVE_SUGERIDOS] = marcas;
     out = aplicarSumas(fields, out);
   }
   // Un sugerido reemplazado se lleva su conflicto viejo: lo último que dijo el cliente gana.
   if (Object.keys(choques).length > 0) out[CLAVE_CONFLICTOS] = choques;
   else if (habiaChoques) delete out[CLAVE_CONFLICTOS];
-  return { data: out, escritos, conflictos, iguales, actualizados, sinSustento };
+  return { data: out, escritos, conflictos, iguales, actualizados, sinSustento, quitados, noQuitados };
 }
 
 /**
@@ -590,6 +614,8 @@ export function trazaCarga(p: {
   escritos: string[];
   conflictos: Conflicto[];
   actualizados?: ReadonlyArray<Pick<Actualizado, 'slug' | 'anterior' | 'valor'>>;
+  /** Campos que se quitaron a pedido del comercial (`cargarEnExistente` con `quitar`). */
+  quitados?: ReadonlyArray<string>;
   fields: ReadonlyArray<CampoEntendible>;
   historia: string;
 }): string {
@@ -612,6 +638,9 @@ export function trazaCarga(p: {
   if (p.conflictos.length > 0) {
     const nombres = p.conflictos.map(c => porSlug.get(c.slug)?.label ?? c.slug).join(', ');
     partes.push(`En conflicto, sin cambiar: ${nombres}.`);
+  }
+  if ((p.quitados ?? []).length > 0) {
+    partes.push(`Quitado (lo corrigió el comercial): ${p.quitados!.map(s => porSlug.get(s)?.label ?? s).join(', ')}.`);
   }
   if (p.historia.trim()) partes.push('', `Historia del ${dia}:`, p.historia.trim());
   return partes.join('\n');

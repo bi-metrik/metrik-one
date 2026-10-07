@@ -20,7 +20,8 @@ import {
 import type { CampoEntendible, SalidaEntendida, Sugerido } from '../wa-entendimiento-reglas.ts';
 import { cargarEnExistente, trazaCarga } from '../wa-carga-reglas.ts';
 import { textoParaModelo } from '../wa-guardianes.ts';
-import { lineaCargada, mensajesDeTextos, planDeCarga, registradoDe } from './bandeja/carga.ts';
+import { lineaCargada, mensajesDeTextos, planDeCarga, propuestoDe, registradoDe } from './bandeja/carga.ts';
+import type { PlanCarga } from './bandeja/carga.ts';
 import { esquemaCarga, instruccionesCarga } from './bandeja/extraccion.ts';
 import { aplanarBloques, calcularNiveles } from '../niveles-solicitud.ts';
 import { todayBogotaISO } from '../bogota.ts';
@@ -192,7 +193,7 @@ export function puertoBandejaSupabase(supabase: SupabaseClient, workspaceId: str
       if (typeof bloques === 'string') throw new Error(bloques);
       const { fields, valores: yaTiene } = aplanarBloques(bloques.map((b) => ({ fields: b.fields, data: b.data })));
       const campos = fields as CampoEntendible[];
-      const lectura = await leerConModelo(instruccionesCarga(campos, todayBogotaISO(), yaTiene), `Mensajes:\n${textoParaModelo(mensajesDeTextos(textos))}`, esquemaCarga(campos));
+      const lectura = await leerConModelo(instruccionesCarga(campos, todayBogotaISO(), yaTiene, propuestoDe(previo)), `Mensajes:\n${textoParaModelo(mensajesDeTextos(textos))}`, esquemaCarga(campos));
       if (lectura.error || lectura.json === null) throw new Error(lectura.error ?? 'sin lectura');
       return planDeCarga({
         bloques: bloques.map((b) => ({ fields: b.fields as CampoEntendible[], data: b.data })), textos, raw: lectura.json,
@@ -200,33 +201,38 @@ export function puertoBandejaSupabase(supabase: SupabaseClient, workspaceId: str
       });
     },
     async cargar(viajeId, plan) {
-      const { sugeridos, historia } = plan as { sugeridos: Record<string, Sugerido>; historia: string };
+      const { sugeridos, historia, quitar } = plan as PlanCarga;
       const bloques = await bloquesDatosDelNegocio(supabase, viajeId);
       if (typeof bloques === 'string') throw new Error(bloques);
       const meta = { entrega_id: 'agente', en: new Date().toISOString(), origenDe: () => 'mensaje' as const };
       const vistos = new Set<string>();
       const escritos: string[] = [];
+      const quitados: string[] = [];
       const campos: CampoEntendible[] = [];
+      const opts = { delModelo: true, ...(quitar ? { quitar } : {}) };
       for (const b of bloques) {
         const antes = new Set(vistos);
         for (const f of b.fields) { vistos.add(f.slug); campos.push(f); }
-        let r = cargarEnExistente(b.data, b.fields, sugeridos, meta, new Set(antes), { delModelo: true });
+        let r = cargarEnExistente(b.data, b.fields, sugeridos, meta, new Set(antes), opts);
         const quedo = await escribirBloque(supabase, b, (d) => {
-          r = cargarEnExistente(d, b.fields, sugeridos, meta, new Set(antes), { delModelo: true });
-          return r.escritos.length > 0 || r.conflictos.length > 0 || r.actualizados.length > 0 ? r.data : null;
+          r = cargarEnExistente(d, b.fields, sugeridos, meta, new Set(antes), opts);
+          return r.escritos.length > 0 || r.conflictos.length > 0 || r.actualizados.length > 0 || r.quitados.length > 0 ? r.data : null;
         });
-        if (quedo) escritos.push(...r.escritos, ...r.actualizados.map((a) => a.slug));
+        if (quedo) {
+          escritos.push(...r.escritos, ...r.actualizados.map((a) => a.slug));
+          quitados.push(...r.quitados);
+        }
       }
       const { data: neg } = await supabase.from('negocios').select('codigo').eq('id', viajeId).maybeSingle();
       const { error } = await supabase.from('activity_log').insert({
         workspace_id: workspaceId, entidad_tipo: 'negocio', entidad_id: viajeId, tipo: 'cambio_sistema', autor_id: staffId,
         // `activity_log.contenido` tiene CHECK de 280 caracteres en producción (medido el 2026-10-07): más largo, el
         // insert falla y la traza se pierde. Se corta aquí; la historia completa queda en la traza del turno.
-        contenido: cortarContenido(trazaCarga({ quien: '', fechaISO: todayBogotaISO(), escritos, conflictos: [], fields: campos, historia })),
+        contenido: cortarContenido(trazaCarga({ quien: '', fechaISO: todayBogotaISO(), escritos, quitados, conflictos: [], fields: campos, historia })),
       });
       if (error) console.error('[agente] sin traza en la actividad del negocio:', error.message);
       const valoresEscritos = Object.fromEntries(Object.entries(sugeridos).map(([k, x]) => [k, x.valor]));
-      return { lineas: [lineaCargada(String(neg?.codigo ?? 'el viaje'), escritos, campos)], escritos: registradoDe(campos, valoresEscritos, escritos) };
+      return { lineas: [lineaCargada(String(neg?.codigo ?? 'el viaje'), escritos, campos, quitados)], escritos: registradoDe(campos, valoresEscritos, escritos) };
     },
     async crearCliente(nombre: string, llave: Llave) {
       const r = await crearContactoConGuardian(supabase, workspaceId, { nombre, llave });

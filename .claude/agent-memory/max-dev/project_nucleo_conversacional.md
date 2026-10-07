@@ -43,4 +43,10 @@ lugar del agente simple v2; criterio fijado ANTES de medir: 0 dañinas, más éx
 - El reglamento de la conversación (`bot_reglamentos`, Anexo A) aún dice «solo infante se deduce» en `g.pasajeros`: es
   dato de la base, no código; no se tocó. `PuertoMemoria` con `campos` + `extraer` corre la cadena real; el guion recibe
   `instrucciones` (el prompt) para probarlo.
+- Tercera falla 2026-10-07 (PR fix/bandeja-preferencia-no-es-valor, sin migración): «económico» → «menos de $3 M» y
+  no había cómo QUITAR. Ahora el esquema trae `quitar` (valor), `como` (calculado/deducido → marca en el resumen) y
+  `dudas` (Mauricio: «no se invente esas cifras, puede preguntar»; la duda va DENTRO del resumen, primera línea, para que
+  `salidaPropuesta` no la corte). Quitar solo borra un sugerido sin confirmar; con `_ediciones` dice «no lo quito». Las
+  edades re-propuestas con otra redacción las resuelve el MODELO (devuelve el valor exacto), no una normalización.
+- La extracción NO recibe el reglamento (`g.presupuesto` y demás solo los ve el modelo de la conversación).
 Relacionado: [[bandeja-hibrida]], [[entendimiento-bandeja-wa]].

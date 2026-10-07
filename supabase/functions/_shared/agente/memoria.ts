@@ -10,7 +10,7 @@ import type { FichaCliente, Llave } from '../wa-cliente-reglas.ts';
 import { calcularNiveles } from '../niveles-solicitud.ts';
 import type { CampoEntendible } from '../wa-entendimiento-reglas.ts';
 import { cargarEnExistente } from '../wa-carga-reglas.ts';
-import { lineaCargada, mensajesDeTextos, planDeCarga, registradoDe } from './bandeja/carga.ts';
+import { lineaCargada, mensajesDeTextos, planDeCarga, propuestoDe, registradoDe } from './bandeja/carga.ts';
 import { instruccionesCarga } from './bandeja/extraccion.ts';
 import type { PlanCarga } from './bandeja/carga.ts';
 import type { PuertoBandeja, ViajeAgente } from './bandeja/dominio.ts';
@@ -199,7 +199,7 @@ export class PuertoMemoria implements PuertoBandeja {
     if (this.campos && this.extraer) {
       this.extracciones.push([...textos]);
       const data = { destino: v.destino, ...v.datos };
-      const raw = await this.extraer({ textos, mensajes: mensajesDeTextos(textos).map((m) => `[${m.n}] ${m.cuerpo}`).join('\n'), campos: this.campos, yaTiene: data, instrucciones: instruccionesCarga(this.campos, this.hoyISO(), data) });
+      const raw = await this.extraer({ textos, mensajes: mensajesDeTextos(textos).map((m) => `[${m.n}] ${m.cuerpo}`).join('\n'), campos: this.campos, yaTiene: data, instrucciones: instruccionesCarga(this.campos, this.hoyISO(), data, propuestoDe(previo)) });
       return planDeCarga({ bloques: [{ fields: this.campos, data }], textos, raw, hoyISO: this.hoyISO(), ahoraIso: new Date(this.ahora()).toISOString(), previo });
     }
     const antes = (previo as { textos?: string[] } | undefined)?.textos ?? [];
@@ -211,16 +211,17 @@ export class PuertoMemoria implements PuertoBandeja {
     const v = this.viajes.find((x) => x.id === viajeId)!;
     if (this.campos && (plan as PlanCarga).sugeridos) {
       const meta = { entrega_id: 'agente', en: new Date(this.ahora()).toISOString(), origenDe: () => 'mensaje' as const };
-      const r = cargarEnExistente({ destino: v.destino, ...v.datos }, this.campos, (plan as PlanCarga).sugeridos, meta, new Set(), { delModelo: true });
+      const quitar = (plan as PlanCarga).quitar;
+      const r = cargarEnExistente({ destino: v.destino, ...v.datos }, this.campos, (plan as PlanCarga).sugeridos, meta, new Set(), { delModelo: true, ...(quitar ? { quitar } : {}) });
       const escritos = [...r.escritos, ...r.actualizados.map((a) => a.slug)];
-      if (escritos.length || r.conflictos.length) {
+      if (escritos.length || r.conflictos.length || r.quitados.length) {
         const { destino, ...resto } = r.data;
         if (typeof destino === 'string' && destino) v.destino = destino;
         v.datos = resto;
       }
-      this.escrituras.push({ tipo: 'carga', codigo: v.codigo, escritos });
+      this.escrituras.push({ tipo: 'carga', codigo: v.codigo, escritos, ...(r.quitados.length ? { quitados: r.quitados } : {}) });
       const valores = Object.fromEntries(Object.entries((plan as PlanCarga).sugeridos).map(([k, x]) => [k, x.valor]));
-      return { lineas: [lineaCargada(v.codigo, escritos, this.campos)], escritos: registradoDe(this.campos, valores, escritos) };
+      return { lineas: [lineaCargada(v.codigo, escritos, this.campos, r.quitados)], escritos: registradoDe(this.campos, valores, escritos) };
     }
     const textos = (plan as { textos: string[] }).textos;
     v.datos.textos = [...((v.datos.textos as string[] | undefined) ?? []), ...textos];
