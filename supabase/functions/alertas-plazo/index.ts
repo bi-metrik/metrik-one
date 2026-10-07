@@ -30,6 +30,7 @@
 import { getServiceClient } from '../_shared/supabase-client.ts';
 import { todayBogotaISO } from '../_shared/bogota.ts';
 import { esDiaHabil, paisDelWorkspace } from '../_shared/dias-habiles.ts';
+import { destinatariosDelHito, type AlertasPlazoConfig } from '../_shared/alertas-plazo-destinatarios.ts';
 
 const FROM = 'MéTRIK ONE <noreply@metrikone.co>';
 
@@ -58,7 +59,7 @@ type Linea = {
   id: string;
   nombre: string;
   workspace_id: string;
-  config_extra: { alertas_plazo?: { areas?: string[] } } | null;
+  config_extra: { alertas_plazo?: AlertasPlazoConfig } | null;
 };
 
 Deno.serve(async (req: Request) => {
@@ -123,16 +124,7 @@ Deno.serve(async (req: Request) => {
       continue;
     }
 
-    const areas = linea.config_extra?.alertas_plazo?.areas ?? [];
-    const correos = await correosDeAreas(supabase, linea.workspace_id, areas);
-    if (correos.length === 0) {
-      // Se reporta en vez de fallar en silencio: un area sin nadie con correo es
-      // exactamente el caso que hay que ver, no el que hay que tragarse.
-      console.error(`[alertas-plazo] ${linea.nombre}: areas ${areas.join(',')} sin correos`);
-      reporte.push({ linea: linea.nombre, vencidos: filas.length, omitido: 'sin_destinatarios' });
-      continue;
-    }
-
+    const cfgAlertas = linea.config_extra?.alertas_plazo ?? null;
     const slug = await slugDelWorkspace(supabase, linea.workspace_id);
 
     // Un correo por hito: "se cumplieron los 15" y "se cumplieron los 50" son dos
@@ -145,6 +137,19 @@ Deno.serve(async (req: Request) => {
     }
 
     for (const [hito, casos] of porHito) {
+      // Destinatarios POR HITO (SOE-001): el de 45 días escala a la supervisora además
+      // del área. Sin `destinatarios` en el hito, las áreas de la línea, como siempre.
+      const dest = destinatariosDelHito(cfgAlertas, hito);
+      const correos = await correosDe(supabase, linea.workspace_id, dest.areas, dest.staffIds);
+      if (correos.length === 0) {
+        // Se reporta en vez de fallar en silencio: un hito sin nadie con correo es
+        // exactamente el caso que hay que ver, no el que hay que tragarse. Sin log:
+        // el día que alguien quede asignado, el aviso sale.
+        console.error(`[alertas-plazo] ${linea.nombre}/${hito}: areas ${dest.areas.join(',')} sin correos`);
+        reporte.push({ linea: linea.nombre, hito, vencidos: casos.length, omitido: 'sin_destinatarios' });
+        continue;
+      }
+
       const titulo = `${casos[0].hito_titulo} — ${casos.length} ${casos.length === 1 ? 'caso' : 'casos'}`;
 
       if (seco) {
@@ -188,19 +193,22 @@ Deno.serve(async (req: Request) => {
 });
 
 /**
- * Los correos del staff activo de unas areas.
+ * Los correos del staff activo de unas areas, mas las personas que el hito nombre.
  *
  * Se reparte por `staff_areas` y no por una lista de personas escrita a mano: el
  * dia que entre o salga alguien de operaciones, el aviso lo sigue el area sola.
- * `is_active` importa — en SOENA hay dos personas de operaciones inactivas que no
- * pueden volver a recibir nada.
+ * `staff_ids` es solo para escalar (la supervisora en el hito de 45 dias) y se
+ * busca DENTRO del workspace: un id de otro workspace no recibe nada.
+ * `is_active` importa — en SOENA hay personas de operaciones inactivas que no
+ * pueden volver a recibir nada, tampoco por estar nombradas en un hito.
  */
-async function correosDeAreas(
+async function correosDe(
   supabase: Supabase,
   workspaceId: string,
   areas: string[],
+  staffIds: string[],
 ): Promise<string[]> {
-  if (areas.length === 0) return [];
+  if (areas.length === 0 && staffIds.length === 0) return [];
 
   const { data: staffRows } = await supabase
     .from('staff')
@@ -212,14 +220,17 @@ async function correosDeAreas(
   const staff = (staffRows ?? []) as Array<{ id: string; profile_id: string }>;
   if (staff.length === 0) return [];
 
-  const { data: areaRows } = await supabase
-    .from('staff_areas')
-    .select('staff_id')
-    .in('staff_id', staff.map((s) => s.id))
-    .in('area', areas);
+  const elegidos = new Set(staff.filter((s) => staffIds.includes(s.id)).map((s) => s.id));
+  if (areas.length > 0) {
+    const { data: areaRows } = await supabase
+      .from('staff_areas')
+      .select('staff_id')
+      .in('staff_id', staff.map((s) => s.id))
+      .in('area', areas);
+    for (const a of (areaRows ?? []) as Array<{ staff_id: string }>) elegidos.add(a.staff_id);
+  }
 
-  const conArea = new Set(((areaRows ?? []) as Array<{ staff_id: string }>).map((a) => a.staff_id));
-  const perfiles = [...new Set(staff.filter((s) => conArea.has(s.id)).map((s) => s.profile_id))];
+  const perfiles = [...new Set(staff.filter((s) => elegidos.has(s.id)).map((s) => s.profile_id))];
 
   const correos: string[] = [];
   for (const pid of perfiles) {
@@ -267,9 +278,9 @@ function armarHtml(casos: Fila[], slug: string): string {
 
   const notaEstimadas = hayEstimadas
     ? `<p style="margin:18px 0 0;font-size:12px;line-height:1.6;color:#B45309;background:#FFFBEB;border:1px solid #FDE68A;border-radius:8px;padding:11px 13px">
-        Las marcadas como <strong>fecha estimada</strong> cuentan desde la cita en la DIAN más los días
-        que suele tardar la radicación, porque nadie escribió la fecha real. Al escribirla en el bloque de
-        seguimiento, el conteo se corrige solo.
+        Las marcadas como <strong>fecha estimada</strong> cuentan desde una fecha de respaldo (por ejemplo,
+        la cita en la DIAN) porque nadie escribió la fecha real. Al escribirla en el negocio, el conteo
+        se corrige solo.
       </p>`
     : '';
 

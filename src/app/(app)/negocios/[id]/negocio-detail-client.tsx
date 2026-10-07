@@ -823,6 +823,7 @@ function SelectorEtapa({
   puedeCierreNoFacturable,
   puedeOmitirGates,
   puedeAvanzarCruces,
+  esResponsable = false,
 }: {
   negocioId: string
   etapasLinea: EtapaNegocio[]
@@ -840,6 +841,8 @@ function SelectorEtapa({
   puedeCierreNoFacturable: boolean
   puedeOmitirGates: boolean
   puedeAvanzarCruces: boolean
+  /** Quien mira es responsable del caso: habilita el reproceso del operativo (SOE-001). */
+  esResponsable?: boolean
 }) {
   const router = useRouter()
   // Una clave por intención: un reintento de la misma acción no la ejecuta dos veces.
@@ -1134,6 +1137,7 @@ function SelectorEtapa({
               negocioId={negocioId}
               reprocesoAbierto={reprocesoMarca}
               userRole={userRole}
+              tiposOperativo={esResponsable ? (etapaActual?.reproceso_operativo ?? []) : []}
             />
             <button
               onClick={() => setShowCierreDialog(true)}
@@ -2675,6 +2679,7 @@ export default function NegocioDetailClient({
             puedeCierreNoFacturable={puedeCierreNoFacturable}
             puedeOmitirGates={puedeOmitirGates}
             puedeAvanzarCruces={puedeAvanzarCruces}
+            esResponsable={currentUserEsResponsable}
           />
         </div>
         </div>

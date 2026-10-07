@@ -40,6 +40,8 @@ import { registrarActividad } from '@/lib/activity/registrar-actividad'
 import { resolverRetornoDelNegocio } from '@/lib/negocios/retorno-reproceso-datos'
 import { tramoDelReproceso } from '@/lib/negocios/retorno-reproceso'
 import { avisoDelRetorno, contenidoErrorSinRetorno } from '@/lib/negocios/reproceso-textos'
+import { validarMotivoReproceso } from '@/lib/negocios/motivos-reproceso'
+import { operativoPuedeReprocesar } from '@/lib/negocios/reproceso-operativo'
 
 /**
  * Los tipos generados de Supabase van por detrás del esquema real: `negocios.metadata`
@@ -63,6 +65,11 @@ export type ReprocesoMarca = {
   tipo: TipoReproceso
   ciclo: number
   causa: CausaReproceso
+  /**
+   * Motivo de la lista cerrada (`motivos-reproceso.ts`). Opcional: los reprocesos
+   * abiertos antes del 2026-10-07 no lo tienen.
+   */
+  motivo?: string | null
   detalle: string
   abierto_at: string
   abierto_por: string | null
@@ -134,6 +141,23 @@ async function puertaReproceso(
   return null
 }
 
+/**
+ * ¿Quien llama está asignado al caso con el puesto de operaciones? Es el «operativo del
+ * caso» de SOE-001. Se pregunta por el PUESTO (`rol`), no por el área de la persona: es lo
+ * mismo que mira `destinatarios_negocio` para los avisos.
+ */
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+async function esOperativoDelCaso(supabase: any, negocioId: string, staffId: string): Promise<boolean> {
+  const { data } = await db(supabase)
+    .from('negocio_responsables')
+    .select('staff_id')
+    .eq('negocio_id', negocioId)
+    .eq('staff_id', staffId)
+    .eq('rol', 'operaciones')
+    .limit(1)
+  return ((data ?? []) as unknown[]).length > 0
+}
+
 export type ResultadoReproceso = {
   ok: boolean
   error?: string
@@ -154,7 +178,7 @@ export type ResultadoReproceso = {
  */
 export async function reprocesarNegocio(
   negocioId: string,
-  input: { tipo: TipoReproceso; causa: CausaReproceso; detalle: string },
+  input: { tipo: TipoReproceso; causa: CausaReproceso; motivo?: string | null; detalle: string },
 ): Promise<ResultadoReproceso> {
   const { supabase, workspaceId, staffId, userId, role, error } = await getWorkspace()
   if (error || !workspaceId || !userId) return { ok: false, error: 'No autenticado' }
@@ -187,13 +211,7 @@ export async function reprocesarNegocio(
     return { ok: false, error: 'El negocio no tiene etapa activa' }
   }
 
-  // ── Permisos ──────────────────────────────────────────────────────────
-  // Un reproceso rehace trabajo ya hecho y penaliza indicadores de calidad, así
-  // que no lo dispara cualquiera: dirección, o un supervisor de operaciones.
-  const sinPermiso = await puertaReproceso(supabase, role, staffId)
-  if (sinPermiso) return { ok: false, error: sinPermiso }
-
-  // ── Etapa destino, declarada por la propia etapa ──────────────────────
+  // ── Etapas de la línea (las necesita el permiso y el retorno) ──────────
   const { data: etapas } = await supabase
     .from('etapas_negocio')
     .select('id, nombre, orden, config_extra')
@@ -202,6 +220,30 @@ export async function reprocesarNegocio(
 
   type EtapaRow = { id: string; nombre: string; orden: number; config_extra: Record<string, unknown> | null }
   const todas = (etapas ?? []) as EtapaRow[]
+
+  // ── Permisos ──────────────────────────────────────────────────────────
+  // Un reproceso rehace trabajo ya hecho y penaliza indicadores de calidad, así
+  // que no lo dispara cualquiera: dirección, o un supervisor de operaciones.
+  //
+  // SOE-001 (2026-10-07): además, el operativo del caso en las etapas que declaran
+  // `reproceso_operativo` para este tipo (las de acompañamiento a la DIAN). Ese camino
+  // no elige la causa: queda la del motivo. Ver `reproceso-operativo.ts`.
+  const sinPermiso = await puertaReproceso(supabase, role, staffId)
+  let causaFija = false
+  if (sinPermiso) {
+    const configEtapaActual = todas.find((e) => e.id === n.etapa_actual_id)?.config_extra ?? null
+    const esOperativo = staffId ? await esOperativoDelCaso(supabase, negocioId, staffId) : false
+    if (!operativoPuedeReprocesar({ tipo: input.tipo, configEtapa: configEtapaActual, esOperativoDelCaso: esOperativo })) {
+      return { ok: false, error: sinPermiso }
+    }
+    causaFija = true
+  }
+
+  // ── Motivo de la lista ────────────────────────────────────────────────
+  const motivoValido = validarMotivoReproceso({ tipo: input.tipo, motivo: input.motivo, causa: input.causa, causaFija })
+  if (!motivoValido.ok) return { ok: false, error: motivoValido.error }
+  const causa = motivoValido.causa
+  const motivo = motivoValido.motivo
 
   const destinoDeclarado = todas.find((e) => {
     const decl = (e.config_extra?.reproceso_de ?? null) as string[] | string | null
@@ -318,7 +360,8 @@ export async function reprocesarNegocio(
     activo: true,
     tipo: input.tipo,
     ciclo,
-    causa: input.causa,
+    causa,
+    motivo: motivo.value,
     detalle,
     abierto_at: archivadoAt,
     abierto_por: staffId ?? null,
@@ -403,7 +446,8 @@ export async function reprocesarNegocio(
     negocio_id: negocioId,
     ciclo,
     tipo: input.tipo,
-    causa: input.causa,
+    causa,
+    motivo: motivo.value,
     detalle,
     atribuido_a: atribuidoA,
     abierto_por: staffId ?? null,
@@ -447,8 +491,8 @@ export async function reprocesarNegocio(
       autor_id: staffId,
       campo_modificado: 'etapa',
       contenido:
-        `Reproceso ${ciclo} — ${LABEL_TIPO[input.tipo]}. ` +
-        `Causa: ${input.causa === 'error_propio' ? 'error propio' : 'criterio del tercero'}. ` +
+        `Reproceso ${ciclo} — ${LABEL_TIPO[input.tipo]}. Motivo: ${motivo.label}. ` +
+        `Causa: ${causa === 'error_propio' ? 'error propio' : 'criterio del tercero'}. ` +
         `Vuelve a ${destino.nombre}. ${detalle}`,
       valor_anterior: etapaActual.nombre,
       valor_nuevo: destino.nombre,
@@ -479,7 +523,7 @@ export async function reprocesarNegocio(
       p_entidad_tipo: 'negocio',
       p_entidad_id: negocioId,
       p_deep_link: `/negocios/${negocioId}`,
-      p_metadata: { tipo_reproceso: input.tipo, causa: input.causa, ciclo },
+      p_metadata: { tipo_reproceso: input.tipo, causa, motivo: motivo.value, ciclo },
       p_permitir_repetidas: true,
     })
   }
@@ -512,7 +556,7 @@ export async function reprocesarNegocio(
  */
 export async function registrarErrorSinDevolver(
   negocioId: string,
-  input: { tipo: TipoReproceso; causa: CausaReproceso; detalle: string },
+  input: { tipo: TipoReproceso; causa: CausaReproceso; motivo?: string | null; detalle: string },
 ): Promise<{ ok: boolean; error?: string }> {
   const { supabase, workspaceId, staffId, userId, role, error } = await getWorkspace()
   if (error || !workspaceId || !userId) return { ok: false, error: 'No autenticado' }
@@ -527,6 +571,11 @@ export async function registrarErrorSinDevolver(
 
   const sinPermiso = await puertaReproceso(supabase, role, staffId)
   if (sinPermiso) return { ok: false, error: sinPermiso }
+
+  // Mismo motivo de lista que el reproceso (SOE-001). Aquí siempre decide dirección o
+  // supervisión, así que la causa es la que eligieron.
+  const motivoValido = validarMotivoReproceso({ tipo: input.tipo, motivo: input.motivo, causa: input.causa, causaFija: false })
+  if (!motivoValido.ok) return { ok: false, error: motivoValido.error }
 
   const { data: negocio } = await db(supabase)
     .from('negocios')
@@ -557,6 +606,7 @@ export async function registrarErrorSinDevolver(
     ciclo: CICLO_SIN_RETORNO,
     tipo: input.tipo,
     causa: input.causa,
+    motivo: motivoValido.motivo.value,
     detalle,
     atribuido_a: atribuidoA,
     abierto_por: staffId ?? null,
@@ -580,7 +630,7 @@ export async function registrarErrorSinDevolver(
         tipo: LABEL_TIPO[input.tipo],
         causa: input.causa,
         etapaActual,
-        detalle,
+        detalle: `${motivoValido.motivo.label}. ${detalle}`,
       }),
     }, 'registrarErrorSinDevolver')
   }

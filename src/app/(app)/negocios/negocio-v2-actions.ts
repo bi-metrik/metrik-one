@@ -114,6 +114,16 @@ import { resolverDerivado, type LockWhen } from '@/lib/negocios/campo-derivado'
 import { soloSiCumple, type SoloSiBloque } from '@/lib/negocios/condicion-bloque'
 import { puedeOmitirGate, marcaOmitido, CLAVE_OMITIDO } from '@/lib/negocios/gate-omitible'
 import { puedeOmitirGatesConMotivo } from '@/lib/permissions/omitir-gates'
+import { tiposReprocesoOperativo } from '@/lib/negocios/reproceso-operativo'
+import {
+  anclaDeBloques,
+  CAMPO_AVANCE_ANTICIPADO,
+  configAvanceAnticipado,
+  contenidoAvanceAnticipado,
+  evaluarAvanceAnticipado,
+  SIN_ANCLA,
+} from '@/lib/negocios/avance-anticipado'
+import type { TipoReproceso } from '@/lib/negocios/atribucion-reproceso'
 import {
   CAMPO_CRUCE_AVANZADO,
   esAvanzable,
@@ -223,6 +233,10 @@ export type EtapaNegocio = {
   // config_extra.buzon_leads = true → buzón de entrada (Recepción). Al descartar
   // desde aquí se piden razones de triage de lead, no de pérdida de venta.
   es_buzon?: boolean
+  // config_extra.reproceso_operativo → tipos de reproceso que el operativo del caso puede
+  // abrir desde esta etapa (SOE-001). Solo decide si la pantalla dibuja el botón; el
+  // permiso lo vuelve a decidir `reprocesarNegocio`.
+  reproceso_operativo?: TipoReproceso[]
   // config_extra.guia → la ayuda de la etapa, en la etapa. Se muestra sobre los
   // bloques para responder, sin salir de la pantalla, las tres preguntas que se
   // hace quien abre un caso: dónde está, qué le toca y qué falta para avanzar.
@@ -1325,6 +1339,7 @@ async function getNegocioDetalle(id: string): Promise<{
       guia: ((e.config_extra as { guia?: GuiaEtapa } | null)?.guia ?? null),
       es_cierre: (e.config_extra as { etapa_cierre?: boolean } | null)?.etapa_cierre === true,
       es_buzon: (e.config_extra as { buzon_leads?: boolean } | null)?.buzon_leads === true,
+      reproceso_operativo: tiposReprocesoOperativo(e.config_extra as Record<string, unknown> | null),
       routing: ((e.config_extra as { routing?: { default_etapa_orden?: number } } | null)?.routing ?? null),
     }))
 
@@ -4295,6 +4310,43 @@ async function cambiarEtapaNegocioConGateSinClave(
       valor_nuevo: nuevaEtapaNombre,
       contenido: motivoOverride ? `Override: ${motivoOverride}` : null,
     }, 'cambiarEtapaNegocioConGate')
+  }
+
+  // ── Salida anticipada de una etapa sin gate (SOE-001) ─────────────────────────
+  // La etapa que lo declara (`registrar_avance_anticipado`) NO frena: deja una marca
+  // consultable con los días hábiles que llevaba desde su ancla. Va después de mover y
+  // no puede tumbar el avance. Ver `avance-anticipado.ts`.
+  const cfgAnticipado = configAvanceAnticipado(etapaActualConfigExtra)
+  if (cfgAnticipado && staffId && etapaActualNombre) {
+    try {
+      const { data: datasBloques } = await db(supabase)
+        .from('negocio_bloques')
+        .select('data')
+        .eq('negocio_id', negocioId)
+      const anticipado = evaluarAvanceAnticipado({
+        config: cfgAnticipado,
+        fechaAncla: anclaDeBloques(
+          ((datasBloques ?? []) as Array<{ data: Record<string, unknown> | null }>).map((b) => b.data),
+          cfgAnticipado.ancla_campo,
+        ),
+        hoy: todayBogotaISO(),
+      })
+      if (anticipado) {
+        await registrarActividad(supabase, {
+          workspace_id: workspaceId,
+          entidad_tipo: 'negocio',
+          entidad_id: negocioId,
+          tipo: 'sistema',
+          autor_id: staffId,
+          campo_modificado: CAMPO_AVANCE_ANTICIPADO,
+          valor_anterior: etapaActualNombre,
+          valor_nuevo: anticipado.dias === null ? SIN_ANCLA : String(anticipado.dias),
+          contenido: contenidoAvanceAnticipado(etapaActualNombre, anticipado),
+        }, 'cambiarEtapaNegocioConGate')
+      }
+    } catch (e) {
+      console.error('[cambiarEtapa] no se pudo registrar el avance anticipado:', e)
+    }
   }
 
   // El tercero de Siigo se crea al superar la etapa donde se captura el RUT.
