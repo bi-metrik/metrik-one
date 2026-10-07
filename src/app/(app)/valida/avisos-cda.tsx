@@ -100,7 +100,7 @@ export function AvisoModificacionTerminos({
           <p>{t.queCambia}</p>
           <p className="font-semibold">{t.vigencia}</p>
           {t.derecho && <p>{t.derecho}</p>}
-          {!puedeAceptar && <p>{textoQuienAceptaModificacion(designadoNombre)}</p>}
+          {!puedeAceptar && <p>{textoQuienAceptaModificacion(designadoNombre, doc)}</p>}
           {t.publicado && <p className="text-xs text-sky-800">{t.publicado}</p>}
         </div>
       </div>

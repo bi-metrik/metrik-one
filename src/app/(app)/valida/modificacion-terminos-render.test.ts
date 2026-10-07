@@ -66,7 +66,11 @@ describe('el aviso en /valida', () => {
     expect(t).toContain('sin penalidad antes del 6 de noviembre de 2026')
     expect(t).toContain('mauricio.moreno@metrik.com.co')
     expect(t).toContain('La persona designada por tu empresa, Jairo Enrique Peña Bernal,')
-    expect(t).toContain('Aceptarla no es obligatorio')
+    // Gate de Vera: no puede leerse como «si no aceptan, el cambio no les aplica».
+    expect(t).toContain(
+      'Aceptarla no es obligatorio para seguir usando Valida, pero el cambio rige desde el 6 de noviembre de 2026 en todo caso.',
+    )
+    expect(t).not.toContain('Valida sigue funcionando igual')
     expect(t).toContain('Aviso publicado en la plataforma el 7 de octubre de 2026.')
     expect(t).toContain('Leer el documento completo')
     expect(t).not.toContain('Leer y aceptar')
@@ -143,7 +147,9 @@ describe('?modificacion=1', () => {
     const t = texto(html)
     expect(html).toContain('data-modificacion-lectura')
     expect(t).toContain('Restricción por mora.')
-    expect(t).toContain('Aceptarla no es obligatorio')
+    expect(t).toContain(
+      'Aceptarla no es obligatorio para seguir usando Valida, pero el cambio rige desde el 6 de noviembre de 2026 en todo caso.',
+    )
     expect(html).not.toContain('type="checkbox"')
     expect(t).not.toContain('Política de Datos')
   })

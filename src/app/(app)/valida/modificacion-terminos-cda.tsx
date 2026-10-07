@@ -89,7 +89,11 @@ export function ModificacionTerminosCda({
           <div className="flex items-start gap-3">
             <FileText className="mt-0.5 hidden h-5 w-5 shrink-0 text-acento sm:block" />
             <div className="min-w-0 flex-1 space-y-4">
-              <p className="text-sm text-tinta">{textoQuienAceptaModificacion(designadoNombre)}</p>
+              {documentos.map((d) => (
+                <p key={d.documentoId} className="text-sm text-tinta">
+                  {textoQuienAceptaModificacion(designadoNombre, d)}
+                </p>
+              ))}
               <div className="max-h-[60vh] overflow-y-auto rounded-md border border-border bg-papel p-4 text-sm leading-relaxed text-tinta [overflow-wrap:anywhere] sm:max-h-[28rem]">
                 {documentos.map((d, i) => (
                   <article key={d.documentoId} className={i > 0 ? 'mt-8 border-t border-border pt-6' : undefined}>

@@ -105,10 +105,20 @@ export function textosAvisoModificacion(
   }
 }
 
-/** A quién le toca aceptar, para quien no puede hacerlo. Aceptar es voluntario: se dice. */
-export function textoQuienAceptaModificacion(designadoNombre: string | null): string {
+/**
+ * A quién le toca aceptar, para quien no puede hacerlo. Aceptar es voluntario, y se dice SIN dejar leer
+ * que sin aceptación el cambio no aplica (gate de Vera, 2026-10-07): rige desde su vigencia en todo caso.
+ */
+export function textoQuienAceptaModificacion(
+  designadoNombre: string | null,
+  doc: Pick<DocumentoContractual, 'vigenteDesde'>,
+): string {
+  const desde = fechaLarga(doc.vigenteDesde)
   const quien = designadoNombre ? `La persona designada por tu empresa, ${designadoNombre},` : 'La persona designada por tu empresa'
-  return `${quien} puede aceptar esta versión desde Valida. Aceptarla no es obligatorio: Valida sigue funcionando igual.`
+  return (
+    `${quien} puede aceptar esta versión desde Valida. Aceptarla no es obligatorio para seguir usando Valida, ` +
+    `pero el cambio rige desde el ${desde} en todo caso.`
+  )
 }
 
 /** La ruta del PDF de una versión (la descarga firmada de `/api/valida/archivo`). */
