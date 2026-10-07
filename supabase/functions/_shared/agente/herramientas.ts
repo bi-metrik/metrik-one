@@ -31,6 +31,8 @@ export function declaraciones(d: Dominio, r: Reglamento): DeclaracionHerramienta
       name: 'proponer',
       description: [
         'La única puerta para escribir en ONE, y no escribe: el sistema arma un resumen con datos reales y lo manda con botones; se ejecuta solo si la persona toca «sí». Cierra el turno: no redactes después.',
+        'Si la persona además preguntó algo (p. ej. «¿ya tenemos algo abierto?»), la respuesta va en `texto`: sale arriba del resumen, en el mismo mensaje. Una pregunta sin contestar es un error.',
+        'Si la propuesta pendiente (en el Estado) ya es esta, no la repitas: contesta con `responder`.',
         `Acciones: ${d.acciones.join(', ')}.`,
         reglasProponer.length ? `Reglas al proponer:\n${reglasProponer.join('\n')}` : '',
       ].filter(Boolean).join('\n'),
@@ -39,6 +41,7 @@ export function declaraciones(d: Dominio, r: Reglamento): DeclaracionHerramienta
         properties: {
           accion: { type: 'string', enum: d.acciones },
           datos: { type: 'object', properties: d.datosProponer },
+          texto: { type: 'string', description: 'Opcional. La respuesta a lo que la persona preguntó en este mensaje (máximo 600 caracteres, mismas reglas que `responder`). No repitas el resumen: lo escribe el sistema.' },
           reglas_usadas: { type: 'array', items: { type: 'string' } },
         },
         required: ['accion', 'datos'],

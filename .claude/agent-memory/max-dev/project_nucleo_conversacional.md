@@ -24,4 +24,8 @@ lugar del agente simple v2; criterio fijado ANTES de medir: 0 dañinas, más éx
 - Arnés real: `scratchpad/nucleo-arnes.sh` (grep a «Gemini API Key (pruebas)»), `--humo` primero. Mauricio no da más
   presupuesto de pruebas sin pedirlo: c1 + c2 ×1 por corrida.
 - Un toque por título en el arnés se busca EXACTO primero (bug «No» → [Anotar]).
+- Falla en vivo 2026-10-07 (PR fix/agente-proponer-con-respuesta): `proponer` cerraba el turno con SOLO el resumen, así
+  que una pregunta junto a un pedido nunca se contestaba, y el respaldo flash-lite repetía la misma propuesta. Ahora
+  `proponer.texto` va arriba del resumen y el candado `propuesta_repetida` (acción + datos con llaves ordenadas) no
+  reenvía la pendiente. El corte/respaldo ya era config: `bot_conversacional.agente_config.corte_ms` / `.respaldo`.
 Relacionado: [[bandeja-hibrida]], [[entendimiento-bandeja-wa]].
