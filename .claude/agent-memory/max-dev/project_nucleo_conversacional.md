@@ -30,8 +30,17 @@ lugar del agente simple v2; criterio fijado ANTES de medir: 0 dañinas, más éx
   reenvía la pendiente. El corte/respaldo ya era config: `bot_conversacional.agente_config.corte_ms` / `.respaldo`.
 - Segunda falla 2026-10-07 (PR fix/bandeja-acumula-propuestas, sin migración): una propuesta de anotar REEMPLAZABA la
   pendiente y la extracción veía solo `datos.texto`. Ahora `bandeja/carga.ts`: lee los escritos del viaje (tramos por
-  `nombramientos`, el viaje_nuevo pendiente cuenta como `nuevo:<huella>`), une con la pendiente del mismo viaje, deriva
-  regreso por noches, y un rango en select va a `requisitos_especiales`. El toque de [Sí, ábrelo] ya llama a la
-  extracción (Gemini) vía `trasEjecutar`: ese toque tarda más que antes. «Niños» sigue preguntándose si no dicen «sin
-  niños» (regla de la extracción de siempre, no se tocó). `PuertoMemoria` con `campos` + `extraer` corre la cadena real.
+  `nombramientos`, el viaje_nuevo pendiente cuenta como `nuevo:<huella>`) y une con la pendiente del mismo viaje. El
+  toque de [Sí, ábrelo] ya llama a la extracción (Gemini) vía `trasEjecutar`: ese toque tarda más que antes.
+- ⚠️ Mauricio, 2026-10-07, sobre «4 o 5 estrellas»: «el modelo tiene que tener la capacidad de entender… No puede ser
+  tan paramétrico». En el núcleo el modelo interpreta y clasifica; el código SOLO protege invariantes. Por eso el núcleo
+  tiene su propia extracción (`bandeja/extraccion.ts`) y NO usa `entenderEntrega`/`validarSalida`/`guardianPasajeros`
+  (regex sobre el texto, siguen en el flujo viejo). `cargarEnExistente(..., { delModelo: true })` en el núcleo. No
+  agregar reglas de código que lean el texto del comercial: si el modelo falla, se arregla el prompt.
+- Verificador (mismo PR, #1073): una afirmación de hecho sale solo con respaldo de HECHOS (herramientas de este turno
+  + escrituras confirmadas, `fuentesDeHechos` en nucleo.ts), no de la conversación. Por eso `ver_viaje` devuelve
+  `registrado` y la escritura guarda `escritos`: si se quitan, lo cierto vuelve a atajarse y el turno se rehace.
+- El reglamento de la conversación (`bot_reglamentos`, Anexo A) aún dice «solo infante se deduce» en `g.pasajeros`: es
+  dato de la base, no código; no se tocó. `PuertoMemoria` con `campos` + `extraer` corre la cadena real; el guion recibe
+  `instrucciones` (el prompt) para probarlo.
 Relacionado: [[bandeja-hibrida]], [[entendimiento-bandeja-wa]].

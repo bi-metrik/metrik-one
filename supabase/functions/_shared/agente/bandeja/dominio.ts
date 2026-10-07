@@ -29,6 +29,8 @@ export interface ViajeAgente {
   faltaCompleto: string[];
   /** Hay una carga en vuelo sobre este viaje. */
   enVuelo?: boolean;
+  /** Lo que el viaje tiene, por etiqueta y legible (`registradoDe`): respalda «está registrada…». */
+  registrado?: Record<string, string>;
 }
 
 export interface PuertoBandeja {
@@ -44,7 +46,8 @@ export interface PuertoBandeja {
    * `previo`: el plan de la propuesta pendiente del mismo viaje, que se une (lo nuevo gana solo en el mismo campo).
    */
   prepararCarga(viajeId: string, textos: string[], previo?: unknown): Promise<{ entendido: string[]; falta: string[]; plan: unknown }>;
-  cargar(viajeId: string, plan: unknown): Promise<{ lineas: string[] }>;
+  /** `escritos`: lo que quedó escrito, por etiqueta y legible (`registradoDe`). */
+  cargar(viajeId: string, plan: unknown): Promise<{ lineas: string[]; escritos?: Record<string, string> }>;
   crearCliente(nombre: string, llave: Llave): Promise<{ ok: true; id: string; nombre: string } | { ok: false; motivo: string }>;
 }
 
@@ -188,7 +191,7 @@ export const LECTURAS: DeclaracionHerramienta[] = [
   },
   {
     name: 'ver_viaje',
-    description: 'El detalle de un viaje por su código («M1 26 6»): cliente, destino, si está abierto, qué le falta para cotizar y para quedar completo. Solo lectura.',
+    description: 'El detalle de un viaje por su código («M1 26 6»): cliente, destino, si está abierto, lo que tiene registrado, qué le falta para cotizar y para quedar completo. Solo lectura.',
     parameters: { type: 'object', properties: { codigo: { type: 'string' } }, required: ['codigo'] },
   },
 ];
@@ -258,6 +261,7 @@ export function dominioBandeja(puerto: PuertoBandeja): Dominio {
         ok: true,
         datos: {
           codigo: v.codigo, nombre: v.nombre, cliente: v.cliente, destino: v.destino, abierto: v.abierto,
+          ...(v.registrado ? { registrado: v.registrado } : {}),
           falta_para_cotizar: v.faltaCotizar, falta_para_completo: v.faltaCompleto,
           ...(v.enVuelo ? { nota: 'Hay una carga en vuelo sobre este viaje: dilo y contesta cuando termine.' } : {}),
         },
@@ -382,7 +386,7 @@ export function dominioBandeja(puerto: PuertoBandeja): Dominio {
       return {
         lineas: r.lineas,
         consumidos: (d.mensajes as string[] | undefined) ?? [],
-        escrituras: [{ tipo: p.accion === 'cargar_tanda' ? 'carga' : 'anotacion', viajeId: d.viajeId, codigo: d.codigo, mensajes: d.mensajes ?? [] }],
+        escrituras: [{ tipo: p.accion === 'cargar_tanda' ? 'carga' : 'anotacion', viajeId: d.viajeId, codigo: d.codigo, mensajes: d.mensajes ?? [], ...(r.escritos ? { escritos: r.escritos } : {}) }],
       };
     }
     if (p.accion === 'crear_cliente') {
