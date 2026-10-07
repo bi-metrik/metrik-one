@@ -303,3 +303,4 @@
 - **Tocar un botón «por título» con `includes` toca el equivocado.** (2026-10-06, arnés del núcleo). «No» encontró
   [Anotar] porque «anotar» contiene «no», y el arnés ejecutó una carga que el usuario simulado había rechazado. Buscar
   primero el título exacto, después el que empieza igual, y solo al final por contenido.
+- **`alertas_plazo_log` ya no es «un aviso por caso para siempre»: es uno por hito y por ciclo de reproceso.** (2026-10-07). La UNIQUE es `(negocio_id, hito, ciclo)` y el `ciclo` lo pone un trigger desde `negocios.metadata.reproceso.ciclo` (lo que mande quien inserta se ignora). «Ya avisado» se decide por TIEMPO (`enviado_at` posterior al `abierto_at` del último reproceso), no por el número: las filas anteriores a la columna nacieron en 0 aunque su caso vaya en el ciclo 2. Compararlas por número repetiría el primer día los avisos ya enviados.
