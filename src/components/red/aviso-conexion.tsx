@@ -3,10 +3,14 @@ import { RefreshCw } from 'lucide-react'
 import AnimacionMarca from '@/components/marca/animacion-marca'
 import {
   ATRIBUTO_CAUSA,
+  ATRIBUTO_CAUSA_LENTA,
   ATRIBUTO_REINTENTAR,
   AVISO_CONEXION,
+  AVISO_LENTA,
+  LIMITE_ESPERA_LENTA_MS,
   LIMITE_ESPERA_RUTA_MS,
   animacionAparecer,
+  animacionLenta,
   animacionOcultar,
   type CausaAvisoConexion,
 } from '@/lib/red/aviso-conexion'
@@ -66,6 +70,7 @@ export function EsperaConLimite({
   causa,
   destino,
   limiteMs = LIMITE_ESPERA_RUTA_MS,
+  limiteLentaMs = LIMITE_ESPERA_LENTA_MS,
   className,
   style,
 }: {
@@ -73,6 +78,8 @@ export function EsperaConLimite({
   causa: CausaAvisoConexion
   destino?: string | null
   limiteMs?: number
+  /** Cuándo aparece «tu conexión está lenta» debajo de la animación. */
+  limiteLentaMs?: number
   className?: string
   style?: CSSProperties
 }) {
@@ -83,7 +90,27 @@ export function EsperaConLimite({
       style={style}
       data-espera-con-limite=""
     >
-      <div style={{ ...celda, animation: animacionOcultar(limiteMs) }}>{children}</div>
+      <div
+        className="flex flex-col items-center gap-3"
+        style={{ ...celda, animation: animacionOcultar(limiteMs) }}
+      >
+        {children}
+        {/*
+          Red lenta (2026-10-07): a los 8 s, debajo de la animación, «tu conexión está lenta».
+          No es el aviso ni pide nada: dice que seguimos. Se oculta junto con la espera si
+          llega el tope (la animación de ocultar va de segunda y gana).
+        */}
+        {limiteLentaMs < limiteMs && (
+          <p
+            {...{ [ATRIBUTO_CAUSA_LENTA]: causa }}
+            role="status"
+            className="px-6 text-center text-sm text-muted-foreground"
+            style={{ visibility: 'hidden', animation: animacionLenta(limiteLentaMs, limiteMs) }}
+          >
+            {AVISO_LENTA}
+          </p>
+        )}
+      </div>
       <div
         {...{ [ATRIBUTO_CAUSA]: causa }}
         style={{ ...celda, visibility: 'hidden', animation: animacionAparecer(limiteMs) }}
@@ -94,7 +121,7 @@ export function EsperaConLimite({
   )
 }
 
-/** El `loading.tsx` de `(app)`: la animación de marca y, a los 25 s, el aviso. */
+/** El `loading.tsx` de `(app)`: la animación de marca, a los 8 s «tu conexión está lenta» y a los 45 s el aviso. */
 export function EsperaDeRuta({ className }: { className?: string }) {
   return (
     <EsperaConLimite causa="espera-ruta" className={className}>

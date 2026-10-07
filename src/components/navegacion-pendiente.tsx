@@ -149,7 +149,7 @@ export function CapaNavegacionPendiente() {
   const ctx = useContext(Contexto)
   if (!ctx?.pendiente) return null
   // Con tope (2026-10-06): Next no le pone limite a una navegacion, y si el payload RSC se
-  // queda colgado en la ruta de Claro/Telmex la capa quedaba para siempre. A los 25 s cede al
+  // queda colgado en la ruta de Claro/Telmex la capa quedaba para siempre. A los 45 s (desde 2026-10-07; antes 25) cede al
   // aviso "No pudimos conectar con ONE"; Reintentar carga el destino completo (si la
   // navegacion es de una tarjeta) o la pagina actual (enlace del menu, cuyo destino no se
   // conoce aqui).

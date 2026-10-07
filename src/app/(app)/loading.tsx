@@ -9,7 +9,7 @@ import { EsperaDeRuta } from '@/components/red/aviso-conexion'
  * JavaScript). Un cambio de filtro por la URL dentro de la misma vista no lo vuelve a
  * mostrar: el limite de carga se monta por segmento, no por parametros de busqueda.
  *
- * Con tope (2026-10-06, Deisy en `/negocios/[id]`): si a los 25 s la pagina no llego (el
+ * Con tope (2026-10-06, Deisy en `/negocios/[id]`): si a los 45 s (antes 25; a los 8 s avisa que la conexion esta lenta) la pagina no llego (el
  * stream se corto o se quedo colgado), la animacion cede al aviso "No pudimos conectar con
  * ONE" con Reintentar. Lo hace CSS: funciona aunque este fallback nunca hidrate.
  */

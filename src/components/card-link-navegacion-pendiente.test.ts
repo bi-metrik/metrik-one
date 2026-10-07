@@ -142,14 +142,14 @@ describe('tocar una tarjeta', () => {
     expect(animando()).toBe(true)
   })
 
-  it('la espera tiene tope: el aviso de conexion ya viene oculto y a los 25 s lo muestra CSS, con el destino', async () => {
+  it('la espera tiene tope: el aviso de conexion ya viene oculto y a los 45 s (antes 25) lo muestra CSS, con el destino', async () => {
     await montar()
     tarjeta()!.click()
     await asentar()
     const aviso = contenedor.querySelector('[data-one-aviso-causa="navegacion"]') as HTMLElement | null
     expect(aviso).not.toBeNull()
     expect(aviso!.style.visibility).toBe('hidden')
-    expect(aviso!.style.animation).toContain('25000ms')
+    expect(aviso!.style.animation).toContain('45000ms')
     expect(aviso!.textContent).toContain('No pudimos conectar con ONE')
     // Reintentar carga la ficha completa, no la lista vieja.
     expect(aviso!.querySelector('[data-one-reintentar]')?.getAttribute('data-one-reintentar')).toBe('/negocios/n1')
