@@ -137,6 +137,22 @@ function fuentesDeRespaldo(e: EntradaTurno, extra: string[]): string[] {
   return f;
 }
 
+/**
+ * Lo que respalda una AFIRMACIÓN de hecho («está registrada…», «ya quedó guardada…»): lo que devolvieron las
+ * herramientas en este turno y las escrituras confirmadas con un toque (sus líneas y lo que escribieron). No la
+ * conversación: que el comercial lo haya dicho no quiere decir que esté en el viaje.
+ */
+function fuentesDeHechos(e: EntradaTurno, resultadosTurno: string[]): string[] {
+  const f: string[] = [...resultadosTurno];
+  for (const x of e.filas) {
+    const ej = x.traza?.ejecucion;
+    if (ej?.resultado !== 'ejecutada') continue;
+    f.push(...(ej.lineas ?? []));
+    if (ej.escrituras?.length) f.push(JSON.stringify(ej.escrituras));
+  }
+  return f;
+}
+
 /** La respuesta fija de «no pude» con las opciones vigentes (la propuesta pendiente, si la hay). */
 function caido(deps: DepsTurno, e: EntradaTurno): Salida {
   const t = respuestaFija(deps.reglamento, 'rf.modelo_caido');
@@ -256,7 +272,7 @@ export async function turnoDelModelo(deps: DepsTurno, e: EntradaTurno): Promise<
           devolver(`${render.error} (el \`texto\` de \`proponer\`)`);
           continue;
         }
-        const motivos = verificar(render.salida.texto, respaldoDe([...respaldoFijo, ...fuentesDeRespaldo(e, resultadosTurno), p.propuesta.resumen]));
+        const motivos = verificar(render.salida.texto, respaldoDe([...respaldoFijo, ...fuentesDeRespaldo(e, resultadosTurno), p.propuesta.resumen]), respaldoDe(fuentesDeHechos(e, resultadosTurno)));
         if (motivos.length) {
           traza.verificador!.push({ motivo: motivos.join('; '), texto: render.salida.texto });
           if (!correccionUsada) {
@@ -302,7 +318,7 @@ export async function turnoDelModelo(deps: DepsTurno, e: EntradaTurno): Promise<
       continue;
     }
     const aVerificar = [render.salida.texto, ...('opciones' in render.salida ? render.salida.opciones.map((o) => `${o.titulo}. ${o.descripcion ?? ''}`) : [])].join('\n');
-    const motivos = texto ? verificar(aVerificar, respaldoDe([...respaldoFijo, ...fuentesDeRespaldo(e, resultadosTurno)])) : ['texto vacío'];
+    const motivos = texto ? verificar(aVerificar, respaldoDe([...respaldoFijo, ...fuentesDeRespaldo(e, resultadosTurno)]), respaldoDe(fuentesDeHechos(e, resultadosTurno))) : ['texto vacío'];
     if (motivos.length) {
       traza.verificador!.push({ motivo: motivos.join('; '), texto: aVerificar });
       if (!correccionUsada) {

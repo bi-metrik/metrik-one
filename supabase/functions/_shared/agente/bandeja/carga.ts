@@ -172,6 +172,21 @@ export function mismoEntendido(a: ReadonlyArray<string>, b: ReadonlyArray<string
   return x.length === y.length && x.every((v, i) => v === y[i]);
 }
 
+/**
+ * Lo que el viaje tiene, por la etiqueta de cada campo y como se le dice a una persona («Fecha de regreso: 16 nov»). Lo
+ * devuelve `ver_viaje` y lo guarda la escritura confirmada: es lo que respalda que el bot diga «está registrada…». Pura.
+ */
+export function registradoDe(campos: ReadonlyArray<CampoEntendible>, valores: Record<string, unknown>, solo?: ReadonlyArray<string>): Record<string, string> {
+  const out: Record<string, string> = {};
+  for (const f of campos) {
+    if (f.slug.startsWith('_') || (solo && !solo.includes(f.slug))) continue;
+    const v = valores[f.slug];
+    if (v === null || v === undefined || v === '' || (Array.isArray(v) && !v.length) || typeof v === 'object') continue;
+    out[f.label ?? f.slug] = valorLegible(f, v);
+  }
+  return out;
+}
+
 /** El hecho tras el toque. Pura. */
 export function lineaCargada(codigo: string, escritos: ReadonlyArray<string>, campos: ReadonlyArray<CampoEntendible>): string {
   const porSlug = new Map(campos.map((f) => [f.slug, f.label ?? f.slug]));

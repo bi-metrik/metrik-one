@@ -10,7 +10,7 @@ import type { FichaCliente, Llave } from '../wa-cliente-reglas.ts';
 import { calcularNiveles } from '../niveles-solicitud.ts';
 import type { CampoEntendible } from '../wa-entendimiento-reglas.ts';
 import { cargarEnExistente } from '../wa-carga-reglas.ts';
-import { lineaCargada, mensajesDeTextos, planDeCarga } from './bandeja/carga.ts';
+import { lineaCargada, mensajesDeTextos, planDeCarga, registradoDe } from './bandeja/carga.ts';
 import { instruccionesCarga } from './bandeja/extraccion.ts';
 import type { PlanCarga } from './bandeja/carga.ts';
 import type { PuertoBandeja, ViajeAgente } from './bandeja/dominio.ts';
@@ -177,7 +177,8 @@ export class PuertoMemoria implements PuertoBandeja {
     if (!v) return null;
     const c = this.contactos.find((x) => x.id === v.contactoId);
     const f = this.faltas(v);
-    return { id: v.id, codigo: v.codigo, nombre: v.nombre, cliente: c?.nombre ?? null, destino: v.destino, abierto: v.abierto, faltaCotizar: f.cotizar, faltaCompleto: f.completo };
+    const registrado = this.campos ? registradoDe(this.campos, { destino: v.destino, ...v.datos }) : undefined;
+    return { id: v.id, codigo: v.codigo, nombre: v.nombre, cliente: c?.nombre ?? null, destino: v.destino, abierto: v.abierto, faltaCotizar: f.cotizar, faltaCompleto: f.completo, ...(registrado ? { registrado } : {}) };
   }
 
   async crearViaje(p: { contactoId: string; destino: string | null }) {
@@ -218,7 +219,8 @@ export class PuertoMemoria implements PuertoBandeja {
         v.datos = resto;
       }
       this.escrituras.push({ tipo: 'carga', codigo: v.codigo, escritos });
-      return { lineas: [lineaCargada(v.codigo, escritos, this.campos)] };
+      const valores = Object.fromEntries(Object.entries((plan as PlanCarga).sugeridos).map(([k, x]) => [k, x.valor]));
+      return { lineas: [lineaCargada(v.codigo, escritos, this.campos)], escritos: registradoDe(this.campos, valores, escritos) };
     }
     const textos = (plan as { textos: string[] }).textos;
     v.datos.textos = [...((v.datos.textos as string[] | undefined) ?? []), ...textos];

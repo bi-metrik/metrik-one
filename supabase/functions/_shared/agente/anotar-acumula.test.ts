@@ -392,6 +392,69 @@ describe('el resumen no repite su primera línea arriba', () => {
   })
 })
 
+/**
+ * Traza en vivo 2026-10-07 15:46-15:49 (datos inventados aquí): el verificador atajaba por la PALABRA y no por el
+ * hecho. «Está registrada la ciudad de salida…» tras un `ver_viaje` y «la fecha de regreso ya quedó guardada…» tras un
+ * toque eran ciertas y se rehacían (turnos de 14,9 s y 12,6 s). Ahora sale lo que respalda una herramienta de este
+ * turno o una escritura confirmada; un «lo anoté» sin respaldo se sigue atajando.
+ */
+describe('el verificador compara la afirmación contra los hechos, no contra una lista de verbos', () => {
+  const ANA = { id: 'c-ana', nombre: 'ANA PRIETO', celular: '3015550421' }
+  const VIAJE = { id: 'v-7', codigo: 'A1 26 7', contactoId: 'c-ana', nombre: 'CANCÚN', destino: 'Cancún', abierto: true, datos: { ciudad_origen: 'PEREIRA', fecha_salida: '2026-11-11' } as Record<string, unknown> }
+  const VER = 'En A1 26 7 está registrada la ciudad de salida: Pereira, y la salida el 11 de noviembre. Falta la fecha de regreso.'
+  const YA = 'La fecha de regreso ya quedó guardada para el 16 de noviembre.'
+  const FALSO = 'Listo, lo anoté en A1 26 7: salen desde Manizales.'
+  const BIEN = '¿Quieres que anote que salen desde Manizales en A1 26 7?'
+
+  it('lo que devolvió ver_viaje en este turno y lo que se escribió con un toque salen; el «lo anoté» falso no', async () => {
+    const modelo = modeloGuionado([
+      // 1. «qué tenemos registrado»: consulta y afirma lo que el viaje tiene.
+      { name: 'ver_viaje', args: { codigo: 'A1 26 7' } },
+      { name: 'responder', args: { tema: 'viaje', texto: VER } },
+      // 2. las noches → propuesta; el toque escribe el regreso.
+      { name: 'proponer', args: { accion: 'anotar_en_viaje', datos: { viaje: 'A1 26 7' } } },
+      // 3. «calcula tú el regreso»: ya está escrito con el toque anterior.
+      { name: 'responder', args: { tema: 'viaje', texto: YA } },
+      // 4. un dato nuevo: el modelo dice que lo anotó (falso) y, devuelto, pregunta.
+      { name: 'responder', args: { tema: 'viaje', texto: FALSO } },
+      { name: 'responder', args: { tema: 'viaje', texto: BIEN } },
+    ])
+    const extraer: ExtractorMemoria = async ({ textos }) => crudo(textos, {
+      fecha_regreso: { valor: '2026-11-16', frase: 'son 5 noches', calculo: 'salida 2026-11-11 + 5 noches' },
+    })
+    const e = await escenario({ modelo, contactos: [ANA], viajes: [VIAJE], campos: CAMPOS, extraer })
+
+    expect(await e.escribe('qué tenemos registrado del A1 26 7 y qué nos hace falta')).toEqual([{ tipo: 'texto', texto: VER }])
+    expect(e.trazas().at(-1)!.verificador).toEqual([])
+
+    const p = await e.escribe('para el A1 26 7 son 5 noches')
+    expect(p[0].texto).toContain('• Fecha de regreso: 16 nov')
+    await e.toca('Anotar')
+    expect(e.puerto.viajes[0].datos.fecha_regreso).toBe('2026-11-16')
+
+    expect(await e.escribe('calcula tú la fecha de regreso')).toEqual([{ tipo: 'texto', texto: YA }])
+    expect(e.trazas().at(-1)!.verificador).toEqual([])
+
+    expect(await e.escribe('salen desde Manizales')).toEqual([{ tipo: 'texto', texto: BIEN }])
+    expect(e.trazas().at(-1)!.verificador?.[0]?.motivo).toContain('anoté')
+    expect(e.puerto.viajes[0].datos.ciudad_origen).toBe('PEREIRA')
+    expect(modelo.restantes()).toBe(0)
+  })
+
+  it('las piezas: sin hechos no sale; con hechos tiene que nombrar algo de ellos y traer sus datos', () => {
+    const conversacion = respaldoDe(['salen desde Manizales el 16 de noviembre', 'A1 26 7'])
+    const hechos = respaldoDe(['Cargué en A1 26 7: Fecha de regreso.', JSON.stringify([{ tipo: 'anotacion', codigo: 'A1 26 7', escritos: { 'Fecha de regreso': '16 nov' } }])])
+    expect(verificar(YA, conversacion)).not.toEqual([])
+    expect(verificar(YA, conversacion, hechos)).toEqual([])
+    // Nombra el campo pero la fecha no es la escrita.
+    expect(verificar('La fecha de regreso ya quedó guardada para el 18 de noviembre.', respaldoDe(['18 de noviembre']), hechos).join()).toContain('fecha')
+    // No nombra nada del hecho.
+    expect(verificar('Lo anoté.', conversacion, hechos).join()).toContain('sin nombrar nada')
+    // El dato está en la conversación, no en lo escrito.
+    expect(verificar(FALSO, conversacion, hechos).join()).toContain('Manizales')
+  })
+})
+
 describe('el verificador ataja el hecho en plural', () => {
   const r = respaldoDe(['Santa Marta'])
   it('«abrimos el viaje» / «lo anotamos» no salen; «¿lo abrimos?» sí', () => {

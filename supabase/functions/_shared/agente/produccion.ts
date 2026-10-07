@@ -20,7 +20,7 @@ import {
 import type { CampoEntendible, SalidaEntendida, Sugerido } from '../wa-entendimiento-reglas.ts';
 import { cargarEnExistente, trazaCarga } from '../wa-carga-reglas.ts';
 import { textoParaModelo } from '../wa-guardianes.ts';
-import { lineaCargada, mensajesDeTextos, planDeCarga } from './bandeja/carga.ts';
+import { lineaCargada, mensajesDeTextos, planDeCarga, registradoDe } from './bandeja/carga.ts';
 import { esquemaCarga, instruccionesCarga } from './bandeja/extraccion.ts';
 import { aplanarBloques, calcularNiveles } from '../niveles-solicitud.ts';
 import { todayBogotaISO } from '../bogota.ts';
@@ -163,6 +163,7 @@ export function puertoBandejaSupabase(supabase: SupabaseClient, workspaceId: str
       abierto: neg.estado === 'abierto',
       faltaCotizar: n.minimo.faltan.map((f) => f.label),
       faltaCompleto: [...n.minimo.faltan, ...n.deseable.faltan].map((f) => f.label),
+      registrado: registradoDe(fields as CampoEntendible[], valores),
     };
   };
 
@@ -224,7 +225,8 @@ export function puertoBandejaSupabase(supabase: SupabaseClient, workspaceId: str
         contenido: cortarContenido(trazaCarga({ quien: '', fechaISO: todayBogotaISO(), escritos, conflictos: [], fields: campos, historia })),
       });
       if (error) console.error('[agente] sin traza en la actividad del negocio:', error.message);
-      return { lineas: [lineaCargada(String(neg?.codigo ?? 'el viaje'), escritos, campos)] };
+      const valoresEscritos = Object.fromEntries(Object.entries(sugeridos).map(([k, x]) => [k, x.valor]));
+      return { lineas: [lineaCargada(String(neg?.codigo ?? 'el viaje'), escritos, campos)], escritos: registradoDe(campos, valoresEscritos, escritos) };
     },
     async crearCliente(nombre: string, llave: Llave) {
       const r = await crearContactoConGuardian(supabase, workspaceId, { nombre, llave });

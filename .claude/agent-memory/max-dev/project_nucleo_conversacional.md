@@ -37,6 +37,9 @@ lugar del agente simple v2; criterio fijado ANTES de medir: 0 dañinas, más éx
   tiene su propia extracción (`bandeja/extraccion.ts`) y NO usa `entenderEntrega`/`validarSalida`/`guardianPasajeros`
   (regex sobre el texto, siguen en el flujo viejo). `cargarEnExistente(..., { delModelo: true })` en el núcleo. No
   agregar reglas de código que lean el texto del comercial: si el modelo falla, se arregla el prompt.
+- Verificador (mismo PR, #1073): una afirmación de hecho sale solo con respaldo de HECHOS (herramientas de este turno
+  + escrituras confirmadas, `fuentesDeHechos` en nucleo.ts), no de la conversación. Por eso `ver_viaje` devuelve
+  `registrado` y la escritura guarda `escritos`: si se quitan, lo cierto vuelve a atajarse y el turno se rehace.
 - El reglamento de la conversación (`bot_reglamentos`, Anexo A) aún dice «solo infante se deduce» en `g.pasajeros`: es
   dato de la base, no código; no se tocó. `PuertoMemoria` con `campos` + `extraer` corre la cadena real; el guion recibe
   `instrucciones` (el prompt) para probarlo.
