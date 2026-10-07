@@ -21,7 +21,12 @@ import {
   validarInvitacion,
 } from '@/lib/usuarios-espacio/reglas'
 import { cambiarRolUsuario, invitarUsuario, reenviarInvitacion, retirarUsuario } from '@/lib/usuarios-espacio/servidor'
-import { elegirPlanAnual as elegirPlanAnualServidor, enlaceDelMes, type EntradaEleccion } from '@/lib/valida-cda/plan-anual-servidor'
+import {
+  cambiarMencion,
+  elegirPlanAnual as elegirPlanAnualServidor,
+  enlaceDelMes,
+  type EntradaEleccion,
+} from '@/lib/valida-cda/plan-anual-servidor'
 
 /**
  * Las acciones de `/suscripcion`. Cada una vuelve a resolver el contexto en el servidor: una acción
@@ -288,6 +293,19 @@ async function elegirPlanAnualSinClave(p: EntradaEleccion): Promise<Resultado<{ 
   const r = await ctxEscritura()
   if (!r.ok) return r
   const res = await elegirPlanAnualServidor(r.ctx, p)
+  if (res.ok) refrescar()
+  return res
+}
+
+/**
+ * La autorización de mención del numeral 11 del anexo, después de elegir: revocarla o volver a darla.
+ * Solo la persona designada y con el plan anual activo; cada cambio es una fila nueva con su fecha.
+ * Idempotente por naturaleza: pedir el estado que ya hay no escribe nada.
+ */
+export async function cambiarMencionPlanAnual(p: { autoriza: boolean; textoMostrado: string }): Promise<Resultado> {
+  const r = await ctxEscritura()
+  if (!r.ok) return r
+  const res = await cambiarMencion(r.ctx, p)
   if (res.ok) refrescar()
   return res
 }

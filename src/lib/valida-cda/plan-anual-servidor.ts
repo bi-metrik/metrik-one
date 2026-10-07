@@ -19,13 +19,15 @@ import {
   PLAN_ANUAL,
   planAnualHabilitado,
   plazoAnual,
+  plantillaDelAnexo,
   renderAnexoPlanAnual,
   TEXTO_SIN_OFERTA,
+  textoMencionAutoriza,
+  textoRevocacionMencion,
   validarAceptante,
   type MotivoSinOferta,
   type PlazoAnual,
 } from './plan-anual'
-import { ANEXO_PLAN_ANUAL_PLANTILLA, ANEXO_PLAN_ANUAL_SLUG, ANEXO_PLAN_ANUAL_VERSION } from './plan-anual-anexo'
 
 /**
  * El lado del servidor del Plan Anual (reglas en `plan-anual.ts`): lo que ve la pestaña Pagos de
@@ -41,12 +43,23 @@ type Ctx = Extract<ContextoSuscripcion, { tipo: 'ok' }>
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type Db = any
 
-/** Los datos del anexo que no escribe la persona: empresa, términos aceptados y el plazo. */
+/** Los datos del anexo que no escribe la persona: empresa, términos aceptados (deciden el anexo) y el plazo. */
 export interface DatosAnexoBase {
   razonSocial: string
   nit: string
   versionTerminos: string
+  /** Solo Términos v2.0 (`parametros.orden_numero`). */
+  ordenNumero: string | null
+  /** Solo Términos v2.0 (`parametros.valor_usuario_adicional`). */
+  precioUsuarioAdicional: number | null
   plazo: Pick<PlazoAnual, 'desde' | 'hasta'>
+}
+
+/** La autorización de mención (anexo, numeral 11) vigente para el contrato. */
+export interface EstadoMencion {
+  autoriza: boolean
+  /** Cuándo se dio o se revocó (ISO). */
+  desde: string
 }
 
 export interface CuotaDelMes {
@@ -65,7 +78,7 @@ export type OpcionesPago =
       /** La cuota pendiente que se paga sola («Pagar el mes»), o `null` si no hay. */
       mes: CuotaDelMes | null
       anual:
-        | { estado: 'activo'; desde: string; hasta: string }
+        | { estado: 'activo'; desde: string; hasta: string; razonSocial: string | null; mencion: EstadoMencion | null }
         | { estado: 'elegido'; desde: string; hasta: string; enlace: string }
         | { estado: 'oferta'; datos: DatosAnexoBase }
         | { estado: 'no_disponible'; motivo: MotivoSinOferta; texto: string }
@@ -100,6 +113,9 @@ async function eleccionesDelContrato(db: Db, servicioContratadoId: string): Prom
   return (r.data ?? []) as FilaPlanAnual[]
 }
 
+/** Las series de Términos del Plan CDA: la v1.x de suscripción y la v2.0 de uso vía AFI. */
+const SLUGS_TERMINOS_CDA = ['terminos-suscripcion-valida-cda', 'terminos-uso-valida']
+
 async function datosBase(ctx: Ctx, plazo: PlazoAnual, db: Db): Promise<DatosAnexoBase | 'error'> {
   const [empresa, docs] = await Promise.all([
     db.from('empresas').select('nombre, razon_social, numero_documento').eq('id', ctx.contrato.empresaId).maybeSingle(),
@@ -108,13 +124,45 @@ async function datosBase(ctx: Ctx, plazo: PlazoAnual, db: Db): Promise<DatosAnex
   if (empresa.error || !empresa.data || !docs.ok) return 'error'
   const razonSocial = String(empresa.data.razon_social || empresa.data.nombre || '').trim()
   const nit = String(empresa.data.numero_documento || '').trim()
-  // La versión de los Términos que el CDA aceptó (la más reciente aceptada del Plan CDA).
+  // La versión de los Términos que el CDA aceptó (la más reciente aceptada): decide qué anexo ve.
   const aceptados = docs.documentos
-    .filter((d) => d.aceptadoAt !== null && d.slug.startsWith('terminos-suscripcion-valida-cda'))
+    .filter((d) => d.aceptadoAt !== null && SLUGS_TERMINOS_CDA.some((p) => d.slug.startsWith(p)))
     .sort((a, b) => b.vigenteDesde.localeCompare(a.vigenteDesde))
   const version = aceptados[0]?.version.replace(/^v/i, '') ?? ''
-  if (!razonSocial || !nit || !version) return 'error'
-  return { razonSocial, nit, versionTerminos: version, plazo: { desde: plazo.desde, hasta: plazo.hasta } }
+  const plantilla = plantillaDelAnexo(version)
+  if (!razonSocial || !nit || !plantilla) return 'error'
+  // El anexo de los Términos v2.0 nombra la Orden y el valor de su usuario adicional: sin ellos no se arma.
+  const p = ctx.contrato.parametros
+  const ordenNumero = typeof p.orden_numero === 'string' && p.orden_numero.trim() ? p.orden_numero.trim() : null
+  const precioUsuarioAdicional = typeof p.valor_usuario_adicional === 'number' && p.valor_usuario_adicional > 0 ? p.valor_usuario_adicional : null
+  if (plantilla.terminos === 'v2' && (!ordenNumero || precioUsuarioAdicional === null)) return 'error'
+  return {
+    razonSocial,
+    nit,
+    versionTerminos: version,
+    ordenNumero: plantilla.terminos === 'v2' ? ordenNumero : null,
+    precioUsuarioAdicional: plantilla.terminos === 'v2' ? precioUsuarioAdicional : null,
+    plazo: { desde: plazo.desde, hasta: plazo.hasta },
+  }
+}
+
+/** La última elección de mención del contrato que cuenta: la de /suscripcion, o la del anexo de un plan activo. */
+async function mencionVigente(db: Db, servicioContratadoId: string): Promise<EstadoMencion | null> {
+  const r = await db
+    .from('v_autorizacion_mencion_cda')
+    .select('autoriza, created_at')
+    .eq('servicio_contratado_id', servicioContratadoId)
+    .maybeSingle()
+  if (r.error || !r.data) {
+    if (r.error) console.error('[plan-anual] mención:', r.error.message)
+    return null
+  }
+  return { autoriza: r.data.autoriza === true, desde: String(r.data.created_at) }
+}
+
+async function razonSocialDe(db: Db, empresaId: string): Promise<string | null> {
+  const r = await db.from('empresas').select('nombre, razon_social').eq('id', empresaId).maybeSingle()
+  return r.data ? String(r.data.razon_social || r.data.nombre || '').trim() || null : null
 }
 
 /** Lo que muestra la pestaña Pagos junto a la cuota pendiente. */
@@ -133,7 +181,10 @@ export async function leerOpcionesPago(ctx: Ctx, ahoraMs: number = Date.now()): 
     : null
 
   const activo = elecciones.find((e) => e.estado === 'activo' && e.periodo_hasta >= hoy)
-  if (activo) return { tipo: 'ok', mes, anual: { estado: 'activo', desde: activo.periodo_desde, hasta: activo.periodo_hasta } }
+  if (activo) {
+    const [mencion, razonSocial] = await Promise.all([mencionVigente(db, ctx.contrato.id), razonSocialDe(db, ctx.contrato.empresaId)])
+    return { tipo: 'ok', mes, anual: { estado: 'activo', desde: activo.periodo_desde, hasta: activo.periodo_hasta, razonSocial, mencion } }
+  }
 
   const elegido = elecciones.find((e) => e.estado === 'elegido')
   if (elegido?.cobro_id && elegido.enlace_expira && Date.parse(elegido.enlace_expira) > ahoraMs) {
@@ -145,6 +196,7 @@ export async function leerOpcionesPago(ctx: Ctx, ahoraMs: number = Date.now()): 
   const plazo = plazoAnual(hoy, ctx.contrato.vigenteDesde)
   const oferta = ofertaPlanAnual({
     habilitado: true,
+    precioMensual: typeof ctx.contrato.parametros.precio_mensual === 'number' ? ctx.contrato.parametros.precio_mensual : null,
     hoy,
     ahoraMs,
     hayCuotasVencidas: estados.some((c) => c.estado === 'vencida'),
@@ -185,6 +237,10 @@ export interface EntradaEleccion {
   /** La huella del anexo que la pantalla tenía a la vista. */
   anexoSha256: unknown
   aceptaCasilla: unknown
+  /** El texto de la casilla SEPARADA de mención (numeral 11) que la pantalla tenía a la vista. */
+  casillaMencionMostrada: unknown
+  /** La casilla de mención: voluntaria, desmarcada por defecto, no condiciona nada. */
+  autorizaMencion: unknown
 }
 
 /**
@@ -210,13 +266,18 @@ export async function elegirPlanAnual(
   if (opciones.anual.estado === 'no_disponible') return { ok: false, error: opciones.anual.texto }
 
   const datos = opciones.anual.datos
-  const { anexo, casilla } = renderAnexoPlanAnual({
+  if (typeof input.autorizaMencion !== 'boolean') return { ok: false, error: 'Falta tu respuesta sobre la autorización de mención.' }
+  const { documento, anexo, casilla, casillaMencion } = renderAnexoPlanAnual({
     ...datos,
     nombreUsuario: aceptante.nombre,
     tipoDocumento: aceptante.tipoDocumento,
     numeroDocumento: aceptante.numeroDocumento,
   })
-  if (input.casillaMostrada !== casilla || input.anexoSha256 !== huellaTexto(anexo)) {
+  if (
+    input.casillaMostrada !== casilla ||
+    input.casillaMencionMostrada !== casillaMencion ||
+    input.anexoSha256 !== huellaTexto(anexo)
+  ) {
     return { ok: false, error: 'El anexo cambió mientras lo leías. Recarga la página y vuelve a leerlo antes de aceptar.' }
   }
 
@@ -311,13 +372,19 @@ export async function elegirPlanAnual(
     periodos: PLAN_ANUAL.periodos,
     monto: PLAN_ANUAL.monto,
     precio_lista: PLAN_ANUAL.precioLista,
-    documento_slug: ANEXO_PLAN_ANUAL_SLUG,
-    documento_version: ANEXO_PLAN_ANUAL_VERSION,
-    documento_texto_sha256: huellaTexto(ANEXO_PLAN_ANUAL_PLANTILLA),
+    // El documento que se MOSTRÓ (el de la serie de Términos del cliente): versión y huella de su plantilla.
+    documento_slug: documento.slug,
+    documento_version: documento.version,
+    documento_texto_sha256: huellaTexto(documento.plantilla),
     texto_anexo: anexo,
     texto_anexo_sha256: huellaTexto(anexo),
     texto_aceptacion: casilla,
     texto_aceptacion_sha256: huellaTexto(casilla),
+    // La autorización de mención (numeral 11), aparte de la aceptación: el trigger de la base deja además
+    // su fila en `autorizaciones_mencion_cda` (13.2: «se registra aparte»).
+    autoriza_mencion: input.autorizaMencion,
+    texto_mencion: casillaMencion,
+    texto_mencion_sha256: huellaTexto(casillaMencion),
     usuario_id: ctx.usuarioId,
     nombre_aceptante: aceptante.nombre,
     tipo_documento: aceptante.tipoDocumento,
@@ -344,4 +411,55 @@ export async function elegirPlanAnual(
     .is('anulado_at', null)
   if (up.error) console.error('[plan-anual] enlace en el cobro:', up.error.message)
   return { ok: true, url: enlace.url }
+}
+
+// ── La autorización de mención (anexo, numeral 11) ──────────────────────────────────────
+
+/**
+ * Dar o revocar después la autorización de mención, desde /suscripcion. Solo con un plan anual activo (la
+ * autorización es del anexo). Revocar es siempre posible; darla repite el texto exacto de la casilla del
+ * anexo, que la pantalla mostró. Cada cambio es una fila nueva en `autorizaciones_mencion_cda` (con
+ * fecha, persona, IP y dispositivo): nada se sobrescribe.
+ */
+export async function cambiarMencion(
+  ctx: Ctx,
+  input: { autoriza: unknown; textoMostrado: unknown },
+): Promise<{ ok: true } | { ok: false; error: string }> {
+  if (typeof input.autoriza !== 'boolean') return { ok: false, error: 'Falta la respuesta.' }
+  const opciones = await leerOpcionesPago(ctx)
+  if (opciones.tipo !== 'ok' || opciones.anual.estado !== 'activo') {
+    return { ok: false, error: 'La autorización de mención es del plan anual, y tu suscripción no tiene uno activo.' }
+  }
+  const { razonSocial, mencion } = opciones.anual
+  if (!razonSocial) return { ok: false, error: 'No se pudo leer la razón social de tu empresa. Intenta de nuevo.' }
+  if ((mencion?.autoriza ?? false) === input.autoriza) return { ok: true }
+  const texto = input.autoriza ? textoMencionAutoriza(razonSocial) : textoRevocacionMencion(razonSocial)
+  if (input.textoMostrado !== texto) return { ok: false, error: 'El texto cambió mientras lo leías. Recarga la página.' }
+  const db = createServiceClient() as Db
+  const activo = await db
+    .from('planes_anuales_cda')
+    .select('id')
+    .eq('servicio_contratado_id', ctx.contrato.id)
+    .eq('estado', 'activo')
+    .order('periodo_hasta', { ascending: false })
+    .limit(1)
+    .maybeSingle()
+  const origen = await origenPeticion()
+  const ins = await db.from('autorizaciones_mencion_cda').insert({
+    servicio_contratado_id: ctx.contrato.id,
+    workspace_cliente_id: ctx.workspaceId,
+    plan_anual_id: activo.data?.id ?? null,
+    origen: 'suscripcion',
+    autoriza: input.autoriza,
+    texto,
+    texto_sha256: huellaTexto(texto),
+    usuario_id: ctx.usuarioId,
+    ip: origen.ip,
+    user_agent: origen.userAgent,
+  })
+  if (ins.error) {
+    console.error('[plan-anual] cambiar mención:', ins.error.message)
+    return { ok: false, error: 'No se pudo registrar tu respuesta. Intenta de nuevo.' }
+  }
+  return { ok: true }
 }

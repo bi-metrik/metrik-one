@@ -1,9 +1,10 @@
 -- ============================================================
--- 20261007090000 — Plan Anual de VALIDA · Plan CDA: la elección con su aceptación, y la activación
+-- 20261007210000 — Plan Anual de VALIDA · Plan CDA: la elección con su aceptación, y la activación
 --
 -- Decisión de Mauricio del 2026-10-06 (proyectos/metrik/valida/decisions.md): 12 períodos por
 -- $1.650.000 (11 x 12), oferta hasta el 2027-03-31, elegida en la plataforma antes de pagar. Anexo del
--- Plan Anual v1 (Emilio, BORRADOR): proyectos/metrik/valida/docs/entrega/legal/plan-anual/.
+-- Plan Anual (Emilio; textos finales aprobados por Legal y por Vera el 2026-10-07): v1 para los Términos
+-- v1.3/v1.4 y el de los Términos v2.0 CDA vía AFI. Copias en docs/legal/plan-anual/.
 --
 -- ## Qué escribe: DDL y funciones. Ni una fila de datos.
 --
@@ -24,15 +25,24 @@
 --      Por eso `monto > 0` pasa a `monto > 0 o (usuarios_adicionales y monto >= 0)`, y el rango del IVA
 --      admite `iva = 0` sobre una cuota en cero.
 --   2. `planes_anuales_cda` — una fila por elección: la constancia de la aceptación del anexo (anexo
---      11.2: fecha y hora, usuario, IP, dispositivo, versión y huella SHA-256 del texto, las fechas del
---      plazo y la referencia del enlace) y su estado (`elegido` → `activo`, o `sin_efecto` /
---      `requiere_revision`). Lo aceptado no se modifica ni se borra (trigger).
+--      13.2: fecha y hora, usuario, IP, dispositivo, versión y huella SHA-256 del texto, las fechas del
+--      plazo, la referencia del enlace y si se dio o no la autorización de mención) y su estado
+--      (`elegido` → `activo`, o `sin_efecto` / `requiere_revision`). Lo aceptado no se modifica ni se
+--      borra (trigger).
+--   2b. `autorizaciones_mencion_cda` — la autorización de mención del numeral 11 del anexo, «registrada
+--      aparte» (13.2): una fila por elección (la de la casilla del anexo, que la escribe un trigger al
+--      insertar la elección) y una por cada cambio posterior en /suscripcion (revocar o volver a dar).
+--      Solo inserción. `v_autorizacion_mencion_cda` dice la vigente por contrato: la consulta Mateo/Sami
+--      antes de publicar un logo.
 --   3. `activar_plan_anual_cda(...)` — al aprobarse el pago: en UNA transacción, las cuotas mensuales
 --      del plazo pasan a `usuarios_adicionales` por lo que sumen sus cargos de licencias, se crean las
 --      de los períodos que faltaban (en cero), se anulan los cobros programados SIN pagar de esas
 --      cuotas (un enlace mensual ya emitido), se crea la cuota `anual` y se le ata el cobro pagado. La
 --      aritmética la hace el servidor (`src/lib/valida-cda/plan-anual.ts`, con pruebas); la función
---      vuelve a comprobar con las filas bloqueadas que nada cambió.
+--      vuelve a comprobar con las filas bloqueadas que nada cambió. En la misma transacción, la fecha
+--      de la cláusula 12.1 (`servicios_contratados.vigente_hasta`) pasa al fin del Plazo Anual si llegaba
+--      antes (anexo v1, 3.3; Maxitec: del 21-dic-2026 al fin de su año), con su fila en
+--      `servicios_contratados_cambios`. Nunca la acorta.
 --   4. `registrar_retiro_licencia(...)` — el mismo cuerpo de 20260924060000 con UN cambio: una cuota
 --      `usuarios_adicionales` puede quedar en cero al retirar su único usuario adicional (antes el
 --      retiro exigía que la cuota quedara en más de cero, porque toda cuota cobraba el servicio).
@@ -50,8 +60,9 @@
 -- ## Datos existentes que toca
 --
 -- Ninguno al aplicarla. Al activarse un plan (después de un pago aprobado): las cuotas mensuales de
--- los 12 períodos de ESE contrato cambian de tipo y monto, se crean cuotas nuevas, y los cobros
--- programados sin pagar de esas cuotas quedan anulados. Las cuotas de otros períodos, los pagos ya
+-- los 12 períodos de ESE contrato cambian de tipo y monto, se crean cuotas nuevas, los cobros
+-- programados sin pagar de esas cuotas quedan anulados y el `vigente_hasta` de ESE contrato pasa al fin
+-- del Plazo Anual. Las cuotas de otros períodos, los pagos ya
 -- recibidos, las facturas y los demás contratos no se tocan.
 --
 -- ## Verificación después de aplicar (solo lectura)
@@ -59,17 +70,23 @@
 --   select conname, pg_get_constraintdef(oid) from pg_constraint
 --    where conrelid = 'public.plan_cobro_cuotas'::regclass and contype = 'c' order by 1;
 --     -> plan_cobro_cuotas_tipo (4 tipos), plan_cobro_cuotas_monto, plan_cobro_cuotas_iva_rango nuevo
---   select relrowsecurity, relacl::text from pg_class where oid = 'public.planes_anuales_cda'::regclass;
+--   select relname, relrowsecurity, relacl::text from pg_class
+--    where oid in ('public.planes_anuales_cda'::regclass, 'public.autorizaciones_mencion_cda'::regclass);
 --     -> true, sin anon ni authenticated
+--   select relname, reloptions from pg_class where oid = 'public.v_autorizacion_mencion_cda'::regclass;
+--     -> {security_invoker=on}
 --   select p.proname, p.proacl::text from pg_proc p join pg_namespace n on n.oid = p.pronamespace
 --    where n.nspname = 'public' and p.proname in ('activar_plan_anual_cda', 'registrar_retiro_licencia',
---                                                 'planes_anuales_cda_guardas');
+--                                                 'planes_anuales_cda_guardas', 'planes_anuales_cda_mencion',
+--                                                 'autorizaciones_mencion_cda_inmutable');
 --     -> sin `anon=`, sin `authenticated=` y sin `=X/`
 --   select count(*) from public.plan_cobro_cuotas where tipo not in ('anticipo', 'cuota');  -> 0
 --
 -- ## Cómo revertir (mientras ningún plan se haya activado)
 --
 --   drop function public.activar_plan_anual_cda(uuid, uuid, jsonb);
+--   drop view public.v_autorizacion_mencion_cda;
+--   drop table public.autorizaciones_mencion_cda;
 --   drop table public.planes_anuales_cda;
 --   -- registrar_retiro_licencia: re-crear con el cuerpo de 20260924060000.
 --   alter table public.plan_cobro_cuotas drop constraint plan_cobro_cuotas_tipo,
@@ -158,7 +175,7 @@ create table public.planes_anuales_cda (
     constraint planes_anuales_precio_lista check (precio_lista >= monto),
   constraint planes_anuales_plazo check (periodo_desde < periodo_hasta),
 
-  -- ── La constancia de la aceptación (anexo 11.2) ──
+  -- ── La constancia de la aceptación (anexo 13.2) ──
   documento_slug text not null
     constraint planes_anuales_slug check (length(btrim(documento_slug)) between 1 and 80),
   documento_version text not null,
@@ -174,6 +191,13 @@ create table public.planes_anuales_cda (
     constraint planes_anuales_aceptacion_largo check (char_length(texto_aceptacion) between 1 and 2000),
   texto_aceptacion_sha256 text not null
     constraint planes_anuales_aceptacion_sha check (texto_aceptacion_sha256 ~ '^[0-9a-f]{64}$'),
+  -- La autorización de mención (numeral 11): casilla SEPARADA, desmarcada por defecto, que no condiciona
+  -- nada. Se guarda la respuesta y el texto que se mostró; el trigger la copia a `autorizaciones_mencion_cda`.
+  autoriza_mencion boolean not null,
+  texto_mencion text not null
+    constraint planes_anuales_mencion_largo check (char_length(texto_mencion) between 1 and 1000),
+  texto_mencion_sha256 text not null
+    constraint planes_anuales_mencion_sha check (texto_mencion_sha256 ~ '^[0-9a-f]{64}$'),
   -- La persona REAL de la sesión (nunca la de «Ver como»), con lo que escribió.
   usuario_id uuid not null references public.profiles(id),
   nombre_aceptante text not null
@@ -243,6 +267,9 @@ begin
   or new.texto_anexo_sha256      is distinct from old.texto_anexo_sha256
   or new.texto_aceptacion        is distinct from old.texto_aceptacion
   or new.texto_aceptacion_sha256 is distinct from old.texto_aceptacion_sha256
+  or new.autoriza_mencion        is distinct from old.autoriza_mencion
+  or new.texto_mencion           is distinct from old.texto_mencion
+  or new.texto_mencion_sha256    is distinct from old.texto_mencion_sha256
   or new.usuario_id              is distinct from old.usuario_id
   or new.nombre_aceptante        is distinct from old.nombre_aceptante
   or new.tipo_documento          is distinct from old.tipo_documento
@@ -273,6 +300,107 @@ create trigger trg_planes_anuales_cda_guardas
   for each row execute function public.planes_anuales_cda_guardas();
 
 
+-- ── 2b. La autorización de mención (anexo, numeral 11), registrada aparte ──────────────────
+
+create table public.autorizaciones_mencion_cda (
+  id uuid primary key default gen_random_uuid(),
+  servicio_contratado_id uuid not null references public.servicios_contratados(id),
+  -- El espacio del CDA.
+  workspace_cliente_id uuid not null references public.workspaces(id),
+  -- La elección del plan anual en la que se dio o a la que pertenece el cambio.
+  plan_anual_id uuid references public.planes_anuales_cda(id),
+  -- `anexo_plan_anual`: la casilla del anexo al elegir (cuenta solo si ese plan se activa).
+  -- `suscripcion`: un cambio posterior en /suscripcion (revocar, o volver a darla).
+  origen text not null
+    constraint autorizaciones_mencion_origen check (origen in ('anexo_plan_anual', 'suscripcion')),
+  autoriza boolean not null,
+  texto text not null
+    constraint autorizaciones_mencion_texto check (char_length(texto) between 1 and 1000),
+  texto_sha256 text not null
+    constraint autorizaciones_mencion_sha check (texto_sha256 ~ '^[0-9a-f]{64}$'),
+  usuario_id uuid not null references public.profiles(id),
+  ip text,
+  user_agent text,
+  created_at timestamptz not null default now(),
+  constraint autorizaciones_mencion_anexo_con_plan check (origen <> 'anexo_plan_anual' or plan_anual_id is not null)
+);
+
+alter table public.autorizaciones_mencion_cda enable row level security;
+-- server-only: la escriben el trigger de la elección y la acción de /suscripcion de la persona designada (service_role); la lee el servidor y quien consulta antes de publicar un logo.
+revoke all on table public.autorizaciones_mencion_cda from public, anon, authenticated;
+
+create index idx_autorizaciones_mencion_contrato
+  on public.autorizaciones_mencion_cda (servicio_contratado_id, created_at desc);
+
+comment on table public.autorizaciones_mencion_cda is
+  'Autorización de mención del numeral 11 del Anexo del Plan Anual de Valida CDA (razón social y logo en material comercial): voluntaria, revocable. Solo inserción: la vigente es la última que cuenta (v_autorizacion_mencion_cda).';
+
+create or replace function public.autorizaciones_mencion_cda_inmutable()
+returns trigger
+language plpgsql
+set search_path = ''
+as $$
+begin
+  raise exception 'autorizaciones_mencion_cda %: es la constancia de una autorización; no se cambia ni se borra (se registra otra)',
+    coalesce(old.id, new.id);
+end;
+$$;
+
+revoke execute on function public.autorizaciones_mencion_cda_inmutable() from public, anon, authenticated;
+
+create trigger trg_autorizaciones_mencion_cda_inmutable
+  before update or delete on public.autorizaciones_mencion_cda
+  for each row execute function public.autorizaciones_mencion_cda_inmutable();
+
+-- La casilla del anexo se registra aparte en la MISMA transacción que la elección.
+create or replace function public.planes_anuales_cda_mencion()
+returns trigger
+language plpgsql
+set search_path = ''
+as $$
+begin
+  insert into public.autorizaciones_mencion_cda (
+    servicio_contratado_id, workspace_cliente_id, plan_anual_id, origen, autoriza, texto, texto_sha256,
+    usuario_id, ip, user_agent, created_at
+  ) values (
+    new.servicio_contratado_id, new.workspace_cliente_id, new.id, 'anexo_plan_anual', new.autoriza_mencion,
+    new.texto_mencion, new.texto_mencion_sha256, new.usuario_id, new.ip, new.user_agent, new.aceptado_at
+  );
+  return new;
+end;
+$$;
+
+revoke execute on function public.planes_anuales_cda_mencion() from public, anon, authenticated;
+
+create trigger trg_planes_anuales_cda_mencion
+  after insert on public.planes_anuales_cda
+  for each row execute function public.planes_anuales_cda_mencion();
+
+-- La vigente por contrato: la última que cuenta. La del anexo cuenta solo si su plan se activó (una
+-- elección que no se pagó no dejó anexo vigente); un cambio en /suscripcion cuenta siempre. `vigente` =
+-- autoriza Y el contrato sigue activo (11.4: «dura mientras el Cliente lo sea»).
+--   select * from public.v_autorizacion_mencion_cda where vigente;   -- antes de publicar un logo
+create view public.v_autorizacion_mencion_cda with (security_invoker = on) as
+select distinct on (a.servicio_contratado_id)
+       a.servicio_contratado_id,
+       a.workspace_cliente_id,
+       sc.empresa_id,
+       a.autoriza,
+       a.autoriza and sc.estado = 'activo' as vigente,
+       a.origen,
+       a.texto,
+       a.usuario_id,
+       a.created_at
+  from public.autorizaciones_mencion_cda a
+  join public.servicios_contratados sc on sc.id = a.servicio_contratado_id
+  left join public.planes_anuales_cda p on p.id = a.plan_anual_id
+ where a.origen = 'suscripcion' or p.estado = 'activo'
+ order by a.servicio_contratado_id, a.created_at desc, a.id desc;
+
+-- server-only: la lee el servidor con service_role (security_invoker y sin grant: authenticated no la ve).
+revoke all on table public.v_autorizacion_mencion_cda from public, anon, authenticated;
+
+
 -- ── 3. Activar el plan al aprobarse el pago ───────────────────────────────────────────────
 
 create or replace function public.activar_plan_anual_cda(
@@ -300,6 +428,8 @@ declare
   v_anual record;
   v_cuota_anual uuid;
   v_n integer;
+  v_sc record;
+  v_hasta date;
 begin
   select * into v_pa from public.planes_anuales_cda where id = p_plan_anual_id for update;
   if not found then raise exception 'activar_plan_anual_cda: elección inexistente'; end if;
@@ -422,6 +552,29 @@ begin
      set estado = 'activo', cuota_anual_id = v_cuota_anual, fecha_pago = v_cobro.fecha, activado_at = now(), detalle = null
    where id = p_plan_anual_id;
 
+  -- La fecha de la cláusula 12.1 pasa al fin del Plazo Anual (anexo v1, 3.3): con el año pagado no puede
+  -- asomar un fin de contrato antes de que el año termine. Nunca se acorta (`greatest` ignora el null:
+  -- un contrato sin fecha también pasa al fin del plazo). Mismo criterio que `vigenteHastaConPlanAnual`.
+  select sc.id, sc.vigente_hasta into v_sc
+    from public.servicios_contratados sc
+   where sc.id = v_pa.servicio_contratado_id
+   for update;
+  if not found then raise exception 'activar_plan_anual_cda: el contrato de la elección no existe'; end if;
+  v_hasta := greatest(v_sc.vigente_hasta, v_pa.periodo_hasta);
+  if v_sc.vigente_hasta is distinct from v_hasta then
+    update public.servicios_contratados
+       set vigente_hasta = v_hasta, actualizado_por = v_pa.usuario_id
+     where id = v_sc.id;
+    insert into public.servicios_contratados_cambios (servicio_contratado_id, campo, valor_anterior, valor_nuevo, motivo, registrado_por)
+    values (
+      v_sc.id, 'vigente_hasta',
+      jsonb_build_object('vigente_hasta', v_sc.vigente_hasta),
+      jsonb_build_object('vigente_hasta', v_hasta, 'plan_anual_id', p_plan_anual_id),
+      'Plan Anual activado: el Plazo Anual absorbe y extiende la fecha de la cláusula 12.1 (Anexo del Plan Anual, 3.3)',
+      v_pa.usuario_id
+    );
+  end if;
+
   return 'activado';
 end;
 $$;
@@ -431,7 +584,7 @@ revoke execute on function public.activar_plan_anual_cda(uuid, uuid, jsonb) from
 grant execute on function public.activar_plan_anual_cda(uuid, uuid, jsonb) to service_role;
 
 comment on function public.activar_plan_anual_cda(uuid, uuid, jsonb) is
-  'Activa el Plan Anual de Valida CDA al aprobarse su pago, en una transacción: cuotas del plazo a usuarios_adicionales, cuotas nuevas en cero, cobros programados sin pagar anulados, la cuota anual con su cobro. La aritmética viene del servidor; aquí se comprueba con las filas bloqueadas.';
+  'Activa el Plan Anual de Valida CDA al aprobarse su pago, en una transacción: cuotas del plazo a usuarios_adicionales, cuotas nuevas en cero, cobros programados sin pagar anulados, la cuota anual con su cobro y la fecha de la cláusula 12.1 (vigente_hasta) al fin del Plazo Anual. La aritmética viene del servidor; aquí se comprueba con las filas bloqueadas.';
 
 
 -- ── 4. El retiro de una licencia puede dejar en cero una cuota de usuarios adicionales ─────

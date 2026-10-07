@@ -10,12 +10,14 @@ import {
   fechaLarga,
   PLAN_ANUAL,
   renderAnexoPlanAnual,
+  textoMencionAutoriza,
+  textoRevocacionMencion,
   TIPOS_DOCUMENTO_ACEPTANTE,
   validarAceptante,
   type TipoDocumentoAceptante,
 } from '@/lib/valida-cda/plan-anual'
 import type { OpcionesPago as Opciones } from '@/lib/valida-cda/plan-anual-servidor'
-import { elegirPlanAnual, pagarElMes } from './acciones'
+import { cambiarMencionPlanAnual, elegirPlanAnual, pagarElMes } from './acciones'
 
 /**
  * Las dos formas de pagar de un CDA, arriba de sus cuotas en la pestaña Pagos de `/suscripcion`:
@@ -25,6 +27,10 @@ import { elegirPlanAnual, pagarElMes } from './acciones'
  * Lo que se acepta se arma con la MISMA función que usa el servidor (`renderAnexoPlanAnual`), con el
  * nombre y el documento que escribe la persona; el servidor la vuelve a armar y compara la casilla y la
  * huella del texto antes de registrar nada.
+ *
+ * La autorización de mención (numeral 11 del anexo) es una casilla APARTE: desmarcada por defecto, fuera
+ * del botón de pago, que no habilita ni bloquea nada. Con el plan activo se puede revocar (o volver a dar)
+ * desde aquí mismo.
  */
 
 type OpcionesOk = Extract<Opciones, { tipo: 'ok' }>
@@ -90,10 +96,15 @@ export function OpcionesPago({ opciones, soloLectura, nombreSugerido }: { opcion
       </div>
 
       {anual.estado === 'activo' && (
-        <p data-plan-anual-activo className="flex items-start gap-2 text-sm text-emerald-800">
-          <CalendarCheck className="mt-0.5 h-4 w-4 shrink-0" />
-          Plan anual pagado: 12 períodos del {fechaLarga(anual.desde)} al {fechaLarga(anual.hasta)}.
-        </p>
+        <>
+          <p data-plan-anual-activo className="flex items-start gap-2 text-sm text-emerald-800">
+            <CalendarCheck className="mt-0.5 h-4 w-4 shrink-0" />
+            Plan anual pagado: 12 períodos del {fechaLarga(anual.desde)} al {fechaLarga(anual.hasta)}.
+          </p>
+          {anual.razonSocial && (
+            <Mencion razonSocial={anual.razonSocial} autoriza={anual.mencion?.autoriza ?? false} soloLectura={soloLectura} />
+          )}
+        </>
       )}
       {anual.estado === 'elegido' && (
         <p data-plan-anual-elegido className="text-xs text-tinta-suave">
@@ -111,20 +122,25 @@ export function OpcionesPago({ opciones, soloLectura, nombreSugerido }: { opcion
   )
 }
 
-function OfertaAnual({
+export function OfertaAnual({
   datos,
   soloLectura,
   nombreSugerido,
+  abiertoInicial = false,
 }: {
   datos: Extract<OpcionesOk['anual'], { estado: 'oferta' }>['datos']
   soloLectura: boolean
   nombreSugerido: string | null
+  /** Solo para las pruebas de render: el anexo ya abierto. */
+  abiertoInicial?: boolean
 }) {
-  const [abierto, setAbierto] = useState(false)
+  const [abierto, setAbierto] = useState(abiertoInicial)
   const [nombre, setNombre] = useState(nombreSugerido ?? '')
   const [tipo, setTipo] = useState<TipoDocumentoAceptante>('CC')
   const [numero, setNumero] = useState('')
   const [acepta, setAcepta] = useState(false)
+  // Numeral 11: desmarcada por defecto, y nada depende de ella.
+  const [mencion, setMencion] = useState(false)
   const [pendiente, iniciar] = useTransition()
   const intencion = useIntencion()
 
@@ -151,6 +167,8 @@ function OfertaAnual({
           casillaMostrada: texto.casilla,
           anexoSha256: await sha256Hex(texto.anexo),
           aceptaCasilla: acepta,
+          casillaMencionMostrada: texto.casillaMencion,
+          autorizaMencion: mencion,
         },
         intencion.clave(),
       )
@@ -231,6 +249,63 @@ function OfertaAnual({
           Ahora no
         </button>
       </div>
+      <label className="flex items-start gap-2 border-t border-border pt-3 text-xs text-tinta-suave">
+        <input
+          type="checkbox"
+          checked={mencion}
+          onChange={(e) => setMencion(e.target.checked)}
+          disabled={soloLectura || pendiente}
+          className="mt-0.5"
+          data-casilla-mencion
+        />
+        <span>{texto.casillaMencion}</span>
+      </label>
+    </div>
+  )
+}
+
+/** Con el plan activo: la autorización de mención, revocable (o que se puede dar) en cualquier momento. */
+function Mencion({ razonSocial, autoriza, soloLectura }: { razonSocial: string; autoriza: boolean; soloLectura: boolean }) {
+  const [pendiente, iniciar] = useTransition()
+  const [confirmar, setConfirmar] = useState(false)
+  const texto = autoriza ? textoRevocacionMencion(razonSocial) : textoMencionAutoriza(razonSocial)
+
+  function cambiar() {
+    iniciar(async () => {
+      const r = await cambiarMencionPlanAnual({ autoriza: !autoriza, textoMostrado: texto })
+      if (!r.ok) {
+        toast.error(r.error)
+        return
+      }
+      setConfirmar(false)
+      toast.success(autoriza ? 'Revocaste la autorización de mención.' : 'Autorizaste la mención.')
+    })
+  }
+
+  return (
+    <div data-mencion-plan-anual className="space-y-2 rounded-md border border-border p-3 text-xs text-tinta-suave">
+      <p>
+        {autoriza
+          ? `Autorizaste a METRIK a decir que ${razonSocial} usa VALIDA, con su razón social y su logotipo (numeral 11 del anexo).`
+          : `No has autorizado a METRIK a mencionar que ${razonSocial} usa VALIDA (numeral 11 del anexo, opcional).`}
+      </p>
+      {confirmar ? (
+        <div className="space-y-2">
+          <p className="text-tinta">{texto}</p>
+          <div className="flex flex-wrap gap-2">
+            <button type="button" data-confirmar-mencion disabled={soloLectura || pendiente} onClick={cambiar} className={`${BOTON} border border-border text-tinta`}>
+              {autoriza ? 'Revocar' : 'Autorizar'}
+            </button>
+            <button type="button" onClick={() => setConfirmar(false)} className={`${BOTON} text-tinta-suave`}>
+              Cancelar
+            </button>
+          </div>
+        </div>
+      ) : (
+        <button type="button" data-cambiar-mencion disabled={soloLectura} onClick={() => setConfirmar(true)} className="underline">
+          {autoriza ? 'Revocar la autorización' : 'Autorizar la mención'}
+        </button>
+      )}
     </div>
   )
 }

@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import { proximoPago, type CuotaDeServicio } from './pago-pendiente'
 import { estadoMora } from './plazos'
+import { ANEXO_PLAN_ANUAL_TERMINOS_V1, ANEXO_PLAN_ANUAL_TERMINOS_V2 } from './plan-anual-anexo'
 import {
   descripcionEnlaceAnual,
   expiraEnlaceAnualMs,
@@ -8,10 +9,14 @@ import {
   PLAN_ANUAL,
   planAnualHabilitado,
   planDeActivacion,
+  plantillaDelAnexo,
   plazoAnual,
   renderAnexoPlanAnual,
+  textoMencionAutoriza,
+  textoRevocacionMencion,
   TIPOS_CUOTA_SIN_MORA,
   validarAceptante,
+  vigenteHastaConPlanAnual,
   type CuotaParaActivar,
 } from './plan-anual'
 
@@ -52,7 +57,15 @@ describe('el plazo anual', () => {
 
 describe('cuándo se ofrece', () => {
   const plazo = plazoAnual('2026-10-06', VIGENTE_DESDE)
-  const base = { habilitado: true, hoy: '2026-10-06', ahoraMs: Date.parse('2026-10-06T15:00:00Z'), hayCuotasVencidas: false, planActivoHasta: null, plazo }
+  const base = {
+    habilitado: true,
+    precioMensual: 150_000,
+    hoy: '2026-10-06',
+    ahoraMs: Date.parse('2026-10-06T15:00:00Z'),
+    hayCuotasVencidas: false,
+    planActivoHasta: null,
+    plazo,
+  }
 
   it('con el contrato encendido, a tiempo y sin cuotas vencidas: sí', () => {
     expect(ofertaPlanAnual(base)).toEqual({ disponible: true })
@@ -63,6 +76,11 @@ describe('cuándo se ofrece', () => {
     expect(planAnualHabilitado({ plan_anual_habilitado: true })).toBe(true)
     expect(planAnualHabilitado({ plan_anual_habilitado: 'true' })).toBe(false)
     expect(planAnualHabilitado(null)).toBe(false)
+  })
+
+  it('solo sobre $150.000 mensuales: el 11 x 12 del anexo está escrito sobre ese precio', () => {
+    expect(ofertaPlanAnual({ ...base, precioMensual: 180_000 })).toEqual({ disponible: false, motivo: 'precio_distinto' })
+    expect(ofertaPlanAnual({ ...base, precioMensual: null })).toEqual({ disponible: false, motivo: 'precio_distinto' })
   })
 
   it('hasta el 31-mar-2027 (Bogotá), no después', () => {
@@ -96,6 +114,8 @@ describe('el anexo con sus datos', () => {
     razonSocial: 'CENTRO DE DIAGNOSTICO AUTOMOTOR PUERTOTEST S.A.S ZOMAC',
     nit: '901234567-1',
     versionTerminos: '1.3',
+    ordenNumero: null,
+    precioUsuarioAdicional: null,
     plazo: { desde: '2026-10-23', hasta: '2027-10-22' },
     nombreUsuario: 'Carlos Arnulfo Castro Quintero',
     tipoDocumento: 'CC' as const,
@@ -121,6 +141,45 @@ describe('el anexo con sus datos', () => {
     expect(casilla).not.toMatch(/Acepto y voy a pagar|☐|\*\*/)
   })
 
+  it('cada cliente ve el anexo de su serie de Términos, y la constancia guarda ESE documento', () => {
+    expect(plantillaDelAnexo('1.3')).toBe(ANEXO_PLAN_ANUAL_TERMINOS_V1)
+    expect(plantillaDelAnexo('v1.4')).toBe(ANEXO_PLAN_ANUAL_TERMINOS_V1)
+    expect(plantillaDelAnexo('2.0')).toBe(ANEXO_PLAN_ANUAL_TERMINOS_V2)
+    expect(plantillaDelAnexo('3.0')).toBeNull()
+    expect(plantillaDelAnexo('')).toBeNull()
+    const v1 = renderAnexoPlanAnual(datos)
+    expect(v1.documento.version).toBe('v1')
+    expect(v1.anexo).toContain('Términos de Suscripción al Servicio VALIDA · Plan CDA · Anexo v1')
+    const v2 = renderAnexoPlanAnual({ ...datos, versionTerminos: '2.0', ordenNumero: 'OS-2026-014', precioUsuarioAdicional: 50_000 })
+    expect(v2.documento.version).toBe('v1-terminos-v2.0')
+    expect(v2.anexo).toContain('Variante CDA vía AFI · Versión 2.0')
+    expect(v2.anexo).toContain('titular de la Orden de Suscripción No. OS-2026-014')
+    expect(v2.anexo).toContain('al valor de la Orden ($50.000 mensuales)')
+    expect(v2.anexo).not.toMatch(/\{[a-z_]+\}/)
+    expect(v2.casilla).toContain('para la Orden OS-2026-014')
+    expect(v2.casilla).toContain('que al terminar el plan la suscripción vuelve a ser mensual según la Orden')
+  })
+
+  it('un anexo a medias no se arma: la v2.0 sin la Orden lanza', () => {
+    expect(() => renderAnexoPlanAnual({ ...datos, versionTerminos: '2.0' })).toThrow(/orden_numero/)
+    expect(() => renderAnexoPlanAnual({ ...datos, versionTerminos: '9.9' })).toThrow(/No hay anexo/)
+  })
+
+  it('la casilla de mención (numeral 11) es aparte de la aceptación, con la razón social, y la misma en los dos anexos', () => {
+    const { casilla, casillaMencion, anexo } = renderAnexoPlanAnual(datos)
+    expect(casillaMencion).toBe(
+      'Opcional. Autorizo a METRIK a decir que CENTRO DE DIAGNOSTICO AUTOMOTOR PUERTOTEST S.A.S ZOMAC usa VALIDA, mostrando su razón social y su logotipo, en los términos del numeral 11 del Anexo. No incluye datos de personas ni del precio. Puedo revocarla cuando quiera. Marcarla o no marcarla no cambia el precio ni el descuento.',
+    )
+    expect(casilla).not.toContain('Autorizo a METRIK')
+    expect(casilla).not.toContain('Casilla separada')
+    expect(anexo).toContain('## 11. Autorización de mención (voluntaria)')
+    const v2 = renderAnexoPlanAnual({ ...datos, versionTerminos: '2.0', ordenNumero: 'OS-1', precioUsuarioAdicional: 50_000 })
+    expect(v2.casillaMencion).toBe(casillaMencion)
+    expect(textoMencionAutoriza(datos.razonSocial)).toBe(casillaMencion)
+    expect(textoMencionAutoriza(datos.razonSocial, ANEXO_PLAN_ANUAL_TERMINOS_V2)).toBe(casillaMencion)
+    expect(textoRevocacionMencion('CDA X')).toContain('Revoco la autorización para que METRIK diga que CDA X usa VALIDA')
+  })
+
   it('el nombre y el documento se validan antes de armar la constancia', () => {
     expect(validarAceptante({ nombre: 'Ana', tipoDocumento: 'CC', numeroDocumento: '123456' }).ok).toBe(false)
     expect(validarAceptante({ nombre: 'Ana Pérez', tipoDocumento: 'NIT', numeroDocumento: '123456' }).ok).toBe(false)
@@ -136,6 +195,19 @@ describe('el anexo con sus datos', () => {
 })
 
 // ── La activación ───────────────────────────────────────────────────────────────────────
+
+describe('la fecha de la cláusula 12.1 con el plan anual (anexo 3.3)', () => {
+  it('Maxitec: plazo hasta el 21-dic-2026, paga el año el 10-oct → la 12.1 pasa al 22-oct-2027', () => {
+    const plazo = plazoAnual('2026-10-10', VIGENTE_DESDE)
+    expect(plazo).toMatchObject({ desde: '2026-10-23', hasta: '2027-10-22' })
+    expect(vigenteHastaConPlanAnual('2026-12-21', plazo.hasta)).toBe('2027-10-22')
+  })
+
+  it('sin fecha (renovación mensual) también pasa al fin del Plazo Anual; una fecha más lejana no se acorta', () => {
+    expect(vigenteHastaConPlanAnual(null, '2027-10-22')).toBe('2027-10-22')
+    expect(vigenteHastaConPlanAnual('2028-01-15', '2027-10-22')).toBe('2028-01-15')
+  })
+})
 
 const PLAZO = { desde: '2026-10-23', hasta: '2027-10-22' }
 const cuota = (numero: number, desde: string, hasta: string, venc: string, over: Partial<CuotaParaActivar> = {}): CuotaParaActivar => ({

@@ -5,7 +5,7 @@ import { PGlite } from '@electric-sql/pglite'
 import { planDeActivacion, type CuotaParaActivar } from './plan-anual'
 
 /**
- * La migración del Plan Anual (20261007090000), ejecutada de verdad en PGlite sobre las de las que
+ * La migración del Plan Anual (20261007210000), ejecutada de verdad en PGlite sobre las de las que
  * depende (catálogo y contratos, licencias). Las tablas de fuera (`workspaces`, `planes_cobro`,
  * `plan_cobro_cuotas`, `cobros`, …) se crean con lo mínimo, pero `plan_cobro_cuotas` con sus CHECK
  * originales SIN nombre (como en 20260630000001 y 20260924100000), que es lo que la migración tiene que
@@ -87,11 +87,13 @@ async function falla(sql: string, params: unknown[] = []): Promise<string | null
 const PLAZO = { desde: '2026-10-23', hasta: '2027-10-22' }
 
 /** El plan de los CDA: cuota 1 pagada, la 2 (oct) con su enlace sin pagar, la 3 (nov) con un usuario adicional. */
-async function sembrar() {
+async function sembrar(opts: { vigenteHasta?: string | null; autorizaMencion?: boolean } = {}) {
+  const vigenteHasta = opts.vigenteHasta === undefined ? null : opts.vigenteHasta
   await db.exec(`
     -- TRUNCATE y no DELETE: la constancia y la bitácora del contrato no se dejan borrar fila a fila.
-    truncate public.planes_anuales_cda, public.licencias_adicionales_cargos, public.licencias_adicionales,
-             public.servicios_contratados_cambios, public.cobros, public.plan_cobro_cuotas;
+    truncate public.autorizaciones_mencion_cda, public.planes_anuales_cda, public.licencias_adicionales_cargos,
+             public.licencias_adicionales, public.servicios_contratados_cambios, public.cobros, public.plan_cobro_cuotas;
+    update public.servicios_contratados set vigente_hasta = ${vigenteHasta === null ? 'null' : `'${vigenteHasta}'`};
     insert into public.plan_cobro_cuotas (id, workspace_id, plan_cobro_id, numero, monto, fecha_vencimiento, concepto_detalle) values
       ('${Q1}', '${WS}', '${PLAN}', 1, 150000, '2026-09-30', 'Suscripción — periodo del 23/09/2026 al 22/10/2026'),
       ('${Q2}', '${WS}', '${PLAN}', 2, 150000, '2026-10-30', 'Suscripción — periodo del 23/10/2026 al 22/11/2026'),
@@ -119,12 +121,13 @@ async function sembrar() {
   const pa = await db.query<{ id: string }>(
     `insert into public.planes_anuales_cda (workspace_id, workspace_cliente_id, servicio_contratado_id, negocio_id, plan_cobro_id,
        periodo_desde, periodo_hasta, monto, precio_lista, documento_slug, documento_version, documento_texto_sha256,
-       texto_anexo, texto_anexo_sha256, texto_aceptacion, texto_aceptacion_sha256, usuario_id, nombre_aceptante,
-       tipo_documento, numero_documento, cobro_id)
+       texto_anexo, texto_anexo_sha256, texto_aceptacion, texto_aceptacion_sha256, autoriza_mencion, texto_mencion,
+       texto_mencion_sha256, usuario_id, nombre_aceptante, tipo_documento, numero_documento, cobro_id)
      values ('${WS}', '${WS_CDA}', $1, '${NEGOCIO}', '${PLAN}', '2026-10-23', '2027-10-22', 1650000, 1800000,
-       'anexo-plan-anual-valida-cda', 'v1', $2, 'ANEXO', $2, 'Yo acepto', $2, '${PERFIL}', 'Ana Pérez', 'CC', '12345678', '${C_ANUAL}')
+       'anexo-plan-anual-valida-cda', 'v1', $2, 'ANEXO', $2, 'Yo acepto', $2, $3, 'Autorizo la mención', $2,
+       '${PERFIL}', 'Ana Pérez', 'CC', '12345678', '${C_ANUAL}')
      returning id`,
-    [SC, 'a'.repeat(64)],
+    [SC, 'a'.repeat(64), opts.autorizaMencion ?? false],
   )
   return { planAnualId: pa.rows[0].id, licenciaId: lic.rows[0].id }
 }
@@ -170,7 +173,7 @@ beforeAll(async () => {
   await db.exec(leer('20260915210000_workspace_modulos.sql'))
   await db.exec(leer('20260916120000_catalogo_y_servicios_contratados.sql'))
   await db.exec(leer('20260924060000_suscripcion_cda_licencias_usuarios_comision.sql'))
-  await db.exec(leer('20261007090000_valida_cda_plan_anual.sql'))
+  await db.exec(leer('20261007210000_valida_cda_plan_anual.sql'))
   await db.query(`select public.registrar_version_catalogo($1, 1, $2::jsonb, $3, $4)`, [
     'valida-cda-licencia',
     JSON.stringify({ nombre: 'Licencia Valida por CDA', modulo: 'valida_consulta', disparador_cobro: 'ciclo' }),
@@ -297,6 +300,95 @@ describe('activar el plan anual', () => {
   })
 })
 
+describe('la fecha de la cláusula 12.1 pasa al fin del Plazo Anual (anexo 3.3)', () => {
+  const contrato = () =>
+    db.query<{ vigente_hasta: string | null }>(`select vigente_hasta::text from public.servicios_contratados where id = $1`, [SC])
+  const cambios = () =>
+    db.query<{ valor_anterior: unknown; valor_nuevo: { vigente_hasta: string }; registrado_por: string }>(
+      `select valor_anterior, valor_nuevo, registrado_por from public.servicios_contratados_cambios where servicio_contratado_id = $1 and campo = 'vigente_hasta'`,
+      [SC],
+    )
+
+  it('Maxitec: plazo hasta el 21-dic-2026; paga el año el 10-oct y la fecha pasa al 22-oct-2027, con su bitácora', async () => {
+    const { planAnualId } = await sembrar({ vigenteHasta: '2026-12-21' })
+    await db.query(ACTIVAR, [planAnualId, C_ANUAL, JSON.stringify(cambiosDelServidor())])
+    expect((await contrato()).rows[0].vigente_hasta).toBe('2027-10-22')
+    const c = (await cambios()).rows
+    expect(c).toHaveLength(1)
+    expect(c[0].valor_anterior).toEqual({ vigente_hasta: '2026-12-21' })
+    expect(c[0].valor_nuevo).toMatchObject({ vigente_hasta: '2027-10-22', plan_anual_id: planAnualId })
+    expect(c[0].registrado_por).toBe(PERFIL)
+  })
+
+  it('un contrato sin fecha (renovación mensual) también pasa al fin del Plazo Anual', async () => {
+    const { planAnualId } = await sembrar({ vigenteHasta: null })
+    await db.query(ACTIVAR, [planAnualId, C_ANUAL, JSON.stringify(cambiosDelServidor())])
+    expect((await contrato()).rows[0].vigente_hasta).toBe('2027-10-22')
+  })
+
+  it('nunca la acorta: un contrato que ya llegaba más lejos se queda, sin fila en la bitácora', async () => {
+    const { planAnualId } = await sembrar({ vigenteHasta: '2028-01-15' })
+    await db.query(ACTIVAR, [planAnualId, C_ANUAL, JSON.stringify(cambiosDelServidor())])
+    expect((await contrato()).rows[0].vigente_hasta).toBe('2028-01-15')
+    expect((await cambios()).rows).toHaveLength(0)
+  })
+
+  it('si la activación no pasa, la fecha no se mueve', async () => {
+    await db.exec(`update public.servicios_contratados set vigente_hasta = null`)
+    const { planAnualId } = await sembrar({ vigenteHasta: '2026-12-21' })
+    await db.exec(`update public.cobros set fecha = null where id = '${C_ANUAL}'`)
+    expect(await falla(ACTIVAR, [planAnualId, C_ANUAL, JSON.stringify(cambiosDelServidor())])).toMatch(/no está pagado/)
+    expect((await contrato()).rows[0].vigente_hasta).toBe('2026-12-21')
+  })
+})
+
+describe('la autorización de mención (numeral 11), registrada aparte', () => {
+  const vigente = () =>
+    db.query<{ autoriza: boolean; vigente: boolean; origen: string }>(
+      `select autoriza, vigente, origen from public.v_autorizacion_mencion_cda where servicio_contratado_id = $1`,
+      [SC],
+    )
+  const filas = () =>
+    db.query<{ origen: string; autoriza: boolean; plan_anual_id: string | null }>(
+      `select origen, autoriza, plan_anual_id from public.autorizaciones_mencion_cda order by created_at, origen`,
+    )
+
+  it('la casilla del anexo deja su fila en la misma transacción, marcada o no', async () => {
+    const { planAnualId } = await sembrar({ autorizaMencion: true })
+    expect((await filas()).rows).toEqual([{ origen: 'anexo_plan_anual', autoriza: true, plan_anual_id: planAnualId }])
+    await sembrar({ autorizaMencion: false })
+    expect((await filas()).rows.map((r) => r.autoriza)).toEqual([false])
+  })
+
+  it('no cuenta mientras el plan no se activa; cuenta después; y se revoca con otra fila', async () => {
+    const { planAnualId } = await sembrar({ autorizaMencion: true })
+    expect((await vigente()).rows).toEqual([])
+    await db.query(ACTIVAR, [planAnualId, C_ANUAL, JSON.stringify(cambiosDelServidor())])
+    expect((await vigente()).rows).toEqual([{ autoriza: true, vigente: true, origen: 'anexo_plan_anual' }])
+    await db.query(
+      `insert into public.autorizaciones_mencion_cda (servicio_contratado_id, workspace_cliente_id, plan_anual_id, origen, autoriza, texto, texto_sha256, usuario_id, created_at)
+       values ($1, '${WS_CDA}', $2, 'suscripcion', false, 'Revoco', $3, '${PERFIL}', now() + interval '1 minute')`,
+      [SC, planAnualId, 'b'.repeat(64)],
+    )
+    expect((await vigente()).rows).toEqual([{ autoriza: false, vigente: false, origen: 'suscripcion' }])
+  })
+
+  it('con el contrato cancelado deja de estar vigente (11.4: mientras el Cliente lo sea)', async () => {
+    const { planAnualId } = await sembrar({ autorizaMencion: true })
+    await db.query(ACTIVAR, [planAnualId, C_ANUAL, JSON.stringify(cambiosDelServidor())])
+    await db.exec(`update public.servicios_contratados set estado = 'cancelado'`)
+    expect((await vigente()).rows[0]).toMatchObject({ autoriza: true, vigente: false })
+    await db.exec(`update public.servicios_contratados set estado = 'activo'`)
+  })
+
+  it('lo registrado no se cambia ni se borra; la de la elección no cambia en la constancia', async () => {
+    const { planAnualId } = await sembrar({ autorizaMencion: true })
+    expect(await falla(`update public.autorizaciones_mencion_cda set autoriza = false`)).toMatch(/no se cambia/)
+    expect(await falla(`delete from public.autorizaciones_mencion_cda`)).toMatch(/no se cambia/)
+    expect(await falla(`update public.planes_anuales_cda set autoriza_mencion = false where id = $1`, [planAnualId])).toMatch(/no cambia/)
+  })
+})
+
 describe('durante el plan, retirar el único usuario adicional deja su cuota en cero', () => {
   const RETIRO = `select public.registrar_retiro_licencia($1, $2, $3::date, $4::uuid[], $5::jsonb, $6, $7) as id`
 
@@ -338,30 +430,43 @@ describe('la constancia y los permisos', () => {
     const e = await falla(
       `insert into public.planes_anuales_cda (workspace_id, workspace_cliente_id, servicio_contratado_id, negocio_id, plan_cobro_id,
          periodo_desde, periodo_hasta, monto, precio_lista, documento_slug, documento_version, documento_texto_sha256,
-         texto_anexo, texto_anexo_sha256, texto_aceptacion, texto_aceptacion_sha256, usuario_id, nombre_aceptante,
-         tipo_documento, numero_documento)
+         texto_anexo, texto_anexo_sha256, texto_aceptacion, texto_aceptacion_sha256, autoriza_mencion, texto_mencion,
+         texto_mencion_sha256, usuario_id, nombre_aceptante, tipo_documento, numero_documento)
        values ('${WS}', '${WS_CDA}', $1, '${NEGOCIO}', '${PLAN}', '2026-10-23', '2027-10-22', 1650000, 1800000,
-         'anexo-plan-anual-valida-cda', 'v1', $2, 'ANEXO', $2, 'Yo acepto', $2, '${PERFIL}', 'Ana Pérez', 'CC', '12345678')`,
+         'anexo-plan-anual-valida-cda', 'v1', $2, 'ANEXO', $2, 'Yo acepto', $2, false, 'Autorizo la mención', $2,
+         '${PERFIL}', 'Ana Pérez', 'CC', '12345678')`,
       [SC, 'a'.repeat(64)],
     )
     expect(e).toMatch(/uq_planes_anuales_elegido/)
   })
 
   it('la tabla y las funciones son de service_role', async () => {
-    const t = await db.query<{ rls: boolean; a: boolean; b: boolean }>(`
-      select relrowsecurity as rls,
+    const t = await db.query<{ relname: string; rls: boolean; a: boolean; b: boolean }>(`
+      select relname, relrowsecurity as rls,
              has_table_privilege('anon', c.oid, 'select') as a,
              has_table_privilege('authenticated', c.oid, 'select') as b
-        from pg_class c where oid = 'public.planes_anuales_cda'::regclass`)
-    expect(t.rows[0]).toEqual({ rls: true, a: false, b: false })
+        from pg_class c
+       where oid in ('public.planes_anuales_cda'::regclass, 'public.autorizaciones_mencion_cda'::regclass)
+       order by relname`)
+    expect(t.rows).toEqual([
+      { relname: 'autorizaciones_mencion_cda', rls: true, a: false, b: false },
+      { relname: 'planes_anuales_cda', rls: true, a: false, b: false },
+    ])
+    const v = await db.query<{ op: string[] | null; a: boolean; b: boolean }>(`
+      select reloptions as op,
+             has_table_privilege('anon', c.oid, 'select') as a,
+             has_table_privilege('authenticated', c.oid, 'select') as b
+        from pg_class c where oid = 'public.v_autorizacion_mencion_cda'::regclass`)
+    expect(v.rows[0]).toEqual({ op: ['security_invoker=on'], a: false, b: false })
     const f = await db.query<{ proname: string; a: boolean; b: boolean }>(`
       select proname,
              has_function_privilege('anon', p.oid, 'execute') as a,
              has_function_privilege('authenticated', p.oid, 'execute') as b
         from pg_proc p
        where pronamespace = 'public'::regnamespace
-         and proname in ('activar_plan_anual_cda', 'registrar_retiro_licencia', 'planes_anuales_cda_guardas')`)
-    expect(f.rows).toHaveLength(3)
+         and proname in ('activar_plan_anual_cda', 'registrar_retiro_licencia', 'planes_anuales_cda_guardas',
+                         'planes_anuales_cda_mencion', 'autorizaciones_mencion_cda_inmutable')`)
+    expect(f.rows).toHaveLength(5)
     expect(f.rows.filter((x) => x.a || x.b)).toEqual([])
   })
 })

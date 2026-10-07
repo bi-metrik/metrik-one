@@ -12,8 +12,10 @@
  *
  * ## Quién lo puede elegir
  *
- *   - un contrato con `parametros.plan_anual_habilitado = true` (el anexo sigue en borrador: nadie lo
- *     ve mientras MeTRIK no lo encienda contrato por contrato);
+ *   - un contrato con `parametros.plan_anual_habilitado = true` (nadie lo ve mientras MeTRIK no lo
+ *     encienda contrato por contrato);
+ *   - de $150.000 mensuales (`parametros.precio_mensual`): el 11 x 12 del anexo está escrito sobre ese
+ *     precio (anexo v1, 1.2; anexo de los Términos v2.0, 2.1: «Órdenes … con valor mensual de $150.000»);
  *   - hoy, en Bogotá, a más tardar el 2027-03-31 (2.4);
  *   - sin cuotas vencidas e impagas, al elegir y al pagar (2.2).
  *
@@ -24,6 +26,10 @@
  * no hay), y se crea la de los períodos que no tenían cuota, también en cero. Así un usuario adicional
  * comprado durante el plan se sigue cobrando mes a mes, con su enlace y su factura (5.2), por la misma
  * maquinaria de `periodos.ts`. Una cuota en cero no se cobra, no tiene enlace y no se pinta.
+ *
+ * La fecha de la cláusula 12.1 del contrato (`servicios_contratados.vigente_hasta`) pasa al último día del
+ * Plazo Anual (anexo v1, 3.3; `vigenteHastaConPlanAnual`): con el año pagado no puede asomar un fin de
+ * contrato antes de que el año termine.
  *
  * Y se crea UNA cuota `anual` por $1.650.000, a la que se ata el cobro pagado: una sola cuota, una sola
  * factura (7.1, carga manual con `facturas_cuota`). Vence el día ANTERIOR al pago a propósito: el reparto
@@ -47,7 +53,7 @@ import {
   type Cargo,
   type Periodo,
 } from '@/lib/seccion-suscripcion/periodos'
-import { ANEXO_PLAN_ANUAL_PLANTILLA } from './plan-anual-anexo'
+import { ANEXO_PLAN_ANUAL_TERMINOS_V1, ANEXO_PLAN_ANUAL_TERMINOS_V2, type PlantillaAnexo } from './plan-anual-anexo'
 
 export const PLAN_ANUAL = {
   periodos: 12,
@@ -97,10 +103,14 @@ export function expiraEnlaceAnualMs(desde: string): number {
 /** Lo mínimo que tiene que vivir un enlace recién generado para ofrecerlo. */
 const VIDA_MINIMA_ENLACE_MS = 2 * 60 * 60 * 1000
 
-export type MotivoSinOferta = 'apagado' | 'fuera_de_plazo' | 'cuotas_vencidas' | 'plan_activo' | 'sin_tiempo'
+export type MotivoSinOferta = 'apagado' | 'precio_distinto' | 'fuera_de_plazo' | 'cuotas_vencidas' | 'plan_activo' | 'sin_tiempo'
+
+/** El precio mensual sobre el que está escrito el 11 x 12 ($1.800.000 de lista = 12 x $150.000). */
+export const PRECIO_MENSUAL_PLAN_ANUAL = PLAN_ANUAL.precioLista / PLAN_ANUAL.periodos
 
 export const TEXTO_SIN_OFERTA: Record<MotivoSinOferta, string> = {
   apagado: 'El plan anual no está disponible para tu suscripción.',
+  precio_distinto: 'El plan anual aplica a las suscripciones de $150.000 mensuales.',
   fuera_de_plazo: 'La oferta del plan anual fue hasta el 31 de marzo de 2027.',
   cuotas_vencidas: 'Para elegir el plan anual primero hay que pagar las cuotas vencidas.',
   plan_activo: 'Tu suscripción ya tiene un plan anual vigente.',
@@ -108,11 +118,13 @@ export const TEXTO_SIN_OFERTA: Record<MotivoSinOferta, string> = {
 }
 
 /**
- * ¿Se ofrece hoy el plan anual? En este orden: el interruptor del contrato, la fecha de la oferta, un
+ * ¿Se ofrece hoy el plan anual? En este orden: el interruptor del contrato, el precio mensual, la fecha de la oferta, un
  * plan anual que todavía corre, las cuotas vencidas impagas y que al enlace le quede tiempo.
  */
 export function ofertaPlanAnual(p: {
   habilitado: boolean
+  /** `parametros.precio_mensual` del contrato. */
+  precioMensual: number | null
   hoy: string
   ahoraMs: number
   hayCuotasVencidas: boolean
@@ -121,6 +133,7 @@ export function ofertaPlanAnual(p: {
   plazo: PlazoAnual
 }): { disponible: true } | { disponible: false; motivo: MotivoSinOferta } {
   if (!p.habilitado) return { disponible: false, motivo: 'apagado' }
+  if (p.precioMensual !== PRECIO_MENSUAL_PLAN_ANUAL) return { disponible: false, motivo: 'precio_distinto' }
   if (p.hoy > PLAN_ANUAL.ofertaHasta) return { disponible: false, motivo: 'fuera_de_plazo' }
   if (p.planActivoHasta && p.planActivoHasta >= p.hoy) return { disponible: false, motivo: 'plan_activo' }
   if (p.hayCuotasVencidas) return { disponible: false, motivo: 'cuotas_vencidas' }
@@ -157,47 +170,111 @@ const NOMBRE_TIPO_DOCUMENTO: Record<TipoDocumentoAceptante, string> = {
   PA: 'pasaporte',
 }
 
+/**
+ * Qué anexo ve cada cliente: el de su serie de Términos. «1.3», «v1.4» → el anexo de los Términos de
+ * Suscripción v1.x; «2.0» → el de los Términos de Uso v2.0, variante CDA vía AFI. Otra cosa, ninguno:
+ * sin saber qué Términos aceptó, no hay anexo que mostrarle (y no se ofrece).
+ */
+export function plantillaDelAnexo(versionTerminos: string): PlantillaAnexo | null {
+  const m = /^v?(\d+)\.(\d+)$/.exec(versionTerminos.trim())
+  if (!m) return null
+  if (m[1] === '1') return ANEXO_PLAN_ANUAL_TERMINOS_V1
+  if (m[1] === '2') return ANEXO_PLAN_ANUAL_TERMINOS_V2
+  return null
+}
+
 export interface DatosAnexo {
   razonSocial: string
   nit: string
-  /** La versión de los Términos aceptados, sin la «v» («1.3»). */
+  /** La versión de los Términos aceptados, sin la «v» («1.3»). Decide el anexo (`plantillaDelAnexo`). */
   versionTerminos: string
+  /** Solo los Términos v2.0: el número de la Orden de Suscripción. */
+  ordenNumero: string | null
+  /** Solo los Términos v2.0: el valor mensual del usuario adicional de la Orden, en pesos. */
+  precioUsuarioAdicional: number | null
   plazo: Pick<PlazoAnual, 'desde' | 'hasta'>
   nombreUsuario: string
   tipoDocumento: TipoDocumentoAceptante
   numeroDocumento: string
 }
 
+export interface AnexoArmado {
+  /** El documento (slug, versión, plantilla) que se mostró: lo que se guarda en la constancia. */
+  documento: PlantillaAnexo
+  /** El anexo con sus datos, hasta el texto de aceptación (exclusive). */
+  anexo: string
+  /** El texto de la casilla de aceptación, sin el `>` de la cita, el ☐, los ** ni el botón. */
+  casilla: string
+  /** El texto de la casilla SEPARADA y opcional de la autorización de mención (numeral 11). */
+  casillaMencion: string
+}
+
 const MARCA_ACEPTACION = '\n---\n\n### Texto de aceptación'
+const MARCA_MENCION = '\n### Casilla separada y opcional'
+
+/** '50000' → '$50.000'. */
+function pesos(n: number): string {
+  return `$${Math.round(n).toLocaleString('es-CO').replace(/,/g, '.')}`
+}
+
+/** Las líneas citadas («>») de un bloque, unidas, sin ☐, ** ni la línea del botón. */
+function textoCitado(bloque: string): string {
+  return bloque
+    .split('\n')
+    .filter((l) => l.startsWith('>'))
+    .map((l) => l.replace(/^>\s?/, '').trim())
+    .filter((l) => l.length > 0 && !/^\*\*\[.*\]\*\*$/.test(l))
+    .join(' ')
+    .replace(/^☐\s*/, '')
+    .replace(/\*\*/g, '')
+}
 
 /**
- * El anexo con sus datos, partido en dos: el texto que se lee (`anexo`) y el de la casilla (`casilla`,
- * sin el `>` de la cita ni el botón). Lo que se guarda y se firma es exactamente esto.
+ * El anexo que le corresponde al cliente con sus datos, partido en tres: el texto que se lee (`anexo`),
+ * la casilla de aceptación (`casilla`) y la casilla opcional de mención (`casillaMencion`). Lo que se
+ * guarda y se firma es exactamente esto. Lanza si los Términos no tienen anexo o si queda una llave sin
+ * llenar: un anexo a medias no se muestra.
  */
-export function renderAnexoPlanAnual(d: DatosAnexo, plantilla: string = ANEXO_PLAN_ANUAL_PLANTILLA): { anexo: string; casilla: string } {
-  const valores: Record<string, string> = {
+export function renderAnexoPlanAnual(d: DatosAnexo): AnexoArmado {
+  const documento = plantillaDelAnexo(d.versionTerminos)
+  if (!documento) throw new Error(`No hay anexo del plan anual para los Términos ${d.versionTerminos}.`)
+  const valores: Record<string, string | null> = {
     razon_social: d.razonSocial,
     nit: d.nit,
     version_terminos: d.versionTerminos,
+    orden_numero: d.ordenNumero,
+    precio_usuario_adicional: d.precioUsuarioAdicional === null ? null : pesos(d.precioUsuarioAdicional),
     fecha_inicio_plan: fechaLarga(d.plazo.desde),
     fecha_fin_plan: fechaLarga(d.plazo.hasta),
     nombre_usuario: d.nombreUsuario,
     tipo_documento: NOMBRE_TIPO_DOCUMENTO[d.tipoDocumento],
     numero_documento: d.numeroDocumento,
   }
-  const lleno = plantilla.replace(/\{([a-z_]+)\}/g, (todo, llave: string) => valores[llave] ?? todo)
+  const lleno = documento.plantilla.replace(/\{([a-z_]+)\}/g, (todo, llave: string) => valores[llave] ?? todo)
+  const sobra = /\{[a-z_]+\}/.exec(lleno)
+  if (sobra) throw new Error(`El anexo del plan anual quedó con ${sobra[0]} sin llenar.`)
   const i = lleno.indexOf(MARCA_ACEPTACION)
   if (i === -1) throw new Error('El anexo no trae su texto de aceptación.')
   const anexo = `${lleno.slice(0, i).trimEnd()}\n`
-  const cita = lleno.slice(i + MARCA_ACEPTACION.length)
-  // Solo la cita (las líneas con «>»): el título de la sección no es parte de lo que se acepta.
-  const lineas = cita
-    .split('\n')
-    .filter((l) => l.startsWith('>'))
-    .map((l) => l.replace(/^>\s?/, '').trim())
-    .filter((l) => l.length > 0 && !/^\*\*\[.*\]\*\*$/.test(l))
-  const casilla = lineas.join(' ').replace(/^☐\s*/, '').replace(/\*\*/g, '')
-  return { anexo, casilla }
+  const resto = lleno.slice(i + MARCA_ACEPTACION.length)
+  const j = resto.indexOf(MARCA_MENCION)
+  if (j === -1) throw new Error('El anexo no trae la casilla separada de la autorización de mención.')
+  return { documento, anexo, casilla: textoCitado(resto.slice(0, j)), casillaMencion: textoCitado(resto.slice(j)) }
+}
+
+/**
+ * La casilla de mención (numeral 11) sola, con la razón social: la que se repite al darla después en
+ * /suscripcion. Es la misma en los dos anexos (lo fija una prueba).
+ */
+export function textoMencionAutoriza(razonSocial: string, documento: PlantillaAnexo = ANEXO_PLAN_ANUAL_TERMINOS_V1): string {
+  const j = documento.plantilla.indexOf(MARCA_MENCION)
+  if (j === -1) throw new Error('El anexo no trae la casilla separada de la autorización de mención.')
+  return textoCitado(documento.plantilla.slice(j).replace(/\{razon_social\}/g, razonSocial))
+}
+
+/** El texto que queda en la constancia cuando la persona designada revoca la mención en /suscripcion. */
+export function textoRevocacionMencion(razonSocial: string): string {
+  return `Revoco la autorización para que METRIK diga que ${razonSocial} usa VALIDA (numeral 11 del Anexo del Plan Anual).`
 }
 
 /** Los datos que escribe la persona: nombre y documento. */
@@ -369,4 +446,18 @@ export function planDeActivacion(p: {
       concepto: conceptoCuotaAnual(p.plazo),
     },
   }
+}
+
+/**
+ * La fecha de la cláusula 12.1 (`servicios_contratados.vigente_hasta`) con el Plan Anual activo: el
+ * Plazo Anual la absorbe y la extiende hasta su último día (anexo v1, 3.3). Nunca la acorta: si el
+ * contrato ya llegaba más lejos, se queda. `null` (contrato sin fecha, renovación mensual) también pasa
+ * al fin del Plazo Anual: durante él METRIK no puede terminar sin causa.
+ *
+ * Maxitec: 12.1 hasta el 21-dic-2026; si paga el año el 10-oct, el plazo es del 23-oct-2026 al
+ * 22-oct-2027 y la 12.1 pasa al 22-oct-2027. La función `activar_plan_anual_cda` hace lo mismo en la
+ * base, en la misma transacción que activa el plan, y deja la fila en `servicios_contratados_cambios`.
+ */
+export function vigenteHastaConPlanAnual(vigenteHasta: string | null, finPlazoAnual: string): string {
+  return vigenteHasta !== null && vigenteHasta > finPlazoAnual ? vigenteHasta : finPlazoAnual
 }
