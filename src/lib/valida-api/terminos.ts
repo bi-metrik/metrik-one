@@ -78,12 +78,74 @@ export function vigentesConAceptacion(
   )
 }
 
-/** Qué falta aceptar del contrato. */
+/**
+ * ¿Una modificación por aviso (cláusula 13.1) está cubierta por lo que el contrato YA aceptó? Sí si la
+ * versión que modifica tiene aceptación, o si esa también es por aviso y está cubierta (en cadena: una
+ * v1.5 por aviso sobre una v1.4 por aviso sobre la v1.3 aceptada).
+ *
+ * Es lo que hace que no aceptar la v1.4 NUNCA pause ni restrinja: la v1.3 aceptada sigue valiendo y la
+ * v1.4 rige por el aviso (dictamen de Emilio, 2026-10-07). Una versión por aviso SIN nada aceptado
+ * detrás no está cubierta: para ese contrato es de entrada como cualquier otra (no hay qué modificar).
+ */
+export function cubiertaPorAviso(
+  doc: Pick<DocumentoContractual, 'documentoId' | 'rigePorAviso' | 'reemplazaId'>,
+  documentos: readonly DocumentoContractual[],
+): boolean {
+  let actual: Pick<DocumentoContractual, 'documentoId' | 'rigePorAviso' | 'reemplazaId'> = doc
+  const vistos = new Set<string>()
+  while (actual.rigePorAviso === true && actual.reemplazaId && !vistos.has(actual.documentoId)) {
+    vistos.add(actual.documentoId)
+    const previas = documentos.filter((d) => d.documentoId === actual.reemplazaId)
+    if (previas.length === 0) return false
+    if (previas.some((d) => d.aceptadoAt !== null)) return true
+    actual = previas[0]
+  }
+  return false
+}
+
+/** Qué falta aceptar del contrato. Una modificación por aviso cubierta no falta: rige sin firma. */
 export function estadoTerminos(documentos: readonly DocumentoContractual[], hoy: string): EstadoTerminos {
   const vigentes = vigentesConAceptacion(documentos, hoy)
   if (vigentes.length === 0) return { estado: 'sin_documentos' }
-  const pendientes = vigentes.filter((v) => !v.aceptado).map((v) => v.doc)
+  const pendientes = vigentes.filter((v) => !v.aceptado && !cubiertaPorAviso(v.doc, documentos)).map((v) => v.doc)
   return pendientes.length === 0 ? { estado: 'aceptados' } : { estado: 'pendientes', pendientes }
+}
+
+/**
+ * ¿La versión se puede aceptar hoy? La vigente, como siempre; y además una modificación por aviso ya
+ * publicada que no se retiró, aunque todavía no rija: la persona designada acepta la v1.4 desde el
+ * aviso. Espejo del paso (1) de `aceptaciones_terminos_modulo()` (20261007150000).
+ */
+export function documentoAceptable(
+  doc: Pick<DocumentoContractual, 'vigenteDesde' | 'vigenteHasta' | 'rigePorAviso' | 'publicadaAt'>,
+  hoy: string,
+): boolean {
+  if (documentoVigente(doc, hoy)) return true
+  if (doc.rigePorAviso !== true || !doc.publicadaAt) return false
+  return !doc.vigenteHasta || doc.vigenteHasta.slice(0, 10) >= hoy
+}
+
+/**
+ * Las modificaciones por aviso publicadas que el contrato todavía no aceptó y que modifican algo que
+ * sí aceptó: las que la plataforma anuncia a todos y la persona designada puede aceptar (voluntario).
+ * Una por versión, de la que rige primero a la última.
+ */
+export function modificacionesPorAceptar(
+  documentos: readonly DocumentoContractual[],
+  hoy: string,
+): DocumentoContractual[] {
+  const porVersion = new Map<string, { doc: DocumentoContractual; aceptado: boolean }>()
+  for (const d of documentos) {
+    const previo = porVersion.get(d.documentoId)
+    porVersion.set(d.documentoId, { doc: previo?.doc ?? d, aceptado: (previo?.aceptado ?? false) || d.aceptadoAt !== null })
+  }
+  return [...porVersion.values()]
+    .filter(
+      ({ doc, aceptado }) =>
+        !aceptado && doc.rigePorAviso === true && documentoAceptable(doc, hoy) && cubiertaPorAviso(doc, documentos),
+    )
+    .map(({ doc }) => doc)
+    .sort((a, b) => a.vigenteDesde.localeCompare(b.vigenteDesde) || a.slug.localeCompare(b.slug))
 }
 
 export type RazonNoAcepta = 'no_owner' | 'soporte' | 'otro_espacio' | 'no_designado' | 'sin_designado'
@@ -276,7 +338,7 @@ export function prepararAceptacion(p: {
     return { tipo: 'error', error: 'Ese documento no está entre los términos de tu contrato.' }
   }
   if (filas.some((d) => d.aceptadoAt !== null)) return { tipo: 'ya_aceptado' }
-  if (!documentoVigente(filas[0], p.hoy)) {
+  if (!documentoAceptable(filas[0], p.hoy)) {
     return { tipo: 'error', error: 'Esa versión de los términos no está vigente hoy.' }
   }
   if (!p.version || p.version.documentoId !== p.documentoId || p.version.pdfSha256 !== filas[0].pdfSha256) {

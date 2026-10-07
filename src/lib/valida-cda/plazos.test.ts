@@ -12,6 +12,7 @@ import {
   textoAvisoMora,
   textoAvisoPlazo,
   textoAvisoRestriccion,
+  vigenciaRestriccion,
 } from './plazos'
 
 /**
@@ -75,7 +76,7 @@ describe('mora por pago antes de la v1.4: cuota que vence el 30-sep (solo la reg
   })
 
   it('1-oct: vencida, aviso con la fecha de corte 31-oct, pero opera', () => {
-    // La pausa (31-oct) llega antes de que rija la restricción (5-nov): no hay fecha de restricción.
+    // La pausa (31-oct) llega antes de que rija la restricción (6-nov): no hay fecha de restricción.
     expect(moraEl('2026-10-01')).toEqual({ estado: 'en_mora', vencio: '2026-09-30', restringeDesde: null, corteDesde: '2026-10-31' })
   })
 
@@ -88,11 +89,11 @@ describe('mora por pago antes de la v1.4: cuota que vence el 30-sep (solo la reg
   })
 
   it('se mide sobre la cuota impaga MÁS VIEJA: con la 1 pagada, el 31-oct no pausa (la 2 vence el 27-oct)', () => {
-    // Su D+6 (2-nov) cae antes de la vigencia: se restringe el 5-nov, no antes.
+    // Su D+6 (2-nov) cae antes de la vigencia: se restringe el 6-nov, no antes.
     expect(moraEl('2026-10-31', 150000)).toEqual({
       estado: 'en_mora',
       vencio: '2026-10-27',
-      restringeDesde: '2026-11-05',
+      restringeDesde: '2026-11-06',
       corteDesde: '2026-11-27',
     })
   })
@@ -120,16 +121,17 @@ describe('mora por pago antes de la v1.4: cuota que vence el 30-sep (solo la reg
 })
 
 /**
- * Cláusula 11 v1.4 (aviso del 2026-10-06, rige el 5-nov). Con vencimiento D: aviso desde D+1 con la
+ * Cláusula 11 v1.4 (aviso publicado en la plataforma el 2026-10-07, rige el 6-nov). Con vencimiento D: aviso desde D+1 con la
  * fecha de la restricción, restringido desde D+6, pausa desde D+31.
  */
-describe('restricción por mora a los 5 días (cláusula 11.1 v1.4, rige el 5-nov-2026)', () => {
+describe('restricción por mora a los 5 días (cláusula 11.1 v1.4, rige el 6-nov-2026)', () => {
   const pendiente = (fechaVencimiento: string) =>
     proximoPago({ cuotas: [cuota(1, fechaVencimiento)], cobros: [], hoy: fechaVencimiento, ahoraISO: `${fechaVencimiento}T15:00:00Z` })
   const mora = (venc: string, hoy: string) => estadoMora(pendiente(venc), hoy)
 
-  it('la vigencia es el 5-nov-2026', () => {
-    expect(RESTRICCION_VIGENTE_DESDE).toBe('2026-11-05')
+  it('la vigencia esperada es el 6-nov-2026: publicación del 7-oct + 30 días calendario', () => {
+    expect(RESTRICCION_VIGENTE_DESDE).toBe('2026-11-06')
+    expect(sumarDias('2026-10-07', 30)).toBe(RESTRICCION_VIGENTE_DESDE)
   })
 
   describe('cuota que vence el 10-nov (después de la vigencia)', () => {
@@ -153,13 +155,14 @@ describe('restricción por mora a los 5 días (cláusula 11.1 v1.4, rige el 5-no
       expect(mora(v, '2026-12-11')).toEqual({ estado: 'suspendido', vencio: v, corteDesde: '2026-12-11' }))
   })
 
-  describe('cuota vencida ANTES de la vigencia (15-oct): la regla alcanza lo ya vencido desde el 5-nov', () => {
+  describe('cuota vencida ANTES de la vigencia (15-oct): la regla alcanza lo ya vencido desde el 6-nov', () => {
     const v = '2026-10-15'
-    it('D+6 (21-oct) no restringe: antes del 5-nov solo existe la regla de los 30 días', () =>
-      expect(mora(v, '2026-10-21')).toEqual({ estado: 'en_mora', vencio: v, restringeDesde: '2026-11-05', corteDesde: '2026-11-15' }))
-    it('4-nov: todavía aviso', () => expect(mora(v, '2026-11-04').estado).toBe('en_mora'))
-    it('5-nov: restringido desde la vigencia', () =>
-      expect(mora(v, '2026-11-05')).toEqual({ estado: 'restringido', vencio: v, restringeDesde: '2026-11-05', corteDesde: '2026-11-15' }))
+    it('D+6 (21-oct) no restringe: antes del 6-nov solo existe la regla de los 30 días', () =>
+      expect(mora(v, '2026-10-21')).toEqual({ estado: 'en_mora', vencio: v, restringeDesde: '2026-11-06', corteDesde: '2026-11-15' }))
+    it('5-nov: todavía aviso (era el día de la vigencia antes de publicarse el 7-oct)', () =>
+      expect(mora(v, '2026-11-05').estado).toBe('en_mora'))
+    it('6-nov: restringido desde la vigencia', () =>
+      expect(mora(v, '2026-11-06')).toEqual({ estado: 'restringido', vencio: v, restringeDesde: '2026-11-06', corteDesde: '2026-11-15' }))
     it('15-nov (D+31): pausado', () => expect(mora(v, '2026-11-15').estado).toBe('suspendido'))
   })
 
@@ -233,5 +236,36 @@ describe('fechas', () => {
     expect(fechaDiaMes('2026-09-30')).toBe('30-sep')
     expect(fechaDiaMes('2026-10-01')).toBe('1-oct')
     expect(fechaDiaMes('no-es-fecha')).toBe('no-es-fecha')
+  })
+})
+
+describe('la vigencia de la restricción sale del dato registrado, no de una constante', () => {
+  const doc = (version: string, vigenteDesde: string, slug = 'terminos-suscripcion-valida-cda') => ({ slug, version, vigenteDesde })
+
+  it('es el vigente_desde de la v1.4 del contrato (la haya aceptado o no)', () => {
+    expect(vigenciaRestriccion([doc('v1.2', '2026-09-23'), doc('v1.3', '2026-09-24'), doc('v1.4', '2026-11-06')])).toBe('2026-11-06')
+  })
+
+  it('si el aviso se hubiera publicado otro día, la fecha es la registrada', () => {
+    expect(vigenciaRestriccion([doc('v1.3', '2026-09-24'), doc('v1.4', '2026-11-09')])).toBe('2026-11-09')
+  })
+
+  it('una versión posterior que ya la trae cuenta; gana la más temprana', () => {
+    expect(vigenciaRestriccion([doc('v1.5', '2027-01-10'), doc('v1.4', '2026-11-06')])).toBe('2026-11-06')
+    expect(vigenciaRestriccion([doc('v2.0', '2027-01-10')])).toBe('2027-01-10')
+    expect(vigenciaRestriccion([doc('v1.10', '2027-02-01')])).toBe('2027-02-01')
+  })
+
+  it('sin v1.4 registrada no hay restricción: sin aviso no hay cambio', () => {
+    expect(vigenciaRestriccion([doc('v1.3', '2026-09-24')])).toBeNull()
+    expect(vigenciaRestriccion([doc('v1.4', '2026-11-06', 'terminos-uso-valida')])).toBeNull()
+    expect(vigenciaRestriccion([])).toBeNull()
+  })
+
+  it('con vigencia null, la mora solo pausa a los 30 días: nunca restringe', () => {
+    const pago = proximoPago({ cuotas: [cuota(1, '2026-11-10')], cobros: [], hoy: '2026-11-10', ahoraISO: '2026-11-10T15:00:00Z' })
+    expect(estadoMora(pago, '2026-11-11', null)).toEqual({ estado: 'en_mora', vencio: '2026-11-10', restringeDesde: null, corteDesde: '2026-12-11' })
+    expect(estadoMora(pago, '2026-11-20', null).estado).toBe('en_mora')
+    expect(estadoMora(pago, '2026-12-11', null).estado).toBe('suspendido')
   })
 })

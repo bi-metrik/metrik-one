@@ -10,7 +10,9 @@ import { contextoSuscripcion } from '@/lib/seccion-suscripcion/contexto-servidor
 import { franjaValida } from '@/lib/seccion-suscripcion/estado';
 import { entradaValidaCda, moraValidaCda, puedeVerPagosCda } from '@/lib/valida-cda/puerta';
 import ValidaClient from './valida-client';
+import { registrarVistaAvisoModificacion } from '@/lib/valida-cda/aviso-modificacion-servidor';
 import {
+  AvisoModificacionTerminos,
   AvisoMora,
   AvisoPlazoTerminos,
   AvisoRestriccion,
@@ -19,11 +21,12 @@ import {
   PausaPorMora,
 } from './avisos-cda';
 import { TerminosCda } from './terminos-cda';
+import { ModificacionTerminosCda } from './modificacion-terminos-cda';
 
 export const dynamic = 'force-dynamic';
 
 interface Props {
-  searchParams: Promise<{ negocio_id?: string; terminos?: string }>;
+  searchParams: Promise<{ negocio_id?: string; terminos?: string; modificacion?: string }>;
 }
 
 export default async function ValidaPage({ searchParams }: Props) {
@@ -61,7 +64,7 @@ export default async function ValidaPage({ searchParams }: Props) {
       />
     );
   }
-  const { negocio_id: negocioId, terminos: verTerminos } = await searchParams;
+  const { negocio_id: negocioId, terminos: verTerminos, modificacion: verModificacion } = await searchParams;
 
   // Términos pendientes: sin plazo (o vencido) se muestran los términos y Valida no opera; dentro
   // del plazo Valida opera con un aviso, y la persona designada abre los términos desde ese aviso
@@ -95,6 +98,45 @@ export default async function ValidaPage({ searchParams }: Props) {
         designadoNombre={entrada.estado.designadoNombre}
       />
     ) : null;
+  }
+
+  // Una modificación de los Términos por aviso (cláusula 13.1, la v1.4): el aviso lo ven TODOS hasta que
+  // la persona designada la acepte, y cada primera vista queda como constancia del preaviso. NO cierra
+  // nada: Valida opera igual con o sin la aceptación. `?modificacion=1` abre el documento completo (y, a la
+  // persona designada, la aceptación con la misma entrada de los términos).
+  let avisoModificacion: React.ReactNode = null;
+  if (entrada.tipo === 'ok' && entrada.modificaciones.length > 0) {
+    const firmaModificacion =
+      entrada.modificacion?.estado === 'pendiente' && entrada.modificacion.aceptante?.puede === true;
+    const designadoNombre =
+      entrada.modificacion?.estado === 'pendiente' ? entrada.modificacion.designadoNombre : null;
+    await registrarVistaAvisoModificacion(entrada);
+    if (verModificacion === '1') {
+      const pagina =
+        firmaModificacion && entrada.modificacion
+          ? await armarEstadoEntradaPagina({ workspaceId: entrada.workspaceId }, entrada.modificacion)
+          : null;
+      return (
+        <ModificacionTerminosCda
+          documentos={entrada.modificaciones}
+          entrada={pagina?.estado === 'pendiente' ? pagina : null}
+          hoy={entrada.hoy}
+          designadoNombre={designadoNombre}
+          aviso={textoAvisoPolitica('valida_cda')}
+          politicaUrl={POLITICA_DATOS_VALIDA.url}
+          politicaTitulo={`${POLITICA_DATOS_VALIDA.titulo} v${POLITICA_DATOS_VALIDA.version}`}
+        />
+      );
+    }
+    avisoModificacion = entrada.modificaciones.map((doc) => (
+      <AvisoModificacionTerminos
+        key={doc.documentoId}
+        doc={doc}
+        hoy={entrada.hoy}
+        puedeAceptar={firmaModificacion}
+        designadoNombre={designadoNombre}
+      />
+    ));
   }
 
   // La mora (cláusula 11) y quién ve la plata. Una sola lectura de cuotas y pagos por request, sin
@@ -152,9 +194,10 @@ export default async function ValidaPage({ searchParams }: Props) {
   // (la misma regla que `/suscripcion`, `puedeVerPagosCda`): la franja y el enlace a Suscripción.
   const enMora = estadoMora?.estado === 'en_mora' ? estadoMora : null;
   const encabezado =
-    avisoPlazo || franja || enMora || restringido ? (
+    avisoPlazo || avisoModificacion || franja || enMora || restringido ? (
       <div className="space-y-3">
         {avisoPlazo}
+        {avisoModificacion}
         {enMora && <AvisoMora mora={enMora} />}
         {restringido && <AvisoRestriccion mora={restringido} vePagos={vePagos} />}
         {franja && <FranjaSuscripcion texto={franja} />}
