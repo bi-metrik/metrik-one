@@ -154,7 +154,7 @@ interface Lectura { json: unknown | null; finishReason: string | null; error: st
  * Llama al modelo con el esquema dado. Verifica el MOTIVO DE TERMINACIÓN, no solo que haya
  * texto: media respuesta aceptada en silencio es un falso verde (§3 del diseño).
  */
-async function leerConModelo(instrucciones: string, texto: string, esquema: unknown): Promise<Lectura> {
+export async function leerConModelo(instrucciones: string, texto: string, esquema: unknown): Promise<Lectura> {
   const apiKey = Deno.env.get('GEMINI_API_KEY');
   if (!apiKey) return { json: null, finishReason: null, error: 'GEMINI_NO_KEY' };
   const url = `https://generativelanguage.googleapis.com/v1beta/models/${GEMINI_MODEL}:generateContent?key=${apiKey}`;
@@ -195,7 +195,7 @@ async function leerConModelo(instrucciones: string, texto: string, esquema: unkn
 
 // ── Config de la línea ───────────────────────────────────────────────────────
 
-interface ConfigLinea {
+export interface ConfigLinea {
   lineaId: string;
   etapaId: string;
   stage: string | null;
@@ -223,7 +223,7 @@ async function lineaDeLaBandeja(
   return { lineaId, slug: ws.slug as string, cfg, bandeja: leerConfigBandeja(ws.config_extra ?? null) };
 }
 
-async function configDeLinea(supabase: SupabaseClient, workspaceId: string): Promise<ConfigLinea | string> {
+export async function configDeLinea(supabase: SupabaseClient, workspaceId: string): Promise<ConfigLinea | string> {
   const l = await lineaDeLaBandeja(supabase, workspaceId);
   if (typeof l === 'string') return l;
   const { lineaId, cfg } = l;
@@ -316,7 +316,7 @@ async function guardarClases(
 
 // ── Negocio ──────────────────────────────────────────────────────────────────
 
-async function crearNegocio(
+export async function crearNegocio(
   supabase: SupabaseClient,
   p: {
     workspaceId: string; cfg: ConfigLinea; contactoId: string; entregaId: string;
@@ -1636,7 +1636,7 @@ async function entenderSegmento(
 
 // ── Cargar en un negocio que ya existe ───────────────────────────────────────
 
-interface BloqueDelNegocio {
+export interface BloqueDelNegocio {
   id: string;
   data: Record<string, unknown>;
   updated_at: string | null;
@@ -1647,7 +1647,7 @@ interface BloqueDelNegocio {
  * Los bloques `datos` del negocio con su config, en el orden de las etapas y de los bloques.
  * Un espejo (`compartido_con_origen`) no se escribe: su dato vive en la fila del origen.
  */
-async function bloquesDatosDelNegocio(supabase: SupabaseClient, negocioId: string): Promise<BloqueDelNegocio[] | string> {
+export async function bloquesDatosDelNegocio(supabase: SupabaseClient, negocioId: string): Promise<BloqueDelNegocio[] | string> {
   const { data, error } = await supabase.from('negocio_bloques')
     .select('id, data, updated_at, bloque_configs(orden, config_extra, bloque_definitions(tipo), etapas_negocio(orden))')
     .eq('negocio_id', negocioId);
@@ -1677,7 +1677,7 @@ async function bloquesDatosDelNegocio(supabase: SupabaseClient, negocioId: strin
  * `updated_at`). Si alguien guardó entre tanto, se relee y se vuelve a fusionar una vez: lo
  * que la persona escribió gana. Devuelve la data que quedó escrita (o `null` si no se pudo).
  */
-async function escribirBloque(
+export async function escribirBloque(
   supabase: SupabaseClient,
   b: BloqueDelNegocio,
   fusionar: (d: Record<string, unknown>) => Record<string, unknown> | null,

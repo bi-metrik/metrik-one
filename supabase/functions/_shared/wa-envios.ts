@@ -13,6 +13,7 @@
 
 import { getServiceClient } from './supabase-client.ts';
 import type { SupabaseClient } from './types.ts';
+import { registrarSaliente } from './wa-conversacion.ts';
 
 export type OrigenEnvio = 'bot' | 'alerta' | 'template' | 'interno';
 
@@ -76,6 +77,20 @@ export async function registrarEnvio(
   } catch (err) {
     console.error('[wa-envios] no se pudo registrar el envio:', err);
   }
+}
+
+/**
+ * El mismo envío, con su texto completo y sus opciones, en `wa_conversacion` (ver `wa-conversacion.ts`). Solo queda si
+ * el teléfono tiene conversación abierta; lo decide la base. Nunca lanza.
+ */
+export async function registrarEnConversacion(
+  phone: string,
+  waMessageId: string | null,
+  payload: Record<string, unknown>,
+  ctx: EnvioCtx = {},
+): Promise<void> {
+  // deno-lint-ignore no-explicit-any
+  await registrarSaliente(clienteDeEnvios() as any, phone, waMessageId, payload, ctx); // eslint-disable-line @typescript-eslint/no-explicit-any
 }
 
 /** Aplica los acuses de Meta. El orden lo resuelve la base (`wa_aplicar_status`). */
