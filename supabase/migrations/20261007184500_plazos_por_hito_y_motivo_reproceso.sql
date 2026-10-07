@@ -7,7 +7,7 @@
 -- la DIAN. Esta migración es SOLO de producto: funciones y columnas, cero filas
 -- de cliente. La configuración de SOENA va aparte, en su carpeta de proyecto.
 --
--- TRES CAMBIOS
+-- CUATRO CAMBIOS
 --
 -- 1. `plazos_pendientes`: alcance POR HITO.
 --    Antes, `etapas_orden` y `ancla` eran de la línea y valían para todos los
@@ -45,6 +45,12 @@
 --    La lista vive en el código (`src/lib/negocios/motivos-reproceso.ts`); la
 --    columna es texto libre a propósito, para que agregar un motivo no pida
 --    migración. Nullable: los 59 eventos viejos no tienen motivo y no se inventa.
+--
+-- 4. `get_directivo_soena`: las etapas nuevas (21 a 24) cuentan en la fila 9 del
+--    embudo de operaciones, junto a la 19. Sin esto, un caso que avanza de la 19
+--    desaparece del tablero directivo: el mapa no lo pone en ninguna fila. Se hace
+--    sobre `pg_get_functiondef` (como `20260927000001`) para no pisar la versión
+--    viva con la copia del repo, y aborta si la fila no está como se espera.
 -- ============================================================
 
 
@@ -233,3 +239,35 @@ alter table public.reproceso_eventos
 
 comment on column public.reproceso_eventos.motivo is
   'Motivo de la lista cerrada por tipo (src/lib/negocios/motivos-reproceso.ts). NULL en los eventos anteriores al 2026-10-07, que solo tienen el texto libre de detalle.';
+
+
+-- ── 4. Tablero directivo de SOENA: las etapas 21 a 24 en la fila 9 ──────────
+
+do $$
+declare
+  r record;
+  v_def text;
+  v_nuevo text;
+begin
+  for r in
+    select p.oid
+    from pg_proc p
+    join pg_namespace n on n.oid = p.pronamespace
+    where n.nspname = 'public' and p.proname = 'get_directivo_soena'
+  loop
+    v_def := pg_get_functiondef(r.oid);
+    if v_def ~ '''Documentos aceptados por la DIAN'',\s*array\[19, 21, 22, 23, 24\]' then
+      continue; -- ya estaba
+    end if;
+    v_nuevo := regexp_replace(
+      v_def,
+      '(''Documentos aceptados por la DIAN'',\s*)array\[19\]',
+      '\1array[19, 21, 22, 23, 24]'
+    );
+    if v_nuevo = v_def then
+      raise exception 'get_directivo_soena cambió en producción: no tiene la fila 9 con array[19]. Revisar a mano antes de aplicar.';
+    end if;
+    execute v_nuevo;
+  end loop;
+end;
+$$;

@@ -51,6 +51,16 @@ const ESQUEMA_BASE = `
 
   create function public.current_user_workspace_id() returns uuid language sql stable as
     $$ select null::uuid $$;
+  -- El embudo del tablero directivo, reducido a la forma que la migración reescribe.
+  create function public.get_directivo_soena(p_workspace_id uuid, p_anio integer, p_mes integer)
+  returns jsonb language sql stable as $f$
+    with mapa(fila_orden, fila, etapa_orden) as (
+      values
+        (9,  'Documentos aceptados por la DIAN',          array[19]),
+        (10, 'Proceso terminado',                         array[15])
+    )
+    select jsonb_agg(etapa_orden order by fila_orden) from mapa
+  $f$;
   -- Reloj de prueba. En producción es el día civil de Bogotá.
   create function public.hoy_bogota() returns date language sql stable as
     $$ select coalesce(nullif(current_setting('prueba.hoy', true), '')::date, current_date) $$;
@@ -215,6 +225,19 @@ describe('un aviso por hito y por ciclo de reproceso', () => {
   it('una fecha de reproceso ilegible no tumba la consulta de la línea', async () => {
     await caso(15, 21, [{ fecha_entrega_dian: '2026-09-25' }], { reproceso: { ciclo: 1, abierto_at: 'ayer' } })
     expect(pares(await pendientes('2026-10-07'))).toEqual(['V15:radicado_5'])
+  })
+})
+
+describe('tablero directivo', () => {
+  it('las etapas 21 a 24 cuentan en la fila 9 junto a la 19; el resto del mapa no cambia', async () => {
+    const r = await db.query<{ m: unknown }>(`select public.get_directivo_soena(null, 2026, 10) as m`)
+    expect(r.rows[0].m).toEqual([[19, 21, 22, 23, 24], [15]])
+  })
+
+  it('volver a correr la migración no la toca dos veces', async () => {
+    await db.exec(leer(NUEVA))
+    const r = await db.query<{ m: unknown }>(`select public.get_directivo_soena(null, 2026, 10) as m`)
+    expect(r.rows[0].m).toEqual([[19, 21, 22, 23, 24], [15]])
   })
 })
 
