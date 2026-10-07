@@ -16,10 +16,22 @@
 //   - no loguea el payload (es lo que dijo la persona);
 //   - no acepta un `estudio` que no exista o este apagado;
 //   - no guarda audio: el tope de 1 MB lo deja fuera (ver `LIMITE_BYTES` en validar.ts).
+//
+// ⚠️⚠️ DESDE EL 2026-10-07 ESTE ENDPOINT PUEDE HACER HABLAR AL BOT. Un envio del modo
+// `objetos` continua la entrevista por WhatsApp (antes la continuaba el toque de la persona
+// sobre un `wa.me`, que desde el navegador interno de WhatsApp relanza la app en vez de
+// devolver a la conversacion). O sea que el endpoint publico y sin autenticacion paso de
+// "escribe una fila" a "manda un mensaje": es un vector de envio no autorizado si no se
+// contiene. La contencion NO esta aqui: esta en `_shared/cardumen/objetos-post.ts`, con sus
+// cuatro invariantes escritas y probadas. La de esta funcion es que el destino del mensaje
+// NUNCA sale del cuerpo del POST.
 
 import { getServiceClient } from "../_shared/supabase-client.ts";
 import { corsHeaders } from "../_shared/cors.ts";
 import { LIMITE_BYTES, idSesionDelPayload, validarCuerpo } from "./validar.ts";
+import { MODO_OBJETOS } from "../_shared/cardumen/objetos.ts";
+import { llaveDelPasoSuelto } from "../_shared/cardumen/objetos-post.ts";
+import { guardarPasoSueltoYContinuar } from "../_shared/cardumen/objetos-flujo.ts";
 
 const JSON_HEADERS = { ...corsHeaders, "Content-Type": "application/json" };
 
@@ -70,7 +82,7 @@ Deno.serve(async (req) => {
   //    dos cosas fallo: desde afuera no hay por que poder enumerar el catalogo.
   const { data: fila, error: errEstudio } = await supabase
     .from("cardumen_estudios")
-    .select("estudio, activo")
+    .select("estudio, activo, modo")
     .eq("estudio", estudio)
     .maybeSingle();
   if (errEstudio) {
@@ -80,6 +92,31 @@ Deno.serve(async (req) => {
   if (!fila || fila.activo === false) {
     console.warn(`[cardumen-ingesta] envio rechazado: estudio '${estudio}' no existe o esta apagado`);
     return responder(404, { error: "estudio_no_disponible" });
+  }
+
+  // 2-obj. Envio de UN paso suelto del modo `objetos`. Dos cosas pasan solo aqui:
+  //
+  //   a) La llave de no-duplicado es `(estudio, token, objeto)` y no el id de sesion. El id
+  //      de sesion de la pagina es un uuid nuevo en cada carga y el del camino del texto es
+  //      `wa-<telefono>-<paso>`: por esa llave los dos caminos de regreso NUNCA colisionan, y
+  //      en el orden texto→POST quedaban DOS filas del mismo reparto (una con el vector
+  //      medido y otra con el aproximado) sin forma de saber cual es cual. Con esta llave el
+  //      POST actualiza la que ya existe y el vector medido se queda con el lugar.
+  //   b) Despues de guardar, la secuencia CONTINUA (`continuarObjetosPorPost`). El riesgo que
+  //      eso abre y lo que lo contiene estan en `_shared/cardumen/objetos-post.ts`.
+  //
+  // ⚠️ La respuesta NO dice si el bot continuo o no, ni por que. Seria un oraculo: desde
+  // afuera, probando telefonos, se podria averiguar cuales tienen una entrevista abierta y en
+  // que paso van. El motivo va al log, que no lo ve quien hace el POST.
+  const llave = fila.modo === MODO_OBJETOS ? llaveDelPasoSuelto({ estudio, token, payload }) : null;
+  if (llave) {
+    const r = await guardarPasoSueltoYContinuar(supabase, { estudio, token, lang, payload }, llave);
+    if (!r) return responder(500, { error: "error_interno" });
+    console.log(
+      `[cardumen-ingesta] paso suelto estudio='${estudio}' objeto='${llave.objeto}' ` +
+        `duplicado=${r.duplicado} continuacion=${r.continuacion}`,
+    );
+    return responder(r.duplicado ? 200 : 201, { ok: true, id: r.id, duplicado: r.duplicado });
   }
 
   // 2. Idempotencia, si el instrumento trae un id de sesion. Reintentar (red intermitente,

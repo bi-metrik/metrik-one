@@ -4,7 +4,7 @@
 
 - ⚠️⚠️ [Plan Anual CDA (#1065)](project_valida_cda_restriccion_y_plan_anual.md) — migración 20261007210000 SIN aplicar; vigente_hasta=12.1 es null; anexo generado; pendientes #1072
 - ⚠️⚠️ [SOE-001: Seguimiento en 4 etapas de operaciones](project_soe001_seguimiento_operaciones.md) — migración APLICADA (7-oct); SQL de datos SIN aplicar; deploy alertas-plazo antes del SQL
-- ⚠️⚠️ [Núcleo conversacional (#1060-#1062)](project_nucleo_conversacional.md) — p90 7,4 s > 5 s; anotar une con la pendiente; [Sí, ábrelo] propone lo ya dicho
+- ⚠️⚠️ [Núcleo conversacional (#1060-#1062)](project_nucleo_conversacional.md) — el modelo clasifica, el código solo valida (extraccion.ts propia); p90 7,4 s; anotar une con la pendiente
 - ⚠️⚠️ [Términos CDA v1.4 por aviso (13.1)](project_valida_cda_terminos_v14_por_aviso.md) — SQL solo corre el 7-oct; deploy ANTES; no aceptar nunca pausa
 - ⚠️⚠️ [Bot híbrido de la bandeja (#1056)](project_bandeja_hibrida.md) — detrás de bot_conversacional.hibrido (apagado = main); propuesta [Sí, ese]; decisión con 3.5-lite
 - ⚠️⚠️ [Doble guardado e idempotencia (#1047-#1053)](project_doble_guardado_idempotencia.md) — #1049/#1052 migración SIN aplicar; POST cortado se repite vía Vercel
@@ -96,12 +96,13 @@
 - ⚠️⚠️ [Cardumen independiente y Meta del 1-oct](project_cardumen_infra_independiente.md) — servicio se cobra pasadas 1.000/numero; sin pago en WABA el bot calla
 - ⚠️ [Medicion de Cardumen en el numero de ONE](project_cardumen_medicion_wa.md) — intent `cardumen:<estudio>`; origen='cardumen' pide migracion; inerte sin deploy
 - ⚠️ [Bot Navigate (demo Grupo Progreso)](project_cardumen_navigate_demo.md) — deploy ANTES del SQL; idioma PRIMERO
-- ⚠️⚠️ [Objetos sueltos por WhatsApp](project_cardumen_objetos_sueltos.md) — comparte tabla con la demo de Navigate; la palabra de consentimiento del chat ES «LISTO»
+- ⚠️⚠️ [Objetos sueltos por WhatsApp](project_cardumen_objetos_sueltos.md) — un `wa.me` relanza la app; el POST continúa y eso vuelve la ingesta un posible relay
 - ⚠️⚠️ [Miniweb por catálogo + ingesta (#980)](project_cardumen_miniweb_catalogo.md) — migración ANTES del merge; `cardumen` NO se toca; la ñ no se normaliza
 - ⚠️ [Guarda de sustento en triada G03 (#931)](project_cardumen_guarda_triada_g03.md) — SIN mergear; probar guardas re-leyendo salidas crudas
 - ⚠️ [Polaridad G22 y matiz G13 (#928)](project_cardumen_polaridad_matiz.md) — SIN mergear: benchmark primero
 - ⚠️⚠️ [Filtro de riesgo y blindaje de Navigate (#924)](project_cardumen_filtro_blindaje.md) — mergeado; filtro caido NO es SEN; CO no es INJ
 - ⚠️ [Navigate no es canal de ayuda (#933)](project_cardumen_sin_canal_de_ayuda.md) — SIN mergear; SEN se aparta sin prometer ayuda; caida_filtro.ts roto
+- ⚠️ [«N años» en un archivo nuevo](project_retencion_cifra_anios.md) — retencion.test.ts exige clasificarlo; CI cae aunque pase lo local
 - ⚠️ [Techo de 1.000 filas de PostgREST](project_techo_postgrest.md) — `traerTodo` para lecturas por lote
 - ⚠️ [Marcas de Siigo en SOENA](project_marcas_siigo_soena.md) — FV-2-244 con la cédula truncada NO se toca
 - [Ciudad de actividad y tasa en Revisar (Trappvel)](project_ciudad_actividad_nombre_tour.md) — regla ANGOSTA (Punta Cana es destino); tasa solo en el editor
