@@ -17,10 +17,11 @@ import { normal } from '../verificador.ts';
 import type { FilaConversacion } from '../tipos.ts';
 import { aplanarBloques } from '../../niveles-solicitud.ts';
 import { huecos } from '../../wa-entendimiento-reglas.ts';
-import type { CampoEntendible, Sugerido } from '../../wa-entendimiento-reglas.ts';
+import type { CampoEntendible } from '../../wa-entendimiento-reglas.ts';
 import { cargarEnExistente, valorLegible } from '../../wa-carga-reglas.ts';
 import type { MensajeEntrega } from '../../wa-guardianes.ts';
-import { validarCarga } from './extraccion.ts';
+import { lineaDuda, validarCarga } from './extraccion.ts';
+import type { Quitado, SugeridoAgente } from './extraccion.ts';
 
 const RE_CODIGO = /\b[A-ZÑ]\d{0,2} \d{2} \d{1,4}\b/gu;
 /** Lo que se le pasa a la extracción, como mucho (el mismo tope de la conversación que ve el modelo: 6.000 tokens). */
@@ -110,15 +111,19 @@ function recortar(textos: string[]): string[] {
 // ── El plan de una carga ─────────────────────────────────────────────────────
 
 export interface PlanCarga {
-  sugeridos: Record<string, Sugerido>;
+  sugeridos: Record<string, SugeridoAgente>;
+  /** Lo que el comercial pidió quitar del viaje (acción explícita: `cargarEnExistente` con `quitar`). */
+  quitar?: Record<string, Quitado>;
   historia: string;
 }
 
 export interface Preparada {
-  /** Lo que cambiaría en el viaje, como se le dice a una persona («Fecha de regreso: 16 nov»). */
+  /** Lo que cambiaría en el viaje, como se le dice a una persona («Fecha de regreso: 16 nov (calculado)»). */
   entendido: string[];
   /** Lo que seguiría faltando para cotizar. */
   falta: string[];
+  /** La duda más importante de la extracción, como una línea para arriba del resumen. No bloquea lo demás. */
+  duda?: string;
   plan: PlanCarga;
 }
 
@@ -128,10 +133,29 @@ export function mensajesDeTextos(textos: ReadonlyArray<string>): MensajeEntrega[
   return textos.map((t, i) => ({ n: i + 1, cuerpo: t, reenviado: true, tipo: 'text', origen: 'texto' })) as MensajeEntrega[];
 }
 
+/** El plan pendiente (lo que se le propuso al comercial y no ha confirmado), tolerante a una traza vieja. Pura. */
+export function planPrevio(previo: unknown): { sugeridos: Record<string, SugeridoAgente>; quitar: Record<string, Quitado> } {
+  const p = (previo && typeof previo === 'object' ? previo : {}) as Partial<PlanCarga>;
+  return { sugeridos: p.sugeridos ?? {}, quitar: p.quitar ?? {} };
+}
+
+/** Lo propuesto sin confirmar, por campo: se le muestra a la extracción para que pueda corregirlo o quitarlo. Pura. */
+export function propuestoDe(previo: unknown): Record<string, unknown> {
+  return Object.fromEntries(Object.entries(planPrevio(previo).sugeridos).map(([k, s]) => [k, s.valor]));
+}
+
+/** La marca corta de lo que no está escrito tal cual: el comercial lo revisa antes de tocar. Pura. */
+function marcaComo(s: SugeridoAgente): string {
+  const como = s.como ?? (s.deduccion ? 'deducido' : undefined);
+  return como ? ` (${como})` : '';
+}
+
+const sinValor = (v: unknown) => v === undefined || v === null || v === '';
+
 /**
  * La carga que se propone. `raw` es la salida del modelo de extracción (`instruccionesCarga`/`esquemaCarga`) sobre
  * `mensajesDeTextos(textos)`; `previo`, el plan de la propuesta pendiente del mismo viaje (se une: lo nuevo gana solo
- * en el mismo campo). Pura.
+ * en el mismo campo, y un «quitar» nuevo saca el valor propuesto). Pura.
  */
 export function planDeCarga(p: {
   bloques: ReadonlyArray<Bloque>;
@@ -143,26 +167,44 @@ export function planDeCarga(p: {
 }): Preparada {
   const { fields, valores: yaTiene } = aplanarBloques(p.bloques.map((b) => ({ fields: b.fields, data: b.data })));
   const campos = fields as CampoEntendible[];
-  // La pendiente cuenta como sabida para las invariantes (el regreso contra su salida, un `pedir_si`).
-  const previo = (p.previo && typeof p.previo === 'object' ? (p.previo as Partial<PlanCarga>).sugeridos : null) ?? {};
-  const sabido = { ...yaTiene, ...Object.fromEntries(Object.entries(previo).map(([k, s]) => [k, s.valor])) };
+  // La pendiente cuenta como sabida para las invariantes (el regreso contra su salida, un `pedir_si`, qué se puede quitar).
+  const previo = planPrevio(p.previo);
+  const sabido = { ...yaTiene, ...propuestoDe(p.previo) };
   const v = validarCarga(p.raw, campos, p.textos, { hoyISO: p.hoyISO, yaTiene: sabido });
 
-  // La unión con la pendiente: nunca se descarta en silencio un dato propuesto y no rechazado.
-  const sugeridos: Record<string, Sugerido> = { ...previo, ...v.sugeridos };
+  // La unión con la pendiente: nunca se descarta en silencio un dato propuesto y no rechazado. Lo que el comercial pidió
+  // quitar sale de lo propuesto; un valor nuevo deshace un «quitar» pendiente del mismo campo.
+  const sugeridos: Record<string, SugeridoAgente> = { ...previo.sugeridos, ...v.sugeridos };
+  const quitar: Record<string, Quitado> = { ...previo.quitar, ...v.quitar };
+  for (const k of Object.keys(v.quitar)) delete sugeridos[k];
+  for (const k of Object.keys(v.sugeridos)) delete quitar[k];
+  // Del viaje solo se quita lo que el viaje tiene: lo que solo estaba propuesto ya salió de `sugeridos`.
+  for (const k of Object.keys(quitar)) if (sinValor(yaTiene[k])) delete quitar[k];
 
   // Lo que cambiaría (en seco, como `cargar`): el resumen no repite lo que el viaje ya tiene.
   const meta = { entrega_id: 'agente', en: p.ahoraIso, origenDe: () => 'mensaje' as const };
   const cambia: string[] = [];
+  const quitados: string[] = [];
+  const noQuitados: string[] = [];
   const vistos = new Set<string>();
   for (const b of p.bloques) {
-    const r = cargarEnExistente(b.data, b.fields, sugeridos, meta, vistos, { delModelo: true });
+    const r = cargarEnExistente(b.data, b.fields, sugeridos, meta, vistos, { delModelo: true, quitar });
     cambia.push(...r.escritos, ...r.actualizados.map((a) => a.slug), ...r.conflictos.map((c) => c.slug));
+    quitados.push(...r.quitados);
+    noQuitados.push(...r.noQuitados);
   }
-  const entendido = campos.filter((f) => cambia.includes(f.slug)).map((f) => `${f.label ?? f.slug}: ${valorLegible(f, sugeridos[f.slug].valor)}`);
-  const quedaria = { ...yaTiene, ...Object.fromEntries(Object.entries(sugeridos).map(([k, s]) => [k, s.valor])) };
+  const entendido = campos.flatMap((f) => {
+    const et = f.label ?? f.slug;
+    if (cambia.includes(f.slug)) return [`${et}: ${valorLegible(f, sugeridos[f.slug].valor)}${marcaComo(sugeridos[f.slug])}`];
+    if (quitados.includes(f.slug)) return [`${et}: se quita (${quitar[f.slug].razon ?? `«${quitar[f.slug].frase}»`})`];
+    if (noQuitados.includes(f.slug)) return [`${et}: no lo quito, lo puso alguien en ONE (cámbialo allí)`];
+    return [];
+  });
+  const quedaria: Record<string, unknown> = { ...yaTiene, ...Object.fromEntries(Object.entries(sugeridos).map(([k, s]) => [k, s.valor])) };
+  for (const k of quitados) delete quedaria[k];
   const falta = huecos(campos, quedaria).minimo.faltan.map((f) => f.label ?? f.slug);
-  return { entendido, falta, plan: { sugeridos, historia: v.historia } };
+  const duda = v.dudas[0] ? lineaDuda(v.dudas[0]) : undefined;
+  return { entendido, falta, ...(duda ? { duda } : {}), plan: { sugeridos, ...(Object.keys(quitar).length ? { quitar } : {}), historia: v.historia } };
 }
 
 /** ¿Dos listas de lo entendido dicen lo mismo? (sin importar el orden). Pura. */
@@ -188,9 +230,10 @@ export function registradoDe(campos: ReadonlyArray<CampoEntendible>, valores: Re
 }
 
 /** El hecho tras el toque. Pura. */
-export function lineaCargada(codigo: string, escritos: ReadonlyArray<string>, campos: ReadonlyArray<CampoEntendible>): string {
+export function lineaCargada(codigo: string, escritos: ReadonlyArray<string>, campos: ReadonlyArray<CampoEntendible>, quitados: ReadonlyArray<string> = []): string {
   const porSlug = new Map(campos.map((f) => [f.slug, f.label ?? f.slug]));
-  return escritos.length
-    ? `Cargué en ${codigo}: ${escritos.map((s) => porSlug.get(s) ?? s).join(', ')}.`
-    : `No había datos nuevos para ${codigo}: no cambié nada.`;
+  const nombres = (xs: ReadonlyArray<string>) => xs.map((s) => porSlug.get(s) ?? s).join(', ');
+  if (!escritos.length && !quitados.length) return `No había datos nuevos para ${codigo}: no cambié nada.`;
+  if (!escritos.length) return `Quité de ${codigo}: ${nombres(quitados)}.`;
+  return `Cargué en ${codigo}: ${nombres(escritos)}.${quitados.length ? ` Quité: ${nombres(quitados)}.` : ''}`;
 }

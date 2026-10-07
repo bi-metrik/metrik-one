@@ -33,6 +33,9 @@ export interface ViajeAgente {
   registrado?: Record<string, string>;
 }
 
+/** Lo que devuelve `prepararCarga`: lo que cambiaría, lo que faltaría, la duda de la extracción y el plan del toque. */
+export interface CargaPreparada { entendido: string[]; falta: string[]; duda?: string; plan: unknown }
+
 export interface PuertoBandeja {
   /** Nombre de la línea donde abre viajes («Viaje a medida»). */
   linea(): Promise<string>;
@@ -45,7 +48,7 @@ export interface PuertoBandeja {
    * La extracción de hoy, sin escribir: lo que cambiaría y lo que faltaría. `plan` es lo que se escribe con el toque.
    * `previo`: el plan de la propuesta pendiente del mismo viaje, que se une (lo nuevo gana solo en el mismo campo).
    */
-  prepararCarga(viajeId: string, textos: string[], previo?: unknown): Promise<{ entendido: string[]; falta: string[]; plan: unknown }>;
+  prepararCarga(viajeId: string, textos: string[], previo?: unknown): Promise<CargaPreparada>;
   /** `escritos`: lo que quedó escrito, por etiqueta y legible (`registradoDe`). */
   cargar(viajeId: string, plan: unknown): Promise<{ lineas: string[]; escritos?: Record<string, string> }>;
   crearCliente(nombre: string, llave: Llave): Promise<{ ok: true; id: string; nombre: string } | { ok: false; motivo: string }>;
@@ -208,21 +211,27 @@ const DATOS_PROPONER = {
 
 // ── El dominio ───────────────────────────────────────────────────────────────
 
-/** La propuesta de cargar o anotar: el resumen con lo que cambiaría y lo que seguiría faltando. Pura. */
+/**
+ * La propuesta de cargar o anotar: el resumen con lo que cambiaría y lo que seguiría faltando. Si la extracción tiene una
+ * duda (Mauricio, 2026-10-07: «no se invente esas cifras, puede preguntar»), va arriba, en la misma burbuja: lo demás
+ * sigue anotable con el toque y la respuesta del comercial se lee en el turno siguiente como cualquier dato. Va dentro
+ * del resumen para que nunca la corte el tope de Meta (`salidaPropuesta` corta lo de arriba, no el resumen). Pura.
+ */
 export function propuestaDeCarga(
   accion: 'cargar_tanda' | 'anotar_en_viaje',
   v: { id: string; codigo: string; nombre: string },
-  prep: { entendido: string[]; falta: string[]; plan: unknown },
+  prep: CargaPreparada,
   mensajes: string[],
 ): Propuesta {
   const verbo = accion === 'cargar_tanda' ? `¿Cargo esto en ${v.codigo} · ${v.nombre}?` : `¿Lo anoto en ${v.codigo} · ${v.nombre}?`;
   const resumen = [
+    ...(prep.duda ? [prep.duda] : []),
     verbo,
     ...(prep.entendido.length ? prep.entendido.map((l) => `• ${l}`) : ['• (no encontré datos del viaje en esto)']),
     prep.falta.length ? `Para cotizar faltaría: ${prep.falta.join(', ')}.` : 'Con esto queda el mínimo para cotizar.',
   ].join('\n');
   return {
-    accion, datos: { viajeId: v.id, codigo: v.codigo, mensajes, plan: prep.plan, entendido: prep.entendido }, resumen,
+    accion, datos: { viajeId: v.id, codigo: v.codigo, mensajes, plan: prep.plan, entendido: prep.entendido, ...(prep.duda ? { duda: prep.duda } : {}) }, resumen,
     si: accion === 'cargar_tanda' ? 'Cargar' : 'Anotar', no: 'No',
   };
 }
@@ -321,9 +330,13 @@ export function dominioBandeja(puerto: PuertoBandeja): Dominio {
       const vig = propuestaVigente(ctx.conversacion);
       const pendiente = vig?.accion === 'anotar_en_viaje' && vig.datos.viajeId === r.v.id ? vig : null;
       const prep = await puerto.prepararCarga(r.v.id, textos, pendiente?.datos.plan);
-      if (pendiente && mismoEntendido(prep.entendido, (pendiente.datos.entendido as string[] | undefined) ?? [])) {
+      // La duda cuenta: si el comercial la contestó y no cambió nada más, la propuesta nueva ya no la trae.
+      if (pendiente && mismoEntendido([...prep.entendido, ...(prep.duda ? [prep.duda] : [])], [...((pendiente.datos.entendido as string[] | undefined) ?? []), ...(typeof pendiente.datos.duda === 'string' ? [pendiente.datos.duda] : [])])) {
         // Nada nuevo frente a la pendiente: es la misma (el núcleo la reenvía con sus botones, misma huella).
         return { ok: true, propuesta: { accion, datos: pendiente.datos, resumen: pendiente.resumen, si: pendiente.si, no: pendiente.no } };
+      }
+      if (!prep.entendido.length && prep.duda) {
+        return { ok: false, error: `En lo que el comercial escribió de ${r.v.codigo} no hay datos nuevos para anotar, pero hay algo que no quedó claro. No propongas anotar: pregúntale con \`responder\`, tal cual: ${prep.duda}`, candado: 'solo_duda' };
       }
       if (!prep.entendido.length) {
         return { ok: false, error: `En lo que el comercial escribió de ${r.v.codigo} no hay datos nuevos: lo que dijo ya está en el viaje. No propongas anotar: contéstale con \`responder\` (usa ver_viaje si te pregunta qué tiene o qué falta).`, candado: 'sin_datos_nuevos' };
@@ -414,13 +427,13 @@ export function dominioBandeja(puerto: PuertoBandeja): Dominio {
     const textos = escritosDelViaje(ctx.conversacion, v.codigo, opcionNombrada, { [`nuevo:${huella}`]: v.codigo });
     if (!textos.length) return null;
     const abri = h.lineas[0];
-    let prep: Awaited<ReturnType<PuertoBandeja['prepararCarga']>>;
+    let prep: CargaPreparada;
     try {
       prep = await puerto.prepararCarga(v.id, textos);
     } catch {
       return { lineas: [abri, 'No alcancé a leer lo que me escribiste de este viaje: dime «anótalo» y lo vuelvo a leer.'] };
     }
-    if (!prep.entendido.length) return null;
+    if (!prep.entendido.length) return prep.duda ? { lineas: [abri, prep.duda] } : null;
     return { lineas: [abri], propuesta: propuestaDeCarga('anotar_en_viaje', { id: v.id, codigo: v.codigo, nombre: v.nombre ?? '' }, prep, []) };
   };
 
