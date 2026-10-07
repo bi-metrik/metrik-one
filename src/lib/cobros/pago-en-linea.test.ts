@@ -230,3 +230,52 @@ describe('otros eventos', () => {
     expect(m.cobros.get(COBRO_ID)?.fecha).toBe('2026-09-25')
   })
 })
+
+describe('lo que sigue a un pago registrado (Plan Anual de Valida CDA)', () => {
+  it('se corre al registrar el pago, y su detalle queda en el evento', async () => {
+    const m = repoEnMemoria([cobro()])
+    const llamadas: string[] = []
+    m.repo.trasPagoRegistrado = async (c) => {
+      llamadas.push(c.id)
+      return { revisar: false, detalle: 'Plan anual activado.' }
+    }
+    const s = await procesarEventoPasarela(evento(), m.repo, HOY)
+    expect(s.resultado).toBe('registrado')
+    expect(s.detalle).toContain('Plan anual activado.')
+    expect(llamadas).toEqual([COBRO_ID])
+  })
+
+  it('si no se puede activar, el pago queda registrado y el evento en revisión (devolver, anexo 2.2)', async () => {
+    const m = repoEnMemoria([cobro()])
+    m.repo.trasPagoRegistrado = async () => ({ revisar: true, detalle: 'Plan anual NO activado: había cuotas vencidas.' })
+    const s = await procesarEventoPasarela(evento(), m.repo, HOY)
+    expect(s.resultado).toBe('requiere_revision')
+    expect(m.confirmaciones).toHaveLength(1)
+    expect(m.eventos.get('evt-1')?.resultado).toBe('requiere_revision')
+    expect(m.notas[0]).toContain('Plan anual NO activado')
+  })
+
+  it('si la activación se cae, el evento queda abierto; el reintento (ya pagado) la vuelve a correr', async () => {
+    const m = repoEnMemoria([cobro()])
+    let intentos = 0
+    m.repo.trasPagoRegistrado = async () => {
+      intentos++
+      if (intentos === 1) throw new Error('base caída')
+      return { revisar: false, detalle: 'Plan anual activado.' }
+    }
+    await expect(procesarEventoPasarela(evento(), m.repo, HOY)).rejects.toThrow('base caída')
+    expect(m.eventos.get('evt-1')?.resultado).toBe('recibido')
+    const s = await procesarEventoPasarela(evento(), m.repo, HOY)
+    expect(s.resultado).toBe('ya_pagado')
+    expect(intentos).toBe(2)
+    expect(m.confirmaciones).toHaveLength(1)
+  })
+
+  it('un cobro que no es de un plan anual no cambia nada', async () => {
+    const m = repoEnMemoria([cobro()])
+    m.repo.trasPagoRegistrado = async () => null
+    const s = await procesarEventoPasarela(evento(), m.repo, HOY)
+    expect(s).toMatchObject({ resultado: 'registrado' })
+    expect(s.detalle).not.toContain('Plan anual')
+  })
+})

@@ -15,6 +15,7 @@ import { designacionDelEspacio, documentosDelCliente, perfilReal } from '@/lib/v
 import { modificacionesPorAceptar } from '@/lib/valida-api/terminos'
 import type { DocumentoContractual } from '@/lib/valida-api/resultados'
 import { leerProximoPagoCda, type LecturaPago } from './pago-servidor'
+import { TIPOS_CUOTA_SIN_MORA } from './plan-anual'
 import { puedeVerSuscripcion } from '@/lib/seccion-suscripcion/estado'
 import {
   enPlazoParaAceptar,
@@ -258,10 +259,19 @@ export type MoraValidaCda =
 async function resolverMora(): Promise<MoraValidaCda> {
   const e = await entradaValidaCda()
   if (e.tipo !== 'ok' || !e.servicioContratadoId) return { tipo: 'no_aplica' }
-  const lectura = await leerProximoPagoCda(e.servicioContratadoId, e.hoy)
+  const ahoraISO = new Date().toISOString()
+  const [lectura, delServicio] = await Promise.all([
+    leerProximoPagoCda(e.servicioContratadoId, e.hoy, ahoraISO),
+    // La mora es del SERVICIO: una cuota de usuarios adicionales impaga (período del Plan Anual) no
+    // restringe ni pausa Valida; deshabilita a ese usuario (anexo del Plan Anual, 5.2 y 6.1).
+    leerProximoPagoCda(e.servicioContratadoId, e.hoy, ahoraISO, TIPOS_CUOTA_SIN_MORA),
+  ])
   // Sin poder leer las cuotas no hay prueba de mora: no se pausa (ver el encabezado).
+  // La restricción de los 5 días (11.1, v1.4) y la pausa de los 30 se miden sobre la misma cuota del
+  // SERVICIO: un período cubierto por el Plan Anual no tiene cuota de servicio (su cuota pasó a usuarios
+  // adicionales y la anual está pagada), así que no produce aviso, restricción ni pausa (anexo 6.1).
   const mora: EstadoMora =
-    lectura.estado === 'ok' ? estadoMora(lectura.pago, e.hoy, e.restriccionDesde) : { estado: 'al_dia' }
+    delServicio.estado === 'ok' ? estadoMora(delServicio.pago, e.hoy, e.restriccionDesde) : { estado: 'al_dia' }
   return { tipo: 'ok', lectura, mora }
 }
 

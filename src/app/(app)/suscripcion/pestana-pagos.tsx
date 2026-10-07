@@ -36,12 +36,14 @@ const CLASE_CUOTA: Record<EstadoCuota, string> = {
 
 const ETIQUETA_PAGO = { pagado: 'Recibido', programado: 'Programado', anulado: 'Anulado' } as const
 
-export function PestanaPagos({ carga }: { carga: ResultadoPagosCda }) {
+export function PestanaPagos({ carga, opciones = null }: { carga: ResultadoPagosCda; opciones?: React.ReactNode }) {
   if (carga.estado === 'sin_acceso') return <AvisoCarga carga={carga} />
   if (carga.estado === 'no_disponible') return <AvisoCarga carga={{ estado: 'no_disponible', motivo: carga.motivo }} />
 
   return (
     <div className="space-y-5">
+      {/* «Pagar el mes» y «Pagar 12 meses» (Plan Anual), cuando el contrato los tiene encendidos. */}
+      {opciones}
       <section data-cuotas-cda className="rounded-lg border border-border bg-white p-4">
         <p className="text-sm font-semibold text-tinta">Cuotas de tu suscripción</p>
         <p className="mt-1 text-xs text-tinta-suave">{NOTA_IVA_CDA}</p>

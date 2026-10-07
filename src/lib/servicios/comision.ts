@@ -38,6 +38,18 @@
  * Otro servicio que el CDA compre aparte (Sustenta) es otro contrato, y su 20 % va en la comisión
  * de ESE contrato con modo `porcentaje`.
  *
+ * ## El Plan Anual de los CDA (decisión de Mauricio, 2026-10-07)
+ *
+ * «Mismo porcentaje, sobre lo efectivamente pagado ($1.650.000)». Un cobro que paga varios períodos por
+ * adelantado (`CobroDeCiclo.prepago`) no lleva un fijo por período: lleva el MISMO porcentaje que el
+ * fijo representa sobre el precio del período, aplicado a lo pagado. Con $50.000 de $150.000 (un
+ * tercio), el anual de $1.650.000 genera $550.000: ni 12 x $50.000 = $600.000 (sería sobre el precio de
+ * lista de $1.800.000) ni un solo fijo de $50.000 (sería tratarlo como un mes). Con modo `porcentaje` no
+ * cambia nada: ya es sobre lo cobrado.
+ *
+ * Durante el Plan Anual, las cuotas de usuarios adicionales (`soloAdicional`) no llevan el fijo del
+ * servicio, que ya se liquidó con el anual: solo el `pct` sobre lo adicional.
+ *
  * Módulo puro. El único que decide cuánta comisión se debe; lo consumen la ficha del contrato,
  * el motor de cobro (B3) y la liquidación.
  */
@@ -134,6 +146,32 @@ export interface CobroDeCiclo {
    * `fijo_mas_porcentaje`. Ausente = 0: sin declararla no hay porcentaje que pagar.
    */
   valorAdicional?: number
+  /**
+   * El cobro paga varios períodos por adelantado (Plan Anual de Valida CDA). `precioPeriodo` es el
+   * precio de UN período del contrato (`parametros.precio_mensual`): el fijo se vuelve el mismo
+   * porcentaje sobre lo pagado (ver el encabezado).
+   */
+  prepago?: { precioPeriodo: number }
+  /**
+   * El cobro es solo de usuarios adicionales (un período cubierto por el Plan Anual): sin el fijo del
+   * servicio, que ya se liquidó con el anual.
+   */
+  soloAdicional?: boolean
+}
+
+/**
+ * El fijo del servicio que le toca a un cobro: el pactado por período; en un prepago, el mismo
+ * porcentaje sobre lo pagado; en un cobro solo de usuarios adicionales, cero.
+ */
+function fijoDelCobro(montoFijo: number, cobro: CobroDeCiclo, base: number): { valor: number; detalle: string } {
+  if (cobro.soloAdicional) return { valor: 0, detalle: 'sin fijo (cobro solo de usuarios adicionales)' }
+  if (!cobro.prepago) return { valor: montoFijo, detalle: `monto fijo de ${montoFijo}` }
+  const precio = cobro.prepago.precioPeriodo
+  if (!(typeof precio === 'number' && Number.isFinite(precio) && precio > 0)) {
+    throw new Error('prepago sin precio del período: no se puede convertir el fijo en porcentaje')
+  }
+  const valor = Math.round((base * montoFijo) / precio)
+  return { valor, detalle: `prepago: ${montoFijo} de ${precio} por período, sobre ${base} pagado` }
 }
 
 export interface ComisionCalculada {
@@ -186,12 +224,16 @@ export function calcularComision(comision: Comision | null | undefined, cobro: C
   }
 
   if (comision.modo === 'monto_fijo') {
-    const valor = comision.monto_fijo as number
+    const fijo = comision.monto_fijo as number
+    if (cobro.prepago || cobro.soloAdicional) {
+      const f = fijoDelCobro(fijo, cobro, cobro.valor)
+      return { valor: f.valor, feeUnico, motivo: 'monto_fijo', detalle: f.detalle }
+    }
     return {
-      valor,
+      valor: fijo,
       feeUnico,
       motivo: 'monto_fijo',
-      detalle: `monto fijo pactado de ${valor} por cobro`,
+      detalle: `monto fijo pactado de ${fijo} por cobro`,
     }
   }
 
@@ -203,6 +245,15 @@ export function calcularComision(comision: Comision | null | undefined, cobro: C
         ? cobro.valorAdicional
         : 0
     const sobreAdicional = Math.round((adicional * pctAdicional) / 100)
+    if (cobro.prepago || cobro.soloAdicional) {
+      const f = fijoDelCobro(fijo, cobro, Math.max(0, cobro.valor - adicional))
+      return {
+        valor: f.valor + sobreAdicional,
+        feeUnico,
+        motivo: 'fijo_mas_porcentaje',
+        detalle: adicional > 0 ? `${f.detalle} + ${pctAdicional} % de ${adicional} adicional` : f.detalle,
+      }
+    }
     return {
       valor: fijo + sobreAdicional,
       feeUnico,

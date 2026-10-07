@@ -80,6 +80,14 @@ export interface RepoPagoEnLinea {
   confirmarPago(c: ConfirmacionPago): Promise<ResultadoConfirmacion>
   /** Deja la línea en el timeline del negocio. No lanza: el pago ya quedó registrado o marcado. */
   anotarEnNegocio(cobro: CobroParaPago, texto: string): Promise<void>
+  /**
+   * Lo que sigue a un pago registrado (o ya registrado, en un reintento), si el cobro lo pide: hoy,
+   * activar el Plan Anual de Valida CDA. `null` = nada que hacer. `revisar: true` deja el evento en
+   * revisión con el detalle. Si lanza, el webhook responde 500, el evento queda abierto y la pasarela
+   * reintenta: la segunda vez el pago ya está (`ya_pagado`) y esto se vuelve a correr. Tiene que ser
+   * idempotente.
+   */
+  trasPagoRegistrado?(cobro: CobroParaPago): Promise<{ revisar: boolean; detalle: string } | null>
 }
 
 export interface SalidaPagoEnLinea {
@@ -228,7 +236,18 @@ async function procesar(e: EventoPasarela, repo: RepoPagoEnLinea, hoy: string): 
       cobro,
     }
   }
-  return registrarPagoAprobado(e, cobro, repo, hoy)
+  const salida = await registrarPagoAprobado(e, cobro, repo, hoy)
+  if ((salida.resultado === 'registrado' || salida.resultado === 'ya_pagado') && repo.trasPagoRegistrado) {
+    const despues = await repo.trasPagoRegistrado(cobro)
+    if (despues) {
+      return {
+        ...salida,
+        resultado: despues.revisar ? 'requiere_revision' : salida.resultado,
+        detalle: `${salida.detalle} ${despues.detalle}`,
+      }
+    }
+  }
+  return salida
 }
 
 export async function procesarEventoPasarela(e: EventoPasarela, repo: RepoPagoEnLinea, hoy: string): Promise<SalidaPagoEnLinea> {
