@@ -14,7 +14,7 @@ import type { ConfigAgente } from './config.ts';
 import { fechaBogota, mensajeDelTurno, recortarResultado, sistema } from './contexto.ts';
 import { CIERRAN, declaraciones } from './herramientas.ts';
 import { consultar, fichasDeHerramienta, respuestaFija, temas, bloqueSiempre } from './reglamento.ts';
-import { botonesPropuesta, opcionesDelModelo, renderizar } from './render.ts';
+import { META, botonesPropuesta, cortarEnPalabra, opcionesDelModelo, renderizar } from './render.ts';
 import { respaldoDe, verificar } from './verificador.ts';
 import type {
   Almacen, ContextoDominio, Dominio, FilaConversacion, Mensaje, Modelo, Parte, Propuesta, Reglamento, Salida, Traza, UsoLlamado,
@@ -73,8 +73,30 @@ export async function huellaPropuesta(accion: string, datos: unknown, turnoId: s
   return [...new Uint8Array(d)].slice(0, 6).map((b) => b.toString(16).padStart(2, '0')).join('');
 }
 
-function salidaPropuesta(p: PropuestaGuardada, arriba?: string): Salida {
-  return { tipo: 'botones', texto: [arriba, p.resumen].filter(Boolean).join('\n'), opciones: botonesPropuesta(p.huella, p.si, p.no) };
+/**
+ * El mensaje de botones de una propuesta: lo de `arriba` (una respuesta del modelo o una respuesta fija) y debajo el
+ * resumen fijo del código. El cuerpo de botones de Meta va hasta 1024 caracteres: si no cabe, se corta lo de arriba
+ * (nunca el resumen, que es lo que se confirma). Pura.
+ */
+export function salidaPropuesta(p: Pick<PropuestaGuardada, 'huella' | 'resumen' | 'si' | 'no'>, arriba?: string | null): Salida {
+  const cabe = META.cuerpoBotones - [...p.resumen].length - 1;
+  const a = arriba && cabe >= 20 ? cortarEnPalabra(arriba, cabe) : '';
+  return { tipo: 'botones', texto: [a, p.resumen].filter(Boolean).join('\n'), opciones: botonesPropuesta(p.huella, p.si, p.no) };
+}
+
+/** JSON con las llaves ordenadas: `jsonb` no guarda el orden, así que dos datos iguales pueden volver distintos. Pura. */
+function estable(v: unknown): string {
+  if (Array.isArray(v)) return `[${v.map(estable).join(',')}]`;
+  if (v && typeof v === 'object') {
+    const o = v as Record<string, unknown>;
+    return `{${Object.keys(o).filter((k) => o[k] !== undefined).sort().map((k) => `${JSON.stringify(k)}:${estable(o[k])}`).join(',')}}`;
+  }
+  return JSON.stringify(v ?? null);
+}
+
+/** ¿Es la misma propuesta (misma acción, mismos datos resueltos por el código) que la pendiente? Pura. */
+export function mismaPropuesta(a: Pick<Propuesta, 'accion' | 'datos'>, b: Pick<Propuesta, 'accion' | 'datos'>): boolean {
+  return a.accion === b.accion && estable(a.datos) === estable(b.datos);
 }
 
 // ── El estado y el respaldo ──────────────────────────────────────────────────
@@ -210,9 +232,42 @@ export async function turnoDelModelo(deps: DepsTurno, e: EntradaTurno): Promise<
         devolver(p.error);
         continue;
       }
+      // La respuesta que va arriba del resumen (opcional): mismo tope y mismo verificador que `responder`.
+      let arriba: string | null = null;
+      const texto = String(args.texto ?? '').trim();
+      if (texto) {
+        const render = renderizar(texto, [], { turno: e.turnoId.slice(0, 8), topeTexto: c.topes.texto, final: correccionUsada });
+        if (!render.ok) {
+          correccionUsada = true;
+          presupuesto = Math.max(presupuesto, traza.llamados! + 1);
+          traza.candados!.push({ candado: 'formato_meta', detalle: render.error });
+          devolver(`${render.error} (el \`texto\` de \`proponer\`)`);
+          continue;
+        }
+        const motivos = verificar(render.salida.texto, respaldoDe([...respaldoFijo, ...fuentesDeRespaldo(e, resultadosTurno), p.propuesta.resumen]));
+        if (motivos.length) {
+          traza.verificador!.push({ motivo: motivos.join('; '), texto: render.salida.texto });
+          if (!correccionUsada) {
+            correccionUsada = true;
+            presupuesto = Math.max(presupuesto, traza.llamados! + 1);
+            devolver(`No se envió porque el \`texto\`: ${motivos.join('; ')}. Vuelve a llamar \`proponer\` con el texto sin eso (los hechos los escribe el sistema; los datos tienen que salir de la conversación o de una herramienta).`);
+            continue;
+          }
+          // Segunda vez: el texto no sale; la propuesta (que arma el código con datos reales) sí.
+        } else {
+          arriba = render.salida.texto;
+        }
+      }
+      // Candado: la misma propuesta que ya está pendiente no se vuelve a mandar. Sale la respuesta del modelo (o una
+      // línea fija) y la pendiente sigue viva para el toque.
+      const vig = propuestaVigente(e.filas);
+      if (vig && mismaPropuesta(vig, p.propuesta)) {
+        traza.candados!.push({ candado: 'propuesta_repetida', detalle: `${accion}: igual a la pendiente ${vig.huella}` });
+        return fin({ tipo: 'texto', texto: arriba ?? TEXTO_PROPUESTA_PENDIENTE }, { tema: 'propuesta', ...(arriba ? {} : { respuesta_fija: 'propuesta_pendiente' }) });
+      }
       const huella = await huellaPropuesta(accion, p.propuesta.datos, e.turnoId);
       const guardada: PropuestaGuardada = { ...p.propuesta, huella, args_modelo: { accion, datos } };
-      return fin(salidaPropuesta(guardada), { propuesta: guardada, tema: 'propuesta' });
+      return fin(salidaPropuesta(guardada, arriba), { propuesta: guardada, tema: 'propuesta' });
     }
 
     // responder
@@ -254,6 +309,8 @@ export async function turnoDelModelo(deps: DepsTurno, e: EntradaTurno): Promise<
 
 export const TEXTO_YA_HECHO = 'Eso ya quedó hecho.';
 export const TEXTO_SIN_VIGENTE = 'Ese botón ya no está vigente: no hice nada.';
+/** Cuando el modelo repite la propuesta pendiente sin decir nada más. No afirma nada: solo recuerda el botón. */
+export const TEXTO_PROPUESTA_PENDIENTE = 'La propuesta de arriba sigue pendiente: tócala cuando quieras.';
 export const TEXTO_NO_PUDE = 'No pude hacerlo ahora: no se escribió nada. Toca de nuevo en un rato.';
 
 /** «sí» escrito solo, sin más palabras (como en #1056). Pura. */
