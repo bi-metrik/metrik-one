@@ -50,7 +50,7 @@ describe('falla en vivo 2026-10-07: preguntar y proponer en el mismo turno', () 
     expect(t[0].texto).toContain('Abrí Q1 26 6 · San Andrés para Rosa Quintero.')
   })
 
-  it('turno 2: la MISMA propuesta no se vuelve a mandar; sale la respuesta y la pendiente sigue viva para el toque', async () => {
+  it('turno 2: la MISMA propuesta no se rearma; se reenvía la pendiente (misma huella, con botones) con la respuesta arriba', async () => {
     const modelo = modeloGuionado([
       { name: 'buscar', args: { texto: 'Rosa Quintero' } },
       { name: 'proponer', args: { ...PROPONER, texto: RESPUESTA_1 } },
@@ -63,7 +63,8 @@ describe('falla en vivo 2026-10-07: preguntar y proponer en el mismo turno', () 
     await e.escribe(TURNO_1)
     const antes = propuestaVigente(e.almacen.filas)!
     const t2 = await e.escribe(TURNO_2)
-    expect(t2).toEqual([{ tipo: 'texto', texto: RESPUESTA_2 }])
+    expect(t2).toEqual([salidaPropuesta(antes, RESPUESTA_2)])
+    expect(t2[0].texto).toBe(`${RESPUESTA_2}\n${RESUMEN}`)
     const traza = e.trazas().filter((x) => x.tipo === 'modelo').at(-1)!
     expect(traza.candados).toEqual([expect.objectContaining({ candado: 'propuesta_repetida' })])
     expect(traza.propuesta ?? null).toBeNull()
@@ -75,7 +76,7 @@ describe('falla en vivo 2026-10-07: preguntar y proponer en el mismo turno', () 
     expect(e.puerto.escrituras.filter((x) => x.tipo === 'viaje')).toHaveLength(1)
   })
 
-  it('turno 2 sin texto (lo que hizo el respaldo en vivo): sale una línea fija, no el mismo botón', async () => {
+  it('turno 2 sin texto (lo que hizo el respaldo en vivo): la pendiente se reenvía con sus botones y una línea fija arriba', async () => {
     const modelo = modeloGuionado([
       { name: 'buscar', args: { texto: 'Rosa Quintero' } },
       { name: 'proponer', args: PROPONER },
@@ -86,8 +87,10 @@ describe('falla en vivo 2026-10-07: preguntar y proponer en el mismo turno', () 
     const e = await escenario({ modelo, contactos: [ROSA], viajes: VIAJES })
     const t1 = await e.escribe(TURNO_1)
     expect(t1[0].texto).toBe(RESUMEN)
+    const antes = propuestaVigente(e.almacen.filas)!
     const t2 = await e.escribe(TURNO_2)
-    expect(t2).toEqual([{ tipo: 'texto', texto: TEXTO_PROPUESTA_PENDIENTE }])
+    expect(t2).toEqual([salidaPropuesta(antes, TEXTO_PROPUESTA_PENDIENTE)])
+    expect(propuestaVigente(e.almacen.filas)!.huella).toBe(antes.huella)
     expect(e.trazas().at(-1)!.respuesta_fija).toBe('propuesta_pendiente')
     await e.toca('Sí, ábrelo')
     expect(e.puerto.escrituras.filter((x) => x.tipo === 'viaje')).toHaveLength(1)

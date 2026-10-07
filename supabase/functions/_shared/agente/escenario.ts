@@ -12,7 +12,8 @@ import type { DepsCola } from './cola.ts';
 import { dominioBandeja } from './bandeja/dominio.ts';
 import { REGLAMENTO_ANEXO_A } from './bandeja/reglamento-anexo-a.ts';
 import { AlmacenMemoria, MensajeroMemoria, PuertoMemoria, Reloj, nuevoId } from './memoria.ts';
-import type { ContactoMem, ViajeMem } from './memoria.ts';
+import type { ContactoMem, ExtractorMemoria, ViajeMem } from './memoria.ts';
+import type { CampoEntendible } from '../wa-entendimiento-reglas.ts';
 import { huellaDe } from './reglamento.ts';
 import type { Ficha, FilaConversacion, Modelo, Reglamento, Salida, Traza } from './tipos.ts';
 
@@ -44,8 +45,8 @@ export interface Escenario {
   deps: DepsCola;
   escribe(texto: string, o?: { despuesMs?: number }): Promise<Salida[]>;
   reenvia(texto: string, o?: { despuesMs?: number }): Promise<Salida[]>;
-  /** Toca la opción cuyo título contiene `titulo` en el último mensaje del bot que tenga opciones. */
-  toca(titulo: string, o?: { despuesMs?: number }): Promise<Salida[]>;
+  /** Toca la opción cuyo título es (o contiene) `titulo` en el mensaje más reciente del bot que la tenga. */
+  toca(titulo: string, o?: { despuesMs?: number; atras?: number }): Promise<Salida[]>;
   trazas(): Traza[];
 }
 
@@ -53,6 +54,9 @@ export async function escenario(p: {
   modelo: Modelo;
   contactos?: ContactoMem[];
   viajes?: ViajeMem[];
+  /** La config de los campos del viaje y la extracción guionada (ver `PuertoMemoria`). */
+  campos?: CampoEntendible[];
+  extraer?: ExtractorMemoria;
   config?: Partial<ConfigAgente>;
   reglamento?: Reglamento;
   /** Reloj monotónico real (arnés) o falso (pruebas). */
@@ -61,7 +65,7 @@ export async function escenario(p: {
   const reloj = new Reloj();
   const almacen = new AlmacenMemoria(reloj);
   const mensajero = new MensajeroMemoria(almacen);
-  const puerto = new PuertoMemoria({ contactos: p.contactos, viajes: p.viajes });
+  const puerto = new PuertoMemoria({ contactos: p.contactos, viajes: p.viajes, campos: p.campos, extraer: p.extraer, ahora: reloj.ahora });
   const deps: DepsCola = {
     modelo: p.modelo,
     dominio: dominioBandeja(puerto),
@@ -101,14 +105,17 @@ export async function escenario(p: {
     escribe: (t, o) => correr('escrito', t, undefined, o?.despuesMs),
     reenvia: (t, o) => correr('reenvio', t, undefined, o?.despuesMs ?? 3_000),
     toca: (titulo, o) => {
-      const ultimo = [...mensajero.enviados].reverse().find((e) => 'opciones' in e.salida);
-      const ops = ultimo && 'opciones' in ultimo.salida ? ultimo.salida.opciones : [];
-      // Exacto primero: «No» no puede tocar «Anotar» porque «anotar» contiene «no» (falla del arnés del 2026-10-06).
+      // El mensaje más reciente que tenga esa opción (`atras`: saltarse los N más recientes que la tienen, para tocar un
+      // botón viejo). Exacto primero: «No» no puede tocar «Anotar» porque «anotar» contiene «no» (arnés, 2026-10-06).
       const t = titulo.toLowerCase().trim();
-      const op = ops.find((x) => x.titulo.toLowerCase() === t)
+      const buscar = (ops: Array<{ id: string; titulo: string }>) => ops.find((x) => x.titulo.toLowerCase() === t)
         ?? ops.find((x) => x.titulo.toLowerCase().startsWith(t))
         ?? ops.find((x) => x.titulo.toLowerCase().includes(t));
-      if (!op) throw new Error(`no hay una opción «${titulo}» en el último mensaje con opciones`);
+      const con = [...mensajero.enviados].reverse()
+        .map((e) => ('opciones' in e.salida ? buscar(e.salida.opciones) : undefined))
+        .filter((x): x is { id: string; titulo: string } => !!x);
+      const op = con[o?.atras ?? 0];
+      if (!op) throw new Error(`no hay una opción «${titulo}» en los mensajes del bot`);
       return correr('toque', op.titulo, op.id, o?.despuesMs ?? 5_000);
     },
     trazas: () => almacen.trazas(),
