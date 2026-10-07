@@ -17,10 +17,11 @@ import type { Llave } from '../wa-cliente-reglas.ts';
 import {
   bloquesDatosDelNegocio, configDeLinea, crearNegocio, escribirBloque, leerConModelo,
 } from '../wa-entendimiento.ts';
-import { esquemaDeSalida, instruccionesEntendimiento, huecos } from '../wa-entendimiento-reglas.ts';
+import { esquemaDeSalida, instruccionesEntendimiento } from '../wa-entendimiento-reglas.ts';
 import type { CampoEntendible, SalidaEntendida, Sugerido } from '../wa-entendimiento-reglas.ts';
-import { cargarEnExistente, sugeridosConDeducciones, trazaCarga } from '../wa-carga-reglas.ts';
-import { entenderEntrega, textoParaModelo } from '../wa-guardianes.ts';
+import { cargarEnExistente, trazaCarga } from '../wa-carga-reglas.ts';
+import { textoParaModelo } from '../wa-guardianes.ts';
+import { lineaCargada, mensajesDeTextos, planDeCarga } from './bandeja/carga.ts';
 import { aplanarBloques, calcularNiveles } from '../niveles-solicitud.ts';
 import { todayBogotaISO } from '../bogota.ts';
 import { enviarAvisoInterno } from '../wa-alerta.ts';
@@ -185,22 +186,17 @@ export function puertoBandejaSupabase(supabase: SupabaseClient, workspaceId: str
       const { data } = await supabase.from('negocios').select('codigo, nombre').eq('id', r.negocioId).maybeSingle();
       return { id: r.negocioId, codigo: String(data?.codigo ?? ''), nombre: String(data?.nombre ?? '') };
     },
-    async prepararCarga(viajeId, textos) {
+    async prepararCarga(viajeId, textos, previo) {
       const bloques = await bloquesDatosDelNegocio(supabase, viajeId);
       if (typeof bloques === 'string') throw new Error(bloques);
       const { fields, valores: yaTiene } = aplanarBloques(bloques.map((b) => ({ fields: b.fields, data: b.data })));
       const campos = fields as CampoEntendible[];
-      const mensajes = textos.map((t, i) => ({ n: i + 1, cuerpo: t, reenviado: true, tipo: 'text', origen: 'texto' }));
-      const lectura = await leerConModelo(instruccionesEntendimiento(campos, todayBogotaISO(), yaTiene), `Mensajes:\n${textoParaModelo(mensajes)}`, esquemaDeSalida(campos));
+      const lectura = await leerConModelo(instruccionesEntendimiento(campos, todayBogotaISO(), yaTiene), `Mensajes:\n${textoParaModelo(mensajesDeTextos(textos))}`, esquemaDeSalida(campos));
       if (lectura.error || lectura.json === null) throw new Error(lectura.error ?? 'sin lectura');
-      const e = entenderEntrega(lectura.json, campos, mensajes, { hoyISO: todayBogotaISO(), conocidos: yaTiene });
-      const meta = { entrega_id: 'agente', en: new Date().toISOString(), origenDe: () => 'mensaje' as const };
-      const sugeridos = sugeridosConDeducciones(bloques.map((b) => ({ fields: b.fields, data: b.data })), e.salida.sugeridos, meta);
-      const porSlug = new Map(campos.map((f) => [f.slug, f]));
-      const entendido = Object.entries(sugeridos).map(([slug, s]) => `${porSlug.get(slug)?.label ?? slug}: ${s.valor}`);
-      const quedaria = { ...yaTiene, ...Object.fromEntries(Object.entries(sugeridos).map(([k, s]) => [k, s.valor])) };
-      const falta = huecos(campos, quedaria).minimo.faltan.map((f) => f.label);
-      return { entendido, falta, plan: { sugeridos, historia: e.salida.historia } };
+      return planDeCarga({
+        bloques: bloques.map((b) => ({ fields: b.fields as CampoEntendible[], data: b.data })), textos, raw: lectura.json,
+        hoyISO: todayBogotaISO(), ahoraIso: new Date().toISOString(), previo,
+      });
     },
     async cargar(viajeId, plan) {
       const { sugeridos, historia } = plan as { sugeridos: Record<string, Sugerido>; historia: string };
@@ -228,8 +224,7 @@ export function puertoBandejaSupabase(supabase: SupabaseClient, workspaceId: str
         contenido: cortarContenido(trazaCarga({ quien: '', fechaISO: todayBogotaISO(), escritos, conflictos: [], fields: campos, historia })),
       });
       if (error) console.error('[agente] sin traza en la actividad del negocio:', error.message);
-      const porSlug = new Map(campos.map((f) => [f.slug, f.label]));
-      return { lineas: [escritos.length ? `Cargué en ${neg?.codigo ?? 'el viaje'}: ${escritos.map((s) => porSlug.get(s) ?? s).join(', ')}.` : `No había datos nuevos para ${neg?.codigo ?? 'el viaje'}: no cambié nada.`] };
+      return { lineas: [lineaCargada(String(neg?.codigo ?? 'el viaje'), escritos, campos)] };
     },
     async crearCliente(nombre: string, llave: Llave) {
       const r = await crearContactoConGuardian(supabase, workspaceId, { nombre, llave });

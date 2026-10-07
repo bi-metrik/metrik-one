@@ -1,6 +1,6 @@
 ---
 name: nucleo-conversacional
-description: Núcleo conversacional de ONE (#1060 → #1061 → #1062, 2026-10-06) — pila de PR, dos migraciones SIN aplicar, cómo se enciende, y el p90 de 7,4 s que no cumple los 5 s de Mauricio
+description: Núcleo conversacional de ONE (#1060 → #1061 → #1062, 2026-10-06; fallas en vivo 2026-10-07) — cómo se enciende, p90 7,4 s, propuestas de anotar que se unen y lo dicho antes de abrir
 metadata:
   type: project
 ---
@@ -28,4 +28,10 @@ lugar del agente simple v2; criterio fijado ANTES de medir: 0 dañinas, más éx
   que una pregunta junto a un pedido nunca se contestaba, y el respaldo flash-lite repetía la misma propuesta. Ahora
   `proponer.texto` va arriba del resumen y el candado `propuesta_repetida` (acción + datos con llaves ordenadas) no
   reenvía la pendiente. El corte/respaldo ya era config: `bot_conversacional.agente_config.corte_ms` / `.respaldo`.
+- Segunda falla 2026-10-07 (PR fix/bandeja-acumula-propuestas, sin migración): una propuesta de anotar REEMPLAZABA la
+  pendiente y la extracción veía solo `datos.texto`. Ahora `bandeja/carga.ts`: lee los escritos del viaje (tramos por
+  `nombramientos`, el viaje_nuevo pendiente cuenta como `nuevo:<huella>`), une con la pendiente del mismo viaje, deriva
+  regreso por noches, y un rango en select va a `requisitos_especiales`. El toque de [Sí, ábrelo] ya llama a la
+  extracción (Gemini) vía `trasEjecutar`: ese toque tarda más que antes. «Niños» sigue preguntándose si no dicen «sin
+  niños» (regla de la extracción de siempre, no se tocó). `PuertoMemoria` con `campos` + `extraer` corre la cadena real.
 Relacionado: [[bandeja-hibrida]], [[entendimiento-bandeja-wa]].

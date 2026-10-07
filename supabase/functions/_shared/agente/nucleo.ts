@@ -80,8 +80,20 @@ export async function huellaPropuesta(accion: string, datos: unknown, turnoId: s
  */
 export function salidaPropuesta(p: Pick<PropuestaGuardada, 'huella' | 'resumen' | 'si' | 'no'>, arriba?: string | null): Salida {
   const cabe = META.cuerpoBotones - [...p.resumen].length - 1;
-  const a = arriba && cabe >= 20 ? cortarEnPalabra(arriba, cabe) : '';
+  const sinRepetir = arriba ? sinLineasDelResumen(arriba, p.resumen) : '';
+  const a = sinRepetir && cabe >= 20 ? cortarEnPalabra(sinRepetir, cabe) : '';
   return { tipo: 'botones', texto: [a, p.resumen].filter(Boolean).join('\n'), opciones: botonesPropuesta(p.huella, p.si, p.no) };
+}
+
+const comparable = (s: string) => s.toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '').replace(/[^a-z0-9ñ]+/g, ' ').trim();
+
+/**
+ * Lo de arriba sin las líneas que ya dice el resumen: en vivo, el modelo escribió en `texto` la misma pregunta del
+ * resumen («¿Lo anoto en …?») y salió dos veces. Pura.
+ */
+export function sinLineasDelResumen(arriba: string, resumen: string): string {
+  const delResumen = new Set(resumen.split('\n').map(comparable).filter(Boolean));
+  return arriba.split('\n').filter((l) => !delResumen.has(comparable(l))).join('\n').trim();
 }
 
 /** JSON con las llaves ordenadas: `jsonb` no guarda el orden, así que dos datos iguales pueden volver distintos. Pura. */
@@ -258,12 +270,13 @@ export async function turnoDelModelo(deps: DepsTurno, e: EntradaTurno): Promise<
           arriba = render.salida.texto;
         }
       }
-      // Candado: la misma propuesta que ya está pendiente no se vuelve a mandar. Sale la respuesta del modelo (o una
-      // línea fija) y la pendiente sigue viva para el toque.
+      // Candado: la misma propuesta que ya está pendiente no se arma de nuevo. Se reenvía LA PENDIENTE (misma huella,
+      // con sus botones) y arriba la respuesta del modelo o una línea fija: en vivo, el texto suelto dejaba los botones
+      // muy arriba en el chat.
       const vig = propuestaVigente(e.filas);
       if (vig && mismaPropuesta(vig, p.propuesta)) {
         traza.candados!.push({ candado: 'propuesta_repetida', detalle: `${accion}: igual a la pendiente ${vig.huella}` });
-        return fin({ tipo: 'texto', texto: arriba ?? TEXTO_PROPUESTA_PENDIENTE }, { tema: 'propuesta', ...(arriba ? {} : { respuesta_fija: 'propuesta_pendiente' }) });
+        return fin(salidaPropuesta(vig, arriba ?? TEXTO_PROPUESTA_PENDIENTE), { tema: 'propuesta', ...(arriba ? {} : { respuesta_fija: 'propuesta_pendiente' }) });
       }
       const huella = await huellaPropuesta(accion, p.propuesta.datos, e.turnoId);
       const guardada: PropuestaGuardada = { ...p.propuesta, huella, args_modelo: { accion, datos } };
@@ -309,8 +322,8 @@ export async function turnoDelModelo(deps: DepsTurno, e: EntradaTurno): Promise<
 
 export const TEXTO_YA_HECHO = 'Eso ya quedó hecho.';
 export const TEXTO_SIN_VIGENTE = 'Ese botón ya no está vigente: no hice nada.';
-/** Cuando el modelo repite la propuesta pendiente sin decir nada más. No afirma nada: solo recuerda el botón. */
-export const TEXTO_PROPUESTA_PENDIENTE = 'La propuesta de arriba sigue pendiente: tócala cuando quieras.';
+/** Cuando el modelo repite la propuesta pendiente sin decir nada más: va arriba de la pendiente reenviada. No afirma nada. */
+export const TEXTO_PROPUESTA_PENDIENTE = 'Esto sigue esperando tu toque:';
 export const TEXTO_NO_PUDE = 'No pude hacerlo ahora: no se escribió nada. Toca de nuevo en un rato.';
 
 /** «sí» escrito solo, sin más palabras (como en #1056). Pura. */
@@ -365,9 +378,24 @@ export async function toqueDePropuesta(
   }
   try {
     const h = await deps.dominio.ejecutar(vig, e.ctx);
-    return salida({ tipo: 'texto', texto: h.lineas.join('\n') }, {
-      huella: toque.huella, accion: vig.accion, resultado: 'ejecutada', lineas: h.lineas, escrituras: h.escrituras, nombrados: h.nombrados, consumidos: h.consumidos,
-    }, { respuesta_fija: 'rf.hecho' });
+    const ejecucion = {
+      huella: toque.huella, accion: vig.accion, resultado: 'ejecutada' as const, lineas: h.lineas, escrituras: h.escrituras, nombrados: h.nombrados, consumidos: h.consumidos,
+    };
+    // Lo que ya se puede proponer con lo dicho (abrir un viaje → anotar lo que el comercial ya contó de él).
+    let sig: Awaited<ReturnType<NonNullable<Dominio['trasEjecutar']>>> = null;
+    try {
+      sig = deps.dominio.trasEjecutar ? await deps.dominio.trasEjecutar(vig, h, toque.huella, e.ctx) : null;
+    } catch (err) {
+      console.error('[agente] tras ejecutar:', err);
+    }
+    if (sig?.propuesta) {
+      const p = sig.propuesta;
+      const huella = await huellaPropuesta(p.accion, p.datos, e.turnoId);
+      const nueva: PropuestaGuardada = { ...p, huella, args_modelo: { accion: p.accion, datos: { viaje: p.datos.codigo }, origen: 'tras_ejecutar' } };
+      return salida(salidaPropuesta(nueva, sig.lineas.join('\n')), { ...ejecucion, lineas: sig.lineas }, { respuesta_fija: 'rf.hecho', propuesta: nueva });
+    }
+    const lineas = sig?.lineas ?? h.lineas;
+    return salida({ tipo: 'texto', texto: lineas.join('\n') }, { ...ejecucion, lineas }, { respuesta_fija: 'rf.hecho' });
   } catch (err) {
     await deps.almacen.soltarCandado(clave);
     return salida({ tipo: 'texto', texto: TEXTO_NO_PUDE }, { huella: toque.huella, accion: vig.accion, resultado: 'error' }, { error: String(err).slice(0, 200) });
