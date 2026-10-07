@@ -263,7 +263,9 @@ describe('script en linea: React no hidrato (login en la portada, tableros en bl
 
   it('el reintento del chunk SÍ baja: no hay aviso y se reporta recuperado', async () => {
     const e = montar('/negocios', undefined, { chunksBajan: true })
-    const src = 'https://soena.metrikone.co/_next/static/chunks/abc.js'
+    // Relativo, como lo pone Next: la copia lleva el MISMO atributo (Turbopack registra el
+    // chunk por el atributo `src`; con la URL absoluta no hidrataba nunca).
+    const src = '/_next/static/chunks/abc.js?dpl=dpl_prueba'
     const s = e.doc.createElement('script')
     s.setAttribute('src', src)
     e.doc.head.appendChild(s)
@@ -275,6 +277,19 @@ describe('script en linea: React no hidrato (login en la portada, tableros en bl
     expect(e.fetchs.find((f) => f.message === MENSAJE_REPORTE_CHUNK)).toMatchObject({ recuperado: true, intento: 1 })
     await vi.advanceTimersByTimeAsync(GRACIA_TRAS_CHUNK_MS + 10_000)
     expect(aviso(e)).toBeNull()
+  })
+
+  it('un preload de /_next/static/ que falla no gasta intentos ni adelanta el aviso', async () => {
+    const e = montar()
+    const l = e.doc.createElement('link')
+    l.setAttribute('rel', 'preload')
+    l.setAttribute('as', 'script')
+    l.setAttribute('href', '/_next/static/chunks/abc.js')
+    e.doc.head.appendChild(l)
+    l.dispatchEvent(new e.ventana.Event('error') as unknown as Event)
+    await vi.advanceTimersByTimeAsync(5_000)
+    expect(e.doc.querySelectorAll('link')).toHaveLength(1)
+    expect(e.fetchs.filter((f) => f.message === MENSAJE_REPORTE_CHUNK)).toHaveLength(0)
   })
 
   it('una hoja de estilo de /_next/static/ que falla también se pide de nuevo', async () => {

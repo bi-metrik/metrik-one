@@ -196,6 +196,12 @@ export function claveEscalera(pathname: string): string {
  *   - Una navegacion RSC (GET con cabecera `rsc: 1`, sin prefetch) que falla antes de recibir
  *     respuesta se repite (`ESPERAS_REINTENTO_RSC_MS`) en vez de caer a una carga completa.
  *
+ * La copia de un chunk lleva el `src` TAL CUAL venía en el atributo (relativo, `/_next/...`),
+ * no la URL absoluta de la propiedad `src`: el runtime de Turbopack identifica el chunk que se
+ * registra por el atributo `src` de `document.currentScript`, y con la URL absoluta lo anotaba
+ * bajo otra llave y la página no hidrataba nunca (medido en Chromium, 2026-10-07). Solo se
+ * reintentan `<script>` y hojas (`rel=stylesheet`): un `preload` que falla no cuenta.
+ *
  * Lo que este script inserta lleva la marca `__oneP`: no cuenta como avance del HTML. El `load`
  * de un elemento se escucha en `document` y no en `window`: por especificación, un evento
  * `load` no sube hasta la ventana (el `error`, sí).
@@ -300,9 +306,11 @@ tm=setTimeout(vigilar,C.ll);
 api.hidratada=function(){clearTimeout(tm);if(tc)clearTimeout(tc);quitar(C.id);quitar(C.il);
 if(mo){try{mo.disconnect()}catch(e){}mo=null}
 while(quitadas.length){var q=quitadas.shift();if(ap)ap.call(d.head,q);else d.head.appendChild(q)}};
-function esChunk(s){if(!s||(s.tagName!=='SCRIPT'&&s.tagName!=='LINK'))return '';var u=String(s.src||s.href||'');return u.indexOf('/_next/static/')<0?'':u}
+function esChunk(s){if(!s||!s.getAttribute)return '';
+if(s.tagName==='LINK'){if(String(s.getAttribute('rel')||'').indexOf('stylesheet')<0)return ''}else if(s.tagName!=='SCRIPT')return '';
+var u=String(s.getAttribute(s.tagName==='LINK'?'href':'src')||'');return u.indexOf('/_next/static/')<0?'':u}
 function copia(s,u,n){var x=d.createElement(s.tagName==='LINK'?'link':'script');x.__oneP=1;x.__oneIntento=n;
-if(s.tagName==='LINK'){x.rel='stylesheet';x.href=u}else{x.src=u;x.async=true}return x}
+if(s.tagName==='LINK'){x.setAttribute('rel','stylesheet');x.setAttribute('href',u)}else{x.setAttribute('src',u);x.async=true}return x}
 ap=d.head&&d.head.appendChild;
 if(ap){d.head.appendChild=function(el){
 try{var u=esChunk(el);if(u&&!el.__oneP&&typeof el.onerror==='function')envolver(el,u)}catch(e){}

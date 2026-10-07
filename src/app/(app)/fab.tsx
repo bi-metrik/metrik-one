@@ -9,10 +9,34 @@ import {
 } from './timer-actions'
 import { accionesVisiblesFab, MenuAccionesFab, type AccionFab } from './fab-acciones'
 import { useNegocioCerrado } from '@/lib/negocios/negocio-en-pantalla'
+import dynamic from 'next/dynamic'
+
 // El formulario de pago vive aparte: lo comparten el FAB global y el bloque de
 // Movimientos de la ficha (allí con el negocio ya fijado).
-import RegistrarPagoModal from '@/components/registrar-pago-modal'
-import RegistrarVentaModal from './ferreteria/registrar-venta-modal'
+//
+// Bajo demanda (2026-10-07, red lenta): el FAB va en TODAS las páginas y estos dos modales
+// arrastraban el formulario de pago, el de venta y el cliente de Supabase (subida del
+// soporte) a la primera carga, que no los usa. Se piden en segundo plano un rato después de
+// hidratar (`precargarModales`), así que al tocar "Registrar pago" casi siempre ya están.
+const cargarPago = () => import('@/components/registrar-pago-modal')
+const cargarVenta = () => import('./ferreteria/registrar-venta-modal')
+const RegistrarPagoModal = dynamic(cargarPago, { ssr: false })
+const RegistrarVentaModal = dynamic(cargarVenta, { ssr: false })
+
+/** Pide los modales cuando la página ya está quieta (no compite con la primera carga). */
+function precargarModales(pago: boolean, venta: boolean): () => void {
+  if (!pago && !venta) return () => {}
+  const pedir = () => {
+    if (pago) cargarPago().catch(() => {})
+    if (venta) cargarVenta().catch(() => {})
+  }
+  const t = setTimeout(() => {
+    const w = window as Window & { requestIdleCallback?: (cb: () => void) => number }
+    if (w.requestIdleCallback) w.requestIdleCallback(pedir)
+    else pedir()
+  }, 5_000)
+  return () => clearTimeout(t)
+}
 
 
 // ── Types ─────────────────────────────────────────────
@@ -82,6 +106,9 @@ export default function FAB({ role, registrarPagoEnabled = false, modules, timer
   const intervalRef = useRef<ReturnType<typeof setInterval> | null>(null)
 
   const visibleActions = accionesVisiblesFab({ role, registrarPagoEnabled, modules, hayContexto: contextEntityId !== null })
+  const ofrecePago = visibleActions.some((a) => a.action === 'pago')
+  const ofreceVenta = visibleActions.some((a) => a.action === 'venta')
+  useEffect(() => precargarModales(ofrecePago, ofreceVenta), [ofrecePago, ofreceVenta])
 
   // ── Persist ────────────────────────────────────────
 
