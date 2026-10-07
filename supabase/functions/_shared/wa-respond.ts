@@ -4,7 +4,7 @@
 
 import { splitMessage } from './wa-format.ts';
 import { aEspanolNeutro } from './es-neutro.ts';
-import { registrarEnvio, resumenPayload } from './wa-envios.ts';
+import { registrarEnConversacion, registrarEnvio, resumenPayload } from './wa-envios.ts';
 import type { EnvioCtx } from './wa-envios.ts';
 import { camposDestino } from './wa-destino.ts';
 
@@ -494,6 +494,10 @@ async function postMessage(
   } catch {
     console.error(`[wa-respond] respuesta de Meta sin JSON para ${phone}: ${cuerpo.slice(0, 200)}`);
   }
-  await registrarEnvio(phone, waMessageId, preview, ctx);
+  // En paralelo: la conversación completa (`wa_conversacion`) solo se escribe si la persona tiene una abierta.
+  await Promise.all([
+    registrarEnvio(phone, waMessageId, preview, ctx),
+    registrarEnConversacion(phone, waMessageId, payload, ctx),
+  ]);
   return waMessageId;
 }
