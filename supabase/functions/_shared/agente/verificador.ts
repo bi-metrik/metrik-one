@@ -14,6 +14,15 @@
 const VERBOS_DE_HECHO = [
   'cargué', 'creé', 'abrí', 'descarté', 'anoté', 'guardé', 'registré', 'actualicé', 'borré', 'eliminé', 'asigné', 'agregué', 'añadí', 'cambié',
 ];
+/**
+ * La primera del plural también afirma un hecho: en vivo (2026-10-07) el respaldo escribió «Sí, abrimos el nuevo viaje a
+ * San Andrés» sin que nada se abriera, y pasó porque la lista solo tenía «abrí». Dentro de una pregunta («¿Lo
+ * abrimos?») no afirma nada.
+ */
+const VERBOS_DE_HECHO_PLURAL = [
+  'cargamos', 'creamos', 'abrimos', 'descartamos', 'anotamos', 'guardamos', 'registramos', 'actualizamos', 'borramos',
+  'eliminamos', 'asignamos', 'agregamos', 'añadimos', 'cambiamos',
+];
 const RE_HECHO_PARTICIPIO = /\b(?:ya\s+)?(?:qued[oó]|est[aá]|lo\s+dej[eé])\s+(?:cargad|cread|abiert|registrad|anotad|guardad|descartad|actualizad)[oa]s?\b/iu;
 const RE_CODIGO = /\b[A-ZÑ]\d{0,2} \d{2} \d{1,4}\b/gu;
 const RE_CORREO = /[A-Za-z0-9._%+-]+@[A-Za-z0-9-]+(?:\.[A-Za-z0-9-]+)*\.[A-Za-z]{2,}/g;
@@ -69,12 +78,25 @@ function inicioDeOracion(texto: string, i: number): boolean {
   return antes === '' || /[.!?:\n…]$/u.test(antes);
 }
 
+/** ¿La posición cae dentro de una pregunta («¿… ?» sin cerrar antes)? */
+function dentroDePregunta(texto: string, i: number): boolean {
+  const abre = texto.lastIndexOf('¿', i);
+  if (abre < 0) return false;
+  const cierra = texto.indexOf('?', abre);
+  return cierra >= i && !/[.!\n]/u.test(texto.slice(abre, i));
+}
+
 /** Los motivos por los que el texto no puede salir. Vacío = pasa. */
 export function verificar(texto: string, r: Respaldo): string[] {
   const motivos: string[] = [];
 
   for (const v of VERBOS_DE_HECHO) {
     if (new RegExp(`(^|[^\\p{L}])${v}($|[^\\p{L}])`, 'iu').test(texto)) motivos.push(`verbo de hecho «${v}»: los hechos los escribe el sistema`);
+  }
+  for (const v of VERBOS_DE_HECHO_PLURAL) {
+    for (const m of texto.matchAll(new RegExp(`(^|[^\\p{L}])${v}($|[^\\p{L}])`, 'giu'))) {
+      if (!dentroDePregunta(texto, (m.index ?? 0) + m[1].length)) { motivos.push(`verbo de hecho «${v}»: los hechos los escribe el sistema`); break; }
+    }
   }
   if (RE_HECHO_PARTICIPIO.test(texto)) motivos.push('afirma que algo quedó hecho: los hechos los escribe el sistema');
 

@@ -14,6 +14,8 @@
 import { llavesDelTexto, tieneLlave } from '../../wa-cliente-reglas.ts';
 import type { FichaCliente, Llave } from '../../wa-cliente-reglas.ts';
 import { normal } from '../verificador.ts';
+import { propuestaVigente } from '../nucleo.ts';
+import { escritosDelViaje, mismoEntendido, nombramientos } from './carga.ts';
 import type { ContextoDominio, DeclaracionHerramienta, Dominio, FilaConversacion, Hechos, Propuesta, ResultadoHerramienta } from '../tipos.ts';
 
 export interface ViajeAgente {
@@ -37,8 +39,11 @@ export interface PuertoBandeja {
   /** `null`: no hay viaje con ese código. `'error'`: no se pudo consultar. */
   viaje(codigo: string): Promise<ViajeAgente | null | 'error'>;
   crearViaje(p: { contactoId: string; destino: string | null }): Promise<{ id: string; codigo: string; nombre: string }>;
-  /** La extracción de hoy, sin escribir: lo entendido y lo que faltaría. `plan` es lo que se escribe con el toque. */
-  prepararCarga(viajeId: string, textos: string[]): Promise<{ entendido: string[]; falta: string[]; plan: unknown }>;
+  /**
+   * La extracción de hoy, sin escribir: lo que cambiaría y lo que faltaría. `plan` es lo que se escribe con el toque.
+   * `previo`: el plan de la propuesta pendiente del mismo viaje, que se une (lo nuevo gana solo en el mismo campo).
+   */
+  prepararCarga(viajeId: string, textos: string[], previo?: unknown): Promise<{ entendido: string[]; falta: string[]; plan: unknown }>;
   cargar(viajeId: string, plan: unknown): Promise<{ lineas: string[] }>;
   crearCliente(nombre: string, llave: Llave): Promise<{ ok: true; id: string; nombre: string } | { ok: false; motivo: string }>;
 }
@@ -83,21 +88,7 @@ export function opcionNombrada(opciones: ReadonlyArray<{ titulo: string; descrip
  * (número o palabra propia de esa opción, en el mensaje que sigue a las opciones) y los que abrió con su toque.
  */
 export function viajesNombrados(filas: FilaConversacion[]): string[] {
-  const out: string[] = [];
-  let opciones: ReadonlyArray<{ titulo: string; descripcion?: string }> | null = null;
-  for (const f of filas) {
-    if (delEquipo(f)) {
-      for (const m of (f.texto ?? '').toUpperCase().matchAll(RE_CODIGO)) out.push(m[0]);
-      if (opciones && f.clase === 'escrito') {
-        const k = opcionNombrada(opciones, f.texto ?? '');
-        if (k !== null) for (const m of opciones[k].titulo.toUpperCase().matchAll(RE_CODIGO)) out.push(m[0]);
-      }
-      opciones = null;
-    }
-    if (f.direccion === 'saliente') opciones = f.opciones?.length ? f.opciones : null;
-    for (const c of f.traza?.ejecucion?.resultado === 'ejecutada' ? f.traza.ejecucion.nombrados ?? [] : []) out.push(c);
-  }
-  return [...new Set(out)];
+  return [...new Set(nombramientos(filas, opcionNombrada).map((x) => x.clave).filter((c) => !c.startsWith('nuevo:')))];
 }
 
 /** ¿El texto está en un escrito del equipo? (para anotar: nada sale del modelo ni de un reenvío). */
@@ -206,13 +197,32 @@ const DATOS_PROPONER = {
   cliente: { type: 'string', description: 'viaje_nuevo: la ref de la ficha tal como la devolvió buscar.' },
   destino: { type: 'string', description: 'viaje_nuevo: el destino, si lo dijeron.' },
   viaje: { type: 'string', description: 'cargar_tanda / anotar_en_viaje: el código del viaje.' },
-  texto: { type: 'string', description: 'anotar_en_viaje: lo que el comercial escribió para anotar.' },
+  texto: { type: 'string', description: 'anotar_en_viaje: opcional. El sistema lee TODO lo que el comercial escribió de ese viaje en la conversación (también lo de antes de abrirlo) y lo une con la propuesta pendiente.' },
   nombre: { type: 'string', description: 'crear_cliente: el nombre como lo escribieron.' },
   llave: { type: 'string', description: 'crear_cliente: el celular, correo o usuario tal como lo escribieron.' },
   distinto_de_parecidos: { type: 'boolean', description: 'crear_cliente: true solo si ya mostraste los parecidos y el comercial dijo que es otra persona.' },
 };
 
 // ── El dominio ───────────────────────────────────────────────────────────────
+
+/** La propuesta de cargar o anotar: el resumen con lo que cambiaría y lo que seguiría faltando. Pura. */
+export function propuestaDeCarga(
+  accion: 'cargar_tanda' | 'anotar_en_viaje',
+  v: { id: string; codigo: string; nombre: string },
+  prep: { entendido: string[]; falta: string[]; plan: unknown },
+  mensajes: string[],
+): Propuesta {
+  const verbo = accion === 'cargar_tanda' ? `¿Cargo esto en ${v.codigo} · ${v.nombre}?` : `¿Lo anoto en ${v.codigo} · ${v.nombre}?`;
+  const resumen = [
+    verbo,
+    ...(prep.entendido.length ? prep.entendido.map((l) => `• ${l}`) : ['• (no encontré datos del viaje en esto)']),
+    prep.falta.length ? `Para cotizar faltaría: ${prep.falta.join(', ')}.` : 'Con esto queda el mínimo para cotizar.',
+  ].join('\n');
+  return {
+    accion, datos: { viajeId: v.id, codigo: v.codigo, mensajes, plan: prep.plan, entendido: prep.entendido }, resumen,
+    si: accion === 'cargar_tanda' ? 'Cargar' : 'Anotar', no: 'No',
+  };
+}
 
 export function dominioBandeja(puerto: PuertoBandeja): Dominio {
   const leer = async (nombre: string, args: Record<string, unknown>): Promise<ResultadoHerramienta> => {
@@ -287,31 +297,34 @@ export function dominioBandeja(puerto: PuertoBandeja): Dominio {
     if (accion === 'cargar_tanda' || accion === 'anotar_en_viaje') {
       const r = await viajeParaEscribir(ctx, datos.viaje);
       if (!r.ok) return r;
-      let textos: string[];
-      let mensajes: string[] = [];
       if (accion === 'cargar_tanda') {
         const t = tanda(ctx.conversacion);
-        if (!t.length) return { ok: false, error: 'No hay mensajes reenviados sin cargar. Si el comercial escribió el dato, usa anotar_en_viaje con su texto.', candado: 'tanda_vacia' };
-        textos = t.map((f) => f.texto ?? '').filter(Boolean);
-        mensajes = t.map((f) => f.id);
-      } else {
+        if (!t.length) return { ok: false, error: 'No hay mensajes reenviados sin cargar. Si el comercial escribió el dato, usa anotar_en_viaje.', candado: 'tanda_vacia' };
+        const prep = await puerto.prepararCarga(r.v.id, t.map((f) => f.texto ?? '').filter(Boolean));
+        return { ok: true, propuesta: propuestaDeCarga(accion, r.v, prep, t.map((f) => f.id)) };
+      }
+      // anotar_en_viaje: lo que el comercial escribió de ESE viaje en la conversación, no solo el texto del modelo
+      // (en vivo, «salen desde Bogotá» se anotaba sin la fecha ni los pasajeros dichos un mensaje antes).
+      let textos = escritosDelViaje(ctx.conversacion, r.v.codigo, opcionNombrada);
+      if (!textos.length) {
         const texto = String(datos.texto ?? '').trim();
         if (!texto || !enEscritoDelEquipo(ctx.conversacion, texto)) {
-          return { ok: false, error: 'Lo que se anota tiene que ser lo que el comercial escribió (no un reenvío ni una frase tuya). Copia su texto.', candado: 'texto_sin_respaldo' };
+          return { ok: false, error: 'Lo que se anota tiene que ser lo que el comercial escribió (no un reenvío ni una frase tuya).', candado: 'texto_sin_respaldo' };
         }
         textos = [texto];
       }
-      const prep = await puerto.prepararCarga(r.v.id, textos);
-      const verbo = accion === 'cargar_tanda' ? `¿Cargo esto en ${r.v.codigo} · ${r.v.nombre}?` : `¿Lo anoto en ${r.v.codigo} · ${r.v.nombre}?`;
-      const resumen = [
-        verbo,
-        ...(prep.entendido.length ? prep.entendido.map((l) => `• ${l}`) : ['• (no encontré datos del viaje en esto)']),
-        prep.falta.length ? `Para cotizar faltaría: ${prep.falta.join(', ')}.` : 'Con esto queda el mínimo para cotizar.',
-      ].join('\n');
-      return {
-        ok: true,
-        propuesta: { accion, datos: { viajeId: r.v.id, codigo: r.v.codigo, mensajes, plan: prep.plan, entendido: prep.entendido }, resumen, si: accion === 'cargar_tanda' ? 'Cargar' : 'Anotar', no: 'No' },
-      };
+      // Una pendiente de anotar en el mismo viaje se une, no se pisa.
+      const vig = propuestaVigente(ctx.conversacion);
+      const pendiente = vig?.accion === 'anotar_en_viaje' && vig.datos.viajeId === r.v.id ? vig : null;
+      const prep = await puerto.prepararCarga(r.v.id, textos, pendiente?.datos.plan);
+      if (pendiente && mismoEntendido(prep.entendido, (pendiente.datos.entendido as string[] | undefined) ?? [])) {
+        // Nada nuevo frente a la pendiente: es la misma (el núcleo la reenvía con sus botones, misma huella).
+        return { ok: true, propuesta: { accion, datos: pendiente.datos, resumen: pendiente.resumen, si: pendiente.si, no: pendiente.no } };
+      }
+      if (!prep.entendido.length) {
+        return { ok: false, error: `En lo que el comercial escribió de ${r.v.codigo} no hay datos nuevos: lo que dijo ya está en el viaje. No propongas anotar: contéstale con \`responder\` (usa ver_viaje si te pregunta qué tiene o qué falta).`, candado: 'sin_datos_nuevos' };
+      }
+      return { ok: true, propuesta: propuestaDeCarga(accion, r.v, prep, []) };
     }
     if (accion === 'crear_cliente') {
       const nombre = String(datos.nombre ?? '').trim();
@@ -361,7 +374,7 @@ export function dominioBandeja(puerto: PuertoBandeja): Dominio {
           'Reenvíame lo que te escribió y lo cargo ahí.',
         ],
         nombrados: [v.codigo],
-        escrituras: [{ tipo: 'viaje', id: v.id, codigo: v.codigo, contactoId: d.contactoId, destino: d.destino ?? null }],
+        escrituras: [{ tipo: 'viaje', id: v.id, codigo: v.codigo, nombre: v.nombre, contactoId: d.contactoId, destino: d.destino ?? null }],
       };
     }
     if (p.accion === 'cargar_tanda' || p.accion === 'anotar_en_viaje') {
@@ -386,6 +399,27 @@ export function dominioBandeja(puerto: PuertoBandeja): Dominio {
     throw new Error(`acción desconocida ${p.accion}`);
   };
 
+  /**
+   * Tras abrir un viaje: lo que el comercial ya dijo de él (en el mensaje en que pidió abrirlo o mientras el botón
+   * esperaba) sale de una vez como propuesta de anotar. No se escribe sin su toque; el «Abrí…» no pide lo ya dicho.
+   */
+  const trasEjecutar: NonNullable<Dominio['trasEjecutar']> = async (p, h, huella, ctx) => {
+    if (p.accion !== 'viaje_nuevo') return null;
+    const v = h.escrituras?.find((x) => x.tipo === 'viaje') as { id: string; codigo: string; nombre?: string } | undefined;
+    if (!v) return null;
+    const textos = escritosDelViaje(ctx.conversacion, v.codigo, opcionNombrada, { [`nuevo:${huella}`]: v.codigo });
+    if (!textos.length) return null;
+    const abri = h.lineas[0];
+    let prep: Awaited<ReturnType<PuertoBandeja['prepararCarga']>>;
+    try {
+      prep = await puerto.prepararCarga(v.id, textos);
+    } catch {
+      return { lineas: [abri, 'No alcancé a leer lo que me escribiste de este viaje: dime «anótalo» y lo vuelvo a leer.'] };
+    }
+    if (!prep.entendido.length) return null;
+    return { lineas: [abri], propuesta: propuestaDeCarga('anotar_en_viaje', { id: v.id, codigo: v.codigo, nombre: v.nombre ?? '' }, prep, []) };
+  };
+
   return {
     bot: BOT_BANDEJA,
     lecturas: LECTURAS,
@@ -394,6 +428,7 @@ export function dominioBandeja(puerto: PuertoBandeja): Dominio {
     leer: (n, a) => leer(n, a),
     proponer,
     ejecutar,
+    trasEjecutar,
     sigueVigente(p, ctx) {
       if (p.accion !== 'cargar_tanda' && p.accion !== 'descartar') return true;
       const ahora = tanda(ctx.conversacion).map((f) => f.id).join(',');

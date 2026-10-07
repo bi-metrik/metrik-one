@@ -200,6 +200,12 @@ export interface Dominio {
   proponer(accion: string, datos: Record<string, unknown>, ctx: ContextoDominio): Promise<{ ok: true; propuesta: Propuesta } | { ok: false; error: string; candado: string }>;
   /** Ejecuta una propuesta tocada. Idempotencia por huella: la asegura el núcleo. Lanza si no pudo. */
   ejecutar(propuesta: Propuesta, ctx: ContextoDominio): Promise<Hechos>;
+  /**
+   * Después de ejecutar una propuesta tocada: la siguiente propuesta que ya se puede armar con lo dicho (abrir un viaje
+   * → anotar lo que el comercial ya contó de él). `lineas` reemplaza las del hecho. `null` = nada más. Puede lanzar: el
+   * núcleo deja el hecho como estaba.
+   */
+  trasEjecutar?(propuesta: Propuesta, hechos: Hechos, huella: string, ctx: ContextoDominio): Promise<{ lineas: string[]; propuesta?: Propuesta } | null>;
   /** ¿La propuesta sigue sirviendo? (la tanda no cambió desde que se armó). Ausente = sí. */
   sigueVigente?(propuesta: Propuesta, ctx: ContextoDominio): boolean;
   /** Una línea del estado que solo el dominio sabe (la tanda abierta). */

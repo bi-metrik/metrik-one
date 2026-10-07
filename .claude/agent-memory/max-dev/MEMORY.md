@@ -4,7 +4,7 @@
 
 - ⚠️⚠️ [Restricción a 5 días (#1064) y Plan Anual CDA](project_valida_cda_restriccion_y_plan_anual.md) — rige 5-nov; migración del anual SIN aplicar; anexo fuera de documentos_contractuales
 - ⚠️⚠️ [SOE-001: Seguimiento en 4 etapas de operaciones](project_soe001_seguimiento_operaciones.md) — migración APLICADA (7-oct); SQL de datos SIN aplicar; deploy alertas-plazo antes del SQL
-- ⚠️⚠️ [Núcleo conversacional (#1060-#1062)](project_nucleo_conversacional.md) — pila de 3 PR; 2 migraciones SIN aplicar; p90 7,4 s > 5 s
+- ⚠️⚠️ [Núcleo conversacional (#1060-#1062)](project_nucleo_conversacional.md) — p90 7,4 s > 5 s; anotar une con la pendiente; [Sí, ábrelo] propone lo ya dicho
 - ⚠️⚠️ [Términos CDA v1.4 por aviso (13.1)](project_valida_cda_terminos_v14_por_aviso.md) — SQL solo corre el 7-oct; deploy ANTES; no aceptar nunca pausa
 - ⚠️⚠️ [Bot híbrido de la bandeja (#1056)](project_bandeja_hibrida.md) — detrás de bot_conversacional.hibrido (apagado = main); propuesta [Sí, ese]; decisión con 3.5-lite
 - ⚠️⚠️ [Doble guardado e idempotencia (#1047-#1053)](project_doble_guardado_idempotencia.md) — #1049/#1052 migración SIN aplicar; POST cortado se repite vía Vercel
