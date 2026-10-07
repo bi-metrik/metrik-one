@@ -5,9 +5,15 @@ import { todayBogotaISO } from '@/lib/dates/bogota'
 import { exigirModulo, REQUISITO } from '@/lib/modulos/exigir-modulo'
 import { getCachedUser } from '@/lib/supabase/auth-user'
 import type { EstadoEntrada } from '@/lib/valida-api/entrada'
-import { evaluarConDesignacion, leerAceptacionesUsuario } from '@/lib/valida-api/entrada-servidor'
+import {
+  evaluarConDesignacion,
+  evaluarModificacionConDesignacion,
+  leerAceptacionesUsuario,
+} from '@/lib/valida-api/entrada-servidor'
 import { esFuncionAusente } from '@/lib/valida-api/mapeo'
 import { designacionDelEspacio, documentosDelCliente, perfilReal } from '@/lib/valida-api/terminos-servidor'
+import { modificacionesPorAceptar } from '@/lib/valida-api/terminos'
+import type { DocumentoContractual } from '@/lib/valida-api/resultados'
 import { leerProximoPagoCda, type LecturaPago } from './pago-servidor'
 import { puedeVerSuscripcion } from '@/lib/seccion-suscripcion/estado'
 import {
@@ -15,6 +21,7 @@ import {
   estadoMora,
   mensajeConsultasRestringidas,
   mensajeSuspendidoPorMora,
+  vigenciaRestriccion,
   type EstadoMora,
 } from './plazos'
 
@@ -55,8 +62,18 @@ import {
  *     espacio opera con un aviso (`enPlazo`). Solo los pendientes: una lectura caída o unos términos
  *     sin registrar siguen cerrando, con plazo o sin él;
  *   - la mora de más de 30 días sobre la cuota impaga más vieja pausa el módulo (cláusula 11.3 de
- *     la v1.4) y, desde el 2026-11-05, la de más de 5 días restringe las consultas nuevas con el
- *     histórico abierto (11.1). Ver `plazos.ts`.
+ *     la v1.4) y, desde la vigencia registrada de la v1.4 de ESE contrato (6-nov-2026 para los cuatro
+ *     CDA), la de más de 5 días restringe las consultas nuevas con el histórico abierto (11.1). Ver
+ *     `plazos.ts` (`vigenciaRestriccion`).
+ *
+ * ## Una modificación por aviso NUNCA cierra (2026-10-07, dictamen de Emilio)
+ *
+ * La v1.4 de los Términos rige por la cláusula 13.1 (aviso de 30 días) la acepte o no el CDA: la v1.3
+ * aceptada sigue valiendo. Por eso una versión `rige_por_aviso` cubierta por lo ya aceptado no entra a
+ * `estado` (ver `cubiertaPorAviso` en `terminos.ts`): no aceptarla no pausa ni restringe, ni antes ni
+ * después de su vigencia. Lo que sí produce es un AVISO para todos (`modificaciones`) y la posibilidad,
+ * voluntaria, de que la persona designada la acepte (`modificacion`) con el mismo mecanismo y la misma
+ * constancia de la entrada.
  *
  * La mora solo se mide para el espacio que PAGA (las RPC de cuotas no responden a un beneficiario) y,
  * a diferencia de los términos, NO cierra ante una lectura caída: pausar a un cliente exige la
@@ -90,6 +107,23 @@ export type EntradaValidaCda =
       plazoTerminos: string | null
       /** Términos pendientes, pero hoy dentro del plazo: el espacio opera con aviso. */
       enPlazo: boolean
+      /**
+       * Modificaciones por aviso (cláusula 13.1) publicadas y sin aceptar: el aviso que ven TODOS. Vacío =
+       * no hay aviso (o ya se aceptó, y el aviso desaparece para todos). Nunca decide si se opera.
+       */
+      modificaciones: DocumentoContractual[]
+      /**
+       * La aceptación voluntaria de esas modificaciones (estado `pendiente` con quién firma), o `null`
+       * si no hay ninguna. `no_disponible` si no se pudo leer quién firma: el aviso sigue, la firma no.
+       */
+      modificacion: EstadoEntrada | null
+      /** Desde cuándo rige la restricción de los 5 días para este contrato; `null` = no rige. */
+      restriccionDesde: string | null
+      /**
+       * La persona REAL de la sesión es un usuario del cliente en este espacio (no el soporte de MeTRIK
+       * ni alguien de otro espacio). Solo así su vista del aviso cuenta como constancia del preaviso.
+       */
+      usuarioDelCliente: boolean
     }
 
 /** Lo que devuelve `mis_servicios()`, con los campos que la puerta usa. */
@@ -152,6 +186,23 @@ async function resolver(): Promise<EntradaValidaCda> {
     usuarioId: user.id,
   })
 
+  // Lo de la modificación por aviso se mira solo con la entrada aprobada: con términos de entrada
+  // pendientes manda la entrada, y nada de esto puede cerrar el módulo.
+  const documentos = docs.ok ? docs.documentos : []
+  const modificaciones = estado.estado === 'aprobada' ? modificacionesPorAceptar(documentos, hoy) : []
+  const modificacion =
+    modificaciones.length > 0
+      ? await evaluarModificacionConDesignacion({
+          documentos,
+          hoy,
+          aceptacionesUsuario: aceptaciones,
+          perfil,
+          workspaceId,
+          producto: 'valida_cda',
+          usuarioId: user.id,
+        })
+      : null
+
   const pagado = contratos.filter((c) => c.es_pagador === true).sort(porVigencia)
   // El plazo del MISMO contrato que decide quién firma (`designacionDelEspacio`, `versionContratada`).
   const plazoTerminos = [...contratos].sort(porVigencia)[0]?.terminos_plazo_hasta ?? null
@@ -168,6 +219,11 @@ async function resolver(): Promise<EntradaValidaCda> {
     servicioContratadoId: pagado[0]?.servicio_contratado_id ?? null,
     plazoTerminos,
     enPlazo: estado.estado === 'pendiente' && enPlazoParaAceptar(plazoTerminos, hoy),
+    modificaciones,
+    modificacion,
+    restriccionDesde: vigenciaRestriccion(documentos),
+    usuarioDelCliente:
+      perfil !== null && !perfil.platformAdmin && perfil.workspaceId === workspaceId && impersonating !== true,
   }
 }
 
@@ -204,7 +260,8 @@ async function resolverMora(): Promise<MoraValidaCda> {
   if (e.tipo !== 'ok' || !e.servicioContratadoId) return { tipo: 'no_aplica' }
   const lectura = await leerProximoPagoCda(e.servicioContratadoId, e.hoy)
   // Sin poder leer las cuotas no hay prueba de mora: no se pausa (ver el encabezado).
-  const mora: EstadoMora = lectura.estado === 'ok' ? estadoMora(lectura.pago, e.hoy) : { estado: 'al_dia' }
+  const mora: EstadoMora =
+    lectura.estado === 'ok' ? estadoMora(lectura.pago, e.hoy, e.restriccionDesde) : { estado: 'al_dia' }
   return { tipo: 'ok', lectura, mora }
 }
 

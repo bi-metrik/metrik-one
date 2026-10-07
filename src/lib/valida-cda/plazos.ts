@@ -8,7 +8,7 @@
  * aceptación. Con plazo 30-sep: el 30-sep opera (con aviso), el 1-oct se pausa. `null` = sin plazo:
  * se pausa desde que existe el contrato (el comportamiento del PR #845).
  *
- * ## 2. La mora (cláusula 11 de los términos, v1.4 desde el 2026-11-05)
+ * ## 2. La mora (cláusula 11 de los términos, v1.4 desde el 2026-11-06)
  *
  * Se mide sobre la cuota impaga MÁS VIEJA (la primera que lo pagado, repartido de la más vieja a la
  * más nueva, no cubre: `proximoPago`). Con vencimiento D:
@@ -20,13 +20,16 @@
  *   - desde D+31 (`suspendido`, 11.3: «obligaciones vencidas superiores a treinta días»): Valida se
  *     pausa entera, como desde el PR #849.
  *
- * La restricción rige desde `RESTRICCION_VIGENTE_DESDE` (11.4: 30 días después del aviso de la 13.1)
- * y alcanza también a las cuotas vencidas antes: una cuota con D+6 anterior a esa fecha se restringe
- * ESE día, no antes. Antes de la vigencia solo existe la regla de los 30 días (v1.3).
+ * La restricción rige desde la vigencia de la v1.4 de ESE contrato (11.4: 30 días calendario después
+ * de publicado el aviso de la 13.1 en la plataforma), que sale del dato registrado
+ * (`vigenciaRestriccion`: el `vigente_desde` de su versión ≥ v1.4) y no de una constante. Sin una
+ * versión ≥ v1.4 registrada, el contrato no tiene restricción: sin aviso no hay cambio. La regla alcanza
+ * también a las cuotas vencidas antes: una cuota con D+6 anterior a la vigencia se restringe ESE día,
+ * no antes. Antes de la vigencia solo existe la regla de los 30 días (v1.3).
  *
  * Cuota que vence el 10-nov: aviso del 11-nov al 15-nov, restringido del 16-nov al 10-dic, pausa
- * desde el 11-dic. Cuota que vence el 15-oct: aviso desde el 16-oct (con la fecha 5-nov), restringido
- * desde el 5-nov, pausa desde el 15-nov.
+ * desde el 11-dic. Cuota que vence el 15-oct: aviso desde el 16-oct (con la fecha 6-nov), restringido
+ * desde el 6-nov, pausa desde el 15-nov.
  *
  * El pago levanta todo en la petición siguiente: nada de esto se cachea más allá del request.
  */
@@ -40,10 +43,46 @@ export const DIAS_MORA_ANTES_DE_SUSPENDER = 30
 export const DIAS_MORA_ANTES_DE_RESTRINGIR = 5
 
 /**
- * Desde cuándo rige la restricción de la cláusula 11.1 (v1.4): 30 días después del aviso enviado el
- * 2026-10-06 (cláusula 13.1). Si el aviso sale otro día, esta fecha se corre con él.
+ * La vigencia ESPERADA de la cláusula 11.1 (v1.4): el aviso se publicó en la plataforma el 2026-10-07 y
+ * rige 30 días calendario después (cláusula 13.1). La puerta NO decide con esta constante: usa la
+ * vigencia registrada de la v1.4 de cada contrato (`vigenciaRestriccion`). Queda como valor por
+ * defecto de `estadoMora` (lo usa la licencia de ONE en /suscripcion, que no se pausa por mora) y como
+ * testigo: una prueba exige que el SQL de alta de la v1.4 registre exactamente esta fecha.
  */
-export const RESTRICCION_VIGENTE_DESDE = '2026-11-05'
+export const RESTRICCION_VIGENTE_DESDE = '2026-11-06'
+
+/** La serie de los Términos de Suscripción VALIDA · Plan CDA en `documentos_contractuales_versiones`. */
+export const SLUG_TERMINOS_CDA = 'terminos-suscripcion-valida-cda'
+
+/** La primera versión de esos términos con la restricción de la cláusula 11.1. */
+const VERSION_CON_RESTRICCION: readonly [number, number] = [1, 4]
+
+/** 'v1.4' → [1, 4]; lo que no es una versión, `null`. */
+function numeroDeVersion(version: string): [number, number] | null {
+  const m = /^v?(\d+)\.(\d+)$/.exec(version.trim())
+  return m ? [Number(m[1]), Number(m[2])] : null
+}
+
+/**
+ * Desde cuándo rige la restricción para un contrato: el `vigente_desde` más temprano de sus versiones
+ * de los Términos del Plan CDA que ya la traen (v1.4 o posterior), la haya aceptado o no (rige por el
+ * aviso). `null` = el contrato no tiene ninguna registrada: no hay restricción, solo la pausa de los 30.
+ */
+export function vigenciaRestriccion(
+  documentos: readonly { slug: string; version: string; vigenteDesde: string }[],
+): string | null {
+  const fechas = documentos
+    .filter((d) => {
+      if (d.slug !== SLUG_TERMINOS_CDA) return false
+      const n = numeroDeVersion(d.version)
+      if (!n) return false
+      return n[0] > VERSION_CON_RESTRICCION[0] || (n[0] === VERSION_CON_RESTRICCION[0] && n[1] >= VERSION_CON_RESTRICCION[1])
+    })
+    .map((d) => d.vigenteDesde.slice(0, 10))
+    .filter((f) => FECHA.test(f))
+    .sort()
+  return fechas[0] ?? null
+}
 
 const FECHA = /^(\d{4})-(\d{2})-(\d{2})$/
 
@@ -75,10 +114,14 @@ export type EstadoMora =
   /** Más de 30 días: Valida se pausa hasta que el pago se registre. */
   | { estado: 'suspendido'; vencio: string; corteDesde: string }
 
+/**
+ * `vigenteDesde`: desde cuándo rige la restricción de los 5 días para este contrato (`vigenciaRestriccion`).
+ * `null` = no rige: solo la pausa de los 30 días (v1.3).
+ */
 export function estadoMora(
   pago: ProximoPago,
   hoy: string,
-  vigenteDesde: string = RESTRICCION_VIGENTE_DESDE,
+  vigenteDesde: string | null = RESTRICCION_VIGENTE_DESDE,
 ): EstadoMora {
   if (pago.estado !== 'pendiente') return { estado: 'al_dia' }
   const vencio = pago.fechaVencimiento
@@ -87,8 +130,8 @@ export function estadoMora(
   if (corteDesde <= hoy) return { estado: 'suspendido', vencio, corteDesde }
   // La regla de los 5 días no existe antes de su vigencia, y desde ella alcanza a lo ya vencido.
   const porDias = sumarDias(vencio, DIAS_MORA_ANTES_DE_RESTRINGIR + 1)
-  const desde = porDias < vigenteDesde ? vigenteDesde : porDias
-  const restringeDesde = desde < corteDesde ? desde : null
+  const desde = vigenteDesde === null ? null : porDias < vigenteDesde ? vigenteDesde : porDias
+  const restringeDesde = desde !== null && desde < corteDesde ? desde : null
   if (restringeDesde && restringeDesde <= hoy) return { estado: 'restringido', vencio, restringeDesde, corteDesde }
   return { estado: 'en_mora', vencio, restringeDesde, corteDesde }
 }

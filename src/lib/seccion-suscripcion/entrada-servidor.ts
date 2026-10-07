@@ -78,6 +78,11 @@ async function resolver(): Promise<EntradaSuscripcion> {
       servicioContratadoId: contrato.servicio_contratado_id,
       plazoTerminos: null,
       enPlazo: false,
+      // La licencia de ONE no tiene términos por aviso ni restricción de Valida.
+      modificaciones: [],
+      modificacion: null,
+      restriccionDesde: null,
+      usuarioDelCliente: false,
     },
   }
 }
