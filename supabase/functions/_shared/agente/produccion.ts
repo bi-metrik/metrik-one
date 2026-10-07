@@ -6,8 +6,8 @@
 //   `wa_conversacion`).
 // · `puertoBandejaSupabase`: el directorio con el guardián de siempre (`fichasPorNombre`, `fichasPorLlave`,
 //   `crearContactoConGuardian`), los viajes con `calcularNiveles`, el negocio nuevo como lo crea la bandeja hoy
-//   (`crearNegocio`, con la empresa espejo) y la carga con la extracción de hoy (`entenderEntrega` y sus guardianes,
-//   `cargarEnExistente`, que no pisa lo que una persona editó).
+//   (`crearNegocio`, con la empresa espejo) y la carga con la extracción del núcleo (`bandeja/extraccion.ts`: el modelo
+//   clasifica, el código solo valida) y `cargarEnExistente`, que no pisa lo que una persona editó.
 // · `cargarReglamento`, `cupoSupabase`.
 // ============================================================
 
@@ -17,11 +17,11 @@ import type { Llave } from '../wa-cliente-reglas.ts';
 import {
   bloquesDatosDelNegocio, configDeLinea, crearNegocio, escribirBloque, leerConModelo,
 } from '../wa-entendimiento.ts';
-import { esquemaDeSalida, instruccionesEntendimiento } from '../wa-entendimiento-reglas.ts';
 import type { CampoEntendible, SalidaEntendida, Sugerido } from '../wa-entendimiento-reglas.ts';
 import { cargarEnExistente, trazaCarga } from '../wa-carga-reglas.ts';
 import { textoParaModelo } from '../wa-guardianes.ts';
 import { lineaCargada, mensajesDeTextos, planDeCarga } from './bandeja/carga.ts';
+import { esquemaCarga, instruccionesCarga } from './bandeja/extraccion.ts';
 import { aplanarBloques, calcularNiveles } from '../niveles-solicitud.ts';
 import { todayBogotaISO } from '../bogota.ts';
 import { enviarAvisoInterno } from '../wa-alerta.ts';
@@ -191,7 +191,7 @@ export function puertoBandejaSupabase(supabase: SupabaseClient, workspaceId: str
       if (typeof bloques === 'string') throw new Error(bloques);
       const { fields, valores: yaTiene } = aplanarBloques(bloques.map((b) => ({ fields: b.fields, data: b.data })));
       const campos = fields as CampoEntendible[];
-      const lectura = await leerConModelo(instruccionesEntendimiento(campos, todayBogotaISO(), yaTiene), `Mensajes:\n${textoParaModelo(mensajesDeTextos(textos))}`, esquemaDeSalida(campos));
+      const lectura = await leerConModelo(instruccionesCarga(campos, todayBogotaISO(), yaTiene), `Mensajes:\n${textoParaModelo(mensajesDeTextos(textos))}`, esquemaCarga(campos));
       if (lectura.error || lectura.json === null) throw new Error(lectura.error ?? 'sin lectura');
       return planDeCarga({
         bloques: bloques.map((b) => ({ fields: b.fields as CampoEntendible[], data: b.data })), textos, raw: lectura.json,
@@ -209,9 +209,9 @@ export function puertoBandejaSupabase(supabase: SupabaseClient, workspaceId: str
       for (const b of bloques) {
         const antes = new Set(vistos);
         for (const f of b.fields) { vistos.add(f.slug); campos.push(f); }
-        let r = cargarEnExistente(b.data, b.fields, sugeridos, meta, new Set(antes));
+        let r = cargarEnExistente(b.data, b.fields, sugeridos, meta, new Set(antes), { delModelo: true });
         const quedo = await escribirBloque(supabase, b, (d) => {
-          r = cargarEnExistente(d, b.fields, sugeridos, meta, new Set(antes));
+          r = cargarEnExistente(d, b.fields, sugeridos, meta, new Set(antes), { delModelo: true });
           return r.escritos.length > 0 || r.conflictos.length > 0 || r.actualizados.length > 0 ? r.data : null;
         });
         if (quedo) escritos.push(...r.escritos, ...r.actualizados.map((a) => a.slug));

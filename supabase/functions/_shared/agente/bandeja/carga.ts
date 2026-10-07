@@ -6,9 +6,9 @@
 //   · `escritosDelViaje`: lo que el comercial escribió de ESE viaje (desde que lo nombró o desde que pidió abrirlo), no
 //     solo el texto que el modelo copió en `proponer`. Así la extracción ve «5 noches, desde el 11» aunque el último
 //     mensaje solo diga «salen desde Bogotá».
-//   · `planDeCarga`: la extracción de hoy (`entenderEntrega` con sus guardianes) + el regreso que se deriva (salida + N
-//     noches) + las alternativas de una opción cerrada («4 o 5 estrellas») + la unión con la propuesta pendiente del
-//     mismo viaje (lo nuevo gana solo en el mismo campo). El resumen muestra solo lo que cambiaría.
+//   · `planDeCarga`: lo que el modelo de extracción clasificó (`validarCarga`: solo invariantes, ver `extraccion.ts`)
+//     + la unión con la propuesta pendiente del mismo viaje (lo nuevo gana solo en el mismo campo). El resumen muestra
+//     solo lo que cambiaría. Regreso, alternativas («4 o 5 estrellas») y el grupo los decide el modelo, no el código.
 //   · `lineaCargada`: el hecho que se le dice al comercial tras el toque.
 // La base la tocan los puertos (`produccion.ts`, `memoria.ts`); esto no escribe nada.
 // ============================================================
@@ -16,13 +16,11 @@
 import { normal } from '../verificador.ts';
 import type { FilaConversacion } from '../tipos.ts';
 import { aplanarBloques } from '../../niveles-solicitud.ts';
-import {
-  DIAS_EN_LETRAS, fraseNombraNumero, fraseNombraOpcion, huecos, normalizarTexto,
-} from '../../wa-entendimiento-reglas.ts';
+import { huecos } from '../../wa-entendimiento-reglas.ts';
 import type { CampoEntendible, Sugerido } from '../../wa-entendimiento-reglas.ts';
-import { cargarEnExistente, sugeridosConDeducciones, valorLegible } from '../../wa-carga-reglas.ts';
-import { entenderEntrega } from '../../wa-guardianes.ts';
+import { cargarEnExistente, valorLegible } from '../../wa-carga-reglas.ts';
 import type { MensajeEntrega } from '../../wa-guardianes.ts';
+import { validarCarga } from './extraccion.ts';
 
 const RE_CODIGO = /\b[A-ZÑ]\d{0,2} \d{2} \d{1,4}\b/gu;
 /** Lo que se le pasa a la extracción, como mucho (el mismo tope de la conversación que ve el modelo: 6.000 tokens). */
@@ -109,55 +107,6 @@ function recortar(textos: string[]): string[] {
   return out;
 }
 
-// ── Lo que se deriva ─────────────────────────────────────────────────────────
-
-const SLUG_SALIDA = 'fecha_salida';
-const SLUG_REGRESO = 'fecha_regreso';
-const SLUG_REQUISITOS = 'requisitos_especiales';
-
-/**
- * El regreso cuando dicen cuántas noches: salida + N días. Solo si TODOS los escritos dicen el mismo número de noches
- * (dos números distintos = no se sabe cuál). «5 días» no deriva nada: cinco días son cuatro noches o cinco, según a
- * quién se le pregunte. Pura.
- */
-export function regresoPorNoches(textos: ReadonlyArray<string>, salidaISO: unknown): Sugerido | null {
-  if (typeof salidaISO !== 'string' || !/^\d{4}-\d{2}-\d{2}$/.test(salidaISO)) return null;
-  const letras = Object.keys(DIAS_EN_LETRAS).filter((w) => w !== 'primero').join('|');
-  const re = new RegExp(`\\b(\\d{1,2}|${letras})\\s+noches?\\b`, 'gu');
-  const hallados: Array<{ n: number; frase: string }> = [];
-  for (const t of textos) {
-    for (const m of normalizarTexto(t).matchAll(re)) {
-      const n = /^\d+$/.test(m[1]) ? Number(m[1]) : DIAS_EN_LETRAS[m[1]];
-      if (n >= 1 && n <= 60) hallados.push({ n, frase: m[0] });
-    }
-  }
-  const distintos = new Set(hallados.map((h) => h.n));
-  if (distintos.size !== 1) return null;
-  const { n, frase } = hallados[0];
-  const d = new Date(`${salidaISO}T12:00:00Z`);
-  d.setUTCDate(d.getUTCDate() + n);
-  const valor = d.toISOString().slice(0, 10);
-  return { valor, frase, deduccion: `salida ${salidaISO} + ${n} noche${n === 1 ? '' : 's'}` };
-}
-
-/**
- * Las opciones concretas de un campo cerrado que nombra la oración de la frase («La categoría puede ser 4 o 5
- * estrellas» nombra 4 y 5). La oración se corta en «.», «;», «,» y saltos: «Son 5 noches, categoría 4» no nombra el 5.
- * Pura.
- */
-export function opcionesNombradas(f: CampoEntendible, frase: string, textos: ReadonlyArray<string>): string[] {
-  const concretas = (f.opciones ?? []).filter((o) => o.no_definido !== true && String(o.value) !== '');
-  if (concretas.length < 2) return [];
-  const fr = normalizarTexto(frase);
-  const oraciones = textos.flatMap((t) => t.split(/[.;,\n!?]+/u)).map((o) => o.trim()).filter(Boolean);
-  const oracion = oraciones.find((o) => normalizarTexto(o).includes(fr)) ?? oraciones.find((o) => fr.includes(normalizarTexto(o))) ?? frase;
-  // Con números en la etiqueta («4 estrellas») mandan los números: «estrellas» la comparten todas y no nombra ninguna.
-  const numeros = (o: { label?: string; value: string }) => [...normalizarTexto(String(o.label ?? o.value)).matchAll(/\d+/g)].map((m) => Number(m[0]));
-  return concretas
-    .filter((o) => (numeros(o).length ? numeros(o).some((n) => fraseNombraNumero(oracion, n)) : fraseNombraOpcion(f, o, oracion)))
-    .map((o) => String(o.value));
-}
-
 // ── El plan de una carga ─────────────────────────────────────────────────────
 
 export interface PlanCarga {
@@ -179,11 +128,10 @@ export function mensajesDeTextos(textos: ReadonlyArray<string>): MensajeEntrega[
   return textos.map((t, i) => ({ n: i + 1, cuerpo: t, reenviado: true, tipo: 'text', origen: 'texto' })) as MensajeEntrega[];
 }
 
-const vacio = (v: unknown) => v === null || v === undefined || v === '' || (Array.isArray(v) && v.length === 0);
-
 /**
- * La carga que se propone. `raw` es la salida del modelo de extracción sobre `mensajesDeTextos(textos)`; `previo`, el
- * plan de la propuesta pendiente del mismo viaje (se une: lo nuevo gana solo en el mismo campo). Pura.
+ * La carga que se propone. `raw` es la salida del modelo de extracción (`instruccionesCarga`/`esquemaCarga`) sobre
+ * `mensajesDeTextos(textos)`; `previo`, el plan de la propuesta pendiente del mismo viaje (se une: lo nuevo gana solo
+ * en el mismo campo). Pura.
  */
 export function planDeCarga(p: {
   bloques: ReadonlyArray<Bloque>;
@@ -195,65 +143,26 @@ export function planDeCarga(p: {
 }): Preparada {
   const { fields, valores: yaTiene } = aplanarBloques(p.bloques.map((b) => ({ fields: b.fields, data: b.data })));
   const campos = fields as CampoEntendible[];
-  const porSlug = new Map(campos.map((f) => [f.slug, f]));
-  const e = entenderEntrega(p.raw, campos, mensajesDeTextos(p.textos), { hoyISO: p.hoyISO, conocidos: yaTiene });
-  const nuevos: Record<string, Sugerido> = { ...e.salida.sugeridos };
-  const notas: string[] = [];
-  const conRango = new Set<string>();
-
-  // «4 o 5 estrellas» en un campo de UNA opción: no se elige una (sería inventar). Si la config tiene requisitos
-  // especiales (texto), las dos quedan ahí y el campo queda para que una persona elija; si no, el campo queda vacío y
-  // el resumen lo dice. En un campo de texto no hace falta nada: guarda la frase como la dijeron.
-  for (const [slug, s] of Object.entries(nuevos)) {
-    const f = porSlug.get(slug);
-    if (!f || !(f.opciones ?? []).length) continue;
-    const nombradas = opcionesNombradas(f, s.frase, p.textos);
-    if (nombradas.length < 2) continue;
-    delete nuevos[slug];
-    conRango.add(slug);
-    const etiquetas = nombradas.map((v) => valorLegible(f, v));
-    notas.push(`${f.label ?? slug}: ${etiquetas.slice(0, -1).join(', ')} o ${etiquetas.at(-1)}`);
-  }
-  if (notas.length && porSlug.has(SLUG_REQUISITOS)) {
-    const antes = String(nuevos[SLUG_REQUISITOS]?.valor ?? yaTiene[SLUG_REQUISITOS] ?? '').trim();
-    const faltan = notas.filter((n) => !normal(antes).includes(normal(n)));
-    if (faltan.length) nuevos[SLUG_REQUISITOS] = { valor: [antes, ...faltan].filter(Boolean).join('; '), frase: nuevos[SLUG_REQUISITOS]?.frase ?? faltan[0] };
-  }
+  // La pendiente cuenta como sabida para las invariantes (el regreso contra su salida, un `pedir_si`).
+  const previo = (p.previo && typeof p.previo === 'object' ? (p.previo as Partial<PlanCarga>).sugeridos : null) ?? {};
+  const sabido = { ...yaTiene, ...Object.fromEntries(Object.entries(previo).map(([k, s]) => [k, s.valor])) };
+  const v = validarCarga(p.raw, campos, p.textos, { hoyISO: p.hoyISO, yaTiene: sabido });
 
   // La unión con la pendiente: nunca se descarta en silencio un dato propuesto y no rechazado.
-  const previo = (p.previo && typeof p.previo === 'object' ? (p.previo as Partial<PlanCarga>).sugeridos : null) ?? {};
-  const unidos: Record<string, Sugerido> = { ...previo, ...nuevos };
-  for (const slug of conRango) if (previo[slug] && !nuevos[slug]) delete unidos[slug];
-
-  // El regreso que se deriva: salida (la de ahora o la que ya tiene) + N noches.
-  if (porSlug.has(SLUG_REGRESO) && !unidos[SLUG_REGRESO] && vacio(yaTiene[SLUG_REGRESO])) {
-    const r = regresoPorNoches(p.textos, unidos[SLUG_SALIDA]?.valor ?? yaTiene[SLUG_SALIDA]);
-    if (r) unidos[SLUG_REGRESO] = r;
-  }
-
-  const meta = { entrega_id: 'agente', en: p.ahoraIso, origenDe: () => 'mensaje' as const };
-  const sugeridos = sugeridosConDeducciones(p.bloques, unidos, meta);
+  const sugeridos: Record<string, Sugerido> = { ...previo, ...v.sugeridos };
 
   // Lo que cambiaría (en seco, como `cargar`): el resumen no repite lo que el viaje ya tiene.
+  const meta = { entrega_id: 'agente', en: p.ahoraIso, origenDe: () => 'mensaje' as const };
   const cambia: string[] = [];
   const vistos = new Set<string>();
   for (const b of p.bloques) {
-    const r = cargarEnExistente(b.data, b.fields, sugeridos, meta, vistos);
+    const r = cargarEnExistente(b.data, b.fields, sugeridos, meta, vistos, { delModelo: true });
     cambia.push(...r.escritos, ...r.actualizados.map((a) => a.slug), ...r.conflictos.map((c) => c.slug));
   }
   const entendido = campos.filter((f) => cambia.includes(f.slug)).map((f) => `${f.label ?? f.slug}: ${valorLegible(f, sugeridos[f.slug].valor)}`);
   const quedaria = { ...yaTiene, ...Object.fromEntries(Object.entries(sugeridos).map(([k, s]) => [k, s.valor])) };
-  // Un campo cerrado cuyas alternativas quedaron en requisitos (en este plan o de antes) se nombra con ellas.
-  const requisitos = String(quedaria[SLUG_REQUISITOS] ?? '');
-  const falta = huecos(campos, quedaria).minimo.faltan.map((f) => {
-    const label = f.label ?? f.slug;
-    const nota = [...notas, ...requisitos.split(/;\s*/)].find((n) => normal(n).startsWith(`${normal(label)}: `));
-    return nota && (porSlug.get(f.slug)?.opciones ?? []).length ? `${label} (dijeron ${nota.slice(label.length + 2).toLowerCase()}: ¿cuál?)` : label;
-  });
-  if (notas.length && !porSlug.has(SLUG_REQUISITOS)) {
-    for (const n of notas) entendido.push(`(sin guardar) ${n}: el campo es de una sola opción`);
-  }
-  return { entendido, falta, plan: { sugeridos, historia: e.salida.historia } };
+  const falta = huecos(campos, quedaria).minimo.faltan.map((f) => f.label ?? f.slug);
+  return { entendido, falta, plan: { sugeridos, historia: v.historia } };
 }
 
 /** ¿Dos listas de lo entendido dicen lo mismo? (sin importar el orden). Pura. */

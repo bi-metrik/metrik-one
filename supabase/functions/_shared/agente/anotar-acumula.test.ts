@@ -1,7 +1,9 @@
 import { describe, expect, it } from 'vitest'
-import { escritosDelViaje, opcionesNombradas, planDeCarga, regresoPorNoches } from './bandeja/carga'
+import { escritosDelViaje, planDeCarga } from './bandeja/carga'
+import { esquemaCarga, instruccionesCarga, validarCarga } from './bandeja/extraccion'
 import { opcionNombrada } from './bandeja/dominio'
 import { escenario } from './escenario'
+import { PuertoMemoria } from './memoria'
 import type { ExtractorMemoria } from './memoria'
 import { modeloGuionado } from './modelo-guionado'
 import { propuestaVigente, salidaPropuesta, sinLineasDelResumen, TEXTO_PROPUESTA_PENDIENTE } from './nucleo'
@@ -21,6 +23,9 @@ import type { FilaConversacion, Salida } from './tipos'
  *   5. repite y agrega «3 o 4 estrellas» → quedaba en 3, sin regreso.
  *   6. «salen desde medellín» 3 s después → REEMPLAZABA la pendiente; el toque guardaba solo la ciudad.
  *   8. «calcula tú el regreso» → «No había datos nuevos».
+ * Desde el 2026-10-07 (Mauricio: «el modelo tiene que tener la capacidad de entender… no puede ser tan paramétrico»)
+ * el regreso, la categoría con su matiz y el grupo los decide el MODELO de extracción; el código solo valida. El guion
+ * de la extracción hace lo que haría el modelo y la prueba mira que el código lo respete.
  * La verdad es el estado final del viaje en la base (en memoria). El modelo de la conversación y el de la extracción
  * son guiones: ninguna llamada a un modelo real.
  */
@@ -58,35 +63,43 @@ const M8 = 'Salen desde Medellín. Calcula tú la fecha de regreso.'
 const LISTA = 'Lucia Barrera tiene 2 viajes abiertos: L1 26 1 Cartagena y L1 26 2 Miami. ¿Abro el nuevo a Santa Marta?'
 const VIAJE_NUEVO = { accion: 'viaje_nuevo', datos: { cliente: ref, destino: 'Santa Marta' } }
 
-type Valores = Record<string, { valor: string; frase: string }>
-/** La salida cruda de la extracción, como la devuelve Gemini: todos los mensajes del cliente (el comercial relata). */
-function crudo(textos: string[], valores: Valores) {
+type Valores = Record<string, { valor: string; frase: string; calculo?: string }>
+/** La salida cruda de la extracción, como la devuelve Gemini. Sin `clases`, todos los mensajes son del viaje. */
+function crudo(textos: string[], valores: Valores, clases?: string[]) {
   const todos: Valores = Object.fromEntries(CAMPOS.map((f) => [f.slug, { valor: 'por_definir', frase: '' }]))
-  return { mensajes: textos.map((_, i) => ({ n: i + 1, clase: 'cliente' })), citas: [], solicitudes: [{ destino: 'Santa Marta', frase: 'Santa Marta' }], cliente: {}, valores: { ...todos, ...valores } }
+  return { mensajes: textos.map((_, i) => ({ n: i + 1, clase: clases?.[i] ?? 'cliente' })), citas: [], valores: { ...todos, ...valores } }
 }
 
-/** El guion de la extracción, llamado por llamado. Como en vivo, la de los turnos 6 y 8 solo ve el dato nuevo. */
-function extraccionGuionada(): ExtractorMemoria {
+/** El guion de la extracción, llamado por llamado: lo que el modelo clasifica y calcula. */
+function extraccionGuionada(prompts: string[] = []): ExtractorMemoria {
+  const regreso = { valor: '2026-12-07', frase: 'Son 4 noches', calculo: 'salida 2026-12-03 + 4 noches' }
   const guion: Valores[] = [
-    // Tras el toque de [Sí, ábrelo]: lo que dijo mientras el botón esperaba.
+    // Tras el toque de [Sí, ábrelo]: lo que dijo mientras el botón esperaba. El modelo calcula el regreso y entiende el
+    // grupo: ella, su esposo y su hija de 1 año = 2 adultos, 0 niños, 1 infante.
     {
       fecha_salida: { valor: '2026-12-03', frase: 'desde el 3 de diciembre' },
+      fecha_regreso: regreso,
       adultos: { valor: '2', frase: 'ella con su esposo' },
+      ninos: { valor: '0', frase: 'ella con su esposo y su hija de 1 año', calculo: 'la única menor es la hija de 1 año: infante' },
       infantes: { valor: '1', frase: 'su hija de 1 año' },
       edades_menores: { valor: '1', frase: 'su hija de 1 año' },
     },
-    // Turno 5: repite la salida y los adultos, agrega la categoría; NO devuelve los infantes (la unión los conserva).
+    // Turno 5: «3 o 4 estrellas». El modelo elige la opción que mejor lo representa y deja el matiz en requisitos; NO
+    // devuelve los niños ni los infantes (la unión con la pendiente los conserva).
     {
       fecha_salida: { valor: '2026-12-03', frase: 'desde el 3 de diciembre' },
+      fecha_regreso: regreso,
       adultos: { valor: '2', frase: 'ella con su esposo' },
-      categoria_hotel: { valor: '3', frase: 'La categoría puede ser 3 o 4 estrellas' },
+      categoria_hotel: { valor: '4', frase: 'La categoría puede ser 3 o 4 estrellas' },
+      requisitos_especiales: { valor: 'Hotel de 3 o 4 estrellas', frase: 'La categoría puede ser 3 o 4 estrellas' },
     },
     // Turno 6: solo la ciudad.
     { ciudad_origen: { valor: 'Medellín', frase: 'salen desde medellín' } },
-    // Turno 8: lo mismo otra vez.
-    { ciudad_origen: { valor: 'Medellín', frase: 'Salen desde Medellín' } },
+    // Turno 8: la ciudad otra vez y el regreso que ya está.
+    { ciudad_origen: { valor: 'Medellín', frase: 'Salen desde Medellín' }, fecha_regreso: regreso },
   ]
-  return async ({ textos }) => {
+  return async ({ textos, instrucciones }) => {
+    prompts.push(instrucciones)
     const v = guion.shift()
     if (!v) throw new Error('guion de extracción agotado')
     return crudo(textos, v)
@@ -122,7 +135,8 @@ const textoDe = (s: Salida[]) => s.map((x) => x.texto).join('\n')
 describe('segunda falla en vivo 2026-10-07: lo dicho se acumula y se guarda', () => {
   it('la secuencia completa: al final el viaje tiene todo lo dicho y el bot no pidió nada dos veces', async () => {
     const modelo = guionConversacion()
-    const e = await escenario({ modelo, contactos: [LUCIA], viajes: VIAJES, campos: CAMPOS, extraer: extraccionGuionada() })
+    const prompts: string[] = []
+    const e = await escenario({ modelo, contactos: [LUCIA], viajes: VIAJES, campos: CAMPOS, extraer: extraccionGuionada(prompts) })
 
     const t0 = await e.escribe(M0)
     expect(t0[0].tipo).toBe('botones')
@@ -151,35 +165,41 @@ describe('segunda falla en vivo 2026-10-07: lo dicho se acumula y se guarda', ()
     expect(t4[0].texto).toContain('• Fecha de regreso: 7 dic')
     expect(t4[0].texto).toContain('• Adultos: 2')
     expect(t4[0].texto).toContain('• Infantes: 1')
+    // El grupo lo entendió el modelo: 0 niños sin que nadie escribiera «sin niños».
+    expect(t4[0].texto).toContain('• Niños: 0')
     expect(t4[0].texto).not.toMatch(/Reenvíame/)
-    // Niños no lo dijo con todas sus letras («sin niños»): la extracción de hoy no pone 0 sin eso, así que se pregunta.
-    expect(t4[0].texto).toMatch(/Para cotizar faltaría: Ciudad de salida, Niños, Categoría de hotel\./)
-    // La extracción vio lo que dijo antes de abrir (no solo el último mensaje).
+    expect(t4[0].texto).toMatch(/Para cotizar faltaría: Ciudad de salida, Categoría de hotel\./)
+    // La extracción vio lo que dijo antes de abrir (no solo el último mensaje), la fecha de hoy y las opciones.
     expect(e.puerto.extracciones[0]).toEqual([M0, M1, M2, M3])
+    expect(prompts[0]).toMatch(/Hoy es \d{4}-\d{2}-\d{2}/)
+    expect(prompts[0]).toContain('4 = 4 estrellas')
     // Nada escrito todavía en el viaje.
     expect(e.puerto.viajes.find((v) => v.codigo === NUEVO)!.datos).toEqual({})
 
-    // 5. Repite y agrega «3 o 4 estrellas»: se UNE con la pendiente (los infantes no se pierden), el rango no queda
-    //    en 3 y la pregunta del resumen no sale dos veces.
+    // 5. Repite y agrega «3 o 4 estrellas»: se UNE con la pendiente (niños e infantes no se pierden), la categoría
+    //    queda en la que eligió el modelo, el matiz en requisitos, y la pregunta del resumen no sale dos veces.
     const t5 = await e.escribe(M5)
     expect(t5[0].tipo).toBe('botones')
     const r5 = t5[0].texto
     expect(r5.split('\n').filter((l) => l.startsWith('¿Lo anoto en'))).toHaveLength(1)
     expect(r5).toContain('• Infantes: 1')
+    expect(r5).toContain('• Niños: 0')
     expect(r5).toContain('• Fecha de regreso: 7 dic')
-    expect(r5).toContain('• Requisitos especiales: Categoría de hotel: 3 estrellas o 4 estrellas')
-    expect(r5).not.toContain('• Categoría de hotel: 3 estrellas')
-    expect(r5).toContain('Categoría de hotel (dijeron 3 estrellas o 4 estrellas: ¿cuál?)')
+    expect(r5).toContain('• Categoría de hotel: 4 estrellas')
+    expect(r5).toContain('• Requisitos especiales: Hotel de 3 o 4 estrellas')
+    expect(r5).toContain('Para cotizar faltaría: Ciudad de salida.')
+    expect(r5).not.toMatch(/¿cuál\?/)
     expect(e.puerto.extracciones[1]).toEqual([M0, M1, M2, M3, M5])
+    // Lo que el viaje ya tiene (de la pendiente no, del viaje sí) le llega al modelo: aquí el destino.
+    expect(prompts[1]).toContain('- destino: Santa Marta')
 
     // 6. «salen desde medellín» 3 s después, antes de tocar: la nueva lleva TODO más la ciudad.
     const t6 = await e.escribe(M6, { despuesMs: 3_000 })
     const r6 = t6[0].texto
-    for (const l of ['• Ciudad de salida: Medellín', '• Fecha de salida: 3 dic', '• Fecha de regreso: 7 dic', '• Adultos: 2', '• Infantes: 1', '• Requisitos especiales: Categoría de hotel: 3 estrellas o 4 estrellas']) {
+    for (const l of ['• Ciudad de salida: Medellín', '• Fecha de salida: 3 dic', '• Fecha de regreso: 7 dic', '• Adultos: 2', '• Niños: 0', '• Infantes: 1', '• Categoría de hotel: 4 estrellas', '• Requisitos especiales: Hotel de 3 o 4 estrellas']) {
       expect(r6).toContain(l)
     }
-
-    expect(r6).not.toMatch(/faltaría:.*Ciudad de salida/)
+    expect(r6).toContain('Con esto queda el mínimo para cotizar.')
 
     // 7. El toque de la VIEJA no se pierde ni escribe la mitad: muestra la de ahora; el de la nueva escribe todo.
     const viejo = await e.toca('Anotar', { atras: 1 })
@@ -187,7 +207,7 @@ describe('segunda falla en vivo 2026-10-07: lo dicho se acumula y se guarda', ()
     expect(viejo[0].texto).toContain('• Ciudad de salida: Medellín')
     const nuevo = await e.toca('Anotar')
     expect(nuevo[0].texto).toMatch(new RegExp(`^Cargué en ${NUEVO}: `))
-    for (const l of ['Ciudad de salida', 'Fecha de salida', 'Fecha de regreso', 'Adultos', 'Infantes', 'Requisitos especiales']) expect(nuevo[0].texto).toContain(l)
+    for (const l of ['Ciudad de salida', 'Fecha de salida', 'Fecha de regreso', 'Adultos', 'Niños', 'Infantes', 'Categoría de hotel', 'Requisitos especiales']) expect(nuevo[0].texto).toContain(l)
 
     // 8. «calcula tú el regreso»: ya está; no se arma una propuesta vacía ni sale «No había datos nuevos».
     const t8 = await e.escribe(M8)
@@ -201,13 +221,15 @@ describe('segunda falla en vivo 2026-10-07: lo dicho se acumula y se guarda', ()
       fecha_salida: '2026-12-03',
       fecha_regreso: '2026-12-07',
       adultos: 2,
+      ninos: 0,
       infantes: 1,
       edades_menores: '1',
+      categoria_hotel: '4',
       // El texto del bloque de viaje se guarda en mayúscula (regla de siempre).
-      requisitos_especiales: 'CATEGORÍA DE HOTEL: 3 ESTRELLAS O 4 ESTRELLAS',
+      requisitos_especiales: 'HOTEL DE 3 O 4 ESTRELLAS',
     })
-    // La categoría no se eligió por el comercial: queda para que una persona escoja entre las dos.
-    expect(v.datos.categoria_hotel).toBeUndefined()
+    // El regreso que calculó el modelo deja su cálculo en la marca del sugerido.
+    expect((v.datos._sugeridos as Record<string, { deduccion?: string }>).fecha_regreso.deduccion).toBe('salida 2026-12-03 + 4 noches')
     // Una sola carga, una sola apertura.
     expect(e.puerto.escrituras.map((x) => x.tipo)).toEqual(['viaje', 'carga'])
     expect(modelo.restantes()).toBe(0)
@@ -215,7 +237,7 @@ describe('segunda falla en vivo 2026-10-07: lo dicho se acumula y se guarda', ()
     // Nunca pidió de nuevo lo que ya estaba dicho: ninguna línea de «falta» del bot nombra un dato que ya dio.
     const delBot = e.almacen.filas.filter((f) => f.direccion === 'saliente').map((f) => f.texto ?? '')
     const faltas = delBot.flatMap((t) => t.split('\n')).filter((l) => /falta/i.test(l))
-    for (const dato of ['Fecha de salida', 'Fecha de regreso', 'Adultos', 'Infantes']) {
+    for (const dato of ['Fecha de salida', 'Fecha de regreso', 'Adultos', 'Niños', 'Infantes']) {
       expect(faltas.filter((l) => l.includes(dato))).toEqual([])
     }
   })
@@ -223,51 +245,122 @@ describe('segunda falla en vivo 2026-10-07: lo dicho se acumula y se guarda', ()
 
 // ── Las piezas ───────────────────────────────────────────────────────────────
 
-describe('regresoPorNoches', () => {
-  it('salida + N noches; con letras también', () => {
-    expect(regresoPorNoches(['Son 5 noches, desde el 11'], '2026-11-11')?.valor).toBe('2026-11-16')
-    expect(regresoPorNoches(['serían cuatro noches'], '2026-12-30')?.valor).toBe('2027-01-03')
-  })
-  it('sin salida, con dos cantidades distintas o con «días», no deriva', () => {
-    expect(regresoPorNoches(['5 noches'], undefined)).toBeNull()
-    expect(regresoPorNoches(['5 noches', 'mejor 6 noches'], '2026-11-11')).toBeNull()
-    expect(regresoPorNoches(['5 días'], '2026-11-11')).toBeNull()
-  })
-})
-
-describe('opcionesNombradas («4 o 5 estrellas»)', () => {
-  const cat = CAMPOS.find((f) => f.slug === 'categoria_hotel')!
-  it('nombra las dos en la misma oración; «5 noches» en otra oración no cuenta', () => {
-    expect(opcionesNombradas(cat, '4 o 5 estrellas', ['La categoría pueden ser 4 o 5 estrellas'])).toEqual(['4', '5'])
-    expect(opcionesNombradas(cat, 'categoría 4', ['Son 5 noches, categoría 4'])).toEqual(['4'])
-  })
-})
-
-describe('planDeCarga', () => {
+describe('planDeCarga: el código respeta lo que clasificó el modelo', () => {
   const bloques = [{ fields: CAMPOS, data: { destino: 'Santa Marta' } as Record<string, unknown> }]
   const base = { bloques, hoyISO: '2026-10-07', ahoraIso: '2026-10-07T20:00:00Z' }
+  const plan = (textos: string[], valores: Valores, extra: Partial<Parameters<typeof planDeCarga>[0]> = {}, clases?: string[]) =>
+    planDeCarga({ ...base, textos, raw: crudo(textos, valores, clases), ...extra })
+
   it('une con la pendiente: lo nuevo gana solo en el mismo campo', () => {
-    const a = planDeCarga({ ...base, textos: ['van 2 adultos'], raw: crudo(['van 2 adultos'], { adultos: { valor: '2', frase: 'van 2 adultos' } }) })
-    const b = planDeCarga({ ...base, textos: ['salen de Cali, mejor 3 adultos'], raw: crudo(['salen de Cali, mejor 3 adultos'], { ciudad_origen: { valor: 'Cali', frase: 'salen de Cali' }, adultos: { valor: '3', frase: 'mejor 3 adultos' } }), previo: a.plan })
+    const a = plan(['van 2 adultos'], { adultos: { valor: '2', frase: 'van 2 adultos' } })
+    const b = plan(['salen de Cali, mejor 3 adultos'], { ciudad_origen: { valor: 'Cali', frase: 'salen de Cali' }, adultos: { valor: '3', frase: 'mejor 3 adultos' } }, { previo: a.plan })
     expect(b.plan.sugeridos.adultos.valor).toBe(3)
     expect(b.plan.sugeridos.ciudad_origen.valor).toBe('Cali')
-    const c = planDeCarga({ ...base, textos: ['salen de Cali'], raw: crudo(['salen de Cali'], { ciudad_origen: { valor: 'Cali', frase: 'salen de Cali' } }), previo: a.plan })
+    const c = plan(['salen de Cali'], { ciudad_origen: { valor: 'Cali', frase: 'salen de Cali' } }, { previo: a.plan })
     expect(c.plan.sugeridos.adultos.valor).toBe(2)
   })
+
   it('lo que el viaje ya tiene no sale en el resumen', () => {
-    const p = planDeCarga({ ...base, bloques: [{ fields: CAMPOS, data: { destino: 'Santa Marta', adultos: 2 } }], textos: ['van 2 adultos'], raw: crudo(['van 2 adultos'], { adultos: { valor: '2', frase: 'van 2 adultos' } }) })
+    const p = plan(['van 2 adultos'], { adultos: { valor: '2', frase: 'van 2 adultos' } }, { bloques: [{ fields: CAMPOS, data: { destino: 'Santa Marta', adultos: 2 } }] })
     expect(p.entendido).toEqual([])
   })
-  it('un rango en un campo de texto se guarda como lo dijeron; sin requisitos en la config, lo dice el resumen', () => {
-    const texto = CAMPOS.map((f) => (f.slug === 'categoria_hotel' ? { slug: f.slug, tipo: 'texto', label: f.label, nivel: 'minimo' } : f)) as CampoEntendible[]
-    const t = ['La categoría puede ser 4 o 5 estrellas']
-    const enTexto = planDeCarga({ ...base, bloques: [{ fields: texto, data: {} }], textos: t, raw: crudo(t, { categoria_hotel: { valor: '4 o 5 estrellas', frase: '4 o 5 estrellas' } }) })
-    expect(enTexto.plan.sugeridos.categoria_hotel.valor).toBe('4 o 5 estrellas')
-    const sinReq = CAMPOS.filter((f) => f.slug !== 'requisitos_especiales')
-    const p = planDeCarga({ ...base, bloques: [{ fields: sinReq, data: {} }], textos: t, raw: crudo(t, { categoria_hotel: { valor: '4', frase: '4 o 5 estrellas' } }) })
-    expect(p.plan.sugeridos.categoria_hotel).toBeUndefined()
-    expect(p.entendido).toContain('(sin guardar) Categoría de hotel: 4 estrellas o 5 estrellas: el campo es de una sola opción')
-    expect(p.falta).toContain('Categoría de hotel (dijeron 4 estrellas o 5 estrellas: ¿cuál?)')
+
+  it('«4 o 5 estrellas»: queda la opción que eligió el modelo y el matiz que él dejó en requisitos', () => {
+    const t = ['La categoría puede ser 4 o 5 estrellas, ojalá con vista al mar']
+    const p = plan(t, {
+      categoria_hotel: { valor: '5', frase: 'La categoría puede ser 4 o 5 estrellas' },
+      requisitos_especiales: { valor: 'Hotel de 4 o 5 estrellas, ojalá con vista al mar', frase: 'ojalá con vista al mar' },
+    })
+    expect(p.plan.sugeridos.categoria_hotel.valor).toBe('5')
+    expect(p.plan.sugeridos.requisitos_especiales.valor).toBe('Hotel de 4 o 5 estrellas, ojalá con vista al mar')
+    expect(p.entendido).toEqual(['Categoría de hotel: 5 estrellas', 'Requisitos especiales: Hotel de 4 o 5 estrellas, ojalá con vista al mar'])
+    expect(p.falta).not.toContain('Categoría de hotel')
+  })
+
+  it('el regreso que calculó el modelo se respeta; si el modelo no lo da, el código no lo deriva', () => {
+    const t = ['Son 5 noches, desde el 11 de noviembre']
+    const p = plan(t, {
+      fecha_salida: { valor: '2026-11-11', frase: 'desde el 11 de noviembre' },
+      fecha_regreso: { valor: '2026-11-16', frase: 'Son 5 noches', calculo: 'salida 2026-11-11 + 5 noches' },
+    })
+    expect(p.plan.sugeridos.fecha_regreso).toEqual({ valor: '2026-11-16', frase: 'Son 5 noches', deduccion: 'salida 2026-11-11 + 5 noches' })
+    expect(p.entendido).toContain('Fecha de regreso: 16 nov')
+    const sin = plan(t, { fecha_salida: { valor: '2026-11-11', frase: 'desde el 11 de noviembre' } })
+    expect(sin.plan.sugeridos.fecha_regreso).toBeUndefined()
+    expect(sin.falta).toContain('Fecha de regreso')
+  })
+
+  it('el grupo lo entiende el modelo: 0 niños sin «sin niños», y cambia un número sin que la frase diga la cifra', () => {
+    const t = ['él con su esposa y su hijo de 1 año']
+    const p = plan(t, {
+      adultos: { valor: '2', frase: 'él con su esposa' },
+      ninos: { valor: '0', frase: 'él con su esposa y su hijo de 1 año' },
+      infantes: { valor: '1', frase: 'su hijo de 1 año' },
+    }, { bloques: [{ fields: CAMPOS, data: { destino: 'Santa Marta', adultos: 3, _sugeridos: { adultos: { fuente: 'whatsapp', entrega_id: 'agente', frase: 'van 3', en: '2026-10-07T10:00:00Z' } } } }] })
+    expect(p.plan.sugeridos.ninos.valor).toBe(0)
+    expect(p.entendido).toEqual(['Adultos: 2', 'Niños: 0', 'Infantes: 1'])
+  })
+
+  it('con el toque se escribe lo que el modelo entendió, aunque cambie un número sugerido sin decir la cifra', async () => {
+    const t = ['al final va él con su esposa, sin el hermano']
+    const puerto = new PuertoMemoria({
+      contactos: [LUCIA],
+      viajes: [{ id: 'v-9', codigo: 'L1 26 9', contactoId: 'c-lucia', nombre: 'SANTA MARTA', destino: 'Santa Marta', abierto: true, datos: { adultos: 3, _sugeridos: { adultos: { fuente: 'whatsapp', entrega_id: 'agente', frase: 'van 3', en: '2026-10-07T10:00:00Z' } } } }],
+      campos: CAMPOS,
+      extraer: async ({ textos }) => crudo(textos, { adultos: { valor: '2', frase: 'él con su esposa', calculo: 'él y su esposa' } }),
+    })
+    const prep = await puerto.prepararCarga('v-9', t)
+    expect(prep.entendido).toEqual(['Adultos: 2'])
+    await puerto.cargar('v-9', prep.plan)
+    expect(puerto.viajes[0].datos.adultos).toBe(2)
+  })
+
+  it('fuera de las opciones, sin frase escrita o de un mensaje que el modelo no clasificó como del viaje: no entra', () => {
+    const t = ['Promo: Santa Marta desde $900.000, hotel 5 estrellas', 'van 2 adultos']
+    const p = plan(t, {
+      categoria_hotel: { valor: '5', frase: 'hotel 5 estrellas' },
+      adultos: { valor: '2', frase: 'van 2 adultos' },
+      ciudad_origen: { valor: 'Cali', frase: 'salen de Cali' },
+    }, {}, ['tercero', 'cliente'])
+    expect(Object.keys(p.plan.sugeridos)).toEqual(['adultos'])
+    const fuera = validarCarga(crudo(['quieren 6 estrellas'], { categoria_hotel: { valor: '6', frase: 'quieren 6 estrellas' } }), CAMPOS, ['quieren 6 estrellas'], { hoyISO: '2026-10-07' })
+    expect(fuera.sugeridos.categoria_hotel).toBeUndefined()
+    expect(fuera.descartados).toEqual([{ slug: 'categoria_hotel', motivo: 'fuera de las opciones: 6' }])
+  })
+
+  it('las invariantes de forma: entero, fecha real dentro de la ventana, regreso después de la salida, pedir_si', () => {
+    const t = ['van dos y medio adultos el 30 de febrero, salen el 5 de enero de 2026 y vuelven el 20 de diciembre, edades 7']
+    const v = validarCarga(crudo(t, {
+      adultos: { valor: '2.5', frase: 'dos y medio adultos' },
+      fecha_salida: { valor: '2026-12-22', frase: 'vuelven el 20 de diciembre' },
+      fecha_regreso: { valor: '2026-12-20', frase: 'vuelven el 20 de diciembre' },
+      edades_menores: { valor: '7', frase: 'edades 7' },
+    }), CAMPOS, t, { hoyISO: '2026-10-07' })
+    expect(v.sugeridos).toEqual({ fecha_salida: { valor: '2026-12-22', frase: 'vuelven el 20 de diciembre' } })
+    expect(v.descartados.map((d) => d.slug).sort()).toEqual(['adultos', 'edades_menores', 'fecha_regreso'])
+    for (const [valor, motivo] of [['2026-02-30', 'no es una fecha'], ['2026-01-05', 'fecha pasada'], ['2028-06-01', 'a más de 18 meses']]) {
+      const x = validarCarga(crudo(t, { fecha_salida: { valor, frase: 'el 30 de febrero' } }), CAMPOS, t, { hoyISO: '2026-10-07' })
+      expect(x.descartados[0].motivo).toContain(motivo)
+    }
+  })
+})
+
+describe('el prompt de la extracción', () => {
+  const p = instruccionesCarga(CAMPOS, '2026-10-07', { destino: 'Santa Marta', fecha_salida: '2026-11-11' })
+  it('trae hoy, lo que el viaje ya tiene, las opciones de cada campo y dónde va el matiz', () => {
+    expect(p).toContain('Hoy es 2026-10-07')
+    expect(p).toContain('- fecha_salida: 2026-11-11')
+    expect(p).toContain('3 = 3 estrellas; 4 = 4 estrellas; 5 = 5 estrellas; sin_preferencia = Sin preferencia (solo si lo dicen)')
+    expect(p).toMatch(/matiz[\s\S]*requisitos_especiales/)
+    expect(p).toContain('con la salida y las noches sale el regreso')
+    expect(p).toContain('Infante es menor de 2 años')
+  })
+  it('el esquema cierra las opciones y deja explicar el cálculo', () => {
+    const e = esquemaCarga(CAMPOS) as { properties: { valores: { properties: Record<string, { properties: Record<string, { enum?: string[] }> }> } } }
+    expect(e.properties.valores.properties.categoria_hotel.properties.valor.enum).toEqual(['3', '4', '5', 'sin_preferencia', 'por_definir'])
+    expect(e.properties.valores.properties.fecha_regreso.properties.calculo).toBeDefined()
+    // Los derivados no los llena el modelo.
+    expect(e.properties.valores.properties.numero_pasajeros).toBeUndefined()
   })
 })
 

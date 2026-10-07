@@ -11,6 +11,7 @@ import { calcularNiveles } from '../niveles-solicitud.ts';
 import type { CampoEntendible } from '../wa-entendimiento-reglas.ts';
 import { cargarEnExistente } from '../wa-carga-reglas.ts';
 import { lineaCargada, mensajesDeTextos, planDeCarga } from './bandeja/carga.ts';
+import { instruccionesCarga } from './bandeja/extraccion.ts';
 import type { PlanCarga } from './bandeja/carga.ts';
 import type { PuertoBandeja, ViajeAgente } from './bandeja/dominio.ts';
 import type { Almacen, FilaConversacion, Mensajero, Salida, Traza } from './tipos.ts';
@@ -105,12 +106,12 @@ function normal(s: string): string {
  * Lo que la extracción le pide al modelo y lo que él devuelve (la salida cruda, como la de Gemini). En las pruebas es un
  * guion: así se prueba lo que el código hace con la salida, sin llamar a ningún modelo.
  */
-export type ExtractorMemoria = (p: { textos: string[]; mensajes: string; campos: CampoEntendible[]; yaTiene: Record<string, unknown> }) => Promise<unknown>;
+export type ExtractorMemoria = (p: { textos: string[]; mensajes: string; campos: CampoEntendible[]; yaTiene: Record<string, unknown>; instrucciones: string }) => Promise<unknown>;
 
 /**
  * El directorio, los viajes y lo escrito. Sin `campos`, la extracción es determinista (sin modelo): guarda los textos
- * tal cual. Con `campos` y `extraer`, corre la MISMA cadena que producción (`planDeCarga`: guardianes, regreso
- * derivado, alternativas, unión con la pendiente) sobre la salida guionada, y escribe con `cargarEnExistente`.
+ * tal cual. Con `campos` y `extraer`, corre la MISMA cadena que producción (`instruccionesCarga` para el guion,
+ * `planDeCarga`: invariantes y unión con la pendiente) sobre la salida guionada, y escribe con `cargarEnExistente`.
  */
 export class PuertoMemoria implements PuertoBandeja {
   contactos: ContactoMem[] = [];
@@ -197,7 +198,7 @@ export class PuertoMemoria implements PuertoBandeja {
     if (this.campos && this.extraer) {
       this.extracciones.push([...textos]);
       const data = { destino: v.destino, ...v.datos };
-      const raw = await this.extraer({ textos, mensajes: mensajesDeTextos(textos).map((m) => `[${m.n}] ${m.cuerpo}`).join('\n'), campos: this.campos, yaTiene: data });
+      const raw = await this.extraer({ textos, mensajes: mensajesDeTextos(textos).map((m) => `[${m.n}] ${m.cuerpo}`).join('\n'), campos: this.campos, yaTiene: data, instrucciones: instruccionesCarga(this.campos, this.hoyISO(), data) });
       return planDeCarga({ bloques: [{ fields: this.campos, data }], textos, raw, hoyISO: this.hoyISO(), ahoraIso: new Date(this.ahora()).toISOString(), previo });
     }
     const antes = (previo as { textos?: string[] } | undefined)?.textos ?? [];
@@ -209,7 +210,7 @@ export class PuertoMemoria implements PuertoBandeja {
     const v = this.viajes.find((x) => x.id === viajeId)!;
     if (this.campos && (plan as PlanCarga).sugeridos) {
       const meta = { entrega_id: 'agente', en: new Date(this.ahora()).toISOString(), origenDe: () => 'mensaje' as const };
-      const r = cargarEnExistente({ destino: v.destino, ...v.datos }, this.campos, (plan as PlanCarga).sugeridos, meta);
+      const r = cargarEnExistente({ destino: v.destino, ...v.datos }, this.campos, (plan as PlanCarga).sugeridos, meta, new Set(), { delModelo: true });
       const escritos = [...r.escritos, ...r.actualizados.map((a) => a.slug)];
       if (escritos.length || r.conflictos.length) {
         const { destino, ...resto } = r.data;

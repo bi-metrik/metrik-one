@@ -342,6 +342,10 @@ export interface Actualizado {
  *
  * @param yaVistos slugs que otro bloque del mismo negocio ya atendió (un slug repetido se
  *                 queda con el primer bloque, como en `aplanarBloques`). Se completa aquí.
+ * @param opts.delModelo `true` en el núcleo conversacional: ahí el modelo decide qué número dijeron («él con su
+ *                 esposa» son 2 adultos) y qué calculó (su `deduccion` es la explicación del cálculo, no una
+ *                 deducción del código), y el comercial lo confirma con su toque. Así no corren las dos reglas del
+ *                 flujo viejo de la bandeja: la frase tiene que decir la cifra nueva, y una deducción no reemplaza.
  */
 export function cargarEnExistente(
   data: Record<string, unknown>,
@@ -349,6 +353,7 @@ export function cargarEnExistente(
   sugeridos: Record<string, Sugerido>,
   meta: { entrega_id: string; en: string; origenDe: (frase: string) => 'audio' | 'mensaje' },
   yaVistos: Set<string> = new Set(),
+  opts: { delModelo?: boolean } = {},
 ): {
   data: Record<string, unknown>;
   escritos: string[];
@@ -388,13 +393,13 @@ export function cargarEnExistente(
     }
     // Para CAMBIAR un número que ya está, la frase tiene que decir el número nuevo: si no, ni se
     // reemplaza ni se arma un conflicto («hablé con mi esposo» no vuelve 2 a «3 adultos»).
-    if (f.tipo === 'numero' && !fraseNombraNumero(s.frase, Number(s.valor))) {
+    if (!opts.delModelo && f.tipo === 'numero' && !fraseNombraNumero(s.frase, Number(s.valor))) {
       sinSustento.push(f.slug);
       continue;
     }
     // Un sugerido sin confirmar no es de nadie todavía: lo dicho después gana. Una deducción
     // (`deducirCeros`) nunca reemplaza: solo llena vacíos.
-    if (marcasPrevias[f.slug] && !ediciones[f.slug] && !s.deduccion) {
+    if (marcasPrevias[f.slug] && !ediciones[f.slug] && (opts.delModelo || !s.deduccion)) {
       out[f.slug] = s.valor;
       marcas[f.slug] = marcaDe(s, meta, actual);
       delete choques[f.slug];
