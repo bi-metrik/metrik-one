@@ -296,3 +296,10 @@
   copia `documento` con `source_etapa_orden` + `source_bloque_slug` del formulario lee su `drive_url`
   (`copia-de-formulario.ts`, solo por slug) y no genera ni sube nada.
 - **⚠️ Un `<script>` en línea del `<head>` de Next NO corre si una hoja de estilo de Next cuelga, y una hoja colgada no deja pintar NADA.** Next/React pone sus `<link rel="stylesheet">` primero en el `<head>`; un script clásico posterior espera a que bajen (son «script-blocking»). Medido en Chromium el 2026-10-06 con `page.route` colgando `/_next/static/chunks/**`: el respaldo «No pudimos conectar» nunca corría. Arreglo: `<script type="module" async>` en línea, que corre apenas se lee. Y aun corriendo, el aviso quedaba en el DOM sin pintarse (la hoja pendiente bloquea el render): hay que QUITAR las hojas con `sheet === null` antes de pintar. Esa es la pantalla en blanco de `/tableros`. Ver `src/lib/red/aviso-conexion.ts` y `scripts/aviso-conexion.e2e.mjs`.
+- **`AbortSignal.timeout(ms)` lanza `RangeError` con un número no entero.** (2026-10-06, núcleo conversacional).
+  `performance.now()` da decimales; «lo que queda del turno» calculado con él y pasado tal cual hizo que el llamado de
+  respaldo fallara siempre con `RangeError [ERR_OUT_OF_RANGE]` (y en `fetch` eso parece un error de red). Redondear
+  antes: `AbortSignal.timeout(Math.round(ms))`.
+- **Tocar un botón «por título» con `includes` toca el equivocado.** (2026-10-06, arnés del núcleo). «No» encontró
+  [Anotar] porque «anotar» contiene «no», y el arnés ejecutó una carga que el usuario simulado había rechazado. Buscar
+  primero el título exacto, después el que empieza igual, y solo al final por contenido.

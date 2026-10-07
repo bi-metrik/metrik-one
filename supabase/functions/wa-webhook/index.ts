@@ -50,6 +50,7 @@ import { atenderEscrito } from '../_shared/wa-interprete.ts';
 import { aLetraLatina } from '../_shared/texto-latino.ts';
 import { primeraVezDelMensaje } from '../_shared/wa-mensaje-unico.ts';
 import { completarTexto, registrarEntrante } from '../_shared/wa-conversacion.ts';
+import { atenderConAgente } from '../_shared/wa-agente.ts';
 import type { BotSession, HandlerContext, IncomingMessage, Intent, WaUser } from '../_shared/types.ts';
 import { OPERATOR_ALLOWED_INTENTS, CONTADOR_ALLOWED_INTENTS, READ_ONLY_ALLOWED_INTENTS } from '../_shared/types.ts';
 
@@ -507,6 +508,11 @@ async function processMessage(message: IncomingMessage): Promise<void> {
   //     la bandeja o el bot conversacional configurado, y solo DESPUÉS del aviso de datos (lo retenido no se guarda).
   //     Fuera de esos workspaces no hace ni una consulta. Se escribe aunque el agente esté apagado.
   await registrarEntrante(supabase, user, message);
+
+  // 1a-agente. El núcleo conversacional (opt-in por workspace: `config_extra.bot_conversacional.agente`, que llega en la
+  //     misma lectura que identifica al remitente). Prendido, atiende lo del equipo con el modelo y sus herramientas; las
+  //     escrituras solo con un toque. Apagado, no hace ni una consulta y todo sigue como hoy. Ver `_shared/wa-agente.ts`.
+  if (await atenderConAgente(supabase, user, message)) return;
 
   // 1a-int. Intérprete conversacional (opt-in por workspace: `config_extra.bot_conversacional`, que
   //     llega en la misma lectura que identifica al remitente). Un escrito libre del equipo pasa por UN

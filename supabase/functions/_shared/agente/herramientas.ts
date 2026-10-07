@@ -1,0 +1,65 @@
+// ============================================================
+// Núcleo conversacional — las declaraciones de las herramientas (§3.3)
+// ------------------------------------------------------------
+// Cinco en la bandeja: dos de lectura del dominio (`buscar`, `ver_viaje`) y tres del núcleo (`consultar_reglas`,
+// `proponer`, `responder`). Sin solapes; `proponer` y `responder` cierran el turno.
+// ============================================================
+
+import { fichasDeHerramienta, temas } from './reglamento.ts';
+import type { DeclaracionHerramienta, Dominio, Reglamento } from './tipos.ts';
+
+export const CIERRAN = ['responder', 'proponer'];
+
+export function declaraciones(d: Dominio, r: Reglamento): DeclaracionHerramienta[] {
+  // Las fichas de `proponer` van en su descripción: el turno se cierra al proponer, así que el modelo tiene que
+  // tenerlas ANTES (las de las lecturas llegan con su resultado).
+  const reglasProponer = fichasDeHerramienta(r, 'proponer');
+  return [
+    ...d.lecturas,
+    {
+      name: 'consultar_reglas',
+      description: 'Trae el detalle de fichas del índice del reglamento, por id o por tema. Solo lectura.',
+      parameters: {
+        type: 'object',
+        properties: {
+          ids: { type: 'array', items: { type: 'string' }, description: 'Ids del índice, p. ej. ["g.varios_viajes"].' },
+          tema: { type: 'string', description: 'Palabras del tema si no sabes el id.' },
+        },
+      },
+    },
+    {
+      name: 'proponer',
+      description: [
+        'La única puerta para escribir en ONE, y no escribe: el sistema arma un resumen con datos reales y lo manda con botones; se ejecuta solo si la persona toca «sí». Cierra el turno: no redactes después.',
+        `Acciones: ${d.acciones.join(', ')}.`,
+        reglasProponer.length ? `Reglas al proponer:\n${reglasProponer.join('\n')}` : '',
+      ].filter(Boolean).join('\n'),
+      parameters: {
+        type: 'object',
+        properties: {
+          accion: { type: 'string', enum: d.acciones },
+          datos: { type: 'object', properties: d.datosProponer },
+          reglas_usadas: { type: 'array', items: { type: 'string' } },
+        },
+        required: ['accion', 'datos'],
+      },
+    },
+    {
+      name: 'responder',
+      description: 'Lo que le llega a la persona. Texto corto (máximo 600 caracteres). Con 2 o 3 salidas cerradas, ponlas en `opciones` (botones, título de hasta 20 caracteres); para elegir entre 4 y 10 cosas, también (lista: título de hasta 24, descripción de hasta 72). Más de 10, no.',
+      parameters: {
+        type: 'object',
+        properties: {
+          texto: { type: 'string' },
+          tema: { type: 'string', enum: temas(r) },
+          opciones: {
+            type: 'array',
+            items: { type: 'object', properties: { titulo: { type: 'string' }, descripcion: { type: 'string' } }, required: ['titulo'] },
+          },
+          reglas_usadas: { type: 'array', items: { type: 'string' } },
+        },
+        required: ['texto', 'tema'],
+      },
+    },
+  ];
+}
