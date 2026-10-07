@@ -130,6 +130,15 @@ export function cupoSupabase(supabase: SupabaseClient, almacen: Almacen): Puerto
 
 // ── La bandeja ───────────────────────────────────────────────────────────────
 
+/** El CHECK de `activity_log.contenido` en producción. */
+export const MAX_CONTENIDO_ACTIVIDAD = 280;
+
+/** Corta en 280 con «…» (cuenta caracteres, no bytes). Pura. */
+export function cortarContenido(s: string): string {
+  const c = [...s];
+  return c.length <= MAX_CONTENIDO_ACTIVIDAD ? s : `${c.slice(0, MAX_CONTENIDO_ACTIVIDAD - 1).join('')}…`;
+}
+
 function relUno(v: unknown): Fila | null {
   return Array.isArray(v) ? (v[0] as Fila | undefined) ?? null : (v as Fila | null) ?? null;
 }
@@ -214,7 +223,9 @@ export function puertoBandejaSupabase(supabase: SupabaseClient, workspaceId: str
       const { data: neg } = await supabase.from('negocios').select('codigo').eq('id', viajeId).maybeSingle();
       const { error } = await supabase.from('activity_log').insert({
         workspace_id: workspaceId, entidad_tipo: 'negocio', entidad_id: viajeId, tipo: 'cambio_sistema', autor_id: staffId,
-        contenido: trazaCarga({ quien: '', fechaISO: todayBogotaISO(), escritos, conflictos: [], fields: campos, historia }),
+        // `activity_log.contenido` tiene CHECK de 280 caracteres en producción (medido el 2026-10-07): más largo, el
+        // insert falla y la traza se pierde. Se corta aquí; la historia completa queda en la traza del turno.
+        contenido: cortarContenido(trazaCarga({ quien: '', fechaISO: todayBogotaISO(), escritos, conflictos: [], fields: campos, historia })),
       });
       if (error) console.error('[agente] sin traza en la actividad del negocio:', error.message);
       const porSlug = new Map(campos.map((f) => [f.slug, f.label]));

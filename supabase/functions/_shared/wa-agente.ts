@@ -30,7 +30,7 @@ export function fueraDelAgente(message: Pick<IncomingMessage, 'type' | 'text' | 
 
 export async function atenderConAgente(supabase: SupabaseClient, user: WaUser, message: IncomingMessage): Promise<boolean> {
   const bot = user.modulos?.bot_conversacional;
-  if (!agenteActivo(bot)) return false;
+  if (!agenteActivo(bot, message.phone)) return false;
   if (fueraDelAgente(message)) return false;
   const config = leerConfigAgente(bot);
   const reglamento = await cargarReglamento(supabase, user.workspace_id, BOT_BANDEJA, config.reglamentoId);

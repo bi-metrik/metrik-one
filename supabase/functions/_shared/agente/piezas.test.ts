@@ -18,6 +18,17 @@ describe('config: bot_conversacional', () => {
     expect(agenteActivo({ agente: 'true' })).toBe(false)
     expect(agenteActivo({ agente: true })).toBe(true)
   })
+  it('agente_telefonos: solo esos remitentes; se comparan dígitos', () => {
+    const bot = { agente: true, agente_telefonos: ['573209219444'] }
+    expect(agenteActivo(bot, '573209219444')).toBe(true)
+    expect(agenteActivo(bot, '+57 320 921 9444')).toBe(true)
+    expect(agenteActivo(bot, '573001112233')).toBe(false)
+    expect(agenteActivo(bot, null)).toBe(false)
+    expect(agenteActivo({ agente: true, agente_telefonos: '573001112233' }, '573001112233')).toBe(false)
+    expect(agenteActivo({ agente: true, agente_telefonos: null }, '573001112233')).toBe(true)
+    expect(leerConfigAgente(bot).telefonos).toEqual(['573209219444'])
+    expect(leerConfigAgente({ agente: true }).telefonos).toBeNull()
+  })
   it('modelo de Yuto por defecto: 3.8-flash LOW, respaldo 3.5-flash-lite MINIMAL a los 2,5 s, cupo 800', () => {
     const c = leerConfigAgente({ agente: true })
     expect(c.principal).toEqual({ modelo: 'gemini-3.8-flash', razonamiento: 'LOW', temperatura: null, maxSalida: 2048 })

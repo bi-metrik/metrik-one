@@ -20,6 +20,11 @@ export interface ConfigModelo {
 
 export interface ConfigAgente {
   activo: boolean;
+  /**
+   * `bot_conversacional.agente_telefonos`: si existe, SOLO esos remitentes van al núcleo (los demás siguen por el camino
+   * de hoy). En E.164 sin «+», como llega en el webhook («57320…»). `null` = todo el workspace.
+   */
+  telefonos: string[] | null;
   principal: ConfigModelo;
   /** Respaldo por llamado. `null` = sin respaldo. */
   respaldo: ConfigModelo | null;
@@ -42,6 +47,7 @@ export interface ConfigAgente {
 
 export const CONFIG_POR_DEFECTO: ConfigAgente = {
   activo: false,
+  telefonos: null,
   principal: { modelo: 'gemini-3.8-flash', razonamiento: 'LOW', temperatura: null, maxSalida: 2048 },
   respaldo: { modelo: 'gemini-3.5-flash-lite', razonamiento: 'MINIMAL', temperatura: null, maxSalida: 2048 },
   corteMs: 2500,
@@ -76,6 +82,7 @@ export function leerConfigAgente(botConversacional: unknown): ConfigAgente {
   const topes = obj(a.topes) ?? {};
   return {
     activo: b.agente === true,
+    telefonos: leerTelefonos(b.agente_telefonos),
     principal: leerModelo(a.modelo, d.principal),
     respaldo: a.respaldo === null ? null : leerModelo(a.respaldo, d.respaldo!),
     corteMs: numero(a.corte_ms, d.corteMs, 100),
@@ -92,8 +99,28 @@ export function leerConfigAgente(botConversacional: unknown): ConfigAgente {
   };
 }
 
-/** ¿El agente está prendido? Solo `agente: true` literal. Pura. */
-export function agenteActivo(botConversacional: unknown): boolean {
+const digitos = (v: unknown): string => String(v ?? '').replace(/\D/g, '');
+
+/**
+ * La lista de teléfonos: solo dígitos, sin vacíos. Ausente (o nula) = `null`: todo el workspace. Presente pero mal
+ * escrita (no es una lista) = nadie: un error de configuración nunca abre el núcleo a todo el workspace. Pura.
+ */
+export function leerTelefonos(v: unknown): string[] | null {
+  if (v === undefined || v === null) return null;
+  if (!Array.isArray(v)) return [];
+  return v.map(digitos).filter((t) => t.length >= 7);
+}
+
+/**
+ * ¿Este remitente va al núcleo? Solo con `agente: true` literal y, si hay `agente_telefonos`, solo si su teléfono está
+ * en la lista (se comparan solo dígitos: «+57 320…» y «57320…» son el mismo). Una lista vacía no deja pasar a nadie.
+ * Pura.
+ */
+export function agenteActivo(botConversacional: unknown, phone?: string | null): boolean {
   const b = obj(botConversacional);
-  return !!b && b.agente === true;
+  if (!b || b.agente !== true) return false;
+  const lista = leerTelefonos(b.agente_telefonos);
+  if (lista === null) return true;
+  const t = digitos(phone);
+  return t.length > 0 && lista.includes(t);
 }
