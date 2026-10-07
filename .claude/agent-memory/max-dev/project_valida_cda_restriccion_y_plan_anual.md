@@ -1,32 +1,30 @@
 ---
 name: valida-cda-restriccion-y-plan-anual
-description: #1064 restricción de consultas a los 5 días (rige 2026-11-05) y el PR del Plan Anual CDA — migración 20261007090000 SIN aplicar; el anexo NO va en documentos_contractuales_versiones; cuotas usuarios_adicionales en cero
+description: Plan Anual CDA (#1065) — migración 20261007210000 SIN aplicar; anexo final v1/v2.0 GENERADO desde docs/legal; vigente_hasta = 12.1 (null en los 4 CDA); mención en tabla aparte; comisión prepago; pendientes en #1072
 metadata:
   type: project
 ---
 
-Dos PR del 2026-10-06 (decisiones de Mauricio en `proyectos/metrik/valida/decisions.md`).
+**#1065 (feat/valida-cda-plan-anual)**: migración `20261007210000` SIN aplicar (renombrada desde
+`20261007090000` el 2026-10-07: ordenaba antes de #1068 y SOE-001, ya aplicadas). Inerte sin
+`servicios_contratados.parametros.plan_anual_habilitado = true`. Pendientes del anexo (8.1, 8.2, 10.2,
+5.2, motor de comisión) en el issue #1072.
 
-**#1064 (restricción por mora, sin migración)**: `restringido` desde D+6, `suspendido` desde D+31, solo
-desde `RESTRICCION_VIGENTE_DESDE = '2026-11-05'` (si el aviso de la 13.1 sale otro día, se corre esa
-constante). `accesoValida({ consultaNueva: true })` solo en `consultarValida` y `prepararLoteValida`.
-Debe estar en producción ANTES del 2026-11-05.
-
-**Plan Anual (feat/valida-cda-plan-anual)**: migración `20261007090000` SIN aplicar; inerte sin
-`servicios_contratados.parametros.plan_anual_habilitado = true`.
-
-**Why:** el anexo (Emilio) sigue en borrador; Mauricio decidió 11 x 12 hasta 2027-03-31.
+**Why:** decisiones de Mauricio 2026-10-06/07; Vera aprobó el texto CONDICIONADO a que #1065 mueva
+`vigente_hasta` antes de encender (`proyectos/metrik/valida/decisions.md`, fila 2026-10-07).
 
 **How to apply (lo que no se ve en el código):**
+- ⚠️ La fecha de la cláusula 12.1 NO tiene columna propia: `servicios_contratados.vigente_hasta` hace de
+  ella, pero el SQL de carga la dejó `null` en los 4 CDA (la fecha solo está en el texto de los Términos:
+  Maxitec 21-dic-2026, los otros 15-ene-2027). Nada en ONE la lee para avisar fin ni suspender.
+- ⚠️ El anexo NO se edita a mano: `docs/legal/plan-anual/*.md` (copia byte a byte del repo metrik) →
+  `node scripts/generar-anexo-plan-anual.mjs`. La prueba compara constante ↔ .md en CI.
 - ⚠️ Un documento en `documentos_contractuales_versiones` visible para un CDA es uno que la entrada de
-  `/valida` le EXIGE aceptar (`estadoTerminos`). Por eso el anexo vive como constante
-  (`plan-anual-anexo.ts`) y la constancia en `planes_anuales_cda`. Registrarlo ahí cierra Valida a todos.
-- Durante el plan las cuotas mensuales del plazo son `usuarios_adicionales` (pueden valer 0): así una
-  licencia comprada en el año se carga por la maquinaria de siempre. La mora del servicio las ignora
-  (`TIPOS_CUOTA_SIN_MORA`). `licencias-servidor` excluye la cuota `anual` (su período de 12 meses se
-  leería como UNO y cargaría $50.000 por el año).
-- La cuota anual vence el día ANTERIOR al pago: si venciera el mismo día, el FIFO le daría parte de la
-  plata a la mensualidad en curso.
-- Al terminar el plan no hay cuotas de renovación (pendiente general de `cuotaDeRenovacion`).
+  `/valida` le EXIGE aceptar: por eso el anexo vive como constante y la constancia en `planes_anuales_cda`.
+- Durante el plan las cuotas del plazo son `usuarios_adicionales` (pueden valer 0); la mora del servicio
+  las ignora (`TIPOS_CUOTA_SIN_MORA`) y con #1068 la restricción de 5 días también.
+- `calcularComision` no la llama ningún motor todavía: el `prepago` está listo pero nadie lo usa.
+- El dry-run va con `EXECUTE $mig$ <archivo> $mig$` y se ensaya en PGlite sobre el ESQUEMA_BASE de
+  `plan-anual-sql.test.ts` antes de ponerlo en el PR.
 
-Relacionado: [[valida-cda-gracia-facturas]], [[pago-en-linea-bold]], [[seccion-suscripcion-cda]].
+Relacionado: [[valida-cda-terminos-v14-por-aviso]], [[pago-en-linea-bold]], [[seccion-suscripcion-cda]].
