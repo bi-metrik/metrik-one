@@ -18,7 +18,7 @@ export type FilaBaja = {
 const CANALES = ['email', 'whatsapp', 'telefono', 'formulario', 'verbal', 'rebote', 'otro']
 const MOTIVOS = ['baja', 'rebote_duro', 'queja', 'reclamo', 'otro']
 
-export function partirCsv(texto: string): string[][] {
+function partirCsv(texto: string): string[][] {
   const filas: string[][] = []
   let fila: string[] = [], celda = '', comillas = false
   const t = texto.replace(/^﻿/, '')

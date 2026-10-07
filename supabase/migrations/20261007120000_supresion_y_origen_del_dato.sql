@@ -88,3 +88,5 @@ drop trigger if exists supresiones_inmutable on public.supresiones;
 create trigger supresiones_inmutable
   before update or delete on public.supresiones
   for each row execute function public.supresiones_inmutable();
+
+revoke execute on function public.supresiones_inmutable() from public, anon, authenticated;
