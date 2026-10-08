@@ -561,6 +561,27 @@ type BloqueGateModal = {
   tipo?: string
   cruce_slug?: string
   advertencia?: string
+  /** `tipo: 'autorizacion_datos'`: el link de autorización del cliente, para copiarlo aquí. */
+  enlace?: string
+}
+
+/** El link de autorización de datos, copiable desde el modal del gate. */
+function CopiarEnlaceAutorizacion({ enlace }: { enlace: string }) {
+  const [copiado, setCopiado] = useState(false)
+  return (
+    <button
+      type="button"
+      onClick={() => {
+        void navigator.clipboard?.writeText(enlace).then(() => {
+          setCopiado(true)
+          setTimeout(() => setCopiado(false), 2000)
+        })
+      }}
+      className="mt-1.5 w-full rounded-md border border-amber-200 bg-white px-2 py-1.5 text-[11px] font-medium text-amber-800 hover:bg-amber-100"
+    >
+      {copiado ? 'Link copiado' : 'Copiar link para el cliente'}
+    </button>
+  )
 }
 
 function ModalGateBloqueado({
@@ -662,10 +683,13 @@ function ModalGateBloqueado({
 
         <div className="flex-1 overflow-y-auto p-4 space-y-2">
           {bloques.map((b, i) => (
-            <div key={i} className="flex items-center gap-2 rounded-lg border border-amber-100 bg-amber-50 px-3 py-2">
-              <AlertTriangle className="h-3.5 w-3.5 text-amber-500 shrink-0" />
-              <span className="text-xs text-tinta">{b.nombre}</span>
-              <span className="ml-auto text-[10px] font-semibold text-amber-600">{b.tipo === 'cruce' ? 'CRUCE' : 'GATE'}</span>
+            <div key={i} className="rounded-lg border border-amber-100 bg-amber-50 px-3 py-2">
+              <div className="flex items-center gap-2">
+                <AlertTriangle className="h-3.5 w-3.5 text-amber-500 shrink-0" />
+                <span className="text-xs text-tinta">{b.nombre}</span>
+                <span className="ml-auto text-[10px] font-semibold text-amber-600">{b.tipo === 'cruce' ? 'CRUCE' : 'GATE'}</span>
+              </div>
+              {b.tipo === 'autorizacion_datos' && b.enlace && <CopiarEnlaceAutorizacion enlace={b.enlace} />}
             </div>
           ))}
         </div>
