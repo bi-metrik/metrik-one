@@ -8,6 +8,7 @@
 import { describe, expect, it } from 'vitest'
 import { createElement } from 'react'
 import { Document, Page, View, renderToBuffer } from '@react-pdf/renderer'
+import { crc32, deflateSync } from 'node:zlib'
 
 import CotizacionTrappvelPDF from './cotizacion-trappvel-pdf'
 import { componerCotizacionTrappvel, medidaDeHojas, type Renderizador } from './cotizacion-trappvel-paginacion'
@@ -35,6 +36,30 @@ import type { HotelPDF, VueloPDF } from '@/lib/cotizaciones/detalle-viaje'
 import { TERMINOS_BASE_TRAPPVEL } from '@/lib/cotizaciones/__fixtures__/terminos-base-trappvel'
 
 const FRANJA = { arriba: HOJA.arriba - 8, abajo: HOJA.alto - HOJA.altoPie - 1 }
+
+/** Un PNG de 3 × 2 px de un color: cada foto la suya, para que el PDF no las reutilice. */
+function PNG_1x1(r: number): Uint8Array {
+  const trozo = (tipo: string, datos: Buffer) => {
+    const largo = Buffer.alloc(4)
+    largo.writeUInt32BE(datos.length)
+    const cuerpo = Buffer.concat([Buffer.from(tipo, 'latin1'), datos])
+    const crc = Buffer.alloc(4)
+    crc.writeUInt32BE(crc32(cuerpo))
+    return Buffer.concat([largo, cuerpo, crc])
+  }
+  const ihdr = Buffer.alloc(13)
+  ihdr.writeUInt32BE(3, 0)
+  ihdr.writeUInt32BE(2, 4)
+  ihdr[8] = 8
+  ihdr[9] = 2
+  const fila = Buffer.from([0, r, 90, 140, r, 90, 140, r, 90, 140])
+  return Buffer.concat([
+    Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]),
+    trozo('IHDR', ihdr),
+    trozo('IDAT', deflateSync(Buffer.concat([fila, fila]))),
+    trozo('IEND', Buffer.alloc(0)),
+  ])
+}
 
 // ── Datos inventados ──────────────────────────────────────────────────────────
 
@@ -277,8 +302,8 @@ const hojasDe = (pdf: Buffer) => medirPDF(pdf, FRANJA).hojas
 
 describe('§4.11 con el documento real', () => {
   it('punto 4 · ningún título queda solo al pie: siempre lleva contenido debajo en su misma hoja', async () => {
-    for (let k = 0; k <= 24; k += 2) {
-      const { pdf } = await componerCotizacionTrappvel(corrido(props(), k))
+    for (let k = 0; k <= 30; k += 1) {
+      const pdf = await renderNivel(corrido(props(), k), { nivel: k % 4 as Composicion['nivel'] })
       hojasDe(pdf).forEach((h, i) => {
         for (const t of h.textos.filter(x => TITULOS.includes(x.texto))) {
           const debajo = h.textos.filter(x => x.y > t.y + 4)
@@ -289,8 +314,9 @@ describe('§4.11 con el documento real', () => {
   }, 120_000)
 
   it('punto 3 · la firma nunca queda sola en una hoja: la acompaña al menos el final de la última sección', async () => {
-    for (let k = 0; k <= 24; k += 2) {
-      const { pdf } = await componerCotizacionTrappvel(corrido(props(), k))
+    // En la composición NORMAL (sin el rescate del punto 6, que la escondería), renglón a renglón.
+    for (let k = 0; k <= 30; k += 1) {
+      const pdf = await renderNivel(corrido(props(), k), { nivel: 0 })
       const hojas = hojasDe(pdf)
       const conFirma = hojas.find(h => h.textos.some(t => t.texto === 'Edgar Javier Alarcón S.'.replace('ó', 'ó')))!
       const otros = conFirma.textos.filter(t => !['Edgar Javier Alarc', 'Director Comercial', 'contacto@trappvel.com'].some(f => t.texto.startsWith(f)) && !t.texto.startsWith('Fotograf'))
@@ -360,12 +386,49 @@ describe('§4.11 con el documento real', () => {
     expect(compactadas).toBeGreaterThan(0)
   }, 180_000)
 
+  it('pasos 2 y 3 · la foto de una alternativa baja a 1/4 del ancho y la de ciudad del capítulo a 110 pt; la portada y la Recomendada no cambian', async () => {
+    const ANCHO = HOJA.ancho - HOJA.margen * 2
+    const png = (r: number) => `data:image/png;base64,${Buffer.from(PNG_1x1(r)).toString('base64')}`
+    const tres = props({
+      itinerarios: [
+        { nombre: 'Recomendada', esPrincipal: true, precio: 5_000_000, items: [item('HOTEL A', 5_000_000)] },
+        { nombre: 'Económica', esPrincipal: false, precio: 3_900_000, items: [item('HOTEL B', 3_900_000)] },
+      ],
+    }, {
+      foto: { url: png(10), rotulo: 'Portada', credito: 'Autor (CC BY 4.0)', proporcion: 1.5 },
+      hoteles: [
+        hotel({ hotel: 'Hotel Recomendado', ciudad: 'Cartagena', tarifas: [0] }),
+        hotel({ hotel: 'Hotel Alternativo', ciudad: 'Cartagena', tarifas: [1], foto: { url: png(200), proporcion: 1.5 } }),
+      ],
+      fotosCiudades: [{ url: png(120), rotulo: 'Cartagena', credito: 'Otro autor (CC BY 4.0)', lugares: ['Cartagena'], proporcion: 1.5 }],
+    })
+    const imagenes = async (nivel: Composicion['nivel']) => hojasDe(await renderNivel(tres, { nivel })).flatMap(h => h.imagenes)
+    // Normal: portada a todo el ancho y 190 de alto; la de ciudad y la de la alternativa a un tercio, 3:2.
+    const [portada0, ciudad0, alterna0] = await imagenes(0)
+    expect(portada0.ancho).toBeCloseTo(ANCHO, 0)
+    expect(portada0.alto).toBeCloseTo(190, 0)
+    expect(ciudad0.ancho).toBeCloseTo((ANCHO - 16) / 3, 0)
+    expect(alterna0.ancho).toBeCloseTo((ANCHO - 16) / 3, 0)
+    // Paso 2: solo la alternativa baja a un cuarto, en 3:2 (o más alta si su tarjeta lo es: punto 7).
+    const [portada2, ciudad2, alterna2] = await imagenes(2)
+    // (sube unos puntos por el espaciado compacto de arriba, pero no cambia de tamaño)
+    expect([portada2.ancho, portada2.alto]).toEqual([portada0.ancho, portada0.alto])
+    expect(ciudad2.ancho).toBeCloseTo(ciudad0.ancho, 1)
+    expect(alterna2.ancho).toBeCloseTo((ANCHO - 24) / 4, 0)
+    expect(alterna2.alto).toBeGreaterThanOrEqual(alterna2.ancho / 1.5 - 0.5)
+    // Paso 3: la de ciudad del capítulo, a 110 de alto en 3:2; la portada sigue igual.
+    const [portada3, ciudad3] = await imagenes(3)
+    expect([portada3.ancho, portada3.alto]).toEqual([portada0.ancho, portada0.alto])
+    expect(ciudad3.ancho).toBeCloseTo(110 * 1.5, 0)
+  }, 60_000)
+
   it('⚠️ compactar nunca achica la letra: los mismos tamaños de texto en los cuatro niveles', async () => {
     const p = props({}, { hoteles: [hotel({ hotel: 'Hotel Casa del Puerto', ciudad: 'Cartagena' }), hotel({ hotel: 'Hotel Bocagrande', ciudad: 'Cartagena' })] })
+    // Cada corrida de texto con su tamaño: la misma frase tiene que salir con la misma letra.
     const tamanos = async (nivel: Composicion['nivel']) =>
-      [...new Set(hojasDe(await renderNivel(p, { nivel })).flatMap(h => h.textos.map(t => t.tam)))].sort((a, b) => a - b)
+      hojasDe(await renderNivel(p, { nivel })).flatMap(h => h.textos.map(t => `${t.tam} · ${t.texto}`)).sort()
     const normal = await tamanos(0)
-    expect(normal.length).toBeGreaterThan(3)
+    expect(normal.length).toBeGreaterThan(30)
     for (const nivel of [1, 2, 3] as const) expect(await tamanos(nivel)).toEqual(normal)
   }, 60_000)
 

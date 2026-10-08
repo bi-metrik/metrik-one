@@ -41,6 +41,12 @@
  * su foco. El día a día no repite la tabla de vuelos, y «Antes de viajar» va con «Incluido»,
  * no suelto al final. Las reglas puras viven en `cotizacion-trappvel-formato.ts`.
  *
+ * **7 · Espacio y paginación (§4.11, Ren, 2026-10-08).** Todo espacio sale de la escala
+ * 4 · 8 · 12 · 16 · 24 · 32 · 48 (`ESPACIADO_NORMAL` / `ESPACIADO_COMPACTO`), que cada sección
+ * recibe por contexto. El aire ANTES de una unidad del flujo es una pieza (`Aire`), no su
+ * margen. Este componente dibuja UNA composición; cuántas hojas y qué paso de compactación
+ * lo decide `componerCotizacionTrappvel` midiendo el PDF ya renderizado.
+ *
  * ⚠️ Las fuentes estándar del PDF (Helvetica) NO traen «→», «✔», «✕», «●» ni «★»: un
  * carácter que la fuente no tiene se imprime como otro (la flecha salió como apóstrofo).
  * Todos esos signos van dibujados en SVG, nunca como texto.

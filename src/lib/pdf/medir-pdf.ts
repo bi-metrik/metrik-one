@@ -46,6 +46,8 @@ export interface HojaMedida {
    * en el orden en que se pinta. Con fuentes estándar el código hexadecimal ES el carácter.
    */
   textos: { texto: string; y: number; tam: number }[]
+  /** Cada imagen de la franja de contenido: su esquina superior izquierda y su tamaño, en pt. */
+  imagenes: { x: number; y: number; ancho: number; alto: number }[]
 }
 
 export interface MedidaDelPDF {
@@ -160,6 +162,7 @@ export function medirPDF(buf: Buffer, franja: FranjaDeContenido): MedidaDelPDF {
     let primero: number | null = null
     let fondo: number | null = null
     const textos: HojaMedida['textos'] = []
+    const imagenes: HojaMedida['imagenes'] = []
     const anotar = (arriba: number, abajo: number) => {
       // Encabezado y pie fijos no cuentan: solo lo que cae en la franja de contenido.
       if (abajo <= franja.arriba || arriba >= franja.abajo) return
@@ -168,51 +171,73 @@ export function medirPDF(buf: Buffer, franja: FranjaDeContenido): MedidaDelPDF {
     }
     const desdeArriba = (m: Matriz, x: number, y: number) => H - aplicar(m, x, y)[1]
 
+    type Caja = { x0: number; y0: number; x1: number; y1: number }
     let ctm: Matriz = IDENTIDAD
-    const pila: Matriz[] = []
+    // El recorte vigente (`W n`): una imagen en `cover` se dibuja más grande que su marco y el
+    // recorte la ajusta. Sin él, la foto de portada «terminaba» 150 pt más abajo de lo que se ve.
+    let recorte: Caja | null = null
+    const pila: { ctm: Matriz; recorte: Caja | null }[] = []
     let ops: string[] = []
     let relleno: number[] = []
-    let camino: number[] = []
+    let cx: number[] = []
+    let cy: number[] = []
     let tm: Matriz = IDENTIDAD
     let tam = 0
+    const punto = (x: number, y: number) => {
+      const [dx] = aplicar(ctm, x, y)
+      cx.push(dx)
+      cy.push(desdeArriba(ctm, x, y))
+    }
+    /** La caja dibujada, recortada por el recorte vigente. `null` si queda fuera. */
+    const recortada = (k: Caja): Caja | null => {
+      if (!recorte) return k
+      const r = { x0: Math.max(k.x0, recorte.x0), y0: Math.max(k.y0, recorte.y0), x1: Math.min(k.x1, recorte.x1), y1: Math.min(k.y1, recorte.y1) }
+      return r.x0 <= r.x1 && r.y0 <= r.y1 ? r : null
+    }
+    const cajaDelCamino = (): Caja | null => cx.length === 0
+      ? null
+      : { x0: Math.min(...cx), x1: Math.max(...cx), y0: Math.min(...cy), y1: Math.max(...cy) }
     for (const f of fichas(c)) {
       const esNumero = /^-?[\d.]+$/.test(f)
       if (esNumero || f.startsWith('/') || f.startsWith('[') || f.startsWith('(') || f.startsWith('<')) { ops.push(f); continue }
       const nums = ops.map(Number)
       switch (f) {
-        case 'q': pila.push(ctm); break
-        case 'Q': ctm = pila.pop() ?? IDENTIDAD; break
+        case 'q': pila.push({ ctm, recorte }); break
+        case 'Q': { const e = pila.pop(); ctm = e?.ctm ?? IDENTIDAD; recorte = e?.recorte ?? null; break }
         case 'cm': ctm = por(nums.slice(-6) as Matriz, ctm); break
         case 'scn': case 'sc': case 'rg': if (nums.length >= 3) relleno = nums.slice(-3); break
         case 're': {
           const [x, y, w, h] = nums.slice(-4)
-          const ys = [desdeArriba(ctm, x, y), desdeArriba(ctm, x + w, y + h)]
-          const arriba = Math.min(...ys)
-          const abajo = Math.max(...ys)
           const esMarca = relleno.length === 3
             && Math.round(relleno[0] * 255) === ROJO_MARCA
             && Math.round(relleno[1] * 255) === VERDE_MARCA
             && Math.abs(w) < 1 && Math.abs(h) < 1
           if (esMarca) {
             const id = Math.round(relleno[2] * 255)
-            if (!marcas.has(id)) marcas.set(id, { hoja: idx + 1, y: arriba })
+            const ys = [desdeArriba(ctm, x, y), desdeArriba(ctm, x + w, y + h)]
+            if (!marcas.has(id)) marcas.set(id, { hoja: idx + 1, y: Math.min(...ys) })
           } else {
-            camino.push(arriba, abajo)
+            punto(x, y)
+            punto(x + w, y + h)
           }
           break
         }
         case 'm': case 'l': {
           const [x, y] = nums.slice(-2)
-          camino.push(desdeArriba(ctm, x, y))
+          punto(x, y)
           break
         }
         case 'c': {
           const v = nums.slice(-6)
-          camino.push(desdeArriba(ctm, v[0], v[1]), desdeArriba(ctm, v[2], v[3]), desdeArriba(ctm, v[4], v[5]))
+          punto(v[0], v[1]); punto(v[2], v[3]); punto(v[4], v[5])
           break
         }
-        case 'W': case 'W*': camino = []; break
-        case 'n': camino = []; break
+        case 'W': case 'W*': {
+          const k = cajaDelCamino()
+          if (k) recorte = recortada(k) ?? { x0: 0, y0: 0, x1: 0, y1: 0 }
+          break
+        }
+        case 'n': cx = []; cy = []; break
         case 'BT': tm = IDENTIDAD; break
         case 'Tm': tm = nums.slice(-6) as Matriz; break
         case 'Tf': tam = nums[nums.length - 1] || tam; break
@@ -229,19 +254,29 @@ export function medirPDF(buf: Buffer, franja: FranjaDeContenido): MedidaDelPDF {
           break
         }
         case 'Do': {
+          const [ax] = aplicar(ctm, 0, 0)
+          const [bx] = aplicar(ctm, 1, 1)
           const ys = [desdeArriba(ctm, 0, 0), desdeArriba(ctm, 1, 1)]
-          anotar(Math.min(...ys), Math.max(...ys))
+          const k = recortada({ x0: Math.min(ax, bx), x1: Math.max(ax, bx), y0: Math.min(...ys), y1: Math.max(...ys) })
+          if (!k) break
+          anotar(k.y0, k.y1)
+          if (k.y1 > franja.arriba && k.y0 < franja.abajo) {
+            imagenes.push({ x: k.x0, y: k.y0, ancho: k.x1 - k.x0, alto: k.y1 - k.y0 })
+          }
           break
         }
         default:
           if (PINTA.has(f)) {
-            if (camino.length > 0) anotar(Math.min(...camino), Math.max(...camino))
-            camino = []
+            const k = cajaDelCamino()
+            const r = k ? recortada(k) : null
+            if (r) anotar(r.y0, r.y1)
+            cx = []
+            cy = []
           }
       }
       ops = []
     }
-    hojas.push({ primero, fondo, textos })
+    hojas.push({ primero, fondo, textos, imagenes })
   })
 
   return { altoHoja: H, hojas, marcas }
