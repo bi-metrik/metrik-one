@@ -9,7 +9,7 @@
 - ⚠️⚠️ [Bot híbrido de la bandeja (#1056)](project_bandeja_hibrida.md) — detrás de bot_conversacional.hibrido (apagado = main); propuesta [Sí, ese]; decisión con 3.5-lite
 - ⚠️⚠️ [Doble guardado e idempotencia (#1047-#1053)](project_doble_guardado_idempotencia.md) — #1049/#1052 migración SIN aplicar; POST cortado se repite vía Vercel
 - ⚠️ [Letras no latinas: bloqueo en todo ONE](project_pdf_cirilico_winansi.md) — `texto-latino.ts` + copia exacta en `_shared/`; guarda de CI sobre drawText
-- ⚠️ [Copia readonly de la carta de autorización](project_copia_carta_autorizacion.md) — documento lee el PDF del formulario; INSERT de la copia SIN aplicar
+- ⚠️ [Carta de autorización: copias y generar desde Cita](project_copia_carta_autorizacion.md) — `genera_en_origen`; UPDATE de f25d432f tras el merge
 - ⚠️ [Copia de la factura escribe en su origen](project_factura_copia_escribe_origen.md) — criterio único `copiaDeSoloLectura`; origen ambiguo rechaza
 - ⚠️ [ONE aguanta red lenta (7-oct)](project_red_lenta_aguanta.md) — aviso por falta de avance; copia de chunk con `src` relativo; páginas de 30
 - ⚠️ [Aviso «No pudimos conectar con ONE»](project_aviso_conexion_fallida.md) — script módulo async en el head; quita hojas colgadas; tope CSS de 25 s

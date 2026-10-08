@@ -44,6 +44,7 @@ import { telefonoCasilla25 } from '@/lib/dian/telefono-casilla-25'
 import { resolverSeccionalOficial, presetKeySeccional, presetKeySeccionalExacta } from '@/lib/dian/seccionales'
 import { fijarSeccionalNegocio } from '@/lib/negocios/seccional-negocio'
 import { generacionNegadaPorDisputa } from '@/lib/negocios/disputa-generacion'
+import { filaDelFormulario } from '@/lib/negocios/fila-formulario'
 import { createElement } from 'react'
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -440,14 +441,20 @@ export async function generarFormulario(
   const { supabase, workspaceId, userId, error } = await getWorkspace()
   if (error || !workspaceId) return { success: false, error: 'No autenticado' }
 
+  // El permiso se mide sobre la fila que el usuario tiene enfrente (una copia generable
+  // vive en la etapa donde trabaja); la escritura va a la del formulario, que puede ser la
+  // del origen. Ver `@/lib/negocios/fila-formulario`.
   const guard = await guardEditarBloque(negocioBloqueId)
   if (!guard.ok) return { success: false, error: guard.error ?? 'Sin permiso' }
+
+  const fila = await filaDelFormulario(supabase, negocioBloqueId, { crear: true })
+  if (!fila.ok) return { success: false, error: fila.error }
 
   return generarFormularioCore(
     supabase as unknown as SupabaseClient,
     workspaceId,
     userId ?? null,
-    negocioBloqueId,
+    fila.id,
     negocioId,
   )
 }
@@ -885,7 +892,7 @@ export interface FormularioVersionItem {
  * editables ANTES de generar el PDF. Devuelve también el historial de versiones.
  */
 export async function resolverFormularioParaEdicion(
-  negocioBloqueId: string,
+  bloqueIdPedido: string,
   negocioId: string,
 ): Promise<{
   casillas: CasillaEditable[]
@@ -902,6 +909,14 @@ export async function resolverFormularioParaEdicion(
 }> {
   const { supabase, workspaceId, error } = await getWorkspace()
   if (error || !workspaceId) return { casillas: [], versiones: [], error: 'No autenticado' }
+
+  // Desde una copia generable se lee el formulario del ORIGEN (casillas, overrides y
+  // versiones). Sin fila de origen todavía no hay nada que mostrar: generar la crea.
+  const fila = await filaDelFormulario(supabase, bloqueIdPedido, { crear: false })
+  if (!fila.ok) {
+    return fila.sinOrigen ? { casillas: [], versiones: [] } : { casillas: [], versiones: [], error: fila.error }
+  }
+  const negocioBloqueId = fila.id
 
   const { data: bloqueData } = await db(supabase)
     .from('negocio_bloques')
@@ -1094,13 +1109,16 @@ async function leerDocumentoFuente(
 
 /** Persiste la seccional seleccionada por el operador en data.seccional (010). */
 export async function guardarSeccional(
-  negocioBloqueId: string,
+  bloqueIdPedido: string,
   seccional: string,
 ): Promise<{ error: string | null }> {
   const { supabase, error } = await getWorkspace()
   if (error) return { error: 'No autenticado' }
-  const guard = await guardEditarBloque(negocioBloqueId)
+  const guard = await guardEditarBloque(bloqueIdPedido)
   if (!guard.ok) return { error: guard.error ?? 'Sin permiso' }
+  const fila = await filaDelFormulario(supabase, bloqueIdPedido, { crear: true })
+  if (!fila.ok) return { error: fila.error }
+  const negocioBloqueId = fila.id
   const { data: row } = await db(supabase).from('negocio_bloques').select('data, negocio_id').eq('id', negocioBloqueId).single()
   const current = (row?.data as Record<string, unknown>) ?? {}
   const { error: upErr } = await db(supabase)
@@ -1129,14 +1147,19 @@ export async function guardarSeccional(
 
 /** Guarda los valores editados de las casillas (solo lo sobreescrito). */
 export async function guardarFormularioOverrides(
-  negocioBloqueId: string,
+  bloqueIdPedido: string,
   overrides: Record<string, string | null>,
 ): Promise<{ error: string | null }> {
   const { supabase, error } = await getWorkspace()
   if (error) return { error: 'No autenticado' }
 
-  const guard = await guardEditarBloque(negocioBloqueId)
+  const guard = await guardEditarBloque(bloqueIdPedido)
   if (!guard.ok) return { error: guard.error ?? 'Sin permiso' }
+
+  // Las casillas editadas desde una copia generable son las del origen: el PDF sale de ahí.
+  const fila = await filaDelFormulario(supabase, bloqueIdPedido, { crear: true })
+  if (!fila.ok) return { error: fila.error }
+  const negocioBloqueId = fila.id
 
   const { data: row } = await db(supabase)
     .from('negocio_bloques')
@@ -1177,7 +1200,7 @@ export async function guardarFormularioOverrides(
  * vieja pisaría lo que otro proceso escribió en el medio, sin error y sin aviso.
  */
 export async function confirmarNitFormulario(
-  negocioBloqueId: string,
+  bloqueIdPedido: string,
   nitTecleado: string,
 ): Promise<{
   ok: boolean
@@ -1189,8 +1212,12 @@ export async function confirmarNitFormulario(
   const { supabase, workspaceId, userId, staffId, error } = await getWorkspace()
   if (error || !workspaceId) return { ok: false, error: 'No autenticado' }
 
-  const guard = await guardEditarBloque(negocioBloqueId)
+  const guard = await guardEditarBloque(bloqueIdPedido)
   if (!guard.ok) return { ok: false, error: guard.error ?? 'Sin permiso' }
+
+  const fila = await filaDelFormulario(supabase, bloqueIdPedido, { crear: true })
+  if (!fila.ok) return { ok: false, error: fila.error }
+  const negocioBloqueId = fila.id
 
   const tecleado = digitosDeNit(nitTecleado)
   if (tecleado === '') return { ok: false, error: 'Escribe el número de la casilla 5 del RUT' }

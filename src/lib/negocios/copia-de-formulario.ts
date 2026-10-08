@@ -16,7 +16,7 @@
  * Solo por slug: la vía legacy por (etapa, nombre) no se extiende a formularios.
  */
 
-import { esCopiaHeredada } from './copia-heredada'
+import { esCopiaHeredada, origenDeCopiaGenerable } from './copia-heredada'
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type Cliente = any
@@ -63,4 +63,30 @@ export async function formulariosOrigenDeCopias(
     if (slug && f.data) m.set(slug, f.data)
   }
   return m
+}
+
+/**
+ * Historial de etapas anteriores sin los formularios que la etapa actual ya ofrece generar
+ * desde una copia (`genera_en_origen`).
+ *
+ * El origen de la carta (`carta_autorizacion_generar`) tiene `editable_siempre`, así que en
+ * el historial se pinta EDITABLE: con la copia generable en la etapa actual, la misma
+ * pantalla tendría dos botones de «Generar» sobre la misma fila, y uno de ellos escondido
+ * en un desplegable cerrado. Se deja uno solo, el de la etapa actual: muestra el mismo PDF,
+ * las mismas casillas y las mismas versiones, porque lee y escribe la fila del origen.
+ *
+ * Solo se filtra lo que se devuelve a la pantalla: quien busca en el historial por slug
+ * (los `doc_link`) lo hace antes, sobre la lista completa.
+ */
+export function historialSinOrigenesGenerables<T extends { slug?: string | null }>(
+  historial: T[],
+  configsEtapaActual: ReadonlyArray<Record<string, unknown> | null | undefined>,
+): T[] {
+  const generables = new Set<string>()
+  for (const ce of configsEtapaActual) {
+    const slug = origenDeCopiaGenerable(ce)
+    if (slug) generables.add(slug)
+  }
+  if (generables.size === 0) return historial
+  return historial.filter(b => !(b.slug && generables.has(b.slug)))
 }
