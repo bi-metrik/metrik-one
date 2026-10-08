@@ -791,10 +791,14 @@ export async function actualizarRanuraDeItem(
       .eq('id', itemId)
       .maybeSingle()
     actual = data
-    if (
-      actual?.entra_al_precio === false &&
-      !puedeQuedarFueraDelPrecio({ id: itemId, grupo: patch.grupo as string | null, es_ajuste: actual.es_ajuste ?? false })
-    ) {
+    const destino = { id: itemId, grupo: patch.grupo as string | null, es_ajuste: actual?.es_ajuste ?? false }
+    const origen = { id: itemId, grupo: (actual?.grupo ?? null) as string | null, es_ajuste: actual?.es_ajuste ?? false }
+    // Un vuelo que no va solo cambia a otra ranura de vuelo: una sugerencia que pasara a vuelo
+    // dejaría de salir en «Opcionales» sin que nadie lo pidiera (brief del 2026-10-08).
+    const destinoValido = esVueloDeLaCotizacion(destino)
+      ? esVueloDeLaCotizacion(origen)
+      : puedeQuedarFueraDelPrecio(destino)
+    if (actual?.entra_al_precio === false && !destinoValido) {
       return {
         success: false,
         error: 'Esta línea está fuera del precio. Márcala para que entre al precio antes de cambiarle el grupo.',

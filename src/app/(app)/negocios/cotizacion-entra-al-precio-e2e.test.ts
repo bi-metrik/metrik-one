@@ -535,6 +535,12 @@ describe('el interruptor desde la server action: guarda, protege y recalcula', (
     expect((tablas.items.find(i => i.id === 'catalina') as Fila).grupo).toBe('excursion')
   })
 
+  it('un vuelo que no va sí cambia a otra ranura de vuelo (brief del 2026-10-08)', async () => {
+    sembrar({ avianca: { entra_al_precio: false } })
+    const res = await actualizarRanuraDeItem('avianca', { grupo: 'vuelo 2' })
+    expect(res).toEqual({ success: true })
+  })
+
   it('CONTROL · cambiarle el grupo a otro que tampoco se combina sí pasa', async () => {
     sembrar({ catalina: { entra_al_precio: false } })
     const res = await actualizarRanuraDeItem('catalina', { grupo: 'tour' })
