@@ -1141,7 +1141,9 @@ export function TabComercialSoena({
                 mentiria sobre la proporcion, que es real. */}
             {/* Esta serie es de CAJA: cada barra suma lo que entró en ese mes. Es la cifra
                 «2º pago recibido este mes» del panel, no la de las ventas del mes, y se
-                dice en el título para que nadie compare la barra contra la otra. */}
+                dice en el título para que nadie compare la barra contra la otra. Llega ya
+                sin los sobrantes de centavos (`sinSobrantes` en la página), así la barra
+                del mes y la cifra del panel dan lo mismo. */}
             <ChartCard title="Primer vs segundo pago recibido por mes">
               <ResponsiveContainer width="100%" height={220}>
                 <BarChart data={serieData} margin={{ left: -4, right: 12, top: 18 }} {...propsSerieConPagos}>
@@ -1169,8 +1171,12 @@ export function TabComercialSoena({
               <p className="mt-1 text-[11px] text-gray-500">
                 Por fecha de pago, sin IVA: lo que entró en cada mes, de ventas de cualquier mes.
                 Solo las ventas 50/50 tienen segundo pago; en las de 100% anticipado no hay
-                segundo tramo que cobrar. Aquí no se descartan los sobrantes de centavos que el
-                panel no cuenta como segundo pago.
+                segundo tramo que cobrar.{' '}
+                {/* SOE-002: la página resta los sobrantes de centavos antes de pintar; si
+                    no los pudo traer, la nota no puede afirmar que los descartó. */}
+                {serie?.umbral_sobrantes != null
+                  ? `Igual que el panel, no cuenta como segundo pago un abono menor a ${fmtCOP(serie.umbral_sobrantes)} (sobrante de redondeo del primer pago); esos pesos sí están en el recaudo.`
+                  : 'Aquí no se descartan los sobrantes de centavos que el panel no cuenta como segundo pago.'}
               </p>
             </ChartCard>
           </div>
