@@ -112,6 +112,12 @@ export function separarCampos(values: Record<string, unknown>): {
 export const AUTORIZACION_SLUG = 'autorizacion_datos'
 export const AUTORIZACION_FECHA_SLUG = 'autorizacion_datos_fecha'
 export const AUTORIZACION_AUTOR_SLUG = 'autorizacion_datos_por'
+/**
+ * El resumen de la autorizacion que dio el TITULAR en su link (version y casillas). Lo escribe
+ * `lib/autorizacion-datos/servidor.ts`; la evidencia es la fila de `autorizacion_datos_enlaces`.
+ * Las tres llaves de arriba son la marca vieja del boton de un clic: ya no cuentan para el gate.
+ */
+export const AUTORIZACION_LINK_SLUG = 'autorizacion_datos_link'
 
 export interface EstadoAutorizacion {
   autorizado: boolean

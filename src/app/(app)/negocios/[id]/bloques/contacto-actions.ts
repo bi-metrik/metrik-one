@@ -3,15 +3,18 @@
 import { revalidatePath } from 'next/cache'
 import { getWorkspace } from '@/lib/actions/get-workspace'
 import { guardEditarBloque, guardVerNegocio } from '@/lib/permissions/guard-negocio'
-import { registrarActividad } from '@/lib/activity/registrar-actividad'
 import {
   separarCampos,
-  estadoAutorizacion,
   AUTORIZACION_SLUG,
   AUTORIZACION_FECHA_SLUG,
   AUTORIZACION_AUTOR_SLUG,
+  AUTORIZACION_LINK_SLUG,
   type ValoresContacto,
 } from '@/lib/contactos/campos-contacto'
+import { estadoDelContacto, pedirEnlace, enviarCorreoAutorizacion } from '@/lib/autorizacion-datos/servidor'
+import { faseDe, type FaseAutorizacion } from '@/lib/autorizacion-datos/estado'
+import { MENSAJE_SIN_CORREO } from '@/lib/autorizacion-datos/correo'
+import type { ClaveCasilla } from '@/lib/autorizacion-datos/texto'
 
 /**
  * Acciones del bloque `contacto`. Escriben en `contactos`, no en `negocio_bloques`.
@@ -128,11 +131,12 @@ export async function guardarFichaContacto(
   if (!actual) return { error: 'Contacto no encontrado' }
 
   const { nativos, custom } = separarCampos(values)
-  // La autorizacion tiene su propia accion, con su estampa de fecha y autor. Dejarla
-  // entrar por aqui permitiria marcarla como un campo mas y perder la trazabilidad.
+  // La autorizacion la da el titular en su link (o, si el workspace la enciende, la via con
+  // evidencia). Dejarla entrar por aqui permitiria marcarla como un campo mas, sin prueba.
   delete custom[AUTORIZACION_SLUG]
   delete custom[AUTORIZACION_FECHA_SLUG]
   delete custom[AUTORIZACION_AUTOR_SLUG]
+  delete custom[AUTORIZACION_LINK_SLUG]
 
   const previo = ((actual as { custom_data: Record<string, unknown> | null }).custom_data ?? {})
   const update: Record<string, unknown> = { ...nativos, updated_at: new Date().toISOString() }
@@ -150,79 +154,104 @@ export async function guardarFichaContacto(
   return { error: null }
 }
 
+// ── Autorizacion de tratamiento de datos (link del titular) ─────────────────────
+
 /**
- * Registra la autorizacion de tratamiento de datos en el CONTACTO.
- *
- * Deja estampa de fecha y autor, y una linea en la bitacora del contacto: es el dato que
- * habilita el gate y el unico con consecuencia legal de todo el bloque. En Airtable el
- * campo equivalente lleva dos anos al 0% de llenado, asi que aqui se registra donde se
- * consulta y no donde se digita.
- *
- * No se puede revocar desde el negocio. Retirar una autorizacion es un acto del titular,
- * se atiende en su ficha, y un boton de un clic dentro de un viaje no es el sitio.
+ * Desde el 2026-10-08 la autorizacion la da el TITULAR en su link (ver
+ * `lib/autorizacion-datos/`). El boton de un clic que la registraba a nombre de la comercial se
+ * quito (Emilio, pieza 4.4): un «autorizado» sin poder mostrar que acepto la persona es lo que
+ * prohibe el deber de conservar prueba. Las marcas que ya existen se muestran con su etiqueta y
+ * no cuentan para el gate.
  */
-export async function registrarAutorizacionContacto(
-  negocioBloqueId: string,
-): Promise<{ error: string | null; fecha: string | null }> {
+
+export interface VistaAutorizacionBloque {
+  contactoNombre: string
+  tieneCorreo: boolean
+  fase: FaseAutorizacion
+  aceptadoAt: string | null
+  version: string | null
+  casillas: Partial<Record<ClaveCasilla, boolean | null>> | null
+  vigente: Record<ClaveCasilla, boolean>
+  correoEnviadoAt: string | null
+  rechazadoAt: string | null
+  manualSinEvidencia: { fecha: string | null } | null
+  textoPublicado: boolean
+  versionVigente: string | null
+}
+
+async function contactoDelBloque(negocioBloqueId: string, editar: boolean) {
   const { supabase, workspaceId, staffId, error } = await getWorkspace()
-  if (error || !workspaceId) return { error: 'No autenticado', fecha: null }
-
-  const guard = await guardEditarBloque(negocioBloqueId)
-  if (!guard.ok) return { error: guard.error ?? 'Sin permiso', fecha: null }
-
+  if (error || !workspaceId) return { error: 'No autenticado' as const }
+  const guard = editar ? await guardEditarBloque(negocioBloqueId) : null
+  if (guard && !guard.ok) return { error: guard.error ?? 'Sin permiso' }
   const res = await resolverContacto(supabase, workspaceId, negocioBloqueId)
-  if (res.error) return { error: res.error, fecha: null }
-  if (!res.contactoId) return { error: 'Este negocio no tiene contacto asociado', fecha: null }
-
-  const { data: actual } = await supabase
-    .from('contactos')
-    .select('nombre, custom_data')
-    .eq('id', res.contactoId)
-    .eq('workspace_id', workspaceId)
-    .maybeSingle()
-  if (!actual) return { error: 'Contacto no encontrado', fecha: null }
-
-  const row = actual as { nombre: string; custom_data: Record<string, unknown> | null }
-  const previo = row.custom_data ?? {}
-  const yaEstaba = estadoAutorizacion(previo)
-  // Re-registrar pisaria la fecha original con la de hoy y envejeceria la autorizacion
-  // hacia adelante. Si ya esta, no hay nada que hacer.
-  if (yaEstaba.autorizado) return { error: null, fecha: yaEstaba.fecha }
-
-  const fecha = new Date().toISOString()
-  const { error: updErr } = await supabase
-    .from('contactos')
-    .update({
-      custom_data: {
-        ...previo,
-        [AUTORIZACION_SLUG]: true,
-        [AUTORIZACION_FECHA_SLUG]: fecha,
-        [AUTORIZACION_AUTOR_SLUG]: staffId ?? null,
-      },
-      updated_at: fecha,
-    })
-    .eq('id', res.contactoId)
-    .eq('workspace_id', workspaceId)
-  if (updErr) return { error: (updErr as { message: string }).message, fecha: null }
-
-  if (staffId) {
-    await registrarActividad(
-      supabase,
-      {
-        workspace_id: workspaceId,
-        entidad_tipo: 'contacto',
-        entidad_id: res.contactoId,
-        tipo: 'cambio',
-        autor_id: staffId,
-        contenido: 'Autorizacion de tratamiento de datos registrada desde el negocio',
-        campo_modificado: AUTORIZACION_SLUG,
-        valor_nuevo: 'true',
-      },
-      'registrarAutorizacionContacto',
-    )
+  if (res.error) return { error: res.error }
+  if (!editar) {
+    const g = await guardVerNegocio(res.negocioId)
+    if (!g.ok) return { error: g.error ?? 'Sin permiso' }
   }
+  if (!res.contactoId) return { error: 'Este negocio no tiene contacto asociado' }
+  return { error: null, workspaceId, staffId: staffId ?? null, negocioId: res.negocioId, contactoId: res.contactoId }
+}
 
-  revalidatePath(`/negocios/${res.negocioId}`)
-  revalidatePath(`/directorio/contacto/${res.contactoId}`)
-  return { error: null, fecha }
+export async function cargarAutorizacionContacto(
+  negocioBloqueId: string,
+): Promise<{ vista: VistaAutorizacionBloque | null; error: string | null }> {
+  const c = await contactoDelBloque(negocioBloqueId, false)
+  if (c.error !== null) return { vista: null, error: c.error === 'Este negocio no tiene contacto asociado' ? null : c.error }
+  const { estado, error } = await estadoDelContacto(c.workspaceId, c.contactoId)
+  if (error) return { vista: null, error: 'No se pudo leer la autorización de datos' }
+  return {
+    vista: {
+      contactoNombre: estado.contacto?.nombre ?? '',
+      tieneCorreo: !!estado.contacto?.email,
+      fase: faseDe(estado),
+      aceptadoAt: estado.aceptacion?.aceptado_at ?? null,
+      version: estado.aceptacion?.version ?? null,
+      casillas: estado.aceptacion?.casillas ?? null,
+      vigente: estado.vigente,
+      correoEnviadoAt: estado.pendiente?.correo_enviado_at ?? null,
+      rechazadoAt: estado.pendiente?.rechazado_at ?? null,
+      manualSinEvidencia: estado.manual_sin_evidencia,
+      textoPublicado: !!estado.texto,
+      versionVigente: estado.texto?.version ?? null,
+    },
+    error: null,
+  }
+}
+
+/** El link del titular para copiarlo (reusa el pendiente). */
+export async function linkAutorizacionContacto(
+  negocioBloqueId: string,
+): Promise<{ url: string | null; error: string | null }> {
+  const c = await contactoDelBloque(negocioBloqueId, true)
+  if (c.error !== null) return { url: null, error: c.error }
+  const { enlace, error } = await pedirEnlace({
+    workspaceId: c.workspaceId, contactoId: c.contactoId, staffId: c.staffId, negocioId: c.negocioId, medio: 'whatsapp_reenviado',
+  })
+  if (!enlace) {
+    console.error('[linkAutorizacionContacto]', error)
+    return { url: null, error: 'No se pudo generar el link' }
+  }
+  return { url: enlace.url, error: null }
+}
+
+/** «Enviar por correo» desde el bloque. */
+export async function enviarCorreoAutorizacionContacto(
+  negocioBloqueId: string,
+): Promise<{ enviadoA: string | null; error: string | null }> {
+  const c = await contactoDelBloque(negocioBloqueId, true)
+  if (c.error !== null) return { enviadoA: null, error: c.error }
+  const r = await enviarCorreoAutorizacion({
+    workspaceId: c.workspaceId, contactoId: c.contactoId, negocioId: c.negocioId, staffId: c.staffId, origen: 'manual',
+  })
+  if (r.enviado) {
+    revalidatePath(`/negocios/${c.negocioId}`)
+    return { enviadoA: r.email, error: null }
+  }
+  if (r.motivo === 'error') {
+    console.error('[enviarCorreoAutorizacionContacto]', r.detalle)
+    return { enviadoA: null, error: 'No se pudo enviar el correo. Copia el link y envíaselo por WhatsApp.' }
+  }
+  return { enviadoA: null, error: MENSAJE_SIN_CORREO[r.motivo] }
 }

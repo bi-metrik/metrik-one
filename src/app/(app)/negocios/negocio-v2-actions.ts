@@ -5,6 +5,10 @@ import { MENSAJE_EN_CURSO } from '@/lib/idempotencia/clave'
 import { getWorkspace } from '@/lib/actions/get-workspace'
 import { enPeticionDeRuta } from '@/lib/actions/memo-de-ruta'
 import { revalidatePath } from 'next/cache'
+import { after } from 'next/server'
+import { correoAlCrearNegocio } from '@/lib/autorizacion-datos/servidor'
+import { bloqueoAutorizacionDatos } from '@/lib/autorizacion-datos/gate-servidor'
+import { GATE_AUTORIZACION } from '@/lib/autorizacion-datos/estado'
 import { RAZONES_PERDIDA_NEGOCIO, MOTIVOS_CANCELACION, MOTIVOS_PAUSA, MAX_PAUSAS, MAX_DIAS_PAUSA, SAFETY_NET_HORAS, leerMarcasDeMetadata, origenDesdeFuenteInteraccion, type MarcaCondicion } from '@/lib/negocios/constants'
 import {
   computeFieldDefaults,
@@ -2172,7 +2176,21 @@ async function crearNegocioSinClave(input: EntradaCrearNegocio): Promise<Resulta
     { supabase, workspaceId, userId: userId ?? null, role: role ?? null, staffId: staffId ?? null },
     input,
   )
-  if (r.negocio_id) revalidatePath('/negocios')
+  if (r.negocio_id) {
+    revalidatePath('/negocios')
+    // El correo con el link de autorización de datos, si el workspace lo encendió y el contacto lo
+    // necesita (ver `lib/autorizacion-datos/servidor.ts`). Después de responder: no demora la
+    // creación, y si falla, el viaje ya quedó creado y el link se manda desde el bloque.
+    const negocioCreado = r.negocio_id
+    try {
+      after(async () => {
+        try {
+          const c = await correoAlCrearNegocio(negocioCreado)
+          if (!c.enviado && c.motivo === 'error') console.error('[crearNegocio] correo de autorización:', c.detalle)
+        } catch (e) { console.error('[crearNegocio] correo de autorización:', e) }
+      })
+    } catch (e) { console.error('[crearNegocio] no se pudo programar el correo de autorización:', e) }
+  }
   return r
 }
 
@@ -3126,9 +3144,11 @@ export type BloquePendienteGate = {
   nombre: string
   es_gate: boolean
   omitible?: boolean
-  tipo?: BloqueoGate['tipo'] | 'cruce'
+  tipo?: BloqueoGate['tipo'] | 'cruce' | 'autorizacion_datos'
   cruce_slug?: string
   advertencia?: string
+  /** `tipo: 'autorizacion_datos'`: el link para que el modal lo copie ahí mismo. */
+  enlace?: string
 }
 
 async function cambiarEtapaNegocioConGateSinClave(
@@ -3764,6 +3784,19 @@ async function cambiarEtapaNegocioConGateSinClave(
           bloquesPendientes: [{ nombre: mensajeMinimoIncompleto(niveles.minimo, msgs['solicitud_minimo']), es_gate: true }],
         }
       }
+    }
+
+    // Gate custom: autorizacion_datos — el cliente autorizó el tratamiento de sus datos en el
+    // link (decisión de Mauricio, 2026-10-08). Vive en el CONTACTO: un cliente recurrente que ya
+    // autorizó pasa sin volver a firmar, salvo una versión MAYOR nueva del texto. Si el viaje lleva
+    // menores, exige también esa casilla. Las marcas manuales viejas no cuentan. El bloqueo trae el
+    // link para copiarlo desde el modal. Cede al override como los demás gates de etapa.
+    if (etapaGates.includes(GATE_AUTORIZACION)) {
+      const bloqueo = await bloqueoAutorizacionDatos({
+        supabase, workspaceId, negocioId, staffId: staffId ?? null,
+        mensajes: (etapaActualConfigExtra.gate_messages ?? {}) as Record<string, string>,
+      })
+      if (bloqueo) return { error: 'gate_bloqueado', bloquesPendientes: [bloqueo] }
     }
 
     // Gate custom: sobrepago_conciliado — si el total cobrado supera el precio del
