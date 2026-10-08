@@ -62,9 +62,19 @@ const CASOS: Caso[] = [
 
 let db: PGlite
 
+/** La respuesta cruda de la RPC (los `numeric` pueden llegar como texto). */
+type CasoCrudo = { codigo: string; fecha_venta: string; fecha_pago: string; valor: number | string; responsable: string | null }
+type Bloque = { total: number | string; negocios: number; detalle: CasoCrudo[] }
+type Respuesta = {
+  umbral_migaja: number | string
+  recibido: Bloque & { de_ventas_del_mes: number | string; de_ventas_anteriores: number | string }
+  de_ventas_del_mes: Bloque
+  anterior: { recibido: number | string; de_ventas_del_mes: number | string }
+}
+
 async function llamar(anio: number, mes: number, ws = WS) {
   await db.exec(`set prueba.ws = '${ws}'`)
-  const r = await db.query<{ j: Record<string, any> | null }>(
+  const r = await db.query<{ j: Respuesta | null }>(
     'select public.get_segundo_pago_mes_soena($1, $2, $3) as j', [WS, anio, mes])
   return r.rows[0].j
 }
@@ -107,12 +117,12 @@ describe('get_segundo_pago_mes_soena', () => {
     expect(Number(r.total)).toBeCloseTo(357132.77 + 357139.5 + 357142.86, 2)
     expect(Number(r.de_ventas_del_mes)).toBeCloseTo(357142.86, 2)
     expect(Number(r.de_ventas_anteriores)).toBeCloseTo(357132.77 + 357139.5, 2)
-    const d = r.detalle.find((x: any) => x.codigo === 'TD')
+    const d = r.detalle.find((x) => x.codigo === 'TD')!
     expect(d.fecha_pago).toBe('2026-09-18')
     expect(Number(d.valor)).toBeCloseTo(357139.5, 2)
     expect(d.fecha_venta).toBe('2026-08-12')
     expect(d.responsable).toBe('Vendedora Uno')
-    expect(r.detalle.find((x: any) => x.codigo === 'TE').responsable).toBeNull()
+    expect(r.detalle.find((x) => x.codigo === 'TE')!.responsable).toBeNull()
   })
 
   it('de las ventas de septiembre: el sobrante de C no la vuelve un segundo pago', async () => {
