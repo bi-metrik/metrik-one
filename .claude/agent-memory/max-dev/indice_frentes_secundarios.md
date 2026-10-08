@@ -151,3 +151,17 @@ Entradas que vivían en la sección «Referencias» de MEMORY.md (proyectos viej
 - ⚠️⚠️ [Cierre del frente KYC](project_valida_privacidad_v13.md) — diez (10) años; 5 superficies
 - ⚠️⚠️ [Valida Diligencia v2](project_valida_diligencia_v2.md) — patch SIN commit ni PR
 - ⚠️ [Guards de items y aprobación](project_guard_bloque_items.md) — quién aprueba lo decide `puedeSerAprobador`
+
+- ⚠️⚠️ [Huecos de tenant del riesgo 11](project_huecos_tenant_riesgo11.md) — #761; wa-webhook SIN redesplegar
+- ⚠️ [Rediseño cotización Trappvel](project_rediseno_cotizacion_trappvel.md) — #853 (P4) SIN mergear: migración ANTES
+- ⚠️⚠️ [Cardumen independiente y Meta del 1-oct](project_cardumen_infra_independiente.md) — servicio se cobra pasadas 1.000/numero; sin pago en WABA el bot calla
+- ⚠️ [Medicion de Cardumen en el numero de ONE](project_cardumen_medicion_wa.md) — intent `cardumen:<estudio>`; origen='cardumen' pide migracion; inerte sin deploy
+- ⚠️⚠️ [Objetos sueltos por WhatsApp](project_cardumen_objetos_sueltos.md) — un `wa.me` relanza la app; el POST continúa y eso vuelve la ingesta un posible relay
+- ⚠️⚠️ [Miniweb por catálogo + ingesta (#980)](project_cardumen_miniweb_catalogo.md) — migración ANTES del merge; `cardumen` NO se toca; la ñ no se normaliza
+- ⚠️ [Guarda de sustento en triada G03 (#931)](project_cardumen_guarda_triada_g03.md) — SIN mergear; probar guardas re-leyendo salidas crudas
+- ⚠️ [Polaridad G22 y matiz G13 (#928)](project_cardumen_polaridad_matiz.md) — SIN mergear: benchmark primero
+- ⚠️⚠️ [Filtro de riesgo y blindaje de Navigate (#924)](project_cardumen_filtro_blindaje.md) — mergeado; filtro caido NO es SEN; CO no es INJ
+- ⚠️ [Navigate no es canal de ayuda (#933)](project_cardumen_sin_canal_de_ayuda.md) — SIN mergear; SEN se aparta sin prometer ayuda; caida_filtro.ts roto
+- ⚠️ [«N años» en un archivo nuevo](project_retencion_cifra_anios.md) — retencion.test.ts exige clasificarlo; CI cae aunque pase lo local
+- ⚠️⚠️ [Drive: soporte y recibo nacen cerrados](project_drive_archivos_cobro.md) — los 22 VIEJOS siguen abiertos
+- ⚠️ [Bucket público cert-documentos](project_cerrar_bucket_cert_documentos.md) — migración SIN aplicar
