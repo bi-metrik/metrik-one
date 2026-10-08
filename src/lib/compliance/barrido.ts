@@ -55,8 +55,10 @@ import {
 import { clasificarParaGuardar, calcularVigenciaParaGuardar } from './persistencia-consulta';
 import type { TierResuelto } from './tier-fuentes';
 import type { InformaMatch } from '@/lib/actions/compliance-dual';
+import { correoDeltaMonitoreo } from './correo-delta';
 
 const VALIDA_API_BASE = process.env.VALIDA_API_BASE || 'https://api.valida.metrikone.co';
+const FROM_CORREO = 'MéTRIK ONE <noreply@metrikone.co>';
 
 /** Techo del universo que se examina. Si se topa, el barrido lo dice. */
 const LIMITE_CONSULTAS = 5000;
@@ -216,6 +218,9 @@ export async function ejecutarBarrido(
   const porClave = new Map(contrapartes.map((c) => [c.clave, c] as const));
   const slug = await slugDeWorkspace(svc, workspaceId);
   const oficiales = await oficialesDelWorkspace(svc, workspaceId);
+  // Lo que sonó en la campanita durante esta corrida. Va por correo a la dueña del
+  // workspace al final, en un solo mensaje.
+  const avisos: string[] = [];
 
   for (const s of corte.diferidos) {
     const c = porClave.get(s.clave);
@@ -243,6 +248,7 @@ export async function ejecutarBarrido(
       contraparte: c,
       motivo: s.motivo,
       oficiales,
+      avisos,
     });
     if (r.fallo) resumen.fallidas += 1;
     else resumen.ejecutadas += 1;
@@ -259,6 +265,10 @@ export async function ejecutarBarrido(
       fallidas: resumen.fallidas,
     })
     .eq('id', barridoId);
+
+  if (avisos.length > 0) {
+    await enviarCorreoDelta(svc, workspaceId, oficiales, avisos);
+  }
 
   return resumen;
 }
@@ -389,7 +399,9 @@ async function barrerContraparte(
     slug: string | null;
     contraparte: Contraparte;
     motivo: 'vigencia_vencida' | 'sin_vigencia';
-    oficiales: { id: string }[];
+    oficiales: Oficial[];
+    /** Se le agrega el texto de cada campanita que efectivamente sonó. */
+    avisos: string[];
   },
 ): Promise<ResultadoItem> {
   const { contraparte: c } = ctx;
@@ -474,9 +486,11 @@ async function barrerContraparte(
   // registrado como aviso entregado, que es la mentira mas cara de todo el modulo.
   let notificada = false;
   if (efecto.notifica && ctx.oficiales.length > 0) {
-    notificada = await notificarOficiales(
+    const contenido = await notificarOficiales(
       svc, ctx.workspaceId, ctx.oficiales, c, delta, efecto.premisa_cambiada,
     );
+    notificada = contenido !== null;
+    if (contenido) ctx.avisos.push(contenido);
   }
 
   await svc.from('compliance_barrido_items').insert({
@@ -512,11 +526,11 @@ async function notificarOficiales(
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   svc: any,
   workspaceId: string,
-  oficiales: { id: string }[],
+  oficiales: Oficial[],
   c: Contraparte,
   delta: ReturnType<typeof compararConsultas>,
   premisaCambiada: boolean,
-): Promise<boolean> {
+): Promise<string | null> {
   const quien = c.nombre?.trim() || `${c.documento_tipo} ${c.documento_numero}`;
   const contenido = premisaCambiada
     ? `${quien} cambió después de que la liberaras: pasó de ${delta.matches_antes} a ${delta.matches_ahora} reporte(s). La decisión que tomaste cubría los ${delta.matches_antes} anteriores.`
@@ -543,7 +557,67 @@ async function notificarOficiales(
   }));
 
   const { error } = await svc.from('notificaciones').insert(filas);
-  return !error;
+  return error ? null : contenido;
+}
+
+/**
+ * El correo de la campanita a la dueña del workspace (`role = 'owner'`), que es la oficial
+ * de cumplimiento. Solo se llama cuando al menos una campanita sonó en la corrida.
+ *
+ * NUNCA lanza: la campanita ya quedó escrita y el item del barrido dice `notificada`. Un
+ * correo que no sale se registra en el log y no deshace nada.
+ *
+ * ⚠️ Como los demás avisos internos, este correo no deja traza en `avisos_cliente`: un
+ * rebote o una dirección en la lista de supresión de Resend no se ven en ONE.
+ */
+async function enviarCorreoDelta(
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  svc: any,
+  workspaceId: string,
+  oficiales: Oficial[],
+  avisos: string[],
+): Promise<number> {
+  try {
+    const resendKey = process.env.RESEND_API_KEY;
+    if (!resendKey) {
+      console.error('[compliance-barrido] RESEND_API_KEY no configurada: la campanita salió, el correo no');
+      return 0;
+    }
+    const duenas = oficiales.filter((o) => o.role === 'owner' && !o.platform_admin);
+    if (duenas.length === 0) return 0;
+
+    const { data: ws } = await svc.from('workspaces').select('name, slug').eq('id', workspaceId).maybeSingle();
+    if (!ws?.slug) return 0;
+
+    const destinatarios: string[] = [];
+    for (const o of duenas) {
+      const { data: u } = await svc.auth.admin.getUserById(o.id);
+      const email = u?.user?.email as string | undefined;
+      if (email) destinatarios.push(email);
+    }
+    if (destinatarios.length === 0) return 0;
+
+    const { asunto, html } = correoDeltaMonitoreo({
+      avisos,
+      workspaceNombre: (ws.name as string | null) ?? (ws.slug as string),
+      workspaceSlug: ws.slug as string,
+      baseDomain: (process.env.NEXT_PUBLIC_BASE_DOMAIN || 'metrikone.co').trim(),
+    });
+
+    const res = await fetch('https://api.resend.com/emails', {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${resendKey}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ from: FROM_CORREO, to: destinatarios, subject: asunto, html }),
+    });
+    if (!res.ok) {
+      console.error('[compliance-barrido] Resend falló:', res.status, await res.text().catch(() => ''));
+      return 0;
+    }
+    return destinatarios.length;
+  } catch (e) {
+    console.error('[compliance-barrido] correo de delta:', (e as Error).message);
+    return 0;
+  }
 }
 
 // ─── Acceso a datos ────────────────────────────────────────────────────────
@@ -600,14 +674,17 @@ async function slugDeWorkspace(svc: any, workspaceId: string): Promise<string | 
 }
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
-async function oficialesDelWorkspace(svc: any, workspaceId: string): Promise<{ id: string }[]> {
+async function oficialesDelWorkspace(svc: any, workspaceId: string): Promise<Oficial[]> {
   const { data } = await svc
     .from('profiles')
-    .select('id')
+    .select('id, role, platform_admin')
     .eq('workspace_id', workspaceId)
     .in('role', ['owner', 'admin']);
-  return (data ?? []) as { id: string }[];
+  return (data ?? []) as Oficial[];
 }
+
+/** Quien recibe la campanita (owner y admin); el correo va solo a la dueña. */
+type Oficial = { id: string; role: string; platform_admin: boolean | null };
 
 // ─── La fuente ─────────────────────────────────────────────────────────────
 
