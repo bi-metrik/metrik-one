@@ -4,6 +4,7 @@ import { getWorkspace } from '@/lib/actions/get-workspace'
 import { rpcTablero } from '@/lib/tableros/cache-rpc'
 import { getRolePermissions } from '@/lib/roles'
 import { columnaDirectivo, COLUMNAS_DIRECTIVO, type ColumnaDirectivo } from '@/lib/dian/agrupacion-directivo'
+import { normalizarSegundoPago, type SegundoPagoMes } from '@/lib/tableros/segundo-pago'
 
 /** Una celda de la matriz de operaciones, tal como la devuelve la RPC (seccional cruda). */
 type FilaCruda = { fila_orden: number; fila: string; seccional: string; cantidad: number }
@@ -45,6 +46,11 @@ export type DirectivoData = {
   operaciones: FilaProceso[]
   citas: { columnas: Record<ColumnaDirectivo, number>; total: number }
   totalCartera: number
+  /**
+   * Las dos cifras de segundo pago (SOE-002), de la misma RPC que lee el Comercial.
+   * `null` si esa consulta falló: la fila cae a la cifra de `comercial.segundo_pago`.
+   */
+  segundoPago: SegundoPagoMes | null
 }
 
 function columnasVacias(): Record<ColumnaDirectivo, number> {
@@ -67,13 +73,16 @@ export async function getDirectivo(anio: number, mes: number): Promise<Directivo
   if (!perms.canViewNumbers) return null
   if (!['owner', 'admin', 'supervisor'].includes(role || '')) return null
 
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const { data, error } = await rpcTablero(supabase as any, workspaceId, 'get_directivo_soena', {
-    p_workspace_id: workspaceId,
-    p_anio: anio,
-    p_mes: mes,
-  })
+  // Las dos RPC van juntas: el segundo pago no espera a la matriz.
+  const params = { p_workspace_id: workspaceId, p_anio: anio, p_mes: mes }
+  const [{ data, error }, segundo] = await Promise.all([
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    rpcTablero(supabase as any, workspaceId, 'get_directivo_soena', params),
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    rpcTablero(supabase as any, workspaceId, 'get_segundo_pago_mes_soena', params),
+  ])
   if (error || !data) return null
+  if (segundo.error) console.error('[direccion] no se pudo traer el segundo pago del mes:', segundo.error)
 
   const crudo = data as DirectivoCrudo
 
@@ -116,5 +125,6 @@ export async function getDirectivo(anio: number, mes: number): Promise<Directivo
     operaciones,
     citas,
     totalCartera: operaciones.reduce((s, f) => s + f.total, 0),
+    segundoPago: segundo.error ? null : normalizarSegundoPago(segundo.data),
   }
 }

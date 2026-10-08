@@ -19,6 +19,7 @@ import TabFerreteria from './components/tab-ferreteria'
 import type { PilotoMarketplaceData } from './ferreteria-actions'
 import type { BandejasData } from './bandejas-actions'
 import type { DirectivoData } from './directivo-actions'
+import type { SegundoPagoMes } from '@/lib/tableros/segundo-pago'
 import type { MarketingData, MarketingNoDisponible } from './marketing-actions'
 import { ShieldCheck, LayoutDashboard, AlertTriangle } from 'lucide-react'
 import type {
@@ -57,6 +58,7 @@ export interface ComercialNegociosBundle {
   origenInicial: ComercialOrigenMes | null
   seccionalInicial: ComercialSeccionalMes | null
   planPagoInicial: ComercialPlanPagoMes | null
+  segundoPagoInicial: SegundoPagoMes | null
   capacidad: CapacidadSeccional | null
   serie: ComercialSerieResponse | null
   /** El mismo histórico abierto por seccional, para el filtro. `null` = sin filtro. */
@@ -221,6 +223,7 @@ export default function TablerosClient({
             origenInicial={initialComercialNegocios.origenInicial}
             seccionalInicial={initialComercialNegocios.seccionalInicial}
             planPagoInicial={initialComercialNegocios.planPagoInicial}
+            segundoPagoInicial={initialComercialNegocios.segundoPagoInicial}
             capacidad={initialComercialNegocios.capacidad}
             serie={initialComercialNegocios.serie}
             serieSeccional={initialComercialNegocios.serieSeccional}
