@@ -1,3 +1,32 @@
+-- Dry-run de 20261008163000_segundo_pago_dos_cifras_soena.sql (SOE-002) contra produccion.
+--
+-- UN solo statement: crea la funcion, simula la sesion de una admin de SOENA, la llama
+-- de junio a septiembre de 2026 y aborta con RAISE EXCEPTION. Nada queda escrito: el
+-- resultado vuelve en el mensaje del error. Correrlo por MCP execute_sql (o la
+-- Management API) y despues confirmar que la funcion NO existe:
+--   select count(*) from pg_proc where proname = 'get_segundo_pago_mes_soena';  -- 0
+--
+-- Lo que tiene que decir (brief del 2026-10-08):
+--   2026-06 recibido 3571428.6 (10)   cohorte 0 (0)
+--   2026-07 recibido 1428571.4 (4)    cohorte ~1071428.6 (3)
+--   2026-08 recibido 0 (0)            cohorte ~1338813.4 (4)
+--   2026-09 recibido 2053085.7 (6)    cohorte 0 (0)
+-- y, como control contra lo vivo, `directivo_sin_umbral` debe ser el `segundo_pago` de
+-- Direccion de hoy (jul 1428581.5, sep 2053117.7) y `kpis_sin_umbral` el del Comercial
+-- (sep 28.57). La diferencia entre cada par son exactamente las migajas.
+--
+-- El cuerpo de la migracion va pegado TAL CUAL entre $mig$ (generado con cat, no
+-- transcrito). Si se edita la migracion, regenerar este archivo.
+
+DO $dry$
+DECLARE
+  ws  uuid := '7dea141d-d4da-483d-a78d-b14ef35500c5';
+  uid uuid;
+  m   int;
+  f   jsonb;
+  r   jsonb := '{}'::jsonb;
+BEGIN
+  EXECUTE $mig$
 -- ============================================================
 -- 20261008163000_segundo_pago_dos_cifras_soena
 -- ============================================================
@@ -199,3 +228,35 @@ comment on function public.get_segundo_pago_mes_soena(uuid, integer, integer) is
 -- usuario; la propia funcion filtra por current_user_workspace_id() (guard).
 revoke execute on function public.get_segundo_pago_mes_soena(uuid, integer, integer) from public, anon;
 grant  execute on function public.get_segundo_pago_mes_soena(uuid, integer, integer) to authenticated;
+$mig$;
+
+  SELECT p.id INTO uid
+  FROM profiles p
+  WHERE p.workspace_id = ws AND p.role IN ('owner', 'admin')
+  ORDER BY p.role DESC
+  LIMIT 1;
+  PERFORM set_config('request.jwt.claims',
+    json_build_object('sub', uid, 'role', 'authenticated')::text, true);
+  IF current_user_workspace_id() IS DISTINCT FROM ws THEN
+    RAISE EXCEPTION 'DRYRUN la sesion simulada no resuelve SOENA (uid %): el ensayo no prueba nada', uid;
+  END IF;
+
+  FOREACH m IN ARRAY ARRAY[6, 7, 8, 9] LOOP
+    f := public.get_segundo_pago_mes_soena(ws, 2026, m);
+    r := r || jsonb_build_object('2026-' || lpad(m::text, 2, '0'), jsonb_build_object(
+      'recibido',             f->'recibido'->'total',
+      'recibido_n',           f->'recibido'->'negocios',
+      'de_ventas_del_mes',    f->'recibido'->'de_ventas_del_mes',
+      'de_ventas_anteriores', f->'recibido'->'de_ventas_anteriores',
+      'recibido_codigos',     (SELECT jsonb_agg(d->'codigo') FROM jsonb_array_elements(f->'recibido'->'detalle') d),
+      'cohorte',              f->'de_ventas_del_mes'->'total',
+      'cohorte_n',            f->'de_ventas_del_mes'->'negocios',
+      'cohorte_codigos',      (SELECT jsonb_agg(d->'codigo') FROM jsonb_array_elements(f->'de_ventas_del_mes'->'detalle') d),
+      'anterior',             f->'anterior',
+      'directivo_sin_umbral', public.get_directivo_soena(ws, 2026, m)->'comercial'->'segundo_pago',
+      'kpis_sin_umbral',      public.get_comercial_kpis_mes_soena(ws, 2026, m)->'kpis'->'segundo_pago'
+    ));
+  END LOOP;
+
+  RAISE EXCEPTION 'DRYRUN %', jsonb_pretty(r);
+END $dry$;
