@@ -8,8 +8,11 @@
 //     ya tiene y lo propuesto sin confirmar; elige una opción solo si lo dicho corresponde a ella (una preferencia sin
 //     cifra, «económico», no es un rango: va al texto), no llena por inferencia lo que nadie dijo (el tipo de viaje por
 //     el destino), calcula lo que se puede calcular (regreso = salida + noches, el grupo por categorías) y dice cómo.
-//     Si el comercial corrige un dato a «abierto» / «eso no», devuelve `QUITAR` (tercera falla en vivo, 2026-10-07:
-//     «el presupuesto está abierto» no tenía cómo decirse y el «menos de 3 millones» se quedó en el viaje).
+//     «No tiene / no dieron el dato / está abierto» es un dato: va a la opción de «aún no está definido» del campo si
+//     la config la tiene (`no_definido`, «solo si lo dicen», o su etiqueta), también como corrección de un valor que
+//     ya estaba (Mauricio, 2026-10-08, sobre #1074: «no nos dieron un número» → «Aún no tiene presupuesto definido»).
+//     Sin esa opción, o con «eso no», devuelve `QUITAR` (tercera falla en vivo, 2026-10-07: «el presupuesto está
+//     abierto» no tenía cómo decirse y el «menos de 3 millones» se quedó en el viaje).
 //   · `esquemaCarga`: la salida estructurada. Las opciones de un campo cerrado son vocabulario cerrado (más `QUITAR`).
 //   · `validarCarga`: lo único que decide el código, y no lee significado:
 //       - el campo lo puede llenar el entendimiento (config: no `lo_llena: agencia`, no derivado);
@@ -27,7 +30,7 @@ import {
 } from '../../wa-entendimiento-reglas.ts';
 import type { CampoEntendible, ClaseMensaje, Sugerido } from '../../wa-entendimiento-reglas.ts';
 
-/** El valor con que el modelo dice «este dato se quita» (el comercial lo corrigió a abierto / no definido / «eso no»). */
+/** El valor con que el modelo dice «este dato se quita» («eso no», o «abierto» en un campo sin opción de no definido). */
 export const QUITAR = 'quitar';
 /** Cómo salió un valor: escrito tal cual, calculado con lo dicho o deducido de una descripción. Lo declara el modelo. */
 export const COMO = ['escrito', 'calculado', 'deducido'] as const;
@@ -100,14 +103,19 @@ export function instruccionesCarga(
     '     opción pide no es una opción: «económico», «algo bueno», «no muy caro» no son un rango de presupuesto. Ahí el',
     `     campo queda en "${POR_DEFINIR}" y la preferencia va, con sus palabras, al campo de texto que corresponda${alTexto}.`,
     '     Si nombran dos opciones («3 o 4 estrellas»), elige una de las dos y anota las dos en el texto.',
+    '   - La opción de «aún no está definido» (la marcada «solo si lo dicen», o la que su etiqueta dice que no hay dato',
+    '     todavía) es un dato: úsala cuando digan explícitamente que el cliente no lo tiene, no lo dio o está abierto («no',
+    '     nos dieron un número», «el presupuesto está abierto, propongamos nosotros»). Una preferencia sola («económico»),',
+    `     sin decir nada del dato, no es eso: queda en "${POR_DEFINIR}" y se pregunta. Si hay preferencia, va también al texto.`,
     '   - No llenes un campo por inferencia de algo que nadie dijo: el tipo de viaje no sale del destino, ni que las fechas',
     '     sean fijas de que haya una fecha. Calcular con lo dicho sí (el regreso, el grupo); suponer una preferencia, no.',
     `   - El campo de texto${alTexto} se escribe completo: lo que ya tiene más lo nuevo.`,
     '   - Si lo dicho ya está en el viaje o en lo propuesto, aunque lo digan con otras palabras («8, 10 años y 11 meses»',
     '     frente a «8, 10, 11 meses»), devuelve el valor EXACTO que ya está. Solo cambia un valor si lo dicho es distinto.',
-    '   - Si el comercial corrige un dato que el viaje ya tiene o que propusiste a abierto, sin definir o «eso no» («el',
-    `     presupuesto está abierto», «no, eso no lo dijeron»), devuelve "${QUITAR}" con la frase de la corrección y, en`,
-    '     calculo, la razón corta («dijeron que está abierto»). Si además queda un matiz, va al campo de texto.',
+    '   - Si el comercial corrige un dato que el viaje ya tiene o que propusiste a abierto o sin definir y el campo tiene la',
+    '     opción de «aún no está definido», devuelve esa opción: reemplaza el valor. Si no la tiene, o la corrección es «eso',
+    `     no» («no, eso no lo dijeron»), devuelve "${QUITAR}" con la frase de la corrección y, en calculo, la razón corta`,
+    '     («dijeron que eso no»). Si además queda un matiz, va al campo de texto.',
     '   - Fechas: si no dicen el año, es la próxima vez que ocurre desde hoy. Calcula lo que se puede calcular con lo dicho y',
     '     con lo que el viaje ya tiene (con la salida y las noches sale el regreso). Un mes o una semana sin día no es una fecha.',
     '   - Pasajeros: entiende el grupo como lo describen. Infante es menor de 2 años. Si la descripción deja claro quiénes',
