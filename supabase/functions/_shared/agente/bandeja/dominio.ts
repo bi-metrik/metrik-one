@@ -16,6 +16,7 @@ import type { FichaCliente, Llave } from '../../wa-cliente-reglas.ts';
 import { normal } from '../verificador.ts';
 import { propuestaVigente } from '../nucleo.ts';
 import { escritosDelViaje, mismoEntendido, nombramientos } from './carga.ts';
+import { salidasLinkAutorizacion, type AutorizacionAgente } from './autorizacion.ts';
 import type { ContextoDominio, DeclaracionHerramienta, Dominio, FilaConversacion, Hechos, Propuesta, ResultadoHerramienta } from '../tipos.ts';
 
 export interface ViajeAgente {
@@ -52,6 +53,11 @@ export interface PuertoBandeja {
   /** `escritos`: lo que quedó escrito, por etiqueta y legible (`registradoDe`). */
   cargar(viajeId: string, plan: unknown): Promise<{ lineas: string[]; escritos?: Record<string, string> }>;
   crearCliente(nombre: string, llave: Llave): Promise<{ ok: true; id: string; nombre: string } | { ok: false; motivo: string }>;
+  /**
+   * La autorización de datos del contacto: si ya autorizó (y cuándo), o el link vigente (lo reusa o lo crea). `'error'`:
+   * no se pudo revisar. No escribe nada en el contacto: a lo sumo crea el enlace pendiente.
+   */
+  autorizacion(contactoId: string): Promise<AutorizacionAgente | 'error'>;
 }
 
 export const BOT_BANDEJA = 'bandeja-solicitudes';
@@ -207,6 +213,18 @@ export const LECTURAS: DeclaracionHerramienta[] = [
     name: 'ver_viaje',
     description: 'El detalle de un viaje por su código («M1 26 6»): cliente, destino, si está abierto, lo que tiene registrado, qué le falta para cotizar y para quedar completo. Solo lectura.',
     parameters: { type: 'object', properties: { codigo: { type: 'string' } }, required: ['codigo'] },
+  },
+];
+
+/**
+ * Cierra el turno: el sistema manda el link real y el mensaje para reenviar (o dice que ya autorizó). El pedido lo
+ * reconoce el modelo; el código solo exige la ficha vista por `buscar`, como `viaje_nuevo`.
+ */
+export const CIERRES: DeclaracionHerramienta[] = [
+  {
+    name: 'link_autorizacion',
+    description: 'Solo cuando el comercial pide el link de autorización de tratamiento de datos de un cliente, o pregunta si ese cliente ya autorizó. No sirve para consultar viajes (para eso, ver_viaje). Primero `buscar` al cliente; luego llama esto con la ref de su ficha. El sistema contesta solo: si ya autorizó, lo dice con la fecha; si no, manda la instrucción y, aparte, el mensaje con el link para que el comercial lo reenvíe. Cierra el turno: no redactes el link ni el mensaje, y nunca le escribas al cliente.',
+    parameters: { type: 'object', properties: { cliente: { type: 'string', description: 'La ref de la ficha tal como la devolvió buscar.' }, reglas_usadas: { type: 'array', items: { type: 'string' } } }, required: ['cliente'] },
   },
 ];
 
@@ -454,6 +472,23 @@ export function dominioBandeja(puerto: PuertoBandeja): Dominio {
     return { lineas: [abri], propuesta: propuestaDeCarga('anotar_en_viaje', { id: v.id, codigo: v.codigo, nombre: v.nombre ?? '' }, prep, []) };
   };
 
+  const cerrar: NonNullable<Dominio['cerrar']> = async (nombre, args, ctx) => {
+    if (nombre !== 'link_autorizacion') return { ok: false, error: `No existe la herramienta «${nombre}».`, candado: 'herramienta_desconocida' };
+    const ref = String(args.cliente ?? '').trim();
+    const ficha = resolverFicha(ctx, ref);
+    if (ficha === 'varias') return { ok: false, error: `Hay varias fichas que coinciden con «${ref}». Pregunta cuál con opciones y usa la ref exacta.`, candado: 'cliente_ambiguo' };
+    if (!ficha) return { ok: false, error: 'Ese cliente no salió de una búsqueda en esta conversación. Primero `buscar` y usa la ref de su ficha.', candado: 'cliente_sin_buscar' };
+    const a = await puerto.autorizacion(ficha.id);
+    if (a === 'error') return { ok: false, error: 'No pude revisar la autorización ahora. Dilo así: no inventes el link ni digas que autorizó.', candado: 'lectura_fallida' };
+    const salidas = salidasLinkAutorizacion({ cliente: ficha.ficha.nombre, comercial: ctx.remitente.nombre, a, ahoraIso: new Date().toISOString() });
+    return {
+      ok: true,
+      salidas,
+      datos: a.estado === 'pendiente' ? { cliente: ficha.ficha.nombre, estado: a.estado, link: a.url } : { cliente: ficha.ficha.nombre, ...a },
+      privado: { contactoId: ficha.id },
+    };
+  };
+
   return {
     bot: BOT_BANDEJA,
     lecturas: LECTURAS,
@@ -463,6 +498,8 @@ export function dominioBandeja(puerto: PuertoBandeja): Dominio {
     proponer,
     ejecutar,
     trasEjecutar,
+    cierres: CIERRES,
+    cerrar,
     sigueVigente(p, ctx) {
       if (p.accion !== 'cargar_tanda' && p.accion !== 'descartar') return true;
       const ahora = tanda(ctx.conversacion).map((f) => f.id).join(',');

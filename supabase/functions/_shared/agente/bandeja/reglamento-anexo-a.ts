@@ -60,6 +60,7 @@ export const REGLAMENTO_ANEXO_A: Ficha[] = [
   g('g.pasajeros', 'con_herramienta', 'hablan de quiénes viajan', 'guarda la categoría que usa el cliente y las edades; solo infante (<2) se deduce. «Bebé» de 2 años o más: pregunta si va en brazos o con cupo propio', ['proponer']),
   g('g.presupuesto', 'con_herramienta', 'el cliente pregunta cuánto sale', 'preguntar el precio no es declarar presupuesto', ['proponer']),
   g('g.descartar_alcance', 'con_herramienta', 'piden descartar', 'descarta solo lo que nombra el mensaje; todo lo pendiente, solo con «todo» o «descartar» solo. Con duda, pregunta', ['proponer']),
+  g('g.link_autorizacion', 'con_herramienta', 'piden el link de autorización de datos de un cliente', 'primero `buscar` al cliente y luego `link_autorizacion` con la ref de su ficha; el sistema manda el mensaje para reenviar o dice que ya autorizó. No redactes el link ni le escribas al cliente', ['link_autorizacion'], 'Decisión Mauricio 2026-10-08'),
   g('g.carga_en_vuelo', 'indice', 'preguntan por un viaje mientras se está cargando', 'di que lo estás cargando y contesta al terminar; nunca con datos viejos'),
   // A.6 Estilo
   { clave: 'b.cerrada_corta', tipo: 'estilo', carga: 'siempre', cuando: 'la respuesta posible es una de 2 o 3 salidas cerradas', hacer: '`responder` con 2 o 3 `opciones` (salen como botones)' },

@@ -212,6 +212,16 @@ export interface Dominio {
   sigueVigente?(propuesta: Propuesta, ctx: ContextoDominio): boolean;
   /** Una línea del estado que solo el dominio sabe (la tanda abierta). */
   estado?(ctx: ContextoDominio): string[];
+  /**
+   * Herramientas del dominio que CIERRAN el turno con una salida que escribe el código, no el modelo (`link_autorizacion`:
+   * el link real y el mensaje para reenviar tal cual). Pueden ser varios mensajes: el primero va como respuesta y los
+   * demás salen después, en orden. El modelo solo decide llamarla y con qué ficha.
+   */
+  cierres?: DeclaracionHerramienta[];
+  cerrar?(nombre: string, args: Record<string, unknown>, ctx: ContextoDominio): Promise<
+    | { ok: true; salidas: Salida[]; datos?: unknown; privado?: unknown }
+    | { ok: false; error: string; candado: string }
+  >;
 }
 
 // ── La traza ─────────────────────────────────────────────────────────────────
@@ -251,5 +261,7 @@ export interface Traza {
    */
   tras_toque?: { origen: 'toque_propuesta' | 'si_escrito'; resultado: 'propuesta' | 'respuesta' | 'terminar' | 'solo_hecho' } | null;
   salida?: Salida | null;
+  /** Los mensajes que salieron después de `salida` en el mismo turno (un cierre del dominio con varios mensajes). */
+  salidas_extra?: Salida[] | null;
   error?: string | null;
 }

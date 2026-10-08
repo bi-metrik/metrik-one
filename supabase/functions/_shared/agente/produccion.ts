@@ -29,6 +29,7 @@ import { enviarAvisoInterno } from '../wa-alerta.ts';
 import type { SupabaseClient } from '../types.ts';
 import { fichaValida, huellaDe } from './reglamento.ts';
 import type { PuertoBandeja, ViajeAgente } from './bandeja/dominio.ts';
+import type { AutorizacionAgente } from './bandeja/autorizacion.ts';
 import type { PuertosCupo } from './uso.ts';
 import type { Almacen, FilaConversacion, Mensajero, Reglamento, Salida, Traza } from './tipos.ts';
 
@@ -233,6 +234,46 @@ export function puertoBandejaSupabase(supabase: SupabaseClient, workspaceId: str
       if (error) console.error('[agente] sin traza en la actividad del negocio:', error.message);
       const valoresEscritos = Object.fromEntries(Object.entries(sugeridos).map(([k, x]) => [k, x.valor]));
       return { lineas: [lineaCargada(String(neg?.codigo ?? 'el viaje'), escritos, campos, quitados)], escritos: registradoDe(campos, valoresEscritos, escritos) };
+    },
+    async autorizacion(contactoId: string): Promise<AutorizacionAgente | 'error'> {
+      // La regla de vigencia es la de la app: la RPC `autorizacion_datos_estado` (migración 20261008230000).
+      const { data: est, error } = await supabase.rpc('autorizacion_datos_estado', { p_workspace_id: workspaceId, p_contacto_id: contactoId });
+      if (error || !est || est.existe !== true) {
+        if (error) console.error('[agente] no se pudo leer la autorización:', error.message);
+        return 'error';
+      }
+      if (est.vigente?.generales === true) {
+        return { estado: 'autorizado', fecha: String(est.aceptacion?.aceptado_at ?? ''), menores: est.vigente?.menores === true };
+      }
+      if (!est.texto?.id) return { estado: 'sin_texto' };
+      const [ws, txt] = await Promise.all([
+        supabase.from('workspaces').select('slug, name, config_extra').eq('id', workspaceId).maybeSingle(),
+        supabase.from('autorizacion_datos_textos').select('variables, mensajes').eq('id', est.texto.id).maybeSingle(),
+      ]);
+      const slug = ws.data?.slug as string | undefined;
+      if (!slug) return 'error';
+      const dias = Number(((ws.data?.config_extra as Fila | null)?.autorizacion_datos as Fila | undefined)?.dias_enlace);
+      const bytes = crypto.getRandomValues(new Uint8Array(32));
+      const token = btoa(String.fromCharCode(...bytes)).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
+      const { data: en, error: errEn } = await supabase.rpc('autorizacion_datos_enlace', {
+        p_workspace_id: workspaceId, p_contacto_id: contactoId, p_token_nuevo: token, p_creado_por: staffId, p_negocio_id: null,
+        p_dias: Number.isInteger(dias) && dias >= 2 && dias <= 365 ? dias : 60,
+      });
+      if (errEn || !en?.ok) {
+        console.error('[agente] no se pudo crear el link de autorización:', errEn?.message ?? en?.error);
+        return 'error';
+      }
+      const base = (Deno.env.get('APP_BASE_DOMAIN') || 'metrikone.co').trim();
+      const variables = (txt.data?.variables ?? {}) as Record<string, unknown>;
+      const mensajes = (txt.data?.mensajes ?? {}) as Record<string, unknown>;
+      const texto = (v: unknown) => (typeof v === 'string' && v.trim() ? v : null);
+      return {
+        estado: 'pendiente',
+        url: `https://${slug}.${base}/autorizacion/${en.token}?m=w`,
+        agencia: texto(variables.agencia) ?? String(ws.data?.name ?? 'la agencia'),
+        whatsapp: texto(mensajes.whatsapp),
+        instruccion: texto(mensajes.instruccion_comercial),
+      };
     },
     async crearCliente(nombre: string, llave: Llave) {
       const r = await crearContactoConGuardian(supabase, workspaceId, { nombre, llave });

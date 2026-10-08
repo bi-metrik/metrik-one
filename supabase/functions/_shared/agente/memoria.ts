@@ -14,6 +14,7 @@ import { lineaCargada, mensajesDeTextos, planDeCarga, propuestoDe, registradoDe 
 import { instruccionesCarga } from './bandeja/extraccion.ts';
 import type { PlanCarga } from './bandeja/carga.ts';
 import type { PuertoBandeja, ViajeAgente } from './bandeja/dominio.ts';
+import type { AutorizacionAgente } from './bandeja/autorizacion.ts';
 import type { Almacen, FilaConversacion, Mensajero, Salida, Traza } from './tipos.ts';
 
 export interface ContactoMem { id: string; nombre: string; celular?: string | null; correo?: string | null; usuario?: string | null }
@@ -227,6 +228,15 @@ export class PuertoMemoria implements PuertoBandeja {
     v.datos.textos = [...((v.datos.textos as string[] | undefined) ?? []), ...textos];
     this.escrituras.push({ tipo: 'carga', codigo: v.codigo, textos });
     return { lineas: [`Cargué en ${v.codigo} ${textos.length === 1 ? 'el mensaje' : `los ${textos.length} mensajes`}.`] };
+  }
+
+  /** La autorización de datos por contacto (sin entrada: pendiente con un link de prueba). */
+  autorizaciones = new Map<string, AutorizacionAgente | 'error'>();
+  async autorizacion(contactoId: string): Promise<AutorizacionAgente | 'error'> {
+    const a = this.autorizaciones.get(contactoId);
+    if (a) return a;
+    this.escrituras.push({ tipo: 'enlace_autorizacion', contactoId });
+    return { estado: 'pendiente', url: `https://agencia.metrikone.co/autorizacion/${'T'.repeat(43)}?m=w`, agencia: 'la agencia', whatsapp: null, instruccion: null };
   }
 
   async crearCliente(nombre: string, llave: Llave) {

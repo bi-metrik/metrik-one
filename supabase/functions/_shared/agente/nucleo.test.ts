@@ -194,7 +194,7 @@ describe('candados (§3.5)', () => {
     expect(r[0].texto).toMatch(/^Eso no lo manejo\./)
   })
 
-  it('tope de llamados: el último llamado solo permite cerrar (responder o proponer)', async () => {
+  it('tope de llamados: el último llamado solo permite cerrar con responder o proponer (no con un cierre del dominio)', async () => {
     const modelo = modeloGuionado([
       { name: 'buscar', args: { texto: 'a' } },
       { name: 'buscar', args: { texto: 'b' } },
