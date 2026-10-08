@@ -8,14 +8,15 @@
 //
 // Por turno:
 //   · reenvíos → entran a la tanda por código, sin modelo ni «escribiendo…»; al primero de una ráfaga, el acuse fijo;
-//   · toque de una propuesta (o «sí» escrito solo con una vigente) → lo ejecuta el código, sin modelo;
+//   · toque de una propuesta (o «sí» escrito solo con una vigente) → lo ejecuta el código, sin modelo; si el dominio pide
+//     seguir (crear un cliente), el modelo tiene un turno después del hecho y sale un solo mensaje;
 //   · escritos, toques de conversación y audios del equipo → turno del modelo, con «escribiendo…» desde el segundo 0
 //     (se vuelve a encender antes de que Meta lo apague a los 25 s).
 // ============================================================
 
 import type { ConfigAgente } from './config.ts';
 import type { DepsTurno, SalidaTurno } from './nucleo.ts';
-import { esSiSolo, toqueDePropuesta, turnoDelModelo, propuestaVigente } from './nucleo.ts';
+import { esSiSolo, seguirTrasToque, toqueDePropuesta, turnoDelModelo, propuestaVigente } from './nucleo.ts';
 import { leerToque } from './render.ts';
 import { respuestaFija } from './reglamento.ts';
 import type { Almacen, ContextoDominio, FilaConversacion, Mensajero, Traza } from './tipos.ts';
@@ -74,6 +75,33 @@ async function enviarYCerrar(d: DepsCola, turnoId: string, atendidas: FilaConver
   r.traza.ms_base = Math.round(d.reloj() - tb);
 }
 
+/** Corre `fn` con «escribiendo…» encendido y re-encendido antes de que Meta lo apague (25 s). */
+async function conEscribiendo<T>(d: DepsCola, wamid: string | null | undefined, fn: () => Promise<T>): Promise<T> {
+  if (!wamid) return await fn();
+  await d.mensajero.escribiendo(wamid);
+  const reencender = setInterval(() => { void d.mensajero.escribiendo(wamid); }, d.config.reencenderMs);
+  try {
+    return await fn();
+  } finally {
+    clearInterval(reencender);
+  }
+}
+
+/**
+ * El toque (o el «sí» escrito) ejecutado y, si el dominio pide seguir, el turno del modelo que sigue al hecho. Una sola
+ * salida. El cupo cuenta el turno del modelo.
+ */
+async function toqueYSeguir(d: DepsCola, e: Parameters<typeof toqueDePropuesta>[1], t: { huella: string; si: boolean }, tipo: 'toque_propuesta' | 'si_escrito'): Promise<SalidaTurno> {
+  const wamid = e.nuevos.at(-1)?.wa_message_id;
+  return await conEscribiendo(d, wamid, async () => {
+    const r = await toqueDePropuesta(d, e, t, tipo);
+    if (!r.seguir) return r;
+    const s = await seguirTrasToque(d, e, r);
+    if (d.despuesDelTurno && s.traza.tipo === 'modelo') await d.despuesDelTurno(s.traza).catch((err) => console.error('[agente] después del turno:', err));
+    return s;
+  });
+}
+
 /** Un turno: atiende lo pendiente más viejo. Devuelve false si no había nada. */
 export async function unTurno(d: DepsCola): Promise<boolean> {
   const c: ConfigAgente = d.config;
@@ -89,8 +117,7 @@ export async function unTurno(d: DepsCola): Promise<boolean> {
   if (toque) {
     const antes = pend.slice(0, pend.indexOf(toque) + 1).filter((f) => f === toque || f.clase === 'reenvio');
     const t = leerToque(toque.toque_id) as { clase: 'propuesta'; huella: string; si: boolean };
-    if (toque.wa_message_id) await d.mensajero.escribiendo(toque.wa_message_id);
-    const r = await toqueDePropuesta(d, { turnoId, filas, nuevos: [toque], ctx }, t);
+    const r = await toqueYSeguir(d, { turnoId, filas, nuevos: [toque], ctx }, t, 'toque_propuesta');
     await enviarYCerrar(d, turnoId, antes, r, 'agente.toque');
     return true;
   }
@@ -111,26 +138,13 @@ export async function unTurno(d: DepsCola): Promise<boolean> {
   // 3) «sí» escrito solo con una propuesta vigente: código.
   const vig = propuestaVigente(filas);
   if (vig && delEquipo.length === 1 && delEquipo[0].clase === 'escrito' && esSiSolo(delEquipo[0].texto)) {
-    if (delEquipo[0].wa_message_id) await d.mensajero.escribiendo(delEquipo[0].wa_message_id);
-    const r = await toqueDePropuesta(d, { turnoId, filas, nuevos: delEquipo, ctx }, { huella: vig.huella, si: true }, 'si_escrito');
+    const r = await toqueYSeguir(d, { turnoId, filas, nuevos: delEquipo, ctx }, { huella: vig.huella, si: true }, 'si_escrito');
     await enviarYCerrar(d, turnoId, pend, r, 'agente.si');
     return true;
   }
 
   // 4) Turno del modelo, con «escribiendo…» desde ya y re-encendido antes de los 25 s.
-  const ultimoEscrito = delEquipo.at(-1)!;
-  let reencender: ReturnType<typeof setInterval> | null = null;
-  if (ultimoEscrito.wa_message_id) {
-    const wamid = ultimoEscrito.wa_message_id;
-    await d.mensajero.escribiendo(wamid);
-    reencender = setInterval(() => { void d.mensajero.escribiendo(wamid); }, c.reencenderMs);
-  }
-  let r: SalidaTurno;
-  try {
-    r = await turnoDelModelo(d, { turnoId, filas, nuevos: pend, ctx });
-  } finally {
-    if (reencender) clearInterval(reencender);
-  }
+  const r = await conEscribiendo(d, delEquipo.at(-1)!.wa_message_id, () => turnoDelModelo(d, { turnoId, filas, nuevos: pend, ctx }));
   await enviarYCerrar(d, turnoId, pend, r, 'agente.turno');
   if (d.despuesDelTurno) await d.despuesDelTurno(r.traza).catch((err) => console.error('[agente] después del turno:', err));
   return true;
