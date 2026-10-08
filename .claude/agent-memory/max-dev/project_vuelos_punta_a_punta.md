@@ -9,8 +9,7 @@ Rama `fix/vuelos-de-punta-a-punta`, sin migración, NO mergear (brief: reportar)
 
 - **No se reprodujo la falta**: con el volcado, el PDF imprime los 4 tramos en main y con el código del 06-oct
   (e614e290), en las 8 combinaciones de `va_en_propuesta`, con y sin `items.tramos`, con fotos. Lo que SÍ estaba
-  mal en ese PDF: TOTAL 21.719.514 vs Recomendada 19.837.166 (`valor_total` viejo, 1,6 M de costo de más en el último
-  recálculo), el segundo traslado (ADZ) compite en la misma ranura y no se cobra, y «Incluido» (IA revisada) dice
+  mal en ese PDF: el TOTAL no era el de la Recomendada (`valor_total` viejo: el último recálculo tenía más costo), el segundo traslado (ADZ) compite en la misma ranura y no se cobra, y «Incluido» (IA revisada) dice
   Avianca con bodega cuando la lectura dice solo artículo personal. La huella del texto no coincide con las líneas.
 - **Check de vuelo**: `puedeQuedarFueraDelPrecio` = sugerible O vuelo; `itemsSugeridos` filtra solo sugeribles (un
   vuelo fuera nunca va a «Opcionales»). Reemplaza la regla «un vuelo fuera del precio se ignora». Guard de mover

@@ -96,13 +96,13 @@ const hotel = (nombre: string, ciudad: string, entrada: string, salida: string, 
   casilla(nombre, 0, { Hotel: nombre, Ciudad: ciudad, 'Check-in': entrada, 'Check-out': salida, Noches: noches, Habitación: 'Doble', Régimen: 'Alojamiento y desayuno' })
 
 const PRECIO = {
-  avianca: 7_300_000,
-  satena: 3_870_000,
-  posada: 1_450_000,
-  aguaDulce: 5_120_000,
-  verdeMar: 6_720_000,
-  lordPierre: 7_550_000,
-  traslado: 494_000,
+  avianca: 7_000_000,
+  satena: 4_000_000,
+  posada: 1_500_000,
+  aguaDulce: 5_000_000,
+  verdeMar: 6_500_000,
+  lordPierre: 7_500_000,
+  traslado: 500_000,
 }
 const RECOMENDADA = PRECIO.avianca + PRECIO.satena + PRECIO.posada + PRECIO.verdeMar + PRECIO.traslado
 const PREMIUM = PRECIO.avianca + PRECIO.satena + PRECIO.aguaDulce + PRECIO.lordPierre + PRECIO.traslado
@@ -121,27 +121,27 @@ function sembrar() {
       tarifa_aceptada_id: null,
     }],
     items: [
-      linea('v-avianca', 6_208_000, PRECIO.avianca, {
+      linea('v-avianca', 6_000_000, PRECIO.avianca, {
         nombre: 'AVIANCA BOGOTÁ–SAN ANDRÉS ISLA', grupo: 'vuelo: Vuelo Bogotá–San Andrés Isla', orden: 1,
-        tarifa_pax: casilla('Avianca Bogotá–San Andrés Isla', 6_208_000, { Aerolínea: 'Avianca', Origen: 'Bogotá', Destino: 'San Andrés Isla', Escalas: '0', Tarifa: 'BASIC Economy' }),
+        tarifa_pax: casilla('Avianca Bogotá–San Andrés Isla', 6_000_000, { Aerolínea: 'Avianca', Origen: 'Bogotá', Destino: 'San Andrés Isla', Escalas: '0', Tarifa: 'BASIC Economy' }),
         tramos: [
           tramo('ida', 'Bogotá', 'San Andrés Isla', '2026-11-23', '06:50', '09:00', '9782', false),
           tramo('regreso', 'San Andrés Isla', 'Bogotá', '2026-11-28', '18:45', '20:55', '9779', false),
         ],
       }),
-      linea('v-satena', 3_292_000, PRECIO.satena, {
+      linea('v-satena', 3_400_000, PRECIO.satena, {
         nombre: 'SATENA SAN ANDRÉS ISLA ADZ–PROVIDENCIA PVA', grupo: 'vuelo 2: Vuelo San Andrés Isla–Providencia', orden: 2,
-        tarifa_pax: casilla('SATENA San Andrés Isla ADZ–Providencia PVA', 3_292_000, { Aerolínea: 'SATENA', Origen: 'San Andrés Isla ADZ', Destino: 'Providencia PVA', Escalas: '0', Tarifa: 'ECONO Economy' }),
+        tarifa_pax: casilla('SATENA San Andrés Isla ADZ–Providencia PVA', 3_400_000, { Aerolínea: 'SATENA', Origen: 'San Andrés Isla ADZ', Destino: 'Providencia PVA', Escalas: '0', Tarifa: 'ECONO Economy' }),
         tramos: [
           tramo('ida', 'San Andrés Isla ADZ', 'Providencia PVA', '2026-11-23', '11:40', '12:17', '8814', true),
           tramo('regreso', 'Providencia PVA', 'San Andrés Isla ADZ', '2026-11-25', '10:30', '11:06', '8833', true),
         ],
       }),
-      linea('h-agua-dulce', 4_352_000, PRECIO.aguaDulce, { nombre: 'HOTEL CABAÑAS AGUA DULCE · PROVIDENCIA', grupo: 'hotel: Hotel en Providencia', orden: 3, tarifa_pax: hotel('Hotel Cabañas Agua Dulce', 'Providencia', '2026-11-23', '2026-11-25', '2') }),
-      linea('h-posada', 1_229_000, PRECIO.posada, { nombre: 'POSADA ENILDA · PROVIDENCIA', grupo: 'hotel: Hotel en Providencia', orden: 4, tarifa_pax: hotel('Posada Enilda', 'Providencia', '2026-11-23', '2026-11-25', '2') }),
-      linea('h-lord-pierre', 6_420_000, PRECIO.lordPierre, { nombre: 'LORD PIERRE · SAN ANDRÉS', grupo: 'hotel 2: Hotel en San Andrés', orden: 5, tarifa_pax: hotel('Lord Pierre', 'San Andrés', '2026-11-25', '2026-11-28', '3') }),
-      linea('h-verde-mar', 5_712_000, PRECIO.verdeMar, { nombre: 'VERDE MAR · SAN ANDRÉS', grupo: 'hotel 2: Hotel en San Andrés', orden: 6, tarifa_pax: hotel('Verde Mar', 'San Andrés', '2026-11-25', '2026-11-28', '3') }),
-      linea('t-providencia', 420_000, PRECIO.traslado, { nombre: 'AEROPUERTO - HOTEL PROVIDENCIA - AEROPUERTO', grupo: 'traslado: Traslado en Providencia', orden: 7 }),
+      linea('h-agua-dulce', 4_250_000, PRECIO.aguaDulce, { nombre: 'HOTEL CABAÑAS AGUA DULCE · PROVIDENCIA', grupo: 'hotel: Hotel en Providencia', orden: 3, tarifa_pax: hotel('Hotel Cabañas Agua Dulce', 'Providencia', '2026-11-23', '2026-11-25', '2') }),
+      linea('h-posada', 1_275_000, PRECIO.posada, { nombre: 'POSADA ENILDA · PROVIDENCIA', grupo: 'hotel: Hotel en Providencia', orden: 4, tarifa_pax: hotel('Posada Enilda', 'Providencia', '2026-11-23', '2026-11-25', '2') }),
+      linea('h-lord-pierre', 6_375_000, PRECIO.lordPierre, { nombre: 'LORD PIERRE · SAN ANDRÉS', grupo: 'hotel 2: Hotel en San Andrés', orden: 5, tarifa_pax: hotel('Lord Pierre', 'San Andrés', '2026-11-25', '2026-11-28', '3') }),
+      linea('h-verde-mar', 5_525_000, PRECIO.verdeMar, { nombre: 'VERDE MAR · SAN ANDRÉS', grupo: 'hotel 2: Hotel en San Andrés', orden: 6, tarifa_pax: hotel('Verde Mar', 'San Andrés', '2026-11-25', '2026-11-28', '3') }),
+      linea('t-providencia', 425_000, PRECIO.traslado, { nombre: 'AEROPUERTO - HOTEL PROVIDENCIA - AEROPUERTO', grupo: 'traslado: Traslado en Providencia', orden: 7 }),
     ],
     cotizacion_itinerarios: [
       { id: 't-eco', workspace_id: WS, cotizacion_id: COT, nombre: 'Económica', orden: 1, va_en_propuesta: false, es_principal: false },
@@ -176,6 +176,8 @@ type ResultadoPDF = { success: boolean; pdf: string; error?: string; borrador?: 
 const cot = () => base.tablas.cotizaciones[0] as Fila
 const item = (id: string) => base.tablas.items.find(i => i.id === id) as Fila
 const cifra = (n: number) => n.toLocaleString('es-CO').replace(/,/g, '.')
+/** Cuántas veces sale una cifra ENTERA (7.000.000 no cuenta dentro de 17.000.000). */
+const veces = (t: string, n: number) => (t.match(new RegExp(`(?<![\\d.])${cifra(n).replace(/\./g, '\\.')}(?![\\d.]*\\d)`, 'g')) ?? []).length
 
 async function pdf(): Promise<string> {
   const r = await generateCotizacionPDF(COT) as ResultadoPDF
@@ -236,8 +238,8 @@ describe('COT-2026-0025 (anonimizada): los cuatro tramos salen en el PDF', () =>
     expect(cot().valor_total).toBe(RECOMENDADA)
     const t = await pdf()
     const inversion = t.slice(t.indexOf('Inversión'))
-    expect(inversion.split(cifra(PRECIO.avianca)).length - 1).toBe(2)
-    expect(inversion.split(cifra(PRECIO.satena)).length - 1).toBe(2)
+    expect(veces(inversion, PRECIO.avianca)).toBe(2)
+    expect(veces(inversion, PRECIO.satena)).toBe(2)
     expect(inversion).toContain(cifra(RECOMENDADA))
     expect(inversion).toContain(cifra(PREMIUM))
   })
@@ -267,7 +269,7 @@ describe('el check «Va en la cotización» de un vuelo', () => {
     const tabla = tablaDeVuelos(t)
     for (const n of ['8814', '8833']) expect(t).not.toContain(n)
     expect(t).not.toContain('SATENA')
-    expect(t).not.toContain(cifra(PRECIO.satena))
+    expect(veces(t, PRECIO.satena)).toBe(0)
     expect(t).not.toContain('Opcionales')
     for (const n of ['9782', '9779']) expect(tabla).toContain(n)
     expect(t).toContain(cifra(RECOMENDADA - PRECIO.satena))
