@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { formulariosOrigenDeCopias, slugsDeCopiasSinOrigen } from './copia-de-formulario'
+import { formulariosOrigenDeCopias, historialSinOrigenesGenerables, slugsDeCopiasSinOrigen } from './copia-de-formulario'
 import { copiaDeSoloLectura } from './copia-heredada'
 
 /**
@@ -76,5 +76,23 @@ describe('formulariosOrigenDeCopias', () => {
 describe('la copia de la carta es de solo lectura', () => {
   it('sin `editable_siempre` no escribe: el servidor la rechaza con este mismo criterio', () => {
     expect(copiaDeSoloLectura(COPIA_CARTA)).toBe(true)
+  })
+})
+
+describe('historialSinOrigenesGenerables', () => {
+  const historial = [
+    { slug: 'rut' },
+    { slug: 'carta_autorizacion_generar' },
+    { slug: null },
+  ]
+
+  it('con la copia generable en la etapa actual, el origen no se repite en el historial', () => {
+    expect(historialSinOrigenesGenerables(historial, [{ ...COPIA_CARTA, genera_en_origen: true }, null]))
+      .toEqual([{ slug: 'rut' }, { slug: null }])
+  })
+
+  it('con la copia de solo lectura el historial queda igual (es el único lugar para generar)', () => {
+    expect(historialSinOrigenesGenerables(historial, [COPIA_CARTA])).toBe(historial)
+    expect(historialSinOrigenesGenerables(historial, [])).toBe(historial)
   })
 })

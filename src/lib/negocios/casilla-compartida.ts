@@ -21,7 +21,7 @@
  * La fila se crea `pendiente` y vacía. Quien llama escribe inmediatamente después.
  */
 
-import { esCopiaHeredada, origenDeCopiaEscribible } from './copia-heredada'
+import { esCopiaHeredada, origenDeCopiaEscribible, origenDeCopiaGenerable } from './copia-heredada'
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type Cliente = any
@@ -87,6 +87,16 @@ export function origenUnico<T extends { id: string }>(candidatos: readonly T[] |
 export async function resolverDestino(
   supabase: Cliente,
   negocioBloqueId: string,
+  opciones: {
+    /**
+     * La copia que GENERA el formulario de su origen (`genera_en_origen`) solo se redirige
+     * cuando quien llama es la generación de formularios. Así ninguna otra escritura
+     * (datos, documentos) puede caer en la fila del formulario por esa puerta.
+     */
+    generaEnOrigen?: boolean
+    /** false = solo buscar la fila del origen, sin crearla (lecturas). */
+    crear?: boolean
+  } = {},
 ): Promise<DestinoBloque> {
   const { data: actual } = await supabase
     .from('negocio_bloques')
@@ -106,7 +116,9 @@ export async function resolverDestino(
 
   // Dos configuraciones escriben en el origen: la casilla compartida y la copia heredada que
   // declara `editable_siempre` (la «Factura emitida» de SOENA desde las etapas posteriores).
-  const srcSlug = origenCompartido(ceLocal) ?? origenDeCopiaEscribible(ceLocal)
+  const srcSlug = origenCompartido(ceLocal)
+    ?? origenDeCopiaEscribible(ceLocal)
+    ?? (opciones.generaEnOrigen ? origenDeCopiaGenerable(ceLocal) : null)
   if (!srcSlug) return local
 
   const negocioId = (actual as { negocio_id: string }).negocio_id
@@ -128,6 +140,7 @@ export async function resolverDestino(
     return local
   }
 
+  if (opciones.crear === false) return local
   return crearCasillaOrigen(supabase, negocioId, srcSlug, local)
 }
 

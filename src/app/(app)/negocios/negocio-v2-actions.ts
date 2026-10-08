@@ -139,7 +139,7 @@ import {
 import { soloLecturaPorDatoLleno } from '@/lib/negocios/editable-si-vacio'
 import { origenDeCopiaHeredada } from '@/lib/negocios/devolucion'
 import { documentoCompartidoQuedaResuelto } from '@/lib/negocios/casilla-compartida'
-import { formulariosOrigenDeCopias, slugsDeCopiasSinOrigen } from '@/lib/negocios/copia-de-formulario'
+import { formulariosOrigenDeCopias, historialSinOrigenesGenerables, slugsDeCopiasSinOrigen } from '@/lib/negocios/copia-de-formulario'
 import { recolectarReferenciasFuente, referenciasFaltantes, aplanarDataBloque } from '@/lib/negocios/referencias-fuente'
 import { bloqueOcultoEnHistorial } from '@/lib/negocios/bloque-oculto-historial'
 import { datosClaveDelNegocio, contradiccionesQueBloquean } from '@/lib/negocios/datos-clave-servidor'
@@ -8274,7 +8274,11 @@ export async function getNegocioDetalleCompleto(id: string): Promise<{
     // Data de bloques fuente indexada por slug estable — para que el cliente
     // evalúe `condition.source_bloque_slug` por identidad (no por etapa_orden).
     datosPorSlug,
-    bloquesEtapasPrevias,
+    // El origen que la etapa actual ya ofrece generar desde su copia no se repite aquí.
+    bloquesEtapasPrevias: historialSinOrigenesGenerables(
+      bloquesEtapasPrevias,
+      base.bloques.map(b => bloqueConfigsExtra[b.id]),
+    ),
     profiles: perfilesConEstadoEnEquipo(
       (profilesData ?? []).map(p => ({
         id: p.id,

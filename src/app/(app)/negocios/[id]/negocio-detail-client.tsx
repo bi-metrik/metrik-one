@@ -54,7 +54,7 @@ import type { EtapaNoAplica } from '@/lib/negocios/ruta-descartada-negocio'
 import { MOTIVOS_PAUSA, MAX_DIAS_PAUSA, MAX_PAUSAS } from '@/lib/negocios/constants'
 import { siguienteEtapaPorDefecto } from '@/lib/negocios/flujo'
 import { soloLecturaPorDatoLleno } from '@/lib/negocios/editable-si-vacio'
-import { copiaDeSoloLectura } from '@/lib/negocios/copia-heredada'
+import { copiaDeSoloLectura, modoDeCopiaGenerable, origenDeCopiaGenerable } from '@/lib/negocios/copia-heredada'
 import { negocioCerrado as estaCerrado } from '@/lib/negocios/motivo-cierre'
 import type { LineaBase } from '@/lib/negocios/presupuesto-ejecucion'
 import { lineaDeclaraCierre, accionDeCierre, type EtapaCierre } from '@/lib/negocios/etapa-cierre'
@@ -1577,6 +1577,10 @@ function BloqueRenderer({
   const abiertoSiempre =
     (configExtra as { editable_siempre?: boolean }).editable_siempre === true
     && !(tipo === 'documento' && copiaDeSoloLectura(configExtra))
+  // Copia de un FORMULARIO que se genera desde aquí (`genera_en_origen`, la carta de
+  // autorización en Cita): se pinta con el bloque de formulario sobre la fila del origen.
+  // Ver `@/lib/negocios/fila-formulario`.
+  const generaEnOrigen = tipo === 'documento' && origenDeCopiaGenerable(configExtra) !== null
 
   function getBloqueMode(): 'editable' | 'visible' {
     // editable_siempre: formularios (010/1668) regenerables aun completados o
@@ -1598,6 +1602,11 @@ function BloqueRenderer({
       abiertoSiempre &&
       SUPERVISOR_UP.includes(userRole)
     ) return 'editable'
+    // La copia generable es de config `visible` (lo sigue siendo para subir archivos),
+    // pero genera con el mismo permiso que el formulario de origen: supervisor+ y el
+    // operator responsable. Va ANTES de la línea de `visible` por eso. El área, el
+    // historial y el negocio cerrado la siguen cerrando más abajo.
+    if (generaEnOrigen) return modoDeCopiaGenerable(userRole, bloque._esResponsable ?? false)
     // Config-level: bloque marked as read-only (inherited/visible)
     if (bloque.estado === 'visible') return 'visible'
     // Heredado que se comporta según lo que traiga: con el dato ya puesto en la
@@ -1879,6 +1888,20 @@ function BloqueRenderer({
     }
 
     case 'documento':
+      // Con permiso de generar, la copia es el formulario del origen: casillas, Generar /
+      // Regenerar y versiones. Sin él (o desde el historial) sigue siendo la copia de solo
+      // lectura con Ver y Descargar.
+      if (generaEnOrigen && modo === 'editable') {
+        return (
+          <BloqueFormulario
+            negocioBloqueId={instanciaId}
+            negocioId={negocioId}
+            instancia={bloque.instancia}
+            modo="editable"
+            configExtra={{ label: (configExtra.label as string | undefined) ?? bloque.nombre ?? 'Formulario', template: '' }}
+          />
+        )
+      }
       return (
         <BloqueDocumento
           negocioBloqueId={instanciaId}

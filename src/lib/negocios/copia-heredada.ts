@@ -44,6 +44,37 @@ export function origenDeCopiaEscribible(configExtra: ConfigExtra | null | undefi
   return typeof slug === 'string' && slug.length > 0 ? slug : null
 }
 
+/**
+ * Slug del FORMULARIO origen que se puede generar desde esta copia, o null.
+ *
+ * Es otra puerta, distinta de `origenDeCopiaEscribible`: la copia no recibe archivos, solo
+ * dispara la generación del formulario de su origen (SOENA, 2026-10-08: la carta de
+ * autorización desde Cita). Escribe siempre en la fila del origen, con la configuración del
+ * origen (`formulario-actions` + `resolverDestino({ generaEnOrigen })`).
+ *
+ * Exige el flag explícito `genera_en_origen === true` y el slug: se activa bloque por bloque
+ * por config, nunca por tipo. Para subir o corregir un documento la copia sigue siendo de
+ * solo lectura (`copiaDeSoloLectura` no mira este flag a propósito).
+ */
+export function origenDeCopiaGenerable(configExtra: ConfigExtra | null | undefined): string | null {
+  const ce = configExtra ?? {}
+  if (!esCopiaHeredada(ce)) return null
+  if (ce.genera_en_origen !== true) return null
+  const slug = ce.source_bloque_slug
+  return typeof slug === 'string' && slug.length > 0 ? slug : null
+}
+
+/**
+ * Modo de la copia generable según el rol: el mismo permiso con que se genera un formulario
+ * (supervisor+ y el operator responsable del negocio; `guardEditarBloque` lo revalida en el
+ * servidor). El área, el historial y el negocio cerrado la cierran después, igual que a
+ * cualquier bloque (`BloqueRenderer`).
+ */
+export function modoDeCopiaGenerable(userRole: string, esResponsable: boolean): 'editable' | 'visible' {
+  if (userRole === 'owner' || userRole === 'admin' || userRole === 'supervisor') return 'editable'
+  return userRole === 'operator' && esResponsable ? 'editable' : 'visible'
+}
+
 /** ¿Copia heredada desde la que NO se puede escribir? (pantalla y servidor, mismo criterio) */
 export function copiaDeSoloLectura(configExtra: ConfigExtra | null | undefined): boolean {
   return esCopiaHeredada(configExtra) && origenDeCopiaEscribible(configExtra) === null
