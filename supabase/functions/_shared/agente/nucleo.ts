@@ -15,7 +15,7 @@
 
 import type { ConfigAgente } from './config.ts';
 import { fechaBogota, mensajeDelTurno, recortarResultado, sistema } from './contexto.ts';
-import { CIERRAN, declaraciones } from './herramientas.ts';
+import { CIERRAN, cierranCon, declaraciones } from './herramientas.ts';
 import { consultar, fichasDeHerramienta, respuestaFija, temas, bloqueSiempre } from './reglamento.ts';
 import { META, botonesPropuesta, cortarEnPalabra, opcionesDelModelo, renderizar } from './render.ts';
 import { respaldoDe, verificar } from './verificador.ts';
@@ -48,6 +48,8 @@ export interface SalidaTurno {
   traza: Traza;
   /** El hecho se ejecutó y el dominio pide un turno del modelo para seguir (`seguirTrasToque`). */
   seguir?: boolean;
+  /** Mensajes que salen después de `salida`, en orden (un cierre del dominio con varios mensajes). */
+  extras?: Salida[];
 }
 
 /** Cierra el turno que sigue a un hecho sin decir nada más (la persona ya tiene la confirmación). */
@@ -194,7 +196,11 @@ export async function turnoDelModelo(deps: DepsTurno, e: EntradaTurno): Promise<
   const usuario = mensajeDelTurno({ estado: est, filas: e.filas, nuevos: e.nuevos, quien: e.ctx.remitente.nombre });
   const decl = [...declaraciones(d, r), ...(e.tras ? [DECLARACION_TERMINAR] : [])];
   const todas = decl.map((x) => x.name);
-  const cierran = e.tras ? [...CIERRAN, TERMINAR] : CIERRAN;
+  const cierran = e.tras ? [...cierranCon(d), TERMINAR] : cierranCon(d);
+  // En el último llamado (forzado a cerrar) NO entran los cierres del dominio: medido en vivo (2026-10-08), con el
+  // presupuesto agotado tras `buscar` y `consultar_reglas`, el modelo cerró «¿qué le falta al viaje de…?» con
+  // `link_autorizacion` porque era la única salida con la ficha a mano. Ahí contesta con `responder`.
+  const forzados = e.tras ? [...CIERRAN, TERMINAR] : CIERRAN;
   // Tras un hecho, lo que no sea seguir (falla, tema fuera, `terminar`) deja la confirmación sola: el hecho ya ocurrió.
   const soloHecho: Salida | null = e.tras ? { tipo: 'texto', texto: e.tras.lineas.join('\n') } : null;
   const caer = (): Salida => soloHecho ?? caido(deps, e);
@@ -220,7 +226,7 @@ export async function turnoDelModelo(deps: DepsTurno, e: EntradaTurno): Promise<
     const ultimo = traza.llamados! >= presupuesto - 1;
     const tm = deps.reloj();
     const res = await deps.modelo.llamar({
-      sistema: sis.texto, mensajes, herramientas: decl, permitidas: ultimo ? cierran : todas, timeoutMs: restante,
+      sistema: sis.texto, mensajes, herramientas: decl, permitidas: ultimo ? forzados : todas, timeoutMs: restante,
     });
     traza.ms_modelo! += Math.round(deps.reloj() - tm);
     traza.llamados!++;
@@ -282,6 +288,30 @@ export async function turnoDelModelo(deps: DepsTurno, e: EntradaTurno): Promise<
     if (nombre === TERMINAR) {
       termino = true;
       return fin(soloHecho);
+    }
+
+    // Un cierre del dominio: la salida la escribe el código (p. ej. el link real y el mensaje para reenviar). Si el
+    // candado lo ataja, vuelve al modelo con el error, como `proponer`.
+    if (d.cerrar && (d.cierres ?? []).some((c) => c.name === nombre)) {
+      const th = deps.reloj();
+      let r: Awaited<ReturnType<NonNullable<Dominio['cerrar']>>>;
+      try {
+        r = await d.cerrar(nombre, args, e.ctx);
+      } catch (err) {
+        r = { ok: false, error: `No pude hacerlo ahora (${String(err).slice(0, 80)}). Dilo así, sin inventar el resultado.`, candado: 'cierre_fallo' };
+      }
+      const ms = Math.round(deps.reloj() - th);
+      traza.ms_herramientas! += ms;
+      traza.herramientas!.push({ nombre, args, ok: r.ok, ...(r.ok ? { datos: r.datos, ...(r.privado !== undefined ? { privado: r.privado } : {}) } : { error: r.error }), ms });
+      if (!r.ok) {
+        traza.candados!.push({ candado: r.candado, detalle: r.error });
+        devolver(r.error);
+        continue;
+      }
+      const [primera, ...resto] = r.salidas;
+      if (!primera) return fin(caer(), { error: `${nombre} sin salida` });
+      const s1 = fin(conHecho(primera), { tema: nombre, ...(resto.length ? { salidas_extra: resto } : {}) });
+      return resto.length ? { ...s1, extras: resto } : s1;
     }
 
     if (nombre === 'proponer') {

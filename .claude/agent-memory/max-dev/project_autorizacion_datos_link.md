@@ -19,6 +19,8 @@ Link por CONTACTO en `/autorizacion/<token>`; 4 casillas por separado; evidencia
   negocios de <15 min). El reclamo es un UPDATE condicionado sobre `correo_enviado_at`.
 - La vía con evidencia (`registro_con_evidencia`, apagada) inserta un enlace YA aceptado con `via = 'evidencia'`;
   `aceptado_at` es la fecha del cliente, no la del registro.
+- Bot: `link_autorizacion` es un CIERRE del dominio (salidas escritas por el código, varios mensajes). En el último
+  llamado forzado NO se permiten cierres del dominio: Gemini cerró una consulta de viaje con el link (medido en vivo).
 - Pendiente al 2026-10-08: acompañantes adultos con link propio (no cerrar el diseño: un enlace es por contacto).
 
 **Why:** Mauricio pidió prueba del titular, no el clic de la comercial; Emilio exige versión + sha256 + casillas.
