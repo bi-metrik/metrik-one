@@ -164,6 +164,12 @@ export interface ComercialVendedorMes {
   /** Honorario con IVA. Columna secundaria de paridad. */
   valor_con_iva: number
   primer_pago: number
+  /**
+   * ⚠️ Criterio viejo (SOE-002): tramo 2 de las ventas del mes SIN el umbral de $1.000,
+   * así que cuenta sobrantes de centavos. Para mostrarlo, sumar de
+   * `get_segundo_pago_mes_soena` con `segundoPagoDeVentas` (src/lib/tableros/segundo-pago.ts),
+   * como hace Tableros. /equipo hoy no lo pinta.
+   */
   segundo_pago: number
   casos_completos: number
   tasa_casos_completos: number | null
@@ -180,6 +186,7 @@ export interface ComercialKpisMes {
   valor_sin_iva: number
   valor_con_iva: number
   primer_pago: number
+  /** ⚠️ Criterio viejo, sin el umbral de sobrantes: ver `ComercialVendedorMes.segundo_pago`. */
   segundo_pago: number
   honorario_recaudado: number
   tarifa_recaudada: number
@@ -260,6 +267,13 @@ export interface ComercialSeriePunto {
 export interface ComercialSerieResponse {
   serie: ComercialSeriePunto[]
   tasa_recaudo_global: number | null
+  /**
+   * SOE-002. Lo pone la página, no la RPC: si viene, `segundo_pago` de esta serie (y de
+   * sus gemelas por vendedor y por seccional) ya NO cuenta los abonos a tramo 2
+   * menores a este umbral (sobrantes de centavos). Ausente o `null` = la serie va tal
+   * como la devolvió la RPC, con los sobrantes, y la nota de la gráfica lo dice.
+   */
+  umbral_sobrantes?: number | null
 }
 
 /**

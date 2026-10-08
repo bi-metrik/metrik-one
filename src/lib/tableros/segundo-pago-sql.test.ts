@@ -22,6 +22,8 @@ import { join } from 'node:path'
 import { PGlite } from '@electric-sql/pglite'
 
 const NUEVA = '20261008163000_segundo_pago_dos_cifras_soena.sql'
+// SOE-002, segunda parte: los sobrantes que la serie mensual resta de su barra.
+const SOBRANTES = '20261008193000_segundo_pago_sobrantes_soena.sql'
 const leer = (a: string) => readFileSync(join(process.cwd(), 'supabase/migrations', a), 'utf8')
 
 const WS = '00000000-0000-4000-8000-0000000000a1'
@@ -99,6 +101,7 @@ beforeAll(async () => {
     }
   }
   await db.exec(leer(NUEVA))
+  await db.exec(leer(SOBRANTES))
 })
 
 describe('get_segundo_pago_mes_soena', () => {
@@ -167,6 +170,53 @@ describe('get_segundo_pago_mes_soena', () => {
   it('anon no la puede ejecutar', async () => {
     const r = await db.query<{ ok: boolean }>(
       `select has_function_privilege('anon', 'public.get_segundo_pago_mes_soena(uuid, integer, integer)', 'execute') as ok`)
+    expect(r.rows[0].ok).toBe(false)
+  })
+})
+
+type Sobrante = { codigo: string; fecha: string; anio: number; mes: number; valor: number | string }
+
+async function sobrantes(ws = WS) {
+  await db.exec(`set prueba.ws = '${ws}'`)
+  const r = await db.query<{ j: { umbral_migaja: number | string; sobrantes: Sobrante[] } | null }>(
+    'select public.get_segundo_pago_sobrantes_soena($1) as j', [WS])
+  return r.rows[0].j
+}
+
+describe('get_segundo_pago_sobrantes_soena', () => {
+  it('lista los abonos a tramo 2 menores al umbral, con su mes de pago', async () => {
+    const j = await sobrantes()
+    expect(Number(j!.umbral_migaja)).toBe(1000)
+    expect(j!.sobrantes.map((x) => [x.codigo, x.fecha, x.anio, x.mes, Number(x.valor)])).toEqual([
+      ['TB', '2026-07-22', 2026, 7, 10.08],
+      ['TD', '2026-09-04', 2026, 9, 3.36],
+      ['TC', '2026-09-16', 2026, 9, 28.57],
+    ])
+  })
+
+  it('la barra de cada mes menos sus sobrantes da la cifra «2º pago recibido» del panel', async () => {
+    // Lo que suma hoy la serie viva: todo abono a tramo 2 con fecha de pago en el mes.
+    await db.exec(`set prueba.ws = '${WS}'`)
+    const barras = await db.query<{ anio: number; mes: number; total: string }>(
+      `select extract(year from fecha)::int as anio, extract(month from fecha)::int as mes,
+              sum(a_tramo2_base)::text as total
+         from v_cobro_valor where workspace_id = $1 and a_tramo2_base > 0 group by 1, 2`, [WS])
+    const lista = (await sobrantes())!.sobrantes
+    expect(barras.rows.length).toBeGreaterThan(0)
+    for (const b of barras.rows) {
+      const quita = lista.filter((x) => x.anio === b.anio && x.mes === b.mes).reduce((s, x) => s + Number(x.valor), 0)
+      const panel = Number((await llamar(b.anio, b.mes))!.recibido.total)
+      expect(Number(b.total) - quita).toBeCloseTo(panel, 2)
+    }
+  })
+
+  it('con la sesión en otro workspace no devuelve nada', async () => {
+    expect(await sobrantes(OTRO_WS)).toBeNull()
+  })
+
+  it('anon no la puede ejecutar', async () => {
+    const r = await db.query<{ ok: boolean }>(
+      `select has_function_privilege('anon', 'public.get_segundo_pago_sobrantes_soena(uuid)', 'execute') as ok`)
     expect(r.rows[0].ok).toBe(false)
   })
 })

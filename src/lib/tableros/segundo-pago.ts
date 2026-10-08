@@ -135,3 +135,127 @@ export function segundoPagoDeVentas(
 ): number {
   return datos.de_ventas_del_mes.detalle.reduce((s, c) => (incluye(c) ? s + c.valor : s), 0)
 }
+
+// ── Sobrantes de tramo 2 en la serie mensual (SOE-002, segunda parte) ──────────
+
+/**
+ * Un abono a tramo 2 por debajo del umbral: el sobrante de centavos que la imputación
+ * de `v_cobro_valor` manda a tramo 2 cuando un pago excede por unos pesos el techo del
+ * primer tramo. Sale de `get_segundo_pago_sobrantes_soena`, con la MISMA constante que
+ * la cifra «2º pago recibido este mes».
+ */
+export interface SobranteTramo2 {
+  cobro_id: string
+  negocio_id: string | null
+  codigo: string | null
+  /** 'YYYY-MM-DD'. Fecha de pago del cobro. */
+  fecha: string
+  anio: number
+  mes: number
+  /** Sin IVA. */
+  valor: number
+}
+
+export interface SobrantesTramo2 {
+  umbral_migaja: number
+  sobrantes: SobranteTramo2[]
+}
+
+/** La respuesta cruda de la RPC. `null` si no vino nada (guarda, error). */
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+export function normalizarSobrantes(data: any): SobrantesTramo2 | null {
+  if (!data || typeof data !== 'object' || !Array.isArray(data.sobrantes)) return null
+  return {
+    umbral_migaja: num(data.umbral_migaja),
+    sobrantes: data.sobrantes.map((s: Record<string, unknown>) => ({
+      cobro_id: String(s.cobro_id),
+      negocio_id: (s.negocio_id as string | null) ?? null,
+      codigo: (s.codigo as string | null) ?? null,
+      fecha: String(s.fecha),
+      anio: num(s.anio),
+      mes: num(s.mes),
+      valor: num(s.valor),
+    })),
+  }
+}
+
+/** Nunca por debajo de cero, y sin el ruido de coma flotante de restar centavos. */
+const restar = (a: number, b: number) => Math.max(0, Math.round((a - b) * 100) / 100)
+
+/**
+ * La barra de segundo pago de la serie TOTAL, sin los sobrantes: a cada mes se le
+ * resta lo que sumaron sus sobrantes. El recaudo del mes NO se toca: esa plata sí
+ * entró; lo que cambia es que no se pinta como segundo pago.
+ */
+export function descontarSobrantesPorMes<T extends { anio: number; mes: number; segundo_pago: number }>(
+  serie: T[],
+  sobrantes: SobranteTramo2[],
+): T[] {
+  if (sobrantes.length === 0) return serie
+  const porMes = new Map<string, number>()
+  for (const s of sobrantes) {
+    const k = `${s.anio}-${s.mes}`
+    porMes.set(k, (porMes.get(k) ?? 0) + s.valor)
+  }
+  return serie.map((p) => {
+    const quita = porMes.get(`${p.anio}-${p.mes}`)
+    return quita ? { ...p, segundo_pago: restar(p.segundo_pago, quita) } : p
+  })
+}
+
+/**
+ * Lo mismo para la serie abierta por vendedor o por seccional: cada punto trae los
+ * `cobro_ids` que suman su recaudo, así que el sobrante se le resta al punto que lo
+ * contiene, y la suma de los puntos sigue dando la barra total.
+ */
+export function descontarSobrantesPorCobro<
+  T extends { anio: number; mes: number; segundo_pago: number; cobro_ids: string[] },
+>(serie: T[], sobrantes: SobranteTramo2[]): T[] {
+  if (sobrantes.length === 0) return serie
+  const porCobro = new Map(sobrantes.map((s) => [s.cobro_id, s]))
+  return serie.map((p) => {
+    let quita = 0
+    for (const id of p.cobro_ids ?? []) {
+      const s = porCobro.get(id)
+      if (s && s.anio === p.anio && s.mes === p.mes) quita += s.valor
+    }
+    return quita > 0 ? { ...p, segundo_pago: restar(p.segundo_pago, quita) } : p
+  })
+}
+
+type PuntoSerie = { anio: number; mes: number; segundo_pago: number }
+type PuntoConCobros = PuntoSerie & { cobro_ids: string[] }
+
+/**
+ * Las tres series del histórico comercial sin los sobrantes, de una vez. Sin sobrantes
+ * (la RPC falló o no aplica) las devuelve tal cual y la total sin `umbral_sobrantes`,
+ * que es lo que le dice a la gráfica que no puede afirmar que los descartó.
+ */
+export function sinSobrantes<
+  S extends { serie: PuntoSerie[]; umbral_sobrantes?: number | null },
+  C extends { serie: PuntoConCobros[] },
+  V extends { serie: PuntoConCobros[] },
+>(
+  serie: S | null,
+  serieSeccional: C | null,
+  serieVendedor: V | null,
+  sobrantes: SobrantesTramo2 | null,
+): { serie: S | null; serieSeccional: C | null; serieVendedor: V | null } {
+  if (!sobrantes) return { serie, serieSeccional, serieVendedor }
+  const lista = sobrantes.sobrantes
+  return {
+    serie: serie && {
+      ...serie,
+      serie: descontarSobrantesPorMes(serie.serie, lista),
+      umbral_sobrantes: sobrantes.umbral_migaja,
+    },
+    serieSeccional: serieSeccional && {
+      ...serieSeccional,
+      serie: descontarSobrantesPorCobro(serieSeccional.serie, lista),
+    },
+    serieVendedor: serieVendedor && {
+      ...serieVendedor,
+      serie: descontarSobrantesPorCobro(serieVendedor.serie, lista),
+    },
+  }
+}

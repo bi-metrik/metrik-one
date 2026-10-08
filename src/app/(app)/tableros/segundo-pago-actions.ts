@@ -3,7 +3,12 @@
 import { getWorkspace } from '@/lib/actions/get-workspace'
 import { rpcTablero } from '@/lib/tableros/cache-rpc'
 import { getRolePermissions } from '@/lib/roles'
-import { normalizarSegundoPago, type SegundoPagoMes } from '@/lib/tableros/segundo-pago'
+import {
+  normalizarSegundoPago,
+  normalizarSobrantes,
+  type SegundoPagoMes,
+  type SobrantesTramo2,
+} from '@/lib/tableros/segundo-pago'
 
 /**
  * Las dos cifras de segundo pago de un mes, con los negocios detrás de cada una
@@ -36,4 +41,30 @@ export async function getSegundoPagoMes(anio: number, mes: number): Promise<Segu
     return null
   }
   return normalizarSegundoPago(data)
+}
+
+/**
+ * Los sobrantes de centavos imputados a tramo 2, cobro por cobro, para que la serie
+ * «Primer vs segundo pago recibido por mes» los descarte con el mismo umbral que la
+ * cifra del panel. Mismo gate que la de arriba.
+ *
+ * `null` si falla o no aplica: la serie se pinta tal como viene y su nota lo dice.
+ */
+export async function getSegundoPagoSobrantes(): Promise<SobrantesTramo2 | null> {
+  const { supabase, workspaceId, role } = await getWorkspace()
+  if (!supabase || !workspaceId) return null
+
+  const perms = getRolePermissions(role || '')
+  if (!perms.canViewNumbers) return null
+  if (!['owner', 'admin', 'supervisor'].includes(role || '')) return null
+
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const { data, error } = await rpcTablero(supabase as any, workspaceId, 'get_segundo_pago_sobrantes_soena', {
+    p_workspace_id: workspaceId,
+  })
+  if (error) {
+    console.error('[tableros] no se pudieron traer los sobrantes de tramo 2:', error)
+    return null
+  }
+  return normalizarSobrantes(data)
 }
