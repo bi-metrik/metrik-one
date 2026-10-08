@@ -43,7 +43,7 @@
  *
  * **7 · Espacio y paginación (§4.11, Ren, 2026-10-08).** Todo espacio sale de la escala
  * 4 · 8 · 12 · 16 · 24 · 32 · 48 (`ESPACIADO_NORMAL` / `ESPACIADO_COMPACTO`), que cada sección
- * recibe por contexto. El aire ANTES de una unidad del flujo es una pieza (`Aire`), no su
+ * recibe por prop (`e` / `esp`). El aire ANTES de una unidad del flujo es una pieza (`Aire`), no su
  * margen. Este componente dibuja UNA composición; cuántas hojas y qué paso de compactación
  * lo decide `componerCotizacionTrappvel` midiendo el PDF ya renderizado.
  *
@@ -52,7 +52,7 @@
  * Todos esos signos van dibujados en SVG, nunca como texto.
  */
 
-import { createContext, Fragment, useContext, type ReactNode } from 'react'
+import { Fragment, type ReactNode } from 'react'
 import {
   Circle,
   Defs,
@@ -75,7 +75,6 @@ import { colorDeMarca } from './medir-pdf'
 import {
   ALTO_ENCABEZADO_VUELOS,
   CANAL_COLUMNAS,
-  ESPACIADO_NORMAL,
   HOJA,
   espaciadoDe,
   numeroDeSeccion,
@@ -134,14 +133,6 @@ const ALTO_PIE = HOJA.altoPie
 // ── Espacio y paginación (§4.11) ──────────────────────────────────────────────
 
 /**
- * El espaciado vigente (normal o compacto) de la sección que se está dibujando. Cada
- * sección del documento lo fija con su `Provider`: así el paso 1 de «la última hoja
- * trabaja» compacta todo el documento, y el punto 8 solo las secciones de un salto.
- */
-const EspacioCtx = createContext<Espaciado>(ESPACIADO_NORMAL)
-const useEspacio = () => useContext(EspacioCtx)
-
-/**
  * El aire ANTES de una unidad del flujo, como pieza propia y no como margen de la unidad.
  *
  * ⚠️ react-pdf conserva el `marginTop` de una unidad que no cupo y pasa entera a la hoja
@@ -154,13 +145,6 @@ function Aire({ alto }: { alto: number }) {
   return alto > 0 ? <View style={{ height: alto }} /> : null
 }
 
-/** Cada sección dibuja con SU espaciado: lo leen las piezas con `useEspacio`. */
-function Seccion({ espaciado, children }: { espaciado: Espaciado; children: ReactNode }) {
-  return <EspacioCtx.Provider value={espaciado}>{children}</EspacioCtx.Provider>
-}
-
-/** El paso de compactación vigente (0 a 3): los pasos 2 y 3 cambian el tamaño de fotos. */
-const NivelCtx = createContext<Composicion['nivel']>(0)
 
 /**
  * Un punto invisible al inicio de una sección, con su número en el color: así el paso de
@@ -368,10 +352,9 @@ function Antetitulo({ texto, color, punto }: { texto: string; color: string; pun
  * un título es siempre el primer hijo de su sección. Medido: el rótulo «DÍA A DÍA» quedó
  * solo al pie de la página con el `minPresenceAhead` puesto.
  */
-function Titulo({ texto, icono, arriba = 0 }: { texto: string; icono: IconoDeSeccion; arriba?: number }) {
+function Titulo({ texto, icono, arriba = 0, e }: { texto: string; icono: IconoDeSeccion; arriba?: number; e: Espaciado }) {
   // §4.11: el de título → contenido abajo. El aire entre secciones va ANTES de la unidad que
   // lleva el título, como `Aire` (o como margen si el título va dentro de una columna).
-  const e = useEspacio()
   return (
     <View style={{ flexDirection: 'row', alignItems: 'center', marginTop: arriba, marginBottom: e.bloque }}>
       <IconoSeccion tipo={icono} />
@@ -406,8 +389,7 @@ function Rotulo({ texto, chico = false, ancho }: { texto: string; chico?: boolea
  * La foto de portada, a todo el ancho (§4.2), encuadrada en su foco: la de Johnny Cay dejaba
  * la isla en el borde de arriba porque el recorte iba por el centro.
  */
-function FotoConRotulo({ foto, alto }: { foto: FotoPDF; alto: number }) {
-  const e = useEspacio()
+function FotoConRotulo({ foto, alto, e }: { foto: FotoPDF; alto: number; e: Espaciado }) {
   return (
     <View wrap={false} style={{ marginTop: e.bloque, position: 'relative' }}>
       <PdfImage
@@ -475,9 +457,7 @@ function Miniatura({ foto, ancho = ANCHO_MINIATURA, alto = ALTO_MINIATURA, estir
  * 2026-09-23 cada foto medía un tercio fuera cual fuera la cuenta, y con dos quedaba un
  * hueco a la derecha. No se parte entre páginas.
  */
-function FranjaDeFotos({ fotos, deCapitulo = false, arriba = false }: { fotos: FotoPDF[]; deCapitulo?: boolean; arriba?: boolean }) {
-  const e = useEspacio()
-  const nivel = useContext(NivelCtx)
+function FranjaDeFotos({ fotos, e, nivel = 0, deCapitulo = false, arriba = false }: { fotos: FotoPDF[]; e: Espaciado; nivel?: Composicion['nivel']; deCapitulo?: boolean; arriba?: boolean }) {
   if (fotos.length === 0) return null
   // Paso 3: las fotos de ciudad de un capítulo bajan a 110 pt de alto; las de la portada no.
   const tope = deCapitulo && nivel >= 3 ? ALTO_FOTO_CIUDAD_COMPACTA : Number.POSITIVE_INFINITY
@@ -554,8 +534,7 @@ function ChipsDeTarifa({ tarifas, de, arriba = false }: { tarifas: TarifaDoc[]; 
  * de la fila: el nombre y el resumen arriba, la acomodación (y lo que va con ella) pegada
  * abajo. Antes quedaba más baja que la foto, con un hueco debajo.
  */
-function TarjetaHotel({ h, general, tarifas, margen, llenar = false }: { h: HotelPDF; general: boolean; tarifas: TarifaDoc[]; margen: number; llenar?: boolean }) {
-  const e = useEspacio()
+function TarjetaHotel({ h, general, tarifas, margen, e, llenar = false }: { h: HotelPDF; general: boolean; tarifas: TarifaDoc[]; margen: number; e: Espaciado; llenar?: boolean }) {
   // Los textos salen de `textosDeTarjetaHotel`, la misma función que pinta «Así lo ve el
   // cliente» en la tarjeta de la opción del editor.
   const t = textosDeTarjetaHotel(h, general)
@@ -626,18 +605,16 @@ function fotoDelHotel(h: HotelPDF): FotoPDF | null {
  * su tarjeta entera con su foto (`textosDeTarjetaHotel` en las dos). La fila no se parte
  * entre dos hojas. Sin foto, el hotel sigue en una línea (`LineaHotelAlternativo`).
  */
-function HotelAlternativoConFoto({ h, foto, general, tarifas }: { h: HotelPDF; foto: FotoPDF; general: boolean; tarifas: TarifaDoc[] }) {
-  const e = useEspacio()
+function HotelAlternativoConFoto({ h, foto, general, tarifas, e, nivel }: { h: HotelPDF; foto: FotoPDF; general: boolean; tarifas: TarifaDoc[]; e: Espaciado; nivel: Composicion['nivel'] }) {
   // Paso 2 del punto 6: la foto de una alternativa (nunca la de la Recomendada) baja de un
   // tercio a un cuarto del ancho, en la misma proporción 3:2.
-  const nivel = useContext(NivelCtx)
   const ancho = nivel >= 2 ? ANCHO_CUARTO : ANCHO_MINIATURA
   return (
     <>
       <Aire alto={e.tarjetas} />
       <View wrap={false} style={{ flexDirection: 'row' }}>
         <View style={{ flex: 1, paddingRight: 12 }}>
-          <TarjetaHotel h={h} general={general} tarifas={tarifas} margen={0} llenar />
+          <TarjetaHotel h={h} general={general} tarifas={tarifas} margen={0} e={e} llenar />
         </View>
         <Miniatura foto={foto} ancho={ancho} alto={ancho / 1.5} estirar />
       </View>
@@ -646,8 +623,7 @@ function HotelAlternativoConFoto({ h, foto, general, tarifas }: { h: HotelPDF; f
 }
 
 /** El hotel de otra tarifa en la misma ciudad: una línea, con su chip. */
-function LineaHotelAlternativo({ h, general, tarifas }: { h: HotelPDF; general: boolean; tarifas: TarifaDoc[] }) {
-  const e = useEspacio()
+function LineaHotelAlternativo({ h, general, tarifas, e }: { h: HotelPDF; general: boolean; tarifas: TarifaDoc[]; e: Espaciado }) {
   const texto = [h.hotel ?? h.linea, !general ? h.regimen : null, !general ? h.habitacion : null].filter(Boolean).join(' · ')
   return (
     <>
@@ -694,8 +670,7 @@ function Circulo({ e }: { e: EntradaTiempo }) {
 }
 
 /** Una tarjeta del día a día: un vuelo o una actividad. */
-function TarjetaDelDia({ e, primera }: { e: EntradaTiempo; primera: boolean }) {
-  const esp = useEspacio()
+function TarjetaDelDia({ e, primera, esp }: { e: EntradaTiempo; primera: boolean; esp: Espaciado }) {
   return (
     <View style={{ marginTop: primera ? 0 : esp.tarjetas, backgroundColor: C.tarjeta, borderRadius: 8, padding: esp.dentro }}>
       {'texto' in e.titulo ? (
@@ -736,14 +711,13 @@ function TarjetaDelDia({ e, primera }: { e: EntradaTiempo; primera: boolean }) {
  * El título viaja con el primer día (#819, afinado el 2026-09-23): solo al pie de la
  * página parece un corte. Si el bloque no cabe, pasa entero a la página que sigue.
  */
-function LineaDeTiempo({ entradas, marca }: { entradas: EntradaTiempo[]; marca?: ReactNode }) {
-  const esp = useEspacio()
+function LineaDeTiempo({ entradas, marca, esp }: { entradas: EntradaTiempo[]; marca?: ReactNode; esp: Espaciado }) {
   if (entradas.length === 0) return null
   const dias = gruposPorDia(entradas).map((grupo, i) => (
     <View key={`dia-${i}`} wrap={false} style={{ flexDirection: 'row' }}>
       <View style={{ width: 34, marginRight: 12 }}><Circulo e={grupo[0]} /></View>
       <View style={{ flex: 1 }}>
-        {grupo.map((e, j) => <TarjetaDelDia key={`t-${j}`} e={e} primera={j === 0} />)}
+        {grupo.map((e, j) => <TarjetaDelDia key={`t-${j}`} e={e} primera={j === 0} esp={esp} />)}
       </View>
     </View>
   ))
@@ -752,7 +726,7 @@ function LineaDeTiempo({ entradas, marca }: { entradas: EntradaTiempo[]; marca?:
       <Aire alto={esp.seccion} />
       <View wrap={false}>
         {marca}
-        <Titulo texto="Día a día" icono="calendario" />
+        <Titulo texto="Día a día" icono="calendario" e={esp} />
         {dias[0]}
       </View>
       {dias.slice(1).map((d, i) => (
@@ -810,8 +784,7 @@ const PRESENCIA_MINIMA_TITULO = 80
 /** Hasta cuántas filas la tabla de cargos en destino va entera, sin partirse (punto 5). */
 const FILAS_DE_CARGOS_ENTERA = 4
 
-function TablaVuelos({ vuelos, general, tarifas, titulo, marca }: { vuelos: VueloPDF[]; general: boolean; tarifas: TarifaDoc[]; titulo?: ReactNode; marca?: ReactNode }) {
-  const esp = useEspacio()
+function TablaVuelos({ vuelos, general, tarifas, titulo, marca, esp }: { vuelos: VueloPDF[]; general: boolean; tarifas: TarifaDoc[]; titulo?: ReactNode; marca?: ReactNode; esp: Espaciado }) {
   const grupos = vuelos.map(v => ({ v, filas: filasDelVuelo(v) }))
   const todas = grupos.flatMap(g => g.filas)
   // Las columnas NO son fijas: una columna vacía es la «tabla con guiones» que este
@@ -1051,8 +1024,9 @@ const ALTO_CIERRE_SIN_AIRE = 46
  * ⚠️ `minPresenceAhead` reserva el alto de la franja de totales: sin él la última fila se
  * queda al pie de una página y el TOTAL aparece solo arriba de la siguiente.
  */
-function LineaPrecio({ l, detallada, tam = 9, ultima = false, presenciaExtra, tarjeta }: {
+function LineaPrecio({ l, e, detallada, tam = 9, ultima = false, presenciaExtra, tarjeta }: {
   l: LineaImpresa
+  e: Espaciado
   detallada: boolean
   tam?: number
   ultima?: boolean
@@ -1065,7 +1039,6 @@ function LineaPrecio({ l, detallada, tam = 9, ultima = false, presenciaExtra, ta
    */
   tarjeta?: PosicionEnTarjeta
 }) {
-  const e = useEspacio()
   const arriba = tarjeta === 'primera' || tarjeta === 'unica'
   const abajo = tarjeta === 'ultima' || tarjeta === 'unica'
   const fila = (
@@ -1163,12 +1136,11 @@ function ItemDeLista({ lista, texto, ultimo, presencia }: {
 }
 
 /** Una lista entera dentro de una columna: la fila de dos columnas no se parte. */
-function ListaEnColumna({ lista, items, primera }: { lista: ListaDelCierre; items: string[]; primera: boolean }) {
+function ListaEnColumna({ lista, items, primera, e }: { lista: ListaDelCierre; items: string[]; primera: boolean; e: Espaciado }) {
   // Dentro de la columna, la segunda lista se separa de la primera con el aire de sección.
-  const e = useEspacio()
   return (
     <View>
-      <Titulo texto={LISTAS[lista].titulo} icono={LISTAS[lista].icono} arriba={primera ? 0 : e.seccion} />
+      <Titulo texto={LISTAS[lista].titulo} icono={LISTAS[lista].icono} arriba={primera ? 0 : e.seccion} e={e} />
       {items.map((t, i) => <ItemDeLista key={`${lista}-${i}`} lista={lista} texto={t} ultimo={i === items.length - 1} />)}
     </View>
   )
@@ -1573,10 +1545,9 @@ export default function CotizacionTrappvelPDF({
           )}
         </View>
 
-        <NivelCtx.Provider value={nivel}>
         <View style={{ paddingHorizontal: MARGEN }}>
           {/* ── Portada (§4.2) ─────────────────────────────────────────────── */}
-          <Seccion espaciado={ep}>
+          <>
           <Marca seccion="portada" />
           <Antetitulo texto="PROPUESTA DE VIAJE · COTIZACIÓN" color={C.purpura} punto />
           <Text
@@ -1597,7 +1568,7 @@ export default function CotizacionTrappvelPDF({
           )}
 
           {/* Sin foto la banda no aparece y el bloque sube: nada de rectángulo vacío. */}
-          {v.foto && <FotoConRotulo foto={v.foto} alto={190} />}
+          {v.foto && <FotoConRotulo foto={v.foto} alto={190} e={ep} />}
 
           {fichas.length > 0 && (
             <View style={{ flexDirection: 'row', backgroundColor: C.tarjeta, borderRadius: 8, paddingVertical: ep.dentro, marginTop: ep.bloque }}>
@@ -1612,8 +1583,8 @@ export default function CotizacionTrappvelPDF({
           )}
 
           {/* Las fotos de ciudades que no tienen capítulo propio (una ciudad sin hotel). */}
-          <FranjaDeFotos fotos={fotosSueltas} />
-          </Seccion>
+          <FranjaDeFotos fotos={fotosSueltas} e={ep} />
+          </>
 
           {/* ── Un capítulo por ciudad (§4.3) ──────────────────────────────── */}
           {capitulos.map((c, i) => {
@@ -1662,7 +1633,7 @@ export default function CotizacionTrappvelPDF({
             // destino que ya dice la portada) es una sección más, a 32.
             const aire = conEncabezado ? ec.capitulo : ec.seccion
             return (
-              <Seccion key={`capitulo-${i}`} espaciado={ec}>
+              <Fragment key={`capitulo-${i}`}>
               <Aire alto={aire} />
               <View>
                 {fotoAlLado ? (
@@ -1673,7 +1644,7 @@ export default function CotizacionTrappvelPDF({
                     <View style={{ flex: 1, paddingRight: 12 }}>
                       {encabezado}
                       {c.hotel && (
-                        <TarjetaHotel h={c.hotel} general={general} tarifas={tarifas} margen={conEncabezado ? ec.bloque : 0} llenar />
+                        <TarjetaHotel h={c.hotel} general={general} tarifas={tarifas} margen={conEncabezado ? ec.bloque : 0} e={ec} llenar />
                       )}
                     </View>
                     <Miniatura foto={fotos[0]} ancho={altoAlLado * 1.5} alto={altoAlLado} estirar={c.hotel !== null} />
@@ -1683,13 +1654,13 @@ export default function CotizacionTrappvelPDF({
                     <View wrap={false}>
                       <Marca seccion={id} />
                       {encabezado}
-                      {conFotos && <FranjaDeFotos fotos={fotos} deCapitulo arriba={!conEncabezado} />}
-                      {conHotel && c.hotel && <TarjetaHotel h={c.hotel} general={general} tarifas={tarifas} margen={conEncabezado ? ec.bloque : 0} />}
+                      {conFotos && <FranjaDeFotos fotos={fotos} e={ec} nivel={nivel} deCapitulo arriba={!conEncabezado} />}
+                      {conHotel && c.hotel && <TarjetaHotel h={c.hotel} general={general} tarifas={tarifas} margen={conEncabezado ? ec.bloque : 0} e={ec} />}
                     </View>
                     {!conHotel && c.hotel && (
                       <>
                         <Aire alto={ec.tarjetas} />
-                        <TarjetaHotel h={c.hotel} general={general} tarifas={tarifas} margen={0} />
+                        <TarjetaHotel h={c.hotel} general={general} tarifas={tarifas} margen={0} e={ec} />
                       </>
                     )}
                   </>
@@ -1700,43 +1671,42 @@ export default function CotizacionTrappvelPDF({
                 {c.alternativas.map((h, j) => {
                   const foto = fotoDelHotel(h)
                   return foto
-                    ? <HotelAlternativoConFoto key={`alt-${j}`} h={h} foto={foto} general={general} tarifas={tarifas} />
-                    : <LineaHotelAlternativo key={`alt-${j}`} h={h} general={general} tarifas={tarifas} />
+                    ? <HotelAlternativoConFoto key={`alt-${j}`} h={h} foto={foto} general={general} tarifas={tarifas} e={ec} nivel={nivel} />
+                    : <LineaHotelAlternativo key={`alt-${j}`} h={h} general={general} tarifas={tarifas} e={ec} />
                 })}
-                <LineaDeTiempo entradas={suyas} />
+                <LineaDeTiempo entradas={suyas} esp={ec} />
               </View>
-              </Seccion>
+              </Fragment>
             )
           })}
           {entradasSueltas.length > 0 && (
-            <Seccion espaciado={espDe('dias')}>
-              <LineaDeTiempo entradas={entradasSueltas} marca={<Marca seccion="dias" />} />
-            </Seccion>
+            <LineaDeTiempo entradas={entradasSueltas} marca={<Marca seccion="dias" />} esp={espDe('dias')} />
           )}
 
           {/* ── Vuelos (§4.4) ──────────────────────────────────────────────── */}
           {v.vuelos.length > 0 && (
-            <Seccion espaciado={espDe('vuelos')}>
+            <>
               <TablaVuelos
                 vuelos={v.vuelos}
                 general={general}
                 tarifas={tarifas}
-                titulo={<Titulo texto="Vuelos" icono="avion" />}
+                titulo={<Titulo texto="Vuelos" icono="avion" e={espDe('vuelos')} />}
                 marca={<Marca seccion="vuelos" />}
+                esp={espDe('vuelos')}
               />
-            </Seccion>
+            </>
           )}
 
           {/* ── Inversión (§4.5) ─────────────────────────────────────────────
               Todo el dinero del documento vive aquí (decisión 2). El TOTAL va PEGADO:
               con varias tarifas el bloque entero no se parte (`wrap={false}`), así el
               total nunca queda solo en la página siguiente. */}
-          <Seccion espaciado={ei}>
+          <>
           <Aire alto={ei.seccion} />
           {porTarifas ? (
             <View wrap={false} minPresenceAhead={conCierre('inversion')}>
               <Marca seccion="inversion" />
-              <Titulo texto="Inversión" icono="dinero" />
+              <Titulo texto="Inversión" icono="dinero" e={ei} />
               <View style={{ flexDirection: 'row' }}>
                 {bloques.map((b, i) => (
                   <View
@@ -1770,7 +1740,7 @@ export default function CotizacionTrappvelPDF({
                       {!general && (
                         <View style={{ marginTop: ei.dentro }}>
                           {b.lineas.map((l, j) => (
-                            <LineaPrecio key={`tarifa-${i}-linea-${j}`} l={l} detallada={detallada} tam={7.5} />
+                            <LineaPrecio key={`tarifa-${i}-linea-${j}`} l={l} e={ei} detallada={detallada} tam={7.5} />
                           ))}
                         </View>
                       )}
@@ -1793,11 +1763,12 @@ export default function CotizacionTrappvelPDF({
             // páginas, la tarjeta queda abierta por abajo en una y por arriba en la otra.
             <View wrap={false} minPresenceAhead={conCierre('inversion')}>
               <Marca seccion="inversion" />
-              <Titulo texto="Inversión" icono="dinero" />
+              <Titulo texto="Inversión" icono="dinero" e={ei} />
               {lineas.map((l, i) => (
                 <LineaPrecio
                   key={`precio-${i}`}
                   l={l}
+                  e={ei}
                   detallada={detallada}
                   tarjeta={lineas.length === 1 ? 'unica' : i === 0 ? 'primera' : i === lineas.length - 1 ? 'ultima' : 'media'}
                 />
@@ -1812,13 +1783,14 @@ export default function CotizacionTrappvelPDF({
             <>
               <View wrap={false} minPresenceAhead={lineas.length === 1 ? ALTO_TOTALES : 0}>
                 <Marca seccion="inversion" />
-                <Titulo texto="Inversión" icono="dinero" />
-                <LineaPrecio l={lineas[0]} detallada={detallada} tarjeta={lineas.length === 1 ? 'unica' : 'primera'} />
+                <Titulo texto="Inversión" icono="dinero" e={ei} />
+                <LineaPrecio l={lineas[0]} e={ei} detallada={detallada} tarjeta={lineas.length === 1 ? 'unica' : 'primera'} />
               </View>
               {lineas.slice(1).map((l, i) => (
                 <LineaPrecio
                   key={`precio-${i + 1}`}
                   l={l}
+                  e={ei}
                   detallada={detallada}
                   ultima={i === lineas.length - 2}
                   // Si la firma va detrás del TOTAL, la última fila pide sitio para los dos.
@@ -1831,11 +1803,11 @@ export default function CotizacionTrappvelPDF({
           ) : (
             <View wrap={false} minPresenceAhead={conCierre('inversion')}>
               <Marca seccion="inversion" />
-              <Titulo texto="Inversión" icono="dinero" />
+              <Titulo texto="Inversión" icono="dinero" e={ei} />
               {totales()}
             </View>
           )}
-          </Seccion>
+          </>
 
           {/* ── Precio por tipo de pasajero, del viaje entero ──────────────────
               ⚠️⚠️ Esta tabla y el TOTAL son dinero del MISMO viaje: la diferencia se
@@ -1911,7 +1883,7 @@ export default function CotizacionTrappvelPDF({
               a todo el ancho si no. Una fila de dos columnas no se parte; una lista a todo
               el ancho sí, entre ítems, con el título pegado al primero. La última pieza
               pide tener el cierre debajo si «listas» es la última sección. */}
-          <Seccion espaciado={espDe('listas')}>
+          <>
           {filasDeListas.map((fila, f) => {
             const presencia = f === filasDeListas.length - 1 ? conCierre('listas') : undefined
             const marca = f === 0 ? <Marca seccion="listas" /> : null
@@ -1924,7 +1896,7 @@ export default function CotizacionTrappvelPDF({
                     {marca}
                     {fila.map((columna, c) => (
                       <View key={`col-${c}`} style={{ flexGrow: 1, flexBasis: 0, marginLeft: c === 0 ? 0 : CANAL_COLUMNAS }}>
-                        {columna.map((l, k) => <ListaEnColumna key={l} lista={l} items={listas[l]} primera={k === 0} />)}
+                        {columna.map((l, k) => <ListaEnColumna key={l} lista={l} items={listas[l]} primera={k === 0} e={espDe('listas')} />)}
                       </View>
                     ))}
                   </View>
@@ -1940,7 +1912,7 @@ export default function CotizacionTrappvelPDF({
                 {aire}
                 <View wrap={false} minPresenceAhead={items.length === 1 ? presencia : undefined}>
                   {marca}
-                  <Titulo texto={LISTAS[l].titulo} icono={LISTAS[l].icono} />
+                  <Titulo texto={LISTAS[l].titulo} icono={LISTAS[l].icono} e={espDe('listas')} />
                   <ItemDeLista lista={l} texto={items[0]} ultimo={items.length === 1} />
                 </View>
                 {items.slice(1).map((t, i) => (
@@ -1955,7 +1927,7 @@ export default function CotizacionTrappvelPDF({
               </Fragment>
             )
           })}
-          </Seccion>
+          </>
 
           {/* ── Opcionales (§4.7) ──────────────────────────────────────────── */}
           {opcionales.length > 0 && (() => {
@@ -1987,11 +1959,11 @@ export default function CotizacionTrappvelPDF({
             // Fragmento, no caja: la última tarjeta tiene que ser HERMANA del cierre para
             // que su `minPresenceAhead` lo alcance.
             return (
-              <Seccion espaciado={eo}>
+              <>
                 <Aire alto={eo.seccion} />
                 <View wrap={false} minPresenceAhead={opcionales.length === 1 ? conCierre('opcionales') : undefined}>
                   <Marca seccion="opcionales" />
-                  <Titulo texto="Opcionales" icono="opcionales" />
+                  <Titulo texto="Opcionales" icono="opcionales" e={eo} />
                   <Text style={{ fontSize: 8.5, color: C.gris }}>
                     Actividades que se pueden coordinar aparte. No están incluidas en el precio de arriba.
                   </Text>
@@ -2003,7 +1975,7 @@ export default function CotizacionTrappvelPDF({
                     {t}
                   </Fragment>
                 ))}
-              </Seccion>
+              </>
             )
           })()}
 
@@ -2013,7 +1985,7 @@ export default function CotizacionTrappvelPDF({
               el encabezado repetido arriba de cada hoja y sin una fila sola en ninguna. */}
           {v.cargosEnDestino.length > 0 && (() => {
             const ecg = espDe('cargos')
-            const titulo = <Titulo texto="Cargos a pagar en destino" icono="destino" />
+            const titulo = <Titulo texto="Cargos a pagar en destino" icono="destino" e={ecg} />
             const encabezado = (
               <View style={{ position: 'relative', height: 18, borderRadius: 4 }}>
                 <Degradado ancho={ANCHO_CONTENIDO} alto={18} id="degradado-cargos" />
@@ -2047,7 +2019,7 @@ export default function CotizacionTrappvelPDF({
             ))
             if (filas.length <= FILAS_DE_CARGOS_ENTERA) {
               return (
-                <Seccion espaciado={ecg}>
+                <>
                   <Aire alto={ecg.seccion} />
                   <View wrap={false} minPresenceAhead={conCierre('cargos')}>
                     <Marca seccion="cargos" />
@@ -2055,12 +2027,12 @@ export default function CotizacionTrappvelPDF({
                     {encabezado}
                     {filas}
                   </View>
-                </Seccion>
+                </>
               )
             }
             const grupos = gruposDeFilas(filas)
             return (
-              <Seccion espaciado={ecg}>
+              <>
                 <Aire alto={ecg.seccion} />
                 <View minPresenceAhead={PRESENCIA_MINIMA_TITULO}>
                   <Marca seccion="cargos" />
@@ -2074,33 +2046,33 @@ export default function CotizacionTrappvelPDF({
                     </View>
                   ))}
                 </View>
-              </Seccion>
+              </>
             )
           })()}
 
           {/* ── Información importante ─────────────────────────────────────── */}
           {cotizacion.notas && (
-            <Seccion espaciado={espDe('notas')}>
+            <>
               <Aire alto={espDe('notas').seccion} />
               <View wrap={false} minPresenceAhead={conCierre('notas')}>
                 <Marca seccion="notas" />
-                <Titulo texto="Información importante" icono="info" />
+                <Titulo texto="Información importante" icono="info" e={espDe('notas')} />
                 <Text hyphenationCallback={SIN_GUION} style={{ fontSize: 9, color: C.texto, lineHeight: 1.45 }}>
                   {cotizacion.notas}
                 </Text>
               </View>
-            </Seccion>
+            </>
           )}
 
           {/* ── Términos y condiciones: al cierre, antes de la firma ──────────────
               Fragmento, no caja, por la misma razón que en «Opcionales»: se parten entre
               piezas, el título va pegado a la primera y la última pide el cierre debajo. */}
           {piezasTerminos.length > 0 && (
-            <Seccion espaciado={espDe('terminos')}>
+            <>
               <Aire alto={espDe('terminos').seccion} />
               <View wrap={false} minPresenceAhead={piezasTerminos.length === 1 ? conCierre('terminos') : undefined}>
                 <Marca seccion="terminos" />
-                <Titulo texto="Términos y condiciones" icono="info" />
+                <Titulo texto="Términos y condiciones" icono="info" e={espDe('terminos')} />
                 {piezasTerminos[0].map((b, j) => <BloqueTerminos key={`terminos-0-${j}`} b={b} primero={j === 0} />)}
               </View>
               {piezasTerminos.slice(1).map((pieza, i) => (
@@ -2113,7 +2085,7 @@ export default function CotizacionTrappvelPDF({
                   </View>
                 </Fragment>
               ))}
-            </Seccion>
+            </>
           )}
 
           {/* ── Cierre: los créditos de las fotos (§4.10) AL LADO de la firma ─────
@@ -2142,7 +2114,6 @@ export default function CotizacionTrappvelPDF({
             </View>
           )}
         </View>
-        </NivelCtx.Provider>
 
         {/* ── Pie de todas las páginas (§4.10): barra `tinta` de lado a lado ──── */}
         <View
