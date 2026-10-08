@@ -19,7 +19,7 @@
  */
 
 import { headers } from 'next/headers';
-import { createServiceClient } from '@/lib/supabase/server';
+import { marcaDelWorkspace as marcaCompartida } from '@/lib/marca/marca-workspace';
 import {
   CADENA_VACIA,
   VERSION_TEXTO,
@@ -133,57 +133,13 @@ function ruta(token: string, sufijo = ''): string {
 // ─── La marca de quien invita ─────────────────────────────────────────────
 
 /**
- * Los datos de empresa pueden estar vacíos: el perfil fiscal del workspace es
- * opcional. Lo que falta se devuelve como null y la pantalla no lo pinta. Un
- * rótulo "NIT:" sin número al lado se lee como plataforma rota, y esta página
- * la ve alguien que todavía no confía en nosotros.
+ * La lectura vive en `lib/marca/marca-workspace.ts`, compartida con la autorización de
+ * datos del cliente final. Aquí solo se recorta a la forma que ya consumía esta pantalla.
  */
 async function marcaDelWorkspace(workspaceId: string | null): Promise<MarcaInvitante> {
-  const vacia: MarcaInvitante = {
-    nombre: 'la empresa que te invitó',
-    logoUrl: null,
-    colorPrimario: null,
-    razonSocial: null,
-    nit: null,
-    direccion: null,
-    ciudad: null,
-    telefono: null,
-    correo: null,
-  };
-  if (!workspaceId) return vacia;
-
-  const svc = createServiceClient();
-  const [ws, fiscal] = await Promise.all([
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    (svc.from('workspaces') as any)
-      .select('name, logo_url, color_primario')
-      .eq('id', workspaceId)
-      .maybeSingle(),
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    (svc.from('fiscal_profiles') as any)
-      .select('nit, razon_social, direccion_fiscal, municipio, telefono, email_fiscal')
-      .eq('workspace_id', workspaceId)
-      .maybeSingle(),
-  ]);
-
-  const w = ws.data as Record<string, string | null> | null;
-  const f = fiscal.data as Record<string, string | null> | null;
-  const limpio = (v: string | null | undefined) => {
-    const s = (v ?? '').trim();
-    return s.length > 0 ? s : null;
-  };
-
-  return {
-    nombre: limpio(f?.razon_social) ?? limpio(w?.name) ?? vacia.nombre,
-    logoUrl: limpio(w?.logo_url),
-    colorPrimario: limpio(w?.color_primario),
-    razonSocial: limpio(f?.razon_social),
-    nit: limpio(f?.nit),
-    direccion: limpio(f?.direccion_fiscal),
-    ciudad: limpio(f?.municipio),
-    telefono: limpio(f?.telefono),
-    correo: limpio(f?.email_fiscal),
-  };
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars
+  const { nombreComercial, ...marca } = await marcaCompartida(workspaceId, 'la empresa que te invitó');
+  return marca;
 }
 
 // ─── Abrir el enlace ──────────────────────────────────────────────────────

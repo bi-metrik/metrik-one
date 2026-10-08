@@ -1061,10 +1061,16 @@ describe('el texto para el cliente', () => {
   it('⚠️ «Antes de viajar» va con «Incluido», no suelto al final del documento', async () => {
     // El orden del texto solo significa algo dentro de UNA página: se mira la suya.
     const t = await texto(props({ dias: null, viaje: viaje({ ...textoParaElViaje(doc(true)), vuelos: [], hoteles: [], presentacion: null }) }))
-    const pagina = [...porPagina(t, 'COT-2026-0006').values()].find(p => p.includes('Antes de viajar'))!
+    const paginas = porPagina(t, 'COT-2026-0006')
+    const pagina = [...paginas.values()].find(p => p.includes('Antes de viajar'))!
     expect(pagina).toContain('Incluido en el plan')
     expect(pagina.indexOf('Incluido en el plan')).toBeLessThan(pagina.indexOf('Antes de viajar'))
-    expect(pagina.indexOf('Antes de viajar')).toBeLessThan(pagina.indexOf('Opcionales'))
+    // «Opcionales» va después: en la misma hoja, más abajo, o en una hoja posterior.
+    const hojaDe = (frase: string) => [...paginas.entries()].find(([, p]) => p.includes(frase))![0]
+    expect(hojaDe('Antes de viajar')).toBeLessThanOrEqual(hojaDe('Opcionales'))
+    if (hojaDe('Antes de viajar') === hojaDe('Opcionales')) {
+      expect(pagina.indexOf('Antes de viajar')).toBeLessThan(pagina.indexOf('Opcionales'))
+    }
   })
 
   it('⚠️⚠️ un borrador de ONE sin revisar no imprime NADA: el documento sale como sin texto', async () => {

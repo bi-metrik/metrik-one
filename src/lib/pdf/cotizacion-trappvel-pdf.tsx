@@ -41,6 +41,12 @@
  * su foco. El día a día no repite la tabla de vuelos, y «Antes de viajar» va con «Incluido»,
  * no suelto al final. Las reglas puras viven en `cotizacion-trappvel-formato.ts`.
  *
+ * **7 · Espacio y paginación (§4.11, Ren, 2026-10-08).** Todo espacio sale de la escala
+ * 4 · 8 · 12 · 16 · 24 · 32 · 48 (`ESPACIADO_NORMAL` / `ESPACIADO_COMPACTO`), que cada sección
+ * recibe por prop (`e` / `esp`). El aire ANTES de una unidad del flujo es una pieza (`Aire`), no su
+ * margen. Este componente dibuja UNA composición; cuántas hojas y qué paso de compactación
+ * lo decide `componerCotizacionTrappvel` midiendo el PDF ya renderizado.
+ *
  * ⚠️ Las fuentes estándar del PDF (Helvetica) NO traen «→», «✔», «✕», «●» ni «★»: un
  * carácter que la fuente no tiene se imprime como otro (la flecha salió como apóstrofo).
  * Todos esos signos van dibujados en SVG, nunca como texto.
@@ -65,9 +71,13 @@ import {
 
 import type { CotizacionPDFProps, FotoPDF, PrecioPorHabitacionPDF, PrecioPorPasajeroPDF, ViajePDF } from './cotizacion-props'
 import { creditosDeFotos } from './fotos-del-viaje'
+import { colorDeMarca } from './medir-pdf'
 import {
   ALTO_ENCABEZADO_VUELOS,
   CANAL_COLUMNAS,
+  HOJA,
+  espaciadoDe,
+  numeroDeSeccion,
   TOKENS as C,
   absorberRedondeo,
   altoEstimadoDeGrupoDeVuelos,
@@ -99,6 +109,8 @@ import {
   tituloConAcento,
   yaLoDiceLaPortada,
   type Capitulo,
+  type Composicion,
+  type Espaciado,
   type Fecha,
   type FilaVuelo,
   type ListaDelCierre,
@@ -113,10 +125,47 @@ import type { HotelPDF, VueloPDF } from '@/lib/cotizaciones/detalle-viaje'
 /** Ver la nota de `SIN_GUION` en la plantilla de Termotech: la regla es por `<Text>`. */
 const SIN_GUION = partirPalabraLarga
 
-const ANCHO_PAGINA = 595.28
-const MARGEN = 40
+const ANCHO_PAGINA = HOJA.ancho
+const MARGEN = HOJA.margen
 const ANCHO_CONTENIDO = ANCHO_PAGINA - MARGEN * 2
-const ALTO_PIE = 26
+const ALTO_PIE = HOJA.altoPie
+
+// ── Espacio y paginación (§4.11) ──────────────────────────────────────────────
+
+/**
+ * El aire ANTES de una unidad del flujo, como pieza propia y no como margen de la unidad.
+ *
+ * ⚠️ react-pdf conserva el `marginTop` de una unidad que no cupo y pasa entera a la hoja
+ * siguiente: la hoja nueva empezaba con 32 o 48 pt en blanco arriba, un blanco que no separa
+ * nada (§4.11: «el espacio en blanco es intencional o no existe»). Una caja vacía con alto sí
+ * se parte: si la unidad que sigue salta, el aire se queda al pie de la hoja anterior y la
+ * unidad arranca arriba, pegada al encabezado.
+ */
+function Aire({ alto }: { alto: number }) {
+  return alto > 0 ? <View style={{ height: alto }} /> : null
+}
+
+
+/**
+ * Un punto invisible al inicio de una sección, con su número en el color: así el paso de
+ * composición sabe, leyendo el PDF ya renderizado, en qué hoja empezó cada sección
+ * (`medir-pdf.ts`). Va en absoluto: no ocupa lugar ni mueve nada.
+ */
+function Marca({ seccion }: { seccion: string }) {
+  return (
+    <View
+      style={{
+        position: 'absolute',
+        top: 0,
+        left: 0,
+        width: 0.5,
+        height: 0.5,
+        backgroundColor: colorDeMarca(numeroDeSeccion(seccion)),
+        opacity: 0.01,
+      }}
+    />
+  )
+}
 
 const pesos = (v: number) =>
   new Intl.NumberFormat('es-CO', { style: 'currency', currency: 'COP', maximumFractionDigits: 0 }).format(v)
@@ -163,7 +212,7 @@ function Degradado({ ancho, alto, id }: { ancho: number; alto: number; id: strin
 
 function Flecha({ color = C.texto, alto = 7 }: { color?: string; alto?: number }) {
   return (
-    <Svg width={alto * 1.4} height={alto} viewBox="0 0 14 10" style={{ marginHorizontal: 3 }}>
+    <Svg width={alto * 1.4} height={alto} viewBox="0 0 14 10" style={{ marginHorizontal: 4 }}>
       <Path d="M1 5 H12 M8.5 1.5 L12 5 L8.5 8.5" stroke={color} strokeWidth={1.4} fill="none" />
     </Svg>
   )
@@ -303,9 +352,11 @@ function Antetitulo({ texto, color, punto }: { texto: string; color: string; pun
  * un título es siempre el primer hijo de su sección. Medido: el rótulo «DÍA A DÍA» quedó
  * solo al pie de la página con el `minPresenceAhead` puesto.
  */
-function Titulo({ texto, icono }: { texto: string; icono: IconoDeSeccion }) {
+function Titulo({ texto, icono, arriba = 0, e }: { texto: string; icono: IconoDeSeccion; arriba?: number; e: Espaciado }) {
+  // §4.11: el de título → contenido abajo. El aire entre secciones va ANTES de la unidad que
+  // lleva el título, como `Aire` (o como margen si el título va dentro de una columna).
   return (
-    <View style={{ flexDirection: 'row', alignItems: 'center', marginTop: 24, marginBottom: 10 }}>
+    <View style={{ flexDirection: 'row', alignItems: 'center', marginTop: arriba, marginBottom: e.bloque }}>
       <IconoSeccion tipo={icono} />
       <Text style={{ fontSize: 22, fontFamily: 'Helvetica-Bold', color: C.tinta }}>{texto}</Text>
     </View>
@@ -338,9 +389,9 @@ function Rotulo({ texto, chico = false, ancho }: { texto: string; chico?: boolea
  * La foto de portada, a todo el ancho (§4.2), encuadrada en su foco: la de Johnny Cay dejaba
  * la isla en el borde de arriba porque el recorte iba por el centro.
  */
-function FotoConRotulo({ foto, alto }: { foto: FotoPDF; alto: number }) {
+function FotoConRotulo({ foto, alto, e }: { foto: FotoPDF; alto: number; e: Espaciado }) {
   return (
-    <View wrap={false} style={{ marginTop: 14, position: 'relative' }}>
+    <View wrap={false} style={{ marginTop: e.bloque, position: 'relative' }}>
       <PdfImage
         src={foto.url}
         style={{
@@ -368,14 +419,27 @@ const CANAL_FOTOS = 8
 const ANCHO_MINIATURA = (ANCHO_CONTENIDO - CANAL_FOTOS * 2) / 3
 const ALTO_MINIATURA = ANCHO_MINIATURA / 1.5
 
-function Miniatura({ foto, ancho = ANCHO_MINIATURA, alto = ALTO_MINIATURA }: { foto: FotoPDF; ancho?: number; alto?: number }) {
+/** Paso 2 del punto 6: la foto de una alternativa a 1/4 del ancho de contenido, en 3:2. */
+const ANCHO_CUARTO = (ANCHO_CONTENIDO - CANAL_FOTOS * 3) / 4
+
+/** Paso 3 del punto 6: la foto de ciudad de un capítulo a 110 pt de alto (la portada no). */
+const ALTO_FOTO_CIUDAD_COMPACTA = 110
+
+/**
+ * Una miniatura 3:2 encuadrada en su foco.
+ *
+ * Con `estirar` (punto 7 del §4.11, fila de tarjeta + foto) la foto toma el alto de la fila:
+ * si la tarjeta de al lado es más alta, la foto crece hacia abajo con el mismo ancho y el
+ * recorte se rehace; si es más baja, la tarjeta se estira hasta el alto de la foto. Así la
+ * fila no deja hueco ni debajo de la tarjeta ni debajo de la foto.
+ */
+function Miniatura({ foto, ancho = ANCHO_MINIATURA, alto = ALTO_MINIATURA, estirar = false }: { foto: FotoPDF; ancho?: number; alto?: number; estirar?: boolean }) {
   return (
-    <View style={{ width: ancho, height: alto, position: 'relative' }}>
+    <View style={estirar ? { width: ancho, minHeight: alto, alignSelf: 'stretch', position: 'relative' } : { width: ancho, height: alto, position: 'relative' }}>
       <PdfImage
         src={foto.url}
         style={{
-          width: ancho,
-          height: alto,
+          ...(estirar ? { position: 'absolute', top: 0, left: 0, bottom: 0, width: ancho } : { width: ancho, height: alto }),
           objectFit: 'cover',
           // El recorte se recalcula para la forma de ESTE marco: el foco es de la foto.
           objectPosition: encuadreDeFoto(foto.foco, foto.proporcion, ancho / alto),
@@ -393,15 +457,17 @@ function Miniatura({ foto, ancho = ANCHO_MINIATURA, alto = ALTO_MINIATURA }: { f
  * 2026-09-23 cada foto medía un tercio fuera cual fuera la cuenta, y con dos quedaba un
  * hueco a la derecha. No se parte entre páginas.
  */
-function FranjaDeFotos({ fotos }: { fotos: FotoPDF[] }) {
+function FranjaDeFotos({ fotos, e, nivel = 0, deCapitulo = false, arriba = false }: { fotos: FotoPDF[]; e: Espaciado; nivel?: Composicion['nivel']; deCapitulo?: boolean; arriba?: boolean }) {
   if (fotos.length === 0) return null
+  // Paso 3: las fotos de ciudad de un capítulo bajan a 110 pt de alto; las de la portada no.
+  const tope = deCapitulo && nivel >= 3 ? ALTO_FOTO_CIUDAD_COMPACTA : Number.POSITIVE_INFINITY
   return (
-    <View wrap={false} style={{ marginTop: 14 }}>
+    <View wrap={false} style={{ marginTop: arriba ? 0 : e.bloque }}>
       {renglonesDeFotos(fotos.length, ANCHO_CONTENIDO, CANAL_FOTOS).map((r, i) => (
         <View key={`renglon-${i}`} style={{ flexDirection: 'row', marginTop: i === 0 ? 0 : CANAL_FOTOS }}>
           {fotos.slice(r.desde, r.desde + r.fotos).map((f, j) => (
             <View key={`foto-${j}`} style={{ marginLeft: j === 0 ? 0 : CANAL_FOTOS }}>
-              <Miniatura foto={f} ancho={r.ancho} alto={r.alto} />
+              <Miniatura foto={f} ancho={r.ancho} alto={Math.min(r.alto, tope)} />
             </View>
           ))}
         </View>
@@ -412,9 +478,9 @@ function FranjaDeFotos({ fotos }: { fotos: FotoPDF[] }) {
 
 function Ficha({ etiqueta, valor }: { etiqueta: string; valor: string }) {
   return (
-    <View style={{ flexGrow: 1, flexBasis: 0, paddingHorizontal: 9 }}>
+    <View style={{ flexGrow: 1, flexBasis: 0, paddingHorizontal: 8 }}>
       <Text style={{ fontSize: 6.5, color: C.gris, letterSpacing: 1 }}>{etiqueta}</Text>
-      <Text hyphenationCallback={SIN_GUION} style={{ fontSize: 10, fontFamily: 'Helvetica-Bold', color: C.tinta, marginTop: 3 }}>
+      <Text hyphenationCallback={SIN_GUION} style={{ fontSize: 10, fontFamily: 'Helvetica-Bold', color: C.tinta, marginTop: 4 }}>
         {valor}
       </Text>
     </View>
@@ -448,11 +514,11 @@ interface TarifaDoc {
   esPrincipal: boolean
 }
 
-function ChipsDeTarifa({ tarifas, de }: { tarifas: TarifaDoc[]; de: { tarifas?: number[] } }) {
+function ChipsDeTarifa({ tarifas, de, arriba = false }: { tarifas: TarifaDoc[]; de: { tarifas?: number[] }; arriba?: boolean }) {
   const propias = (de.tarifas ?? []).map(i => tarifas[i]).filter((t): t is TarifaDoc => t !== undefined)
   if (propias.length === 0) return null
   return (
-    <View style={{ flexDirection: 'row', flexWrap: 'wrap', marginTop: 2 }}>
+    <View style={{ flexDirection: 'row', flexWrap: 'wrap', marginTop: arriba ? 0 : 4 }}>
       {propias.map(t => <Chip key={t.titulo} texto={t.titulo} color={t.color} />)}
     </View>
   )
@@ -460,38 +526,60 @@ function ChipsDeTarifa({ tarifas, de }: { tarifas: TarifaDoc[]; de: { tarifas?: 
 
 // ── Hotel (§4.3) ──────────────────────────────────────────────────────────────
 
-function TarjetaHotel({ h, general, tarifas, arriba = false }: { h: HotelPDF; general: boolean; tarifas: TarifaDoc[]; arriba?: boolean }) {
+/**
+ * La tarjeta de un hotel. `margen` es el aire que la separa de lo que va encima (0 si es lo
+ * primero de su bloque).
+ *
+ * Con `llenar` (punto 7 del §4.11) la tarjeta va en una fila con una foto y se estira al alto
+ * de la fila: el nombre y el resumen arriba, la acomodación (y lo que va con ella) pegada
+ * abajo. Antes quedaba más baja que la foto, con un hueco debajo.
+ */
+function TarjetaHotel({ h, general, tarifas, margen, e, llenar = false }: { h: HotelPDF; general: boolean; tarifas: TarifaDoc[]; margen: number; e: Espaciado; llenar?: boolean }) {
   // Los textos salen de `textosDeTarjetaHotel`, la misma función que pinta «Así lo ve el
   // cliente» en la tarjeta de la opción del editor.
   const t = textosDeTarjetaHotel(h, general)
+  const abajo = t.condiciones !== '' || Boolean(t.adicionales) || Boolean(t.nota)
   return (
-    <View wrap={false} style={{ flexDirection: 'row', backgroundColor: C.tarjeta, borderRadius: 8, padding: 11, marginTop: arriba ? 0 : 12 }}>
-      <View style={{ flex: 1 }}>
-        <ChipsDeTarifa tarifas={tarifas} de={h} />
-        <View style={{ flexDirection: 'row', alignItems: 'center', marginTop: 3 }}>
+    <View
+      wrap={false}
+      style={{
+        backgroundColor: C.tarjeta,
+        borderRadius: 8,
+        padding: e.dentro,
+        marginTop: margen,
+        ...(llenar ? { flexGrow: 1, justifyContent: 'space-between' } : {}),
+      }}
+    >
+      <View>
+        <ChipsDeTarifa tarifas={tarifas} de={h} arriba />
+        <View style={{ flexDirection: 'row', alignItems: 'center', marginTop: (h.tarifas ?? []).some(i => tarifas[i]) ? e.fino : 0 }}>
           <Text hyphenationCallback={SIN_GUION} style={{ fontSize: 13, fontFamily: 'Helvetica-Bold', color: C.tinta }}>
             {t.nombre}
           </Text>
           {t.estrellas ? <Estrellas n={t.estrellas} /> : null}
         </View>
         {t.resumen !== '' && (
-          <Text hyphenationCallback={SIN_GUION} style={{ fontSize: 9.5, color: C.texto, marginTop: 3 }}>{t.resumen}</Text>
+          <Text hyphenationCallback={SIN_GUION} style={{ fontSize: 9.5, color: C.texto, marginTop: e.fino }}>{t.resumen}</Text>
         )}
-        {t.condiciones !== '' && (
-          <Text hyphenationCallback={SIN_GUION} style={{ fontSize: 8.5, color: C.gris, marginTop: 3 }}>{t.condiciones}</Text>
-        )}
-        {/* El adicional vive dentro de su bloque, en los tres niveles: es plata que el
-            cliente paga. Sin cifra: el dinero va en «Inversión». */}
-        {t.adicionales && (
-          <Text hyphenationCallback={SIN_GUION} style={{ fontSize: 8.5, color: C.gris, marginTop: 2 }}>
-            {t.adicionales}
-          </Text>
-        )}
-        {/* P2 · la nota que escribió una persona para el cliente, debajo de la tarjeta. */}
-        {t.nota ? (
-          <Text hyphenationCallback={SIN_GUION} style={{ fontSize: 8.5, color: C.texto, marginTop: 3 }}>{t.nota}</Text>
-        ) : null}
       </View>
+      {abajo && (
+        <View style={{ marginTop: e.fino }}>
+          {t.condiciones !== '' && (
+            <Text hyphenationCallback={SIN_GUION} style={{ fontSize: 8.5, color: C.gris }}>{t.condiciones}</Text>
+          )}
+          {/* El adicional vive dentro de su bloque, en los tres niveles: es plata que el
+              cliente paga. Sin cifra: el dinero va en «Inversión». */}
+          {t.adicionales && (
+            <Text hyphenationCallback={SIN_GUION} style={{ fontSize: 8.5, color: C.gris, marginTop: t.condiciones !== '' ? e.fino : 0 }}>
+              {t.adicionales}
+            </Text>
+          )}
+          {/* P2 · la nota que escribió una persona para el cliente, debajo de la tarjeta. */}
+          {t.nota ? (
+            <Text hyphenationCallback={SIN_GUION} style={{ fontSize: 8.5, color: C.texto, marginTop: t.condiciones !== '' || t.adicionales ? e.fino : 0 }}>{t.nota}</Text>
+          ) : null}
+        </View>
+      )}
     </View>
   )
 }
@@ -517,25 +605,34 @@ function fotoDelHotel(h: HotelPDF): FotoPDF | null {
  * su tarjeta entera con su foto (`textosDeTarjetaHotel` en las dos). La fila no se parte
  * entre dos hojas. Sin foto, el hotel sigue en una línea (`LineaHotelAlternativo`).
  */
-function HotelAlternativoConFoto({ h, foto, general, tarifas }: { h: HotelPDF; foto: FotoPDF; general: boolean; tarifas: TarifaDoc[] }) {
+function HotelAlternativoConFoto({ h, foto, general, tarifas, e, nivel }: { h: HotelPDF; foto: FotoPDF; general: boolean; tarifas: TarifaDoc[]; e: Espaciado; nivel: Composicion['nivel'] }) {
+  // Paso 2 del punto 6: la foto de una alternativa (nunca la de la Recomendada) baja de un
+  // tercio a un cuarto del ancho, en la misma proporción 3:2.
+  const ancho = nivel >= 2 ? ANCHO_CUARTO : ANCHO_MINIATURA
   return (
-    <View wrap={false} style={{ flexDirection: 'row', marginTop: 12 }}>
-      <View style={{ flex: 1, paddingRight: 12 }}>
-        <TarjetaHotel h={h} general={general} tarifas={tarifas} arriba />
+    <>
+      <Aire alto={e.tarjetas} />
+      <View wrap={false} style={{ flexDirection: 'row' }}>
+        <View style={{ flex: 1, paddingRight: 12 }}>
+          <TarjetaHotel h={h} general={general} tarifas={tarifas} margen={0} e={e} llenar />
+        </View>
+        <Miniatura foto={foto} ancho={ancho} alto={ancho / 1.5} estirar />
       </View>
-      <Miniatura foto={foto} />
-    </View>
+    </>
   )
 }
 
 /** El hotel de otra tarifa en la misma ciudad: una línea, con su chip. */
-function LineaHotelAlternativo({ h, general, tarifas }: { h: HotelPDF; general: boolean; tarifas: TarifaDoc[] }) {
+function LineaHotelAlternativo({ h, general, tarifas, e }: { h: HotelPDF; general: boolean; tarifas: TarifaDoc[]; e: Espaciado }) {
   const texto = [h.hotel ?? h.linea, !general ? h.regimen : null, !general ? h.habitacion : null].filter(Boolean).join(' · ')
   return (
-    <View wrap={false} style={{ flexDirection: 'row', alignItems: 'center', marginTop: 6, paddingHorizontal: 11 }}>
-      <ChipsDeTarifa tarifas={tarifas} de={h} />
-      <Text hyphenationCallback={SIN_GUION} style={{ fontSize: 9, color: C.texto, marginLeft: 2, flex: 1 }}>{texto}</Text>
-    </View>
+    <>
+      <Aire alto={e.tarjetas} />
+      <View wrap={false} style={{ flexDirection: 'row', alignItems: 'center', paddingHorizontal: e.dentro }}>
+        <ChipsDeTarifa tarifas={tarifas} de={h} arriba />
+        <Text hyphenationCallback={SIN_GUION} style={{ fontSize: 9, color: C.texto, marginLeft: 4, flex: 1 }}>{texto}</Text>
+      </View>
+    </>
   )
 }
 
@@ -573,9 +670,9 @@ function Circulo({ e }: { e: EntradaTiempo }) {
 }
 
 /** Una tarjeta del día a día: un vuelo o una actividad. */
-function TarjetaDelDia({ e, primera }: { e: EntradaTiempo; primera: boolean }) {
+function TarjetaDelDia({ e, primera, esp }: { e: EntradaTiempo; primera: boolean; esp: Espaciado }) {
   return (
-    <View style={{ marginTop: primera ? 0 : 6, backgroundColor: C.tarjeta, borderRadius: 8, paddingVertical: 8, paddingHorizontal: 10 }}>
+    <View style={{ marginTop: primera ? 0 : esp.tarjetas, backgroundColor: C.tarjeta, borderRadius: 8, padding: esp.dentro }}>
       {'texto' in e.titulo ? (
         <Text hyphenationCallback={SIN_GUION} style={{ fontSize: 10, fontFamily: 'Helvetica-Bold', color: C.tinta }}>
           {e.titulo.texto}
@@ -584,9 +681,9 @@ function TarjetaDelDia({ e, primera }: { e: EntradaTiempo; primera: boolean }) {
         <Ruta desde={e.titulo.desde} hasta={e.titulo.hasta} tam={10} negrita />
       )}
       {e.subtitulo && ('texto' in e.subtitulo ? (
-        <Text style={{ fontSize: 8.5, color: C.purpura, marginTop: 2 }}>{e.subtitulo.texto}</Text>
+        <Text style={{ fontSize: 8.5, color: C.purpura, marginTop: esp.fino }}>{e.subtitulo.texto}</Text>
       ) : (
-        <View style={{ flexDirection: 'row', alignItems: 'center', marginTop: 2 }}>
+        <View style={{ flexDirection: 'row', alignItems: 'center', marginTop: esp.fino }}>
           <Text style={{ fontSize: 8.5, color: C.purpura }}>
             {[e.subtitulo.aerolinea, e.subtitulo.salida].filter(Boolean).join(' · ')}
           </Text>
@@ -595,11 +692,11 @@ function TarjetaDelDia({ e, primera }: { e: EntradaTiempo; primera: boolean }) {
         </View>
       ))}
       {e.notas.map((n, j) => (
-        <Text key={`n-${j}`} hyphenationCallback={SIN_GUION} style={{ fontSize: 8, color: C.gris, marginTop: 2 }}>{n}</Text>
+        <Text key={`n-${j}`} hyphenationCallback={SIN_GUION} style={{ fontSize: 8, color: C.gris, marginTop: esp.fino }}>{n}</Text>
       ))}
       {e.vinetas.map((v, j) => (
-        <View key={`v-${j}`} style={{ flexDirection: 'row', marginTop: 3 }}>
-          <View style={{ width: 4, height: 4, borderRadius: 2, backgroundColor: C.magenta, marginTop: 3.5, marginRight: 6 }} />
+        <View key={`v-${j}`} style={{ flexDirection: 'row', marginTop: esp.fino }}>
+          <View style={{ width: 4, height: 4, borderRadius: 2, backgroundColor: C.magenta, marginTop: 3.5, marginRight: 8 }} />
           <Text hyphenationCallback={SIN_GUION} style={{ fontSize: 9, color: C.texto, flex: 1 }}>{v}</Text>
         </View>
       ))}
@@ -614,23 +711,30 @@ function TarjetaDelDia({ e, primera }: { e: EntradaTiempo; primera: boolean }) {
  * El título viaja con el primer día (#819, afinado el 2026-09-23): solo al pie de la
  * página parece un corte. Si el bloque no cabe, pasa entero a la página que sigue.
  */
-function LineaDeTiempo({ entradas }: { entradas: EntradaTiempo[] }) {
+function LineaDeTiempo({ entradas, marca, esp }: { entradas: EntradaTiempo[]; marca?: ReactNode; esp: Espaciado }) {
   if (entradas.length === 0) return null
   const dias = gruposPorDia(entradas).map((grupo, i) => (
-    <View key={`dia-${i}`} wrap={false} style={{ flexDirection: 'row', marginTop: i === 0 ? 0 : 8 }}>
-      <View style={{ width: 34, marginRight: 10 }}><Circulo e={grupo[0]} /></View>
+    <View key={`dia-${i}`} wrap={false} style={{ flexDirection: 'row' }}>
+      <View style={{ width: 34, marginRight: 12 }}><Circulo e={grupo[0]} /></View>
       <View style={{ flex: 1 }}>
-        {grupo.map((e, j) => <TarjetaDelDia key={`t-${j}`} e={e} primera={j === 0} />)}
+        {grupo.map((e, j) => <TarjetaDelDia key={`t-${j}`} e={e} primera={j === 0} esp={esp} />)}
       </View>
     </View>
   ))
   return (
     <View>
+      <Aire alto={esp.seccion} />
       <View wrap={false}>
-        <Titulo texto="Día a día" icono="calendario" />
+        {marca}
+        <Titulo texto="Día a día" icono="calendario" e={esp} />
         {dias[0]}
       </View>
-      {dias.slice(1)}
+      {dias.slice(1).map((d, i) => (
+        <Fragment key={`dia-aire-${i}`}>
+          <Aire alto={esp.tarjetas} />
+          {d}
+        </Fragment>
+      ))}
     </View>
   )
 }
@@ -664,7 +768,23 @@ const CANAL = 6
 /** Alto de la franja del color secundario en la pastilla de la aerolínea. */
 const FRANJA_SIGLA = 3
 
-function TablaVuelos({ vuelos, general, tarifas, titulo }: { vuelos: VueloPDF[]; general: boolean; tarifas: TarifaDoc[]; titulo?: ReactNode }) {
+/**
+ * Las filas de una tabla que se parte (§4.11, punto 5), agrupadas para que ninguna hoja se
+ * quede con una fila sola: las dos primeras van juntas (la primera hoja lleva al menos dos)
+ * y las dos últimas también (la última, igual). Con tres o menos, van todas juntas.
+ */
+function gruposDeFilas<T>(filas: T[]): T[][] {
+  if (filas.length <= 3) return [filas]
+  return [filas.slice(0, 2), ...filas.slice(2, -2).map(f => [f]), filas.slice(-2)]
+}
+
+/** Lo mínimo que un título pide tener debajo en su hoja (punto 4): su primera unidad, 80 pt o más. */
+const PRESENCIA_MINIMA_TITULO = 80
+
+/** Hasta cuántas filas la tabla de cargos en destino va entera, sin partirse (punto 5). */
+const FILAS_DE_CARGOS_ENTERA = 4
+
+function TablaVuelos({ vuelos, general, tarifas, titulo, marca, esp }: { vuelos: VueloPDF[]; general: boolean; tarifas: TarifaDoc[]; titulo?: ReactNode; marca?: ReactNode; esp: Espaciado }) {
   const grupos = vuelos.map(v => ({ v, filas: filasDelVuelo(v) }))
   const todas = grupos.flatMap(g => g.filas)
   // Las columnas NO son fijas: una columna vacía es la «tabla con guiones» que este
@@ -697,7 +817,7 @@ function TablaVuelos({ vuelos, general, tarifas, titulo }: { vuelos: VueloPDF[];
                 alignItems: 'center',
                 justifyContent: 'center',
                 paddingBottom: color.franja ? FRANJA_SIGLA : 0,
-                marginRight: 5,
+                marginRight: 4,
               }}
             >
               <Text style={{ fontSize: 6.5, fontFamily: 'Helvetica-Bold', color: color.texto }}>{sigla}</Text>
@@ -716,7 +836,7 @@ function TablaVuelos({ vuelos, general, tarifas, titulo }: { vuelos: VueloPDF[];
       return (
         <View>
           <Ruta desde={f.desde} hasta={f.hasta} />
-          {f.escala && <Text style={{ fontSize: 7.5, color: C.gris, marginTop: 1 }}>{f.escala}</Text>}
+          {f.escala && <Text style={{ fontSize: 7.5, color: C.gris }}>{f.escala}</Text>}
           <ChipsDeTarifa tarifas={tarifas} de={f.vuelo} />
         </View>
       )
@@ -755,10 +875,10 @@ function TablaVuelos({ vuelos, general, tarifas, titulo }: { vuelos: VueloPDF[];
           <View
             key={`vuelo-${gi}`}
             wrap={false}
-            style={{ backgroundColor: gi % 2 === 1 ? C.tarjeta : C.blanco, paddingHorizontal: 8, paddingVertical: 6 }}
+            style={{ backgroundColor: gi % 2 === 1 ? C.tarjeta : C.blanco, paddingHorizontal: 8, paddingVertical: 4 }}
           >
             {g.filas.map((f, fi) => (
-              <View key={`f-${fi}`} style={{ flexDirection: 'row', marginTop: fi === 0 ? 0 : 5 }}>
+              <View key={`f-${fi}`} style={{ flexDirection: 'row', marginTop: fi === 0 ? 0 : 4 }}>
                 {columnas.map((c, j) => (
                   <View key={`td-${c}`} style={{ width: ancho(c), paddingRight: pad(j) }}>{celda(f, c)}</View>
                 ))}
@@ -769,7 +889,7 @@ function TablaVuelos({ vuelos, general, tarifas, titulo }: { vuelos: VueloPDF[];
             )}
             {/* P2 · la nota que escribió una persona para el cliente, debajo del vuelo. */}
             {g.v.nota ? (
-              <Text hyphenationCallback={SIN_GUION} style={{ fontSize: 7.5, color: C.texto, marginTop: 3 }}>{g.v.nota}</Text>
+              <Text hyphenationCallback={SIN_GUION} style={{ fontSize: 7.5, color: C.texto, marginTop: 4 }}>{g.v.nota}</Text>
             ) : null}
           </View>
         )
@@ -790,11 +910,15 @@ function TablaVuelos({ vuelos, general, tarifas, titulo }: { vuelos: VueloPDF[];
   // en blanco, la misma regla que ya aplican las listas del cierre.
   if (tablaDeVuelosVaEntera(altos)) {
     return (
-      <View wrap={false}>
-        {titulo}
-        {encabezado}
-        {bloques}
-      </View>
+      <>
+        <Aire alto={esp.seccion} />
+        <View wrap={false}>
+          {marca}
+          {titulo}
+          {encabezado}
+          {bloques}
+        </View>
+      </>
     )
   }
 
@@ -804,12 +928,24 @@ function TablaVuelos({ vuelos, general, tarifas, titulo }: { vuelos: VueloPDF[];
   // El título (con su marca de presencia) queda HERMANO del contenedor para no ser su
   // primer hijo: `minPresenceAhead` no actúa sobre un primer hijo, y así el título nunca
   // queda solo al pie. La marca pide que quepan el encabezado y la primera aerolínea.
+  //
+  // §4.11 punto 5: se parte entre filas, nunca dentro de una, y ninguna de las dos hojas se
+  // queda con una fila sola (`gruposDeFilas`). Punto 4: el título pide debajo su primera
+  // unidad —el encabezado y el primer grupo de filas—, y nunca menos de 80 pt.
+  const indices = gruposDeFilas(bloques.map((_, i) => i))
+  const primera = ALTO_ENCABEZADO_VUELOS + indices[0].reduce((a, i) => a + altos[i], 0)
   return (
     <>
-      <View minPresenceAhead={ALTO_ENCABEZADO_VUELOS + altos[0] + 20}>{titulo}</View>
+      <Aire alto={esp.seccion} />
+      <View minPresenceAhead={Math.max(PRESENCIA_MINIMA_TITULO, primera)}>
+        {marca}
+        {titulo}
+      </View>
       <View>
         <View fixed>{encabezado}</View>
-        {bloques}
+        {indices.map((grupo, k) => (
+          <View key={`grupo-vuelos-${k}`} wrap={false}>{grupo.map(i => bloques[i])}</View>
+        ))}
       </View>
     </>
   )
@@ -822,14 +958,14 @@ function PorPasajero({ precios, habitaciones, color }: { precios: PrecioPorPasaj
   // R8 · regla 8: sin precio por pasajero, el de cada habitación.
   if ((!precios || precios.length === 0) && habitaciones && habitaciones.length > 0) {
     return (
-      <Text style={{ fontSize: 7, color, marginTop: 2 }}>
+      <Text style={{ fontSize: 7, color }}>
         {habitaciones.map(h => `Habitación ${h.numero} (${h.ocupacion}) ${pesos(h.precio)}`).join('  ·  ')}
       </Text>
     )
   }
   if (!precios || precios.length === 0) return null
   return (
-    <Text style={{ fontSize: 7, color, marginTop: 2 }}>
+    <Text style={{ fontSize: 7, color }}>
       {precios.map(p => `${NOMBRE_PASAJERO[p.tipo]} ${pesos(p.precioUnitario)}`).join('  ·  ')}
     </Text>
   )
@@ -878,9 +1014,9 @@ const ALTO_TOTALES = 70
  *  eso se parte, con el TOTAL pegado a la última línea. */
 const LINEAS_EN_UN_BLOQUE = 8
 
-/** Alto del cierre (créditos al lado de la firma) con su margen: lo que la última sección
- *  pide tener debajo en su misma página. */
-const ALTO_CIERRE = 70
+/** Alto del cierre (créditos al lado de la firma) SIN su margen de arriba: lo que la última
+ *  sección pide tener debajo en su misma página es esto más el aire entre secciones. */
+const ALTO_CIERRE_SIN_AIRE = 46
 
 /**
  * Una fila de dinero: el concepto a la izquierda, su total a la derecha.
@@ -888,8 +1024,9 @@ const ALTO_CIERRE = 70
  * ⚠️ `minPresenceAhead` reserva el alto de la franja de totales: sin él la última fila se
  * queda al pie de una página y el TOTAL aparece solo arriba de la siguiente.
  */
-function LineaPrecio({ l, detallada, tam = 9, ultima = false, presenciaExtra, tarjeta }: {
+function LineaPrecio({ l, e, detallada, tam = 9, ultima = false, presenciaExtra, tarjeta }: {
   l: LineaImpresa
+  e: Espaciado
   detallada: boolean
   tam?: number
   ultima?: boolean
@@ -922,7 +1059,7 @@ function LineaPrecio({ l, detallada, tam = 9, ultima = false, presenciaExtra, ta
         {/* Los adicionales, DENTRO de la línea, sin cifra propia —ya están en el total de
             la derecha—, pero con nombre. Salen en los TRES niveles de detalle. */}
         {(l.adicionales?.length ?? 0) > 0 && (
-          <Text hyphenationCallback={SIN_GUION} style={{ fontSize: tam - 2, color: C.gris, marginTop: 1 }}>
+          <Text hyphenationCallback={SIN_GUION} style={{ fontSize: tam - 2, color: C.gris }}>
             {`Incluye: ${l.adicionales!.join(' · ')}`}
           </Text>
         )}
@@ -941,9 +1078,9 @@ function LineaPrecio({ l, detallada, tam = 9, ultima = false, presenciaExtra, ta
         borderTopRightRadius: arriba ? 8 : 0,
         borderBottomLeftRadius: abajo ? 8 : 0,
         borderBottomRightRadius: abajo ? 8 : 0,
-        paddingHorizontal: 12,
-        paddingTop: arriba ? 6 : 0,
-        paddingBottom: abajo ? 6 : 0,
+        paddingHorizontal: e.dentro,
+        paddingTop: arriba ? e.fino : 0,
+        paddingBottom: abajo ? e.fino : 0,
       } : undefined}
     >
       {fila}
@@ -985,7 +1122,7 @@ function ItemDeLista({ lista, texto, ultimo, presencia }: {
       style={{
         flexDirection: 'row',
         paddingBottom: ultimo ? 0 : 4,
-        ...(antes ? { borderLeftWidth: 2, borderLeftColor: C.ambarBorde, paddingLeft: 10 } : {}),
+        ...(antes ? { borderLeftWidth: 2, borderLeftColor: C.ambarBorde, paddingLeft: 8 } : {}),
       }}
     >
       <View style={{ width: 14, paddingTop: antes ? 4.5 : 1.5 }}>
@@ -999,10 +1136,11 @@ function ItemDeLista({ lista, texto, ultimo, presencia }: {
 }
 
 /** Una lista entera dentro de una columna: la fila de dos columnas no se parte. */
-function ListaEnColumna({ lista, items }: { lista: ListaDelCierre; items: string[] }) {
+function ListaEnColumna({ lista, items, primera, e }: { lista: ListaDelCierre; items: string[]; primera: boolean; e: Espaciado }) {
+  // Dentro de la columna, la segunda lista se separa de la primera con el aire de sección.
   return (
     <View>
-      <Titulo texto={LISTAS[lista].titulo} icono={LISTAS[lista].icono} />
+      <Titulo texto={LISTAS[lista].titulo} icono={LISTAS[lista].icono} arriba={primera ? 0 : e.seccion} e={e} />
       {items.map((t, i) => <ItemDeLista key={`${lista}-${i}`} lista={lista} texto={t} ultimo={i === items.length - 1} />)}
     </View>
   )
@@ -1028,14 +1166,14 @@ function piezasDeTerminos(bloques: BloqueDeTerminos[]): BloqueDeTerminos[][] {
 function BloqueTerminos({ b, primero }: { b: BloqueDeTerminos; primero: boolean }) {
   if (b.tipo === 'subtitulo') {
     return (
-      <Text style={{ fontSize: 9, fontFamily: 'Helvetica-Bold', color: C.tinta, marginTop: primero ? 0 : 8, marginBottom: 3 }}>
+      <Text style={{ fontSize: 9, fontFamily: 'Helvetica-Bold', color: C.tinta, marginTop: primero ? 0 : 8, marginBottom: 4 }}>
         {b.texto}
       </Text>
     )
   }
   if (b.tipo === 'vineta') {
     return (
-      <View style={{ flexDirection: 'row', paddingLeft: b.nivel === 2 ? 14 : 0, paddingBottom: 2.5 }}>
+      <View style={{ flexDirection: 'row', paddingLeft: b.nivel === 2 ? 12 : 0, paddingBottom: 4 }}>
         <View style={{ width: 10, paddingTop: 3.5 }}>
           <View style={{ width: 3, height: 3, borderRadius: 1.5, backgroundColor: b.nivel === 2 ? C.gris : C.magenta }} />
         </View>
@@ -1044,7 +1182,7 @@ function BloqueTerminos({ b, primero }: { b: BloqueDeTerminos; primero: boolean 
     )
   }
   return (
-    <Text hyphenationCallback={SIN_GUION} style={{ fontSize: 8, color: C.texto, lineHeight: 1.35, paddingBottom: 2.5 }}>
+    <Text hyphenationCallback={SIN_GUION} style={{ fontSize: 8, color: C.texto, lineHeight: 1.35, paddingBottom: 4 }}>
       {b.texto}
     </Text>
   )
@@ -1066,8 +1204,19 @@ export default function CotizacionTrappvelPDF({
   negocio,
   emisor,
   viaje,
-}: CotizacionPDFProps) {
+  composicion,
+}: CotizacionPDFProps & {
+  /**
+   * Cómo se compone (§4.11): normal si no viene. Lo fija `componerCotizacionTrappvel`
+   * después de medir el PDF ya renderizado; nadie más lo pasa.
+   */
+  composicion?: Composicion
+}) {
   const v = viaje ?? VIAJE_VACIO
+  const nivel = composicion?.nivel ?? 0
+  /** El espaciado de una sección: compacto con el paso 1, o si el punto 8 la eligió. */
+  const espDe = (seccion: string) => espaciadoDe(composicion, seccion)
+
   const detallada = v.nivelDetalle === 'muy_detallada'
   const general = v.nivelDetalle === 'general'
 
@@ -1336,26 +1485,26 @@ export default function CotizacionTrappvelPDF({
     piezasTerminos.length > 0 && 'terminos',
   ].filter((x): x is string => Boolean(x))
   const ultimaSeccion = firma ? seccionesFinales[seccionesFinales.length - 1] : undefined
-  const conCierre = (seccion: string) => (seccion === ultimaSeccion ? ALTO_CIERRE : undefined)
+  const conCierre = (seccion: string) => (seccion === ultimaSeccion ? espDe('cierre').seccion + ALTO_CIERRE_SIN_AIRE : undefined)
 
   // Totales: subtotal e IVA solo con IVA; el TOTAL en la barra de degradado, siempre.
   // `minPresenceAhead` solo cuando el TOTAL va suelto (más de 8 líneas) y es lo último antes
   // de la firma: en los demás casos lo lleva la caja que lo envuelve.
   const totales = (minPresenceAhead?: number) => (
-    <View wrap={false} minPresenceAhead={minPresenceAhead} style={{ marginTop: 8 }}>
+    <View wrap={false} minPresenceAhead={minPresenceAhead} style={{ marginTop: espDe('inversion').tarjetas }}>
       {!general && iva > 0 && (
-        <View style={{ flexDirection: 'row', justifyContent: 'flex-end', paddingVertical: 2 }}>
+        <View style={{ flexDirection: 'row', justifyContent: 'flex-end', marginBottom: 4 }}>
           <Text style={{ fontSize: 8.5, color: C.gris, width: 120 }}>Subtotal</Text>
           <Text style={{ fontSize: 8.5, color: C.tinta, width: 110, textAlign: 'right' }}>{pesos(subtotal)}</Text>
         </View>
       )}
       {iva > 0 && (
-        <View style={{ flexDirection: 'row', justifyContent: 'flex-end', paddingVertical: 2 }}>
+        <View style={{ flexDirection: 'row', justifyContent: 'flex-end', marginBottom: 4 }}>
           <Text style={{ fontSize: 8.5, color: C.gris, width: 120 }}>IVA</Text>
           <Text style={{ fontSize: 8.5, color: C.tinta, width: 110, textAlign: 'right' }}>{pesos(iva)}</Text>
         </View>
       )}
-      <View style={{ position: 'relative', height: 30, marginTop: 4 }}>
+      <View style={{ position: 'relative', height: 30 }}>
         <Degradado ancho={ANCHO_CONTENIDO} alto={30} id="degradado-total" />
         <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', height: 30, paddingHorizontal: 12 }}>
           <Text style={{ fontSize: 11, fontFamily: 'Helvetica-Bold', color: C.blanco, letterSpacing: 1 }}>TOTAL</Text>
@@ -1369,11 +1518,16 @@ export default function CotizacionTrappvelPDF({
     </View>
   )
 
+  const ep = espDe('portada')
+  const ei = espDe('inversion')
+  const epp = espDe('porPasajero')
   return (
     <Document>
       <Page
         size="A4"
-        style={{ paddingTop: 58, paddingBottom: ALTO_PIE + 22, fontFamily: 'Helvetica', color: C.texto }}
+        // §4.11 punto 1: el contenido empieza bajo la barra y el logo, y nunca invade la
+        // franja de 16 pt sobre el pie.
+        style={{ paddingTop: HOJA.arriba, paddingBottom: HOJA.altoPie + HOJA.franjaSobrePie, fontFamily: 'Helvetica', color: C.texto }}
       >
         {/* ── Encabezado de todas las páginas (§4.1) ───────────────────────── */}
         <View fixed style={{ position: 'absolute', top: 0, left: 0, width: ANCHO_PAGINA, height: 4 }}>
@@ -1393,6 +1547,8 @@ export default function CotizacionTrappvelPDF({
 
         <View style={{ paddingHorizontal: MARGEN }}>
           {/* ── Portada (§4.2) ─────────────────────────────────────────────── */}
+          <>
+          <Marca seccion="portada" />
           <Antetitulo texto="PROPUESTA DE VIAJE · COTIZACIÓN" color={C.purpura} punto />
           <Text
             hyphenationCallback={SIN_GUION}
@@ -1402,32 +1558,33 @@ export default function CotizacionTrappvelPDF({
             <Text style={{ color: C.magenta }}>{acento.acento}</Text>
             {acento.despues}
           </Text>
-          <Text style={{ fontSize: 10, color: C.gris, marginTop: 5 }}>
+          <Text style={{ fontSize: 10, color: C.gris, marginTop: ep.fino }}>
             {clienteDeLaPortada(empresa.contacto_nombre, empresa.nombre) ?? 'Propuesta de viaje'}
           </Text>
           {intro && (
-            <Text hyphenationCallback={SIN_GUION} style={{ fontSize: 12, color: C.texto, lineHeight: 1.45, marginTop: 10 }}>
+            <Text hyphenationCallback={SIN_GUION} style={{ fontSize: 12, color: C.texto, lineHeight: 1.45, marginTop: ep.dentro }}>
               {intro}
             </Text>
           )}
 
           {/* Sin foto la banda no aparece y el bloque sube: nada de rectángulo vacío. */}
-          {v.foto && <FotoConRotulo foto={v.foto} alto={190} />}
+          {v.foto && <FotoConRotulo foto={v.foto} alto={190} e={ep} />}
 
           {fichas.length > 0 && (
-            <View style={{ flexDirection: 'row', backgroundColor: C.tarjeta, borderRadius: 8, paddingVertical: 10, marginTop: 14 }}>
+            <View style={{ flexDirection: 'row', backgroundColor: C.tarjeta, borderRadius: 8, paddingVertical: ep.dentro, marginTop: ep.bloque }}>
               {fichas.map(f => <Ficha key={f.etiqueta} etiqueta={f.etiqueta} valor={f.valor} />)}
             </View>
           )}
 
           {v.presentacion && (
-            <Text hyphenationCallback={SIN_GUION} style={{ fontSize: 11, color: C.texto, lineHeight: 1.5, marginTop: 16 }}>
+            <Text hyphenationCallback={SIN_GUION} style={{ fontSize: 11, color: C.texto, lineHeight: 1.5, marginTop: ep.bloque }}>
               {v.presentacion}
             </Text>
           )}
 
           {/* Las fotos de ciudades que no tienen capítulo propio (una ciudad sin hotel). */}
-          <FranjaDeFotos fotos={fotosSueltas} />
+          <FranjaDeFotos fotos={fotosSueltas} e={ep} />
+          </>
 
           {/* ── Un capítulo por ciudad (§4.3) ──────────────────────────────── */}
           {capitulos.map((c, i) => {
@@ -1436,6 +1593,8 @@ export default function CotizacionTrappvelPDF({
             const hayAlgo = c.hotel !== null || c.alternativas.length > 0 || fotos.length > 0 || suyas.length > 0
             if (!hayAlgo) return null
             const nombreCiudad = c.ciudad ? (lugarConCodigo(c.ciudad)?.nombre ?? c.ciudad) : null
+            const id = `capitulo-${i}`
+            const ec = espDe(id)
             // Con un solo capítulo, su nombre casi siempre es el destino que la portada ya
             // dice («San Andrés - Providencia» salía dos veces en la misma página). La portada
             // lo dice en el título, en el nombre del negocio o en la ficha DESTINO: con un
@@ -1454,7 +1613,7 @@ export default function CotizacionTrappvelPDF({
                     {nombreCiudad}
                   </Text>
                 )}
-                {fechasCapitulo && <Text style={{ fontSize: 9, color: C.gris, marginTop: 2 }}>{fechasCapitulo}</Text>}
+                {fechasCapitulo && <Text style={{ fontSize: 9, color: C.gris, marginTop: ec.fino }}>{fechasCapitulo}</Text>}
               </>
             )
             const conEncabezado = multiples || conNombre
@@ -1466,24 +1625,44 @@ export default function CotizacionTrappvelPDF({
             // hotel): un título de capítulo solo al pie de la página parece un corte.
             const conFotos = fotos.length > 0
             const conHotel = !conFotos && c.hotel !== null
+            // La foto al lado es de la ciudad (no la del hotel que puso el asesor): el paso 3 la
+            // baja a 110 pt de alto, en 3:2.
+            const fotoDeCiudad = fotoAlLado && !(c.hotel && fotoDelHotel(c.hotel)?.url === fotos[0].url)
+            const altoAlLado = fotoDeCiudad && nivel >= 3 ? ALTO_FOTO_CIUDAD_COMPACTA : ALTO_MINIATURA
+            // §4.11 punto 2: 48 entre capítulos con nombre; un capítulo sin encabezado (un solo
+            // destino que ya dice la portada) es una sección más, a 32.
+            const aire = conEncabezado ? ec.capitulo : ec.seccion
             return (
-              <View key={`capitulo-${i}`} style={{ marginTop: conEncabezado ? 26 : 0 }}>
+              <Fragment key={`capitulo-${i}`}>
+              <Aire alto={aire} />
+              <View>
                 {fotoAlLado ? (
+                  // Punto 7: la columna de la izquierda y la foto miden lo mismo; la tarjeta
+                  // del hotel se estira hasta el pie de la foto (o la foto hasta el de ella).
                   <View wrap={false} style={{ flexDirection: 'row' }}>
+                    <Marca seccion={id} />
                     <View style={{ flex: 1, paddingRight: 12 }}>
                       {encabezado}
-                      {c.hotel && <TarjetaHotel h={c.hotel} general={general} tarifas={tarifas} arriba={!conEncabezado} />}
+                      {c.hotel && (
+                        <TarjetaHotel h={c.hotel} general={general} tarifas={tarifas} margen={conEncabezado ? ec.bloque : 0} e={ec} llenar />
+                      )}
                     </View>
-                    <Miniatura foto={fotos[0]} />
+                    <Miniatura foto={fotos[0]} ancho={altoAlLado * 1.5} alto={altoAlLado} estirar={c.hotel !== null} />
                   </View>
                 ) : (
                   <>
                     <View wrap={false}>
+                      <Marca seccion={id} />
                       {encabezado}
-                      {conFotos && <FranjaDeFotos fotos={fotos} />}
-                      {conHotel && c.hotel && <TarjetaHotel h={c.hotel} general={general} tarifas={tarifas} />}
+                      {conFotos && <FranjaDeFotos fotos={fotos} e={ec} nivel={nivel} deCapitulo arriba={!conEncabezado} />}
+                      {conHotel && c.hotel && <TarjetaHotel h={c.hotel} general={general} tarifas={tarifas} margen={conEncabezado ? ec.bloque : 0} e={ec} />}
                     </View>
-                    {!conHotel && c.hotel && <TarjetaHotel h={c.hotel} general={general} tarifas={tarifas} />}
+                    {!conHotel && c.hotel && (
+                      <>
+                        <Aire alto={ec.tarjetas} />
+                        <TarjetaHotel h={c.hotel} general={general} tarifas={tarifas} margen={0} e={ec} />
+                      </>
+                    )}
                   </>
                 )}
                 {/* Cada hotel con la foto que le puso el asesor la lleva al lado, en el mismo
@@ -1492,27 +1671,42 @@ export default function CotizacionTrappvelPDF({
                 {c.alternativas.map((h, j) => {
                   const foto = fotoDelHotel(h)
                   return foto
-                    ? <HotelAlternativoConFoto key={`alt-${j}`} h={h} foto={foto} general={general} tarifas={tarifas} />
-                    : <LineaHotelAlternativo key={`alt-${j}`} h={h} general={general} tarifas={tarifas} />
+                    ? <HotelAlternativoConFoto key={`alt-${j}`} h={h} foto={foto} general={general} tarifas={tarifas} e={ec} nivel={nivel} />
+                    : <LineaHotelAlternativo key={`alt-${j}`} h={h} general={general} tarifas={tarifas} e={ec} />
                 })}
-                <LineaDeTiempo entradas={suyas} />
+                <LineaDeTiempo entradas={suyas} esp={ec} />
               </View>
+              </Fragment>
             )
           })}
-          {entradasSueltas.length > 0 && <LineaDeTiempo entradas={entradasSueltas} />}
+          {entradasSueltas.length > 0 && (
+            <LineaDeTiempo entradas={entradasSueltas} marca={<Marca seccion="dias" />} esp={espDe('dias')} />
+          )}
 
           {/* ── Vuelos (§4.4) ──────────────────────────────────────────────── */}
           {v.vuelos.length > 0 && (
-            <TablaVuelos vuelos={v.vuelos} general={general} tarifas={tarifas} titulo={<Titulo texto="Vuelos" icono="avion" />} />
+            <>
+              <TablaVuelos
+                vuelos={v.vuelos}
+                general={general}
+                tarifas={tarifas}
+                titulo={<Titulo texto="Vuelos" icono="avion" e={espDe('vuelos')} />}
+                marca={<Marca seccion="vuelos" />}
+                esp={espDe('vuelos')}
+              />
+            </>
           )}
 
           {/* ── Inversión (§4.5) ─────────────────────────────────────────────
               Todo el dinero del documento vive aquí (decisión 2). El TOTAL va PEGADO:
               con varias tarifas el bloque entero no se parte (`wrap={false}`), así el
               total nunca queda solo en la página siguiente. */}
+          <>
+          <Aire alto={ei.seccion} />
           {porTarifas ? (
             <View wrap={false} minPresenceAhead={conCierre('inversion')}>
-              <Titulo texto="Inversión" icono="dinero" />
+              <Marca seccion="inversion" />
+              <Titulo texto="Inversión" icono="dinero" e={ei} />
               <View style={{ flexDirection: 'row' }}>
                 {bloques.map((b, i) => (
                   <View
@@ -1520,7 +1714,7 @@ export default function CotizacionTrappvelPDF({
                     style={{
                       flexGrow: 1,
                       flexBasis: 0,
-                      marginLeft: i === 0 ? 0 : 8,
+                      marginLeft: i === 0 ? 0 : ei.tarjetas,
                       borderRadius: 8,
                       backgroundColor: C.tarjeta,
                       // La recomendada se distingue por el borde magenta; las demás, sin borde.
@@ -1530,23 +1724,23 @@ export default function CotizacionTrappvelPDF({
                     }}
                   >
                     <View style={{ height: 4, backgroundColor: b.color, borderTopLeftRadius: 7, borderTopRightRadius: 7 }} />
-                    <View style={{ padding: 10 }}>
+                    <View style={{ padding: ei.dentro }}>
                       <Chip texto={b.titulo} color={b.color} />
                       {b.esPrincipal && (
-                        <Text style={{ fontSize: 7.5, fontFamily: 'Helvetica-Bold', color: C.magenta, marginTop: 4 }}>
+                        <Text style={{ fontSize: 7.5, fontFamily: 'Helvetica-Bold', color: C.magenta, marginTop: ei.fino }}>
                           La que recomendamos
                         </Text>
                       )}
-                      <Text style={{ fontSize: 18, fontFamily: 'Helvetica-Bold', color: C.tinta, marginTop: 5 }}>{pesos(b.precio)}</Text>
+                      <Text style={{ fontSize: 18, fontFamily: 'Helvetica-Bold', color: C.tinta, marginTop: ei.fino }}>{pesos(b.precio)}</Text>
                       {b.notaIva && (
-                        <Text style={{ fontSize: 7, color: C.gris, marginTop: 1 }}>{b.notaIva}</Text>
+                        <Text style={{ fontSize: 7, color: C.gris }}>{b.notaIva}</Text>
                       )}
                       {/* El nivel general recorta el desglose, nunca el nombre y el precio
                           de cada opción: eso ES lo que el cliente tiene que decidir. */}
                       {!general && (
-                        <View style={{ marginTop: 6 }}>
+                        <View style={{ marginTop: ei.dentro }}>
                           {b.lineas.map((l, j) => (
-                            <LineaPrecio key={`tarifa-${i}-linea-${j}`} l={l} detallada={detallada} tam={7.5} />
+                            <LineaPrecio key={`tarifa-${i}-linea-${j}`} l={l} e={ei} detallada={detallada} tam={7.5} />
                           ))}
                         </View>
                       )}
@@ -1557,7 +1751,7 @@ export default function CotizacionTrappvelPDF({
               {/* Sin esta línea el cliente ve tres precios y un total, y no sabe cuál está
                   aceptando. El de abajo es el de la recomendada (R5). */}
               {totalEsDeLaRecomendada && (
-                <Text style={{ fontSize: 7.5, color: C.gris, marginTop: 6 }}>
+                <Text style={{ fontSize: 7.5, color: C.gris, marginTop: ei.dentro }}>
                   El total de abajo corresponde a la opción recomendada. Las demás son alternativas
                   con el precio indicado en su encabezado.
                 </Text>
@@ -1568,11 +1762,13 @@ export default function CotizacionTrappvelPDF({
             // Pocas líneas: la tarjeta entera y el TOTAL no se parten. Partida en dos
             // páginas, la tarjeta queda abierta por abajo en una y por arriba en la otra.
             <View wrap={false} minPresenceAhead={conCierre('inversion')}>
-              <Titulo texto="Inversión" icono="dinero" />
+              <Marca seccion="inversion" />
+              <Titulo texto="Inversión" icono="dinero" e={ei} />
               {lineas.map((l, i) => (
                 <LineaPrecio
                   key={`precio-${i}`}
                   l={l}
+                  e={ei}
                   detallada={detallada}
                   tarjeta={lineas.length === 1 ? 'unica' : i === 0 ? 'primera' : i === lineas.length - 1 ? 'ultima' : 'media'}
                 />
@@ -1586,13 +1782,15 @@ export default function CotizacionTrappvelPDF({
             // Por eso el borde de la tarjeta lo dibuja cada fila.
             <>
               <View wrap={false} minPresenceAhead={lineas.length === 1 ? ALTO_TOTALES : 0}>
-                <Titulo texto="Inversión" icono="dinero" />
-                <LineaPrecio l={lineas[0]} detallada={detallada} tarjeta={lineas.length === 1 ? 'unica' : 'primera'} />
+                <Marca seccion="inversion" />
+                <Titulo texto="Inversión" icono="dinero" e={ei} />
+                <LineaPrecio l={lineas[0]} e={ei} detallada={detallada} tarjeta={lineas.length === 1 ? 'unica' : 'primera'} />
               </View>
               {lineas.slice(1).map((l, i) => (
                 <LineaPrecio
                   key={`precio-${i + 1}`}
                   l={l}
+                  e={ei}
                   detallada={detallada}
                   ultima={i === lineas.length - 2}
                   // Si la firma va detrás del TOTAL, la última fila pide sitio para los dos.
@@ -1604,26 +1802,30 @@ export default function CotizacionTrappvelPDF({
             </>
           ) : (
             <View wrap={false} minPresenceAhead={conCierre('inversion')}>
-              <Titulo texto="Inversión" icono="dinero" />
+              <Marca seccion="inversion" />
+              <Titulo texto="Inversión" icono="dinero" e={ei} />
               {totales()}
             </View>
           )}
+          </>
 
           {/* ── Precio por tipo de pasajero, del viaje entero ──────────────────
               ⚠️⚠️ Esta tabla y el TOTAL son dinero del MISMO viaje: la diferencia se
               imprime con nombre y cierra por construcción (Σ por pasajero + lo del grupo =
               TOTAL). Con varias tarifas, es la de la recomendada. */}
+          {preciosPorPasajero && hayPorPasajero && <Aire alto={epp.tarjetas} />}
           {preciosPorPasajero && hayPorPasajero && (
             <View
               wrap={false}
               minPresenceAhead={conCierre('porPasajero')}
-              style={{ marginTop: 12, backgroundColor: C.tarjeta, borderRadius: 8, padding: 11 }}
+              style={{ backgroundColor: C.tarjeta, borderRadius: 8, padding: epp.dentro }}
             >
+              <Marca seccion="porPasajero" />
               <Text style={{ fontSize: 7.5, fontFamily: 'Helvetica-Bold', color: C.gris, letterSpacing: 1, marginBottom: 4 }}>
                 {totalEsDeLaRecomendada ? 'PRECIO POR PASAJERO · OPCIÓN RECOMENDADA' : 'PRECIO POR PASAJERO'}
               </Text>
-              {filasPorPasajero.map(f => (
-                <View key={`pax-${f.tipo}`} style={{ flexDirection: 'row', alignItems: 'flex-end', paddingVertical: 1.5 }}>
+              {filasPorPasajero.map((f, k) => (
+                <View key={`pax-${f.tipo}`} style={{ flexDirection: 'row', alignItems: 'flex-end', marginTop: k === 0 ? 0 : epp.fino }}>
                   <Text style={{ fontSize: 9, color: C.tinta, flex: 1 }}>
                     {NOMBRE_PASAJERO[f.tipo]}
                     {/* El «×6» permite rehacer la cuenta. Solo cuando todas las líneas
@@ -1633,7 +1835,7 @@ export default function CotizacionTrappvelPDF({
                   {/* ⚠️ «c/u» y el subtotal por separado: «Adulto ×6 … $1.170.000» se lee
                       igual de bien como «seis adultos cuestan 1.170.000», que es falso. */}
                   {f.cantidad !== null && f.cantidad > 1 && (
-                    <Text style={{ fontSize: 8, color: C.gris, paddingRight: 10 }}>{`${pesos(f.precioUnitario)} c/u`}</Text>
+                    <Text style={{ fontSize: 8, color: C.gris, paddingRight: 8 }}>{`${pesos(f.precioUnitario)} c/u`}</Text>
                   )}
                   <Text style={{ fontSize: 9, fontFamily: 'Helvetica-Bold', color: C.tinta }}>
                     {pesos(f.cantidad !== null && f.cantidad > 1 ? f.precioUnitario * f.cantidad : f.precioUnitario)}
@@ -1641,8 +1843,8 @@ export default function CotizacionTrappvelPDF({
                 </View>
               ))}
               {porElGrupo !== null && porElGrupo !== 0 && (
-                <View style={{ flexDirection: 'row', justifyContent: 'space-between', paddingTop: 4, marginTop: 3, borderTopWidth: 0.5, borderTopColor: C.linea }}>
-                  <Text hyphenationCallback={SIN_GUION} style={{ fontSize: 8, color: C.texto, flex: 1, paddingRight: 10 }}>
+                <View style={{ flexDirection: 'row', justifyContent: 'space-between', paddingTop: epp.fino, marginTop: epp.fino, borderTopWidth: 0.5, borderTopColor: C.linea }}>
+                  <Text hyphenationCallback={SIN_GUION} style={{ fontSize: 8, color: C.texto, flex: 1, paddingRight: 8 }}>
                     {preciosPorPasajero.sinReparto.length > 0
                       ? `Se cobra por el grupo: ${preciosPorPasajero.sinReparto.join(', ')}`
                       : 'Se cobra por el grupo'}
@@ -1652,27 +1854,28 @@ export default function CotizacionTrappvelPDF({
               )}
               {/* Solo cuando ninguna fila pudo absorber el redondeo entero: se dice qué es. */}
               {ajusteRedondeo !== 0 && (
-                <View style={{ flexDirection: 'row', justifyContent: 'space-between', paddingTop: 3, marginTop: 2 }}>
+                <View style={{ flexDirection: 'row', justifyContent: 'space-between', marginTop: epp.fino }}>
                   <Text style={{ fontSize: 7.5, color: C.gris, flex: 1 }}>Ajuste por redondeo</Text>
                   <Text style={{ fontSize: 7.5, color: C.gris }}>{pesos(ajusteRedondeo)}</Text>
                 </View>
               )}
               {/* Sin `cubierto` no se puede afirmar que la columna sume el total: se dice. */}
               {porElGrupo === null && preciosPorPasajero.sinReparto.length > 0 && (
-                <Text hyphenationCallback={SIN_GUION} style={{ fontSize: 7.5, color: C.gris, marginTop: 3 }}>
+                <Text hyphenationCallback={SIN_GUION} style={{ fontSize: 7.5, color: C.gris, marginTop: epp.fino }}>
                   {`No incluye lo que se cobra por el grupo: ${preciosPorPasajero.sinReparto.join(', ')}.`}
                 </Text>
               )}
               {porElGrupo === null && preciosPorPasajero.sinReparto.length === 0 && (
-                <Text style={{ fontSize: 7.5, color: C.gris, marginTop: 3 }}>
+                <Text style={{ fontSize: 7.5, color: C.gris, marginTop: epp.fino }}>
                   Es el precio de cada viajero; no suma el total de arriba.
                 </Text>
               )}
             </View>
           )}
 
+          {cotizacion.condiciones_pago && <Aire alto={ei.tarjetas} />}
           {cotizacion.condiciones_pago && (
-            <Text style={{ fontSize: 8.5, color: C.texto, marginTop: 10 }}>{`Forma de pago: ${cotizacion.condiciones_pago}`}</Text>
+            <Text style={{ fontSize: 8.5, color: C.texto }}>{`Forma de pago: ${cotizacion.condiciones_pago}`}</Text>
           )}
 
           {/* ── Incluido, a tener en cuenta y antes de viajar (§4.6, §4.9) ────────
@@ -1680,17 +1883,24 @@ export default function CotizacionTrappvelPDF({
               a todo el ancho si no. Una fila de dos columnas no se parte; una lista a todo
               el ancho sí, entre ítems, con el título pegado al primero. La última pieza
               pide tener el cierre debajo si «listas» es la última sección. */}
+          <>
           {filasDeListas.map((fila, f) => {
             const presencia = f === filasDeListas.length - 1 ? conCierre('listas') : undefined
+            const marca = f === 0 ? <Marca seccion="listas" /> : null
+            const aire = <Aire alto={espDe('listas').seccion} />
             if (fila.length > 1) {
               return (
-                <View key={`listas-${f}`} wrap={false} minPresenceAhead={presencia} style={{ flexDirection: 'row' }}>
-                  {fila.map((columna, c) => (
-                    <View key={`col-${c}`} style={{ flexGrow: 1, flexBasis: 0, marginLeft: c === 0 ? 0 : CANAL_COLUMNAS }}>
-                      {columna.map(l => <ListaEnColumna key={l} lista={l} items={listas[l]} />)}
-                    </View>
-                  ))}
-                </View>
+                <Fragment key={`listas-${f}`}>
+                  {aire}
+                  <View wrap={false} minPresenceAhead={presencia} style={{ flexDirection: 'row' }}>
+                    {marca}
+                    {fila.map((columna, c) => (
+                      <View key={`col-${c}`} style={{ flexGrow: 1, flexBasis: 0, marginLeft: c === 0 ? 0 : CANAL_COLUMNAS }}>
+                        {columna.map((l, k) => <ListaEnColumna key={l} lista={l} items={listas[l]} primera={k === 0} e={espDe('listas')} />)}
+                      </View>
+                    ))}
+                  </View>
+                </Fragment>
               )
             }
             const l = fila[0][0]
@@ -1699,8 +1909,10 @@ export default function CotizacionTrappvelPDF({
             // su `minPresenceAhead` lo alcance (la misma razón que en «Opcionales»).
             return (
               <Fragment key={`listas-${f}`}>
+                {aire}
                 <View wrap={false} minPresenceAhead={items.length === 1 ? presencia : undefined}>
-                  <Titulo texto={LISTAS[l].titulo} icono={LISTAS[l].icono} />
+                  {marca}
+                  <Titulo texto={LISTAS[l].titulo} icono={LISTAS[l].icono} e={espDe('listas')} />
                   <ItemDeLista lista={l} texto={items[0]} ultimo={items.length === 1} />
                 </View>
                 {items.slice(1).map((t, i) => (
@@ -1715,9 +1927,11 @@ export default function CotizacionTrappvelPDF({
               </Fragment>
             )
           })}
+          </>
 
           {/* ── Opcionales (§4.7) ──────────────────────────────────────────── */}
           {opcionales.length > 0 && (() => {
+            const eo = espDe('opcionales')
             const tarjetas = opcionales.map((o, i) => {
                 const valor = Math.round((o.precio_venta || 0) * (o.cantidad ?? 1))
                 const descripcion = sinCancelacionDelProveedor(o.descripcion)
@@ -1726,12 +1940,12 @@ export default function CotizacionTrappvelPDF({
                     key={`opcional-${i}`}
                     wrap={false}
                     minPresenceAhead={i > 0 && i === opcionales.length - 1 ? conCierre('opcionales') : undefined}
-                    style={{ flexDirection: 'row', backgroundColor: C.tarjeta, borderRadius: 8, paddingVertical: 8, paddingHorizontal: 11, marginTop: 6 }}
+                    style={{ flexDirection: 'row', backgroundColor: C.tarjeta, borderRadius: 8, padding: eo.dentro, marginTop: i === 0 ? eo.tarjetas : 0 }}
                   >
                     <View style={{ flex: 1, paddingRight: 8 }}>
                       <Text hyphenationCallback={SIN_GUION} style={{ fontSize: 9.5, fontFamily: 'Helvetica-Bold', color: C.tinta }}>{o.nombre}</Text>
                       {!general && descripcion && (
-                        <Text hyphenationCallback={SIN_GUION} style={{ fontSize: 8.5, color: C.gris, marginTop: 2 }}>{descripcion}</Text>
+                        <Text hyphenationCallback={SIN_GUION} style={{ fontSize: 8.5, color: C.gris, marginTop: eo.fino }}>{descripcion}</Text>
                       )}
                     </View>
                     {valor > 0 && (
@@ -1746,23 +1960,33 @@ export default function CotizacionTrappvelPDF({
             // que su `minPresenceAhead` lo alcance.
             return (
               <>
+                <Aire alto={eo.seccion} />
                 <View wrap={false} minPresenceAhead={opcionales.length === 1 ? conCierre('opcionales') : undefined}>
-                  <Titulo texto="Opcionales" icono="opcionales" />
-                  <Text style={{ fontSize: 8.5, color: C.gris, marginBottom: 4 }}>
+                  <Marca seccion="opcionales" />
+                  <Titulo texto="Opcionales" icono="opcionales" e={eo} />
+                  <Text style={{ fontSize: 8.5, color: C.gris }}>
                     Actividades que se pueden coordinar aparte. No están incluidas en el precio de arriba.
                   </Text>
                   {tarjetas[0]}
                 </View>
-                {tarjetas.slice(1)}
+                {tarjetas.slice(1).map((t, i) => (
+                  <Fragment key={`opcional-aire-${i}`}>
+                    <Aire alto={eo.tarjetas} />
+                    {t}
+                  </Fragment>
+                ))}
               </>
             )
           })()}
 
           {/* ── Cargos a pagar en destino (§4.8) ───────────────────────────────
-              Plata del viajero: sale en los TRES niveles de detalle (decisión 3). */}
-          {v.cargosEnDestino.length > 0 && (
-            <View wrap={false} minPresenceAhead={conCierre('cargos')}>
-              <Titulo texto="Cargos a pagar en destino" icono="destino" />
+              Plata del viajero: sale en los TRES niveles de detalle (decisión 3).
+              §4.11 punto 5: corta, va entera con su título; larga, se parte entre filas con
+              el encabezado repetido arriba de cada hoja y sin una fila sola en ninguna. */}
+          {v.cargosEnDestino.length > 0 && (() => {
+            const ecg = espDe('cargos')
+            const titulo = <Titulo texto="Cargos a pagar en destino" icono="destino" e={ecg} />
+            const encabezado = (
               <View style={{ position: 'relative', height: 18, borderRadius: 4 }}>
                 <Degradado ancho={ANCHO_CONTENIDO} alto={18} id="degradado-cargos" />
                 <View style={{ flexDirection: 'row', paddingHorizontal: 8, paddingTop: 5.5 }}>
@@ -1772,37 +1996,72 @@ export default function CotizacionTrappvelPDF({
                   <Text style={{ fontSize: 6.5, fontFamily: 'Helvetica-Bold', color: C.blanco, letterSpacing: 0.8, width: '25%' }}>OBSERVACIÓN</Text>
                 </View>
               </View>
-              {v.cargosEnDestino.map((c, i) => (
-                <View
-                  key={`cargo-${i}`}
-                  wrap={false}
-                  style={{ flexDirection: 'row', paddingVertical: 5, paddingHorizontal: 8, backgroundColor: i % 2 === 1 ? C.tarjeta : C.blanco }}
-                >
-                  {/* B2 · el cargo es de UNA opción: con varias tarifas, dice de qué hotel y
-                      de qué tarifa, igual que su tarjeta de hotel. */}
-                  <View style={{ width: '22%', paddingRight: 4 }}>
-                    <Text hyphenationCallback={SIN_GUION} style={{ fontSize: 8.5, color: C.tinta }}>{c.ciudad ?? ''}</Text>
-                    {c.hotel && (
-                      <Text hyphenationCallback={SIN_GUION} style={{ fontSize: 7.5, color: C.gris, marginTop: 1 }}>{c.hotel}</Text>
-                    )}
-                    <ChipsDeTarifa tarifas={tarifas} de={c} />
-                  </View>
-                  <Text hyphenationCallback={SIN_GUION} style={{ fontSize: 8.5, color: C.tinta, width: '33%' }}>{c.concepto}</Text>
-                  <Text style={{ fontSize: 8.5, fontFamily: 'Helvetica-Bold', color: C.tinta, width: '20%' }}>{c.monto}</Text>
-                  <Text hyphenationCallback={SIN_GUION} style={{ fontSize: 8, color: C.texto, width: '25%' }}>{c.observacion}</Text>
+            )
+            const filas = v.cargosEnDestino.map((c, i) => (
+              <View
+                key={`cargo-${i}`}
+                wrap={false}
+                style={{ flexDirection: 'row', paddingVertical: 4, paddingHorizontal: 8, backgroundColor: i % 2 === 1 ? C.tarjeta : C.blanco }}
+              >
+                {/* B2 · el cargo es de UNA opción: con varias tarifas, dice de qué hotel y
+                    de qué tarifa, igual que su tarjeta de hotel. */}
+                <View style={{ width: '22%', paddingRight: 4 }}>
+                  <Text hyphenationCallback={SIN_GUION} style={{ fontSize: 8.5, color: C.tinta }}>{c.ciudad ?? ''}</Text>
+                  {c.hotel && (
+                    <Text hyphenationCallback={SIN_GUION} style={{ fontSize: 7.5, color: C.gris }}>{c.hotel}</Text>
+                  )}
+                  <ChipsDeTarifa tarifas={tarifas} de={c} />
                 </View>
-              ))}
-            </View>
-          )}
+                <Text hyphenationCallback={SIN_GUION} style={{ fontSize: 8.5, color: C.tinta, width: '33%' }}>{c.concepto}</Text>
+                <Text style={{ fontSize: 8.5, fontFamily: 'Helvetica-Bold', color: C.tinta, width: '20%' }}>{c.monto}</Text>
+                <Text hyphenationCallback={SIN_GUION} style={{ fontSize: 8, color: C.texto, width: '25%' }}>{c.observacion}</Text>
+              </View>
+            ))
+            if (filas.length <= FILAS_DE_CARGOS_ENTERA) {
+              return (
+                <>
+                  <Aire alto={ecg.seccion} />
+                  <View wrap={false} minPresenceAhead={conCierre('cargos')}>
+                    <Marca seccion="cargos" />
+                    {titulo}
+                    {encabezado}
+                    {filas}
+                  </View>
+                </>
+              )
+            }
+            const grupos = gruposDeFilas(filas)
+            return (
+              <>
+                <Aire alto={ecg.seccion} />
+                <View minPresenceAhead={PRESENCIA_MINIMA_TITULO}>
+                  <Marca seccion="cargos" />
+                  {titulo}
+                </View>
+                <View>
+                  <View fixed>{encabezado}</View>
+                  {grupos.map((g, k) => (
+                    <View key={`grupo-cargos-${k}`} wrap={false} minPresenceAhead={k === grupos.length - 1 ? conCierre('cargos') : undefined}>
+                      {g}
+                    </View>
+                  ))}
+                </View>
+              </>
+            )
+          })()}
 
           {/* ── Información importante ─────────────────────────────────────── */}
           {cotizacion.notas && (
-            <View wrap={false} minPresenceAhead={conCierre('notas')}>
-              <Titulo texto="Información importante" icono="info" />
-              <Text hyphenationCallback={SIN_GUION} style={{ fontSize: 9, color: C.texto, lineHeight: 1.45 }}>
-                {cotizacion.notas}
-              </Text>
-            </View>
+            <>
+              <Aire alto={espDe('notas').seccion} />
+              <View wrap={false} minPresenceAhead={conCierre('notas')}>
+                <Marca seccion="notas" />
+                <Titulo texto="Información importante" icono="info" e={espDe('notas')} />
+                <Text hyphenationCallback={SIN_GUION} style={{ fontSize: 9, color: C.texto, lineHeight: 1.45 }}>
+                  {cotizacion.notas}
+                </Text>
+              </View>
+            </>
           )}
 
           {/* ── Términos y condiciones: al cierre, antes de la firma ──────────────
@@ -1810,18 +2069,21 @@ export default function CotizacionTrappvelPDF({
               piezas, el título va pegado a la primera y la última pide el cierre debajo. */}
           {piezasTerminos.length > 0 && (
             <>
+              <Aire alto={espDe('terminos').seccion} />
               <View wrap={false} minPresenceAhead={piezasTerminos.length === 1 ? conCierre('terminos') : undefined}>
-                <Titulo texto="Términos y condiciones" icono="info" />
+                <Marca seccion="terminos" />
+                <Titulo texto="Términos y condiciones" icono="info" e={espDe('terminos')} />
                 {piezasTerminos[0].map((b, j) => <BloqueTerminos key={`terminos-0-${j}`} b={b} primero={j === 0} />)}
               </View>
               {piezasTerminos.slice(1).map((pieza, i) => (
-                <View
-                  key={`terminos-${i + 1}`}
-                  wrap={false}
-                  minPresenceAhead={i === piezasTerminos.length - 2 ? conCierre('terminos') : undefined}
-                >
-                  {pieza.map((b, j) => <BloqueTerminos key={`terminos-${i + 1}-${j}`} b={b} primero={false} />)}
-                </View>
+                <Fragment key={`terminos-${i + 1}`}>
+                  {/* El aire sobre un subtítulo va antes de su pieza, no dentro: si la pieza
+                      salta de hoja, no arranca con ese blanco arriba. */}
+                  {pieza[0].tipo === 'subtitulo' && <Aire alto={8} />}
+                  <View wrap={false} minPresenceAhead={i === piezasTerminos.length - 2 ? conCierre('terminos') : undefined}>
+                    {pieza.map((b, j) => <BloqueTerminos key={`terminos-${i + 1}-${j}`} b={b} primero={j === 0} />)}
+                  </View>
+                </Fragment>
               ))}
             </>
           )}
@@ -1830,11 +2092,13 @@ export default function CotizacionTrappvelPDF({
               Sin crédito, la licencia de casi todas (CC BY / BY-SA) no se cumple. Solo las
               que se imprimieron, y la línea no existe si no hubo ninguna. Encima de la firma
               sumaban 30 pt más al bloque que tiene que caber con la última sección. */}
+          {(creditos.length > 0 || firma) && <Aire alto={espDe('cierre').seccion} />}
           {(creditos.length > 0 || firma) && (
             <View
               wrap={false}
-              style={{ marginTop: 24, flexDirection: 'row', alignItems: 'flex-end', justifyContent: creditos.length > 0 ? 'space-between' : 'center' }}
+              style={{ flexDirection: 'row', alignItems: 'flex-end', justifyContent: creditos.length > 0 ? 'space-between' : 'center' }}
             >
+              <Marca seccion="cierre" />
               {creditos.length > 0 && (
                 <Text hyphenationCallback={SIN_GUION} style={{ flex: 1, fontSize: 6.5, color: C.gris, lineHeight: 1.4, paddingRight: firma ? 24 : 0 }}>
                   {`Fotografías: ${creditos.join(' · ')}`}
@@ -1843,8 +2107,8 @@ export default function CotizacionTrappvelPDF({
               {firma && (
                 <View style={{ alignItems: creditos.length > 0 ? 'flex-end' : 'center', maxWidth: 220 }}>
                   <Text style={{ fontSize: 10, fontFamily: 'Helvetica-Bold', color: C.tinta }}>{firma.nombre}</Text>
-                  {firma.cargo && <Text style={{ fontSize: 8.5, color: C.gris, marginTop: 1 }}>{firma.cargo}</Text>}
-                  {firma.contacto && <Text style={{ fontSize: 8, color: C.gris, marginTop: 1 }}>{firma.contacto}</Text>}
+                  {firma.cargo && <Text style={{ fontSize: 8.5, color: C.gris }}>{firma.cargo}</Text>}
+                  {firma.contacto && <Text style={{ fontSize: 8, color: C.gris }}>{firma.contacto}</Text>}
                 </View>
               )}
             </View>

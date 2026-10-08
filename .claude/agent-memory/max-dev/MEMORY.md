@@ -2,7 +2,9 @@
 
 ## Project memories
 
-- ⚠️⚠️ [SOE-006: histórico de inactivos (#1084)](project_historico_inactivos_soe006.md) — migración 20261008223000 SIN aplicar; is_active es estado de hoy; rótulo en servidor
+- ⚠️⚠️ [SOE-006: histórico de inactivos (#1084)](project_historico_inactivos_soe006.md) — migración 20261008223000 SIN aplicar; promedio del supervisor solo activos (provisional)
+- ⚠️⚠️ [Autorización de datos por link (Trappvel)](project_autorizacion_datos_link.md) — migración 20261008230000 APLICADA (8-oct); marcas manuales no cuentan; Encargado por versión
+- [SOE-004: aprobación fuera de tarifa](project_aprobacion_fuera_de_tarifa.md) — tope frena al APROBAR, no al generar; gerencial + motivo; recargos incluidos
 - [Reporte Supertransporte (ALMA)](project_reporte_supertransporte.md) — contrapartes = todos los segmentos; MéTRIK por platform_admin/correo; KYC sin created_by
 - ⚠️⚠️ [SOE-002: segundo pago en dos cifras](project_segundo_pago_dos_cifras.md) — ambas RPC APLICADAS (8-oct); umbral $1.000 en 2 funciones
 - ⚠️⚠️ [Plan Anual CDA (#1065)](project_valida_cda_restriccion_y_plan_anual.md) — migración 20261007210000 SIN aplicar; vigente_hasta=12.1 es null; anexo generado; pendientes #1072
@@ -49,7 +51,6 @@
 - ⚠️⚠️ [Cierre automático del reproceso](project_cierre_automatico_reproceso.md) — backfill de 21 SIN aplicar; se mide por FLUJO, no por `orden`
 - ⚠️⚠️ [El bloque declara qué documento espera](project_documento_esperado_bloque.md) — config SOENA SIN aplicar; veredicto ASIMÉTRICO a propósito
 - ⚠️ [«No aplica» por línea](project_no_aplica_por_linea.md) — SIN aplicar; avisa, no cierra
-- ⚠️⚠️ [Formato 010 DIAN](project_formulario_010_dian.md) — casilla 25 SIN indicativo (la DIAN rechaza)
 - ⚠️⚠️ [Transcripción a ciegas del NIT](project_confirmacion_nit_ciegas.md) — #807: la casilla NO viaja al navegador
 - ⚠️ [Animación de marca y RPC de Tableros (caída 2026-10-03)](project_animacion_marca_y_rpc_tableros.md) — loading de (app) por segmento; 12 RPC en paralelo por apertura; cacheables por ws+params
 - ⚠️⚠️ [Caché de 5 min de Tableros (#1001)](project_tableros_cache.md) — cifras hasta 5 min atrasadas; ventana en la llave (SWR); guarda verificada antes de guardar
@@ -61,10 +62,7 @@
 - ⚠️ [Radar SECOP como módulo (#952)](project_radar_secop_modulo.md) — MERGEADO y migrado; el cron NO lee disparador_cobro: enrolar el contrato no cobra
 - [Términos de un módulo nuevo](project_terminos_modulo_radar.md) — el gate de Valida ya es genérico; el ternario mandaba todo producto nuevo a Valida API
 - ⚠️ [Vencido por cuota en la cartera (#934)](project_cartera_vencido_por_cuota.md) — migración ANTES del merge; luego redesplegar wa-alerts y wa-webhook
-- [Emisión de cuentas de cobro](project_emision_cuentas_cobro.md) — solo corre en producción (credenciales en Vercel)
-- ⚠️ [Cobros: mergear el cron = autorizar emisión](project_cobros_emision_gate.md) — cambiar qué emite el cron dispara cuentas reales
 - [Buscador del reparto sin Valida (#877)](project_buscador_reparto_sin_valida.md) — escape de `.or()` sin probar contra PostgREST vivo
-- ⚠️⚠️ [Idempotencia de cuentas de cobro](project_idempotencia_cuentas_cobro.md) — anular la única viva = el cron la re-emite
 - ⚠️⚠️ [Entrada única de /valida-api](project_entrada_unica_valida_api.md) — Términos exige texto_sha256 = sha256(texto_md) tal cual
 - ⚠️⚠️ [Plazo, mora y facturas de los CDA en Valida](project_valida_cda_gracia_facturas.md) — #849: migración SIN aplicar; cargar un CDA tras el 30-sep lo cierra
 - ⚠️⚠️ [Factura por cobro en /valida-api (#876)](project_factura_cobro_servicio.md) — migración SIN aplicar; CUFE de la FE-1 mal copiado (90/96)
@@ -79,67 +77,30 @@
 - ⚠️⚠️ [Enlace de pago automático de cuotas CDA](project_enlace_pago_automatico.md) — cron paso 6; ignora `planes_cobro.activo` a propósito
 - ⚠️ [Tarjeta de Sustenta en /suscripcion](project_sustenta_tarjeta_marca.md) — migración de eventos SIN aplicar; sin ella se pierden en silencio
 - ⚠️⚠️ [Razón social METRIK IA S.A.S.](project_razon_social_metrik_ia.md) — sin «IA» es otra sociedad
-- ⚠️⚠️ [Huecos de tenant del riesgo 11](project_huecos_tenant_riesgo11.md) — #761; wa-webhook SIN redesplegar
-- ⚠️ [Suscripciones de licencia, Fase 1](project_suscripciones_cobro_automatico.md) — #577 sin mergear: nadie se suspende solo
-- ⚠️ [Casillas gate faltantes SOENA](project_casillas_gate_faltantes.md) — 653 gates sin casilla no retienen nada
-- ⚠️ [Tablero de marketing SOENA](project_tablero_marketing_soena.md) — el sync sigue sin correr
-- ⚠️⚠️ [Ventas por ciudad en Marketing](project_marketing_ventas_por_ciudad.md) — #689 sin mergear: migración ANTES del merge
 - [Agrupación de hotel y traslado in-out (COT-2026-0018)](project_agrupacion_hotel_traslado_inout.md) — comparar opciones por `lecturaDeOpcion`; no fusiona las duplicadas
-- ⚠️ [Rediseño cotización Trappvel](project_rediseno_cotizacion_trappvel.md) — #853 (P4) SIN mergear: migración ANTES
-- [Tableros SOENA, olas 1 y 2](project_tableros_soena.md) — 4 migraciones sin aplicar; tres definiciones de «venta»
-- ⚠️⚠️ [/equipo y el perfil, por mes](project_equipo_por_mes.md) — #721 SIN mergear: migración antes del merge
-- ⚠️ [Consultas de listas facturables](project_consultas_listas_facturables.md) — cada consulta a SEIYA se cobra: solo fixtures
 - ⚠️ [Limpieza tras merge (hook)](project_limpieza_tras_merge.md) — settings.json vivo NO es symlink; registro del hook pendiente
-- ⚠️ [Git en worktree aislado](project_worktree_git_bloqueado.md) — la rama se crea ANTES de leer
 - ⚠️ [Hook de presupuesto al editar CLAUDE.md](project_hook_presupuesto_claude_md.md) — salta siempre; cifras de `.claude/rules/`
-- ⚠️ [Valida paquete documental v1.1](project_valida_paquete_documental_v11.md) — #18 sin mergear
-- ⚠️ [El hook de ownership no reconoce al teammate](project_hook_ownership_no_reconoce_teammate.md) — como teammate todo se bloquea
-- ⚠️ [Vistas server-only](project_vistas_server_only.md) — revocada a `authenticated` devuelve vacío sin error
 - ⚠️ [El trigger de rol no espeja 'contador' (#988)](project_trigger_staff_rol_sin_contador.md) — staff 'contador' deja profiles.role NULL; no se autocrea
-- ⚠️ [staff: 1 fila por persona en TODA la base](project_staff_unique_global.md) — platform_admin ajeno opera con `staffId` null
 - ⚠️⚠️ [Pestaña que quedó en otro workspace](project_pestana_desincronizada.md) — el guard va en el MIDDLEWARE
-- [Canal WhatsApp propio](project_canal_wa_propio.md) — #448 sin desplegar; Gate 0 prohíbe persistir contenido
-- ⚠️⚠️ [Cardumen independiente y Meta del 1-oct](project_cardumen_infra_independiente.md) — servicio se cobra pasadas 1.000/numero; sin pago en WABA el bot calla
-- ⚠️ [Medicion de Cardumen en el numero de ONE](project_cardumen_medicion_wa.md) — intent `cardumen:<estudio>`; origen='cardumen' pide migracion; inerte sin deploy
-- ⚠️ [Bot Navigate (demo Grupo Progreso)](project_cardumen_navigate_demo.md) — deploy ANTES del SQL; idioma PRIMERO
-- ⚠️⚠️ [Objetos sueltos por WhatsApp](project_cardumen_objetos_sueltos.md) — un `wa.me` relanza la app; el POST continúa y eso vuelve la ingesta un posible relay
-- ⚠️⚠️ [Miniweb por catálogo + ingesta (#980)](project_cardumen_miniweb_catalogo.md) — migración ANTES del merge; `cardumen` NO se toca; la ñ no se normaliza
-- ⚠️ [Guarda de sustento en triada G03 (#931)](project_cardumen_guarda_triada_g03.md) — SIN mergear; probar guardas re-leyendo salidas crudas
-- ⚠️ [Polaridad G22 y matiz G13 (#928)](project_cardumen_polaridad_matiz.md) — SIN mergear: benchmark primero
-- ⚠️⚠️ [Filtro de riesgo y blindaje de Navigate (#924)](project_cardumen_filtro_blindaje.md) — mergeado; filtro caido NO es SEN; CO no es INJ
-- ⚠️ [Navigate no es canal de ayuda (#933)](project_cardumen_sin_canal_de_ayuda.md) — SIN mergear; SEN se aparta sin prometer ayuda; caida_filtro.ts roto
-- ⚠️ [«N años» en un archivo nuevo](project_retencion_cifra_anios.md) — retencion.test.ts exige clasificarlo; CI cae aunque pase lo local
-- ⚠️ [Techo de 1.000 filas de PostgREST](project_techo_postgrest.md) — `traerTodo` para lecturas por lote
-- ⚠️ [Marcas de Siigo en SOENA](project_marcas_siigo_soena.md) — FV-2-244 con la cédula truncada NO se toca
 - [Ciudad de actividad y tasa en Revisar (Trappvel)](project_ciudad_actividad_nombre_tour.md) — regla ANGOSTA (Punta Cana es destino); tasa solo en el editor
 - ⚠️⚠️ [Cotización Trappvel (30 frentes)](indice_cotizacion_trappvel.md) — ranuras, tarifas, pasajeros, PDF del cliente, captura A/B
 - ⚠️ [Montos de SOENA por parseMontoCop (#842)](project_soena_parse_monto_cop.md) — el regex viejo daba NaN con 2+ puntos; extractor cerrado en #843
-- ⚠️⚠️ [Trappvel: las tres reglas del 15](project_trappvel_reglas_reunion_15.md) — las tres INERTES sin config
 - ⚠️⚠️ [IVA sobre el ingreso propio (Trappvel)](project_iva_ingreso_propio.md) — config viva infla el total hasta el PR de iva_incluido + su SQL
 - ⚠️⚠️ [Margen y recargo configurables (Trappvel)](project_margen_recargo_configurables_trappvel.md) — el guardado de #712 NUNCA escribió (0 filas sin error); exige el CHECK de activity_log ANTES del merge
-- ⚠️⚠️ [Archivos de trappvel en su Supabase](project_almacenamiento_supabase_externo.md) — #716 sin mergear: corte de Drive DESPUÉS
 - ⚠️⚠️ [Corregir hacia atrás sin área](project_correccion_hacia_atras_sin_area.md) — SOLO SOENA declara el opt-in
-- ⚠️ [Omitir gates por persona](project_omitir_gate_por_persona.md) — inerte hasta que SOENA lo cargue
-- ⚠️⚠️ [Gate de carpeta local](project_gate_carpeta_local.md) — #702 sin QA en pantalla
 - ⚠️⚠️ [Referencia `one://`](project_referencia_archivos_one.md) — `notificar-etapa` sin redesplegar
-- ⚠️⚠️ [Drive: soporte y recibo nacen cerrados](project_drive_archivos_cobro.md) — los 22 VIEJOS siguen abiertos
-- ⚠️ [Bucket público cert-documentos](project_cerrar_bucket_cert_documentos.md) — migración SIN aplicar
-- ⚠️⚠️ [Soporte foto del bot](project_wa_soporte_reencauza.md) — #658 sin desplegar; un PDF no llega al handler
 - ⚠️⚠️ [Bot WA sin bandeja: premisas del motor Trappvel](project_wa_bot_sin_bandeja_trappvel.md) — un número, preview de 100, funnelchat es SOENA sin mensajes
 - ⚠️⚠️ [Bandeja WA a negocio existente](project_bandeja_negocio_existente.md) — migración SIN aplicar; conflicto en `_conflictos`; ejecutor Deno sí se prueba
 - ⚠️⚠️ [Varios viajes y guardianes N1-N9 (bandeja WA)](project_bandeja_varios_viajes.md) — solo encabezado exacto mueve la caja; edad no clasifica; con la llave encendida manda la bandeja (2026-10-01)
 - ⚠️⚠️ [Entendimiento de la bandeja WA (#960)](project_entendimiento_bandeja_wa.md) — guardianes 1-oct SIN mergear; SQL no_definido SIN aplicar; sugerido sin confirmar se reemplaza
 - ⚠️⚠️ [Bandeja de solicitudes WA (Trappvel)](project_bandeja_wa_solicitudes.md) — 2 migraciones SIN aplicar: tablas → deploy → cron; llave al final
 - ⚠️ [Descripcion del gasto por WhatsApp (#861)](project_wa_gasto_descripcion.md) — flujo guiado recuerda el detalle (2026-09-30); wa-webhook se despliega aparte
-- ⚠️⚠️ [WhatsApp sin teléfono (BSUID)](project_wa_bsuid_sin_telefono.md) — #724 sin redesplegar
-- ⚠️⚠️ [Términos por WhatsApp](project_aceptacion_terminos_wa.md) — #722 sin redesplegar; HMAC NO se valida
 - ⚠️ [Fixture de producción bloquea el push](project_fixture_de_produccion_bloquea_push.md) — fixtures sintéticos a mano; SQL de config se prueba en PGlite
 - [Frentes ya cerrados](indice_frentes_cerrados.md) — memorias de trabajo terminado, fuera del índice caliente
 
 ## Referencias
 
 - [Build en worktree sin una dependencia](reference_build_en_worktree.md) — copiar el paquete, no symlink (raíz de Turbopack)
-- [Indice de referencias](indice_referencias.md) — 37 recetas: medir prod sin MCP, SQL de ONE, PGlite, render/PDF, vitest de handlers
 - [Frentes secundarios](indice_frentes_secundarios.md) — ~145 entradas viejas: cobros, Valida, SOENA, recibos, Siigo, recetas; buscar ahí antes de crear
 
 ## Feedback

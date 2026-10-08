@@ -1,6 +1,6 @@
 ---
 name: historico-inactivos-soe006
-description: SOE-006 — is_active es estado de HOY; el bono de operaciones incluye inactivos con actividad en el mes; migración 20261008223000 SIN aplicar (reemplazo de texto sobre la viva); rótulo «(inactivo)» en servidor
+description: SOE-006 — is_active es estado de HOY; el bono de operaciones incluye inactivos con actividad en el mes, pero el promedio del supervisor solo activos (provisional); migración 20261008223000 SIN aplicar (reemplazo de texto sobre la viva); rótulo «(inactivo)» en servidor
 metadata:
   type: project
 ---
@@ -23,7 +23,14 @@ subagente. Por eso la migración reemplaza SOLO `WHERE s.is_active IS NOT FALSE`
 - «Actividad» = bloque completado (`completado_por` = profile_id) o `activity_log` tipo
   `cambio_etapa` de su autoría (`autor_id` = staff.id) en el mes. Un comentario NO cuenta, ni
   un reproceso atribuido después del retiro.
-- El bono del supervisor de un mes con el retirado cambia (vuelve a promediarlo): es esperado.
+- ⚠️ El promedio del supervisor (`prom`) cuenta SOLO a los activos de hoy (`WHERE f.staff_id IN
+  (staff activos)`), por decisión de Mauricio (2026-10-08): «En septiembre Deisy debe mantenerse en
+  la misma comisión... hasta que ellos nos notifiquen en otro ticket». PROVISIONAL: si SOENA define
+  otra regla, ese es el filtro a cambiar. Con Jhon dentro, septiembre bajaba de 0,6 a 0.
+- Dos reemplazos con marcas propias (`SOE-006 universo`, `SOE-006 promedio`); el patrón de `prom`
+  es `        FROM final f\n      ) prom` (`FROM final f` sola sale 2 veces).
+- NO tocado a propósito: la supervisora sale de `es_supervisor = true LIMIT 1`; desde SOE-005 sale
+  Daniela Jativa en vez de Deisy. Mauricio decidió esperar.
 - Rótulo: `src/lib/equipo/inactivos.ts` (`staffInactivos` + `rotularFilas`), aplicado tras la
   caché de Tableros; la entrada cacheada queda cruda.
 - Nómina en `v_pyl_mes` y `/numeros` sigue con `is_active` (foto del presente, sin historial

@@ -579,8 +579,11 @@ export type ListaDelCierre = 'incluye' | 'noIncluye' | 'antes'
  */
 export type FilaDeListas = ListaDelCierre[][]
 
-/** Lo que mide un título de sección con su aire (`Titulo`: 24 arriba, 26 de alto, 10 abajo). */
-const ALTO_TITULO = 60
+/**
+ * Lo que mide un título de sección con su aire en espaciado normal (§4.11: 32 arriba entre
+ * secciones, 26 de alto, 16 abajo hasta el contenido).
+ */
+const ALTO_TITULO = 74
 /** Un renglón de 9 pt con su interlineado. */
 const ALTO_RENGLON = 11.5
 /** El aire entre dos ítems de una lista. */
@@ -590,7 +593,7 @@ const ANCHO_CARACTER = 4.5
 /** Lo que se come el marcador del ítem (chulo, equis o viñeta) y la franja ámbar. */
 const SANGRIA_ITEM = 16
 /** El aire entre las dos columnas. */
-export const CANAL_COLUMNAS = 20
+export const CANAL_COLUMNAS = 24
 
 /**
  * Hasta cuánto puede medir una columna para ir lado a lado con otra.
@@ -710,15 +713,15 @@ export interface GrupoDeVuelosAMedir {
 }
 
 // Medidas del JSX de `TablaVuelos`, a 1,1 veces el tamaño de la letra por renglón: un
-// vuelo de un tramo con escala y línea gris mide 43 pt; uno de ida y regreso, 67. La fila
+// vuelo de un tramo con escala y línea gris mide 38 pt; uno de ida y regreso, 60. La fila
 // nunca mide menos que la píldora de la sigla (14 pt), que va en la columna de aerolínea.
-const RELLENO_GRUPO = 12
+const RELLENO_GRUPO = 8
 const ALTO_SIGLA = 14
 const RENGLON_RUTA = 9.4
 const RENGLON_CHICO = 8.3
-const AIRE_ESCALA = 1
+const AIRE_ESCALA = 0
 const ALTO_MARCA_TARIFA = 13
-const AIRE_ENTRE_FILAS = 5
+const AIRE_ENTRE_FILAS = 4
 const AIRE_META = 4
 const CARACTER_META = 3.75
 
@@ -750,6 +753,183 @@ export function altoEstimadoDeGrupoDeVuelos(g: GrupoDeVuelosAMedir, anchoMeta: n
 export function tablaDeVuelosVaEntera(altosDeGrupos: number[]): boolean {
   const alto = ALTO_TITULO + ALTO_ENCABEZADO_VUELOS + altosDeGrupos.reduce((a, h) => a + h, 0)
   return alto <= ALTO_MAXIMO_COLUMNA
+}
+
+// ── Espacio y paginación (§4.11, Ren, 2026-10-08) ─────────────────────────────
+
+/**
+ * Los ÚNICOS espacios permitidos en el documento (§4.11, punto 2). Ningún margen suelto
+ * fuera de esta escala: si hace falta otro, se escoge el vecino de la escala.
+ *
+ * ⚠️ Lo que NO es espacio entre elementos sino geometría de una pieza dibujada (el relleno
+ * de una pastilla, la veladura del rótulo, el alto del encabezado de una tabla, el ajuste
+ * óptico que alinea un ícono con su renglón) no entra en la escala: es el dibujo de esa
+ * pieza, como su radio o su tamaño.
+ */
+export const ESCALA_DE_ESPACIOS = [4, 8, 12, 16, 24, 32, 48] as const
+export type EspacioDeEscala = (typeof ESCALA_DE_ESPACIOS)[number]
+
+/** Los espacios del documento por su función (la tabla del punto 2). */
+export interface Espaciado {
+  /** Entre renglones de una misma tarjeta. Igual en compacto. */
+  fino: EspacioDeEscala
+  /** El relleno de una tarjeta. Igual en compacto. */
+  dentro: EspacioDeEscala
+  /** Entre tarjetas o filas de un mismo bloque. */
+  tarjetas: EspacioDeEscala
+  /** Del título de una sección a su contenido, y entre bloques de una misma sección. */
+  bloque: EspacioDeEscala
+  /** Entre secciones (Vuelos, Inversión, Incluido…). */
+  seccion: EspacioDeEscala
+  /** Entre capítulos de destino. */
+  capitulo: EspacioDeEscala
+}
+
+export const ESPACIADO_NORMAL: Espaciado = { fino: 4, dentro: 8, tarjetas: 12, bloque: 16, seccion: 32, capitulo: 48 }
+
+/** El paso 1 de «la última hoja trabaja»: la columna derecha de la tabla del punto 2. */
+export const ESPACIADO_COMPACTO: Espaciado = { fino: 4, dentro: 8, tarjetas: 8, bloque: 12, seccion: 24, capitulo: 32 }
+
+/**
+ * La hoja (§4.11, punto 1): A4 vertical, 40 pt de margen lateral, la barra de 4 pt y el logo
+ * arriba (el contenido empieza en 58), el pie de 26 pt abajo y una franja de 16 pt sobre el
+ * pie que el contenido nunca invade.
+ */
+export const HOJA = {
+  ancho: 595.28,
+  alto: 841.89,
+  margen: 40,
+  arriba: 58,
+  altoPie: 26,
+  franjaSobrePie: 16,
+} as const
+
+/** Lo que el contenido puede ocupar de una hoja, de arriba abajo. */
+export const ALTO_UTIL = HOJA.alto - HOJA.arriba - HOJA.altoPie - HOJA.franjaSobrePie
+
+/** Por debajo de esto la última hoja «no trabaja» y el documento se recompone (punto 6). */
+export const UMBRAL_ULTIMA_HOJA = 0.35
+
+/** Un salto que deja en blanco más que esto al pie de una hoja se intenta cerrar (punto 8). */
+export const UMBRAL_HUECO_AL_PIE = 0.25
+
+/** El costo acotado de recomponer: nunca más de cuatro renders por documento. */
+export const MAXIMO_DE_RENDERS = 4
+
+/**
+ * Los pasos del punto 6, en orden. Cada nivel incluye los anteriores:
+ * 0 · normal; 1 · espaciado compacto; 2 · + fotos de las alternativas a 1/4 del ancho;
+ * 3 · + foto de ciudad del capítulo a 110 pt de alto.
+ */
+export type NivelDeCompactacion = 0 | 1 | 2 | 3
+
+/**
+ * Cómo se compone el documento. `compactas` es el punto 8: secciones sueltas que van en
+ * espaciado compacto aunque el nivel sea 0.
+ */
+export interface Composicion {
+  nivel: NivelDeCompactacion
+  compactas?: string[]
+}
+
+export const COMPOSICION_NORMAL: Composicion = { nivel: 0 }
+
+/** El espaciado de una sección según la composición. */
+export function espaciadoDe(composicion: Composicion | undefined, seccion: string): Espaciado {
+  if (!composicion) return ESPACIADO_NORMAL
+  return composicion.nivel >= 1 || (composicion.compactas ?? []).includes(seccion) ? ESPACIADO_COMPACTO : ESPACIADO_NORMAL
+}
+
+/**
+ * Las secciones del documento, en su orden, con el número de su marca (el que la plantilla
+ * pinta en el azul de un punto invisible al inicio de cada una, ver `medir-pdf.ts`). El
+ * orden de los números ES el orden del documento.
+ */
+const NUMERO_DE_SECCION: Record<string, number> = {
+  portada: 1,
+  dias: 120,
+  vuelos: 130,
+  inversion: 140,
+  porPasajero: 150,
+  listas: 160,
+  opcionales: 170,
+  cargos: 180,
+  notas: 190,
+  terminos: 200,
+  cierre: 210,
+}
+
+/** El número de la marca de una sección. Los capítulos van del 10 en adelante. */
+export function numeroDeSeccion(seccion: string): number {
+  const cap = /^capitulo-(\d+)$/.exec(seccion)
+  if (cap) return 10 + Math.min(Number(cap[1]), 100)
+  return NUMERO_DE_SECCION[seccion] ?? 0
+}
+
+export function seccionDeNumero(n: number): string | null {
+  if (n >= 10 && n <= 110) return `capitulo-${n - 10}`
+  return Object.entries(NUMERO_DE_SECCION).find(([, v]) => v === n)?.[0] ?? null
+}
+
+/** Lo que el paso de composición necesita saber de un PDF ya renderizado. */
+export interface MedidaDeHojas {
+  /** Borde inferior del contenido de cada hoja, en pt desde arriba (`null` si está vacía). */
+  fondos: (number | null)[]
+  /** En qué hoja (desde 1) empieza cada sección que tiene marca. */
+  inicios: Map<string, number>
+}
+
+/** Qué fracción del alto útil ocupa el contenido de una hoja. */
+export function ocupacionDeHoja(fondo: number | null): number {
+  if (fondo === null) return 0
+  return Math.max(0, Math.min(1, (fondo - HOJA.arriba) / ALTO_UTIL))
+}
+
+/**
+ * ¿La última hoja trabaja? Con una sola hoja no hay hoja que desaparecer: trabaja siempre.
+ */
+export function ultimaHojaTrabaja(m: MedidaDeHojas): boolean {
+  if (m.fondos.length <= 1) return true
+  return ocupacionDeHoja(m.fondos[m.fondos.length - 1]) >= UMBRAL_ULTIMA_HOJA
+}
+
+/**
+ * ¿La recomposición con el nivel siguiente ya cumplió? Para en cuanto la última hoja
+ * desaparezca o pase del umbral (punto 6).
+ */
+export function recomposicionCumple(antes: MedidaDeHojas, despues: MedidaDeHojas): boolean {
+  return despues.fondos.length < antes.fondos.length || ultimaHojaTrabaja(despues)
+}
+
+/**
+ * Las hojas (desde 1, sin la última) que terminan con un blanco al pie mayor que el umbral
+ * del punto 8: ahí una unidad no cupo y pasó a la siguiente.
+ */
+export function hojasConHueco(m: MedidaDeHojas): number[] {
+  const fondoUtil = HOJA.arriba + ALTO_UTIL
+  const out: number[] = []
+  m.fondos.forEach((f, i) => {
+    if (i === m.fondos.length - 1 || f === null) return
+    if ((fondoUtil - f) / ALTO_UTIL > UMBRAL_HUECO_AL_PIE) out.push(i + 1)
+  })
+  return out
+}
+
+/**
+ * Qué secciones se componen en compacto para intentar cerrar el hueco al pie de la hoja `p`
+ * (punto 8): las que tienen contenido en esa hoja —la unidad anterior al salto es de alguna
+ * de ellas— y la que empieza en la siguiente, que es la de la unidad que saltó.
+ */
+export function seccionesParaCerrarHueco(m: MedidaDeHojas, p: number): string[] {
+  const orden = [...m.inicios.entries()].sort((a, b) => numeroDeSeccion(a[0]) - numeroDeSeccion(b[0]))
+  const out: string[] = []
+  orden.forEach(([seccion, inicio], i) => {
+    const siguiente = orden[i + 1]?.[1] ?? Number.POSITIVE_INFINITY
+    // Toca la hoja p si empieza en ella o antes y sigue hasta ella; o si empieza en p + 1.
+    const tocaP = inicio <= p && siguiente >= p
+    if (tocaP || inicio === p + 1) out.push(seccion)
+  })
+  return out
 }
 
 // ── Utilidades ────────────────────────────────────────────────────────────────
