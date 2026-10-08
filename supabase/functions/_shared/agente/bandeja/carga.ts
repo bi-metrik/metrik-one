@@ -61,7 +61,12 @@ export function nombramientos(
     }
     if (f.direccion === 'saliente') opciones = f.opciones?.length ? f.opciones : null;
     const p = f.traza?.propuesta;
-    if (p?.accion === 'viaje_nuevo') out.push({ i: f.turno_id ? inicioDeTurno.get(f.turno_id) ?? i : i, clave: `nuevo:${p.huella}` });
+    if (p?.accion === 'viaje_nuevo') {
+      // El pedido empieza donde empezó el turno que lo propuso, o antes si el modelo señaló el mensaje (`desde`).
+      const inicio = f.turno_id ? inicioDeTurno.get(f.turno_id) ?? i : i;
+      const desde = typeof p.datos?.desdeFila === 'string' ? filas.findIndex((x) => x.id === p.datos.desdeFila) : -1;
+      out.push({ i: desde >= 0 && desde < inicio ? desde : inicio, clave: `nuevo:${p.huella}` });
+    }
     const e = f.traza?.ejecucion;
     if (e?.resultado === 'ejecutada') {
       for (const c of e.nombrados ?? []) {
