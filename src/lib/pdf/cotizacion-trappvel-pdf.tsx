@@ -75,7 +75,6 @@ import {
   circuloDeFecha,
   claveDeFecha,
   clienteDeLaPortada,
-  colorDeSigla,
   colorDeTarifa,
   conAnio,
   diaADiaSeImprime,
@@ -105,6 +104,7 @@ import {
   type ListaDelCierre,
 } from './cotizacion-trappvel-formato'
 import { partirPalabraLarga } from '@/lib/cotizaciones/condiciones-comerciales'
+import { colorDeAerolinea } from '@/lib/cotizaciones/aerolineas'
 import { estructurarTerminos, type BloqueDeTerminos } from '@/lib/cotizaciones/terminos-cotizacion'
 import { tituloDeBloquePDF } from '@/lib/cotizaciones/itinerarios'
 import { textoIvaIncluido } from '@/lib/fiscal/iva-cotizacion'
@@ -629,6 +629,9 @@ const PESO_COLUMNA: Record<ColumnaVuelo, number> = {
 /** Aire entre columnas: sin él la caja de una termina donde empieza el texto de la otra. */
 const CANAL = 6
 
+/** Alto de la franja del color secundario en la pastilla de la aerolínea. */
+const FRANJA_SIGLA = 3
+
 function TablaVuelos({ vuelos, general, tarifas, titulo }: { vuelos: VueloPDF[]; general: boolean; tarifas: TarifaDoc[]; titulo?: ReactNode }) {
   const grupos = vuelos.map(v => ({ v, filas: filasDelVuelo(v) }))
   const todas = grupos.flatMap(g => g.filas)
@@ -646,21 +649,29 @@ function TablaVuelos({ vuelos, general, tarifas, titulo }: { vuelos: VueloPDF[];
   const celda = (f: FilaVuelo, c: ColumnaVuelo): ReactNode => {
     if (c === 'aerolinea') {
       const sigla = siglaAerolinea(f.vuelo.aerolinea, f.vuelo.numeroVuelo)
+      // El color sale del catálogo de aerolíneas (brief del 2026-10-08); el secundario va como
+      // franja de 3 pt al pie, DENTRO de los 14 pt de la pastilla: la fila no cambia de alto.
+      const color = sigla ? colorDeAerolinea(sigla) : null
       return (
         <View style={{ flexDirection: 'row', alignItems: 'center' }}>
-          {sigla && (
+          {sigla && color && (
             <View
               style={{
                 width: 22,
                 height: 14,
                 borderRadius: 7,
-                backgroundColor: colorDeSigla(sigla),
+                overflow: 'hidden',
+                backgroundColor: color.fondo,
                 alignItems: 'center',
                 justifyContent: 'center',
+                paddingBottom: color.franja ? FRANJA_SIGLA : 0,
                 marginRight: 5,
               }}
             >
-              <Text style={{ fontSize: 6.5, fontFamily: 'Helvetica-Bold', color: C.blanco }}>{sigla}</Text>
+              <Text style={{ fontSize: 6.5, fontFamily: 'Helvetica-Bold', color: color.texto }}>{sigla}</Text>
+              {color.franja && (
+                <View style={{ position: 'absolute', left: 0, right: 0, bottom: 0, height: FRANJA_SIGLA, backgroundColor: color.franja }} />
+              )}
             </View>
           )}
           <Text hyphenationCallback={SIN_GUION} style={{ fontSize: 8.5, fontFamily: 'Helvetica-Bold', color: C.tinta, flex: 1 }}>

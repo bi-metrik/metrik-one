@@ -18,13 +18,14 @@ import {
 import { comprimirFotoHotel } from '@/lib/cotizaciones/foto-hotel-navegador'
 import HojaCliente from '@/app/(app)/negocios/hoja-cliente'
 import TarjetaCosto from '@/app/(app)/negocios/tarjeta-costo'
+import PastillaAerolinea from '@/app/(app)/negocios/pastilla-aerolinea'
 import { AlertaDecision } from '@/components/viaje/alerta-decision'
 import { BTN, BTN_PRIM, INPUT } from '@/components/viaje/estilo'
 import { ItemMenu, MenuAcciones, SeparadorMenu } from '@/components/viaje/menu-acciones'
 import { Miniatura, MiniaturaManual, useVistaAmpliada } from '@/components/viaje/pantallazo'
 import type { FilaAdicional } from '@/lib/cotizaciones/adicionales'
 import { aplicarCorrecciones, esCorregible, leerCorrecciones, leidosPorSlug } from '@/lib/cotizaciones/correcciones'
-import { cargoDeItem, hotelesDeItems, type ItemConLectura } from '@/lib/cotizaciones/detalle-viaje'
+import { cargoDeItem, hotelesDeItems, vuelosDeItems, type ItemConLectura } from '@/lib/cotizaciones/detalle-viaje'
 import {
   costoPorTipoDeHabitaciones,
   habitacionesDeTarifa,
@@ -243,6 +244,8 @@ export default function TarjetaOpcion({
   const esActividad = ranura?.slug === 'actividad_detalle'
   const esVuelo = ranura?.slug === 'vuelo_detalle'
   const [hotel] = esHotel ? hotelesDeItems([item]) : [null]
+  // La pastilla de la aerolínea en la cabecera, la misma del PDF (brief del 2026-10-08).
+  const [vuelo] = esVuelo ? vuelosDeItems([item]) : [null]
   const nombre = (esHotel ? hotel?.hotel : null) || nombreVisibleDeLinea(item) || `Opción ${numero}`
   const estrellas = esHotel ? hotel?.estrellas ?? null : null
 
@@ -386,6 +389,7 @@ export default function TarjetaOpcion({
           <span className="min-w-0">
             <span className="block text-xs font-semibold text-[#6E6A62]">Opción {numero}</span>
             <span className="flex flex-wrap items-center gap-1.5 text-base font-bold">
+              {vuelo && <PastillaAerolinea aerolinea={vuelo.aerolinea} numeroVuelo={vuelo.numeroVuelo} />}
               {nombre}
               {estrellas ? <span className="text-xs tracking-[1px] text-[#C98A00]" aria-label={`${estrellas} estrellas`}>{'★'.repeat(estrellas)}</span> : null}
             </span>
