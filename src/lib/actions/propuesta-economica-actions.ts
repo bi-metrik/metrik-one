@@ -32,7 +32,15 @@ import { parseMontoCop } from '@/lib/negocios/monto-cop'
 import { bogotaMesCalendario, type BogotaParts } from '@/lib/dates/bogota'
 import { tarifaConfirmadaPorNegocio, niegaCertificacionUpme, type FilaBloqueTarifa } from '@/lib/upme/modelo-dinero'
 import { fuenteDeLaTarifa, faltaConfirmarTarifa } from '@/lib/upme/tarifa-propuesta'
-import { descuentoImplicito, motivoDescuentoRechazado } from '@/lib/propuesta/gate-descuento'
+import {
+  descuentoImplicito,
+  describirFueraDeTarifa,
+  fueraDeTarifa,
+  motivoAprobacionTarifaRechazada,
+  motivoDescuentoRechazado,
+  MOTIVO_MAX,
+  type AprobacionFueraDeTarifa,
+} from '@/lib/propuesta/gate-descuento'
 import {
   bloqueTieneRespuesta,
   faltanRequisitos,
@@ -142,6 +150,11 @@ export type PropuestaData = {
    * otra. Se muestra, y re-congelarlo es una corrección deliberada.
    */
   aprobado_servicio?: string | null
+  /**
+   * Solo con tarifas: la versión aprobada quedó FUERA de la tarifa (recargo o más
+   * descuento que el tope) y la aprobó un rol gerencial con este motivo. `null` = dentro.
+   */
+  aprobado_fuera_de_tarifa?: AprobacionFueraDeTarifa | null
   /**
    * Versión de tarifas con la que se armó la propuesta (se fija al generar la primera
    * versión con tarifas). Ausente = esquema anterior. Una vez puesta, el negocio no cambia
@@ -623,6 +636,16 @@ async function generarVersionPropuestaSinClave(
 
   for (const [n, pct] of [[1, desc1], [2, desc2]] as const) {
     if (!ofrecidos.includes(n)) continue
+    if (!Number.isFinite(pct)) return { ok: false, error: `El valor del Plan ${n} no es un número` }
+    if (conTarifas) {
+      // Con tarifas el comercial escribe CUALQUIER valor y la propuesta se emite: lo que
+      // quede fuera de la tarifa (recargo o más descuento que el tope) lo frena la
+      // APROBACIÓN, que exige rol gerencial y motivo (`motivoAprobacionTarifaRechazada`).
+      // Antes esto rechazaba todo lo que no estuviera entre 0 y el tope, para todos, y
+      // el valor tecleado se perdía sin guardarse (SOE-004).
+      if (pct >= 100) return { ok: false, error: `El valor del Plan ${n} tiene que ser mayor que cero` }
+      continue
+    }
     if (pct < 0) return { ok: false, error: `Descuento Plan ${n} no puede ser negativo` }
     if (pct > capVigente) {
       return { ok: false, error: `Descuento Plan ${n} excede el cap de ${capVigente}%` }
@@ -764,12 +787,14 @@ async function generarVersionPropuestaSinClave(
       plan1_valor: plan1Ofrecido ? formatCOP(calc.plan1_valor) : NO_APLICA,
       plan1_anticipo: plan1Ofrecido ? formatCOP(calc.plan1_anticipo) : NO_APLICA,
       plan1_exito_iva: plan1Ofrecido ? formatCOP(calc.plan1_exito_iva) : NO_APLICA,
-      plan1_descuento_pct: `${pctMostrado(desc1)}%`,
+      // Un valor por encima de la tarifa (aprobación manual) no es un descuento: el
+      // documento no imprime porcentajes ni ahorros negativos.
+      plan1_descuento_pct: `${pctMostrado(Math.max(0, desc1))}%`,
       plan1_descuento_linea: plan1DescuentoLinea,
-      plan1_ahorro: formatCOP(calc.ahorro_plan1),
+      plan1_ahorro: formatCOP(Math.max(0, calc.ahorro_plan1)),
       plan2_valor: plan2Ofrecido ? formatCOP(calc.plan2_valor) : NO_APLICA,
-      plan2_descuento_pct: `${pctMostrado(ahorroPctPlan2)}%`,
-      plan2_ahorro: formatCOP(calc.ahorro_plan2),
+      plan2_descuento_pct: `${pctMostrado(Math.max(0, ahorroPctPlan2))}%`,
+      plan2_ahorro: formatCOP(Math.max(0, calc.ahorro_plan2)),
       plan1_estilo: plan1Ofrecido ? '' : 'display:none',
       plan2_estilo: plan2Ofrecido ? '' : 'display:none',
       // Tarifa UPME (pasante) + total a pagar por plan = honorario + tarifa.
@@ -899,6 +924,7 @@ async function generarVersionPropuestaSinClave(
     aprobado_honorario: ctx.data.aprobado_honorario ?? null,
     aprobado_tarifa_upme: ctx.data.aprobado_tarifa_upme ?? null,
     aprobado_servicio: ctx.data.aprobado_servicio ?? null,
+    aprobado_fuera_de_tarifa: ctx.data.aprobado_fuera_de_tarifa ?? null,
     // La versión de tarifas queda fijada con la primera versión que la usa.
     ...(conTarifas ? { tarifa: congelar(conTarifas) } : {}),
   }
@@ -929,6 +955,8 @@ export async function aprobarVersionPropuesta(
   bloqueId: string,
   versionN: number,
   plan: 1 | 2,
+  /** Obligatorio solo si el plan quedó fuera de la tarifa (esquema de tarifas). */
+  motivo?: string | null,
 ): Promise<{ ok: boolean; error?: string }> {
   const { supabase, workspaceId, staffId, role, error: errWs } = await getWorkspace()
   if (errWs || !workspaceId) return { ok: false, error: 'No autenticado' }
@@ -969,14 +997,32 @@ export async function aprobarVersionPropuesta(
   // Gate de aprobación: descuentos sobre el umbral requieren rol gerencial. La regla
   // vive en `gate-descuento` porque `corregirAprobacion` fija el mismo honorario por
   // otra puerta y tiene que exigir exactamente lo mismo — dos copias se desincronizan.
-  const rechazo = motivoDescuentoRechazado({
-    descuentoPct: descPlan,
-    cap: versionConTarifas ? Number(version.cap_descuento_pct ?? ctx.capDescuento) : ctx.capDescuento,
-    umbral: ctx.umbralAprobacion,
-    role,
-    etiqueta: `El Plan ${plan}`,
-  })
+  // Con tarifas, además, un valor FUERA de la tarifa (recargo o más descuento que el
+  // tope) solo lo aprueba un rol gerencial y con motivo escrito (SOE-004).
+  const capVersion = versionConTarifas ? Number(version.cap_descuento_pct ?? ctx.capDescuento) : ctx.capDescuento
+  const razon = (motivo ?? '').trim().slice(0, MOTIVO_MAX)
+  const rechazo = versionConTarifas
+    ? motivoAprobacionTarifaRechazada({
+        descuentoPct: descPlan,
+        cap: capVersion,
+        umbral: ctx.umbralAprobacion,
+        role,
+        etiqueta: `El Plan ${plan}`,
+        motivo: razon,
+      })
+    : motivoDescuentoRechazado({
+        descuentoPct: descPlan,
+        cap: capVersion,
+        umbral: ctx.umbralAprobacion,
+        role,
+        etiqueta: `El Plan ${plan}`,
+      })
   if (rechazo) return { ok: false, error: rechazo }
+  const baseVersion = Number(plan === 1 ? version.base_plan1 : version.base_plan2)
+  const fueraDeLaTarifa: AprobacionFueraDeTarifa | null =
+    versionConTarifas && fueraDeTarifa(descPlan, capVersion)
+      ? { motivo: razon, descuento_pct: descPlan, base: baseVersion, cap: capVersion }
+      : null
 
   // Honorario del plan elegido (los planes 50/50 vs único aplican al HONORARIO).
   const honorarioElegido = plan === 1 ? version.valor_final_plan1 : version.valor_final_plan2
@@ -1012,6 +1058,7 @@ export async function aprobarVersionPropuesta(
     aprobado_honorario: honorarioElegido,
     aprobado_tarifa_upme: tarifaElegida,
     aprobado_servicio: servicioElegido,
+    aprobado_fuera_de_tarifa: fueraDeLaTarifa,
     ...(ctx.data.tarifa ? { tarifa: ctx.data.tarifa } : {}),
   }
 
@@ -1030,16 +1077,21 @@ export async function aprobarVersionPropuesta(
     .eq('id', ctx.negocioId)
 
   // Activity log — desglosa honorario + tarifa cuando hay tarifa (pasante).
-  const contenidoLog = tarifaElegida > 0
-    ? `Propuesta económica v${versionN} aprobada — Plan ${plan}: honorario ${formatCOP(honorarioElegido)} (precio) + tarifa UPME ref. ${formatCOP(tarifaElegida)} → valor a recaudar ${formatCOP(honorarioElegido + tarifaElegida)}`
-    : `Propuesta económica v${versionN} aprobada — Plan ${plan} — honorario ${formatCOP(valorElegido)}`
+  // Fuera de la tarifa, el motivo va ADELANTE: el contenido tiene tope de 280 y lo que
+  // se tiene que poder leer en la historia es por qué se aprobó ese valor. El motivo
+  // completo queda además en `aprobado_fuera_de_tarifa` del bloque.
+  const contenidoLog = fueraDeLaTarifa
+    ? `Propuesta económica v${versionN} aprobada fuera de la tarifa — Plan ${plan}: honorario ${formatCOP(honorarioElegido)} (tarifa ${formatCOP(fueraDeLaTarifa.base)}, ${describirFueraDeTarifa(descPlan, capVersion)}). Motivo: ${razon}`
+    : tarifaElegida > 0
+      ? `Propuesta económica v${versionN} aprobada — Plan ${plan}: honorario ${formatCOP(honorarioElegido)} (precio) + tarifa UPME ref. ${formatCOP(tarifaElegida)} → valor a recaudar ${formatCOP(honorarioElegido + tarifaElegida)}`
+      : `Propuesta económica v${versionN} aprobada — Plan ${plan} — honorario ${formatCOP(valorElegido)}`
   await registrarActividad(sb, {
     workspace_id: workspaceId,
     entidad_tipo: 'negocio',
     entidad_id: ctx.negocioId,
     tipo: 'propuesta_aprobada',
     autor_id: staffId,
-    contenido: contenidoLog,
+    contenido: contenidoLog.slice(0, 280),
   }, 'aprobarVersionPropuesta')
 
   revalidatePath(`/negocios/${ctx.negocioId}`)
@@ -1187,6 +1239,7 @@ export async function revertirAprobacionPropuesta(
     aprobado_honorario: null,
     aprobado_tarifa_upme: null,
     aprobado_servicio: null,
+    aprobado_fuera_de_tarifa: null,
   }
 
   const { error: errBlq } = await sb
@@ -1550,18 +1603,29 @@ export async function corregirAprobacion(
   // el umbral que sí lo frena al aprobar. La base viene de la instancia origen; si la
   // propuesta no la trae (bloques viejos), `descuentoImplicito` devuelve null y el gate
   // no frena, porque ahí falta configuración, no falta una decisión de precio.
+  // Con tarifas, si el valor corregido queda fuera de la tarifa se anota igual que al
+  // aprobar; si vuelve a quedar dentro, la marca se limpia. `undefined` = no se toca.
+  let fueraCorregido: AprobacionFueraDeTarifa | null | undefined
   if (cambiaHonorario && aprobadaConTarifas) {
     // Con tarifas, el descuento se mide contra la casilla del plan que queda aprobado,
     // con el tope de la versión de tarifas: la misma vara que al generar y aprobar.
+    // Fuera de la tarifa rige lo mismo que al aprobar: rol gerencial y motivo (aquí el
+    // motivo ya es obligatorio para toda corrección).
     const base = Number(planNuevo === 1 ? versionAprobada!.base_plan1 : versionAprobada!.base_plan2)
-    const rechazo = motivoDescuentoRechazado({
+    const rechazo = motivoAprobacionTarifaRechazada({
       descuentoPct: descuentoImplicito(nuevo, base),
       cap: Number(versionAprobada!.cap_descuento_pct ?? capDescuento),
       umbral: umbralAprobacion,
       role,
       etiqueta: `El valor corregido (${formatCOP(nuevo)})`,
+      motivo: razon,
     })
     if (rechazo) return { ok: false, error: rechazo }
+    const capCorr = Number(versionAprobada!.cap_descuento_pct ?? capDescuento)
+    const descCorr = descuentoImplicito(nuevo, base)
+    fueraCorregido = descCorr != null && fueraDeTarifa(descCorr, capCorr)
+      ? { motivo: razon.slice(0, MOTIVO_MAX), descuento_pct: descCorr, base, cap: capCorr }
+      : null
   } else if (cambiaHonorario) {
     let precioBase = Number(
       filas.map(f => f.data?.precio_base_con_iva).find(v => Number(v) > 0) ?? 0,
@@ -1600,6 +1664,7 @@ export async function corregirAprobacion(
   for (const inst of filas) {
     const data = { ...inst.data }
     if (cambiaHonorario) data.aprobado_honorario = nuevo
+    if (fueraCorregido !== undefined) data.aprobado_fuera_de_tarifa = fueraCorregido
     if (cambiaPlan) data.aprobado_plan = planNuevo
     if (cambiaServicio) data.aprobado_servicio = servicioNuevo
     await sb

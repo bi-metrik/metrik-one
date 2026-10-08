@@ -79,7 +79,72 @@ export function motivoDescuentoRechazado(e: EntradaGateDescuento): string | null
   return null
 }
 
+// ── Esquema de tarifas por plan y ruta: aprobación manual fuera de la tarifa ──
+//
+// Antes de las tarifas (#977, 2026-10-01) el tope del bloque en SOENA era 100 % y el
+// umbral 50 %: el comercial emitía cualquier descuento y uno sobre el 50 % lo aprobaba
+// solo un rol gerencial (gate del 2026-06-04). Con las tarifas el tope pasó a ser el de
+// la versión (25 %) y se volvió un muro para TODOS al generar, con lo que el umbral (50)
+// quedó mudo y nadie podía aprobar un precio distinto (SOE-004, V0570). Además el gate
+// nunca admitió recargos: un precio por encima de la base se rechazaba incluso al dueño.
+//
+// Regla de hoy, solo con tarifas: el comercial escribe cualquier valor por plan y la
+// propuesta se genera. Si el valor queda FUERA de la tarifa —más descuento que el tope,
+// o por encima del valor de la casilla— solo la aprueba un owner/admin/supervisor, y con
+// un motivo escrito que queda en el bloque y en la historia del negocio. Dentro de la
+// tarifa todo sigue como antes (incluido el umbral, si alguna vez queda por debajo del tope).
+
+/** Un descuento fuera de la tarifa: recargo (negativo) o más descuento que el tope. */
+export function fueraDeTarifa(descuentoPct: number | null | undefined, cap: number): boolean {
+  if (descuentoPct == null || !Number.isFinite(descuentoPct)) return false
+  return descuentoPct < 0 || (Number.isFinite(cap) && descuentoPct > cap)
+}
+
+/** «31,87 % por encima de la tarifa» / «30 % de descuento, el tope es 25 %». */
+export function describirFueraDeTarifa(descuentoPct: number, cap: number): string {
+  return descuentoPct < 0
+    ? `${redondear(-descuentoPct)}% por encima de la tarifa`
+    : `${redondear(descuentoPct)}% de descuento, el tope es ${cap}%`
+}
+
+/**
+ * Motivo por el que NO se puede aprobar (o corregir) este valor con tarifas, o `null`.
+ * `motivo` es lo que escribió quien aprueba: fuera de la tarifa es obligatorio.
+ */
+export function motivoAprobacionTarifaRechazada(
+  e: EntradaGateDescuento & { motivo?: string | null },
+): string | null {
+  const d = e.descuentoPct
+  if (d == null || !Number.isFinite(d)) return null
+  if (fueraDeTarifa(d, e.cap)) {
+    if (!ROLES_DESCUENTO_ALTO.includes(e.role ?? '')) {
+      return `${e.etiqueta} queda fuera de la tarifa (${describirFueraDeTarifa(d, e.cap)}) y solo lo aprueba un supervisor, administrador o dueño.`
+    }
+    if (!(e.motivo ?? '').trim()) {
+      return `${e.etiqueta} queda fuera de la tarifa (${describirFueraDeTarifa(d, e.cap)}): escribe el motivo de la aprobación.`
+    }
+    return null
+  }
+  if (e.umbral != null && d > e.umbral && !ROLES_DESCUENTO_ALTO.includes(e.role ?? '')) {
+    return `${e.etiqueta}: ${redondear(d)}% de descuento supera ${e.umbral}% y requiere aprobación de un supervisor, administrador o dueño.`
+  }
+  return null
+}
+
 /** Redondeo a 2 decimales, solo para el mensaje (el valor almacenado no se toca). */
 function redondear(n: number): number {
   return Math.round(n * 100) / 100
 }
+
+/** Lo que el bloque guarda cuando se aprueba un valor fuera de la tarifa. */
+export interface AprobacionFueraDeTarifa {
+  motivo: string
+  /** Descuento del plan aprobado sobre su casilla (negativo = recargo). */
+  descuento_pct: number
+  /** Valor de la casilla plan × ruta (la tarifa). */
+  base: number
+  cap: number
+}
+
+/** Tope del motivo guardado: es texto libre de una persona, no un documento. */
+export const MOTIVO_MAX = 500
