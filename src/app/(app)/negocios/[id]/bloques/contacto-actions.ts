@@ -11,7 +11,15 @@ import {
   AUTORIZACION_LINK_SLUG,
   type ValoresContacto,
 } from '@/lib/contactos/campos-contacto'
-import { estadoDelContacto, pedirEnlace, enviarCorreoAutorizacion } from '@/lib/autorizacion-datos/servidor'
+import {
+  configDelWorkspace,
+  enviarCorreoAutorizacion,
+  estadoDelContacto,
+  MENSAJE_EVIDENCIA,
+  pedirEnlace,
+  registrarConEvidencia,
+  versionesPublicadas,
+} from '@/lib/autorizacion-datos/servidor'
 import { faseDe, type FaseAutorizacion } from '@/lib/autorizacion-datos/estado'
 import { MENSAJE_SIN_CORREO } from '@/lib/autorizacion-datos/correo'
 import type { ClaveCasilla } from '@/lib/autorizacion-datos/texto'
@@ -177,6 +185,10 @@ export interface VistaAutorizacionBloque {
   manualSinEvidencia: { fecha: string | null } | null
   textoPublicado: boolean
   versionVigente: string | null
+  /** `link` o `evidencia` (registrada por el equipo con el archivo). */
+  via: 'link' | 'evidencia' | null
+  /** La vía «recibida por otro medio» está encendida en el workspace: sus versiones para elegir. */
+  evidencia: { versiones: Array<{ id: string; version: string; casillas: Array<{ clave: ClaveCasilla; texto: string }> }> } | null
 }
 
 async function contactoDelBloque(negocioBloqueId: string, editar: boolean) {
@@ -199,8 +211,12 @@ export async function cargarAutorizacionContacto(
 ): Promise<{ vista: VistaAutorizacionBloque | null; error: string | null }> {
   const c = await contactoDelBloque(negocioBloqueId, false)
   if (c.error !== null) return { vista: null, error: c.error === 'Este negocio no tiene contacto asociado' ? null : c.error }
-  const { estado, error } = await estadoDelContacto(c.workspaceId, c.contactoId)
+  const [{ estado, error }, { config }] = await Promise.all([
+    estadoDelContacto(c.workspaceId, c.contactoId),
+    configDelWorkspace(c.workspaceId),
+  ])
   if (error) return { vista: null, error: 'No se pudo leer la autorización de datos' }
+  const evidencia = config.registroConEvidencia ? { versiones: await versionesPublicadas(c.workspaceId) } : null
   return {
     vista: {
       contactoNombre: estado.contacto?.nombre ?? '',
@@ -215,6 +231,8 @@ export async function cargarAutorizacionContacto(
       manualSinEvidencia: estado.manual_sin_evidencia,
       textoPublicado: !!estado.texto,
       versionVigente: estado.texto?.version ?? null,
+      via: estado.aceptacion?.via ?? null,
+      evidencia,
     },
     error: null,
   }
@@ -254,4 +272,33 @@ export async function enviarCorreoAutorizacionContacto(
     return { enviadoA: null, error: 'No se pudo enviar el correo. Copia el link y envíaselo por WhatsApp.' }
   }
   return { enviadoA: null, error: MENSAJE_SIN_CORREO[r.motivo] }
+}
+
+/**
+ * «Registrar autorización recibida por otro medio»: con el archivo que la prueba, la fecha en que el cliente autorizó,
+ * el medio, la versión que se le mostró y las casillas que cubre. Solo si el workspace la encendió.
+ */
+export async function registrarAutorizacionConEvidencia(
+  negocioBloqueId: string,
+  form: FormData,
+): Promise<{ error: string | null }> {
+  const c = await contactoDelBloque(negocioBloqueId, true)
+  if (c.error !== null) return { error: c.error }
+  const casillas: Record<string, boolean> = {}
+  for (const clave of ['generales', 'sensibles', 'menores', 'ofertas']) casillas[clave] = form.get(`casilla_${clave}`) === 'on'
+  const archivo = form.get('archivo')
+  const r = await registrarConEvidencia({
+    workspaceId: c.workspaceId,
+    contactoId: c.contactoId,
+    negocioId: c.negocioId,
+    staffId: c.staffId,
+    textoId: String(form.get('texto_id') ?? ''),
+    fecha: String(form.get('fecha') ?? ''),
+    medio: String(form.get('medio') ?? ''),
+    casillas,
+    archivo: archivo instanceof File ? archivo : null,
+  })
+  if (!r.ok) return { error: MENSAJE_EVIDENCIA[r.error] }
+  revalidatePath(`/negocios/${c.negocioId}`)
+  return { error: null }
 }

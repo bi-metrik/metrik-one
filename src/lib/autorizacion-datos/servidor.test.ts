@@ -35,7 +35,11 @@ function consulta(tabla: string) {
       if (cambio) for (const f of fs) Object.assign(f, cambio)
       res({ data: fs, error: null })
     },
-    insert: () => ({ select: () => ({ maybeSingle: async () => ({ data: { id: 'act' }, error: null }) }) }),
+    insert: (fila: Fila) => {
+      const nueva = { id: `id-${(tablas[tabla] ??= []).length + 1}`, ...fila }
+      tablas[tabla].push(nueva)
+      return { select: () => ({ maybeSingle: async () => ({ data: { id: nueva.id }, error: null }) }) }
+    },
   }
   return q
 }
@@ -74,7 +78,11 @@ function sembrar(enlace: Partial<Fila> = {}) {
   tablas.activity_log = []
 }
 
-const { abrirAutorizacion, responderAutorizacion } = await import('./servidor')
+vi.mock('@/lib/almacenamiento/one', () => ({
+  subirAOne: async (e: { bucket: string; path: string }) => ({ referencia: `one://${e.bucket}/${e.path}`, bucket: e.bucket, path: e.path }),
+}))
+
+const { abrirAutorizacion, responderAutorizacion, registrarConEvidencia } = await import('./servidor')
 
 const respuesta = (extra: Partial<Parameters<typeof responderAutorizacion>[0]> = {}) => responderAutorizacion({
   token: TOKEN, slug: 'agencia', decision: 'autorizo', textoId: 't1', casillas: { generales: true, menores: true },
@@ -152,5 +160,36 @@ describe('la respuesta del titular', () => {
     expect(e.rechazado_at).toBeTruthy()
     expect(e.aceptado_at).toBeNull()
     expect(await respuesta()).toEqual({ ok: true, copiaEnviada: false })
+  })
+})
+
+describe('vía «recibida por otro medio», con evidencia', () => {
+  const archivo = () => new File([new Uint8Array([37, 80, 68, 70])], 'firma.pdf', { type: 'application/pdf' })
+  const registrar = (extra: Partial<Parameters<typeof registrarConEvidencia>[0]> = {}) => registrarConEvidencia({
+    workspaceId: WS, contactoId: 'c1', negocioId: null, staffId: 'staff-1', textoId: 't1', fecha: '2026-10-02',
+    medio: 'papel', casillas: { generales: true }, archivo: archivo(), ...extra,
+  })
+  const encender = () => { tablas.workspaces[0].config_extra = { autorizacion_datos: { registro_con_evidencia: true } } }
+
+  it('apagada por defecto', async () => {
+    expect(await registrar()).toEqual({ ok: false, error: 'apagado' })
+  })
+
+  it('sin archivo no registra; fecha futura tampoco', async () => {
+    encender()
+    expect(await registrar({ archivo: null })).toEqual({ ok: false, error: 'sin_archivo' })
+    expect(await registrar({ fecha: '2099-01-01' })).toEqual({ ok: false, error: 'fecha' })
+    expect(await registrar({ casillas: { menores: true } })).toEqual({ ok: false, error: 'falta_generales' })
+  })
+
+  it('con evidencia queda como enlace aceptado vía evidencia, con la fecha del cliente', async () => {
+    encender()
+    expect(await registrar()).toEqual({ ok: true })
+    const e = tablas.autorizacion_datos_enlaces.at(-1)!
+    expect(e).toMatchObject({
+      via: 'evidencia', medio: 'papel', aceptado_at: '2026-10-02T12:00:00-05:00', texto_id: 't1', texto_mayor: 1,
+      casillas: { generales: true, sensibles: null, menores: false, ofertas: null }, registrado_por: 'staff-1',
+    })
+    expect(String(e.evidencia_ref)).toMatch(/^one:\/\/ve-documentos\/autorizacion-datos\/ws-agencia\/c1\//)
   })
 })

@@ -48,6 +48,31 @@ export type CasillasMarcadas = Partial<Record<ClaveCasilla, boolean | null>>
 
 export type Medio = 'correo' | 'whatsapp_reenviado' | 'otro'
 
+/**
+ * Por dónde llegó una autorización que se registra CON EVIDENCIA (vía «recibida por otro medio», Emilio 4.4): papel
+ * firmado en la oficina, o el cliente respondiendo por correo o WhatsApp a un mensaje que traía el texto o el link.
+ */
+export type MedioEvidencia = 'papel' | 'correo' | 'whatsapp'
+
+export const MEDIOS_EVIDENCIA: Record<MedioEvidencia, string> = {
+  papel: 'Documento firmado en papel',
+  correo: 'Respuesta del cliente por correo',
+  whatsapp: 'Respuesta del cliente por WhatsApp',
+}
+
+export function esMedioEvidencia(v: unknown): v is MedioEvidencia {
+  return v === 'papel' || v === 'correo' || v === 'whatsapp'
+}
+
+/**
+ * La fecha en que el CLIENTE autorizó (no la de hoy): `AAAA-MM-DD`, no futura, desde 2026. Pura.
+ */
+export function fechaDeEvidenciaValida(v: unknown, hoyIso: string): boolean {
+  if (typeof v !== 'string' || !/^\d{4}-\d{2}-\d{2}$/.test(v)) return false
+  const d = new Date(`${v}T12:00:00Z`)
+  return !Number.isNaN(d.getTime()) && d.toISOString().slice(0, 10) === v && v >= '2026-01-01' && v <= hoyIso
+}
+
 /** El parámetro corto de la URL (`?m=c`): el correo y el mensaje del bot llevan el suyo. */
 export const PARAM_MEDIO: Record<Medio, string> = { correo: 'c', whatsapp_reenviado: 'w', otro: 'o' }
 

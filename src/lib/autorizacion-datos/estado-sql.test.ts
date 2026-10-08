@@ -188,6 +188,18 @@ describe('guardas de evidencia', () => {
     await expect(aceptar(en.enlace_id, t, 1, { generales: false, sensibles: true })).rejects.toThrow()
   })
 
+  it('la vía evidencia exige archivo y quién la registró, y cuenta como vigente', async () => {
+    const t = await publicar(1, 0)
+    const base = `insert into public.autorizacion_datos_enlaces (workspace_id, contacto_id, token, expira_at, via, aceptado_at, medio,
+      texto_id, texto_version, texto_mayor, texto_menor, texto_sha256, casillas, evidencia_ref, registrado_por)
+      values ($1, $2, $3, now(), 'evidencia', '2026-10-01', 'papel', $4, 'v1.0', 1, 0, repeat('e', 64), '{"generales": true}', $5, $6)`
+    await db.exec(`insert into public.staff values ('00000000-0000-4000-8000-0000000000f1')`)
+    await expect(db.query(base, [WS, C1, TOKEN, t, null, '00000000-0000-4000-8000-0000000000f1'])).rejects.toThrow()
+    await db.query(base, [WS, C1, TOKEN, t, 'one://ve-documentos/x.pdf', '00000000-0000-4000-8000-0000000000f1'])
+    const e = await estado(C1)
+    expect(e.vigente.generales).toBe(true)
+  })
+
   it('el texto tiene que traer la casilla general', async () => {
     await expect(db.query(
       `insert into public.autorizacion_datos_textos (workspace_id, version, mayor, titulo, cuerpo_md, casillas) values ($1, 'x', 1, 't', 'c', '[{"clave":"sensibles","texto":"s"}]')`, [WS],

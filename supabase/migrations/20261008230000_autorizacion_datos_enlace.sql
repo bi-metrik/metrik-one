@@ -155,7 +155,9 @@ create table public.autorizacion_datos_enlaces (
 
   -- ── La aceptacion ──
   aceptado_at timestamptz,
-  medio text constraint autorizacion_enlaces_medio check (medio in ('correo', 'whatsapp_reenviado', 'otro')),
+  -- `correo` / `whatsapp_reenviado` / `otro`: por dónde le llegó el LINK. `papel` / `whatsapp`: por dónde llegó la
+  -- autorización que se registró con evidencia (vía `evidencia`).
+  medio text constraint autorizacion_enlaces_medio check (medio in ('correo', 'whatsapp_reenviado', 'otro', 'papel', 'whatsapp')),
   texto_id uuid references public.autorizacion_datos_textos(id),
   texto_version text,
   texto_mayor integer,
@@ -170,6 +172,19 @@ create table public.autorizacion_datos_enlaces (
   encargado text,
   ip text,
   user_agent text,
+
+  -- ── La vía «recibida por otro medio» (Emilio, pieza 4.4) ──
+  -- `link`: la dio el titular en la página. `evidencia`: la registró alguien del equipo con el archivo que la prueba
+  -- (papel firmado, captura del correo o del WhatsApp del cliente). Apagada por defecto en cada workspace
+  -- (`config_extra.autorizacion_datos.registro_con_evidencia`). En la vía evidencia, `aceptado_at` es la fecha en que el
+  -- CLIENTE autorizó, no la del registro (que es `created_at`).
+  via text not null default 'link' constraint autorizacion_enlaces_via check (via in ('link', 'evidencia')),
+  -- Referencia `one://` del archivo (bucket ve-documentos). Sin archivo no hay vía evidencia.
+  evidencia_ref text,
+  registrado_por uuid references public.staff(id) on delete set null,
+  constraint autorizacion_enlaces_evidencia_completa check (
+    via = 'link' or (evidencia_ref is not null and registrado_por is not null and aceptado_at is not null)
+  ),
 
   -- Revocatoria por casilla (pieza 4.3): { "sensibles": { "at": "…", "motivo": "…" } }. Es lo UNICO
   -- que cambia en un enlace aceptado. La marca la sesion principal o el dueno del workspace.
@@ -227,6 +242,9 @@ begin
     or new.encargado     is distinct from old.encargado
     or new.ip            is distinct from old.ip
     or new.user_agent    is distinct from old.user_agent
+    or new.via           is distinct from old.via
+    or new.evidencia_ref is distinct from old.evidencia_ref
+    or new.registrado_por is distinct from old.registrado_por
   ) then
     raise exception 'autorizacion_datos_enlaces %: ya tiene la aceptacion del titular y es evidencia; solo se marca la revocatoria', old.id;
   end if;
@@ -280,7 +298,7 @@ begin
   order by t.mayor desc, t.menor desc
   limit 1;
 
-  select e.id, e.aceptado_at, e.texto_version, e.texto_mayor, e.texto_menor, e.medio, e.casillas, e.revocadas into v_a
+  select e.id, e.aceptado_at, e.texto_version, e.texto_mayor, e.texto_menor, e.medio, e.casillas, e.revocadas, e.via into v_a
   from public.autorizacion_datos_enlaces e
   where e.workspace_id = p_workspace_id and e.contacto_id = p_contacto_id and e.aceptado_at is not null
   order by e.texto_mayor desc, e.aceptado_at desc
@@ -320,7 +338,7 @@ begin
     'aceptacion', case when v_a.id is null then null else jsonb_build_object(
       'enlace_id', v_a.id, 'aceptado_at', v_a.aceptado_at, 'version', v_a.texto_version,
       'mayor', v_a.texto_mayor, 'menor', v_a.texto_menor, 'medio', v_a.medio,
-      'casillas', v_a.casillas, 'revocadas', v_a.revocadas) end,
+      'casillas', v_a.casillas, 'revocadas', v_a.revocadas, 'via', v_a.via) end,
     'vigente', v_vig,
     'requiere_reaceptar', v_a.id is not null and v_t.id is not null and v_a.texto_mayor < v_t.mayor,
     'pendiente', case when v_p.id is null then null else jsonb_build_object(

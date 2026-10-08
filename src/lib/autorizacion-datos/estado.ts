@@ -4,7 +4,7 @@
  * bot), y el gate de avance que lo lee. Puro.
  */
 
-import type { CasillasMarcadas, ClaveCasilla, Medio } from './texto'
+import type { CasillasMarcadas, ClaveCasilla, Medio, MedioEvidencia } from './texto'
 
 export interface EstadoAutorizacion {
   existe: boolean
@@ -16,9 +16,11 @@ export interface EstadoAutorizacion {
     version: string
     mayor: number
     menor: number
-    medio: Medio
+    medio: Medio | MedioEvidencia
     casillas: CasillasMarcadas
     revocadas: Record<string, unknown>
+    /** `link`: la dio el titular en la página; `evidencia`: la registró el equipo con el archivo que la prueba. */
+    via?: 'link' | 'evidencia'
   } | null
   vigente: Record<ClaveCasilla, boolean>
   requiere_reaceptar: boolean

@@ -9,11 +9,13 @@ import 'server-only'
  * valida el TOKEN y que su workspace sea el del subdominio por el que entró.
  */
 
-import { randomBytes, createHash } from 'node:crypto'
+import { randomBytes, createHash, randomUUID } from 'node:crypto'
 import { createServiceClient } from '@/lib/supabase/server'
 import { marcaDelWorkspace, type MarcaWorkspace } from '@/lib/marca/marca-workspace'
 import { registrarActividad } from '@/lib/activity/registrar-actividad'
-import { formatFecha } from '@/lib/dates/bogota'
+import { formatFecha, todayBogotaISO } from '@/lib/dates/bogota'
+import { subirAOne } from '@/lib/almacenamiento/one'
+import { BUCKET_DOCUMENTOS_ONE } from '@/lib/almacenamiento/referencia'
 import { leerEstado, ESTADO_VACIO, type EstadoAutorizacion } from './estado'
 import {
   casillasVisibles,
@@ -25,6 +27,8 @@ import {
   puedeAutorizar,
   textoVisible,
   urlAutorizacion,
+  esMedioEvidencia,
+  fechaDeEvidenciaValida,
   TEXTO_MARCADOR,
   TOKEN_FORMA,
   type Casilla,
@@ -68,7 +72,7 @@ export async function estadoDelContacto(workspaceId: string, contactoId: string)
   return { estado: leerEstado(data), error: null }
 }
 
-async function configDelWorkspace(workspaceId: string): Promise<{ config: ConfigAutorizacion; slug: string | null }> {
+export async function configDelWorkspace(workspaceId: string): Promise<{ config: ConfigAutorizacion; slug: string | null }> {
   const { data } = await svc().from('workspaces').select('slug, config_extra').eq('id', workspaceId).maybeSingle()
   const fila = data as { slug: string | null; config_extra: unknown } | null
   return { config: leerConfigAutorizacion(fila?.config_extra ?? null), slug: fila?.slug ?? null }
@@ -546,6 +550,152 @@ export async function responderAutorizacion(p: RespuestaTitular): Promise<{ ok: 
     if (!r.ok) console.error('[autorizacion-datos] la copia al titular no salió:', r.error)
   }
   return { ok: true, copiaEnviada }
+}
+
+// ─── La vía «recibida por otro medio», con evidencia obligatoria ───────────────
+
+/** Las versiones publicadas, de la más nueva a la más vieja (para elegir la que se le mostró). */
+export async function versionesPublicadas(workspaceId: string): Promise<Array<{ id: string; version: string; casillas: Casilla[] }>> {
+  const { data } = await svc()
+    .from('autorizacion_datos_textos')
+    .select('id, version, mayor, menor, titulo, cuerpo_md, detalle_md, casillas, variables, mensajes, plantilla_sha256')
+    .eq('workspace_id', workspaceId)
+    .lte('publicado_at', new Date().toISOString())
+    .order('mayor', { ascending: false })
+    .order('menor', { ascending: false })
+  const { config } = await configDelWorkspace(workspaceId)
+  return ((data ?? []) as Record<string, unknown>[])
+    .map(filaATexto)
+    .filter((t): t is TextoAutorizacion => !!t && !!t.id)
+    .map(t => ({ id: t.id!, version: t.version, casillas: casillasVisibles(t, config) }))
+}
+
+const MIMES_EVIDENCIA: Record<string, string> = {
+  'application/pdf': 'pdf', 'image/jpeg': 'jpg', 'image/png': 'png', 'image/webp': 'webp', 'image/heic': 'heic',
+}
+const TOPE_EVIDENCIA_BYTES = 4 * 1024 * 1024
+
+export type ErrorEvidencia =
+  | 'apagado' | 'sin_staff' | 'sin_archivo' | 'archivo_invalido' | 'medio' | 'fecha' | 'version' | 'falta_generales'
+  | 'no_autorizable' | 'contacto' | 'error'
+
+export const MENSAJE_EVIDENCIA: Record<ErrorEvidencia, string> = {
+  apagado: 'Este espacio de trabajo no tiene activo el registro con evidencia. Envíale el link al cliente.',
+  sin_staff: 'Tu usuario no está en el equipo de este espacio de trabajo.',
+  sin_archivo: 'Adjunta la evidencia: sin archivo no se registra.',
+  archivo_invalido: 'La evidencia tiene que ser un PDF o una imagen de máximo 4 MB.',
+  medio: 'Elige por dónde llegó la autorización.',
+  fecha: 'Escribe la fecha en que el cliente autorizó (no puede ser futura).',
+  version: 'Elige la versión del texto que se le mostró al cliente.',
+  falta_generales: 'La evidencia tiene que cubrir al menos los datos generales.',
+  no_autorizable: 'Esa versión del texto está incompleta: no se puede registrar sobre ella.',
+  contacto: 'Contacto no encontrado.',
+  error: 'No se pudo registrar. Intenta de nuevo.',
+}
+
+/**
+ * Registra una autorización que el cliente dio por otro medio (papel, correo, WhatsApp) con el archivo que la prueba
+ * (Emilio, pieza 4.4). Pide: el archivo, el medio, la FECHA EN QUE EL CLIENTE AUTORIZÓ, la versión que se le mostró y
+ * qué casillas cubre. Sin archivo no guarda. Apagada por defecto (`registro_con_evidencia`).
+ *
+ * Queda como un enlace ya aceptado, con `via = 'evidencia'`: cuenta para el gate igual que el link, y su huella es la
+ * del texto de esa versión con el nombre del cliente.
+ */
+export async function registrarConEvidencia(p: {
+  workspaceId: string
+  contactoId: string
+  negocioId: string | null
+  staffId: string | null
+  textoId: string
+  fecha: string
+  medio: string
+  casillas: Record<string, unknown>
+  archivo: File | null
+}): Promise<{ ok: true } | { ok: false; error: ErrorEvidencia }> {
+  const { config } = await configDelWorkspace(p.workspaceId)
+  if (!config.registroConEvidencia) return { ok: false, error: 'apagado' }
+  if (!p.staffId) return { ok: false, error: 'sin_staff' }
+  if (!p.archivo || p.archivo.size === 0) return { ok: false, error: 'sin_archivo' }
+  const ext = MIMES_EVIDENCIA[p.archivo.type]
+  if (!ext || p.archivo.size > TOPE_EVIDENCIA_BYTES) return { ok: false, error: 'archivo_invalido' }
+  if (!esMedioEvidencia(p.medio)) return { ok: false, error: 'medio' }
+  if (!fechaDeEvidenciaValida(p.fecha, todayBogotaISO())) return { ok: false, error: 'fecha' }
+  const texto = await textoPorId(p.workspaceId, p.textoId)
+  if (!texto) return { ok: false, error: 'version' }
+
+  const db = svc()
+  const [marca, contacto] = await Promise.all([
+    marcaDelWorkspace(p.workspaceId, 'su agencia'),
+    db.from('contactos').select('nombre, custom_data').eq('id', p.contactoId).eq('workspace_id', p.workspaceId).maybeSingle(),
+  ])
+  const fila = contacto.data as { nombre: string; custom_data: Record<string, unknown> | null } | null
+  if (!fila) return { ok: false, error: 'contacto' }
+  const visibles = casillasVisibles(texto, config)
+  const m = marcadoresDe(texto, marca, { nombreCliente: fila.nombre })
+  if (!puedeAutorizar(texto, m, visibles).ok) return { ok: false, error: 'no_autorizable' }
+  const casillas = normalizarCasillas(p.casillas, visibles)
+  if (casillas.generales !== true) return { ok: false, error: 'falta_generales' }
+
+  let referencia: string
+  try {
+    const subido = await subirAOne({
+      bucket: BUCKET_DOCUMENTOS_ONE,
+      path: `autorizacion-datos/${p.workspaceId}/${p.contactoId}/${randomUUID()}.${ext}`,
+      cuerpo: p.archivo,
+      mime: p.archivo.type,
+      upsert: false,
+    })
+    referencia = subido.referencia
+  } catch (e) {
+    console.error('[autorizacion-datos] no se pudo guardar la evidencia:', e)
+    return { ok: false, error: 'error' }
+  }
+
+  // Mediodía de Bogotá del día que dijo: la hora no se conoce y no se inventa una que caiga en otro día.
+  const aceptadoAt = `${p.fecha}T12:00:00-05:00`
+  const { data: nueva, error } = await db.from('autorizacion_datos_enlaces').insert({
+    workspace_id: p.workspaceId,
+    contacto_id: p.contactoId,
+    negocio_id: p.negocioId,
+    token: generarToken(),
+    creado_por: p.staffId,
+    expira_at: new Date().toISOString(),
+    via: 'evidencia',
+    aceptado_at: aceptadoAt,
+    medio: p.medio,
+    texto_id: texto.id,
+    texto_version: texto.version,
+    texto_mayor: texto.mayor,
+    texto_menor: texto.menor,
+    texto_sha256: sha256(textoVisible(texto, m, visibles)),
+    casillas,
+    responsable: m.responsable,
+    encargado: m.encargado,
+    evidencia_ref: referencia,
+    registrado_por: p.staffId,
+  }).select('id').maybeSingle()
+  if (error || !nueva) {
+    console.error('[autorizacion-datos] no se pudo registrar la evidencia:', (error as { message: string } | null)?.message)
+    return { ok: false, error: 'error' }
+  }
+
+  const { error: errC } = await db.from('contactos').update({
+    custom_data: {
+      ...(fila.custom_data ?? {}),
+      autorizacion_datos_link: {
+        enlace_id: (nueva as { id: string }).id, aceptado_at: aceptadoAt, medio: p.medio, via: 'evidencia',
+        version: texto.version, mayor: texto.mayor, menor: texto.menor, casillas,
+      },
+    },
+    updated_at: new Date().toISOString(),
+  }).eq('id', p.contactoId).eq('workspace_id', p.workspaceId)
+  if (errC) console.error('[autorizacion-datos] la evidencia quedó registrada, no el resumen del contacto:', (errC as { message: string }).message)
+
+  await registrarActividad(db, {
+    workspace_id: p.workspaceId, entidad_tipo: 'contacto', entidad_id: p.contactoId, tipo: 'cambio_sistema', autor_id: p.staffId,
+    contenido: `Autorización de datos registrada con evidencia (${p.medio}, del ${p.fecha}, versión ${texto.version}).`.slice(0, 280),
+  }, 'registrarConEvidencia')
+  return { ok: true }
 }
 
 export type { Medio }

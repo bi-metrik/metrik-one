@@ -1,6 +1,6 @@
 ---
 name: autorizacion-datos-link
-description: Autorización de datos del cliente final por link (Trappvel, 2026-10-08) — migración 20261008230000 SIN aplicar al abrir; texto de Emilio sin aprobar; vigencia en una RPC; marcas manuales no cuentan
+description: Autorización de datos del cliente final por link (Trappvel, 2026-10-08) — migración 20261008230000 APLICADA en producción (8-oct, por la sesión principal); texto de Emilio sin aprobar; vigencia en una RPC; marcas manuales no cuentan
 metadata:
   type: project
 ---
@@ -17,7 +17,9 @@ Link por CONTACTO en `/autorizacion/<token>`; 4 casillas por separado; evidencia
   detalle) bloquean «Autorizo». Es a propósito: el borrador de Emilio todavía trae `⟦CORREO DE DATOS⟧`.
 - Correo al crear: Next lo manda por Resend; el bot llama `/api/autorizacion-datos/al-crear` (sin sesión, solo
   negocios de <15 min). El reclamo es un UPDATE condicionado sobre `correo_enviado_at`.
-- Pendiente al 2026-10-08: vía manual con evidencia obligatoria (apagada por defecto) y acompañantes adultos.
+- La vía con evidencia (`registro_con_evidencia`, apagada) inserta un enlace YA aceptado con `via = 'evidencia'`;
+  `aceptado_at` es la fecha del cliente, no la del registro.
+- Pendiente al 2026-10-08: acompañantes adultos con link propio (no cerrar el diseño: un enlace es por contacto).
 
 **Why:** Mauricio pidió prueba del titular, no el clic de la comercial; Emilio exige versión + sha256 + casillas.
 
