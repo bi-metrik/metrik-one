@@ -39,3 +39,4 @@ Memorias del motor de cotización y el documento del cliente de Trappvel (sacada
 - ⚠️⚠️ [Limpieza antes de presentar (2026-10-05)](project_limpieza_presentar_trappvel.md) — mergeado #1023 (95d3da8c); actividad en 3 estados sin columna; el día ya no es interruptor; COT-0018 −1 peso
 - ⚠️ [Actividades tras la limpieza (2026-10-05)](project_actividades_tras_limpieza.md) — actividad siempre abre bloque; Opcional guarda el día; los avisos de la lectura NUNCA se limpian y frenan el bloque
 - ⚠️ [Espacio y paginación §4.11 (2026-10-08)](project_paginacion_pdf_trappvel.md) — compone en hasta 4 renders midiendo el PDF; Aire, no marginTop; paso 3 casi inerte
+- ⚠️ [Vuelos de punta a punta (2026-10-08)](project_vuelos_punta_a_punta.md) — COT-0025 no reproduce; vuelo con check va/no va; medir vuelos con entra_al_precio=false antes del merge
