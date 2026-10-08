@@ -60,6 +60,8 @@ const REQ_2 = 'Buscan un viaje económico; el presupuesto está abierto, lo prop
 
 type Valor = { valor: string; frase: string; como?: string; calculo?: string }
 type Valores = Record<string, Valor>
+/** «No nos dieron un número»: la opción de no definido del presupuesto, no un vacío (Mauricio, 2026-10-08). */
+const SIN_DEFINIR: Valor = { valor: 'sin_definir', frase: 'no nos dieron un número', como: 'escrito' }
 /** La salida cruda de la extracción, como la devuelve Gemini: todos los campos, los no dichos en `por_definir`. */
 function crudo(textos: string[], valores: Valores, dudas: unknown[] = []) {
   const todos: Valores = Object.fromEntries(CAMPOS.map((f) => [f.slug, { valor: 'por_definir', frase: '' }]))
@@ -82,17 +84,18 @@ const TURNO_1: Valores = {
 const linea = (s: string) => s.split('\n')
 
 describe('tercera falla en vivo 2026-10-07: una preferencia no es un valor y corregir también es borrar', () => {
-  it('los dos turnos con el viaje vacío: lo ambiguo se pregunta, lo calculado se marca y el presupuesto queda vacío con el matiz en requisitos', async () => {
+  it('los dos turnos con el viaje vacío: «económico» solo se pregunta, «no nos dieron un número» es sin definir y el matiz va a requisitos', async () => {
     const prompts: string[] = []
     const guion = [
       // 1. «económico» no es un rango: queda por definir, va a requisitos y se pregunta.
       () => ({ valores: TURNO_1, dudas: [DUDA] }),
-      // 1b. contesta la duda («como nota») antes de tocar: lo mismo, sin la duda.
-      () => ({ valores: TURNO_1, dudas: [] }),
-      // 2. el audio, ya con el viaje cargado: el presupuesto sigue sin definir (no hay qué quitar), el matiz crece y las
-      //    edades vienen con el valor EXACTO que el viaje ya tiene (otra redacción sería un cambio).
+      // 1b. contesta la duda: «no nos dieron un número» es la opción de no definido (Mauricio, 2026-10-08), sin la duda.
+      () => ({ valores: { ...TURNO_1, presupuesto: SIN_DEFINIR }, dudas: [] }),
+      // 2. el audio, ya con el viaje cargado: el presupuesto ya es «sin definir» y vuelve con el valor EXACTO (no es un
+      //    cambio), el matiz crece y las edades vienen con el valor EXACTO que el viaje ya tiene.
       () => ({
         valores: {
+          presupuesto: { valor: 'sin_definir', frase: 'el presupuesto está abierto', como: 'escrito' },
           edades_menores: { valor: '8, 10, 11 MESES', frase: '2 niños de 8 y 10 años y un bebé de 11 meses', como: 'escrito' },
           requisitos_especiales: { valor: REQ_2, frase: 'el presupuesto está abierto', como: 'escrito' },
         } as Valores,
@@ -138,6 +141,8 @@ describe('tercera falla en vivo 2026-10-07: una preferencia no es un valor y cor
     expect(t1b[0].tipo).toBe('botones')
     expect(linea(t1b[0].texto)[0]).toBe(`¿Lo anoto en ${COD} · QUITO?`)
     expect(t1b[0].texto).not.toContain('¿lo dejo como nota')
+    expect(linea(t1b[0].texto)).toContain('• Presupuesto aproximado del viaje: Aún no tiene presupuesto definido')
+    expect(linea(t1b[0].texto)).toContain(`• Requisitos especiales: ${REQ_1}`)
     // La extracción vio lo propuesto sin confirmar (para poder corregirlo o quitarlo).
     expect(prompts[1]).toContain('Lo que ya le propusiste al comercial y todavía no confirma:')
     expect(prompts[1]).toContain('- adultos: 3')
@@ -145,7 +150,7 @@ describe('tercera falla en vivo 2026-10-07: una preferencia no es un valor y cor
     const c1 = await e.toca('Anotar')
     expect(c1[0].texto).toMatch(new RegExp(`^Cargué en ${COD}: `))
     const v = () => e.puerto.viajes[0].datos
-    expect(v().presupuesto).toBeUndefined()
+    expect(v().presupuesto).toBe('sin_definir')
     expect(v().tipo_viaje).toBeUndefined()
     expect(v().fechas_tipo).toBeUndefined()
     expect(v()).toMatchObject({ fecha_regreso: '2027-01-27', adultos: 3, ninos: 2, infantes: 1, edades_menores: '8, 10, 11 MESES' })
@@ -155,19 +160,20 @@ describe('tercera falla en vivo 2026-10-07: una preferencia no es un valor y cor
     const r2 = t2[0].texto
     expect(linea(r2).filter((l) => l.startsWith('• '))).toEqual([`• Requisitos especiales: ${REQ_2}`])
     expect(prompts[2]).toContain('- edades_menores: 8, 10, 11 MESES')
+    expect(prompts[2]).toContain('- presupuesto: sin_definir')
     await e.toca('Anotar')
 
-    // La verdad: presupuesto vacío, el matiz en requisitos, tipo de viaje y fechas fijas sin llenar.
-    expect(v().presupuesto).toBeUndefined()
+    // La verdad: presupuesto «sin definir», el matiz en requisitos, tipo de viaje y fechas fijas sin llenar.
+    expect(v().presupuesto).toBe('sin_definir')
     expect(v().tipo_viaje).toBeUndefined()
     expect(v().fechas_tipo).toBeUndefined()
     expect(v().requisitos_especiales).toBe(REQ_2.toUpperCase())
     expect(modelo.restantes()).toBe(0)
   })
 
-  it('el estado que dejó la falla: el «menos de $3 millones» en el viaje se QUITA con el toque', async () => {
+  it('el estado que dejó la falla: el «menos de $3 millones» del viaje pasa a «sin definir» con el toque (reemplaza, no quita)', async () => {
     const extraer: ExtractorMemoria = async ({ textos }) => crudo(textos, {
-      presupuesto: { valor: 'quitar', frase: 'el presupuesto está abierto', calculo: 'dijeron que está abierto' },
+      presupuesto: { valor: 'sin_definir', frase: 'el presupuesto está abierto', como: 'escrito' },
       requisitos_especiales: { valor: REQ_2, frase: 'el presupuesto está abierto' },
       edades_menores: { valor: '8, 10, 11 MESES', frase: 'no nos dieron un número exacto' },
     })
@@ -184,19 +190,37 @@ describe('tercera falla en vivo 2026-10-07: una preferencia no es un valor y cor
     const t = await e.escribe(`${COD}: ${AUDIO}`)
     const bullets = linea(t[0].texto).filter((l) => l.startsWith('• '))
     expect(bullets).toEqual([
-      '• Presupuesto aproximado del viaje: se quita (dijeron que está abierto)',
+      '• Presupuesto aproximado del viaje: Aún no tiene presupuesto definido',
       `• Requisitos especiales: ${REQ_2}`,
     ])
-    // Nada se borra sin el toque.
+    // Nada se cambia sin el toque.
     expect(e.puerto.viajes[0].datos.presupuesto).toBe('menos_3m')
 
     const c = await e.toca('Anotar')
-    expect(c[0].texto).toBe(`Cargué en ${COD}: Requisitos especiales. Quité: Presupuesto aproximado del viaje.`)
+    expect(c[0].texto).not.toContain('Quité')
     const d = e.puerto.viajes[0].datos
-    expect(d.presupuesto).toBeUndefined()
-    expect((d._sugeridos as Record<string, unknown>).presupuesto).toBeUndefined()
+    expect(d.presupuesto).toBe('sin_definir')
+    expect((d._sugeridos as Record<string, { frase: string }>).presupuesto.frase).toBe('el presupuesto está abierto')
     expect(d.requisitos_especiales).toBe(REQ_2.toUpperCase())
     expect(d.edades_menores).toBe('8, 10, 11 MESES')
+  })
+
+  it('«eso no lo dijeron» en un campo SIN opción de no definido sigue siendo quitar', async () => {
+    const DICHO = 'el tipo de viaje eso no lo dijeron'
+    const extraer: ExtractorMemoria = async ({ textos }) => crudo(textos, {
+      tipo_viaje: { valor: 'quitar', frase: DICHO, calculo: 'dijeron que eso no' },
+    })
+    const marca = { fuente: 'whatsapp', entrega_id: 'agente', frase: 'Quito', en: '2026-10-06T22:09:00Z' }
+    const modelo = modeloGuionado([{ name: 'proponer', args: { accion: 'anotar_en_viaje', datos: { viaje: COD } } }])
+    const e = await escenario({
+      modelo, contactos: [ROSA], campos: CAMPOS, extraer,
+      viajes: [{ id: 'v-2', codigo: COD, contactoId: 'c-rosa', nombre: 'QUITO', destino: 'Quito', abierto: true, datos: { tipo_viaje: 'naturaleza_aventura', _sugeridos: { tipo_viaje: marca } } }],
+    })
+    const t = await e.escribe(`${COD}: ${DICHO}`)
+    expect(linea(t[0].texto).filter((l) => l.startsWith('• '))).toEqual(['• Tipo de viaje: se quita (dijeron que eso no)'])
+    const c = await e.toca('Anotar')
+    expect(c[0].texto).toBe(`Quité de ${COD}: Tipo de viaje.`)
+    expect(e.puerto.viajes[0].datos.tipo_viaje).toBeUndefined()
   })
 })
 
@@ -298,5 +322,23 @@ describe('las dudas de la extracción', () => {
     expect(p).toContain('4. dudas:')
     expect(p).toContain('- presupuesto: menos_3m')
     expect(p).toMatch(/preferencia va, con sus palabras, al campo de texto que corresponda \(destino, edades_menores, requisitos_especiales\)/)
+  })
+
+  it('el prompt: «no tiene / no dieron / está abierto» es la opción de no definido de la config; «económico» solo, duda; corregir a abierto la usa', () => {
+    const p = instruccionesCarga(CAMPOS, '2026-10-08')
+    // La opción sale marcada desde la config (`no_definido`), en cualquier campo que la tenga.
+    expect(p).toContain('sin_definir = Aún no tiene presupuesto definido (solo si lo dicen)')
+    expect(p).toContain('sin_preferencia = Sin preferencia (solo si lo dicen)')
+    // La regla habla de la marca y de la etiqueta, no de un campo.
+    expect(p).toContain('La opción de «aún no está definido» (la marcada «solo si lo dicen», o la que su etiqueta dice que no hay dato')
+    expect(p).toContain('úsala cuando digan explícitamente que el cliente no lo tiene, no lo dio o está abierto')
+    expect(p).toMatch(/Una preferencia sola \(«económico»\),\s+sin decir nada del dato, no es eso: queda en "por_definir" y se pregunta/)
+    // Corregir a abierto reemplaza con esa opción; quitar queda para el campo sin ella o para «eso no».
+    expect(p).toMatch(/opción de «aún no está definido», devuelve esa opción: reemplaza el valor\. Si no la tiene, o la corrección es «eso\s+no»/)
+    expect(p).not.toContain('«el presupuesto está abierto», «no, eso no lo dijeron»), devuelve "quitar"')
+  })
+
+  it('la parte fija del prompt de la extracción no pasa de 1.200 tokens (4 caracteres por token)', () => {
+    expect(Math.ceil(instruccionesCarga([], '2026-10-08').length / 4)).toBeLessThanOrEqual(1200)
   })
 })

@@ -48,5 +48,9 @@ lugar del agente simple v2; criterio fijado ANTES de medir: 0 dañinas, más éx
   `dudas` (Mauricio: «no se invente esas cifras, puede preguntar»; la duda va DENTRO del resumen, primera línea, para que
   `salidaPropuesta` no la corte). Quitar solo borra un sugerido sin confirmar; con `_ediciones` dice «no lo quito». Las
   edades re-propuestas con otra redacción las resuelve el MODELO (devuelve el valor exacto), no una normalización.
+- ⚠️ Mauricio, 2026-10-08, sobre #1074: «no tiene / no dieron número / está abierto» NO es vacío ni `quitar`: es la
+  opción `no_definido` del campo (presupuesto → `sin_definir`), también como corrección de un rango. `quitar` queda para
+  el campo sin esa opción o «eso no lo dijeron». «Económico» solo sigue siendo duda. Solo prompt; prueba con tope de
+  1.200 tokens en la parte fija del prompt de la extracción (estaba en ~1.169). La extracción solo la empaqueta wa-webhook.
 - La extracción NO recibe el reglamento (`g.presupuesto` y demás solo los ve el modelo de la conversación).
 Relacionado: [[bandeja-hibrida]], [[entendimiento-bandeja-wa]].
