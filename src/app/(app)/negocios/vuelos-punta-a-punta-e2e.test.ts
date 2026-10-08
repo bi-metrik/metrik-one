@@ -306,6 +306,25 @@ describe('el check «Va en la cotización» de un vuelo', () => {
     expect(t).not.toContain('Avianca')
   })
 
+  it('el texto para el cliente revisado antes de quitarlo: el PDF avisa que quedó viejo', async () => {
+    const { leerContextoTextoCliente } = await import('@/lib/cotizaciones/documento-cliente-datos')
+    const ctx = await leerContextoTextoCliente(clienteFalso(), COT)
+    cot().documento_cliente = {
+      titular: 'San Andrés y Providencia', intro: 'Un viaje a las islas.',
+      incluye: ['Tiquetes Bogotá – San Andrés con Avianca', 'Tiquetes San Andrés – Providencia con SATENA'],
+      antes_de_viajar: [], origen: 'ia', fuente_hash: ctx!.huella,
+      revisado_en: '2026-10-06T21:58:00Z', revisado_por: 'p-asesora', revisado_por_nombre: 'Asesora de prueba',
+    }
+    const aviso = async () => ((await generateCotizacionPDF(COT)) as { avisoTexto?: string | null }).avisoTexto ?? null
+    // CONTROL: con las mismas líneas no hay nada que avisar.
+    expect(await aviso()).toBeNull()
+    await marcarActividadEnCotizacion('v-satena', { va: false })
+    expect(await aviso()).toContain('El texto para el cliente se revisó con otros servicios')
+    // Puesto otra vez, la huella vuelve a ser la misma y el aviso se va.
+    await marcarActividadEnCotizacion('v-satena', { va: true })
+    expect(await aviso()).toBeNull()
+  })
+
   it('un vuelo no es «Opcional», y el interruptor genérico no lo saca del precio', async () => {
     const opcional = await marcarActividadEnCotizacion('v-satena', { modo: 'opcional' })
     expect(opcional.success).toBe(false)

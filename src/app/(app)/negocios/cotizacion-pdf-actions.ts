@@ -46,7 +46,8 @@ import {
   plantillaUsaFotosDeCiudad,
   plantillaUsaTextoDelCliente,
 } from '@/lib/pdf/plantillas-cotizacion'
-import { avisoDelTextoEnPdf, leerDocumentoCliente, textoParaElViaje } from '@/lib/cotizaciones/documento-cliente'
+import { avisoDelTextoEnPdf, avisoDelTextoViejoEnPdf, leerDocumentoCliente, textoParaElViaje } from '@/lib/cotizaciones/documento-cliente'
+import { leerContextoTextoCliente } from '@/lib/cotizaciones/documento-cliente-datos'
 import { vigenciaEnDias } from '@/lib/cotizaciones/condiciones-comerciales'
 import { fotosDeCiudad } from '@/lib/pdf/fotos-ciudad'
 import { fotosDelViaje } from '@/lib/pdf/fotos-del-viaje'
@@ -1133,6 +1134,12 @@ export async function generateCotizacionPDF(cotizacionId: string) {
       : null
     const textoCliente = textoParaElViaje(documentoCliente)
     avisoTexto = avisoDelTextoEnPdf(documentoCliente)
+    // El texto revisado que quedó viejo (brief del 2026-10-08): la misma huella que el panel del
+    // editor, sobre las mismas líneas. Solo se calcula con un texto revisado que se imprime.
+    if (!avisoTexto && Object.keys(textoCliente).length > 0 && documentoCliente?.fuente_hash) {
+      const ctxTexto = await leerContextoTextoCliente(supabase, cotizacionId)
+      avisoTexto = avisoDelTextoViejoEnPdf(documentoCliente, ctxTexto?.huella ?? null)
+    }
     const viaje = {
       ...textoCliente,
       viajeros: delNegocio.composicion ? describirOcupacion(delNegocio.composicion, 'y') : null,
