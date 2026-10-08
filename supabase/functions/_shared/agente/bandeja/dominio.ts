@@ -110,6 +110,17 @@ function enEscritoDelEquipo(filas: FilaConversacion[], texto: string): boolean {
   });
 }
 
+/**
+ * La fila del mensaje `#n` que el modelo dice que abrió el pedido del viaje (`desde`): tiene que ser un escrito del equipo
+ * en la conversación. El número es el de la ventana que vio el modelo; se guarda el id, que no se corre. Pura.
+ */
+export function filaDesde(filas: FilaConversacion[], desde: unknown): { id: string } | null | 'invalida' {
+  if (desde === undefined || desde === null || desde === '') return null;
+  const n = Number(String(desde).replace(/^#/, '').trim());
+  const f = Number.isInteger(n) && n >= 1 ? filas[n - 1] : undefined;
+  return f && delEquipo(f) ? { id: f.id } : 'invalida';
+}
+
 /** ¿El dato está escrito en la conversación (del equipo o reenviado), no solo dicho por el bot? */
 function enLaConversacion(filas: FilaConversacion[], dato: string): boolean {
   const d = normal(dato).trim();
@@ -202,6 +213,7 @@ export const LECTURAS: DeclaracionHerramienta[] = [
 const DATOS_PROPONER = {
   cliente: { type: 'string', description: 'viaje_nuevo: la ref de la ficha tal como la devolvió buscar.' },
   destino: { type: 'string', description: 'viaje_nuevo: el destino, si lo dijeron.' },
+  desde: { type: 'integer', description: 'viaje_nuevo: el número (#n) del mensaje del comercial donde empezó a pedir este viaje, si fue antes de este turno. El sistema lee desde ahí lo que dijo del viaje.' },
   viaje: { type: 'string', description: 'cargar_tanda / anotar_en_viaje: el código del viaje.' },
   texto: { type: 'string', description: 'anotar_en_viaje: opcional. El sistema lee TODO lo que el comercial escribió de ese viaje en la conversación (también lo de antes de abrirlo) y lo une con la propuesta pendiente.' },
   nombre: { type: 'string', description: 'crear_cliente: el nombre como lo escribieron.' },
@@ -304,8 +316,10 @@ export function dominioBandeja(puerto: PuertoBandeja): Dominio {
       if (destino && !enLaConversacion(ctx.conversacion, destino)) {
         return { ok: false, error: `«${destino}» no está escrito en la conversación. Usa el destino como lo escribieron, o déjalo vacío.`, candado: 'dato_sin_respaldo' };
       }
+      const desde = filaDesde(ctx.conversacion, datos.desde);
+      if (desde === 'invalida') return { ok: false, error: '`desde` tiene que ser el número (#n) de un mensaje escrito por el comercial en la conversación, o vacío.', candado: 'desde_invalido' };
       const resumen = `¿Abro este viaje?\n${ficha.ficha.ref}${destino ? ` · ${destino}` : ''} · ${linea}`;
-      return { ok: true, propuesta: { accion, datos: { contactoId: ficha.id, cliente: ficha.ficha.nombre, destino }, resumen, si: 'Sí, ábrelo', no: 'No' } };
+      return { ok: true, propuesta: { accion, datos: { contactoId: ficha.id, cliente: ficha.ficha.nombre, destino, ...(desde ? { desdeFila: desde.id } : {}) }, resumen, si: 'Sí, ábrelo', no: 'No' } };
     }
     if (accion === 'cargar_tanda' || accion === 'anotar_en_viaje') {
       const r = await viajeParaEscribir(ctx, datos.viaje);
@@ -421,6 +435,9 @@ export function dominioBandeja(puerto: PuertoBandeja): Dominio {
    * esperaba) sale de una vez como propuesta de anotar. No se escribe sin su toque; el «Abrí…» no pide lo ya dicho.
    */
   const trasEjecutar: NonNullable<Dominio['trasEjecutar']> = async (p, h, huella, ctx) => {
+    // Tras crear un cliente, el modelo decide si quedó una solicitud suya sin atender (Tatiana, 2026-10-07: pidió la
+    // cotización, el bot pidió el cliente, lo creó y ahí se quedó).
+    if (p.accion === 'crear_cliente') return { lineas: h.lineas, seguir: true };
     if (p.accion !== 'viaje_nuevo') return null;
     const v = h.escrituras?.find((x) => x.tipo === 'viaje') as { id: string; codigo: string; nombre?: string } | undefined;
     if (!v) return null;
@@ -457,6 +474,8 @@ export function dominioBandeja(puerto: PuertoBandeja): Dominio {
       return [
         `Tanda abierta: ${t.length ? `${t.length} mensaje${t.length === 1 ? '' : 's'} reenviado${t.length === 1 ? '' : 's'} sin cargar` : 'ninguna'}.`,
         `Viajes nombrados en esta conversación: ${nombrados.length ? nombrados.join(', ') : 'ninguno'}.`,
+        // En vivo (2026-10-07) el bot buscó a la comercial como si fuera la clienta.
+        `${ctx.remitente.nombre} es del equipo, no es un cliente: no lo busques ni lo propongas como cliente.`,
       ];
     },
   };
