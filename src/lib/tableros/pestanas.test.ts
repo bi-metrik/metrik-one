@@ -18,6 +18,7 @@ const CON_DATOS: DatosTableros = {
   operacionesBono: true,
   calidad: true,
   ferreteria: true,
+  supertransporte: true,
 }
 
 const SIN_DATOS: DatosTableros = {
@@ -28,6 +29,7 @@ const SIN_DATOS: DatosTableros = {
   operacionesBono: false,
   calidad: false,
   ferreteria: false,
+  supertransporte: false,
 }
 
 /** `modules` real de SOENA, medido en la base. */
@@ -90,6 +92,7 @@ describe('pestanasDeTableros', () => {
       'financiero',
       'comercial',
       'operativo',
+      'supertransporte',
       'cumplimiento',
       'calidad',
     ])
@@ -140,6 +143,11 @@ describe('pestanasDeTableros', () => {
 
   it('Cumplimiento no depende de datos ni de business', () => {
     expect(claves({ compliance: true }, SIN_DATOS)).toEqual(['cumplimiento'])
+  })
+
+  it('Reporte Supertransporte solo con compliance y con su dato, antes de Cumplimiento', () => {
+    expect(claves({ compliance: true })).toEqual(['supertransporte', 'cumplimiento'])
+    expect(claves({ business: true })).not.toContain('supertransporte')
   })
 })
 

@@ -18,6 +18,7 @@ export type TableroKey =
   | 'comercial'
   | 'operativo'
   | 'cumplimiento'
+  | 'supertransporte'
   | 'calidad'
 
 export interface PestanaTablero {
@@ -47,6 +48,11 @@ export interface DatosTableros {
   calidad: boolean
   /** Pestana Marketplace: totales del piloto de Ferreteria. Falso si la lectura no llego. */
   ferreteria: boolean
+  /**
+   * Reporte Supertransporte (compliance). Falso si la lectura fallo: una pestana de cifras
+   * regulatorias que abre en ceros se leeria como dato.
+   */
+  supertransporte: boolean
 }
 
 /** Las dos vistas de la pestana Operaciones. */
@@ -70,6 +76,9 @@ const OPERACIONES_TAB: PestanaTablero = { key: 'operaciones', label: 'Operacione
 // en dimpro convive con las tres genericas, que miden el resto del negocio.
 const FERRETERIA_TAB: PestanaTablero = { key: 'ferreteria', label: 'Marketplace' }
 const COMPLIANCE_TAB: PestanaTablero = { key: 'cumplimiento', label: 'Cumplimiento' }
+// La informacion objetiva SARLAFT/RMS que se radica en VIGIA. Va ANTES del tablero de
+// Cumplimiento: es la que tiene fecha limite.
+const SUPERTRANSPORTE_TAB: PestanaTablero = { key: 'supertransporte', label: 'Reporte Supertransporte' }
 const CALIDAD_TAB: PestanaTablero = { key: 'calidad', label: 'Recaudo y riesgo' }
 
 /**
@@ -168,6 +177,7 @@ export function pestanasDeTableros(
   if (mod.business && !tieneTablerosPropios(mod)) {
     tabs.push(...(opciones.bandejasOperativas ? OPERATIVAS : GENERICAS))
   }
+  if (mod.compliance && datos.supertransporte) tabs.push(SUPERTRANSPORTE_TAB)
   if (mod.compliance) tabs.push(COMPLIANCE_TAB)
   if (mod.calidad_llamadas && datos.calidad) tabs.push(CALIDAD_TAB)
 

@@ -9,6 +9,7 @@ import { filasDeCosto, pesos } from '@/lib/cotizaciones/tarjeta-opcion'
 import { filasDelVuelo, numerosSinTramo, TOKENS, textosDeTarjetaHotel } from '@/lib/pdf/cotizacion-trappvel-formato'
 import { TEXTO_AGREGAR_FOTO_HOTEL, urlDeFotoHotel } from '@/lib/cotizaciones/foto-hotel'
 import { nombreVisibleDeLinea } from '@/lib/cotizaciones/nombre-visible'
+import PastillaAerolinea from './pastilla-aerolinea'
 
 /**
  * «Así lo ve el cliente» (prototipo de la tarjeta, 2026-09-24): la opción de hotel como sale en
@@ -230,7 +231,7 @@ function VueloDelCliente({ v, general }: { v: VueloPDF; general: boolean }) {
     <div className="flex flex-col gap-1.5 rounded-lg border px-3.5 py-2.5" style={{ borderColor: TOKENS.linea }} data-vuelo-cliente>
       {filas.map((f, i) => (
         <div key={i} className="flex flex-wrap items-baseline gap-x-3 gap-y-0.5 text-[11.5px]" style={{ color: TOKENS.tinta }}>
-          <b>{v.aerolinea ?? v.linea}</b>
+          <span className="inline-flex items-center gap-1.5"><PastillaAerolinea aerolinea={v.aerolinea} numeroVuelo={v.numeroVuelo} /><b>{v.aerolinea ?? v.linea}</b></span>
           <span>{[f.desde, f.hasta].filter(Boolean).join(' → ')}</span>
           {f.fecha && <span>{f.fecha}</span>}
           {(f.salida || f.llegada) && <span className="tabular-nums">{[f.salida, f.llegada].filter(Boolean).join(' – ')}</span>}

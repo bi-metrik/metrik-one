@@ -204,8 +204,10 @@ export interface Dominio {
    * Después de ejecutar una propuesta tocada: la siguiente propuesta que ya se puede armar con lo dicho (abrir un viaje
    * → anotar lo que el comercial ya contó de él). `lineas` reemplaza las del hecho. `null` = nada más. Puede lanzar: el
    * núcleo deja el hecho como estaba.
+   * `seguir`: el modelo tiene un turno después del hecho (crear un cliente → ¿quedó una solicitud suya sin atender?). Él
+   * decide si propone lo que sigue, pregunta lo que falta o termina; el código no lee el texto. El hecho sale igual.
    */
-  trasEjecutar?(propuesta: Propuesta, hechos: Hechos, huella: string, ctx: ContextoDominio): Promise<{ lineas: string[]; propuesta?: Propuesta } | null>;
+  trasEjecutar?(propuesta: Propuesta, hechos: Hechos, huella: string, ctx: ContextoDominio): Promise<{ lineas: string[]; propuesta?: Propuesta; seguir?: boolean } | null>;
   /** ¿La propuesta sigue sirviendo? (la tanda no cambió desde que se armó). Ausente = sí. */
   sigueVigente?(propuesta: Propuesta, ctx: ContextoDominio): boolean;
   /** Una línea del estado que solo el dominio sabe (la tanda abierta). */
@@ -243,6 +245,11 @@ export interface Traza {
     consumidos?: string[];
   } | null;
   respuesta_fija?: string | null;
+  /**
+   * El turno del modelo que siguió a un toque (`trasEjecutar` con `seguir`): de qué toque vino y cómo terminó. La traza
+   * es de tipo `modelo` (así cuenta en el uso del mes) y trae la `ejecucion` del toque.
+   */
+  tras_toque?: { origen: 'toque_propuesta' | 'si_escrito'; resultado: 'propuesta' | 'respuesta' | 'terminar' | 'solo_hecho' } | null;
   salida?: Salida | null;
   error?: string | null;
 }

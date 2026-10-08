@@ -2,11 +2,13 @@
 
 ## Project memories
 
-- ⚠️⚠️ [SOE-002: segundo pago en dos cifras](project_segundo_pago_dos_cifras.md) — 1ª RPC aplicada; sobrantes de la serie SIN aplicar; umbral en 2 funciones
+- [Reporte Supertransporte (ALMA)](project_reporte_supertransporte.md) — contrapartes = todos los segmentos; MéTRIK por platform_admin/correo; KYC sin created_by
+- ⚠️⚠️ [SOE-002: segundo pago en dos cifras](project_segundo_pago_dos_cifras.md) — ambas RPC APLICADAS (8-oct); umbral $1.000 en 2 funciones
 - ⚠️⚠️ [Plan Anual CDA (#1065)](project_valida_cda_restriccion_y_plan_anual.md) — migración 20261007210000 SIN aplicar; vigente_hasta=12.1 es null; anexo generado; pendientes #1072
 - ⚠️⚠️ [SOE-001: Seguimiento en 4 etapas de operaciones](project_soe001_seguimiento_operaciones.md) — migración APLICADA (7-oct); SQL de datos SIN aplicar; deploy alertas-plazo antes del SQL
 - ⚠️⚠️ [Núcleo conversacional (#1060-#1062)](project_nucleo_conversacional.md) — el modelo clasifica, el código solo valida (extraccion.ts propia); p90 7,4 s; anotar une con la pendiente
 - ⚠️⚠️ [Términos CDA v1.4 por aviso (13.1)](project_valida_cda_terminos_v14_por_aviso.md) — SQL solo corre el 7-oct; deploy ANTES; no aceptar nunca pausa
+- ⚠️ [Turno del modelo tras un toque](project_nucleo_turno_tras_toque.md) — traza tipo `modelo` por el cupo; `desde` en viaje_nuevo
 - ⚠️⚠️ [Bot híbrido de la bandeja (#1056)](project_bandeja_hibrida.md) — detrás de bot_conversacional.hibrido (apagado = main); propuesta [Sí, ese]; decisión con 3.5-lite
 - ⚠️⚠️ [Doble guardado e idempotencia (#1047-#1053)](project_doble_guardado_idempotencia.md) — #1049/#1052 migración SIN aplicar; POST cortado se repite vía Vercel
 - ⚠️ [Letras no latinas: bloqueo en todo ONE](project_pdf_cirilico_winansi.md) — `texto-latino.ts` + copia exacta en `_shared/`; guarda de CI sobre drawText
@@ -16,6 +18,7 @@
 - ⚠️ [Aviso «No pudimos conectar con ONE»](project_aviso_conexion_fallida.md) — script módulo async en el head; quita hojas colgadas; tope CSS de 25 s
 - ⚠️ [Piloto de red en soena (#1042 y siguientes)](project_piloto_red_soena.md) — falla carga/RSC, no descargas; SW con interruptor; tabla SIN aplicar
 - ⚠️ [Cargue en segundo plano y acciones largas (#1035, #1036)](project_cargue_segundo_plano.md) — marca `data._lectura`; #1036 mergeado; /conciliacion tiene 300 s
+- [Colores de aerolíneas (#1082)](project_colores_aerolineas.md) — catálogo único en src/lib/cotizaciones/aerolineas.ts; colores de tarifa vetados
 - [Columna Pago de cuotas CDA](project_columna_pago_cuota_cda.md) — pago↔cuota por FIFO (RPC sin plan/cuota); la UI no nombra a Bold
 - ⚠️ [Acciones lentas SOENA (#1010-#1012)](project_acciones_lentas_soena.md) — `cache()` no memoiza en server actions; `after()` lanza fuera de request
 - [Cargue masivo de Valida concurrente](project_valida_cargue_concurrente.md) — 3 filas; reintento de red no recobra; PDF de lote ya no sigue el orden del XLSX

@@ -10,6 +10,7 @@
  */
 
 import type { HotelPDF, VueloPDF } from '@/lib/cotizaciones/detalle-viaje'
+import { siglaAerolinea } from '@/lib/cotizaciones/aerolineas'
 
 // ── Tokens (§2) ───────────────────────────────────────────────────────────────
 
@@ -59,63 +60,12 @@ export function colorDeTarifa(titulo: string): string {
 
 // ── Aerolínea ─────────────────────────────────────────────────────────────────
 
-/** Sigla IATA de las aerolíneas que Trappvel vende. Clave: nombre sin tildes, minúscula. */
-const SIGLAS: [string, string][] = [
-  ['avianca', 'AV'],
-  ['latam', 'LA'],
-  ['satena', '9R'],
-  ['wingo', 'P5'],
-  ['easyfly', 'VE'],
-  ['clic', 'VE'],
-  ['jetsmart', 'JA'],
-  ['copa', 'CM'],
-  ['iberia', 'IB'],
-  ['air europa', 'UX'],
-  ['american', 'AA'],
-  ['delta', 'DL'],
-  ['united', 'UA'],
-  ['aeromexico', 'AM'],
-  ['volaris', 'Y4'],
-  ['viva aerobus', 'VB'],
-  ['vivaaerobus', 'VB'],
-  ['air france', 'AF'],
-  ['klm', 'KL'],
-  ['lufthansa', 'LH'],
-  ['turkish', 'TK'],
-  ['spirit', 'NK'],
-  ['arajet', 'DM'],
-  ['jetblue', 'B6'],
-  ['british airways', 'BA'],
-  ['ita airways', 'AZ'],
-  ['tap', 'TP'],
-  ['emirates', 'EK'],
-  ['qatar', 'QR'],
-]
-
 /**
- * La sigla de la pastilla. Primero la que trae el número de vuelo (`AV8520` → `AV`),
- * que es un dato leído; si no, la del nombre. Sin ninguna de las dos devuelve `null` y la
- * pastilla no se pinta: dos letras inventadas se leerían como un código real.
+ * La sigla y el color de la pastilla salen del catálogo único de aerolíneas (brief del
+ * 2026-10-08): `@/lib/cotizaciones/aerolineas`. Se reexporta la sigla porque la usan esta
+ * misma hoja (`partirLineaDeVuelo`) y las pruebas de la plantilla.
  */
-export function siglaAerolinea(aerolinea: string | null, numeroVuelo?: string | null): string | null {
-  const delNumero = /^([A-Z0-9]{2})\s?\d{1,4}\b/.exec((numeroVuelo ?? '').trim().toUpperCase())
-  if (delNumero && /[A-Z]/.test(delNumero[1])) return delNumero[1]
-  if (!aerolinea) return null
-  const n = sinTildes(aerolinea)
-  // La clave tiene que ser palabra entera: «tap» no puede atrapar «Tapachula».
-  for (const [clave, sigla] of SIGLAS) {
-    if (new RegExp(`(^|[^a-z])${clave}([^a-z]|$)`).test(n)) return sigla
-  }
-  return null
-}
-
-/** Rotación magenta → verde → púrpura por sigla, como en la referencia (§4.4). */
-export function colorDeSigla(sigla: string): string {
-  const colores = [TOKENS.magenta, TOKENS.verde, TOKENS.purpura]
-  let h = 0
-  for (const c of sigla) h = (h * 31 + c.charCodeAt(0)) % 997
-  return colores[h % colores.length]
-}
+export { siglaAerolinea } from '@/lib/cotizaciones/aerolineas'
 
 /** Un número de vuelo suelto: `8832`, `AV8520`, `9R8832`, con una letra de sufijo a lo sumo. */
 const NUMERO_DE_VUELO = /^(?:[A-Z0-9]{2})?\d{1,4}[A-Z]?$/i

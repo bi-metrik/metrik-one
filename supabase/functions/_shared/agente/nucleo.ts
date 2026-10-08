@@ -7,6 +7,9 @@
 // (un llamado extra); la segunda, sale la respuesta fija con las opciones vigentes.
 // [código, sin modelo] el toque de una propuesta y el «sí» escrito solo: se ejecuta si la huella sigue vigente, una sola
 // vez (candado por huella).
+// [modelo, después del hecho] si el dominio lo pide (`trasEjecutar` con `seguir`), el modelo tiene un turno para seguir
+// (`seguirTrasToque`): propone lo que el hecho destrabó, pregunta lo que falta o llama `terminar`. Sale en el mismo
+// mensaje que la confirmación, debajo de ella; si el modelo falla, sale solo la confirmación.
 // Todo deja traza: llamados, tokens por modelo, herramientas, reglas, candados, verificador y tiempos.
 // ============================================================
 
@@ -36,12 +39,25 @@ export interface EntradaTurno {
   filas: FilaConversacion[];
   nuevos: FilaConversacion[];
   ctx: ContextoDominio;
+  /** El turno sigue a un hecho que la persona acaba de confirmar con un toque (`seguirTrasToque`). */
+  tras?: { lineas: string[]; origen: 'toque_propuesta' | 'si_escrito' };
 }
 
 export interface SalidaTurno {
   salida: Salida | null;
   traza: Traza;
+  /** El hecho se ejecutó y el dominio pide un turno del modelo para seguir (`seguirTrasToque`). */
+  seguir?: boolean;
 }
+
+/** Cierra el turno que sigue a un hecho sin decir nada más (la persona ya tiene la confirmación). */
+export const TERMINAR = 'terminar';
+
+const DECLARACION_TERMINAR = {
+  name: TERMINAR,
+  description: 'Solo en el turno que sigue a un hecho confirmado: no queda nada que proponer ni que preguntar. El sistema deja la confirmación sola.',
+  parameters: { type: 'object', properties: { reglas_usadas: { type: 'array', items: { type: 'string' } } } },
+};
 
 type PropuestaGuardada = NonNullable<Traza['propuesta']>;
 
@@ -120,6 +136,10 @@ function estado(deps: DepsTurno, e: EntradaTurno): string[] {
     `Escribe: ${e.ctx.remitente.nombre} (${e.ctx.remitente.rol}).`,
     `Propuesta pendiente: ${vig ? `${vig.resumen.replace(/\n/g, ' · ')} — espera su toque` : 'ninguna'}.`,
     ...(deps.dominio.estado?.(e.ctx) ?? []),
+    ...(e.tras ? [
+      `Acaba de quedar hecho, con el toque de ${e.ctx.remitente.nombre}: ${e.tras.lineas.join(' ')} La confirmación ya la escribe el sistema: no la repitas.`,
+      `Este turno es para seguir: si en la conversación quedó algo que ${e.ctx.remitente.nombre} pidió y que este paso destrabó, propón lo siguiente con \`proponer\` o pregunta lo que falte. Si no queda nada, llama \`${TERMINAR}\`.`,
+    ] : []),
   ];
 }
 
@@ -172,32 +192,45 @@ export async function turnoDelModelo(deps: DepsTurno, e: EntradaTurno): Promise<
   const est = estado(deps, e);
   const sis = sistema(r, c);
   const usuario = mensajeDelTurno({ estado: est, filas: e.filas, nuevos: e.nuevos, quien: e.ctx.remitente.nombre });
-  const decl = declaraciones(d, r);
+  const decl = [...declaraciones(d, r), ...(e.tras ? [DECLARACION_TERMINAR] : [])];
   const todas = decl.map((x) => x.name);
+  const cierran = e.tras ? [...CIERRAN, TERMINAR] : CIERRAN;
+  // Tras un hecho, lo que no sea seguir (falla, tema fuera, `terminar`) deja la confirmación sola: el hecho ya ocurrió.
+  const soloHecho: Salida | null = e.tras ? { tipo: 'texto', texto: e.tras.lineas.join('\n') } : null;
+  const caer = (): Salida => soloHecho ?? caido(deps, e);
+  const conHecho = (s: Salida): Salida => (e.tras ? { ...s, texto: [...e.tras.lineas, s.texto].filter(Boolean).join('\n') } : s);
+  let termino = false;
   const mensajes: Mensaje[] = [{ role: 'user', parts: [{ text: usuario }] }];
   const resultadosTurno: string[] = [];
   const respaldoFijo = [usuario, bloqueSiempre(r)];
   let presupuesto = c.topes.llamados;
   let correccionUsada = false;
-  const fin = (salida: Salida | null, extra: Partial<Traza> = {}): SalidaTurno => ({ salida, traza: { ...traza, ...extra, salida } });
+  const fin = (salida: Salida | null, extra: Partial<Traza> = {}): SalidaTurno => {
+    const t: Traza = { ...traza, ...extra, salida };
+    if (e.tras) {
+      t.tras_toque = { origen: e.tras.origen, resultado: t.propuesta ? 'propuesta' : termino ? 'terminar' : salida === soloHecho ? 'solo_hecho' : 'respuesta' };
+      if (salida === soloHecho) t.respuesta_fija = 'rf.hecho';
+    }
+    return { salida, traza: t };
+  };
 
   while (traza.llamados! < presupuesto) {
     const restante = c.topes.turnoMs - (deps.reloj() - t0);
-    if (restante < 500) return fin(caido(deps, e), { error: 'tope de tiempo del turno' });
+    if (restante < 500) return fin(caer(), { error: 'tope de tiempo del turno' });
     const ultimo = traza.llamados! >= presupuesto - 1;
     const tm = deps.reloj();
     const res = await deps.modelo.llamar({
-      sistema: sis.texto, mensajes, herramientas: decl, permitidas: ultimo ? CIERRAN : todas, timeoutMs: restante,
+      sistema: sis.texto, mensajes, herramientas: decl, permitidas: ultimo ? cierran : todas, timeoutMs: restante,
     });
     traza.ms_modelo! += Math.round(deps.reloj() - tm);
     traza.llamados!++;
     traza.uso!.push(...res.usos);
-    if (!res.ok) return fin(caido(deps, e), { error: `modelo: ${res.motivo}` });
+    if (!res.ok) return fin(caer(), { error: `modelo: ${res.motivo}` });
     mensajes.push(res.mensaje);
 
     const llamadas = res.mensaje.parts.filter((p): p is Parte & { functionCall: NonNullable<Parte['functionCall']> } => !!p.functionCall);
-    const lecturas = llamadas.filter((p) => !CIERRAN.includes(p.functionCall.name));
-    const cierres = llamadas.filter((p) => CIERRAN.includes(p.functionCall.name));
+    const lecturas = llamadas.filter((p) => !cierran.includes(p.functionCall.name));
+    const cierres = llamadas.filter((p) => cierran.includes(p.functionCall.name));
 
     if (lecturas.length) {
       const th = deps.reloj();
@@ -238,13 +271,18 @@ export async function turnoDelModelo(deps: DepsTurno, e: EntradaTurno): Promise<
     }
 
     const cierre = cierres[0];
-    if (!cierre) return fin(caido(deps, e), { error: 'el modelo no llamó ninguna herramienta' });
+    if (!cierre) return fin(caer(), { error: 'el modelo no llamó ninguna herramienta' });
     const nombre = cierre.functionCall.name;
     const args = (cierre.functionCall.args ?? {}) as Record<string, unknown>;
     if (Array.isArray(args.reglas_usadas)) traza.reglas_usadas!.push(...args.reglas_usadas.map(String));
     const devolver = (error: string) => {
       mensajes.push({ role: 'user', parts: [{ functionResponse: { name: nombre, response: { ok: false, error }, ...(cierre.functionCall.id ? { id: cierre.functionCall.id } : {}) } }] });
     };
+
+    if (nombre === TERMINAR) {
+      termino = true;
+      return fin(soloHecho);
+    }
 
     if (nombre === 'proponer') {
       const accion = String(args.accion ?? '');
@@ -296,7 +334,10 @@ export async function turnoDelModelo(deps: DepsTurno, e: EntradaTurno): Promise<
       }
       const huella = await huellaPropuesta(accion, p.propuesta.datos, e.turnoId);
       const guardada: PropuestaGuardada = { ...p.propuesta, huella, args_modelo: { accion, datos } };
-      return fin(salidaPropuesta(guardada, arriba), { propuesta: guardada, tema: 'propuesta' });
+      // Tras un hecho, la confirmación va primero y la propuesta debajo, en el mismo mensaje (si no cabe, se corta lo
+      // del modelo, no la confirmación ni el resumen).
+      const encima = e.tras ? [...e.tras.lineas, arriba].filter(Boolean).join('\n') : arriba;
+      return fin(salidaPropuesta(guardada, encima), { propuesta: guardada, tema: 'propuesta' });
     }
 
     // responder
@@ -304,6 +345,7 @@ export async function turnoDelModelo(deps: DepsTurno, e: EntradaTurno): Promise<
     traza.tema = tema;
     if (tema === 'fuera' || !temas(r).includes(tema)) {
       if (tema !== 'fuera') traza.candados!.push({ candado: 'tema_cerrado', detalle: `tema «${tema}» fuera de la lista` });
+      if (soloHecho) return fin(soloHecho);
       const t = respuestaFija(r, 'rf.fuera_de_tema');
       return fin({ tipo: 'texto', texto: t }, { respuesta_fija: 'rf.fuera_de_tema' });
     }
@@ -327,11 +369,11 @@ export async function turnoDelModelo(deps: DepsTurno, e: EntradaTurno): Promise<
         devolver(`No se envió porque: ${motivos.join('; ')}. Escríbelo otra vez sin eso (los hechos los escribe el sistema; los datos tienen que salir de la conversación o de una herramienta).`);
         continue;
       }
-      return fin(caido(deps, e), { respuesta_fija: 'rf.modelo_caido', error: 'verificador' });
+      return fin(caer(), { respuesta_fija: soloHecho ? 'rf.hecho' : 'rf.modelo_caido', error: 'verificador' });
     }
-    return fin(render.salida);
+    return fin(conHecho(render.salida));
   }
-  return fin(caido(deps, e), { error: 'tope de llamados sin respuesta' });
+  return fin(caer(), { error: 'tope de llamados sin respuesta' });
 }
 
 // ── El toque de una propuesta (y el «sí» escrito solo), sin modelo ────────────
@@ -411,11 +453,38 @@ export async function toqueDePropuesta(
       return salida(salidaPropuesta(nueva, sig.lineas.join('\n')), { ...ejecucion, lineas: sig.lineas }, { respuesta_fija: 'rf.hecho', propuesta: nueva });
     }
     const lineas = sig?.lineas ?? h.lineas;
-    return salida({ tipo: 'texto', texto: lineas.join('\n') }, { ...ejecucion, lineas }, { respuesta_fija: 'rf.hecho' });
+    const r = salida({ tipo: 'texto', texto: lineas.join('\n') }, { ...ejecucion, lineas }, { respuesta_fija: 'rf.hecho' });
+    return sig?.seguir ? { ...r, seguir: true } : r;
   } catch (err) {
     await deps.almacen.soltarCandado(clave);
     return salida({ tipo: 'texto', texto: TEXTO_NO_PUDE }, { huella: toque.huella, accion: vig.accion, resultado: 'error' }, { error: String(err).slice(0, 200) });
   }
+}
+
+/**
+ * El turno del modelo que sigue a un toque ejecutado (`toque.seguir`): la conversación ya con el hecho (el cliente creado
+ * es una ficha vista, la propuesta ya no está pendiente) y el estado diciendo qué acaba de pasar. El modelo decide si
+ * sigue; la salida es una sola: la confirmación arriba y lo que él siga debajo, o la confirmación sola. La traza es de
+ * tipo `modelo` (cuenta en el uso del mes) y conserva la `ejecucion` del toque, que es la que cierra la propuesta tocada.
+ */
+export async function seguirTrasToque(deps: DepsTurno, e: EntradaTurno, toque: SalidaTurno): Promise<SalidaTurno> {
+  const ej = toque.traza.ejecucion;
+  if (!toque.seguir || !ej || ej.resultado !== 'ejecutada') return toque;
+  const origen = toque.traza.tipo === 'si_escrito' ? 'si_escrito' : 'toque_propuesta';
+  // La fila que guardará la traza del toque es la última nueva: con el hecho puesto, la conversación es la de después.
+  const conHecho = e.nuevos.at(-1)?.id;
+  const filas = e.filas.map((f) => (f.id === conHecho ? { ...f, traza: toque.traza } : f));
+  const ctx: ContextoDominio = { ...e.ctx, conversacion: filas, resultadosPrevios: [...e.ctx.resultadosPrevios] };
+  const m = await turnoDelModelo(deps, { ...e, filas, ctx, tras: { lineas: ej.lineas ?? [], origen } });
+  return {
+    salida: m.salida,
+    traza: {
+      ...m.traza,
+      tipo: 'modelo',
+      ejecucion: ej,
+      ms_herramientas: (m.traza.ms_herramientas ?? 0) + (toque.traza.ms_herramientas ?? 0),
+    },
+  };
 }
 
 /** Para la traza de uso: los tokens del turno sumados por modelo. Pura. */
