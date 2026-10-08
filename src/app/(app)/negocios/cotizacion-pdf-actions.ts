@@ -40,6 +40,7 @@ import { hayTarifaPorPasajero, lineasDesactualizadas, motivoParaNoEnviar } from 
 import { MENSAJE_SIN_PASAJEROS } from '@/lib/cotizaciones/captura-desactualizada-datos'
 import {
   PLANTILLA_POR_DEFECTO,
+  compositorDePlantilla,
   plantillaCotizacionPropia,
   plantillaImprimePreciosConIva,
   plantillaUsaFotosDeCiudad,
@@ -1164,7 +1165,7 @@ export async function generateCotizacionPDF(cotizacionId: string) {
     viajePDF = hayAlgoQueDescribir ? viaje : null
   }
 
-  const element = createElement(plantillaPropia ?? CotizacionPDF, {
+  const propsPDF: CotizacionPDFProps = {
     cotizacion: {
       consecutivo: cot.consecutivo,
       descripcion: cot.descripcion,
@@ -1223,11 +1224,16 @@ export async function generateCotizacionPDF(cotizacionId: string) {
     negocio: negocioInfo ? { nombre: negocioInfo.nombre } : null,
     emisor,
     viaje: viajePDF,
-  })
+  }
 
-  // renderToBuffer espera DocumentElement; nuestro createElement lo produce correctamente en runtime
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const buffer = await renderToBuffer(element as any)
+  // Una plantilla que se COMPONE (Trappvel: renderiza, mide el PDF y recompone para que la
+  // última hoja trabaje) se entrega por su compositor; las demás se renderizan una vez.
+  const compositor = compositorDePlantilla(templateSlug)
+  const buffer = compositor
+    ? await compositor(propsPDF)
+    // renderToBuffer espera DocumentElement; nuestro createElement lo produce correctamente en runtime
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    : await renderToBuffer(createElement(plantillaPropia ?? CotizacionPDF, propsPDF) as any)
 
   // Borrador: marca de agua y fuera, sin guardar ni registrar (ver `esBorrador`).
   if (esBorrador) {

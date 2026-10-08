@@ -41,6 +41,11 @@ export interface HojaMedida {
   primero: number | null
   /** Borde inferior del último elemento de contenido, en pt desde arriba. `null` si la hoja está vacía. */
   fondo: number | null
+  /**
+   * Cada corrida de texto de la franja de contenido, con su línea base y su tamaño de letra,
+   * en el orden en que se pinta. Con fuentes estándar el código hexadecimal ES el carácter.
+   */
+  textos: { texto: string; y: number; tam: number }[]
 }
 
 export interface MedidaDelPDF {
@@ -154,6 +159,7 @@ export function medirPDF(buf: Buffer, franja: FranjaDeContenido): MedidaDelPDF {
     const c = objs.map(o => flujo(buf, pdf, o)).join('\n')
     let primero: number | null = null
     let fondo: number | null = null
+    const textos: HojaMedida['textos'] = []
     const anotar = (arriba: number, abajo: number) => {
       // Encabezado y pie fijos no cuentan: solo lo que cae en la franja de contenido.
       if (abajo <= franja.arriba || arriba >= franja.abajo) return
@@ -214,6 +220,12 @@ export function medirPDF(buf: Buffer, franja: FranjaDeContenido): MedidaDelPDF {
           const linea = desdeArriba(por(tm, ctm), 0, 0)
           // La línea base: el texto sube casi todo su tamaño y baja una cuarta parte.
           anotar(linea - tam * 0.8, linea + tam * 0.25)
+          if (linea - tam * 0.8 < franja.abajo && linea + tam * 0.25 > franja.arriba) {
+            const texto = (ops[ops.length - 1] ?? '').match(/<([0-9A-Fa-f\s]*)>/g)
+              ?.map(h => h.slice(1, -1).replace(/\s+/g, '').match(/../g)?.map(b => String.fromCharCode(parseInt(b, 16))).join('') ?? '')
+              .join('') ?? ''
+            textos.push({ texto, y: linea, tam })
+          }
           break
         }
         case 'Do': {
@@ -229,7 +241,7 @@ export function medirPDF(buf: Buffer, franja: FranjaDeContenido): MedidaDelPDF {
       }
       ops = []
     }
-    hojas.push({ primero, fondo })
+    hojas.push({ primero, fondo, textos })
   })
 
   return { altoHoja: H, hojas, marcas }
