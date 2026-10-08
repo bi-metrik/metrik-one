@@ -350,7 +350,10 @@ export interface Capitulo {
   ciudad: string | null
   /** El hotel grande: el de la tarifa principal en esa ciudad. */
   hotel: HotelPDF | null
-  /** Los hoteles de las otras tarifas en esa ciudad: una línea cada uno. */
+  /**
+   * Los demás hoteles de esa ciudad (otras tarifas, o un segundo hotel de la principal): una
+   * línea cada uno, o su tarjeta con la miniatura si el asesor le puso foto (2026-10-08).
+   */
   alternativas: HotelPDF[]
 }
 

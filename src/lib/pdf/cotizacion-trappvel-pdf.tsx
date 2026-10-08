@@ -496,6 +496,38 @@ function TarjetaHotel({ h, general, tarifas, arriba = false }: { h: HotelPDF; ge
   )
 }
 
+/**
+ * La foto del hotel que puso el asesor, como foto del documento: sin rótulo ni crédito (es
+ * del cliente o del proveedor, no del banco) y recortada al centro, igual que en «Así lo ve
+ * el cliente».
+ */
+function fotoDelHotel(h: HotelPDF): FotoPDF | null {
+  if (!h.foto) return null
+  return { url: h.foto.url, rotulo: null, credito: null, proporcion: h.foto.proporcion ?? undefined }
+}
+
+/**
+ * Un hotel que no es el grande del capítulo (otra tarifa, o un segundo hotel en la misma
+ * ciudad) CON la foto que le puso el asesor (brief del 2026-10-08: «las fotos si el usuario
+ * las carga deben quedar puestas en la propuesta»).
+ *
+ * Va como el hotel grande con su foto: la tarjeta a la izquierda y la miniatura 3:2 del mismo
+ * tamaño a la derecha (`fotoAlLado`, 2026-09-23). Una línea suelta al lado de una foto de
+ * ~110 pt dejaba media fila vacía, y es lo que muestra «Así lo ve el cliente» para esa opción:
+ * su tarjeta entera con su foto (`textosDeTarjetaHotel` en las dos). La fila no se parte
+ * entre dos hojas. Sin foto, el hotel sigue en una línea (`LineaHotelAlternativo`).
+ */
+function HotelAlternativoConFoto({ h, foto, general, tarifas }: { h: HotelPDF; foto: FotoPDF; general: boolean; tarifas: TarifaDoc[] }) {
+  return (
+    <View wrap={false} style={{ flexDirection: 'row', marginTop: 12 }}>
+      <View style={{ flex: 1, paddingRight: 12 }}>
+        <TarjetaHotel h={h} general={general} tarifas={tarifas} arriba />
+      </View>
+      <Miniatura foto={foto} />
+    </View>
+  )
+}
+
 /** El hotel de otra tarifa en la misma ciudad: una línea, con su chip. */
 function LineaHotelAlternativo({ h, general, tarifas }: { h: HotelPDF; general: boolean; tarifas: TarifaDoc[] }) {
   const texto = [h.hotel ?? h.linea, !general ? h.regimen : null, !general ? h.habitacion : null].filter(Boolean).join(' · ')
@@ -1167,10 +1199,10 @@ export default function CotizacionTrappvelPDF({
   // ciudad y la reemplaza (`foto-hotel.ts`): no hay un segundo lugar para fotos.
   const reemplazadas = new Set<FotoPDF>()
   capitulos.forEach((c, i) => {
-    const f = c.hotel?.foto
+    const f = c.hotel ? fotoDelHotel(c.hotel) : null
     if (!f) return
     for (const vieja of fotoDeCapitulo.get(i) ?? []) reemplazadas.add(vieja)
-    fotoDeCapitulo.set(i, [{ url: f.url, rotulo: null, credito: null, proporcion: f.proporcion ?? undefined }])
+    fotoDeCapitulo.set(i, [f])
   })
 
   // La línea de tiempo: los días del itinerario y los días de vuelo (solo los de la
@@ -1454,9 +1486,15 @@ export default function CotizacionTrappvelPDF({
                     {!conHotel && c.hotel && <TarjetaHotel h={c.hotel} general={general} tarifas={tarifas} />}
                   </>
                 )}
-                {c.alternativas.map((h, j) => (
-                  <LineaHotelAlternativo key={`alt-${j}`} h={h} general={general} tarifas={tarifas} />
-                ))}
+                {/* Cada hotel con la foto que le puso el asesor la lleva al lado, en el mismo
+                    orden: la foto de las alternativas NO reemplaza la de la ciudad, que es del
+                    hotel grande del capítulo. */}
+                {c.alternativas.map((h, j) => {
+                  const foto = fotoDelHotel(h)
+                  return foto
+                    ? <HotelAlternativoConFoto key={`alt-${j}`} h={h} foto={foto} general={general} tarifas={tarifas} />
+                    : <LineaHotelAlternativo key={`alt-${j}`} h={h} general={general} tarifas={tarifas} />
+                })}
                 <LineaDeTiempo entradas={suyas} />
               </View>
             )
