@@ -23,9 +23,15 @@
 -- Un reproceso que se le ATRIBUYE después de retirarse no lo vuelve a meter: eso no es
 -- actividad suya en ese mes.
 --
--- Consecuencia que hay que saber: en un mes donde el retirado sí trabajó, el promedio del
--- equipo —del que sale el bono de quien lidera— vuelve a incluirlo. Es la cifra que ese mes
--- tenía antes del retiro; la de hoy es la equivocada.
+-- EL PROMEDIO DE QUIEN LIDERA NO CAMBIA (provisional). El bono del supervisor sale del promedio
+-- del equipo (`prom`, sobre `final`). Si el retirado entrara a ese promedio, septiembre de 2026
+-- bajaría de puntaje 0,6 a 0 (Jhon tiene calidad, radicación y correcciones en 0 y el piso del
+-- director lo manda a cero). Decisión de Mauricio (2026-10-08): «En septiembre Deisy debe
+-- mantenerse en la misma comisión. Por ahora no toquemos eso hasta que ellos nos notifiquen en
+-- otro ticket cómo va a quedar.» Por eso `prom` cuenta SOLO a quienes hoy están activos
+-- (`staff.is_active IS NOT FALSE`, el mismo universo de antes): el inactivo aparece en la lista de
+-- personas con sus indicadores, pero no entra al promedio. Cuando SOENA defina la regla en otro
+-- ticket, se revisa este filtro.
 --
 -- El rótulo «(inactivo)» junto al nombre lo pone el servidor (`src/lib/equipo/inactivos.ts`),
 -- no esta función: así la forma del JSON no cambia.
@@ -35,24 +41,30 @@
 -- del repo (20260901000006), cargada tal cual en PGlite (PostgreSQL 18), da
 -- d7f841b5ccf39ffccee74fb0a1d3e349. Puede ser solo formato de versión, pero no se pudo leer la
 -- definición viva para descartarlo, y las RPC de SOENA ya han divergido del repo antes.
--- Reescribirla desde el repo podría revertir en silencio lo que haya cambiado allá. Se reemplaza SOLO el filtro del universo `gente` sobre la definición
--- viva (patrón de 20261007184500) y se aborta si el filtro no está exactamente una vez.
+-- Reescribirla desde el repo podría revertir en silencio lo que haya cambiado allá. Se hacen DOS
+-- reemplazos de texto sobre la definición viva (patrón de 20261007184500), y cada uno aborta si
+-- su patrón no está exactamente una vez:
+--   1. el filtro del universo `gente` (`WHERE s.is_active IS NOT FALSE`);
+--   2. el cierre del promedio del supervisor (`FROM final f` + `) prom`; `FROM final f` sola
+--      aparece dos veces, por eso se busca con el `) prom`).
 -- `create or replace` (lo que trae pg_get_functiondef) conserva dueño, SECURITY DEFINER y
 -- grants.
 --
--- Idempotente: si la función ya trae la marca SOE-006, no hace nada.
+-- Idempotente por reemplazo: cada uno deja su marca (`SOE-006 universo`, `SOE-006 promedio`) y se
+-- salta si ya está.
 -- ============================================================
 
 do $$
 declare
-  v_oid   oid;
-  v_def   text;
-  v_nuevo text;
-  v_n     int;
-  v_viejo constant text := 'WHERE s.is_active IS NOT FALSE';
-  v_cambio constant text := $frag$WHERE (
-      -- SOE-006: is_active es un estado de HOY y no puede borrar un mes pasado. Quien hoy
-      -- esta inactivo entra al mes si tuvo actividad propia en ese mes.
+  v_oid    oid;
+  v_def    text;
+  v_n      int;
+  v_cambio boolean := false;
+  -- 1. Universo `gente`
+  v_viejo_u constant text := 'WHERE s.is_active IS NOT FALSE';
+  v_nuevo_u constant text := $frag$WHERE (
+      -- SOE-006 universo: is_active es un estado de HOY y no puede borrar un mes pasado. Quien
+      -- hoy esta inactivo entra al mes si tuvo actividad propia en ese mes.
       s.is_active IS NOT FALSE
       OR EXISTS (
         SELECT 1
@@ -73,6 +85,15 @@ declare
           AND alx.created_at <  ((make_date(p_anio, p_mes, 1) + interval '1 month')::timestamp AT TIME ZONE 'America/Bogota')
       )
     )$frag$;
+  -- 2. Promedio del supervisor
+  v_viejo_p constant text := E'        FROM final f\n      ) prom';
+  v_nuevo_p constant text := $frag$        FROM final f
+        -- SOE-006 promedio (PROVISIONAL): solo quienes hoy estan activos, igual que antes de
+        -- SOE-006. Decision de Mauricio (2026-10-08): "En septiembre Deisy debe mantenerse en la
+        -- misma comision. Por ahora no toquemos eso hasta que ellos nos notifiquen en otro ticket
+        -- como va a quedar." El inactivo sale en `personas`, pero no entra a este promedio.
+        WHERE f.staff_id IN (SELECT sx.id FROM staff sx WHERE sx.is_active IS NOT FALSE)
+      ) prom$frag$;
 begin
   select p.oid into v_oid
   from pg_proc p
@@ -80,17 +101,30 @@ begin
 
   v_def := pg_get_functiondef(v_oid);
 
-  if position('SOE-006' in v_def) > 0 then
-    raise notice 'get_operaciones_bono_resumen ya trae SOE-006: nada que hacer';
-    return;
+  if position('SOE-006 universo' in v_def) > 0 then
+    raise notice 'get_operaciones_bono_resumen ya trae SOE-006 universo: se salta';
+  else
+    v_n := (length(v_def) - length(replace(v_def, v_viejo_u, ''))) / length(v_viejo_u);
+    if v_n <> 1 then
+      raise exception 'get_operaciones_bono_resumen cambió en producción: el filtro "%" aparece % veces (se esperaba 1). Revisar a mano antes de aplicar.', v_viejo_u, v_n;
+    end if;
+    v_def := replace(v_def, v_viejo_u, v_nuevo_u);
+    v_cambio := true;
   end if;
 
-  v_n := (length(v_def) - length(replace(v_def, v_viejo, ''))) / length(v_viejo);
-  if v_n <> 1 then
-    raise exception 'get_operaciones_bono_resumen cambió en producción: el filtro "%" aparece % veces (se esperaba 1). Revisar a mano antes de aplicar.', v_viejo, v_n;
+  if position('SOE-006 promedio' in v_def) > 0 then
+    raise notice 'get_operaciones_bono_resumen ya trae SOE-006 promedio: se salta';
+  else
+    v_n := (length(v_def) - length(replace(v_def, v_viejo_p, ''))) / length(v_viejo_p);
+    if v_n <> 1 then
+      raise exception 'get_operaciones_bono_resumen cambió en producción: el cierre del promedio del supervisor aparece % veces (se esperaba 1). Revisar a mano antes de aplicar.', v_n;
+    end if;
+    v_def := replace(v_def, v_viejo_p, v_nuevo_p);
+    v_cambio := true;
   end if;
 
-  v_nuevo := replace(v_def, v_viejo, v_cambio);
-  execute v_nuevo;
+  if v_cambio then
+    execute v_def;
+  end if;
 end;
 $$;
