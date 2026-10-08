@@ -28,10 +28,18 @@ const respuestaBono = {
   supervisor: { staff_id: JEFA, nombre: 'Jefa', bono: 900000 },
 }
 
-function cliente() {
+// SOE-006: Luis se retiró. Sigue en el mes en que trabajó, con el nombre rotulado.
+function cliente(inactivos: string[] = [LUIS]) {
   const llamadas: string[] = []
+  const consulta = {
+    select: () => consulta,
+    eq: (col: string) => (col === 'is_active'
+      ? Promise.resolve({ data: inactivos.map((id) => ({ id })), error: null })
+      : consulta),
+  }
   return {
     llamadas,
+    from: vi.fn(() => consulta),
     rpc: vi.fn(async (fn: string) => {
       if (fn === 'current_user_workspace_id') return { data: WS, error: null }
       llamadas.push(fn)
@@ -62,6 +70,16 @@ describe('getOperacionesBono con caché', () => {
     const otraVez = await getOperacionesBono(2026, 10)
     expect(otraVez?.personas.map((p) => p.bono)).toEqual([500000, 300000])
     expect(otraVez?.supervisor?.bono).toBe(900000)
+  })
+
+  it('quien hoy está inactivo sigue en el mes, rotulado, y la entrada del caché queda cruda', async () => {
+    sesion.actual = { supabase: cliente([LUIS, JEFA]), workspaceId: WS, role: 'supervisor', staffId: 'otro' }
+    const vista = await getOperacionesBono(2026, 9)
+    expect(vista?.personas.map((p) => p.nombre)).toEqual(['Ana', 'Luis (inactivo)'])
+    expect(vista?.personas.map((p) => p.bono)).toEqual([500000, 300000])
+    expect(vista?.supervisor?.nombre).toBe('Jefa (inactivo)')
+    const [entrada] = [...almacen.values()]
+    expect(JSON.parse(entrada.body)).toEqual(respuestaBono)
   })
 
   it('la entrada guardada es la respuesta cruda de la RPC, sin recorte de nadie', async () => {

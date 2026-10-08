@@ -47,14 +47,19 @@ export async function staffInactivos(
   supabase: any,
   workspaceId: string,
 ): Promise<Set<string>> {
-  const { data, error } = await supabase
-    .from('staff')
-    .select('id')
-    .eq('workspace_id', workspaceId)
-    .eq('is_active', false)
-  if (error) {
-    console.error('[equipo] no se pudieron leer los inactivos:', error.message)
+  try {
+    const { data, error } = await supabase
+      .from('staff')
+      .select('id')
+      .eq('workspace_id', workspaceId)
+      .eq('is_active', false)
+    if (error) {
+      console.error('[equipo] no se pudieron leer los inactivos:', error.message)
+      return new Set()
+    }
+    return new Set(((data ?? []) as Array<{ id: string }>).map((s) => s.id))
+  } catch (e) {
+    console.error('[equipo] no se pudieron leer los inactivos:', e)
     return new Set()
   }
-  return new Set(((data ?? []) as Array<{ id: string }>).map((s) => s.id))
 }
