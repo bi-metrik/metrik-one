@@ -10,7 +10,7 @@
 import { describe, expect, it } from 'vitest'
 import { createElement } from 'react'
 import { renderToBuffer } from '@react-pdf/renderer'
-import { inflateSync } from 'node:zlib'
+import { crc32, deflateSync, inflateSync } from 'node:zlib'
 
 import CotizacionPDF from './cotizacion-pdf'
 import CotizacionTermotechPDF from './cotizacion-termotech-pdf'
@@ -1227,5 +1227,192 @@ describe('la nota para el cliente de una opción', () => {
   it('sin nota no aparece nada', async () => {
     const t = await texto(props())
     expect(t).not.toContain('INCLUYE ASISTENCIA EN EL AEROPUERTO')
+  })
+})
+
+// ── Toda foto de hotel que cargó el asesor sale en el PDF (brief del 2026-10-08) ─────
+
+/**
+ * Una imagen sintética de un solo color, en PNG: cada hotel lleva la SUYA para que el PDF no
+ * pueda reutilizar un mismo objeto para dos fotos y la cuenta de dibujos sea la de fotos.
+ */
+function pngDeColor(r: number, g: number, b: number, ancho = 30, alto = 20): string {
+  const trozo = (tipo: string, datos: Buffer) => {
+    const largo = Buffer.alloc(4)
+    largo.writeUInt32BE(datos.length)
+    const cuerpo = Buffer.concat([Buffer.from(tipo, 'latin1'), datos])
+    const crc = Buffer.alloc(4)
+    crc.writeUInt32BE(crc32(cuerpo))
+    return Buffer.concat([largo, cuerpo, crc])
+  }
+  const ihdr = Buffer.alloc(13)
+  ihdr.writeUInt32BE(ancho, 0)
+  ihdr.writeUInt32BE(alto, 4)
+  ihdr[8] = 8 // bits por canal
+  ihdr[9] = 2 // RGB
+  const fila = Buffer.concat([Buffer.from([0]), Buffer.from(Array.from({ length: ancho }, () => [r, g, b]).flat())])
+  const datos = deflateSync(Buffer.concat(Array.from({ length: alto }, () => fila)))
+  const png = Buffer.concat([
+    Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]),
+    trozo('IHDR', ihdr),
+    trozo('IDAT', datos),
+    trozo('IEND', Buffer.alloc(0)),
+  ])
+  return `data:image/png;base64,${png.toString('base64')}`
+}
+
+interface Dibujo { x: number; y: number; ancho: number; alto: number }
+
+/**
+ * Qué imágenes dibuja cada hoja y dónde, junto con el texto de esa hoja y dónde empieza.
+ * Una hoja es un flujo de contenido; su número sale del pie («<consecutivo> N de M»).
+ * Una imagen es un `Do` de un XObject: se mide con la matriz vigente en ese momento.
+ */
+function hojasDibujadas(buf: Buffer, consecutivo: string): Map<number, { imagenes: Dibujo[]; textos: { texto: string; x: number; y: number }[] }> {
+  const hojas = new Map<number, { imagenes: Dibujo[]; textos: { texto: string; x: number; y: number }[] }>()
+  const num = '(-?[\\d.]+)'
+  const seis = `${num} ${num} ${num} ${num} ${num} ${num}`
+  let desde = 0
+  for (;;) {
+    const ini = buf.indexOf('stream', desde)
+    if (ini === -1) break
+    let inicio = ini + 'stream'.length
+    if (buf[inicio] === 0x0d) inicio++
+    if (buf[inicio] === 0x0a) inicio++
+    const fin = buf.indexOf('endstream', inicio)
+    if (fin === -1) break
+    desde = fin + 'endstream'.length
+    let c: string
+    try { c = inflateSync(buf.subarray(inicio, fin)).toString('latin1') } catch { continue }
+    let ctm: Matriz = [1, 0, 0, 1, 0, 0]
+    const pila: Matriz[] = []
+    const imagenes: Dibujo[] = []
+    const textos: { texto: string; x: number; y: number }[] = []
+    const re = new RegExp(`(?:^|\\n)(q|Q)(?=\\n)|${seis} cm|BT([\\s\\S]*?)ET|/(\\S+) Do`, 'g')
+    let m: RegExpExecArray | null
+    while ((m = re.exec(c)) !== null) {
+      if (m[1] === 'q') pila.push(ctm)
+      else if (m[1] === 'Q') ctm = pila.pop() ?? [1, 0, 0, 1, 0, 0]
+      else if (m[2] !== undefined) ctm = por(m.slice(2, 8).map(Number) as Matriz, ctm)
+      else if (m[9] !== undefined) {
+        const alto = Math.abs(ctm[3])
+        imagenes.push({ x: ctm[4], y: ctm[3] < 0 ? ctm[5] - alto : ctm[5], ancho: Math.abs(ctm[0]), alto })
+      } else {
+        const tm = new RegExp(`${seis} Tm`).exec(m[8])
+        const [e, f] = tm ? [Number(tm[5]), Number(tm[6])] : [0, 0]
+        const texto = (m[8].match(/<([0-9A-Fa-f\\s]*)>/g) ?? [])
+          .map(h => h.slice(1, -1).replace(/\\s+/g, '').match(/../g)?.map(b => String.fromCharCode(parseInt(b, 16))).join('') ?? '')
+          .join('')
+        textos.push({ texto, x: e * ctm[0] + f * ctm[2] + ctm[4], y: e * ctm[1] + f * ctm[3] + ctm[5] })
+      }
+    }
+    const pie = new RegExp(`${consecutivo}\\s*(\\d+)\\s*de`).exec(textos.map(t => t.texto).join(' '))
+    if (pie) hojas.set(Number(pie[1]), { imagenes, textos })
+  }
+  return hojas
+}
+
+describe('toda foto de hotel que cargó el asesor sale en el PDF (2026-10-08)', () => {
+  const ROJO = pngDeColor(220, 60, 60)
+  const VERDE = pngDeColor(40, 170, 120)
+  const MORADO = pngDeColor(130, 50, 220)
+  const AZUL = pngDeColor(60, 120, 220)
+
+  const TRES: CotizacionPDFProps['itinerarios'] = [
+    { nombre: 'Recomendada', esPrincipal: true, precio: 5_000_000, items: [{ nombre: 'HOTEL RECOMENDADO', descripcion: null, precio_venta: 5_000_000, descuento_porcentaje: 0, cantidad: 1, unidad: null }] },
+    { nombre: 'Económica', esPrincipal: false, precio: 3_900_000, items: [{ nombre: 'HOTEL ECONOMICO', descripcion: null, precio_venta: 3_900_000, descuento_porcentaje: 0, cantidad: 1, unidad: null }] },
+    { nombre: 'Premium', esPrincipal: false, precio: 8_400_000, items: [{ nombre: 'HOTEL PREMIUM', descripcion: null, precio_venta: 8_400_000, descuento_porcentaje: 0, cantidad: 1, unidad: null }] },
+  ]
+  const hotel = (nombre: string, tarifa: number | null, foto: string | null) => ({
+    ...HOTEL,
+    linea: nombre.toUpperCase(),
+    hotel: nombre,
+    ...(tarifa === null ? {} : { tarifas: [tarifa] }),
+    ...(foto ? { foto: { url: foto, proporcion: 1.5 } } : {}),
+  })
+  const DE_LA_CIUDAD = { url: AZUL, rotulo: 'Cancun · punta nizuc', credito: 'Autor de la ciudad (Wikimedia Commons, CC BY 4.0)', lugares: ['Cancun'] }
+  const tresTarifas = (fotos: [string | null, string | null, string | null], over: Partial<ViajePDF> = {}) => props({
+    itinerarios: TRES,
+    viaje: viaje({
+      vuelos: [],
+      cargosEnDestino: [],
+      hoteles: [hotel('Hotel Playa Recomendada', 0, fotos[0]), hotel('Hotel Centro Economico', 1, fotos[1]), hotel('Hotel Isla Premium', 2, fotos[2])],
+      ...over,
+    }),
+  })
+
+  /** Las fotos de todo el documento, cada una con el nombre del hotel que tiene AL LADO. */
+  async function fotosYSuHotel(p: CotizacionPDFProps, nombres: string[]) {
+    const hojas = hojasDibujadas(await pdfDe(p), 'COT-2026-0006')
+    const out: { hoja: number; hotel: string | null; foto: Dibujo }[] = []
+    for (const [hoja, { imagenes, textos }] of hojas) {
+      for (const foto of imagenes) {
+        // Al lado: el nombre empieza a la izquierda de la foto y a una altura que la foto cubre.
+        const vecino = textos.find(t => nombres.includes(t.texto) && t.x < foto.x && t.y >= foto.y && t.y <= foto.y + foto.alto)
+        out.push({ hoja, hotel: vecino?.texto ?? null, foto })
+      }
+    }
+    return out
+  }
+  const NOMBRES = ['Hotel Playa Recomendada', 'Hotel Centro Economico', 'Hotel Isla Premium']
+
+  it('(a) tres tarifas con foto: tres fotos, cada una al lado de su hotel y del mismo tamaño', async () => {
+    const fotos = await fotosYSuHotel(tresTarifas([ROJO, VERDE, MORADO]), NOMBRES)
+    expect(fotos).toHaveLength(3)
+    expect(fotos.map(f => f.hotel).sort()).toEqual([...NOMBRES].sort())
+    // La miniatura de las alternativas mide lo mismo que la del hotel grande.
+    for (const f of fotos) {
+      expect(f.foto.ancho).toBeCloseTo(fotos[0].foto.ancho, 1)
+      expect(f.foto.alto).toBeCloseTo(fotos[0].foto.alto, 1)
+      expect(f.foto.ancho / f.foto.alto).toBeCloseTo(1.5, 2)
+    }
+  })
+
+  it('(a bis) ⚠️ la fila de un hotel con su foto no se parte entre dos hojas, caiga donde caiga', async () => {
+    // Se corre el bloque de hoteles hacia el pie de la hoja una línea a la vez: en alguna de esas
+    // posiciones una fila partida dejaría la foto en una hoja y su hotel en la otra.
+    const linea = 'Una línea más de introducción, para correr los hoteles hacia el pie de la hoja. '
+    const base = tresTarifas([ROJO, VERDE, MORADO])
+    for (let k = 0; k <= 30; k += 3) {
+      const p = { ...base, viaje: { ...base.viaje!, intro: linea.repeat(k) } }
+      const fotos = await fotosYSuHotel(p, NOMBRES)
+      expect(fotos.map(f => f.hotel).sort(), `introducción de ${k} líneas`).toEqual([...NOMBRES].sort())
+    }
+  }, 60_000)
+
+  it('(b) solo la Premium con foto: una foto de hotel, al lado de la Premium; la principal conserva la de la ciudad', async () => {
+    const p = tresTarifas([null, null, MORADO], { fotosCiudades: [DE_LA_CIUDAD] })
+    const fotos = await fotosYSuHotel(p, NOMBRES)
+    expect(fotos).toHaveLength(2)
+    expect(fotos.map(f => f.hotel).sort()).toEqual(['Hotel Isla Premium', 'Hotel Playa Recomendada'])
+    const t = await texto(p)
+    // La de la ciudad sigue siendo la del capítulo, con su rótulo y su crédito.
+    expect(t).toContain('PUNTA NIZUC')
+    expect(t).toContain('Fotografías: Autor de la ciudad')
+    // La Económica, sin foto, sigue en su línea.
+    expect(t).toContain('Hotel Centro Economico')
+  })
+
+  it('(c) dos hoteles con foto en la misma ciudad: dos fotos, cada una al lado del suyo', async () => {
+    const p = props({
+      viaje: viaje({
+        vuelos: [],
+        cargosEnDestino: [],
+        hoteles: [hotel('Hotel Playa Recomendada', null, ROJO), hotel('Hotel Isla Premium', null, MORADO)],
+      }),
+    })
+    const fotos = await fotosYSuHotel(p, NOMBRES)
+    expect(fotos).toHaveLength(2)
+    expect(fotos.map(f => f.hotel).sort()).toEqual(['Hotel Isla Premium', 'Hotel Playa Recomendada'])
+  })
+
+  it('(d) sin ninguna foto: ni una imagen, y las alternativas siguen en una línea', async () => {
+    const p = tresTarifas([null, null, null])
+    const fotos = await fotosYSuHotel(p, NOMBRES)
+    expect(fotos).toHaveLength(0)
+    const t = await texto(p)
+    for (const n of NOMBRES) expect(t).toContain(n)
+    // En «normal» la línea de una alternativa junta nombre, régimen y habitación.
+    expect(t).toContain('Hotel Centro Economico · Todo incluido · Standard Double')
   })
 })
