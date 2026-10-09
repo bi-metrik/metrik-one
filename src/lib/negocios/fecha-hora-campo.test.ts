@@ -3,7 +3,7 @@ import {
   sinHoraRegistrada,
   ahoraBogotaCivil,
   esFechaHoraPasada,
-  rechazoPorFechaPasada,
+  notaPorFechaPasada,
   fechaHoraEnLetras,
   partesFechaHora,
   componerFechaHora,
@@ -36,10 +36,10 @@ describe('el ahora se lee en Bogotá, no en UTC', () => {
   })
 })
 
-describe('una cita no se puede registrar en el pasado', () => {
+describe('una cita en el pasado se registra con nota (SOE-009)', () => {
   it('rechaza el día ya cumplido', () => {
     expect(esFechaHoraPasada('2026-08-14T09:30', AHORA)).toBe(true)
-    expect(rechazoPorFechaPasada('1999-01-01T08:00')).toContain('no puede quedar en el pasado')
+    expect(notaPorFechaPasada('1999-01-01T08:00')).toContain('no se le enviará el aviso')
   })
 
   it('rechaza una hora anterior del mismo día y acepta una posterior', () => {
@@ -49,7 +49,7 @@ describe('una cita no se puede registrar en el pasado', () => {
 
   it('acepta la cita futura', () => {
     expect(esFechaHoraPasada('2026-09-26T09:30', AHORA)).toBe(false)
-    expect(rechazoPorFechaPasada('2999-01-01T08:00')).toBeNull()
+    expect(notaPorFechaPasada('2999-01-01T08:00')).toBeNull()
   })
 
   it('no llama pasado a un campo a medio escribir', () => {
@@ -57,7 +57,7 @@ describe('una cita no se puede registrar en el pasado', () => {
     expect(esFechaHoraPasada('', AHORA)).toBe(false)
     expect(esFechaHoraPasada('2026-08', AHORA)).toBe(false)
     expect(esFechaHoraPasada(null, AHORA)).toBe(false)
-    expect(rechazoPorFechaPasada('')).toBeNull()
+    expect(notaPorFechaPasada('')).toBeNull()
   })
 
   it('compara el valor de solo día como su medianoche', () => {

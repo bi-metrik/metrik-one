@@ -25,7 +25,7 @@ import { InfoTooltip } from '@/components/ui/info-tooltip'
 import { formatFecha } from '@/lib/dates/bogota'
 import {
   sinHoraRegistrada,
-  rechazoPorFechaPasada,
+  notaPorFechaPasada,
   fechaHoraEnLetras,
   partesFechaHora,
   componerFechaHora,
@@ -323,6 +323,8 @@ export default function BloqueDatos({
   const [aiFilled, setAiFilled] = useState<Record<string, boolean>>({})
   // Rechazo de validación por campo (`fecha_hora` y la tarifa UPME). Cadena vacía = sin error.
   const [errorCampo, setErrorCampo] = useState<Record<string, string>>({})
+  // Nota (no error) de una cita registrada con fecha ya pasada: se guarda igual (SOE-009).
+  const [notaCita, setNotaCita] = useState<Record<string, string>>({})
   // Espejo en ref: el guardado diferido corre dentro de un `setTimeout` y ahí el estado
   // todavía es el viejo. Sin este espejo, un valor rechazado se guardaría igual 2,5 s
   // después de escribirlo, que es justo lo que el rechazo viene a impedir.
@@ -643,11 +645,9 @@ export default function BloqueDatos({
     valuesRef.current = next
     setValues(next)
     dirtyRef.current = true
-    // La regla muerde al ESCRIBIR, no al avanzar: el aviso llega donde está el error y
-    // no sobre un botón que no explica nada. Y muerde solo sobre lo que se escribe
-    // ahora — decenas de casos cerrados guardan citas ya cumplidas, y validar el valor
-    // heredado los dejaría trabados sin poder avanzar por algo que ya ocurrió.
-    setErrorCampo(prev => ({ ...prev, [slug]: rechazoPorFechaPasada(compuesto) ?? '' }))
+    // Una cita pasada SE GUARDA (SOE-009): es la fecha real cuando la cita ya ocurrió.
+    // La nota avisa que al cliente no le va a salir el aviso de esa cita.
+    setNotaCita(prev => ({ ...prev, [slug]: notaPorFechaPasada(compuesto) ?? '' }))
   }
 
   // Salir del campo → guardar. Con la cita a medio escribir (día sí, hora no) NO se
@@ -657,7 +657,6 @@ export default function BloqueDatos({
     if (!dirtyRef.current) return
     const b = borradorCitaRef.current[slug]
     if (b && faltaHoraDeCita(b.dia, b.hora)) return
-    if (rechazoPorFechaPasada(valuesRef.current[slug])) return
     void persist(valuesRef.current, true)
   }
 
@@ -1124,6 +1123,9 @@ export default function BloqueDatos({
                 </div>
                 {errorCampo[f.slug] && (
                   <span className="text-[11px] text-red-600 font-medium">{errorCampo[f.slug]}</span>
+                )}
+                {notaCita[f.slug] && !errorCampo[f.slug] && (
+                  <span className="text-[11px] text-[#B45309]">{notaCita[f.slug]}</span>
                 )}
                 {falta && !errorCampo[f.slug] && (
                   <span className="text-[11px] text-[#B45309]">

@@ -54,7 +54,7 @@
  * ⚠️ **Se juzga lo que se escribe AHORA, no lo que la historia dejó escrito.** Quien
  * llama debe saltarse la revisión cuando el valor entrante es idéntico al guardado: si no,
  * los casos que ya tienen una diferencia grande quedarían trabados para siempre, sin poder
- * corregir ningún otro campo del bloque. Es el mismo corte que `rechazoPorFechaPasada`.
+ * corregir ningún otro campo del bloque. Es el mismo corte que tenía `rechazoPorFechaPasada` (retirado en SOE-009).
  */
 
 import { parsearNumeroColombiano, formatearNumeroColombiano } from '@/lib/negocios/numero-colombiano'
