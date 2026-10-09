@@ -220,6 +220,59 @@ describe('adaptador de Gemini', () => {
     const cuerpo = JSON.parse(String((f.mock.calls[1][1] as RequestInit).body))
     expect(cuerpo.contents[1].parts[0].thoughtSignature).toBe(FIRMA_DE_RELLENO)
   })
+  const respuesta = (texto: string) => new Response(JSON.stringify({
+    candidates: [{ content: { parts: [{ functionCall: { name: 'responder', args: { texto } } }] }, finishReason: 'STOP' }],
+    usageMetadata: { promptTokenCount: 900, candidatesTokenCount: 20 },
+  }), { status: 200 })
+  const tarda = (ms: number, init: RequestInit) => new Promise<void>((res, rej) => {
+    const t = setTimeout(res, ms)
+    init.signal!.addEventListener('abort', () => { clearTimeout(t); rej(Object.assign(new Error('a'), { name: 'AbortError' })) })
+  })
+  it('pasado el corte el principal sigue: si llega antes que el respaldo, contesta él y el respaldo se cancela', async () => {
+    const f = vi.fn(async (url: string, init: RequestInit) => {
+      await tarda(url.includes('3.8') ? 120 : 400, init)
+      return respuesta(url.includes('3.8') ? 'principal' : 'respaldo')
+    })
+    const m = modeloGemini({ llave: 'k', principal, respaldo, corteMs: 50, fetch: f as unknown as typeof fetch })
+    const r = await m.llamar(pedido)
+    expect(r.ok && r.mensaje.modelo).toBe('gemini-3.8-flash')
+    expect(r.usos.map((u) => [u.modelo, u.ok, u.motivo ?? null])).toEqual([
+      ['gemini-3.8-flash', true, null], ['gemini-3.5-flash-lite', false, 'cancelado: respondió el principal'],
+    ])
+    // El principal no se cortó en el corte: tuvo el tiempo del turno.
+    expect(f).toHaveBeenCalledTimes(2)
+  })
+  it('si el respaldo llega primero, contesta él y el principal queda como corte', async () => {
+    const f = vi.fn(async (url: string, init: RequestInit) => {
+      await tarda(url.includes('3.8') ? 5_000 : 30, init)
+      return respuesta('respaldo')
+    })
+    const m = modeloGemini({ llave: 'k', principal, respaldo, corteMs: 50, fetch: f as unknown as typeof fetch })
+    const t0 = performance.now()
+    const r = await m.llamar(pedido)
+    expect(performance.now() - t0).toBeLessThan(1_000)
+    expect(r.ok && r.mensaje.modelo).toBe('gemini-3.5-flash-lite')
+    expect(r.usos.map((u) => [u.modelo, u.ok, u.motivo ?? null])).toEqual([['gemini-3.8-flash', false, 'corte'], ['gemini-3.5-flash-lite', true, null]])
+  })
+  it('si el respaldo falla después del corte, se espera al principal', async () => {
+    const f = vi.fn(async (url: string, init: RequestInit) => {
+      if (url.includes('lite')) return new Response('{"error":"cuota"}', { status: 429 })
+      await tarda(150, init)
+      return respuesta('principal')
+    })
+    const m = modeloGemini({ llave: 'k', principal, respaldo, corteMs: 50, fetch: f as unknown as typeof fetch })
+    const r = await m.llamar(pedido)
+    expect(r.ok && r.mensaje.modelo).toBe('gemini-3.8-flash')
+    expect(r.usos.map((u) => [u.modelo, u.ok])).toEqual([['gemini-3.8-flash', true], ['gemini-3.5-flash-lite', false]])
+  })
+  it('un error del principal antes del corte va directo al respaldo; si los dos fallan, dice los dos motivos', async () => {
+    const f = vi.fn(async () => new Response('{"error":"x"}', { status: 503 }))
+    const m = modeloGemini({ llave: 'k', principal, respaldo, corteMs: 5_000, fetch: f as unknown as typeof fetch })
+    const t0 = performance.now()
+    const r = await m.llamar(pedido)
+    expect(performance.now() - t0).toBeLessThan(1_000)
+    expect(r).toMatchObject({ ok: false, motivo: 'http 503; respaldo: http 503' })
+  })
   it('un 429 del principal también va al respaldo; sin respaldo, falla con el motivo', async () => {
     const f = vi.fn(async () => new Response('{"error":"cuota"}', { status: 429 }))
     const m = modeloGemini({ llave: 'k', principal, respaldo: null, corteMs: 200, fetch: f as unknown as typeof fetch })
