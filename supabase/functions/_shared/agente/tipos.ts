@@ -189,7 +189,7 @@ export interface ContextoDominio {
 export interface Dominio {
   /** Nombre del bot (`bandeja-solicitudes`). */
   bot: string;
-  /** Las herramientas de lectura del dominio (además de `consultar_reglas`). */
+  /** Las herramientas de lectura del dominio. */
   lecturas: DeclaracionHerramienta[];
   /** Las acciones de `proponer`. */
   acciones: string[];
