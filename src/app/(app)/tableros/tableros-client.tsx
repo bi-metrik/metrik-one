@@ -22,6 +22,7 @@ import type { PilotoMarketplaceData } from './ferreteria-actions'
 import type { BandejasData } from './bandejas-actions'
 import type { DirectivoData } from './directivo-actions'
 import type { SegundoPagoMes } from '@/lib/tableros/segundo-pago'
+import type { ReembolsosMes } from '@/lib/tableros/reembolsos'
 import type { MarketingData, MarketingNoDisponible } from './marketing-actions'
 import { ShieldCheck, LayoutDashboard, AlertTriangle } from 'lucide-react'
 import type {
@@ -61,6 +62,8 @@ export interface ComercialNegociosBundle {
   seccionalInicial: ComercialSeccionalMes | null
   planPagoInicial: ComercialPlanPagoMes | null
   segundoPagoInicial: SegundoPagoMes | null
+  /** Las devoluciones de dinero del mes (SOE-007). `null` = no se pudo traer. */
+  reembolsosInicial: ReembolsosMes | null
   capacidad: CapacidadSeccional | null
   serie: ComercialSerieResponse | null
   /** El mismo histórico abierto por seccional, para el filtro. `null` = sin filtro. */
@@ -235,6 +238,7 @@ export default function TablerosClient({
             seccionalInicial={initialComercialNegocios.seccionalInicial}
             planPagoInicial={initialComercialNegocios.planPagoInicial}
             segundoPagoInicial={initialComercialNegocios.segundoPagoInicial}
+            reembolsosInicial={initialComercialNegocios.reembolsosInicial}
             capacidad={initialComercialNegocios.capacidad}
             serie={initialComercialNegocios.serie}
             serieSeccional={initialComercialNegocios.serieSeccional}
