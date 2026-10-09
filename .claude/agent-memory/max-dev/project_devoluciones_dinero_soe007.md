@@ -1,6 +1,6 @@
 ---
 name: devoluciones-dinero-soe007
-description: SOE-007 devolución de dinero — 20261009160000 APLICADA; 20261009210000 (venta reembolsada sale de ventas + indicador de reembolsos) SIN aplicar; cómo se midió prod sin MCP
+description: SOE-007 devolución de dinero — 20261009160000 APLICADA; 20261009210000 (venta reembolsada sale de ventas + indicador de reembolsos) APLICADA; cómo se midió prod sin MCP
 metadata:
   type: project
 ---
@@ -9,7 +9,7 @@ metadata:
 `registrar_devolucion_dinero` (solo service_role) + vistas `v_devolucion_valor` / `v_recaudo_neto_valor`. Seis RPC de
 recaudo leen la vista neta por reemplazo `v_cobro_valor cv` → `v_recaudo_neto_valor cv` sobre `pg_get_functiondef`.
 
-**2ª parte (rama `feat/soe-007-reembolsos-indicadores`, migración `20261009210000`, SIN aplicar al abrir el PR):**
+**2ª parte (rama `feat/soe-007-reembolsos-indicadores`, migración `20261009210000`, aplicada 2026-10-09 antes del merge):**
 decisión de Mauricio (2026-10-09): devuelto ≥ cobrado → el negocio NO es venta y sale de `v_venta_mes_comercial`,
 también del mes cerrado de su venta. Parcial no saca. Indicador `get_reembolsos_mes_soena` (por fecha de devolución,
 sin IVA) en Dirección y Comercial. Dry-run `sql/soena/2026-10-09_dry-run_venta-reembolsada.sql`; un test PGlite lo
