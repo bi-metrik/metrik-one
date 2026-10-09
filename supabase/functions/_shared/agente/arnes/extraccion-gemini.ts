@@ -1,9 +1,9 @@
 // ============================================================
 // Arnés del núcleo — la extracción de una carga con el modelo real (Deno)
 // ------------------------------------------------------------
-// La misma llamada que hace producción en `prepararCarga` (`leerConModelo` de `wa-entendimiento.ts`): mismo modelo por
-// defecto, misma temperatura, mismo esquema y el mismo formato de los mensajes. Se copia aquí para no cargar el flujo
-// viejo de la bandeja (que trae Supabase) en el arnés. La llave llega por GEMINI_API_KEY y nunca se imprime: en el
+// La misma llamada que hace producción en `prepararCarga` (`leerConModelo` de `wa-entendimiento.ts`): misma temperatura,
+// mismo esquema y el mismo formato de los mensajes. Se copia aquí para no cargar el flujo viejo de la bandeja (que trae
+// Supabase) en el arnés. La llave llega por GEMINI_API_KEY y nunca se imprime: en el
 // arnés es la de PRUEBAS.
 // ============================================================
 
@@ -12,8 +12,12 @@ import { mensajesDeTextos } from '../bandeja/carga.ts';
 import { textoParaModelo } from '../../wa-guardianes.ts';
 import type { ExtractorMemoria } from '../memoria.ts';
 
-/** El modelo de la extracción en producción: `GEMINI_ENTENDIMIENTO_MODEL` o `GEMINI_PARSE_MODEL`, si no este. */
-export const MODELO_EXTRACCION = Deno.env.get('GEMINI_ENTENDIMIENTO_MODEL') || Deno.env.get('GEMINI_PARSE_MODEL') || 'gemini-2.5-flash-lite';
+/**
+ * Producción extrae con `gemini-2.5-flash-lite` (el defecto de `wa-entendimiento.ts`; no hay secreto que lo cambie, medido
+ * el 2026-10-09). La llave de pruebas no lo alcanza: Google responde 404 «no longer available to new users» y recomienda
+ * `gemini-3.5-flash-lite`. El arnés usa ese (o `ARNES_MODELO_EXTRACCION`): lo que mide es el prompt, en un modelo vecino.
+ */
+export const MODELO_EXTRACCION = Deno.env.get('ARNES_MODELO_EXTRACCION') || 'gemini-3.5-flash-lite';
 
 export function extraccionGemini(llave: string, registro: Array<{ ms: number; ok: boolean }> = []): ExtractorMemoria {
   return async ({ textos, campos, instrucciones }) => {
