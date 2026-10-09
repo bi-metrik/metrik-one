@@ -27,6 +27,12 @@ export interface ResultadoCaso {
   exito: Veredicto;
   daninas: string[];
   atajadas: string[];
+  /** Respuestas que el verificador no dejó salir (cada una cuesta un llamado más). */
+  rechazosVerificador: number;
+  /** Turnos con modelo que terminaron en la respuesta fija de «no pude» (rf.modelo_caido). */
+  caidos: number;
+  /** Propuestas donde lo de arriba repite la pregunta del resumen (una línea que pregunta, arriba de «¿…?» del resumen). */
+  preguntaDoble: number;
   latencias: Array<{ tipo: string; ms: number }>;
   uso: UsoMes;
   pasos: PasoRegistrado[];
@@ -73,10 +79,18 @@ export function calificar(caso: CasoArnes, pasos: PasoRegistrado[], puerto: Puer
     for (const v of t.verificador ?? []) atajadas.push(`verificador: ${v.motivo.slice(0, 120)}`);
   }
   const latencias = pasos.filter((p) => p.ms !== null).map((p) => ({ tipo: tipoDeTurno(p.trazas.at(-1)), ms: p.ms! }));
+  const rechazosVerificador = trazas.reduce((n, t) => n + (t.verificador?.length ?? 0), 0);
+  const caidos = trazas.filter((t) => t.tipo === 'modelo' && t.respuesta_fija === 'rf.modelo_caido').length;
+  const preguntaDoble = trazas.filter((t) => {
+    const resumen = t.propuesta?.resumen;
+    const texto = t.salida?.texto ?? '';
+    if (!resumen || !texto.endsWith(resumen)) return false;
+    return texto.slice(0, texto.length - resumen.length).split(/\n|⏎/u).some((l) => l.trim().endsWith('?'));
+  }).length;
   return {
     id: caso.id, conjunto: caso.conjunto, titulo: caso.titulo,
     exito: error ? { ok: false, motivo: `el arnés falló: ${error}` } : caso.esperado(puerto, trazas),
-    daninas, atajadas, latencias, uso: sumarUso(trazas, precios), pasos, error,
+    daninas, atajadas, rechazosVerificador, caidos, preguntaDoble, latencias, uso: sumarUso(trazas, precios), pasos, error,
   };
 }
 
@@ -91,6 +105,9 @@ export interface Tabla {
   exitos: number;
   daninas: number;
   atajadas: number;
+  rechazosVerificador: number;
+  caidos: number;
+  preguntaDoble: number;
   porTipo: Record<string, { n: number; p50: number | null; p90: number | null }>;
   modelo: { n: number; p50: number | null; p90: number | null };
   uso: UsoMes;
@@ -109,6 +126,9 @@ export function tabla(rs: ResultadoCaso[], precios: PrecioModelo[]): Tabla {
     exitos: rs.filter((r) => r.exito.ok).length,
     daninas: rs.reduce((n, r) => n + r.daninas.length, 0),
     atajadas: rs.reduce((n, r) => n + r.atajadas.length, 0),
+    rechazosVerificador: rs.reduce((n, r) => n + r.rechazosVerificador, 0),
+    caidos: rs.reduce((n, r) => n + r.caidos, 0),
+    preguntaDoble: rs.reduce((n, r) => n + r.preguntaDoble, 0),
     porTipo,
     modelo: { n: conModelo.length, p50: percentil(conModelo, 50), p90: percentil(conModelo, 90) },
     uso: sumarUso(rs.flatMap((r) => r.pasos.flatMap((p) => p.trazas)), precios),

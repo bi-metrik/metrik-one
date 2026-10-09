@@ -134,7 +134,7 @@ describe('tercera falla en vivo 2026-10-07: una preferencia no es un valor y cor
     // El prompt ya no empuja a escoger siempre.
     expect(prompts[0]).not.toContain('elige la que mejor representa lo pedido')
     expect(prompts[0]).toContain('«económico», «algo bueno», «no muy caro» no son un rango de presupuesto')
-    expect(prompts[0]).toContain('el tipo de viaje no sale del destino')
+    expect(prompts[0]).toContain('el tipo de viaje por el destino')
 
     // 1b. La respuesta a la duda se lee como cualquier dato: sale una propuesta nueva SIN la duda (no la pendiente).
     const t1b = await e.escribe(M2)
@@ -316,7 +316,7 @@ describe('las dudas de la extracción', () => {
   it('el prompt: una opción solo si corresponde, sin inferencias, quitar, el valor exacto si ya está, y preguntar', () => {
     const p = instruccionesCarga(CAMPOS, '2026-10-07', { edades_menores: '8, 10, 11 MESES' }, { presupuesto: 'menos_3m' })
     expect(p).toContain('Un campo de opciones guarda UNA opción, y solo si lo dicho corresponde a ella.')
-    expect(p).toContain('ni que las fechas')
+    expect(p).toContain('que las fechas sean fijas porque hay una fecha')
     expect(p).toContain('devuelve "quitar"')
     expect(p).toContain('devuelve el valor EXACTO que ya está')
     expect(p).toContain('4. dudas:')
@@ -336,6 +336,15 @@ describe('las dudas de la extracción', () => {
     // Corregir a abierto reemplaza con esa opción; quitar queda para el campo sin ella o para «eso no».
     expect(p).toMatch(/opción de «aún no está definido», devuelve esa opción: reemplaza el valor\. Si no la tiene, o la corrección es «eso\s+no»/)
     expect(p).not.toContain('«el presupuesto está abierto», «no, eso no lo dijeron»), devuelve "quitar"')
+  })
+
+  it('interpretar no es inventar (2026-10-09): un campo del que nadie habló queda vacío; la edad decide infante', () => {
+    const p = instruccionesCarga([], '2026-10-09')
+    expect(p).toMatch(/Interpretar no es inventar: un campo del que nadie habló queda en "por_definir" aunque se pueda suponer \(el\s+presupuesto/)
+    expect(p).toContain('La frase de un valor habla de ESE campo.')
+    expect(p).toMatch(/Infante es menor de 2 años y la edad manda sobre la palabra\s+\(«un niño de año y medio» es 1 infante y 0 niños\)/)
+    const esquema = esquemaCarga([{ slug: 'adultos', tipo: 'numero', label: 'Adultos' }] as CampoEntendible[]) as { properties: { valores: { properties: Record<string, { properties: { frase: { description?: string } } }> } } }
+    expect(esquema.properties.valores.properties.adultos.properties.frase.description).toContain('hablan de ESTE campo')
   })
 
   it('la parte fija del prompt de la extracción no pasa de 1.200 tokens (4 caracteres por token)', () => {
