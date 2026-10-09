@@ -67,6 +67,12 @@ async function enviarYCerrar(d: DepsCola, turnoId: string, atendidas: FilaConver
     if (wamid) salientes.push(wamid);
     else r.traza.error = [r.traza.error, 'Meta rechazó el envío'].filter(Boolean).join('; ');
   }
+  // Los que siguen (el mensaje para reenviar tal cual): cada uno aparte, para que se pueda reenviar solo.
+  for (const extra of r.extras ?? []) {
+    const wamid = await d.mensajero.enviar(d.phone, extra, { workspaceId: d.workspaceId, intent });
+    if (wamid) salientes.push(wamid);
+    else r.traza.error = [r.traza.error, 'Meta rechazó un mensaje extra'].filter(Boolean).join('; ');
+  }
   // Desde que llegó el último mensaje atendido (la fila nace en el webhook) hasta que salió la respuesta.
   const ultima = atendidas.at(-1)!;
   r.traza.ms_turno = Math.max(0, d.ahoraMs() - Date.parse(ultima.created_at));

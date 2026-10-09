@@ -71,7 +71,7 @@ import {
 import { datosManuales, esManual, montoConMiles } from '@/lib/cotizaciones/ingreso-manual'
 import { nombreVisibleDeLinea } from '@/lib/cotizaciones/nombre-visible'
 import { CheckVa, ModoYDia, useActividad, type ActividadDeTarjeta } from '@/app/(app)/negocios/actividad-control'
-import { TEXTO_ACTIVIDAD_NO_VA } from '@/lib/cotizaciones/actividad-en-cotizacion'
+import { TEXTO_ACTIVIDAD_NO_VA, TEXTO_VUELO_NO_VA } from '@/lib/cotizaciones/actividad-en-cotizacion'
 
 /**
  * La tarjeta de una opción de viaje (prototipo aprobado por Mauricio el 2026-09-24,
@@ -226,8 +226,9 @@ export default function TarjetaOpcion({
   onGuardarNota: (texto: string) => void
   onCambio: () => void
   /**
-   * Solo actividades (brief del 2026-10-05, punto 0): si va en la cotización, Incluida u Opcional,
-   * y su día. `null` en vuelo, hotel y traslado, que se ven como siempre.
+   * Actividades (brief del 2026-10-05, punto 0): si va en la cotización, Incluida u Opcional,
+   * y su día. Vuelos (brief del 2026-10-08): solo el check (`soloVa`). `null` en hotel y
+   * traslado, que se ven como siempre.
    */
   actividad?: ActividadDeTarjeta | null
 }) {
@@ -429,7 +430,12 @@ export default function TarjetaOpcion({
         />
       </div>
 
-      {actividad && (
+      {actividad?.soloVa && noVa && (
+        <div className="-mt-1 pb-2.5 pl-[50px] pr-3" data-vuelo-control>
+          <p className="m-0 text-xs font-semibold text-[#6E6A62]" data-vuelo-no-va>{TEXTO_VUELO_NO_VA}</p>
+        </div>
+      )}
+      {actividad && !actividad.soloVa && (
         <div className="-mt-1 pb-2.5 pl-[50px] pr-3" data-actividad-control>
           <ModoYDia
             estado={act.estado}
@@ -512,7 +518,8 @@ export default function TarjetaOpcion({
               hoja: la línea de «Inversión» del documento y, en el vuelo, sus filas de la tabla
               «Vuelos». Su nota se sigue escribiendo aparte, encima. */}
           {!esHotel && nota}
-          {(esHotel || esTraslado || esActividad || esVuelo) && <HojaCliente
+          {/* Lo que no va no se le muestra al cliente: tampoco aquí (brief del 2026-10-08). */}
+          {(esHotel || esTraslado || esActividad || esVuelo) && !noVa && <HojaCliente
             item={item}
             numero={numero}
             bloqueTitulo={bloqueTitulo}

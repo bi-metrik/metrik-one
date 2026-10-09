@@ -10,12 +10,23 @@ import type { DeclaracionHerramienta, Dominio, Reglamento } from './tipos.ts';
 
 export const CIERRAN = ['responder', 'proponer'];
 
+/** Lo que cierra el turno con este dominio: los del núcleo y los cierres que declare el dominio. */
+export function cierranCon(d: Pick<Dominio, 'cierres'>): string[] {
+  return [...CIERRAN, ...(d.cierres ?? []).map((c) => c.name)];
+}
+
 export function declaraciones(d: Dominio, r: Reglamento): DeclaracionHerramienta[] {
   // Las fichas de `proponer` van en su descripción: el turno se cierra al proponer, así que el modelo tiene que
   // tenerlas ANTES (las de las lecturas llegan con su resultado).
   const reglasProponer = fichasDeHerramienta(r, 'proponer');
+  // Los cierres del dominio también cierran el turno: sus fichas van en la descripción, como las de `proponer`.
+  const cierres = (d.cierres ?? []).map((c) => {
+    const reglas = fichasDeHerramienta(r, c.name);
+    return reglas.length ? { ...c, description: `${c.description}\nReglas:\n${reglas.join('\n')}` } : c;
+  });
   return [
     ...d.lecturas,
+    ...cierres,
     {
       name: 'consultar_reglas',
       description: 'Trae el detalle de fichas del índice del reglamento, por id o por tema. Solo lectura.',

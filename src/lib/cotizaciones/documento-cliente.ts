@@ -190,6 +190,17 @@ export function avisoDelTextoEnPdf(doc: DocumentoCliente | null): string | null 
 }
 
 /**
+ * El aviso del PDF cuando el texto REVISADO se escribió con otras líneas (brief del 2026-10-08):
+ * un vuelo que se quitó, una aerolínea o un equipaje corregidos. El PDF lo imprime igual —no se
+ * bloquea por un cambio que puede ser menor— pero quien lo genera lo sabe antes de mandarlo:
+ * «Incluido en el plan» puede nombrar un servicio que ya no se cobra. `null` = nada que avisar.
+ */
+export function avisoDelTextoViejoEnPdf(doc: DocumentoCliente | null, huellaActual: string | null): string | null {
+  if (estadoDelTexto(doc) !== 'revisado' || !textoDesactualizado(doc, huellaActual)) return null
+  return 'El texto para el cliente se revisó con otros servicios (algo cambió después: un vuelo, un hotel, un equipaje). El PDF lo imprimió como estaba: revísalo en «Texto para el cliente» antes de enviarlo.'
+}
+
+/**
  * Lo que el editor necesita para pintar el panel «Texto para el cliente». Lo arma el
  * servidor; el navegador no calcula huellas ni decide si el texto quedó viejo.
  */

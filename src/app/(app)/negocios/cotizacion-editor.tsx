@@ -38,6 +38,7 @@ import { agregarOpcionAItem, actualizarRanuraDeItem, actualizarDiaDeItem, type E
 import {
   avisoSugeridosQueCobran,
   diaDeItem,
+  esVueloDeLaCotizacion,
   fueraDelPrecio,
   hayDiasAsignados,
   itemsSugeridos,
@@ -97,6 +98,8 @@ import {
   actividadesSinDia,
   esActividad,
   estadoDeActividad,
+  estadoDeVuelo,
+  lineaQueNoVa,
   notaDeActividadesFuera,
   textoFaltaDia,
   textoNoVan,
@@ -1138,8 +1141,8 @@ export default function CotizacionEditor({ oportunidadId, cotizacion, initialIte
       .filter(b => b.grupo !== null)
       .map(b => estadoDeBloque(
         { grupo: b.grupo as string, etiqueta: tituloDeBloque(b, numeroDeVuelo.get(b.grupo as string) ?? null).titulo },
-        // Una actividad que no va no deja el bloque por atender: no sale en la cotización (punto 0).
-        b.lineas.filter(l => !(esActividad(l.grupo) && estadoDeActividad(l) === 'no_va')).map(estadoDeOpcion),
+        // Una actividad o un vuelo que no va no deja el bloque por atender: no sale en la cotización.
+        b.lineas.filter(l => !lineaQueNoVa(l)).map(estadoDeOpcion),
       ))
     : []
   const costoTotal = cascadaTotal.costoDirecto
@@ -1285,8 +1288,8 @@ export default function CotizacionEditor({ oportunidadId, cotizacion, initialIte
   // cambio. El precio queda en $0 y aquí se dice, antes de enviar: nunca pasa callado.
   const costosPendientes = lineasPorTipo
     ? initialItems
-      // Una actividad que no va no pide nada: no sale en la cotización (punto 0).
-      .filter(i => i.es_ajuste !== true && !ocultos.has(i.id) && !(esActividad(i.grupo) && estadoDeActividad(i) === 'no_va'))
+      // Una actividad o un vuelo que no va no pide nada: no sale en la cotización.
+      .filter(i => i.es_ajuste !== true && !ocultos.has(i.id) && !lineaQueNoVa(i))
       .map(i => {
         const texto = tasaPendientePorId.get(i.id) ?? null
         const u = ubicacionesDeOpciones[i.id]
@@ -2337,6 +2340,13 @@ export default function CotizacionEditor({ oportunidadId, cotizacion, initialIte
                   ? precioPorPax.map(p => `${NOMBRE_TIPO[p.tipo]} ${pesosTarjeta(p.precioUnitario)}`).join(' · ')
                   : null,
                 era: tarifaDelItem.noVa?.era ?? null,
+              } : esVueloDeLaCotizacion({ id: item.id, grupo: item.grupo ?? null, es_ajuste: item.es_ajuste ?? false }) ? {
+                // Un vuelo solo lleva el check (brief del 2026-10-08): va o no va.
+                estado: estadoDeVuelo(item),
+                dia: null,
+                precioPorPersona: null,
+                era: 'incluida',
+                soloVa: true,
               } : null}
             />
           )
