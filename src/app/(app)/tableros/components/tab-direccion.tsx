@@ -5,6 +5,8 @@ import { getDirectivo, type DirectivoData } from '../directivo-actions'
 import { COLUMNAS_DIRECTIVO } from '@/lib/dian/agrupacion-directivo'
 import { notaSegundoPago, type CifraSegundoPago } from '@/lib/tableros/segundo-pago'
 import { SegundoPagoDrawer } from './segundo-pago-drawer'
+import { NOTA_REEMBOLSOS } from '@/lib/tableros/reembolsos'
+import { ReembolsosDrawer } from './reembolsos-drawer'
 
 const MESES_ES = [
   'Enero', 'Febrero', 'Marzo', 'Abril', 'Mayo', 'Junio',
@@ -33,9 +35,11 @@ export default function TabDireccion({ inicial }: { inicial: DirectivoData }) {
   const [cargando, startTransition] = useTransition()
   // Qué cifra de segundo pago se abrió. `null` = panel cerrado.
   const [abierta, setAbierta] = useState<CifraSegundoPago | null>(null)
+  const [verReembolsos, setVerReembolsos] = useState(false)
 
   function irAMes(delta: number) {
     setAbierta(null)
+    setVerReembolsos(false)
     const d = new Date(datos.anio, datos.mes - 1 + delta, 1)
     const anio = d.getFullYear()
     const mes = d.getMonth() + 1
@@ -55,6 +59,12 @@ export default function TabDireccion({ inicial }: { inicial: DirectivoData }) {
   const sp = datos.segundoPago
   const recibido = sp ? sp.recibido.total : c.segundo_pago
   const ventasTotales = sp ? c.primer_pago + sp.recibido.total : c.ventas_totales
+  // SOE-007. Las devoluciones de dinero del mes, por fecha de la devolución. Se muestran, no se
+  // restan aquí: «Ingresos primer pago» ya es neto de lo devuelto en el mes (lee
+  // v_recaudo_neto_valor) y una venta devuelta en su totalidad ya no cuenta en «Negocios
+  // cerrados» (sale de v_venta_mes_comercial).
+  const re = datos.reembolsos
+  const abrirReembolsos = re && re.reembolsos > 0 ? () => setVerReembolsos(true) : undefined
 
   return (
     <div className={cargando ? 'opacity-60 transition-opacity' : ''}>
@@ -84,7 +94,8 @@ export default function TabDireccion({ inicial }: { inicial: DirectivoData }) {
             <FilaKpi nombre="Leads generados" valor={c.leads_generados} meta={m.meta_leads_mensual} />
             <FilaKpi nombre="Leads calificados" valor={c.leads_calificados} meta={m.meta_leads_calificados_mensual}
               nota="Negocios que superaron Validación" />
-            <FilaKpi nombre="Negocios cerrados" valor={c.negocios_cerrados} meta={m.meta_negocios_mensual} />
+            <FilaKpi nombre="Negocios cerrados" valor={c.negocios_cerrados} meta={m.meta_negocios_mensual}
+              detalle="Sin las ventas a las que se les devolvió todo lo que pagaron" />
             <FilaKpi nombre="Ingresos primer pago" valor={c.primer_pago} meta={null} moneda />
             <FilaKpi nombre="2º pago recibido este mes" valor={recibido} meta={null} moneda
               detalle={sp
@@ -101,6 +112,14 @@ export default function TabDireccion({ inicial }: { inicial: DirectivoData }) {
                 ? `${notaSegundoPago('de_ventas_del_mes', sp.umbral_migaja)}. No suma en Ventas totales.`
                 : 'No se pudo calcular.'}
               onAbrir={sp && sp.de_ventas_del_mes.negocios > 0 ? () => setAbierta('de_ventas_del_mes') : undefined} />
+            <FilaKpi nombre="Reembolsos" valor={re ? re.reembolsos : null} meta={null}
+              detalle={re
+                ? `${NOTA_REEMBOLSOS}.${re.ventas_anuladas > 0 ? ` ${re.ventas_anuladas} con todo devuelto: ya no cuentan como venta.` : ''}`
+                : 'No se pudo calcular.'}
+              onAbrir={abrirReembolsos} />
+            <FilaKpi nombre="Dinero devuelto" valor={re ? re.valor : null} meta={null} moneda
+              detalle={re && re.monto > 0 ? `${fmtCOP(re.monto)} con IVA salieron de la cuenta.` : undefined}
+              onAbrir={abrirReembolsos} />
           </tbody>
         </table>
       </div>
@@ -209,6 +228,14 @@ export default function TabDireccion({ inicial }: { inicial: DirectivoData }) {
           datos={sp}
           cifra={abierta}
           onClose={() => setAbierta(null)}
+        />
+      )}
+
+      {verReembolsos && re && (
+        <ReembolsosDrawer
+          key={`${re.anio}-${re.mes}-reembolsos`}
+          datos={re}
+          onClose={() => setVerReembolsos(false)}
         />
       )}
     </div>

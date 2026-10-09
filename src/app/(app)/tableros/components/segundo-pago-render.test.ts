@@ -53,6 +53,7 @@ const DATOS: DirectivoData = {
   citas: { columnas: vacias, total: 0 },
   totalCartera: 0,
   segundoPago: SP,
+  reembolsos: null,
 }
 
 const html = (d: DirectivoData) => renderToStaticMarkup(React.createElement(TabDireccion, { inicial: d }))

@@ -5,6 +5,7 @@ import { rpcTablero } from '@/lib/tableros/cache-rpc'
 import { getRolePermissions } from '@/lib/roles'
 import { columnaDirectivo, COLUMNAS_DIRECTIVO, type ColumnaDirectivo } from '@/lib/dian/agrupacion-directivo'
 import { normalizarSegundoPago, type SegundoPagoMes } from '@/lib/tableros/segundo-pago'
+import { normalizarReembolsos, type ReembolsosMes } from '@/lib/tableros/reembolsos'
 
 /** Una celda de la matriz de operaciones, tal como la devuelve la RPC (seccional cruda). */
 type FilaCruda = { fila_orden: number; fila: string; seccional: string; cantidad: number }
@@ -51,6 +52,11 @@ export type DirectivoData = {
    * `null` si esa consulta falló: la fila cae a la cifra de `comercial.segundo_pago`.
    */
   segundoPago: SegundoPagoMes | null
+  /**
+   * Las devoluciones de dinero del mes (SOE-007), de la misma RPC que lee el Comercial.
+   * `null` si esa consulta falló: las filas de reembolsos dicen «sin dato».
+   */
+  reembolsos: ReembolsosMes | null
 }
 
 function columnasVacias(): Record<ColumnaDirectivo, number> {
@@ -73,16 +79,19 @@ export async function getDirectivo(anio: number, mes: number): Promise<Directivo
   if (!perms.canViewNumbers) return null
   if (!['owner', 'admin', 'supervisor'].includes(role || '')) return null
 
-  // Las dos RPC van juntas: el segundo pago no espera a la matriz.
+  // Las tres RPC van juntas: ni el segundo pago ni los reembolsos esperan a la matriz.
   const params = { p_workspace_id: workspaceId, p_anio: anio, p_mes: mes }
-  const [{ data, error }, segundo] = await Promise.all([
+  const [{ data, error }, segundo, reembolsos] = await Promise.all([
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     rpcTablero(supabase as any, workspaceId, 'get_directivo_soena', params),
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     rpcTablero(supabase as any, workspaceId, 'get_segundo_pago_mes_soena', params),
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    rpcTablero(supabase as any, workspaceId, 'get_reembolsos_mes_soena', params),
   ])
   if (error || !data) return null
   if (segundo.error) console.error('[direccion] no se pudo traer el segundo pago del mes:', segundo.error)
+  if (reembolsos.error) console.error('[direccion] no se pudieron traer los reembolsos del mes:', reembolsos.error)
 
   const crudo = data as DirectivoCrudo
 
@@ -126,5 +135,6 @@ export async function getDirectivo(anio: number, mes: number): Promise<Directivo
     citas,
     totalCartera: operaciones.reduce((s, f) => s + f.total, 0),
     segundoPago: segundo.error ? null : normalizarSegundoPago(segundo.data),
+    reembolsos: reembolsos.error ? null : normalizarReembolsos(reembolsos.data),
   }
 }

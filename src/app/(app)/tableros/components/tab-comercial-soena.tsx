@@ -39,6 +39,9 @@ import { PerdidosDrawer } from './perdidos-drawer'
 import { PagosDrawer, type MesSeleccionado } from './pagos-drawer'
 import { SegundoPagoDrawer } from './segundo-pago-drawer'
 import { getSegundoPagoMes } from '../segundo-pago-actions'
+import { ReembolsosDrawer } from './reembolsos-drawer'
+import { getReembolsosMes } from '../reembolsos-actions'
+import { NOTA_REEMBOLSOS, type ReembolsosMes } from '@/lib/tableros/reembolsos'
 import {
   notaSegundoPago,
   segundoPagoDeVentas,
@@ -60,6 +63,8 @@ const BLUE = '#2563EB'
 // El segundo pago necesita color propio y CONTRASTADO: en gris sobre el verde del
 // primero, $850.000 al lado de $25,9M eran unos seis pixeles indistinguibles.
 const OCRE = '#D97706'
+// Reembolsos: dinero que salió. Rojo oscuro, contrastado sobre blanco.
+const ROJO = '#991B1B'
 
 function fmtCOP(n: number): string {
   return `$${Math.round(n).toLocaleString('es-CO')}`
@@ -129,6 +134,11 @@ export interface TabComercialSoenaProps {
    */
   segundoPagoInicial: SegundoPagoMes | null
   /**
+   * Las devoluciones de dinero del mes (SOE-007), de la misma RPC que lee Dirección.
+   * `null` = no se pudo traer: la tarjeta no se dibuja.
+   */
+  reembolsosInicial: ReembolsosMes | null
+  /**
    * Capacidad mensual por seccional (punto #43). `null` = la linea no declaro de
    * donde sale cada serie, y entonces la seccion no se dibuja.
    */
@@ -165,6 +175,7 @@ export function TabComercialSoena({
   seccionalInicial,
   planPagoInicial,
   segundoPagoInicial,
+  reembolsosInicial,
   capacidad,
   serie,
   serieSeccional,
@@ -186,6 +197,8 @@ export function TabComercialSoena({
   // Qué cifra de segundo pago se abrió. Va aparte de `cifra`: su lista llega con la cifra
   // y no es un corte de las ventas del mes (el recibido viene de ventas de otros meses).
   const [segundoAbierto, setSegundoAbierto] = useState<CifraSegundoPago | null>(null)
+  const [reembolsos, setReembolsos] = useState<ReembolsosMes | null>(reembolsosInicial)
+  const [verReembolsos, setVerReembolsos] = useState(false)
   const [metasModalOpen, setMetasModalOpen] = useState(false)
   const [pending, startTransition] = useTransition()
   // Qué cifra se abrió. `null` = panel cerrado. Se monta con `key` para que al pasar de
@@ -225,19 +238,21 @@ export function TabComercialSoena({
    */
   function irAlMes(na: number, nm: number, recorte?: RecorteVendedor) {
     setSegundoAbierto(null)
+    setVerReembolsos(false)
     setMes(nm)
     setAnio(na)
     const prev = nm === 1 ? { a: na - 1, m: 12 } : { a: na, m: nm - 1 }
     startTransition(async () => {
       // Las tres consultas van juntas: si la comparación llegara después, el panel
       // mostraría por un instante los deltas del mes anterior sobre las cifras nuevas.
-      const [d, p, o, sec, plan, sp] = await Promise.all([
+      const [d, p, o, sec, plan, sp, re] = await Promise.all([
         getComercialMes(na, nm),
         getComercialMes(prev.a, prev.m),
         getComercialOrigenMes(na, nm, recorte),
         getComercialSeccionalMes(na, nm, recorte),
         getComercialPlanPagoMes(na, nm, recorte),
         getSegundoPagoMes(na, nm),
+        getReembolsosMes(na, nm),
       ])
       setMesData(d)
       setMesPrevio(p)
@@ -245,6 +260,7 @@ export function TabComercialSoena({
       setSeccional(sec)
       setPlanPago(plan)
       setSegundoPago(sp)
+      setReembolsos(re)
     })
   }
 
@@ -793,6 +809,19 @@ export function TabComercialSoena({
           <Kpi label="Tasa cancelacion" value={pct(kpis.tasa_cancelacion)} sub={`${kpis.n_perdidos} perdidos`}
                delta={delta(kpis.tasa_cancelacion, kpisPrev?.tasa_cancelacion, { menosEsMejor: true })}
                onAbrir={kpis.n_perdidos > 0 ? () => setVerPerdidos(true) : undefined} />
+          {/* SOE-007. Las devoluciones de dinero del mes, por fecha de la devolución. Una
+              venta a la que se le devolvió todo ya salió de las cifras de ventas de su mes;
+              aquí se ve cuándo salió el dinero. El panel abre la lista y el corte por vendedor. */}
+          {reembolsos && (
+            <Kpi label="Reembolsos" value={String(reembolsos.reembolsos)} color={reembolsos.reembolsos > 0 ? ROJO : undefined}
+                 sub={reembolsos.reembolsos > 0
+                   ? `${fmtCompact(reembolsos.valor)} devueltos${reembolsos.ventas_anuladas > 0
+                       ? ` · ${reembolsos.ventas_anuladas} ya no ${reembolsos.ventas_anuladas === 1 ? 'es venta' : 'son ventas'}` : ''}`
+                   : 'no se devolvió dinero'}
+                 nota={NOTA_REEMBOLSOS}
+                 delta={delta(reembolsos.reembolsos, reembolsos.anterior.reembolsos, { menosEsMejor: true })}
+                 onAbrir={reembolsos.reembolsos > 0 ? () => setVerReembolsos(true) : undefined} />
+          )}
         </div>
       )}
 
@@ -1210,6 +1239,15 @@ export function TabComercialSoena({
           datos={segundoPago}
           cifra={segundoAbierto}
           onClose={() => setSegundoAbierto(null)}
+        />
+      )}
+
+      {verReembolsos && reembolsos && (
+        <ReembolsosDrawer
+          key={`reembolsos-${reembolsos.anio}-${reembolsos.mes}`}
+          datos={reembolsos}
+          porVendedor
+          onClose={() => setVerReembolsos(false)}
         />
       )}
 
