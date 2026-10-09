@@ -150,6 +150,11 @@ export interface ResultadoHerramienta {
   error?: string;
   /** Lo que el código necesita después (ids reales) y el modelo no ve. Queda en la traza. */
   privado?: unknown;
+  /**
+   * La cosa concreta que se consultó (en la bandeja, el código del viaje de `ver_viaje`). Una propuesta pendiente sobre
+   * otra cosa queda atrás cuando la conversación consulta esta (`propuestaVigente`).
+   */
+  sobre?: string;
 }
 
 /** Lo que un ejecutor de `proponer` arma: el resumen y lo que se ejecutaría con el toque. */
@@ -159,6 +164,8 @@ export interface Propuesta {
   datos: Record<string, unknown>;
   /** El texto que ve el comercial, armado por el código con datos reales. */
   resumen: string;
+  /** La cosa concreta donde escribe (el código del viaje); sin `sobre`, todavía no existe (un viaje nuevo, un cliente). */
+  sobre?: string;
   /** Los botones: el primero ejecuta, el último dice que no. Títulos ≤ 20. */
   si: string;
   no: string;
@@ -237,7 +244,7 @@ export interface Traza {
   ms_base?: number;
   llamados?: number;
   uso?: UsoLlamado[];
-  herramientas?: Array<{ nombre: string; args: unknown; ok: boolean; datos?: unknown; privado?: unknown; error?: string; ms: number }>;
+  herramientas?: Array<{ nombre: string; args: unknown; ok: boolean; datos?: unknown; privado?: unknown; sobre?: string; error?: string; ms: number }>;
   reglas_usadas?: string[];
   tema?: string | null;
   /** Lo que cada candado atajó: el arnés las cuenta como dañinas evitadas. */

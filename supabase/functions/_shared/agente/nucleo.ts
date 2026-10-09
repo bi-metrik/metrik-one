@@ -79,11 +79,21 @@ export function propuestas(filas: FilaConversacion[]): Array<{ p: PropuestaGuard
   return out;
 }
 
-/** La propuesta vigente: la última, si nadie la ejecutó ni la rechazó. */
+/**
+ * La propuesta vigente: la última, si nadie la ejecutó ni la rechazó y la conversación no la dejó atrás. Queda atrás
+ * cuando, después de proponerla, una herramienta consultó OTRA cosa concreta (`sobre`: en la bandeja, `ver_viaje` de otro
+ * viaje). Una propuesta sin `sobre` (abrir un viaje nuevo) queda atrás con cualquier consulta concreta: en vivo
+ * (2026-10-09, 12:51) «¿Abro este viaje?» siguió pendiente después de «Listo, retomamos M1 26 1», volvió pegada a una
+ * respuesta fija y un «sí» escrito la habría ejecutado. Estructural: lee la traza, no el texto. Pura.
+ */
 export function propuestaVigente(filas: FilaConversacion[]): PropuestaGuardada | null {
   const ps = propuestas(filas);
   const u = ps.at(-1);
-  return u && !u.resultado ? u.p : null;
+  if (!u || u.resultado) return null;
+  const i = filas.findIndex((f) => f.traza?.propuesta?.huella === u.p.huella);
+  const despues = i >= 0 ? filas.slice(i + 1) : [];
+  const atras = despues.some((f) => (f.traza?.herramientas ?? []).some((h) => h.ok && h.sobre !== undefined && h.sobre !== u.p.sobre));
+  return atras ? null : u.p;
 }
 
 export async function huellaPropuesta(accion: string, datos: unknown, turnoId: string): Promise<string> {
@@ -229,7 +239,7 @@ export async function turnoDelModelo(deps: DepsTurno, e: EntradaTurno): Promise<
         const nombre = p.functionCall.name;
         const args = p.functionCall.args ?? {};
         const ti = deps.reloj();
-        let r2: { ok: boolean; datos: unknown; error?: string; privado?: unknown };
+        let r2: { ok: boolean; datos: unknown; error?: string; privado?: unknown; sobre?: string };
         try {
           if (d.lecturas.some((l) => l.name === nombre)) {
             r2 = await d.leer(nombre, args, e.ctx);
@@ -241,7 +251,7 @@ export async function turnoDelModelo(deps: DepsTurno, e: EntradaTurno): Promise<
         }
         const reglas = fichasDeHerramienta(r, nombre);
         const datos = recortarResultado(r2.datos);
-        traza.herramientas!.push({ nombre, args, ok: r2.ok, datos, ...(r2.privado !== undefined ? { privado: r2.privado } : {}), error: r2.error, ms: Math.round(deps.reloj() - ti) });
+        traza.herramientas!.push({ nombre, args, ok: r2.ok, datos, ...(r2.privado !== undefined ? { privado: r2.privado } : {}), ...(r2.sobre !== undefined ? { sobre: r2.sobre } : {}), error: r2.error, ms: Math.round(deps.reloj() - ti) });
         // Lo que se leyó en este turno también respalda la propuesta del mismo turno.
         e.ctx.resultadosPrevios.push({ herramienta: nombre, args, datos: r2.datos, privado: r2.privado });
         resultadosTurno.push(JSON.stringify(datos ?? ''));
