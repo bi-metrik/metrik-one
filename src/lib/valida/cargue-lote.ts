@@ -76,6 +76,12 @@ export async function correrFilaTolerante<R>(
  * `alTerminarItem` se llama una vez por item, en el orden en que TERMINAN, con el total de
  * terminados hasta ese momento (el contador del progreso). Devuelve los resultados en el
  * orden de ENTRADA, no en el de llegada.
+ *
+ * `detenerSi`: con el primer resultado que lo cumpla no se ARRANCA ningun item mas (los que ya
+ * estan en vuelo terminan y cuentan). Es el corte de la bolsa de Valida: al agotarse, cada fila
+ * siguiente responderia lo mismo, y seguir solo llena el historial de errores. Los items que no
+ * arrancaron quedan con `valorNoIniciado` (por defecto `valorDeError`) y NO pasan por
+ * `alTerminarItem`, asi que el contador del progreso dice cuantas filas se procesaron de verdad.
  */
 export async function procesarEnParalelo<T, R>(
   items: readonly T[],
@@ -84,15 +90,19 @@ export async function procesarEnParalelo<T, R>(
     concurrencia?: number
     valorDeError: R
     alTerminarItem?: (resultado: R, terminados: number, indice: number) => void
+    detenerSi?: (resultado: R) => boolean
+    valorNoIniciado?: R
   },
 ): Promise<R[]> {
-  const { concurrencia = CONCURRENCIA_LOTE, valorDeError, alTerminarItem } = opciones
-  const resultados = new Array<R>(items.length)
+  const { concurrencia = CONCURRENCIA_LOTE, valorDeError, alTerminarItem, detenerSi } = opciones
+  const valorNoIniciado = 'valorNoIniciado' in opciones ? (opciones.valorNoIniciado as R) : valorDeError
+  const resultados = new Array<R>(items.length).fill(valorNoIniciado)
   let siguiente = 0
   let terminados = 0
+  let detenido = false
 
   async function trabajador() {
-    while (siguiente < items.length) {
+    while (!detenido && siguiente < items.length) {
       const indice = siguiente++
       let r: R
       try {
@@ -101,6 +111,7 @@ export async function procesarEnParalelo<T, R>(
         r = valorDeError
       }
       resultados[indice] = r
+      if (detenerSi?.(r)) detenido = true
       terminados += 1
       alTerminarItem?.(r, terminados, indice)
     }

@@ -2,14 +2,13 @@
 
 import { textoLatinoProfundo } from '@/lib/texto/texto-latino'
 import { createServiceClient } from '@/lib/supabase/server';
-import { leerSecretosWorkspace, secretoConRespaldo } from '@/lib/secretos/workspace';
+import { credencialValida, VALIDA_API_BASE } from '@/lib/valida/credencial-servidor';
+import { motivoCorteDeError } from '@/lib/valida/corte-bolsa';
 import { resolverNombresUsuarios } from './_usuarios';
 import { exigirModulo, REQUISITO } from '@/lib/modulos/exigir-modulo';
 import { validaCdaPermiteConsultar, validaCdaPermiteOperar } from '@/lib/valida-cda/puerta';
 import * as XLSX from 'xlsx';
 import { getCachedUser } from '@/lib/supabase/auth-user'
-
-const VALIDA_API_BASE = process.env.VALIDA_API_BASE ?? 'https://api.valida.metrikone.co';
 
 // ─── Types ────────────────────────────────────────────────────────────────
 
@@ -125,27 +124,7 @@ async function accesoValida(
 }
 
 async function getWorkspaceValidaApiKey(workspaceId: string): Promise<string | null> {
-  const svc = createServiceClient();
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const { data } = await (svc.from('workspaces') as any)
-    .select('config_extra')
-    .eq('id', workspaceId)
-    .single();
-  // Vault primero; config_extra solo mientras dure el traslado (frente 2026-09-14).
-  const key = secretoConRespaldo(
-    await leerSecretosWorkspace(workspaceId),
-    data?.config_extra as Record<string, unknown> | null,
-    'valida_api_key',
-  );
-  // SIN respaldo a la llave global de MeTRIK. Hasta el 2026-09-16 caía a `VALIDA_API_KEY`:
-  // un workspace sin llave propia consultaba a cargo de MeTRIK, y sus reportes quedaban
-  // bajo la llave de MeTRIK, donde `descargarPDFConsultaValida` los devolvía a cualquiera
-  // que tuviera un id. Medido ese día: `config_extra` ya no guarda ninguna llave (el
-  // traslado a Vault corrió y aborta si Vault no tiene exactamente las que había), y las
-  // 7 llaves de Valida medidas el 2026-09-14 son de afi, alma-afi, cda-caqueta,
-  // cda-elcarmen, cda-puertotest, maxitec y metrik: todos los workspaces con
-  // `valida_consulta` tienen la suya. Sin llave, la consulta falla a la vista.
-  return key ?? null;
+  return (await credencialValida(workspaceId)).llave;
 }
 
 /**
@@ -325,7 +304,7 @@ export async function consultarValida(
     return { ok: false, error: 'negocio_no_encontrado' };
   }
 
-  const apiKey = await getWorkspaceValidaApiKey(workspaceId);
+  const { llave: apiKey, prueba } = await credencialValida(workspaceId);
   if (!apiKey) return { ok: false, error: 'valida_api_key_no_configurada' };
 
   if (opts.reintento && opts.lote_id) {
@@ -334,6 +313,15 @@ export async function consultarValida(
   }
 
   const resultado = await llamarValida(apiKey, input);
+
+  // Corte de la bolsa (agotada, vencida, o la llave de prueba que venció con ella): Valida no
+  // registró ni cobró la consulta, así que tampoco se guarda aquí. Guardarla como error llenaba el
+  // historial con una fila por cada intento después del corte. La pantalla lo convierte en
+  // «Activa tu plan» (ver `@/lib/valida/corte-bolsa`).
+  if (!resultado.ok) {
+    const corte = motivoCorteDeError(resultado.error, prueba);
+    if (corte) return { ok: false, error: corte };
+  }
 
   const persisted = await persistirConsulta({
     workspaceId,

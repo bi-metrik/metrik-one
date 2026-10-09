@@ -37,6 +37,8 @@ import TutorialButton from '@/components/tutorial/TutorialButton';
 import TutorialEmptyState from '@/components/tutorial/TutorialEmptyState';
 import { useFileDrop } from '@/hooks/use-file-drop';
 import { correrFilaTolerante, procesarEnParalelo } from '@/lib/valida/cargue-lote';
+import { esMotivoCorte, type MotivoCorte, type SaldoBolsa } from '@/lib/valida/corte-bolsa';
+import { ActivaTuPlan, SaldoConsultas } from './activa-tu-plan';
 import { formatFecha } from '@/lib/dates/bogota'
 import { PALETA } from '@/lib/marca/paleta'
 
@@ -118,6 +120,12 @@ type Props = {
    * nuevas están restringidas por mora (cláusula 11.1): el historial y sus descargas siguen abiertos.
    */
   consultasRestringidas?: React.ReactNode;
+  /**
+   * Saldo de la bolsa (la prueba gratis del registro autogestionado, o una bolsa prepagada). null =
+   * el espacio no consulta con bolsa y no se muestra contador. Agotada o vencida, «Activa tu plan»
+   * reemplaza los formularios de consulta.
+   */
+  saldo?: SaldoBolsa | null;
 };
 
 export default function ValidaClient({
@@ -128,8 +136,14 @@ export default function ValidaClient({
   modoVitrina = false,
   encabezado = null,
   consultasEnPausa = null,
-  consultasRestringidas = null,
+  consultasRestringidas: restringidasPorMora = null,
+  saldo = null,
 }: Props) {
+  const [saldoLocal, setSaldoLocal] = useState<SaldoBolsa | null>(saldo);
+  const [corte, setCorte] = useState<MotivoCorte | null>(saldo?.bloqueada ? (saldo.motivo ?? 'bolsa_agotada') : null);
+  // La mora manda (es un contrato con cuotas vencidas); si no, el corte de la bolsa.
+  const consultasRestringidas =
+    restringidasPorMora ?? (corte ? <ActivaTuPlan motivo={corte} esPrueba={saldoLocal?.esPrueba ?? false} /> : null);
   const [tab, setTab] = useState<TabKey>(negocioInicial || consultasRestringidas ? 'historial' : 'puntual');
   const [historial, setHistorial] = useState<ConsultaHistorialItem[]>(historialInicial);
   const [historialError, setHistorialError] = useState<string | null>(errorHistorial);
@@ -166,6 +180,7 @@ export default function ValidaClient({
       </div>
 
       {encabezado}
+      {saldoLocal && !corte && !consultasEnPausa && !restringidasPorMora && <SaldoConsultas saldo={saldoLocal} />}
 
       <div className="space-y-6">
       {consultasEnPausa ? consultasEnPausa : (<>
@@ -203,8 +218,23 @@ export default function ValidaClient({
       </div>
 
       {tab !== 'historial' && consultasRestringidas}
-      {tab === 'puntual' && !consultasRestringidas && <ConsultaPuntualForm onPersisted={() => refrescarHistorial()} modoVitrina={modoVitrina} />}
-      {tab === 'masiva' && !consultasRestringidas && <ConsultaMasivaForm onPersisted={() => refrescarHistorial()} modoVitrina={modoVitrina} />}
+      {tab === 'puntual' && !consultasRestringidas && (
+        <ConsultaPuntualForm
+          onPersisted={() => refrescarHistorial()}
+          modoVitrina={modoVitrina}
+          onCorte={setCorte}
+          onConsumidas={n => setSaldoLocal(s => (s ? { ...s, saldo: Math.max(0, s.saldo - n) } : s))}
+        />
+      )}
+      {tab === 'masiva' && !consultasRestringidas && (
+        <ConsultaMasivaForm
+          onPersisted={() => refrescarHistorial()}
+          modoVitrina={modoVitrina}
+          onCorte={setCorte}
+          onConsumidas={n => setSaldoLocal(s => (s ? { ...s, saldo: Math.max(0, s.saldo - n) } : s))}
+          esPrueba={saldoLocal?.esPrueba ?? false}
+        />
+      )}
       {tab === 'historial' && (
         <Historial
           consultas={historial}
@@ -256,7 +286,18 @@ function TabButton({
 
 // ─── Consulta puntual ─────────────────────────────────────────────────────
 
-function ConsultaPuntualForm({ onPersisted, modoVitrina = false }: { onPersisted: () => void; modoVitrina?: boolean }) {
+type PropsForm = {
+  onPersisted: () => void;
+  modoVitrina?: boolean;
+  /** La bolsa se cortó: el padre cambia los formularios por «Activa tu plan». */
+  onCorte?: (motivo: MotivoCorte) => void;
+  /** Consultas con resultado, para bajar el contador sin volver a leer el saldo. */
+  onConsumidas?: (n: number) => void;
+  /** La bolsa es la prueba gratis (cambia el texto del corte). */
+  esPrueba?: boolean;
+};
+
+function ConsultaPuntualForm({ onPersisted, modoVitrina = false, onCorte, onConsumidas }: PropsForm) {
   const [tipo, setTipo] = useState<TipoPersona>('natural');
   const [nombre, setNombre] = useState('');
   const [docTipo, setDocTipo] = useState<TipoDocumento>('CC');
@@ -278,7 +319,10 @@ function ConsultaPuntualForm({ onPersisted, modoVitrina = false }: { onPersisted
       const r = await consultarValida(input, { negocio_id: negocio?.id ?? null });
       if (r.ok) {
         setResultado({ data: r.data, valida_id: r.data.consulta_id });
+        onConsumidas?.(1);
         onPersisted();
+      } else if (esMotivoCorte(r.error)) {
+        onCorte?.(r.error);
       } else {
         setError(r.error);
       }
@@ -668,14 +712,24 @@ type EstadoCargue =
   | { fase: 'inicial' }
   | { fase: 'preparando' }
   | { fase: 'procesando'; loteId: string; total: number; procesadas: number; severidades: Record<Severidad, number>; tituloLote: string | null }
-  | { fase: 'completado'; loteId: string; total: number; severidades: Record<Severidad, number>; tituloLote: string | null }
+  | {
+      fase: 'completado';
+      loteId: string;
+      total: number;
+      severidades: Record<Severidad, number>;
+      tituloLote: string | null;
+      /** El cargue se detuvo porque la bolsa se cortó; `sinConsultar` filas no llegaron a Valida. */
+      corte: { motivo: MotivoCorte; sinConsultar: number } | null;
+    }
   | { fase: 'error'; mensaje: string };
 
 function severidadesIniciales(): Record<Severidad, number> {
   return { alto: 0, medio: 0, bajo: 0, informativo: 0, sin_hallazgo: 0, error: 0 };
 }
 
-function ConsultaMasivaForm({ onPersisted, modoVitrina = false }: { onPersisted: () => void; modoVitrina?: boolean }) {
+type ResultadoFila = Severidad | MotivoCorte;
+
+function ConsultaMasivaForm({ onPersisted, modoVitrina = false, onCorte, onConsumidas, esPrueba = false }: PropsForm) {
   const [archivo, setArchivo] = useState<File | null>(null);
   const [titulo, setTitulo] = useState('');
   const [negocioLote, setNegocioLote] = useState<NegocioBusqueda | null>(null);
@@ -734,21 +788,41 @@ function ConsultaMasivaForm({ onPersisted, modoVitrina = false }: { onPersisted:
     // Varias filas a la vez, cada una con tope de tiempo y un reintento si falla por red; una
     // fila que falla queda en error y el lote sigue (ver `@/lib/valida/cargue-lote`). El
     // contador sube cuando cada fila TERMINA, en el orden que sea.
-    await procesarEnParalelo(filas, fila => procesarFila(fila, lote_id), {
-      valorDeError: 'error' as Severidad,
-      alTerminarItem: (sev, procesadas) => {
-        severidades[sev] = (severidades[sev] ?? 0) + 1;
+    // Con el corte de la bolsa (agotada o vencida) el lote se detiene: no arranca ninguna fila mas,
+    // porque todas responderian lo mismo. Las filas cortadas no se guardan ni se cobran.
+    const cargue: { corte: MotivoCorte | null; conResultado: number } = { corte: null, conResultado: 0 };
+    await procesarEnParalelo<FilaLotePreparada, ResultadoFila>(filas, fila => procesarFila(fila, lote_id), {
+      valorDeError: 'error',
+      valorNoIniciado: 'bolsa_agotada',
+      detenerSi: r => esMotivoCorte(r),
+      alTerminarItem: (r, procesadas) => {
+        if (esMotivoCorte(r)) {
+          cargue.corte = cargue.corte ?? r;
+        } else {
+          severidades[r] = (severidades[r] ?? 0) + 1;
+          if (r !== 'error') cargue.conResultado += 1;
+        }
         setEstado({ fase: 'procesando', loteId: lote_id, total, procesadas, severidades: { ...severidades }, tituloLote });
       },
     });
 
-    setEstado({ fase: 'completado', loteId: lote_id, total, severidades, tituloLote });
+    const consultadas = Object.values(severidades).reduce((a, b) => a + b, 0);
+    if (cargue.conResultado > 0) onConsumidas?.(cargue.conResultado);
+    setEstado({
+      fase: 'completado',
+      loteId: lote_id,
+      total: consultadas,
+      severidades,
+      tituloLote,
+      corte: cargue.corte ? { motivo: cargue.corte, sinConsultar: total - consultadas } : null,
+    });
     onPersisted();
   }
 
-  function procesarFila(fila: FilaLotePreparada, loteId: string): Promise<Severidad> {
-    return correrFilaTolerante<Severidad>(async reintento => {
+  function procesarFila(fila: FilaLotePreparada, loteId: string): Promise<ResultadoFila> {
+    return correrFilaTolerante<ResultadoFila>(async reintento => {
       const r = await consultarValida(fila.input, { negocio_id: fila.negocio_id, lote_id: loteId, reintento });
+      if (!r.ok && esMotivoCorte(r.error)) return r.error;
       // Una fila con error de parseo igual se persiste (como error) para que cuente en el lote.
       if (fila.error) return 'error';
       return r.ok ? r.data.severidad : 'error';
@@ -770,6 +844,11 @@ function ConsultaMasivaForm({ onPersisted, modoVitrina = false }: { onPersisted:
   }
 
   function reiniciar() {
+    // Tras un cargue cortado, «Nuevo cargue» lleva a «Activa tu plan»: otro cargue no pasaría.
+    if (estado.fase === 'completado' && estado.corte) {
+      onCorte?.(estado.corte.motivo);
+      return;
+    }
     setArchivo(null);
     setTitulo('');
     setNegocioLote(null);
@@ -803,6 +882,7 @@ function ConsultaMasivaForm({ onPersisted, modoVitrina = false }: { onPersisted:
 
       {estado.fase === 'completado' ? (
         <ResumenCargueCompletado
+          esPrueba={esPrueba}
           estado={estado}
           pendingPDF={pendingPDF}
           errorPDF={errorPDF}
@@ -991,7 +1071,9 @@ function ResumenCargueCompletado({
   errorPDF,
   onDescargar,
   onReiniciar,
+  esPrueba,
 }: {
+  esPrueba: boolean;
   estado: Extract<EstadoCargue, { fase: 'completado' }>;
   pendingPDF: boolean;
   errorPDF: string | null;
@@ -1003,7 +1085,7 @@ function ResumenCargueCompletado({
       <div className="rounded-lg bg-acento-tinte border border-acento/30 p-5">
         <div className="flex items-center gap-2 text-acento font-semibold">
           <Check className="h-5 w-5" />
-          Cargue completado
+          {estado.corte ? 'Cargue detenido' : 'Cargue completado'}
         </div>
         <p className="text-sm text-tinta mt-1">
           {estado.total} consultas procesadas{estado.tituloLote ? ` · ${estado.tituloLote}` : ''}.
@@ -1012,6 +1094,17 @@ function ResumenCargueCompletado({
           <DistribucionSeveridad sev={estado.severidades} />
         </div>
       </div>
+
+      {estado.corte && (
+        <div data-cargue-cortado className="space-y-2">
+          <p className="text-sm text-tinta">
+            {estado.corte.sinConsultar === 1
+              ? '1 fila quedó sin consultar y no se cobró.'
+              : `${estado.corte.sinConsultar} filas quedaron sin consultar y no se cobraron.`}
+          </p>
+          <ActivaTuPlan motivo={estado.corte.motivo} esPrueba={esPrueba} />
+        </div>
+      )}
 
       <div className="flex flex-col sm:flex-row gap-2">
         <button
