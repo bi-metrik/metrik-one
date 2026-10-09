@@ -33,6 +33,7 @@ import {
   textoDeRecibos,
 } from '../_shared/recibos-del-aviso.ts';
 import { todayBogotaISO } from '../_shared/bogota.ts';
+import { marcaDelWorkspace } from '../_shared/marca-workspace.ts';
 import { esDiaHabil, paisDelWorkspace, siguienteDiaHabil } from '../_shared/dias-habiles.ts';
 import {
   type AvisoPrevio,
@@ -1343,13 +1344,9 @@ async function enviarAlCliente(
     return { ...CORREO_VACIO, estado: 'omitido', omitidoPor: 'sin_correo' };
   }
 
-  const { data: ws } = await supabase
-    .from('workspaces')
-    .select('nombre, config_extra')
-    .eq('id', negocio.workspace_id)
-    .maybeSingle();
-
-  const marca = (ws?.nombre as string | undefined)?.trim() || 'tu proveedor';
+  // La columna es `name` (SOE-010: pedir `nombre` hacia fallar la consulta en silencio
+  // y todo correo salia como «tu proveedor»). El helper registra el error si lo hay.
+  const { marca, configExtra } = await marcaDelWorkspace(supabase, negocio.workspace_id);
 
   // ── A dónde contesta el cliente ────────────────────────────────────────────
   // Primero el COMERCIAL del negocio: es quien lo conoce y quien va a responderle.
@@ -1359,7 +1356,7 @@ async function enviarAlCliente(
   // tienen comercial con cuenta.)
   const comercial = await comercialDelNegocio(supabase, negocio.id);
   const replyTo = comercial?.email
-    ?? (ws?.config_extra as { email_respuesta?: string } | null)?.email_respuesta
+    ?? (configExtra as { email_respuesta?: string } | null)?.email_respuesta
     ?? null;
 
   // ── La copia al comercial ──────────────────────────────────────────────────
