@@ -187,6 +187,11 @@ describe('el prompt pide contestar lo preguntado', () => {
     const d = declaraciones(e.deps.dominio, r).find((x) => x.name === 'proponer')!
     expect(d.description).toContain('la respuesta va en `texto`')
     expect(d.description).toContain('no la repitas')
+    // 2026-10-09 (69eeff52): «¿Anoto en M1 26 1 · MIAMI 7N que buscan hoteles 4 estrellas?» arriba de «¿Lo anoto en…?».
+    expect(d.description).toContain('La pregunta de confirmación («¿Lo anoto en…?», «¿Abro este viaje?») y sus botones los pone el sistema')
+    const texto = (d.parameters as { properties: { texto: { description: string } } }).properties.texto.description
+    expect(texto).toContain('vacío si la persona no preguntó nada')
+    expect(texto).toContain('Nunca la pregunta de si lo anotas, abres o cargas')
   })
 })
 
