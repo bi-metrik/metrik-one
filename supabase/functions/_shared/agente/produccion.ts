@@ -6,8 +6,8 @@
 //   `wa_conversacion`).
 // · `puertoBandejaSupabase`: el directorio con el guardián de siempre (`fichasPorNombre`, `fichasPorLlave`,
 //   `crearContactoConGuardian`), los viajes con `calcularNiveles`, el negocio nuevo como lo crea la bandeja hoy
-//   (`crearNegocio`, con la empresa espejo) y la carga con la extracción de hoy (`entenderEntrega` y sus guardianes,
-//   `cargarEnExistente`, que no pisa lo que una persona editó).
+//   (`crearNegocio`, con la empresa espejo) y la carga con la extracción del núcleo (`bandeja/extraccion.ts`: el modelo
+//   clasifica, el código solo valida) y `cargarEnExistente`, que no pisa lo que una persona editó.
 // · `cargarReglamento`, `cupoSupabase`.
 // ============================================================
 
@@ -17,16 +17,19 @@ import type { Llave } from '../wa-cliente-reglas.ts';
 import {
   bloquesDatosDelNegocio, configDeLinea, crearNegocio, escribirBloque, leerConModelo,
 } from '../wa-entendimiento.ts';
-import { esquemaDeSalida, instruccionesEntendimiento, huecos } from '../wa-entendimiento-reglas.ts';
 import type { CampoEntendible, SalidaEntendida, Sugerido } from '../wa-entendimiento-reglas.ts';
-import { cargarEnExistente, sugeridosConDeducciones, trazaCarga } from '../wa-carga-reglas.ts';
-import { entenderEntrega, textoParaModelo } from '../wa-guardianes.ts';
+import { cargarEnExistente, trazaCarga } from '../wa-carga-reglas.ts';
+import { textoParaModelo } from '../wa-guardianes.ts';
+import { lineaCargada, mensajesDeTextos, planDeCarga, propuestoDe, registradoDe } from './bandeja/carga.ts';
+import type { PlanCarga } from './bandeja/carga.ts';
+import { esquemaCarga, instruccionesCarga } from './bandeja/extraccion.ts';
 import { aplanarBloques, calcularNiveles } from '../niveles-solicitud.ts';
 import { todayBogotaISO } from '../bogota.ts';
 import { enviarAvisoInterno } from '../wa-alerta.ts';
 import type { SupabaseClient } from '../types.ts';
 import { fichaValida, huellaDe } from './reglamento.ts';
 import type { PuertoBandeja, ViajeAgente } from './bandeja/dominio.ts';
+import type { AutorizacionAgente } from './bandeja/autorizacion.ts';
 import type { PuertosCupo } from './uso.ts';
 import type { Almacen, FilaConversacion, Mensajero, Reglamento, Salida, Traza } from './tipos.ts';
 
@@ -162,6 +165,7 @@ export function puertoBandejaSupabase(supabase: SupabaseClient, workspaceId: str
       abierto: neg.estado === 'abierto',
       faltaCotizar: n.minimo.faltan.map((f) => f.label),
       faltaCompleto: [...n.minimo.faltan, ...n.deseable.faltan].map((f) => f.label),
+      registrado: registradoDe(fields as CampoEntendible[], valores),
     };
   };
 
@@ -185,51 +189,91 @@ export function puertoBandejaSupabase(supabase: SupabaseClient, workspaceId: str
       const { data } = await supabase.from('negocios').select('codigo, nombre').eq('id', r.negocioId).maybeSingle();
       return { id: r.negocioId, codigo: String(data?.codigo ?? ''), nombre: String(data?.nombre ?? '') };
     },
-    async prepararCarga(viajeId, textos) {
+    async prepararCarga(viajeId, textos, previo) {
       const bloques = await bloquesDatosDelNegocio(supabase, viajeId);
       if (typeof bloques === 'string') throw new Error(bloques);
       const { fields, valores: yaTiene } = aplanarBloques(bloques.map((b) => ({ fields: b.fields, data: b.data })));
       const campos = fields as CampoEntendible[];
-      const mensajes = textos.map((t, i) => ({ n: i + 1, cuerpo: t, reenviado: true, tipo: 'text', origen: 'texto' }));
-      const lectura = await leerConModelo(instruccionesEntendimiento(campos, todayBogotaISO(), yaTiene), `Mensajes:\n${textoParaModelo(mensajes)}`, esquemaDeSalida(campos));
+      const lectura = await leerConModelo(instruccionesCarga(campos, todayBogotaISO(), yaTiene, propuestoDe(previo)), `Mensajes:\n${textoParaModelo(mensajesDeTextos(textos))}`, esquemaCarga(campos));
       if (lectura.error || lectura.json === null) throw new Error(lectura.error ?? 'sin lectura');
-      const e = entenderEntrega(lectura.json, campos, mensajes, { hoyISO: todayBogotaISO(), conocidos: yaTiene });
-      const meta = { entrega_id: 'agente', en: new Date().toISOString(), origenDe: () => 'mensaje' as const };
-      const sugeridos = sugeridosConDeducciones(bloques.map((b) => ({ fields: b.fields, data: b.data })), e.salida.sugeridos, meta);
-      const porSlug = new Map(campos.map((f) => [f.slug, f]));
-      const entendido = Object.entries(sugeridos).map(([slug, s]) => `${porSlug.get(slug)?.label ?? slug}: ${s.valor}`);
-      const quedaria = { ...yaTiene, ...Object.fromEntries(Object.entries(sugeridos).map(([k, s]) => [k, s.valor])) };
-      const falta = huecos(campos, quedaria).minimo.faltan.map((f) => f.label);
-      return { entendido, falta, plan: { sugeridos, historia: e.salida.historia } };
+      return planDeCarga({
+        bloques: bloques.map((b) => ({ fields: b.fields as CampoEntendible[], data: b.data })), textos, raw: lectura.json,
+        hoyISO: todayBogotaISO(), ahoraIso: new Date().toISOString(), previo,
+      });
     },
     async cargar(viajeId, plan) {
-      const { sugeridos, historia } = plan as { sugeridos: Record<string, Sugerido>; historia: string };
+      const { sugeridos, historia, quitar } = plan as PlanCarga;
       const bloques = await bloquesDatosDelNegocio(supabase, viajeId);
       if (typeof bloques === 'string') throw new Error(bloques);
       const meta = { entrega_id: 'agente', en: new Date().toISOString(), origenDe: () => 'mensaje' as const };
       const vistos = new Set<string>();
       const escritos: string[] = [];
+      const quitados: string[] = [];
       const campos: CampoEntendible[] = [];
+      const opts = { delModelo: true, ...(quitar ? { quitar } : {}) };
       for (const b of bloques) {
         const antes = new Set(vistos);
         for (const f of b.fields) { vistos.add(f.slug); campos.push(f); }
-        let r = cargarEnExistente(b.data, b.fields, sugeridos, meta, new Set(antes));
+        let r = cargarEnExistente(b.data, b.fields, sugeridos, meta, new Set(antes), opts);
         const quedo = await escribirBloque(supabase, b, (d) => {
-          r = cargarEnExistente(d, b.fields, sugeridos, meta, new Set(antes));
-          return r.escritos.length > 0 || r.conflictos.length > 0 || r.actualizados.length > 0 ? r.data : null;
+          r = cargarEnExistente(d, b.fields, sugeridos, meta, new Set(antes), opts);
+          return r.escritos.length > 0 || r.conflictos.length > 0 || r.actualizados.length > 0 || r.quitados.length > 0 ? r.data : null;
         });
-        if (quedo) escritos.push(...r.escritos, ...r.actualizados.map((a) => a.slug));
+        if (quedo) {
+          escritos.push(...r.escritos, ...r.actualizados.map((a) => a.slug));
+          quitados.push(...r.quitados);
+        }
       }
       const { data: neg } = await supabase.from('negocios').select('codigo').eq('id', viajeId).maybeSingle();
       const { error } = await supabase.from('activity_log').insert({
         workspace_id: workspaceId, entidad_tipo: 'negocio', entidad_id: viajeId, tipo: 'cambio_sistema', autor_id: staffId,
         // `activity_log.contenido` tiene CHECK de 280 caracteres en producción (medido el 2026-10-07): más largo, el
         // insert falla y la traza se pierde. Se corta aquí; la historia completa queda en la traza del turno.
-        contenido: cortarContenido(trazaCarga({ quien: '', fechaISO: todayBogotaISO(), escritos, conflictos: [], fields: campos, historia })),
+        contenido: cortarContenido(trazaCarga({ quien: '', fechaISO: todayBogotaISO(), escritos, quitados, conflictos: [], fields: campos, historia })),
       });
       if (error) console.error('[agente] sin traza en la actividad del negocio:', error.message);
-      const porSlug = new Map(campos.map((f) => [f.slug, f.label]));
-      return { lineas: [escritos.length ? `Cargué en ${neg?.codigo ?? 'el viaje'}: ${escritos.map((s) => porSlug.get(s) ?? s).join(', ')}.` : `No había datos nuevos para ${neg?.codigo ?? 'el viaje'}: no cambié nada.`] };
+      const valoresEscritos = Object.fromEntries(Object.entries(sugeridos).map(([k, x]) => [k, x.valor]));
+      return { lineas: [lineaCargada(String(neg?.codigo ?? 'el viaje'), escritos, campos, quitados)], escritos: registradoDe(campos, valoresEscritos, escritos) };
+    },
+    async autorizacion(contactoId: string): Promise<AutorizacionAgente | 'error'> {
+      // La regla de vigencia es la de la app: la RPC `autorizacion_datos_estado` (migración 20261008230000).
+      const { data: est, error } = await supabase.rpc('autorizacion_datos_estado', { p_workspace_id: workspaceId, p_contacto_id: contactoId });
+      if (error || !est || est.existe !== true) {
+        if (error) console.error('[agente] no se pudo leer la autorización:', error.message);
+        return 'error';
+      }
+      if (est.vigente?.generales === true) {
+        return { estado: 'autorizado', fecha: String(est.aceptacion?.aceptado_at ?? ''), menores: est.vigente?.menores === true };
+      }
+      if (!est.texto?.id) return { estado: 'sin_texto' };
+      const [ws, txt] = await Promise.all([
+        supabase.from('workspaces').select('slug, name, config_extra').eq('id', workspaceId).maybeSingle(),
+        supabase.from('autorizacion_datos_textos').select('variables, mensajes').eq('id', est.texto.id).maybeSingle(),
+      ]);
+      const slug = ws.data?.slug as string | undefined;
+      if (!slug) return 'error';
+      const dias = Number(((ws.data?.config_extra as Fila | null)?.autorizacion_datos as Fila | undefined)?.dias_enlace);
+      const bytes = crypto.getRandomValues(new Uint8Array(32));
+      const token = btoa(String.fromCharCode(...bytes)).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
+      const { data: en, error: errEn } = await supabase.rpc('autorizacion_datos_enlace', {
+        p_workspace_id: workspaceId, p_contacto_id: contactoId, p_token_nuevo: token, p_creado_por: staffId, p_negocio_id: null,
+        p_dias: Number.isInteger(dias) && dias >= 2 && dias <= 365 ? dias : 60,
+      });
+      if (errEn || !en?.ok) {
+        console.error('[agente] no se pudo crear el link de autorización:', errEn?.message ?? en?.error);
+        return 'error';
+      }
+      const base = (Deno.env.get('APP_BASE_DOMAIN') || 'metrikone.co').trim();
+      const variables = (txt.data?.variables ?? {}) as Record<string, unknown>;
+      const mensajes = (txt.data?.mensajes ?? {}) as Record<string, unknown>;
+      const texto = (v: unknown) => (typeof v === 'string' && v.trim() ? v : null);
+      return {
+        estado: 'pendiente',
+        url: `https://${slug}.${base}/autorizacion/${en.token}?m=w`,
+        agencia: texto(variables.agencia) ?? String(ws.data?.name ?? 'la agencia'),
+        whatsapp: texto(mensajes.whatsapp),
+        instruccion: texto(mensajes.instruccion_comercial),
+      };
     },
     async crearCliente(nombre: string, llave: Llave) {
       const r = await crearContactoConGuardian(supabase, workspaceId, { nombre, llave });

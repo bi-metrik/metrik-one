@@ -178,6 +178,8 @@ export async function generarEnlacesAutomaticos(
         .from('plan_cobro_cuotas')
         .select('id, plan_cobro_id, numero, fecha_vencimiento')
         .in('plan_cobro_id', planIds)
+        // Una cuota en cero (usuarios adicionales de un período del Plan Anual, sin ninguno) no se cobra.
+        .gt('monto', 0)
         .lte('fecha_vencimiento', limiteVentana(p.hoy))
         .order('id')
         .range(desde, hasta),

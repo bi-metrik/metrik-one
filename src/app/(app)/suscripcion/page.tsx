@@ -10,6 +10,8 @@ import { fechaConAnio } from '@/lib/seccion-suscripcion/estado'
 import { estadoSugerencia } from '@/lib/seccion-suscripcion/sustenta-servidor'
 import { accionesSobreUsuario, esAdministradorSinCosto } from '@/lib/usuarios-espacio/reglas'
 import { leerPagosCda, leerTerminosEmpresaCda } from '@/lib/valida-cda/pestanas-servidor'
+import { leerOpcionesPago } from '@/lib/valida-cda/plan-anual-servidor'
+import { OpcionesPago } from './opciones-pago'
 import { PestanaPagos } from './pestana-pagos'
 import SuscripcionClient, { type PestanaSuscripcion } from './suscripcion-client'
 import { TarjetaPago } from './tarjeta-pago'
@@ -57,19 +59,25 @@ export default async function SuscripcionPage({ searchParams }: Props) {
   const esOne = ctx.producto === 'one'
 
   // La licencia de ONE no tiene términos publicados que releer ni oferta de Sustenta (es para los CDA).
-  const [pagos, terminos, equipo, sugerencia] = await Promise.all([
+  const [pagos, terminos, equipo, sugerencia, opcionesPago] = await Promise.all([
     leerPagosCda(ctx.entrada),
     esOne ? null : leerTerminosEmpresaCda(ctx.entrada),
     leerEquipo(ctx),
     esOne ? null : estadoSugerencia({ workspaceId: ctx.workspaceId, usuarioId: ctx.usuarioId, ahora: new Date() }),
+    // El Plan Anual: solo Valida de los CDA, con términos aceptados y el contrato encendido.
+    esOne || !aprobada ? null : leerOpcionesPago(ctx),
   ])
 
   const { contrato, resumen } = ctx
   // El nombre fiscal del plan (Felipe, 2026-09-24), no el del catálogo, que todavía dice «Licencia».
   const plan = esOne ? PLAN_ONE : PLAN_CDA
-  const vigencia = contrato.vigenteHasta
-    ? `Vigente hasta el ${fechaConAnio(contrato.vigenteHasta)} · renovación mensual`
-    : `Vigente desde el ${fechaConAnio(contrato.vigenteDesde)} · renovación mensual`
+  // Con el Plan Anual pagado, su plazo absorbe y extiende el de la cláusula 12.1 (anexo 3.3).
+  const planAnual = opcionesPago?.tipo === 'ok' && opcionesPago.anual.estado === 'activo' ? opcionesPago.anual : null
+  const vigencia = planAnual
+    ? `Plan anual del ${fechaConAnio(planAnual.desde)} al ${fechaConAnio(planAnual.hasta)}`
+    : contrato.vigenteHasta
+      ? `Vigente hasta el ${fechaConAnio(contrato.vigenteHasta)} · renovación mensual`
+      : `Vigente desde el ${fechaConAnio(contrato.vigenteDesde)} · renovación mensual`
 
   // Términos pendientes: la tarjeta de pago cede su lugar a la aceptación (el estado lo manda).
   const soloLectura = ctx.soloLectura
@@ -162,7 +170,16 @@ export default async function SuscripcionPage({ searchParams }: Props) {
         }
         terminosResumen={terminosResumen}
         sustenta={soloLectura || !sugerencia ? null : sugerencia.yaSolicitado ? 'solicitada' : sugerencia.mostrar ? 'oferta' : null}
-        pagos={<PestanaPagos carga={pagos} />}
+        pagos={
+          <PestanaPagos
+            carga={pagos}
+            opciones={
+              opcionesPago?.tipo === 'ok' ? (
+                <OpcionesPago opciones={opcionesPago} soloLectura={soloLectura} nombreSugerido={ctx.designadoNombre} />
+              ) : null
+            }
+          />
+        }
         terminos={
           !terminos ? (
             <p data-sin-terminos className="rounded-lg border border-border bg-papel p-4 text-sm text-tinta-suave">

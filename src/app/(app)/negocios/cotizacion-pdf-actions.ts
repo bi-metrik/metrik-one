@@ -40,12 +40,14 @@ import { hayTarifaPorPasajero, lineasDesactualizadas, motivoParaNoEnviar } from 
 import { MENSAJE_SIN_PASAJEROS } from '@/lib/cotizaciones/captura-desactualizada-datos'
 import {
   PLANTILLA_POR_DEFECTO,
+  compositorDePlantilla,
   plantillaCotizacionPropia,
   plantillaImprimePreciosConIva,
   plantillaUsaFotosDeCiudad,
   plantillaUsaTextoDelCliente,
 } from '@/lib/pdf/plantillas-cotizacion'
-import { avisoDelTextoEnPdf, leerDocumentoCliente, textoParaElViaje } from '@/lib/cotizaciones/documento-cliente'
+import { avisoDelTextoEnPdf, avisoDelTextoViejoEnPdf, leerDocumentoCliente, textoParaElViaje } from '@/lib/cotizaciones/documento-cliente'
+import { leerContextoTextoCliente } from '@/lib/cotizaciones/documento-cliente-datos'
 import { vigenciaEnDias } from '@/lib/cotizaciones/condiciones-comerciales'
 import { fotosDeCiudad } from '@/lib/pdf/fotos-ciudad'
 import { fotosDelViaje } from '@/lib/pdf/fotos-del-viaje'
@@ -1132,6 +1134,12 @@ export async function generateCotizacionPDF(cotizacionId: string) {
       : null
     const textoCliente = textoParaElViaje(documentoCliente)
     avisoTexto = avisoDelTextoEnPdf(documentoCliente)
+    // El texto revisado que quedó viejo (brief del 2026-10-08): la misma huella que el panel del
+    // editor, sobre las mismas líneas. Solo se calcula con un texto revisado que se imprime.
+    if (!avisoTexto && Object.keys(textoCliente).length > 0 && documentoCliente?.fuente_hash) {
+      const ctxTexto = await leerContextoTextoCliente(supabase, cotizacionId)
+      avisoTexto = avisoDelTextoViejoEnPdf(documentoCliente, ctxTexto?.huella ?? null)
+    }
     const viaje = {
       ...textoCliente,
       viajeros: delNegocio.composicion ? describirOcupacion(delNegocio.composicion, 'y') : null,
@@ -1164,7 +1172,7 @@ export async function generateCotizacionPDF(cotizacionId: string) {
     viajePDF = hayAlgoQueDescribir ? viaje : null
   }
 
-  const element = createElement(plantillaPropia ?? CotizacionPDF, {
+  const propsPDF: CotizacionPDFProps = {
     cotizacion: {
       consecutivo: cot.consecutivo,
       descripcion: cot.descripcion,
@@ -1223,11 +1231,16 @@ export async function generateCotizacionPDF(cotizacionId: string) {
     negocio: negocioInfo ? { nombre: negocioInfo.nombre } : null,
     emisor,
     viaje: viajePDF,
-  })
+  }
 
-  // renderToBuffer espera DocumentElement; nuestro createElement lo produce correctamente en runtime
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const buffer = await renderToBuffer(element as any)
+  // Una plantilla que se COMPONE (Trappvel: renderiza, mide el PDF y recompone para que la
+  // última hoja trabaje) se entrega por su compositor; las demás se renderizan una vez.
+  const compositor = compositorDePlantilla(templateSlug)
+  const buffer = compositor
+    ? await compositor(propsPDF)
+    // renderToBuffer espera DocumentElement; nuestro createElement lo produce correctamente en runtime
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    : await renderToBuffer(createElement(plantillaPropia ?? CotizacionPDF, propsPDF) as any)
 
   // Borrador: marca de agua y fuera, sin guardar ni registrar (ver `esBorrador`).
   if (esBorrador) {

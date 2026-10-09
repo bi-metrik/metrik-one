@@ -200,10 +200,28 @@ export interface Dominio {
   proponer(accion: string, datos: Record<string, unknown>, ctx: ContextoDominio): Promise<{ ok: true; propuesta: Propuesta } | { ok: false; error: string; candado: string }>;
   /** Ejecuta una propuesta tocada. Idempotencia por huella: la asegura el núcleo. Lanza si no pudo. */
   ejecutar(propuesta: Propuesta, ctx: ContextoDominio): Promise<Hechos>;
+  /**
+   * Después de ejecutar una propuesta tocada: la siguiente propuesta que ya se puede armar con lo dicho (abrir un viaje
+   * → anotar lo que el comercial ya contó de él). `lineas` reemplaza las del hecho. `null` = nada más. Puede lanzar: el
+   * núcleo deja el hecho como estaba.
+   * `seguir`: el modelo tiene un turno después del hecho (crear un cliente → ¿quedó una solicitud suya sin atender?). Él
+   * decide si propone lo que sigue, pregunta lo que falta o termina; el código no lee el texto. El hecho sale igual.
+   */
+  trasEjecutar?(propuesta: Propuesta, hechos: Hechos, huella: string, ctx: ContextoDominio): Promise<{ lineas: string[]; propuesta?: Propuesta; seguir?: boolean } | null>;
   /** ¿La propuesta sigue sirviendo? (la tanda no cambió desde que se armó). Ausente = sí. */
   sigueVigente?(propuesta: Propuesta, ctx: ContextoDominio): boolean;
   /** Una línea del estado que solo el dominio sabe (la tanda abierta). */
   estado?(ctx: ContextoDominio): string[];
+  /**
+   * Herramientas del dominio que CIERRAN el turno con una salida que escribe el código, no el modelo (`link_autorizacion`:
+   * el link real y el mensaje para reenviar tal cual). Pueden ser varios mensajes: el primero va como respuesta y los
+   * demás salen después, en orden. El modelo solo decide llamarla y con qué ficha.
+   */
+  cierres?: DeclaracionHerramienta[];
+  cerrar?(nombre: string, args: Record<string, unknown>, ctx: ContextoDominio): Promise<
+    | { ok: true; salidas: Salida[]; datos?: unknown; privado?: unknown }
+    | { ok: false; error: string; candado: string }
+  >;
 }
 
 // ── La traza ─────────────────────────────────────────────────────────────────
@@ -237,6 +255,13 @@ export interface Traza {
     consumidos?: string[];
   } | null;
   respuesta_fija?: string | null;
+  /**
+   * El turno del modelo que siguió a un toque (`trasEjecutar` con `seguir`): de qué toque vino y cómo terminó. La traza
+   * es de tipo `modelo` (así cuenta en el uso del mes) y trae la `ejecucion` del toque.
+   */
+  tras_toque?: { origen: 'toque_propuesta' | 'si_escrito'; resultado: 'propuesta' | 'respuesta' | 'terminar' | 'solo_hecho' } | null;
   salida?: Salida | null;
+  /** Los mensajes que salieron después de `salida` en el mismo turno (un cierre del dominio con varios mensajes). */
+  salidas_extra?: Salida[] | null;
   error?: string | null;
 }

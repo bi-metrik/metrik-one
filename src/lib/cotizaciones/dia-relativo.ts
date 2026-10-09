@@ -73,7 +73,7 @@
  * peligroso: una línea que SÍ entra al precio y se imprime como «no incluida».
  */
 
-import { grupoCombinable } from './ranuras-pantallazo'
+import { grupoCombinable, ranuraDeGrupo } from './ranuras-pantallazo'
 
 /** Lo mínimo que hace falta de una línea para saber en qué sección del PDF sale. */
 export interface ItemConDia {
@@ -169,6 +169,29 @@ export function puedeSerSugerido(item: ItemConDia): boolean {
 }
 
 /**
+ * ¿Es un VUELO? Desde el brief del 2026-10-08 («vuelos de punta a punta», punto 2) un vuelo
+ * lleva el mismo check «Va en la cotización» de las actividades: quitado, no suma, no entra a
+ * ninguna tarifa y no sale en el documento. Puesto otra vez, vuelve como estaba.
+ *
+ * ⚠️ Un vuelo fuera del precio NO es una sugerencia: nunca cae a «Opcionales» (regla 2 del
+ * encabezado: un vuelo no se imprime como «no incluido»). Solo tiene dos estados, va o no va.
+ */
+export function esVueloDeLaCotizacion(item: ItemConDia): boolean {
+  if (item.es_ajuste === true) return false
+  return ranuraDeGrupo(item.grupo ?? null)?.slug === 'vuelo_detalle'
+}
+
+/**
+ * ¿La línea PUEDE quedar fuera del precio? Una sugerencia (actividad, traslado, tour: sale en
+ * «Opcionales» o no sale) o un vuelo que no va. Es la regla que leen `fueraDelPrecio` y los
+ * guards de las acciones que escriben `entra_al_precio`: la base nunca guarda una marca que la
+ * lectura ignore.
+ */
+export function puedeQuedarFueraDelPrecio(item: ItemConDia): boolean {
+  return puedeSerSugerido(item) || esVueloDeLaCotizacion(item)
+}
+
+/**
  * ¿Esta línea está FUERA DEL PRECIO? Es la única regla del segundo interruptor.
  *
  * Tres condiciones, y las tres son de la LÍNEA (ninguna mira el resto de la cotización):
@@ -176,9 +199,11 @@ export function puedeSerSugerido(item: ItemConDia): boolean {
  *  1. `entra_al_precio` es `false` explícito. Ausente entra, como hoy.
  *  2. No lleva día. Con día la línea está en el itinerario, o sea incluida: dejarla
  *     fuera del precio imprimiría una línea del viaje con precio que no suma.
- *  3. Puede ser sugerida (grupo declarado y no combinable, no es cuadre). Un vuelo, un
- *     hotel o una línea sin grupo nunca se imprimen como «no incluidas», así que
- *     sacarlas del precio las haría desaparecer del documento sin que sumen.
+ *  3. Puede ser sugerida (grupo declarado y no combinable, no es cuadre), o es un VUELO
+ *     (`puedeQuedarFueraDelPrecio`). Un hotel o una línea sin grupo nunca se imprimen como
+ *     «no incluidas», así que sacarlas del precio las haría desaparecer del documento sin
+ *     que sumen. El vuelo sí puede, a propósito: su check «Va en la cotización» (brief del
+ *     2026-10-08) es justo «que no sume ni salga en el documento».
  *
  * ⚠️ Por qué ninguna condición mira la COTIZACIÓN (si usa días o no). Si la regla
  * dependiera de que haya un día asignado en alguna parte, quitarle el último día a un
@@ -204,7 +229,8 @@ export function fueraDelPrecio(item: ItemConDia): boolean {
   // desmarca («No va») sale del precio y conserva su día para cuando la vuelvan a marcar. Ya no
   // hay riesgo de «una línea del itinerario con precio que no suma»: una línea fuera del precio
   // no entra al itinerario (`diasDelItinerario` la salta) ni a lo incluido del documento.
-  return puedeSerSugerido(item)
+  // Desde el 2026-10-08 un vuelo que no va también sale del precio (`esVueloDeLaCotizacion`).
+  return puedeQuedarFueraDelPrecio(item)
 }
 
 /**
@@ -263,7 +289,8 @@ export function itemsSugeridos(items: ItemConDia[]): string[] {
   // Brief del 2026-10-05 (D1): «no incluida» es SOLO lo que alguien sacó del precio a propósito
   // (Opcional, o No va). Una actividad que suma y no tiene día se imprime en lo incluido: hasta
   // ese día caía aquí con los días en uso, y el documento decía «no incluida» mientras la cobraba.
-  return ordenados(items).filter(fueraDelPrecio).map(i => i.id)
+  // Un vuelo que no va está fuera del precio y NO es una sugerencia: no sale en «Opcionales».
+  return ordenados(items).filter(i => fueraDelPrecio(i) && puedeSerSugerido(i)).map(i => i.id)
 }
 
 /** De los sugeridos, los que el PDF sí imprime (el check encendido, o ausente). */

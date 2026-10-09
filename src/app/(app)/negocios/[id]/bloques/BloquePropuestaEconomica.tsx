@@ -19,6 +19,12 @@ import { hrefArchivo } from '@/lib/almacenamiento/referencia'
 import { conReintentoDeRed } from '@/lib/red/con-reintento'
 import { mensajeDeFallaDeCarga } from '@/lib/red/error-de-red'
 import { useIntencion } from '@/hooks/use-intencion'
+import {
+  describirFueraDeTarifa,
+  fueraDeTarifa,
+  MOTIVO_MAX,
+  ROLES_DESCUENTO_ALTO,
+} from '@/lib/propuesta/gate-descuento'
 
 interface PropuestaVersion {
   n: number
@@ -60,6 +66,8 @@ interface PropuestaData {
   aprobado_honorario?: number | null
   /** Servicio congelado al aprobar, al lado de `aprobado_plan`. */
   aprobado_servicio?: string | null
+  /** Aprobada fuera de la tarifa (solo con tarifas): motivo y cuánto se apartó. */
+  aprobado_fuera_de_tarifa?: { motivo: string; descuento_pct: number; base: number; cap: number } | null
   /** Versión de tarifas con la que se armó (ausente = esquema anterior). */
   tarifa?: { version_id: string; version: number } | null
 }
@@ -223,7 +231,9 @@ function CuerpoPropuesta({
   const aprobada = !!data.aprobado_at
   // Gate de descuento alto: sobre el umbral, aprobar requiere rol gerencial.
   const umbralAprobacion = configExtra.umbral_aprobacion_pct ?? null
-  const puedeAprobarAlto = ['owner', 'admin', 'supervisor'].includes(userRole ?? '')
+  const puedeAprobarAlto = ROLES_DESCUENTO_ALTO.includes(userRole ?? '')
+  // Motivo de aprobar un valor fuera de la tarifa (esquema de tarifas, SOE-004).
+  const [motivoFuera, setMotivoFuera] = useState('')
 
   // ── Base de cada plan ─────────────────────────────────────────────────────
   // Esquema anterior: los dos planes parten del mismo precio base y el tope es el del
@@ -298,8 +308,16 @@ function CuerpoPropuesta({
   const descPlanSeleccionado = (planSeleccionado === 1
     ? ultimaVersion?.descuento_pct_plan1
     : ultimaVersion?.descuento_pct_plan2) ?? 0
-  const requiereAprobacionAlta = umbralAprobacion != null && descPlanSeleccionado > umbralAprobacion
+  // Con tarifas, un plan FUERA de la tarifa (recargo o más descuento que el tope de la
+  // versión) se puede emitir, pero solo lo aprueba un rol gerencial y con motivo. Es el
+  // aviso: la regla la aplica el servidor (`motivoAprobacionTarifaRechazada`).
+  const capUltima = Number(ultimaVersion?.cap_descuento_pct ?? NaN)
+  const seleccionFueraDeTarifa = !!ultimaVersion?.tarifa_version_id
+    && fueraDeTarifa(descPlanSeleccionado, capUltima)
+  const requiereAprobacionAlta = seleccionFueraDeTarifa
+    || (umbralAprobacion != null && descPlanSeleccionado > umbralAprobacion)
   const aprobacionBloqueada = requiereAprobacionAlta && !puedeAprobarAlto
+  const faltaMotivoFuera = seleccionFueraDeTarifa && puedeAprobarAlto && !motivoFuera.trim()
 
   // Recalculo en vivo (desde el descuento canónico). El React Compiler lo
   // auto-memoiza; no usamos useMemo manual (rompe con los helpers de conversión).
@@ -314,10 +332,14 @@ function CuerpoPropuesta({
     ahorro_plan2: baseDe(2) - plan2Valor,
     desc1,
     desc2,
-    // Fuera de rango: descuento negativo (precio > base) o sobre el cap. Un plan que no
-    // se ofrece no se valida: no viaja.
-    invalid1: ofrece(1) && (desc1 < 0 || desc1 > cap),
-    invalid2: ofrece(2) && (desc2 < 0 || desc2 > cap),
+    // Esquema anterior: fuera de rango (descuento negativo o sobre el cap) no se emite.
+    // Con tarifas se emite cualquier valor mayor que cero: lo que quede fuera de la
+    // tarifa lo frena la aprobación (rol gerencial + motivo), no la generación. Un plan
+    // que no se ofrece no se valida: no viaja.
+    invalid1: ofrece(1) && (conTarifas ? !(plan1Valor > 0) : desc1 < 0 || desc1 > cap),
+    invalid2: ofrece(2) && (conTarifas ? !(plan2Valor > 0) : desc2 < 0 || desc2 > cap),
+    fuera1: conTarifas && ofrece(1) && fueraDeTarifa(desc1, cap),
+    fuera2: conTarifas && ofrece(2) && fueraDeTarifa(desc2, cap),
   }
 
   const invalido = calc.invalid1 || calc.invalid2
@@ -338,7 +360,9 @@ function CuerpoPropuesta({
 
   const handleGenerar = () => {
     if (invalido) {
-      toast.error(`El descuento de cada plan debe estar entre 0% y ${cap}%`)
+      toast.error(conTarifas
+        ? 'El valor de cada plan tiene que ser mayor que cero'
+        : `El descuento de cada plan debe estar entre 0% y ${cap}%`)
       return
     }
     startTransition(async () => {
@@ -378,8 +402,14 @@ function CuerpoPropuesta({
       return
     }
     startTransition(async () => {
-      const res = await aprobarVersionPropuesta(negocioBloqueId, versionActiva, planSeleccionado)
+      const res = await aprobarVersionPropuesta(
+        negocioBloqueId,
+        versionActiva,
+        planSeleccionado,
+        seleccionFueraDeTarifa ? motivoFuera : null,
+      )
       if (res.ok) {
+        setMotivoFuera('')
         toast.success(`Propuesta aprobada — Plan ${planSeleccionado}`)
       } else {
         toast.error(res.error ?? 'Error aprobando propuesta')
@@ -450,6 +480,13 @@ function CuerpoPropuesta({
               <p className="pl-6 text-xs text-green-800">
                 Corregido después de emitir: el PDF v{data.aprobado_version} dice{' '}
                 {formatCOP(valorVersion!)}.
+              </p>
+            )}
+            {data.aprobado_fuera_de_tarifa && (
+              <p className="pl-6 text-xs text-green-800">
+                Aprobada fuera de la tarifa ({formatCOP(data.aprobado_fuera_de_tarifa.base)},{' '}
+                {describirFueraDeTarifa(data.aprobado_fuera_de_tarifa.descuento_pct, data.aprobado_fuera_de_tarifa.cap)}).
+                Motivo: {data.aprobado_fuera_de_tarifa.motivo}
               </p>
             )}
           </div>
@@ -573,9 +610,14 @@ function CuerpoPropuesta({
           // boton que el servidor va a rechazar. La regla vive en el servidor
           // (`gate-descuento`): esto es el aviso, no el control.
           const descCorregido = valorValido && baseCorr(planCorr) > 0 ? descDeValorCorr(valorNum) : null
-          const fueraDeRango = descCorregido !== null && (descCorregido < 0 || descCorregido > capCorr)
-          const sobreUmbral =
-            descCorregido !== null && umbralAprobacion != null && descCorregido > umbralAprobacion
+          // Con tarifas, fuera de la tarifa se puede corregir con rol gerencial (el motivo
+          // ya es obligatorio aquí); en el esquema anterior sigue siendo un tope duro.
+          const fueraDeLaTarifaCorr = versionConTarifas && descCorregido !== null
+            && fueraDeTarifa(descCorregido, capCorr)
+          const fueraDeRango = !versionConTarifas && descCorregido !== null
+            && (descCorregido < 0 || descCorregido > capCorr)
+          const sobreUmbral = fueraDeLaTarifaCorr
+            || (descCorregido !== null && umbralAprobacion != null && descCorregido > umbralAprobacion)
           const bloqueadoPorUmbral = sobreUmbral && !puedeAprobarAlto
           // Con tarifas, solo los planes que se ofrecían para la ruta aprobada.
           const PLANES: Array<{ n: 1 | 2; label: string }> = [
@@ -682,11 +724,19 @@ function CuerpoPropuesta({
               {bloqueadoPorUmbral && (
                 <span className="inline-flex items-center gap-1.5 text-[11px] font-medium text-red-700">
                   <Lock className="h-3 w-3 shrink-0" />
-                  {pct2(descCorregido!)}% supera {umbralAprobacion}% — requiere un supervisor,
+                  {fueraDeLaTarifaCorr
+                    ? `Fuera de la tarifa (${describirFueraDeTarifa(descCorregido!, capCorr)})`
+                    : `${pct2(descCorregido!)}% supera ${umbralAprobacion}%`} — requiere un supervisor,
                   administrador o dueño, igual que al aprobar.
                 </span>
               )}
-              {sobreUmbral && puedeAprobarAlto && (
+              {fueraDeLaTarifaCorr && puedeAprobarAlto && (
+                <span className="text-[11px] text-amber-800">
+                  Fuera de la tarifa ({describirFueraDeTarifa(descCorregido!, capCorr)}); tu rol lo
+                  autoriza y el motivo queda en la historia del negocio.
+                </span>
+              )}
+              {!fueraDeLaTarifaCorr && sobreUmbral && puedeAprobarAlto && (
                 <span className="text-[11px] text-amber-800">
                   {pct2(descCorregido!)}% supera el umbral de {umbralAprobacion}%; tu rol lo
                   autoriza.
@@ -831,6 +881,7 @@ function CuerpoPropuesta({
                 precioMin={precioMinDe(1)}
                 precioMax={precioMaxDe(1)}
                 invalid={calc.invalid1}
+                fuera={calc.fuera1}
               />
             )}
             {ofrece(2) && (
@@ -845,6 +896,7 @@ function CuerpoPropuesta({
                 precioMin={precioMinDe(2)}
                 precioMax={precioMaxDe(2)}
                 invalid={calc.invalid2}
+                fuera={calc.fuera2}
               />
             )}
           </div>
@@ -859,7 +911,20 @@ function CuerpoPropuesta({
             <div className="flex items-center gap-2 rounded-md border border-red-200 bg-red-50 px-3 py-2 text-xs text-red-900">
               <AlertCircle className="h-4 w-4 shrink-0" />
               <span>
-                El descuento de cada plan debe estar entre 0% y {cap}% de su tarifa.
+                {conTarifas
+                  ? 'El valor de cada plan tiene que ser mayor que cero.'
+                  : `El descuento de cada plan debe estar entre 0% y ${cap}% de su tarifa.`}
+              </span>
+            </div>
+          )}
+          {!invalido && (calc.fuera1 || calc.fuera2) && (
+            <div className="flex items-start gap-2 rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-900">
+              <Lock className="mt-0.5 h-3.5 w-3.5 shrink-0" />
+              <span>
+                {[calc.fuera1 && `Plan 1: ${describirFueraDeTarifa(desc1, cap)}`, calc.fuera2 && `Plan 2: ${describirFueraDeTarifa(desc2, cap)}`]
+                  .filter(Boolean).join(' · ')}
+                . La propuesta se puede generar, pero ese plan solo lo aprueba un supervisor,
+                administrador o dueño, con un motivo que queda en la historia del negocio.
               </span>
             </div>
           )}
@@ -893,7 +958,9 @@ function CuerpoPropuesta({
                 </p>
                 <p className="text-base font-medium text-green-700">{formatCOP(calc.plan2)}</p>
                 <p className="mt-1 text-xs text-green-700">
-                  Ahorro: {formatCOP(calc.ahorro_plan2)}
+                  {calc.ahorro_plan2 >= 0
+                    ? `Ahorro: ${formatCOP(calc.ahorro_plan2)}`
+                    : <span className="text-amber-700">{formatCOP(-calc.ahorro_plan2)} sobre la tarifa</span>}
                 </p>
               </div>
               )}
@@ -953,8 +1020,12 @@ function CuerpoPropuesta({
                 </fieldset>
                 <button
                   onClick={handleAprobar}
-                  disabled={isPending || aprobacionBloqueada || rutaCambio || !planesAprobables.includes(planSeleccionado)}
-                  title={aprobacionBloqueada ? `Descuentos sobre ${umbralAprobacion}% requieren aprobación gerencial` : undefined}
+                  disabled={isPending || aprobacionBloqueada || faltaMotivoFuera || rutaCambio || !planesAprobables.includes(planSeleccionado)}
+                  title={aprobacionBloqueada
+                    ? seleccionFueraDeTarifa
+                      ? 'Un valor fuera de la tarifa requiere aprobación gerencial'
+                      : `Descuentos sobre ${umbralAprobacion}% requieren aprobación gerencial`
+                    : faltaMotivoFuera ? 'Escribe el motivo de aprobar fuera de la tarifa' : undefined}
                   className="inline-flex items-center gap-1.5 rounded-md border border-green-600 bg-green-50 px-3 py-2 text-sm font-medium text-green-700 hover:bg-green-100 disabled:opacity-50"
                 >
                   <CheckCircle2 className="h-4 w-4" />
@@ -965,8 +1036,27 @@ function CuerpoPropuesta({
             {aprobacionBloqueada && (
               <p className="mt-1.5 inline-flex items-center gap-1.5 rounded-md bg-amber-50 px-2.5 py-1.5 text-xs text-amber-700">
                 <Lock className="h-3.5 w-3.5 shrink-0" />
-                El Plan {planSeleccionado} tiene {pct2(descPlanSeleccionado)}% de descuento — supera {umbralAprobacion}% y requiere aprobación de un supervisor, administrador o dueño.
+                {seleccionFueraDeTarifa
+                  ? `El Plan ${planSeleccionado} queda fuera de la tarifa (${describirFueraDeTarifa(descPlanSeleccionado, capUltima)}) y solo lo aprueba un supervisor, administrador o dueño.`
+                  : `El Plan ${planSeleccionado} tiene ${pct2(descPlanSeleccionado)}% de descuento — supera ${umbralAprobacion}% y requiere aprobación de un supervisor, administrador o dueño.`}
               </p>
+            )}
+            {seleccionFueraDeTarifa && puedeAprobarAlto && versiones.length > 0 && (
+              <div className="flex w-full flex-col gap-1">
+                <span className="text-xs text-amber-800">
+                  El Plan {planSeleccionado} queda fuera de la tarifa
+                  ({describirFueraDeTarifa(descPlanSeleccionado, capUltima)}). Tu rol lo puede
+                  aprobar; el motivo queda en la historia del negocio.
+                </span>
+                <input
+                  type="text"
+                  value={motivoFuera}
+                  maxLength={MOTIVO_MAX}
+                  onChange={e => setMotivoFuera(e.target.value)}
+                  placeholder="¿Por qué se aprueba fuera de la tarifa?"
+                  className="w-full rounded-md border border-amber-300 bg-white px-2 py-1.5 text-sm"
+                />
+              </div>
             )}
           </div>
         </>
@@ -1002,6 +1092,7 @@ function PlanEditor({
   precioMin,
   precioMax,
   invalid,
+  fuera = false,
 }: {
   titulo: string
   /** Valor de la casilla plan × ruta (con tarifas). `null` en el esquema anterior. */
@@ -1014,8 +1105,10 @@ function PlanEditor({
   precioMin: number
   precioMax: number
   invalid: boolean
+  /** Con tarifas: el valor se emite, pero queda fuera de la tarifa (aprobación gerencial). */
+  fuera?: boolean
 }) {
-  const borde = invalid ? 'border-red-500' : ''
+  const borde = invalid ? 'border-red-500' : fuera ? 'border-amber-500' : ''
   return (
     <div className="rounded-md border bg-background/50 p-3">
       <p className="mb-2 flex items-baseline justify-between gap-2 text-xs font-medium text-muted-foreground">
@@ -1057,7 +1150,8 @@ function PlanEditor({
         </div>
       </div>
       <p className="mt-1.5 text-[11px] text-muted-foreground">
-        Edita el % o el precio: se sincronizan. Rango {formatCOP(precioMin)}–{formatCOP(precioMax)} · desc. máx {cap}%.
+        Edita el % o el precio: se sincronizan. {tarifa != null ? 'Tarifa' : 'Rango'} {formatCOP(precioMin)}–{formatCOP(precioMax)} · desc. máx {cap}%.
+        {tarifa != null && ' Fuera de ese rango lo aprueba un supervisor, administrador o dueño.'}
       </p>
     </div>
   )
@@ -1115,7 +1209,10 @@ function VersionList({
                 </p>
               )}
               <p className="text-xs text-muted-foreground">
-                {planesDe(v).map(n => `P${n} ${pct2(n === 1 ? v.descuento_pct_plan1 : v.descuento_pct_plan2)}%`).join(' · ')}
+                {planesDe(v).map(n => {
+                  const d = n === 1 ? v.descuento_pct_plan1 : v.descuento_pct_plan2
+                  return d < 0 ? `P${n} +${pct2(-d)}% sobre tarifa` : `P${n} ${pct2(d)}%`
+                }).join(' · ')}
                 {v.tarifa_version != null && ` · tarifas v${v.tarifa_version}`} ·{' '}
                 {formatFechaCorta(v.generated_at)}
                 {isAprobada && <span className="ml-2 text-green-700">· Aprobada</span>}

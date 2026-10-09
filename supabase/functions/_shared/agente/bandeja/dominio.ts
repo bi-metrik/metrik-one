@@ -14,6 +14,9 @@
 import { llavesDelTexto, tieneLlave } from '../../wa-cliente-reglas.ts';
 import type { FichaCliente, Llave } from '../../wa-cliente-reglas.ts';
 import { normal } from '../verificador.ts';
+import { propuestaVigente } from '../nucleo.ts';
+import { escritosDelViaje, mismoEntendido, nombramientos } from './carga.ts';
+import { salidasLinkAutorizacion, type AutorizacionAgente } from './autorizacion.ts';
 import type { ContextoDominio, DeclaracionHerramienta, Dominio, FilaConversacion, Hechos, Propuesta, ResultadoHerramienta } from '../tipos.ts';
 
 export interface ViajeAgente {
@@ -27,7 +30,12 @@ export interface ViajeAgente {
   faltaCompleto: string[];
   /** Hay una carga en vuelo sobre este viaje. */
   enVuelo?: boolean;
+  /** Lo que el viaje tiene, por etiqueta y legible (`registradoDe`): respalda «está registrada…». */
+  registrado?: Record<string, string>;
 }
+
+/** Lo que devuelve `prepararCarga`: lo que cambiaría, lo que faltaría, la duda de la extracción y el plan del toque. */
+export interface CargaPreparada { entendido: string[]; falta: string[]; duda?: string; plan: unknown }
 
 export interface PuertoBandeja {
   /** Nombre de la línea donde abre viajes («Viaje a medida»). */
@@ -37,10 +45,19 @@ export interface PuertoBandeja {
   /** `null`: no hay viaje con ese código. `'error'`: no se pudo consultar. */
   viaje(codigo: string): Promise<ViajeAgente | null | 'error'>;
   crearViaje(p: { contactoId: string; destino: string | null }): Promise<{ id: string; codigo: string; nombre: string }>;
-  /** La extracción de hoy, sin escribir: lo entendido y lo que faltaría. `plan` es lo que se escribe con el toque. */
-  prepararCarga(viajeId: string, textos: string[]): Promise<{ entendido: string[]; falta: string[]; plan: unknown }>;
-  cargar(viajeId: string, plan: unknown): Promise<{ lineas: string[] }>;
+  /**
+   * La extracción de hoy, sin escribir: lo que cambiaría y lo que faltaría. `plan` es lo que se escribe con el toque.
+   * `previo`: el plan de la propuesta pendiente del mismo viaje, que se une (lo nuevo gana solo en el mismo campo).
+   */
+  prepararCarga(viajeId: string, textos: string[], previo?: unknown): Promise<CargaPreparada>;
+  /** `escritos`: lo que quedó escrito, por etiqueta y legible (`registradoDe`). */
+  cargar(viajeId: string, plan: unknown): Promise<{ lineas: string[]; escritos?: Record<string, string> }>;
   crearCliente(nombre: string, llave: Llave): Promise<{ ok: true; id: string; nombre: string } | { ok: false; motivo: string }>;
+  /**
+   * La autorización de datos del contacto: si ya autorizó (y cuándo), o el link vigente (lo reusa o lo crea). `'error'`:
+   * no se pudo revisar. No escribe nada en el contacto: a lo sumo crea el enlace pendiente.
+   */
+  autorizacion(contactoId: string): Promise<AutorizacionAgente | 'error'>;
 }
 
 export const BOT_BANDEJA = 'bandeja-solicitudes';
@@ -83,21 +100,7 @@ export function opcionNombrada(opciones: ReadonlyArray<{ titulo: string; descrip
  * (número o palabra propia de esa opción, en el mensaje que sigue a las opciones) y los que abrió con su toque.
  */
 export function viajesNombrados(filas: FilaConversacion[]): string[] {
-  const out: string[] = [];
-  let opciones: ReadonlyArray<{ titulo: string; descripcion?: string }> | null = null;
-  for (const f of filas) {
-    if (delEquipo(f)) {
-      for (const m of (f.texto ?? '').toUpperCase().matchAll(RE_CODIGO)) out.push(m[0]);
-      if (opciones && f.clase === 'escrito') {
-        const k = opcionNombrada(opciones, f.texto ?? '');
-        if (k !== null) for (const m of opciones[k].titulo.toUpperCase().matchAll(RE_CODIGO)) out.push(m[0]);
-      }
-      opciones = null;
-    }
-    if (f.direccion === 'saliente') opciones = f.opciones?.length ? f.opciones : null;
-    for (const c of f.traza?.ejecucion?.resultado === 'ejecutada' ? f.traza.ejecucion.nombrados ?? [] : []) out.push(c);
-  }
-  return [...new Set(out)];
+  return [...new Set(nombramientos(filas, opcionNombrada).map((x) => x.clave).filter((c) => !c.startsWith('nuevo:')))];
 }
 
 /** ¿El texto está en un escrito del equipo? (para anotar: nada sale del modelo ni de un reenvío). */
@@ -111,6 +114,17 @@ function enEscritoDelEquipo(filas: FilaConversacion[], texto: string): boolean {
     // Una paráfrasis corta del mismo escrito: casi todas sus palabras están en él.
     return palabras.length > 0 && palabras.filter((w) => e.includes(w)).length / palabras.length >= 0.8;
   });
+}
+
+/**
+ * La fila del mensaje `#n` que el modelo dice que abrió el pedido del viaje (`desde`): tiene que ser un escrito del equipo
+ * en la conversación. El número es el de la ventana que vio el modelo; se guarda el id, que no se corre. Pura.
+ */
+export function filaDesde(filas: FilaConversacion[], desde: unknown): { id: string } | null | 'invalida' {
+  if (desde === undefined || desde === null || desde === '') return null;
+  const n = Number(String(desde).replace(/^#/, '').trim());
+  const f = Number.isInteger(n) && n >= 1 ? filas[n - 1] : undefined;
+  return f && delEquipo(f) ? { id: f.id } : 'invalida';
 }
 
 /** ¿El dato está escrito en la conversación (del equipo o reenviado), no solo dicho por el bot? */
@@ -197,22 +211,60 @@ export const LECTURAS: DeclaracionHerramienta[] = [
   },
   {
     name: 'ver_viaje',
-    description: 'El detalle de un viaje por su código («M1 26 6»): cliente, destino, si está abierto, qué le falta para cotizar y para quedar completo. Solo lectura.',
+    description: 'El detalle de un viaje por su código («M1 26 6»): cliente, destino, si está abierto, lo que tiene registrado, qué le falta para cotizar y para quedar completo. Solo lectura.',
     parameters: { type: 'object', properties: { codigo: { type: 'string' } }, required: ['codigo'] },
+  },
+];
+
+/**
+ * Cierra el turno: el sistema manda el link real y el mensaje para reenviar (o dice que ya autorizó). El pedido lo
+ * reconoce el modelo; el código solo exige la ficha vista por `buscar`, como `viaje_nuevo`.
+ */
+export const CIERRES: DeclaracionHerramienta[] = [
+  {
+    name: 'link_autorizacion',
+    description: 'Solo cuando el comercial pide el link de autorización de tratamiento de datos de un cliente, o pregunta si ese cliente ya autorizó. No sirve para consultar viajes (para eso, ver_viaje). Primero `buscar` al cliente; luego llama esto con la ref de su ficha. El sistema contesta solo: si ya autorizó, lo dice con la fecha; si no, manda la instrucción y, aparte, el mensaje con el link para que el comercial lo reenvíe. Cierra el turno: no redactes el link ni el mensaje, y nunca le escribas al cliente.',
+    parameters: { type: 'object', properties: { cliente: { type: 'string', description: 'La ref de la ficha tal como la devolvió buscar.' }, reglas_usadas: { type: 'array', items: { type: 'string' } } }, required: ['cliente'] },
   },
 ];
 
 const DATOS_PROPONER = {
   cliente: { type: 'string', description: 'viaje_nuevo: la ref de la ficha tal como la devolvió buscar.' },
   destino: { type: 'string', description: 'viaje_nuevo: el destino, si lo dijeron.' },
+  desde: { type: 'integer', description: 'viaje_nuevo: el número (#n) del mensaje del comercial donde empezó a pedir este viaje, si fue antes de este turno. El sistema lee desde ahí lo que dijo del viaje.' },
   viaje: { type: 'string', description: 'cargar_tanda / anotar_en_viaje: el código del viaje.' },
-  texto: { type: 'string', description: 'anotar_en_viaje: lo que el comercial escribió para anotar.' },
+  texto: { type: 'string', description: 'anotar_en_viaje: opcional. El sistema lee TODO lo que el comercial escribió de ese viaje en la conversación (también lo de antes de abrirlo) y lo une con la propuesta pendiente.' },
   nombre: { type: 'string', description: 'crear_cliente: el nombre como lo escribieron.' },
   llave: { type: 'string', description: 'crear_cliente: el celular, correo o usuario tal como lo escribieron.' },
   distinto_de_parecidos: { type: 'boolean', description: 'crear_cliente: true solo si ya mostraste los parecidos y el comercial dijo que es otra persona.' },
 };
 
 // ── El dominio ───────────────────────────────────────────────────────────────
+
+/**
+ * La propuesta de cargar o anotar: el resumen con lo que cambiaría y lo que seguiría faltando. Si la extracción tiene una
+ * duda (Mauricio, 2026-10-07: «no se invente esas cifras, puede preguntar»), va arriba, en la misma burbuja: lo demás
+ * sigue anotable con el toque y la respuesta del comercial se lee en el turno siguiente como cualquier dato. Va dentro
+ * del resumen para que nunca la corte el tope de Meta (`salidaPropuesta` corta lo de arriba, no el resumen). Pura.
+ */
+export function propuestaDeCarga(
+  accion: 'cargar_tanda' | 'anotar_en_viaje',
+  v: { id: string; codigo: string; nombre: string },
+  prep: CargaPreparada,
+  mensajes: string[],
+): Propuesta {
+  const verbo = accion === 'cargar_tanda' ? `¿Cargo esto en ${v.codigo} · ${v.nombre}?` : `¿Lo anoto en ${v.codigo} · ${v.nombre}?`;
+  const resumen = [
+    ...(prep.duda ? [prep.duda] : []),
+    verbo,
+    ...(prep.entendido.length ? prep.entendido.map((l) => `• ${l}`) : ['• (no encontré datos del viaje en esto)']),
+    prep.falta.length ? `Para cotizar faltaría: ${prep.falta.join(', ')}.` : 'Con esto queda el mínimo para cotizar.',
+  ].join('\n');
+  return {
+    accion, datos: { viajeId: v.id, codigo: v.codigo, mensajes, plan: prep.plan, entendido: prep.entendido, ...(prep.duda ? { duda: prep.duda } : {}) }, resumen,
+    si: accion === 'cargar_tanda' ? 'Cargar' : 'Anotar', no: 'No',
+  };
+}
 
 export function dominioBandeja(puerto: PuertoBandeja): Dominio {
   const leer = async (nombre: string, args: Record<string, unknown>): Promise<ResultadoHerramienta> => {
@@ -248,6 +300,7 @@ export function dominioBandeja(puerto: PuertoBandeja): Dominio {
         ok: true,
         datos: {
           codigo: v.codigo, nombre: v.nombre, cliente: v.cliente, destino: v.destino, abierto: v.abierto,
+          ...(v.registrado ? { registrado: v.registrado } : {}),
           falta_para_cotizar: v.faltaCotizar, falta_para_completo: v.faltaCompleto,
           ...(v.enVuelo ? { nota: 'Hay una carga en vuelo sobre este viaje: dilo y contesta cuando termine.' } : {}),
         },
@@ -281,37 +334,46 @@ export function dominioBandeja(puerto: PuertoBandeja): Dominio {
       if (destino && !enLaConversacion(ctx.conversacion, destino)) {
         return { ok: false, error: `«${destino}» no está escrito en la conversación. Usa el destino como lo escribieron, o déjalo vacío.`, candado: 'dato_sin_respaldo' };
       }
+      const desde = filaDesde(ctx.conversacion, datos.desde);
+      if (desde === 'invalida') return { ok: false, error: '`desde` tiene que ser el número (#n) de un mensaje escrito por el comercial en la conversación, o vacío.', candado: 'desde_invalido' };
       const resumen = `¿Abro este viaje?\n${ficha.ficha.ref}${destino ? ` · ${destino}` : ''} · ${linea}`;
-      return { ok: true, propuesta: { accion, datos: { contactoId: ficha.id, cliente: ficha.ficha.nombre, destino }, resumen, si: 'Sí, ábrelo', no: 'No' } };
+      return { ok: true, propuesta: { accion, datos: { contactoId: ficha.id, cliente: ficha.ficha.nombre, destino, ...(desde ? { desdeFila: desde.id } : {}) }, resumen, si: 'Sí, ábrelo', no: 'No' } };
     }
     if (accion === 'cargar_tanda' || accion === 'anotar_en_viaje') {
       const r = await viajeParaEscribir(ctx, datos.viaje);
       if (!r.ok) return r;
-      let textos: string[];
-      let mensajes: string[] = [];
       if (accion === 'cargar_tanda') {
         const t = tanda(ctx.conversacion);
-        if (!t.length) return { ok: false, error: 'No hay mensajes reenviados sin cargar. Si el comercial escribió el dato, usa anotar_en_viaje con su texto.', candado: 'tanda_vacia' };
-        textos = t.map((f) => f.texto ?? '').filter(Boolean);
-        mensajes = t.map((f) => f.id);
-      } else {
+        if (!t.length) return { ok: false, error: 'No hay mensajes reenviados sin cargar. Si el comercial escribió el dato, usa anotar_en_viaje.', candado: 'tanda_vacia' };
+        const prep = await puerto.prepararCarga(r.v.id, t.map((f) => f.texto ?? '').filter(Boolean));
+        return { ok: true, propuesta: propuestaDeCarga(accion, r.v, prep, t.map((f) => f.id)) };
+      }
+      // anotar_en_viaje: lo que el comercial escribió de ESE viaje en la conversación, no solo el texto del modelo
+      // (en vivo, «salen desde Bogotá» se anotaba sin la fecha ni los pasajeros dichos un mensaje antes).
+      let textos = escritosDelViaje(ctx.conversacion, r.v.codigo, opcionNombrada);
+      if (!textos.length) {
         const texto = String(datos.texto ?? '').trim();
         if (!texto || !enEscritoDelEquipo(ctx.conversacion, texto)) {
-          return { ok: false, error: 'Lo que se anota tiene que ser lo que el comercial escribió (no un reenvío ni una frase tuya). Copia su texto.', candado: 'texto_sin_respaldo' };
+          return { ok: false, error: 'Lo que se anota tiene que ser lo que el comercial escribió (no un reenvío ni una frase tuya).', candado: 'texto_sin_respaldo' };
         }
         textos = [texto];
       }
-      const prep = await puerto.prepararCarga(r.v.id, textos);
-      const verbo = accion === 'cargar_tanda' ? `¿Cargo esto en ${r.v.codigo} · ${r.v.nombre}?` : `¿Lo anoto en ${r.v.codigo} · ${r.v.nombre}?`;
-      const resumen = [
-        verbo,
-        ...(prep.entendido.length ? prep.entendido.map((l) => `• ${l}`) : ['• (no encontré datos del viaje en esto)']),
-        prep.falta.length ? `Para cotizar faltaría: ${prep.falta.join(', ')}.` : 'Con esto queda el mínimo para cotizar.',
-      ].join('\n');
-      return {
-        ok: true,
-        propuesta: { accion, datos: { viajeId: r.v.id, codigo: r.v.codigo, mensajes, plan: prep.plan, entendido: prep.entendido }, resumen, si: accion === 'cargar_tanda' ? 'Cargar' : 'Anotar', no: 'No' },
-      };
+      // Una pendiente de anotar en el mismo viaje se une, no se pisa.
+      const vig = propuestaVigente(ctx.conversacion);
+      const pendiente = vig?.accion === 'anotar_en_viaje' && vig.datos.viajeId === r.v.id ? vig : null;
+      const prep = await puerto.prepararCarga(r.v.id, textos, pendiente?.datos.plan);
+      // La duda cuenta: si el comercial la contestó y no cambió nada más, la propuesta nueva ya no la trae.
+      if (pendiente && mismoEntendido([...prep.entendido, ...(prep.duda ? [prep.duda] : [])], [...((pendiente.datos.entendido as string[] | undefined) ?? []), ...(typeof pendiente.datos.duda === 'string' ? [pendiente.datos.duda] : [])])) {
+        // Nada nuevo frente a la pendiente: es la misma (el núcleo la reenvía con sus botones, misma huella).
+        return { ok: true, propuesta: { accion, datos: pendiente.datos, resumen: pendiente.resumen, si: pendiente.si, no: pendiente.no } };
+      }
+      if (!prep.entendido.length && prep.duda) {
+        return { ok: false, error: `En lo que el comercial escribió de ${r.v.codigo} no hay datos nuevos para anotar, pero hay algo que no quedó claro. No propongas anotar: pregúntale con \`responder\`, tal cual: ${prep.duda}`, candado: 'solo_duda' };
+      }
+      if (!prep.entendido.length) {
+        return { ok: false, error: `En lo que el comercial escribió de ${r.v.codigo} no hay datos nuevos: lo que dijo ya está en el viaje. No propongas anotar: contéstale con \`responder\` (usa ver_viaje si te pregunta qué tiene o qué falta).`, candado: 'sin_datos_nuevos' };
+      }
+      return { ok: true, propuesta: propuestaDeCarga(accion, r.v, prep, []) };
     }
     if (accion === 'crear_cliente') {
       const nombre = String(datos.nombre ?? '').trim();
@@ -361,7 +423,7 @@ export function dominioBandeja(puerto: PuertoBandeja): Dominio {
           'Reenvíame lo que te escribió y lo cargo ahí.',
         ],
         nombrados: [v.codigo],
-        escrituras: [{ tipo: 'viaje', id: v.id, codigo: v.codigo, contactoId: d.contactoId, destino: d.destino ?? null }],
+        escrituras: [{ tipo: 'viaje', id: v.id, codigo: v.codigo, nombre: v.nombre, contactoId: d.contactoId, destino: d.destino ?? null }],
       };
     }
     if (p.accion === 'cargar_tanda' || p.accion === 'anotar_en_viaje') {
@@ -369,7 +431,7 @@ export function dominioBandeja(puerto: PuertoBandeja): Dominio {
       return {
         lineas: r.lineas,
         consumidos: (d.mensajes as string[] | undefined) ?? [],
-        escrituras: [{ tipo: p.accion === 'cargar_tanda' ? 'carga' : 'anotacion', viajeId: d.viajeId, codigo: d.codigo, mensajes: d.mensajes ?? [] }],
+        escrituras: [{ tipo: p.accion === 'cargar_tanda' ? 'carga' : 'anotacion', viajeId: d.viajeId, codigo: d.codigo, mensajes: d.mensajes ?? [], ...(r.escritos ? { escritos: r.escritos } : {}) }],
       };
     }
     if (p.accion === 'crear_cliente') {
@@ -386,6 +448,47 @@ export function dominioBandeja(puerto: PuertoBandeja): Dominio {
     throw new Error(`acción desconocida ${p.accion}`);
   };
 
+  /**
+   * Tras abrir un viaje: lo que el comercial ya dijo de él (en el mensaje en que pidió abrirlo o mientras el botón
+   * esperaba) sale de una vez como propuesta de anotar. No se escribe sin su toque; el «Abrí…» no pide lo ya dicho.
+   */
+  const trasEjecutar: NonNullable<Dominio['trasEjecutar']> = async (p, h, huella, ctx) => {
+    // Tras crear un cliente, el modelo decide si quedó una solicitud suya sin atender (Tatiana, 2026-10-07: pidió la
+    // cotización, el bot pidió el cliente, lo creó y ahí se quedó).
+    if (p.accion === 'crear_cliente') return { lineas: h.lineas, seguir: true };
+    if (p.accion !== 'viaje_nuevo') return null;
+    const v = h.escrituras?.find((x) => x.tipo === 'viaje') as { id: string; codigo: string; nombre?: string } | undefined;
+    if (!v) return null;
+    const textos = escritosDelViaje(ctx.conversacion, v.codigo, opcionNombrada, { [`nuevo:${huella}`]: v.codigo });
+    if (!textos.length) return null;
+    const abri = h.lineas[0];
+    let prep: CargaPreparada;
+    try {
+      prep = await puerto.prepararCarga(v.id, textos);
+    } catch {
+      return { lineas: [abri, 'No alcancé a leer lo que me escribiste de este viaje: dime «anótalo» y lo vuelvo a leer.'] };
+    }
+    if (!prep.entendido.length) return prep.duda ? { lineas: [abri, prep.duda] } : null;
+    return { lineas: [abri], propuesta: propuestaDeCarga('anotar_en_viaje', { id: v.id, codigo: v.codigo, nombre: v.nombre ?? '' }, prep, []) };
+  };
+
+  const cerrar: NonNullable<Dominio['cerrar']> = async (nombre, args, ctx) => {
+    if (nombre !== 'link_autorizacion') return { ok: false, error: `No existe la herramienta «${nombre}».`, candado: 'herramienta_desconocida' };
+    const ref = String(args.cliente ?? '').trim();
+    const ficha = resolverFicha(ctx, ref);
+    if (ficha === 'varias') return { ok: false, error: `Hay varias fichas que coinciden con «${ref}». Pregunta cuál con opciones y usa la ref exacta.`, candado: 'cliente_ambiguo' };
+    if (!ficha) return { ok: false, error: 'Ese cliente no salió de una búsqueda en esta conversación. Primero `buscar` y usa la ref de su ficha.', candado: 'cliente_sin_buscar' };
+    const a = await puerto.autorizacion(ficha.id);
+    if (a === 'error') return { ok: false, error: 'No pude revisar la autorización ahora. Dilo así: no inventes el link ni digas que autorizó.', candado: 'lectura_fallida' };
+    const salidas = salidasLinkAutorizacion({ cliente: ficha.ficha.nombre, comercial: ctx.remitente.nombre, a, ahoraIso: new Date().toISOString() });
+    return {
+      ok: true,
+      salidas,
+      datos: a.estado === 'pendiente' ? { cliente: ficha.ficha.nombre, estado: a.estado, link: a.url } : { cliente: ficha.ficha.nombre, ...a },
+      privado: { contactoId: ficha.id },
+    };
+  };
+
   return {
     bot: BOT_BANDEJA,
     lecturas: LECTURAS,
@@ -394,6 +497,9 @@ export function dominioBandeja(puerto: PuertoBandeja): Dominio {
     leer: (n, a) => leer(n, a),
     proponer,
     ejecutar,
+    trasEjecutar,
+    cierres: CIERRES,
+    cerrar,
     sigueVigente(p, ctx) {
       if (p.accion !== 'cargar_tanda' && p.accion !== 'descartar') return true;
       const ahora = tanda(ctx.conversacion).map((f) => f.id).join(',');
@@ -405,6 +511,8 @@ export function dominioBandeja(puerto: PuertoBandeja): Dominio {
       return [
         `Tanda abierta: ${t.length ? `${t.length} mensaje${t.length === 1 ? '' : 's'} reenviado${t.length === 1 ? '' : 's'} sin cargar` : 'ninguna'}.`,
         `Viajes nombrados en esta conversación: ${nombrados.length ? nombrados.join(', ') : 'ninguno'}.`,
+        // En vivo (2026-10-07) el bot buscó a la comercial como si fuera la clienta.
+        `${ctx.remitente.nombre} es del equipo, no es un cliente: no lo busques ni lo propongas como cliente.`,
       ];
     },
   };

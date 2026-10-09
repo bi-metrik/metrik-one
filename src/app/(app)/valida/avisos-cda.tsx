@@ -1,5 +1,5 @@
 import Link from 'next/link'
-import { AlertTriangle, Ban, CalendarClock, PauseCircle } from 'lucide-react'
+import { AlertTriangle, Ban, CalendarClock, FileText, PauseCircle } from 'lucide-react'
 import {
   mensajeSuspendidoPorMora,
   textoAvisoMora,
@@ -7,6 +7,12 @@ import {
   textoAvisoPlazo,
   type EstadoMora,
 } from '@/lib/valida-cda/plazos'
+import {
+  rutaPdfTerminos,
+  textoQuienAceptaModificacion,
+  textosAvisoModificacion,
+} from '@/lib/valida-cda/modificacion-terminos'
+import type { DocumentoContractual } from '@/lib/valida-api/resultados'
 
 /**
  * Los avisos de `/valida` de un CDA. El aviso de mora con la fecha de la restricción (cláusula 11.2),
@@ -57,6 +63,62 @@ export function AvisoPlazoTerminos({
           Leer y aceptar los Términos
         </Link>
       )}
+    </section>
+  )
+}
+
+/**
+ * Una modificación de los Términos por la cláusula 13.1 (la v1.4): lo ven TODOS los usuarios del CDA
+ * desde la publicación hasta que la persona designada la acepte. Qué cambia en simple, desde cuándo
+ * rige, el documento completo y su PDF, y el derecho a terminar sin penalidad antes de la vigencia.
+ *
+ * No condiciona nada: Valida opera igual con o sin la aceptación. La persona designada ve el botón para
+ * aceptarla; los demás, a quién le toca y que no es obligatorio.
+ */
+export function AvisoModificacionTerminos({
+  doc,
+  hoy,
+  puedeAceptar,
+  designadoNombre,
+}: {
+  doc: Pick<DocumentoContractual, 'documentoId' | 'slug' | 'version' | 'titulo' | 'vigenteDesde' | 'publicadaAt'>
+  hoy: string
+  /** Quien entra es la persona designada y puede aceptar ahora. */
+  puedeAceptar: boolean
+  designadoNombre: string | null
+}) {
+  const t = textosAvisoModificacion(doc, hoy)
+  return (
+    <section
+      data-aviso-modificacion-terminos
+      className="flex flex-col gap-3 rounded-lg border border-sky-300 bg-sky-50 p-4 text-sm text-sky-950"
+    >
+      <div className="flex items-start gap-3">
+        <FileText className="mt-0.5 hidden h-5 w-5 shrink-0 sm:block" />
+        <div className="min-w-0 space-y-2">
+          <p className="font-semibold">{t.titulo}</p>
+          <p>{t.queCambia}</p>
+          <p className="font-semibold">{t.vigencia}</p>
+          {t.derecho && <p>{t.derecho}</p>}
+          {!puedeAceptar && <p>{textoQuienAceptaModificacion(designadoNombre, doc)}</p>}
+          {t.publicado && <p className="text-xs text-sky-800">{t.publicado}</p>}
+        </div>
+      </div>
+      <div className="flex flex-wrap items-center gap-3 sm:pl-8">
+        <Link
+          href="/valida?modificacion=1"
+          className={
+            puedeAceptar
+              ? 'inline-flex items-center justify-center rounded-md bg-acento px-4 py-2 text-sm font-semibold text-white'
+              : 'font-semibold underline underline-offset-2'
+          }
+        >
+          {puedeAceptar ? 'Leer y aceptar la nueva versión' : 'Leer el documento completo'}
+        </Link>
+        <a href={rutaPdfTerminos(doc.documentoId)} className="font-semibold underline underline-offset-2">
+          Descargar el PDF
+        </a>
+      </div>
     </section>
   )
 }

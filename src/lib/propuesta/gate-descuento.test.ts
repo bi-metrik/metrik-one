@@ -1,5 +1,11 @@
 import { describe, it, expect } from 'vitest'
-import { descuentoImplicito, motivoDescuentoRechazado } from './gate-descuento'
+import {
+  descuentoImplicito,
+  describirFueraDeTarifa,
+  fueraDeTarifa,
+  motivoAprobacionTarifaRechazada,
+  motivoDescuentoRechazado,
+} from './gate-descuento'
 
 // Config viva de SOENA (linea GIT EV/HEV) al 2026-09-01.
 const BASE = 850_000
@@ -80,5 +86,54 @@ describe('motivoDescuentoRechazado', () => {
     expect(motivoDescuentoRechazado({
       descuentoPct: null, cap: 50, umbral: 20, role: 'comercial', etiqueta: 'X',
     })).toBeNull()
+  })
+})
+
+describe('motivoAprobacionTarifaRechazada (tarifas, SOE-004)', () => {
+  // V0570: Solo UPME, Plan 2, tarifa $341.250 con tope 25 %; Daniela quiere $450.000.
+  const BASE_V0570 = 341_250
+  const tarifa = (honorario: number, role: string | null, motivo: string | null = null) =>
+    motivoAprobacionTarifaRechazada({
+      descuentoPct: descuentoImplicito(honorario, BASE_V0570),
+      cap: 25,
+      umbral: 50,
+      role,
+      etiqueta: 'El Plan 2',
+      motivo,
+    })
+
+  it('dentro de la tarifa no cambia nada: cualquier rol aprueba, sin motivo', () => {
+    expect(tarifa(341_250, 'operator')).toBeNull()
+    expect(tarifa(255_938, 'operator')).toBeNull() // 25 % del tope, redondeado al peso
+  })
+
+  it('por encima de la tarifa (recargo): el comercial no aprueba', () => {
+    expect(fueraDeTarifa(descuentoImplicito(450_000, BASE_V0570), 25)).toBe(true)
+    expect(tarifa(450_000, 'operator', 'cliente pidió')).toMatch(/fuera de la tarifa.*por encima.*supervisor, administrador o dueño/)
+  })
+
+  it('más descuento que el tope: el comercial no aprueba', () => {
+    expect(tarifa(200_000, 'operator', 'x')).toMatch(/de descuento, el tope es 25%.*supervisor/)
+  })
+
+  it('admin/supervisor/owner aprueban fuera de la tarifa, pero solo con motivo', () => {
+    for (const role of ['owner', 'admin', 'supervisor']) {
+      expect(tarifa(450_000, role)).toMatch(/escribe el motivo/)
+      expect(tarifa(450_000, role, '   ')).toMatch(/escribe el motivo/)
+      expect(tarifa(450_000, role, 'Cliente acepta el valor del plan anterior')).toBeNull()
+      expect(tarifa(100_000, role, 'Convenio')).toBeNull()
+    }
+  })
+
+  it('el umbral sigue rigiendo dentro de la tarifa si queda por debajo del tope', () => {
+    const r = motivoAprobacionTarifaRechazada({
+      descuentoPct: 20, cap: 25, umbral: 15, role: 'operator', etiqueta: 'El Plan 1',
+    })
+    expect(r).toMatch(/supera 15%/)
+  })
+
+  it('describe el recargo y el exceso de descuento en palabras', () => {
+    expect(describirFueraDeTarifa(-31.868132, 25)).toBe('31.87% por encima de la tarifa')
+    expect(describirFueraDeTarifa(30, 25)).toBe('30% de descuento, el tope es 25%')
   })
 })

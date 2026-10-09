@@ -7,14 +7,17 @@
 // (un llamado extra); la segunda, sale la respuesta fija con las opciones vigentes.
 // [código, sin modelo] el toque de una propuesta y el «sí» escrito solo: se ejecuta si la huella sigue vigente, una sola
 // vez (candado por huella).
+// [modelo, después del hecho] si el dominio lo pide (`trasEjecutar` con `seguir`), el modelo tiene un turno para seguir
+// (`seguirTrasToque`): propone lo que el hecho destrabó, pregunta lo que falta o llama `terminar`. Sale en el mismo
+// mensaje que la confirmación, debajo de ella; si el modelo falla, sale solo la confirmación.
 // Todo deja traza: llamados, tokens por modelo, herramientas, reglas, candados, verificador y tiempos.
 // ============================================================
 
 import type { ConfigAgente } from './config.ts';
 import { fechaBogota, mensajeDelTurno, recortarResultado, sistema } from './contexto.ts';
-import { CIERRAN, declaraciones } from './herramientas.ts';
+import { CIERRAN, cierranCon, declaraciones } from './herramientas.ts';
 import { consultar, fichasDeHerramienta, respuestaFija, temas, bloqueSiempre } from './reglamento.ts';
-import { botonesPropuesta, opcionesDelModelo, renderizar } from './render.ts';
+import { META, botonesPropuesta, cortarEnPalabra, opcionesDelModelo, renderizar } from './render.ts';
 import { respaldoDe, verificar } from './verificador.ts';
 import type {
   Almacen, ContextoDominio, Dominio, FilaConversacion, Mensaje, Modelo, Parte, Propuesta, Reglamento, Salida, Traza, UsoLlamado,
@@ -36,12 +39,27 @@ export interface EntradaTurno {
   filas: FilaConversacion[];
   nuevos: FilaConversacion[];
   ctx: ContextoDominio;
+  /** El turno sigue a un hecho que la persona acaba de confirmar con un toque (`seguirTrasToque`). */
+  tras?: { lineas: string[]; origen: 'toque_propuesta' | 'si_escrito' };
 }
 
 export interface SalidaTurno {
   salida: Salida | null;
   traza: Traza;
+  /** El hecho se ejecutó y el dominio pide un turno del modelo para seguir (`seguirTrasToque`). */
+  seguir?: boolean;
+  /** Mensajes que salen después de `salida`, en orden (un cierre del dominio con varios mensajes). */
+  extras?: Salida[];
 }
+
+/** Cierra el turno que sigue a un hecho sin decir nada más (la persona ya tiene la confirmación). */
+export const TERMINAR = 'terminar';
+
+const DECLARACION_TERMINAR = {
+  name: TERMINAR,
+  description: 'Solo en el turno que sigue a un hecho confirmado: no queda nada que proponer ni que preguntar. El sistema deja la confirmación sola.',
+  parameters: { type: 'object', properties: { reglas_usadas: { type: 'array', items: { type: 'string' } } } },
+};
 
 type PropuestaGuardada = NonNullable<Traza['propuesta']>;
 
@@ -73,8 +91,42 @@ export async function huellaPropuesta(accion: string, datos: unknown, turnoId: s
   return [...new Uint8Array(d)].slice(0, 6).map((b) => b.toString(16).padStart(2, '0')).join('');
 }
 
-function salidaPropuesta(p: PropuestaGuardada, arriba?: string): Salida {
-  return { tipo: 'botones', texto: [arriba, p.resumen].filter(Boolean).join('\n'), opciones: botonesPropuesta(p.huella, p.si, p.no) };
+/**
+ * El mensaje de botones de una propuesta: lo de `arriba` (una respuesta del modelo o una respuesta fija) y debajo el
+ * resumen fijo del código. El cuerpo de botones de Meta va hasta 1024 caracteres: si no cabe, se corta lo de arriba
+ * (nunca el resumen, que es lo que se confirma). Pura.
+ */
+export function salidaPropuesta(p: Pick<PropuestaGuardada, 'huella' | 'resumen' | 'si' | 'no'>, arriba?: string | null): Salida {
+  const cabe = META.cuerpoBotones - [...p.resumen].length - 1;
+  const sinRepetir = arriba ? sinLineasDelResumen(arriba, p.resumen) : '';
+  const a = sinRepetir && cabe >= 20 ? cortarEnPalabra(sinRepetir, cabe) : '';
+  return { tipo: 'botones', texto: [a, p.resumen].filter(Boolean).join('\n'), opciones: botonesPropuesta(p.huella, p.si, p.no) };
+}
+
+const comparable = (s: string) => s.toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '').replace(/[^a-z0-9ñ]+/g, ' ').trim();
+
+/**
+ * Lo de arriba sin las líneas que ya dice el resumen: en vivo, el modelo escribió en `texto` la misma pregunta del
+ * resumen («¿Lo anoto en …?») y salió dos veces. Pura.
+ */
+export function sinLineasDelResumen(arriba: string, resumen: string): string {
+  const delResumen = new Set(resumen.split('\n').map(comparable).filter(Boolean));
+  return arriba.split('\n').filter((l) => !delResumen.has(comparable(l))).join('\n').trim();
+}
+
+/** JSON con las llaves ordenadas: `jsonb` no guarda el orden, así que dos datos iguales pueden volver distintos. Pura. */
+function estable(v: unknown): string {
+  if (Array.isArray(v)) return `[${v.map(estable).join(',')}]`;
+  if (v && typeof v === 'object') {
+    const o = v as Record<string, unknown>;
+    return `{${Object.keys(o).filter((k) => o[k] !== undefined).sort().map((k) => `${JSON.stringify(k)}:${estable(o[k])}`).join(',')}}`;
+  }
+  return JSON.stringify(v ?? null);
+}
+
+/** ¿Es la misma propuesta (misma acción, mismos datos resueltos por el código) que la pendiente? Pura. */
+export function mismaPropuesta(a: Pick<Propuesta, 'accion' | 'datos'>, b: Pick<Propuesta, 'accion' | 'datos'>): boolean {
+  return a.accion === b.accion && estable(a.datos) === estable(b.datos);
 }
 
 // ── El estado y el respaldo ──────────────────────────────────────────────────
@@ -86,6 +138,10 @@ function estado(deps: DepsTurno, e: EntradaTurno): string[] {
     `Escribe: ${e.ctx.remitente.nombre} (${e.ctx.remitente.rol}).`,
     `Propuesta pendiente: ${vig ? `${vig.resumen.replace(/\n/g, ' · ')} — espera su toque` : 'ninguna'}.`,
     ...(deps.dominio.estado?.(e.ctx) ?? []),
+    ...(e.tras ? [
+      `Acaba de quedar hecho, con el toque de ${e.ctx.remitente.nombre}: ${e.tras.lineas.join(' ')} La confirmación ya la escribe el sistema: no la repitas.`,
+      `Este turno es para seguir: si en la conversación quedó algo que ${e.ctx.remitente.nombre} pidió y que este paso destrabó, propón lo siguiente con \`proponer\` o pregunta lo que falte. Si no queda nada, llama \`${TERMINAR}\`.`,
+    ] : []),
   ];
 }
 
@@ -100,6 +156,22 @@ function fuentesDeRespaldo(e: EntradaTurno, extra: string[]): string[] {
     for (const l of x.traza?.ejecucion?.lineas ?? []) f.push(l);
   }
   for (const r of e.ctx.resultadosPrevios) f.push(JSON.stringify(r.datos ?? ''));
+  return f;
+}
+
+/**
+ * Lo que respalda una AFIRMACIÓN de hecho («está registrada…», «ya quedó guardada…»): lo que devolvieron las
+ * herramientas en este turno y las escrituras confirmadas con un toque (sus líneas y lo que escribieron). No la
+ * conversación: que el comercial lo haya dicho no quiere decir que esté en el viaje.
+ */
+function fuentesDeHechos(e: EntradaTurno, resultadosTurno: string[]): string[] {
+  const f: string[] = [...resultadosTurno];
+  for (const x of e.filas) {
+    const ej = x.traza?.ejecucion;
+    if (ej?.resultado !== 'ejecutada') continue;
+    f.push(...(ej.lineas ?? []));
+    if (ej.escrituras?.length) f.push(JSON.stringify(ej.escrituras));
+  }
   return f;
 }
 
@@ -122,32 +194,49 @@ export async function turnoDelModelo(deps: DepsTurno, e: EntradaTurno): Promise<
   const est = estado(deps, e);
   const sis = sistema(r, c);
   const usuario = mensajeDelTurno({ estado: est, filas: e.filas, nuevos: e.nuevos, quien: e.ctx.remitente.nombre });
-  const decl = declaraciones(d, r);
+  const decl = [...declaraciones(d, r), ...(e.tras ? [DECLARACION_TERMINAR] : [])];
   const todas = decl.map((x) => x.name);
+  const cierran = e.tras ? [...cierranCon(d), TERMINAR] : cierranCon(d);
+  // En el último llamado (forzado a cerrar) NO entran los cierres del dominio: medido en vivo (2026-10-08), con el
+  // presupuesto agotado tras `buscar` y `consultar_reglas`, el modelo cerró «¿qué le falta al viaje de…?» con
+  // `link_autorizacion` porque era la única salida con la ficha a mano. Ahí contesta con `responder`.
+  const forzados = e.tras ? [...CIERRAN, TERMINAR] : CIERRAN;
+  // Tras un hecho, lo que no sea seguir (falla, tema fuera, `terminar`) deja la confirmación sola: el hecho ya ocurrió.
+  const soloHecho: Salida | null = e.tras ? { tipo: 'texto', texto: e.tras.lineas.join('\n') } : null;
+  const caer = (): Salida => soloHecho ?? caido(deps, e);
+  const conHecho = (s: Salida): Salida => (e.tras ? { ...s, texto: [...e.tras.lineas, s.texto].filter(Boolean).join('\n') } : s);
+  let termino = false;
   const mensajes: Mensaje[] = [{ role: 'user', parts: [{ text: usuario }] }];
   const resultadosTurno: string[] = [];
   const respaldoFijo = [usuario, bloqueSiempre(r)];
   let presupuesto = c.topes.llamados;
   let correccionUsada = false;
-  const fin = (salida: Salida | null, extra: Partial<Traza> = {}): SalidaTurno => ({ salida, traza: { ...traza, ...extra, salida } });
+  const fin = (salida: Salida | null, extra: Partial<Traza> = {}): SalidaTurno => {
+    const t: Traza = { ...traza, ...extra, salida };
+    if (e.tras) {
+      t.tras_toque = { origen: e.tras.origen, resultado: t.propuesta ? 'propuesta' : termino ? 'terminar' : salida === soloHecho ? 'solo_hecho' : 'respuesta' };
+      if (salida === soloHecho) t.respuesta_fija = 'rf.hecho';
+    }
+    return { salida, traza: t };
+  };
 
   while (traza.llamados! < presupuesto) {
     const restante = c.topes.turnoMs - (deps.reloj() - t0);
-    if (restante < 500) return fin(caido(deps, e), { error: 'tope de tiempo del turno' });
+    if (restante < 500) return fin(caer(), { error: 'tope de tiempo del turno' });
     const ultimo = traza.llamados! >= presupuesto - 1;
     const tm = deps.reloj();
     const res = await deps.modelo.llamar({
-      sistema: sis.texto, mensajes, herramientas: decl, permitidas: ultimo ? CIERRAN : todas, timeoutMs: restante,
+      sistema: sis.texto, mensajes, herramientas: decl, permitidas: ultimo ? forzados : todas, timeoutMs: restante,
     });
     traza.ms_modelo! += Math.round(deps.reloj() - tm);
     traza.llamados!++;
     traza.uso!.push(...res.usos);
-    if (!res.ok) return fin(caido(deps, e), { error: `modelo: ${res.motivo}` });
+    if (!res.ok) return fin(caer(), { error: `modelo: ${res.motivo}` });
     mensajes.push(res.mensaje);
 
     const llamadas = res.mensaje.parts.filter((p): p is Parte & { functionCall: NonNullable<Parte['functionCall']> } => !!p.functionCall);
-    const lecturas = llamadas.filter((p) => !CIERRAN.includes(p.functionCall.name));
-    const cierres = llamadas.filter((p) => CIERRAN.includes(p.functionCall.name));
+    const lecturas = llamadas.filter((p) => !cierran.includes(p.functionCall.name));
+    const cierres = llamadas.filter((p) => cierran.includes(p.functionCall.name));
 
     if (lecturas.length) {
       const th = deps.reloj();
@@ -188,13 +277,42 @@ export async function turnoDelModelo(deps: DepsTurno, e: EntradaTurno): Promise<
     }
 
     const cierre = cierres[0];
-    if (!cierre) return fin(caido(deps, e), { error: 'el modelo no llamó ninguna herramienta' });
+    if (!cierre) return fin(caer(), { error: 'el modelo no llamó ninguna herramienta' });
     const nombre = cierre.functionCall.name;
     const args = (cierre.functionCall.args ?? {}) as Record<string, unknown>;
     if (Array.isArray(args.reglas_usadas)) traza.reglas_usadas!.push(...args.reglas_usadas.map(String));
     const devolver = (error: string) => {
       mensajes.push({ role: 'user', parts: [{ functionResponse: { name: nombre, response: { ok: false, error }, ...(cierre.functionCall.id ? { id: cierre.functionCall.id } : {}) } }] });
     };
+
+    if (nombre === TERMINAR) {
+      termino = true;
+      return fin(soloHecho);
+    }
+
+    // Un cierre del dominio: la salida la escribe el código (p. ej. el link real y el mensaje para reenviar). Si el
+    // candado lo ataja, vuelve al modelo con el error, como `proponer`.
+    if (d.cerrar && (d.cierres ?? []).some((c) => c.name === nombre)) {
+      const th = deps.reloj();
+      let r: Awaited<ReturnType<NonNullable<Dominio['cerrar']>>>;
+      try {
+        r = await d.cerrar(nombre, args, e.ctx);
+      } catch (err) {
+        r = { ok: false, error: `No pude hacerlo ahora (${String(err).slice(0, 80)}). Dilo así, sin inventar el resultado.`, candado: 'cierre_fallo' };
+      }
+      const ms = Math.round(deps.reloj() - th);
+      traza.ms_herramientas! += ms;
+      traza.herramientas!.push({ nombre, args, ok: r.ok, ...(r.ok ? { datos: r.datos, ...(r.privado !== undefined ? { privado: r.privado } : {}) } : { error: r.error }), ms });
+      if (!r.ok) {
+        traza.candados!.push({ candado: r.candado, detalle: r.error });
+        devolver(r.error);
+        continue;
+      }
+      const [primera, ...resto] = r.salidas;
+      if (!primera) return fin(caer(), { error: `${nombre} sin salida` });
+      const s1 = fin(conHecho(primera), { tema: nombre, ...(resto.length ? { salidas_extra: resto } : {}) });
+      return resto.length ? { ...s1, extras: resto } : s1;
+    }
 
     if (nombre === 'proponer') {
       const accion = String(args.accion ?? '');
@@ -210,9 +328,46 @@ export async function turnoDelModelo(deps: DepsTurno, e: EntradaTurno): Promise<
         devolver(p.error);
         continue;
       }
+      // La respuesta que va arriba del resumen (opcional): mismo tope y mismo verificador que `responder`.
+      let arriba: string | null = null;
+      const texto = String(args.texto ?? '').trim();
+      if (texto) {
+        const render = renderizar(texto, [], { turno: e.turnoId.slice(0, 8), topeTexto: c.topes.texto, final: correccionUsada });
+        if (!render.ok) {
+          correccionUsada = true;
+          presupuesto = Math.max(presupuesto, traza.llamados! + 1);
+          traza.candados!.push({ candado: 'formato_meta', detalle: render.error });
+          devolver(`${render.error} (el \`texto\` de \`proponer\`)`);
+          continue;
+        }
+        const motivos = verificar(render.salida.texto, respaldoDe([...respaldoFijo, ...fuentesDeRespaldo(e, resultadosTurno), p.propuesta.resumen]), respaldoDe(fuentesDeHechos(e, resultadosTurno)));
+        if (motivos.length) {
+          traza.verificador!.push({ motivo: motivos.join('; '), texto: render.salida.texto });
+          if (!correccionUsada) {
+            correccionUsada = true;
+            presupuesto = Math.max(presupuesto, traza.llamados! + 1);
+            devolver(`No se envió porque el \`texto\`: ${motivos.join('; ')}. Vuelve a llamar \`proponer\` con el texto sin eso (los hechos los escribe el sistema; los datos tienen que salir de la conversación o de una herramienta).`);
+            continue;
+          }
+          // Segunda vez: el texto no sale; la propuesta (que arma el código con datos reales) sí.
+        } else {
+          arriba = render.salida.texto;
+        }
+      }
+      // Candado: la misma propuesta que ya está pendiente no se arma de nuevo. Se reenvía LA PENDIENTE (misma huella,
+      // con sus botones) y arriba la respuesta del modelo o una línea fija: en vivo, el texto suelto dejaba los botones
+      // muy arriba en el chat.
+      const vig = propuestaVigente(e.filas);
+      if (vig && mismaPropuesta(vig, p.propuesta)) {
+        traza.candados!.push({ candado: 'propuesta_repetida', detalle: `${accion}: igual a la pendiente ${vig.huella}` });
+        return fin(salidaPropuesta(vig, arriba ?? TEXTO_PROPUESTA_PENDIENTE), { tema: 'propuesta', ...(arriba ? {} : { respuesta_fija: 'propuesta_pendiente' }) });
+      }
       const huella = await huellaPropuesta(accion, p.propuesta.datos, e.turnoId);
       const guardada: PropuestaGuardada = { ...p.propuesta, huella, args_modelo: { accion, datos } };
-      return fin(salidaPropuesta(guardada), { propuesta: guardada, tema: 'propuesta' });
+      // Tras un hecho, la confirmación va primero y la propuesta debajo, en el mismo mensaje (si no cabe, se corta lo
+      // del modelo, no la confirmación ni el resumen).
+      const encima = e.tras ? [...e.tras.lineas, arriba].filter(Boolean).join('\n') : arriba;
+      return fin(salidaPropuesta(guardada, encima), { propuesta: guardada, tema: 'propuesta' });
     }
 
     // responder
@@ -220,6 +375,7 @@ export async function turnoDelModelo(deps: DepsTurno, e: EntradaTurno): Promise<
     traza.tema = tema;
     if (tema === 'fuera' || !temas(r).includes(tema)) {
       if (tema !== 'fuera') traza.candados!.push({ candado: 'tema_cerrado', detalle: `tema «${tema}» fuera de la lista` });
+      if (soloHecho) return fin(soloHecho);
       const t = respuestaFija(r, 'rf.fuera_de_tema');
       return fin({ tipo: 'texto', texto: t }, { respuesta_fija: 'rf.fuera_de_tema' });
     }
@@ -234,7 +390,7 @@ export async function turnoDelModelo(deps: DepsTurno, e: EntradaTurno): Promise<
       continue;
     }
     const aVerificar = [render.salida.texto, ...('opciones' in render.salida ? render.salida.opciones.map((o) => `${o.titulo}. ${o.descripcion ?? ''}`) : [])].join('\n');
-    const motivos = texto ? verificar(aVerificar, respaldoDe([...respaldoFijo, ...fuentesDeRespaldo(e, resultadosTurno)])) : ['texto vacío'];
+    const motivos = texto ? verificar(aVerificar, respaldoDe([...respaldoFijo, ...fuentesDeRespaldo(e, resultadosTurno)]), respaldoDe(fuentesDeHechos(e, resultadosTurno))) : ['texto vacío'];
     if (motivos.length) {
       traza.verificador!.push({ motivo: motivos.join('; '), texto: aVerificar });
       if (!correccionUsada) {
@@ -243,17 +399,19 @@ export async function turnoDelModelo(deps: DepsTurno, e: EntradaTurno): Promise<
         devolver(`No se envió porque: ${motivos.join('; ')}. Escríbelo otra vez sin eso (los hechos los escribe el sistema; los datos tienen que salir de la conversación o de una herramienta).`);
         continue;
       }
-      return fin(caido(deps, e), { respuesta_fija: 'rf.modelo_caido', error: 'verificador' });
+      return fin(caer(), { respuesta_fija: soloHecho ? 'rf.hecho' : 'rf.modelo_caido', error: 'verificador' });
     }
-    return fin(render.salida);
+    return fin(conHecho(render.salida));
   }
-  return fin(caido(deps, e), { error: 'tope de llamados sin respuesta' });
+  return fin(caer(), { error: 'tope de llamados sin respuesta' });
 }
 
 // ── El toque de una propuesta (y el «sí» escrito solo), sin modelo ────────────
 
 export const TEXTO_YA_HECHO = 'Eso ya quedó hecho.';
 export const TEXTO_SIN_VIGENTE = 'Ese botón ya no está vigente: no hice nada.';
+/** Cuando el modelo repite la propuesta pendiente sin decir nada más: va arriba de la pendiente reenviada. No afirma nada. */
+export const TEXTO_PROPUESTA_PENDIENTE = 'Esto sigue esperando tu toque:';
 export const TEXTO_NO_PUDE = 'No pude hacerlo ahora: no se escribió nada. Toca de nuevo en un rato.';
 
 /** «sí» escrito solo, sin más palabras (como en #1056). Pura. */
@@ -308,13 +466,55 @@ export async function toqueDePropuesta(
   }
   try {
     const h = await deps.dominio.ejecutar(vig, e.ctx);
-    return salida({ tipo: 'texto', texto: h.lineas.join('\n') }, {
-      huella: toque.huella, accion: vig.accion, resultado: 'ejecutada', lineas: h.lineas, escrituras: h.escrituras, nombrados: h.nombrados, consumidos: h.consumidos,
-    }, { respuesta_fija: 'rf.hecho' });
+    const ejecucion = {
+      huella: toque.huella, accion: vig.accion, resultado: 'ejecutada' as const, lineas: h.lineas, escrituras: h.escrituras, nombrados: h.nombrados, consumidos: h.consumidos,
+    };
+    // Lo que ya se puede proponer con lo dicho (abrir un viaje → anotar lo que el comercial ya contó de él).
+    let sig: Awaited<ReturnType<NonNullable<Dominio['trasEjecutar']>>> = null;
+    try {
+      sig = deps.dominio.trasEjecutar ? await deps.dominio.trasEjecutar(vig, h, toque.huella, e.ctx) : null;
+    } catch (err) {
+      console.error('[agente] tras ejecutar:', err);
+    }
+    if (sig?.propuesta) {
+      const p = sig.propuesta;
+      const huella = await huellaPropuesta(p.accion, p.datos, e.turnoId);
+      const nueva: PropuestaGuardada = { ...p, huella, args_modelo: { accion: p.accion, datos: { viaje: p.datos.codigo }, origen: 'tras_ejecutar' } };
+      return salida(salidaPropuesta(nueva, sig.lineas.join('\n')), { ...ejecucion, lineas: sig.lineas }, { respuesta_fija: 'rf.hecho', propuesta: nueva });
+    }
+    const lineas = sig?.lineas ?? h.lineas;
+    const r = salida({ tipo: 'texto', texto: lineas.join('\n') }, { ...ejecucion, lineas }, { respuesta_fija: 'rf.hecho' });
+    return sig?.seguir ? { ...r, seguir: true } : r;
   } catch (err) {
     await deps.almacen.soltarCandado(clave);
     return salida({ tipo: 'texto', texto: TEXTO_NO_PUDE }, { huella: toque.huella, accion: vig.accion, resultado: 'error' }, { error: String(err).slice(0, 200) });
   }
+}
+
+/**
+ * El turno del modelo que sigue a un toque ejecutado (`toque.seguir`): la conversación ya con el hecho (el cliente creado
+ * es una ficha vista, la propuesta ya no está pendiente) y el estado diciendo qué acaba de pasar. El modelo decide si
+ * sigue; la salida es una sola: la confirmación arriba y lo que él siga debajo, o la confirmación sola. La traza es de
+ * tipo `modelo` (cuenta en el uso del mes) y conserva la `ejecucion` del toque, que es la que cierra la propuesta tocada.
+ */
+export async function seguirTrasToque(deps: DepsTurno, e: EntradaTurno, toque: SalidaTurno): Promise<SalidaTurno> {
+  const ej = toque.traza.ejecucion;
+  if (!toque.seguir || !ej || ej.resultado !== 'ejecutada') return toque;
+  const origen = toque.traza.tipo === 'si_escrito' ? 'si_escrito' : 'toque_propuesta';
+  // La fila que guardará la traza del toque es la última nueva: con el hecho puesto, la conversación es la de después.
+  const conHecho = e.nuevos.at(-1)?.id;
+  const filas = e.filas.map((f) => (f.id === conHecho ? { ...f, traza: toque.traza } : f));
+  const ctx: ContextoDominio = { ...e.ctx, conversacion: filas, resultadosPrevios: [...e.ctx.resultadosPrevios] };
+  const m = await turnoDelModelo(deps, { ...e, filas, ctx, tras: { lineas: ej.lineas ?? [], origen } });
+  return {
+    salida: m.salida,
+    traza: {
+      ...m.traza,
+      tipo: 'modelo',
+      ejecucion: ej,
+      ms_herramientas: (m.traza.ms_herramientas ?? 0) + (toque.traza.ms_herramientas ?? 0),
+    },
+  };
 }
 
 /** Para la traza de uso: los tokens del turno sumados por modelo. Pura. */

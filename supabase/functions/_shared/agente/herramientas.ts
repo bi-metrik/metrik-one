@@ -10,12 +10,23 @@ import type { DeclaracionHerramienta, Dominio, Reglamento } from './tipos.ts';
 
 export const CIERRAN = ['responder', 'proponer'];
 
+/** Lo que cierra el turno con este dominio: los del núcleo y los cierres que declare el dominio. */
+export function cierranCon(d: Pick<Dominio, 'cierres'>): string[] {
+  return [...CIERRAN, ...(d.cierres ?? []).map((c) => c.name)];
+}
+
 export function declaraciones(d: Dominio, r: Reglamento): DeclaracionHerramienta[] {
   // Las fichas de `proponer` van en su descripción: el turno se cierra al proponer, así que el modelo tiene que
   // tenerlas ANTES (las de las lecturas llegan con su resultado).
   const reglasProponer = fichasDeHerramienta(r, 'proponer');
+  // Los cierres del dominio también cierran el turno: sus fichas van en la descripción, como las de `proponer`.
+  const cierres = (d.cierres ?? []).map((c) => {
+    const reglas = fichasDeHerramienta(r, c.name);
+    return reglas.length ? { ...c, description: `${c.description}\nReglas:\n${reglas.join('\n')}` } : c;
+  });
   return [
     ...d.lecturas,
+    ...cierres,
     {
       name: 'consultar_reglas',
       description: 'Trae el detalle de fichas del índice del reglamento, por id o por tema. Solo lectura.',
@@ -31,6 +42,8 @@ export function declaraciones(d: Dominio, r: Reglamento): DeclaracionHerramienta
       name: 'proponer',
       description: [
         'La única puerta para escribir en ONE, y no escribe: el sistema arma un resumen con datos reales y lo manda con botones; se ejecuta solo si la persona toca «sí». Cierra el turno: no redactes después.',
+        'Si la persona además preguntó algo (p. ej. «¿ya tenemos algo abierto?»), la respuesta va en `texto`: sale arriba del resumen, en el mismo mensaje. Una pregunta sin contestar es un error.',
+        'Si la propuesta pendiente (en el Estado) ya es esta, no la repitas: contesta con `responder`.',
         `Acciones: ${d.acciones.join(', ')}.`,
         reglasProponer.length ? `Reglas al proponer:\n${reglasProponer.join('\n')}` : '',
       ].filter(Boolean).join('\n'),
@@ -39,6 +52,7 @@ export function declaraciones(d: Dominio, r: Reglamento): DeclaracionHerramienta
         properties: {
           accion: { type: 'string', enum: d.acciones },
           datos: { type: 'object', properties: d.datosProponer },
+          texto: { type: 'string', description: 'Opcional. La respuesta a lo que la persona preguntó en este mensaje (máximo 600 caracteres, mismas reglas que `responder`). No repitas el resumen: lo escribe el sistema.' },
           reglas_usadas: { type: 'array', items: { type: 'string' } },
         },
         required: ['accion', 'datos'],

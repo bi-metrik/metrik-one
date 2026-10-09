@@ -142,6 +142,9 @@ export async function emitirCuentaDesdeCuota(
   if (qErr || !cuotaData) return fallo(`Cuota ${planCuotaId} no encontrada`)
   const cuota = cuotaData as CuotaRow
   const workspaceId = cuota.workspace_id
+  // Una cuota en cero (usuarios adicionales de un período del Plan Anual de Valida, sin ninguno) no
+  // tiene nada que cobrar: no se emite una cuenta por $0.
+  if (!(Number(cuota.monto) > 0)) return fallo(`La cuota ${cuota.numero} vale $0: no se emite cuenta de cobro`)
 
   const { data: planData } = await supabase
     .from('planes_cobro')

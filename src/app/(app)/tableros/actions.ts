@@ -5,6 +5,7 @@ import { bogotaParts, todayBogotaISO } from '@/lib/dates/bogota'
 import { SECCIONALES_DIAN, canonizarSeccional } from '@/lib/dian/seccionales'
 import { resumirCartera } from '@/lib/negocios/cartera'
 import { STAGE_LABEL } from '@/lib/negocios/stage-label'
+import { rotularNombre } from '@/lib/equipo/inactivos'
 import type {
   ComercialData, OperativoData, FinancieroData,
   PipelineStage, RazonPerdida, OportunidadUrgente, RitmoPipeline, CanalAdquisicion,
@@ -540,12 +541,12 @@ export async function getOperativoData(_periodo: Periodo = 'mes'): Promise<Opera
       .eq('estado', 'abierto')
       .in('stage_actual', ['ejecucion', 'cobro']),
 
-    // Staff activo
+    // Staff: activo, o inactivo con horas en el mes (SOE-006, se filtra abajo). `is_active` es
+    // un estado de HOY y no puede borrar las horas que alguien registro antes de retirarse.
     supabase
       .from('staff')
-      .select('id, full_name, horas_disponibles_mes')
-      .eq('workspace_id', workspaceId)
-      .eq('is_active', true),
+      .select('id, full_name, horas_disponibles_mes, is_active')
+      .eq('workspace_id', workspaceId),
 
     // Horas del mes
     supabase
@@ -651,11 +652,13 @@ export async function getOperativoData(_periodo: Periodo = 'mes'): Promise<Opera
       horasPorStaff.set(h.staff_id, (horasPorStaff.get(h.staff_id) || 0) + Number(h.horas))
     }
   }
-  const productividadEquipo: StaffProductividad[] = staffList.map(s => {
+  const productividadEquipo: StaffProductividad[] = staffList
+    .filter(s => s.is_active !== false || horasPorStaff.has(s.id))
+    .map(s => {
     const registradas = horasPorStaff.get(s.id) || 0
     const disponibles = Number(s.horas_disponibles_mes || 160)
     return {
-      nombre: s.full_name || '',
+      nombre: rotularNombre(s.full_name || '', s.is_active === false),
       horasRegistradas: registradas,
       horasDisponibles: disponibles,
       utilizacion: disponibles > 0 ? (registradas / disponibles) * 100 : 0,

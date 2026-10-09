@@ -26,7 +26,7 @@ Memorias del motor de cotización y el documento del cliente de Trappvel (sacada
 - ⚠️ [Cotización con el negocio adentro (Trappvel)](project_cotizacion_con_negocio_trappvel.md) — #872 y #874; el marco de #874 lo reemplazó #882
 - [Año deducido y marco idéntico (#880, #882)](project_anio_inferido_y_marco_identico.md) — sufijo `/lun` verificado en vivo; 5 ítems del encabezado sin decidir
 - ⚠️ [Tarjeta de la opción Trappvel (#900, #901)](project_tarjeta_opcion_trappvel.md) — la hoja del cliente usa los textos del PDF, no los del prototipo
-- ⚠️ [Foto del hotel y fila de acciones (#907, #910)](project_foto_hotel_y_fila_de_acciones.md) — server action larga bloquea router.refresh; la foto reemplaza la de ciudad
+- ⚠️ [Foto del hotel y fila de acciones (#907, #910)](project_foto_hotel_y_fila_de_acciones.md) — server action larga bloquea router.refresh; solo la del hotel grande reemplaza la de ciudad; alternativas con foto desde 10-08
 - ⚠️ [Bandeja con borrador firmado (#889)](project_bandeja_borrador_firmado.md) — leer no escribe; H4 corrige fuera del JSON firmado
 - ⚠️ [Habitaciones por opción de hotel (R8)](project_habitaciones_hotel_r8.md) — unión en fila tras leer; sin QA en pantalla (prod se escribe al abrir)
 - ⚠️ [Captura de cotización, Parte A (#839)](project_captura_cotizacion_parte_a.md) — montos por `parseMontoCop`; la casilla no usa `isPending`
@@ -38,3 +38,5 @@ Memorias del motor de cotización y el documento del cliente de Trappvel (sacada
 - ⚠️ [Actividad por pantallazo, infante gratis](project_actividad_infante_gratis.md) — solo sin niños; la casilla tragaba excepciones; pegar sin foco cae en la bandeja
 - ⚠️⚠️ [Limpieza antes de presentar (2026-10-05)](project_limpieza_presentar_trappvel.md) — mergeado #1023 (95d3da8c); actividad en 3 estados sin columna; el día ya no es interruptor; COT-0018 −1 peso
 - ⚠️ [Actividades tras la limpieza (2026-10-05)](project_actividades_tras_limpieza.md) — actividad siempre abre bloque; Opcional guarda el día; los avisos de la lectura NUNCA se limpian y frenan el bloque
+- ⚠️ [Espacio y paginación §4.11 (2026-10-08)](project_paginacion_pdf_trappvel.md) — compone en hasta 4 renders midiendo el PDF; Aire, no marginTop; paso 3 casi inerte
+- ⚠️ [Vuelos de punta a punta (2026-10-08)](project_vuelos_punta_a_punta.md) — COT-0025 no reproduce; vuelo con check va/no va; medir vuelos con entra_al_precio=false antes del merge

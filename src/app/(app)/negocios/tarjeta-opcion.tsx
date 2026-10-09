@@ -18,13 +18,14 @@ import {
 import { comprimirFotoHotel } from '@/lib/cotizaciones/foto-hotel-navegador'
 import HojaCliente from '@/app/(app)/negocios/hoja-cliente'
 import TarjetaCosto from '@/app/(app)/negocios/tarjeta-costo'
+import PastillaAerolinea from '@/app/(app)/negocios/pastilla-aerolinea'
 import { AlertaDecision } from '@/components/viaje/alerta-decision'
 import { BTN, BTN_PRIM, INPUT } from '@/components/viaje/estilo'
 import { ItemMenu, MenuAcciones, SeparadorMenu } from '@/components/viaje/menu-acciones'
 import { Miniatura, MiniaturaManual, useVistaAmpliada } from '@/components/viaje/pantallazo'
 import type { FilaAdicional } from '@/lib/cotizaciones/adicionales'
 import { aplicarCorrecciones, esCorregible, leerCorrecciones, leidosPorSlug } from '@/lib/cotizaciones/correcciones'
-import { cargoDeItem, hotelesDeItems, type ItemConLectura } from '@/lib/cotizaciones/detalle-viaje'
+import { cargoDeItem, hotelesDeItems, vuelosDeItems, type ItemConLectura } from '@/lib/cotizaciones/detalle-viaje'
 import {
   costoPorTipoDeHabitaciones,
   habitacionesDeTarifa,
@@ -70,7 +71,7 @@ import {
 import { datosManuales, esManual, montoConMiles } from '@/lib/cotizaciones/ingreso-manual'
 import { nombreVisibleDeLinea } from '@/lib/cotizaciones/nombre-visible'
 import { CheckVa, ModoYDia, useActividad, type ActividadDeTarjeta } from '@/app/(app)/negocios/actividad-control'
-import { TEXTO_ACTIVIDAD_NO_VA } from '@/lib/cotizaciones/actividad-en-cotizacion'
+import { TEXTO_ACTIVIDAD_NO_VA, TEXTO_VUELO_NO_VA } from '@/lib/cotizaciones/actividad-en-cotizacion'
 
 /**
  * La tarjeta de una opción de viaje (prototipo aprobado por Mauricio el 2026-09-24,
@@ -225,8 +226,9 @@ export default function TarjetaOpcion({
   onGuardarNota: (texto: string) => void
   onCambio: () => void
   /**
-   * Solo actividades (brief del 2026-10-05, punto 0): si va en la cotización, Incluida u Opcional,
-   * y su día. `null` en vuelo, hotel y traslado, que se ven como siempre.
+   * Actividades (brief del 2026-10-05, punto 0): si va en la cotización, Incluida u Opcional,
+   * y su día. Vuelos (brief del 2026-10-08): solo el check (`soloVa`). `null` en hotel y
+   * traslado, que se ven como siempre.
    */
   actividad?: ActividadDeTarjeta | null
 }) {
@@ -243,6 +245,8 @@ export default function TarjetaOpcion({
   const esActividad = ranura?.slug === 'actividad_detalle'
   const esVuelo = ranura?.slug === 'vuelo_detalle'
   const [hotel] = esHotel ? hotelesDeItems([item]) : [null]
+  // La pastilla de la aerolínea en la cabecera, la misma del PDF (brief del 2026-10-08).
+  const [vuelo] = esVuelo ? vuelosDeItems([item]) : [null]
   const nombre = (esHotel ? hotel?.hotel : null) || nombreVisibleDeLinea(item) || `Opción ${numero}`
   const estrellas = esHotel ? hotel?.estrellas ?? null : null
 
@@ -386,6 +390,7 @@ export default function TarjetaOpcion({
           <span className="min-w-0">
             <span className="block text-xs font-semibold text-[#6E6A62]">Opción {numero}</span>
             <span className="flex flex-wrap items-center gap-1.5 text-base font-bold">
+              {vuelo && <PastillaAerolinea aerolinea={vuelo.aerolinea} numeroVuelo={vuelo.numeroVuelo} />}
               {nombre}
               {estrellas ? <span className="text-xs tracking-[1px] text-[#C98A00]" aria-label={`${estrellas} estrellas`}>{'★'.repeat(estrellas)}</span> : null}
             </span>
@@ -425,7 +430,12 @@ export default function TarjetaOpcion({
         />
       </div>
 
-      {actividad && (
+      {actividad?.soloVa && noVa && (
+        <div className="-mt-1 pb-2.5 pl-[50px] pr-3" data-vuelo-control>
+          <p className="m-0 text-xs font-semibold text-[#6E6A62]" data-vuelo-no-va>{TEXTO_VUELO_NO_VA}</p>
+        </div>
+      )}
+      {actividad && !actividad.soloVa && (
         <div className="-mt-1 pb-2.5 pl-[50px] pr-3" data-actividad-control>
           <ModoYDia
             estado={act.estado}
@@ -508,7 +518,8 @@ export default function TarjetaOpcion({
               hoja: la línea de «Inversión» del documento y, en el vuelo, sus filas de la tabla
               «Vuelos». Su nota se sigue escribiendo aparte, encima. */}
           {!esHotel && nota}
-          {(esHotel || esTraslado || esActividad || esVuelo) && <HojaCliente
+          {/* Lo que no va no se le muestra al cliente: tampoco aquí (brief del 2026-10-08). */}
+          {(esHotel || esTraslado || esActividad || esVuelo) && !noVa && <HojaCliente
             item={item}
             numero={numero}
             bloqueTitulo={bloqueTitulo}

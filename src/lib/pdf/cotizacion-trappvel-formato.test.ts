@@ -484,14 +484,14 @@ describe('la tabla de vuelos, entera o partida con su encabezado', () => {
   const conEscala = { conEscala: true, conTarifa: false }
   const nota = 'Tarifa Basic · 1 artículo personal'
 
-  it('calibrado contra el render: un tramo con escala y nota, 43 pt; ida y regreso, 67', () => {
-    expect(altoEstimadoDeGrupoDeVuelos({ filas: [conEscala], meta: nota }, ANCHO_META)).toBeCloseTo(43, 0)
-    expect(altoEstimadoDeGrupoDeVuelos({ filas: [conEscala, conEscala], meta: nota }, ANCHO_META)).toBeCloseTo(67, 0)
+  it('calibrado contra el render: un tramo con escala y nota, 38 pt; ida y regreso, 60', () => {
+    expect(altoEstimadoDeGrupoDeVuelos({ filas: [conEscala], meta: nota }, ANCHO_META)).toBeCloseTo(38, 0)
+    expect(altoEstimadoDeGrupoDeVuelos({ filas: [conEscala, conEscala], meta: nota }, ANCHO_META)).toBeCloseTo(60, 0)
   })
 
   it('una fila nunca mide menos que la píldora de la sigla', () => {
     const sola = altoEstimadoDeGrupoDeVuelos({ filas: [ida], meta: '' }, ANCHO_META)
-    expect(sola).toBe(12 + 14)
+    expect(sola).toBe(8 + 14)
   })
 
   it('la marca de la tarifa, la escala y una nota larga lo hacen crecer', () => {
@@ -512,7 +512,7 @@ describe('la tabla de vuelos, entera o partida con su encabezado', () => {
   })
 
   it('el borde es el de las listas del cierre, con título y encabezado incluidos', () => {
-    const resto = ALTO_MAXIMO_COLUMNA - 60 - ALTO_ENCABEZADO_VUELOS
+    const resto = ALTO_MAXIMO_COLUMNA - 74 - ALTO_ENCABEZADO_VUELOS
     expect(tablaDeVuelosVaEntera([resto])).toBe(true)
     expect(tablaDeVuelosVaEntera([resto + 0.5])).toBe(false)
   })

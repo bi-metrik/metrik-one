@@ -37,6 +37,11 @@ export interface ActividadDeTarjeta {
   precioPorPersona: string | null
   /** Cómo era antes de quitarle el check (`tarifa_pax.noVa`), para pintar la vuelta en el acto. */
   era: 'incluida' | 'opcional' | null
+  /**
+   * Un VUELO (brief del 2026-10-08): solo el check, sin Incluida/Opcional ni día. Quitado no
+   * suma, no entra a ninguna tarifa ni sale en el documento.
+   */
+  soloVa?: boolean
 }
 
 /** El estado que se pinta: lo pedido mientras el servidor no lo confirme, y si no, el guardado. */

@@ -37,6 +37,14 @@ import { canonizarSeccional } from '@/lib/dian/seccionales'
 import { VentasDrawer, type CifraSeleccionada } from './ventas-drawer'
 import { PerdidosDrawer } from './perdidos-drawer'
 import { PagosDrawer, type MesSeleccionado } from './pagos-drawer'
+import { SegundoPagoDrawer } from './segundo-pago-drawer'
+import { getSegundoPagoMes } from '../segundo-pago-actions'
+import {
+  notaSegundoPago,
+  segundoPagoDeVentas,
+  type CifraSegundoPago,
+  type SegundoPagoMes,
+} from '@/lib/tableros/segundo-pago'
 import { origenNegocioLabel } from '@/lib/catalogos/constants'
 import { PALETA } from '@/lib/marca/paleta'
 
@@ -116,6 +124,11 @@ export interface TabComercialSoenaProps {
   /** Corte del mes por plan de pago (50/50, 100% anticipado, sin declarar). */
   planPagoInicial: ComercialPlanPagoMes | null
   /**
+   * Las dos cifras de segundo pago del mes (SOE-002), de la misma RPC que lee Dirección.
+   * `null` = no se pudo traer: el panel cae a la cifra de los KPIs.
+   */
+  segundoPagoInicial: SegundoPagoMes | null
+  /**
    * Capacidad mensual por seccional (punto #43). `null` = la linea no declaro de
    * donde sale cada serie, y entonces la seccion no se dibuja.
    */
@@ -151,6 +164,7 @@ export function TabComercialSoena({
   origenInicial,
   seccionalInicial,
   planPagoInicial,
+  segundoPagoInicial,
   capacidad,
   serie,
   serieSeccional,
@@ -168,6 +182,10 @@ export function TabComercialSoena({
   const [origen, setOrigen] = useState<ComercialOrigenMes | null>(origenInicial)
   const [seccional, setSeccional] = useState<ComercialSeccionalMes | null>(seccionalInicial)
   const [planPago, setPlanPago] = useState<ComercialPlanPagoMes | null>(planPagoInicial)
+  const [segundoPago, setSegundoPago] = useState<SegundoPagoMes | null>(segundoPagoInicial)
+  // Qué cifra de segundo pago se abrió. Va aparte de `cifra`: su lista llega con la cifra
+  // y no es un corte de las ventas del mes (el recibido viene de ventas de otros meses).
+  const [segundoAbierto, setSegundoAbierto] = useState<CifraSegundoPago | null>(null)
   const [metasModalOpen, setMetasModalOpen] = useState(false)
   const [pending, startTransition] = useTransition()
   // Qué cifra se abrió. `null` = panel cerrado. Se monta con `key` para que al pasar de
@@ -206,24 +224,27 @@ export function TabComercialSoena({
    * vendedor ni de quitar el filtro.
    */
   function irAlMes(na: number, nm: number, recorte?: RecorteVendedor) {
+    setSegundoAbierto(null)
     setMes(nm)
     setAnio(na)
     const prev = nm === 1 ? { a: na - 1, m: 12 } : { a: na, m: nm - 1 }
     startTransition(async () => {
       // Las tres consultas van juntas: si la comparación llegara después, el panel
       // mostraría por un instante los deltas del mes anterior sobre las cifras nuevas.
-      const [d, p, o, sec, plan] = await Promise.all([
+      const [d, p, o, sec, plan, sp] = await Promise.all([
         getComercialMes(na, nm),
         getComercialMes(prev.a, prev.m),
         getComercialOrigenMes(na, nm, recorte),
         getComercialSeccionalMes(na, nm, recorte),
         getComercialPlanPagoMes(na, nm, recorte),
+        getSegundoPagoMes(na, nm),
       ])
       setMesData(d)
       setMesPrevio(p)
       setOrigen(o)
       setSeccional(sec)
       setPlanPago(plan)
+      setSegundoPago(sp)
     })
   }
 
@@ -334,12 +355,48 @@ export function TabComercialSoena({
    * tablero no los mostraba en ninguna parte visible.
    */
   const filaPlan1 = planPago?.filas.find((f) => f.plan_pago === 1) ?? null
+
+  /**
+   * El segundo pago de un conjunto de ventas del mes (una fila del corte por seccional o
+   * por plan), sumado de la lista de la cifra del panel. Sin esa lista, el de la fila.
+   */
+  const segundoPagoDeIds = (ids: string[], deLaFila: number) => {
+    if (!segundoPago) return deLaFila
+    const conjunto = new Set(ids)
+    return segundoPagoDeVentas(segundoPago, (c) => conjunto.has(c.negocio_id))
+  }
+  const seccionalVista: ComercialSeccionalMes | null = seccional && {
+    ...seccional,
+    filas: seccional.filas.map((f) => ({ ...f, segundo_pago: segundoPagoDeIds(f.negocio_ids, f.segundo_pago) })),
+  }
+  const planPagoVista: ComercialPlanPagoMes | null = planPago && {
+    ...planPago,
+    filas: planPago.filas.map((f) => ({
+      ...f,
+      // `null` fuera del plan 1 se conserva: ahí el tramo no existe o no se sabe.
+      segundo_pago: f.segundo_pago === null ? null : segundoPagoDeIds(f.negocio_ids, f.segundo_pago),
+    })),
+  }
+
+  // La cifra de cohorte. Sin la RPC de segundo pago cae a la de los KPIs (la misma
+  // definición, sin el umbral de migajas); la de caja, en ese caso, no se pinta.
+  const segundoDeVentas = segundoPago ? segundoPago.de_ventas_del_mes.total : kpis?.segundo_pago ?? 0
   const mesSinVentas5050 = filaPlan1 !== null && filaPlan1.ventas === 0
 
   // Quien lidera el equipo toma casos especiales pero no compite: va listado aparte, al
   // pie de la tabla, para no mezclarlo con la comparacion entre quienes ejecutan. Sus
   // cifras SI cuentan en el TOTAL, que es el del equipo entero.
-  const porVendedor = mesData?.porVendedor ?? []
+  //
+  // SOE-002: la columna "2o pago" se suma de la MISMA lista que la cifra del panel
+  // («2º pago de las ventas de este mes»), así fila, total y panel no pueden discrepar y
+  // una venta cuyo tramo 2 es solo un sobrante de centavos vale cero aquí también.
+  const porVendedor = (mesData?.porVendedor ?? []).map((v) => segundoPago
+    ? {
+        ...v,
+        segundo_pago: segundoPagoDeVentas(segundoPago, (c) =>
+          v.sin_responsable ? c.responsable_id === null : c.responsable_id === v.responsable_id),
+      }
+    : v)
   const vendedoresMes = porVendedor.filter((v) => !v.es_lider)
   const lideresMes = porVendedor.filter((v) => v.es_lider)
 
@@ -671,24 +728,39 @@ export function TabComercialSoena({
                onAbrir={kpis.num_ventas > 0 ? () => abrirVentas({
                  titulo: `Valor vendido · ${MESES_ES[mes - 1]} ${anio}`,
                }) : undefined} />
-          {/* ⚠️ El segundo pago existía, se calculaba bien y no estaba en ninguna parte
-              donde alguien fuera a buscarlo: en julio de 2026 entraron $850.000 (V0025 y
-              V0099) y el tablero dejó leer "no hubo segundos pagos". Se muestra al lado
-              del valor vendido, y en RAYA cuando el mes no tuvo ni una venta 50/50 —
-              ahí un $0 no mide nada, porque no había segundo tramo que pagar. */}
-          <Kpi label="2º pago" value={mesSinVentas5050 ? '—' : fmtCompact(kpis.segundo_pago)}
+          {/* ⚠️ SOE-002. "2º pago" eran dos preguntas con un solo nombre: este tablero
+              contaba lo que pagaron las ventas DEL mes y Dirección lo que ENTRÓ en el mes.
+              En septiembre de 2026 una decía $29 y la otra $2.053.118. Ahora van las dos,
+              con nombre y con la nota de dónde sale cada una, y salen de la misma RPC que
+              lee Dirección.
+              La de cohorte va en RAYA cuando el mes no tuvo ni una venta 50/50: ahí un $0
+              no mide nada, porque no había segundo tramo que pagar. */}
+          {segundoPago && (
+            <Kpi label="2º pago recibido este mes" value={fmtCompact(segundoPago.recibido.total)}
+                 color={OCRE}
+                 sub={segundoPago.recibido.total > 0
+                   ? `${fmtCompact(segundoPago.recibido.de_ventas_del_mes)} de ventas de este mes · ${fmtCompact(segundoPago.recibido.de_ventas_anteriores)} de meses anteriores`
+                   : 'no entró ningún segundo pago'}
+                 nota={notaSegundoPago('recibido', segundoPago.umbral_migaja)}
+                 delta={delta(segundoPago.recibido.total, segundoPago.anterior.recibido)}
+                 onAbrir={segundoPago.recibido.negocios > 0 ? () => setSegundoAbierto('recibido') : undefined} />
+          )}
+          <Kpi label="2º pago de las ventas de este mes" value={mesSinVentas5050 ? '—' : fmtCompact(segundoDeVentas)}
                color={mesSinVentas5050 ? undefined : OCRE}
                sub={mesSinVentas5050
                  ? 'ninguna venta 50/50 este mes'
                  : filaPlan1
                    ? `de ${filaPlan1.ventas} venta${filaPlan1.ventas === 1 ? '' : 's'} 50/50`
                    : 'solo las ventas 50/50 tienen segundo tramo'}
-               delta={mesSinVentas5050 ? null : delta(kpis.segundo_pago, kpisPrev?.segundo_pago)}
-               onAbrir={filaPlan1 && filaPlan1.ventas > 0 ? () => abrirVentas({
-                 titulo: `Ventas 50/50 · ${MESES_ES[mes - 1]} ${anio}`,
-                 alcance: 'las únicas que pueden tener un segundo pago',
-                 negocioIds: filaPlan1.negocio_ids,
-               }) : undefined} />
+               nota={segundoPago
+                 ? notaSegundoPago('de_ventas_del_mes', segundoPago.umbral_migaja)
+                 : 'Por mes de venta, pagado cuando sea · sin IVA · solo ventas 50/50'}
+               delta={mesSinVentas5050 ? null : segundoPago
+                 ? delta(segundoPago.de_ventas_del_mes.total, segundoPago.anterior.de_ventas_del_mes)
+                 : delta(kpis.segundo_pago, kpisPrev?.segundo_pago)}
+               onAbrir={segundoPago && segundoPago.de_ventas_del_mes.negocios > 0
+                 ? () => setSegundoAbierto('de_ventas_del_mes')
+                 : undefined} />
           <Kpi label="Ticket promedio" value={fmtCompact(kpis.ticket_promedio)}
                delta={delta(kpis.ticket_promedio, kpisPrev?.ticket_promedio)} />
           <Kpi label="Ventas bonificables" value={kpis.bonificables === null ? '—' : String(kpis.bonificables)}
@@ -742,7 +814,7 @@ export function TabComercialSoena({
                   <th className="px-4 py-3 text-right">Valor (sin IVA)</th>
                   <th className="hidden px-4 py-3 text-right md:table-cell">Valor (con IVA)</th>
                   <th className="hidden px-4 py-3 text-right sm:table-cell">1er pago</th>
-                  <th className="hidden px-4 py-3 text-right sm:table-cell">2o pago</th>
+                  <th className="hidden px-4 py-3 text-right sm:table-cell" title="2º pago de las ventas de este mes: por mes de venta, pagado cuando sea, sin IVA">2o pago</th>
                   <th className="px-4 py-3 text-right" title="Ventas que pasaron el umbral del proceso: es la cifra que bonifica">Bonificables</th>
                   <th className="hidden px-4 py-3 text-right md:table-cell" title="Ventas cuyo honorario aprobado ya quedó cubierto por el recaudo">Hon. cubierto</th>
                   <th className="hidden px-4 py-3 text-right sm:table-cell">Particip.</th>
@@ -836,8 +908,11 @@ export function TabComercialSoena({
                       {fmtCOP(kpis.primer_pago)}
                     </CeldaAbrible>
                     <CeldaAbrible className="hidden px-4 py-3 text-right tabular-nums sm:table-cell"
-                      onAbrir={abrirTodasDelMes} title="Ver todas las ventas del mes">
-                      {fmtCOP(kpis.segundo_pago)}
+                      onAbrir={segundoPago && segundoPago.de_ventas_del_mes.negocios > 0
+                        ? () => setSegundoAbierto('de_ventas_del_mes')
+                        : abrirTodasDelMes}
+                      title="Ver los segundos pagos de las ventas del mes">
+                      {fmtCOP(segundoDeVentas)}
                     </CeldaAbrible>
                     <CeldaAbrible className="px-4 py-3 text-right tabular-nums"
                       onAbrir={abrirBonificablesDelMes} title="Ver las ventas que pasaron el umbral del proceso">
@@ -893,9 +968,9 @@ export function TabComercialSoena({
 
       {/* El mes abierto por seccional DIAN (punto #22). Mauricio: seccional tal cual,
           sin agrupar en regiones. */}
-      {seccional && seccional.total_ventas > 0 && (
+      {seccionalVista && seccionalVista.total_ventas > 0 && (
         <SeccionSeccional
-          datos={seccional}
+          datos={seccionalVista}
           mesLabel={`${MESES_ES[mes - 1]} ${anio}`}
           onAbrir={(f) => abrirVentas({
             titulo: `Ventas · ${f.seccional ?? 'Sin seccional registrada'}`,
@@ -908,9 +983,9 @@ export function TabComercialSoena({
 
       {/* El mes abierto por plan de pago. Es lo que da sentido a la casilla "2o pago":
           en plan 2 vale cero PORQUE no existe el tramo, no porque nadie haya pagado. */}
-      {planPago && planPago.total_ventas > 0 && (
+      {planPagoVista && planPagoVista.total_ventas > 0 && (
         <SeccionPlanPago
-          datos={planPago}
+          datos={planPagoVista}
           mesLabel={`${MESES_ES[mes - 1]} ${anio}`}
           onAbrir={(f) => abrirVentas({
             titulo: `Ventas · ${planPagoLabel(f.plan_pago)}`,
@@ -1064,14 +1139,19 @@ export function TabComercialSoena({
                 encima en los meses en que hubo alguno — una barra de seis pixeles con
                 su numero al lado si se puede leer; cambiar la escala para agrandarla
                 mentiria sobre la proporcion, que es real. */}
-            <ChartCard title="Primer vs segundo pago por mes">
+            {/* Esta serie es de CAJA: cada barra suma lo que entró en ese mes. Es la cifra
+                «2º pago recibido este mes» del panel, no la de las ventas del mes, y se
+                dice en el título para que nadie compare la barra contra la otra. Llega ya
+                sin los sobrantes de centavos (`sinSobrantes` en la página), así la barra
+                del mes y la cifra del panel dan lo mismo. */}
+            <ChartCard title="Primer vs segundo pago recibido por mes">
               <ResponsiveContainer width="100%" height={220}>
                 <BarChart data={serieData} margin={{ left: -4, right: 12, top: 18 }} {...propsSerieConPagos}>
                   <CartesianGrid vertical={false} stroke="#F3F4F6" />
                   <XAxis dataKey="label" tick={{ fontSize: 11, fill: PALETA.tintaSuave }} tickLine={false} axisLine={false} />
                   <YAxis tick={{ fontSize: 11, fill: PALETA.tintaSuave }} tickLine={false} axisLine={false} tickFormatter={fmtCompact} width={48} />
                   <Tooltip
-                    formatter={(v, name) => [fmtCOP(Number(v)), name === 'primer_pago' ? '1er pago' : '2o pago']}
+                    formatter={(v, name) => [fmtCOP(Number(v)), name === 'primer_pago' ? '1er pago recibido' : '2o pago recibido']}
                     labelFormatter={pistaDeRecaudo}
                   />
                   <Bar dataKey="primer_pago" fill={GREEN} radius={[4, 4, 0, 0]} />
@@ -1089,8 +1169,14 @@ export function TabComercialSoena({
                 </BarChart>
               </ResponsiveContainer>
               <p className="mt-1 text-[11px] text-gray-500">
+                Por fecha de pago, sin IVA: lo que entró en cada mes, de ventas de cualquier mes.
                 Solo las ventas 50/50 tienen segundo pago; en las de 100% anticipado no hay
-                segundo tramo que cobrar.
+                segundo tramo que cobrar.{' '}
+                {/* SOE-002: la página resta los sobrantes de centavos antes de pintar; si
+                    no los pudo traer, la nota no puede afirmar que los descartó. */}
+                {serie?.umbral_sobrantes != null
+                  ? `Igual que el panel, no cuenta como segundo pago un abono menor a ${fmtCOP(serie.umbral_sobrantes)} (sobrante de redondeo del primer pago); esos pesos sí están en el recaudo.`
+                  : 'Aquí no se descartan los sobrantes de centavos que el panel no cuenta como segundo pago.'}
               </p>
             </ChartCard>
           </div>
@@ -1115,6 +1201,15 @@ export function TabComercialSoena({
           key={`${cifra.anio}-${cifra.mes}-${cifra.responsableId ?? 'todos'}-${cifra.sinResponsable ? 'sr' : ''}-${String(cifra.soloCompletos)}-${cifra.dia ?? ''}-${cifra.campana ?? 'todas'}`}
           cifra={cifra}
           onClose={() => setCifra(null)}
+        />
+      )}
+
+      {segundoAbierto && segundoPago && (
+        <SegundoPagoDrawer
+          key={`segundo-${segundoPago.anio}-${segundoPago.mes}-${segundoAbierto}`}
+          datos={segundoPago}
+          cifra={segundoAbierto}
+          onClose={() => setSegundoAbierto(null)}
         />
       )}
 
@@ -1310,10 +1405,12 @@ function FilaVendedor({ v, seleccionado, onElegir, onAbrir }: {
   )
 }
 
-function Kpi({ label, value, sub, color, delta: variacion, onAbrir }: {
+function Kpi({ label, value, sub, nota, color, delta: variacion, onAbrir }: {
   label: string
   value: string
   sub?: string
+  /** De dónde sale la cifra (fecha de pago o mes de venta, IVA, plan). Va al pie. */
+  nota?: string
   color?: string
   delta?: { texto: string; bueno: boolean | null } | null
   onAbrir?: () => void
@@ -1323,6 +1420,7 @@ function Kpi({ label, value, sub, color, delta: variacion, onAbrir }: {
       <p className="text-[11px] font-bold uppercase tracking-wide text-gray-400">{label}</p>
       <p className="mt-1 text-xl font-bold tabular-nums text-gray-900" style={color ? { color } : undefined}>{value}</p>
       {sub && <p className="mt-0.5 text-[11px] text-gray-400">{sub}</p>}
+      {nota && <p className="mt-1 text-[10px] italic leading-snug text-gray-400">{nota}</p>}
       {/* Sin comparable no se pinta nada: una raya o un 0% se leerían como "no cambió". */}
       {variacion && (
         <p

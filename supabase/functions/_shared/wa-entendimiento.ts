@@ -18,6 +18,7 @@
 // ============================================================
 
 import { sendTextMessage } from './wa-respond.ts';
+import { pedirCorreoAutorizacionAlCrear } from './autorizacion-al-crear.ts';
 import { anotarConsultaPendiente, anotarFoco, pedidosDeLaCarga, leerConversacion, viajeEnFoco } from './wa-foco.ts';
 import { enviarConBotones, enviarPunto } from './wa-enviar-botones.ts';
 import { CANONICO_NO_ES_NUEVO, leerConfirmacionNuevoCanonica, puntoDelContacto, puntoDelNuevo, puntoDelResumen, puntoDelViaje } from './wa-decision-reglas.ts';
@@ -393,6 +394,9 @@ export async function crearNegocio(
     contenido: ['Solicitud entendida desde WhatsApp. Los datos llegan como sugeridos hasta que alguien los confirme.', p.salida.historia].filter(Boolean).join('\n\n'),
   });
   if (eA) console.error(`[wa-entendimiento] negocio ${negocioId} sin historia en el timeline:`, eA.message);
+
+  // El correo con el link de autorización de datos, si el workspace lo encendió (lo manda la app).
+  await pedirCorreoAutorizacionAlCrear(supabase, p.workspaceId, negocioId);
 
   return { negocioId, valores };
 }

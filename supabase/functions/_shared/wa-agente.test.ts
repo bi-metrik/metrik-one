@@ -78,6 +78,14 @@ describe('atenderConAgente', () => {
     expect(await entra({ agente: false, agente_telefonos: ['573209219444'] }, '573209219444')).toEqual({ resultado: false, consultas: [] })
   })
 
+  // La configuración del número de prueba del 2026-10-07 (teléfono inventado), con la llave de corte nueva: el
+  // interruptor manda. Apagado, ni `agente_config.corte_ms` ni la lista hacen entrar a nadie.
+  it('config de la falla del 2026-10-07: prendido entra al núcleo, apagado sigue el camino de hoy sin consultas', async () => {
+    const config = { hibrido: true, agente_telefonos: ['573000009444'], agente_config: { corte_ms: 4000 } }
+    expect((await entra({ ...config, agente: true }, '573000009444')).consultas).toEqual(['bot_reglamentos'])
+    expect(await entra({ ...config, agente: false }, '573000009444')).toEqual({ resultado: false, consultas: [] })
+  })
+
   it('la traza de la carga cabe en el CHECK de 280 de activity_log', async () => {
     const { cortarContenido } = await import('./agente/produccion.ts')
     expect(cortarContenido('a'.repeat(279))).toBe('a'.repeat(279))

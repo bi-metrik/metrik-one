@@ -38,7 +38,6 @@ import {
   Wrench,
   Brain,
 } from 'lucide-react'
-import { createClient } from '@/lib/supabase/client'
 import { useState } from 'react'
 import FAB from './fab'
 import { PlatformAdminBar } from '@/components/platform-admin-bar'
@@ -450,6 +449,8 @@ export default function AppShell({
   const [menuPerfilAbierto, setMenuPerfilAbierto] = useState(false)
 
   const handleSignOut = async () => {
+    // Bajo demanda: el cliente de Supabase no viaja en la primera carga (2026-10-07).
+    const { createClient } = await import('@/lib/supabase/client')
     const supabase = createClient()
     await supabase.auth.signOut()
     window.location.href = '/'

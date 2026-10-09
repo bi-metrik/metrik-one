@@ -11,9 +11,18 @@
 // decidir si la secuencia avanza. Los envios de WhatsApp viven en `objetos-flujo.ts` (ese
 // importa `wa-respond.ts`, que toca `Deno.env` y no se puede colectar desde vitest).
 //
-// Por que el regreso depende del toque de la persona y no de un empujon del servidor: cada
-// mensaje que ella manda abre la ventana de servicio de Meta, asi que esta secuencia NO
-// necesita plantilla aprobada ni ventana de 24h. No meter un envio proactivo en el camino.
+// EL REGRESO AL CHAT YA NO DEPENDE DEL TOQUE DE LA PERSONA (cambio del 2026-10-07). La
+// primera version hacia que la pagina abriera un `wa.me` con el texto `Listo ...` prellenado
+// y el bot avanzaba al leerlo. Medido con un telefono real: desde el navegador interno de
+// WhatsApp un `wa.me` NO devuelve a la conversacion, RELANZA la app — la persona aterriza en
+// el chat pero no donde salio, y el hilo se siente roto. Ahora la pagina le dice que cierre
+// la ventana (el cierre nativo del navegador interno la deja exactamente donde estaba) y el
+// bot continua solo cuando le llega el POST a `cardumen-ingesta`. El texto queda como salida
+// de EMERGENCIA, por si el POST no sale. Ver `objetos-post.ts`.
+//
+// Esto no obliga a plantilla: la persona escribio al bot minutos antes para recibir el link,
+// asi que la ventana de servicio de Meta esta abierta. Lo que SI obliga es a contener la
+// ingesta, que es publica y sin autenticacion — las invariantes estan en `objetos-post.ts`.
 //
 // REGLA METODOLOGICA QUE ATRAVIESA TODO EL MODULO: los enunciados son LITERALES del spec y
 // las respuestas se guardan VERBATIM. El bot no parafrasea la pregunta, no resume el relato,
@@ -360,6 +369,21 @@ export interface EstadoObjetos {
   paso: number;            // indice del paso PENDIENTE dentro de spec.pasos
   recibidos: string[];     // ids ya registrados, en orden de llegada
   repreguntados?: string[]; // ids de relato a los que ya se les repregunto UNA vez
+  /**
+   * Ids de reparto cuyo avance YA empujo el POST de la pagina a `cardumen-ingesta`.
+   *
+   * Es la idempotencia entre las DOS vias de regreso. Desde el 2026-10-07 el bot continua
+   * solo cuando llega el POST (el `wa.me` no devuelve al chat desde el navegador interno de
+   * WhatsApp: relanza la app y la persona queda fuera del hilo). El texto `Listo ...` sigue
+   * en pie como salida de EMERGENCIA, para cuando el POST se cae. Si las dos llegan, la
+   * segunda no puede avanzar un segundo paso ni dejar una segunda fila: esta lista es lo que
+   * hace que el texto que llega DESPUES del POST no haga nada.
+   */
+  por_post?: string[];
+  /** Envios disparados por el POST en la ventana vigente. Ver `contarEnvioPorPost`. */
+  post_envios?: number;
+  /** Momento (ISO) en que abrio la ventana de conteo de arriba. */
+  post_ventana?: string;
 }
 
 /**
@@ -455,6 +479,12 @@ export type DecisionObjetos =
   | { tipo: "no_entendido"; pendiente: PasoQueEspera }
   /** Relato de una o dos palabras: UNA repregunta suave y se sigue pase lo que pase. */
   | { tipo: "repregunta"; pendiente: PasoRelato; estado: EstadoObjetos }
+  /**
+   * El reparto que trae el texto ya lo atendio el POST: no se escribe, no se envia, no se
+   * avanza. Es el otro extremo de `por_post` y la mitad del punto (b) del encargo: el texto
+   * es la salida de emergencia, y si la via buena ya corrio el texto no puede repetir el paso.
+   */
+  | { tipo: "ya_atendido"; paso: PasoReparto }
   /** Llego un reparto valido que NO es el pendiente (link viejo): se registra, no se retrocede. */
   | { tipo: "fuera_de_secuencia"; paso: PasoReparto; reparto: RepartoLeido; repetido: boolean; pendiente: PasoQueEspera }
   /**
@@ -543,6 +573,12 @@ function decidirReparto(
   paso: PasoReparto,
   reparto: RepartoLeido,
 ): DecisionObjetos {
+  // El POST de la pagina ya atendio este reparto: el texto no repite nada. Va ANTES del
+  // chequeo de la cantidad de numeros a proposito — un texto mutilado de un paso ya atendido
+  // tampoco tiene que provocar un "no te entendi" sobre un paso que ya paso.
+  if ((estado.por_post ?? []).includes(paso.id)) {
+    return { tipo: "ya_atendido", paso };
+  }
   // Cantidad de numeros declarada y no coincide: el mensaje viene mutilado (o es de otra
   // version del instrumento). No se registra un vector de largo equivocado.
   if (paso.opciones !== null && reparto.porcentajes.length !== paso.opciones) {
@@ -560,15 +596,29 @@ function decidirReparto(
   return avanzar(spec, estado, paso, { tipo: "reparto", reparto });
 }
 
-function avanzar(
+/**
+ * El avance de la secuencia desde el paso que se acaba de responder: los `bot` que vienen,
+ * el proximo paso que espera respuesta (null = era el ultimo) y el estado ya movido.
+ *
+ * UNA sola fuente para las DOS vias de regreso (el texto `Listo ...` y el POST de la pagina
+ * a `cardumen-ingesta`). La aritmetica del indice es lo que mas facil se desincroniza entre
+ * dos copias, y ya mordio una vez: contar desde `estado.paso` en vez de desde el paso
+ * RESPONDIDO deja la secuencia un paso atras y repite un `bot` que ya se dijo.
+ *
+ * `porPost` marca el paso en `estado.por_post`: es lo que hace que el texto de emergencia que
+ * llegue despues no vuelva a avanzar.
+ */
+export function avanceDesdePaso(
   spec: SpecObjetos,
   estado: EstadoObjetos,
   paso: PasoQueEspera,
-  respuesta: RespuestaDelPaso,
-): DecisionObjetos {
+  porPost = false,
+): { textos: string[]; siguiente: PasoQueEspera | null; estado: EstadoObjetos } {
   const recibidos = estado.recibidos.includes(paso.id)
     ? estado.recibidos
     : [...estado.recibidos, paso.id];
+  const previos = estado.por_post ?? [];
+  const por_post = porPost && !previos.includes(paso.id) ? [...previos, paso.id] : previos;
   // Se avanza desde el paso que SE RESPONDIO, no desde `estado.paso`. No es lo mismo: si el
   // estado quedo apuntando a un `bot` (spec editado a mitad, o `paso` corrupto),
   // `pasoPendiente` lo salto para encontrar a quien preguntar, y sumarle 1 al indice viejo
@@ -577,11 +627,20 @@ function avanzar(
   const desde = (i >= 0 ? i : pasoSano(estado)) + 1;
   // `tramoDesde` recoge los `bot` que siguen y deja el estado en el proximo paso que espera
   // respuesta: asi el texto del instrumento viaja con la decision y no se pierde.
-  const tramo = tramoDesde(spec, { ...estado, paso: desde, recibidos });
+  const tramo = tramoDesde(spec, { ...estado, paso: desde, recibidos, por_post });
+  return { textos: tramo.textos, siguiente: tramo.paso, estado: tramo.estado };
+}
 
-  return tramo.paso
-    ? { tipo: "avanza", paso, respuesta, textos: tramo.textos, siguiente: tramo.paso, estado: tramo.estado }
-    : { tipo: "cierra", paso, respuesta, textos: tramo.textos, estado: tramo.estado };
+function avanzar(
+  spec: SpecObjetos,
+  estado: EstadoObjetos,
+  paso: PasoQueEspera,
+  respuesta: RespuestaDelPaso,
+): DecisionObjetos {
+  const a = avanceDesdePaso(spec, estado, paso);
+  return a.siguiente
+    ? { tipo: "avanza", paso, respuesta, textos: a.textos, siguiente: a.siguiente, estado: a.estado }
+    : { tipo: "cierra", paso, respuesta, textos: a.textos, estado: a.estado };
 }
 
 // ---------------------------------------------------------------------------------------

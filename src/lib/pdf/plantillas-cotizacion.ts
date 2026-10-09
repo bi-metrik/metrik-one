@@ -28,6 +28,7 @@ import type { ComponentType } from 'react'
 import type { CotizacionPDFProps } from './cotizacion-props'
 import CotizacionTermotechPDF from './cotizacion-termotech-pdf'
 import CotizacionTrappvelPDF from './cotizacion-trappvel-pdf'
+import { componerCotizacionTrappvel } from './cotizacion-trappvel-paginacion'
 
 /** Slug de la plantilla genérica de MeTRIK. Es el default de la columna. */
 export const PLANTILLA_POR_DEFECTO = 'metrik'
@@ -58,6 +59,27 @@ export function plantillaCotizacionPropia(
 /** Slugs con plantilla propia. Expuesto para pruebas y para el PR. */
 export function slugsConPlantillaPropia(): string[] {
   return Object.keys(PLANTILLAS)
+}
+
+/**
+ * Las plantillas que no se renderizan una sola vez sino que se COMPONEN: renderizan, miden
+ * el PDF ya renderizado y recomponen (hoy solo Trappvel: «la última hoja trabaja», §4.11 de
+ * su sistema visual). Devuelve el PDF final; `null` si la plantilla se renderiza una vez.
+ */
+const COMPOSITORES: Record<string, (props: CotizacionPDFProps) => Promise<Buffer>> = {
+  trappvel: async props => {
+    const desde = Date.now()
+    const { pdf, informe } = await componerCotizacionTrappvel(props)
+    console.info('[pdf-trappvel] composición', JSON.stringify({ ms: Date.now() - desde, ...informe }))
+    return pdf
+  },
+}
+
+export function compositorDePlantilla(
+  slug: string | null | undefined,
+): ((props: CotizacionPDFProps) => Promise<Buffer>) | null {
+  if (!slug || !Object.hasOwn(COMPOSITORES, slug)) return null
+  return COMPOSITORES[slug]
 }
 
 /**

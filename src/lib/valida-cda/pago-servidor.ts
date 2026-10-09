@@ -150,10 +150,12 @@ export async function leerProximoPagoCda(
   servicioContratadoId: string,
   hoy: string,
   ahoraISO: string = new Date().toISOString(),
+  /** Tipos de cuota que no son «la pendiente» (la mora del servicio ignora los usuarios adicionales). */
+  ignorarTipos?: readonly string[],
 ): Promise<LecturaPago> {
   const cuenta = await leerCuentaCda(servicioContratadoId)
   if (cuenta.estado !== 'ok') return cuenta
-  return { estado: 'ok', pago: proximoPago({ cuotas: cuenta.cuotas, cobros: cuenta.cobros, hoy, ahoraISO }) }
+  return { estado: 'ok', pago: proximoPago({ cuotas: cuenta.cuotas, cobros: cuenta.cobros, hoy, ahoraISO, ignorarTipos }) }
 }
 
 export async function leerPestanaPagosCda(

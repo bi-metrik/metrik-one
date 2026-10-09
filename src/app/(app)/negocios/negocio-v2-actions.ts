@@ -5,6 +5,10 @@ import { MENSAJE_EN_CURSO } from '@/lib/idempotencia/clave'
 import { getWorkspace } from '@/lib/actions/get-workspace'
 import { enPeticionDeRuta } from '@/lib/actions/memo-de-ruta'
 import { revalidatePath } from 'next/cache'
+import { after } from 'next/server'
+import { correoAlCrearNegocio } from '@/lib/autorizacion-datos/servidor'
+import { bloqueoAutorizacionDatos } from '@/lib/autorizacion-datos/gate-servidor'
+import { GATE_AUTORIZACION } from '@/lib/autorizacion-datos/estado'
 import { RAZONES_PERDIDA_NEGOCIO, MOTIVOS_CANCELACION, MOTIVOS_PAUSA, MAX_PAUSAS, MAX_DIAS_PAUSA, SAFETY_NET_HORAS, leerMarcasDeMetadata, origenDesdeFuenteInteraccion, type MarcaCondicion } from '@/lib/negocios/constants'
 import {
   computeFieldDefaults,
@@ -114,6 +118,16 @@ import { resolverDerivado, type LockWhen } from '@/lib/negocios/campo-derivado'
 import { soloSiCumple, type SoloSiBloque } from '@/lib/negocios/condicion-bloque'
 import { puedeOmitirGate, marcaOmitido, CLAVE_OMITIDO } from '@/lib/negocios/gate-omitible'
 import { puedeOmitirGatesConMotivo } from '@/lib/permissions/omitir-gates'
+import { tiposReprocesoOperativo } from '@/lib/negocios/reproceso-operativo'
+import {
+  anclaDeBloques,
+  CAMPO_AVANCE_ANTICIPADO,
+  configAvanceAnticipado,
+  contenidoAvanceAnticipado,
+  evaluarAvanceAnticipado,
+  SIN_ANCLA,
+} from '@/lib/negocios/avance-anticipado'
+import type { TipoReproceso } from '@/lib/negocios/atribucion-reproceso'
 import {
   CAMPO_CRUCE_AVANZADO,
   esAvanzable,
@@ -129,7 +143,7 @@ import {
 import { soloLecturaPorDatoLleno } from '@/lib/negocios/editable-si-vacio'
 import { origenDeCopiaHeredada } from '@/lib/negocios/devolucion'
 import { documentoCompartidoQuedaResuelto } from '@/lib/negocios/casilla-compartida'
-import { formulariosOrigenDeCopias, slugsDeCopiasSinOrigen } from '@/lib/negocios/copia-de-formulario'
+import { formulariosOrigenDeCopias, historialSinOrigenesGenerables, slugsDeCopiasSinOrigen } from '@/lib/negocios/copia-de-formulario'
 import { recolectarReferenciasFuente, referenciasFaltantes, aplanarDataBloque } from '@/lib/negocios/referencias-fuente'
 import { bloqueOcultoEnHistorial } from '@/lib/negocios/bloque-oculto-historial'
 import { datosClaveDelNegocio, contradiccionesQueBloquean } from '@/lib/negocios/datos-clave-servidor'
@@ -223,6 +237,10 @@ export type EtapaNegocio = {
   // config_extra.buzon_leads = true → buzón de entrada (Recepción). Al descartar
   // desde aquí se piden razones de triage de lead, no de pérdida de venta.
   es_buzon?: boolean
+  // config_extra.reproceso_operativo → tipos de reproceso que el operativo del caso puede
+  // abrir desde esta etapa (SOE-001). Solo decide si la pantalla dibuja el botón; el
+  // permiso lo vuelve a decidir `reprocesarNegocio`.
+  reproceso_operativo?: TipoReproceso[]
   // config_extra.guia → la ayuda de la etapa, en la etapa. Se muestra sobre los
   // bloques para responder, sin salir de la pantalla, las tres preguntas que se
   // hace quien abre un caso: dónde está, qué le toca y qué falta para avanzar.
@@ -1325,6 +1343,7 @@ async function getNegocioDetalle(id: string): Promise<{
       guia: ((e.config_extra as { guia?: GuiaEtapa } | null)?.guia ?? null),
       es_cierre: (e.config_extra as { etapa_cierre?: boolean } | null)?.etapa_cierre === true,
       es_buzon: (e.config_extra as { buzon_leads?: boolean } | null)?.buzon_leads === true,
+      reproceso_operativo: tiposReprocesoOperativo(e.config_extra as Record<string, unknown> | null),
       routing: ((e.config_extra as { routing?: { default_etapa_orden?: number } } | null)?.routing ?? null),
     }))
 
@@ -2157,7 +2176,21 @@ async function crearNegocioSinClave(input: EntradaCrearNegocio): Promise<Resulta
     { supabase, workspaceId, userId: userId ?? null, role: role ?? null, staffId: staffId ?? null },
     input,
   )
-  if (r.negocio_id) revalidatePath('/negocios')
+  if (r.negocio_id) {
+    revalidatePath('/negocios')
+    // El correo con el link de autorización de datos, si el workspace lo encendió y el contacto lo
+    // necesita (ver `lib/autorizacion-datos/servidor.ts`). Después de responder: no demora la
+    // creación, y si falla, el viaje ya quedó creado y el link se manda desde el bloque.
+    const negocioCreado = r.negocio_id
+    try {
+      after(async () => {
+        try {
+          const c = await correoAlCrearNegocio(negocioCreado)
+          if (!c.enviado && c.motivo === 'error') console.error('[crearNegocio] correo de autorización:', c.detalle)
+        } catch (e) { console.error('[crearNegocio] correo de autorización:', e) }
+      })
+    } catch (e) { console.error('[crearNegocio] no se pudo programar el correo de autorización:', e) }
+  }
   return r
 }
 
@@ -3111,9 +3144,11 @@ export type BloquePendienteGate = {
   nombre: string
   es_gate: boolean
   omitible?: boolean
-  tipo?: BloqueoGate['tipo'] | 'cruce'
+  tipo?: BloqueoGate['tipo'] | 'cruce' | 'autorizacion_datos'
   cruce_slug?: string
   advertencia?: string
+  /** `tipo: 'autorizacion_datos'`: el link para que el modal lo copie ahí mismo. */
+  enlace?: string
 }
 
 async function cambiarEtapaNegocioConGateSinClave(
@@ -3751,6 +3786,19 @@ async function cambiarEtapaNegocioConGateSinClave(
       }
     }
 
+    // Gate custom: autorizacion_datos — el cliente autorizó el tratamiento de sus datos en el
+    // link (decisión de Mauricio, 2026-10-08). Vive en el CONTACTO: un cliente recurrente que ya
+    // autorizó pasa sin volver a firmar, salvo una versión MAYOR nueva del texto. Si el viaje lleva
+    // menores, exige también esa casilla. Las marcas manuales viejas no cuentan. El bloqueo trae el
+    // link para copiarlo desde el modal. Cede al override como los demás gates de etapa.
+    if (etapaGates.includes(GATE_AUTORIZACION)) {
+      const bloqueo = await bloqueoAutorizacionDatos({
+        supabase, workspaceId, negocioId, staffId: staffId ?? null,
+        mensajes: (etapaActualConfigExtra.gate_messages ?? {}) as Record<string, string>,
+      })
+      if (bloqueo) return { error: 'gate_bloqueado', bloquesPendientes: [bloqueo] }
+    }
+
     // Gate custom: sobrepago_conciliado — si el total cobrado supera el precio del
     // negocio, exige que el sobrepago esté conciliado (campo `accion_extra` con valor).
     // Si no hay sobrepago, no exige nada (no estorba a negocios con pago normal).
@@ -4295,6 +4343,43 @@ async function cambiarEtapaNegocioConGateSinClave(
       valor_nuevo: nuevaEtapaNombre,
       contenido: motivoOverride ? `Override: ${motivoOverride}` : null,
     }, 'cambiarEtapaNegocioConGate')
+  }
+
+  // ── Salida anticipada de una etapa sin gate (SOE-001) ─────────────────────────
+  // La etapa que lo declara (`registrar_avance_anticipado`) NO frena: deja una marca
+  // consultable con los días hábiles que llevaba desde su ancla. Va después de mover y
+  // no puede tumbar el avance. Ver `avance-anticipado.ts`.
+  const cfgAnticipado = configAvanceAnticipado(etapaActualConfigExtra)
+  if (cfgAnticipado && staffId && etapaActualNombre) {
+    try {
+      const { data: datasBloques } = await db(supabase)
+        .from('negocio_bloques')
+        .select('data')
+        .eq('negocio_id', negocioId)
+      const anticipado = evaluarAvanceAnticipado({
+        config: cfgAnticipado,
+        fechaAncla: anclaDeBloques(
+          ((datasBloques ?? []) as Array<{ data: Record<string, unknown> | null }>).map((b) => b.data),
+          cfgAnticipado.ancla_campo,
+        ),
+        hoy: todayBogotaISO(),
+      })
+      if (anticipado) {
+        await registrarActividad(supabase, {
+          workspace_id: workspaceId,
+          entidad_tipo: 'negocio',
+          entidad_id: negocioId,
+          tipo: 'sistema',
+          autor_id: staffId,
+          campo_modificado: CAMPO_AVANCE_ANTICIPADO,
+          valor_anterior: etapaActualNombre,
+          valor_nuevo: anticipado.dias === null ? SIN_ANCLA : String(anticipado.dias),
+          contenido: contenidoAvanceAnticipado(etapaActualNombre, anticipado),
+        }, 'cambiarEtapaNegocioConGate')
+      }
+    } catch (e) {
+      console.error('[cambiarEtapa] no se pudo registrar el avance anticipado:', e)
+    }
   }
 
   // El tercero de Siigo se crea al superar la etapa donde se captura el RUT.
@@ -8222,7 +8307,11 @@ export async function getNegocioDetalleCompleto(id: string): Promise<{
     // Data de bloques fuente indexada por slug estable — para que el cliente
     // evalúe `condition.source_bloque_slug` por identidad (no por etapa_orden).
     datosPorSlug,
-    bloquesEtapasPrevias,
+    // El origen que la etapa actual ya ofrece generar desde su copia no se repite aquí.
+    bloquesEtapasPrevias: historialSinOrigenesGenerables(
+      bloquesEtapasPrevias,
+      base.bloques.map(b => bloqueConfigsExtra[b.id]),
+    ),
     profiles: perfilesConEstadoEnEquipo(
       (profilesData ?? []).map(p => ({
         id: p.id,

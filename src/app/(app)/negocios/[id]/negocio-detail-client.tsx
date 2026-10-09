@@ -54,7 +54,7 @@ import type { EtapaNoAplica } from '@/lib/negocios/ruta-descartada-negocio'
 import { MOTIVOS_PAUSA, MAX_DIAS_PAUSA, MAX_PAUSAS } from '@/lib/negocios/constants'
 import { siguienteEtapaPorDefecto } from '@/lib/negocios/flujo'
 import { soloLecturaPorDatoLleno } from '@/lib/negocios/editable-si-vacio'
-import { copiaDeSoloLectura } from '@/lib/negocios/copia-heredada'
+import { copiaDeSoloLectura, modoDeCopiaGenerable, origenDeCopiaGenerable } from '@/lib/negocios/copia-heredada'
 import { negocioCerrado as estaCerrado } from '@/lib/negocios/motivo-cierre'
 import type { LineaBase } from '@/lib/negocios/presupuesto-ejecucion'
 import { lineaDeclaraCierre, accionDeCierre, type EtapaCierre } from '@/lib/negocios/etapa-cierre'
@@ -561,6 +561,27 @@ type BloqueGateModal = {
   tipo?: string
   cruce_slug?: string
   advertencia?: string
+  /** `tipo: 'autorizacion_datos'`: el link de autorización del cliente, para copiarlo aquí. */
+  enlace?: string
+}
+
+/** El link de autorización de datos, copiable desde el modal del gate. */
+function CopiarEnlaceAutorizacion({ enlace }: { enlace: string }) {
+  const [copiado, setCopiado] = useState(false)
+  return (
+    <button
+      type="button"
+      onClick={() => {
+        void navigator.clipboard?.writeText(enlace).then(() => {
+          setCopiado(true)
+          setTimeout(() => setCopiado(false), 2000)
+        })
+      }}
+      className="mt-1.5 w-full rounded-md border border-amber-200 bg-white px-2 py-1.5 text-[11px] font-medium text-amber-800 hover:bg-amber-100"
+    >
+      {copiado ? 'Link copiado' : 'Copiar link para el cliente'}
+    </button>
+  )
 }
 
 function ModalGateBloqueado({
@@ -662,10 +683,13 @@ function ModalGateBloqueado({
 
         <div className="flex-1 overflow-y-auto p-4 space-y-2">
           {bloques.map((b, i) => (
-            <div key={i} className="flex items-center gap-2 rounded-lg border border-amber-100 bg-amber-50 px-3 py-2">
-              <AlertTriangle className="h-3.5 w-3.5 text-amber-500 shrink-0" />
-              <span className="text-xs text-tinta">{b.nombre}</span>
-              <span className="ml-auto text-[10px] font-semibold text-amber-600">{b.tipo === 'cruce' ? 'CRUCE' : 'GATE'}</span>
+            <div key={i} className="rounded-lg border border-amber-100 bg-amber-50 px-3 py-2">
+              <div className="flex items-center gap-2">
+                <AlertTriangle className="h-3.5 w-3.5 text-amber-500 shrink-0" />
+                <span className="text-xs text-tinta">{b.nombre}</span>
+                <span className="ml-auto text-[10px] font-semibold text-amber-600">{b.tipo === 'cruce' ? 'CRUCE' : 'GATE'}</span>
+              </div>
+              {b.tipo === 'autorizacion_datos' && b.enlace && <CopiarEnlaceAutorizacion enlace={b.enlace} />}
             </div>
           ))}
         </div>
@@ -823,6 +847,7 @@ function SelectorEtapa({
   puedeCierreNoFacturable,
   puedeOmitirGates,
   puedeAvanzarCruces,
+  esResponsable = false,
 }: {
   negocioId: string
   etapasLinea: EtapaNegocio[]
@@ -840,6 +865,8 @@ function SelectorEtapa({
   puedeCierreNoFacturable: boolean
   puedeOmitirGates: boolean
   puedeAvanzarCruces: boolean
+  /** Quien mira es responsable del caso: habilita el reproceso del operativo (SOE-001). */
+  esResponsable?: boolean
 }) {
   const router = useRouter()
   // Una clave por intención: un reintento de la misma acción no la ejecuta dos veces.
@@ -1134,6 +1161,7 @@ function SelectorEtapa({
               negocioId={negocioId}
               reprocesoAbierto={reprocesoMarca}
               userRole={userRole}
+              tiposOperativo={esResponsable ? (etapaActual?.reproceso_operativo ?? []) : []}
             />
             <button
               onClick={() => setShowCierreDialog(true)}
@@ -1573,6 +1601,10 @@ function BloqueRenderer({
   const abiertoSiempre =
     (configExtra as { editable_siempre?: boolean }).editable_siempre === true
     && !(tipo === 'documento' && copiaDeSoloLectura(configExtra))
+  // Copia de un FORMULARIO que se genera desde aquí (`genera_en_origen`, la carta de
+  // autorización en Cita): se pinta con el bloque de formulario sobre la fila del origen.
+  // Ver `@/lib/negocios/fila-formulario`.
+  const generaEnOrigen = tipo === 'documento' && origenDeCopiaGenerable(configExtra) !== null
 
   function getBloqueMode(): 'editable' | 'visible' {
     // editable_siempre: formularios (010/1668) regenerables aun completados o
@@ -1594,6 +1626,11 @@ function BloqueRenderer({
       abiertoSiempre &&
       SUPERVISOR_UP.includes(userRole)
     ) return 'editable'
+    // La copia generable es de config `visible` (lo sigue siendo para subir archivos),
+    // pero genera con el mismo permiso que el formulario de origen: supervisor+ y el
+    // operator responsable. Va ANTES de la línea de `visible` por eso. El área, el
+    // historial y el negocio cerrado la siguen cerrando más abajo.
+    if (generaEnOrigen) return modoDeCopiaGenerable(userRole, bloque._esResponsable ?? false)
     // Config-level: bloque marked as read-only (inherited/visible)
     if (bloque.estado === 'visible') return 'visible'
     // Heredado que se comporta según lo que traiga: con el dato ya puesto en la
@@ -1875,6 +1912,20 @@ function BloqueRenderer({
     }
 
     case 'documento':
+      // Con permiso de generar, la copia es el formulario del origen: casillas, Generar /
+      // Regenerar y versiones. Sin él (o desde el historial) sigue siendo la copia de solo
+      // lectura con Ver y Descargar.
+      if (generaEnOrigen && modo === 'editable') {
+        return (
+          <BloqueFormulario
+            negocioBloqueId={instanciaId}
+            negocioId={negocioId}
+            instancia={bloque.instancia}
+            modo="editable"
+            configExtra={{ label: (configExtra.label as string | undefined) ?? bloque.nombre ?? 'Formulario', template: '' }}
+          />
+        )
+      }
       return (
         <BloqueDocumento
           negocioBloqueId={instanciaId}
@@ -2675,6 +2726,7 @@ export default function NegocioDetailClient({
             puedeCierreNoFacturable={puedeCierreNoFacturable}
             puedeOmitirGates={puedeOmitirGates}
             puedeAvanzarCruces={puedeAvanzarCruces}
+            esResponsable={currentUserEsResponsable}
           />
         </div>
         </div>

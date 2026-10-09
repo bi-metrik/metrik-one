@@ -2,6 +2,7 @@
 
 import { getWorkspace } from '@/lib/actions/get-workspace'
 import { rpcTablero } from '@/lib/tableros/cache-rpc'
+import { rotularFilas, rotularNombre, staffInactivos } from '@/lib/equipo/inactivos'
 import type { OperacionesBonoData, OperacionesDetalleData } from './operaciones-types'
 
 /**
@@ -30,20 +31,29 @@ export async function getOperacionesBono(
 
   // Los tipos generados de Supabase van por detras del esquema: la RPC es nueva.
   // Mismo patron que `comercial-actions.ts`.
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const { data, error } = await rpcTablero(supabase as any, workspaceId, 'get_operaciones_bono_resumen', {
-    p_workspace_id: workspaceId,
-    p_anio: anio,
-    p_mes: mes,
-  })
+  const [{ data, error }, inactivos] = await Promise.all([
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    rpcTablero(supabase as any, workspaceId, 'get_operaciones_bono_resumen', {
+      p_workspace_id: workspaceId,
+      p_anio: anio,
+      p_mes: mes,
+    }),
+    staffInactivos(supabase, workspaceId),
+  ])
   if (error || !data) return null
 
   const bruto = data as unknown as OperacionesBonoData
   const verTodo = puedeVerTodoElDinero(role)
+  // SOE-006: la RPC ya incluye a quien hoy está inactivo en los meses en que trabajó; aquí
+  // solo se rotula el nombre para que se lea que hoy ya no está.
+  const supervisorBruto =
+    bruto.supervisor && inactivos.has(bruto.supervisor.staff_id)
+      ? { ...bruto.supervisor, nombre: rotularNombre(bruto.supervisor.nombre, true) }
+      : bruto.supervisor
 
   return {
     ...bruto,
-    personas: (bruto.personas ?? []).map((p) => ({
+    personas: rotularFilas(bruto.personas ?? [], (p) => p.staff_id, inactivos).map((p) => ({
       ...p,
       bono: verTodo || p.staff_id === staffId ? p.bono : undefined,
     })),
@@ -54,8 +64,8 @@ export async function getOperacionesBono(
     // Es la misma regla que ya aplicaba al dinero, extendida a la fila completa:
     // ocultar en React no es ocultar.
     supervisor:
-      bruto.supervisor && (verTodo || bruto.supervisor.staff_id === staffId)
-        ? bruto.supervisor
+      supervisorBruto && (verTodo || supervisorBruto.staff_id === staffId)
+        ? supervisorBruto
         : null,
   }
 }

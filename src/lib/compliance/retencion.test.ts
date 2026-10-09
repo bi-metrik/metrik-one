@@ -170,6 +170,12 @@ const CLASIFICACION: Record<string, Clasificacion> = {
       'el arnés re-actúa una pregunta real del bot («¿Viajan bebés (menores de 2 años)?»): una EDAD de pasajero. ' +
       'No hay plazo de conservación en este archivo.',
   },
+  'supabase/functions/_shared/agente/bandeja/extraccion.ts': {
+    tipo: 'no-es-plazo',
+    razon:
+      'el prompt de la extracción del núcleo conversacional le dice al modelo que infante es «menor de 2 años»: ' +
+      'una EDAD de pasajero. No hay plazo de conservación en este archivo.',
+  },
   'src/lib/negocios/sugeridos.ts': {
     tipo: 'no-es-plazo',
     razon: 'ejemplo de la deducción que anota la marca de sugerido («ninguno … es menor de 2 años»): una edad.',

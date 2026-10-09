@@ -7,7 +7,14 @@
 // ============================================================
 
 import type { FichaCliente, Llave } from '../wa-cliente-reglas.ts';
+import { calcularNiveles } from '../niveles-solicitud.ts';
+import type { CampoEntendible } from '../wa-entendimiento-reglas.ts';
+import { cargarEnExistente } from '../wa-carga-reglas.ts';
+import { lineaCargada, mensajesDeTextos, planDeCarga, propuestoDe, registradoDe } from './bandeja/carga.ts';
+import { instruccionesCarga } from './bandeja/extraccion.ts';
+import type { PlanCarga } from './bandeja/carga.ts';
 import type { PuertoBandeja, ViajeAgente } from './bandeja/dominio.ts';
+import type { AutorizacionAgente } from './bandeja/autorizacion.ts';
 import type { Almacen, FilaConversacion, Mensajero, Salida, Traza } from './tipos.ts';
 
 export interface ContactoMem { id: string; nombre: string; celular?: string | null; correo?: string | null; usuario?: string | null }
@@ -96,18 +103,37 @@ function normal(s: string): string {
   return s.toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '').replace(/[^a-z0-9@. ]+/g, ' ').replace(/\s+/g, ' ').trim();
 }
 
-/** El directorio, los viajes y lo escrito. La extracción es determinista (sin modelo): guarda los textos tal cual. */
+/**
+ * Lo que la extracción le pide al modelo y lo que él devuelve (la salida cruda, como la de Gemini). En las pruebas es un
+ * guion: así se prueba lo que el código hace con la salida, sin llamar a ningún modelo.
+ */
+export type ExtractorMemoria = (p: { textos: string[]; mensajes: string; campos: CampoEntendible[]; yaTiene: Record<string, unknown>; instrucciones: string }) => Promise<unknown>;
+
+/**
+ * El directorio, los viajes y lo escrito. Sin `campos`, la extracción es determinista (sin modelo): guarda los textos
+ * tal cual. Con `campos` y `extraer`, corre la MISMA cadena que producción (`instruccionesCarga` para el guion,
+ * `planDeCarga`: invariantes y unión con la pendiente) sobre la salida guionada, y escribe con `cargarEnExistente`.
+ */
 export class PuertoMemoria implements PuertoBandeja {
   contactos: ContactoMem[] = [];
   viajes: ViajeMem[] = [];
   /** Lo que se escribió, en orden: la verdad del arnés. */
   escrituras: Array<Record<string, unknown>> = [];
   fallarBusqueda = false;
+  campos: CampoEntendible[] | null;
+  extraer: ExtractorMemoria | null;
+  /** Lo que recibió la extracción en cada llamado (para las pruebas). */
+  extracciones: string[][] = [];
   private consecutivo = new Map<string, number>();
-  constructor(p: { contactos?: ContactoMem[]; viajes?: ViajeMem[] } = {}) {
+  constructor(p: { contactos?: ContactoMem[]; viajes?: ViajeMem[]; campos?: CampoEntendible[]; extraer?: ExtractorMemoria; ahora?: () => number } = {}) {
     this.contactos = structuredClone(p.contactos ?? []);
     this.viajes = structuredClone(p.viajes ?? []);
+    this.campos = p.campos ?? null;
+    this.extraer = p.extraer ?? null;
+    if (p.ahora) this.ahora = p.ahora;
   }
+  private ahora: () => number = () => Date.parse('2026-10-06T18:45:00Z');
+  private hoyISO() { return new Date(this.ahora() - 5 * 3600 * 1000).toISOString().slice(0, 10); }
 
   async linea() { return 'Viaje a medida'; }
 
@@ -137,6 +163,10 @@ export class PuertoMemoria implements PuertoBandeja {
   }
 
   private faltas(v: ViajeMem) {
+    if (this.campos) {
+      const n = calcularNiveles(this.campos, { destino: v.destino, ...v.datos });
+      return { cotizar: n.minimo.faltan.map((f) => f.label ?? f.slug), completo: [...n.minimo.faltan, ...n.deseable.faltan].map((f) => f.label ?? f.slug) };
+    }
     const cotizar = ['fecha de salida', 'fecha de regreso', 'adultos', 'niños'].filter((k) => !(k in v.datos));
     if (!v.destino) cotizar.unshift('destino');
     return { cotizar, completo: [...cotizar, 'presupuesto', 'categoría de hotel', 'plan de alimentación'].filter((k) => !(k in v.datos)) };
@@ -148,7 +178,8 @@ export class PuertoMemoria implements PuertoBandeja {
     if (!v) return null;
     const c = this.contactos.find((x) => x.id === v.contactoId);
     const f = this.faltas(v);
-    return { id: v.id, codigo: v.codigo, nombre: v.nombre, cliente: c?.nombre ?? null, destino: v.destino, abierto: v.abierto, faltaCotizar: f.cotizar, faltaCompleto: f.completo };
+    const registrado = this.campos ? registradoDe(this.campos, { destino: v.destino, ...v.datos }) : undefined;
+    return { id: v.id, codigo: v.codigo, nombre: v.nombre, cliente: c?.nombre ?? null, destino: v.destino, abierto: v.abierto, faltaCotizar: f.cotizar, faltaCompleto: f.completo, ...(registrado ? { registrado } : {}) };
   }
 
   async crearViaje(p: { contactoId: string; destino: string | null }) {
@@ -164,17 +195,48 @@ export class PuertoMemoria implements PuertoBandeja {
     return { id: v.id, codigo: v.codigo, nombre: v.nombre };
   }
 
-  async prepararCarga(viajeId: string, textos: string[]) {
+  async prepararCarga(viajeId: string, textos: string[], previo?: unknown) {
     const v = this.viajes.find((x) => x.id === viajeId)!;
-    return { entendido: textos.map((t) => t.slice(0, 70)), falta: this.faltas(v).cotizar, plan: { textos } };
+    if (this.campos && this.extraer) {
+      this.extracciones.push([...textos]);
+      const data = { destino: v.destino, ...v.datos };
+      const raw = await this.extraer({ textos, mensajes: mensajesDeTextos(textos).map((m) => `[${m.n}] ${m.cuerpo}`).join('\n'), campos: this.campos, yaTiene: data, instrucciones: instruccionesCarga(this.campos, this.hoyISO(), data, propuestoDe(previo)) });
+      return planDeCarga({ bloques: [{ fields: this.campos, data }], textos, raw, hoyISO: this.hoyISO(), ahoraIso: new Date(this.ahora()).toISOString(), previo });
+    }
+    const antes = (previo as { textos?: string[] } | undefined)?.textos ?? [];
+    const todos = [...antes, ...textos.filter((t) => !antes.includes(t))];
+    return { entendido: todos.map((t) => t.slice(0, 70)), falta: this.faltas(v).cotizar, plan: { textos: todos } };
   }
 
   async cargar(viajeId: string, plan: unknown) {
     const v = this.viajes.find((x) => x.id === viajeId)!;
+    if (this.campos && (plan as PlanCarga).sugeridos) {
+      const meta = { entrega_id: 'agente', en: new Date(this.ahora()).toISOString(), origenDe: () => 'mensaje' as const };
+      const quitar = (plan as PlanCarga).quitar;
+      const r = cargarEnExistente({ destino: v.destino, ...v.datos }, this.campos, (plan as PlanCarga).sugeridos, meta, new Set(), { delModelo: true, ...(quitar ? { quitar } : {}) });
+      const escritos = [...r.escritos, ...r.actualizados.map((a) => a.slug)];
+      if (escritos.length || r.conflictos.length || r.quitados.length) {
+        const { destino, ...resto } = r.data;
+        if (typeof destino === 'string' && destino) v.destino = destino;
+        v.datos = resto;
+      }
+      this.escrituras.push({ tipo: 'carga', codigo: v.codigo, escritos, ...(r.quitados.length ? { quitados: r.quitados } : {}) });
+      const valores = Object.fromEntries(Object.entries((plan as PlanCarga).sugeridos).map(([k, x]) => [k, x.valor]));
+      return { lineas: [lineaCargada(v.codigo, escritos, this.campos, r.quitados)], escritos: registradoDe(this.campos, valores, escritos) };
+    }
     const textos = (plan as { textos: string[] }).textos;
     v.datos.textos = [...((v.datos.textos as string[] | undefined) ?? []), ...textos];
     this.escrituras.push({ tipo: 'carga', codigo: v.codigo, textos });
     return { lineas: [`Cargué en ${v.codigo} ${textos.length === 1 ? 'el mensaje' : `los ${textos.length} mensajes`}.`] };
+  }
+
+  /** La autorización de datos por contacto (sin entrada: pendiente con un link de prueba). */
+  autorizaciones = new Map<string, AutorizacionAgente | 'error'>();
+  async autorizacion(contactoId: string): Promise<AutorizacionAgente | 'error'> {
+    const a = this.autorizaciones.get(contactoId);
+    if (a) return a;
+    this.escrituras.push({ tipo: 'enlace_autorizacion', contactoId });
+    return { estado: 'pendiente', url: `https://agencia.metrikone.co/autorizacion/${'T'.repeat(43)}?m=w`, agencia: 'la agencia', whatsapp: null, instruccion: null };
   }
 
   async crearCliente(nombre: string, llave: Llave) {

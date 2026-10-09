@@ -182,4 +182,32 @@ describe('AFI desde el 2026-09-23: $50.000 fijos por CDA + 20 % de lo adicional'
     expect(problemasDeComision({ ...AFI_CDA, monto_fijo: undefined }).map((p) => p.campo)).toContain('monto_fijo')
     expect(problemasDeComision({ ...AFI_CDA, pct: 120 }).map((p) => p.campo)).toContain('pct')
   })
+
+  describe('Plan Anual: mismo porcentaje del mensual, sobre lo efectivamente pagado (Mauricio, 2026-10-07)', () => {
+    const ANUAL = { valor: 1_650_000, esPrimerCobro: false, prepago: { precioPeriodo: 150_000 } }
+
+    it('el anual de $1.650.000 genera $550.000: un tercio de lo pagado, como el mensual (50.000 / 150.000)', () => {
+      const r = calcularComision(AFI_CDA, ANUAL)
+      expect(r.valor).toBe(550_000)
+      // CONTROL: no es sobre el precio de lista (12 x 50.000 = 600.000) ni un solo fijo de mes (50.000).
+      expect(r.valor).not.toBe(600_000)
+      expect(calcularComision(AFI_CDA, { valor: 1_650_000, esPrimerCobro: false }).valor).toBe(50_000)
+      const mensual = calcularComision(AFI_CDA, { valor: 150_000, esPrimerCobro: false })
+      expect(r.valor / ANUAL.valor).toBeCloseTo(mensual.valor / 150_000, 10)
+    })
+
+    it('con modo monto_fijo, igual; con modo porcentaje no cambia (ya es sobre lo cobrado)', () => {
+      expect(calcularComision(AFI, ANUAL).valor).toBe(550_000)
+      expect(calcularComision(PROMOTORA_4DSOFT, ANUAL).valor).toBe(330_000)
+    })
+
+    it('durante el plan, la cuota de un usuario adicional lleva solo el 20 % de lo adicional, sin el fijo', () => {
+      const r = calcularComision(AFI_CDA, { valor: 50_000, valorAdicional: 50_000, esPrimerCobro: false, soloAdicional: true })
+      expect(r.valor).toBe(10_000)
+    })
+
+    it('un prepago sin precio del período no se calcula: no se inventa la proporción', () => {
+      expect(() => calcularComision(AFI_CDA, { valor: 1_650_000, esPrimerCobro: false, prepago: { precioPeriodo: 0 } })).toThrow(/prepago/)
+    })
+  })
 })

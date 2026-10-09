@@ -1,6 +1,6 @@
 ---
 name: cardumen-objetos-sueltos
-description: Modo `objetos` de Cardumen (secuencia de repartos sueltos por WhatsApp) — por qué comparte tabla con la demo viva de Navigate y qué la mantiene fuera del motor de chat, por qué el modo entra con filas NUEVAS en vez de reusar las de miniweb, y qué quedó sin verificar sin un teléfono real
+description: Modo `objetos` de Cardumen (secuencia de repartos sueltos por WhatsApp) — por qué el regreso al chat dejó de depender del toque de la persona (un `wa.me` relanza la app), qué convierte eso a `cardumen-ingesta` en posible vector de envío y cómo se contuvo, por qué comparte tabla con la demo viva de Navigate, y qué queda sin verificar sin un teléfono real
 metadata:
   type: project
 ---
@@ -12,12 +12,63 @@ repo en `proyectos/metrik/cardumen/navigate-demo/deploy/`): con `?obj=<id>` sirv
 a pantalla completa, hace POST a `cardumen-ingesta` y abre `wa.me` con
 `Listo <objeto> 50-30-20` prellenado.
 
-**Why:** que el regreso al chat dependa del TOQUE de la persona y no de un empujón del
-servidor es el centro del diseño, no un detalle: cada mensaje de ella abre la ventana de
-servicio de Meta, así que la secuencia NO necesita plantilla aprobada ni ventana de 24h.
-Cualquier envío proactivo en el camino crítico tira eso por la borda.
+⚠️⚠️ **El regreso por `wa.me` NO FUNCIONA, y la premisa de diseño se cayó entera
+(2026-10-07, PR `feat/cardumen-regreso-nativo`, medido por Mauricio con su teléfono).**
+Desde el **navegador interno de WhatsApp un `wa.me` no devuelve a la conversación: RELANZA la
+app.** La persona aterriza en el chat de MeTRIK pero no donde salió, y el hilo se siente roto.
+Textual: *«no regresa nativamente al chat de donde salimos. Esto es lo más grave»*. Lo que sí
+devuelve al punto exacto es el **cierre nativo de la ventana** del navegador interno, así que
+la página le dice «cierra esta ventana» y **el bot continúa solo al recibir el POST**.
+
+**Why:** la versión anterior de esta memoria decía que depender del toque era «el centro del
+diseño». La parte que se sostiene es la de Meta: la persona escribió al bot minutos antes para
+recibir el link, así que **la ventana de servicio de 24h está abierta y no hace falta
+plantilla** — continuar desde el servidor no cuesta una plantilla aprobada. Lo que no se
+sostenía era creer que el toque devolvía al hilo. Hermano de [[medir-antes-de-construir]]: la
+premisa era verificable con un teléfono y nadie la había verificado.
+
+⚠️⚠️ **El cambio convierte `cardumen-ingesta` (público, `verify_jwt = false`) en un posible
+vector de envío de WhatsApp.** Antes un POST falso escribía una fila; ahora haría que el bot
+mande un mensaje a un número. Las **cuatro invariantes** que lo contienen viven en
+`_shared/cardumen/objetos-post.ts` con su prueba y su mutación corrida en
+`objetos-post.test.ts`: (1) solo continúa si hay sesión de objetos **ABIERTA** para ese
+teléfono; (2) **el destino sale de `cardumen_chat_sessions.phone`, nunca del cuerpo** — el
+`token` es solo llave de búsqueda, y el cuerpo además trae `payload.participante`, que es el
+señuelo realista; (3) el `objeto` tiene que ser **exactamente** el paso pendiente y el
+`estudio` el de la sesión; (4) tope de **6 envíos por teléfono cada 10 min** (el guion más
+largo tiene 4 repartos: una entrevista honesta nunca lo toca).
+**La respuesta del endpoint NO dice si hubo continuación ni por qué**: sería un oráculo para
+averiguar qué teléfonos tienen entrevista abierta y en qué paso van. El motivo va solo al log.
+
+⚠️ **La invariante del destino es estructural, no verificable por mutación.** Sustituir
+`fila.phone` por el token normalizado **no hace fallar ninguna prueba**, porque el lookup es
+por igualdad exacta contra `phone`: los dos son el mismo valor siempre. Esa igualdad *es* la
+razón por la que el cuerpo no puede nombrar un destinatario. Lo que sí cae por mutación es
+tomar el destino de `payload.participante`. Vale la pena distinguirlo en vez de inventar una
+mutación que no existe.
+
+⚠️ **El texto `Listo ...` sigue en pie como salida de EMERGENCIA y hay que mantenerlo
+idempotente en LOS DOS ÓRDENES** (`estado.por_post` + decisión `ya_atendido` + llave de
+no-duplicado `(estudio, token, objeto)`):
+- **POST→texto**: el texto que llega después no avanza ni acusa; silencio a propósito.
+- **texto→POST**: el POST **actualiza** la fila del texto en vez de insertar una segunda. La
+  llave vieja (id de sesión del payload) **nunca** colisionaba — el de la página es un uuid
+  nuevo por carga y el del texto es `wa-<tel>-<paso>` — así que ese orden dejaba **dos filas
+  del mismo reparto**, una con vector medido y otra con el aproximado, sin saber cuál es cuál.
+- Un **link viejo reenviado por POST no reenvía nada** (a diferencia del texto, que acusa y
+  reenvía el pendiente): reenviar es justo el botón que vuelve repetible un POST válido. Si
+  alguien reabre un link viejo y re-envía, queda sin empujón nuevo — tiene el mensaje del paso
+  pendiente ya en su chat y queda el recordatorio del cron.
 
 **How to apply:**
+- **Un avance, una aritmética.** `avanceDesdePaso` en `objetos.ts` la comparte el camino del
+  texto y el del POST, y hay una prueba que compara las dos decisiones paso a paso. Separarlas
+  en dos copias deja una atrás, y el síntoma es un `bot` del guion perdido (error de medición).
+- **Sin migración**: los campos nuevos del estado (`por_post`, `post_envios`, `post_ventana`)
+  viven en el `jsonb` de `cardumen_chat_sessions.state`, que no tiene esquema.
+- ⚠️ **`cardumen-ingesta` ahora importa `wa-respond.ts`**: necesita `WHATSAPP_PHONE_NUMBER_ID`
+  y `WHATSAPP_ACCESS_TOKEN` en el entorno de la función. Son secretos de proyecto (los mismos
+  de `wa-webhook`), pero sin ellos el guardado funciona y el envío falla en silencio.
 - ⚠️ **La sesión de objetos vive en `cardumen_chat_sessions`, la MISMA tabla que Navigate
   (demo viva de Grupo Progreso).** Lo único que la separa es `state.modo = 'objetos'`:
   el bloque 0b del webhook la desvía con `esEstadoObjetos` ANTES de transcribir audio o
@@ -69,7 +120,8 @@ Cualquier envío proactivo en el camino crítico tira eso por la borda.
   `transcrito_de_audio: true`: una transcripción no es el texto que la persona escribió.
 - **Un relato corto nunca bloquea**: UNA repregunta neutra (`estado.repreguntados`) y después
   se acepta como venga.
-- **El vector autoritativo es el del POST, no el del texto.** El texto sirve para AVANZAR.
+- **El vector autoritativo es el del POST, no el del texto** (y desde el 2026-10-07 el POST es
+  además la vía por la que la secuencia avanza). El texto sirve para AVANZAR.
   Solo si no hay fila para `(estudio, token, payload->>objeto)` se guarda el derivado del
   texto, marcado `origen: 'texto_whatsapp'` y bajo la clave `vector_aproximado` (no
   `vector`). Requisito metodológico de Saga. Si la consulta del duplicado FALLA, se asume

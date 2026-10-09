@@ -44,7 +44,9 @@ const esc: {
   tarifas: Fila[]
   precioAprobado: number | null
   pdf: Fila | null
-} = { data: {}, estado: 'pendiente', ruta: null, creado: '', tarifas: [], precioAprobado: null, pdf: null }
+  role: string
+  actividad: Fila[]
+} = { data: {}, estado: 'pendiente', ruta: null, creado: '', tarifas: [], precioAprobado: null, pdf: null, role: 'operator', actividad: [] }
 
 vi.mock('next/cache', () => ({ revalidatePath: () => {} }))
 vi.mock('@/lib/actions/get-workspace', () => ({
@@ -52,7 +54,7 @@ vi.mock('@/lib/actions/get-workspace', () => ({
     supabase: { from: (t: string) => consulta(t), rpc: async () => ({ data: null, error: null }) },
     workspaceId: 'ws-1',
     staffId: null,
-    role: 'operator',
+    role: esc.role,
     userId: 'u-1',
     error: null,
   }),
@@ -67,7 +69,9 @@ vi.mock('@/lib/pdf/pdf-render-client', () => ({
 }))
 vi.mock('@/lib/almacenamiento/supabase-externo', () => ({ almacenamientoExternoDe: async () => null }))
 vi.mock('@/lib/google-drive', () => ({ createSubfolderPath: async () => '', uploadFileToDrive: async () => ({}) }))
-vi.mock('@/lib/activity/registrar-actividad', () => ({ registrarActividad: async () => {} }))
+vi.mock('@/lib/activity/registrar-actividad', () => ({
+  registrarActividad: async (_sb: unknown, fila: Fila) => { esc.actividad.push(fila) },
+}))
 
 function bloque(): Fila {
   return {
@@ -146,6 +150,8 @@ beforeEach(() => {
   esc.tarifas = [TARIFA_V1]
   esc.precioAprobado = null
   esc.pdf = null
+  esc.role = 'operator'
+  esc.actividad = []
 })
 
 describe('negocio creado desde el 1-oct', () => {
@@ -162,10 +168,7 @@ describe('negocio creado desde el 1-oct', () => {
     })
   })
 
-  it('Solo UPME, Plan 2: $341.250 y no deja bajar de $255.938', async () => {
-    const pasado = await generarVersionPropuesta('blq-1', { descuento_pct_plan1: 0, descuento_pct_plan2: 25.01 })
-    expect(pasado).toMatchObject({ ok: false, error: expect.stringMatching(/cap de 25%/) })
-
+  it('Solo UPME, Plan 2: $341.250 y el comercial aprueba hasta $255.938 (25 %)', async () => {
     const r = await generarVersionPropuesta('blq-1', { descuento_pct_plan1: 0, descuento_pct_plan2: 25 })
     expect(r.ok).toBe(true)
     expect(r.version).toMatchObject({
@@ -232,5 +235,100 @@ describe('negocio creado en septiembre', () => {
     expect(r.version).toMatchObject({ valor_final_plan1: 850000, valor_final_plan2: 425000 })
     expect(r.version?.tarifa_version_id).toBeUndefined()
     expect(esc.data.tarifa).toBeUndefined()
+  })
+})
+
+// SOE-004 (V0570): con tarifas, el comercial escribe cualquier valor por plan; lo que quede
+// fuera de la tarifa solo lo aprueba un owner/admin/supervisor, con motivo guardado.
+describe('aprobación manual fuera de la tarifa (SOE-004)', () => {
+  // $450.000 sobre la casilla de $341.250: lo que tecleó Daniela en V0570.
+  const RECARGO_450 = Math.round((1 - 450000 / 341250) * 100 * 1e6) / 1e6
+
+  it('un valor por encima de la tarifa se emite y queda guardado tal cual', async () => {
+    const r = await generarVersionPropuesta('blq-1', { descuento_pct_plan1: 0, descuento_pct_plan2: RECARGO_450 })
+    expect(r.ok).toBe(true)
+    expect(r.version).toMatchObject({ valor_final_plan2: 450000, base_plan2: 341250, cap_descuento_pct: 25 })
+    expect(esc.data.valor_final_plan2).toBe(450000)
+    // El documento no imprime ahorros ni porcentajes negativos.
+    expect(esc.pdf).toMatchObject({ plan2_valor: expect.stringContaining('450.000') })
+    expect(String(esc.pdf?.plan1_ahorro)).not.toContain('-')
+    expect(String(esc.pdf?.plan2_descuento_pct)).not.toContain('-')
+  })
+
+  it('más descuento que el tope también se emite (ya no rechaza al generar)', async () => {
+    const r = await generarVersionPropuesta('blq-1', { descuento_pct_plan1: 40, descuento_pct_plan2: 0 })
+    expect(r.ok).toBe(true)
+    expect(r.version).toMatchObject({ valor_final_plan1: 273000 })
+  })
+
+  it('un valor en cero o negativo no se emite', async () => {
+    const r = await generarVersionPropuesta('blq-1', { descuento_pct_plan1: 0, descuento_pct_plan2: 100 })
+    expect(r).toMatchObject({ ok: false, error: expect.stringMatching(/mayor que cero/) })
+  })
+
+  it('el comercial no aprueba fuera de la tarifa, ni con motivo', async () => {
+    await generarVersionPropuesta('blq-1', { descuento_pct_plan1: 0, descuento_pct_plan2: RECARGO_450 })
+    const a = await aprobarVersionPropuesta('blq-1', 1, 2, 'el cliente lo aceptó')
+    expect(a).toMatchObject({ ok: false, error: expect.stringMatching(/fuera de la tarifa.*supervisor, administrador o dueño/) })
+    expect(esc.precioAprobado).toBeNull()
+    expect(esc.estado).toBe('pendiente')
+  })
+
+  it('admin/supervisor aprueban con motivo; sin motivo no', async () => {
+    for (const role of ['admin', 'supervisor']) {
+      esc.data = { precio_base_con_iva: 850000, iva_pct: 0.19, descuento_pct_plan1: 0, descuento_pct_plan2: 0, versiones: [] }
+      esc.estado = 'pendiente'
+      esc.precioAprobado = null
+      esc.actividad = []
+      esc.role = role
+      await generarVersionPropuesta('blq-1', { descuento_pct_plan1: 0, descuento_pct_plan2: RECARGO_450 })
+
+      expect(await aprobarVersionPropuesta('blq-1', 1, 2)).toMatchObject({ ok: false, error: expect.stringMatching(/motivo/) })
+      expect(esc.precioAprobado).toBeNull()
+
+      expect(await aprobarVersionPropuesta('blq-1', 1, 2, 'Cliente acepta $450.000 del plan anterior')).toEqual({ ok: true })
+      expect(esc.precioAprobado).toBe(450000)
+      expect(esc.data).toMatchObject({
+        aprobado_honorario: 450000,
+        aprobado_plan: 2,
+        aprobado_fuera_de_tarifa: {
+          motivo: 'Cliente acepta $450.000 del plan anterior',
+          base: 341250,
+          cap: 25,
+          descuento_pct: RECARGO_450,
+        },
+      })
+      // El motivo queda en la historia del negocio.
+      expect(esc.actividad).toHaveLength(1)
+      expect(esc.actividad[0]).toMatchObject({ tipo: 'propuesta_aprobada' })
+      expect(String(esc.actividad[0].contenido)).toMatch(/fuera de la tarifa.*Motivo: Cliente acepta \$450\.000 del plan anterior/)
+    }
+  })
+
+  it('dentro de la tarifa todo sigue igual: el comercial aprueba sin motivo y no se marca', async () => {
+    await generarVersionPropuesta('blq-1', { descuento_pct_plan1: 0, descuento_pct_plan2: 10 })
+    expect(await aprobarVersionPropuesta('blq-1', 1, 2)).toEqual({ ok: true })
+    expect(esc.precioAprobado).toBe(307125)
+    expect(esc.data.aprobado_fuera_de_tarifa).toBeNull()
+    expect(String(esc.actividad[0].contenido)).not.toMatch(/fuera de la tarifa/)
+  })
+
+  it('el valor aprobado no se recalcula al volver a leer el bloque (avanzar de etapa)', async () => {
+    esc.role = 'admin'
+    await generarVersionPropuesta('blq-1', { descuento_pct_plan1: 0, descuento_pct_plan2: RECARGO_450 })
+    await aprobarVersionPropuesta('blq-1', 1, 2, 'Valor pactado con el cliente')
+    const aprobado = structuredClone(esc.data)
+
+    // Lo que hace la ficha en la etapa siguiente: vuelve a pedir la tarifa vigente. No
+    // escribe nada; el valor aprobado y la versión siguen siendo los mismos.
+    const t = await getTarifaPropuesta('blq-1')
+    expect(t.ok && t.tarifa.esquema).toBe('tarifas')
+    expect(esc.data).toEqual(aprobado)
+    expect(esc.precioAprobado).toBe(450000)
+
+    // Y una versión nueva no se puede generar sobre la aprobada: el valor no se pisa.
+    expect(await generarVersionPropuesta('blq-1', { descuento_pct_plan1: 0, descuento_pct_plan2: 0 }))
+      .toMatchObject({ ok: false, error: expect.stringMatching(/Bloque aprobado/) })
+    expect(esc.data).toEqual(aprobado)
   })
 })

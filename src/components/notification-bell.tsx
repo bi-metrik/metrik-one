@@ -4,7 +4,6 @@ import { useState, useEffect, useCallback, useRef } from 'react'
 import { useRouter } from 'next/navigation'
 import { Bell, Check, X, CheckCheck, Flame, FolderKanban, AtSign, TrendingDown, UserPlus, UserCheck, Package, CircleDollarSign } from 'lucide-react'
 import { LoadingSpinner } from '@/components/ui/loading-spinner'
-import { createClient } from '@/lib/supabase/client'
 import {
   marcarCompletada,
   descartarNotificacion,
@@ -155,17 +154,16 @@ export default function NotificationBell({ userId, initialItems, initialTotal }:
   // de arriba recarga el conteo cada vez que el usuario vuelve a la pestaña, y el
   // contador inicial llega resuelto desde el servidor. Se pierde el aviso
   // instantáneo mientras la pestaña está al frente, nada más.
+  //
+  // El cliente de Supabase (~165 KB sin comprimir: auth, realtime, storage) se pide
+  // DESPUÉS de montar (2026-10-07, red lenta): la campana va en todas las páginas y con el
+  // import estático ese peso viajaba en la primera carga, antes de poder usar nada.
   useEffect(() => {
-    const supabase = createClient()
     const MAX_FALLOS = 3
     let fallos = 0
     let rendido = false
     let suscrito = false
-
-    // La referencia se declara antes del `subscribe` porque su callback puede
-    // dispararse de forma síncrona: leer `channel` desde `rendirse` antes de que
-    // exista rompería con "used before its declaration".
-    let canal: ReturnType<typeof supabase.channel> | null = null
+    let quitarCanal: (() => void) | null = null
 
     const rendirse = (motivo: string) => {
       if (rendido) return
@@ -174,36 +172,51 @@ export default function NotificationBell({ userId, initialItems, initialTotal }:
       // Al quitar el último canal, la librería cierra el socket (RealtimeClient
       // .removeChannel llama a disconnect cuando no quedan canales) → se acaba el
       // bucle de reconexión, no solo la suscripción.
-      if (canal) supabase.removeChannel(canal)
+      quitarCanal?.()
     }
 
-    canal = supabase
-      .channel('notificaciones-realtime')
-      .on(
-        'postgres_changes',
-        {
-          event: 'INSERT',
-          schema: 'public',
-          table: 'notificaciones',
-          filter: `destinatario_id=eq.${userId}`,
-        },
-        (payload) => {
-          const nueva = payload.new as NotificacionItem
-          // Dedup por id: la misma notificación puede llegar por realtime y por
-          // un `cargar()` concurrente (apertura del panel o vuelta a la pestaña).
-          setItems(prev => (prev.some(n => n.id === nueva.id) ? prev : [nueva, ...prev]))
+    import('@/lib/supabase/client')
+      .then(({ createClient }) => {
+        if (rendido) return
+        const supabase = createClient()
+        // La referencia se declara antes del `subscribe` porque su callback puede
+        // dispararse de forma síncrona: leer `canal` desde `rendirse` antes de que
+        // exista rompería con "used before its declaration".
+        let canal: ReturnType<typeof supabase.channel> | null = null
+        quitarCanal = () => {
+          if (canal) supabase.removeChannel(canal)
         }
-      )
-      .subscribe((status) => {
-        if (status === 'SUBSCRIBED') {
-          suscrito = true
-          fallos = 0
-          return
-        }
-        if (status === 'CHANNEL_ERROR' || status === 'TIMED_OUT') {
-          fallos += 1
-          if (fallos >= MAX_FALLOS) rendirse(`${fallos} intentos fallidos (${status})`)
-        }
+        canal = supabase
+          .channel('notificaciones-realtime')
+          .on(
+            'postgres_changes',
+            {
+              event: 'INSERT',
+              schema: 'public',
+              table: 'notificaciones',
+              filter: `destinatario_id=eq.${userId}`,
+            },
+            (payload) => {
+              const nueva = payload.new as NotificacionItem
+              // Dedup por id: la misma notificación puede llegar por realtime y por
+              // un `cargar()` concurrente (apertura del panel o vuelta a la pestaña).
+              setItems(prev => (prev.some(n => n.id === nueva.id) ? prev : [nueva, ...prev]))
+            }
+          )
+          .subscribe((status) => {
+            if (status === 'SUBSCRIBED') {
+              suscrito = true
+              fallos = 0
+              return
+            }
+            if (status === 'CHANNEL_ERROR' || status === 'TIMED_OUT') {
+              fallos += 1
+              if (fallos >= MAX_FALLOS) rendirse(`${fallos} intentos fallidos (${status})`)
+            }
+          })
+      })
+      .catch(() => {
+        // Sin el chunk no hay aviso instantáneo; el conteo sigue llegando al volver a la pestaña.
       })
 
     // Red de seguridad: si el socket ni siquiera llega a abrirse, el callback de
@@ -215,7 +228,7 @@ export default function NotificationBell({ userId, initialItems, initialTotal }:
     return () => {
       clearTimeout(plazo)
       rendido = true
-      if (canal) supabase.removeChannel(canal)
+      quitarCanal?.()
     }
   }, [userId])
 

@@ -34,6 +34,24 @@ const DOC: DocumentoContractual = {
 }
 const DOC_ACEPTADO: DocumentoContractual = { ...DOC, aceptadoAt: '2026-09-24T14:00:00Z', aceptadoPor: 'Alba', aceptadoCanal: 'modulo' }
 
+/**
+ * La v1.4 por aviso (cláusula 13.1) sobre la versión aceptada, como la registra
+ * `sql/valida-cda/2026-10-07_terminos-v1.4-por-aviso.sql`: publicada el 7-oct, rige el 6-nov. Es la que
+ * trae la restricción de los 5 días.
+ */
+const DOC_V14: DocumentoContractual = {
+  ...DOC,
+  documentoId: '77777777-7777-4777-8777-777777777777',
+  titulo: 'Términos de Suscripción al Servicio VALIDA · Plan CDA',
+  version: 'v1.4',
+  pdfSha256: 'b'.repeat(64),
+  vigenteDesde: '2026-11-06',
+  rigePorAviso: true,
+  reemplazaId: DOC.documentoId,
+  publicadaAt: '2026-10-07T15:00:00Z',
+}
+const DOC_ACEPTADO_HASTA_V14: DocumentoContractual = { ...DOC_ACEPTADO, vigenteHasta: '2026-11-05' }
+
 const CONTRATO_CDA = {
   servicio_contratado_id: SC,
   modulo: 'valida_consulta',
@@ -127,6 +145,7 @@ vi.mock('react', async (original) => ({ ...(await original<typeof import('react'
 
 const {
   entradaValidaCda,
+  moraValidaCda,
   puedeVerPagosCda,
   terminosValidaPermitenOperar,
   validaCdaPermiteConsultar,
@@ -304,6 +323,26 @@ describe('mora de más de 30 días (cláusula 11.1)', () => {
     expect(await validaCdaPermiteOperar()).toEqual({ ok: true })
   })
 
+  it('con el plan anual pagado, una cuota de usuarios adicionales impaga no pausa el servicio (anexo 5.2 y 6.1)', async () => {
+    escenario.hoy = '2027-03-15'
+    escenario.cuotas = {
+      data: [
+        CUOTA_1,
+        { ...CUOTA_1, cuota_id: '77777777-7777-4777-8777-777777777777', numero: 14, tipo: 'anual', monto: '1650000', fecha_vencimiento: '2026-10-09' },
+        { ...CUOTA_1, cuota_id: '88888888-8888-4888-8888-888888888888', numero: 4, tipo: 'usuarios_adicionales', monto: '50000', fecha_vencimiento: '2026-12-30' },
+      ],
+      error: null,
+    }
+    escenario.cobros = { data: [{ monto: '150000', estado: 'pagado' }, { monto: '1650000', estado: 'pagado' }], error: null }
+    expect(await validaCdaPermiteOperar()).toEqual({ ok: true })
+    // CONTROL — la misma cuota impaga si fuera del servicio sí pausaría.
+    escenario.cuotas = {
+      data: [...(escenario.cuotas.data ?? []).slice(0, 2), { ...CUOTA_1, cuota_id: '88888888-8888-4888-8888-888888888888', numero: 4, monto: '50000', fecha_vencimiento: '2026-12-30' }],
+      error: null,
+    }
+    expect((await validaCdaPermiteOperar()).ok).toBe(false)
+  })
+
   it('sin poder leer las cuotas NO se pausa: pausar exige la prueba de la deuda', async () => {
     const log = vi.spyOn(console, 'error').mockImplementation(() => {})
     escenario.hoy = '2026-12-31'
@@ -325,12 +364,35 @@ describe('mora de más de 30 días (cláusula 11.1)', () => {
   })
 })
 
-describe('restricción de consultas nuevas a los 5 días (cláusula 11.1 v1.4, rige el 5-nov-2026)', () => {
+describe('restricción de consultas nuevas a los 5 días (cláusula 11.1 v1.4, rige el 6-nov-2026)', () => {
   // Cuota 2 de los CDA, que vence el 10-nov: la restricción corre desde el 16-nov, la pausa desde el 11-dic.
   const CUOTA_NOV = { ...CUOTA_1, cuota_id: '66666666-6666-4666-8666-666666666666', numero: 2, fecha_vencimiento: '2026-11-10' }
   beforeEach(() => {
-    escenario.documentos = [DOC_ACEPTADO]
+    // La v1.3 aceptada y la v1.4 por aviso SIN aceptar: la v1.4 rige igual (13.1).
+    escenario.documentos = [DOC_ACEPTADO_HASTA_V14, DOC_V14]
     escenario.cuotas = { data: [CUOTA_NOV], error: null }
+  })
+
+  it('la fecha sale de la v1.4 registrada, no de una constante', async () => {
+    const e = await entradaValidaCda()
+    expect(e.tipo === 'ok' && e.restriccionDesde).toBe('2026-11-06')
+  })
+
+  it('sin la v1.4 registrada (sin aviso) no hay restricción: 20-nov con 10 días de mora, consulta', async () => {
+    escenario.documentos = [DOC_ACEPTADO]
+    escenario.hoy = '2026-11-20'
+    expect(await validaCdaPermiteConsultar()).toEqual({ ok: true })
+    escenario.hoy = '2026-12-11'
+    expect((await validaCdaPermiteOperar()).ok).toBe(false)
+  })
+
+  it('cuota vencida el 15-oct: el 5-nov todavía consulta, el 6-nov (vigencia) ya no', async () => {
+    escenario.cuotas = { data: [{ ...CUOTA_1, fecha_vencimiento: '2026-10-15' }], error: null }
+    escenario.hoy = '2026-11-05'
+    expect(await validaCdaPermiteConsultar()).toEqual({ ok: true })
+    escenario.hoy = '2026-11-06'
+    const r = await validaCdaPermiteConsultar()
+    expect(!r.ok && r.error).toContain('restringidas desde el 6-nov')
   })
 
   it('15-nov (D+5): consulta y opera', async () => {
@@ -359,6 +421,25 @@ describe('restricción de consultas nuevas a los 5 días (cláusula 11.1 v1.4, r
     expect((await validaCdaPermiteConsultar()).ok).toBe(false)
     escenario.cobros = { data: [{ monto: '150000', estado: 'pagado' }], error: null }
     expect(await validaCdaPermiteConsultar()).toEqual({ ok: true })
+  })
+
+  it('con el plan anual pagado, el período cubierto no da aviso, ni restricción, ni pausa (anexo 6.1)', async () => {
+    // Pagó el año el 10-oct: la cuota de nov (período del 23-nov) pasó a usuarios adicionales, con un
+    // usuario adicional impago de $50.000; la anual de $1.650.000 está cubierta.
+    const anual = { ...CUOTA_1, cuota_id: '99999999-9999-4999-8999-999999999999', numero: 14, tipo: 'anual', monto: '1650000', fecha_vencimiento: '2026-10-09' }
+    escenario.cuotas = { data: [CUOTA_1, anual, { ...CUOTA_NOV, tipo: 'usuarios_adicionales', monto: '50000' }], error: null }
+    escenario.cobros = { data: [{ monto: '150000', estado: 'pagado' }, { monto: '1650000', estado: 'pagado' }], error: null }
+    for (const hoy of ['2026-11-11', '2026-11-20', '2026-12-11']) {
+      escenario.hoy = hoy
+      const m = await moraValidaCda()
+      // Sin aviso de mora para todos (en_mora), sin restricción y sin pausa.
+      expect(m.tipo === 'ok' && m.mora).toEqual({ estado: 'al_dia' })
+      expect(await validaCdaPermiteConsultar()).toEqual({ ok: true })
+    }
+    // CONTROL: la misma cuota de nov como cuota del SERVICIO impaga sí restringe el 20-nov.
+    escenario.cuotas = { data: [CUOTA_1, anual, { ...CUOTA_NOV, monto: '50000' }], error: null }
+    escenario.hoy = '2026-11-20'
+    expect((await validaCdaPermiteConsultar()).ok).toBe(false)
   })
 
   it('sin poder leer las cuotas NO se restringe', async () => {

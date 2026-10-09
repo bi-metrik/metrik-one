@@ -3,6 +3,8 @@ import { getWorkspace } from '@/lib/actions/get-workspace'
 import { getRolePermissions } from '@/lib/roles'
 import { getComercialData, getOperativoData, getFinancieroData, getRentabilidadComercialData, getProcesoPorSeccional } from './actions'
 import { getDirectivo } from './directivo-actions'
+import { getSegundoPagoMes, getSegundoPagoSobrantes } from './segundo-pago-actions'
+import { sinSobrantes } from '@/lib/tableros/segundo-pago'
 import { getMarketingData } from './marketing-actions'
 import { getPilotoMarketplace } from './ferreteria-actions'
 import {
@@ -19,9 +21,15 @@ import { getBandejasOperativas } from './bandejas-actions'
 import TablerosClient from './tableros-client'
 import VitrinaPlaceholder from '@/components/vitrina-placeholder'
 import { getVitrinaCopy } from '@/lib/workspace/vitrina'
+import { cargarVistaSupertransporte } from '@/lib/compliance/reporte-supertransporte/servidor'
+import type { ParamsPeriodo } from '@/lib/compliance/reporte-supertransporte/periodos'
 
-export default async function TablerosPage() {
-  const { supabase, workspaceId, role } = await getWorkspace()
+export default async function TablerosPage({
+  searchParams,
+}: {
+  searchParams: Promise<ParamsPeriodo>
+}) {
+  const [{ supabase, workspaceId, role }, params] = await Promise.all([getWorkspace(), searchParams])
 
   // La vitrina y los modulos se piden JUNTOS: ninguna depende de la otra, y en fila
   // eran dos idas y vueltas a la base antes del `Promise.all` de abajo.
@@ -87,6 +95,7 @@ export default async function TablerosPage() {
     operaciones,
     ferreteria,
     bandejas,
+    supertransporte,
   ] = await Promise.all([
     // Las tres genericas (Financiero/Comercial/Operativo) solo se consultan cuando
     // se van a pintar: son tres rondas de consultas y un workspace con tableros
@@ -173,6 +182,17 @@ export default async function TablerosPage() {
           return null
         })
       : null,
+
+    // Reporte Supertransporte (compliance): el periodo viaja en la URL (`periodo`,
+    // `meses` o `desde`/`hasta`), asi que cambiarlo vuelve a pedir esta pagina. Hoy el
+    // unico workspace con compliance es ALMA, que no tiene ningun otro tablero que
+    // recalcular. Si la lectura falla, la pestana no se pinta: nunca cifras en cero.
+    modules.compliance && workspaceId
+      ? cargarVistaSupertransporte(workspaceId, params).catch((e) => {
+          console.error('[tableros] reporte supertransporte:', e)
+          return null
+        })
+      : null,
   ])
 
   const [comercial, operativo, financiero] = genericas
@@ -191,6 +211,8 @@ export default async function TablerosPage() {
       initialCalidad={calidad}
       initialFerreteria={ferreteria}
       initialBandejas={bandejas}
+      initialSupertransporte={supertransporte}
+      tabInicial={typeof params.tab === 'string' ? params.tab : null}
       modules={modules}
     />
   )
@@ -221,7 +243,7 @@ async function cargarComercialNegocios(role: string | null) {
     const d = new Date(Date.UTC(anioSel, mesSel - 1 + meses, 1))
     return `${d.getUTCFullYear()}-${String(d.getUTCMonth() + 1).padStart(2, '0')}-01`
   }
-  const [equipo, mesData, mesPrevio, origen, seccional, planPago, capacidad, serie, serieSeccional, serieVendedor] = await Promise.all([
+  const [equipo, mesData, mesPrevio, origen, seccional, planPago, capacidad, serieCruda, serieSeccionalCruda, serieVendedorCruda, segundoPago, sobrantes] = await Promise.all([
     getComercialResumen(),
     getComercialMes(anioSel, mesSel),
     getComercialMes(prev.anio, prev.mes),
@@ -232,7 +254,15 @@ async function cargarComercialNegocios(role: string | null) {
     getComercialSerie(12),
     getComercialSerieSeccional(12),
     getComercialSerieVendedor(12),
+    // SOE-002: las dos cifras de segundo pago, de la misma RPC que lee Direccion.
+    getSegundoPagoMes(anioSel, mesSel),
+    // SOE-002: los sobrantes de centavos a tramo 2, para que la barra de segundo pago
+    // de la serie los descarte igual que la cifra «2º pago recibido este mes».
+    getSegundoPagoSobrantes(),
   ])
+  const { serie, serieSeccional, serieVendedor } = sinSobrantes(
+    serieCruda, serieSeccionalCruda, serieVendedorCruda, sobrantes,
+  )
   return {
     equipo,
     mesInicial: mesData,
@@ -240,6 +270,7 @@ async function cargarComercialNegocios(role: string | null) {
     origenInicial: origen,
     seccionalInicial: seccional,
     planPagoInicial: planPago,
+    segundoPagoInicial: segundoPago,
     capacidad,
     serie,
     serieSeccional,

@@ -3,7 +3,9 @@ import {
   copiaDeSoloLectura,
   esCopiaHeredada,
   mensajeCopiaDeSoloLectura,
+  modoDeCopiaGenerable,
   origenDeCopiaEscribible,
+  origenDeCopiaGenerable,
 } from './copia-heredada'
 
 /**
@@ -63,5 +65,43 @@ describe('C5 — lo que no es copia no cambia', () => {
   it('sin config no hay copia', () => {
     expect(copiaDeSoloLectura(null)).toBe(false)
     expect(copiaDeSoloLectura(undefined)).toBe(false)
+  })
+})
+
+describe('copia que genera el formulario de su origen (carta en Cita, 2026-10-08)', () => {
+  const COPIA_CARTA = {
+    readonly: true,
+    source_etapa_orden: 6,
+    source_bloque_slug: 'carta_autorizacion_generar',
+  }
+
+  it('con `genera_en_origen` devuelve el slug del formulario origen', () => {
+    expect(origenDeCopiaGenerable({ ...COPIA_CARTA, genera_en_origen: true })).toBe('carta_autorizacion_generar')
+  })
+
+  it('las otras copias de la carta (sin el flag) no generan', () => {
+    expect(origenDeCopiaGenerable(COPIA_CARTA)).toBeNull()
+    // Estricto: una cadena que entró por SQL a mano no abre nada.
+    expect(origenDeCopiaGenerable({ ...COPIA_CARTA, genera_en_origen: 'true' })).toBeNull()
+  })
+
+  it('sin slug o sin ser copia no hay a qué generar', () => {
+    expect(origenDeCopiaGenerable({ readonly: true, source_etapa_orden: 6, genera_en_origen: true })).toBeNull()
+    expect(origenDeCopiaGenerable({ source_bloque_slug: 'x', genera_en_origen: true })).toBeNull()
+    expect(origenDeCopiaGenerable(null)).toBeNull()
+  })
+
+  it('generar no abre la subida: para documentos sigue siendo de solo lectura', () => {
+    const generable = { ...COPIA_CARTA, genera_en_origen: true }
+    expect(copiaDeSoloLectura(generable)).toBe(true)
+    expect(origenDeCopiaEscribible(generable)).toBeNull()
+  })
+
+  it('genera quien genera formularios: supervisor+ y el operator responsable', () => {
+    for (const rol of ['owner', 'admin', 'supervisor']) expect(modoDeCopiaGenerable(rol, false)).toBe('editable')
+    expect(modoDeCopiaGenerable('operator', true)).toBe('editable')
+    expect(modoDeCopiaGenerable('operator', false)).toBe('visible')
+    expect(modoDeCopiaGenerable('read_only', true)).toBe('visible')
+    expect(modoDeCopiaGenerable('contador', true)).toBe('visible')
   })
 })

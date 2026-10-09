@@ -108,6 +108,11 @@ export async function middleware(request: NextRequest) {
   // 307 a /login, justo cuando el vigilante mas necesita la respuesta.
   if (pathname === '/api/version') return NextResponse.next()
 
+  // El correo con el link de autorización de datos al crear un viaje desde el bot (edge
+  // function, sin sesión). La ruta solo actúa sobre un negocio creado hace menos de 15 minutos y
+  // solo manda el correo que el sistema habría mandado solo (ver `app/api/autorizacion-datos`).
+  if (pathname === '/api/autorizacion-datos/al-crear') return NextResponse.next()
+
   // El service worker del piloto de red (`public/sw.js`). Es un archivo estatico, pero `.js` no
   // esta excluido del matcher: sin este corte, una pestaña sin sesion recibia un 307 a /login y
   // el navegador rechaza registrar (o ACTUALIZAR, que es por donde llega el interruptor de
@@ -196,6 +201,10 @@ export async function middleware(request: NextRequest) {
     // pagina valida contra Valida. La marca que se pinta sale del workspace del
     // propio expediente, no de este subdominio.
     if (pathname.startsWith('/vinculacion/')) return respuestaTenant()
+
+    // Link de autorización de datos del cliente final (sin usuario en ONE). La credencial es el
+    // token, y la página solo abre un enlace del workspace de ESTE subdominio.
+    if (pathname.startsWith('/autorizacion/')) return respuestaTenant()
 
     // No autenticado → login DEL MISMO SUBDOMAIN (no marketing). Asi el magic link
     // siembra sesion en este subdomain via /auth/callback, en lugar de pasar por

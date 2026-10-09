@@ -3,8 +3,13 @@
 // ------------------------------------------------------------
 // Todo código de viaje, celular, correo, cifra, fecha, porcentaje y nombre propio del texto tiene que estar en el
 // respaldo: un resultado de herramienta, un mensaje de la conversación (escritos, reenvíos, lo que el bot ya dijo) o el
-// estado y el reglamento que armó el código. Los verbos de hecho («cargué», «creé», «abrí», «descarté») no salen nunca
-// del modelo: los hechos los escribe el código (`rf.hecho`) después de un toque.
+// estado y el reglamento que armó el código.
+// Una oración que AFIRMA un hecho del sistema («lo anoté», «abrimos», «ya quedó guardada…», «está registrada…») sale
+// solo si un HECHO la respalda: un resultado de herramienta de este turno (`ver_viaje`, `buscar`) o una escritura
+// confirmada con su toque en la conversación. La oración tiene que nombrar algo de ese hecho (un campo, un código, un
+// valor) y todos sus datos tienen que estar en él. Las palabras solo detectan que hay una afirmación; lo que decide si
+// sale es el respaldo (2026-10-07: en vivo se atajaban «está registrada la ciudad de salida: Bogotá», dicho tras un
+// `ver_viaje`, y «la fecha de regreso ya quedó guardada…», cierta desde el toque anterior).
 //
 // Riesgo conocido (diseño §3.5): puede bloquear un nombre escrito de otra forma («don Diego» por «Diego Torres»). Eso
 // es un «mal», no una dañina; el arnés cuenta los bloqueos y su motivo.
@@ -13,6 +18,15 @@
 
 const VERBOS_DE_HECHO = [
   'cargué', 'creé', 'abrí', 'descarté', 'anoté', 'guardé', 'registré', 'actualicé', 'borré', 'eliminé', 'asigné', 'agregué', 'añadí', 'cambié',
+];
+/**
+ * La primera del plural también afirma un hecho: en vivo (2026-10-07) el respaldo escribió «Sí, abrimos el nuevo viaje a
+ * San Andrés» sin que nada se abriera, y pasó porque la lista solo tenía «abrí». Dentro de una pregunta («¿Lo
+ * abrimos?») no afirma nada.
+ */
+const VERBOS_DE_HECHO_PLURAL = [
+  'cargamos', 'creamos', 'abrimos', 'descartamos', 'anotamos', 'guardamos', 'registramos', 'actualizamos', 'borramos',
+  'eliminamos', 'asignamos', 'agregamos', 'añadimos', 'cambiamos',
 ];
 const RE_HECHO_PARTICIPIO = /\b(?:ya\s+)?(?:qued[oó]|est[aá]|lo\s+dej[eé])\s+(?:cargad|cread|abiert|registrad|anotad|guardad|descartad|actualizad)[oa]s?\b/iu;
 const RE_CODIGO = /\b[A-ZÑ]\d{0,2} \d{2} \d{1,4}\b/gu;
@@ -69,15 +83,72 @@ function inicioDeOracion(texto: string, i: number): boolean {
   return antes === '' || /[.!?:\n…]$/u.test(antes);
 }
 
-/** Los motivos por los que el texto no puede salir. Vacío = pasa. */
-export function verificar(texto: string, r: Respaldo): string[] {
-  const motivos: string[] = [];
+/** ¿La posición cae dentro de una pregunta («¿… ?» sin cerrar antes)? */
+function dentroDePregunta(texto: string, i: number): boolean {
+  const abre = texto.lastIndexOf('¿', i);
+  if (abre < 0) return false;
+  const cierra = texto.indexOf('?', abre);
+  return cierra >= i && !/[.!\n]/u.test(texto.slice(abre, i));
+}
 
+/** Los pares de palabras seguidas de 3+ letras: «la ciudad de salida» → «ciudad salida». */
+function pares(n: string): Set<string> {
+  const ws = n.split(/[^a-z0-9ñ]+/u).filter((w) => w.length >= 3);
+  const out = new Set<string>();
+  for (let i = 0; i + 1 < ws.length; i++) out.add(`${ws[i]} ${ws[i + 1]}`);
+  return out;
+}
+
+/** ¿La oración afirma un hecho del sistema? Devuelve qué lo dice (para el motivo), o null. Solo DETECTA. */
+function afirmacion(oracion: string): string | null {
   for (const v of VERBOS_DE_HECHO) {
-    if (new RegExp(`(^|[^\\p{L}])${v}($|[^\\p{L}])`, 'iu').test(texto)) motivos.push(`verbo de hecho «${v}»: los hechos los escribe el sistema`);
+    if (new RegExp(`(^|[^\\p{L}])${v}($|[^\\p{L}])`, 'iu').test(oracion)) return `verbo de hecho «${v}»`;
   }
-  if (RE_HECHO_PARTICIPIO.test(texto)) motivos.push('afirma que algo quedó hecho: los hechos los escribe el sistema');
+  for (const v of VERBOS_DE_HECHO_PLURAL) {
+    for (const m of oracion.matchAll(new RegExp(`(^|[^\\p{L}])${v}($|[^\\p{L}])`, 'giu'))) {
+      if (!dentroDePregunta(oracion, (m.index ?? 0) + m[1].length)) return `verbo de hecho «${v}»`;
+    }
+  }
+  if (RE_HECHO_PARTICIPIO.test(oracion)) return 'afirma que algo quedó hecho';
+  return null;
+}
 
+const RESPALDO_VACIO: Respaldo = { texto: '', palabras: new Set(), digitos: '', numeros: new Set() };
+
+/**
+ * Los motivos por los que el texto no puede salir. Vacío = pasa.
+ *
+ * @param hechos lo que respalda una AFIRMACIÓN de hecho (`respaldoDe` de los resultados de herramienta de este turno y
+ *               de las escrituras confirmadas de la conversación). Sin hechos, ninguna afirmación de hecho sale.
+ */
+export function verificar(texto: string, r: Respaldo, hechos: Respaldo = RESPALDO_VACIO): string[] {
+  const motivos: string[] = [];
+  const paresHechos = pares(hechos.texto);
+  for (const m of texto.matchAll(/[^.!?\n]+[.!?]*/gu)) {
+    const oracion = m[0].trim();
+    const dice = oracion ? afirmacion(oracion) : null;
+    if (!dice) continue;
+    if (!hechos.texto) {
+      motivos.push(`${dice} y ninguna herramienta de este turno ni escritura confirmada lo respalda: los hechos los escribe el sistema`);
+      continue;
+    }
+    // Tiene que nombrar algo del hecho (un campo, un código, un valor)…
+    const nombra = [...pares(normal(oracion))].some((x) => paresHechos.has(x))
+      || [...oracion.matchAll(RE_CODIGO)].some((c) => hechos.texto.includes(normal(c[0])));
+    if (!nombra) {
+      motivos.push(`${dice} sin nombrar nada de lo que devolvió una herramienta de este turno o se escribió con un toque`);
+      continue;
+    }
+    // …y todos sus datos tienen que estar en él, no solo en la conversación.
+    for (const d of datosSinRespaldo(oracion, hechos)) motivos.push(`${dice}, pero ${d} entre lo consultado o escrito`);
+  }
+  motivos.push(...datosSinRespaldo(texto, r));
+  return [...new Set(motivos)];
+}
+
+/** Los datos de un texto (códigos, correos, celulares, fechas, cifras, nombres) que no están en el respaldo. */
+function datosSinRespaldo(texto: string, r: Respaldo): string[] {
+  const motivos: string[] = [];
   const usados = new Set<string>();
   for (const m of texto.matchAll(RE_CODIGO)) {
     usados.add(m[0]);

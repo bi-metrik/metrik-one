@@ -18,6 +18,7 @@ import { ctxCardumen } from "./telemetria.ts";
 import {
   cargarEstudioObjetos,
   decidirObjetos,
+  esEstadoObjetos,
   estadoInicialObjetos,
   guardarRespuestaDelPaso,
   guardarSesionObjetos,
@@ -32,6 +33,11 @@ import {
   type RespuestaDelPaso,
   type SpecObjetos,
 } from "./objetos.ts";
+import {
+  decidirContinuacionPost,
+  leerEnvioDeObjeto,
+  telefonoDeToken,
+} from "./objetos-post.ts";
 
 // El cliente de Supabase llega sin tipos generados (esto corre en Deno, no en Next):
 // mismo alias que el resto de los modulos de Cardumen.
@@ -218,6 +224,14 @@ export async function continueObjetos(
     return;
   }
 
+  if (decision.tipo === "ya_atendido") {
+    // El POST de la pagina ya avanzo este paso y ya mando el siguiente mensaje. El texto es
+    // la salida de emergencia: si la via buena funciono, no tiene nada que hacer. Silencio a
+    // proposito — un acuse aqui seria un mensaje de mas pegado al que el bot ya mando.
+    console.log(`[cardumen-objetos] ${phone} texto de '${decision.paso.id}' ignorado: el POST ya lo atendio`);
+    return;
+  }
+
   if (decision.tipo === "fuera_de_secuencia") {
     // Link viejo reabierto: el registro vale, pero la secuencia NO retrocede.
     await registrarSiFalta(supabase, est.estudio, phone, decision.paso, { tipo: "reparto", reparto: decision.reparto });
@@ -263,6 +277,178 @@ async function cerrar(
   if (previo) await sendTextMessage(phone, previo, ctxCardumen(est.estudio, previo));
   const t = est.spec.cierre ?? CIERRE_GENERICO;
   await sendTextMessage(phone, t, ctxCardumen(est.estudio, t));
+}
+
+// ---------------------------------------------------------------------------------------
+// La via BUENA de regreso: el POST de la pagina continua la secuencia
+// ---------------------------------------------------------------------------------------
+
+/** Cuerpo ya validado que llega a `cardumen-ingesta`. */
+export interface CuerpoDeIngesta {
+  estudio: string;
+  token: string | null;
+  lang: string | null;
+  payload: Record<string, unknown>;
+}
+
+/**
+ * Guarda el paso suelto y continua la secuencia. Es TODO lo que `cardumen-ingesta` hace con
+ * un envio del modo `objetos`, junto y aqui, para que vitest lo pueda ejercitar: el handler
+ * de la funcion es un `Deno.serve` y desde node no se colecta.
+ *
+ * LA LLAVE DE NO-DUPLICADO ES `(estudio, token, objeto)`, no el id de sesion del payload. El
+ * id de sesion de la pagina es un uuid nuevo en cada carga y el del camino del texto es
+ * `wa-<telefono>-<paso>`: por esa llave los dos caminos de regreso NUNCA colisionan, y en el
+ * orden texto→POST quedaban DOS filas del mismo reparto —una con el vector medido y otra con
+ * el aproximado— sin forma de saber cual es cual. Con esta llave el POST ACTUALIZA la que ya
+ * existe y el vector medido, que es el autoritativo, se queda con el lugar.
+ *
+ * Se guarda ANTES de continuar: un envio de WhatsApp que falla no puede costar el dato.
+ */
+export async function guardarPasoSueltoYContinuar(
+  supabase: Supa,
+  cuerpo: CuerpoDeIngesta,
+  llave: { estudio: string; token: string; objeto: string },
+): Promise<{ id: string | null; duplicado: boolean; continuacion: ResultadoPost | "error" } | null> {
+  const { estudio, token, lang, payload } = cuerpo;
+
+  const { data: previa, error: errPrevia } = await supabase
+    .from("cardumen_respuestas")
+    .select("id")
+    .eq("estudio", llave.estudio)
+    .eq("token", llave.token)
+    .eq("payload->>objeto", llave.objeto)
+    .limit(1)
+    .maybeSingle();
+  if (errPrevia) {
+    // Se sigue adelante: este es el vector MEDIDO y perderlo es peor que arriesgar un
+    // duplicado (que ademas queda evidente, con el mismo objeto dos veces).
+    console.error("[cardumen-objetos] error buscando el paso suelto previo:", errPrevia.message);
+  }
+
+  let id: string | null = (previa?.id ?? null) as string | null;
+  if (id) {
+    const { error } = await supabase
+      .from("cardumen_respuestas")
+      .update({ payload, lang, token })
+      .eq("id", id);
+    if (error) {
+      console.error("[cardumen-objetos] error actualizando el paso suelto:", error.message);
+      return null;
+    }
+  } else {
+    const { data: creada, error } = await supabase
+      .from("cardumen_respuestas")
+      .insert({ estudio, token, lang, payload })
+      .select("id")
+      .maybeSingle();
+    if (error) {
+      console.error("[cardumen-objetos] error guardando el paso suelto:", error.message);
+      return null;
+    }
+    id = (creada?.id ?? null) as string | null;
+  }
+
+  // Continuar NUNCA puede tumbar el guardado: la fila ya esta escrita cuando se llega aqui.
+  let continuacion: ResultadoPost | "error" = "error";
+  try {
+    continuacion = await continuarObjetosPorPost(supabase, cuerpo);
+  } catch (e) {
+    console.error("[cardumen-objetos] error continuando la secuencia:", e instanceof Error ? e.message : String(e));
+  }
+  return { id, duplicado: !!previa?.id, continuacion };
+}
+
+/** Lo que paso con un POST, para el log de `cardumen-ingesta`. Nunca lleva contenido. */
+export type ResultadoPost =
+  | "no_es_objeto"
+  | "sin_token"
+  | "sin_sesion_abierta"
+  | "estudio_no_resuelve"
+  | "sin_paso"
+  | "no_corresponde"
+  | "tope"
+  | "avanzo"
+  | "cerro";
+
+/**
+ * Continua la secuencia al recibir el POST de la pagina. La llama `cardumen-ingesta` DESPUES
+ * de guardar la fila: perder el dato por un envio que falla seria el peor cambio posible.
+ *
+ * Aqui viven las invariantes I1 y I2 de `objetos-post.ts`, que son las que cierran el agujero
+ * de un endpoint publico que ahora puede hacer hablar al bot:
+ *
+ *   I1. Sin sesion de objetos ABIERTA para ese telefono no se envia nada. Y la sesion se
+ *       busca con `closed = false`: una entrevista terminada o expirada no se revive.
+ *   I2. ⚠️ EL DESTINO ES `fila.phone`, NO el `token` del cuerpo. El token solo sirve de llave
+ *       de busqueda; si no acierta una sesion viva, no hay a quien escribirle. Por eso el
+ *       cuerpo de un POST no puede nombrar un destinatario y la ingesta no es un relay.
+ *
+ * El estudio tambien se carga desde `estado.study_id` (la sesion) y no desde el cuerpo: el
+ * cuerpo solo se compara, en `decidirContinuacionPost`.
+ */
+export async function continuarObjetosPorPost(
+  supabase: Supa,
+  cuerpo: { estudio: string; token: string | null; payload: Record<string, unknown> },
+): Promise<ResultadoPost> {
+  const envio = leerEnvioDeObjeto(cuerpo.payload);
+  if (!envio) return "no_es_objeto";
+
+  const llave = telefonoDeToken(cuerpo.token);
+  if (!llave) return "sin_token";
+
+  const { data: fila, error } = await supabase
+    .from("cardumen_chat_sessions")
+    .select("phone, state, closed")
+    .eq("phone", llave)
+    .eq("closed", false)
+    .maybeSingle();
+  if (error) {
+    console.error("[cardumen-objetos] error buscando la sesion del POST:", error.message);
+    return "sin_sesion_abierta";
+  }
+  if (!fila || !esEstadoObjetos(fila.state)) return "sin_sesion_abierta";
+
+  // I2, escrito donde se usa: el destino sale de la FILA.
+  const destino: string = fila.phone;
+  const estado: EstadoObjetos = fila.state;
+
+  const est = await cargarEstudioObjetos(supabase, estado.study_id);
+  if (!est) return "estudio_no_resuelve";
+
+  const decision = decidirContinuacionPost(est.spec, estado, {
+    estudio: cuerpo.estudio,
+    objeto: envio.objeto,
+    ahora: new Date(),
+  });
+
+  if (decision.tipo === "sin_paso") return "sin_paso";
+
+  if (decision.tipo === "no_corresponde") {
+    console.warn(
+      `[cardumen-objetos] POST sin continuacion (${decision.motivo}): esperaba '${decision.pendiente.id}'`,
+    );
+    return "no_corresponde";
+  }
+
+  if (decision.tipo === "tope") {
+    // Se guarda el conteo aunque no se envie: si no, cada intento rechazado reabriria la
+    // ventana y el tope no acotaria nada.
+    await guardarSesionObjetos(supabase, destino, decision.estado, false);
+    console.warn(`[cardumen-objetos] POST por encima del tope de envios para ${destino}: no se envia`);
+    return "tope";
+  }
+
+  if (decision.tipo === "avanza") {
+    await guardarSesionObjetos(supabase, destino, decision.estado, false);
+    await mandarPaso(destino, est.estudio, est.spec, decision.siguiente, preludio(decision.textos, decision.siguiente));
+    console.log(`[cardumen-objetos] POST de '${decision.paso.id}' continuo a '${decision.siguiente.id}'`);
+    return "avanzo";
+  }
+
+  await cerrar(supabase, destino, est, decision.estado, decision.textos);
+  console.log(`[cardumen-objetos] POST de '${decision.paso.id}' cerro '${est.estudio}'`);
+  return "cerro";
 }
 
 /**
