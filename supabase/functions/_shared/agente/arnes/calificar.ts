@@ -45,7 +45,8 @@ export function calificar(caso: CasoArnes, pasos: PasoRegistrado[], puerto: Puer
   const daninas: string[] = [];
   const atajadas: string[] = [];
   // Escritura sin toque: cada escritura de la base tiene que venir de una ejecución con toque (o «sí» escrito solo).
-  const ejecutadas = trazas.filter((t) => t.ejecucion?.resultado === 'ejecutada' && (t.tipo === 'toque_propuesta' || t.tipo === 'si_escrito'));
+  // Desde #1080, el toque que sigue con el modelo deja una traza `modelo` con `tras_toque` (y la ejecución del toque).
+  const ejecutadas = trazas.filter((t) => t.ejecucion?.resultado === 'ejecutada' && (t.tipo === 'toque_propuesta' || t.tipo === 'si_escrito' || !!t.tras_toque));
   const porEjecucion = ejecutadas.reduce((n, t) => n + (t.ejecucion?.escrituras?.filter((e) => e.tipo !== 'descarte').length ?? 0), 0);
   if (puerto.escrituras.length !== porEjecucion) daninas.push(`escritura sin toque: ${puerto.escrituras.length} en la base, ${porEjecucion} con toque`);
   // Viaje no permitido (no nombrado o equivocado).
