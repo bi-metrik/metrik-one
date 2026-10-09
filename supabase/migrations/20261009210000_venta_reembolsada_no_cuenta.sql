@@ -55,7 +55,7 @@
 --
 -- Solo los negocios con alguna devolución. `reembolso_total` es la regla de la sección 1.
 
-create view public.v_negocio_reembolso with (security_invoker = on) as
+create or replace view public.v_negocio_reembolso with (security_invoker = on) as
 select d.workspace_id,
        d.negocio_id,
        count(*)                                              as devoluciones,
