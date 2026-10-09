@@ -2,6 +2,7 @@
 
 ## Project memories
 
+- ⚠️⚠️ [SOE-006: histórico de inactivos (#1084)](project_historico_inactivos_soe006.md) — migración 20261008223000 SIN aplicar; promedio del supervisor solo activos (provisional)
 - ⚠️⚠️ [Autorización de datos por link (Trappvel)](project_autorizacion_datos_link.md) — migración 20261008230000 APLICADA (8-oct); marcas manuales no cuentan; Encargado por versión
 - [SOE-004: aprobación fuera de tarifa](project_aprobacion_fuera_de_tarifa.md) — tope frena al APROBAR, no al generar; gerencial + motivo; recargos incluidos
 - [Reporte Supertransporte (ALMA)](project_reporte_supertransporte.md) — contrapartes = todos los segmentos; MéTRIK por platform_admin/correo; KYC sin created_by
