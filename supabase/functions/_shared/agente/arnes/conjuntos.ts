@@ -200,7 +200,10 @@ export const CONJUNTO_1: CasoArnes[] = [
     id: 'c1-1009', conjunto: 1, extraccion: true,
     titulo: '12:51–12:57 (2026-10-09): retomar un viaje con una propuesta de viaje nuevo pendiente; «un niño de año y medio»; presupuesto que nadie dijo',
     contactos: DIRECTORIO,
-    // El viaje que se retoma no tiene destino ni datos (como el de la prueba real).
+    // El viaje que se retoma no tiene destino ni datos (como el de la prueba real). En la real el comercial escribió
+    // «m1261» sin espacios y el viaje quedó nombrado porque eligió «el de miami» de una lista del bot; aquí va el código
+    // con espacios para medir lo de este caso y no si el modelo mostró la lista (el código pegado no se reconoce: ver
+    // el reporte del 2026-10-09).
     viajes: VIAJES.map((x) => (x.codigo === 'M1 26 2' ? { ...x, nombre: 'MIAMI 7N', destino: null } : x)),
     sinClienteNuevo: true, viajesPermitidos: ['M1 26 2'],
     pasos: [
@@ -208,7 +211,7 @@ export const CONJUNTO_1: CasoArnes[] = [
       { escribe: 'Primero dime que viajes están abiertos de Martín' },
       { escribe: 'A listo. Vamos a retomar el viaje a miami. vamos a hacer una nueva cotización' },
       { toca: 'Ver qué', oEscribe: 'Ver qué le falta' },
-      { escribe: 'Quiero que coticemos m1262 ahora para que vayan 2 adultos y un niño de año y medio. Serían 6 noches saliendo desde Bogotá el 19 de noviembre. calcula la fecha de regreso' },
+      { escribe: 'Quiero que coticemos M1 26 2 ahora para que vayan 2 adultos y un niño de año y medio. Serían 6 noches saliendo desde Bogotá el 19 de noviembre. calcula la fecha de regreso' },
       { toca: 'Anotar' },
       { escribe: 'están buscando hoteles 4 estrellas' },
       { toca: 'Anotar' },
