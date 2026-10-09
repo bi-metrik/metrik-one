@@ -154,24 +154,9 @@ function fuentesDeRespaldo(e: EntradaTurno, extra: string[]): string[] {
     for (const h of x.traza?.herramientas ?? []) f.push(JSON.stringify(h.datos ?? ''));
     if (x.traza?.propuesta) f.push(x.traza.propuesta.resumen);
     for (const l of x.traza?.ejecucion?.lineas ?? []) f.push(l);
+    if (x.traza?.ejecucion?.escrituras?.length) f.push(JSON.stringify(x.traza.ejecucion.escrituras));
   }
   for (const r of e.ctx.resultadosPrevios) f.push(JSON.stringify(r.datos ?? ''));
-  return f;
-}
-
-/**
- * Lo que respalda una AFIRMACIÓN de hecho («está registrada…», «ya quedó guardada…»): lo que devolvieron las
- * herramientas en este turno y las escrituras confirmadas con un toque (sus líneas y lo que escribieron). No la
- * conversación: que el comercial lo haya dicho no quiere decir que esté en el viaje.
- */
-function fuentesDeHechos(e: EntradaTurno, resultadosTurno: string[]): string[] {
-  const f: string[] = [...resultadosTurno];
-  for (const x of e.filas) {
-    const ej = x.traza?.ejecucion;
-    if (ej?.resultado !== 'ejecutada') continue;
-    f.push(...(ej.lineas ?? []));
-    if (ej.escrituras?.length) f.push(JSON.stringify(ej.escrituras));
-  }
   return f;
 }
 
@@ -336,13 +321,13 @@ export async function turnoDelModelo(deps: DepsTurno, e: EntradaTurno): Promise<
           devolver(`${render.error} (el \`texto\` de \`proponer\`)`);
           continue;
         }
-        const motivos = verificar(render.salida.texto, respaldoDe([...respaldoFijo, ...fuentesDeRespaldo(e, resultadosTurno), p.propuesta.resumen]), respaldoDe(fuentesDeHechos(e, resultadosTurno)));
+        const motivos = verificar(render.salida.texto, respaldoDe([...respaldoFijo, ...fuentesDeRespaldo(e, resultadosTurno), p.propuesta.resumen]));
         if (motivos.length) {
           traza.verificador!.push({ motivo: motivos.join('; '), texto: render.salida.texto });
           if (!correccionUsada) {
             correccionUsada = true;
             presupuesto = Math.max(presupuesto, traza.llamados! + 1);
-            devolver(`No se envió porque el \`texto\`: ${motivos.join('; ')}. Vuelve a llamar \`proponer\` con el texto sin eso (los hechos los escribe el sistema; los datos tienen que salir de la conversación o de una herramienta).`);
+            devolver(`No se envió porque el \`texto\`: ${motivos.join('; ')}. Vuelve a llamar \`proponer\` con el texto sin eso (los datos tienen que salir de la conversación o de una herramienta).`);
             continue;
           }
           // Segunda vez: el texto no sale; la propuesta (que arma el código con datos reales) sí.
@@ -386,13 +371,13 @@ export async function turnoDelModelo(deps: DepsTurno, e: EntradaTurno): Promise<
       continue;
     }
     const aVerificar = [render.salida.texto, ...('opciones' in render.salida ? render.salida.opciones.map((o) => `${o.titulo}. ${o.descripcion ?? ''}`) : [])].join('\n');
-    const motivos = texto ? verificar(aVerificar, respaldoDe([...respaldoFijo, ...fuentesDeRespaldo(e, resultadosTurno)]), respaldoDe(fuentesDeHechos(e, resultadosTurno))) : ['texto vacío'];
+    const motivos = texto ? verificar(aVerificar, respaldoDe([...respaldoFijo, ...fuentesDeRespaldo(e, resultadosTurno)])) : ['texto vacío'];
     if (motivos.length) {
       traza.verificador!.push({ motivo: motivos.join('; '), texto: aVerificar });
       if (!correccionUsada) {
         correccionUsada = true;
         presupuesto = Math.max(presupuesto, traza.llamados! + 1);
-        devolver(`No se envió porque: ${motivos.join('; ')}. Escríbelo otra vez sin eso (los hechos los escribe el sistema; los datos tienen que salir de la conversación o de una herramienta).`);
+        devolver(`No se envió porque: ${motivos.join('; ')}. Escríbelo otra vez sin eso (los datos tienen que salir de la conversación o de una herramienta).`);
         continue;
       }
       return fin(caer(), { respuesta_fija: soloHecho ? 'rf.hecho' : 'rf.modelo_caido', error: 'verificador' });
