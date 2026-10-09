@@ -10,6 +10,7 @@
 - [SOE-004: aprobación fuera de tarifa](project_aprobacion_fuera_de_tarifa.md) — tope frena al APROBAR, no al generar; gerencial + motivo; recargos incluidos
 - [Reporte Supertransporte (ALMA)](project_reporte_supertransporte.md) — contrapartes = todos los segmentos; MéTRIK por platform_admin/correo; KYC sin created_by
 - ⚠️⚠️ [SOE-008/009: aviso al cliente una vez por hecho](project_aviso_mismo_hecho.md) — migración huella SIN aplicar; deploy notificar-etapa después
+- ⚠️⚠️ [SOE-006: Correcciones y etapas renombradas](project_correcciones_etapa_retirada.md) — migración SIN aplicar; resolver por momento; sin resolver CUENTA
 - ⚠️⚠️ [SOE-002: segundo pago en dos cifras](project_segundo_pago_dos_cifras.md) — ambas RPC APLICADAS (8-oct); umbral $1.000 en 2 funciones
 - ⚠️⚠️ [Plan Anual CDA (#1065)](project_valida_cda_restriccion_y_plan_anual.md) — migración 20261007210000 SIN aplicar; vigente_hasta=12.1 es null; anexo generado; pendientes #1072
 - ⚠️⚠️ [SOE-001: Seguimiento en 4 etapas de operaciones](project_soe001_seguimiento_operaciones.md) — migración APLICADA (7-oct); SQL de datos SIN aplicar; deploy alertas-plazo antes del SQL
