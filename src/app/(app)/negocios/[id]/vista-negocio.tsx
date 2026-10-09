@@ -20,6 +20,9 @@ import { leerFacturasDeCuotas } from '@/lib/valida-cda/facturas-negocio-servidor
 import { FacturasCuotas } from './facturas-cuotas'
 import { getActivityLog } from '@/app/(app)/activity-actions'
 import type { ActivityEntry } from '@/components/activity-log'
+import { leerDevolucionesDelNegocio } from '@/lib/cobros/devoluciones-servidor'
+import { cobradoDelNegocio } from '@/lib/cobros/devolucion-dinero'
+import { DevolucionesNegocio } from './devoluciones-negocio'
 
 /**
  * Todo lo que la página del negocio le pasa a `NegocioDetailClient`, armado en UN sitio.
@@ -208,9 +211,24 @@ export async function cargarVistaNegocio(id: string): Promise<VistaNegocio | nul
     )
     : null
 
-  const extras = extrasValida || facturasCuotas?.estado === 'ok' || facturasCuotas?.estado === 'no_disponible'
+  // Devoluciones de dinero (SOE-007): visibles en la ficha aunque el bloque de pagos no se
+  // pinte en la etapa actual (el caso típico es un negocio perdido en venta).
+  const devoluciones = workspaceId ? await leerDevolucionesDelNegocio(supabase, workspaceId, id) : []
+  const tarjetaDevoluciones = devoluciones.length > 0
+    ? (
+      <DevolucionesNegocio
+        devoluciones={devoluciones}
+        cobrado={cobradoDelNegocio(
+          (data.cobros ?? []) as Array<{ monto: number | null; tipo_cobro: string | null; fecha: string | null }>,
+        )}
+      />
+    )
+    : null
+
+  const extras = extrasValida || tarjetaDevoluciones || facturasCuotas?.estado === 'ok' || facturasCuotas?.estado === 'no_disponible'
     ? (
       <div className="space-y-3">
+        {tarjetaDevoluciones}
         {facturasCuotas?.estado === 'ok' && <FacturasCuotas cuotas={facturasCuotas.cuotas} />}
         {facturasCuotas?.estado === 'no_disponible' && (
           <p className="text-xs text-tinta-suave">No se pudieron cargar las facturas de las cuotas en este momento.</p>

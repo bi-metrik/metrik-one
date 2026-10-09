@@ -153,11 +153,13 @@ begin
     return jsonb_build_object('ok', false, 'codigo', 'razon_requerida');
   end if;
 
-  -- Lo cobrado: todos los cobros del negocio (un anulado ya vale 0). Sin `devolucion_pendiente`,
-  -- que es un remanente por devolver, no plata que entró.
+  -- Lo cobrado: los cobros del negocio que ya ENTRARON (con fecha: un `programado` sin fecha es
+  -- una cuota por pagar) y un anulado ya vale 0. Sin `devolucion_pendiente`, que es un remanente
+  -- por devolver, no plata que entró.
   select coalesce(sum(c.monto), 0) into v_cobrado
     from cobros c
    where c.negocio_id = p_negocio_id and c.workspace_id = p_workspace_id
+     and c.fecha is not null
      and coalesce(c.tipo_cobro, '') <> 'devolucion_pendiente';
   select coalesce(sum(d.monto), 0) into v_devuelto
     from devoluciones_dinero d

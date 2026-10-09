@@ -121,6 +121,32 @@ export function mensajeDeRechazo(r: Extract<RespuestaRegistro, { ok: false }>): 
   }
 }
 
+/** Una devolución tal como la pinta la ficha del negocio. */
+export interface DevolucionDelNegocio {
+  id: string
+  fecha: string
+  monto: number
+  motivo: string
+  cerro_caso: boolean
+  soporte_url: string | null
+  soporte_nombre: string | null
+  autor: string | null
+}
+
+/**
+ * Lo cobrado de un negocio, con el mismo criterio que la función de la base: los cobros que ya
+ * entraron (con fecha; un anulado ya vale 0), menos los remanentes por devolver
+ * (`devolucion_pendiente`).
+ */
+export function cobradoDelNegocio(
+  cobros: Array<{ monto: number | null; tipo_cobro: string | null; fecha: string | null }>,
+): number {
+  return cobros
+    // Sin fecha es una cuota programada que todavía no se paga.
+    .filter((c) => !!c.fecha && c.tipo_cobro !== 'devolucion_pendiente')
+    .reduce((s, c) => s + Number(c.monto ?? 0), 0)
+}
+
 /** Neto por negocio: lo cobrado menos lo devuelto. */
 export function recaudadoNeto(cobrado: number, devuelto: number): number {
   return Math.round((Number(cobrado || 0) - Number(devuelto || 0)) * 100) / 100

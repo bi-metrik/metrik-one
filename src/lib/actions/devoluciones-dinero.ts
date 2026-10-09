@@ -188,6 +188,7 @@ export async function getPanelDevoluciones(): Promise<{ data: PanelDevoluciones 
 
   try {
     const [cobros, devoluciones, negocios] = await Promise.all([
+      // Solo lo que ya entró: un `programado` sin fecha es una cuota por pagar.
       traerTodo<{ negocio_id: string | null; monto: number | null; tipo_cobro: string | null }>(
         (desde, hasta) =>
           db(supabase)
@@ -195,6 +196,7 @@ export async function getPanelDevoluciones(): Promise<{ data: PanelDevoluciones 
             .select('negocio_id, monto, tipo_cobro')
             .eq('workspace_id', workspaceId)
             .not('negocio_id', 'is', null)
+            .not('fecha', 'is', null)
             .order('id')
             .range(desde, hasta),
         { etiqueta: 'devoluciones:cobros' },
