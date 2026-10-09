@@ -24,6 +24,7 @@ function tablasBase(extra: Partial<Tablas> = {}): Tablas {
     catalogo_servicios: [
       { slug: 'radar-secop-licencia', nombre: 'Licencia Radar SECOP', modulo: 'radar_secop', disparador_cobro: 'ciclo' },
       // Un servicio por ciclo de OTRO módulo: no se debe ni leer.
+      { slug: 'licencia-clarity', nombre: 'Licencia Clarity', modulo: 'business', disparador_cobro: 'ciclo' },
       { slug: 'valida-cda-licencia', nombre: 'Licencia Valida por CDA', modulo: 'valida_consulta', disparador_cobro: 'ciclo' },
     ],
     catalogo_servicios_versiones: [
@@ -180,11 +181,11 @@ describe('lo que no toca', () => {
       tablasBase({
         servicios_contratados: [
           {
-            id: 'c-cda',
+            id: 'c-clarity',
             workspace_id: WS,
-            negocio_id: 'n-cda',
+            negocio_id: 'n-clarity',
             estado: 'activo',
-            servicio_slug: 'valida-cda-licencia',
+            servicio_slug: 'licencia-clarity',
             servicio_version: 1,
             parametros: { precio_mensual: 150_000 },
           },
@@ -215,6 +216,69 @@ describe('lo que no toca', () => {
     const r = await enrolarContratosPorCiclo({ db: d.db, ...conPasarela })
     // 15 días, no 5: el contrato no dijo nada y la ficha de su versión manda.
     expect(r.creados[0].finTrial).toBe('2026-10-14')
+  })
+})
+
+describe('Valida por CDA (decisión del 2026-10-09)', () => {
+  const CDA = {
+    id: 'c-cda',
+    workspace_id: WS,
+    negocio_id: 'n-cda',
+    estado: 'activo',
+    servicio_slug: 'valida-cda-licencia',
+    servicio_version: 1,
+    parametros: { precio_mensual: 150_000, dias_trial: 7 },
+  }
+  const aceptacionCda = { id: 'a-cda', negocio_id: 'n-cda', estado: 'aceptado', respondido_at: '2026-10-09T15:00:00Z' }
+
+  it('se enrola con Bold aunque el espacio no declare pasarela, y el plan nace con auto_renovar', async () => {
+    // `metrik` no tiene `cobros.pasarela_en_linea`: ponérsela encendería el enlace de todo plan manual.
+    const d = dobleConRpc(
+      tablasBase({
+        servicios_contratados: [CDA],
+        aceptaciones_terminos: [aceptacionCda],
+        workspaces: [{ id: WS, config_extra: {} }],
+      }),
+    )
+    const r = await enrolarContratosPorCiclo({ db: d.db, adapterPara: (x) => (x === 'bold' ? ({ crearEnlacePago: async () => null } as never) : null) })
+    expect(r.errores).toEqual([])
+    expect(r.creados).toHaveLength(1)
+    expect(r.creados[0].finTrial).toBe('2026-10-16')
+    expect(d.tablas.planes_cobro?.[0]).toMatchObject({ pasarela: 'bold', auto_renovar: true, activo: false })
+  })
+
+  it('el Radar NO queda con auto_renovar: renovar es una decisión por módulo', async () => {
+    const d = dobleConRpc(tablasBase())
+    await enrolarContratosPorCiclo({ db: d.db, ...conPasarela })
+    expect(d.tablas.planes_cobro?.[0].auto_renovar).toBeUndefined()
+  })
+
+  it('un CDA con plan cargado a mano no recibe otro (los 4 de hoy)', async () => {
+    const d = dobleConRpc(
+      tablasBase({
+        servicios_contratados: [CDA],
+        aceptaciones_terminos: [aceptacionCda],
+        planes_cobro: [{ id: 'plan-mano', workspace_id: WS, negocio_id: 'n-cda', auto_renovar: false }],
+      }),
+    )
+    const r = await enrolarContratosPorCiclo({ db: d.db, ...conPasarela })
+    expect(r.creados).toEqual([])
+    expect(r.descartes).toEqual({ plan_existente: 1 })
+    expect(d.llamadas).toEqual([])
+    expect(d.tablas.planes_cobro).toHaveLength(1)
+    expect(d.tablas.planes_cobro?.[0].auto_renovar).toBe(false)
+  })
+
+  it('sin días de trial en el contrato ni en la ficha no se enrola (la ficha v1 no los declara)', async () => {
+    const d = dobleConRpc(
+      tablasBase({
+        servicios_contratados: [{ ...CDA, parametros: { precio_mensual: 150_000 } }],
+        aceptaciones_terminos: [aceptacionCda],
+      }),
+    )
+    const r = await enrolarContratosPorCiclo({ db: d.db, ...conPasarela })
+    expect(r.descartes).toEqual({ sin_dias_trial: 1 })
+    expect(d.tablas.planes_cobro).toEqual([])
   })
 })
 

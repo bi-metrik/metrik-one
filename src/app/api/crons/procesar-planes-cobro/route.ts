@@ -18,6 +18,7 @@ import { POLITICA_FASE_1 } from '@/lib/suscripciones/estado'
 import { adapterPara } from '@/lib/suscripciones/pasarela/registro'
 import { generarEnlacesAutomaticos, type ResumenEnlacesAutomaticos } from '@/lib/cobros/enlace-automatico-servidor'
 import { enrolarContratosPorCiclo, type ResumenEnrolamiento } from '@/lib/cobros/enrolar-ciclo-servidor'
+import { renovarPlanesPorCiclo, type ResumenRenovacion } from '@/lib/cobros/renovar-ciclo-servidor'
 
 // Cron diario — Procesa planes_cobro activos:
 //   1. Genera cobros programados con fecha_esperada = T+3 dias si no existe ya la cuota
@@ -33,7 +34,10 @@ import { enrolarContratosPorCiclo, type ResumenEnrolamiento } from '@/lib/cobros
 //      su plan de cobro y sus cuotas SOLO, con la primera cuota el dia en que termina su trial
 //      (`dias_trial` contado desde la aceptacion). Hoy ese paso lo hacia una persona a mano. Corre
 //      ANTES del paso 6 para que el contrato enrolado hoy reciba su enlace en esta misma corrida.
-//      Alcance: solo el modulo `radar_secop` (ver `enrolar-ciclo.ts`).
+//      Alcance: los modulos `radar_secop` y `valida_consulta` (ver `enrolar-ciclo.ts`).
+//   6b. Renovacion continua: el plan con `auto_renovar` de un contrato activo de Valida recibe su
+//      cuota SIGUIENTE (una sola) cuando la ultima vence dentro de 30 dias. Sin permanencia: dar de
+//      baja es apagar `auto_renovar` y terminar el contrato (ver `renovar-ciclo.ts`).
 //   6. Enlaces de pago en linea de los contratos de servicio (CDA): la cuota que vence en 7 dias
 //      o menos (o ya vencio sin pagarse) recibe su enlace solo, con la misma funcion del boton,
 //      y la persona designada un correo. No emite cuentas de cobro (ver el bloque del paso 6).
@@ -454,6 +458,17 @@ export async function GET(req: NextRequest) {
     enrolamientoError = err instanceof Error ? err.message : String(err)
   }
 
+  // ── 6b. Renovar la cuota siguiente de los planes que se renuevan solos ──
+  // Despues del 6a (un plan recien enrolado ya trae sus cuotas) y antes del 6, para que la cuota
+  // que nace hoy entre a la seleccion de enlaces si ya esta en su ventana.
+  let renovacion: ResumenRenovacion | null = null
+  let renovacionError: string | null = null
+  try {
+    renovacion = await renovarPlanesPorCiclo({ db: supabase, hoy: hoyStr })
+  } catch (err) {
+    renovacionError = err instanceof Error ? err.message : String(err)
+  }
+
   // ── 6. Enlaces de pago en linea de los contratos de servicio ──
   // Va de ultimo a proposito: no cambia nada de lo que hacen los pasos 1 a 5, y si falla no los
   // tumba. Mira el CONTRATO (`servicios_contratados` activo o pausado) y la pasarela en linea del
@@ -490,6 +505,8 @@ export async function GET(req: NextRequest) {
     suscripciones_errores: suscripcionesErrores,
     enrolamiento_por_ciclo: enrolamiento,
     enrolamiento_por_ciclo_error: enrolamientoError,
+    renovacion_por_ciclo: renovacion,
+    renovacion_por_ciclo_error: renovacionError,
     enlaces_automaticos: enlacesAutomaticos,
     enlaces_automaticos_error: enlacesAutomaticosError,
   })

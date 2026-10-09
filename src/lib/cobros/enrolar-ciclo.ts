@@ -23,17 +23,30 @@
  * rechaza el calendario que no arranque el día en que termina el trial, con números no consecutivos,
  * con un monto en cero o con vencimientos que no crezcan.
  *
- * ## El alcance es UN módulo, y es a propósito
+ * ## El alcance es una lista corta, y es a propósito
  *
- * `MODULOS_CON_ENROLAMIENTO_AUTOMATICO` tiene una sola llave: `radar_secop`. Todo otro módulo con
- * `disparador_cobro: ciclo` (las licencias de Clarity, Sustenta y de los CDA) tiene hoy sus planes
- * cargados a mano o a medio cargar: enrolarlos automáticamente emitiría cobros que nadie autorizó.
- * Sumar un módulo a esa lista es una línea de código **y una decisión de Mauricio**, no un efecto
- * secundario de este eslabón.
+ * `MODULOS_CON_ENROLAMIENTO_AUTOMATICO` tiene dos llaves: `radar_secop` (2026-09-28) y
+ * `valida_consulta` (decisión de Mauricio del 2026-10-09, fila A de
+ * `proyectos/metrik/valida/docs/crecimiento-mrr/10-decisiones-mauricio.md`: el cobro de Valida se
+ * renueva solo cada mes, sin permanencia). Las licencias de Clarity y Sustenta siguen con sus planes
+ * cargados a mano: enrolarlas emitiría cobros que nadie autorizó. Sumar un módulo a esa lista es una
+ * línea de código **y una decisión de Mauricio**, no un efecto secundario de este eslabón.
+ *
+ * Los cuatro CDA de Valida que ya tienen plan cargado a mano no se enrolan (`plan_existente`): su
+ * paso a la renovación continua es un script aparte que enciende `auto_renovar` en SU plan, y la
+ * renovación (`renovar-ciclo.ts`) la hace el paso 6b del cron.
  */
 
 /** Los módulos cuyo cobro por ciclo lo enrola el cron. Ver la cabecera antes de agregar uno. */
-export const MODULOS_CON_ENROLAMIENTO_AUTOMATICO = ['radar_secop'] as const
+export const MODULOS_CON_ENROLAMIENTO_AUTOMATICO = ['radar_secop', 'valida_consulta'] as const
+
+/**
+ * La pasarela del enlace de un módulo cuando el espacio cobrador no declara una
+ * (`config_extra.cobros.pasarela_en_linea`). Valida cobra por enlace de Bold mientras no exista el
+ * cobro recurrente a tarjeta (ePayco, decisión 7): `metrik` no tiene pasarela en su configuración y
+ * ponérsela encendería el enlace automático a TODO plan `manual` del espacio, no solo a Valida.
+ */
+export const PASARELA_DE_ENLACE_POR_MODULO: Readonly<Record<string, string>> = { valida_consulta: 'bold' }
 
 /** Meses que se enrolan de una vez. Renovar más allá del año es un acto explícito. */
 export const CUOTAS_POR_ENROLAMIENTO = 12
