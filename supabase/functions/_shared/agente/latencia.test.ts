@@ -66,3 +66,18 @@ describe('proponer lee la línea solo cuando la nombra', () => {
     expect(s[0].texto).toBe('¿Abro este viaje?\nLina Rojas (cel. …4455) · Viaje a medida')
   })
 })
+
+describe('las fichas de índice van completas: sin llamado aparte para traerlas', () => {
+  it('el modelo no tiene consultar_reglas y el sistema trae el detalle de cada ficha de índice', async () => {
+    const modelo = modeloGuionado([{ name: 'responder', args: { tema: 'solicitud', texto: '¿De cuál cliente?' } }])
+    const e = await escenario({ modelo })
+    await e.escribe('Te paso los mensajes de dos clientes')
+    const pedido = modelo.pedidos[0]
+    expect(pedido.herramientas.map((h) => h.name)).not.toContain('consultar_reglas')
+    expect(pedido.permitidas).not.toContain('consultar_reglas')
+    const indice = e.deps.reglamento.fichas.filter((f) => f.carga === 'indice')
+    expect(indice.length).toBeGreaterThan(0)
+    for (const f of indice) expect(pedido.sistema).toContain(f.hacer)
+    expect(pedido.sistema).not.toContain('consultar_reglas')
+  })
+})

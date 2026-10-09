@@ -54,9 +54,9 @@ describe('falla en vivo 2026-10-07: preguntar y proponer en el mismo turno', () 
     const modelo = modeloGuionado([
       { name: 'buscar', args: { texto: 'Rosa Quintero' } },
       { name: 'proponer', args: { ...PROPONER, texto: RESPUESTA_1 } },
-      // Turno 2, como en la traza: buscar, consultar_reglas(p.consulta) y otra vez la misma propuesta.
+      // Turno 2, como en la traza: buscar y otra vez la misma propuesta (en vivo hubo además un consultar_reglas, que
+      // ya no existe: las fichas de índice van completas en el sistema).
       { name: 'buscar', args: { texto: 'Rosa Quintero' } },
-      { name: 'consultar_reglas', args: { ids: ['p.consulta'] } },
       { name: 'proponer', args: { ...PROPONER, texto: RESPUESTA_2 } },
     ])
     const e = await escenario({ modelo, contactos: [ROSA], viajes: VIAJES })
@@ -81,7 +81,6 @@ describe('falla en vivo 2026-10-07: preguntar y proponer en el mismo turno', () 
       { name: 'buscar', args: { texto: 'Rosa Quintero' } },
       { name: 'proponer', args: PROPONER },
       { name: 'buscar', args: { texto: 'Rosa Quintero' } },
-      { name: 'consultar_reglas', args: { ids: ['p.consulta'] } },
       { name: 'proponer', args: PROPONER },
     ])
     const e = await escenario({ modelo, contactos: [ROSA], viajes: VIAJES })

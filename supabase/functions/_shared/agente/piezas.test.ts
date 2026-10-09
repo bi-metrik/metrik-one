@@ -114,16 +114,18 @@ describe('verificador', () => {
 })
 
 describe('reglamento', () => {
-  it('bloques: siempre sin respuestas fijas; índice con una línea por ficha; con_herramienta por herramienta', async () => {
+  it('bloques: siempre sin respuestas fijas; índice completo, una línea por ficha; con_herramienta por herramienta', async () => {
     const r = await reglamentoDePrueba()
     expect(bloqueSiempre(r)).toContain('inv.confirmar')
     expect(bloqueSiempre(r)).not.toContain('rf.fuera_de_tema')
     expect(bloqueSiempre(r)).not.toContain('g.varios_viajes')
-    expect(bloqueIndice(r).split('\n')).toContain('g.varios_viajes: la tanda trae mensajes de más de un cliente')
+    // El índice va completo (condición → qué hacer): sin un llamado aparte para traer el detalle.
+    const varios = r.fichas.find((f) => f.clave === 'g.varios_viajes')!
+    expect(bloqueIndice(r).split('\n')).toContain(`g.varios_viajes: cuando la tanda trae mensajes de más de un cliente → ${varios.hacer}`)
     expect(fichasDeHerramienta(r, 'buscar').map((x) => x.split(':')[0])).toEqual(['g.buscar_primero', 'g.viaje_nuevo_existente'])
     expect(temas(r)).toEqual(['solicitud', 'viaje', 'cliente', 'saludo', 'fuera'])
   })
-  it('consultar_reglas: por id y por tema; las respuestas fijas no se consultan', async () => {
+  it('consultar: por id y por tema; las respuestas fijas no se consultan', async () => {
     const r = await reglamentoDePrueba()
     expect(consultar(r, { ids: ['g.varios_viajes', 'g.no_existe', 'rf.hecho'] })).toEqual({
       fichas: [expect.stringContaining('g.varios_viajes: cuando')], no_existen: ['g.no_existe', 'rf.hecho'],

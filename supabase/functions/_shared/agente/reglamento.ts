@@ -3,7 +3,10 @@
 // ------------------------------------------------------------
 // Fichas cortas con nombre. Tres formas de carga:
 //   · `siempre`          — van en cada turno (perfil, alcance, invariantes, glosario, estilo y guías cortas);
-//   · `indice`           — en cada turno va una línea («id: cuando»); el detalle lo trae `consultar_reglas`;
+//   · `indice`           — las que aplican solo en una situación (procedimientos, guías). Van en cada turno completas,
+//                          con su condición delante («id: cuando … → hacer»). Hasta el 2026-10-09 iba solo la condición
+//                          y el detalle se traía con `consultar_reglas`: medido en vivo, ese llamado extra (≈2 s) estaba
+//                          en 9 de 39 turnos para ahorrar ~450 tokens;
 //   · `con_herramienta`  — la herramienta las devuelve junto con su resultado, justo cuando hacen falta.
 // Se guardan en `bot_parametros` (borrador) y se publican como foto inmutable en `bot_reglamentos` (con huella). El
 // núcleo solo lee versiones publicadas.
@@ -42,11 +45,11 @@ export function bloqueSiempre(r: Reglamento): string {
   return partes.join('\n\n');
 }
 
-/** Bloque 3: una línea por ficha de índice. */
+/** Bloque 3: las fichas de índice, completas (su condición y qué hacer). */
 export function bloqueIndice(r: Reglamento): string {
   return r.fichas
     .filter((f) => f.carga === 'indice')
-    .map((f) => `${f.clave}: ${f.cuando ?? f.hacer.slice(0, 120)}`)
+    .map(linea)
     .join('\n');
 }
 
@@ -57,7 +60,8 @@ export function fichasDeHerramienta(r: Reglamento, herramienta: string): string[
     .map(linea);
 }
 
-/** `consultar_reglas`: por ids exactos o por tema (palabras en `cuando`/`hacer`). Solo de la versión publicada. */
+/** Las fichas por ids exactos o por tema (palabras en `cuando`/`hacer`). Solo de la versión publicada. Hoy no la llama el
+ * modelo (era `consultar_reglas`); queda para buscar fichas desde el código y las pruebas. */
 export function consultar(r: Reglamento, args: { ids?: unknown; tema?: unknown }): { fichas: string[]; no_existen: string[] } {
   const ids = Array.isArray(args.ids) ? args.ids.map(String) : [];
   const porClave = new Map(r.fichas.map((f) => [f.clave, f]));
