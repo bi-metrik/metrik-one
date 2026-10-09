@@ -41,9 +41,14 @@ describe('la regla: fuera del precio exige las tres condiciones a la vez', () =>
     expect(fueraDelPrecio({ ...tour, dia_relativo: 2, entra_al_precio: false })).toBe(true)
   })
 
-  it('⚠️ un vuelo o un hotel marcados fuera se IGNORAN: nunca se imprimen como no incluidos', () => {
-    expect(fueraDelPrecio({ id: 'v', grupo: 'vuelo', entra_al_precio: false })).toBe(false)
+  it('⚠️ un hotel marcado fuera se IGNORA: nunca se imprime como no incluido', () => {
     expect(fueraDelPrecio({ id: 'h', grupo: 'alojamiento', entra_al_precio: false })).toBe(false)
+  })
+
+  it('un vuelo marcado fuera SÍ sale del precio: es su check «Va en la cotización» (brief del 2026-10-08)', () => {
+    expect(fueraDelPrecio({ id: 'v', grupo: 'vuelo', entra_al_precio: false })).toBe(true)
+    expect(fueraDelPrecio({ id: 'v2', grupo: 'vuelo 2: Vuelo San Andrés–Providencia', entra_al_precio: false })).toBe(true)
+    expect(fueraDelPrecio({ id: 'v', grupo: 'vuelo', entra_al_precio: true })).toBe(false)
   })
 
   it('⚠️ una línea SIN grupo marcada fuera se ignora: desaparecería del documento sin sumar', () => {
@@ -79,9 +84,10 @@ describe('quién aporta al total: la sugerencia fuera del precio no', () => {
     expect(itemsQueAportanAlTotal(items)).toContain('catalina')
   })
 
-  it('⚠️ un vuelo marcado fuera sigue aportando: la marca se ignora', () => {
+  it('un vuelo que no va deja de aportar, y no cae a sugeridos (brief del 2026-10-08)', () => {
     const items = viaje({ avianca: { entra_al_precio: false } })
-    expect(itemsQueAportanAlTotal(items)).toContain('avianca')
+    expect(itemsQueAportanAlTotal(items)).not.toContain('avianca')
+    expect(itemsSugeridos(items)).not.toContain('avianca')
   })
 
   it('con día y fuera del precio («No va») NO aporta: el día no la devuelve al total', () => {

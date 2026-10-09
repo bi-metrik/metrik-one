@@ -35,7 +35,7 @@
  * Puro: sin red ni base. Lo usan la tarjeta, el editor, la acción del servidor y la bandeja.
  */
 
-import { diaDeItem, fueraDelPrecio, hayDiasAsignados, type ItemConDia } from './dia-relativo'
+import { diaDeItem, esVueloDeLaCotizacion, fueraDelPrecio, hayDiasAsignados, type ItemConDia } from './dia-relativo'
 import { ranuraDeGrupo } from './ranuras-pantallazo'
 
 export type EstadoActividad = 'incluida' | 'opcional' | 'no_va'
@@ -51,6 +51,25 @@ export function esActividad(grupo: string | null | undefined): boolean {
 export function estadoDeActividad(item: Pick<ItemConDia, 'entra_al_precio' | 'mostrar_en_sugeridos'>): EstadoActividad {
   if (item.entra_al_precio !== false) return 'incluida'
   return item.mostrar_en_sugeridos === false ? 'no_va' : 'opcional'
+}
+
+/**
+ * El estado de un VUELO (brief del 2026-10-08, «vuelos de punta a punta», punto 2): va o no va.
+ * No hay «opcional»: un vuelo no se ofrece aparte ni sale en «Opcionales». Lo lee de
+ * `entra_al_precio` solo, que es lo mismo que lee `fueraDelPrecio`: un vuelo fuera del precio
+ * está fuera aunque una marca vieja diga que se muestra.
+ */
+export function estadoDeVuelo(item: Pick<ItemConDia, 'entra_al_precio'>): 'incluida' | 'no_va' {
+  return item.entra_al_precio === false ? 'no_va' : 'incluida'
+}
+
+/**
+ * ¿La línea tiene el check quitado («No va»)? Una actividad o un vuelo. Lo que no va no pide
+ * nada en la pantalla (no deja el bloque por atender, no pide tasa): no sale en la cotización.
+ */
+export function lineaQueNoVa(item: Pick<ItemConDia, 'id' | 'grupo' | 'entra_al_precio' | 'mostrar_en_sugeridos' | 'es_ajuste'>): boolean {
+  if (esActividad(item.grupo)) return estadoDeActividad(item) === 'no_va'
+  return esVueloDeLaCotizacion(item) && estadoDeVuelo(item) === 'no_va'
 }
 
 /** Lo que pide la operadora: marcar o quitar el check, o pasar de Incluida a Opcional. */
@@ -236,3 +255,6 @@ export function notaDeActividadesFuera(items: readonly ItemConDia[]): string | n
 
 /** El texto de la tarjeta de una actividad sin el check. */
 export const TEXTO_ACTIVIDAD_NO_VA = 'No va · no suma ni sale en el PDF'
+
+/** El texto de la tarjeta de un vuelo sin el check: tampoco entra a ninguna tarifa. */
+export const TEXTO_VUELO_NO_VA = 'No va · no suma, no entra a ninguna tarifa ni sale en el PDF'

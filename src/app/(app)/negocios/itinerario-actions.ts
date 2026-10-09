@@ -3,11 +3,12 @@
 import { revalidatePath } from 'next/cache'
 
 import { getWorkspace } from '@/lib/actions/get-workspace'
-import { diaDeItem, puedeLlevarDia, puedeSerSugerido } from '@/lib/cotizaciones/dia-relativo'
+import { diaDeItem, esVueloDeLaCotizacion, puedeLlevarDia, puedeQuedarFueraDelPrecio } from '@/lib/cotizaciones/dia-relativo'
 import {
   cambiosDeActividad,
   esActividad,
   estadoDeActividad,
+  estadoDeVuelo,
   motivoDiaInvalido,
   type EstadoActividad,
   type PedidoActividad,
@@ -790,10 +791,14 @@ export async function actualizarRanuraDeItem(
       .eq('id', itemId)
       .maybeSingle()
     actual = data
-    if (
-      actual?.entra_al_precio === false &&
-      !puedeSerSugerido({ id: itemId, grupo: patch.grupo as string | null, es_ajuste: actual.es_ajuste ?? false })
-    ) {
+    const destino = { id: itemId, grupo: patch.grupo as string | null, es_ajuste: actual?.es_ajuste ?? false }
+    const origen = { id: itemId, grupo: (actual?.grupo ?? null) as string | null, es_ajuste: actual?.es_ajuste ?? false }
+    // Un vuelo que no va solo cambia a otra ranura de vuelo: una sugerencia que pasara a vuelo
+    // dejaría de salir en «Opcionales» sin que nadie lo pidiera (brief del 2026-10-08).
+    const destinoValido = esVueloDeLaCotizacion(destino)
+      ? esVueloDeLaCotizacion(origen)
+      : puedeQuedarFueraDelPrecio(destino)
+    if (actual?.entra_al_precio === false && !destinoValido) {
       return {
         success: false,
         error: 'Esta línea está fuera del precio. Márcala para que entre al precio antes de cambiarle el grupo.',
@@ -924,7 +929,9 @@ export async function actualizarDiaDeItem(
 
   const tocaElInterruptor = patch.entra_al_precio !== undefined || patch.dia_relativo !== undefined
   if (tocaElInterruptor && quedaria.entra_al_precio === false) {
-    if (!puedeSerSugerido(quedaria)) {
+    // El vuelo NO sale del precio por aquí: tiene su check (`marcarActividadEnCotizacion`), que
+    // lo saca también de «Opcionales». Por este camino quedaría como una sugerencia a la vista.
+    if (!puedeQuedarFueraDelPrecio(quedaria) || esVueloDeLaCotizacion(quedaria)) {
       return {
         success: false,
         error:
@@ -970,8 +977,12 @@ export async function actualizarDiaDeItem(
  *
  * Mueve plata, así que recalcula el total aquí mismo, como el interruptor de siempre.
  *
- * ⚠️ El grupo se lee de la BASE: solo una actividad tiene este control. Un vuelo, un hotel o una
- * línea sin grupo no pueden salir del precio por aquí.
+ * Desde el brief del 2026-10-08 («vuelos de punta a punta», punto 2) un VUELO también lleva el
+ * check, sin «Opcional»: quitado no suma, no entra a ninguna tarifa (`ranurasConAlternativas` lo
+ * deja fuera de su ranura) y no sale en el documento; puesto, vuelve como estaba.
+ *
+ * ⚠️ El grupo se lee de la BASE: solo una actividad o un vuelo tienen este control. Un hotel o
+ * una línea sin grupo no pueden salir del precio por aquí.
  */
 export async function marcarActividadEnCotizacion(
   itemId: string,
@@ -992,14 +1003,19 @@ export async function marcarActividadEnCotizacion(
   if (!isEditable(estadoCot as EstadoCotizacion)) {
     return { success: false, error: 'Esta cotización ya no se edita. Duplícala para trabajar sobre una nueva.' }
   }
-  if (!esActividad(item.grupo ?? null) || item.es_ajuste === true) {
-    return { success: false, error: 'Solo una actividad se marca como incluida, opcional o que no va.' }
+  const vuelo = esVueloDeLaCotizacion({ id: itemId, grupo: item.grupo ?? null, es_ajuste: item.es_ajuste ?? false })
+  if ((!esActividad(item.grupo ?? null) && !vuelo) || item.es_ajuste === true) {
+    return { success: false, error: 'Solo una actividad o un vuelo se marcan como que van o no van.' }
+  }
+  if (vuelo && 'modo' in pedido) {
+    return { success: false, error: 'Un vuelo va o no va en la cotización: no puede ser opcional.' }
   }
 
-  const estado = estadoDeActividad(item)
+  const estado = vuelo ? estadoDeVuelo(item) : estadoDeActividad(item)
   const dia = diaDeItem({ id: itemId, dia_relativo: item.dia_relativo ?? null })
   const tarifaCruda = (item.tarifa_pax && typeof item.tarifa_pax === 'object' ? item.tarifa_pax : {}) as Record<string, unknown>
-  const era = leerTarifaPax(item.tarifa_pax).noVa?.era ?? null
+  // Un vuelo solo pudo haber estado incluido: al volver, vuelve incluido.
+  const era = vuelo ? 'incluida' : leerTarifaPax(item.tarifa_pax).noVa?.era ?? null
   const cambios = cambiosDeActividad({ estado, dia, era }, pedido)
   if (!cambios) return { success: true, estado }
 
@@ -1028,7 +1044,7 @@ export async function marcarActividadEnCotizacion(
   if (cambios.entra_al_precio !== (item.entra_al_precio !== false) && item.cotizacion_id) {
     await recalcularTotales(item.cotizacion_id as string)
   }
-  return { success: true, estado: estadoDeActividad(cambios) }
+  return { success: true, estado: vuelo ? estadoDeVuelo(cambios) : estadoDeActividad(cambios) }
 }
 
 // ── Interno ──────────────────────────────────────────────────────────────────

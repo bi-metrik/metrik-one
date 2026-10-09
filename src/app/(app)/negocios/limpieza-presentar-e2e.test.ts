@@ -478,11 +478,18 @@ describe('punto 0 · Incluida, Opcional y No va', () => {
     expect(itemsQueAportanAlTotal(items).sort()).toEqual(['item-1', 'item-3'])
   })
 
-  it('solo una actividad lleva el check: un vuelo no sale del precio por aquí', async () => {
-    tablas.items.push(fila('vuelo-1', COT, 'vuelo', 'SATENA', {}, 9))
-    const r = await marcarActividadEnCotizacion('vuelo-1', { va: false })
+  it('un hotel no lleva el check: no sale del precio por aquí', async () => {
+    tablas.items.push(fila('hotel-1', COT, 'hotel', 'POSADA', {}, 9))
+    const r = await marcarActividadEnCotizacion('hotel-1', { va: false })
     expect(r.success).toBe(false)
-    expect(lineaDeLaBase('vuelo-1').entra_al_precio ?? true).toBe(true)
+    expect(lineaDeLaBase('hotel-1').entra_al_precio ?? true).toBe(true)
+  })
+
+  it('un vuelo sí lleva el check desde el 2026-10-08, pero sin «Opcional» (vuelos-punta-a-punta-e2e)', async () => {
+    tablas.items.push(fila('vuelo-1', COT, 'vuelo', 'SATENA', {}, 9))
+    expect((await marcarActividadEnCotizacion('vuelo-1', { modo: 'opcional' })).success).toBe(false)
+    expect(await marcarActividadEnCotizacion('vuelo-1', { va: false })).toEqual({ success: true, estado: 'no_va' })
+    expect(lineaDeLaBase('vuelo-1').entra_al_precio).toBe(false)
   })
 })
 
