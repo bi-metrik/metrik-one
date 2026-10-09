@@ -16,12 +16,14 @@ import { escenario } from '../escenario.ts';
 import type { Escenario } from '../escenario.ts';
 import { modeloGemini } from '../modelo-gemini.ts';
 import { modeloGuionado } from '../modelo-guionado.ts';
+import type { ExtractorMemoria } from '../memoria.ts';
 import type { Modelo, PedidoModelo, Salida, UsoLlamado } from '../tipos.ts';
 import type { PrecioModelo } from '../uso.ts';
 import { sumarUso } from '../uso.ts';
 import { calificar, tabla } from './calificar.ts';
 import type { ResultadoCaso } from './calificar.ts';
-import { CONJUNTO_1, CONJUNTO_2 } from './conjuntos.ts';
+import { CAMPOS_ARNES, CONJUNTO_1, CONJUNTO_2 } from './conjuntos.ts';
+import { extraccionGemini, MODELO_EXTRACCION } from './extraccion-gemini.ts';
 import type { CasoArnes } from './conjuntos.ts';
 import { promptSimulador, simular, transcripcionParaSimulador } from './simulador.ts';
 
@@ -71,19 +73,24 @@ function verSalida(s: Salida): string {
   return `${s.texto}${ops}`;
 }
 
-/** Toca por título; si el bot no mostró esa opción, la persona contesta escribiendo «sí» (y queda dicho). */
-async function tocarOEscribir(e: Escenario, titulo: string): Promise<string> {
+/** Toca por título; si el bot no mostró esa opción, la persona contesta escribiendo (`oEscribe`, o «sí»), y queda dicho. */
+async function tocarOEscribir(e: Escenario, titulo: string, oEscribe = 'sí'): Promise<string> {
   try {
     await e.toca(titulo);
     return `[toque: ${titulo}]`;
   } catch {
-    await e.escribe('sí');
-    return `«sí» (no había botón «${titulo}»)`;
+    await e.escribe(oEscribe);
+    return `«${oEscribe}» (no había botón «${titulo}»)`;
   }
 }
 
+/** Seco: la extracción no entiende nada (todo por definir). */
+const extraccionSeca: ExtractorMemoria = async ({ campos }) => ({ mensajes: [], citas: [], valores: Object.fromEntries(campos.map((f) => [f.slug, { valor: 'por_definir', frase: '' }])) });
+const extracciones: Array<{ ms: number; ok: boolean }> = [];
+
 async function correrCaso(caso: CasoArnes): Promise<{ r: ResultadoCaso; usoSimulador: UsoLlamado[]; comercial: string[] }> {
-  const e = await escenario({ modelo: modeloParaCaso(), contactos: caso.contactos, viajes: caso.viajes, reloj: () => performance.now() });
+  const conExtraccion = caso.extraccion ? { campos: CAMPOS_ARNES, extraer: seco ? extraccionSeca : extraccionGemini(LLAVE, extracciones) } : {};
+  const e = await escenario({ modelo: modeloParaCaso(), contactos: caso.contactos, viajes: caso.viajes, reloj: () => performance.now(), ...conExtraccion });
   if (caso.semilla) e.semilla(caso.semilla);
   const comercial: string[] = [];
   const usoSimulador: UsoLlamado[] = [];
@@ -93,7 +100,7 @@ async function correrCaso(caso: CasoArnes): Promise<{ r: ResultadoCaso; usoSimul
       for (const p of caso.pasos) {
         if (p.escribe !== undefined) { await e.escribe(p.escribe); comercial.push(p.escribe); }
         else if (p.reenvia !== undefined) { await e.reenvia(p.reenvia); comercial.push(`(reenvío) ${p.reenvia}`); }
-        else if (p.toca !== undefined) comercial.push(await tocarOEscribir(e, p.toca));
+        else if (p.toca !== undefined) comercial.push(await tocarOEscribir(e, p.toca, p.oEscribe));
       }
     } else {
       const pendientes = [...(caso.mensajesCliente ?? [])];
@@ -156,7 +163,7 @@ function transcripcion(caso: CasoArnes, r: ResultadoCaso, comercial: string[]): 
   return [
     `### ${caso.id} · ${caso.titulo}`,
     '',
-    `**Éxito de la tarea:** ${r.exito.ok ? 'sí' : 'NO'} — ${r.exito.motivo}. **Dañinas:** ${r.daninas.length ? r.daninas.join('; ') : '0'}. **Atajadas:** ${r.atajadas.length ? r.atajadas.join('; ') : '0'}.${r.error ? ` **Error del arnés:** ${r.error}` : ''}`,
+    `**Éxito de la tarea:** ${r.exito.ok ? 'sí' : 'NO'} — ${r.exito.motivo}. **Dañinas:** ${r.daninas.length ? r.daninas.join('; ') : '0'}. **Atajadas:** ${r.atajadas.length ? r.atajadas.join('; ') : '0'}. **Rechazos del verificador:** ${r.rechazosVerificador}. **«No pude»:** ${r.caidos}. **Pregunta repetida:** ${r.preguntaDoble}.${r.error ? ` **Error del arnés:** ${r.error}` : ''}`,
     '',
     ...filas,
     '',
@@ -179,7 +186,7 @@ if (import.meta.main) {
     resultados.push(r);
     usoSim.push(...usoSimulador);
     transcripciones.push(transcripcion(c, r, comercial));
-    console.log(JSON.stringify({ caso: c.id, exito: r.exito.ok, daninas: r.daninas.length, atajadas: r.atajadas.length, tokens: r.uso.entrada + r.uso.salida + r.uso.razonamiento, error: r.error ?? null }));
+    console.log(JSON.stringify({ caso: c.id, exito: r.exito.ok, motivo: r.exito.motivo, daninas: r.daninas.length, atajadas: r.atajadas.length, verificador: r.rechazosVerificador, caidos: r.caidos, pregunta_doble: r.preguntaDoble, tokens: r.uso.entrada + r.uso.salida + r.uso.razonamiento, error: r.error ?? null }));
   }
   const t = tabla(resultados, PRECIOS_312);
   const sim = sumarUso([{ tipo: 'modelo', bot: 'simulador', uso: usoSim }], PRECIOS_312);
@@ -195,6 +202,10 @@ if (import.meta.main) {
     '|---|---|',
     `| Dañinas (llegaron) | ${t.daninas} |`,
     `| Atajadas por candado o verificador | ${t.atajadas} |`,
+    `| Rechazos del verificador (cada uno cuesta un llamado) | ${t.rechazosVerificador} |`,
+    `| Turnos que terminaron en «no pude» (rf.modelo_caido) | ${t.caidos} |`,
+    `| Propuestas con la pregunta repetida arriba del resumen | ${t.preguntaDoble} |`,
+    ...(extracciones.length ? [`| Extracción real (${MODELO_EXTRACCION}, n=${extracciones.length}) | ${extracciones.filter((x) => !x.ok).length} fallas · ms ${extracciones.map((x) => x.ms).join(', ')} |`] : []),
     `| Éxito de la tarea | ${t.exitos} de ${t.casos} |`,
     ...Object.entries(t.porTipo).map(([k, v]) => `| Turno ${k} (n=${v.n}) | p50 ${v.p50 ?? '—'} ms · p90 ${v.p90 ?? '—'} ms |`),
     `| Todos los turnos con modelo (n=${t.modelo.n}) | p50 ${t.modelo.p50 ?? '—'} ms · p90 ${t.modelo.p90 ?? '—'} ms |`,

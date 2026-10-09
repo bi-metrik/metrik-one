@@ -11,8 +11,10 @@
 
 import type { ContactoMem, PuertoMemoria, ViajeMem } from '../memoria.ts';
 import type { FilaConversacion, Traza } from '../tipos.ts';
+import type { CampoEntendible } from '../../wa-entendimiento-reglas.ts';
 
-export interface PasoGuion { escribe?: string; reenvia?: string; toca?: string }
+/** `toca` con `oEscribe`: si el bot no mostró ese botón, la persona escribe eso (y no «sí»). */
+export interface PasoGuion { escribe?: string; reenvia?: string; toca?: string; oEscribe?: string }
 
 export interface Veredicto { ok: boolean; motivo: string }
 
@@ -35,6 +37,8 @@ export interface CasoArnes {
   viajesPermitidos?: string[];
   /** Si se crea un cliente aquí, es un duplicado (dañina). */
   sinClienteNuevo?: boolean;
+  /** Corre la extracción real (el modelo de producción) con los campos de `CAMPOS_ARNES`. */
+  extraccion?: boolean;
   esperado(p: PuertoMemoria, trazas: Traza[]): Veredicto;
 }
 
@@ -56,6 +60,31 @@ const ANA_1: ContactoMem = { id: 'c-ana1', nombre: 'ANA TORRES', celular: '30011
 const ANA_2: ContactoMem = { id: 'c-ana2', nombre: 'ANA TORRES', celular: '3009879455' };
 const DIRECTORIO = [MARTIN, DIANA, LAURA, PEDRO, ANA_1, ANA_2];
 const VIAJES = [...VIAJES_MARTIN, ...VIAJES_DIANA, v('v-l0', 'L1 25 4', 'c-laura', 'PARÍS', false), v('v-p3', 'P1 26 3', 'c-pedro', 'MIAMI')];
+
+/**
+ * La forma de la config de una línea de viajes, escrita a mano (no es la config de nadie): los campos que la extracción
+ * puede llenar, con opciones cerradas donde la duda de inventar es real (presupuesto, grupo, fechas fijas).
+ */
+export const CAMPOS_ARNES: CampoEntendible[] = [
+  { slug: 'destino', tipo: 'texto', label: 'Destino', nivel: 'minimo', pregunta: '¿A dónde?' },
+  { slug: 'ciudad_origen', tipo: 'texto', label: 'Ciudad de salida', nivel: 'minimo', pregunta: '¿Desde dónde salen?' },
+  { slug: 'destino_tipo', tipo: 'select', label: 'Nacional o internacional', opciones: [{ value: 'nacional', label: 'Nacional' }, { value: 'internacional', label: 'Internacional' }] },
+  { slug: 'fechas_tipo', tipo: 'select', label: 'Fechas fijas o móviles', opciones: [{ value: 'fijas', label: 'Fijas' }, { value: 'moviles', label: 'Móviles' }] },
+  { slug: 'fecha_salida', tipo: 'fecha', label: 'Fecha de salida', nivel: 'minimo', pregunta: '¿Qué día salen?' },
+  { slug: 'fecha_regreso', tipo: 'fecha', label: 'Fecha de regreso', nivel: 'minimo', pregunta: '¿Qué día regresan?' },
+  { slug: 'adultos', tipo: 'numero', label: 'Adultos', nivel: 'minimo', pregunta: '¿Cuántos adultos?' },
+  { slug: 'ninos', tipo: 'numero', label: 'Niños', nivel: 'minimo', pregunta: '¿Niños?' },
+  { slug: 'infantes', tipo: 'numero', label: 'Infantes', nivel: 'minimo', pregunta: '¿Infantes?', ayuda: 'En aerolíneas, hasta 2 años' },
+  { slug: 'numero_pasajeros', tipo: 'numero', label: 'Número de pasajeros', suma_de: ['adultos', 'ninos', 'infantes'] },
+  { slug: 'edades_menores', tipo: 'texto', label: 'Edades de los niños e infantes', pedir_si: { suma_de: ['ninos', 'infantes'], mayor_que: 0 } },
+  { slug: 'composicion', tipo: 'select', label: 'Cómo viaja el grupo', opciones: [{ value: 'individual', label: 'Individual' }, { value: 'pareja', label: 'Pareja' }, { value: 'familia', label: 'Familia' }, { value: 'grupo', label: 'Grupo' }] },
+  {
+    slug: 'presupuesto', tipo: 'select', label: 'Presupuesto', nivel: 'deseable', pregunta: '¿Presupuesto?',
+    opciones: [{ value: 'menos_3m', label: 'Menos de $3 millones' }, { value: '3m_5m', label: 'Entre $3 y $5 millones' }, { value: 'mas_5m', label: 'Más de $5 millones' }, { value: 'sin_definir', label: 'Aún no tiene presupuesto definido', no_definido: true }],
+  },
+  { slug: 'categoria_hotel', tipo: 'select', label: 'Categoría de hotel', nivel: 'minimo', pregunta: '¿Categoría?', opciones: [{ value: '3', label: '3 estrellas' }, { value: '4', label: '4 estrellas' }, { value: '5', label: '5 estrellas' }, { value: 'sin_preferencia', label: 'Sin preferencia', no_definido: true }] },
+  { slug: 'requisitos_especiales', tipo: 'texto', label: 'Requisitos especiales', nivel: 'deseable', pregunta: '¿Algo especial?' },
+] as CampoEntendible[];
 
 // ── Lo que se mira del estado final ──────────────────────────────────────────
 
@@ -165,6 +194,53 @@ export const CONJUNTO_1: CasoArnes[] = [
       const c = de(p, 'carga');
       if (c.length !== 1 || c[0].codigo !== 'D1 26 1') return mal(`se esperaba 1 carga en D1 26 1 y hay ${c.map((x) => x.codigo).join(', ') || 'ninguna'}`);
       return ok('la tanda quedó en D1 26 1, una sola vez');
+    },
+  },
+  {
+    id: 'c1-1009', conjunto: 1, extraccion: true,
+    titulo: '12:51–12:57 (2026-10-09): retomar un viaje con una propuesta de viaje nuevo pendiente; «un niño de año y medio»; presupuesto que nadie dijo',
+    contactos: DIRECTORIO,
+    // El viaje que se retoma no tiene destino ni datos (como el de la prueba real).
+    viajes: VIAJES.map((x) => (x.codigo === 'M1 26 2' ? { ...x, nombre: 'MIAMI 7N', destino: null } : x)),
+    sinClienteNuevo: true, viajesPermitidos: ['M1 26 2'],
+    pasos: [
+      { escribe: 'Vamos a iniciar un nuevo viaje para Martín Mora' },
+      { escribe: 'Primero dime que viajes están abiertos de Martín' },
+      { escribe: 'A listo. Vamos a retomar el viaje a miami. vamos a hacer una nueva cotización' },
+      { toca: 'Ver qué', oEscribe: 'Ver qué le falta' },
+      { escribe: 'Quiero que coticemos m1262 ahora para que vayan 2 adultos y un niño de año y medio. Serían 6 noches saliendo desde Bogotá el 19 de noviembre. calcula la fecha de regreso' },
+      { toca: 'Anotar' },
+      { escribe: 'están buscando hoteles 4 estrellas' },
+      { toca: 'Anotar' },
+      { escribe: 'En cuanto al presupuesto, no tienen nada definido por ahora.' },
+      { toca: 'Anotar' },
+    ],
+    botDeHoy: [
+      '¿Abro este viaje? Martín Mora (cel. …7311) · Viaje a medida [Sí, ábrelo] [No]',
+      'La lista de los 5 viajes abiertos (11,3 s: el verificador atajó «¿Quieres…?» como un nombre).',
+      'Listo, retomamos M1 26 2 (MIAMI 7N). Pásame los datos de la nueva cotización o dime si quieres ver qué le falta.',
+      'No pude revisarlo ahora… + ¿Abro este viaje? (el verificador atajó dos respuestas buenas: «Pasajeros», «Envíame», «Quedo», «los anotamos»; y revivió la propuesta de las 12:51).',
+      'El niño de año y medio cuenta como infante. ¿Lo anoto…? • Niños: 1 • Infantes: 0 (deducido) • Presupuesto: Aún no tiene presupuesto definido (deducido)',
+      'Cargué en M1 26 2: …, Niños, Infantes, …, Presupuesto aproximado del viaje.',
+      '¿Anoto en M1 26 2 · MIAMI 7N que buscan hoteles 4 estrellas? ¿Lo anoto en M1 26 2 · MIAMI 7N? • Categoría de hotel: 4 estrellas',
+      'Cargué en M1 26 2: Categoría de hotel.',
+      '(13,9 s) Ese dato ya quedó guardado en M1 26 2 (el presupuesto inventado del paso 5).',
+      '(no hubo toque)',
+    ],
+    esperado: (p, trazas) => {
+      if (de(p, 'viaje').length) return mal('abrió un viaje nuevo');
+      const revivio = trazas.findIndex((t) => t.herramientas?.some((h) => h.nombre === 'ver_viaje'));
+      if (revivio >= 0 && trazas.slice(revivio + 1).some((t) => (t.salida?.texto ?? '').includes('¿Abro este viaje?'))) return mal('volvió a ofrecer el viaje nuevo después de retomar M1 26 2');
+      const c = de(p, 'carga');
+      if (!c.length) return mal('no anotó nada en M1 26 2');
+      if (c.some((x) => x.codigo !== 'M1 26 2')) return mal('anotó en otro viaje');
+      if (((c[0].escritos as string[] | undefined) ?? []).includes('presupuesto')) return mal('la primera anotación trajo un presupuesto que nadie dijo');
+      const d = p.viajes.find((x) => x.codigo === 'M1 26 2')!.datos;
+      if (Number(d.infantes) !== 1) return mal(`el niño de año y medio no quedó como infante (infantes: ${d.infantes ?? 'vacío'}, niños: ${d.ninos ?? 'vacío'})`);
+      if (Number(d.ninos ?? 0) !== 0) return mal(`quedó un niño de más (niños: ${d.ninos})`);
+      if (d.fecha_regreso !== '2026-11-25') return mal(`el regreso quedó en ${d.fecha_regreso ?? 'vacío'}`);
+      if (String(d.categoria_hotel) !== '4') return mal(`la categoría quedó en ${d.categoria_hotel ?? 'vacío'}`);
+      return ok('M1 26 2 con 2 adultos, 1 infante, regreso calculado y 4 estrellas, sin viaje nuevo ni presupuesto inventado');
     },
   },
 ];
