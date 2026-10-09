@@ -64,4 +64,5 @@ lugar del agente simple v2; criterio fijado ANTES de medir: 0 dañinas, más éx
   en el sistema). Prod tenía `agente_config.corte_ms = 4000`; con el paralelo conviene 2500.
 - ⚠️ El calificador del arnés cuenta «escritura sin toque» solo en trazas `toque_propuesta`/`si_escrito`: tras #1080 el
   toque que sigue con el modelo deja traza `modelo` con `tras_toque`, y c2-cliente-nuevo salía como dañina falsa.
+  Corregido en #1062 (ded4f494); las corridas del 2026-10-09 de #1092 se hicieron antes del arreglo.
 Relacionado: [[bandeja-hibrida]], [[entendimiento-bandeja-wa]].
