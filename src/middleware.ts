@@ -291,6 +291,10 @@ export async function middleware(request: NextRequest) {
 
   if (pathname.startsWith('/auth/callback')) return supabaseResponse
   if (pathname === '/sin-espacio') return supabaseResponse
+  // Alta autogestionada de Valida: pública en el dominio base, como `/secop`. Sin este corte, el gate
+  // por módulo de abajo trataba `/valida/empezar` como la ruta `/valida` del espacio de la sesión y
+  // mandaba a otro lado a quien ya tiene espacio; la página y su ruta de API resuelven ese caso.
+  if (pathname === '/valida/empezar') return supabaseResponse
 
   // Signup cerrado: registro / onboarding / invitaciones -> al login
   if (pathname === '/registro' || pathname === '/onboarding' || pathname === '/accept-invite') {
