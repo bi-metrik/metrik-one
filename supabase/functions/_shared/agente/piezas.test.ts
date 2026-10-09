@@ -53,6 +53,11 @@ describe('config: bot_conversacional', () => {
 
 describe('render: los límites de Meta', () => {
   const r = (texto: string, ops: Array<{ titulo: string; descripcion?: string }>, final = false) => renderizar(texto, ops, { turno: 'abcd1234', topeTexto: 600, final })
+  it('la marca «⏎» que el modelo copia de la conversación vuelve a ser salto de línea', () => {
+    expect(r('Va con 4 estrellas. ⏎ ¿Lo anoto en M1 26 2 · MIAMI 7N?⏎• Categoría de hotel: 4 estrellas', [])).toEqual({
+      ok: true, salida: { tipo: 'texto', texto: 'Va con 4 estrellas.\n¿Lo anoto en M1 26 2 · MIAMI 7N?\n• Categoría de hotel: 4 estrellas' }, recortes: [],
+    })
+  })
   it('0 opciones = texto; 1 a 3 = botones; 4 a 10 = lista; ids del código', () => {
     expect(r('hola', [])).toEqual({ ok: true, salida: { tipo: 'texto', texto: 'hola' }, recortes: [] })
     const b = r('¿Cuál?', [{ titulo: 'Cel. …9444' }, { titulo: 'Cel. …1203' }, { titulo: 'Es otra persona' }])

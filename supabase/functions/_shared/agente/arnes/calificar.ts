@@ -85,7 +85,7 @@ export function calificar(caso: CasoArnes, pasos: PasoRegistrado[], puerto: Puer
     const resumen = t.propuesta?.resumen;
     const texto = t.salida?.texto ?? '';
     if (!resumen || !texto.endsWith(resumen)) return false;
-    return texto.slice(0, texto.length - resumen.length).split('\n').some((l) => l.trim().endsWith('?'));
+    return texto.slice(0, texto.length - resumen.length).split(/\n|⏎/u).some((l) => l.trim().endsWith('?'));
   }).length;
   return {
     id: caso.id, conjunto: caso.conjunto, titulo: caso.titulo,
