@@ -1,8 +1,9 @@
 // ============================================================
 // Núcleo conversacional — las declaraciones de las herramientas (§3.3)
 // ------------------------------------------------------------
-// Cinco en la bandeja: dos de lectura del dominio (`buscar`, `ver_viaje`) y tres del núcleo (`consultar_reglas`,
-// `proponer`, `responder`). Sin solapes; `proponer` y `responder` cierran el turno.
+// En la bandeja: las lecturas del dominio (`buscar`, `ver_viaje`), sus cierres y dos del núcleo (`proponer`,
+// `responder`). Sin solapes; `proponer` y `responder` cierran el turno. `consultar_reglas` salió el 2026-10-09: las
+// fichas de índice ya van completas en el sistema (ver `reglamento.ts`).
 // ============================================================
 
 import { fichasDeHerramienta, temas } from './reglamento.ts';
@@ -27,17 +28,6 @@ export function declaraciones(d: Dominio, r: Reglamento): DeclaracionHerramienta
   return [
     ...d.lecturas,
     ...cierres,
-    {
-      name: 'consultar_reglas',
-      description: 'Trae el detalle de fichas del índice del reglamento, por id o por tema. Solo lectura.',
-      parameters: {
-        type: 'object',
-        properties: {
-          ids: { type: 'array', items: { type: 'string' }, description: 'Ids del índice, p. ej. ["g.varios_viajes"].' },
-          tema: { type: 'string', description: 'Palabras del tema si no sabes el id.' },
-        },
-      },
-    },
     {
       name: 'proponer',
       description: [

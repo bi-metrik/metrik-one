@@ -53,4 +53,16 @@ lugar del agente simple v2; criterio fijado ANTES de medir: 0 dañinas, más éx
   el campo sin esa opción o «eso no lo dijeron». «Económico» solo sigue siendo duda. Solo prompt; prueba con tope de
   1.200 tokens en la parte fija del prompt de la extracción (estaba en ~1.169). La extracción solo la empaqueta wa-webhook.
 - La extracción NO recibe el reglamento (`g.presupuesto` y demás solo los ve el modelo de la conversación).
+- Latencia (2026-10-09, perf/agente-latencia): en vivo el turno se va en modelo útil 3,2 s + cortes 0,95 s + la
+  EXTRACCIÓN dentro de `proponer` 1,8 s (p50 4,1 s cuando corre; ~1.200 tokens de salida porque el esquema exige los 25
+  campos) + base 1,6 s. Quitar el `required` del esquema la baja a 1,4 s pero llenó 2 campos en vez de 14: no se toca
+  sin evaluación propia (el arnés NO corre la extracción: no tiene `campos`).
+- ⚠️ Caché de Gemini: 3.8 Flash pide 4.096 tokens mínimos (doc oficial); el prefijo fijo pesa ~3,5k. Probado: 5
+  pedidos idénticos de 6,3k → caché 0 en 3.8 (lite sí cachea). La explícita cachea pero no bajó la latencia y su
+  `toolConfig` es inmutable. Es palanca de costo, no de latencia.
+- Desde 2026-10-09: respaldo en paralelo pasado `corte_ms` (el principal sigue) y sin `consultar_reglas` (índice completo
+  en el sistema). Prod tenía `agente_config.corte_ms = 4000`; con el paralelo conviene 2500.
+- ⚠️ El calificador del arnés cuenta «escritura sin toque» solo en trazas `toque_propuesta`/`si_escrito`: tras #1080 el
+  toque que sigue con el modelo deja traza `modelo` con `tras_toque`, y c2-cliente-nuevo salía como dañina falsa.
+  Corregido en #1062 (ded4f494); las corridas del 2026-10-09 de #1092 se hicieron antes del arreglo.
 Relacionado: [[bandeja-hibrida]], [[entendimiento-bandeja-wa]].

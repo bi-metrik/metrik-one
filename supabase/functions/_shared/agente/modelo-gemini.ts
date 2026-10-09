@@ -8,8 +8,11 @@
 // · Firmas de razonamiento: se devuelven TAL CUAL (sin firma, HTTP 400). Si el llamado va a otro modelo (el respaldo),
 //   las firmas de un modelo distinto se reemplazan por el valor de relleno que documenta Google para historial que no
 //   salió de ese modelo (`skip_thought_signature_validator`). Sin verificar contra la API viva: lo mide el arnés.
-// · Respaldo por llamado (Yuto, 2026-10-06): si el principal no responde en `corteMs` (2,5 s) o falla, ese llamado va
-//   al respaldo con lo que quede del turno. Los dos usos quedan en la traza.
+// · Respaldo por llamado (Yuto, 2026-10-06): si el principal falla, ese llamado va al respaldo con lo que quede del
+//   turno. Si a los `corteMs` todavía no responde, el respaldo arranca EN PARALELO y el principal sigue: gana el primero
+//   que responda bien y el otro se cancela (2026-10-09). Antes el principal se cortaba ahí: medido en vivo, 13 de 68
+//   llamados de 3.8 llegaron al corte y cada uno botó los 2,5-4 s que ya llevaba; ahora, si el principal llega poco
+//   después del corte, contesta él. Los usos de los dos quedan en la traza (el que pierde, con su motivo).
 // ============================================================
 
 import type { ConfigModelo } from './config.ts';
@@ -56,7 +59,7 @@ export function cuerpoGemini(p: PedidoModelo, c: ConfigModelo): Record<string, u
 
 type Intento = { ok: true; mensaje: Mensaje; uso: UsoLlamado } | { ok: false; motivo: string; uso: UsoLlamado };
 
-async function intentar(p: PedidoModelo, c: ConfigModelo, timeoutMs: number, o: OpcionesGemini): Promise<Intento> {
+async function intentar(p: PedidoModelo, c: ConfigModelo, timeoutMs: number, o: OpcionesGemini, cancelar?: AbortSignal): Promise<Intento> {
   const ahora = o.ahora ?? (() => performance.now());
   const f = o.fetch ?? fetch;
   const t0 = ahora();
@@ -68,7 +71,7 @@ async function intentar(p: PedidoModelo, c: ConfigModelo, timeoutMs: number, o: 
       method: 'POST',
       headers: { 'Content-Type': 'application/json', 'x-goog-api-key': o.llave },
       body: JSON.stringify(cuerpoGemini(p, c)),
-      signal: AbortSignal.timeout(Math.max(200, Math.round(timeoutMs))),
+      signal: cancelar ? AbortSignal.any([AbortSignal.timeout(Math.max(200, Math.round(timeoutMs))), cancelar]) : AbortSignal.timeout(Math.max(200, Math.round(timeoutMs))),
     });
     if (res.status !== 200) {
       const detalle = (await res.text()).slice(0, 200).replace(/\s+/g, ' ');
@@ -89,9 +92,20 @@ async function intentar(p: PedidoModelo, c: ConfigModelo, timeoutMs: number, o: 
     return { ok: true, mensaje: { role: 'model', parts: partes, modelo: c.modelo }, uso: uso(true, tokens) };
   } catch (e) {
     const nombre = (e as Error)?.name;
-    const motivo = nombre === 'TimeoutError' || nombre === 'AbortError' ? 'corte' : `red: ${String(e).slice(0, 80)}`;
+    const motivo = cancelar?.aborted ? String(cancelar.reason ?? 'cancelado')
+      : nombre === 'TimeoutError' || nombre === 'AbortError' ? 'corte' : `red: ${String(e).slice(0, 80)}`;
     return { ok: false, motivo, uso: uso(false, { motivo }) };
   }
+}
+
+/** Espera `ms` o hasta que alguien la suelte; siempre limpia su temporizador. */
+function espera(ms: number): { hecho: Promise<void>; soltar: () => void } {
+  let soltar: () => void = () => {};
+  const hecho = new Promise<void>((r) => {
+    const t = setTimeout(r, Math.max(0, ms));
+    soltar = () => { clearTimeout(t); r(); };
+  });
+  return { hecho, soltar };
 }
 
 export function modeloGemini(o: OpcionesGemini): Modelo {
@@ -99,13 +113,52 @@ export function modeloGemini(o: OpcionesGemini): Modelo {
     async llamar(p: PedidoModelo): Promise<RespuestaModelo> {
       const ahora = o.ahora ?? (() => performance.now());
       const t0 = ahora();
-      const primero = await intentar(p, o.principal, o.respaldo ? Math.min(o.corteMs, p.timeoutMs) : p.timeoutMs, o);
-      if (primero.ok) return { ok: true, mensaje: primero.mensaje, usos: [primero.uso] };
-      const resta = p.timeoutMs - (ahora() - t0);
-      if (!o.respaldo || resta < 300) return { ok: false, motivo: primero.motivo, usos: [primero.uso] };
-      const segundo = await intentar(p, o.respaldo, resta, o);
-      if (segundo.ok) return { ok: true, mensaje: segundo.mensaje, usos: [primero.uso, segundo.uso] };
-      return { ok: false, motivo: `${primero.motivo}; respaldo: ${segundo.motivo}`, usos: [primero.uso, segundo.uso] };
+      const resta = () => p.timeoutMs - (ahora() - t0);
+      if (!o.respaldo) {
+        const solo = await intentar(p, o.principal, p.timeoutMs, o);
+        return solo.ok ? { ok: true, mensaje: solo.mensaje, usos: [solo.uso] } : { ok: false, motivo: solo.motivo, usos: [solo.uso] };
+      }
+      const respaldo = o.respaldo;
+      const cancelarPrincipal = new AbortController();
+      const principal = intentar(p, o.principal, p.timeoutMs, o, cancelarPrincipal.signal);
+      const corte = espera(Math.min(o.corteMs, p.timeoutMs));
+      const antes = await Promise.race([principal, corte.hecho.then(() => null)]);
+      corte.soltar();
+      if (antes?.ok) return { ok: true, mensaje: antes.mensaje, usos: [antes.uso] };
+      if (antes) {
+        // Falló antes del corte (429, 5xx, red): al respaldo con lo que quede, como siempre.
+        if (resta() < 300) return { ok: false, motivo: antes.motivo, usos: [antes.uso] };
+        const r = await intentar(p, respaldo, resta(), o);
+        return r.ok
+          ? { ok: true, mensaje: r.mensaje, usos: [antes.uso, r.uso] }
+          : { ok: false, motivo: `${antes.motivo}; respaldo: ${r.motivo}`, usos: [antes.uso, r.uso] };
+      }
+      // Llegó el corte sin respuesta: el respaldo arranca y el principal sigue. Gana el primero que responda bien.
+      if (resta() < 300) {
+        cancelarPrincipal.abort('corte');
+        const p1 = await principal;
+        return p1.ok ? { ok: true, mensaje: p1.mensaje, usos: [p1.uso] } : { ok: false, motivo: p1.motivo, usos: [p1.uso] };
+      }
+      const cancelarRespaldo = new AbortController();
+      const segundo = intentar(p, respaldo, resta(), o, cancelarRespaldo.signal);
+      const ganador = await new Promise<'principal' | 'respaldo' | null>((resolver) => {
+        let pendientes = 2;
+        const fin = (quien: 'principal' | 'respaldo') => (r: Intento) => {
+          pendientes--;
+          if (r.ok) resolver(quien);
+          else if (!pendientes) resolver(null);
+        };
+        principal.then(fin('principal'));
+        segundo.then(fin('respaldo'));
+      });
+      if (ganador === 'principal') cancelarRespaldo.abort('cancelado: respondió el principal');
+      if (ganador === 'respaldo') cancelarPrincipal.abort('corte');
+      const [p1, p2] = await Promise.all([principal, segundo]);
+      const usos = [p1.uso, p2.uso];
+      const elegido = ganador === 'principal' ? p1 : ganador === 'respaldo' ? p2 : null;
+      if (elegido?.ok) return { ok: true, mensaje: elegido.mensaje, usos };
+      const motivo = (x: Intento) => (x.ok ? 'ok' : x.motivo);
+      return { ok: false, motivo: `${motivo(p1)}; respaldo: ${motivo(p2)}`, usos };
     },
   };
 }

@@ -324,7 +324,6 @@ export function dominioBandeja(puerto: PuertoBandeja): Dominio {
   };
 
   const proponer: Dominio['proponer'] = async (accion, datos, ctx) => {
-    const linea = await puerto.linea();
     if (accion === 'viaje_nuevo') {
       const ref = String(datos.cliente ?? '').trim();
       const ficha = resolverFicha(ctx, ref);
@@ -336,6 +335,9 @@ export function dominioBandeja(puerto: PuertoBandeja): Dominio {
       }
       const desde = filaDesde(ctx.conversacion, datos.desde);
       if (desde === 'invalida') return { ok: false, error: '`desde` tiene que ser el número (#n) de un mensaje escrito por el comercial en la conversación, o vacío.', candado: 'desde_invalido' };
+      // La línea solo la nombra este resumen: leerla antes de cada acción eran cuatro consultas en serie delante de la
+      // extracción de `anotar_en_viaje` y `cargar_tanda` (medido en vivo, 2026-10-09).
+      const linea = await puerto.linea();
       const resumen = `¿Abro este viaje?\n${ficha.ficha.ref}${destino ? ` · ${destino}` : ''} · ${linea}`;
       return { ok: true, propuesta: { accion, datos: { contactoId: ficha.id, cliente: ficha.ficha.nombre, destino, ...(desde ? { desdeFila: desde.id } : {}) }, resumen, si: 'Sí, ábrelo', no: 'No' } };
     }

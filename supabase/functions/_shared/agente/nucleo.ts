@@ -16,7 +16,7 @@
 import type { ConfigAgente } from './config.ts';
 import { fechaBogota, mensajeDelTurno, recortarResultado, sistema } from './contexto.ts';
 import { CIERRAN, cierranCon, declaraciones } from './herramientas.ts';
-import { consultar, fichasDeHerramienta, respuestaFija, temas, bloqueSiempre } from './reglamento.ts';
+import { fichasDeHerramienta, respuestaFija, temas, bloqueSiempre } from './reglamento.ts';
 import { META, botonesPropuesta, cortarEnPalabra, opcionesDelModelo, renderizar } from './render.ts';
 import { respaldoDe, verificar } from './verificador.ts';
 import type {
@@ -198,7 +198,7 @@ export async function turnoDelModelo(deps: DepsTurno, e: EntradaTurno): Promise<
   const todas = decl.map((x) => x.name);
   const cierran = e.tras ? [...cierranCon(d), TERMINAR] : cierranCon(d);
   // En el último llamado (forzado a cerrar) NO entran los cierres del dominio: medido en vivo (2026-10-08), con el
-  // presupuesto agotado tras `buscar` y `consultar_reglas`, el modelo cerró «¿qué le falta al viaje de…?» con
+  // presupuesto agotado tras `buscar` y `consultar_reglas` (que ya no existe), el modelo cerró «¿qué le falta al viaje de…?» con
   // `link_autorizacion` porque era la única salida con la ficha a mano. Ahí contesta con `responder`.
   const forzados = e.tras ? [...CIERRAN, TERMINAR] : CIERRAN;
   // Tras un hecho, lo que no sea seguir (falla, tema fuera, `terminar`) deja la confirmación sola: el hecho ya ocurrió.
@@ -246,11 +246,7 @@ export async function turnoDelModelo(deps: DepsTurno, e: EntradaTurno): Promise<
         const ti = deps.reloj();
         let r2: { ok: boolean; datos: unknown; error?: string; privado?: unknown };
         try {
-          if (nombre === 'consultar_reglas') {
-            const x = consultar(r, args);
-            r2 = { ok: true, datos: x };
-            traza.reglas_usadas!.push(...(Array.isArray(args.ids) ? args.ids.map(String) : []));
-          } else if (d.lecturas.some((l) => l.name === nombre)) {
+          if (d.lecturas.some((l) => l.name === nombre)) {
             r2 = await d.leer(nombre, args, e.ctx);
           } else {
             r2 = { ok: false, datos: null, error: `No existe la herramienta «${nombre}». Usa: ${todas.join(', ')}.` };
