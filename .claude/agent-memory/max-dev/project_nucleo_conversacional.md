@@ -1,6 +1,6 @@
 ---
 name: nucleo-conversacional
-description: Núcleo conversacional de ONE (#1060 → #1061 → #1062, 2026-10-06; fallas en vivo 2026-10-07) — cómo se enciende, p90 7,4 s, propuestas de anotar que se unen y lo dicho antes de abrir
+description: Núcleo conversacional de ONE (#1060 → #1062, fallas en vivo 2026-10-07 y 10-09) — cómo se enciende, verificador solo estructural, propuesta que vence por `sobre`, extracción en 2.5-flash-lite
 metadata:
   type: project
 ---
@@ -37,9 +37,16 @@ lugar del agente simple v2; criterio fijado ANTES de medir: 0 dañinas, más éx
   tiene su propia extracción (`bandeja/extraccion.ts`) y NO usa `entenderEntrega`/`validarSalida`/`guardianPasajeros`
   (regex sobre el texto, siguen en el flujo viejo). `cargarEnExistente(..., { delModelo: true })` en el núcleo. No
   agregar reglas de código que lean el texto del comercial: si el modelo falla, se arregla el prompt.
-- Verificador (mismo PR, #1073): una afirmación de hecho sale solo con respaldo de HECHOS (herramientas de este turno
-  + escrituras confirmadas, `fuentesDeHechos` en nucleo.ts), no de la conversación. Por eso `ver_viaje` devuelve
-  `registrado` y la escritura guarda `escritos`: si se quitan, lo cierto vuelve a atajarse y el turno se rehace.
+- Verificador desde 2026-10-09 (rama fix/bot-verificador-estructural): SOLO datos estructurales (código, celular,
+  correo, fecha, cifra, %) contra el respaldo. Se quitaron mayúscula=nombre y las listas de verbos/participios (y el
+  cruce con «hechos» de #1073): en prod 5 de 5 rechazos eran falsos. No volver a agregar listas de palabras. El arnés
+  sigue contando como dañina un «cargué/abrí…» del modelo (`calificar.ts`).
+- Propuesta vigente con `sobre` (código del viaje en Propuesta y en el resultado de `ver_viaje`): la última propuesta
+  queda atrás si una lectura posterior tiene otro `sobre` (viaje_nuevo no tiene: cualquier `ver_viaje` la deja atrás).
+- La extracción de prod corre en `gemini-2.5-flash-lite` (defecto de `wa-entendimiento.ts`, sin secreto que lo cambie);
+  la llave de pruebas recibe 404 «no longer available to new users». El arnés extrae con 3.5-flash-lite: lo que se
+  mide es el prompt en un modelo vecino. Casos: `arnes/extraccion-casos.ts`; `c1-1009` corre la extracción real.
+- `RE_CODIGO` exige espacios: «m1261» escrito pegado NO nombra el viaje (candado viaje_nombrado). Reportado, sin arreglar.
 - El reglamento de la conversación (`bot_reglamentos`, Anexo A) aún dice «solo infante se deduce» en `g.pasajeros`: es
   dato de la base, no código; no se tocó. `PuertoMemoria` con `campos` + `extraer` corre la cadena real; el guion recibe
   `instrucciones` (el prompt) para probarlo.

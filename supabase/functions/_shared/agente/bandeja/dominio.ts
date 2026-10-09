@@ -261,7 +261,7 @@ export function propuestaDeCarga(
     prep.falta.length ? `Para cotizar faltaría: ${prep.falta.join(', ')}.` : 'Con esto queda el mínimo para cotizar.',
   ].join('\n');
   return {
-    accion, datos: { viajeId: v.id, codigo: v.codigo, mensajes, plan: prep.plan, entendido: prep.entendido, ...(prep.duda ? { duda: prep.duda } : {}) }, resumen,
+    accion, sobre: v.codigo, datos: { viajeId: v.id, codigo: v.codigo, mensajes, plan: prep.plan, entendido: prep.entendido, ...(prep.duda ? { duda: prep.duda } : {}) }, resumen,
     si: accion === 'cargar_tanda' ? 'Cargar' : 'Anotar', no: 'No',
   };
 }
@@ -298,6 +298,7 @@ export function dominioBandeja(puerto: PuertoBandeja): Dominio {
       if (!v) return { ok: true, datos: { nota: `No hay un viaje con el código ${codigo}.` } };
       return {
         ok: true,
+        sobre: v.codigo,
         datos: {
           codigo: v.codigo, nombre: v.nombre, cliente: v.cliente, destino: v.destino, abierto: v.abierto,
           ...(v.registrado ? { registrado: v.registrado } : {}),
@@ -367,7 +368,7 @@ export function dominioBandeja(puerto: PuertoBandeja): Dominio {
       // La duda cuenta: si el comercial la contestó y no cambió nada más, la propuesta nueva ya no la trae.
       if (pendiente && mismoEntendido([...prep.entendido, ...(prep.duda ? [prep.duda] : [])], [...((pendiente.datos.entendido as string[] | undefined) ?? []), ...(typeof pendiente.datos.duda === 'string' ? [pendiente.datos.duda] : [])])) {
         // Nada nuevo frente a la pendiente: es la misma (el núcleo la reenvía con sus botones, misma huella).
-        return { ok: true, propuesta: { accion, datos: pendiente.datos, resumen: pendiente.resumen, si: pendiente.si, no: pendiente.no } };
+        return { ok: true, propuesta: { accion, sobre: r.v.codigo, datos: pendiente.datos, resumen: pendiente.resumen, si: pendiente.si, no: pendiente.no } };
       }
       if (!prep.entendido.length && prep.duda) {
         return { ok: false, error: `En lo que el comercial escribió de ${r.v.codigo} no hay datos nuevos para anotar, pero hay algo que no quedó claro. No propongas anotar: pregúntale con \`responder\`, tal cual: ${prep.duda}`, candado: 'solo_duda' };

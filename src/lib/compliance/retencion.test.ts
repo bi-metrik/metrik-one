@@ -170,6 +170,12 @@ const CLASIFICACION: Record<string, Clasificacion> = {
       'el arnés re-actúa una pregunta real del bot («¿Viajan bebés (menores de 2 años)?»): una EDAD de pasajero. ' +
       'No hay plazo de conservación en este archivo.',
   },
+  'supabase/functions/_shared/agente/arnes/extraccion-casos.ts': {
+    tipo: 'no-es-plazo',
+    razon:
+      'los casos de la extracción del arnés describen pasajeros («el hijo de 5 años», «dos niños de 3 y 7 años»): ' +
+      'EDADES de pasajeros. No hay plazo de conservación en este archivo.',
+  },
   'supabase/functions/_shared/agente/bandeja/extraccion.ts': {
     tipo: 'no-es-plazo',
     razon:

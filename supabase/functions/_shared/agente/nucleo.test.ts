@@ -170,7 +170,7 @@ describe('candados (§3.5)', () => {
     expect(e.puerto.escrituras).toEqual([])
   })
 
-  it('el verificador no deja salir un código ni un «cargué» sin respaldo; a la segunda sale la respuesta fija', async () => {
+  it('el verificador no deja salir un código sin respaldo; a la segunda sale la respuesta fija', async () => {
     const modelo = modeloGuionado([
       { name: 'responder', args: { tema: 'viaje', texto: 'Ya cargué todo en M1 26 9.' } },
       { name: 'responder', args: { tema: 'viaje', texto: 'Listo, quedó en M1 26 9.' } },
@@ -180,7 +180,6 @@ describe('candados (§3.5)', () => {
     expect(r[0].texto).toBe('No pude revisarlo ahora. Si es una decisión, toca una opción; si no, escríbemelo de nuevo en un rato.')
     const t = e.trazas().find((x) => x.tipo === 'modelo')!
     expect(t.verificador).toHaveLength(2)
-    expect(t.verificador![0].motivo).toContain('cargué')
     expect(t.verificador![0].motivo).toContain('M1 26 9')
     // El segundo intento recibió el motivo.
     const devuelto = JSON.stringify(modelo.pedidos[1].mensajes.at(-1))

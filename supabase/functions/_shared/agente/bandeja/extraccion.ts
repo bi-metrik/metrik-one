@@ -7,7 +7,9 @@
 //   · `instruccionesCarga`: el prompt. El modelo conoce los campos con sus opciones, la fecha de hoy, lo que el viaje
 //     ya tiene y lo propuesto sin confirmar; elige una opción solo si lo dicho corresponde a ella (una preferencia sin
 //     cifra, «económico», no es un rango: va al texto), no llena por inferencia lo que nadie dijo (el tipo de viaje por
-//     el destino), calcula lo que se puede calcular (regreso = salida + noches, el grupo por categorías) y dice cómo.
+//     el destino, un presupuesto «deducido» de nada: en vivo, 2026-10-09), calcula lo que se puede calcular (regreso =
+//     salida + noches, el grupo por categorías) y dice cómo. La categoría de un menor la da su edad, no la palabra que
+//     usaron («un niño de año y medio» es infante): eso es glosario del prompt, no una regla de código.
 //     «No tiene / no dieron el dato / está abierto» es un dato: va a la opción de «aún no está definido» del campo si
 //     la config la tiene (`no_definido`, «solo si lo dicen», o su etiqueta), también como corrección de un valor que
 //     ya estaba (Mauricio, 2026-10-08, sobre #1074: «no nos dieron un número» → «Aún no tiene presupuesto definido»).
@@ -107,8 +109,9 @@ export function instruccionesCarga(
     '     todavía) es un dato: úsala cuando digan explícitamente que el cliente no lo tiene, no lo dio o está abierto («no',
     '     nos dieron un número», «el presupuesto está abierto, propongamos nosotros»). Una preferencia sola («económico»),',
     `     sin decir nada del dato, no es eso: queda en "${POR_DEFINIR}" y se pregunta. Si hay preferencia, va también al texto.`,
-    '   - No llenes un campo por inferencia de algo que nadie dijo: el tipo de viaje no sale del destino, ni que las fechas',
-    '     sean fijas de que haya una fecha. Calcular con lo dicho sí (el regreso, el grupo); suponer una preferencia, no.',
+    '   - Interpretar no es inventar: un campo del que nadie habló queda en "' + POR_DEFINIR + '" aunque se pueda suponer (el',
+    '     presupuesto, el tipo de viaje por el destino, que las fechas sean fijas porque hay una fecha). Calcular con lo',
+    '     dicho sí (el regreso, el grupo). La frase de un valor habla de ESE campo.',
     `   - El campo de texto${alTexto} se escribe completo: lo que ya tiene más lo nuevo.`,
     '   - Si lo dicho ya está en el viaje o en lo propuesto, aunque lo digan con otras palabras («8, 10 años y 11 meses»',
     '     frente a «8, 10, 11 meses»), devuelve el valor EXACTO que ya está. Solo cambia un valor si lo dicho es distinto.',
@@ -118,11 +121,10 @@ export function instruccionesCarga(
     '     («dijeron que eso no»). Si además queda un matiz, va al campo de texto.',
     '   - Fechas: si no dicen el año, es la próxima vez que ocurre desde hoy. Calcula lo que se puede calcular con lo dicho y',
     '     con lo que el viaje ya tiene (con la salida y las noches sale el regreso). Un mes o una semana sin día no es una fecha.',
-    '   - Pasajeros: entiende el grupo como lo describen. Infante es menor de 2 años. Si la descripción deja claro quiénes',
-    '     viajan, pon 0 en la categoría donde no hay nadie; si no queda claro, "' + POR_DEFINIR + '". Un total sin desglose',
-    '     («somos 4 con los niños») no se reparte.',
+    '   - Pasajeros: entiende el grupo como lo describen. Infante es menor de 2 años y la edad manda sobre la palabra',
+    '     («un niño de año y medio» es 1 infante y 0 niños). Si queda claro quiénes viajan, pon 0 donde no hay nadie; si',
+    '     no, "' + POR_DEFINIR + '". Un total sin desglose («somos 4 con los niños») no se reparte.',
     '   - Si se corrigen («2… mejor 3»), vale lo último. Si un dato del viaje cambia, devuelve el nuevo con su frase.',
-    '   - No inventes: lo que nadie dijo ni se puede calcular queda en "' + POR_DEFINIR + '".',
     '4. dudas: cuando lo dicho para un campo no es claro (una preferencia sin cifra, dos lecturas posibles), además de',
     `   dejarlo en "${POR_DEFINIR}", pregúntalo: { campo, pregunta, opciones }. La pregunta es corta y para el comercial,`,
     '   con sus palabras entre comillas («"Económico": ¿lo dejo como nota o es un rango?»); opciones, 2 a 4 respuestas',
@@ -144,7 +146,7 @@ export function esquemaCarga(fields: ReadonlyArray<CampoEntendible>): Record<str
       type: 'object',
       properties: {
         valor: op.length ? { type: 'string', enum: [...op, POR_DEFINIR, QUITAR] } : { type: 'string' },
-        frase: { type: 'string' },
+        frase: { type: 'string', description: 'Las palabras exactas de un mensaje que hablan de ESTE campo. Si nadie habló de él, vacío.' },
         como: { type: 'string', enum: [...COMO] },
         calculo: { type: 'string' },
       },

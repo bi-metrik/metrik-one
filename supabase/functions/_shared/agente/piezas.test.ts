@@ -53,6 +53,11 @@ describe('config: bot_conversacional', () => {
 
 describe('render: los límites de Meta', () => {
   const r = (texto: string, ops: Array<{ titulo: string; descripcion?: string }>, final = false) => renderizar(texto, ops, { turno: 'abcd1234', topeTexto: 600, final })
+  it('la marca «⏎» que el modelo copia de la conversación vuelve a ser salto de línea', () => {
+    expect(r('Va con 4 estrellas. ⏎ ¿Lo anoto en M1 26 2 · MIAMI 7N?⏎• Categoría de hotel: 4 estrellas', [])).toEqual({
+      ok: true, salida: { tipo: 'texto', texto: 'Va con 4 estrellas.\n¿Lo anoto en M1 26 2 · MIAMI 7N?\n• Categoría de hotel: 4 estrellas' }, recortes: [],
+    })
+  })
   it('0 opciones = texto; 1 a 3 = botones; 4 a 10 = lista; ids del código', () => {
     expect(r('hola', [])).toEqual({ ok: true, salida: { tipo: 'texto', texto: 'hola' }, recortes: [] })
     const b = r('¿Cuál?', [{ titulo: 'Cel. …9444' }, { titulo: 'Cel. …1203' }, { titulo: 'Es otra persona' }])
@@ -94,22 +99,22 @@ describe('verificador', () => {
     expect(verificar('Va a San Andrés el 12 de diciembre. ¿Cuántos viajan?', resp)).toEqual([])
     expect(verificar('¿Lo cargo en M1 26 2?', resp)).toEqual([])
   })
-  it('ataja código, celular, fecha, cifra, porcentaje y nombre inventados', () => {
+  it('ataja código, celular, fecha, cifra y porcentaje inventados', () => {
     expect(verificar('Está en M1 26 9.', resp)[0]).toContain('M1 26 9')
     expect(verificar('El de cel. …1203.', resp)[0]).toContain('1203')
     expect(verificar('Sale el 15 de enero.', resp).join()).toContain('fecha')
     expect(verificar('Cuesta $3.500.000.', resp).join()).toContain('cifra')
     expect(verificar('Llevas el 80 % del mínimo.', resp).join()).toContain('porcentaje')
-    expect(verificar('Es para Lucía Pérez, ¿cierto?', resp).join()).toContain('Lucía')
   })
-  it('ataja los verbos de hecho aunque el dato exista', () => {
-    expect(verificar('Cargué todo en M1 26 2.', resp).join()).toContain('cargué')
-    expect(verificar('Ya quedó cargado.', resp).join()).toContain('quedó hecho')
-    // El subjuntivo de una pregunta no es un hecho.
-    expect(verificar('¿Quieres que lo cargue en M1 26 2?', resp)).toEqual([])
-  })
-  it('la mayúscula al inicio de oración no es un nombre', () => {
+  it('no lee palabras: ni mayúsculas como nombres ni verbos como hechos (los falsos rechazos del 2026-10-07 y 10-09)', () => {
+    const viaje = respaldoDe(['ver_viaje → M1 26 1 MIAMI 7N, falta destino, ciudad de salida, fechas, pasajeros, categoría de hotel'])
+    expect(verificar('Para cotizar M1 26 1 (MIAMI 7N) falta:\n• Destino\n• Pasajeros (adultos, niños, infantes)\n\nEnvíame los datos y los anotamos.', viaje)).toEqual([])
+    expect(verificar('Quedo atento a lo que tengas.', viaje)).toEqual([])
+    expect(verificar('M1 26 1 · MIAMI 7N\n\n¿Quieres trabajar en alguno de estos o abrimos el viaje nuevo?', viaje)).toEqual([])
+    expect(verificar('Es para Lucía Pérez, ¿cierto?', resp)).toEqual([])
     expect(verificar('Perfecto. Dime a dónde van. Gracias.', resp)).toEqual([])
+    // Un código que nadie devolvió sigue sin salir, diga lo que diga la oración.
+    expect(verificar('Cargué todo en M1 26 9.', resp).join()).toContain('M1 26 9')
   })
 })
 

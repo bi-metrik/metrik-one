@@ -50,7 +50,9 @@ export type Render = { ok: true; salida: Salida; recortes: string[] } | { ok: fa
  */
 export function renderizar(texto: string, opciones: OpcionModelo[], o: { turno: string; topeTexto: number; final: boolean }): Render {
   const recortes: string[] = [];
-  let cuerpo = texto.trim();
+  // «⏎» es la marca con que `escapar` le muestra al modelo un salto de línea; si la copia, vuelve a ser salto (visto en
+  // el arnés, 2026-10-09: «¿Lo anoto…?⏎• Categoría…» en una sola línea, que `sinLineasDelResumen` no reconocía).
+  let cuerpo = texto.replace(/[ \t]*⏎[ \t]*/gu, '\n').trim();
   if (largo(cuerpo) > o.topeTexto) {
     if (!o.final) return { ok: false, error: `El texto tiene ${largo(cuerpo)} caracteres; el máximo es ${o.topeTexto}. Acórtalo.` };
     cuerpo = cortarEnPalabra(cuerpo, o.topeTexto);
