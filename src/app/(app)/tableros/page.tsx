@@ -4,6 +4,7 @@ import { getRolePermissions } from '@/lib/roles'
 import { getComercialData, getOperativoData, getFinancieroData, getRentabilidadComercialData, getProcesoPorSeccional } from './actions'
 import { getDirectivo } from './directivo-actions'
 import { getSegundoPagoMes, getSegundoPagoSobrantes } from './segundo-pago-actions'
+import { getReembolsosMes } from './reembolsos-actions'
 import { sinSobrantes } from '@/lib/tableros/segundo-pago'
 import { getMarketingData } from './marketing-actions'
 import { getPilotoMarketplace } from './ferreteria-actions'
@@ -243,7 +244,7 @@ async function cargarComercialNegocios(role: string | null) {
     const d = new Date(Date.UTC(anioSel, mesSel - 1 + meses, 1))
     return `${d.getUTCFullYear()}-${String(d.getUTCMonth() + 1).padStart(2, '0')}-01`
   }
-  const [equipo, mesData, mesPrevio, origen, seccional, planPago, capacidad, serieCruda, serieSeccionalCruda, serieVendedorCruda, segundoPago, sobrantes] = await Promise.all([
+  const [equipo, mesData, mesPrevio, origen, seccional, planPago, capacidad, serieCruda, serieSeccionalCruda, serieVendedorCruda, segundoPago, sobrantes, reembolsos] = await Promise.all([
     getComercialResumen(),
     getComercialMes(anioSel, mesSel),
     getComercialMes(prev.anio, prev.mes),
@@ -259,6 +260,8 @@ async function cargarComercialNegocios(role: string | null) {
     // SOE-002: los sobrantes de centavos a tramo 2, para que la barra de segundo pago
     // de la serie los descarte igual que la cifra «2º pago recibido este mes».
     getSegundoPagoSobrantes(),
+    // SOE-007: las devoluciones de dinero del mes, de la misma RPC que lee Direccion.
+    getReembolsosMes(anioSel, mesSel),
   ])
   const { serie, serieSeccional, serieVendedor } = sinSobrantes(
     serieCruda, serieSeccionalCruda, serieVendedorCruda, sobrantes,
@@ -271,6 +274,7 @@ async function cargarComercialNegocios(role: string | null) {
     seccionalInicial: seccional,
     planPagoInicial: planPago,
     segundoPagoInicial: segundoPago,
+    reembolsosInicial: reembolsos,
     capacidad,
     serie,
     serieSeccional,
