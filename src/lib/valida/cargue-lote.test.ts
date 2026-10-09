@@ -115,6 +115,37 @@ describe('procesarEnParalelo', () => {
     expect(maximo).toBe(3)
   })
 
+  it('detenerSi: con el primer corte no arranca ninguna fila mas; las que estaban en vuelo terminan', async () => {
+    const llamadas: number[] = []
+    const progreso: number[] = []
+    const resultados = await procesarEnParalelo(
+      Array.from({ length: 10 }, (_, i) => i),
+      async (i) => {
+        llamadas.push(i)
+        // La fila 3 agota la bolsa; la 4 ya estaba en vuelo y responde lo mismo, mas tarde.
+        await new Promise((r) => setTimeout(r, i === 4 ? 15 : 5))
+        return i >= 3 ? 'bolsa_agotada' : 'ok'
+      },
+      {
+        concurrencia: 2,
+        valorDeError: 'error',
+        valorNoIniciado: 'no_iniciada',
+        detenerSi: (r) => r === 'bolsa_agotada',
+        alTerminarItem: (_, terminados) => progreso.push(terminados),
+      },
+    )
+    expect(llamadas).toEqual([0, 1, 2, 3, 4])
+    expect(resultados.slice(0, 5)).toEqual(['ok', 'ok', 'ok', 'bolsa_agotada', 'bolsa_agotada'])
+    expect(resultados.slice(5)).toEqual(Array(5).fill('no_iniciada'))
+    // El contador solo cuenta las que corrieron.
+    expect(progreso).toEqual([1, 2, 3, 4, 5])
+  })
+
+  it('sin detenerSi, un resultado cualquiera no corta el lote', async () => {
+    const resultados = await procesarEnParalelo(['a', 'b', 'c'], async (x) => `r:${x}`, { valorDeError: 'error' })
+    expect(resultados).toEqual(['r:a', 'r:b', 'r:c'])
+  })
+
   it('un lote vacio termina sin llamar a nada', async () => {
     const procesar = vi.fn(async () => 'ok')
     await expect(procesarEnParalelo([], procesar, { valorDeError: 'error' })).resolves.toEqual([])

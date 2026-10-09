@@ -10,6 +10,7 @@ import { contextoSuscripcion } from '@/lib/seccion-suscripcion/contexto-servidor
 import { franjaValida } from '@/lib/seccion-suscripcion/estado';
 import { entradaValidaCda, moraValidaCda, puedeVerPagosCda } from '@/lib/valida-cda/puerta';
 import ValidaClient from './valida-client';
+import { leerSaldoValida } from '@/lib/valida/credencial-servidor';
 import { registrarVistaAvisoModificacion } from '@/lib/valida-cda/aviso-modificacion-servidor';
 import {
   AvisoModificacionTerminos,
@@ -166,7 +167,7 @@ export default async function ValidaPage({ searchParams }: Props) {
     if (neg) negocioInicial = neg;
   }
 
-  const [historial, tutorialProgress, suscripcion] = await Promise.all([
+  const [historial, tutorialProgress, suscripcion, saldo] = await Promise.all([
     // En pausa las consultas no se muestran, y su lectura la negaría la misma puerta.
     enPausa
       ? Promise.resolve(null)
@@ -178,6 +179,9 @@ export default async function ValidaPage({ searchParams }: Props) {
     // La suscripción (pago, usuarios, términos) vive en /suscripcion. Aquí, a la persona designada,
     // solo una línea cuando hay algo que hacer; los demás ven únicamente la pausa por mora.
     vePagos ? contextoSuscripcion() : Promise.resolve(null),
+    // El contador de la bolsa (la prueba gratis o una bolsa prepagada). null en un espacio con plan
+    // mensual o con la licencia de los CDA: Valida responde otra modalidad y no se pinta nada.
+    enPausa ? Promise.resolve(null) : leerSaldoValida(workspaceId),
   ]);
 
   const franja =
@@ -214,6 +218,7 @@ export default async function ValidaPage({ searchParams }: Props) {
       encabezado={encabezado}
       consultasEnPausa={enPausa ? <PausaPorMora mora={enPausa} vePagos={vePagos} /> : null}
       consultasRestringidas={restringido ? <ConsultasRestringidas /> : null}
+      saldo={saldo}
     />
   );
 }
