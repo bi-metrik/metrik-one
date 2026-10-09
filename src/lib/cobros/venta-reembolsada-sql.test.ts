@@ -27,6 +27,8 @@ const DEVOLUCIONES = '20261009160000_devoluciones_dinero.sql'
 const HONORARIO_NETO = '20260902220053_tableros_honorario_neto_de_iva.sql'
 const VENTA_CERO = '20260903120000_venta_cero_cuenta_como_cierre.sql'
 const KPIS = '20261001140200_perf_fence_venta_mes_soena.sql'
+const RESUMEN = '20260915030000_perfil_y_resumen_cuentan_la_venta_canonica.sql'
+const DRY_RUN = join(process.cwd(), 'sql/soena/2026-10-09_dry-run_venta-reembolsada.sql')
 
 /** La definición de una función tal como la dejó su migración (CREATE … hasta `$function$;`). */
 function funcion(archivo: string, nombre: string): string {
@@ -80,7 +82,7 @@ const ESQUEMA_BASE = `
 
   create table public.workspaces (id uuid primary key, slug text);
   create table public.profiles   (id uuid primary key, workspace_id uuid, role text);
-  create table public.staff      (id uuid primary key, workspace_id uuid, full_name text, profile_id uuid);
+  create table public.staff      (id uuid primary key, workspace_id uuid, full_name text, profile_id uuid, position text);
   create table public.negocios (
     id uuid primary key, workspace_id uuid not null, codigo text, nombre text,
     estado text not null default 'abierto', stage_actual text default 'venta',
@@ -157,14 +159,17 @@ const DATOS = `
     ('${OTRO_WS}', '${AJENO}', 637500, '2026-09-12', 'anticipo');
 `
 
-async function montar(db: PGlite) {
-  await db.exec(ESQUEMA_BASE)
+/** Con `ids` se montan los mismos datos con otros uuid (los de SOENA y V0494, para el dry-run). */
+async function montar(db: PGlite, ids?: { ws: string; v0494: string }) {
+  const conIds = (sql: string) => (ids ? sql.replaceAll(WS, ids.ws).replaceAll(V0494, ids.v0494) : sql)
+  await db.exec(conIds(ESQUEMA_BASE))
   await db.exec(vista(HONORARIO_NETO, 'v_cobro_valor'))
   await db.exec(vista(VENTA_CERO, 'v_venta_mes_comercial'))
   await db.exec(devolucionesSinRpc())
   await db.exec(funcion(KPIS, 'get_comercial_kpis_mes_soena'))
   await db.exec(funcion(HONORARIO_NETO, 'get_directivo_soena'))
-  await db.exec(DATOS)
+  await db.exec(funcion(RESUMEN, 'get_comercial_resumen_soena'))
+  await db.exec(conIds(DATOS))
 }
 
 let db: PGlite
@@ -388,4 +393,48 @@ describe('indicador de reembolsos', () => {
       await db.exec('reset role')
     }
   })
+})
+
+describe('el dry-run de producción', () => {
+  const dry = readFileSync(DRY_RUN, 'utf8')
+
+  it('lleva la migración pegada tal cual', () => {
+    expect(dry).toContain(leer(MIGRACION))
+  })
+
+  it('aborta con el informe esperado y no deja nada escrito', async () => {
+    const SOENA = '7dea141d-d4da-483d-a78d-b14ef35500c5'
+    const fresca = new PGlite()
+    await montar(fresca, { ws: SOENA, v0494: '1695e4cf-0799-4a46-8558-171f6ed456d1' })
+    await fresca.exec(`set prueba.ws = '${SOENA}'`)
+    let mensaje = ''
+    try {
+      await fresca.exec(dry)
+    } catch (e) {
+      mensaje = (e as Error).message
+    }
+    expect(mensaje.startsWith('DRYRUN ')).toBe(true)
+    const r = JSON.parse(mensaje.slice('DRYRUN '.length))
+    expect(r).toMatchObject({
+      vista_reescrita: true,
+      sin_devoluciones_igual: true,
+      parcial: { v0494_sigue_en_ventas: true, ventas_sep_igual: true },
+      ensayo_total: { ok: true, ya_cerrado: true, cerro_caso: false },
+      v0494_en_ventas_despues: false,
+    })
+    expect(r.septiembre.direccion_negocios_cerrados).toEqual([3, 2])
+    expect(r.septiembre.comercial_ventas).toEqual([3, 2])
+    expect(r.septiembre.direccion_primer_pago[1]).toBe(r.septiembre.direccion_primer_pago[0])
+    expect(r.septiembre.comercial_valor_sin_iva[0] - r.septiembre.comercial_valor_sin_iva[1]).toBeCloseTo(535714.29, 2)
+    expect(r.reembolsos_mes).toMatchObject({ reembolsos: 1, monto: 637500, ventas_anuladas: 1 })
+    expect(r.reembolsos_mes.valor).toBeCloseTo(535714.29, 2)
+    expect(r.reembolsos_septiembre).toEqual({ reembolsos: 0, valor: 0 })
+    // Nada quedó: ni la vista nueva, ni la función, ni la devolución.
+    const t = await fresca.query<{ vista: string | null; fn: string | null; n: number }>(`
+      select to_regclass('public.v_negocio_reembolso')::text as vista,
+             to_regprocedure('public.get_reembolsos_mes_soena(uuid,integer,integer)')::text as fn,
+             (select count(*)::int from public.devoluciones_dinero) as n`)
+    expect(t.rows[0]).toEqual({ vista: null, fn: null, n: 0 })
+    await fresca.close()
+  }, 60_000)
 })
