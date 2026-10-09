@@ -81,15 +81,20 @@ async function enviarYCerrar(d: DepsCola, turnoId: string, atendidas: FilaConver
   r.traza.ms_base = Math.round(d.reloj() - tb);
 }
 
-/** Corre `fn` con «escribiendo…» encendido y re-encendido antes de que Meta lo apague (25 s). */
+/**
+ * Corre `fn` con «escribiendo…» encendido y re-encendido antes de que Meta lo apague (25 s). El encendido va en paralelo
+ * con `fn` (es una llamada a Meta de unos cientos de ms que no cambia lo que el turno decide), pero se espera antes de
+ * devolver: así el «escribiendo…» nunca llega a Meta después de la respuesta y no se queda prendido sobre ella.
+ */
 async function conEscribiendo<T>(d: DepsCola, wamid: string | null | undefined, fn: () => Promise<T>): Promise<T> {
   if (!wamid) return await fn();
-  await d.mensajero.escribiendo(wamid);
-  const reencender = setInterval(() => { void d.mensajero.escribiendo(wamid); }, d.config.reencenderMs);
+  const encendido = d.mensajero.escribiendo(wamid).catch(() => {});
+  const reencender = setInterval(() => { void d.mensajero.escribiendo(wamid).catch(() => {}); }, d.config.reencenderMs);
   try {
     return await fn();
   } finally {
     clearInterval(reencender);
+    await encendido;
   }
 }
 
