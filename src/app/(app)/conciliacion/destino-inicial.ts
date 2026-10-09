@@ -14,7 +14,7 @@
  * Puro: no toca DB ni red.
  */
 
-export const PESTANAS_CONCILIACION = ['bandeja', 'saldos', 'general', 'fuera_epayco', 'facturacion', 'recibos'] as const
+export const PESTANAS_CONCILIACION = ['bandeja', 'saldos', 'general', 'fuera_epayco', 'devoluciones', 'facturacion', 'recibos'] as const
 export type PestanaConciliacion = (typeof PESTANAS_CONCILIACION)[number]
 
 export const FILTROS_SALDO = ['sobrante', 'faltante', 'cero'] as const

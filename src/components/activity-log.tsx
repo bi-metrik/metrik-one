@@ -706,6 +706,27 @@ function ChangeEntry({ entry }: { entry: ActivityEntry }) {
     )
   }
 
+  // Devolucion de dinero (SOE-007): salida propia, no anulacion del cobro. El detalle (fecha,
+  // motivo, si cerro el caso) viene armado por la base en `contenido`.
+  if (campo === 'devolucion_dinero') {
+    return (
+      <div className="flex items-start gap-2 rounded-lg px-3 py-2 text-[11px] text-muted-foreground">
+        <Banknote className="mt-0.5 h-3.5 w-3.5 shrink-0 text-red-500" />
+        <div className="min-w-0 space-y-0.5">
+          <div className="flex flex-wrap items-center gap-1">
+            <Autor nombre={autorName} />
+            <span>registro devolucion de dinero</span>
+            {entry.valor_nuevo && (
+              <span className="font-medium text-red-600">{formatCOP(entry.valor_nuevo)}</span>
+            )}
+            <span className="text-[10px]">{timestamp}</span>
+          </div>
+          {entry.contenido && <p className="text-foreground/80">{entry.contenido}</p>}
+        </div>
+      </div>
+    )
+  }
+
   // Carpeta URL — solo indicar que se actualizo
   if (campo === 'carpeta_url') {
     return (

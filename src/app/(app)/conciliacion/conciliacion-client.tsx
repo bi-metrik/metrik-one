@@ -22,6 +22,7 @@ import { anularCobro } from '@/lib/actions/pagos-externos'
 import { MOTIVO_ANULACION_MIN } from '@/lib/cobros/anulacion'
 import { referenciaEsperaConfirmacion } from '@/lib/cobros/confirmacion-por-referencia'
 import PagosExternosTab from './pagos-externos-tab'
+import DevolucionesTab from './devoluciones-tab'
 import BusquedaInput from '@/components/busqueda-input'
 import { telefonoCoincide } from '@/lib/busqueda/telefono'
 import { RedistribuirModal } from './redistribuir-modal'
@@ -74,6 +75,8 @@ type TabKey = PestanaConciliacion
  *   - Pago fuera de ePayco: captura excepcional de un ingreso que cayó a una cuenta
  *     bancaria. NO es conciliación — por eso vive en su propia pestaña, aislada de
  *     la bandeja de aceptar/rechazar.
+ *   - Devoluciones: dinero que se le devolvió al cliente (SOE-007). Una salida propia en
+ *     su fecha, con la opción de cerrar el caso en la misma acción.
  *   - Recibos de caja: de la plata que entró, cuál está acusada. Separado de
  *     facturación por decisión de Mauricio (2026-09-07): son dos controles distintos y
  *     tenerlo dentro obligaba a buscar pagos sin acusar en la pestaña "Ya facturados".
@@ -131,6 +134,7 @@ export default function ConciliacionClient(
     { key: 'saldos', label: 'Saldos', count: data.metricas.en_saldo },
     { key: 'general', label: 'Vista general' },
     { key: 'fuera_epayco', label: 'Pago fuera de ePayco' },
+    { key: 'devoluciones', label: 'Devoluciones' },
     ...(cola ? [{ key: 'facturacion' as TabKey, label: 'Por facturar', count: cola.totales.listos + cola.totales.incompletos }] : []),
     { key: 'recibos' as TabKey, label: 'Recibos de caja', count: recibos?.totales.pendientes },
   ]
@@ -181,6 +185,7 @@ export default function ConciliacionClient(
       {tab === 'saldos' && <TabSaldos data={data} filtros={filtrosSaldo} setFiltros={setFiltrosSaldo} />}
       {tab === 'general' && <VistaGeneral data={data} onTab={setTab} />}
       {tab === 'fuera_epayco' && <PagosExternosTab onDone={() => router.refresh()} />}
+      {tab === 'devoluciones' && <DevolucionesTab onDone={() => router.refresh()} />}
       {tab === 'facturacion' && cola && <TabFacturacion cola={cola} />}
       {tab === 'recibos' && (
         recibos

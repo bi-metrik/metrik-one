@@ -82,6 +82,7 @@ export async function getFinancieroData(periodo: Periodo = '6meses'): Promise<Fi
     gastosCurrRes,
     carteraRes,
     gastosPorPagarRes,
+    devolucionesRes,
   ] = await Promise.all([
     // Latest bank balance
     supabase
@@ -161,10 +162,28 @@ export async function getFinancieroData(periodo: Periodo = '6meses'): Promise<Fi
       .select('monto')
       .eq('workspace_id', workspaceId)
       .eq('estado_pago', 'pendiente'),
+
+    // Devoluciones de dinero (SOE-007): restan del ingreso del MES en que se devolvio, sin
+    // tocar el mes del cobro original.
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    (supabase as any)
+      .from('devoluciones_dinero')
+      .select('monto, fecha')
+      .eq('workspace_id', workspaceId)
+      .gte('fecha', range.start)
+      .lt('fecha', range.end),
   ])
 
   const saldo = saldoRes.data?.[0]
-  const cobrosHist = cobrosHistRes.data || []
+  // Ingreso NETO: los cobros en su fecha y las devoluciones de dinero en negativo en la suya
+  // (SOE-007). Una devolucion resta del mes en que ocurrio y no reescribe el mes del cobro.
+  const cobrosHist: Array<{ monto: number; fecha: string }> = [
+    ...(cobrosHistRes.data || []).map((c) => ({ monto: Number(c.monto), fecha: c.fecha as string })),
+    ...((devolucionesRes?.data ?? []) as Array<{ monto: number; fecha: string }>).map((d) => ({
+      monto: -Number(d.monto),
+      fecha: d.fecha,
+    })),
+  ]
   const gastosHist = gastosHistRes.data || []
   const gastosFijos = gastosFijosRes.data || []
   const staff = staffRes.data || []
