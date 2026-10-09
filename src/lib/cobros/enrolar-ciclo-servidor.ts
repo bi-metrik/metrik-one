@@ -4,8 +4,10 @@ import { traerTodo } from '@/lib/supabase/paginar'
 import { adapterPara } from '@/lib/suscripciones/pasarela/registro'
 import type { PasarelaAdapter } from '@/lib/suscripciones/pasarela/adapter'
 import { pasarelaDeEnlaces } from './enlace-pago-cuota'
+import { esModuloConRenovacion } from './renovar-ciclo'
 import {
   MODULOS_CON_ENROLAMIENTO_AUTOMATICO,
+  PASARELA_DE_ENLACE_POR_MODULO,
   planearEnrolamiento,
   type ContratoCandidato,
   type MotivoNoEnrolar,
@@ -28,7 +30,7 @@ import {
  * ## Lo que se lee, y por qué la consulta es angosta
  *
  * Solo los tipos de servicio del catálogo cuyo módulo está en
- * `MODULOS_CON_ENROLAMIENTO_AUTOMATICO` (hoy: `radar_secop`) y con `disparador_cobro = 'ciclo'`.
+ * `MODULOS_CON_ENROLAMIENTO_AUTOMATICO` (hoy: `radar_secop` y `valida_consulta`) y con `disparador_cobro = 'ciclo'`.
  * Esta es la primera vez que algo del cobro LEE `disparador_cobro`: hasta el 2026-09-28 sus únicos
  * lectores eran el esquema del catálogo y la pantalla `/servicios`. El filtro de módulo va además
  * en la decisión pura, a propósito: si alguien amplía la consulta, la lista sigue frenando.
@@ -208,9 +210,9 @@ export async function enrolarContratosPorCiclo(deps: DepsEnrolamiento): Promise<
       yaEnrolado: conActa.has(c.id),
       tienePlan: conPlan.has(`${c.workspace_id}|${c.negocio_id}`),
       pasarela: pasarelaDeEnlaces({
-        // El plan no existe todavía: la pasarela sale de la configuración del espacio cobrador,
-        // que es el paso 2 de `pasarelaDeEnlaces`.
-        pasarelaPlan: null,
+        // El plan no existe todavía: la pasarela es la del módulo (Valida cobra por Bold) y, si el
+        // módulo no declara una, la de la configuración del espacio cobrador.
+        pasarelaPlan: PASARELA_DE_ENLACE_POR_MODULO[servicio.modulo] ?? null,
         configWorkspace: configPorWorkspace.get(c.workspace_id) ?? null,
         generaEnlaces: (x) => Boolean(resolver(x)?.crearEnlacePago),
       }),
@@ -236,6 +238,15 @@ export async function enrolarContratosPorCiclo(deps: DepsEnrolamiento): Promise<
       }
       const r = (data ?? {}) as { resultado?: string; plan_cobro_id?: string }
       if (r.resultado === 'creado' && r.plan_cobro_id) {
+        // La función de la base crea el plan con `auto_renovar = false`. Un módulo que se renueva solo
+        // (Valida) lo enciende aquí, aparte: si esto falla, el plan queda sin renovación, que es el
+        // lado seguro (no cobra de más), y el error sale en el resumen del cron.
+        if (esModuloConRenovacion(servicio.modulo)) {
+          const upd = await db.from('planes_cobro').update({ auto_renovar: true }).eq('id', r.plan_cobro_id)
+          if (upd.error) {
+            resumen.errores.push({ contratoId: c.id, error: `encender la renovación del plan ${r.plan_cobro_id}: ${upd.error.message}` })
+          }
+        }
         resumen.creados.push({
           contratoId: c.id,
           planCobroId: r.plan_cobro_id,

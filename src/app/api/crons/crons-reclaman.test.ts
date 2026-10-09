@@ -78,6 +78,7 @@ vi.mock('@/lib/cobros/cronograma-explicito', () => ({
 }))
 vi.mock('@/lib/cobros/enlace-automatico-servidor', () => ({ generarEnlacesAutomaticos: async () => ({}) }))
 vi.mock('@/lib/cobros/enrolar-ciclo-servidor', () => ({ enrolarContratosPorCiclo: async () => ({}) }))
+vi.mock('@/lib/cobros/renovar-ciclo-servidor', () => ({ renovarPlanesPorCiclo: async () => ({}) }))
 vi.mock('@/lib/suscripciones/pasarela/registro', () => ({ adapterPara: () => null }))
 
 const pausaSla = await import('./pausa-sla/route')
