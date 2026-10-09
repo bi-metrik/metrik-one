@@ -11,7 +11,7 @@
 - ⚠️⚠️ [SOE-002: segundo pago en dos cifras](project_segundo_pago_dos_cifras.md) — ambas RPC APLICADAS (8-oct); umbral $1.000 en 2 funciones
 - ⚠️⚠️ [Plan Anual CDA (#1065)](project_valida_cda_restriccion_y_plan_anual.md) — migración 20261007210000 SIN aplicar; vigente_hasta=12.1 es null; anexo generado; pendientes #1072
 - ⚠️⚠️ [SOE-001: Seguimiento en 4 etapas de operaciones](project_soe001_seguimiento_operaciones.md) — migración APLICADA (7-oct); SQL de datos SIN aplicar; deploy alertas-plazo antes del SQL
-- ⚠️⚠️ [Núcleo conversacional (#1060-#1062)](project_nucleo_conversacional.md) — el modelo clasifica, el código solo valida; la extracción es lo lento; caché no baja latencia
+- ⚠️⚠️ [Núcleo conversacional (#1060-#1062)](project_nucleo_conversacional.md) — verificador solo datos (sin listas); propuesta vence por `sobre`; prod extrae con 2.5-flash-lite (sin acceso de QA)
 - ⚠️⚠️ [Términos CDA v1.4 por aviso (13.1)](project_valida_cda_terminos_v14_por_aviso.md) — SQL solo corre el 7-oct; deploy ANTES; no aceptar nunca pausa
 - ⚠️ [Turno del modelo tras un toque](project_nucleo_turno_tras_toque.md) — traza tipo `modelo` por el cupo; `desde` en viaje_nuevo
 - ⚠️⚠️ [Bot híbrido de la bandeja (#1056)](project_bandeja_hibrida.md) — detrás de bot_conversacional.hibrido (apagado = main); propuesta [Sí, ese]; decisión con 3.5-lite
