@@ -179,6 +179,12 @@ export function puertoBandejaSupabase(supabase: SupabaseClient, workspaceId: str
     porNombre: (t) => fichasPorNombre(supabase, workspaceId, t),
     porLlave: (l) => fichasPorLlave(supabase, workspaceId, l),
     viaje: leerViaje,
+    async codigosExistentes(candidatos) {
+      if (!candidatos.length) return [];
+      const { data, error } = await supabase.from('negocios').select('codigo').eq('workspace_id', workspaceId).in('codigo', candidatos.slice(0, 20));
+      if (error) return 'error';
+      return ((data ?? []) as Fila[]).map((x) => String(x.codigo));
+    },
     async crearViaje(p) {
       const cfg = await configDeLinea(supabase, workspaceId);
       if (typeof cfg === 'string') throw new Error(cfg);

@@ -127,7 +127,7 @@ describe('candados (§3.5)', () => {
     expect(r[0].texto).toContain('¿Cargo esto en M1 26 2')
     await e.toca('Cargar')
     expect(e.puerto.escrituras).toEqual([{ tipo: 'carga', codigo: 'M1 26 2', textos: ['Hola, queremos ir a Cartagena', 'somos 2 adultos'] }])
-    expect(e.deps.dominio.estado!({ workspaceId: '', phone: '', remitente: { nombre: '', rol: '' }, conversacion: e.almacen.filas, resultadosPrevios: [] })[0]).toBe('Tanda abierta: ninguna.')
+    expect((await e.deps.dominio.estado!({ workspaceId: '', phone: '', remitente: { nombre: '', rol: '' }, conversacion: e.almacen.filas, resultadosPrevios: [] }))[0]).toBe('Tanda abierta: ninguna.')
   })
 
   it('el acuse de reenvío sale UNA vez por ráfaga y ningún reenvío llama al modelo', async () => {
