@@ -16,6 +16,10 @@ import { registrarActividad } from '@/lib/activity/registrar-actividad'
 import { contextoViaje } from '@/lib/viaje/contexto-viaje'
 import { leerTitular, type TitularFacturacion } from '@/lib/viaje/confirmacion'
 import { configFacturacionLinea, MIN_MOTIVO_FORZAR } from '@/lib/facturacion/regla-viaje'
+import { getWorkspace } from '@/lib/actions/get-workspace'
+import { emitirReciboViaje } from '@/lib/viaje/riel-cobro-datos'
+import { entornoSiigo } from '@/lib/siigo/config-viaje'
+import type { SiigoConfig } from '@/lib/siigo/client'
 
 const MENSAJE_EN_CURSO = 'Tu acción anterior todavía se está guardando. Espera un momento.'
 
@@ -120,6 +124,96 @@ async function guardarDatosFacturacionViajeSinClave(negocioId: string, datos: un
   revalidatePath(`/negocios/${negocioId}`)
   revalidatePath('/facturacion')
   return { ok: true }
+}
+
+// ── «Emitir pendientes» (adenda Siigo) ───────────────────────────────────────
+
+/**
+ * Encender Siigo NO vacía la cola sola: lo que quedó pendiente mientras no había credenciales se
+ * emite con «Emitir pendientes» (lote con confirmación y conteo) o caso por caso con «Reintentar».
+ * Lo puede la financiera o la dirección.
+ */
+async function puedeEmitirPendientes(): Promise<{ ok: true; workspaceId: string; staffId: string | null } | { ok: false; error: string }> {
+  const { workspaceId, staffId, role, areas, error } = await getWorkspace()
+  if (error || !workspaceId) return { ok: false, error: 'No autenticado' }
+  const financiera = ((areas ?? []) as string[]).includes('financiera')
+  if (!(role === 'owner' || role === 'admin' || financiera)) return { ok: false, error: 'Solo la financiera o la dirección emiten los pendientes.' }
+  return { ok: true, workspaceId, staffId: staffId ?? null }
+}
+
+interface PendienteRecibo { negocioId: string; cobroId: string; configLinea: Record<string, unknown> }
+
+/** Los recibos de viaje que quedaron pendientes (`negocios.metadata.recibos_viaje`). */
+async function recibosPendientes(svc: Db, workspaceId: string): Promise<PendienteRecibo[]> {
+  const { data, error } = await svc
+    .from('negocios')
+    .select('id, metadata, linea_id')
+    .eq('workspace_id', workspaceId)
+    .not('metadata->recibos_viaje', 'is', null)
+  if (error) throw new Error(`No se pudieron leer los pendientes: ${error.message}`)
+  const negocios = (data ?? []) as Array<{ id: string; metadata: Record<string, unknown> | null; linea_id: string | null }>
+  const lineaIds = [...new Set(negocios.map(n => n.linea_id).filter((x): x is string => !!x))]
+  const { data: lineas } = lineaIds.length > 0
+    ? await svc.from('lineas_negocio').select('id, config_extra').in('id', lineaIds)
+    : { data: [] }
+  const configDe = new Map(((lineas ?? []) as Array<{ id: string; config_extra: Record<string, unknown> | null }>).map(l => [l.id, l.config_extra ?? {}]))
+  const out: PendienteRecibo[] = []
+  for (const n of negocios) {
+    const pend = (n.metadata?.recibos_viaje ?? {}) as Record<string, unknown>
+    for (const cobroId of Object.keys(pend)) out.push({ negocioId: n.id, cobroId, configLinea: configDe.get(n.linea_id ?? '') ?? {} })
+  }
+  return out
+}
+
+export async function contarPendientesSiigoViaje(): Promise<{ ok: true; recibos: number; entorno: 'pruebas' | 'produccion' | null } | { ok: false; error: string }> {
+  const q = await puedeEmitirPendientes()
+  if (!q.ok) return q
+  const svc = createServiceClient() as Db
+  try {
+    const [pend, { data: ws }] = await Promise.all([
+      recibosPendientes(svc, q.workspaceId),
+      svc.from('workspaces').select('config_extra').eq('id', q.workspaceId).maybeSingle(),
+    ])
+    const cfg = ((ws as { config_extra?: { siigo_config?: Partial<SiigoConfig> } } | null)?.config_extra?.siigo_config) ?? null
+    return { ok: true, recibos: pend.length, entorno: cfg ? entornoSiigo(cfg) : null }
+  } catch (e) {
+    return { ok: false, error: e instanceof Error ? e.message : String(e) }
+  }
+}
+
+/**
+ * Emite en lote los recibos pendientes. Exige el conteo que la persona vio y confirmó: si cambió
+ * (entró otro pago, alguien reintentó uno), no emite y devuelve el conteo nuevo para volver a
+ * confirmar. Uno por cobro, nunca dos (idempotencia del recibo de siempre).
+ */
+async function emitirPendientesSiigoViajeSinClave(conteoConfirmado: number): Promise<{ ok: true; emitidos: number; siguenPendientes: number } | { ok: false; error: string; conteo?: number }> {
+  const q = await puedeEmitirPendientes()
+  if (!q.ok) return q
+  const svc = createServiceClient() as Db
+  const pend = await recibosPendientes(svc, q.workspaceId)
+  if (!Number.isInteger(conteoConfirmado) || conteoConfirmado !== pend.length) {
+    return { ok: false, error: `Ahora hay ${pend.length} recibos pendientes. Confirma de nuevo.`, conteo: pend.length }
+  }
+  if (pend.length === 0) return { ok: true, emitidos: 0, siguenPendientes: 0 }
+  const { data: st } = q.staffId ? await svc.from('staff').select('full_name').eq('id', q.staffId).maybeSingle() : { data: null }
+  const nombre = ((st as { full_name?: string | null } | null)?.full_name ?? '').trim() || null
+  let emitidos = 0
+  let siguen = 0
+  // Uno detrás de otro: Siigo limita la tasa y cada recibo consume numeración.
+  for (const p of pend) {
+    const r = await emitirReciboViaje({ workspaceId: q.workspaceId, negocioId: p.negocioId, cobroId: p.cobroId, staffNombre: nombre, configLinea: p.configLinea })
+    if (r.numero) emitidos++
+    else siguen++
+  }
+  revalidatePath('/conciliacion')
+  return { ok: true, emitidos, siguenPendientes: siguen }
+}
+
+export async function emitirPendientesSiigoViaje(conteoConfirmado: number, intencion?: string) {
+  return accionIdempotente<Awaited<ReturnType<typeof emitirPendientesSiigoViajeSinClave>>>(
+    { accion: 'emitirPendientesSiigoViaje', clave: intencion, args: [conteoConfirmado], enCurso: () => ({ ok: false, error: MENSAJE_EN_CURSO }) },
+    () => emitirPendientesSiigoViajeSinClave(conteoConfirmado),
+  )
 }
 
 export async function guardarDatosFacturacionViaje(negocioId: string, datos: unknown, intencion?: string): Promise<Resultado> {
