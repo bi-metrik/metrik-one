@@ -31,6 +31,7 @@
  */
 
 import { saldoCuadrado, TOLERANCIA_SALDO_COP } from '@/lib/negocios/tolerancia-saldo'
+import { repartirFifo } from '@/lib/cobros/cuotas-fifo'
 import { TODOS_LOS_DOMINIOS_DE_PAGO } from '@/lib/suscripciones/pasarela/dominios'
 
 export interface CuotaDeServicio {
@@ -227,12 +228,10 @@ export function cuotasConEstado(p: {
   hoy: string
   ahoraISO: string
 }): CuotaConEstado[] {
-  let disponible = totalRecibido(p.cobros)
-  return cuotasEnOrden(p.cuotas).map((cuota) => {
-    const abonado = Math.max(0, Math.min(disponible, cuota.monto))
-    disponible -= cuota.monto
-    const saldo = cuota.monto - abonado
-    const pagada = saldo <= 0 || saldoCuadrado(saldo)
+  const ordenadas = cuotasEnOrden(p.cuotas)
+  const { tramos } = repartirFifo(ordenadas.map((c) => c.monto), totalRecibido(p.cobros))
+  return ordenadas.map((cuota, i) => {
+    const { abonado, saldo, pagada } = tramos[i]
     const estado: EstadoCuota = pagada
       ? 'pagada'
       : cuota.fechaVencimiento < p.hoy
@@ -246,8 +245,8 @@ export function cuotasConEstado(p: {
       concepto: cuota.concepto,
       fechaVencimiento: cuota.fechaVencimiento,
       monto: cuota.monto,
-      abonado: pagada ? cuota.monto : abonado,
-      saldo: pagada ? 0 : saldo,
+      abonado,
+      saldo,
       estado,
       enlacePago: pagada ? null : enlaceDeCuota(cuota, p.ahoraISO).enlace,
       factura: cuota.factura ?? null,

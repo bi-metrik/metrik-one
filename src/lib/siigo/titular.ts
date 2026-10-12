@@ -193,6 +193,36 @@ export function validarTitular(
  * una corrección y se ignora (vuelve a mandar el RUT), en vez de armar un tercero
  * a medias con un pedazo de ella.
  */
+/**
+ * El titular que dejó «El cliente confirmó» (viaje, F2) en `negocios.metadata.titular_facturacion`.
+ * Es la fuente del tercero SOLO para un negocio sin RUT (Trappvel no pide RUT); con RUT, o con un
+ * titular corregido, no cambia nada (Max §3.3). El pasaporte (41) no se factura desde ONE (P3).
+ */
+export function titularDeConfirmacion(
+  metadata: Record<string, unknown> | null | undefined,
+): TitularParaBorrador | null {
+  const t = (metadata ?? {}).titular_facturacion
+  if (!t || typeof t !== 'object' || Array.isArray(t)) return null
+  const c = t as { tipo_documento?: unknown; numero_documento?: unknown; nombre?: unknown }
+  if (!esCodigoTipoDocumento(c.tipo_documento)) return null
+  const numero = typeof c.numero_documento === 'string' ? c.numero_documento.replace(/\D/g, '') : ''
+  if (!numero) return null
+  const nombre = typeof c.nombre === 'string' ? c.nombre.trim().replace(/\s+/g, ' ') : ''
+  if (!nombre) return null
+  const esEmpresa = esDocumentoDeEmpresa(c.tipo_documento)
+  // Un NIT con DV pegado («900123456-7»): el número va sin DV y el DV aparte.
+  const conDv = /^(\d{6,12})-(\d)$/.exec(String(c.numero_documento).trim())
+  const base = esEmpresa && conDv ? conDv[1] : numero
+  const partes = nombre.split(' ')
+  if (!esEmpresa && partes.length < 2) return null
+  return {
+    tipo_documento: c.tipo_documento,
+    numero: base,
+    dv: esEmpresa ? (conDv?.[2] ?? calcularDvNit(base) ?? '') : '',
+    nombre: esEmpresa ? [nombre] : [partes[0], partes.slice(1).join(' ')],
+  }
+}
+
 export function leerTitularCorregido(
   metadata: Record<string, unknown> | null | undefined,
 ): TitularCorregido | null {

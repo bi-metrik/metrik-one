@@ -7,9 +7,10 @@
  * (regla, entidad, fecha objetivo, destinatario, canal) hace que dos corridas a la vez manden uno
  * solo. Un aviso que falló se vuelve a reclamar en la siguiente corrida, hasta 3 intentos.
  *
- * Canales: hoy solo `in_app` (fila en `notificaciones` con enlace al negocio). Una regla que pide
- * `email` o `wa_manual` no reclama nada por ese canal (no gasta la llave): esos canales llegan con
- * los avisos al viajero (F2) y entonces mandan desde el primer día que apliquen.
+ * Canales: al equipo, `in_app` (fila en `notificaciones` con enlace al negocio). Al viajero
+ * (`cliente`): `email` por Resend si el contacto tiene correo, y `wa_manual` = la comercial recibe en
+ * la app el mensaje listo para mandarlo desde su WhatsApp (Vera C1). Un canal que no aplica al
+ * destino (correo al equipo) no reclama la llave: no la gasta para el día en que exista.
  *
  * El cliente de base es `service_role` (lo crea la ruta del cron); todas las lecturas filtran por
  * las líneas encendidas, y cada escritura lleva el `workspace_id` del negocio.
@@ -17,7 +18,8 @@
 
 import { esDiaHabil } from '@/lib/dates/dias-habiles'
 import {
-  CANALES_SOPORTADOS,
+  CANALES_AL_CLIENTE,
+  CANALES_AL_EQUIPO,
   MAX_INTENTOS,
   aprobadoresDeConfig,
   configDeLinea,
@@ -27,15 +29,20 @@ import {
   type ReglaRecordatorio,
 } from './reglas'
 import {
+  candidatosDeCuota,
   candidatosDeEnvio,
   candidatosDePagoProveedor,
   textoDelAviso,
   tipoDeNotificacion,
   type Candidato,
   type CotizacionEnviada,
+  type CuotaFuente,
   type NegocioFuente,
   type ServicioFuente,
 } from './fuentes'
+import { cuentasDeRecaudo, linkDePagoPropio, mensajeRecordatorioCuota, type PagoViajero } from '@/lib/viaje/riel-cobro'
+import { enlaceWhatsApp } from '@/lib/viaje/confirmacion'
+import { enviarCorreoAlViajero } from '@/lib/viaje/correo-viajero'
 
 // El esquema nuevo (negocio_servicios, recordatorios_log) no está en los tipos generados.
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -202,6 +209,70 @@ async function mandarInApp(svc: Db, c: Candidato, regla: ReglaRecordatorio, dest
   if (error) throw new Error(error.message)
 }
 
+/**
+ * Un aviso al viajero (cuotas, §2.3 bis 4). `email`: el correo con la marca de la agencia (traza en
+ * `avisos_cliente`); sin correo queda `omitido`. `wa_manual`: a la comercial le llega en la app el
+ * mensaje listo para mandar desde su WhatsApp (C1); el WhatsApp no sale solo.
+ */
+async function mandarAlViajero(
+  svc: Db,
+  c: Candidato,
+  regla: ReglaRecordatorio,
+  canal: CanalRecordatorio,
+  contacto: { id: string; nombre: string; email?: string | null; telefono?: string | null },
+  linea: Linea,
+  hoy: string,
+  datos: DatosViajero,
+  destinatarios: Destinatarios,
+): Promise<'enviado' | 'omitido'> {
+  const agencia = await datos.agencia(c.negocio.workspace_id, linea.config_extra)
+  const comercial = await datos.comercial(c.negocio.id)
+  const monto = typeof c.detalle.falta === 'number' ? c.detalle.falta : 0
+  const texto = mensajeRecordatorioCuota({
+    nombreCliente: contacto.nombre,
+    cuota: { monto, fecha: c.fechaObjetivo },
+    hoy,
+    link: agencia.link,
+    comercial,
+    agencia: agencia.nombre,
+  })
+  if (canal === 'email') {
+    if (!contacto.email) return 'omitido'
+    const r = await enviarCorreoAlViajero({
+      workspaceId: c.negocio.workspace_id,
+      negocioId: c.negocio.id,
+      para: contacto.email,
+      replyTo: null,
+      agencia: agencia.nombre,
+      asunto: c.fechaObjetivo === hoy ? 'Hoy vence tu cuota' : 'Recordatorio de tu cuota',
+      texto,
+      idempotencyKey: `recordatorio:${regla.id}:${c.entidadId}:${c.fechaObjetivo}`,
+    })
+    if (r.estado === 'fallido') throw new Error(r.motivo ?? 'el correo no salió')
+    return r.estado === 'enviado' ? 'enviado' : 'omitido'
+  }
+  // wa_manual: la tarea va a la comercial del negocio, con el enlace listo.
+  const perfiles = await destinatarios.de('responsable', c.negocio, linea)
+  if (perfiles.length === 0) return 'omitido'
+  const waUrl = enlaceWhatsApp(contacto.telefono ?? null, texto)
+  const quien = contacto.nombre.trim().split(/\s+/)[0] || 'el cliente'
+  const { error } = await svc.from('notificaciones').insert(
+    perfiles.map((p) => ({
+      workspace_id: c.negocio.workspace_id,
+      destinatario_id: p,
+      tipo: 'cuota_por_vencer',
+      estado: 'pendiente',
+      contenido: `${c.fechaObjetivo === hoy ? 'Hoy vence' : 'Se acerca'} la cuota de ${quien}. Mándale el recordatorio desde tu WhatsApp: el mensaje ya está listo.`,
+      entidad_tipo: 'negocio',
+      entidad_id: c.negocio.id,
+      deep_link: `/negocios/${c.negocio.id}`,
+      metadata: { regla_id: regla.id, fecha_objetivo: c.fechaObjetivo, fuente: c.fuente, negocio_id: c.negocio.id, wa_url: waUrl },
+    })),
+  )
+  if (error) throw new Error(error.message)
+  return 'enviado'
+}
+
 /** Carga lo que leen las fuentes para las líneas encendidas. */
 async function cargar(svc: Db, lineas: Linea[], fuentes: Set<string>) {
   const lineaIds = lineas.map((l) => l.id)
@@ -224,12 +295,16 @@ async function cargar(svc: Db, lineas: Linea[], fuentes: Set<string>) {
   )
   const numeroDe = new Map(etapas.map((e) => [e.id, e.numero]))
   const contactoIds = [...new Set(negociosRaw.map((n) => n.contacto_id).filter((x): x is string => !!x))]
-  const contactos = fuentes.has('envio')
+  const contactos = fuentes.has('envio') || fuentes.has('cuota')
     ? await porTandas(contactoIds, async (t) =>
-        sinError<{ id: string; nombre: string }>(await svc.from('contactos').select('id, nombre').in('id', t), 'contactos'),
+        sinError<{ id: string; nombre: string; email?: string | null; telefono?: string | null }>(
+          await svc.from('contactos').select('id, nombre, email, telefono').in('id', t),
+          'contactos',
+        ),
       )
     : []
   const nombreDe = new Map(contactos.map((c) => [c.id, c.nombre]))
+  const contactoDe = new Map(negociosRaw.map((n) => [n.id, contactos.find((c) => c.id === n.contacto_id) ?? null]))
 
   const negocios: NegocioFuente[] = negociosRaw.map((n) => ({
     id: n.id,
@@ -275,7 +350,67 @@ async function cargar(svc: Db, lineas: Linea[], fuentes: Set<string>) {
     )
     for (const g of gastos) pagado.set(g.servicio_id, (pagado.get(g.servicio_id) ?? 0) + Number(g.monto ?? 0))
   }
-  return { negocios, cotizaciones, servicios, pagado }
+  let cuotas: CuotaFuente[] = []
+  const pagos = new Map<string, PagoViajero[]>()
+  if (fuentes.has('cuota')) {
+    const planes = await porTandas(negocioIds, async (t) =>
+      sinError<{ id: string; negocio_id: string }>(
+        await svc.from('negocio_planes_pago').select('id, negocio_id').in('negocio_id', t).eq('estado', 'acordado'),
+        'planes de pago',
+      ),
+    )
+    const negocioDePlan = new Map(planes.map((p) => [p.id, p.negocio_id]))
+    const filas = await porTandas(planes.map((p) => p.id), async (t) =>
+      sinError<{ id: string; plan_id: string; numero: number; monto: number; fecha_vencimiento: string }>(
+        await svc.from('negocio_plan_cuotas').select('id, plan_id, numero, monto, fecha_vencimiento').in('plan_id', t),
+        'cuotas',
+      ),
+    )
+    cuotas = filas.map((c) => ({ id: c.id, negocio_id: negocioDePlan.get(c.plan_id) ?? '', numero: c.numero, monto: Number(c.monto), fecha_vencimiento: c.fecha_vencimiento }))
+    const conPlan = [...new Set(planes.map((p) => p.negocio_id))]
+    const cobros = await porTandas(conPlan, async (t) =>
+      sinError<{ negocio_id: string; monto: number; fecha: string | null; retencion_iva: number | null; anulado_at: string | null }>(
+        await svc.from('cobros').select('negocio_id, monto, fecha, retencion_iva, anulado_at').in('negocio_id', t).not('fecha', 'is', null),
+        'pagos',
+      ),
+    )
+    for (const c of cobros) (pagos.get(c.negocio_id) ?? pagos.set(c.negocio_id, []).get(c.negocio_id)!).push(c)
+  }
+  return { negocios, cotizaciones, servicios, pagado, cuotas, pagos, contactoDe }
+}
+
+/** Lo que el mensaje al viajero necesita y no está en el negocio: agencia, link propio y comercial. */
+class DatosViajero {
+  private agencias = new Map<string, { nombre: string; link: string | null }>()
+  private comerciales = new Map<string, string | null>()
+  constructor(private svc: Db) {}
+
+  async agencia(workspaceId: string, configLinea: unknown): Promise<{ nombre: string; link: string | null }> {
+    const hit = this.agencias.get(workspaceId)
+    if (hit) return hit
+    const { data } = await this.svc.from('workspaces').select('name, config_extra').eq('id', workspaceId).maybeSingle()
+    const w = (data ?? {}) as { name?: string; config_extra?: unknown }
+    const terminos = (configLinea as { terminos_base?: unknown } | null)?.terminos_base
+    const v = {
+      nombre: (w.name ?? '').trim() || 'Tu agencia',
+      link: linkDePagoPropio(cuentasDeRecaudo(w.config_extra, typeof terminos === 'string' ? terminos : null)),
+    }
+    this.agencias.set(workspaceId, v)
+    return v
+  }
+
+  async comercial(negocioId: string): Promise<string | null> {
+    if (this.comerciales.has(negocioId)) return this.comerciales.get(negocioId) ?? null
+    const { data } = await this.svc
+      .from('negocio_responsables')
+      .select('staff_id, rol, staff!negocio_responsables_staff_id_fkey(full_name)')
+      .eq('negocio_id', negocioId)
+    const filas = (data ?? []) as Array<{ rol?: string | null; staff?: { full_name?: string | null } | null }>
+    const fila = filas.find((f) => f.rol === 'comercial') ?? filas[0]
+    const nombre = fila?.staff?.full_name?.trim() || null
+    this.comerciales.set(negocioId, nombre)
+    return nombre
+  }
 }
 
 export async function correrRecordatorios(svc: Db, opts: { hoy: string }): Promise<ResumenRecordatorios> {
@@ -307,15 +442,17 @@ export async function correrRecordatorios(svc: Db, opts: { hoy: string }): Promi
   if (lineas.length === 0) return resumen
 
   const fuentes = new Set([...reglasDe.values()].flat().map((r) => r.fuente))
-  const { negocios, cotizaciones, servicios, pagado } = await cargar(svc, lineas, fuentes)
+  const { negocios, cotizaciones, servicios, pagado, cuotas, pagos, contactoDe } = await cargar(svc, lineas, fuentes)
   resumen.negocios = negocios.length
   const lineaDe = new Map(lineas.map((l) => [l.id, l]))
 
   const candidatos = [
     ...(fuentes.has('envio') ? candidatosDeEnvio(negocios, cotizaciones) : []),
     ...(fuentes.has('pago_proveedor') ? candidatosDePagoProveedor(negocios, servicios, pagado) : []),
+    ...(fuentes.has('cuota') ? candidatosDeCuota(negocios, cuotas, pagos, hoy) : []),
   ]
   const destinatarios = new Destinatarios(svc)
+  const datosViajero = new DatosViajero(svc)
 
   for (const c of candidatos) {
     const linea = lineaDe.get(c.negocio.linea_id)
@@ -333,42 +470,58 @@ export async function correrRecordatorios(svc: Db, opts: { hoy: string }): Promi
       if (tocan.some((o) => o.regla !== regla && o.regla.a.join('|') === destinos && o.disparo > disparo)) continue
       resumen.candidatos++
 
-      const canales = regla.canales.filter((k): k is CanalRecordatorio =>
-        (CANALES_SOPORTADOS as readonly string[]).includes(k),
-      )
-      resumen.canal_sin_soporte += regla.canales.length - canales.length
-      if (canales.length === 0) continue
+      // Al equipo, solo los canales que le llegan; al viajero, los suyos. Uno que no aplica no
+      // reclama la llave (no la gasta para el día en que exista).
+      const alEquipo = regla.a.filter((d) => d !== 'cliente')
+      const canalesEquipo = regla.canales.filter((k) => (CANALES_AL_EQUIPO as readonly string[]).includes(k))
+      const canalesCliente = regla.a.includes('cliente')
+        ? regla.canales.filter((k) => (CANALES_AL_CLIENTE as readonly string[]).includes(k))
+        : []
+      const usados = new Set<string>([...(alEquipo.length > 0 ? canalesEquipo : []), ...canalesCliente])
+      resumen.canal_sin_soporte += regla.canales.filter((k) => !usados.has(k)).length
+      if (usados.size === 0) continue
 
       const perfiles = new Set<string>()
-      for (const destino of regla.a) for (const p of await destinatarios.de(destino, c.negocio, linea)) perfiles.add(p)
-      if (perfiles.size === 0) { resumen.sin_destinatario++; continue }
+      if (canalesEquipo.length > 0 && alEquipo.length > 0) {
+        for (const destino of alEquipo) for (const p of await destinatarios.de(destino, c.negocio, linea)) perfiles.add(p)
+      }
+      const contacto = contactoDe.get(c.negocio.id) ?? null
+      const envios: Array<{ destinatario: string; canal: CanalRecordatorio }> = [
+        ...[...perfiles].flatMap((p) => canalesEquipo.map((canal) => ({ destinatario: p, canal: canal as CanalRecordatorio }))),
+        ...(contacto ? canalesCliente.map((canal) => ({ destinatario: `cliente:${contacto.id}`, canal: canal as CanalRecordatorio })) : []),
+      ]
+      if (envios.length === 0) { resumen.sin_destinatario++; continue }
 
-      for (const destinatario of perfiles) {
-        for (const canal of canales) {
-          const reclamo = await reclamar(svc, {
-            workspace_id: c.negocio.workspace_id,
-            negocio_id: c.negocio.id,
-            regla_id: regla.id,
-            entidad_tipo: c.entidadTipo,
-            entidad_id: c.entidadId,
-            fecha_objetivo: c.fechaObjetivo,
-            destinatario,
-            canal,
-          })
-          if (!reclamo) { resumen.ya_reclamados++; continue }
-          try {
+      for (const { destinatario, canal } of envios) {
+        const reclamo = await reclamar(svc, {
+          workspace_id: c.negocio.workspace_id,
+          negocio_id: c.negocio.id,
+          regla_id: regla.id,
+          entidad_tipo: c.entidadTipo,
+          entidad_id: c.entidadId,
+          fecha_objetivo: c.fechaObjetivo,
+          destinatario,
+          canal,
+        })
+        if (!reclamo) { resumen.ya_reclamados++; continue }
+        try {
+          let estado: 'enviado' | 'omitido' = 'enviado'
+          if (destinatario.startsWith('cliente:')) {
+            estado = await mandarAlViajero(svc, c, regla, canal, contacto!, linea, hoy, datosViajero, destinatarios)
+          } else {
             await mandarInApp(svc, c, regla, destinatario, hoy)
-            await svc
-              .from('recordatorios_log')
-              .update({ estado: 'enviado', enviado_at: new Date().toISOString(), error: null })
-              .eq('id', reclamo.id)
-            resumen.enviados++
-          } catch (e) {
-            const msg = e instanceof Error ? e.message : String(e)
-            console.error('[recordatorios] no salió', regla.id, c.entidadId, msg)
-            await svc.from('recordatorios_log').update({ estado: 'fallido', error: msg.slice(0, 500) }).eq('id', reclamo.id)
-            resumen.fallidos++
           }
+          await svc
+            .from('recordatorios_log')
+            .update({ estado, enviado_at: estado === 'enviado' ? new Date().toISOString() : null, error: null })
+            .eq('id', reclamo.id)
+          if (estado === 'enviado') resumen.enviados++
+          else resumen.sin_destinatario++
+        } catch (e) {
+          const msg = e instanceof Error ? e.message : String(e)
+          console.error('[recordatorios] no salió', regla.id, c.entidadId, msg)
+          await svc.from('recordatorios_log').update({ estado: 'fallido', error: msg.slice(0, 500) }).eq('id', reclamo.id)
+          resumen.fallidos++
         }
       }
     }
