@@ -54,7 +54,7 @@ export async function atenderConAgente(supabase: SupabaseClient, user: WaUser, m
   const staffId = user.collaborator_id ? null : await staffIdDelRemitente(supabase, user);
   await atenderPendientes({
     modelo: modeloGemini({ llave, principal: config.principal, respaldo: config.respaldo, corteMs: config.corteMs }),
-    dominio: dominioBandeja(puertoBandejaSupabase(supabase, user.workspace_id, staffId)),
+    dominio: dominioBandeja(puertoBandejaSupabase(supabase, user.workspace_id, staffId, { extraccionCompacta: config.extraccionCompacta })),
     reglamento,
     config,
     ahoraMs: () => Date.now(),

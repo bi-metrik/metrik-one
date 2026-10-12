@@ -16,6 +16,7 @@ import type { FichaCliente, Llave } from '../../wa-cliente-reglas.ts';
 import { normal } from '../verificador.ts';
 import { propuestaVigente } from '../nucleo.ts';
 import { escritosDelViaje, mismoEntendido, nombramientos } from './carga.ts';
+import { codigosCanonicos, resolverCodigo, resolverSueltos } from './codigo.ts';
 import { salidasLinkAutorizacion, type AutorizacionAgente } from './autorizacion.ts';
 import type { ContextoDominio, DeclaracionHerramienta, Dominio, FilaConversacion, Hechos, Propuesta, ResultadoHerramienta } from '../tipos.ts';
 
@@ -44,6 +45,11 @@ export interface PuertoBandeja {
   porLlave(llave: Llave): Promise<FichaCliente[] | null>;
   /** `null`: no hay viaje con ese código. `'error'`: no se pudo consultar. */
   viaje(codigo: string): Promise<ViajeAgente | null | 'error'>;
+  /**
+   * Cuáles de estos códigos (con espacios) existen en el workspace: resuelve un código escrito sin espacios («m1261»)
+   * contra los que hay, sin adivinar. `'error'`: no se pudo consultar.
+   */
+  codigosExistentes(candidatos: string[]): Promise<string[] | 'error'>;
   crearViaje(p: { contactoId: string; destino: string | null }): Promise<{ id: string; codigo: string; nombre: string }>;
   /**
    * La extracción de hoy, sin escribir: lo que cambiaría y lo que faltaría. `plan` es lo que se escribe con el toque.
@@ -62,7 +68,6 @@ export interface PuertoBandeja {
 
 export const BOT_BANDEJA = 'bandeja-solicitudes';
 export const ACCIONES = ['viaje_nuevo', 'cargar_tanda', 'anotar_en_viaje', 'crear_cliente', 'descartar'];
-const RE_CODIGO = /\b[A-ZÑ]\d{0,2} \d{2} \d{1,4}\b/gu;
 
 // ── Lo que dice la conversación ──────────────────────────────────────────────
 
@@ -98,9 +103,10 @@ export function opcionNombrada(opciones: ReadonlyArray<{ titulo: string; descrip
 /**
  * Los viajes que el comercial nombró: códigos en sus escritos o en lo que tocó, la opción que eligió escribiendo
  * (número o palabra propia de esa opción, en el mensaje que sigue a las opciones) y los que abrió con su toque.
+ * `sueltos`: los códigos que escribió sin espacios, ya resueltos contra la base (`resolverSueltos`).
  */
-export function viajesNombrados(filas: FilaConversacion[]): string[] {
-  return [...new Set(nombramientos(filas, opcionNombrada).map((x) => x.clave).filter((c) => !c.startsWith('nuevo:')))];
+export function viajesNombrados(filas: FilaConversacion[], sueltos: Record<string, string> = {}): string[] {
+  return [...new Set(nombramientos(filas, opcionNombrada, {}, sueltos).map((x) => x.clave).filter((c) => !c.startsWith('nuevo:')))];
 }
 
 /** ¿El texto está en un escrito del equipo? (para anotar: nada sale del modelo ni de un reenvío). */
@@ -267,12 +273,14 @@ export function propuestaDeCarga(
 }
 
 export function dominioBandeja(puerto: PuertoBandeja): Dominio {
+  const existentes = (c: string[]) => puerto.codigosExistentes(c);
   const leer = async (nombre: string, args: Record<string, unknown>): Promise<ResultadoHerramienta> => {
     if (nombre === 'buscar') {
       const texto = String(args.texto ?? '').trim();
       if (!texto) return { ok: false, datos: null, error: 'Dime qué buscar: un nombre, un código, un celular o un correo.' };
       const llave = llavesDelTexto(texto);
-      const codigos = [...texto.toUpperCase().matchAll(RE_CODIGO)].map((m) => m[0]);
+      const sueltos = await resolverSueltos([texto], existentes);
+      const codigos = [...new Set([...codigosCanonicos(texto), ...Object.values(sueltos)])];
       const sinLlave = texto.replace(/[\w.+-]+@[\w.-]+/g, ' ').replace(/\+?\d[\d\s().-]{5,}\d/g, ' ').trim();
       const [porLlave, porNombre, viajes] = await Promise.all([
         llave ? puerto.porLlave(llave) : Promise.resolve([] as FichaCliente[]),
@@ -292,7 +300,9 @@ export function dominioBandeja(puerto: PuertoBandeja): Dominio {
       };
     }
     if (nombre === 'ver_viaje') {
-      const codigo = String(args.codigo ?? '').trim().toUpperCase().replace(/\s+/g, ' ');
+      const r = await codigoDe(args.codigo);
+      if (!r.ok) return r.error === 'lectura' ? { ok: false, datos: null, error: 'No pude revisar ese viaje ahora. No digas que no existe.' } : { ok: true, datos: { nota: r.error } };
+      const codigo = r.codigo;
       const v = await puerto.viaje(codigo);
       if (v === 'error') return { ok: false, datos: null, error: 'No pude revisar ese viaje ahora. No digas que no existe.' };
       if (!v) return { ok: true, datos: { nota: `No hay un viaje con el código ${codigo}.` } };
@@ -310,11 +320,26 @@ export function dominioBandeja(puerto: PuertoBandeja): Dominio {
     return { ok: false, datos: null, error: `No existe la herramienta «${nombre}».` };
   };
 
+  /** Los códigos que el equipo escribió sin espacios en la conversación, resueltos contra la base (sin sueltos, nada). */
+  const sueltosDe = (ctx: ContextoDominio) => resolverSueltos(ctx.conversacion.filter(delEquipo).map((f) => f.texto ?? ''), existentes);
+
+  /** El código que dio el modelo, con espacios: tal cual si ya los trae, o la única lectura que existe («m1261»). */
+  const codigoDe = async (dado: unknown): Promise<{ ok: true; codigo: string } | { ok: false; error: string }> => {
+    const texto = String(dado ?? '').trim();
+    const r = await resolverCodigo(texto, existentes);
+    if (r === 'error') return { ok: false, error: 'lectura' };
+    if (r && 'codigo' in r) return { ok: true, codigo: r.codigo };
+    if (r) return { ok: false, error: `«${texto}» puede ser ${r.varios.join(' o ')}. Pregúntale al comercial cuál, con opciones.` };
+    return { ok: true, codigo: texto.toUpperCase().replace(/\s+/g, ' ') };
+  };
+
   /** El viaje para escribir: nombrado en la conversación y abierto. */
   const viajeParaEscribir = async (ctx: ContextoDominio, codigoDado: unknown): Promise<{ ok: true; v: ViajeAgente } | { ok: false; error: string; candado: string }> => {
-    const codigo = String(codigoDado ?? '').trim().toUpperCase().replace(/\s+/g, ' ');
-    if (!codigo) return { ok: false, error: 'Falta el código del viaje.', candado: 'viaje_nombrado' };
-    if (!viajesNombrados(ctx.conversacion).includes(codigo)) {
+    if (!String(codigoDado ?? '').trim()) return { ok: false, error: 'Falta el código del viaje.', candado: 'viaje_nombrado' };
+    const [rc, sueltos] = await Promise.all([codigoDe(codigoDado), sueltosDe(ctx)]);
+    if (!rc.ok) return rc.error === 'lectura' ? { ok: false, error: 'No pude revisar ese viaje ahora.', candado: 'lectura_fallida' } : { ok: false, error: rc.error, candado: 'codigo_ambiguo' };
+    const codigo = rc.codigo;
+    if (!viajesNombrados(ctx.conversacion, sueltos).includes(codigo)) {
       return { ok: false, error: `El comercial no nombró ${codigo} en esta conversación. Pregúntale a qué viaje va (puedes mostrarle opciones) o propón un viaje nuevo.`, candado: 'viaje_nombrado' };
     }
     const v = await puerto.viaje(codigo);
@@ -353,7 +378,7 @@ export function dominioBandeja(puerto: PuertoBandeja): Dominio {
       }
       // anotar_en_viaje: lo que el comercial escribió de ESE viaje en la conversación, no solo el texto del modelo
       // (en vivo, «salen desde Bogotá» se anotaba sin la fecha ni los pasajeros dichos un mensaje antes).
-      let textos = escritosDelViaje(ctx.conversacion, r.v.codigo, opcionNombrada);
+      let textos = escritosDelViaje(ctx.conversacion, r.v.codigo, opcionNombrada, {}, await sueltosDe(ctx));
       if (!textos.length) {
         const texto = String(datos.texto ?? '').trim();
         if (!texto || !enEscritoDelEquipo(ctx.conversacion, texto)) {
@@ -462,7 +487,7 @@ export function dominioBandeja(puerto: PuertoBandeja): Dominio {
     if (p.accion !== 'viaje_nuevo') return null;
     const v = h.escrituras?.find((x) => x.tipo === 'viaje') as { id: string; codigo: string; nombre?: string } | undefined;
     if (!v) return null;
-    const textos = escritosDelViaje(ctx.conversacion, v.codigo, opcionNombrada, { [`nuevo:${huella}`]: v.codigo });
+    const textos = escritosDelViaje(ctx.conversacion, v.codigo, opcionNombrada, { [`nuevo:${huella}`]: v.codigo }, await sueltosDe(ctx));
     if (!textos.length) return null;
     const abri = h.lineas[0];
     let prep: CargaPreparada;
@@ -508,9 +533,9 @@ export function dominioBandeja(puerto: PuertoBandeja): Dominio {
       const ahora = tanda(ctx.conversacion).map((f) => f.id).join(',');
       return ahora === ((p.datos.mensajes as string[] | undefined) ?? []).join(',');
     },
-    estado(ctx) {
+    async estado(ctx) {
       const t = tanda(ctx.conversacion);
-      const nombrados = viajesNombrados(ctx.conversacion);
+      const nombrados = viajesNombrados(ctx.conversacion, await sueltosDe(ctx));
       return [
         `Tanda abierta: ${t.length ? `${t.length} mensaje${t.length === 1 ? '' : 's'} reenviado${t.length === 1 ? '' : 's'} sin cargar` : 'ninguna'}.`,
         `Viajes nombrados en esta conversación: ${nombrados.length ? nombrados.join(', ') : 'ninguno'}.`,

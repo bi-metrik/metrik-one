@@ -15,7 +15,7 @@
 
 import type { ConfigAgente } from './config.ts';
 import { fechaBogota, mensajeDelTurno, recortarResultado, sistema } from './contexto.ts';
-import { CIERRAN, cierranCon, declaraciones } from './herramientas.ts';
+import { CIERRAN, cierranCon, declaraciones, declaracionesRespaldo } from './herramientas.ts';
 import { fichasDeHerramienta, respuestaFija, temas, bloqueSiempre } from './reglamento.ts';
 import { META, botonesPropuesta, cortarEnPalabra, opcionesDelModelo, renderizar } from './render.ts';
 import { respaldoDe, verificar } from './verificador.ts';
@@ -141,13 +141,14 @@ export function mismaPropuesta(a: Pick<Propuesta, 'accion' | 'datos'>, b: Pick<P
 
 // ── El estado y el respaldo ──────────────────────────────────────────────────
 
-function estado(deps: DepsTurno, e: EntradaTurno): string[] {
+async function estado(deps: DepsTurno, e: EntradaTurno): Promise<string[]> {
   const vig = propuestaVigente(e.filas);
+  const delDominio = (await deps.dominio.estado?.(e.ctx)) ?? [];
   return [
     `Ahora: ${fechaBogota(deps.ahoraMs())} (Bogotá).`,
     `Escribe: ${e.ctx.remitente.nombre} (${e.ctx.remitente.rol}).`,
     `Propuesta pendiente: ${vig ? `${vig.resumen.replace(/\n/g, ' · ')} — espera su toque` : 'ninguna'}.`,
-    ...(deps.dominio.estado?.(e.ctx) ?? []),
+    ...delDominio,
     ...(e.tras ? [
       `Acaba de quedar hecho, con el toque de ${e.ctx.remitente.nombre}: ${e.tras.lineas.join(' ')} La confirmación ya la escribe el sistema: no la repitas.`,
       `Este turno es para seguir: si en la conversación quedó algo que ${e.ctx.remitente.nombre} pidió y que este paso destrabó, propón lo siguiente con \`proponer\` o pregunta lo que falte. Si no queda nada, llama \`${TERMINAR}\`.`,
@@ -186,11 +187,12 @@ export async function turnoDelModelo(deps: DepsTurno, e: EntradaTurno): Promise<
     tipo: 'modelo', bot: d.bot, reglamento: { id: r.id, version: r.version, huella: r.huella },
     llamados: 0, uso: [], herramientas: [], candados: [], verificador: [], reglas_usadas: [], ms_modelo: 0, ms_herramientas: 0,
   };
-  const est = estado(deps, e);
+  const est = await estado(deps, e);
   const sis = sistema(r, c);
   const usuario = mensajeDelTurno({ estado: est, filas: e.filas, nuevos: e.nuevos, quien: e.ctx.remitente.nombre });
   const decl = [...declaraciones(d, r), ...(e.tras ? [DECLARACION_TERMINAR] : [])];
   const todas = decl.map((x) => x.name);
+  const declRespaldo = declaracionesRespaldo(decl);
   const cierran = e.tras ? [...cierranCon(d), TERMINAR] : cierranCon(d);
   // En el último llamado (forzado a cerrar) NO entran los cierres del dominio: medido en vivo (2026-10-08), con el
   // presupuesto agotado tras `buscar` y `consultar_reglas` (que ya no existe), el modelo cerró «¿qué le falta al viaje de…?» con
@@ -222,6 +224,7 @@ export async function turnoDelModelo(deps: DepsTurno, e: EntradaTurno): Promise<
     const tm = deps.reloj();
     const res = await deps.modelo.llamar({
       sistema: sis.texto, mensajes, herramientas: decl, permitidas: ultimo ? forzados : todas, timeoutMs: restante,
+      ...(c.respaldoEstricto && c.respaldo ? { herramientasRespaldo: declRespaldo } : {}),
     });
     traza.ms_modelo! += Math.round(deps.reloj() - tm);
     traza.llamados!++;
@@ -321,7 +324,13 @@ export async function turnoDelModelo(deps: DepsTurno, e: EntradaTurno): Promise<
       }
       // La respuesta que va arriba del resumen (opcional): mismo tope y mismo verificador que `responder`.
       let arriba: string | null = null;
-      const texto = String(args.texto ?? '').trim();
+      let texto = String(args.texto ?? '').trim();
+      // Del respaldo no sale texto arriba de una propuesta (`respaldoEstricto`): su declaración no lo trae, y si igual lo
+      // escribe, se ignora. Lo decide quién escribió el llamado, no lo que dice.
+      if (texto && c.respaldoEstricto && c.respaldo && res.mensaje.modelo === c.respaldo.modelo && c.respaldo.modelo !== c.principal.modelo) {
+        traza.candados!.push({ candado: 'respaldo_sin_texto', detalle: texto.slice(0, 200) });
+        texto = '';
+      }
       if (texto) {
         const render = renderizar(texto, [], { turno: e.turnoId.slice(0, 8), topeTexto: c.topes.texto, final: correccionUsada });
         if (!render.ok) {
