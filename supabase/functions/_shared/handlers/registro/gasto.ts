@@ -27,6 +27,7 @@ import { executeRegistro } from './execute.ts';
 import { proponerCentroCostosWA, type PropuestaCC } from '../../centro-costos.ts';
 import { categoriaConocida, detalleGasto, descripcionVisible } from '../../wa-gasto-descripcion.ts';
 import { MSG_PEDIR_MONTO } from './mensajes-gasto.ts';
+import { desviarAServicioViaje } from './servicio-viaje.ts';
 
 // Lo que este handler lee de un destino, venga de donde venga. Todo opcional
 // salvo el nombre: un negocio no trae `presupuesto_total` ni `costo_acumulado`,
@@ -252,6 +253,9 @@ export async function showGastoConfirmation(
   fields: ParsedFields = {},
   tipo: DestinoTipo = 'proyecto',
 ): Promise<void> {
+  // Viaje con servicios (F3): primero de qué servicio es y con qué se pagó.
+  if (tipo === 'negocio' && await desviarAServicioViaje(ctx, { id: destinoId(entity), nombre: entity.nombre }, amount, categoria, fields)) return;
+
   const detalle = detalleGasto(fields);
   const presupuesto = Number(entity.presupuesto_total) || 0;
   const costoActual = Number(entity.costo_acumulado) || 0;
@@ -320,6 +324,8 @@ async function autoRegisterGasto(
   tipo: DestinoTipo = 'proyecto',
 ): Promise<void> {
   const entityId = destinoId(entity);
+  // Viaje con servicios (F3): no se registra solo; primero el servicio y el medio.
+  if (tipo === 'negocio' && await desviarAServicioViaje(ctx, { id: entityId, nombre: entity.nombre }, amount, categoria, fields)) return;
   const negIdForCC = tipo === 'negocio' ? entityId : null;
   const cc = await resolverCentroCostos(ctx, {
     descripcion: detalleGasto(fields),
