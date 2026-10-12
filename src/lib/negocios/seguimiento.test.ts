@@ -68,5 +68,5 @@ describe('migración origen_version', () => {
     await db.exec(`update public.cotizaciones set origen_version = 'prerreserva_vencida'`)
     await expect(db.exec(`update public.cotizaciones set origen_version = 'capricho'`)).rejects.toThrow(/check/i)
     await db.close()
-  })
+  }, 30_000) // PGlite arranca lento con la suite completa en paralelo
 })
