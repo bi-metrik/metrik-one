@@ -263,6 +263,16 @@ const ESCENARIOS: Escenario[] = [
       configWorkspace: { ...IVA_INGRESO_PROPIO, ...(interruptor ? INTERRUPTOR_ENCENDIDO : {}) },
     }),
   },
+  {
+    nombre: 'trappvel-recomendada-otro-hotel',
+    workspaceId: WS_TRAPPVEL, cotizacionId: COT_SAN_ANDRES, negocioId: NEG_SAN_ANDRES, tarifaAprobada: 'tf-recomendada',
+    tablas: interruptor => tablasCasoSanAndres({ recomendada: 'otro-hotel', configWorkspace: interruptor ? INTERRUPTOR_ENCENDIDO : {} }),
+  },
+  {
+    nombre: 'trappvel-recomendada-dos-hoteles',
+    workspaceId: WS_TRAPPVEL, cotizacionId: COT_SAN_ANDRES, negocioId: NEG_SAN_ANDRES, tarifaAprobada: 'tf-premium',
+    tablas: interruptor => tablasCasoSanAndres({ recomendada: 'dos-hoteles', configWorkspace: interruptor ? INTERRUPTOR_ENCENDIDO : {} }),
+  },
 ]
 
 // ── Correr y anotar ──────────────────────────────────────────────────────────
@@ -481,6 +491,23 @@ function presupuestoMedido(): Record<string, number> {
   return p
 }
 
+/**
+ * Con GRABAR_IGUALDAD=1 y el fixture ya grabado, solo se AGREGAN escenarios o claves del
+ * presupuesto que no estaban. Lo que ya está grabado no se toca nunca.
+ */
+function agregarLoQueFalta(f: Fixture): Fixture {
+  if (!GRABAR) return f
+  let cambio = false
+  for (const e of ESCENARIOS) {
+    if (!f.salidas[e.nombre]) { f.salidas[e.nombre] = corridas[e.nombre].apagado.salida; cambio = true }
+  }
+  for (const [k, v] of Object.entries(presupuestoMedido())) {
+    if (!(k in f.presupuesto)) { f.presupuesto[k] = v; cambio = true }
+  }
+  if (cambio) writeFileSync(RUTA_FIXTURE, `${JSON.stringify(f, null, 1)}\n`)
+  return f
+}
+
 function leerFixture(): Fixture {
   if (!existsSync(RUTA_FIXTURE)) {
     if (!GRABAR) throw new Error(`Falta ${RUTA_FIXTURE}. Se graba UNA vez sobre origin/main con GRABAR_IGUALDAD=1.`)
@@ -496,7 +523,7 @@ function leerFixture(): Fixture {
     }
     writeFileSync(RUTA_FIXTURE, `${JSON.stringify(nuevo, null, 1)}\n`)
   }
-  return JSON.parse(readFileSync(RUTA_FIXTURE, 'utf8')) as Fixture
+  return agregarLoQueFalta(JSON.parse(readFileSync(RUTA_FIXTURE, 'utf8')) as Fixture)
 }
 
 // ── Las pruebas ──────────────────────────────────────────────────────────────
@@ -556,6 +583,27 @@ describe('C0 · igualdad del servidor contra origin/main (N1, N2)', () => {
       costo_total: COSTO_RECOMENDADA,
     })
     expect((fijo.aprobacion as { precio_aprobado: number }).precio_aprobado).toBe(premium)
+  })
+})
+
+describe('C0 · lo que hace hoy el servidor con la Recomendada (riesgo R1, COT-2026-0025)', () => {
+  it('si elige otra opción que la primera pegada, el total es el suyo y no el supuesto', () => {
+    const s = corridas['trappvel-recomendada-otro-hotel'].apagado.salida
+    const rec = (s.tarifas as { tarifas: { nombre: string; precio: number }[] }).tarifas.find(t => t.nombre === 'Recomendada')!
+    const base = corridas['trappvel-caso-fijo'].apagado.salida.recalculo as { cotizacion: { valor_total: number } }
+    expect((s.recalculo as { cotizacion: { valor_total: number } }).cotizacion.valor_total).toBe(rec.precio)
+    expect(rec.precio).not.toBe(base.cotizacion.valor_total)
+  })
+
+  it('si nombra DOS opciones de la misma ranura, el recálculo escribe el total con las dos y LUEGO la saca de la propuesta', () => {
+    const s = corridas['trappvel-recomendada-dos-hoteles'].apagado.salida
+    const r = s.recalculo as { resultado: { valorVenta: number; desmarcados: { nombre: string; motivo: string }[] }; cotizacion: { costo_total: number } }
+    // Costo con Verde Mar Y Lord Pierre: el de la Recomendada base más $6.420.000.
+    expect(r.cotizacion.costo_total).toBe(COSTO_RECOMENDADA + 6_420_000)
+    expect(r.resultado.desmarcados.map(d => d.nombre)).toEqual(['Recomendada'])
+    // Desde ahí la Recomendada no va: no se aprueba ni se envía, y el PDF sale borrador.
+    expect((s.aprobacion as { resultado: { success: boolean } }).resultado.success).toBe(false)
+    expect((s.pdf as { resultado: { borrador?: boolean } }).resultado.borrador).toBe(true)
   })
 })
 

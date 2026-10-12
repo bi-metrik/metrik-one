@@ -173,6 +173,16 @@ export const COSTO_RECOMENDADA = 19_081_590
  */
 export function tablasCasoSanAndres(opts: {
   flujoNuevo?: boolean
+  /**
+   * Dos formas de la Recomendada que el caso base no ve, porque ahí coincide con el supuesto
+   * (la primera pegada de cada servicio) y `valor_total` sale igual con o sin principal:
+   *  · `otro-hotel`: elige Lord Pierre (la segunda pegada) en San Andrés. El total solo es el
+   *    suyo si la regla de la principal la toma.
+   *  · `dos-hoteles`: nombra Verde Mar Y Lord Pierre en la misma ranura combinable (selección
+   *    mal formada, la forma que se sospecha en COT-2026-0025). Queda fijado qué hace hoy el
+   *    servidor con ella (riesgo R1).
+   */
+  recomendada?: 'otro-hotel' | 'dos-hoteles'
   configWorkspace?: Fila
 } = {}): Record<string, Fila[]> {
   const lineas = LINEAS_CASO_FIJO.map(l => ({ item: structuredClone(l.item), rubro: structuredClone(l.rubro) }))
@@ -183,6 +193,12 @@ export function tablasCasoSanAndres(opts: {
     providencia.item.mostrar_en_sugeridos = true
     lineas.push(linea('t-san-andres-privado', 12, 'traslado 2: Traslado en San Andrés', 'TRASLADO PRIVADO SAN ANDRÉS', [['adulto', 6, 80_000], ['nino', 1, 80_000], ['infante', 1, 80_000]]))
     for (const t of tarifas) t.seleccion.push(t.fila.nombre === 'Premium' ? 't-san-andres-privado' : 't-san-andres')
+  }
+  if (opts.recomendada) {
+    const rec = tarifas.find(t => t.fila.nombre === 'Recomendada')!
+    rec.seleccion = opts.recomendada === 'otro-hotel'
+      ? ['h-posada', 'h-lord-pierre', 'a-cayo-compartida']
+      : ['h-posada', 'h-verde-mar', 'h-lord-pierre', 'a-cayo-compartida']
   }
 
   return {
