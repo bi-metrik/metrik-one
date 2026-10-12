@@ -1798,6 +1798,7 @@ function BloqueRenderer({
             nota={configExtra.nota as string | undefined}
             validarEpayco={!!configExtra.validar_epayco}
             faltaHonorario={faltaHonorarioConfirmado}
+            cobros={cobros}
           />
         )
       }
