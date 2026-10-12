@@ -5,33 +5,62 @@ import { useRouter } from 'next/navigation'
 import { toast } from 'sonner'
 import { Camera, Check, ChevronDown, FileText, Paperclip } from 'lucide-react'
 import { useTransitionTolerante } from '@/hooks/use-transition-tolerante'
+import { useIntencion } from '@/hooks/use-intencion'
 import { formatCOP } from '@/lib/cobros/format'
 import { todayBogotaISO } from '@/lib/dates/bogota'
 import { hrefArchivo } from '@/lib/almacenamiento/referencia'
-import { ETIQUETA_ESTADO, puedeAdjuntarVoucher, puedeEditarServicios, puedeTraerServicios, type EstadoServicio } from '@/lib/viaje/estado-servicio'
 import {
+  ETIQUETA_ESTADO,
+  esDireccion,
+  puedeAdjuntarVoucher,
+  puedeEditarServicios,
+  puedeTraerServicios,
+  type EstadoServicio,
+} from '@/lib/viaje/estado-servicio'
+import {
+  ETIQUETA_FILTRO,
+  colorDeLaEtapa,
   fechaLimiteEnPalabras,
   filasVista,
+  filtrarTablero,
+  porcentajePersonal,
   resumenDelTablero,
+  sigueDelTablero,
   totalesDelTablero,
   type DatosBloqueServicios,
   type FilaVista,
+  type FiltroTablero,
 } from '@/lib/viaje/bloque-servicios'
+import {
+  configReglasPago,
+  desviacion,
+  reglasQueRompe,
+  reglasSinAprobar,
+  totalTrasPago,
+  type AprobacionLeida,
+  type MedioPagoProveedor,
+} from '@/lib/viaje/reglas-pago'
 import {
   actualizarServicio,
   adjuntarArchivoServicio,
+  decidirAprobacionServicio,
+  pedirAprobacionServicio,
+  registrarPagoServicio,
+  subirSoporteServicio,
   traerServiciosDeCotizacion,
   type CambiosServicio,
 } from '../../servicios-viaje-actions'
 
 /**
- * Bloque «Servicios del viaje» (F0): una fila por servicio de la tarifa aceptada, en el orden
- * del viaje. Aquí se reserva (proveedor, localizador, fecha límite), se marca «No va» y se
- * adjuntan el voucher y la confirmación del proveedor final como archivo. Pagar al proveedor
- * llega con F3.
+ * Bloque «Servicios del viaje»: el tablero de Reservas y pagos (F0 + F3). Una fila por servicio
+ * de la tarifa aceptada, en el orden del viaje. Aquí se reserva, se paga al proveedor con su
+ * soporte (medio y titular), se pide y se da la aprobación de Edgar, y se adjuntan el voucher y la
+ * confirmación del proveedor final como archivo.
  *
- * Los datos los resuelve el servidor y viajan en `config_extra._servicios` (no por props: un
- * solo tipo de bloque no justifica hilar dos props por cuatro sitios de llamada).
+ * Los datos los resuelve el servidor y viajan en `config_extra._servicios` (no por props).
+ * El estado «Pagado», «Confirmado» y «Esperando a Edgar» sale de la plata (Vera C6). Las reglas
+ * del pago son las mismas del servidor y del bot (`lib/viaje/reglas-pago.ts`): aquí solo se
+ * anticipan para escoger el botón; quien decide es el servidor.
  *
  * Celular: tarjetas apiladas; un toque abre la fila debajo, con botones de 44 px.
  */
@@ -65,17 +94,22 @@ const PILDORA: Record<EstadoServicio, string> = {
 }
 
 const COLOR_FECHA = { verde: 'text-green-700', ambar: 'text-amber-600', rojo: 'text-red-600' } as const
+const PUNTO_ETAPA = { verde: 'bg-green-500', ambar: 'bg-amber-500', rojo: 'bg-red-500' } as const
+const FILTROS: FiltroTablero[] = ['todos', 'por_pagar', 'esperando', 'falta_confirmar']
 
 interface BloqueServiciosProps {
   negocioId: string
   modo: 'editable' | 'visible'
   datos: DatosBloqueServicios | null | undefined
   esResponsable: boolean
+  /** Fila abierta al montar (las pruebas de pantalla y el enlace desde el gate). */
+  abiertaInicial?: string | null
 }
 
-export default function BloqueServicios({ negocioId, modo, datos, esResponsable }: BloqueServiciosProps) {
+export default function BloqueServicios({ negocioId, modo, datos, esResponsable, abiertaInicial = null }: BloqueServiciosProps) {
   const router = useRouter()
-  const [abierta, setAbierta] = useState<string | null>(null)
+  const [abierta, setAbierta] = useState<string | null>(abiertaInicial)
+  const [filtro, setFiltro] = useState<FiltroTablero>('todos')
   const [isPending, startTransition] = useTransitionTolerante()
 
   if (!datos) {
@@ -86,6 +120,7 @@ export default function BloqueServicios({ negocioId, modo, datos, esResponsable 
   const editable = modo === 'editable' && datos.activo
   const puedeEditar = editable && puedeEditarServicios(quien)
   const puedeVoucher = editable && puedeAdjuntarVoucher(quien)
+  const direccion = editable && esDireccion(quien)
   const hoy = todayBogotaISO()
   const vista = filasVista(datos.filas)
 
@@ -124,26 +159,59 @@ export default function BloqueServicios({ negocioId, modo, datos, esResponsable 
   }
 
   const totales = totalesDelTablero(vista)
+  const personal = porcentajePersonal(vista)
+  const sigue = sigueDelTablero(vista, hoy)
+  const color = colorDeLaEtapa(vista, hoy)
+  const visibles = filtrarTablero(vista, filtro)
   return (
     <div className="space-y-3">
-      <p className="text-xs font-medium text-muted-foreground">{resumenDelTablero(vista, hoy)}</p>
+      <p className="flex items-center gap-2 text-xs font-medium text-muted-foreground">
+        <span className={`inline-block h-2 w-2 shrink-0 rounded-full ${PUNTO_ETAPA[color]}`} aria-hidden />
+        {resumenDelTablero(vista, hoy)}
+      </p>
+      {sigue && (
+        <button
+          type="button"
+          onClick={() => { setFiltro('todos'); setAbierta(sigue.servicioId) }}
+          className="block min-h-11 w-full rounded-md bg-muted/60 px-3 py-2 text-left text-sm"
+        >
+          <span className="font-medium">Sigue:</span> {sigue.texto} <span className="text-primary underline">Abrir</span>
+        </button>
+      )}
+      <div className="flex flex-wrap gap-1.5" role="group" aria-label="Filtrar servicios">
+        {FILTROS.map(f => (
+          <button
+            key={f}
+            type="button"
+            onClick={() => setFiltro(f)}
+            aria-pressed={filtro === f}
+            className={`min-h-11 rounded-full border px-3 text-xs ${filtro === f ? 'border-primary bg-primary/10 font-medium text-primary' : 'text-muted-foreground'}`}
+          >
+            {ETIQUETA_FILTRO[f]}
+          </button>
+        ))}
+      </div>
       <ul className="space-y-2">
-        {vista.map(v => (
+        {visibles.map(v => (
           <FilaServicio
             key={v.servicio.id}
             v={v}
             hoy={hoy}
+            datos={datos}
             abierta={abierta === v.servicio.id}
             alternar={() => setAbierta(a => (a === v.servicio.id ? null : v.servicio.id))}
             puedeEditar={puedeEditar}
             puedeVoucher={puedeVoucher}
+            direccion={direccion}
             alGuardar={() => router.refresh()}
           />
         ))}
+        {visibles.length === 0 && <li className="text-xs text-muted-foreground">Ningún servicio en este filtro.</li>}
       </ul>
       <div className="flex flex-wrap justify-between gap-2 border-t pt-2 text-xs">
         <span className="text-muted-foreground">Cotizado {formatCOP(totales.cotizado)}</span>
         <span className="font-medium">Costo real hasta hoy {formatCOP(totales.pagado)}</span>
+        <span className="w-full text-muted-foreground sm:w-auto">Pagado con tarjetas personales: {personal.toLocaleString('es-CO')} %</span>
       </div>
       {!datos.activo && (
         <p className="text-[11px] text-muted-foreground">Los servicios del viaje están apagados en esta línea: se ven, no se editan.</p>
@@ -152,21 +220,43 @@ export default function BloqueServicios({ negocioId, modo, datos, esResponsable 
   )
 }
 
+/** ¿Este pago pediría a Edgar? Lo mismo que decide el servidor (`reglas-pago`). */
+function pideAEdgar(v: FilaVista, datos: DatosBloqueServicios, monto: number, medio: MedioPagoProveedor | null): string[] {
+  if (!medio || !(monto > 0)) return []
+  const rotas = reglasQueRompe({
+    monto,
+    pagadoAntes: v.pagado,
+    costoCotizado: v.servicio.costo_cotizado,
+    medio,
+    cobradoCliente: datos.cobradoCliente ?? 0,
+    precioAprobado: datos.precioAprobado ?? 0,
+    config: datos.reglas ?? configReglasPago(null),
+  })
+  const aprob: AprobacionLeida[] = v.servicio.aprobaciones
+    .filter(a => a.id && a.tipo && a.huella)
+    .map(a => ({ id: a.id!, tipo: a.tipo!, estado: a.estado, huella: a.huella! }))
+  return reglasSinAprobar(rotas, aprob).map(r => r.texto)
+}
+
 function FilaServicio({
   v,
   hoy,
+  datos,
   abierta,
   alternar,
   puedeEditar,
   puedeVoucher,
+  direccion,
   alGuardar,
 }: {
   v: FilaVista
   hoy: string
+  datos: DatosBloqueServicios
   abierta: boolean
   alternar: () => void
   puedeEditar: boolean
   puedeVoucher: boolean
+  direccion: boolean
   alGuardar: () => void
 }) {
   const s = v.servicio
@@ -174,6 +264,9 @@ function FilaServicio({
   const detalle = [s.proveedor_nombre ?? 'Falta el proveedor', s.localizador ? `loc. ${s.localizador}` : null]
     .filter(Boolean)
     .join(' · ')
+  const d = desviacion(v.pagado, s.costo_cotizado)
+  const umbral = (datos.reglas ?? configReglasPago(null)).umbralPct
+  const pctTexto = Number.isFinite(d.pct) ? ` +${(Math.round(d.pct * 10) / 10).toLocaleString('es-CO')} %` : ''
   return (
     <li className={`rounded-md border border-l-4 ${COLOR_TIPO[s.tipo] ?? COLOR_TIPO.otro} bg-card`}>
       <button
@@ -190,7 +283,9 @@ function FilaServicio({
             {fecha && <span className={COLOR_FECHA[fecha.color]}>{fecha.texto}</span>}
             <span className="tabular-nums text-muted-foreground">
               Cotizado {formatCOP(s.costo_cotizado)} · Pagado {formatCOP(v.pagado)}
-              {v.sobrecosto > 0 && <span className="text-amber-600"> +{formatCOP(v.sobrecosto)}</span>}
+              {d.pesos > 0 && (
+                <span className={d.pct > umbral ? 'text-red-600' : 'text-amber-600'}> +{formatCOP(d.pesos)}{pctTexto}</span>
+              )}
             </span>
           </div>
           <p className="text-[11px] text-muted-foreground">
@@ -201,7 +296,7 @@ function FilaServicio({
         <ChevronDown className={`mt-0.5 h-4 w-4 shrink-0 text-muted-foreground transition-transform ${abierta ? 'rotate-180' : ''}`} />
       </button>
       {abierta && (
-        <HojaServicio v={v} puedeEditar={puedeEditar} puedeVoucher={puedeVoucher} alGuardar={alGuardar} />
+        <HojaServicio v={v} datos={datos} puedeEditar={puedeEditar} puedeVoucher={puedeVoucher} direccion={direccion} alGuardar={alGuardar} />
       )}
     </li>
   )
@@ -209,13 +304,17 @@ function FilaServicio({
 
 function HojaServicio({
   v,
+  datos,
   puedeEditar,
   puedeVoucher,
+  direccion,
   alGuardar,
 }: {
   v: FilaVista
+  datos: DatosBloqueServicios
   puedeEditar: boolean
   puedeVoucher: boolean
+  direccion: boolean
   alGuardar: () => void
 }) {
   const s = v.servicio
@@ -255,8 +354,27 @@ function HojaServicio({
     </label>
   )
 
+  const pasos: Array<{ id: EstadoServicio; texto: string }> = [
+    { id: 'por_reservar', texto: 'Por reservar' },
+    { id: 'reservado', texto: 'Reservado' },
+    { id: 'pagado', texto: 'Pagado' },
+    { id: 'confirmado', texto: 'Confirmado' },
+  ]
+  const pasoActual = v.estado === 'esperando' || v.estado === 'no_aprobado' ? 'reservado' : v.estado
+
   return (
     <div className="space-y-3 border-t p-2.5">
+      <p className="text-[11px] text-muted-foreground">
+        {pasos.map((p, i) => (
+          <span key={p.id}>
+            {i > 0 && ' · '}
+            <span className={p.id === pasoActual ? 'font-semibold text-foreground' : ''}>{p.texto}</span>
+          </span>
+        ))}
+      </p>
+
+      <Aprobaciones v={v} datos={datos} direccion={direccion} alGuardar={alGuardar} />
+
       <p className="text-xs font-semibold">1 Reserva</p>
       {campoTexto('Proveedor', 'proveedor_nombre', s.proveedor_nombre, '¿Con quién lo reservaste?')}
       {campoTexto('Localizador', 'localizador', s.localizador)}
@@ -274,9 +392,15 @@ function HojaServicio({
       </label>
 
       <p className="text-xs font-semibold">2 Pago</p>
-      <p className="text-xs text-muted-foreground">
-        Por pagar {formatCOP(v.aPagar)} · Pagado {formatCOP(v.pagado)}. El pago con su soporte se registra aquí cuando se active el registro de pagos a proveedores.
-      </p>
+      <PagosHechos v={v} medios={datos.medios ?? []} />
+      {v.estado !== 'cancelado' && v.estado !== 'confirmado' && v.estado !== 'pagado' && v.estado !== 'esperando' && (
+        puedeEditar
+          ? <FormularioPago v={v} datos={datos} alGuardar={alGuardar} />
+          : <p className="text-xs text-muted-foreground">Por pagar {formatCOP(Math.max(0, v.aPagar - v.pagado))}.</p>
+      )}
+      {v.estado === 'esperando' && (
+        <p className="text-xs text-purple-700">Esperando a Edgar: el pago no cuenta hasta que lo apruebe.</p>
+      )}
 
       <p className="text-xs font-semibold">3 Confirmación del proveedor final</p>
       <Adjunto servicioId={s.id} campo="confirmacion" referencia={s.confirmacion_ref} habilitado={puedeEditar} alGuardar={alGuardar} />
@@ -286,7 +410,7 @@ function HojaServicio({
 
       {puedeEditar && (
         <div className="flex flex-wrap gap-2 pt-1">
-          {s.estado === 'por_reservar' && (
+          {s.estado === 'por_reservar' && v.estado === 'por_reservar' && (
             <button type="button" disabled={isPending} onClick={() => guardar({ estado: 'reservado' }, 'Marcado como reservado.')}
               className="min-h-11 rounded-md bg-primary px-3 text-sm font-medium text-primary-foreground disabled:opacity-60">
               Marcar como reservado
@@ -294,7 +418,7 @@ function HojaServicio({
           )}
           {s.estado !== 'cancelado' ? (
             <button type="button" disabled={isPending} onClick={() => guardar({ estado: 'cancelado' }, 'Sacado del viaje.')}
-              className="min-h-11 rounded-md border px-3 text-sm disabled:opacity-60">
+              className="min-h-11 rounded-md px-3 text-xs text-muted-foreground underline disabled:opacity-60">
               Sacar del viaje
             </button>
           ) : (
@@ -305,6 +429,270 @@ function HojaServicio({
           )}
         </div>
       )}
+    </div>
+  )
+}
+
+/** Los pagos ya registrados de la fila, cada uno con su medio y su soporte. */
+function PagosHechos({ v, medios }: { v: FilaVista; medios: readonly MedioPagoProveedor[] }) {
+  const gastos = v.servicio.gastos
+  if (gastos.length === 0) {
+    return <p className="text-xs text-muted-foreground">Por pagar {formatCOP(v.aPagar)}. Todavía no hay pagos.</p>
+  }
+  return (
+    <ul className="space-y-1 text-xs">
+      {gastos.map((g, i) => {
+        const medio = medios.find(m => m.id === g.medio_pago)
+        const href = hrefArchivo(g.soporte_url)
+        return (
+          <li key={g.id ?? i} className="flex flex-wrap items-center gap-x-2">
+            <span className="tabular-nums font-medium">{formatCOP(g.monto)}</span>
+            {g.fecha && <span className="text-muted-foreground">{g.fecha}</span>}
+            <span className="text-muted-foreground">
+              {medio?.label ?? (g.medio_pago ? g.medio_pago : 'Falta el medio')}
+              {g.titular_medio ? ` · ${g.titular_medio === 'personal' ? 'Personal' : 'Empresa'}` : ''}
+            </span>
+            {href
+              ? <a href={href} target="_blank" rel="noopener noreferrer" className="text-primary underline">Ver soporte</a>
+              : <span className="text-amber-600">Falta el soporte</span>}
+          </li>
+        )
+      })}
+      {v.aPagar - v.pagado > 0 && <li className="text-muted-foreground">Falta pagar {formatCOP(v.aPagar - v.pagado)}.</li>}
+    </ul>
+  )
+}
+
+/**
+ * Valor, medio (el titular sale de él), fecha y soporte. Pegar el soporte NO registra el pago:
+ * cuenta cuando se toca «Registrar pago» (Noor §3.3). Si el pago rompe una regla sin aprobación,
+ * el botón es «Pedir a Edgar» (antes de pagar) y abajo queda «El pago ya salió: registrarlo»
+ * (Vera C5: los dos caminos existen y se distinguen).
+ */
+function FormularioPago({ v, datos, alGuardar }: { v: FilaVista; datos: DatosBloqueServicios; alGuardar: () => void }) {
+  const medios = datos.medios ?? []
+  const falta = Math.max(0, v.aPagar - v.pagado)
+  const [montoTexto, setMontoTexto] = useState(falta > 0 ? String(Math.round(falta)) : '')
+  const [medioId, setMedioId] = useState(medios.length === 1 ? medios[0].id : '')
+  const [fecha, setFecha] = useState(todayBogotaISO())
+  const [soporte, setSoporte] = useState<string | null>(null)
+  const [isPending, startTransition] = useTransitionTolerante()
+  const intencion = useIntencion()
+  const archivoRef = useRef<HTMLInputElement>(null)
+  const camaraRef = useRef<HTMLInputElement>(null)
+
+  if (medios.length === 0) {
+    return <p className="text-xs text-amber-700">Falta configurar los medios de pago a proveedores de la agencia. Pídeselo a MéTRIK.</p>
+  }
+
+  const monto = Math.round(Number(montoTexto.replace(/[^\d]/g, '')) || 0)
+  const medio = medios.find(m => m.id === medioId) ?? null
+  const motivos = pideAEdgar(v, datos, monto, medio)
+  const total = totalTrasPago({ monto, pagadoAntes: v.pagado })
+  const d = desviacion(total, v.servicio.costo_cotizado)
+  const listo = monto > 0 && !!medio && !!soporte
+
+  function subir(file: File | null | undefined) {
+    if (!file) return
+    const fd = new FormData()
+    fd.set('servicioId', v.servicio.id)
+    fd.set('file', file)
+    startTransition(async () => {
+      const r = await subirSoporteServicio(fd)
+      if (!r.ok) {
+        toast.error(r.error)
+        return
+      }
+      setSoporte(r.referencia)
+      toast.success('Soporte listo. Revisa el valor y toca «Registrar pago».')
+    })
+  }
+
+  function registrar() {
+    if (!listo || !medio || !soporte) return
+    startTransition(async () => {
+      const r = await registrarPagoServicio({ servicioId: v.servicio.id, monto, fecha, medioId: medio.id, soporteRef: soporte }, intencion.clave())
+      intencion.cerrar()
+      if (!r.ok) {
+        toast.error(r.error)
+        return
+      }
+      if (r.esperando.length > 0) toast.success(`Pago registrado. Quedó esperando a Edgar: ${r.esperando.join(' ')}`)
+      else toast.success('Pago registrado.')
+      setSoporte(null)
+      alGuardar()
+    })
+  }
+
+  function pedir() {
+    if (!medio || !(monto > 0)) return
+    startTransition(async () => {
+      const r = await pedirAprobacionServicio({ servicioId: v.servicio.id, monto, medioId: medio.id }, intencion.clave())
+      intencion.cerrar()
+      if (!r.ok) {
+        toast.error(r.error)
+        return
+      }
+      toast.success('Le pedimos a Edgar que lo apruebe. Te avisamos cuando decida.')
+      alGuardar()
+    })
+  }
+
+  return (
+    <div className="space-y-2 rounded-md border bg-muted/30 p-2">
+      <div className="grid gap-2 sm:grid-cols-2">
+        <label className="block space-y-1">
+          <span className="text-xs font-medium">Valor pagado</span>
+          <input
+            type="text"
+            inputMode="numeric"
+            value={montoTexto}
+            onChange={e => setMontoTexto(e.target.value)}
+            disabled={isPending}
+            className="h-11 w-full rounded-md border px-2 text-sm tabular-nums"
+          />
+        </label>
+        <label className="block space-y-1">
+          <span className="text-xs font-medium">Fecha del pago</span>
+          <input type="date" value={fecha} max={todayBogotaISO()} onChange={e => setFecha(e.target.value)} disabled={isPending}
+            className="h-11 w-full rounded-md border px-2 text-sm" />
+        </label>
+      </div>
+      <label className="block space-y-1">
+        <span className="text-xs font-medium">Medio de pago</span>
+        <select value={medioId} onChange={e => setMedioId(e.target.value)} disabled={isPending} className="h-11 w-full rounded-md border bg-background px-2 text-sm">
+          <option value="">Elige con qué se pagó</option>
+          {medios.map(m => <option key={m.id} value={m.id}>{m.label}</option>)}
+        </select>
+      </label>
+      {medio && <p className="text-xs text-muted-foreground">Titular: {medio.titular === 'personal' ? 'Personal' : 'Empresa'}</p>}
+      {d.pesos > 0 && monto > 0 && (
+        <p className={`text-xs ${motivos.length > 0 ? 'text-red-600' : 'text-amber-600'}`}>
+          +{formatCOP(d.pesos)} sobre lo cotizado{Number.isFinite(d.pct) ? ` (+${(Math.round(d.pct * 10) / 10).toLocaleString('es-CO')} %)` : ''}
+        </p>
+      )}
+
+      <div
+        className="flex flex-wrap items-center gap-2"
+        onPaste={e => {
+          const file = Array.from(e.clipboardData.files)[0]
+          if (file) {
+            e.preventDefault()
+            subir(file)
+          }
+        }}
+      >
+        {soporte
+          ? <span className="inline-flex items-center gap-1 text-xs text-green-700"><Check className="h-3.5 w-3.5" /> Soporte listo</span>
+          : <span className="text-xs text-muted-foreground">Falta el soporte:</span>}
+        <button type="button" disabled={isPending} title="Pega aquí el soporte (Ctrl+V)"
+          className="inline-flex min-h-11 items-center gap-1 rounded-md border px-3 text-xs disabled:opacity-60">
+          <Paperclip className="h-3.5 w-3.5" /> Pegar soporte
+        </button>
+        <button type="button" disabled={isPending} onClick={() => camaraRef.current?.click()}
+          className="inline-flex min-h-11 items-center gap-1 rounded-md border px-3 text-xs disabled:opacity-60">
+          <Camera className="h-3.5 w-3.5" /> Tomar foto
+        </button>
+        <button type="button" disabled={isPending} onClick={() => archivoRef.current?.click()}
+          className="inline-flex min-h-11 items-center gap-1 rounded-md border px-3 text-xs disabled:opacity-60">
+          <FileText className="h-3.5 w-3.5" /> Subir archivo
+        </button>
+        <input ref={camaraRef} type="file" accept="image/*" capture="environment" className="hidden"
+          onChange={e => { subir(e.target.files?.[0]); e.target.value = '' }} />
+        <input ref={archivoRef} type="file" accept="image/*,application/pdf" className="hidden"
+          onChange={e => { subir(e.target.files?.[0]); e.target.value = '' }} />
+      </div>
+
+      {motivos.length > 0 ? (
+        <div className="space-y-1">
+          <p className="text-xs text-purple-700">{motivos.join(' ')}</p>
+          <button type="button" disabled={isPending || !medio || !(monto > 0)} onClick={pedir}
+            className="min-h-11 w-full rounded-md bg-purple-600 px-3 text-sm font-medium text-white disabled:opacity-60 sm:w-auto">
+            Pedir a Edgar
+          </button>
+          <button type="button" disabled={isPending || !listo} onClick={registrar}
+            className="block min-h-11 px-1 text-xs text-muted-foreground underline disabled:opacity-60">
+            El pago ya salió: registrarlo y que Edgar lo revise
+          </button>
+        </div>
+      ) : (
+        <button type="button" disabled={isPending || !listo} onClick={registrar}
+          className="min-h-11 w-full rounded-md bg-primary px-3 text-sm font-medium text-primary-foreground disabled:opacity-60 sm:w-auto">
+          {isPending ? 'Guardando…' : 'Registrar pago'}
+        </button>
+      )}
+    </div>
+  )
+}
+
+/**
+ * Lo pedido a Edgar en la misma fila (Noor §3.5). Edgar ve «Aprobar» y «No aprobar» (con motivo);
+ * los demás ven quién pidió qué y, si Edgar no aprobó, su motivo.
+ */
+function Aprobaciones({ v, datos, direccion, alGuardar }: { v: FilaVista; datos: DatosBloqueServicios; direccion: boolean; alGuardar: () => void }) {
+  const abiertas = v.servicio.aprobaciones.filter(a => a.estado === 'solicitada' || a.estado === 'rechazada')
+  const [motivo, setMotivo] = useState('')
+  const [rechazando, setRechazando] = useState<string | null>(null)
+  const [isPending, startTransition] = useTransitionTolerante()
+  const intencion = useIntencion()
+  if (abiertas.length === 0) return null
+
+  function decidir(id: string, decision: 'aprobada' | 'rechazada') {
+    startTransition(async () => {
+      const r = await decidirAprobacionServicio(v.servicio.id, id, decision, decision === 'rechazada' ? motivo : null, intencion.clave())
+      intencion.cerrar()
+      if (!r.ok) {
+        toast.error(r.error)
+        return
+      }
+      toast.success(decision === 'aprobada' ? 'Aprobado.' : 'No aprobado. Le avisamos a quien lo pidió.')
+      setRechazando(null)
+      setMotivo('')
+      alGuardar()
+    })
+  }
+
+  return (
+    <div className="space-y-2">
+      {abiertas.map(a => {
+        const det = (a.detalle ?? {}) as Record<string, unknown>
+        const quien = (a.solicitada_por && datos.nombres?.[a.solicitada_por]) || 'Operaciones'
+        const monto = Number(det.monto ?? 0)
+        const proveedor = (typeof det.proveedor === 'string' && det.proveedor) || v.servicio.nombre
+        const texto = typeof det.texto === 'string' ? det.texto : ''
+        return (
+          <div key={a.id ?? a.tipo} className={`space-y-1.5 rounded-md border p-2 text-xs ${a.estado === 'rechazada' ? 'border-red-200 bg-red-50' : 'border-purple-200 bg-purple-50'}`}>
+            <p className={a.estado === 'rechazada' ? 'text-red-700' : 'text-purple-800'}>
+              {a.estado === 'rechazada'
+                ? `No aprobado por Edgar: ${a.motivo ?? ''}`
+                : `${quien} pide pagar ${formatCOP(monto)} a ${proveedor}: ${texto}`}
+            </p>
+            {direccion && a.id && (
+              rechazando === a.id ? (
+                <div className="space-y-1.5">
+                  <input value={motivo} onChange={e => setMotivo(e.target.value)} placeholder="¿Por qué no lo apruebas?"
+                    className="h-11 w-full rounded-md border bg-background px-2 text-sm" />
+                  <div className="flex gap-2">
+                    <button type="button" disabled={isPending || motivo.trim().length < 3} onClick={() => decidir(a.id!, 'rechazada')}
+                      className="min-h-11 rounded-md bg-red-600 px-3 text-sm font-medium text-white disabled:opacity-60">No aprobar</button>
+                    <button type="button" disabled={isPending} onClick={() => setRechazando(null)}
+                      className="min-h-11 rounded-md border px-3 text-sm">Volver</button>
+                  </div>
+                </div>
+              ) : (
+                <div className="flex gap-2">
+                  <button type="button" disabled={isPending} onClick={() => decidir(a.id!, 'aprobada')}
+                    className="min-h-11 rounded-md bg-green-600 px-3 text-sm font-medium text-white disabled:opacity-60">Aprobar</button>
+                  {a.estado === 'solicitada' && (
+                    <button type="button" disabled={isPending} onClick={() => setRechazando(a.id!)}
+                      className="min-h-11 rounded-md border px-3 text-sm">No aprobar</button>
+                  )}
+                </div>
+              )
+            )}
+          </div>
+        )
+      })}
     </div>
   )
 }
