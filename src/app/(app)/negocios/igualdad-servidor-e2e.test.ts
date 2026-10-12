@@ -70,14 +70,24 @@ import {
 const sesion = vi.hoisted(() => ({ workspaceId: '', n: 0 }))
 
 vi.mock('next/cache', () => ({ revalidatePath: () => {}, revalidateTag: () => {} }))
-vi.mock('@/lib/actions/get-workspace', () => ({
-  getWorkspace: async () => {
-    sesion.n++
-    return {
-      supabase: clienteFalso(), workspaceId: sesion.workspaceId, userId: 'p-asesora', staffId: 's-asesora',
-      role: 'operator', areas: [], impersonating: false, realRole: 'operator', error: null,
-    }
-  },
+// Con el memo de las rutas, como en producción: dentro de una ruta la sesión se resuelve una vez.
+vi.mock('@/lib/actions/get-workspace', async () => {
+  const { memoDeRuta } = await import('@/lib/actions/memo-de-ruta')
+  return {
+    getWorkspace: memoDeRuta(async () => {
+      sesion.n++
+      return {
+        supabase: clienteFalso(), workspaceId: sesion.workspaceId, userId: 'p-asesora', staffId: 's-asesora',
+        role: 'operator', areas: [], impersonating: false, realRole: 'operator', error: null,
+      }
+    }),
+  }
+})
+// El módulo contratado y la imagen del pantallazo no son de esta prueba.
+vi.mock('@/lib/modulos/exigir-modulo', () => ({
+  exigirModulo: async () => ({ ok: true }),
+  MENSAJE_MODULO_NO_ACTIVO: 'sin módulo',
+  REQUISITO: { clarity: 'clarity' },
 }))
 vi.mock('@/lib/supabase/server', () => ({ createServiceClient: () => clienteFalso(), createClient: async () => clienteFalso() }))
 
@@ -133,6 +143,10 @@ import { recalcularTotales } from './cotizacion-actions'
 import { generateCotizacionPDF } from './cotizacion-pdf-actions'
 import { aceptarCotizacionNegocio, opcionesDeAprobacion } from './[id]/cotizacion/actions'
 import { cambiarOpcionDeItinerario } from './itinerario-actions'
+import { POST as aceptarPorLaRuta } from '@/app/api/cotizaciones/[id]/aceptar-captura/route'
+import { firmarBorrador } from '@/lib/cotizaciones/firma-borrador'
+import { lecturaManual } from '@/lib/cotizaciones/ingreso-manual'
+import { ranuraPorSlug } from '@/lib/cotizaciones/ranuras-pantallazo'
 
 // ── Los escenarios ───────────────────────────────────────────────────────────
 
@@ -350,6 +364,60 @@ async function idasDeElegirOpcion(): Promise<number> {
   return tomarRegistro().length
 }
 
+/**
+ * «Aceptar» UNO desde la bandeja, por la ruta de verdad (`aceptar-captura`): un traslado nuevo
+ * sobre el caso fijo ya armado. Cuenta las idas de la aceptación entera, con su recálculo.
+ */
+async function idasDeAceptarUno(): Promise<{ idas: number; sesiones: number }> {
+  sembrar(ESCENARIOS[2], false)
+  await recalcularTotales(COT_SAN_ANDRES)
+  tomarRegistro()
+  const r = lecturaManual({
+    ranura: ranuraPorSlug('traslado_detalle')!,
+    entrada: {
+      tipo: 'traslado',
+      datos: {
+        ruta: 'Hotel - muelle de Providencia', fecha: '2026-11-24', adultos: 6, ninos: 1, infantes: 1, cobro: 'por_persona',
+        precio: 'por_trayecto', neto: 25_000, netoNino: 25_000, netoInfante: 0, idaYRegreso: true,
+        fuente: 'Proveedor de prueba',
+      },
+    },
+    leidaEn: '2026-10-12T14:30:00.000Z',
+    hoy: '2026-10-12',
+  })
+  if (!r.ok) throw new Error(JSON.stringify(r.errores))
+  const lecturaJson = JSON.stringify(r.lectura)
+  const cuerpo = {
+    tipo: 'traslado', lecturaJson, firma: firmarBorrador(COT_SAN_ANDRES, 'traslado', lecturaJson)!,
+    pistas: { lugar: 'Providencia', origen: null, destino: null }, decision: 'auto', destinoId: null,
+    imagen: null, correcciones: null, idAceptacion: null,
+  }
+  sesion.n = 0
+  const res = await aceptarPorLaRuta(
+    new Request(`https://x/api/cotizaciones/${COT_SAN_ANDRES}/aceptar-captura`, { method: 'POST', body: JSON.stringify(cuerpo) }),
+    { params: Promise.resolve({ id: COT_SAN_ANDRES }) },
+  )
+  const json = await res.json() as { ok: boolean; mensaje?: string }
+  expect(json.ok, json.mensaje).toBe(true)
+  return { idas: tomarRegistro().length, sesiones: sesion.n }
+}
+
+/**
+ * «Abrir la cotización»: la página del servidor (`[id]/cotizacion/[cotId]/page.tsx`), con el
+ * marco del negocio de Trappvel. Cuenta las idas de la carga, sin pintar nada.
+ */
+async function idasDeAbrir(): Promise<{ idas: number; sesiones: number; escrituras: number }> {
+  sembrar(ESCENARIOS[2], false)
+  await recalcularTotales(COT_SAN_ANDRES)
+  tomarRegistro()
+  sesion.n = 0
+  const { default: Pagina } = await import('./[id]/cotizacion/[cotId]/page')
+  const jsx = await Pagina({ params: Promise.resolve({ id: NEG_SAN_ANDRES, cotId: COT_SAN_ANDRES }) })
+  expect(jsx).toBeTruthy()
+  const registro = tomarRegistro()
+  return { idas: registro.length, sesiones: sesion.n, escrituras: escrituras(registro).length }
+}
+
 // ── El fixture ───────────────────────────────────────────────────────────────
 
 const RUTA_FIXTURE = path.join(__dirname, 'igualdad-servidor.fixture.json')
@@ -363,6 +431,8 @@ interface Fixture {
 
 const corridas: Record<string, { apagado: Awaited<ReturnType<typeof correr>>; encendido: Awaited<ReturnType<typeof correr>> }> = {}
 let idasElegir = 0
+let aceptarUno = { idas: 0, sesiones: 0 }
+let abrir = { idas: 0, sesiones: 0, escrituras: 0 }
 
 beforeAll(async () => {
   // El reloj fijo: las fechas que el servidor escribe (aprobación, registro) no pueden variar.
@@ -371,10 +441,14 @@ beforeAll(async () => {
     corridas[e.nombre] = { apagado: await correr(e, false), encendido: await correr(e, true) }
   }
   idasElegir = await idasDeElegirOpcion()
+  vi.stubEnv('SUPABASE_SERVICE_ROLE_KEY', 'secreto-de-prueba')
+  aceptarUno = await idasDeAceptarUno()
+  abrir = await idasDeAbrir()
 }, 120_000)
 
 afterAll(() => {
   vi.useRealTimers()
+  vi.unstubAllEnvs()
 })
 
 function presupuestoMedido(): Record<string, number> {
@@ -386,6 +460,19 @@ function presupuestoMedido(): Record<string, number> {
     p[`${e.nombre} · aprobar`] = idas.aprobar
   }
   p['trappvel-caso-fijo · elegir opción en una tarifa'] = idasElegir
+  p['trappvel-caso-fijo · aceptar 1 (ruta)'] = aceptarUno.idas
+  p['trappvel-caso-fijo · abrir la cotización'] = abrir.idas
+  // La sesión también cuesta idas en producción (perfil y workspace): se cuenta aparte.
+  p['trappvel-caso-fijo · aceptar 1 (ruta) · sesiones'] = aceptarUno.sesiones
+  p['trappvel-caso-fijo · abrir la cotización · sesiones'] = abrir.sesiones
+  // N7 («abrir no escribe») se exige desde C1; aquí queda la línea base.
+  p['trappvel-caso-fijo · abrir la cotización · escrituras'] = abrir.escrituras
+  for (const e of ESCENARIOS) {
+    const { sesiones } = corridas[e.nombre].apagado
+    p[`${e.nombre} · recalcular · sesiones`] = sesiones.recalcular
+    p[`${e.nombre} · pdf · sesiones`] = sesiones.pdf
+    p[`${e.nombre} · aprobar · sesiones`] = sesiones.aprobar
+  }
   return p
 }
 

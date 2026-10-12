@@ -3525,6 +3525,23 @@
   "trappvel-flujo-nuevo · recalcular": 23,
   "trappvel-flujo-nuevo · pdf": 40,
   "trappvel-flujo-nuevo · aprobar": 48,
-  "trappvel-caso-fijo · elegir opción en una tarifa": 27
+  "trappvel-caso-fijo · elegir opción en una tarifa": 27,
+  "trappvel-caso-fijo · aceptar 1 (ruta)": 34,
+  "trappvel-caso-fijo · abrir la cotización": 40,
+  "trappvel-caso-fijo · aceptar 1 (ruta) · sesiones": 1,
+  "trappvel-caso-fijo · abrir la cotización · sesiones": 15,
+  "trappvel-caso-fijo · abrir la cotización · escrituras": 0,
+  "termotech · recalcular · sesiones": 1,
+  "termotech · pdf · sesiones": 1,
+  "termotech · aprobar · sesiones": 1,
+  "generica-con-cuadre · recalcular · sesiones": 1,
+  "generica-con-cuadre · pdf · sesiones": 1,
+  "generica-con-cuadre · aprobar · sesiones": 1,
+  "trappvel-caso-fijo · recalcular · sesiones": 1,
+  "trappvel-caso-fijo · pdf · sesiones": 1,
+  "trappvel-caso-fijo · aprobar · sesiones": 1,
+  "trappvel-flujo-nuevo · recalcular · sesiones": 1,
+  "trappvel-flujo-nuevo · pdf · sesiones": 1,
+  "trappvel-flujo-nuevo · aprobar · sesiones": 1
  }
 }
