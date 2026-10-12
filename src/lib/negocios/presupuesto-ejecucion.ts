@@ -55,6 +55,15 @@ import { itemsDelItinerario, type ItemConGrupo } from '@/lib/cotizaciones/itiner
 export const TIPO_RUBRO_SIN_DETALLE = 'otro'
 
 /**
+ * El cubo «Proveedores del viaje»: con `servicios_viaje.activo` en la línea, los tres tipos de
+ * viaje (`tarifa`, `impuestos`, `fee_proveedor`) se pliegan aquí. El pago real a un proveedor no
+ * viene partido en tarifa, tasas y fee: medirlo contra el primero de los tres haría mentir a la
+ * barra. La comparación fina es por servicio (tablero de servicios), no por tipo.
+ */
+export const TIPO_RUBRO_PROVEEDOR_VIAJE = 'proveedor_viaje'
+const TIPOS_RUBRO_QUE_SE_PLIEGAN: ReadonlySet<string> = new Set(['tarifa', 'impuestos', 'fee_proveedor'])
+
+/**
  * Categoría de gasto → tipos de rubro contra los que puede contar, en orden de
  * preferencia. Es el inverso de `CAT_TO_RUBRO_TIPOS` del formulario de gasto nuevo
  * (`src/app/(app)/nuevo/gasto/nuevo-gasto-form.tsx`), que es quien decide a qué rubro
@@ -107,6 +116,13 @@ export const TIPO_RUBRO_SIN_DETALLE = 'otro'
  * pruebas de este archivo las usan como categorías de ejemplo.
  */
 export const CATEGORIA_GASTO_A_TIPOS_RUBRO: Record<string, string[]> = {
+  // Decisión cerrada el 2026-10-12 (plan post-cotización, F0): el pago a un proveedor del
+  // viaje es su propia categoría y cuenta contra el cubo plegado `proveedor_viaje` (ver
+  // `calcularPresupuestoPorRubro`). Si la cotización es vieja y su costo quedó como
+  // `servicios_prof` (el pantallazo) o sin desglose, cuenta ahí: en una línea de viajes todo
+  // ese costo es de proveedores, y mandarlo a «Sin presupuesto» mentiría hacia arriba.
+  proveedor_viaje: [TIPO_RUBRO_PROVEEDOR_VIAJE, 'servicios_prof', TIPO_RUBRO_SIN_DETALLE],
+  cortesia_viaje: [TIPO_RUBRO_PROVEEDOR_VIAJE, 'servicios_prof', TIPO_RUBRO_SIN_DETALLE],
   materiales: ['materiales'],
   transporte: ['viaticos'],
   alimentacion: ['viaticos'],
@@ -166,8 +182,19 @@ export const HORAS_MES_TARIFA = 160
  * `Number(cantidad) || 1` es literal del editor: cantidad nula, 0 o no numérica cuenta
  * como 1. Cambiarlo aquí descuadraría contra `costo_total`.
  */
-export function calcularPresupuestoPorRubro(items: ItemPresupuesto[]): RubroPresupuesto[] {
+export function calcularPresupuestoPorRubro(
+  items: ItemPresupuesto[],
+  opciones: {
+    /**
+     * `servicios_viaje.activo` de la línea (Vera X12). Apagado o ausente, todo sale como hoy:
+     * la Ejecución de cualquier workspace no cambia por esto.
+     */
+    plegarViaje?: boolean
+  } = {},
+): RubroPresupuesto[] {
   const porTipo: Record<string, number> = {}
+  const tipoDe = (tipo: string) =>
+    opciones.plegarViaje && TIPOS_RUBRO_QUE_SE_PLIEGAN.has(tipo) ? TIPO_RUBRO_PROVEEDOR_VIAJE : tipo
 
   for (const item of items) {
     if (item.es_ajuste) continue
@@ -184,7 +211,7 @@ export function calcularPresupuestoPorRubro(items: ItemPresupuesto[]): RubroPres
 
     if (rubros.length > 0) {
       for (const rubro of rubros) {
-        const tipo = rubro.tipo ?? TIPO_RUBRO_SIN_DETALLE
+        const tipo = tipoDe(rubro.tipo ?? TIPO_RUBRO_SIN_DETALLE)
         porTipo[tipo] = (porTipo[tipo] ?? 0) + (Number(rubro.valor_total) || 0) * cantidad
       }
     } else {

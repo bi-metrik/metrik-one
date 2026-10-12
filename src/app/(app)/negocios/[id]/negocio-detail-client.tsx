@@ -1,6 +1,7 @@
 'use client'
 
 import dynamic from 'next/dynamic'
+import type { DatosBloqueServicios } from '@/lib/viaje/bloque-servicios'
 import { useState, useRef, useEffect, useCallback } from 'react'
 import { useTransitionTolerante } from '@/hooks/use-transition-tolerante'
 import { useRouter } from 'next/navigation'
@@ -111,6 +112,7 @@ const BloqueResumenFinanciero = dynamic(() => import('./bloques/BloqueResumenFin
 const BloqueEjecucion = dynamic(() => import('./bloques/BloqueEjecucion'))
 const BloqueMovimientos = dynamic(() => import('./bloques/BloqueMovimientos'))
 const BloqueResultado = dynamic(() => import('./bloques/BloqueResultado'))
+const BloqueServicios = dynamic(() => import('./bloques/BloqueServicios'))
 const BloqueHistorial = dynamic(() => import('./bloques/BloqueHistorial'))
 const BloqueFormulario = dynamic(() => import('./bloques/BloqueFormulario'))
 const BloquePagosEpayco = dynamic(() => import('./bloques/BloquePagosEpayco'))
@@ -2161,6 +2163,17 @@ function BloqueRenderer({
 
     case 'ejecucion':
       return <BloqueEjecucion negocioId={negocioId} data={ejecucionData} />
+
+    // Servicios del viaje (F0): los datos los deja el servidor en `_servicios`.
+    case 'servicios':
+      return (
+        <BloqueServicios
+          negocioId={negocioId}
+          modo={modo}
+          datos={(configExtra as { _servicios?: DatosBloqueServicios })._servicios}
+          esResponsable={bloque._esResponsable ?? false}
+        />
+      )
 
     case 'historial':
       return <BloqueHistorial data={historialData} />

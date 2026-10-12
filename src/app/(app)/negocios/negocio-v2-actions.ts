@@ -12,6 +12,9 @@ import { GATE_AUTORIZACION } from '@/lib/autorizacion-datos/estado'
 import { configSeguimiento, etiquetaMotivoPerdida, mensajeTopeAplazamientos, motivoPerdidaInvalido, type ConfigSeguimiento } from '@/lib/negocios/seguimiento'
 import { configSeguimientoDelNegocio } from '@/lib/negocios/seguimiento-datos'
 import { evaluarGatesSeguimiento } from '@/lib/negocios/gates-seguimiento'
+import { leerServiciosDelNegocio } from '@/lib/viaje/servicios-viaje-datos'
+import { aprobadoresDeLinea, serviciosViajeActivo } from '@/lib/viaje/estado-servicio'
+import type { DatosBloqueServicios } from '@/lib/viaje/bloque-servicios'
 import { MOTIVOS_CANCELACION, MOTIVOS_PAUSA, MAX_PAUSAS, SAFETY_NET_HORAS, leerMarcasDeMetadata, origenDesdeFuenteInteraccion, type MarcaCondicion } from '@/lib/negocios/constants'
 import {
   computeFieldDefaults,
@@ -7280,6 +7283,8 @@ export async function getNegocioDetalleCompleto(id: string): Promise<{
     }
     presupuestoPorRubro = calcularPresupuestoPorRubro(
       itemsDeLaTarifaAceptada((itemsConRubros ?? []) as (ItemPresupuesto & ItemConGrupo)[], seleccion),
+      // Solo con servicios del viaje encendidos en la línea (Vera X12): apagado, como hoy.
+      { plegarViaje: serviciosViajeActivo(lineaConfigExtra) },
     )
   }
 
@@ -7707,7 +7712,9 @@ export async function getNegocioDetalleCompleto(id: string): Promise<{
       // historial). El componente HistorialEtapasPrevias los muestra en
       // orden de aparicion (etapa_orden ASC, bloque.orden ASC).
       const etapaInfoById = new Map(etapasPrevias.map(e => [e.id, { orden: e.orden, nombre: e.nombre, stage: e.stage }]))
-      const HIDDEN_TYPES = new Set(['resumen_financiero', 'resultado', 'ejecucion', 'historial', 'historial_valida'])
+      // `servicios` también: sus datos los arma el servidor solo para la etapa actual, y en
+      // el historial saldría un tablero vacío que no dice la verdad.
+      const HIDDEN_TYPES = new Set(['resumen_financiero', 'resultado', 'ejecucion', 'historial', 'historial_valida', 'servicios'])
 
       // ── Bloques que se ACTIVARON tarde ────────────────────────────────────────
       // Un bloque condicional de una etapa ya pasada puede aplicar HOY porque
@@ -8007,6 +8014,25 @@ export async function getNegocioDetalleCompleto(id: string): Promise<{
     ),
   )
 
+  // Servicios del viaje (F0): solo si la etapa actual tiene el bloque. Viaja en el
+  // `config_extra` del bloque, como las demás banderas del servidor (`_servicios`).
+  const hayBloqueServicios = base.bloques.some(
+    b => (b as { bloque_definitions?: { tipo?: string } | null }).bloque_definitions?.tipo === 'servicios',
+  )
+  const serviciosViaje: DatosBloqueServicios | null = hayBloqueServicios
+    ? {
+        activo: serviciosViajeActivo(lineaConfigExtra),
+        hayCotizacionAceptada: !!cotizacionAceptada,
+        filas: (await leerServiciosDelNegocio(supabase, { workspaceId, negocioId: id })) ?? [],
+        quien: {
+          role: role ?? null,
+          areas: (areas ?? []) as string[],
+          staffId: staffId ?? null,
+          aprobadores: aprobadoresDeLinea(lineaConfigExtra),
+        },
+      }
+    : null
+
   const bloquesConExtra = base.bloques.map(b => {
     const configExtra = bloqueConfigsExtra[b.id] ?? {}
 
@@ -8258,6 +8284,7 @@ export async function getNegocioDetalleCompleto(id: string): Promise<{
     if (defTipo === 'cotizacion' && configSeguimiento(lineaConfigExtra).activo) {
       enrichedConfigExtra._seguimiento = true
     }
+    if (defTipo === 'servicios' && serviciosViaje) enrichedConfigExtra._servicios = serviciosViaje
     if (defTipo === 'propuesta_economica' && puedeCorregirPrecioWs) {
       enrichedConfigExtra._puedeCorregirPrecio = true
     }
