@@ -19,6 +19,7 @@ import { adapterPara } from '@/lib/suscripciones/pasarela/registro'
 import { generarEnlacesAutomaticos, type ResumenEnlacesAutomaticos } from '@/lib/cobros/enlace-automatico-servidor'
 import { enrolarContratosPorCiclo, type ResumenEnrolamiento } from '@/lib/cobros/enrolar-ciclo-servidor'
 import { renovarPlanesPorCiclo, type ResumenRenovacion } from '@/lib/cobros/renovar-ciclo-servidor'
+import { reconciliarCiclosValida, type ResumenReconciliacion } from '@/lib/valida-registro/ciclo-servidor'
 
 // Cron diario — Procesa planes_cobro activos:
 //   1. Genera cobros programados con fecha_esperada = T+3 dias si no existe ya la cuota
@@ -42,6 +43,9 @@ import { renovarPlanesPorCiclo, type ResumenRenovacion } from '@/lib/cobros/reno
 //      o menos (o ya vencio sin pagarse) recibe su enlace solo, con la misma funcion del boton,
 //      y la persona designada un correo. No emite cuentas de cobro (ver el bloque del paso 6).
 //   7. Plan se marca inactivo automaticamente cuando todas las cuotas se cobran (trigger DB)
+//   8. Valida autogestionada: el pago mas nuevo del plan de cada espacio del registro autogestionado
+//      tiene su ciclo abierto en Valida (bolsa del mes y llave sin vencimiento). Lo abre el webhook
+//      al pagar; este paso recoge lo que no alcanzo (ver `src/lib/valida-registro/ciclo-servidor.ts`).
 //
 // Spec: docs/specs/2026-04-26_mc-ebitda-capa-fiscal-simplificada.md (extension B/Fase 1)
 //       docs/specs/2026-09-08_suscripciones-cobro-automatico.md (paso 5)
@@ -483,6 +487,17 @@ export async function GET(req: NextRequest) {
     enlacesAutomaticosError = err instanceof Error ? err.message : String(err)
   }
 
+  // ── 8. Valida autogestionada: el pago más nuevo de cada plan tiene su ciclo abierto en Valida ──
+  // El webhook lo abre en el momento del pago; esto recoge lo que no alcanzó (Valida caída, o un pago
+  // registrado a mano). Solo mira espacios del registro autogestionado; idempotente en Valida.
+  let ciclosValida: ResumenReconciliacion | null = null
+  let ciclosValidaError: string | null = null
+  try {
+    ciclosValida = await reconciliarCiclosValida({ db: supabase })
+  } catch (err) {
+    ciclosValidaError = err instanceof Error ? err.message : String(err)
+  }
+
   return NextResponse.json({
     ok: true,
     fecha: hoyStr,
@@ -509,5 +524,7 @@ export async function GET(req: NextRequest) {
     renovacion_por_ciclo_error: renovacionError,
     enlaces_automaticos: enlacesAutomaticos,
     enlaces_automaticos_error: enlacesAutomaticosError,
+    ciclos_valida: ciclosValida,
+    ciclos_valida_error: ciclosValidaError,
   })
 }

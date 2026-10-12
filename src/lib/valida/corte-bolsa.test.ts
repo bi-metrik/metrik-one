@@ -6,6 +6,7 @@ import {
   saldoDesdeCuentaConsumo,
   textoCorte,
   textoSaldo,
+  accionDelCorte,
 } from './corte-bolsa'
 
 const AHORA = new Date('2026-10-09T15:00:00Z')
@@ -101,5 +102,22 @@ describe('textos', () => {
     expect(saldoDePruebaVencida(prueba)).toMatchObject({ bloqueada: true, motivo: 'bolsa_vencida', esPrueba: true })
     expect(textoCorte('bolsa_vencida', true).titulo).toBe('Tu prueba terminó')
     expect(textoCorte('bolsa_agotada', true).titulo).toBe('Usaste todas tus consultas de prueba')
+  })
+})
+
+describe('el mes del plan pagado (autogestionado)', () => {
+  it('el contador habla del límite del mes, sin fecha', () => {
+    const s = saldoDesdeCuentaConsumo(
+      cuerpoBolsa({ saldo: 2140, consultas_compradas: 3000, precio_total: 150000, pago_referencia: 'one-ciclo:abc' }),
+      AHORA,
+    )
+    expect(s?.esPrueba).toBe(false)
+    expect(textoSaldo(s!)).toBe('Te quedan 2.140 de 3.000 consultas de este mes.')
+  })
+  it('el corte no ofrece «activar» un plan que ya está activo', () => {
+    expect(textoCorte('bolsa_agotada', false).titulo).toBe('Llegaste al límite de consultas de este mes')
+    expect(textoCorte('bolsa_vencida', false).titulo).toBe('Tu mes de Valida terminó')
+    expect(accionDelCorte(false)).toEqual({ texto: 'Ver mi suscripción', ruta: '/suscripcion' })
+    expect(accionDelCorte(true).texto).toBe('Activar plan')
   })
 })

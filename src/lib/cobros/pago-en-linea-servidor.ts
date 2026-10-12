@@ -6,6 +6,7 @@ import { adapterPara } from '@/lib/suscripciones/pasarela/registro'
 import type { EventoPasarela, PasarelaAdapter } from '@/lib/suscripciones/pasarela/adapter'
 import { createServiceClient } from '@/lib/supabase/server'
 import { activarPlanAnualSiCorresponde } from '@/lib/valida-cda/plan-anual-activacion-servidor'
+import { abrirCicloSiCorresponde, detalleCiclo } from '@/lib/valida-registro/ciclo-servidor'
 import { confirmarPagoCobroProgramado } from './confirmar-cobro-programado'
 import { procesarEventoPasarela, type CobroParaPago, type RepoPagoEnLinea } from './pago-en-linea'
 
@@ -135,12 +136,19 @@ export function repoPagoEnLinea(dbCliente: SupabaseClient, pasarela: string, ada
     },
 
     async trasPagoRegistrado(cobro) {
+      const partes: { revisar: boolean; detalle: string }[] = []
       const r = await activarPlanAnualSiCorresponde(dbCliente, cobro.id)
-      if (r.tipo === 'no_aplica') return null
       if (r.tipo === 'requiere_revision') {
-        return { revisar: true, detalle: `Plan anual NO activado: ${r.detalle} Revisar y devolver el pago si corresponde.` }
+        partes.push({ revisar: true, detalle: `Plan anual NO activado: ${r.detalle} Revisar y devolver el pago si corresponde.` })
+      } else if (r.tipo !== 'no_aplica') {
+        partes.push({ revisar: false, detalle: r.tipo === 'activado' ? 'Plan anual activado.' : 'El plan anual ya estaba activo.' })
       }
-      return { revisar: false, detalle: r.tipo === 'activado' ? 'Plan anual activado.' : 'El plan anual ya estaba activo.' }
+      // Valida autogestionada: el pago abre el ciclo del mes en Valida (y el primero le quita el
+      // vencimiento a la llave de la prueba). No aplica a ningún espacio que no venga del registro.
+      const ciclo = detalleCiclo(await abrirCicloSiCorresponde(cobro.id, { db: dbCliente }))
+      if (ciclo) partes.push(ciclo)
+      if (partes.length === 0) return null
+      return { revisar: partes.some((p) => p.revisar), detalle: partes.map((p) => p.detalle).join(' ') }
     },
 
     async anotarEnNegocio(cobro, texto) {
