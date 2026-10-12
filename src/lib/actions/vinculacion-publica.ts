@@ -18,7 +18,7 @@
  * se podría abrir bajo la marca de cualquier otro cliente.
  */
 
-import { headers } from 'next/headers';
+import { origenDelTenant } from '@/lib/tenant/origen-tenant';
 import { marcaDelWorkspace as marcaCompartida } from '@/lib/marca/marca-workspace';
 import {
   CADENA_VACIA,
@@ -541,9 +541,7 @@ export async function enviarSolicitud(
   // El host lo pone ONE, no el navegador: si viniera del cliente, cualquiera
   // podría pedirle a Valida que mande un correo con la marca de la empresa y un
   // enlace a un sitio suyo.
-  const h = await headers();
-  const host = h.get('x-forwarded-host') ?? h.get('host') ?? '';
-  const proto = h.get('x-forwarded-proto') ?? (host.startsWith('localhost') ? 'http' : 'https');
+  const origen = await origenDelTenant();
 
   const r = await publico<{ ok: boolean }>(rutaSolicitud(token), {
     method: 'POST',
@@ -554,7 +552,7 @@ export async function enviarSolicitud(
       documento_tipo: datos.tipoDocumento,
       documento_numero: normalizarDocumento(datos.documento),
       email: datos.correo.trim().toLowerCase(),
-      enlace_base: `${proto}://${host}`,
+      enlace_base: origen,
     }),
   });
   if (!r.ok) return { ok: false, error: r.error };

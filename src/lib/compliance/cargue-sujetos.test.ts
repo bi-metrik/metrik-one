@@ -50,6 +50,7 @@ function existente(over: Partial<SujetoExistente> = {}): SujetoExistente {
     documento_numero: '900123456',
     nombre: 'Ferretería del Norte SAS',
     correo: null,
+    relacion_desde: '2026-10-01',
     relacion_hasta: null,
     ...over,
   };
@@ -242,5 +243,57 @@ describe('explicarInvalida', () => {
 
   it('un motivo desconocido se muestra crudo en vez de desaparecer', () => {
     expect(explicarInvalida('motivo_que_nadie_previo')).toBe('motivo_que_nadie_previo');
+  });
+});
+
+describe('fechas de inicio y retiros con fecha pasada (QA 2026-10-12)', () => {
+  it('el alta lleva el inicio del archivo', () => {
+    const plan = planDe([fila({ relacion_desde: '2024-07-15' })]);
+    expect(plan.items[0].accion).toBe('alta');
+    expect(plan.items[0].relacion_desde).toBe('2024-07-15');
+  });
+
+  it('el retiro anterior al inicio guardado corrige el inicio y lo dice', () => {
+    const plan = planDe(
+      [fila({ relacion_hasta: '2026-09-30', motivo: 'Terminación de contrato' })],
+      [existente({ relacion_desde: '2026-10-01' })],
+    );
+    expect(plan.items[0].accion).toBe('cierre');
+    expect(plan.items[0].relacion_desde).toBe('2026-09-30');
+    expect(plan.items[0].detalle).toContain('2026-10-01 a 2026-09-30');
+  });
+
+  it('si el archivo trae inicio, el retiro lo usa en vez de la fecha de salida', () => {
+    const plan = planDe(
+      [fila({ relacion_desde: '2024-01-10', relacion_hasta: '2026-09-30', motivo: 'Renuncia' })],
+      [existente({ relacion_desde: '2026-10-01' })],
+    );
+    expect(plan.items[0].relacion_desde).toBe('2024-01-10');
+  });
+
+  it('un retiro posterior al inicio guardado no toca el inicio', () => {
+    const plan = planDe(
+      [fila({ relacion_hasta: '2026-11-30', motivo: 'Renuncia' })],
+      [existente({ relacion_desde: '2026-10-01' })],
+    );
+    expect(plan.items[0].relacion_desde).toBeNull();
+  });
+
+  it('un inicio distinto en el archivo es una actualización; en blanco no', () => {
+    expect(planDe([fila({ relacion_desde: '2025-01-01' })], [existente()]).items[0].accion).toBe('actualizacion');
+    expect(planDe([fila()], [existente()]).items[0].accion).toBe('sin_cambio');
+  });
+
+  it('"C.C." y "CC" son el mismo tipo de documento', () => {
+    const plan = planDe(
+      [fila({ documento_tipo: 'C.C.', documento: '79123456', relacion_hasta: '2026-10-31', motivo: 'Renuncia' })],
+      [existente({ documento_tipo: 'CC', documento_numero: '79123456' })],
+    );
+    expect(plan.items[0].accion).toBe('cierre');
+  });
+
+  it('un nombre de más de 200 caracteres se rechaza en la vista previa', () => {
+    const plan = planDe([fila({ nombre: 'X'.repeat(201) })]);
+    expect(plan.invalidas[0].motivo).toBe('nombre_muy_largo');
   });
 });

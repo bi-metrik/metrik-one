@@ -98,6 +98,13 @@ export type ItemPlan = {
   nombre: string;
   tipo: TipoSujeto;
   correo: string | null;
+  /**
+   * Inicio de la relación con que queda la ficha. En un alta es la fecha del
+   * archivo; si el archivo no la trae, `aplicarCargueSujetos` pone la del
+   * cargue. En un cierre o una actualización, solo viene cuando el inicio
+   * guardado CAMBIA (ver `planearCargue`).
+   */
+  relacion_desde: string | null;
   relacion_hasta: string | null;
   motivo: string | null;
   /** El id del sujeto que ya existe. NULL en las altas. */
@@ -113,6 +120,7 @@ export type SujetoExistente = {
   documento_numero: string;
   nombre: string;
   correo: string | null;
+  relacion_desde: string;
   relacion_hasta: string | null;
 };
 
@@ -155,6 +163,9 @@ export function parsearFechaCargue(v: unknown): string | null {
 
 export const MOTIVO_CARGUE_MAX = 300;
 
+/** El mismo techo que el check `nombre_util` de `compliance_sujetos`. */
+export const NOMBRE_CARGUE_MAX = 200;
+
 /**
  * Convierte las filas crudas del XLSX en filas útiles y en filas rechazadas.
  *
@@ -179,7 +190,9 @@ export function parsearFilasCargue(
     const eco = [texto(row.documento), texto(row.nombre)].filter(Boolean).join(' — ') || '(vacía)';
 
     const tipoCrudo = texto(row.tipo).toLowerCase();
-    const documentoTipo = texto(row.documento_tipo).toUpperCase();
+    // "C.C." y "CC" son el mismo tipo: si no se igualan, el retiro del mes
+    // siguiente no encuentra la ficha y crea un duplicado cerrado.
+    const documentoTipo = texto(row.documento_tipo).toUpperCase().replace(/[\s.]/g, '');
     const documentoNumero = normalizarDocumento(texto(row.documento));
     const nombre = texto(row.nombre);
     const hasta = texto(row.relacion_hasta);
@@ -213,6 +226,10 @@ export function parsearFilasCargue(
     }
     if (nombre.length < 2) {
       invalidas.push({ fila, motivo: 'falta_nombre', eco });
+      return;
+    }
+    if (nombre.length > NOMBRE_CARGUE_MAX) {
+      invalidas.push({ fila, motivo: 'nombre_muy_largo', eco });
       return;
     }
 
@@ -323,6 +340,7 @@ export function planearCargue(
       nombre: f.nombre,
       tipo: f.tipo,
       correo: f.correo,
+      relacion_desde: f.relacion_desde,
       relacion_hasta: f.relacion_hasta,
       motivo: f.motivo,
     };
@@ -356,11 +374,25 @@ export function planearCargue(
     }
 
     if (f.relacion_hasta) {
+      // La base no deja cerrar antes del inicio guardado. Ese inicio suele ser
+      // la fecha del primer cargue (la plantilla permite dejarlo en blanco),
+      // así que el retiro de alguien que salió antes de que se cargara la base
+      // fallaría al aplicar. Se corrige el inicio —al del archivo si lo trae,
+      // si no a la fecha de salida— y se dice en la vista previa.
+      const desdeArchivo = f.relacion_desde && f.relacion_desde !== ya.relacion_desde
+        ? f.relacion_desde
+        : null;
+      const nuevoDesde = f.relacion_hasta < ya.relacion_desde
+        ? (desdeArchivo ?? f.relacion_hasta)
+        : desdeArchivo;
       items.push({
         ...base,
         accion: 'cierre',
         sujeto_id: ya.id,
-        detalle: `Se cierra el ${f.relacion_hasta}. Deja de consultarse en el monitoreo.`,
+        relacion_desde: nuevoDesde,
+        detalle:
+          `Se cierra el ${f.relacion_hasta}. Deja de consultarse en el monitoreo.` +
+          (nuevoDesde ? ` El inicio de la relación pasa de ${ya.relacion_desde} a ${nuevoDesde}.` : ''),
       });
       resumen.cierre += 1;
       continue;
@@ -375,6 +407,9 @@ export function planearCargue(
     if (f.correo && (ya.correo ?? '').toLowerCase() !== f.correo) {
       cambios.push(ya.correo ? `correo: ${ya.correo} → ${f.correo}` : `correo: ${f.correo}`);
     }
+    // Igual que el correo: un inicio en blanco es "no lo sé", no "bórralo".
+    const desdeCambia = !!f.relacion_desde && f.relacion_desde !== ya.relacion_desde;
+    if (desdeCambia) cambios.push(`inicio: ${ya.relacion_desde} → ${f.relacion_desde}`);
 
     if (cambios.length === 0) {
       items.push({
@@ -391,6 +426,7 @@ export function planearCargue(
       ...base,
       accion: 'actualizacion',
       sujeto_id: ya.id,
+      relacion_desde: desdeCambia ? f.relacion_desde : null,
       detalle: cambios.join('; '),
     });
     resumen.actualizacion += 1;
@@ -416,6 +452,7 @@ export function explicarInvalida(motivo: string): string {
     falta_documento: 'Falta el número de documento.',
     documento_muy_largo: 'El número de documento es demasiado largo.',
     falta_nombre: 'Falta el nombre o la razón social.',
+    nombre_muy_largo: `El nombre no puede pasar de ${NOMBRE_CARGUE_MAX} caracteres.`,
     relacion_desde_ilegible: `La fecha de inicio no se entiende. Usa ${FORMATO_FECHA_CARGUE}.`,
     relacion_hasta_ilegible: `La fecha de salida no se entiende. Usa ${FORMATO_FECHA_CARGUE}.`,
     cierre_sin_motivo: 'Si pones fecha de salida, escribe también el motivo. Queda en la bitácora.',
