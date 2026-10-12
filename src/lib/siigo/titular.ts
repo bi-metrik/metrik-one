@@ -21,6 +21,7 @@
 // ============================================================
 
 import { calcularDvNit } from '@/lib/dian/nit'
+import type { RutExtraido } from './mapeo'
 
 /**
  * Tipos de documento que se pueden poner al corregir. Lista CERRADA: son los que
@@ -221,6 +222,28 @@ export function titularDeConfirmacion(
     dv: esEmpresa ? (conDv?.[2] ?? calcularDvNit(base) ?? '') : '',
     nombre: esEmpresa ? [nombre] : [partes[0], partes.slice(1).join(' ')],
   }
+}
+
+/**
+ * Lo que el tercero de Siigo necesita además del documento y el nombre (dirección, ciudad, correo y
+ * teléfono), sacado del titular de «El cliente confirmó» (F5). Tiene la forma de un RUT leído para
+ * que `borradorCliente` lo resuelva igual (DIVIPOLA por departamento y municipio). Solo se usa para
+ * un negocio SIN RUT, junto con `titularDeConfirmacion`.
+ */
+export function rutDeConfirmacion(metadata: Record<string, unknown> | null | undefined): RutExtraido | null {
+  const t = (metadata ?? {}).titular_facturacion
+  if (!t || typeof t !== 'object' || Array.isArray(t)) return null
+  const c = t as Record<string, unknown>
+  const texto = (v: unknown) => (typeof v === 'string' && v.trim() !== '' ? v.trim() : undefined)
+  const rut: RutExtraido = {
+    direccion: texto(c.direccion),
+    departamento: texto(c.departamento),
+    municipio: texto(c.municipio),
+    pais: 'Colombia',
+    email: texto(c.correo),
+    telefono: texto(c.telefono),
+  }
+  return rut
 }
 
 export function leerTitularCorregido(

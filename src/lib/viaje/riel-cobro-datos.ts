@@ -15,7 +15,8 @@ import 'server-only'
  */
 
 import { createServiceClient } from '@/lib/supabase/server'
-import { emitirReciboDeCobro, type ResultadoRecibo } from '@/lib/siigo/recibos'
+import type { emitirReciboDeCobro, ResultadoRecibo } from '@/lib/siigo/recibos'
+import { proveedorDeFacturacion } from '@/lib/facturacion/proveedor'
 import { primerRecibo } from '@/lib/siigo/recibo-componentes'
 import { leerViajeDelNegocio } from '@/lib/cotizaciones/viaje-negocio'
 import { todayBogotaISO } from '@/lib/dates/bogota'
@@ -170,11 +171,17 @@ export async function emitirReciboViaje(args: {
       const cuentaId = (cobro as { cuenta_recaudo?: string | null } | null)?.cuenta_recaudo ?? null
       const cuentas = await cuentasDelNegocio(args.workspaceId, args.configLinea)
       const formaDePagoId = cuentas.find((c) => c.id === cuentaId)?.siigo_payment_id ?? null
-      resultado = await (args.emitir ?? emitirReciboDeCobro)(args.workspaceId, args.cobroId, args.staffNombre, {
-        concepto: conceptoDelRecibo(args.configLinea),
-        avisarAlCliente: false,
-        formaDePagoId,
-      })
+      const opciones = { concepto: conceptoDelRecibo(args.configLinea), avisarAlCliente: false, formaDePagoId }
+      if (args.emitir) {
+        resultado = await args.emitir(args.workspaceId, args.cobroId, args.staffNombre, opciones)
+      } else {
+        // Por la capa de proveedor (F5): Siigo hoy, Aliaddo cuando exista. Ausente = Siigo.
+        const { data: ws } = await (svc as Db).from('workspaces').select('config_extra').eq('id', args.workspaceId).maybeSingle()
+        const proveedor = proveedorDeFacturacion((ws as { config_extra?: unknown } | null)?.config_extra)
+        resultado = 'error' in proveedor
+          ? { ok: false, motivo: 'excepcion', mensaje: proveedor.error }
+          : await proveedor.emitirRecibo({ workspaceId: args.workspaceId, cobroId: args.cobroId, staffNombre: args.staffNombre, opciones })
+      }
     } catch (e) {
       resultado = { ok: false, motivo: 'excepcion', mensaje: e instanceof Error ? e.message : String(e) }
     }
