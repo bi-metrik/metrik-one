@@ -2,8 +2,12 @@
  * Diagnóstico de la conexión Siigo de un workspace.
  *
  * Ejercita el MISMO cliente que usa el producto (`siigoRequest`), no una copia
- * del payload: si esto pasa, lo que se despliega funciona. Solo lectura, no
+ * del payload: si esto pasa, lo que se despliega funciona. Solo lectura (solo GET), no
  * crea ni modifica nada en Siigo.
+ *
+ * Verifica que cada id del `siigo_config` exista y esté activo en esa empresa (comprobantes,
+ * vendedor, IVA, formas de pago, productos de viaje, forma de pago por cuenta, centro de costo)
+ * y dice el entorno (pruebas o producción). Sale con código 1 si algo falta.
  *
  * Uso:
  *   npx tsx scripts/check-siigo.ts <slug-workspace>
@@ -37,7 +41,19 @@ async function main() {
   // 1. Configuración guardada
   const cfg = await getSiigoConfig(wsId);
   console.log('Configuración de catálogo:');
-  Object.entries(cfg).forEach(([k, v]) => console.log(`  ${k}: ${v}`));
+  Object.entries(cfg).forEach(([k, v]) => console.log(`  ${k}: ${typeof v === 'object' ? JSON.stringify(v) : v}`));
+
+  // 1.bis. Cada id del `siigo_config` existe y está activo en ESTA empresa (adenda Siigo).
+  //        Solo GET: el catálogo se lee, nada se crea ni se modifica.
+  const { verificarCatalogo } = await import('../src/lib/siigo/verificar-catalogo');
+  const verificacion = await verificarCatalogo(cfg, <T,>(path: string) => siigoRequest<T>(wsId, path));
+  console.log(`\nEntorno: ${verificacion.entorno === 'pruebas' ? 'PRUEBAS (empresa de pruebas)' : 'PRODUCCIÓN (libros reales)'}`);
+  for (const l of verificacion.lineas) console.log(`  ${l.ok ? '✔' : '✗'} ${l.texto}`);
+  if (verificacion.faltan.length > 0) {
+    console.log('\nFalta en el siigo_config:');
+    verificacion.faltan.forEach(f => console.log(`  · ${f}`));
+  }
+  if (!verificacion.ok) process.exitCode = 1;
 
   // 2. Autenticación + petición real (el token se mintea dentro del cliente)
   type Doc = { id: number; name: string; electronic_type?: string };
