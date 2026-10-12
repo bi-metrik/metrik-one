@@ -34,13 +34,16 @@ import {
   candidatosDeCuota,
   candidatosDeEnvio,
   candidatosDePagoProveedor,
+  candidatosDeSalida,
   nombreNegocio,
+  salidaPideAviso,
   textoDelAviso,
   tipoDeNotificacion,
   type Candidato,
   type CotizacionEnviada,
   type CuotaFuente,
   type NegocioFuente,
+  type SalidaFuente,
   type ServicioFuente,
 } from './fuentes'
 import { cuentasDeRecaudo, linkDePagoPropio, mensajeRecordatorioCuota, type PagoViajero } from '@/lib/viaje/riel-cobro'
@@ -284,11 +287,11 @@ async function cargar(svc: Db, lineas: Linea[], fuentes: Set<string>) {
     sinError<{
       id: string; workspace_id: string; linea_id: string; nombre: string; codigo: string | null
       contacto_id: string | null; etapa_actual_id: string | null; pausado: boolean | null; estado: string
-      metadata: { seguimiento?: { aplazado_para?: unknown } } | null
+      metadata: { seguimiento?: { aplazado_para?: unknown } } | null; precio_aprobado?: number | null
     }>(
       await svc
         .from('negocios')
-        .select('id, workspace_id, linea_id, nombre, codigo, contacto_id, etapa_actual_id, pausado, estado, metadata')
+        .select('id, workspace_id, linea_id, nombre, codigo, contacto_id, etapa_actual_id, pausado, estado, metadata, precio_aprobado')
         .in('linea_id', t)
         .eq('estado', 'abierto'),
       'negocios',
@@ -300,7 +303,7 @@ async function cargar(svc: Db, lineas: Linea[], fuentes: Set<string>) {
   )
   const numeroDe = new Map(etapas.map((e) => [e.id, e.numero]))
   const contactoIds = [...new Set(negociosRaw.map((n) => n.contacto_id).filter((x): x is string => !!x))]
-  const contactos = fuentes.has('envio') || fuentes.has('aplazado') || fuentes.has('cuota')
+  const contactos = fuentes.has('envio') || fuentes.has('aplazado') || fuentes.has('cuota') || fuentes.has('salida')
     ? await porTandas(contactoIds, async (t) =>
         sinError<{ id: string; nombre: string; email?: string | null; telefono?: string | null }>(
           await svc.from('contactos').select('id, nombre, email, telefono').in('id', t),
@@ -322,6 +325,7 @@ async function cargar(svc: Db, lineas: Linea[], fuentes: Set<string>) {
     pausado: n.pausado === true,
     estado: n.estado,
     aplazado_para: typeof n.metadata?.seguimiento?.aplazado_para === 'string' ? n.metadata.seguimiento.aplazado_para : null,
+    precio_aprobado: n.precio_aprobado === undefined || n.precio_aprobado === null ? null : Number(n.precio_aprobado),
   }))
   const negocioIds = negocios.map((n) => n.id)
 
@@ -358,7 +362,7 @@ async function cargar(svc: Db, lineas: Linea[], fuentes: Set<string>) {
   }
   let cuotas: CuotaFuente[] = []
   const pagos = new Map<string, PagoViajero[]>()
-  if (fuentes.has('cuota')) {
+  if (fuentes.has('cuota') || fuentes.has('salida')) {
     const planes = await porTandas(negocioIds, async (t) =>
       sinError<{ id: string; negocio_id: string }>(
         await svc.from('negocio_planes_pago').select('id, negocio_id').in('negocio_id', t).eq('estado', 'acordado'),
@@ -382,7 +386,25 @@ async function cargar(svc: Db, lineas: Linea[], fuentes: Set<string>) {
     )
     for (const c of cobros) (pagos.get(c.negocio_id) ?? pagos.set(c.negocio_id, []).get(c.negocio_id)!).push(c)
   }
-  return { negocios, cotizaciones, servicios, pagado, cuotas, pagos, contactoDe }
+  // La fecha de salida del viaje (bloque de la etapa 1), solo de los que tienen plan.
+  let salidas: SalidaFuente[] = []
+  if (fuentes.has('salida')) {
+    const conPlan = [...new Set(cuotas.map((c) => c.negocio_id))]
+    const filas = await porTandas(conPlan, async (t) =>
+      sinError<{ negocio_id: string; fecha_salida: unknown }>(
+        await svc.from('negocio_bloques').select('negocio_id, fecha_salida:data->fecha_salida').in('negocio_id', t),
+        'fechas de salida',
+      ),
+    )
+    const vistos = new Set<string>()
+    for (const f of filas) {
+      const fecha = typeof f.fecha_salida === 'string' ? /^(\d{4}-\d{2}-\d{2})/.exec(f.fecha_salida.trim())?.[1] : undefined
+      if (!fecha || vistos.has(f.negocio_id)) continue
+      vistos.add(f.negocio_id)
+      salidas.push({ negocio_id: f.negocio_id, fecha_salida: fecha })
+    }
+  }
+  return { negocios, cotizaciones, servicios, pagado, cuotas, pagos, contactoDe, salidas }
 }
 
 /** Lo que el mensaje al viajero necesita y no está en el negocio: agencia, link propio y comercial. */
@@ -448,7 +470,7 @@ export async function correrRecordatorios(svc: Db, opts: { hoy: string }): Promi
   if (lineas.length === 0) return resumen
 
   const fuentes = new Set([...reglasDe.values()].flat().map((r) => r.fuente))
-  const { negocios, cotizaciones, servicios, pagado, cuotas, pagos, contactoDe } = await cargar(svc, lineas, fuentes)
+  const { negocios, cotizaciones, servicios, pagado, cuotas, pagos, contactoDe, salidas } = await cargar(svc, lineas, fuentes)
   resumen.negocios = negocios.length
   const lineaDe = new Map(lineas.map((l) => [l.id, l]))
 
@@ -457,6 +479,7 @@ export async function correrRecordatorios(svc: Db, opts: { hoy: string }): Promi
     ...(fuentes.has('pago_proveedor') ? candidatosDePagoProveedor(negocios, servicios, pagado) : []),
     ...(fuentes.has('aplazado') ? candidatosDeAplazado(negocios) : []),
     ...(fuentes.has('cuota') ? candidatosDeCuota(negocios, cuotas, pagos, hoy) : []),
+    ...(fuentes.has('salida') ? candidatosDeSalida(negocios, salidas, cuotas, pagos, hoy) : []),
   ]
   const destinatarios = new Destinatarios(svc)
   const datosViajero = new DatosViajero(svc)
@@ -469,6 +492,7 @@ export async function correrRecordatorios(svc: Db, opts: { hoy: string }): Promi
       .filter((regla) => regla.fuente === c.fuente)
       .filter((regla) => regla.etapa_numero === null || c.negocio.etapa_numero === regla.etapa_numero)
       .filter((regla) => !(regla.fuente === 'envio' && c.negocio.pausado))
+      .filter((regla) => regla.fuente !== 'salida' || salidaPideAviso(c.detalle, regla.offset))
       .map((regla) => ({ regla, disparo: fechaDeDisparo(regla, c.fechaObjetivo) }))
       .filter(({ disparo }) => tocaHoy(disparo, hoy))
     for (const { regla, disparo } of tocan) {
