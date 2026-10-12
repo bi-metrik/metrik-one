@@ -112,14 +112,15 @@ export type ReglaDelNegocio =
 export async function reglaDelNegocio(svc: Db, workspaceId: string, negocioId: string): Promise<ReglaDelNegocio | null> {
   const { data } = await svc
     .from('negocios')
-    .select('id, precio_aprobado, metadata, lineas_negocio(config_extra)')
+    .select('id, precio_aprobado, metadata, linea_id')
     .eq('id', negocioId)
     .eq('workspace_id', workspaceId)
     .maybeSingle()
   if (!data) return null
-  const n = data as NegocioParaColaViaje & { lineas_negocio?: unknown }
-  const l = Array.isArray(n.lineas_negocio) ? n.lineas_negocio[0] : n.lineas_negocio
-  const cfg = configFacturacionLinea((l as { config_extra?: unknown } | null)?.config_extra)
+  const n = data as NegocioParaColaViaje & { linea_id: string | null }
+  if (!n.linea_id) return { regla: 'etapa' }
+  const { data: linea } = await svc.from('lineas_negocio').select('config_extra').eq('id', n.linea_id).maybeSingle()
+  const cfg = configFacturacionLinea((linea as { config_extra?: unknown } | null)?.config_extra)
   if (!cfg.activo) return { regla: 'apagada' }
   if (!cfg.porTitular) return { regla: 'etapa' }
   const estado = (await estadosViaje(svc, workspaceId, [n])).get(n.id)!
