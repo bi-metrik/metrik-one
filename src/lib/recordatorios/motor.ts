@@ -387,7 +387,7 @@ async function cargar(svc: Db, lineas: Linea[], fuentes: Set<string>) {
     for (const c of cobros) (pagos.get(c.negocio_id) ?? pagos.set(c.negocio_id, []).get(c.negocio_id)!).push(c)
   }
   // La fecha de salida del viaje (bloque de la etapa 1), solo de los que tienen plan.
-  let salidas: SalidaFuente[] = []
+  const salidas: SalidaFuente[] = []
   if (fuentes.has('salida')) {
     const conPlan = [...new Set(cuotas.map((c) => c.negocio_id))]
     const filas = await porTandas(conPlan, async (t) =>
