@@ -11,6 +11,9 @@
  *   · `pago_proveedor`: la fecha límite de pago de cada servicio por reservar o reservado
  *     (`negocio_servicios.fecha_limite_pago`). Pendiente mientras lo pagado (Σ gastos de la fila)
  *     no cubra el valor a pagar. «Pagado» se deriva de la plata, no de un estado escrito (Vera C6).
+ *   · `aplazado`: el día que la comercial escogió al aplazar (`negocios.metadata.seguimiento.
+ *     aplazado_para`, F1-4). Pendiente mientras el negocio siga abierto. No se lee de
+ *     `pausado_hasta`: el cron de pausa lo borra al reactivar, a primera hora, antes del motor.
  */
 
 import { todayBogotaISO } from '@/lib/dates/bogota'
@@ -28,6 +31,8 @@ export interface NegocioFuente {
   etapa_numero: number | null
   pausado: boolean
   estado: string
+  /** `metadata.seguimiento.aplazado_para`, si la comercial aplazó con el seguimiento encendido. */
+  aplazado_para?: string | null
 }
 
 export interface CotizacionEnviada {
@@ -48,7 +53,7 @@ export interface ServicioFuente {
 
 export interface Candidato {
   fuente: FuenteRecordatorio
-  entidadTipo: 'cotizacion' | 'servicio' | 'cuota'
+  entidadTipo: 'cotizacion' | 'servicio' | 'negocio' | 'cuota'
   entidadId: string
   negocio: NegocioFuente
   fechaObjetivo: string
@@ -88,6 +93,17 @@ export function candidatosDeEnvio(negocios: NegocioFuente[], cotizaciones: Cotiz
       fechaObjetivo: fechaCivil(c.fecha_envio),
       detalle: {},
     })
+  }
+  return out
+}
+
+/** El toque del día que se escogió al aplazar. Una fecha nueva (otro aplazamiento) rearma. */
+export function candidatosDeAplazado(negocios: NegocioFuente[]): Candidato[] {
+  const out: Candidato[] = []
+  for (const n of negocios) {
+    const f = n.aplazado_para
+    if (!f || n.estado !== 'abierto' || !/^\d{4}-\d{2}-\d{2}/.test(f)) continue
+    out.push({ fuente: 'aplazado', entidadTipo: 'negocio', entidadId: n.id, negocio: n, fechaObjetivo: f.slice(0, 10), detalle: {} })
   }
   return out
 }
@@ -200,6 +216,10 @@ export function textoDelAviso(c: Candidato, offset: number, hoy: string): string
     const quien = c.negocio.contacto_nombre?.trim() || 'el cliente'
     return `Hoy toca escribirle a ${quien} (${negocio}): le enviaste la cotización el ${fechaEnPalabras(c.fechaObjetivo)}.`
   }
+  if (c.fuente === 'aplazado') {
+    const quien = c.negocio.contacto_nombre?.trim() || 'al cliente'
+    return `Hoy quedaste de volver a escribirle a ${quien} (${negocio}).`
+  }
   const servicio = String(c.detalle.servicio ?? 'el servicio')
   const falta = typeof c.detalle.falta === 'number' ? ` Faltan ${FMT_PESOS.format(c.detalle.falta)}.` : ''
   if (offset > 0 || c.fechaObjetivo < hoy) {
@@ -211,7 +231,7 @@ export function textoDelAviso(c: Candidato, offset: number, hoy: string): string
 
 /** Tipo de notificación (los tipos ya están en el CHECK desde la migración de F0). */
 export function tipoDeNotificacion(c: Candidato, offset: number, hoy: string): string {
-  if (c.fuente === 'envio') return 'toque_seguimiento'
+  if (c.fuente === 'envio' || c.fuente === 'aplazado') return 'toque_seguimiento'
   if (c.fuente === 'cuota') return offset > 0 || c.fechaObjetivo < hoy ? 'cobro_vencido' : 'cuota_por_vencer'
   return offset > 0 || c.fechaObjetivo < hoy ? 'pago_proveedor_vencido' : 'pago_proveedor_por_vencer'
 }

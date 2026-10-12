@@ -18,8 +18,12 @@
 
 import { esDiaHabil } from '@/lib/dates/dias-habiles'
 
-/** Fuentes que el motor sabe leer hoy. Las de salida y regreso llegan con F4-F6. */
-export const FUENTES_SOPORTADAS = ['envio', 'pago_proveedor', 'cuota'] as const
+/**
+ * Fuentes que el motor sabe leer hoy. Las de salida y regreso llegan con F4-F6.
+ * `aplazado` (F1, PR 5): el día en que la comercial quedó de volver a escribir al aplazar.
+ * `cuota` (F2, PR 9): las cuotas del plan de pagos del viajero.
+ */
+export const FUENTES_SOPORTADAS = ['envio', 'pago_proveedor', 'aplazado', 'cuota'] as const
 export type FuenteRecordatorio = (typeof FUENTES_SOPORTADAS)[number]
 
 /**
@@ -61,6 +65,8 @@ export const REGLAS_POR_DEFECTO: readonly ReglaRecordatorio[] = [
   { id: 'toque_1', fuente: 'envio', offset: 1, dias: 'habiles', etapa_numero: 3, a: ['responsable'], canales: ['in_app'] },
   { id: 'toque_3', fuente: 'envio', offset: 3, dias: 'habiles', etapa_numero: 3, a: ['responsable'], canales: ['in_app'] },
   { id: 'toque_7', fuente: 'envio', offset: 7, dias: 'habiles', etapa_numero: 3, a: ['responsable'], canales: ['in_app'] },
+  // «Aplazar exige fecha y deja un toque ese día» (F1-4).
+  { id: 'toque_aplazado', fuente: 'aplazado', offset: 0, dias: 'calendario', etapa_numero: null, a: ['responsable'], canales: ['in_app'] },
   // Cuotas del plan del viajero (§2.3 bis 4, F4-6): 3 días antes y el día al cliente; el día a la
   // comercial; vencida a los 2 días, a la dirección una sola vez.
   { id: 'cuota_t3', fuente: 'cuota', offset: -3, dias: 'calendario', etapa_numero: null, a: ['cliente'], canales: ['email', 'wa_manual'] },

@@ -128,6 +128,8 @@ export const COLUMNAS_QUE_NO_VIAJAN = [
   'email_enviado_a',
   'duplicada_de',
   'tarifa_aceptada_id',
+  // Por qué existe ESTA versión (F1-3): la copia lleva el suyo, que se pide al duplicar.
+  'origen_version',
   // Embebidos de un `select` con relaciones: no son columnas.
   'oportunidades',
   'items',

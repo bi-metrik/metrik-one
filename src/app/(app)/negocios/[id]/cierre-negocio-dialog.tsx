@@ -43,19 +43,25 @@ interface CierreNegocioDialogProps {
    * Esto es UX, no seguridad: el guard real vive en `completarNegocio`.
    */
   puedeCierreNoFacturable?: boolean
+  /**
+   * Motivos de la línea con el seguimiento encendido (F1-4, Vera C10): los cinco de Noor,
+   * cada uno sobre un `value` global. Ausente = la lista global de siempre.
+   */
+  motivosPerdida?: ReadonlyArray<{ value: string; label: string }>
   onClose: () => void
 }
 
 // ── Stage: VENTA — Desistir del negocio ─────────────────────────────────────
 
-function PerderForm({ negocioId, esBuzonLeads, onClose }: { negocioId: string; esBuzonLeads?: boolean; onClose: () => void }) {
+function PerderForm({ negocioId, esBuzonLeads, motivosPerdida, onClose }: { negocioId: string; esBuzonLeads?: boolean; motivosPerdida?: ReadonlyArray<{ value: string; label: string }>; onClose: () => void }) {
   const router = useRouter()
   const [isPending, startTransition] = useTransitionTolerante()
   const [razon, setRazon] = useState('')
   const [notas, setNotas] = useState('')
   // Desde el buzón (Recepción) se descarta un lead → razones de triage; en el
   // resto de la venta → razones de pérdida comercial.
-  const razones = esBuzonLeads ? RAZONES_DESCARTE_LEAD : RAZONES_PERDIDA_NEGOCIO
+  const razones = esBuzonLeads ? RAZONES_DESCARTE_LEAD : (motivosPerdida ?? RAZONES_PERDIDA_NEGOCIO)
+  const conSeguimiento = !esBuzonLeads && !!motivosPerdida
 
   const handleConfirm = () => {
     if (!razon) return
@@ -64,7 +70,7 @@ function PerderForm({ negocioId, esBuzonLeads, onClose }: { negocioId: string; e
       if (res.error) {
         toast.error(res.error)
       } else {
-        toast.success('Negocio marcado como desistido')
+        toast.success(conSeguimiento ? 'Se perdió. Quedó el motivo.' : 'Negocio marcado como desistido')
         onClose()
         router.refresh()
       }
@@ -75,7 +81,7 @@ function PerderForm({ negocioId, esBuzonLeads, onClose }: { negocioId: string; e
     <>
       <h3 className="text-sm font-bold text-tinta">{esBuzonLeads ? 'Descartar lead' : 'Desistir del negocio'}</h3>
       <p className="text-xs text-tinta-suave">
-        {esBuzonLeads ? 'Motivo del descarte (obligatorio)' : 'Selecciona la razon principal'}
+        {esBuzonLeads ? 'Motivo del descarte (obligatorio)' : conSeguimiento ? '¿Por qué se perdió?' : 'Selecciona la razon principal'}
       </p>
 
       <div className="space-y-1.5 mt-3">
@@ -394,6 +400,7 @@ export default function CierreNegocioDialog({
   resumenFinanciero,
   precioAprobado,
   puedeCierreNoFacturable = false,
+  motivosPerdida,
   onClose,
 }: CierreNegocioDialogProps) {
   // El stage dice QUIEN trabaja la etapa, no si el proceso termina ahi. Con la linea
@@ -435,7 +442,7 @@ export default function CierreNegocioDialog({
           no facturable y en pantallas bajas se salia del viewport. */}
       <div className="my-auto flex max-h-[90vh] w-full max-w-md flex-col overflow-y-auto rounded-xl bg-white shadow-xl p-6 space-y-1">
         {stage === 'venta' && !showCompletar && (
-          <PerderForm negocioId={negocioId} esBuzonLeads={esBuzonLeads} onClose={onClose} />
+          <PerderForm negocioId={negocioId} esBuzonLeads={esBuzonLeads} motivosPerdida={motivosPerdida} onClose={onClose} />
         )}
         {showCancelar && (
           <CancelarForm negocioId={negocioId} onClose={onClose} />

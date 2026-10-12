@@ -8,6 +8,8 @@ import { toast } from 'sonner'
 import { enviarCotizacionNegocio, aceptarCotizacionNegocio, rechazarCotizacionNegocio, duplicarCotizacionNegocio, eliminarCotizacionBorrador, corregirCotizacionAceptada, opcionesDeAprobacion } from '../cotizacion/actions'
 import { nombreMostrable } from '@/lib/cotizaciones/nombre-cotizacion'
 import ElegirTarifaAprobacion, { type TarifaOpcion } from './ElegirTarifaAprobacion'
+import ElegirOrigenVersion from '@/components/cotizacion/elegir-origen-version'
+import type { OrigenVersion } from '@/lib/negocios/seguimiento'
 
 interface CotizacionResumen {
   id: string
@@ -35,6 +37,8 @@ interface BloqueCotizacionProps {
    * ejecutar — esto solo dibuja el botón.
    */
   puedeCorregir?: boolean
+  /** Seguimiento encendido en la línea (F1-3): «Duplicar» pregunta de dónde sale la versión. */
+  pedirOrigenAlDuplicar?: boolean
 }
 
 const fmt = (v: number) =>
@@ -64,7 +68,7 @@ const ESTADO_ORDER: Record<string, number> = {
   vencida: 4,
 }
 
-export default function BloqueCotizacion({ negocioId, modo, cotizaciones, skipEnviar, puedeCorregir = false }: BloqueCotizacionProps) {
+export default function BloqueCotizacion({ negocioId, modo, cotizaciones, skipEnviar, puedeCorregir = false, pedirOrigenAlDuplicar = false }: BloqueCotizacionProps) {
   const [isPending, startTransition] = useTransitionTolerante()
   const [optimisticAceptadaId, setOptimisticAceptadaId] = useState<string | null>(null)
   /**
@@ -89,15 +93,24 @@ export default function BloqueCotizacion({ negocioId, modo, cotizaciones, skipEn
 
   const hayEnviada = cotizaciones.some(c => c.estado === 'enviada')
 
-  const handleDuplicar = (cotizacionId: string) => {
+  /** La cotización que se va a duplicar mientras se escoge el origen (F1-3). */
+  const [duplicando, setDuplicando] = useState<string | null>(null)
+
+  const duplicar = (cotizacionId: string, origen: OrigenVersion | null) => {
     startTransition(async () => {
-      const res = await duplicarCotizacionNegocio(cotizacionId, negocioId)
+      const res = await duplicarCotizacionNegocio(cotizacionId, negocioId, origen)
+      setDuplicando(null)
       if (!res.success) {
         toast.error(res.error)
       } else {
         toast.success('Cotización duplicada como borrador')
       }
     })
+  }
+
+  const handleDuplicar = (cotizacionId: string) => {
+    if (pedirOrigenAlDuplicar) setDuplicando(cotizacionId)
+    else duplicar(cotizacionId, null)
   }
 
   const handleEliminar = (cotizacionId: string) => {
@@ -364,6 +377,14 @@ export default function BloqueCotizacion({ negocioId, modo, cotizaciones, skipEn
             )
           })}
         </div>
+      )}
+
+      {duplicando && (
+        <ElegirOrigenVersion
+          pendiente={isPending}
+          onElegir={(origen) => duplicar(duplicando, origen)}
+          onCancelar={() => setDuplicando(null)}
+        />
       )}
 
       {/* Nueva cotización — oculto si hay aceptada */}

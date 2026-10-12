@@ -1,13 +1,13 @@
 ---
 name: post-cotizacion-servicios-f0
-description: Post-cotización Trappvel ola 1 (2026-10-12) — Total cobrado, filtro de líneas, F0 servicios del viaje (migración 20261012150000 SIN aplicar, PR 3 apilado)
+description: Post-cotización Trappvel ola 1 (2026-10-12) — Total cobrado, filtro de líneas, F0 servicios del viaje (migración 20261012150000 aplicada, #1112 mergeado)
 metadata:
   type: project
 ---
 
 Ola 1 del plan post-cotización (PR #1108 Total cobrado, #1109 líneas activas, #1111 esquema F0, PR 3 código F0
-apilado sobre #1111). Migración `20261012150000_servicios_viaje_esquema` **SIN aplicar**: va ANTES del merge de
-#1111 y del PR 3 (que la lee). Interruptor: `lineas_negocio.config_extra.servicios_viaje.activo === true`.
+apilado sobre #1111). Migración `20261012150000_servicios_viaje_esquema` aplicada en producción (verificado por
+la sesión principal, 2026-10-12) y #1111/#1112 mergeados. Interruptor: `lineas_negocio.config_extra.servicios_viaje.activo === true`.
 
 **Why:** Vera (`vera-criterios-post-cotizacion-2026-10-12.md`) es vinculante y cambió el diseño técnico: estado
 escrito solo por_reservar/reservado/cancelado (C6), cortesías solo como gasto `cortesia_viaje` (sin tipo
