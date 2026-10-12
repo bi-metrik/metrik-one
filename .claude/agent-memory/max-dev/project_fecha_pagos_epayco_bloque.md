@@ -9,4 +9,6 @@ metadata:
 
 **Why:** Daniela (SOENA) pidió ver la fecha; mostrar `pagos[].fecha` corría un día V0136 (ref 386159602).
 
-**How to apply:** cualquier lector nuevo de `pagos[].fecha` de pagos viejos debe ir al cobro. Hueco ABIERTO, reportado sin arreglar: `autoCrearCobrosMulti` (BloqueDatosMultiPago) inserta `cobros.fecha = todayBogotaISO()`, el mismo defecto que #312 arregló para ePayco, y ese bloque no muestra fecha.
+**How to apply:** cualquier lector nuevo de `pagos[].fecha` de pagos viejos debe ir al cobro.
+
+Multi-pago (2026-10-12, fix/fecha-cobro-multipago): `autoCrearCobrosMulti` ya fecha por ePayco (`lib/epayco/fecha-cobro-multi-pago.ts`), no por campo manual: el campo ES la referencia ePayco y la cuenta es global, así que solo consulta refs numéricas con `REQUISITO.pagoEpayco`; si no, registro + nota. El bloque empareja fecha por (ref, valor) con multiplicidad, no solo por ref. `FechaDelPago` vive en `bloques/FechaDelPago.tsx`.

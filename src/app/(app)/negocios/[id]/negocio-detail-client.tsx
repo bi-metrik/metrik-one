@@ -1822,6 +1822,7 @@ function BloqueRenderer({
             modo={modo}
             fields={fields as MultiPagoField[]}
             faltaHonorario={faltaHonorarioConfirmado}
+            cobros={cobros}
           />
         )
       }

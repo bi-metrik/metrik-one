@@ -29,6 +29,8 @@ import { routingDeEtapa } from '@/lib/negocios/retorno-reproceso'
 import type { EtapaDelSegmentador } from '@/lib/negocios/linea-de-flujo'
 import type { GuiaEtapa } from '@/lib/negocios/guia-etapa'
 import { todayBogotaISO } from '@/lib/dates/bogota'
+import { fechasDeCobrosMulti, notaCobroMulti } from '@/lib/epayco/fecha-cobro-multi-pago'
+import { consultarTransaccionEpayco } from '@/lib/epayco'
 import { bloqueTipoCode } from '@/components/workflow/types'
 import { seccionalDesdeRut, requiereCitaDian, nombreOficialSeccional, labelCanonicoSeccional } from '@/lib/dian/seccionales'
 import { fijarSeccionalNegocio } from '@/lib/negocios/seccional-negocio'
@@ -5847,7 +5849,7 @@ async function autoCrearCobrosMulti(
   // Recorrer las filas pedidas; insertar solo las que exceden lo ya registrado
   // por su par (ref, monto). El Map se decrementa por cada par "consumido" para
   // que un pago repetido legítimamente (2 filas iguales) registre 2 cobros.
-  const nuevos = pagos
+  const pendientes = pagos
     .filter(p => {
       const k = claveDe(p.referencia_epayco, p.valor_pago)
       const ya = restante.get(k) ?? 0
@@ -5857,15 +5859,28 @@ async function autoCrearCobrosMulti(
       }
       return true
     })
-    .map(p => ({
-      workspace_id: workspaceId,
-      negocio_id: negocioId,
-      notas: 'Pago',
-      monto: p.valor_pago,
-      tipo_cobro: 'pago',
-      fecha: todayBogotaISO(),
-      external_ref: p.referencia_epayco,
-    }))
+
+  // La fecha del cobro es la del PAGO en ePayco, no la del registro (decisión 2026-08-18,
+  // el mismo defecto que #312 arregló en `registrarPagoEpayco`). Solo se consulta lo que
+  // es nuevo: re-guardar el mismo pago no vuelve a llamar a ePayco. Sin fecha legible cae
+  // en el día del registro y la nota lo dice. Ver `lib/epayco/fecha-cobro-multi-pago.ts`.
+  const fechas = pendientes.length > 0
+    ? await fechasDeCobrosMulti(pendientes.map(p => p.referencia_epayco), {
+        puedeConsultar: async () => (await exigirModulo(REQUISITO.pagoEpayco)).ok,
+        consultar: consultarTransaccionEpayco,
+        hoy: todayBogotaISO(),
+      })
+    : []
+
+  const nuevos = pendientes.map((p, i) => ({
+    workspace_id: workspaceId,
+    negocio_id: negocioId,
+    notas: notaCobroMulti(p.referencia_epayco, fechas[i].dePago),
+    monto: p.valor_pago,
+    tipo_cobro: 'pago',
+    fecha: fechas[i].fecha,
+    external_ref: p.referencia_epayco,
+  }))
 
   if (nuevos.length > 0) {
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
