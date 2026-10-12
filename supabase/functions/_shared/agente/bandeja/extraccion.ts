@@ -67,12 +67,33 @@ function formatoDe(f: CampoEntendible): string {
   return 'texto';
 }
 
+/**
+ * El viaje en el que una comercial PEGÓ una conversación (copiada de WhatsApp o exportada a .txt). Sin esto el prompt es
+ * el del bot, byte por byte. `viaje` lo nombra (código, nombre, cliente) para que el modelo decida qué es de este viaje.
+ */
+export interface ChatPegado { viaje: string }
+
+/** Lo que cambia cuando el texto es una conversación pegada y no los mensajes de un turno del bot. */
+function parrafoChat(chat: ChatPegado): string[] {
+  return [
+    '',
+    'Esta vez no son mensajes sueltos del comercial: pegó una CONVERSACIÓN de WhatsApp (copiada o exportada), entre la',
+    'agencia y el cliente. Cada línea es un mensaje y puede traer la fecha, la hora y el nombre de quien escribe: esa',
+    `fecha es la del mensaje, no la del viaje. El viaje es ${chat.viaje.replace(/\s+/g, ' ').trim().slice(0, 200)}.`,
+    'Un chat puede hablar de más de un viaje, o de personas que no viajan en este. Tú decides qué es de ESTE viaje: los',
+    'mensajes de otro viaje son «tercero» y no sostienen valores. Si el viaje todavía no tiene datos y el chat pide varios,',
+    'este es el que el chat pide primero, salvo que el nombre del viaje diga otro. Lo que la agencia confirma o resume del',
+    'pedido cuenta como «cliente»; sus preguntas, saludos y promociones no.',
+  ];
+}
+
 /** Las instrucciones para el modelo de extracción. Los campos, sus opciones y lo que ya se sabe salen de la config y del viaje. */
 export function instruccionesCarga(
   fields: ReadonlyArray<CampoEntendible>,
   hoyISO: string,
   yaTiene: Record<string, unknown> = {},
   propuesto: Record<string, unknown> = {},
+  chat?: ChatPegado,
 ): string {
   const campos = camposEntendibles(fields);
   const deTexto = campos.filter((f) => f.tipo === 'texto' && !opcionesDe(f).length).map((f) => f.slug);
@@ -86,6 +107,7 @@ export function instruccionesCarga(
     'lo que propongas antes de que se guarde.',
     '',
     `Hoy es ${hoyISO} (Bogotá).`,
+    ...(chat ? parrafoChat(chat) : []),
     ...(sabidos.length ? ['', 'Lo que el viaje YA tiene:', ...sabidos] : ['', 'El viaje todavía no tiene datos.']),
     ...(enEspera.length ? ['', 'Lo que ya le propusiste al comercial y todavía no confirma:', ...enEspera] : []),
     '',
@@ -130,6 +152,10 @@ export function instruccionesCarga(
     '   con sus palabras entre comillas («"Económico": ¿lo dejo como nota o es un rango?»); opciones, 2 a 4 respuestas',
     '   concretas («Menos de $3 millones», «Entre $3 y $5 millones», «Solo como nota»). Sin dudas, lista vacía. No',
     '   preguntes lo que nadie mencionó: eso lo pide el sistema aparte.',
+    ...(chat ? [
+      '5. otros: una línea corta por cada viaje o persona aparte de ESTE viaje que aparezca en el chat («Viaje de la',
+      '   hermana a Madrid en diciembre»), sin teléfonos, correos ni documentos. Sin nada aparte, lista vacía.',
+    ] : []),
     '',
     'Campos:',
     ...campos.map((f) => `- ${f.slug}: ${f.label ?? f.slug}${f.ayuda ? ` — ${f.ayuda}` : ''}. Formato: ${formatoDe(f)}.`),
@@ -137,7 +163,7 @@ export function instruccionesCarga(
 }
 
 /** El `responseSchema` de la extracción, generado de la config. */
-export function esquemaCarga(fields: ReadonlyArray<CampoEntendible>): Record<string, unknown> {
+export function esquemaCarga(fields: ReadonlyArray<CampoEntendible>, opts: { chat?: boolean } = {}): Record<string, unknown> {
   const campos = camposEntendibles(fields);
   const properties: Record<string, unknown> = {};
   for (const f of campos) {
@@ -170,6 +196,7 @@ export function esquemaCarga(fields: ReadonlyArray<CampoEntendible>): Record<str
           required: ['campo', 'pregunta'],
         },
       },
+      ...(opts.chat ? { otros: { type: 'array', items: { type: 'string' } } } : {}),
     },
     required: ['mensajes', 'valores'],
   };
@@ -183,6 +210,8 @@ export interface CargaValidada {
   dudas: Duda[];
   descartados: Array<{ slug: string; motivo: string }>;
   historia: string;
+  /** Viajes o personas aparte que el modelo vio en una conversación pegada (solo con `esquemaCarga(…, { chat })`). */
+  otros: string[];
 }
 
 /** Una duda de la extracción: el campo, la pregunta y respuestas concretas. Se pregunta; no bloquea lo demás. */
@@ -210,6 +239,20 @@ function dudasDe(raw: unknown, campos: ReadonlyArray<CampoEntendible>): Duda[] {
     out.push({ campo, pregunta, opciones });
   }
   return out.map((d, i) => ({ d, i })).sort((a, b) => nivel.get(a.d.campo)! - nivel.get(b.d.campo)! || a.i - b.i).map((x) => x.d);
+}
+
+const MAX_OTRO = 160;
+const MAX_OTROS = 5;
+
+/** Los viajes o personas aparte, acotados: texto, corto, a lo más 5 y sin repetir. No lee el texto. Pura. */
+function otrosDe(raw: unknown): string[] {
+  if (!Array.isArray(raw)) return [];
+  const out: string[] = [];
+  for (const x of raw) {
+    const t = typeof x === 'string' ? x.replace(/\s+/g, ' ').trim() : '';
+    if (t && !out.includes(t)) out.push(t.length > MAX_OTRO ? `${t.slice(0, MAX_OTRO - 1)}…` : t);
+  }
+  return out.slice(0, MAX_OTROS);
 }
 
 /** La duda como una línea del mensaje: «"Económico": ¿lo dejo como nota o es un rango? (A / B / C)». Pura. */
@@ -255,7 +298,7 @@ export function validarCarga(
   const fuente = textosDelViaje(r, textos);
   const enFuente = fuente.map(normalizarTexto);
   const campos = camposEntendibles(fields);
-  const out: CargaValidada = { sugeridos: {}, quitar: {}, dudas: dudasDe(r.dudas, campos), descartados: [], historia: historiaDeCitas(r.citas, fuente.join('\n---\n')) };
+  const out: CargaValidada = { sugeridos: {}, quitar: {}, dudas: dudasDe(r.dudas, campos), descartados: [], historia: historiaDeCitas(r.citas, fuente.join('\n---\n')), otros: otrosDe(r.otros) };
   const descartar = (slug: string, motivo: string) => out.descartados.push({ slug, motivo });
   const tope = masMeses(opts.hoyISO, MESES_MAXIMOS);
   const enDuda = new Set(out.dudas.map((d) => d.campo));

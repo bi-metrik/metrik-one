@@ -191,7 +191,7 @@ import { abonarEnSegundoPlano } from '@/lib/siigo/segundo-plano'
 import { avisarSobrepagoSiCorresponde } from '@/lib/cobros/aviso-sobrepago-servidor'
 import { cerrarReprocesoSiSeRehizoElTramo } from '@/lib/negocios/cierre-reproceso-servidor'
 import { crearCobrosSoenaCore, leerModeloDineroNegocio, leerModeloDineroCompleto } from '@/lib/actions/conciliacion-actions'
-import { bloqueCobrosCompleto, cobradoConfirmado } from '@/lib/cobros/saldo-negocio'
+import { bloqueCobrosCompleto, cobradoConfirmado, resumenDeCobro } from '@/lib/cobros/saldo-negocio'
 import { asignarResponsable } from '@/lib/negocios/responsable-rol'
 import { leerAviso } from '@/lib/correcciones/retroceso'
 import { getCachedUser } from '@/lib/supabase/auth-user'
@@ -2150,6 +2150,8 @@ export async function getDatosNuevoNegocio(): Promise<{
       .from('lineas_negocio')
       .select('id, workspace_id, nombre, tipo, numero')
       .or(`workspace_id.is.null,workspace_id.eq.${workspaceId}`)
+      // Igual que «Nuevo negocio»: una línea apagada no se ofrece para crear.
+      .eq('is_active', true)
       .order('numero', { ascending: true }),
   ])
 
@@ -2174,6 +2176,23 @@ async function crearNegocioSinClave(input: EntradaCrearNegocio): Promise<Resulta
   // Crear un negocio es la puerta a todo Clarity (bloques, carpeta de Drive, cobros): un
   // workspace sin el módulo no crea negocios sobre sí mismo aunque llame a la acción.
   if (!(await exigirModulo(REQUISITO.clarity)).ok) return { negocio_id: null, error: MENSAJE_MODULO_NO_ACTIVO }
+
+  // «Nuevo negocio» solo ofrece las líneas activas del workspace (`negocios/nuevo/page.tsx`).
+  // Aquí se exige lo mismo, porque la pantalla solo esconde: una línea apagada (p. ej. el clon
+  // de prueba de una línea que se está rediseñando) o de otro workspace no recibe negocios
+  // por esta puerta aunque alguien mande su id. Sin `linea_id` explícito no se mira nada: el
+  // negocio entra por `linea_activa_id`, como siempre (conversión de leads, bandeja).
+  if (input.linea_id) {
+    const { data: linea } = await db(supabase)
+      .from('lineas_negocio')
+      .select('id, is_active')
+      .eq('id', input.linea_id)
+      .eq('workspace_id', workspaceId)
+      .maybeSingle()
+    if (!linea || (linea as { is_active: boolean | null }).is_active !== true) {
+      return { negocio_id: null, error: 'Esa línea de negocio no está disponible. Escoge otra.' }
+    }
+  }
 
   // El cuerpo vive en `src/lib/negocios/crear-negocio.ts`: el webhook de Wompi de Ferretería
   // crea negocios sin sesión por la misma vía.
@@ -6240,7 +6259,7 @@ async function saldoCobrosCubierto(
       .single(),
     supabase
       .from('cobros')
-      .select('monto, fecha, retencion_iva')
+      .select('monto, fecha, retencion_iva, anulado_at')
       .eq('negocio_id', negocioId)
       ,
     leerModeloDineroCompleto(supabase, negocioId),
@@ -6251,7 +6270,7 @@ async function saldoCobrosCubierto(
   // Un workspace sin modelo de dinero (sin tarifa pasante) da tarifa 0, y entonces el
   // valor a recaudar es el precio: el comportamiento generico no cambia.
   const aRecaudar = valorARecaudar(precio, modelo)
-  const totalCobrado = cobradoConfirmado((cobrosRes.data ?? []) as Array<{ monto: number; fecha: string | null; retencion_iva: number | null }>)
+  const totalCobrado = cobradoConfirmado((cobrosRes.data ?? []) as Array<{ monto: number; fecha: string | null; retencion_iva: number | null; anulado_at: string | null }>)
   return bloqueCobrosCompleto({ valorARecaudar: aRecaudar, cobrado: totalCobrado })
 }
 
@@ -6849,7 +6868,7 @@ export async function getNegocioDetalleCompleto(id: string): Promise<{
       .eq('workspace_id', workspaceId),
     db(supabase)
       .from('cobros')
-      .select('id, notas, monto, retencion_iva, retencion_iva_estado, revisado, tipo_cobro, fecha, fecha_esperada, numero_cuota, vencido, external_ref, split_json, siigo_recibo')
+      .select('id, notas, monto, retencion_iva, retencion_iva_estado, revisado, tipo_cobro, fecha, fecha_esperada, numero_cuota, vencido, external_ref, split_json, siigo_recibo, anulado_at')
       .eq('workspace_id', workspaceId)
       .eq('negocio_id', id)
       .order('created_at', { ascending: true }),
@@ -7265,15 +7284,14 @@ export async function getNegocioDetalleCompleto(id: string): Promise<{
     autor_nombre: a.autor_id ? (staffMap[a.autor_id as string] ?? null) : null,
   }))
 
-  // Calcular resumen financiero
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const cobrosList = ((cobrosData ?? []) as any[]) as Array<{
-    monto: number
-    revisado: boolean
-  }>
-  // 2026-04-28: cobros registrados = dinero entrado. revisado es flag para
-  // contador (bandeja /revision), no afecta cálculos operativos.
-  const totalCobrado = cobrosList.reduce((sum, c) => sum + (c.monto ?? 0), 0)
+  // Calcular resumen financiero.
+  // «Total cobrado» = lo que de verdad entró: cobros con fecha (más la retención de IVA que
+  // practicó el cliente), sin cuotas programadas ni pagos anulados. Antes sumaba TODAS las
+  // filas de `cobros`, así que una cuota programada sin pagar ya contaba como plata recibida
+  // y «Por cobrar» bajaba sin que entrara un peso. Es la misma definición de la tarjeta de
+  // cobros y del motor de avance (`cobradoConfirmado`). `revisado` sigue sin pesar: es la
+  // marca del contador (bandeja /revision), no dice si la plata entró.
+  const cobrosParaResumen = (cobrosData ?? []) as Array<{ monto: number | null; fecha: string | null; retencion_iva: number | null; anulado_at: string | null }>
 
   // ── Cross-etapa data for conditions + auto_fill ────────────────────────────
   // Se recolectan LAS DOS formas de declarar el bloque fuente (orden de etapa y
@@ -8393,8 +8411,7 @@ export async function getNegocioDetalleCompleto(id: string): Promise<{
     cotizacionesNegocio,
     puedeCorregirCotizacion,
     resumenFinanciero: {
-      totalCobrado,
-      porCobrar: Math.max(0, (precioAprobado ?? 0) - totalCobrado),
+      ...resumenDeCobro(cobrosParaResumen, precioAprobado),
       precioAprobado,
       costosEjecutados: (() => {
         const gastos = ((gastosData ?? []) as Array<{ monto: number }>)
@@ -9121,15 +9138,18 @@ async function camposDeCierre(
 ): Promise<Record<string, unknown>> {
   const { data: cobrosData } = await db(supabase)
     .from('cobros')
-    .select('monto, revisado')
+    .select('monto, fecha, retencion_iva, anulado_at')
     .eq('negocio_id', negocioId)
 
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const cobros = ((cobrosData ?? []) as any[]) as Array<{ monto: number }>
-  // 2026-04-28: todos los cobros registrados cuentan. revisado es para contador.
-  const totalCobrado = cobros.reduce((sum, c) => sum + (c.monto ?? 0), 0)
+  // Solo lo que entró (`cobradoConfirmado`): una cuota programada sin pagar no es cobro y
+  // el snapshot del cierre la contaba como tal, dejando `pendiente_cobro` en 0 con plata
+  // por entrar. Los snapshots de cierres ya hechos no se reescriben: esto vale desde el
+  // siguiente cierre.
   const precioAprobado = negocio.precio_aprobado ?? negocio.precio_estimado ?? 0
-  const pendiente = Math.max(0, precioAprobado - totalCobrado)
+  const { totalCobrado, porCobrar: pendiente } = resumenDeCobro(
+    (cobrosData ?? []) as Array<{ monto: number | null; fecha: string | null; retencion_iva: number | null; anulado_at: string | null }>,
+    precioAprobado,
+  )
   const nf = opts?.noFacturable
   const now = new Date().toISOString()
 

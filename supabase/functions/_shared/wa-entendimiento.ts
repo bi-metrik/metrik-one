@@ -117,9 +117,11 @@ import type { ConsultaBandeja } from './wa-consulta-bandeja.ts';
 import { datoDeLaFicha, leerEsLaMisma, llavesDelTexto, nombreEnElDirectorio, pareceNombre, separarNombreYLlave, soloLlave, textoDelCliente, textoLlave, textoNoEsLaMisma, tieneLlave, unirLlaves } from './wa-cliente-reglas.ts';
 import type { Directorio, FichaCliente, Llave, ResolucionCliente } from './wa-cliente-reglas.ts';
 import type { SupabaseClient } from './types.ts';
+import { leerConGemini, MODELO_ENTENDIMIENTO_POR_DEFECTO } from './lectura-gemini.ts';
+import type { Lectura } from './lectura-gemini.ts';
 
 /** El mismo proveedor y el mismo modelo base que ONE ya usa para leer mensajes (`wa-parse.ts`). */
-const GEMINI_MODEL = Deno.env.get('GEMINI_ENTENDIMIENTO_MODEL') || Deno.env.get('GEMINI_PARSE_MODEL') || 'gemini-2.5-flash-lite';
+const GEMINI_MODEL = Deno.env.get('GEMINI_ENTENDIMIENTO_MODEL') || Deno.env.get('GEMINI_PARSE_MODEL') || MODELO_ENTENDIMIENTO_POR_DEFECTO;
 const INTENT = 'bandeja_entendimiento';
 const MAX_INTENTOS = 3;
 const LOTE = 5;
@@ -149,49 +151,13 @@ async function actualizar(supabase: SupabaseClient, id: string, cambios: Fila): 
 
 // ── Modelo ───────────────────────────────────────────────────────────────────
 
-interface Lectura { json: unknown | null; finishReason: string | null; error: string | null }
-
 /**
  * Llama al modelo con el esquema dado. Verifica el MOTIVO DE TERMINACIÓN, no solo que haya
- * texto: media respuesta aceptada en silencio es un falso verde (§3 del diseño).
+ * texto: media respuesta aceptada en silencio es un falso verde (§3 del diseño). El pedido vive
+ * en `lectura-gemini.ts`, que comparte con la app (pegar una conversación en el viaje).
  */
-export async function leerConModelo(instrucciones: string, texto: string, esquema: unknown): Promise<Lectura> {
-  const apiKey = Deno.env.get('GEMINI_API_KEY');
-  if (!apiKey) return { json: null, finishReason: null, error: 'GEMINI_NO_KEY' };
-  const url = `https://generativelanguage.googleapis.com/v1beta/models/${GEMINI_MODEL}:generateContent?key=${apiKey}`;
-  try {
-    const res = await fetch(url, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        system_instruction: { parts: [{ text: instrucciones }] },
-        contents: [{ role: 'user', parts: [{ text: texto }] }],
-        generationConfig: {
-          temperature: 0.1,
-          maxOutputTokens: 8192,
-          responseMimeType: 'application/json',
-          responseSchema: esquema,
-        },
-      }),
-    });
-    if (!res.ok) return { json: null, finishReason: null, error: `GEMINI_HTTP_${res.status}: ${(await res.text()).slice(0, 200)}` };
-    const data = await res.json();
-    const bloqueo = data.promptFeedback?.blockReason;
-    if (bloqueo) return { json: null, finishReason: null, error: `GEMINI_BLOCKED: ${bloqueo}` };
-    const finishReason: string | null = data.candidates?.[0]?.finishReason ?? null;
-    if (finishReason !== 'STOP') {
-      return { json: null, finishReason, error: `GEMINI_INCOMPLETO: finishReason ${finishReason ?? '(ausente)'}` };
-    }
-    const txt = data.candidates?.[0]?.content?.parts?.[0]?.text;
-    if (!txt) return { json: null, finishReason, error: 'GEMINI_EMPTY' };
-    try {
-      return { json: JSON.parse(txt), finishReason, error: null };
-    } catch {
-      return { json: null, finishReason, error: 'GEMINI_JSON_INVALIDO' };
-    }
-  } catch (err) {
-    return { json: null, finishReason: null, error: `GEMINI_RED: ${String(err).slice(0, 200)}` };
-  }
+export function leerConModelo(instrucciones: string, texto: string, esquema: unknown): Promise<Lectura> {
+  return leerConGemini({ apiKey: Deno.env.get('GEMINI_API_KEY'), modelo: GEMINI_MODEL, instrucciones, texto, esquema });
 }
 
 // ── Config de la línea ───────────────────────────────────────────────────────
