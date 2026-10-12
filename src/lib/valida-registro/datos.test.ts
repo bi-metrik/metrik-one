@@ -90,10 +90,18 @@ describe('la llave del registro', () => {
   it('en un preview abre con la llave aunque falten los textos (para probar el recorrido)', () => {
     expect(registroAbierto({ VALIDA_REGISTRO_ABIERTO: '1', VERCEL_ENV: 'preview' }, false)).toBe(true)
   })
-  it('hoy los textos NO están listos: los marcadores siguen ahí', () => {
-    expect(textosListos()).toBe(false)
-    expect(CONDICIONES_PRUEBA.texto).toMatch(/\[TEXTO EMILIO/)
-    expect(textosListos(['Texto definitivo.'])).toBe(true)
+  it('los textos aprobados (2026-10-11) ya no tienen marcadores', () => {
+    expect(textosListos()).toBe(true)
+    expect(CONDICIONES_PRUEBA.texto).not.toMatch(/\[TEXTO/)
+    expect(textosListos(['[TEXTO LUCÍA: pendiente]'])).toBe(false)
+  })
+  it('en producción no abre si el entorno pide una prueba distinta de la que prometen las Condiciones', () => {
+    const prod = { VALIDA_REGISTRO_ABIERTO: '1', VERCEL_ENV: 'production' }
+    expect(registroAbierto({ ...prod, VALIDA_PRUEBA_CONSULTAS: '20' }, true)).toBe(false)
+    expect(registroAbierto({ ...prod, VALIDA_PRUEBA_DIAS: '5' }, true)).toBe(false)
+    expect(registroAbierto({ ...prod, VALIDA_PRUEBA_CONSULTAS: '10', VALIDA_PRUEBA_DIAS: '7' }, true)).toBe(true)
+    // En un preview sí, para poder probar otra prueba.
+    expect(registroAbierto({ VALIDA_REGISTRO_ABIERTO: '1', VERCEL_ENV: 'preview', VALIDA_PRUEBA_CONSULTAS: '20' }, true)).toBe(true)
   })
 })
 

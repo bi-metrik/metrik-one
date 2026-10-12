@@ -6,7 +6,7 @@ import { MODULOS } from '@/lib/modulos/catalogo'
 import { VENTANA_HORAS, dominioDeCorreo, motivoDeRechazo, type MotivoRechazo } from '@/lib/secop-registro/antiabuso'
 import { derivarSlug, problemaDelSlug } from '@/lib/secop-registro/slug'
 import { POLITICA_DATOS_VALIDA } from '@/lib/valida-api/politica'
-import { CONDICIONES_PRUEBA } from './condiciones'
+import { condicionesVigentes, textoAceptado, versionAceptada } from './condiciones'
 import {
   candidatosDeSlug,
   decidirOrigen,
@@ -34,8 +34,9 @@ import { emitirPruebaDelEspacio } from './prueba-servidor'
  *     entra a «Valida», no a los módulos de gestión de ONE (§5, «la puerta de Valida abre ONE»);
  *   - la persona es dueña del espacio. La persona DESIGNADA del contrato llega al activar el plan
  *     (PR 6): en la prueba no hay contrato, y `entradaValidaCda()` deja pasar un espacio sin contrato;
- *   - la aceptación de las Condiciones de la prueba y la Política queda en `valida_registros` con la
- *     huella SHA-256 del texto que se mostró, ANTES de crear nada: sin aceptación no hay espacio;
+ *   - la aceptación queda en `valida_registros` con la huella SHA-256 de TODO lo que se leyó y marcó
+ *     (Condiciones + aviso de datos + casilla, `textoAceptado()`), ANTES de crear nada: sin
+ *     aceptación no hay espacio;
  *   - la prueba (10 consultas, 7 días) la emite Valida y su llave va a Vault (`prueba-servidor.ts`).
  *
  * ## Las reglas del aislamiento (las mismas de SECOP)
@@ -79,7 +80,7 @@ export interface DatosRegistroValida {
   tipoEntidad: string
   /** La casilla de las Condiciones de la prueba y la Política de Datos. */
   acepta: boolean
-  /** La versión de las Condiciones que vio la pantalla. Tiene que ser la vigente. */
+  /** La versión de Condiciones + aviso que vio la pantalla (`VERSION_ACEPTADA`). Tiene que ser la vigente. */
   condicionesVersion: string
   recomendadoAfi: boolean | null
   codigoAfi: string | null
@@ -92,8 +93,12 @@ export interface DatosRegistroValida {
 /** Cupos del espacio: la persona que se registra y un segundo usuario, como los CDA de hoy. */
 export const CUPOS_VALIDA = 2
 
-/** La huella del texto EXACTO de las Condiciones que muestra la pantalla. */
-export function huellaCondiciones(texto: string = CONDICIONES_PRUEBA.texto): string {
+/**
+ * La huella de lo que la persona leyó y aceptó: Condiciones, aviso de datos tal como lo completa la
+ * pantalla y texto de la casilla (`textoAceptado()`). No solo las Condiciones: la autorización del
+ * titular se prueba con el aviso exacto (Decreto 1377 de 2013, art. 7).
+ */
+export function huellaAceptacion(texto: string = textoAceptado()): string {
   return createHash('sha256').update(texto, 'utf8').digest('hex')
 }
 
@@ -121,7 +126,8 @@ export async function crearEspacioValida(datos: DatosRegistroValida): Promise<Re
   if (!datos.acepta) {
     return { tipo: 'dato', campo: 'acepta', texto: 'Para empezar la prueba tienes que aceptar las condiciones y la política de datos.' }
   }
-  if (datos.condicionesVersion !== CONDICIONES_PRUEBA.version) {
+  const condiciones = condicionesVigentes()
+  if (datos.condicionesVersion !== versionAceptada(condiciones)) {
     // La pantalla mostró otro texto (estaba abierta desde antes de un cambio): que lo vuelva a leer.
     return { tipo: 'dato', campo: 'acepta', texto: 'Las condiciones cambiaron mientras tenías la página abierta. Recarga y vuelve a leerlas.' }
   }
@@ -242,8 +248,8 @@ export async function crearEspacioValida(datos: DatosRegistroValida): Promise<Re
       estado: 'creado',
       workspace_id: workspaceId,
       slug_creado: slug,
-      condiciones_version: CONDICIONES_PRUEBA.version,
-      condiciones_sha256: huellaCondiciones(),
+      condiciones_version: versionAceptada(condiciones),
+      condiciones_sha256: huellaAceptacion(textoAceptado(condiciones)),
       politica_version: POLITICA_DATOS_VALIDA.version,
       aceptado_at: new Date().toISOString(),
       updated_at: new Date().toISOString(),
