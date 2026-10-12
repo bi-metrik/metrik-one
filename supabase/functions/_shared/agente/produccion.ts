@@ -22,7 +22,7 @@ import { cargarEnExistente, trazaCarga } from '../wa-carga-reglas.ts';
 import { textoParaModelo } from '../wa-guardianes.ts';
 import { lineaCargada, mensajesDeTextos, planDeCarga, propuestoDe, registradoDe } from './bandeja/carga.ts';
 import type { PlanCarga } from './bandeja/carga.ts';
-import { esquemaCarga, instruccionesCarga } from './bandeja/extraccion.ts';
+import { esquemaCarga, esquemaCargaCompacta, instruccionesCarga, omitidosCompacta } from './bandeja/extraccion.ts';
 import { aplanarBloques, calcularNiveles } from '../niveles-solicitud.ts';
 import { todayBogotaISO } from '../bogota.ts';
 import { enviarAvisoInterno } from '../wa-alerta.ts';
@@ -146,7 +146,9 @@ function relUno(v: unknown): Fila | null {
   return Array.isArray(v) ? (v[0] as Fila | undefined) ?? null : (v as Fila | null) ?? null;
 }
 
-export function puertoBandejaSupabase(supabase: SupabaseClient, workspaceId: string, staffId: string | null): PuertoBandeja {
+export function puertoBandejaSupabase(
+  supabase: SupabaseClient, workspaceId: string, staffId: string | null, o: { extraccionCompacta?: boolean } = {},
+): PuertoBandeja {
   const leerViaje = async (codigo: string): Promise<ViajeAgente | null | 'error'> => {
     const { data: neg, error } = await supabase.from('negocios').select('id, codigo, nombre, estado, contactos(nombre)')
       .eq('workspace_id', workspaceId).eq('codigo', codigo).maybeSingle();
@@ -200,8 +202,19 @@ export function puertoBandejaSupabase(supabase: SupabaseClient, workspaceId: str
       if (typeof bloques === 'string') throw new Error(bloques);
       const { fields, valores: yaTiene } = aplanarBloques(bloques.map((b) => ({ fields: b.fields, data: b.data })));
       const campos = fields as CampoEntendible[];
-      const lectura = await leerConModelo(instruccionesCarga(campos, todayBogotaISO(), yaTiene, propuestoDe(previo)), `Mensajes:\n${textoParaModelo(mensajesDeTextos(textos))}`, esquemaCarga(campos));
+      const compacta = o.extraccionCompacta === true;
+      const t0 = performance.now();
+      const lectura = await leerConModelo(
+        instruccionesCarga(campos, todayBogotaISO(), yaTiene, propuestoDe(previo), undefined, { compacta }),
+        `Mensajes:\n${textoParaModelo(mensajesDeTextos(textos))}`,
+        compacta ? esquemaCargaCompacta(campos) : esquemaCarga(campos),
+      );
       if (lectura.error || lectura.json === null) throw new Error(lectura.error ?? 'sin lectura');
+      if (compacta) {
+        // Para medir la compacta en vivo: cuánto tardó y si se saltó campos (ni en datos ni en sin_dato).
+        const omitidos = omitidosCompacta(lectura.json, campos);
+        console.log(`[agente] extracción compacta ${Math.round(performance.now() - t0)} ms${omitidos.length ? `; omitió ${omitidos.join(', ')}` : ''}`);
+      }
       return planDeCarga({
         bloques: bloques.map((b) => ({ fields: b.fields as CampoEntendible[], data: b.data })), textos, raw: lectura.json,
         hoyISO: todayBogotaISO(), ahoraIso: new Date().toISOString(), previo,

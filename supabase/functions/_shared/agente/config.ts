@@ -36,6 +36,12 @@ export interface ConfigAgente {
    * resumen («¿Anoto en M1 26 1…?» encima de «¿Lo anoto en M1 26 1…?»); las 2 del principal con texto eran respuestas.
    */
   respaldoEstricto: boolean;
+  /**
+   * `agente_config.extraccion_compacta` (por defecto no): la extracción de `anotar`/`cargar` pide solo los campos con valor
+   * más la lista de los que no (`esquemaCargaCompacta`). Menos tokens de salida; se enciende después de medirla con el
+   * modelo real (`arnes/extraccion-casos.ts --esquema ambas`).
+   */
+  extraccionCompacta: boolean;
   topes: {
     llamados: number;
     entradaTokens: number;
@@ -58,6 +64,7 @@ export const CONFIG_POR_DEFECTO: ConfigAgente = {
   respaldo: { modelo: 'gemini-3.5-flash-lite', razonamiento: 'MINIMAL', temperatura: null, maxSalida: 2048 },
   corteMs: 2500,
   respaldoEstricto: true,
+  extraccionCompacta: false,
   topes: { llamados: 3, entradaTokens: 12000, texto: 600, turnoMs: 20000, ventanaHoras: 24 },
   cupoTurnosMes: 800,
   reglamentoId: null,
@@ -94,6 +101,7 @@ export function leerConfigAgente(botConversacional: unknown): ConfigAgente {
     respaldo: a.respaldo === null ? null : leerModelo(a.respaldo, d.respaldo!),
     corteMs: numero(a.corte_ms, d.corteMs, 100),
     respaldoEstricto: a.respaldo_estricto === false ? false : d.respaldoEstricto,
+    extraccionCompacta: a.extraccion_compacta === true,
     topes: {
       llamados: numero(topes.llamados, d.topes.llamados, 1),
       entradaTokens: numero(topes.entrada_tokens, d.topes.entradaTokens, 1000),
