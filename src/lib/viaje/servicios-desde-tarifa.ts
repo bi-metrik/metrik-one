@@ -134,9 +134,11 @@ export function filasDeServicioDeTarifa(args: {
   const { items, seleccion, params } = args
   const ids = seleccion ? itemsDelItinerario(items, seleccion) : itemsQueAportanAlTotal(items)
   const porId = new Map(items.map(i => [i.id, i]))
+  // El ajuste y lo de fuera del precio ya los saca `itemsDelItinerario` (`compitePorElTotal`):
+  // repetir el filtro aquí sería una línea que ninguna prueba puede ver fallar.
   const incluidos = ids
     .map(id => porId.get(id))
-    .filter((i): i is ItemParaServicio => !!i && i.es_ajuste !== true)
+    .filter((i): i is ItemParaServicio => !!i)
 
   const filas: FilaServicioNueva[] = incluidos.map((item, orden) => {
     const tipo = tipoDeServicio(item, args.tipoRanuraPorItem?.[item.id])
