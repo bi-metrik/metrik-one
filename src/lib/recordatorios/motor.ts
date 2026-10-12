@@ -320,12 +320,17 @@ export async function correrRecordatorios(svc: Db, opts: { hoy: string }): Promi
   for (const c of candidatos) {
     const linea = lineaDe.get(c.negocio.linea_id)
     if (!linea) continue
-    for (const regla of reglasDe.get(linea.id) ?? []) {
-      if (regla.fuente !== c.fuente) continue
-      if (regla.etapa_numero !== null && c.negocio.etapa_numero !== regla.etapa_numero) continue
-      if (regla.fuente === 'envio' && c.negocio.pausado) continue
-      const disparo = fechaDeDisparo(regla, c.fechaObjetivo)
-      if (!tocaHoy(disparo, hoy)) continue
+    const tocan = (reglasDe.get(linea.id) ?? [])
+      .filter((regla) => regla.fuente === c.fuente)
+      .filter((regla) => regla.etapa_numero === null || c.negocio.etapa_numero === regla.etapa_numero)
+      .filter((regla) => !(regla.fuente === 'envio' && c.negocio.pausado))
+      .map((regla) => ({ regla, disparo: fechaDeDisparo(regla, c.fechaObjetivo) }))
+      .filter(({ disparo }) => tocaHoy(disparo, hoy))
+    for (const { regla, disparo } of tocan) {
+      // Un aviso atrasado que se recupera no sale si otro posterior de la misma cadena, a las mismas
+      // personas, sale hoy (p. ej. el toque 1 y el 3 al encender el motor): basta el más reciente.
+      const destinos = regla.a.join('|')
+      if (tocan.some((o) => o.regla !== regla && o.regla.a.join('|') === destinos && o.disparo > disparo)) continue
       resumen.candidatos++
 
       const canales = regla.canales.filter((k): k is CanalRecordatorio =>
