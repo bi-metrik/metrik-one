@@ -16,6 +16,7 @@ import type {
   NivelDetalle,
   VueloPDF,
 } from '@/lib/cotizaciones/detalle-viaje'
+import type { EntradaAsiPuedesPagar } from '@/lib/viaje/asi-puedes-pagar'
 
 /**
  * El precio de UN pasajero de cada tipo en una línea (tarifa por pasajero, diseño §4).
@@ -422,4 +423,12 @@ export interface CotizacionPDFProps {
    * viaje, y la plantilla por defecto ni lo mira.
    */
   viaje?: ViajePDF | null
+
+  /**
+   * «Así puedes pagar» (F2, PR 7): la fecha de salida, hoy y la regla 80/15 de la línea. La
+   * plantilla arma las filas sobre el TOTAL que imprime, así que suman ese total por
+   * construcción. Ausente o `null` (línea sin `plan_pagos.activo`, o cualquier cotización que no
+   * sea de viaje): la plantilla no pinta nada y el documento sale como hoy.
+   */
+  asiPuedesPagar?: EntradaAsiPuedesPagar | null
 }

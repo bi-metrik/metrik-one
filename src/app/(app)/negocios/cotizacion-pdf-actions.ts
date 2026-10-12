@@ -35,6 +35,7 @@ import {
   vuelosDeItems,
 } from '@/lib/cotizaciones/detalle-viaje'
 import { leerViajeDelNegocio } from '@/lib/cotizaciones/viaje-negocio'
+import { entradaAsiPuedesPagar } from '@/lib/viaje/asi-puedes-pagar'
 import { describirOcupacion } from '@/lib/cotizaciones/tarifa-pasajero'
 import { hayTarifaPorPasajero, lineasDesactualizadas, motivoParaNoEnviar } from '@/lib/cotizaciones/captura-desactualizada'
 import { MENSAJE_SIN_PASAJEROS, motivoPorCapturasDesactualizadas } from '@/lib/cotizaciones/captura-desactualizada-datos'
@@ -306,17 +307,17 @@ export async function generateCotizacionPDF(cotizacionId: string) {
   }
 
   // Para cotizaciones de negocio, intentar obtener empresa del negocio
-  type NegocioInfo = { id: string; nombre: string | null; carpeta_url: string | null }
+  type NegocioInfo = { id: string; nombre: string | null; carpeta_url: string | null; linea_id: string | null }
   let negocioInfo: NegocioInfo | null = null
 
   if (cot.negocio_id) {
     const { data: negocio } = await supabase
       .from('negocios')
-      .select('id, nombre, carpeta_url, empresa_id, empresas(nombre, numero_documento, contacto_nombre, contacto_email, tipo_persona, regimen_tributario, gran_contribuyente, agente_retenedor, telefono, direccion_fiscal, municipio, departamento)')
+      .select('id, nombre, carpeta_url, linea_id, empresa_id, empresas(nombre, numero_documento, contacto_nombre, contacto_email, tipo_persona, regimen_tributario, gran_contribuyente, agente_retenedor, telefono, direccion_fiscal, municipio, departamento)')
       .eq('id', cot.negocio_id)
       .single()
     if (negocio) {
-      negocioInfo = { id: negocio.id, nombre: negocio.nombre, carpeta_url: negocio.carpeta_url }
+      negocioInfo = { id: negocio.id, nombre: negocio.nombre, carpeta_url: negocio.carpeta_url, linea_id: (negocio as { linea_id?: string | null }).linea_id ?? null }
       if (!empresa) {
         empresa = (negocio.empresas as EmpresaRow | null) ?? null
       }
@@ -1055,11 +1056,25 @@ export async function generateCotizacionPDF(cotizacionId: string) {
   const itemsImpresos = lineasQueDescribeElDocumento(items, idsDelPrincipal, aporta)
 
   let viajePDF: CotizacionPDFProps['viaje'] = null
+  // «Así puedes pagar» (F2, PR 7): solo con `plan_pagos.activo` en la línea del negocio.
+  let entradaPlan: CotizacionPDFProps['asiPuedesPagar'] = null
   // Un borrador de ONE sin revisar no sale en el PDF; se avisa, sin bloquear la descarga.
   let avisoTexto: string | null = null
   if (plantillaPropia && negocioInfo) {
     // Ya leído arriba cuando alguna línea tiene tarifa por pasajero: no se paga dos veces.
     const delNegocio = viajeDelNegocio ?? (await leerViajeDelNegocio(supabase, negocioInfo.id)).viaje
+    if (negocioInfo.linea_id) {
+      // Sin poder leer la línea, apagado: el documento sale como hoy.
+      const { data: lineaPlan } = await supabase
+        .from('lineas_negocio')
+        .select('config_extra')
+        .eq('id', negocioInfo.linea_id)
+        .maybeSingle()
+      entradaPlan = entradaAsiPuedesPagar(
+        (lineaPlan as { config_extra?: unknown } | null)?.config_extra,
+        { fechaSalida: delNegocio.fechas.inicio, hoy: todayBogotaISO() },
+      )
+    }
     const paraLecturaDe = (i: ItemRow) => ({
       nombre: i.nombre ?? '',
       grupo: i.grupo ?? null,
@@ -1234,6 +1249,7 @@ export async function generateCotizacionPDF(cotizacionId: string) {
     negocio: negocioInfo ? { nombre: negocioInfo.nombre } : null,
     emisor,
     viaje: viajePDF,
+    ...(entradaPlan ? { asiPuedesPagar: entradaPlan } : {}),
   }
 
   // Una plantilla que se COMPONE (Trappvel: renderiza, mide el PDF y recompone para que la

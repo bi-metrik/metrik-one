@@ -16,6 +16,8 @@ import { leerViajeDelNegocio } from '@/lib/cotizaciones/viaje-negocio'
 import type { NivelDetalle } from '@/lib/cotizaciones/detalle-viaje'
 import { lineaCotizaPorTipo } from '@/lib/cotizaciones/lineas-por-tipo'
 import { configSeguimiento } from '@/lib/negocios/seguimiento'
+import { entradaAsiPuedesPagar } from '@/lib/viaje/asi-puedes-pagar'
+import { todayBogotaISO } from '@/lib/dates/bogota'
 import type { Composicion } from '@/lib/cotizaciones/tarifa-pasajero'
 import {
   CONFIG_IVA_POR_DEFECTO,
@@ -175,6 +177,8 @@ export default async function CotizacionNegocioPage({
   let politicaLinea: UmbralesMargen = UMBRALES_MARGEN_POR_DEFECTO
   // Seguimiento de la línea (F1): sin poder leer la línea, apagado (como hoy).
   let seguimientoActivo = false
+  // «Así puedes pagar» (F2, PR 7): la config de la línea; con las fechas del viaje se arma abajo.
+  let configLineaPlan: unknown = null
   if (negocioLineaId) {
     try {
       const { supabase: sbLinea } = await getWorkspace()
@@ -188,6 +192,7 @@ export default async function CotizacionNegocioPage({
       )
       politicaLinea = { pisoPct, avisoPct }
       seguimientoActivo = configSeguimiento((linea as { config_extra?: unknown } | null)?.config_extra).activo
+      configLineaPlan = (linea as { config_extra?: unknown } | null)?.config_extra ?? null
     } catch {
       // Sin la línea rigen los umbrales por defecto: el color de una cifra no puede
       // depender de que una consulta secundaria responda.
@@ -321,6 +326,7 @@ export default async function CotizacionNegocioPage({
       fechasViaje={fechasViaje}
       leidaEn={leidaEn}
       seguimiento={seguimientoActivo}
+      asiPuedesPagar={entradaAsiPuedesPagar(configLineaPlan, { fechaSalida: fechasViaje?.inicio ?? null, hoy: todayBogotaISO() })}
     />
   )
 

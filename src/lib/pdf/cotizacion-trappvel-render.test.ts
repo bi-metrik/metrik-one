@@ -24,6 +24,8 @@ import { textoParaElViaje, type DocumentoCliente } from '@/lib/cotizaciones/docu
 import { fotosDelViaje } from './fotos-del-viaje'
 import { fotosDeCiudad } from './fotos-ciudad'
 import { TERMINOS_BASE_TRAPPVEL } from '@/lib/cotizaciones/__fixtures__/terminos-base-trappvel'
+import { asiPuedesPagar } from '@/lib/viaje/asi-puedes-pagar'
+import { REGLA_POR_DEFECTO } from '@/lib/viaje/plan-pagos'
 
 const VUELO = {
   linea: 'AVIANCA CUCUTA-ARMENIA',
@@ -1420,5 +1422,41 @@ describe('toda foto de hotel que cargó el asesor sale en el PDF (2026-10-08)', 
     for (const n of NOMBRES) expect(t).toContain(n)
     // En «normal» la línea de una alternativa junta nombre, régimen y habitación.
     expect(t).toContain('Hotel Centro Economico · Todo incluido · Standard Double')
+  })
+})
+
+describe('«Así puedes pagar» (F2-1, PR 7)', () => {
+  const pesosPdf = (v: number) =>
+    new Intl.NumberFormat('es-CO', { style: 'currency', currency: 'COP', maximumFractionDigits: 0 }).format(v)
+  const plano = (t: string) => t.replace(/\s+/g, ' ')
+  const entrada = { fechaSalida: '2026-12-19', hoy: '2026-10-12', regla: REGLA_POR_DEFECTO }
+
+  it('sin la entrada (línea sin plan_pagos.activo) el documento no cambia', async () => {
+    const sin = await texto(props())
+    expect(sin).not.toContain('Así puedes pagar')
+    expect(await texto(props({ asiPuedesPagar: null }))).toBe(sin)
+  })
+
+  it('con fecha: las filas que imprime suman el TOTAL que imprime', async () => {
+    const p = props({ asiPuedesPagar: entrada })
+    const total = 1_294_351 + 3_780_884
+    const t = plano(await texto(p))
+    expect(t).toContain('Así puedes pagar')
+    expect(t).toContain(plano(pesosPdf(total)))
+    const plan = asiPuedesPagar(total, entrada)
+    expect(plan.filas).toHaveLength(3)
+    for (const f of plan.filas!) {
+      expect(t).toContain(plano(pesosPdf(f.monto)))
+      expect(t).toContain(f.cuando)
+    }
+    expect(plan.filas!.reduce((a, f) => a + f.monto, 0)).toBe(total)
+    expect(t).toContain('con esto llevas el 80 %')
+    expect(t).toContain('Puedes repartirlo en más cuotas: lo acordamos contigo.')
+  })
+
+  it('sin fecha de salida: la regla en palabras y ningún monto', async () => {
+    const t = plano(await texto(props({ asiPuedesPagar: { ...entrada, fechaSalida: null } })))
+    expect(t).toContain('El 80 % quince días antes de salir y el resto el día del viaje.')
+    expect(t).not.toContain('al confirmar (anticipo)')
   })
 })
