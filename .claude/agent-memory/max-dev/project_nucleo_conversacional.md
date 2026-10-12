@@ -46,7 +46,7 @@ lugar del agente simple v2; criterio fijado ANTES de medir: 0 dañinas, más éx
 - La extracción de prod corre en `gemini-2.5-flash-lite` (defecto de `wa-entendimiento.ts`, sin secreto que lo cambie);
   la llave de pruebas recibe 404 «no longer available to new users». El arnés extrae con 3.5-flash-lite: lo que se
   mide es el prompt en un modelo vecino. Casos: `arnes/extraccion-casos.ts`; `c1-1009` corre la extracción real.
-- `RE_CODIGO` exige espacios: «m1261» escrito pegado NO nombra el viaje (candado viaje_nombrado). Reportado, sin arreglar.
+- Códigos pegados («m1261»): arreglado en #1121 (`bandeja/codigo.ts`, resuelve contra la base). Ver [[tanda-bot-1012]].
 - El reglamento de la conversación (`bot_reglamentos`, Anexo A) aún dice «solo infante se deduce» en `g.pasajeros`: es
   dato de la base, no código; no se tocó. `PuertoMemoria` con `campos` + `extraer` corre la cadena real; el guion recibe
   `instrucciones` (el prompt) para probarlo.
