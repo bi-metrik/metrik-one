@@ -27,12 +27,12 @@ export const FUENTES_SOPORTADAS = ['envio', 'pago_proveedor', 'aplazado', 'cuota
 export type FuenteRecordatorio = (typeof FUENTES_SOPORTADAS)[number]
 
 /**
- * Canales que el motor manda hoy. Al equipo, solo `in_app`. Al viajero (`cliente`), `email`
- * (Resend, si el contacto tiene correo) y `wa_manual` (la comercial recibe en la app el mensaje
- * listo para mandarlo desde su WhatsApp, Vera C1). El correo al equipo todavía no sale.
+ * Canales que el motor manda hoy. Al equipo, `in_app` y `email` (Resend a `profiles.email`,
+ * Vera F3-5). Al viajero (`cliente`), `email` (Resend, si el contacto tiene correo) y `wa_manual`
+ * (la comercial recibe en la app el mensaje listo para mandarlo desde su WhatsApp, Vera C1).
  */
 export const CANALES_SOPORTADOS = ['in_app', 'email', 'wa_manual'] as const
-export const CANALES_AL_EQUIPO = ['in_app'] as const
+export const CANALES_AL_EQUIPO = ['in_app', 'email'] as const
 export const CANALES_AL_CLIENTE = ['email', 'wa_manual'] as const
 export type CanalRecordatorio = 'in_app' | 'email' | 'wa_manual'
 
