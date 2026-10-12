@@ -23,7 +23,6 @@ vi.mock('next/cache', () => ({ revalidatePath: () => {} }))
 vi.mock('@/lib/idempotencia/accion', () => ({ accionIdempotente: (_o: unknown, fn: () => unknown) => fn() }))
 
 import { getColaFacturacion, emitirFacturaDeNegocio } from './facturacion-actions'
-import { FALTA_FACTURA_VIAJE } from '@/lib/facturacion/cola-viaje'
 
 const VIAJE = 'linea-viaje'
 const EMPRESA = { tipo: 'empresa', tipo_documento: '31', numero_documento: '900123456', nombre: 'Viajes Corporativos SAS', correo: 'facturas@corp.co', telefono: '3001234567', direccion: 'CL 10 20 30', municipio: 'Medellín', departamento: 'Antioquia' }
@@ -118,7 +117,7 @@ describe('viajes: por evento y no por etapa (C4)', () => {
     expect(caso.titular.tipo_documento).toBe('31')
     expect(caso.email).toBe('facturas@corp.co')
     expect(caso.faltan_cliente).toEqual([])
-    expect(caso.faltan_factura).toContain(FALTA_FACTURA_VIAJE)
+    expect(caso.faltan_factura).toEqual(expect.arrayContaining(['configurar en Siigo el producto de ingreso propio', 'configurar en Siigo el producto recibido para terceros']))
   })
 
   it('sin dirección ni ciudad, la cola lo dice antes de emitir', async () => {
@@ -154,6 +153,6 @@ describe('emisión de un viaje', () => {
     estado.fixtures.negocios.push(viaje('emp-no', { titular_facturacion: EMPRESA }))
     expect(await emitirFacturaDeNegocio('emp-no')).toMatchObject({ ok: false, error: expect.stringContaining('todavía no entra') })
     estado.fixtures.negocios.push(viaje('emp-ok', { titular_facturacion: EMPRESA, confirmacion_cliente: CONFIRMADA }))
-    expect(await emitirFacturaDeNegocio('emp-ok')).toMatchObject({ ok: false, error: expect.stringContaining('productos de viaje') })
+    expect(await emitirFacturaDeNegocio('emp-ok')).toMatchObject({ ok: false, error: expect.stringContaining('Falta') })
   })
 })

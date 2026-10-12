@@ -34,7 +34,8 @@
 // ============================================================
 
 import { createServiceClient } from '@/lib/supabase/server'
-import { claveIdempotencia, getSiigoConfig, siigoRequest, SiigoError } from './client'
+import { borradorFacturaViaje, faltantesConfigViaje, type RepartoFacturaViaje } from './config-viaje'
+import { bloqueoPorEntornoDelNegocio, claveIdempotencia, getSiigoConfig, siigoRequest, SiigoError } from './client'
 import { borradorFactura, SUCURSAL_POR_DEFECTO, type BorradorFactura } from './mapeo'
 import { resolverConceptoDeNegocio } from './concepto-negocio'
 import {
@@ -277,6 +278,12 @@ export interface OpcionesEmision {
    */
   justificacionDuplicado?: string
   /**
+   * Factura de un VIAJE (adenda Siigo): dos conceptos, ingreso propio con IVA y recibido para
+   * terceros sin IVA, con los productos de `siigo_config` (`productoPropioCode`,
+   * `productoTercerosCode`). Ausente = la factura del honorario de siempre (SOENA).
+   */
+  viaje?: RepartoFacturaViaje
+  /**
    * Lo que la financiera corrigió en la pantalla de revisión antes de darle a
    * facturar. Es la aplicación del principio de siempre (ONE sugiere, la
    * financiera edita) al único momento en que todavía se puede: después de emitir,
@@ -451,6 +458,10 @@ export async function emitirFacturaNegocio(
   if (errNeg || !negRaw) return { ok: false, motivo: 'error', mensaje: 'Negocio no encontrado' }
   const negocio = negRaw as DatosNegocio & { linea_id: string | null }
 
+  // ── 0. Un negocio de prueba nunca emite en los libros reales (adenda Siigo, F8-5) ──
+  const entorno = await bloqueoPorEntornoDelNegocio(workspaceId, negocio.metadata)
+  if (entorno) return { ok: false, motivo: 'error', mensaje: entorno }
+
   // ── 1. ¿ONE ya sabe que está facturado? ───────────────────────────────────
   // Dos señales, porque hay dos maneras de llegar a estar facturado. La marca solo
   // existe cuando la factura salió DESDE aquí; la otra vía es el bloque, donde
@@ -513,11 +524,15 @@ export async function emitirFacturaNegocio(
     // estado de AHORA, y no se recibe del cliente: entre que la pantalla pintó
     // la fila y alguien confirma, el servicio contratado pudo corregirse, y la
     // factura tiene que decir lo que el negocio dice hoy.
-    const concepto = await resolverConceptoDeNegocio(svc, negocioId, negocio.linea_id, cfg.productoCode)
-    // Si la financiera escogió otro producto en la pantalla, ese gana: lo que ONE
-    // deduce del servicio contratado es una sugerencia, y hay casos que se facturan
-    // bajo otro concepto. Quien llama ya lo validó contra el catálogo de Siigo.
-    const productoCode = opciones.datos?.productoCode?.trim() || concepto.code
+    // Un viaje factura con sus dos productos; nunca con el concepto deducido para SOENA.
+    const productoCode = opciones.viaje
+      ? (cfg.productoPropioCode ?? '')
+      : opciones.datos?.productoCode?.trim()
+        || (await resolverConceptoDeNegocio(svc, negocioId, negocio.linea_id, cfg.productoCode)).code
+    if (opciones.viaje) {
+      const faltaConfig = faltantesConfigViaje(cfg)
+      if (faltaConfig.length > 0) return { ok: false, motivo: 'faltan_datos', faltantes: faltaConfig }
+    }
 
     // ── 4. ¿Siigo ya tiene una factura de este producto para el cliente? ────
     // Es la barrera que ONE no puede resolver mirándose a sí mismo. Medido el
@@ -546,17 +561,23 @@ export async function emitirFacturaNegocio(
     // Dia civil de Bogota: a las 20:00 del 30-sep, UTC ya es 1-oct y la factura
     // caeria en otro periodo de IVA.
     const hoy = todayBogotaISO()
-    const { payload, faltantes } = borradorFactura(
-      cfg, identificacion, honorario, hoy, contexto.ivaPct ?? 19,
-      {
+    const { payload, faltantes } = opciones.viaje
+      ? borradorFacturaViaje(cfg, identificacion, opciones.viaje, hoy, contexto.ivaPct ?? 19, {
         emitir: opciones.emitir,
         enviarCorreo: opciones.enviarCorreo === true,
-        productoCode,
-        // Siigo resuelve el tercero por identificación MÁS sucursal. Sin dato
-        // conocido va la principal, que es el comportamiento de siempre.
         branchOffice: cliente.branch_office ?? SUCURSAL_POR_DEFECTO,
-      },
-    )
+      })
+      : borradorFactura(
+        cfg, identificacion, honorario, hoy, contexto.ivaPct ?? 19,
+        {
+          emitir: opciones.emitir,
+          enviarCorreo: opciones.enviarCorreo === true,
+          productoCode,
+          // Siigo resuelve el tercero por identificación MÁS sucursal. Sin dato
+          // conocido va la principal, que es el comportamiento de siempre.
+          branchOffice: cliente.branch_office ?? SUCURSAL_POR_DEFECTO,
+        },
+      )
     if (faltantes.length > 0) return { ok: false, motivo: 'faltan_datos', faltantes }
 
     const creada = await siigoRequest<{ id?: string; name?: string; total?: number }>(

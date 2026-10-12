@@ -34,7 +34,11 @@ import {
 } from '@/lib/siigo/recibo-componentes'
 import { leerTitularCorregido, rutDeConfirmacion, titularDeConfirmacion, validarTitular, type TitularEditado } from '@/lib/siigo/titular'
 import { desdePorLinea, hayReglaDeCola } from '@/lib/facturacion/regla-viaje'
-import { entradasViaje, FALTA_FACTURA_VIAJE, lineasPorTitular, reglaDelNegocio } from '@/lib/facturacion/cola-viaje'
+import { entradasViaje, lineasPorTitular, reglaDelNegocio } from '@/lib/facturacion/cola-viaje'
+import { repartoFacturaViaje } from '@/lib/facturacion/reparto-viaje'
+import { adaptadorSiigo, proveedorDeFacturacion, type ProveedorFacturacion } from '@/lib/facturacion/proveedor'
+import type { OpcionesEmision } from '@/lib/siigo/facturas'
+import { borradorFacturaViaje, type RepartoFacturaViaje } from '@/lib/siigo/config-viaje'
 import { siigoRequest, type SiigoConfig } from '@/lib/siigo/client'
 import {
   conceptoFactura,
@@ -558,6 +562,15 @@ async function armarColaFacturacion(
   // el de UTC: emitir a las 8 p.m. del 31 fechaba la factura el 1 del mes siguiente.
   const hoy = todayBogotaISO()
 
+  // La factura de cada viaje de la cola, con el MISMO armado que la emisión (dos conceptos).
+  const facViaje = new Map<string, ReturnType<typeof borradorFacturaViaje>>()
+  for (const n of candidatos) {
+    if (!lineasViaje.has(n.linea_id ?? '')) continue
+    const rep = await repartoFacturaViaje(svc, { workspaceId, negocio: n }).catch(() => ({ ok: false as const, falta: 'el reparto del valor (no se pudo leer la cotización)' }))
+    const borr = borradorFacturaViaje(cfgEval, 'x', rep.ok ? rep.reparto : null, hoy, 19)
+    facViaje.set(n.id, rep.ok ? borr : { ...borr, faltantes: [...borr.faltantes.filter(f => !f.startsWith('el reparto')), rep.falta] })
+  }
+
   const casos: CasoPorFacturar[] = candidatos.map(n => {
     const rut = rutPorNegocio.get(n.id) ?? {}
     const contacto = contactos.get(n.contacto_id ?? '') ?? { email: null, telefono: null }
@@ -628,8 +641,9 @@ async function armarColaFacturacion(
       },
       honorario,
       valor_upme: upme,
-      // Un viaje no sale con el producto de SOENA: hasta tener los dos conceptos, queda incompleto.
-      faltan_factura: esViaje ? [...fac.faltantes, FALTA_FACTURA_VIAJE] : fac.faltantes,
+      // Un viaje sale con sus dos conceptos (ingreso propio y terceros), nunca con el producto de
+      // SOENA: lo que le falte a esa factura (productos, reparto) es lo que la cola dice.
+      faltan_factura: esViaje ? (facViaje.get(n.id)?.faltantes ?? fac.faltantes) : fac.faltantes,
       faltan_cliente: cli.faltantes,
       // El mapa solo guarda RUT con identificación utilizable, así que su
       // ausencia cubre las dos formas de no tenerlo: sin documento cargado y
@@ -648,7 +662,7 @@ async function armarColaFacturacion(
           : { permitida: false, reemplaza: false, razon: permisoCarga.razon },
       cerrado,
       recibo_numero: ultimoReciboPorNegocio.get(n.id) ?? null,
-      base_gravable: fac.payload.items[0]?.price ?? null,
+      base_gravable: (esViaje ? facViaje.get(n.id)?.payload.items[0]?.price : fac.payload.items[0]?.price) ?? null,
       descartado,
     }
   })
@@ -916,9 +930,20 @@ async function emitirFacturaDeNegocioSinClave(
   // el producto de SOENA. Las líneas de siempre siguen exactamente su camino.
   const regla = await reglaDelNegocio(svc, workspaceId, negocioId)
   if (regla?.regla === 'apagada') return { ok: false, error: 'La facturación está apagada en esta línea.' }
+  let reparto: RepartoFacturaViaje | undefined
+  let proveedor: ProveedorFacturacion = adaptadorSiigo
   if (regla?.regla === 'viaje') {
     if (!regla.entra) return { ok: false, error: 'Esta factura todavía no entra a la cola: falta el evento de su titular (confirmación de la empresa, o paquete enviado con el saldo en cero).' }
-    return { ok: false, error: `Falta ${FALTA_FACTURA_VIAJE}.` }
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const { data: negViaje } = await (svc as any).from('negocios').select('precio_aprobado, metadata').eq('id', negocioId).eq('workspace_id', workspaceId).maybeSingle()
+    const r = await repartoFacturaViaje(svc, { workspaceId, negocio: (negViaje ?? { precio_aprobado: null, metadata: null }) as { precio_aprobado: number | null; metadata: Record<string, unknown> | null } })
+    if (!r.ok) return { ok: false, error: `Falta ${r.falta}.` }
+    reparto = r.reparto
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const { data: wsProv } = await (svc as any).from('workspaces').select('config_extra').eq('id', workspaceId).maybeSingle()
+    const p = proveedorDeFacturacion((wsProv as { config_extra?: unknown } | null)?.config_extra)
+    if ('error' in p) return { ok: false, error: p.error }
+    proveedor = p
   }
 
   let nombre: string | null = null
@@ -961,12 +986,9 @@ async function emitirFacturaDeNegocioSinClave(
     if (!titular.ok) return { ok: false, error: titular.mensaje }
   }
 
-  const r = await emitirFacturaNegocio(
-    workspaceId,
-    negocioId,
-    nombre,
-    {
+  const opcionesEmision: OpcionesEmision = {
       bloqueFacturaSlug,
+      ...(reparto ? { viaje: reparto } : {}),
       datos: {
         email: opciones?.datos?.email,
         telefono: opciones?.datos?.telefono,
@@ -979,9 +1001,12 @@ async function emitirFacturaDeNegocioSinClave(
       emitir: opciones?.emitir !== false,
       enviarCorreo: opciones?.enviarCorreo === true,
       justificacionDuplicado: opciones?.justificacionDuplicado,
-    },
-    { staffId },
-  )
+  }
+  // Un viaje sale por la capa de proveedor (Siigo hoy, Aliaddo mañana). El camino de SOENA sigue
+  // llamando directo, como siempre (Vera F5-5).
+  const r = reparto
+    ? await proveedor.emitirFactura({ workspaceId, negocioId, staffNombre: nombre, staffId, opciones: opcionesEmision })
+    : await emitirFacturaNegocio(workspaceId, negocioId, nombre, opcionesEmision, { staffId })
 
   if (!r.ok) {
     switch (r.motivo) {

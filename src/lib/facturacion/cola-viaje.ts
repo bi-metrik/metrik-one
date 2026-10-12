@@ -96,12 +96,6 @@ export async function entradasViaje(
   return out
 }
 
-/**
- * La factura de viajes sale con dos conceptos (ingreso propio con IVA y recibido para terceros sin
- * IVA). Hasta que el espacio declare los dos productos de Siigo, el caso queda incompleto con este
- * motivo y NUNCA se emite con el producto de otro (adenda Siigo de la ola 4).
- */
-export const FALTA_FACTURA_VIAJE = 'configurar en Siigo los productos de viaje (ingreso propio y recibido para terceros)'
 
 export type ReglaDelNegocio =
   | { regla: 'etapa' }
