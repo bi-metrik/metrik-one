@@ -51,6 +51,8 @@ import {
 import SelectorRanura from '@/app/(app)/negocios/selector-ranura'
 import TarifaPasajeroItem from '@/app/(app)/negocios/tarifa-pasajero-item'
 import BloqueRanura from '@/app/(app)/negocios/bloque-ranura'
+import AsiPuedesPagarPanel from './asi-puedes-pagar-panel'
+import { totalDelDocumento, type EntradaAsiPuedesPagar } from '@/lib/viaje/asi-puedes-pagar'
 import BotonesRevisar from '@/app/(app)/negocios/botones-revisar'
 import BandejaCapturas, { type ReceptorDeBandeja } from '@/app/(app)/negocios/bandeja-capturas'
 import TarjetaOpcion from '@/app/(app)/negocios/tarjeta-opcion'
@@ -370,12 +372,17 @@ interface Props {
    * descargar el PDF desde «Revisar y enviar» puede contar como envío (con «No lo envié»).
    */
   seguimiento?: boolean
+  /**
+   * «Así puedes pagar» (F2, PR 7): fecha de salida, hoy y regla de la línea. Solo llega con
+   * `plan_pagos.activo`; ausente, «Revisar y enviar» queda como hoy.
+   */
+  asiPuedesPagar?: EntradaAsiPuedesPagar | null
 }
 
 /** Cuánto dura el «Deshacer» de un borrado de opción o de bloque (P12). */
 const ESPERA_DESHACER_MS = 6000
 
-export default function CotizacionEditor({ oportunidadId, cotizacion, initialItems: itemsDeLaPagina, fiscalProfile, clientFiscal, backUrl, staffMembers, frozen, lineaId, umbrales = UMBRALES_MARGEN_POR_DEFECTO, itinerarios, pisoBloqueaAvance = false, politicaRecargo = RECARGO_POR_DEFECTO, composicionViaje = null, lineasPorTipo = false, adicionales: adicionalesDeLaPagina = ADICIONALES_VACIOS, salida = null, textoCliente = null, configIva = CONFIG_IVA_POR_DEFECTO, mostrarResumenFiscal = true, destinoViaje = null, fechasViaje = null, nivelDetalle = null, leidaEn = null, seguimiento = false }: Props) {
+export default function CotizacionEditor({ oportunidadId, cotizacion, initialItems: itemsDeLaPagina, fiscalProfile, clientFiscal, backUrl, staffMembers, frozen, lineaId, umbrales = UMBRALES_MARGEN_POR_DEFECTO, itinerarios, pisoBloqueaAvance = false, politicaRecargo = RECARGO_POR_DEFECTO, composicionViaje = null, lineasPorTipo = false, adicionales: adicionalesDeLaPagina = ADICIONALES_VACIOS, salida = null, textoCliente = null, configIva = CONFIG_IVA_POR_DEFECTO, mostrarResumenFiscal = true, destinoViaje = null, fechasViaje = null, nivelDetalle = null, leidaEn = null, seguimiento = false, asiPuedesPagar: entradaPlan = null }: Props) {
   // Abierto de entrada solo si hay un borrador de ONE esperando revisión: es lo único que
   // el equipo tiene que hacer aquí, y cerrado no lo vería.
   const [verTextoCliente, setVerTextoCliente] = useState(() => estadoDelTexto(textoCliente?.documento ?? null) === 'borrador')
@@ -3521,6 +3528,16 @@ export default function CotizacionEditor({ oportunidadId, cotizacion, initialIte
                   <AlertTriangle className="h-3 w-3 shrink-0" aria-hidden />
                   Pendiente: {viaje.motivo}.
                 </p>
+              )}
+              {entradaPlan && (
+                <AsiPuedesPagarPanel
+                  entrada={entradaPlan}
+                  total={totalDelDocumento({
+                    precioVenta: cascadaTotal.precioVenta,
+                    ivaSobreIngresoPropio: conIvaSobreIngresoPropio,
+                    iva: ivaVigente ? { valor: ivaVigente.iva, precio: ivaVigente.precio } : null,
+                  })}
+                />
               )}
               {jsxAvisoCostoPendiente}
               {jsxAvisoActividades}
