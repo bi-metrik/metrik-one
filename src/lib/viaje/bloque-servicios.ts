@@ -7,6 +7,7 @@
 
 import type { ServicioDelNegocio } from './servicios-viaje-datos'
 import { estadoDelServicio, pagadoDelServicio, valorAPagar, type EstadoServicio, type QuienEdita } from './estado-servicio'
+import type { ConfigReglasPago, MedioPagoProveedor } from './reglas-pago'
 
 /** Lo que el servidor deja en `config_extra._servicios` del bloque. */
 export interface DatosBloqueServicios {
@@ -16,6 +17,15 @@ export interface DatosBloqueServicios {
   filas: ServicioDelNegocio[]
   /** Quién mira, sin la responsabilidad: esa la sabe la ficha (`_esResponsable`). */
   quien: Omit<QuienEdita, 'esResponsable'>
+  /** F3: medios de pago del espacio (`workspaces.config_extra.medios_pago_proveedor`). */
+  medios?: MedioPagoProveedor[]
+  /** F3: umbral, piso, abono mínimo y si se exige la confirmación (de la línea). */
+  reglas?: ConfigReglasPago
+  /** F3: cobrado confirmado al cliente y precio aprobado (para «sin abono» en vivo). */
+  cobradoCliente?: number
+  precioAprobado?: number
+  /** F3: nombre de quien pidió cada aprobación (staff id → nombre). */
+  nombres?: Record<string, string>
 }
 
 export type ColorFecha = 'verde' | 'ambar' | 'rojo'
@@ -89,4 +99,83 @@ export function totalesDelTablero(vista: readonly FilaVista[]): { cotizado: numb
     cotizado: vivas.reduce((s, v) => s + v.servicio.costo_cotizado, 0),
     pagado: vista.reduce((s, v) => s + v.pagado, 0),
   }
+}
+
+// ── F3: tablero de Reservas y pagos ──────────────────────────────────────────
+
+/** «% pagado con tarjetas personales» (Noor §5): sobre todo lo pagado a proveedores del viaje. */
+export function porcentajePersonal(vista: readonly FilaVista[]): number {
+  let total = 0
+  let personal = 0
+  for (const v of vista) {
+    for (const g of v.servicio.gastos) {
+      const m = Number(g.monto) || 0
+      total += m
+      if (g.titular_medio === 'personal') personal += m
+    }
+  }
+  return total > 0 ? Math.round((personal / total) * 1000) / 10 : 0
+}
+
+export type FiltroTablero = 'todos' | 'por_pagar' | 'esperando' | 'falta_confirmar'
+
+export const ETIQUETA_FILTRO: Record<FiltroTablero, string> = {
+  todos: 'Todos',
+  por_pagar: 'Por pagar',
+  esperando: 'Esperando a Edgar',
+  falta_confirmar: 'Falta confirmar',
+}
+
+/** Píldoras de filtro (Noor §5): Todos · Por pagar · Esperando a Edgar · Falta confirmar. */
+export function filtrarTablero(vista: readonly FilaVista[], filtro: FiltroTablero): FilaVista[] {
+  switch (filtro) {
+    case 'todos':
+      return [...vista]
+    case 'por_pagar':
+      return vista.filter(v => v.estado === 'por_reservar' || v.estado === 'reservado')
+    case 'esperando':
+      return vista.filter(v => v.estado === 'esperando' || v.estado === 'no_aprobado')
+    case 'falta_confirmar':
+      return vista.filter(v => v.estado === 'pagado')
+  }
+}
+
+/** Color de la etapa (Noor §5): rojo con un pago vencido, ámbar si algo vence en 3 días, verde si todo va. */
+export function colorDeLaEtapa(vista: readonly FilaVista[], hoy: string): ColorFecha {
+  let ambar = false
+  for (const v of vista) {
+    const f = fechaLimiteEnPalabras(v.servicio.fecha_limite_pago, v.estado, hoy)
+    if (f?.color === 'rojo') return 'rojo'
+    if (f?.color === 'ambar') ambar = true
+  }
+  return ambar ? 'ambar' : 'verde'
+}
+
+/**
+ * «Sigue:» del tablero (Noor §5): el pago más urgente; si nada urge, lo siguiente por hacer.
+ * `null` cuando todo lo que va está confirmado.
+ */
+export function sigueDelTablero(vista: readonly FilaVista[], hoy: string): { servicioId: string; texto: string } | null {
+  const vivas = vista.filter(v => v.estado !== 'cancelado')
+  const conFecha = vivas
+    .map(v => ({ v, f: fechaLimiteEnPalabras(v.servicio.fecha_limite_pago, v.estado, hoy) }))
+    .filter((x): x is { v: FilaVista; f: { texto: string; color: ColorFecha } } => !!x.f)
+    .sort((a, b) => (a.v.servicio.fecha_limite_pago ?? '').localeCompare(b.v.servicio.fecha_limite_pago ?? ''))
+  const vencida = conFecha.find(x => x.f.color === 'rojo')
+  if (vencida) return { servicioId: vencida.v.servicio.id, texto: `${vencida.v.servicio.nombre}: ${minuscula(vencida.f.texto)}.` }
+  const pronto = conFecha.find(x => x.f.color === 'ambar')
+  if (pronto) return { servicioId: pronto.v.servicio.id, texto: `${pronto.v.servicio.nombre}: ${minuscula(pronto.f.texto)}.` }
+  const esperando = vivas.find(v => v.estado === 'esperando')
+  if (esperando) return { servicioId: esperando.servicio.id, texto: `${esperando.servicio.nombre} está esperando a Edgar.` }
+  const porReservar = vivas.find(v => v.estado === 'por_reservar' && v.aPagar > 0)
+  if (porReservar) return { servicioId: porReservar.servicio.id, texto: `Reserva ${porReservar.servicio.nombre}.` }
+  const porPagar = vivas.find(v => v.estado === 'reservado' && v.aPagar > 0)
+  if (porPagar) return { servicioId: porPagar.servicio.id, texto: `Registra el pago de ${porPagar.servicio.nombre}.` }
+  const sinConfirmar = vivas.find(v => v.estado === 'pagado')
+  if (sinConfirmar) return { servicioId: sinConfirmar.servicio.id, texto: `Adjunta la confirmación del proveedor final de ${sinConfirmar.servicio.nombre}.` }
+  return null
+}
+
+function minuscula(t: string): string {
+  return t.charAt(0).toLowerCase() + t.slice(1)
 }

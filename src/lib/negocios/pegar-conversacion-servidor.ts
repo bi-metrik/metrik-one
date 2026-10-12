@@ -31,6 +31,7 @@ import { textoParaModelo } from '../../../supabase/functions/_shared/wa-guardian
 import { leerConGemini, MODELO_ENTENDIMIENTO_POR_DEFECTO } from '../../../supabase/functions/_shared/lectura-gemini.ts'
 import type { CampoEntendible } from '../../../supabase/functions/_shared/wa-entendimiento-reglas.ts'
 import { aplanarBloques } from '@/lib/negocios/niveles-solicitud'
+import { camposCambiados, renombrarNegocioSiAplica } from '@/lib/negocios/nombre-automatico'
 
 export type ResultadoPegarConversacion =
   | { error: string }
@@ -112,6 +113,9 @@ export async function pegarConversacion(negocioBloqueId: string, texto: string):
     if (!actual) return { error: 'No se pudo leer el bloque' }
     carga = armar(actual.data)
   }
+
+  // El nombre automático sigue al destino y a las fechas que dejó el chat (regla de la línea), si nadie lo renombró.
+  if (carga.data) await renombrarNegocioSiAplica(supabase, nb.negocio_id as string, camposCambiados(actual.data, carga.data))
 
   await registrarActividad(supabase, {
     workspace_id: workspaceId,

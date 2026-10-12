@@ -119,6 +119,7 @@ import type { Directorio, FichaCliente, Llave, ResolucionCliente } from './wa-cl
 import type { SupabaseClient } from './types.ts';
 import { leerConGemini, MODELO_ENTENDIMIENTO_POR_DEFECTO } from './lectura-gemini.ts';
 import type { Lectura } from './lectura-gemini.ts';
+import { nombreSegunPlantilla, plantillaDeLinea, renombrarSegunPlantilla } from './nombre-viaje.ts';
 
 /** El mismo proveedor y el mismo modelo base que ONE ya usa para leer mensajes (`wa-parse.ts`). */
 const GEMINI_MODEL = Deno.env.get('GEMINI_ENTENDIMIENTO_MODEL') || Deno.env.get('GEMINI_PARSE_MODEL') || MODELO_ENTENDIMIENTO_POR_DEFECTO;
@@ -295,7 +296,12 @@ export async function crearNegocio(
   // uno provisional sin destino («Viaje de Laura Prueba»). La marca dice que lo puso el bot: si
   // alguien lo cambia a mano, el bot ya no lo toca (prueba en vivo del 2026-10-01, parte B).
   const sug = p.salida.sugeridos;
-  const auto = nombreViajeNuevo({
+  // Si la línea declara su regla de nombre (`lineas_negocio.config_extra.nombre_automatico`), manda esa; si no, la
+  // convención de siempre.
+  const plantilla = await plantillaDeLinea(supabase, p.cfg.lineaId);
+  const valoresNombre = Object.fromEntries(Object.entries(sug).map(([k, x]) => [k, x?.valor]));
+  const segunLinea = plantilla ? nombreSegunPlantilla(plantilla, valoresNombre, (contacto?.nombre as string | null) ?? null) : null;
+  const auto = segunLinea ?? nombreViajeNuevo({
     destino: sug.destino?.valor, salida: sug.fecha_salida?.valor, regreso: sug.fecha_regreso?.valor,
     mes: p.pistas.mes, duracion: p.pistas.duracion, cliente: (contacto?.nombre as string | null) ?? null,
   });
@@ -1843,6 +1849,8 @@ async function renombrarSiEsProvisional(
   const actual = (neg.nombre as string | null) ?? null;
   const meta = (neg.metadata && typeof neg.metadata === 'object' ? neg.metadata : {}) as Fila;
   if (!actual || meta.nombre_auto !== actual) return actual;
+  // La línea con regla de nombre propia (`nombre_automatico`) la aplica con lo que el negocio tiene ahora.
+  if (await plantillaDeLinea(supabase, neg.linea_id as string | null)) return (await renombrarSegunPlantilla(supabase, neg.id as string)) ?? actual;
   const antes = (meta.nombre_pistas && typeof meta.nombre_pistas === 'object' ? meta.nombre_pistas : {}) as { mes?: number | null; duracion?: string | null };
   const juntas = { mes: pistas.mes ?? antes.mes ?? null, duracion: pistas.duracion ?? antes.duracion ?? null };
   const nuevo = nombreViajeNuevo({

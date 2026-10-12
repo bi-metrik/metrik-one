@@ -3,6 +3,7 @@ import { redirect } from 'next/navigation'
 import { getAliadosActivos } from '@/app/(app)/directorio/aliados/actions'
 import NuevoNegocioForm from './nuevo-negocio-form'
 import { getCachedUser } from '@/lib/supabase/auth-user'
+import { leerPlantillaNombre } from '@/lib/negocios/nombre-automatico'
 
 export default async function NuevoNegocioPage() {
   const supabase = await createClient()
@@ -21,11 +22,18 @@ export default async function NuevoNegocioPage() {
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const { data: lineasData } = await (supabase as any)
     .from('lineas_negocio')
-    .select('id, nombre, descripcion, numero')
+    .select('id, nombre, descripcion, numero, config_extra')
     .eq('workspace_id', profile.workspace_id)
     .eq('is_active', true)
     .order('numero')
-  const lineas = (lineasData ?? []) as { id: string; nombre: string; descripcion: string | null; numero: number }[]
+  const lineasConConfig = (lineasData ?? []) as { id: string; nombre: string; descripcion: string | null; numero: number; config_extra: unknown }[]
+  const lineas = lineasConConfig.map(({ config_extra: _c, ...l }) => l)
+  // Líneas con nombre por plantilla (`config_extra.nombre_automatico`): el form oculta el nombre y muestra la regla.
+  const lineasNombrePlantilla: Record<string, string> = {}
+  for (const l of lineasConConfig) {
+    const p = leerPlantillaNombre(l.config_extra)
+    if (p) lineasNombrePlantilla[l.id] = p.plantilla
+  }
 
   // Líneas con nombre automático = contacto (config_extra.negocio_codigo_format).
   // El form oculta el campo "nombre del negocio" para esas líneas.
@@ -50,6 +58,7 @@ export default async function NuevoNegocioPage() {
     <NuevoNegocioForm
       lineas={lineas}
       lineasAutoNombre={lineasAutoNombre}
+      lineasNombrePlantilla={lineasNombrePlantilla}
       aliados={aliados}
       aliadosHabilitado={aliadosHabilitado}
     />

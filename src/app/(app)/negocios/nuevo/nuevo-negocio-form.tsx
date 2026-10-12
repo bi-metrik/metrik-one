@@ -26,12 +26,15 @@ const STEPS = [
 export default function NuevoNegocioForm({
   lineas = [],
   lineasAutoNombre = [],
+  lineasNombrePlantilla = {},
   aliados = [],
   aliadosHabilitado = false,
 }: {
   lineas?: Linea[]
   /** Líneas cuyo negocio toma el nombre del contacto: se oculta el campo nombre. */
   lineasAutoNombre?: string[]
+  /** Líneas con nombre por plantilla (`config_extra.nombre_automatico`): id → plantilla. Se oculta el campo nombre. */
+  lineasNombrePlantilla?: Record<string, string>
   /** Aliados activos del workspace (solo si el módulo está activo). */
   aliados?: AliadoOpcion[]
   /** ¿El workspace tiene el módulo aliados? Sin él no se ofrece origen 'alianza'. */
@@ -95,7 +98,8 @@ export default function NuevoNegocioForm({
   const negocioStep = esPersonaNatural ? 1 : 2
 
   // Línea con nombre automático = contacto → se oculta el campo "nombre del negocio".
-  const autoNombre = lineaId != null && lineasAutoNombre.includes(lineaId)
+  const plantillaNombre = lineaId != null ? lineasNombrePlantilla[lineaId] ?? null : null
+  const autoNombre = lineaId != null && (lineasAutoNombre.includes(lineaId) || plantillaNombre !== null)
 
   // ── Busqueda contactos ─────────────────────────────────────────────────────
 
@@ -190,7 +194,8 @@ export default function NuevoNegocioForm({
   const enviar = (confirmarDuplicado: boolean) => {
     startTransition(async () => {
       const result = await crearNegocio({
-        nombre: autoNombre ? contactoNombre.trim() : nombre.trim(),
+        // Con plantilla el servidor arma el nombre (y lo sigue rehaciendo con el destino y las fechas).
+        nombre: plantillaNombre !== null ? '' : autoNombre ? contactoNombre.trim() : nombre.trim(),
         linea_id: lineaId ?? undefined,
         contacto_id: contactoId ?? undefined,
         contacto_nombre: contactoId ? undefined : contactoNombre.trim(),
@@ -572,7 +577,15 @@ export default function NuevoNegocioForm({
           )}
 
           {/* Nombre — oculto cuando la línea usa nombre automático = contacto */}
-          {autoNombre ? (
+          {plantillaNombre !== null ? (
+            <div className="rounded-md border border-dashed bg-muted/40 px-3 py-2.5">
+              <p className="text-xs font-medium text-muted-foreground">Nombre del negocio</p>
+              <p className="mt-0.5 text-sm font-medium">Automático, con la regla de la línea: {plantillaNombre}</p>
+              <p className="mt-0.5 text-[10px] text-muted-foreground/70">
+                Se arma solo con el destino y las fechas, y cambia si cambian. Si lo renombras a mano, ya no cambia.
+              </p>
+            </div>
+          ) : autoNombre ? (
             <div className="rounded-md border border-dashed bg-muted/40 px-3 py-2.5">
               <p className="text-xs font-medium text-muted-foreground">Nombre del negocio</p>
               <p className="mt-0.5 text-sm font-medium">{contactoNombre || 'El nombre del cliente'}</p>

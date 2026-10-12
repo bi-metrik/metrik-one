@@ -12,7 +12,9 @@ import { GATE_AUTORIZACION } from '@/lib/autorizacion-datos/estado'
 import { configSeguimiento, etiquetaMotivoPerdida, mensajeTopeAplazamientos, motivoPerdidaInvalido, type ConfigSeguimiento } from '@/lib/negocios/seguimiento'
 import { configSeguimientoDelNegocio } from '@/lib/negocios/seguimiento-datos'
 import { evaluarGatesSeguimiento } from '@/lib/negocios/gates-seguimiento'
-import { leerServiciosDelNegocio } from '@/lib/viaje/servicios-viaje-datos'
+import { evaluarGateServicios } from '@/lib/viaje/servicios-viaje-datos'
+import { datosDelTablero } from '@/lib/viaje/servicios-tablero-datos'
+import { lineasDelGate } from '@/lib/viaje/gate-servicios'
 import { aprobadoresDeLinea, serviciosViajeActivo } from '@/lib/viaje/estado-servicio'
 import type { DatosBloqueServicios } from '@/lib/viaje/bloque-servicios'
 import { evaluarGatesConfirmacion } from '@/lib/viaje/confirmacion-datos'
@@ -218,6 +220,7 @@ import { exigeCarpetaLocal, normalizarCarpetaLocal } from '@/lib/negocios/carpet
 import { guardarCarpetaLocal, resolverPermisoCarpetaLocal } from '@/lib/negocios/carpeta-local-servidor'
 import { costosEjecutadosPorNegocio } from '@/lib/negocios/costos-ejecutados'
 import { documentosLeyendo, mensajeDocumentoLeyendo } from '@/lib/negocios/documentos-leyendo'
+import { camposCambiados, renombrarNegocioSiAplica } from '@/lib/negocios/nombre-automatico'
 
 // ── Tipos inline para el nuevo schema de negocios ─────────────────────────────
 // Las tablas nuevas (negocios, lineas_negocio, etapas_negocio, bloque_configs,
@@ -3617,6 +3620,13 @@ async function cambiarEtapaNegocioConGateSinClave(
       return { error: 'gate_bloqueado', bloquesPendientes: faltaConfirmacion.map((nombre) => ({ nombre, es_gate: true })) }
     }
 
+    // Gate de Reservas y pagos (F3-7): todo servicio que va, pagado con soporte, medio y
+    // titular, sin aprobación abierta y confirmado. Opt-in por etapa; máximo 3 líneas y «y N más».
+    const faltaServicios = await evaluarGateServicios(db(supabase), { workspaceId, negocioId, gates: etapaGates })
+    if (faltaServicios.length > 0) {
+      return { error: 'gate_bloqueado', bloquesPendientes: lineasDelGate(faltaServicios).map((nombre) => ({ nombre, es_gate: true })) }
+    }
+
     // Gate custom: saldo:handoff — control de recaudo para soltar el negocio a
     // operaciones (handoff comercial → operaciones, ej. salida de Documentación).
     // El recaudo del cliente debe cubrir el 100% de la tarifa UPME + el honorario
@@ -5600,6 +5610,8 @@ async function actualizarBloqueDataSinMemo(
   }
 
   const nid = negocioId ?? (row as Record<string, unknown>)?.negocio_id as string | undefined
+  // El nombre automático sigue al destino y a las fechas (regla de la línea), si nadie lo renombró a mano.
+  if (nid) await renombrarNegocioSiAplica(supabase, nid, camposCambiados(dataDestino, dataFinal))
   if (nid && opts?.revalidate !== false) revalidatePath(`/negocios/${nid}`)
 
   // No registrar en activity_log aquí — auto-save cada 800ms genera ruido.
@@ -8033,17 +8045,18 @@ export async function getNegocioDetalleCompleto(id: string): Promise<{
     b => (b as { bloque_definitions?: { tipo?: string } | null }).bloque_definitions?.tipo === 'servicios',
   )
   const serviciosViaje: DatosBloqueServicios | null = hayBloqueServicios
-    ? {
-        activo: serviciosViajeActivo(lineaConfigExtra),
+    ? await datosDelTablero(supabase, {
+        workspaceId,
+        negocioId: id,
+        configLinea: lineaConfigExtra,
         hayCotizacionAceptada: !!cotizacionAceptada,
-        filas: (await leerServiciosDelNegocio(supabase, { workspaceId, negocioId: id })) ?? [],
         quien: {
           role: role ?? null,
           areas: (areas ?? []) as string[],
           staffId: staffId ?? null,
           aprobadores: aprobadoresDeLinea(lineaConfigExtra),
         },
-      }
+      })
     : null
 
   const bloquesConExtra = base.bloques.map(b => {

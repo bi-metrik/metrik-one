@@ -13,6 +13,8 @@
 import { contextoDeCotizacion, leerItinerarios } from '@/lib/cotizaciones/itinerarios-datos'
 import { filasDeServicioDeTarifa, type FilaServicioNueva } from './servicios-desde-tarifa'
 import { serviciosViajeActivo, type EstadoEscrito } from './estado-servicio'
+import { GATE_SERVICIOS_LISTOS, serviciosQueFaltan, type FaltaServicio } from './gate-servicios'
+import { configReglasPago } from './reglas-pago'
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type Db = any
@@ -176,8 +178,29 @@ export interface ServicioDelNegocio {
   confirmacion_ref: string | null
   orden: number
   origen: 'cotizacion' | 'manual'
-  gastos: Array<{ monto: number; soporte_url: string | null; medio_pago: string | null; titular_medio: string | null }>
-  aprobaciones: Array<{ estado: 'solicitada' | 'aprobada' | 'rechazada' | 'caducada' }>
+  gastos: GastoDeServicio[]
+  aprobaciones: AprobacionDeServicio[]
+}
+
+export interface GastoDeServicio {
+  /** Opcionales: las pruebas puras no los necesitan; la lectura de la base siempre los trae. */
+  id?: string
+  fecha?: string | null
+  monto: number
+  soporte_url: string | null
+  medio_pago: string | null
+  titular_medio: string | null
+}
+
+export interface AprobacionDeServicio {
+  id?: string
+  tipo?: string
+  estado: 'solicitada' | 'aprobada' | 'rechazada' | 'caducada'
+  huella?: string
+  motivo?: string | null
+  detalle?: Record<string, unknown> | null
+  solicitada_por?: string | null
+  decidida_at?: string | null
 }
 
 /** Las filas del negocio en el orden del viaje, con lo pagado y las aprobaciones de cada una. */
@@ -199,23 +222,84 @@ export async function leerServiciosDelNegocio(
   if (filas.length === 0) return []
   const ids = filas.map(f => f.id)
   const [gastosRes, aprobRes] = await Promise.all([
-    db.from('gastos').select('servicio_id, monto, soporte_url, medio_pago, titular_medio').in('servicio_id', ids),
-    db.from('aprobaciones_excepcion').select('entidad_id, estado').eq('entidad_tipo', 'servicio').in('entidad_id', ids),
+    db.from('gastos').select('id, fecha, servicio_id, monto, soporte_url, medio_pago, titular_medio').in('servicio_id', ids).order('fecha', { ascending: true }),
+    // Las caducadas no pintan nada: la vigente o la última decisión son las que cuentan.
+    db.from('aprobaciones_excepcion')
+      .select('id, entidad_id, tipo, estado, huella, motivo, detalle, solicitada_por, decidida_at')
+      .eq('entidad_tipo', 'servicio')
+      .in('entidad_id', ids)
+      .neq('estado', 'caducada'),
   ])
-  const gastos = (gastosRes.data ?? []) as Array<ServicioDelNegocio['gastos'][number] & { servicio_id: string }>
-  const aprob = (aprobRes.data ?? []) as Array<{ entidad_id: string; estado: ServicioDelNegocio['aprobaciones'][number]['estado'] }>
+  const gastos = (gastosRes.data ?? []) as Array<GastoDeServicio & { servicio_id: string }>
+  const aprob = (aprobRes.data ?? []) as Array<AprobacionDeServicio & { entidad_id: string }>
   return filas.map(f => ({
     ...f,
     costo_cotizado: Number(f.costo_cotizado) || 0,
     valor_por_pagar: f.valor_por_pagar === null ? null : Number(f.valor_por_pagar),
     gastos: gastos.filter(g => g.servicio_id === f.id).map(g => ({
+      id: g.id,
+      fecha: g.fecha ?? null,
       monto: Number(g.monto) || 0,
       soporte_url: g.soporte_url,
       medio_pago: g.medio_pago,
       titular_medio: g.titular_medio,
     })),
-    aprobaciones: aprob.filter(a => a.entidad_id === f.id).map(a => ({ estado: a.estado })),
+    aprobaciones: vigentesPorTipo(aprob.filter(a => a.entidad_id === f.id)).map(a => ({
+      id: a.id,
+      tipo: a.tipo,
+      estado: a.estado,
+      huella: a.huella,
+      motivo: a.motivo ?? null,
+      detalle: a.detalle ?? null,
+      solicitada_por: a.solicitada_por ?? null,
+      decidida_at: a.decidida_at ?? null,
+    })),
   }))
+}
+
+/**
+ * Por tipo de regla, solo la que manda: la pedida o aprobada (hay a lo sumo una, índice único) y,
+ * si no hay, la última rechazada. Una rechazada vieja que ya se volvió a pedir y se aprobó no
+ * puede dejar la fila en «No aprobado».
+ */
+function vigentesPorTipo<T extends AprobacionDeServicio>(filas: readonly T[]): T[] {
+  const porTipo = new Map<string, T>()
+  for (const a of filas) {
+    const clave = a.tipo ?? ''
+    const actual = porTipo.get(clave)
+    if (!actual) { porTipo.set(clave, a); continue }
+    const viva = (x: T) => x.estado === 'solicitada' || x.estado === 'aprobada'
+    if (viva(a) && !viva(actual)) { porTipo.set(clave, a); continue }
+    if (!viva(a) && !viva(actual) && (a.decidida_at ?? '') > (actual.decidida_at ?? '')) porTipo.set(clave, a)
+  }
+  return [...porTipo.values()]
+}
+
+// ── Gate `servicios_listos` (F3-7) ───────────────────────────────────────────
+
+/**
+ * Lo que falta para salir de Reservas y pagos. Opt-in por `etapas_negocio.config_extra.gates`: una
+ * etapa sin `servicios_listos` no consulta nada (SOENA, AFI y Termotech no cambian). Con la línea
+ * apagada tampoco frena: el tablero no se edita y frenar con él sería un bloqueo sin salida.
+ */
+export async function evaluarGateServicios(
+  db: Db,
+  args: { workspaceId: string; negocioId: string; gates: readonly string[] },
+): Promise<FaltaServicio[]> {
+  if (!args.gates.includes(GATE_SERVICIOS_LISTOS)) return []
+  const { data } = await db
+    .from('negocios')
+    .select('linea_id, lineas_negocio(config_extra)')
+    .eq('id', args.negocioId)
+    .eq('workspace_id', args.workspaceId)
+    .maybeSingle()
+  const linea = (data as { lineas_negocio?: unknown } | null)?.lineas_negocio
+  const config = ((Array.isArray(linea) ? linea[0] : linea) as { config_extra?: unknown } | null)?.config_extra ?? null
+  if (!serviciosViajeActivo(config)) return []
+  const filas = await leerServiciosDelNegocio(db, args)
+  // Si no se pudieron leer, la duda frena: no se suelta un viaje sin saber si se pagó.
+  if (filas === null) return [{ servicioId: '', texto: 'No se pudieron leer los servicios del viaje. Intenta de nuevo.' }]
+  return serviciosQueFaltan(filas, configReglasPago(config).exigeConfirmacion)
 }
 
 // ── Corregir una aceptación ──────────────────────────────────────────────────
