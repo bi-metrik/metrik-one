@@ -15,3 +15,7 @@ Receta sin tocar el repo principal:
    symlink) a `node_modules/<pkg>`: Turbopack toma como raíz el repo principal (dos lockfiles) y no
    resuelve un symlink que apunte fuera de ella.
 3. Borrar `node_modules` y `.env.local` del worktree al cerrar.
+
+**Más simple para vitest (2026-10-12, C0):** `npm ci --no-audit --no-fund` dentro del worktree (14 s, 956
+paquetes) deja un `node_modules` real y al día; el principal seguía sin `unpdf`. Gitignored: no ensucia el PR.
+Borrarlo al cerrar igual que los symlinks.
