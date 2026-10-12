@@ -11,7 +11,7 @@ import type { EpaycoDesglose } from '@/lib/epayco'
 import type { NegocioBloque } from '../../negocio-v2-actions'
 import AvisoHonorarioPendiente from './AvisoHonorarioPendiente'
 import { useIntencion } from '@/hooks/use-intencion'
-import { formatBogotaFechaCortaAno } from '@/lib/dates/bogota'
+import { FechaDelPago } from './FechaDelPago'
 import { fechaDelPagoEpayco, type CobroConFecha } from '@/lib/epayco/fecha-de-pago'
 
 export interface PagoRegistrado {
@@ -55,17 +55,7 @@ interface BloquePagosEpaycoProps {
 const fmt = (v: number) =>
   new Intl.NumberFormat('es-CO', { style: 'currency', currency: 'COP', maximumFractionDigits: 0 }).format(v)
 
-/** Mismo formato que `BloqueCobros` («16 sept 2026»). */
-function fmtDate(iso: string | null) {
-  return formatBogotaFechaCortaAno(iso) ?? ''
-}
-
-/** La fecha del pago bajo el pagador. Sin fecha legible no pinta nada. */
-export function FechaDelPago({ fecha }: { fecha: string | null }) {
-  const texto = fmtDate(fecha)
-  if (!texto) return null
-  return <p className="text-[10px] text-tinta-suave" data-fecha-pago={fecha ?? undefined}>{texto}</p>
-}
+export { FechaDelPago }
 
 export default function BloquePagosEpayco({
   negocioBloqueId,
