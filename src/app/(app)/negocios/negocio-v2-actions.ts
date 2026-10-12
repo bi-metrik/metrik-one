@@ -15,6 +15,7 @@ import { evaluarGatesSeguimiento } from '@/lib/negocios/gates-seguimiento'
 import { leerServiciosDelNegocio } from '@/lib/viaje/servicios-viaje-datos'
 import { aprobadoresDeLinea, serviciosViajeActivo } from '@/lib/viaje/estado-servicio'
 import type { DatosBloqueServicios } from '@/lib/viaje/bloque-servicios'
+import { evaluarGatesConfirmacion } from '@/lib/viaje/confirmacion-datos'
 import { MOTIVOS_CANCELACION, MOTIVOS_PAUSA, MAX_PAUSAS, SAFETY_NET_HORAS, leerMarcasDeMetadata, origenDesdeFuenteInteraccion, type MarcaCondicion } from '@/lib/negocios/constants'
 import {
   computeFieldDefaults,
@@ -3602,6 +3603,18 @@ async function cambiarEtapaNegocioConGateSinClave(
           bloquesPendientes: [{ nombre: `Saldo pendiente: ${fmt.format(saldo)}${detalle}`, es_gate: true }],
         }
       }
+    }
+
+    // Gates de la confirmación del viaje (post-cotización, F2): confirmación registrada, plan
+    // acordado y anticipo con soporte. Opt-in por etapa; sin esos ids no consulta nada.
+    const faltaConfirmacion = await evaluarGatesConfirmacion(db(supabase), {
+      workspaceId,
+      negocioId,
+      gates: etapaGates,
+      mensajes: (etapaActualConfigExtra.gate_messages ?? {}) as Record<string, string>,
+    })
+    if (faltaConfirmacion.length > 0) {
+      return { error: 'gate_bloqueado', bloquesPendientes: faltaConfirmacion.map((nombre) => ({ nombre, es_gate: true })) }
     }
 
     // Gate custom: saldo:handoff — control de recaudo para soltar el negocio a
