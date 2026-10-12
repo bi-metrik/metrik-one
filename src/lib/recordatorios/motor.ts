@@ -34,6 +34,7 @@ import {
   candidatosDeCuota,
   candidatosDeEnvio,
   candidatosDePagoProveedor,
+  candidatosDeRegreso,
   candidatosDeSalida,
   nombreNegocio,
   salidaPideAviso,
@@ -43,6 +44,7 @@ import {
   type CotizacionEnviada,
   type CuotaFuente,
   type NegocioFuente,
+  type RegresoFuente,
   type SalidaFuente,
   type ServicioFuente,
 } from './fuentes'
@@ -50,6 +52,7 @@ import { cuentasDeRecaudo, linkDePagoPropio, mensajeRecordatorioCuota, type Pago
 import { enlaceWhatsApp } from '@/lib/viaje/confirmacion'
 import { enviarCorreoAlViajero } from '@/lib/viaje/correo-viajero'
 import { CorreosDelEquipo } from './correo-equipo'
+import { mensajeEncuesta } from '@/lib/viaje/cierre-viaje'
 
 // El esquema nuevo (negocio_servicios, recordatorios_log) no está en los tipos generados.
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -235,14 +238,17 @@ async function mandarAlViajero(
   const agencia = await datos.agencia(c.negocio.workspace_id, linea.config_extra)
   const comercial = await datos.comercial(c.negocio.id)
   const monto = typeof c.detalle.falta === 'number' ? c.detalle.falta : 0
-  const texto = mensajeRecordatorioCuota({
-    nombreCliente: contacto.nombre,
-    cuota: { monto, fecha: c.fechaObjetivo },
-    hoy,
-    link: agencia.link,
-    comercial,
-    agencia: agencia.nombre,
-  })
+  const esEncuesta = c.fuente === 'regreso'
+  const texto = esEncuesta
+    ? mensajeEncuesta({ nombreCliente: contacto.nombre, destino: c.negocio.destino ?? null, comercial, agencia: agencia.nombre })
+    : mensajeRecordatorioCuota({
+        nombreCliente: contacto.nombre,
+        cuota: { monto, fecha: c.fechaObjetivo },
+        hoy,
+        link: agencia.link,
+        comercial,
+        agencia: agencia.nombre,
+      })
   if (canal === 'email') {
     if (!contacto.email) return 'omitido'
     const r = await enviarCorreoAlViajero({
@@ -251,7 +257,7 @@ async function mandarAlViajero(
       para: contacto.email,
       replyTo: null,
       agencia: agencia.nombre,
-      asunto: c.fechaObjetivo === hoy ? 'Hoy vence tu cuota' : 'Recordatorio de tu cuota',
+      asunto: esEncuesta ? '¿Cómo te fue en el viaje?' : c.fechaObjetivo === hoy ? 'Hoy vence tu cuota' : 'Recordatorio de tu cuota',
       texto,
       idempotencyKey: `recordatorio:${regla.id}:${c.entidadId}:${c.fechaObjetivo}`,
     })
@@ -267,9 +273,11 @@ async function mandarAlViajero(
     perfiles.map((p) => ({
       workspace_id: c.negocio.workspace_id,
       destinatario_id: p,
-      tipo: 'cuota_por_vencer',
+      tipo: esEncuesta ? 'toque_seguimiento' : 'cuota_por_vencer',
       estado: 'pendiente',
-      contenido: `${c.fechaObjetivo === hoy ? 'Hoy vence' : 'Se acerca'} la cuota de ${quien}. Mándale el recordatorio desde tu WhatsApp: el mensaje ya está listo.`,
+      contenido: esEncuesta
+        ? `${quien} regresó del viaje. Mándale la encuesta desde tu WhatsApp: el mensaje ya está listo.`
+        : `${c.fechaObjetivo === hoy ? 'Hoy vence' : 'Se acerca'} la cuota de ${quien}. Mándale el recordatorio desde tu WhatsApp: el mensaje ya está listo.`,
       entidad_tipo: 'negocio',
       entidad_id: c.negocio.id,
       deep_link: `/negocios/${c.negocio.id}`,
@@ -287,7 +295,7 @@ async function cargar(svc: Db, lineas: Linea[], fuentes: Set<string>) {
     sinError<{
       id: string; workspace_id: string; linea_id: string; nombre: string; codigo: string | null
       contacto_id: string | null; etapa_actual_id: string | null; pausado: boolean | null; estado: string
-      metadata: { seguimiento?: { aplazado_para?: unknown } } | null; precio_aprobado?: number | null
+      metadata: { seguimiento?: { aplazado_para?: unknown }; postventa?: { calificacion?: unknown } } | null; precio_aprobado?: number | null
     }>(
       await svc
         .from('negocios')
@@ -303,7 +311,7 @@ async function cargar(svc: Db, lineas: Linea[], fuentes: Set<string>) {
   )
   const numeroDe = new Map(etapas.map((e) => [e.id, e.numero]))
   const contactoIds = [...new Set(negociosRaw.map((n) => n.contacto_id).filter((x): x is string => !!x))]
-  const contactos = fuentes.has('envio') || fuentes.has('aplazado') || fuentes.has('cuota') || fuentes.has('salida')
+  const contactos = fuentes.has('envio') || fuentes.has('aplazado') || fuentes.has('cuota') || fuentes.has('salida') || fuentes.has('regreso')
     ? await porTandas(contactoIds, async (t) =>
         sinError<{ id: string; nombre: string; email?: string | null; telefono?: string | null }>(
           await svc.from('contactos').select('id, nombre, email, telefono').in('id', t),
@@ -326,6 +334,7 @@ async function cargar(svc: Db, lineas: Linea[], fuentes: Set<string>) {
     estado: n.estado,
     aplazado_para: typeof n.metadata?.seguimiento?.aplazado_para === 'string' ? n.metadata.seguimiento.aplazado_para : null,
     precio_aprobado: n.precio_aprobado === undefined || n.precio_aprobado === null ? null : Number(n.precio_aprobado),
+    encuesta_respondida: n.metadata?.postventa?.calificacion !== undefined && n.metadata?.postventa?.calificacion !== null,
   }))
   const negocioIds = negocios.map((n) => n.id)
 
@@ -404,7 +413,26 @@ async function cargar(svc: Db, lineas: Linea[], fuentes: Set<string>) {
       salidas.push({ negocio_id: f.negocio_id, fecha_salida: fecha })
     }
   }
-  return { negocios, cotizaciones, servicios, pagado, cuotas, pagos, contactoDe, salidas }
+  // La fecha de regreso y el destino (encuesta, F6-7).
+  const regresos: RegresoFuente[] = []
+  if (fuentes.has('regreso')) {
+    const filas = await porTandas(negocioIds, async (t) =>
+      sinError<{ negocio_id: string; fecha_regreso: unknown; destino: unknown }>(
+        await svc.from('negocio_bloques').select('negocio_id, fecha_regreso:data->fecha_regreso, destino:data->destino').in('negocio_id', t),
+        'fechas de regreso',
+      ),
+    )
+    const vistos = new Set<string>()
+    for (const f of filas) {
+      const n = negocios.find((x) => x.id === f.negocio_id)
+      if (n && !n.destino && typeof f.destino === 'string' && f.destino.trim()) n.destino = f.destino.trim()
+      const fecha = typeof f.fecha_regreso === 'string' ? /^(\d{4}-\d{2}-\d{2})/.exec(f.fecha_regreso.trim())?.[1] : undefined
+      if (!fecha || vistos.has(f.negocio_id)) continue
+      vistos.add(f.negocio_id)
+      regresos.push({ negocio_id: f.negocio_id, fecha_regreso: fecha })
+    }
+  }
+  return { negocios, cotizaciones, servicios, pagado, cuotas, pagos, contactoDe, salidas, regresos }
 }
 
 /** Lo que el mensaje al viajero necesita y no está en el negocio: agencia, link propio y comercial. */
@@ -470,7 +498,7 @@ export async function correrRecordatorios(svc: Db, opts: { hoy: string }): Promi
   if (lineas.length === 0) return resumen
 
   const fuentes = new Set([...reglasDe.values()].flat().map((r) => r.fuente))
-  const { negocios, cotizaciones, servicios, pagado, cuotas, pagos, contactoDe, salidas } = await cargar(svc, lineas, fuentes)
+  const { negocios, cotizaciones, servicios, pagado, cuotas, pagos, contactoDe, salidas, regresos } = await cargar(svc, lineas, fuentes)
   resumen.negocios = negocios.length
   const lineaDe = new Map(lineas.map((l) => [l.id, l]))
 
@@ -480,6 +508,7 @@ export async function correrRecordatorios(svc: Db, opts: { hoy: string }): Promi
     ...(fuentes.has('aplazado') ? candidatosDeAplazado(negocios) : []),
     ...(fuentes.has('cuota') ? candidatosDeCuota(negocios, cuotas, pagos, hoy) : []),
     ...(fuentes.has('salida') ? candidatosDeSalida(negocios, salidas, cuotas, pagos, hoy) : []),
+    ...(fuentes.has('regreso') ? candidatosDeRegreso(negocios, regresos) : []),
   ]
   const destinatarios = new Destinatarios(svc)
   const datosViajero = new DatosViajero(svc)

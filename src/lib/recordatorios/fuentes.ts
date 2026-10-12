@@ -40,6 +40,10 @@ export interface NegocioFuente {
   aplazado_para?: string | null
   /** Total del viaje (fuente `salida`). */
   precio_aprobado?: number | null
+  /** Ya se registró la calificación del viaje (fuente `regreso`: la encuesta no vuelve a salir). */
+  encuesta_respondida?: boolean
+  /** A dónde fue el viaje (texto de la encuesta). */
+  destino?: string | null
 }
 
 export interface CotizacionEnviada {
@@ -238,6 +242,23 @@ export function candidatosDeSalida(
   return out
 }
 
+export interface RegresoFuente {
+  negocio_id: string
+  fecha_regreso: string
+}
+
+/** La encuesta (F6-7): pendiente mientras la comercial no haya escrito la calificación. */
+export function candidatosDeRegreso(negocios: NegocioFuente[], regresos: RegresoFuente[]): Candidato[] {
+  const regresoDe = new Map(regresos.map((x) => [x.negocio_id, x.fecha_regreso.slice(0, 10)]))
+  const out: Candidato[] = []
+  for (const n of negocios) {
+    const f = regresoDe.get(n.id)
+    if (!f || n.estado !== 'abierto' || n.encuesta_respondida) continue
+    out.push({ fuente: 'regreso', entidadTipo: 'negocio', entidadId: n.id, negocio: n, fechaObjetivo: f, detalle: {} })
+  }
+  return out
+}
+
 /** ¿El aviso de salida con este desfase aplica? (F4-5). */
 export function salidaPideAviso(detalle: Candidato['detalle'], offset: number): boolean {
   const diasAntes = Number(detalle.dias_antes ?? 15)
@@ -273,6 +294,10 @@ export function textoDelAviso(c: Candidato, offset: number, hoy: string): string
     }
     return `Hoy vence la cuota de ${quien}: ${falta} (${negocio}). Pega el comprobante cuando pague.`
   }
+  if (c.fuente === 'regreso') {
+    const quien = c.negocio.contacto_nombre?.trim() || 'el cliente'
+    return `Mándale la encuesta a ${quien} (${negocio}): el mensaje ya está listo.`
+  }
   if (c.fuente === 'salida') {
     const quien = c.negocio.contacto_nombre?.trim().split(/\s+/)[0] || 'El cliente'
     const pct = Number(c.detalle.pct ?? 0)
@@ -304,7 +329,7 @@ export function textoDelAviso(c: Candidato, offset: number, hoy: string): string
 /** Tipo de notificación (los tipos ya están en el CHECK desde la migración de F0). */
 export function tipoDeNotificacion(c: Candidato, offset: number, hoy: string): string {
   if (c.fuente === 'salida') return 'viaje_sin_listo'
-  if (c.fuente === 'envio' || c.fuente === 'aplazado') return 'toque_seguimiento'
+  if (c.fuente === 'envio' || c.fuente === 'aplazado' || c.fuente === 'regreso') return 'toque_seguimiento'
   if (c.fuente === 'cuota') return offset > 0 || c.fechaObjetivo < hoy ? 'cobro_vencido' : 'cuota_por_vencer'
   return offset > 0 || c.fechaObjetivo < hoy ? 'pago_proveedor_vencido' : 'pago_proveedor_por_vencer'
 }

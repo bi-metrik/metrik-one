@@ -181,3 +181,31 @@ describe('T-15: a la comercial y a la dirección si no va en el 80 %', () => {
     expect(correos).toHaveLength(2)
   })
 })
+
+describe('encuesta a los 2 días del regreso (F6-7, C1)', () => {
+  const ENCUESTA = [{ id: 'encuesta', fuente: 'regreso', offset: 2, a: ['cliente'], canales: ['email', 'wa_manual'] }]
+  function conEncuesta(calificacion?: number) {
+    sembrar(4_052_000)
+    ;(tablas.lineas_negocio[0].config_extra as Fila).recordatorios = { activo: true, reglas: ENCUESTA }
+    ;(tablas.negocio_bloques[0] as Fila).fecha_regreso = '2026-11-25'
+    ;(tablas.negocio_bloques[0] as Fila).destino = 'Cusco'
+    if (calificacion) (tablas.negocios[0] as Fila).metadata = { postventa: { calificacion } }
+  }
+
+  it('sale por correo y como mensaje listo para la comercial', async () => {
+    conEncuesta()
+    await correr('2026-11-27')
+    expect(correos).toHaveLength(1)
+    expect(correos[0].text.startsWith('Valeria, ¿cómo les fue en Cusco? Respóndeme con un número del 1 al 5.')).toBe(true)
+    expect(avisos()).toHaveLength(1)
+    expect(avisos()[0]).toMatchObject({ destinatario_id: 'p-dani', tipo: 'toque_seguimiento' })
+    expect(String(avisos()[0].contenido)).toContain('Mándale la encuesta desde tu WhatsApp')
+  })
+
+  it('con la calificación ya escrita, no sale', async () => {
+    conEncuesta(5)
+    await correr('2026-11-27')
+    expect(correos).toHaveLength(0)
+    expect(avisos()).toHaveLength(0)
+  })
+})

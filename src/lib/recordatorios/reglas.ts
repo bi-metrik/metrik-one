@@ -23,8 +23,9 @@ import { esDiaHabil } from '@/lib/dates/dias-habiles'
  * `aplazado` (F1, PR 5): el día en que la comercial quedó de volver a escribir al aplazar.
  * `cuota` (F2, PR 9): las cuotas del plan de pagos del viajero.
  * `salida` (F4, PR 11): la fecha de salida del viaje, con el chequeo del cobro mínimo (80/15).
+ * `regreso` (F6, PR 13): la fecha de regreso; la encuesta sale a los 2 días (F6-7).
  */
-export const FUENTES_SOPORTADAS = ['envio', 'pago_proveedor', 'aplazado', 'cuota', 'salida'] as const
+export const FUENTES_SOPORTADAS = ['envio', 'pago_proveedor', 'aplazado', 'cuota', 'salida', 'regreso'] as const
 export type FuenteRecordatorio = (typeof FUENTES_SOPORTADAS)[number]
 
 /**
@@ -79,6 +80,9 @@ export const REGLAS_POR_DEFECTO: readonly ReglaRecordatorio[] = [
   { id: 'salida_t30', fuente: 'salida', offset: -30, dias: 'calendario', etapa_numero: null, a: ['responsable'], canales: ['in_app'] },
   { id: 'salida_t20', fuente: 'salida', offset: -20, dias: 'calendario', etapa_numero: null, a: ['responsable'], canales: ['in_app'] },
   { id: 'salida_t15', fuente: 'salida', offset: -15, dias: 'calendario', etapa_numero: null, a: ['responsable', 'aprobadores'], canales: ['in_app', 'email'] },
+  // Encuesta a los 2 días del regreso (F6-7, C1): correo al viajero si lo tiene y el mensaje listo
+  // para el WhatsApp de la comercial. La respuesta la escribe la comercial.
+  { id: 'encuesta', fuente: 'regreso', offset: 2, dias: 'calendario', etapa_numero: null, a: ['cliente'], canales: ['email', 'wa_manual'] },
 ]
 
 /**

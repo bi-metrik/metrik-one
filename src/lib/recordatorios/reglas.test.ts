@@ -61,7 +61,7 @@ describe('interruptor por línea', () => {
   it('encendido sin reglas propias = las de por defecto (toques, pago a proveedor, cuotas y salida)', () => {
     const cfg = configDeLinea({ recordatorios: { activo: true } })
     expect(cfg.activo).toBe(true)
-    expect(cfg.reglas.map((r) => r.id)).toEqual(['prov_t3', 'prov_t0', 'prov_vencido', 'toque_1', 'toque_3', 'toque_7', 'toque_aplazado', 'cuota_t3', 'cuota_t0', 'cuota_vencida', 'salida_t30', 'salida_t20', 'salida_t15'])
+    expect(cfg.reglas.map((r) => r.id)).toEqual(['prov_t3', 'prov_t0', 'prov_vencido', 'toque_1', 'toque_3', 'toque_7', 'toque_aplazado', 'cuota_t3', 'cuota_t0', 'cuota_vencida', 'salida_t30', 'salida_t20', 'salida_t15', 'encuesta'])
   })
 
   it('una regla de una fuente que aún no existe se salta sin contarse como error; una mal escrita se descarta', () => {
@@ -69,7 +69,7 @@ describe('interruptor por línea', () => {
       recordatorios: {
         activo: true,
         reglas: [
-          { id: 'regreso_t2', fuente: 'regreso', offset: 2, a: ['cliente'], canales: ['email'] },
+          { id: 'futura', fuente: 'una_fuente_futura', offset: 2, a: ['cliente'], canales: ['email'] },
           { id: 'mala', fuente: 'envio', offset: 1.5, a: ['responsable'], canales: ['in_app'] },
           { id: 'sin_canal', fuente: 'envio', offset: 1, a: ['responsable'], canales: ['paloma'] },
           { id: 'toque_1', fuente: 'envio', offset: 1, dias: 'habiles', etapa_numero: 3, a: ['responsable'], canales: ['in_app'] },
