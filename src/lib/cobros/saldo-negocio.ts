@@ -49,6 +49,12 @@ export interface CobroParaSaldo {
    * retencion como saldo. Ver `lib/cobros/retencion-iva.ts`.
    */
   retencion_iva?: number | string | null
+  /**
+   * Un cobro anulado deja `monto` en 0 (`lib/cobros/anulacion.ts`), pero la anulacion NO toca
+   * `retencion_iva`: sin mirar esta marca, la retencion de un pago anulado seguiria contando
+   * como recaudo. Quien no la lea (no la selecciona) se queda con lo de siempre.
+   */
+  anulado_at?: string | null
 }
 
 /**
@@ -62,12 +68,31 @@ export function cobradoConfirmado(cobros: readonly CobroParaSaldo[]): number {
   let total = 0
   for (const c of cobros) {
     if (!c.fecha) continue
+    if (c.anulado_at) continue
     const n = Number(c.monto ?? 0)
     if (Number.isFinite(n)) total += n
     const r = Number(c.retencion_iva ?? 0)
     if (Number.isFinite(r) && r > 0) total += r
   }
   return total
+}
+
+/**
+ * «Total cobrado» y «Por cobrar» del resumen financiero y del snapshot de cierre, en UN solo
+ * sitio. Los dos sumaban `monto` de todas las filas de `cobros`, cuotas programadas incluidas:
+ * un plan de 4 cuotas sin un peso pagado salia como cobrado entero y «Por cobrar» en 0.
+ *
+ * «Por cobrar» nunca es negativo aqui: un sobrepago se ve como «Total cobrado» mayor al precio,
+ * no como deuda negativa (el saldo a favor lo dice la tarjeta de cobros).
+ */
+export function resumenDeCobro(
+  cobros: readonly CobroParaSaldo[],
+  precioAprobado: number | null | undefined,
+): { totalCobrado: number; porCobrar: number } {
+  const totalCobrado = cobradoConfirmado(cobros)
+  const precio = Number(precioAprobado ?? 0)
+  const porCobrar = Math.max(0, (Number.isFinite(precio) ? precio : 0) - totalCobrado)
+  return { totalCobrado, porCobrar }
 }
 
 /**
