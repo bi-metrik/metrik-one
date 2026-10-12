@@ -1,0 +1,3530 @@
+{
+ "_grabado": {
+  "commit": "54568adf",
+  "fecha": "2026-10-12",
+  "como": "GRABAR_IGUALDAD=1 npx vitest run igualdad-servidor, sobre origin/main sin cambios de código",
+  "regla": "No se regenera para que una prueba pase. Si un PR lo cambia, el PR no entra (regla 3 de Vera)."
+ },
+ "salidas": {
+  "termotech": {
+   "recalculo": {
+    "resultado": {
+     "success": true,
+     "costoTotal": 6940000,
+     "valorVenta": 9146464,
+     "desmarcados": []
+    },
+    "escrituras": [
+     {
+      "tabla": "cotizaciones",
+      "op": "update",
+      "filtros": [
+       [
+        "eq",
+        "id",
+        "cot-industrial"
+       ]
+      ],
+      "payload": {
+       "costo_total": 6940000,
+       "valor_total": 9146464,
+       "descuento_valor": 481393
+      }
+     },
+     {
+      "tabla": "items",
+      "op": "update",
+      "filtros": [
+       [
+        "eq",
+        "id",
+        "bomba"
+       ]
+      ],
+      "payload": {
+       "subtotal": 1610000,
+       "precio_venta": 2173500
+      }
+     },
+     {
+      "tabla": "items",
+      "op": "update",
+      "filtros": [
+       [
+        "eq",
+        "id",
+        "ingenieria"
+       ]
+      ],
+      "payload": {
+       "subtotal": 800000,
+       "precio_venta": 1110857
+      }
+     },
+     {
+      "tabla": "items",
+      "op": "update",
+      "filtros": [
+       [
+        "eq",
+        "id",
+        "tablero"
+       ]
+      ],
+      "payload": {
+       "subtotal": 1000000,
+       "precio_venta": 1350000
+      }
+     }
+    ],
+    "cotizacion": {
+     "valor_total": 9146464,
+     "costo_total": 6940000,
+     "descuento_valor": 481393
+    },
+    "preciosPorLinea": {
+     "bomba": 2173500,
+     "ingenieria": 1110857,
+     "transporte": 120000,
+     "tablero": 1350000
+    }
+   },
+   "pdf": {
+    "props": {
+     "cotizacion": {
+      "consecutivo": "COT-2026-0100",
+      "descripcion": "Obra planta de prueba",
+      "valor_total": 9146464,
+      "modo": "detallada",
+      "fecha_envio": null,
+      "fecha_validez": "2026-11-12",
+      "condiciones_pago": "50 % de anticipo",
+      "notas": "Incluye instalación",
+      "descuento_porcentaje": 5,
+      "descuento_valor": 481393,
+      "terminos_condiciones": "Validez 30 días."
+     },
+     "empresa": {
+      "nombre": "Cliente",
+      "nit": null,
+      "contacto_nombre": null,
+      "contacto_email": null,
+      "telefono": null,
+      "direccion": null,
+      "ciudad": null
+     },
+     "vendedor": {
+      "nombre": "Industrial de Prueba",
+      "razon_social": "INDUSTRIAL DE PRUEBA S.A.S",
+      "nit": "900000002",
+      "logo_url": null,
+      "color_primario": "var(--acento)",
+      "telefono": null,
+      "email": null,
+      "direccion": null,
+      "ciudad": null
+     },
+     "items": [
+      {
+       "nombre": "Bomba centrífuga",
+       "descripcion": "Incluye instalación",
+       "precio_venta": 2173500,
+       "descuento_porcentaje": 0,
+       "cantidad": 2,
+       "unidad": null,
+       "precioPorPasajero": null
+      },
+      {
+       "nombre": "Ingeniería",
+       "descripcion": null,
+       "precio_venta": 1110857,
+       "descuento_porcentaje": 0,
+       "cantidad": 1,
+       "unidad": null,
+       "precioPorPasajero": null
+      },
+      {
+       "nombre": "Transporte",
+       "descripcion": null,
+       "precio_venta": 120000,
+       "descuento_porcentaje": 0,
+       "cantidad": 1,
+       "unidad": null,
+       "precioPorPasajero": null
+      },
+      {
+       "nombre": "Tablero eléctrico",
+       "descripcion": null,
+       "precio_venta": 1350000,
+       "descuento_porcentaje": 0,
+       "cantidad": 3,
+       "unidad": null,
+       "precioPorPasajero": null
+      }
+     ],
+     "itinerarios": null,
+     "dias": null,
+     "itemsSinDia": null,
+     "sugeridos": null,
+     "preciosPorPasajero": null,
+     "fiscal": {
+      "subtotal": 9146464,
+      "iva": 0,
+      "ivaRate": 0,
+      "reteFuente": 0,
+      "reteFuenteRate": 0,
+      "reteICA": 0,
+      "reteICARate": 0,
+      "reteIVA": 0,
+      "reteIVARate": 0,
+      "totalBruto": 9146464,
+      "totalRetenciones": 0,
+      "teQueda": 9146464,
+      "aplica": {
+       "iva": false,
+       "reteFuente": false,
+       "reteICA": false,
+       "reteIVA": false
+      }
+     },
+     "ivaEnPrecios": null,
+     "negocio": {
+      "nombre": "OBRA PLANTA DE PRUEBA"
+     },
+     "emisor": {
+      "nombre": "Comercial de Prueba",
+      "cargo": "Comercial"
+     },
+     "viaje": null
+    },
+    "resultado": {
+     "success": true,
+     "filename": "COT-2026-0100.pdf",
+     "fiscal": {
+      "subtotal": 9146464,
+      "iva": 0,
+      "ivaRate": 0,
+      "reteFuente": 0,
+      "reteFuenteRate": 0,
+      "reteICA": 0,
+      "reteICARate": 0,
+      "reteIVA": 0,
+      "reteIVARate": 0,
+      "totalBruto": 9146464,
+      "totalRetenciones": 0,
+      "teQueda": 9146464,
+      "aplica": {
+       "iva": false,
+       "reteFuente": false,
+       "reteICA": false,
+       "reteIVA": false
+      }
+     },
+     "archivoReferencia": "sbext://one-documentos/COT-2026-0100.pdf",
+     "aviso": null,
+     "avisosCobertura": [],
+     "avisosCaptura": [],
+     "avisoTexto": null,
+     "envioRegistrado": false,
+     "renderedVia": "react-pdf"
+    },
+    "escrituras": [],
+    "subidas": [
+     "COT-2026-0100.pdf"
+    ]
+   },
+   "tarifas": {
+    "success": true,
+    "tarifas": [],
+    "preseleccion": null
+   },
+   "aprobacion": {
+    "resultado": {
+     "success": true
+    },
+    "precio_aprobado": 9146464,
+    "escrituras": [
+     {
+      "tabla": "cotizaciones",
+      "op": "update",
+      "filtros": [
+       [
+        "eq",
+        "id",
+        "cot-industrial"
+       ]
+      ],
+      "payload": {
+       "estado": "aceptada",
+       "updated_at": "2026-10-12T15:00:00.000Z"
+      }
+     },
+     {
+      "tabla": "negocios",
+      "op": "update",
+      "filtros": [
+       [
+        "eq",
+        "id",
+        "neg-industrial"
+       ]
+      ],
+      "payload": {
+       "precio_aprobado": 9146464
+      }
+     }
+    ]
+   }
+  },
+  "generica-con-cuadre": {
+   "recalculo": {
+    "resultado": {
+     "success": true,
+     "costoTotal": 6940000,
+     "valorVenta": 9800000
+    },
+    "escrituras": [
+     {
+      "tabla": "cotizaciones",
+      "op": "update",
+      "filtros": [
+       [
+        "eq",
+        "id",
+        "cot-industrial"
+       ]
+      ],
+      "payload": {
+       "costo_total": 6940000
+      }
+     },
+     {
+      "tabla": "items",
+      "op": "update",
+      "filtros": [
+       [
+        "eq",
+        "id",
+        "ajuste"
+       ]
+      ],
+      "payload": {
+       "precio_venta": 876429,
+       "nombre": "Administración e imprevistos"
+      }
+     },
+     {
+      "tabla": "items",
+      "op": "update",
+      "filtros": [
+       [
+        "eq",
+        "id",
+        "bomba"
+       ]
+      ],
+      "payload": {
+       "subtotal": 1610000,
+       "precio_venta": 2012500
+      }
+     },
+     {
+      "tabla": "items",
+      "op": "update",
+      "filtros": [
+       [
+        "eq",
+        "id",
+        "ingenieria"
+       ]
+      ],
+      "payload": {
+       "subtotal": 800000,
+       "precio_venta": 1028571
+      }
+     },
+     {
+      "tabla": "items",
+      "op": "update",
+      "filtros": [
+       [
+        "eq",
+        "id",
+        "tablero"
+       ]
+      ],
+      "payload": {
+       "subtotal": 1000000,
+       "precio_venta": 1250000
+      }
+     }
+    ],
+    "cotizacion": {
+     "valor_total": 9800000,
+     "costo_total": 6940000,
+     "descuento_valor": 0
+    },
+    "preciosPorLinea": {
+     "bomba": 2012500,
+     "ingenieria": 1028571,
+     "transporte": 120000,
+     "tablero": 1250000,
+     "ajuste": 876429
+    }
+   },
+   "pdf": {
+    "props": {
+     "cotizacion": {
+      "consecutivo": "COT-2026-0100",
+      "descripcion": "Obra planta de prueba",
+      "valor_total": 9800000,
+      "modo": "detallada",
+      "fecha_envio": null,
+      "fecha_validez": "2026-11-12",
+      "condiciones_pago": "50 % de anticipo",
+      "notas": "Incluye instalación",
+      "descuento_porcentaje": 0,
+      "descuento_valor": 0,
+      "terminos_condiciones": "Validez 30 días."
+     },
+     "empresa": {
+      "nombre": "Cliente",
+      "nit": null,
+      "contacto_nombre": null,
+      "contacto_email": null,
+      "telefono": null,
+      "direccion": null,
+      "ciudad": null
+     },
+     "vendedor": {
+      "nombre": "Industrial de Prueba",
+      "razon_social": "INDUSTRIAL DE PRUEBA S.A.S",
+      "nit": "900000002",
+      "logo_url": null,
+      "color_primario": "var(--acento)",
+      "telefono": null,
+      "email": null,
+      "direccion": null,
+      "ciudad": null
+     },
+     "items": [
+      {
+       "nombre": "Bomba centrífuga",
+       "descripcion": "Incluye instalación",
+       "precio_venta": 2012500,
+       "descuento_porcentaje": 0,
+       "cantidad": 2,
+       "unidad": null,
+       "precioPorPasajero": null
+      },
+      {
+       "nombre": "Ingeniería",
+       "descripcion": null,
+       "precio_venta": 1028571,
+       "descuento_porcentaje": 0,
+       "cantidad": 1,
+       "unidad": null,
+       "precioPorPasajero": null
+      },
+      {
+       "nombre": "Transporte",
+       "descripcion": null,
+       "precio_venta": 120000,
+       "descuento_porcentaje": 0,
+       "cantidad": 1,
+       "unidad": null,
+       "precioPorPasajero": null
+      },
+      {
+       "nombre": "Tablero eléctrico",
+       "descripcion": null,
+       "precio_venta": 1250000,
+       "descuento_porcentaje": 0,
+       "cantidad": 3,
+       "unidad": null,
+       "precioPorPasajero": null
+      },
+      {
+       "nombre": "Administración e imprevistos",
+       "descripcion": null,
+       "precio_venta": 876429,
+       "descuento_porcentaje": 0,
+       "cantidad": 1,
+       "unidad": null,
+       "precioPorPasajero": null
+      }
+     ],
+     "itinerarios": null,
+     "dias": null,
+     "itemsSinDia": null,
+     "sugeridos": null,
+     "preciosPorPasajero": null,
+     "fiscal": {
+      "subtotal": 9800000,
+      "iva": 0,
+      "ivaRate": 0,
+      "reteFuente": 0,
+      "reteFuenteRate": 0,
+      "reteICA": 0,
+      "reteICARate": 0,
+      "reteIVA": 0,
+      "reteIVARate": 0,
+      "totalBruto": 9800000,
+      "totalRetenciones": 0,
+      "teQueda": 9800000,
+      "aplica": {
+       "iva": false,
+       "reteFuente": false,
+       "reteICA": false,
+       "reteIVA": false
+      }
+     },
+     "ivaEnPrecios": null,
+     "negocio": {
+      "nombre": "OBRA PLANTA DE PRUEBA"
+     },
+     "emisor": null,
+     "viaje": null
+    },
+    "resultado": {
+     "success": true,
+     "filename": "COT-2026-0100.pdf",
+     "fiscal": {
+      "subtotal": 9800000,
+      "iva": 0,
+      "ivaRate": 0,
+      "reteFuente": 0,
+      "reteFuenteRate": 0,
+      "reteICA": 0,
+      "reteICARate": 0,
+      "reteIVA": 0,
+      "reteIVARate": 0,
+      "totalBruto": 9800000,
+      "totalRetenciones": 0,
+      "teQueda": 9800000,
+      "aplica": {
+       "iva": false,
+       "reteFuente": false,
+       "reteICA": false,
+       "reteIVA": false
+      }
+     },
+     "archivoReferencia": "sbext://one-documentos/COT-2026-0100.pdf",
+     "aviso": null,
+     "avisosCobertura": [],
+     "avisosCaptura": [],
+     "avisoTexto": null,
+     "envioRegistrado": false,
+     "renderedVia": "react-pdf"
+    },
+    "escrituras": [],
+    "subidas": [
+     "COT-2026-0100.pdf"
+    ]
+   },
+   "tarifas": {
+    "success": true,
+    "tarifas": [],
+    "preseleccion": null
+   },
+   "aprobacion": {
+    "resultado": {
+     "success": true
+    },
+    "precio_aprobado": 9800000,
+    "escrituras": [
+     {
+      "tabla": "cotizaciones",
+      "op": "update",
+      "filtros": [
+       [
+        "eq",
+        "id",
+        "cot-industrial"
+       ]
+      ],
+      "payload": {
+       "estado": "aceptada",
+       "updated_at": "2026-10-12T15:00:00.000Z"
+      }
+     },
+     {
+      "tabla": "negocios",
+      "op": "update",
+      "filtros": [
+       [
+        "eq",
+        "id",
+        "neg-industrial"
+       ]
+      ],
+      "payload": {
+       "precio_aprobado": 9800000
+      }
+     }
+    ]
+   }
+  },
+  "trappvel-caso-fijo": {
+   "recalculo": {
+    "resultado": {
+     "success": true,
+     "costoTotal": 19081590,
+     "valorVenta": 22448922,
+     "desmarcados": []
+    },
+    "escrituras": [
+     {
+      "tabla": "cotizaciones",
+      "op": "update",
+      "filtros": [
+       [
+        "eq",
+        "id",
+        "cot-san-andres"
+       ]
+      ],
+      "payload": {
+       "costo_total": 19081590,
+       "valor_total": 22448922,
+       "descuento_valor": 0
+      }
+     },
+     {
+      "tabla": "items",
+      "op": "update",
+      "filtros": [
+       [
+        "eq",
+        "id",
+        "a-buceo"
+       ]
+      ],
+      "payload": {
+       "subtotal": 1080000,
+       "precio_venta": 1270588
+      }
+     },
+     {
+      "tabla": "items",
+      "op": "update",
+      "filtros": [
+       [
+        "eq",
+        "id",
+        "a-cayo-compartida"
+       ]
+      ],
+      "payload": {
+       "subtotal": 720000,
+       "precio_venta": 847056
+      }
+     },
+     {
+      "tabla": "items",
+      "op": "update",
+      "filtros": [
+       [
+        "eq",
+        "id",
+        "a-cayo-privada"
+       ]
+      ],
+      "payload": {
+       "subtotal": 1400000,
+       "precio_venta": 1647056
+      }
+     },
+     {
+      "tabla": "items",
+      "op": "update",
+      "filtros": [
+       [
+        "eq",
+        "id",
+        "h-agua-dulce"
+       ]
+      ],
+      "payload": {
+       "subtotal": 4352838,
+       "precio_venta": 5120986
+      }
+     },
+     {
+      "tabla": "items",
+      "op": "update",
+      "filtros": [
+       [
+        "eq",
+        "id",
+        "h-lord-pierre"
+       ]
+      ],
+      "payload": {
+       "subtotal": 6420000,
+       "precio_venta": 7552944
+      }
+     },
+     {
+      "tabla": "items",
+      "op": "update",
+      "filtros": [
+       [
+        "eq",
+        "id",
+        "h-posada"
+       ]
+      ],
+      "payload": {
+       "subtotal": 1229098,
+       "precio_venta": 1446000
+      }
+     },
+     {
+      "tabla": "items",
+      "op": "update",
+      "filtros": [
+       [
+        "eq",
+        "id",
+        "h-verde-mar"
+       ]
+      ],
+      "payload": {
+       "subtotal": 5712000,
+       "precio_venta": 6720000
+      }
+     },
+     {
+      "tabla": "items",
+      "op": "update",
+      "filtros": [
+       [
+        "eq",
+        "id",
+        "t-providencia"
+       ]
+      ],
+      "payload": {
+       "subtotal": 420000,
+       "precio_venta": 494116
+      }
+     },
+     {
+      "tabla": "items",
+      "op": "update",
+      "filtros": [
+       [
+        "eq",
+        "id",
+        "t-san-andres"
+       ]
+      ],
+      "payload": {
+       "subtotal": 420000,
+       "precio_venta": 494116
+      }
+     },
+     {
+      "tabla": "items",
+      "op": "update",
+      "filtros": [
+       [
+        "eq",
+        "id",
+        "v-avianca"
+       ]
+      ],
+      "payload": {
+       "subtotal": 6208296,
+       "precio_venta": 7303877
+      }
+     },
+     {
+      "tabla": "items",
+      "op": "update",
+      "filtros": [
+       [
+        "eq",
+        "id",
+        "v-satena"
+       ]
+      ],
+      "payload": {
+       "subtotal": 3292196,
+       "precio_venta": 3873169
+      }
+     }
+    ],
+    "cotizacion": {
+     "valor_total": 22448922,
+     "costo_total": 19081590,
+     "descuento_valor": 0
+    },
+    "preciosPorLinea": {
+     "v-avianca": 7303877,
+     "v-satena": 3873169,
+     "h-posada": 1446000,
+     "h-agua-dulce": 5120986,
+     "h-verde-mar": 6720000,
+     "h-lord-pierre": 7552944,
+     "t-providencia": 494116,
+     "t-san-andres": 494116,
+     "a-cayo-compartida": 847056,
+     "a-cayo-privada": 1647056,
+     "a-buceo": 1270588
+    }
+   },
+   "pdf": {
+    "props": {
+     "cotizacion": {
+      "consecutivo": "COT-2026-0901",
+      "descripcion": "Viaje San Andrés y Providencia",
+      "valor_total": 22448922,
+      "modo": "detallada",
+      "fecha_envio": null,
+      "fecha_validez": "2026-10-27",
+      "condiciones_pago": "80 % para reservar y 20 % 30 días antes del viaje",
+      "notas": null,
+      "descuento_porcentaje": 0,
+      "descuento_valor": 0,
+      "terminos_condiciones": "Tarifas sujetas a disponibilidad al momento de reservar."
+     },
+     "empresa": {
+      "nombre": "Cliente",
+      "nit": null,
+      "contacto_nombre": null,
+      "contacto_email": null,
+      "telefono": null,
+      "direccion": null,
+      "ciudad": null
+     },
+     "vendedor": {
+      "nombre": "Agencia de Prueba",
+      "razon_social": "AGENCIA DE PRUEBA S.A.S",
+      "nit": "900000001",
+      "logo_url": null,
+      "color_primario": "var(--acento)",
+      "telefono": null,
+      "email": null,
+      "direccion": null,
+      "ciudad": null
+     },
+     "items": [
+      {
+       "nombre": "Avianca Bogotá ⇄ San Andrés",
+       "descripcion": null,
+       "precio_venta": 7303877,
+       "descuento_porcentaje": 0,
+       "cantidad": 1,
+       "unidad": null,
+       "precioPorPasajero": [
+        {
+         "tipo": "adulto",
+         "cantidad": 6,
+         "precioUnitario": 1087808
+        },
+        {
+         "tipo": "nino",
+         "cantidad": 1,
+         "precioUnitario": 763691
+        },
+        {
+         "tipo": "infante",
+         "cantidad": 1,
+         "precioUnitario": 13338
+        }
+       ]
+      },
+      {
+       "nombre": "SATENA San Andrés ⇄ Providencia",
+       "descripcion": null,
+       "precio_venta": 3873169,
+       "descuento_porcentaje": 0,
+       "cantidad": 1,
+       "unidad": null,
+       "precioPorPasajero": [
+        {
+         "tipo": "adulto",
+         "cantidad": 6,
+         "precioUnitario": 525882
+        },
+        {
+         "tipo": "nino",
+         "cantidad": 1,
+         "precioUnitario": 525882
+        },
+        {
+         "tipo": "infante",
+         "cantidad": 1,
+         "precioUnitario": 191995
+        }
+       ]
+      },
+      {
+       "nombre": "POSADA ENILDA · PROVIDENCIA",
+       "descripcion": null,
+       "precio_venta": 1446000,
+       "descuento_porcentaje": 0,
+       "cantidad": 1,
+       "unidad": null,
+       "precioPorPasajero": [
+        {
+         "tipo": "adulto",
+         "cantidad": 6,
+         "precioUnitario": 206571
+        },
+        {
+         "tipo": "nino",
+         "cantidad": 1,
+         "precioUnitario": 206574
+        },
+        {
+         "tipo": "infante",
+         "cantidad": 1,
+         "precioUnitario": 0
+        }
+       ]
+      },
+      {
+       "nombre": "VERDE MAR · SAN ANDRÉS",
+       "descripcion": null,
+       "precio_venta": 6720000,
+       "descuento_porcentaje": 0,
+       "cantidad": 1,
+       "unidad": null,
+       "precioPorPasajero": [
+        {
+         "tipo": "adulto",
+         "cantidad": 6,
+         "precioUnitario": 840000
+        },
+        {
+         "tipo": "nino",
+         "cantidad": 1,
+         "precioUnitario": 840000
+        },
+        {
+         "tipo": "infante",
+         "cantidad": 1,
+         "precioUnitario": 840000
+        }
+       ]
+      },
+      {
+       "nombre": "AEROPUERTO - HOTEL - AEROPUERTO PROVIDENCIA",
+       "descripcion": null,
+       "precio_venta": 494116,
+       "descuento_porcentaje": 0,
+       "cantidad": 1,
+       "unidad": null,
+       "precioPorPasajero": [
+        {
+         "tipo": "adulto",
+         "cantidad": 6,
+         "precioUnitario": 70588
+        },
+        {
+         "tipo": "nino",
+         "cantidad": 1,
+         "precioUnitario": 70588
+        },
+        {
+         "tipo": "infante",
+         "cantidad": 1,
+         "precioUnitario": 0
+        }
+       ]
+      },
+      {
+       "nombre": "AEROPUERTO - HOTEL - AEROPUERTO SAN ANDRÉS",
+       "descripcion": null,
+       "precio_venta": 494116,
+       "descuento_porcentaje": 0,
+       "cantidad": 1,
+       "unidad": null,
+       "precioPorPasajero": [
+        {
+         "tipo": "adulto",
+         "cantidad": 6,
+         "precioUnitario": 70588
+        },
+        {
+         "tipo": "nino",
+         "cantidad": 1,
+         "precioUnitario": 70588
+        },
+        {
+         "tipo": "infante",
+         "cantidad": 1,
+         "precioUnitario": 0
+        }
+       ]
+      },
+      {
+       "nombre": "CAYO CANGREJO · LANCHA COMPARTIDA",
+       "descripcion": null,
+       "precio_venta": 847056,
+       "descuento_porcentaje": 0,
+       "cantidad": 1,
+       "unidad": null,
+       "precioPorPasajero": [
+        {
+         "tipo": "adulto",
+         "cantidad": 6,
+         "precioUnitario": 105882
+        },
+        {
+         "tipo": "nino",
+         "cantidad": 1,
+         "precioUnitario": 105882
+        },
+        {
+         "tipo": "infante",
+         "cantidad": 1,
+         "precioUnitario": 105882
+        }
+       ]
+      },
+      {
+       "nombre": "BUCEO DE BAUTISMO",
+       "descripcion": null,
+       "precio_venta": 1270588,
+       "descuento_porcentaje": 0,
+       "cantidad": 1,
+       "unidad": null,
+       "precioPorPasajero": [
+        {
+         "tipo": "adulto",
+         "cantidad": 2,
+         "precioUnitario": 635294
+        }
+       ]
+      }
+     ],
+     "itinerarios": [
+      {
+       "nombre": "Recomendada",
+       "esPrincipal": true,
+       "precio": 22448922,
+       "items": [
+        {
+         "nombre": "Avianca Bogotá ⇄ San Andrés",
+         "descripcion": null,
+         "precio_venta": 7303877,
+         "descuento_porcentaje": 0,
+         "cantidad": 1,
+         "unidad": null,
+         "precioPorPasajero": [
+          {
+           "tipo": "adulto",
+           "cantidad": 6,
+           "precioUnitario": 1087808
+          },
+          {
+           "tipo": "nino",
+           "cantidad": 1,
+           "precioUnitario": 763691
+          },
+          {
+           "tipo": "infante",
+           "cantidad": 1,
+           "precioUnitario": 13338
+          }
+         ]
+        },
+        {
+         "nombre": "SATENA San Andrés ⇄ Providencia",
+         "descripcion": null,
+         "precio_venta": 3873169,
+         "descuento_porcentaje": 0,
+         "cantidad": 1,
+         "unidad": null,
+         "precioPorPasajero": [
+          {
+           "tipo": "adulto",
+           "cantidad": 6,
+           "precioUnitario": 525882
+          },
+          {
+           "tipo": "nino",
+           "cantidad": 1,
+           "precioUnitario": 525882
+          },
+          {
+           "tipo": "infante",
+           "cantidad": 1,
+           "precioUnitario": 191995
+          }
+         ]
+        },
+        {
+         "nombre": "POSADA ENILDA · PROVIDENCIA",
+         "descripcion": null,
+         "precio_venta": 1446000,
+         "descuento_porcentaje": 0,
+         "cantidad": 1,
+         "unidad": null,
+         "precioPorPasajero": [
+          {
+           "tipo": "adulto",
+           "cantidad": 6,
+           "precioUnitario": 206571
+          },
+          {
+           "tipo": "nino",
+           "cantidad": 1,
+           "precioUnitario": 206574
+          },
+          {
+           "tipo": "infante",
+           "cantidad": 1,
+           "precioUnitario": 0
+          }
+         ]
+        },
+        {
+         "nombre": "VERDE MAR · SAN ANDRÉS",
+         "descripcion": null,
+         "precio_venta": 6720000,
+         "descuento_porcentaje": 0,
+         "cantidad": 1,
+         "unidad": null,
+         "precioPorPasajero": [
+          {
+           "tipo": "adulto",
+           "cantidad": 6,
+           "precioUnitario": 840000
+          },
+          {
+           "tipo": "nino",
+           "cantidad": 1,
+           "precioUnitario": 840000
+          },
+          {
+           "tipo": "infante",
+           "cantidad": 1,
+           "precioUnitario": 840000
+          }
+         ]
+        },
+        {
+         "nombre": "AEROPUERTO - HOTEL - AEROPUERTO PROVIDENCIA",
+         "descripcion": null,
+         "precio_venta": 494116,
+         "descuento_porcentaje": 0,
+         "cantidad": 1,
+         "unidad": null,
+         "precioPorPasajero": [
+          {
+           "tipo": "adulto",
+           "cantidad": 6,
+           "precioUnitario": 70588
+          },
+          {
+           "tipo": "nino",
+           "cantidad": 1,
+           "precioUnitario": 70588
+          },
+          {
+           "tipo": "infante",
+           "cantidad": 1,
+           "precioUnitario": 0
+          }
+         ]
+        },
+        {
+         "nombre": "AEROPUERTO - HOTEL - AEROPUERTO SAN ANDRÉS",
+         "descripcion": null,
+         "precio_venta": 494116,
+         "descuento_porcentaje": 0,
+         "cantidad": 1,
+         "unidad": null,
+         "precioPorPasajero": [
+          {
+           "tipo": "adulto",
+           "cantidad": 6,
+           "precioUnitario": 70588
+          },
+          {
+           "tipo": "nino",
+           "cantidad": 1,
+           "precioUnitario": 70588
+          },
+          {
+           "tipo": "infante",
+           "cantidad": 1,
+           "precioUnitario": 0
+          }
+         ]
+        },
+        {
+         "nombre": "CAYO CANGREJO · LANCHA COMPARTIDA",
+         "descripcion": null,
+         "precio_venta": 847056,
+         "descuento_porcentaje": 0,
+         "cantidad": 1,
+         "unidad": null,
+         "precioPorPasajero": [
+          {
+           "tipo": "adulto",
+           "cantidad": 6,
+           "precioUnitario": 105882
+          },
+          {
+           "tipo": "nino",
+           "cantidad": 1,
+           "precioUnitario": 105882
+          },
+          {
+           "tipo": "infante",
+           "cantidad": 1,
+           "precioUnitario": 105882
+          }
+         ]
+        },
+        {
+         "nombre": "BUCEO DE BAUTISMO",
+         "descripcion": null,
+         "precio_venta": 1270588,
+         "descuento_porcentaje": 0,
+         "cantidad": 1,
+         "unidad": null,
+         "precioPorPasajero": [
+          {
+           "tipo": "adulto",
+           "cantidad": 2,
+           "precioUnitario": 635294
+          }
+         ]
+        }
+       ]
+      },
+      {
+       "nombre": "Premium",
+       "esPrincipal": false,
+       "precio": 27756852,
+       "items": [
+        {
+         "nombre": "Avianca Bogotá ⇄ San Andrés",
+         "descripcion": null,
+         "precio_venta": 7303877,
+         "descuento_porcentaje": 0,
+         "cantidad": 1,
+         "unidad": null,
+         "precioPorPasajero": [
+          {
+           "tipo": "adulto",
+           "cantidad": 6,
+           "precioUnitario": 1087808
+          },
+          {
+           "tipo": "nino",
+           "cantidad": 1,
+           "precioUnitario": 763691
+          },
+          {
+           "tipo": "infante",
+           "cantidad": 1,
+           "precioUnitario": 13338
+          }
+         ]
+        },
+        {
+         "nombre": "SATENA San Andrés ⇄ Providencia",
+         "descripcion": null,
+         "precio_venta": 3873169,
+         "descuento_porcentaje": 0,
+         "cantidad": 1,
+         "unidad": null,
+         "precioPorPasajero": [
+          {
+           "tipo": "adulto",
+           "cantidad": 6,
+           "precioUnitario": 525882
+          },
+          {
+           "tipo": "nino",
+           "cantidad": 1,
+           "precioUnitario": 525882
+          },
+          {
+           "tipo": "infante",
+           "cantidad": 1,
+           "precioUnitario": 191995
+          }
+         ]
+        },
+        {
+         "nombre": "CABAÑAS AGUA DULCE · PROVIDENCIA",
+         "descripcion": null,
+         "precio_venta": 5120986,
+         "descuento_porcentaje": 0,
+         "cantidad": 1,
+         "unidad": null,
+         "precioPorPasajero": [
+          {
+           "tipo": "adulto",
+           "cantidad": 6,
+           "precioUnitario": 682353
+          },
+          {
+           "tipo": "nino",
+           "cantidad": 1,
+           "precioUnitario": 682353
+          },
+          {
+           "tipo": "infante",
+           "cantidad": 1,
+           "precioUnitario": 344515
+          }
+         ]
+        },
+        {
+         "nombre": "LORD PIERRE · SAN ANDRÉS",
+         "descripcion": null,
+         "precio_venta": 7552944,
+         "descuento_porcentaje": 0,
+         "cantidad": 1,
+         "unidad": null,
+         "precioPorPasajero": [
+          {
+           "tipo": "adulto",
+           "cantidad": 6,
+           "precioUnitario": 944118
+          },
+          {
+           "tipo": "nino",
+           "cantidad": 1,
+           "precioUnitario": 944118
+          },
+          {
+           "tipo": "infante",
+           "cantidad": 1,
+           "precioUnitario": 944118
+          }
+         ]
+        },
+        {
+         "nombre": "AEROPUERTO - HOTEL - AEROPUERTO PROVIDENCIA",
+         "descripcion": null,
+         "precio_venta": 494116,
+         "descuento_porcentaje": 0,
+         "cantidad": 1,
+         "unidad": null,
+         "precioPorPasajero": [
+          {
+           "tipo": "adulto",
+           "cantidad": 6,
+           "precioUnitario": 70588
+          },
+          {
+           "tipo": "nino",
+           "cantidad": 1,
+           "precioUnitario": 70588
+          },
+          {
+           "tipo": "infante",
+           "cantidad": 1,
+           "precioUnitario": 0
+          }
+         ]
+        },
+        {
+         "nombre": "AEROPUERTO - HOTEL - AEROPUERTO SAN ANDRÉS",
+         "descripcion": null,
+         "precio_venta": 494116,
+         "descuento_porcentaje": 0,
+         "cantidad": 1,
+         "unidad": null,
+         "precioPorPasajero": [
+          {
+           "tipo": "adulto",
+           "cantidad": 6,
+           "precioUnitario": 70588
+          },
+          {
+           "tipo": "nino",
+           "cantidad": 1,
+           "precioUnitario": 70588
+          },
+          {
+           "tipo": "infante",
+           "cantidad": 1,
+           "precioUnitario": 0
+          }
+         ]
+        },
+        {
+         "nombre": "CAYO CANGREJO · LANCHA PRIVADA",
+         "descripcion": null,
+         "precio_venta": 1647056,
+         "descuento_porcentaje": 0,
+         "cantidad": 1,
+         "unidad": null,
+         "precioPorPasajero": [
+          {
+           "tipo": "adulto",
+           "cantidad": 6,
+           "precioUnitario": 205882
+          },
+          {
+           "tipo": "nino",
+           "cantidad": 1,
+           "precioUnitario": 205882
+          },
+          {
+           "tipo": "infante",
+           "cantidad": 1,
+           "precioUnitario": 205882
+          }
+         ]
+        },
+        {
+         "nombre": "BUCEO DE BAUTISMO",
+         "descripcion": null,
+         "precio_venta": 1270588,
+         "descuento_porcentaje": 0,
+         "cantidad": 1,
+         "unidad": null,
+         "precioPorPasajero": [
+          {
+           "tipo": "adulto",
+           "cantidad": 2,
+           "precioUnitario": 635294
+          }
+         ]
+        }
+       ]
+      }
+     ],
+     "dias": null,
+     "itemsSinDia": null,
+     "sugeridos": null,
+     "preciosPorPasajero": {
+      "filas": [
+       {
+        "tipo": "adulto",
+        "cantidad": null,
+        "precioUnitario": 3542613
+       },
+       {
+        "tipo": "nino",
+        "cantidad": 1,
+        "precioUnitario": 2583205
+       },
+       {
+        "tipo": "infante",
+        "cantidad": 1,
+        "precioUnitario": 1151215
+       }
+      ],
+      "cubierto": null,
+      "sinReparto": []
+     },
+     "fiscal": {
+      "subtotal": 22448922,
+      "iva": 0,
+      "ivaRate": 0,
+      "reteFuente": 0,
+      "reteFuenteRate": 0,
+      "reteICA": 0,
+      "reteICARate": 0,
+      "reteIVA": 0,
+      "reteIVARate": 0,
+      "totalBruto": 22448922,
+      "totalRetenciones": 0,
+      "teQueda": 22448922,
+      "aplica": {
+       "iva": false,
+       "reteFuente": false,
+       "reteICA": false,
+       "reteIVA": false
+      }
+     },
+     "ivaEnPrecios": null,
+     "negocio": {
+      "nombre": "FAMILIA DE PRUEBA · SAN ANDRÉS"
+     },
+     "emisor": {
+      "nombre": "Asesora de Prueba",
+      "cargo": "Asesora"
+     },
+     "viaje": {
+      "viajeros": "6 adultos, 1 niño y 1 infante",
+      "destino": "San Andrés y Providencia",
+      "fechas": "23 nov 2026 – 28 nov 2026",
+      "duracion": "6 días / 5 noches",
+      "presentacion": null,
+      "foto": {
+       "url": "/home/mauricio/Developer/metrik/metrik-one/.claude/worktrees/agente-a5a4d68efe32/src/lib/pdf/templates/fotos-ciudad/san-andres-1.jpg",
+       "rotulo": "SAN ANDRÉS · JOHNNY CAY",
+       "credito": "Jorge Dos Oceanos (Wikimedia Commons, CC BY-SA 3.0)",
+       "lugares": [
+        "San Andrés",
+        "San Andrés ADZ",
+        "San Andrés"
+       ],
+       "foco": {
+        "x": 0.5,
+        "y": 0.33
+       },
+       "proporcion": 1.3333333333333333
+      },
+      "fotosCiudades": [
+       {
+        "url": "/home/mauricio/Developer/metrik/metrik-one/.claude/worktrees/agente-a5a4d68efe32/src/lib/pdf/templates/fotos-ciudad/san-andres-2.jpg",
+        "rotulo": "SAN ANDRÉS · EL ACUARIO",
+        "credito": "Mr.Jhosimar (Wikimedia Commons, CC BY-SA 4.0)",
+        "lugares": [
+         "San Andrés",
+         "San Andrés ADZ",
+         "San Andrés"
+        ],
+        "foco": {
+         "x": 0.3,
+         "y": 0.72
+        },
+        "proporcion": 1.3344453711426187
+       },
+       {
+        "url": "/home/mauricio/Developer/metrik/metrik-one/.claude/worktrees/agente-a5a4d68efe32/src/lib/pdf/templates/fotos-ciudad/providencia-1.jpg",
+        "rotulo": "PROVIDENCIA · MCBEAN LAGOON",
+        "credito": "Felviper (Wikimedia Commons, CC BY-SA 4.0)",
+        "lugares": [
+         "Providencia",
+         "Providencia PVA",
+         "Providencia"
+        ],
+        "foco": {
+         "x": 0.65,
+         "y": 0.5
+        },
+        "proporcion": 4.545454545454546
+       }
+      ],
+      "fechaInicio": "2026-11-23",
+      "vuelos": [
+       {
+        "linea": "AVIANCA BOGOTÁ ⇄ SAN ANDRÉS",
+        "aerolinea": "Avianca",
+        "origen": "Bogotá BOG",
+        "destino": "San Andrés ADZ",
+        "fechaSalida": "23 nov 2026",
+        "fechaRegreso": "28 nov 2026",
+        "horaSalida": "06:50",
+        "horaLlegada": "09:00",
+        "horaSalidaRegreso": "18:45",
+        "horaLlegadaRegreso": "20:55",
+        "escalaIda": null,
+        "escalaRegreso": null,
+        "escalas": 0,
+        "tarifa": "Classic",
+        "equipaje": "artículo personal + equipaje de mano de 10 kg + equipaje de bodega de 23 kg",
+        "adicionales": [],
+        "numeroVuelo": null,
+        "numeros": {
+         "ida": "AV 9782",
+         "regreso": "AV 9779",
+         "sinAsignar": null
+        },
+        "nota": null,
+        "tarifas": [
+         0,
+         1
+        ]
+       },
+       {
+        "linea": "SATENA SAN ANDRÉS ⇄ PROVIDENCIA",
+        "aerolinea": "SATENA",
+        "origen": "San Andrés ADZ",
+        "destino": "Providencia PVA",
+        "fechaSalida": "23 nov 2026",
+        "fechaRegreso": "25 nov 2026",
+        "horaSalida": "11:40",
+        "horaLlegada": "12:17",
+        "horaSalidaRegreso": "10:30",
+        "horaLlegadaRegreso": "11:06",
+        "escalaIda": null,
+        "escalaRegreso": null,
+        "escalas": 0,
+        "tarifa": "Econo",
+        "equipaje": "artículo personal + equipaje de mano de 10 kg + equipaje de bodega de 23 kg",
+        "adicionales": [],
+        "numeroVuelo": null,
+        "numeros": {
+         "ida": "8814",
+         "regreso": "8833",
+         "sinAsignar": null
+        },
+        "nota": null,
+        "tarifas": [
+         0,
+         1
+        ]
+       }
+      ],
+      "hoteles": [
+       {
+        "linea": "POSADA ENILDA · PROVIDENCIA",
+        "hotel": "Posada Enilda",
+        "ciudad": "Providencia",
+        "habitacion": "3 habitaciones dobles",
+        "regimen": "Alojamiento y desayuno",
+        "checkIn": "23 nov 2026",
+        "checkOut": "25 nov 2026",
+        "noches": 2,
+        "ocupacion": "6 adultos + 1 niño + 1 infante",
+        "cancelacion": null,
+        "estrellas": null,
+        "localizador": null,
+        "adicionales": [],
+        "nota": null,
+        "tarifas": [
+         0
+        ]
+       },
+       {
+        "linea": "VERDE MAR · SAN ANDRÉS",
+        "hotel": "Verde Mar",
+        "ciudad": "San Andrés",
+        "habitacion": "2 cuádruples",
+        "regimen": "Alojamiento y desayuno",
+        "checkIn": "25 nov 2026",
+        "checkOut": "28 nov 2026",
+        "noches": 3,
+        "ocupacion": "6 adultos + 1 niño + 1 infante",
+        "cancelacion": null,
+        "estrellas": null,
+        "localizador": null,
+        "adicionales": [],
+        "nota": null,
+        "tarifas": [
+         0
+        ]
+       },
+       {
+        "linea": "CABAÑAS AGUA DULCE · PROVIDENCIA",
+        "hotel": "Cabañas Agua Dulce",
+        "ciudad": "Providencia",
+        "habitacion": "2 cuádruples",
+        "regimen": "Alojamiento y desayuno",
+        "checkIn": "23 nov 2026",
+        "checkOut": "25 nov 2026",
+        "noches": 2,
+        "ocupacion": "6 adultos + 1 niño + 1 infante",
+        "cancelacion": null,
+        "estrellas": null,
+        "localizador": null,
+        "adicionales": [],
+        "nota": null,
+        "tarifas": [
+         1
+        ]
+       },
+       {
+        "linea": "LORD PIERRE · SAN ANDRÉS",
+        "hotel": "Lord Pierre",
+        "ciudad": "San Andrés",
+        "habitacion": "2 cuádruples",
+        "regimen": "Alojamiento y desayuno",
+        "checkIn": "25 nov 2026",
+        "checkOut": "28 nov 2026",
+        "noches": 3,
+        "ocupacion": "6 adultos + 1 niño + 1 infante",
+        "cancelacion": null,
+        "estrellas": null,
+        "localizador": null,
+        "adicionales": [],
+        "nota": null,
+        "tarifas": [
+         1
+        ]
+       }
+      ],
+      "cargosEnDestino": [],
+      "nivelDetalle": "normal",
+      "pie": null,
+      "firma": null
+     }
+    },
+    "resultado": {
+     "success": true,
+     "filename": "COT-2026-0901.pdf",
+     "fiscal": {
+      "subtotal": 22448922,
+      "iva": 0,
+      "ivaRate": 0,
+      "reteFuente": 0,
+      "reteFuenteRate": 0,
+      "reteICA": 0,
+      "reteICARate": 0,
+      "reteIVA": 0,
+      "reteIVARate": 0,
+      "totalBruto": 22448922,
+      "totalRetenciones": 0,
+      "teQueda": 22448922,
+      "aplica": {
+       "iva": false,
+       "reteFuente": false,
+       "reteICA": false,
+       "reteIVA": false
+      }
+     },
+     "archivoReferencia": "sbext://one-documentos/COT-2026-0901.pdf",
+     "aviso": null,
+     "avisosCobertura": [],
+     "avisosCaptura": [],
+     "avisoTexto": null,
+     "envioRegistrado": false,
+     "renderedVia": "react-pdf"
+    },
+    "escrituras": [
+     {
+      "tabla": "decisiones_combinacion",
+      "op": "insert",
+      "filtros": [],
+      "payload": [
+       {
+        "workspace_id": "ws-agencia-prueba",
+        "cotizacion_id": "cot-san-andres",
+        "negocio_id": "neg-san-andres",
+        "itinerario_id": "tf-recomendada",
+        "tarifa_nombre": "Recomendada",
+        "elegida": [
+         {
+          "ranura": "hotel: Hotel en Providencia",
+          "etiqueta": "Hotel en Providencia",
+          "combinable": true,
+          "item_id": "h-posada",
+          "nombre": "POSADA ENILDA · PROVIDENCIA",
+          "precio": 1446000
+         },
+         {
+          "ranura": "hotel 2: Hotel en San Andrés",
+          "etiqueta": "Hotel 2 · Hotel en San Andrés",
+          "combinable": true,
+          "item_id": "h-verde-mar",
+          "nombre": "VERDE MAR · SAN ANDRÉS",
+          "precio": 6720000
+         },
+         {
+          "ranura": "actividad: Cayo Cangrejo",
+          "etiqueta": "Actividad · Cayo Cangrejo",
+          "combinable": false,
+          "item_id": "a-cayo-compartida",
+          "nombre": "CAYO CANGREJO · LANCHA COMPARTIDA",
+          "precio": 847056
+         }
+        ],
+        "precio_elegida": 22448922,
+        "costo_elegida": 19081590,
+        "margen_elegida_pct": 14.99997193629164,
+        "propuesta": null,
+        "precio_propuesta": null,
+        "propuesta_origen": null,
+        "descartadas": [
+         {
+          "ranura": "hotel: Hotel en Providencia",
+          "etiqueta": "Hotel en Providencia",
+          "combinable": true,
+          "item_id": "h-agua-dulce",
+          "nombre": "CABAÑAS AGUA DULCE · PROVIDENCIA",
+          "precio": 5120986
+         },
+         {
+          "ranura": "hotel 2: Hotel en San Andrés",
+          "etiqueta": "Hotel 2 · Hotel en San Andrés",
+          "combinable": true,
+          "item_id": "h-lord-pierre",
+          "nombre": "LORD PIERRE · SAN ANDRÉS",
+          "precio": 7552944
+         },
+         {
+          "ranura": "actividad: Cayo Cangrejo",
+          "etiqueta": "Actividad · Cayo Cangrejo",
+          "combinable": false,
+          "item_id": "a-cayo-privada",
+          "nombre": "CAYO CANGREJO · LANCHA PRIVADA",
+          "precio": 1647056
+         }
+        ],
+        "motivo_codigo": null,
+        "motivo_texto": null,
+        "contexto": {
+         "destino": "San Andrés y Providencia",
+         "fecha_salida": "2026-11-23",
+         "fecha_regreso": "2026-11-28",
+         "noches": 5,
+         "adultos": 6,
+         "ninos": 1,
+         "infantes": 1,
+         "pasajeros": 8,
+         "dias_anticipacion": 42,
+         "medido_el": "2026-10-12"
+        },
+        "decidido_por": "s-asesora",
+        "decidido_por_nombre": "Asesora de Prueba",
+        "salida_at": "2026-10-12T15:00:00.000Z"
+       },
+       {
+        "workspace_id": "ws-agencia-prueba",
+        "cotizacion_id": "cot-san-andres",
+        "negocio_id": "neg-san-andres",
+        "itinerario_id": "tf-premium",
+        "tarifa_nombre": "Premium",
+        "elegida": [
+         {
+          "ranura": "hotel: Hotel en Providencia",
+          "etiqueta": "Hotel en Providencia",
+          "combinable": true,
+          "item_id": "h-agua-dulce",
+          "nombre": "CABAÑAS AGUA DULCE · PROVIDENCIA",
+          "precio": 5120986
+         },
+         {
+          "ranura": "hotel 2: Hotel en San Andrés",
+          "etiqueta": "Hotel 2 · Hotel en San Andrés",
+          "combinable": true,
+          "item_id": "h-lord-pierre",
+          "nombre": "LORD PIERRE · SAN ANDRÉS",
+          "precio": 7552944
+         },
+         {
+          "ranura": "actividad: Cayo Cangrejo",
+          "etiqueta": "Actividad · Cayo Cangrejo",
+          "combinable": false,
+          "item_id": "a-cayo-privada",
+          "nombre": "CAYO CANGREJO · LANCHA PRIVADA",
+          "precio": 1647056
+         }
+        ],
+        "precio_elegida": 27756852,
+        "costo_elegida": 23593330,
+        "margen_elegida_pct": 14.999979104258653,
+        "propuesta": null,
+        "precio_propuesta": null,
+        "propuesta_origen": null,
+        "descartadas": [
+         {
+          "ranura": "hotel: Hotel en Providencia",
+          "etiqueta": "Hotel en Providencia",
+          "combinable": true,
+          "item_id": "h-posada",
+          "nombre": "POSADA ENILDA · PROVIDENCIA",
+          "precio": 1446000
+         },
+         {
+          "ranura": "hotel 2: Hotel en San Andrés",
+          "etiqueta": "Hotel 2 · Hotel en San Andrés",
+          "combinable": true,
+          "item_id": "h-verde-mar",
+          "nombre": "VERDE MAR · SAN ANDRÉS",
+          "precio": 6720000
+         },
+         {
+          "ranura": "actividad: Cayo Cangrejo",
+          "etiqueta": "Actividad · Cayo Cangrejo",
+          "combinable": false,
+          "item_id": "a-cayo-compartida",
+          "nombre": "CAYO CANGREJO · LANCHA COMPARTIDA",
+          "precio": 847056
+         }
+        ],
+        "motivo_codigo": null,
+        "motivo_texto": null,
+        "contexto": {
+         "destino": "San Andrés y Providencia",
+         "fecha_salida": "2026-11-23",
+         "fecha_regreso": "2026-11-28",
+         "noches": 5,
+         "adultos": 6,
+         "ninos": 1,
+         "infantes": 1,
+         "pasajeros": 8,
+         "dias_anticipacion": 42,
+         "medido_el": "2026-10-12"
+        },
+        "decidido_por": "s-asesora",
+        "decidido_por_nombre": "Asesora de Prueba",
+        "salida_at": "2026-10-12T15:00:00.000Z"
+       }
+      ]
+     }
+    ],
+    "subidas": [
+     "COT-2026-0901.pdf"
+    ]
+   },
+   "tarifas": {
+    "success": true,
+    "tarifas": [
+     {
+      "itinerarioId": "tf-recomendada",
+      "nombre": "Recomendada",
+      "esRecomendada": true,
+      "precio": 22448922,
+      "motivo": null
+     },
+     {
+      "itinerarioId": "tf-premium",
+      "nombre": "Premium",
+      "esRecomendada": false,
+      "precio": 27756852,
+      "motivo": null
+     }
+    ],
+    "preseleccion": "tf-recomendada"
+   },
+   "aprobacion": {
+    "resultado": {
+     "success": true
+    },
+    "precio_aprobado": 27756852,
+    "escrituras": [
+     {
+      "tabla": "activity_log",
+      "op": "insert",
+      "filtros": [],
+      "payload": {
+       "workspace_id": "ws-agencia-prueba",
+       "entidad_tipo": "negocio",
+       "entidad_id": "neg-san-andres",
+       "tipo": "cambio",
+       "autor_id": "s-asesora",
+       "campo_modificado": "precio_aprobado",
+       "valor_anterior": null,
+       "valor_nuevo": "27756852",
+       "contenido": "COT-2026-0901 aprobada: el cliente escogió la tarifa Premium, por $27.756.852. La Recomendada, que da el total del documento, era de $22.448.922."
+      }
+     },
+     {
+      "tabla": "cotizaciones",
+      "op": "update",
+      "filtros": [
+       [
+        "eq",
+        "id",
+        "cot-san-andres"
+       ]
+      ],
+      "payload": {
+       "estado": "aceptada",
+       "updated_at": "2026-10-12T15:00:00.000Z",
+       "tarifa_aceptada_id": "tf-premium"
+      }
+     },
+     {
+      "tabla": "decisiones_combinacion",
+      "op": "insert",
+      "filtros": [],
+      "payload": [
+       {
+        "workspace_id": "ws-agencia-prueba",
+        "cotizacion_id": "cot-san-andres",
+        "negocio_id": "neg-san-andres",
+        "itinerario_id": "tf-premium",
+        "tarifa_nombre": "Premium",
+        "elegida": [
+         {
+          "ranura": "hotel: Hotel en Providencia",
+          "etiqueta": "Hotel en Providencia",
+          "combinable": true,
+          "item_id": "h-agua-dulce",
+          "nombre": "CABAÑAS AGUA DULCE · PROVIDENCIA",
+          "precio": 5120986
+         },
+         {
+          "ranura": "hotel 2: Hotel en San Andrés",
+          "etiqueta": "Hotel 2 · Hotel en San Andrés",
+          "combinable": true,
+          "item_id": "h-lord-pierre",
+          "nombre": "LORD PIERRE · SAN ANDRÉS",
+          "precio": 7552944
+         },
+         {
+          "ranura": "actividad: Cayo Cangrejo",
+          "etiqueta": "Actividad · Cayo Cangrejo",
+          "combinable": false,
+          "item_id": "a-cayo-privada",
+          "nombre": "CAYO CANGREJO · LANCHA PRIVADA",
+          "precio": 1647056
+         }
+        ],
+        "precio_elegida": 27756852,
+        "costo_elegida": 23593330,
+        "margen_elegida_pct": 14.999979104258653,
+        "propuesta": null,
+        "precio_propuesta": null,
+        "propuesta_origen": null,
+        "descartadas": [
+         {
+          "ranura": "hotel: Hotel en Providencia",
+          "etiqueta": "Hotel en Providencia",
+          "combinable": true,
+          "item_id": "h-posada",
+          "nombre": "POSADA ENILDA · PROVIDENCIA",
+          "precio": 1446000
+         },
+         {
+          "ranura": "hotel 2: Hotel en San Andrés",
+          "etiqueta": "Hotel 2 · Hotel en San Andrés",
+          "combinable": true,
+          "item_id": "h-verde-mar",
+          "nombre": "VERDE MAR · SAN ANDRÉS",
+          "precio": 6720000
+         },
+         {
+          "ranura": "actividad: Cayo Cangrejo",
+          "etiqueta": "Actividad · Cayo Cangrejo",
+          "combinable": false,
+          "item_id": "a-cayo-compartida",
+          "nombre": "CAYO CANGREJO · LANCHA COMPARTIDA",
+          "precio": 847056
+         }
+        ],
+        "motivo_codigo": null,
+        "motivo_texto": null,
+        "contexto": {
+         "destino": "San Andrés y Providencia",
+         "fecha_salida": "2026-11-23",
+         "fecha_regreso": "2026-11-28",
+         "noches": 5,
+         "adultos": 6,
+         "ninos": 1,
+         "infantes": 1,
+         "pasajeros": 8,
+         "dias_anticipacion": 42,
+         "medido_el": "2026-10-12"
+        },
+        "decidido_por": "s-asesora",
+        "decidido_por_nombre": "Asesora de Prueba",
+        "salida_at": "2026-10-12T15:00:00.000Z",
+        "evento": "aceptacion",
+        "recomendada_itinerario_id": "tf-recomendada",
+        "recomendada_nombre": "Recomendada",
+        "precio_recomendada": 22448922,
+        "tarifas_ofrecidas": [
+         {
+          "itinerario_id": "tf-recomendada",
+          "nombre": "Recomendada",
+          "precio": 22448922
+         },
+         {
+          "itinerario_id": "tf-premium",
+          "nombre": "Premium",
+          "precio": 27756852
+         }
+        ]
+       }
+      ]
+     },
+     {
+      "tabla": "negocios",
+      "op": "update",
+      "filtros": [
+       [
+        "eq",
+        "id",
+        "neg-san-andres"
+       ]
+      ],
+      "payload": {
+       "precio_aprobado": 27756852
+      }
+     }
+    ]
+   }
+  },
+  "trappvel-flujo-nuevo": {
+   "recalculo": {
+    "resultado": {
+     "success": true,
+     "costoTotal": 18661590,
+     "valorVenta": 21954806,
+     "desmarcados": []
+    },
+    "escrituras": [
+     {
+      "tabla": "cotizaciones",
+      "op": "update",
+      "filtros": [
+       [
+        "eq",
+        "id",
+        "cot-san-andres"
+       ]
+      ],
+      "payload": {
+       "costo_total": 18661590,
+       "valor_total": 21954806,
+       "descuento_valor": 0
+      }
+     },
+     {
+      "tabla": "items",
+      "op": "update",
+      "filtros": [
+       [
+        "eq",
+        "id",
+        "a-buceo"
+       ]
+      ],
+      "payload": {
+       "subtotal": 1080000,
+       "precio_venta": 1270588
+      }
+     },
+     {
+      "tabla": "items",
+      "op": "update",
+      "filtros": [
+       [
+        "eq",
+        "id",
+        "a-cayo-compartida"
+       ]
+      ],
+      "payload": {
+       "subtotal": 720000,
+       "precio_venta": 847056
+      }
+     },
+     {
+      "tabla": "items",
+      "op": "update",
+      "filtros": [
+       [
+        "eq",
+        "id",
+        "a-cayo-privada"
+       ]
+      ],
+      "payload": {
+       "subtotal": 1400000,
+       "precio_venta": 1647056
+      }
+     },
+     {
+      "tabla": "items",
+      "op": "update",
+      "filtros": [
+       [
+        "eq",
+        "id",
+        "h-agua-dulce"
+       ]
+      ],
+      "payload": {
+       "subtotal": 4352838,
+       "precio_venta": 5120986
+      }
+     },
+     {
+      "tabla": "items",
+      "op": "update",
+      "filtros": [
+       [
+        "eq",
+        "id",
+        "h-lord-pierre"
+       ]
+      ],
+      "payload": {
+       "subtotal": 6420000,
+       "precio_venta": 7552944
+      }
+     },
+     {
+      "tabla": "items",
+      "op": "update",
+      "filtros": [
+       [
+        "eq",
+        "id",
+        "h-posada"
+       ]
+      ],
+      "payload": {
+       "subtotal": 1229098,
+       "precio_venta": 1446000
+      }
+     },
+     {
+      "tabla": "items",
+      "op": "update",
+      "filtros": [
+       [
+        "eq",
+        "id",
+        "h-verde-mar"
+       ]
+      ],
+      "payload": {
+       "subtotal": 5712000,
+       "precio_venta": 6720000
+      }
+     },
+     {
+      "tabla": "items",
+      "op": "update",
+      "filtros": [
+       [
+        "eq",
+        "id",
+        "t-providencia"
+       ]
+      ],
+      "payload": {
+       "subtotal": 420000,
+       "precio_venta": 494116
+      }
+     },
+     {
+      "tabla": "items",
+      "op": "update",
+      "filtros": [
+       [
+        "eq",
+        "id",
+        "t-san-andres-privado"
+       ]
+      ],
+      "payload": {
+       "subtotal": 640000,
+       "precio_venta": 752944
+      }
+     },
+     {
+      "tabla": "items",
+      "op": "update",
+      "filtros": [
+       [
+        "eq",
+        "id",
+        "t-san-andres"
+       ]
+      ],
+      "payload": {
+       "subtotal": 420000,
+       "precio_venta": 494116
+      }
+     },
+     {
+      "tabla": "items",
+      "op": "update",
+      "filtros": [
+       [
+        "eq",
+        "id",
+        "v-avianca"
+       ]
+      ],
+      "payload": {
+       "subtotal": 6208296,
+       "precio_venta": 7303877
+      }
+     },
+     {
+      "tabla": "items",
+      "op": "update",
+      "filtros": [
+       [
+        "eq",
+        "id",
+        "v-satena"
+       ]
+      ],
+      "payload": {
+       "subtotal": 3292196,
+       "precio_venta": 3873169
+      }
+     }
+    ],
+    "cotizacion": {
+     "valor_total": 21954806,
+     "costo_total": 18661590,
+     "descuento_valor": 0
+    },
+    "preciosPorLinea": {
+     "v-avianca": 7303877,
+     "v-satena": 3873169,
+     "h-posada": 1446000,
+     "h-agua-dulce": 5120986,
+     "h-verde-mar": 6720000,
+     "h-lord-pierre": 7552944,
+     "t-providencia": 494116,
+     "t-san-andres": 494116,
+     "a-cayo-compartida": 847056,
+     "a-cayo-privada": 1647056,
+     "a-buceo": 1270588,
+     "t-san-andres-privado": 752944
+    }
+   },
+   "pdf": {
+    "props": {
+     "cotizacion": {
+      "consecutivo": "COT-2026-0901",
+      "descripcion": "Viaje San Andrés y Providencia",
+      "valor_total": 21954806,
+      "modo": "detallada",
+      "fecha_envio": null,
+      "fecha_validez": "2026-10-27",
+      "condiciones_pago": "80 % para reservar y 20 % 30 días antes del viaje",
+      "notas": null,
+      "descuento_porcentaje": 0,
+      "descuento_valor": 0,
+      "terminos_condiciones": "Tarifas sujetas a disponibilidad al momento de reservar."
+     },
+     "empresa": {
+      "nombre": "Cliente",
+      "nit": null,
+      "contacto_nombre": null,
+      "contacto_email": null,
+      "telefono": null,
+      "direccion": null,
+      "ciudad": null
+     },
+     "vendedor": {
+      "nombre": "Agencia de Prueba",
+      "razon_social": "AGENCIA DE PRUEBA S.A.S",
+      "nit": "900000001",
+      "logo_url": null,
+      "color_primario": "var(--acento)",
+      "telefono": null,
+      "email": null,
+      "direccion": null,
+      "ciudad": null
+     },
+     "items": [
+      {
+       "nombre": "Avianca Bogotá ⇄ San Andrés",
+       "descripcion": null,
+       "precio_venta": 7512037,
+       "descuento_porcentaje": 0,
+       "cantidad": 1,
+       "unidad": null,
+       "precioPorPasajero": [
+        {
+         "tipo": "adulto",
+         "cantidad": 6,
+         "precioUnitario": 1118811
+        },
+        {
+         "tipo": "nino",
+         "cantidad": 1,
+         "precioUnitario": 785456
+        },
+        {
+         "tipo": "infante",
+         "cantidad": 1,
+         "precioUnitario": 13718
+        }
+       ]
+      },
+      {
+       "nombre": "SATENA San Andrés ⇄ Providencia",
+       "descripcion": null,
+       "precio_venta": 3983554,
+       "descuento_porcentaje": 0,
+       "cantidad": 1,
+       "unidad": null,
+       "precioPorPasajero": [
+        {
+         "tipo": "adulto",
+         "cantidad": 6,
+         "precioUnitario": 540870
+        },
+        {
+         "tipo": "nino",
+         "cantidad": 1,
+         "precioUnitario": 540870
+        },
+        {
+         "tipo": "infante",
+         "cantidad": 1,
+         "precioUnitario": 197467
+        }
+       ]
+      },
+      {
+       "nombre": "POSADA ENILDA · PROVIDENCIA",
+       "descripcion": null,
+       "precio_venta": 1487211,
+       "descuento_porcentaje": 0,
+       "cantidad": 1,
+       "unidad": null,
+       "precioPorPasajero": [
+        {
+         "tipo": "adulto",
+         "cantidad": 6,
+         "precioUnitario": 212458
+        },
+        {
+         "tipo": "nino",
+         "cantidad": 1,
+         "precioUnitario": 212462
+        },
+        {
+         "tipo": "infante",
+         "cantidad": 1,
+         "precioUnitario": 0
+        }
+       ]
+      },
+      {
+       "nombre": "VERDE MAR · SAN ANDRÉS",
+       "descripcion": null,
+       "precio_venta": 6911520,
+       "descuento_porcentaje": 0,
+       "cantidad": 1,
+       "unidad": null,
+       "precioPorPasajero": [
+        {
+         "tipo": "adulto",
+         "cantidad": 6,
+         "precioUnitario": 863940
+        },
+        {
+         "tipo": "nino",
+         "cantidad": 1,
+         "precioUnitario": 863940
+        },
+        {
+         "tipo": "infante",
+         "cantidad": 1,
+         "precioUnitario": 863940
+        }
+       ]
+      },
+      {
+       "nombre": "AEROPUERTO - HOTEL - AEROPUERTO SAN ANDRÉS",
+       "descripcion": null,
+       "precio_venta": 508198,
+       "descuento_porcentaje": 0,
+       "cantidad": 1,
+       "unidad": null,
+       "precioPorPasajero": [
+        {
+         "tipo": "adulto",
+         "cantidad": 6,
+         "precioUnitario": 72600
+        },
+        {
+         "tipo": "nino",
+         "cantidad": 1,
+         "precioUnitario": 72600
+        },
+        {
+         "tipo": "infante",
+         "cantidad": 1,
+         "precioUnitario": 0
+        }
+       ]
+      },
+      {
+       "nombre": "CAYO CANGREJO · LANCHA COMPARTIDA",
+       "descripcion": null,
+       "precio_venta": 871197,
+       "descuento_porcentaje": 0,
+       "cantidad": 1,
+       "unidad": null,
+       "precioPorPasajero": [
+        {
+         "tipo": "adulto",
+         "cantidad": 6,
+         "precioUnitario": 108900
+        },
+        {
+         "tipo": "nino",
+         "cantidad": 1,
+         "precioUnitario": 108900
+        },
+        {
+         "tipo": "infante",
+         "cantidad": 1,
+         "precioUnitario": 108900
+        }
+       ]
+      },
+      {
+       "nombre": "BUCEO DE BAUTISMO",
+       "descripcion": null,
+       "precio_venta": 1306800,
+       "descuento_porcentaje": 0,
+       "cantidad": 1,
+       "unidad": null,
+       "precioPorPasajero": [
+        {
+         "tipo": "adulto",
+         "cantidad": 2,
+         "precioUnitario": 653400
+        }
+       ]
+      }
+     ],
+     "itinerarios": [
+      {
+       "nombre": "Recomendada",
+       "esPrincipal": true,
+       "precio": 22580517,
+       "items": [
+        {
+         "nombre": "Avianca Bogotá ⇄ San Andrés",
+         "descripcion": null,
+         "precio_venta": 7512037,
+         "descuento_porcentaje": 0,
+         "cantidad": 1,
+         "unidad": null,
+         "precioPorPasajero": [
+          {
+           "tipo": "adulto",
+           "cantidad": 6,
+           "precioUnitario": 1118811
+          },
+          {
+           "tipo": "nino",
+           "cantidad": 1,
+           "precioUnitario": 785456
+          },
+          {
+           "tipo": "infante",
+           "cantidad": 1,
+           "precioUnitario": 13718
+          }
+         ]
+        },
+        {
+         "nombre": "SATENA San Andrés ⇄ Providencia",
+         "descripcion": null,
+         "precio_venta": 3983554,
+         "descuento_porcentaje": 0,
+         "cantidad": 1,
+         "unidad": null,
+         "precioPorPasajero": [
+          {
+           "tipo": "adulto",
+           "cantidad": 6,
+           "precioUnitario": 540870
+          },
+          {
+           "tipo": "nino",
+           "cantidad": 1,
+           "precioUnitario": 540870
+          },
+          {
+           "tipo": "infante",
+           "cantidad": 1,
+           "precioUnitario": 197467
+          }
+         ]
+        },
+        {
+         "nombre": "POSADA ENILDA · PROVIDENCIA",
+         "descripcion": null,
+         "precio_venta": 1487211,
+         "descuento_porcentaje": 0,
+         "cantidad": 1,
+         "unidad": null,
+         "precioPorPasajero": [
+          {
+           "tipo": "adulto",
+           "cantidad": 6,
+           "precioUnitario": 212458
+          },
+          {
+           "tipo": "nino",
+           "cantidad": 1,
+           "precioUnitario": 212462
+          },
+          {
+           "tipo": "infante",
+           "cantidad": 1,
+           "precioUnitario": 0
+          }
+         ]
+        },
+        {
+         "nombre": "VERDE MAR · SAN ANDRÉS",
+         "descripcion": null,
+         "precio_venta": 6911520,
+         "descuento_porcentaje": 0,
+         "cantidad": 1,
+         "unidad": null,
+         "precioPorPasajero": [
+          {
+           "tipo": "adulto",
+           "cantidad": 6,
+           "precioUnitario": 863940
+          },
+          {
+           "tipo": "nino",
+           "cantidad": 1,
+           "precioUnitario": 863940
+          },
+          {
+           "tipo": "infante",
+           "cantidad": 1,
+           "precioUnitario": 863940
+          }
+         ]
+        },
+        {
+         "nombre": "AEROPUERTO - HOTEL - AEROPUERTO SAN ANDRÉS",
+         "descripcion": null,
+         "precio_venta": 508198,
+         "descuento_porcentaje": 0,
+         "cantidad": 1,
+         "unidad": null,
+         "precioPorPasajero": [
+          {
+           "tipo": "adulto",
+           "cantidad": 6,
+           "precioUnitario": 72600
+          },
+          {
+           "tipo": "nino",
+           "cantidad": 1,
+           "precioUnitario": 72600
+          },
+          {
+           "tipo": "infante",
+           "cantidad": 1,
+           "precioUnitario": 0
+          }
+         ]
+        },
+        {
+         "nombre": "CAYO CANGREJO · LANCHA COMPARTIDA",
+         "descripcion": null,
+         "precio_venta": 871197,
+         "descuento_porcentaje": 0,
+         "cantidad": 1,
+         "unidad": null,
+         "precioPorPasajero": [
+          {
+           "tipo": "adulto",
+           "cantidad": 6,
+           "precioUnitario": 108900
+          },
+          {
+           "tipo": "nino",
+           "cantidad": 1,
+           "precioUnitario": 108900
+          },
+          {
+           "tipo": "infante",
+           "cantidad": 1,
+           "precioUnitario": 108900
+          }
+         ]
+        },
+        {
+         "nombre": "BUCEO DE BAUTISMO",
+         "descripcion": null,
+         "precio_venta": 1306800,
+         "descuento_porcentaje": 0,
+         "cantidad": 1,
+         "unidad": null,
+         "precioPorPasajero": [
+          {
+           "tipo": "adulto",
+           "cantidad": 2,
+           "precioUnitario": 653400
+          }
+         ]
+        }
+       ]
+      },
+      {
+       "nombre": "Premium",
+       "esPrincipal": false,
+       "precio": 28305928,
+       "items": [
+        {
+         "nombre": "Avianca Bogotá ⇄ San Andrés",
+         "descripcion": null,
+         "precio_venta": 7512037,
+         "descuento_porcentaje": 0,
+         "cantidad": 1,
+         "unidad": null,
+         "precioPorPasajero": [
+          {
+           "tipo": "adulto",
+           "cantidad": 6,
+           "precioUnitario": 1118811
+          },
+          {
+           "tipo": "nino",
+           "cantidad": 1,
+           "precioUnitario": 785456
+          },
+          {
+           "tipo": "infante",
+           "cantidad": 1,
+           "precioUnitario": 13718
+          }
+         ]
+        },
+        {
+         "nombre": "SATENA San Andrés ⇄ Providencia",
+         "descripcion": null,
+         "precio_venta": 3983554,
+         "descuento_porcentaje": 0,
+         "cantidad": 1,
+         "unidad": null,
+         "precioPorPasajero": [
+          {
+           "tipo": "adulto",
+           "cantidad": 6,
+           "precioUnitario": 540870
+          },
+          {
+           "tipo": "nino",
+           "cantidad": 1,
+           "precioUnitario": 540870
+          },
+          {
+           "tipo": "infante",
+           "cantidad": 1,
+           "precioUnitario": 197467
+          }
+         ]
+        },
+        {
+         "nombre": "CABAÑAS AGUA DULCE · PROVIDENCIA",
+         "descripcion": null,
+         "precio_venta": 5266934,
+         "descuento_porcentaje": 0,
+         "cantidad": 1,
+         "unidad": null,
+         "precioPorPasajero": [
+          {
+           "tipo": "adulto",
+           "cantidad": 6,
+           "precioUnitario": 701800
+          },
+          {
+           "tipo": "nino",
+           "cantidad": 1,
+           "precioUnitario": 701800
+          },
+          {
+           "tipo": "infante",
+           "cantidad": 1,
+           "precioUnitario": 354334
+          }
+         ]
+        },
+        {
+         "nombre": "LORD PIERRE · SAN ANDRÉS",
+         "descripcion": null,
+         "precio_venta": 7768203,
+         "descuento_porcentaje": 0,
+         "cantidad": 1,
+         "unidad": null,
+         "precioPorPasajero": [
+          {
+           "tipo": "adulto",
+           "cantidad": 6,
+           "precioUnitario": 971025
+          },
+          {
+           "tipo": "nino",
+           "cantidad": 1,
+           "precioUnitario": 971025
+          },
+          {
+           "tipo": "infante",
+           "cantidad": 1,
+           "precioUnitario": 971025
+          }
+         ]
+        },
+        {
+         "nombre": "CAYO CANGREJO · LANCHA PRIVADA",
+         "descripcion": null,
+         "precio_venta": 1693997,
+         "descuento_porcentaje": 0,
+         "cantidad": 1,
+         "unidad": null,
+         "precioPorPasajero": [
+          {
+           "tipo": "adulto",
+           "cantidad": 6,
+           "precioUnitario": 211750
+          },
+          {
+           "tipo": "nino",
+           "cantidad": 1,
+           "precioUnitario": 211750
+          },
+          {
+           "tipo": "infante",
+           "cantidad": 1,
+           "precioUnitario": 211750
+          }
+         ]
+        },
+        {
+         "nombre": "BUCEO DE BAUTISMO",
+         "descripcion": null,
+         "precio_venta": 1306800,
+         "descuento_porcentaje": 0,
+         "cantidad": 1,
+         "unidad": null,
+         "precioPorPasajero": [
+          {
+           "tipo": "adulto",
+           "cantidad": 2,
+           "precioUnitario": 653400
+          }
+         ]
+        },
+        {
+         "nombre": "TRASLADO PRIVADO SAN ANDRÉS",
+         "descripcion": null,
+         "precio_venta": 774403,
+         "descuento_porcentaje": 0,
+         "cantidad": 1,
+         "unidad": null,
+         "precioPorPasajero": [
+          {
+           "tipo": "adulto",
+           "cantidad": 6,
+           "precioUnitario": 96800
+          },
+          {
+           "tipo": "nino",
+           "cantidad": 1,
+           "precioUnitario": 96800
+          },
+          {
+           "tipo": "infante",
+           "cantidad": 1,
+           "precioUnitario": 96800
+          }
+         ]
+        }
+       ]
+      }
+     ],
+     "dias": null,
+     "itemsSinDia": null,
+     "sugeridos": [
+      {
+       "nombre": "AEROPUERTO - HOTEL - AEROPUERTO PROVIDENCIA",
+       "descripcion": null,
+       "precio_venta": 508198,
+       "cantidad": 1,
+       "unidad": null
+      }
+     ],
+     "preciosPorPasajero": {
+      "filas": [
+       {
+        "tipo": "adulto",
+        "cantidad": null,
+        "precioUnitario": 3570979
+       },
+       {
+        "tipo": "nino",
+        "cantidad": 1,
+        "precioUnitario": 2584228
+       },
+       {
+        "tipo": "infante",
+        "cantidad": 1,
+        "precioUnitario": 1184025
+       }
+      ],
+      "cubierto": null,
+      "sinReparto": []
+     },
+     "fiscal": {
+      "subtotal": 21954806,
+      "iva": 625711,
+      "ivaRate": 0.19,
+      "reteFuente": 0,
+      "reteFuenteRate": 0,
+      "reteICA": 0,
+      "reteICARate": 0,
+      "reteIVA": 0,
+      "reteIVARate": 0,
+      "totalBruto": 22580517,
+      "totalRetenciones": 0,
+      "teQueda": 22580517,
+      "aplica": {
+       "iva": true,
+       "reteFuente": false,
+       "reteICA": false,
+       "reteIVA": false
+      }
+     },
+     "ivaEnPrecios": {
+      "iva": 625711,
+      "nota": true,
+      "porBloque": [
+       625711,
+       784364
+      ]
+     },
+     "negocio": {
+      "nombre": "FAMILIA DE PRUEBA · SAN ANDRÉS"
+     },
+     "emisor": {
+      "nombre": "Asesora de Prueba",
+      "cargo": "Asesora"
+     },
+     "viaje": {
+      "viajeros": "6 adultos, 1 niño y 1 infante",
+      "destino": "San Andrés y Providencia",
+      "fechas": "23 nov 2026 – 28 nov 2026",
+      "duracion": "6 días / 5 noches",
+      "presentacion": null,
+      "foto": {
+       "url": "/home/mauricio/Developer/metrik/metrik-one/.claude/worktrees/agente-a5a4d68efe32/src/lib/pdf/templates/fotos-ciudad/san-andres-1.jpg",
+       "rotulo": "SAN ANDRÉS · JOHNNY CAY",
+       "credito": "Jorge Dos Oceanos (Wikimedia Commons, CC BY-SA 3.0)",
+       "lugares": [
+        "San Andrés",
+        "San Andrés ADZ",
+        "San Andrés"
+       ],
+       "foco": {
+        "x": 0.5,
+        "y": 0.33
+       },
+       "proporcion": 1.3333333333333333
+      },
+      "fotosCiudades": [
+       {
+        "url": "/home/mauricio/Developer/metrik/metrik-one/.claude/worktrees/agente-a5a4d68efe32/src/lib/pdf/templates/fotos-ciudad/san-andres-2.jpg",
+        "rotulo": "SAN ANDRÉS · EL ACUARIO",
+        "credito": "Mr.Jhosimar (Wikimedia Commons, CC BY-SA 4.0)",
+        "lugares": [
+         "San Andrés",
+         "San Andrés ADZ",
+         "San Andrés"
+        ],
+        "foco": {
+         "x": 0.3,
+         "y": 0.72
+        },
+        "proporcion": 1.3344453711426187
+       },
+       {
+        "url": "/home/mauricio/Developer/metrik/metrik-one/.claude/worktrees/agente-a5a4d68efe32/src/lib/pdf/templates/fotos-ciudad/providencia-1.jpg",
+        "rotulo": "PROVIDENCIA · MCBEAN LAGOON",
+        "credito": "Felviper (Wikimedia Commons, CC BY-SA 4.0)",
+        "lugares": [
+         "Providencia",
+         "Providencia PVA",
+         "Providencia"
+        ],
+        "foco": {
+         "x": 0.65,
+         "y": 0.5
+        },
+        "proporcion": 4.545454545454546
+       }
+      ],
+      "fechaInicio": "2026-11-23",
+      "vuelos": [
+       {
+        "linea": "AVIANCA BOGOTÁ ⇄ SAN ANDRÉS",
+        "aerolinea": "Avianca",
+        "origen": "Bogotá BOG",
+        "destino": "San Andrés ADZ",
+        "fechaSalida": "23 nov 2026",
+        "fechaRegreso": "28 nov 2026",
+        "horaSalida": "06:50",
+        "horaLlegada": "09:00",
+        "horaSalidaRegreso": "18:45",
+        "horaLlegadaRegreso": "20:55",
+        "escalaIda": null,
+        "escalaRegreso": null,
+        "escalas": 0,
+        "tarifa": "Classic",
+        "equipaje": "artículo personal + equipaje de mano de 10 kg + equipaje de bodega de 23 kg",
+        "adicionales": [],
+        "numeroVuelo": null,
+        "numeros": {
+         "ida": "AV 9782",
+         "regreso": "AV 9779",
+         "sinAsignar": null
+        },
+        "nota": null,
+        "tarifas": [
+         0,
+         1
+        ]
+       },
+       {
+        "linea": "SATENA SAN ANDRÉS ⇄ PROVIDENCIA",
+        "aerolinea": "SATENA",
+        "origen": "San Andrés ADZ",
+        "destino": "Providencia PVA",
+        "fechaSalida": "23 nov 2026",
+        "fechaRegreso": "25 nov 2026",
+        "horaSalida": "11:40",
+        "horaLlegada": "12:17",
+        "horaSalidaRegreso": "10:30",
+        "horaLlegadaRegreso": "11:06",
+        "escalaIda": null,
+        "escalaRegreso": null,
+        "escalas": 0,
+        "tarifa": "Econo",
+        "equipaje": "artículo personal + equipaje de mano de 10 kg + equipaje de bodega de 23 kg",
+        "adicionales": [],
+        "numeroVuelo": null,
+        "numeros": {
+         "ida": "8814",
+         "regreso": "8833",
+         "sinAsignar": null
+        },
+        "nota": null,
+        "tarifas": [
+         0,
+         1
+        ]
+       }
+      ],
+      "hoteles": [
+       {
+        "linea": "POSADA ENILDA · PROVIDENCIA",
+        "hotel": "Posada Enilda",
+        "ciudad": "Providencia",
+        "habitacion": "3 habitaciones dobles",
+        "regimen": "Alojamiento y desayuno",
+        "checkIn": "23 nov 2026",
+        "checkOut": "25 nov 2026",
+        "noches": 2,
+        "ocupacion": "6 adultos + 1 niño + 1 infante",
+        "cancelacion": null,
+        "estrellas": null,
+        "localizador": null,
+        "adicionales": [],
+        "nota": null,
+        "tarifas": [
+         0
+        ]
+       },
+       {
+        "linea": "VERDE MAR · SAN ANDRÉS",
+        "hotel": "Verde Mar",
+        "ciudad": "San Andrés",
+        "habitacion": "2 cuádruples",
+        "regimen": "Alojamiento y desayuno",
+        "checkIn": "25 nov 2026",
+        "checkOut": "28 nov 2026",
+        "noches": 3,
+        "ocupacion": "6 adultos + 1 niño + 1 infante",
+        "cancelacion": null,
+        "estrellas": null,
+        "localizador": null,
+        "adicionales": [],
+        "nota": null,
+        "tarifas": [
+         0
+        ]
+       },
+       {
+        "linea": "CABAÑAS AGUA DULCE · PROVIDENCIA",
+        "hotel": "Cabañas Agua Dulce",
+        "ciudad": "Providencia",
+        "habitacion": "2 cuádruples",
+        "regimen": "Alojamiento y desayuno",
+        "checkIn": "23 nov 2026",
+        "checkOut": "25 nov 2026",
+        "noches": 2,
+        "ocupacion": "6 adultos + 1 niño + 1 infante",
+        "cancelacion": null,
+        "estrellas": null,
+        "localizador": null,
+        "adicionales": [],
+        "nota": null,
+        "tarifas": [
+         1
+        ]
+       },
+       {
+        "linea": "LORD PIERRE · SAN ANDRÉS",
+        "hotel": "Lord Pierre",
+        "ciudad": "San Andrés",
+        "habitacion": "2 cuádruples",
+        "regimen": "Alojamiento y desayuno",
+        "checkIn": "25 nov 2026",
+        "checkOut": "28 nov 2026",
+        "noches": 3,
+        "ocupacion": "6 adultos + 1 niño + 1 infante",
+        "cancelacion": null,
+        "estrellas": null,
+        "localizador": null,
+        "adicionales": [],
+        "nota": null,
+        "tarifas": [
+         1
+        ]
+       }
+      ],
+      "cargosEnDestino": [],
+      "nivelDetalle": "normal",
+      "pie": null,
+      "firma": null
+     }
+    },
+    "resultado": {
+     "success": true,
+     "filename": "COT-2026-0901.pdf",
+     "fiscal": {
+      "subtotal": 21954806,
+      "iva": 625711,
+      "ivaRate": 0.19,
+      "reteFuente": 0,
+      "reteFuenteRate": 0,
+      "reteICA": 0,
+      "reteICARate": 0,
+      "reteIVA": 0,
+      "reteIVARate": 0,
+      "totalBruto": 22580517,
+      "totalRetenciones": 0,
+      "teQueda": 22580517,
+      "aplica": {
+       "iva": true,
+       "reteFuente": false,
+       "reteICA": false,
+       "reteIVA": false
+      }
+     },
+     "archivoReferencia": "sbext://one-documentos/COT-2026-0901.pdf",
+     "aviso": null,
+     "avisosCobertura": [],
+     "avisosCaptura": [],
+     "avisoTexto": null,
+     "envioRegistrado": false,
+     "renderedVia": "react-pdf"
+    },
+    "escrituras": [
+     {
+      "tabla": "decisiones_combinacion",
+      "op": "insert",
+      "filtros": [],
+      "payload": [
+       {
+        "workspace_id": "ws-agencia-prueba",
+        "cotizacion_id": "cot-san-andres",
+        "negocio_id": "neg-san-andres",
+        "itinerario_id": "tf-recomendada",
+        "tarifa_nombre": "Recomendada",
+        "elegida": [
+         {
+          "ranura": "hotel: Hotel en Providencia",
+          "etiqueta": "Hotel en Providencia",
+          "combinable": true,
+          "item_id": "h-posada",
+          "nombre": "POSADA ENILDA · PROVIDENCIA",
+          "precio": 1446000
+         },
+         {
+          "ranura": "hotel 2: Hotel en San Andrés",
+          "etiqueta": "Hotel 2 · Hotel en San Andrés",
+          "combinable": true,
+          "item_id": "h-verde-mar",
+          "nombre": "VERDE MAR · SAN ANDRÉS",
+          "precio": 6720000
+         },
+         {
+          "ranura": "traslado 2: Traslado en San Andrés",
+          "etiqueta": "Traslado 2 · Traslado en San Andrés",
+          "combinable": false,
+          "item_id": "t-san-andres",
+          "nombre": "AEROPUERTO - HOTEL - AEROPUERTO SAN ANDRÉS",
+          "precio": 494116
+         },
+         {
+          "ranura": "actividad: Cayo Cangrejo",
+          "etiqueta": "Actividad · Cayo Cangrejo",
+          "combinable": false,
+          "item_id": "a-cayo-compartida",
+          "nombre": "CAYO CANGREJO · LANCHA COMPARTIDA",
+          "precio": 847056
+         }
+        ],
+        "precio_elegida": 21954806,
+        "costo_elegida": 18661590,
+        "margen_elegida_pct": 14.999977681424287,
+        "propuesta": null,
+        "precio_propuesta": null,
+        "propuesta_origen": null,
+        "descartadas": [
+         {
+          "ranura": "hotel: Hotel en Providencia",
+          "etiqueta": "Hotel en Providencia",
+          "combinable": true,
+          "item_id": "h-agua-dulce",
+          "nombre": "CABAÑAS AGUA DULCE · PROVIDENCIA",
+          "precio": 5120986
+         },
+         {
+          "ranura": "hotel 2: Hotel en San Andrés",
+          "etiqueta": "Hotel 2 · Hotel en San Andrés",
+          "combinable": true,
+          "item_id": "h-lord-pierre",
+          "nombre": "LORD PIERRE · SAN ANDRÉS",
+          "precio": 7552944
+         },
+         {
+          "ranura": "traslado 2: Traslado en San Andrés",
+          "etiqueta": "Traslado 2 · Traslado en San Andrés",
+          "combinable": false,
+          "item_id": "t-san-andres-privado",
+          "nombre": "TRASLADO PRIVADO SAN ANDRÉS",
+          "precio": 752944
+         },
+         {
+          "ranura": "actividad: Cayo Cangrejo",
+          "etiqueta": "Actividad · Cayo Cangrejo",
+          "combinable": false,
+          "item_id": "a-cayo-privada",
+          "nombre": "CAYO CANGREJO · LANCHA PRIVADA",
+          "precio": 1647056
+         }
+        ],
+        "motivo_codigo": null,
+        "motivo_texto": null,
+        "contexto": {
+         "destino": "San Andrés y Providencia",
+         "fecha_salida": "2026-11-23",
+         "fecha_regreso": "2026-11-28",
+         "noches": 5,
+         "adultos": 6,
+         "ninos": 1,
+         "infantes": 1,
+         "pasajeros": 8,
+         "dias_anticipacion": 42,
+         "medido_el": "2026-10-12"
+        },
+        "decidido_por": "s-asesora",
+        "decidido_por_nombre": "Asesora de Prueba",
+        "salida_at": "2026-10-12T15:00:00.000Z"
+       },
+       {
+        "workspace_id": "ws-agencia-prueba",
+        "cotizacion_id": "cot-san-andres",
+        "negocio_id": "neg-san-andres",
+        "itinerario_id": "tf-premium",
+        "tarifa_nombre": "Premium",
+        "elegida": [
+         {
+          "ranura": "hotel: Hotel en Providencia",
+          "etiqueta": "Hotel en Providencia",
+          "combinable": true,
+          "item_id": "h-agua-dulce",
+          "nombre": "CABAÑAS AGUA DULCE · PROVIDENCIA",
+          "precio": 5120986
+         },
+         {
+          "ranura": "hotel 2: Hotel en San Andrés",
+          "etiqueta": "Hotel 2 · Hotel en San Andrés",
+          "combinable": true,
+          "item_id": "h-lord-pierre",
+          "nombre": "LORD PIERRE · SAN ANDRÉS",
+          "precio": 7552944
+         },
+         {
+          "ranura": "traslado 2: Traslado en San Andrés",
+          "etiqueta": "Traslado 2 · Traslado en San Andrés",
+          "combinable": false,
+          "item_id": "t-san-andres-privado",
+          "nombre": "TRASLADO PRIVADO SAN ANDRÉS",
+          "precio": 752944
+         },
+         {
+          "ranura": "actividad: Cayo Cangrejo",
+          "etiqueta": "Actividad · Cayo Cangrejo",
+          "combinable": false,
+          "item_id": "a-cayo-privada",
+          "nombre": "CAYO CANGREJO · LANCHA PRIVADA",
+          "precio": 1647056
+         }
+        ],
+        "precio_elegida": 27521564,
+        "costo_elegida": 23393330,
+        "margen_elegida_pct": 14.99999781989134,
+        "propuesta": null,
+        "precio_propuesta": null,
+        "propuesta_origen": null,
+        "descartadas": [
+         {
+          "ranura": "hotel: Hotel en Providencia",
+          "etiqueta": "Hotel en Providencia",
+          "combinable": true,
+          "item_id": "h-posada",
+          "nombre": "POSADA ENILDA · PROVIDENCIA",
+          "precio": 1446000
+         },
+         {
+          "ranura": "hotel 2: Hotel en San Andrés",
+          "etiqueta": "Hotel 2 · Hotel en San Andrés",
+          "combinable": true,
+          "item_id": "h-verde-mar",
+          "nombre": "VERDE MAR · SAN ANDRÉS",
+          "precio": 6720000
+         },
+         {
+          "ranura": "traslado 2: Traslado en San Andrés",
+          "etiqueta": "Traslado 2 · Traslado en San Andrés",
+          "combinable": false,
+          "item_id": "t-san-andres",
+          "nombre": "AEROPUERTO - HOTEL - AEROPUERTO SAN ANDRÉS",
+          "precio": 494116
+         },
+         {
+          "ranura": "actividad: Cayo Cangrejo",
+          "etiqueta": "Actividad · Cayo Cangrejo",
+          "combinable": false,
+          "item_id": "a-cayo-compartida",
+          "nombre": "CAYO CANGREJO · LANCHA COMPARTIDA",
+          "precio": 847056
+         }
+        ],
+        "motivo_codigo": null,
+        "motivo_texto": null,
+        "contexto": {
+         "destino": "San Andrés y Providencia",
+         "fecha_salida": "2026-11-23",
+         "fecha_regreso": "2026-11-28",
+         "noches": 5,
+         "adultos": 6,
+         "ninos": 1,
+         "infantes": 1,
+         "pasajeros": 8,
+         "dias_anticipacion": 42,
+         "medido_el": "2026-10-12"
+        },
+        "decidido_por": "s-asesora",
+        "decidido_por_nombre": "Asesora de Prueba",
+        "salida_at": "2026-10-12T15:00:00.000Z"
+       }
+      ]
+     }
+    ],
+    "subidas": [
+     "COT-2026-0901.pdf"
+    ]
+   },
+   "tarifas": {
+    "success": true,
+    "tarifas": [
+     {
+      "itinerarioId": "tf-recomendada",
+      "nombre": "Recomendada",
+      "esRecomendada": true,
+      "precio": 22580517,
+      "motivo": null
+     },
+     {
+      "itinerarioId": "tf-premium",
+      "nombre": "Premium",
+      "esRecomendada": false,
+      "precio": 28305928,
+      "motivo": null
+     }
+    ],
+    "preseleccion": "tf-recomendada"
+   },
+   "aprobacion": {
+    "resultado": {
+     "success": true
+    },
+    "precio_aprobado": 28305928,
+    "escrituras": [
+     {
+      "tabla": "activity_log",
+      "op": "insert",
+      "filtros": [],
+      "payload": {
+       "workspace_id": "ws-agencia-prueba",
+       "entidad_tipo": "negocio",
+       "entidad_id": "neg-san-andres",
+       "tipo": "cambio",
+       "autor_id": "s-asesora",
+       "campo_modificado": "precio_aprobado",
+       "valor_anterior": null,
+       "valor_nuevo": "28305928",
+       "contenido": "COT-2026-0901 aprobada: el cliente escogió la tarifa Premium, por $28.305.928. La Recomendada, que da el total del documento, era de $22.580.517."
+      }
+     },
+     {
+      "tabla": "cotizaciones",
+      "op": "update",
+      "filtros": [
+       [
+        "eq",
+        "id",
+        "cot-san-andres"
+       ]
+      ],
+      "payload": {
+       "estado": "aceptada",
+       "updated_at": "2026-10-12T15:00:00.000Z",
+       "tarifa_aceptada_id": "tf-premium"
+      }
+     },
+     {
+      "tabla": "decisiones_combinacion",
+      "op": "insert",
+      "filtros": [],
+      "payload": [
+       {
+        "workspace_id": "ws-agencia-prueba",
+        "cotizacion_id": "cot-san-andres",
+        "negocio_id": "neg-san-andres",
+        "itinerario_id": "tf-premium",
+        "tarifa_nombre": "Premium",
+        "elegida": [
+         {
+          "ranura": "hotel: Hotel en Providencia",
+          "etiqueta": "Hotel en Providencia",
+          "combinable": true,
+          "item_id": "h-agua-dulce",
+          "nombre": "CABAÑAS AGUA DULCE · PROVIDENCIA",
+          "precio": 5120986
+         },
+         {
+          "ranura": "hotel 2: Hotel en San Andrés",
+          "etiqueta": "Hotel 2 · Hotel en San Andrés",
+          "combinable": true,
+          "item_id": "h-lord-pierre",
+          "nombre": "LORD PIERRE · SAN ANDRÉS",
+          "precio": 7552944
+         },
+         {
+          "ranura": "traslado 2: Traslado en San Andrés",
+          "etiqueta": "Traslado 2 · Traslado en San Andrés",
+          "combinable": false,
+          "item_id": "t-san-andres-privado",
+          "nombre": "TRASLADO PRIVADO SAN ANDRÉS",
+          "precio": 752944
+         },
+         {
+          "ranura": "actividad: Cayo Cangrejo",
+          "etiqueta": "Actividad · Cayo Cangrejo",
+          "combinable": false,
+          "item_id": "a-cayo-privada",
+          "nombre": "CAYO CANGREJO · LANCHA PRIVADA",
+          "precio": 1647056
+         }
+        ],
+        "precio_elegida": 27521564,
+        "costo_elegida": 23393330,
+        "margen_elegida_pct": 14.99999781989134,
+        "propuesta": null,
+        "precio_propuesta": null,
+        "propuesta_origen": null,
+        "descartadas": [
+         {
+          "ranura": "hotel: Hotel en Providencia",
+          "etiqueta": "Hotel en Providencia",
+          "combinable": true,
+          "item_id": "h-posada",
+          "nombre": "POSADA ENILDA · PROVIDENCIA",
+          "precio": 1446000
+         },
+         {
+          "ranura": "hotel 2: Hotel en San Andrés",
+          "etiqueta": "Hotel 2 · Hotel en San Andrés",
+          "combinable": true,
+          "item_id": "h-verde-mar",
+          "nombre": "VERDE MAR · SAN ANDRÉS",
+          "precio": 6720000
+         },
+         {
+          "ranura": "traslado 2: Traslado en San Andrés",
+          "etiqueta": "Traslado 2 · Traslado en San Andrés",
+          "combinable": false,
+          "item_id": "t-san-andres",
+          "nombre": "AEROPUERTO - HOTEL - AEROPUERTO SAN ANDRÉS",
+          "precio": 494116
+         },
+         {
+          "ranura": "actividad: Cayo Cangrejo",
+          "etiqueta": "Actividad · Cayo Cangrejo",
+          "combinable": false,
+          "item_id": "a-cayo-compartida",
+          "nombre": "CAYO CANGREJO · LANCHA COMPARTIDA",
+          "precio": 847056
+         }
+        ],
+        "motivo_codigo": null,
+        "motivo_texto": null,
+        "contexto": {
+         "destino": "San Andrés y Providencia",
+         "fecha_salida": "2026-11-23",
+         "fecha_regreso": "2026-11-28",
+         "noches": 5,
+         "adultos": 6,
+         "ninos": 1,
+         "infantes": 1,
+         "pasajeros": 8,
+         "dias_anticipacion": 42,
+         "medido_el": "2026-10-12"
+        },
+        "decidido_por": "s-asesora",
+        "decidido_por_nombre": "Asesora de Prueba",
+        "salida_at": "2026-10-12T15:00:00.000Z",
+        "evento": "aceptacion",
+        "recomendada_itinerario_id": "tf-recomendada",
+        "recomendada_nombre": "Recomendada",
+        "precio_recomendada": 21954806,
+        "tarifas_ofrecidas": [
+         {
+          "itinerario_id": "tf-recomendada",
+          "nombre": "Recomendada",
+          "precio": 21954806
+         },
+         {
+          "itinerario_id": "tf-premium",
+          "nombre": "Premium",
+          "precio": 27521564
+         }
+        ]
+       }
+      ]
+     },
+     {
+      "tabla": "negocios",
+      "op": "update",
+      "filtros": [
+       [
+        "eq",
+        "id",
+        "neg-san-andres"
+       ]
+      ],
+      "payload": {
+       "precio_aprobado": 28305928
+      }
+     }
+    ]
+   }
+  }
+ },
+ "presupuesto": {
+  "termotech · recalcular": 13,
+  "termotech · pdf": 21,
+  "termotech · aprobar": 16,
+  "generica-con-cuadre · recalcular": 10,
+  "generica-con-cuadre · pdf": 19,
+  "generica-con-cuadre · aprobar": 16,
+  "trappvel-caso-fijo · recalcular": 22,
+  "trappvel-caso-fijo · pdf": 33,
+  "trappvel-caso-fijo · aprobar": 41,
+  "trappvel-flujo-nuevo · recalcular": 23,
+  "trappvel-flujo-nuevo · pdf": 40,
+  "trappvel-flujo-nuevo · aprobar": 48,
+  "trappvel-caso-fijo · elegir opción en una tarifa": 27
+ }
+}
