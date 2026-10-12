@@ -22,6 +22,7 @@ import { guardarMarcaEnMetadata } from '@/lib/negocios/marca-metadata'
 import {
   CLAVE_TITULAR_CORREGIDO,
   leerTitularCorregido,
+  titularDeConfirmacion,
   mismoTitular,
   textoActividadTitular,
   type TitularCorregido,
@@ -158,9 +159,12 @@ async function borradorDelNegocio(
   negocioId: string,
   contactoId: string | null,
   titular: TitularParaBorrador | null,
+  /** El titular de «El cliente confirmó» (viaje): solo cuenta si el negocio no tiene RUT. */
+  titularConfirmacion: TitularParaBorrador | null = null,
 ): Promise<{ borrador: ReturnType<typeof borradorCliente> }> {
   const { rut, contacto } = await leerRutYContacto(negocioId, contactoId)
-  return { borrador: borradorCliente(rut, contacto, titular) }
+  const sinRut = Object.keys(rut).length === 0
+  return { borrador: borradorCliente(rut, contacto, titular ?? (sinRut ? titularConfirmacion : null)) }
 }
 
 /**
@@ -276,7 +280,7 @@ export async function asegurarClienteSiigo(
   // no tiene por qué envolverla en su propio try.
   let borrador: Awaited<ReturnType<typeof borradorDelNegocio>>
   try {
-    borrador = await borradorDelNegocio(negocioId, negocio.contacto_id, titular)
+    borrador = await borradorDelNegocio(negocioId, negocio.contacto_id, titular, titularDeConfirmacion(negocio.metadata))
   } catch (e) {
     // Un caso YA marcado no se convierte en error porque hoy no se pueda releer
     // su RUT: eso ya estaba resuelto y la marca sigue siendo la respuesta.

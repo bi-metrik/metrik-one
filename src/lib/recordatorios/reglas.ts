@@ -19,14 +19,21 @@
 import { esDiaHabil } from '@/lib/dates/dias-habiles'
 
 /**
- * Fuentes que el motor sabe leer hoy. Las de cuota, salida y regreso llegan con F2-F6.
+ * Fuentes que el motor sabe leer hoy. Las de salida y regreso llegan con F4-F6.
  * `aplazado` (F1, PR 5): el día en que la comercial quedó de volver a escribir al aplazar.
+ * `cuota` (F2, PR 9): las cuotas del plan de pagos del viajero.
  */
-export const FUENTES_SOPORTADAS = ['envio', 'pago_proveedor', 'aplazado'] as const
+export const FUENTES_SOPORTADAS = ['envio', 'pago_proveedor', 'aplazado', 'cuota'] as const
 export type FuenteRecordatorio = (typeof FUENTES_SOPORTADAS)[number]
 
-/** Canales que el motor manda hoy. `email` y `wa_manual` llegan con los avisos al viajero (F2). */
-export const CANALES_SOPORTADOS = ['in_app'] as const
+/**
+ * Canales que el motor manda hoy. Al equipo, solo `in_app`. Al viajero (`cliente`), `email`
+ * (Resend, si el contacto tiene correo) y `wa_manual` (la comercial recibe en la app el mensaje
+ * listo para mandarlo desde su WhatsApp, Vera C1). El correo al equipo todavía no sale.
+ */
+export const CANALES_SOPORTADOS = ['in_app', 'email', 'wa_manual'] as const
+export const CANALES_AL_EQUIPO = ['in_app'] as const
+export const CANALES_AL_CLIENTE = ['email', 'wa_manual'] as const
 export type CanalRecordatorio = 'in_app' | 'email' | 'wa_manual'
 
 /** `responsable` · `aprobadores` · `area:<comercial|operaciones|financiera>` · `cliente`. */
@@ -60,6 +67,11 @@ export const REGLAS_POR_DEFECTO: readonly ReglaRecordatorio[] = [
   { id: 'toque_7', fuente: 'envio', offset: 7, dias: 'habiles', etapa_numero: 3, a: ['responsable'], canales: ['in_app'] },
   // «Aplazar exige fecha y deja un toque ese día» (F1-4).
   { id: 'toque_aplazado', fuente: 'aplazado', offset: 0, dias: 'calendario', etapa_numero: null, a: ['responsable'], canales: ['in_app'] },
+  // Cuotas del plan del viajero (§2.3 bis 4, F4-6): 3 días antes y el día al cliente; el día a la
+  // comercial; vencida a los 2 días, a la dirección una sola vez.
+  { id: 'cuota_t3', fuente: 'cuota', offset: -3, dias: 'calendario', etapa_numero: null, a: ['cliente'], canales: ['email', 'wa_manual'] },
+  { id: 'cuota_t0', fuente: 'cuota', offset: 0, dias: 'calendario', etapa_numero: null, a: ['cliente', 'responsable'], canales: ['email', 'wa_manual', 'in_app'] },
+  { id: 'cuota_vencida', fuente: 'cuota', offset: 2, dias: 'calendario', etapa_numero: null, a: ['aprobadores'], canales: ['in_app'] },
 ]
 
 /**

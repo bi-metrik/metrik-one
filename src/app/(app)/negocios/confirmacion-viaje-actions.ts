@@ -22,7 +22,6 @@ import { preciosDeLasTarifas } from '@/lib/fiscal/iva-cotizacion-datos'
 import { duplicarCotizacionCompleta } from '@/lib/cotizaciones/duplicar-cotizacion'
 import { leerViajeDelNegocio } from '@/lib/cotizaciones/viaje-negocio'
 import { generarServiciosDesdeTarifa } from '@/lib/viaje/servicios-viaje-datos'
-import { aprobadoresDeLinea } from '@/lib/viaje/estado-servicio'
 import { archivarSoporte, type SoporteSubidoInput } from '@/lib/cobros/soporte-pago'
 import {
   configPlanPagos,
@@ -36,11 +35,9 @@ import {
 } from '@/lib/viaje/plan-pagos'
 import {
   enlaceWhatsApp,
-  esAprobador,
   leerTitular,
   mensajeConfirmacion,
   primerNombre,
-  puedeConfirmarCliente,
   seccionesDeTerminos,
 } from '@/lib/viaje/confirmacion'
 import {
@@ -49,10 +46,10 @@ import {
   avisarAprobadores,
   etapaDeConfirmacion,
   guardarVersionPlan,
-  leerNegocioConLinea,
   type ConfirmacionGuardada,
 } from '@/lib/viaje/confirmacion-datos'
 import { enviarCorreoAlViajero, trazarWhatsAppManual } from '@/lib/viaje/correo-viajero'
+import { contextoViaje, nombreYCorreo, type ContextoViaje } from '@/lib/viaje/contexto-viaje'
 import { aceptarCotizacionNegocio } from './[id]/cotizacion/actions'
 import { cambiarEtapaNegocio } from './negocio-v2-actions'
 
@@ -62,59 +59,8 @@ const SIN_PERMISO = 'Solo la comercial del negocio o la dirección pueden hacer 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type Db = any
 
-interface Contexto {
-  supabase: Db
-  workspaceId: string
-  staffId: string | null
-  role: string | null
-  configLinea: Record<string, unknown>
-  negocio: {
-    id: string
-    nombre: string | null
-    metadata: Record<string, unknown> | null
-    contacto_id: string | null
-    linea_id: string | null
-    etapa_actual_id: string | null
-    precio_aprobado: number | null
-    estado: string | null
-  }
-  puedeConfirmar: boolean
-  esDireccion: boolean
-}
-
-async function contexto(negocioId: string): Promise<{ ok: true; ctx: Contexto } | { ok: false; error: string }> {
-  const { supabase, workspaceId, staffId, role, areas, error } = await getWorkspace()
-  if (error || !workspaceId) return { ok: false, error: 'No autenticado' }
-  const base = await leerNegocioConLinea(supabase, workspaceId, negocioId)
-  if (!base) return { ok: false, error: 'Negocio no encontrado' }
-  if (!configPlanPagos(base.configLinea).activo) return { ok: false, error: 'Esta línea no usa el plan de pagos del viaje.' }
-  if (base.negocio.estado && base.negocio.estado !== 'abierto') return { ok: false, error: 'El negocio ya está cerrado.' }
-  const aprobadores = aprobadoresDeLinea(base.configLinea)
-  let esResponsable = false
-  if (staffId) {
-    const { data } = await (supabase as Db)
-      .from('negocio_responsables')
-      .select('staff_id')
-      .eq('negocio_id', negocioId)
-      .eq('staff_id', staffId)
-      .maybeSingle()
-    esResponsable = !!data
-  }
-  const quien = { role, staffId, areas: (areas ?? []) as string[], aprobadores, esResponsable }
-  return {
-    ok: true,
-    ctx: {
-      supabase,
-      workspaceId,
-      staffId: staffId ?? null,
-      role: role ?? null,
-      configLinea: base.configLinea,
-      negocio: base.negocio,
-      puedeConfirmar: puedeConfirmarCliente(quien),
-      esDireccion: esAprobador(quien),
-    },
-  }
-}
+type Contexto = ContextoViaje
+const contexto = contextoViaje
 
 /** El total contra el que se mide el plan: el precio de la tarifa elegida (el mismo cálculo que la aprobación). */
 async function totalDeTarifa(db: Db, workspaceId: string, cotizacionId: string, itinerarioId: string | null): Promise<{ ok: true; total: number; nombre: string | null } | { ok: false; error: string }> {
@@ -134,19 +80,6 @@ async function totalDeTarifa(db: Db, workspaceId: string, cotizacionId: string, 
 async function cotizacionDelNegocio(db: Db, negocioId: string, cotizacionId: string): Promise<{ id: string; estado: string; tarifa_aceptada_id: string | null; consecutivo: string | null } | null> {
   const { data } = await db.from('cotizaciones').select('*').eq('id', cotizacionId).eq('negocio_id', negocioId).maybeSingle()
   return (data as { id: string; estado: string; tarifa_aceptada_id: string | null; consecutivo: string | null } | null) ?? null
-}
-
-/** Nombre y correo de quien actúa (el correo vive en `profiles`, no en `staff`). */
-async function nombreYCorreo(db: Db, staffId: string | null): Promise<{ nombre: string | null; correo: string | null }> {
-  if (!staffId) return { nombre: null, correo: null }
-  const { data: st } = await db.from('staff').select('full_name, profile_id').eq('id', staffId).maybeSingle()
-  const fila = st as { full_name?: string | null; profile_id?: string | null } | null
-  let correo: string | null = null
-  if (fila?.profile_id) {
-    const { data: pr } = await db.from('profiles').select('email').eq('id', fila.profile_id).maybeSingle()
-    correo = ((pr as { email?: string | null } | null)?.email ?? '').trim() || null
-  }
-  return { nombre: (fila?.full_name ?? '').trim() || null, correo }
 }
 
 // ── Plan propuesto (versión nueva) ───────────────────────────────────────────

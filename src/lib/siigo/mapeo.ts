@@ -297,6 +297,11 @@ export function borradorRecibo(
    * plata de terceros salen idénticos salvo por este número y la observación.
    */
   documentId?: number,
+  /**
+   * Forma de pago del recibo. Sin ella, la única que declara el workspace. La pide el pago del
+   * viajero que trae su cuenta receptora (`cuentas_recaudo[].siigo_payment_id`, F2-6).
+   */
+  paymentId?: number,
 ): Borrador<BorradorRecibo> {
   const faltantes: string[] = []
   if (!identificacion) faltantes.push('identificación')
@@ -308,7 +313,7 @@ export function borradorRecibo(
       date: fecha,
       type: 'AdvancePayment',
       customer: { identification: identificacion, branch_office: branchOffice },
-      payment: { id: cfg.reciboPaymentId, value: valorPagado ?? 0 },
+      payment: { id: paymentId ?? cfg.reciboPaymentId, value: valorPagado ?? 0 },
       observations: concepto,
     },
     faltantes,

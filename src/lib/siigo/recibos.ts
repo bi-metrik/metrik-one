@@ -431,6 +431,8 @@ export async function emitirReciboDeCobro(
      * recibo automático (`['pasante']`). Lo que no se pide ni se planea.
      */
     soloComponentes?: readonly ComponenteRecibo[]
+    /** Forma de pago de Siigo de la cuenta que recibió la plata (viaje, F2-6). Ausente = la del workspace. */
+    formaDePagoId?: number | null
   } = {},
 ): Promise<ResultadoRecibo> {
   const svc = createServiceClient()
@@ -680,6 +682,7 @@ export async function emitirReciboDeCobro(
         )
         : borradorRecibo(
           cfg, identificacion, comp.valor, fecha, comp.concepto, sucursalDelCliente, comp.documentId,
+          opciones.formaDePagoId ?? undefined,
         )
 
       const { payload, faltantes } = armar(fechaRecibo)

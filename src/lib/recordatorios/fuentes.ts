@@ -17,6 +17,8 @@
  */
 
 import { todayBogotaISO } from '@/lib/dates/bogota'
+import { cuotasConEstadoViaje, type PagoViajero } from '@/lib/viaje/riel-cobro'
+import { pesos } from '@/lib/viaje/plan-pagos'
 import type { FuenteRecordatorio } from './reglas'
 
 export interface NegocioFuente {
@@ -51,7 +53,7 @@ export interface ServicioFuente {
 
 export interface Candidato {
   fuente: FuenteRecordatorio
-  entidadTipo: 'cotizacion' | 'servicio' | 'negocio'
+  entidadTipo: 'cotizacion' | 'servicio' | 'negocio' | 'cuota'
   entidadId: string
   negocio: NegocioFuente
   fechaObjetivo: string
@@ -139,6 +141,51 @@ export function candidatosDePagoProveedor(
   return out
 }
 
+export interface CuotaFuente {
+  id: string
+  negocio_id: string
+  numero: number
+  monto: number
+  fecha_vencimiento: string
+}
+
+/**
+ * Cuotas del plan acordado: pendientes mientras el reparto FIFO de los pagos con fecha no las
+ * cubra (Vera §7.2.3: el estado sale de la plata). Una cuota pagada en parte recuerda lo que falta.
+ */
+export function candidatosDeCuota(
+  negocios: NegocioFuente[],
+  cuotas: CuotaFuente[],
+  pagosPorNegocio: Map<string, PagoViajero[]>,
+  hoy: string,
+): Candidato[] {
+  const porNegocio = new Map<string, CuotaFuente[]>()
+  for (const c of cuotas) (porNegocio.get(c.negocio_id) ?? porNegocio.set(c.negocio_id, []).get(c.negocio_id)!).push(c)
+  const out: Candidato[] = []
+  for (const n of negocios) {
+    if (n.estado !== 'abierto') continue
+    const delNegocio = porNegocio.get(n.id) ?? []
+    if (delNegocio.length === 0) continue
+    const { cuotas: conEstado } = cuotasConEstadoViaje(
+      delNegocio.map((c) => ({ numero: c.numero, monto: Number(c.monto), fecha: c.fecha_vencimiento.slice(0, 10), concepto: c.id })),
+      pagosPorNegocio.get(n.id) ?? [],
+      hoy,
+    )
+    for (const c of conEstado) {
+      if (c.estado === 'pagada' || c.saldo <= 0) continue
+      out.push({
+        fuente: 'cuota',
+        entidadTipo: 'cuota',
+        entidadId: String(c.concepto),
+        negocio: n,
+        fechaObjetivo: c.fecha,
+        detalle: { falta: c.saldo, cuota: c.monto, numero: c.numero + 1 },
+      })
+    }
+  }
+  return out
+}
+
 const FMT_FECHA = new Intl.DateTimeFormat('es-CO', { weekday: 'long', day: 'numeric', month: 'long', timeZone: 'UTC' })
 const FMT_PESOS = new Intl.NumberFormat('es-CO', { style: 'currency', currency: 'COP', maximumFractionDigits: 0 })
 
@@ -156,6 +203,15 @@ export function fechaEnPalabras(fechaISO: string): string {
  */
 export function textoDelAviso(c: Candidato, offset: number, hoy: string): string {
   const negocio = nombreNegocio(c.negocio)
+  if (c.fuente === 'cuota') {
+    const quien = c.negocio.contacto_nombre?.trim() || 'El cliente'
+    const falta = typeof c.detalle.falta === 'number' ? pesos(c.detalle.falta) : 'la cuota'
+    if (offset > 0 || c.fechaObjetivo < hoy) {
+      const n = Math.max(1, Math.round((Date.parse(`${hoy}T00:00:00Z`) - Date.parse(`${c.fechaObjetivo}T00:00:00Z`)) / 86_400_000))
+      return `Cuota vencida: ${quien} · ${falta} · hace ${n} día${n === 1 ? '' : 's'} (${negocio}).`
+    }
+    return `Hoy vence la cuota de ${quien}: ${falta} (${negocio}). Pega el comprobante cuando pague.`
+  }
   if (c.fuente === 'envio') {
     const quien = c.negocio.contacto_nombre?.trim() || 'el cliente'
     return `Hoy toca escribirle a ${quien} (${negocio}): le enviaste la cotización el ${fechaEnPalabras(c.fechaObjetivo)}.`
@@ -176,5 +232,6 @@ export function textoDelAviso(c: Candidato, offset: number, hoy: string): string
 /** Tipo de notificación (los tipos ya están en el CHECK desde la migración de F0). */
 export function tipoDeNotificacion(c: Candidato, offset: number, hoy: string): string {
   if (c.fuente === 'envio' || c.fuente === 'aplazado') return 'toque_seguimiento'
+  if (c.fuente === 'cuota') return offset > 0 || c.fechaObjetivo < hoy ? 'cobro_vencido' : 'cuota_por_vencer'
   return offset > 0 || c.fechaObjetivo < hoy ? 'pago_proveedor_vencido' : 'pago_proveedor_por_vencer'
 }
