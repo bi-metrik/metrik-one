@@ -88,6 +88,14 @@ const CLASIFICACION: Record<string, Clasificacion> = {
     declara: 'literal',
     razon: 'la fuente única. Su docstring escribe el plazo y su fundamento legal.',
   },
+  'src/lib/valida-registro/condiciones.ts': {
+    tipo: 'plazo',
+    declara: 'literal',
+    razon:
+      'las Condiciones de la prueba gratis de Valida v1.0 (Emilio; aprobadas por Mauricio el 2026-10-11), ' +
+      'numeral 6.5: la bitácora de consultas, también la de la prueba, se conserva 10 años (Ley 962 de 2005, ' +
+      'art. 28). Es texto legal con huella SHA-256: va literal y no se interpola.',
+  },
   'src/lib/compliance/vinculacion-publica.ts': {
     tipo: 'plazo',
     declara: 'derivado',
