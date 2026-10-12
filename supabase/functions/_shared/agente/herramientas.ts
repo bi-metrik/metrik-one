@@ -16,6 +16,28 @@ export function cierranCon(d: Pick<Dominio, 'cierres'>): string[] {
   return [...CIERRAN, ...(d.cierres ?? []).map((c) => c.name)];
 }
 
+/** Lo que dice la descripción de `proponer` sobre el `texto`: en la variante del respaldo se reemplaza. */
+const TEXTO_ARRIBA = 'Si la persona además preguntó algo (p. ej. «¿ya tenemos algo abierto?»), la respuesta va en `texto`: sale arriba del resumen, en el mismo mensaje. Una pregunta sin contestar es un error.';
+const SIN_TEXTO = 'Aquí `proponer` no lleva texto: el resumen, la pregunta y los botones los escribe el sistema. Si la persona además preguntó algo, contéstale con `responder` en vez de proponer.';
+
+/**
+ * Las declaraciones para el modelo de respaldo: `proponer` sin `texto`. Medido en producción (2026-10-07 a 10-09): las
+ * 3 propuestas del respaldo con texto lo usaron para repetir la pregunta del resumen; ninguna contestaba algo. Pura.
+ */
+export function declaracionesRespaldo(decl: DeclaracionHerramienta[]): DeclaracionHerramienta[] {
+  return decl.map((x) => {
+    if (x.name !== 'proponer') return x;
+    const params = x.parameters as { properties: Record<string, unknown> } & Record<string, unknown>;
+    const { texto: _texto, ...props } = params.properties;
+    return {
+      ...x,
+      description: x.description.split('\n').map((l) => (l === TEXTO_ARRIBA ? SIN_TEXTO : l))
+        .filter((l) => !l.startsWith('La pregunta de confirmación')).join('\n'),
+      parameters: { ...params, properties: props },
+    };
+  });
+}
+
 export function declaraciones(d: Dominio, r: Reglamento): DeclaracionHerramienta[] {
   // Las fichas de `proponer` van en su descripción: el turno se cierra al proponer, así que el modelo tiene que
   // tenerlas ANTES (las de las lecturas llegan con su resultado).
@@ -32,7 +54,7 @@ export function declaraciones(d: Dominio, r: Reglamento): DeclaracionHerramienta
       name: 'proponer',
       description: [
         'La única puerta para escribir en ONE, y no escribe: el sistema arma un resumen con datos reales y lo manda con botones; se ejecuta solo si la persona toca «sí». Cierra el turno: no redactes después.',
-        'Si la persona además preguntó algo (p. ej. «¿ya tenemos algo abierto?»), la respuesta va en `texto`: sale arriba del resumen, en el mismo mensaje. Una pregunta sin contestar es un error.',
+        TEXTO_ARRIBA,
         'La pregunta de confirmación («¿Lo anoto en…?», «¿Abro este viaje?») y sus botones los pone el sistema en el resumen: no la escribas en `texto`, ni con otras palabras.',
         'Si la propuesta pendiente (en el Estado) ya es esta, no la repitas: contesta con `responder`.',
         `Acciones: ${d.acciones.join(', ')}.`,

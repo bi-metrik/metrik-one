@@ -22,8 +22,8 @@ import { cargarEnExistente, valorLegible } from '../../wa-carga-reglas.ts';
 import type { MensajeEntrega } from '../../wa-guardianes.ts';
 import { lineaDuda, validarCarga } from './extraccion.ts';
 import type { Quitado, SugeridoAgente } from './extraccion.ts';
+import { codigosCanonicos, codigosDelTexto } from './codigo.ts';
 
-const RE_CODIGO = /\b[A-ZÑ]\d{0,2} \d{2} \d{1,4}\b/gu;
 /** Lo que se le pasa a la extracción, como mucho (el mismo tope de la conversación que ve el modelo: 6.000 tokens). */
 export const TOPE_ESCRITOS_CARACTERES = 24_000;
 
@@ -38,12 +38,14 @@ type OpcionNombrada = (opciones: ReadonlyArray<{ titulo: string; descripcion?: s
 /**
  * Dónde se nombró cada viaje, en orden: un código en un escrito del equipo, la opción que eligió escribiendo, el viaje
  * que abrió con su toque y el viaje nuevo que se le propuso (clave `nuevo:<huella>`, desde el primer mensaje de ese
- * turno; al abrirse pasa a ser su código). Pura.
+ * turno; al abrirse pasa a ser su código). `sueltos`: los códigos escritos sin espacios que ya se resolvieron contra la
+ * base («m1261» → «M1 26 1», `resolverSueltos`). Pura.
  */
 export function nombramientos(
   filas: FilaConversacion[],
   opcionNombrada: OpcionNombrada,
   alias: Record<string, string> = {},
+  sueltos: Record<string, string> = {},
 ): Array<{ i: number; clave: string }> {
   const out: Array<{ i: number; clave: string }> = [];
   const alias2 = { ...alias };
@@ -52,10 +54,10 @@ export function nombramientos(
   let opciones: ReadonlyArray<{ titulo: string; descripcion?: string }> | null = null;
   filas.forEach((f, i) => {
     if (delEquipo(f)) {
-      for (const m of (f.texto ?? '').toUpperCase().matchAll(RE_CODIGO)) out.push({ i, clave: m[0] });
+      for (const c of codigosDelTexto(f.texto ?? '', sueltos)) out.push({ i, clave: c });
       if (opciones && f.clase === 'escrito') {
         const k = opcionNombrada(opciones, f.texto ?? '');
-        if (k !== null) for (const m of opciones[k].titulo.toUpperCase().matchAll(RE_CODIGO)) out.push({ i, clave: m[0] });
+        if (k !== null) for (const c of codigosCanonicos(opciones[k].titulo)) out.push({ i, clave: c });
       }
       opciones = null;
     }
@@ -88,8 +90,9 @@ export function escritosDelViaje(
   codigo: string,
   opcionNombrada: OpcionNombrada,
   alias: Record<string, string> = {},
+  sueltos: Record<string, string> = {},
 ): string[] {
-  const ev = nombramientos(filas, opcionNombrada, alias);
+  const ev = nombramientos(filas, opcionNombrada, alias, sueltos);
   const tramos: Array<[number, number]> = [];
   ev.forEach((x, k) => {
     if (x.clave !== codigo || (k > 0 && ev[k - 1].clave === codigo)) return;

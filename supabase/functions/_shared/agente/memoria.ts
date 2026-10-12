@@ -172,6 +172,11 @@ export class PuertoMemoria implements PuertoBandeja {
     return { cotizar, completo: [...cotizar, 'presupuesto', 'categoría de hotel', 'plan de alimentación'].filter((k) => !(k in v.datos)) };
   }
 
+  async codigosExistentes(candidatos: string[]): Promise<string[] | 'error'> {
+    if (this.fallarBusqueda) return 'error';
+    return this.viajes.map((v) => v.codigo).filter((c) => candidatos.includes(c));
+  }
+
   async viaje(codigo: string): Promise<ViajeAgente | null | 'error'> {
     if (this.fallarBusqueda) return 'error';
     const v = this.viajes.find((x) => x.codigo === codigo);

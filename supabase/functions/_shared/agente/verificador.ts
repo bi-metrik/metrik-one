@@ -17,7 +17,8 @@
 // Pura.
 // ============================================================
 
-const RE_CODIGO = /\b[A-ZÑ]\d{0,2} \d{2} \d{1,4}\b/gu;
+import { RE_CODIGO } from './bandeja/codigo.ts';
+
 const RE_CORREO = /[A-Za-z0-9._%+-]+@[A-Za-z0-9-]+(?:\.[A-Za-z0-9-]+)*\.[A-Za-z]{2,}/g;
 const RE_CEL_CORTO = /(?:…|\.\.\.)\s?(\d{3,4})\b/gu;
 const RE_CEL_LARGO = /(?<![\d])\+?\d[\d\s().-]{5,}\d(?![\d])/gu;
