@@ -61,10 +61,12 @@ interface Props {
   dias: number
   condiciones: { version: string; titulo: string; texto: string }
   avisoDatos: string
+  /** El texto de la casilla: entra a la huella, así que sale del mismo archivo que la calcula. */
+  textoCasilla: string
   politica: { titulo: string; url: string }
 }
 
-export default function RegistroValidaClient({ origenUrl, abierto, consultas, dias, condiciones, avisoDatos, politica }: Props) {
+export default function RegistroValidaClient({ origenUrl, abierto, consultas, dias, condiciones, avisoDatos, textoCasilla, politica }: Props) {
   const [paso, setPaso] = useState<Paso>('correo')
   const [correo, setCorreo] = useState('')
   const [codigo, setCodigo] = useState('')
@@ -382,7 +384,7 @@ export default function RegistroValidaClient({ origenUrl, abierto, consultas, di
             </p>
             <label className="flex items-start gap-3 text-sm text-foreground">
               <input type="checkbox" className="mt-1 h-5 w-5" checked={acepta} onChange={(e) => setAcepta(e.target.checked)} />
-              <span>Acepto las Condiciones de la prueba y la Política de Datos.</span>
+              <span>{textoCasilla}</span>
             </label>
             {errorCampo === 'acepta' && <p className="text-xs text-red-500">{error}</p>}
           </div>

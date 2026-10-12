@@ -1,18 +1,20 @@
-import { textosListos } from './condiciones'
+import { PRUEBA_DE_LAS_CONDICIONES, textosListos } from './condiciones'
 
 /**
  * La llave del registro autogestionado de Valida y el tamaño de la prueba. Puro: recibe el entorno.
  *
  * El registro está APAGADO por defecto. Abre solo con las dos cosas:
  *   1. `VALIDA_REGISTRO_ABIERTO=1` en el entorno (la llave: la enciende Mauricio en Vercel);
- *   2. los textos legales escritos (`textosListos()`): sin las Condiciones de la prueba de Emilio y
- *      el aviso de Lucía, producción NO abre aunque la llave esté puesta. En un preview sí, para poder
- *      recorrer el flujo con los marcadores a la vista.
+ *   2. los textos legales escritos (`textosListos()`) y una prueba del tamaño que esos textos
+ *      prometen (10 consultas, 7 días): si el entorno pide otra, las Condiciones aceptadas dirían una
+ *      cosa y la cuenta otra. Sin eso producción NO abre aunque la llave esté puesta. En un preview sí,
+ *      para poder recorrer el flujo.
  */
 export function registroAbierto(env: Record<string, string | undefined> = process.env, listos: boolean = textosListos()): boolean {
   if (env.VALIDA_REGISTRO_ABIERTO !== '1') return false
-  if (listos) return true
-  return env.VERCEL_ENV !== 'production'
+  if (env.VERCEL_ENV !== 'production') return true
+  const { consultas, dias } = tamanoPrueba(env)
+  return listos && consultas === PRUEBA_DE_LAS_CONDICIONES.consultas && dias === PRUEBA_DE_LAS_CONDICIONES.dias
 }
 
 /**
