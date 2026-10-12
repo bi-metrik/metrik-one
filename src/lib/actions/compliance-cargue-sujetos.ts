@@ -20,6 +20,7 @@ import { textoLatinoProfundo } from '@/lib/texto/texto-latino'
 import * as XLSX from 'xlsx';
 import { revalidatePath } from 'next/cache';
 import { createServiceClient } from '@/lib/supabase/server';
+import { fechasExcelAISO } from '@/lib/xlsx/fechas-excel';
 import { getWorkspace } from './get-workspace';
 import { todayBogotaISO } from '@/lib/dates/bogota';
 import { puedeGestionarSujetos, TIPOS_SUJETO } from '@/lib/compliance/sujetos';
@@ -139,11 +140,15 @@ async function cargarExistentes(
   svc: any,
   workspaceId: string,
 ): Promise<SujetoExistente[]> {
-  const { data } = await svc
+  const { data, error } = await svc
     .from('compliance_sujetos')
-    .select('id, tipo, documento_tipo, documento_numero, nombre, correo, relacion_hasta')
+    .select('id, tipo, documento_tipo, documento_numero, nombre, correo, relacion_desde, relacion_hasta')
     .eq('workspace_id', workspaceId)
+    .order('created_at', { ascending: true })
     .limit(LIMITE_SUJETOS);
+  // Sin esto, un fallo de lectura pinta toda la base como "alta" y los
+  // retiros de gente que ya existe no se ejecutan nunca.
+  if (error) throw new Error(`lectura_sujetos: ${error.message}`);
   return (data ?? []) as SujetoExistente[];
 }
 
@@ -161,7 +166,7 @@ export async function previsualizarCargueSujetos(
 
   let workbook: XLSX.WorkBook;
   try {
-    workbook = XLSX.read(buffer, { type: 'buffer' });
+    workbook = XLSX.read(buffer, { type: 'buffer', cellNF: true });
   } catch {
     return { ok: false, error: 'xlsx_invalido' };
   }
@@ -173,6 +178,7 @@ export async function previsualizarCargueSujetos(
 
   // `raw: false` para que una cédula formateada como número no llegue en
   // notación científica, que es como se pierden documentos largos en silencio.
+  fechasExcelAISO(workbook.Sheets[sheetName]);
   const todas = textoLatinoProfundo(XLSX.utils.sheet_to_json<Record<string, unknown>>(workbook.Sheets[sheetName], {
     defval: null,
     raw: false,
@@ -186,7 +192,12 @@ export async function previsualizarCargueSujetos(
 
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const svc = createServiceClient() as any;
-  const existentes = await cargarExistentes(svc, guard.data.workspaceId);
+  let existentes: SujetoExistente[];
+  try {
+    existentes = await cargarExistentes(svc, guard.data.workspaceId);
+  } catch {
+    return { ok: false, error: 'No se pudo leer la base actual de sujetos. Intenta de nuevo.' };
+  }
 
   return { ok: true, data: planearCargue(validas, existentes, invalidas, truncado) };
 }
@@ -249,6 +260,12 @@ export async function aplicarCargueSujetos(
 
     try {
       if (it.accion === 'alta' || it.accion === 'alta_cerrada') {
+        // El inicio es el del archivo. Si viene en blanco: la fecha del cargue,
+        // salvo que la persona ya haya salido antes, porque la base exige que
+        // la salida no sea anterior al inicio.
+        const cierre = it.accion === 'alta_cerrada' ? it.relacion_hasta : null;
+        const desde = it.relacion_desde ?? (cierre && cierre < hoy ? cierre : hoy);
+
         const { data, error } = await svc
           .from('compliance_sujetos')
           .insert({
@@ -258,11 +275,7 @@ export async function aplicarCargueSujetos(
             documento_numero: it.documento_numero,
             nombre: it.nombre,
             correo: it.correo,
-            relacion_desde: hoy,
-            relacion_hasta: it.accion === 'alta_cerrada' ? it.relacion_hasta : null,
-            motivo_cierre: it.accion === 'alta_cerrada' ? it.motivo : null,
-            cerrado_por: it.accion === 'alta_cerrada' ? userId : null,
-            cerrado_at: it.accion === 'alta_cerrada' ? new Date().toISOString() : null,
+            relacion_desde: desde,
             responsable_profile_id: userId,
             created_by: userId,
           })
@@ -270,13 +283,30 @@ export async function aplicarCargueSujetos(
           .single();
 
         if (error) {
-          res.fallidas.push({ fila: it.fila, error: error.message });
+          res.fallidas.push({ fila: it.fila, error: traducirErrorCargue(error.message) });
           continue;
         }
 
-        await registrarEvento(svc, workspaceId, data.id, 'alta', `${it.nombre} (${it.documento_tipo} ${it.documento_numero}) — cargue masivo`, null, userId);
+        const ev = await registrarEvento(svc, workspaceId, data.id, 'alta', `${it.nombre} (${it.documento_tipo} ${it.documento_numero}) — cargue masivo`, null, userId);
+        if (ev) res.fallidas.push({ fila: it.fila, error: `creado, pero la bitácora no lo registró: ${ev}` });
         res.altas += 1;
-        if (it.accion === 'alta_cerrada') res.cierres += 1;
+
+        // El cierre va por el RPC y no en el mismo insert: así la bitácora
+        // dice quién cerró y por qué, igual que un cierre desde la ficha.
+        if (cierre) {
+          const { error: errCierre } = await svc.rpc('compliance_cerrar_relacion_sujeto', {
+            p_workspace_id: workspaceId,
+            p_sujeto_id: data.id,
+            p_fecha: cierre,
+            p_motivo: (it.motivo ?? '').trim() || 'cargue masivo',
+            p_actor: userId,
+          });
+          if (errCierre) {
+            res.fallidas.push({ fila: it.fila, error: `creado, pero no se cerró: ${traducirErrorCargue(errCierre.message)}` });
+          } else {
+            res.cierres += 1;
+          }
+        }
         continue;
       }
 
@@ -284,6 +314,14 @@ export async function aplicarCargueSujetos(
         if (!it.sujeto_id) {
           res.fallidas.push({ fila: it.fila, error: 'sin_sujeto' });
           continue;
+        }
+        // La vista previa ya avisó si el inicio cambia (ver `planearCargue`).
+        if (it.relacion_desde) {
+          const err = await corregirInicio(svc, workspaceId, it, userId ?? null);
+          if (err) {
+            res.fallidas.push({ fila: it.fila, error: err });
+            continue;
+          }
         }
         const { error } = await svc.rpc('compliance_cerrar_relacion_sujeto', {
           p_workspace_id: workspaceId,
@@ -293,7 +331,7 @@ export async function aplicarCargueSujetos(
           p_actor: userId,
         });
         if (error) {
-          res.fallidas.push({ fila: it.fila, error: error.message });
+          res.fallidas.push({ fila: it.fila, error: traducirErrorCargue(error.message) });
           continue;
         }
         res.cierres += 1;
@@ -309,6 +347,7 @@ export async function aplicarCargueSujetos(
       // blanco es "no lo sé", no "bórralo".
       const patch: Record<string, unknown> = { tipo: it.tipo, nombre: it.nombre };
       if (it.correo) patch.correo = it.correo;
+      if (it.relacion_desde) patch.relacion_desde = it.relacion_desde;
 
       const { error } = await svc
         .from('compliance_sujetos')
@@ -316,10 +355,11 @@ export async function aplicarCargueSujetos(
         .eq('id', it.sujeto_id)
         .eq('workspace_id', workspaceId);
       if (error) {
-        res.fallidas.push({ fila: it.fila, error: error.message });
+        res.fallidas.push({ fila: it.fila, error: traducirErrorCargue(error.message) });
         continue;
       }
-      await registrarEvento(svc, workspaceId, it.sujeto_id, 'cambio_datos', `${it.detalle} — cargue masivo`, null, userId);
+      const ev = await registrarEvento(svc, workspaceId, it.sujeto_id, 'cambio_datos', `${it.detalle} — cargue masivo`, null, userId);
+      if (ev) res.fallidas.push({ fila: it.fila, error: `actualizado, pero la bitácora no lo registró: ${ev}` });
       res.actualizaciones += 1;
     } catch (e) {
       res.fallidas.push({ fila: it.fila, error: e instanceof Error ? e.message : 'error' });
@@ -339,8 +379,8 @@ async function registrarEvento(
   detalle: string,
   motivo: string | null,
   actor: string | null,
-): Promise<void> {
-  await svc.rpc('compliance_registrar_evento_sujeto', {
+): Promise<string | null> {
+  const { error } = await svc.rpc('compliance_registrar_evento_sujeto', {
     p_workspace_id: workspaceId,
     p_sujeto_id: sujetoId,
     p_evento: evento,
@@ -348,4 +388,43 @@ async function registrarEvento(
     p_motivo: motivo,
     p_actor: actor,
   });
+  return error ? error.message : null;
+}
+
+/** Mueve el inicio de una relación abierta antes de cerrarla, con su evento. */
+async function corregirInicio(
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  svc: any,
+  workspaceId: string,
+  it: ItemPlan,
+  userId: string | null,
+): Promise<string | null> {
+  const { error } = await svc
+    .from('compliance_sujetos')
+    .update({ relacion_desde: it.relacion_desde })
+    .eq('id', it.sujeto_id)
+    .eq('workspace_id', workspaceId)
+    .is('relacion_hasta', null);
+  if (error) return traducirErrorCargue(error.message);
+  return registrarEvento(
+    svc, workspaceId, it.sujeto_id as string, 'cambio_datos',
+    `inicio de la relación → ${it.relacion_desde} — cargue masivo`, null, userId,
+  );
+}
+
+/** Los errores de la base, en el idioma de quien sube el archivo. */
+function traducirErrorCargue(mensaje: string): string {
+  if (mensaje.includes('duplicate key')) {
+    return 'ese documento ya está en la base (vuelve a generar la vista previa)';
+  }
+  if (mensaje.includes('relacion_ya_cerrada')) return 'la relación ya estaba cerrada';
+  if (mensaje.includes('cierre_anterior_al_inicio_de_la_relacion')) {
+    return 'la fecha de salida es anterior al inicio de la relación';
+  }
+  if (mensaje.includes('relacion_ordenada')) return 'la fecha de salida es anterior al inicio de la relación';
+  if (mensaje.includes('nombre_util')) return 'el nombre debe tener entre 2 y 200 caracteres';
+  if (mensaje.includes('motivo_de_cierre_obligatorio') || mensaje.includes('cierre_motivado')) {
+    return 'falta el motivo del retiro';
+  }
+  return mensaje;
 }

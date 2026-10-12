@@ -19,7 +19,7 @@ import { createServiceClient } from '@/lib/supabase/server';
 import { leerSecretosWorkspace, secretoConRespaldo } from '@/lib/secretos/workspace';
 import { getCachedUser } from '@/lib/supabase/auth-user';
 import { revalidatePath } from 'next/cache';
-import { headers } from 'next/headers';
+import { origenDelTenant } from '@/lib/tenant/origen-tenant';
 import { getWorkspace } from './get-workspace';
 import { exigirModulo, REQUISITO } from '@/lib/modulos/exigir-modulo';
 import {
@@ -373,10 +373,7 @@ type RespuestaEnlace = { token: string; activa: boolean; rotado_en: string | nul
  * queda `host` con http.
  */
 async function origenActual(): Promise<string> {
-  const h = await headers();
-  const host = h.get('x-forwarded-host') ?? h.get('host') ?? '';
-  const proto = h.get('x-forwarded-proto') ?? (host.startsWith('localhost') ? 'http' : 'https');
-  return `${proto}://${host}`;
+  return origenDelTenant();
 }
 
 export async function enlaceDeSolicitud(): Promise<Result<EnlaceSolicitud>> {

@@ -66,8 +66,20 @@ export async function clasificarParaGuardar(
   // Una consulta sin coincidencias no tiene nada que clasificar, y marcarla
   // como sin clasificar sería mandar al canal de mayor exigencia a una
   // contraparte que salió limpia.
+  //
+  // `tier_opera` sí se resuelve: es lo que decide la vigencia (C2). Dejarlo en
+  // null hacía que una consulta limpia tomara el nivel más corto de toda la
+  // configuración aun con el catálogo firmado (3 meses y "tier_1" en vez de
+  // 12 y "sin_hallazgo"), y el barrido la volvía a cobrar cuatro veces al año.
   if (!matches || matches.length === 0) {
-    return { ...sinClasificacion, tier_sin_clasificar: false };
+    let opera: boolean | null = null;
+    try {
+      const catalogo = await cargarCatalogoTierVigente();
+      opera = catalogo ? catalogo.opera : null;
+    } catch {
+      opera = null;
+    }
+    return { ...sinClasificacion, tier_sin_clasificar: false, tier_opera: opera };
   }
 
   let catalogo;

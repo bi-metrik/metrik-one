@@ -4,10 +4,14 @@
  * ## De dónde sale la versión
  *
  * Tiene que ser la publicada en `bi-metrik/metrik-valida` (`POLITICA_PRIVACIDAD.version` en
- * `lib/recursos/politica-privacidad.ts`, servida en `/recursos/privacidad`). Hoy es la **1.5**,
- * publicada el 2026-09-16: corrige la razón social del Responsable del Tratamiento, que la 1.4
- * nombraba sin «IA», o sea con el nombre de otra sociedad homónima. El Responsable es METRIK IA
- * S.A.S., NIT 902.079.601-9.
+ * `lib/recursos/politica-privacidad.ts`, servida en `/recursos/privacidad`). Hoy es la **1.6**,
+ * vigente desde el 2026-10-05 (verificada en la página publicada el 2026-10-11): ajusta el numeral
+ * 13.3 (OFAC y UE como «listas restrictivas internacionales») y retira la cita de la Circular
+ * 100-000016 de Supersociedades. La 1.5 (2026-09-16) corrigió la razón social del Responsable, que la
+ * 1.4 nombraba sin «IA». El Responsable es METRIK IA S.A.S., NIT 902.079.601-9.
+ *
+ * ⚠️ Pasar de 1.5 a 1.6 vuelve a pedir la Política una vez a quien entra a Valida API y al Radar
+ * (`exigeAprobacionPorUsuario`); en Valida de los CDA no se pide por usuario y no cambia nada.
  *
  * ⚠️ La spec de servicios y cobro llama «v1.5» a la versión que agrega a Wompi como destinatario
  * (entrega B5). Esa ya no puede ser la 1.5: será la siguiente. Donde la spec o el catálogo exijan
@@ -35,7 +39,7 @@ import { PRODUCTOS_ENTRADA, type ProductoEntrada } from './producto'
 
 export const POLITICA_DATOS_VALIDA = {
   slug: 'politica-datos-valida',
-  version: '1.5',
+  version: '1.6',
   titulo: 'Política de Tratamiento de Datos Personales',
   url: 'https://valida.metrik.com.co/recursos/privacidad',
 } as const
