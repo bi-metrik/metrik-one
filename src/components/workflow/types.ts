@@ -115,6 +115,7 @@ export const BLOQUE_TIPO_CODE: Record<string, string> = {
   plan_recurrente: 'PR',
   propuesta_economica: 'PE',
   resumen_financiero: 'RF',
+  servicios: 'SV',
 }
 
 export function bloqueTipoCode(tipo: string): string {
