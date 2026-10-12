@@ -35,7 +35,8 @@ import {
   type LecturaDocumento,
   type TipoDocumentoViajero,
 } from '@/lib/viaje/entrega'
-import { armarPaquetePdf, leerVistaEntrega } from '@/lib/viaje/entrega-datos'
+import { leerVistaEntrega } from '@/lib/viaje/entrega-datos'
+import { armarPaquetePdf } from '@/lib/viaje/entrega-paquete'
 
 const MENSAJE_EN_CURSO = 'Tu acción anterior todavía se está guardando. Espera un momento.'
 const APAGADO = 'Esta línea no usa la entrega del viaje.'

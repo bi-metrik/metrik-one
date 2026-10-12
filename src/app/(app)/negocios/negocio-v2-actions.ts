@@ -15,6 +15,7 @@ import { evaluarGatesSeguimiento } from '@/lib/negocios/gates-seguimiento'
 import { evaluarGateServicios } from '@/lib/viaje/servicios-viaje-datos'
 import { datosDelTablero } from '@/lib/viaje/servicios-tablero-datos'
 import { lineasDelGate } from '@/lib/viaje/gate-servicios'
+import { evaluarGateEntrega } from '@/lib/viaje/entrega-datos'
 import { aprobadoresDeLinea, serviciosViajeActivo } from '@/lib/viaje/estado-servicio'
 import type { DatosBloqueServicios } from '@/lib/viaje/bloque-servicios'
 import { evaluarGatesConfirmacion } from '@/lib/viaje/confirmacion-datos'
@@ -3624,6 +3625,13 @@ async function cambiarEtapaNegocioConGateSinClave(
     const faltaServicios = await evaluarGateServicios(db(supabase), { workspaceId, negocioId, gates: etapaGates })
     if (faltaServicios.length > 0) {
       return { error: 'gate_bloqueado', bloquesPendientes: lineasDelGate(faltaServicios).map((nombre) => ({ nombre, es_gate: true })) }
+    }
+
+    // Gates de Documentos y entrega (F4): vouchers, documentos del viajero, cobro mínimo y
+    // paquete enviado. Opt-in por etapa; con `entrega_viaje.activo` apagado no frena.
+    const faltaEntrega = await evaluarGateEntrega(db(supabase), { workspaceId, negocioId, gates: etapaGates })
+    if (faltaEntrega.length > 0) {
+      return { error: 'gate_bloqueado', bloquesPendientes: faltaEntrega.map((nombre) => ({ nombre, es_gate: true })) }
     }
 
     // Gate custom: saldo:handoff — control de recaudo para soltar el negocio a
