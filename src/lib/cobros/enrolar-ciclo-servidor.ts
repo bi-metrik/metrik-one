@@ -42,6 +42,12 @@ type Db = any
 export interface DepsEnrolamiento {
   db: SupabaseClient
   adapterPara?: (pasarela: string) => PasarelaAdapter | null
+  /**
+   * Solo este contrato. Lo usa la cuenta autogestionada de Valida al aceptar sus Términos
+   * (`asegurarCobroDelEspacio`): su plan nace en ese momento y no al día siguiente con el cron.
+   * Mismas reglas, misma función de la base: solo se angosta la lectura.
+   */
+  contratoId?: string
 }
 
 export interface ResumenEnrolamiento {
@@ -111,14 +117,15 @@ export async function enrolarContratosPorCiclo(deps: DepsEnrolamiento): Promise<
 
   // 2. Sus contratos activos.
   const contratos = await traerTodo<FilaContrato>(
-    (desde, hasta) =>
-      db
+    (desde, hasta) => {
+      let q = db
         .from('servicios_contratados')
         .select('id, workspace_id, negocio_id, estado, servicio_slug, servicio_version, parametros')
         .in('servicio_slug', [...porSlug.keys()])
         .eq('estado', 'activo')
-        .order('id')
-        .range(desde, hasta),
+      if (deps.contratoId) q = q.eq('id', deps.contratoId)
+      return q.order('id').range(desde, hasta)
+    },
     { etiqueta: 'contratos por ciclo sin enrolar' },
   )
   if (contratos.length === 0) return resumen

@@ -138,8 +138,8 @@ export function textoCorte(motivo: MotivoCorte, esPrueba: boolean): { titulo: st
       }
 }
 
-/** A dónde lleva el botón «Activar plan» (prueba) o «Ver mi suscripción» (plan pagado). */
-export const RUTA_ACTIVAR_PLAN = '/suscripcion'
+/** A dónde lleva «Activar plan» desde la prueba: la activación autogestionada (`/valida/activar`). */
+export const RUTA_ACTIVAR_PLAN = '/valida/activar'
 
 /** El botón que acompaña al contador y al corte: activar desde la prueba, o ir a la suscripción del plan. */
 export function accionDelCorte(esPrueba: boolean): { texto: string; ruta: string } {
