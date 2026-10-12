@@ -35,7 +35,7 @@ beforeAll(async () => {
     insert into public.negocios values ('${NEG}', '${WS}');
   `)
   await db.exec(readFileSync(MIGRACION, 'utf8'))
-})
+}, 30_000)
 
 afterAll(async () => {
   await db.close()

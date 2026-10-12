@@ -16,6 +16,9 @@ import {
 } from '@/app/(app)/negocios/cotizacion-actions'
 import { getServiciosActivos } from '@/app/(app)/config/servicios-actions'
 import { generateCotizacionPDF } from '@/app/(app)/negocios/cotizacion-pdf-actions'
+import { deshacerEnvioPorDescarga } from '@/app/(app)/negocios/[id]/cotizacion/actions'
+import ElegirOrigenVersion from '@/components/cotizacion/elegir-origen-version'
+import type { OrigenVersion } from '@/lib/negocios/seguimiento'
 import PanelMargenSalida from '@/app/(app)/negocios/panel-margen-salida'
 import type { SalidaVista } from '@/app/(app)/negocios/margen-salida-actions'
 import { ESTADO_COTIZACION_CONFIG, TIPOS_RUBRO, etiquetaTipoRubro } from '@/lib/catalogos/constants'
@@ -362,12 +365,17 @@ interface Props {
    * lectura propia siempre gana cuando existe.
    */
   leidaEn?: string | null
+  /**
+   * Seguimiento encendido en la línea (F1): «Duplicar» pregunta de dónde sale la versión, y
+   * descargar el PDF desde «Revisar y enviar» puede contar como envío (con «No lo envié»).
+   */
+  seguimiento?: boolean
 }
 
 /** Cuánto dura el «Deshacer» de un borrado de opción o de bloque (P12). */
 const ESPERA_DESHACER_MS = 6000
 
-export default function CotizacionEditor({ oportunidadId, cotizacion, initialItems: itemsDeLaPagina, fiscalProfile, clientFiscal, backUrl, staffMembers, frozen, lineaId, umbrales = UMBRALES_MARGEN_POR_DEFECTO, itinerarios, pisoBloqueaAvance = false, politicaRecargo = RECARGO_POR_DEFECTO, composicionViaje = null, lineasPorTipo = false, adicionales: adicionalesDeLaPagina = ADICIONALES_VACIOS, salida = null, textoCliente = null, configIva = CONFIG_IVA_POR_DEFECTO, mostrarResumenFiscal = true, destinoViaje = null, fechasViaje = null, nivelDetalle = null, leidaEn = null }: Props) {
+export default function CotizacionEditor({ oportunidadId, cotizacion, initialItems: itemsDeLaPagina, fiscalProfile, clientFiscal, backUrl, staffMembers, frozen, lineaId, umbrales = UMBRALES_MARGEN_POR_DEFECTO, itinerarios, pisoBloqueaAvance = false, politicaRecargo = RECARGO_POR_DEFECTO, composicionViaje = null, lineasPorTipo = false, adicionales: adicionalesDeLaPagina = ADICIONALES_VACIOS, salida = null, textoCliente = null, configIva = CONFIG_IVA_POR_DEFECTO, mostrarResumenFiscal = true, destinoViaje = null, fechasViaje = null, nivelDetalle = null, leidaEn = null, seguimiento = false }: Props) {
   // Abierto de entrada solo si hay un borrador de ONE esperando revisión: es lo único que
   // el equipo tiene que hacer aquí, y cerrado no lo vería.
   const [verTextoCliente, setVerTextoCliente] = useState(() => estadoDelTexto(textoCliente?.documento ?? null) === 'borrador')
@@ -564,9 +572,15 @@ export default function CotizacionEditor({ oportunidadId, cotizacion, initialIte
     })
   }
 
+  const [eligiendoOrigen, setEligiendoOrigen] = useState(false)
   const handleDuplicar = () => {
+    if (seguimiento) setEligiendoOrigen(true)
+    else duplicarCon(null)
+  }
+  const duplicarCon = (origen: OrigenVersion | null) => {
     startTransition(async () => {
-      const res = await duplicarCotizacion(cotizacion.id)
+      const res = await duplicarCotizacion(cotizacion.id, origen)
+      setEligiendoOrigen(false)
       if (res.success) {
         toast.success('Cotización duplicada')
         router.push(backUrl ?? `/negocios/${oportunidadId}/cotizacion/${res.id}`)
@@ -599,6 +613,22 @@ export default function CotizacionEditor({ oportunidadId, cotizacion, initialIte
           // el PDF lleva marca de agua y no se guardó. Se dice en ámbar y se queda en
           // pantalla, no como un «listo».
           toast.warning(aviso ?? 'PDF de borrador: no se puede enviar.', { duration: Infinity, closeButton: true })
+        } else if ((res as { envioRegistrado?: boolean }).envioRegistrado) {
+          // Seguimiento (Vera C3): la descarga contó como envío. 8 s para deshacerlo.
+          toast.success('PDF descargado. Quedó como enviada: arranca el seguimiento.', {
+            duration: 8000,
+            action: {
+              label: 'No lo envié',
+              onClick: () => {
+                void deshacerEnvioPorDescarga(cotizacion.id).then((r) => {
+                  if (r.success) { toast.success('Deshecho.'); refrescar() } else toast.error(r.error)
+                })
+              },
+            },
+          })
+          refrescar()
+          const aviso = (res as { aviso?: string | null }).aviso
+          if (aviso) toast.error(aviso)
         } else {
           toast.success('PDF descargado')
           // Almacenamiento externo: el PDF se descargó pero no quedó guardado en el
@@ -1248,6 +1278,13 @@ export default function CotizacionEditor({ oportunidadId, cotizacion, initialIte
             <Copy className="h-3 w-3" />
             Duplicar
           </button>
+          {eligiendoOrigen && (
+            <ElegirOrigenVersion
+              pendiente={isPending}
+              onElegir={(origen) => duplicarCon(origen)}
+              onCancelar={() => setEligiendoOrigen(false)}
+            />
+          )}
         </div>
       </div>
     </>

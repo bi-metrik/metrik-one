@@ -286,6 +286,7 @@ export async function cargarVistaNegocio(id: string): Promise<VistaNegocio | nul
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     bloquesEtapasPrevias: data.bloquesEtapasPrevias as any,
     pausaEnabled: data.pausaEnabled,
+    seguimiento: data.seguimiento,
     registrarPagoEnabled: conciliacionActiva,
     registrarPagoSimple: pagoSimpleActivo,
     puedeCierreNoFacturable: puedeCierreNoFacturable,
