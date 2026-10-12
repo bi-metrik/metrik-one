@@ -267,8 +267,13 @@ const ESCENARIOS: Escenario[] = [
 
 // ── Correr y anotar ──────────────────────────────────────────────────────────
 
-/** JSON tal cual lo compararía alguien: sin `undefined`, sin funciones. */
-const plano = <T,>(v: T): T => JSON.parse(JSON.stringify(v ?? null))
+/**
+ * JSON tal cual lo compararía alguien: sin `undefined`, sin funciones, y sin la carpeta
+ * donde está el repo (las fotos de ciudad viajan como ruta absoluta del archivo, y en CI el
+ * repo vive en otra carpeta que en la máquina que grabó).
+ */
+const RAIZ_REPO = path.resolve(__dirname, '../../../..')
+const plano = <T,>(v: T): T => JSON.parse(JSON.stringify(v ?? null).split(RAIZ_REPO).join('<repo>'))
 
 /** Las escrituras en un orden que no depende de cómo se repartan en paralelo. */
 function ordenadas(registro: readonly Ida[]): Ida[] {

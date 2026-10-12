@@ -1457,7 +1457,7 @@
       "duracion": "6 días / 5 noches",
       "presentacion": null,
       "foto": {
-       "url": "/home/mauricio/Developer/metrik/metrik-one/.claude/worktrees/agente-a5a4d68efe32/src/lib/pdf/templates/fotos-ciudad/san-andres-1.jpg",
+       "url": "<repo>/src/lib/pdf/templates/fotos-ciudad/san-andres-1.jpg",
        "rotulo": "SAN ANDRÉS · JOHNNY CAY",
        "credito": "Jorge Dos Oceanos (Wikimedia Commons, CC BY-SA 3.0)",
        "lugares": [
@@ -1473,7 +1473,7 @@
       },
       "fotosCiudades": [
        {
-        "url": "/home/mauricio/Developer/metrik/metrik-one/.claude/worktrees/agente-a5a4d68efe32/src/lib/pdf/templates/fotos-ciudad/san-andres-2.jpg",
+        "url": "<repo>/src/lib/pdf/templates/fotos-ciudad/san-andres-2.jpg",
         "rotulo": "SAN ANDRÉS · EL ACUARIO",
         "credito": "Mr.Jhosimar (Wikimedia Commons, CC BY-SA 4.0)",
         "lugares": [
@@ -1488,7 +1488,7 @@
         "proporcion": 1.3344453711426187
        },
        {
-        "url": "/home/mauricio/Developer/metrik/metrik-one/.claude/worktrees/agente-a5a4d68efe32/src/lib/pdf/templates/fotos-ciudad/providencia-1.jpg",
+        "url": "<repo>/src/lib/pdf/templates/fotos-ciudad/providencia-1.jpg",
         "rotulo": "PROVIDENCIA · MCBEAN LAGOON",
         "credito": "Felviper (Wikimedia Commons, CC BY-SA 4.0)",
         "lugares": [
@@ -2884,7 +2884,7 @@
       "duracion": "6 días / 5 noches",
       "presentacion": null,
       "foto": {
-       "url": "/home/mauricio/Developer/metrik/metrik-one/.claude/worktrees/agente-a5a4d68efe32/src/lib/pdf/templates/fotos-ciudad/san-andres-1.jpg",
+       "url": "<repo>/src/lib/pdf/templates/fotos-ciudad/san-andres-1.jpg",
        "rotulo": "SAN ANDRÉS · JOHNNY CAY",
        "credito": "Jorge Dos Oceanos (Wikimedia Commons, CC BY-SA 3.0)",
        "lugares": [
@@ -2900,7 +2900,7 @@
       },
       "fotosCiudades": [
        {
-        "url": "/home/mauricio/Developer/metrik/metrik-one/.claude/worktrees/agente-a5a4d68efe32/src/lib/pdf/templates/fotos-ciudad/san-andres-2.jpg",
+        "url": "<repo>/src/lib/pdf/templates/fotos-ciudad/san-andres-2.jpg",
         "rotulo": "SAN ANDRÉS · EL ACUARIO",
         "credito": "Mr.Jhosimar (Wikimedia Commons, CC BY-SA 4.0)",
         "lugares": [
@@ -2915,7 +2915,7 @@
         "proporcion": 1.3344453711426187
        },
        {
-        "url": "/home/mauricio/Developer/metrik/metrik-one/.claude/worktrees/agente-a5a4d68efe32/src/lib/pdf/templates/fotos-ciudad/providencia-1.jpg",
+        "url": "<repo>/src/lib/pdf/templates/fotos-ciudad/providencia-1.jpg",
         "rotulo": "PROVIDENCIA · MCBEAN LAGOON",
         "credito": "Felviper (Wikimedia Commons, CC BY-SA 4.0)",
         "lugares": [
