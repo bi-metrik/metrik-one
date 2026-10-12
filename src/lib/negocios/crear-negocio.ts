@@ -8,6 +8,7 @@ import { bogotaYear } from '@/lib/dates/bogota'
 import { visiblePuedeNacerCompleto } from '@/lib/negocios/bloque-visible-completo'
 import { ensureNegocioDriveFolder } from '@/lib/negocios/ensure-drive-folder'
 import { asignarResponsable } from '@/lib/negocios/responsable-rol'
+import { leerPlantillaNombre, nombreSegunPlantilla } from '@/lib/negocios/nombre-automatico'
 
 /**
  * Crear un negocio, sin leer la sesión. Es el cuerpo de la acción `crearNegocio`
@@ -463,11 +464,34 @@ export async function crearNegocioEnWorkspace(
     }
   }
 
+  // Nombre automático por plantilla de la LÍNEA (`lineas_negocio.config_extra.nombre_automatico`, ver
+  // `supabase/functions/_shared/nombre-viaje.ts`): si el formulario no trae nombre, nace con el provisional de la regla
+  // («Viaje de Martin Mora») y queda marcado como automático, así sigue al destino y a las fechas cuando se llenen. Un
+  // nombre escrito a mano manda y no se marca.
+  let metadataNombre: Record<string, unknown> | null = null
+  if (!nombreNegocio?.trim()) {
+    const { data: lineaCfg } = await db(supabase).from('lineas_negocio').select('config_extra').eq('id', lineaId).maybeSingle()
+    const plantilla = leerPlantillaNombre((lineaCfg as { config_extra?: unknown } | null)?.config_extra)
+    if (plantilla) {
+      let cliente = input.contacto_nombre?.trim() || null
+      if (!cliente && contactoId) {
+        const { data: c } = await supabase.from('contactos').select('nombre').eq('id', contactoId).maybeSingle()
+        cliente = (c as { nombre?: string | null } | null)?.nombre ?? null
+      }
+      const auto = nombreSegunPlantilla(plantilla, {}, cliente)
+      if (auto) {
+        nombreNegocio = auto.nombre
+        metadataNombre = { nombre_auto: auto.nombre, nombre_provisional: auto.provisional }
+      }
+    }
+  }
+
   const { data: negocio, error: insertError } = await db(supabase)
     .from('negocios')
     .insert({
       workspace_id: workspaceId,
       nombre: nombreNegocio,
+      ...(metadataNombre ? { metadata: metadataNombre } : {}),
       linea_id: lineaId,
       empresa_id: empresaId ?? null,
       contacto_id: contactoId ?? null,
