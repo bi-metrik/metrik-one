@@ -16,6 +16,7 @@ import { evaluarGateServicios } from '@/lib/viaje/servicios-viaje-datos'
 import { datosDelTablero } from '@/lib/viaje/servicios-tablero-datos'
 import { lineasDelGate } from '@/lib/viaje/gate-servicios'
 import { evaluarGateEntrega } from '@/lib/viaje/entrega-datos'
+import { evaluarGateCierre, evaluarGatePostventa } from '@/lib/viaje/cierre-viaje-datos'
 import { aprobadoresDeLinea, serviciosViajeActivo } from '@/lib/viaje/estado-servicio'
 import type { DatosBloqueServicios } from '@/lib/viaje/bloque-servicios'
 import { evaluarGatesConfirmacion } from '@/lib/viaje/confirmacion-datos'
@@ -3471,6 +3472,13 @@ async function cambiarEtapaNegocioConGateSinClave(
     const faltaEntrega = await evaluarGateEntrega(db(supabase), { workspaceId, negocioId, gates: etapaGates })
     if (faltaEntrega.length > 0) {
       return { error: 'gate_bloqueado', bloquesPendientes: faltaEntrega.map((nombre) => ({ nombre, es_gate: true })) }
+    }
+
+    // Gate del Cierre económico (F6-4/F6-5): margen calculado y confirmado por la dirección con
+    // la huella vigente, saldo a favor decidido. Opt-in por etapa; con `cierre_viaje` apagado no frena.
+    const faltaCierre = await evaluarGateCierre(db(supabase), { workspaceId, negocioId, gates: etapaGates })
+    if (faltaCierre.length > 0) {
+      return { error: 'gate_bloqueado', bloquesPendientes: faltaCierre.map((nombre) => ({ nombre, es_gate: true })) }
     }
 
     // Gate custom: saldo:handoff — control de recaudo para soltar el negocio a
@@ -9252,6 +9260,15 @@ export async function completarNegocio(
   // la validación vigente. La excepción explícita solo existe en cobro, para un
   // gate realmente incumplido y con autorización de administración/financiera.
   const gateErr = await validarGateFacturaEmitida(supabase, negocioId, negocio.etapa_actual_id as string | null)
+
+  // Postventa del viaje (F6-7): «Cerrar el negocio» exige la calificación y la respuesta del
+  // referido. Opt-in por etapa (`postventa_completa`); con `cierre_viaje` apagado no frena.
+  if (negocio.etapa_actual_id) {
+    const { data: etapaCierre } = await db(supabase).from('etapas_negocio').select('config_extra').eq('id', negocio.etapa_actual_id).maybeSingle()
+    const gatesCierre = (((etapaCierre as { config_extra?: { gates?: unknown } } | null)?.config_extra?.gates ?? []) as unknown[]).filter((g): g is string => typeof g === 'string')
+    const faltaPv = await evaluarGatePostventa(db(supabase), { workspaceId, negocioId, gates: gatesCierre })
+    if (faltaPv) return { error: faltaPv }
+  }
   if (!esCierreNoFacturable) {
     if (gateErr) return { error: gateErr }
   } else {
