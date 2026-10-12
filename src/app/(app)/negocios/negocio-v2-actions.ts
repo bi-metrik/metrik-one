@@ -218,6 +218,7 @@ import { exigeCarpetaLocal, normalizarCarpetaLocal } from '@/lib/negocios/carpet
 import { guardarCarpetaLocal, resolverPermisoCarpetaLocal } from '@/lib/negocios/carpeta-local-servidor'
 import { costosEjecutadosPorNegocio } from '@/lib/negocios/costos-ejecutados'
 import { documentosLeyendo, mensajeDocumentoLeyendo } from '@/lib/negocios/documentos-leyendo'
+import { camposCambiados, renombrarNegocioSiAplica } from '@/lib/negocios/nombre-automatico'
 
 // ── Tipos inline para el nuevo schema de negocios ─────────────────────────────
 // Las tablas nuevas (negocios, lineas_negocio, etapas_negocio, bloque_configs,
@@ -5600,6 +5601,8 @@ async function actualizarBloqueDataSinMemo(
   }
 
   const nid = negocioId ?? (row as Record<string, unknown>)?.negocio_id as string | undefined
+  // El nombre automático sigue al destino y a las fechas (regla de la línea), si nadie lo renombró a mano.
+  if (nid) await renombrarNegocioSiAplica(supabase, nid, camposCambiados(dataDestino, dataFinal))
   if (nid && opts?.revalidate !== false) revalidatePath(`/negocios/${nid}`)
 
   // No registrar en activity_log aquí — auto-save cada 800ms genera ruido.

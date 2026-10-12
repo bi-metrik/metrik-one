@@ -25,6 +25,7 @@ import type { PlanCarga } from './bandeja/carga.ts';
 import { esquemaCarga, esquemaCargaCompacta, instruccionesCarga, omitidosCompacta } from './bandeja/extraccion.ts';
 import { aplanarBloques, calcularNiveles } from '../niveles-solicitud.ts';
 import { todayBogotaISO } from '../bogota.ts';
+import { renombrarSegunPlantilla } from '../nombre-viaje.ts';
 import { enviarAvisoInterno } from '../wa-alerta.ts';
 import type { SupabaseClient } from '../types.ts';
 import { fichaValida, huellaDe } from './reglamento.ts';
@@ -243,6 +244,8 @@ export function puertoBandejaSupabase(
           quitados.push(...r.quitados);
         }
       }
+      // El nombre automático del viaje sigue a sus campos (destino, fechas), si nadie lo renombró a mano.
+      if (escritos.length || quitados.length) await renombrarSegunPlantilla(supabase, viajeId, [...escritos, ...quitados]);
       const { data: neg } = await supabase.from('negocios').select('codigo').eq('id', viajeId).maybeSingle();
       const { error } = await supabase.from('activity_log').insert({
         workspace_id: workspaceId, entidad_tipo: 'negocio', entidad_id: viajeId, tipo: 'cambio_sistema', autor_id: staffId,
