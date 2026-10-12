@@ -23,6 +23,7 @@ import type { ActivityEntry } from '@/components/activity-log'
 import { leerDevolucionesDelNegocio } from '@/lib/cobros/devoluciones-servidor'
 import { cobradoDelNegocio } from '@/lib/cobros/devolucion-dinero'
 import { DevolucionesNegocio } from './devoluciones-negocio'
+import { leerConfirmacionViaje } from './confirmacion-viaje'
 
 /**
  * Todo lo que la página del negocio le pasa a `NegocioDetailClient`, armado en UN sitio.
@@ -170,7 +171,7 @@ export async function cargarVistaNegocio(id: string): Promise<VistaNegocio | nul
   // propio `mx-auto max-w-2xl`: al ensancharse el contenedor del detalle
   // quedaban desalineados. JSX del servidor se puede pasar como prop a un
   // componente cliente; convertir esta página en cliente no es opción.
-  const banner = tieneBannerDeCierre && data.negocio.cierre_motivo
+  const bannerCierre = tieneBannerDeCierre && data.negocio.cierre_motivo
     ? (
       <div className="mb-3">
         <CerradoHeaderBanner
@@ -182,6 +183,19 @@ export async function cargarVistaNegocio(id: string): Promise<VistaNegocio | nul
           hasAreaComercial={hasAreaComercial}
         />
       </div>
+    )
+    : null
+
+  // Confirmación del viaje (F2): solo en líneas con `plan_pagos.activo`; en las demás no lee nada.
+  const confirmacionViaje = workspaceId
+    ? await leerConfirmacionViaje(supabase, { workspaceId, negocioId: id, staffId: staffId ?? null, role: role ?? null, areas: (areas ?? []) as string[] })
+    : null
+  const banner = bannerCierre || confirmacionViaje
+    ? (
+      <>
+        {bannerCierre}
+        {confirmacionViaje}
+      </>
     )
     : null
 

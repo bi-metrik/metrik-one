@@ -123,6 +123,10 @@ export interface VistaConfirmacion {
   agencia: string
   comercial: string | null
   hayPago: boolean
+  /** `config_extra.aprobaciones.staff_ids` de la línea (la dirección, D8). */
+  aprobadores: string[]
+  /** La prerreserva venció sin anticipo y todavía no se aplicó (la ficha la aplica al abrir). */
+  prerreservaVencida: boolean
 }
 
 // ── Lecturas ─────────────────────────────────────────────────────────────────
@@ -407,6 +411,8 @@ export async function leerVistaConfirmacion(db: Db, workspaceId: string, negocio
     agencia: ((wsRes.data as { name?: string } | null)?.name ?? '').trim() || 'la agencia',
     comercial: responsables.map((r) => r.staff?.full_name?.trim()).find(Boolean) ?? null,
     hayPago,
+    aprobadores: aprobadoresDeLinea(configLinea),
+    prerreservaVencida: prerreservaVencida(prerreserva, Date.now(), hayPago),
   }
 }
 
