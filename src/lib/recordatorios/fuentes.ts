@@ -15,6 +15,7 @@
 
 import { todayBogotaISO } from '@/lib/dates/bogota'
 import { cuotasConEstadoViaje, type PagoViajero } from '@/lib/viaje/riel-cobro'
+import { pesos } from '@/lib/viaje/plan-pagos'
 import type { FuenteRecordatorio } from './reglas'
 
 export interface NegocioFuente {
@@ -188,7 +189,7 @@ export function textoDelAviso(c: Candidato, offset: number, hoy: string): string
   const negocio = nombreNegocio(c.negocio)
   if (c.fuente === 'cuota') {
     const quien = c.negocio.contacto_nombre?.trim() || 'El cliente'
-    const falta = typeof c.detalle.falta === 'number' ? FMT_PESOS.format(c.detalle.falta) : 'la cuota'
+    const falta = typeof c.detalle.falta === 'number' ? pesos(c.detalle.falta) : 'la cuota'
     if (offset > 0 || c.fechaObjetivo < hoy) {
       const n = Math.max(1, Math.round((Date.parse(`${hoy}T00:00:00Z`) - Date.parse(`${c.fechaObjetivo}T00:00:00Z`)) / 86_400_000))
       return `Cuota vencida: ${quien} · ${falta} · hace ${n} día${n === 1 ? '' : 's'} (${negocio}).`
