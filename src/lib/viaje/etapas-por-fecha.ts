@@ -15,6 +15,7 @@
  */
 
 import { cobradoConfirmado } from '@/lib/cobros/saldo-negocio'
+import { registrarActividad } from '@/lib/activity/registrar-actividad'
 import { instanciarBloquesDeEtapa } from '@/lib/negocios/instanciar-bloques-etapa'
 import { evaluarGateEntrega } from './entrega-datos'
 import { configEtapasPorFecha, movimientoPorFecha, pesosCierre } from './cierre-viaje'
@@ -153,14 +154,14 @@ export async function correrEtapasPorFecha(svc: Db, opts: { hoy: string; soloNeg
     const textoMov = mov === 'entrar'
       ? `Entró a ${destino.nombre}: hoy sale el viaje.${faltaba.length ? ` Salió el viaje sin estar listo: ${faltaba.join(' ')}` : ''}`
       : `Pasó a ${destino.nombre}: el viaje regresó.`
-    await svc.from('activity_log').insert({
+    await registrarActividad(svc, {
       workspace_id: n.workspace_id,
       entidad_tipo: 'negocio',
       entidad_id: n.id,
       tipo: 'cambio',
       autor_id: null,
       contenido: textoMov.slice(0, 280),
-    })
+    }, 'etapasPorFecha')
 
     if (mov === 'salir') {
       resumen.salieron++
