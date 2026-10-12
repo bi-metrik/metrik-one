@@ -15,7 +15,8 @@ precio de cada tarifa y aprobación, para Termotech/genérica y Trappvel con el 
 - El fixture NO se regenera para que pase. Si una pieza lo cambia, el PR no entra. Bajar un número del presupuesto
   de idas sí se puede, a mano y dicho en el PR. «Aceptar en lote» y «Deshacer» entran al presupuesto con su pieza.
 - Las props del PDF se capturan envolviendo `compositorDePlantilla` (Trappvel) y `renderToBuffer` (las demás);
-  la primera captura gana porque el compositor renderiza varias veces por dentro.
+  la primera captura gana porque el compositor renderiza varias veces por dentro. Las fotos de ciudad van
+  como RUTA ABSOLUTA del archivo: se normaliza la raíz del repo a `<repo>` o CI (otra carpeta) cae.
 - Mutación de control que sí cae: `itemsDelItinerario` ignorando la selección NO combinable (Premium −$800.000).
   Termotech no la ve (no tiene ranuras): para ella sirve ignorar el descuento comercial.
 - P12: hoy NO hay regla «falta el precio del niño»; la bandeja crea la opción con `pendiente` y lo que frena
