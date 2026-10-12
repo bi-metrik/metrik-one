@@ -210,20 +210,22 @@ export function leerCuotas(raw: unknown): CuotaPlan[] | null {
 
 // ── Textos (Noor §4.2 y §2 etapa 4; español llano, sin palabras técnicas) ─────
 
-const FMT_PESOS = new Intl.NumberFormat('es-CO', { style: 'currency', currency: 'COP', maximumFractionDigits: 0 })
-export const pesos = (v: number) => FMT_PESOS.format(Math.round(v)).replace(/\s/g, ' ')
+/** «$9.165.000», como el documento del cliente y `formatCOP`. */
+export const pesos = (v: number) => `${v < 0 ? '-' : ''}$${Math.abs(Math.round(v)).toLocaleString('es-CO', { useGrouping: true })}`
 
-const FMT_CORTA = new Intl.DateTimeFormat('es-CO', { day: 'numeric', month: 'short', timeZone: 'UTC' })
-const FMT_DIA = new Intl.DateTimeFormat('es-CO', { weekday: 'long', day: 'numeric', month: 'short', timeZone: 'UTC' })
+const MESES = ['ene', 'feb', 'mar', 'abr', 'may', 'jun', 'jul', 'ago', 'sep', 'oct', 'nov', 'dic']
+const DIAS = ['domingo', 'lunes', 'martes', 'miércoles', 'jueves', 'viernes', 'sábado']
 
-/** «19 nov» */
+/** «19 nov» (el formato de Noor; no depende del ICU del servidor). */
 export function fechaCorta(f: string): string {
-  return FMT_CORTA.format(new Date(`${f}T00:00:00Z`)).replace('.', '')
+  const d = new Date(`${f.slice(0, 10)}T00:00:00Z`)
+  return `${d.getUTCDate()} ${MESES[d.getUTCMonth()]}`
 }
 
 /** «viernes 4 dic» */
 export function fechaConDia(f: string): string {
-  return FMT_DIA.format(new Date(`${f}T00:00:00Z`)).replace(',', '').replace('.', '')
+  const d = new Date(`${f.slice(0, 10)}T00:00:00Z`)
+  return `${DIAS[d.getUTCDay()]} ${fechaCorta(f)}`
 }
 
 /** La línea de validación en vivo, arriba del editor (Noor §4.2). */
