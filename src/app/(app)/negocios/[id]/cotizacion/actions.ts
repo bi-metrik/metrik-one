@@ -21,6 +21,7 @@ import { duplicarCotizacionCompleta } from '@/lib/cotizaciones/duplicar-cotizaci
 import { terminosInicialesDeCotizacion } from '@/lib/cotizaciones/terminos-al-crear'
 import { recalcularTotales } from '@/app/(app)/negocios/cotizacion-actions'
 import { createServiceClient } from '@/lib/supabase/server'
+import { generarServiciosDesdeTarifa, soltarServiciosDeAceptacion } from '@/lib/viaje/servicios-viaje-datos'
 
 export async function getCotizacionesNegocio(negocioId: string) {
   const { supabase, error } = await getWorkspace()
@@ -353,6 +354,18 @@ export async function aceptarCotizacionNegocio(
     }, 'aceptarCotizacionNegocio')
   }
 
+  // Servicios del viaje (F0): una fila por ítem de la tarifa aceptada, solo con
+  // `servicios_viaje.activo` en la línea. Va AL FINAL y no deshace nada si falla (F0-4): la
+  // aceptación ya quedó, y las filas se traen después desde el bloque con el mismo cálculo.
+  // Con el interruptor apagado no lee la cotización ni escribe nada (F0-7).
+  const servicios = await generarServiciosDesdeTarifa(supabase, {
+    workspaceId,
+    negocioId,
+    cotizacionId,
+    staffId: staffId ?? null,
+  })
+  if (!servicios.ok) console.error('[aceptarCotizacionNegocio] no se crearon los servicios del viaje:', servicios.error)
+
   revalidatePath(`/negocios/${negocioId}`)
   return { success: true as const }
 }
@@ -494,6 +507,12 @@ export async function corregirCotizacionAceptada(cotizacionId: string, negocioId
     recaudoConfirmado,
   })
   if (!validacion.valid) return { success: false as const, error: validacion.error ?? 'No se puede corregir' }
+
+  // Servicios del viaje (F0-5): los que salieron de esta aceptación y no tienen pagos se
+  // borran; si alguno ya tiene un pago a proveedor, no se corrige nada y se duplica. Va ANTES
+  // de tocar la cotización para que el rechazo no deje la corrección a medias.
+  const soltados = await soltarServiciosDeAceptacion(supabase, { workspaceId, negocioId })
+  if (!soltados.ok) return { success: false as const, error: soltados.error }
 
   const ahora = new Date().toISOString()
 
