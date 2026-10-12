@@ -1,0 +1,3 @@
+[11/10/26, 8:00] Cliente Inventado: Buenos días
+[11/10/26, 8:05] Agencia Prueba: Buenos días! En qué te puedo ayudar?
+[11/10/26, 8:10] Cliente Inventado: Luego te escribo, estoy manejando

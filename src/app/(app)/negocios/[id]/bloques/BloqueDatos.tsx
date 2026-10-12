@@ -35,6 +35,8 @@ import { parsearNumeroColombiano, formatearNumeroColombiano } from '@/lib/negoci
 import { hrefArchivo } from '@/lib/almacenamiento/referencia'
 import { revisarTarifaConfirmada, type ReglasTarifaConfirmada } from '@/lib/upme/tarifa-confirmada'
 import IndicadoresSolicitud from './indicadores-solicitud'
+import PegarConversacion from './pegar-conversacion'
+import { declaraNiveles } from '@/lib/negocios/niveles-solicitud'
 import MarcaSugerido from './marca-sugerido'
 import { sugeridosDe, conflictosDe } from '@/lib/negocios/sugeridos'
 import MarcaConflicto, { valorLegibleCampo } from './marca-conflicto'
@@ -937,6 +939,26 @@ export default function BloqueDatos({
         )}
       </div>
       <IndicadoresSolicitud fields={fields} valores={values} />
+      {/* Pegar la conversación con el cliente: llena el bloque con sugeridos (solo en un bloque de solicitud). */}
+      {!corrigiendo && declaraNiveles(fields) && (
+        <div className="flex justify-end">
+          <PegarConversacion
+            negocioBloqueId={negocioBloqueId}
+            antes={async () => {
+              if (dirtyRef.current && !hayRechazoPendiente()) await persist(valuesRef.current, false)
+            }}
+            alCargar={(nuevos) => {
+              const slugs = Object.keys(nuevos)
+              if (!slugs.length) return
+              const next = aplicarSumas(fields, { ...valuesRef.current, ...nuevos })
+              valuesRef.current = next
+              setValues(next)
+              setConfirmados(prev => new Set([...prev].filter(s => !slugs.includes(s))))
+              setDescartados(prev => new Set([...prev].filter(s => !slugs.includes(s))))
+            }}
+          />
+        </div>
+      )}
       {fields.filter(f => visible(f, values)).map(f => (
         <div key={f.slug}>
           {f.tipo !== 'documentos_preview' && f.tipo !== 'plantilla' && (
