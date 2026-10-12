@@ -161,7 +161,7 @@ export async function guardarDocumentoViajero(input: EntradaDocumentoViajero): P
     : null
   const { error } = existente
     ? await ctx.supabase.from('contacto_documentos').update({ ...fila, archivo_ref: archivoRef ?? existente.archivo_ref }).eq('id', existente.id).eq('workspace_id', ctx.workspaceId)
-    : await ctx.supabase.from('contacto_documentos').insert({ ...fila, archivo_ref: archivoRef, created_by: ctx.staffId })
+    : await ctx.supabase.from('contacto_documentos').insert({ ...fila, archivo_ref: archivoRef, vigente: true, created_by: ctx.staffId })
   if (error) return { ok: false, error: `No se pudo guardar el documento: ${error.message}` }
 
   await registrarActividad(ctx.supabase, {

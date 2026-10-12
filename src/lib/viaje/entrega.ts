@@ -94,7 +94,8 @@ export interface FilaEntrega {
 /** ¿La fila pide voucher? Las «No va» no; una fila sin nada que pagarle a nadie, tampoco. */
 export function pideVoucher(f: FilaEntrega): boolean {
   if (f.estado === 'cancelado') return false
-  const aPagar = f.valor_por_pagar ?? f.costo_cotizado
+  const v = f.valor_por_pagar
+  const aPagar = typeof v === 'number' && Number.isFinite(v) ? v : Number(f.costo_cotizado) || 0
   return aPagar > 0 || f.gastos.length > 0
 }
 
