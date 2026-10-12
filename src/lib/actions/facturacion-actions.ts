@@ -987,20 +987,20 @@ async function emitirFacturaDeNegocioSinClave(
   }
 
   const opcionesEmision: OpcionesEmision = {
-      bloqueFacturaSlug,
-      ...(reparto ? { viaje: reparto } : {}),
-      datos: {
-        email: opciones?.datos?.email,
-        telefono: opciones?.datos?.telefono,
-        productoCode: opciones?.datos?.productoCode,
-        ...(titular?.ok ? { titular: titular.titular } : {}),
-      },
-      // Por defecto se RADICA: el botón dice "facturar electrónicamente" y una
-      // pantalla que promete eso no puede dejar un borrador sin avisar. El modo
-      // sin radicar existe para la primera prueba controlada con Diana.
-      emitir: opciones?.emitir !== false,
-      enviarCorreo: opciones?.enviarCorreo === true,
-      justificacionDuplicado: opciones?.justificacionDuplicado,
+    bloqueFacturaSlug,
+    ...(reparto ? { viaje: reparto } : {}),
+    datos: {
+      email: opciones?.datos?.email,
+      telefono: opciones?.datos?.telefono,
+      productoCode: opciones?.datos?.productoCode,
+      ...(titular?.ok ? { titular: titular.titular } : {}),
+    },
+    // Por defecto se RADICA: el botón dice "facturar electrónicamente" y una
+    // pantalla que promete eso no puede dejar un borrador sin avisar. El modo
+    // sin radicar existe para la primera prueba controlada con Diana.
+    emitir: opciones?.emitir !== false,
+    enviarCorreo: opciones?.enviarCorreo === true,
+    justificacionDuplicado: opciones?.justificacionDuplicado,
   }
   // Un viaje sale por la capa de proveedor (Siigo hoy, Aliaddo mañana). El camino de SOENA sigue
   // llamando directo, como siempre (Vera F5-5).
