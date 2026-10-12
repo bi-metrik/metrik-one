@@ -15,7 +15,7 @@
 
 import type { ConfigAgente } from './config.ts';
 import { fechaBogota, mensajeDelTurno, recortarResultado, sistema } from './contexto.ts';
-import { CIERRAN, cierranCon, declaraciones } from './herramientas.ts';
+import { CIERRAN, cierranCon, declaraciones, declaracionesRespaldo } from './herramientas.ts';
 import { fichasDeHerramienta, respuestaFija, temas, bloqueSiempre } from './reglamento.ts';
 import { META, botonesPropuesta, cortarEnPalabra, opcionesDelModelo, renderizar } from './render.ts';
 import { respaldoDe, verificar } from './verificador.ts';
@@ -192,6 +192,7 @@ export async function turnoDelModelo(deps: DepsTurno, e: EntradaTurno): Promise<
   const usuario = mensajeDelTurno({ estado: est, filas: e.filas, nuevos: e.nuevos, quien: e.ctx.remitente.nombre });
   const decl = [...declaraciones(d, r), ...(e.tras ? [DECLARACION_TERMINAR] : [])];
   const todas = decl.map((x) => x.name);
+  const declRespaldo = declaracionesRespaldo(decl);
   const cierran = e.tras ? [...cierranCon(d), TERMINAR] : cierranCon(d);
   // En el último llamado (forzado a cerrar) NO entran los cierres del dominio: medido en vivo (2026-10-08), con el
   // presupuesto agotado tras `buscar` y `consultar_reglas` (que ya no existe), el modelo cerró «¿qué le falta al viaje de…?» con
@@ -223,6 +224,7 @@ export async function turnoDelModelo(deps: DepsTurno, e: EntradaTurno): Promise<
     const tm = deps.reloj();
     const res = await deps.modelo.llamar({
       sistema: sis.texto, mensajes, herramientas: decl, permitidas: ultimo ? forzados : todas, timeoutMs: restante,
+      ...(c.respaldoEstricto && c.respaldo ? { herramientasRespaldo: declRespaldo } : {}),
     });
     traza.ms_modelo! += Math.round(deps.reloj() - tm);
     traza.llamados!++;
@@ -322,7 +324,13 @@ export async function turnoDelModelo(deps: DepsTurno, e: EntradaTurno): Promise<
       }
       // La respuesta que va arriba del resumen (opcional): mismo tope y mismo verificador que `responder`.
       let arriba: string | null = null;
-      const texto = String(args.texto ?? '').trim();
+      let texto = String(args.texto ?? '').trim();
+      // Del respaldo no sale texto arriba de una propuesta (`respaldoEstricto`): su declaración no lo trae, y si igual lo
+      // escribe, se ignora. Lo decide quién escribió el llamado, no lo que dice.
+      if (texto && c.respaldoEstricto && c.respaldo && res.mensaje.modelo === c.respaldo.modelo && c.respaldo.modelo !== c.principal.modelo) {
+        traza.candados!.push({ candado: 'respaldo_sin_texto', detalle: texto.slice(0, 200) });
+        texto = '';
+      }
       if (texto) {
         const render = renderizar(texto, [], { turno: e.turnoId.slice(0, 8), topeTexto: c.topes.texto, final: correccionUsada });
         if (!render.ok) {

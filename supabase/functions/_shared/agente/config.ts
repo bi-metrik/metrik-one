@@ -30,6 +30,12 @@ export interface ConfigAgente {
   respaldo: ConfigModelo | null;
   /** Si el principal no responde en este tiempo, el llamado va al respaldo. */
   corteMs: number;
+  /**
+   * `agente_config.respaldo_estricto` (por defecto sí): el respaldo propone SIN `texto` arriba del resumen. Medido en
+   * producción (2026-10-07 a 10-09): de 7 propuestas del respaldo, las 3 que traían texto repetían la pregunta del
+   * resumen («¿Anoto en M1 26 1…?» encima de «¿Lo anoto en M1 26 1…?»); las 2 del principal con texto eran respuestas.
+   */
+  respaldoEstricto: boolean;
   topes: {
     llamados: number;
     entradaTokens: number;
@@ -51,6 +57,7 @@ export const CONFIG_POR_DEFECTO: ConfigAgente = {
   principal: { modelo: 'gemini-3.8-flash', razonamiento: 'LOW', temperatura: null, maxSalida: 2048 },
   respaldo: { modelo: 'gemini-3.5-flash-lite', razonamiento: 'MINIMAL', temperatura: null, maxSalida: 2048 },
   corteMs: 2500,
+  respaldoEstricto: true,
   topes: { llamados: 3, entradaTokens: 12000, texto: 600, turnoMs: 20000, ventanaHoras: 24 },
   cupoTurnosMes: 800,
   reglamentoId: null,
@@ -86,6 +93,7 @@ export function leerConfigAgente(botConversacional: unknown): ConfigAgente {
     principal: leerModelo(a.modelo, d.principal),
     respaldo: a.respaldo === null ? null : leerModelo(a.respaldo, d.respaldo!),
     corteMs: numero(a.corte_ms, d.corteMs, 100),
+    respaldoEstricto: a.respaldo_estricto === false ? false : d.respaldoEstricto,
     topes: {
       llamados: numero(topes.llamados, d.topes.llamados, 1),
       entradaTokens: numero(topes.entrada_tokens, d.topes.entradaTokens, 1000),

@@ -61,6 +61,8 @@ export interface PedidoModelo {
   sistema: string;
   mensajes: Mensaje[];
   herramientas: DeclaracionHerramienta[];
+  /** Las declaraciones para el modelo de respaldo, si son otras (más estrictas). Sin esto, las mismas. */
+  herramientasRespaldo?: DeclaracionHerramienta[];
   /** Las que puede llamar en este llamado (modo ANY): en el último llamado, solo las que cierran el turno. */
   permitidas: string[];
   /** Tope duro de este llamado (lo que queda del turno). */
