@@ -27,6 +27,7 @@ import {
   type ReglaRecordatorio,
 } from './reglas'
 import {
+  candidatosDeAplazado,
   candidatosDeEnvio,
   candidatosDePagoProveedor,
   textoDelAviso,
@@ -194,7 +195,7 @@ async function mandarInApp(svc: Db, c: Candidato, regla: ReglaRecordatorio, dest
     tipo: tipoDeNotificacion(c, regla.offset, hoy),
     estado: 'pendiente',
     contenido: textoDelAviso(c, regla.offset, hoy),
-    entidad_tipo: c.entidadTipo === 'servicio' ? 'servicio' : 'negocio',
+    entidad_tipo: c.entidadTipo === 'servicio' ? 'servicio' : 'negocio',  // cotización y aplazado: el negocio
     entidad_id: c.entidadTipo === 'servicio' ? c.entidadId : c.negocio.id,
     deep_link: `/negocios/${c.negocio.id}`,
     metadata: { regla_id: regla.id, fecha_objetivo: c.fechaObjetivo, fuente: c.fuente, negocio_id: c.negocio.id },
@@ -209,10 +210,11 @@ async function cargar(svc: Db, lineas: Linea[], fuentes: Set<string>) {
     sinError<{
       id: string; workspace_id: string; linea_id: string; nombre: string; codigo: string | null
       contacto_id: string | null; etapa_actual_id: string | null; pausado: boolean | null; estado: string
+      metadata: { seguimiento?: { aplazado_para?: unknown } } | null
     }>(
       await svc
         .from('negocios')
-        .select('id, workspace_id, linea_id, nombre, codigo, contacto_id, etapa_actual_id, pausado, estado')
+        .select('id, workspace_id, linea_id, nombre, codigo, contacto_id, etapa_actual_id, pausado, estado, metadata')
         .in('linea_id', t)
         .eq('estado', 'abierto'),
       'negocios',
@@ -224,7 +226,7 @@ async function cargar(svc: Db, lineas: Linea[], fuentes: Set<string>) {
   )
   const numeroDe = new Map(etapas.map((e) => [e.id, e.numero]))
   const contactoIds = [...new Set(negociosRaw.map((n) => n.contacto_id).filter((x): x is string => !!x))]
-  const contactos = fuentes.has('envio')
+  const contactos = fuentes.has('envio') || fuentes.has('aplazado')
     ? await porTandas(contactoIds, async (t) =>
         sinError<{ id: string; nombre: string }>(await svc.from('contactos').select('id, nombre').in('id', t), 'contactos'),
       )
@@ -241,6 +243,7 @@ async function cargar(svc: Db, lineas: Linea[], fuentes: Set<string>) {
     etapa_numero: n.etapa_actual_id ? numeroDe.get(n.etapa_actual_id) ?? null : null,
     pausado: n.pausado === true,
     estado: n.estado,
+    aplazado_para: typeof n.metadata?.seguimiento?.aplazado_para === 'string' ? n.metadata.seguimiento.aplazado_para : null,
   }))
   const negocioIds = negocios.map((n) => n.id)
 
@@ -314,6 +317,7 @@ export async function correrRecordatorios(svc: Db, opts: { hoy: string }): Promi
   const candidatos = [
     ...(fuentes.has('envio') ? candidatosDeEnvio(negocios, cotizaciones) : []),
     ...(fuentes.has('pago_proveedor') ? candidatosDePagoProveedor(negocios, servicios, pagado) : []),
+    ...(fuentes.has('aplazado') ? candidatosDeAplazado(negocios) : []),
   ]
   const destinatarios = new Destinatarios(svc)
 

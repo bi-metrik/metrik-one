@@ -18,8 +18,11 @@
 
 import { esDiaHabil } from '@/lib/dates/dias-habiles'
 
-/** Fuentes que el motor sabe leer hoy. Las de cuota, salida y regreso llegan con F2-F6. */
-export const FUENTES_SOPORTADAS = ['envio', 'pago_proveedor'] as const
+/**
+ * Fuentes que el motor sabe leer hoy. Las de cuota, salida y regreso llegan con F2-F6.
+ * `aplazado` (F1, PR 5): el día en que la comercial quedó de volver a escribir al aplazar.
+ */
+export const FUENTES_SOPORTADAS = ['envio', 'pago_proveedor', 'aplazado'] as const
 export type FuenteRecordatorio = (typeof FUENTES_SOPORTADAS)[number]
 
 /** Canales que el motor manda hoy. `email` y `wa_manual` llegan con los avisos al viajero (F2). */
@@ -55,6 +58,8 @@ export const REGLAS_POR_DEFECTO: readonly ReglaRecordatorio[] = [
   { id: 'toque_1', fuente: 'envio', offset: 1, dias: 'habiles', etapa_numero: 3, a: ['responsable'], canales: ['in_app'] },
   { id: 'toque_3', fuente: 'envio', offset: 3, dias: 'habiles', etapa_numero: 3, a: ['responsable'], canales: ['in_app'] },
   { id: 'toque_7', fuente: 'envio', offset: 7, dias: 'habiles', etapa_numero: 3, a: ['responsable'], canales: ['in_app'] },
+  // «Aplazar exige fecha y deja un toque ese día» (F1-4).
+  { id: 'toque_aplazado', fuente: 'aplazado', offset: 0, dias: 'calendario', etapa_numero: null, a: ['responsable'], canales: ['in_app'] },
 ]
 
 /**

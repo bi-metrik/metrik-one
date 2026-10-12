@@ -21,6 +21,8 @@ import { duplicarCotizacionCompleta } from '@/lib/cotizaciones/duplicar-cotizaci
 import { terminosInicialesDeCotizacion } from '@/lib/cotizaciones/terminos-al-crear'
 import { recalcularTotales } from '@/app/(app)/negocios/cotizacion-actions'
 import { createServiceClient } from '@/lib/supabase/server'
+import { deshacerEnvioDescargado, registrarEnvioCotizacion } from '@/lib/negocios/seguimiento-datos'
+import { esOrigenVersion } from '@/lib/negocios/seguimiento'
 
 export async function getCotizacionesNegocio(negocioId: string) {
   const { supabase, error } = await getWorkspace()
@@ -135,6 +137,10 @@ export async function enviarCotizacionNegocio(cotizacionId: string, negocioId: s
     .eq('id', cotizacionId)
 
   if (updErr) return { success: false as const, error: updErr.message }
+
+  // Seguimiento (F1-1): con la línea encendida, el envío deja fecha, versión y canal, y de ahí
+  // cuelgan los toques. Apagada no escribe nada (este camino nunca llenó `fecha_envio`).
+  await registrarEnvioCotizacion(supabase, { workspaceId, negocioId, cotizacionId, staffId: staffId ?? null, canal: 'enviar' })
 
   revalidatePath(`/negocios/${negocioId}`)
   return { success: true as const }
@@ -351,6 +357,12 @@ export async function aceptarCotizacionNegocio(
         eraLaRecomendada: recomendada?.id === tarifa.id,
       })),
     }, 'aceptarCotizacionNegocio')
+  }
+
+  // Aprobar desde borrador se salta el envío: con el seguimiento encendido, cuenta como envío
+  // para el embudo (F1-1). Si ya había fecha de envío, no la toca.
+  if (estadoCot === 'borrador') {
+    await registrarEnvioCotizacion(supabase, { workspaceId, negocioId, cotizacionId, staffId: staffId ?? null, canal: 'aprobada' })
   }
 
   revalidatePath(`/negocios/${negocioId}`)
@@ -640,11 +652,17 @@ export async function eliminarCotizacionBorrador(cotizacionId: string, negocioId
  * La copia nace en `borrador` y vuelve a medir: se recalcula aquí mismo, así que su total
  * y su margen salen de lo que se copió, no de lo que la original tenía guardado.
  */
-export async function duplicarCotizacionNegocio(cotizacionId: string, negocioId: string) {
+export async function duplicarCotizacionNegocio(cotizacionId: string, negocioId: string, origen?: string | null) {
   const { supabase, workspaceId, error } = await getWorkspace()
   if (error || !workspaceId) return { success: false as const, error: 'No autenticado' }
 
-  const res = await duplicarCotizacionCompleta(supabase, { workspaceId, cotizacionId, negocioId })
+  // Origen de la versión nueva (F1-3). La prerreserva vencida la escribe el sistema (C9), no
+  // este botón.
+  if (origen != null && (!esOrigenVersion(origen) || origen === 'prerreserva_vencida')) {
+    return { success: false as const, error: 'Escoge de dónde sale la versión nueva.' }
+  }
+
+  const res = await duplicarCotizacionCompleta(supabase, { workspaceId, cotizacionId, negocioId, origenVersion: origen ?? null })
   if (!res.ok) return { success: false as const, error: res.error }
 
   // Una cotización rápida no tiene líneas: su total es el que traía, y recalcular lo
@@ -653,4 +671,25 @@ export async function duplicarCotizacionNegocio(cotizacionId: string, negocioId:
 
   revalidatePath(`/negocios/${negocioId}`)
   return { success: true as const, id: res.id }
+}
+
+/**
+ * «No lo envié» (Vera C3.2): la descarga del PDF ya no cuenta como envío. Solo en borrador y
+ * dentro de los 2 minutos siguientes (el toast da 8 s).
+ */
+export async function deshacerEnvioPorDescarga(cotizacionId: string) {
+  const { supabase, workspaceId, staffId, error } = await getWorkspace()
+  if (error || !workspaceId) return { success: false as const, error: 'No autenticado' }
+  const { data: cot } = await supabase
+    .from('cotizaciones')
+    .select('negocio_id')
+    .eq('id', cotizacionId)
+    .eq('workspace_id', workspaceId)
+    .maybeSingle()
+  const negocioId = (cot as { negocio_id: string | null } | null)?.negocio_id
+  if (!negocioId) return { success: false as const, error: 'Cotización no encontrada' }
+  const r = await deshacerEnvioDescargado(supabase, { workspaceId, negocioId, cotizacionId, staffId: staffId ?? null })
+  if (!r.ok) return { success: false as const, error: r.error ?? 'No se pudo deshacer' }
+  revalidatePath(`/negocios/${negocioId}`)
+  return { success: true as const }
 }
