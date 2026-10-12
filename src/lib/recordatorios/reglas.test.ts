@@ -61,7 +61,7 @@ describe('interruptor por línea', () => {
   it('encendido sin reglas propias = las de por defecto (toques y pago a proveedor)', () => {
     const cfg = configDeLinea({ recordatorios: { activo: true } })
     expect(cfg.activo).toBe(true)
-    expect(cfg.reglas.map((r) => r.id)).toEqual(['prov_t3', 'prov_t0', 'prov_vencido', 'toque_1', 'toque_3', 'toque_7'])
+    expect(cfg.reglas.map((r) => r.id)).toEqual(['prov_t3', 'prov_t0', 'prov_vencido', 'toque_1', 'toque_3', 'toque_7', 'toque_aplazado'])
   })
 
   it('una regla de una fuente que aún no existe se salta sin contarse como error; una mal escrita se descarta', () => {

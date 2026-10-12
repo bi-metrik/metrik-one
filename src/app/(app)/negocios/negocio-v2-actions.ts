@@ -9,10 +9,13 @@ import { after } from 'next/server'
 import { correoAlCrearNegocio } from '@/lib/autorizacion-datos/servidor'
 import { bloqueoAutorizacionDatos } from '@/lib/autorizacion-datos/gate-servidor'
 import { GATE_AUTORIZACION } from '@/lib/autorizacion-datos/estado'
+import { configSeguimiento, etiquetaMotivoPerdida, mensajeTopeAplazamientos, motivoPerdidaInvalido, type ConfigSeguimiento } from '@/lib/negocios/seguimiento'
+import { configSeguimientoDelNegocio } from '@/lib/negocios/seguimiento-datos'
+import { evaluarGatesSeguimiento } from '@/lib/negocios/gates-seguimiento'
 import { leerServiciosDelNegocio } from '@/lib/viaje/servicios-viaje-datos'
 import { aprobadoresDeLinea, serviciosViajeActivo } from '@/lib/viaje/estado-servicio'
 import type { DatosBloqueServicios } from '@/lib/viaje/bloque-servicios'
-import { RAZONES_PERDIDA_NEGOCIO, MOTIVOS_CANCELACION, MOTIVOS_PAUSA, MAX_PAUSAS, MAX_DIAS_PAUSA, SAFETY_NET_HORAS, leerMarcasDeMetadata, origenDesdeFuenteInteraccion, type MarcaCondicion } from '@/lib/negocios/constants'
+import { MOTIVOS_CANCELACION, MOTIVOS_PAUSA, MAX_PAUSAS, SAFETY_NET_HORAS, leerMarcasDeMetadata, origenDesdeFuenteInteraccion, type MarcaCondicion } from '@/lib/negocios/constants'
 import {
   computeFieldDefaults,
   crearNegocioEnWorkspace,
@@ -3534,6 +3537,17 @@ async function cambiarEtapaNegocioConGateSinClave(
       }
     }
 
+    // Gates de seguimiento (post-cotización, F1): `cotizacion_enviada`. Opt-in por etapa; sin
+    // esos ids en `config_extra.gates` no consulta nada.
+    const bloqueoSeguimiento = await evaluarGatesSeguimiento(db(supabase), {
+      negocioId,
+      gates: etapaGates,
+      mensajes: (etapaActualConfigExtra.gate_messages ?? {}) as Record<string, string>,
+    })
+    if (bloqueoSeguimiento) {
+      return { error: 'gate_bloqueado', bloquesPendientes: [{ nombre: bloqueoSeguimiento, es_gate: true }] }
+    }
+
     // Gate custom: saldo_cero — el HONORARIO pendiente debe estar cubierto.
     //
     // Mide contra `precio_aprobado` (honorario) A PROPÓSITO, no contra el valor a
@@ -6797,6 +6811,8 @@ export async function getNegocioDetalleCompleto(id: string): Promise<{
   }>
   staffList: Array<{ id: string; full_name: string }>
   pausaEnabled: boolean
+  /** Seguimiento de la línea (F1): motivos de pérdida y plazo del aplazamiento. Apagado = como hoy. */
+  seguimiento: ConfigSeguimiento
   /** ¿El usuario actual (por staff.id) es uno de los responsables del negocio? */
   currentUserEsResponsable: boolean
   /**
@@ -8264,6 +8280,10 @@ export async function getNegocioDetalleCompleto(id: string): Promise<{
         enrichedConfigExtra._puedeRevertirAprobacion = true
       }
     }
+    // Seguimiento (F1-3): con la línea encendida, «Duplicar» pregunta de dónde sale la versión.
+    if (defTipo === 'cotizacion' && configSeguimiento(lineaConfigExtra).activo) {
+      enrichedConfigExtra._seguimiento = true
+    }
     if (defTipo === 'servicios' && serviciosViaje) enrichedConfigExtra._servicios = serviciosViaje
     if (defTipo === 'propuesta_economica' && puedeCorregirPrecioWs) {
       enrichedConfigExtra._puedeCorregirPrecio = true
@@ -8508,6 +8528,7 @@ export async function getNegocioDetalleCompleto(id: string): Promise<{
       full_name: s.full_name,
     })),
     pausaEnabled,
+    seguimiento: configSeguimiento(lineaConfigExtra),
   }
 }
 
@@ -8714,6 +8735,12 @@ export async function perderNegocio(
     return { error: 'El negocio ya esta cerrado' }
   }
 
+  // Seguimiento (F1-4, Vera C10): con la línea encendida, el motivo es uno de los de la línea,
+  // cada uno sobre un `value` global (los reportes no se rompen). Apagada, como siempre.
+  const cfgSeguimiento = await configSeguimientoDelNegocio(db(supabase), negocioId)
+  const motivoInvalido = motivoPerdidaInvalido(cfgSeguimiento, razon)
+  if (motivoInvalido) return { error: motivoInvalido }
+
   const { error: updErr } = await db(supabase)
     .from('negocios')
     .update({
@@ -8728,7 +8755,7 @@ export async function perderNegocio(
   if (updErr) return { error: (updErr as { message: string }).message }
 
   // Log en activity_log
-  const razonLabel = RAZONES_PERDIDA_NEGOCIO.find(r => r.value === razon)?.label ?? razon
+  const razonLabel = etiquetaMotivoPerdida(cfgSeguimiento, razon)
   if (staffId) {
     await registrarActividad(supabase, {
       workspace_id: workspaceId,
@@ -8796,17 +8823,29 @@ export async function pausarNegocio(
   // Cargar negocio
   const { data: negocio } = await db(supabase)
     .from('negocios')
-    .select('id, stage_actual, estado, pausado, veces_pausado')
+    .select('id, stage_actual, estado, pausado, veces_pausado, metadata, linea_id')
     .eq('id', negocioId)
     .eq('workspace_id', workspaceId)
     .single()
   if (!negocio) return { error: 'Negocio no encontrado' }
 
-  type N = { stage_actual: string; estado: string; pausado: boolean; veces_pausado: number }
+  type N = { stage_actual: string; estado: string; pausado: boolean; veces_pausado: number; metadata: Record<string, unknown> | null; linea_id: string | null }
   const n = negocio as N
   if (n.estado !== 'abierto') return { error: 'El negocio ya esta cerrado' }
   if (n.stage_actual !== 'venta') return { error: 'Solo se puede pausar un negocio en etapa de venta' }
   if (n.pausado) return { error: 'El negocio ya esta pausado' }
+
+  // Seguimiento (F1-4, P6, Vera C10): la línea fija el plazo (`pausa.max_dias`, 14 si no lo
+  // dice) y, encendida, el cuarto aplazamiento NO pierde el negocio solo: lo dice y para.
+  let cfgPausa: ConfigSeguimiento = configSeguimiento(null)
+  if (n.linea_id) {
+    const { data: lineaPausa } = await db(supabase).from('lineas_negocio').select('config_extra').eq('id', n.linea_id).maybeSingle()
+    cfgPausa = configSeguimiento((lineaPausa as { config_extra: unknown } | null)?.config_extra ?? null)
+  }
+  const maxDiasPausa = cfgPausa.maxDiasAplazar
+  if (cfgPausa.activo && n.veces_pausado >= MAX_PAUSAS) {
+    return { error: mensajeTopeAplazamientos(MAX_PAUSAS) }
+  }
 
   // Si ya alcanzo el maximo de pausas → auto-perdido
   if (n.veces_pausado >= MAX_PAUSAS) {
@@ -8856,13 +8895,13 @@ export async function pausarNegocio(
     return { error: 'Debe registrar al menos una interaccion con el cliente antes de pausar' }
   }
 
-  // Validar fecha de reapertura <= ultima_actividad + MAX_DIAS_PAUSA
+  // Validar fecha de reapertura <= ultima_actividad + días de la línea (MAX_DIAS_PAUSA por defecto)
   const fechaLimite = new Date(ultimaActividad)
-  fechaLimite.setDate(fechaLimite.getDate() + MAX_DIAS_PAUSA)
+  fechaLimite.setDate(fechaLimite.getDate() + maxDiasPausa)
   const fechaReaperturaDate = new Date(`${fechaReapertura}T00:00:00`)
   if (isNaN(fechaReaperturaDate.getTime())) return { error: 'Fecha de reapertura invalida' }
   if (fechaReaperturaDate.getTime() > fechaLimite.getTime()) {
-    return { error: `La fecha de reapertura no puede superar ${MAX_DIAS_PAUSA} dias desde la ultima actividad (${todayBogotaISO(fechaLimite)})` }
+    return { error: `La fecha de reapertura no puede superar ${maxDiasPausa} dias desde la ultima actividad (${todayBogotaISO(fechaLimite)})` }
   }
 
   const now = new Date().toISOString()
@@ -8876,6 +8915,12 @@ export async function pausarNegocio(
       veces_pausado: n.veces_pausado + 1,
       ultimo_pausado_at: now,
       updated_at: now,
+      // Seguimiento: el toque de ese día lo agenda el motor de recordatorios (fuente
+      // `aplazado`). Vive en metadata y no en `pausado_hasta`, que el cron de pausa borra al
+      // reactivar a primera hora, antes del motor.
+      ...(cfgPausa.activo
+        ? { metadata: { ...(n.metadata ?? {}), seguimiento: { ...((n.metadata ?? {}).seguimiento as Record<string, unknown> | undefined ?? {}), aplazado_para: fechaReapertura } } }
+        : {}),
     })
     .eq('id', negocioId)
     .eq('workspace_id', workspaceId)
