@@ -1,6 +1,6 @@
 import type { Metadata } from 'next'
 import { registroAbierto, tamanoPrueba } from '@/lib/valida-registro/llave'
-import { AVISO_DATOS_FORMULARIO, CONDICIONES_PRUEBA } from '@/lib/valida-registro/condiciones'
+import { AVISO_DATOS_FORMULARIO, CONDICIONES_PRUEBA, TEXTO_CASILLA, VERSION_ACEPTADA } from '@/lib/valida-registro/condiciones'
 import { POLITICA_DATOS_VALIDA } from '@/lib/valida-api/politica'
 import { LLAVES_UTM } from '@/lib/valida-registro/datos'
 import RegistroValidaClient from './registro-client'
@@ -39,8 +39,9 @@ export default async function EmpezarValidaPage({ searchParams }: Props) {
       abierto={registroAbierto()}
       consultas={consultas}
       dias={dias}
-      condiciones={{ version: CONDICIONES_PRUEBA.version, titulo: CONDICIONES_PRUEBA.titulo, texto: CONDICIONES_PRUEBA.texto }}
+      condiciones={{ version: VERSION_ACEPTADA, titulo: CONDICIONES_PRUEBA.titulo, texto: CONDICIONES_PRUEBA.texto }}
       avisoDatos={AVISO_DATOS_FORMULARIO}
+      textoCasilla={TEXTO_CASILLA}
       politica={{ titulo: POLITICA_DATOS_VALIDA.titulo, url: POLITICA_DATOS_VALIDA.url }}
     />
   )
