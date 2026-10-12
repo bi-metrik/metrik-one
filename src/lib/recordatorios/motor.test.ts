@@ -271,6 +271,25 @@ describe('pago a proveedor', () => {
   })
 })
 
+describe('toque del aplazamiento (fuente aplazado, F1-4)', () => {
+  it('el día que la comercial escogió le llega el toque, una vez; otra fecha rearma', async () => {
+    ;(tablas.negocios[0] as Fila).metadata = { seguimiento: { aplazado_para: '2026-10-20' } }
+    ;(tablas.negocios[0] as Fila).pausado = true
+    await correr('2026-10-19')
+    expect(avisos().filter((a) => (a.metadata as Fila).regla_id === 'toque_aplazado')).toHaveLength(0)
+    await correr('2026-10-20')
+    await correr('2026-10-20')
+    const t = avisos().filter((a) => (a.metadata as Fila).regla_id === 'toque_aplazado')
+    expect(t).toHaveLength(1)
+    expect(t[0]).toMatchObject({ destinatario_id: 'p-daniela', tipo: 'toque_seguimiento' })
+    expect(String(t[0].contenido)).toContain('volver a escribirle a Carolina')
+
+    ;(tablas.negocios[0] as Fila).metadata = { seguimiento: { aplazado_para: '2026-10-27' } }
+    await correr('2026-10-27')
+    expect(avisos().filter((a) => (a.metadata as Fila).regla_id === 'toque_aplazado')).toHaveLength(2)
+  })
+})
+
 describe('un aviso perdido se recupera (Vera §7.7)', () => {
   it('fallido se reintenta en la corrida siguiente, hasta 3 intentos', async () => {
     const soloProv = [{ id: 'prov_t3', fuente: 'pago_proveedor', offset: -3, a: ['area:operaciones'], canales: ['in_app'] }]

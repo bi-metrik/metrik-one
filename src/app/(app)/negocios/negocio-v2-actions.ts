@@ -12,7 +12,7 @@ import { GATE_AUTORIZACION } from '@/lib/autorizacion-datos/estado'
 import { configSeguimiento, etiquetaMotivoPerdida, mensajeTopeAplazamientos, motivoPerdidaInvalido, type ConfigSeguimiento } from '@/lib/negocios/seguimiento'
 import { configSeguimientoDelNegocio } from '@/lib/negocios/seguimiento-datos'
 import { evaluarGatesSeguimiento } from '@/lib/negocios/gates-seguimiento'
-import { RAZONES_PERDIDA_NEGOCIO, MOTIVOS_CANCELACION, MOTIVOS_PAUSA, MAX_PAUSAS, SAFETY_NET_HORAS, leerMarcasDeMetadata, origenDesdeFuenteInteraccion, type MarcaCondicion } from '@/lib/negocios/constants'
+import { MOTIVOS_CANCELACION, MOTIVOS_PAUSA, MAX_PAUSAS, SAFETY_NET_HORAS, leerMarcasDeMetadata, origenDesdeFuenteInteraccion, type MarcaCondicion } from '@/lib/negocios/constants'
 import {
   computeFieldDefaults,
   crearNegocioEnWorkspace,
