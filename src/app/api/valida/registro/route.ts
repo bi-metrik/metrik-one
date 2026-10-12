@@ -39,6 +39,8 @@ export async function POST(req: Request) {
     ref: texto(c.ref) || null,
     utm: c.utm,
     ip: ipDelCliente(req),
+    // Solo el token de ePayco.js, el titular y el celular; el servidor lo valida (`leerTarjeta`).
+    tarjeta: c.tarjeta,
   })
 
   switch (r.tipo) {

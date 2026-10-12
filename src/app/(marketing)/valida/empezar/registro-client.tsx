@@ -1,9 +1,10 @@
 'use client'
 
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import MetrikLockup from '@/components/metrik-lockup'
 import { createClient } from '@/lib/supabase/client'
 import { fetchPropio } from '@/lib/version/fetch-propio'
+import TarjetaEpayco, { type TarjetaEpaycoHandle } from './tarjeta-epayco'
 import {
   TIPOS_ENTIDAD,
   nitConPuntos,
@@ -64,9 +65,11 @@ interface Props {
   /** El texto de la casilla: entra a la huella, así que sale del mismo archivo que la calcula. */
   textoCasilla: string
   politica: { titulo: string; url: string }
+  /** Solo con la cláusula de cobro vigente y ePayco encendido (`pideMetodoPago`): la llave pública. */
+  tarjeta?: { llavePublica: string } | null
 }
 
-export default function RegistroValidaClient({ origenUrl, abierto, consultas, dias, condiciones, avisoDatos, textoCasilla, politica }: Props) {
+export default function RegistroValidaClient({ origenUrl, abierto, consultas, dias, condiciones, avisoDatos, textoCasilla, politica, tarjeta = null }: Props) {
   const [paso, setPaso] = useState<Paso>('correo')
   const [correo, setCorreo] = useState('')
   const [codigo, setCodigo] = useState('')
@@ -78,6 +81,7 @@ export default function RegistroValidaClient({ origenUrl, abierto, consultas, di
   const [codigoAfi, setCodigoAfi] = useState(origenUrl.codigoAfi ?? '')
   const [acepta, setAcepta] = useState(false)
   const [origen] = useState<Origen>(() => origenInicial(origenUrl))
+  const refTarjeta = useRef<TarjetaEpaycoHandle>(null)
   const [error, setError] = useState('')
   const [errorCampo, setErrorCampo] = useState('')
   const [ocupado, setOcupado] = useState(false)
@@ -152,6 +156,18 @@ export default function RegistroValidaClient({ origenUrl, abierto, consultas, di
     setOcupado(true)
     setError('')
     setErrorCampo('')
+    // Con la cláusula de cobro vigente: primero el token de ePayco (la tarjeta nunca viaja a ONE).
+    let datosTarjeta: { token: string; titular: string; celular: string } | null = null
+    if (tarjeta) {
+      try {
+        datosTarjeta = (await refTarjeta.current?.tokenizar()) ?? null
+      } catch (err) {
+        setErrorCampo('tarjeta')
+        setError(err instanceof Error ? err.message : 'No pudimos registrar la tarjeta.')
+        setOcupado(false)
+        return
+      }
+    }
     const r = await fetchPropio('/api/valida/registro', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -166,6 +182,7 @@ export default function RegistroValidaClient({ origenUrl, abierto, consultas, di
         codigo_afi: recomendadoAfi ? codigoAfi || null : null,
         ref: origen.ref,
         utm: origen.utm,
+        ...(datosTarjeta ? { tarjeta: datosTarjeta } : {}),
       }),
     })
     const cuerpo = (await r.json().catch(() => ({}))) as {
@@ -388,6 +405,8 @@ export default function RegistroValidaClient({ origenUrl, abierto, consultas, di
             </label>
             {errorCampo === 'acepta' && <p className="text-xs text-red-500">{error}</p>}
           </div>
+
+          {tarjeta && <TarjetaEpayco ref={refTarjeta} llavePublica={tarjeta.llavePublica} correo={correo} />}
 
           {error && !['razon_social', 'nit', 'dv', 'acepta'].includes(errorCampo) && <p className="text-sm text-red-500">{error}</p>}
           {aviso && <p className="text-sm text-amber-700">{aviso}</p>}

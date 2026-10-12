@@ -20,6 +20,7 @@ import { generarEnlacesAutomaticos, type ResumenEnlacesAutomaticos } from '@/lib
 import { enrolarContratosPorCiclo, type ResumenEnrolamiento } from '@/lib/cobros/enrolar-ciclo-servidor'
 import { renovarPlanesPorCiclo, type ResumenRenovacion } from '@/lib/cobros/renovar-ciclo-servidor'
 import { reconciliarCiclosValida, type ResumenReconciliacion } from '@/lib/valida-registro/ciclo-servidor'
+import { cobrarCuotasConTarjeta, type ResumenCobroToken } from '@/lib/valida-registro/cobro-token-servidor'
 
 // Cron diario — Procesa planes_cobro activos:
 //   1. Genera cobros programados con fecha_esperada = T+3 dias si no existe ya la cuota
@@ -43,6 +44,8 @@ import { reconciliarCiclosValida, type ResumenReconciliacion } from '@/lib/valid
 //      o menos (o ya vencio sin pagarse) recibe su enlace solo, con la misma funcion del boton,
 //      y la persona designada un correo. No emite cuentas de cobro (ver el bloque del paso 6).
 //   7. Plan se marca inactivo automaticamente cuando todas las cuotas se cobran (trigger DB)
+//   7b. Cobro con la tarjeta guardada en ePayco de las cuotas que vencen (planes `epayco`). Apagado
+//      sin EPAYCO_HABILITADO (ver `src/lib/valida-registro/cobro-token-servidor.ts`).
 //   8. Valida autogestionada: el pago mas nuevo del plan de cada espacio del registro autogestionado
 //      tiene su ciclo abierto en Valida (bolsa del mes y llave sin vencimiento). Lo abre el webhook
 //      al pagar; este paso recoge lo que no alcanzo (ver `src/lib/valida-registro/ciclo-servidor.ts`).
@@ -487,6 +490,18 @@ export async function GET(req: NextRequest) {
     enlacesAutomaticosError = err instanceof Error ? err.message : String(err)
   }
 
+  // ── 7b. Cobro con tarjeta guardada (ePayco) de las cuotas que vencen ──
+  // Solo planes con pasarela `epayco` (cuentas autogestionadas que registraron tarjeta). Con ePayco
+  // apagado no hace nada. Va ANTES del 8 para que un cobro aprobado abra su mes en esta corrida, y
+  // después del 6: una cuota rechazada aquí pasa a enlace y lo recibe en la corrida siguiente.
+  let cobroTarjeta: ResumenCobroToken | null = null
+  let cobroTarjetaError: string | null = null
+  try {
+    cobroTarjeta = await cobrarCuotasConTarjeta({ db: supabase, hoy: hoyStr })
+  } catch (err) {
+    cobroTarjetaError = err instanceof Error ? err.message : String(err)
+  }
+
   // ── 8. Valida autogestionada: el pago más nuevo de cada plan tiene su ciclo abierto en Valida ──
   // El webhook lo abre en el momento del pago; esto recoge lo que no alcanzó (Valida caída, o un pago
   // registrado a mano). Solo mira espacios del registro autogestionado; idempotente en Valida.
@@ -524,6 +539,8 @@ export async function GET(req: NextRequest) {
     renovacion_por_ciclo_error: renovacionError,
     enlaces_automaticos: enlacesAutomaticos,
     enlaces_automaticos_error: enlacesAutomaticosError,
+    cobro_tarjeta: cobroTarjeta,
+    cobro_tarjeta_error: cobroTarjetaError,
     ciclos_valida: ciclosValida,
     ciclos_valida_error: ciclosValidaError,
   })

@@ -22,6 +22,8 @@ import {
   type TipoEntidad,
 } from './datos'
 import { registroAbierto } from './llave'
+import { leerTarjeta, partirNombre, pideMetodoPago, textoProblemaTarjeta } from './metodo-pago'
+import { registrarClienteEpayco } from '@/lib/suscripciones/pasarela/epayco'
 import { emitirPruebaDelEspacio } from './prueba-servidor'
 
 /**
@@ -61,7 +63,7 @@ import { emitirPruebaDelEspacio } from './prueba-servidor'
  * `valida_registros.metodo_pago_estado` deja de nacer en `no_requerido`. Hoy la prueba es sin tarjeta.
  */
 
-export type CampoRegistro = 'razon_social' | 'nit' | 'dv' | 'tipo_entidad' | 'acepta'
+export type CampoRegistro = 'razon_social' | 'nit' | 'dv' | 'tipo_entidad' | 'acepta' | 'tarjeta'
 
 export type ResultadoRegistroValida =
   | { tipo: 'ok'; slug: string }
@@ -88,6 +90,11 @@ export interface DatosRegistroValida {
   utm: unknown
   /** Lo que el servidor leyó de las cabeceras. Nunca del cuerpo. */
   ip: string | null
+  /**
+   * Solo cuando las Condiciones vigentes traen la cláusula de cobro y ePayco está encendido: el token
+   * de ePayco.js, el titular y un celular. Nunca la tarjeta (`metodo-pago.ts`).
+   */
+  tarjeta?: unknown
 }
 
 /** Cupos del espacio: la persona que se registra y un segundo usuario, como los CDA de hoy. */
@@ -182,12 +189,34 @@ export async function crearEspacioValida(datos: DatosRegistroValida): Promise<Re
     codigo_afi: codigoAfi,
     recomendado_afi: datos.recomendadoAfi,
     utm,
-    metodo_pago_estado: 'no_requerido',
+    metodo_pago_estado: 'no_requerido' as 'no_requerido' | 'registrado',
+    metodo_pago_ref: null as string | null,
   }
 
   if (motivo) {
     await svc.from('valida_registros').insert({ ...filaBase, estado: 'rechazado', motivo })
     return { tipo: 'rechazado', motivo, texto: textoMotivoValida(motivo) }
+  }
+
+  // ── El método de pago (decisión A2), solo con la cláusula de cobro vigente y ePayco encendido ───
+  // Antes de crear nada: si la tarjeta no se registra, no hay espacio ni prueba que limpiar. ePayco
+  // guarda la tarjeta; aquí queda solo su referencia (`epayco:<cliente>:<token>`).
+  let celularPago: string | null = null
+  if (pideMetodoPago(condiciones.conCobro)) {
+    const t = leerTarjeta(datos.tarjeta)
+    if (!t.ok) return { tipo: 'dato', campo: 'tarjeta', texto: textoProblemaTarjeta(t.problema) }
+    const { nombre, apellido } = partirNombre(t.tarjeta.titular)
+    const cliente = await registrarClienteEpayco({
+      cardTokenId: t.tarjeta.token,
+      pagador: { tipoDocumento: 'NIT', documento: nit, nombre, apellido, email: correo, celular: t.tarjeta.celular },
+    })
+    if (!cliente.ok) {
+      console.error('[valida-registro] ePayco:', cliente.error)
+      return { tipo: 'dato', campo: 'tarjeta', texto: textoProblemaTarjeta('token') }
+    }
+    filaBase.metodo_pago_estado = 'registrado'
+    filaBase.metodo_pago_ref = cliente.ref
+    celularPago = t.tarjeta.celular
   }
 
   // ── 1. La huella del intento ──────────────────────────────────────────────
@@ -225,7 +254,12 @@ export async function crearEspacioValida(datos: DatosRegistroValida): Promise<Re
         equipo_declarado: 1,
         // SOLO Valida, con la navegación de Valida (la misma de los CDA).
         modules: { [MODULOS.valida.clave]: true },
-        config_extra: { modo_vitrina: true, origen_registro: 'valida_autogestion' },
+        config_extra: {
+          modo_vitrina: true,
+          origen_registro: 'valida_autogestion',
+          // El celular que pide ePayco para cobrar con la tarjeta (de la persona dueña de la cuenta).
+          ...(celularPago ? { valida_pagador: { celular: celularPago } } : {}),
+        },
         drive_folder_id: null,
       })
       .select('id')

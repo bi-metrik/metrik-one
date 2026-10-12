@@ -3,6 +3,8 @@ import { registroAbierto, tamanoPrueba } from '@/lib/valida-registro/llave'
 import { AVISO_DATOS_FORMULARIO, TEXTO_CASILLA, condicionesVigentes, versionAceptada } from '@/lib/valida-registro/condiciones'
 import { POLITICA_DATOS_VALIDA } from '@/lib/valida-api/politica'
 import { LLAVES_UTM } from '@/lib/valida-registro/datos'
+import { llavePublicaEpayco } from '@/lib/suscripciones/pasarela/epayco'
+import { pideMetodoPago } from '@/lib/valida-registro/metodo-pago'
 import RegistroValidaClient from './registro-client'
 
 /**
@@ -34,6 +36,8 @@ export default async function EmpezarValidaPage({ searchParams }: Props) {
   }
   const { consultas, dias } = tamanoPrueba()
   const condiciones = condicionesVigentes()
+  const llavePublica = llavePublicaEpayco()
+  const tarjeta = pideMetodoPago(condiciones.conCobro) && llavePublica ? { llavePublica } : null
   return (
     <RegistroValidaClient
       origenUrl={{ ref: uno(q.ref)?.slice(0, 60) ?? null, codigoAfi: uno(q.codigo)?.slice(0, 24) ?? null, utm }}
@@ -44,6 +48,7 @@ export default async function EmpezarValidaPage({ searchParams }: Props) {
       avisoDatos={AVISO_DATOS_FORMULARIO}
       textoCasilla={TEXTO_CASILLA}
       politica={{ titulo: POLITICA_DATOS_VALIDA.titulo, url: POLITICA_DATOS_VALIDA.url }}
+      tarjeta={tarjeta}
     />
   )
 }

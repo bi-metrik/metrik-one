@@ -48,6 +48,11 @@ export interface ClienteCargo {
   nombre: string | null
   email: string | null
   documento: string | null
+  /** Lo que además pide una pasarela con cobro por token (ePayco). Opcional para las demás. */
+  tipoDocumento?: string | null
+  apellido?: string | null
+  celular?: string | null
+  direccion?: string | null
 }
 
 export interface SolicitudCargo {

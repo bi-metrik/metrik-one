@@ -7,6 +7,7 @@ import { parseRut } from '@/lib/rut/parse-rut'
 import { getServerKey } from '@/lib/server-keys'
 import { BUCKET_ACEPTACIONES } from '@/lib/retencion-bot/plazos'
 import { enrolarContratosPorCiclo } from '@/lib/cobros/enrolar-ciclo-servidor'
+import { cobrarCuotasConTarjeta, pasarElPlanATarjeta } from './cobro-token-servidor'
 import { COBRADOR_VALIDA, FICHA_PLAN_VALIDA, activacionAbierta, plazoTerminos, type ErrorActivacion } from './activacion'
 import { parametrosDelPlan, esEspacioAutogestion } from './plan'
 import { pdfTerminos } from './pdf-terminos'
@@ -194,11 +195,23 @@ export async function asegurarCobroDelEspacio(workspaceId: string): Promise<void
     const svc = createServiceClient() as Db
     const ws = await svc.from('workspaces').select('config_extra').eq('id', workspaceId).maybeSingle()
     if (ws.error || !esEspacioAutogestion(ws.data?.config_extra ?? null)) return
-    const sc = await svc.from('servicios_contratados').select('id').eq('workspace_pagador_id', workspaceId).eq('estado', 'activo')
-    const contratos = (sc.data ?? []) as { id: string }[]
+    const sc = await svc
+      .from('servicios_contratados')
+      .select('id, workspace_id, negocio_id')
+      .eq('workspace_pagador_id', workspaceId)
+      .eq('estado', 'activo')
+    const contratos = (sc.data ?? []) as { id: string; workspace_id: string; negocio_id: string }[]
     if (sc.error || contratos.length !== 1) return
-    const r = await enrolarContratosPorCiclo({ db: svc, contratoId: contratos[0].id })
+    const contrato = contratos[0]
+    const r = await enrolarContratosPorCiclo({ db: svc, contratoId: contrato.id })
     if (r.errores.length > 0) console.error('[valida-activacion] enrolamiento al aceptar:', r.errores.map((e) => e.error).join('; '))
+    // Con tarjeta registrada (ePayco, cláusula de cobro): el plan cobra por token y la cuota 1, que
+    // vence hoy, se cobra ya. Sin tarjeta, nada cambia: paga con el enlace desde /suscripcion.
+    for (const creado of r.creados) {
+      if (await pasarElPlanATarjeta({ db: svc }, { cobradorId: contrato.workspace_id, planCobroId: creado.planCobroId, negocioId: contrato.negocio_id })) {
+        await cobrarCuotasConTarjeta({ db: svc, hoy: todayBogotaISO(), soloPlan: creado.planCobroId })
+      }
+    }
   } catch (e) {
     console.error('[valida-activacion] enrolamiento al aceptar:', e instanceof Error ? e.message : e)
   }
