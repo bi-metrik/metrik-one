@@ -189,7 +189,7 @@ export function candidatosDeCuota(
 const FMT_FECHA = new Intl.DateTimeFormat('es-CO', { weekday: 'long', day: 'numeric', month: 'long', timeZone: 'UTC' })
 const FMT_PESOS = new Intl.NumberFormat('es-CO', { style: 'currency', currency: 'COP', maximumFractionDigits: 0 })
 
-function nombreNegocio(n: NegocioFuente): string {
+export function nombreNegocio(n: NegocioFuente): string {
   return n.codigo ? `${n.codigo} — ${n.nombre}` : n.nombre
 }
 

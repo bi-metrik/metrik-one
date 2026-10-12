@@ -7,10 +7,11 @@
  * (regla, entidad, fecha objetivo, destinatario, canal) hace que dos corridas a la vez manden uno
  * solo. Un aviso que falló se vuelve a reclamar en la siguiente corrida, hasta 3 intentos.
  *
- * Canales: al equipo, `in_app` (fila en `notificaciones` con enlace al negocio). Al viajero
+ * Canales: al equipo, `in_app` (fila en `notificaciones` con enlace al negocio) y `email` (el mismo
+ * texto a `profiles.email`, Vera F3-5). Al viajero
  * (`cliente`): `email` por Resend si el contacto tiene correo, y `wa_manual` = la comercial recibe en
  * la app el mensaje listo para mandarlo desde su WhatsApp (Vera C1). Un canal que no aplica al
- * destino (correo al equipo) no reclama la llave: no la gasta para el día en que exista.
+ * destino (`wa_manual` al equipo) no reclama la llave: no la gasta para el día en que exista.
  *
  * El cliente de base es `service_role` (lo crea la ruta del cron); todas las lecturas filtran por
  * las líneas encendidas, y cada escritura lleva el `workspace_id` del negocio.
@@ -33,6 +34,7 @@ import {
   candidatosDeCuota,
   candidatosDeEnvio,
   candidatosDePagoProveedor,
+  nombreNegocio,
   textoDelAviso,
   tipoDeNotificacion,
   type Candidato,
@@ -44,6 +46,7 @@ import {
 import { cuentasDeRecaudo, linkDePagoPropio, mensajeRecordatorioCuota, type PagoViajero } from '@/lib/viaje/riel-cobro'
 import { enlaceWhatsApp } from '@/lib/viaje/confirmacion'
 import { enviarCorreoAlViajero } from '@/lib/viaje/correo-viajero'
+import { CorreosDelEquipo } from './correo-equipo'
 
 // El esquema nuevo (negocio_servicios, recordatorios_log) no está en los tipos generados.
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -457,6 +460,7 @@ export async function correrRecordatorios(svc: Db, opts: { hoy: string }): Promi
   ]
   const destinatarios = new Destinatarios(svc)
   const datosViajero = new DatosViajero(svc)
+  const correosEquipo = new CorreosDelEquipo(svc)
 
   for (const c of candidatos) {
     const linea = lineaDe.get(c.negocio.linea_id)
@@ -510,14 +514,27 @@ export async function correrRecordatorios(svc: Db, opts: { hoy: string }): Promi
         if (!reclamo) { resumen.ya_reclamados++; continue }
         try {
           let estado: 'enviado' | 'omitido' = 'enviado'
+          let motivo: string | null = null
           if (destinatario.startsWith('cliente:')) {
             estado = await mandarAlViajero(svc, c, regla, canal, contacto!, linea, hoy, datosViajero, destinatarios)
+          } else if (canal === 'email') {
+            const r = await correosEquipo.mandar({
+              profileId: destinatario,
+              workspaceId: c.negocio.workspace_id,
+              negocioId: c.negocio.id,
+              negocioNombre: nombreNegocio(c.negocio),
+              tipo: tipoDeNotificacion(c, regla.offset, hoy),
+              texto: textoDelAviso(c, regla.offset, hoy),
+              idempotencyKey: `recordatorio-equipo:${regla.id}:${c.entidadId}:${c.fechaObjetivo}:${destinatario}`,
+            })
+            estado = r.estado
+            motivo = r.motivo
           } else {
             await mandarInApp(svc, c, regla, destinatario, hoy)
           }
           await svc
             .from('recordatorios_log')
-            .update({ estado, enviado_at: estado === 'enviado' ? new Date().toISOString() : null, error: null })
+            .update({ estado, enviado_at: estado === 'enviado' ? new Date().toISOString() : null, error: motivo })
             .eq('id', reclamo.id)
           if (estado === 'enviado') resumen.enviados++
           else resumen.sin_destinatario++

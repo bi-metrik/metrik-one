@@ -320,15 +320,31 @@ function HojaServicio({
   const s = v.servicio
   const [isPending, startTransition] = useTransitionTolerante()
 
-  function guardar(cambios: CambiosServicio, aviso?: string) {
+  /**
+   * Guarda al salir del campo (o al tocar el botón) y ofrece «Deshacer» 8 s (Noor §6, Vera F3-9):
+   * deshacer vuelve a escribir lo que había, por la misma acción del servidor y con sus permisos.
+   */
+  function guardar(cambios: CambiosServicio, anterior: CambiosServicio, aviso = 'Guardado.') {
     startTransition(async () => {
       const r = await actualizarServicio(s.id, cambios)
       if (!r.ok) {
         toast.error(r.error)
         return
       }
-      if (aviso) toast.success(aviso)
       alGuardar()
+      toast.success(aviso, {
+        duration: 8000,
+        action: {
+          label: 'Deshacer',
+          onClick: () => {
+            void actualizarServicio(s.id, anterior).then((d) => {
+              if (d.ok) toast.message('Deshecho.')
+              else toast.error(d.error)
+              alGuardar()
+            })
+          },
+        },
+      })
     })
   }
 
@@ -341,13 +357,15 @@ function HojaServicio({
     <label className="block space-y-1">
       <span className="text-xs font-medium">{etiqueta}</span>
       <input
+        // Con la llave atada al valor guardado, deshacer o un cambio de otra persona repinta el campo.
+        key={`${clave}:${valor ?? ''}`}
         type="text"
         defaultValue={valor ?? ''}
         placeholder={placeholder}
         disabled={!puedeEditar || isPending}
         onBlur={e => {
           const nuevo = e.target.value.trim()
-          if (nuevo !== (valor ?? '')) guardar({ [clave]: nuevo })
+          if (nuevo !== (valor ?? '')) guardar({ [clave]: nuevo }, { [clave]: valor ?? '' }, `${etiqueta}: guardado.`)
         }}
         className="h-11 w-full rounded-md border px-2 text-sm disabled:bg-muted"
       />
@@ -381,11 +399,14 @@ function HojaServicio({
       <label className="block space-y-1">
         <span className="text-xs font-medium">Fecha límite de pago</span>
         <input
+          key={`limite:${s.fecha_limite_pago ?? ''}`}
           type="date"
           defaultValue={s.fecha_limite_pago ?? ''}
           disabled={!puedeEditar || isPending}
           onBlur={e => {
-            if (e.target.value !== (s.fecha_limite_pago ?? '')) guardar({ fecha_limite_pago: e.target.value })
+            if (e.target.value !== (s.fecha_limite_pago ?? '')) {
+              guardar({ fecha_limite_pago: e.target.value }, { fecha_limite_pago: s.fecha_limite_pago ?? '' }, 'Fecha límite: guardada.')
+            }
           }}
           className="h-11 w-full rounded-md border px-2 text-sm disabled:bg-muted"
         />
@@ -411,18 +432,18 @@ function HojaServicio({
       {puedeEditar && (
         <div className="flex flex-wrap gap-2 pt-1">
           {s.estado === 'por_reservar' && v.estado === 'por_reservar' && (
-            <button type="button" disabled={isPending} onClick={() => guardar({ estado: 'reservado' }, 'Marcado como reservado.')}
+            <button type="button" disabled={isPending} onClick={() => guardar({ estado: 'reservado' }, { estado: s.estado }, 'Marcado como reservado.')}
               className="min-h-11 rounded-md bg-primary px-3 text-sm font-medium text-primary-foreground disabled:opacity-60">
               Marcar como reservado
             </button>
           )}
           {s.estado !== 'cancelado' ? (
-            <button type="button" disabled={isPending} onClick={() => guardar({ estado: 'cancelado' }, 'Sacado del viaje.')}
+            <button type="button" disabled={isPending} onClick={() => guardar({ estado: 'cancelado' }, { estado: s.estado }, 'Sacado del viaje.')}
               className="min-h-11 rounded-md px-3 text-xs text-muted-foreground underline disabled:opacity-60">
               Sacar del viaje
             </button>
           ) : (
-            <button type="button" disabled={isPending} onClick={() => guardar({ estado: 'por_reservar' }, 'Volvió al viaje.')}
+            <button type="button" disabled={isPending} onClick={() => guardar({ estado: 'por_reservar' }, { estado: 'cancelado' }, 'Volvió al viaje.')}
               className="min-h-11 rounded-md border px-3 text-sm disabled:opacity-60">
               Volver al viaje
             </button>
