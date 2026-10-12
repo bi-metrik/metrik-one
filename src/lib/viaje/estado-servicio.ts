@@ -85,7 +85,8 @@ export interface QuienEdita {
   esResponsable?: boolean
 }
 
-function esDireccion(q: QuienEdita): boolean {
+/** Dirección: owner/admin o aprobadores de la línea. Aprueba, rechaza y edita todo. */
+export function esDireccion(q: Pick<QuienEdita, 'role' | 'staffId' | 'aprobadores'>): boolean {
   if (q.role === 'owner' || q.role === 'admin') return true
   return !!q.staffId && (q.aprobadores ?? []).includes(q.staffId)
 }

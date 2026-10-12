@@ -105,6 +105,18 @@ export interface SessionContext {
   gastos_en_cola?: GastoEnCola[];
   /** Cuántos gastos traía el mensaje (para «Gasto 2 de 3»). */
   gastos_total?: number;
+  /**
+   * Pago a un proveedor del viaje (F3, `handlers/registro/servicio-viaje.ts`): solo en negocios de
+   * una línea con `servicios_viaje.activo`. `paso_viaje` dice qué se está preguntando.
+   */
+  paso_viaje?: 'servicio' | 'medio';
+  servicio_id?: string;
+  servicio_nombre?: string;
+  medio_pago?: string;
+  medio_label?: string;
+  titular_medio?: 'empresa' | 'personal';
+  /** La persona dijo que el gasto no es de ningún servicio: no se vuelve a preguntar. */
+  servicio_viaje_resuelto?: boolean;
 }
 
 /** Un gasto en la cola del intérprete: lo validado, todavía sin registrar. */

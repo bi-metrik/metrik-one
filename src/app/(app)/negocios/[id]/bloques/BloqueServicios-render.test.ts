@@ -13,6 +13,10 @@ vi.mock('../../servicios-viaje-actions', () => ({
   actualizarServicio: vi.fn(),
   adjuntarArchivoServicio: vi.fn(),
   traerServiciosDeCotizacion: vi.fn(),
+  registrarPagoServicio: vi.fn(),
+  pedirAprobacionServicio: vi.fn(),
+  decidirAprobacionServicio: vi.fn(),
+  subirSoporteServicio: vi.fn(),
 }))
 vi.mock('next/navigation', () => ({ useRouter: () => ({ refresh: vi.fn() }) }))
 vi.mock('sonner', () => ({ toast: { success: vi.fn(), error: vi.fn() } }))
@@ -44,8 +48,8 @@ function datos(extra: Partial<DatosBloqueServicios> = {}): DatosBloqueServicios 
   }
 }
 
-const html = (d: DatosBloqueServicios | null, modo: 'editable' | 'visible' = 'editable', esResponsable = false) =>
-  renderToStaticMarkup(React.createElement(BloqueServicios, { negocioId: 'n1', modo, datos: d, esResponsable }))
+const html = (d: DatosBloqueServicios | null, modo: 'editable' | 'visible' = 'editable', esResponsable = false, abiertaInicial: string | null = null) =>
+  renderToStaticMarkup(React.createElement(BloqueServicios, { negocioId: 'n1', modo, datos: d, esResponsable, abiertaInicial }))
 
 const PROHIBIDAS = ['cobro programado', 'checklist', 'bloque', 'stage', 'gate', 'plan_pago', 'wa_manual', 'excepción', 'huella', 'FIFO', 'RLS']
 
@@ -75,5 +79,55 @@ describe('BloqueServicios', () => {
 
   it('apagado se ve y lo dice: no se edita', () => {
     expect(html(datos({ activo: false }))).toContain('se ven, no se editan')
+  })
+
+  it('F3: la hoja trae el pago con medio, titular y soporte; sin anticipo, el botón es «Pedir a Edgar»', () => {
+    const medios = [{ id: 'tc-emp', label: 'Tarjeta empresa ••4417', titular: 'empresa' as const }]
+    const h = html(datos({ medios, cobradoCliente: 0, precioAprobado: 9_000_000 }), 'editable', false, 's1')
+    expect(h).toContain('Valor pagado')
+    expect(h).toContain('Medio de pago')
+    expect(h).toContain('Titular: Empresa')
+    expect(h).toContain('Pegar soporte')
+    expect(h).toContain('Tomar foto')
+    expect(h).toContain('El cliente no ha pagado el anticipo.')
+    expect(h).toContain('Pedir a Edgar')
+    expect(h).toContain('El pago ya salió')
+    for (const p of PROHIBIDAS) expect(h.toLowerCase()).not.toContain(p.toLowerCase())
+  })
+
+  it('F3: con anticipo y medio de empresa, «Registrar pago»; sin medios configurados lo dice', () => {
+    const medios = [{ id: 'tc-emp', label: 'Tarjeta empresa ••4417', titular: 'empresa' as const }]
+    const h = html(datos({ medios, cobradoCliente: 2_000_000, precioAprobado: 9_000_000 }), 'editable', false, 's1')
+    expect(h).toContain('Registrar pago')
+    expect(h).not.toContain('Pedir a Edgar')
+    expect(html(datos({ medios: [] }), 'editable', false, 's1')).toContain('Falta configurar los medios de pago')
+  })
+
+  it('F3: Edgar ve el pedido en la fila con Aprobar y No aprobar; operaciones solo lo ve', () => {
+    const conPedido = datos({
+      nombres: { 's-ale': 'Alejandra' },
+      filas: [{
+        ...datos().filas[0],
+        aprobaciones: [{ id: 'ap1', tipo: 'desviacion_costo', estado: 'solicitada', huella: 'h', solicitada_por: 's-ale',
+          detalle: { monto: 1_262_000, proveedor: 'SATENA', texto: 'Costó $82.000 más de lo cotizado (+6,9 %).' } }],
+      }],
+    })
+    const edgar = html({ ...conPedido, quien: { role: 'owner', areas: [], staffId: 's-edgar', aprobadores: [] } }, 'editable', false, 's1')
+    expect(edgar).toContain('Alejandra pide pagar')
+    expect(edgar).toContain('SATENA')
+    expect(edgar).toContain('Aprobar')
+    expect(edgar).toContain('No aprobar')
+    expect(edgar).toContain('Esperando a Edgar')
+    const ope = html(conPedido, 'editable', false, 's1')
+    expect(ope).toContain('Alejandra pide pagar')
+    expect(ope).not.toContain('>Aprobar<')
+  })
+
+  it('F3: resumen con % de tarjetas personales y filtros', () => {
+    const h = html(datos())
+    expect(h).toContain('Pagado con tarjetas personales')
+    expect(h).toContain('Esperando a Edgar')
+    expect(h).toContain('Falta confirmar')
+    expect(h).toContain('Sigue:')
   })
 })

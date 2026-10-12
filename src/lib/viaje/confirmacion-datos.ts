@@ -496,7 +496,7 @@ export async function guardarVersionPlan(
 /** Avisa a los aprobadores de la línea (notificación en la app con enlace al negocio). */
 export async function avisarAprobadores(
   svc: Db,
-  args: { workspaceId: string; configLinea: unknown; negocioId: string; entidadId: string; contenido: string; tipo: 'aprobacion_pendiente' | 'aprobacion_decidida'; destinatariosStaff?: string[] },
+  args: { workspaceId: string; configLinea: unknown; negocioId: string; entidadId: string; contenido: string; tipo: 'aprobacion_pendiente' | 'aprobacion_decidida'; destinatariosStaff?: string[]; entidadTipo?: 'plan_pago' | 'servicio' },
 ): Promise<void> {
   const staffIds = args.destinatariosStaff ?? aprobadoresDeLinea(args.configLinea)
   let perfiles: string[] = []
@@ -517,7 +517,7 @@ export async function avisarAprobadores(
       tipo: args.tipo,
       estado: 'pendiente',
       contenido: args.contenido.slice(0, 500),
-      entidad_tipo: 'plan_pago',
+      entidad_tipo: args.entidadTipo ?? 'plan_pago',
       entidad_id: args.entidadId,
       deep_link: `/negocios/${args.negocioId}`,
       metadata: { negocio_id: args.negocioId },
