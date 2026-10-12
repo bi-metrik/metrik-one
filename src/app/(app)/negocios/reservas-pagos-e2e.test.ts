@@ -17,7 +17,6 @@ let secuencia = 0
 const WS = '64010015-a9a2-4aca-be83-e456cf217d96'
 const LINEA = 'linea-viaje'
 const NEG = '7c1d2e3f-4a5b-4c6d-8e8f-90a1b2c3d4e5'
-const COT = 'cot-1'
 
 let rol = 'operator'
 let areas: string[] = ['operaciones']
@@ -41,24 +40,6 @@ vi.mock('@/lib/supabase/server', () => ({
   createServiceClient: () => clienteFalso(),
   createClient: async () => clienteFalso(),
 }))
-vi.mock('@/lib/cobros/soporte-pago', () => ({
-  archivarSoporte: async (_s: unknown, _w: string, _n: string, e: { storage_path: string; file_name: string }) => ({ url: `one://ve-documentos/${e.storage_path}`, file_name: e.file_name }),
-}))
-// Siigo NUNCA se llama de verdad en pruebas: el recibo pasa por este doble.
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-let emitirMock: (...a: any[]) => Promise<any> = async () => ({ ok: false, motivo: 'error', mensaje: 'sin doble' })
-vi.mock('@/lib/siigo/recibos', () => ({
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  emitirReciboDeCobro: (...a: any[]) => emitirMock(...a),
-}))
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-let extraerMock: (...a: any[]) => Promise<any> = async () => ({ data: null, error: 'sin doble' })
-vi.mock('@/lib/ai/extract-fields', () => ({
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  extractFieldsFromDocument: (...a: any[]) => extraerMock(...a),
-}))
-let archivoEnStorage: Blob | null = null
-
 vi.mock('@/lib/modulos/exigir-modulo', async () =>
   (await import('../../../../test/exigir-modulo-doble')).dobleExigirModulo())
 
@@ -68,7 +49,6 @@ function clienteFalso() {
   return {
     from: (tabla: string) => constructor(tabla),
     rpc: async () => ({ data: null, error: null }),
-    storage: { from: () => ({ download: async () => (archivoEnStorage ? { data: archivoEnStorage, error: null } : { data: null, error: { message: 'no' } }) }) },
   }
 }
 
