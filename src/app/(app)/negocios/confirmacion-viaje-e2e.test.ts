@@ -45,6 +45,21 @@ vi.mock('@/lib/supabase/server', () => ({
 vi.mock('@/lib/cobros/soporte-pago', () => ({
   archivarSoporte: async (_s: unknown, _w: string, _n: string, e: { storage_path: string; file_name: string }) => ({ url: `one://ve-documentos/${e.storage_path}`, file_name: e.file_name }),
 }))
+// Siigo NUNCA se llama de verdad en pruebas: el recibo pasa por este doble.
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+let emitirMock: (...a: any[]) => Promise<any> = async () => ({ ok: false, motivo: 'error', mensaje: 'sin doble' })
+vi.mock('@/lib/siigo/recibos', () => ({
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  emitirReciboDeCobro: (...a: any[]) => emitirMock(...a),
+}))
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+let extraerMock: (...a: any[]) => Promise<any> = async () => ({ data: null, error: 'sin doble' })
+vi.mock('@/lib/ai/extract-fields', () => ({
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  extractFieldsFromDocument: (...a: any[]) => extraerMock(...a),
+}))
+let archivoEnStorage: Blob | null = null
+
 vi.mock('@/lib/modulos/exigir-modulo', async () =>
   (await import('../../../../test/exigir-modulo-doble')).dobleExigirModulo())
 
@@ -54,7 +69,7 @@ function clienteFalso() {
   return {
     from: (tabla: string) => constructor(tabla),
     rpc: async () => ({ data: null, error: null }),
-    storage: { from: () => ({ download: async () => ({ data: null, error: { message: 'no' } }) }) },
+    storage: { from: () => ({ download: async () => (archivoEnStorage ? { data: archivoEnStorage, error: null } : { data: null, error: { message: 'no' } }) }) },
   }
 }
 
@@ -545,5 +560,160 @@ describe('prerreserva vencida (C9, F2-9)', () => {
     tablas.cobros.push({ id: 'cb-1', workspace_id: WS, negocio_id: NEG, monto: 1_000_000, fecha: HOY })
     expect(await aplicarPrerreservaSiVencio(NEG)).toEqual({ ok: true, aplicada: false })
     expect(neg().etapa_actual_id).toBe('e4')
+  })
+})
+
+// ── Riel de cobro (PR 9) ─────────────────────────────────────────────────────
+
+import {
+  consolidarPagoViajero,
+  deshacerPagoViajero,
+  leerComprobantePago,
+  registrarPagoViajero,
+  reintentarReciboViaje,
+  type EntradaPagoViajero,
+} from './riel-cobro-actions'
+
+const SOPORTE = { storage_path: `${WS}/pagos-viajero/c1.png`, file_name: 'comprobante.png', mime_type: 'image/png' }
+
+function pagoEntrada(extra: Partial<EntradaPagoViajero> = {}): EntradaPagoViajero {
+  return { negocioId: NEG, monto: 1_215_000, fecha: HOY, cuentaId: 'bancolombia-3241', referencia: 'M4471023', banco: 'Nequi', soporte: SOPORTE, ...extra }
+}
+
+async function confirmado() {
+  sembrar()
+  tablas.staff.push({ id: 's-ale', workspace_id: WS, full_name: 'Alejandra Prueba', profile_id: 'p-s-ale', is_active: true })
+  tablas.staff_areas = [{ staff_id: 's-ale', area: 'operaciones', staff: { workspace_id: WS, is_active: true } }]
+  tablas.negocio_responsables.push({ negocio_id: NEG, staff_id: 's-ale', rol: 'operaciones' })
+  const r = await confirmarClienteViaje(entrada())
+  expect(r.ok).toBe(true)
+  expect(neg().etapa_actual_id).toBe('e4')
+  archivoEnStorage = null
+  emitirMock = async () => ({ ok: false, motivo: 'error', mensaje: 'sin doble' })
+  extraerMock = async () => ({ data: null, error: 'sin doble' })
+}
+
+describe('riel de cobro: registrar el pago del viajero (F2-5, F2-8)', () => {
+  beforeEach(confirmado)
+
+  it('registra UN cobro con fecha, cuenta, comprobante y referencia; con el anticipo pasa la etapa y avisa a operaciones', async () => {
+    const r = await registrarPagoViajero(pagoEntrada())
+    expect(r.ok).toBe(true)
+    expect(tablas.cobros).toHaveLength(1)
+    expect(tablas.cobros[0]).toMatchObject({ monto: 1_215_000, fecha: HOY, tipo_cobro: 'anticipo', cuenta_recaudo: 'bancolombia-3241', external_ref: 'M4471023' })
+    expect((tablas.cobros[0].soporte as Fila).url).toBe(`one://ve-documentos/${SOPORTE.storage_path}`)
+    if (!r.ok) return
+    expect(r.avanzo).toBe('Reservas y pagos')
+    expect(neg().etapa_actual_id).toBe('e5')
+    expect(tablas.notificaciones.some((n) => n.tipo === 'handoff' && n.destinatario_id === 'p-s-ale' && String(n.contenido) === 'Carolina Prueba pagó el anticipo. Ya puedes reservar.')).toBe(true)
+  })
+
+  it('doble toque con la misma intención: un solo cobro', async () => {
+    const clave = 'c0ffee00-1111-4222-8333-777777777777'
+    await Promise.all([registrarPagoViajero(pagoEntrada(), clave), registrarPagoViajero(pagoEntrada(), clave)])
+    expect(tablas.cobros).toHaveLength(1)
+  })
+
+  it('misma referencia y monto: avisa antes de registrar; si es otro pago, lo registra', async () => {
+    await registrarPagoViajero(pagoEntrada())
+    const r = await registrarPagoViajero(pagoEntrada())
+    expect(r).toMatchObject({ ok: false, repetido: true })
+    expect(tablas.cobros).toHaveLength(1)
+    expect((await registrarPagoViajero(pagoEntrada({ confirmarRepetido: true }))).ok).toBe(true)
+    expect(tablas.cobros).toHaveLength(2)
+    expect(tablas.cobros[1].tipo_cobro).toBe('pago')
+  })
+
+  it('sin cuenta receptora o sin comprobante no registra', async () => {
+    expect((await registrarPagoViajero(pagoEntrada({ cuentaId: 'otra' }))).ok).toBe(false)
+    expect((await registrarPagoViajero(pagoEntrada({ soporte: { storage_path: '', file_name: '', mime_type: '' } }))).ok).toBe(false)
+    expect(tablas.cobros).toHaveLength(0)
+  })
+
+  it('otra comercial no registra; operaciones sola tampoco (§7.4)', async () => {
+    staffId = 's-tati'
+    expect((await registrarPagoViajero(pagoEntrada())).ok).toBe(false)
+    staffId = 's-ale'
+    areas = ['operaciones']
+    expect((await registrarPagoViajero(pagoEntrada())).ok).toBe(false)
+    expect(tablas.cobros).toHaveLength(0)
+  })
+
+  it('Deshacer (8): el pago desaparece y el negocio vuelve a Confirmación', async () => {
+    const r = await registrarPagoViajero(pagoEntrada())
+    if (!r.ok) throw new Error(r.error)
+    expect(await deshacerPagoViajero(NEG, r.cobroId)).toEqual({ ok: true })
+    expect(tablas.cobros).toHaveLength(0)
+    expect(neg().etapa_actual_id).toBe('e4')
+  })
+})
+
+describe('riel de cobro: recibo de caja (F2-6, C7)', () => {
+  beforeEach(confirmado)
+
+  it('con la emisión apagada en la línea: el pago queda y el recibo pendiente con su motivo; Siigo no se llama', async () => {
+    let llamadas = 0
+    emitirMock = async () => { llamadas++; return { ok: true, numero: 'RC-X' } }
+    const r = await registrarPagoViajero(pagoEntrada())
+    if (!r.ok) throw new Error(r.error)
+    const c = await consolidarPagoViajero(NEG, r.cobroId)
+    expect(c).toMatchObject({ ok: true, numero: null, pendiente: expect.stringContaining('no está encendida') })
+    expect(llamadas).toBe(0)
+    expect(((meta().recibos_viaje as Fila)[r.cobroId] as Fila).motivo).toMatch(/no está encendida/)
+  })
+
+  it('encendida: uno por cobro, con la forma de pago de la cuenta que recibió la plata', async () => {
+    ;(tablas.lineas_negocio[0].config_extra as Fila).siigo = { recibo_total_automatico: true }
+    tablas.workspaces[0].config_extra = { cuentas_recaudo: [{ id: 'bancolombia-3241', nombre: 'Bancolombia ahorros', tipo: 'banco', numero: '32800003241', siigo_payment_id: 5638 }] }
+    const llamadas: unknown[][] = []
+    emitirMock = async (...a: unknown[]) => { llamadas.push(a); return { ok: true, numero: 'RC-0142', siigo_id: 'x', valor: 1, archivada: true, recibos: [] } }
+    const r = await registrarPagoViajero(pagoEntrada())
+    if (!r.ok) throw new Error(r.error)
+    const c = await consolidarPagoViajero(NEG, r.cobroId)
+    expect(c).toMatchObject({ ok: true, numero: 'RC-0142', pendiente: null })
+    expect(llamadas).toHaveLength(1)
+    expect(llamadas[0][1]).toBe(r.cobroId)
+    expect(llamadas[0][3]).toMatchObject({ formaDePagoId: 5638, avisarAlCliente: false })
+    if (c.ok) expect(decodeURIComponent(c.waUrl)).toContain('Adjunto tu recibo de caja RC-0142.')
+  })
+
+  it('sin credenciales (Siigo responde error): pendiente con «Reintentar»', async () => {
+    ;(tablas.lineas_negocio[0].config_extra as Fila).siigo = { recibo_total_automatico: true }
+    emitirMock = async () => ({ ok: false, motivo: 'error', mensaje: 'No hay credenciales de Siigo configuradas' })
+    const r = await registrarPagoViajero(pagoEntrada())
+    if (!r.ok) throw new Error(r.error)
+    const c = await consolidarPagoViajero(NEG, r.cobroId)
+    expect(c).toMatchObject({ ok: true, numero: null, pendiente: 'Siigo no está conectado para este espacio.' })
+    emitirMock = async () => ({ ok: true, numero: 'RC-0143', siigo_id: 'x', valor: 1, archivada: true, recibos: [] })
+    expect(await reintentarReciboViaje(NEG, r.cobroId)).toMatchObject({ ok: true, numero: 'RC-0143', pendiente: null })
+    expect((meta().recibos_viaje as Fila)[r.cobroId]).toBeUndefined()
+  })
+})
+
+describe('riel de cobro: lectura del comprobante (F2-4)', () => {
+  beforeEach(confirmado)
+
+  it('propone monto, fecha, banco, referencia y cuenta; la persona confirma', async () => {
+    process.env.GEMINI_API_KEY = 'prueba'
+    archivoEnStorage = new Blob(['x'], { type: 'image/png' })
+    extraerMock = async () => ({ data: {
+      monto: { value: '1215000' }, fecha: { value: HOY }, banco_origen: { value: 'Nequi' },
+      cuenta_destino: { value: '3241' }, destinatario: { value: 'Trappvel Enterprise' }, referencia: { value: 'M4471023' },
+    } })
+    const r = await leerComprobantePago(NEG, SOPORTE)
+    expect(r).toMatchObject({ ok: true, leido: true, aviso: null, lectura: { monto: 1_215_000, fecha: HOY, banco: 'Nequi', referencia: 'M4471023', cuentaId: 'bancolombia-3241' } })
+    // Leer no registra nada.
+    expect(tablas.cobros).toHaveLength(0)
+    delete process.env.GEMINI_API_KEY
+  })
+
+  it('ilegible o sin llave: propuesta vacía para escribir a mano', async () => {
+    delete process.env.GEMINI_API_KEY
+    const r = await leerComprobantePago(NEG, SOPORTE)
+    expect(r).toMatchObject({ ok: true, leido: false })
+  })
+
+  it('un archivo de otro espacio no se lee', async () => {
+    expect((await leerComprobantePago(NEG, { ...SOPORTE, storage_path: 'otro-ws/x.png' })).ok).toBe(false)
   })
 })
