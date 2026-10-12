@@ -2,7 +2,8 @@
 
 ## Project memories
 
-- ⚠️⚠️ [Post-cotización ola 1: servicios del viaje F0](project_post_cotizacion_servicios_f0.md) — migración 20261012150000 SIN aplicar; datos en `_servicios`; Q1-Q8 sin medir
+- ⚠️ [Post-cotización olas 2-3: confirmación y riel de cobro](project_post_cotizacion_f2.md) — #1116/#1117 sin migración; #1117 choca con #1115 en recordatorios
+- [Post-cotización ola 1: servicios del viaje F0](project_post_cotizacion_servicios_f0.md) — migración APLICADA; datos en `_servicios`; Q1-Q8 sin medir
 - ⚠️⚠️ [Alta autogestionada de Valida (#1095, #1097, #1098)](project_valida_alta_autogestionada.md) — #1097 aplicada y mergeada; PR 1/9 de Valida son parches
 - ⚠️⚠️ [Renovación continua de Valida (fila A)](project_valida_renovacion_continua.md) — paso 6b agrega 1 cuota; script de los 4 CDA SIN correr; ficha sin dias_trial
 - ⚠️⚠️ [SOE-007: devolución de dinero y venta reembolsada](project_devoluciones_dinero_soe007.md) — 20261009210000 APLICADA; devuelto ≥ cobrado sale de ventas; read-only API sí mide
@@ -109,6 +110,7 @@
 ## Referencias
 
 - [Build en worktree sin una dependencia](reference_build_en_worktree.md) — copiar el paquete, no symlink (raíz de Turbopack)
+- [Comandos en worktree aislado](reference_worktree_aislado_comandos.md) — editar y mutar con python; git siempre simple
 - [Frentes secundarios](indice_frentes_secundarios.md) — ~145 entradas viejas: cobros, Valida, SOENA, recibos, Siigo, recetas; buscar ahí antes de crear
 
 ## Feedback
