@@ -80,6 +80,8 @@ export async function getSegmentacionConfig(): Promise<
   };
 }
 
+const ROLES_APLICAN_SEGMENTACION: readonly string[] = ['owner', 'admin', 'supervisor'];
+
 export async function aplicarSegmentacionConfig(input: {
   preset: PresetSegmentacion;
   pesos_contrapartes: PesosContrapartes;
@@ -89,8 +91,14 @@ export async function aplicarSegmentacionConfig(input: {
   disclaimer_aceptado: boolean;
   razon_cambio?: string | null;
 }): Promise<{ ok: true; version: number } | { ok: false; error: string }> {
-  const { workspaceId } = await getWorkspace();
+  const { workspaceId, role } = await getWorkspace();
   if (!workspaceId) return { ok: false, error: 'workspace_no_encontrado' };
+  // El mismo corte que la página (`compliance/segmentacion/page.tsx`). Sin él,
+  // cualquier rol con sesión podía invocar la acción y cambiar la metodología
+  // de segmentación del workspace, quedando como quien la aplicó.
+  if (!ROLES_APLICAN_SEGMENTACION.includes(role ?? '')) {
+    return { ok: false, error: 'forbidden_rol' };
+  }
 
   if (!input.disclaimer_aceptado) {
     return { ok: false, error: 'disclaimer_obligatorio' };
