@@ -2147,6 +2147,8 @@ export async function getDatosNuevoNegocio(): Promise<{
       .from('lineas_negocio')
       .select('id, workspace_id, nombre, tipo, numero')
       .or(`workspace_id.is.null,workspace_id.eq.${workspaceId}`)
+      // Igual que «Nuevo negocio»: una línea apagada no se ofrece para crear.
+      .eq('is_active', true)
       .order('numero', { ascending: true }),
   ])
 
@@ -2171,6 +2173,23 @@ async function crearNegocioSinClave(input: EntradaCrearNegocio): Promise<Resulta
   // Crear un negocio es la puerta a todo Clarity (bloques, carpeta de Drive, cobros): un
   // workspace sin el módulo no crea negocios sobre sí mismo aunque llame a la acción.
   if (!(await exigirModulo(REQUISITO.clarity)).ok) return { negocio_id: null, error: MENSAJE_MODULO_NO_ACTIVO }
+
+  // «Nuevo negocio» solo ofrece las líneas activas del workspace (`negocios/nuevo/page.tsx`).
+  // Aquí se exige lo mismo, porque la pantalla solo esconde: una línea apagada (p. ej. el clon
+  // de prueba de una línea que se está rediseñando) o de otro workspace no recibe negocios
+  // por esta puerta aunque alguien mande su id. Sin `linea_id` explícito no se mira nada: el
+  // negocio entra por `linea_activa_id`, como siempre (conversión de leads, bandeja).
+  if (input.linea_id) {
+    const { data: linea } = await db(supabase)
+      .from('lineas_negocio')
+      .select('id, is_active')
+      .eq('id', input.linea_id)
+      .eq('workspace_id', workspaceId)
+      .maybeSingle()
+    if (!linea || (linea as { is_active: boolean | null }).is_active !== true) {
+      return { negocio_id: null, error: 'Esa línea de negocio no está disponible. Escoge otra.' }
+    }
+  }
 
   // El cuerpo vive en `src/lib/negocios/crear-negocio.ts`: el webhook de Wompi de Ferretería
   // crea negocios sin sesión por la misma vía.
