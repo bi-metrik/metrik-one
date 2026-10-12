@@ -25,6 +25,7 @@ import { cobradoDelNegocio } from '@/lib/cobros/devolucion-dinero'
 import { DevolucionesNegocio } from './devoluciones-negocio'
 import { leerConfirmacionViaje } from './confirmacion-viaje'
 import { leerRielCobro } from './riel-cobro'
+import { leerEntregaViaje } from './entrega-viaje'
 
 /**
  * Todo lo que la página del negocio le pasa a `NegocioDetailClient`, armado en UN sitio.
@@ -190,15 +191,17 @@ export async function cargarVistaNegocio(id: string): Promise<VistaNegocio | nul
   // Confirmación del viaje (F2): solo en líneas con `plan_pagos.activo`; en las demás no lee nada.
   // Riel de cobro (F2): solo con plan acordado. Va arriba, debajo de la cabecera.
   const argsViaje = { workspaceId: workspaceId ?? '', negocioId: id, staffId: staffId ?? null, role: role ?? null, areas: (areas ?? []) as string[] }
-  const [rielCobro, confirmacionViaje] = workspaceId
-    ? await Promise.all([leerRielCobro(supabase, argsViaje), leerConfirmacionViaje(supabase, argsViaje)])
-    : [null, null]
-  const banner = bannerCierre || rielCobro || confirmacionViaje
+  // Documentos y entrega (F4): solo con `entrega_viaje.activo` y en la etapa que declara sus gates.
+  const [rielCobro, confirmacionViaje, entregaViaje] = workspaceId
+    ? await Promise.all([leerRielCobro(supabase, argsViaje), leerConfirmacionViaje(supabase, argsViaje), leerEntregaViaje(supabase, argsViaje)])
+    : [null, null, null]
+  const banner = bannerCierre || rielCobro || confirmacionViaje || entregaViaje
     ? (
       <>
         {bannerCierre}
         {rielCobro}
         {confirmacionViaje}
+        {entregaViaje}
       </>
     )
     : null
