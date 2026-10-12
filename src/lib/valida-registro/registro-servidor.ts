@@ -6,7 +6,7 @@ import { MODULOS } from '@/lib/modulos/catalogo'
 import { VENTANA_HORAS, dominioDeCorreo, motivoDeRechazo, type MotivoRechazo } from '@/lib/secop-registro/antiabuso'
 import { derivarSlug, problemaDelSlug } from '@/lib/secop-registro/slug'
 import { POLITICA_DATOS_VALIDA } from '@/lib/valida-api/politica'
-import { VERSION_ACEPTADA, textoAceptado } from './condiciones'
+import { condicionesVigentes, textoAceptado, versionAceptada } from './condiciones'
 import {
   candidatosDeSlug,
   decidirOrigen,
@@ -126,7 +126,8 @@ export async function crearEspacioValida(datos: DatosRegistroValida): Promise<Re
   if (!datos.acepta) {
     return { tipo: 'dato', campo: 'acepta', texto: 'Para empezar la prueba tienes que aceptar las condiciones y la política de datos.' }
   }
-  if (datos.condicionesVersion !== VERSION_ACEPTADA) {
+  const condiciones = condicionesVigentes()
+  if (datos.condicionesVersion !== versionAceptada(condiciones)) {
     // La pantalla mostró otro texto (estaba abierta desde antes de un cambio): que lo vuelva a leer.
     return { tipo: 'dato', campo: 'acepta', texto: 'Las condiciones cambiaron mientras tenías la página abierta. Recarga y vuelve a leerlas.' }
   }
@@ -247,8 +248,8 @@ export async function crearEspacioValida(datos: DatosRegistroValida): Promise<Re
       estado: 'creado',
       workspace_id: workspaceId,
       slug_creado: slug,
-      condiciones_version: VERSION_ACEPTADA,
-      condiciones_sha256: huellaAceptacion(),
+      condiciones_version: versionAceptada(condiciones),
+      condiciones_sha256: huellaAceptacion(textoAceptado(condiciones)),
       politica_version: POLITICA_DATOS_VALIDA.version,
       aceptado_at: new Date().toISOString(),
       updated_at: new Date().toISOString(),

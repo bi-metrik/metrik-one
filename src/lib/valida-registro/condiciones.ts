@@ -1,4 +1,5 @@
 import { POLITICA_DATOS_VALIDA } from '@/lib/valida-api/politica'
+import { CLAUSULA_COBRO_APROBADA_PARA_PRODUCCION, CLAUSULA_COBRO_TRAS_PRUEBA, camposClausulaCobro } from './condiciones-cobro'
 
 /**
  * Los textos legales del registro autogestionado de Valida (pantalla «Tu empresa»).
@@ -6,9 +7,10 @@ import { POLITICA_DATOS_VALIDA } from '@/lib/valida-api/politica'
  * Aprobados por Mauricio el 2026-10-11, copiados TAL CUAL (no se reescriben aquí):
  *   - Condiciones de la prueba v1.0 (Emilio, con Lucía en el encargo):
  *     `proyectos/metrik/valida/docs/legal/condiciones-prueba-valida-v1.0.md` §1, tres bloques.
- *     ⚠️ La cláusula de cobro al terminar la prueba (§2 de ese archivo) NO está aquí: es inactiva hasta
- *     que el registro pida método de pago (ePayco). No entra a este texto ni a su huella; al
- *     activarse reemplaza el numeral 7 y la versión pasa a 2.0.
+ *     ⚠️ La cláusula de cobro al terminar la prueba (§2 de ese archivo) está en `condiciones-cobro.ts`,
+ *     INACTIVA: no entra a estas Condiciones ni a su huella hasta que `condicionesVigentes` la active
+ *     (flag + campos llenos + visto de Vera para producción). Al activarse reemplaza el numeral 7 y
+ *     la versión pasa a 2.0.
  *   - Aviso del formulario y casilla v1.0 (Lucía, con Emilio):
  *     `proyectos/metrik/valida/docs/legal/aviso-formulario-registro-v1.0.md` §1.
  *
@@ -98,6 +100,11 @@ export const AVISO_REGISTRO = {
 /** Lo que se guarda en `valida_registros.condiciones_version` y lo que la pantalla devuelve al enviar. */
 export const VERSION_ACEPTADA = `condiciones-${CONDICIONES_PRUEBA.version}+aviso-${AVISO_REGISTRO.version}`
 
+/** La versión aceptada de unas Condiciones dadas (la 2.0 con cobro, si algún día se activa). */
+export function versionAceptada(c: { version: string } = CONDICIONES_PRUEBA): string {
+  return `condiciones-${c.version}+aviso-${AVISO_REGISTRO.version}`
+}
+
 /** El aviso como se lee en la pantalla: texto, enlace a la Política (con su dirección) y punto. */
 export function avisoComoSeLee(politica: { titulo: string; url: string } = POLITICA_DATOS_VALIDA): string {
   return `${AVISO_DATOS_FORMULARIO} ${politica.titulo} (${politica.url}).`
@@ -107,10 +114,10 @@ export function avisoComoSeLee(politica: { titulo: string; url: string } = POLIT
  * Todo lo que la persona leyó y aceptó al marcar la casilla, en un orden fijo. Sobre esto se calcula
  * la huella. No se muestra así: es la forma canónica de reconstruir la constancia desde el código.
  */
-export function textoAceptado(): string {
+export function textoAceptado(c: { titulo: string; version: string; texto: string } = CONDICIONES_PRUEBA): string {
   return [
-    `${CONDICIONES_PRUEBA.titulo} · v${CONDICIONES_PRUEBA.version}`,
-    CONDICIONES_PRUEBA.texto,
+    `${c.titulo} · v${c.version}`,
+    c.texto,
     `Aviso del formulario de registro · v${AVISO_REGISTRO.version}`,
     avisoComoSeLee(),
     `Casilla: ${TEXTO_CASILLA}`,
@@ -122,4 +129,35 @@ export function textosListos(
   textos: readonly string[] = [CONDICIONES_PRUEBA.texto, AVISO_DATOS_FORMULARIO, TEXTO_CASILLA],
 ): boolean {
   return textos.every((t) => !MARCADOR_TEXTO_PENDIENTE.test(t))
+}
+
+// ── La cláusula de cobro, inactiva (ver `condiciones-cobro.ts`) ──────────────────────────────
+
+const CAMPO_CLAUSULA = /\{([a-z_]+)\}/g
+
+export interface CondicionesVigentes {
+  version: string
+  titulo: string
+  texto: string
+  /** true = la versión con medio de pago y cobro al terminar la prueba (2.0). */
+  conCobro: boolean
+}
+
+/**
+ * Las Condiciones que muestra y registra la pantalla. Hoy, siempre la v1.0 (sin cobro). La 2.0 sale
+ * solo con `VALIDA_COBRO_TRAS_PRUEBA=1`, los cuatro campos de la cláusula llenos y, en producción,
+ * `CLAUSULA_COBRO_APROBADA_PARA_PRODUCCION`. La cláusula REEMPLAZA el numeral 7 y el encabezado
+ * pasa a «Versión 2.0»; el resto del texto queda igual.
+ */
+export function condicionesVigentes(env: Record<string, string | undefined> = process.env): CondicionesVigentes {
+  const base: CondicionesVigentes = { ...CONDICIONES_PRUEBA, conCobro: false }
+  if (env.VALIDA_COBRO_TRAS_PRUEBA !== '1') return base
+  if (env.VERCEL_ENV === 'production' && !CLAUSULA_COBRO_APROBADA_PARA_PRODUCCION) return base
+  const campos = camposClausulaCobro(env)
+  if (Object.values(campos).some((v) => !v)) return base
+  const clausula = CLAUSULA_COBRO_TRAS_PRUEBA.replace(CAMPO_CLAUSULA, (_, c: string) => campos[c] ?? `{${c}}`)
+  const numeral7 = /7\. Al terminar la prueba\.[\s\S]*?(?=\n\n8\. )/
+  if (!numeral7.test(BLOQUE_3) || !BLOQUE_1.includes('· Versión 1.0')) return base
+  const texto = [BLOQUE_1.replace('· Versión 1.0', '· Versión 2.0'), BLOQUE_2, BLOQUE_3.replace(numeral7, () => clausula)].join('\n\n')
+  return { ...base, version: '2.0', texto, conCobro: true }
 }
