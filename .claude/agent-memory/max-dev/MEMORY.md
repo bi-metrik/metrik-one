@@ -2,6 +2,8 @@
 
 ## Project memories
 
+- ⚠️⚠️ [Post-cotización ola 2: recordatorios, plan de pagos, seguimiento](project_post_cotizacion_ola2.md) — 3 migraciones SIN aplicar; toque lee metadata, no pausado_hasta
+
 - ⚠️⚠️ [Alta autogestionada de Valida (#1095, #1097, #1098)](project_valida_alta_autogestionada.md) — #1097 aplicada y mergeada; PR 1/9 de Valida son parches
 - ⚠️⚠️ [Renovación continua de Valida (fila A)](project_valida_renovacion_continua.md) — paso 6b agrega 1 cuota; script de los 4 CDA SIN correr; ficha sin dias_trial
 - ⚠️⚠️ [SOE-007: devolución de dinero y venta reembolsada](project_devoluciones_dinero_soe007.md) — 20261009210000 APLICADA; devuelto ≥ cobrado sale de ventas; read-only API sí mide
