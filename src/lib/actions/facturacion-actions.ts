@@ -32,7 +32,13 @@ import {
   recibosDelCobro,
   type ConfigReciboPorConcepto,
 } from '@/lib/siigo/recibo-componentes'
-import { leerTitularCorregido, validarTitular, type TitularEditado } from '@/lib/siigo/titular'
+import { leerTitularCorregido, rutDeConfirmacion, titularDeConfirmacion, validarTitular, type TitularEditado } from '@/lib/siigo/titular'
+import { desdePorLinea, hayReglaDeCola } from '@/lib/facturacion/regla-viaje'
+import { entradasViaje, lineasPorTitular, reglaDelNegocio } from '@/lib/facturacion/cola-viaje'
+import { repartoFacturaViaje } from '@/lib/facturacion/reparto-viaje'
+import { adaptadorSiigo, proveedorDeFacturacion, type ProveedorFacturacion } from '@/lib/facturacion/proveedor'
+import type { OpcionesEmision } from '@/lib/siigo/facturas'
+import { borradorFacturaViaje, type RepartoFacturaViaje } from '@/lib/siigo/config-viaje'
 import { siigoRequest, type SiigoConfig } from '@/lib/siigo/client'
 import {
   conceptoFactura,
@@ -328,7 +334,12 @@ async function armarColaFacturacion(
       .eq('workspace_id', workspaceId).order('id').range(d, h),
     { etiqueta: 'facturacion/lineas_negocio' },
   )
-  let desde: number | null = null
+  // Desde qué etapa entra CADA línea (F5): antes la primera línea mandaba para todas. Una
+  // línea sin valor propio hereda el primero, como antes, así que ninguna cola cambia (Q5).
+  // Las líneas de viaje (`facturacion.por_titular`) entran por evento, no por etapa (Vera C4).
+  const desdeDeLinea = desdePorLinea(lineas)
+  const lineasViaje = lineasPorTitular(lineas)
+  const desde: number | null = [...desdeDeLinea.values()][0] ?? null
   // Los conceptos se resuelven POR LÍNEA: cada una vende cosas distintas y su
   // catálogo de Siigo no tiene por qué coincidir.
   const conceptosPorLinea = new Map<string, ConceptosConfig>()
@@ -336,15 +347,13 @@ async function armarColaFacturacion(
   // ya tiene una factura CARGADA, que es distinto de emitida desde aquí.
   const facturaSlugPorLinea = new Map<string, string>()
   for (const l of lineas) {
-    const f = (l.config_extra?.facturacion ?? {}) as { desde_etapa_numero?: number }
-    if (typeof f.desde_etapa_numero === 'number' && desde === null) desde = f.desde_etapa_numero
     const s = (l.config_extra?.siigo ?? {}) as {
       conceptos?: ConceptosConfig; bloque_factura_slug?: string
     }
     if (s.conceptos) conceptosPorLinea.set(l.id, s.conceptos)
     facturaSlugPorLinea.set(l.id, slugFacturaDeLinea(l.config_extra))
   }
-  if (desde == null) {
+  if (!hayReglaDeCola(lineas)) {
     return { data: { casos: [], workspace_nombre, desde_etapa_numero: null, siigo_configurado, descarte_abierto: ventanaDescarteAbierta(), descarte_hasta: DESCARTE_FACTURACION_HASTA, productos: [], totales: TOTALES_VACIOS } }
   }
 
@@ -369,7 +378,15 @@ async function armarColaFacturacion(
       .range(d, h),
     { etiqueta: 'facturacion/negocios' },
   )
-  const abiertos = negocios.filter(n => n.estado === 'abierto' && (n.etapas_negocio?.numero ?? 0) > desde!)
+  const porEtapa = negocios.filter(n => {
+    if (n.estado !== 'abierto') return false
+    const d = desdeDeLinea.get(n.linea_id ?? '')
+    return d !== undefined && (n.etapas_negocio?.numero ?? 0) > d
+  })
+  // Viajes: empresa al confirmar; persona con el paquete enviado y el saldo en cero; o forzada.
+  const viajesAbiertos = negocios.filter(n => n.estado === 'abierto' && lineasViaje.has(n.linea_id ?? ''))
+  const entradaViaje = await entradasViaje(svc, workspaceId, viajesAbiertos)
+  const abiertos = [...porEtapa, ...viajesAbiertos.filter(n => entradaViaje.has(n.id))]
   const cerrados = negocios.filter(n => n.estado !== 'abierto')
 
   // ── La factura de cada caso: bloque ORIGINAL + marca, nunca una copia ──────
@@ -545,13 +562,28 @@ async function armarColaFacturacion(
   // el de UTC: emitir a las 8 p.m. del 31 fechaba la factura el 1 del mes siguiente.
   const hoy = todayBogotaISO()
 
+  // La factura de cada viaje de la cola, con el MISMO armado que la emisión (dos conceptos).
+  const facViaje = new Map<string, ReturnType<typeof borradorFacturaViaje>>()
+  for (const n of candidatos) {
+    if (!lineasViaje.has(n.linea_id ?? '')) continue
+    const rep = await repartoFacturaViaje(svc, { workspaceId, negocio: n }).catch(() => ({ ok: false as const, falta: 'el reparto del valor (no se pudo leer la cotización)' }))
+    const borr = borradorFacturaViaje(cfgEval, 'x', rep.ok ? rep.reparto : null, hoy, 19)
+    facViaje.set(n.id, rep.ok ? borr : { ...borr, faltantes: [...borr.faltantes.filter(f => !f.startsWith('el reparto')), rep.falta] })
+  }
+
   const casos: CasoPorFacturar[] = candidatos.map(n => {
     const rut = rutPorNegocio.get(n.id) ?? {}
     const contacto = contactos.get(n.contacto_id ?? '') ?? { email: null, telefono: null }
     // El titular corregido manda sobre el RUT, igual que en la emisión: la revisión
     // tiene que mostrar a nombre de quién va a salir de verdad.
     const titularCorregido = leerTitularCorregido(n.metadata)
-    const cli = borradorCliente(rut, contacto, titularCorregido)
+    // Sin RUT, el titular de «El cliente confirmó» (viaje) con su dirección y ciudad: la MISMA
+    // regla que la emisión (`borradorDelNegocio`), para que la revisión diga a nombre de quién sale.
+    const titularViaje = rutPorNegocio.has(n.id) ? null : titularDeConfirmacion(n.metadata)
+    const cli = titularViaje
+      ? borradorCliente(rutDeConfirmacion(n.metadata) ?? {}, contacto, titularCorregido ?? titularViaje)
+      : borradorCliente(rut, contacto, titularCorregido)
+    const esViaje = lineasViaje.has(n.linea_id ?? '')
     const honorario = n.precio_aprobado == null ? null : Number(n.precio_aprobado)
     // El concepto sale del MISMO helper que usa la emisión: si la pantalla y el
     // documento lo resolvieran por su cuenta, se verían distintos el día que
@@ -609,7 +641,9 @@ async function armarColaFacturacion(
       },
       honorario,
       valor_upme: upme,
-      faltan_factura: fac.faltantes,
+      // Un viaje sale con sus dos conceptos (ingreso propio y terceros), nunca con el producto de
+      // SOENA: lo que le falte a esa factura (productos, reparto) es lo que la cola dice.
+      faltan_factura: esViaje ? (facViaje.get(n.id)?.faltantes ?? fac.faltantes) : fac.faltantes,
       faltan_cliente: cli.faltantes,
       // El mapa solo guarda RUT con identificación utilizable, así que su
       // ausencia cubre las dos formas de no tenerlo: sin documento cargado y
@@ -628,7 +662,7 @@ async function armarColaFacturacion(
           : { permitida: false, reemplaza: false, razon: permisoCarga.razon },
       cerrado,
       recibo_numero: ultimoReciboPorNegocio.get(n.id) ?? null,
-      base_gravable: fac.payload.items[0]?.price ?? null,
+      base_gravable: (esViaje ? facViaje.get(n.id)?.payload.items[0]?.price : fac.payload.items[0]?.price) ?? null,
       descartado,
     }
   })
@@ -892,6 +926,26 @@ async function emitirFacturaDeNegocioSinClave(
   const cerrado = await bloqueoPorNegocioCerrado(svc, workspaceId, negocioId)
   if (cerrado) return { ok: false, error: cerrado }
 
+  // Viajes (F5): solo lo que entró a la cola por su evento (o forzado por la dirección), y nunca con
+  // el producto de SOENA. Las líneas de siempre siguen exactamente su camino.
+  const regla = await reglaDelNegocio(svc, workspaceId, negocioId)
+  if (regla?.regla === 'apagada') return { ok: false, error: 'La facturación está apagada en esta línea.' }
+  let reparto: RepartoFacturaViaje | undefined
+  let proveedor: ProveedorFacturacion = adaptadorSiigo
+  if (regla?.regla === 'viaje') {
+    if (!regla.entra) return { ok: false, error: 'Esta factura todavía no entra a la cola: falta el evento de su titular (confirmación de la empresa, o paquete enviado con el saldo en cero).' }
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const { data: negViaje } = await (svc as any).from('negocios').select('precio_aprobado, metadata').eq('id', negocioId).eq('workspace_id', workspaceId).maybeSingle()
+    const r = await repartoFacturaViaje(svc, { workspaceId, negocio: (negViaje ?? { precio_aprobado: null, metadata: null }) as { precio_aprobado: number | null; metadata: Record<string, unknown> | null } })
+    if (!r.ok) return { ok: false, error: `Falta ${r.falta}.` }
+    reparto = r.reparto
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const { data: wsProv } = await (svc as any).from('workspaces').select('config_extra').eq('id', workspaceId).maybeSingle()
+    const p = proveedorDeFacturacion((wsProv as { config_extra?: unknown } | null)?.config_extra)
+    if ('error' in p) return { ok: false, error: p.error }
+    proveedor = p
+  }
+
   let nombre: string | null = null
   if (staffId) {
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -932,27 +986,27 @@ async function emitirFacturaDeNegocioSinClave(
     if (!titular.ok) return { ok: false, error: titular.mensaje }
   }
 
-  const r = await emitirFacturaNegocio(
-    workspaceId,
-    negocioId,
-    nombre,
-    {
-      bloqueFacturaSlug,
-      datos: {
-        email: opciones?.datos?.email,
-        telefono: opciones?.datos?.telefono,
-        productoCode: opciones?.datos?.productoCode,
-        ...(titular?.ok ? { titular: titular.titular } : {}),
-      },
-      // Por defecto se RADICA: el botón dice "facturar electrónicamente" y una
-      // pantalla que promete eso no puede dejar un borrador sin avisar. El modo
-      // sin radicar existe para la primera prueba controlada con Diana.
-      emitir: opciones?.emitir !== false,
-      enviarCorreo: opciones?.enviarCorreo === true,
-      justificacionDuplicado: opciones?.justificacionDuplicado,
+  const opcionesEmision: OpcionesEmision = {
+    bloqueFacturaSlug,
+    ...(reparto ? { viaje: reparto } : {}),
+    datos: {
+      email: opciones?.datos?.email,
+      telefono: opciones?.datos?.telefono,
+      productoCode: opciones?.datos?.productoCode,
+      ...(titular?.ok ? { titular: titular.titular } : {}),
     },
-    { staffId },
-  )
+    // Por defecto se RADICA: el botón dice "facturar electrónicamente" y una
+    // pantalla que promete eso no puede dejar un borrador sin avisar. El modo
+    // sin radicar existe para la primera prueba controlada con Diana.
+    emitir: opciones?.emitir !== false,
+    enviarCorreo: opciones?.enviarCorreo === true,
+    justificacionDuplicado: opciones?.justificacionDuplicado,
+  }
+  // Un viaje sale por la capa de proveedor (Siigo hoy, Aliaddo mañana). El camino de SOENA sigue
+  // llamando directo, como siempre (Vera F5-5).
+  const r = reparto
+    ? await proveedor.emitirFactura({ workspaceId, negocioId, staffNombre: nombre, staffId, opciones: opcionesEmision })
+    : await emitirFacturaNegocio(workspaceId, negocioId, nombre, opcionesEmision, { staffId })
 
   if (!r.ok) {
     switch (r.motivo) {

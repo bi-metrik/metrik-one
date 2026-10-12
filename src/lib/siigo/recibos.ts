@@ -55,7 +55,7 @@
  */
 
 import { createServiceClient } from '@/lib/supabase/server'
-import { siigoRequest, getSiigoConfig, claveIdempotencia, SiigoError, type SiigoConfig } from './client'
+import { bloqueoPorEntornoDelNegocio, siigoRequest, getSiigoConfig, claveIdempotencia, SiigoError, type SiigoConfig } from './client'
 import {
   borradorAbono,
   borradorRecibo,
@@ -459,6 +459,13 @@ export async function emitirReciboDeCobro(
 
   if (!cobro.negocio_id) return { ok: false, motivo: 'error', mensaje: 'El cobro no está atado a un negocio' }
   const negocioId = cobro.negocio_id
+
+  // Un negocio de prueba nunca emite en los libros reales (adenda Siigo, F8-5).
+  {
+    const { data: negPrueba } = await db(svc).from('negocios').select('metadata').eq('id', negocioId).maybeSingle()
+    const entorno = await bloqueoPorEntornoDelNegocio(workspaceId, (negPrueba as { metadata?: Record<string, unknown> | null } | null)?.metadata)
+    if (entorno) return { ok: false, motivo: 'error', mensaje: entorno }
+  }
 
   // ── 1. ¿Este COBRO ya tiene recibo? ──
   // La marca por cobro es lo que reemplazó a `negocios.metadata.siigo_recibo`: con la
