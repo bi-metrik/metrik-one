@@ -177,7 +177,7 @@ describe('gastos', () => {
     } finally {
       await otra.close()
     }
-  })
+  }, 30_000) // levanta una segunda base: con la máquina cargada pasa de los 5 s por defecto
 })
 
 describe('aprobaciones_excepcion', () => {
