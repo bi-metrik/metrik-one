@@ -19,6 +19,7 @@ import { registrarActividad } from '@/lib/activity/registrar-actividad'
 import { instanciarBloquesDeEtapa } from '@/lib/negocios/instanciar-bloques-etapa'
 import { evaluarGateEntrega } from './entrega-datos'
 import { configEtapasPorFecha, movimientoPorFecha, pesosCierre } from './cierre-viaje'
+import { avisoSoloAQuienLleva } from '@/lib/negocios/negocios-de-prueba'
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type Db = any
@@ -58,8 +59,12 @@ async function responsables(svc: Db, negocioId: string): Promise<string[]> {
   return ((data ?? []) as Array<{ profile_id: string | null }>).map((d) => d.profile_id ?? '').filter(Boolean)
 }
 
-async function avisar(svc: Db, workspaceId: string, negocioId: string, destinatarios: string[], contenido: string, motivo: string) {
-  const unicos = [...new Set(destinatarios)]
+async function avisar(svc: Db, n: { id: string; workspace_id: string; linea_id: string | null; metadata: unknown }, destinatarios: string[], contenido: string, motivo: string) {
+  const workspaceId = n.workspace_id
+  const negocioId = n.id
+  // El viaje de prueba (F8-1) solo le avisa a quien lo lleva o lo aprueba (el respaldo de
+  // `destinatarios_negocio` es el supervisor del área real).
+  const unicos = await avisoSoloAQuienLleva(svc, n, new Set(destinatarios))
   if (unicos.length === 0) return
   const { error } = await svc.from('notificaciones').insert(unicos.map((p) => ({
     workspace_id: workspaceId,
@@ -171,7 +176,7 @@ export async function correrEtapasPorFecha(svc: Db, opts: { hoy: string; soloNeg
     const aprobadores = await perfiles(svc, n.workspace_id, (((linea.config_extra as { aprobaciones?: { staff_ids?: unknown } } | null)?.aprobaciones?.staff_ids ?? []) as unknown[]).filter((x): x is string => typeof x === 'string'))
     if (faltaba.length > 0) {
       resumen.sin_listo++
-      await avisar(svc, n.workspace_id, n.id, aprobadores, `${n.nombre} salió de viaje sin estar listo: ${faltaba.join(' ')}`, 'viaje_sin_listo')
+      await avisar(svc, n, aprobadores, `${n.nombre} salió de viaje sin estar listo: ${faltaba.join(' ')}`, 'viaje_sin_listo')
     }
     // F6-2: el día de salida con saldo, aviso a la comercial y a la dirección.
     const precio = Number(n.precio_aprobado ?? 0)
@@ -185,7 +190,7 @@ export async function correrEtapasPorFecha(svc: Db, opts: { hoy: string; soloNeg
         resumen.con_saldo++
         const { data: c } = n.contacto_id ? await svc.from('contactos').select('nombre').eq('id', n.contacto_id).maybeSingle() : { data: null }
         const quien = ((c as { nombre?: string } | null)?.nombre ?? '').trim() || n.nombre
-        await avisar(svc, n.workspace_id, n.id, [...(await responsables(svc, n.id)), ...aprobadores], `${quien} viaja hoy con saldo de ${pesosCierre(saldo)}.`, 'viaja_con_saldo')
+        await avisar(svc, n, [...(await responsables(svc, n.id)), ...aprobadores], `${quien} viaja hoy con saldo de ${pesosCierre(saldo)}.`, 'viaja_con_saldo')
       }
     }
   }

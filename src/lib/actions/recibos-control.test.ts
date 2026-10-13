@@ -26,8 +26,9 @@ let lineas: Fila[]
 /** `v_cobro_valor`: el reparto canónico. Vacío = el panel ni lo consulta. */
 let reparto: Fila[]
 
+const sesion = vi.hoisted(() => ({ staffId: 's1' }))
 vi.mock('@/lib/actions/get-workspace', () => ({
-  getWorkspace: async () => ({ workspaceId: WS, staffId: 's1', role: 'admin', areas: ['financiera'] }),
+  getWorkspace: async () => ({ workspaceId: WS, staffId: sesion.staffId, role: 'admin', areas: ['financiera'] }),
 }))
 
 vi.mock('@/lib/permissions/can-edit', () => ({ canEditBloque: () => true }))
@@ -85,6 +86,9 @@ vi.mock('@/lib/supabase/server', () => ({
           if (fallaTabla === tabla) throw new Error(`column ${tabla}.inexistente does not exist`)
           return { data: fuente(), error: null }
         },
+        // Sin `.range()`: la lectura de los negocios de prueba (`metadata->>es_prueba = 'true'`).
+        then: (r: (v: unknown) => unknown) =>
+          r({ data: tabla === 'negocios' ? fuente().filter(f => (f.metadata as Fila | null)?.es_prueba === true) : [], error: null }),
       }
       return chain
     },
@@ -107,6 +111,7 @@ const LINEA_SOENA = {
 }
 
 beforeEach(() => {
+  sesion.staffId = 's1'
   fallaTabla = null
   selects = {}
   fallaRpc = null
@@ -618,5 +623,29 @@ describe('getControlRecibos — el destinatario sale de email_cliente_negocio', 
 
     expect(r.data).toBeNull()
     expect(r.error).toContain('emails_cliente_negocio')
+  })
+})
+
+describe('getControlRecibos — negocio de prueba (F8-1)', () => {
+  beforeEach(() => {
+    negocios.push({
+      id: 'neg-prueba', codigo: 'P', nombre: 'PRUEBA · Cusco', contacto_id: 'ct-1', carpeta_url: null, linea_id: 'lin-1',
+      metadata: { es_prueba: true, siigo_cliente: { siigo_id: 'cli-9', identificacion: '52100200' } },
+      negocio_responsables: [{ staff_id: 's-cp' }],
+    })
+    reparto.push({ cobro_id: 'c-prueba', a_tramo1: 0, a_tramo2: 0, a_tarifa: 1_216_000, excedente: 0 })
+    cobros.push({ id: 'c-prueba', negocio_id: 'neg-prueba', monto: 1_216_000, fecha: '2026-10-12', concepto: 'Anticipo', siigo_recibo: null, recibo_no_aplica: null })
+  })
+
+  it('su pago no aparece ni suma para la financiera real', async () => {
+    const { data } = await getControlRecibos()
+    expect(data!.pagos.map(p => p.cobro_id)).not.toContain('c-prueba')
+    expect(data!.totales.pendientes).toBe(1)
+  })
+
+  it('quien lo lleva sí lo ve', async () => {
+    sesion.staffId = 's-cp'
+    const { data } = await getControlRecibos()
+    expect(data!.pagos.map(p => p.cobro_id)).toContain('c-prueba')
   })
 })

@@ -392,3 +392,33 @@ describe('correo al equipo (Vera F3-5)', () => {
     expect((tablas.recordatorios_log as Fila[]).find((l) => l.canal === 'email')).toMatchObject({ estado: 'enviado', intentos: 2 })
   })
 })
+
+describe('negocio de prueba (F8-1)', () => {
+  beforeEach(() => {
+    // El negocio de prueba vive en la línea clon: aprueba la dirección de prueba, lo lleva la
+    // comercial de prueba y NO tiene responsable de operaciones (el respaldo del área es real).
+    const neg = tablas.negocios.find((n) => n.id === NEG)!
+    neg.metadata = { es_prueba: true }
+    ;(tablas.lineas_negocio[0].config_extra as Fila).aprobaciones = { staff_ids: ['s-dp'] }
+    tablas.negocio_responsables = [{ negocio_id: NEG, staff_id: 's-cp', rol: 'comercial' }]
+    tablas.staff.push(
+      { id: 's-cp', profile_id: 'p-cp', workspace_id: WS, is_active: true, staff_areas: [{ area: 'comercial' }] },
+      { id: 's-dp', profile_id: 'p-dp', workspace_id: WS, is_active: true, staff_areas: [] },
+    )
+  })
+
+  it('el respaldo del área no le avisa al staff real; el vencido llega solo a la aprobadora de prueba', async () => {
+    await correr('2026-10-13') // T-3 del hotel: iría a operaciones, sin responsable → toda el área
+    await correr('2026-10-19') // vencido: escala a los aprobadores de la línea
+    const destinatarios = new Set(avisos().map((a) => a.destinatario_id))
+    expect(destinatarios.has('p-alejandra')).toBe(false)
+    expect(destinatarios.has('p-edgar')).toBe(false)
+    expect(destinatarios.has('p-daniela')).toBe(false)
+    expect(avisos().some((a) => a.tipo === 'pago_proveedor_vencido' && a.destinatario_id === 'p-dp')).toBe(true)
+  })
+
+  it('el toque de seguimiento sí le llega a la comercial de prueba que lo lleva', async () => {
+    await correr('2026-10-13')
+    expect(avisos().filter((a) => a.tipo === 'toque_seguimiento').map((a) => a.destinatario_id)).toEqual(['p-cp'])
+  })
+})

@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { candadoDeCron } from '@/lib/idempotencia/candado-cron'
+import { avisoSoloAQuienLleva } from '@/lib/negocios/negocios-de-prueba'
 import { createClient } from '@supabase/supabase-js'
 import {
   getConfigNotificaciones,
@@ -42,7 +43,7 @@ export async function GET(req: NextRequest) {
 
   const { data: negocios } = await supabase
     .from('negocios')
-    .select('id, workspace_id, nombre, stage_actual')
+    .select('id, workspace_id, nombre, stage_actual, linea_id, metadata')
     .eq('estado', 'abierto')
     .eq('stage_actual', 'ejecucion')
 
@@ -139,7 +140,9 @@ export async function GET(req: NextRequest) {
       }
     }
 
-    for (const destinatarioId of destinatarios) {
+    // El negocio de prueba (F8-1) solo le avisa a quien lo lleva o lo aprueba: ni el
+    // supervisor ni el owner del workspace real.
+    for (const destinatarioId of await avisoSoloAQuienLleva(supabase, negocio, destinatarios)) {
       const { data: existente } = await supabase
         .from('notificaciones')
         .select('id')

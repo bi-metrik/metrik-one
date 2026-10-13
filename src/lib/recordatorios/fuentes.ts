@@ -42,6 +42,8 @@ export interface NegocioFuente {
   precio_aprobado?: number | null
   /** Ya se registró la calificación del viaje (fuente `regreso`: la encuesta no vuelve a salir). */
   encuesta_respondida?: boolean
+  /** `metadata.es_prueba` (F8-1): sus avisos solo van a quien lo lleva o lo aprueba. */
+  es_prueba?: boolean
   /** A dónde fue el viaje (texto de la encuesta). */
   destino?: string | null
 }

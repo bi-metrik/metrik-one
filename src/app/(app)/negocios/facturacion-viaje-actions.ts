@@ -20,6 +20,7 @@ import { getWorkspace } from '@/lib/actions/get-workspace'
 import { emitirReciboViaje } from '@/lib/viaje/riel-cobro-datos'
 import { entornoSiigo } from '@/lib/siigo/config-viaje'
 import type { SiigoConfig } from '@/lib/siigo/client'
+import { negociosDePruebaOcultos, sinOcultos } from '@/lib/negocios/negocios-de-prueba'
 
 const MENSAJE_EN_CURSO = 'Tu acción anterior todavía se está guardando. Espera un momento.'
 
@@ -144,14 +145,20 @@ async function puedeEmitirPendientes(): Promise<{ ok: true; workspaceId: string;
 interface PendienteRecibo { negocioId: string; cobroId: string; configLinea: Record<string, unknown> }
 
 /** Los recibos de viaje que quedaron pendientes (`negocios.metadata.recibos_viaje`). */
-async function recibosPendientes(svc: Db, workspaceId: string): Promise<PendienteRecibo[]> {
+async function recibosPendientes(svc: Db, workspaceId: string, staffId: string | null): Promise<PendienteRecibo[]> {
   const { data, error } = await svc
     .from('negocios')
     .select('id, metadata, linea_id')
     .eq('workspace_id', workspaceId)
     .not('metadata->recibos_viaje', 'is', null)
   if (error) throw new Error(`No se pudieron leer los pendientes: ${error.message}`)
-  const negocios = (data ?? []) as Array<{ id: string; metadata: Record<string, unknown> | null; linea_id: string | null }>
+  // Los recibos del viaje de prueba (F8-1) no los cuenta ni los emite quien no lo lleva ni lo
+  // aprueba: el lote de la financiera real no puede mandar un recibo de prueba a su Siigo.
+  const negocios = sinOcultos(
+    (data ?? []) as Array<{ id: string; metadata: Record<string, unknown> | null; linea_id: string | null }>,
+    await negociosDePruebaOcultos(svc, workspaceId, staffId),
+    n => n.id,
+  )
   const lineaIds = [...new Set(negocios.map(n => n.linea_id).filter((x): x is string => !!x))]
   const { data: lineas } = lineaIds.length > 0
     ? await svc.from('lineas_negocio').select('id, config_extra').in('id', lineaIds)
@@ -171,7 +178,7 @@ export async function contarPendientesSiigoViaje(): Promise<{ ok: true; recibos:
   const svc = createServiceClient() as Db
   try {
     const [pend, { data: ws }] = await Promise.all([
-      recibosPendientes(svc, q.workspaceId),
+      recibosPendientes(svc, q.workspaceId, q.staffId),
       svc.from('workspaces').select('config_extra').eq('id', q.workspaceId).maybeSingle(),
     ])
     const cfg = ((ws as { config_extra?: { siigo_config?: Partial<SiigoConfig> } } | null)?.config_extra?.siigo_config) ?? null
@@ -190,7 +197,7 @@ async function emitirPendientesSiigoViajeSinClave(conteoConfirmado: number): Pro
   const q = await puedeEmitirPendientes()
   if (!q.ok) return q
   const svc = createServiceClient() as Db
-  const pend = await recibosPendientes(svc, q.workspaceId)
+  const pend = await recibosPendientes(svc, q.workspaceId, q.staffId)
   if (!Number.isInteger(conteoConfirmado) || conteoConfirmado !== pend.length) {
     return { ok: false, error: `Ahora hay ${pend.length} recibos pendientes. Confirma de nuevo.`, conteo: pend.length }
   }
