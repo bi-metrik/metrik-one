@@ -1424,6 +1424,27 @@ export interface LecturaDevuelta {
 export async function devolverOpcionABandeja(itemId: string): Promise<{ ok: true; devueltas: LecturaDevuelta[] } | { ok: false; mensaje: string }> {
   const ctx = await contexto(itemId)
   if ('error' in ctx) return { ok: false, mensaje: ctx.error as string }
+  const lecturas = await lecturasDevueltasDe(ctx)
+  if (!lecturas.ok) return lecturas
+  const devueltas = lecturas.devueltas
+  const r = await deleteItem(itemId)
+  if (!r.success) return { ok: false, mensaje: r.error ?? 'No se pudo eliminar la opción.' }
+  await recalcularTotales(ctx.item.cotizacionId)
+  if (ctx.item.negocioId) revalidatePath(`/negocios/${ctx.item.negocioId}`)
+  return { ok: true, devueltas }
+}
+
+/**
+ * Los pantallazos de una opción, firmados para volver a la bandeja, SIN borrar la opción (la
+ * cotización por pasos borra en el acto y deja «Deshacer» con los mismos ids: C4). Solo lee.
+ */
+export async function lecturasParaLaBandeja(itemId: string): Promise<{ ok: true; devueltas: LecturaDevuelta[] } | { ok: false; mensaje: string }> {
+  const ctx = await contexto(itemId)
+  if ('error' in ctx) return { ok: false, mensaje: ctx.error as string }
+  return lecturasDevueltasDe(ctx)
+}
+
+async function lecturasDevueltasDe(ctx: ContextoDeItem): Promise<{ ok: true; devueltas: LecturaDevuelta[] } | { ok: false; mensaje: string }> {
   const tipo = tipoDeDefinicion(ctx.ranura)
   if (!tipo) return { ok: false, mensaje: 'Tipo de componente desconocido.' }
   const lecturas = conHabitaciones(ctx.tarifa)
@@ -1441,10 +1462,6 @@ export async function devolverOpcionABandeja(itemId: string): Promise<{ ok: true
     const pistas = lugarDeOpcion({ nombre: ctx.item.nombre, grupo: ctx.item.grupo, tarifa_pax: { casillas: { grupo_completo: l } } })
     devueltas.push({ tipo, lecturaJson, firma, pistas, imagen, huella: l.huellaImagen ?? null })
   }
-  const r = await deleteItem(itemId)
-  if (!r.success) return { ok: false, mensaje: r.error ?? 'No se pudo eliminar la opción.' }
-  await recalcularTotales(ctx.item.cotizacionId)
-  if (ctx.item.negocioId) revalidatePath(`/negocios/${ctx.item.negocioId}`)
   return { ok: true, devueltas }
 }
 

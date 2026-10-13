@@ -155,8 +155,13 @@ export function planDeTarifas(args: {
   const hayCombinables = ranuras.some(r => r.combinable)
 
   // ── Qué tarifas tienen que existir ──
-  const necesarias: NombreTarifa[] = ranuras.length === 0 ? [] : hayCombinables ? [...NOMBRES_TARIFA] : ['Recomendada']
+  // La Recomendada, siempre que haya algo que escoger. La Económica y la Premium nacen cuando
+  // aparece el primer vuelo u hotel con opciones (o la cotización no tiene ninguna tarifa): una
+  // que alguien eliminó a propósito no vuelve sola en la acción siguiente.
   const existentes = despues.tarifas
+  const hayCombinablesAntes = ranurasConAlternativas(antes.items).some(r => r.combinable)
+  const conEconomicaYPremium = hayCombinables && (existentes.length === 0 || !hayCombinablesAntes)
+  const necesarias: NombreTarifa[] = ranuras.length === 0 ? [] : conEconomicaYPremium ? [...NOMBRES_TARIFA] : ['Recomendada']
   const yaEsta = new Set(existentes.map(t => claveTarifa(t.nombre)))
   let orden = existentes.reduce((m, t) => Math.max(m, t.orden), 0)
   const porCrear = necesarias.filter(n => !yaEsta.has(claveTarifa(n)))

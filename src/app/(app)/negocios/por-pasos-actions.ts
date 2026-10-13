@@ -30,6 +30,13 @@ import { enviarCotizacion } from '@/app/(app)/negocios/cotizacion-actions'
 import { esRecomendada, recomendadaDe } from '@/lib/cotizaciones/tarifas'
 import { etiquetaDeRanura, grupoDeInstancia, resolverRanura, siguienteGrupoDeTipo } from '@/lib/cotizaciones/ranuras-pantallazo'
 import { cambiosDeEstado, estadoDeLinea, estadosPermitidos, type EstadoServicio } from '@/lib/cotizaciones/estado-servicio'
+import { YA_CAMBIO, type OperacionDeshacer } from '@/lib/cotizaciones/deshacer-por-pasos'
+import { agregarOpcionARanura } from '@/app/(app)/negocios/ranura-actions'
+import { createServiceClient } from '@/lib/supabase/server'
+import { registrarActividad } from '@/lib/activity/registrar-actividad'
+import { evaluarSalida, leerUltimaExcepcion, recortarParaLog, TABLA_EXCEPCIONES } from '@/lib/cotizaciones/piso-salida-datos'
+import { pctTexto } from '@/lib/cotizaciones/piso-salida'
+import { esDuenoDelWorkspace, leerPlatformAdmin } from '@/lib/permissions/dueno-workspace'
 
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -323,6 +330,273 @@ export async function estadoDeServicioPorPasos(
   const c = await cerrarAccion(supabase, { workspaceId, cotizacionId, antes, staffId })
   if (!c.success) return c
   return { success: true, anterior, valorTotal: c.valorTotal }
+}
+
+// ── El margen de la cotización (uno para las tres tarifas) ──────────────────
+
+/**
+ * La casilla única de margen de Tarifas: es el «margen general» de hoy
+ * (`cotizaciones.margen_porcentaje`) y vale para las tres tarifas (decisión B: el margen por
+ * tarifa llega en C7). Devuelve el anterior, para el «Deshacer».
+ */
+export async function margenPorPasos(
+  cotizacionId: string,
+  pct: number,
+): Promise<ResultadoPorPasos<{ anterior: number | null; valorTotal: number | null }>> {
+  const { supabase, workspaceId, staffId, error } = await getWorkspace()
+  if (error || !workspaceId) return { success: false, error: 'No autenticado' }
+  if (!Number.isFinite(pct) || pct < 0 || pct >= 100) return { success: false, error: 'El margen tiene que estar entre 0 % y 99 %.' }
+  const guard = await exigirPorPasos(supabase, cotizacionId)
+  if (!guard.ok) return { success: false, error: guard.error }
+  const { data: cot } = await supabase.from('cotizaciones').select('margen_porcentaje').eq('id', cotizacionId).maybeSingle()
+  const anterior = (cot?.margen_porcentaje ?? null) as number | null
+  const { error: errUpd } = await supabase.from('cotizaciones').update({ margen_porcentaje: pct }).eq('id', cotizacionId)
+  if (errUpd) return { success: false, error: errUpd.message }
+  const c = await cerrarAccion(supabase, { workspaceId, cotizacionId, antes: null, staffId })
+  if (!c.success) return c
+  return { success: true, anterior, valorTotal: c.valorTotal }
+}
+
+/**
+ * «+ Otra opción» de un servicio: una opción vacía en ese servicio, para pegarle su pantallazo, y
+ * las tres tarifas con la propuesta de ONE para él.
+ */
+export async function agregarOpcionPorPasos(
+  cotizacionId: string,
+  grupo: string,
+): Promise<ResultadoPorPasos<{ itemId: string; valorTotal: number | null }>> {
+  const { supabase, workspaceId, staffId, error } = await getWorkspace()
+  if (error || !workspaceId) return { success: false, error: 'No autenticado' }
+  const guard = await exigirPorPasos(supabase, cotizacionId)
+  if (!guard.ok) return { success: false, error: guard.error }
+  const antes = await fotoDeTarifas(supabase, cotizacionId)
+  if (!antes) return { success: false, error: 'Cotización no encontrada' }
+  const r = await agregarOpcionARanura(cotizacionId, grupo)
+  if (!r.success) return { success: false, error: r.error }
+  const c = await cerrarAccion(supabase, { workspaceId, cotizacionId, antes, staffId })
+  if (!c.success) return c
+  return { success: true, itemId: r.itemId, valorTotal: c.valorTotal }
+}
+
+// ── Deshacer (condicionado) ─────────────────────────────────────────────────
+
+/**
+ * «Deshacer» de los cambios de valor de la forma por pasos (D1): solo revierte si lo que la
+ * acción escribió sigue ahí. Si alguien lo cambió en medio, responde «Ya cambió: no se deshace»
+ * y no pisa el cambio nuevo. Borrar se deshace aparte (`reponerOpcionesPorPasos`), y la
+ * autorización bajo el mínimo NO se deshace: se retira, con su registro.
+ */
+export async function deshacerPorPasos(op: OperacionDeshacer): Promise<ResultadoPorPasos<{ valorTotal: number | null }>> {
+  const { supabase, workspaceId, staffId, error } = await getWorkspace()
+  if (error || !workspaceId) return { success: false, error: 'No autenticado' }
+  if (!op || typeof op !== 'object' || typeof op.cotizacionId !== 'string') return { success: false, error: 'Nada que deshacer.' }
+  const guard = await exigirPorPasos(supabase, op.cotizacionId)
+  if (!guard.ok) return { success: false, error: guard.error }
+  const antes = await fotoDeTarifas(supabase, op.cotizacionId)
+  if (!antes) return { success: false, error: 'Cotización no encontrada' }
+  const cerrar = () => cerrarAccion(supabase, { workspaceId, cotizacionId: op.cotizacionId, antes, staffId })
+
+  switch (op.tipo) {
+    case 'eleccion': {
+      const fila = antes.filas.find(f => f.id === op.itinerarioId)
+      const ranura = ranurasConAlternativas(antes.ctx.items).find(r => r.grupo === normalizarGrupo(op.grupo))
+      const hoy = ranura?.candidatos.find(id => fila?.seleccion.includes(id)) ?? null
+      if (!fila || !ranura || hoy !== op.escrita) return { success: false, error: YA_CAMBIO }
+      if (op.anterior === null || !ranura.candidatos.includes(op.anterior)) return { success: false, error: YA_CAMBIO }
+      const { error: eDel } = await supabase.from('itinerario_opciones').delete().eq('itinerario_id', op.itinerarioId).in('item_id', ranura.candidatos)
+      if (eDel) return { success: false, error: eDel.message }
+      const { error: eIns } = await supabase.from('itinerario_opciones').insert({ itinerario_id: op.itinerarioId, item_id: op.anterior })
+      if (eIns) return { success: false, error: eIns.message }
+      return cerrar()
+    }
+    case 'mandar': {
+      const fila = antes.filas.find(f => f.id === op.itinerarioId)
+      if (!fila || fila.vaEnPropuesta !== op.escrita || esRecomendada(fila.nombre)) return { success: false, error: YA_CAMBIO }
+      const { error: e } = await supabase.from('cotizacion_itinerarios').update({ va_en_propuesta: op.anterior }).eq('id', op.itinerarioId)
+      if (e) return { success: false, error: e.message }
+      return cerrar()
+    }
+    case 'margen': {
+      const { data: cot } = await supabase.from('cotizaciones').select('margen_porcentaje').eq('id', op.cotizacionId).maybeSingle()
+      if (Number(cot?.margen_porcentaje) !== op.escrito) return { success: false, error: YA_CAMBIO }
+      const { error: e } = await supabase.from('cotizaciones').update({ margen_porcentaje: op.anterior }).eq('id', op.cotizacionId)
+      if (e) return { success: false, error: e.message }
+      return cerrar()
+    }
+    case 'estado': {
+      const g = normalizarGrupo(op.grupo)
+      const lineas = antes.ctx.items.filter(i => normalizarGrupo(i.grupo ?? null) === g && i.es_ajuste !== true)
+      const ids = Object.keys(op.anterior ?? {})
+      if (ids.length === 0 || lineas.length !== ids.length) return { success: false, error: YA_CAMBIO }
+      const { data: filas } = await supabase.from('items').select('*').in('id', ids).eq('cotizacion_id', op.cotizacionId)
+      const porId = new Map(((filas ?? []) as Record<string, unknown>[]).map(f => [f.id as string, f]))
+      for (const id of ids) {
+        const f = porId.get(id)
+        if (!f || estadoDeLinea({ grupo: g, entra_al_precio: f.entra_al_precio as boolean | null, mostrar_en_sugeridos: f.mostrar_en_sugeridos as boolean | null }) !== op.escrito) {
+          return { success: false, error: YA_CAMBIO }
+        }
+      }
+      for (const id of ids) {
+        const f = porId.get(id)!
+        const cambios = cambiosDeEstado({ grupo: g, entra_al_precio: f.entra_al_precio as boolean | null, mostrar_en_sugeridos: f.mostrar_en_sugeridos as boolean | null }, op.anterior[id])
+        if (!cambios) continue
+        const tarifa = { ...((f.tarifa_pax && typeof f.tarifa_pax === 'object' ? f.tarifa_pax : {}) as Record<string, unknown>) }
+        if (cambios.noVa) tarifa.noVa = { era: cambios.noVa.era, por: null, porId: null, en: new Date().toISOString() }
+        else delete tarifa.noVa
+        const patch: Record<string, unknown> = {
+          entra_al_precio: cambios.entra_al_precio,
+          mostrar_en_sugeridos: cambios.mostrar_en_sugeridos,
+          ...(f.tarifa_pax || cambios.noVa ? { tarifa_pax: tarifa } : {}),
+        }
+        const { error: e } = await supabase.from('items').update(patch).eq('id', id)
+        if (e) return { success: false, error: e.message }
+      }
+      return cerrar()
+    }
+    case 'mover':
+    case 'juntar': {
+      const ids = op.tipo === 'mover' ? [op.itemId] : op.movidas
+      const escrito = normalizarGrupo(op.grupoEscrito)
+      if (ids.length === 0 || ids.some(id => normalizarGrupo(antes.ctx.items.find(i => i.id === id)?.grupo ?? null) !== escrito)) {
+        return { success: false, error: YA_CAMBIO }
+      }
+      for (const id of ids) {
+        const r = await actualizarRanuraDeItem(id, { grupo: op.grupoAnterior })
+        if (!r.success) return { success: false, error: r.error ?? 'No se pudo deshacer.' }
+      }
+      return cerrar()
+    }
+    default:
+      return { success: false, error: 'Nada que deshacer.' }
+  }
+}
+
+// ── Autorización bajo el mínimo (Noor, Paso 2; P6 y P7) ──────────────────────
+
+/**
+ * «Pedir autorización a {dueño}». Queda en la actividad del negocio y le llega al dueño del
+ * workspace por la tabla `notificaciones` (P7 de la nota técnica). Quién autoriza sale de la
+ * configuración del workspace (el rol de dueño), nunca de un nombre escrito en el código.
+ */
+export async function pedirAutorizacionPorPasos(cotizacionId: string): Promise<ResultadoPorPasos<{ a: string | null }>> {
+  const { supabase, workspaceId, staffId, error } = await getWorkspace()
+  if (error || !workspaceId) return { success: false, error: 'No autenticado' }
+  const guard = await exigirPorPasos(supabase, cotizacionId)
+  if (!guard.ok) return { success: false, error: guard.error }
+  const servicio = createServiceClient()
+  const salida = await evaluarSalida(supabase, { servicio: () => servicio, workspaceId, cotizacionId })
+  if (!salida || !salida.aplica || !salida.bloquea || !salida.bajoPiso) {
+    return { success: false, error: 'Esta cotización no está bajo el margen mínimo: no hay nada que pedir.' }
+  }
+  const { data: cot } = await supabase.from('cotizaciones').select('codigo, consecutivo, negocio_id').eq('id', cotizacionId).maybeSingle()
+  const negocioId = (cot?.negocio_id ?? null) as string | null
+  if (!negocioId) return { success: false, error: 'La cotización no tiene negocio.' }
+  const codigo = (cot?.codigo || cot?.consecutivo || 'la cotización') as string
+  const detalle = (salida.medicion?.bajoPiso ?? [])
+    .map(s => `${s.tipo === 'tarifa' ? `tarifa ${s.nombre}` : 'cotización'} al ${s.margenRealPct === null ? 'sin margen medible' : pctTexto(s.margenRealPct, salida.medicion!.pisoPct)}`)
+    .join(', ')
+  const log = await registrarActividad(supabase, {
+    workspace_id: workspaceId,
+    entidad_tipo: 'negocio',
+    entidad_id: negocioId,
+    tipo: 'cambio',
+    autor_id: staffId,
+    campo_modificado: 'excepcion_margen',
+    valor_anterior: null,
+    valor_nuevo: 'pedida',
+    contenido: recortarParaLog(`Pidió autorización para enviar ${codigo} bajo el margen mínimo (${detalle}).`),
+  }, 'pedirAutorizacionPorPasos')
+  if (!log.ok) return { success: false, error: 'No se pudo registrar el pedido. Vuelve a intentarlo.' }
+
+  // A quién le llega: los dueños del workspace (el rol, no una persona del código).
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const svc = servicio as any
+  const { data: duenos } = await svc.from('profiles').select('id').eq('workspace_id', workspaceId).eq('role', 'owner').eq('platform_admin', false)
+  const destinatarios = ((duenos ?? []) as { id: string }[]).map(d => d.id)
+  if (destinatarios.length > 0) {
+    const { error: errNot } = await svc.from('notificaciones').insert(destinatarios.map(id => ({
+      workspace_id: workspaceId,
+      destinatario_id: id,
+      tipo: 'aprobacion_pendiente',
+      estado: 'pendiente',
+      contenido: recortarParaLog(`Te piden autorizar ${codigo} bajo el margen mínimo (${detalle}).`, 500),
+      entidad_tipo: 'negocio',
+      entidad_id: negocioId,
+      deep_link: `/negocios/${negocioId}/cotizacion/${cotizacionId}?paso=tarifas`,
+      metadata: { cotizacion_id: cotizacionId, motivo: 'margen_bajo_minimo' },
+    })))
+    if (errNot) console.error('[por-pasos] no se pudo avisar al dueño:', errNot.message)
+  }
+  return { success: true, a: salida.dueno }
+}
+
+/**
+ * «Retirar la autorización» (el dueño): no es un «Deshacer», es otra acción con su registro. La
+ * excepción queda perdida con la causa «la retiró» y la cotización vuelve a frenarse.
+ */
+export async function retirarAutorizacionPorPasos(cotizacionId: string): Promise<ResultadoPorPasos> {
+  const { supabase, workspaceId, userId, staffId, role, impersonating, error } = await getWorkspace()
+  if (error || !workspaceId || !userId) return { success: false, error: 'No autenticado' }
+  const guard = await exigirPorPasos(supabase, cotizacionId)
+  if (!guard.ok) return { success: false, error: guard.error }
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const servicio = createServiceClient() as any
+  const esDueno = esDuenoDelWorkspace({ role, impersonating, platformAdmin: await leerPlatformAdmin(servicio, userId) })
+  if (!esDueno) return { success: false, error: 'Solo el dueño del workspace puede retirar la autorización.' }
+  const { ultima } = await leerUltimaExcepcion(servicio, workspaceId, cotizacionId)
+  if (!ultima || ultima.perdidaAt !== null) return { success: false, error: 'No hay una autorización vigente que retirar.' }
+  const { data: marcada, error: errUpd } = await servicio
+    .from(TABLA_EXCEPCIONES)
+    .update({ perdida_at: new Date().toISOString(), perdida_causa: 'La retiró el dueño.' })
+    .eq('id', ultima.id)
+    .eq('workspace_id', workspaceId)
+    .is('perdida_at', null)
+    .select('id')
+  if (errUpd) return { success: false, error: errUpd.message }
+  if (!Array.isArray(marcada) || marcada.length === 0) return { success: false, error: 'No hay una autorización vigente que retirar.' }
+  const { data: cot } = await supabase.from('cotizaciones').select('codigo, consecutivo, negocio_id').eq('id', cotizacionId).maybeSingle()
+  if (cot?.negocio_id) {
+    await registrarActividad(supabase, {
+      workspace_id: workspaceId,
+      entidad_tipo: 'negocio',
+      entidad_id: cot.negocio_id as string,
+      tipo: 'cambio',
+      autor_id: staffId,
+      campo_modificado: 'excepcion_margen',
+      valor_anterior: 'autorizada',
+      valor_nuevo: 'retirada',
+      contenido: recortarParaLog(`Retiró la autorización para enviar ${(cot.codigo || cot.consecutivo || 'la cotización') as string} bajo el margen mínimo.`),
+    }, 'retirarAutorizacionPorPasos')
+  }
+  return { success: true }
+}
+
+/**
+ * Si hay un pedido de autorización esperando: el último registro de `excepcion_margen` del
+ * negocio dice «pedida» y no hay una autorización posterior. Solo lo lee la forma por pasos.
+ */
+export async function getPedidoDeAutorizacion(cotizacionId: string): Promise<{ por: string | null; en: string } | null> {
+  const { supabase, error } = await getWorkspace()
+  if (error) return null
+  const { data: cot } = await supabase.from('cotizaciones').select('negocio_id').eq('id', cotizacionId).maybeSingle()
+  const negocioId = (cot?.negocio_id ?? null) as string | null
+  if (!negocioId) return null
+  const { data } = await supabase
+    .from('activity_log')
+    .select('created_at, valor_nuevo, autor_id')
+    .eq('entidad_tipo', 'negocio')
+    .eq('entidad_id', negocioId)
+    .eq('campo_modificado', 'excepcion_margen')
+    .order('created_at', { ascending: false })
+    .limit(1)
+  const ultimo = (Array.isArray(data) ? data[0] : null) as { created_at: string; valor_nuevo: string | null; autor_id: string | null } | null
+  if (!ultimo || ultimo.valor_nuevo !== 'pedida') return null
+  let por: string | null = null
+  if (ultimo.autor_id) {
+    const { data: staff } = await supabase.from('staff').select('full_name').eq('id', ultimo.autor_id).maybeSingle()
+    por = ((staff as { full_name?: string | null } | null)?.full_name ?? '').trim() || null
+  }
+  return { por, en: ultimo.created_at }
 }
 
 // ── Enviar ───────────────────────────────────────────────────────────────────
