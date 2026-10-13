@@ -15,7 +15,7 @@
  *   · `pagado >= valor` → `pagado > valor` en fuentes.ts → 7 rojas, entre ellas «pagado completo
  *     no avisa».
  */
-import { beforeEach, describe, expect, it } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { correrRecordatorios } from './motor'
 
 type Fila = Record<string, unknown>
@@ -321,11 +321,74 @@ describe('un aviso perdido se recupera (Vera §7.7)', () => {
     expect((tablas.recordatorios_log as Fila[])[0]).toMatchObject({ estado: 'enviado', intentos: 2 })
   })
 
-  it('un canal que el motor aún no manda no gasta la llave', async () => {
-    const conEmail = [{ id: 'prov_t3', fuente: 'pago_proveedor', offset: -3, a: ['area:operaciones'], canales: ['email'] }]
-    sembrar({ reglas: conEmail })
+  it('un canal que no aplica al equipo (wa_manual) no gasta la llave', async () => {
+    const conWa = [{ id: 'prov_t3', fuente: 'pago_proveedor', offset: -3, a: ['area:operaciones'], canales: ['wa_manual'] }]
+    sembrar({ reglas: conWa })
     const r = await correr('2026-10-13')
     expect(r.canal_sin_soporte).toBe(1)
     expect(tablas.recordatorios_log).toHaveLength(0)
+  })
+})
+
+describe('correo al equipo (Vera F3-5)', () => {
+  const conEmail = [{ id: 'prov_t3', fuente: 'pago_proveedor', offset: -3, a: ['area:operaciones'], canales: ['in_app', 'email'] }]
+  let correos: Array<{ to: string[]; subject: string; text: string; key: string }>
+
+  beforeEach(() => {
+    sembrar({ reglas: conEmail })
+    tablas.profiles = [{ id: 'p-alejandra', email: 'alejandra@prueba.test' }]
+    tablas.workspaces = [{ id: WS, slug: 'trappvel' }]
+    correos = []
+    process.env.RESEND_API_KEY = 'prueba'
+    vi.stubGlobal('fetch', vi.fn(async (_url: string, init: { body: string; headers: Record<string, string> }) => {
+      const b = JSON.parse(init.body)
+      correos.push({ to: b.to, subject: b.subject, text: b.text, key: init.headers['Idempotency-Key'] })
+      return { ok: true, status: 200, text: async () => '' }
+    }))
+  })
+  afterEach(() => {
+    vi.unstubAllGlobals()
+    delete process.env.RESEND_API_KEY
+  })
+
+  it('T-3 de un pago a proveedor: aviso en la app y correo a operaciones, con el enlace al negocio', async () => {
+    const r = await correr('2026-10-13')
+    expect(avisos().filter((a) => a.destinatario_id === 'p-alejandra')).toHaveLength(1)
+    expect(correos).toHaveLength(1)
+    expect(correos[0].to).toEqual(['alejandra@prueba.test'])
+    expect(correos[0].subject).toBe('Pago a proveedor por vencer · D 26 1 — San Andrés')
+    expect(correos[0].text).toContain('Paga Hotel Arena Blanca')
+    expect(correos[0].text).toContain(`https://trappvel.metrikone.co/negocios/${NEG}`)
+    const log = (tablas.recordatorios_log as Fila[]).find((l) => l.canal === 'email')
+    expect(log).toMatchObject({ destinatario: 'p-alejandra', estado: 'enviado' })
+    expect(r.canal_sin_soporte).toBe(0)
+  })
+
+  it('dos corridas el mismo día: un solo correo', async () => {
+    await correr('2026-10-13')
+    await correr('2026-10-13')
+    expect(correos).toHaveLength(1)
+  })
+
+  it('sin correo en el perfil: el de la app sale y el correo queda omitido con su motivo', async () => {
+    tablas.profiles = []
+    await correr('2026-10-13')
+    expect(correos).toHaveLength(0)
+    expect(avisos().filter((a) => a.destinatario_id === 'p-alejandra')).toHaveLength(1)
+    expect((tablas.recordatorios_log as Fila[]).find((l) => l.canal === 'email')).toMatchObject({ estado: 'omitido', error: 'sin_correo' })
+  })
+
+  it('Resend responde error: queda fallido y se reintenta al día siguiente', async () => {
+    vi.stubGlobal('fetch', vi.fn(async () => ({ ok: false, status: 500, text: async () => 'caído' })))
+    await correr('2026-10-13')
+    expect((tablas.recordatorios_log as Fila[]).find((l) => l.canal === 'email')).toMatchObject({ estado: 'fallido', intentos: 1 })
+    vi.stubGlobal('fetch', vi.fn(async (_u: string, init: { body: string; headers: Record<string, string> }) => {
+      const b = JSON.parse(init.body)
+      correos.push({ to: b.to, subject: b.subject, text: b.text, key: init.headers['Idempotency-Key'] })
+      return { ok: true, status: 200, text: async () => '' }
+    }))
+    await correr('2026-10-14')
+    expect(correos).toHaveLength(1)
+    expect((tablas.recordatorios_log as Fila[]).find((l) => l.canal === 'email')).toMatchObject({ estado: 'enviado', intentos: 2 })
   })
 })

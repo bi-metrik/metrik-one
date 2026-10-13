@@ -25,6 +25,8 @@ import { cobradoDelNegocio } from '@/lib/cobros/devolucion-dinero'
 import { DevolucionesNegocio } from './devoluciones-negocio'
 import { leerConfirmacionViaje } from './confirmacion-viaje'
 import { leerRielCobro } from './riel-cobro'
+import { leerEntregaViaje } from './entrega-viaje'
+import { leerViajeFinal } from './viaje-final'
 import { leerFacturaViaje } from './factura-viaje'
 
 /**
@@ -192,16 +194,20 @@ export async function cargarVistaNegocio(id: string): Promise<VistaNegocio | nul
   // Riel de cobro (F2): solo con plan acordado. Va arriba, debajo de la cabecera.
   const argsViaje = { workspaceId: workspaceId ?? '', negocioId: id, staffId: staffId ?? null, role: role ?? null, areas: (areas ?? []) as string[] }
   // Riel de facturación (F5): solo en líneas que facturan por evento (`facturacion.por_titular`).
-  const [rielCobro, confirmacionViaje, facturaViaje] = workspaceId
-    ? await Promise.all([leerRielCobro(supabase, argsViaje), leerConfirmacionViaje(supabase, argsViaje), leerFacturaViaje(supabase, argsViaje)])
-    : [null, null, null]
-  const banner = bannerCierre || rielCobro || confirmacionViaje || facturaViaje
+  // Documentos y entrega (F4): solo con `entrega_viaje.activo` y en la etapa que declara sus gates.
+  // En viaje, Cierre económico y Postventa (F6): solo con `cierre_viaje.activo` y en su etapa.
+  const [rielCobro, confirmacionViaje, facturaViaje, entregaViaje, viajeFinal] = workspaceId
+    ? await Promise.all([leerRielCobro(supabase, argsViaje), leerConfirmacionViaje(supabase, argsViaje), leerFacturaViaje(supabase, argsViaje), leerEntregaViaje(supabase, argsViaje), leerViajeFinal(supabase, argsViaje)])
+    : [null, null, null, null, null]
+  const banner = bannerCierre || rielCobro || confirmacionViaje || facturaViaje || entregaViaje || viajeFinal
     ? (
       <>
         {bannerCierre}
         {rielCobro}
         {facturaViaje}
         {confirmacionViaje}
+        {entregaViaje}
+        {viajeFinal}
       </>
     )
     : null

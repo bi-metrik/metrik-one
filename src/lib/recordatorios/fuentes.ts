@@ -14,11 +14,16 @@
  *   · `aplazado`: el día que la comercial escogió al aplazar (`negocios.metadata.seguimiento.
  *     aplazado_para`, F1-4). Pendiente mientras el negocio siga abierto. No se lee de
  *     `pausado_hasta`: el cron de pausa lo borra al reactivar, a primera hora, antes del motor.
+ *   · `salida`: la fecha de salida del viaje (bloque de la etapa 1). Pendiente mientras el cobro
+ *     mínimo no se cumpla (F4-5): antes de T-15, si el plan no llega al 80 % o hay cuota vencida;
+ *     desde T-15, si lo pagado no llega al 80 %. Lo decide `salidaPideAviso` con el desfase de la
+ *     regla, porque el mismo viaje puede estar bien para T-30 y mal para T-15.
  */
 
 import { todayBogotaISO } from '@/lib/dates/bogota'
-import { cuotasConEstadoViaje, type PagoViajero } from '@/lib/viaje/riel-cobro'
+import { cuotasConEstadoViaje, recibido, type PagoViajero } from '@/lib/viaje/riel-cobro'
 import { pesos } from '@/lib/viaje/plan-pagos'
+import { cobroMinimo, riesgoDelPlan } from '@/lib/viaje/entrega'
 import type { FuenteRecordatorio } from './reglas'
 
 export interface NegocioFuente {
@@ -33,6 +38,12 @@ export interface NegocioFuente {
   estado: string
   /** `metadata.seguimiento.aplazado_para`, si la comercial aplazó con el seguimiento encendido. */
   aplazado_para?: string | null
+  /** Total del viaje (fuente `salida`). */
+  precio_aprobado?: number | null
+  /** Ya se registró la calificación del viaje (fuente `regreso`: la encuesta no vuelve a salir). */
+  encuesta_respondida?: boolean
+  /** A dónde fue el viaje (texto de la encuesta). */
+  destino?: string | null
 }
 
 export interface CotizacionEnviada {
@@ -186,10 +197,81 @@ export function candidatosDeCuota(
   return out
 }
 
+export interface SalidaFuente {
+  negocio_id: string
+  fecha_salida: string
+}
+
+/** Un candidato por viaje con fecha de salida y plan acordado; el detalle lleva el cobro mínimo. */
+export function candidatosDeSalida(
+  negocios: NegocioFuente[],
+  salidas: SalidaFuente[],
+  cuotas: CuotaFuente[],
+  pagosPorNegocio: Map<string, PagoViajero[]>,
+  hoy: string,
+): Candidato[] {
+  const salidaDe = new Map(salidas.map((x) => [x.negocio_id, x.fecha_salida.slice(0, 10)]))
+  const out: Candidato[] = []
+  for (const n of negocios) {
+    if (n.estado !== 'abierto') continue
+    const salida = salidaDe.get(n.id)
+    const delPlan = cuotas.filter((c) => c.negocio_id === n.id)
+    if (!salida || delPlan.length === 0) continue
+    const total = Number(n.precio_aprobado ?? 0) || delPlan.reduce((a, c) => a + Number(c.monto), 0)
+    const pagado = recibido(pagosPorNegocio.get(n.id) ?? [])
+    const entrada = { total, pagado, cuotas: delPlan.map((c) => ({ monto: Number(c.monto), fecha: c.fecha_vencimiento.slice(0, 10) })), fechaSalida: salida, hoy }
+    const est = cobroMinimo(entrada)
+    const riesgo = riesgoDelPlan(entrada)
+    out.push({
+      fuente: 'salida',
+      entidadTipo: 'negocio',
+      entidadId: n.id,
+      negocio: n,
+      fechaObjetivo: salida,
+      detalle: {
+        pagado: est.pagado,
+        pct: est.pct,
+        minimo: est.minimo,
+        faltan80: Math.max(0, est.minimo - est.pagado),
+        plan_llega: riesgo.planLlega ? 1 : 0,
+        cuota_vencida: riesgo.cuotaVencida ? 1 : 0,
+        dias_antes: 15,
+      },
+    })
+  }
+  return out
+}
+
+export interface RegresoFuente {
+  negocio_id: string
+  fecha_regreso: string
+}
+
+/** La encuesta (F6-7): pendiente mientras la comercial no haya escrito la calificación. */
+export function candidatosDeRegreso(negocios: NegocioFuente[], regresos: RegresoFuente[]): Candidato[] {
+  const regresoDe = new Map(regresos.map((x) => [x.negocio_id, x.fecha_regreso.slice(0, 10)]))
+  const out: Candidato[] = []
+  for (const n of negocios) {
+    const f = regresoDe.get(n.id)
+    if (!f || n.estado !== 'abierto' || n.encuesta_respondida) continue
+    out.push({ fuente: 'regreso', entidadTipo: 'negocio', entidadId: n.id, negocio: n, fechaObjetivo: f, detalle: {} })
+  }
+  return out
+}
+
+/** ¿El aviso de salida con este desfase aplica? (F4-5). */
+export function salidaPideAviso(detalle: Candidato['detalle'], offset: number): boolean {
+  const diasAntes = Number(detalle.dias_antes ?? 15)
+  const faltan80 = Number(detalle.faltan80 ?? 0)
+  if (faltan80 <= 0) return false
+  if (offset < -diasAntes) return detalle.plan_llega === 0 || detalle.cuota_vencida === 1
+  return true
+}
+
 const FMT_FECHA = new Intl.DateTimeFormat('es-CO', { weekday: 'long', day: 'numeric', month: 'long', timeZone: 'UTC' })
 const FMT_PESOS = new Intl.NumberFormat('es-CO', { style: 'currency', currency: 'COP', maximumFractionDigits: 0 })
 
-function nombreNegocio(n: NegocioFuente): string {
+export function nombreNegocio(n: NegocioFuente): string {
   return n.codigo ? `${n.codigo} — ${n.nombre}` : n.nombre
 }
 
@@ -212,6 +294,21 @@ export function textoDelAviso(c: Candidato, offset: number, hoy: string): string
     }
     return `Hoy vence la cuota de ${quien}: ${falta} (${negocio}). Pega el comprobante cuando pague.`
   }
+  if (c.fuente === 'regreso') {
+    const quien = c.negocio.contacto_nombre?.trim() || 'el cliente'
+    return `Mándale la encuesta a ${quien} (${negocio}): el mensaje ya está listo.`
+  }
+  if (c.fuente === 'salida') {
+    const quien = c.negocio.contacto_nombre?.trim().split(/\s+/)[0] || 'El cliente'
+    const pct = Number(c.detalle.pct ?? 0)
+    const diasAntes = Number(c.detalle.dias_antes ?? 15)
+    if (offset < -diasAntes) {
+      const t15 = Date.parse(`${c.fechaObjetivo}T00:00:00Z`) - diasAntes * 86_400_000
+      const n = Math.max(1, Math.round((t15 - Date.parse(`${hoy}T00:00:00Z`)) / 86_400_000))
+      return `En ${n} día${n === 1 ? '' : 's'} ${quien} debe llevar el 80 % y va en ${pct} % (${negocio}).`
+    }
+    return `${quien} viaja el ${fechaEnPalabras(c.fechaObjetivo)} y va en ${pct} %: faltan ${pesos(Number(c.detalle.faltan80 ?? 0))} para el 80 % (${negocio}).`
+  }
   if (c.fuente === 'envio') {
     const quien = c.negocio.contacto_nombre?.trim() || 'el cliente'
     return `Hoy toca escribirle a ${quien} (${negocio}): le enviaste la cotización el ${fechaEnPalabras(c.fechaObjetivo)}.`
@@ -231,7 +328,8 @@ export function textoDelAviso(c: Candidato, offset: number, hoy: string): string
 
 /** Tipo de notificación (los tipos ya están en el CHECK desde la migración de F0). */
 export function tipoDeNotificacion(c: Candidato, offset: number, hoy: string): string {
-  if (c.fuente === 'envio' || c.fuente === 'aplazado') return 'toque_seguimiento'
+  if (c.fuente === 'salida') return 'viaje_sin_listo'
+  if (c.fuente === 'envio' || c.fuente === 'aplazado' || c.fuente === 'regreso') return 'toque_seguimiento'
   if (c.fuente === 'cuota') return offset > 0 || c.fechaObjetivo < hoy ? 'cobro_vencido' : 'cuota_por_vencer'
   return offset > 0 || c.fechaObjetivo < hoy ? 'pago_proveedor_vencido' : 'pago_proveedor_por_vencer'
 }

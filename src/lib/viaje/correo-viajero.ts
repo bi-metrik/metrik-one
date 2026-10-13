@@ -42,6 +42,8 @@ export async function enviarCorreoAlViajero(p: {
   texto: string
   /** Una por hecho: el reintento del mismo hecho no manda dos correos (Resend la respeta 24 h). */
   idempotencyKey: string
+  /** Archivos adjuntos (el paquete de viaje en PDF), en base64. */
+  adjuntos?: Array<{ filename: string; content: string }>
 }): Promise<EstadoCorreo> {
   const svc = createServiceClient()
   const registrar = async (e: EstadoCorreo, proveedorId: string | null = null): Promise<EstadoCorreo> => {
@@ -78,6 +80,7 @@ export async function enviarCorreoAlViajero(p: {
         html: htmlDelMensaje(p.texto),
         text: textoPlanoDelMensaje(p.texto),
         ...(p.replyTo && correoValido(p.replyTo) ? { reply_to: p.replyTo } : {}),
+        ...(p.adjuntos && p.adjuntos.length > 0 ? { attachments: p.adjuntos } : {}),
       }),
     })
     if (!res.ok) {

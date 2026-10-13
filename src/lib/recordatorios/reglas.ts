@@ -22,17 +22,19 @@ import { esDiaHabil } from '@/lib/dates/dias-habiles'
  * Fuentes que el motor sabe leer hoy. Las de salida y regreso llegan con F4-F6.
  * `aplazado` (F1, PR 5): el día en que la comercial quedó de volver a escribir al aplazar.
  * `cuota` (F2, PR 9): las cuotas del plan de pagos del viajero.
+ * `salida` (F4, PR 11): la fecha de salida del viaje, con el chequeo del cobro mínimo (80/15).
+ * `regreso` (F6, PR 13): la fecha de regreso; la encuesta sale a los 2 días (F6-7).
  */
-export const FUENTES_SOPORTADAS = ['envio', 'pago_proveedor', 'aplazado', 'cuota'] as const
+export const FUENTES_SOPORTADAS = ['envio', 'pago_proveedor', 'aplazado', 'cuota', 'salida', 'regreso'] as const
 export type FuenteRecordatorio = (typeof FUENTES_SOPORTADAS)[number]
 
 /**
- * Canales que el motor manda hoy. Al equipo, solo `in_app`. Al viajero (`cliente`), `email`
- * (Resend, si el contacto tiene correo) y `wa_manual` (la comercial recibe en la app el mensaje
- * listo para mandarlo desde su WhatsApp, Vera C1). El correo al equipo todavía no sale.
+ * Canales que el motor manda hoy. Al equipo, `in_app` y `email` (Resend a `profiles.email`,
+ * Vera F3-5). Al viajero (`cliente`), `email` (Resend, si el contacto tiene correo) y `wa_manual`
+ * (la comercial recibe en la app el mensaje listo para mandarlo desde su WhatsApp, Vera C1).
  */
 export const CANALES_SOPORTADOS = ['in_app', 'email', 'wa_manual'] as const
-export const CANALES_AL_EQUIPO = ['in_app'] as const
+export const CANALES_AL_EQUIPO = ['in_app', 'email'] as const
 export const CANALES_AL_CLIENTE = ['email', 'wa_manual'] as const
 export type CanalRecordatorio = 'in_app' | 'email' | 'wa_manual'
 
@@ -72,6 +74,15 @@ export const REGLAS_POR_DEFECTO: readonly ReglaRecordatorio[] = [
   { id: 'cuota_t3', fuente: 'cuota', offset: -3, dias: 'calendario', etapa_numero: null, a: ['cliente'], canales: ['email', 'wa_manual'] },
   { id: 'cuota_t0', fuente: 'cuota', offset: 0, dias: 'calendario', etapa_numero: null, a: ['cliente', 'responsable'], canales: ['email', 'wa_manual', 'in_app'] },
   { id: 'cuota_vencida', fuente: 'cuota', offset: 2, dias: 'calendario', etapa_numero: null, a: ['aprobadores'], canales: ['in_app'] },
+  // Cobro mínimo antes de la salida (F4-5): T-30 y T-20 a la comercial, solo si el plan no llega
+  // al 80 % en T-15 o hay cuota vencida; T-15 a la comercial y a la dirección si no va en el 80 %.
+  // Internos: al viajero solo le llegan los de su cuota (Noor §4.4).
+  { id: 'salida_t30', fuente: 'salida', offset: -30, dias: 'calendario', etapa_numero: null, a: ['responsable'], canales: ['in_app'] },
+  { id: 'salida_t20', fuente: 'salida', offset: -20, dias: 'calendario', etapa_numero: null, a: ['responsable'], canales: ['in_app'] },
+  { id: 'salida_t15', fuente: 'salida', offset: -15, dias: 'calendario', etapa_numero: null, a: ['responsable', 'aprobadores'], canales: ['in_app', 'email'] },
+  // Encuesta a los 2 días del regreso (F6-7, C1): correo al viajero si lo tiene y el mensaje listo
+  // para el WhatsApp de la comercial. La respuesta la escribe la comercial.
+  { id: 'encuesta', fuente: 'regreso', offset: 2, dias: 'calendario', etapa_numero: null, a: ['cliente'], canales: ['email', 'wa_manual'] },
 ]
 
 /**
