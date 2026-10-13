@@ -49,12 +49,13 @@ interface Entorno {
 function montar(
   pathname = '/tableros',
   respuesta: Promise<{ status: number }> = Promise.resolve({ status: 204 }),
-  opciones: { chunksBajan?: boolean; antes?: (v: Window) => void } = {},
+  opciones: { chunksBajan?: boolean; antes?: (v: Window) => void; host?: string; conSw?: boolean } = {},
 ): Entorno {
+  const host = opciones.host ?? 'soena.metrikone.co'
   // happy-dom no ejecuta JS: un <script src> conectado dispara `error` solo (un chunk que no
   // baja) o, con `chunksBajan`, `load` (el reintento que sí llegó).
   const ventana = new Window({
-    url: `https://soena.metrikone.co${pathname}`,
+    url: `https://${host}${pathname}`,
     settings: { handleDisabledFileLoadingAsSuccess: !!opciones.chunksBajan, disableCSSFileLoading: true },
   })
   opciones.antes?.(ventana)
@@ -62,7 +63,7 @@ function montar(
   const fetchs: Record<string, unknown>[] = []
   const reload = vi.fn()
   const assign = vi.fn()
-  const location = { pathname, host: 'soena.metrikone.co', reload, assign }
+  const location = { pathname, host, hostname: host, reload, assign }
   const fetchFalso = vi.fn((_url: string, init: { body: string }) => {
     fetchs.push(JSON.parse(init.body))
     return respuesta
@@ -71,7 +72,14 @@ function montar(
   // Los globales que el script usa sin `window.`: los del navegador, aqui inyectados.
   const fn = new Function('window', 'document', 'location', 'navigator', 'fetch', 'crypto', codigo)
   const correr = () =>
-    fn(ventana, doc, location, { userAgent: 'Chrome/Windows', onLine: true }, fetchFalso, globalThis.crypto)
+    fn(
+      ventana,
+      doc,
+      location,
+      { userAgent: 'Chrome/Windows', onLine: true, ...(opciones.conSw ? { serviceWorker: { controller: {} } } : {}) },
+      fetchFalso,
+      globalThis.crypto,
+    )
   // `marcarHidratada` lee el `window` global.
   Object.defineProperty(globalThis, 'window', { configurable: true, writable: true, value: ventana })
   correr()
@@ -199,7 +207,9 @@ describe('script en linea: React no hidrato (login en la portada, tableros en bl
     cargada.setAttribute('href', '/_next/static/chunks/cargada.css')
     Object.defineProperty(cargada, 'sheet', { value: {} })
     e.doc.head.append(colgada, cargada)
-    await vi.advanceTimersByTimeAsync(SIN_AVANCE_MS)
+    // happy-dom (sin CSS) dispara `error` en las hojas: pasan primero los reintentos, que cuentan
+    // como avance (2026-10-12), y después el aviso.
+    await vi.advanceTimersByTimeAsync(SIN_AVANCE_MS + 60_000)
     expect(aviso(e)).not.toBeNull()
     expect(colgada.isConnected).toBe(false)
     expect(cargada.isConnected).toBe(true)
@@ -235,8 +245,8 @@ describe('script en linea: React no hidrato (login en la portada, tableros en bl
     expect(aviso(e)).toBeNull()
   })
 
-  it('un chunk de /_next/static/ que falla se pide de nuevo (1, 3 y 8 s) antes de avisar', async () => {
-    expect(ESPERAS_REINTENTO_CHUNK_MS).toEqual([1_000, 3_000, 8_000])
+  it('un chunk de /_next/static/ que falla se pide de nuevo (1, 2, 4, 8 y 15 s) antes de avisar', async () => {
+    expect(ESPERAS_REINTENTO_CHUNK_MS).toEqual([1_000, 2_000, 4_000, 8_000, 15_000])
     const e = montar()
     const src = 'https://soena.metrikone.co/_next/static/chunks/abc.js'
     errorDeScript(e, src)
@@ -245,15 +255,18 @@ describe('script en linea: React no hidrato (login en la portada, tableros en bl
     await vi.advanceTimersByTimeAsync(1_000)
     expect(copias()).toBe(2)
     expect(aviso(e)).toBeNull()
-    await vi.advanceTimersByTimeAsync(3_000 + 8_000)
-    expect(copias()).toBe(4)
+    await vi.advanceTimersByTimeAsync(2_000 + 4_000 + 8_000)
+    expect(copias()).toBe(5)
+    expect(aviso(e)).toBeNull()
+    await vi.advanceTimersByTimeAsync(15_000)
+    expect(copias()).toBe(6)
     expect(aviso(e)).toBeNull()
     // Sin más intentos: el aviso tras la gracia, con su causa.
     await vi.advanceTimersByTimeAsync(GRACIA_TRAS_CHUNK_MS)
     expect(aviso(e)).not.toBeNull()
     expect(avisos(e)).toEqual(['chunk'])
     const fallo = e.fetchs.find((f) => f.message === MENSAJE_REPORTE_CHUNK)
-    expect(fallo).toMatchObject({ recuperado: false, intento: 3 })
+    expect(fallo).toMatchObject({ recuperado: false, intento: 5 })
     expect(leerReporte(JSON.stringify(fallo)).ok).toBe(true)
     // El de falta de avance ya no pinta otro ni reporta otra vez.
     await vi.advanceTimersByTimeAsync(TOPE_HIDRATACION_MS)
@@ -321,11 +334,19 @@ describe('script en linea: React no hidrato (login en la portada, tableros en bl
     expect(aviso(e)).toBeNull()
   })
 
-  it('despues de hidratar, un chunk que falla es asunto de la escalera de React, no del script', async () => {
+  it('despues de hidratar, un chunk del HTML que falla TAMBIEN se reintenta (el runtime lo espera para siempre), sin aviso a pantalla completa', async () => {
+    // 2026-10-12: el layout raiz hidrata antes que la pagina; un chunk de la pagina que fallaba
+    // despues no se pedia de nuevo y la ruta quedaba en la animacion («espera-ruta»).
     const e = montar()
     marcarHidratada()
-    errorDeScript(e, 'https://soena.metrikone.co/_next/static/chunks/lazy.js')
+    const src = 'https://soena.metrikone.co/_next/static/chunks/pagina.js'
+    errorDeScript(e, src)
+    const copias = () => [...e.doc.querySelectorAll('script')].filter((s) => s.getAttribute('src') === src).length
+    await vi.advanceTimersByTimeAsync(1_000)
+    expect(copias()).toBe(2)
     await vi.advanceTimersByTimeAsync(60_000)
+    expect(copias()).toBe(1 + ESPERAS_REINTENTO_CHUNK_MS.length)
+    expect(e.fetchs.find((f) => f.message === MENSAJE_REPORTE_CHUNK)).toMatchObject({ recuperado: false, intento: 5 })
     expect(aviso(e)).toBeNull()
   })
 
@@ -482,15 +503,15 @@ describe('chunks que pide el runtime después de hidratar (una ruta nueva, un mo
     return { el, onerror, onload }
   }
 
-  it('si no baja, se pide 3 veces más antes de avisarle al runtime (que guarda el fallo para siempre)', async () => {
+  it('si no baja, se pide 5 veces más antes de avisarle al runtime (que guarda el fallo para siempre)', async () => {
     const e = montar('/negocios')
     marcarHidratada()
     const { onerror } = pedirChunk(e, 'script', 'https://soena.metrikone.co/_next/static/chunks/ruta.js')
-    await vi.advanceTimersByTimeAsync(1_000 + 3_000 + 8_000 - 1)
+    await vi.advanceTimersByTimeAsync(1_000 + 2_000 + 4_000 + 8_000 + 15_000 - 1)
     expect(onerror).not.toHaveBeenCalled()
     await vi.advanceTimersByTimeAsync(1)
     expect(onerror).toHaveBeenCalledTimes(1)
-    expect(e.fetchs.find((f) => f.message === MENSAJE_REPORTE_CHUNK)).toMatchObject({ recuperado: false, intento: 3 })
+    expect(e.fetchs.find((f) => f.message === MENSAJE_REPORTE_CHUNK)).toMatchObject({ recuperado: false, intento: 5 })
     // No es asunto del aviso a pantalla completa: la escalera de React decide.
     expect(aviso(e)).toBeNull()
   })
@@ -519,9 +540,10 @@ describe('chunks que pide el runtime después de hidratar (una ruta nueva, un mo
 })
 
 describe('navegación interna (RSC): un fallo antes de la respuesta se repite', () => {
-  function conFetch(respuestas: Array<() => Promise<unknown>>) {
+  function conFetch(respuestas: Array<() => Promise<unknown>>, opciones: { host?: string; conSw?: boolean } = {}) {
     const llamadas: unknown[][] = []
     const e = montar('/negocios', undefined, {
+      ...opciones,
       antes: (v) => {
         ;(v as unknown as { fetch: unknown }).fetch = (...args: unknown[]) => {
           llamadas.push(args)
@@ -535,23 +557,40 @@ describe('navegación interna (RSC): un fallo antes de la respuesta se repite', 
   }
   const caida = () => Promise.reject(new TypeError('Failed to fetch'))
 
-  it('GET con `rsc: 1` que falla: se repite a 1 s y a 3 s', async () => {
-    expect(ESPERAS_REINTENTO_RSC_MS).toEqual([1_000, 3_000])
-    const { f, llamadas } = conFetch([caida, caida, () => Promise.resolve('llegó')])
+  it('GET con `rsc: 1` que falla: se repite a 1, 2, 4 y 8 s', async () => {
+    expect(ESPERAS_REINTENTO_RSC_MS).toEqual([1_000, 2_000, 4_000, 8_000])
+    const { f, llamadas } = conFetch([caida, caida, caida, caida, () => Promise.resolve('llegó')])
     const p = f('/negocios/abc?_rsc=x', { headers: { rsc: '1', 'next-url': '/negocios' } })
     await vi.advanceTimersByTimeAsync(999)
     expect(llamadas).toHaveLength(1)
-    await vi.advanceTimersByTimeAsync(1 + 3_000)
+    await vi.advanceTimersByTimeAsync(1 + 2_000)
     expect(llamadas).toHaveLength(3)
+    await vi.advanceTimersByTimeAsync(4_000 + 8_000)
+    expect(llamadas).toHaveLength(5)
     await expect(p).resolves.toBe('llegó')
   })
 
   it('sin más intentos, el error llega a Next tal cual (y Next cae a carga completa como antes)', async () => {
-    const { f } = conFetch([caida, caida, caida])
+    const { f, llamadas } = conFetch([caida, caida, caida, caida, caida])
     const p = f('/x', { headers: { RSC: '1' } })
     const atrapado = p.catch((err: Error) => err)
-    await vi.advanceTimersByTimeAsync(5_000)
+    await vi.advanceTimersByTimeAsync(20_000)
     expect(await atrapado).toBeInstanceOf(TypeError)
+    expect(llamadas).toHaveLength(5)
+  })
+
+  it('con service worker: en el piloto no repite (ya repite el SW); fuera del piloto sí (el SW solo cachea estáticos)', async () => {
+    const piloto = conFetch([caida, () => Promise.resolve('no')], { host: 'soena.metrikone.co', conSw: true })
+    const enPiloto = piloto.f('/x', { headers: { rsc: '1' } }).catch((err: Error) => err)
+    await vi.advanceTimersByTimeAsync(20_000)
+    expect(await enPiloto).toBeInstanceOf(TypeError)
+    expect(piloto.llamadas).toHaveLength(1)
+
+    const otro = conFetch([caida, () => Promise.resolve('llegó')], { host: 'trappvel.metrikone.co', conSw: true })
+    const fuera = otro.f('/x', { headers: { rsc: '1' } })
+    await vi.advanceTimersByTimeAsync(1_000)
+    await expect(fuera).resolves.toBe('llegó')
+    expect(otro.llamadas).toHaveLength(2)
   })
 
   it('no repite: prefetch, POST (server actions), otra cosa que no es RSC, ni una navegación abortada', async () => {

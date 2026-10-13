@@ -89,6 +89,11 @@ async function escenario(ruta, preparar, esperaMs, despues, captura) {
     aviso: document.getElementById('one-aviso-conexion')?.innerText ?? null,
     hidratada: !!window.__oneHidratada,
     form: !!document.querySelector('input[type=email]'),
+    // El formulario HIDRATADO (React se colgó de él), no solo el HTML del servidor.
+    formVivo: (() => {
+      const i = document.querySelector('input[type=email]')
+      return !!i && Object.keys(i).some((k) => k.startsWith('__reactFiber'))
+    })(),
     hojasCargadas: [...document.querySelectorAll('link[rel="stylesheet"]')].filter((l) => l.sheet).length,
     diferido: (() => {
       const el = document.querySelector('[data-one-aviso-causa]')
@@ -199,6 +204,49 @@ const casos = {
       25_000,
     )
     comprobar('I cada chunk falla la primera vez y baja al reintento: hidrata sin aviso', r.aparecio === null && r.hidratada && r.form && r.avisos.length === 0, r)
+  },
+  async J() {
+    // LA RED DEL 2026-10-12 (Claro móvil): el chunk falla TARDE (la conexión se cae a los 3 s), cuando
+    // el runtime de Turbopack ya se colgó del `<script>` del HTML con `addEventListener('error')`.
+    // Antes: el reintento lo bajaba (`chunk-reintentado` recuperado:true) pero el runtime ya había
+    // rechazado para siempre → «Failed to load chunk … from module …» y pantalla de error.
+    // Solo fallan (tarde) los chunks del HTML que van DESPUÉS del runtime: los de la página, que el
+    // cliente RSC pide al hidratar. El runtime y los de arranque bajan bien y a tiempo.
+    const html = await (await fetch(`${BASE}/login`)).text()
+    const srcs = [...html.matchAll(/<script src="([^"]+)"/g)].map((m) => m[1].replace(/&amp;/g, '&'))
+    const tras = new Set(srcs.slice(srcs.findIndex((s) => /turbopack-/.test(s)) + 1).map((s) => s.split('?')[0]))
+    const vistos = new Set()
+    const r = await escenario(
+      '/login?redirectTo=%2Fnegocios',
+      (p) => p.route('**/_next/static/chunks/**', async (x) => {
+        const u = new URL(x.request().url()).pathname
+        if (tras.has(u) && !vistos.has(u)) { vistos.add(u); await espera(3_000); await x.abort('connectionreset'); return }
+        await x.continue()
+      }),
+      25_000,
+    )
+    r.tras = tras.size
+    r.abortados = vistos.size
+    const fallo = r.consola.some((c) => /Failed to load chunk/.test(c))
+    comprobar('J chunk que falla tarde (runtime ya escuchando): hidrata sin aviso ni «Failed to load chunk»', r.aparecio === null && r.hidratada && r.formVivo && r.avisos.length === 0 && !fallo, r)
+  },
+  async K() {
+    // Pérdida al azar y persistente: cada pedido de chunk JS falla con probabilidad 0,5 (a los
+    // 0-2 s). Determinista por (url, intento) para que la corrida se repita igual.
+    const n = new Map()
+    const r = await escenario(
+      '/login?redirectTo=%2Fnegocios',
+      (p) => p.route('**/_next/static/chunks/**', async (x) => {
+        const u = x.request().url()
+        const k = (n.get(u) ?? 0) + 1
+        n.set(u, k)
+        if (demora(`${u}#${k}`, 0, 99) < 50) { await espera(demora(u, 0, 2_000)); await x.abort('connectionreset'); return }
+        await x.continue()
+      }),
+      45_000,
+    )
+    const fallo = r.consola.some((c) => /Failed to load chunk/.test(c))
+    comprobar('K pérdida 50 % al azar: hidrata sin aviso', r.aparecio === null && r.hidratada && r.form && r.avisos.length === 0 && !fallo, { ...r, pedidos: [...n.values()].reduce((a, b) => a + b, 0) })
   },
 }
 
