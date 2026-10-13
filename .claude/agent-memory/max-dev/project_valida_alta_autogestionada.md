@@ -28,6 +28,7 @@ Ya mergeados: #1095 (corte de la bolsa), #1097 (`valida_registros`, APLICADA, no
 3. **#1107**: `/valida/activar` + RPC `valida_activar_autogestion`. **Migración 20261012100000 SIN aplicar.**
    - Está apagada: `VALIDA_ACTIVACION_ABIERTA` + `terminosPlanListos()`. Los Términos v2.0 siguen como marcador.
 4. **#1110**: ePayco en modo prueba (`EPAYCO_HABILITADO`). Tokeniza en el navegador y cobra por token (paso 7b del cron).
+   - ⚠️ Llaves con sufijo `_METRIK` (cuenta 1595165). `EPAYCO_PUBLIC_KEY`/`PRIVATE_KEY` sin sufijo son de OTRA cuenta (conciliación de un cliente); leerlas cobraría en la cuenta equivocada. Cargadas solo en Production (2026-10-12): Preview no las tiene.
 5. **metrik-valida#57**: los parches de PR 1 y 9, `POST /api/one/v1/autogestion/{cliente}/ciclos` y la marca PRUEBA en el PDF.
 
 ## Decisiones de diseño que no se deducen del código
