@@ -34,6 +34,7 @@
  * Configuración: `lineas_negocio.config_extra.cruces` (lista). Sin la clave, nada cambia.
  */
 
+import { entidadFinancieraEn } from '@/lib/documentos/entidad-financiera'
 import { esPersonaJuridica, parsearPersonas } from '@/lib/documentos/personas'
 import { coinciden, MODOS_COMPARACION, type ModoComparacion } from './comparar-valores'
 import {
@@ -149,7 +150,25 @@ export interface CruceRequeridos extends CruceBase {
   campos: CampoRequerido[]
 }
 
-export type Cruce = CruceCantidad | CruceDocumentoEnLista | CruceCoincide | CruceRequeridos
+/**
+ * Si en una lista de personas (los compradores de la factura) hay una ENTIDAD FINANCIERA,
+ * un dato tiene que valer uno de `valores` (la titularidad tiene que ser «leasing»).
+ *
+ * Calla si falta la lista, si nadie en ella es entidad financiera, o si falta el dato: un
+ * lado ausente no es una contradicción. La entidad se reconoce por el nombre
+ * (`@/lib/documentos/entidad-financiera`).
+ *
+ * Marcadores del mensaje: `{entidad}` (nombre de la entidad), `{valor}` (el dato, con la
+ * etiqueta de su opción), `{lista}`.
+ */
+export interface CruceEntidadFinanciera extends CruceBase {
+  tipo: 'entidad_financiera'
+  lista: FuenteValor
+  dato: FuenteValor
+  valores: string[]
+}
+
+export type Cruce = CruceCantidad | CruceDocumentoEnLista | CruceCoincide | CruceRequeridos | CruceEntidadFinanciera
 
 export interface Contradiccion {
   slug: string
@@ -203,6 +222,10 @@ function esCruce(v: unknown): v is Cruce {
     return typeof c.condition === 'object' && c.condition !== null &&
       Array.isArray(c.campos) && c.campos.length > 0 && c.campos.every(esCampoRequerido)
   }
+  if (c.tipo === 'entidad_financiera') {
+    return esFuenteValor(c.lista) && esFuenteValor(c.dato) && Array.isArray(c.valores) &&
+      c.valores.length > 0 && c.valores.every(v => typeof v === 'string' && !!v.trim())
+  }
   if (c.tipo === 'coincide') {
     return esFuenteValor(c.a) && Array.isArray(c.b) && c.b.some(esFuenteValor) &&
       (MODOS_COMPARACION as unknown[]).includes(c.modo)
@@ -234,6 +257,11 @@ export function slugsDeCruces(cruces: Cruce[]): string[] {
     } else if (c.tipo === 'documento_en_lista') {
       s.add(c.documento.source_bloque_slug)
       s.add(c.lista.source_bloque_slug)
+    } else if (c.tipo === 'entidad_financiera') {
+      for (const f of [c.lista, c.dato]) {
+        s.add(f.source_bloque_slug)
+        for (const alt of f.alternativas ?? []) s.add(alt)
+      }
     } else if (c.tipo === 'requeridos') {
       for (const f of c.campos) {
         s.add(f.source_bloque_slug)
@@ -302,11 +330,19 @@ async function resolverLado(lado: LadoCantidad, ctx: ContextoFuentes): Promise<L
 
 /** El valor de una fuente: el primer bloque que le aplique al caso y traiga el campo. */
 async function resolverValor(f: FuenteValor, ctx: ContextoFuentes): Promise<unknown> {
+  return (await resolverValorConSlug(f, ctx))?.valor
+}
+
+/** Igual que `resolverValor`, con el bloque del que salió (para la etiqueta de la opción). */
+async function resolverValorConSlug(
+  f: FuenteValor,
+  ctx: ContextoFuentes,
+): Promise<{ slug: string; valor: unknown } | undefined> {
   for (const slug of [f.source_bloque_slug, ...(f.alternativas ?? [])]) {
     if (!ctx.porSlug[slug]) continue
     if (!(await ctx.aplica(slug))) continue
     const v = valorDe(ctx, slug, f.field)
-    if (v !== undefined) return v
+    if (v !== undefined) return { slug, valor: v }
   }
   return undefined
 }
@@ -392,6 +428,24 @@ export async function evaluarCruces(
         bloquea,
         ...extra(c, ['requeridos', ...faltantes]),
         mensaje: redactar(c.mensaje, { faltantes: enumerar(faltantes) }),
+      })
+      continue
+    }
+
+    if (c.tipo === 'entidad_financiera') {
+      const lista = await resolverValor(c.lista, ctx)
+      const entidad = entidadFinancieraEn(parsearPersonas(lista))
+      if (!entidad) continue
+      const dato = await resolverValorConSlug(c.dato, ctx)
+      if (!dato) continue
+      const clave = normalizarClave(dato.valor)
+      if (c.valores.some(v => normalizarClave(v) === clave)) continue
+      const valor = ctx.etiqueta(dato.slug, c.dato.field, dato.valor) ?? String(dato.valor)
+      out.push({
+        slug: c.slug,
+        bloquea,
+        ...extra(c, ['entidad_financiera', `${entidad.nombre}|${entidad.documento}`, clave]),
+        mensaje: redactar(c.mensaje, { entidad: entidad.nombre, valor, lista: String(lista) }),
       })
       continue
     }
