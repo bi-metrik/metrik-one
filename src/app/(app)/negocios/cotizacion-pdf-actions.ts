@@ -307,17 +307,27 @@ export async function generateCotizacionPDF(cotizacionId: string) {
   }
 
   // Para cotizaciones de negocio, intentar obtener empresa del negocio
-  type NegocioInfo = { id: string; nombre: string | null; carpeta_url: string | null; linea_id: string | null }
+  type NegocioInfo = { id: string; nombre: string | null; carpeta_url: string | null; linea_id: string | null; configLinea: unknown }
   let negocioInfo: NegocioInfo | null = null
 
   if (cot.negocio_id) {
     const { data: negocio } = await supabase
       .from('negocios')
-      .select('id, nombre, carpeta_url, linea_id, empresa_id, empresas(nombre, numero_documento, contacto_nombre, contacto_email, tipo_persona, regimen_tributario, gran_contribuyente, agente_retenedor, telefono, direccion_fiscal, municipio, departamento)')
+      // La línea viaja en la MISMA ida (embed): «Así puedes pagar» lee su `config_extra` y una
+      // consulta aparte le sumaba una ida a todo PDF de negocio (presupuesto V5 de C0).
+      .select('id, nombre, carpeta_url, linea_id, empresa_id, lineas_negocio(config_extra), empresas(nombre, numero_documento, contacto_nombre, contacto_email, tipo_persona, regimen_tributario, gran_contribuyente, agente_retenedor, telefono, direccion_fiscal, municipio, departamento)')
       .eq('id', cot.negocio_id)
       .single()
     if (negocio) {
-      negocioInfo = { id: negocio.id, nombre: negocio.nombre, carpeta_url: negocio.carpeta_url, linea_id: (negocio as { linea_id?: string | null }).linea_id ?? null }
+      const lineaEmbebida = (negocio as { lineas_negocio?: unknown }).lineas_negocio
+      const filaLinea = Array.isArray(lineaEmbebida) ? lineaEmbebida[0] : lineaEmbebida
+      negocioInfo = {
+        id: negocio.id,
+        nombre: negocio.nombre,
+        carpeta_url: negocio.carpeta_url,
+        linea_id: (negocio as { linea_id?: string | null }).linea_id ?? null,
+        configLinea: (filaLinea as { config_extra?: unknown } | null | undefined)?.config_extra ?? null,
+      }
       if (!empresa) {
         empresa = (negocio.empresas as EmpresaRow | null) ?? null
       }
@@ -1065,13 +1075,8 @@ export async function generateCotizacionPDF(cotizacionId: string) {
     const delNegocio = viajeDelNegocio ?? (await leerViajeDelNegocio(supabase, negocioInfo.id)).viaje
     if (negocioInfo.linea_id) {
       // Sin poder leer la línea, apagado: el documento sale como hoy.
-      const { data: lineaPlan } = await supabase
-        .from('lineas_negocio')
-        .select('config_extra')
-        .eq('id', negocioInfo.linea_id)
-        .maybeSingle()
       entradaPlan = entradaAsiPuedesPagar(
-        (lineaPlan as { config_extra?: unknown } | null)?.config_extra,
+        negocioInfo.configLinea,
         { fechaSalida: delNegocio.fechas.inicio, hoy: todayBogotaISO() },
       )
     }
