@@ -274,6 +274,43 @@ describe('script en linea: React no hidrato (login en la portada, tableros en bl
     expect(avisos(e)).toEqual(['chunk'])
   })
 
+  it('el runtime colgado del <script> del HTML no se entera del fallo mientras quedan intentos; agotados, sí (una vez)', async () => {
+    // Turbopack: si el <script> del chunk ya está en el HTML, `addEventListener('error')` sobre él.
+    const e = montar()
+    const src = '/_next/static/chunks/pagina.js?dpl=dpl_prueba'
+    const s = e.doc.createElement('script')
+    s.setAttribute('src', src)
+    const runtime = vi.fn()
+    s.addEventListener('error', runtime)
+    e.doc.head.appendChild(s) // happy-dom: falla al conectar, como cada copia
+    await vi.advanceTimersByTimeAsync(1_000 + 2_000 + 4_000 + 8_000)
+    expect(runtime).not.toHaveBeenCalled()
+    await vi.advanceTimersByTimeAsync(15_000)
+    expect(runtime).toHaveBeenCalledTimes(1)
+  })
+
+  it('el runtime colgado del original NO recibe su error si la copia baja (Failed to load chunk del 12-oct)', async () => {
+    const e = montar('/negocios', undefined, { chunksBajan: true })
+    const src = '/_next/static/chunks/pagina.js?dpl=dpl_prueba'
+    const s = e.doc.createElement('script')
+    s.setAttribute('src', src)
+    const runtime = vi.fn()
+    s.addEventListener('error', runtime)
+    e.doc.head.appendChild(s)
+    s.dispatchEvent(new e.ventana.Event('error') as unknown as Event)
+    await vi.advanceTimersByTimeAsync(60_000)
+    expect(runtime).not.toHaveBeenCalled()
+    expect(e.fetchs.find((f) => f.message === MENSAJE_REPORTE_CHUNK)).toMatchObject({ recuperado: true, intento: 1 })
+  })
+
+  it('varios chunks agotados: un solo reporte de fallo, y el aviso igual se reporta (tope de 5)', async () => {
+    const e = montar()
+    for (const n of ['a', 'b', 'c', 'd', 'e']) errorDeScript(e, `https://soena.metrikone.co/_next/static/chunks/${n}.js`)
+    await vi.advanceTimersByTimeAsync(30_000 + GRACIA_TRAS_CHUNK_MS)
+    expect(e.fetchs.filter((f) => f.message === MENSAJE_REPORTE_CHUNK)).toHaveLength(1)
+    expect(avisos(e)).toEqual(['chunk'])
+  })
+
   it('el reintento del chunk SÍ baja: no hay aviso y se reporta recuperado', async () => {
     const e = montar('/negocios', undefined, { chunksBajan: true })
     // Relativo, como lo pone Next: la copia lleva el MISMO atributo (Turbopack registra el

@@ -205,6 +205,18 @@ export function claveEscalera(pathname: string): string {
  *   - Una navegacion RSC (GET con cabecera `rsc: 1`, sin prefetch) que falla antes de recibir
  *     respuesta se repite (`ESPERAS_REINTENTO_RSC_MS`) en vez de caer a una carga completa.
  *
+ * 2026-10-12, la carrera con el runtime (medida en Chromium con perdida del 60 %): el cliente RSC
+ * pide los chunks de los componentes de la pagina con `__turbopack_load_by_url__`; si el
+ * `<script>` ya esta en el HTML, el runtime NO crea otro: se cuelga de ese con
+ * `addEventListener('error')`. El `error` del original le llegaba aunque la copia bajara despues
+ * → «Failed to load chunk … from module …» (lo que vio Mauricio en Claro, 3 veces en /negocios),
+ * con `chunk-reintentado` recuperado:true en el mismo log. Ahora, mientras queden intentos, el
+ * `error` de un `<script>` se corta en la ventana (fase de captura, antes de llegar al elemento:
+ * el runtime no se entera) y la copia que baja lo registra igual (Turbopack resuelve por
+ * registro). Agotados los intentos, se le re-dispara `error` a los `<script>` anteriores con la
+ * misma URL, para que el runtime que esperaba en ellos falle en vez de quedarse colgado. Las
+ * hojas de estilo no se cortan: React espera su `load`/`error` para mostrar la ruta.
+ *
  * Desde el 2026-10-12 un chunk del HTML que falla se reintenta TAMBIEN despues de hidratar. El
  * layout raiz hidrata antes que el segmento de la pagina, y el runtime de Turbopack espera los
  * chunks del HTML por su registro, no por su `error`: uno que fallo sin copia dejaba la pagina
@@ -224,7 +236,8 @@ export function claveEscalera(pathname: string): string {
  *
  * El reporte se anota en la cola de `[error-cliente]` (`errores-cliente/cola.ts`, mismo
  * formato) y sale por `fetch` con `keepalive`; si la red no lo deja salir, la carga
- * siguiente lo reenvía. Tope de 5 reportes por carga.
+ * siguiente lo reenvía. Tope de 5 reportes por carga; de los chunks del HTML agotados se reporta
+ * solo el primero (si no, con varios chunks caídos se gastaba el tope y el aviso no se reportaba).
  */
 export function scriptAvisoConexion(version: string): string {
   const c = {
@@ -260,7 +273,7 @@ export function scriptAvisoConexion(version: string): string {
   return `(function(){try{
 var C=${conf},w=window,d=document,t0=Date.now(),enviados=0;
 if(w.__oneAvisoConexion)return;
-var api=w.__oneAvisoConexion={},quitadas=[],avance=t0,intentos={},tm=null,tc=null,mo=null,ap=null;
+var api=w.__oneAvisoConexion={},quitadas=[],avance=t0,intentos={},tm=null,tc=null,mo=null,ap=null,agotado=0;
 function nid(){try{if(w.crypto&&crypto.randomUUID)return crypto.randomUUID()}catch(e){}return Date.now().toString(36)+'-'+Math.random().toString(36).slice(2,10)}
 function reportar(m,causa,extra){try{
 if(enviados>=5)return;enviados++;
@@ -342,11 +355,15 @@ x.onload=function(e2){reportar(C.mc,null,{recuperado:true,intento:n});if(ol)ol.c
 ap.call(d.head,x)},espera)}
 el.onerror=fallo}
 w.addEventListener('error',function(e){
-var s=e.target,u=esChunk(s);if(!u||s.__oneDinamico)return;
+var s=e.target,u=esChunk(s);if(!u||s.__oneDinamico||s.__oneDeja)return;
 var n=intentos[u]||0;
-if(n<C.rc.length){intentos[u]=n+1;setTimeout(function(){avanzo();var x=copia(s,u,n+1);
+if(n<C.rc.length){intentos[u]=n+1;
+if(s.tagName==='SCRIPT')e.stopImmediatePropagation();
+setTimeout(function(){avanzo();var x=copia(s,u,n+1);
 if(s.tagName==='LINK'&&s.parentNode)s.parentNode.insertBefore(x,s.nextSibling);else if(ap)ap.call(d.head,x);else d.head.appendChild(x)},C.rc[n]);return}
-reportar(C.mc,null,{recuperado:false,intento:n});
+if(s.tagName==='SCRIPT'){var ps=d.getElementsByTagName('script');for(var i=0;i<ps.length;i++){var q=ps[i];
+if(q!==s&&!q.__oneDeja&&q.getAttribute('src')===u){q.__oneDeja=1;try{q.dispatchEvent(new w.Event('error'))}catch(e2){}}}}
+if(!agotado++)reportar(C.mc,null,{recuperado:false,intento:n});
 if(!w.__oneHidratada&&!tc)tc=setTimeout(function(){pintar('chunk')},C.gc)},true);
 var of=w.fetch;
 function esRsc(init){if(!init||!init.headers)return false;if(String(init.method||'GET').toUpperCase()!=='GET')return false;

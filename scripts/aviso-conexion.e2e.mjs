@@ -13,8 +13,8 @@
 //
 // Casos:
 //   A) carga normal de /login: sin aviso, sin píldora, React hidrata, formulario visible.
-//   B) chunks abortados SIEMPRE (connection reset): se reintentan 3 veces (1, 3, 8 s) y recién
-//      entonces el aviso, causa `chunk`.
+//   B) chunks abortados SIEMPRE (connection reset): se reintentan 5 veces (1, 2, 4, 8, 15 s) y
+//      recién entonces el aviso, causa `chunk` (antes del 2026-10-12: 3 veces, 1, 3, 8 s).
 //   C) chunks lentos 12 s pero sanos: píldora «conexión lenta», sin aviso, hidrata.
 //   D) chunks colgados sin error, JS Y CSS (la pantalla en blanco): aviso a los 25 s sin
 //      avance, causa `sin-hidratar`, y PINTADO (la hoja colgada bloqueaba el pintado: el script
@@ -27,9 +27,16 @@
 //      hidrata. (Antes de este cambio: aviso a los 20 s sobre una carga sana.)
 //   I) cada chunk falla la PRIMERA vez (connection reset) y baja al reintento: hidrata sin aviso.
 //      (Antes: aviso `chunk` a los 3 s y la página no hidrataba nunca.)
+//   J) los chunks de la página fallan TARDE (a los 3 s, el runtime ya esperándolos): hidrata.
+//   K) LA RED DEL 2026-10-12 (Claro móvil): cada pedido de chunk falla con probabilidad 0,4.
+//      Con 3 reintentos la carga caía en el aviso `chunk`; con 5, hidrata.
+//
+// OJO con los patrones de `page.route`: los chunks llevan `?dpl=`, así que `**/*.js` NO los toma
+// (el glob exige que la URL termine en `.js`). Usar `**/_next/static/chunks/**` y filtrar dentro.
 
 import { createRequire } from 'node:module'
 import { writeFileSync } from 'node:fs'
+import { createHash } from 'node:crypto'
 
 const require = createRequire(import.meta.url)
 const { chromium } = require(process.env.PW_CORE ?? 'playwright-core')
@@ -43,6 +50,11 @@ function comprobar(nombre, cond, detalle) {
   const { consola: _consola, ...resumen } = detalle ?? {}
   const ver = !cond || process.env.DETALLE
   console.log(`${cond ? 'OK  ' : 'FALLA'} ${nombre}${ver ? ` -> ${JSON.stringify(cond ? resumen : detalle)}` : ''}`)
+}
+
+/** 0-99 determinista y SIN correlación entre claves vecinas (`url#1`, `url#2`…). */
+function azar(clave) {
+  return createHash('md5').update(clave).digest().readUInt32BE(0) % 100
 }
 
 /** Espera determinista por URL entre `min` y `max` ms (la misma URL tarda lo mismo siempre). */
@@ -122,10 +134,10 @@ const casos = {
     comprobar('A normal: sin aviso ni píldora, hidrata, formulario', r.aparecio === null && r.pildora === null && r.hidratada && r.form && r.avisos.length === 0 && !r.consola.some((c) => /hydrat/i.test(c)), r)
   },
   async B() {
-    const r = await escenario('/login?redirectTo=%2Fnegocios', (p) => p.route(chunks, (x) => x.abort('connectionreset')), 25_000)
+    const r = await escenario('/login?redirectTo=%2Fnegocios', (p) => p.route(chunks, (x) => x.abort('connectionreset')), 45_000)
     comprobar(
-      'B chunks abortados siempre: 3 reintentos y luego aviso (causa chunk, una vez)',
-      r.aparecio !== null && r.aparecio > 12_000 && r.aparecio < 20_000 && /No pudimos conectar con ONE/.test(r.aviso ?? '') && r.avisos.join() === 'chunk',
+      'B chunks abortados siempre: 5 reintentos (1+2+4+8+15 s) y luego aviso (causa chunk, una vez)',
+      r.aparecio !== null && r.aparecio > 30_000 && r.aparecio < 40_000 && /No pudimos conectar con ONE/.test(r.aviso ?? '') && r.avisos.join() === 'chunk',
       r,
     )
   },
@@ -142,7 +154,7 @@ const casos = {
     )
   },
   async G() {
-    const r = await escenario('/login?redirectTo=%2Fnegocios', (p) => p.route('**/_next/static/chunks/*.js', () => {}), 30_000, null, 'G-js-colgado')
+    const r = await escenario('/login?redirectTo=%2Fnegocios', (p) => p.route(chunks, (x) => { if (!/\.js(\?|$)/.test(x.request().url())) return x.continue() }), 30_000, null, 'G-js-colgado')
     comprobar(
       'G solo JS colgado: píldora a los 8 s y aviso a los ~25 s, causa sin-hidratar',
       r.pildora !== null && r.pildora < 10_000 && r.aparecio !== null && r.aparecio >= 24_000 && r.avisos.join() === 'sin-hidratar' && r.pintado,
@@ -231,7 +243,7 @@ const casos = {
     comprobar('J chunk que falla tarde (runtime ya escuchando): hidrata sin aviso ni «Failed to load chunk»', r.aparecio === null && r.hidratada && r.formVivo && r.avisos.length === 0 && !fallo, r)
   },
   async K() {
-    // Pérdida al azar y persistente: cada pedido de chunk JS falla con probabilidad 0,5 (a los
+    // Pérdida al azar y persistente: cada pedido de chunk falla con probabilidad 0,4 (a los
     // 0-2 s). Determinista por (url, intento) para que la corrida se repita igual.
     const n = new Map()
     const r = await escenario(
@@ -240,13 +252,13 @@ const casos = {
         const u = x.request().url()
         const k = (n.get(u) ?? 0) + 1
         n.set(u, k)
-        if (demora(`${u}#${k}`, 0, 99) < 50) { await espera(demora(u, 0, 2_000)); await x.abort('connectionreset'); return }
+        if (azar(`${u}#${k}`) < 40) { await espera(demora(u, 0, 2_000)); await x.abort('connectionreset'); return }
         await x.continue()
       }),
       45_000,
     )
     const fallo = r.consola.some((c) => /Failed to load chunk/.test(c))
-    comprobar('K pérdida 50 % al azar: hidrata sin aviso', r.aparecio === null && r.hidratada && r.form && r.avisos.length === 0 && !fallo, { ...r, pedidos: [...n.values()].reduce((a, b) => a + b, 0) })
+    comprobar('K pérdida 40 % al azar: hidrata sin aviso', r.aparecio === null && r.hidratada && r.form && r.avisos.length === 0 && !fallo, { ...r, pedidos: [...n.values()].reduce((a, b) => a + b, 0) })
   },
 }
 
