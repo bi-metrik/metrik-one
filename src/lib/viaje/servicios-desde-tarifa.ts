@@ -52,20 +52,22 @@ export type ItemParaServicio = Pick<
 const MAX_NOMBRE = 200
 
 /**
- * El tipo del servicio. Una asistencia médica MARCADA en su lectura («Otro servicio» de la
- * cotización por pasos, `asistencia-medica.ts`) es «asistencia». Si no, manda la ranura del ítem
- * (`items.ranura_id` → `cotizacion_ranuras.tipo`); si no la tiene, el tipo de su grupo; si tampoco
- * —o es un «Otro servicio» sin marca—, «asistencia» cuando el texto lo dice y si no «otro». Nunca
- * se descarta un ítem por no saber qué es.
+ * El tipo del servicio. Manda la ranura del ítem (`items.ranura_id` → `cotizacion_ranuras.tipo`);
+ * si no la tiene, el tipo de su grupo; si tampoco, «asistencia» cuando el texto lo dice y si no
+ * «otro». Nunca se descarta un ítem por no saber qué es.
+ *
+ * «Otro servicio» (la ranura «otro» de la cotización por pasos) ya dijo qué es: es «asistencia»
+ * solo si su lectura trae la MARCA de asistencia médica (`asistencia-medica.ts`), y si no, «otro»
+ * —un «Seguro de viaje» no se adivina por el texto—.
  */
 export function tipoDeServicio(
   item: Pick<ItemParaServicio, 'grupo' | 'nombre'> & { tarifa_pax?: unknown },
   tipoRanura?: string | null,
 ): TipoServicio {
-  if (lineaConAsistenciaMedica(item)) return 'asistencia'
-  if (esTipoRanura(tipoRanura) && tipoRanura !== 'otro') return tipoRanura
   const porGrupo = tipoDeDefinicion(ranuraDeGrupo(item.grupo))
-  if (porGrupo && porGrupo !== 'otro') return porGrupo
+  const tipo = esTipoRanura(tipoRanura) ? tipoRanura : porGrupo
+  if (tipo === 'otro') return lineaConAsistenciaMedica(item) ? 'asistencia' : 'otro'
+  if (tipo) return tipo
   const texto = `${normalizarGrupo(item.grupo) ?? ''} ${item.nombre ?? ''}`.toLowerCase()
   if (/\b(asistencia|seguro)\b/.test(texto)) return 'asistencia'
   return 'otro'

@@ -553,13 +553,19 @@ export function crudaDeActividadManual(a: ActividadManual): LecturaCruda {
 
 /**
  * Lo que habría leído el modelo de la cotización de este «Otro servicio». Por persona, cada
- * viajero con el mismo costo; por todo, un solo total sin filas por pasajero (como el traslado por
- * vehículo).
+ * viajero con el mismo costo. Por todo, el valor se reparte por igual entre los viajeros, con el
+ * redondeo en el primer tipo: así suma exactamente lo escrito y el costo se confirma solo, sin
+ * pedir «otra búsqueda con los niños» (un solo total con menores pide desglose, TP4).
  */
 export function crudaDeOtroServicioManual(o: OtroServicioManual): LecturaCruda {
   const pax: Composicion = { adultos: o.adultos, ninos: o.ninos, infantes: o.infantes }
-  const porTipo = o.cobro === 'por_persona' ? filas(pax, () => o.neto ?? 0, 1) : []
-  const total = o.cobro === 'por_persona' ? porTipo.reduce((a, f) => a + f.subtotal_tipo, 0) : Math.round(o.neto ?? 0)
+  const personas = o.adultos + o.ninos + o.infantes
+  const neto = o.neto ?? 0
+  const porTipo = filas(pax, () => (o.cobro === 'por_persona' ? neto : personas > 0 ? neto / personas : 0), 1)
+  if (o.cobro === 'total' && porTipo.length > 0) {
+    porTipo[0].subtotal_tipo += Math.round(neto) - porTipo.reduce((a, f) => a + f.subtotal_tipo, 0)
+  }
+  const total = porTipo.reduce((a, f) => a + f.subtotal_tipo, 0)
   return crudaDe({
     nombre: o.nombre,
     proveedor: o.proveedor || null,
@@ -570,7 +576,7 @@ export function crudaDeOtroServicioManual(o: OtroServicioManual): LecturaCruda {
     moneda: 'COP',
     precio_total: String(total),
     base_precio: 'total',
-  }, porTipo, porTipo.length > 0 ? total : null)
+  }, porTipo, total)
 }
 
 /** Lo que entra a `lecturaManual`: uno de los cinco tipos con sus datos. */

@@ -211,7 +211,8 @@ export function nombreAutomaticoDeRanura(args: {
     const servicio = comoFrase((args.servicio ?? '').trim().replace(/\s+/g, ' ').slice(0, 100))
     const nombre = servicio || etiqueta
     if (!enUso.has(clave(nombre))) return nombre
-    let n = args.numero && args.numero >= 2 ? args.numero : 2
+    // El número cuenta los servicios de ESE nombre, no la ranura: el segundo es «… 2».
+    let n = 2
     while (enUso.has(clave(`${nombre} ${n}`))) n += 1
     return `${nombre} ${n}`
   }
