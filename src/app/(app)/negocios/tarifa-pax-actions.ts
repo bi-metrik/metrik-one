@@ -77,6 +77,7 @@ import { fechaDeActividad, lugarDeBloqueNuevo } from '@/lib/cotizaciones/activid
 import { diaDeFecha } from '@/lib/cotizaciones/actividad-en-cotizacion'
 import { borradorValido, firmarBorrador } from '@/lib/cotizaciones/firma-borrador'
 import { opcionElegidaDeActividad, ubicarLectura, type LineaParaUbicar } from '@/lib/cotizaciones/ubicar-lectura'
+import { completaDe, mismoTipo } from '@/lib/cotizaciones/destino-por-pasos'
 import { aceptacionPrevia, idAceptacionValido } from '@/lib/cotizaciones/aceptacion-idempotente'
 import { definicionDeTipo, esTipoRanura, tipoDeDefinicion, type TipoRanura } from '@/lib/cotizaciones/ranuras-cotizacion'
 import { lugarDeOpcion } from '@/lib/cotizaciones/opcion-viaje'
@@ -611,7 +612,7 @@ export interface BorradorParaAceptar {
    * igual»). `habitacion`: habitación de `destinoId` aunque el grupo ya esté cubierto.
    * `reemplazar`: la lectura reemplaza la de `destinoId` («Reemplazar el precio»).
    */
-  decision: 'auto' | 'opcion' | 'habitacion' | 'reemplazar'
+  decision: 'auto' | 'opcion' | 'habitacion' | 'reemplazar' | DecisionPorPasos
   destinoId?: string | null
   /**
    * El pantallazo leído (data URL), para guardarlo con la opción. Solo se guarda si su huella
@@ -633,8 +634,16 @@ export interface BorradorParaAceptar {
   idAceptacion?: string | null
 }
 
+/**
+ * Las decisiones que solo manda la cotización por pasos (C5): lo que dijo la frase de la fila
+ * cuando la eligió el modelo o la asesora. `nueva`: servicio aparte. `hermana`: otra opción del
+ * servicio de `destinoId` (del mismo tipo). `completa`: el pantallazo trae el precio por pasajero
+ * que le faltaba a `destinoId` y no crea nada. Las rutas solo las dejan pasar con el interruptor.
+ */
+export type DecisionPorPasos = 'nueva' | 'hermana' | 'completa'
+
 /** Cómo entró la captura: otra opción, una ranura nueva, una habitación o sobre una opción. */
-export type ComoEntro = 'hermana' | 'nueva' | 'habitacion' | 'reemplazo'
+export type ComoEntro = 'hermana' | 'nueva' | 'habitacion' | 'reemplazo' | 'completa'
 
 export type ResultadoAceptarCaptura =
   | {
@@ -721,7 +730,7 @@ export async function aceptarCapturaDeBandeja(cotizacionId: string, b: BorradorP
     const ref = await subida
     if (ref) await borrarImagenesDeCaptura(workspaceId, [ref])
   }
-  if (!r.ok || r.como === 'habitacion') return r
+  if (!r.ok || r.como === 'habitacion' || r.como === 'completa') return r
   const fallidas = await medirEtapa('correcciones', () => aplicarCorreccionesDeBandeja(r.itemId, b.correcciones))
   // Punto 2 del brief del 2026-10-05: la actividad con fecha dentro del viaje llega con su día.
   if (b.tipo === 'actividad') await medirEtapa('dia', () => proponerDiaDeActividad(ctx.supabase, r.itemId, ctx.viaje.fechas))
@@ -789,8 +798,26 @@ async function aceptarLectura(
     return terminarAceptacion(ctx.supabase, cotizacionId, b.destinoId!, { como: 'reemplazo' })
   }
 
+  // ── Completa el precio por pasajero que le faltaba a una opción (por pasos, C5) ──
+  // Se vuelve a comprobar contra la opción de ESTE momento: si ya no le falta, no se escribe.
+  if (b.decision === 'completa') {
+    const linea = lineas.find(l => l.id === b.destinoId)
+    const c = linea ? completaDe(b.tipo, lectura, [linea as unknown as LineaParaUbicar], ctx.viaje.composicion) : null
+    if (!c) return { ok: false, codigo: 'DESTINO', mensaje: 'A esa opción ya no le falta ese precio. Toca la frase y elige a dónde va.' }
+    const ctxItem = await contexto(c.itemId)
+    if ('error' in ctxItem) return { ok: false, codigo: 'CONTEXTO', mensaje: ctxItem.error as string }
+    await conImagen()
+    const g = await guardarLecturaEnItem(ctxItem, c.itemId, c.clave, lectura)
+    if (!g.ok) return { ok: false, codigo: g.codigo, mensaje: g.mensaje }
+    return terminarAceptacion(ctx.supabase, cotizacionId, c.itemId, { como: 'completa' })
+  }
+
   // ── Dónde va, contra la cotización de ESTE momento ──
-  const destino = b.decision === 'habitacion'
+  const destino = b.decision === 'nueva'
+    ? { como: 'nueva' as const }
+    : b.decision === 'hermana'
+    ? hermanaElegida(b.tipo, b.destinoId, lineas as unknown as LineaParaUbicar[])
+    : b.decision === 'habitacion'
     ? (delaCotizacion(b.destinoId) ? { como: 'habitacion' as const, itemId: b.destinoId!, grupo: '', sobra: false } : null)
     // Una actividad solo es opción de otra si quien cotiza lo eligió (brief del 2026-10-05,
     // «actividades tras la limpieza»): «Agregar como otra opción» manda la actividad de al lado.
@@ -829,6 +856,17 @@ async function aceptarLectura(
     return { ok: false, codigo: g.codigo, mensaje: g.mensaje }
   }
   return terminarAceptacion(ctx.supabase, cotizacionId, creada.itemId, { como: destino.como })
+}
+
+/**
+ * «Otra opción de: …» que eligió la asesora o el modelo (por pasos, C5): va como hermana del
+ * servicio de `destinoId`, que tiene que seguir en la cotización y ser del MISMO tipo (M3).
+ */
+function hermanaElegida(tipo: TipoRanura, destinoId: string | null | undefined, lineas: readonly LineaParaUbicar[]): { como: 'hermana'; grupo: string } | null {
+  const linea = destinoId ? lineas.find(l => l.id === destinoId && l.es_ajuste !== true) : null
+  if (!linea || !mismoTipo(linea, tipo)) return null
+  const grupo = normalizarGrupo(linea.grupo ?? null)
+  return grupo ? { como: 'hermana', grupo } : null
 }
 
 /** Confirma el costo (un faltante queda pendiente en su bloque, R1) y dice dónde quedó. */

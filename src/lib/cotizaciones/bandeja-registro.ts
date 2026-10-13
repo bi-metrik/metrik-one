@@ -16,7 +16,7 @@
  *     vercel logs … --query "bandeja"
  */
 
-export type RutaBandeja = 'detectar-captura' | 'leer-captura' | 'aceptar-captura' | 'lectura-manual'
+export type RutaBandeja = 'detectar-captura' | 'leer-captura' | 'aceptar-captura' | 'lectura-manual' | 'aceptar-lote'
 
 /** Lo que se dice cuando la acción lanzó: no es la captura, es ONE. */
 export const MENSAJE_ERROR_SERVIDOR =

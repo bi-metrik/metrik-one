@@ -17,11 +17,13 @@ import { aceptarCapturaDeBandeja, type BorradorParaAceptar } from '@/app/(app)/n
 import { enPeticionDeRuta } from '@/lib/actions/memo-de-ruta'
 import { conTiempos, encabezadoServerTiming } from '@/lib/actions/tiempos-de-ruta'
 import { bytesDeImagen, registrarEnBandeja, responderBandeja } from '@/lib/cotizaciones/bandeja-registro'
-import { aceptarPorPasos } from '@/lib/cotizaciones/por-pasos-cierre'
+import { aceptarPorPasos, esEstadoAlAceptar, type EstadoAlAceptar } from '@/lib/cotizaciones/por-pasos-cierre'
 
 export const runtime = 'nodejs'
 
 const DECISIONES = new Set(['auto', 'opcion', 'habitacion', 'reemplazar'])
+/** Solo con la marca de la forma por pasos (C5): lo que eligió el modelo o la asesora en la frase. */
+const DECISIONES_POR_PASOS = new Set(['nueva', 'hermana', 'completa'])
 
 export async function POST(req: Request, { params }: { params: Promise<{ id: string }> }) {
   const { id } = await params
@@ -37,7 +39,8 @@ export async function POST(req: Request, { params }: { params: Promise<{ id: str
     typeof cuerpo.tipo !== 'string' ||
     typeof cuerpo.lecturaJson !== 'string' ||
     typeof cuerpo.firma !== 'string' ||
-    !DECISIONES.has(String(cuerpo.decision))
+    !(DECISIONES.has(String(cuerpo.decision))
+      || ((cuerpo as { porPasos?: unknown }).porPasos === true && DECISIONES_POR_PASOS.has(String(cuerpo.decision))))
   ) {
     registrarEnBandeja('warn', { ruta: 'aceptar-captura', codigo: 'PETICION', cotizacionId: id ?? '', bytesImagen: bytesDeImagen(cuerpo?.imagen) })
     return NextResponse.json({ ok: false, codigo: 'PETICION', mensaje: 'La captura llegó incompleta. Vuelve a pegarla.' }, { status: 400 })
@@ -69,7 +72,7 @@ export async function POST(req: Request, { params }: { params: Promise<{ id: str
   const porPasos = (cuerpo as { porPasos?: unknown }).porPasos === true
   const { resultado: r, etapas } = await conTiempos(() =>
     responderBandeja('aceptar-captura', id, bytesDeImagen(borrador.imagen), () => porPasos
-      ? enPeticionDeRuta(() => aceptarPorPasos(id, borrador))
+      ? enPeticionDeRuta(() => aceptarPorPasos(id, borrador, esEstadoAlAceptar((cuerpo as { estado?: unknown }).estado) ? (cuerpo as { estado: EstadoAlAceptar }).estado : null))
       : enPeticionDeRuta(() => aceptarCapturaDeBandeja(id, borrador))))
   const ms = performance.now() - inicio
   return NextResponse.json(r, { headers: { 'Server-Timing': encabezadoServerTiming(['aceptar', ms], etapas) } })
