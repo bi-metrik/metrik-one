@@ -2881,10 +2881,10 @@ export default function CotizacionEditor({ oportunidadId, cotizacion, initialIte
               onCambio={refrescar}
             />
           )}
-          {/* C5 · con la forma por pasos, «O agrégalo sin pantallazo» y sus botones por tipo se
-              funden en «✎ Escríbelo a mano» de la bandeja. Queda el componente suelto, que es
-              la entrada de lo que no es vuelo, hotel, traslado ni actividad (seguro, asistencia
-              médica) mientras «Otro servicio» no exista como tipo. */}
+          {/* C5 · con la forma por pasos, «O agrégalo sin pantallazo», sus botones por tipo y el
+              componente suelto («Otro componente del viaje») se funden en «✎ Escríbelo a mano» de
+              la bandeja: lo que no es vuelo, hotel, traslado ni actividad entra como «Otro
+              servicio» (asistencia médica, seguro). Apagada, la pantalla de siempre. */}
           {lineasPorTipo && !porPasosOn && (
             <p className="text-[10px] font-medium uppercase tracking-wide text-muted-foreground">
               O agrégalo sin pantallazo
@@ -2908,8 +2908,9 @@ export default function CotizacionEditor({ oportunidadId, cotizacion, initialIte
                 ))}
                 {/* EL BOTÓN DEL COMPONENTE SUELTO (§4.2). Se llamaba «Otro», que no
                     dice lo único que hay que saber para elegirlo: una línea sin
-                    ranura SUMA SIEMPRE, no compite con nadie. */}
-                <button
+                    ranura SUMA SIEMPRE, no compite con nadie. Por pasos lo reemplaza
+                    «Otro servicio» de «✎ Escríbelo a mano». */}
+                {!porPasosOn && <button
                   onClick={() => setMostrarOtro(v => !v)}
                   disabled={isPending}
                   aria-expanded={mostrarOtro}
@@ -2917,7 +2918,7 @@ export default function CotizacionEditor({ oportunidadId, cotizacion, initialIte
                 >
                   <Plus className="h-3.5 w-3.5" />
                   Otro componente del viaje
-                </button>
+                </button>}
               </>
             ) : (
               <>
@@ -3000,7 +3001,7 @@ export default function CotizacionEditor({ oportunidadId, cotizacion, initialIte
               el tramo a la isla. Ahora crea «Vuelo 2», que suma aparte, y la opción que
               compite tiene su propio botón DENTRO de la línea. Son dos cosas distintas
               y cada una tiene su botón, así que la frase ya puede explicar las dos. */}
-          {lineasPorTipo && (
+          {lineasPorTipo && !porPasosOn && (
             <p className="text-[10px] leading-relaxed text-muted-foreground">
               <span className="font-medium text-foreground">Vuelo, Hotel, Actividad y Traslado</span>{' '}
               agregan otro componente que <span className="font-medium">suma</span>: si ya hay un
@@ -3013,7 +3014,7 @@ export default function CotizacionEditor({ oportunidadId, cotizacion, initialIte
               una línea sin ranura: suma siempre y no compite con nadie.
             </p>
           )}
-          {lineasPorTipo && mostrarOtro && (
+          {lineasPorTipo && mostrarOtro && !porPasosOn && (
             <div className="flex gap-2">
               <input
                 value={newItemName}

@@ -216,7 +216,8 @@ function comoLectura(l: unknown): ItemConLectura {
   return { ...x, grupo: x.grupo ?? null }
 }
 
-const RANGO_TIPO: Record<TipoRanura, number> = { vuelo: 0, hotel: 1, traslado: 2, actividad: 3 }
+// «Otro servicio» (asistencia médica, seguro) va al final del viaje, antes de las líneas sueltas.
+const RANGO_TIPO: Record<TipoRanura, number> = { vuelo: 0, hotel: 1, traslado: 2, actividad: 3, otro: 4 }
 
 /** «2026-11-09 06:05» del primer tramo de ida, para ordenar. `--MM-DD` va después de lo fechado. */
 function claveDeSalida(item: ItemConLectura): string | null {

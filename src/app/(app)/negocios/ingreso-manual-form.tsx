@@ -2,7 +2,8 @@
 
 import { useId, useState, type ReactNode } from 'react'
 
-import { avisoFechasFueraDelViaje, montoConMiles, nochesEntre, type ErroresManual } from '@/lib/cotizaciones/ingreso-manual'
+import { ATAJOS_OTRO_SERVICIO, avisoFechasFueraDelViaje, montoConMiles, nochesEntre, type ErroresManual } from '@/lib/cotizaciones/ingreso-manual'
+import { esAsistenciaMedica } from '@/lib/cotizaciones/asistencia-medica'
 import type { Composicion } from '@/lib/cotizaciones/tarifa-pasajero'
 import { BTN, BTN_ELEGIDO, BTN_PRIM, INPUT, INPUT_DUDOSO, SPIN } from '@/components/viaje/estilo'
 
@@ -23,12 +24,15 @@ const SPIN_BOTON = SPIN.replace('mr-1.5 ', '')
 
 export type TipoManual = 'hotel' | 'traslado'
 
-/** «✎ Escríbelo a mano» de la cotización por pasos (C5): suma vuelo y actividad. */
-export type TipoEscritoAMano = TipoManual | 'vuelo' | 'actividad'
+/** «✎ Escríbelo a mano» de la cotización por pasos (C5): suma vuelo, actividad y «Otro servicio». */
+export type TipoEscritoAMano = TipoManual | 'vuelo' | 'actividad' | 'otro'
 
 /** El orden de los tipos en «✎ Escríbelo a mano» (Noor, Paso 1). */
-export const TIPOS_A_MANO: readonly TipoEscritoAMano[] = ['vuelo', 'hotel', 'traslado', 'actividad']
-const ETIQUETA_TIPO: Record<TipoEscritoAMano, string> = { vuelo: 'Vuelo', hotel: 'Hotel', traslado: 'Traslado', actividad: 'Actividad' }
+export const TIPOS_A_MANO: readonly TipoEscritoAMano[] = ['vuelo', 'hotel', 'traslado', 'actividad', 'otro']
+const ETIQUETA_TIPO: Record<TipoEscritoAMano, string> = { vuelo: 'Vuelo', hotel: 'Hotel', traslado: 'Traslado', actividad: 'Actividad', otro: 'Otro servicio' }
+
+/** Lo que dice el formulario cuando el otro servicio es una asistencia médica (Noor, copys). */
+export const NOTA_ASISTENCIA_MEDICA = 'Asistencia médica: además, el negocio la mostrará en «Documentos del viajero»'
 
 /** Copys de Noor (sección 3, «Escribirlo a mano»). */
 export const TITULO_A_MANO = '✎ Escríbelo a mano'
@@ -82,6 +86,9 @@ function inicial(tipo: TipoEscritoAMano, grupo: Composicion | null): Valores {
   if (tipo === 'actividad') {
     return { nombre: '', ciudad: '', fecha: '', ...pax, netoAdulto: '', netoNino: '', netoInfante: '', opcional: '', fuente: '' }
   }
+  if (tipo === 'otro') {
+    return { nombre: '', proveedor: '', ...pax, cobro: 'por_persona', neto: '', fuente: '' }
+  }
   return tipo === 'hotel'
     ? { hotel: '', ciudad: '', entrada: '', salida: '', habitacion: '', regimen: '', incluye: '', ...pax, netoAdulto: '', netoNino: '', netoInfante: '', edadDesde: '', edadHasta: '', fuente: '' }
     : { ruta: '', fecha: '', ...pax, cobro: 'por_persona', precio: '', neto: '', netoNino: '', netoInfante: '', idaYRegreso: 'si', fuente: '' }
@@ -105,8 +112,8 @@ export default function IngresoManualForm({
   /** Con qué arranca. La bandeja no lo pasa: empieza en hotel. */
   tipoInicial?: TipoEscritoAMano
   /**
-   * «✎ Escríbelo a mano» de la cotización por pasos (C5): cuatro tipos (vuelo, hotel, traslado y
-   * actividad), lo obligatorio marcado con * y la fuente opcional. Sin ella, el ingreso manual de
+   * «✎ Escríbelo a mano» de la cotización por pasos (C5): cinco tipos (vuelo, hotel, traslado,
+   * actividad y «Otro servicio»), lo obligatorio marcado con * y la fuente opcional. Sin ella, el ingreso manual de
    * siempre, igual que hoy.
    */
   porPasos?: boolean
@@ -186,6 +193,8 @@ export default function IngresoManualForm({
   const noches = tipo === 'hotel' ? nochesEntre(v.entrada ?? '', v.salida ?? '') : 0
   // El mismo aviso que llevará la fila de la bandeja: avisa, no frena.
   const fueraDelViaje = tipo === 'hotel' ? avisoFechasFueraDelViaje(v.entrada ?? '', v.salida ?? '', fechasViaje) : null
+  // «Otro servicio» por persona: los pasajeros salen del viaje (Noor, Paso 1).
+  const viajeros = (Number(v.adultos) || 0) + (Number(v.ninos) || 0) + (Number(v.infantes) || 0)
   const titulo = (t: string) => <span className="col-span-full mt-1 text-[11px] font-bold uppercase tracking-[.08em] text-[#6E6A62]">{t}</span>
 
   if (porPasos) {
@@ -248,6 +257,34 @@ export default function IngresoManualForm({
               {ES_OPCIONAL}
             </label>
             {campo('fuente', 'Fuente de la tarifa', { ancho: 'col-span-2 max-sm:col-span-2', placeholder: 'Operador local', ayuda: AYUDA_FUENTE })}
+          </div>
+        ) : tipo === 'otro' ? (
+          <div className="grid grid-cols-3 gap-x-3 gap-y-2 max-sm:grid-cols-2">
+            <div className="col-span-full flex flex-wrap items-center gap-1" role="group" aria-label="Qué es">
+              {ATAJOS_OTRO_SERVICIO.map(a => (
+                <button key={a} type="button" onClick={() => setV(prev => ({ ...prev, nombre: a }))} aria-pressed={v.nombre === a} className={v.nombre === a ? BTN_ELEGIDO : BTN} data-atajo-otro={a}>
+                  {a}
+                </button>
+              ))}
+            </div>
+            {campo('nombre', 'Nombre', { obligatorio: true, placeholder: 'Asistencia médica' })}
+            {campo('proveedor', 'Proveedor o detalle', { ancho: 'col-span-2 max-sm:col-span-2', placeholder: 'Assist Card, plan Básico' })}
+            <div className="col-span-full flex flex-wrap gap-x-4 gap-y-1" role="radiogroup" aria-label="Cómo cobra">
+              {opcion('cobro', 'por_persona', `Por persona (${viajeros} ${viajeros === 1 ? 'viajero' : 'viajeros'})`)}
+              {opcion('cobro', 'total', 'Un valor por todo')}
+            </div>
+            {!composicion && (
+              <>
+                {titulo('Pasajeros')}
+                {campo('adultos', 'Adultos', { numerico: true })}
+                {campo('ninos', 'Niños', { numerico: true })}
+                {campo('infantes', 'Infantes', { numerico: true })}
+              </>
+            )}
+            <p className="col-span-full m-0 text-xs text-[#6E6A62]">{AYUDA_NETO}</p>
+            {campo('neto', v.cobro === 'total' ? 'Costo total' : 'Costo por persona', { numerico: true, obligatorio: true })}
+            {campo('fuente', 'Fuente de la tarifa', { ancho: 'col-span-2 max-sm:col-span-2', placeholder: 'Portafolio 2026, llamada con el proveedor…', ayuda: AYUDA_FUENTE })}
+            {esAsistenciaMedica(v.nombre) && <p className="col-span-full m-0 text-xs text-[#0E5C43]" data-nota-asistencia>{NOTA_ASISTENCIA_MEDICA}</p>}
           </div>
         ) : tipo === 'hotel' ? (
           <div className="grid grid-cols-3 gap-x-3 gap-y-2 max-sm:grid-cols-2">

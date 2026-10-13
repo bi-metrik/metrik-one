@@ -204,12 +204,12 @@ export async function lecturaManualPorRuta(
 }
 
 /**
- * «✎ Escríbelo a mano» de la cotización por pasos (C5): los cuatro tipos, con la marca para que el
- * servidor compruebe el interruptor. `null` sin respuesta.
+ * «✎ Escríbelo a mano» de la cotización por pasos (C5): los cinco tipos (con «Otro servicio»), con
+ * la marca para que el servidor compruebe el interruptor. `null` sin respuesta.
  */
 export async function escritoAManoPorRuta(
   cotizacionId: string,
-  tipo: 'hotel' | 'traslado' | 'vuelo' | 'actividad',
+  tipo: 'hotel' | 'traslado' | 'vuelo' | 'actividad' | 'otro',
   datos: unknown,
   f: Fetch = fetch,
   opciones?: OpcionesDeEnvio,

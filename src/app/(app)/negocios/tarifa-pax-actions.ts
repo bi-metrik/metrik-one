@@ -72,7 +72,8 @@ import {
 } from '@/lib/cotizaciones/habitaciones'
 import { opcionLeidaDeFila, type OpcionLeida } from '@/lib/cotizaciones/bandeja-capturas'
 import { leerImagenDeCaptura } from '@/lib/cotizaciones/leer-imagen-captura'
-import { avisoFechaActividadFueraDelViaje, leerActividadManual, leerHotelManual, leerTrasladoManual, leerVueloManual, lecturaManual, type EntradaManual, type ErroresManual } from '@/lib/cotizaciones/ingreso-manual'
+import { avisoFechaActividadFueraDelViaje, leerActividadManual, leerHotelManual, leerOtroServicioManual, leerTrasladoManual, leerVueloManual, lecturaManual, type EntradaManual, type ErroresManual } from '@/lib/cotizaciones/ingreso-manual'
+import { marcarAsistenciaMedica } from '@/lib/cotizaciones/asistencia-medica'
 import { fechaDeActividad, lugarDeBloqueNuevo } from '@/lib/cotizaciones/actividad-pantallazo'
 import { diaDeFecha } from '@/lib/cotizaciones/actividad-en-cotizacion'
 import { borradorValido, firmarBorrador } from '@/lib/cotizaciones/firma-borrador'
@@ -541,6 +542,12 @@ export async function leerCapturaEnBorrador(
   }
   const ctx = await contextoDeCotizacion(cotizacionId)
   if ('error' in ctx) return { ok: false, codigo: 'CONTEXTO', mensaje: ctx.error as string }
+  // «Es otro servicio» solo existe en la cotización por pasos: con el interruptor apagado no se
+  // lee (ni se gasta una llamada al modelo).
+  if (tipo === 'otro') {
+    const guard = await exigirPorPasos(ctx.supabase, cotizacionId)
+    if (!guard.ok) return { ok: false, codigo: 'POR_PASOS', mensaje: guard.error }
+  }
   const ranura = definicionDeTipo(tipo)
   const r = await leerImagenDeCaptura({ ranura, dataUrl, viaje: ctx.viaje, enfoque })
   if (!r.ok) return r
@@ -555,6 +562,8 @@ export async function leerCapturaEnBorrador(
   // 2026-10-01). Es un aviso: la captura entra igual.
   const fueraDelViaje = tipo === 'actividad' ? avisoFechaActividadFueraDelViaje(fechaDeActividad(leida), ctx.viaje.fechas) : null
   leida.alertas = sumarAlertas(leida.alertas, v.alertas, fueraDelViaje ? [fueraDelViaje] : [])
+  // Una asistencia médica leída de un pantallazo queda marcada igual que la escrita a mano.
+  if (tipo === 'otro') marcarAsistenciaMedica(tipo, leida)
   const lecturaJson = JSON.stringify(leida)
   const firma = firmarBorrador(cotizacionId, tipo, lecturaJson)
   if (!firma) return { ok: false, codigo: 'CONFIG', mensaje: 'Falta configurar la firma de la bandeja. Avísale a MeTRIK.' }
@@ -572,7 +581,7 @@ export type ResultadoManualEnBorrador =
 
 export async function lecturaManualEnBorrador(
   cotizacionId: string,
-  tipo: 'hotel' | 'traslado' | 'vuelo' | 'actividad',
+  tipo: 'hotel' | 'traslado' | 'vuelo' | 'actividad' | 'otro',
   datos: unknown,
   /**
    * «✎ Escríbelo a mano» de la cotización por pasos (C5): suma vuelo y actividad, y la fuente es
@@ -583,7 +592,7 @@ export async function lecturaManualEnBorrador(
 ): Promise<ResultadoManualEnBorrador> {
   const porPasos = opciones?.porPasos === true
   const deSiempre = tipo === 'hotel' || tipo === 'traslado'
-  if (!deSiempre && !(porPasos && (tipo === 'vuelo' || tipo === 'actividad'))) return { ok: false, codigo: 'TIPO', mensaje: 'Tipo de componente desconocido.' }
+  if (!deSiempre && !(porPasos && (tipo === 'vuelo' || tipo === 'actividad' || tipo === 'otro'))) return { ok: false, codigo: 'TIPO', mensaje: 'Tipo de componente desconocido.' }
   if (!(await exigirModulo(REQUISITO.clarity)).ok) {
     return { ok: false, codigo: 'MODULO', mensaje: MENSAJE_MODULO_NO_ACTIVO }
   }
@@ -600,7 +609,9 @@ export async function lecturaManualEnBorrador(
       ? { tipo, datos: leerTrasladoManual(datos) }
       : tipo === 'vuelo'
         ? { tipo, datos: leerVueloManual(datos) }
-        : { tipo, datos: leerActividadManual(datos) }
+        : tipo === 'actividad'
+          ? { tipo, datos: leerActividadManual(datos) }
+          : { tipo, datos: leerOtroServicioManual(datos) }
   const r = lecturaManual({
     ranura,
     entrada,
@@ -707,6 +718,12 @@ export async function aceptarCapturaDeBandeja(cotizacionId: string, b: BorradorP
   if (idAceptacion) lectura.aceptacion = idAceptacion
   const ctx = await medirEtapa('contexto', () => contextoDeCotizacion(cotizacionId))
   if ('error' in ctx) return { ok: false, codigo: 'CONTEXTO', mensaje: ctx.error as string }
+  // «Otro servicio» solo entra con la cotización por pasos (N5): aunque la lectura venga firmada,
+  // con el interruptor apagado se rechaza sin escribir nada.
+  if (b.tipo === 'otro') {
+    const guard = await exigirPorPasos(ctx.supabase, cotizacionId)
+    if (!guard.ok) return { ok: false, codigo: 'POR_PASOS', mensaje: guard.error }
+  }
   // El pantallazo se sube ahora, al aceptar: mientras estuvo en la bandeja no se guardó. Una
   // lectura que ya trae su imagen (volvió a la bandeja desde una opción eliminada) no la sube
   // otra vez. Brief del 2026-10-05, punto 13: la subida va EN PARALELO con la lectura de las
@@ -878,7 +895,12 @@ async function aceptarLectura(
     ? await medirEtapa('crear', () => agregarOpcionARanura(cotizacionId, destino.grupo))
     // Una actividad sin ciudad en la captura nombra su bloque con el destino del viaje, no
     // con el nombre de la excursión que tomó el detector (punto 4 del brief del 2026-10-01).
-    : await medirEtapa('crear', () => crearRanuraConOpcion(cotizacionId, b.tipo, { ...pistas, lugar: lugarDeBloqueNuevo(b.tipo, lectura, pistas.lugar, b.correcciones) }))
+    : await medirEtapa('crear', () => crearRanuraConOpcion(cotizacionId, b.tipo, {
+      ...pistas,
+      lugar: lugarDeBloqueNuevo(b.tipo, lectura, pistas.lugar, b.correcciones),
+      // «Otro servicio» se llama como lo que es («Asistencia médica»), no por un lugar.
+      ...(b.tipo === 'otro' ? { servicio: servicioDeLectura(lectura, b.correcciones) } : {}),
+    }))
   if (!creada.success) return { ok: false, codigo: 'CREAR', mensaje: creada.error || 'No se pudo abrir la opción para esta captura. Toca «Aceptar» otra vez.' }
   const ctxItem = await contexto(creada.itemId)
   await conImagen()
@@ -891,6 +913,13 @@ async function aceptarLectura(
     return { ok: false, codigo: g.codigo, mensaje: g.mensaje }
   }
   return terminarAceptacion(ctx.supabase, cotizacionId, creada.itemId, { como: destino.como })
+}
+
+/** El nombre de un «Otro servicio»: el corregido en la fila, o el leído. */
+function servicioDeLectura(lectura: LecturaCasilla, correcciones: BorradorParaAceptar['correcciones']): string | null {
+  const corregido = Array.isArray(correcciones) ? correcciones.find(c => c?.slug === 'nombre' && typeof c.valor === 'string')?.valor : undefined
+  const t = (corregido ?? lectura.nombre ?? '').trim()
+  return t === '' ? null : t
 }
 
 /**

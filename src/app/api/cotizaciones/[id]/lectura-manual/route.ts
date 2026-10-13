@@ -18,16 +18,17 @@ export async function POST(req: Request, { params }: { params: Promise<{ id: str
   } catch {
     cuerpo = null
   }
-  // «✎ Escríbelo a mano» de la cotización por pasos (C5) suma vuelo y actividad; el servidor
-  // vuelve a comprobar el interruptor. Sin la marca, solo hotel y traslado, como siempre.
+  // «✎ Escríbelo a mano» de la cotización por pasos (C5) suma vuelo, actividad y «Otro servicio»;
+  // el servidor vuelve a comprobar el interruptor. Sin la marca, solo hotel y traslado, como siempre.
   const porPasos = cuerpo?.porPasos === true
-  const tipoValido = cuerpo?.tipo === 'hotel' || cuerpo?.tipo === 'traslado' || (porPasos && (cuerpo?.tipo === 'vuelo' || cuerpo?.tipo === 'actividad'))
+  const tipoValido = cuerpo?.tipo === 'hotel' || cuerpo?.tipo === 'traslado'
+    || (porPasos && (cuerpo?.tipo === 'vuelo' || cuerpo?.tipo === 'actividad' || cuerpo?.tipo === 'otro'))
   if (!id || !cuerpo || !tipoValido || !cuerpo.datos || typeof cuerpo.datos !== 'object') {
     registrarEnBandeja('warn', { ruta: 'lectura-manual', codigo: 'PETICION', cotizacionId: id ?? '', bytesImagen: null })
     return NextResponse.json({ ok: false, codigo: 'PETICION', mensaje: 'El formulario llegó incompleto. Vuelve a enviarlo.' }, { status: 400 })
   }
   const { datos } = cuerpo
-  const tipo = cuerpo.tipo as 'hotel' | 'traslado' | 'vuelo' | 'actividad'
+  const tipo = cuerpo.tipo as 'hotel' | 'traslado' | 'vuelo' | 'actividad' | 'otro'
   return NextResponse.json(await responderBandeja('lectura-manual', id, null, () => porPasos
     ? lecturaManualEnBorrador(id, tipo, datos, { porPasos: true })
     : lecturaManualEnBorrador(id, tipo, datos)))
