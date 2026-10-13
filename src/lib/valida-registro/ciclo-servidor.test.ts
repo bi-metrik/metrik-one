@@ -81,13 +81,13 @@ describe('el pago de una cuota abre el ciclo en Valida', () => {
     expect(detalleCiclo(r)).toEqual({ revisar: false, detalle: 'Valida: plan abierto hasta el 2026-11-17 con 3.000 consultas.' })
   })
 
-  it('el límite configurable del contrato viaja tal cual', async () => {
+  it('el límite es el de los textos (3.000) aunque el contrato traiga otro (fila 23 de Vera)', async () => {
     const t = base()
     ;(t.servicios_contratados[0].parametros as Record<string, unknown>).limite_consultas_mes = 4500
     const { db } = crearDoble(t)
     const v = valida()
-    await abrirCicloSiCorresponde('cobro-1', { db, llamar: v.llamar, ahora: AHORA, env: {} })
-    expect((v.llamadas[0].cuerpo as { consultas: number }).consultas).toBe(4500)
+    await abrirCicloSiCorresponde('cobro-1', { db, llamar: v.llamar, ahora: AHORA, env: { VALIDA_PLAN_LIMITE_MES: '9000' } })
+    expect((v.llamadas[0].cuerpo as { consultas: number }).consultas).toBe(3000)
   })
 
   it('el mismo pago dos veces (reintento del webhook) no vuelve a llamar a Valida', async () => {

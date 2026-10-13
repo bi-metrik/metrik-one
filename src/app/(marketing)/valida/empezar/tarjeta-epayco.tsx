@@ -4,7 +4,7 @@ import Script from 'next/script'
 import { forwardRef, useImperativeHandle, useRef, useState } from 'react'
 
 /**
- * La tarjeta para el cobro al terminar la prueba (cláusula 7 v2.0, decisión A2). Solo se pinta cuando
+ * La tarjeta para el cobro al cumplirse los 7 días de la prueba (numeral 7 de la v2.0, decisión A2). Solo se pinta cuando
  * el servidor dice que se pide (`pideMetodoPago`).
  *
  * ⚠️ El número, la fecha y el CVC NO tienen `name`: no viajan en ningún formulario de ONE. ePayco.js
@@ -30,8 +30,27 @@ export interface TarjetaEpaycoHandle {
 
 const claseCampo = 'h-11 w-full rounded-lg border border-border bg-white px-3 text-base text-foreground'
 
-const TarjetaEpayco = forwardRef<TarjetaEpaycoHandle, { llavePublica: string; correo: string }>(function TarjetaEpayco(
-  { llavePublica, correo },
+const FECHA_HORA = new Intl.DateTimeFormat('es-CO', {
+  weekday: 'long',
+  day: 'numeric',
+  month: 'long',
+  year: 'numeric',
+  hour: 'numeric',
+  minute: '2-digit',
+  timeZone: 'America/Bogota',
+})
+
+interface PropsTarjeta {
+  llavePublica: string
+  correo: string
+  /** El texto del aviso §2.3, con `{fecha_y_hora_vence}` por llenar (no entra a la huella). */
+  texto: string
+  /** Cuánto dura la prueba desde que se abre: la fecha que se muestra es ahora más esto. */
+  duracionMs: number
+}
+
+const TarjetaEpayco = forwardRef<TarjetaEpaycoHandle, PropsTarjeta>(function TarjetaEpayco(
+  { llavePublica, correo, texto, duracionMs },
   ref,
 ) {
   const bloque = useRef<HTMLDivElement>(null)
@@ -40,6 +59,8 @@ const TarjetaEpayco = forwardRef<TarjetaEpaycoHandle, { llavePublica: string; co
   // campo controlado podría entregarle un valor viejo. Se lee del campo al tokenizar.
   const campoTitular = useRef<HTMLInputElement>(null)
   const [celular, setCelular] = useState('')
+  // Se calcula una vez, al pintar: la prueba abre al enviar, minutos después.
+  const [vence] = useState(() => FECHA_HORA.format(new Date(Date.now() + duracionMs)))
 
   useImperativeHandle(ref, () => ({
     tokenizar: () =>
@@ -65,10 +86,8 @@ const TarjetaEpayco = forwardRef<TarjetaEpaycoHandle, { llavePublica: string; co
     <fieldset className="space-y-3 rounded-lg border border-border p-3" data-tarjeta-epayco>
       <Script src={JQUERY} strategy="afterInteractive" />
       <Script src={EPAYCO_JS} strategy="afterInteractive" onLoad={() => setCargado(true)} />
-      <legend className="px-1 text-sm font-medium text-foreground">Tarjeta para cuando termine la prueba</legend>
-      <p className="text-xs text-muted-foreground">
-        Durante la prueba no se cobra nada. La tarjeta la guarda ePayco, no MeTRIK.
-      </p>
+      <legend className="px-1 text-sm font-medium text-foreground">Tarjeta para el plan</legend>
+      <p className="text-xs text-muted-foreground">{texto.replace('{fecha_y_hora_vence}', vence)}</p>
       {/* Lo que lee ePayco.js. Sin `name`: estos datos no se envían a ONE. */}
       <div ref={bloque} className="space-y-3">
         <input type="hidden" data-epayco="card[email]" value={correo} readOnly />

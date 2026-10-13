@@ -66,11 +66,16 @@ interface Props {
   /** El texto de la casilla: entra a la huella, así que sale del mismo archivo que la calcula. */
   textoCasilla: string
   politica: { titulo: string; url: string }
-  /** Solo con la cláusula de cobro vigente y ePayco encendido (`pideMetodoPago`): la llave pública. */
-  tarjeta?: { llavePublica: string } | null
+  /** true con las Condiciones v2.0 (cobro al cumplirse los 7 días): la prueba ya no es «sin tarjeta». */
+  conCobro?: boolean
+  /**
+   * Solo con las Condiciones v2.0 (`pideMetodoPago`): la llave pública y el texto junto a la tarjeta
+   * (aviso §2.3), con `{fecha_y_hora_vence}` por llenar.
+   */
+  tarjeta?: { llavePublica: string; texto: string; duracionMs: number } | null
 }
 
-export default function RegistroValidaClient({ origenUrl, abierto, consultas, dias, condiciones, avisoDatos, textoCasilla, politica, tarjeta = null }: Props) {
+export default function RegistroValidaClient({ origenUrl, abierto, consultas, dias, condiciones, avisoDatos, textoCasilla, politica, conCobro = false, tarjeta = null }: Props) {
   const [paso, setPaso] = useState<Paso>('correo')
   const [correo, setCorreo] = useState('')
   const [codigo, setCodigo] = useState('')
@@ -113,7 +118,7 @@ export default function RegistroValidaClient({ origenUrl, abierto, consultas, di
 
   if (!abierto) {
     return (
-      <Marco consultas={consultas} dias={dias}>
+      <Marco consultas={consultas} dias={dias} conCobro={conCobro}>
         <p className="text-center text-sm text-muted-foreground">
           La prueba gratis abre muy pronto. Mientras tanto, escríbenos a mauricio.moreno@metrik.com.co.
         </p>
@@ -225,7 +230,7 @@ export default function RegistroValidaClient({ origenUrl, abierto, consultas, di
   }
 
   return (
-    <Marco consultas={consultas} dias={dias}>
+    <Marco consultas={consultas} dias={dias} conCobro={conCobro}>
       {paso === 'correo' && (
         <form onSubmit={pedirCodigo} className="space-y-4">
           <div className="space-y-2">
@@ -401,7 +406,7 @@ export default function RegistroValidaClient({ origenUrl, abierto, consultas, di
             {errorCampo === 'acepta' && <p className="text-xs text-red-500">{error}</p>}
           </div>
 
-          {tarjeta && <TarjetaEpayco ref={refTarjeta} llavePublica={tarjeta.llavePublica} correo={correo} />}
+          {tarjeta && <TarjetaEpayco ref={refTarjeta} llavePublica={tarjeta.llavePublica} correo={correo} texto={tarjeta.texto} duracionMs={tarjeta.duracionMs} />}
 
           {error && !['razon_social', 'nit', 'dv', 'acepta'].includes(errorCampo) && <p className="text-sm text-red-500">{error}</p>}
           {aviso && <p className="text-sm text-amber-700">{aviso}</p>}
@@ -417,7 +422,7 @@ export default function RegistroValidaClient({ origenUrl, abierto, consultas, di
   )
 }
 
-function Marco({ consultas, dias, children }: { consultas: number; dias: number; children: React.ReactNode }) {
+function Marco({ consultas, dias, conCobro, children }: { consultas: number; dias: number; conCobro: boolean; children: React.ReactNode }) {
   return (
     <div className="flex min-h-screen flex-col items-center justify-center bg-background px-4 py-10">
       <div className="w-full max-w-sm space-y-8">
@@ -428,7 +433,7 @@ function Marco({ consultas, dias, children }: { consultas: number; dias: number;
               Valida: prueba gratis
             </h1>
             <p className="text-sm text-muted-foreground">
-              Consulta listas vinculantes SARLAFT. {consultas} consultas en {dias} días, sin tarjeta.
+              Consulta listas vinculantes SARLAFT. {consultas} consultas en {dias} días{conCobro ? '.' : ', sin tarjeta.'}
             </p>
           </div>
         </div>

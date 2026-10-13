@@ -151,7 +151,7 @@ export async function abrirCicloSiCorresponde(cobroId: string, deps: DepsCiclo):
   const actor = { usuario_id: registro.usuario_id, correo: registro.correo.toLowerCase() }
 
   const ciclo = cicloDeCuota(vencimiento, ahora)
-  const limite = limiteConsultasMes(contrato.parametros, deps.env)
+  const limite = limiteConsultasMes()
   const referencia = referenciaCiclo(cobro.id)
 
   const r = await llamar<{ ya_registrada?: boolean; vence_en?: string }>({

@@ -12,26 +12,14 @@ import {
 } from './plan'
 
 describe('el límite de consultas del mes', () => {
-  it('3.000 por defecto', () => {
-    expect(limiteConsultasMes(null, {})).toBe(3000)
-    expect(limiteConsultasMes({}, {})).toBe(3000)
-  })
-  it('el contrato manda sobre el entorno, y el entorno sobre el defecto', () => {
-    expect(limiteConsultasMes({ limite_consultas_mes: 5000 }, { VALIDA_PLAN_LIMITE_MES: '4000' })).toBe(5000)
-    expect(limiteConsultasMes({}, { VALIDA_PLAN_LIMITE_MES: '4000' })).toBe(4000)
-    expect(limiteConsultasMes({ limite_consultas_mes: '2500' }, {})).toBe(2500)
-  })
-  it('fuera de rango o mal escrito se ignora (Valida topa en 20.000)', () => {
-    expect(limiteConsultasMes({ limite_consultas_mes: 20_001 }, {})).toBe(3000)
-    expect(limiteConsultasMes({ limite_consultas_mes: 0 }, { VALIDA_PLAN_LIMITE_MES: 'mucho' })).toBe(3000)
-    expect(limiteConsultasMes({ limite_consultas_mes: 12.5 }, { VALIDA_PLAN_LIMITE_MES: '20000' })).toBe(20_000)
+  it('3.000 fijo: ni el contrato ni el entorno lo cambian (fila 23 de Vera)', () => {
+    expect(limiteConsultasMes()).toBe(3000)
   })
 })
 
 describe('los parámetros con que nace el contrato', () => {
-  it('$150.000, 2 usuarios, sin trial (la prueba ya pasó) y el límite del entorno', () => {
-    expect(parametrosDelPlan({})).toEqual({ precio_mensual: 150_000, licencias: 2, dias_trial: 0, limite_consultas_mes: 3000 })
-    expect(parametrosDelPlan({ VALIDA_PLAN_LIMITE_MES: '3500' }).limite_consultas_mes).toBe(3500)
+  it('$150.000, 2 usuarios, sin trial (la prueba ya pasó) y 3.000 consultas', () => {
+    expect(parametrosDelPlan()).toEqual({ precio_mensual: 150_000, licencias: 2, dias_trial: 0, limite_consultas_mes: 3000 })
   })
 })
 
