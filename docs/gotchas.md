@@ -275,13 +275,19 @@
   filas, repite desde la lectura (3 intentos, el último sin condición). Patrón para cualquier «leer,
   mezclar, escribir» sobre una fila con `updated_at`. Para lo que sale hacia afuera (pago, factura,
   correo) la barrera es la clave de intención: `useIntencion` + `accionIdempotente` (#1049/#1050).
-- **Service worker del piloto de red (`public/sw.js`, solo soena).** No guarda respuestas; solo toca GET
+- **Service worker (`public/sw.js`): estáticos en TODOS los workspaces, navegación y RSC solo en soena.** Desde el
+  2026-10-12 guarda SOLO estáticos de `/_next/static/chunks|media` con hash en el nombre, con la llave sin `?dpl=`
+  (Turbopack nombra por contenido; si algún día un archivo cambia de bytes sin cambiar de nombre, el caché serviría
+  el viejo: subir `CACHE_ESTATICOS`). Nunca HTML, RSC, `/api/` ni Supabase. Lista `PILOTO` dentro del archivo =
+  `WORKSPACES_PILOTO_RED` (lo comprueba `src/lib/red/sw.test.ts`). Lo que sigue es del piloto (soena):
+  no guarda respuestas; solo toca GET
   de navegación (reintenta y, sin red, «Reconectando») y RSC sin prefetch (lee la respuesta ENTERA para
   poder repetirla: se pierde el pintado parcial del stream). Una respuesta RSC redirigida va tal cual: Next
   mira `redirected`/`url`. Nunca `/api/`, `/auth/` (el código del enlace mágico es de un solo uso), POST
   ni otro dominio. `/sw.js` pasa el middleware sin sesión: un SW que redirige no se registra NI SE
   ACTUALIZA, y el interruptor de apagado (`APAGADO = true` en el archivo) llega por la actualización.
-  Segunda llave: `SW_PILOTO_ACTIVO` en `src/lib/red/piloto.ts`.
+  Segunda llave: `SW_ACTIVO` en `src/lib/red/piloto.ts` (y fuera de producción se desregistra: en `next dev` los
+  chunks no llevan hash).
 
 - **Un trigger que busca filas que llegan en el VIAJE SIGUIENTE no las ve.** (2026-10-06,
   fix/idempotencia-menciones). `addComment` escribía `activity_log` con `mencion_id` y después, en otra
@@ -313,3 +319,5 @@
 - **Un módulo que llega a un Server Component no puede importar `createContext` ni `useContext`, aunque sea una plantilla de @react-pdf.** (2026-10-08). `cotizacion-trappvel-pdf.tsx` entra al grafo del servidor por `plantillas-cotizacion.ts` → `terminos-al-crear.ts` → `negocios/page.tsx`; `tsc`, eslint y vitest pasan, y el que cae es `next build` («needs `createContext`… only works in a Client Component»). En las plantillas PDF, los datos de composición van por props.
 - **Un `cambio_etapa` se resuelve con `etapa_orden_registrada(linea, valor, momento)`, nunca con `etapas_negocio.nombre = valor`.** (2026-10-10, SOE-006). `activity_log` guarda el NOMBRE que la etapa tenía ese día; comparar contra el nombre de hoy deja en cero toda la historia anterior a un renombre (le pasó a Correcciones del bono con «Seguimiento» → «Entrega a la DIAN»). Desde `20261010113000` el trigger de `etapas_negocio` guarda cada nombre viejo en `etapas_nombres_anteriores`. Ojo también con `ilike '%texto%'`: una etapa nueva con nombre parecido entra sola al filtro («Validación de rechazo» en «calificados»).
 - **El total de una tarifa NO es la suma de `items.precio_venta`: le faltan los adicionales.** (2026-10-12, riesgo R1 de la cotización integrada). La cascada cobra `precioConAdicionales` (línea + `item_adicionales.precio × cantidad`), y `precio_venta` es solo la línea. El total de la tarifa principal = suma de `precio_venta` de sus líneas + los adicionales de esas líneas. Medir solo `precio_venta` deja la tarifa corta justo en sus adicionales, y eso se leyó como «el servidor no tomó la Recomendada» cuando sí la tomaba. Para medir desde SQL, sumar también los adicionales; mejor, leer `opcionesDeAprobacion` / `cascadaDeItinerario`. Fijado en `negocios/total-recomendada-adicionales.test.ts`.
+- **El runtime de Turbopack se cuelga del `<script>` del HTML: su `error` le llega aunque el reintento baje.** (2026-10-12, fix/resiliencia-chunks-red). Los chunks de los componentes de la página los pide el cliente RSC (`__turbopack_load_by_url__`, «from module N»); si el `<script>` ya está en el documento, el runtime no crea otro sino `addEventListener('error')` sobre ese, y un rechazo queda para siempre (`ChunkLoadError`). El reintento de `aviso-conexion.ts` corta ese `error` en la ventana (fase de captura) mientras quedan intentos, y al agotarse se lo re-dispara a los anteriores. No se corta en hojas de estilo (React espera su `load`/`error`). Se reprodujo con un proxy que corta sockets (`scripts/sw-estaticos.e2e.mjs`), no con `page.route` de pérdida instantánea.
+- **`page.route('**/*.js')` NO toma un chunk con `?dpl=`.** (2026-10-12). El glob de Playwright exige que la URL TERMINE en `.js`; con Skew Protection (`VERCEL_DEPLOYMENT_ID` en el build) todas llevan query. Usar `**/_next/static/chunks/**` y filtrar dentro. Y `next start` local necesita el MISMO `VERCEL_DEPLOYMENT_ID` del build: sin él la página no hidrata y no hay error en consola.

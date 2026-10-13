@@ -26,14 +26,16 @@ export const PERSONAS_MEDIDAS: Readonly<Record<string, readonly string[]>> = {
 }
 
 /**
- * Interruptor del service worker del piloto (`public/sw.js`). En `false`, toda pestaña del
- * piloto que cargue desregistra el SW. Para equipos que no logren cargar la app, el interruptor
+ * Interruptor del service worker (`public/sw.js`). Desde el 2026-10-12 se registra en TODOS los
+ * workspaces (caché de los estáticos de Next); la carga de página y la navegación RSC solo las
+ * atiende en `WORKSPACES_PILOTO_RED` (lista `PILOTO` dentro de sw.js). En `false`, toda pestaña
+ * que cargue la app desregistra el SW. Para equipos que no logren cargar la app, el interruptor
  * que manda es `APAGADO` dentro de `public/sw.js`: el navegador lo revisa en cada navegación.
  */
-export const SW_PILOTO_ACTIVO = true
+export const SW_ACTIVO = true
 
 /** Ruta del service worker. Se registra con alcance `/` del subdominio. */
-export const RUTA_SW_PILOTO = '/sw.js'
+export const RUTA_SW = '/sw.js'
 
 export function esPilotoRed(slug: string | null | undefined): boolean {
   return !!slug && WORKSPACES_PILOTO_RED.includes(slug)

@@ -31,6 +31,7 @@
 - ⚠️ [Copia de la factura escribe en su origen](project_factura_copia_escribe_origen.md) — criterio único `copiaDeSoloLectura`; origen ambiguo rechaza
 - ⚠️ [ONE aguanta red lenta (7-oct)](project_red_lenta_aguanta.md) — aviso por falta de avance; copia de chunk con `src` relativo; páginas de 30
 - ⚠️ [Aviso «No pudimos conectar con ONE»](project_aviso_conexion_fallida.md) — script módulo async en el head; quita hojas colgadas; tope CSS de 25 s
+- ⚠️ [Chunks que aguantan pérdida + SW de estáticos para todos](project_resiliencia_chunks_sw.md) — runtime se cuelga del `<script>` del HTML; llave sin ?dpl
 - ⚠️ [Piloto de red en soena (#1042 y siguientes)](project_piloto_red_soena.md) — falla carga/RSC, no descargas; SW con interruptor; tabla SIN aplicar
 - ⚠️ [Cargue en segundo plano y acciones largas (#1035, #1036)](project_cargue_segundo_plano.md) — marca `data._lectura`; #1036 mergeado; /conciliacion tiene 300 s
 - ⚠️⚠️ [Cotización integrada C0 (igualdad del servidor)](project_cotizacion_integrada_c0.md) — fixture sobre 54568adf NO se regenera; P12 frena por faltaCosto; V1 PW choca con preview=prod

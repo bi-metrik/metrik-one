@@ -1,4 +1,5 @@
 import { PALETA } from '@/lib/marca/paleta'
+import { WORKSPACES_PILOTO_RED } from './piloto'
 
 /**
  * Aviso de conexión fallida: ONE nunca se queda cargando para siempre ni en blanco.
@@ -60,18 +61,24 @@ export const TOPE_HIDRATACION_MS = 120_000
 /**
  * Un chunk o una hoja de `/_next/static/` que falló se pide de nuevo con estas esperas antes
  * de rendirse (antes del 2026-10-07, un solo fallo bastaba para el aviso o la pantalla de
- * error). Vale para los del HTML (antes de hidratar) y para los que pide el runtime después
- * (una ruta nueva, un modal): Turbopack guarda el fallo para siempre, así que el reintento
- * tiene que pasar ANTES de que el runtime se entere.
+ * error). Vale para los del HTML y para los que pide el runtime después (una ruta nueva, un
+ * modal): Turbopack guarda el fallo para siempre, así que el reintento tiene que pasar ANTES
+ * de que el runtime se entere.
+ *
+ * 2026-10-12 (Claro móvil → Vercel con pérdida de paquetes, trappvel): de 3 reintentos en 12 s
+ * a 5 con espera exponencial y tope de 15 s (30 s en total). Con 3, un chunk de 26 KB se
+ * agotaba y la página caía en «Failed to load chunk». Con pérdida del 40 % por pedido, 4
+ * fallos seguidos pasan en 1 de cada 40 chunks; 6 seguidos, en 1 de cada 250.
  */
-export const ESPERAS_REINTENTO_CHUNK_MS = [1_000, 3_000, 8_000] as const
+export const ESPERAS_REINTENTO_CHUNK_MS = [1_000, 2_000, 4_000, 8_000, 15_000] as const
 
 /**
  * Una navegación interna (petición RSC GET) que falla ANTES de recibir respuesta se repite con
- * estas esperas. Sin esto Next cae a una carga completa de la página (más pesada). No aplica si
- * hay service worker controlando la página: el del piloto ya repite.
+ * estas esperas. Sin esto Next cae a una carga completa de la página (más pesada). No aplica en
+ * los workspaces del piloto con el service worker controlando la página: allí el SW ya repite
+ * (fuera del piloto el SW solo atiende estáticos y la repetición es de este script).
  */
-export const ESPERAS_REINTENTO_RSC_MS = [1_000, 3_000] as const
+export const ESPERAS_REINTENTO_RSC_MS = [1_000, 2_000, 4_000, 8_000] as const
 
 /**
  * Animación de carga de una ruta (o de una navegación): a los 8 s aparece debajo «tu conexión
@@ -189,12 +196,33 @@ export function claveEscalera(pathname: string): string {
  *   - Sin hidratar a los 8 s: la pildora «tu conexion esta lenta», que no tapa nada.
  *   - El aviso a pantalla completa sale por falta de AVANCE (nada de `/_next/` termino de bajar
  *     y no llego HTML nuevo en `SIN_AVANCE_MS`), no por reloj; tope duro `TOPE_HIDRATACION_MS`.
- *   - Un chunk u hoja de `/_next/static/` que falla se pide de nuevo (`ESPERAS_REINTENTO_CHUNK_MS`):
+ *   - Un chunk u hoja de `/_next/static/` que falla se pide de nuevo (`ESPERAS_REINTENTO_CHUNK_MS`;
+ *     cada reintento cuenta como avance, para que la falta de avance no pinte el aviso mientras
+ *     todavía quedan intentos):
  *     los del HTML desde el listener de `error`, y los que pide el runtime de Turbopack despues
  *     (envolviendo `document.head.appendChild`: el runtime pone `onerror` y guarda el fallo para
  *     siempre, asi que el reintento va antes de avisarle).
  *   - Una navegacion RSC (GET con cabecera `rsc: 1`, sin prefetch) que falla antes de recibir
  *     respuesta se repite (`ESPERAS_REINTENTO_RSC_MS`) en vez de caer a una carga completa.
+ *
+ * 2026-10-12, la carrera con el runtime (medida en Chromium con perdida del 60 %): el cliente RSC
+ * pide los chunks de los componentes de la pagina con `__turbopack_load_by_url__`; si el
+ * `<script>` ya esta en el HTML, el runtime NO crea otro: se cuelga de ese con
+ * `addEventListener('error')`. El `error` del original le llegaba aunque la copia bajara despues
+ * → «Failed to load chunk … from module …» (lo que vio Mauricio en Claro, 3 veces en /negocios),
+ * con `chunk-reintentado` recuperado:true en el mismo log. Ahora, mientras queden intentos, el
+ * `error` de un `<script>` se corta en la ventana (fase de captura, antes de llegar al elemento:
+ * el runtime no se entera) y la copia que baja lo registra igual (Turbopack resuelve por
+ * registro). Agotados los intentos, se le re-dispara `error` a los `<script>` anteriores con la
+ * misma URL, para que el runtime que esperaba en ellos falle en vez de quedarse colgado. Las
+ * hojas de estilo no se cortan: React espera su `load`/`error` para mostrar la ruta.
+ *
+ * Desde el 2026-10-12 un chunk del HTML que falla se reintenta TAMBIEN despues de hidratar. El
+ * layout raiz hidrata antes que el segmento de la pagina, y el runtime de Turbopack espera los
+ * chunks del HTML por su registro, no por su `error`: uno que fallo sin copia dejaba la pagina
+ * (o la siguiente navegacion que lo necesitara) esperando para siempre, que es la «espera-ruta»
+ * de /negocios y /numeros. Hidratada, ya no pinta el aviso a pantalla completa al agotarse:
+ * lo resuelve la espera con tope de la ruta.
  *
  * La copia de un chunk lleva el `src` TAL CUAL venía en el atributo (relativo, `/_next/...`),
  * no la URL absoluta de la propiedad `src`: el runtime de Turbopack identifica el chunk que se
@@ -208,7 +236,8 @@ export function claveEscalera(pathname: string): string {
  *
  * El reporte se anota en la cola de `[error-cliente]` (`errores-cliente/cola.ts`, mismo
  * formato) y sale por `fetch` con `keepalive`; si la red no lo deja salir, la carga
- * siguiente lo reenvía. Tope de 5 reportes por carga.
+ * siguiente lo reenvía. Tope de 5 reportes por carga; de los chunks del HTML agotados se reporta
+ * solo el primero (si no, con varios chunks caídos se gastaba el tope y el aviso no se reportaba).
  */
 export function scriptAvisoConexion(version: string): string {
   const c = {
@@ -220,6 +249,7 @@ export function scriptAvisoConexion(version: string): string {
     gc: GRACIA_TRAS_CHUNK_MS,
     rc: ESPERAS_REINTENTO_CHUNK_MS,
     rr: ESPERAS_REINTENTO_RSC_MS,
+    pr: WORKSPACES_PILOTO_RED,
     an: ANIMACION_APARECER,
     al: ANIMACION_LENTA,
     id: ID_AVISO_PANTALLA,
@@ -243,7 +273,7 @@ export function scriptAvisoConexion(version: string): string {
   return `(function(){try{
 var C=${conf},w=window,d=document,t0=Date.now(),enviados=0;
 if(w.__oneAvisoConexion)return;
-var api=w.__oneAvisoConexion={},quitadas=[],avance=t0,intentos={},tm=null,tc=null,mo=null,ap=null;
+var api=w.__oneAvisoConexion={},quitadas=[],avance=t0,intentos={},tm=null,tc=null,mo=null,ap=null,agotado=0;
 function nid(){try{if(w.crypto&&crypto.randomUUID)return crypto.randomUUID()}catch(e){}return Date.now().toString(36)+'-'+Math.random().toString(36).slice(2,10)}
 function reportar(m,causa,extra){try{
 if(enviados>=5)return;enviados++;
@@ -320,17 +350,21 @@ el.__oneDinamico=1;var oe=el.onerror,ol=el.onload,n=0;
 function fallo(ev){
 if(n>=C.rc.length){reportar(C.mc,null,{recuperado:false,intento:n});return oe.call(el,ev)}
 var espera=C.rc[n++];
-setTimeout(function(){var x=copia(el,u,n);x.__oneDinamico=1;x.onerror=fallo;
+setTimeout(function(){avanzo();var x=copia(el,u,n);x.__oneDinamico=1;x.onerror=fallo;
 x.onload=function(e2){reportar(C.mc,null,{recuperado:true,intento:n});if(ol)ol.call(el,e2)};
 ap.call(d.head,x)},espera)}
 el.onerror=fallo}
 w.addEventListener('error',function(e){
-var s=e.target,u=esChunk(s);if(!u||s.__oneDinamico||w.__oneHidratada||tc)return;
+var s=e.target,u=esChunk(s);if(!u||s.__oneDinamico||s.__oneDeja)return;
 var n=intentos[u]||0;
-if(n<C.rc.length){intentos[u]=n+1;setTimeout(function(){if(w.__oneHidratada)return;var x=copia(s,u,n+1);
+if(n<C.rc.length){intentos[u]=n+1;
+if(s.tagName==='SCRIPT')e.stopImmediatePropagation();
+setTimeout(function(){avanzo();var x=copia(s,u,n+1);
 if(s.tagName==='LINK'&&s.parentNode)s.parentNode.insertBefore(x,s.nextSibling);else if(ap)ap.call(d.head,x);else d.head.appendChild(x)},C.rc[n]);return}
-reportar(C.mc,null,{recuperado:false,intento:n});
-tc=setTimeout(function(){pintar('chunk')},C.gc)},true);
+if(s.tagName==='SCRIPT'){var ps=d.getElementsByTagName('script');for(var i=0;i<ps.length;i++){var q=ps[i];
+if(q!==s&&!q.__oneDeja&&q.getAttribute('src')===u){q.__oneDeja=1;try{q.dispatchEvent(new w.Event('error'))}catch(e2){}}}}
+if(!agotado++)reportar(C.mc,null,{recuperado:false,intento:n});
+if(!w.__oneHidratada&&!tc)tc=setTimeout(function(){pintar('chunk')},C.gc)},true);
 var of=w.fetch;
 function esRsc(init){if(!init||!init.headers)return false;if(String(init.method||'GET').toUpperCase()!=='GET')return false;
 var h=init.headers,rsc=null,pf=null;
@@ -338,7 +372,7 @@ if(typeof h.get==='function'){rsc=h.get('rsc');pf=h.get('next-router-prefetch')}
 return String(rsc)==='1'&&!pf}
 if(typeof of==='function'){w.fetch=function(input,init){
 var self=this,args=arguments,pr=of.apply(self,args);
-try{if(!esRsc(init)||(navigator.serviceWorker&&navigator.serviceWorker.controller))return pr}catch(e){return pr}
+try{if(!esRsc(init)||(C.pr.indexOf(location.hostname.split('.')[0])>=0&&navigator.serviceWorker&&navigator.serviceWorker.controller))return pr}catch(e){return pr}
 var n=0,sg=init.signal;
 function intentar(p){return p.catch(function(err){
 if((err&&err.name==='AbortError')||(sg&&sg.aborted)||n>=C.rr.length)throw err;
