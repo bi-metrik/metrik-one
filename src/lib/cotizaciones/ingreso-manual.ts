@@ -610,6 +610,14 @@ export function lecturaManual(args: {
   lectura.origen = 'manual'
   const aviso = h ? avisoFechasFueraDelViaje(h.entrada, h.salida, args.viaje) : null
   if (aviso) lectura.alertas = [...lectura.alertas, aviso]
+  // Vuelo y actividad: el niño o el infante sin costo escrito viajan igual, sin precio (C5).
+  if (entrada.tipo === 'vuelo' || entrada.tipo === 'actividad') {
+    const d = entrada.datos
+    const sinPrecio = ([['nino', d.ninos, d.netoNino], ['infante', d.infantes, d.netoInfante]] as const)
+      .filter(([, cantidad, neto]) => cantidad > 0 && neto === null)
+      .map(([tipo]) => tipo)
+    if (sinPrecio.length > 0) lectura.sinPrecio = [...sinPrecio]
+  }
   const avisoActividad = entrada.tipo === 'actividad' ? avisoFechaActividadFueraDelViaje(entrada.datos.fecha, args.viaje) : null
   if (avisoActividad) lectura.alertas = [...lectura.alertas, avisoActividad]
   lectura.manual = {

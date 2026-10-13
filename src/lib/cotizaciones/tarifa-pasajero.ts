@@ -318,6 +318,14 @@ export interface LecturaCasilla {
    */
   huellaImagen?: string
   /**
+   * Los tipos de pasajero que VIAJAN en esta lectura y cuyo precio no vino: un vuelo o una
+   * actividad escritos a mano con el costo del niño o del infante vacío («vacío = falta», C5). Sin
+   * fila por tipo, pero cuentan en la ocupación (`ocupacionObservada`): así la opción cubre a todos
+   * y lo que falta es el PRECIO, que impide enviar hasta tenerlo. Ausente en toda lectura de
+   * pantallazo y en las manuales de antes.
+   */
+  sinPrecio?: TipoPasajero[]
+  /**
    * Dónde quedó guardado el pantallazo (`sbext://…`, en el almacenamiento propio del
    * workspace): se sube al ACEPTAR, nunca mientras la captura sigue en la bandeja
    * (`imagen-captura.ts`). Ausente en las lecturas anteriores al 2026-09-24 y en los
@@ -421,7 +429,13 @@ export function textoFaltanPorAcomodar(falta: Composicion): string {
 /** La ocupación que ACREDITA la captura: la de las filas si hay desglose, la leída si no. */
 export function ocupacionObservada(l: LecturaCasilla): OcupacionLeida {
   if (l.porTipo.length > 0) {
-    const suma = (t: TipoPasajero) => l.porTipo.filter(f => f.tipo === t).reduce((a, f) => a + f.cantidad, 0)
+    // Los que viajan sin precio (`sinPrecio`) no tienen fila, pero viajan: cuentan con lo leído.
+    const sinFila = (t: TipoPasajero) => {
+      if (!l.sinPrecio?.includes(t) || l.porTipo.some(f => f.tipo === t)) return 0
+      const n = t === 'nino' ? l.ocupacion?.ninos : t === 'infante' ? l.ocupacion?.infantes : l.ocupacion?.adultos
+      return typeof n === 'number' && n > 0 ? n : 0
+    }
+    const suma = (t: TipoPasajero) => l.porTipo.filter(f => f.tipo === t).reduce((a, f) => a + f.cantidad, 0) + sinFila(t)
     const adultos = suma('adulto')
     const ninos = suma('nino')
     const infantes = suma('infante')
