@@ -162,6 +162,7 @@ import {
 import type { EstadoCotizacion } from '@/lib/catalogos/constants'
 import type { FiscalProfile, Client } from '@/types/database'
 import type { NivelDetalle } from '@/lib/cotizaciones/detalle-viaje'
+import type { EstadoPorPasos } from '@/lib/cotizaciones/por-pasos'
 import { conReintentoDeRed } from '@/lib/red/con-reintento'
 
 interface RubroRow {
@@ -377,6 +378,11 @@ interface Props {
    * `plan_pagos.activo`; ausente, «Revisar y enviar» queda como hoy.
    */
   asiPuedesPagar?: EntradaAsiPuedesPagar | null
+  /**
+   * El interruptor de la cotización por pasos (`por-pasos.ts`), ya resuelto en el servidor con
+   * sus cuatro condiciones. Solo gobierna la pantalla; ausente o apagado, el editor de siempre.
+   */
+  porPasos?: EstadoPorPasos | null
 }
 
 /** Cuánto dura el «Deshacer» de un borrado de opción o de bloque (P12). */
