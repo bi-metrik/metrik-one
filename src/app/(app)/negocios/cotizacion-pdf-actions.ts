@@ -49,6 +49,7 @@ import {
   plantillaUsaTextoDelCliente,
 } from '@/lib/pdf/plantillas-cotizacion'
 import { avisoDelTextoEnPdf, avisoDelTextoViejoEnPdf, leerDocumentoCliente, textoParaElViaje } from '@/lib/cotizaciones/documento-cliente'
+import { incluyeDeOne } from '@/lib/cotizaciones/incluye-por-one'
 import { leerContextoTextoCliente } from '@/lib/cotizaciones/documento-cliente-datos'
 import { vigenciaEnDias } from '@/lib/cotizaciones/condiciones-comerciales'
 import { fotosDeCiudad } from '@/lib/pdf/fotos-ciudad'
@@ -1184,7 +1185,14 @@ export async function generateCotizacionPDF(cotizacionId: string) {
     const documentoCliente = plantillaUsaTextoDelCliente(templateSlug)
       ? leerDocumentoCliente((cot as unknown as Record<string, unknown>).documento_cliente)
       : null
-    const textoCliente = textoParaElViaje(documentoCliente)
+    // C6 · con la marca `incluye_origen = 'one'`, «Incluye» lo arma ONE con lo que se cobra en
+    // lo que el documento describe. Sin la marca no se calcula nada: el documento de siempre.
+    const textoCliente = textoParaElViaje(
+      documentoCliente,
+      documentoCliente?.incluye_origen === 'one'
+        ? incluyeDeOne(itemsImpresos.filter(i => i.entra_al_precio !== false).map(paraLecturaDe), delNegocio.nivelDetalle)
+        : null,
+    )
     avisoTexto = avisoDelTextoEnPdf(documentoCliente)
     // El texto revisado que quedó viejo (brief del 2026-10-08): la misma huella que el panel del
     // editor, sobre las mismas líneas. Solo se calcula con un texto revisado que se imprime.
