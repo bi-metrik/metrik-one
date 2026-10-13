@@ -12,6 +12,7 @@ import { GATE_AUTORIZACION } from '@/lib/autorizacion-datos/estado'
 import { configSeguimiento, etiquetaMotivoPerdida, mensajeTopeAplazamientos, motivoPerdidaInvalido, type ConfigSeguimiento } from '@/lib/negocios/seguimiento'
 import { configSeguimientoDelNegocio } from '@/lib/negocios/seguimiento-datos'
 import { evaluarGatesSeguimiento } from '@/lib/negocios/gates-seguimiento'
+import { sinNegociosDePruebaAjenos } from '@/lib/negocios/negocios-de-prueba'
 import { evaluarGateServicios } from '@/lib/viaje/servicios-viaje-datos'
 import { datosDelTablero } from '@/lib/viaje/servicios-tablero-datos'
 import { lineasDelGate } from '@/lib/viaje/gate-servicios'
@@ -750,6 +751,7 @@ export async function getNegociosV2(
       etapa_cambiada_at,
       origen,
       aliado_id,
+      linea_id,
       lineas_negocio(nombre, numero),
       etapas_negocio(nombre, stage, numero, config_extra),
       empresas(nombre),
@@ -774,13 +776,18 @@ export async function getNegociosV2(
     query = query.in('id', negocioIdsPermitidos)
   }
 
-  const { data, error: errorLista } = await query
+  const { data: dataCruda, error: errorLista } = await query
 
   // Antes `if (!data) return []`: un fallo de Supabase (timeout, red, permisos) llegaba a la
   // pantalla como «Sin negocios» con 200. Se lanza: la página lo entrega a `error.tsx`, la
   // ruta de la lista responde 500 y el export ya respondía 500 ante un throw.
   if (errorLista) throw new Error(`negocios: ${errorLista.message}`)
-  if (!data) return []
+  if (!dataCruda) return []
+  // El negocio del viaje de prueba (metadata.es_prueba, F8) solo lo listan sus responsables y
+  // los aprobadores de su línea: el equipo real del cliente no lo ve (Vera F8-1).
+  const data = await sinNegociosDePruebaAjenos(
+    db(supabase), workspaceId, staffId ?? null, dataCruda as Record<string, unknown>[],
+  )
 
   // Batch: gastos por negocio
   const negocioIds = (data as Record<string, unknown>[]).map(r => r.id as string)
