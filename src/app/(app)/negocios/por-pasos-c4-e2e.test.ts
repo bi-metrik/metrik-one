@@ -189,6 +189,9 @@ describe('D2 · borrar una opción escogida en la Premium y deshacer', () => {
     sembrar()
     base.tablas.item_adicionales = [{ id: 'ad-1', item_id: 'h-lord-pierre', codigo: null, nombre: 'Late check-out', cantidad: 1, costo: 100_000, precio: 120_000, moneda: 'COP', tasa: null, precio_manual: true }]
     await recalcularTotales(COT_SAN_ANDRES)
+    // La asesora le puso Lord Pierre también a la Económica: no es lo que propone ONE (la más
+    // barata), así que solo vuelve si «Deshacer» le devuelve su elección.
+    expect((await elegirOpcionEnTarifa('tf-economica', 'hotel 2: Hotel en San Andrés', 'h-lord-pierre')).success).toBe(true)
     const antes = await precios()
     const totalAntes = valorTotal()
 
@@ -202,16 +205,17 @@ describe('D2 · borrar una opción escogida en la Premium y deshacer', () => {
     // Su pantallazo queda firmado para volver a la bandeja cuando venza la cuenta.
     expect((b as { devueltas: Record<string, unknown[]> }).devueltas['h-lord-pierre']).toHaveLength(1)
 
-    const r = await reponerOpcionesPorPasos(COT_SAN_ANDRES, (b as { fotos: never[] }).fotos)
+    const r = await reponerOpcionesPorPasos(COT_SAN_ANDRES, (b as unknown as { fotos: never[] }).fotos, (b as unknown as { marcas: never[] }).marcas)
     expect(r.success, (r as { error?: string }).error).toBe(true)
     expect(tabla('items').some(i => i.id === 'h-lord-pierre')).toBe(true)
     expect(tabla('rubros').some(x => x.id === 'r-h-lord-pierre')).toBe(true)
     expect(tabla('item_adicionales').map(a => a.id)).toEqual(['ad-1'])
     expect(seleccion('tf-premium')).toContain('h-lord-pierre')
+    expect(seleccion('tf-economica')).toContain('h-lord-pierre')
     expect(await precios()).toEqual(antes)
     expect(valorTotal()).toBe(totalAntes)
     // Deshacer dos veces no duplica nada.
-    expect(await reponerOpcionesPorPasos(COT_SAN_ANDRES, (b as { fotos: never[] }).fotos)).toEqual({ success: false, error: YA_CAMBIO })
+    expect(await reponerOpcionesPorPasos(COT_SAN_ANDRES, (b as unknown as { fotos: never[] }).fotos)).toEqual({ success: false, error: YA_CAMBIO })
   })
 
   it('borrar el servicio entero (Cayo Cangrejo, dos opciones) y deshacer', async () => {
@@ -221,7 +225,7 @@ describe('D2 · borrar una opción escogida en la Premium y deshacer', () => {
     const b = await borrar(['a-cayo-compartida', 'a-cayo-privada'])
     expect(b.success).toBe(true)
     expect(tabla('items').some(i => String(i.id).startsWith('a-cayo'))).toBe(false)
-    expect((await reponerOpcionesPorPasos(COT_SAN_ANDRES, (b as { fotos: never[] }).fotos)).success).toBe(true)
+    expect((await reponerOpcionesPorPasos(COT_SAN_ANDRES, (b as unknown as { fotos: never[] }).fotos, (b as unknown as { marcas: never[] }).marcas)).success).toBe(true)
     expect(await precios()).toEqual(antes)
   })
 
@@ -299,4 +303,5 @@ describe('P6 · la huella de la autorización no cambia de forma', () => {
   })
 })
 
-const HUELLA_CASO_FIJO = 'PENDIENTE'
+// Grabada el 2026-10-12 sobre origin/main (47302dc6) con el caso fijo de C0: misma cifra en la rama.
+const HUELLA_CASO_FIJO = '12302631c2fe6724fd47e801c1bfb8a473bb0450d6ce969f75cb6dc2070f9131'

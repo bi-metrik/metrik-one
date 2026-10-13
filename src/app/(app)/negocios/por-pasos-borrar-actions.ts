@@ -29,6 +29,7 @@ import {
   ordenParaReponer,
   rubroParaReponer,
   type FotoDeOpcion,
+  type MarcaDeTarifa,
 } from '@/lib/cotizaciones/deshacer-por-pasos'
 
 /**
@@ -38,7 +39,7 @@ import {
 export async function borrarOpcionesPorPasos(
   cotizacionId: string,
   itemIds: string[],
-): Promise<ResultadoPorPasos<{ fotos: FotoDeOpcion[]; devueltas: Record<string, LecturaDevuelta[]>; valorTotal: number | null }>> {
+): Promise<ResultadoPorPasos<{ fotos: FotoDeOpcion[]; marcas: MarcaDeTarifa[]; devueltas: Record<string, LecturaDevuelta[]>; valorTotal: number | null }>> {
   const { supabase, workspaceId, staffId, error } = await getWorkspace()
   if (error || !workspaceId) return { success: false, error: 'No autenticado' }
   const guard = await exigirPorPasos(supabase, cotizacionId)
@@ -82,7 +83,10 @@ export async function borrarOpcionesPorPasos(
 
   const c = await cerrarAccionPorPasos(supabase, { workspaceId, cotizacionId, antes, staffId })
   if (!c.success) return c
-  return { success: true, fotos, devueltas, valorTotal: c.valorTotal }
+  // Qué tarifas iban al cliente antes de borrar: borrar puede dejar una igual a la Recomendada
+  // (y sacarla de la propuesta); «Deshacer» la devuelve como estaba.
+  const marcas = antes.filas.map(f => ({ itinerarioId: f.id, va: f.vaEnPropuesta }))
+  return { success: true, fotos, marcas, devueltas, valorTotal: c.valorTotal }
 }
 
 /**
@@ -95,6 +99,7 @@ export async function borrarOpcionesPorPasos(
 export async function reponerOpcionesPorPasos(
   cotizacionId: string,
   fotos: FotoDeOpcion[],
+  marcas: MarcaDeTarifa[] = [],
 ): Promise<ResultadoPorPasos<{ valorTotal: number | null }>> {
   const { supabase: sesion, workspaceId, staffId, error } = await getWorkspace()
   if (error || !workspaceId) return { success: false, error: 'No autenticado' }
@@ -134,10 +139,14 @@ export async function reponerOpcionesPorPasos(
     }
   }
 
-  // La elección de cada tarifa: la opción repuesta vuelve a ser la que iba. Se borra lo que la
-  // tarifa nombra HOY en ese servicio (ONE le propuso otra al borrar) y se pone la de antes.
+  // Primero las tarifas quedan completas con las opciones repuestas (el servicio volvió a tener
+  // opciones: ONE propone), y DESPUÉS cada tarifa recupera la que tenía. En el otro orden, la
+  // propuesta de ONE pisaba la elección repuesta.
+  const completas = await cerrarAccionPorPasos(supabase, { workspaceId, cotizacionId, antes, staffId })
+  if (!completas.success) return completas
   const despues = await fotoDeTarifas(supabase, cotizacionId)
   if (!despues) return { success: false, error: 'Cotización no encontrada' }
+  let escribio = false
   for (const foto of fotos) {
     const grupo = normalizarGrupo((foto.item.grupo ?? null) as string | null)
     const hermanas = despues.ctx.items.filter(i => normalizarGrupo(i.grupo ?? null) === grupo).map(i => i.id)
@@ -147,9 +156,19 @@ export async function reponerOpcionesPorPasos(
       if (eDel) return { success: false, error: eDel.message }
       const { error: eIns } = await supabase.from('itinerario_opciones').insert({ itinerario_id: s.itinerario_id, item_id: s.item_id })
       if (eIns) return { success: false, error: eIns.message }
+      escribio = true
     }
   }
-  return cerrarAccionPorPasos(supabase, { workspaceId, cotizacionId, antes, staffId })
+  for (const m of Array.isArray(marcas) ? marcas : []) {
+    if (!m || !tarifasDeLaCotizacion.has(m.itinerarioId) || typeof m.va !== 'boolean') continue
+    const { error: eMarca } = await supabase.from('cotizacion_itinerarios').update({ va_en_propuesta: m.va }).eq('id', m.itinerarioId)
+    if (eMarca) return { success: false, error: eMarca.message }
+    escribio = true
+  }
+  if (!escribio) return completas
+  // Sin `antes`: ningún servicio ganó ni perdió opciones en este paso, así que el plan respeta
+  // la elección repuesta (y vuelve a decidir qué tarifa se manda).
+  return cerrarAccionPorPasos(supabase, { workspaceId, cotizacionId, antes: null, staffId })
 }
 
 /**

@@ -36,6 +36,12 @@ export interface FotoDeOpcion {
   selecciones: { itinerario_id: string; item_id: string }[]
 }
 
+/** Si una tarifa iba al cliente antes de borrar. */
+export interface MarcaDeTarifa {
+  itinerarioId: string
+  va: boolean
+}
+
 /** La fila del ítem lista para insertar: sin lo que la base calcula ni lo que se embebió. */
 export function itemParaReponer(item: Record<string, unknown>): Record<string, unknown> {
   const { rubros: _r, cotizaciones: _c, ...resto } = item
