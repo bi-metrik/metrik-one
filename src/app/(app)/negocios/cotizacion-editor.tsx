@@ -964,7 +964,13 @@ export default function CotizacionEditor({ oportunidadId, cotizacion, initialIte
     ? liquidarIva(lineasParaIva(cascadaTotal.lineas, metaIva), opcionesIva)
     : null
 
-  const supuestos = ranurasPorSupuesto(itemsParaRanuras).filter(s => s.combinable ? !hayPrincipal : true)
+  // Un traslado o una actividad que la tarifa principal NOMBRA no es un supuesto: lo decidió la
+  // tarifa (la forma por pasos lo escribe, C2) y la lectura ya lo cobra así. El aviso decía
+  // «cuenta la primera, borra la alternativa» aunque contara la elegida.
+  const nombradosPorPrincipal = new Set(seleccionPrincipal ?? [])
+  const supuestos = ranurasPorSupuesto(itemsParaRanuras).filter(s =>
+    s.combinable ? !hayPrincipal : ![s.elegido, ...s.descartados].some(id => nombradosPorPrincipal.has(id)),
+  )
   const hayCombinable = supuestos.some(s => s.combinable)
   const nombrePorItem = new Map(initialItems.map(i => [i.id, i.nombre ?? 'Sin nombre']))
 

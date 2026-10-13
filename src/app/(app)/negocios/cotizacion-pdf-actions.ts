@@ -23,6 +23,7 @@ import {
   totalesDeAdicionales,
 } from '@/lib/cotizaciones/adicionales'
 import { aportaAlTotal, lineasQueDescribeElDocumento } from '@/lib/cotizaciones/lineas-del-documento'
+import { ranurasCombinables } from '@/lib/cotizaciones/itinerarios'
 import { avisosDeCobertura } from '@/lib/cotizaciones/cobertura-opciones'
 import { diasDelItinerario, fueraDelPrecio, itemsSugeridos, sugeridosVisibles } from '@/lib/cotizaciones/dia-relativo'
 import {
@@ -832,7 +833,35 @@ export async function generateCotizacionPDF(cotizacionId: string) {
   // itinerarios o ninguno va en la propuesta: ahi el PDF imprime la lista plana de
   // siempre. El corte vive en `bloquesParaPDF` y no en la plantilla porque hay mas
   // de una plantilla, y una regla repetida es una regla que se desincroniza.
-  const bloques = await bloquesParaPDF(supabase, cotizacionId)
+  const bloquesLeidos = await bloquesParaPDF(supabase, cotizacionId)
+  /**
+   * P9 (decisión Max 4, 2026-10-12) · UNA SOLA MANERA DE HACER EL VIAJE: una sola tarifa en la
+   * propuesta (la Recomendada) y ningún vuelo ni hotel con opciones —las únicas opciones son de
+   * traslados o actividades—. Ahí no hay tarifas que comparar: el documento conserva el «Día a
+   * día» y lo arma con lo que la Recomendada escogió, no con el supuesto. El dinero no cambia:
+   * `valor_total` ya es el de la Recomendada (`totalDelPrincipal`).
+   *
+   * Depende del DATO, no del interruptor: es lectura, encendido o apagado igual. Con vuelos u
+   * hoteles con opciones, o con más de una tarifa en la propuesta, todo queda como antes.
+   */
+  const unaSolaManera = bloquesLeidos !== null
+    && bloquesLeidos.length === 1
+    && bloquesLeidos[0].esPrincipal
+    && ranurasCombinables(items.filter(i => i.id).map(i => ({
+      id: i.id as string,
+      grupo: i.grupo ?? null,
+      opcion_de: i.opcion_de ?? null,
+      es_ajuste: i.es_ajuste ?? false,
+      orden: i.orden ?? 0,
+      dia_relativo: i.dia_relativo ?? null,
+      entra_al_precio: i.entra_al_precio ?? null,
+    }))).length === 0
+  const bloques = unaSolaManera ? null : bloquesLeidos
+  const idsDeLaUnica = unaSolaManera ? new Set(bloquesLeidos![0].itemIds) : null
+  /** Lo que aporta al documento: con una sola manera, lo que escogió la Recomendada. */
+  const aportaDoc = idsDeLaUnica
+    ? (i: ItemRow) => !i.id || idsDeLaUnica.has(i.id) || i.es_ajuste === true
+    : aporta
   const itemPorId = new Map(items.filter(i => i.id).map(i => [i.id as string, i]))
 
   /**
@@ -949,7 +978,7 @@ export async function generateCotizacionPDF(cotizacionId: string) {
     : null
 
   const itemsDelPrincipal = itinerariosPDF?.find(b => b.esPrincipal)?.items ?? null
-  const itemsParaResumen = itemsDelPrincipal ?? items.filter(aporta).map(paraPlantilla)
+  const itemsParaResumen = itemsDelPrincipal ?? items.filter(aportaDoc).map(paraPlantilla)
 
   /**
    * El itinerario DÍA POR DÍA y el paquete de sugeridos.
@@ -990,7 +1019,7 @@ export async function generateCotizacionPDF(cotizacionId: string) {
         dia: d.dia,
         items: d.itemIds
           .map(id => porId.get(id))
-          .filter((i): i is ItemRow => i !== undefined && aporta(i))
+          .filter((i): i is ItemRow => i !== undefined && aportaDoc(i))
           .map(paraPlantilla),
       }))
     : null
@@ -1011,7 +1040,7 @@ export async function generateCotizacionPDF(cotizacionId: string) {
    */
   const itemsSinDiaPDF = diasPDF
     ? items
-        .filter(i => aporta(i) && !(i.id && (idsConDia.has(i.id) || idsSugeridos.has(i.id))))
+        .filter(i => aportaDoc(i) && !(i.id && (idsConDia.has(i.id) || idsSugeridos.has(i.id))))
         .map(paraPlantilla)
     : null
 
@@ -1063,7 +1092,7 @@ export async function generateCotizacionPDF(cotizacionId: string) {
    * vuelo que el cliente no está comprando.
    */
   const idsDelPrincipal = bloques?.find(b => b.esPrincipal)?.itemIds ?? null
-  const itemsImpresos = lineasQueDescribeElDocumento(items, idsDelPrincipal, aporta)
+  const itemsImpresos = lineasQueDescribeElDocumento(items, idsDelPrincipal, aportaDoc)
 
   let viajePDF: CotizacionPDFProps['viaje'] = null
   // «Así puedes pagar» (F2, PR 7): solo con `plan_pagos.activo` en la línea del negocio.

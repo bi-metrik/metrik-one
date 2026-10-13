@@ -4,6 +4,7 @@ import { randomUUID } from 'crypto'
 
 import { revalidatePath } from 'next/cache'
 
+import { exigirPorPasos } from '@/lib/cotizaciones/por-pasos-datos'
 import { getWorkspace } from '@/lib/actions/get-workspace'
 import { exigirModulo, MENSAJE_MODULO_NO_ACTIVO, REQUISITO } from '@/lib/modulos/exigir-modulo'
 import { ranuraDeGrupo } from '@/lib/cotizaciones/ranuras-pantallazo'
@@ -27,6 +28,11 @@ import {
   describirOcupacion,
   normalizarComposicion,
   resolverTarifa,
+  costosAManoComoMapa,
+  preciosQueFaltan,
+  cantidadDeTipo,
+  TIPOS_PASAJERO,
+  type TipoPasajero,
   sumarAlertas,
   validarLecturaEnCasilla,
   type CasillasLeidas,
@@ -1516,6 +1522,62 @@ export async function confirmarMenorNoPaga(
   return { success: true, tarifa: guardado.tarifa }
 }
 
+// ── El precio por pasajero que falta, escrito a mano (forma por pasos, P12) ─────
+
+/**
+ * «Escribir a mano» el costo c/u de un tipo de pasajero que el pantallazo no trae, o «No paga en
+ * este proveedor» (`unitario = 0`). Regla del 2026-10-12 (aprobada por Mauricio): una opción de
+ * vuelo o actividad a la que le falta el precio del niño o del infante no se envía, y se cierra
+ * con un pantallazo nuevo, a mano o con «No paga». Queda registrado con quién y cuándo.
+ *
+ * Es de la forma por pasos: relee el interruptor (C1) y con él apagado no escribe nada. Lo
+ * escrito vive en `tarifa_pax.costosAMano` y lo usa `resolverTarifa` solo cuando no hay otra
+ * captura pegada para restar. Confirma el costo enseguida, como un pantallazo.
+ *
+ * `unitario = null` lo QUITA (el «Deshacer»).
+ */
+export async function escribirPrecioQueFalta(
+  itemId: string,
+  tipo: TipoPasajero,
+  unitario: number | null,
+): Promise<ResultadoTarifa & { anterior?: number | null }> {
+  const ctx = await contexto(itemId)
+  if ('error' in ctx) return { success: false, error: ctx.error as string }
+  const guard = await exigirPorPasos(ctx.supabase, ctx.item.cotizacionId)
+  if (!guard.ok) return { success: false, error: guard.error }
+  if (!ctx.composicion) return { success: false, error: 'Falta decir a cuántos pasajeros cubre la línea.' }
+  if (!TIPOS_PASAJERO.includes(tipo) || cantidadDeTipo(ctx.composicion, tipo) === 0) {
+    return { success: false, error: 'Ese tipo de pasajero no viaja en esta opción.' }
+  }
+  if (unitario !== null && (!Number.isFinite(unitario) || unitario < 0)) {
+    return { success: false, error: 'Escribe un costo de cero o más.' }
+  }
+  const anterior = ctx.tarifa.costosAMano?.[tipo]?.unitario ?? null
+  if (unitario !== null && anterior === null) {
+    // Solo se escribe lo que de verdad falta: un precio que el pantallazo trae no se tapa a mano.
+    const casillas = casillasConEstadia(ctx.tarifa.casillas ?? {}, ctx.tarifa.correcciones)
+    const faltan = preciosQueFaltan(ctx.composicion, casillas, ctx.ranura.slug, {
+      moneda: monedaDeTarifa(ctx.tarifa).moneda,
+      aMano: costosAManoComoMapa(ctx.tarifa),
+    })
+    if (!faltan.includes(tipo)) return { success: false, error: 'A esta opción no le falta ese precio.' }
+  }
+  const quien = await quienEscribe(ctx.supabase)
+  const guardado = await guardarTarifa(ctx.supabase, itemId, actual => {
+    const costosAMano = { ...(actual.costosAMano ?? {}) }
+    if (unitario === null) delete costosAMano[tipo]
+    else costosAMano[tipo] = { unitario, por: quien.por, porId: quien.porId, en: new Date().toISOString() }
+    const { costosAMano: _viejo, ...resto } = actual
+    void _viejo
+    return Object.keys(costosAMano).length > 0 ? { ...resto, costosAMano } : resto
+  })
+  if ('error' in guardado) return { success: false, error: guardado.error }
+  // Con lo escrito, el costo se confirma (y el total se recalcula) igual que con un pantallazo.
+  const c = await confirmarTarifaPorPasajero(itemId, null)
+  if (ctx.item.negocioId) revalidatePath(`/negocios/${ctx.item.negocioId}`)
+  return { success: true, tarifa: c.tarifa ?? guardado.tarifa, anterior, ...(c.success ? {} : { error: c.error }) }
+}
+
 // ── Composición de la línea (CC4b, P7) ───────────────────────────────────────
 
 /**
@@ -1639,7 +1701,11 @@ export async function confirmarTarifaPorPasajero(
   const porHabitaciones = conHabitaciones(tarifa)
   const estado = porHabitaciones
     ? resolverHabitaciones(tarifa, ctx.viaje.composicion ?? composicion, { moneda: monedaTarifa.moneda })
-    : resolverTarifa(composicion, casillasConEstadia(casillas, tarifa.correcciones), ranura.slug, { moneda: monedaTarifa.moneda })
+    : resolverTarifa(composicion, casillasConEstadia(casillas, tarifa.correcciones), ranura.slug, {
+        moneda: monedaTarifa.moneda,
+        // Lo escrito a mano en la forma por pasos (P12). Sin esa llave, como siempre.
+        aMano: costosAManoComoMapa(tarifa),
+      })
   if (estado.estado !== 'resuelta') return { success: false, error: estado.mensaje, codigo: 'PENDIENTE' }
   // «$» sin moneda: COP está preseleccionada pero nadie la ha dicho. No pasa callada.
   if (monedaTarifa.asumida) return { success: false, error: MENSAJE_MONEDA_ASUMIDA, codigo: 'PENDIENTE' }

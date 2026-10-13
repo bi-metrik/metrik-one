@@ -17,6 +17,10 @@ import { aceptarCapturaDeBandeja, type BorradorParaAceptar } from '@/app/(app)/n
 import { enPeticionDeRuta } from '@/lib/actions/memo-de-ruta'
 import { conTiempos, encabezadoServerTiming } from '@/lib/actions/tiempos-de-ruta'
 import { bytesDeImagen, registrarEnBandeja, responderBandeja } from '@/lib/cotizaciones/bandeja-registro'
+import { getWorkspace } from '@/lib/actions/get-workspace'
+import { exigirPorPasos } from '@/lib/cotizaciones/por-pasos-datos'
+import { fotoDeTarifas, type FotoDeTarifas } from '@/lib/cotizaciones/tarifas-por-pasos-datos'
+import { tarifasTrasAceptar } from '@/lib/cotizaciones/por-pasos-cierre'
 
 export const runtime = 'nodejs'
 
@@ -60,8 +64,28 @@ export async function POST(req: Request, { params }: { params: Promise<{ id: str
   // Brief del 2026-10-05, punto 13: además del total, cada etapa (contexto, subida del
   // pantallazo, líneas, crear la opción, guardar la lectura, confirmar el costo, ubicarla).
   // Caso Alejandra (2026-10-05): todo `ok:false` con mensaje y con su línea en el log.
+  //
+  // La forma por pasos (C2) manda `porPasos: true`: después de aceptar, la opción entra en las
+  // tarifas y la Recomendada queda en la propuesta. El interruptor se relee aquí, contra la
+  // base: con él apagado (una pestaña vieja) no se acepta nada y se pide recargar. Sin la marca,
+  // la ruta hace exactamente lo de siempre.
+  const porPasos = (cuerpo as { porPasos?: unknown }).porPasos === true
   const { resultado: r, etapas } = await conTiempos(() =>
-    responderBandeja('aceptar-captura', id, bytesDeImagen(borrador.imagen), () => enPeticionDeRuta(() => aceptarCapturaDeBandeja(id, borrador))))
+    responderBandeja('aceptar-captura', id, bytesDeImagen(borrador.imagen), () => enPeticionDeRuta(async () => {
+      let antes: FotoDeTarifas | null = null
+      if (porPasos) {
+        const { supabase } = await getWorkspace()
+        const guard = await exigirPorPasos(supabase, id)
+        if (!guard.ok) return { ok: false as const, codigo: 'POR_PASOS', mensaje: guard.error }
+        antes = await fotoDeTarifas(supabase, id)
+      }
+      const aceptada = await aceptarCapturaDeBandeja(id, borrador)
+      if (porPasos && aceptada.ok) {
+        const t = await tarifasTrasAceptar(id, antes)
+        if (!t.success) return { ...aceptada, tarifas: t.error }
+      }
+      return aceptada
+    })))
   const ms = performance.now() - inicio
   return NextResponse.json(r, { headers: { 'Server-Timing': encabezadoServerTiming(['aceptar', ms], etapas) } })
 }
