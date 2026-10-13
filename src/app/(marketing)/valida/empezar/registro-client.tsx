@@ -6,12 +6,12 @@ import { createClient } from '@/lib/supabase/client'
 import { fetchPropio } from '@/lib/version/fetch-propio'
 import TarjetaEpayco, { type TarjetaEpaycoHandle } from './tarjeta-epayco'
 import {
-  TIPOS_ENTIDAD,
+  casillasDesdeNit,
+  listoParaEnviar as datosListos,
   nitConPuntos,
   problemaDelNit,
   soloDigitos,
   textoProblemaNit,
-  type TipoEntidad,
 } from '@/lib/valida-registro/datos'
 
 const FONT = 'var(--font-schibsted), sans-serif'
@@ -26,7 +26,8 @@ const LLAVE_ORIGEN = 'valida-empezar-origen'
  *
  * Lo que esta pantalla NO decide: ni el NIT libre, ni el tope, ni el origen. Los manda al servidor
  * (`/api/valida/registro`) y muestra su respuesta. El DV sí se comprueba aquí mientras se escribe,
- * con la MISMA función que usa el servidor.
+ * con la MISMA función que usa el servidor, y se llena solo al escribir el NIT (`casillasDesdeNit`:
+ * se calcula sobre la casilla del NIT entera, no se adivina partiendo un número).
  */
 
 type Paso = 'correo' | 'codigo' | 'empresa' | 'listo'
@@ -76,12 +77,12 @@ export default function RegistroValidaClient({ origenUrl, abierto, consultas, di
   const [razonSocial, setRazonSocial] = useState('')
   const [nit, setNit] = useState('')
   const [dv, setDv] = useState('')
-  const [tipoEntidad, setTipoEntidad] = useState<TipoEntidad | ''>('')
   const [recomendadoAfi, setRecomendadoAfi] = useState<boolean | null>(origenUrl.codigoAfi ? true : null)
   const [codigoAfi, setCodigoAfi] = useState(origenUrl.codigoAfi ?? '')
   const [acepta, setAcepta] = useState(false)
   const [origen] = useState<Origen>(() => origenInicial(origenUrl))
   const refTarjeta = useRef<TarjetaEpaycoHandle>(null)
+  const refDv = useRef<HTMLInputElement>(null)
   const [error, setError] = useState('')
   const [errorCampo, setErrorCampo] = useState('')
   const [ocupado, setOcupado] = useState(false)
@@ -175,7 +176,6 @@ export default function RegistroValidaClient({ origenUrl, abierto, consultas, di
         razon_social: razonSocial,
         nit,
         dv,
-        tipo_entidad: tipoEntidad,
         acepta,
         condiciones_version: condiciones.version,
         recomendado_afi: recomendadoAfi,
@@ -214,7 +214,15 @@ export default function RegistroValidaClient({ origenUrl, abierto, consultas, di
     setOcupado(false)
   }
 
-  const listoParaEnviar = razonSocial.trim().length >= 3 && !problemaNit && !!tipoEntidad && acepta && recomendadoAfi !== null
+  const listoParaEnviar = datosListos({ razonSocial, nit, dv, acepta, recomendadoAfi })
+
+  const escribirNit = (crudo: string) => {
+    const c = casillasDesdeNit(crudo)
+    setNit(c.nit)
+    setDv(c.dv)
+    // Quien escribe el guion va a escribir el DV: se le pasa a su casilla para que no quede pegado.
+    if (c.conGuion) refDv.current?.focus()
+  }
 
   return (
     <Marco consultas={consultas} dias={dias}>
@@ -319,20 +327,23 @@ export default function RegistroValidaClient({ origenUrl, abierto, consultas, di
                 required
                 placeholder="900123456"
                 value={nitConPuntos(nit)}
-                onChange={(e) => setNit(soloDigitos(e.target.value).slice(0, 10))}
+                onChange={(e) => escribirNit(e.target.value)}
                 className={claseCampo}
                 aria-describedby="ayuda-nit"
               />
               <span className="text-lg text-muted-foreground">-</span>
               <input
                 id="dv"
+                ref={refDv}
                 type="text"
                 inputMode="numeric"
                 required
                 aria-label="Dígito de verificación"
                 placeholder="DV"
                 value={dv}
-                onChange={(e) => setDv(soloDigitos(e.target.value).slice(0, 1))}
+                // El último dígito: con el DV ya puesto, escribir otro lo reemplaza en vez de ignorarse.
+                onChange={(e) => setDv(soloDigitos(e.target.value).slice(-1))}
+                onFocus={(e) => e.target.select()}
                 className={`${claseCampo} w-16 text-center`}
               />
             </div>
@@ -340,27 +351,11 @@ export default function RegistroValidaClient({ origenUrl, abierto, consultas, di
               <p className="text-xs text-amber-600">{avisoNit}</p>
             ) : (
               <p id="ayuda-nit" className="text-xs text-muted-foreground">
-                Sin puntos. El dígito de verificación va en la casilla de la derecha.
+                Sin puntos. El dígito de verificación se llena solo; revísalo contra tu RUT.
               </p>
             )}
             {(errorCampo === 'nit' || errorCampo === 'dv') && <p className="text-xs text-red-500">{error}</p>}
           </div>
-
-          <fieldset className="space-y-2">
-            <legend className="text-sm font-medium text-foreground">Tipo de empresa</legend>
-            {TIPOS_ENTIDAD.map((t) => (
-              <label key={t.valor} className="flex h-12 items-center gap-3 rounded-lg border border-border px-3 text-sm">
-                <input
-                  type="radio"
-                  name="tipo_entidad"
-                  value={t.valor}
-                  checked={tipoEntidad === t.valor}
-                  onChange={() => setTipoEntidad(t.valor)}
-                />
-                {t.etiqueta}
-              </label>
-            ))}
-          </fieldset>
 
           <fieldset className="space-y-2">
             <legend className="text-sm font-medium text-foreground">¿Te recomendó AFI?</legend>

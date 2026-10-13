@@ -13,6 +13,13 @@ import { textoMotivo, type MotivoRechazo } from '@/lib/secop-registro/antiabuso'
  * `src/lib/secop-registro/identificacion.ts` explica por qué adivinar el DV mutila números buenos, y
  * su salida recomendada era justamente esta («pedir el número y el DV en dos campos»).
  *
+ * La pantalla LLENA el DV sola en cuanto hay un NIT (`dvParaNit`), y eso no contradice lo anterior.
+ * El «no se adivina» de `src/lib/dian/nit.ts` es sobre partir un número que ya podría traer el DV pegado
+ * (`separarNitDv`): ahí se decide cuál dígito sobra y se mutila 1 de cada 11 números buenos. Aquí la
+ * casilla del NIT es solo el NIT, así que no se parte nada: el DV se CALCULA de la base completa,
+ * que es determinista. La casilla del DV sigue editable; si la persona la cambia y no cuadra, sale
+ * el aviso de siempre (`dv_no_coincide`).
+ *
  * Con el DV comprobado, la llave «una prueba por NIT» (`valida_registros_identificacion_creada`) no
  * tiene el hueco del DV pegado: el número que se guarda es siempre la base.
  */
@@ -34,6 +41,37 @@ export function problemaDelNit(nit: string, dv: string): ProblemaNit | null {
   return null
 }
 
+/**
+ * El DV que la pantalla pone sola al escribir el NIT: el módulo 11 de la DIAN (`calcularDvNit`) sobre
+ * la base COMPLETA, nunca sobre un número partido. Mientras el NIT no tenga forma (6 a 10 dígitos)
+ * devuelve vacío, para no proponer el DV de un número a medio escribir.
+ */
+export function dvParaNit(nit: string): string {
+  const base = soloDigitos(nit)
+  if (base.length < 6 || base.length > 10) return ''
+  return calcularDvNit(base) ?? ''
+}
+
+/**
+ * Lo que deja en las dos casillas lo que la persona escribe (o pega) en la del NIT.
+ *
+ * Sin guion: todo es NIT y el DV se calcula (`dvParaNit`). Con guion («902079601-9», lo normal al
+ * pegar desde el RUT o una factura): el guion SEPARA, no se adivina nada; lo de antes es el NIT y el
+ * dígito de después es el DV que la persona trae, que se respeta tal cual para que el aviso de
+ * `dv_no_coincide` siga atrapando un número mal copiado. Sin esto, el guion se borraba con el resto
+ * de lo que no es dígito y el DV quedaba pegado al NIT como un dígito más.
+ */
+export function casillasDesdeNit(crudo: string): { nit: string; dv: string; conGuion: boolean } {
+  const guion = crudo.indexOf('-')
+  if (guion < 0) {
+    const nit = soloDigitos(crudo).slice(0, 10)
+    return { nit, dv: dvParaNit(nit), conGuion: false }
+  }
+  const nit = soloDigitos(crudo.slice(0, guion)).slice(0, 10)
+  const dvTraido = soloDigitos(crudo.slice(guion + 1))
+  return { nit, dv: dvTraido.length === 1 ? dvTraido : dvParaNit(nit), conGuion: true }
+}
+
 export function textoProblemaNit(p: ProblemaNit): string {
   switch (p) {
     case 'nit_vacio':
@@ -52,7 +90,7 @@ export function nitConPuntos(nit: string): string {
   return soloDigitos(nit).replace(/\B(?=(\d{3})+(?!\d))/g, '.')
 }
 
-// ─── Razón social y tipo de entidad ─────────────────────────────────────
+// ─── Razón social ─────────────────────────────────────────────────────────
 
 export const LARGO_MIN_RAZON = 3
 export const LARGO_MAX_RAZON = 120
@@ -68,16 +106,18 @@ export function problemaDeRazonSocial(v: string): string | null {
   return null
 }
 
-export const TIPOS_ENTIDAD = [
-  { valor: 'cda', etiqueta: 'CDA' },
-  { valor: 'vigilado_supertransporte', etiqueta: 'Otro vigilado de la Supertransporte' },
-  { valor: 'otro', etiqueta: 'Otro tipo de empresa' },
-] as const
-
-export type TipoEntidad = (typeof TIPOS_ENTIDAD)[number]['valor']
-
-export function esTipoEntidad(v: unknown): v is TipoEntidad {
-  return TIPOS_ENTIDAD.some((t) => t.valor === v)
+/**
+ * Cuándo la pantalla deja tocar «Empezar». Ya NO pregunta el tipo de empresa (Mauricio, 2026-10-12:
+ * «estamos apuntando a cualquier empresa»): el segmento sale del RUT al activar (CIIU 7120 = CDA).
+ */
+export function listoParaEnviar(f: {
+  razonSocial: string
+  nit: string
+  dv: string
+  acepta: boolean
+  recomendadoAfi: boolean | null
+}): boolean {
+  return f.razonSocial.trim().length >= LARGO_MIN_RAZON && !problemaDelNit(f.nit, f.dv) && f.acepta && f.recomendadoAfi !== null
 }
 
 // ─── Marca de origen (comisión AFI) ─────────────────────────────────────

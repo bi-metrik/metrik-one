@@ -31,7 +31,6 @@ export async function POST(req: Request) {
     razonSocial: texto(c.razon_social),
     nit: texto(c.nit),
     dv: texto(c.dv),
-    tipoEntidad: texto(c.tipo_entidad),
     acepta: c.acepta === true,
     condicionesVersion: texto(c.condiciones_version),
     recomendadoAfi: typeof c.recomendado_afi === 'boolean' ? c.recomendado_afi : null,

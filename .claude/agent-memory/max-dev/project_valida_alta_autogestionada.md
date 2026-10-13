@@ -53,6 +53,8 @@ Ya mergeados: #1095 (corte de la bolsa), #1097 (`valida_registros`, APLICADA, no
 - ePayco.js usa `$.ajax`: hay que cargar jQuery antes. Su `parseForm` lee `getAttribute('value')` antes que `.value`, así que los campos de tarjeta van sin estado de React.
 - El guardián `src/lib/compliance/retencion.test.ts` hace caer CI si un archivo nuevo dice «N años» sin clasificarlo (las Condiciones dicen 10 años).
 - Rutas con paréntesis dentro de comandos compuestos: el hook rechaza el comando. Hay que pasar `\(` `\)` sin encadenar.
+- El registro ya NO pregunta el tipo de empresa (Mauricio, 2026-10-12: «cualquier empresa»): `valida_registros.tipo_entidad` nace null; el segmento sale del RUT al activar (CIIU 7120 = CDA), aún sin construir.
+- El DV se llena solo desde la casilla del NIT (`casillasDesdeNit`); un guion SEPARA (respeta el DV traído), sin guion se calcula. No es `separarNitDv`: nunca partir un número sin separador.
 
 ## Falta para abrir al público
 

@@ -10,7 +10,6 @@ import { condicionesVigentes, textoAceptado, versionAceptada } from './condicion
 import {
   candidatosDeSlug,
   decidirOrigen,
-  esTipoEntidad,
   limpiarCodigoAfi,
   limpiarUtm,
   normalizarRazonSocial,
@@ -19,7 +18,6 @@ import {
   soloDigitos,
   textoMotivoValida,
   textoProblemaNit,
-  type TipoEntidad,
 } from './datos'
 import { registroAbierto } from './llave'
 import { leerTarjeta, partirNombre, pideMetodoPago, textoProblemaTarjeta } from './metodo-pago'
@@ -63,7 +61,7 @@ import { emitirPruebaDelEspacio } from './prueba-servidor'
  * `valida_registros.metodo_pago_estado` deja de nacer en `no_requerido`. Hoy la prueba es sin tarjeta.
  */
 
-export type CampoRegistro = 'razon_social' | 'nit' | 'dv' | 'tipo_entidad' | 'acepta' | 'tarjeta'
+export type CampoRegistro = 'razon_social' | 'nit' | 'dv' | 'acepta' | 'tarjeta'
 
 export type ResultadoRegistroValida =
   | { tipo: 'ok'; slug: string }
@@ -79,7 +77,6 @@ export interface DatosRegistroValida {
   razonSocial: string
   nit: string
   dv: string
-  tipoEntidad: string
   /** La casilla de las Condiciones de la prueba y la Política de Datos. */
   acepta: boolean
   /** La versión de Condiciones + aviso que vio la pantalla (`VERSION_ACEPTADA`). Tiene que ser la vigente. */
@@ -150,11 +147,6 @@ export async function crearEspacioValida(datos: DatosRegistroValida): Promise<Re
   const nit = soloDigitos(datos.nit)
   const dv = soloDigitos(datos.dv)
 
-  if (!esTipoEntidad(datos.tipoEntidad)) {
-    return { tipo: 'dato', campo: 'tipo_entidad', texto: 'Elige qué tipo de empresa es.' }
-  }
-  const tipoEntidad: TipoEntidad = datos.tipoEntidad
-
   const utm = limpiarUtm(datos.utm)
   const codigoAfi = limpiarCodigoAfi(datos.codigoAfi)
   const { origen, fuente } = decidirOrigen({ ref: datos.ref, codigoAfi, recomendadoAfi: datos.recomendadoAfi, utm })
@@ -182,7 +174,9 @@ export async function crearEspacioValida(datos: DatosRegistroValida): Promise<Re
     identificacion: nit,
     dv,
     razon_social: razonSocial,
-    tipo_entidad: tipoEntidad,
+    // Ya no se pregunta (Mauricio, 2026-10-12: cualquier empresa). El segmento sale del RUT al activar
+    // (CIIU 7120 = CDA); la columna queda en null, que su CHECK admite.
+    tipo_entidad: null,
     origen,
     origen_fuente: fuente,
     ref: datos.ref ? datos.ref.trim().slice(0, 60) : null,
