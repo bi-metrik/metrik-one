@@ -13,12 +13,16 @@ import { cargarEnExistente } from '../wa-carga-reglas.ts';
 import { lineaCargada, mensajesDeTextos, planDeCarga, propuestoDe, registradoDe } from './bandeja/carga.ts';
 import { instruccionesCarga } from './bandeja/extraccion.ts';
 import type { PlanCarga } from './bandeja/carga.ts';
-import type { PuertoBandeja, ViajeAgente } from './bandeja/dominio.ts';
+import type { HechoConOrigen, PuertoBandeja, ViajeAgente } from './bandeja/dominio.ts';
 import type { AutorizacionAgente } from './bandeja/autorizacion.ts';
+import { planGuardado } from '../perfil-contacto.ts';
+import type { DimensionPerfil, EstadoPerfil, HechoExistente, OrigenPerfil } from '../perfil-contacto.ts';
 import type { Almacen, FilaConversacion, Mensajero, Salida, Traza } from './tipos.ts';
 
 export interface ContactoMem { id: string; nombre: string; celular?: string | null; correo?: string | null; usuario?: string | null }
 export interface ViajeMem { id: string; codigo: string; contactoId: string; nombre: string; destino: string | null; abierto: boolean; datos: Record<string, unknown> }
+/** Un hecho del perfil (`contacto_perfil_hechos`), en memoria. */
+export interface HechoMem { id: string; contactoId: string; dimension: DimensionPerfil; texto: string; estado: EstadoPerfil; origenTipo: OrigenPerfil; origenRef: string }
 
 export class Reloj {
   constructor(public ms = Date.parse('2026-10-06T18:45:00Z')) {}
@@ -184,7 +188,7 @@ export class PuertoMemoria implements PuertoBandeja {
     const c = this.contactos.find((x) => x.id === v.contactoId);
     const f = this.faltas(v);
     const registrado = this.campos ? registradoDe(this.campos, { destino: v.destino, ...v.datos }) : undefined;
-    return { id: v.id, codigo: v.codigo, nombre: v.nombre, cliente: c?.nombre ?? null, destino: v.destino, abierto: v.abierto, faltaCotizar: f.cotizar, faltaCompleto: f.completo, ...(registrado ? { registrado } : {}) };
+    return { id: v.id, codigo: v.codigo, nombre: v.nombre, cliente: c?.nombre ?? null, contactoId: v.contactoId, destino: v.destino, abierto: v.abierto, faltaCotizar: f.cotizar, faltaCompleto: f.completo, ...(registrado ? { registrado } : {}) };
   }
 
   async crearViaje(p: { contactoId: string; destino: string | null }) {
@@ -205,7 +209,7 @@ export class PuertoMemoria implements PuertoBandeja {
     if (this.campos && this.extraer) {
       this.extracciones.push([...textos]);
       const data = { destino: v.destino, ...v.datos };
-      const raw = await this.extraer({ textos, mensajes: mensajesDeTextos(textos).map((m) => `[${m.n}] ${m.cuerpo}`).join('\n'), campos: this.campos, yaTiene: data, instrucciones: instruccionesCarga(this.campos, this.hoyISO(), data, propuestoDe(previo)) });
+      const raw = await this.extraer({ textos, mensajes: mensajesDeTextos(textos).map((m) => `[${m.n}] ${m.cuerpo}`).join('\n'), campos: this.campos, yaTiene: data, instrucciones: instruccionesCarga(this.campos, this.hoyISO(), data, propuestoDe(previo), undefined, { perfil: true }) });
       return planDeCarga({ bloques: [{ fields: this.campos, data }], textos, raw, hoyISO: this.hoyISO(), ahoraIso: new Date(this.ahora()).toISOString(), previo });
     }
     const antes = (previo as { textos?: string[] } | undefined)?.textos ?? [];
@@ -242,6 +246,38 @@ export class PuertoMemoria implements PuertoBandeja {
     if (a) return a;
     this.escrituras.push({ tipo: 'enlace_autorizacion', contactoId });
     return { estado: 'pendiente', url: `https://agencia.metrikone.co/autorizacion/${'T'.repeat(43)}?m=w`, agencia: 'la agencia', whatsapp: null, instruccion: null };
+  }
+
+  /** ¿Autorizó? Lo dice `autorizaciones` (sin entrada: no ha autorizado, como un contacto recién creado). */
+  async autorizado(contactoId: string): Promise<boolean | 'error'> {
+    const a = this.autorizaciones.get(contactoId);
+    if (a === 'error') return 'error';
+    return a?.estado === 'autorizado';
+  }
+
+  /** El perfil de cada contacto (`contacto_perfil_hechos`). */
+  perfil: HechoMem[] = [];
+  async perfilDe(contactoId: string): Promise<HechoExistente[] | 'error'> {
+    if (this.fallarBusqueda) return 'error';
+    return this.perfil.filter((h) => h.contactoId === contactoId).map((h) => ({ id: h.id, texto: h.texto, estado: h.estado }));
+  }
+
+  async guardarPerfil(p: { contactoId: string; hechos: HechoConOrigen[]; estado: 'sugerido' | 'confirmado'; origenTipo: OrigenPerfil }) {
+    // Las guardas de la base: el contacto existe aquí y tiene la autorización vigente.
+    if (!this.contactos.some((c) => c.id === p.contactoId)) throw new Error('perfil_contacto_fuera_del_workspace');
+    if ((await this.autorizado(p.contactoId)) !== true) throw new Error('perfil_sin_autorizacion');
+    const existentes = this.perfil.filter((h) => h.contactoId === p.contactoId).map((h) => ({ id: h.id, texto: h.texto, estado: h.estado }));
+    const plan = planGuardado(p.hechos, existentes, p.estado);
+    for (const h of plan.insertar) {
+      this.perfil.push({ id: nuevoId(), contactoId: p.contactoId, dimension: h.dimension, texto: h.texto, estado: p.estado, origenTipo: p.origenTipo, origenRef: h.origenRef });
+    }
+    for (const x of plan.confirmar) {
+      const h = this.perfil.find((y) => y.id === x.id);
+      if (h) h.estado = 'confirmado';
+    }
+    const guardados = [...plan.insertar, ...plan.confirmar.map((x) => x.hecho)];
+    for (const h of guardados) this.escrituras.push({ tipo: 'perfil', contactoId: p.contactoId, estado: p.estado, dimension: h.dimension, texto: h.texto, origenTipo: p.origenTipo });
+    return { guardados, yaEstaban: plan.yaEstaban };
   }
 
   async crearCliente(nombre: string, llave: Llave) {

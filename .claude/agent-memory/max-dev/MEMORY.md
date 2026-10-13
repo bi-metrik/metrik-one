@@ -2,6 +2,7 @@
 
 ## Project memories
 
+- ⚠️⚠️ [Perfil del contacto por el bot (corte 1)](project_perfil_contacto_bot.md) — migración 20261012234500 SIN aplicar; fichas sin publicar; trigger exige autorización
 - ⚠️⚠️ [F7/F8 Trappvel: SQL 11→9, clon e interruptores](project_f7_configurar_linea_trappvel.md) — SIN correr; gates 3-4 sin interruptor; cola F5 no filtra es_prueba
 - ⚠️⚠️ [Post-cotización ola 5: F4 entrega y F6 cierre](project_post_cotizacion_f4_f6.md) — #1131 migración contacto_documentos SIN aplicar; pila hasta #1133
 - ⚠️ [Post-cotización ola 4: F3, F5 y Siigo listo](project_post_cotizacion_f3_f5.md) — #1119/#1120/#1123 apilados; wa-webhook sin desplegar; piso $0

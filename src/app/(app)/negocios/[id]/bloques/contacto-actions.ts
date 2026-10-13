@@ -22,6 +22,8 @@ import {
 } from '@/lib/autorizacion-datos/servidor'
 import { armarVista, type VistaAutorizacionContacto } from '@/lib/autorizacion-datos/vista'
 import { MENSAJE_SIN_CORREO } from '@/lib/autorizacion-datos/correo'
+import { leerPerfil } from '@/lib/perfil-contacto/servidor'
+import type { HechoPerfilVista } from '@/lib/perfil-contacto/vista'
 
 /**
  * Acciones del bloque `contacto`. Escriben en `contactos`, no en `negocio_bloques`.
@@ -60,6 +62,8 @@ async function resolverContacto(
 export interface FichaContacto {
   contactoId: string
   valores: ValoresContacto
+  /** El perfil CONFIRMADO del contacto, de solo lectura (para cotizar). Vacío si no hay o no se pudo leer. */
+  perfil: HechoPerfilVista[]
 }
 
 /**
@@ -92,6 +96,10 @@ export async function cargarFichaContacto(
   if (!c) return { ficha: null, error: null }
 
   const row = c as ValoresContacto & { id: string; custom_data: Record<string, unknown> | null }
+  // El perfil confirmado viaja con la ficha: la comercial lo ve al cotizar. Si no se puede leer, la
+  // ficha sale igual (el perfil es de consulta, no bloquea nada).
+  const perfil = await leerPerfil(supabase, workspaceId, row.id, { soloConfirmados: true })
+  if (perfil.error) console.error('[cargarFichaContacto] perfil:', perfil.error)
   return {
     ficha: {
       contactoId: row.id,
@@ -103,6 +111,7 @@ export async function cargarFichaContacto(
         segmento: row.segmento,
         custom_data: row.custom_data ?? {},
       },
+      perfil: perfil.hechos,
     },
     error: null,
   }
