@@ -11,7 +11,7 @@
 - ⚠️⚠️ [SOE-007: devolución de dinero y venta reembolsada](project_devoluciones_dinero_soe007.md) — 20261009210000 APLICADA; devuelto ≥ cobrado sale de ventas; read-only API sí mide
 - ⚠️ [Pegar conversación en el viaje](project_pegar_conversacion.md) — Next importa _shared puro con `.ts`; llave de pruebas sin pago (403)
 - ⚠️⚠️ [SOE-006: histórico de inactivos (#1084)](project_historico_inactivos_soe006.md) — migración 20261008223000 SIN aplicar; promedio del supervisor solo activos (provisional)
-- ⚠️⚠️ [Autorización de datos por link (Trappvel)](project_autorizacion_datos_link.md) — migración 20261008230000 APLICADA (8-oct); marcas manuales no cuentan; Encargado por versión
+- ⚠️⚠️ [Autorización de datos por link (Trappvel)](project_autorizacion_datos_link.md) — migración 20261008230000 APLICADA (8-oct); marcas manuales no cuentan; directorio sin punto en la lista (N+1)
 - [SOE-004: aprobación fuera de tarifa](project_aprobacion_fuera_de_tarifa.md) — tope frena al APROBAR, no al generar; gerencial + motivo; recargos incluidos
 - [Reporte Supertransporte (ALMA)](project_reporte_supertransporte.md) — contrapartes = todos los segmentos; MéTRIK por platform_admin/correo; KYC sin created_by
 - ⚠️⚠️ [SOE-008/009: aviso al cliente una vez por hecho](project_aviso_mismo_hecho.md) — migración huella SIN aplicar; deploy notificar-etapa después

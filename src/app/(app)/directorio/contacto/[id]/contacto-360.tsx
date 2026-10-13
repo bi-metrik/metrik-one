@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useTransition } from 'react'
+import { useState, useTransition, type ReactNode } from 'react'
 import { useRouter } from 'next/navigation'
 import Link from 'next/link'
 import { ArrowLeft, Mail, Save, Flame, Building2 } from 'lucide-react'
@@ -40,9 +40,11 @@ interface Props {
   negocios: NegocioRow[]
   interacciones: InteraccionContacto[]
   staff: StaffOption[]
+  /** La sección «Autorización de datos» (solo en workspaces que la usan). */
+  autorizacion?: ReactNode
 }
 
-export default function Contacto360({ contacto, empresaVinculada, negocios, interacciones, staff }: Props) {
+export default function Contacto360({ contacto, empresaVinculada, negocios, interacciones, staff, autorizacion }: Props) {
   const router = useRouter()
   const [isPending, startTransition] = useTransition()
   const [form, setForm] = useState({
@@ -218,6 +220,9 @@ export default function Contacto360({ contacto, empresaVinculada, negocios, inte
           )}
         </div>
       </div>
+
+      {/* Autorización de tratamiento de datos: la misma vista del bloque del viaje. */}
+      {autorizacion}
 
       {/* Interacciones (leads sin convertir + timeline) */}
       {/* `custom_data.origen` es el first-touch inmutable que graba el webhook de

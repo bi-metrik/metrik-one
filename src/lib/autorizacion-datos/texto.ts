@@ -90,6 +90,12 @@ export function medioDesdeParam(v: unknown): Medio {
  * workspace no manda correos solos ni muestra la casilla de ofertas.
  */
 export interface ConfigAutorizacion {
+  /**
+   * El workspace usa la autorización de datos: `config_extra.autorizacion_datos` existe como
+   * objeto. Decide si el directorio muestra la sección del contacto. No toca el gate: ese lo
+   * declara la etapa en `config_extra.gates`.
+   */
+  activa: boolean
   /** Manda el correo con el link al crear un viaje (si el contacto tiene correo y no autorizó). */
   correoAlCrear: boolean
   /** Muestra la casilla de ofertas (si la versión la trae). */
@@ -105,6 +111,7 @@ export interface ConfigAutorizacion {
 }
 
 export const CONFIG_POR_DEFECTO: ConfigAutorizacion = {
+  activa: false,
   correoAlCrear: false,
   ofertas: false,
   registroConEvidencia: false,
@@ -126,6 +133,7 @@ export function leerConfigAutorizacion(configExtra: unknown): ConfigAutorizacion
   const c = raw as Record<string, unknown>
   const responder = typeof c.responder_a === 'string' ? c.responder_a.trim() : ''
   return {
+    activa: true,
     // Solo `true` literal enciende: un «"true"» de texto es un error de carga, no una decisión.
     correoAlCrear: c.correo_al_crear === true,
     ofertas: c.ofertas === true,
