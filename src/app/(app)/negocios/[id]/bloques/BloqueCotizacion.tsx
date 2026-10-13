@@ -39,6 +39,11 @@ interface BloqueCotizacionProps {
   puedeCorregir?: boolean
   /** Seguimiento encendido en la línea (F1-3): «Duplicar» pregunta de dónde sale la versión. */
   pedirOrigenAlDuplicar?: boolean
+  /**
+   * La cotización por pasos encendida (C4, decisión J): «Enviar» no envía desde aquí, lleva a
+   * «Revisar y enviar» de esa cotización, donde están la lista y el documento. Apagada, lo de siempre.
+   */
+  porPasos?: boolean
 }
 
 const fmt = (v: number) =>
@@ -68,7 +73,7 @@ const ESTADO_ORDER: Record<string, number> = {
   vencida: 4,
 }
 
-export default function BloqueCotizacion({ negocioId, modo, cotizaciones, skipEnviar, puedeCorregir = false, pedirOrigenAlDuplicar = false }: BloqueCotizacionProps) {
+export default function BloqueCotizacion({ negocioId, modo, cotizaciones, skipEnviar, puedeCorregir = false, pedirOrigenAlDuplicar = false, porPasos = false }: BloqueCotizacionProps) {
   const [isPending, startTransition] = useTransitionTolerante()
   const [optimisticAceptadaId, setOptimisticAceptadaId] = useState<string | null>(null)
   /**
@@ -126,6 +131,11 @@ export default function BloqueCotizacion({ negocioId, modo, cotizaciones, skipEn
   }
 
   const handleEnviar = (cotizacionId: string) => {
+    if (porPasos) {
+      // Sin el router de la app: el botón vive también en el historial del negocio.
+      window.location.assign(`/negocios/${negocioId}/cotizacion/${cotizacionId}?paso=revisar`)
+      return
+    }
     startTransition(async () => {
       const res = await enviarCotizacionNegocio(cotizacionId, negocioId)
       if (!res.success) {

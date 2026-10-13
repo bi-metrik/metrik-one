@@ -3,6 +3,7 @@ import { getEstadoItinerarios } from '@/app/(app)/negocios/itinerario-actions'
 import { getAdicionalesDeCotizacion } from '@/app/(app)/negocios/adicional-actions'
 import { getPoliticaRecargo } from '@/app/(app)/negocios/recargo-actions'
 import { getSalidaDeCotizacion } from '@/app/(app)/negocios/margen-salida-actions'
+import { getPedidoDeAutorizacion } from '@/app/(app)/negocios/por-pasos-actions'
 import { getTextoCliente } from '@/app/(app)/negocios/documento-cliente-actions'
 import { getFiscalProfile } from '@/app/(app)/config/fiscal-actions'
 import { getWorkspace } from '@/lib/actions/get-workspace'
@@ -40,10 +41,14 @@ export const maxDuration = 60
 
 export default async function CotizacionNegocioPage({
   params,
+  searchParams,
 }: {
   params: Promise<{ id: string; cotId: string }>
+  /** `?paso=tarifas|revisar`: la cotización por pasos abre en ese paso (decisión J). */
+  searchParams?: Promise<{ paso?: string }>
 }) {
   const { id, cotId } = await params
+  const { paso } = (await searchParams) ?? {}
 
   // La hora del servidor ANTES de leer: el editor del viaje la compara con su propia lectura
   // para pintar la más nueva sin recargar (`lib/cotizaciones/vista-fresca.ts`).
@@ -306,9 +311,15 @@ export default async function CotizacionNegocioPage({
     estado: (cotizacion as { estado?: string | null }).estado ?? null,
   })
 
+  // Solo con la forma por pasos: el pedido de autorización que espera al dueño. Apagada, ninguna
+  // consulta de más (la carga de la página es la de siempre).
+  const pedidoAutorizacion = estadoPasos.encendido ? await getPedidoDeAutorizacion(cotId).catch(() => null) : null
+
   const editor = (
     <CotizacionEditor
       porPasos={estadoPasos}
+      pedidoAutorizacion={pedidoAutorizacion}
+      pasoInicial={paso === 'revisar' ? 3 : paso === 'tarifas' ? 2 : 1}
       oportunidadId={id}
       // Con los tipos regenerados, `convencion_margen` llega como `string` de la base y el
       // editor la declara como la unión de sus dos valores (el CHECK de la columna). El cast

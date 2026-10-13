@@ -143,6 +143,8 @@ import { recalcularTotales } from './cotizacion-actions'
 import { generateCotizacionPDF } from './cotizacion-pdf-actions'
 import { aceptarCotizacionNegocio, opcionesDeAprobacion } from './[id]/cotizacion/actions'
 import { cambiarOpcionDeItinerario } from './itinerario-actions'
+import { deshacerPorPasos, elegirOpcionEnTarifa } from './por-pasos-actions'
+import { tablasPorPasos } from '../../../../test/caso-por-pasos'
 import { POST as aceptarPorLaRuta } from '@/app/api/cotizaciones/[id]/aceptar-captura/route'
 import { firmarBorrador } from '@/lib/cotizaciones/firma-borrador'
 import { lecturaManual } from '@/lib/cotizaciones/ingreso-manual'
@@ -380,6 +382,26 @@ async function idasDeElegirOpcion(): Promise<number> {
 }
 
 /**
+ * C4 · «Deshacer» (y la escritura que deshace): la opción de una tarifa en la cotización por pasos,
+ * con el interruptor encendido de verdad (las cuatro condiciones). Entra al presupuesto con su
+ * pieza, como decía C0.
+ */
+async function idasDeDeshacer(): Promise<{ elegir: number; deshacer: number }> {
+  base.tablas = tablasPorPasos()
+  base.secuencia = 0
+  base.registro = []
+  sesion.workspaceId = WS_TRAPPVEL
+  await recalcularTotales(COT_SAN_ANDRES)
+  tomarRegistro()
+  const r = await elegirOpcionEnTarifa('tf-premium', 'actividad: Cayo Cangrejo', 'a-cayo-compartida')
+  expect(r.success, (r as { error?: string }).error).toBe(true)
+  const elegir = tomarRegistro().length
+  const d = await deshacerPorPasos({ tipo: 'eleccion', cotizacionId: COT_SAN_ANDRES, itinerarioId: 'tf-premium', grupo: 'actividad: Cayo Cangrejo', escrita: 'a-cayo-compartida', anterior: 'a-cayo-privada' })
+  expect(d.success, (d as { error?: string }).error).toBe(true)
+  return { elegir, deshacer: tomarRegistro().length }
+}
+
+/**
  * «Aceptar» UNO desde la bandeja, por la ruta de verdad (`aceptar-captura`): un traslado nuevo
  * sobre el caso fijo ya armado. Cuenta las idas de la aceptación entera, con su recálculo.
  */
@@ -448,6 +470,7 @@ const corridas: Record<string, { apagado: Awaited<ReturnType<typeof correr>>; en
 let idasElegir = 0
 let aceptarUno = { idas: 0, sesiones: 0 }
 let abrir = { idas: 0, sesiones: 0, escrituras: 0 }
+let porPasos = { elegir: 0, deshacer: 0 }
 
 beforeAll(async () => {
   // El reloj fijo: las fechas que el servidor escribe (aprobación, registro) no pueden variar.
@@ -459,6 +482,7 @@ beforeAll(async () => {
   vi.stubEnv('SUPABASE_SERVICE_ROLE_KEY', 'secreto-de-prueba')
   aceptarUno = await idasDeAceptarUno()
   abrir = await idasDeAbrir()
+  porPasos = await idasDeDeshacer()
 }, 120_000)
 
 afterAll(() => {
@@ -482,6 +506,9 @@ function presupuestoMedido(): Record<string, number> {
   p['trappvel-caso-fijo · abrir la cotización · sesiones'] = abrir.sesiones
   // N7 («abrir no escribe») se exige desde C1; aquí queda la línea base.
   p['trappvel-caso-fijo · abrir la cotización · escrituras'] = abrir.escrituras
+  // C4 · la forma por pasos: elegir la opción de una tarifa y deshacerlo.
+  p['trappvel-por-pasos · elegir opción en una tarifa'] = porPasos.elegir
+  p['trappvel-por-pasos · deshacer'] = porPasos.deshacer
   for (const e of ESCENARIOS) {
     const { sesiones } = corridas[e.nombre].apagado
     p[`${e.nombre} · recalcular · sesiones`] = sesiones.recalcular

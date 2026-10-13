@@ -181,6 +181,22 @@ export interface DevolucionABandeja {
 /** Lo que la bandeja expone para recibir los pantallazos de una opción eliminada. */
 export interface ReceptorDeBandeja {
   recibir: (d: DevolucionABandeja) => void
+  /** La cotización por pasos: «Aceptar N» desde «Sigue:», de a una, en la fila de siempre. */
+  aceptarListas?: () => void
+  /** La cotización por pasos: «Pegar pantallazo» desde «Sigue:» abre el selector de archivo. */
+  elegirArchivo?: () => void
+}
+
+/** Cuántos pantallazos esperan «Aceptar» y cuántos se están leyendo (la barra de pasos). */
+export function conteoDeBandeja(capturas: readonly Pick<Captura, 'estado'>[]): { porAceptar: number; leyendo: number } {
+  let porAceptar = 0
+  let leyendo = 0
+  for (const c of capturas) {
+    const f = c.estado.fase
+    if (f === 'mirando' || f === 'leyendo' || f === 'aceptando') leyendo += 1
+    else if (f === 'lista' || f === 'parecida' || f === 'otro_precio' || f === 'eligiendo_tipo' || f === 'eligiendo_opcion' || f === 'rechazada') porAceptar += 1
+  }
+  return { porAceptar, leyendo }
 }
 
 /**
@@ -325,6 +341,8 @@ export default function BandejaCapturas({
   fechasViaje = null,
   destinoViaje = null,
   onCambio,
+  porPasos = false,
+  onConteo,
 }: {
   cotizacionId: string
   /** Las líneas de la cotización: contra ellas se dice a dónde irá cada captura. */
@@ -349,6 +367,13 @@ export default function BandejaCapturas({
    * suyo, que además relee la cotización (`vista-fresca.ts`); sin él, el refresco de siempre.
    */
   onCambio?: () => void
+  /**
+   * La cotización por pasos (interruptor encendido): «Aceptar» manda la marca para que la opción
+   * entre en las tarifas (`aceptarPorPasos`). Sin ella, exactamente lo de siempre.
+   */
+  porPasos?: boolean
+  /** Cuántos esperan «Aceptar» y cuántos se leen: lo cuenta la barra de pasos. */
+  onConteo?: (c: { porAceptar: number; leyendo: number }) => void
 }) {
   const router = useRouter()
   const refrescar = () => (onCambio ? onCambio() : router.refresh())
@@ -509,7 +534,22 @@ export default function BandejaCapturas({
       if (nuevas.length > 0) setCapturas(cs => [...nuevas, ...cs])
     }
   }, [])
-  useImperativeHandle(receptor, () => ({ recibir: recibirDevolucion }), [recibirDevolucion])
+  // Las listas, aceptadas de a una en la fila de siempre (el lote con un solo recálculo es C5).
+  const aceptarListasRef = useRef<() => void>(() => {})
+  useImperativeHandle(receptor, () => ({
+    recibir: recibirDevolucion,
+    aceptarListas: () => aceptarListasRef.current(),
+    elegirArchivo: () => (document.getElementById(idEntrada) as HTMLInputElement | null)?.click(),
+  }), [recibirDevolucion, idEntrada])
+  const ultimoConteo = useRef('')
+  useEffect(() => {
+    if (!onConteo) return
+    const c = conteoDeBandeja(capturas)
+    const firma = `${c.porAceptar}:${c.leyendo}`
+    if (firma === ultimoConteo.current) return
+    ultimoConteo.current = firma
+    onConteo(c)
+  }, [capturas, onConteo])
 
   // Ingreso manual: la lectura firmada entra como recién leída, igual que una devuelta.
   const [manualAbierto, setManualAbierto] = useState(false)
@@ -725,7 +765,8 @@ export default function BandejaCapturas({
       destinoId: destinoId ?? null, imagen: c.dataUrl || null,
       correcciones: correcciones.length > 0 ? correcciones : null,
       idAceptacion: idDeAceptacion(c),
-    }
+      ...(porPasos ? { porPasos: true } : {}),
+    } as BorradorParaAceptar
     const turno = colaAceptar.current.then(() => aceptarPorRuta(cotizacionId, cuerpo))
     colaAceptar.current = turno.catch(() => undefined)
     const d = desenlaceDeAceptacion(await turno)
@@ -761,6 +802,13 @@ export default function BandejaCapturas({
     }
     refrescar()
   }
+
+  // «Aceptar N» de la cotización por pasos: las listas, de a una, en la misma fila e idempotencia.
+  useEffect(() => {
+    aceptarListasRef.current = () => {
+      for (const c of vigentes.current) if (c.estado.fase === 'lista' && c.borrador) void aceptar(c, 'auto')
+    }
+  })
 
   /** «Agregar igual» / «Agregar como otra opción» / «Es una habitación más». */
   function agregarIgual(c: Captura) {

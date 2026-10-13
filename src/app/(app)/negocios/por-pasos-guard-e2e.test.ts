@@ -105,7 +105,8 @@ describe('C1 · abrir la cotización con el interruptor encendido no escribe (N7
       expect(escrituras(registro), `interruptor ${interruptor ? 'encendido' : 'apagado'}`).toEqual([])
       idas[String(interruptor)] = registro.length
     }
-    // Calcular el interruptor no suma idas: sale de filas que la página ya lee.
-    expect(idas.true).toBe(idas.false)
+    // Calcular el interruptor no suma idas: sale de filas que la página ya lee. Encendida, la
+    // forma por pasos lee además si hay un pedido de autorización esperando (C4): dos lecturas.
+    expect(idas.true - idas.false).toBeLessThanOrEqual(2)
   }, 60_000)
 })
