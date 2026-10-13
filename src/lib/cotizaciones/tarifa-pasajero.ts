@@ -148,6 +148,7 @@ function mismoProducto(ranuraSlug: string): string {
   if (ranuraSlug === 'vuelo_detalle') return 'el mismo vuelo y tarifa'
   if (ranuraSlug === 'actividad_detalle') return 'la misma actividad y fecha'
   if (ranuraSlug === 'traslado_detalle') return 'el mismo trayecto y vehículo'
+  if (ranuraSlug === 'otro_detalle') return 'el mismo servicio y plan'
   return 'el mismo hotel, habitación y fechas'
 }
 
@@ -343,6 +344,12 @@ export interface LecturaCasilla {
    * (`ingreso-manual.ts`): no hay imagen detrás. Ausente = salió de un pantallazo.
    */
   origen?: 'manual'
+  /**
+   * «Otro servicio» que es una ASISTENCIA MÉDICA, escrita a mano o leída de un pantallazo en la
+   * cotización por pasos (Noor §Paso 1 y §11): el negocio la muestra en «Documentos del viajero».
+   * La pone `marcarAsistenciaMedica` al leer. Ausente en todo lo demás.
+   */
+  asistenciaMedica?: true
   /** Lo que el formulario manual deja además de la lectura (`DatosManuales`). */
   manual?: { fuente: string; incluye: string | null; edadNino: { desde: number; hasta: number } | null; opcional?: boolean }
 }

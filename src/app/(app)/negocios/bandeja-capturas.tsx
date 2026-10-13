@@ -65,7 +65,7 @@ import {
   type CorreccionDeBandeja,
 } from '@/lib/cotizaciones/revision-captura'
 import { leidosPorSlug } from '@/lib/cotizaciones/correcciones'
-import { definicionDeTipo, TIPOS_RANURA, type TipoRanura } from '@/lib/cotizaciones/ranuras-cotizacion'
+import { definicionDeTipo, TIPOS_CON_PANTALLAZO, TIPOS_RANURA, type TipoRanura } from '@/lib/cotizaciones/ranuras-cotizacion'
 import type { Composicion, LecturaCasilla } from '@/lib/cotizaciones/tarifa-pasajero'
 import { PREGUNTA_AL_SALIR, saleDeLaPagina } from '@/lib/cotizaciones/aviso-al-salir'
 import { AlertaDecision } from '@/components/viaje/alerta-decision'
@@ -1087,6 +1087,7 @@ export default function BandejaCapturas({
                 onDescartar={() => borrar(c, 'descartada')}
                 onDeshacer={() => void deshacer(c)}
                 onElegirTipo={t => void procesar(c.id, c.dataUrl, t)}
+                tiposElegibles={porPasos ? TIPOS_RANURA : TIPOS_CON_PANTALLAZO}
                 onReintentar={() => reintentar(c)}
                 onElegirOpcion={o => elegirOpcion(c, o)}
                 onAgregarIgual={() => agregarIgual(c)}
@@ -1140,8 +1141,14 @@ export function FilaCaptura({
   onReemplazarPrecio = NADA,
   onVer,
   onAmpliar,
+  tiposElegibles = TIPOS_CON_PANTALLAZO,
 }: {
   captura: Captura
+  /**
+   * Los tipos que se ofrecen cuando ONE no reconoce el pantallazo. La cotización por pasos suma
+   * «Es otro servicio» (asistencia médica, seguro); la de siempre, los cuatro de siempre.
+   */
+  tiposElegibles?: readonly TipoRanura[]
   ubicaciones?: Readonly<Record<string, Ubicacion>>
   /** Con lo que la persona corrigió en la fila (H4). */
   onAceptar?: (correcciones: CorreccionDeBandeja[]) => void
@@ -1256,7 +1263,7 @@ export function FilaCaptura({
         {estado(e.motivo === MENSAJE_DETECCION_SIN_RED ? 'Se cortó la conexión' : 'No se reconoce qué es')}
         <span className="text-[13px] text-[#6E6A62]">{e.motivo}</span>
         <div className="mt-1 flex flex-wrap gap-2">
-          {TIPOS_RANURA.map(t => (
+          {tiposElegibles.map(t => (
             <button key={t} type="button" onClick={() => onElegirTipo(t)} className={BTN}>
               Es {definicionDeTipo(t).label.toLowerCase()}
             </button>

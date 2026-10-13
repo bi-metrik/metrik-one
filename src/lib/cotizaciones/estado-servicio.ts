@@ -34,7 +34,8 @@ export const ETIQUETA_ESTADO: Record<EstadoServicio, string> = {
 export function estadosPermitidos(grupo: string | null | undefined): EstadoServicio[] {
   const slug = ranuraDeGrupo(grupo ?? null)?.slug
   if (slug === 'vuelo_detalle' || slug === 'hotel_detalle') return ['incluido', 'no']
-  if (slug === 'traslado_detalle' || slug === 'actividad_detalle') return ['incluido', 'opcional', 'no']
+  // «Otro servicio» (asistencia médica, seguro) también puede ir Opcional: el cliente decide.
+  if (slug === 'traslado_detalle' || slug === 'actividad_detalle' || slug === 'otro_detalle') return ['incluido', 'opcional', 'no']
   return []
 }
 

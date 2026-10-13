@@ -28,6 +28,7 @@ import { lugarDeOpcion } from '@/lib/cotizaciones/opcion-viaje'
 import { etiquetaDeRanura } from '@/lib/cotizaciones/ranuras-pantallazo'
 import { SIN_OPCIONES } from '@/lib/cotizaciones/ubicador-capturas'
 import { aMayusculas } from '@/lib/negocios/mayusculas'
+import { exigirPorPasos } from '@/lib/cotizaciones/por-pasos-datos'
 
 /**
  * La ranura desde la pantalla: crearla con su nombre, agregarle una opción hermana y
@@ -126,6 +127,8 @@ export interface PistasDeLugar {
   lugar?: string | null
   origen?: string | null
   destino?: string | null
+  /** «Otro servicio»: lo que es («Asistencia médica»). Es el nombre de la ranura. */
+  servicio?: string | null
 }
 
 /**
@@ -144,6 +147,11 @@ export async function crearRanuraConOpcion(
   if (!esTipoRanura(tipo)) return { success: false, error: 'Tipo de componente desconocido' }
   const c = await contexto(cotizacionId)
   if ('error' in c) return { success: false, error: c.error }
+  // «Otro servicio» solo lo abre la cotización por pasos (N5): apagada, no se escribe nada.
+  if (tipo === 'otro') {
+    const guard = await exigirPorPasos(c.supabase, cotizacionId)
+    if (!guard.ok) return { success: false, error: guard.error }
+  }
 
   const { viaje } = await leerViajeDelNegocio(c.supabase, c.cotizacion.negocio_id)
   const grupos = c.items.map(i => (i.grupo ?? null) as string | null)
@@ -158,6 +166,7 @@ export async function crearRanuraConOpcion(
     destino: pistas.destino ?? (tipo === 'vuelo' ? viaje.destino : null),
     numero,
     nombresEnUso,
+    servicio: pistas.servicio ?? null,
   })
   // La forma que se guarda sale del grupo ya escrito: si el nombre traía «:», el grupo lo
   // cambia por un guion, y la fila tiene que decir exactamente lo mismo que el grupo.

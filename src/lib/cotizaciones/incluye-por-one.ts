@@ -21,7 +21,7 @@
  * Puro: lo usan la acción del PDF y la pantalla de Revisar.
  */
 
-import { hotelesDeItems, serviciosDeItems, vuelosDeItems, type ItemConLectura, type NivelDetalle } from './detalle-viaje'
+import { hotelesDeItems, otroServicioDeItem, serviciosDeItems, vuelosDeItems, type ItemConLectura, type NivelDetalle } from './detalle-viaje'
 import { idDelPrincipal } from './tarifas'
 import { itemsDelItinerario, itemsQueAportanAlTotal, type ItemConGrupo } from './itinerarios'
 import { ranuraDeGrupo } from './ranuras-pantallazo'
@@ -78,8 +78,12 @@ export function incluyeDeOne(items: readonly ItemConLectura[], nivel: NivelDetal
   for (const i of items) {
     const slug = ranuraDeGrupo(i.grupo ?? null)?.slug
     if (slug === 'vuelo_detalle' || slug === 'hotel_detalle' || slug === 'traslado_detalle' || slug === 'actividad_detalle') continue
-    const nombre = limpio(i.nombre)
-    if (nombre) out.push(comoFrase(nombre))
+    // «Otro servicio» escrito o leído (por pasos): lo que es y, salvo en «general», quién lo presta
+    // («Asistencia médica (Assist Card, plan Básico)», como el prototipo de Noor).
+    const otro = otroServicioDeItem(i)
+    const nombre = limpio(otro?.nombre ?? i.nombre)
+    const proveedor = !corto && otro?.proveedor ? ` (${limpio(otro.proveedor)})` : ''
+    if (nombre) out.push(`${comoFrase(nombre)}${proveedor}`)
   }
   return sinRepetidos(out.map(limpio).filter(r => r !== '' && !DINERO.test(r)))
 }

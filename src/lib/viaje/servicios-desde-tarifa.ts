@@ -22,6 +22,7 @@ import { calcularCascada, type ParametrosCascada } from '@/lib/cotizaciones/tota
 import { itemsDelItinerario, itemsQueAportanAlTotal, normalizarGrupo } from '@/lib/cotizaciones/itinerarios'
 import { etiquetaDeRanura, ranuraDeGrupo } from '@/lib/cotizaciones/ranuras-pantallazo'
 import { esTipoRanura, tipoDeDefinicion } from '@/lib/cotizaciones/ranuras-cotizacion'
+import { lineaConAsistenciaMedica } from '@/lib/cotizaciones/asistencia-medica'
 import { lecturaDeOpcion } from '@/lib/cotizaciones/habitaciones'
 import { leerTarifaPax } from '@/lib/cotizaciones/tarifa-pasajero'
 import type { ItemDeCotizacion } from '@/lib/cotizaciones/itinerarios-datos'
@@ -54,11 +55,19 @@ const MAX_NOMBRE = 200
  * El tipo del servicio. Manda la ranura del ítem (`items.ranura_id` → `cotizacion_ranuras.tipo`);
  * si no la tiene, el tipo de su grupo; si tampoco, «asistencia» cuando el texto lo dice y si no
  * «otro». Nunca se descarta un ítem por no saber qué es.
+ *
+ * «Otro servicio» (la ranura «otro» de la cotización por pasos) ya dijo qué es: es «asistencia»
+ * solo si su lectura trae la MARCA de asistencia médica (`asistencia-medica.ts`), y si no, «otro»
+ * —un «Seguro de viaje» no se adivina por el texto—.
  */
-export function tipoDeServicio(item: Pick<ItemParaServicio, 'grupo' | 'nombre'>, tipoRanura?: string | null): TipoServicio {
-  if (esTipoRanura(tipoRanura)) return tipoRanura
+export function tipoDeServicio(
+  item: Pick<ItemParaServicio, 'grupo' | 'nombre'> & { tarifa_pax?: unknown },
+  tipoRanura?: string | null,
+): TipoServicio {
   const porGrupo = tipoDeDefinicion(ranuraDeGrupo(item.grupo))
-  if (porGrupo) return porGrupo
+  const tipo = esTipoRanura(tipoRanura) ? tipoRanura : porGrupo
+  if (tipo === 'otro') return lineaConAsistenciaMedica(item) ? 'asistencia' : 'otro'
+  if (tipo) return tipo
   const texto = `${normalizarGrupo(item.grupo) ?? ''} ${item.nombre ?? ''}`.toLowerCase()
   if (/\b(asistencia|seguro)\b/.test(texto)) return 'asistencia'
   return 'otro'

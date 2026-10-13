@@ -157,13 +157,56 @@ describe('C5 · V4 · «Aceptar los N»', () => {
 })
 
 describe('C5 · «✎ Escríbelo a mano» solo con la forma por pasos', () => {
-  it('con la forma por pasos reemplaza a «Ingresar a mano» y abre los cuatro tipos', async () => {
+  it('con la forma por pasos reemplaza a «Ingresar a mano» y abre los cinco tipos', async () => {
     await montar(true)
     expect(contenedor.querySelector('[data-abrir-ingreso-manual]')).toBeNull()
     await clic(contenedor.querySelector('[data-abrir-escrito-a-mano]')!)
     const tipos = [...contenedor.querySelectorAll('[data-tipo-a-mano]')].map(b => textoDe(b))
-    expect(tipos).toEqual(['Vuelo', 'Hotel', 'Traslado', 'Actividad'])
+    expect(tipos).toEqual(['Vuelo', 'Hotel', 'Traslado', 'Actividad', 'Otro servicio'])
     expect(textoDe(contenedor.querySelector('[data-escrito-a-mano]'))).toContain('Solo lo marcado con * es obligatorio.')
+  })
+
+  it('«Otro servicio»: los atajos llenan el nombre, la asistencia médica avisa de «Documentos del viajero» y viaja como tipo «otro»', async () => {
+    await montar(true)
+    await clic(contenedor.querySelector('[data-abrir-escrito-a-mano]')!)
+    await clic(contenedor.querySelector('[data-tipo-a-mano="otro"]')!)
+    const atajos = [...contenedor.querySelectorAll('[data-atajo-otro]')].map(b => textoDe(b))
+    expect(atajos).toEqual(['Asistencia médica', 'Seguro de viaje', 'Tarjeta de turismo', 'Equipaje adicional'])
+    // Por persona, con los pasajeros del viaje (6 + 1 + 1).
+    expect(textoDe(contenedor.querySelector('[data-escrito-a-mano] [role="radiogroup"]'))).toContain('Por persona (8 viajeros)')
+    expect(contenedor.querySelector('[data-nota-asistencia]')).toBeNull()
+    await clic(contenedor.querySelector('[data-atajo-otro="Seguro de viaje"]')!)
+    expect((contenedor.querySelector('[data-campo-manual="nombre"]') as HTMLInputElement).value).toBe('Seguro de viaje')
+    expect(contenedor.querySelector('[data-nota-asistencia]')).toBeNull()
+    await clic(contenedor.querySelector('[data-atajo-otro="Asistencia médica"]')!)
+    expect(textoDe(contenedor.querySelector('[data-nota-asistencia]'))).toBe('Asistencia médica: además, el negocio la mostrará en «Documentos del viajero»')
+
+    vi.stubGlobal('fetch', vi.fn(async (url: string, init: RequestInit) => {
+      envios.push({ url, cuerpo: JSON.parse(String(init.body)) as Record<string, unknown> })
+      return new Response(JSON.stringify({ ok: false, codigo: 'CAMPOS', mensaje: 'Revisa los campos marcados.', errores: { neto: 'Escribe lo que cobra el proveedor por persona.' } }), { status: 200 })
+    }))
+    const form = contenedor.querySelector('[data-escrito-a-mano]') as HTMLFormElement
+    await act(async () => { form.dispatchEvent(new Event('submit', { bubbles: true, cancelable: true })) })
+    await act(async () => { await new Promise(res => setTimeout(res, 0)) })
+    expect(envios.map(e => e.url)).toEqual(['/api/cotizaciones/cot-1/lectura-manual'])
+    expect(envios[0].cuerpo).toMatchObject({ tipo: 'otro', porPasos: true, datos: { nombre: 'Asistencia médica', cobro: 'por_persona', adultos: '6', ninos: '1', infantes: '1' } })
+    // Sin costo no se lleva a la bandeja: el campo se pinta y lo dice.
+    expect(textoDe(contenedor.querySelector('[data-escrito-a-mano] [role="alert"]'))).toBe('Falta lo marcado con *.')
+  })
+
+  it('cuando ONE no reconoce el pantallazo, solo la forma por pasos ofrece «Es otro servicio»', async () => {
+    const { FilaCaptura } = await import('./bandeja-capturas')
+    const { TIPOS_RANURA, TIPOS_CON_PANTALLAZO } = await import('@/lib/cotizaciones/ranuras-cotizacion')
+    const captura = {
+      id: 'c1', preview: '', dataUrl: '', estado: { fase: 'eligiendo_tipo', motivo: 'No se reconoce.' }, tipo: null, pistas: null, borrador: null,
+      itemId: null, donde: null, leida: null, error: null, huella: null,
+    }
+    for (const [tipos, esperado] of [[TIPOS_CON_PANTALLAZO, false], [TIPOS_RANURA, true]] as const) {
+      await act(async () => { root!.render(React.createElement('ul', null, React.createElement(FilaCaptura, { captura: captura as never, tiposElegibles: tipos }))) })
+      const botones = [...contenedor.querySelectorAll('button')].map(b => textoDe(b))
+      expect(botones.includes('Es otro servicio'), String(esperado)).toBe(esperado)
+      expect(botones).toContain('Es hotel')
+    }
   })
 
   it('apagada, la bandeja es la de siempre: «Ingresar a mano», sin frase ni «Aceptar los N»', async () => {

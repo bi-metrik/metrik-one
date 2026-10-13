@@ -30,6 +30,7 @@
  * Puro: sin red y sin base. La fecha de lectura entra por parámetro.
  */
 
+import { marcarAsistenciaMedica } from './asistencia-medica'
 import { nochesEntre } from './estadia'
 import { construirLecturaCasilla } from './lectura-casilla'
 import { evaluarLectura, type FilaTipoPaxCruda, type LecturaCruda, type ValorLeido } from './lectura-pantallazo'
@@ -164,6 +165,31 @@ export interface ActividadManual {
   fuente: string
 }
 
+/** Cómo cobra un «Otro servicio»: el mismo valor por cada viajero, o un valor por todo. */
+export type CobroOtroServicio = 'por_persona' | 'total'
+
+/**
+ * «Otro servicio» escrito a mano (cotización por pasos, 2026-10-13): asistencia médica, seguro de
+ * viaje, tarjeta de turismo, equipaje adicional. Obligatorio: nombre y costo. Por persona, el costo
+ * es el mismo para cada viajero (adulto, niño o infante: así cobran los planes); por todo, un solo
+ * valor. Opcional: proveedor o detalle y la fuente.
+ */
+export interface OtroServicioManual {
+  nombre: string
+  /** «Assist Card, plan Básico». Va a la descripción de la opción: lo ve el cliente. */
+  proveedor: string
+  adultos: number
+  ninos: number
+  infantes: number
+  cobro: CobroOtroServicio
+  /** Costo NETO por persona, o de todo el servicio. */
+  neto: number | null
+  fuente: string
+}
+
+/** Los atajos del nombre (Noor, Paso 1): lo que más se escribe. */
+export const ATAJOS_OTRO_SERVICIO = ['Asistencia médica', 'Seguro de viaje', 'Tarjeta de turismo', 'Equipaje adicional'] as const
+
 export type ErroresManual = Record<string, string>
 
 export type ResultadoManual =
@@ -290,6 +316,20 @@ export function leerActividadManual(raw: unknown): ActividadManual {
   }
 }
 
+export function leerOtroServicioManual(raw: unknown): OtroServicioManual {
+  const r = (raw && typeof raw === 'object' ? raw : {}) as Record<string, unknown>
+  return {
+    nombre: texto(r.nombre, 100),
+    proveedor: texto(r.proveedor, 120),
+    adultos: entero(r.adultos),
+    ninos: entero(r.ninos),
+    infantes: entero(r.infantes),
+    cobro: r.cobro === 'total' ? 'total' : 'por_persona',
+    neto: montoManual(r.neto),
+    fuente: texto(r.fuente),
+  }
+}
+
 const OBLIGATORIO = 'Escríbelo.'
 const HORA = /^([01]\d|2[0-3]):[0-5]\d$/
 
@@ -365,6 +405,14 @@ export function validarActividadManual(a: ActividadManual): ErroresManual {
   erroresDePasajeros(a, e)
   if (a.adultos === 0 && !e.adultos) e.adultos = 'Al menos un adulto.'
   if (a.adultos > 0 && !(a.netoAdulto && a.netoAdulto > 0)) e.netoAdulto = 'Escribe lo que cobra el proveedor por adulto.'
+  return e
+}
+
+export function validarOtroServicioManual(o: OtroServicioManual): ErroresManual {
+  const e: ErroresManual = {}
+  if (!o.nombre) e.nombre = OBLIGATORIO
+  erroresDePasajeros(o, e)
+  if (!(o.neto && o.neto > 0)) e.neto = o.cobro === 'total' ? 'Escribe lo que cobra el proveedor por todo.' : 'Escribe lo que cobra el proveedor por persona.'
   return e
 }
 
@@ -503,12 +551,41 @@ export function crudaDeActividadManual(a: ActividadManual): LecturaCruda {
   }, porTipo, total)
 }
 
-/** Lo que entra a `lecturaManual`: uno de los cuatro tipos con sus datos. */
+/**
+ * Lo que habría leído el modelo de la cotización de este «Otro servicio». Por persona, cada
+ * viajero con el mismo costo. Por todo, el valor se reparte por igual entre los viajeros, con el
+ * redondeo en el primer tipo: así suma exactamente lo escrito y el costo se confirma solo, sin
+ * pedir «otra búsqueda con los niños» (un solo total con menores pide desglose, TP4).
+ */
+export function crudaDeOtroServicioManual(o: OtroServicioManual): LecturaCruda {
+  const pax: Composicion = { adultos: o.adultos, ninos: o.ninos, infantes: o.infantes }
+  const personas = o.adultos + o.ninos + o.infantes
+  const neto = o.neto ?? 0
+  const porTipo = filas(pax, () => (o.cobro === 'por_persona' ? neto : personas > 0 ? neto / personas : 0), 1)
+  if (o.cobro === 'total' && porTipo.length > 0) {
+    porTipo[0].subtotal_tipo += Math.round(neto) - porTipo.reduce((a, f) => a + f.subtotal_tipo, 0)
+  }
+  const total = porTipo.reduce((a, f) => a + f.subtotal_tipo, 0)
+  return crudaDe({
+    nombre: o.nombre,
+    proveedor: o.proveedor || null,
+    pax: String(o.adultos + o.ninos + o.infantes),
+    ocupacion_adultos: String(o.adultos),
+    ocupacion_ninos: String(o.ninos),
+    ocupacion_infantes: String(o.infantes),
+    moneda: 'COP',
+    precio_total: String(total),
+    base_precio: 'total',
+  }, porTipo, total)
+}
+
+/** Lo que entra a `lecturaManual`: uno de los cinco tipos con sus datos. */
 export type EntradaManual =
   | { tipo: 'hotel'; datos: HotelManual }
   | { tipo: 'traslado'; datos: TrasladoManual }
   | { tipo: 'vuelo'; datos: VueloManual }
   | { tipo: 'actividad'; datos: ActividadManual }
+  | { tipo: 'otro'; datos: OtroServicioManual }
 
 const MESES = ['ene', 'feb', 'mar', 'abr', 'may', 'jun', 'jul', 'ago', 'sep', 'oct', 'nov', 'dic']
 const fechaCorta = (f: string) => `${Number(f.slice(8, 10))} ${MESES[Number(f.slice(5, 7)) - 1]} ${f.slice(0, 4)}`
@@ -593,7 +670,9 @@ export function lecturaManual(args: {
       ? validarTrasladoManual(entrada.datos)
       : entrada.tipo === 'vuelo'
         ? validarVueloManual(entrada.datos)
-        : validarActividadManual(entrada.datos)
+        : entrada.tipo === 'actividad'
+          ? validarActividadManual(entrada.datos)
+          : validarOtroServicioManual(entrada.datos)
   if (args.fuenteOpcional) delete errores.fuente
   if (Object.keys(errores).length > 0) return { ok: false, errores }
   const cruda = entrada.tipo === 'hotel'
@@ -602,7 +681,9 @@ export function lecturaManual(args: {
       ? crudaDeTrasladoManual(entrada.datos)
       : entrada.tipo === 'vuelo'
         ? crudaDeVueloManual(entrada.datos)
-        : crudaDeActividadManual(entrada.datos)
+        : entrada.tipo === 'actividad'
+          ? crudaDeActividadManual(entrada.datos)
+          : crudaDeOtroServicioManual(entrada.datos)
   const veredicto = evaluarLectura(ranura, cruda, { soloMinimosDeCosto: true, manual: true, ...(args.hoy ? { hoy: args.hoy } : {}) })
   if (!veredicto.ok) return { ok: false, errores: { _: veredicto.instruccion } }
   const lectura = construirLecturaCasilla(ranura, veredicto, args.leidaEn)
@@ -618,6 +699,8 @@ export function lecturaManual(args: {
       .map(([tipo]) => tipo)
     if (sinPrecio.length > 0) lectura.sinPrecio = [...sinPrecio]
   }
+  // «Otro servicio» que es una asistencia médica: marcada para «Documentos del viajero».
+  if (entrada.tipo === 'otro') marcarAsistenciaMedica('otro', lectura)
   const avisoActividad = entrada.tipo === 'actividad' ? avisoFechaActividadFueraDelViaje(entrada.datos.fecha, args.viaje) : null
   if (avisoActividad) lectura.alertas = [...lectura.alertas, avisoActividad]
   lectura.manual = {

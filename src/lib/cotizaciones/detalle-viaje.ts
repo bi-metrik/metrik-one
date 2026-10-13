@@ -708,6 +708,21 @@ export function serviciosDeItems(items: ItemConLectura[]): ServicioPDF[] {
   return out
 }
 
+/**
+ * «Otro servicio» (asistencia médica, seguro, tarjeta de turismo): lo que es y quién lo presta,
+ * con lo corregido encima. `null` si la línea no es un otro servicio.
+ */
+export interface OtroServicioPDF {
+  nombre: string | null
+  proveedor: string | null
+}
+
+export function otroServicioDeItem(item: ItemConLectura): OtroServicioPDF | null {
+  if (ranuraDelItem(item)?.slug !== 'otro_detalle') return null
+  const d = detalleDelItem(item)
+  return { nombre: texto(d, 'nombre'), proveedor: texto(d, 'proveedor') }
+}
+
 /** Un cargo en destino: el valor y su moneda local (ISO de tres letras, o `null`). */
 export interface CargoDeOpcion {
   valor: number

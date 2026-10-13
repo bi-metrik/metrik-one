@@ -255,6 +255,9 @@ export default function TarjetaOpcion({
   const esTraslado = ranura?.slug === 'traslado_detalle'
   const esActividad = ranura?.slug === 'actividad_detalle'
   const esVuelo = ranura?.slug === 'vuelo_detalle'
+  // «Otro servicio» (asistencia médica, seguro) sale en el documento como su línea de «Inversión»,
+  // igual que un traslado: también tiene su hoja.
+  const esOtroServicio = ranura?.slug === 'otro_detalle'
   const [hotel] = esHotel ? hotelesDeItems([item]) : [null]
   // La pastilla de la aerolínea en la cabecera, la misma del PDF (brief del 2026-10-08).
   const [vuelo] = esVuelo ? vuelosDeItems([item]) : [null]
@@ -555,7 +558,7 @@ export default function TarjetaOpcion({
               «Vuelos». Su nota se sigue escribiendo aparte, encima. */}
           {!esHotel && nota}
           {/* Lo que no va no se le muestra al cliente: tampoco aquí (brief del 2026-10-08). */}
-          {(esHotel || esTraslado || esActividad || esVuelo) && !noVa && <HojaCliente
+          {(esHotel || esTraslado || esActividad || esVuelo || esOtroServicio) && !noVa && <HojaCliente
             item={item}
             numero={numero}
             bloqueTitulo={bloqueTitulo}

@@ -43,6 +43,7 @@ const CAMPOS_POR_TIPO: Record<TipoRanura, readonly string[]> = {
   hotel: ['tipo_habitacion', 'regimen', 'check_in', 'check_out', 'politica_cancelacion', 'costo'],
   traslado: ['proveedor', 'trayecto', 'tipo_vehiculo', 'fecha_hora', 'costo'],
   actividad: ['proveedor', 'nombre', 'fecha', 'duracion', 'costo'],
+  otro: ['nombre', 'proveedor', 'costo'],
 }
 
 /** Los que, vacíos, se marcan en ámbar: sin ellos la opción queda coja. */
@@ -101,7 +102,7 @@ export function tituloDeCaptura(tipo: TipoRanura, l: LecturaCasilla | null | und
     partes = [v.aerolinea ?? null, o && d ? `${o} → ${d}` : (o ?? d)]
   } else if (tipo === 'hotel') {
     partes = [v.hotel ?? l.nombre ?? null, v.tipo_habitacion ?? null, ocupacionDeCaptura(l)]
-  } else if (tipo === 'actividad') {
+  } else if (tipo === 'actividad' || tipo === 'otro') {
     partes = [v.nombre ?? l.nombre ?? null, v.proveedor ?? null]
   } else {
     partes = [v.trayecto ?? l.nombre ?? null, v.proveedor ?? null]
