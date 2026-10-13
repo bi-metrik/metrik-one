@@ -11,6 +11,7 @@
 // ============================================================
 
 import { createServiceClient } from '@/lib/supabase/server'
+import { bloqueoPorEntorno, esNegocioDePrueba } from './config-viaje'
 import { leerSecretosWorkspace, secretoConRespaldo } from '@/lib/secretos/workspace'
 
 const SIIGO_BASE = 'https://api.siigo.com'
@@ -52,6 +53,24 @@ export interface SiigoConfig {
   facturaPaymentId: number
   /** Forma de pago del recibo de caja. */
   reciboPaymentId: number
+  // ── Viajes (adenda Siigo, ola 4). Opcionales: sin ellos, todo sigue como hoy (SOENA). ──
+  /**
+   * Forma de pago del recibo por cuenta donde entró la plata (`cuenta_recaudo` → id de forma de
+   * pago RC). Con el mapa, una cuenta que no esté en él NO emite («falta configurar»).
+   */
+  reciboPaymentIdPorCuenta?: Record<string, number>
+  /** Producto de la factura para el ingreso propio (fee, margen), con IVA. */
+  productoPropioCode?: string
+  /** Producto de la factura para lo recibido para terceros, sin IVA. */
+  productoTercerosCode?: string
+  /** Centro de costo de Siigo (opcional). */
+  centroCostoId?: number
+  /**
+   * Empresa de Siigo de pruebas o libros reales. Obligatorio en espacios nuevos (lo pregunta el
+   * setup); ausente = `produccion`, para no tocar SOENA. Un negocio de prueba nunca emite en
+   * producción (`config-viaje.ts`).
+   */
+  entorno?: 'pruebas' | 'produccion'
 }
 
 export class SiigoError extends Error {
@@ -112,6 +131,30 @@ async function resolveCredentials(workspaceId: string): Promise<SiigoCredentials
  * Se resuelven una vez con `scripts/inspect-siigo-catalogos.ts` y se guardan; NO
  * se adivinan en runtime ni se hardcodean, porque son distintos en cada empresa.
  */
+/**
+ * El `siigo_config` tal como esté, sin exigir que esté completo (para las guardas: entorno y
+ * formas de pago). `null` si el espacio no lo tiene.
+ */
+export async function siigoConfigParcial(workspaceId: string): Promise<Partial<SiigoConfig> | null> {
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const { data } = await (createServiceClient() as any)
+    .from('workspaces')
+    .select('config_extra')
+    .eq('id', workspaceId)
+    .maybeSingle()
+  const cfg = ((data?.config_extra ?? {}) as Record<string, unknown>).siigo_config
+  return cfg && typeof cfg === 'object' ? (cfg as Partial<SiigoConfig>) : null
+}
+
+/**
+ * La guarda del entorno contra la base: un negocio de prueba no emite contra el Siigo de
+ * producción (`config-viaje.ts`). Devuelve el motivo o `null`.
+ */
+export async function bloqueoPorEntornoDelNegocio(workspaceId: string, metadata: Record<string, unknown> | null | undefined): Promise<string | null> {
+  if (!esNegocioDePrueba(metadata)) return null
+  return bloqueoPorEntorno(await siigoConfigParcial(workspaceId), metadata)
+}
+
 export async function getSiigoConfig(workspaceId: string): Promise<SiigoConfig> {
   const svc = createServiceClient()
   // eslint-disable-next-line @typescript-eslint/no-explicit-any

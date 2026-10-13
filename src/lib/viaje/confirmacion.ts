@@ -24,6 +24,13 @@ export interface TitularFacturacion {
   nombre: string
   correo: string | null
   telefono: string | null
+  /**
+   * Para el tercero de Siigo (F5): sin RUT, la dirección y la ciudad salen de aquí. Opcionales: la
+   * confirmación no las exige; la cola de facturación las pide antes de emitir.
+   */
+  direccion?: string | null
+  departamento?: string | null
+  municipio?: string | null
 }
 
 const CORREO_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/
@@ -50,6 +57,8 @@ export function leerTitular(raw: unknown, viajero: { nombre: string; correo: str
   if (correo && !correoValido(correo)) return { ok: false, error: 'El correo de facturación no parece válido.' }
   const numero = texto(r.numero_documento, 20)?.replace(/[\s.]/g, '') ?? null
   const tipoDoc = ['13', '22', '31', '41'].includes(String(r.tipo_documento)) ? (String(r.tipo_documento) as TitularFacturacion['tipo_documento']) : null
+  // Dirección y ciudad: solo si vienen (las pide la facturación, F5; la confirmación no las exige).
+  const ubicacion = ubicacionDelTitular(r)
 
   if (tipo === 'viajero') {
     return {
@@ -61,6 +70,7 @@ export function leerTitular(raw: unknown, viajero: { nombre: string; correo: str
         nombre: viajero.nombre,
         correo: correo ?? viajero.correo,
         telefono: viajero.telefono,
+        ...ubicacion,
       },
       aviso: tipoDoc === '41' ? AVISO_PASAPORTE : null,
     }
@@ -69,7 +79,7 @@ export function leerTitular(raw: unknown, viajero: { nombre: string; correo: str
     const nombre = texto(r.nombre)
     if (!nombre) return { ok: false, error: 'Escribe la razón social de la empresa.' }
     if (!numero || !/^\d{6,12}(-\d)?$/.test(numero)) return { ok: false, error: 'Escribe el NIT de la empresa.' }
-    return { ok: true, titular: { tipo, tipo_documento: '31', numero_documento: numero, nombre, correo, telefono: texto(r.telefono, 30) }, aviso: null }
+    return { ok: true, titular: { tipo, tipo_documento: '31', numero_documento: numero, nombre, correo, telefono: texto(r.telefono, 30), ...ubicacion }, aviso: null }
   }
   const nombre = texto(r.nombre)
   if (!nombre) return { ok: false, error: 'Escribe el nombre de la persona a la que va la factura.' }
@@ -77,9 +87,22 @@ export function leerTitular(raw: unknown, viajero: { nombre: string; correo: str
   const doc = tipoDoc && tipoDoc !== '31' ? tipoDoc : '13'
   return {
     ok: true,
-    titular: { tipo, tipo_documento: doc, numero_documento: numero, nombre, correo, telefono: texto(r.telefono, 30) },
+    titular: { tipo, tipo_documento: doc, numero_documento: numero, nombre, correo, telefono: texto(r.telefono, 30), ...ubicacion },
     aviso: doc === '41' ? AVISO_PASAPORTE : null,
   }
+}
+
+/** Dirección, departamento y municipio del titular, solo los que vienen con texto. */
+export function ubicacionDelTitular(r: Record<string, unknown>): Pick<TitularFacturacion, 'direccion' | 'departamento' | 'municipio'> {
+  const t = (v: unknown, max: number) => (typeof v === 'string' && v.trim() !== '' ? v.trim().replace(/\s+/g, ' ').slice(0, max) : null)
+  const out: Pick<TitularFacturacion, 'direccion' | 'departamento' | 'municipio'> = {}
+  const d = t(r.direccion, 200)
+  const dep = t(r.departamento, 80)
+  const mun = t(r.municipio, 80)
+  if (d) out.direccion = d
+  if (dep) out.departamento = dep
+  if (mun) out.municipio = mun
+  return out
 }
 
 // ── Términos: de `terminos_base` a viñetas (D-9) ─────────────────────────────

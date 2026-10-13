@@ -13,6 +13,12 @@
  *
  * Uso:
  *   npx tsx scripts/simular-siigo-desde-one.ts <slug-workspace> [--detalle <cedula>]
+ *   npx tsx scripts/simular-siigo-desde-one.ts <slug-workspace> --viajes
+ *
+ * `--viajes` (adenda Siigo, ola 4): para los viajes que hoy están en la cola de facturación y los
+ * recibos de caja que quedaron pendientes, imprime el payload EXACTO que ONE mandaría (tercero,
+ * factura de dos conceptos y recibo con la forma de pago de su cuenta), con lo que falta y lo que
+ * lo frenaría. No llama a Siigo: ni GET ni POST. Solo lee ONE.
  */
 
 import { config } from 'dotenv';
@@ -25,8 +31,74 @@ const idxDetalle = process.argv.indexOf('--detalle');
 const cedulaDetalle = idxDetalle > -1 ? process.argv[idxDetalle + 1] : null;
 
 if (!slug) {
-  console.error('Uso: npx tsx scripts/simular-siigo-desde-one.ts <slug-workspace> [--detalle <cedula>]');
+  console.error('Uso: npx tsx scripts/simular-siigo-desde-one.ts <slug-workspace> [--detalle <cedula>] | --viajes');
   process.exit(1);
+}
+const modoViajes = process.argv.includes('--viajes');
+
+/** `--viajes`: los documentos de viaje que saldrían, sin tocar Siigo. */
+async function simularViajes() {
+  const { createClient } = await import('@supabase/supabase-js');
+  const { lineasPorTitular, entradasViaje } = await import('../src/lib/facturacion/cola-viaje');
+  const { repartoFacturaViaje } = await import('../src/lib/facturacion/reparto-viaje');
+  const { simularDocumentosViaje } = await import('../src/lib/siigo/simular-viaje');
+  const { cuentasDeRecaudo } = await import('../src/lib/viaje/riel-cobro');
+  const { todayBogotaISO } = await import('../src/lib/dates/bogota');
+
+  const one = createClient(process.env.NEXT_PUBLIC_SUPABASE_URL!, process.env.SUPABASE_SERVICE_ROLE_KEY!, { auth: { persistSession: false } });
+  const { data: ws } = await one.from('workspaces').select('id, name, config_extra').eq('slug', slug).single();
+  if (!ws) { console.error(`Workspace "${slug}" no existe`); process.exit(1); }
+  const w = ws as { id: string; name?: string; config_extra?: Record<string, unknown> | null };
+  const cfg = (w.config_extra?.siigo_config ?? null) as import('../src/lib/siigo/client').SiigoConfig | null;
+  if (!cfg) { console.error('El espacio no tiene siigo_config: corre primero scripts/setup-siigo-workspace.ts'); process.exit(1); }
+  const hoy = todayBogotaISO();
+
+  const { data: lineas } = await one.from('lineas_negocio').select('id, config_extra').eq('workspace_id', w.id);
+  const ls = (lineas ?? []) as Array<{ id: string; config_extra: Record<string, unknown> | null }>;
+  const viajes = lineasPorTitular(ls);
+  const terminos = ls.map(l => l.config_extra?.terminos_base).find((t): t is string => typeof t === 'string') ?? null;
+  const cuentas = cuentasDeRecaudo(w.config_extra ?? null, terminos);
+  const concepto = ls.map(l => (l.config_extra?.siigo as { recibo_concepto?: string } | undefined)?.recibo_concepto).find(Boolean) ?? 'Abono a viaje';
+
+  const { data: negs } = await one.from('negocios').select('id, codigo, nombre, estado, precio_aprobado, metadata, contacto_id, linea_id').eq('workspace_id', w.id).eq('estado', 'abierto');
+  const negocios = ((negs ?? []) as Array<{ id: string; codigo: string | null; nombre: string | null; precio_aprobado: number | null; metadata: Record<string, unknown> | null; contacto_id: string | null; linea_id: string | null }>);
+  const enCola = await entradasViaje(one, w.id, negocios.filter(n => viajes.has(n.linea_id ?? '')));
+
+  console.log(`\n${w.name ?? slug} · entorno ${cfg.entorno === 'pruebas' ? 'PRUEBAS' : 'PRODUCCIÓN'} · ${enCola.size} viaje(s) en la cola\n`);
+  let total = 0;
+  for (const n of negocios) {
+    const pendientes = Object.keys((n.metadata?.recibos_viaje ?? {}) as Record<string, unknown>);
+    if (!enCola.has(n.id) && pendientes.length === 0) continue;
+    total++;
+    const { data: ct } = n.contacto_id ? await one.from('contactos').select('email, telefono').eq('id', n.contacto_id).maybeSingle() : { data: null };
+    const { data: cobros } = pendientes.length > 0 ? await one.from('cobros').select('id, monto, fecha, cuenta_recaudo').in('id', pendientes) : { data: [] };
+    const reparto = enCola.has(n.id) ? await repartoFacturaViaje(one, { workspaceId: w.id, negocio: n }) : null;
+    const sim = simularDocumentosViaje({
+      cfg,
+      metadata: n.metadata,
+      contacto: { email: (ct as { email?: string | null } | null)?.email ?? null, telefono: (ct as { telefono?: string | null } | null)?.telefono ?? null },
+      reparto,
+      cobrosPendientes: ((cobros ?? []) as Array<{ id: string; monto: number; fecha: string | null; cuenta_recaudo: string | null }>).map(c => ({ ...c, monto: Number(c.monto) })),
+      cuentas,
+      hoy,
+      conceptoRecibo: concepto,
+    });
+    console.log(`── ${n.codigo ?? n.id} · ${n.nombre ?? ''}${enCola.has(n.id) ? ` · en cola (${enCola.get(n.id)})` : ''}`);
+    if (sim.bloqueo) console.log(`   ⛔ ${sim.bloqueo}`);
+    console.log(`   Tercero${sim.cliente.faltantes.length ? ` (falta: ${sim.cliente.faltantes.join(', ')})` : ''}:`);
+    console.log('   ' + JSON.stringify(sim.cliente.payload));
+    if (sim.factura) {
+      console.log(`   Factura${sim.factura.faltantes.length ? ` (falta: ${sim.factura.faltantes.join(', ')})` : ''}:`);
+      console.log('   ' + JSON.stringify(sim.factura.payload));
+    }
+    for (const r of sim.recibos) {
+      console.log(`   Recibo del cobro ${r.cobroId}${r.faltantes.length ? ` (falta: ${r.faltantes.join(', ')})` : ''}:`);
+      if (r.payload) console.log('   ' + JSON.stringify(r.payload));
+    }
+    console.log();
+  }
+  if (total === 0) console.log('No hay viajes en la cola ni recibos pendientes.');
+  console.log('Simulación: no se llamó a Siigo y no se escribió nada.');
 }
 
 const COP = (n: number | null | undefined) =>
@@ -35,6 +107,7 @@ const COP = (n: number | null | undefined) =>
 interface SiigoDoc { id: string; name: string; date: string; total?: number; customer?: { identification?: string }; payment?: { value?: number }; observations?: string; items?: Array<{ code?: string; price?: number; quantity?: number }>; stamp?: { status?: string } }
 
 async function main() {
+  if (modoViajes) return simularViajes();
   const { createClient } = await import('@supabase/supabase-js');
   const { siigoRequest } = await import('../src/lib/siigo/client');
 

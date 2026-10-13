@@ -379,6 +379,8 @@ export interface BorradorFactura {
   document: { id: number }
   date: string
   customer: { identification: string; branch_office: number }
+  /** Centro de costo de Siigo (viajes, opcional). SOENA no lo manda. */
+  cost_center?: number
   seller: number
   items: Array<{ code: string; quantity: number; price: number; taxes: Array<{ id: number }> }>
   payments: Array<{ id: number; value: number; due_date: string }>
