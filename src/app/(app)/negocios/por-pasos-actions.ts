@@ -28,7 +28,8 @@ import { leerViajeDelNegocio } from '@/lib/cotizaciones/viaje-negocio'
 import { motivoSinPrecioPorPasajero, opcionesSinPrecio } from '@/lib/cotizaciones/precio-que-falta'
 import { enviarCotizacion } from '@/app/(app)/negocios/cotizacion-actions'
 import { esRecomendada, recomendadaDe } from '@/lib/cotizaciones/tarifas'
-import { grupoDeInstancia, resolverRanura, siguienteGrupoDeTipo } from '@/lib/cotizaciones/ranuras-pantallazo'
+import { etiquetaDeRanura, grupoDeInstancia, resolverRanura, siguienteGrupoDeTipo } from '@/lib/cotizaciones/ranuras-pantallazo'
+import { cambiosDeEstado, estadoDeLinea, estadosPermitidos, type EstadoServicio } from '@/lib/cotizaciones/estado-servicio'
 
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -245,6 +246,83 @@ export async function eliminarOpcionPorPasos(
   const c = await cerrarAccion(supabase, { workspaceId, cotizacionId: linea.cotizacionId, antes, staffId })
   if (!c.success) return c
   return { success: true, devueltas: r.devueltas, valorTotal: c.valorTotal }
+}
+
+// ── Incluido · Opcional · No va (C3) ────────────────────────────────────────
+
+/**
+ * El estado de un SERVICIO entero (decisión 4 del diseño): «Incluido», «Opcional» (traslado y
+ * actividad) o «No va». Se escribe con los dos interruptores de siempre en TODAS sus opciones,
+ * así que la lectura no cambia: un traslado Opcional no suma y sale en «Opcionales» del PDF con su
+ * precio, exactamente como una actividad opcional de hoy.
+ *
+ * Lo nuevo frente a la pantalla de siempre: el traslado Opcional (pieza `opcional_traslado`) y el
+ * hotel que no va. Vuelo y hotel nunca son opcionales: el servidor lo rechaza (P10).
+ *
+ * Devuelve el estado que tenía cada opción, para el «Deshacer».
+ */
+export async function estadoDeServicioPorPasos(
+  cotizacionId: string,
+  grupo: string,
+  estado: EstadoServicio,
+): Promise<ResultadoPorPasos<{ anterior: Record<string, EstadoServicio>; valorTotal: number | null }>> {
+  const { supabase, workspaceId, staffId, userId, error } = await getWorkspace()
+  if (error || !workspaceId) return { success: false, error: 'No autenticado' }
+  const g = normalizarGrupo(grupo)
+  if (!g) return { success: false, error: 'Falta el servicio.' }
+  const permitidos = estadosPermitidos(g)
+  if (!permitidos.includes(estado)) {
+    return {
+      success: false,
+      error: permitidos.length === 0
+        ? 'Este servicio no tiene estado: no es un vuelo, hotel, traslado ni actividad.'
+        : `Un ${etiquetaDeRanura(g).toLowerCase().split(' ')[0]} va o no va: no puede ser opcional.`,
+    }
+  }
+  const esTraslado = resolverRanura(g)?.definicion.slug === 'traslado_detalle'
+  const guard = await exigirPorPasos(supabase, cotizacionId, esTraslado && estado === 'opcional' ? 'opcional_traslado' : undefined)
+  if (!guard.ok) return { success: false, error: guard.error }
+
+  const antes = await fotoDeTarifas(supabase, cotizacionId)
+  if (!antes) return { success: false, error: 'Cotización no encontrada' }
+  const { data: filas, error: errLee } = await supabase
+    .from('items')
+    .select('*')
+    .eq('cotizacion_id', cotizacionId)
+    .eq('grupo', g)
+  if (errLee) return { success: false, error: errLee.message }
+  const lineas = ((filas ?? []) as Record<string, unknown>[]).filter(f => f.es_ajuste !== true)
+  if (lineas.length === 0) return { success: false, error: 'Ese servicio ya no está en la cotización. Recarga la página.' }
+
+  const anterior: Record<string, EstadoServicio> = {}
+  let quien: { por: string | null; porId: string | null } | null = null
+  for (const l of lineas) {
+    const actual = { grupo: g, entra_al_precio: (l.entra_al_precio ?? null) as boolean | null, mostrar_en_sugeridos: (l.mostrar_en_sugeridos ?? null) as boolean | null }
+    anterior[l.id as string] = estadoDeLinea(actual)
+    const cambios = cambiosDeEstado(actual, estado)
+    if (!cambios) continue
+    const tarifa = { ...((l.tarifa_pax && typeof l.tarifa_pax === 'object' ? l.tarifa_pax : {}) as Record<string, unknown>) }
+    if (cambios.noVa) {
+      if (!quien) {
+        const { data: perfil } = await supabase.from('profiles').select('full_name').eq('id', userId).maybeSingle()
+        quien = { por: ((perfil?.full_name as string | null | undefined) ?? '').trim() || null, porId: userId ?? null }
+      }
+      tarifa.noVa = { era: cambios.noVa.era, por: quien.por, porId: quien.porId, en: new Date().toISOString() }
+    } else {
+      delete tarifa.noVa
+    }
+    const patch: Record<string, unknown> = {
+      entra_al_precio: cambios.entra_al_precio,
+      mostrar_en_sugeridos: cambios.mostrar_en_sugeridos,
+      // Sin tarifa guardada y sin marca que poner, la columna se queda como estaba.
+      ...(l.tarifa_pax || cambios.noVa ? { tarifa_pax: tarifa } : {}),
+    }
+    const { error: errUpd } = await supabase.from('items').update(patch).eq('id', l.id as string)
+    if (errUpd) return { success: false, error: errUpd.message }
+  }
+  const c = await cerrarAccion(supabase, { workspaceId, cotizacionId, antes, staffId })
+  if (!c.success) return c
+  return { success: true, anterior, valorTotal: c.valorTotal }
 }
 
 // ── Enviar ───────────────────────────────────────────────────────────────────

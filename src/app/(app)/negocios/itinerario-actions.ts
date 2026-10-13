@@ -3,7 +3,7 @@
 import { revalidatePath } from 'next/cache'
 
 import { getWorkspace } from '@/lib/actions/get-workspace'
-import { diaDeItem, esVueloDeLaCotizacion, puedeLlevarDia, puedeQuedarFueraDelPrecio } from '@/lib/cotizaciones/dia-relativo'
+import { diaDeItem, esHotelDeLaCotizacion, esVueloDeLaCotizacion, puedeLlevarDia, puedeQuedarFueraDelPrecio, soloVaONoVa } from '@/lib/cotizaciones/dia-relativo'
 import {
   cambiosDeActividad,
   esActividad,
@@ -816,9 +816,12 @@ export async function actualizarRanuraDeItem(
     const origen = { id: itemId, grupo: (actual?.grupo ?? null) as string | null, es_ajuste: actual?.es_ajuste ?? false }
     // Un vuelo que no va solo cambia a otra ranura de vuelo: una sugerencia que pasara a vuelo
     // dejaría de salir en «Opcionales» sin que nadie lo pidiera (brief del 2026-10-08).
+    // Lo mismo para un hotel que no va (cotización por pasos): solo a otro hotel.
     const destinoValido = esVueloDeLaCotizacion(destino)
       ? esVueloDeLaCotizacion(origen)
-      : puedeQuedarFueraDelPrecio(destino)
+      : esHotelDeLaCotizacion(destino)
+        ? esHotelDeLaCotizacion(origen)
+        : puedeQuedarFueraDelPrecio(destino)
     if (actual?.entra_al_precio === false && !destinoValido) {
       return {
         success: false,
@@ -952,7 +955,7 @@ export async function actualizarDiaDeItem(
   if (tocaElInterruptor && quedaria.entra_al_precio === false) {
     // El vuelo NO sale del precio por aquí: tiene su check (`marcarActividadEnCotizacion`), que
     // lo saca también de «Opcionales». Por este camino quedaría como una sugerencia a la vista.
-    if (!puedeQuedarFueraDelPrecio(quedaria) || esVueloDeLaCotizacion(quedaria)) {
+    if (!puedeQuedarFueraDelPrecio(quedaria) || soloVaONoVa(quedaria)) {
       return {
         success: false,
         error:
