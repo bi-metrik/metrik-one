@@ -1,6 +1,6 @@
 ---
 name: valida-alta-autogestionada
-description: Alta autogestionada de Valida (18-recorrido-baja-friccion). Al 2026-10-12, pila de PR #1102→#1104→#1107→#1110 en ONE más metrik-valida#57, todo apagado. Migración 20261012100000 SIN aplicar. Lo que no se ve en el código: el plan es una bolsa por mes, los términos van por empresa y la tarjeta nunca toca ONE.
+description: Alta autogestionada de Valida (18-recorrido-baja-friccion). Al 2026-10-12, #1102 mergeado; pila #1104→#1107→#1110 abierta más metrik-valida#57, todo apagado. Migraciones 20261012100000 (#1107) y 20261013090000 (#1110, cobro a los 7 días) SIN aplicar. Lo que no se ve en el código: el plan es una bolsa por mes, los términos van por empresa y la tarjeta nunca toca ONE.
 metadata:
   type: project
 ---
@@ -20,14 +20,17 @@ Textos legales aprobados por Mauricio el 2026-10-11: `proyectos/metrik/valida/do
 Ya mergeados: #1095 (corte de la bolsa), #1097 (`valida_registros`, APLICADA, no volver a aplicar) y #1098 (`/valida/empezar`, apagado).
 
 **Pila abierta.** Se mergea en orden y, antes de cada merge, hay que cambiar la base del siguiente a `main`:
-1. **#1102**: textos aprobados, huella de Condiciones + aviso + casilla (`condiciones_version = condiciones-1.0+aviso-1.0`) y Política 1.5 → 1.6.
+1. **#1102** (MERGEADO): textos aprobados, huella de Condiciones + aviso + casilla (`condiciones_version = condiciones-1.0+aviso-1.0`) y Política 1.5 → 1.6.
    - Al desplegar, Valida API y el Radar vuelven a pedir la Política una vez.
    - La cláusula de cobro va INACTIVA: `VALIDA_COBRO_TRAS_PRUEBA=1` más campos llenos, y en producción además `CLAUSULA_COBRO_APROBADA_PARA_PRODUCCION`.
 2. **#1104**: el pago de una cuota abre el mes en Valida (`ciclo-servidor.ts`, desde el webhook y el paso 8 del cron).
-   - Límite: `parametros.limite_consultas_mes` > `VALIDA_PLAN_LIMITE_MES` > 3000.
+   - Límite: 3.000 FIJO en código desde el 2026-10-12 (fila 23 de Vera); ni el contrato ni el entorno lo cambian.
 3. **#1107**: `/valida/activar` + RPC `valida_activar_autogestion`. **Migración 20261012100000 SIN aplicar.**
    - Está apagada: `VALIDA_ACTIVACION_ABIERTA` + `terminosPlanListos()`. Los Términos v2.0 siguen como marcador.
 4. **#1110**: ePayco en modo prueba (`EPAYCO_HABILITADO`). Tokeniza en el navegador y cobra por token (paso 7b del cron).
+   - Desde el 2026-10-12 trae además el cobro a los 7 días (decisión de Mauricio, opción A, fecha fija): Condiciones v2.0 + aviso v1.2, el paso 7a del cron, «Cancelar prueba», el borrado de la tarjeta y el aviso antes de suspender (paso 8b). **Migración 20261013090000 SIN aplicar.**
+   - El cobro automático NO cobra mientras `ACEPTACION_EN_REGISTRO_CONSTRUIDA = false`: la guarda `aceptaciones_terminos_modulo()` exige cédula y persona designada, y aceptar los Términos en el registro necesita otro canal (migración, con Emilio).
+   - Textos: la fuente son los archivos de `docs/legal/` (Emilio pasó ahí el texto de Vera). El código se comparó byte por byte con esos archivos el 2026-10-12; si cambian, se vuelve a copiar y se sube la versión.
    - ⚠️ Llaves con sufijo `_METRIK` (cuenta 1595165). `EPAYCO_PUBLIC_KEY`/`PRIVATE_KEY` sin sufijo son de OTRA cuenta (conciliación de un cliente); leerlas cobraría en la cuenta equivocada. Cargadas solo en Production (2026-10-12): Preview no las tiene.
 5. **metrik-valida#57**: los parches de PR 1 y 9, `POST /api/one/v1/autogestion/{cliente}/ciclos` y la marca PRUEBA en el PDF.
 
@@ -45,6 +48,10 @@ Ya mergeados: #1095 (corte de la bolsa), #1097 (`valida_registros`, APLICADA, no
 
 ## Gotchas
 
+- **Los previews usan la base de PRODUCCIÓN**: el cobro a los 7 días guarda `cobro_entorno` y cada despliegue procesa solo lo suyo. Nunca correr el cron entero en un preview (manda enlaces a clientes reales). Para eso está `/api/crons/valida-cobro-prueba`.
+- ePayco borra una tarjeta con `franchise` + `mask` + `customerId` (`/subscription/token/card/delete`). ONE no guarda la máscara: se consulta antes `/subscriptions/customer`. No está verificado contra una cuenta real.
+- `crearDoble` (`test/tablas-doble.ts`) devuelve las filas POR REFERENCIA: un `update` cambia el objeto que ya se leyó. Hay que copiar el valor previo antes de reclamar, o la prueba de «soltar» miente.
+
 - **Publicar en metrik-valida desde el worktree aislado sí se puede** (#57, 2026-10-12):
   1. `rsync` del checkout al scratchpad (sin `node_modules`/`.git`/`.claude`) y comparar blobs contra `git/trees/<sha>`;
   2. aplicar los parches con `patch -p1` (no `git apply`);
@@ -60,7 +67,8 @@ Ya mergeados: #1095 (corte de la bolsa), #1097 (`valida_registros`, APLICADA, no
 
 - Aplicar la migración de #1107 antes de su merge.
 - Desplegar metrik-valida#57.
-- Términos v2.0 aprobados (pegarlos en `terminos-plan.ts`).
+- Términos v2.0 aprobados (pegarlos en `terminos-plan.ts`). El texto ya está en `terminos-valida-v2.0-autoservicio.md`, APROBADO CON CAMBIOS por Vera; `{N}` = `DIAS_GRACIA_CICLO` (5 o 10, lo decide Carmen).
+- El retiro del plan, el cambio de medio de pago, la factura de cada cobro automático (hoy no se emite ninguna) y el procedimiento de cancelación por correo.
 - Decisión sobre la comisión de AFI en autoservicio (el contrato nace con `comision = null` y el origen en los parámetros).
 - La prueba de Vera en un preview.
 - Para el cobro al terminar la prueba sin clic: Términos aceptados en el registro (condición 4 de §2.1) y una cuenta ePayco.
