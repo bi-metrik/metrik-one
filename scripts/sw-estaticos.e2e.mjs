@@ -108,7 +108,8 @@ try {
     await ctx.close()
   }
 
-  // 2-4) Con SW.
+  // 2-4) Con SW. `SOLO_SIN_SW=1` corta aquí (para medir el antes contra un build sin estos cambios).
+  if (process.env.SOLO_SIN_SW) throw Object.assign(new Error('fin'), { fin: true })
   const ctx = await navegador.newContext()
   const page = await ctx.newPage()
   const cdp = await ctx.newCDPSession(page)
@@ -165,6 +166,8 @@ try {
   }
   comprobar('4 APAGADO: se desregistra y borra su caché', fin.registros === 0 && fin.caches.length === 0, fin)
   await ctx.close()
+} catch (e) {
+  if (!e.fin) throw e
 } finally {
   await navegador.close()
   proxy.close()
