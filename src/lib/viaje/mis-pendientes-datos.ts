@@ -12,6 +12,7 @@ import { todayBogotaISO } from '@/lib/dates/bogota'
 import { configPlanPagos, normalizarCuotas } from './plan-pagos'
 import { aprobadoresDeLinea, serviciosViajeActivo } from './estado-servicio'
 import { leerCierreGuardado } from './cierre-viaje'
+import { negociosDePruebaOcultos } from '@/lib/negocios/negocios-de-prueba'
 import {
   loProximo,
   pendientesDe,
@@ -64,8 +65,8 @@ export async function cargarMisPendientes(): Promise<MisPendientes> {
   const hoy = todayBogotaISO()
 
   const [negocios, etapas] = await Promise.all([
-    porTandas(lineaIds, async t => filas<{ id: string; nombre: string; codigo: string | null; contacto_id: string | null; etapa_actual_id: string | null; precio_aprobado: number | null; metadata: Record<string, unknown> | null }>(
-      await db.from('negocios').select('id, nombre, codigo, contacto_id, etapa_actual_id, precio_aprobado, metadata').eq('workspace_id', workspaceId).in('linea_id', t).eq('estado', 'abierto'),
+    porTandas(lineaIds, async t => filas<{ id: string; nombre: string; codigo: string | null; linea_id: string | null; contacto_id: string | null; etapa_actual_id: string | null; precio_aprobado: number | null; metadata: Record<string, unknown> | null }>(
+      await db.from('negocios').select('id, nombre, codigo, linea_id, contacto_id, etapa_actual_id, precio_aprobado, metadata').eq('workspace_id', workspaceId).in('linea_id', t).eq('estado', 'abierto'),
     )),
     porTandas(lineaIds, async t => filas<{ id: string; numero: number; config_extra: { gates?: unknown } | null }>(
       await db.from('etapas_negocio').select('id, numero, config_extra').in('linea_id', t),
@@ -127,6 +128,7 @@ export async function cargarMisPendientes(): Promise<MisPendientes> {
       regreso: b.map(x => fecha(x.fecha_regreso)).find(Boolean) ?? null,
       precioAprobado: Number(n.precio_aprobado ?? 0),
       metadata: n.metadata,
+      aprobadoresStaffIds: aprobadoresDeLinea(lineas.find(l => l.id === n.linea_id)?.config_extra),
       comercialStaffId: resp.find(r => r.rol === 'comercial')?.staff_id ?? null,
       operacionesStaffId: resp.find(r => r.rol === 'operaciones')?.staff_id ?? null,
       cuotas: plan
@@ -144,11 +146,11 @@ export async function cargarMisPendientes(): Promise<MisPendientes> {
     }
   })
 
-  const tablero = esDireccion ? await cargarTablero(db, workspaceId, lineaIds) : null
+  const tablero = esDireccion ? await cargarTablero(db, workspaceId, lineaIds, staffId ?? null) : null
   return { activo: true, hoy, persona, pendientes: pendientesDe(viajes, persona, hoy), proximo: loProximo(viajes, hoy), tablero }
 }
 
-async function cargarTablero(db: Db, workspaceId: string, lineaIds: string[]): Promise<Tablero> {
+async function cargarTablero(db: Db, workspaceId: string, lineaIds: string[], staffId: string | null): Promise<Tablero> {
   const cerrados = await porTandas(lineaIds, async t => filas<{ id: string; nombre: string; codigo: string | null; metadata: Record<string, unknown> | null }>(
     await db.from('negocios').select('id, nombre, codigo, metadata').eq('workspace_id', workspaceId).in('linea_id', t).not('metadata->cierre_viaje->confirmado', 'is', null),
   ))
@@ -182,5 +184,7 @@ async function cargarTablero(db: Db, workspaceId: string, lineaIds: string[]): P
       gastosProveedor: g.filter(x => x.categoria === 'proveedor_viaje' && x.servicio_id).map(x => ({ monto: Number(x.monto) || 0, titular: x.titular_medio })),
     })
   }
-  return tableroDeMargen(cierres)
+  // El cierre de prueba (F8-1) solo suma para quien lleva o aprueba ese viaje (la dirección de prueba).
+  const ocultos = cierres.some(c => c.esPrueba) ? await negociosDePruebaOcultos(db, workspaceId, staffId) : new Set<string>()
+  return tableroDeMargen(cierres, new Set(cierres.filter(c => c.esPrueba && !ocultos.has(c.negocioId)).map(c => c.negocioId)))
 }

@@ -4,6 +4,7 @@ import { getWorkspace } from '@/lib/actions/get-workspace'
 import { bogotaParts, todayBogotaISO } from '@/lib/dates/bogota'
 import { SECCIONALES_DIAN, canonizarSeccional } from '@/lib/dian/seccionales'
 import { resumirCartera } from '@/lib/negocios/cartera'
+import { negociosDePruebaOcultos, sinOcultos } from '@/lib/negocios/negocios-de-prueba'
 import { STAGE_LABEL } from '@/lib/negocios/stage-label'
 import { rotularNombre } from '@/lib/equipo/inactivos'
 import type {
@@ -64,7 +65,7 @@ function getDiasRestantesMes(): number {
 // ============================================================
 
 export async function getFinancieroData(periodo: Periodo = '6meses'): Promise<FinancieroData | null> {
-  const { supabase, workspaceId, error } = await getWorkspace()
+  const { supabase, workspaceId, staffId, error } = await getWorkspace()
   if (error || !workspaceId) return null
 
   const range = getPeriodRange(periodo)
@@ -73,16 +74,17 @@ export async function getFinancieroData(periodo: Periodo = '6meses'): Promise<Fi
 
   const [
     saldoRes,
-    cobrosHistRes,
-    gastosHistRes,
+    cobrosHistResTodos,
+    gastosHistResTodos,
     gastosFijosRes,
     staffRes,
     fiscalRes,
-    gastosPrevRes,
-    gastosCurrRes,
-    carteraRes,
-    gastosPorPagarRes,
-    devolucionesRes,
+    gastosPrevResTodos,
+    gastosCurrResTodos,
+    carteraResTodos,
+    gastosPorPagarResTodos,
+    devolucionesResTodos,
+    ocultosPrueba,
   ] = await Promise.all([
     // Latest bank balance
     supabase
@@ -95,7 +97,7 @@ export async function getFinancieroData(periodo: Periodo = '6meses'): Promise<Fi
     // Cobros in range (for monthly trend)
     supabase
       .from('cobros')
-      .select('monto, fecha')
+      .select('monto, fecha, negocio_id')
       .eq('workspace_id', workspaceId)
       .gte('fecha', range.start)
       .lt('fecha', range.end),
@@ -103,7 +105,7 @@ export async function getFinancieroData(periodo: Periodo = '6meses'): Promise<Fi
     // Gastos in range (for monthly trend + runway)
     supabase
       .from('gastos')
-      .select('monto, fecha, categoria')
+      .select('monto, fecha, categoria, negocio_id')
       .eq('workspace_id', workspaceId)
       .gte('fecha', range.start)
       .lt('fecha', range.end),
@@ -132,7 +134,7 @@ export async function getFinancieroData(periodo: Periodo = '6meses'): Promise<Fi
     // Gastos prev month by categoria
     supabase
       .from('gastos')
-      .select('monto, categoria')
+      .select('monto, categoria, negocio_id')
       .eq('workspace_id', workspaceId)
       .gte('fecha', prev.start)
       .lt('fecha', prev.end),
@@ -140,7 +142,7 @@ export async function getFinancieroData(periodo: Periodo = '6meses'): Promise<Fi
     // Gastos current month by categoria
     supabase
       .from('gastos')
-      .select('monto, categoria')
+      .select('monto, categoria, negocio_id')
       .eq('workspace_id', workspaceId)
       .gte('fecha', curr.start)
       .lt('fecha', curr.end),
@@ -153,13 +155,13 @@ export async function getFinancieroData(periodo: Periodo = '6meses'): Promise<Fi
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     (supabase as any)
       .from('v_cartera_negocio')
-      .select('codigo, nombre, honorario, honorario_recaudado, saldo, dias, con_cronograma, saldo_vencido, dias_mora')
+      .select('negocio_id, codigo, nombre, honorario, honorario_recaudado, saldo, dias, con_cronograma, saldo_vencido, dias_mora')
       .eq('workspace_id', workspaceId),
 
     // Gastos por pagar (post-refactor 2026-04-27: todos los gastos son reales)
     supabase
       .from('gastos')
-      .select('monto')
+      .select('monto, negocio_id')
       .eq('workspace_id', workspaceId)
       .eq('estado_pago', 'pendiente'),
 
@@ -168,11 +170,25 @@ export async function getFinancieroData(periodo: Periodo = '6meses'): Promise<Fi
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     (supabase as any)
       .from('devoluciones_dinero')
-      .select('monto, fecha')
+      .select('monto, fecha, negocio_id')
       .eq('workspace_id', workspaceId)
       .gte('fecha', range.start)
       .lt('fecha', range.end),
+
+    // El viaje de prueba (metadata.es_prueba, F8-1) no suma en ninguna cifra de quien no lo
+    // lleva ni lo aprueba.
+    negociosDePruebaOcultos(supabase, workspaceId, staffId ?? null),
   ])
+  // Cada lectura que cuelga de un negocio pierde las filas del de prueba ajeno.
+  const sinPrueba = <T extends { data: unknown }>(res: T): T =>
+    ({ ...res, data: Array.isArray(res.data) ? sinOcultos(res.data as Array<{ negocio_id?: unknown }>, ocultosPrueba, (r) => r.negocio_id) : res.data })
+  const cobrosHistRes = sinPrueba(cobrosHistResTodos)
+  const gastosHistRes = sinPrueba(gastosHistResTodos)
+  const gastosPrevRes = sinPrueba(gastosPrevResTodos)
+  const gastosCurrRes = sinPrueba(gastosCurrResTodos)
+  const carteraRes = sinPrueba(carteraResTodos)
+  const gastosPorPagarRes = sinPrueba(gastosPorPagarResTodos)
+  const devolucionesRes = sinPrueba(devolucionesResTodos)
 
   const saldo = saldoRes.data?.[0]
   // Ingreso NETO: los cobros en su fecha y las devoluciones de dinero en negativo en la suya
@@ -355,7 +371,7 @@ export async function getFinancieroData(periodo: Periodo = '6meses'): Promise<Fi
 // ============================================================
 
 export async function getComercialData(_periodo: Periodo = 'mes'): Promise<ComercialData | null> {
-  const { supabase, workspaceId, error } = await getWorkspace()
+  const { supabase, workspaceId, staffId, error } = await getWorkspace()
   if (error || !workspaceId) return null
 
   const curr = getCurrentMonthRange()
@@ -367,6 +383,7 @@ export async function getComercialData(_periodo: Periodo = 'mes'): Promise<Comer
     cobrosPrevRes,
     configMetasRes,
     negociosCerradosRes,
+    ocultosPrueba,
   ] = await Promise.all([
     // All negocios (current state — not filtered by date)
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -378,7 +395,7 @@ export async function getComercialData(_periodo: Periodo = 'mes'): Promise<Comer
     // Cobros current month
     supabase
       .from('cobros')
-      .select('monto')
+      .select('monto, negocio_id')
       .eq('workspace_id', workspaceId)
       .gte('fecha', curr.start)
       .lt('fecha', curr.end),
@@ -386,7 +403,7 @@ export async function getComercialData(_periodo: Periodo = 'mes'): Promise<Comer
     // Cobros previous month
     supabase
       .from('cobros')
-      .select('monto')
+      .select('monto, negocio_id')
       .eq('workspace_id', workspaceId)
       .gte('fecha', prev.start)
       .lt('fecha', prev.end),
@@ -402,15 +419,18 @@ export async function getComercialData(_periodo: Periodo = 'mes'): Promise<Comer
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     (supabase as any)
       .from('negocios')
-      .select('created_at, closed_at')
+      .select('id, created_at, closed_at')
       .eq('workspace_id', workspaceId)
       .eq('estado', 'completado'),
+
+    // El viaje de prueba (F8-1) no suma para quien no lo lleva ni lo aprueba.
+    negociosDePruebaOcultos(supabase, workspaceId, staffId ?? null),
   ])
 
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const negs: any[] = negociosRes.data || []
-  const cobros = cobrosRes.data || []
-  const cobrosPrev = cobrosPrevRes.data || []
+  const negs: any[] = sinOcultos(negociosRes.data || [], ocultosPrueba, (n: { id?: unknown }) => n.id)
+  const cobros = sinOcultos(cobrosRes.data || [], ocultosPrueba, (c) => c.negocio_id)
+  const cobrosPrev = sinOcultos(cobrosPrevRes.data || [], ocultosPrueba, (c) => c.negocio_id)
 
   // Recaudo
   const recaudoMes = cobros.reduce((s, c) => s + Number(c.monto), 0)
@@ -493,7 +513,7 @@ export async function getComercialData(_periodo: Periodo = 'mes'): Promise<Comer
   // Ritmo pipeline — simplified (no etapa_historial for negocios yet)
   let ritmoPipeline: RitmoPipeline | null = null
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const negsCerrados: any[] = negociosCerradosRes.data || []
+  const negsCerrados: any[] = sinOcultos(negociosCerradosRes.data || [], ocultosPrueba, (n: { id?: unknown }) => n.id)
   if (negsCerrados.length >= 3) {
     const closeTimes: number[] = []
     for (const n of negsCerrados) {
@@ -540,7 +560,7 @@ export async function getComercialData(_periodo: Periodo = 'mes'): Promise<Comer
 // ============================================================
 
 export async function getOperativoData(_periodo: Periodo = 'mes'): Promise<OperativoData | null> {
-  const { supabase, workspaceId, error } = await getWorkspace()
+  const { supabase, workspaceId, staffId, error } = await getWorkspace()
   if (error || !workspaceId) return null
 
   const curr = getCurrentMonthRange()
@@ -550,6 +570,7 @@ export async function getOperativoData(_periodo: Periodo = 'mes'): Promise<Opera
     staffRes,
     horasRes,
     negociosCerradosRes,
+    ocultosPrueba,
   ] = await Promise.all([
     // Negocios activos (ejecucion + cobro)
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -584,14 +605,17 @@ export async function getOperativoData(_periodo: Periodo = 'mes'): Promise<Opera
       .eq('estado', 'completado')
       .order('updated_at', { ascending: false })
       .limit(10),
+
+    // El viaje de prueba (F8-1) no cuenta para quien no lo lleva ni lo aprueba.
+    negociosDePruebaOcultos(supabase, workspaceId, staffId ?? null),
   ])
 
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const negociosActivos: any[] = negociosActivosRes.data || []
+  const negociosActivos: any[] = sinOcultos(negociosActivosRes.data || [], ocultosPrueba, (n: { id?: unknown }) => n.id)
   const staffList = staffRes.data || []
   const horas = horasRes.data || []
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const negociosCerrados: any[] = negociosCerradosRes.data || []
+  const negociosCerrados: any[] = sinOcultos(negociosCerradosRes.data || [], ocultosPrueba, (n: { id?: unknown }) => n.id)
 
   // Negocios por stage
   const STAGE_LABELS_OP: Record<string, string> = {

@@ -35,6 +35,7 @@ import {
 import { leerTitularCorregido, rutDeConfirmacion, titularDeConfirmacion, validarTitular, type TitularEditado } from '@/lib/siigo/titular'
 import { desdePorLinea, hayReglaDeCola } from '@/lib/facturacion/regla-viaje'
 import { entradasViaje, lineasPorTitular, reglaDelNegocio } from '@/lib/facturacion/cola-viaje'
+import { negociosDePruebaOcultos, sinOcultos } from '@/lib/negocios/negocios-de-prueba'
 import { repartoFacturaViaje } from '@/lib/facturacion/reparto-viaje'
 import { adaptadorSiigo, proveedorDeFacturacion, type ProveedorFacturacion } from '@/lib/facturacion/proveedor'
 import type { OpcionesEmision } from '@/lib/siigo/facturas'
@@ -269,7 +270,7 @@ export interface ColaFacturacion {
  * stage de cobro. Facturar es del área financiera, no de quien lleva el caso.
  */
 async function ctxFinanciero(): Promise<
-  { ok: true; workspaceId: string } | { ok: false; error: string }
+  { ok: true; workspaceId: string; staffId: string | null } | { ok: false; error: string }
 > {
   const { workspaceId, staffId, role, areas, error } = await getWorkspace()
   if (error || !workspaceId) return { ok: false, error: error ?? 'No autenticado' }
@@ -281,7 +282,7 @@ async function ctxFinanciero(): Promise<
   if (!canEditBloque(user, { stage: 'cobro' }, [])) {
     return { ok: false, error: 'Solo el área financiera puede facturar' }
   }
-  return { ok: true, workspaceId }
+  return { ok: true, workspaceId, staffId: staffId ?? null }
 }
 
 /**
@@ -297,7 +298,7 @@ export async function getColaFacturacion(): Promise<{ data: ColaFacturacion | nu
   const ctx = await ctxFinanciero()
   if (!ctx.ok) return { data: null, error: ctx.error }
   try {
-    return await armarColaFacturacion(ctx.workspaceId)
+    return await armarColaFacturacion(ctx.workspaceId, ctx.staffId)
   } catch (e) {
     // Una lectura por lote que no se pudo completar NO se degrada a una bandeja
     // corta. Ese es exactamente el fallo que este frente vino a cerrar: una lista
@@ -310,6 +311,7 @@ export async function getColaFacturacion(): Promise<{ data: ColaFacturacion | nu
 /** Cuerpo de la cola. Separado solo para que el `catch` de arriba lo envuelva entero. */
 async function armarColaFacturacion(
   workspaceId: string,
+  staffId: string | null,
 ): Promise<{ data: ColaFacturacion | null; error?: string }> {
   const svc = createServiceClient()
 
@@ -368,7 +370,7 @@ async function armarColaFacturacion(
   // 391 abiertos hoy en SOENA: todavía por debajo del techo, pero la cola crece
   // con el negocio del cliente y el día que lo pase no habría error, solo casos
   // que dejan de aparecer.
-  const negocios = await traerTodo<Neg>(
+  const negociosTodos = await traerTodo<Neg>(
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     (d, h) => (svc as any)
       .from('negocios')
@@ -378,6 +380,10 @@ async function armarColaFacturacion(
       .range(d, h),
     { etiqueta: 'facturacion/negocios' },
   )
+  // El viaje de prueba (metadata.es_prueba, F8-1) no entra a la cola, ni a sus totales, ni a la
+  // emisión de quien no lo lleva ni lo aprueba: la financiera real no lo ve.
+  const ocultosPrueba = await negociosDePruebaOcultos(svc, workspaceId, staffId)
+  const negocios = sinOcultos(negociosTodos, ocultosPrueba, n => n.id)
   const porEtapa = negocios.filter(n => {
     if (n.estado !== 'abierto') return false
     const d = desdeDeLinea.get(n.linea_id ?? '')

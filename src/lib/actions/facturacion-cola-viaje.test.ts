@@ -12,9 +12,10 @@ vi.mock('@/lib/supabase/server', () => ({
   createServiceClient: () => servicioFalso(),
   createClient: async () => servicioFalso(),
 }))
+const sesion = vi.hoisted(() => ({ staffId: 'staff-diana' }))
 vi.mock('./get-workspace', () => ({
   getWorkspace: async () => ({
-    workspaceId: WS, staffId: 'staff-diana', role: 'owner', areas: ['financiera'], supabase: null,
+    workspaceId: WS, staffId: sesion.staffId, role: 'owner', areas: ['financiera'], supabase: null,
   }),
 }))
 vi.mock('@/lib/siigo/client', () => ({ siigoRequest: async () => ({ results: [] }), SiigoError: class extends Error {} }))
@@ -47,6 +48,7 @@ const ids = async () => {
 }
 
 beforeEach(() => {
+  sesion.staffId = 'staff-diana'
   reiniciarDoble()
   sembrar({ casos: 1 })
   estado.fixtures.aprobaciones_excepcion = []
@@ -154,5 +156,26 @@ describe('emisión de un viaje', () => {
     expect(await emitirFacturaDeNegocio('emp-no')).toMatchObject({ ok: false, error: expect.stringContaining('todavía no entra') })
     estado.fixtures.negocios.push(viaje('emp-ok', { titular_facturacion: EMPRESA, confirmacion_cliente: CONFIRMADA }))
     expect(await emitirFacturaDeNegocio('emp-ok')).toMatchObject({ ok: false, error: expect.stringContaining('Falta') })
+  })
+})
+
+describe('negocio de prueba (F8-1)', () => {
+  beforeEach(() => {
+    estado.fixtures.lineas_negocio.push(lineaViaje())
+    estado.fixtures.negocios.push({
+      ...viaje('prueba', { es_prueba: true, titular_facturacion: EMPRESA, confirmacion_cliente: CONFIRMADA }),
+      negocio_responsables: [{ staff_id: 'staff-cp' }],
+    })
+  })
+
+  it('no entra a la cola ni a sus totales de la financiera real', async () => {
+    expect(await ids()).toEqual(['neg-0000'])
+    const { data } = await getColaFacturacion()
+    expect(data!.totales.listos + data!.totales.incompletos).toBe(1)
+  })
+
+  it('quien lo lleva sí lo ve en la cola', async () => {
+    sesion.staffId = 'staff-cp'
+    expect(await ids()).toEqual(['neg-0000', 'prueba'])
   })
 })

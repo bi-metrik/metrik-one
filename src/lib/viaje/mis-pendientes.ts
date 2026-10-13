@@ -78,6 +78,8 @@ export interface ViajePendiente {
   metadata: Record<string, unknown> | null
   comercialStaffId: string | null
   operacionesStaffId: string | null
+  /** Aprobadores de la línea del viaje (`config_extra.aprobaciones.staff_ids`): ven el de prueba. */
+  aprobadoresStaffIds?: string[]
   cuotas: CuotaPlan[]
   pagos: PagoViajero[]
   servicios: ServicioPendiente[]
@@ -119,8 +121,9 @@ export function pendientesDe(viajes: readonly ViajePendiente[], persona: Persona
   const add = (p: Omit<Pendiente, 'id'> & { id?: string }) => out.push({ id: p.id ?? `${p.negocioId}:${p.texto}`, ...p })
 
   for (const v of viajes) {
-    // Un viaje de prueba (F8-1) solo le aparece a quien lo lleva (las cuentas de prueba).
-    if (v.esPrueba && !esMio(v.comercialStaffId, persona) && !esMio(v.operacionesStaffId, persona)) continue
+    // Un viaje de prueba (F8-1) solo le aparece a quien lo lleva o lo aprueba (las cuentas de prueba).
+    const loAprueba = !!persona.staffId && (v.aprobadoresStaffIds ?? []).includes(persona.staffId)
+    if (v.esPrueba && !esMio(v.comercialStaffId, persona) && !esMio(v.operacionesStaffId, persona) && !loAprueba) continue
     const viaje = v.nombre
     const quien = v.cliente.split(/\s+/)[0] || 'El cliente'
     const { cuotas } = cuotasConEstadoViaje(v.cuotas, v.pagos, hoy)
@@ -256,9 +259,12 @@ export interface Tablero {
 
 const pct1 = (a: number, b: number) => (b > 0 ? Math.round((a / b) * 1000) / 10 : null)
 
-/** Excluye `es_prueba`. Sale de los cierres confirmados: cuadra con su suma por construcción. */
-export function tableroDeMargen(cierres: readonly CierreTablero[]): Tablero {
-  const reales = cierres.filter(c => !c.esPrueba)
+/**
+ * Excluye `es_prueba`, salvo los que quien mira lleva o aprueba (`visibles`, F8-1: la dirección de
+ * prueba ve su viaje; Edgar no). Sale de los cierres confirmados: cuadra con su suma por construcción.
+ */
+export function tableroDeMargen(cierres: readonly CierreTablero[], visibles: ReadonlySet<string> = new Set()): Tablero {
+  const reales = cierres.filter(c => !c.esPrueba || visibles.has(c.negocioId))
   const porMes = new Map<string, Tablero['meses'][number]>()
   for (const c of reales) {
     const m = porMes.get(c.mes) ?? { mes: c.mes, viajes: 0, margenReal: 0, ingresoNeto: 0, pctReal: null, margenCotizado: 0, pctCotizado: null }

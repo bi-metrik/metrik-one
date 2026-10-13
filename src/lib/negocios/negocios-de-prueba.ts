@@ -70,3 +70,72 @@ export async function sinNegociosDePruebaAjenos<T extends { metadata?: unknown; 
   }
   return filtrarNegociosDePrueba(filas, { staffId, aprobadoresPorLinea })
 }
+
+/**
+ * Los ids de los negocios de prueba del workspace que esta persona NO lleva ni aprueba (F8-1).
+ *
+ * Para los agregados y las colas que no leen la fila del negocio con sus responsables (cola de
+ * facturación, recibos pendientes, tableros, cifras de /numeros, cartera): se resta este conjunto
+ * de lo que cada una suma o lista. Una consulta acotada a `metadata->>es_prueba = 'true'`: en un
+ * workspace sin negocios de prueba devuelve vacío y no lee nada más.
+ *
+ * Sin `staffId` (un cron, una sesión sin ficha de staff) todos los de prueba quedan ocultos.
+ * Si la lectura falla, LANZA: un agregado que no pudo restar la prueba parece entero (mismo
+ * criterio de la cola de facturación, que no se degrada a una bandeja corta).
+ */
+export async function negociosDePruebaOcultos(supabase: Db, workspaceId: string, staffId: string | null): Promise<Set<string>> {
+  const { data, error } = await supabase
+    .from('negocios')
+    .select('id, metadata, linea_id, negocio_responsables(staff_id)')
+    .eq('workspace_id', workspaceId)
+    .eq('metadata->>es_prueba', 'true')
+  if (error) throw new Error(`No se pudieron leer los negocios de prueba: ${error.message}`)
+  const deprueba = ((data ?? []) as Array<{ id: string; metadata?: unknown; linea_id?: unknown; negocio_responsables?: unknown }>)
+    .filter((f) => esNegocioDePrueba(f.metadata))
+  if (deprueba.length === 0) return new Set()
+  const visibles = new Set((await sinNegociosDePruebaAjenos(supabase, workspaceId, staffId, deprueba)).map((f) => f.id))
+  return new Set(deprueba.filter((f) => !visibles.has(f.id)).map((f) => f.id))
+}
+
+/**
+ * Avisos a staff (crons de inactividad, etapas por fecha): del negocio de prueba solo se enteran sus
+ * responsables y los aprobadores de su línea, nunca el respaldo del área, el supervisor ni el owner
+ * (F8-1: «ni Edgar, ni Alejandra, ni las comerciales reales reciben nada»). Un negocio real pasa
+ * sin cambios y sin leer nada. Recibe y devuelve `profile_id`.
+ */
+export async function avisoSoloAQuienLleva(
+  svc: Db,
+  negocio: { id: string; workspace_id: string; linea_id?: string | null; metadata?: unknown },
+  perfiles: Iterable<string>,
+): Promise<string[]> {
+  const todos = [...perfiles]
+  if (!esNegocioDePrueba(negocio.metadata) || todos.length === 0) return todos
+  const [resp, linea] = await Promise.all([
+    svc.from('negocio_responsables').select('staff_id').eq('negocio_id', negocio.id),
+    negocio.linea_id
+      ? svc.from('lineas_negocio').select('config_extra').eq('id', negocio.linea_id).maybeSingle()
+      : Promise.resolve({ data: null, error: null }),
+  ])
+  // Sin poder leer quién lo lleva, el aviso de prueba no sale (el error no lo abre al equipo real).
+  if (resp.error || linea.error) return []
+  const staffIds = [
+    ...new Set([
+      ...((resp.data ?? []) as Array<{ staff_id: string | null }>).map((r) => r.staff_id ?? ''),
+      ...aprobadoresDeConfig((linea.data as { config_extra?: unknown } | null)?.config_extra),
+    ].filter(Boolean)),
+  ]
+  if (staffIds.length === 0) return []
+  const st = await svc.from('staff').select('profile_id').eq('workspace_id', negocio.workspace_id).in('id', staffIds)
+  if (st.error) return []
+  const permitidos = new Set(((st.data ?? []) as Array<{ profile_id: string | null }>).map((s) => s.profile_id ?? '').filter(Boolean))
+  return todos.filter((p) => permitidos.has(p))
+}
+
+/** Puro: quita las filas cuyo negocio está en `ocultos`. Filas sin negocio se quedan. */
+export function sinOcultos<T>(filas: readonly T[], ocultos: ReadonlySet<string>, negocioDe: (f: T) => unknown): T[] {
+  if (ocultos.size === 0) return [...filas]
+  return filas.filter((f) => {
+    const id = negocioDe(f)
+    return !(typeof id === 'string' && ocultos.has(id))
+  })
+}

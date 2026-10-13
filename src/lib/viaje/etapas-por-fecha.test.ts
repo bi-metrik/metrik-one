@@ -143,6 +143,25 @@ describe('entrar a En viaje (F6-1, F6-2)', () => {
     expect(tablas.activity_log).toHaveLength(1)
     expect(tablas.notificaciones.filter((n) => (n.metadata as Fila).motivo === 'viaja_con_saldo')).toHaveLength(2)
   })
+
+  it('viaje de prueba (F8-1): el aviso va solo a quien lo lleva y a la aprobadora de su línea, no al supervisor real', async () => {
+    neg().metadata = { es_prueba: true }
+    ;(tablas.lineas_negocio[0].config_extra as Fila).aprobaciones = { staff_ids: ['s-dp'] }
+    tablas.staff.push({ id: 's-dp', workspace_id: WS, profile_id: 'p-dp' })
+    // `destinatarios_negocio` suma al supervisor del área cuando falta un responsable: es staff real.
+    const rpcOriginal = svc.rpc
+    svc.rpc = async (fn: string, args: Fila) => {
+      const r = await rpcOriginal(fn, args)
+      return { ...r, data: [...r.data, { profile_id: 'p-supervisor-real' }] }
+    }
+    try {
+      await correr('2026-11-21')
+    } finally {
+      svc.rpc = rpcOriginal
+    }
+    const avisos = tablas.notificaciones.filter((n) => (n.metadata as Fila).motivo === 'viaja_con_saldo')
+    expect(avisos.map((a) => a.destinatario_id).sort()).toEqual(['p-dani', 'p-dp'])
+  })
 })
 
 describe('salir de En viaje', () => {

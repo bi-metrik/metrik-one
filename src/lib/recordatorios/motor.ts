@@ -100,10 +100,33 @@ class Destinatarios {
     const llave = `${negocio.id}|${destino}`
     const hit = this.cache.get(llave)
     if (hit) return hit
-    const ids = await this.resolver(destino, negocio, linea)
+    let ids = await this.resolver(destino, negocio, linea)
+    // El negocio de prueba (F8-1) no le avisa a nadie que no lo lleve o lo apruebe: ni el
+    // respaldo del área entera ni el supervisor de `destinatarios_negocio` alcanzan al staff real.
+    if (negocio.es_prueba) {
+      const permitidos = new Set(await this.dePrueba(negocio, linea))
+      ids = ids.filter((p) => permitidos.has(p))
+    }
     const unicos = [...new Set(ids.filter(Boolean))]
     this.cache.set(llave, unicos)
     return unicos
+  }
+
+  /** Perfiles que pueden enterarse del negocio de prueba: sus responsables y los aprobadores de su línea. */
+  private async dePrueba(negocio: NegocioFuente, linea: Linea): Promise<string[]> {
+    const llave = `${negocio.id}|__prueba`
+    const hit = this.cache.get(llave)
+    if (hit) return hit
+    const resp = sinError<{ staff_id: string }>(
+      await this.svc.from('negocio_responsables').select('staff_id').eq('negocio_id', negocio.id),
+      'negocio_responsables',
+    )
+    const perfiles = await this.perfilesDeStaff(
+      [...new Set([...resp.map((r) => r.staff_id), ...aprobadoresDeConfig(linea.config_extra)])],
+      negocio.workspace_id,
+    )
+    this.cache.set(llave, perfiles)
+    return perfiles
   }
 
   private async perfilesDeStaff(staffIds: string[], workspaceId: string): Promise<string[]> {
@@ -335,6 +358,7 @@ async function cargar(svc: Db, lineas: Linea[], fuentes: Set<string>) {
     aplazado_para: typeof n.metadata?.seguimiento?.aplazado_para === 'string' ? n.metadata.seguimiento.aplazado_para : null,
     precio_aprobado: n.precio_aprobado === undefined || n.precio_aprobado === null ? null : Number(n.precio_aprobado),
     encuesta_respondida: n.metadata?.postventa?.calificacion !== undefined && n.metadata?.postventa?.calificacion !== null,
+    es_prueba: (n.metadata as { es_prueba?: unknown } | null)?.es_prueba === true,
   }))
   const negocioIds = negocios.map((n) => n.id)
 

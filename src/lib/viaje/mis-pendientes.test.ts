@@ -60,6 +60,14 @@ describe('Mis pendientes (F6-9)', () => {
     expect(pendientesDe([viaje({ esPrueba: true })], DANI, HOY)).toHaveLength(1)
   })
 
+  it('la aprobación del viaje de prueba le llega a la dirección de prueba (aprobadora de SU línea), no a Edgar (F8-1)', () => {
+    const DP = { staffId: 's-dp', esDireccion: true, areas: [] }
+    const aprob = { id: 'apr-p', tipo: 'medio_personal', entidad_tipo: 'servicio', entidad_id: 'hotel', estado: 'solicitada' as const, motivo: null, detalle: { monto: 1_180_000 }, solicitada_por_nombre: 'OP', decidida_at: null }
+    const v = viaje({ esPrueba: true, comercialStaffId: 's-cp', operacionesStaffId: 's-op', aprobadoresStaffIds: ['s-dp'], aprobaciones: [aprob] })
+    expect(pendientesDe([v], EDGAR, HOY)).toEqual([])
+    expect(pendientesDe([v], DP, HOY).some(p => p.accion?.tipo === 'aprobar')).toBe(true)
+  })
+
   it('el vacío dice lo próximo', () => {
     const v = viaje({ pagos: [{ monto: 3_242_000, fecha: '2026-10-12' }], servicios: [] })
     expect(pendientesDe([v], DANI, HOY)).toEqual([])
@@ -78,5 +86,14 @@ describe('tablero de margen (F6-8)', () => {
     expect(t.viajes.map(v => v.negocioId)).toEqual(['a', 'b'])
     expect(t.proveedores).toEqual([{ proveedor: 'Andino', desviacion: 90_000 }, { proveedor: 'LATAM', desviacion: -40_000 }])
     expect(t.pctTarjetasPersonales).toBe(30.9)
+  })
+
+  it('el cierre de prueba suma solo para quien lo lleva o lo aprueba (visibles, F8-1)', () => {
+    const cierres = [
+      { negocioId: 'a', nombre: 'A', esPrueba: false, mes: '2026-12', margenReal: 660_000, ingresoNeto: 3_900_000, margenCotizado: 800_000, servicios: [], gastosProveedor: [] },
+      { negocioId: 'p', nombre: 'PRUEBA', esPrueba: true, mes: '2026-12', margenReal: 100_000, ingresoNeto: 1_000_000, margenCotizado: 0, servicios: [], gastosProveedor: [] },
+    ]
+    expect(tableroDeMargen(cierres).viajes.map(v => v.negocioId)).toEqual(['a'])
+    expect(tableroDeMargen(cierres, new Set(['p'])).viajes.map(v => v.negocioId)).toEqual(['a', 'p'])
   })
 })
