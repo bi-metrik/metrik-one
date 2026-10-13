@@ -1,5 +1,6 @@
 'use server'
 
+import { leerConfigPorPasos } from '@/lib/cotizaciones/por-pasos'
 import { accionIdempotente } from '@/lib/idempotencia/accion'
 import { MENSAJE_EN_CURSO } from '@/lib/idempotencia/clave'
 import { getWorkspace } from '@/lib/actions/get-workspace'
@@ -6751,7 +6752,7 @@ export async function getNegocioDetalleCompleto(id: string): Promise<{
     db(supabase).from('negocios').select('metadata').eq('id', id).maybeSingle(),
     // UNA sola lectura de `workspaces`: antes eran DOS al MISMO registro, una para
     // el gate del honorario y otra para modules/config_extra.
-    db(supabase).from('workspaces').select('modules, config_extra').eq('id', workspaceId).single(),
+    db(supabase).from('workspaces').select('modules, config_extra, cotizacion_template_slug').eq('id', workspaceId).single(),
     // Visibilidad de operator: solo se pregunta cuando el rol lo exige.
     role === 'operator'
       ? db(supabase).from('negocio_responsables').select('staff_id').eq('negocio_id', id)
@@ -6996,6 +6997,11 @@ export async function getNegocioDetalleCompleto(id: string): Promise<{
   const staffIdsPrecio = (((wsRow as { config_extra?: { correccion_precio?: { staff_ids?: unknown } } } | null)
     ?.config_extra?.correccion_precio?.staff_ids ?? []) as string[])
   const puedeCorregirPrecioWs = role === 'owner' || (!!staffId && staffIdsPrecio.includes(staffId))
+  // La cotización por pasos (C4, decisión J): con el interruptor encendido y la plantilla de viaje,
+  // el «Enviar» del bloque Cotización lleva a «Revisar y enviar». La página de la cotización vuelve
+  // a comprobar las cuatro condiciones; esto solo decide a dónde lleva el botón.
+  const cotizacionPorPasos = leerConfigPorPasos((wsRow as { config_extra?: unknown } | null)?.config_extra).activo
+    && (wsRow as { cotizacion_template_slug?: string | null } | null)?.cotizacion_template_slug === 'trappvel'
 
   // Cargar config_extra de los bloque_configs
   const bloqueConfigsExtra: Record<string, Record<string, unknown>> = {}
@@ -8171,6 +8177,7 @@ export async function getNegocioDetalleCompleto(id: string): Promise<{
     if (defTipo === 'cotizacion' && configSeguimiento(lineaConfigExtra).activo) {
       enrichedConfigExtra._seguimiento = true
     }
+    if (defTipo === 'cotizacion' && cotizacionPorPasos) enrichedConfigExtra._porPasos = true
     if (defTipo === 'servicios' && serviciosViaje) enrichedConfigExtra._servicios = serviciosViaje
     if (defTipo === 'propuesta_economica' && puedeCorregirPrecioWs) {
       enrichedConfigExtra._puedeCorregirPrecio = true

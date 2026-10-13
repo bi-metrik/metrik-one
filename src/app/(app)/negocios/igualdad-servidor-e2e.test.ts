@@ -143,7 +143,11 @@ import { recalcularTotales } from './cotizacion-actions'
 import { generateCotizacionPDF } from './cotizacion-pdf-actions'
 import { aceptarCotizacionNegocio, opcionesDeAprobacion } from './[id]/cotizacion/actions'
 import { cambiarOpcionDeItinerario } from './itinerario-actions'
+import { deshacerPorPasos, elegirOpcionEnTarifa } from './por-pasos-actions'
+import { tablasPorPasos } from '../../../../test/caso-por-pasos'
 import { POST as aceptarPorLaRuta } from '@/app/api/cotizaciones/[id]/aceptar-captura/route'
+import { POST as aceptarLotePorLaRuta } from '@/app/api/cotizaciones/[id]/aceptar-lote/route'
+import { onceDelCasoFijo } from '../../../../test/caso-once-pantallazos'
 import { firmarBorrador } from '@/lib/cotizaciones/firma-borrador'
 import { lecturaManual } from '@/lib/cotizaciones/ingreso-manual'
 import { ranuraPorSlug } from '@/lib/cotizaciones/ranuras-pantallazo'
@@ -380,6 +384,26 @@ async function idasDeElegirOpcion(): Promise<number> {
 }
 
 /**
+ * C4 · «Deshacer» (y la escritura que deshace): la opción de una tarifa en la cotización por pasos,
+ * con el interruptor encendido de verdad (las cuatro condiciones). Entra al presupuesto con su
+ * pieza, como decía C0.
+ */
+async function idasDeDeshacer(): Promise<{ elegir: number; deshacer: number }> {
+  base.tablas = tablasPorPasos()
+  base.secuencia = 0
+  base.registro = []
+  sesion.workspaceId = WS_TRAPPVEL
+  await recalcularTotales(COT_SAN_ANDRES)
+  tomarRegistro()
+  const r = await elegirOpcionEnTarifa('tf-premium', 'actividad: Cayo Cangrejo', 'a-cayo-compartida')
+  expect(r.success, (r as { error?: string }).error).toBe(true)
+  const elegir = tomarRegistro().length
+  const d = await deshacerPorPasos({ tipo: 'eleccion', cotizacionId: COT_SAN_ANDRES, itinerarioId: 'tf-premium', grupo: 'actividad: Cayo Cangrejo', escrita: 'a-cayo-compartida', anterior: 'a-cayo-privada' })
+  expect(d.success, (d as { error?: string }).error).toBe(true)
+  return { elegir, deshacer: tomarRegistro().length }
+}
+
+/**
  * «Aceptar» UNO desde la bandeja, por la ruta de verdad (`aceptar-captura`): un traslado nuevo
  * sobre el caso fijo ya armado. Cuenta las idas de la aceptación entera, con su recálculo.
  */
@@ -418,6 +442,44 @@ async function idasDeAceptarUno(): Promise<{ idas: number; sesiones: number }> {
 }
 
 /**
+ * C5 · «Aceptar los 11 en lote» (V4, V5): los 11 del caso fijo sobre la cotización por pasos
+ * VACÍA, por la ruta de verdad (`aceptar-lote`), con un solo recálculo al final. La lancha privada
+ * va como «Otra opción de» la compartida del mismo lote, como la elige quien cotiza.
+ */
+async function idasDeAceptarLote(): Promise<{ idas: number; sesiones: number }> {
+  base.tablas = tablasPorPasos()
+  base.tablas.items = []
+  base.tablas.rubros = []
+  base.tablas.cotizacion_itinerarios = []
+  base.tablas.itinerario_opciones = []
+  base.secuencia = 0
+  base.registro = []
+  sesion.workspaceId = WS_TRAPPVEL
+  const filas = onceDelCasoFijo().map(p => {
+    const lecturaJson = JSON.stringify(p.lectura)
+    const hermana = p.id === 'cap-caso-10'
+    return {
+      id: p.id,
+      borrador: {
+        tipo: p.tipo, lecturaJson, firma: firmarBorrador(COT_SAN_ANDRES, p.tipo, lecturaJson)!, pistas: p.pistas,
+        decision: hermana ? 'hermana' : 'auto', destinoId: null, imagen: null, correcciones: null, idAceptacion: p.id,
+      },
+      ...(hermana ? { destinoCaptura: 'cap-caso-09' } : {}),
+    }
+  })
+  tomarRegistro()
+  sesion.n = 0
+  const res = await aceptarLotePorLaRuta(
+    new Request(`https://x/api/cotizaciones/${COT_SAN_ANDRES}/aceptar-lote`, { method: 'POST', body: JSON.stringify({ filas }) }),
+    { params: Promise.resolve({ id: COT_SAN_ANDRES }) },
+  )
+  const json = await res.json() as { ok: boolean; mensaje?: string; resultados: { resultado: { ok: boolean } }[] }
+  expect(json.ok, json.mensaje).toBe(true)
+  expect(json.resultados.every(r => r.resultado.ok)).toBe(true)
+  return { idas: tomarRegistro().length, sesiones: sesion.n }
+}
+
+/**
  * «Abrir la cotización»: la página del servidor (`[id]/cotizacion/[cotId]/page.tsx`), con el
  * marco del negocio de Trappvel. Cuenta las idas de la carga, sin pintar nada.
  */
@@ -448,6 +510,8 @@ const corridas: Record<string, { apagado: Awaited<ReturnType<typeof correr>>; en
 let idasElegir = 0
 let aceptarUno = { idas: 0, sesiones: 0 }
 let abrir = { idas: 0, sesiones: 0, escrituras: 0 }
+let porPasos = { elegir: 0, deshacer: 0 }
+let lote = { idas: 0, sesiones: 0 }
 
 beforeAll(async () => {
   // El reloj fijo: las fechas que el servidor escribe (aprobación, registro) no pueden variar.
@@ -459,6 +523,8 @@ beforeAll(async () => {
   vi.stubEnv('SUPABASE_SERVICE_ROLE_KEY', 'secreto-de-prueba')
   aceptarUno = await idasDeAceptarUno()
   abrir = await idasDeAbrir()
+  porPasos = await idasDeDeshacer()
+  lote = await idasDeAceptarLote()
 }, 120_000)
 
 afterAll(() => {
@@ -482,6 +548,12 @@ function presupuestoMedido(): Record<string, number> {
   p['trappvel-caso-fijo · abrir la cotización · sesiones'] = abrir.sesiones
   // N7 («abrir no escribe») se exige desde C1; aquí queda la línea base.
   p['trappvel-caso-fijo · abrir la cotización · escrituras'] = abrir.escrituras
+  // C4 · la forma por pasos: elegir la opción de una tarifa y deshacerlo.
+  p['trappvel-por-pasos · elegir opción en una tarifa'] = porPasos.elegir
+  p['trappvel-por-pasos · deshacer'] = porPasos.deshacer
+  // C5 · «Aceptar los 11 en lote», con un solo recálculo (V4).
+  p['trappvel-por-pasos · aceptar 11 en lote'] = lote.idas
+  p['trappvel-por-pasos · aceptar 11 en lote · sesiones'] = lote.sesiones
   for (const e of ESCENARIOS) {
     const { sesiones } = corridas[e.nombre].apagado
     p[`${e.nombre} · recalcular · sesiones`] = sesiones.recalcular

@@ -1989,6 +1989,7 @@ function BloqueRenderer({
           cotizaciones={cotizacionesNegocio}
           skipEnviar={configExtra?.skip_enviar === true}
           pedirOrigenAlDuplicar={configExtra?._seguimiento === true}
+          porPasos={configExtra?._porPasos === true}
           // Corregir es de la etapa VIVA. Desde el historial la copia se ve y no se
           // toca — mismo criterio que el registro de pagos de BloqueCobros.
           puedeCorregir={

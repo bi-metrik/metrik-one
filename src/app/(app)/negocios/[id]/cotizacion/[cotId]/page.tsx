@@ -3,6 +3,7 @@ import { getEstadoItinerarios } from '@/app/(app)/negocios/itinerario-actions'
 import { getAdicionalesDeCotizacion } from '@/app/(app)/negocios/adicional-actions'
 import { getPoliticaRecargo } from '@/app/(app)/negocios/recargo-actions'
 import { getSalidaDeCotizacion } from '@/app/(app)/negocios/margen-salida-actions'
+import { getPedidoDeAutorizacion } from '@/app/(app)/negocios/por-pasos-actions'
 import { getTextoCliente } from '@/app/(app)/negocios/documento-cliente-actions'
 import { getFiscalProfile } from '@/app/(app)/config/fiscal-actions'
 import { getWorkspace } from '@/lib/actions/get-workspace'
@@ -14,7 +15,8 @@ import { cargarVistaNegocio } from '@/app/(app)/negocios/[id]/vista-negocio'
 import { ProveedorTotalVivo } from '@/app/(app)/negocios/total-vivo'
 import { leerViajeDelNegocio } from '@/lib/cotizaciones/viaje-negocio'
 import type { NivelDetalle } from '@/lib/cotizaciones/detalle-viaje'
-import { lineaCotizaPorTipo } from '@/lib/cotizaciones/lineas-por-tipo'
+import { leerLineasPorTipo } from '@/lib/cotizaciones/por-pasos-datos'
+import { estadoPorPasos } from '@/lib/cotizaciones/por-pasos'
 import { configSeguimiento } from '@/lib/negocios/seguimiento'
 import { entradaAsiPuedesPagar } from '@/lib/viaje/asi-puedes-pagar'
 import { todayBogotaISO } from '@/lib/dates/bogota'
@@ -39,10 +41,14 @@ export const maxDuration = 60
 
 export default async function CotizacionNegocioPage({
   params,
+  searchParams,
 }: {
   params: Promise<{ id: string; cotId: string }>
+  /** `?paso=tarifas|revisar`: la cotización por pasos abre en ese paso (decisión J). */
+  searchParams?: Promise<{ paso?: string }>
 }) {
   const { id, cotId } = await params
+  const { paso } = (await searchParams) ?? {}
 
   // La hora del servidor ANTES de leer: el editor del viaje la compara con su propia lectura
   // para pintar la más nueva sin recargar (`lib/cotizaciones/vista-fresca.ts`).
@@ -252,13 +258,7 @@ export default async function CotizacionNegocioPage({
   if (negocioLineaId) {
     try {
       const { supabase: sbTipos } = await getWorkspace()
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      const { data: bloquesLinea, error: errTipos } = await (sbTipos as any)
-        .from('bloque_configs')
-        .select('fields:config_extra->fields, etapas_negocio!inner(linea_id)')
-        .eq('etapas_negocio.linea_id', negocioLineaId)
-      if (errTipos) console.warn('[cotizacion] no se pudo leer si la línea cotiza por tipo:', errTipos.message)
-      else lineasPorTipo = lineaCotizaPorTipo(((bloquesLinea ?? []) as { fields: unknown }[]).map(b => b.fields))
+      lineasPorTipo = await leerLineasPorTipo(sbTipos, negocioLineaId)
     } catch {
       // Sin respuesta, lo de siempre: nombre libre.
     }
@@ -273,6 +273,10 @@ export default async function CotizacionNegocioPage({
   // final (hallazgo 33: Trappvel no). Si no se puede leer, se pinta, como siempre.
   let configIva: ConfigIvaCotizacion = CONFIG_IVA_POR_DEFECTO
   let mostrarResumenFiscal = true
+  // El interruptor de la cotización por pasos (C1): sale de la MISMA fila, sin consultas de
+  // más. Si no se puede leer, apagado: la pantalla de siempre.
+  let configWorkspace: unknown = null
+  let plantillaWorkspace: string | null = null
   try {
     const { supabase: sbIva, workspaceId: wsIva } = await getWorkspace()
     if (wsIva) {
@@ -285,6 +289,8 @@ export default async function CotizacionNegocioPage({
       const fila = wsRow as { config_extra?: unknown; cotizacion_template_slug?: string | null } | null
       configIva = leerConfigIvaCotizacion(fila?.config_extra)
       mostrarResumenFiscal = plantillaMuestraResumenFiscal(fila?.cotizacion_template_slug)
+      configWorkspace = fila?.config_extra ?? null
+      plantillaWorkspace = fila?.cotizacion_template_slug ?? null
     }
   } catch {
     // Sin respuesta, el IVA de siempre.
@@ -296,8 +302,24 @@ export default async function CotizacionNegocioPage({
     politicaLinea,
   )
 
+  // ¿Se trabaja por pasos? Las cuatro condiciones (`por-pasos.ts`), calculadas en el servidor.
+  // Gobierna solo la pantalla: la lectura del total, el IVA y el PDF no lo miran.
+  const estadoPasos = estadoPorPasos({
+    lineasPorTipo,
+    plantilla: plantillaWorkspace,
+    configWorkspace,
+    estado: (cotizacion as { estado?: string | null }).estado ?? null,
+  })
+
+  // Solo con la forma por pasos: el pedido de autorización que espera al dueño. Apagada, ninguna
+  // consulta de más (la carga de la página es la de siempre).
+  const pedidoAutorizacion = estadoPasos.encendido ? await getPedidoDeAutorizacion(cotId).catch(() => null) : null
+
   const editor = (
     <CotizacionEditor
+      porPasos={estadoPasos}
+      pedidoAutorizacion={pedidoAutorizacion}
+      pasoInicial={paso === 'revisar' ? 3 : paso === 'tarifas' ? 2 : 1}
       oportunidadId={id}
       // Con los tipos regenerados, `convencion_margen` llega como `string` de la base y el
       // editor la declara como la unión de sus dos valores (el CHECK de la columna). El cast

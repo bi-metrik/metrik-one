@@ -30,6 +30,7 @@ import { esBaseIvaLinea, type BaseIvaLinea } from '@/lib/fiscal/iva-cotizacion'
 import { borrarImagenesDeCaptura, imagenesAlBorrarOpcion } from '@/lib/cotizaciones/imagen-captura'
 import { confirmadaVigente, leerTarifaPax } from '@/lib/cotizaciones/tarifa-pasajero'
 import { precioDeLineaConManuales } from '@/lib/cotizaciones/tarjeta-opcion'
+import { diferirRecalculo } from '@/lib/cotizaciones/recalculo-diferido'
 
 export async function getCotizaciones(oportunidadId: string) {
   const { supabase, error } = await getWorkspace()
@@ -996,6 +997,9 @@ export async function reconciliarAjuste(cotizacionId: string, valorTotalDeseado:
  * servidor y la pantalla no puedan discrepar sobre cuánto vale la cotización.
  */
 export async function recalcularTotales(cotizacionId: string) {
+  // «Aceptar los N» (C5): dentro del lote no se recalcula; el lote recalcula una vez al final.
+  // Fuera del lote es `false` y no cuesta ninguna ida (`recalculo-diferido.ts`).
+  if (diferirRecalculo(cotizacionId)) return { success: true, diferido: true }
   const { supabase, workspaceId, staffId, error } = await getWorkspace()
   if (error) return { success: false, error: 'No autenticado' }
 

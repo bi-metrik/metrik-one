@@ -181,6 +181,8 @@ export default function TarjetaOpcion({
   onGuardarNota,
   onCambio,
   actividad = null,
+  porPasos = null,
+  autorizador = null,
 }: {
   itemId: string
   numero: number
@@ -231,6 +233,15 @@ export default function TarjetaOpcion({
    * traslado, que se ven como siempre.
    */
   actividad?: ActividadDeTarjeta | null
+  /**
+   * La cotización por pasos (interruptor encendido, C4). El estado Incluido · Opcional · No va es
+   * del SERVICIO (lo pinta su tarjeta), así que aquí no va el check; eliminar no pregunta (deja
+   * «Deshacer»); el «⋯» trae «Separar» y «Mover esta opción a…»; y la opción dice en qué tarifas
+   * va. `null` = la tarjeta de siempre.
+   */
+  porPasos?: { enTarifas: string[] | null; menuExtra: (cerrar: () => void) => ReactNode } | null
+  /** Quién autoriza bajo el mínimo (el dueño del workspace, de la configuración): P7. */
+  autorizador?: string | null
 }) {
   // Lo que el servidor acaba de guardar desde «Corregir datos» se pinta sin esperar el
   // refresco (COT-2026-0019: la ficha siguió diciendo las fechas viejas después de guardar).
@@ -343,7 +354,17 @@ export default function TarjetaOpcion({
     })
   }
 
-  const menuOpcion = (cerrar: () => void) => confirmaBorrar ? (
+  const menuOpcion = (cerrar: () => void) => porPasos ? (
+    <>
+      <ItemMenu onClick={() => { cerrar(); setEditandoFicha(true); if (!abierta) onAlternar() }}>Corregir datos</ItemMenu>
+      {habitaciones.length <= 1 && (
+        <ItemMenu onClick={() => { cerrar(); entradaPantallazo.current?.click() }}>Cambiar pantallazo</ItemMenu>
+      )}
+      {porPasos.menuExtra(cerrar)}
+      <SeparadorMenu />
+      <ItemMenu peligro onClick={() => { cerrar(); onEliminar(nombre) }}>Eliminar opción</ItemMenu>
+    </>
+  ) : confirmaBorrar ? (
     <span className="flex flex-col gap-2 px-2.5 py-2 text-[13px]" data-confirma-borrar>
       <span>{preguntaEliminarOpcion(nombre, { esHotel, tieneLectura: !!tarifa.casillas?.grupo_completo, manual: esManual(tarifa.casillas?.grupo_completo) })}</span>
       <span className="flex gap-2">
@@ -377,7 +398,7 @@ export default function TarjetaOpcion({
       {...(actividad ? { 'data-actividad-estado': act.estado } : {})}
     >
       <div className="flex items-center gap-1.5 py-2.5 pl-3 pr-2">
-        {actividad && (
+        {actividad && !porPasos && (
           <CheckVa va={!noVa} editable={editable} ocupado={act.ocupado} onCambio={va => act.marcar({ va })} />
         )}
         <button
@@ -393,6 +414,10 @@ export default function TarjetaOpcion({
               {vuelo && <PastillaAerolinea aerolinea={vuelo.aerolinea} numeroVuelo={vuelo.numeroVuelo} />}
               {nombre}
               {estrellas ? <span className="text-xs tracking-[1px] text-[#C98A00]" aria-label={`${estrellas} estrellas`}>{'★'.repeat(estrellas)}</span> : null}
+              {/* C5 · lo escrito a mano lleva su marca en la forma por pasos (Noor: «✎ a mano»). */}
+              {porPasos && esManual(tarifa.casillas?.grupo_completo ?? tarifa.habitaciones?.[0]?.lectura ?? null) && (
+                <span className="rounded-full bg-[#F1EEE7] px-2 py-0.5 text-[11px] font-semibold text-[#6E6A62]" title="Lo escribiste a mano" data-marca-a-mano>✎ a mano</span>
+              )}
             </span>
             {sinPantallazo ? (
               <span className="block text-[13px] text-[#6E6A62] max-sm:text-xs">pega el pantallazo</span>
@@ -400,6 +425,15 @@ export default function TarjetaOpcion({
               <span className="block text-[13px] text-[#6E6A62] max-sm:text-xs">{abierta ? subAbierta : subCerrada}</span>
             )}
             <span className="mt-0.5 hidden text-sm font-bold tabular-nums max-sm:block">{pesos(precioOpcion)}</span>
+            {porPasos?.enTarifas && (
+              <span className="mt-1 flex flex-wrap gap-1" data-en-tarifas>
+                {porPasos.enTarifas.length > 0
+                  ? porPasos.enTarifas.map(t => (
+                    <span key={t} className={`rounded-full border px-1.5 text-[10.5px] font-bold ${t === 'Recomendada' ? 'border-[#0E5C43] bg-[#EAF1EE] text-[#0E5C43]' : 'border-[#CFCAC0] text-[#6E6A62]'}`}>{t}</span>
+                  ))
+                  : <span className="rounded-full border border-[#CFCAC0] px-1.5 text-[10.5px] font-bold text-[#6E6A62]">En ninguna tarifa</span>}
+              </span>
+            )}
           </span>
         </button>
         {pendiente && (
@@ -430,14 +464,15 @@ export default function TarjetaOpcion({
         />
       </div>
 
-      {actividad?.soloVa && noVa && (
+      {actividad?.soloVa && noVa && !porPasos && (
         <div className="-mt-1 pb-2.5 pl-[50px] pr-3" data-vuelo-control>
           <p className="m-0 text-xs font-semibold text-[#6E6A62]" data-vuelo-no-va>{TEXTO_VUELO_NO_VA}</p>
         </div>
       )}
-      {actividad && !actividad.soloVa && (
+      {actividad && !actividad.soloVa && !(porPasos && act.estado !== 'incluida') && (
         <div className="-mt-1 pb-2.5 pl-[50px] pr-3" data-actividad-control>
           <ModoYDia
+            sinModo={!!porPasos}
             estado={act.estado}
             dia={act.dia}
             precioPorPersona={actividad.precioPorPersona}
@@ -510,6 +545,7 @@ export default function TarjetaOpcion({
             margenCotizacion={margenCotizacion}
             moneda={monedaDeTarifa(tarifa)}
             onCambio={onCambio}
+            autorizador={autorizador}
           />
 
           {!confirmada && respaldo}

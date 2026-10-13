@@ -182,13 +182,29 @@ export function esVueloDeLaCotizacion(item: ItemConDia): boolean {
 }
 
 /**
+ * ¿Es un HOTEL? Desde la cotización por pasos (etapa C, 2026-10-12) un hotel también puede «No
+ * va», como el vuelo: no suma, no entra a ninguna tarifa y no sale en el documento. Tampoco es
+ * una sugerencia: nunca cae a «Opcionales». Solo lo escribe la forma nueva
+ * (`estadoDeServicioPorPasos`); hasta ese día ninguna acción dejaba un hotel fuera del precio.
+ */
+export function esHotelDeLaCotizacion(item: ItemConDia): boolean {
+  if (item.es_ajuste === true) return false
+  return ranuraDeGrupo(item.grupo ?? null)?.slug === 'hotel_detalle'
+}
+
+/** Vuelo u hotel: van o no van, nunca «Opcional». */
+export function soloVaONoVa(item: ItemConDia): boolean {
+  return esVueloDeLaCotizacion(item) || esHotelDeLaCotizacion(item)
+}
+
+/**
  * ¿La línea PUEDE quedar fuera del precio? Una sugerencia (actividad, traslado, tour: sale en
- * «Opcionales» o no sale) o un vuelo que no va. Es la regla que leen `fueraDelPrecio` y los
- * guards de las acciones que escriben `entra_al_precio`: la base nunca guarda una marca que la
- * lectura ignore.
+ * «Opcionales» o no sale), o un vuelo u hotel que no va. Es la regla que leen `fueraDelPrecio` y
+ * los guards de las acciones que escriben `entra_al_precio`: la base nunca guarda una marca que
+ * la lectura ignore.
  */
 export function puedeQuedarFueraDelPrecio(item: ItemConDia): boolean {
-  return puedeSerSugerido(item) || esVueloDeLaCotizacion(item)
+  return puedeSerSugerido(item) || soloVaONoVa(item)
 }
 
 /**
