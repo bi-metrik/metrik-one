@@ -6,6 +6,7 @@ import {
   crearAdapterEpayco,
   faltaConfiguracionEpayco,
   firmaConfirmacion,
+  llavePublicaEpayco,
   leerRefMedioPagoEpayco,
   refMedioPagoEpayco,
   registrarClienteEpayco,
@@ -20,8 +21,8 @@ import {
 
 const ENV = {
   EPAYCO_HABILITADO: '1',
-  EPAYCO_PUBLIC_KEY: 'pub_123',
-  EPAYCO_PRIVATE_KEY: 'priv_456',
+  EPAYCO_PUBLIC_KEY_METRIK: 'pub_123',
+  EPAYCO_PRIVATE_KEY_METRIK: 'priv_456',
   EPAYCO_P_CUST_ID_CLIENTE: '901234',
   EPAYCO_P_KEY: 'pkey_789',
   VERCEL_ENV: 'preview',
@@ -48,6 +49,30 @@ describe('configuración y modo prueba', () => {
     expect(faltaConfiguracionEpayco({})).toMatch(/apagado/)
     expect(faltaConfiguracionEpayco({ EPAYCO_HABILITADO: '1' })).toMatch(/sin configurar/)
     expect(faltaConfiguracionEpayco(ENV)).toBeNull()
+  })
+  it('las llaves SIN sufijo _METRIK (otra cuenta de ePayco) no cuentan: sin configurar y no cobra', async () => {
+    const ajenas = {
+      EPAYCO_HABILITADO: '1',
+      EPAYCO_PUBLIC_KEY: 'pub_otra_cuenta',
+      EPAYCO_PRIVATE_KEY: 'priv_otra_cuenta',
+      EPAYCO_P_CUST_ID_CLIENTE: '901234',
+      EPAYCO_P_KEY: 'pkey_789',
+      VERCEL_ENV: 'preview',
+    }
+    expect(faltaConfiguracionEpayco(ajenas)).toMatch(/sin configurar/)
+    expect(llavePublicaEpayco(ajenas)).toBeNull()
+    const api = apiSimulada({ '/login': LOGIN })
+    const r = await registrarClienteEpayco(
+      {
+        cardTokenId: 'XCX92PZqBKfmcWFbA',
+        pagador: { tipoDocumento: 'NIT', documento: '900123456', nombre: 'Ana', apellido: 'Pérez', email: 'ana@cda.co', celular: '3001234567' },
+      },
+      { env: ajenas, fetch: api.f },
+    )
+    expect(r.ok).toBe(false)
+    expect(api.llamadas).toHaveLength(0)
+    // Con los dos juegos definidos, manda la de METRIK.
+    expect(llavePublicaEpayco({ ...ajenas, EPAYCO_PUBLIC_KEY_METRIK: 'pub_metrik' })).toBe('pub_metrik')
   })
   it('en modo prueba NO opera en el despliegue de producción (una tarjeta de prueba pagaría una cuota real)', () => {
     expect(faltaConfiguracionEpayco({ ...ENV, VERCEL_ENV: 'production' })).toMatch(/modo prueba/)

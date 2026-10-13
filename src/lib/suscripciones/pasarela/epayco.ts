@@ -37,13 +37,17 @@
  * ## Variables (solo servidor)
  *
  *   EPAYCO_HABILITADO=1          enciende la pasarela (sin esto, `adapterPara('epayco')` es null)
- *   EPAYCO_PUBLIC_KEY            llave pública (también la usa ePayco.js en el navegador)
- *   EPAYCO_PRIVATE_KEY           llave privada
+ *   EPAYCO_PUBLIC_KEY_METRIK     llave pública de METRIK IA S.A.S. (también la usa ePayco.js en el navegador)
+ *   EPAYCO_PRIVATE_KEY_METRIK    llave privada de METRIK IA S.A.S.
  *   EPAYCO_P_CUST_ID_CLIENTE     P_CUST_ID_CLIENTE, para verificar la firma de la confirmación
  *   EPAYCO_P_KEY                 P_KEY, para verificar la firma de la confirmación
  *   EPAYCO_PRODUCCION=1          cobros reales (sin esto: modo prueba)
  *   EPAYCO_API_BASE              opcional; por defecto https://apify.epayco.co
  *   EPAYCO_URL_CONFIRMACION      opcional; por defecto https://metrikone.co/api/webhooks/epayco
+ *
+ * ⚠️ `EPAYCO_PUBLIC_KEY` / `EPAYCO_PRIVATE_KEY` (sin sufijo) son las llaves de OTRA cuenta de ePayco
+ * (conciliación de un cliente: `src/lib/epayco.ts` y scripts). Este adaptador NO las lee nunca: con
+ * ellas cobraría a los clientes de Valida en la cuenta equivocada.
  *
  * ⚠️ Sin verificar contra una cuenta real (no hay llaves): la forma exacta de las respuestas sale de
  * los ejemplos de la colección oficial. Antes del primer cobro real se corre el recorrido en preview
@@ -82,14 +86,14 @@ export function epaycoEnPruebas(env: Env = process.env): boolean {
 
 /** La llave pública, para ePayco.js. No es secreta, pero sale del servidor (no es `NEXT_PUBLIC_`). */
 export function llavePublicaEpayco(env: Env = process.env): string | null {
-  return valor(env, 'EPAYCO_PUBLIC_KEY')
+  return valor(env, 'EPAYCO_PUBLIC_KEY_METRIK')
 }
 
 /** Por qué ePayco no puede cobrar ahora, o `null`. */
 export function faltaConfiguracionEpayco(env: Env = process.env): string | null {
   if (!epaycoHabilitado(env)) return 'ePayco está apagado (EPAYCO_HABILITADO). No se cobró nada.'
-  if (!valor(env, 'EPAYCO_PUBLIC_KEY') || !valor(env, 'EPAYCO_PRIVATE_KEY')) {
-    return 'ePayco sin configurar: faltan EPAYCO_PUBLIC_KEY o EPAYCO_PRIVATE_KEY. No se cobró nada.'
+  if (!valor(env, 'EPAYCO_PUBLIC_KEY_METRIK') || !valor(env, 'EPAYCO_PRIVATE_KEY_METRIK')) {
+    return 'ePayco sin configurar: faltan EPAYCO_PUBLIC_KEY_METRIK o EPAYCO_PRIVATE_KEY_METRIK. No se cobró nada.'
   }
   if (epaycoEnPruebas(env) && env.VERCEL_ENV === 'production') {
     return 'ePayco está en modo prueba y este es el despliegue de producción: no se cobra con tarjetas de prueba sobre cuotas reales.'
@@ -146,8 +150,8 @@ async function pedir(
 /** `POST /login` con Basic → JWT. Nunca se registra ni la llave ni el token. */
 async function iniciarSesion(deps: DepsEpayco): Promise<{ ok: true; token: string } | { ok: false; error: string; reintentable: boolean }> {
   const env = deps.env ?? process.env
-  const publica = valor(env, 'EPAYCO_PUBLIC_KEY')
-  const privada = valor(env, 'EPAYCO_PRIVATE_KEY')
+  const publica = valor(env, 'EPAYCO_PUBLIC_KEY_METRIK')
+  const privada = valor(env, 'EPAYCO_PRIVATE_KEY_METRIK')
   if (!publica || !privada) return { ok: false, error: 'ePayco sin llaves.', reintentable: false }
   const r = await pedir(deps, '/login', { basic: Buffer.from(`${publica}:${privada}`, 'utf8').toString('base64') })
   if (!r.ok) return r
