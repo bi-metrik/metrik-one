@@ -10,6 +10,7 @@ import {
   piezaEncendida,
   porPasos,
   PIEZAS_POR_PASOS,
+  PIEZAS_SOLO_CON_TRUE,
   rechazoPorPasos,
   type EntradaPorPasos,
 } from './por-pasos'
@@ -66,6 +67,12 @@ describe('C1 · las piezas', () => {
     expect(config.piezas.toda_opcion_en_tarifas).toBe(true)
   })
 
+  it('C5 · `modelo_destino` solo enciende con `true` explícito (M4: sin la corrida real de M1 queda apagada)', () => {
+    expect(leerConfigPorPasos({ cotizacion_por_pasos: { activo: true } }).piezas.modelo_destino).toBe(false)
+    expect(leerConfigPorPasos({ cotizacion_por_pasos: { activo: true, piezas: { modelo_destino: 'true' } } }).piezas.modelo_destino).toBe(false)
+    expect(leerConfigPorPasos({ cotizacion_por_pasos: { activo: true, piezas: { modelo_destino: true } } }).piezas.modelo_destino).toBe(true)
+  })
+
   it('con el maestro apagado, las piezas no cuentan', () => {
     const config = leerConfigPorPasos({ cotizacion_por_pasos: { activo: false, piezas: { modelo_destino: true } } })
     expect(Object.values(config.piezas).every(v => v === false)).toBe(true)
@@ -75,7 +82,7 @@ describe('C1 · las piezas', () => {
     const enviada = estadoPorPasos({ ...TODO, estado: 'enviada' })
     for (const p of PIEZAS_POR_PASOS) expect(piezaEncendida(enviada, p)).toBe(false)
     const ok = estadoPorPasos(TODO)
-    for (const p of PIEZAS_POR_PASOS) expect(piezaEncendida(ok, p)).toBe(true)
+    for (const p of PIEZAS_POR_PASOS) expect(piezaEncendida(ok, p), p).toBe(!PIEZAS_SOLO_CON_TRUE.has(p))
   })
 
   it('el rechazo del servidor dice qué hacer', () => {

@@ -35,6 +35,11 @@
  * sin deploy, no para tener que encender seis claves. `margen_por_tarifa` es de C7 (segunda
  * entrega) y hoy no la lee nadie.
  *
+ * ⚠️ La excepción es `modelo_destino` (C5): se enciende solo con `true` explícito. Vera (M4) pide
+ * que quede apagada mientras no se pruebe que el modelo acierta igual o mejor que las reglas (M1)
+ * con una corrida real, y esa corrida no se ha hecho. Apagada, la frase de la bandeja sale de las
+ * reglas de siempre.
+ *
  * Volver atrás = poner `activo: false` (o borrar la clave). Sin deploy.
  */
 
@@ -48,6 +53,9 @@ export const PIEZAS_POR_PASOS = [
 ] as const
 
 export type PiezaPorPasos = (typeof PIEZAS_POR_PASOS)[number]
+
+/** Las piezas que no encienden solas con el maestro: piden `true` explícito (ver arriba). */
+export const PIEZAS_SOLO_CON_TRUE: ReadonlySet<PiezaPorPasos> = new Set<PiezaPorPasos>(['modelo_destino'])
 
 export interface ConfigPorPasos {
   /** El maestro, leído de forma estricta. */
@@ -75,7 +83,7 @@ export function leerConfigPorPasos(configExtraWorkspace: unknown): ConfigPorPaso
     ? (bloque.piezas as Record<string, unknown>)
     : {}
   const piezas = Object.fromEntries(
-    PIEZAS_POR_PASOS.map(p => [p, piezasCrudas[p] !== false]),
+    PIEZAS_POR_PASOS.map(p => [p, PIEZAS_SOLO_CON_TRUE.has(p) ? piezasCrudas[p] === true : piezasCrudas[p] !== false]),
   ) as Record<PiezaPorPasos, boolean>
   return { activo: true, piezas }
 }

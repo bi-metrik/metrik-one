@@ -12,16 +12,23 @@ export const runtime = 'nodejs'
 
 export async function POST(req: Request, { params }: { params: Promise<{ id: string }> }) {
   const { id } = await params
-  let cuerpo: { tipo?: unknown; datos?: unknown } | null = null
+  let cuerpo: { tipo?: unknown; datos?: unknown; porPasos?: unknown } | null = null
   try {
-    cuerpo = (await req.json()) as { tipo?: unknown; datos?: unknown }
+    cuerpo = (await req.json()) as { tipo?: unknown; datos?: unknown; porPasos?: unknown }
   } catch {
     cuerpo = null
   }
-  if (!id || !cuerpo || (cuerpo.tipo !== 'hotel' && cuerpo.tipo !== 'traslado') || !cuerpo.datos || typeof cuerpo.datos !== 'object') {
+  // «✎ Escríbelo a mano» de la cotización por pasos (C5) suma vuelo y actividad; el servidor
+  // vuelve a comprobar el interruptor. Sin la marca, solo hotel y traslado, como siempre.
+  const porPasos = cuerpo?.porPasos === true
+  const tipoValido = cuerpo?.tipo === 'hotel' || cuerpo?.tipo === 'traslado' || (porPasos && (cuerpo?.tipo === 'vuelo' || cuerpo?.tipo === 'actividad'))
+  if (!id || !cuerpo || !tipoValido || !cuerpo.datos || typeof cuerpo.datos !== 'object') {
     registrarEnBandeja('warn', { ruta: 'lectura-manual', codigo: 'PETICION', cotizacionId: id ?? '', bytesImagen: null })
     return NextResponse.json({ ok: false, codigo: 'PETICION', mensaje: 'El formulario llegó incompleto. Vuelve a enviarlo.' }, { status: 400 })
   }
-  const { tipo, datos } = cuerpo
-  return NextResponse.json(await responderBandeja('lectura-manual', id, null, () => lecturaManualEnBorrador(id, tipo, datos)))
+  const { datos } = cuerpo
+  const tipo = cuerpo.tipo as 'hotel' | 'traslado' | 'vuelo' | 'actividad'
+  return NextResponse.json(await responderBandeja('lectura-manual', id, null, () => porPasos
+    ? lecturaManualEnBorrador(id, tipo, datos, { porPasos: true })
+    : lecturaManualEnBorrador(id, tipo, datos)))
 }

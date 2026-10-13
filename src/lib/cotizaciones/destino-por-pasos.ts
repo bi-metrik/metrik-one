@@ -31,13 +31,11 @@ import { listaDeTipos, tiposSinPrecio } from './precio-que-falta'
 import { definicionDeTipo, type TipoRanura } from './ranuras-cotizacion'
 import { etiquetaDeRanura, ranuraDeGrupo } from './ranuras-pantallazo'
 import {
-  casillasDe,
   composicionDeLectura,
   composicionDeLinea,
   leerTarifaPax,
   mismaComposicion,
   mismoTexto,
-  type ClaveCasilla,
   type Composicion,
   type LecturaCasilla,
   type TipoPasajero,
@@ -57,9 +55,9 @@ export interface DestinoPorPasos {
   itemId: string | null
   /** El grupo del servicio, para nombrarlo. `nueva`: `null`. */
   grupo: string | null
-  /** `completa`: la casilla que llena y los tipos de pasajero que trae. */
-  clave?: ClaveCasilla | null
+  /** `completa`: los tipos de pasajero que trae y el costo c/u de cada uno. */
   tipos?: TipoPasajero[] | null
+  precios?: Partial<Record<TipoPasajero, number>> | null
   /** La razón en una línea, en gris (o en ámbar si `duda`). */
   razon: string | null
   /** ONE no está seguro: queda aparte para que no se pierda (decisión 1). */
@@ -85,20 +83,31 @@ function nombreDeLinea(l: Linea): string {
   return (l.nombre ?? '').trim() || etiquetaDeRanura(l.grupo ?? null)
 }
 
+/** Lo que completa un pantallazo: la opción, los tipos que le faltaban y el costo c/u de cada uno. */
+export interface Completa {
+  itemId: string
+  grupo: string
+  nombre: string
+  tipos: TipoPasajero[]
+  /** Costo c/u por tipo, en la moneda de la opción, sacado del pantallazo nuevo. */
+  precios: Partial<Record<TipoPasajero, number>>
+}
+
 /**
  * ¿Este pantallazo COMPLETA el precio que le falta a una opción que ya está? (V4, P12)
  *
  * Misma identidad (aerolínea, ruta y fechas; o la misma actividad y fecha) que una opción de vuelo
- * o de actividad a la que le falta el precio del niño o del infante, leída con OTRA ocupación: la
- * de una de las búsquedas que esa opción pide («6 adultos y 1 niño»). Devuelve la opción, la
- * casilla que llena y los tipos que trae. `null` si no completa nada.
+ * o de actividad a la que le falta el precio del niño o del infante, leída con OTROS pasajeros
+ * (la búsqueda «6 adultos y 1 niño»). El precio que falta sale del pantallazo nuevo: de su fila por
+ * tipo, o restándole a su total lo de los adultos al precio que ya tiene la opción. `null` si no
+ * completa nada.
  */
 export function completaDe(
   tipo: TipoRanura,
   lectura: LecturaCasilla,
   lineas: readonly Linea[],
   composicionViaje: Composicion | null,
-): { itemId: string; grupo: string; nombre: string; clave: ClaveCasilla; tipos: TipoPasajero[] } | null {
+): Completa | null {
   const slug = slugDeTipo(tipo)
   if (!RANURAS_QUE_COMPLETAN.has(slug)) return null
   const ocupacion = composicionDeLectura(lectura)
@@ -111,13 +120,48 @@ export function completaDe(
     const primera = tarifa.casillas?.grupo_completo
     const c = composicionDeLinea(tarifa, composicionViaje)
     if (!primera || !c) continue
-    // La misma búsqueda que pide la opción, y que todavía no tiene su pantallazo.
-    const casilla = casillasDe(c, slug).find(k => k.clave !== 'grupo_completo' && !tarifa.casillas?.[k.clave] && mismaComposicion(k.ocupacion, ocupacion))
-    if (!casilla) continue
+    // Otra búsqueda (no la misma ocupación de la opción) de la misma tarifa, en la misma moneda.
+    if (mismaComposicion(c, ocupacion)) continue
+    if ((lectura.moneda ?? '').toUpperCase() !== (primera.moneda ?? '').toUpperCase()) continue
     if (!mismaIdentidad(primera.identidad, lectura.identidad)) continue
-    return { itemId: l.id, grupo: normalizarGrupo(l.grupo ?? null) ?? (l.grupo as string), nombre: nombreDeLinea(l), clave: casilla.clave, tipos: faltan }
+    const precios = preciosQueTrae(lectura, ocupacion, faltan, unitarioDe(primera, 'adulto'))
+    const tipos = faltan.filter(t => typeof precios[t] === 'number')
+    if (tipos.length === 0) continue
+    return { itemId: l.id, grupo: normalizarGrupo(l.grupo ?? null) ?? (l.grupo as string), nombre: nombreDeLinea(l), tipos, precios }
   }
   return null
+}
+
+/** El costo c/u de un tipo en una lectura con fila por tipo. `null` si no la trae. */
+function unitarioDe(l: LecturaCasilla, tipo: TipoPasajero): number | null {
+  const f = (l.porTipo ?? []).find(x => x.tipo === tipo && x.cantidad > 0)
+  return f ? f.subtotal / f.cantidad : null
+}
+
+/**
+ * Los precios que trae un pantallazo de los tipos que faltan: de su fila por tipo, o (si viene un
+ * solo total) restándole lo de los adultos, cuando además de adultos lleva UN solo tipo que falta.
+ */
+function preciosQueTrae(
+  l: LecturaCasilla,
+  ocupacion: Composicion,
+  faltan: readonly TipoPasajero[],
+  adulto: number | null,
+): Partial<Record<TipoPasajero, number>> {
+  const out: Partial<Record<TipoPasajero, number>> = {}
+  for (const t of faltan) {
+    const u = unitarioDe(l, t)
+    if (u !== null && u >= 0) out[t] = Math.round(u)
+  }
+  if (Object.keys(out).length > 0) return out
+  const presentes = faltan.filter(t => (t === 'nino' ? ocupacion.ninos : ocupacion.infantes) > 0)
+  const otros = (['nino', 'infante'] as const).filter(t => !faltan.includes(t) && (t === 'nino' ? ocupacion.ninos : ocupacion.infantes) > 0)
+  if (presentes.length !== 1 || otros.length > 0 || adulto === null || !(l.total > 0)) return out
+  const t = presentes[0]
+  const cantidad = t === 'nino' ? ocupacion.ninos : ocupacion.infantes
+  const resto = l.total - adulto * ocupacion.adultos
+  if (resto >= 0) out[t] = Math.round(resto / cantidad)
+  return out
 }
 
 /**
@@ -150,8 +194,8 @@ export function destinoDeReglas(args: {
       como: 'completa',
       itemId: completa.itemId,
       grupo: completa.grupo,
-      clave: completa.clave,
       tipos: completa.tipos,
+      precios: completa.precios,
       razon: `Misma ${args.tipo === 'vuelo' ? 'aerolínea, ruta, fechas y tarifa' : 'actividad y fecha'} que ${completa.nombre}, con otros pasajeros: trae el precio del ${listaDeTipos(completa.tipos)} que faltaba.`,
       duda: false,
       fuente: 'reglas',
@@ -287,6 +331,8 @@ const NOMBRE_NO_INCLUIDO = /\(\s*no\s+incluid[oa]\s*\)|^\s*no\s+incluid[oa]\b/i
  */
 export function opcionalSegunLectura(tipo: TipoRanura, lectura: LecturaCasilla): string | null {
   if (tipo !== 'traslado' && tipo !== 'actividad') return null
+  // Escrito a mano con «Es opcional: el cliente decide (no suma)».
+  if (lectura.origen === 'manual' && lectura.manual?.opcional === true) return 'Es opcional: el cliente decide (no suma)'
   const campos = (lectura.campos ?? []).map(c => c.valor).filter((v): v is string => typeof v === 'string')
   const textos = [lectura.nombre, lectura.descripcion, ...(lectura.notasCliente ?? []), ...campos]
   for (const t of textos) {
@@ -298,4 +344,47 @@ export function opcionalSegunLectura(tipo: TipoRanura, lectura: LecturaCasilla):
   if (n) return n[0].replace(/[()]/g, '').trim()
   const c = campos.find(v => NO_INCLUIDO.test(v))
   return c ? c.trim() : null
+}
+
+// ── Lo que se le manda al modelo, desde el navegador ────────────────────────
+
+/** Lo que identifica una lectura, en una línea: «Avianca · Bogotá BOG · San Andrés ADZ · 2026-11-23». */
+function detalleDeLectura(l: LecturaCasilla | null | undefined): string {
+  if (!l) return ''
+  return Object.values(l.identidad ?? {}).filter((v): v is string => typeof v === 'string' && v.trim() !== '').join(' · ').slice(0, 240)
+}
+
+/**
+ * Los servicios del viaje como los recibe el modelo (`decidir-destino.ts`): uno por servicio, con
+ * el id de su primera opción y lo que identifica a cada opción. Lo arma el navegador con lo que ya
+ * tiene: la lectura no lee la base para esto.
+ */
+export function serviciosParaElModelo(lineas: readonly Linea[]): { id: string; tipo: string; servicio: string; nombre: string; detalle: string }[] {
+  const porGrupo = new Map<string, { id: string; tipo: string; servicio: string; nombres: string[]; detalles: string[] }>()
+  for (const l of vivas(lineas)) {
+    const g = normalizarGrupo(l.grupo ?? null)
+    const def = ranuraDeGrupo(g)
+    if (!g || !def) continue
+    const actual = porGrupo.get(g) ?? { id: l.id, tipo: def.label.toLowerCase(), servicio: etiquetaDeRanura(g), nombres: [], detalles: [] }
+    actual.nombres.push(nombreDeLinea(l))
+    const d = detalleDeLectura(leerTarifaPax(l.tarifa_pax).casillas?.grupo_completo)
+    if (d) actual.detalles.push(d)
+    porGrupo.set(g, actual)
+  }
+  return [...porGrupo.values()].slice(0, 60).map(s => ({
+    id: s.id, tipo: s.tipo, servicio: s.servicio,
+    nombre: s.nombres.join(' / ').slice(0, 160),
+    detalle: s.detalles.join(' / ').slice(0, 240),
+  }))
+}
+
+/** Lo leído, en pocas palabras, para el modelo. */
+export function lecturaParaDecidir(tipo: TipoRanura, l: LecturaCasilla): { tipo: string; nombre: string; detalle: string; ocupacion: string } {
+  const c = composicionDeLectura(l)
+  return {
+    tipo,
+    nombre: (l.nombre ?? '').slice(0, 160),
+    detalle: detalleDeLectura(l),
+    ocupacion: c ? `${c.adultos} adultos, ${c.ninos} niños, ${c.infantes} infantes` : '',
+  }
 }

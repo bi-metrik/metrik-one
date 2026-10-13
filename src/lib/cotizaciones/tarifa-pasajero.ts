@@ -336,7 +336,7 @@ export interface LecturaCasilla {
    */
   origen?: 'manual'
   /** Lo que el formulario manual deja además de la lectura (`DatosManuales`). */
-  manual?: { fuente: string; incluye: string | null; edadNino: { desde: number; hasta: number } | null }
+  manual?: { fuente: string; incluye: string | null; edadNino: { desde: number; hasta: number } | null; opcional?: boolean }
 }
 
 /**
@@ -1639,6 +1639,13 @@ export interface CostoAMano {
   por: string | null
   porId: string | null
   en: string
+  /**
+   * `pantallazo`: no lo tecleó nadie, lo sacó ONE de un pantallazo pegado en la bandeja que
+   * completaba la opción («Completa SATENA: precio del niño», por pasos C5). Ausente = escrito a mano.
+   */
+  desde?: 'pantallazo'
+  /** El pantallazo de donde salió (`desde: 'pantallazo'`), guardado como los de las opciones. */
+  imagenRef?: string
 }
 export type CostosAMano = Partial<Record<'nino' | 'infante' | 'adulto', CostoAMano>>
 
@@ -1663,7 +1670,11 @@ function leerCostosAMano(raw: unknown): CostosAMano | null {
     if (!v || typeof v !== 'object') continue
     const u = v.unitario
     if (typeof u !== 'number' || !Number.isFinite(u) || u < 0 || typeof v.en !== 'string') continue
-    salida[tipo] = { unitario: u, por: typeof v.por === 'string' ? v.por : null, porId: typeof v.porId === 'string' ? v.porId : null, en: v.en }
+    salida[tipo] = {
+      unitario: u, por: typeof v.por === 'string' ? v.por : null, porId: typeof v.porId === 'string' ? v.porId : null, en: v.en,
+      ...(v.desde === 'pantallazo' ? { desde: 'pantallazo' as const } : {}),
+      ...(typeof v.imagenRef === 'string' ? { imagenRef: v.imagenRef } : {}),
+    }
   }
   return Object.keys(salida).length > 0 ? salida : null
 }

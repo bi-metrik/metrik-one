@@ -72,7 +72,7 @@ import {
 } from '@/lib/cotizaciones/habitaciones'
 import { opcionLeidaDeFila, type OpcionLeida } from '@/lib/cotizaciones/bandeja-capturas'
 import { leerImagenDeCaptura } from '@/lib/cotizaciones/leer-imagen-captura'
-import { avisoFechaActividadFueraDelViaje, leerHotelManual, leerTrasladoManual, lecturaManual, type ErroresManual } from '@/lib/cotizaciones/ingreso-manual'
+import { avisoFechaActividadFueraDelViaje, leerActividadManual, leerHotelManual, leerTrasladoManual, leerVueloManual, lecturaManual, type EntradaManual, type ErroresManual } from '@/lib/cotizaciones/ingreso-manual'
 import { fechaDeActividad, lugarDeBloqueNuevo } from '@/lib/cotizaciones/actividad-pantallazo'
 import { diaDeFecha } from '@/lib/cotizaciones/actividad-en-cotizacion'
 import { borradorValido, firmarBorrador } from '@/lib/cotizaciones/firma-borrador'
@@ -572,21 +572,41 @@ export type ResultadoManualEnBorrador =
 
 export async function lecturaManualEnBorrador(
   cotizacionId: string,
-  tipo: 'hotel' | 'traslado',
+  tipo: 'hotel' | 'traslado' | 'vuelo' | 'actividad',
   datos: unknown,
+  /**
+   * «✎ Escríbelo a mano» de la cotización por pasos (C5): suma vuelo y actividad, y la fuente es
+   * opcional. Se comprueba el interruptor contra la base: con él apagado, solo hotel y traslado,
+   * exactamente como siempre.
+   */
+  opciones?: { porPasos?: boolean } | null,
 ): Promise<ResultadoManualEnBorrador> {
-  if (tipo !== 'hotel' && tipo !== 'traslado') return { ok: false, codigo: 'TIPO', mensaje: 'Tipo de componente desconocido.' }
+  const porPasos = opciones?.porPasos === true
+  const deSiempre = tipo === 'hotel' || tipo === 'traslado'
+  if (!deSiempre && !(porPasos && (tipo === 'vuelo' || tipo === 'actividad'))) return { ok: false, codigo: 'TIPO', mensaje: 'Tipo de componente desconocido.' }
   if (!(await exigirModulo(REQUISITO.clarity)).ok) {
     return { ok: false, codigo: 'MODULO', mensaje: MENSAJE_MODULO_NO_ACTIVO }
   }
   const ctx = await contextoDeCotizacion(cotizacionId)
   if ('error' in ctx) return { ok: false, codigo: 'CONTEXTO', mensaje: ctx.error as string }
+  if (porPasos) {
+    const guard = await exigirPorPasos(ctx.supabase, cotizacionId)
+    if (!guard.ok) return { ok: false, codigo: 'POR_PASOS', mensaje: guard.error }
+  }
   const ranura = definicionDeTipo(tipo)
+  const entrada: EntradaManual = tipo === 'hotel'
+    ? { tipo, datos: leerHotelManual(datos) }
+    : tipo === 'traslado'
+      ? { tipo, datos: leerTrasladoManual(datos) }
+      : tipo === 'vuelo'
+        ? { tipo, datos: leerVueloManual(datos) }
+        : { tipo, datos: leerActividadManual(datos) }
   const r = lecturaManual({
     ranura,
-    entrada: tipo === 'hotel' ? { tipo, datos: leerHotelManual(datos) } : { tipo, datos: leerTrasladoManual(datos) },
+    entrada,
     leidaEn: new Date().toISOString(),
     viaje: ctx.viaje.fechas,
+    ...(porPasos ? { fuenteOpcional: true } : {}),
   })
   if (!r.ok) return { ok: false, codigo: 'CAMPOS', mensaje: r.errores._ ?? 'Revisa los campos marcados.', errores: r.errores }
   const leida = r.lectura
@@ -807,8 +827,23 @@ async function aceptarLectura(
     const ctxItem = await contexto(c.itemId)
     if ('error' in ctxItem) return { ok: false, codigo: 'CONTEXTO', mensaje: ctxItem.error as string }
     await conImagen()
-    const g = await guardarLecturaEnItem(ctxItem, c.itemId, c.clave, lectura)
-    if (!g.ok) return { ok: false, codigo: g.codigo, mensaje: g.mensaje }
+    // El precio que faltaba queda como el escrito a mano (`costosAMano`), con la marca de que
+    // salió de este pantallazo y su imagen: así lo leen igual el total, el PDF y la tarjeta.
+    const quien = await quienEscribe(ctxItem.supabase)
+    const en = new Date().toISOString()
+    const g = await guardarTarifa(ctxItem.supabase, c.itemId, actual => {
+      const costosAMano = { ...(actual.costosAMano ?? {}) }
+      for (const t of c.tipos) {
+        const unitario = c.precios[t]
+        if (typeof unitario !== 'number' || costosAMano[t]) continue
+        costosAMano[t] = {
+          unitario, por: quien.por, porId: quien.porId, en, desde: 'pantallazo',
+          ...(lectura.imagenRef ? { imagenRef: lectura.imagenRef } : {}),
+        }
+      }
+      return { ...actual, costosAMano }
+    })
+    if ('error' in g) return { ok: false, codigo: 'GUARDAR', mensaje: g.error }
     return terminarAceptacion(ctx.supabase, cotizacionId, c.itemId, { como: 'completa' })
   }
 
