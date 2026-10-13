@@ -1,6 +1,6 @@
 'use client'
 
-import { Fragment, useContext, useEffect, useRef, useState } from 'react'
+import { Fragment, useContext, useEffect, useRef, useState, type ReactNode } from 'react'
 import { useTransitionTolerante } from '@/hooks/use-transition-tolerante'
 import { useRouter } from 'next/navigation'
 import {
@@ -131,6 +131,7 @@ import {
 import {
   itemsDelItinerario,
   itemsQueAportanAlTotal,
+  normalizarGrupo,
   ranurasPorSupuesto,
 } from '@/lib/cotizaciones/itinerarios'
 import { avisosDeCobertura } from '@/lib/cotizaciones/cobertura-opciones'
@@ -162,6 +163,12 @@ import {
 import type { EstadoCotizacion } from '@/lib/catalogos/constants'
 import type { FiscalProfile, Client } from '@/types/database'
 import type { NivelDetalle } from '@/lib/cotizaciones/detalle-viaje'
+import type { EstadoPorPasos } from '@/lib/cotizaciones/por-pasos'
+import VistaPorPasos from '@/app/(app)/negocios/por-pasos/vista-por-pasos'
+import { incluyeDeOne, lineasQueSeCobran } from '@/lib/cotizaciones/incluye-por-one'
+import { listaUnica } from '@/lib/cotizaciones/lista-unica'
+import { opcionesSinPrecio } from '@/lib/cotizaciones/precio-que-falta'
+import { estadoDeLinea } from '@/lib/cotizaciones/estado-servicio'
 import { conReintentoDeRed } from '@/lib/red/con-reintento'
 
 interface RubroRow {
@@ -377,12 +384,24 @@ interface Props {
    * `plan_pagos.activo`; ausente, «Revisar y enviar» queda como hoy.
    */
   asiPuedesPagar?: EntradaAsiPuedesPagar | null
+  /**
+   * El interruptor de la cotización por pasos (`por-pasos.ts`), ya resuelto en el servidor con
+   * sus cuatro condiciones. Solo gobierna la pantalla; ausente o apagado, el editor de siempre.
+   */
+  porPasos?: EstadoPorPasos | null
+  /** Con la forma por pasos: el pedido de autorización que espera al dueño (`getPedidoDeAutorizacion`). */
+  pedidoAutorizacion?: { por: string | null; en: string } | null
+  /** Con la forma por pasos: el paso con que abre (`?paso=tarifas|revisar`, decisión J). */
+  pasoInicial?: 1 | 2 | 3
 }
+
+/** Lo que la cotización por pasos le pide a la tarjeta de una opción (`TarjetaOpcion.porPasos`). */
+type PorPasosDeOpcion = { enTarifas: string[] | null; menuExtra: (cerrar: () => void) => ReactNode; onEliminar: () => void }
 
 /** Cuánto dura el «Deshacer» de un borrado de opción o de bloque (P12). */
 const ESPERA_DESHACER_MS = 6000
 
-export default function CotizacionEditor({ oportunidadId, cotizacion, initialItems: itemsDeLaPagina, fiscalProfile, clientFiscal, backUrl, staffMembers, frozen, lineaId, umbrales = UMBRALES_MARGEN_POR_DEFECTO, itinerarios, pisoBloqueaAvance = false, politicaRecargo = RECARGO_POR_DEFECTO, composicionViaje = null, lineasPorTipo = false, adicionales: adicionalesDeLaPagina = ADICIONALES_VACIOS, salida = null, textoCliente = null, configIva = CONFIG_IVA_POR_DEFECTO, mostrarResumenFiscal = true, destinoViaje = null, fechasViaje = null, nivelDetalle = null, leidaEn = null, seguimiento = false, asiPuedesPagar: entradaPlan = null }: Props) {
+export default function CotizacionEditor({ oportunidadId, cotizacion, initialItems: itemsDeLaPagina, fiscalProfile, clientFiscal, backUrl, staffMembers, frozen, lineaId, umbrales = UMBRALES_MARGEN_POR_DEFECTO, itinerarios, pisoBloqueaAvance = false, politicaRecargo = RECARGO_POR_DEFECTO, composicionViaje = null, lineasPorTipo = false, adicionales: adicionalesDeLaPagina = ADICIONALES_VACIOS, salida = null, textoCliente = null, configIva = CONFIG_IVA_POR_DEFECTO, mostrarResumenFiscal = true, destinoViaje = null, fechasViaje = null, nivelDetalle = null, leidaEn = null, seguimiento = false, asiPuedesPagar: entradaPlan = null, porPasos = null, pedidoAutorizacion = null, pasoInicial = 1 }: Props) {
   // Abierto de entrada solo si hay un borrador de ONE esperando revisión: es lo único que
   // el equipo tiene que hacer aquí, y cerrado no lo vería.
   const [verTextoCliente, setVerTextoCliente] = useState(() => estadoDelTexto(textoCliente?.documento ?? null) === 'borrador')
@@ -425,6 +444,10 @@ export default function CotizacionEditor({ oportunidadId, cotizacion, initialIte
   // pantalla de siempre (R6).
   const marcoDelNegocio = useContext(MarcoCotizacionContexto)
   const conMarco = lineasPorTipo && marcoDelNegocio !== null
+  // La cotización por pasos (C4): solo con el interruptor encendido, decidido en el servidor con
+  // sus cuatro condiciones. Apagado, este editor queda exactamente como siempre.
+  const porPasosOn = lineasPorTipo && porPasos?.encendido === true
+  const [conteoBandeja, setConteoBandeja] = useState({ porAceptar: 0, leyendo: 0 })
   const estado = cotizacion.estado as EstadoCotizacion
   const editable = isEditable(estado) && !frozen
   const estadoConfig = ESTADO_COTIZACION_CONFIG[estado]
@@ -958,7 +981,13 @@ export default function CotizacionEditor({ oportunidadId, cotizacion, initialIte
     ? liquidarIva(lineasParaIva(cascadaTotal.lineas, metaIva), opcionesIva)
     : null
 
-  const supuestos = ranurasPorSupuesto(itemsParaRanuras).filter(s => s.combinable ? !hayPrincipal : true)
+  // Un traslado o una actividad que la tarifa principal NOMBRA no es un supuesto: lo decidió la
+  // tarifa (la forma por pasos lo escribe, C2) y la lectura ya lo cobra así. El aviso decía
+  // «cuenta la primera, borra la alternativa» aunque contara la elegida.
+  const nombradosPorPrincipal = new Set(seleccionPrincipal ?? [])
+  const supuestos = ranurasPorSupuesto(itemsParaRanuras).filter(s =>
+    s.combinable ? !hayPrincipal : ![s.elegido, ...s.descartados].some(id => nombradosPorPrincipal.has(id)),
+  )
   const hayCombinable = supuestos.some(s => s.combinable)
   const nombrePorItem = new Map(initialItems.map(i => [i.id, i.nombre ?? 'Sin nombre']))
 
@@ -1435,14 +1464,11 @@ export default function CotizacionEditor({ oportunidadId, cotizacion, initialIte
       )}
     </>
   )
-  const jsxLista = (
-    <>
-      {/* Items */}
-      {bloquesDeLineas.map((bloque, indiceBloque) => {
-        const enBloqueDeRanura = bloque.grupo !== null
-        const lineasVisibles = bloque.lineas.filter(l => !ocultos.has(l.id))
-        if (lineasVisibles.length === 0) return null
-        const lineasDelBloque = lineasVisibles.map(item => {
+  /**
+   * Una línea de la cotización, como la pinta el editor. Se saca de `jsxLista` para que la
+   * cotización por pasos (C4) pinte la MISMA tarjeta de cada opción dentro de su servicio.
+   */
+  const pintarLinea = (item: ItemRow, enBloqueDeRanura: boolean, porPasosDeOpcion: PorPasosDeOpcion | null = null) => {
         const itemCantidad = Number(item.cantidad) || 1
         const itemPrecio = Number(item.precio_venta) || 0
         const itemDescPct = Number(item.descuento_porcentaje) || 0
@@ -2337,7 +2363,9 @@ export default function CotizacionEditor({ oportunidadId, cotizacion, initialIte
               margenCotizacion={{ margenPct: margenCotizacion, convencion: convencionMargen }}
               pendiente={pendientesEnBandeja[item.id] ? { capturaId: pendientesEnBandeja[item.id] } : null}
               onIrABandeja={irABandeja}
-              onEliminar={nombre => eliminarOpcionDevolviendo(item, nombre)}
+              onEliminar={porPasosDeOpcion ? () => porPasosDeOpcion.onEliminar() : nombre => eliminarOpcionDevolviendo(item, nombre)}
+              porPasos={porPasosDeOpcion ? { enTarifas: porPasosDeOpcion.enTarifas, menuExtra: porPasosDeOpcion.menuExtra } : null}
+              autorizador={salida?.dueno ?? null}
               onMover={() => setMoverGrupoDe(item.id)}
               mover={editable && moverGrupoDe === item.id ? (
                 <div className="px-3 pb-2">
@@ -2797,7 +2825,16 @@ export default function CotizacionEditor({ oportunidadId, cotizacion, initialIte
             </div>
           ))}
         </div>
-      )})
+      )
+  }
+  const jsxLista = (
+    <>
+      {/* Items */}
+      {bloquesDeLineas.map((bloque, indiceBloque) => {
+        const enBloqueDeRanura = bloque.grupo !== null
+        const lineasVisibles = bloque.lineas.filter(l => !ocultos.has(l.id))
+        if (lineasVisibles.length === 0) return null
+        const lineasDelBloque = lineasVisibles.map(item => pintarLinea(item, enBloqueDeRanura))
         if (!enBloqueDeRanura) {
           return <Fragment key={`sueltas-${bloque.lineas[0]?.id ?? indiceBloque}`}>{lineasDelBloque}</Fragment>
         }
@@ -2844,7 +2881,11 @@ export default function CotizacionEditor({ oportunidadId, cotizacion, initialIte
               onCambio={refrescar}
             />
           )}
-          {lineasPorTipo && (
+          {/* C5 · con la forma por pasos, «O agrégalo sin pantallazo», sus botones por tipo y el
+              componente suelto («Otro componente del viaje») se funden en «✎ Escríbelo a mano» de
+              la bandeja: lo que no es vuelo, hotel, traslado ni actividad entra como «Otro
+              servicio» (asistencia médica, seguro). Apagada, la pantalla de siempre. */}
+          {lineasPorTipo && !porPasosOn && (
             <p className="text-[10px] font-medium uppercase tracking-wide text-muted-foreground">
               O agrégalo sin pantallazo
             </p>
@@ -2854,7 +2895,7 @@ export default function CotizacionEditor({ oportunidadId, cotizacion, initialIte
           <div className={lineasPorTipo ? 'relative flex flex-wrap gap-2' : 'relative flex gap-2'}>
             {lineasPorTipo ? (
               <>
-                {gruposCanonicos().map(g => (
+                {!porPasosOn && gruposCanonicos().map(g => (
                   <button
                     key={g.grupo}
                     onClick={() => handleAddItemDeGrupo(g)}
@@ -2867,8 +2908,9 @@ export default function CotizacionEditor({ oportunidadId, cotizacion, initialIte
                 ))}
                 {/* EL BOTÓN DEL COMPONENTE SUELTO (§4.2). Se llamaba «Otro», que no
                     dice lo único que hay que saber para elegirlo: una línea sin
-                    ranura SUMA SIEMPRE, no compite con nadie. */}
-                <button
+                    ranura SUMA SIEMPRE, no compite con nadie. Por pasos lo reemplaza
+                    «Otro servicio» de «✎ Escríbelo a mano». */}
+                {!porPasosOn && <button
                   onClick={() => setMostrarOtro(v => !v)}
                   disabled={isPending}
                   aria-expanded={mostrarOtro}
@@ -2876,7 +2918,7 @@ export default function CotizacionEditor({ oportunidadId, cotizacion, initialIte
                 >
                   <Plus className="h-3.5 w-3.5" />
                   Otro componente del viaje
-                </button>
+                </button>}
               </>
             ) : (
               <>
@@ -2959,7 +3001,7 @@ export default function CotizacionEditor({ oportunidadId, cotizacion, initialIte
               el tramo a la isla. Ahora crea «Vuelo 2», que suma aparte, y la opción que
               compite tiene su propio botón DENTRO de la línea. Son dos cosas distintas
               y cada una tiene su botón, así que la frase ya puede explicar las dos. */}
-          {lineasPorTipo && (
+          {lineasPorTipo && !porPasosOn && (
             <p className="text-[10px] leading-relaxed text-muted-foreground">
               <span className="font-medium text-foreground">Vuelo, Hotel, Actividad y Traslado</span>{' '}
               agregan otro componente que <span className="font-medium">suma</span>: si ya hay un
@@ -2972,7 +3014,7 @@ export default function CotizacionEditor({ oportunidadId, cotizacion, initialIte
               una línea sin ranura: suma siempre y no compite con nadie.
             </p>
           )}
-          {lineasPorTipo && mostrarOtro && (
+          {lineasPorTipo && mostrarOtro && !porPasosOn && (
             <div className="flex gap-2">
               <input
                 value={newItemName}
@@ -3564,9 +3606,144 @@ export default function CotizacionEditor({ oportunidadId, cotizacion, initialIte
     />
   ) : null
 
+  // ── La cotización por pasos (C4) ──
+  const estadoTexto = textoCliente
+    ? (estadoDelTexto(textoCliente.documento) === 'sin_texto' ? 'nada' : textoCliente.desactualizado ? 'viejo' : estadoDelTexto(textoCliente.documento) === 'revisado' ? 'ok' : 'sinrevisar')
+    : 'nada'
+  const itemPorIdVista = new Map(initialItems.map(i => [i.id, i]))
+  // C6 · lo que la forma por pasos arma con lo que ya tiene la página, sin pedir nada.
+  const tarifasDeLaPagina = (itinerarios?.itinerarios ?? []).map(t => ({ id: t.id, nombre: t.nombre, orden: t.orden, vaEnPropuesta: t.vaEnPropuesta, seleccion: t.seleccion }))
+  const lineasConLectura = initialItems.filter(i => !i.es_ajuste).map(i => ({ ...i, nombre: i.nombre ?? '', grupo: i.grupo ?? null }))
+  // «Incluye · Lo arma ONE con lo que se cobra» (pieza `incluye_por_one`).
+  const incluyeOne = porPasosOn && porPasos?.piezas.incluye_por_one === true
+    ? incluyeDeOne(lineasQueSeCobran(lineasConLectura as never[], tarifasDeLaPagina) as never[], nivelDetalle ?? 'normal')
+    : null
+  // La lista única de Revisar (pieza `lista_unica`): lo que impide enviar es lo del servidor.
+  const listaPorPasos = porPasosOn && porPasos?.piezas.lista_unica === true ? (() => {
+    const vanAlCliente = tarifasDeLaPagina.filter(t => t.vaEnPropuesta)
+    const idsQueSalen = new Set(vanAlCliente.length > 0
+      ? vanAlCliente.flatMap(t => itemsDelItinerario(lineasConLectura as never[], t.seleccion))
+      : itemsQueAportanAlTotal(lineasConLectura as never[]))
+    const noVan = new Map<string, { itemId: string; nombre: string }>()
+    for (const i of lineasConLectura) {
+      const g = normalizarGrupo(i.grupo)
+      if (!g || noVan.has(g) || estadoDeLinea(i) !== 'no') continue
+      noVan.set(g, { itemId: i.id, nombre: etiquetaDeRanura(g) })
+    }
+    return listaUnica({
+      sinPrecio: opcionesSinPrecio(lineasConLectura, idsQueSalen, composicionViaje ?? null),
+      capturas: motivoEnvio ? { motivo: motivoEnvio, itemId: desactualizadas[0]?.itemId ?? null } : null,
+      tarifas: tarifasDeLaPagina,
+      salida: salidaVista as never,
+      pantallazosPorAceptar: conteoBandeja.porAceptar,
+      texto: estadoTexto as 'nada' | 'sinrevisar' | 'viejo' | 'ok',
+      noVan: [...noVan.values()],
+      faltaDia: avisoFaltaDia ?? null,
+      margenBajoAviso: null,
+      recargo: recargo.estado === 'falta' ? `Falta el ${recargo.etiqueta.toLowerCase()}.` : null,
+      viaje: viaje.motivo ? `Pendiente: ${viaje.motivo}.` : null,
+      ivaSinCalcular: !mostrarResumenFiscal && ivaVigente && !ivaVigente.calculable && cascadaTotal.precioVenta > 0 ? motivoIvaSinCalcular(ivaVigente.sinCosto) : null,
+    })
+  })() : null
+  const vistaPorPasos = porPasosOn ? (
+    <VistaPorPasos
+      cotizacionId={cotizacion.id}
+      editable={editable}
+      enviada={cotizacion.estado === 'enviada' || cotizacion.estado === 'aceptada'}
+      filas={initialItems.filter(i => !i.es_ajuste) as never}
+      adicionalesPorItem={adicionales.porItem}
+      tarifasDelServidor={(itinerarios?.itinerarios ?? []).map(t => ({ id: t.id, nombre: t.nombre, orden: t.orden, vaEnPropuesta: t.vaEnPropuesta, seleccion: t.seleccion }))}
+      params={paramsCascada}
+      margenPct={Number(margenCotizacion) || 0}
+      umbrales={umbrales}
+      composicionViaje={composicionViaje}
+      fechasViaje={fechasViaje}
+      destinoViaje={destinoViaje}
+      salida={salidaVista}
+      pedido={pedidoAutorizacion}
+      texto={estadoTexto}
+      pantallazosPorAceptar={conteoBandeja.porAceptar}
+      leyendo={conteoBandeja.leyendo}
+      pasoInicial={pasoInicial}
+      motivoBotonEnviar={motivoBotonEnviar}
+      listaUnica={listaPorPasos}
+      conteoLista={listaPorPasos ? { rojos: listaPorPasos.impide.length, ambar: listaPorPasos.revisar.length - (conteoBandeja.porAceptar > 0 ? 1 : 0) } : {
+        rojos: motivoBotonEnviar ? 1 : 0,
+        ambar: (avisoFaltaDia ? 1 : 0) + (avisoNoVan ? 1 : 0) + (viaje.motivo ? 1 : 0) + (estadoTexto === 'sinrevisar' || estadoTexto === 'viejo' ? 1 : 0) + costosPendientes.length,
+      }}
+      bandeja={(
+        <BandejaCapturas
+          enMarco={conMarco}
+          porPasos
+          onConteo={setConteoBandeja}
+          cotizacionId={cotizacion.id}
+          items={initialItems}
+          composicion={composicionViaje}
+          onOpcionCreada={mostrarOpcion}
+          ubicaciones={ubicacionesDeOpciones}
+          receptor={receptorBandeja}
+          onPendientes={setPendientesEnBandeja}
+          fechasViaje={fechasViaje}
+          destinoViaje={destinoViaje}
+          onCambio={refrescar}
+        />
+      )}
+      agregarSinPantallazo={jsxAgregar}
+      tarjetaDeOpcion={(id, pp) => {
+        const item = itemPorIdVista.get(id)
+        return item ? pintarLinea(item, true, pp) : null
+      }}
+      revisarLista={(
+        <>
+          {viaje.motivo && (
+            <p data-pendiente-viaje className="m-0 flex items-center gap-1 text-xs font-medium text-amber-800">
+              <AlertTriangle className="h-3 w-3 shrink-0" aria-hidden />
+              Pendiente: {viaje.motivo}.
+            </p>
+          )}
+          {jsxAvisoCostoPendiente}
+          {jsxAvisoActividades}
+          {jsxAvisoDesactualizadas}
+          {jsxRecargo}
+          {jsxCobertura}
+          {jsxPanelMargen}
+          {jsxIvaNota}
+          {!motivoBotonEnviar && !viaje.motivo && !avisoFaltaDia && !avisoNoVan && costosPendientes.length === 0 && (
+            <p className="m-0 text-[13px] font-semibold text-[#0E5C43]">Nada impide enviar.</p>
+          )}
+        </>
+      )}
+      revisarDocumento={(
+        <>
+          {textoCliente ? <DocumentoClientePanel cotizacionId={cotizacion.id} inicial={textoCliente} incluyeDeOne={incluyeOne} /> : null}
+          {jsxTerminosJsx}
+          {entradaPlan && (
+            <AsiPuedesPagarPanel
+              entrada={entradaPlan}
+              total={totalDelDocumento({
+                precioVenta: cascadaTotal.precioVenta,
+                ivaSobreIngresoPropio: conIvaSobreIngresoPropio,
+                iva: ivaVigente ? { valor: ivaVigente.iva, precio: ivaVigente.precio } : null,
+              })}
+            />
+          )}
+          {jsxFiscal}
+        </>
+      )}
+      verElCalculo={jsxTotales}
+      rastro={jsxRastro}
+      onDescargar={handleDescargarPDF}
+      onAceptarTodos={() => receptorBandeja.current?.aceptarListas?.()}
+      onPegar={() => receptorBandeja.current?.elegirArchivo?.()}
+      onAbrirOpcion={mostrarOpcion}
+      onRecibirEnBandeja={(itemId, lecturas) => receptorBandeja.current?.recibir({ clave: `${itemId}:${Date.now()}`, itemId, lecturas })}
+      refrescar={refrescar}
+    />
+  ) : null
+
   return (
     // Trappvel: el ancho del prototipo de la tarjeta (880 px); fuera del viaje, el de siempre (R6).
-    <div className={`mx-auto ${lineasPorTipo ? 'max-w-[880px]' : 'max-w-2xl'} space-y-4 px-4 py-6`}>
+    <div className={porPasosOn ? 'mx-auto max-w-[1180px] space-y-4 py-6 sm:px-4' : `mx-auto ${lineasPorTipo ? 'max-w-[880px]' : 'max-w-2xl'} space-y-4 px-4 py-6`}>
       {jsxEncabezado}
       {!lineasPorTipo && jsxPanelMargen}
       {!lineasPorTipo && jsxPanelTexto}
@@ -3576,7 +3753,7 @@ export default function CotizacionEditor({ oportunidadId, cotizacion, initialIte
       {jsxEncabezadoViaje}
       {/* Con el marco, la bandeja de pantallazos va antes de «Componentes», como en el
           prototipo de la tarjeta (2026-09-24): una sección de la página, no una franja fija. */}
-      {conMarco && editable && (
+      {conMarco && editable && !porPasosOn && (
         <BandejaCapturas
           enMarco
           cotizacionId={cotizacion.id}
@@ -3591,7 +3768,7 @@ export default function CotizacionEditor({ oportunidadId, cotizacion, initialIte
           onCambio={refrescar}
         />
       )}
-      {lineasPorTipo ? pasosDelViaje : (
+      {porPasosOn ? vistaPorPasos : lineasPorTipo ? pasosDelViaje : (
         <div className="space-y-3">
           {jsxExpandir}
           {jsxLista}

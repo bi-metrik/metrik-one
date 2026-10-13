@@ -17,10 +17,13 @@ import { aceptarCapturaDeBandeja, type BorradorParaAceptar } from '@/app/(app)/n
 import { enPeticionDeRuta } from '@/lib/actions/memo-de-ruta'
 import { conTiempos, encabezadoServerTiming } from '@/lib/actions/tiempos-de-ruta'
 import { bytesDeImagen, registrarEnBandeja, responderBandeja } from '@/lib/cotizaciones/bandeja-registro'
+import { aceptarPorPasos, esEstadoAlAceptar, type EstadoAlAceptar } from '@/lib/cotizaciones/por-pasos-cierre'
 
 export const runtime = 'nodejs'
 
 const DECISIONES = new Set(['auto', 'opcion', 'habitacion', 'reemplazar'])
+/** Solo con la marca de la forma por pasos (C5): lo que eligió el modelo o la asesora en la frase. */
+const DECISIONES_POR_PASOS = new Set(['nueva', 'hermana', 'completa'])
 
 export async function POST(req: Request, { params }: { params: Promise<{ id: string }> }) {
   const { id } = await params
@@ -36,7 +39,8 @@ export async function POST(req: Request, { params }: { params: Promise<{ id: str
     typeof cuerpo.tipo !== 'string' ||
     typeof cuerpo.lecturaJson !== 'string' ||
     typeof cuerpo.firma !== 'string' ||
-    !DECISIONES.has(String(cuerpo.decision))
+    !(DECISIONES.has(String(cuerpo.decision))
+      || ((cuerpo as { porPasos?: unknown }).porPasos === true && DECISIONES_POR_PASOS.has(String(cuerpo.decision))))
   ) {
     registrarEnBandeja('warn', { ruta: 'aceptar-captura', codigo: 'PETICION', cotizacionId: id ?? '', bytesImagen: bytesDeImagen(cuerpo?.imagen) })
     return NextResponse.json({ ok: false, codigo: 'PETICION', mensaje: 'La captura llegó incompleta. Vuelve a pegarla.' }, { status: 400 })
@@ -60,8 +64,16 @@ export async function POST(req: Request, { params }: { params: Promise<{ id: str
   // Brief del 2026-10-05, punto 13: además del total, cada etapa (contexto, subida del
   // pantallazo, líneas, crear la opción, guardar la lectura, confirmar el costo, ubicarla).
   // Caso Alejandra (2026-10-05): todo `ok:false` con mensaje y con su línea en el log.
+  //
+  // La forma por pasos (C2) manda `porPasos: true`: después de aceptar, la opción entra en las
+  // tarifas y la Recomendada queda en la propuesta. El interruptor se relee aquí, contra la
+  // base: con él apagado (una pestaña vieja) no se acepta nada y se pide recargar. Sin la marca,
+  // la ruta hace exactamente lo de siempre.
+  const porPasos = (cuerpo as { porPasos?: unknown }).porPasos === true
   const { resultado: r, etapas } = await conTiempos(() =>
-    responderBandeja('aceptar-captura', id, bytesDeImagen(borrador.imagen), () => enPeticionDeRuta(() => aceptarCapturaDeBandeja(id, borrador))))
+    responderBandeja('aceptar-captura', id, bytesDeImagen(borrador.imagen), () => porPasos
+      ? enPeticionDeRuta(() => aceptarPorPasos(id, borrador, esEstadoAlAceptar((cuerpo as { estado?: unknown }).estado) ? (cuerpo as { estado: EstadoAlAceptar }).estado : null))
+      : enPeticionDeRuta(() => aceptarCapturaDeBandeja(id, borrador))))
   const ms = performance.now() - inicio
   return NextResponse.json(r, { headers: { 'Server-Timing': encabezadoServerTiming(['aceptar', ms], etapas) } })
 }

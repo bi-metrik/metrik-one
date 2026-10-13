@@ -152,7 +152,8 @@ export function ubicarLectura(args: {
   // ⚠️ Antes caía en `ubicarCaptura`: sin lugar leído y con UNA sola ranura de actividad iba como
   // hermana de esa ranura (la regla de «otra opción del mismo hotel»). En COT-2026-0021 el kayak
   // abrió la primera ranura y el buceo, sin ciudad, entró como su «Opción 2» y dejó de sumar.
-  if (tipo === 'actividad') return { como: 'nueva' }
+  // «Otro servicio» igual: cada uno (asistencia médica, seguro, tarjeta de turismo) suma aparte.
+  if (tipo === 'actividad' || tipo === 'otro') return { como: 'nueva' }
 
   const captura: CapturaDetectada = { tipo, lugar: lugarLeido, origen: pistas.origen, destino: pistas.destino }
   const candidatas: RanuraCandidata[] = ranurasConLugar(vivas, tipo).map(r => ({

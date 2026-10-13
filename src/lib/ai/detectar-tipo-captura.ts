@@ -24,7 +24,7 @@
  */
 
 import { extraerConReintento, type ResultadoExtraccion } from './reintentar-extraccion'
-import { esTipoRanura, type TipoRanura } from '@/lib/cotizaciones/ranuras-cotizacion'
+import { esTipoConPantallazo, type TipoRanura } from '@/lib/cotizaciones/ranuras-cotizacion'
 
 const GEMINI_MODEL = 'gemini-2.5-flash'
 /** Clasificar no necesita pensar mucho: el presupuesto bajo es lo que la hace rápida. */
@@ -101,7 +101,8 @@ function textoOVacio(v: unknown): string | null {
 export function normalizarDeteccion(raw: unknown): TipoDetectado {
   const r = (raw && typeof raw === 'object' ? raw : {}) as Record<string, unknown>
   const tipoCrudo = typeof r.tipo === 'string' ? r.tipo.trim().toLowerCase() : ''
-  const tipo = esTipoRanura(tipoCrudo) ? tipoCrudo : null
+  // Solo los cuatro de siempre: «otro» lo elige la persona en la cotización por pasos, nunca la detección.
+  const tipo = esTipoConPantallazo(tipoCrudo) ? tipoCrudo : null
   return {
     tipo,
     lugar: tipo && tipo !== 'vuelo' ? textoOVacio(r.lugar) : null,

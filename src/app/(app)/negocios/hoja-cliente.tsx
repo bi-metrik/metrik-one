@@ -6,7 +6,7 @@ import { adicionalEnLaFicha, aAdicional, type FilaAdicional } from '@/lib/cotiza
 import { hotelesDeItems, vuelosDeItems, type ItemConLectura, type VueloPDF } from '@/lib/cotizaciones/detalle-viaje'
 import type { PreciosAMano, TarifaConfirmada } from '@/lib/cotizaciones/tarifa-pasajero'
 import { filasDeCosto, pesos } from '@/lib/cotizaciones/tarjeta-opcion'
-import { filasDelVuelo, numerosSinTramo, TOKENS, textosDeTarjetaHotel } from '@/lib/pdf/cotizacion-trappvel-formato'
+import { aerolineaDeFila, filasDelVuelo, numerosSinTramo, TOKENS, textosDeTarjetaHotel } from '@/lib/pdf/cotizacion-trappvel-formato'
 import { TEXTO_AGREGAR_FOTO_HOTEL, urlDeFotoHotel } from '@/lib/cotizaciones/foto-hotel'
 import { nombreVisibleDeLinea } from '@/lib/cotizaciones/nombre-visible'
 import PastillaAerolinea from './pastilla-aerolinea'
@@ -229,9 +229,20 @@ function VueloDelCliente({ v, general }: { v: VueloPDF; general: boolean }) {
   ].filter(Boolean).join(' · ')
   return (
     <div className="flex flex-col gap-1.5 rounded-lg border px-3.5 py-2.5" style={{ borderColor: TOKENS.linea }} data-vuelo-cliente>
+      {/* Una pastilla por vuelo (regla del 2026-10-12): la aerolínea va una vez, junto a su
+          nombre; los trayectos debajo van sin pastilla, salvo uno de otra aerolínea. */}
+      {(() => { const primera = aerolineaDeFila(filas, 0); return primera ? (
+        <span className="inline-flex items-center gap-1.5 text-[11.5px]" style={{ color: TOKENS.tinta }} data-aerolinea-del-vuelo>
+          <PastillaAerolinea aerolinea={v.aerolinea} numeroVuelo={v.numeroVuelo} /><b>{primera.nombre}</b>
+        </span>
+      ) : null })()}
       {filas.map((f, i) => (
         <div key={i} className="flex flex-wrap items-baseline gap-x-3 gap-y-0.5 text-[11.5px]" style={{ color: TOKENS.tinta }}>
-          <span className="inline-flex items-center gap-1.5"><PastillaAerolinea aerolinea={v.aerolinea} numeroVuelo={v.numeroVuelo} /><b>{v.aerolinea ?? v.linea}</b></span>
+          {i > 0 && aerolineaDeFila(filas, i) && (
+            <span className="inline-flex items-center gap-1.5" data-aerolinea-de-otro-tramo>
+              <PastillaAerolinea aerolinea={null} numeroVuelo={f.numero} /><b>{aerolineaDeFila(filas, i)!.nombre}</b>
+            </span>
+          )}
           <span>{[f.desde, f.hasta].filter(Boolean).join(' → ')}</span>
           {f.fecha && <span>{f.fecha}</span>}
           {(f.salida || f.llegada) && <span className="tabular-nums">{[f.salida, f.llegada].filter(Boolean).join(' – ')}</span>}

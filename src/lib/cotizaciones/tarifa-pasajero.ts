@@ -148,6 +148,7 @@ function mismoProducto(ranuraSlug: string): string {
   if (ranuraSlug === 'vuelo_detalle') return 'el mismo vuelo y tarifa'
   if (ranuraSlug === 'actividad_detalle') return 'la misma actividad y fecha'
   if (ranuraSlug === 'traslado_detalle') return 'el mismo trayecto y vehículo'
+  if (ranuraSlug === 'otro_detalle') return 'el mismo servicio y plan'
   return 'el mismo hotel, habitación y fechas'
 }
 
@@ -318,6 +319,14 @@ export interface LecturaCasilla {
    */
   huellaImagen?: string
   /**
+   * Los tipos de pasajero que VIAJAN en esta lectura y cuyo precio no vino: un vuelo o una
+   * actividad escritos a mano con el costo del niño o del infante vacío («vacío = falta», C5). Sin
+   * fila por tipo, pero cuentan en la ocupación (`ocupacionObservada`): así la opción cubre a todos
+   * y lo que falta es el PRECIO, que impide enviar hasta tenerlo. Ausente en toda lectura de
+   * pantallazo y en las manuales de antes.
+   */
+  sinPrecio?: TipoPasajero[]
+  /**
    * Dónde quedó guardado el pantallazo (`sbext://…`, en el almacenamiento propio del
    * workspace): se sube al ACEPTAR, nunca mientras la captura sigue en la bandeja
    * (`imagen-captura.ts`). Ausente en las lecturas anteriores al 2026-09-24 y en los
@@ -335,8 +344,14 @@ export interface LecturaCasilla {
    * (`ingreso-manual.ts`): no hay imagen detrás. Ausente = salió de un pantallazo.
    */
   origen?: 'manual'
+  /**
+   * «Otro servicio» que es una ASISTENCIA MÉDICA, escrita a mano o leída de un pantallazo en la
+   * cotización por pasos (Noor §Paso 1 y §11): el negocio la muestra en «Documentos del viajero».
+   * La pone `marcarAsistenciaMedica` al leer. Ausente en todo lo demás.
+   */
+  asistenciaMedica?: true
   /** Lo que el formulario manual deja además de la lectura (`DatosManuales`). */
-  manual?: { fuente: string; incluye: string | null; edadNino: { desde: number; hasta: number } | null }
+  manual?: { fuente: string; incluye: string | null; edadNino: { desde: number; hasta: number } | null; opcional?: boolean }
 }
 
 /**
@@ -421,7 +436,13 @@ export function textoFaltanPorAcomodar(falta: Composicion): string {
 /** La ocupación que ACREDITA la captura: la de las filas si hay desglose, la leída si no. */
 export function ocupacionObservada(l: LecturaCasilla): OcupacionLeida {
   if (l.porTipo.length > 0) {
-    const suma = (t: TipoPasajero) => l.porTipo.filter(f => f.tipo === t).reduce((a, f) => a + f.cantidad, 0)
+    // Los que viajan sin precio (`sinPrecio`) no tienen fila, pero viajan: cuentan con lo leído.
+    const sinFila = (t: TipoPasajero) => {
+      if (!l.sinPrecio?.includes(t) || l.porTipo.some(f => f.tipo === t)) return 0
+      const n = t === 'nino' ? l.ocupacion?.ninos : t === 'infante' ? l.ocupacion?.infantes : l.ocupacion?.adultos
+      return typeof n === 'number' && n > 0 ? n : 0
+    }
+    const suma = (t: TipoPasajero) => l.porTipo.filter(f => f.tipo === t).reduce((a, f) => a + f.cantidad, 0) + sinFila(t)
     const adultos = suma('adulto')
     const ninos = suma('nino')
     const infantes = suma('infante')
@@ -1092,7 +1113,7 @@ export type EstadoTarifa =
       costos: CostoPorTipo[]
       moneda: string
       costoTotal: number
-      origen: 'desglose' | 'resta' | 'solo_adultos' | 'habitaciones' | 'infante_gratis'
+      origen: 'desglose' | 'resta' | 'solo_adultos' | 'habitaciones' | 'infante_gratis' | 'a_mano'
       mensaje: string
       /**
        * Con habitaciones (R8) y sin un par del mismo tipo de habitación para cada menor, el
@@ -1166,7 +1187,15 @@ export function resolverTarifa(
   c: Composicion,
   casillas: CasillasLeidas,
   ranuraSlug: string,
-  opciones: { moneda?: string | null } = {},
+  opciones: {
+    moneda?: string | null
+    /**
+     * El costo c/u de un tipo de pasajero escrito A MANO porque el pantallazo no lo trae (la
+     * forma por pasos, regla del «precio por pasajero que falta», 2026-10-12). `0` = «No paga
+     * en este proveedor». En la moneda de la tarifa. Ausente = como siempre.
+     */
+    aMano?: Partial<Record<TipoPasajero, number>> | null
+  } = {},
 ): EstadoTarifa {
   const defs = casillasDe(c, ranuraSlug)
   const def1 = defs[0]
@@ -1270,6 +1299,10 @@ export function resolverTarifa(
   // 3 · un solo total con menores: TP4, falta desglose.
   const necesarias = defs.slice(1)
   const faltan = necesarias.filter(d => !casillas[d.clave])
+  // 3a · lo que falta se escribió a mano («Escribir a mano» o «No paga en este proveedor»):
+  // solo si no hay otra captura pegada para restar, que manda sobre lo escrito.
+  const aMano = faltan.length === necesarias.length ? conPrecioAMano(c, l1, opciones.aMano ?? null, moneda) : null
+  if (aMano) return aMano
   if (faltan.length > 0) {
     const siguiente = faltan[0]
     const prefijo = faltan.length === necesarias.length
@@ -1367,6 +1400,89 @@ export function resolverTarifa(
     origen: 'resta',
     mensaje: 'Ya está el precio de cada tipo de pasajero.',
   }
+}
+
+/**
+ * 3a · el precio que falta, escrito a mano (regla del 2026-10-12, P12 de Vera). El pantallazo 1
+ * trae el precio de unos tipos (el adulto, casi siempre) y la persona escribe el costo c/u de los
+ * que faltan, o confirma que no pagan (`0`).
+ *
+ * Cada tipo sale de su fila leída si la trae; si no, de lo escrito a mano. Un solo tipo sin
+ * ninguna de las dos, solo si es el adulto (el pantallazo trae un solo total), sale de la resta:
+ * el total menos lo escrito. Si queda un menor sin precio, o la resta da negativa, no se resuelve.
+ * `null` = no aplica (no hay nada escrito a mano, o no alcanza).
+ */
+function conPrecioAMano(
+  c: Composicion,
+  l1: LecturaCasilla,
+  aMano: Partial<Record<TipoPasajero, number>> | null,
+  moneda: string,
+): EstadoTarifa | null {
+  if (!aMano || !Object.values(aMano).some(v => typeof v === 'number' && Number.isFinite(v) && v >= 0)) return null
+  const presentes = tiposPresentes(c)
+  const filas: { tipo: TipoPasajero; total: number | null; deDonde: string }[] = presentes.map(t => {
+    const n = cantidadDeTipo(c, t)
+    const leidas = l1.porTipo.filter(f => f.tipo === t && f.cantidad > 0)
+    if (leidas.length > 0) {
+      const sub = leidas.reduce((a, f) => a + f.subtotal, 0)
+      return { tipo: t, total: sub, deDonde: `Pantallazo 1: ${formatoMonto(sub, moneda)} por ${describirOcupacion(soloTipo(t, n))}` }
+    }
+    const escrito = aMano[t]
+    if (typeof escrito === 'number' && Number.isFinite(escrito) && escrito >= 0) {
+      return {
+        tipo: t,
+        total: dosDecimales(escrito * n),
+        deDonde: escrito === 0 ? 'No paga en este proveedor (lo confirmó una persona)' : `Escrito a mano: ${formatoMonto(escrito, moneda)} c/u`,
+      }
+    }
+    return { tipo: t, total: null, deDonde: '' }
+  })
+  const sinPrecio = filas.filter(f => f.total === null)
+  // Solo el ADULTO puede salir de la resta (el pantallazo trae un solo total). Un menor sin
+  // fila ni precio escrito sigue faltando.
+  if (sinPrecio.length > 1 || sinPrecio.some(f => f.tipo !== 'adulto')) return null
+  const costo = montoDeCosto(l1)
+  if (sinPrecio.length === 1) {
+    const resto = dosDecimales(costo - filas.reduce((a, f) => a + (f.total ?? 0), 0))
+    if (resto < 0) {
+      return { estado: 'inconsistente', mensaje: 'Lo escrito a mano suma más que el total del pantallazo: revisa el costo de cada pasajero.' }
+    }
+    sinPrecio[0].total = resto
+    sinPrecio[0].deDonde = `Pantallazo 1 (${formatoMonto(costo, moneda)}) menos lo escrito a mano`
+  }
+  const costos: CostoPorTipo[] = filas.map(f => {
+    const n = cantidadDeTipo(c, f.tipo)
+    return { tipo: f.tipo, cantidad: n, total: f.total as number, unitario: dosDecimales((f.total as number) / n), deDonde: f.deDonde }
+  })
+  return {
+    estado: 'resuelta',
+    costos,
+    moneda,
+    costoTotal: dosDecimales(costos.reduce((a, x) => a + x.total, 0)),
+    origen: 'a_mano',
+    mensaje: 'Ya está el precio de cada tipo de pasajero (una parte escrita a mano).',
+  }
+}
+
+/**
+ * Los tipos de pasajero sin precio en una tarifa: lo que la forma por pasos dice «Falta precio:
+ * niño, infante» (regla del 2026-10-12). Vacío = no falta nada, o no aplica (sin pantallazo, sin
+ * menores, por habitaciones). Mira lo leído, no la confirmación: si falta, no hay confirmación.
+ */
+export function preciosQueFaltan(
+  c: Composicion,
+  casillas: CasillasLeidas,
+  ranuraSlug: string,
+  opciones: { moneda?: string | null; aMano?: Partial<Record<TipoPasajero, number>> | null } = {},
+): TipoPasajero[] {
+  const estado = resolverTarifa(c, casillas, ranuraSlug, opciones)
+  if (estado.estado === 'confirmar_menor_no_paga') return [estado.tipo]
+  if (estado.estado !== 'falta') return []
+  const l1 = casillas.grupo_completo
+  if (!l1) return []
+  return tiposPresentes(c).filter(t => t !== 'adulto'
+    && !l1.porTipo.some(f => f.tipo === t && f.cantidad > 0)
+    && !(typeof opciones.aMano?.[t] === 'number'))
 }
 
 /** Lo que la tarjeta dice del reparto de una actividad con infante (punto 1 del brief). */
@@ -1530,6 +1646,58 @@ export interface TarifaPax {
    * la actividad va, o se quitó antes de esta marca (vuelve Incluida).
    */
   noVa?: MarcaNoVa
+  /**
+   * El costo c/u de un tipo de pasajero que el pantallazo no trae, escrito a mano en la forma
+   * por pasos (regla del 2026-10-12): «Escribir a mano» o «No paga en este proveedor» (`0`).
+   * Ausente = como siempre: lo que falta se busca con otra captura.
+   */
+  costosAMano?: CostosAMano
+}
+
+/** Lo escrito a mano de un tipo de pasajero, con quién y cuándo. */
+export interface CostoAMano {
+  unitario: number
+  por: string | null
+  porId: string | null
+  en: string
+  /**
+   * `pantallazo`: no lo tecleó nadie, lo sacó ONE de un pantallazo pegado en la bandeja que
+   * completaba la opción («Completa SATENA: precio del niño», por pasos C5). Ausente = escrito a mano.
+   */
+  desde?: 'pantallazo'
+  /** El pantallazo de donde salió (`desde: 'pantallazo'`), guardado como los de las opciones. */
+  imagenRef?: string
+}
+export type CostosAMano = Partial<Record<'nino' | 'infante' | 'adulto', CostoAMano>>
+
+/** Lo escrito a mano, como lo pide `resolverTarifa`. */
+export function costosAManoComoMapa(t: TarifaPax): Partial<Record<TipoPasajero, number>> | null {
+  const c = t.costosAMano
+  if (!c) return null
+  const salida: Partial<Record<TipoPasajero, number>> = {}
+  for (const tipo of TIPOS_PASAJERO) {
+    const v = c[tipo]?.unitario
+    if (typeof v === 'number' && Number.isFinite(v) && v >= 0) salida[tipo] = v
+  }
+  return Object.keys(salida).length > 0 ? salida : null
+}
+
+function leerCostosAMano(raw: unknown): CostosAMano | null {
+  if (!raw || typeof raw !== 'object') return null
+  const r = raw as Record<string, unknown>
+  const salida: CostosAMano = {}
+  for (const tipo of TIPOS_PASAJERO) {
+    const v = r[tipo] as Record<string, unknown> | undefined
+    if (!v || typeof v !== 'object') continue
+    const u = v.unitario
+    if (typeof u !== 'number' || !Number.isFinite(u) || u < 0 || typeof v.en !== 'string') continue
+    salida[tipo] = {
+      unitario: u, por: typeof v.por === 'string' ? v.por : null, porId: typeof v.porId === 'string' ? v.porId : null, en: v.en,
+      ...(v.desde === 'pantallazo' ? { desde: 'pantallazo' as const } : {}),
+      ...(typeof v.imagenRef === 'string' ? { imagenRef: v.imagenRef } : {}),
+    }
+  }
+  return Object.keys(salida).length > 0 ? salida : null
 }
 
 /** Cómo era una actividad antes de quitarle el check, con quién y cuándo. */
@@ -1718,6 +1886,7 @@ export function leerTarifaPax(raw: unknown): TarifaPax {
   const preciosAMano = leerPreciosAMano(r.preciosAMano)
   const fotoHotel = leerFotoDelHotel(r.fotoHotel)
   const noVa = leerMarcaNoVa(r.noVa)
+  const costosAMano = leerCostosAMano(r.costosAMano)
   return {
     composicion: normalizarComposicion(r.composicion),
     casillas,
@@ -1738,6 +1907,8 @@ export function leerTarifaPax(raw: unknown): TarifaPax {
     ...(fotoHotel ? { fotoHotel } : {}),
     // Igual: sin la marca de «No va» la llave no aparece.
     ...(noVa ? { noVa } : {}),
+    // Igual: sin precios de pasajero escritos a mano la llave no aparece.
+    ...(costosAMano ? { costosAMano } : {}),
   }
 }
 

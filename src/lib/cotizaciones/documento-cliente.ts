@@ -34,6 +34,7 @@ import {
   type ItemConLectura,
 } from './detalle-viaje'
 import { normalizarTerminos } from './terminos-cotizacion'
+import { incluyeConPropias } from './incluye-por-one'
 
 export const MODELO_REDACTOR = 'gemini-2.5-flash'
 
@@ -64,6 +65,12 @@ export interface DocumentoCliente extends TextoCliente {
    * guardados antes del 2026-09-23.
    */
   estilo_por_revisar?: AlertaDeEstilo[]
+  /**
+   * `'one'`: «Incluye» lo arma ONE al imprimir con lo que se cobra (`incluye-por-one.ts`, C6), y
+   * `incluye` guarda solo las líneas propias de la asesora. Ausente = «Incluye» es el texto
+   * guardado, como siempre. La escribe la forma por pasos; el PDF la lee sin mirar el interruptor.
+   */
+  incluye_origen?: 'one'
 }
 
 export const LIMITES_TEXTO = {
@@ -137,6 +144,7 @@ export function leerDocumentoCliente(raw: unknown): DocumentoCliente | null {
     revisado_por_nombre: cadena(r.revisado_por_nombre),
     revisado_en: cadena(r.revisado_en),
     ...conAlertas(leerAlertasDeEstilo(r.estilo_por_revisar)),
+    ...(r.incluye_origen === 'one' ? { incluye_origen: 'one' as const } : {}),
   }
 }
 
@@ -171,10 +179,16 @@ export function estadoDelTexto(doc: DocumentoCliente | null): EstadoTexto {
  */
 export function textoParaElViaje(
   doc: DocumentoCliente | null,
+  /**
+   * C6 · los renglones que arma ONE con lo que se cobra (`incluyeDeOne`). Solo se usan si el
+   * documento lleva la marca `incluye_origen = 'one'`; sin la marca, «Incluye» es el guardado.
+   */
+  incluyeDeOne?: readonly string[] | null,
 ): Partial<Pick<ViajePDF, 'titular' | 'intro' | 'incluye' | 'antesDeViajar'>> {
   const t = textoImprimible(doc)
   if (!t) return {}
-  return { titular: t.titular, intro: t.intro, incluye: t.incluye, antesDeViajar: t.antes_de_viajar }
+  const incluye = doc?.incluye_origen === 'one' && incluyeDeOne ? incluyeConPropias(incluyeDeOne, t.incluye) : t.incluye
+  return { titular: t.titular, intro: t.intro, incluye, antesDeViajar: t.antes_de_viajar }
 }
 
 /** ¿El texto se escribió (o se revisó) con otras líneas? Sin huella de ninguno de los dos lados, no se afirma. */
