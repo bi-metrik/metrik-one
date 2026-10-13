@@ -11,7 +11,7 @@ export type Fila = Record<string, unknown>
 /** `[columna, 'eq', valor]` o `[columna, 'in', valores]`. */
 export type Filtro = [string, 'eq', unknown] | [string, 'in', unknown[]]
 
-export interface ResultadoBorrado {
+interface ResultadoBorrado {
   borradas: number
   error: { code?: string; message: string } | null
 }
@@ -21,8 +21,11 @@ export interface Almacen {
   contar(tabla: string, filtros: Filtro[]): Promise<number>
   insertar(tabla: string, filas: Fila[]): Promise<void>
   actualizar(tabla: string, id: string, patch: Fila): Promise<void>
-  /** Upsert por `id` (solo `profiles`: el id lo pone Auth). */
-  guardar(tabla: string, fila: Fila): Promise<void>
+  /**
+   * Upsert por `conflicto` (por defecto `id`). Para `profiles` (el id lo pone Auth) y para
+   * `fiscal_profiles`, cuya fila la crea un trigger al nacer el workspace.
+   */
+  guardar(tabla: string, fila: Fila, conflicto?: string): Promise<void>
   borrar(tabla: string, filtros: Filtro[]): Promise<ResultadoBorrado>
   /** Las TABLAS de `public` (no vistas) que se pueden borrar, con sus columnas. */
   tablas(): Promise<Map<string, string[]>>
@@ -52,6 +55,11 @@ export function almacenEnMemoria(opts: {
   llaves?: { tabla: string; columna: string; apunta: string }[]
   usuarios?: { id: string; correo: string }[]
   archivos?: { bucket: string; ruta: string }[]
+  /** Lo que en la base hacen los triggers (sembrar al crear un workspace, registrar al borrar una etapa). */
+  disparadores?: {
+    alInsertar?: (tabla: string, fila: Fila, estado: Record<string, Fila[]>) => void
+    alBorrar?: (tabla: string, fila: Fila, estado: Record<string, Fila[]>) => void
+  }
 }): Almacen & { estado: Record<string, Fila[]>; usuarios: { id: string; correo: string }[]; objetos: { bucket: string; ruta: string }[] } {
   const estado = opts.tablas
   const usuarios = opts.usuarios ?? []
@@ -71,15 +79,18 @@ export function almacenEnMemoria(opts: {
       return filas(tabla).filter(f => cumple(f, filtros)).length
     },
     async insertar(tabla, nuevas) {
-      for (const f of nuevas) filas(tabla).push({ ...f })
+      for (const f of nuevas) {
+        filas(tabla).push({ ...f })
+        opts.disparadores?.alInsertar?.(tabla, f, estado)
+      }
     },
     async actualizar(tabla, id, patch) {
       for (const f of filas(tabla)) if (f.id === id) Object.assign(f, patch)
     },
-    async guardar(tabla, fila) {
-      const previa = filas(tabla).find(f => f.id === fila.id)
+    async guardar(tabla, fila, conflicto = 'id') {
+      const previa = filas(tabla).find(f => f[conflicto] === fila[conflicto])
       if (previa) Object.assign(previa, fila)
-      else filas(tabla).push({ ...fila })
+      else filas(tabla).push({ id: `fila-${++n}`, ...fila })
     },
     async borrar(tabla, filtros) {
       const van = filas(tabla).filter(f => cumple(f, filtros))
@@ -90,6 +101,7 @@ export function almacenEnMemoria(opts: {
         }
       }
       estado[tabla] = filas(tabla).filter(f => !van.includes(f))
+      for (const f of van) opts.disparadores?.alBorrar?.(tabla, f, estado)
       return { borradas: van.length, error: null }
     },
     async tablas() {

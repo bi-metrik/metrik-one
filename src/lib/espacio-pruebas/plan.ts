@@ -26,13 +26,14 @@ import {
   CLAVES_WORKSPACE_QUE_SE_COPIAN,
   CLAVES_WORKSPACE_QUE_SE_DESCARTAN,
   LLAVE_DE_CREDENCIAL,
+  TABLAS_QUE_SE_COPIAN,
   clasificarTabla,
   modulosParaPruebas,
 } from './clasificacion'
 import { pareceDatoPersonal, remapear, sinLlaves, uuidsEn } from './jsonb'
 import { MARCA_SEMILLA, SEMILLAS, filasDeSemilla, type EntradaCaso } from './semillas'
 
-export interface UsuarioDePrueba {
+interface UsuarioDePrueba {
   correo: string
   nombre: string
   role: 'owner' | 'operator'
@@ -42,7 +43,7 @@ export interface UsuarioDePrueba {
 }
 
 /** Los dos accesos: la dueña autoriza bajo el mínimo (P6, V3) y la asesora arma el viaje. */
-export function usuariosDePrueba(correoBase: string, destino: string): UsuarioDePrueba[] {
+function usuariosDePrueba(correoBase: string, destino: string): UsuarioDePrueba[] {
   const [local, dominio] = correoBase.split('@')
   if (!local || !dominio) throw new Error(`Correo base inválido: ${correoBase}`)
   const alias = (sufijo: string) => `${local.split('+')[0]}+${destino}-${sufijo}@${dominio}`.toLowerCase()
@@ -66,10 +67,10 @@ export interface OpcionesPlan {
 
 export type Paso =
   | { tipo: 'insertar'; tabla: string; filas: Fila[] }
-  | { tipo: 'guardar'; tabla: string; fila: Fila }
+  | { tipo: 'guardar'; tabla: string; fila: Fila; conflicto?: string }
   | { tipo: 'actualizar'; tabla: string; id: string; patch: Fila }
 
-export interface InformePlan {
+interface InformePlan {
   clavesCopiadas: string[]
   clavesDescartadas: { clave: string; motivo: string }[]
   modulosApagados: string[]
@@ -167,7 +168,7 @@ export async function planificar(a: Almacen, o: OpcionesPlan): Promise<Plan> {
   const dueno = usuarios[0]
   const asesora = usuarios[1]
   // Sin `--apply` un usuario nuevo todavía no tiene id: el simulacro usa uno provisional.
-  const perfilDe = (u: (typeof usuarios)[number]) => u.id ?? `pendiente-${u.correo}`
+  const perfilDe = (u: (typeof usuarios)[number]) => u.id ?? `perfil-por-crear-${u.rolPlataforma}`
 
   // ── Configuración (solo si el destino es nuevo) ───────────────────────────
   let lineas: Fila[] = []
@@ -184,8 +185,7 @@ export async function planificar(a: Almacen, o: OpcionesPlan): Promise<Plan> {
     const leidas: Record<string, Fila[]> = {}
     const ids: Record<string, string[]> = {}
     const esquema = await a.tablas()
-    for (const tabla of ['lineas_negocio', 'etapas_negocio', 'bloque_configs', 'custom_fields', 'custom_field_mappings', 'labels',
-      'workspace_stages', 'stage_transition_rules', 'expense_categories', 'workspace_features', 'servicios', 'servicio_tarifas_versiones']) {
+    for (const tabla of TABLAS_QUE_SE_COPIAN.map(r => r.patron).filter(t => t !== 'fiscal_profiles')) {
       if (!esquema.has(tabla)) {
         informe.avisos.push(`La tabla ${tabla} no existe en la base: no se copia.`)
         leidas[tabla] = []
@@ -286,20 +286,22 @@ export async function planificar(a: Almacen, o: OpcionesPlan): Promise<Plan> {
       if (filas.length) pasos.push({ tipo: 'insertar', tabla, filas: filas.map(f => transformar(tabla, f)) })
     }
 
-    // El perfil fiscal: el régimen de la cliente, con una identidad inventada.
+    // El perfil fiscal: el régimen de la cliente, con una identidad inventada. La fila la crea un
+    // trigger al nacer el workspace (`seed_fiscal_profile`, workspace_id UNIQUE): se completa esa.
     const [fiscal] = esquema.has('fiscal_profiles') ? await a.leer('fiscal_profiles', [['workspace_id', 'eq', origen.id]]) : []
     const REGIMEN = ['person_type', 'tax_regime', 'iva_responsible', 'is_declarante', 'self_withholder', 'gran_contribuyente',
       'agente_retenedor', 'ica_rate', 'ica_city', 'ciiu', 'actividad_secundaria', 'tipo_documento']
     pasos.push({
-      tipo: 'insertar',
+      tipo: 'guardar',
       tabla: 'fiscal_profiles',
-      filas: [{
+      conflicto: 'workspace_id',
+      fila: {
         ...Object.fromEntries(REGIMEN.filter(k => fiscal && k in fiscal).map(k => [k, fiscal![k]])),
         workspace_id: wsId,
         nit: '900000001',
         razon_social: 'AGENCIA DE PRUEBA S.A.S',
         is_complete: true,
-      }],
+      },
     })
 
     // Lo que NO se copia, contado, para que el informe diga qué se dejó y por qué.
@@ -428,7 +430,7 @@ async function pasosDeSemillas(
 export async function ejecutar(a: Almacen, plan: Plan): Promise<void> {
   for (const p of plan.pasos) {
     if (p.tipo === 'insertar') await a.insertar(p.tabla, p.filas)
-    else if (p.tipo === 'guardar') await a.guardar(p.tabla, p.fila)
+    else if (p.tipo === 'guardar') await a.guardar(p.tabla, p.fila, p.conflicto)
     else await a.actualizar(p.tabla, p.id, p.patch)
   }
 }

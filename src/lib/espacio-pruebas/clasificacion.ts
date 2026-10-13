@@ -17,7 +17,7 @@
  * configuración nueva no se queda afuera en silencio, y una de datos no entra por descuido.
  */
 
-export type AccionTabla = 'copia' | 'excluye'
+type AccionTabla = 'copia' | 'excluye'
 
 export interface ReglaTabla {
   /** Nombre exacto o prefijo terminado en `*` (`backup_*`). */
@@ -47,19 +47,21 @@ export const TABLAS_QUE_SE_COPIAN: readonly ReglaTabla[] = [
   { patron: 'custom_fields', accion: 'copia', motivo: 'Campos propios del workspace' },
   { patron: 'custom_field_mappings', accion: 'copia', motivo: 'Herencia de esos campos entre entidades' },
   { patron: 'labels', accion: 'copia', motivo: 'Etiquetas (sin sus asignaciones)' },
-  { patron: 'workspace_stages', accion: 'copia', motivo: 'Estados configurables' },
-  { patron: 'stage_transition_rules', accion: 'copia', motivo: 'Reglas entre esos estados' },
-  { patron: 'expense_categories', accion: 'copia', motivo: 'Categorías de gasto' },
   { patron: 'workspace_features', accion: 'copia', motivo: 'Funciones encendidas del workspace' },
   { patron: 'servicios', accion: 'copia', motivo: 'Catálogo de servicios de las líneas copiadas' },
-  { patron: 'servicio_tarifas_versiones', accion: 'copia', motivo: 'Tarifas de esos servicios' },
-  { patron: 'fiscal_profiles', accion: 'copia', motivo: 'Solo el régimen (IVA, declarante, ICA): NIT y razón social inventados' },
+  { patron: 'fiscal_profiles', accion: 'copia', motivo: 'Solo el régimen (IVA, declarante, ICA) sobre la fila que crea la base: NIT y razón social inventados' },
 ]
 
+const LA_BASE_LAS_SIEMBRA = 'La base las siembra sola al crear el workspace (trigger); copiarlas las duplica'
+
 /** Las que NO se copian, a propósito. Primera regla que coincide gana. */
-export const TABLAS_QUE_SE_EXCLUYEN: readonly ReglaTabla[] = [
+const TABLAS_QUE_SE_EXCLUYEN: readonly ReglaTabla[] = [
   // Respaldos
   { patron: 'backup_*', accion: 'excluye', motivo: 'Respaldo de una corrección vieja' },
+  // Las que siembra la base al crear el workspace
+  ...['expense_categories', 'workspace_stages'].map(patron => ({ patron, accion: 'excluye' as const, motivo: LA_BASE_LAS_SIEMBRA })),
+  { patron: 'stage_transition_rules', accion: 'excluye', motivo: 'Cuelgan de workspace_stages (pipeline viejo); el flujo de negocios no las usa' },
+  { patron: 'servicio_tarifas_versiones', accion: 'excluye', motivo: 'Inmutable (trigger): una copia no se puede borrar después; tarifas por plan de SOENA' },
   // Datos de negocios
   ...[
     'negocios', 'negocio_*', 'cotizaciones', 'cotizacion_*', 'items', 'rubros', 'item_adicionales',

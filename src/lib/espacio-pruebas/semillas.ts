@@ -19,7 +19,7 @@
 import type { Fila } from './almacen'
 import { remapear } from './jsonb'
 
-export type Base = 'caso-fijo' | 'flujo-nuevo' | 'vacia'
+type Base = 'caso-fijo' | 'flujo-nuevo' | 'vacia'
 
 export interface DefSemilla {
   clave: string
