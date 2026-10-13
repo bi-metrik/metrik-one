@@ -2876,7 +2876,11 @@ export default function CotizacionEditor({ oportunidadId, cotizacion, initialIte
               onCambio={refrescar}
             />
           )}
-          {lineasPorTipo && (
+          {/* C5 · con la forma por pasos, «O agrégalo sin pantallazo» y sus botones por tipo se
+              funden en «✎ Escríbelo a mano» de la bandeja. Queda el componente suelto, que es
+              la entrada de lo que no es vuelo, hotel, traslado ni actividad (seguro, asistencia
+              médica) mientras «Otro servicio» no exista como tipo. */}
+          {lineasPorTipo && !porPasosOn && (
             <p className="text-[10px] font-medium uppercase tracking-wide text-muted-foreground">
               O agrégalo sin pantallazo
             </p>
@@ -2886,7 +2890,7 @@ export default function CotizacionEditor({ oportunidadId, cotizacion, initialIte
           <div className={lineasPorTipo ? 'relative flex flex-wrap gap-2' : 'relative flex gap-2'}>
             {lineasPorTipo ? (
               <>
-                {gruposCanonicos().map(g => (
+                {!porPasosOn && gruposCanonicos().map(g => (
                   <button
                     key={g.grupo}
                     onClick={() => handleAddItemDeGrupo(g)}

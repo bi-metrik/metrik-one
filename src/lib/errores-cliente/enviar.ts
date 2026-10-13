@@ -233,7 +233,7 @@ export function reportarAvisoConexion(causa: CausaAvisoConexion): void {
 
 /** Lo que la bandeja de pantallazos cuenta de un envío que no llegó (ver `reporte.ts`). */
 export interface FalloDeBandeja {
-  ruta: 'detectar-captura' | 'leer-captura' | 'aceptar-captura' | 'lectura-manual'
+  ruta: 'detectar-captura' | 'leer-captura' | 'aceptar-captura' | 'lectura-manual' | 'aceptar-lote'
   /** `RED` = el fetch lanzó; `RESPUESTA` = volvió algo que no es JSON; `PESADA` = 413. */
   codigo: string
   cotizacionId: string

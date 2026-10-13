@@ -414,6 +414,10 @@ export default function TarjetaOpcion({
               {vuelo && <PastillaAerolinea aerolinea={vuelo.aerolinea} numeroVuelo={vuelo.numeroVuelo} />}
               {nombre}
               {estrellas ? <span className="text-xs tracking-[1px] text-[#C98A00]" aria-label={`${estrellas} estrellas`}>{'★'.repeat(estrellas)}</span> : null}
+              {/* C5 · lo escrito a mano lleva su marca en la forma por pasos (Noor: «✎ a mano»). */}
+              {porPasos && esManual(tarifa.casillas?.grupo_completo ?? tarifa.habitaciones?.[0]?.lectura ?? null) && (
+                <span className="rounded-full bg-[#F1EEE7] px-2 py-0.5 text-[11px] font-semibold text-[#6E6A62]" title="Lo escribiste a mano" data-marca-a-mano>✎ a mano</span>
+              )}
             </span>
             {sinPantallazo ? (
               <span className="block text-[13px] text-[#6E6A62] max-sm:text-xs">pega el pantallazo</span>

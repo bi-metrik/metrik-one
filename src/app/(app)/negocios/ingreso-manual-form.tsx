@@ -23,6 +23,20 @@ const SPIN_BOTON = SPIN.replace('mr-1.5 ', '')
 
 export type TipoManual = 'hotel' | 'traslado'
 
+/** «✎ Escríbelo a mano» de la cotización por pasos (C5): suma vuelo y actividad. */
+export type TipoEscritoAMano = TipoManual | 'vuelo' | 'actividad'
+
+/** El orden de los tipos en «✎ Escríbelo a mano» (Noor, Paso 1). */
+export const TIPOS_A_MANO: readonly TipoEscritoAMano[] = ['vuelo', 'hotel', 'traslado', 'actividad']
+const ETIQUETA_TIPO: Record<TipoEscritoAMano, string> = { vuelo: 'Vuelo', hotel: 'Hotel', traslado: 'Traslado', actividad: 'Actividad' }
+
+/** Copys de Noor (sección 3, «Escribirlo a mano»). */
+export const TITULO_A_MANO = '✎ Escríbelo a mano'
+export const AYUDA_A_MANO = 'Sin pantallazo: para portafolios, tarifas por teléfono o lo que no se puede capturar.'
+export const AYUDA_OBLIGATORIOS = 'Solo lo marcado con * es obligatorio. Lo demás se completa después con «✎ Corregir datos».'
+export const FALTA_OBLIGATORIO = 'Falta lo marcado con *.'
+export const ES_OPCIONAL = 'Es opcional: el cliente decide (no suma)'
+
 export type RespuestaManual = { ok: true } | { ok: false; mensaje: string; errores?: ErroresManual }
 
 export const AYUDA_NETO = 'Lo que te cobra el proveedor, sin sumarle nada. El margen lo pone ONE.'
@@ -52,11 +66,21 @@ export function valorEscrito(campo: string, texto: string): string {
   return CAMPOS_MONTO.has(campo) ? montoConMiles(texto) : texto
 }
 
-function inicial(tipo: TipoManual, grupo: Composicion | null): Valores {
+function inicial(tipo: TipoEscritoAMano, grupo: Composicion | null): Valores {
   const pax = {
     adultos: String(grupo?.adultos ?? 2),
     ninos: String(grupo?.ninos ?? 0),
     infantes: String(grupo?.infantes ?? 0),
+  }
+  if (tipo === 'vuelo') {
+    return {
+      aerolinea: '', origen: '', destino: '', ida: '', horaSalida: '', horaLlegada: '', numero: '', tarifa: '',
+      regreso: '', horaSalidaRegreso: '', horaLlegadaRegreso: '', numeroRegreso: '', ...pax,
+      netoAdulto: '', netoNino: '', netoInfante: '', fuente: '',
+    }
+  }
+  if (tipo === 'actividad') {
+    return { nombre: '', ciudad: '', fecha: '', ...pax, netoAdulto: '', netoNino: '', netoInfante: '', opcional: '', fuente: '' }
   }
   return tipo === 'hotel'
     ? { hotel: '', ciudad: '', entrada: '', salida: '', habitacion: '', regimen: '', incluye: '', ...pax, netoAdulto: '', netoNino: '', netoInfante: '', edadDesde: '', edadHasta: '', fuente: '' }
@@ -69,6 +93,7 @@ export default function IngresoManualForm({
   onCerrar,
   tipoInicial = 'hotel',
   fechasViaje = null,
+  porPasos = false,
 }: {
   /** El grupo del viaje: los pasajeros arrancan con él. */
   composicion: Composicion | null
@@ -78,16 +103,22 @@ export default function IngresoManualForm({
   onEnviar: (tipo: TipoManual, datos: Record<string, unknown>) => Promise<RespuestaManual>
   onCerrar: () => void
   /** Con qué arranca. La bandeja no lo pasa: empieza en hotel. */
-  tipoInicial?: TipoManual
+  tipoInicial?: TipoEscritoAMano
+  /**
+   * «✎ Escríbelo a mano» de la cotización por pasos (C5): cuatro tipos (vuelo, hotel, traslado y
+   * actividad), lo obligatorio marcado con * y la fuente opcional. Sin ella, el ingreso manual de
+   * siempre, igual que hoy.
+   */
+  porPasos?: boolean
 }) {
   const id = useId()
-  const [tipo, setTipo] = useState<TipoManual>(tipoInicial)
+  const [tipo, setTipo] = useState<TipoEscritoAMano>(tipoInicial)
   const [v, setV] = useState<Valores>(() => inicial(tipoInicial, composicion))
   const [errores, setErrores] = useState<ErroresManual>({})
   const [mensaje, setMensaje] = useState<string | null>(null)
   const [enviando, setEnviando] = useState(false)
 
-  function cambiarTipo(t: TipoManual) {
+  function cambiarTipo(t: TipoEscritoAMano) {
     if (t === tipo) return
     setTipo(t)
     setV(inicial(t, composicion))
@@ -101,12 +132,12 @@ export default function IngresoManualForm({
    * `numerico`: un monto o una cantidad. Como en `FormHabitacion`: texto con teclado numérico
    * (no `type="number"`, que pone flechas y deja que la rueda del mouse cambie el valor).
    */
-  function campo(k: string, label: string, extra: { tipo?: string; placeholder?: string; ayuda?: string; ancho?: string; numerico?: boolean } = {}): ReactNode {
+  function campo(k: string, label: string, extra: { tipo?: string; placeholder?: string; ayuda?: string; ancho?: string; numerico?: boolean; obligatorio?: boolean } = {}): ReactNode {
     const error = errores[k]
     const clase = error ? INPUT_DUDOSO : INPUT
     return (
       <label key={k} className={`flex flex-col gap-0.5 text-xs ${error ? 'text-[#9A5F0C]' : 'text-[#6E6A62]'} ${extra.ancho ?? ''}`}>
-        <span>{label}</span>
+        <span>{porPasos && extra.obligatorio ? `${label} *` : label}</span>
         <input
           type={extra.numerico ? 'text' : (extra.tipo ?? 'text')}
           inputMode={extra.numerico ? 'numeric' : undefined}
@@ -136,21 +167,157 @@ export default function IngresoManualForm({
     if (enviando) return
     setEnviando(true)
     setMensaje(null)
-    const datos: Record<string, unknown> = tipo === 'hotel' ? { ...v } : { ...v, idaYRegreso: v.idaYRegreso === 'si' }
-    const r = await onEnviar(tipo, datos)
+    const datos: Record<string, unknown> = tipo === 'hotel' || tipo === 'vuelo'
+      ? { ...v }
+      : tipo === 'actividad'
+        ? { ...v, opcional: v.opcional === 'si' }
+        : { ...v, idaYRegreso: v.idaYRegreso === 'si' }
+    const r = await (onEnviar as (t: TipoEscritoAMano, d: Record<string, unknown>) => Promise<RespuestaManual>)(tipo, datos)
     setEnviando(false)
     if (r.ok) {
       onCerrar()
       return
     }
     setErrores(r.errores ?? {})
-    setMensaje(r.mensaje)
+    // «Falta lo marcado con *.»: en la forma por pasos, lo que falta se pinta en el campo.
+    setMensaje(porPasos && r.errores && Object.keys(r.errores).some(k => k !== '_') ? FALTA_OBLIGATORIO : r.mensaje)
   }
 
   const noches = tipo === 'hotel' ? nochesEntre(v.entrada ?? '', v.salida ?? '') : 0
   // El mismo aviso que llevará la fila de la bandeja: avisa, no frena.
   const fueraDelViaje = tipo === 'hotel' ? avisoFechasFueraDelViaje(v.entrada ?? '', v.salida ?? '', fechasViaje) : null
   const titulo = (t: string) => <span className="col-span-full mt-1 text-[11px] font-bold uppercase tracking-[.08em] text-[#6E6A62]">{t}</span>
+
+  if (porPasos) {
+    return (
+      <form onSubmit={enviar} className="flex flex-col gap-2.5 rounded-lg border border-[#CFCAC0] bg-[#F8F7F3] p-3" aria-label="Escríbelo a mano" data-escrito-a-mano>
+        <div className="flex flex-wrap items-center gap-2">
+          <span className="text-sm font-semibold">{TITULO_A_MANO}</span>
+          <div className="flex flex-wrap gap-1" role="group" aria-label="Qué es">
+            {TIPOS_A_MANO.map(t => (
+              <button key={t} type="button" onClick={() => cambiarTipo(t)} aria-pressed={tipo === t} className={tipo === t ? BTN_ELEGIDO : BTN} data-tipo-a-mano={t}>
+                {ETIQUETA_TIPO[t]}
+              </button>
+            ))}
+          </div>
+        </div>
+        <p className="m-0 text-xs text-[#6E6A62]">{AYUDA_A_MANO} {AYUDA_OBLIGATORIOS}</p>
+        {tipo === 'vuelo' ? (
+          <div className="grid grid-cols-3 gap-x-3 gap-y-2 max-sm:grid-cols-2">
+            {campo('aerolinea', 'Aerolínea', { placeholder: 'Avianca' })}
+            {campo('origen', 'Origen', { obligatorio: true, placeholder: 'Bogotá BOG' })}
+            {campo('destino', 'Destino', { obligatorio: true, placeholder: 'San Andrés ADZ' })}
+            {titulo('Ida')}
+            {campo('ida', 'Fecha', { tipo: 'date', obligatorio: true })}
+            {campo('horaSalida', 'Sale', { placeholder: '06:50' })}
+            {campo('horaLlegada', 'Llega', { placeholder: '09:00' })}
+            {campo('numero', 'Nº de vuelo', { placeholder: 'AV 9782' })}
+            {campo('tarifa', 'Tarifa', { placeholder: 'Classic' })}
+            {titulo('Regreso (vacío = solo ida)')}
+            {campo('regreso', 'Fecha', { tipo: 'date' })}
+            {campo('horaSalidaRegreso', 'Sale', { placeholder: '18:45' })}
+            {campo('horaLlegadaRegreso', 'Llega', { placeholder: '20:55' })}
+            {campo('numeroRegreso', 'Nº de vuelo', { placeholder: 'AV 9779' })}
+            {titulo('Pasajeros')}
+            {campo('adultos', 'Adultos', { numerico: true })}
+            {campo('ninos', 'Niños', { numerico: true })}
+            {campo('infantes', 'Infantes', { numerico: true })}
+            {titulo('Costo neto por pasajero (ida y regreso)')}
+            <p className="col-span-full m-0 text-xs text-[#6E6A62]">{AYUDA_NETO}</p>
+            {campo('netoAdulto', 'Adulto', { numerico: true, obligatorio: true })}
+            {campo('netoNino', 'Niño', { numerico: true, placeholder: 'vacío = falta' })}
+            {campo('netoInfante', 'Infante', { numerico: true, placeholder: 'vacío = falta', ayuda: '0 si no paga' })}
+            {campo('fuente', 'Fuente de la tarifa', { ancho: 'col-span-2 max-sm:col-span-2', placeholder: 'Teléfono de la aerolínea', ayuda: AYUDA_FUENTE })}
+          </div>
+        ) : tipo === 'actividad' ? (
+          <div className="grid grid-cols-3 gap-x-3 gap-y-2 max-sm:grid-cols-2">
+            {campo('nombre', 'Actividad', { obligatorio: true, ancho: 'col-span-2 max-sm:col-span-2', placeholder: 'Cayo Cangrejo en lancha' })}
+            {campo('ciudad', 'Dónde', { placeholder: 'Providencia' })}
+            {campo('fecha', 'Fecha', { tipo: 'date' })}
+            {titulo('Pasajeros')}
+            {campo('adultos', 'Adultos', { numerico: true })}
+            {campo('ninos', 'Niños', { numerico: true })}
+            {campo('infantes', 'Infantes', { numerico: true })}
+            {titulo('Costo neto por persona')}
+            <p className="col-span-full m-0 text-xs text-[#6E6A62]">{AYUDA_NETO}</p>
+            {campo('netoAdulto', 'Adulto', { numerico: true, obligatorio: true })}
+            {campo('netoNino', 'Niño', { numerico: true, placeholder: 'vacío = falta' })}
+            {campo('netoInfante', 'Infante', { numerico: true, placeholder: 'vacío = falta', ayuda: '0 si no paga' })}
+            <label className="col-span-full inline-flex items-center gap-1.5 text-[13px] text-[#191713]">
+              <input type="checkbox" className="accent-[#0E5C43]" checked={v.opcional === 'si'} onChange={e => setV(prev => ({ ...prev, opcional: e.target.checked ? 'si' : '' }))} data-campo-manual="opcional" />
+              {ES_OPCIONAL}
+            </label>
+            {campo('fuente', 'Fuente de la tarifa', { ancho: 'col-span-2 max-sm:col-span-2', placeholder: 'Operador local', ayuda: AYUDA_FUENTE })}
+          </div>
+        ) : tipo === 'hotel' ? (
+          <div className="grid grid-cols-3 gap-x-3 gap-y-2 max-sm:grid-cols-2">
+            {campo('hotel', 'Hotel', { obligatorio: true })}
+            {campo('ciudad', 'Dónde', { placeholder: 'Providencia' })}
+            {campo('entrada', 'Entrada', { tipo: 'date', obligatorio: true })}
+            {campo('salida', 'Salida', { tipo: 'date', obligatorio: true, ayuda: noches > 0 ? `${noches} ${noches === 1 ? 'noche' : 'noches'}` : undefined })}
+            {campo('habitacion', 'Habitación', { obligatorio: true, placeholder: 'Doble estándar' })}
+            {campo('regimen', 'Régimen', { placeholder: 'Todo incluido, desayuno y cena…' })}
+            {titulo('Pasajeros de la habitación')}
+            {campo('adultos', 'Adultos', { numerico: true })}
+            {campo('ninos', 'Niños', { numerico: true })}
+            {campo('infantes', 'Infantes', { numerico: true })}
+            {titulo('Costo neto por persona por noche')}
+            <p className="col-span-full m-0 text-xs text-[#6E6A62]">{AYUDA_NETO}</p>
+            {campo('netoAdulto', 'Adulto', { numerico: true, obligatorio: true })}
+            {campo('netoNino', 'Niño', { numerico: true })}
+            {campo('netoInfante', 'Infante', { numerico: true, placeholder: '0' })}
+            {campo('fuente', 'Fuente de la tarifa', { ancho: 'col-span-2 max-sm:col-span-2', placeholder: 'Portafolio del hotel', ayuda: AYUDA_FUENTE })}
+          </div>
+        ) : (
+          <div className="grid grid-cols-3 gap-x-3 gap-y-2 max-sm:grid-cols-2">
+            {campo('ruta', 'Recorrido', { obligatorio: true, placeholder: 'Aeropuerto – hotel' })}
+            {campo('fecha', 'Fecha', { tipo: 'date' })}
+            {titulo('Pasajeros')}
+            {campo('adultos', 'Adultos', { numerico: true })}
+            {campo('ninos', 'Niños', { numerico: true })}
+            {campo('infantes', 'Infantes', { numerico: true })}
+            <div className="col-span-full flex flex-col gap-0.5" data-campo-manual="precio">
+              <div className="flex flex-wrap items-center gap-x-4 gap-y-1" role="radiogroup" aria-label={PREGUNTA_PRECIO_TRASLADO}>
+                <span className={`text-xs ${errores.precio ? 'text-[#9A5F0C]' : 'text-[#6E6A62]'}`}>{PREGUNTA_PRECIO_TRASLADO} *</span>
+                {opcion('precio', 'por_trayecto', OPCION_POR_TRAYECTO)}
+                {opcion('precio', 'in_out', OPCION_IN_OUT)}
+              </div>
+              {errores.precio && <span className="text-xs text-[#B3382C]">{errores.precio}</span>}
+            </div>
+            <div className="col-span-full flex flex-wrap gap-x-4 gap-y-1" role="radiogroup" aria-label="Cómo cobra">
+              {opcion('cobro', 'por_persona', 'Por persona')}
+              {opcion('cobro', 'por_vehiculo', 'Por vehículo')}
+            </div>
+            {v.cobro === 'por_vehiculo'
+              ? campo('neto', 'Costo por vehículo', { numerico: true, obligatorio: true })
+              : (
+                <>
+                  {campo('neto', 'Adulto', { numerico: true, obligatorio: true })}
+                  {campo('netoNino', 'Niño', { numerico: true })}
+                  {campo('netoInfante', 'Infante', { numerico: true, placeholder: '0' })}
+                </>
+              )}
+            {v.precio !== 'in_out' && (
+              <div className="col-span-2 flex flex-wrap items-end gap-x-4 gap-y-1 pb-1.5" role="radiogroup" aria-label="Trayectos">
+                {opcion('idaYRegreso', 'no', 'Solo ida')}
+                {opcion('idaYRegreso', 'si', 'Ida y regreso')}
+              </div>
+            )}
+            {campo('fuente', 'Fuente de la tarifa', { ancho: 'col-span-2 max-sm:col-span-2', placeholder: 'Portafolio del proveedor', ayuda: AYUDA_FUENTE })}
+          </div>
+        )}
+        {fueraDelViaje && <p className="m-0 text-xs font-medium text-[#9A5F0C]" data-aviso-fechas>{fueraDelViaje}</p>}
+        {mensaje && <p className="m-0 text-xs font-medium text-[#B3382C]" role="alert">{mensaje}</p>}
+        <div className="flex flex-wrap gap-2">
+          <button type="submit" className={BTN_PRIM} disabled={enviando}>
+            {enviando && <span className={SPIN_BOTON} aria-hidden />}
+            Llevar a la bandeja
+          </button>
+          <button type="button" className={BTN} onClick={onCerrar} disabled={enviando}>Cancelar</button>
+        </div>
+      </form>
+    )
+  }
 
   return (
     <form onSubmit={enviar} className="flex flex-col gap-2.5 rounded-lg border border-[#CFCAC0] bg-[#F8F7F3] p-3" aria-label="Ingresar a mano" data-ingreso-manual>
