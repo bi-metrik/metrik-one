@@ -299,7 +299,7 @@ export default function RegistroValidaClient({ origenUrl, abierto, consultas, di
               autoComplete="organization"
               required
               autoFocus
-              placeholder="CDA Ejemplo S.A.S."
+              placeholder="Empresa Ejemplo S.A.S."
               value={razonSocial}
               onChange={(e) => setRazonSocial(e.target.value)}
               className={claseCampo}
