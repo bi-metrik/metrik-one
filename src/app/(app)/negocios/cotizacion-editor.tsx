@@ -131,6 +131,7 @@ import {
 import {
   itemsDelItinerario,
   itemsQueAportanAlTotal,
+  normalizarGrupo,
   ranurasPorSupuesto,
 } from '@/lib/cotizaciones/itinerarios'
 import { avisosDeCobertura } from '@/lib/cotizaciones/cobertura-opciones'
@@ -164,6 +165,10 @@ import type { FiscalProfile, Client } from '@/types/database'
 import type { NivelDetalle } from '@/lib/cotizaciones/detalle-viaje'
 import type { EstadoPorPasos } from '@/lib/cotizaciones/por-pasos'
 import VistaPorPasos from '@/app/(app)/negocios/por-pasos/vista-por-pasos'
+import { incluyeDeOne, lineasQueSeCobran } from '@/lib/cotizaciones/incluye-por-one'
+import { listaUnica } from '@/lib/cotizaciones/lista-unica'
+import { opcionesSinPrecio } from '@/lib/cotizaciones/precio-que-falta'
+import { estadoDeLinea } from '@/lib/cotizaciones/estado-servicio'
 import { conReintentoDeRed } from '@/lib/red/con-reintento'
 
 interface RubroRow {
@@ -3605,6 +3610,40 @@ export default function CotizacionEditor({ oportunidadId, cotizacion, initialIte
     ? (estadoDelTexto(textoCliente.documento) === 'sin_texto' ? 'nada' : textoCliente.desactualizado ? 'viejo' : estadoDelTexto(textoCliente.documento) === 'revisado' ? 'ok' : 'sinrevisar')
     : 'nada'
   const itemPorIdVista = new Map(initialItems.map(i => [i.id, i]))
+  // C6 · lo que la forma por pasos arma con lo que ya tiene la página, sin pedir nada.
+  const tarifasDeLaPagina = (itinerarios?.itinerarios ?? []).map(t => ({ id: t.id, nombre: t.nombre, orden: t.orden, vaEnPropuesta: t.vaEnPropuesta, seleccion: t.seleccion }))
+  const lineasConLectura = initialItems.filter(i => !i.es_ajuste).map(i => ({ ...i, nombre: i.nombre ?? '', grupo: i.grupo ?? null }))
+  // «Incluye · Lo arma ONE con lo que se cobra» (pieza `incluye_por_one`).
+  const incluyeOne = porPasosOn && porPasos?.piezas.incluye_por_one === true
+    ? incluyeDeOne(lineasQueSeCobran(lineasConLectura as never[], tarifasDeLaPagina) as never[], nivelDetalle ?? 'normal')
+    : null
+  // La lista única de Revisar (pieza `lista_unica`): lo que impide enviar es lo del servidor.
+  const listaPorPasos = porPasosOn && porPasos?.piezas.lista_unica === true ? (() => {
+    const vanAlCliente = tarifasDeLaPagina.filter(t => t.vaEnPropuesta)
+    const idsQueSalen = new Set(vanAlCliente.length > 0
+      ? vanAlCliente.flatMap(t => itemsDelItinerario(lineasConLectura as never[], t.seleccion))
+      : itemsQueAportanAlTotal(lineasConLectura as never[]))
+    const noVan = new Map<string, { itemId: string; nombre: string }>()
+    for (const i of lineasConLectura) {
+      const g = normalizarGrupo(i.grupo)
+      if (!g || noVan.has(g) || estadoDeLinea(i) !== 'no') continue
+      noVan.set(g, { itemId: i.id, nombre: etiquetaDeRanura(g) })
+    }
+    return listaUnica({
+      sinPrecio: opcionesSinPrecio(lineasConLectura, idsQueSalen, composicionViaje ?? null),
+      capturas: motivoEnvio ? { motivo: motivoEnvio, itemId: desactualizadas[0]?.itemId ?? null } : null,
+      tarifas: tarifasDeLaPagina,
+      salida: salidaVista as never,
+      pantallazosPorAceptar: conteoBandeja.porAceptar,
+      texto: estadoTexto as 'nada' | 'sinrevisar' | 'viejo' | 'ok',
+      noVan: [...noVan.values()],
+      faltaDia: avisoFaltaDia ?? null,
+      margenBajoAviso: null,
+      recargo: recargo.estado === 'falta' ? `Falta el ${recargo.etiqueta.toLowerCase()}.` : null,
+      viaje: viaje.motivo ? `Pendiente: ${viaje.motivo}.` : null,
+      ivaSinCalcular: !mostrarResumenFiscal && ivaVigente && !ivaVigente.calculable && cascadaTotal.precioVenta > 0 ? motivoIvaSinCalcular(ivaVigente.sinCosto) : null,
+    })
+  })() : null
   const vistaPorPasos = porPasosOn ? (
     <VistaPorPasos
       cotizacionId={cotizacion.id}
@@ -3626,7 +3665,8 @@ export default function CotizacionEditor({ oportunidadId, cotizacion, initialIte
       leyendo={conteoBandeja.leyendo}
       pasoInicial={pasoInicial}
       motivoBotonEnviar={motivoBotonEnviar}
-      conteoLista={{
+      listaUnica={listaPorPasos}
+      conteoLista={listaPorPasos ? { rojos: listaPorPasos.impide.length, ambar: listaPorPasos.revisar.length - (conteoBandeja.porAceptar > 0 ? 1 : 0) } : {
         rojos: motivoBotonEnviar ? 1 : 0,
         ambar: (avisoFaltaDia ? 1 : 0) + (avisoNoVan ? 1 : 0) + (viaje.motivo ? 1 : 0) + (estadoTexto === 'sinrevisar' || estadoTexto === 'viejo' ? 1 : 0) + costosPendientes.length,
       }}
@@ -3674,7 +3714,7 @@ export default function CotizacionEditor({ oportunidadId, cotizacion, initialIte
       )}
       revisarDocumento={(
         <>
-          {textoCliente ? <DocumentoClientePanel cotizacionId={cotizacion.id} inicial={textoCliente} /> : null}
+          {textoCliente ? <DocumentoClientePanel cotizacionId={cotizacion.id} inicial={textoCliente} incluyeDeOne={incluyeOne} /> : null}
           {jsxTerminosJsx}
           {entradaPlan && (
             <AsiPuedesPagarPanel

@@ -121,7 +121,7 @@ export type LineaQueSeCobra = ItemConGrupo & ItemConLectura
  */
 export function lineasQueSeCobran<T extends LineaQueSeCobra>(
   lineas: readonly T[],
-  tarifas: readonly { id: string; nombre: string; orden: number; vaEnPropuesta: boolean; seleccion: string[] }[],
+  tarifas: readonly { id: string; nombre: string | null; orden: number; vaEnPropuesta: boolean; seleccion: string[] }[],
 ): T[] {
   const vivas = lineas.filter(l => l.es_ajuste !== true)
   const principal = idDelPrincipal(tarifas.map(t => ({ id: t.id, nombre: t.nombre, orden: t.orden, vaEnPropuesta: t.vaEnPropuesta })))

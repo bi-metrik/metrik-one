@@ -39,6 +39,8 @@ import type { Composicion } from '@/lib/cotizaciones/tarifa-pasajero'
 import { nombreVisibleDeLinea } from '@/lib/cotizaciones/nombre-visible'
 import { resumenDeOpcion } from '@/lib/cotizaciones/opcion-viaje'
 import type { ItemConLectura } from '@/lib/cotizaciones/detalle-viaje'
+import type { DestinoDeIr, ListaUnica } from '@/lib/cotizaciones/lista-unica'
+import { ListaUnicaPorPasos } from './lista-unica-por-pasos'
 import {
   cascadaDelTotal,
   estadoDeLosPasos,
@@ -97,6 +99,11 @@ export interface PropsVistaPorPasos {
   agregarSinPantallazo: ReactNode
   tarjetaDeOpcion: (itemId: string, porPasos: { enTarifas: string[] | null; menuExtra: (cerrar: () => void) => ReactNode; onEliminar: () => void }) => ReactNode
   revisarLista: ReactNode
+  /**
+   * C6 · la lista única (pieza `lista_unica`): reemplaza a `revisarLista` y su primer renglón rojo
+   * es el motivo del botón «Enviar». `null` = los avisos de siempre.
+   */
+  listaUnica?: ListaUnica | null
   revisarDocumento: ReactNode
   verElCalculo: ReactNode
   rastro: ReactNode
@@ -190,6 +197,13 @@ export default function VistaPorPasos(p: PropsVistaPorPasos) {
     setPaso(n)
     if (n === 2) setTarifasVistas(true)
     if (typeof window !== 'undefined') window.scrollTo({ top: 0, behavior: 'smooth' })
+  }
+  /** «Ir» de la lista única: la tarjeta, la tarifa, la bandeja o el párrafo exacto. */
+  const irDesdeLaLista = (d: DestinoDeIr) => {
+    if (d.a === 'opcion') { setPaso(1); p.onAbrirOpcion(d.itemId); return }
+    if (d.a === 'tarifas') { irAPaso(2); return }
+    if (d.a === 'bandeja' || d.a === 'viaje') { irAPaso(1); return }
+    if (typeof document !== 'undefined') document.getElementById('doc')?.scrollIntoView({ behavior: 'smooth', block: 'start' })
   }
 
   // ── Acciones: se escriben en el acto y dejan «Deshacer» ──
@@ -517,8 +531,10 @@ export default function VistaPorPasos(p: PropsVistaPorPasos) {
       enviada={p.enviada}
       editable={p.editable}
       ocupado={ocupado}
-      motivoParaNoEnviar={p.motivoBotonEnviar ?? (sinCosto.length > 0 ? `${sinCosto[0].motivo}: ${sinCosto[0].servicio}.` : null)}
-      lista={p.revisarLista}
+      motivoParaNoEnviar={p.listaUnica
+        ? (p.listaUnica.impide[0]?.texto ?? null)
+        : p.motivoBotonEnviar ?? (sinCosto.length > 0 ? `${sinCosto[0].motivo}: ${sinCosto[0].servicio}.` : null)}
+      lista={p.listaUnica ? <ListaUnicaPorPasos lista={p.listaUnica} onIr={irDesdeLaLista} /> : p.revisarLista}
       documento={p.revisarDocumento}
       onDescargar={p.onDescargar}
       onEnviar={() => void correr(async () => {

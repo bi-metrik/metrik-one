@@ -204,6 +204,35 @@ describe('C6 · D6 · «Incluye» armado por ONE', () => {
   })
 })
 
+describe('C6 · N10 · la paginación aguanta «Incluye» armado por ONE', () => {
+  /** El documento del caso fijo, con la marca y el nivel de detalle pedido, compuesto de verdad. */
+  async function informe(nivel: 'normal' | 'muy_detallada', conMarca: boolean) {
+    sembrar()
+    ;(tabla('cotizaciones')[0] as Fila).documento_cliente = textoRevisado(conMarca ? { incluye: ['Tarjeta de turismo de San Andrés'], incluye_origen: 'one' } : {})
+    for (const b of tabla('negocio_bloques')) {
+      const d = b.data as Fila | undefined
+      if (d && 'nivel_detalle' in d) d.nivel_detalle = nivel
+    }
+    await recalcularTotales(COT_SAN_ANDRES)
+    captura.activa = true
+    captura.props = null
+    await generateCotizacionPDF(COT_SAN_ANDRES)
+    captura.activa = false
+    const props = captura.props as Parameters<typeof import('@/lib/pdf/cotizacion-trappvel-paginacion').componerCotizacionTrappvel>[0]
+    expect(props.viaje?.incluye?.length ?? 0).toBeGreaterThan(conMarca ? 7 : 0)
+    const { componerCotizacionTrappvel } = await import('@/lib/pdf/cotizacion-trappvel-paginacion')
+    return (await componerCotizacionTrappvel(props)).informe
+  }
+
+  for (const nivel of ['normal', 'muy_detallada'] as const) {
+    it(`nivel ${nivel}: la última hoja trabaja (una sola hoja, o el 35 % o más), sin achicar letra`, async () => {
+      const i = await informe(nivel, true)
+      expect(i.despues.hojas === 1 || i.despues.ocupacionUltima >= 0.35, JSON.stringify(i)).toBe(true)
+      expect(i.descartado).toBe(false)
+    }, 120_000)
+  }
+})
+
 // ── D8 · la lista única contra el servidor ──────────────────────────────────
 
 /** La lista, con las MISMAS funciones que usa la pantalla, sobre lo que hay en el doble. */
