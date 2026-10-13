@@ -10,7 +10,7 @@
  */
 
 import type { HotelPDF, VueloPDF } from '@/lib/cotizaciones/detalle-viaje'
-import { siglaAerolinea } from '@/lib/cotizaciones/aerolineas'
+import { aerolineaDeSigla, siglaAerolinea } from '@/lib/cotizaciones/aerolineas'
 
 // ── Tokens (§2) ───────────────────────────────────────────────────────────────
 
@@ -1026,6 +1026,25 @@ export function numerosDelVuelo(v: VueloPDF): { ida: string | null; regreso: str
   const regreso = tieneRegreso(v)
   if (v.numeros && (regreso || !v.numeros.regreso)) return v.numeros
   return numerosDeVuelo(v.numeroVuelo, regreso)
+}
+
+/**
+ * UNA PASTILLA POR VUELO (regla del 2026-10-12, pedido de Mauricio; N9 de Vera). La aerolínea va
+ * una vez, en la primera fila del vuelo; los trayectos que siguen van sin pastilla ni nombre, para
+ * que la columna se lea como una sola celda alta. Solo un trayecto de OTRA aerolínea (código
+ * compartido, regreso con otra) lleva la suya: se reconoce por el prefijo de su número de vuelo.
+ *
+ * `null` = esa fila no lleva aerolínea. Vale igual en el PDF y en la hoja del cliente.
+ */
+export function aerolineaDeFila(filas: readonly FilaVuelo[], i: number): { sigla: string | null; nombre: string } | null {
+  const f = filas[i]
+  if (!f) return null
+  const v = f.vuelo
+  const delVuelo = siglaAerolinea(v.aerolinea, v.numeroVuelo)
+  if (i === 0) return { sigla: delVuelo, nombre: v.aerolinea ?? v.linea }
+  const deLaFila = /^([A-Z][A-Z0-9]|[0-9][A-Z])\s?\d{1,4}\b/.exec((f.numero ?? '').trim().toUpperCase())?.[1] ?? null
+  if (!deLaFila || deLaFila === delVuelo) return null
+  return { sigla: deLaFila, nombre: aerolineaDeSigla(deLaFila)?.nombre ?? deLaFila }
 }
 
 export function filasDelVuelo(v: VueloPDF): FilaVuelo[] {

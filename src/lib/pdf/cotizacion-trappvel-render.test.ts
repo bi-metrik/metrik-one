@@ -297,6 +297,14 @@ describe('el documento del cliente', () => {
     expect(t).toContain('AV9460')
   })
 
+  it('N9 · una pastilla por vuelo: el regreso de la misma aerolínea va sin nombre; uno de código compartido lleva el suyo', async () => {
+    const mismo = await texto(props({ viaje: viaje({ vuelos: [{ ...VUELO, numeroVuelo: 'AV9459 AV9460' }] }) }))
+    expect(mismo.match(/Avianca/g)).toHaveLength(1)
+    const compartido = await texto(props({ viaje: viaje({ vuelos: [{ ...VUELO, numeroVuelo: 'AV9459 LA4521' }] }) }))
+    expect(compartido.match(/Avianca/g)).toHaveLength(1)
+    expect(compartido).toMatch(/LA\s*LATAM/)
+  })
+
   it('un viaje de solo ida no imprime una fila de regreso vacía', async () => {
     const t = await texto(props({
       viaje: viaje({
@@ -857,8 +865,11 @@ describe('COT-2026-0006: San Andrés - Providencia', () => {
     expect(t).not.toMatch(/23 NOV Bogotá San Andrés Isla Avianca/)
     // ⚠️ El renderizador parte la corrida después del dígito del día («28  nov»): se busca
     // con `\s+`. Tabla de vuelos: las dos filas de Avianca, cada una con su fecha y su número.
+    // Una pastilla por vuelo (regla del 2026-10-12): la aerolínea va en la primera fila y el
+    // regreso, de la misma aerolínea, va sin pastilla ni nombre.
     expect(t).toMatch(/Avianca Bogotá San Andrés Isla Vuelo directo 23\s+nov 2026 9782/)
-    expect(t).toMatch(/Avianca San Andrés Isla Bogotá Vuelo directo 28\s+nov 2026 9779/)
+    expect(t).toMatch(/9782 San Andrés Isla Bogotá Vuelo directo 28\s+nov 2026 9779/)
+    expect(t.match(/Avianca/g)).toHaveLength(1)
   })
 
   it('1b · con un día que no es vuelo, el «Día a día» vuelve y cada vuelo va en su día', async () => {
