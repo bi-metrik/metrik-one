@@ -18,6 +18,7 @@ import { leerTarifaPax } from '@/lib/cotizaciones/tarifa-pasajero'
 import { recalcularTotales } from '@/app/(app)/negocios/cotizacion-actions'
 import { UMBRALES_MARGEN_POR_DEFECTO, type UmbralesMargen } from '@/lib/cotizaciones/convencion-margen'
 import {
+  itemsDelItinerario,
   normalizarGrupo,
   ranurasCombinables,
   ranurasNoCombinables,
@@ -110,7 +111,17 @@ export interface EstadoItinerarios {
    * Entran en todos los itinerarios y aportan UNA vez. `aporta` es el nombre del que
    * suma; `fuera`, los que quedan afuera del total.
    */
-  fijosConAlternativas: { grupo: string; aporta: string | null; fuera: string[] }[]
+  fijosConAlternativas: {
+    grupo: string
+    aporta: string | null
+    fuera: string[]
+    /**
+     * Cuando alguna tarifa NOMBRA una opción de este servicio (lo escribe la cotización por
+     * pasos, C2), ya no hay un supuesto: cada tarifa cobra la suya, y la lectura lo respeta
+     * (`itemsDelItinerario`). Aquí va cuál cobra cada una. Ausente = el supuesto de siempre.
+     */
+    porTarifa?: { tarifa: string; opcion: string }[]
+  }[]
   itinerarios: ItinerarioCalculado[]
   umbrales: UmbralesMargen
   /**
@@ -205,6 +216,16 @@ export async function getEstadoItinerarios(cotizacionId: string): Promise<Estado
   const filas = await leerItinerarios(supabase, cotizacionId)
   if (filas === null) {
     return { ...vacio, ranuras, fijosConAlternativas, umbrales: ctx.umbrales, tablasAusentes: true }
+  }
+  // Si alguna tarifa nombra una opción de un servicio que no se cruza, el aviso dice cuál cobra
+  // cada tarifa en vez del supuesto (la lectura ya la cobra así: nota técnica de Max §2).
+  for (const f of fijosConAlternativas) {
+    const candidatos = ranurasNoCombinables(ctx.items).find(r => r.grupo === f.grupo)?.candidatos ?? []
+    if (!filas.some(t => t.seleccion.some(id => candidatos.includes(id)))) continue
+    ;(f as { porTarifa?: { tarifa: string; opcion: string }[] }).porTarifa = filas.map((t, i) => {
+      const cobra = itemsDelItinerario(ctx.items, t.seleccion).find(id => candidatos.includes(id)) ?? null
+      return { tarifa: (t.nombre ?? '').trim() || `Tarifa ${i + 1}`, opcion: (cobra && nombreDe(cobra)) || 'Sin nombre' }
+    })
   }
 
   return {

@@ -15,7 +15,12 @@ import { revalidatePath } from 'next/cache'
 import { getWorkspace } from '@/lib/actions/get-workspace'
 import { recalcularTotales } from '@/app/(app)/negocios/cotizacion-actions'
 import { exigirPorPasos } from './por-pasos-datos'
-import { sincronizarTarifas, type FotoDeTarifas } from './tarifas-por-pasos-datos'
+import { fotoDeTarifas, sincronizarTarifas, type FotoDeTarifas } from './tarifas-por-pasos-datos'
+import {
+  aceptarCapturaDeBandeja,
+  type BorradorParaAceptar,
+  type ResultadoAceptarCaptura,
+} from '@/app/(app)/negocios/tarifa-pax-actions'
 import { revisarExcepcionTrasCambio } from './piso-salida-datos'
 import { createServiceClient } from '@/lib/supabase/server'
 
@@ -65,4 +70,20 @@ export async function tarifasTrasAceptar(
   const guard = await exigirPorPasos(supabase, cotizacionId)
   if (!guard.ok) return { success: false, error: guard.error }
   return cerrarAccionPorPasos(supabase, { workspaceId, cotizacionId, antes, staffId })
+}
+
+/**
+ * «Aceptar» de la bandeja de la forma por pasos: el de siempre (`aceptarCapturaDeBandeja`) y,
+ * después, las tarifas con la opción nueva. El interruptor se relee ANTES de aceptar: con él
+ * apagado (una pestaña vieja) no se acepta nada y se pide recargar.
+ */
+export async function aceptarPorPasos(cotizacionId: string, borrador: BorradorParaAceptar): Promise<ResultadoAceptarCaptura & { tarifas?: string }> {
+  const { supabase } = await getWorkspace()
+  const guard = await exigirPorPasos(supabase, cotizacionId)
+  if (!guard.ok) return { ok: false, codigo: 'POR_PASOS', mensaje: guard.error }
+  const antes = await fotoDeTarifas(supabase, cotizacionId)
+  const aceptada = await aceptarCapturaDeBandeja(cotizacionId, borrador)
+  if (!aceptada.ok) return aceptada
+  const t = await tarifasTrasAceptar(cotizacionId, antes)
+  return t.success ? aceptada : { ...aceptada, tarifas: t.error }
 }

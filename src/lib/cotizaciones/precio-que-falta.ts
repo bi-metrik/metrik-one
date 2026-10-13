@@ -14,6 +14,7 @@ import {
   casillasConEstadia,
 } from './estadia'
 import {
+  cantidadDeTipo,
   composicionDeLinea,
   costosAManoComoMapa,
   describirOcupacion,
@@ -25,6 +26,7 @@ import {
 } from './tarifa-pasajero'
 import { ranuraDeGrupo } from './ranuras-pantallazo'
 
+const TIPOS: readonly TipoPasajero[] = ['adulto', 'nino', 'infante']
 const RANURAS_CON_PRECIO_POR_PASAJERO = new Set(['vuelo_detalle', 'actividad_detalle'])
 
 export interface OpcionSinPrecio {
@@ -54,6 +56,10 @@ export function tiposSinPrecio(
   if (!tarifa.casillas?.grupo_completo) return []
   const c = composicionDeLinea(tarifa, composicionViaje)
   if (!c) return []
+  // Con el costo ya confirmado por tipo de pasajero, no falta nada: cada tipo que viaja tiene
+  // su fila (un pantallazo con desglose, la resta, o lo escrito a mano).
+  const confirmados = new Set((tarifa.confirmada?.costos ?? []).map(x => x.tipo))
+  if (tarifa.confirmada && TIPOS.every(t => cantidadDeTipo(c, t) === 0 || confirmados.has(t))) return []
   return preciosQueFaltan(c, casillasConEstadia(tarifa.casillas ?? {}, tarifa.correcciones), ranura.slug, {
     moneda: monedaDeTarifa(tarifa).moneda,
     aMano: costosAManoComoMapa(tarifa),

@@ -204,7 +204,8 @@ export function planDeTarifas(args: {
       let contaba: string | null = r.candidatos.find(id => t.seleccionActual.has(id)) ?? null
       if (contaba === null) {
         const nombrabaAntes = candAntes.some(id => t.seleccionAntes.has(id))
-        contaba = nombrabaAntes || previa.combinable ? null : laQueCuenta(candAntes, false, t.seleccionAntes)
+        // Una tarifa que nace ahora no tenía nada «implícito» que conservar: propone ONE.
+        contaba = nombrabaAntes || previa.combinable || t.nueva ? null : laQueCuenta(candAntes, false, t.seleccionAntes)
         if (contaba !== null && !r.candidatos.includes(contaba)) contaba = null
       }
       let elegida: string

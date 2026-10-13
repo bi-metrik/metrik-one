@@ -1387,8 +1387,8 @@ export function resolverTarifa(
  * que faltan, o confirma que no pagan (`0`).
  *
  * Cada tipo sale de su fila leída si la trae; si no, de lo escrito a mano. Un solo tipo sin
- * ninguna de las dos (el adulto, cuando el pantallazo trae un solo total) sale de la resta: el
- * total menos lo escrito. Si queda más de uno sin precio, o la resta da negativa, no se resuelve.
+ * ninguna de las dos, solo si es el adulto (el pantallazo trae un solo total), sale de la resta:
+ * el total menos lo escrito. Si queda un menor sin precio, o la resta da negativa, no se resuelve.
  * `null` = no aplica (no hay nada escrito a mano, o no alcanza).
  */
 function conPrecioAMano(
@@ -1417,7 +1417,9 @@ function conPrecioAMano(
     return { tipo: t, total: null, deDonde: '' }
   })
   const sinPrecio = filas.filter(f => f.total === null)
-  if (sinPrecio.length > 1) return null
+  // Solo el ADULTO puede salir de la resta (el pantallazo trae un solo total). Un menor sin
+  // fila ni precio escrito sigue faltando.
+  if (sinPrecio.length > 1 || sinPrecio.some(f => f.tipo !== 'adulto')) return null
   const costo = montoDeCosto(l1)
   if (sinPrecio.length === 1) {
     const resto = dosDecimales(costo - filas.reduce((a, f) => a + (f.total ?? 0), 0))
