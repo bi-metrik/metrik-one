@@ -4,6 +4,7 @@ import {
   camposConfirmacion,
   cobrarConTokenEpayco,
   crearAdapterEpayco,
+  eliminarTarjetasEpayco,
   faltaConfiguracionEpayco,
   firmaConfirmacion,
   llavePublicaEpayco,
@@ -254,5 +255,40 @@ describe('la confirmación (webhook)', () => {
     expect(t('2')).toBe('rechazado')
     expect(t('6')).toBe('anulado')
     expect(t('3')).toBe('otro')
+  })
+})
+
+describe('borrar la tarjeta al cancelar (7.3)', () => {
+  const REF = 'epayco:cDrjtT6J3NXgkorWB:XCX92PZqBKfmcWFbA'
+  const CLIENTE = {
+    success: true,
+    data: { data: { id_customer: 'cDrjtT6J3NXgkorWB', cards: [{ token: '**********FqctY4', franchise: 'visa', mask: '************0326' }] } },
+  }
+  const BORRADO = { success: true, textResponse: 'Success token delete', data: { status: true } }
+
+  it('consulta el cliente y borra cada tarjeta con su franquicia y su máscara', async () => {
+    const api = apiSimulada({ '/login': LOGIN, '/subscriptions/customer': CLIENTE, '/subscription/token/card/delete': BORRADO })
+    const r = await eliminarTarjetasEpayco(REF, { env: ENV, fetch: api.f })
+    expect(r).toEqual({ ok: true, borradas: 1 })
+    const borrado = api.llamadas.find((l) => l.url.endsWith('/subscription/token/card/delete'))
+    expect(JSON.parse(String(borrado?.init.body))).toEqual({ franchise: 'visa', mask: '************0326', customerId: 'cDrjtT6J3NXgkorWB' })
+    expect((borrado?.init.headers as Record<string, string>).Authorization).toBe('Bearer jwt-de-prueba')
+  })
+
+  it('sin tarjetas que borrar (ya se borraron) es éxito', async () => {
+    const api = apiSimulada({ '/login': LOGIN, '/subscriptions/customer': { success: true, data: { data: { cards: [] } } } })
+    expect(await eliminarTarjetasEpayco(REF, { env: ENV, fetch: api.f })).toEqual({ ok: true, borradas: 0 })
+  })
+
+  it('si ePayco no borra, no dice que borró', async () => {
+    const api = apiSimulada({ '/login': LOGIN, '/subscriptions/customer': CLIENTE, '/subscription/token/card/delete': { success: false, textResponse: 'Error' } })
+    expect((await eliminarTarjetasEpayco(REF, { env: ENV, fetch: api.f })).ok).toBe(false)
+  })
+
+  it('una referencia que no es de ePayco, o sin llaves, no llama a nadie', async () => {
+    const api = apiSimulada({ '/login': LOGIN })
+    expect((await eliminarTarjetasEpayco('bold:x', { env: ENV, fetch: api.f })).ok).toBe(false)
+    expect((await eliminarTarjetasEpayco(REF, { env: {}, fetch: api.f })).ok).toBe(false)
+    expect(api.llamadas).toHaveLength(0)
   })
 })

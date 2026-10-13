@@ -223,6 +223,55 @@ export async function registrarClienteEpayco(
   return { ok: true, ref: refMedioPagoEpayco(customerId, p.cardTokenId), customerId }
 }
 
+/**
+ * Borra en ePayco las tarjetas del cliente de una referencia (Condiciones 7.3: al cancelar la prueba
+ * «METRIK pide a la pasarela eliminar el medio de pago registrado»; Términos 9.9 y 11.2).
+ *
+ * APIFY (colección oficial, leída el 2026-10-12):
+ *   - `POST /subscriptions/customer` con `{ customerId }` → `data.data.cards[]` con `franchise` y `mask`;
+ *   - `POST /subscription/token/card/delete` con `{ franchise, mask, customerId }` → `success: true`.
+ * El borrado pide la franquicia y la máscara, que ONE no guarda: por eso primero se consulta el
+ * cliente. Se borran TODAS sus tarjetas: el cliente de ePayco lo creó este registro y no tiene otra.
+ * Sin tarjetas que borrar (ya se borraron) es éxito: el reintento del cron no falla para siempre.
+ *
+ * ⚠️ Sin verificar contra una cuenta real: la máscara del ejemplo de consulta (`************0326`) y
+ * la del ejemplo de borrado (`457562******0326`) no tienen la misma forma. Se manda la que devuelve
+ * la consulta; si ePayco la rechaza, el resultado es `ok: false` y el cron lo reintenta y lo deja a la
+ * vista. Probarlo en un preview con la tarjeta de prueba antes del encendido.
+ */
+export async function eliminarTarjetasEpayco(
+  ref: string | null | undefined,
+  deps: DepsEpayco = {},
+): Promise<{ ok: true; borradas: number } | { ok: false; error: string }> {
+  const medio = leerRefMedioPagoEpayco(ref)
+  if (!medio) return { ok: false, error: 'La referencia no es de una tarjeta de ePayco.' }
+  const env = deps.env ?? process.env
+  if (!valor(env, 'EPAYCO_PUBLIC_KEY_METRIK') || !valor(env, 'EPAYCO_PRIVATE_KEY_METRIK')) {
+    return { ok: false, error: 'ePayco sin llaves: no se pudo pedir el borrado.' }
+  }
+  const s = await iniciarSesion(deps)
+  if (!s.ok) return { ok: false, error: s.error }
+  const c = await pedir(deps, '/subscriptions/customer', { bearer: s.token, cuerpo: { customerId: medio.customerId } })
+  if (!c.ok) return { ok: false, error: c.error }
+  const datos = ((c.cuerpo.data as Record<string, unknown> | undefined)?.data ?? null) as Record<string, unknown> | null
+  if (c.cuerpo.success !== true || !datos) return { ok: false, error: `ePayco no devolvió el cliente: ${String(c.cuerpo.textResponse ?? 'sin detalle')}.` }
+  const tarjetas = (Array.isArray(datos.cards) ? datos.cards : []) as Record<string, unknown>[]
+  let borradas = 0
+  for (const t of tarjetas) {
+    const franchise = typeof t.franchise === 'string' ? t.franchise : null
+    const mask = typeof t.mask === 'string' ? t.mask : null
+    if (!franchise || !mask) return { ok: false, error: 'ePayco devolvió una tarjeta sin franquicia o sin máscara.' }
+    const d = await pedir(deps, '/subscription/token/card/delete', {
+      bearer: s.token,
+      cuerpo: { franchise, mask, customerId: medio.customerId },
+    })
+    if (!d.ok) return { ok: false, error: d.error }
+    if (d.cuerpo.success !== true) return { ok: false, error: `ePayco no borró la tarjeta: ${String(d.cuerpo.textResponse ?? 'sin detalle')}.` }
+    borradas += 1
+  }
+  return { ok: true, borradas }
+}
+
 /** `estado` de ePayco → resultado del ciclo. */
 export function resultadoDeEstado(estado: string | null | undefined): 'aprobado' | 'rechazado' | 'pendiente' {
   const e = (estado ?? '').trim().toLowerCase()

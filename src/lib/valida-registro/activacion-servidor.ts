@@ -12,7 +12,7 @@ import { COBRADOR_VALIDA, FICHA_PLAN_VALIDA, activacionAbierta, plazoTerminos, t
 import { parametrosDelPlan, esEspacioAutogestion } from './plan'
 import { pdfTerminos } from './pdf-terminos'
 import { compararRut, type VeredictoRut } from './rut'
-import { TERMINOS_PLAN, camposDeLaOrden, llenarPlantilla } from './terminos-plan'
+import { TERMINOS_PLAN, camposDeLaOrden, llenarPlantilla, terminosPlanListos } from './terminos-plan'
 
 /**
  * «Activar plan» desde la prueba (`18-recorrido-baja-friccion.md` §2.2, PR 6 y la mitad ONE del PR 8).
@@ -92,6 +92,35 @@ export async function activarPlanValida(input: { rut: File | null }): Promise<Re
   if (perfil.error || !workspaceId) return { ok: false, error: 'sin_sesion' }
   if (perfil.data?.role !== 'owner') return { ok: false, error: 'no_es_duena' }
 
+  const r = await activarPlanDelEspacio(svc, { workspaceId, usuarioId: user.id, rut: input.rut })
+  if (!r.ok) return r
+  // Lo que sigue es aceptar los Términos: la entrada de `/valida` los abre con `?terminos=1`.
+  return { ok: true, destino: '/valida?terminos=1' }
+}
+
+export type ResultadoActivacionEspacio =
+  | { ok: true; resultado: 'activado' | 'ya_activo'; contratoId: string | null }
+  | { ok: false; error: ErrorActivacion }
+
+/**
+ * El núcleo de la activación, sin sesión: lo usan el botón «Activar plan» (con la sesión de la persona
+ * dueña) y el cobro al cumplirse los 7 días (`cobro-prueba-servidor.ts`, con la persona que se registró
+ * y aceptó). Las reglas que la base vuelve a exigir (registro creado, persona del espacio, sin contrato
+ * vivo, NIT sin contrato) están en `valida_activar_autogestion`.
+ *
+ * Exige los Términos escritos (`terminosPlanListos`): con el marcador, `llenarPlantilla` devolvería el
+ * marcador lleno y la base registraría un «contrato» sin texto. Antes eso lo cuidaba solo
+ * `activacionAbierta`, que el cobro automático no usa.
+ *
+ * `parametrosExtra` se suma a los parámetros del contrato (el cobro automático marca
+ * `cobro_tras_prueba`, para que el enrolamiento diario no lo enrole por su cuenta).
+ */
+export async function activarPlanDelEspacio(
+  svc: Db,
+  p: { workspaceId: string; usuarioId: string; rut: File | null; parametrosExtra?: Record<string, unknown> },
+): Promise<ResultadoActivacionEspacio> {
+  if (!terminosPlanListos()) return { ok: false, error: 'terminos_incompletos' }
+  const workspaceId = p.workspaceId
   const ws = await svc.from('workspaces').select('slug, config_extra').eq('id', workspaceId).maybeSingle()
   const config = (ws.data?.config_extra ?? null) as Record<string, unknown> | null
   if (ws.error || !ws.data || !esEspacioAutogestion(config)) return { ok: false, error: 'no_es_autogestion' }
@@ -106,7 +135,7 @@ export async function activarPlanValida(input: { rut: File | null }): Promise<Re
   const registro = reg.data as FilaRegistro | null
   if (reg.error || !registro) return { ok: false, error: 'sin_registro' }
 
-  const parametros = parametrosDelPlan()
+  const parametros = { ...parametrosDelPlan(), ...(p.parametrosExtra ?? {}) }
   const ahora = new Date()
 
   // 2. Los Términos de ESTA empresa: si falta un solo campo de la plantilla, no se activa.
@@ -147,14 +176,14 @@ export async function activarPlanValida(input: { rut: File | null }): Promise<Re
   }
 
   // 1. El RUT (opcional). Después del PDF a propósito: si los términos fallan, no se sube un RUT para nada.
-  const rut = input.rut
-    ? await leerRut(svc, input.rut, workspaceId, { nit: registro.identificacion, dv: registro.dv, razonSocial: registro.razon_social })
+  const rut = p.rut
+    ? await leerRut(svc, p.rut, workspaceId, { nit: registro.identificacion, dv: registro.dv, razonSocial: registro.razon_social })
     : null
 
   const prueba = (config?.valida_prueba ?? null) as { vence_en?: string } | null
   const { data, error } = await svc.rpc('valida_activar_autogestion', {
     p_workspace_cliente: workspaceId,
-    p_usuario: user.id,
+    p_usuario: p.usuarioId,
     p_cobrador: COBRADOR_VALIDA.workspaceId,
     p_linea: COBRADOR_VALIDA.lineaValida,
     p_etapa: COBRADOR_VALIDA.etapaCobro,
@@ -176,10 +205,9 @@ export async function activarPlanValida(input: { rut: File | null }): Promise<Re
     console.error('[valida-activacion] valida_activar_autogestion:', error.message)
     return { ok: false, error: 'error' }
   }
-  const r = (data ?? {}) as { ok?: boolean; error?: ErrorActivacion; resultado?: string }
+  const r = (data ?? {}) as { ok?: boolean; error?: ErrorActivacion; resultado?: string; contrato_id?: string }
   if (!r.ok) return { ok: false, error: r.error ?? 'error' }
-  // Lo que sigue es aceptar los Términos: la entrada de `/valida` los abre con `?terminos=1`.
-  return { ok: true, destino: '/valida?terminos=1' }
+  return { ok: true, resultado: r.resultado === 'ya_activo' ? 'ya_activo' : 'activado', contratoId: r.contrato_id ?? null }
 }
 
 /**

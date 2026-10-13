@@ -285,6 +285,38 @@ describe('Valida por CDA (decisión del 2026-10-09)', () => {
     expect(d.llamadas.map((l) => l.args.p_servicio_contratado_id)).toEqual(['c-auto'])
   })
 
+  describe('el contrato que cobra al cumplirse los 7 días de la prueba', () => {
+    const TRAS = {
+      ...CDA,
+      id: 'c-tras',
+      negocio_id: 'n-tras',
+      parametros: { precio_mensual: 150_000, dias_trial: 0, limite_consultas_mes: 3000, cobro_tras_prueba: true },
+    }
+    // Aceptó en el registro, el 13 de octubre; el primer cobro es el 21.
+    const aceptacion = { id: 'a-tras', negocio_id: 'n-tras', estado: 'aceptado', respondido_at: '2026-10-13T20:00:00Z' }
+    const bold = { adapterPara: (x: string) => (x === 'bold' ? ({ crearEnlacePago: async () => null } as never) : null) }
+
+    it('el enrolamiento diario lo salta: lo enrola solo el cobro', async () => {
+      const d = dobleConRpc(tablasBase({ servicios_contratados: [TRAS], aceptaciones_terminos: [aceptacion], workspaces: [{ id: WS, config_extra: {} }] }))
+      const r = await enrolarContratosPorCiclo({ db: d.db, ...bold })
+      expect(r.creados).toEqual([])
+      expect(d.llamadas).toEqual([])
+    })
+
+    it('el cobro lo enrola con la cuota 1 el día del primer cobro, no el de la aceptación (fila 22)', async () => {
+      const d = dobleConRpc(tablasBase({ servicios_contratados: [TRAS], aceptaciones_terminos: [aceptacion], workspaces: [{ id: WS, config_extra: {} }] }))
+      const r = await enrolarContratosPorCiclo({ db: d.db, contratoId: 'c-tras', anclaAt: '2026-10-21T12:00:00Z', ...bold })
+      expect(r.creados[0]).toMatchObject({ contratoId: 'c-tras', finTrial: '2026-10-21' })
+      expect(d.llamadas[0].args.p_ancla_at).toBe('2026-10-21T12:00:00Z')
+    })
+
+    it('sin aceptación, el ancla no basta: no se enrola', async () => {
+      const d = dobleConRpc(tablasBase({ servicios_contratados: [TRAS], aceptaciones_terminos: [], workspaces: [{ id: WS, config_extra: {} }] }))
+      const r = await enrolarContratosPorCiclo({ db: d.db, contratoId: 'c-tras', anclaAt: '2026-10-21T12:00:00Z', ...bold })
+      expect(r.creados).toEqual([])
+    })
+  })
+
   it('sin días de trial en el contrato ni en la ficha no se enrola (la ficha v1 no los declara)', async () => {
     const d = dobleConRpc(
       tablasBase({

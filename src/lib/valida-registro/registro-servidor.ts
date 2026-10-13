@@ -56,9 +56,13 @@ import { emitirPruebaDelEspacio } from './prueba-servidor'
  *   5. la prueba en Valida. Si falla, el espacio queda creado sin llave y el siguiente POST del
  *      mismo usuario la vuelve a pedir (`ya_tiene_espacio` con prueba pendiente).
  *
- * Punto de extensión del método de pago (decisión A2, ePayco): cuando exista la pasarela con cobro
- * recurrente, el paso 5 pasa a ser «registrar el método de pago y luego emitir la prueba», y
- * `valida_registros.metodo_pago_estado` deja de nacer en `no_requerido`. Hoy la prueba es sin tarjeta.
+ * Con las Condiciones v2.0 (`condicionesVigentes().conCobro`) la tarjeta es OBLIGATORIA: se registra
+ * en ePayco ANTES de crear nada (sin tarjeta no hay espacio ni prueba), `metodo_pago_estado` nace en
+ * `registrado` y, al emitirse la prueba, queda programado el cobro del primer mes en el instante en que
+ * se cumplen los 7 días (`cobro-prueba.ts`, `cobro-prueba-servidor.ts`).
+ *
+ * ⚠️ PENDIENTE (Emilio): los Términos de Uso de autoservicio se aceptan en este mismo registro (7.1).
+ * Cuando estén, se muestran con las Condiciones y se pasan a `textoAceptado(condiciones, terminos)`.
  */
 
 export type CampoRegistro = 'razon_social' | 'nit' | 'dv' | 'acepta' | 'tarjeta'
@@ -320,7 +324,16 @@ export async function crearEspacioValida(datos: DatosRegistroValida): Promise<Re
   if (eFiscal) console.error('[valida-registro] perfil fiscal:', eFiscal.message)
 
   // ── 5. La prueba ──────────────────────────────────────────────────────────
-  const prueba = await emitirPruebaDelEspacio({ workspaceId, registroId, usuarioId: user.id, correo, razonSocial, nit, dv })
+  const prueba = await emitirPruebaDelEspacio({
+    workspaceId,
+    registroId,
+    usuarioId: user.id,
+    correo,
+    razonSocial,
+    nit,
+    dv,
+    conCobro: filaBase.metodo_pago_estado === 'registrado',
+  })
   if (prueba.tipo !== 'ok') return { tipo: 'prueba_pendiente', slug }
   return { tipo: 'ok', slug }
 }
@@ -340,11 +353,18 @@ async function reintentarPruebaPendiente(
   const slug = (ws as { slug: string } | null)?.slug ?? null
   const { data: reg } = await svc
     .from('valida_registros')
-    .select('id, razon_social, identificacion, dv, valida_cliente_id')
+    .select('id, razon_social, identificacion, dv, valida_cliente_id, metodo_pago_estado')
     .eq('workspace_id', workspaceId)
     .eq('estado', 'creado')
     .maybeSingle()
-  const r = reg as { id: string; razon_social: string; identificacion: string; dv: string | null; valida_cliente_id: string | null } | null
+  const r = reg as {
+    id: string
+    razon_social: string
+    identificacion: string
+    dv: string | null
+    valida_cliente_id: string | null
+    metodo_pago_estado: string
+  } | null
   if (!r || r.valida_cliente_id || !r.dv || !slug) return { tipo: 'ya_tiene_espacio', slug }
   const prueba = await emitirPruebaDelEspacio({
     workspaceId,
@@ -354,6 +374,7 @@ async function reintentarPruebaPendiente(
     razonSocial: r.razon_social,
     nit: r.identificacion,
     dv: r.dv,
+    conCobro: r.metodo_pago_estado === 'registrado',
   })
   return prueba.tipo === 'ok' ? { tipo: 'ok', slug } : { tipo: 'prueba_pendiente', slug }
 }
