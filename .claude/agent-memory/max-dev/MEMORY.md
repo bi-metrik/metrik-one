@@ -34,7 +34,8 @@
 - ⚠️ [Chunks que aguantan pérdida + SW de estáticos para todos](project_resiliencia_chunks_sw.md) — runtime se cuelga del `<script>` del HTML; llave sin ?dpl
 - ⚠️ [Piloto de red en soena (#1042 y siguientes)](project_piloto_red_soena.md) — falla carga/RSC, no descargas; SW con interruptor; tabla SIN aplicar
 - ⚠️ [Cargue en segundo plano y acciones largas (#1035, #1036)](project_cargue_segundo_plano.md) — marca `data._lectura`; #1036 mergeado; /conciliacion tiene 300 s
-- ⚠️⚠️ [«Otro servicio» en la cotización por pasos](project_cotizacion_otro_servicio.md) — migración 20261013140000 SIN aplicar; valor por todo se reparte; 3 guardas
+- ⚠️⚠️ [Cotización por pasos C1–C6 (pila #1135→#1146, #1147)](project_cotizacion_integrada_c1_c6.md) — modelo_destino opt-in (M4); «Otro servicio» ya con migración aplicada; marca incluye_origen
+- ⚠️ [«Otro servicio» en la cotización por pasos](project_cotizacion_otro_servicio.md) — migración 20261013140000 APLICADA (13-oct); valor por todo se reparte; 3 guardas
 - ⚠️⚠️ [Cotización integrada C0 (igualdad del servidor)](project_cotizacion_integrada_c0.md) — fixture sobre 54568adf NO se regenera; P12 frena por faltaCosto; V1 PW choca con preview=prod
 - ⚠️ [R1: el servidor sí toma la Recomendada](project_r1_total_recomendada_adicionales.md) — la diferencia eran adicionales; precio_venta no los suma
 - [Colores de aerolíneas (#1082)](project_colores_aerolineas.md) — catálogo único en src/lib/cotizaciones/aerolineas.ts; colores de tarifa vetados

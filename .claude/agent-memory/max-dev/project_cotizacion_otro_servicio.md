@@ -1,6 +1,6 @@
 ---
 name: cotizacion-otro-servicio
-description: «Otro servicio» (tipo de ranura `otro`) de la cotización por pasos Trappvel (2026-10-13) — migración 20261013140000 SIN aplicar; fuera de botones y detección; valor por todo se reparte; marca asistenciaMedica
+description: «Otro servicio» (tipo de ranura `otro`) de la cotización por pasos Trappvel (2026-10-13) — migración 20261013140000 APLICADA en producción (13-oct, sesión principal); fuera de botones y detección; valor por todo se reparte; marca asistenciaMedica
 metadata:
   type: project
 ---
