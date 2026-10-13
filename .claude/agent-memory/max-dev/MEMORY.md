@@ -115,6 +115,7 @@
 - ⚠️⚠️ [Bandeja de solicitudes WA (Trappvel)](project_bandeja_wa_solicitudes.md) — 2 migraciones SIN aplicar: tablas → deploy → cron; llave al final
 - ⚠️ [Descripcion del gasto por WhatsApp (#861)](project_wa_gasto_descripcion.md) — flujo guiado recuerda el detalle (2026-09-30); wa-webhook se despliega aparte
 - ⚠️ [Fixture de producción bloquea el push](project_fixture_de_produccion_bloquea_push.md) — fixtures sintéticos a mano; SQL de config se prueba en PGlite
+- ⚠️ [SOE-012: banco en la factura exige leasing](project_cruce_banco_leasing.md) — tipo `entidad_financiera`; config SOENA SIN aplicar
 - [Frentes ya cerrados](indice_frentes_cerrados.md) — memorias de trabajo terminado, fuera del índice caliente
 
 ## Referencias
