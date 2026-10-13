@@ -21,6 +21,8 @@ import { enrolarContratosPorCiclo, type ResumenEnrolamiento } from '@/lib/cobros
 import { renovarPlanesPorCiclo, type ResumenRenovacion } from '@/lib/cobros/renovar-ciclo-servidor'
 import { reconciliarCiclosValida, type ResumenReconciliacion } from '@/lib/valida-registro/ciclo-servidor'
 import { cobrarCuotasConTarjeta, type ResumenCobroToken } from '@/lib/valida-registro/cobro-token-servidor'
+import { enviarPorResend, procesarCobrosTrasPrueba, type ResumenCobroPrueba } from '@/lib/valida-registro/cobro-prueba-servidor'
+import { avisarSuspensionesProximas, type ResumenSuspension } from '@/lib/valida-registro/suspension-servidor'
 
 // Cron diario — Procesa planes_cobro activos:
 //   1. Genera cobros programados con fecha_esperada = T+3 dias si no existe ya la cuota
@@ -44,11 +46,16 @@ import { cobrarCuotasConTarjeta, type ResumenCobroToken } from '@/lib/valida-reg
 //      o menos (o ya vencio sin pagarse) recibe su enlace solo, con la misma funcion del boton,
 //      y la persona designada un correo. No emite cuentas de cobro (ver el bloque del paso 6).
 //   7. Plan se marca inactivo automaticamente cuando todas las cuotas se cobran (trigger DB)
+//   7a. Valida autogestionada con tarjeta: el aviso de 48 h y el cobro del primer mes al cumplirse los
+//      7 dias de la prueba (nunca antes del instante exacto), y el borrado de la tarjeta de quien
+//      cancelo (ver `src/lib/valida-registro/cobro-prueba-servidor.ts`). Sin registros con tarjeta no hace nada.
 //   7b. Cobro con la tarjeta guardada en ePayco de las cuotas que vencen (planes `epayco`). Apagado
 //      sin EPAYCO_HABILITADO (ver `src/lib/valida-registro/cobro-token-servidor.ts`).
 //   8. Valida autogestionada: el pago mas nuevo del plan de cada espacio del registro autogestionado
 //      tiene su ciclo abierto en Valida (bolsa del mes y llave sin vencimiento). Lo abre el webhook
 //      al pagar; este paso recoge lo que no alcanzo (ver `src/lib/valida-registro/ciclo-servidor.ts`).
+//   8b. Valida autogestionada: el aviso por correo antes de suspender por una cuota sin pagar
+//      (ver `src/lib/valida-registro/suspension-servidor.ts`).
 //
 // Spec: docs/specs/2026-04-26_mc-ebitda-capa-fiscal-simplificada.md (extension B/Fase 1)
 //       docs/specs/2026-09-08_suscripciones-cobro-automatico.md (paso 5)
@@ -490,6 +497,16 @@ export async function GET(req: NextRequest) {
     enlacesAutomaticosError = err instanceof Error ? err.message : String(err)
   }
 
+  // ── 7a. Valida: aviso y cobro del primer mes al cumplirse los 7 días de la prueba ──
+  // Antes del 7b: el plan que nace aquí con su cuota 1 ya cobrada no se vuelve a cobrar allá.
+  let cobroPrueba: ResumenCobroPrueba | null = null
+  let cobroPruebaError: string | null = null
+  try {
+    cobroPrueba = await procesarCobrosTrasPrueba({ db: supabase, ahoraMs: hoy.getTime() })
+  } catch (err) {
+    cobroPruebaError = err instanceof Error ? err.message : String(err)
+  }
+
   // ── 7b. Cobro con tarjeta guardada (ePayco) de las cuotas que vencen ──
   // Solo planes con pasarela `epayco` (cuentas autogestionadas que registraron tarjeta). Con ePayco
   // apagado no hace nada. Va ANTES del 8 para que un cobro aprobado abra su mes en esta corrida, y
@@ -511,6 +528,16 @@ export async function GET(req: NextRequest) {
     ciclosValida = await reconciliarCiclosValida({ db: supabase })
   } catch (err) {
     ciclosValidaError = err instanceof Error ? err.message : String(err)
+  }
+
+  // ── 8b. Valida: aviso antes de suspender por una cuota sin pagar ──
+  // Después del 8: quien pagó y abre su ciclo en esta corrida ya no recibe el aviso.
+  let avisoSuspension: ResumenSuspension | null = null
+  let avisoSuspensionError: string | null = null
+  try {
+    avisoSuspension = await avisarSuspensionesProximas({ db: supabase, ahoraMs: hoy.getTime(), enviarCorreo: enviarPorResend })
+  } catch (err) {
+    avisoSuspensionError = err instanceof Error ? err.message : String(err)
   }
 
   return NextResponse.json({
@@ -539,9 +566,13 @@ export async function GET(req: NextRequest) {
     renovacion_por_ciclo_error: renovacionError,
     enlaces_automaticos: enlacesAutomaticos,
     enlaces_automaticos_error: enlacesAutomaticosError,
+    cobro_prueba: cobroPrueba,
+    cobro_prueba_error: cobroPruebaError,
     cobro_tarjeta: cobroTarjeta,
     cobro_tarjeta_error: cobroTarjetaError,
     ciclos_valida: ciclosValida,
     ciclos_valida_error: ciclosValidaError,
+    aviso_suspension: avisoSuspension,
+    aviso_suspension_error: avisoSuspensionError,
   })
 }

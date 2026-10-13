@@ -25,6 +25,8 @@
 --   cobro_cancelado_at, cobro_cancelado_por   el 7.3: botón «Cancelar prueba» o correo (lo registra una persona).
 --   cobro_token_borrado_at cuándo ePayco confirmó que borró la tarjeta tras cancelar (7.3).
 --   cobro_intento_at, cobro_ref, cobro_detalle   el rastro del cobro (referencia de ePayco, motivo).
+--   aviso_suspension_para  el vencimiento de la bolsa (`valida_plan.vence_en`) que ya tuvo su aviso de
+--                          suspensión por cuota sin pagar (Términos 11.1, «previo aviso»). Uno por vencimiento.
 --   cobro_entorno          el despliegue que abrió la prueba (production | preview | development).
 --                          Los previews usan la base de producción: un preview solo procesa los suyos, y
 --                          producción solo los suyos. Sin esto, un cobro de prueba en un preview
@@ -41,7 +43,8 @@
 --     drop column if exists cobro_aviso_enviado_at, drop column if exists cobro_cancelado_at,
 --     drop column if exists cobro_cancelado_por, drop column if exists cobro_token_borrado_at,
 --     drop column if exists cobro_intento_at, drop column if exists cobro_ref,
---     drop column if exists cobro_detalle, drop column if exists cobro_entorno;
+--     drop column if exists cobro_detalle, drop column if exists cobro_entorno,
+--     drop column if exists aviso_suspension_para;
 --   drop index if exists public.valida_registros_cobro_pendiente;
 --   -- y el CHECK de metodo_pago_estado como estaba (sin 'eliminado').
 -- ============================================================
@@ -56,7 +59,8 @@ alter table public.valida_registros
   add column if not exists cobro_intento_at timestamptz,
   add column if not exists cobro_ref text,
   add column if not exists cobro_detalle text,
-  add column if not exists cobro_entorno text;
+  add column if not exists cobro_entorno text,
+  add column if not exists aviso_suspension_para timestamptz;
 
 alter table public.valida_registros drop constraint if exists valida_registros_cobro_estado_check;
 alter table public.valida_registros add constraint valida_registros_cobro_estado_check

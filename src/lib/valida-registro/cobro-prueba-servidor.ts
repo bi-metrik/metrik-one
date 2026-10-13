@@ -126,7 +126,7 @@ function urlCuentaPorDefecto(slug: string): string {
 
 const FROM_AVISO = 'Valida · METRIK <facturacion@metrikone.co>'
 
-async function enviarPorResend(m: CorreoSaliente): Promise<ResultadoEnvio> {
+export async function enviarPorResend(m: CorreoSaliente): Promise<ResultadoEnvio> {
   const key = process.env.RESEND_API_KEY
   if (!key) return { ok: false, error: 'sin_resend_api_key' }
   const res = await fetch('https://api.resend.com/emails', {
