@@ -62,7 +62,7 @@ describe('H14 · la resta de un hotel no suma como habitación', () => {
   it('una persona que la marca habitación a mano manda', () => {
     const habs: Habitacion[] = [
       { id: 'completa', lectura: COMPLETA },
-      { id: 'sin-infante', lectura: SIN_INFANTE, rolManual: { valor: 'habitacion', en: '2026-10-14T15:00:00Z' } },
+      { id: 'sin-infante', lectura: SIN_INFANTE, rolManual: { valor: 'habitacion', por: null, porId: null, en: '2026-10-14T15:00:00Z' } },
     ]
     const r = repartirHabitaciones(habs, GRUPO)
     expect(r.habitaciones.every(h => h.rol === 'habitacion')).toBe(true)
