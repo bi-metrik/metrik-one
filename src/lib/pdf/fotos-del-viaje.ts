@@ -18,13 +18,42 @@
 
 import type { FotoCiudad } from './fotos-ciudad'
 import type { FotoPDF } from './cotizacion-props'
+import { mismoLugar } from '@/lib/cotizaciones/bandeja-capturas'
 
 export const MAXIMO_FOTOS_POR_DOCUMENTO = 4
 
 export interface EntradaFotos {
   destino: string | null
-  vuelos: { destino: string | null }[]
+  vuelos: { destino: string | null; origen?: string | null; fechaSalida?: string | null }[]
   hoteles: { ciudad: string | null }[]
+}
+
+/**
+ * La ciudad de donde SALE el cliente: el origen del primer vuelo (por fecha de salida; sin fechas,
+ * el primero de la lista). `null` sin vuelos.
+ *
+ * Hallazgo del PDF de la prueba Europa (2026-10-14): la portada salía con «Bogotá · Monserrate»
+ * porque el vuelo de regreso (AMS→BOG) llega a Bogotá, y la llegada de un vuelo contaba como
+ * ciudad del viaje. El origen no es destino: es de paso, como las escalas (regla 2).
+ */
+export function origenDelViaje(vuelos: readonly { origen?: string | null; fechaSalida?: string | null }[]): string | null {
+  const conOrigen = vuelos.filter(v => (v.origen ?? '').trim() !== '')
+  if (conOrigen.length === 0) return null
+  const fecha = (v: { fechaSalida?: string | null }) => /^\d{4}-\d{2}-\d{2}/.exec((v.fechaSalida ?? '').trim())?.[0] ?? null
+  const conFecha = conOrigen.filter(v => fecha(v) !== null)
+  const primero = conFecha.length > 0
+    ? [...conFecha].sort((a, b) => (fecha(a) as string).localeCompare(fecha(b) as string))[0]
+    : conOrigen[0]
+  return (primero.origen as string).trim()
+}
+
+/** ¿Este lugar es la ciudad de salida del cliente? Por texto/código, o por la ciudad del banco. */
+export function esElOrigen(lugar: string, origen: string | null, buscar?: (ciudad: string) => FotoCiudad[]): boolean {
+  if (!origen) return false
+  if (mismoLugar(lugar, origen) === true) return true
+  if (!buscar) return false
+  const a = buscar(lugar)[0]?.ciudad
+  return !!a && a === buscar(origen)[0]?.ciudad
 }
 
 export interface FotosDelViaje {
@@ -54,9 +83,11 @@ export function fotosDelViaje(
   entrada: EntradaFotos,
   buscar: (ciudad: string) => FotoCiudad[],
 ): FotosDelViaje {
-  // Portada: la primera ciudad del DESTINO que tenga foto.
+  const origen = origenDelViaje(entrada.vuelos)
+  const noEsOrigen = (c: string) => !esElOrigen(c, origen, buscar)
+  // Portada: la primera ciudad del DESTINO que tenga foto. Nunca la de salida.
   let portada: FotoCiudad | null = null
-  for (const c of ciudadesEnTexto(entrada.destino)) {
+  for (const c of ciudadesEnTexto(entrada.destino).filter(noEsOrigen)) {
     const fotos = buscar(c)
     if (fotos.length > 0) {
       portada = fotos[0]
@@ -68,7 +99,7 @@ export function fotosDelViaje(
     ...ciudadesEnTexto(entrada.destino),
     ...entrada.vuelos.flatMap(v => ciudadesEnTexto(v.destino)),
     ...entrada.hoteles.flatMap(h => ciudadesEnTexto(h.ciudad)),
-  ]
+  ].filter(noEsOrigen)
 
   const cupo = MAXIMO_FOTOS_POR_DOCUMENTO - (portada ? 1 : 0)
   const ciudades: FotoCiudad[] = []

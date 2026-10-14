@@ -111,7 +111,21 @@ export interface TrasladoManual {
   netoInfante: number | null
   /** Solo cuenta con `precio: 'por_trayecto'`: in-out ya es ida y regreso. */
   idaYRegreso: boolean
+  /**
+   * H20 (prueba Europa, 2026-10-14) · la moneda del proveedor. Un tren en EUR se cargaba
+   * convertido a ojo; ahora entra en su moneda y la tasa se escribe como en un pantallazo.
+   * Ausente = COP, como antes.
+   */
+  moneda?: MonedaManual
   fuente: string
+}
+
+export const MONEDAS_MANUALES = ['COP', 'EUR', 'USD'] as const
+export type MonedaManual = (typeof MONEDAS_MANUALES)[number]
+
+function monedaManual(v: unknown): MonedaManual {
+  const t = String(v ?? '').trim().toUpperCase()
+  return (MONEDAS_MANUALES as readonly string[]).includes(t) ? (t as MonedaManual) : 'COP'
 }
 
 /**
@@ -270,6 +284,7 @@ export function leerTrasladoManual(raw: unknown): TrasladoManual {
     netoNino: montoManual(r.netoNino),
     netoInfante: montoManual(r.netoInfante),
     idaYRegreso: r.idaYRegreso === true,
+    moneda: monedaManual(r.moneda),
     fuente: texto(r.fuente),
   }
 }
@@ -430,11 +445,11 @@ function crudaDe(campos: Record<string, string | null>, porTipoPax: FilaTipoPaxC
   }
 }
 
-function filas(p: Composicion, unitario: (tipo: 'adulto' | 'nino' | 'infante') => number, veces: number): FilaTipoPaxCruda[] {
+function filas(p: Composicion, unitario: (tipo: 'adulto' | 'nino' | 'infante') => number, veces: number, moneda: MonedaManual = 'COP'): FilaTipoPaxCruda[] {
   const out: FilaTipoPaxCruda[] = []
   for (const [tipo, cantidad] of [['adulto', p.adultos], ['nino', p.ninos], ['infante', p.infantes]] as const) {
     if (cantidad <= 0) continue
-    out.push({ tipo, cantidad, subtotal_tipo: Math.round(unitario(tipo) * veces * cantidad), moneda: 'COP', confidence: 1 })
+    out.push({ tipo, cantidad, subtotal_tipo: Math.round(unitario(tipo) * veces * cantidad), moneda, confidence: 1 })
   }
   return out
 }
@@ -472,7 +487,7 @@ export function crudaDeTrasladoManual(t: TrasladoManual): LecturaCruda {
   const personas = t.adultos + t.ninos + t.infantes
   // El mismo reparto del hotel: cada tipo con su costo, y el infante sin costo escrito en 0.
   const porTipo = t.cobro === 'por_persona'
-    ? filas(pax, tipo => (tipo === 'adulto' ? t.neto : tipo === 'nino' ? t.netoNino : t.netoInfante) ?? 0, trayectos)
+    ? filas(pax, tipo => (tipo === 'adulto' ? t.neto : tipo === 'nino' ? t.netoNino : t.netoInfante) ?? 0, trayectos, t.moneda ?? 'COP')
     : []
   const total = t.cobro === 'por_persona' ? porTipo.reduce((a, f) => a + f.subtotal_tipo, 0) : Math.round((t.neto ?? 0) * trayectos)
   return crudaDe({
@@ -482,7 +497,7 @@ export function crudaDeTrasladoManual(t: TrasladoManual): LecturaCruda {
     ocupacion_adultos: String(t.adultos),
     ocupacion_ninos: String(t.ninos),
     ocupacion_infantes: String(t.infantes),
-    moneda: 'COP',
+    moneda: t.moneda ?? 'COP',
     precio_total: String(total),
     base_precio: 'total',
   }, porTipo, porTipo.length > 0 ? total : null)

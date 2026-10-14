@@ -77,8 +77,28 @@ export function lugarDeBloqueNuevo(
   pistaLugar: string | null,
   correcciones?: readonly { slug: string; valor: string }[] | null,
 ): string | null {
+  // Un tren o un traslado entre ciudades se nombra con SU trayecto («París–Ámsterdam»): sin lugar
+  // del detector caía al destino del viaje, y el Eurostar quedó «Traslado en Madrid» (prueba
+  // Europa, 2026-10-14).
+  if (tipo === 'traslado') return pistaLugar ?? rutaDeTraslado(campoLeido(lectura, 'Trayecto'))
   if (tipo !== 'actividad') return pistaLugar
   return ciudadDeActividad(lectura, correcciones)
+}
+
+const PUNTO_GENERICO = /^(aeropuerto|hotel|terminal|puerto|muelle|estaci[oó]n|alojamiento)\b/i
+
+/**
+ * «París - Ámsterdam (solo ida)» → «París–Ámsterdam». `null` si el trayecto no son dos lugares,
+ * o si es el de siempre entre un aeropuerto y un hotel: ahí no dice la ciudad.
+ */
+export function rutaDeTraslado(trayecto: string | null | undefined): string | null {
+  const t = (trayecto ?? '').replace(/\([^)]*\)/g, ' ').replace(/\s+/g, ' ').trim()
+  if (!t) return null
+  const partes = t.split(/\s*(?:→|->|>|–|—|\s-\s|\sa\s)\s*/i).map(p => p.trim()).filter(Boolean)
+  if (partes.length !== 2) return null
+  if (partes.some(p => PUNTO_GENERICO.test(p))) return null
+  const corta = (p: string) => p.split(',')[0].trim()
+  return `${corta(partes[0])}–${corta(partes[1])}`
 }
 
 /**

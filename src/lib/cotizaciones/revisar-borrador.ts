@@ -63,7 +63,9 @@ export function textoDeDestino(
   if (d.como === 'hermana') return `Otra opción de ${etiquetaDeRanura(d.grupo)}`
   const lugar = tipo === 'actividad' && actividad
     ? lugarDeBloqueNuevo(tipo, actividad.lectura, pistas.lugar) ?? (actividad.destinoViaje?.trim() || null)
-    : pistas.destino || pistas.lugar
+    : tipo === 'traslado' && actividad
+      ? lugarDeBloqueNuevo(tipo, actividad.lectura, pistas.lugar)
+      : pistas.destino || pistas.lugar
   return `${definicionDeTipo(tipo).label}${lugar ? ` en ${lugar}` : ''} · nuevo`
 }
 

@@ -52,7 +52,9 @@ export function nombreNuevo(b: Borrador, destinoViaje: string | null): string {
   const label = definicionDeTipo(b.tipo).label
   const lugar = b.tipo === 'actividad'
     ? lugarDeBloqueNuevo(b.tipo, b.lectura, b.pistas.lugar) ?? (destinoViaje?.trim() || null)
-    : b.pistas.destino || b.pistas.lugar
+    : b.tipo === 'traslado'
+      ? lugarDeBloqueNuevo(b.tipo, b.lectura, b.pistas.lugar)
+      : b.pistas.destino || b.pistas.lugar
   return `${label}${lugar ? ` en ${lugar}` : ''}`
 }
 

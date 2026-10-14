@@ -54,6 +54,7 @@
  * retiró es el documento del cliente.
  */
 
+import { esElOrigen, origenDelViaje } from '@/lib/pdf/fotos-del-viaje'
 import { composicionDeLectura, describirOcupacion, leerTarifaPax, mismaComposicion, type LecturaCasilla } from './tarifa-pasajero'
 import { ranuraDeGrupo, ranuraPorSlug, slugsDeRanura, type DefinicionRanura } from './ranuras-pantallazo'
 import { aplicarCorrecciones, leidosPorSlug, type Correcciones } from './correcciones'
@@ -791,7 +792,10 @@ export function destinoDeItinerario(vuelos: VueloPDF[], hoteles: HotelPDF[]): st
   const ciudades: string[] = []
   for (const h of hoteles) if (h.ciudad) ciudades.push(h.ciudad)
   for (const v of vuelos) if (v.destino) ciudades.push(v.destino)
-  const unicas = [...new Set(ciudades.map(c => c.trim()).filter(Boolean))]
+  // La ciudad de salida del cliente no es destino: la llegada del vuelo de regreso lo es en el
+  // papel, y la portada decía «Bogotá» en un viaje a Europa (prueba Europa, 2026-10-14).
+  const origen = origenDelViaje(vuelos)
+  const unicas = [...new Set(ciudades.map(c => c.trim()).filter(c => c && !esElOrigen(c, origen)))]
   return unicas.length === 0 ? null : unicas.join(' · ')
 }
 

@@ -166,7 +166,7 @@ export function casillasDe(c: Composicion, ranuraSlug: string): CasillaDef[] {
   const repetir = mismoProducto(ranuraSlug)
   // Una actividad con infantes y sin niños se costea con UN pantallazo: el infante no paga
   // (`infanteGratisEnActividad`). No hay «solo adultos» que buscar.
-  const hayMenores = c.ninos + c.infantes > 0 && !infanteGratisEnActividad(c, ranuraSlug)
+  const hayMenores = c.ninos + c.infantes > 0 && !infanteGratisEnActividad(c, ranuraSlug) && !trasladoPorGrupo(ranuraSlug)
   const separa = c.ninos > 0 && c.infantes > 0
     ? 'adultos, niños e infantes'
     : c.ninos > 0 ? 'adultos y niños' : 'adultos e infantes'
@@ -221,6 +221,20 @@ export function casillasDe(c: Composicion, ranuraSlug: string): CasillaDef[] {
  */
 export function infanteGratisEnActividad(c: Composicion, ranuraSlug: string): boolean {
   return ranuraSlug === 'actividad_detalle' && c.infantes > 0 && c.ninos === 0
+}
+
+/**
+ * H23 de la prueba Europa (2026-10-14) · un traslado se cotiza por vehículo o por grupo: el total
+ * del pantallazo del grupo completo ES su costo. Pedir la resta de 3 pantallazos («sin el
+ * infante», «solo adultos») a un privado que cuesta lo mismo para 3 que para 4 dejaba la línea en
+ * $0 con «Falta el costo», y el aviso «Falta el 2» seguía aunque se escribiera a mano.
+ *
+ * Si el proveedor sí separa por tipo de pasajero, el pantallazo trae el desglose y se usa (paso 1
+ * de `resolverTarifa`). Si no, el total se reparte por igual entre los que viajan: es un asiento
+ * cada uno, y el reparto solo sirve para la tabla por pasajero; el costo de la línea no cambia.
+ */
+export function trasladoPorGrupo(ranuraSlug: string): boolean {
+  return ranuraSlug === 'traslado_detalle'
 }
 
 /**
@@ -1113,7 +1127,7 @@ export type EstadoTarifa =
       costos: CostoPorTipo[]
       moneda: string
       costoTotal: number
-      origen: 'desglose' | 'resta' | 'solo_adultos' | 'habitaciones' | 'infante_gratis' | 'a_mano'
+      origen: 'desglose' | 'resta' | 'solo_adultos' | 'habitaciones' | 'infante_gratis' | 'por_grupo' | 'a_mano'
       mensaje: string
       /**
        * Con habitaciones (R8) y sin un par del mismo tipo de habitación para cada menor, el
@@ -1293,6 +1307,28 @@ export function resolverTarifa(
       costoTotal: costo,
       origen: 'infante_gratis',
       mensaje: `${MENSAJE_INFANTE_GRATIS} No hace falta nada más.`,
+    }
+  }
+
+  // 2c · traslado: el total del grupo es el costo, sin resta (`trasladoPorGrupo`).
+  if (trasladoPorGrupo(ranuraSlug)) {
+    const costo = montoDeCosto(l1)
+    const personas = totalPasajeros(c)
+    const totales = repartirProporcional(costo, presentes.map(t => cantidadDeTipo(c, t)))
+    const costos: CostoPorTipo[] = presentes.map((t, i) => ({
+      tipo: t,
+      cantidad: cantidadDeTipo(c, t),
+      total: totales[i],
+      unitario: dosDecimales(totales[i] / cantidadDeTipo(c, t)),
+      deDonde: `Pantallazo 1: ${formatoMonto(costo, moneda)} por el vehículo, repartido entre los ${personas} pasajeros`,
+    }))
+    return {
+      estado: 'resuelta',
+      costos,
+      moneda,
+      costoTotal: costo,
+      origen: 'por_grupo',
+      mensaje: 'El traslado se cobra por vehículo: el pantallazo trae el costo de todo el grupo. No hace falta nada más.',
     }
   }
 
