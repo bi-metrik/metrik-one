@@ -97,7 +97,38 @@ export function claveContraparte(
   documentoNumero: string | null | undefined,
 ): string | null {
   const partes = partesContraparte(documentoTipo, documentoNumero);
-  return partes ? `${partes.tipo}:${partes.numero}` : null;
+  if (!partes) return null;
+  const numero = partes.tipo === 'NIT' ? nitSinDvParaCruce(partes.numero) : partes.numero;
+  return `${partes.tipo}:${numero}`;
+}
+
+/**
+ * El NIT sin DV, SOLO para la llave del cruce (nunca para guardar).
+ *
+ * Valida guarda el NIT sin DV (`900123456`) y una ficha vieja de ONE puede
+ * tenerlo pegado (`9001234567`): la base de ONE le quita los puntos y el guion
+ * a "900.123.456-7" y el DV queda adentro. Sin esto, el expediente de Valida no
+ * cruzaba con la ficha (QA ALMA 2026-10-12, V3), y lo mismo una liberación
+ * hecha con DV contra una consulta hecha sin él.
+ *
+ * No se adivina con el algoritmo del DV (ver el aviso de `@/lib/dian/nit`: el
+ * último dígito cuadra por azar 1 de cada 11 veces, y el DV escrito a mano a
+ * veces está mal). Se decide por el largo, que en Colombia no es ambiguo:
+ *
+ *  - Persona jurídica: NIT de 9 dígitos que empieza en 8 o 9. Con 10 dígitos y
+ *    ese prefijo, el décimo es el DV.
+ *  - Persona natural: el NIT es la cédula. Las cédulas de 10 dígitos empiezan
+ *    en 1; con 11 dígitos, el último es el DV.
+ *
+ * Fuera de esos dos casos el número se deja como llegó. Las cédulas viejas de
+ * 8 dígitos con DV (9 dígitos) se confunden con un NIT de empresa sin DV, así
+ * que ahí no se toca nada: un cruce que falta se ve; uno que pega a dos
+ * terceros distintos no.
+ */
+export function nitSinDvParaCruce(numero: string): string {
+  if (/^[89]\d{9}$/.test(numero)) return numero.slice(0, 9);
+  if (/^1\d{10}$/.test(numero)) return numero.slice(0, 10);
+  return numero;
 }
 
 /**

@@ -118,6 +118,18 @@ describe('qué se le dice al oficial', () => {
     expect(r.titulo).toContain('ya tenía un expediente');
   });
 
+  // QA ALMA 2026-10-12, V1: con el enlace vencido, "le reenviamos el enlace"
+  // era mentira. Ahora Valida emite uno nuevo y la pantalla lo dice.
+  it('si el enlace había vencido, dice que salió uno nuevo y que el viejo no abre', () => {
+    const r = resumirInvitacion(
+      resultado({ resultado: 'reenviado', enlaceRenovado: true }),
+      'contacto@proveedora.co',
+    );
+    expect(r.titulo).toContain('vencido');
+    expect(r.detalle).toContain('uno nuevo');
+    expect(r.detalle).not.toContain('Le reenviamos el enlace');
+  });
+
   it('si el correo registrado es otro, se dice y se ofrece el enlace', () => {
     const r = resumirInvitacion(
       resultado({ resultado: 'reenviado', correoDistinto: true }),

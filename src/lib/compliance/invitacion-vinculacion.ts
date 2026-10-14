@@ -72,6 +72,11 @@ export type ResultadoInvitacion = {
   correoDistinto: boolean;
   /** `false` cuando el expediente sí quedó abierto pero el correo no salió. */
   correoSalio: boolean;
+  /**
+   * Solo en `reenviado`: el enlace anterior había vencido (30 días) y Valida
+   * emitió uno nuevo. El que tenía la contraparte ya no sirve.
+   */
+  enlaceRenovado?: boolean;
 };
 
 export type DesenlaceInvitacion = {
@@ -110,6 +115,15 @@ export function resumirInvitacion(r: ResultadoInvitacion, correoEscrito: string)
         detalle:
           `No se creó un expediente nuevo. El enlace salió al correo que ya estaba registrado, no a ${correo}: cambiar el destino desde acá dejaría que cualquiera con el documento de un proveedor se lleve su expediente a otra dirección. Si el contacto de verdad cambió, copia el enlace y mándaselo tú.`,
         ofreceEnlace: true,
+      };
+    }
+    if (r.enlaceRenovado) {
+      return {
+        tono: 'alerta',
+        titulo: 'Esa contraparte ya tenía un expediente abierto, con el enlace vencido.',
+        detalle:
+          'No se creó otro: dos expedientes del mismo documento parten el rastro en dos. El enlace anterior había vencido, así que le enviamos uno nuevo al mismo correo. El viejo ya no abre.',
+        ofreceEnlace: false,
       };
     }
     return {
