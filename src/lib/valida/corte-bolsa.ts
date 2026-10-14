@@ -126,5 +126,12 @@ export function textoCorte(motivo: MotivoCorte, esPrueba: boolean): { titulo: st
     : { titulo: 'Tu bolsa de consultas venció', detalle: 'Activa tu plan para seguir consultando. Esta consulta no se cobró.' }
 }
 
-/** A dónde lleva el botón «Activar plan». */
-export const RUTA_ACTIVAR_PLAN = '/suscripcion'
+/**
+ * A dónde lleva el botón «Activar plan»: TEMPORAL, al WhatsApp de MéTRIK con el espacio en el texto.
+ * `/suscripcion` responde 404 en un espacio de la prueba (no paga ningún contrato todavía). La
+ * activación autogestionada (`/valida/activar`, PR #1107) reemplaza esta función al entrar a main.
+ */
+export function enlaceActivarPlan(espacio: string): string {
+  const texto = `Hola, quiero activar el plan de Valida para ${espacio}`
+  return `https://wa.me/573159509103?text=${encodeURIComponent(texto)}`
+}
