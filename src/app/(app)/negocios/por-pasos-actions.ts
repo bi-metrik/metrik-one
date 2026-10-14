@@ -608,8 +608,10 @@ export async function getPedidoDeAutorizacion(cotizacionId: string): Promise<{ p
  * La regla nueva (aprobada por Mauricio el 2026-10-12, P12): una opción de vuelo o actividad
  * que va al cliente y no trae el precio del niño o del infante impide enviar. Solo aquí, con el
  * interruptor encendido: apagado, el envío de siempre no la conoce.
+ *
+ * `canal = 'descargado'` es el «Sí, ya se la mandé» tras descargar el PDF (H33).
  */
-export async function enviarPorPasos(cotizacionId: string): Promise<ResultadoPorPasos> {
+export async function enviarPorPasos(cotizacionId: string, canal?: 'enviar' | 'descargado'): Promise<ResultadoPorPasos> {
   const { supabase, error } = await getWorkspace()
   if (error) return { success: false, error: 'No autenticado' }
   const guard = await exigirPorPasos(supabase, cotizacionId)
@@ -625,6 +627,6 @@ export async function enviarPorPasos(cotizacionId: string): Promise<ResultadoPor
   const { viaje } = await leerViajeDelNegocio(supabase, foto.ctx.negocioId)
   const motivo = motivoSinPrecioPorPasajero(opcionesSinPrecio(foto.ctx.items, ids, viaje.composicion))
   if (motivo) return { success: false, error: motivo }
-  const r = await enviarCotizacion(cotizacionId)
+  const r = await enviarCotizacion(cotizacionId, canal)
   return r.success ? { success: true } : { success: false, error: r.error ?? 'No se pudo enviar.' }
 }
