@@ -302,7 +302,7 @@ describe('lo que muestra la cuenta', () => {
 
 describe('el cobro del primer mes AL CONFIRMAR (Condiciones v2.1, 7.1 literal a)', () => {
   // Aceptó las Condiciones v2.1 (las que contemplan este cobro). Jueves 15: le quedan 5 días de prueba.
-  const V21 = { condiciones_version: 'condiciones-2.1+aviso-1.2+terminos-auto-2.1' }
+  const V21 = { condiciones_version: 'condiciones-2.1+aviso-1.3+terminos-auto-2.1' }
   const JUEVES = cron('2026-10-15') + 6 * H
   const confirmar = (m: ReturnType<typeof montar>, extra: Partial<{ usuarioId: string; agotada: boolean }> = {}) =>
     cobrarAlConfirmar(

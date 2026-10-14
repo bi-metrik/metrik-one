@@ -151,14 +151,18 @@ export const AVISO_DATOS_FORMULARIO_CON_COBRO = `METRIK IA S.A.S. (NIT 902.079.6
 /** La casilla sin cobro (la de la v1.0; el aviso v1.1 no la cambia). */
 export const TEXTO_CASILLA = `Acepto, en nombre de la empresa, las Condiciones de la prueba gratis, incluido el encargo de los datos de las personas que consulte, y autorizo el tratamiento de mis datos según este aviso.`
 
-/** La casilla con cobro (aviso v1.2, texto corregido por Vera): autoriza el cobro de cada mes. */
-export const TEXTO_CASILLA_CON_COBRO = `Acepto, en nombre de la empresa, las Condiciones de la prueba gratis, incluido el cobro del plan mensual al medio de pago registrado si no cancelo antes de que se cumplan los 7 días (el primer mes y después cada mes hasta que me retire), el encargo de los datos de las personas que consulte y los Términos de Uso de Valida, y autorizo el tratamiento de mis datos según este aviso.`
+/**
+ * La casilla con cobro (aviso v1.3): autoriza el cobro de cada mes (Vera) y dice los dos momentos del
+ * primero con el léxico de la 7.1 v2.1 (2026-10-14; texto de Max, pendiente de Emilio). La v1.2 decía
+ * solo «si no cancelo antes de que se cumplan los 7 días».
+ */
+export const TEXTO_CASILLA_CON_COBRO = `Acepto, en nombre de la empresa, las Condiciones de la prueba gratis, incluido el cobro del plan mensual al medio de pago registrado: el primer mes cuando confirme en mi cuenta que activo el plan, lo que Valida me pide cuando intento una consulta después de agotar las 10 de la prueba o antes con el botón "Activar plan", o, si no lo confirmo ni cancelo, después de que se cumplan los 7 días de la prueba y nunca antes; y después cada mes hasta que me retire. Acepto también el encargo de los datos de las personas que consulte y los Términos de Uso de Valida, y autorizo el tratamiento de mis datos según este aviso.`
 
 /**
  * El texto junto a la tarjeta (aviso §2.3, texto de Vera). NO entra a la huella: es ayuda en pantalla.
  * `{fecha_y_hora_vence}` lo llena la pantalla con `textoJuntoATarjeta`.
  */
-export const TEXTO_JUNTO_A_TARJETA = `Durante la prueba no se cobra nada. Si no cancela antes del {fecha_y_hora_vence}, después de ese momento se cobran $150.000 por el primer mes y luego cada mes. La tarjeta la guarda ePayco, no METRIK.`
+export const TEXTO_JUNTO_A_TARJETA = `Durante la prueba no se cobra nada sin su confirmación. El primer mes, $150.000, se cobra cuando confirme en su cuenta que activa el plan, lo que Valida le pide cuando intenta una consulta después de agotar las 10 de la prueba o antes con el botón "Activar plan". Si no lo confirma ni cancela antes del {fecha_y_hora_vence}, se cobra después de ese momento, nunca antes, y luego cada mes. La tarjeta la guarda ePayco, no METRIK.`
 
 export function textoJuntoATarjeta(fechaYHoraVence: string): string {
   return TEXTO_JUNTO_A_TARJETA.replace('{fecha_y_hora_vence}', fechaYHoraVence)
@@ -169,9 +173,10 @@ export const AVISO_REGISTRO = {
   version: '1.1',
 } as const
 
+/** v1.3 (2026-10-14): la casilla dice los dos momentos del primer cobro (Condiciones v2.1, 7.1). */
 export const AVISO_REGISTRO_CON_COBRO = {
   slug: 'aviso-formulario-registro-valida',
-  version: '1.2',
+  version: '1.3',
 } as const
 
 // ── Las Condiciones vigentes ──────────────────────────────────────────────────────────────────

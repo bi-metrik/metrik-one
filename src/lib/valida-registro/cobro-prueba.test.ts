@@ -132,7 +132,7 @@ describe('el correo del aviso (pendiente de Vera)', () => {
 
 describe('el cobro al confirmar (Condiciones v2.1, 7.1 literal a)', () => {
   it('solo a quien aceptó la v2.1 o posterior: la v2.0 dice «no se adelanta»', () => {
-    expect(permiteCobroAlConfirmar('condiciones-2.1+aviso-1.2+terminos-auto-2.1')).toBe(true)
+    expect(permiteCobroAlConfirmar('condiciones-2.1+aviso-1.3+terminos-auto-2.1')).toBe(true)
     expect(permiteCobroAlConfirmar('condiciones-2.10+aviso-1.2')).toBe(true)
     expect(permiteCobroAlConfirmar('condiciones-3.0+aviso-1.3')).toBe(true)
     expect(permiteCobroAlConfirmar('condiciones-2.0+aviso-1.2+terminos-auto-2.0')).toBe(false)

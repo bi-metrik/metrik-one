@@ -85,6 +85,6 @@ Ya mergeados: #1095 (corte de la bolsa), #1097 (`valida_registros`, APLICADA, no
   antes de encender**; los archivos legales de `proyectos/metrik/valida/docs/legal/` siguen en v2.0 (no los toca Max).
 - Solo se ofrece a registros que aceptaron condiciones-2.1+ (la v2.0 prometía «no se adelanta»).
 - Migración `20261014233000_valida_cobro_al_confirmar.sql` SIN aplicar: sin ella el clic falla al reclamar y no cobra.
-- La casilla con cobro y el texto junto a la tarjeta NO cambiaron (siguen describiendo solo el día 7): revisar con Emilio.
+- Casilla con cobro (aviso v1.3) y texto junto a la tarjeta ya dicen la regla nueva; todo pendiente de Emilio.
 
 Relacionado: [[secop-autogestion-registro]], [[radar-trial-y-cobro]], [[valida-renovacion-continua]], [[sql-y-despliegue-metrik-valida]].

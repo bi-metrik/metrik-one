@@ -6,6 +6,7 @@ import {
   AVISO_DATOS_FORMULARIO,
   AVISO_DATOS_FORMULARIO_CON_COBRO,
   AVISO_REGISTRO,
+  AVISO_REGISTRO_CON_COBRO,
   CONDICIONES_PRUEBA,
   CONDICIONES_PRUEBA_CON_COBRO,
   PRUEBA_DE_LAS_CONDICIONES,
@@ -33,11 +34,11 @@ const sha = (t: string) => createHash('sha256').update(t, 'utf8').digest('hex')
  * subir la versión que corresponda (Condiciones o aviso) y, solo entonces, actualizar el valor.
  *
  *   - sin cobro: Condiciones v1.0 + aviso v1.1 + casilla v1.0 (2026-10-12, aviso sin «tipo de empresa»);
- *   - con cobro: Condiciones v2.1 + aviso v1.2 + casilla con cobro (2026-10-14: la v2.0 de Vera y Emilio
+ *   - con cobro: Condiciones v2.1 + aviso v1.3 + casilla con cobro (2026-10-14: la v2.0 de Vera y Emilio
  *     con el cobro del primer mes al confirmar; texto de Max, pendiente de Emilio).
  */
 const HUELLA_SIN_COBRO = '88ddf9d4d3050e5b309041c6693dbf3d0174bd0d2e7020e1fa32f957a5d2ae80'
-const HUELLA_CON_COBRO = '4d058b240ee765665163849d9935b1aa5df1b268abd93cbdf945dd4261e7d362'
+const HUELLA_CON_COBRO = '9b73eff0b05025eef9cd1b8f52076a2a2ffffcc9d09a0b9c93532b2d6feb7c74'
 
 const EPAYCO = { EPAYCO_HABILITADO: '1', EPAYCO_PUBLIC_KEY_METRIK: 'pub_prueba' }
 const COBRO = { VALIDA_COBRO_TRAS_PRUEBA: '1', ...EPAYCO }
@@ -80,7 +81,7 @@ describe('con cobro: Condiciones v2.1 completas, aviso v1.2 y casilla con cobro'
 
   it('versión 2.1 y aviso 1.2', () => {
     expect(t).toMatch(/^CONDICIONES DE LA PRUEBA GRATIS DE VALIDA · Versión 2\.1/)
-    expect(versionAceptada(VIGENTES_CON_COBRO)).toBe('condiciones-2.1+aviso-1.2+terminos-auto-2.1')
+    expect(versionAceptada(VIGENTES_CON_COBRO)).toBe('condiciones-2.1+aviso-1.3+terminos-auto-2.1')
   })
 
   it('el numeral 1 ya no dice que no pide tarjeta, y autoriza el cobro de cada mes (Vera)', () => {
@@ -139,14 +140,24 @@ describe('con cobro: Condiciones v2.1 completas, aviso v1.2 y casilla con cobro'
     expect(AVISO_DATOS_FORMULARIO_CON_COBRO.endsWith('están en la')).toBe(true)
   })
 
-  it('la casilla con cobro autoriza el primer mes y cada mes siguiente', () => {
-    expect(TEXTO_CASILLA_CON_COBRO).toContain('(el primer mes y después cada mes hasta que me retire)')
+  it('la casilla con cobro (aviso v1.3) dice los dos momentos del primer mes, con el léxico de la 7.1, y cada mes siguiente', () => {
+    expect(TEXTO_CASILLA_CON_COBRO).toContain('el primer mes cuando confirme en mi cuenta que activo el plan')
+    expect(TEXTO_CASILLA_CON_COBRO).toContain('lo que Valida me pide cuando intento una consulta después de agotar las 10 de la prueba o antes con el botón "Activar plan"')
+    expect(TEXTO_CASILLA_CON_COBRO).toContain('si no lo confirmo ni cancelo, después de que se cumplan los 7 días de la prueba y nunca antes')
+    expect(TEXTO_CASILLA_CON_COBRO).toContain('y después cada mes hasta que me retire')
+    expect(TEXTO_CASILLA_CON_COBRO).not.toContain('si no cancelo antes de que se cumplan los 7 días (el primer mes')
     expect(TEXTO_CASILLA_CON_COBRO).toContain('los Términos de Uso de Valida')
+    // Un solo renglón: `casillaMarcada` la recupera de lo aceptado con «Casilla: …».
+    expect(TEXTO_CASILLA_CON_COBRO).not.toContain('\n')
+    expect(AVISO_REGISTRO_CON_COBRO.version).toBe('1.3')
   })
 
   it('el texto junto a la tarjeta lleva la fecha y la hora en que se cumplen los 7 días', () => {
     const x = textoJuntoATarjeta('martes, 20 de octubre de 2026, 3:00 p. m.')
-    expect(x).toContain('Si no cancela antes del martes, 20 de octubre de 2026, 3:00 p. m., después de ese momento se cobran $150.000')
+    expect(x).toContain('Durante la prueba no se cobra nada sin su confirmación.')
+    expect(x).toContain('El primer mes, $150.000, se cobra cuando confirme en su cuenta que activa el plan')
+    expect(x).toContain('cuando intenta una consulta después de agotar las 10 de la prueba o antes con el botón "Activar plan"')
+    expect(x).toContain('Si no lo confirma ni cancela antes del martes, 20 de octubre de 2026, 3:00 p. m., se cobra después de ese momento, nunca antes, y luego cada mes.')
     expect(x).not.toContain('{')
   })
 })
@@ -161,7 +172,7 @@ describe('la huella cubre Condiciones, aviso y casilla DE LA VERSIÓN QUE SE MOS
     const tx = textoAceptado(VIGENTES_CON_COBRO)
     expect(tx).toContain(avisoComoSeLee(AVISO_DATOS_FORMULARIO_CON_COBRO))
     expect(tx).toContain(`Casilla: ${TEXTO_CASILLA_CON_COBRO}`)
-    expect(tx).toContain('Aviso del formulario de registro · v1.2')
+    expect(tx).toContain('Aviso del formulario de registro · v1.3')
     expect(tx).not.toContain(`Casilla: ${TEXTO_CASILLA}`)
     expect(huellaAceptacion(tx)).toBe(HUELLA_CON_COBRO)
   })
