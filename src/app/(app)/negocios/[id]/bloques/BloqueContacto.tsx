@@ -17,6 +17,7 @@ import {
   type CampoContacto,
 } from '@/lib/contactos/campos-contacto'
 import AutorizacionDelContacto from './AutorizacionDelContacto'
+import PerfilConfirmado from '@/components/perfil-contacto/perfil-confirmado'
 import { conReintentoDeRed } from '@/lib/red/con-reintento'
 import { mensajeDeFallaDeCarga } from '@/lib/red/error-de-red'
 
@@ -213,6 +214,8 @@ export default function BloqueContacto({
           )}
         </div>
       ))}
+
+      <PerfilConfirmado hechos={fichaActual.perfil} />
 
       {enlaceFicha}
     </div>

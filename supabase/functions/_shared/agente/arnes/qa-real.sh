@@ -7,6 +7,8 @@
 #      Encender `agente_config.extraccion_compacta` solo si la compacta tiene los mismos aciertos y los mismos campos
 #      exigidos llenos, 0 omitidos, y menos ms.
 #   3. conversación: conjunto 1 del arnés (incluye c1-1009, con la extracción real) con el respaldo estricto de hoy.
+#   4. perfil del contacto (2026-10-12): el conjunto `perfil` (incluye cp-mixto, con la extracción real). Desde esta
+#      tanda todos los casos corren con las fichas del perfil (`conPerfil`), como quedará Trappvel al publicarlas.
 CREDENCIALES="${CREDENCIALES:-$HOME/Developer/metrik/.credentials.md}"
 export GEMINI_API_KEY="$(grep -m1 'Gemini API Key (pruebas)' "$CREDENCIALES" | awk -F'|' '{gsub(/ /,"",$3); print $3}')"
 [ ${#GEMINI_API_KEY} -gt 20 ] || { echo "No encontré la llave de pruebas en $CREDENCIALES"; exit 2; }
@@ -24,4 +26,6 @@ ARNES=supabase/functions/_shared/agente/arnes
 deno run -A --node-modules-dir=none "$ARNES/correr.ts" --humo --salida "$SALIDA" || { echo "El humo falló: no sigo (¿facturación de Google?)."; exit 1; }
 deno run -A --node-modules-dir=none "$ARNES/extraccion-casos.ts" --n "$N" --esquema ambas | tee "$SALIDA/extraccion.jsonl"
 deno run -A --node-modules-dir=none "$ARNES/correr.ts" --conjunto 1 --salida "$SALIDA"
+# 4. perfil del contacto (brief 2026-10-12): explícito, con quién viaja, ambiguo, sin autorización, sensible, juicio y mixto.
+deno run -A --node-modules-dir=none "$ARNES/correr.ts" --conjunto perfil --salida "$SALIDA/perfil"
 echo "Resultados en $SALIDA"

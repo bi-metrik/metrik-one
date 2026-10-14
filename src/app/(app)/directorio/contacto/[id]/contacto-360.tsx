@@ -42,9 +42,11 @@ interface Props {
   staff: StaffOption[]
   /** La sección «Autorización de datos» (solo en workspaces que la usan). */
   autorizacion?: ReactNode
+  /** La sección «Perfil» (mismo alcance que la autorización). */
+  perfil?: ReactNode
 }
 
-export default function Contacto360({ contacto, empresaVinculada, negocios, interacciones, staff, autorizacion }: Props) {
+export default function Contacto360({ contacto, empresaVinculada, negocios, interacciones, staff, autorizacion, perfil }: Props) {
   const router = useRouter()
   const [isPending, startTransition] = useTransition()
   const [form, setForm] = useState({
@@ -223,6 +225,9 @@ export default function Contacto360({ contacto, empresaVinculada, negocios, inte
 
       {/* Autorización de tratamiento de datos: la misma vista del bloque del viaje. */}
       {autorizacion}
+
+      {/* Perfil: lo que se sabe de la persona para sus próximos viajes (confirmado, sugerido, agregar). */}
+      {perfil}
 
       {/* Interacciones (leads sin convertir + timeline) */}
       {/* `custom_data.origen` es el first-touch inmutable que graba el webhook de

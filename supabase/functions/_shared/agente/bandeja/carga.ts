@@ -22,6 +22,8 @@ import { cargarEnExistente, valorLegible } from '../../wa-carga-reglas.ts';
 import type { MensajeEntrega } from '../../wa-guardianes.ts';
 import { lineaDuda, validarCarga } from './extraccion.ts';
 import type { Quitado, SugeridoAgente } from './extraccion.ts';
+import { textoComparable } from '../../perfil-contacto.ts';
+import type { HechoPerfil } from '../../perfil-contacto.ts';
 import { codigosCanonicos, codigosDelTexto } from './codigo.ts';
 
 /** Lo que se le pasa a la extracción, como mucho (el mismo tope de la conversación que ve el modelo: 6.000 tokens). */
@@ -123,6 +125,13 @@ export interface PlanCarga {
   /** Lo que el comercial pidió quitar del viaje (acción explícita: `cargarEnExistente` con `quitar`). */
   quitar?: Record<string, Quitado>;
   historia: string;
+  /** Lo de la persona que va a su perfil como sugerido, con el toque de esta carga (solo si la extracción lo pidió). */
+  perfil?: HechoPerfil[];
+}
+
+/** La línea del resumen con lo que va al perfil (sugerido): el comercial lo ve antes de tocar. Pura. */
+export function lineaPerfilSugerido(perfil: ReadonlyArray<Pick<HechoPerfil, 'texto'>>): string {
+  return `Al perfil del cliente, por confirmar en ONE: ${perfil.map((h) => h.texto).join('; ')}`;
 }
 
 export interface Preparada {
@@ -142,9 +151,9 @@ export function mensajesDeTextos(textos: ReadonlyArray<string>): MensajeEntrega[
 }
 
 /** El plan pendiente (lo que se le propuso al comercial y no ha confirmado), tolerante a una traza vieja. Pura. */
-export function planPrevio(previo: unknown): { sugeridos: Record<string, SugeridoAgente>; quitar: Record<string, Quitado> } {
+export function planPrevio(previo: unknown): { sugeridos: Record<string, SugeridoAgente>; quitar: Record<string, Quitado>; perfil: HechoPerfil[] } {
   const p = (previo && typeof previo === 'object' ? previo : {}) as Partial<PlanCarga>;
-  return { sugeridos: p.sugeridos ?? {}, quitar: p.quitar ?? {} };
+  return { sugeridos: p.sugeridos ?? {}, quitar: p.quitar ?? {}, perfil: Array.isArray(p.perfil) ? p.perfil : [] };
 }
 
 /** Lo propuesto sin confirmar, por campo: se le muestra a la extracción para que pueda corregirlo o quitarlo. Pura. */
@@ -212,7 +221,14 @@ export function planDeCarga(p: {
   for (const k of quitados) delete quedaria[k];
   const falta = huecos(campos, quedaria).minimo.faltan.map((f) => f.label ?? f.slug);
   const duda = v.dudas[0] ? lineaDuda(v.dudas[0]) : undefined;
-  return { entendido, falta, ...(duda ? { duda } : {}), plan: { sugeridos, ...(Object.keys(quitar).length ? { quitar } : {}), historia: v.historia } };
+  // Lo de la persona: lo pendiente más lo nuevo, sin repetir el mismo texto.
+  const perfil = [...previo.perfil];
+  for (const h of v.perfil) if (!perfil.some((x) => textoComparable(x.texto) === textoComparable(h.texto))) perfil.push(h);
+  if (perfil.length) entendido.push(lineaPerfilSugerido(perfil));
+  return {
+    entendido, falta, ...(duda ? { duda } : {}),
+    plan: { sugeridos, ...(Object.keys(quitar).length ? { quitar } : {}), historia: v.historia, ...(perfil.length ? { perfil } : {}) },
+  };
 }
 
 /** ¿Dos listas de lo entendido dicen lo mismo? (sin importar el orden). Pura. */
