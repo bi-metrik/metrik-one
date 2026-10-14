@@ -27,7 +27,8 @@ import { traerTodo } from '@/lib/supabase/paginar'
 import { bogotaYearMonth, todayBogotaISO } from '@/lib/dates/bogota'
 import { columnaDirectivo, type ColumnaDirectivo } from '@/lib/dian/agrupacion-directivo'
 import { drillSeAcotaAVentas } from '@/lib/tableros/marketing'
-import type { FilaMarketing, FilaNegocioMarketing } from '@/lib/tableros/marketing'
+import type { FilaLeadCiudad, FilaMarketing, FilaNegocioMarketing } from '@/lib/tableros/marketing'
+import { leadsConCiudad } from '@/lib/tableros/marketing-leads-ciudad'
 
 /** Quien ve gasto y recaudo agregados de la operacion. Mismo criterio que Direccion. */
 const ROLES_MARKETING = ['owner', 'admin', 'supervisor']
@@ -37,12 +38,21 @@ export interface MarketingData {
   /**
    * Las VENTAS, una por fila, con su ciudad. Alimentan la tabla "Ventas por ciudad".
    *
-   * Solo ventas y no todos los negocios: la ciudad es la seccional DIAN, que llega con
-   * el RUT en Documentacion, asi que un lead recien entrado no tiene ninguna. Medido el
+   * Solo ventas y no todos los negocios: esta ciudad es la seccional DIAN, que llega con
+   * el RUT en Documentacion, asi que un lead recien entrado no tiene seccional (si tiene
+   * ciudad de RESIDENCIA, que es otra y va en `leadsCiudad`). Medido el
    * 2026-09-14 en SOENA: de 99 negocios con campana, 28 tienen seccional y son
    * exactamente las 28 ventas.
    */
   ventas: FilaNegocioMarketing[]
+  /**
+   * Un lead por (campana, contacto) con la ciudad de RESIDENCIA que declaro en el
+   * formulario de Meta, ya normalizada en el servidor. Alimenta «Leads por ciudad».
+   *
+   * `null` = la consulta fallo. La seccion lo dice y el resto de la pestana sigue en
+   * pie: perder este corte no es razon para esconder la tabla de campanas.
+   */
+  leadsCiudad: FilaLeadCiudad[] | null
   /** 'YYYY-MM-01' del mes en curso en Bogota, resuelto en el SERVIDOR. */
   mesEnCurso: string
   /** 'YYYY-MM-DD' de hoy en Bogota: decide que cohortes todavia no se pueden juzgar. */
@@ -79,6 +89,16 @@ interface FilaNegocioCruda {
   seccional: string | null
   honorario: number | string | null
   recaudado: number | string | null
+}
+
+interface InteraccionCruda {
+  id: string
+  contacto_id: string
+  ocurrida_at: string | null
+  created_at: string | null
+  campaign_id: string | null
+  /** `payload->field_data`: arreglo `{name, values}` del formulario de Meta. */
+  field_data: unknown
 }
 
 /**
@@ -156,6 +176,43 @@ export async function getMarketingData(): Promise<MarketingData | MarketingNoDis
     return { noDisponible: true }
   }
 
+  // Los leads con su ciudad declarada. Mismo filtro que la CTE `leads` de
+  // `v_marketing_campana` (fuente 'meta', campaign_id no vacio) para que la suma por
+  // ciudad cuadre con la cifra «Leads»; la agrupacion por contacto la hace
+  // `leadsConCiudad`. Paginada: son ~1.065 interacciones en SOENA el 2026-10-14, ya por
+  // encima del techo de 1.000 de PostgREST, que recorta sin avisar.
+  let leadsCiudad: FilaLeadCiudad[] | null
+  try {
+    const interacciones = await traerTodo<InteraccionCruda>(
+      (d, h) =>
+        svc
+          .from('contacto_interacciones')
+          .select('id, contacto_id, ocurrida_at, created_at, campaign_id:payload->>campaign_id, field_data:payload->field_data')
+          .eq('workspace_id', workspaceId)
+          .eq('fuente', 'meta')
+          .not('payload->>campaign_id', 'is', null)
+          .neq('payload->>campaign_id', '')
+          .order('id')
+          .range(d, h) as unknown as PromiseLike<{
+          data: InteraccionCruda[] | null
+          error: { message: string } | null
+        }>,
+      { etiqueta: 'Tablero de marketing: leads por ciudad' },
+    )
+    leadsCiudad = leadsConCiudad(
+      interacciones.map(i => ({
+        contactoId: i.contacto_id,
+        campaignId: i.campaign_id ?? '',
+        ocurridaAt: i.ocurrida_at,
+        createdAt: i.created_at,
+        fieldData: i.field_data,
+      })),
+    )
+  } catch (e) {
+    console.error('[marketing] no se pudo traer contacto_interacciones (leads por ciudad):', { workspaceId, error: e })
+    leadsCiudad = null
+  }
+
   const ventas: FilaNegocioMarketing[] = ventasCrudas.map(v => ({
     campaignId: v.campaign_id,
     mesVenta: v.mes_venta,
@@ -184,6 +241,7 @@ export async function getMarketingData(): Promise<MarketingData | MarketingNoDis
   return {
     filas,
     ventas,
+    leadsCiudad,
     mesEnCurso: `${bogotaYearMonth()}-01`,
     hoyISO: todayBogotaISO(),
     gastoSincronizado: crudas.some(f => f.sincronizado_at !== null),
