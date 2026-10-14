@@ -99,7 +99,20 @@ export type AsignacionResponsable = {
  */
 export async function asignarResponsable(
   supabase: unknown,
-  params: { negocioId: string; staffId: string; assignedBy: string | null },
+  params: {
+    negocioId: string
+    staffId: string
+    assignedBy: string | null
+    /**
+     * Puesto pedido explícitamente. Solo se respeta si el staff TIENE esa área; si no, manda
+     * la derivación. Existe por la asignación automática por etapa (SOE-016): quien lleva
+     * comercial y operaciones derivaría `comercial` y desplazaría al comercial del caso
+     * cuando lo que se configuró fue el puesto de operaciones.
+     */
+    rol?: RolResponsable
+    /** Se agrega al texto del timeline (p. ej. «automático al entrar a Cargue»). */
+    nota?: string
+  },
 ): Promise<AsignacionResponsable> {
   const { negocioId, staffId, assignedBy } = params
 
@@ -109,7 +122,7 @@ export async function asignarResponsable(
     .eq('staff_id', staffId)
 
   const areas = ((areasStaff ?? []) as Array<{ area: string }>).map((a) => a.area)
-  const rol = rolDesdeAreas(areas)
+  const rol = params.rol && areas.includes(params.rol) ? params.rol : rolDesdeAreas(areas)
 
   let desplazado: string | null = null
 
@@ -151,6 +164,7 @@ export async function asignarResponsable(
     assignedBy,
     rol,
     desplazadoNombre,
+    nota: params.nota ?? null,
   })
 
   return { rol, desplazado, desplazadoNombre, error: null }
@@ -187,6 +201,7 @@ async function anotarAsignacion(
     assignedBy: string | null
     rol: RolResponsable | null
     desplazadoNombre: string | null
+    nota: string | null
   },
 ): Promise<void> {
   const { data: negocio } = await db(supabase)
@@ -212,6 +227,7 @@ async function anotarAsignacion(
   const nombre = (await nombreDeStaff(supabase, p.staffId)) ?? 'Sin nombre'
   const comoRol = p.rol ? ` como ${p.rol}` : ' (sin área: no recibe avisos de etapa)'
   const relevo = p.desplazadoNombre ? `, en reemplazo de ${p.desplazadoNombre}` : ''
+  const nota = p.nota ? ` (${p.nota})` : ''
 
   await registrarActividad(
     supabase,
@@ -221,7 +237,7 @@ async function anotarAsignacion(
       entidad_id: p.negocioId,
       tipo: 'cambio_sistema',
       autor_id: autorId,
-      contenido: `Responsable agregado: ${nombre}${comoRol}${relevo}`,
+      contenido: `Responsable agregado: ${nombre}${comoRol}${relevo}${nota}`,
     },
     'asignarResponsable',
   )

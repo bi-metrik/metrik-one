@@ -17,6 +17,7 @@
 import { cobradoConfirmado } from '@/lib/cobros/saldo-negocio'
 import { registrarActividad } from '@/lib/activity/registrar-actividad'
 import { instanciarBloquesDeEtapa } from '@/lib/negocios/instanciar-bloques-etapa'
+import { asignarResponsableAlEntrar } from '@/lib/negocios/responsable-automatico'
 import { evaluarGateEntrega } from './entrega-datos'
 import { configEtapasPorFecha, movimientoPorFecha, pesosCierre } from './cierre-viaje'
 import { avisoSoloAQuienLleva } from '@/lib/negocios/negocios-de-prueba'
@@ -155,6 +156,7 @@ export async function correrEtapasPorFecha(svc: Db, opts: { hoy: string; soloNeg
     }
     if (((upd.data ?? []) as unknown[]).length === 0) continue
     await instanciarBloquesDeEtapa(svc, { negocioId: n.id, etapaId: destino.id, workspaceId: n.workspace_id })
+    await asignarResponsableAlEntrar(svc, { negocioId: n.id, etapaId: destino.id, workspaceId: n.workspace_id })
 
     const textoMov = mov === 'entrar'
       ? `Entró a ${destino.nombre}: hoy sale el viaje.${faltaba.length ? ` Salió el viaje sin estar listo: ${faltaba.join(' ')}` : ''}`
