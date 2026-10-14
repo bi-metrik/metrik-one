@@ -5,7 +5,7 @@ metadata:
   type: project
 ---
 
-Abiertos el 2026-10-14, sin mergear. Plan: `proyectos/trappvel/clarity/diseno/propuesta-emocional/max.md` §3.
+Abiertos el 2026-10-14. #1165 mergeado (e8e10f0d); PR 2 es #1168, sin mergear. Plan: `proyectos/trappvel/clarity/diseno/propuesta-emocional/max.md` §3.
 
 - **#1165 (PR 3, H33):** descargar ya no escribe `fecha_envio`; el editor pregunta (`debePreguntarEnvio`:
   viaje o seguimiento, borrador, PDF limpio) y el «Sí» va por `enviarCotizacion(id,'descargado')` /
@@ -28,5 +28,8 @@ anticipo a mano + wa.me). Un anticipo registrado como pago mueve el negocio a Re
 - `textoDelPDF` (de react-pdf) no lee los PDF de Chromium (fuentes CID): usar `textoDelPdf` de `ai/texto-pdf.ts`.
 - Ver páginas de un PDF en la torre: no hay poppler; `pdfjs` de `unpdf/dist/pdfjs.mjs` cargado en Chromium
   con `--allow-file-access-from-files` (script en el scratchpad de la sesión, `pdf2png.mjs`).
+- Saltos de hoja (14-oct, queja del dueño por los blancos): nada de `nobr` sobre una tabla entera; el bloque
+  que no se parte es el tramo (`<tbody class="nobr">`), con `<thead>` repetido y `tr { break-inside: avoid }`.
+  Medir el hueco por hoja con `medir-hojas.mjs` (scratchpad): última fila no blanca sobre el alto útil.
 - `esTren` por marca o estación-a-estación; una estación en un extremo es el traslado al tren.
 - Relacionado: [[propuesta-chromium-modelo]].

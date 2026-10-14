@@ -39,6 +39,17 @@ describe('htmlDePropuesta · COT-2026-0026 de muestra', () => {
     expect((h.match(/<div class="day">/g) ?? []).length).toBe(14)
   })
 
+  it('saltos: la tabla de vuelos fluye detrás de los hoteles; solo cada tramo no se parte', () => {
+    const vuelos = h.slice(h.indexOf('>Vuelos<'), h.indexOf('</section>', h.indexOf('>Vuelos<')))
+    // La tabla entera con «nobr» saltaba de hoja y dejaba 3/4 de página en blanco.
+    expect(vuelos).not.toMatch(/<table class="nobr"/)
+    expect(vuelos).toContain('<thead>')
+    // Ida y regreso: dos bloques que no se parten.
+    expect((vuelos.match(/<tbody class="nobr">/g) ?? []).length).toBe(2)
+    const trenes = h.slice(h.indexOf('>Trenes y traslados<'))
+    expect(trenes.slice(0, trenes.indexOf('</table>'))).not.toMatch(/<table class="nobr"/)
+  })
+
   it('léxico: «Premium» se le dice «Superior» al cliente', () => {
     expect(t).toContain('Superior')
     expect(t).not.toMatch(/premium/i)

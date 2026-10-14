@@ -398,10 +398,13 @@ function vuelos(m: ModeloPropuesta): string {
       const equipaje = [f.tarifaAerolinea, f.equipaje, ...f.adicionales].filter(Boolean).join(' · ')
       return `<tr>${conTarifas ? `<td>${etiquetasDe(f.tarifas.length > 0 ? f.tarifas : m.tarifas.map((t) => t.indice), porIndice)}</td>` : ''}<td><span class="fl">${esc(vuelo)}</span>${f.escala ? `<br>${esc(f.escala)}` : ''}</td><td>${esc(horario)}</td><td>${esc(equipaje)}</td></tr>`
     })
-    return [sub, ...cuerpo].join('\n')
+    // Cada tramo (ida, regreso) es un bloque que no se parte; la tabla sí puede seguir en la
+    // hoja siguiente, con la cabecera repetida. Antes la tabla entera no se partía y, detrás de
+    // los hoteles, saltaba de hoja dejando media página en blanco.
+    return `<tbody class="nobr">${[sub, ...cuerpo].join('\n')}</tbody>`
   })
   return `<section class="sec">\n${encabezadoDeSeccion('plane', 'Vuelos', null)}
-  <table class="nobr"><tr>${conTarifas ? '<th style="width:24mm">Versión</th>' : ''}<th>Vuelo</th><th>Horario</th><th>Equipaje</th></tr>
+  <table><thead><tr>${conTarifas ? '<th style="width:24mm">Versión</th>' : ''}<th>Vuelo</th><th>Horario</th><th>Equipaje</th></tr></thead>
 ${filas.join('\n')}
   </table>\n</section>`
 }
@@ -421,7 +424,7 @@ function trenesYTraslados(m: ModeloPropuesta): string {
     return `<tr><td>${esc(dia)}</td><td>${icono(t.tipo === 'tren' ? 'train' : 'van')} ${desc}</td>${conHora ? `<td>${esc(t.hora ?? '')}</td>` : ''}${conColumna ? `<td>${etiquetasDe(t.tarifas, porIndice)}</td>` : ''}</tr>`
   })
   return `<section class="sec">\n${encabezadoDeSeccion(hayTren ? 'train' : 'van', titulo, sub)}
-  <table class="nobr"><tr><th style="width:20mm">Día</th><th>Servicio</th>${conHora ? '<th style="width:18mm">Hora</th>' : ''}${conColumna ? '<th>Versión</th>' : ''}</tr>
+  <table><thead><tr><th style="width:20mm">Día</th><th>Servicio</th>${conHora ? '<th style="width:18mm">Hora</th>' : ''}${conColumna ? '<th>Versión</th>' : ''}</tr></thead>
 ${cuerpo.join('\n')}
   </table>\n</section>`
 }
@@ -553,7 +556,7 @@ function incluyeYPagos(m: ModeloPropuesta): string {
   if (columnas.length === 0 && !plan && !antes) return ''
   return `<section class="sec">\n<div class="nobr">${encabezadoDeSeccion('doc', plan ? 'Qué incluye y cuándo se paga' : 'Qué incluye', null)}
   ${columnas.length > 0 ? `<div class="two">${columnas.join('\n')}</div>` : ''}</div>
-  ${plan ? `<h3 style="margin-top:6mm">Cuánto pagan y cuándo</h3>${plan}` : ''}
+  ${plan ? `<div class="nobr"><h3 style="margin-top:6mm">Cuánto pagan y cuándo</h3>${plan}</div>` : ''}
   ${antes}\n</section>`
 }
 
@@ -574,7 +577,7 @@ function formal(m: ModeloPropuesta, r: RecursosPropuesta): string {
 </section>`
 }
 
-/** Lo que el prototipo no tenía: tarjetas sin foto y el llamado sin botones. */
+/** Lo que el prototipo no tenía: tarjetas sin foto, el llamado sin botones y tablas que se parten. */
 const CSS_EXTRA = `
 .tN { background: var(--navy); } .cN { color: var(--navy); } .bN { background: var(--navy); }
 .sinfoto { background: linear-gradient(135deg,#e63380,#8b4fa0 55%,#1fa7bd); }
@@ -583,6 +586,9 @@ const CSS_EXTRA = `
 .hc .img .tags .tag { position: static; }
 .hc .b > .tags { display:flex; gap: 1mm; flex-wrap: wrap; margin-bottom: 1.2mm; }
 .top b.mont { font-size: 13pt; color: var(--navy); }
+/* Las tablas siguen en la hoja siguiente (cabecera repetida); una fila nunca se parte. */
+tr { break-inside: avoid; }
+thead { display: table-header-group; }
 `
 
 export function htmlDePropuesta(m: ModeloPropuesta, r: RecursosPropuesta): string {
