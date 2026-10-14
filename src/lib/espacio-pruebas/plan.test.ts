@@ -1,10 +1,13 @@
+import { readFileSync } from 'node:fs'
+import { resolve } from 'node:path'
+
 import { describe, expect, it } from 'vitest'
 
-import { ORIGEN, casoDeC0, crearAlmacenDoble } from '../../../test/espacio-pruebas-doble'
+import { LLAVES, ORIGEN, casoDeC0, crearAlmacenDoble, esquemaDelDoble } from '../../../test/espacio-pruebas-doble'
 import type { Fila } from './almacen'
 import { clasificarTabla, TABLAS_QUE_SE_COPIAN } from './clasificacion'
 import { pareceDatoPersonal, remapear, sinLlaves } from './jsonb'
-import { contarPorTabla, crearUsuarios, ejecutar, planificar, purgar, type OpcionesPlan, type Plan } from './plan'
+import { contarPorTabla, crearUsuarios, deshacer, ejecutar, planificar, purgar, type OpcionesPlan, type Plan } from './plan'
 import { SEMILLAS } from './semillas'
 
 const CORREO = 'persona@metrik.example'
@@ -189,6 +192,88 @@ describe('plan del espacio de pruebas (simulacro sobre el doble)', () => {
     await planificar(a, opciones())
     expect(JSON.stringify(a.estado)).toBe(antes)
     expect(a.usuarios).toHaveLength(0)
+  })
+})
+
+/** Las llaves foráneas de los tipos de la base (`Relationships`), tabla → [columna, apunta]. */
+function llavesDeLaBase(): { tabla: string; columna: string; apunta: string }[] {
+  const src = readFileSync(resolve(process.cwd(), 'src/types/database.ts'), 'utf8')
+  const tablas = src.slice(src.indexOf('    Tables: {'), src.indexOf('    Views: {'))
+  const partes = tablas.split(/\n {6}(\w+): \{\n {8}Row:/)
+  const out: { tabla: string; columna: string; apunta: string }[] = []
+  for (let i = 1; i < partes.length; i += 2) {
+    const rel = partes[i + 1].slice(partes[i + 1].indexOf('Relationships:'))
+    for (const m of rel.matchAll(/columns: \["(\w+)"\]\s*isOneToOne: \w+\s*referencedRelation: "(\w+)"/g)) {
+      out.push({ tabla: partes[i], columna: m[1], apunta: m[2] })
+    }
+  }
+  return out
+}
+
+describe('el doble hace cumplir las llaves foráneas de la base', () => {
+  it('el doble declara todas las llaves de la base entre sus tablas', () => {
+    const base = llavesDeLaBase()
+    expect(base.length).toBeGreaterThan(100) // el lector de los tipos no se rompió en silencio
+    const delDoble = new Set(Object.keys(esquemaDelDoble()))
+    const declaradas = new Set(LLAVES.map(l => `${l.tabla}.${l.columna}->${l.apunta}`))
+    const faltan = base
+      .filter(l => delDoble.has(l.tabla) && delDoble.has(l.apunta))
+      .map(l => `${l.tabla}.${l.columna}->${l.apunta}`)
+      .filter(k => !declaradas.has(k))
+    expect(faltan).toEqual([])
+  })
+
+  it('frena una fila que apunta a otra que todavía no existe (como la base)', async () => {
+    const a = crearAlmacenDoble()
+    await expect(a.insertar('workspaces', [{ id: 'dddddddd-0000-4000-8000-000000000009', slug: 'x', linea_activa_id: 'no-existe' }]))
+      .rejects.toThrow(/workspaces_linea_activa_id_fkey/)
+    expect(a.estado.workspaces.some(w => w.slug === 'x')).toBe(false)
+  })
+
+  it('el workspace nace sin línea activa y la recibe cuando la línea ya existe', async () => {
+    const a = crearAlmacenDoble()
+    const plan = await aplicar(a)
+    const [lineaCopia] = filasDe(plan, 'lineas_negocio')
+    expect(filasDe(plan, 'workspaces')[0].linea_activa_id).toBeNull()
+    const iInsertaLinea = plan.pasos.findIndex(p => p.tipo === 'insertar' && p.tabla === 'lineas_negocio')
+    const iFija = plan.pasos.findIndex(p => p.tipo === 'actualizar' && p.tabla === 'workspaces' && 'linea_activa_id' in p.patch)
+    expect(iFija).toBeGreaterThan(iInsertaLinea)
+    expect(a.estado.workspaces.find(w => w.id === plan.destino.id)?.linea_activa_id).toBe(lineaCopia.id)
+  })
+
+  it('una referencia hacia adelante en las semillas también se difiere (tarifa aceptada)', async () => {
+    const a = crearAlmacenDoble()
+    await crearUsuarios(a, CORREO, 'trappvel-pruebas')
+    // El caso trae la tarifa aceptada: la cotización se inserta antes que sus tarifas.
+    const conLaTarifa = (t: Record<string, Fila[]>) => ({
+      ...t,
+      cotizaciones: t.cotizaciones.map(c => ({ ...c, tarifa_aceptada_id: t.cotizacion_itinerarios[0].id })),
+    })
+    const conTarifa = await planificar(a, opciones({ caso: {
+      ...caso,
+      tablas: { 'caso-fijo': conLaTarifa(caso.tablas['caso-fijo']), 'flujo-nuevo': conLaTarifa(caso.tablas['flujo-nuevo']) },
+    } }))
+    expect(filasDe(conTarifa, 'cotizaciones').every(c => c.tarifa_aceptada_id === null)).toBe(true)
+    await ejecutar(a, conTarifa)
+    const escrita = a.estado.cotizaciones.filter(c => c.workspace_id === conTarifa.destino.id && c.tarifa_aceptada_id != null)
+    expect(escrita.length).toBeGreaterThan(0)
+    expect(escrita.every(c => a.estado.cotizacion_itinerarios.some(t => t.id === c.tarifa_aceptada_id && t.cotizacion_id === c.id))).toBe(true)
+  })
+
+  it('si una escritura falla a mitad de camino, deshacer no deja nada', async () => {
+    const a = crearAlmacenDoble()
+    const creados = await crearUsuarios(a, CORREO, 'trappvel-pruebas')
+    const plan = await planificar(a, opciones())
+    const origen = JSON.stringify(Object.fromEntries(Object.entries(crearAlmacenDoble().estado)))
+    // Una etapa que apunta a una línea que no existe: la base la frena después de crear el workspace.
+    const etapas = plan.pasos.find(p => p.tipo === 'insertar' && p.tabla === 'etapas_negocio')!
+    if (etapas.tipo === 'insertar') etapas.filas[0].linea_id = 'no-existe'
+    await expect(ejecutar(a, plan)).rejects.toThrow(/etapas_negocio_linea_id_fkey/)
+    const inf = await deshacer(a, { origen: 'trappvel', destino: 'trappvel-pruebas', correoBase: CORREO }, creados)
+    expect(inf.residuo).toEqual({})
+    expect(inf.workspaceBorrado).toBe(true)
+    expect(a.usuarios).toHaveLength(0)
+    expect(JSON.stringify(Object.fromEntries(Object.entries(a.estado)))).toBe(origen)
   })
 })
 

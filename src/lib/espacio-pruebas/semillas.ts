@@ -166,7 +166,8 @@ export function filasDeSemilla(def: DefSemilla, numero: number, ctx: CtxSemilla,
   }
 
   if (!conCotizacion) {
-    Object.assign(cotizacion, { valor_total: 0, costo_total: 0, descuento_valor: 0 })
+    // Sin ítems ni tarifas: la tarifa aceptada del caso no tendría a qué apuntar.
+    Object.assign(cotizacion, { valor_total: 0, costo_total: 0, descuento_valor: 0, tarifa_aceptada_id: null })
     return salida
   }
 

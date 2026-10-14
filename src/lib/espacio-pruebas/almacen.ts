@@ -44,15 +44,27 @@ function cumple(f: Fila, filtros: Filtro[]): boolean {
   )
 }
 
+/** Una llave foránea del doble. `alBorrar` es la acción de la base (por defecto, frena). */
+export interface LlaveForanea {
+  tabla: string
+  columna: string
+  apunta: string
+  alBorrar?: 'restrict' | 'set null' | 'cascade'
+}
+
 /**
  * El doble en memoria. `esquema` dice qué columnas tiene cada tabla (lo que en la base da
- * PostgREST); `llaves` declara las llaves foráneas que el doble hace cumplir al borrar, para
- * que el orden del borrado se pruebe de verdad y no por suerte.
+ * PostgREST); `llaves` declara las llaves foráneas que el doble hace cumplir AL ESCRIBIR
+ * (insertar, guardar, actualizar: al cierre de la sentencia, como Postgres con una llave no
+ * diferible) y AL BORRAR (frena, anula o borra en cascada según `alBorrar`), para que el orden
+ * de la escritura y del borrado se prueben de verdad y no por suerte. Antes solo las cumplía
+ * al borrar, y el primer `--apply` contra la base cayó por `workspaces.linea_activa_id`
+ * apuntando a una línea que todavía no existía (2026-10-14).
  */
 export function almacenEnMemoria(opts: {
   tablas: Record<string, Fila[]>
   esquema: Record<string, string[]>
-  llaves?: { tabla: string; columna: string; apunta: string }[]
+  llaves?: LlaveForanea[]
   usuarios?: { id: string; correo: string }[]
   archivos?: { bucket: string; ruta: string }[]
   /** Lo que en la base hacen los triggers (sembrar al crear un workspace, registrar al borrar una etapa). */
@@ -68,6 +80,20 @@ export function almacenEnMemoria(opts: {
   let n = 0
   const filas = (t: string) => (estado[t] ??= [])
 
+  /** Lo que Postgres diría al cierre de la sentencia si alguna fila escrita apunta a la nada. */
+  const violacion = (tabla: string, escritas: Fila[]): string | null => {
+    for (const l of llaves.filter(k => k.tabla === tabla)) {
+      for (const f of escritas) {
+        const v = f[l.columna]
+        if (v == null) continue
+        if (!filas(l.apunta).some(x => x.id === v)) {
+          return `insert or update on table "${tabla}" violates foreign key constraint "${tabla}_${l.columna}_fkey"`
+        }
+      }
+    }
+    return null
+  }
+
   return {
     estado,
     usuarios,
@@ -79,26 +105,45 @@ export function almacenEnMemoria(opts: {
       return filas(tabla).filter(f => cumple(f, filtros)).length
     },
     async insertar(tabla, nuevas) {
-      for (const f of nuevas) {
-        filas(tabla).push({ ...f })
-        opts.disparadores?.alInsertar?.(tabla, f, estado)
+      // Una sentencia: todas las filas entran y la llave se revisa al final (una fila puede
+      // apuntar a otra del mismo lote). Si falla, no queda ninguna.
+      const copias = nuevas.map(f => ({ ...f }))
+      filas(tabla).push(...copias)
+      const error = violacion(tabla, copias)
+      if (error) {
+        estado[tabla] = filas(tabla).filter(f => !copias.includes(f))
+        throw new Error(`insertar ${tabla}: ${error}`)
       }
+      for (const f of nuevas) opts.disparadores?.alInsertar?.(tabla, f, estado)
     },
     async actualizar(tabla, id, patch) {
-      for (const f of filas(tabla)) if (f.id === id) Object.assign(f, patch)
+      const van = filas(tabla).filter(f => f.id === id)
+      const error = violacion(tabla, van.map(f => ({ ...f, ...patch })))
+      if (error) throw new Error(`actualizar ${tabla}: ${error}`)
+      for (const f of van) Object.assign(f, patch)
     },
     async guardar(tabla, fila, conflicto = 'id') {
       const previa = filas(tabla).find(f => f[conflicto] === fila[conflicto])
+      const error = violacion(tabla, [{ ...(previa ?? {}), ...fila }])
+      if (error) throw new Error(`guardar ${tabla}: ${error}`)
       if (previa) Object.assign(previa, fila)
       else filas(tabla).push({ id: `fila-${++n}`, ...fila })
     },
     async borrar(tabla, filtros) {
       const van = filas(tabla).filter(f => cumple(f, filtros))
       const ids = new Set(van.map(f => f.id))
-      for (const l of llaves.filter(k => k.apunta === tabla)) {
-        if (filas(l.tabla).some(f => ids.has(f[l.columna]))) {
+      const hijas = (l: LlaveForanea) => filas(l.tabla).filter(f => ids.has(f[l.columna]) && !(l.tabla === tabla && van.includes(f)))
+      for (const l of llaves.filter(k => k.apunta === tabla && (k.alBorrar ?? 'restrict') === 'restrict')) {
+        if (hijas(l).length) {
           return { borradas: 0, error: { code: '23503', message: `${l.tabla}.${l.columna} apunta a ${tabla}` } }
         }
+      }
+      for (const l of llaves.filter(k => k.apunta === tabla && k.alBorrar === 'set null')) {
+        for (const f of hijas(l)) f[l.columna] = null
+      }
+      for (const l of llaves.filter(k => k.apunta === tabla && k.alBorrar === 'cascade')) {
+        const cascada = hijas(l)
+        if (cascada.length) estado[l.tabla] = filas(l.tabla).filter(f => !cascada.includes(f))
       }
       estado[tabla] = filas(tabla).filter(f => !van.includes(f))
       for (const f of van) opts.disparadores?.alBorrar?.(tabla, f, estado)

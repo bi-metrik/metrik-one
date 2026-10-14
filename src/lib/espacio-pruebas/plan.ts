@@ -97,6 +97,43 @@ const COLUMNAS_QUE_SE_ANULAN: Record<string, string[]> = {
   lineas_negocio: ['drive_folder_id'],
 }
 
+/**
+ * Columnas con llave foránea hacia una fila que el plan inserta DESPUÉS, o hacia la misma
+ * tabla. Se insertan en null y se fijan con un UPDATE al final, cuando todo existe. Una llave
+ * no diferible se revisa al cierre de cada sentencia, así que el orden de los inserts no basta.
+ *
+ * Mordió el 2026-10-14: `workspaces.linea_activa_id` apunta a `lineas_negocio`, y la línea
+ * copiada cuelga del workspace (`lineas_negocio.workspace_id`). Es circular: ningún orden de
+ * inserts la resuelve, y el primer `--apply` contra la base cayó en el insert del workspace.
+ * Las demás no se escriben hoy con valor, pero la semilla copia la cotización del caso tal cual
+ * y el script parte los inserts en trozos: quedan cubiertas para que no muerdan después.
+ */
+const REFERENCIAS_DIFERIDAS: Readonly<Record<string, readonly string[]>> = {
+  workspaces: ['linea_activa_id'], // → lineas_negocio, hija del workspace
+  cotizaciones: ['tarifa_aceptada_id', 'duplicada_de'], // → cotizacion_itinerarios (hija de la cotización) / a sí misma
+  items: ['opcion_de'], // → items
+  contactos: ['fuente_promotor_id'], // → contactos
+}
+
+/** Saca de los inserts las referencias de `REFERENCIAS_DIFERIDAS` y las fija al final. */
+function diferirReferencias(pasos: Paso[]): Paso[] {
+  const fijar: Paso[] = []
+  const out = pasos.map(p => {
+    const columnas = REFERENCIAS_DIFERIDAS[p.tabla]
+    if (p.tipo !== 'insertar' || !columnas) return p
+    const filas = p.filas.map(f => {
+      const patch: Fila = {}
+      for (const c of columnas) if (f[c] != null) patch[c] = f[c]
+      if (!Object.keys(patch).length) return f
+      if (typeof f.id !== 'string') throw new Error(`${p.tabla}: una fila con ${Object.keys(patch).join(', ')} no tiene id para fijarla después.`)
+      fijar.push({ tipo: 'actualizar', tabla: p.tabla, id: f.id, patch })
+      return { ...f, ...Object.fromEntries(Object.keys(patch).map(c => [c, null])) }
+    })
+    return { ...p, filas }
+  })
+  return [...out, ...fijar]
+}
+
 /** Qué filas de cada tabla copiada se leen del origen. */
 function filtroDeCopia(tabla: string, origenId: string, ids: Record<string, string[]>): Filtro[] {
   switch (tabla) {
@@ -268,7 +305,7 @@ export async function planificar(a: Almacen, o: OpcionesPlan): Promise<Plan> {
         stages_activos: origen.stages_activos ?? null,
         proyecto_modules: origen.proyecto_modules ?? null,
         profession: origen.profession ?? null,
-        linea_activa_id: lineaActiva,
+        linea_activa_id: lineaActiva, // circular con lineas_negocio: va en null y se fija al final (REFERENCIAS_DIFERIDAS)
         modules: modulos.copiados,
         config_extra: {
           ...cfg,
@@ -335,7 +372,7 @@ export async function planificar(a: Almacen, o: OpcionesPlan): Promise<Plan> {
   // ── Semillas ───────────────────────────────────────────────────────────────
   pasos.push(...(await pasosDeSemillas(a, o, { wsId, existe: !!previo, lineas, etapas, bloques, asesoraStaffId: asesora.staffId }, informe)))
 
-  return { origen: { id: String(origen.id), slug: o.origen }, destino: { id: wsId, slug: o.destino, existe: !!previo }, usuarios, pasos, informe }
+  return { origen: { id: String(origen.id), slug: o.origen }, destino: { id: wsId, slug: o.destino, existe: !!previo }, usuarios, pasos: diferirReferencias(pasos), informe }
 }
 
 function pasosDeUsuarios(usuarios: Plan['usuarios'], wsId: string, perfilDe: (u: Plan['usuarios'][number]) => string): Paso[] {
