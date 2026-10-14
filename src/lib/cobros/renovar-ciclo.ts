@@ -43,7 +43,13 @@ export const MODULOS_CON_RENOVACION_AUTOMATICA = ['valida_consulta'] as const
 /** La cuota siguiente se crea cuando la última vence dentro de estos días. */
 export const HORIZONTE_RENOVACION_DIAS = 30
 
-/** Una cuota vencida hace más de estos días sin pagar frena la renovación. La gracia de la mora. */
+/**
+ * Una cuota vencida hace más de estos días sin pagar frena la renovación. Se queda en 5 aunque la
+ * gracia de Valida en autoservicio sea 10 (`DIAS_GRACIA_CICLO`, decisión del 2026-10-14): no corta el
+ * servicio, solo deja de CREAR la cuota del mes siguiente a quien debe (el lado de no cobrar), y se
+ * levanta sola en la corrida siguiente al pago. Aplica también a los 4 CDA. Subirla a 10 dejaría
+ * nacer más cuotas para cuentas que van camino de la suspensión.
+ */
 export const DIAS_GRACIA_RENOVACION = 5
 
 /** Tipo de las cuotas de la serie mensual. Las demás (anticipo, usuarios adicionales) no se renuevan. */

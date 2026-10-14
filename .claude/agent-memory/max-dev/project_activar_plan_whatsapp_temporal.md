@@ -1,17 +1,23 @@
 ---
 name: project-activar-plan-whatsapp-temporal
-description: «Activar plan» de Valida abre WhatsApp de MéTRIK (enlaceActivarPlan) mientras #1107 no esté en main; /suscripcion da 404 en espacios de prueba
+description: «Activar plan» de Valida — #1160 lo mandó a WhatsApp por un 404; la pila #1104→#1107 lo devuelve a /valida/activar y deja el WhatsApp solo como respaldo con la activación cerrada
 metadata:
   type: project
 ---
 
-Desde 2026-10-14, «Activar plan» (corte de bolsa y contador de saldo en /valida) abre wa.me/573159509103 con
-«Hola, quiero activar el plan de Valida para <workspaces.name o slug>», vía `enlaceActivarPlan(espacio)` en
-`src/lib/valida/corte-bolsa.ts`. Reemplazó `RUTA_ACTIVAR_PLAN = '/suscripcion'`.
+#1160 (2026-10-14, d1f39037) hizo que «Activar plan» abriera wa.me/573159509103 porque `/suscripcion` da 404
+a un espacio de la prueba (sin contrato) y `/valida/activar` aún no estaba en main.
 
-**Why:** el registro autogestionado ya estaba abierto y promocionado; `/suscripcion` responde 404 a un espacio
-sin contrato (la prueba), y la activación real (`/valida/activar`, PR #1107) no estaba en main.
+Resolución en la pila (merge de main del 2026-10-14, sin force):
+- #1104: `accionDelCorte(esPrueba, espacio)` sigue mandando la prueba al WhatsApp (en #1104 no existe
+  `/valida/activar`; si #1104 entra solo a main no vuelve el 404).
+- #1107: `accionDelCorte(esPrueba)` → `RUTA_ACTIVAR_PLAN = '/valida/activar'`; se retiró la prop `espacio` de
+  page.tsx/valida-client.tsx. `enlaceActivarPlan(razon_social)` queda SOLO en `/valida/activar` cuando
+  `activacionAbierta()` es falso (VALIDA_ACTIVACION_ABIERTA apagada), junto al correo.
 
-**How to apply:** #1107 choca en las mismas líneas (corte-bolsa.ts final y activa-tu-plan.tsx). Al rebasarlo,
-gana #1107 (`accionDelCorte` + `/valida/activar`, de vuelta a `<Link>`); se puede quitar la prop `espacio`
-que baja de page.tsx → ValidaClient → ConsultaMasivaForm → ResumenCargueCompletado. Ver [[project-valida-alta-autogestionada]].
+**Why:** Mauricio quiere que activar genere el cobro con la tarjeta registrada, no un chat.
+
+**How to apply:** con tarjeta registrada (`valida_registros.cobro_estado`), el botón NO cobra al clic:
+responde `cobro_al_terminar_prueba` y el cobro sale al día 7 por el cron `valida-cobro-prueba` (Términos
+3.5/16.6 «nunca antes»). Si Mauricio pide cobro al clic, es cambio de Términos (Emilio/Vera), no de código.
+Ver [[project-valida-alta-autogestionada]].

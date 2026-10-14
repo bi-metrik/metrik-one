@@ -82,6 +82,7 @@ async function resolver(): Promise<EntradaSuscripcion> {
       modificaciones: [],
       modificacion: null,
       restriccionDesde: null,
+      autoservicio: false,
       usuarioDelCliente: false,
     },
   }

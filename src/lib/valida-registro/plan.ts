@@ -4,20 +4,16 @@
  * `18-recorrido-baja-friccion.md`, PR 5 a 7. Lo que decide este archivo:
  *
  *   1. **Cuánto cabe en un mes.** El plan de $150.000 (decisión F, precio único) trae un LÍMITE
- *      TÉCNICO de consultas por mes: 3.000 por defecto (Mauricio, 2026-10-11). No es un paquete con
- *      excedente: al llegar al límite Valida responde `402 bolsa_agotada` hasta el ciclo siguiente.
- *      Es configurable sin PR, en este orden:
- *        a. `servicios_contratados.parametros.limite_consultas_mes` del contrato (lo pactado con ESE
- *           cliente: subirle el límite a uno es editar su contrato, con su fila en la bitácora);
- *        b. `VALIDA_PLAN_LIMITE_MES` en el entorno (el valor para todos los contratos que no lo traen);
- *        c. 3.000.
- *      Un valor fuera de [1, 20.000] se ignora y cae al siguiente: Valida topa el pedido en 20.000.
+ *      TÉCNICO de 3.000 consultas por mes (Mauricio, 2026-10-11). No es un paquete con excedente: al
+ *      llegar al límite Valida responde `402 bolsa_agotada` hasta el ciclo siguiente.
+ *      FIJO EN EL CÓDIGO (fila 23 de Vera, 2026-10-12): lo prometen las Condiciones (7.1) y los
+ *      Términos de autoservicio, así que ni `parametros.limite_consultas_mes` del contrato ni una
+ *      variable de entorno lo cambian. Cambiarlo es un PR con una versión nueva de esos textos.
  *
  *   2. **Qué ciclo abre un pago.** Cada cuota pagada abre en Valida UNA bolsa de `limite` consultas
  *      con la referencia `one-ciclo:<cobro>` (idempotente: el mismo pago dos veces abre una sola). La
- *      bolsa vence al terminar el período que paga la cuota MÁS los 5 días de gracia de la mora
- *      (`DIAS_GRACIA` del cron, los mismos de los Términos): quien paga el día 3 de su período no
- *      queda cortado el día 1 del siguiente mientras su enlace todavía está en plazo.
+ *      bolsa vence al terminar el período que paga la cuota MÁS `DIAS_GRACIA_CICLO`: quien paga el
+ *      día 3 de su período no queda cortado el día 1 del siguiente mientras su enlace está en plazo.
  *
  *   3. **Que el pago no quede cortado el día 7.** La llave de la prueba vence con la prueba. Abrir el
  *      primer ciclo le quita el vencimiento a esa misma llave (no se cambia por otra: una llave nueva
@@ -25,6 +21,7 @@
  *      hace Valida en `POST /api/one/v1/autogestion/{cliente}/ciclos`.
  */
 
+/** Las 3.000 consultas al mes del plan (Condiciones 7.1, Términos 4.5). Fijo: ver la cabecera. */
 export const LIMITE_CONSULTAS_MES_POR_DEFECTO = 3000
 /** El mismo tope del lado de Valida: un pedido mayor lo rechaza. */
 export const TOPE_LIMITE_CONSULTAS_MES = 20_000
@@ -34,32 +31,64 @@ export const PRECIO_MENSUAL_VALIDA = 150_000
 /** Usuarios incluidos, como los CDA de hoy (`CUPOS_VALIDA` del registro). */
 export const LICENCIAS_INCLUIDAS = 2
 
-/** Los días de gracia de la mora: `DIAS_GRACIA` del cron `procesar-planes-cobro` y de los Términos. */
-export const DIAS_GRACIA_CICLO = 5
+/**
+ * Los días que una cuenta autogestionada sigue consultando después de que vence una cuota sin pagar,
+ * antes de suspenderse: 10, decisión de Mauricio del 2026-10-14 con el calendario de Carmen
+ * (`crecimiento-mrr/28-carmen-piso-epayco-y-gracia.md` §2.3). Es el `{N}` de los Términos de
+ * autoservicio (3.6 y 11.1): si cambia, cambia ahí con el MISMO número.
+ *
+ * ES LA ÚNICA PERILLA del calendario de mora (`CALENDARIO_MORA`): la usan el vencimiento de la bolsa
+ * (`cicloDeCuota`), los reintentos con la tarjeta (`cobro-token-servidor.ts`) y el aviso de suspensión
+ * (`suspension-servidor.ts`).
+ *
+ * No es `DIAS_GRACIA` del cron `procesar-planes-cobro` (5): aquel marca como vencidos los cobros de
+ * TODOS los productos para el equipo de MeTRIK y no corta el servicio de Valida. Tampoco
+ * `DIAS_GRACIA_RENOVACION` (5): ese frena crear la cuota del mes siguiente a quien debe, que es el lado
+ * de no cobrar, y aplica también a los 4 CDA.
+ */
+export const DIAS_GRACIA_CICLO = 10
 
-function enteroEnRango(v: unknown, min: number, max: number): number | null {
-  const n = typeof v === 'number' ? v : typeof v === 'string' && v.trim() !== '' ? Number(v) : NaN
-  return Number.isInteger(n) && n >= min && n <= max ? n : null
+/**
+ * El calendario de mora de una cuota mensual (de la 2 en adelante) cobrada con la tarjeta, contado en
+ * días calendario desde su vencimiento (día 0). Carmen §2.3:
+ *   - día 0: cobro; si se rechaza, correo con el enlace de pago (paso 6 del cron);
+ *   - días 3 y 7: reintento con la misma tarjeta;
+ *   - día 7: aviso de suspensión;
+ *   - día `DIAS_GRACIA_CICLO` (10): se suspenden las consultas nuevas (vence la bolsa del mes pagado).
+ * El primer cobro, al cumplirse los 7 días de la prueba, no tiene reintentos (Condiciones 7.5).
+ */
+export const CALENDARIO_MORA = {
+  /** El día de cada intento con la tarjeta: el índice es `cobro_intentos_tarjeta.intento`. */
+  intentos: [0, 3, 7] as const,
+  avisoSuspension: 7,
+  suspension: DIAS_GRACIA_CICLO,
+} as const
+
+/**
+ * Qué intento con la tarjeta toca hoy a una cuota vencida hace `dias` días, o `null`. Un intento cuyo
+ * día pasó sin correr (el cron estuvo caído) se hace al día siguiente, mientras no llegue el siguiente
+ * intento; desde la suspensión no se intenta nada.
+ */
+export function intentoDelDia(dias: number): number | null {
+  if (!Number.isInteger(dias) || dias < 0 || dias >= CALENDARIO_MORA.suspension) return null
+  let actual: number | null = null
+  CALENDARIO_MORA.intentos.forEach((d, i) => {
+    if (dias >= d) actual = i
+  })
+  return actual
 }
 
-/** El límite de consultas por mes de un contrato (ver la cabecera, punto 1). */
-export function limiteConsultasMes(
-  parametros: Record<string, unknown> | null | undefined,
-  env: Record<string, string | undefined> = process.env,
-): number {
-  return (
-    enteroEnRango(parametros?.limite_consultas_mes, 1, TOPE_LIMITE_CONSULTAS_MES) ??
-    enteroEnRango(env.VALIDA_PLAN_LIMITE_MES, 1, TOPE_LIMITE_CONSULTAS_MES) ??
-    LIMITE_CONSULTAS_MES_POR_DEFECTO
-  )
+/** El límite de consultas por mes de una cuenta autogestionada: siempre el de los textos. */
+export function limiteConsultasMes(): number {
+  return LIMITE_CONSULTAS_MES_POR_DEFECTO
 }
 
 /**
  * Los parámetros con que nace el contrato al activar el plan. `dias_trial: 0` a propósito: la
- * prueba ya pasó (10 consultas, 7 días); el enrolamiento por ciclo (`enrolar-ciclo.ts`) lee el del
- * contrato antes que el de la ficha, y con 0 la cuota 1 vence el día en que se aceptan los Términos.
+ * prueba ya pasó (10 consultas, 7 días). Con el cobro al cumplirse los 7 días, la cuota 1 vence el
+ * día del primer cobro (`cobro-prueba-servidor.ts` enrola con ese día como ancla, fila 22 de Vera).
  */
-export function parametrosDelPlan(env: Record<string, string | undefined> = process.env): {
+export function parametrosDelPlan(): {
   precio_mensual: number
   licencias: number
   dias_trial: number
@@ -69,7 +98,7 @@ export function parametrosDelPlan(env: Record<string, string | undefined> = proc
     precio_mensual: PRECIO_MENSUAL_VALIDA,
     licencias: LICENCIAS_INCLUIDAS,
     dias_trial: 0,
-    limite_consultas_mes: limiteConsultasMes(null, env),
+    limite_consultas_mes: limiteConsultasMes(),
   }
 }
 

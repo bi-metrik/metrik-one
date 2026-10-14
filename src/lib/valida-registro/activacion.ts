@@ -54,6 +54,7 @@ export type ErrorActivacion =
   | 'parametros_invalidos'
   | 'nit_con_contrato'
   | 'terminos_incompletos'
+  | 'cobro_al_terminar_prueba'
   | 'pdf'
   | 'error'
 
@@ -68,6 +69,8 @@ export function textoErrorActivacion(e: ErrorActivacion): string {
     case 'no_es_duena':
     case 'usuario_ajeno':
       return 'Solo la persona que abrió la prueba puede activar el plan de la empresa.'
+    case 'cobro_al_terminar_prueba':
+      return 'Tu plan se activa solo al terminar la prueba, con el cobro a la tarjeta que registraste. No tienes que hacer nada; si no quieres seguir, cancela la prueba antes de esa fecha.'
     case 'nit_con_contrato':
       return 'No pudimos activar el plan en línea para esta empresa. Escríbenos a mauricio.moreno@metrik.com.co y lo revisamos contigo.'
     default:

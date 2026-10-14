@@ -75,6 +75,12 @@ export interface ResumenEnlacesAutomaticos {
   /** La generación las rechazó por una razón esperada (cubierta con pagos anteriores, etc.). */
   omitidas: { cuotaId: string; motivo: string }[]
   errores: { cuotaId: string; error: string }[]
+  /**
+   * Cuotas de planes que cobran con la tarjeta guardada (pasarela `epayco`) que NO reciben enlace:
+   * la tarjeta todavía no las rechazó. Un enlace antes invitaría a pagar dos veces lo que la tarjeta
+   * cobra sola. Después del rechazo sí lo reciben (Carmen §2.3, día 0).
+   */
+  conTarjetaSinRechazo: number
 }
 
 const FROM_AVISO = 'MéTRIK · Facturación <facturacion@metrikone.co>'
@@ -127,6 +133,7 @@ export async function generarEnlacesAutomaticos(
     descartadas: { pagada: 0, anulada: 0, enlace_vigente: 0 },
     omitidas: [],
     errores: [],
+    conTarjetaSinRechazo: 0,
   }
 
   // 1. Contratos de servicio que siguen cobrando.
@@ -221,6 +228,29 @@ export async function generarEnlacesAutomaticos(
     ahoraMs: p.ahoraMs,
   })
   for (const d of seleccion.descartadas) resumen.descartadas[d.motivo] += 1
+
+  // 3a. Las cuotas que la tarjeta guardada ya rechazó: las de un plan que sigue en la tarjeta (cuota 2
+  // en adelante) y las del primer cobro, cuyo plan volvió al enlace (Condiciones 7.5). Su correo dice
+  // que la tarjeta no pasó (Términos 3.6: «METRIK lo informa al correo de notificaciones»).
+  const conTarjeta = new Set(planes.filter((x) => x.pasarela === 'epayco').map((x) => x.id))
+  const planesCandidatos = [...new Set(seleccion.candidatas.map((c) => c.planCobroId))]
+  let rechazadas = new Set<string>()
+  if (planesCandidatos.length > 0) {
+    const rech = await db
+      .from('cobro_intentos_tarjeta')
+      .select('plan_cobro_id, numero_cuota')
+      .in('plan_cobro_id', planesCandidatos)
+      .eq('resultado', 'rechazado')
+    // Sin poder leer los rechazos (la tabla aún no existe), ninguna cuota con tarjeta recibe enlace.
+    rechazadas = new Set(
+      rech.error ? [] : ((rech.data ?? []) as { plan_cobro_id: string; numero_cuota: number }[]).map((f) => `${f.plan_cobro_id}|${f.numero_cuota}`),
+    )
+  }
+  if (conTarjeta.size > 0) {
+    const antes = seleccion.candidatas.length
+    seleccion.candidatas = seleccion.candidatas.filter((c) => !conTarjeta.has(c.planCobroId) || rechazadas.has(`${c.planCobroId}|${c.numero}`))
+    resumen.conTarjetaSinRechazo = antes - seleccion.candidatas.length
+  }
   resumen.candidatas = seleccion.candidatas.length
 
   // 3b. Solo en día hábil del país del cliente que paga (decisión de Mauricio, 2026-09-27).
@@ -257,7 +287,7 @@ export async function generarEnlacesAutomaticos(
       continue
     }
 
-    const aviso = await avisarEnlaceGenerado(db, deps, cand, r, contratos, p)
+    const aviso = await avisarEnlaceGenerado(db, deps, cand, r, contratos, { ...p, tarjetaRechazada: rechazadas.has(`${cand.planCobroId}|${cand.numero}`) })
     await registrarActividad(
       db,
       {
@@ -319,7 +349,7 @@ async function avisarEnlaceGenerado(
   cand: CuotaCandidata,
   r: Extract<ResultadoEnlaceCuota, { ok: true }>,
   contratos: readonly FilaContrato[],
-  p: { hoy: string; ahoraMs: number },
+  p: { hoy: string; ahoraMs: number; tarjetaRechazada: boolean },
 ): Promise<{ estado: EstadoAviso; motivo: string | null }> {
   const registrar = async (fila: { estado: EstadoAviso; destino?: string | null; titulo?: string | null; motivo?: string | null; proveedorId?: string | null }) => {
     const ins = await db.from('avisos_cliente').insert({
@@ -366,6 +396,7 @@ async function avisarEnlaceGenerado(
     hoy: p.hoy,
     enlaceExpira: r.expira,
     urlSuscripcion: (deps.urlSuscripcion ?? urlSuscripcionPorDefecto)(slug),
+    tarjetaRechazada: p.tarjetaRechazada,
   }
   const asunto = asuntoAvisoEnlace(datos)
   const envio = await (deps.enviarCorreo ?? enviarPorResend)({

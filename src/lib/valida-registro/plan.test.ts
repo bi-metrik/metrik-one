@@ -5,6 +5,9 @@ import {
   configConPlan,
   esEspacioAutogestion,
   limiteConsultasMes,
+  intentoDelDia,
+  CALENDARIO_MORA,
+  DIAS_GRACIA_CICLO,
   parametrosDelPlan,
   planDeConfig,
   referenciaCiclo,
@@ -12,40 +15,28 @@ import {
 } from './plan'
 
 describe('el límite de consultas del mes', () => {
-  it('3.000 por defecto', () => {
-    expect(limiteConsultasMes(null, {})).toBe(3000)
-    expect(limiteConsultasMes({}, {})).toBe(3000)
-  })
-  it('el contrato manda sobre el entorno, y el entorno sobre el defecto', () => {
-    expect(limiteConsultasMes({ limite_consultas_mes: 5000 }, { VALIDA_PLAN_LIMITE_MES: '4000' })).toBe(5000)
-    expect(limiteConsultasMes({}, { VALIDA_PLAN_LIMITE_MES: '4000' })).toBe(4000)
-    expect(limiteConsultasMes({ limite_consultas_mes: '2500' }, {})).toBe(2500)
-  })
-  it('fuera de rango o mal escrito se ignora (Valida topa en 20.000)', () => {
-    expect(limiteConsultasMes({ limite_consultas_mes: 20_001 }, {})).toBe(3000)
-    expect(limiteConsultasMes({ limite_consultas_mes: 0 }, { VALIDA_PLAN_LIMITE_MES: 'mucho' })).toBe(3000)
-    expect(limiteConsultasMes({ limite_consultas_mes: 12.5 }, { VALIDA_PLAN_LIMITE_MES: '20000' })).toBe(20_000)
+  it('3.000 fijo: ni el contrato ni el entorno lo cambian (fila 23 de Vera)', () => {
+    expect(limiteConsultasMes()).toBe(3000)
   })
 })
 
 describe('los parámetros con que nace el contrato', () => {
-  it('$150.000, 2 usuarios, sin trial (la prueba ya pasó) y el límite del entorno', () => {
-    expect(parametrosDelPlan({})).toEqual({ precio_mensual: 150_000, licencias: 2, dias_trial: 0, limite_consultas_mes: 3000 })
-    expect(parametrosDelPlan({ VALIDA_PLAN_LIMITE_MES: '3500' }).limite_consultas_mes).toBe(3500)
+  it('$150.000, 2 usuarios, sin trial (la prueba ya pasó) y 3.000 consultas', () => {
+    expect(parametrosDelPlan()).toEqual({ precio_mensual: 150_000, licencias: 2, dias_trial: 0, limite_consultas_mes: 3000 })
   })
 })
 
 describe('el ciclo que abre una cuota pagada', () => {
   const ahora = new Date('2026-10-20T15:00:00Z')
-  it('el período empieza el día del vencimiento y la bolsa vence al terminar + 5 días de gracia, medianoche de Bogotá', () => {
+  it('el período empieza el día del vencimiento y la bolsa vence al terminar + 10 días de gracia, medianoche de Bogotá', () => {
     expect(cicloDeCuota('2026-10-18', ahora)).toEqual({
       desde: '2026-10-18',
       hasta: '2026-11-17',
-      venceEn: '2026-11-23T05:00:00.000Z',
+      venceEn: '2026-11-28T05:00:00.000Z',
     })
   })
   it('el 31 no salta de mes', () => {
-    expect(cicloDeCuota('2027-01-31', ahora)).toMatchObject({ desde: '2027-01-31', hasta: '2027-02-27', venceEn: '2027-03-05T05:00:00.000Z' })
+    expect(cicloDeCuota('2027-01-31', ahora)).toMatchObject({ desde: '2027-01-31', hasta: '2027-02-27', venceEn: '2027-03-10T05:00:00.000Z' })
   })
   it('un pago tan tardío que el ciclo ya terminó no abre una bolsa vencida: dura un día', () => {
     const tarde = new Date('2027-03-01T12:00:00Z')
@@ -87,5 +78,18 @@ describe('qué pago abre ciclo', () => {
     expect(esEspacioAutogestion({ origen_registro: 'valida_autogestion' })).toBe(true)
     expect(esEspacioAutogestion({ modo_vitrina: true })).toBe(false)
     expect(esEspacioAutogestion(null)).toBe(false)
+  })
+})
+
+describe('el calendario de mora (Carmen, decisión de Mauricio del 2026-10-14)', () => {
+  it('10 días de gracia: suspensión el día 10, aviso el 7', () => {
+    expect(DIAS_GRACIA_CICLO).toBe(10)
+    expect(CALENDARIO_MORA).toMatchObject({ intentos: [0, 3, 7], avisoSuspension: 7, suspension: 10 })
+  })
+  it('el intento de cada día: 0 los días 0 a 2, 1 los días 3 a 6, 2 los días 7 a 9, ninguno desde el 10', () => {
+    expect([0, 1, 2].map(intentoDelDia)).toEqual([0, 0, 0])
+    expect([3, 4, 6].map(intentoDelDia)).toEqual([1, 1, 1])
+    expect([7, 9].map(intentoDelDia)).toEqual([2, 2])
+    expect([10, 30, -1].map(intentoDelDia)).toEqual([null, null, null])
   })
 })

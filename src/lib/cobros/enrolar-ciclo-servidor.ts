@@ -48,6 +48,23 @@ export interface DepsEnrolamiento {
    * Mismas reglas, misma función de la base: solo se angosta la lectura.
    */
   contratoId?: string
+  /**
+   * Solo con `contratoId`: el ancla de la primera cuota en vez de la aceptación más vieja. La usa el
+   * cobro al cumplirse los 7 días de la prueba de Valida (`cobro-prueba-servidor.ts`): los Términos se
+   * aceptan en el registro, 7 días antes, y anclar ahí pondría la cuota 1 antes del primer cobro y la
+   * del mes 2 a los 23 días (fila 22 de Vera: la cuota 1 es el día del primer cobro). Igual exige que
+   * haya una aceptación.
+   */
+  anclaAt?: string
+}
+
+/**
+ * Un contrato que cobra al cumplirse los 7 días de la prueba (`parametros.cobro_tras_prueba`) lo enrola
+ * SOLO ese cobro, con su ancla. El enrolamiento diario lo salta: si no, el día que falle el cobro
+ * automático lo enrolaría con el ancla de la aceptación del registro y le mandaría un enlace.
+ */
+export function loEnrolaElCobroTrasPrueba(parametros: Record<string, unknown> | null | undefined): boolean {
+  return (parametros ?? {}).cobro_tras_prueba === true
 }
 
 export interface ResumenEnrolamiento {
@@ -202,6 +219,9 @@ export async function enrolarContratosPorCiclo(deps: DepsEnrolamiento): Promise<
   for (const c of contratos) {
     const servicio = porSlug.get(c.servicio_slug)
     if (!servicio) continue
+    if (loEnrolaElCobroTrasPrueba(c.parametros) && deps.contratoId !== c.id) continue
+    const anclaAceptacion = anclaPorNegocio.get(c.negocio_id) ?? null
+    const ancla = deps.contratoId === c.id && deps.anclaAt && anclaAceptacion ? deps.anclaAt : anclaAceptacion
     const candidato: ContratoCandidato = {
       id: c.id,
       workspaceId: c.workspace_id,
@@ -213,7 +233,7 @@ export async function enrolarContratosPorCiclo(deps: DepsEnrolamiento): Promise<
       disparadorCobro: servicio.disparador_cobro,
       parametros: c.parametros,
       diasTrialFicha: fichaPorVersion.get(`${c.servicio_slug}|${c.servicio_version}`) ?? null,
-      anclaAt: anclaPorNegocio.get(c.negocio_id) ?? null,
+      anclaAt: ancla,
       yaEnrolado: conActa.has(c.id),
       tienePlan: conPlan.has(`${c.workspace_id}|${c.negocio_id}`),
       pasarela: pasarelaDeEnlaces({

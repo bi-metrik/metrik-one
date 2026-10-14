@@ -249,3 +249,35 @@ describe('generarEnlacesAutomaticos', () => {
     })
   })
 })
+
+describe('planes que cobran con la tarjeta guardada (pasarela epayco)', () => {
+  const conTarjeta = (extra: Partial<Tablas> = {}) =>
+    tablasBase({ planes_cobro: [{ id: 'plan1', workspace_id: 'wsM', negocio_id: 'n1', total_cuotas: 3, pasarela: 'epayco', activo: false }], ...extra })
+
+  it('sin rechazo de la tarjeta, ninguna cuota recibe enlace (se pagaría dos veces)', async () => {
+    const r = await correr(conTarjeta({ cobro_intentos_tarjeta: [] }))
+    expect(r.pasarela.crear).not.toHaveBeenCalled()
+    expect(r.resumen.conTarjetaSinRechazo).toBe(2)
+  })
+
+  it('la cuota que la tarjeta rechazó recibe su enlace y su correo el mismo día (día 0 de Carmen)', async () => {
+    const r = await correr(conTarjeta({ cobro_intentos_tarjeta: [{ plan_cobro_id: 'plan1', numero_cuota: 2, intento: 0, resultado: 'rechazado' }] }))
+    expect(r.resumen.generados.map((g) => g.numero)).toEqual([2])
+    expect(r.enviar).toHaveBeenCalledTimes(1)
+    expect(r.resumen.conTarjetaSinRechazo).toBe(1)
+    // El correo del día 0 dice que la tarjeta no pasó (Términos de autoservicio 3.6).
+    const m = r.enviar.mock.calls[0][0]
+    expect(m.subject).toBe('No pudimos cobrar tu cuota con MéTRIK a la tarjeta: puedes pagarla en línea')
+    expect(m.text).toContain('No pudimos cobrar la cuota 2 de CDA Pruebas a la tarjeta que registraste en ePayco: la tarjeta rechazó el cobro.')
+    expect(m.html).toContain('la tarjeta rechazó el cobro')
+  })
+
+  it('el primer cobro rechazado (el plan volvió al enlace, Condiciones 7.5) también lo dice; la otra cuota, no', async () => {
+    const r = await correr(tablasBase({ cobro_intentos_tarjeta: [{ plan_cobro_id: 'plan1', numero_cuota: 1, intento: 0, resultado: 'rechazado' }] }))
+    expect(r.resumen.generados.map((g) => g.numero)).toEqual([1, 2])
+    const [c1, c2] = r.enviar.mock.calls.map((c) => c[0])
+    expect(c1.text).toContain('la tarjeta rechazó el cobro')
+    expect(c2.text).not.toContain('tarjeta')
+    expect(c2.subject).not.toContain('No pudimos cobrar')
+  })
+})

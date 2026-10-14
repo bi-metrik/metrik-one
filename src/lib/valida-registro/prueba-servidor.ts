@@ -2,6 +2,7 @@ import 'server-only'
 import { createServiceClient } from '@/lib/supabase/server'
 import { llamarValida } from '@/lib/valida-api/cliente'
 import { tamanoPrueba } from './llave'
+import { entornoDeCobro, momentoDelCobro } from './cobro-prueba'
 
 /**
  * Pide la prueba gratis a Valida (`POST /api/one/v1/pruebas`, firmada como ONE) y la deja lista en el
@@ -33,6 +34,11 @@ export async function emitirPruebaDelEspacio(datos: {
   razonSocial: string
   nit: string
   dv: string
+  /**
+   * La prueba abre con tarjeta (Condiciones v2.0): queda programado el cobro en el instante exacto en
+   * que se cumplen los 7 días (`vence_en`), que es la fecha que la cuenta muestra desde ya (7.1).
+   */
+  conCobro?: boolean
 }): Promise<ResultadoPrueba> {
   const { consultas, dias } = tamanoPrueba()
   const actor = { usuario_id: datos.usuarioId, correo: datos.correo.toLowerCase() }
@@ -89,6 +95,13 @@ export async function emitirPruebaDelEspacio(datos: {
       valida_cliente_id: cliente_id,
       prueba_consultas: r.datos.consultas,
       prueba_vence_en: vence_en,
+      ...(datos.conCobro
+        ? {
+            cobro_estado: 'programado',
+            cobro_programado_at: momentoDelCobro({ venceEn: vence_en, aperturaMs: Date.now() }),
+            cobro_entorno: entornoDeCobro(),
+          }
+        : {}),
       motivo: null,
       updated_at: new Date().toISOString(),
     })

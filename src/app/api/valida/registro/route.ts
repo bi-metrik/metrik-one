@@ -31,7 +31,6 @@ export async function POST(req: Request) {
     razonSocial: texto(c.razon_social),
     nit: texto(c.nit),
     dv: texto(c.dv),
-    tipoEntidad: texto(c.tipo_entidad),
     acepta: c.acepta === true,
     condicionesVersion: texto(c.condiciones_version),
     recomendadoAfi: typeof c.recomendado_afi === 'boolean' ? c.recomendado_afi : null,
@@ -39,6 +38,8 @@ export async function POST(req: Request) {
     ref: texto(c.ref) || null,
     utm: c.utm,
     ip: ipDelCliente(req),
+    // Solo el token de ePayco.js, el titular y el celular; el servidor lo valida (`leerTarjeta`).
+    tarjeta: c.tarjeta,
   })
 
   switch (r.tipo) {

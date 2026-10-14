@@ -7,11 +7,12 @@ import { parseRut } from '@/lib/rut/parse-rut'
 import { getServerKey } from '@/lib/server-keys'
 import { BUCKET_ACEPTACIONES } from '@/lib/retencion-bot/plazos'
 import { enrolarContratosPorCiclo } from '@/lib/cobros/enrolar-ciclo-servidor'
+import { cobrarCuotasConTarjeta, pasarElPlanATarjeta } from './cobro-token-servidor'
 import { COBRADOR_VALIDA, FICHA_PLAN_VALIDA, activacionAbierta, plazoTerminos, type ErrorActivacion } from './activacion'
 import { parametrosDelPlan, esEspacioAutogestion } from './plan'
 import { pdfTerminos } from './pdf-terminos'
 import { compararRut, type VeredictoRut } from './rut'
-import { TERMINOS_PLAN, camposDeLaOrden, llenarPlantilla } from './terminos-plan'
+import { TERMINOS_PLAN, terminosPlanListos } from './terminos-plan'
 
 /**
  * «Activar plan» desde la prueba (`18-recorrido-baja-friccion.md` §2.2, PR 6 y la mitad ONE del PR 8).
@@ -19,7 +20,8 @@ import { TERMINOS_PLAN, camposDeLaOrden, llenarPlantilla } from './terminos-plan
  * La persona dueña de un espacio nacido en `/valida/empezar` oprime el botón y, en el servidor:
  *   1. si subió el RUT, se lee (`parseRut`) y se compara con lo declarado. NO frena nada (§5): solo
  *      decide si la empresa queda verificada; lo que no coincide lo revisa una persona;
- *   2. se arman los Términos del plan de SU empresa desde la plantilla aprobada, su PDF y sus huellas;
+ *   2. los Términos del plan de SU empresa son los que la persona aceptó en el registro, tal cual
+ *      (`valida_registros.terminos_texto`): aquí se les hace el PDF y las huellas, no se vuelven a armar;
  *   3. `valida_activar_autogestion` crea, en UNA transacción, empresa, negocio, términos, contrato con
  *      ella como persona designada, y el módulo apuntando al contrato.
  * Después la persona acepta los Términos en `/valida` (la entrada de siempre, con su constancia), el
@@ -43,6 +45,10 @@ interface FilaRegistro {
   identificacion: string
   dv: string | null
   correo: string
+  cobro_estado: string | null
+  terminos_version: string | null
+  terminos_texto: string | null
+  terminos_sha256: string | null
 }
 
 /** El RUT, leído y comparado. Cualquier falla de lectura es `ilegible`: nunca frena la activación. */
@@ -91,6 +97,41 @@ export async function activarPlanValida(input: { rut: File | null }): Promise<Re
   if (perfil.error || !workspaceId) return { ok: false, error: 'sin_sesion' }
   if (perfil.data?.role !== 'owner') return { ok: false, error: 'no_es_duena' }
 
+  // Con tarjeta, el plan se activa SOLO al cumplirse los 7 días, con el primer cobro (Términos 3.5 y
+  // 16.6: «nunca antes»). Activarlo a mano antes cobraría la cuota 1 el día del clic.
+  const reg = await svc.from('valida_registros').select('cobro_estado').eq('workspace_id', workspaceId).eq('estado', 'creado').maybeSingle()
+  if (reg.error) return { ok: false, error: 'error' }
+  if (reg.data?.cobro_estado) return { ok: false, error: 'cobro_al_terminar_prueba' }
+
+  const r = await activarPlanDelEspacio(svc, { workspaceId, usuarioId: user.id, rut: input.rut })
+  if (!r.ok) return r
+  // Lo que sigue es aceptar los Términos: la entrada de `/valida` los abre con `?terminos=1`.
+  return { ok: true, destino: '/valida?terminos=1' }
+}
+
+export type ResultadoActivacionEspacio =
+  | { ok: true; resultado: 'activado' | 'ya_activo'; contratoId: string | null }
+  | { ok: false; error: ErrorActivacion }
+
+/**
+ * El núcleo de la activación, sin sesión: lo usan el botón «Activar plan» (con la sesión de la persona
+ * dueña) y el cobro al cumplirse los 7 días (`cobro-prueba-servidor.ts`, con la persona que se registró
+ * y aceptó). Las reglas que la base vuelve a exigir (registro creado, persona del espacio, sin contrato
+ * vivo, NIT sin contrato) están en `valida_activar_autogestion`.
+ *
+ * Exige los Términos aceptados EN EL REGISTRO (`terminos_texto`, con su huella): son los únicos Términos
+ * de autoservicio que existen (v2.0, el camino con tarjeta). Un registro sin ellos (sin tarjeta, o de
+ * antes del 2026-10-14) responde `terminos_incompletos`: no hay un texto aceptado que registrar.
+ *
+ * `parametrosExtra` se suma a los parámetros del contrato (el cobro automático marca
+ * `cobro_tras_prueba`, para que el enrolamiento diario no lo enrole por su cuenta).
+ */
+export async function activarPlanDelEspacio(
+  svc: Db,
+  p: { workspaceId: string; usuarioId: string; rut: File | null; parametrosExtra?: Record<string, unknown> },
+): Promise<ResultadoActivacionEspacio> {
+  if (!terminosPlanListos()) return { ok: false, error: 'terminos_incompletos' }
+  const workspaceId = p.workspaceId
   const ws = await svc.from('workspaces').select('slug, config_extra').eq('id', workspaceId).maybeSingle()
   const config = (ws.data?.config_extra ?? null) as Record<string, unknown> | null
   if (ws.error || !ws.data || !esEspacioAutogestion(config)) return { ok: false, error: 'no_es_autogestion' }
@@ -98,47 +139,35 @@ export async function activarPlanValida(input: { rut: File | null }): Promise<Re
 
   const reg = await svc
     .from('valida_registros')
-    .select('razon_social, identificacion, dv, correo')
+    .select('razon_social, identificacion, dv, correo, cobro_estado, terminos_version, terminos_texto, terminos_sha256')
     .eq('workspace_id', workspaceId)
     .eq('estado', 'creado')
     .maybeSingle()
   const registro = reg.data as FilaRegistro | null
   if (reg.error || !registro) return { ok: false, error: 'sin_registro' }
 
-  const parametros = parametrosDelPlan()
-  const ahora = new Date()
+  const parametros = { ...parametrosDelPlan(), ...(p.parametrosExtra ?? {}) }
 
-  // 2. Los Términos de ESTA empresa: si falta un solo campo de la plantilla, no se activa.
-  const llenado = llenarPlantilla(
-    TERMINOS_PLAN.plantilla,
-    camposDeLaOrden({
-      razonSocial: registro.razon_social,
-      nit: registro.identificacion,
-      dv: registro.dv,
-      correo: registro.correo,
-      precioMensual: parametros.precio_mensual,
-      licencias: parametros.licencias,
-      limiteMes: parametros.limite_consultas_mes,
-      ahora,
-    }),
-  )
-  if (!llenado.ok) {
-    console.error('[valida-activacion] la plantilla de los Términos pide campos que el sistema no llena:', llenado.faltan.join(', '))
+  // 2. Los Términos de ESTA empresa: los que aceptó en el registro, con la huella que se guardó ahí.
+  const textoMd = registro.terminos_texto
+  if (!textoMd || !registro.terminos_version || !registro.terminos_sha256) return { ok: false, error: 'terminos_incompletos' }
+  const textoSha = createHash('sha256').update(textoMd, 'utf8').digest('hex')
+  if (textoSha !== registro.terminos_sha256) {
+    console.error('[valida-activacion] los Términos del registro no tienen la huella guardada:', workspaceId)
     return { ok: false, error: 'terminos_incompletos' }
   }
-  const textoMd = llenado.texto
-  const textoSha = createHash('sha256').update(textoMd, 'utf8').digest('hex')
+  const versionTerminos = registro.terminos_version
 
   let pdf: Buffer
   try {
-    pdf = await pdfTerminos(textoMd, `${TERMINOS_PLAN.titulo} ${TERMINOS_PLAN.version} · ${registro.razon_social}`)
+    pdf = await pdfTerminos(textoMd, `${TERMINOS_PLAN.titulo} ${versionTerminos} · ${registro.razon_social}`)
   } catch (e) {
     console.error('[valida-activacion] PDF de los Términos:', e instanceof Error ? e.message : e)
     return { ok: false, error: 'pdf' }
   }
   const pdfSha = createHash('sha256').update(pdf).digest('hex')
   // La huella en el nombre: un reintento con otro PDF no pisa el anterior (la evidencia no se reescribe).
-  const pdfPath = `${slug}/${TERMINOS_PLAN.slug}-${TERMINOS_PLAN.version}-${pdfSha.slice(0, 12)}.pdf`
+  const pdfPath = `${slug}/${TERMINOS_PLAN.slug}-${versionTerminos}-${pdfSha.slice(0, 12)}.pdf`
   const subida = await svc.storage.from(BUCKET_ACEPTACIONES).upload(pdfPath, pdf, { contentType: 'application/pdf', upsert: false })
   if (subida.error && !/exist/i.test(subida.error.message)) {
     console.error('[valida-activacion] PDF al bucket:', subida.error.message)
@@ -146,14 +175,14 @@ export async function activarPlanValida(input: { rut: File | null }): Promise<Re
   }
 
   // 1. El RUT (opcional). Después del PDF a propósito: si los términos fallan, no se sube un RUT para nada.
-  const rut = input.rut
-    ? await leerRut(svc, input.rut, workspaceId, { nit: registro.identificacion, dv: registro.dv, razonSocial: registro.razon_social })
+  const rut = p.rut
+    ? await leerRut(svc, p.rut, workspaceId, { nit: registro.identificacion, dv: registro.dv, razonSocial: registro.razon_social })
     : null
 
   const prueba = (config?.valida_prueba ?? null) as { vence_en?: string } | null
   const { data, error } = await svc.rpc('valida_activar_autogestion', {
     p_workspace_cliente: workspaceId,
-    p_usuario: user.id,
+    p_usuario: p.usuarioId,
     p_cobrador: COBRADOR_VALIDA.workspaceId,
     p_linea: COBRADOR_VALIDA.lineaValida,
     p_etapa: COBRADOR_VALIDA.etapaCobro,
@@ -163,7 +192,7 @@ export async function activarPlanValida(input: { rut: File | null }): Promise<Re
     p_documento: {
       slug: TERMINOS_PLAN.slug,
       titulo: TERMINOS_PLAN.titulo,
-      version: TERMINOS_PLAN.version,
+      version: versionTerminos,
       texto_md: textoMd,
       texto_sha256: textoSha,
       pdf_path: pdfPath,
@@ -175,10 +204,9 @@ export async function activarPlanValida(input: { rut: File | null }): Promise<Re
     console.error('[valida-activacion] valida_activar_autogestion:', error.message)
     return { ok: false, error: 'error' }
   }
-  const r = (data ?? {}) as { ok?: boolean; error?: ErrorActivacion; resultado?: string }
+  const r = (data ?? {}) as { ok?: boolean; error?: ErrorActivacion; resultado?: string; contrato_id?: string }
   if (!r.ok) return { ok: false, error: r.error ?? 'error' }
-  // Lo que sigue es aceptar los Términos: la entrada de `/valida` los abre con `?terminos=1`.
-  return { ok: true, destino: '/valida?terminos=1' }
+  return { ok: true, resultado: r.resultado === 'ya_activo' ? 'ya_activo' : 'activado', contratoId: r.contrato_id ?? null }
 }
 
 /**
@@ -194,11 +222,23 @@ export async function asegurarCobroDelEspacio(workspaceId: string): Promise<void
     const svc = createServiceClient() as Db
     const ws = await svc.from('workspaces').select('config_extra').eq('id', workspaceId).maybeSingle()
     if (ws.error || !esEspacioAutogestion(ws.data?.config_extra ?? null)) return
-    const sc = await svc.from('servicios_contratados').select('id').eq('workspace_pagador_id', workspaceId).eq('estado', 'activo')
-    const contratos = (sc.data ?? []) as { id: string }[]
+    const sc = await svc
+      .from('servicios_contratados')
+      .select('id, workspace_id, negocio_id')
+      .eq('workspace_pagador_id', workspaceId)
+      .eq('estado', 'activo')
+    const contratos = (sc.data ?? []) as { id: string; workspace_id: string; negocio_id: string }[]
     if (sc.error || contratos.length !== 1) return
-    const r = await enrolarContratosPorCiclo({ db: svc, contratoId: contratos[0].id })
+    const contrato = contratos[0]
+    const r = await enrolarContratosPorCiclo({ db: svc, contratoId: contrato.id })
     if (r.errores.length > 0) console.error('[valida-activacion] enrolamiento al aceptar:', r.errores.map((e) => e.error).join('; '))
+    // Con tarjeta registrada (ePayco, cláusula de cobro): el plan cobra por token y la cuota 1, que
+    // vence hoy, se cobra ya. Sin tarjeta, nada cambia: paga con el enlace desde /suscripcion.
+    for (const creado of r.creados) {
+      if (await pasarElPlanATarjeta({ db: svc }, { cobradorId: contrato.workspace_id, planCobroId: creado.planCobroId, negocioId: contrato.negocio_id })) {
+        await cobrarCuotasConTarjeta({ db: svc, hoy: todayBogotaISO(), soloPlan: creado.planCobroId })
+      }
+    }
   } catch (e) {
     console.error('[valida-activacion] enrolamiento al aceptar:', e instanceof Error ? e.message : e)
   }

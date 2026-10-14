@@ -1,6 +1,10 @@
 import { describe, expect, it } from 'vitest'
+import { readFileSync } from 'node:fs'
 import {
   candidatosDeSlug,
+  casillasDesdeNit,
+  dvParaNit,
+  listoParaEnviar,
   decidirOrigen,
   limpiarCodigoAfi,
   limpiarUtm,
@@ -27,6 +31,63 @@ describe('NIT y DV en dos campos', () => {
   })
   it('el NIT se muestra con puntos mientras se escribe', () => {
     expect(nitConPuntos('902079601')).toBe('902.079.601')
+  })
+})
+
+describe('el DV se llena solo al escribir el NIT', () => {
+  it('se calcula con la fórmula de la DIAN sobre el NIT entero', () => {
+    expect(dvParaNit('902079601')).toBe('9')
+    expect(dvParaNit('902.079.601')).toBe('9')
+    // Bancolombia: la trampa de `separarNitDv` (8 es también el DV de 89090393). Aquí no se parte nada.
+    expect(dvParaNit('890903938')).toBe('8')
+    expect(casillasDesdeNit('890903938')).toEqual({ nit: '890903938', dv: '8', conGuion: false })
+  })
+  it('a medio escribir no propone DV', () => {
+    expect(dvParaNit('')).toBe('')
+    expect(dvParaNit('90207')).toBe('')
+    expect(casillasDesdeNit('90207')).toEqual({ nit: '90207', dv: '', conGuion: false })
+  })
+  it('lo que llena siempre pasa la comprobación del servidor', () => {
+    for (const nit of ['902079601', '890903938', '800197268', '1020304050', '123456']) {
+      expect(problemaDelNit(nit, dvParaNit(nit))).toBeNull()
+    }
+  })
+  it('con guion separa: el DV traído se respeta y, si no cuadra, sale el aviso', () => {
+    expect(casillasDesdeNit('902079601-9')).toEqual({ nit: '902079601', dv: '9', conGuion: true })
+    const mal = casillasDesdeNit('902.079.601-8')
+    expect(mal).toEqual({ nit: '902079601', dv: '8', conGuion: true })
+    expect(problemaDelNit(mal.nit, mal.dv)).toBe('dv_no_coincide')
+    // El guion recién escrito, sin DV todavía: se calcula y el foco pasa a la casilla del DV.
+    expect(casillasDesdeNit('902079601-')).toEqual({ nit: '902079601', dv: '9', conGuion: true })
+  })
+  it('el NIT no pasa de 10 dígitos', () => {
+    expect(casillasDesdeNit('12345678901234').nit).toBe('1234567890')
+  })
+  it('si la persona cambia el DV y no cuadra, el aviso de siempre', () => {
+    expect(problemaDelNit('902079601', '3')).toBe('dv_no_coincide')
+  })
+})
+
+describe('cuándo se deja tocar «Empezar» (sin tipo de empresa)', () => {
+  const completo = { razonSocial: 'Empresa Ejemplo S.A.S.', nit: '902079601', dv: '9', acepta: true, recomendadoAfi: false }
+  it('con razón social, NIT válido, casilla y respuesta de AFI basta: no pide tipo de empresa', () => {
+    expect(listoParaEnviar(completo)).toBe(true)
+  })
+  it('falta cualquiera de esos y no deja', () => {
+    expect(listoParaEnviar({ ...completo, razonSocial: 'ab' })).toBe(false)
+    expect(listoParaEnviar({ ...completo, dv: '8' })).toBe(false)
+    expect(listoParaEnviar({ ...completo, acepta: false })).toBe(false)
+    expect(listoParaEnviar({ ...completo, recomendadoAfi: null })).toBe(false)
+  })
+  it('ni la pantalla, ni la ruta, ni el servidor vuelven a pedir el tipo de empresa', () => {
+    const pantalla = readFileSync('src/app/(marketing)/valida/empezar/registro-client.tsx', 'utf8')
+    const ruta = readFileSync('src/app/api/valida/registro/route.ts', 'utf8')
+    const servidor = readFileSync('src/lib/valida-registro/registro-servidor.ts', 'utf8')
+    expect(pantalla).not.toMatch(/tipo_entidad|Tipo de empresa|tipoEntidad/)
+    expect(ruta).not.toMatch(/tipo_entidad|tipoEntidad/)
+    expect(servidor).not.toMatch(/esTipoEntidad|tipoEntidad|campo: 'tipo_entidad'/)
+    // La columna nullable queda en null: el segmento sale del RUT al activar.
+    expect(servidor).toMatch(/tipo_entidad: null,/)
   })
 })
 

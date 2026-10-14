@@ -1,17 +1,20 @@
 'use client'
 
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import MetrikLockup from '@/components/metrik-lockup'
 import { createClient } from '@/lib/supabase/client'
 import { fetchPropio } from '@/lib/version/fetch-propio'
+import TarjetaEpayco, { type TarjetaEpaycoHandle } from './tarjeta-epayco'
 import {
-  TIPOS_ENTIDAD,
+  casillasDesdeNit,
+  listoParaEnviar as datosListos,
   nitConPuntos,
   problemaDelNit,
   soloDigitos,
   textoProblemaNit,
-  type TipoEntidad,
 } from '@/lib/valida-registro/datos'
+import { camposDeLaOrden, vistaDeLosTerminos } from '@/lib/valida-registro/terminos-plan'
+import { bloquesDeTexto } from '@/lib/valida-api/texto-documento'
 
 const FONT = 'var(--font-schibsted), sans-serif'
 const BASE_DOMAIN = process.env.NEXT_PUBLIC_BASE_DOMAIN || 'localhost:3000'
@@ -25,7 +28,8 @@ const LLAVE_ORIGEN = 'valida-empezar-origen'
  *
  * Lo que esta pantalla NO decide: ni el NIT libre, ni el tope, ni el origen. Los manda al servidor
  * (`/api/valida/registro`) y muestra su respuesta. El DV sí se comprueba aquí mientras se escribe,
- * con la MISMA función que usa el servidor.
+ * con la MISMA función que usa el servidor, y se llena solo al escribir el NIT (`casillasDesdeNit`:
+ * se calcula sobre la casilla del NIT entera, no se adivina partiendo un número).
  */
 
 type Paso = 'correo' | 'codigo' | 'empresa' | 'listo'
@@ -64,24 +68,53 @@ interface Props {
   /** El texto de la casilla: entra a la huella, así que sale del mismo archivo que la calcula. */
   textoCasilla: string
   politica: { titulo: string; url: string }
+  /** true con las Condiciones v2.0 (cobro al cumplirse los 7 días): la prueba ya no es «sin tarjeta». */
+  conCobro?: boolean
+  /**
+   * Solo con las Condiciones v2.0 (`pideMetodoPago`): la llave pública y el texto junto a la tarjeta
+   * (aviso §2.3), con `{fecha_y_hora_vence}` por llenar.
+   */
+  tarjeta?: { llavePublica: string; texto: string; duracionMs: number } | null
+  /**
+   * Con cobro: los Términos de Uso que la casilla acepta (sección B de los Términos de autoservicio),
+   * para mostrarlos enteros con la Orden llena con lo que la persona escribe. `huella` es la de la
+   * Parte II; `duracionMs`, la de la prueba (la fecha en que vence el plazo para cancelar).
+   */
+  terminos?: { titulo: string; version: string; huella: string; duracionMs: number } | null
 }
 
-export default function RegistroValidaClient({ origenUrl, abierto, consultas, dias, condiciones, avisoDatos, textoCasilla, politica }: Props) {
+export default function RegistroValidaClient({
+  origenUrl,
+  abierto,
+  consultas,
+  dias,
+  condiciones,
+  avisoDatos,
+  textoCasilla,
+  politica,
+  conCobro = false,
+  tarjeta = null,
+  terminos = null,
+}: Props) {
   const [paso, setPaso] = useState<Paso>('correo')
   const [correo, setCorreo] = useState('')
   const [codigo, setCodigo] = useState('')
   const [razonSocial, setRazonSocial] = useState('')
   const [nit, setNit] = useState('')
   const [dv, setDv] = useState('')
-  const [tipoEntidad, setTipoEntidad] = useState<TipoEntidad | ''>('')
   const [recomendadoAfi, setRecomendadoAfi] = useState<boolean | null>(origenUrl.codigoAfi ? true : null)
   const [codigoAfi, setCodigoAfi] = useState(origenUrl.codigoAfi ?? '')
   const [acepta, setAcepta] = useState(false)
   const [origen] = useState<Origen>(() => origenInicial(origenUrl))
+  const refTarjeta = useRef<TarjetaEpaycoHandle>(null)
+  const refDv = useRef<HTMLInputElement>(null)
   const [error, setError] = useState('')
   const [errorCampo, setErrorCampo] = useState('')
   const [ocupado, setOcupado] = useState(false)
   const [aviso, setAviso] = useState('')
+  // El momento con que la pantalla llena la Orden (fecha del registro y fin del plazo para cancelar), como
+  // el texto junto a la tarjeta. Lo que se guarda lo pone el servidor al aceptar.
+  const [abiertaMs] = useState(() => Date.now())
 
   useEffect(() => {
     if (tieneSenales(origenUrl)) window.sessionStorage.setItem(LLAVE_ORIGEN, JSON.stringify(origenUrl))
@@ -108,7 +141,7 @@ export default function RegistroValidaClient({ origenUrl, abierto, consultas, di
 
   if (!abierto) {
     return (
-      <Marco consultas={consultas} dias={dias}>
+      <Marco consultas={consultas} dias={dias} conCobro={conCobro}>
         <p className="text-center text-sm text-muted-foreground">
           La prueba gratis abre muy pronto. Mientras tanto, escríbenos a mauricio.moreno@metrik.com.co.
         </p>
@@ -152,6 +185,18 @@ export default function RegistroValidaClient({ origenUrl, abierto, consultas, di
     setOcupado(true)
     setError('')
     setErrorCampo('')
+    // Con la cláusula de cobro vigente: primero el token de ePayco (la tarjeta nunca viaja a ONE).
+    let datosTarjeta: { token: string; titular: string; celular: string } | null = null
+    if (tarjeta) {
+      try {
+        datosTarjeta = (await refTarjeta.current?.tokenizar()) ?? null
+      } catch (err) {
+        setErrorCampo('tarjeta')
+        setError(err instanceof Error ? err.message : 'No pudimos registrar la tarjeta.')
+        setOcupado(false)
+        return
+      }
+    }
     const r = await fetchPropio('/api/valida/registro', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -159,13 +204,13 @@ export default function RegistroValidaClient({ origenUrl, abierto, consultas, di
         razon_social: razonSocial,
         nit,
         dv,
-        tipo_entidad: tipoEntidad,
         acepta,
         condiciones_version: condiciones.version,
         recomendado_afi: recomendadoAfi,
         codigo_afi: recomendadoAfi ? codigoAfi || null : null,
         ref: origen.ref,
         utm: origen.utm,
+        ...(datosTarjeta ? { tarjeta: datosTarjeta } : {}),
       }),
     })
     const cuerpo = (await r.json().catch(() => ({}))) as {
@@ -197,10 +242,18 @@ export default function RegistroValidaClient({ origenUrl, abierto, consultas, di
     setOcupado(false)
   }
 
-  const listoParaEnviar = razonSocial.trim().length >= 3 && !problemaNit && !!tipoEntidad && acepta && recomendadoAfi !== null
+  const listoParaEnviar = datosListos({ razonSocial, nit, dv, acepta, recomendadoAfi })
+
+  const escribirNit = (crudo: string) => {
+    const c = casillasDesdeNit(crudo)
+    setNit(c.nit)
+    setDv(c.dv)
+    // Quien escribe el guion va a escribir el DV: se le pasa a su casilla para que no quede pegado.
+    if (c.conGuion) refDv.current?.focus()
+  }
 
   return (
-    <Marco consultas={consultas} dias={dias}>
+    <Marco consultas={consultas} dias={dias} conCobro={conCobro}>
       {paso === 'correo' && (
         <form onSubmit={pedirCodigo} className="space-y-4">
           <div className="space-y-2">
@@ -282,7 +335,7 @@ export default function RegistroValidaClient({ origenUrl, abierto, consultas, di
               autoComplete="organization"
               required
               autoFocus
-              placeholder="CDA Ejemplo S.A.S."
+              placeholder="Empresa Ejemplo S.A.S."
               value={razonSocial}
               onChange={(e) => setRazonSocial(e.target.value)}
               className={claseCampo}
@@ -302,20 +355,23 @@ export default function RegistroValidaClient({ origenUrl, abierto, consultas, di
                 required
                 placeholder="900123456"
                 value={nitConPuntos(nit)}
-                onChange={(e) => setNit(soloDigitos(e.target.value).slice(0, 10))}
+                onChange={(e) => escribirNit(e.target.value)}
                 className={claseCampo}
                 aria-describedby="ayuda-nit"
               />
               <span className="text-lg text-muted-foreground">-</span>
               <input
                 id="dv"
+                ref={refDv}
                 type="text"
                 inputMode="numeric"
                 required
                 aria-label="Dígito de verificación"
                 placeholder="DV"
                 value={dv}
-                onChange={(e) => setDv(soloDigitos(e.target.value).slice(0, 1))}
+                // El último dígito: con el DV ya puesto, escribir otro lo reemplaza en vez de ignorarse.
+                onChange={(e) => setDv(soloDigitos(e.target.value).slice(-1))}
+                onFocus={(e) => e.target.select()}
                 className={`${claseCampo} w-16 text-center`}
               />
             </div>
@@ -323,27 +379,11 @@ export default function RegistroValidaClient({ origenUrl, abierto, consultas, di
               <p className="text-xs text-amber-600">{avisoNit}</p>
             ) : (
               <p id="ayuda-nit" className="text-xs text-muted-foreground">
-                Sin puntos. El dígito de verificación va en la casilla de la derecha.
+                Sin puntos. El dígito de verificación se llena solo; revísalo contra tu RUT.
               </p>
             )}
             {(errorCampo === 'nit' || errorCampo === 'dv') && <p className="text-xs text-red-500">{error}</p>}
           </div>
-
-          <fieldset className="space-y-2">
-            <legend className="text-sm font-medium text-foreground">Tipo de empresa</legend>
-            {TIPOS_ENTIDAD.map((t) => (
-              <label key={t.valor} className="flex h-12 items-center gap-3 rounded-lg border border-border px-3 text-sm">
-                <input
-                  type="radio"
-                  name="tipo_entidad"
-                  value={t.valor}
-                  checked={tipoEntidad === t.valor}
-                  onChange={() => setTipoEntidad(t.valor)}
-                />
-                {t.etiqueta}
-              </label>
-            ))}
-          </fieldset>
 
           <fieldset className="space-y-2">
             <legend className="text-sm font-medium text-foreground">¿Te recomendó AFI?</legend>
@@ -375,6 +415,27 @@ export default function RegistroValidaClient({ origenUrl, abierto, consultas, di
               <summary className="cursor-pointer text-sm font-medium text-foreground">{condiciones.titulo}</summary>
               <div className="mt-2 max-h-64 overflow-y-auto whitespace-pre-line text-xs text-muted-foreground">{condiciones.texto}</div>
             </details>
+            {terminos && (
+              <details>
+                <summary className="cursor-pointer text-sm font-medium text-foreground">
+                  {terminos.titulo} · {terminos.version}
+                </summary>
+                <TextoTerminos
+                  md={vistaDeLosTerminos(
+                    camposDeLaOrden({
+                      razonSocial: razonSocial.trim(),
+                      nit: soloDigitos(nit),
+                      dv: soloDigitos(dv) || null,
+                      correo,
+                      recomendadoAfi,
+                      aceptadoMs: abiertaMs,
+                      duracionPruebaMs: terminos.duracionMs,
+                      huellaParteII: terminos.huella,
+                    }),
+                  )}
+                />
+              </details>
+            )}
             <p className="text-xs text-muted-foreground">
               {avisoDatos}{' '}
               <a href={politica.url} target="_blank" rel="noreferrer" className="underline">
@@ -388,6 +449,8 @@ export default function RegistroValidaClient({ origenUrl, abierto, consultas, di
             </label>
             {errorCampo === 'acepta' && <p className="text-xs text-red-500">{error}</p>}
           </div>
+
+          {tarjeta && <TarjetaEpayco ref={refTarjeta} llavePublica={tarjeta.llavePublica} correo={correo} texto={tarjeta.texto} duracionMs={tarjeta.duracionMs} />}
 
           {error && !['razon_social', 'nit', 'dv', 'acepta'].includes(errorCampo) && <p className="text-sm text-red-500">{error}</p>}
           {aviso && <p className="text-sm text-amber-700">{aviso}</p>}
@@ -403,7 +466,25 @@ export default function RegistroValidaClient({ origenUrl, abierto, consultas, di
   )
 }
 
-function Marco({ consultas, dias, children }: { consultas: number; dias: number; children: React.ReactNode }) {
+/** Los Términos como texto: títulos, párrafos y negritas (el mismo lector del PDF de la constancia). */
+function TextoTerminos({ md }: { md: string }) {
+  return (
+    <div className="mt-2 max-h-64 space-y-2 overflow-y-auto text-xs text-muted-foreground">
+      {bloquesDeTexto(md).flatMap((b, i) => {
+        // Una lista se lee como sus renglones; un título, en negrita; lo demás, como párrafo.
+        const renglones = b.tipo === 'lista' ? b.items : [b.tramos]
+        return renglones.map((tramos, k) => (
+          <p key={`${i}-${k}`} className={b.tipo === 'titulo' ? 'pt-1 font-semibold text-foreground' : 'whitespace-pre-line'}>
+            {b.tipo === 'lista' ? '- ' : null}
+            {tramos.map((t, j) => (t.negrita ? <strong key={j}>{t.texto}</strong> : <span key={j}>{t.texto}</span>))}
+          </p>
+        ))
+      })}
+    </div>
+  )
+}
+
+function Marco({ consultas, dias, conCobro, children }: { consultas: number; dias: number; conCobro: boolean; children: React.ReactNode }) {
   return (
     <div className="flex min-h-screen flex-col items-center justify-center bg-background px-4 py-10">
       <div className="w-full max-w-sm space-y-8">
@@ -414,7 +495,7 @@ function Marco({ consultas, dias, children }: { consultas: number; dias: number;
               Valida: prueba gratis
             </h1>
             <p className="text-sm text-muted-foreground">
-              Consulta listas vinculantes SARLAFT. {consultas} consultas en {dias} días, sin tarjeta.
+              Consulta listas vinculantes SARLAFT. {consultas} consultas en {dias} días{conCobro ? '.' : ', sin tarjeta.'}
             </p>
           </div>
         </div>

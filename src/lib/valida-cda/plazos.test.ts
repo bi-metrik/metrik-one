@@ -7,6 +7,7 @@ import {
   mensajeConsultasRestringidas,
   mensajeSuspendidoPorMora,
   moraPermiteConsultar,
+  REGLA_MORA_AUTOSERVICIO,
   RESTRICCION_VIGENTE_DESDE,
   sumarDias,
   textoAvisoMora,
@@ -128,6 +129,19 @@ describe('restricción por mora a los 5 días (cláusula 11.1 v1.4, rige el 6-no
   const pendiente = (fechaVencimiento: string) =>
     proximoPago({ cuotas: [cuota(1, fechaVencimiento)], cobros: [], hoy: fechaVencimiento, ahoraISO: `${fechaVencimiento}T15:00:00Z` })
   const mora = (venc: string, hoy: string) => estadoMora(pendiente(venc), hoy)
+
+  it('autoservicio (Términos v2.0, 11.1 y 11.2): consultas restringidas desde D+10, reportes abiertos hasta D+40', () => {
+    const auto = (hoy: string) => estadoMora(pendiente('2026-11-10'), hoy, '2000-01-01', REGLA_MORA_AUTOSERVICIO)
+    expect(auto('2026-11-19')).toEqual({ estado: 'en_mora', vencio: '2026-11-10', restringeDesde: '2026-11-20', corteDesde: '2026-12-20' })
+    expect(auto('2026-11-20').estado).toBe('restringido')
+    // El día 31 un CDA ya está pausado; una cuenta de autoservicio sigue viendo sus reportes (11.2).
+    expect(mora('2026-11-10', '2026-12-11').estado).toBe('suspendido')
+    expect(auto('2026-12-11').estado).toBe('restringido')
+    expect(moraPermiteConsultar(auto('2026-12-11'))).toBe(false)
+    // A los 30 días de suspensión, la suscripción termina y el acceso cesa (11.2, 12.6).
+    expect(auto('2026-12-19').estado).toBe('restringido')
+    expect(auto('2026-12-20')).toEqual({ estado: 'suspendido', vencio: '2026-11-10', corteDesde: '2026-12-20' })
+  })
 
   it('la vigencia esperada es el 6-nov-2026: publicación del 7-oct + 30 días calendario', () => {
     expect(RESTRICCION_VIGENTE_DESDE).toBe('2026-11-06')

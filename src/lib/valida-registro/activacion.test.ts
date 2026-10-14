@@ -10,9 +10,13 @@ describe('la llave de la activación', () => {
     expect(activacionAbierta({ VALIDA_ACTIVACION_ABIERTA: '1', VERCEL_ENV: 'preview' }, false)).toBe(false)
     expect(activacionAbierta({ VALIDA_ACTIVACION_ABIERTA: '1' }, true)).toBe(true)
   })
-  it('hoy los Términos del plan NO están: el marcador sigue en la plantilla', () => {
-    expect(terminosPlanListos()).toBe(false)
-    expect(activacionAbierta({ VALIDA_ACTIVACION_ABIERTA: '1' })).toBe(false)
+  it('los Términos de autoservicio v2.0 ya están: sin marcador, la llave decide', () => {
+    expect(terminosPlanListos()).toBe(true)
+    expect(activacionAbierta({ VALIDA_ACTIVACION_ABIERTA: '1' })).toBe(true)
+    expect(activacionAbierta({})).toBe(false)
+  })
+  it('con tarjeta, el botón no activa: el plan nace con el primer cobro al terminar la prueba', () => {
+    expect(textoErrorActivacion('cobro_al_terminar_prueba')).toContain('se activa solo al terminar la prueba')
   })
 })
 
@@ -33,21 +37,23 @@ describe('los Términos de la empresa', () => {
       nit: '900123456',
       dv: '7',
       correo: 'gerencia@cda.co',
-      precioMensual: 150000,
-      licencias: 2,
-      limiteMes: 3000,
-      ahora: new Date('2026-10-12T15:00:00Z'),
+      recomendadoAfi: false,
+      // 15:00 de Bogotá; la prueba vence 7 días después, a la misma hora.
+      aceptadoMs: Date.parse('2026-10-12T20:00:00Z'),
+      duracionPruebaMs: 7 * 86_400_000,
+      huellaParteII: 'f'.repeat(64),
     })
     expect(c).toMatchObject({
       razon_social: 'CDA EJEMPLO S.A.S.',
       nit: '900.123.456-7',
-      precio_cifra: '$150.000',
-      usuarios_incluidos: '2',
-      consultas_incluidas: '3.000',
-      fecha_orden: '12 de octubre de 2026',
+      correo_notificaciones: 'gerencia@cda.co',
+      fecha_registro: '12 de octubre de 2026',
+      fecha_publicacion: '12 de octubre de 2026',
+      recomendado_afi: 'no',
+      huella_sha256: 'f'.repeat(64),
     })
-    // La plantilla de hoy (marcador) pide solo campos que el sistema llena: al pegar el texto
-    // aprobado, esta prueba dice cuáles faltan.
+    expect(c.fecha_hora_vence_prueba).toMatch(/^lunes, 19 de octubre de 2026, 3:00\s?p\.\s?m\. \(hora de Colombia\)$/)
+    // La plantilla pide SOLO campos que el registro llena.
     expect(llenarPlantilla(TERMINOS_PLAN.plantilla, c).ok).toBe(true)
   })
   it('NIT legible con puntos y DV', () => {

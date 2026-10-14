@@ -10,7 +10,6 @@ import { condicionesVigentes, textoAceptado, versionAceptada } from './condicion
 import {
   candidatosDeSlug,
   decidirOrigen,
-  esTipoEntidad,
   limpiarCodigoAfi,
   limpiarUtm,
   normalizarRazonSocial,
@@ -19,10 +18,12 @@ import {
   soloDigitos,
   textoMotivoValida,
   textoProblemaNit,
-  type TipoEntidad,
 } from './datos'
 import { registroAbierto } from './llave'
+import { leerTarjeta, partirNombre, pideMetodoPago, textoProblemaTarjeta } from './metodo-pago'
+import { registrarClienteEpayco } from '@/lib/suscripciones/pasarela/epayco'
 import { emitirPruebaDelEspacio } from './prueba-servidor'
+import { terminosParaElRegistro, type TerminosDelRegistroArmados } from './terminos-registro-servidor'
 
 /**
  * El alta autogestionada de Valida, en el SERVIDOR (`18-recorrido-baja-friccion.md`, PR 3).
@@ -56,12 +57,20 @@ import { emitirPruebaDelEspacio } from './prueba-servidor'
  *   5. la prueba en Valida. Si falla, el espacio queda creado sin llave y el siguiente POST del
  *      mismo usuario la vuelve a pedir (`ya_tiene_espacio` con prueba pendiente).
  *
- * Punto de extensión del método de pago (decisión A2, ePayco): cuando exista la pasarela con cobro
- * recurrente, el paso 5 pasa a ser «registrar el método de pago y luego emitir la prueba», y
- * `valida_registros.metodo_pago_estado` deja de nacer en `no_requerido`. Hoy la prueba es sin tarjeta.
+ * Con las Condiciones v2.0 (`condicionesVigentes().conCobro`) la tarjeta es OBLIGATORIA: se registra
+ * en ePayco ANTES de crear nada (sin tarjeta no hay espacio ni prueba), `metodo_pago_estado` nace en
+ * `registrado` y, al emitirse la prueba, queda programado el cobro del primer mes en el instante en que
+ * se cumplen los 7 días (`cobro-prueba.ts`, `cobro-prueba-servidor.ts`).
+ *
+ * Con cobro, la casilla v1.2 acepta además los Términos de Uso de autoservicio (Condiciones 7.1;
+ * Términos 16.2). El servidor arma los de ESTA empresa en el momento de aceptar (Orden con lo
+ * declarado + Parte II, `terminosParaElRegistro`), los mete en la huella (`textoAceptado(c, terminos)`)
+ * y guarda, en la misma escritura de la puerta, el texto aceptado entero y los Términos con su huella
+ * (`aceptado_texto`, `terminos_*`, migración 20261014203000). El día 7 esos Términos se registran tal
+ * cual sobre el contrato (`aceptarTerminosDelRegistro`) y el cobro sigue.
  */
 
-export type CampoRegistro = 'razon_social' | 'nit' | 'dv' | 'tipo_entidad' | 'acepta'
+export type CampoRegistro = 'razon_social' | 'nit' | 'dv' | 'acepta' | 'tarjeta'
 
 export type ResultadoRegistroValida =
   | { tipo: 'ok'; slug: string }
@@ -77,7 +86,6 @@ export interface DatosRegistroValida {
   razonSocial: string
   nit: string
   dv: string
-  tipoEntidad: string
   /** La casilla de las Condiciones de la prueba y la Política de Datos. */
   acepta: boolean
   /** La versión de Condiciones + aviso que vio la pantalla (`VERSION_ACEPTADA`). Tiene que ser la vigente. */
@@ -88,6 +96,11 @@ export interface DatosRegistroValida {
   utm: unknown
   /** Lo que el servidor leyó de las cabeceras. Nunca del cuerpo. */
   ip: string | null
+  /**
+   * Solo cuando las Condiciones vigentes traen la cláusula de cobro y ePayco está encendido: el token
+   * de ePayco.js, el titular y un celular. Nunca la tarjeta (`metodo-pago.ts`).
+   */
+  tarjeta?: unknown
 }
 
 /** Cupos del espacio: la persona que se registra y un segundo usuario, como los CDA de hoy. */
@@ -143,11 +156,6 @@ export async function crearEspacioValida(datos: DatosRegistroValida): Promise<Re
   const nit = soloDigitos(datos.nit)
   const dv = soloDigitos(datos.dv)
 
-  if (!esTipoEntidad(datos.tipoEntidad)) {
-    return { tipo: 'dato', campo: 'tipo_entidad', texto: 'Elige qué tipo de empresa es.' }
-  }
-  const tipoEntidad: TipoEntidad = datos.tipoEntidad
-
   const utm = limpiarUtm(datos.utm)
   const codigoAfi = limpiarCodigoAfi(datos.codigoAfi)
   const { origen, fuente } = decidirOrigen({ ref: datos.ref, codigoAfi, recomendadoAfi: datos.recomendadoAfi, utm })
@@ -175,20 +183,66 @@ export async function crearEspacioValida(datos: DatosRegistroValida): Promise<Re
     identificacion: nit,
     dv,
     razon_social: razonSocial,
-    tipo_entidad: tipoEntidad,
+    // Ya no se pregunta (Mauricio, 2026-10-12: cualquier empresa). El segmento sale del RUT al activar
+    // (CIIU 7120 = CDA); la columna queda en null, que su CHECK admite.
+    tipo_entidad: null,
     origen,
     origen_fuente: fuente,
     ref: datos.ref ? datos.ref.trim().slice(0, 60) : null,
     codigo_afi: codigoAfi,
     recomendado_afi: datos.recomendadoAfi,
     utm,
-    metodo_pago_estado: 'no_requerido',
+    metodo_pago_estado: 'no_requerido' as 'no_requerido' | 'registrado',
+    metodo_pago_ref: null as string | null,
   }
 
   if (motivo) {
     await svc.from('valida_registros').insert({ ...filaBase, estado: 'rechazado', motivo })
     return { tipo: 'rechazado', motivo, texto: textoMotivoValida(motivo) }
   }
+
+  // ── El método de pago (decisión A2), solo con la cláusula de cobro vigente y ePayco encendido ───
+  // Antes de crear nada: si la tarjeta no se registra, no hay espacio ni prueba que limpiar. ePayco
+  // guarda la tarjeta; aquí queda solo su referencia (`epayco:<cliente>:<token>`).
+  let celularPago: string | null = null
+  if (pideMetodoPago(condiciones.conCobro)) {
+    const t = leerTarjeta(datos.tarjeta)
+    if (!t.ok) return { tipo: 'dato', campo: 'tarjeta', texto: textoProblemaTarjeta(t.problema) }
+    const { nombre, apellido } = partirNombre(t.tarjeta.titular)
+    const cliente = await registrarClienteEpayco({
+      cardTokenId: t.tarjeta.token,
+      pagador: { tipoDocumento: 'NIT', documento: nit, nombre, apellido, email: correo, celular: t.tarjeta.celular },
+    })
+    if (!cliente.ok) {
+      console.error('[valida-registro] ePayco:', cliente.error)
+      return { tipo: 'dato', campo: 'tarjeta', texto: textoProblemaTarjeta('token') }
+    }
+    filaBase.metodo_pago_estado = 'registrado'
+    filaBase.metodo_pago_ref = cliente.ref
+    celularPago = t.tarjeta.celular
+  }
+
+  // ── Los Términos de esta empresa, si la casilla los acepta (con cobro) ───────────────────────
+  // El instante de la aceptación es UNO: el de `aceptado_at` y el de la Orden.
+  const aceptadoMs = Date.now()
+  let terminos: TerminosDelRegistroArmados | null = null
+  if (condiciones.terminos) {
+    const t = terminosParaElRegistro({
+      razonSocial,
+      nit,
+      dv,
+      correo,
+      recomendadoAfi: datos.recomendadoAfi,
+      aceptadoMs,
+    })
+    if (!t.ok) {
+      // Un campo de la Orden sin llenar: no se acepta un texto con huecos.
+      console.error('[valida-registro] Términos con campos sin llenar:', t.faltan.join(', '))
+      return { tipo: 'error' }
+    }
+    terminos = t.terminos
+  }
+  const aceptado = textoAceptado(condiciones, terminos)
 
   // ── 1. La huella del intento ──────────────────────────────────────────────
   const { data: intento, error: eIntento } = await svc
@@ -225,7 +279,12 @@ export async function crearEspacioValida(datos: DatosRegistroValida): Promise<Re
         equipo_declarado: 1,
         // SOLO Valida, con la navegación de Valida (la misma de los CDA).
         modules: { [MODULOS.valida.clave]: true },
-        config_extra: { modo_vitrina: true, origen_registro: 'valida_autogestion' },
+        config_extra: {
+          modo_vitrina: true,
+          origen_registro: 'valida_autogestion',
+          // El celular que pide ePayco para cobrar con la tarjeta (de la persona dueña de la cuenta).
+          ...(celularPago ? { valida_pagador: { celular: celularPago } } : {}),
+        },
         drive_folder_id: null,
       })
       .select('id')
@@ -249,14 +308,31 @@ export async function crearEspacioValida(datos: DatosRegistroValida): Promise<Re
       workspace_id: workspaceId,
       slug_creado: slug,
       condiciones_version: versionAceptada(condiciones),
-      condiciones_sha256: huellaAceptacion(textoAceptado(condiciones)),
+      condiciones_sha256: huellaAceptacion(aceptado),
       politica_version: POLITICA_DATOS_VALIDA.version,
-      aceptado_at: new Date().toISOString(),
+      aceptado_at: new Date(aceptadoMs).toISOString(),
+      // La evidencia de los Términos aceptados en el registro (Términos 16.3). Solo con Términos: así
+      // un registro sin cobro no depende de la migración 20261014203000.
+      ...(terminos
+        ? {
+            aceptado_texto: aceptado,
+            terminos_version: terminos.version,
+            terminos_texto: terminos.texto,
+            terminos_sha256: terminos.sha256,
+          }
+        : {}),
       updated_at: new Date().toISOString(),
     })
     .eq('id', registroId)
   if (ePuerta) {
     await svc.from('workspaces').delete().eq('id', workspaceId)
+    if (ePuerta.code && ePuerta.code !== '23505') {
+      // No es la puerta del NIT o del correo (p. ej. la migración de los Términos sin aplicar): no se
+      // le dice a la persona que su NIT ya está tomado.
+      console.error('[valida-registro] puerta:', ePuerta.code, ePuerta.message)
+      await cerrarIntento('error_puerta')
+      return { tipo: 'error' }
+    }
     const m: MotivoRechazo = /correo_creado/.test(ePuerta.message) ? 'correo_tomado' : 'identificacion_tomada'
     await cerrarIntento(m)
     return { tipo: 'rechazado', motivo: m, texto: textoMotivoValida(m) }
@@ -292,7 +368,16 @@ export async function crearEspacioValida(datos: DatosRegistroValida): Promise<Re
   if (eFiscal) console.error('[valida-registro] perfil fiscal:', eFiscal.message)
 
   // ── 5. La prueba ──────────────────────────────────────────────────────────
-  const prueba = await emitirPruebaDelEspacio({ workspaceId, registroId, usuarioId: user.id, correo, razonSocial, nit, dv })
+  const prueba = await emitirPruebaDelEspacio({
+    workspaceId,
+    registroId,
+    usuarioId: user.id,
+    correo,
+    razonSocial,
+    nit,
+    dv,
+    conCobro: filaBase.metodo_pago_estado === 'registrado',
+  })
   if (prueba.tipo !== 'ok') return { tipo: 'prueba_pendiente', slug }
   return { tipo: 'ok', slug }
 }
@@ -312,11 +397,18 @@ async function reintentarPruebaPendiente(
   const slug = (ws as { slug: string } | null)?.slug ?? null
   const { data: reg } = await svc
     .from('valida_registros')
-    .select('id, razon_social, identificacion, dv, valida_cliente_id')
+    .select('id, razon_social, identificacion, dv, valida_cliente_id, metodo_pago_estado')
     .eq('workspace_id', workspaceId)
     .eq('estado', 'creado')
     .maybeSingle()
-  const r = reg as { id: string; razon_social: string; identificacion: string; dv: string | null; valida_cliente_id: string | null } | null
+  const r = reg as {
+    id: string
+    razon_social: string
+    identificacion: string
+    dv: string | null
+    valida_cliente_id: string | null
+    metodo_pago_estado: string
+  } | null
   if (!r || r.valida_cliente_id || !r.dv || !slug) return { tipo: 'ya_tiene_espacio', slug }
   const prueba = await emitirPruebaDelEspacio({
     workspaceId,
@@ -326,6 +418,7 @@ async function reintentarPruebaPendiente(
     razonSocial: r.razon_social,
     nit: r.identificacion,
     dv: r.dv,
+    conCobro: r.metodo_pago_estado === 'registrado',
   })
   return prueba.tipo === 'ok' ? { tipo: 'ok', slug } : { tipo: 'prueba_pendiente', slug }
 }

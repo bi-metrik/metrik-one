@@ -22,6 +22,11 @@ import {
   PausaPorMora,
 } from './avisos-cda';
 import { TerminosCda } from './terminos-cda';
+import { CobroPrueba } from './cobro-prueba';
+import { esEspacioAutogestion } from '@/lib/valida-registro/plan';
+import { estadoCobroDelEspacio } from '@/lib/valida-registro/cobro-prueba-servidor';
+import { fechaYHoraBogota } from '@/lib/valida-registro/cobro-prueba';
+import { COBRO_TRAS_PRUEBA } from '@/lib/valida-registro/condiciones-cobro';
 import { ModificacionTerminosCda } from './modificacion-terminos-cda';
 
 export const dynamic = 'force-dynamic';
@@ -31,7 +36,7 @@ interface Props {
 }
 
 export default async function ValidaPage({ searchParams }: Props) {
-  const { workspaceId } = await getWorkspace();
+  const { workspaceId, realRole, impersonating } = await getWorkspace();
   if (!workspaceId) redirect('/');
 
   // Validar flag activo
@@ -197,9 +202,27 @@ export default async function ValidaPage({ searchParams }: Props) {
   // (11.1) y la pausa (11.3), sin montos. Cuota y plata son solo de la persona designada del contrato
   // (la misma regla que `/suscripcion`, `puedeVerPagosCda`): la franja y el enlace a Suscripción.
   const enMora = estadoMora?.estado === 'en_mora' ? estadoMora : null;
+
+  // La prueba con tarjeta (Condiciones v2.0): la fecha y la hora del cobro (7.1) y «Cancelar prueba»
+  // (7.3). Solo espacios del registro autogestionado; cancela solo la persona dueña, nunca «Ver como».
+  const cobro = esEspacioAutogestion((wsRow?.config_extra ?? null) as Record<string, unknown> | null)
+    ? await estadoCobroDelEspacio(svc, workspaceId)
+    : null;
+  const bloqueCobro =
+    cobro && (cobro.estado === 'programado' || cobro.estado === 'cancelado') ? (
+      <CobroPrueba
+        estado={cobro.estado}
+        fechaYHora={fechaYHoraBogota(cobro.cobroDesde)}
+        precio={COBRO_TRAS_PRUEBA.precio}
+        boton={COBRO_TRAS_PRUEBA.botonCancelar}
+        puedeCancelar={cobro.puedeCancelar && realRole === 'owner' && !impersonating}
+      />
+    ) : null;
+
   const encabezado =
-    avisoPlazo || avisoModificacion || franja || enMora || restringido ? (
+    bloqueCobro || avisoPlazo || avisoModificacion || franja || enMora || restringido ? (
       <div className="space-y-3">
+        {bloqueCobro}
         {avisoPlazo}
         {avisoModificacion}
         {enMora && <AvisoMora mora={enMora} />}
