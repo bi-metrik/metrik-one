@@ -14,7 +14,7 @@
 import { readFileSync } from 'node:fs'
 import { resolve } from 'node:path'
 
-import { almacenEnMemoria, type Fila } from '../src/lib/espacio-pruebas/almacen'
+import { almacenEnMemoria, type Fila, type LlaveForanea } from '../src/lib/espacio-pruebas/almacen'
 import type { EntradaCaso, EscrituraGrabada } from '../src/lib/espacio-pruebas/semillas'
 import { tablasCasoSanAndres } from './caso-san-andres'
 
@@ -166,21 +166,40 @@ function esquemaDe(tablas: Record<string, Fila[]>): Record<string, string[]> {
   return out
 }
 
-/** Las llaves foráneas que el doble hace cumplir al borrar. */
-const LLAVES = [
+/**
+ * Las llaves foráneas de la base entre las tablas del doble, que el doble hace cumplir al
+ * escribir y al borrar. Salen de `src/types/database.ts` (Relationships) más la acción al
+ * borrar de su migración; la prueba `el doble declara todas las llaves de la base` falla si
+ * aparece una en los tipos que aquí no está.
+ */
+export const LLAVES: LlaveForanea[] = [
   ['negocio_bloques', 'negocio_id', 'negocios'], ['negocio_bloques', 'bloque_config_id', 'bloque_configs'],
+  ['negocio_bloques', 'completado_por', 'profiles'],
   ['negocio_responsables', 'negocio_id', 'negocios'], ['negocio_responsables', 'staff_id', 'staff'],
-  ['cotizaciones', 'negocio_id', 'negocios'], ['items', 'cotizacion_id', 'cotizaciones'], ['rubros', 'item_id', 'items'],
+  ['negocio_responsables', 'assigned_by', 'profiles'],
+  ['cotizaciones', 'negocio_id', 'negocios'], ['cotizaciones', 'duplicada_de', 'cotizaciones'],
+  ['items', 'cotizacion_id', 'cotizaciones'], ['rubros', 'item_id', 'items'],
   ['cotizacion_itinerarios', 'cotizacion_id', 'cotizaciones'], ['itinerario_opciones', 'itinerario_id', 'cotizacion_itinerarios'],
   ['itinerario_opciones', 'item_id', 'items'], ['negocios', 'contacto_id', 'contactos'], ['negocios', 'linea_id', 'lineas_negocio'],
-  ['negocios', 'etapa_actual_id', 'etapas_negocio'], ['negocios', 'responsable_id', 'staff'], ['etapas_negocio', 'linea_id', 'lineas_negocio'],
-  ['bloque_configs', 'etapa_id', 'etapas_negocio'], ['staff', 'profile_id', 'profiles'], ['staff_areas', 'staff_id', 'staff'],
+  ['negocios', 'etapa_actual_id', 'etapas_negocio'], ['negocios', 'responsable_id', 'staff'],
+  ['negocios', 'cierre_no_facturable_por', 'staff'], ['negocios', 'paused_by', 'profiles'],
+  ['contactos', 'fuente_promotor_id', 'contactos'], ['contactos', 'responsable_id', 'staff'],
+  ['etapas_negocio', 'linea_id', 'lineas_negocio'],
+  ['bloque_configs', 'etapa_id', 'etapas_negocio'], ['bloque_configs', 'bloque_definition_id', 'bloque_definitions'],
+  ['staff', 'profile_id', 'profiles'], ['staff_areas', 'staff_id', 'staff'],
   ['servicio_tarifas_versiones', 'servicio_id', 'servicios'], ['servicio_tarifas_versiones', 'creado_por', 'staff'],
   ['servicios', 'linea_id', 'lineas_negocio'], ['labels', 'created_by', 'profiles'],
-  ...['lineas_negocio', 'bloque_configs', 'custom_fields', 'labels', 'servicios', 'servicio_tarifas_versiones', 'fiscal_profiles',
-    'contactos', 'negocios', 'cotizaciones', 'staff', 'profiles', 'cotizacion_itinerarios', 'wa_collaborators', 'activity_log',
-    'tabla_sin_clasificar'].map(t => [t, 'workspace_id', 'workspaces']),
-].map(([tabla, columna, apunta]) => ({ tabla, columna, apunta }))
+  ['profiles', 'home_workspace_id', 'workspaces'], ['activity_log', 'autor_id', 'staff'], ['activity_log', 'mencion_id', 'staff'],
+  ['stage_transition_rules', 'desde_stage_id', 'workspace_stages'], ['stage_transition_rules', 'hasta_stage_id', 'workspace_stages'],
+  ...['lineas_negocio', 'bloque_configs', 'custom_fields', 'custom_field_mappings', 'labels', 'servicios', 'servicio_tarifas_versiones',
+    'fiscal_profiles', 'contactos', 'negocios', 'cotizaciones', 'staff', 'profiles', 'cotizacion_itinerarios', 'wa_collaborators',
+    'activity_log', 'tabla_sin_clasificar', 'workspace_features', 'expense_categories', 'workspace_stages', 'stage_transition_rules'].map(t => [t, 'workspace_id', 'workspaces']),
+].map(([tabla, columna, apunta]) => ({ tabla, columna, apunta }) as LlaveForanea).concat([
+  // Las que no frenan el borrado (acción en su migración).
+  { tabla: 'workspaces', columna: 'linea_activa_id', apunta: 'lineas_negocio', alBorrar: 'set null' }, // 20260409000001
+  { tabla: 'cotizaciones', columna: 'tarifa_aceptada_id', apunta: 'cotizacion_itinerarios', alBorrar: 'set null' }, // 20260923200000
+  { tabla: 'items', columna: 'opcion_de', apunta: 'items', alBorrar: 'cascade' }, // 20260914200000
+])
 
 /**
  * Los triggers de la base que el clonador tiene que respetar: al nacer un workspace la base le
@@ -201,6 +220,11 @@ const DISPARADORES = {
     if (tabla !== 'etapas_negocio') return
     ;(estado.etapas_nombres_anteriores ??= []).push({ id: `nombre-${String(fila.id)}`, linea_id: fila.linea_id, etapa_id: null, nombre: fila.nombre, origen: 'eliminada' })
   },
+}
+
+/** Las tablas del doble y sus columnas (lo que la prueba cruza contra los tipos de la base). */
+export function esquemaDelDoble(): Record<string, string[]> {
+  return esquemaDe(tablasDelDoble())
 }
 
 export function crearAlmacenDoble(opts: { usuarios?: { id: string; correo: string }[]; archivos?: { bucket: string; ruta: string }[] } = {}) {
