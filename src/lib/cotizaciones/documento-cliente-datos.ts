@@ -25,6 +25,7 @@ import {
   type ViajeParaRedactar,
 } from './documento-cliente'
 import { normalizarTerminos } from './terminos-cotizacion'
+import { leerAnticipo, type AnticipoPropuesta } from './propuesta/anticipo'
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type Supabase = any
@@ -50,6 +51,8 @@ export interface ContextoTextoCliente {
    * de la agencia (`config_extra.terminos_base` y `config_extra.ejemplos_texto`).
    */
   configLinea: ConfigTextoDeLinea
+  /** El anticipo guardado en la misma columna (`anticipo.ts`): quien escribe el texto lo conserva. */
+  anticipo: AnticipoPropuesta | null
 }
 
 interface FilaItem {
@@ -161,5 +164,6 @@ export async function leerContextoTextoCliente(
     huella: huellaDeViaje(viaje),
     terminos: normalizarTerminos(fila.terminos_condiciones),
     configLinea: leerConfigTextoDeLinea(configExtraLinea),
+    anticipo: leerAnticipo(fila.documento_cliente),
   }
 }

@@ -26,10 +26,14 @@
  * La tarifa que en los datos se llama «Premium» se le muestra al cliente como «Superior»
  * (`nombreDeTarifaParaCliente`). El nombre guardado no cambia.
  *
- * ## Lo que este modelo NO decide
- * - La cancelación de cada hotel viaja en el modelo, pero imprimirla es la decisión 3 de Noor,
- *   que sigue abierta. Hoy el PDF no la imprime.
- * - El 10 % para apartar no existe aquí: el plan es el de la línea (decisión 4 de Noor).
+ * ## Decisiones de Mauricio del 2026-10-14 (vinculantes)
+ * 1. Los nombres de pila de los niños van en la propuesta SOLO si el cliente autorizó el
+ *    tratamiento de datos de menores (`nombresParaLaPropuesta`). Hoy ONE no guarda esos
+ *    nombres: el dato queda listo, con su guarda, para el texto generado (PR 6).
+ * 2. La propuesta NO muestra políticas de cancelación de hoteles. `cancelacion` viaja en el
+ *    modelo (la pantalla la usa) pero ninguna plantilla de la propuesta la imprime.
+ * 3. Sin anticipo fijo: el que la asesora asignó a mano (`anticipo.ts`), o ninguna cifra. El
+ *    llamado a apartar abre el WhatsApp de la asesora, no un link de pago.
  */
 import type { CotizacionPDFProps, FotoPDF } from '@/lib/pdf/cotizacion-props'
 import type { HotelPDF, ServicioPDF, VueloPDF } from '@/lib/cotizaciones/detalle-viaje'
@@ -50,6 +54,7 @@ import { tituloDeBloquePDF } from '@/lib/cotizaciones/itinerarios'
 import { claveTarifa } from '@/lib/cotizaciones/tarifas'
 import { textoIvaIncluido } from '@/lib/fiscal/iva-cotizacion'
 import { asiPuedesPagar, type AsiPuedesPagar } from '@/lib/viaje/asi-puedes-pagar'
+import type { AnticipoPropuesta } from './anticipo'
 
 // ── Entrada ───────────────────────────────────────────────────────────────────
 
@@ -60,9 +65,23 @@ export interface ServicioDelDocumento extends ServicioPDF {
   tarifas?: number[]
 }
 
+/** Un viajero con nombre. `menor` = niño o infante. */
+export interface ViajeroConNombre {
+  nombre: string
+  menor: boolean
+}
+
 export interface EntradaModeloPropuesta {
   props: CotizacionPDFProps
   servicios?: ServicioDelDocumento[]
+  /** Decisión 1: los viajeros con nombre, si ONE los tiene. */
+  viajeros?: ViajeroConNombre[]
+  /** Decisión 1: la casilla `menores` de la autorización de datos, vigente (`autorizacion_datos_estado`). */
+  menoresAutorizados?: boolean
+  /** Decisión 3: el anticipo que la asesora asignó en esta cotización. */
+  anticipo?: AnticipoPropuesta | null
+  /** Decisión 3: quien atiende al cliente; su WhatsApp es el botón de apartar. */
+  asesora?: { nombre: string | null; whatsapp: string | null } | null
 }
 
 // ── Salida ────────────────────────────────────────────────────────────────────
@@ -199,6 +218,8 @@ export interface ModeloPropuesta {
     duracion: string | null
     foto: FotoPDF | null
     fotosCiudades: FotoPDF[]
+    /** Decisión 1: nombres de pila que se pueden imprimir (los de menores solo con autorización). */
+    nombres: string[]
   }
   ruta: { origen: string | null; paradas: ParadaDoc[]; regreso: string | null }
   dias: DiaDoc[]
@@ -224,12 +245,18 @@ export interface ModeloPropuesta {
     noIncluye: string[]
     /** Uno por tarifa (en el orden de `tarifas`), o uno solo con el total. Vacío sin plan en la línea. */
     planes: PlanDoc[]
+    /** Decisión 3: el anticipo asignado a mano. `null` = la propuesta no dice ninguna cifra para apartar. */
+    anticipo: AnticipoPropuesta | null
   }
   formal: {
     terminos: string | null
     pie: string
     firma: { nombre: string; cargo: string | null; contacto: string | null } | null
     creditos: string[]
+    /** «Antes de viajar» del texto revisado (`documento_cliente`). */
+    antesDeViajar: string[]
+    /** Decisión 3: a quién le escribe el cliente para apartar. */
+    asesora: { nombre: string | null; whatsapp: string | null } | null
   }
   /** Lo que no cuadra y alguien tiene que mirar antes de imprimir. */
   avisos: string[]
@@ -336,9 +363,31 @@ function cargoDelHotel(props: CotizacionPDFProps, h: HotelPDF): string | null {
   return delHotel ? `${delHotel.concepto}: ${delHotel.monto}` : null
 }
 
+/**
+ * Decisión 1: los nombres de pila que la propuesta puede decir. Los adultos siempre; los de
+ * los menores, solo con la autorización de datos de menores vigente. Sin autorización, el
+ * menor no se nombra (la portada dice «2 niños», como hoy). Solo el primer nombre.
+ */
+export function nombresParaLaPropuesta(viajeros: readonly ViajeroConNombre[], menoresAutorizados: boolean): string[] {
+  const salida: string[] = []
+  for (const v of viajeros) {
+    if (v.menor && !menoresAutorizados) continue
+    const pila = v.nombre.trim().split(/\s+/)[0] ?? ''
+    if (pila && !salida.includes(pila)) salida.push(pila)
+  }
+  return salida
+}
+
 // ── El modelo ─────────────────────────────────────────────────────────────────
 
-export function modeloDePropuesta({ props, servicios = [] }: EntradaModeloPropuesta): ModeloPropuesta {
+export function modeloDePropuesta({
+  props,
+  servicios = [],
+  viajeros = [],
+  menoresAutorizados = false,
+  anticipo = null,
+  asesora = null,
+}: EntradaModeloPropuesta): ModeloPropuesta {
   const v = props.viaje ?? null
   const inicio = v?.fechaInicio ?? null
   const avisos: string[] = []
@@ -516,6 +565,7 @@ export function modeloDePropuesta({ props, servicios = [] }: EntradaModeloPropue
       duracion: v?.duracion ?? null,
       foto: v?.foto ?? null,
       fotosCiudades: v?.fotosCiudades ?? [],
+      nombres: nombresParaLaPropuesta(viajeros, menoresAutorizados),
     },
     ruta,
     dias,
@@ -535,12 +585,15 @@ export function modeloDePropuesta({ props, servicios = [] }: EntradaModeloPropue
       incluye: v?.incluye ?? [],
       noIncluye,
       planes,
+      anticipo: anticipo && anticipo.monto > 0 ? anticipo : null,
     },
     formal: {
       terminos: props.cotizacion.terminos_condiciones ?? null,
       pie,
       firma,
       creditos: creditosDeFotos([v?.foto, ...(v?.fotosCiudades ?? [])]),
+      antesDeViajar: v?.antesDeViajar ?? [],
+      asesora,
     },
     avisos,
   }

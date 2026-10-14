@@ -17,6 +17,7 @@ import {
 import { LIMITE_TERMINOS, normalizarTerminos, terminosAlAbrir } from '@/lib/cotizaciones/terminos-cotizacion'
 import { lineasPropias } from '@/lib/cotizaciones/incluye-por-one'
 import { formatBogotaFechaHora } from '@/lib/dates/bogota'
+import AnticipoPropuestaPanel from './anticipo-propuesta-panel'
 
 /**
  * «Texto para el cliente» (Trappvel): lo que el documento dice del viaje con palabras, no
@@ -505,6 +506,11 @@ export default function DocumentoClientePanel({
             Guardar texto revisado
           </button>
         </div>
+      )}
+
+      {/* Decisión del 2026-10-14 (3): el anticipo lo asigna la asesora; solo con la propuesta nueva. */}
+      {panel.imprimeAnticipo && (
+        <AnticipoPropuestaPanel cotizacionId={cotizacionId} inicial={panel.anticipo ?? null} editable={editable} />
       )}
     </section>
   )

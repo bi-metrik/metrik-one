@@ -22,6 +22,7 @@
  *    desactualizado. La huella se calcula sobre la MISMA entrada que ve el modelo.
  */
 
+import type { AnticipoPropuesta } from './propuesta/anticipo'
 import type { ViajePDF } from '@/lib/pdf/cotizacion-props'
 import type { Composicion } from './tarifa-pasajero'
 import {
@@ -235,6 +236,13 @@ export interface PanelTextoCliente {
    * propone en un borrador sin términos (`terminosAlAbrir`); el PDF nunca las lee.
    */
   terminosBase: string | null
+  /**
+   * El anticipo para apartar que la asesora asignó (decisión del 2026-10-14, `anticipo.ts`).
+   * Vive en la misma columna que el texto, con su propio ciclo de vida.
+   */
+  anticipo?: AnticipoPropuesta | null
+  /** ¿El documento lo imprime? Solo con el motor `html` encendido en el workspace. */
+  imprimeAnticipo?: boolean
 }
 
 // ── La entrada del modelo ─────────────────────────────────────────────────────

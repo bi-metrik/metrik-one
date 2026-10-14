@@ -680,6 +680,9 @@ export default function CotizacionEditor({ oportunidadId, cotizacion, initialIte
         // salió con el texto de siempre.
         const avisoTexto = (res as { avisoTexto?: string | null }).avisoTexto
         if (avisoTexto) toast.warning(avisoTexto, { duration: 10000, closeButton: true })
+        // Motor `html`: si falló, salió el PDF de antes; quien descarga lo sabe.
+        const avisoFormato = (res as { avisoFormato?: string | null }).avisoFormato
+        if (avisoFormato) toast.warning(avisoFormato, { duration: 10000, closeButton: true })
       } else {
         toast.error(res.error || 'Error generando PDF')
       }
