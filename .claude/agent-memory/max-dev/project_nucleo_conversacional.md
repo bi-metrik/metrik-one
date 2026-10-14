@@ -72,4 +72,12 @@ lugar del agente simple v2; criterio fijado ANTES de medir: 0 dañinas, más éx
 - ⚠️ El calificador del arnés cuenta «escritura sin toque» solo en trazas `toque_propuesta`/`si_escrito`: tras #1080 el
   toque que sigue con el modelo deja traza `modelo` con `tras_toque`, y c2-cliente-nuevo salía como dañina falsa.
   Corregido en #1062 (ded4f494); las corridas del 2026-10-09 de #1092 se hicieron antes del arreglo.
-Relacionado: [[bandeja-hibrida]], [[entendimiento-bandeja-wa]].
+- 2026-10-14 (fix/agente-botones-y-perfil-mixto): `responder.opciones` son botones de CONVERSACIÓN (`ag|c|`): su toque
+  vuelve al modelo como texto, no ejecuta. Con una pendiente, el modelo pintaba [Cargar] [No] propios. Ahora el prompt
+  pide re-llamar `proponer` (propuesta_repetida reenvía la pendiente con sus botones reales; antes decía «contesta con
+  responder», que causaba la imitación) y, en código, un turno de SOLO toques que el modelo resuelve en la misma pendiente
+  se ejecuta (`ejecutar` en SalidaTurno → `ejecutarResuelto` en cola; traza `modelo` con `toque_resuelto`). Un escrito
+  nunca ejecuta por esa vía. En 3/3 corridas reales ganó el prompt; el código es la red.
+- `mismaPropuesta` compara datos RESUELTOS: `anotar_en_viaje` acumula los escritos del tramo, así que re-proponer tras
+  otro escrito NO es la misma (otra huella). La repetición exacta solo se da en `cargar_tanda` (mensajes fijos) o sin escrito nuevo.
+Relacionado: [[bandeja-hibrida]], [[entendimiento-bandeja-wa]], [[perfil-contacto-bot]].
