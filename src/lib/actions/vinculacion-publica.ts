@@ -82,7 +82,12 @@ export type CampoPublico = {
   value: unknown;
   origen: string;
   confirmado: boolean;
+  /** La misma regla del gate de firma en Valida: lo que la firma exige. */
   requiere_confirmacion: boolean;
+  /** Nombre legible del campo. Opcional mientras Valida no lo mande. */
+  etiqueta?: string;
+  /** El documento no lo trae: la contraparte lo escribe, no lo confirma en blanco. */
+  manual?: boolean;
 };
 
 export type VistaPublica = {
