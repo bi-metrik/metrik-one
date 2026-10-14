@@ -3,6 +3,7 @@
 import { registrarAprobacionEntrada, type EntradaAprobacion } from '@/lib/valida-api/entrada-aprobacion'
 import type { ResultadoAprobarEntrada } from '@/lib/valida-api/resultados'
 import { entradaValidaCda } from './puerta'
+import { asegurarCobroDelEspacio } from '@/lib/valida-registro/activacion-servidor'
 
 /**
  * El «Acepto» de los términos de Valida para los CDA.
@@ -23,10 +24,14 @@ export async function aprobarEntradaValidaCda(input: EntradaAprobacion): Promise
   // voluntaria, con el mismo mecanismo y la misma constancia. Sin modificación, `yaEstaba`.
   const estado =
     entrada.estado.estado === 'aprobada' && entrada.modificacion !== null ? entrada.modificacion : entrada.estado
-  return registrarAprobacionEntrada(
+  const r = await registrarAprobacionEntrada(
     { workspaceId: entrada.workspaceId, usuarioId: entrada.usuarioId, producto: 'valida_cda' },
     estado,
     entrada.hoy,
     input,
   )
+  // Cuenta autogestionada: al aceptar los Términos del plan nace su plan de cobro, para pagar de una
+  // vez. En un CDA de hoy no hace nada (solo mira espacios del registro autogestionado).
+  if (r.ok && !r.yaEstaba) await asegurarCobroDelEspacio(entrada.workspaceId)
+  return r
 }

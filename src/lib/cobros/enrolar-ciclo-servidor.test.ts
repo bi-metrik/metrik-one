@@ -269,6 +269,22 @@ describe('Valida por CDA (decisión del 2026-10-09)', () => {
     expect(d.tablas.planes_cobro?.[0].auto_renovar).toBe(false)
   })
 
+  it('la cuenta autogestionada (dias_trial 0) se enrola sola al aceptar, angostada a SU contrato', async () => {
+    const AUTO = { ...CDA, id: 'c-auto', negocio_id: 'n-auto', parametros: { precio_mensual: 150_000, dias_trial: 0, limite_consultas_mes: 3000 } }
+    const d = dobleConRpc(
+      tablasBase({
+        servicios_contratados: [CDA, AUTO],
+        aceptaciones_terminos: [aceptacionCda, { id: 'a-auto', negocio_id: 'n-auto', estado: 'aceptado', respondido_at: '2026-10-12T15:00:00Z' }],
+        workspaces: [{ id: WS, config_extra: {} }],
+      }),
+    )
+    const r = await enrolarContratosPorCiclo({ db: d.db, contratoId: 'c-auto', adapterPara: (x) => (x === 'bold' ? ({ crearEnlacePago: async () => null } as never) : null) })
+    expect(r.candidatos).toBe(1)
+    expect(r.creados).toHaveLength(1)
+    expect(r.creados[0]).toMatchObject({ contratoId: 'c-auto', finTrial: '2026-10-12' })
+    expect(d.llamadas.map((l) => l.args.p_servicio_contratado_id)).toEqual(['c-auto'])
+  })
+
   it('sin días de trial en el contrato ni en la ficha no se enrola (la ficha v1 no los declara)', async () => {
     const d = dobleConRpc(
       tablasBase({

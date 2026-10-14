@@ -38,7 +38,7 @@ export default async function ValidaPage({ searchParams }: Props) {
   const svc = createServiceClient();
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const { data: wsRow } = await (svc.from('workspaces') as any)
-    .select('modules, config_extra, name, slug')
+    .select('modules, config_extra')
     .eq('id', workspaceId)
     .single();
   const modules = (wsRow?.modules ?? {}) as Record<string, boolean>;
@@ -219,7 +219,6 @@ export default async function ValidaPage({ searchParams }: Props) {
       consultasEnPausa={enPausa ? <PausaPorMora mora={enPausa} vePagos={vePagos} /> : null}
       consultasRestringidas={restringido ? <ConsultasRestringidas /> : null}
       saldo={saldo}
-      espacio={(wsRow?.name as string | undefined)?.trim() || (wsRow?.slug as string | undefined) || ''}
     />
   );
 }

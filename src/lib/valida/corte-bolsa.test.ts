@@ -118,18 +118,17 @@ describe('el mes del plan pagado (autogestionado)', () => {
   it('el corte no ofrece «activar» un plan que ya está activo', () => {
     expect(textoCorte('bolsa_agotada', false).titulo).toBe('Llegaste al límite de consultas de este mes')
     expect(textoCorte('bolsa_vencida', false).titulo).toBe('Tu mes de Valida terminó')
-    expect(accionDelCorte(false, 'X')).toEqual({ texto: 'Ver mi suscripción', ruta: '/suscripcion' })
-    expect(accionDelCorte(true, 'X').texto).toBe('Activar plan')
+    expect(accionDelCorte(false)).toEqual({ texto: 'Ver mi suscripción', ruta: '/suscripcion' })
+    expect(accionDelCorte(true)).toEqual({ texto: 'Activar plan', ruta: '/valida/activar' })
   })
 })
 
-describe('enlaceActivarPlan (temporal, hasta #1107)', () => {
+describe('enlaceActivarPlan (respaldo con la activación cerrada)', () => {
   it('abre el WhatsApp de MéTRIK con el espacio en el texto', () => {
     const url = enlaceActivarPlan('Transportes Ñandú S.A.S.')
     expect(url.startsWith('https://wa.me/573159509103?text=')).toBe(true)
     expect(decodeURIComponent(url.split('?text=')[1])).toBe(
       'Hola, quiero activar el plan de Valida para Transportes Ñandú S.A.S.',
     )
-    expect(accionDelCorte(true, 'Transportes Ñandú S.A.S.').ruta).toBe(url)
   })
 })

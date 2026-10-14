@@ -126,8 +126,6 @@ type Props = {
    * reemplaza los formularios de consulta.
    */
   saldo?: SaldoBolsa | null;
-  /** Nombre del espacio (o su slug): va en el mensaje de WhatsApp de «Activar plan». */
-  espacio?: string;
 };
 
 export default function ValidaClient({
@@ -140,13 +138,12 @@ export default function ValidaClient({
   consultasEnPausa = null,
   consultasRestringidas: restringidasPorMora = null,
   saldo = null,
-  espacio = '',
 }: Props) {
   const [saldoLocal, setSaldoLocal] = useState<SaldoBolsa | null>(saldo);
   const [corte, setCorte] = useState<MotivoCorte | null>(saldo?.bloqueada ? (saldo.motivo ?? 'bolsa_agotada') : null);
   // La mora manda (es un contrato con cuotas vencidas); si no, el corte de la bolsa.
   const consultasRestringidas =
-    restringidasPorMora ?? (corte ? <ActivaTuPlan motivo={corte} esPrueba={saldoLocal?.esPrueba ?? false} espacio={espacio} /> : null);
+    restringidasPorMora ?? (corte ? <ActivaTuPlan motivo={corte} esPrueba={saldoLocal?.esPrueba ?? false} /> : null);
   const [tab, setTab] = useState<TabKey>(negocioInicial || consultasRestringidas ? 'historial' : 'puntual');
   const [historial, setHistorial] = useState<ConsultaHistorialItem[]>(historialInicial);
   const [historialError, setHistorialError] = useState<string | null>(errorHistorial);
@@ -183,7 +180,7 @@ export default function ValidaClient({
       </div>
 
       {encabezado}
-      {saldoLocal && !corte && !consultasEnPausa && !restringidasPorMora && <SaldoConsultas saldo={saldoLocal} espacio={espacio} />}
+      {saldoLocal && !corte && !consultasEnPausa && !restringidasPorMora && <SaldoConsultas saldo={saldoLocal} />}
 
       <div className="space-y-6">
       {consultasEnPausa ? consultasEnPausa : (<>
@@ -236,7 +233,6 @@ export default function ValidaClient({
           onCorte={setCorte}
           onConsumidas={n => setSaldoLocal(s => (s ? { ...s, saldo: Math.max(0, s.saldo - n) } : s))}
           esPrueba={saldoLocal?.esPrueba ?? false}
-          espacio={espacio}
         />
       )}
       {tab === 'historial' && (
@@ -299,8 +295,6 @@ type PropsForm = {
   onConsumidas?: (n: number) => void;
   /** La bolsa es la prueba gratis (cambia el texto del corte). */
   esPrueba?: boolean;
-  /** Nombre del espacio, para el mensaje de «Activar plan». */
-  espacio?: string;
 };
 
 function ConsultaPuntualForm({ onPersisted, modoVitrina = false, onCorte, onConsumidas }: PropsForm) {
@@ -735,7 +729,7 @@ function severidadesIniciales(): Record<Severidad, number> {
 
 type ResultadoFila = Severidad | MotivoCorte;
 
-function ConsultaMasivaForm({ onPersisted, modoVitrina = false, onCorte, onConsumidas, esPrueba = false, espacio = '' }: PropsForm) {
+function ConsultaMasivaForm({ onPersisted, modoVitrina = false, onCorte, onConsumidas, esPrueba = false }: PropsForm) {
   const [archivo, setArchivo] = useState<File | null>(null);
   const [titulo, setTitulo] = useState('');
   const [negocioLote, setNegocioLote] = useState<NegocioBusqueda | null>(null);
@@ -889,7 +883,6 @@ function ConsultaMasivaForm({ onPersisted, modoVitrina = false, onCorte, onConsu
       {estado.fase === 'completado' ? (
         <ResumenCargueCompletado
           esPrueba={esPrueba}
-          espacio={espacio}
           estado={estado}
           pendingPDF={pendingPDF}
           errorPDF={errorPDF}
@@ -1079,10 +1072,8 @@ function ResumenCargueCompletado({
   onDescargar,
   onReiniciar,
   esPrueba,
-  espacio,
 }: {
   esPrueba: boolean;
-  espacio: string;
   estado: Extract<EstadoCargue, { fase: 'completado' }>;
   pendingPDF: boolean;
   errorPDF: string | null;
@@ -1111,7 +1102,7 @@ function ResumenCargueCompletado({
               ? '1 fila quedó sin consultar y no se cobró.'
               : `${estado.corte.sinConsultar} filas quedaron sin consultar y no se cobraron.`}
           </p>
-          <ActivaTuPlan motivo={estado.corte.motivo} esPrueba={esPrueba} espacio={espacio} />
+          <ActivaTuPlan motivo={estado.corte.motivo} esPrueba={esPrueba} />
         </div>
       )}
 
