@@ -68,7 +68,7 @@ import { bloquesPorRanura, esNombreDeOpcion, tipoDeDefinicion, type BloqueDeLine
 import CostoManualItem from '@/app/(app)/negocios/costo-manual-item'
 import AdicionalesItem from '@/app/(app)/negocios/adicionales-item'
 import DocumentoClientePanel from '@/app/(app)/negocios/documento-cliente-panel'
-import type { FilaAdicional } from '@/lib/cotizaciones/adicionales'
+import { adjuntarAdicionales, type FilaAdicional } from '@/lib/cotizaciones/adicionales'
 import { estadoDelTexto, type PanelTextoCliente } from '@/lib/cotizaciones/documento-cliente'
 import { terminosAlAbrir } from '@/lib/cotizaciones/terminos-cotizacion'
 
@@ -841,7 +841,11 @@ export default function CotizacionEditor({ oportunidadId, cotizacion, initialIte
   // Los números de la cotización salen de la MISMA cascada que aplica el servidor al
   // guardar. Calcularlos aquí por separado fue exactamente el defecto anterior: la
   // pantalla mostraba un total y la base guardaba otro.
-  const paraCascada = initialItems.map(item => {
+  // H27 (prueba Europa, 2026-10-14) · con los adicionales de cada variante, emparejados por id: lo
+  // mismo que `recalcularTotales` y `contextoDeCotizacion`. Sin ellos la pantalla mostraba un total
+  // (y un plan de pagos) por debajo de la Recomendada justo en la maleta de bodega, mientras la
+  // base, la tabla de tarifas y el PDF sí la cobraban.
+  const paraCascada = adjuntarAdicionales(initialItems.map(item => {
     const rubros = item.rubros ?? []
     const delDesglose = costoDeRubrosConfirmados(rubros)
     return {
@@ -858,7 +862,7 @@ export default function CotizacionEditor({ oportunidadId, cotizacion, initialIte
       // Punto 11 del brief del 2026-10-05: lo mismo que `recalcularTotales`.
       pasajeros: pasajerosParaCuadre(item.tarifa_pax, delDesglose.costoDeRubros),
     }
-  })
+  }), Object.values(adicionales.porItem).flat())
   const paramsCascada = {
     administrativosPct: (Number(cotizacion.aiu_admin_pct) || 0) + (Number(cotizacion.aiu_imprevistos_pct) || 0),
     margenPct: margenCotizacion,
