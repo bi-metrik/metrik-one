@@ -2,6 +2,7 @@
 
 ## Project memories
 
+- ⚠️⚠️ [Factura electrónica automática (Aliaddo)](project_facturacion_electronica_aliaddo.md) — apagada; migración 20261014233000 SIN aplicar; numeración a mano; CDA fuera
 - ⚠️ [Espacio de pruebas trappvel-pruebas](project_espacio_pruebas_trappvel.md) — script SIN correr en prod; sin almacén propio no hay fotos; preview sin GEMINI
 - ⚠️⚠️ [F7/F8 Trappvel: SQL 11→9, clon e interruptores](project_f7_configurar_linea_trappvel.md) — SIN correr; gates 3-4 sin interruptor; cola F5 no filtra es_prueba
 - ⚠️⚠️ [Post-cotización ola 5: F4 entrega y F6 cierre](project_post_cotizacion_f4_f6.md) — #1131 migración contacto_documentos SIN aplicar; pila hasta #1133
@@ -121,6 +122,7 @@
 ## Referencias
 
 - [Build en worktree sin una dependencia](reference_build_en_worktree.md) — copiar el paquete, no symlink (raíz de Turbopack)
+- ⚠️ [Worktree aislado ocupado por otro Max](reference_worktree_ocupado_por_otro_max.md) — otro worktree, scratchpad + cp, commit por plumbing
 - [Comandos en worktree aislado](reference_worktree_aislado_comandos.md) — editar y mutar con python; git siempre simple
 - [Frentes secundarios](indice_frentes_secundarios.md) — ~145 entradas viejas: cobros, Valida, SOENA, recibos, Siigo, recetas; buscar ahí antes de crear
 

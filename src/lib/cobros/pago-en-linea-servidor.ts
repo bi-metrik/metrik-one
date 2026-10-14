@@ -2,6 +2,7 @@ import 'server-only'
 import type { SupabaseClient } from '@supabase/supabase-js'
 import { registrarActividad } from '@/lib/activity/registrar-actividad'
 import { todayBogotaISO } from '@/lib/dates/bogota'
+import { facturarCobroTrasPago } from '@/lib/facturacion-electronica/emision-servidor'
 import { adapterPara } from '@/lib/suscripciones/pasarela/registro'
 import type { EventoPasarela, PasarelaAdapter } from '@/lib/suscripciones/pasarela/adapter'
 import { createServiceClient } from '@/lib/supabase/server'
@@ -158,6 +159,13 @@ export function repoPagoEnLinea(dbCliente: SupabaseClient, pasarela: string, ada
         },
         `webhook-${pasarela}`,
       )
+    },
+
+    // La factura electrónica del pago (apagada sin FACTURACION_ELECTRONICA_HABILITADA): encola y
+    // emite después de responder. Cubre el webhook y el cobro con tarjeta del cron (#1110), que
+    // registran por este mismo repositorio.
+    facturarPago(cobro) {
+      return facturarCobroTrasPago(dbCliente, cobro.id)
     },
   }
 }

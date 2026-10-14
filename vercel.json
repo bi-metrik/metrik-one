@@ -21,6 +21,10 @@
       "schedule": "0 12 * * *"
     },
     {
+      "path": "/api/crons/facturas-electronicas",
+      "schedule": "*/30 * * * *"
+    },
+    {
       "path": "/api/crons/drive-health",
       "schedule": "0 13 * * *"
     },
