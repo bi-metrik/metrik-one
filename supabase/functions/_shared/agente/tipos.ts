@@ -269,6 +269,11 @@ export interface Traza {
    * es de tipo `modelo` (así cuenta en el uso del mes) y trae la `ejecucion` del toque.
    */
   tras_toque?: { origen: 'toque_propuesta' | 'si_escrito'; resultado: 'propuesta' | 'respuesta' | 'terminar' | 'solo_hecho' } | null;
+  /**
+   * El turno fue solo toques (un botón de la conversación) y el modelo lo resolvió en la propuesta pendiente: se ejecutó
+   * esa (`huella`). La traza es de tipo `modelo` y trae la `ejecucion`.
+   */
+  toque_resuelto?: { huella: string } | null;
   salida?: Salida | null;
   /** Los mensajes que salieron después de `salida` en el mismo turno (un cierre del dominio con varios mensajes). */
   salidas_extra?: Salida[] | null;

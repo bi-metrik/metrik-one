@@ -111,7 +111,12 @@ function normal(s: string): string {
  * Lo que la extracción le pide al modelo y lo que él devuelve (la salida cruda, como la de Gemini). En las pruebas es un
  * guion: así se prueba lo que el código hace con la salida, sin llamar a ningún modelo.
  */
-export type ExtractorMemoria = (p: { textos: string[]; mensajes: string; campos: CampoEntendible[]; yaTiene: Record<string, unknown>; instrucciones: string }) => Promise<unknown>;
+/**
+ * `perfil`: las instrucciones se armaron con el párrafo del perfil, así que el esquema tiene que traer `perfil` (como en
+ * producción, `prepararCarga` de `produccion.ts`). Sin él, el esquema de respuesta no deja al modelo devolver lo de la
+ * persona aunque el prompt se lo pida (cp-mixto, 2026-10-14).
+ */
+export type ExtractorMemoria = (p: { textos: string[]; mensajes: string; campos: CampoEntendible[]; yaTiene: Record<string, unknown>; instrucciones: string; perfil?: boolean }) => Promise<unknown>;
 
 /**
  * El directorio, los viajes y lo escrito. Sin `campos`, la extracción es determinista (sin modelo): guarda los textos
@@ -209,7 +214,7 @@ export class PuertoMemoria implements PuertoBandeja {
     if (this.campos && this.extraer) {
       this.extracciones.push([...textos]);
       const data = { destino: v.destino, ...v.datos };
-      const raw = await this.extraer({ textos, mensajes: mensajesDeTextos(textos).map((m) => `[${m.n}] ${m.cuerpo}`).join('\n'), campos: this.campos, yaTiene: data, instrucciones: instruccionesCarga(this.campos, this.hoyISO(), data, propuestoDe(previo), undefined, { perfil: true }) });
+      const raw = await this.extraer({ textos, mensajes: mensajesDeTextos(textos).map((m) => `[${m.n}] ${m.cuerpo}`).join('\n'), campos: this.campos, yaTiene: data, instrucciones: instruccionesCarga(this.campos, this.hoyISO(), data, propuestoDe(previo), undefined, { perfil: true }), perfil: true });
       return planDeCarga({ bloques: [{ fields: this.campos, data }], textos, raw, hoyISO: this.hoyISO(), ahoraIso: new Date(this.ahora()).toISOString(), previo });
     }
     const antes = (previo as { textos?: string[] } | undefined)?.textos ?? [];

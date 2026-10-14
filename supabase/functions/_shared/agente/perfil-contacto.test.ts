@@ -357,6 +357,19 @@ describe('mixto: una solicitud que trae datos de la persona', () => {
     expect(e.puerto.escrituras.map((x) => x.tipo)).toEqual(['carga', 'perfil', 'perfil'])
   })
 
+  it('el extractor recibe `perfil` junto con las instrucciones del perfil: el esquema tiene que dejar devolverlo', async () => {
+    // Arnés con Gemini real, 2026-10-14 (cp-mixto): las instrucciones pedían `perfil` pero el arnés mandaba el esquema
+    // sin él, y el esquema de respuesta manda: el modelo no podía devolver lo de la persona. Producción sí lo pedía.
+    const vistos: Array<{ perfil?: boolean; instrucciones: string }> = []
+    const extraer: ExtractorMemoria = async (x) => { vistos.push(x); return extraerMixto(x) }
+    const e = await mundo({ viajes: [VIAJE], campos: CAMPOS, extraer, guion: guionMixto })
+    await e.escribe(MIXTO)
+    expect(vistos).toHaveLength(1)
+    expect(vistos[0].perfil).toBe(true)
+    expect(vistos[0].instrucciones).toContain('perfil: lo que dicen de la PERSONA')
+    expect((esquemaCarga(CAMPOS, { perfil: vistos[0].perfil }).properties as Record<string, unknown>).perfil).toBeDefined()
+  })
+
   it('sin autorización: lo del viaje se carga, lo de la persona NO, y se dice', async () => {
     const e = await mundo({ viajes: [VIAJE], campos: CAMPOS, extraer: extraerMixto, guion: guionMixto, autorizados: [] })
     await e.escribe(MIXTO)

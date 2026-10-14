@@ -50,6 +50,11 @@ export interface SalidaTurno {
   seguir?: boolean;
   /** Mensajes que salen después de `salida`, en orden (un cierre del dominio con varios mensajes). */
   extras?: Salida[];
+  /**
+   * El turno era solo toques de la persona y el modelo lo resolvió en la MISMA propuesta pendiente: la cola la ejecuta
+   * como el toque de su botón (`ejecutarResuelto`). Lleva la huella de la pendiente.
+   */
+  ejecutar?: string;
 }
 
 /** Cierra el turno que sigue a un hecho sin decir nada más (la persona ya tiene la confirmación). */
@@ -360,6 +365,11 @@ export async function turnoDelModelo(deps: DepsTurno, e: EntradaTurno): Promise<
       const vig = propuestaVigente(e.filas);
       if (vig && mismaPropuesta(vig, p.propuesta)) {
         traza.candados!.push({ candado: 'propuesta_repetida', detalle: `${accion}: igual a la pendiente ${vig.huella}` });
+        // Un botón que la persona ve ejecuta algo: si lo que llegó fueron solo toques (un botón de la conversación) y el
+        // modelo los leyó como esta misma propuesta, se ejecuta como el toque de su botón. Visto en el arnés
+        // (2026-10-14, c1-1215): el toque de un «Cargar» de `responder` volvía a proponer y no cargaba nada. Un escrito
+        // no ejecuta (para eso está el «sí» solo); un hecho recién confirmado tampoco encadena otro.
+        if (!e.tras && soloToques(e.nuevos)) return { ...fin(null, { tema: 'propuesta' }), ejecutar: vig.huella };
         return fin(salidaPropuesta(vig, arriba ?? TEXTO_PROPUESTA_PENDIENTE), { tema: 'propuesta', ...(arriba ? {} : { respuesta_fija: 'propuesta_pendiente' }) });
       }
       const huella = await huellaPropuesta(accion, p.propuesta.datos, e.turnoId);
@@ -404,6 +414,37 @@ export async function turnoDelModelo(deps: DepsTurno, e: EntradaTurno): Promise<
     return fin(conHecho(render.salida));
   }
   return fin(caer(), { error: 'tope de llamados sin respuesta' });
+}
+
+/** ¿Lo que llegó en el turno (sin contar reenvíos) son solo toques? Estructural: la clase de la fila. Pura. */
+export function soloToques(nuevos: FilaConversacion[]): boolean {
+  const delEquipo = nuevos.filter((f) => f.clase !== 'reenvio');
+  return delEquipo.length > 0 && delEquipo.every((f) => f.clase === 'toque');
+}
+
+/**
+ * Une la traza del turno del modelo que resolvió un toque con la de la ejecución (y la del turno que la siguió, si el
+ * dominio lo pidió): una sola traza de tipo `modelo` (así cuenta en el uso del mes) con la `ejecucion` y la marca
+ * `toque_resuelto`. Pura.
+ */
+export function unirToqueResuelto(m: Traza, s: Traza, huella: string): Traza {
+  const suma = (a?: number, b?: number) => (a ?? 0) + (b ?? 0);
+  return {
+    ...s,
+    tipo: 'modelo',
+    bot: m.bot,
+    reglamento: m.reglamento,
+    llamados: suma(m.llamados, s.llamados),
+    uso: [...(m.uso ?? []), ...(s.uso ?? [])],
+    herramientas: [...(m.herramientas ?? []), ...(s.herramientas ?? [])],
+    candados: [...(m.candados ?? []), ...(s.candados ?? [])],
+    verificador: [...(m.verificador ?? []), ...(s.verificador ?? [])],
+    reglas_usadas: [...(m.reglas_usadas ?? []), ...(s.reglas_usadas ?? [])],
+    ms_modelo: suma(m.ms_modelo, s.ms_modelo),
+    ms_herramientas: suma(m.ms_herramientas, s.ms_herramientas),
+    tema: s.tema ?? m.tema ?? null,
+    toque_resuelto: { huella },
+  };
 }
 
 // ── El toque de una propuesta (y el «sí» escrito solo), sin modelo ────────────
