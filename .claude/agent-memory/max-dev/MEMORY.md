@@ -2,6 +2,7 @@
 
 ## Project memories
 
+- ⚠️ [Propuesta de viaje: Chromium (#1161) y modelo (#1162)](project_propuesta_chromium_modelo.md) — sin mergear; vercel curl crea bypass (no); Montserrat OTF
 - ⚠️ [SOE-016: responsable automático por etapa](project_responsable_automatico_etapa.md) — sin migración; config SOENA SIN aplicar; crear negocio no cubierto
 - ⚠️⚠️ [Espacio de pruebas trappvel-pruebas](project_espacio_pruebas_trappvel.md) — 2 --apply fallidos; restos 90226eac en prod; ensayo PGlite antes del próximo
 - ⚠️⚠️ [F7/F8 Trappvel: SQL 11→9, clon e interruptores](project_f7_configurar_linea_trappvel.md) — SIN correr; gates 3-4 sin interruptor; cola F5 no filtra es_prueba
