@@ -19,6 +19,8 @@
  *    (`config_extra.espacio_de_pruebas = true` y `clon_de = <origen>`).
  *  · Un alias que ya es de otro workspace no se mueve.
  *  · `--apply` se niega con tablas sin clasificar que tengan filas de la cliente.
+ *  · Un workspace de pruebas sin `config_extra.clon_completo` son RESTOS de una corrida que
+ *    falló: el plan los señala (`destino.restos`) y `--apply` los purga antes de crear.
  */
 
 import type { Almacen, Fila, Filtro } from './almacen'
@@ -85,7 +87,11 @@ interface InformePlan {
 
 export interface Plan {
   origen: { id: string; slug: string }
-  destino: { id: string; slug: string; existe: boolean }
+  /**
+   * `existe`: el espacio ya está completo y solo se completan usuarios y semillas. `restos`: el
+   * id de un workspace de pruebas a medio crear (sin `clon_completo`), que hay que purgar antes.
+   */
+  destino: { id: string; slug: string; existe: boolean; restos: string | null }
   usuarios: (UsuarioDePrueba & { id: string | null; staffId: string; existe: boolean })[]
   pasos: Paso[]
   informe: InformePlan
@@ -113,6 +119,34 @@ const REFERENCIAS_DIFERIDAS: Readonly<Record<string, readonly string[]>> = {
   cotizaciones: ['tarifa_aceptada_id', 'duplicada_de'], // → cotizacion_itinerarios (hija de la cotización) / a sí misma
   items: ['opcion_de'], // → items
   contactos: ['fuente_promotor_id'], // → contactos
+}
+
+/**
+ * Columnas `GENERATED ALWAYS` de las tablas que escribe el plan, MEDIDAS en producción
+ * (`information_schema.columns.is_generated = 'ALWAYS'`, 2026-10-14). La base rechaza cualquier
+ * valor en ellas, null incluido: «cannot insert a non-DEFAULT value into column». El segundo
+ * `--apply` cayó así en `rubros.valor_total` (= cantidad × valor_unitario): la semilla copia los
+ * rubros del caso fijo tal cual. Si el almacén sabe leerlas (`Almacen.generadas`), se suman; el de
+ * Supabase no puede (PostgREST no expone `information_schema`) y además reintenta sin la columna
+ * que la base nombre en ese error.
+ */
+export const COLUMNAS_GENERADAS: Readonly<Record<string, readonly string[]>> = {
+  rubros: ['valor_total'],
+}
+
+/** Quita de cada paso las columnas generadas: la base las calcula. */
+export function sinGeneradas(pasos: Paso[], generadas: Readonly<Record<string, readonly string[]>>): Paso[] {
+  const limpiar = (tabla: string, f: Fila): Fila => {
+    const cols = generadas[tabla]
+    if (!cols?.length || !cols.some(c => c in f)) return f
+    return Object.fromEntries(Object.entries(f).filter(([k]) => !cols.includes(k)))
+  }
+  return pasos.flatMap((p): Paso[] => {
+    if (p.tipo === 'insertar') return [{ ...p, filas: p.filas.map(f => limpiar(p.tabla, f)) }]
+    if (p.tipo === 'guardar') return [{ ...p, fila: limpiar(p.tabla, p.fila) }]
+    const patch = limpiar(p.tabla, p.patch)
+    return Object.keys(patch).length ? [{ ...p, patch }] : []
+  })
 }
 
 /** Saca de los inserts las referencias de `REFERENCIAS_DIFERIDAS` y las fija al final. */
@@ -166,19 +200,28 @@ export async function planificar(a: Almacen, o: OpcionesPlan): Promise<Plan> {
 
   const [origen] = await a.leer('workspaces', [['slug', 'eq', o.origen]])
   if (!origen) throw new Error(`No existe el workspace de origen «${o.origen}».`)
-  const [previo] = await a.leer('workspaces', [['slug', 'eq', o.destino]])
-  if (previo) {
-    const cfg = (previo.config_extra ?? {}) as Record<string, unknown>
+  const [encontrado] = await a.leer('workspaces', [['slug', 'eq', o.destino]])
+  let restos: string | null = null
+  if (encontrado) {
+    const cfg = (encontrado.config_extra ?? {}) as Record<string, unknown>
     if (cfg.espacio_de_pruebas !== true || cfg.clon_de !== o.origen) {
       throw new Error(`El workspace «${o.destino}» ya existe y no es un espacio de pruebas de «${o.origen}». No se toca.`)
     }
+    // Sin la marca del último paso, es lo que dejó una corrida que falló: se purga y se recrea.
+    if (cfg.clon_completo !== true) restos = String(encontrado.id)
   }
+  const previo = restos ? undefined : encontrado
   const wsId = previo ? String(previo.id) : o.nuevoId()
+  const libre = (ws: unknown) => !ws || ws === wsId || (restos !== null && ws === restos)
   const informe: InformePlan = {
     clavesCopiadas: [], clavesDescartadas: [], modulosApagados: [], llavesQuitadas: [], datosPersonales: [],
     uuidsSueltos: [], excluidas: [], sinClasificar: [], semillas: [], avisos: [],
   }
   const pasos: Paso[] = []
+  if (restos) {
+    informe.avisos.push(`Hay restos de una corrida que falló (workspace ${restos} sin terminar): --apply los borra antes de crear.`)
+  }
+  let configCreada: Record<string, unknown> | null = null
 
   // ── Usuarios de prueba ─────────────────────────────────────────────────────
   const usuarios: Plan['usuarios'] = []
@@ -188,14 +231,14 @@ export async function planificar(a: Almacen, o: OpcionesPlan): Promise<Plan> {
     let existe = false
     if (id) {
       const [perfil] = await a.leer('profiles', [['id', 'eq', id]])
-      if (perfil?.workspace_id && perfil.workspace_id !== wsId) {
+      if (!libre(perfil?.workspace_id)) {
         throw new Error(`${u.correo} ya es usuario de otro workspace (${String(perfil.workspace_id)}). No se mueve.`)
       }
       const [staff] = await a.leer('staff', [['profile_id', 'eq', id]])
-      if (staff && staff.workspace_id !== wsId) {
+      if (staff && !libre(staff.workspace_id)) {
         throw new Error(`${u.correo} ya tiene staff en otro workspace (${String(staff.workspace_id)}). No se mueve.`)
       }
-      if (staff) {
+      if (staff && staff.workspace_id === wsId) {
         staffId = String(staff.id)
         existe = true
       }
@@ -307,13 +350,13 @@ export async function planificar(a: Almacen, o: OpcionesPlan): Promise<Plan> {
         profession: origen.profession ?? null,
         linea_activa_id: lineaActiva, // circular con lineas_negocio: va en null y se fija al final (REFERENCIAS_DIFERIDAS)
         modules: modulos.copiados,
-        config_extra: {
+        config_extra: (configCreada = {
           ...cfg,
           espacio_de_pruebas: true,
           clon_de: o.origen,
           grupo: 'demo',
           cotizacion_por_pasos: { activo: true },
-        },
+        }),
       }],
     })
     // Personas antes que la configuración: hay columnas de configuración que apuntan a staff y perfiles.
@@ -372,7 +415,20 @@ export async function planificar(a: Almacen, o: OpcionesPlan): Promise<Plan> {
   // ── Semillas ───────────────────────────────────────────────────────────────
   pasos.push(...(await pasosDeSemillas(a, o, { wsId, existe: !!previo, lineas, etapas, bloques, asesoraStaffId: asesora.staffId }, informe)))
 
-  return { origen: { id: String(origen.id), slug: o.origen }, destino: { id: wsId, slug: o.destino, existe: !!previo }, usuarios, pasos: diferirReferencias(pasos), informe }
+  const generadas: Record<string, readonly string[]> = { ...COLUMNAS_GENERADAS }
+  for (const [t, cols] of Object.entries((await a.generadas?.()) ?? {})) generadas[t] = [...new Set([...(generadas[t] ?? []), ...cols])]
+  const finales = diferirReferencias(sinGeneradas(pasos, generadas))
+  // El último paso marca el espacio como terminado: sin esta marca, la próxima corrida lo trata
+  // como restos de una que falló.
+  if (configCreada) finales.push({ tipo: 'actualizar', tabla: 'workspaces', id: wsId, patch: { config_extra: { ...configCreada, clon_completo: true } } })
+
+  return {
+    origen: { id: String(origen.id), slug: o.origen },
+    destino: { id: wsId, slug: o.destino, existe: !!previo, restos },
+    usuarios,
+    pasos: finales,
+    informe,
+  }
 }
 
 function pasosDeUsuarios(usuarios: Plan['usuarios'], wsId: string, perfilDe: (u: Plan['usuarios'][number]) => string): Paso[] {
@@ -465,6 +521,7 @@ async function pasosDeSemillas(
 
 /** Escribe el plan. Los usuarios de Auth ya tienen que existir (`crearUsuarios`). */
 export async function ejecutar(a: Almacen, plan: Plan): Promise<void> {
+  if (plan.destino.restos) throw new Error(`Hay restos de una corrida anterior (${plan.destino.restos}): purgarlos y volver a planificar antes de escribir.`)
   for (const p of plan.pasos) {
     if (p.tipo === 'insertar') await a.insertar(p.tabla, p.filas)
     else if (p.tipo === 'guardar') await a.guardar(p.tabla, p.fila, p.conflicto)
@@ -472,9 +529,11 @@ export async function ejecutar(a: Almacen, plan: Plan): Promise<void> {
   }
 }
 
-/** Crea en Auth los usuarios de prueba que falten. Devuelve los ids creados (para deshacer). */
-export async function crearUsuarios(a: Almacen, correoBase: string, destino: string): Promise<string[]> {
-  const creados: string[] = []
+/**
+ * Crea en Auth los usuarios de prueba que falten. Devuelve los ids creados (para deshacer); si
+ * se pasa `creados`, los va anotando ahí, así un fallo a mitad no los pierde.
+ */
+export async function crearUsuarios(a: Almacen, correoBase: string, destino: string, creados: string[] = []): Promise<string[]> {
   for (const u of usuariosDePrueba(correoBase, destino)) {
     if (await a.buscarUsuario(u.correo)) continue
     creados.push(await a.crearUsuario(u.correo, u.nombre))
@@ -492,7 +551,36 @@ export interface InformeBorrado {
   usuariosBorrados: string[]
   archivosBorrados: number
   workspaceBorrado: boolean
+  /** Lo que quedó sin borrar, dicho en llano: el informe siempre termina diciéndolo. */
+  pendientes: string[]
 }
+
+/** Por dónde avisa el borrado de su avance (el script lo imprime: sin esto, minutos en silencio). */
+export type Avisar = (mensaje: string) => void
+
+const mensaje = (e: unknown) => (e instanceof Error ? e.message : String(e))
+
+function informeVacio(): InformeBorrado {
+  return { borradas: {}, residuo: {}, errores: {}, bloqueos: [], usuariosBorrados: [], archivosBorrados: 0, workspaceBorrado: false, pendientes: [] }
+}
+
+/** Corre `f`; si falla, lo anota como error y pendiente y sigue (el borrado nunca se corta sin decirlo). */
+async function intentar<T>(inf: InformeBorrado, paso: string, f: () => Promise<T>): Promise<T | undefined> {
+  try {
+    return await f()
+  } catch (e) {
+    inf.errores[paso] = mensaje(e)
+    inf.pendientes.push(`${paso}: ${mensaje(e)}`)
+    return undefined
+  }
+}
+
+/** Borrar sin lanzar: un error de red cuenta como una sentencia que no borró. */
+const borrarSinLanzar = (a: Almacen, tabla: string, filtros: Filtro[]) =>
+  a.borrar(tabla, filtros).catch(e => ({ borradas: 0, error: { message: mensaje(e) } as { code?: string; message: string } }))
+
+/** Cuántas sentencias de borrado van a la vez por pasada: de una en una, ~200 tablas son minutos. */
+const BORRADOS_A_LA_VEZ = 8
 
 /** Las columnas por las que una fila cuelga del espacio de pruebas, y de dónde salen sus ids. */
 const ENLACES: [columna: string, tabla: string, desde: (ids: Record<string, string[]>) => Filtro][] = [
@@ -514,15 +602,45 @@ const ENLACES: [columna: string, tabla: string, desde: (ids: Record<string, stri
  * volver a sembrar). Recorre todas las tablas de la base que cuelgan del workspace por alguna
  * de sus columnas y repite por pasadas: lo que una llave foránea frena en una pasada sale en la
  * siguiente, cuando ya no tiene hijos. Lo que quede se informa como residuo.
+ *
+ * Después de las filas, en este orden: archivos (si fallan, se anota y se sigue), perfiles de los
+ * alias (cuelgan del workspace), el workspace y al final las cuentas de Auth. Ningún paso de
+ * borrado lanza: lo que no se pudo queda en `pendientes`.
+ *
+ * Sin workspace, igual limpia los alias huérfanos (cuenta sin perfil, o perfil sin workspace):
+ * así `--borrar --apply` deja cero restos aunque una corrida anterior se cortara.
+ *
+ * `conocidos`: ids de Auth que se sabe que son alias (los creados en esta corrida), por si Auth no
+ * responde a la búsqueda por correo.
  */
-export async function purgar(a: Almacen, o: { origen: string; destino: string; correoBase: string; soloSemillas?: boolean }): Promise<InformeBorrado> {
-  const inf: InformeBorrado = { borradas: {}, residuo: {}, errores: {}, bloqueos: [], usuariosBorrados: [], archivosBorrados: 0, workspaceBorrado: false }
+export async function purgar(
+  a: Almacen,
+  o: { origen: string; destino: string; correoBase: string; soloSemillas?: boolean },
+  avisar: Avisar = () => {},
+  conocidos: string[] = [],
+): Promise<InformeBorrado> {
+  const inf = informeVacio()
   if (o.destino === o.origen) throw new Error('El destino no puede ser el origen.')
   const [ws] = await a.leer('workspaces', [['slug', 'eq', o.destino]])
-  if (!ws) return inf
-  const cfg = (ws.config_extra ?? {}) as Record<string, unknown>
-  if (cfg.espacio_de_pruebas !== true || cfg.clon_de !== o.origen) {
-    throw new Error(`«${o.destino}» no es un espacio de pruebas de «${o.origen}»: no se borra.`)
+  if (ws) {
+    const cfg = (ws.config_extra ?? {}) as Record<string, unknown>
+    if (cfg.espacio_de_pruebas !== true || cfg.clon_de !== o.origen) {
+      throw new Error(`«${o.destino}» no es un espacio de pruebas de «${o.origen}»: no se borra.`)
+    }
+  }
+
+  // Los alias en Auth (por correo; si Auth no responde, quedan los conocidos).
+  const idsAlias: string[] = [...conocidos]
+  if (!o.soloSemillas) {
+    for (const u of usuariosDePrueba(o.correoBase, o.destino)) {
+      const id = await intentar(inf, `buscar ${u.correo} en Auth`, () => a.buscarUsuario(u.correo))
+      if (id && !idsAlias.includes(id)) idsAlias.push(id)
+    }
+  }
+
+  if (!ws) {
+    if (!o.soloSemillas) await borrarAlias(a, inf, idsAlias, null, avisar)
+    return inf
   }
   const wsId = String(ws.id)
   const esquema = await a.tablas()
@@ -547,19 +665,16 @@ export async function purgar(a: Almacen, o: { origen: string; destino: string; c
   }
 
   // Los perfiles que están parados en este workspace y no son los alias: no se borran ni se mueven.
-  const alias = usuariosDePrueba(o.correoBase, o.destino)
-  const idsAlias: string[] = []
-  for (const u of alias) {
-    const id = await a.buscarUsuario(u.correo)
-    if (id) idsAlias.push(id)
-  }
   if (!o.soloSemillas) {
     for (const col of ['workspace_id', 'home_workspace_id']) {
       for (const p of await a.leer('profiles', [[col, 'eq', wsId]])) {
         if (!idsAlias.includes(String(p.id))) inf.bloqueos.push(`El perfil ${String(p.id)} (${String(p.full_name ?? '')}) tiene ${col} en este workspace: muévelo antes de borrarlo.`)
       }
     }
-    if (inf.bloqueos.length) return inf
+    if (inf.bloqueos.length) {
+      inf.pendientes.push(`No se borró nada del workspace ${wsId}: hay perfiles ajenos parados en él.`)
+      return inf
+    }
   }
 
   // Qué (tabla, columna, ids) hay que vaciar.
@@ -575,58 +690,120 @@ export async function purgar(a: Almacen, o: { origen: string; destino: string; c
   }
   if (o.soloSemillas && ids.negocio_id.length) objetivos.push({ tabla: 'negocios', filtro: ['id', 'in', ids.negocio_id] })
 
-  for (let pasada = 0; pasada < 12; pasada++) {
-    let avance = false
-    for (const ob of objetivos) {
-      if ((await a.contar(ob.tabla, [ob.filtro])) === 0) continue
-      const r = await a.borrar(ob.tabla, [ob.filtro])
-      if (r.borradas > 0) {
-        avance = true
-        inf.borradas[ob.tabla] = (inf.borradas[ob.tabla] ?? 0) + r.borradas
-      }
-      if (r.error) inf.errores[ob.tabla] = r.error.message
-      else delete inf.errores[ob.tabla]
+  // Pasadas de borrado. Cada objetivo es UNA sentencia (el DELETE dice cuántas borró; antes se
+  // contaba y luego se borraba, el doble de llamadas, en serie y sin imprimir nada). Una pasada
+  // sin avance termina: lo que quedó con error es el residuo, y solo eso se cuenta al final.
+  avisar(`Borrando filas: ${objetivos.length} pares tabla·columna del workspace ${wsId}…`)
+  let conError: typeof objetivos = []
+  for (let pasada = 1; pasada <= 12; pasada++) {
+    let avance = 0
+    conError = []
+    for (let k = 0; k < objetivos.length; k += BORRADOS_A_LA_VEZ) {
+      const tanda = objetivos.slice(k, k + BORRADOS_A_LA_VEZ)
+      const resultados = await Promise.all(tanda.map(ob => borrarSinLanzar(a, ob.tabla, [ob.filtro])))
+      tanda.forEach((ob, n) => {
+        const r = resultados[n]
+        if (r.borradas > 0) {
+          avance += r.borradas
+          inf.borradas[ob.tabla] = (inf.borradas[ob.tabla] ?? 0) + r.borradas
+        }
+        if (r.error) {
+          inf.errores[ob.tabla] = r.error.message
+          conError.push(ob)
+        } else delete inf.errores[ob.tabla]
+      })
     }
+    avisar(`  pasada ${pasada}: ${avance} filas borradas${conError.length ? `, ${conError.length} sentencias frenadas` : ''}`)
     if (!avance) break
   }
-  for (const ob of objetivos) {
-    const n = await a.contar(ob.tabla, [ob.filtro])
-    if (n > 0) inf.residuo[ob.tabla] = (inf.residuo[ob.tabla] ?? 0) + n
+  for (const ob of conError) {
+    const n = await intentar(inf, `contar ${ob.tabla}`, () => a.contar(ob.tabla, [ob.filtro]))
+    if (n) inf.residuo[ob.tabla] = (inf.residuo[ob.tabla] ?? 0) + n
   }
-  if (o.soloSemillas || Object.keys(inf.residuo).length) return inf
-
-  // Archivos del workspace (y de sus negocios) en Storage.
-  const archivos = [
-    ...(await a.archivos(`${wsId}/`)),
-    ...(await Promise.all((ids.negocio_id ?? []).map(n => a.archivos(`negocios/${n}/`)))).flat(),
-  ]
-  if (archivos.length) await a.borrarArchivos(archivos)
-  inf.archivosBorrados = archivos.length
-
-  // Los alias: perfil y cuenta.
-  for (const id of idsAlias) {
-    const r = await a.borrar('profiles', [['id', 'eq', id]])
-    if (r.error) {
-      inf.errores.profiles = r.error.message
-      continue
-    }
-    await a.borrarUsuario(id)
-    inf.usuariosBorrados.push(id)
+  if (o.soloSemillas) return inf
+  if (Object.keys(inf.residuo).length) {
+    inf.pendientes.push(`Quedan filas en ${Object.keys(inf.residuo).join(', ')}: no se borran los alias ni el workspace ${wsId}.`)
+    return inf
   }
-  const r = await a.borrar('workspaces', [['id', 'eq', wsId]])
-  if (r.error) inf.errores.workspaces = r.error.message
-  inf.workspaceBorrado = !r.error && r.borradas === 1
+
+  // Archivos del workspace (y de sus negocios) en Storage. Si Storage no responde, se anota y se sigue.
+  avisar('Revisando archivos en Storage…')
+  await intentar(inf, 'archivos', async () => {
+    const archivos = [
+      ...(await a.archivos(`${wsId}/`)),
+      ...(await Promise.all((ids.negocio_id ?? []).map(n => a.archivos(`negocios/${n}/`)))).flat(),
+    ]
+    if (archivos.length) await a.borrarArchivos(archivos)
+    inf.archivosBorrados = archivos.length
+  })
+
+  await borrarAlias(a, inf, idsAlias, wsId, avisar)
   return inf
 }
 
-/** Deshace un `--apply` que falló a medias: borra lo escrito y los usuarios creados en esta corrida. */
-export async function deshacer(a: Almacen, o: { origen: string; destino: string; correoBase: string }, creados: string[]): Promise<InformeBorrado> {
-  const inf = await purgar(a, o)
-  for (const id of creados) {
-    if (inf.usuariosBorrados.includes(id)) continue
-    await a.borrar('profiles', [['id', 'eq', id]])
-    await a.borrarUsuario(id)
-    inf.usuariosBorrados.push(id)
+/**
+ * Perfiles de los alias, luego el workspace, luego las cuentas de Auth: el perfil cuelga del
+ * workspace y de la cuenta. Un perfil parado en OTRO workspace no se toca (ni su cuenta). Cada
+ * paso anota lo que no pudo y sigue.
+ */
+async function borrarAlias(a: Almacen, inf: InformeBorrado, idsAlias: string[], wsId: string | null, avisar: Avisar) {
+  const cuentas: string[] = []
+  for (const id of idsAlias) {
+    const leidos = await intentar(inf, `leer perfil ${id}`, () => a.leer('profiles', [['id', 'eq', id]]))
+    if (!leidos) continue
+    const perfil = leidos[0]
+    if (perfil?.workspace_id && perfil.workspace_id !== wsId) {
+      inf.pendientes.push(`El alias ${id} tiene perfil en otro workspace (${String(perfil.workspace_id)}): no se toca.`)
+      continue
+    }
+    if (perfil) {
+      avisar(`Borrando el perfil ${id}…`)
+      const r = await borrarSinLanzar(a, 'profiles', [['id', 'eq', id]])
+      if (r.error) {
+        inf.errores[`profiles ${id}`] = r.error.message
+        inf.pendientes.push(`Perfil ${id} sin borrar: ${r.error.message}`)
+        continue
+      }
+      inf.borradas.profiles = (inf.borradas.profiles ?? 0) + r.borradas
+    }
+    cuentas.push(id)
   }
-  return inf
+
+  if (wsId) {
+    avisar(`Borrando el workspace ${wsId}…`)
+    const r = await borrarSinLanzar(a, 'workspaces', [['id', 'eq', wsId]])
+    if (r.error) inf.errores.workspaces = r.error.message
+    inf.workspaceBorrado = !r.error && r.borradas === 1
+    if (!inf.workspaceBorrado) inf.pendientes.push(`Workspace ${wsId} sin borrar${r.error ? `: ${r.error.message}` : ''}.`)
+  }
+
+  for (const id of cuentas) {
+    avisar(`Borrando la cuenta ${id} de Auth…`)
+    const ok = await intentar(inf, `cuenta ${id} en Auth`, async () => {
+      await a.borrarUsuario(id)
+      return true
+    })
+    if (ok) inf.usuariosBorrados.push(id)
+  }
+}
+
+/**
+ * Deshace un `--apply` que falló a medias: borra lo escrito y los usuarios creados en esta corrida
+ * (`creados` cuentan como alias aunque Auth no responda a la búsqueda por correo). Nunca lanza:
+ * si algo no se pudo, queda en `pendientes`, y la próxima corrida encuentra los restos.
+ */
+export async function deshacer(
+  a: Almacen,
+  o: { origen: string; destino: string; correoBase: string },
+  creados: string[],
+  avisar: Avisar = () => {},
+): Promise<InformeBorrado> {
+  try {
+    return await purgar(a, o, avisar, creados)
+  } catch (e) {
+    const inf = informeVacio()
+    inf.errores.purgar = mensaje(e)
+    inf.pendientes.push(`El borrado se cortó: ${mensaje(e)}`)
+    return inf
+  }
 }
