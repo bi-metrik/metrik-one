@@ -288,14 +288,28 @@ export const NOMBRE_TIPO_BLOQUE: Record<TipoRanura | 'otro', string> = {
 export { equipajeDeTramo }
 
 /**
+ * La ruta de la IDA de un vuelo: la ciudad de salida del primer tramo, la de llegada del ÚLTIMO
+ * y la fecha de salida (H9, prueba Europa del 2026-10-14). Con una escala guardada como dos
+ * tramos de ida (BOG→CDG, CDG→MAD), el destino es Madrid, no París: tomar el primer tramo
+ * abría «Vuelo 2» para un vuelo con escala del mismo trayecto, y la ida se cobraba dos veces.
+ */
+export function rutaDeVueloDeOpcion(item: ItemConLectura): { origen: string | null; destino: string | null; fecha: string | null } {
+  const idas = tramosDelItem(item).tramos.filter(t => t.sentido === 'ida')
+  const primero = idas.find(t => t.origen) ?? idas[0]
+  const ultimo = [...idas].reverse().find(t => t.destino) ?? idas[idas.length - 1]
+  const fecha = idas.find(t => t.fecha)?.fecha ?? null
+  return { origen: primero?.origen ?? null, destino: ultimo?.destino ?? null, fecha }
+}
+
+/**
  * Dónde queda una opción, para agrupar capturas en la bandeja (P7): la ruta de la ida en un
  * vuelo, la ciudad en un hotel. `null` en lo que la lectura no dejó.
  */
 export function lugarDeOpcion(item: ItemConLectura): { lugar: string | null; origen: string | null; destino: string | null } {
   const ranura = ranuraDelItem(item)
   if (ranura?.slug === 'vuelo_detalle') {
-    const ida = tramosDelItem(item).tramos.find(t => t.sentido === 'ida')
-    return { lugar: null, origen: ida?.origen ?? null, destino: ida?.destino ?? null }
+    const { origen, destino } = rutaDeVueloDeOpcion(item)
+    return { lugar: null, origen, destino }
   }
   if (ranura?.slug === 'hotel_detalle') {
     const [h] = hotelesDeItems([item])
