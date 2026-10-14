@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import {
+  enlaceActivarPlan,
   motivoCorteDeError,
   pruebaDeConfig,
   saldoDePruebaVencida,
@@ -101,5 +102,15 @@ describe('textos', () => {
     expect(saldoDePruebaVencida(prueba)).toMatchObject({ bloqueada: true, motivo: 'bolsa_vencida', esPrueba: true })
     expect(textoCorte('bolsa_vencida', true).titulo).toBe('Tu prueba terminó')
     expect(textoCorte('bolsa_agotada', true).titulo).toBe('Usaste todas tus consultas de prueba')
+  })
+})
+
+describe('enlaceActivarPlan (temporal, hasta #1107)', () => {
+  it('abre el WhatsApp de MéTRIK con el espacio en el texto', () => {
+    const url = enlaceActivarPlan('Transportes Ñandú S.A.S.')
+    expect(url.startsWith('https://wa.me/573159509103?text=')).toBe(true)
+    expect(decodeURIComponent(url.split('?text=')[1])).toBe(
+      'Hola, quiero activar el plan de Valida para Transportes Ñandú S.A.S.',
+    )
   })
 })
