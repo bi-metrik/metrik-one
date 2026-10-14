@@ -2,7 +2,7 @@
 // Arnés del núcleo conversacional — la corrida (Deno)
 // ------------------------------------------------------------
 // Uso (la llave llega por GEMINI_API_KEY; nunca se imprime):
-//   deno run -A --node-modules-dir=none supabase/functions/_shared/agente/arnes/correr.ts --salida <dir> [--conjunto 1|2|todo]
+//   deno run -A --node-modules-dir=none supabase/functions/_shared/agente/arnes/correr.ts --salida <dir> [--conjunto 1|2|perfil|todo]
 //     [--solo id1,id2] [--temperatura 0] [--seco] [--humo]
 // --seco   sin red: modelo falso (prueba de cañería, no mide nada).
 // --humo   UNA llamada mínima a gemini-3.8-flash y sale. Si da 429 o cuota, se para ahí.
@@ -22,7 +22,10 @@ import type { PrecioModelo } from '../uso.ts';
 import { sumarUso } from '../uso.ts';
 import { calificar, tabla } from './calificar.ts';
 import type { ResultadoCaso } from './calificar.ts';
-import { CAMPOS_ARNES, CONJUNTO_1, CONJUNTO_2 } from './conjuntos.ts';
+import { CAMPOS_ARNES, CONJUNTO_1, CONJUNTO_2, CONJUNTO_PERFIL } from './conjuntos.ts';
+import { reglamentoDePrueba } from '../escenario.ts';
+import { REGLAMENTO_ANEXO_A } from '../bandeja/reglamento-anexo-a.ts';
+import { conPerfil } from '../bandeja/reglamento-perfil.ts';
 import { extraccionGemini, MODELO_EXTRACCION } from './extraccion-gemini.ts';
 import type { CasoArnes } from './conjuntos.ts';
 import { promptSimulador, simular, transcripcionParaSimulador } from './simulador.ts';
@@ -90,7 +93,10 @@ const extracciones: Array<{ ms: number; ok: boolean }> = [];
 
 async function correrCaso(caso: CasoArnes): Promise<{ r: ResultadoCaso; usoSimulador: UsoLlamado[]; comercial: string[] }> {
   const conExtraccion = caso.extraccion ? { campos: CAMPOS_ARNES, extraer: seco ? extraccionSeca : extraccionGemini(LLAVE, extracciones) } : {};
-  const e = await escenario({ modelo: modeloParaCaso(), contactos: caso.contactos, viajes: caso.viajes, reloj: () => performance.now(), ...conExtraccion });
+  // El reglamento que tendrá Trappvel al publicar las fichas del perfil (2026-10-12): todos los casos corren con él.
+  const reglamento = await reglamentoDePrueba(conPerfil(REGLAMENTO_ANEXO_A));
+  const e = await escenario({ modelo: modeloParaCaso(), contactos: caso.contactos, viajes: caso.viajes, reglamento, reloj: () => performance.now(), ...conExtraccion });
+  for (const id of caso.autorizados ?? []) e.puerto.autorizaciones.set(id, { estado: 'autorizado', fecha: '2026-10-01T15:00:00Z', menores: false });
   if (caso.semilla) e.semilla(caso.semilla);
   const comercial: string[] = [];
   const usoSimulador: UsoLlamado[] = [];
@@ -177,7 +183,9 @@ if (import.meta.main) {
   if (!salida) { console.error('falta --salida <dir>'); Deno.exit(2); }
   const conjunto = arg('--conjunto') ?? 'todo';
   const solo = arg('--solo')?.split(',');
-  const casos = [...(conjunto === '2' ? [] : CONJUNTO_1), ...(conjunto === '1' ? [] : CONJUNTO_2)].filter((c) => !solo || solo.includes(c.id));
+  const casos = (conjunto === 'perfil' ? CONJUNTO_PERFIL : [
+    ...(conjunto === '2' ? [] : CONJUNTO_1), ...(conjunto === '1' ? [] : CONJUNTO_2), ...(conjunto === 'todo' ? CONJUNTO_PERFIL : []),
+  ]).filter((c) => !solo || solo.includes(c.id));
   const resultados: ResultadoCaso[] = [];
   const transcripciones: string[] = [];
   const usoSim: UsoLlamado[] = [];

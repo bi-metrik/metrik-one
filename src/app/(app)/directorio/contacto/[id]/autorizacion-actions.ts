@@ -10,6 +10,7 @@ import {
   pedirEnlace,
 } from '@/lib/autorizacion-datos/servidor'
 import { MENSAJE_SIN_CORREO } from '@/lib/autorizacion-datos/correo'
+import { contactoYResponsable } from '@/lib/contactos/permiso-contacto'
 import {
   armarVista,
   puedePedirAutorizacion,
@@ -48,30 +49,15 @@ async function contextoDelContacto(contactoId: string, pedir: boolean): Promise<
   if (!config.activa) return { error: null, workspaceId, staffId: staffId ?? null, contactoId, puedePedir: false, activa: false }
   if (!puedeVerAutorizacion(role)) return { error: SIN_ACCESO }
 
-  const { data: c } = await (supabase as Cliente)
-    .from('contactos')
-    .select('id, responsable_id')
-    .eq('id', contactoId)
-    .eq('workspace_id', workspaceId)
-    .maybeSingle()
-  const contacto = c as { id: string; responsable_id: string | null } | null
-  if (!contacto) return { error: 'Contacto no encontrado' }
+  const { existe, esResponsable } = await contactoYResponsable({
+    supabase: supabase as Cliente, workspaceId, role, staffId: staffId ?? null, contactoId,
+  })
+  if (!existe) return { error: 'Contacto no encontrado' }
 
   // Los viajes son de Clarity: como en `guard-negocio`, sin el módulo no se pide nada.
   const modulo = await exigirModulo(REQUISITO.clarity)
   if (!modulo.ok) return { error: modulo.error === 'no_autenticado' ? 'No autenticado' : MENSAJE_MODULO_NO_ACTIVO }
 
-  let esResponsable = !!staffId && contacto.responsable_id === staffId
-  if (!esResponsable && staffId && role === 'operator') {
-    const { data: filas } = await (supabase as Cliente)
-      .from('negocio_responsables')
-      .select('negocio_id, negocios!inner(contacto_id, workspace_id)')
-      .eq('staff_id', staffId)
-      .eq('negocios.contacto_id', contactoId)
-      .eq('negocios.workspace_id', workspaceId)
-      .limit(1)
-    esResponsable = ((filas ?? []) as unknown[]).length > 0
-  }
   const puedePedir = puedePedirAutorizacion(role, esResponsable)
   if (pedir && !puedePedir) return { error: 'Tu rol no permite pedir la autorización de este contacto' }
   return { error: null, workspaceId, staffId: staffId ?? null, contactoId, puedePedir, activa: true }

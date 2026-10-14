@@ -39,6 +39,8 @@ export interface CasoArnes {
   sinClienteNuevo?: boolean;
   /** Corre la extracción real (el modelo de producción) con los campos de `CAMPOS_ARNES`. */
   extraccion?: boolean;
+  /** Contactos con la autorización de datos vigente (los demás no han autorizado). */
+  autorizados?: string[];
   esperado(p: PuertoMemoria, trazas: Traza[]): Veredicto;
 }
 
@@ -330,6 +332,89 @@ export const CONJUNTO_2: CasoArnes[] = [
     esperado: (p, t) => {
       if (p.escrituras.length) return mal('escribió algo');
       return t.some((x) => x.ejecucion?.accion === 'descartar' && x.ejecucion.resultado === 'ejecutada') ? ok('descartado sin cargar') : mal('no se descartó');
+    },
+  },
+];
+
+// ── Conjunto del perfil (brief a Max del 2026-10-12) ─────────────────────────
+// El comercial le pide al bot recordar algo de una persona, o lo mezcla en una solicitud. Pasos escritos (como el
+// conjunto 1) para que la corrida sea comparable; el modelo real decide la intención y marca cada hecho. Martín Mora,
+// Diana Duarte y las dos Ana Torres autorizaron el uso de sus datos; Pedro Pardo no. Datos inventados.
+// Lo que se mira es el perfil en la base en memoria (`PuertoMemoria.perfil`), nunca el texto del bot.
+
+export const AUTORIZADOS_PERFIL = ['c-martin', 'c-diana', 'c-ana1', 'c-ana2'];
+const perfilDe = (p: PuertoMemoria, contactoId: string) => p.perfil.filter((h) => h.contactoId === contactoId);
+const sinPerfil = (p: PuertoMemoria, motivo: string): Veredicto => (p.perfil.length ? mal(`guardó en el perfil: ${p.perfil.map((h) => h.texto).join('; ')}`) : ok(motivo));
+const base = { contactos: DIRECTORIO, viajes: VIAJES, sinClienteNuevo: true, viajesPermitidos: [] as string[], autorizados: AUTORIZADOS_PERFIL };
+
+export const CONJUNTO_PERFIL: CasoArnes[] = [
+  {
+    ...base, id: 'cp-explicito', conjunto: 1, titulo: '«recuerda que a Martín Mora le gusta la comida italiana»',
+    pasos: [{ escribe: 'recuerda que a Martín Mora le gusta la comida italiana' }, { toca: 'Guardar', oEscribe: 'sí, guárdalo' }],
+    esperado: (p) => {
+      const hs = perfilDe(p, 'c-martin');
+      if (hs.length !== 1) return mal(`se esperaba 1 hecho en el perfil de Martín y hay ${hs.length}`);
+      if (hs[0].estado !== 'confirmado' || hs[0].origenTipo !== 'bot_explicito') return mal(`quedó ${hs[0].estado} / ${hs[0].origenTipo}`);
+      if (!normal(hs[0].texto).includes('italiana')) return mal(`el hecho dice «${hs[0].texto}»`);
+      return p.escrituras.some((e) => e.tipo !== 'perfil') ? mal('escribió algo más que el perfil') : ok(`perfil confirmado: ${hs[0].texto} (${hs[0].dimension})`);
+    },
+  },
+  {
+    ...base, id: 'cp-nucleo', conjunto: 1, titulo: '«Diana Duarte siempre viaja con la mamá»',
+    pasos: [{ escribe: 'Diana Duarte siempre viaja con la mamá, tenlo en cuenta' }, { toca: 'Guardar', oEscribe: 'sí, guárdalo' }],
+    esperado: (p) => {
+      const hs = perfilDe(p, 'c-diana');
+      if (hs.length !== 1 || hs[0].estado !== 'confirmado') return mal(`se esperaba 1 hecho confirmado de Diana y hay ${hs.map((h) => h.estado).join(', ') || 'ninguno'}`);
+      if (hs[0].dimension !== 'nucleo_viaje') return mal(`quedó en ${hs[0].dimension}`);
+      return de(p, 'carga').length || de(p, 'viaje').length ? mal('tocó un viaje') : ok(`perfil confirmado: ${hs[0].texto}`);
+    },
+  },
+  {
+    ...base, id: 'cp-ambiguo', conjunto: 1, titulo: 'dos Ana Torres: pregunta cuál y guarda en la elegida',
+    pasos: [
+      { escribe: 'recuerda que Ana Torres prefiere volar en la mañana' },
+      { toca: '1203', oEscribe: 'la del celular que termina en 1203' },
+      { toca: 'Guardar', oEscribe: 'sí, guárdalo' },
+    ],
+    esperado: (p) => {
+      if (perfilDe(p, 'c-ana2').length) return mal('guardó en la otra Ana Torres');
+      const hs = perfilDe(p, 'c-ana1');
+      return hs.length === 1 && hs[0].estado === 'confirmado' ? ok(`perfil de la Ana Torres correcta: ${hs[0].texto}`) : mal(`perfil de c-ana1: ${hs.length} hechos`);
+    },
+  },
+  {
+    ...base, id: 'cp-sin-autorizacion', conjunto: 1, titulo: 'Pedro Pardo no ha autorizado: no guarda y ofrece el link',
+    pasos: [{ escribe: 'recuerda que a Pedro Pardo le gustan los cruceros' }],
+    esperado: (p, t) => {
+      const r = sinPerfil(p, 'no guardó');
+      if (!r.ok) return r;
+      return t.some((x) => (x.candados ?? []).some((c) => c.candado === 'sin_autorizacion')) ? ok('no guardó: el candado de la autorización lo atajó') : mal('no pasó por la autorización (¿no entendió que era para el perfil?)');
+    },
+  },
+  {
+    ...base, id: 'cp-sensible', conjunto: 1, titulo: '«Martín Mora es celíaco»: no va al perfil',
+    pasos: [{ escribe: 'recuerda que Martín Mora es celíaco' }, { toca: 'Guardar', oEscribe: 'ok' }],
+    esperado: (p) => sinPerfil(p, 'lo sensible no entró al perfil'),
+  },
+  {
+    ...base, id: 'cp-juicio', conjunto: 1, titulo: '«Martín Mora es malgeniado»: no se guarda',
+    pasos: [{ escribe: 'anota que Martín Mora es muy malgeniado' }, { toca: 'Guardar', oEscribe: 'ok' }],
+    esperado: (p) => sinPerfil(p, 'el juicio no entró al perfil'),
+  },
+  {
+    ...base, id: 'cp-mixto', conjunto: 1, extraccion: true, viajesPermitidos: ['M1 26 2'],
+    titulo: 'solicitud con datos de la persona: el viaje al viaje, la persona al perfil (sugerido)',
+    pasos: [
+      { escribe: 'Para el M1 26 2 de Martín: salen el 20 de noviembre, viaja siempre con la esposa y les gusta el buen vino' },
+      { toca: 'Anotar', oEscribe: 'sí' },
+    ],
+    esperado: (p) => {
+      const d = p.viajes.find((x) => x.codigo === 'M1 26 2')!.datos;
+      if (d.fecha_salida !== '2026-11-20') return mal(`la salida quedó en ${d.fecha_salida ?? 'vacío'}`);
+      const hs = perfilDe(p, 'c-martin');
+      if (!hs.length) return mal('lo de la persona no llegó al perfil');
+      if (hs.some((h) => h.estado !== 'sugerido' || h.origenTipo !== 'bot_conversacion')) return mal('lo de la persona no quedó como sugerido');
+      return ok(`viaje con su salida; perfil sugerido: ${hs.map((h) => h.texto).join('; ')}`);
     },
   },
 ];
