@@ -153,7 +153,7 @@ function esquemaDe(tablas: Record<string, Fila[]>): Record<string, string[]> {
     negocio_bloques: ['id', 'negocio_id', 'bloque_config_id', 'estado', 'data', 'completado_at'],
     negocio_responsables: ['negocio_id', 'staff_id', 'rol'],
     items: ['id', 'cotizacion_id'],
-    rubros: ['id', 'item_id'],
+    rubros: ['id', 'item_id', 'cantidad', 'valor_unitario', 'valor_total'],
     cotizacion_itinerarios: ['id', 'workspace_id', 'cotizacion_id'],
     itinerario_opciones: ['itinerario_id', 'item_id'],
     etapas_nombres_anteriores: ['id', 'linea_id', 'etapa_id', 'nombre', 'origen'],
@@ -227,9 +227,15 @@ export function esquemaDelDoble(): Record<string, string[]> {
   return esquemaDe(tablasDelDoble())
 }
 
+/**
+ * Las columnas `GENERATED ALWAYS` de la base entre las tablas del doble (medidas en producción
+ * el 2026-10-14 sobre las tablas que escribe el clonador: solo esta). El doble las rechaza.
+ */
+export const GENERADAS: Record<string, string[]> = { rubros: ['valor_total'] }
+
 export function crearAlmacenDoble(opts: { usuarios?: { id: string; correo: string }[]; archivos?: { bucket: string; ruta: string }[] } = {}) {
   const tablas = tablasDelDoble()
-  return almacenEnMemoria({ tablas, esquema: esquemaDe(tablas), llaves: LLAVES, usuarios: opts.usuarios, archivos: opts.archivos, disparadores: DISPARADORES })
+  return almacenEnMemoria({ tablas, esquema: esquemaDe(tablas), llaves: LLAVES, generadas: GENERADAS, usuarios: opts.usuarios, archivos: opts.archivos, disparadores: DISPARADORES })
 }
 
 /** El caso fijo de C0 y su recálculo grabado, como los recibe el plan. */

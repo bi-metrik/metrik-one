@@ -16,6 +16,12 @@
  *   4. Siembra el caso fijo de San Andrés de C0 (inventado) y un negocio por variante de Vera.
  *   5. Da acceso con dos alias del correo base: dueña (autoriza bajo el mínimo) y asesora.
  *
+ * RESTOS: si una corrida anterior falló y su deshacer no terminó, el workspace queda sin la marca
+ * `config_extra.clon_completo`. El simulacro lo dice y `--apply` lo purga antes de crear.
+ *
+ * Cada llamada HTTP tiene techo (`src/lib/espacio-pruebas/red.ts`) y el borrado imprime su avance
+ * y termina SIEMPRE diciendo qué borró y qué quedó pendiente.
+ *
  * SIMULACRO POR DEFECTO: sin `--apply` no escribe nada e imprime cuántas filas escribiría por
  * tabla, qué dejó afuera y por qué.
  *
@@ -24,7 +30,8 @@
  *
  * Opciones:
  *   --apply                  Escribe de verdad. Se niega si hay tablas sin clasificar con filas.
- *   --borrar                 Borra el espacio de pruebas entero (filas, archivos, alias, workspace).
+ *   --borrar                 Borra el espacio de pruebas entero (filas, archivos, alias, workspace),
+ *                            también los restos de una corrida que falló y los alias huérfanos.
  *                            Sin --apply, solo dice que lo haría.
  *   --resembrar              Borra los negocios sembrados y los vuelve a sembrar (con --apply).
  *   --nombre "<texto>"       Nombre visible. Default: «Viajes Prueba».
@@ -58,6 +65,7 @@ import {
   type OpcionesPlan,
   type Plan,
 } from '@/lib/espacio-pruebas/plan'
+import { columnaGeneradaDelError, fetchConTiempo } from '@/lib/espacio-pruebas/red'
 
 import { casoDeC0, crearAlmacenDoble } from '../test/espacio-pruebas-doble'
 
@@ -96,8 +104,30 @@ const incluirClaves = (valor('incluir-clave') ?? '').split(',').map(s => s.trim(
 const TECHO = 1000
 const TROZO = 150
 
+/** Tope de carpetas al recorrer Storage: un listado raro no puede volverse un ciclo sin fin. */
+const TOPE_CARPETAS = 500
+
+/**
+ * Escribe; si la base rechaza una columna GENERADA que no estaba en la lista medida, la quita y
+ * repite (la sentencia que falló no escribió nada). Defensa genérica: la lista manda.
+ */
+async function sinColumnaGenerada(tabla: string, filas: Fila[], escribir: (filas: Fila[]) => Promise<{ message: string } | null>) {
+  let actuales = filas
+  for (let intento = 0; intento < 5; intento++) {
+    const error = await escribir(actuales)
+    if (!error) return
+    const col = columnaGeneradaDelError(error.message)
+    if (!col || !actuales.some(f => col in f)) throw new Error(error.message)
+    console.warn(`  (${tabla}.${col} es una columna generada: se escribe sin ella)`)
+    actuales = actuales.map(f => Object.fromEntries(Object.entries(f).filter(([k]) => k !== col)))
+  }
+  throw new Error(`${tabla}: demasiadas columnas generadas rechazadas`)
+}
+
 function almacenSupabase(url: string, llave: string): Almacen {
-  const sb: SupabaseClient = createClient(url, llave, { auth: { persistSession: false } })
+  // TODAS las llamadas (PostgREST, Auth, Storage) pasan por el fetch con techo.
+  const conTiempo = fetchConTiempo()
+  const sb: SupabaseClient = createClient(url, llave, { auth: { persistSession: false }, global: { fetch: conTiempo } })
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const aplicar = (q: any, filtros: Filtro[]) => {
     for (const [col, op, v] of filtros) q = op === 'eq' ? q.eq(col, v) : q.in(col, v)
@@ -141,17 +171,17 @@ function almacenSupabase(url: string, llave: string): Almacen {
     },
     async insertar(tabla, filas) {
       for (let k = 0; k < filas.length; k += TROZO) {
-        const { error } = await sb.from(tabla).insert(filas.slice(k, k + TROZO))
-        if (error) throw new Error(`insertar ${tabla}: ${error.message}`)
+        await sinColumnaGenerada(tabla, filas.slice(k, k + TROZO), async trozo => (await sb.from(tabla).insert(trozo)).error)
+          .catch(e => { throw new Error(`insertar ${tabla}: ${e instanceof Error ? e.message : String(e)}`) })
       }
     },
     async actualizar(tabla, id, patch) {
-      const { error } = await sb.from(tabla).update(patch).eq('id', id)
-      if (error) throw new Error(`actualizar ${tabla}: ${error.message}`)
+      await sinColumnaGenerada(tabla, [patch], async ([p]) => (await sb.from(tabla).update(p).eq('id', id)).error)
+        .catch(e => { throw new Error(`actualizar ${tabla}: ${e instanceof Error ? e.message : String(e)}`) })
     },
     async guardar(tabla, fila, conflicto = 'id') {
-      const { error } = await sb.from(tabla).upsert(fila, { onConflict: conflicto })
-      if (error) throw new Error(`guardar ${tabla}: ${error.message}`)
+      await sinColumnaGenerada(tabla, [fila], async ([f]) => (await sb.from(tabla).upsert(f, { onConflict: conflicto })).error)
+        .catch(e => { throw new Error(`guardar ${tabla}: ${e instanceof Error ? e.message : String(e)}`) })
     },
     async borrar(tabla, filtros) {
       let borradas = 0
@@ -164,7 +194,7 @@ function almacenSupabase(url: string, llave: string): Almacen {
     },
     async tablas() {
       // El OpenAPI de PostgREST: las tablas expuestas y sus columnas. Las vistas no aceptan DELETE.
-      const r = await fetch(`${url}/rest/v1/`, { headers: { apikey: llave, Authorization: `Bearer ${llave}`, Accept: 'application/openapi+json' } })
+      const r = await conTiempo(`${url}/rest/v1/`, { headers: { apikey: llave, Authorization: `Bearer ${llave}`, Accept: 'application/openapi+json' } })
       if (!r.ok) throw new Error(`OpenAPI de PostgREST: ${r.status}`)
       const doc = (await r.json()) as { definitions?: Record<string, { properties?: Record<string, unknown> }>; paths?: Record<string, Record<string, unknown>> }
       const out = new Map<string, string[]>()
@@ -177,7 +207,7 @@ function almacenSupabase(url: string, llave: string): Almacen {
     async buscarUsuario(correo) {
       // NO por `listUsers`: una fila de otro cliente con `banned_until = 'infinity'` lo tumba
       // para cualquier página. Búsqueda puntual por correo; el porqué en `espacio-pruebas/auth.ts`.
-      return buscarIdDeAuthPorCorreo(url, llave, correo)
+      return buscarIdDeAuthPorCorreo(url, llave, correo, conTiempo)
     },
     async crearUsuario(correo, nombreCompleto) {
       const { data, error } = await sb.auth.admin.createUser({ email: correo, email_confirm: true, user_metadata: { full_name: nombreCompleto } })
@@ -194,9 +224,14 @@ function almacenSupabase(url: string, llave: string): Almacen {
       const out: { bucket: string; ruta: string }[] = []
       for (const b of buckets ?? []) {
         const pendientes = [prefijo.replace(/\/$/, '')]
+        const vistas = new Set<string>()
         while (pendientes.length) {
           const carpeta = pendientes.pop()!
-          const { data } = await sb.storage.from(b.name).list(carpeta, { limit: 1000 })
+          if (vistas.has(carpeta)) continue
+          vistas.add(carpeta)
+          if (vistas.size > TOPE_CARPETAS) throw new Error(`Storage ${b.name}: más de ${TOPE_CARPETAS} carpetas bajo ${prefijo}`)
+          const { data, error: e } = await sb.storage.from(b.name).list(carpeta, { limit: 1000 })
+          if (e) throw new Error(`Storage ${b.name} ${carpeta}: ${e.message}`)
           for (const o of data ?? []) {
             const ruta = `${carpeta}/${o.name}`
             if (o.id) out.push({ bucket: b.name, ruta })
@@ -222,6 +257,9 @@ function almacenSupabase(url: string, llave: string): Almacen {
 function imprimirPlan(plan: Plan, modo: string) {
   const i = plan.informe
   console.log(`\n${modo} · ${plan.origen.slug} → ${plan.destino.slug}${DOBLE ? '  [DOBLE en memoria, no la base]' : ''}\n`)
+  if (plan.destino.restos) {
+    console.log(`Restos de una corrida que falló: workspace ${plan.destino.restos} sin terminar. --apply lo borra entero (filas, perfiles, alias) antes de crear.`)
+  }
   console.log(plan.destino.existe
     ? `Workspace destino: ya existe (${plan.destino.id}).`
     : `Workspace destino: se crea «${nombre}» (${plan.destino.id}), grupo demo, espacio_de_pruebas = true, cotizacion_por_pasos encendido.`)
@@ -264,11 +302,16 @@ function imprimirPlan(plan: Plan, modo: string) {
 function imprimirBorrado(inf: InformeBorrado) {
   console.log('\nBorrado:')
   for (const [t, n] of Object.entries(inf.borradas)) console.log(`  ${t.padEnd(32)} ${String(n).padStart(5)}`)
-  console.log(`  archivos: ${inf.archivosBorrados} · alias borrados: ${inf.usuariosBorrados.length} · workspace borrado: ${inf.workspaceBorrado ? 'sí' : 'no'}`)
+  console.log(`  archivos: ${inf.archivosBorrados} · cuentas de Auth borradas: ${inf.usuariosBorrados.length} · workspace borrado: ${inf.workspaceBorrado ? 'sí' : 'no'}`)
   for (const b of inf.bloqueos) console.log(`  BLOQUEO: ${b}`)
   for (const [t, n] of Object.entries(inf.residuo)) console.log(`  RESIDUO: ${t} ${n}`)
   for (const [t, m] of Object.entries(inf.errores)) console.log(`  ERROR: ${t}: ${m}`)
+  console.log(inf.pendientes.length ? '\nQUEDÓ SIN BORRAR:' : '\nNo quedó nada pendiente.')
+  for (const p of inf.pendientes) console.log(`  · ${p}`)
 }
+
+/** El avance del borrado, al momento (stderr no se guarda en búfer). */
+const avisar = (m: string) => console.error(m)
 
 // ── Ejecución ───────────────────────────────────────────────────────────────
 
@@ -290,10 +333,12 @@ async function main() {
   if (BORRAR) {
     if (!APPLY) {
       const [ws] = await almacen.leer('workspaces', [['slug', 'eq', destino]])
-      console.log(ws ? `\nSIMULACRO: borraría el espacio de pruebas «${destino}» (${String(ws.id)}) entero. Repetir con --borrar --apply.` : `\n«${destino}» no existe: nada que borrar.`)
+      console.log(ws
+        ? `\nSIMULACRO: borraría el espacio de pruebas «${destino}» (${String(ws.id)}) entero, con sus alias. Repetir con --borrar --apply.`
+        : `\n«${destino}» no existe: con --apply solo se borrarían los alias huérfanos que haya en Auth.`)
       return
     }
-    imprimirBorrado(await purgar(almacen, destinoO))
+    imprimirBorrado(await purgar(almacen, destinoO, avisar))
     return
   }
 
@@ -318,21 +363,35 @@ async function main() {
     console.error('\nHay tablas sin clasificar con filas de la cliente. Clasifícalas en src/lib/espacio-pruebas/clasificacion.ts o usa --ignorar-sin-clasificar.')
     process.exit(1)
   }
+  // Restos de una corrida que falló: se purgan antes de crear, sin intervención manual.
+  if (previo.destino.restos) {
+    console.error(`\nRestos de una corrida anterior (workspace ${previo.destino.restos} sin terminar): se borran antes de crear…`)
+    const inf = await purgar(almacen, destinoO, avisar)
+    imprimirBorrado(inf)
+    if (!inf.workspaceBorrado || inf.pendientes.length) {
+      console.error('\n✗ Los restos no se pudieron borrar del todo: no se crea nada encima. Ver «QUEDÓ SIN BORRAR».')
+      process.exit(1)
+    }
+  }
   if (RESEMBRAR && previo.destino.existe) {
-    imprimirBorrado(await purgar(almacen, { ...destinoO, soloSemillas: true }))
+    imprimirBorrado(await purgar(almacen, { ...destinoO, soloSemillas: true }, avisar))
   }
 
-  const creados = await crearUsuarios(almacen, correoBase, destino)
-  let plan: Plan | null = null
+  // Si el espacio no estaba completo, todo lo que se escriba ahora es de esta corrida y se deshace si falla.
+  const nuevo = !previo.destino.existe
+  const creados: string[] = []
   try {
-    plan = await planificar(almacen, opciones)
+    await crearUsuarios(almacen, correoBase, destino, creados)
+    const plan: Plan = await planificar(almacen, opciones)
     imprimirPlan(plan, 'APLICANDO')
     await ejecutar(almacen, plan)
   } catch (e) {
     console.error('\n✗ Falló a mitad de camino:', e instanceof Error ? e.message : String(e))
-    if (plan && !plan.destino.existe) {
+    if (nuevo) {
       console.error('  Se deshace lo escrito en esta corrida…')
-      imprimirBorrado(await deshacer(almacen, destinoO, creados))
+      imprimirBorrado(await deshacer(almacen, destinoO, creados, avisar))
+    } else if (creados.length) {
+      console.error(`  El espacio ya existía: no se borra. Cuentas creadas en esta corrida: ${creados.join(', ')}`)
     }
     process.exit(1)
   }

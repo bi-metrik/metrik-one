@@ -29,6 +29,12 @@ export interface Almacen {
   borrar(tabla: string, filtros: Filtro[]): Promise<ResultadoBorrado>
   /** Las TABLAS de `public` (no vistas) que se pueden borrar, con sus columnas. */
   tablas(): Promise<Map<string, string[]>>
+  /**
+   * Las columnas GENERADAS (`GENERATED ALWAYS`) por tabla, si el almacén las puede leer. La base
+   * rechaza cualquier valor en ellas. PostgREST no expone `information_schema`, así que el
+   * almacén de Supabase no lo implementa y el plan usa la lista medida (`COLUMNAS_GENERADAS`).
+   */
+  generadas?(): Promise<Record<string, string[]>>
   /** El id de Auth de un correo, o `null`. */
   buscarUsuario(correo: string): Promise<string | null>
   crearUsuario(correo: string, nombre: string): Promise<string>
@@ -67,6 +73,11 @@ export function almacenEnMemoria(opts: {
   llaves?: LlaveForanea[]
   usuarios?: { id: string; correo: string }[]
   archivos?: { bucket: string; ruta: string }[]
+  /**
+   * Columnas `GENERATED ALWAYS` por tabla: el doble rechaza escribirlas con el mensaje de
+   * Postgres. El segundo `--apply` cayó en `rubros.valor_total` (2026-10-14) y el doble no lo vio.
+   */
+  generadas?: Record<string, string[]>
   /** Lo que en la base hacen los triggers (sembrar al crear un workspace, registrar al borrar una etapa). */
   disparadores?: {
     alInsertar?: (tabla: string, fila: Fila, estado: Record<string, Fila[]>) => void
@@ -79,6 +90,16 @@ export function almacenEnMemoria(opts: {
   const llaves = opts.llaves ?? []
   let n = 0
   const filas = (t: string) => (estado[t] ??= [])
+
+  /** Lo que Postgres dice si una fila trae valor en una columna generada (null incluido). */
+  const generada = (tabla: string, escritas: Fila[], al: 'insertar' | 'actualizar'): string | null => {
+    for (const col of opts.generadas?.[tabla] ?? []) {
+      if (escritas.some(f => f[col] !== undefined)) {
+        return al === 'insertar' ? `cannot insert a non-DEFAULT value into column "${col}"` : `column "${col}" can only be updated to DEFAULT`
+      }
+    }
+    return null
+  }
 
   /** Lo que Postgres diría al cierre de la sentencia si alguna fila escrita apunta a la nada. */
   const violacion = (tabla: string, escritas: Fila[]): string | null => {
@@ -107,6 +128,8 @@ export function almacenEnMemoria(opts: {
     async insertar(tabla, nuevas) {
       // Una sentencia: todas las filas entran y la llave se revisa al final (una fila puede
       // apuntar a otra del mismo lote). Si falla, no queda ninguna.
+      const g = generada(tabla, nuevas, 'insertar')
+      if (g) throw new Error(`insertar ${tabla}: ${g}`)
       const copias = nuevas.map(f => ({ ...f }))
       filas(tabla).push(...copias)
       const error = violacion(tabla, copias)
@@ -117,6 +140,8 @@ export function almacenEnMemoria(opts: {
       for (const f of nuevas) opts.disparadores?.alInsertar?.(tabla, f, estado)
     },
     async actualizar(tabla, id, patch) {
+      const g = generada(tabla, [patch], 'actualizar')
+      if (g) throw new Error(`actualizar ${tabla}: ${g}`)
       const van = filas(tabla).filter(f => f.id === id)
       const error = violacion(tabla, van.map(f => ({ ...f, ...patch })))
       if (error) throw new Error(`actualizar ${tabla}: ${error}`)
@@ -124,6 +149,8 @@ export function almacenEnMemoria(opts: {
     },
     async guardar(tabla, fila, conflicto = 'id') {
       const previa = filas(tabla).find(f => f[conflicto] === fila[conflicto])
+      const g = generada(tabla, [fila], previa ? 'actualizar' : 'insertar')
+      if (g) throw new Error(`guardar ${tabla}: ${g}`)
       const error = violacion(tabla, [{ ...(previa ?? {}), ...fila }])
       if (error) throw new Error(`guardar ${tabla}: ${error}`)
       if (previa) Object.assign(previa, fila)
