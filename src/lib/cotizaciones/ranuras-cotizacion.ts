@@ -226,6 +226,8 @@ export function nombreAutomaticoDeRanura(args: {
       return cabeza
     }
     const lugar = ciudadCorta(args.lugar)
+    // «Traslado París–Ámsterdam»: un trayecto entre dos ciudades no queda «en» ninguna.
+    if (lugar && args.tipo === 'traslado' && lugar.includes('–')) return `${cabeza} ${lugar}`
     return lugar ? `${cabeza} en ${lugar}` : cabeza
   }
 

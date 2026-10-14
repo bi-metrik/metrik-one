@@ -1,5 +1,6 @@
 'use server'
 
+import { ciudadesEnTexto } from '@/lib/pdf/fotos-del-viaje'
 import { revalidatePath } from 'next/cache'
 
 import { getWorkspace } from '@/lib/actions/get-workspace'
@@ -159,9 +160,13 @@ export async function crearRanuraConOpcion(
   const nombresEnUso = bloquesPorRanura(c.items as { id: string; grupo?: string | null }[])
     .map(b => b.etiqueta)
     .filter((e): e is string => e !== null)
+  // Un traslado en un viaje de varias ciudades («Madrid, Barcelona, París y Ámsterdam»): el destino
+  // no dice dónde queda ESTE traslado, y tomar la primera nombraba «Traslado en Madrid» al Eurostar
+  // (prueba Europa, 2026-10-14). Hotel y actividad siguen con el destino, como siempre.
+  const destinoUnico = tipo === 'traslado' && ciudadesEnTexto(viaje.destino).length > 1 ? null : viaje.destino
   const nombre = nombreAutomaticoDeRanura({
     tipo,
-    lugar: pistas.lugar ?? viaje.destino,
+    lugar: pistas.lugar ?? destinoUnico,
     origen: pistas.origen ?? null,
     destino: pistas.destino ?? (tipo === 'vuelo' ? viaje.destino : null),
     numero,
