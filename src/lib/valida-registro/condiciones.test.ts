@@ -33,11 +33,11 @@ const sha = (t: string) => createHash('sha256').update(t, 'utf8').digest('hex')
  * subir la versión que corresponda (Condiciones o aviso) y, solo entonces, actualizar el valor.
  *
  *   - sin cobro: Condiciones v1.0 + aviso v1.1 + casilla v1.0 (2026-10-12, aviso sin «tipo de empresa»);
- *   - con cobro: Condiciones v2.0 + aviso v1.2 + casilla con cobro (2026-10-12, texto de Vera aplicado
- *     por Emilio en los archivos legales).
+ *   - con cobro: Condiciones v2.1 + aviso v1.2 + casilla con cobro (2026-10-14: la v2.0 de Vera y Emilio
+ *     con el cobro del primer mes al confirmar; texto de Max, pendiente de Emilio).
  */
 const HUELLA_SIN_COBRO = '88ddf9d4d3050e5b309041c6693dbf3d0174bd0d2e7020e1fa32f957a5d2ae80'
-const HUELLA_CON_COBRO = '2c1f8f4f4ef03a9ebc609612c97ccb0c0cbb462ed563158ba6f6b29b97c98d85'
+const HUELLA_CON_COBRO = '4d058b240ee765665163849d9935b1aa5df1b268abd93cbdf945dd4261e7d362'
 
 const EPAYCO = { EPAYCO_HABILITADO: '1', EPAYCO_PUBLIC_KEY_METRIK: 'pub_prueba' }
 const COBRO = { VALIDA_COBRO_TRAS_PRUEBA: '1', ...EPAYCO }
@@ -75,28 +75,38 @@ describe('sin cobro: Condiciones v1.0 con el aviso v1.1', () => {
   })
 })
 
-describe('con cobro: Condiciones v2.0 completas, aviso v1.2 y casilla con cobro', () => {
+describe('con cobro: Condiciones v2.1 completas, aviso v1.2 y casilla con cobro', () => {
   const t = CONDICIONES_PRUEBA_CON_COBRO.texto
 
-  it('versión 2.0 y aviso 1.2', () => {
-    expect(t).toMatch(/^CONDICIONES DE LA PRUEBA GRATIS DE VALIDA · Versión 2\.0/)
-    expect(versionAceptada(VIGENTES_CON_COBRO)).toBe('condiciones-2.0+aviso-1.2+terminos-auto-2.0')
+  it('versión 2.1 y aviso 1.2', () => {
+    expect(t).toMatch(/^CONDICIONES DE LA PRUEBA GRATIS DE VALIDA · Versión 2\.1/)
+    expect(versionAceptada(VIGENTES_CON_COBRO)).toBe('condiciones-2.1+aviso-1.2+terminos-auto-2.1')
   })
 
   it('el numeral 1 ya no dice que no pide tarjeta, y autoriza el cobro de cada mes (Vera)', () => {
     expect(t).not.toContain('no pide tarjeta')
     expect(t).not.toContain('solo se le cobra el primer mes')
     expect(t).toContain(
-      'Para abrirla, la Empresa registra un medio de pago. Si no cancela a tiempo, a ese medio de pago se le cobra el plan mensual de Valida: el primer mes al cumplirse los 7 días y después cada mes, hasta que se retire, como dicen los numerales 7.1 y 7.4.',
+      'Para abrirla, la Empresa registra un medio de pago. Si no cancela a tiempo, a ese medio de pago se le cobra el plan mensual de Valida: el primer mes cuando la Empresa confirma en su cuenta que activa el plan o, si no lo confirma, al cumplirse los 7 días, y después cada mes, hasta que se retire, como dicen los numerales 7.1 y 7.4.',
     )
   })
 
-  it('el 7 ya no dice «al terminar la prueba» y el 7.1 promete «después, nunca antes»', () => {
-    expect(t).toContain('7. Medio de pago y cobro al cumplirse los 7 días de la prueba.')
+  it('el 7 ya no dice «al terminar la prueba»; el 7.1 da los dos momentos y el (b) sigue «después, nunca antes»', () => {
+    expect(t).toContain('7. Medio de pago y cobro del primer mes.')
     expect(t).not.toContain('al terminar la prueba')
     expect(t).not.toContain('Al terminar la prueba')
-    expect(t).toContain('el cobro se hace después de ese momento, nunca antes.')
-    expect(t).toContain('El cobro no se adelanta aunque las 10 consultas se agoten antes.')
+    // La regla de la v2.0 que la v2.1 cambia (decisión de Mauricio, 2026-10-14).
+    expect(t).not.toContain('El cobro no se adelanta aunque las 10 consultas se agoten antes.')
+    expect(t).toContain('en el primero de estos dos momentos: (a) cuando la Empresa confirma en su cuenta en Valida que activa el plan.')
+    expect(t).toContain('Valida le pide esa confirmación cuando intenta una consulta después de agotar las 10 de la prueba')
+    expect(t).toContain('la pantalla muestra el valor y los últimos 4 dígitos de la tarjeta, y el cobro se hace en ese momento')
+    expect(t).toContain('(b) si la Empresa no ha confirmado ni cancelado, al cumplirse los 7 días de la prueba.')
+    expect(t).toContain('este cobro se hace después de ese momento, nunca antes.')
+    expect(t).toContain('Sin la confirmación del literal (a), agotar las 10 consultas no adelanta el cobro.')
+    // El aviso de 48 h es del (b); cancelar, hasta confirmar; si el primer cobro falla, no se reintenta.
+    expect(t).toContain('7.2. Aviso previo. Para el cobro del literal (b) del numeral 7.1')
+    expect(t).toContain('antes de que se cumplan los 7 días de la prueba y antes de confirmar la activación del plan.')
+    expect(t).toContain('no se activa el plan, no se vuelve a intentar con la tarjeta y METRIK envía un enlace de pago.')
   })
 
   it('los valores de la cláusula van escritos y coinciden con los del código', () => {

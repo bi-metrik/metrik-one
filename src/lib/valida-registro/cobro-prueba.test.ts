@@ -8,7 +8,9 @@ import {
   minutosDePruebaAcortada,
   momentoDelCobro,
   pasoDelCobro,
+  permiteCobroAlConfirmar,
   puedeCancelar,
+  textoConfirmacionCobro,
 } from './cobro-prueba'
 
 const H = 3_600_000
@@ -125,5 +127,31 @@ describe('el correo del aviso (pendiente de Vera)', () => {
     expect(c.text).toContain('"Cancelar prueba"')
     expect(c.text).toContain('https://acme.metrikone.co/valida')
     expect(c.html).not.toContain('<script')
+  })
+})
+
+describe('el cobro al confirmar (Condiciones v2.1, 7.1 literal a)', () => {
+  it('solo a quien aceptó la v2.1 o posterior: la v2.0 dice «no se adelanta»', () => {
+    expect(permiteCobroAlConfirmar('condiciones-2.1+aviso-1.2+terminos-auto-2.1')).toBe(true)
+    expect(permiteCobroAlConfirmar('condiciones-2.10+aviso-1.2')).toBe(true)
+    expect(permiteCobroAlConfirmar('condiciones-3.0+aviso-1.3')).toBe(true)
+    expect(permiteCobroAlConfirmar('condiciones-2.0+aviso-1.2+terminos-auto-2.0')).toBe(false)
+    expect(permiteCobroAlConfirmar('condiciones-1.0+aviso-1.1')).toBe(false)
+    expect(permiteCobroAlConfirmar(null)).toBe(false)
+    expect(permiteCobroAlConfirmar('2.1')).toBe(false)
+  })
+
+  it('la pantalla de la consulta 11 dice exactamente lo que decidió Mauricio, con UN botón', () => {
+    expect(textoConfirmacionCobro({ valor: 150_000, ultimos4: '0326', agotada: true, consultasPrueba: 10 })).toEqual({
+      titulo: 'Usaste tus 10 consultas de prueba',
+      detalle: 'Activa tu plan ahora: se cobran $150.000 a tu tarjeta terminada en 0326.',
+      boton: 'Activar y pagar $150.000',
+    })
+  })
+
+  it('desde «Activar plan» con consultas todavía, y sin los 4 dígitos (ePayco no respondió)', () => {
+    const t = textoConfirmacionCobro({ valor: 150_000, ultimos4: null, agotada: false, consultasPrueba: 10 })
+    expect(t.titulo).toBe('Activa tu plan antes de que termine la prueba')
+    expect(t.detalle).toContain('Activa tu plan ahora: se cobran $150.000 a la tarjeta que registraste.')
   })
 })

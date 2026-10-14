@@ -79,4 +79,12 @@ Ya mergeados: #1095 (corte de la bolsa), #1097 (`valida_registros`, APLICADA, no
 - La prueba de Vera en un preview.
 - Para el cobro sin clic en producción: aplicar las 3 migraciones, `CLAUSULA_COBRO_APROBADA_PARA_PRODUCCION`, `EPAYCO_PRODUCCION`, metrik-valida#57 desplegado (abre la bolsa al pagar), y lo de Emilio (16.4: enviar Términos + constancia al correo, no construido).
 
+## Cobro al confirmar en la consulta 11 (2026-10-14, PR apilado sobre feat/valida-epayco-pruebas)
+- Decisión de Mauricio: primer mes = lo primero entre día 7 y consulta 11, pero la consulta 11 SOLO con clic de
+  confirmación (nunca en silencio). Condiciones v2.1 + Términos autoservicio v2.1: texto de Max, **lo aprueba Emilio
+  antes de encender**; los archivos legales de `proyectos/metrik/valida/docs/legal/` siguen en v2.0 (no los toca Max).
+- Solo se ofrece a registros que aceptaron condiciones-2.1+ (la v2.0 prometía «no se adelanta»).
+- Migración `20261014233000_valida_cobro_al_confirmar.sql` SIN aplicar: sin ella el clic falla al reclamar y no cobra.
+- La casilla con cobro y el texto junto a la tarjeta NO cambiaron (siguen describiendo solo el día 7): revisar con Emilio.
+
 Relacionado: [[secop-autogestion-registro]], [[radar-trial-y-cobro]], [[valida-renovacion-continua]], [[sql-y-despliegue-metrik-valida]].

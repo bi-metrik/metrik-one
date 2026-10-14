@@ -6,6 +6,8 @@ import { activacionAbierta } from '@/lib/valida-registro/activacion'
 import { esEspacioAutogestion, parametrosDelPlan } from '@/lib/valida-registro/plan'
 import { nitLegible } from '@/lib/valida-registro/terminos-plan'
 import ActivarClient from './activar-client'
+import { CobroAlConfirmar } from '../cobro-al-confirmar'
+import { ofertaDeCobroAlConfirmar } from '../cobro-al-confirmar-acciones'
 
 /**
  * «Activa tu plan» de una cuenta que nació en la prueba gratis (`18-recorrido-baja-friccion.md` §2.2,
@@ -32,6 +34,7 @@ export default async function ActivarPlanPage() {
   if ((contrato.data ?? []).length > 0) redirect('/valida?terminos=1')
 
   const plan = parametrosDelPlan()
+  const oferta = await ofertaDeCobroAlConfirmar(false)
   const empresa = reg.data as { razon_social: string; identificacion: string; dv: string | null }
 
   return (
@@ -53,11 +56,23 @@ export default async function ActivarPlanPage() {
         </ul>
       </section>
 
-      <section className="space-y-2 text-sm text-tinta-suave">
-        <p>Así sigue: 1. activas el plan; 2. lees y aceptas los Términos de tu empresa; 3. pagas el primer mes en línea.</p>
-      </section>
+      {oferta.disponible ? (
+        // Con tarjeta registrada: activar es cobrar el primer mes YA, con su confirmación (Condiciones
+        // v2.1, 7.1 literal a). Los Términos ya los aceptó en el registro.
+        <section className="rounded-lg border border-border bg-white p-4">
+          <CobroAlConfirmar agotada={false} oferta={oferta}>
+            {null}
+          </CobroAlConfirmar>
+        </section>
+      ) : (
+        <>
+          <section className="space-y-2 text-sm text-tinta-suave">
+            <p>Así sigue: 1. activas el plan; 2. lees y aceptas los Términos de tu empresa; 3. pagas el primer mes en línea.</p>
+          </section>
 
-      <ActivarClient abierta={activacionAbierta()} whatsapp={enlaceActivarPlan(empresa.razon_social)} />
+          <ActivarClient abierta={activacionAbierta()} whatsapp={enlaceActivarPlan(empresa.razon_social)} />
+        </>
+      )}
     </main>
   )
 }

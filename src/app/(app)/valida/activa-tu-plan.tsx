@@ -1,5 +1,6 @@
 import Link from 'next/link'
 import { Sparkles } from 'lucide-react'
+import { CobroAlConfirmar } from './cobro-al-confirmar'
 import { accionDelCorte, textoCorte, textoSaldo, type MotivoCorte, type SaldoBolsa } from '@/lib/valida/corte-bolsa'
 
 /**
@@ -9,22 +10,33 @@ import { accionDelCorte, textoCorte, textoSaldo, type MotivoCorte, type SaldoBol
 export function ActivaTuPlan({ motivo, esPrueba }: { motivo: MotivoCorte; esPrueba: boolean }) {
   const { titulo, detalle } = textoCorte(motivo, esPrueba)
   const accion = accionDelCorte(esPrueba)
+  const deSiempre = (
+    <div className="w-full space-y-3">
+      <div>
+        <h2 className="text-base font-semibold text-tinta">{titulo}</h2>
+        <p className="mt-1 text-sm text-tinta-suave">{detalle}</p>
+      </div>
+      <Link
+        href={accion.ruta}
+        className="inline-flex h-11 w-full items-center justify-center rounded-lg bg-acento px-5 text-sm font-semibold text-white sm:w-auto"
+      >
+        {accion.texto}
+      </Link>
+    </div>
+  )
   return (
     <section data-activa-tu-plan={motivo} className="rounded-lg border border-border bg-white p-4 sm:p-5">
       <div className="flex items-start gap-3">
         <Sparkles className="mt-0.5 hidden h-5 w-5 shrink-0 text-acento sm:block" />
-        <div className="w-full space-y-3">
-          <div>
-            <h2 className="text-base font-semibold text-tinta">{titulo}</h2>
-            <p className="mt-1 text-sm text-tinta-suave">{detalle}</p>
+        {/* Agotó las 10 de prueba con tarjeta: el cobro se ofrece aquí mismo, con su confirmación
+            (Condiciones v2.1, 7.1 literal a). Sin tarjeta o sin esa opción, lo de siempre. */}
+        {esPrueba && motivo === 'bolsa_agotada' ? (
+          <div className="w-full">
+            <CobroAlConfirmar agotada>{deSiempre}</CobroAlConfirmar>
           </div>
-          <Link
-            href={accion.ruta}
-            className="inline-flex h-11 w-full items-center justify-center rounded-lg bg-acento px-5 text-sm font-semibold text-white sm:w-auto"
-          >
-            {accion.texto}
-          </Link>
-        </div>
+        ) : (
+          deSiempre
+        )}
       </div>
     </section>
   )

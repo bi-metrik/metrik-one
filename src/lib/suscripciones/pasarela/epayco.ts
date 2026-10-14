@@ -272,6 +272,34 @@ export async function eliminarTarjetasEpayco(
   return { ok: true, borradas }
 }
 
+/**
+ * Los últimos 4 dígitos de la tarjeta de una referencia, para que la Empresa vea a qué tarjeta se
+ * cobra antes de confirmar (Condiciones v2.1, 7.1 literal a). ONE no los guarda: se le preguntan a
+ * ePayco (`POST /subscriptions/customer`, la misma consulta del borrado). Las dos formas de máscara
+ * que muestra la documentación (`************0326` y `457562******0326`) terminan en los 4 dígitos.
+ * Cualquier falla devuelve null: la pantalla dice «la tarjeta que registraste» y no se frena el cobro.
+ */
+export async function ultimosDigitosTarjetaEpayco(ref: string | null | undefined, deps: DepsEpayco = {}): Promise<string | null> {
+  const medio = leerRefMedioPagoEpayco(ref)
+  if (!medio) return null
+  const env = deps.env ?? process.env
+  if (!valor(env, 'EPAYCO_PUBLIC_KEY_METRIK') || !valor(env, 'EPAYCO_PRIVATE_KEY_METRIK')) return null
+  try {
+    const s = await iniciarSesion(deps)
+    if (!s.ok) return null
+    const c = await pedir(deps, '/subscriptions/customer', { bearer: s.token, cuerpo: { customerId: medio.customerId } })
+    if (!c.ok || c.cuerpo.success !== true) return null
+    const datos = ((c.cuerpo.data as Record<string, unknown> | undefined)?.data ?? null) as Record<string, unknown> | null
+    const tarjetas = (Array.isArray(datos?.cards) ? datos.cards : []) as Record<string, unknown>[]
+    // El cliente de ePayco lo creó el registro con UNA tarjeta; con más, no se adivina cuál.
+    if (tarjetas.length !== 1) return null
+    const m = /(\d{4})$/.exec(typeof tarjetas[0].mask === 'string' ? tarjetas[0].mask.trim() : '')
+    return m ? m[1] : null
+  } catch {
+    return null
+  }
+}
+
 /** `estado` de ePayco → resultado del ciclo. */
 export function resultadoDeEstado(estado: string | null | undefined): 'aprobado' | 'rechazado' | 'pendiente' {
   const e = (estado ?? '').trim().toLowerCase()

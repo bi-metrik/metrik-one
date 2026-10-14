@@ -97,8 +97,10 @@ export async function activarPlanValida(input: { rut: File | null }): Promise<Re
   if (perfil.error || !workspaceId) return { ok: false, error: 'sin_sesion' }
   if (perfil.data?.role !== 'owner') return { ok: false, error: 'no_es_duena' }
 
-  // Con tarjeta, el plan se activa SOLO al cumplirse los 7 días, con el primer cobro (Términos 3.5 y
-  // 16.6: «nunca antes»). Activarlo a mano antes cobraría la cuota 1 el día del clic.
+  // Con tarjeta, el plan nace SIEMPRE con el primer cobro (Términos v2.1, 3.5 y 16.6): al confirmar
+  // «Activar y pagar» (`cobrarAlConfirmar`, la pantalla lo ofrece en vez de este botón) o al cumplirse
+  // los 7 días. Esta activación sin cobro no aplica; a un registro que aceptó la v2.0 («nunca antes»)
+  // no se le ofrece el cobro al confirmar y ve `cobro_al_terminar_prueba`.
   const reg = await svc.from('valida_registros').select('cobro_estado').eq('workspace_id', workspaceId).eq('estado', 'creado').maybeSingle()
   if (reg.error) return { ok: false, error: 'error' }
   if (reg.data?.cobro_estado) return { ok: false, error: 'cobro_al_terminar_prueba' }

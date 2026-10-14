@@ -2,7 +2,7 @@
 
 ## Project memories
 
-- ⚠️⚠️ [Alta autogestionada de Valida](project_valida_alta_autogestionada.md) — pila #1104→#1107→#1110; 3 migraciones SIN aplicar (…100000, …153000, …203000); Términos en el registro, canal 'registro'
+- ⚠️⚠️ [Alta autogestionada de Valida](project_valida_alta_autogestionada.md) — pila #1104→#1107→#1110; 3 migraciones SIN aplicar (…100000, …153000, …203000); Términos en el registro, canal 'registro'; +…233000 cobro al confirmar (texto v2.1 espera a Emilio)
 - ⚠️⚠️ [Perfil del contacto por el bot (corte 1)](project_perfil_contacto_bot.md) — migración 20261012234500 SIN aplicar; fichas sin publicar; trigger exige autorización
 - ⚠️ [SOE-016: responsable automático por etapa](project_responsable_automatico_etapa.md) — sin migración; config SOENA SIN aplicar; crear negocio no cubierto
 - ⚠️⚠️ [Espacio de pruebas trappvel-pruebas](project_espacio_pruebas_trappvel.md) — 2 --apply fallidos; restos 90226eac en prod; ensayo PGlite antes del próximo

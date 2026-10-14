@@ -2,24 +2,29 @@ import 'server-only'
 import type { SupabaseClient } from '@supabase/supabase-js'
 import { enrolarContratosPorCiclo, type DepsEnrolamiento, type ResumenEnrolamiento } from '@/lib/cobros/enrolar-ciclo-servidor'
 import type { CorreoSaliente, ResultadoEnvio } from '@/lib/cobros/enlace-automatico-servidor'
-import { cobrarConTokenEpayco, eliminarTarjetasEpayco, epaycoEnPruebas } from '@/lib/suscripciones/pasarela/epayco'
+import { cobrarConTokenEpayco, eliminarTarjetasEpayco, epaycoEnPruebas, ultimosDigitosTarjetaEpayco } from '@/lib/suscripciones/pasarela/epayco'
 import type { ResultadoCargo } from '@/lib/suscripciones/pasarela/adapter'
 import { activarPlanDelEspacio, type ResultadoActivacionEspacio } from './activacion-servidor'
 import { cobrarCuotaConTarjeta, pasarElPlanATarjeta, type ResultadoCobroToken } from './cobro-token-servidor'
 import { COBRO_TRAS_PRUEBA } from './condiciones-cobro'
+import { PRUEBA_DE_LAS_CONDICIONES } from './condiciones'
 import {
   antelacionAvisoMs,
   cobroDesdeMs,
   correoAvisoCobro,
   entornoDeCobro,
   pasoDelCobro,
+  permiteCobroAlConfirmar,
   puedeCancelar,
+  textoConfirmacionCobro,
 } from './cobro-prueba'
 import { partirNombre } from './metodo-pago'
 import { TERMINOS_PLAN, terminosPlanListos } from './terminos-plan'
 
 /**
- * El cobro del primer mes al cumplirse los 7 días de la prueba, sin clic (Condiciones v2.0, 7.1 a 7.5).
+ * El cobro del primer mes al cumplirse los 7 días de la prueba, sin clic (Condiciones v2.1, 7.1 literal b).
+ * El del literal a (la Empresa confirma antes: consulta 11 o «Activar plan») es `cobrarAlConfirmar`, al
+ * final de este archivo, y comparte con este los pasos b a e (`activarYCobrarReclamado`).
  * Decisión de Mauricio (2026-10-12): opción A, fecha fija. Corre en el paso 7a del cron
  * `procesar-planes-cobro` y en `/api/crons/valida-cobro-prueba` (para probarlo en un preview).
  *
@@ -84,10 +89,13 @@ export interface RegistroCobro {
   cobro_token_borrado_at: string | null
   /** Los Términos aceptados en el registro. Null en un registro de antes del 2026-10-14: no se cobra. */
   terminos_sha256: string | null
+  /** Lo que aceptó (`condiciones-2.1+…`): decide si se le puede ofrecer el cobro al confirmar. */
+  condiciones_version?: string | null
+  cobro_entorno?: string | null
 }
 
 const COLUMNAS =
-  'id, workspace_id, usuario_id, correo, razon_social, identificacion, slug_creado, metodo_pago_ref, cobro_estado, cobro_programado_at, cobro_aviso_enviado_at, cobro_token_borrado_at, terminos_sha256'
+  'id, workspace_id, usuario_id, correo, razon_social, identificacion, slug_creado, metodo_pago_ref, cobro_estado, cobro_programado_at, cobro_aviso_enviado_at, cobro_token_borrado_at, terminos_sha256, condiciones_version, cobro_entorno'
 
 export interface DepsCobroPrueba {
   db: SupabaseClient
@@ -105,6 +113,8 @@ export interface DepsCobroPrueba {
   eliminarTarjeta?: (ref: string | null) => Promise<{ ok: true; borradas: number } | { ok: false; error: string }>
   /** El cobro directo del ensayo de un preview. */
   cobrarDirecto?: typeof cobrarConTokenEpayco
+  /** Los últimos 4 dígitos de la tarjeta (ePayco), para la confirmación del cobro. */
+  ultimos4?: (ref: string | null) => Promise<string | null>
 }
 
 export interface ResumenCobroPrueba {
@@ -238,8 +248,7 @@ async function cobrar(deps: DepsCobroPrueba, r: RegistroCobro, ahoraMs: number, 
   const ahora = new Date(ahoraMs).toISOString()
   // Los Términos en el código Y aceptados en ESTE registro. Un registro sin ellos no tiene autorización
   // de cobro que se pueda probar con el texto de los Términos (3.5): espera.
-  const listos =
-    (deps.terminosDelRegistroListos ?? (() => terminosPlanListos() && ACEPTACION_EN_REGISTRO_CONSTRUIDA))() && Boolean(r.terminos_sha256)
+  const listos = terminosDelRegistro(deps, r)
   const ensayo = !listos && ensayoPermitido(env)
 
   if (!listos && !ensayo) {
@@ -249,28 +258,67 @@ async function cobrar(deps: DepsCobroPrueba, r: RegistroCobro, ahoraMs: number, 
   }
 
   // a. El reclamo: la única puerta al cobro. Quien no lo gana, no cobra.
-  const reclamo = await db
-    .from('valida_registros')
-    .update({ cobro_estado: 'cobrando', cobro_intento_at: ahora, updated_at: ahora })
-    .eq('id', r.id)
-    .eq('cobro_estado', 'programado')
-    .select('id')
-  if (reclamo.error || (reclamo.data ?? []).length === 0) return
+  if (!(await reclamarCobro(db, r.id, { cobro_estado: 'cobrando', cobro_intento_at: ahora, updated_at: ahora }))) return
 
-  const cerrar = (estado: string, detalle: string, ref: string | null = null) =>
+  if (ensayo) {
+    await ensayoDeCobro(deps, r, cerrarCobro(db, r.id), resumen)
+    return
+  }
+
+  const d = await activarYCobrarReclamado(deps, r, ahoraMs)
+  anotarDesenlace(resumen, r.id, d)
+}
+
+/** Términos en el código, aceptación en el registro construida, y ESTE registro los aceptó. */
+function terminosDelRegistro(deps: Pick<DepsCobroPrueba, 'terminosDelRegistroListos'>, r: RegistroCobro): boolean {
+  return (deps.terminosDelRegistroListos ?? (() => terminosPlanListos() && ACEPTACION_EN_REGISTRO_CONSTRUIDA))() && Boolean(r.terminos_sha256)
+}
+
+/** `programado` → `cobrando`, con la guarda en el update: dos corridas (o el cron y un clic) cobran una vez. */
+async function reclamarCobro(db: Db, registroId: string, cambios: Record<string, unknown>): Promise<boolean> {
+  const reclamo = await db.from('valida_registros').update(cambios).eq('id', registroId).eq('cobro_estado', 'programado').select('id')
+  return !reclamo.error && (reclamo.data ?? []).length > 0
+}
+
+type Cerrar = (estado: string, detalle: string, ref?: string | null) => Promise<unknown>
+
+function cerrarCobro(db: Db, registroId: string): Cerrar {
+  return (estado, detalle, ref = null) =>
     db
       .from('valida_registros')
       .update({ cobro_estado: estado, cobro_detalle: detalle.slice(0, 300), ...(ref ? { cobro_ref: ref } : {}), updated_at: new Date().toISOString() })
-      .eq('id', r.id)
+      .eq('id', registroId)
       .eq('cobro_estado', 'cobrando')
-  const soltar = async (detalle: string) => {
-    await cerrar('programado', detalle)
-    resumen.reintentar.push({ registroId: r.id, detalle })
-  }
+}
 
-  if (ensayo) {
-    await ensayoDeCobro(deps, r, cerrar, resumen)
-    return
+/** Cómo terminó un cobro reclamado. `reintentar` devolvió la fila a `programado`. */
+type Desenlace =
+  | { tipo: 'cobrado' }
+  | { tipo: 'pendiente' }
+  | { tipo: 'rechazado'; mensaje: string }
+  | { tipo: 'revisar'; detalle: string }
+  | { tipo: 'reintentar'; detalle: string }
+
+function anotarDesenlace(resumen: ResumenCobroPrueba, registroId: string, d: Desenlace) {
+  if (d.tipo === 'cobrado') resumen.cobrados += 1
+  else if (d.tipo === 'pendiente') resumen.pendientes += 1
+  else if (d.tipo === 'rechazado') resumen.rechazados += 1
+  else if (d.tipo === 'revisar') resumen.aRevisar.push({ registroId, detalle: d.detalle })
+  else resumen.reintentar.push({ registroId, detalle: d.detalle })
+}
+
+/**
+ * Pasos b a e sobre una fila YA reclamada (`cobrando`). Lo comparten el cron del día 7 y el cobro al
+ * confirmar (`cobrarAlConfirmar`): el mismo plan, la misma cuota 1 y el mismo `cobrarCuotaConTarjeta`,
+ * con su intento reclamado en `cobro_intentos_tarjeta`.
+ */
+async function activarYCobrarReclamado(deps: DepsCobroPrueba, r: RegistroCobro, ahoraMs: number): Promise<Desenlace> {
+  const db = deps.db as Db
+  const ahora = new Date(ahoraMs).toISOString()
+  const cerrar = cerrarCobro(db, r.id)
+  const soltar = async (detalle: string): Promise<Desenlace> => {
+    await cerrar('programado', detalle)
+    return { tipo: 'reintentar', detalle }
   }
 
   // b. a d.: se puede repetir sin riesgo. Cualquier falla suelta la fila.
@@ -278,8 +326,7 @@ async function cobrar(deps: DepsCobroPrueba, r: RegistroCobro, ahoraMs: number, 
   try {
     if (!r.usuario_id) {
       await cerrar('revisar', 'el registro no tiene persona para activar el plan')
-      resumen.aRevisar.push({ registroId: r.id, detalle: 'sin persona' })
-      return
+      return { tipo: 'revisar', detalle: 'sin persona' }
     }
     const act = await (deps.activar ?? ((p) => activarPlanDelEspacio(db, { ...p, rut: null, parametrosExtra: { cobro_tras_prueba: true } })))({
       workspaceId: r.workspace_id,
@@ -289,9 +336,9 @@ async function cobrar(deps: DepsCobroPrueba, r: RegistroCobro, ahoraMs: number, 
       if (act.error === 'nit_con_contrato') {
         // Un cliente de hoy que se registró a probar: no se le cuelga otro contrato ni se le cobra.
         await cerrar('revisar', 'activacion: nit_con_contrato')
-        resumen.aRevisar.push({ registroId: r.id, detalle: 'nit_con_contrato' })
-      } else await soltar(`activacion: ${act.error}`)
-      return
+        return { tipo: 'revisar', detalle: 'nit_con_contrato' }
+      }
+      return soltar(`activacion: ${act.error}`)
     }
 
     const sc = await db
@@ -318,41 +365,29 @@ async function cobrar(deps: DepsCobroPrueba, r: RegistroCobro, ahoraMs: number, 
     // e. El cobro. Desde aquí no se vuelve a `programado`.
     fase = 'cobro'
     const res = await (deps.cobrarCuota ?? cobrarCuotaConTarjeta)({ db: deps.db, ahoraMs }, { cobradorId: contrato.workspace_id, cuotaId: cuota.data.id as string })
-    await registrarResultado(db, r, res, planId, cerrar, resumen)
+    return await registrarResultado(db, res, planId, cerrar)
   } catch (e) {
     const msg = e instanceof Error ? e.message : String(e)
-    if (fase === 'antes') await soltar(`error: ${msg}`)
-    else {
-      await cerrar('revisar', `error en el cobro: ${msg}`)
-      resumen.aRevisar.push({ registroId: r.id, detalle: msg })
-    }
+    if (fase === 'antes') return soltar(`error: ${msg}`)
+    await cerrar('revisar', `error en el cobro: ${msg}`)
+    return { tipo: 'revisar', detalle: msg }
   }
 }
 
-async function registrarResultado(
-  db: Db,
-  r: RegistroCobro,
-  res: ResultadoCobroToken,
-  planId: string,
-  cerrar: (estado: string, detalle: string, ref?: string | null) => Promise<unknown>,
-  resumen: ResumenCobroPrueba,
-) {
+async function registrarResultado(db: Db, res: ResultadoCobroToken, planId: string, cerrar: Cerrar): Promise<Desenlace> {
   switch (res.tipo) {
     case 'aprobado':
     case 'pagada':
       await cerrar('cobrado', res.tipo === 'aprobado' ? res.detalle : 'la cuota 1 ya estaba pagada')
-      resumen.cobrados += 1
-      return
+      return { tipo: 'cobrado' }
     case 'pendiente':
     case 'pendiente_previo':
       await cerrar('cobro_pendiente', 'ePayco dejó el cobro pendiente: lo cierra la confirmación')
-      resumen.pendientes += 1
-      return
+      return { tipo: 'pendiente' }
     case 'rechazado':
       // 7.5: no se activa el plan y va un enlace de pago (el plan ya volvió a enlace en `cobrarCuotaConTarjeta`).
       await cerrar('rechazado', `rechazado: ${res.mensaje}`)
-      resumen.rechazados += 1
-      return
+      return { tipo: 'rechazado', mensaje: res.mensaje }
     default: {
       // Dudoso: quizá ePayco cobró y no alcanzó a responder. El plan sale de la tarjeta para que nadie
       // (ni el paso 7b) lo vuelva a cobrar; lo revisa una persona contra el panel de ePayco.
@@ -360,7 +395,7 @@ async function registrarResultado(
       const detalle = res.tipo === 'error' ? res.mensaje : res.tipo === 'ya_intentado' ? 'el intento ya estaba reclamado sin resultado' : `no_aplica: ${res.motivo}`
       await db.from('planes_cobro').update({ pasarela: 'manual' }).eq('id', planId).eq('pasarela', 'epayco')
       await cerrar('revisar', detalle)
-      resumen.aRevisar.push({ registroId: r.id, detalle })
+      return { tipo: 'revisar', detalle }
     }
   }
 }
@@ -578,5 +613,125 @@ export async function estadoCobroDelEspacio(db: SupabaseClient, workspaceId: str
     cobroDesde: new Date(desde).toISOString(),
     puedeCancelar: puedeCancelar(r.cobro_estado),
     tarjetaBorrada: Boolean(r.cobro_token_borrado_at),
+  }
+}
+
+// ── El cobro del primer mes al confirmar (Condiciones v2.1, 7.1 literal a) ─────────────────────
+
+export type MotivoSinCobroAlConfirmar =
+  | 'sin_registro'
+  | 'no_es_la_persona'
+  | 'sin_cobro_programado'
+  | 'otro_entorno'
+  | 'condiciones_sin_cobro_al_confirmar'
+  | 'esperando_terminos'
+  | 'sin_tarjeta'
+
+/**
+ * Por qué a ESTE registro no se le puede cobrar al confirmar, o null si sí. Lo exige todo lo que el
+ * cron exige para cobrar (Términos aceptados en el registro, tarjeta, el mismo despliegue), menos el
+ * aviso de 48 horas y la fecha: esos son del cobro del literal (b). Y además:
+ *   - quien confirma es la persona que se registró y aceptó (no otra persona del espacio, ni «Ver como»);
+ *   - el registro aceptó un texto que contempla este cobro (Condiciones v2.1 o posterior).
+ */
+function motivoSinCobroAlConfirmar(
+  deps: Pick<DepsCobroPrueba, 'terminosDelRegistroListos'>,
+  r: RegistroCobro | null,
+  usuarioId: string,
+  env: Env,
+): MotivoSinCobroAlConfirmar | null {
+  if (!r) return 'sin_registro'
+  if (!r.usuario_id || r.usuario_id !== usuarioId) return 'no_es_la_persona'
+  if (r.cobro_estado !== 'programado') return 'sin_cobro_programado'
+  if (r.cobro_entorno !== entornoDeCobro(env)) return 'otro_entorno'
+  if (!permiteCobroAlConfirmar(r.condiciones_version)) return 'condiciones_sin_cobro_al_confirmar'
+  if (!terminosDelRegistro(deps, r)) return 'esperando_terminos'
+  if (!r.metodo_pago_ref) return 'sin_tarjeta'
+  return null
+}
+
+async function registroDelEspacio(db: Db, workspaceId: string): Promise<RegistroCobro | null> {
+  const reg = await db.from('valida_registros').select(COLUMNAS).eq('workspace_id', workspaceId).eq('estado', 'creado').maybeSingle()
+  if (reg.error) throw new Error(`registro del espacio: ${reg.error.message}`)
+  return (reg.data as RegistroCobro | null) ?? null
+}
+
+export type OfertaCobroAlConfirmar =
+  | { disponible: true; valor: number; ultimos4: string | null }
+  | { disponible: false; motivo: MotivoSinCobroAlConfirmar }
+
+type DepsOferta = Pick<DepsCobroPrueba, 'db' | 'env' | 'ultimos4' | 'terminosDelRegistroListos'>
+
+/** Lo que muestra la pantalla antes del botón: el valor y los últimos 4 dígitos de la tarjeta. */
+export async function ofertaCobroAlConfirmar(deps: DepsOferta, p: { workspaceId: string; usuarioId: string }): Promise<OfertaCobroAlConfirmar> {
+  const r = await registroDelEspacio(deps.db as Db, p.workspaceId)
+  const motivo = motivoSinCobroAlConfirmar(deps, r, p.usuarioId, deps.env ?? process.env)
+  if (motivo) return { disponible: false, motivo }
+  const ultimos4 = await (deps.ultimos4 ?? ((ref) => ultimosDigitosTarjetaEpayco(ref)))((r as RegistroCobro).metodo_pago_ref)
+  return { disponible: true, valor: COBRO_TRAS_PRUEBA.precio, ultimos4 }
+}
+
+export type ResultadoCobroAlConfirmar =
+  | { tipo: 'cobrado'; ultimos4: string | null }
+  | { tipo: 'pendiente' }
+  | { tipo: 'rechazado'; mensaje: string; ultimos4: string | null }
+  | { tipo: 'revisar' }
+  | { tipo: 'reintentar' }
+  /** Otra corrida (el cron, u otro clic) ya reclamó el cobro: este no cobra. */
+  | { tipo: 'en_curso' }
+  | { tipo: 'no_disponible'; motivo: MotivoSinCobroAlConfirmar }
+
+/**
+ * La Empresa confirmó «Activar y pagar»: se cobra el primer mes YA, por el mismo camino del cron del
+ * día 7 (reclamo de la fila, activación, aceptación de los Términos del registro, enrolamiento con el
+ * ancla de hoy, cuota 1 por token con su intento en `cobro_intentos_tarjeta`).
+ *
+ * No hay doble cobro con el cron: los dos reclaman la fila con la guarda `cobro_estado = 'programado'`.
+ * Quien llega segundo no cobra (el cron ve `cobrado`, o `cobrando` mientras este clic cobra). Y si los
+ * dos llegaran a la cuota, el intento 0 de la cuota 1 solo se reclama una vez.
+ *
+ * El reclamo deja la constancia de lo confirmado: cuándo, desde qué IP y el texto exacto que vio
+ * (`cobro_confirmado_*`, migración 20261014233000). Si la activación falla ANTES del cobro, la fila
+ * vuelve a `programado` (no se cobró nada) y el cobro del día 7 sigue en pie.
+ */
+export async function cobrarAlConfirmar(
+  deps: DepsCobroPrueba,
+  p: { workspaceId: string; usuarioId: string; agotada: boolean; ip: string | null },
+): Promise<ResultadoCobroAlConfirmar> {
+  const db = deps.db as Db
+  const env = deps.env ?? process.env
+  const r = await registroDelEspacio(db, p.workspaceId)
+  const motivo = motivoSinCobroAlConfirmar(deps, r, p.usuarioId, env)
+  if (motivo) return { tipo: 'no_disponible', motivo }
+  const registro = r as RegistroCobro
+
+  const ultimos4 = await (deps.ultimos4 ?? ((ref) => ultimosDigitosTarjetaEpayco(ref)))(registro.metodo_pago_ref)
+  const t = textoConfirmacionCobro({ valor: COBRO_TRAS_PRUEBA.precio, ultimos4, agotada: p.agotada, consultasPrueba: PRUEBA_DE_LAS_CONDICIONES.consultas })
+  const ahoraMs = deps.ahoraMs ?? Date.now()
+  const ahora = new Date(ahoraMs).toISOString()
+  const reclamado = await reclamarCobro(db, registro.id, {
+    cobro_estado: 'cobrando',
+    cobro_intento_at: ahora,
+    cobro_confirmado_at: ahora,
+    cobro_confirmado_ip: p.ip,
+    cobro_confirmado_texto: `${t.titulo}. ${t.detalle} [${t.boton}]`,
+    updated_at: ahora,
+  })
+  if (!reclamado) return { tipo: 'en_curso' }
+
+  const d = await activarYCobrarReclamado(deps, registro, ahoraMs)
+  switch (d.tipo) {
+    case 'cobrado':
+      return { tipo: 'cobrado', ultimos4 }
+    case 'pendiente':
+      return { tipo: 'pendiente' }
+    case 'rechazado':
+      return { tipo: 'rechazado', mensaje: d.mensaje, ultimos4 }
+    case 'revisar':
+      console.error('[valida-cobro] cobro al confirmar a revisar:', registro.id, d.detalle)
+      return { tipo: 'revisar' }
+    default:
+      console.error('[valida-cobro] cobro al confirmar sin cobrar:', registro.id, d.detalle)
+      return { tipo: 'reintentar' }
   }
 }

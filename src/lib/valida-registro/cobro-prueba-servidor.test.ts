@@ -5,7 +5,15 @@ vi.mock('server-only', () => ({}))
 vi.mock('./activacion-servidor', () => ({ activarPlanDelEspacio: vi.fn() }))
 
 import { crearDoble, type Tablas } from '../../../test/tablas-doble'
-import { cancelarCobroDelEspacio, estadoCobroDelEspacio, procesarCobrosTrasPrueba, type DepsCobroPrueba } from './cobro-prueba-servidor'
+import {
+  cancelarCobroDelEspacio,
+  cobrarAlConfirmar,
+  estadoCobroDelEspacio,
+  ofertaCobroAlConfirmar,
+  procesarCobrosTrasPrueba,
+  type DepsCobroPrueba,
+} from './cobro-prueba-servidor'
+import { textoTrasConfirmar } from './cobro-prueba'
 import type { ResultadoCobroToken } from './cobro-token-servidor'
 
 const H = 3_600_000
@@ -289,5 +297,118 @@ describe('lo que muestra la cuenta', () => {
       cobroDesde: VENCE,
       puedeCancelar: true,
     })
+  })
+})
+
+describe('el cobro del primer mes AL CONFIRMAR (Condiciones v2.1, 7.1 literal a)', () => {
+  // Aceptó las Condiciones v2.1 (las que contemplan este cobro). Jueves 15: le quedan 5 días de prueba.
+  const V21 = { condiciones_version: 'condiciones-2.1+aviso-1.2+terminos-auto-2.1' }
+  const JUEVES = cron('2026-10-15') + 6 * H
+  const confirmar = (m: ReturnType<typeof montar>, extra: Partial<{ usuarioId: string; agotada: boolean }> = {}) =>
+    cobrarAlConfirmar(
+      { ...m.deps, ahoraMs: JUEVES, ultimos4: async () => '0326' },
+      { workspaceId: 'ws-cli', usuarioId: 'u-1', agotada: true, ip: '181.50.1.2', ...extra },
+    )
+
+  it('consulta 11: al confirmar cobra YA (sin aviso de 48 h ni día 7), activa el plan y deja la constancia de lo que vio', async () => {
+    const m = montar(tablas(V21))
+    const r = await confirmar(m)
+    expect(r).toEqual({ tipo: 'cobrado', ultimos4: '0326' })
+    expect(m.cobros).toEqual(['cuota-1'])
+    expect(m.activar).toHaveBeenCalledWith({ workspaceId: 'ws-cli', usuarioId: 'u-1' })
+    // El mes nace hoy: la cuota 1 y las siguientes se anclan al día de la confirmación.
+    expect(m.enrolar).toHaveBeenCalledWith(expect.objectContaining({ contratoId: 'c-1', anclaAt: new Date(JUEVES).toISOString() }))
+    expect(m.correos).toEqual([])
+    expect(m.registro()).toMatchObject({
+      cobro_estado: 'cobrado',
+      cobro_confirmado_at: new Date(JUEVES).toISOString(),
+      cobro_confirmado_ip: '181.50.1.2',
+      cobro_confirmado_texto:
+        'Usaste tus 10 consultas de prueba. Activa tu plan ahora: se cobran $150.000 a tu tarjeta terminada en 0326. [Activar y pagar $150.000]',
+    })
+  })
+
+  it('no hay doble cobro: el cron del día 7 (y los siguientes) ya no cobra', async () => {
+    const m = montar(tablas(V21))
+    await confirmar(m)
+    const avisos = await procesarCobrosTrasPrueba({ ...m.deps, ahoraMs: cron('2026-10-18') })
+    const dia7 = await procesarCobrosTrasPrueba({ ...m.deps, ahoraMs: cron('2026-10-21') })
+    await procesarCobrosTrasPrueba({ ...m.deps, ahoraMs: cron('2026-10-22') })
+    expect(m.cobros).toEqual(['cuota-1'])
+    expect(avisos.avisos).toBe(0)
+    expect(m.correos).toEqual([])
+    expect(dia7.cobrados).toBe(0)
+  })
+
+  it('no hay doble cobro aunque el clic y el cron del día 7 lleguen A LA VEZ', async () => {
+    const m = montar(tablas({ ...V21, ...AVISADO }))
+    const [clic] = await Promise.all([
+      cobrarAlConfirmar({ ...m.deps, ahoraMs: cron('2026-10-21'), ultimos4: async () => '0326' }, { workspaceId: 'ws-cli', usuarioId: 'u-1', agotada: true, ip: null }),
+      procesarCobrosTrasPrueba({ ...m.deps, ahoraMs: cron('2026-10-21') }),
+    ])
+    expect(m.cobros).toEqual(['cuota-1'])
+    expect(['cobrado', 'en_curso', 'no_disponible']).toContain(clic.tipo)
+    // Un segundo clic tampoco cobra.
+    expect((await confirmar(m)).tipo).toBe('no_disponible')
+    expect(m.cobros).toHaveLength(1)
+  })
+
+  it('tarjeta rechazada al confirmar: lo dice claro, sin plan, y el día 7 no se vuelve a intentar', async () => {
+    const m = montar(tablas(V21))
+    m.setResultado({ tipo: 'rechazado', cobroId: 'cobro-1', mensaje: 'Fondos insuficientes' })
+    const r = await confirmar(m)
+    expect(r).toEqual({ tipo: 'rechazado', mensaje: 'Fondos insuficientes', ultimos4: '0326' })
+    expect(textoTrasConfirmar(r.tipo, { valor: 150_000, ultimos4: '0326' })).toBe(
+      'No se pudo cobrar a tu tarjeta terminada en 0326: el pago fue rechazado. No se cobró nada y tu plan no quedó activo. Te enviamos al correo un enlace para pagar el primer mes con otro medio.',
+    )
+    expect(m.registro().cobro_estado).toBe('rechazado')
+    await procesarCobrosTrasPrueba({ ...m.deps, ahoraMs: cron('2026-10-21') })
+    expect(m.cobros).toHaveLength(1)
+  })
+
+  it('si la activación falla antes del cobro: no cobra, la fila vuelve a programado y el día 7 sigue en pie', async () => {
+    let falla = true
+    const m = montar(tablas({ ...V21, ...AVISADO }), {
+      activar: async () => (falla ? { ok: false, error: 'error' } : { ok: true, resultado: 'activado', contratoId: 'c-1' }),
+    })
+    expect((await confirmar(m)).tipo).toBe('reintentar')
+    expect(m.cobros).toEqual([])
+    expect(m.registro().cobro_estado).toBe('programado')
+    falla = false
+    await procesarCobrosTrasPrueba({ ...m.deps, ahoraMs: cron('2026-10-21') })
+    expect(m.cobros).toEqual(['cuota-1'])
+  })
+
+  it('SIN confirmación no se cobra antes del día 7, aunque haya agotado las 10 consultas y vea la oferta', async () => {
+    const m = montar(tablas(V21))
+    const oferta = await ofertaCobroAlConfirmar({ ...m.deps, ultimos4: async () => '0326' }, { workspaceId: 'ws-cli', usuarioId: 'u-1' })
+    expect(oferta).toEqual({ disponible: true, valor: 150_000, ultimos4: '0326' })
+    for (const dia of ['2026-10-14', '2026-10-15', '2026-10-16', '2026-10-17', '2026-10-18', '2026-10-19', '2026-10-20']) {
+      await procesarCobrosTrasPrueba({ ...m.deps, ahoraMs: cron(dia) })
+    }
+    expect(m.cobros).toEqual([])
+    expect(m.activar).not.toHaveBeenCalled()
+    expect(m.registro().cobro_estado).toBe('programado')
+    expect(m.registro().cobro_confirmado_at ?? null).toBeNull()
+    // El día 7, el de siempre.
+    await procesarCobrosTrasPrueba({ ...m.deps, ahoraMs: cron('2026-10-21') })
+    expect(m.cobros).toEqual(['cuota-1'])
+  })
+
+  it('no se ofrece ni se cobra: a quien aceptó la v2.0, a otra persona, a otro despliegue, tras cancelar ni sin Términos', async () => {
+    const casos: [Record<string, unknown>, string, string][] = [
+      [{ condiciones_version: 'condiciones-2.0+aviso-1.2+terminos-auto-2.0' }, 'u-1', 'condiciones_sin_cobro_al_confirmar'],
+      [V21, 'u-otra', 'no_es_la_persona'],
+      [{ ...V21, cobro_entorno: 'production' }, 'u-1', 'otro_entorno'],
+      [{ ...V21, cobro_estado: 'cancelado', cobro_cancelado_at: '2026-10-14T00:00:00Z' }, 'u-1', 'sin_cobro_programado'],
+      [{ ...V21, terminos_sha256: null }, 'u-1', 'esperando_terminos'],
+    ]
+    for (const [extra, usuarioId, motivo] of casos) {
+      const m = montar(tablas(extra))
+      expect(await ofertaCobroAlConfirmar({ ...m.deps, ultimos4: async () => '0326' }, { workspaceId: 'ws-cli', usuarioId })).toEqual({ disponible: false, motivo })
+      expect(await confirmar(m, { usuarioId })).toEqual({ tipo: 'no_disponible', motivo })
+      expect(m.cobros).toEqual([])
+      expect(m.activar).not.toHaveBeenCalled()
+    }
   })
 })
