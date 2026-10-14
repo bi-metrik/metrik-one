@@ -13,6 +13,8 @@ import {
   soloDigitos,
   textoProblemaNit,
 } from '@/lib/valida-registro/datos'
+import { camposDeLaOrden, vistaDeLosTerminos } from '@/lib/valida-registro/terminos-plan'
+import { bloquesDeTexto } from '@/lib/valida-api/texto-documento'
 
 const FONT = 'var(--font-schibsted), sans-serif'
 const BASE_DOMAIN = process.env.NEXT_PUBLIC_BASE_DOMAIN || 'localhost:3000'
@@ -73,9 +75,27 @@ interface Props {
    * (aviso §2.3), con `{fecha_y_hora_vence}` por llenar.
    */
   tarjeta?: { llavePublica: string; texto: string; duracionMs: number } | null
+  /**
+   * Con cobro: los Términos de Uso que la casilla acepta (sección B de los Términos de autoservicio),
+   * para mostrarlos enteros con la Orden llena con lo que la persona escribe. `huella` es la de la
+   * Parte II; `duracionMs`, la de la prueba (la fecha en que vence el plazo para cancelar).
+   */
+  terminos?: { titulo: string; version: string; huella: string; duracionMs: number } | null
 }
 
-export default function RegistroValidaClient({ origenUrl, abierto, consultas, dias, condiciones, avisoDatos, textoCasilla, politica, conCobro = false, tarjeta = null }: Props) {
+export default function RegistroValidaClient({
+  origenUrl,
+  abierto,
+  consultas,
+  dias,
+  condiciones,
+  avisoDatos,
+  textoCasilla,
+  politica,
+  conCobro = false,
+  tarjeta = null,
+  terminos = null,
+}: Props) {
   const [paso, setPaso] = useState<Paso>('correo')
   const [correo, setCorreo] = useState('')
   const [codigo, setCodigo] = useState('')
@@ -92,6 +112,9 @@ export default function RegistroValidaClient({ origenUrl, abierto, consultas, di
   const [errorCampo, setErrorCampo] = useState('')
   const [ocupado, setOcupado] = useState(false)
   const [aviso, setAviso] = useState('')
+  // El momento con que la pantalla llena la Orden (fecha del registro y fin del plazo para cancelar), como
+  // el texto junto a la tarjeta. Lo que se guarda lo pone el servidor al aceptar.
+  const [abiertaMs] = useState(() => Date.now())
 
   useEffect(() => {
     if (tieneSenales(origenUrl)) window.sessionStorage.setItem(LLAVE_ORIGEN, JSON.stringify(origenUrl))
@@ -392,6 +415,27 @@ export default function RegistroValidaClient({ origenUrl, abierto, consultas, di
               <summary className="cursor-pointer text-sm font-medium text-foreground">{condiciones.titulo}</summary>
               <div className="mt-2 max-h-64 overflow-y-auto whitespace-pre-line text-xs text-muted-foreground">{condiciones.texto}</div>
             </details>
+            {terminos && (
+              <details>
+                <summary className="cursor-pointer text-sm font-medium text-foreground">
+                  {terminos.titulo} · {terminos.version}
+                </summary>
+                <TextoTerminos
+                  md={vistaDeLosTerminos(
+                    camposDeLaOrden({
+                      razonSocial: razonSocial.trim(),
+                      nit: soloDigitos(nit),
+                      dv: soloDigitos(dv) || null,
+                      correo,
+                      recomendadoAfi,
+                      aceptadoMs: abiertaMs,
+                      duracionPruebaMs: terminos.duracionMs,
+                      huellaParteII: terminos.huella,
+                    }),
+                  )}
+                />
+              </details>
+            )}
             <p className="text-xs text-muted-foreground">
               {avisoDatos}{' '}
               <a href={politica.url} target="_blank" rel="noreferrer" className="underline">
@@ -419,6 +463,24 @@ export default function RegistroValidaClient({ origenUrl, abierto, consultas, di
 
       {paso === 'listo' && <p className="text-center text-sm text-muted-foreground">Listo. Te estamos llevando a Valida.</p>}
     </Marco>
+  )
+}
+
+/** Los Términos como texto: títulos, párrafos y negritas (el mismo lector del PDF de la constancia). */
+function TextoTerminos({ md }: { md: string }) {
+  return (
+    <div className="mt-2 max-h-64 space-y-2 overflow-y-auto text-xs text-muted-foreground">
+      {bloquesDeTexto(md).flatMap((b, i) => {
+        // Una lista se lee como sus renglones; un título, en negrita; lo demás, como párrafo.
+        const renglones = b.tipo === 'lista' ? b.items : [b.tramos]
+        return renglones.map((tramos, k) => (
+          <p key={`${i}-${k}`} className={b.tipo === 'titulo' ? 'pt-1 font-semibold text-foreground' : 'whitespace-pre-line'}>
+            {b.tipo === 'lista' ? '- ' : null}
+            {tramos.map((t, j) => (t.negrita ? <strong key={j}>{t.texto}</strong> : <span key={j}>{t.texto}</span>))}
+          </p>
+        ))
+      })}
+    </div>
   )
 }
 

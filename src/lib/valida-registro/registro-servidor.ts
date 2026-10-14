@@ -23,6 +23,7 @@ import { registroAbierto } from './llave'
 import { leerTarjeta, partirNombre, pideMetodoPago, textoProblemaTarjeta } from './metodo-pago'
 import { registrarClienteEpayco } from '@/lib/suscripciones/pasarela/epayco'
 import { emitirPruebaDelEspacio } from './prueba-servidor'
+import { terminosParaElRegistro, type TerminosDelRegistroArmados } from './terminos-registro-servidor'
 
 /**
  * El alta autogestionada de Valida, en el SERVIDOR (`18-recorrido-baja-friccion.md`, PR 3).
@@ -61,8 +62,12 @@ import { emitirPruebaDelEspacio } from './prueba-servidor'
  * `registrado` y, al emitirse la prueba, queda programado el cobro del primer mes en el instante en que
  * se cumplen los 7 días (`cobro-prueba.ts`, `cobro-prueba-servidor.ts`).
  *
- * ⚠️ PENDIENTE (Emilio): los Términos de Uso de autoservicio se aceptan en este mismo registro (7.1).
- * Cuando estén, se muestran con las Condiciones y se pasan a `textoAceptado(condiciones, terminos)`.
+ * Con cobro, la casilla v1.2 acepta además los Términos de Uso de autoservicio (Condiciones 7.1;
+ * Términos 16.2). El servidor arma los de ESTA empresa en el momento de aceptar (Orden con lo
+ * declarado + Parte II, `terminosParaElRegistro`), los mete en la huella (`textoAceptado(c, terminos)`)
+ * y guarda, en la misma escritura de la puerta, el texto aceptado entero y los Términos con su huella
+ * (`aceptado_texto`, `terminos_*`, migración 20261014203000). El día 7 esos Términos se registran tal
+ * cual sobre el contrato (`aceptarTerminosDelRegistro`) y el cobro sigue.
  */
 
 export type CampoRegistro = 'razon_social' | 'nit' | 'dv' | 'acepta' | 'tarjeta'
@@ -217,6 +222,28 @@ export async function crearEspacioValida(datos: DatosRegistroValida): Promise<Re
     celularPago = t.tarjeta.celular
   }
 
+  // ── Los Términos de esta empresa, si la casilla los acepta (con cobro) ───────────────────────
+  // El instante de la aceptación es UNO: el de `aceptado_at` y el de la Orden.
+  const aceptadoMs = Date.now()
+  let terminos: TerminosDelRegistroArmados | null = null
+  if (condiciones.terminos) {
+    const t = terminosParaElRegistro({
+      razonSocial,
+      nit,
+      dv,
+      correo,
+      recomendadoAfi: datos.recomendadoAfi,
+      aceptadoMs,
+    })
+    if (!t.ok) {
+      // Un campo de la Orden sin llenar: no se acepta un texto con huecos.
+      console.error('[valida-registro] Términos con campos sin llenar:', t.faltan.join(', '))
+      return { tipo: 'error' }
+    }
+    terminos = t.terminos
+  }
+  const aceptado = textoAceptado(condiciones, terminos)
+
   // ── 1. La huella del intento ──────────────────────────────────────────────
   const { data: intento, error: eIntento } = await svc
     .from('valida_registros')
@@ -281,14 +308,31 @@ export async function crearEspacioValida(datos: DatosRegistroValida): Promise<Re
       workspace_id: workspaceId,
       slug_creado: slug,
       condiciones_version: versionAceptada(condiciones),
-      condiciones_sha256: huellaAceptacion(textoAceptado(condiciones)),
+      condiciones_sha256: huellaAceptacion(aceptado),
       politica_version: POLITICA_DATOS_VALIDA.version,
-      aceptado_at: new Date().toISOString(),
+      aceptado_at: new Date(aceptadoMs).toISOString(),
+      // La evidencia de los Términos aceptados en el registro (Términos 16.3). Solo con Términos: así
+      // un registro sin cobro no depende de la migración 20261014203000.
+      ...(terminos
+        ? {
+            aceptado_texto: aceptado,
+            terminos_version: terminos.version,
+            terminos_texto: terminos.texto,
+            terminos_sha256: terminos.sha256,
+          }
+        : {}),
       updated_at: new Date().toISOString(),
     })
     .eq('id', registroId)
   if (ePuerta) {
     await svc.from('workspaces').delete().eq('id', workspaceId)
+    if (ePuerta.code && ePuerta.code !== '23505') {
+      // No es la puerta del NIT o del correo (p. ej. la migración de los Términos sin aplicar): no se
+      // le dice a la persona que su NIT ya está tomado.
+      console.error('[valida-registro] puerta:', ePuerta.code, ePuerta.message)
+      await cerrarIntento('error_puerta')
+      return { tipo: 'error' }
+    }
     const m: MotivoRechazo = /correo_creado/.test(ePuerta.message) ? 'correo_tomado' : 'identificacion_tomada'
     await cerrarIntento(m)
     return { tipo: 'rechazado', motivo: m, texto: textoMotivoValida(m) }

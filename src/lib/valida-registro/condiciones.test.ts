@@ -80,7 +80,7 @@ describe('con cobro: Condiciones v2.0 completas, aviso v1.2 y casilla con cobro'
 
   it('versión 2.0 y aviso 1.2', () => {
     expect(t).toMatch(/^CONDICIONES DE LA PRUEBA GRATIS DE VALIDA · Versión 2\.0/)
-    expect(versionAceptada(VIGENTES_CON_COBRO)).toBe('condiciones-2.0+aviso-1.2')
+    expect(versionAceptada(VIGENTES_CON_COBRO)).toBe('condiciones-2.0+aviso-1.2+terminos-auto-2.0')
   })
 
   it('el numeral 1 ya no dice que no pide tarjeta, y autoriza el cobro de cada mes (Vera)', () => {

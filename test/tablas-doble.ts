@@ -91,6 +91,15 @@ export function crearDoble(tablas: Tablas) {
         }
         return ins
       },
+      // Upsert por la llave de `onConflict` (una columna): actualiza la fila que coincide o inserta.
+      upsert: (v: Fila, o?: { onConflict?: string }) => {
+        const llave = o?.onConflict ?? 'id'
+        const previa = filas().find((f) => f[llave] !== undefined && f[llave] === v[llave])
+        if (previa) Object.assign(previa, v)
+        else filas().push({ id: `${tabla}-${++secuencia}`, ...v })
+        escrituras.push({ tabla, op: previa ? 'update' : 'insert', fila: { ...v } })
+        return Promise.resolve({ data: null, error: null })
+      },
       // `columna->>llave`: el texto de una llave de un jsonb, como PostgREST.
       eq: (c: string, v: unknown) => (filtros.push((f) => valor(f, c) === v), chain),
       not: (c: string, op: string, v: unknown) => {
@@ -101,6 +110,7 @@ export function crearDoble(tablas: Tablas) {
       is: (c: string, v: unknown) => (filtros.push((f) => (f[c] ?? null) === v), chain),
       in: (c: string, vs: unknown[]) => (filtros.push((f) => vs.includes(f[c])), chain),
       lte: (c: string, v: string) => (filtros.push((f) => String(f[c]) <= v), chain),
+      gte: (c: string, v: string) => (filtros.push((f) => String(f[c]) >= v), chain),
       gt: (c: string, v: number) => (filtros.push((f) => Number(f[c]) > v), chain),
       order: (c: string, o?: { ascending?: boolean }) => ((orden = c), (descendente = o?.ascending === false), chain),
       range: (a: number, b: number) => ((rango = [a, b]), chain),

@@ -1,6 +1,6 @@
 import { POLITICA_DATOS_VALIDA } from '@/lib/valida-api/politica'
 import { CLAUSULA_COBRO_APROBADA_PARA_PRODUCCION } from './condiciones-cobro'
-import { terminosPlanListos } from './terminos-plan'
+import { TERMINOS_PLAN, terminosPlanListos } from './terminos-plan'
 
 /**
  * Los textos legales del registro autogestionado de Valida (pantalla «Tu empresa»). Copiados TAL CUAL
@@ -181,6 +181,12 @@ export interface CondicionesVigentes {
   aviso: { version: string; texto: string }
   /** La casilla que se muestra con ESTAS Condiciones (entra a la huella). */
   casilla: string
+  /**
+   * Los Términos de Uso que se aceptan con la casilla, en el MISMO registro (Condiciones 7.1; Términos
+   * autoservicio 16.2). Solo con cobro: la casilla v1.2 los nombra. El texto lleno de cada empresa lo
+   * arma el servidor (`terminos-registro-servidor.ts`); aquí va qué documento es.
+   */
+  terminos: { slug: string; titulo: string; version: string } | null
 }
 
 export const VIGENTES_SIN_COBRO: CondicionesVigentes = {
@@ -188,6 +194,7 @@ export const VIGENTES_SIN_COBRO: CondicionesVigentes = {
   conCobro: false,
   aviso: { version: AVISO_REGISTRO.version, texto: AVISO_DATOS_FORMULARIO },
   casilla: TEXTO_CASILLA,
+  terminos: null,
 }
 
 export const VIGENTES_CON_COBRO: CondicionesVigentes = {
@@ -195,14 +202,20 @@ export const VIGENTES_CON_COBRO: CondicionesVigentes = {
   conCobro: true,
   aviso: { version: AVISO_REGISTRO_CON_COBRO.version, texto: AVISO_DATOS_FORMULARIO_CON_COBRO },
   casilla: TEXTO_CASILLA_CON_COBRO,
+  terminos: { slug: TERMINOS_PLAN.slug, titulo: TERMINOS_PLAN.titulo, version: TERMINOS_PLAN.version },
 }
 
 /** Lo que se guarda en `valida_registros.condiciones_version` sin cobro. */
 export const VERSION_ACEPTADA = `condiciones-${CONDICIONES_PRUEBA.version}+aviso-${AVISO_REGISTRO.version}`
 
-/** La versión aceptada de unas Condiciones dadas, con el aviso que se mostró con ellas. */
-export function versionAceptada(c: Pick<CondicionesVigentes, 'version' | 'aviso'> = VIGENTES_SIN_COBRO): string {
-  return `condiciones-${c.version}+aviso-${c.aviso.version}`
+/**
+ * La versión aceptada de unas Condiciones dadas, con el aviso que se mostró con ellas y, con cobro,
+ * los Términos (`condiciones-2.0+aviso-1.2+terminos-auto-2.0`, la que pide Emilio en la sección B de
+ * los Términos de autoservicio).
+ */
+export function versionAceptada(c: Pick<CondicionesVigentes, 'version' | 'aviso'> & { terminos?: CondicionesVigentes['terminos'] } = VIGENTES_SIN_COBRO): string {
+  const base = `condiciones-${c.version}+aviso-${c.aviso.version}`
+  return c.terminos ? `${base}+terminos-auto-${c.terminos.version.replace(/^v/, '')}` : base
 }
 
 /** El aviso como se lee en la pantalla: texto, enlace a la Política (con su dirección) y punto. */
@@ -215,12 +228,9 @@ export function avisoComoSeLee(
 
 /**
  * Los Términos de Uso que se aceptan EN EL REGISTRO (7.1: «los Términos de Uso de Valida que la
- * Empresa aceptó en este registro»).
- *
- * ⚠️ PENDIENTE (Emilio): la variante autoservicio no existe todavía (`condiciones-prueba-valida-v2.0.md`
- * §4). Cuando llegue, el registro la muestra junto a las Condiciones y la pasa a `textoAceptado`, que
- * la mete en la huella detrás de la casilla. Hoy nadie la pasa: en producción la v2.0 no se activa
- * sin Términos (`condicionesVigentes`), y en un preview el registro con tarjeta se prueba sin ellos.
+ * Empresa aceptó en este registro»): los de autoservicio v2.0 (`terminos-plan.ts`), llenos con la Orden
+ * de la empresa. El registro los muestra junto a las Condiciones y los pasa a `textoAceptado`, que los
+ * mete en la huella detrás de la casilla.
  */
 export interface TerminosDelRegistro {
   titulo: string

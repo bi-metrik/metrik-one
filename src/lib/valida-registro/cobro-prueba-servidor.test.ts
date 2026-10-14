@@ -33,6 +33,8 @@ function tablas(extra: Record<string, unknown> = {}): Tablas {
         cobro_aviso_enviado_at: null,
         cobro_token_borrado_at: null,
         cobro_entorno: 'preview',
+        // Aceptó los Términos en el registro (sin esto, el cobro espera).
+        terminos_sha256: 'a'.repeat(64),
         ...extra,
       },
     ],
@@ -170,6 +172,15 @@ describe('el cobro en la fecha fija', () => {
 
   it('sin Términos aceptados en el registro (hoy), no reclama ni cobra: espera', async () => {
     const m = montar(tablas(AVISADO), { terminosDelRegistroListos: () => false })
+    const r = await procesarCobrosTrasPrueba({ ...m.deps, ahoraMs: cron('2026-10-21') })
+    expect(r.esperandoTerminos).toBe(1)
+    expect(m.cobros).toEqual([])
+    expect(m.activar).not.toHaveBeenCalled()
+    expect(m.registro()).toMatchObject({ cobro_estado: 'programado', cobro_detalle: 'esperando_terminos' })
+  })
+
+  it('un registro sin Términos aceptados (de antes del 2026-10-14) tampoco se cobra: espera', async () => {
+    const m = montar(tablas({ ...AVISADO, terminos_sha256: null }))
     const r = await procesarCobrosTrasPrueba({ ...m.deps, ahoraMs: cron('2026-10-21') })
     expect(r.esperandoTerminos).toBe(1)
     expect(m.cobros).toEqual([])

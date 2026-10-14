@@ -16,7 +16,7 @@ import {
   puedeCancelar,
 } from './cobro-prueba'
 import { partirNombre } from './metodo-pago'
-import { terminosPlanListos } from './terminos-plan'
+import { TERMINOS_PLAN, terminosPlanListos } from './terminos-plan'
 
 /**
  * El cobro del primer mes al cumplirse los 7 días de la prueba, sin clic (Condiciones v2.0, 7.1 a 7.5).
@@ -32,8 +32,8 @@ import { terminosPlanListos } from './terminos-plan'
  *        a. se RECLAMA la fila (`programado` → `cobrando`, con la guarda en el update): dos corridas a
  *           la vez, o el cron entregado dos veces, cobran una sola vez;
  *        b. se activa el plan (`activarPlanDelEspacio`, con la persona que se registró y aceptó);
- *        c. se registra la aceptación de los Términos que se aceptaron EN EL REGISTRO (pendiente: ver
- *           `aceptarTerminosDelRegistro`);
+ *        c. se registra, sobre el contrato que acaba de nacer, la aceptación de los Términos que se
+ *           aceptaron EN EL REGISTRO (`aceptarTerminosDelRegistro`, canal `registro`);
  *        d. se enrola el contrato con la cuota 1 el día del cobro (fila 22 de Vera);
  *        e. el plan pasa a la tarjeta y se cobra la cuota 1 por el MISMO camino de las cuotas mensuales
  *           (`cobrarCuotaConTarjeta`): aprobado abre el mes en Valida; rechazado deja el plan sin activar
@@ -45,13 +45,14 @@ import { terminosPlanListos } from './terminos-plan'
  *      que ni esta corrida ni el paso 7b vuelvan a cobrar algo que quizá ya se cobró.
  *   3. **Tarjetas de quien canceló** (7.3) que ePayco no alcanzó a borrar: se reintenta el borrado.
  *
- * ## Por qué hoy no cobra (y no puede cobrar) nada
+ * ## Cuándo no cobra
  *
- * Los Términos de Uso de autoservicio no están en el código (`terminos-plan.ts`, marcador) y la
- * aceptación de esos Términos en el registro no está construida (`ACEPTACION_EN_REGISTRO_CONSTRUIDA`).
- * Sin las dos, el paso de cobro no reclama nada: deja `cobro_detalle = 'esperando_terminos'` y sigue
- * siendo `programado`. Para probar la pasarela en un preview existe el ENSAYO (`VALIDA_COBRO_ENSAYO=1`,
- * solo fuera de producción y con ePayco en modo prueba): cobra la tarjeta de prueba directo, sin plan.
+ * Sin los Términos de autoservicio en el código (`terminosPlanListos`) o sin la aceptación en el
+ * registro construida (`ACEPTACION_EN_REGISTRO_CONSTRUIDA`), o con un registro que no aceptó Términos
+ * (sin `terminos_sha256`: uno de antes del 2026-10-14), el paso de cobro no reclama nada: deja
+ * `cobro_detalle = 'esperando_terminos'` y sigue siendo `programado`. Para probar la pasarela en un
+ * preview con un registro así existe el ENSAYO (`VALIDA_COBRO_ENSAYO=1`, solo fuera de producción y con
+ * ePayco en modo prueba): cobra la tarjeta de prueba directo, sin plan.
  */
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -59,14 +60,14 @@ type Db = any
 type Env = Record<string, string | undefined>
 
 /**
- * ⚠️ PENDIENTE. La aceptación de los Términos de Uso en el MISMO registro (Condiciones 7.1; Términos
- * v2.0 autoservicio 16.2 a 16.4: la acepta «quien marca la casilla», sin cédula ni representante legal).
- * Hoy la guarda de la base (`aceptaciones_terminos_modulo()`) exige nombre y cédula de quien acepta y
- * que lo haga la persona designada desde su espacio: para registrar una aceptación hecha en el
- * registro hace falta otro canal en `aceptaciones_terminos` (migración) y decidir con Emilio qué texto
- * de declaración la acompaña. Se cambia a `true` en ese PR.
+ * La aceptación de los Términos de Uso en el MISMO registro (Condiciones 7.1; Términos v2.0 autoservicio
+ * 16.2 a 16.4: la acepta «quien marca la casilla», sin cédula ni representante legal). Construida el
+ * 2026-10-14: la casilla v1.2 acepta los Términos llenos de la empresa, el registro guarda el texto y su
+ * huella, y el día 7 la aceptación se registra sobre el contrato por el canal `registro` de
+ * `aceptaciones_terminos` (migración 20261014203000), cuya guarda exige que el documento sea el MISMO
+ * texto aceptado y pone la hora, la IP y el correo desde el registro.
  */
-export const ACEPTACION_EN_REGISTRO_CONSTRUIDA = false
+export const ACEPTACION_EN_REGISTRO_CONSTRUIDA = true
 
 export interface RegistroCobro {
   id: string
@@ -81,10 +82,12 @@ export interface RegistroCobro {
   cobro_programado_at: string | null
   cobro_aviso_enviado_at: string | null
   cobro_token_borrado_at: string | null
+  /** Los Términos aceptados en el registro. Null en un registro de antes del 2026-10-14: no se cobra. */
+  terminos_sha256: string | null
 }
 
 const COLUMNAS =
-  'id, workspace_id, usuario_id, correo, razon_social, identificacion, slug_creado, metodo_pago_ref, cobro_estado, cobro_programado_at, cobro_aviso_enviado_at, cobro_token_borrado_at'
+  'id, workspace_id, usuario_id, correo, razon_social, identificacion, slug_creado, metodo_pago_ref, cobro_estado, cobro_programado_at, cobro_aviso_enviado_at, cobro_token_borrado_at, terminos_sha256'
 
 export interface DepsCobroPrueba {
   db: SupabaseClient
@@ -233,7 +236,10 @@ function ensayoPermitido(env: Env): boolean {
 async function cobrar(deps: DepsCobroPrueba, r: RegistroCobro, ahoraMs: number, env: Env, resumen: ResumenCobroPrueba) {
   const db = deps.db as Db
   const ahora = new Date(ahoraMs).toISOString()
-  const listos = (deps.terminosDelRegistroListos ?? (() => terminosPlanListos() && ACEPTACION_EN_REGISTRO_CONSTRUIDA))()
+  // Los Términos en el código Y aceptados en ESTE registro. Un registro sin ellos no tiene autorización
+  // de cobro que se pueda probar con el texto de los Términos (3.5): espera.
+  const listos =
+    (deps.terminosDelRegistroListos ?? (() => terminosPlanListos() && ACEPTACION_EN_REGISTRO_CONSTRUIDA))() && Boolean(r.terminos_sha256)
   const ensayo = !listos && ensayoPermitido(env)
 
   if (!listos && !ensayo) {
@@ -297,7 +303,7 @@ async function cobrar(deps: DepsCobroPrueba, r: RegistroCobro, ahoraMs: number, 
     if (sc.error || contratos.length !== 1) return soltar(`contrato: ${sc.error?.message ?? `${contratos.length} activos`}`)
     const contrato = contratos[0]
 
-    const acept = await (deps.aceptarTerminos ?? aceptarTerminosDelRegistro)({ registro: r, contratoId: contrato.id })
+    const acept = await (deps.aceptarTerminos ?? ((p) => aceptarTerminosDelRegistro(deps.db, p)))({ registro: r, contratoId: contrato.id })
     if (!acept.ok) return soltar(`terminos: ${acept.motivo}`)
 
     const enr = await (deps.enrolar ?? enrolarContratosPorCiclo)({ db: deps.db, contratoId: contrato.id, anclaAt: ahora })
@@ -393,13 +399,94 @@ async function ensayoDeCobro(
 }
 
 /**
- * ⚠️ PENDIENTE (ver `ACEPTACION_EN_REGISTRO_CONSTRUIDA`): deja la constancia de los Términos aceptados
- * en el registro sobre el contrato que acaba de nacer. Mientras no exista, devuelve `pendiente` y el
- * cobro no sigue (la fila vuelve a `programado`): sin Términos aceptados no hay plan que cobrar.
+ * Deja la constancia de los Términos aceptados EN EL REGISTRO sobre el contrato que acaba de nacer
+ * (canal `registro` de `aceptaciones_terminos`). Sin ella no hay plan que cobrar: el enrolamiento solo
+ * enrola contratos con aceptación, y la puerta de `/valida` pediría aceptar otra vez.
+ *
+ * El servidor arma la fila; la BASE la valida y pone la evidencia desde el registro
+ * (`aceptaciones_terminos_registro()`): la hora en que se marcó la casilla, la IP, el correo verificado,
+ * la razón social y el NIT declarados, y exige que el documento del contrato sea EL MISMO texto
+ * aceptado (`texto_sha256 = terminos_sha256`) y que la declaración sea la casilla tal como se marcó.
+ *
+ * Idempotente: si la corrida anterior la registró y falló después, la encuentra y sigue.
  */
-export async function aceptarTerminosDelRegistro(_p: { registro: RegistroCobro; contratoId: string }): Promise<{ ok: true } | { ok: false; motivo: string }> {
-  void _p
-  return { ok: false, motivo: 'aceptacion_en_registro_pendiente' }
+export async function aceptarTerminosDelRegistro(
+  dbCliente: SupabaseClient,
+  p: { registro: RegistroCobro; contratoId: string },
+): Promise<{ ok: true } | { ok: false; motivo: string }> {
+  const db = dbCliente as Db
+  const r = p.registro
+  if (!r.terminos_sha256 || !r.usuario_id) return { ok: false, motivo: 'registro_sin_terminos' }
+
+  // La casilla que marcó, tal como quedó en lo que aceptó (no la de hoy: puede haber cambiado).
+  const reg = await db.from('valida_registros').select('aceptado_texto').eq('id', r.id).maybeSingle()
+  if (reg.error || !reg.data) return { ok: false, motivo: `registro: ${reg.error?.message ?? 'no existe'}` }
+  const casilla = casillaMarcada((reg.data as { aceptado_texto: string | null }).aceptado_texto)
+  if (!casilla) return { ok: false, motivo: 'registro_sin_casilla' }
+
+  const sc = await db
+    .from('servicios_contratados')
+    .select('id, workspace_id, empresa_id, negocio_id')
+    .eq('id', p.contratoId)
+    .maybeSingle()
+  if (sc.error || !sc.data) return { ok: false, motivo: `contrato: ${sc.error?.message ?? 'no existe'}` }
+  const contrato = sc.data as { id: string; workspace_id: string; empresa_id: string; negocio_id: string }
+
+  // El documento de ESA empresa con el texto exacto aceptado en el registro (lo dejó la activación).
+  const docs = await db
+    .from('documentos_contractuales_versiones')
+    .select('id, titulo, version, texto_sha256, pdf_sha256')
+    .eq('workspace_id', contrato.workspace_id)
+    .eq('empresa_id', contrato.empresa_id)
+    .eq('slug', TERMINOS_PLAN.slug)
+    .eq('texto_sha256', r.terminos_sha256)
+  if (docs.error) return { ok: false, motivo: `documento: ${docs.error.message}` }
+  const lista = (docs.data ?? []) as { id: string; titulo: string; version: string; texto_sha256: string; pdf_sha256: string }[]
+  if (lista.length !== 1) return { ok: false, motivo: `documento: ${lista.length} con el texto del registro` }
+  const doc = lista[0]
+
+  const previa = await db
+    .from('aceptaciones_terminos')
+    .select('id')
+    .eq('negocio_id', contrato.negocio_id)
+    .eq('documento_sha256', doc.pdf_sha256)
+    .eq('estado', 'aceptado')
+  if (previa.error) return { ok: false, motivo: `aceptación previa: ${previa.error.message}` }
+  if ((previa.data ?? []).length > 0) return { ok: true }
+
+  const ins = await db.from('aceptaciones_terminos').insert({
+    canal: 'registro',
+    estado: 'aceptado',
+    workspace_id: contrato.workspace_id,
+    negocio_id: contrato.negocio_id,
+    workspace_cliente_id: r.workspace_id,
+    usuario_id: r.usuario_id,
+    valida_registro_id: r.id,
+    documento_version_id: doc.id,
+    documento_titulo: doc.titulo,
+    documento_version: doc.version,
+    documento_sha256: doc.pdf_sha256,
+    texto_documento_sha256: doc.texto_sha256,
+    // La declaración es la casilla tal como la marcó (la base comprueba que esté en lo aceptado).
+    texto_aceptacion: casilla,
+    // La base los reemplaza con los del registro; van para que la fila se lea completa.
+    nombre_aceptante: r.correo,
+    calidad: 'autorizado',
+    empresa_nombre: r.razon_social,
+    empresa_nit: r.identificacion,
+  })
+  if (ins.error) {
+    // Otra corrida la registró entre la lectura y el insert.
+    if (ins.error.code === '23505') return { ok: true }
+    return { ok: false, motivo: `aceptación: ${ins.error.message}` }
+  }
+  return { ok: true }
+}
+
+/** La casilla dentro de lo aceptado (`textoAceptado`: el bloque «Casilla: …», en un solo renglón). */
+export function casillaMarcada(aceptadoTexto: string | null): string | null {
+  const m = /(?:^|\n\n)Casilla: ([^\n]+)/.exec(aceptadoTexto ?? '')
+  return m ? m[1] : null
 }
 
 async function borrarTarjeta(deps: DepsCobroPrueba, r: RegistroCobro, ahoraMs: number): Promise<boolean> {

@@ -162,6 +162,7 @@ beforeAll(async () => {
   await db.exec(migracion('20260924010000_valida_cda_plazo_terminos_y_facturas_cuota.sql'))
   await db.exec(migracion('20261010090000_valida_registros.sql'))
   await db.exec(migracion('20261012100000_valida_activar_autogestion.sql'))
+  await db.exec(migracion('20261014203000_terminos_aceptados_en_registro.sql'))
 
   // El espacio de la prueba, como lo deja `crearEspacioValida`.
   await db.exec(`insert into public.valida_registros
@@ -258,5 +259,153 @@ describe('valida_activar_autogestion', () => {
     )
     expect(res).toEqual({ ok: false, error: 'nit_con_contrato' })
     expect(await contar('public.servicios_contratados')).toBe(antes)
+  })
+})
+
+// ── Los Términos aceptados EN EL REGISTRO (canal 'registro', 20261014203000) ──────────────────────
+
+const WS_REG = '00000000-0000-4000-8000-00000000e001'
+const PERSONA = '00000000-0000-4000-8000-00000000e002'
+const OTRA_PERSONA = '00000000-0000-4000-8000-00000000e003'
+const REGISTRO = '00000000-0000-4000-8000-00000000e004'
+const TERMINOS_ACME = '# TÉRMINOS DE USO DE VALIDA\n\n| Razón social (declarada en el registro) | ACME S.A.S. |\n\n---\n\n## PARTE II. TÉRMINOS\n\n16.2. Los acepta la persona que marca la casilla.'
+const CASILLA = 'Acepto, en nombre de la empresa, las Condiciones de la prueba gratis, incluido el cobro del plan mensual (…) y los Términos de Uso de Valida, y autorizo el tratamiento de mis datos según este aviso.'
+const ACEPTADO = `Condiciones de la prueba gratis de Valida · v2.0\n\nTexto de las Condiciones.\n\nAviso del formulario de registro · v1.2\n\nAviso.\n\nCasilla: ${CASILLA}\n\nTérminos de Uso de VALIDA · v2.0\n\n${TERMINOS_ACME}`
+const DOC_ACME = {
+  slug: 'terminos-uso-valida-autogestion',
+  titulo: 'Términos de Uso de VALIDA',
+  version: 'v2.0',
+  texto_md: TERMINOS_ACME,
+  texto_sha256: sha256(TERMINOS_ACME),
+  pdf_path: 'acme/terminos-uso-valida-autogestion-v2.0.pdf',
+  pdf_sha256: 'f'.repeat(64),
+}
+
+function filaRegistro(o: Record<string, string> = {}) {
+  const v = {
+    id: REGISTRO,
+    terminos_texto: TERMINOS_ACME,
+    terminos_sha256: sha256(TERMINOS_ACME),
+    aceptado_texto: ACEPTADO,
+    condiciones_sha256: sha256(ACEPTADO),
+    ...o,
+  }
+  const q = (t: string) => `'${t.replace(/'/g, "''")}'`
+  return `insert into public.valida_registros
+    (id, usuario_id, correo, correo_dominio, ip, identificacion, dv, razon_social, origen, origen_fuente,
+     workspace_id, slug_creado, condiciones_version, condiciones_sha256, aceptado_at, estado,
+     aceptado_texto, terminos_version, terminos_texto, terminos_sha256)
+    values ('${v.id}', '${PERSONA}', 'ana@acme.co', 'acme.co', '181.50.1.2', '901234567', '1', 'ACME S.A.S.', 'directo', 'ninguna',
+     '${WS_REG}', 'acme', 'condiciones-2.0+aviso-1.2+terminos-auto-2.0', '${v.condiciones_sha256}',
+     timestamptz '2026-10-13 20:00:59+00', 'creado', ${q(v.aceptado_texto)}, 'v2.0', ${q(v.terminos_texto)}, '${v.terminos_sha256}')`
+}
+
+let contratoAcme: { contrato_id: string; negocio_id: string; documento_id: string }
+
+function aceptacion(o: Record<string, string | null> = {}) {
+  const v: Record<string, string | null> = {
+    usuario_id: PERSONA,
+    workspace_cliente_id: WS_REG,
+    valida_registro_id: REGISTRO,
+    documento_version_id: contratoAcme.documento_id,
+    negocio_id: contratoAcme.negocio_id,
+    documento_sha256: DOC_ACME.pdf_sha256,
+    texto_documento_sha256: DOC_ACME.texto_sha256,
+    texto_aceptacion: CASILLA,
+    documento_version: 'v2.0',
+    ...o,
+  }
+  const lit = (x: string | null) => (x === null ? 'null' : `'${x.replace(/'/g, "''")}'`)
+  return `insert into public.aceptaciones_terminos
+    (canal, estado, workspace_id, negocio_id, workspace_cliente_id, usuario_id, valida_registro_id, documento_version_id,
+     documento_titulo, documento_version, documento_sha256, texto_documento_sha256, texto_aceptacion,
+     nombre_aceptante, calidad, empresa_nombre, empresa_nit)
+    values ('registro', 'aceptado', '${METRIK}', ${lit(v.negocio_id)}, ${lit(v.workspace_cliente_id)}, ${lit(v.usuario_id)},
+     ${lit(v.valida_registro_id)}, ${lit(v.documento_version_id)}, 'Términos de Uso de VALIDA', ${lit(v.documento_version)},
+     ${lit(v.documento_sha256)}, ${lit(v.texto_documento_sha256)}, ${lit(v.texto_aceptacion)},
+     'lo pone la base', 'representante_legal', 'lo pone la base', 'lo pone la base')`
+}
+
+async function falla(sql: string): Promise<string> {
+  try {
+    await db.exec(sql)
+  } catch (e) {
+    return e instanceof Error ? e.message : String(e)
+  }
+  throw new Error('se esperaba un error')
+}
+
+describe('los Términos aceptados en el registro', () => {
+  it('el registro guarda el texto aceptado solo con huellas que son las de sus textos', async () => {
+    await db.exec(`
+      insert into public.workspaces (id, slug, modules) values ('${WS_REG}', 'acme', '{"valida_consulta": true}');
+      insert into public.profiles (id, workspace_id, role, full_name) values
+        ('${PERSONA}', '${WS_REG}', 'owner', 'ana'),
+        ('${OTRA_PERSONA}', '${WS_REG}', 'owner', 'otra');
+    `)
+    expect(await falla(filaRegistro({ terminos_sha256: 'a'.repeat(64) }))).toContain('terminos_sha256 no es la huella')
+    expect(await falla(filaRegistro({ condiciones_sha256: 'a'.repeat(64) }))).toContain('condiciones_sha256 no es la huella')
+    const sinTerminosDentro = ACEPTADO.replace(TERMINOS_ACME, 'otro texto')
+    expect(await falla(filaRegistro({ aceptado_texto: sinTerminosDentro, condiciones_sha256: sha256(sinTerminosDentro) }))).toContain(
+      'no están dentro de lo que se aceptó',
+    )
+    await db.exec(filaRegistro())
+    expect(await contar('public.valida_registros', `id = '${REGISTRO}'`)).toBe(1)
+  })
+
+  it('la evidencia del registro no se reescribe; el resto de la fila sí', async () => {
+    expect(await falla(`update public.valida_registros set aceptado_at = now() where id = '${REGISTRO}'`)).toContain('no se reescriben')
+    expect(await falla(`update public.valida_registros set ip = '1.1.1.1' where id = '${REGISTRO}'`)).toContain('no se reescriben')
+    await db.exec(`update public.valida_registros set motivo = 'x', updated_at = now() where id = '${REGISTRO}'`)
+  })
+
+  it('la activación del día 7 registra ESE texto; la aceptación del registro se cuelga del contrato', async () => {
+    const res = await r(activar({ ws: WS_REG, usuario: PERSONA, doc: DOC_ACME }))
+    expect(res).toMatchObject({ ok: true, resultado: 'activado' })
+    contratoAcme = { contrato_id: res.contrato_id as string, negocio_id: res.negocio_id as string, documento_id: res.documento_id as string }
+
+    await db.exec(aceptacion())
+    const a = (await db.query<Record<string, unknown>>(`select * from public.aceptaciones_terminos where canal = 'registro'`)).rows
+    expect(a).toHaveLength(1)
+    // La evidencia la puso la base, desde el registro: no lo que mandó el servidor.
+    expect(a[0]).toMatchObject({
+      estado: 'aceptado',
+      calidad: 'autorizado',
+      nombre_aceptante: 'ana@acme.co',
+      empresa_nombre: 'ACME S.A.S.',
+      empresa_nit: '901234567-1',
+      ip: '181.50.1.2',
+      texto_aceptacion_sha256: sha256(CASILLA),
+      cedula_aceptante: null,
+    })
+    expect(new Date(a[0].respondido_at as string).toISOString()).toBe('2026-10-13T20:00:59.000Z')
+  })
+
+  it('una vez: la segunda vez es unique_violation (el servidor la toma como ya aceptada)', async () => {
+    expect(await falla(aceptacion())).toContain('ya tiene aceptación registrada')
+  })
+
+  it('rechaza otra persona, otro texto, otra declaración o un registro sin Términos', async () => {
+    // Otro documento de la misma empresa con OTRO texto: no es lo que se aceptó en el registro.
+    const otro = 'Otro texto de términos'
+    const doc = (
+      await db.query<{ id: string }>(`insert into public.documentos_contractuales_versiones
+        (workspace_id, linea_id, slug, alcance, empresa_id, titulo, version, texto_md, texto_sha256, pdf_path, pdf_sha256, vigente_desde, registrado_por)
+        select workspace_id, linea_id, slug, alcance, empresa_id, titulo, 'v2.0-otro', '${otro}', '${sha256(otro)}', 'otro.pdf', '${'9'.repeat(64)}', vigente_desde, registrado_por
+          from public.documentos_contractuales_versiones where id = '${contratoAcme.documento_id}' returning id`)
+    ).rows[0].id
+    expect(
+      await falla(
+        aceptacion({ documento_version_id: doc, documento_version: 'v2.0-otro', documento_sha256: '9'.repeat(64), texto_documento_sha256: sha256(otro) }),
+      ),
+    ).toContain('no es el texto que se aceptó en el registro')
+    expect(await falla(aceptacion({ usuario_id: OTRA_PERSONA }))).toContain('de otro espacio o de otra persona')
+    expect(await falla(aceptacion({ texto_aceptacion: 'Acepto todo.' }))).toContain('no es la casilla que se marcó')
+    expect(await falla(aceptacion({ valida_registro_id: null }))).toContain('no tiene Términos aceptados')
+    expect(await contar('public.aceptaciones_terminos', `canal = 'registro'`)).toBe(1)
+  })
+
+  it('la fila del registro no se modifica después', async () => {
+    expect(await falla(`update public.aceptaciones_terminos set texto_aceptacion = 'x' where canal = 'registro'`)).toContain('no se modifica')
   })
 })
