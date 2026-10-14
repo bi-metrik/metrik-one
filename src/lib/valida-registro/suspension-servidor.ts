@@ -2,7 +2,7 @@ import 'server-only'
 import type { SupabaseClient } from '@supabase/supabase-js'
 import type { CorreoSaliente, ResultadoEnvio } from '@/lib/cobros/enlace-automatico-servidor'
 import { fechaYHoraBogota } from './cobro-prueba'
-import { DIAS_GRACIA_CICLO, planDeConfig } from './plan'
+import { CALENDARIO_MORA, DIAS_GRACIA_CICLO, planDeConfig } from './plan'
 
 /**
  * El aviso ANTES de suspender una cuenta autogestionada por una cuota sin pagar (Términos de
@@ -12,12 +12,12 @@ import { DIAS_GRACIA_CICLO, planDeConfig } from './plan'
  * `DIAS_GRACIA_CICLO` (`cicloDeCuota` en `plan.ts`). Si la cuota siguiente no se paga, esa bolsa vence
  * y Valida responde que no hay consultas: esa es la suspensión. Pagar abre la bolsa nueva y la levanta.
  *
- * El aviso sale UNA vez por vencimiento (`valida_registros.aviso_suspension_para`), desde el día
- * siguiente al vencimiento de la cuota (el primer día de gracia ya cumplido) y antes de que venza la
- * bolsa. Si la cuota se paga, la bolsa se corre un mes y el aviso ya no aplica. Corre después del paso
+ * El aviso sale UNA vez por vencimiento (`valida_registros.aviso_suspension_para`), el día 7 de mora
+ * (`CALENDARIO_MORA.avisoSuspension`, Carmen §2.3, decisión de Mauricio del 2026-10-14) o en la primera
+ * corrida después, y antes de que venza la bolsa el día 10. Si la cuota se paga, la bolsa se corre un mes y el aviso ya no aplica. Corre después del paso
  * 8 del cron (la reconciliación de ciclos), para no avisar a quien pagó y cuyo ciclo abre en esa corrida.
  *
- * La cantidad de días es `DIAS_GRACIA_CICLO`, la única perilla (5 hoy; Mauricio y Carmen deciden si 10).
+ * La suspensión es el día `DIAS_GRACIA_CICLO` (10), la única perilla del calendario.
  */
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -25,12 +25,17 @@ type Db = any
 
 const DIA_MS = 24 * 3_600_000
 
-/** ¿Toca avisar hoy? Entre el día siguiente al vencimiento de la cuota y el vencimiento de la bolsa. */
-export function debeAvisarSuspension(venceEn: string, ahoraMs: number, diasGracia: number = DIAS_GRACIA_CICLO): boolean {
+/** ¿Toca avisar hoy? Desde el día 7 de mora de la cuota hasta que vence la bolsa (día 10). */
+export function debeAvisarSuspension(
+  venceEn: string,
+  ahoraMs: number,
+  diasGracia: number = DIAS_GRACIA_CICLO,
+  diaAviso: number = CALENDARIO_MORA.avisoSuspension,
+): boolean {
   const vence = Date.parse(venceEn)
   if (!Number.isFinite(vence)) return false
   const vencioLaCuota = vence - diasGracia * DIA_MS
-  return ahoraMs >= vencioLaCuota + DIA_MS && ahoraMs < vence
+  return ahoraMs >= vencioLaCuota + diaAviso * DIA_MS && ahoraMs < vence
 }
 
 /**
@@ -42,7 +47,7 @@ export function correoAvisoSuspension(p: { razonSocial: string; venceEn: string;
   const lineas = [
     'Hola:',
     `No hemos recibido el pago de este mes del plan de Valida de ${p.razonSocial}.`,
-    `Si no se paga antes del ${fecha} (hora de Colombia), las consultas se suspenden hasta que se pague.`,
+    `Si no se paga antes del ${fecha} (hora de Colombia), se suspenden las consultas nuevas hasta que se pague. Los reportes que ya generaste siguen disponibles.`,
     `Puedes pagar aquí: ${p.urlPago}. Si ya pagaste, no tienes que hacer nada.`,
     'METRIK IA S.A.S.',
   ]

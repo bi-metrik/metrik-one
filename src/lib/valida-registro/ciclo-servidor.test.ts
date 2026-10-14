@@ -71,7 +71,7 @@ describe('el pago de una cuota abre el ciclo en Valida', () => {
       referencia: 'one-ciclo:cobro-1',
       consultas: 3000,
       precio_total: 150_000,
-      vence_en: '2026-11-23T05:00:00.000Z',
+      vence_en: '2026-11-28T05:00:00.000Z',
     })
     const config = tablas.workspaces.find((w) => w.id === PRUEBA)?.config_extra as Record<string, unknown>
     // La llave ya no vence: `valida_prueba` se va, y un 401 vuelve a ser un 401.

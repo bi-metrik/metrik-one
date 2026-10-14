@@ -249,3 +249,21 @@ describe('generarEnlacesAutomaticos', () => {
     })
   })
 })
+
+describe('planes que cobran con la tarjeta guardada (pasarela epayco)', () => {
+  const conTarjeta = (extra: Partial<Tablas> = {}) =>
+    tablasBase({ planes_cobro: [{ id: 'plan1', workspace_id: 'wsM', negocio_id: 'n1', total_cuotas: 3, pasarela: 'epayco', activo: false }], ...extra })
+
+  it('sin rechazo de la tarjeta, ninguna cuota recibe enlace (se pagaría dos veces)', async () => {
+    const r = await correr(conTarjeta({ cobro_intentos_tarjeta: [] }))
+    expect(r.pasarela.crear).not.toHaveBeenCalled()
+    expect(r.resumen.conTarjetaSinRechazo).toBe(2)
+  })
+
+  it('la cuota que la tarjeta rechazó recibe su enlace y su correo el mismo día (día 0 de Carmen)', async () => {
+    const r = await correr(conTarjeta({ cobro_intentos_tarjeta: [{ plan_cobro_id: 'plan1', numero_cuota: 2, intento: 0, resultado: 'rechazado' }] }))
+    expect(r.resumen.generados.map((g) => g.numero)).toEqual([2])
+    expect(r.enviar).toHaveBeenCalledTimes(1)
+    expect(r.resumen.conTarjetaSinRechazo).toBe(1)
+  })
+})

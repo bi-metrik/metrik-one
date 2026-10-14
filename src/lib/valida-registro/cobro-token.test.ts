@@ -120,13 +120,20 @@ describe('cobrar una cuota con la tarjeta', () => {
     expect(eventos).toHaveLength(0)
   })
 
-  it('rechazado: cláusula 7.5, el plan vuelve a enlace (Bold) y no se cobran las demás', async () => {
-    const d = crearDoble(base({ plan_cobro_cuotas: [...base().plan_cobro_cuotas, { id: 'q0', workspace_id: METRIK, plan_cobro_id: 'p1', numero: 0, monto: 1, fecha_vencimiento: '2026-10-01', concepto_detalle: 'x' }] }))
+  it('primer cobro (cuota 1) rechazado: cláusula 7.5, el plan vuelve a enlace (Bold) y no se reintenta', async () => {
+    const d = crearDoble(base())
     const e = epayco({ estado: 'rechazado', externalRef: 'epayco-5', codigo: '2', mensaje: 'Fondos insuficientes', reintentable: false })
     const r = await cobrarCuotasConTarjeta({ db: d.db, adapterPara: e.adapterPara, hoy: '2026-10-12', ahoraMs: AHORA })
     expect(r.rechazadas).toBe(1)
     expect(e.cargos).toHaveLength(1)
     expect(d.tablas.planes_cobro[0].pasarela).toBe('bold')
+    expect(d.tablas.cobro_intentos_tarjeta[0]).toMatchObject({ intento: 0, numero_cuota: 1, resultado: 'rechazado' })
+    // La cuota 1 no tiene intentos de los días 3 y 7 (aunque el plan siguiera en la tarjeta).
+    const otra = crearDoble(base())
+    expect(await cobrarCuotaConTarjeta({ db: otra.db, adapterPara: e.adapterPara }, { cobradorId: METRIK, cuotaId: 'q1', intento: 1 })).toEqual({
+      tipo: 'no_aplica',
+      motivo: 'primer_cobro_sin_reintento',
+    })
   })
 
   it('el cron solo mira cuotas vencidas o de hoy, y sin ePayco no hace nada', async () => {

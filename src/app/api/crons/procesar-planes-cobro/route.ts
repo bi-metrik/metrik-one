@@ -50,7 +50,9 @@ import { avisarSuspensionesProximas, type ResumenSuspension } from '@/lib/valida
 //      7 dias de la prueba (nunca antes del instante exacto), y el borrado de la tarjeta de quien
 //      cancelo (ver `src/lib/valida-registro/cobro-prueba-servidor.ts`). Sin registros con tarjeta no hace nada.
 //   7b. Cobro con la tarjeta guardada en ePayco de las cuotas que vencen (planes `epayco`). Apagado
-//      sin EPAYCO_HABILITADO (ver `src/lib/valida-registro/cobro-token-servidor.ts`).
+//      sin EPAYCO_HABILITADO (ver `src/lib/valida-registro/cobro-token-servidor.ts`). Sigue el
+//      calendario de mora de Carmen: intentos los dias 0, 3 y 7 desde el vencimiento; nada desde el 10.
+//   7c. Si la tarjeta rechazo algo hoy, otra pasada del paso 6: el enlace de pago sale el mismo dia.
 //   8. Valida autogestionada: el pago mas nuevo del plan de cada espacio del registro autogestionado
 //      tiene su ciclo abierto en Valida (bolsa del mes y llave sin vencimiento). Lo abre el webhook
 //      al pagar; este paso recoge lo que no alcanzo (ver `src/lib/valida-registro/ciclo-servidor.ts`).
@@ -68,6 +70,9 @@ const DIAS_ANTICIPACION = 3
 // sistema declaraba vencido dos dias antes de lo pactado. El documento manda; el codigo se alinea.
 // OJO: esto es la gracia de la MORA, no el trial. El trial del Radar (`lib/radar/acceso.ts`) no
 // tiene gracia: la primera cuota es condicion de entrega y vence el dia en que el trial termina.
+// NO es la gracia de Valida en autoservicio (`DIAS_GRACIA_CICLO` = 10, `valida-registro/plan.ts`):
+// este numero solo marca el cobro como vencido y avisa al equipo de MeTRIK; no corta ningun servicio.
+// Se queda en 5 a proposito (2026-10-14): lo prometen los terminos del Radar y es comun a todos.
 const DIAS_GRACIA = 5
 // Dia del mes en que se ABRE la ventana de emision de cuentas. La ventana no se
 // cierra: ver el comentario del paso 4.
@@ -519,6 +524,18 @@ export async function GET(req: NextRequest) {
     cobroTarjetaError = err instanceof Error ? err.message : String(err)
   }
 
+  // ── 7c. El enlace de pago de lo que la tarjeta rechazó HOY (Carmen §2.3, día 0) ──
+  // El paso 6 corrió antes del cobro: sin esta segunda pasada, el correo con el enlace saldría mañana.
+  // Es la misma función, idempotente (un enlace vigente no se repite ni se vuelve a avisar).
+  let enlacesTrasRechazo: ResumenEnlacesAutomaticos | null = null
+  if ((cobroTarjeta?.rechazadas ?? 0) + (cobroPrueba?.rechazados ?? 0) > 0) {
+    try {
+      enlacesTrasRechazo = await generarEnlacesAutomaticos({ hoy: hoyStr, ahoraMs: hoy.getTime() }, { db: supabase })
+    } catch (err) {
+      enlacesAutomaticosError = `${enlacesAutomaticosError ?? ''} tras rechazo: ${err instanceof Error ? err.message : String(err)}`.trim()
+    }
+  }
+
   // ── 8. Valida autogestionada: el pago más nuevo de cada plan tiene su ciclo abierto en Valida ──
   // El webhook lo abre en el momento del pago; esto recoge lo que no alcanzó (Valida caída, o un pago
   // registrado a mano). Solo mira espacios del registro autogestionado; idempotente en Valida.
@@ -569,6 +586,7 @@ export async function GET(req: NextRequest) {
     cobro_prueba: cobroPrueba,
     cobro_prueba_error: cobroPruebaError,
     cobro_tarjeta: cobroTarjeta,
+    enlaces_tras_rechazo: enlacesTrasRechazo,
     cobro_tarjeta_error: cobroTarjetaError,
     ciclos_valida: ciclosValida,
     ciclos_valida_error: ciclosValidaError,

@@ -1,6 +1,6 @@
 ---
 name: valida-alta-autogestionada
-description: Alta autogestionada de Valida (18-recorrido-baja-friccion). Al 2026-10-12, #1102 mergeado; pila #1104→#1107→#1110 abierta más metrik-valida#57, todo apagado. Migraciones 20261012100000 (#1107) y 20261013090000 (#1110, cobro a los 7 días) SIN aplicar. Lo que no se ve en el código: el plan es una bolsa por mes, los términos van por empresa y la tarjeta nunca toca ONE.
+description: Alta autogestionada de Valida (18-recorrido-baja-friccion). Al 2026-10-12, #1102 mergeado; pila #1104→#1107→#1110 abierta más metrik-valida#57, todo apagado. Migración 20261012100000 (#1107) SIN aplicar; 20261013090000 APLICADA (14-oct, no volver a aplicar); 20261014153000 (intentos con tarjeta) SIN aplicar. Lo que no se ve en el código: el plan es una bolsa por mes, los términos van por empresa y la tarjeta nunca toca ONE.
 metadata:
   type: project
 ---
@@ -28,7 +28,9 @@ Ya mergeados: #1095 (corte de la bolsa), #1097 (`valida_registros`, APLICADA, no
 3. **#1107**: `/valida/activar` + RPC `valida_activar_autogestion`. **Migración 20261012100000 SIN aplicar.**
    - Está apagada: `VALIDA_ACTIVACION_ABIERTA` + `terminosPlanListos()`. Los Términos v2.0 siguen como marcador.
 4. **#1110**: ePayco en modo prueba (`EPAYCO_HABILITADO`). Tokeniza en el navegador y cobra por token (paso 7b del cron).
-   - Desde el 2026-10-12 trae además el cobro a los 7 días (decisión de Mauricio, opción A, fecha fija): Condiciones v2.0 + aviso v1.2, el paso 7a del cron, «Cancelar prueba», el borrado de la tarjeta y el aviso antes de suspender (paso 8b). **Migración 20261013090000 SIN aplicar.**
+   - Desde el 2026-10-12 trae además el cobro a los 7 días (decisión de Mauricio, opción A, fecha fija): Condiciones v2.0 + aviso v1.2, el paso 7a del cron, «Cancelar prueba», el borrado de la tarjeta y el aviso antes de suspender (paso 8b). Migración 20261013090000 APLICADA en producción el 2026-10-14 (no tocar el archivo).
+   - Calendario de mora (Mauricio, 2026-10-14, Carmen en `crecimiento-mrr/28-…`): `DIAS_GRACIA_CICLO = 10`; cuota 2+ con tarjeta: intentos días 0, 3 y 7 (`cobro_intentos_tarjeta`, migración 20261014153000 SIN aplicar; sin la tabla NO cobra), enlace el día 0 (paso 7c), aviso día 7, suspensión día 10. La cuota 1 nunca se reintenta (7.5). `DIAS_GRACIA` del cron y `DIAS_GRACIA_RENOVACION` se quedan en 5 a propósito.
+   - Los planes `epayco` ya NO reciben enlace automático antes de un rechazo (antes sí, por el fallback a `cobros.pasarela_en_linea` = bold del espacio metrik: doble pago).
    - El cobro automático NO cobra mientras `ACEPTACION_EN_REGISTRO_CONSTRUIDA = false`: la guarda `aceptaciones_terminos_modulo()` exige cédula y persona designada, y aceptar los Términos en el registro necesita otro canal (migración, con Emilio).
    - Textos: la fuente son los archivos de `docs/legal/` (Emilio pasó ahí el texto de Vera). El código se comparó byte por byte con esos archivos el 2026-10-12; si cambian, se vuelve a copiar y se sube la versión.
    - ⚠️ Llaves con sufijo `_METRIK` (cuenta 1595165). `EPAYCO_PUBLIC_KEY`/`PRIVATE_KEY` sin sufijo son de OTRA cuenta (conciliación de un cliente); leerlas cobraría en la cuenta equivocada. Cargadas solo en Production (2026-10-12): Preview no las tiene.
@@ -67,7 +69,7 @@ Ya mergeados: #1095 (corte de la bolsa), #1097 (`valida_registros`, APLICADA, no
 
 - Aplicar la migración de #1107 antes de su merge.
 - Desplegar metrik-valida#57.
-- Términos v2.0 aprobados (pegarlos en `terminos-plan.ts`). El texto ya está en `terminos-valida-v2.0-autoservicio.md`, APROBADO CON CAMBIOS por Vera; `{N}` = `DIAS_GRACIA_CICLO` (5 o 10, lo decide Carmen).
+- Términos v2.0 aprobados (pegarlos en `terminos-plan.ts`). El texto ya está en `terminos-valida-v2.0-autoservicio.md`, APROBADO CON CAMBIOS por Vera; `{N}` = 10 (decidido el 2026-10-14) = `DIAS_GRACIA_CICLO`.
 - El retiro del plan, el cambio de medio de pago, la factura de cada cobro automático (hoy no se emite ninguna) y el procedimiento de cancelación por correo.
 - Decisión sobre la comisión de AFI en autoservicio (el contrato nace con `comision = null` y el origen en los parámetros).
 - La prueba de Vera en un preview.

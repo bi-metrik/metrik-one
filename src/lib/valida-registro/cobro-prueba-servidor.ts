@@ -350,7 +350,8 @@ async function registrarResultado(
     default: {
       // Dudoso: quizá ePayco cobró y no alcanzó a responder. El plan sale de la tarjeta para que nadie
       // (ni el paso 7b) lo vuelva a cobrar; lo revisa una persona contra el panel de ePayco.
-      const detalle = res.tipo === 'error' ? res.mensaje : `no_aplica: ${res.motivo}`
+      // `ya_intentado` en el primer cobro: otra corrida reclamó el intento y no dejó resultado.
+      const detalle = res.tipo === 'error' ? res.mensaje : res.tipo === 'ya_intentado' ? 'el intento ya estaba reclamado sin resultado' : `no_aplica: ${res.motivo}`
       await db.from('planes_cobro').update({ pasarela: 'manual' }).eq('id', planId).eq('pasarela', 'epayco')
       await cerrar('revisar', detalle)
       resumen.aRevisar.push({ registroId: r.id, detalle })

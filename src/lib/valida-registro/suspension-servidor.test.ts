@@ -7,7 +7,7 @@ import { DIAS_GRACIA_CICLO } from './plan'
 import { avisarSuspensionesProximas, correoAvisoSuspension, debeAvisarSuspension } from './suspension-servidor'
 
 const DIA = 24 * 3_600_000
-// La cuota de noviembre vence el 18; con 5 días de gracia la bolsa vence el 23 a la medianoche.
+// La cuota de noviembre vence el 13; con 10 días de gracia la bolsa vence el 23 a la medianoche.
 const VENCE = '2026-11-23T05:00:00.000Z'
 
 function tablas(extra: Partial<Tablas> = {}): Tablas {
@@ -30,19 +30,16 @@ function tablas(extra: Partial<Tablas> = {}): Tablas {
   }
 }
 
-describe('cuándo se avisa', () => {
-  it('desde el día siguiente al vencimiento de la cuota hasta antes de suspender', () => {
+describe('cuándo se avisa (Carmen §2.3: aviso el día 7, suspensión el 10)', () => {
+  it('desde el día 7 de mora hasta antes de suspender; los días 1 a 6, no', () => {
+    expect(DIAS_GRACIA_CICLO).toBe(10)
     const vence = Date.parse(VENCE)
     const cuota = vence - DIAS_GRACIA_CICLO * DIA
-    expect(debeAvisarSuspension(VENCE, cuota)).toBe(false)
-    expect(debeAvisarSuspension(VENCE, cuota + DIA)).toBe(true)
+    expect(debeAvisarSuspension(VENCE, cuota + DIA)).toBe(false)
+    expect(debeAvisarSuspension(VENCE, cuota + 6 * DIA + 23 * 3_600_000)).toBe(false)
+    expect(debeAvisarSuspension(VENCE, cuota + 7 * DIA)).toBe(true)
     expect(debeAvisarSuspension(VENCE, vence - 1)).toBe(true)
     expect(debeAvisarSuspension(VENCE, vence)).toBe(false)
-  })
-  it('la gracia es una sola perilla: con 10 días el aviso sale antes', () => {
-    const vence = Date.parse(VENCE)
-    expect(debeAvisarSuspension(VENCE, vence - 8 * DIA, 5)).toBe(false)
-    expect(debeAvisarSuspension(VENCE, vence - 8 * DIA, 10)).toBe(true)
   })
 })
 

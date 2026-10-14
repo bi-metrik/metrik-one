@@ -32,16 +32,51 @@ export const PRECIO_MENSUAL_VALIDA = 150_000
 export const LICENCIAS_INCLUIDAS = 2
 
 /**
- * ⚠️ DECISIÓN ABIERTA (Mauricio y Carmen, fila 21 de Vera): los días que una cuenta autogestionada
- * sigue consultando después de que vence una cuota sin pagar, antes de suspenderse. Hoy 5 (lo que
- * hacía el código); Emilio propone 10 en los Términos (3.6 y 11.1, con `{N}`). ES LA ÚNICA PERILLA:
- * la usan el vencimiento de la bolsa (`cicloDeCuota`) y el aviso de suspensión
- * (`suspension-servidor.ts`). Al decidir, se cambia aquí y el `{N}` de los Términos con el MISMO número.
+ * Los días que una cuenta autogestionada sigue consultando después de que vence una cuota sin pagar,
+ * antes de suspenderse: 10, decisión de Mauricio del 2026-10-14 con el calendario de Carmen
+ * (`crecimiento-mrr/28-carmen-piso-epayco-y-gracia.md` §2.3). Es el `{N}` de los Términos de
+ * autoservicio (3.6 y 11.1): si cambia, cambia ahí con el MISMO número.
  *
- * No es `DIAS_GRACIA` del cron `procesar-planes-cobro`: aquel es el de la mora de todos los productos
- * (los Términos del Radar dicen 5) y no corta el servicio de Valida.
+ * ES LA ÚNICA PERILLA del calendario de mora (`CALENDARIO_MORA`): la usan el vencimiento de la bolsa
+ * (`cicloDeCuota`), los reintentos con la tarjeta (`cobro-token-servidor.ts`) y el aviso de suspensión
+ * (`suspension-servidor.ts`).
+ *
+ * No es `DIAS_GRACIA` del cron `procesar-planes-cobro` (5): aquel marca como vencidos los cobros de
+ * TODOS los productos para el equipo de MeTRIK y no corta el servicio de Valida. Tampoco
+ * `DIAS_GRACIA_RENOVACION` (5): ese frena crear la cuota del mes siguiente a quien debe, que es el lado
+ * de no cobrar, y aplica también a los 4 CDA.
  */
-export const DIAS_GRACIA_CICLO = 5
+export const DIAS_GRACIA_CICLO = 10
+
+/**
+ * El calendario de mora de una cuota mensual (de la 2 en adelante) cobrada con la tarjeta, contado en
+ * días calendario desde su vencimiento (día 0). Carmen §2.3:
+ *   - día 0: cobro; si se rechaza, correo con el enlace de pago (paso 6 del cron);
+ *   - días 3 y 7: reintento con la misma tarjeta;
+ *   - día 7: aviso de suspensión;
+ *   - día `DIAS_GRACIA_CICLO` (10): se suspenden las consultas nuevas (vence la bolsa del mes pagado).
+ * El primer cobro, al cumplirse los 7 días de la prueba, no tiene reintentos (Condiciones 7.5).
+ */
+export const CALENDARIO_MORA = {
+  /** El día de cada intento con la tarjeta: el índice es `cobro_intentos_tarjeta.intento`. */
+  intentos: [0, 3, 7] as const,
+  avisoSuspension: 7,
+  suspension: DIAS_GRACIA_CICLO,
+} as const
+
+/**
+ * Qué intento con la tarjeta toca hoy a una cuota vencida hace `dias` días, o `null`. Un intento cuyo
+ * día pasó sin correr (el cron estuvo caído) se hace al día siguiente, mientras no llegue el siguiente
+ * intento; desde la suspensión no se intenta nada.
+ */
+export function intentoDelDia(dias: number): number | null {
+  if (!Number.isInteger(dias) || dias < 0 || dias >= CALENDARIO_MORA.suspension) return null
+  let actual: number | null = null
+  CALENDARIO_MORA.intentos.forEach((d, i) => {
+    if (dias >= d) actual = i
+  })
+  return actual
+}
 
 /** El límite de consultas por mes de una cuenta autogestionada: siempre el de los textos. */
 export function limiteConsultasMes(): number {
