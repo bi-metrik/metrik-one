@@ -244,23 +244,20 @@ describe('el doble hace cumplir las llaves foráneas de la base', () => {
   it('una referencia hacia adelante en las semillas también se difiere (tarifa aceptada)', async () => {
     const a = crearAlmacenDoble()
     await crearUsuarios(a, CORREO, 'trappvel-pruebas')
-    const plan = await planificar(a, opciones())
-    // Una cotización sembrada que ya trae su tarifa aceptada: la tarifa se inserta después.
-    const fijo = filasDe(plan, 'cotizaciones').find(c => filasDe(plan, 'cotizacion_itinerarios').some(t => t.cotizacion_id === c.id))!
-    const tarifa = filasDe(plan, 'cotizacion_itinerarios').find(t => t.cotizacion_id === fijo.id)!
+    // El caso trae la tarifa aceptada: la cotización se inserta antes que sus tarifas.
+    const conLaTarifa = (t: Record<string, Fila[]>) => ({
+      ...t,
+      cotizaciones: t.cotizaciones.map(c => ({ ...c, tarifa_aceptada_id: t.cotizacion_itinerarios[0].id })),
+    })
     const conTarifa = await planificar(a, opciones({ caso: {
       ...caso,
-      tablas: Object.fromEntries(Object.entries(caso.tablas).map(([k, t]) => [k, {
-        ...t,
-        cotizaciones: t.cotizaciones.map(c => ({ ...c, tarifa_aceptada_id: t.cotizacion_itinerarios[0].id })),
-      }])),
+      tablas: { 'caso-fijo': conLaTarifa(caso.tablas['caso-fijo']), 'flujo-nuevo': conLaTarifa(caso.tablas['flujo-nuevo']) },
     } }))
     expect(filasDe(conTarifa, 'cotizaciones').every(c => c.tarifa_aceptada_id === null)).toBe(true)
     await ejecutar(a, conTarifa)
     const escrita = a.estado.cotizaciones.filter(c => c.workspace_id === conTarifa.destino.id && c.tarifa_aceptada_id != null)
     expect(escrita.length).toBeGreaterThan(0)
     expect(escrita.every(c => a.estado.cotizacion_itinerarios.some(t => t.id === c.tarifa_aceptada_id && t.cotizacion_id === c.id))).toBe(true)
-    expect(tarifa).toBeDefined()
   })
 
   it('si una escritura falla a mitad de camino, deshacer no deja nada', async () => {

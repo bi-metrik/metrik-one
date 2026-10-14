@@ -128,6 +128,7 @@
 
 - [Las cifras del brief caducan](feedback_cifras_del_brief_caducan.md) — se re-miden al hacer el QA
 - [Pruebas por mutación](feedback_pruebas_por_mutacion.md) — no creerle a una prueba hasta verla fallar
+- ⚠️ [El doble hace cumplir las llaves al escribir](feedback_doble_hace_cumplir_llaves.md) — cruzar contra database.ts; ciclos en null + UPDATE
 - [Medir antes de construir](feedback_medir_antes_de_construir.md) — las premisas se comprueban
 - [La referencia manda sobre el diseño](feedback_la_referencia_manda_sobre_el_diseno.md) — si el brief cita un artefacto real, ábrelo
 - ⚠️ [Rebasar el PR de otra sesión](feedback_rebase_pr_ajeno_mirar_reflog.md) — mirar el reflog de la rama local antes del force-push
