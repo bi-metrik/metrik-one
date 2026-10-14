@@ -114,6 +114,7 @@ import { aplicarDesenlacesDeRetorno } from '@/lib/negocios/aplicar-desenlace'
 import { leerDesenlacesDeMetadata, type DesenlaceMarcado } from '@/lib/negocios/desenlace-retorno'
 import { visiblePuedeNacerCompleto, gateVisibleQuedaResuelto, documentoHeredadoNaceCompleto } from '@/lib/negocios/bloque-visible-completo'
 import { instanciarBloquesDeEtapa } from '@/lib/negocios/instanciar-bloques-etapa'
+import { asignarResponsableAlEntrar } from '@/lib/negocios/responsable-automatico'
 import {
   dataDeFacturaParaCopias,
   emisorImpideFactura,
@@ -2621,6 +2622,8 @@ export async function cambiarEtapaNegocio(
   // Crear negocio_bloques para la nueva etapa si no existen (lo comparte el cron que mueve de
   // etapa por fechas, que no tiene sesión: `instanciar-bloques-etapa.ts`).
   await instanciarBloquesDeEtapa(supabase, { negocioId, etapaId: nuevaEtapaId, workspaceId })
+  // Quien atiende la etapa, si la etapa lo declara (SOE-016). No lanza ni frena el avance.
+  await asignarResponsableAlEntrar(supabase, { negocioId, etapaId: nuevaEtapaId, workspaceId })
 
   revalidatePath(`/negocios/${negocioId}`)
   revalidatePath('/negocios')
