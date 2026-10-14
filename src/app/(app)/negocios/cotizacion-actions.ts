@@ -754,7 +754,13 @@ export async function deleteRubro(id: string) {
 
 // ── State transitions ────────────────────────────
 
-export async function enviarCotizacion(id: string) {
+/**
+ * Borrador → enviada. Con `canal = 'descargado'` es el «Sí, ya se la mandé» que el editor pregunta
+ * tras descargar el PDF (H33, 2026-10-14): mismas guardas, mismo UPDATE, solo cambia el canal que
+ * queda en la actividad. Cualquier otro valor cuenta como «Enviar»: el canal llega del navegador.
+ */
+export async function enviarCotizacion(id: string, canal?: 'enviar' | 'descargado') {
+  const canalEnvio: 'enviar' | 'descargado' = canal === 'descargado' ? 'descargado' : 'enviar'
   const { supabase, workspaceId, staffId, error } = await getWorkspace()
   if (error || !workspaceId) return { success: false, error: 'No autenticado' }
 
@@ -799,7 +805,7 @@ export async function enviarCotizacion(id: string) {
     }
   }
 
-  const { error: dbError } = await supabase
+  const { data: marcadas, error: dbError } = await supabase
     .from('cotizaciones')
     .update({
       estado: 'enviada',
@@ -808,14 +814,20 @@ export async function enviarCotizacion(id: string) {
     } as never)
     .eq('id', id)
     .eq('estado', 'borrador')
+    .select('id')
 
   if (dbError) return { success: false, error: dbError.message }
+  // Sin fila, la cotización ya no estaba en borrador (otra pestaña la envió o la aprobó). Antes
+  // esto devolvía éxito sin haber escrito nada; con la pregunta de H33 diría «quedó enviada».
+  if (!Array.isArray(marcadas) || marcadas.length === 0) {
+    return { success: false, error: 'Solo se pueden enviar cotizaciones en borrador' }
+  }
 
   if (cot.negocio_id) {
     // Seguimiento (F1-1): con la línea encendida queda la línea de actividad con versión y
     // canal. La fecha ya la escribió el update de arriba.
     await registrarEnvioCotizacion(supabase, {
-      workspaceId, negocioId: cot.negocio_id, cotizacionId: id, staffId: staffId ?? null, canal: 'enviar', fechaYaEscrita: true,
+      workspaceId, negocioId: cot.negocio_id, cotizacionId: id, staffId: staffId ?? null, canal: canalEnvio, fechaYaEscrita: true,
     })
     revalidatePath(`/negocios/${cot.negocio_id}`)
   } else {

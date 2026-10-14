@@ -44,7 +44,10 @@ export function esOrigenVersion(v: unknown): v is OrigenVersion {
   return typeof v === 'string' && ORIGENES_VERSION.some((o) => o.value === v)
 }
 
-/** Cómo salió la cotización. «descargado» = PDF descargado desde «Revisar y enviar» (Vera C3). */
+/**
+ * Cómo salió la cotización. «descargado» = descargó el PDF y dijo «Sí, ya se la mandé» (H33,
+ * 2026-10-14; hasta entonces bastaba descargar, Vera C3).
+ */
 export type CanalEnvio = 'enviar' | 'descargado' | 'aprobada'
 
 export const ETIQUETA_CANAL: Record<CanalEnvio, string> = {

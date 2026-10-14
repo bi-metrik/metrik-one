@@ -39,7 +39,7 @@ import { leerViajeDelNegocio } from '@/lib/cotizaciones/viaje-negocio'
 import { entradaAsiPuedesPagar } from '@/lib/viaje/asi-puedes-pagar'
 import { describirOcupacion } from '@/lib/cotizaciones/tarifa-pasajero'
 import { hayTarifaPorPasajero, lineasDesactualizadas, motivoParaNoEnviar } from '@/lib/cotizaciones/captura-desactualizada'
-import { MENSAJE_SIN_PASAJEROS, motivoPorCapturasDesactualizadas } from '@/lib/cotizaciones/captura-desactualizada-datos'
+import { MENSAJE_SIN_PASAJEROS } from '@/lib/cotizaciones/captura-desactualizada-datos'
 import {
   PLANTILLA_POR_DEFECTO,
   compositorDePlantilla,
@@ -82,8 +82,7 @@ import {
 import { uploadFileToDrive, createDriveFolder } from '@/lib/google-drive'
 import { usaAlmacenamientoExterno } from '@/lib/almacenamiento/proveedor'
 import { almacenamientoExternoDe } from '@/lib/almacenamiento/supabase-externo'
-import { evaluarSalida, motivoParaNoSalir } from '@/lib/cotizaciones/piso-salida-datos'
-import { registrarEnvioPorDescarga } from '@/lib/negocios/seguimiento-datos'
+import { evaluarSalida } from '@/lib/cotizaciones/piso-salida-datos'
 import { motivoSinRecomendada } from '@/lib/cotizaciones/tarifas'
 import { ponerMarcaDeBorrador } from '@/lib/pdf/marca-borrador'
 import { avisoDeBorrador, motivosDeBorrador } from '@/lib/cotizaciones/motivos-borrador'
@@ -794,7 +793,6 @@ export async function generateCotizacionPDF(cotizacionId: string) {
         negocioId: negocioInfo?.id ?? null,
         staffId: staffId ?? null,
       })
-      const envioRegistrado = await envioPorDescarga(supabase, workspaceId, cotizacionId, negocioInfo?.id ?? null, staffId ?? null)
 
       return {
         success: true,
@@ -807,7 +805,9 @@ export async function generateCotizacionPDF(cotizacionId: string) {
         aviso: externo.aviso,
         avisosCobertura,
         avisosCaptura,
-        envioRegistrado,
+        // H33: descargar ya no registra el envío (lo pregunta el editor). La clave se queda en
+        // `false` porque la salida del servidor está congelada por el fixture de igualdad (C0).
+        envioRegistrado: false,
         renderedVia: 'weasyprint' as const,
       }
     } catch (e) {
@@ -1399,7 +1399,6 @@ export async function generateCotizacionPDF(cotizacionId: string) {
     negocioId: negocioInfo?.id ?? null,
     staffId: staffId ?? null,
   })
-  const envioRegistrado = await envioPorDescarga(supabase, workspaceId, cotizacionId, negocioInfo?.id ?? null, staffId ?? null)
 
   return {
     success: true,
@@ -1411,7 +1410,8 @@ export async function generateCotizacionPDF(cotizacionId: string) {
     avisosCobertura,
     avisosCaptura,
     avisoTexto,
-    envioRegistrado,
+    // H33: ver el comentario del camino externo.
+    envioRegistrado: false,
     ...conMotor,
     renderedVia,
   }
@@ -1468,29 +1468,4 @@ async function propuestaConMotorHtml(
   )
   console.info('[pdf-html] propuesta', JSON.stringify({ totalMs: medidas.totalMs, pdfBytes: medidas.pdfBytes, bloqueadas: medidas.peticionesBloqueadas.length }))
   return pdf
-}
-
-/**
- * Seguimiento (F1-1, Vera C3): la descarga desde «Revisar y enviar» cuenta como envío si la
- * línea lo tiene encendido y pasa las guardas de «Enviar». Nunca tumba la descarga: el PDF ya
- * existe cuando esto corre.
- */
-async function envioPorDescarga(
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  supabase: any,
-  workspaceId: string,
-  cotizacionId: string,
-  negocioId: string | null,
-  staffId: string | null,
-): Promise<boolean> {
-  if (!negocioId) return false
-  try {
-    return await registrarEnvioPorDescarga(supabase, { workspaceId, negocioId, cotizacionId, staffId }, {
-      capturas: () => motivoPorCapturasDesactualizadas(supabase, { cotizacionId, destino: 'enviada' }),
-      margen: () => motivoParaNoSalir(supabase, { servicio: createServiceClient, workspaceId, cotizacionId, staffId }),
-    })
-  } catch (e) {
-    console.error('[cotizacion-pdf] no se pudo registrar el envío por descarga:', e instanceof Error ? e.message : e)
-    return false
-  }
 }

@@ -22,9 +22,12 @@ export const MODELO_EXTRACCION = Deno.env.get('ARNES_MODELO_EXTRACCION') || 'gem
 /** Lo que se mide de cada llamado: tiempo y tokens (la latencia de flash-lite va casi toda en los de salida). */
 export interface MedidaExtraccion { ms: number; ok: boolean; salida?: number; entrada?: number; razonamiento?: number }
 
-/** `compacta`: el esquema de `esquemaCargaCompacta` (las instrucciones las arma quien llama, con `{ compacta }`). */
+/**
+ * `compacta`: el esquema de `esquemaCargaCompacta` (las instrucciones las arma quien llama, con `{ compacta }`). El
+ * `perfil` lo dice quien arma las instrucciones (el bot siempre lo pide): esquema e instrucciones van juntos.
+ */
 export function extraccionGemini(llave: string, registro: MedidaExtraccion[] = [], o: { compacta?: boolean } = {}): ExtractorMemoria {
-  return async ({ textos, campos, instrucciones }) => {
+  return async ({ textos, campos, instrucciones, perfil }) => {
     const t0 = performance.now();
     const res = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${MODELO_EXTRACCION}:generateContent`, {
       method: 'POST',
@@ -32,7 +35,7 @@ export function extraccionGemini(llave: string, registro: MedidaExtraccion[] = [
       body: JSON.stringify({
         system_instruction: { parts: [{ text: instrucciones }] },
         contents: [{ role: 'user', parts: [{ text: `Mensajes:\n${textoParaModelo(mensajesDeTextos(textos))}` }] }],
-        generationConfig: { temperature: 0.1, maxOutputTokens: 8192, responseMimeType: 'application/json', responseSchema: o.compacta ? esquemaCargaCompacta(campos) : esquemaCarga(campos) },
+        generationConfig: { temperature: 0.1, maxOutputTokens: 8192, responseMimeType: 'application/json', responseSchema: o.compacta ? esquemaCargaCompacta(campos, { perfil }) : esquemaCarga(campos, { perfil }) },
       }),
     });
     const ms = Math.round(performance.now() - t0);
