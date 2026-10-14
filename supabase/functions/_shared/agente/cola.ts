@@ -16,7 +16,7 @@
 
 import type { ConfigAgente } from './config.ts';
 import type { DepsTurno, SalidaTurno } from './nucleo.ts';
-import { esSiSolo, seguirTrasToque, toqueDePropuesta, turnoDelModelo, propuestaVigente, unirToqueResuelto } from './nucleo.ts';
+import { esSiSolo, seguirTrasToque, toqueDePropuesta, turnoDelModelo, propuestaVigente } from './nucleo.ts';
 import { leerToque } from './render.ts';
 import { respuestaFija } from './reglamento.ts';
 import type { Almacen, ContextoDominio, FilaConversacion, Mensajero, Traza } from './tipos.ts';
@@ -113,16 +113,6 @@ async function toqueYSeguir(d: DepsCola, e: Parameters<typeof toqueDePropuesta>[
   });
 }
 
-/**
- * La propuesta pendiente que el modelo leyó en un toque de la conversación: se ejecuta como el toque de su botón y, si el
- * dominio pide seguir, el modelo tiene su turno después del hecho. Una sola traza (la del modelo con la ejecución).
- */
-async function ejecutarResuelto(d: DepsCola, e: Parameters<typeof toqueDePropuesta>[1], m: SalidaTurno, huella: string): Promise<SalidaTurno> {
-  const t = await toqueDePropuesta(d, e, { huella, si: true }, 'toque_propuesta');
-  const s = t.seguir ? await seguirTrasToque(d, e, t) : t;
-  return { salida: s.salida, traza: unirToqueResuelto(m.traza, s.traza, huella), ...(s.extras ? { extras: s.extras } : {}) };
-}
-
 /** Un turno: atiende lo pendiente más viejo. Devuelve false si no había nada. */
 export async function unTurno(d: DepsCola): Promise<boolean> {
   const c: ConfigAgente = d.config;
@@ -164,13 +154,8 @@ export async function unTurno(d: DepsCola): Promise<boolean> {
     return true;
   }
 
-  // 4) Turno del modelo, con «escribiendo…» desde ya y re-encendido antes de los 25 s. Si el modelo resolvió un toque en
-  //    la propuesta pendiente, se ejecuta como el toque de su botón (mismo candado por huella, misma vigencia).
-  const r = await conEscribiendo(d, delEquipo.at(-1)!.wa_message_id, async () => {
-    const e = { turnoId, filas, nuevos: pend, ctx };
-    const m = await turnoDelModelo(d, e);
-    return m.ejecutar ? await ejecutarResuelto(d, e, m, m.ejecutar) : m;
-  });
+  // 4) Turno del modelo, con «escribiendo…» desde ya y re-encendido antes de los 25 s.
+  const r = await conEscribiendo(d, delEquipo.at(-1)!.wa_message_id, () => turnoDelModelo(d, { turnoId, filas, nuevos: pend, ctx }));
   await enviarYCerrar(d, turnoId, pend, r, 'agente.turno');
   if (d.despuesDelTurno) await d.despuesDelTurno(r.traza).catch((err) => console.error('[agente] después del turno:', err));
   return true;
