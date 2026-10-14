@@ -339,6 +339,17 @@ describe('caso Alejandra (2026-10-05): lo que no llegó a ONE dice qué pasó y 
     expect(html).not.toContain('data-reintentar-captura')
   })
 
+  it('H19 · un rechazo de la lectura ofrece decir qué es: «Es traslado», nunca un callejón', () => {
+    const html = pintar(captura({ estado: { fase: 'rechazada', mensaje: 'Esta captura no es de vuelo.' }, borrador: null, tipo: 'vuelo' }))
+    expect(html).toContain('data-reclasificar-captura')
+    expect(html).toContain('Es traslado')
+    // El tipo que ya falló no se vuelve a ofrecer.
+    expect(html).not.toContain('Es vuelo')
+    // Sin red, la salida es «Reintentar», no reclasificar.
+    const sinRed = pintar(captura({ estado: { fase: 'rechazada', mensaje: 'x', reintentar: true }, borrador: null, tipo: 'vuelo' }))
+    expect(sinRed).not.toContain('data-reclasificar-captura')
+  })
+
   it('la detección que no llegó dice «Se cortó la conexión», no «No se reconoce qué es»', async () => {
     const { MENSAJE_DETECCION_SIN_RED } = await import('@/lib/cotizaciones/proceso-captura')
     const html = pintar(captura({ estado: { fase: 'eligiendo_tipo', motivo: MENSAJE_DETECCION_SIN_RED }, borrador: null, tipo: null }))

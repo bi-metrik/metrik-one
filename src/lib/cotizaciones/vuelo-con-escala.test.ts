@@ -6,8 +6,9 @@
  * sale el mismo día. Las escalas no cuentan. Cifras y vuelos inventados.
  *
  * Se vio fallar:
- *  · con `lugarDeOpcion` tomando el destino del PRIMER tramo, el caso de tramos guardados cae;
- *  · con `mismoLugar` sin la ciudad del código, el caso «MAD» contra «Madrid» cae.
+ *  · con la ruta del detector por encima de la de la lectura, el caso de Air France cae;
+ *  · con `mismoLugar` sin la ciudad del código, los casos de códigos contra nombres caen;
+ *  · sin comparar la fecha, el de la misma ruta otro día cae.
  */
 import { describe, expect, it } from 'vitest'
 
@@ -50,14 +51,10 @@ describe('H9 · un vuelo con escala del mismo trayecto es OPCIÓN, no un bloque 
     expect(ubicarLectura({ tipo: 'vuelo', lectura: airFrance, pistas, lineas: [avianca], grupoViaje: GRUPO })).toEqual({ como: 'hermana', grupo: 'vuelo' })
   })
 
-  it('con la escala guardada como dos tramos de ida, cuenta el destino del ÚLTIMO', () => {
-    const tramos = [
-      { sentido: 'ida', origen: 'Bogotá BOG', destino: 'París CDG', fecha: '2026-12-10', salida: null, llegada: null, numero: null, escala: null, directo: null, equipaje: { personal: null, mano: null, bodega: null } },
-      { sentido: 'ida', origen: 'París CDG', destino: 'Madrid MAD', fecha: '2026-12-11', salida: null, llegada: null, numero: null, escala: null, directo: null, equipaje: { personal: null, mano: null, bodega: null } },
-    ]
-    const conEscala: LineaParaUbicar = { id: 'af', grupo: 'vuelo', tarifa_pax: { casillas: { grupo_completo: vuelo({ aerolinea: 'Air France' }) } }, tramos }
-    const iberia = vuelo({ aerolinea: 'Iberia' })
-    expect(ubicarLectura({ tipo: 'vuelo', lectura: iberia, pistas: SIN_PISTAS, lineas: [conEscala], grupoViaje: GRUPO })).toEqual({ como: 'hermana', grupo: 'vuelo' })
+  it('una opción leída con códigos (BOG→MAD) y otra con nombres (Bogotá→Madrid) son el mismo trayecto', () => {
+    const conCodigos: LineaParaUbicar = { id: 'ib', grupo: 'vuelo', tarifa_pax: { casillas: { grupo_completo: vuelo({ aerolinea: 'Iberia', origen: 'BOG', destino: 'MAD' }) } } }
+    const conNombres = vuelo({ aerolinea: 'Air France', origen: 'Bogotá', destino: 'Madrid' })
+    expect(ubicarLectura({ tipo: 'vuelo', lectura: conNombres, pistas: SIN_PISTAS, lineas: [conCodigos], grupoViaje: GRUPO })).toEqual({ como: 'hermana', grupo: 'vuelo' })
   })
 
   it('el regreso AMS→BOG no es opción de la ida BOG→MAD', () => {

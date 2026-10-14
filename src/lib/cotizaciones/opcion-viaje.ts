@@ -288,17 +288,13 @@ export const NOMBRE_TIPO_BLOQUE: Record<TipoRanura | 'otro', string> = {
 export { equipajeDeTramo }
 
 /**
- * La ruta de la IDA de un vuelo: la ciudad de salida del primer tramo, la de llegada del ÚLTIMO
- * y la fecha de salida (H9, prueba Europa del 2026-10-14). Con una escala guardada como dos
- * tramos de ida (BOG→CDG, CDG→MAD), el destino es Madrid, no París: tomar el primer tramo
- * abría «Vuelo 2» para un vuelo con escala del mismo trayecto, y la ida se cobraba dos veces.
+ * La ruta de la IDA de un vuelo: de dónde sale, a dónde llega AL FINAL y qué día sale (H9, prueba
+ * Europa del 2026-10-14). El `destino` de la lectura es la llegada final de la ida (así lo pide la
+ * ranura), así que una escala no lo cambia: BOG→CDG→MAD llega a Madrid.
  */
 export function rutaDeVueloDeOpcion(item: ItemConLectura): { origen: string | null; destino: string | null; fecha: string | null } {
-  const idas = tramosDelItem(item).tramos.filter(t => t.sentido === 'ida')
-  const primero = idas.find(t => t.origen) ?? idas[0]
-  const ultimo = [...idas].reverse().find(t => t.destino) ?? idas[idas.length - 1]
-  const fecha = idas.find(t => t.fecha)?.fecha ?? null
-  return { origen: primero?.origen ?? null, destino: ultimo?.destino ?? null, fecha }
+  const ida = tramosDelItem(item).tramos.find(t => t.sentido === 'ida')
+  return { origen: ida?.origen ?? null, destino: ida?.destino ?? null, fecha: ida?.fecha ?? null }
 }
 
 /**

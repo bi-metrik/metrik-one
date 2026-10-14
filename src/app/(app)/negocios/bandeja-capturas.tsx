@@ -1304,6 +1304,16 @@ export function FilaCaptura({
             <button type="button" onClick={onReintentar} className={BTN_PRIM} data-reintentar-captura>Reintentar</button>
           </div>
         )}
+        {/* H19 · un rechazo de la lectura nunca deja la fila sin salida: se puede decir qué es. */}
+        {!e.reintentar && tipo && (
+          <div className="mt-1 flex flex-wrap gap-2" data-reclasificar-captura>
+            {tiposElegibles.filter(t => t !== tipo).map(t => (
+              <button key={t} type="button" onClick={() => onElegirTipo(t)} className={BTN}>
+                Es {definicionDeTipo(t).label.toLowerCase()}
+              </button>
+            ))}
+          </div>
+        )}
       </>,
       quitar,
     )

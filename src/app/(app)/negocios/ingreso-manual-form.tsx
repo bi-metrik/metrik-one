@@ -2,7 +2,7 @@
 
 import { useId, useState, type ReactNode } from 'react'
 
-import { ATAJOS_OTRO_SERVICIO, avisoFechasFueraDelViaje, montoConMiles, nochesEntre, type ErroresManual } from '@/lib/cotizaciones/ingreso-manual'
+import { ATAJOS_OTRO_SERVICIO, avisoFechasFueraDelViaje, MONEDAS_MANUALES, montoConMiles, nochesEntre, type ErroresManual } from '@/lib/cotizaciones/ingreso-manual'
 import { esAsistenciaMedica } from '@/lib/cotizaciones/asistencia-medica'
 import type { Composicion } from '@/lib/cotizaciones/tarifa-pasajero'
 import { BTN, BTN_ELEGIDO, BTN_PRIM, INPUT, INPUT_DUDOSO, SPIN } from '@/components/viaje/estilo'
@@ -91,7 +91,7 @@ function inicial(tipo: TipoEscritoAMano, grupo: Composicion | null): Valores {
   }
   return tipo === 'hotel'
     ? { hotel: '', ciudad: '', entrada: '', salida: '', habitacion: '', regimen: '', incluye: '', ...pax, netoAdulto: '', netoNino: '', netoInfante: '', edadDesde: '', edadHasta: '', fuente: '' }
-    : { ruta: '', fecha: '', ...pax, cobro: 'por_persona', precio: '', neto: '', netoNino: '', netoInfante: '', idaYRegreso: 'si', fuente: '' }
+    : { ruta: '', fecha: '', ...pax, cobro: 'por_persona', precio: '', neto: '', netoNino: '', netoInfante: '', idaYRegreso: 'si', moneda: 'COP', fuente: '' }
 }
 
 export default function IngresoManualForm({
@@ -196,6 +196,17 @@ export default function IngresoManualForm({
   // «Otro servicio» por persona: los pasajeros salen del viaje (Noor, Paso 1).
   const viajeros = (Number(v.adultos) || 0) + (Number(v.ninos) || 0) + (Number(v.infantes) || 0)
   const titulo = (t: string) => <span className="col-span-full mt-1 text-[11px] font-bold uppercase tracking-[.08em] text-[#6E6A62]">{t}</span>
+  // H20 · el traslado escrito a mano entra en la moneda del proveedor; la tasa se escribe después,
+  // en la opción, igual que con un pantallazo en EUR o USD.
+  const monedaDelTraslado = (
+    <div className="col-span-full flex flex-wrap items-center gap-x-4 gap-y-1" role="radiogroup" aria-label="Moneda" data-campo-manual="moneda">
+      <span className="text-xs text-[#6E6A62]">Moneda del proveedor</span>
+      {MONEDAS_MANUALES.map(m => opcion('moneda', m, m))}
+      {v.moneda && v.moneda !== 'COP' && (
+        <span className="text-[11px] text-[#6E6A62]">Escribe el valor en {v.moneda}. La tasa de cambio se pone en la opción, como con un pantallazo.</span>
+      )}
+    </div>
+  )
 
   if (porPasos) {
     return (
@@ -321,6 +332,7 @@ export default function IngresoManualForm({
               </div>
               {errores.precio && <span className="text-xs text-[#B3382C]">{errores.precio}</span>}
             </div>
+            {monedaDelTraslado}
             <div className="col-span-full flex flex-wrap gap-x-4 gap-y-1" role="radiogroup" aria-label="Cómo cobra">
               {opcion('cobro', 'por_persona', 'Por persona')}
               {opcion('cobro', 'por_vehiculo', 'Por vehículo')}
@@ -418,6 +430,7 @@ export default function IngresoManualForm({
               ? <span className="text-xs text-[#B3382C]">{errores.precio}</span>
               : v.precio === 'in_out' && <span className="text-[11px] text-[#6E6A62]">{AYUDA_IN_OUT}</span>}
           </div>
+          {monedaDelTraslado}
           <div className="col-span-full flex flex-wrap gap-x-4 gap-y-1" role="radiogroup" aria-label="Cómo cobra">
             {opcion('cobro', 'por_persona', 'Por persona')}
             {opcion('cobro', 'por_vehiculo', 'Por vehículo')}
