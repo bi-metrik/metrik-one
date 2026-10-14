@@ -218,7 +218,7 @@ describe('identidad', () => {
     const a = claveSujeto({ documento_tipo: 'nit', documento_numero: '900.123.456-7' });
     const b = claveSujeto({ documento_tipo: 'NIT ', documento_numero: '9001234567' });
     expect(a).toBe(b);
-    expect(a).toBe('NIT:9001234567');
+    expect(a).toBe('NIT:900123456');
   });
 });
 

@@ -467,6 +467,7 @@ export async function invitarContraparte(input: {
     expediente_id: string;
     url: string;
     correo_distinto: boolean;
+    enlace_renovado?: boolean;
   }>(g.data.apiKey, '/api/v1/kyc/invitaciones', {
     method: 'POST',
     body: JSON.stringify({
@@ -492,6 +493,7 @@ export async function invitarContraparte(input: {
       const expedienteId = r.cuerpo?.expediente_id;
       const url = r.cuerpo?.url;
       if (typeof expedienteId === 'string' && typeof url === 'string') {
+        await registrarEnEspejo(g.data.workspaceId, expedienteId, input, denominacion);
         revalidatePath('/compliance/vinculacion');
         return {
           ok: true,
@@ -508,6 +510,7 @@ export async function invitarContraparte(input: {
     return { ok: false, error: await traducirErrorVinculacion(r.error) };
   }
 
+  await registrarEnEspejo(g.data.workspaceId, r.data.expediente_id, input, denominacion);
   revalidatePath('/compliance/vinculacion');
   return {
     ok: true,
@@ -517,6 +520,45 @@ export async function invitarContraparte(input: {
       url: r.data.url,
       correoDistinto: r.data.correo_distinto === true,
       correoSalio: true,
+      enlaceRenovado: r.data.enlace_renovado === true,
     },
   };
+}
+
+/**
+ * El expediente entra al espejo desde que se invita, no desde que se firma.
+ *
+ * `kyc_expediente_ref` solo se llenaba con el webhook de firma o de decisión, así
+ * que la invitación masiva no veía a nadie como "ya invitado" y repetir la vista
+ * previa les volvía a escribir a todos (QA ALMA 2026-10-12, V2). Valida ahora
+ * también avisa al invitar; esto lo cubre aunque ese aviso falle o llegue tarde.
+ *
+ * Solo INSERTA: si la fila ya existe, la que manda es la del webhook, que trae
+ * el estado real. Un "invitado" escrito desde acá no puede pisar un "firmado".
+ * Best-effort: si falla, la invitación ya salió y no se deshace por esto.
+ */
+async function registrarEnEspejo(
+  workspaceId: string,
+  expedienteId: string,
+  input: { tipoSujeto: TipoSujeto; tipoDocumento: TipoDocumento; documento: string },
+  denominacion: string,
+): Promise<void> {
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const svc = createServiceClient() as any;
+  const { error } = await svc
+    .from('kyc_expediente_ref')
+    .upsert(
+      {
+        workspace_id: workspaceId,
+        expediente_kyc_id: expedienteId,
+        razon_social: input.tipoSujeto === 'juridica' ? denominacion : null,
+        nombre: input.tipoSujeto === 'natural' ? denominacion : null,
+        documento_tipo: input.tipoDocumento,
+        documento_numero: input.documento,
+        estado_cache: 'invitado',
+        etapa_cache: 'invitacion',
+      },
+      { onConflict: 'expediente_kyc_id', ignoreDuplicates: true },
+    );
+  if (error) console.warn(`[vinculacion] espejo no registrado (${expedienteId}): ${error.message}`);
 }
