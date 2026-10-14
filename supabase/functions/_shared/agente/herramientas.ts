@@ -56,7 +56,7 @@ export function declaraciones(d: Dominio, r: Reglamento): DeclaracionHerramienta
         'La única puerta para escribir en ONE, y no escribe: el sistema arma un resumen con datos reales y lo manda con botones; se ejecuta solo si la persona toca «sí». Cierra el turno: no redactes después.',
         TEXTO_ARRIBA,
         'La pregunta de confirmación («¿Lo anoto en…?», «¿Abro este viaje?») y sus botones los pone el sistema en el resumen: no la escribas en `texto`, ni con otras palabras.',
-        'Si la propuesta pendiente (en el Estado) ya es esta, no la repitas: contesta con `responder`.',
+        'Si la propuesta pendiente (en el Estado) ya es esta, llámala igual: el sistema no la duplica, reenvía la pendiente con sus botones (y tu `texto` arriba). No la repitas con otras palabras en `responder`.',
         `Acciones: ${d.acciones.join(', ')}.`,
         reglasProponer.length ? `Reglas al proponer:\n${reglasProponer.join('\n')}` : '',
       ].filter(Boolean).join('\n'),
@@ -73,7 +73,7 @@ export function declaraciones(d: Dominio, r: Reglamento): DeclaracionHerramienta
     },
     {
       name: 'responder',
-      description: 'Lo que le llega a la persona. Texto corto (máximo 600 caracteres). Con 2 o 3 salidas cerradas, ponlas en `opciones` (botones, título de hasta 20 caracteres); para elegir entre 4 y 10 cosas, también (lista: título de hasta 24, descripción de hasta 72). Más de 10, no.',
+      description: 'Lo que le llega a la persona. Texto corto (máximo 600 caracteres). Con 2 o 3 salidas cerradas, ponlas en `opciones` (botones, título de hasta 20 caracteres); para elegir entre 4 y 10 cosas, también (lista: título de hasta 24, descripción de hasta 72). Más de 10, no. Las `opciones` son para elegir, no para confirmar: los botones que escriben en ONE (cargar, anotar, abrir, descartar) solo los pone el sistema con `proponer`; nunca los imites aquí ni mandes a tocar los de otro mensaje.',
       parameters: {
         type: 'object',
         properties: {
