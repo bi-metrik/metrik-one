@@ -6,6 +6,7 @@ import { destinoTrasAutenticar, esRelativo } from '@/lib/tenant/destino-tenant'
 import { destinoSiBloqueada, rutaGateada } from '@/lib/modulos/gate'
 import { leerPerfilDeAcceso, type ClientePerfil } from '@/lib/modulos/perfil-de-acceso'
 import { RUTA_DESINCRONIZADA, hayDesincronizacionDeTenant } from '@/lib/tenant/desincronizacion'
+import { RUTA_ENSAYO_CHROMIUM } from '@/lib/pdf/chromium/acceso-ensayo'
 import {
   COOKIE_TENANT_PREVIEW,
   PARAM_TENANT_PREVIEW,
@@ -112,6 +113,12 @@ export async function middleware(request: NextRequest) {
   // function, sin sesión). La ruta solo actúa sobre un negocio creado hace menos de 15 minutos y
   // solo manda el correo que el sistema habría mandado solo (ver `app/api/autorizacion-datos`).
   if (pathname === '/api/autorizacion-datos/al-crear') return NextResponse.next()
+
+  // Ensayo de Chromium (PR 0 de la propuesta de Trappvel): SOLO en un preview, que ya está
+  // detrás del SSO de Vercel, para medir el arranque en frío con `vercel curl` sin sesión de
+  // ONE. Imprime un fixture del repo. En producción sigue el camino normal (sesión) y la ruta
+  // exige platform admin. Ver `lib/pdf/chromium/acceso-ensayo.ts`.
+  if (pathname === RUTA_ENSAYO_CHROMIUM && process.env.VERCEL_ENV === 'preview') return NextResponse.next()
 
   // El service worker del piloto de red (`public/sw.js`). Es un archivo estatico, pero `.js` no
   // esta excluido del matcher: sin este corte, una pestaña sin sesion recibia un 307 a /login y
