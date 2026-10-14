@@ -203,16 +203,21 @@ describe('corte y respaldo se leen de bot_conversacional.agente_config (sin depl
     expect(c.respaldo).toEqual({ modelo: 'gemini-otro', razonamiento: 'LOW', temperatura: null, maxSalida: 2048 })
   })
 
-  it('el turno 1 con el adaptador de Gemini (red falsa): el principal se corta en corte_ms y el respaldo propone con texto', async () => {
-    const c = leerConfigAgente({ agente: true, agente_config: { corte_ms: 150 } })
+  /** El turno 1 con el adaptador de Gemini y una red falsa: el principal contesta `buscar` y se cuelga en el segundo llamado. */
+  async function turnoConRespaldo(agenteConfig: Record<string, unknown>) {
+    const c = leerConfigAgente({ agente: true, agente_config: { corte_ms: 150, ...agenteConfig } })
     const urls: string[] = []
+    const cuerpos: Array<{ modelo: string; proponer: { description: string; parameters: { properties: Record<string, unknown> } } }> = []
     const respuesta = (functionCall: unknown) => new Response(JSON.stringify({
       candidates: [{ content: { parts: [{ functionCall }] }, finishReason: 'STOP' }],
       usageMetadata: { promptTokenCount: 900, candidatesTokenCount: 20, thoughtsTokenCount: 0, cachedContentTokenCount: 0 },
     }), { status: 200 })
     let n = 0
     const f = vi.fn(async (url: string, init: RequestInit) => {
-      urls.push(url.split('/models/')[1])
+      const modelo = url.split('/models/')[1]
+      urls.push(modelo)
+      const cuerpo = JSON.parse(String(init.body)) as { tools: Array<{ functionDeclarations: Array<{ name: string }> }> }
+      cuerpos.push({ modelo, proponer: cuerpo.tools[0].functionDeclarations.find((x) => x.name === 'proponer') as never })
       // El principal responde el primer llamado; en el segundo (después de buscar) se cuelga y se corta.
       if (url.includes(c.principal.modelo) && n++ > 0) {
         await new Promise((_, rej) => init.signal!.addEventListener('abort', () => rej(Object.assign(new Error('t'), { name: 'TimeoutError' }))))
@@ -224,11 +229,31 @@ describe('corte y respaldo se leen de bot_conversacional.agente_config (sin depl
     const modelo: Modelo = modeloGemini({ llave: 'llave-falsa', principal: c.principal, respaldo: c.respaldo, corteMs: c.corteMs, fetch: f as unknown as typeof fetch })
     const e = await escenario({ modelo, contactos: [ROSA], viajes: VIAJES, config: c })
     const t1 = await e.escribe(TURNO_1)
+    return { c, urls, cuerpos, t1, traza: e.trazas().find((x) => x.tipo === 'modelo')! }
+  }
+
+  it('el principal se corta en corte_ms y el respaldo propone: su declaración no trae `texto` y, si igual lo escribe, sale solo el resumen', async () => {
+    const { urls, cuerpos, t1, traza } = await turnoConRespaldo({})
     expect(urls).toEqual(['gemini-3.8-flash:generateContent', 'gemini-3.8-flash:generateContent', 'gemini-3.5-flash-lite:generateContent'])
-    expect(t1[0].texto).toBe(`${RESPUESTA_1}\n${RESUMEN}`)
-    const traza = e.trazas().find((x) => x.tipo === 'modelo')!
+    // El principal ve `texto` en proponer; el respaldo no, y se le dice que conteste con `responder`.
+    expect(cuerpos[1].proponer.parameters.properties).toHaveProperty('texto')
+    expect(cuerpos[2].proponer.parameters.properties).not.toHaveProperty('texto')
+    expect(cuerpos[2].proponer.description).toContain('Aquí `proponer` no lleva texto')
+    expect(cuerpos[2].proponer.description).not.toContain('la respuesta va en `texto`')
+    // Medido en producción (2026-10-09, 69eeff52): el respaldo escribió «¿Anoto en M1 26 1 · MIAMI 7N…?» encima de
+    // «¿Lo anoto en M1 26 1 · MIAMI 7N?». Ahora sale solo el resumen que arma el código.
+    expect(t1[0].texto).toBe(RESUMEN)
+    expect(traza.candados).toEqual([{ candado: 'respaldo_sin_texto', detalle: RESPUESTA_1 }])
     expect(traza.uso!.map((u) => [u.modelo, u.ok, u.motivo ?? null])).toEqual([
       ['gemini-3.8-flash', true, null], ['gemini-3.8-flash', false, 'corte'], ['gemini-3.5-flash-lite', true, null],
     ])
+  })
+
+  it('con respaldo_estricto: false el respaldo propone con texto, como antes', async () => {
+    const { c, cuerpos, t1, traza } = await turnoConRespaldo({ respaldo_estricto: false })
+    expect(c.respaldoEstricto).toBe(false)
+    expect(cuerpos[2].proponer.parameters.properties).toHaveProperty('texto')
+    expect(t1[0].texto).toBe(`${RESPUESTA_1}\n${RESUMEN}`)
+    expect(traza.candados).toEqual([])
   })
 })

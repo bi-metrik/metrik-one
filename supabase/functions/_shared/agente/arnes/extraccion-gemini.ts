@@ -7,7 +7,7 @@
 // arnés es la de PRUEBAS.
 // ============================================================
 
-import { esquemaCarga } from '../bandeja/extraccion.ts';
+import { esquemaCarga, esquemaCargaCompacta } from '../bandeja/extraccion.ts';
 import { mensajesDeTextos } from '../bandeja/carga.ts';
 import { textoParaModelo } from '../../wa-guardianes.ts';
 import type { ExtractorMemoria } from '../memoria.ts';
@@ -19,7 +19,11 @@ import type { ExtractorMemoria } from '../memoria.ts';
  */
 export const MODELO_EXTRACCION = Deno.env.get('ARNES_MODELO_EXTRACCION') || 'gemini-3.5-flash-lite';
 
-export function extraccionGemini(llave: string, registro: Array<{ ms: number; ok: boolean }> = []): ExtractorMemoria {
+/** Lo que se mide de cada llamado: tiempo y tokens (la latencia de flash-lite va casi toda en los de salida). */
+export interface MedidaExtraccion { ms: number; ok: boolean; salida?: number; entrada?: number; razonamiento?: number }
+
+/** `compacta`: el esquema de `esquemaCargaCompacta` (las instrucciones las arma quien llama, con `{ compacta }`). */
+export function extraccionGemini(llave: string, registro: MedidaExtraccion[] = [], o: { compacta?: boolean } = {}): ExtractorMemoria {
   return async ({ textos, campos, instrucciones }) => {
     const t0 = performance.now();
     const res = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${MODELO_EXTRACCION}:generateContent`, {
@@ -28,14 +32,15 @@ export function extraccionGemini(llave: string, registro: Array<{ ms: number; ok
       body: JSON.stringify({
         system_instruction: { parts: [{ text: instrucciones }] },
         contents: [{ role: 'user', parts: [{ text: `Mensajes:\n${textoParaModelo(mensajesDeTextos(textos))}` }] }],
-        generationConfig: { temperature: 0.1, maxOutputTokens: 8192, responseMimeType: 'application/json', responseSchema: esquemaCarga(campos) },
+        generationConfig: { temperature: 0.1, maxOutputTokens: 8192, responseMimeType: 'application/json', responseSchema: o.compacta ? esquemaCargaCompacta(campos) : esquemaCarga(campos) },
       }),
     });
     const ms = Math.round(performance.now() - t0);
     if (!res.ok) { registro.push({ ms, ok: false }); throw new Error(`extracción HTTP ${res.status}`); }
     const d = await res.json();
     const txt = d.candidates?.[0]?.content?.parts?.[0]?.text;
-    registro.push({ ms, ok: !!txt });
+    const u = d.usageMetadata ?? {};
+    registro.push({ ms, ok: !!txt, salida: Number(u.candidatesTokenCount ?? 0), entrada: Number(u.promptTokenCount ?? 0), razonamiento: Number(u.thoughtsTokenCount ?? 0) });
     if (!txt) throw new Error('extracción vacía');
     return JSON.parse(txt);
   };

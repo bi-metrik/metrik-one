@@ -23,6 +23,7 @@ import {
   totalesDeAdicionales,
 } from '@/lib/cotizaciones/adicionales'
 import { aportaAlTotal, lineasQueDescribeElDocumento } from '@/lib/cotizaciones/lineas-del-documento'
+import { ranurasCombinables } from '@/lib/cotizaciones/itinerarios'
 import { avisosDeCobertura } from '@/lib/cotizaciones/cobertura-opciones'
 import { diasDelItinerario, fueraDelPrecio, itemsSugeridos, sugeridosVisibles } from '@/lib/cotizaciones/dia-relativo'
 import {
@@ -35,9 +36,10 @@ import {
   vuelosDeItems,
 } from '@/lib/cotizaciones/detalle-viaje'
 import { leerViajeDelNegocio } from '@/lib/cotizaciones/viaje-negocio'
+import { entradaAsiPuedesPagar } from '@/lib/viaje/asi-puedes-pagar'
 import { describirOcupacion } from '@/lib/cotizaciones/tarifa-pasajero'
 import { hayTarifaPorPasajero, lineasDesactualizadas, motivoParaNoEnviar } from '@/lib/cotizaciones/captura-desactualizada'
-import { MENSAJE_SIN_PASAJEROS } from '@/lib/cotizaciones/captura-desactualizada-datos'
+import { MENSAJE_SIN_PASAJEROS, motivoPorCapturasDesactualizadas } from '@/lib/cotizaciones/captura-desactualizada-datos'
 import {
   PLANTILLA_POR_DEFECTO,
   compositorDePlantilla,
@@ -47,6 +49,7 @@ import {
   plantillaUsaTextoDelCliente,
 } from '@/lib/pdf/plantillas-cotizacion'
 import { avisoDelTextoEnPdf, avisoDelTextoViejoEnPdf, leerDocumentoCliente, textoParaElViaje } from '@/lib/cotizaciones/documento-cliente'
+import { incluyeDeOne } from '@/lib/cotizaciones/incluye-por-one'
 import { leerContextoTextoCliente } from '@/lib/cotizaciones/documento-cliente-datos'
 import { vigenciaEnDias } from '@/lib/cotizaciones/condiciones-comerciales'
 import { fotosDeCiudad } from '@/lib/pdf/fotos-ciudad'
@@ -74,7 +77,8 @@ import {
 import { uploadFileToDrive, createDriveFolder } from '@/lib/google-drive'
 import { usaAlmacenamientoExterno } from '@/lib/almacenamiento/proveedor'
 import { almacenamientoExternoDe } from '@/lib/almacenamiento/supabase-externo'
-import { evaluarSalida } from '@/lib/cotizaciones/piso-salida-datos'
+import { evaluarSalida, motivoParaNoSalir } from '@/lib/cotizaciones/piso-salida-datos'
+import { registrarEnvioPorDescarga } from '@/lib/negocios/seguimiento-datos'
 import { motivoSinRecomendada } from '@/lib/cotizaciones/tarifas'
 import { ponerMarcaDeBorrador } from '@/lib/pdf/marca-borrador'
 import { avisoDeBorrador, motivosDeBorrador } from '@/lib/cotizaciones/motivos-borrador'
@@ -305,17 +309,27 @@ export async function generateCotizacionPDF(cotizacionId: string) {
   }
 
   // Para cotizaciones de negocio, intentar obtener empresa del negocio
-  type NegocioInfo = { id: string; nombre: string | null; carpeta_url: string | null }
+  type NegocioInfo = { id: string; nombre: string | null; carpeta_url: string | null; linea_id: string | null; configLinea: unknown }
   let negocioInfo: NegocioInfo | null = null
 
   if (cot.negocio_id) {
     const { data: negocio } = await supabase
       .from('negocios')
-      .select('id, nombre, carpeta_url, empresa_id, empresas(nombre, numero_documento, contacto_nombre, contacto_email, tipo_persona, regimen_tributario, gran_contribuyente, agente_retenedor, telefono, direccion_fiscal, municipio, departamento)')
+      // La línea viaja en la MISMA ida (embed): «Así puedes pagar» lee su `config_extra` y una
+      // consulta aparte le sumaba una ida a todo PDF de negocio (presupuesto V5 de C0).
+      .select('id, nombre, carpeta_url, linea_id, empresa_id, lineas_negocio(config_extra), empresas(nombre, numero_documento, contacto_nombre, contacto_email, tipo_persona, regimen_tributario, gran_contribuyente, agente_retenedor, telefono, direccion_fiscal, municipio, departamento)')
       .eq('id', cot.negocio_id)
       .single()
     if (negocio) {
-      negocioInfo = { id: negocio.id, nombre: negocio.nombre, carpeta_url: negocio.carpeta_url }
+      const lineaEmbebida = (negocio as { lineas_negocio?: unknown }).lineas_negocio
+      const filaLinea = Array.isArray(lineaEmbebida) ? lineaEmbebida[0] : lineaEmbebida
+      negocioInfo = {
+        id: negocio.id,
+        nombre: negocio.nombre,
+        carpeta_url: negocio.carpeta_url,
+        linea_id: (negocio as { linea_id?: string | null }).linea_id ?? null,
+        configLinea: (filaLinea as { config_extra?: unknown } | null | undefined)?.config_extra ?? null,
+      }
       if (!empresa) {
         empresa = (negocio.empresas as EmpresaRow | null) ?? null
       }
@@ -772,6 +786,7 @@ export async function generateCotizacionPDF(cotizacionId: string) {
         negocioId: negocioInfo?.id ?? null,
         staffId: staffId ?? null,
       })
+      const envioRegistrado = await envioPorDescarga(supabase, workspaceId, cotizacionId, negocioInfo?.id ?? null, staffId ?? null)
 
       return {
         success: true,
@@ -784,6 +799,7 @@ export async function generateCotizacionPDF(cotizacionId: string) {
         aviso: externo.aviso,
         avisosCobertura,
         avisosCaptura,
+        envioRegistrado,
         renderedVia: 'weasyprint' as const,
       }
     } catch (e) {
@@ -818,7 +834,35 @@ export async function generateCotizacionPDF(cotizacionId: string) {
   // itinerarios o ninguno va en la propuesta: ahi el PDF imprime la lista plana de
   // siempre. El corte vive en `bloquesParaPDF` y no en la plantilla porque hay mas
   // de una plantilla, y una regla repetida es una regla que se desincroniza.
-  const bloques = await bloquesParaPDF(supabase, cotizacionId)
+  const bloquesLeidos = await bloquesParaPDF(supabase, cotizacionId)
+  /**
+   * P9 (decisión Max 4, 2026-10-12) · UNA SOLA MANERA DE HACER EL VIAJE: una sola tarifa en la
+   * propuesta (la Recomendada) y ningún vuelo ni hotel con opciones —las únicas opciones son de
+   * traslados o actividades—. Ahí no hay tarifas que comparar: el documento conserva el «Día a
+   * día» y lo arma con lo que la Recomendada escogió, no con el supuesto. El dinero no cambia:
+   * `valor_total` ya es el de la Recomendada (`totalDelPrincipal`).
+   *
+   * Depende del DATO, no del interruptor: es lectura, encendido o apagado igual. Con vuelos u
+   * hoteles con opciones, o con más de una tarifa en la propuesta, todo queda como antes.
+   */
+  const unaSolaManera = bloquesLeidos !== null
+    && bloquesLeidos.length === 1
+    && bloquesLeidos[0].esPrincipal
+    && ranurasCombinables(items.filter(i => i.id).map(i => ({
+      id: i.id as string,
+      grupo: i.grupo ?? null,
+      opcion_de: i.opcion_de ?? null,
+      es_ajuste: i.es_ajuste ?? false,
+      orden: i.orden ?? 0,
+      dia_relativo: i.dia_relativo ?? null,
+      entra_al_precio: i.entra_al_precio ?? null,
+    }))).length === 0
+  const bloques = unaSolaManera ? null : bloquesLeidos
+  const idsDeLaUnica = unaSolaManera ? new Set(bloquesLeidos![0].itemIds) : null
+  /** Lo que aporta al documento: con una sola manera, lo que escogió la Recomendada. */
+  const aportaDoc = idsDeLaUnica
+    ? (i: ItemRow) => !i.id || idsDeLaUnica.has(i.id) || i.es_ajuste === true
+    : aporta
   const itemPorId = new Map(items.filter(i => i.id).map(i => [i.id as string, i]))
 
   /**
@@ -935,7 +979,7 @@ export async function generateCotizacionPDF(cotizacionId: string) {
     : null
 
   const itemsDelPrincipal = itinerariosPDF?.find(b => b.esPrincipal)?.items ?? null
-  const itemsParaResumen = itemsDelPrincipal ?? items.filter(aporta).map(paraPlantilla)
+  const itemsParaResumen = itemsDelPrincipal ?? items.filter(aportaDoc).map(paraPlantilla)
 
   /**
    * El itinerario DÍA POR DÍA y el paquete de sugeridos.
@@ -976,7 +1020,7 @@ export async function generateCotizacionPDF(cotizacionId: string) {
         dia: d.dia,
         items: d.itemIds
           .map(id => porId.get(id))
-          .filter((i): i is ItemRow => i !== undefined && aporta(i))
+          .filter((i): i is ItemRow => i !== undefined && aportaDoc(i))
           .map(paraPlantilla),
       }))
     : null
@@ -997,7 +1041,7 @@ export async function generateCotizacionPDF(cotizacionId: string) {
    */
   const itemsSinDiaPDF = diasPDF
     ? items
-        .filter(i => aporta(i) && !(i.id && (idsConDia.has(i.id) || idsSugeridos.has(i.id))))
+        .filter(i => aportaDoc(i) && !(i.id && (idsConDia.has(i.id) || idsSugeridos.has(i.id))))
         .map(paraPlantilla)
     : null
 
@@ -1049,14 +1093,23 @@ export async function generateCotizacionPDF(cotizacionId: string) {
    * vuelo que el cliente no está comprando.
    */
   const idsDelPrincipal = bloques?.find(b => b.esPrincipal)?.itemIds ?? null
-  const itemsImpresos = lineasQueDescribeElDocumento(items, idsDelPrincipal, aporta)
+  const itemsImpresos = lineasQueDescribeElDocumento(items, idsDelPrincipal, aportaDoc)
 
   let viajePDF: CotizacionPDFProps['viaje'] = null
+  // «Así puedes pagar» (F2, PR 7): solo con `plan_pagos.activo` en la línea del negocio.
+  let entradaPlan: CotizacionPDFProps['asiPuedesPagar'] = null
   // Un borrador de ONE sin revisar no sale en el PDF; se avisa, sin bloquear la descarga.
   let avisoTexto: string | null = null
   if (plantillaPropia && negocioInfo) {
     // Ya leído arriba cuando alguna línea tiene tarifa por pasajero: no se paga dos veces.
     const delNegocio = viajeDelNegocio ?? (await leerViajeDelNegocio(supabase, negocioInfo.id)).viaje
+    if (negocioInfo.linea_id) {
+      // Sin poder leer la línea, apagado: el documento sale como hoy.
+      entradaPlan = entradaAsiPuedesPagar(
+        negocioInfo.configLinea,
+        { fechaSalida: delNegocio.fechas.inicio, hoy: todayBogotaISO() },
+      )
+    }
     const paraLecturaDe = (i: ItemRow) => ({
       nombre: i.nombre ?? '',
       grupo: i.grupo ?? null,
@@ -1132,7 +1185,14 @@ export async function generateCotizacionPDF(cotizacionId: string) {
     const documentoCliente = plantillaUsaTextoDelCliente(templateSlug)
       ? leerDocumentoCliente((cot as unknown as Record<string, unknown>).documento_cliente)
       : null
-    const textoCliente = textoParaElViaje(documentoCliente)
+    // C6 · con la marca `incluye_origen = 'one'`, «Incluye» lo arma ONE con lo que se cobra en
+    // lo que el documento describe. Sin la marca no se calcula nada: el documento de siempre.
+    const textoCliente = textoParaElViaje(
+      documentoCliente,
+      documentoCliente?.incluye_origen === 'one'
+        ? incluyeDeOne(itemsImpresos.filter(i => i.entra_al_precio !== false).map(paraLecturaDe), delNegocio.nivelDetalle)
+        : null,
+    )
     avisoTexto = avisoDelTextoEnPdf(documentoCliente)
     // El texto revisado que quedó viejo (brief del 2026-10-08): la misma huella que el panel del
     // editor, sobre las mismas líneas. Solo se calcula con un texto revisado que se imprime.
@@ -1231,6 +1291,7 @@ export async function generateCotizacionPDF(cotizacionId: string) {
     negocio: negocioInfo ? { nombre: negocioInfo.nombre } : null,
     emisor,
     viaje: viajePDF,
+    ...(entradaPlan ? { asiPuedesPagar: entradaPlan } : {}),
   }
 
   // Una plantilla que se COMPONE (Trappvel: renderiza, mide el PDF y recompone para que la
@@ -1281,6 +1342,7 @@ export async function generateCotizacionPDF(cotizacionId: string) {
     negocioId: negocioInfo?.id ?? null,
     staffId: staffId ?? null,
   })
+  const envioRegistrado = await envioPorDescarga(supabase, workspaceId, cotizacionId, negocioInfo?.id ?? null, staffId ?? null)
 
   return {
     success: true,
@@ -1292,6 +1354,32 @@ export async function generateCotizacionPDF(cotizacionId: string) {
     avisosCobertura,
     avisosCaptura,
     avisoTexto,
+    envioRegistrado,
     renderedVia: 'react-pdf' as const,
+  }
+}
+
+/**
+ * Seguimiento (F1-1, Vera C3): la descarga desde «Revisar y enviar» cuenta como envío si la
+ * línea lo tiene encendido y pasa las guardas de «Enviar». Nunca tumba la descarga: el PDF ya
+ * existe cuando esto corre.
+ */
+async function envioPorDescarga(
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  supabase: any,
+  workspaceId: string,
+  cotizacionId: string,
+  negocioId: string | null,
+  staffId: string | null,
+): Promise<boolean> {
+  if (!negocioId) return false
+  try {
+    return await registrarEnvioPorDescarga(supabase, { workspaceId, negocioId, cotizacionId, staffId }, {
+      capturas: () => motivoPorCapturasDesactualizadas(supabase, { cotizacionId, destino: 'enviada' }),
+      margen: () => motivoParaNoSalir(supabase, { servicio: createServiceClient, workspaceId, cotizacionId, staffId }),
+    })
+  } catch (e) {
+    console.error('[cotizacion-pdf] no se pudo registrar el envío por descarga:', e instanceof Error ? e.message : e)
+    return false
   }
 }

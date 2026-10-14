@@ -11,6 +11,8 @@ import type { EpaycoDesglose } from '@/lib/epayco'
 import type { NegocioBloque } from '../../negocio-v2-actions'
 import AvisoHonorarioPendiente from './AvisoHonorarioPendiente'
 import { useIntencion } from '@/hooks/use-intencion'
+import { FechaDelPago } from './FechaDelPago'
+import { fechaDelPagoEpayco, type CobroConFecha } from '@/lib/epayco/fecha-de-pago'
 
 export interface PagoRegistrado {
   ref_payco: number
@@ -43,10 +45,17 @@ interface BloquePagosEpaycoProps {
    * entrada: dejarla abierta manda a teclear referencia y valor para nada.
    */
   faltaHonorario?: boolean
+  /**
+   * Cobros del negocio. De aquí sale la fecha del PAGO de cada referencia (SOE-013):
+   * `pagos[].fecha` de los pagos viejos es la del registro en ONE, no la del pago.
+   */
+  cobros?: ReadonlyArray<CobroConFecha>
 }
 
 const fmt = (v: number) =>
   new Intl.NumberFormat('es-CO', { style: 'currency', currency: 'COP', maximumFractionDigits: 0 }).format(v)
+
+export { FechaDelPago }
 
 export default function BloquePagosEpayco({
   negocioBloqueId,
@@ -57,6 +66,7 @@ export default function BloquePagosEpayco({
   nota,
   validarEpayco = false,
   faltaHonorario = false,
+  cobros = [],
 }: BloquePagosEpaycoProps) {
   const [pagos, setPagos] = useState<PagoRegistrado[]>(
     () => ((instancia?.data as { pagos?: PagoRegistrado[] } | null)?.pagos) ?? []
@@ -190,6 +200,7 @@ export default function BloquePagosEpayco({
             <div className="flex-1 min-w-0">
               <p className="text-xs font-medium text-tinta">Ref: {p.ref_payco}</p>
               <p className="text-[10px] text-tinta-suave">{p.pagador_nombre}</p>
+              <FechaDelPago fecha={fechaDelPagoEpayco(p, cobros)} />
             </div>
             <span className="text-xs font-semibold text-tinta tabular-nums shrink-0">
               {fmt(p.monto_bruto)}
@@ -224,6 +235,7 @@ export default function BloquePagosEpayco({
                   </span>
                 </div>
                 <p className="text-[10px] text-tinta-suave mt-0.5">{p.pagador_nombre}</p>
+                <FechaDelPago fecha={fechaDelPagoEpayco(p, cobros)} />
               </div>
               <div className="text-right shrink-0">
                 <p className="text-xs font-semibold text-tinta tabular-nums">{fmt(p.monto_bruto)}</p>

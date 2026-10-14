@@ -80,7 +80,7 @@
 - [ ] **Security low:** mover extensions unaccent, pg_trgm, pg_net fuera de public
 - [ ] **Security low:** policy explicita para wa_message_log o documentar como service-role-only
 - [ ] **Security low:** activar Leaked Password Protection en Supabase Auth dashboard
-- [ ] **DevOps:** supabase migration repair + db pull para realinear 13 migraciones remotas
+- [x] ~~**DevOps:** supabase migration repair + db pull para realinear 13 migraciones remotas~~ DESCARTADO: NUNCA `migration repair` ni `db push` contra produccion; el ledger es derivado (ver CLAUDE.md, seccion Migraciones)
 - [ ] **CRITICO:** Persona natural debe crear empresa automaticamente en `crearNegocio` (ver workspaces/soena/CONTEXT.md para detalle)
 - [ ] **SOENA:** Pendientes criticos en `workspaces/soena/CONTEXT.md` — incluye bloque `devolucion_dian` + storage + generacion docs
 - [ ] **INTEGRAR (sesión SOENA 2026-04-12):** Commit `c51d246` agrega 2 features genéricos al producto que deben validarse: (1) `source_etapa_orden` en routing eval de `cambiarEtapaNegocioConGate` — permite leer campos de bloques datos de una etapa distinta a la actual, backward compatible (si no se pasa, lee etapa actual como antes); (2) `DatosField.default` en `BloqueDatos.tsx` — permite inicializar toggles con valor distinto de false. Ambos ya están en producción via SOENA. Revisar y documentar como features de producto si se validan correctos

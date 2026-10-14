@@ -36,7 +36,7 @@
 import { describe, expect, it, vi } from 'vitest'
 import React from 'react'
 import { renderToStaticMarkup } from 'react-dom/server'
-import type { FilaMarketing, FilaNegocioMarketing } from '@/lib/tableros/marketing'
+import type { FilaLeadCiudad, FilaMarketing, FilaNegocioMarketing } from '@/lib/tableros/marketing'
 
 // El panel lateral se dobla: arrastra `marketing-actions`, que es `'use server'` y
 // depende del runtime de Next. Aquí se prueba la TABLA, no el panel.
@@ -123,6 +123,7 @@ const VENTAS: FilaNegocioMarketing[] = [
 const datos = (p: Partial<Parameters<typeof TabMarketing>[0]['datos']> = {}) => ({
   filas: FILAS,
   ventas: VENTAS,
+  leadsCiudad: [] as FilaLeadCiudad[] | null,
   mesEnCurso: '2026-09-01',
   hoyISO: '2026-09-14',
   gastoSincronizado: false,
@@ -254,7 +255,69 @@ describe('Ventas por ciudad · render', () => {
 
   it('la nota explica por qué NO hay CPL ni CAC por ciudad', () => {
     const html = pintar()
-    expect(html).toContain('Solo las ventas se parten por ciudad')
+    expect(html).toContain('Esta ciudad no es la de los leads')
     expect(html).toContain('Documentación')
+    // La nota vieja afirmaba que un lead recién entrado no tiene ciudad: es falso, la
+    // declara en el formulario de Meta (SOE-015).
+    expect(html).not.toContain('un lead recién entrado no tiene ninguna')
+    expect(html).toContain('ciudad de residencia que la persona declara en el formulario de Meta')
+  })
+})
+
+// ── Leads por ciudad de residencia (SOE-015) ─────────────────────────────────
+
+/** Solo el trozo de la tabla de leads: termina donde empieza la de ventas. */
+function seccionLeads(html: string): string {
+  const i = html.indexOf('Leads por ciudad de residencia')
+  const j = html.indexOf('Ventas por ciudad')
+  if (i < 0 || j < 0 || j < i) throw new Error('no se pintó la sección de leads antes de la de ventas')
+  return html.slice(i, j)
+}
+
+function celdasLeads(html: string, etiqueta: string): string[] {
+  const fila = seccionLeads(html).split('<tr').find(t => t.includes(`>${etiqueta}<`))
+  if (!fila) throw new Error(`no hay fila "${etiqueta}" en Leads por ciudad`)
+  return [...fila.matchAll(/<t[dh][^>]*>([\s\S]*?)<\/t[dh]>/g)].map(m => m[1].replace(/<[^>]+>/g, '').trim())
+}
+
+const lead = (campaignId: string, mes: string, ciudad: string | null): FilaLeadCiudad => ({ campaignId, mes, ciudad })
+
+describe('Leads por ciudad · render', () => {
+  const filasSep = [
+    f({ campaignId: SEP_70, campana: 'CLIENTES POTENCIALES SEP ($70)', mes: '2026-09-01', leads: 4, primerLead: '2026-09-03T00:00:00Z' }),
+    f({ campaignId: WEBINAR, campana: 'WEBINAR', mes: '2026-09-01', leads: 2, primerLead: '2026-09-07T00:00:00Z' }),
+    // Un lead de agosto: en la lente de septiembre no entra.
+    f({ campaignId: WEBINAR, campana: 'WEBINAR', mes: '2026-08-01', leads: 1, primerLead: '2026-08-07T00:00:00Z' }),
+  ]
+  const leadsSep = [
+    lead(SEP_70, '2026-09-01', 'Cali'), lead(SEP_70, '2026-09-01', 'Cali'),
+    lead(SEP_70, '2026-09-01', 'Barranquilla'), lead(SEP_70, '2026-09-01', null),
+    lead(WEBINAR, '2026-09-01', 'Envigado'), lead(WEBINAR, '2026-09-01', 'Medellín'),
+    lead(WEBINAR, '2026-08-01', 'Cali'),
+  ]
+
+  it('va ANTES de la de ventas, con las ciudades de los leads y no las seis del directivo', () => {
+    const html = pintar(datos({ filas: filasSep, ventas: [], leadsCiudad: leadsSep }))
+    const enc = celdasLeads(html, 'Campaña')
+    expect(enc).toEqual(['Campaña', 'Cali', 'Barranquilla', 'Envigado', 'Medellín', 'Otras ciudades', 'Sin ciudad', 'Total'])
+  })
+
+  it('el total de la tabla iguala la cifra «Leads» de la lente', () => {
+    const html = pintar(datos({ filas: filasSep, ventas: [], leadsCiudad: leadsSep }))
+    expect(celdasLeads(html, 'Total de leads')).toEqual(['Total de leads', '2', '1', '1', '1', RAYA, '1', '6'])
+    expect(celdasLeads(html, 'WEBINAR')).toEqual(['WEBINAR', RAYA, RAYA, '1', '1', RAYA, RAYA, '2'])
+    // La cifra «Leads» de arriba dice 6 en septiembre, y no hay aviso de descuadre.
+    expect(html).not.toContain('Esta tabla suma')
+  })
+
+  it('si no cuadra con la cifra «Leads», lo DICE', () => {
+    const html = pintar(datos({ filas: filasSep, ventas: [], leadsCiudad: leadsSep.slice(1) }))
+    expect(html).toContain('Esta tabla suma 5 leads y la cifra de arriba dice 6')
+  })
+
+  it('si la consulta falló, la sección lo dice y la pestaña sigue', () => {
+    const html = pintar(datos({ filas: filasSep, ventas: [], leadsCiudad: null }))
+    expect(html).toContain('No se pudo leer la ciudad de los leads')
+    expect(html).toContain('Ventas por ciudad')
   })
 })

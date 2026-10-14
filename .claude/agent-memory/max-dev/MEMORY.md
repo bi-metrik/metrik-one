@@ -2,11 +2,22 @@
 
 ## Project memories
 
+- ⚠️⚠️ [Perfil del contacto por el bot (corte 1)](project_perfil_contacto_bot.md) — migración 20261012234500 SIN aplicar; fichas sin publicar; trigger exige autorización
+- ⚠️ [SOE-016: responsable automático por etapa](project_responsable_automatico_etapa.md) — sin migración; config SOENA SIN aplicar; crear negocio no cubierto
+- ⚠️⚠️ [Espacio de pruebas trappvel-pruebas](project_espacio_pruebas_trappvel.md) — 2 --apply fallidos; restos 90226eac en prod; ensayo PGlite antes del próximo
+- ⚠️⚠️ [F7/F8 Trappvel: SQL 11→9, clon e interruptores](project_f7_configurar_linea_trappvel.md) — SIN correr; gates 3-4 sin interruptor; cola F5 no filtra es_prueba
+- ⚠️⚠️ [Post-cotización ola 5: F4 entrega y F6 cierre](project_post_cotizacion_f4_f6.md) — #1131 migración contacto_documentos SIN aplicar; pila hasta #1133
+- ⚠️ [Post-cotización ola 4: F3, F5 y Siigo listo](project_post_cotizacion_f3_f5.md) — #1119/#1120/#1123 apilados; wa-webhook sin desplegar; piso $0
+- ⚠️ [Post-cotización olas 2-3: confirmación y riel de cobro](project_post_cotizacion_f2.md) — #1116/#1117 sin migración; destrabados con merge de main (12-oct)
+- ⚠️ [Cotizador de viajes: plata de la prueba Europa](project_cotizador_viajes_plata_europa.md) — H27 era el editor sin adicionales; resta en repartirHabitaciones
+- [Post-cotización ola 1: servicios del viaje F0](project_post_cotizacion_servicios_f0.md) — migración APLICADA; datos en `_servicios`; Q1-Q8 sin medir
 - ⚠️⚠️ [Alta autogestionada de Valida (#1095, #1097, #1098)](project_valida_alta_autogestionada.md) — #1097 aplicada y mergeada; PR 1/9 de Valida son parches
+- ⚠️ [«Activar plan» por WhatsApp (temporal)](project_activar_plan_whatsapp_temporal.md) — hasta #1107; choca con #1107 en corte-bolsa.ts
 - ⚠️⚠️ [Renovación continua de Valida (fila A)](project_valida_renovacion_continua.md) — paso 6b agrega 1 cuota; script de los 4 CDA SIN correr; ficha sin dias_trial
 - ⚠️⚠️ [SOE-007: devolución de dinero y venta reembolsada](project_devoluciones_dinero_soe007.md) — 20261009210000 APLICADA; devuelto ≥ cobrado sale de ventas; read-only API sí mide
+- ⚠️ [Pegar conversación en el viaje](project_pegar_conversacion.md) — Next importa _shared puro con `.ts`; llave de pruebas sin pago (403)
 - ⚠️⚠️ [SOE-006: histórico de inactivos (#1084)](project_historico_inactivos_soe006.md) — migración 20261008223000 SIN aplicar; promedio del supervisor solo activos (provisional)
-- ⚠️⚠️ [Autorización de datos por link (Trappvel)](project_autorizacion_datos_link.md) — migración 20261008230000 APLICADA (8-oct); marcas manuales no cuentan; Encargado por versión
+- ⚠️⚠️ [Autorización de datos por link (Trappvel)](project_autorizacion_datos_link.md) — migración 20261008230000 APLICADA (8-oct); marcas manuales no cuentan; directorio sin punto en la lista (N+1)
 - [SOE-004: aprobación fuera de tarifa](project_aprobacion_fuera_de_tarifa.md) — tope frena al APROBAR, no al generar; gerencial + motivo; recargos incluidos
 - [Reporte Supertransporte (ALMA)](project_reporte_supertransporte.md) — contrapartes = todos los segmentos; MéTRIK por platform_admin/correo; KYC sin created_by
 - ⚠️⚠️ [SOE-008/009: aviso al cliente una vez por hecho](project_aviso_mismo_hecho.md) — migración huella SIN aplicar; deploy notificar-etapa después
@@ -14,6 +25,7 @@
 - ⚠️⚠️ [SOE-002: segundo pago en dos cifras](project_segundo_pago_dos_cifras.md) — ambas RPC APLICADAS (8-oct); umbral $1.000 en 2 funciones
 - ⚠️⚠️ [Plan Anual CDA (#1065)](project_valida_cda_restriccion_y_plan_anual.md) — migración 20261007210000 SIN aplicar; vigente_hasta=12.1 es null; anexo generado; pendientes #1072
 - ⚠️⚠️ [SOE-001: Seguimiento en 4 etapas de operaciones](project_soe001_seguimiento_operaciones.md) — migración APLICADA (7-oct); SQL de datos SIN aplicar; deploy alertas-plazo antes del SQL
+- ⚠️⚠️ [Tanda bot 2026-10-12 (#1121, #1127)](project_tanda_bot_1012.md) — compacta APAGADA hasta QA real (Google 403); nombre auto: SQL sin aplicar
 - ⚠️⚠️ [Núcleo conversacional (#1060-#1062)](project_nucleo_conversacional.md) — verificador solo datos (sin listas); propuesta vence por `sobre`; prod extrae con 2.5-flash-lite (sin acceso de QA)
 - ⚠️⚠️ [Términos CDA v1.4 por aviso (13.1)](project_valida_cda_terminos_v14_por_aviso.md) — SQL solo corre el 7-oct; deploy ANTES; no aceptar nunca pausa
 - ⚠️ [Turno del modelo tras un toque](project_nucleo_turno_tras_toque.md) — traza tipo `modelo` por el cupo; `desde` en viaje_nuevo
@@ -24,9 +36,16 @@
 - ⚠️ [Copia de la factura escribe en su origen](project_factura_copia_escribe_origen.md) — criterio único `copiaDeSoloLectura`; origen ambiguo rechaza
 - ⚠️ [ONE aguanta red lenta (7-oct)](project_red_lenta_aguanta.md) — aviso por falta de avance; copia de chunk con `src` relativo; páginas de 30
 - ⚠️ [Aviso «No pudimos conectar con ONE»](project_aviso_conexion_fallida.md) — script módulo async en el head; quita hojas colgadas; tope CSS de 25 s
+- ⚠️ [Chunks que aguantan pérdida + SW de estáticos para todos](project_resiliencia_chunks_sw.md) — runtime se cuelga del `<script>` del HTML; llave sin ?dpl
 - ⚠️ [Piloto de red en soena (#1042 y siguientes)](project_piloto_red_soena.md) — falla carga/RSC, no descargas; SW con interruptor; tabla SIN aplicar
 - ⚠️ [Cargue en segundo plano y acciones largas (#1035, #1036)](project_cargue_segundo_plano.md) — marca `data._lectura`; #1036 mergeado; /conciliacion tiene 300 s
+- ⚠️⚠️ [Cotización por pasos C1–C6 (pila #1135→#1146, #1147)](project_cotizacion_integrada_c1_c6.md) — modelo_destino opt-in (M4); «Otro servicio» ya con migración aplicada; marca incluye_origen
+- ⚠️ [«Otro servicio» en la cotización por pasos](project_cotizacion_otro_servicio.md) — migración 20261013140000 APLICADA (13-oct); valor por todo se reparte; 3 guardas
+- ⚠️⚠️ [Cotización integrada C0 (igualdad del servidor)](project_cotizacion_integrada_c0.md) — fixture sobre 54568adf NO se regenera; P12 frena por faltaCosto; V1 PW choca con preview=prod
+- ⚠️ [R1: el servidor sí toma la Recomendada](project_r1_total_recomendada_adicionales.md) — la diferencia eran adicionales; precio_venta no los suma
+- ⚠️ [SOE-015: leads por ciudad de residencia](project_leads_por_ciudad_soe015.md) — copia JS de la CTE leads; cuadre sin medir en prod; DIVIPOLA solo servidor
 - [Colores de aerolíneas (#1082)](project_colores_aerolineas.md) — catálogo único en src/lib/cotizaciones/aerolineas.ts; colores de tarifa vetados
+- [Fecha del pago en el bloque Pagos ePayco (SOE-013)](project_fecha_pagos_epayco_bloque.md) — pagos[].fecha viejo = registro; leer cobros.fecha; multi-pago fecha por ePayco (12-oct)
 - [Columna Pago de cuotas CDA](project_columna_pago_cuota_cda.md) — pago↔cuota por FIFO (RPC sin plan/cuota); la UI no nombra a Bold
 - ⚠️ [Acciones lentas SOENA (#1010-#1012)](project_acciones_lentas_soena.md) — `cache()` no memoiza en server actions; `after()` lanza fuera de request
 - [Cargue masivo de Valida concurrente](project_valida_cargue_concurrente.md) — 3 filas; reintento de red no recobra; PDF de lote ya no sigue el orden del XLSX
@@ -101,17 +120,20 @@
 - ⚠️⚠️ [Bandeja de solicitudes WA (Trappvel)](project_bandeja_wa_solicitudes.md) — 2 migraciones SIN aplicar: tablas → deploy → cron; llave al final
 - ⚠️ [Descripcion del gasto por WhatsApp (#861)](project_wa_gasto_descripcion.md) — flujo guiado recuerda el detalle (2026-09-30); wa-webhook se despliega aparte
 - ⚠️ [Fixture de producción bloquea el push](project_fixture_de_produccion_bloquea_push.md) — fixtures sintéticos a mano; SQL de config se prueba en PGlite
+- ⚠️ [SOE-012: banco en la factura exige leasing](project_cruce_banco_leasing.md) — tipo `entidad_financiera`; config SOENA SIN aplicar
 - [Frentes ya cerrados](indice_frentes_cerrados.md) — memorias de trabajo terminado, fuera del índice caliente
 
 ## Referencias
 
 - [Build en worktree sin una dependencia](reference_build_en_worktree.md) — copiar el paquete, no symlink (raíz de Turbopack)
+- [Comandos en worktree aislado](reference_worktree_aislado_comandos.md) — editar y mutar con python; git siempre simple
 - [Frentes secundarios](indice_frentes_secundarios.md) — ~145 entradas viejas: cobros, Valida, SOENA, recibos, Siigo, recetas; buscar ahí antes de crear
 
 ## Feedback
 
 - [Las cifras del brief caducan](feedback_cifras_del_brief_caducan.md) — se re-miden al hacer el QA
 - [Pruebas por mutación](feedback_pruebas_por_mutacion.md) — no creerle a una prueba hasta verla fallar
+- ⚠️ [El doble hace cumplir las llaves al escribir](feedback_doble_hace_cumplir_llaves.md) — cruzar contra database.ts; ciclos en null + UPDATE
 - [Medir antes de construir](feedback_medir_antes_de_construir.md) — las premisas se comprueban
 - [La referencia manda sobre el diseño](feedback_la_referencia_manda_sobre_el_diseno.md) — si el brief cita un artefacto real, ábrelo
 - ⚠️ [Rebasar el PR de otra sesión](feedback_rebase_pr_ajeno_mirar_reflog.md) — mirar el reflog de la rama local antes del force-push

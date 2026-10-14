@@ -1,0 +1,511 @@
+<!doctype html>
+<html lang="es"><head><meta charset="utf-8"><title>COT-2026-0026 · Europa en familia</title>
+<style>
+@page { size: A4; margin: 13mm 13mm 17mm; }
+@page :first { margin: 0; }
+:root { --ink:#1f1a2b; --mute:#6a6478; --line:#e6e1ec; --soft:#f4f0f7; --navy:#2b1840; --acc:#e63380; --tq:#1fa7bd; --grad:linear-gradient(90deg,#e63380,#8b4fa0 55%,#1fa7bd); --e:#1a93a8; --r:#e63380; --p:#7a4fa8; }
+* { box-sizing: border-box; }
+html { -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+body { margin:0; font-family: Inter, sans-serif; color: var(--ink); font-size: 9.6pt; line-height: 1.45; }
+h1,h2,h3,.mont { font-family: Montserrat, sans-serif; }
+h2 { font-size: 17pt; margin: 0 0 2mm; color: var(--navy); letter-spacing: -.2px; }
+h2 + .lead { color: var(--mute); margin: 0 0 5mm; font-size: 10pt; }
+h3 { font-size: 11.5pt; margin: 0 0 1.5mm; color: var(--navy); }
+.sec { break-before: page; }
+.nobr { break-inside: avoid; }
+.kicker { font: 600 7.5pt Montserrat, sans-serif; letter-spacing: 1.6px; text-transform: uppercase; color: var(--acc); }
+.muted { color: var(--mute); }
+.small { font-size: 8.2pt; }
+.money { font-variant-numeric: tabular-nums; white-space: nowrap; }
+.tag { display:inline-block; font: 700 6.8pt Montserrat, sans-serif; letter-spacing: .8px; text-transform: uppercase; padding: .6mm 2mm; border-radius: 1mm; color:#fff; }
+.tE { background: var(--e); } .tR { background: var(--r); } .tP { background: var(--p); }
+.cE { color: var(--e); } .cR { color: var(--r); } .cP { color: var(--p); }
+
+/* Portada */
+.cover { width: 210mm; height: 297mm; position: relative; overflow: hidden; color: #fff; background: var(--navy); }
+.cover .mosaic { position:absolute; inset:0 0 auto 0; height: 168mm; display:grid; grid-template-columns: 1.3fr 1fr; grid-template-rows: 1fr 1fr; gap: 1.2mm; }
+.cover .mosaic div { background-size: cover; background-position: center; position: relative; }
+.cover .mosaic div:first-child { grid-row: span 2; }
+.cover .mosaic span { position:absolute; left: 3mm; bottom: 2.5mm; font: 600 6.5pt Montserrat; letter-spacing: 1.2px; text-transform: uppercase; text-shadow: 0 0 4px rgba(0,0,0,.7); }
+.cover .shade { position:absolute; left:0; right:0; top: 120mm; height: 50mm; background: linear-gradient(transparent, var(--navy)); }
+.cover .body { position:absolute; left: 16mm; right: 16mm; top: 150mm; }
+.cover .brand { position:absolute; top: 11mm; left: 15mm; } .cover .brand img { height: 10mm; display:block; filter: drop-shadow(0 0 2.5mm rgba(0,0,0,.55)); }
+.cover::after { content:""; position:absolute; left:0; right:0; bottom:0; height: 2.5mm; background: var(--grad); }
+.gbar { height: 1.2mm; width: 28mm; background: var(--grad); border-radius: 1mm; margin-bottom: 3mm; }
+.cover .code { position:absolute; top: 13mm; right: 16mm; font: 600 8pt Montserrat; letter-spacing: 1px; text-shadow: 0 0 6px rgba(0,0,0,.6); }
+.cover h1 { font-size: 27pt; line-height: 1.08; margin: 3mm 0 3mm; letter-spacing: -.5px; }
+.cover .para { font-size: 10.5pt; opacity: .9; max-width: 160mm; margin: 0; }
+.cover .facts { display:grid; grid-template-columns: repeat(4, 1fr); gap: 4mm; margin-top: 8mm; border-top: 1px solid rgba(255,255,255,.25); padding-top: 4mm; }
+.cover .facts b { display:block; font: 600 6.8pt Montserrat; letter-spacing: 1.3px; text-transform: uppercase; opacity: .7; margin-bottom: 1mm; }
+.cover .facts div { font-size: 9.5pt; }
+.cover .who { position:absolute; left:16mm; right:16mm; bottom: 12mm; display:flex; justify-content: space-between; font-size: 8.3pt; opacity: .85; }
+
+/* Ruta */
+.route { display:flex; align-items: stretch; margin: 4mm 0 6mm; }
+.stop { flex: 1; text-align: center; position: relative; }
+.stop .dot { width: 9mm; height: 9mm; border-radius: 50%; margin: 0 auto 1.5mm; background: var(--navy); color:#fff; font: 700 8pt Montserrat; display:flex; align-items:center; justify-content:center; }
+.stop.home .dot { background: #fff; color: var(--navy); border: 2px solid var(--navy); }
+.stop .city { font: 700 9.5pt Montserrat; color: var(--navy); }
+.stop .when { font-size: 7.8pt; color: var(--mute); }
+.leg { flex: .9; display:flex; flex-direction: column; align-items:center; justify-content: flex-start; padding-top: 2mm; }
+.leg .bar { width: 100%; border-top: 2px dashed #9fb0bd; margin-bottom: 1mm; }
+.leg .bar.train { border-top: 3px solid #9fb0bd; }
+.leg .ico { font-size: 11pt; line-height: 1; }
+.leg .lbl { font-size: 7.2pt; color: var(--mute); text-align:center; line-height: 1.25; }
+.photo-row { display:grid; grid-template-columns: repeat(4,1fr); gap: 2mm; margin-bottom: 6mm; }
+.photo-row div { height: 30mm; border-radius: 1.5mm; background-size: cover; background-position: center; }
+
+/* Tarifas */
+.tarifas { display:grid; grid-template-columns: repeat(3, 1fr); gap: 3mm; }
+.tf { border: 1px solid var(--line); border-radius: 2.5mm; padding: 4mm 4mm 3mm; position: relative; }
+.tf.rec { border: 2px solid var(--r); box-shadow: 0 1mm 4mm rgba(230,51,128,.18); }
+.tf .name { font: 800 12pt Montserrat; }
+.tf .badge { position:absolute; top: -3mm; right: 4mm; }
+.tf .price { font: 800 17pt Montserrat; margin: 2mm 0 0; letter-spacing: -.4px; }
+.tf .pp { font-size: 7.8pt; color: var(--mute); margin-bottom: 3mm; }
+.tf .row { border-top: 1px solid var(--line); padding: 1.6mm 0; font-size: 8.4pt; }
+.tf .row b { display:block; font: 600 6.6pt Montserrat; letter-spacing: 1px; text-transform: uppercase; color: var(--mute); }
+.stars { color: #c9962a; letter-spacing: .5px; font-size: 7.5pt; }
+.flag { font-size: 7.6pt; color: #9a3412; }
+.igual { margin-top: 5mm; background: var(--soft); border-radius: 2.5mm; padding: 4mm 5mm; }
+.igual ul { margin: 1mm 0 0; padding-left: 4.5mm; columns: 2; column-gap: 8mm; }
+.igual li { margin-bottom: 1mm; break-inside: avoid; }
+
+/* Día a día */
+.day { display:grid; grid-template-columns: 22mm 1fr; gap: 4mm; padding: 2.6mm 0; border-bottom: 1px solid var(--line); break-inside: avoid; }
+.day .d { font: 800 15pt Montserrat; color: var(--navy); line-height: 1; }
+.day .d small { display:block; font: 600 7pt Montserrat; letter-spacing: 1px; text-transform: uppercase; color: var(--mute); margin-top: 1mm; }
+.day .t { font: 700 10pt Montserrat; color: var(--navy); margin-bottom: .8mm; }
+.day .t .city { color: var(--acc); font-weight: 600; font-size: 8pt; letter-spacing: 1px; text-transform: uppercase; margin-left: 2mm; }
+.ev { display:grid; grid-template-columns: 12mm 5mm 1fr; gap: 1mm; font-size: 8.8pt; margin: .5mm 0; }
+.ev .h { color: var(--mute); font-variant-numeric: tabular-nums; }
+.ev .i { text-align:center; }
+.opt3 { display:grid; grid-template-columns: repeat(3, 1fr); gap: 2mm; margin-top: 1mm; font-size: 7.9pt; }
+.opt3 div { background: var(--soft); border-radius: 1.2mm; padding: 1.2mm 2mm; }
+.free { color: var(--mute); font-style: italic; font-size: 8.6pt; }
+.warnbox { background: #fdeef5; border-left: 3px solid var(--acc); padding: 1.5mm 3mm; font-size: 8.2pt; margin-top: 1mm; }
+
+/* Hoteles */
+.cityhead { display:flex; justify-content: space-between; align-items: baseline; margin: 3.5mm 0 1.8mm; border-bottom: 2px solid var(--navy); padding-bottom: 1mm; }
+.cityhead .mont { font: 800 13pt Montserrat; color: var(--navy); }
+.hotels { display:grid; grid-template-columns: repeat(3,1fr); gap: 3mm; break-inside: avoid; }
+.hc { border: 1px solid var(--line); border-radius: 2mm; overflow: hidden; font-size: 8.2pt; }
+.hc.rec { border: 2px solid var(--r); }
+.hc .img { height: 42mm; background-size: cover; background-position: center; position: relative; }
+.hc .img .tag { position:absolute; top: 2mm; left: 2mm; }
+.hc .img .zone { position:absolute; bottom: 0; left:0; right:0; padding: 4mm 2mm 1mm; font-size: 6.6pt; color: #fff; background: linear-gradient(transparent, rgba(0,0,0,.65)); }
+.hc .b { padding: 1.8mm 2.5mm 2mm; line-height: 1.35; }
+.hc .n { font: 700 9.2pt Montserrat; color: var(--navy); line-height: 1.2; }
+.hc .p { font: 800 10pt Montserrat; margin-top: 1.2mm; }
+.hc .ok { color: #2f6b47; } .hc .no { color: #9a3412; }
+
+/* Tablas */
+table { width: 100%; border-collapse: collapse; font-size: 8.5pt; }
+th { text-align:left; font: 600 6.8pt Montserrat; letter-spacing: 1px; text-transform: uppercase; color: var(--mute); border-bottom: 1.5px solid var(--navy); padding: 1.5mm 1.5mm; }
+td { border-bottom: 1px solid var(--line); padding: 1.8mm 1.5mm; vertical-align: top; }
+td.r, th.r { text-align: right; }
+tr.sub td { background: var(--soft); font: 700 8pt Montserrat; color: var(--navy); }
+.fl { font: 700 8.5pt Montserrat; }
+.two { display:grid; grid-template-columns: 1fr 1fr; gap: 6mm; }
+.pay { display:grid; grid-template-columns: repeat(3,1fr); gap: 3mm; margin: 3mm 0 4mm; }
+.pay div { background: var(--soft); border-radius: 2mm; padding: 3mm; }
+.pay .v { font: 800 13pt Montserrat; color: var(--navy); }
+.list li { margin-bottom: 1.2mm; }
+.sign { margin-top: 8mm; display:flex; justify-content: space-between; align-items: flex-end; }
+.credits { font-size: 6.6pt; color: var(--mute); margin-top: 6mm; line-height: 1.35; }
+.ic { width: 3.6mm; height: 3.6mm; vertical-align: -0.7mm; color: var(--navy); }
+.leg .ic { width: 4.5mm; height: 4.5mm; color: #7d909e; }
+.ev .i .ic { color: var(--acc); }
+td .ic { color: var(--acc); margin-right: .8mm; }
+.cover .mosaic span { left:auto; bottom:auto; right: 3mm; top: 3mm; }
+.cover .mosaic div:first-child span { top: 26mm; left: 16mm; right: auto; }
+.cover .mosaic div:nth-child(2) span { top: auto; bottom: 3mm; }
+.opcs { display:grid; grid-template-columns: repeat(4,1fr); gap: 3mm; }
+.oc { border:1px solid var(--line); border-radius:2mm; overflow:hidden; font-size:8pt; break-inside: avoid; display:flex; flex-direction:column; }
+.oc .img { height: 30mm; background-size:cover; background-position:center; position:relative; }
+.oc .where { position:absolute; left:0; right:0; bottom:0; padding: 4mm 2mm 1mm; color:#fff; font: 600 6.5pt Montserrat; letter-spacing:1px; text-transform:uppercase; background: linear-gradient(transparent, rgba(0,0,0,.65)); }
+.oc .b { padding: 2mm 2.4mm; display:flex; flex-direction:column; flex:1; line-height:1.35; }
+.oc .n { font: 700 9pt Montserrat; color: var(--navy); margin-bottom: .8mm; }
+.oc .foot { margin-top:auto; padding-top: 1.5mm; display:flex; justify-content:space-between; align-items:baseline; }
+.oc .pr { font: 800 9pt Montserrat; color: var(--acc); }
+.cta { margin-top: 5mm; background: var(--navy); color:#fff; border-radius: 3mm; padding: 5mm 6mm; display:grid; grid-template-columns: 1.15fr 1fr; gap: 5mm; align-items:center; break-inside: avoid; }
+.ctt { font: 700 12.5pt Montserrat; line-height:1.25; margin: 1.5mm 0 2mm; }
+.btns { display:flex; flex-direction:column; gap: 2mm; }
+.btn { display:flex; justify-content:space-between; align-items:center; text-decoration:none; color:#fff; border-radius: 2mm; padding: 2.6mm 4mm; font-size: 8.2pt; }
+.btn b { font: 800 9.5pt Montserrat; }
+.bE { background: var(--e); } .bR { background: var(--r); box-shadow: 0 0 0 1.2px #fff inset; } .bP { background: var(--p); }
+.hls { display:grid; grid-template-columns: 1fr 1fr; gap: 4mm; margin-top: 2mm; }
+.hl { border-radius: 3mm; overflow:hidden; background: var(--soft); break-inside: avoid; }
+.hl .img { height: 62mm; background-size: cover; position: relative; }
+.hl .ct { position:absolute; left: 3mm; top: 3mm; background: rgba(43,24,64,.82); color:#fff; font: 700 6.8pt Montserrat; letter-spacing: 1.2px; text-transform: uppercase; padding: 1mm 2.2mm; border-radius: 1mm; }
+.hl .tx { padding: 3mm 4mm 4mm; border-top: 1.2mm solid; border-image: var(--grad) 1; }
+.hl h3 { font-size: 12.5pt; margin-bottom: 1mm; }
+.hl p { margin: 0; font-size: 9pt; color: var(--ink); }
+</style></head><body>
+<svg width="0" height="0" style="position:absolute"><defs>
+<symbol id="plane" viewBox="0 0 24 24"><path d="M21 16v-2l-8-5V3.5a1.5 1.5 0 0 0-3 0V9l-8 5v2l8-2.5V19l-2 1.5V22l3.5-1 3.5 1v-1.5L13 19v-5.5z" fill="currentColor"/></symbol>
+<symbol id="train" viewBox="0 0 24 24"><path d="M12 2c-4 0-8 .5-8 4v9.5A3.5 3.5 0 0 0 7.5 19L6 20.5v.5h12v-.5L16.5 19a3.5 3.5 0 0 0 3.5-3.5V6c0-3.5-4-4-8-4zM7.5 17a1.5 1.5 0 1 1 0-3 1.5 1.5 0 0 1 0 3zM11 10H6V6h5zm5.5 7a1.5 1.5 0 1 1 0-3 1.5 1.5 0 0 1 0 3zm1.5-7h-5V6h5z" fill="currentColor"/></symbol>
+<symbol id="van" viewBox="0 0 24 24"><path d="M3 6h11l4 4h3v6h-2a2.5 2.5 0 0 1-5 0H9a2.5 2.5 0 0 1-5 0H3zm2 2v3h4V8zm6 0v3h5l-3-3z" fill="currentColor"/></symbol>
+<symbol id="bed" viewBox="0 0 24 24"><path d="M3 7v12h2v-3h14v3h2v-7a3 3 0 0 0-3-3h-7v5H5V7zm4 1a2 2 0 1 0 0 4 2 2 0 0 0 0-4z" fill="currentColor"/></symbol>
+<symbol id="tk" viewBox="0 0 24 24"><path d="M3 7a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2v3a2 2 0 0 0 0 4v3a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-3a2 2 0 0 0 0-4zm11 0v2h2V7zm0 4v2h2v-2zm0 4v2h2v-2z" fill="currentColor"/></symbol>
+<symbol id="sun" viewBox="0 0 24 24"><circle cx="12" cy="12" r="4.5" fill="currentColor"/><g stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M12 2v2.5M12 19.5V22M2 12h2.5M19.5 12H22M4.9 4.9l1.8 1.8M17.3 17.3l1.8 1.8M4.9 19.1l1.8-1.8M17.3 6.7l1.8-1.8"/></g></symbol>
+<symbol id="bag" viewBox="0 0 24 24"><path d="M9 3h6v3h3a2 2 0 0 1 2 2v11a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h3zm2 2v1h2V5z" fill="currentColor"/></symbol>
+</defs></svg>
+
+<!-- ═══ PORTADA ═══ -->
+<section class="cover">
+  <div class="mosaic">
+    <div style="background-image:url(fotos/c_madrid.jpg)"><span>Madrid · Gran Vía en invierno</span></div>
+    <div style="background-image:url(fotos/c_par.jpg)"><span>París · Pont Alexandre III</span></div>
+    <div style="background-image:url(fotos/c_ams.jpg)"><span>Ámsterdam · Nieuwe Keizersgracht</span></div>
+  </div>
+  <div class="shade"></div>
+  <div class="brand"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 120 24" style="height:10mm;display:block"><text x="0" y="19" font-family="Montserrat" font-weight="800" font-size="20" fill="#ffffff">AGENCIA</text></svg></div>
+  <div class="code">PROPUESTA COT-2026-0026</div>
+  <div class="body">
+    <div class="kicker" style="color:#ff8fbf">Propuesta de viaje para Laura Ocampo y familia</div>
+    <h1>Europa en familia:<br>Madrid, Barcelona, París y Ámsterdam</h1>
+    <p class="para">Trece noches de museos, trenes y calles con luces de Navidad, pensadas para viajar cómodos con Martín e Isabela. Lo armamos día por día para que ustedes solo tengan que disfrutarlo.</p>
+    <div class="facts">
+      <div><b>Viajeros</b>Laura, Juan Camilo, Martín (8) e Isabela (1)</div>
+      <div><b>Fechas</b>Jue 10 dic – mié 23 dic 2026</div>
+      <div><b>Duración</b>14 días · 13 noches</div>
+      <div><b>Incluye</b>Vuelos, 13 noches, 3 trenes, 8 traslados y 4 visitas</div>
+    </div>
+  </div>
+  <div class="who"><span>Preparada por Asesora de Ejemplo · Director Comercial</span><span>Precios sujetos a disponibilidad al reservar</span></div>
+</section>
+
+<!-- 1 -->
+<section>
+  <div class="gbar"></div>
+  <div class="kicker">1 · Lo que van a vivir</div>
+  <h2>Una Navidad en Europa que van a contar por años</h2>
+  <p class="lead">Cuatro ciudades encendidas para diciembre, una tras otra, sin aeropuertos de por medio: de centro a centro en tren, con los niños mirando por la ventana.</p>
+<div class="route">
+    <div class="stop home"><div class="dot">BOG</div><div class="city">Bogotá</div><div class="when">sale jue 10</div></div>
+    <div class="leg"><div class="bar"></div><div class="ico"><svg class="ic" viewBox="0 0 24 24"><use href="#plane"/></svg></div><div class="lbl">vuelo nocturno</div></div>
+    <div class="stop"><div class="dot">3n</div><div class="city">Madrid</div><div class="when">11 – 14 dic</div></div>
+    <div class="leg"><div class="bar train"></div><div class="ico"><svg class="ic" viewBox="0 0 24 24"><use href="#train"/></svg></div><div class="lbl">AVE · 2 h 45</div></div>
+    <div class="stop"><div class="dot">3n</div><div class="city">Barcelona</div><div class="when">14 – 17 dic</div></div>
+    <div class="leg"><div class="bar train"></div><div class="ico"><svg class="ic" viewBox="0 0 24 24"><use href="#train"/></svg></div><div class="lbl">TGV · 6 h 36</div></div>
+    <div class="stop"><div class="dot">4n</div><div class="city">París</div><div class="when">17 – 21 dic</div></div>
+    <div class="leg"><div class="bar train"></div><div class="ico"><svg class="ic" viewBox="0 0 24 24"><use href="#train"/></svg></div><div class="lbl">Eurostar · 3 h 17</div></div>
+    <div class="stop"><div class="dot">2n</div><div class="city">Ámsterdam</div><div class="when">21 – 23 dic</div></div>
+    <div class="leg"><div class="bar"></div><div class="ico"><svg class="ic" viewBox="0 0 24 24"><use href="#plane"/></svg></div><div class="lbl">regreso</div></div>
+    <div class="stop home"><div class="dot">BOG</div><div class="city">Bogotá</div><div class="when">llega mié 23</div></div>
+  </div>
+
+    <div class="hls">
+<div class="hl"><div class="img" style="background-image:url(fotos/catalonia.jpg);background-position:center 40%"><span class="ct">Madrid · 3 noches</span></div><div class="tx"><h3>Navidad en la Puerta del Sol</h3><p>Llegan cuando Madrid enciende sus luces. El Prado con guía en español, y chocolate con churros a dos cuadras del hotel.</p></div></div>
+<div class="hl"><div class="img" style="background-image:url(fotos/hl_bcn.jpg);background-position:center 20%"><span class="ct">Barcelona · 3 noches</span></div><div class="tx"><h3>Gaudí desde las torres</h3><p>Suben a las torres de la Sagrada Familia y caminan el Passeig de Gràcia entre casas que parecen sacadas de un cuento.</p></div></div>
+<div class="hl"><div class="img" style="background-image:url(fotos/c_par.jpg);background-position:center"><span class="ct">París · 4 noches</span></div><div class="tx"><h3>París a sus pies</h3><p>Suben a la cumbre de la Torre Eiffel al atardecer y bajan con la torre encendida. Y si Martín se anima, un día entero en Disney.</p></div></div>
+<div class="hl"><div class="img" style="background-image:url(fotos/c_ams.jpg);background-position:center"><span class="ct">Ámsterdam · 2 noches</span></div><div class="tx"><h3>Canales antes de volver</h3><p>Recorren los canales en barco y se despiden de Europa entre luces de invierno, para llegar a Bogotá a tiempo para Navidad.</p></div></div>
+  </div>
+</section>
+
+<section class="sec">
+  <div class="gbar"></div><div class="kicker">2 · Día a día</div>
+  <h2>Así se ve cada día</h2>
+  <p class="lead">Lo que está en negrilla ya está incluido. Los días libres los pueden llenar con los planes opcionales del final, o simplemente caminar.</p>
+
+  <div class="day"><div class="d">10<small>jue · dic</small></div><div>
+    <div class="t">Salida desde Bogotá <span class="city">Bogotá</span></div>
+    <div class="ev"><span class="h">3 h antes</span><span class="i"><svg class="ic" viewBox="0 0 24 24"><use href="#bag"/></svg></span><span>Llegada a El Dorado con pasaportes de los cuatro. Al viajar con papá y mamá, los niños no necesitan permiso de salida.</span></div>
+    <div class="opt3"><div><span class="cE fl">Económica</span><br>Avianca 19:20, directo</div><div><span class="cR fl">Recomendada</span><br>Air France 18:45, vía París</div><div><span class="cP fl">Superior</span><br>Iberia 16:55, directo</div></div>
+  </div></div>
+
+  <div class="day"><div class="d">11<small>vie · dic</small></div><div>
+    <div class="t">Llegada a Madrid <span class="city">Madrid</span></div>
+    <div class="opt3"><div><span class="cE fl">Económica</span><br>llega 11:15</div><div><span class="cR fl">Recomendada</span><br>llega 16:10</div><div><span class="cP fl">Superior</span><br>llega 08:45</div></div>
+    <div class="ev"><span class="h">al llegar</span><span class="i"><svg class="ic" viewBox="0 0 24 24"><use href="#van"/></svg></span><span>Traslado privado Barajas → hotel. El conductor espera en llegadas con un cartel.</span></div>
+    <div class="ev"><span class="h">tarde</span><span class="i"><svg class="ic" viewBox="0 0 24 24"><use href="#bed"/></svg></span><span>Instalación en el hotel y paseo corto por la Puerta del Sol iluminada.</span></div>
+  </div></div>
+
+  <div class="day"><div class="d">12<small>sáb · dic</small></div><div>
+    <div class="t">Arte para toda la familia <span class="city">Madrid</span></div>
+    <div class="ev"><span class="h">10:00</span><span class="i"><svg class="ic" viewBox="0 0 24 24"><use href="#tk"/></svg></span><span>Visita guiada al Museo del Prado en español, entrada sin filas · 2 h. <b>Incluida.</b></span></div>
+    <div class="ev"><span class="h">tarde</span><span class="i"><svg class="ic" viewBox="0 0 24 24"><use href="#sun"/></svg></span><span class="free">Sugerencia: Parque del Retiro y el Palacio de Cristal.</span></div>
+  </div></div>
+
+  <div class="day"><div class="d">13<small>dom · dic</small></div><div>
+    <div class="t">Día libre <span class="city">Madrid</span></div>
+    <div class="ev"><span class="h"></span><span class="i"><svg class="ic" viewBox="0 0 24 24"><use href="#sun"/></svg></span><span class="free">Libre para ustedes. <b>Opcional:</b> Palacio Real o el tour del Bernabéu con Martín (ver «Planes para agregar»).</span></div>
+  </div></div>
+
+  <div class="day"><div class="d">14<small>lun · dic</small></div><div>
+    <div class="t">En tren a Barcelona <span class="city">Madrid → Barcelona</span></div>
+    <div class="ev"><span class="h">08:15</span><span class="i"><svg class="ic" viewBox="0 0 24 24"><use href="#van"/></svg></span><span>Traslado privado hotel → estación Puerta de Atocha.</span></div>
+    <div class="ev"><span class="h">09:30</span><span class="i"><svg class="ic" viewBox="0 0 24 24"><use href="#train"/></svg></span><span>Tren AVE 03071 de Renfe, clase Estándar · llega a Barcelona Sants a las 12:15.</span></div>
+    <div class="ev"><span class="h">12:45</span><span class="i"><svg class="ic" viewBox="0 0 24 24"><use href="#van"/></svg></span><span>Traslado compartido Sants → hotel.</span></div>
+  </div></div>
+
+  <div class="day"><div class="d">15<small>mar · dic</small></div><div>
+    <div class="t">Gaudí <span class="city">Barcelona</span></div>
+    <div class="ev"><span class="h">11:30</span><span class="i"><svg class="ic" viewBox="0 0 24 24"><use href="#tk"/></svg></span><span>Sagrada Familia, visita guiada en español con subida a las torres · 1 h 30. <b>Incluida.</b></span></div>
+    <div class="ev"><span class="h">tarde</span><span class="i"><svg class="ic" viewBox="0 0 24 24"><use href="#sun"/></svg></span><span class="free">Sugerencia: Passeig de Gràcia, Casa Batlló por fuera y el mercado de Navidad de la Catedral.</span></div>
+  </div></div>
+
+  <div class="day"><div class="d">16<small>mié · dic</small></div><div>
+    <div class="t">Día libre <span class="city">Barcelona</span></div>
+    <div class="ev"><span class="h"></span><span class="i"><svg class="ic" viewBox="0 0 24 24"><use href="#sun"/></svg></span><span class="free">Libre para ustedes. <b>Opcional:</b> Park Güell con guía o el Aquàrium con los niños.</span></div>
+  </div></div>
+
+  <div class="day"><div class="d">17<small>jue · dic</small></div><div>
+    <div class="t">En tren a París <span class="city">Barcelona → París</span></div>
+    <div class="ev"><span class="h">08:20</span><span class="i"><svg class="ic" viewBox="0 0 24 24"><use href="#van"/></svg></span><span>Traslado compartido hotel → Barcelona Sants.</span></div>
+    <div class="ev"><span class="h">09:25</span><span class="i"><svg class="ic" viewBox="0 0 24 24"><use href="#train"/></svg></span><span>Tren TGV INOUI 9714, segunda clase · llega a Paris Gare de Lyon a las 16:01.</span></div>
+    <div class="ev"><span class="h">16:30</span><span class="i"><svg class="ic" viewBox="0 0 24 24"><use href="#van"/></svg></span><span>Traslado privado Gare de Lyon → hotel, con silla de bebé.</span></div>
+  </div></div>
+
+  <div class="day"><div class="d">18<small>vie · dic</small></div><div>
+    <div class="t">La Torre Eiffel <span class="city">París</span></div>
+    <div class="ev"><span class="h">15:00</span><span class="i"><svg class="ic" viewBox="0 0 24 24"><use href="#tk"/></svg></span><span>Acceso a la cumbre de la Torre Eiffel en ascensor, con guía en español · 2 h. <b>Incluida.</b> Al bajar ya están encendidas las luces.</span></div>
+  </div></div>
+
+  <div class="day"><div class="d">19<small>sáb · dic</small></div><div>
+    <div class="t">Día para Martín <span class="city">París</span></div>
+    <div class="ev"><span class="h">todo el día</span><span class="i"><svg class="ic" viewBox="0 0 24 24"><use href="#tk"/></svg></span><span><b>Opcional:</b> Disneyland Paris, un día en los dos parques. Si no lo toman, día libre en París.</span></div>
+  </div></div>
+
+  <div class="day"><div class="d">20<small>dom · dic</small></div><div>
+    <div class="t">Día libre <span class="city">París</span></div>
+    <div class="ev"><span class="h"></span><span class="i"><svg class="ic" viewBox="0 0 24 24"><use href="#sun"/></svg></span><span class="free">Libre para ustedes. <b>Opcional:</b> el Louvre en familia o un crucero con cena por el Sena.</span></div>
+  </div></div>
+
+  <div class="day"><div class="d">21<small>lun · dic</small></div><div>
+    <div class="t">En tren a Ámsterdam <span class="city">París → Ámsterdam</span></div>
+    <div class="ev"><span class="h">09:15</span><span class="i"><svg class="ic" viewBox="0 0 24 24"><use href="#van"/></svg></span><span>Traslado privado hotel → Paris Gare du Nord (hay que estar 45 min antes del Eurostar).</span></div>
+    <div class="ev"><span class="h">10:25</span><span class="i"><svg class="ic" viewBox="0 0 24 24"><use href="#train"/></svg></span><span>Eurostar 9325, clase Standard · llega a Amsterdam Centraal a las 13:42.</span></div>
+    <div class="ev"><span class="h">14:00</span><span class="i"><svg class="ic" viewBox="0 0 24 24"><use href="#van"/></svg></span><span>Traslado privado Centraal → hotel.</span></div>
+  </div></div>
+
+  <div class="day"><div class="d">22<small>mar · dic</small></div><div>
+    <div class="t">Canales <span class="city">Ámsterdam</span></div>
+    <div class="ev"><span class="h">11:00</span><span class="i"><svg class="ic" viewBox="0 0 24 24"><use href="#tk"/></svg></span><span>Paseo en barco por los canales, audioguía en español · 1 h 15. <b>Incluido.</b></span></div>
+    <div class="ev"><span class="h">tarde</span><span class="i"><svg class="ic" viewBox="0 0 24 24"><use href="#sun"/></svg></span><span class="free"><b>Opcional:</b> molinos de Zaanse Schans por la tarde, o Vondelpark y el festival de luces.</span></div>
+  </div></div>
+
+  <div class="day"><div class="d">23<small>mié · dic</small></div><div>
+    <div class="t">Regreso a casa para Navidad <span class="city">Ámsterdam → Bogotá</span></div>
+    <div class="opt3"><div><span class="cE fl">Económica</span><br>Iberia 06:25 vía Madrid · llega 15:45</div><div><span class="cR fl">Recomendada</span><br>Lufthansa 07:10 vía Frankfurt · llega 15:05</div><div><span class="cP fl">Superior</span><br>KLM 10:05 directo · llega 15:20</div></div>
+    <div class="ev"><span class="h">3 h antes</span><span class="i"><svg class="ic" viewBox="0 0 24 24"><use href="#van"/></svg></span><span>Traslado privado hotel → Schiphol. Recogida tres horas antes del vuelo.</span></div>
+    <div class="warnbox">La hora de recogida la ajustamos al vuelo que elijan: con Económica o Recomendada es de madrugada (03:25 o 04:10). Si prefieren dormir, la de KLM permite salir del hotel a las 07:05.</div>
+  </div></div>
+</section>
+
+<section class="sec">
+  <div class="gbar"></div><div class="kicker">3 · Dónde duermen</div>
+  <h2>Hoteles en Madrid y Barcelona</h2>
+  <p class="lead">En todos: desayuno incluido, una habitación familiar para los cuatro y cuna para Isabela. Cada ciudad tiene un hotel por versión del viaje; la etiqueta de color les dice cuál.</p>
+
+  <div class="nobr">
+  <div class="cityhead"><span class="mont">Madrid</span><span class="muted small">vie 11 – lun 14 dic · 3 noches</span></div>
+  <div class="hotels">
+    <div class="hc"><div class="img" style="background-image:url(fotos/ibis_mad.jpg)"><span class="tag tE">Económica</span><span class="zone">La zona: Plaza de Santa Ana, a 2 cuadras</span></div><div class="b"><div class="n">Ibis Styles Madrid Prado</div><span class="stars">★★★</span> · Barrio de las Letras<br>Habitación familiar<br><span class="ok">Cancelación gratis hasta el 4 dic</span></div></div>
+    <div class="hc rec"><div class="img" style="background-image:url(fotos/catalonia.jpg)"><span class="tag tR">Recomendada</span><span class="zone">La zona: Puerta del Sol, a una cuadra</span></div><div class="b"><div class="n">Catalonia Puerta del Sol</div><span class="stars">★★★★</span> · Sol · piscina<br>Habitación familiar (2 + 2)<br><span class="ok">Cancelación gratis hasta el 1 dic</span></div></div>
+    <div class="hc"><div class="img" style="background-image:url(fotos/ingles.jpg)"><span class="tag tP">Superior</span></div><div class="b"><div class="n">Gran Hotel Inglés</div><span class="stars">★★★★★</span> · Barrio de las Letras · spa<br>Junior suite familiar<br><span class="no">No reembolsable</span></div></div>
+  </div></div>
+
+  <div class="nobr">
+  <div class="cityhead"><span class="mont">Barcelona</span><span class="muted small">lun 14 – jue 17 dic · 3 noches</span></div>
+  <div class="hotels">
+    <div class="hc"><div class="img" style="background-image:url(fotos/ibis_bcn.jpg);background-position:center 30%"><span class="tag tE">Económica</span></div><div class="b"><div class="n">Ibis Barcelona Centro (Sagrada Familia)</div><span class="stars">★★★</span> · Eixample · metro a 50 m<br>Habitación triple<br><span class="ok">Cancelación gratis hasta el 10 dic</span></div></div>
+    <div class="hc rec"><div class="img" style="background-image:url(fotos/h10.jpg)"><span class="tag tR">Recomendada</span></div><div class="b"><div class="n">H10 Metropolitan</div><span class="stars">★★★★</span> · Rambla de Catalunya · terraza<br>Habitación familiar<br><span class="ok">Cancelación gratis hasta el 7 dic</span><br><span class="muted">Tasa turística en el hotel: 41,28 EUR</span></div></div>
+    <div class="hc"><div class="img" style="background-image:url(fotos/majestic.jpg)"><span class="tag tP">Superior</span></div><div class="b"><div class="n">Hotel Majestic</div><span class="stars">★★★★★</span> · Passeig de Gràcia · spa<br>Suite familiar<br><span class="ok">Cancelación gratis hasta el 30 nov</span></div></div>
+  </div></div>
+
+</section>
+<section class="sec">
+  <div class="gbar"></div><div class="kicker">3 · Dónde duermen</div>
+  <h2>Hoteles en París y Ámsterdam</h2>
+  <div class="nobr">
+  <div class="cityhead"><span class="mont">París</span><span class="muted small">jue 17 – lun 21 dic · 4 noches</span></div>
+  <div class="hotels">
+    <div class="hc"><div class="img" style="background-image:url(fotos/ibis_par.jpg)"><span class="tag tE">Económica</span><span class="zone">La zona: metro Cambronne, frente al hotel</span></div><div class="b"><div class="n">Ibis Paris Tour Eiffel Cambronne</div><span class="stars">★★★</span> · distrito 15<br>Habitación familiar<br><span class="ok">Cancelación gratis hasta el 14 dic</span><br><span class="muted">Tasa de estancia en el hotel: 18,50 EUR</span></div></div>
+    <div class="hc rec"><div class="img" style="background-image:url(fotos/pullman.jpg)"><span class="tag tR">Recomendada</span></div><div class="b"><div class="n">Pullman Paris Tour Eiffel</div><span class="stars">★★★★</span> · al pie de la Torre Eiffel<br>Habitación familiar deluxe<br><span class="ok">Cancelación gratis hasta el 10 dic</span><br><span class="muted">Tasa de estancia en el hotel: 46 EUR</span></div></div>
+    <div class="hc"><div class="img" style="background-image:url(fotos/meurice.jpg)"><span class="tag tP">Superior</span></div><div class="b"><div class="n">Le Meurice</div><span class="stars">★★★★★</span> · frente a las Tullerías<br>Suite familiar<br><span class="no">No reembolsable</span></div></div>
+  </div></div>
+
+  <div class="nobr">
+  <div class="cityhead"><span class="mont">Ámsterdam</span><span class="muted small">lun 21 – mié 23 dic · 2 noches</span></div>
+  <div class="hotels">
+    <div class="hc"><div class="img" style="background-image:url(fotos/ibis_ams.jpg)"><span class="tag tE">Económica</span></div><div class="b"><div class="n">Ibis Amsterdam Centre</div><span class="stars">★★★</span> · junto a Centraal<br>Habitación familiar<br><span class="ok">Cancelación gratis hasta el 18 dic</span></div></div>
+    <div class="hc rec"><div class="img" style="background-image:url(fotos/parkplaza.jpg)"><span class="tag tR">Recomendada</span></div><div class="b"><div class="n">Park Plaza Victoria</div><span class="stars">★★★★</span> · Damrak · piscina<br>Habitación familiar superior<br><span class="ok">Cancelación gratis hasta el 16 dic</span><br><span class="muted">Tasa turística en el hotel: 12,5 % de la habitación</span></div></div>
+    <div class="hc"><div class="img" style="background-image:url(fotos/waldorf.jpg)"><span class="tag tP">Superior</span></div><div class="b"><div class="n">Waldorf Astoria Amsterdam</div><span class="stars">★★★★★</span> · Herengracht · spa<br>Deluxe familiar vista al canal<br><span class="no">No reembolsable</span></div></div>
+  </div></div>
+</section>
+
+<section class="sec">
+  <div class="gbar"></div><div class="kicker">4 · Vuelos</div>
+  <h2>Ida y regreso</h2>
+  <p class="lead">Llegan a Madrid y regresan desde Ámsterdam. Isabela viaja en brazos con tiquete de infante.</p>
+  <table class="nobr">
+    <tr><th style="width:22mm">Tarifa</th><th>Vuelo</th><th>Horario</th><th>Equipaje</th><th>Cambios</th></tr>
+    <tr class="sub"><td colspan="5">Ida · Bogotá → Madrid · jueves 10 de diciembre</td></tr>
+    <tr><td><span class="tag tE">Económica</span></td><td><span class="fl">Avianca AV26</span><br>directo · 9 h 55</td><td>19:20 → 11:15 <span class="muted">(+1)</span></td><td>23 kg incluida</td><td>Con cargo; sin reembolso</td></tr>
+    <tr><td><span class="tag tR">Recomendada</span></td><td><span class="fl">Air France AF423 + AF1300</span><br>escala de 2 h 10 en París CDG</td><td>18:45 → 16:10 <span class="muted">(+1)</span></td><td>23 kg incluida</td><td>150 USD + diferencia</td></tr>
+    <tr><td><span class="tag tP">Superior</span></td><td><span class="fl">Iberia IB6584</span><br>directo · 10 h 50</td><td>16:55 → 08:45 <span class="muted">(+1)</span></td><td>Basic + 3 maletas de 23 kg agregadas</td><td>Sin cambios ni reembolso</td></tr>
+    <tr class="sub"><td colspan="5">Regreso · Ámsterdam → Bogotá · miércoles 23 de diciembre</td></tr>
+    <tr><td><span class="tag tE">Económica</span></td><td><span class="fl">Iberia IB3251 + IB6585</span><br>escala de 3 h 05 en Madrid</td><td>06:25 → 15:45</td><td>23 kg incluida</td><td>120 EUR</td></tr>
+    <tr><td><span class="tag tR">Recomendada</span></td><td><span class="fl">Lufthansa LH993 + LH542</span><br>escala de 1 h 40 en Frankfurt</td><td>07:10 → 15:05</td><td>Light + 3 maletas de 23 kg agregadas</td><td>Sin cambios ni reembolso</td></tr>
+    <tr><td><span class="tag tP">Superior</span></td><td><span class="fl">KLM KL743</span><br>directo · 11 h 15</td><td>10:05 → 15:20</td><td>23 kg incluida</td><td>200 EUR</td></tr>
+  </table>
+
+</section>
+<section class="sec">
+  <div class="gbar"></div><div class="kicker">5 · Trenes y traslados</div>
+  <h2>Cómo se mueven en Europa</h2>
+  <p class="lead">Iguales en las tres tarifas. Los traslados privados llevan silla de bebé; el conductor espera con un cartel.</p>
+  <table class="nobr">
+    <tr><th style="width:20mm">Día</th><th>Trayecto</th><th>Servicio</th><th>Hora</th></tr>
+    <tr><td>vie 11</td><td>Aeropuerto Barajas T4 → hotel</td><td><svg class="ic" viewBox="0 0 24 24"><use href="#van"/></svg> Traslado privado, van con silla de bebé</td><td>según el vuelo</td></tr>
+    <tr><td>lun 14</td><td>Hotel → estación Puerta de Atocha</td><td><svg class="ic" viewBox="0 0 24 24"><use href="#van"/></svg> Traslado privado</td><td>08:15</td></tr>
+    <tr><td>lun 14</td><td><b>Madrid Atocha → Barcelona Sants</b></td><td><svg class="ic" viewBox="0 0 24 24"><use href="#train"/></svg> AVE 03071 Renfe · Estándar · 2 h 45</td><td>09:30 → 12:15</td></tr>
+    <tr><td>lun 14</td><td>Barcelona Sants → hotel</td><td><svg class="ic" viewBox="0 0 24 24"><use href="#van"/></svg> Traslado compartido</td><td>12:45</td></tr>
+    <tr><td>jue 17</td><td>Hotel → Barcelona Sants</td><td><svg class="ic" viewBox="0 0 24 24"><use href="#van"/></svg> Traslado compartido</td><td>08:20</td></tr>
+    <tr><td>jue 17</td><td><b>Barcelona Sants → Paris Gare de Lyon</b></td><td><svg class="ic" viewBox="0 0 24 24"><use href="#train"/></svg> TGV INOUI 9714 · 2.ª clase · 6 h 36</td><td>09:25 → 16:01</td></tr>
+    <tr><td>jue 17</td><td>Gare de Lyon → hotel</td><td><svg class="ic" viewBox="0 0 24 24"><use href="#van"/></svg> Traslado privado, Mercedes Vito con silla</td><td>16:30</td></tr>
+    <tr><td>lun 21</td><td>Hotel → Paris Gare du Nord</td><td><svg class="ic" viewBox="0 0 24 24"><use href="#van"/></svg> Traslado privado</td><td>09:15</td></tr>
+    <tr><td>lun 21</td><td><b>Paris Nord → Amsterdam Centraal</b></td><td><svg class="ic" viewBox="0 0 24 24"><use href="#train"/></svg> Eurostar 9325 · Standard · 3 h 17</td><td>10:25 → 13:42</td></tr>
+    <tr><td>lun 21</td><td>Amsterdam Centraal → hotel</td><td><svg class="ic" viewBox="0 0 24 24"><use href="#van"/></svg> Traslado privado con silla</td><td>14:00</td></tr>
+    <tr><td>mié 23</td><td>Hotel → aeropuerto Schiphol</td><td><svg class="ic" viewBox="0 0 24 24"><use href="#van"/></svg> Traslado privado</td><td>3 h antes del vuelo</td></tr>
+  </table>
+  <p class="small muted">Cambios en trenes: AVE con 20 % de cargo hasta 2 h antes; TGV sin cargo hasta 3 días antes; Eurostar sin cargo hasta 7 días antes. Traslados: cancelación gratis hasta 48 h antes.</p>
+</section>
+
+<section class="sec">
+  <div class="gbar"></div><div class="kicker">6 · Planes para agregar</div>
+  <h2>Para los días libres, a su gusto</h2>
+  <p class="lead">Escojan los que quieran y los sumamos a la reserva. También pueden cambiar uno de los planes incluidos por uno de estos: les ajustamos solo la diferencia. Precio para los cuatro.</p>
+  <div class="opcs">
+<div class="oc"><div class="img" style="background-image:url(fotos/o_palacio.jpg)"><span class="where">Madrid · dom 13</span></div><div class="b"><div class="n">Palacio Real de Madrid</div><div class="muted">Visita guiada en español por los salones y la Armería real.</div><div class="foot"><span class="muted">2 h</span><span class="pr money">+ $ 520.000</span></div></div></div>
+<div class="oc"><div class="img" style="background-image:url(fotos/o_bernabeu.jpg)"><span class="where">Madrid · dom 13</span></div><div class="b"><div class="n">Tour del Bernabéu</div><div class="muted">Vestuarios, túnel, museo y trofeos del Real Madrid. Para Martín.</div><div class="foot"><span class="muted">1 h 30</span><span class="pr money">+ $ 780.000</span></div></div></div>
+<div class="oc"><div class="img" style="background-image:url(fotos/o_guell.jpg)"><span class="where">Barcelona · mié 16</span></div><div class="b"><div class="n">Park Güell con guía</div><div class="muted">El dragón de Gaudí, la plaza y las casitas de cuento.</div><div class="foot"><span class="muted">1 h 30</span><span class="pr money">+ $ 610.000</span></div></div></div>
+<div class="oc"><div class="img" style="background-image:url(fotos/o_aqua.jpg)"><span class="where">Barcelona · mié 16</span></div><div class="b"><div class="n">Aquàrium de Barcelona</div><div class="muted">El túnel de tiburones bajo el mar del Port Vell.</div><div class="foot"><span class="muted">2 h</span><span class="pr money">+ $ 420.000</span></div></div></div>
+<div class="oc"><div class="img" style="background-image:url(fotos/o_disney.jpg)"><span class="where">París · sáb 19</span></div><div class="b"><div class="n">Disneyland Paris</div><div class="muted">Un día completo en los dos parques. Isabela entra gratis.</div><div class="foot"><span class="muted">todo el día</span><span class="pr money">+ $ 2.031.294</span></div></div></div>
+<div class="oc"><div class="img" style="background-image:url(fotos/o_louvre.jpg)"><span class="where">París · dom 20</span></div><div class="b"><div class="n">El Louvre en familia</div><div class="muted">Recorrido corto para niños: la Gioconda, Egipto y las momias.</div><div class="foot"><span class="muted">2 h</span><span class="pr money">+ $ 890.000</span></div></div></div>
+<div class="oc"><div class="img" style="background-image:url(fotos/o_sena.jpg)"><span class="where">París · dom 20</span></div><div class="b"><div class="n">Crucero con cena por el Sena</div><div class="muted">París iluminada desde el agua, con menú infantil.</div><div class="foot"><span class="muted">2 h 30</span><span class="pr money">+ $ 1.150.000</span></div></div></div>
+<div class="oc"><div class="img" style="background-image:url(fotos/o_zaanse.jpg)"><span class="where">Ámsterdam · mar 22</span></div><div class="b"><div class="n">Molinos de Zaanse Schans</div><div class="muted">Molinos, zuecos y queso a 20 minutos de Ámsterdam.</div><div class="foot"><span class="muted">medio día</span><span class="pr money">+ $ 690.000</span></div></div></div>
+  </div>
+  <div class="igual" style="margin-top:4mm"><b class="mont" style="color:var(--navy)">¿Prefieren cambiar algo de lo incluido?</b> Por ejemplo, la cumbre de la Torre Eiffel por el Louvre o Disney en vez del paseo por los canales. Nos dicen y les mandamos el ajuste el mismo día.</div>
+</section>
+
+<section class="sec">
+  <div class="gbar"></div><div class="kicker">7 · Elige tu versión</div>
+  <h2>Tres versiones del mismo viaje</h2>
+  <p class="lead">Precio total para los cuatro, con impuestos. Todo lo que vieron hasta aquí está incluido en las tres; solo cambian los vuelos y los hoteles.</p>
+  <div class="tarifas">
+    <div class="tf">
+      <div class="name cE">Económica</div>
+      <div class="price money">$ 44.869.124</div>
+      <div class="pp">el grupo · 3★ bien ubicados</div>
+      <div class="row"><b>Ida · jue 10 dic</b>Avianca AV26 directo · 19:20 → 11:15<br><span class="muted">Classic · maleta de 23 kg incluida</span></div>
+      <div class="row"><b>Regreso · mié 23 dic</b>Iberia vía Madrid · 06:25 → 15:45<br><span class="muted">Standard · maleta de 23 kg incluida</span></div>
+      <div class="row"><b>Hoteles</b>Ibis Styles Madrid Prado <span class="stars">★★★</span><br>Ibis Barcelona Centro <span class="stars">★★★</span><br>Ibis Paris Tour Eiffel <span class="stars">★★★</span><br>Ibis Amsterdam Centre <span class="stars">★★★</span></div>
+      <div class="row"><b>Si cambian de planes</b>Hoteles con cancelación gratis. Vuelos con cambio pagando cargo.</div>
+    </div>
+    <div class="tf rec">
+      <span class="tag tR badge">La que recomendamos</span>
+      <div class="name cR">Recomendada</div>
+      <div class="price money">$ 54.214.047</div>
+      <div class="pp">el grupo · 4★ en el centro</div>
+      <div class="row"><b>Ida · jue 10 dic</b>Air France vía París · 18:45 → 16:10<br><span class="muted">Economy Standard · maleta de 23 kg incluida</span></div>
+      <div class="row"><b>Regreso · mié 23 dic</b>Lufthansa vía Frankfurt · 07:10 → 15:05<br><span class="muted">Light + 3 maletas de 23 kg agregadas</span></div>
+      <div class="row"><b>Hoteles</b>Catalonia Puerta del Sol <span class="stars">★★★★</span><br>H10 Metropolitan <span class="stars">★★★★</span><br>Pullman Paris Tour Eiffel <span class="stars">★★★★</span><br>Park Plaza Victoria <span class="stars">★★★★</span></div>
+      <div class="row"><b>Si cambian de planes</b>Hoteles con cancelación gratis. <span class="flag">El regreso en Lufthansa Light no admite cambios ni reembolso.</span></div>
+    </div>
+    <div class="tf">
+      <div class="name cP">Superior</div>
+      <div class="price money">$ 94.434.884</div>
+      <div class="pp">el grupo · 5★ emblemáticos</div>
+      <div class="row"><b>Ida · jue 10 dic</b>Iberia IB6584 directo · 16:55 → 08:45<br><span class="muted">Basic + 3 maletas de 23 kg agregadas</span></div>
+      <div class="row"><b>Regreso · mié 23 dic</b>KLM KL743 directo · 10:05 → 15:20<br><span class="muted">Economy Standard · maleta de 23 kg incluida</span></div>
+      <div class="row"><b>Hoteles</b>Gran Hotel Inglés <span class="stars">★★★★★</span><br>Hotel Majestic <span class="stars">★★★★★</span><br>Le Meurice <span class="stars">★★★★★</span><br>Waldorf Astoria Amsterdam <span class="stars">★★★★★</span></div>
+      <div class="row"><b>Si cambian de planes</b><span class="flag">Madrid, París y Ámsterdam no son reembolsables. La ida en Iberia Basic no admite cambios.</span></div>
+    </div>
+  </div>
+
+
+  <div class="cta">
+    <div class="ctl">
+      <div class="kicker" style="color:#ff8fbf">Aparta tu viaje hoy</div>
+      <div class="ctt">Apártenlo hoy con solo el <span style="color:#ff8fbf">10 %</span>.</div>
+      <div class="small" style="opacity:.8">Con eso bloqueamos los hoteles y les guardamos esta propuesta. Completan el 30 % en los 5 días hábiles siguientes y en ese momento compramos tiquetes y trenes.</div>
+    </div>
+    <div class="btns">
+      <a class="btn bE" href="https://pagos.example/ensayo-E"><span>Económica</span><b>Apartar · $ 4.487.000</b></a>
+      <a class="btn bR" href="https://pagos.example/ensayo-R"><span>Recomendada</span><b>Apartar · $ 5.421.000</b></a>
+      <a class="btn bP" href="https://pagos.example/ensayo-P"><span>Superior</span><b>Apartar · $ 9.443.000</b></a>
+    </div>
+  </div>
+</section>
+<section class="sec">
+  <div class="gbar"></div><div class="kicker">8 · El precio, claro</div>
+  <h2>Qué incluye y cuándo se paga</h2>
+  <div class="two">
+    <div>
+      <h3>Incluido en las tres</h3>
+      <ul class="list small">
+        <li>Tiquetes aéreos de ida y regreso para los cuatro, con impuestos y maleta de 23 kg</li>
+        <li>13 noches de hotel con desayuno en habitación familiar, con cuna</li>
+        <li>Tres trenes: AVE, TGV y Eurostar</li>
+        <li>Ocho traslados entre aeropuertos, estaciones y hoteles</li>
+        <li>Museo del Prado, Sagrada Familia, cumbre de la Torre Eiffel y canales de Ámsterdam</li>
+        <li>Asistencia médica Europa Total 60 (Schengen) para los cuatro</li>
+        <li>Emisión y acompañamiento de la agencia antes y durante el viaje</li>
+      </ul>
+    </div>
+    <div>
+      <h3>No incluido</h3>
+      <ul class="list small">
+        <li>Disneyland Paris (opcional, $ 2.031.294 los cuatro)</li>
+        <li>Tasas turísticas que cobra el hotel al salir (Barcelona, París y Ámsterdam; ver cada hotel)</li>
+        <li>Almuerzos, cenas y transporte en los días libres</li>
+        <li>Gastos personales y propinas</li>
+      </ul>
+    </div>
+  </div>
+
+  <h3 style="margin-top:6mm">Cuánto pagan y cuándo</h3>
+  <table class="nobr">
+    <tr><th></th><th class="r"><span class="cE">Económica</span></th><th class="r"><span class="cR">Recomendada</span></th><th class="r"><span class="cP">Superior</span></th></tr>
+    <tr><td><b>Para apartar</b> (10 %)</td><td class="r money">$ 4.487.000</td><td class="r money">$ 5.421.000</td><td class="r money">$ 9.443.000</td></tr>
+    <tr><td><b>En los 5 días hábiles siguientes</b> (hasta el 30 %)</td><td class="r money">$ 8.974.000</td><td class="r money">$ 10.843.000</td><td class="r money">$ 18.887.000</td></tr>
+    <tr><td><b>Hasta el 25 de noviembre</b> (hasta llevar el 80 %)</td><td class="r money">$ 22.435.000</td><td class="r money">$ 27.108.000</td><td class="r money">$ 47.218.000</td></tr>
+    <tr><td><b>Saldo antes del viaje</b></td><td class="r money">$ 8.973.124</td><td class="r money">$ 10.842.047</td><td class="r money">$ 18.886.884</td></tr>
+    <tr><td><b>Total</b></td><td class="r money"><b>$ 44.869.124</b></td><td class="r money"><b>$ 54.214.047</b></td><td class="r money"><b>$ 94.434.884</b></td></tr>
+  </table>
+  <p class="small muted">Si prefieren más cuotas, las acordamos. Los tiquetes y los trenes se compran al completar el 30 %; hasta ese momento su precio lo fija la aerolínea.</p>
+
+  <h3 style="margin-top:5mm">Antes de viajar</h3>
+  <ul class="list small">
+    <li>Pasaportes vigentes de los cuatro (vencen en 2029: perfecto). Colombianos no necesitan visa para el espacio Schengen por menos de 90 días.</li>
+    <li>Diciembre es frío: entre 0 y 10 °C en París y Ámsterdam. Ropa abrigada y un portabebé para el metro.</li>
+    <li>Lleguen a El Dorado tres horas antes del vuelo internacional.</li>
+  </ul>
+</section>
+
+<section class="sec">
+  <div class="gbar"></div><div class="kicker">9 · Lo formal</div>
+  <h2>Términos y condiciones</h2>
+  <ul class="list small">
+    <li>Al realizar el pago, el pasajero declara que conoce y acepta las condiciones y las políticas de cancelación.</li>
+    <li>Las cancelaciones pueden generar penalidades de hasta el 100 % del valor del paquete turístico, según la tarifa elegida (ver «Si cambian de planes» en cada tarifa).</li>
+    <li>Si el pasajero no se presenta al inicio del programa, los cargos pueden ser de hasta el 100 % del valor del paquete.</li>
+    <li>Los servicios que no se tomen no son reembolsables.</li>
+    <li>Las tarifas están sujetas a cambios y a disponibilidad al momento de reservar.</li>
+  </ul>
+  <h3 style="margin-top:5mm">Medios de pago</h3>
+  <p class="small">Consignación o transferencia a nombre de Agencia de Ejemplo S.A.S., NIT 900.000.000-0: Banco Uno, ahorros 0000000001 · Banco Dos, ahorros 0000000002 · Banco Tres, ahorros 0000000003. PSE, tarjeta de crédito o link de pago, con un recargo promedio del 3 %.</p>
+
+  <div class="sign">
+    <div><b class="mont" style="color:var(--navy)">Asesora de Ejemplo</b><br><span class="muted small">Director Comercial · contacto@agencia.example · 300 000 0000</span></div>
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 120 24" style="height:9mm;display:block"><text x="0" y="19" font-family="Montserrat" font-weight="800" font-size="20" fill="#2b1840">AGENCIA</text></svg>
+  </div>
+
+  <div class="credits">
+    <b>Fotografías (Wikimedia Commons):</b> Gran Vía, Nicolas Vigier (CC0) · Pont Alexandre III, Getfunky Paris (CC BY 2.0) · Nieuwe Keizersgracht, Fons Heijnsbroek (CC0) · Plaza de Santa Ana, Simon Burchell (CC BY-SA 4.0) · Puerta del Sol, José María Ligero Loarte (CC BY-SA 3.0) · Gran Hotel Inglés, Javier Pérez Montes (CC BY-SA 4.0) · Ibis Barcelona Centro, Zarateman (CC0) · H10 Metropolitan, Enric (CC BY 4.0) · Hotel Majestic, Ardfern (CC BY-SA 3.0) · Square Cambronne, Guilhem Vellut (CC BY 2.0) · Pullman Paris Tour Eiffel, Gary Bembridge (CC BY 2.0) · Le Meurice, Arthur Weidmann (CC BY-SA 4.0) · Ibis Amsterdam Centre, Dqfn13 (CC BY-SA 3.0) · Victoria Hotel, C messier (CC BY-SA 4.0) · Waldorf Astoria Amsterdam, currystrumpet (CC BY-SA 2.0) · Palacio Real, José Luis Filpo Cabana (CC BY 3.0) · Bernabéu, Zoser (CC BY 4.0) · Park Güell, Isiwal (CC BY-SA 3.0) · Aquàrium, Paul Hermans (CC BY-SA 3.0) · Disneyland Paris, Kapsuglan (CC BY-SA 4.0) · Louvre, Benh Lieu Song (CC BY 2.5) · Sena, Joe deSousa (CC BY 2.0) · Zaanse Schans, DimiTalen (CC0) · Sagrada Familia, kallerna (CC BY-SA 4.0).
+  </div>
+</section>
+</body></html>

@@ -33,6 +33,7 @@ import type { BorradorParaAceptar, ResultadoAceptarCaptura, ResultadoBorrador, R
 import { reportarFalloDeBandeja, type FalloDeBandeja } from '@/lib/errores-cliente/enviar'
 import { bytesDeImagen } from './bandeja-registro'
 import type { TipoRanura } from './ranuras-cotizacion'
+import type { DecisionDelModelo } from './destino-por-pasos'
 
 type Fetch = typeof fetch
 type Ruta = FalloDeBandeja['ruta']
@@ -199,5 +200,97 @@ export async function lecturaManualPorRuta(
     return await enviar<ResultadoManualEnBorrador>(cotizacionId, 'lectura-manual', { tipo, datos }, undefined, f, opciones)
   } catch {
     return null
+  }
+}
+
+/**
+ * «✎ Escríbelo a mano» de la cotización por pasos (C5): los cinco tipos (con «Otro servicio»), con
+ * la marca para que el servidor compruebe el interruptor. `null` sin respuesta.
+ */
+export async function escritoAManoPorRuta(
+  cotizacionId: string,
+  tipo: 'hotel' | 'traslado' | 'vuelo' | 'actividad' | 'otro',
+  datos: unknown,
+  f: Fetch = fetch,
+  opciones?: OpcionesDeEnvio,
+): Promise<ResultadoManualEnBorrador | null> {
+  try {
+    return await enviar<ResultadoManualEnBorrador>(cotizacionId, 'lectura-manual', { tipo, datos, porPasos: true }, undefined, f, opciones)
+  } catch {
+    return null
+  }
+}
+
+/**
+ * La lectura de la cotización por pasos (C5): manda además el viaje, para que la ruta le pregunte
+ * al modelo a dónde va (con su corte). Lanza `ErrorDeEnvio`, como `leerPorRuta`.
+ */
+export function leerPorPasosPorRuta(
+  cotizacionId: string,
+  tipo: TipoRanura,
+  dataUrl: string,
+  enfoque: { nombre: string; precio: string | null } | null,
+  servicios: unknown[],
+  f: Fetch = fetch,
+  opciones?: OpcionesDeEnvio,
+): Promise<ResultadoBorrador & { modelo?: DecisionDelModelo | null }> {
+  return enviar(cotizacionId, 'leer-captura', { tipo, dataUrl, enfoque, porPasos: true, servicios }, bytesDeDataUrl(dataUrl), f, opciones)
+}
+
+/** Una fila de «Aceptar los N», como la manda la bandeja. */
+export interface FilaDeLoteParaEnviar {
+  id: string
+  borrador: BorradorParaAceptar
+  estado?: 'incluido' | 'opcional' | null
+  destinoCaptura?: string | null
+}
+
+export type ResultadoDeLote =
+  | { ok: true; resultados: { id: string; resultado: ResultadoAceptarCaptura }[]; tarifas: string | null; valorTotal: number | null }
+  | { ok: false; codigo: string; mensaje: string }
+
+/**
+ * Parte el lote en envíos que quepan en el borde (las imágenes viajan con cada fila). En orden:
+ * una fila que apunta a otra del lote («Otra opción de» una que todavía no estaba) va en el mismo
+ * envío o en uno posterior, porque el orden se respeta. Cada envío recalcula una vez.
+ */
+export function partirLote(filas: readonly FilaDeLoteParaEnviar[], tope = MAX_BYTES_CUERPO - 200_000, maxFilas = 20): FilaDeLoteParaEnviar[][] {
+  const envios: FilaDeLoteParaEnviar[][] = []
+  let actual: FilaDeLoteParaEnviar[] = []
+  let peso = 0
+  for (const f of filas) {
+    const p = JSON.stringify(f).length
+    if (actual.length > 0 && (peso + p > tope || actual.length >= maxFilas)) {
+      envios.push(actual)
+      actual = []
+      peso = 0
+    }
+    actual.push(f)
+    peso += p
+  }
+  if (actual.length > 0) envios.push(actual)
+  return envios
+}
+
+/**
+ * «Aceptar los N» (`aceptarLotePorPasos`, por la ruta). Nunca lanza: sin respuesta devuelve
+ * `ok:false` con el mensaje de qué hacer; las filas siguen en la bandeja y su llave evita
+ * duplicar al volver a tocar.
+ */
+export async function aceptarLotePorRuta(
+  cotizacionId: string,
+  filas: readonly FilaDeLoteParaEnviar[],
+  f: Fetch = fetch,
+  opciones?: OpcionesDeEnvio,
+): Promise<ResultadoDeLote> {
+  try {
+    return await enviar<ResultadoDeLote>(cotizacionId, 'aceptar-lote', { filas }, undefined, f, opciones)
+  } catch (e) {
+    const codigo = esErrorDeEnvio(e) ? e.codigo : 'RED'
+    return {
+      ok: false,
+      codigo,
+      mensaje: codigo === 'PESADA' ? MENSAJE_PANTALLAZO_PESADO : codigo === 'RESPUESTA' ? MENSAJE_ACEPTAR_SIN_RESPUESTA : MENSAJE_ACEPTAR_SIN_RED,
+    }
   }
 }

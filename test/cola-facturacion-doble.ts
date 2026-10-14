@@ -71,6 +71,14 @@ export function reiniciarDoble(): void {
 // ─── Doble: mini motor de consultas que RECORTA como PostgREST ──────────────
 
 function valorEn(fila: Fila, ruta: string): unknown {
+  // `metadata->>es_prueba`: el operador de texto de PostgREST (el valor llega como texto).
+  if (ruta.includes('->>')) {
+    const v = ruta.split(/->>?/).reduce<unknown>(
+      (acc, k) => (acc == null ? undefined : (acc as Record<string, unknown>)[k]),
+      fila,
+    )
+    return v == null ? null : String(v)
+  }
   return ruta.split('.').reduce<unknown>(
     (acc, k) => (acc == null ? undefined : (acc as Record<string, unknown>)[k]),
     fila,

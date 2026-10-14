@@ -37,6 +37,7 @@ import {
   type TipoReproceso,
 } from '@/lib/negocios/atribucion-reproceso'
 import { registrarActividad } from '@/lib/activity/registrar-actividad'
+import { asignarResponsableAlEntrar } from '@/lib/negocios/responsable-automatico'
 import { resolverRetornoDelNegocio } from '@/lib/negocios/retorno-reproceso-datos'
 import { tramoDelReproceso } from '@/lib/negocios/retorno-reproceso'
 import { avisoDelRetorno, contenidoErrorSinRetorno } from '@/lib/negocios/reproceso-textos'
@@ -383,6 +384,8 @@ export async function reprocesarNegocio(
     .eq('id', negocioId)
 
   if (updErr) return { ok: false, error: (updErr as { message: string }).message }
+
+  await asignarResponsableAlEntrar(supabase, { negocioId, etapaId: destino.id, workspaceId })
 
   // ── Historial del reproceso: el insumo REAL del indicador de calidad ──
   //

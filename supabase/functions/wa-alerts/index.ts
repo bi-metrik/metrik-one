@@ -25,6 +25,7 @@ type ValorNumerico = number | string | null;
 type FilaMonto = { monto: ValorNumerico };
 type FilaHoras = { horas: ValorNumerico };
 type FilaNegocio = {
+  id?: string;
   nombre: string;
   precio_estimado: ValorNumerico;
   precio_aprobado: ValorNumerico;
@@ -121,6 +122,32 @@ Deno.serve(async (req) => {
 });
 
 // ============================================================
+// Negocios de prueba (F8-1)
+// ============================================================
+//
+// El viaje de prueba de Trappvel (`negocios.metadata.es_prueba = true`) corre en el workspace
+// REAL. Estas alertas van al DUEÑO del workspace, que no lleva ni aprueba la prueba: ningún
+// resumen, saldo ni conteo lo incluye. Si la lectura falla, se lanza: un resumen que no pudo
+// restar la prueba no sale (cada tarea ya corre en su propio try).
+async function negociosDePrueba(
+  supabase: ReturnType<typeof getServiceClient>,
+  workspaceId?: string,
+): Promise<Set<string>> {
+  let q = supabase.from('negocios').select('id').eq('metadata->>es_prueba', 'true');
+  if (workspaceId) q = q.eq('workspace_id', workspaceId);
+  const { data, error } = await q;
+  if (error) throw new Error(`negocios de prueba: ${error.message}`);
+  return new Set(((data ?? []) as Array<{ id: string }>).map((r) => r.id));
+}
+
+function sinPrueba<T>(filas: T[] | null | undefined, prueba: Set<string>, negocioDe: (f: T) => unknown): T[] {
+  return (filas ?? []).filter((f) => {
+    const id = negocioDe(f);
+    return !(typeof id === 'string' && prueba.has(id));
+  });
+}
+
+// ============================================================
 // W25 — Saldo Vencido (>30 días, recordatorio cada 7 días)
 // ============================================================
 //
@@ -140,12 +167,15 @@ Deno.serve(async (req) => {
 async function runW25FacturaVencida(supabase: ReturnType<typeof getServiceClient>): Promise<void> {
   console.log('[wa-alerts] Running W25 — Saldo Vencido');
 
-  const { data } = await supabase
-    .from('v_cartera_negocio')
-    .select(COLUMNAS_CARTERA);
+  const [{ data }, prueba] = await Promise.all([
+    supabase
+      .from('v_cartera_negocio')
+      .select(`${COLUMNAS_CARTERA}, negocio_id`),
+    negociosDePrueba(supabase),
+  ]);
 
   // `deudasDeCartera` aplica el piso de materialidad y ordena por antiguedad.
-  const vencidos = deudasDeCartera(data).filter((d) => d.vencida);
+  const vencidos = deudasDeCartera(sinPrueba(data, prueba, (f: { negocio_id?: unknown }) => f.negocio_id)).filter((d) => d.vencida);
 
   if (vencidos.length === 0) {
     console.log('[wa-alerts] W25: No overdue balances found');
@@ -274,21 +304,23 @@ async function buildWeeklySummary(
   const startDate = formatDate(weekAgo);
   const endDate = formatDate(now);
 
+  const prueba = await negociosDePrueba(supabase, workspaceId);
+
   // --- Cobros this week ---
   const { data: cobrosWeek } = await supabase
     .from('cobros')
-    .select('monto')
+    .select('monto, negocio_id')
     .eq('workspace_id', workspaceId)
     .gte('fecha', weekAgoStr);
-  const totalCobros = (cobrosWeek || []).reduce((s: number, c: FilaMonto) => s + Number(c.monto), 0);
+  const totalCobros = sinPrueba(cobrosWeek, prueba, (c: { negocio_id?: unknown }) => c.negocio_id).reduce((s: number, c: FilaMonto) => s + Number(c.monto), 0);
 
   // --- Gastos this week ---
   const { data: gastosWeek } = await supabase
     .from('gastos')
-    .select('monto')
+    .select('monto, negocio_id')
     .eq('workspace_id', workspaceId)
     .gte('fecha', weekAgoStr);
-  const totalGastos = (gastosWeek || []).reduce((s: number, g: FilaMonto) => s + Number(g.monto), 0);
+  const totalGastos = sinPrueba(gastosWeek, prueba, (g: { negocio_id?: unknown }) => g.negocio_id).reduce((s: number, g: FilaMonto) => s + Number(g.monto), 0);
 
   // --- Horas this week ---
   const { data: horasWeek } = await supabase
@@ -320,14 +352,15 @@ async function buildWeeklySummary(
   }
 
   // --- Negocios en ejecución ---
-  const { data: enEjecucion } = await supabase
+  const { data: enEjecucionTodos } = await supabase
     .from('negocios')
     .select('id, nombre, precio_aprobado, precio_estimado, updated_at')
     .eq('workspace_id', workspaceId)
     .eq('estado', 'abierto')
     .eq('stage_actual', 'ejecucion')
     .order('updated_at', { ascending: false })
-    .limit(5);
+    .limit(5 + prueba.size);
+  const enEjecucion = sinPrueba(enEjecucionTodos, prueba, (n: FilaNegocio) => n.id).slice(0, 5);
 
   let projectLines = '';
   if (enEjecucion && enEjecucion.length > 0) {
@@ -342,12 +375,13 @@ async function buildWeeklySummary(
   }
 
   // --- Negocios en venta ---
-  const { data: enVenta } = await supabase
+  const { data: enVentaTodos } = await supabase
     .from('negocios')
     .select('id, nombre, precio_estimado, precio_aprobado, updated_at')
     .eq('workspace_id', workspaceId)
     .eq('estado', 'abierto')
     .eq('stage_actual', 'venta');
+  const enVenta = sinPrueba(enVentaTodos, prueba, (n: FilaNegocio) => n.id);
 
   let pipelineLine = '';
   let staleLine = '';
@@ -373,10 +407,10 @@ async function buildWeeklySummary(
   // "Cartera: $0" todos los lunes sin importar lo que se debiera.
   const { data: carteraRows } = await supabase
     .from('v_cartera_negocio')
-    .select(COLUMNAS_CARTERA)
+    .select(`${COLUMNAS_CARTERA}, negocio_id`)
     .eq('workspace_id', workspaceId);
 
-  const deudas = deudasDeCartera(carteraRows);
+  const deudas = deudasDeCartera(sinPrueba(carteraRows, prueba, (f: { negocio_id?: unknown }) => f.negocio_id));
 
   let carteraLine = '';
   if (deudas.length > 0) {
@@ -581,15 +615,17 @@ async function runStaleOppsAlert(supabase: ReturnType<typeof getServiceClient>):
   const tenDaysAgo = new Date(Date.now() - 10 * 24 * 60 * 60 * 1000).toISOString();
 
   for (const ws of workspaces) {
-    const { data: staleNeg } = await supabase
+    const prueba = await negociosDePrueba(supabase, ws.id);
+    const { data: staleTodos } = await supabase
       .from('negocios')
-      .select('nombre, codigo, precio_estimado, precio_aprobado, updated_at, contactos!left(nombre)')
+      .select('id, nombre, codigo, precio_estimado, precio_aprobado, updated_at, contactos!left(nombre)')
       .eq('workspace_id', ws.id)
       .eq('estado', 'abierto')
       .eq('stage_actual', 'venta')
       .lt('updated_at', tenDaysAgo)
       .order('updated_at', { ascending: true })
-      .limit(3);
+      .limit(3 + prueba.size);
+    const staleNeg = sinPrueba(staleTodos, prueba, (n: { id?: unknown }) => n.id).slice(0, 3);
 
     if (!staleNeg || staleNeg.length === 0) continue;
 
@@ -655,12 +691,12 @@ async function runRecaudoCheck(supabase: ReturnType<typeof getServiceClient>): P
     // Get cobros this month
     const { data: cobros } = await supabase
       .from('cobros')
-      .select('monto')
+      .select('monto, negocio_id')
       .eq('workspace_id', ws.id)
       .gte('fecha', mesInicio)
       .lt('fecha', mesFin);
 
-    const totalCobros = (cobros || []).reduce((s: number, c: FilaMonto) => s + Number(c.monto), 0);
+    const totalCobros = sinPrueba(cobros, await negociosDePrueba(supabase, ws.id), (c: { negocio_id?: unknown }) => c.negocio_id).reduce((s: number, c: FilaMonto) => s + Number(c.monto), 0);
     const pctMeta = (totalCobros / metaRecaudo) * 100;
 
     if (pctMeta >= 50) continue; // On track, skip

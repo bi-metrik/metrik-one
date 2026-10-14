@@ -1,6 +1,8 @@
 'use server'
 
 import { getWorkspace } from '@/lib/actions/get-workspace'
+import { registrarEnvioCotizacion } from '@/lib/negocios/seguimiento-datos'
+import { esOrigenVersion } from '@/lib/negocios/seguimiento'
 import { revalidatePath } from 'next/cache'
 import { todayBogotaISO, bogotaYear } from '@/lib/dates/bogota'
 import { type ConvencionMargen } from '@/lib/cotizaciones/precio-item'
@@ -28,6 +30,7 @@ import { esBaseIvaLinea, type BaseIvaLinea } from '@/lib/fiscal/iva-cotizacion'
 import { borrarImagenesDeCaptura, imagenesAlBorrarOpcion } from '@/lib/cotizaciones/imagen-captura'
 import { confirmadaVigente, leerTarifaPax } from '@/lib/cotizaciones/tarifa-pasajero'
 import { precioDeLineaConManuales } from '@/lib/cotizaciones/tarjeta-opcion'
+import { diferirRecalculo } from '@/lib/cotizaciones/recalculo-diferido'
 
 export async function getCotizaciones(oportunidadId: string) {
   const { supabase, error } = await getWorkspace()
@@ -809,6 +812,11 @@ export async function enviarCotizacion(id: string) {
   if (dbError) return { success: false, error: dbError.message }
 
   if (cot.negocio_id) {
+    // Seguimiento (F1-1): con la línea encendida queda la línea de actividad con versión y
+    // canal. La fecha ya la escribió el update de arriba.
+    await registrarEnvioCotizacion(supabase, {
+      workspaceId, negocioId: cot.negocio_id, cotizacionId: id, staffId: staffId ?? null, canal: 'enviar', fechaYaEscrita: true,
+    })
     revalidatePath(`/negocios/${cot.negocio_id}`)
   } else {
     revalidatePath('/pipeline')
@@ -873,11 +881,16 @@ export async function rechazarCotizacion(id: string) {
  *
  * La copia nace en `borrador` y vuelve a medir su margen: se recalcula aquí mismo.
  */
-export async function duplicarCotizacion(id: string) {
+export async function duplicarCotizacion(id: string, origen?: string | null) {
   const { supabase, workspaceId, error } = await getWorkspace()
   if (error || !workspaceId) return { success: false, error: 'No autenticado' }
 
-  const res = await duplicarCotizacionCompleta(supabase, { workspaceId, cotizacionId: id })
+  // Origen de la versión nueva (F1-3). La prerreserva vencida la escribe el sistema (C9).
+  if (origen != null && (!esOrigenVersion(origen) || origen === 'prerreserva_vencida')) {
+    return { success: false, error: 'Escoge de dónde sale la versión nueva.' }
+  }
+
+  const res = await duplicarCotizacionCompleta(supabase, { workspaceId, cotizacionId: id, origenVersion: origen ?? null })
   if (!res.ok) return { success: false, error: res.error }
 
   // Una cotización rápida no tiene líneas: su total es el que traía, y recalcular lo
@@ -984,6 +997,9 @@ export async function reconciliarAjuste(cotizacionId: string, valorTotalDeseado:
  * servidor y la pantalla no puedan discrepar sobre cuánto vale la cotización.
  */
 export async function recalcularTotales(cotizacionId: string) {
+  // «Aceptar los N» (C5): dentro del lote no se recalcula; el lote recalcula una vez al final.
+  // Fuera del lote es `false` y no cuesta ninguna ida (`recalculo-diferido.ts`).
+  if (diferirRecalculo(cotizacionId)) return { success: true, diferido: true }
   const { supabase, workspaceId, staffId, error } = await getWorkspace()
   if (error) return { success: false, error: 'No autenticado' }
 

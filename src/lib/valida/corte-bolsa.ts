@@ -141,6 +141,15 @@ export function textoCorte(motivo: MotivoCorte, esPrueba: boolean): { titulo: st
 /** A dónde lleva «Activar plan» desde la prueba: la activación autogestionada (`/valida/activar`). */
 export const RUTA_ACTIVAR_PLAN = '/valida/activar'
 
+/**
+ * El respaldo mientras la activación en línea está cerrada (`activacionAbierta()` en falso): el
+ * WhatsApp de MéTRIK con la empresa en el texto. Lo muestra `/valida/activar`, no el botón.
+ */
+export function enlaceActivarPlan(empresa: string): string {
+  const texto = `Hola, quiero activar el plan de Valida para ${empresa}`
+  return `https://wa.me/573159509103?text=${encodeURIComponent(texto)}`
+}
+
 /** El botón que acompaña al contador y al corte: activar desde la prueba, o ir a la suscripción del plan. */
 export function accionDelCorte(esPrueba: boolean): { texto: string; ruta: string } {
   return esPrueba ? { texto: 'Activar plan', ruta: RUTA_ACTIVAR_PLAN } : { texto: 'Ver mi suscripción', ruta: '/suscripcion' }

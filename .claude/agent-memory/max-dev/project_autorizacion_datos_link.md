@@ -21,6 +21,10 @@ Link por CONTACTO en `/autorizacion/<token>`; 4 casillas por separado; evidencia
   `aceptado_at` es la fecha del cliente, no la del registro.
 - Bot: `link_autorizacion` es un CIERRE del dominio (salidas escritas por el código, varios mensajes). En el último
   llamado forzado NO se permiten cierres del dominio: Gemini cerró una consulta de viaje con el link (medido en vivo).
+- Directorio (2026-10-12): la ficha del contacto muestra la misma vista (`EstadoAutorizacion` en
+  `components/autorizacion-datos/`) por `contacto_id`; «activa» = `config_extra.autorizacion_datos` es objeto
+  (solo Trappvel). No autorizado = ROJO `alerta`. Sin indicador en la LISTA: la vigencia solo existe en la RPC
+  por contacto (N+1); hace falta una RPC por lote antes de pintarlo. Evidencia solo desde el viaje.
 - Pendiente al 2026-10-08: acompañantes adultos con link propio (no cerrar el diseño: un enlace es por contacto).
 
 **Why:** Mauricio pidió prueba del titular, no el clic de la comercial; Emilio exige versión + sha256 + casillas.

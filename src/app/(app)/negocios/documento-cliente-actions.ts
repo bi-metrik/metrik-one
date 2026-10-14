@@ -20,6 +20,21 @@ import { normalizarTerminos } from '@/lib/cotizaciones/terminos-cotizacion'
 import { isEditable, type EstadoCotizacion } from '@/lib/cotizaciones/state-machine'
 import { PLANTILLA_POR_DEFECTO, plantillaUsaTextoDelCliente } from '@/lib/pdf/plantillas-cotizacion'
 import { getServerKey } from '@/lib/server-keys'
+import { exigirPorPasos } from '@/lib/cotizaciones/por-pasos-datos'
+import { INCLUYE_POR_ONE } from '@/lib/cotizaciones/incluye-por-one'
+
+/**
+ * C6 · «Incluye» armado por ONE: la forma por pasos pide guardar (o redactar) con la marca
+ * `incluye_origen = 'one'`. Se comprueba la pieza contra la base; con ella apagada no se marca.
+ */
+type OpcionesPorPasos = { porPasos?: boolean }
+
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+async function marcaIncluyePorOne(supabase: any, cotizacionId: string, opciones?: OpcionesPorPasos): Promise<{ marca: boolean } | { fallo: Fallo }> {
+  if (opciones?.porPasos !== true) return { marca: false }
+  const guard = await exigirPorPasos(supabase, cotizacionId, 'incluye_por_one')
+  return guard.ok ? { marca: true } : { fallo: { success: false, error: guard.error } }
+}
 
 /**
  * El texto para el cliente del documento de Trappvel: leerlo, redactarlo con ONE y
@@ -134,12 +149,14 @@ export async function getTextoCliente(cotizacionId: string): Promise<PanelTextoC
  */
 export async function redactarDocumentoCliente(
   cotizacionId: string,
-  opciones?: { reemplazarRevisado?: boolean },
+  opciones?: { reemplazarRevisado?: boolean } & OpcionesPorPasos,
 ): Promise<Exito | Fallo> {
   const r = await contextoParaEscribir(cotizacionId)
   if ('fallo' in r) return r.fallo as Fallo
   const { supabase, workspaceId, ctx } = r
   const reemplazar = opciones?.reemplazarRevisado === true
+  const m = await marcaIncluyePorOne(supabase, cotizacionId, opciones)
+  if ('fallo' in m) return m.fallo
 
   if (ctx.documento?.revisado_en && !reemplazar) {
     return {
@@ -167,8 +184,11 @@ export async function redactarDocumentoCliente(
   }
 
   // El validador de estilo MARCA el borrador; no lo corrige. Quien revisa ve qué mirar.
+  // Con «Incluye» armado por ONE, la lista del modelo no se guarda: la arma ONE al imprimir, y
+  // un borrador nuevo no trae líneas propias.
   const documento: DocumentoCliente = {
     ...redactado.texto,
+    ...(m.marca || ctx.documento?.incluye_origen === INCLUYE_POR_ONE ? { incluye: [], incluye_origen: INCLUYE_POR_ONE } : {}),
     origen: 'ia',
     modelo: redactado.modelo,
     redactado_en: new Date().toISOString(),
@@ -217,10 +237,17 @@ export async function guardarDocumentoCliente(
   cotizacionId: string,
   texto: TextoCliente,
   terminos?: string | null,
+  /**
+   * C6 · la forma por pasos: `texto.incluye` son solo las líneas PROPIAS de la asesora, y el
+   * documento queda con la marca `incluye_origen = 'one'` (el PDF arma lo demás).
+   */
+  opciones?: OpcionesPorPasos,
 ): Promise<Exito | Fallo> {
   const r = await contextoParaEscribir(cotizacionId)
   if ('fallo' in r) return r.fallo as Fallo
   const { supabase, workspaceId, staffId, ctx } = r
+  const m = await marcaIncluyePorOne(supabase, cotizacionId, opciones)
+  if ('fallo' in m) return m.fallo
 
   const limpio = normalizarTexto(texto)
   let documento: DocumentoCliente | null = null
@@ -244,6 +271,7 @@ export async function guardarDocumentoCliente(
       revisado_en: new Date().toISOString(),
       // Lo que la persona decidió dejar, para que quede dicho; nunca se corrige solo.
       ...conAlertas(revisarEstilo(limpio)),
+      ...(m.marca || ctx.documento?.incluye_origen === INCLUYE_POR_ONE ? { incluye_origen: INCLUYE_POR_ONE } : {}),
     }
   }
 

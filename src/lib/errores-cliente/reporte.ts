@@ -57,7 +57,7 @@ const esquemaReporte = z.object({
    */
   bandeja: z
     .object({
-      ruta: z.enum(['detectar-captura', 'leer-captura', 'aceptar-captura', 'lectura-manual']),
+      ruta: z.enum(['detectar-captura', 'leer-captura', 'aceptar-captura', 'lectura-manual', 'aceptar-lote']),
       codigo: recortar(40),
       cotizacionId: z.string().regex(/^[A-Za-z0-9-]{1,64}$/),
       bytesImagen: z.number().int().min(0).max(100_000_000).optional(),

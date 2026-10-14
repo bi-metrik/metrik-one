@@ -22,6 +22,7 @@ import { getWorkspace } from './get-workspace'
 import { exigirModulo, MENSAJE_MODULO_NO_ACTIVO, REQUISITO } from '@/lib/modulos/exigir-modulo'
 import { getAreasEfectivas, type Area } from '@/lib/permissions/can-edit'
 import { registrarActividad } from '@/lib/activity/registrar-actividad'
+import { asignarResponsableAlEntrar } from '@/lib/negocios/responsable-automatico'
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 async function getStaffAreas(supabase: any, staffId: string): Promise<Area[]> {
@@ -163,6 +164,8 @@ export async function reabrirNegocio(
   if (updErr) {
     return { ok: false, error: (updErr as { message: string }).message }
   }
+
+  await asignarResponsableAlEntrar(supabase, { negocioId, etapaId: etapaDestinoId, workspaceId })
 
   // Obtener nombre de la etapa destino
   const { data: etapaRow } = await supabase
@@ -309,6 +312,9 @@ export async function crearNegocioDesdeCerrado(
     return { ok: false, error: (insErr as { message: string } | null)?.message ?? 'Insert fallo' }
   }
   const nuevoId = (nuevo as { id: string }).id
+  if (etapaInicialId) {
+    await asignarResponsableAlEntrar(supabase, { negocioId: nuevoId, etapaId: etapaInicialId, workspaceId })
+  }
 
   // Activity log en origen
   if (staffId) {

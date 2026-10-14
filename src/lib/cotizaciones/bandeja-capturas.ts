@@ -74,7 +74,27 @@ export function mismoLugar(a: string | null | undefined, b: string | null | unde
   if (!x || !y) return null
   if (x.codigo && y.codigo) return x.codigo === y.codigo
   if (x.nombre && y.nombre) return x.nombre === y.nombre
+  // H9 (prueba Europa, 2026-10-14) · «MAD» contra «Madrid»: el detector escribe la ciudad y la
+  // lectura el código, o al revés. Solo con un código que se conoce; si no, no se sabe.
+  const conCodigo = x.codigo ? x : y
+  const conNombre = x.codigo ? y : x
+  const ciudad = conCodigo.codigo ? CIUDAD_DE_AEROPUERTO[conCodigo.codigo] : undefined
+  if (ciudad && conNombre.nombre) return ` ${conNombre.nombre} `.includes(` ${ciudad} `)
   return null
+}
+
+/**
+ * La ciudad de los aeropuertos que una agencia colombiana vende de verdad, sin tildes y en
+ * minúscula, para comparar un código con un nombre. Un código que no está aquí no se adivina.
+ */
+const CIUDAD_DE_AEROPUERTO: Record<string, string> = {
+  BOG: 'bogota', MDE: 'medellin', CLO: 'cali', CTG: 'cartagena', BAQ: 'barranquilla', SMR: 'santa marta',
+  ADZ: 'san andres', PVA: 'providencia', PEI: 'pereira', AXM: 'armenia', CUC: 'cucuta', BGA: 'bucaramanga',
+  LET: 'leticia', MAD: 'madrid', BCN: 'barcelona', CDG: 'paris', ORY: 'paris', AMS: 'amsterdam', LIS: 'lisboa',
+  FCO: 'roma', MXP: 'milan', FRA: 'frankfurt', MUC: 'munich', LHR: 'londres', LGW: 'londres', ZRH: 'zurich',
+  MIA: 'miami', MCO: 'orlando', FLL: 'fort lauderdale', JFK: 'nueva york', CUN: 'cancun', PTY: 'panama',
+  PUJ: 'punta cana', LIM: 'lima', SCL: 'santiago', EZE: 'buenos aires', GRU: 'sao paulo', MEX: 'ciudad de mexico',
+  SJO: 'san jose', UIO: 'quito', CUR: 'curazao', AUA: 'aruba', IST: 'estambul',
 }
 
 /**

@@ -3,8 +3,8 @@
 import { useEffect } from 'react'
 import { activarPilotoRed, anotarEventoRed, nuevoIdRed, vaciarBandejaRed } from '@/lib/red/bandeja-red'
 import { rutaNormalizada } from '@/lib/red/eventos'
-import { SW_PILOTO_ACTIVO, esPilotoRed } from '@/lib/red/piloto'
-import { sincronizarSwPiloto } from '@/lib/red/registro-sw'
+import { SW_ACTIVO, esPilotoRed } from '@/lib/red/piloto'
+import { sincronizarServiceWorker } from '@/lib/red/registro-sw'
 import { ESPERA_SONDA_MS, VENTANA_MS, crearMedidor, type Medidor, type ResultadoSonda } from '@/lib/red/pulso'
 import { leerRed } from '@/lib/red/contexto-red'
 
@@ -63,12 +63,15 @@ function redDelNavegador() {
 export default function PilotoRed({ slug }: { slug: string | null }) {
   const activo = esPilotoRed(slug)
 
-  // Service worker del piloto (`public/sw.js`): se registra en el piloto y se retira fuera de
-  // él o con el interruptor `SW_PILOTO_ACTIVO` apagado. Después de la carga, sin competir con ella.
+  // Service worker (`public/sw.js`): desde el 2026-10-12 en TODOS los workspaces (caché de los
+  // estáticos de Next; navegación y RSC solo en el piloto, lo decide el propio sw.js por el
+  // subdominio). Se retira con el interruptor `SW_ACTIVO` apagado y fuera de producción: en
+  // `next dev` los chunks no llevan hash de contenido y un caché los dejaría viejos.
+  // Después de la carga, sin competir con ella.
   useEffect(() => {
-    const t = setTimeout(() => void sincronizarSwPiloto(activo && SW_PILOTO_ACTIVO), 3_000)
+    const t = setTimeout(() => void sincronizarServiceWorker(SW_ACTIVO && process.env.NODE_ENV === 'production'), 3_000)
     return () => clearTimeout(t)
-  }, [activo])
+  }, [])
 
   useEffect(() => {
     if (!activo) return

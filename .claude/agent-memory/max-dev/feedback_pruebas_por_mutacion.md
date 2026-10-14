@@ -182,6 +182,10 @@ PR sin commitear**, y el checkout la borró en silencio (lo delató la nota de a
 disco). Y al revés, los tres archivos mutados eran **nuevos**, así que `git checkout` no los habría
 restaurado aunque se lo pidiera.
 
+**Repetido el 2026-10-12 (C6, #1146):** mutar dos archivos con trabajo SIN commitear y «restaurar» con
+`git checkout <archivo>` los devolvió al índice y se llevó la marca `incluye_origen` y el cálculo del PDF;
+hubo que reescribirlos. La regla de abajo no es opcional.
+
 **How to apply:** respaldar con `cp` al scratchpad ANTES de mutar y restaurar con `cp` + `cmp`
 contra ese respaldo; o commitear primero y mutar sobre lo commiteado. Después de restaurar,
 `git status --short` y volver a correr la suite **y** `deno check` antes del commit.

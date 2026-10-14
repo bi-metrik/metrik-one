@@ -22,10 +22,31 @@ import {
   type EstadoDeProceso,
   type Pistas,
 } from '@/lib/cotizaciones/proceso-captura'
-import { aceptarPorRuta, detectarPorRuta, lecturaManualPorRuta, leerPorRuta, MENSAJE_ACEPTAR_SIN_RED } from '@/lib/cotizaciones/bandeja-red'
+import {
+  aceptarLotePorRuta,
+  aceptarPorRuta,
+  detectarPorRuta,
+  escritoAManoPorRuta,
+  lecturaManualPorRuta,
+  leerPorPasosPorRuta,
+  leerPorRuta,
+  MENSAJE_ACEPTAR_SIN_RED,
+  partirLote,
+} from '@/lib/cotizaciones/bandeja-red'
+import { serviciosParaElModelo, type DecisionDelModelo } from '@/lib/cotizaciones/destino-por-pasos'
+import {
+  cuerpoDeAceptar,
+  estadoInicial,
+  filasDelLote,
+  fraseDeFila,
+  menuDeFila,
+  type Eleccion,
+  type EstadoAlAceptar,
+  type FraseDeFila,
+} from '@/lib/cotizaciones/bandeja-por-pasos'
 import { esAvisoFechasFueraDelViaje, esManual } from '@/lib/cotizaciones/ingreso-manual'
 import { fueraDeVista, MENSAJE_PEGADO_EN_BANDEJA } from '@/lib/cotizaciones/lectura-sin-silencio'
-import IngresoManualForm, { type RespuestaManual, type TipoManual } from './ingreso-manual-form'
+import IngresoManualForm, { TITULO_A_MANO, type RespuestaManual, type TipoEscritoAMano, type TipoManual } from './ingreso-manual-form'
 import { esIdDeBorrador, revisarBorrador } from '@/lib/cotizaciones/revisar-borrador'
 import { idAvisoPendiente, pantallazosEnCotizacion, pendienteResuelto, type OpcionLeida } from '@/lib/cotizaciones/bandeja-capturas'
 import {
@@ -44,7 +65,7 @@ import {
   type CorreccionDeBandeja,
 } from '@/lib/cotizaciones/revision-captura'
 import { leidosPorSlug } from '@/lib/cotizaciones/correcciones'
-import { definicionDeTipo, TIPOS_RANURA, type TipoRanura } from '@/lib/cotizaciones/ranuras-cotizacion'
+import { definicionDeTipo, TIPOS_CON_PANTALLAZO, TIPOS_RANURA, type TipoRanura } from '@/lib/cotizaciones/ranuras-cotizacion'
 import type { Composicion, LecturaCasilla } from '@/lib/cotizaciones/tarifa-pasajero'
 import { PREGUNTA_AL_SALIR, saleDeLaPagina } from '@/lib/cotizaciones/aviso-al-salir'
 import { AlertaDecision } from '@/components/viaje/alerta-decision'
@@ -181,6 +202,22 @@ export interface DevolucionABandeja {
 /** Lo que la bandeja expone para recibir los pantallazos de una opción eliminada. */
 export interface ReceptorDeBandeja {
   recibir: (d: DevolucionABandeja) => void
+  /** La cotización por pasos: «Aceptar N» desde «Sigue:», de a una, en la fila de siempre. */
+  aceptarListas?: () => void
+  /** La cotización por pasos: «Pegar pantallazo» desde «Sigue:» abre el selector de archivo. */
+  elegirArchivo?: () => void
+}
+
+/** Cuántos pantallazos esperan «Aceptar» y cuántos se están leyendo (la barra de pasos). */
+export function conteoDeBandeja(capturas: readonly Pick<Captura, 'estado'>[]): { porAceptar: number; leyendo: number } {
+  let porAceptar = 0
+  let leyendo = 0
+  for (const c of capturas) {
+    const f = c.estado.fase
+    if (f === 'mirando' || f === 'leyendo' || f === 'aceptando') leyendo += 1
+    else if (f === 'lista' || f === 'parecida' || f === 'otro_precio' || f === 'eligiendo_tipo' || f === 'eligiendo_opcion' || f === 'rechazada') porAceptar += 1
+  }
+  return { porAceptar, leyendo }
 }
 
 /**
@@ -325,6 +362,8 @@ export default function BandejaCapturas({
   fechasViaje = null,
   destinoViaje = null,
   onCambio,
+  porPasos = false,
+  onConteo,
 }: {
   cotizacionId: string
   /** Las líneas de la cotización: contra ellas se dice a dónde irá cada captura. */
@@ -349,6 +388,13 @@ export default function BandejaCapturas({
    * suyo, que además relee la cotización (`vista-fresca.ts`); sin él, el refresco de siempre.
    */
   onCambio?: () => void
+  /**
+   * La cotización por pasos (interruptor encendido): «Aceptar» manda la marca para que la opción
+   * entre en las tarifas (`aceptarPorPasos`). Sin ella, exactamente lo de siempre.
+   */
+  porPasos?: boolean
+  /** Cuántos esperan «Aceptar» y cuántos se leen: lo cuenta la barra de pasos. */
+  onConteo?: (c: { porAceptar: number; leyendo: number }) => void
 }) {
   const router = useRouter()
   const refrescar = () => (onCambio ? onCambio() : router.refresh())
@@ -392,6 +438,12 @@ export default function BandejaCapturas({
   // Aceptaciones: una a la vez (H1), y un segundo toque no manda otra (R1).
   const aceptando = useRef(new Set<string>())
   const colaAceptar = useRef<Promise<unknown>>(Promise.resolve())
+  // La cotización por pasos (C5): lo que dijo el modelo en la lectura (con su corte), lo que la
+  // persona eligió en el menú de la frase y el estado con que llega cada servicio nuevo.
+  const modelos = useRef(new Map<string, DecisionDelModelo | null>())
+  const [elecciones, setElecciones] = useState<Record<string, Eleccion>>({})
+  const [estadosElegidos, setEstadosElegidos] = useState<Record<string, EstadoAlAceptar>>({})
+  const [aceptandoLote, setAceptandoLote] = useState(false)
 
   const actualizar = useCallback((id: string, cambio: Partial<Captura>) => {
     setCapturas(cs => cs.map(c => (c.id === id ? { ...c, ...cambio } : c)))
@@ -414,7 +466,15 @@ export default function BandejaCapturas({
     return {
       // Por fetch y no por server action: ver `bandeja-red.ts` (la fila de acciones de Next).
       detectar: () => detectarPorRuta(cotizacionId, dataUrl),
-      leer: (tipo, enfoque) => leerPorRuta(cotizacionId, tipo, dataUrl, enfoque),
+      leer: porPasos
+        // Por pasos: la lectura le pregunta además al modelo a dónde va (corte de 2,5 s). Lo que
+        // diga se guarda para la frase de la fila; «Aceptar» no lo vuelve a pedir (V6).
+        ? async (tipo, enfoque) => {
+          const r = await leerPorPasosPorRuta(cotizacionId, tipo, dataUrl, enfoque, serviciosParaElModelo(itemsVivos.current))
+          modelos.current.set(id, r.ok ? (r.modelo ?? null) : null)
+          return r
+        }
+        : (tipo, enfoque) => leerPorRuta(cotizacionId, tipo, dataUrl, enfoque),
       revisar: borrador => revisarBorrador({
         capId: id,
         borrador,
@@ -428,7 +488,7 @@ export default function BandejaCapturas({
       vigente: () => turnos.current.get(id) === turno,
       informar: cambio => actualizar(id, cambio),
     }
-  }, [actualizar, cotizacionId, nuevoTurno])
+  }, [actualizar, cotizacionId, nuevoTurno, porPasos])
 
   const procesar = useCallback(async (id: string, dataUrl: string, tipoElegido?: TipoRanura) => {
     await procesarCaptura(dependencias(id, dataUrl), tipoElegido)
@@ -509,17 +569,37 @@ export default function BandejaCapturas({
       if (nuevas.length > 0) setCapturas(cs => [...nuevas, ...cs])
     }
   }, [])
-  useImperativeHandle(receptor, () => ({ recibir: recibirDevolucion }), [recibirDevolucion])
+  // Las listas, aceptadas de a una en la fila de siempre (el lote con un solo recálculo es C5).
+  const aceptarListasRef = useRef<() => void>(() => {})
+  useImperativeHandle(receptor, () => ({
+    recibir: recibirDevolucion,
+    aceptarListas: () => aceptarListasRef.current(),
+    elegirArchivo: () => (document.getElementById(idEntrada) as HTMLInputElement | null)?.click(),
+  }), [recibirDevolucion, idEntrada])
+  const ultimoConteo = useRef('')
+  useEffect(() => {
+    if (!onConteo) return
+    const c = conteoDeBandeja(capturas)
+    const firma = `${c.porAceptar}:${c.leyendo}`
+    if (firma === ultimoConteo.current) return
+    ultimoConteo.current = firma
+    onConteo(c)
+  }, [capturas, onConteo])
 
   // Ingreso manual: la lectura firmada entra como recién leída, igual que una devuelta.
   const [manualAbierto, setManualAbierto] = useState(false)
-  const enviarManual = useCallback(async (tipo: TipoManual, datos: Record<string, unknown>): Promise<RespuestaManual> => {
-    const r = await lecturaManualPorRuta(cotizacionId, tipo, datos)
+  const enviarManual = useCallback(async (tipo: TipoEscritoAMano, datos: Record<string, unknown>): Promise<RespuestaManual> => {
+    const r = porPasos
+      ? await escritoAManoPorRuta(cotizacionId, tipo, datos)
+      : await lecturaManualPorRuta(cotizacionId, tipo as TipoManual, datos)
     if (!r) return { ok: false, mensaje: 'No se pudo enviar. Tus datos siguen aquí: inténtalo otra vez.' }
     if (!r.ok) return { ok: false, mensaje: r.mensaje, errores: r.errores }
     const id = nuevoId()
     const ciudad = typeof datos.ciudad === 'string' && datos.ciudad.trim() !== '' ? datos.ciudad.trim() : null
-    const pistas: Pistas = { lugar: ciudad, origen: null, destino: null }
+    const texto = (k: string) => (typeof datos[k] === 'string' && (datos[k] as string).trim() !== '' ? (datos[k] as string).trim() : null)
+    const pistas: Pistas = tipo === 'vuelo'
+      ? { lugar: null, origen: texto('origen'), destino: texto('destino') }
+      : { lugar: ciudad, origen: null, destino: null }
     const borrador: Borrador = { tipo, lectura: r.lectura, lecturaJson: r.lecturaJson, firma: r.firma, pistas }
     const rev = revisarBorrador({
       capId: id,
@@ -538,8 +618,9 @@ export default function BandejaCapturas({
       tipo, pistas, borrador, itemId: null, donde: rev.donde, como: rev.como ?? null,
       leida: rev.leida, error: null, huella: null, ...(rev.pregunta ? { abierta: true } : {}),
     }, ...cs])
+    if (porPasos) toast.success('Quedó en la bandeja, igual que un pantallazo. Revisa a dónde va y acéptala.')
     return { ok: true }
-  }, [cotizacionId])
+  }, [cotizacionId, porPasos])
 
   // La tarjeta de cada opción de hotel pinta su ⚠ cuando aquí hay una habitación que sobra.
   const ultimosPendientes = useRef('')
@@ -714,6 +795,8 @@ export default function BandejaCapturas({
     decision: BorradorParaAceptar['decision'],
     destinoId?: string | null,
     correcciones: CorreccionDeBandeja[] = [],
+    /** Por pasos (C5): el estado con que llega un servicio nuevo (P11). */
+    estado?: EstadoAlAceptar | null,
   ) {
     const b = c.borrador
     if (!b || aceptando.current.has(c.id)) return
@@ -725,11 +808,20 @@ export default function BandejaCapturas({
       destinoId: destinoId ?? null, imagen: c.dataUrl || null,
       correcciones: correcciones.length > 0 ? correcciones : null,
       idAceptacion: idDeAceptacion(c),
-    }
+      ...(porPasos ? { porPasos: true } : {}),
+      ...(porPasos && estado ? { estado } : {}),
+    } as BorradorParaAceptar
     const turno = colaAceptar.current.then(() => aceptarPorRuta(cotizacionId, cuerpo))
     colaAceptar.current = turno.catch(() => undefined)
     const d = desenlaceDeAceptacion(await turno)
     aceptando.current.delete(c.id)
+    aplicarDesenlace(c, antes, d)
+    // Como antes: un error deja la fila como estaba y no refresca la página.
+    if (d.tipo !== 'error') refrescar()
+  }
+
+  /** Lo que vuelve de aceptar UNA captura (de a una o en el lote), en su fila. */
+  function aplicarDesenlace(c: Captura, antes: Estado, d: ReturnType<typeof desenlaceDeAceptacion>) {
     if (d.tipo === 'error') {
       actualizar(c.id, { estado: antes, error: d.mensaje })
       return
@@ -740,7 +832,6 @@ export default function BandejaCapturas({
       actualizar(c.id, {
         estado: { fase: 'parecida', conItemId: d.conItemId, donde: nombreDeOpcion(d.conItemId, ubicacionesVivas.current), alertas, habitacion: true },
       })
-      refrescar()
       return
     }
     actualizar(c.id, {
@@ -759,8 +850,97 @@ export default function BandejaCapturas({
       toast.warning(`Quedó un pendiente en ${d.donde}: ${d.pendiente}`, { id: idAvisoPendiente(d.itemId), ...(ver ? { action: ver } : {}) })
       avisosPendientes.current.add(d.itemId)
     }
-    refrescar()
   }
+
+  // ── La cotización por pasos: la frase de cada fila, su menú y «Aceptar los N» (C5) ──
+
+  const frases = useMemo(() => {
+    const m = new Map<string, FraseDeFila>()
+    if (!porPasos) return m
+    for (const c of capturas) {
+      if (c.estado.fase !== 'lista' || !c.borrador) continue
+      const titulo = tituloDeCaptura(c.borrador.tipo, c.borrador.lectura, false) || 'Pantallazo'
+      m.set(c.id, fraseDeFila({
+        captura: { id: c.id, titulo, borrador: c.borrador },
+        lineas: items, composicion, destinoViaje,
+        modelo: modelos.current.get(c.id) ?? null,
+        eleccion: elecciones[c.id] ?? null,
+      }))
+    }
+    return m
+  }, [porPasos, capturas, items, composicion, destinoViaje, elecciones])
+
+  /** La opción que dejó una captura ya aceptada, si la frase apunta a ella. */
+  const destinoAceptado = (f: FraseDeFila | undefined): string | null => {
+    if (!f?.capturaDestino) return null
+    const destino = vigentes.current.find(x => x.id === f.capturaDestino)
+    return destino?.estado.fase === 'aceptada' ? destino.itemId : null
+  }
+
+  function estadoDe(c: Captura, f: FraseDeFila | undefined): EstadoAlAceptar | null {
+    if (!c.borrador || !f) return null
+    const ini = estadoInicial(c.borrador, f.destino)
+    return ini ? (estadosElegidos[c.id] ?? ini.estado) : null
+  }
+
+  /** «Aceptar» de una fila de la forma por pasos: con lo que dice su frase. */
+  function aceptarPorPasos(c: Captura, correcciones: CorreccionDeBandeja[]) {
+    const f = frases.get(c.id)
+    if (!c.borrador || !f) return void aceptar(c, 'auto', null, correcciones)
+    const dest = destinoAceptado(f)
+    if (f.capturaDestino && !dest) {
+      actualizar(c.id, { error: 'Acepta primero la captura de la que es opción, o toca «Aceptar los N» para aceptarlas juntas.' })
+      return
+    }
+    const cuerpo = cuerpoDeAceptar(c.borrador, f, { imagen: null, correcciones: null, idAceptacion: c.id, destinoId: dest })
+    void aceptar(c, cuerpo.decision, cuerpo.destinoId, correcciones, estadoDe(c, f))
+  }
+
+  /**
+   * «Aceptar los N»: las listas en el orden en que se pegaron, en un solo envío (o en varios si
+   * las imágenes no caben), con un recálculo por envío. Pasa por la misma fila que «Aceptar»: no
+   * se cruza con una aceptación de a una.
+   */
+  async function aceptarLote() {
+    if (aceptandoLote) return
+    const listas = vigentes.current.filter(c => c.estado.fase === 'lista' && c.borrador && frases.has(c.id) && !aceptando.current.has(c.id))
+    if (listas.length === 0) return
+    setAceptandoLote(true)
+    const antes = new Map(listas.map(c => [c.id, c.estado] as const))
+    for (const c of listas) {
+      aceptando.current.add(c.id)
+      actualizar(c.id, { estado: { fase: 'aceptando' }, error: null })
+    }
+    const filas = filasDelLote(listas.map(c => {
+      const f = frases.get(c.id)!
+      return { id: c.id, borrador: c.borrador!, frase: f, estado: estadoDe(c, f), imagen: c.dataUrl || null, destinoAceptado: destinoAceptado(f) }
+    }))
+    const porId = new Map(listas.map(c => [c.id, c] as const))
+    const turno = colaAceptar.current.then(async () => {
+      for (const envio of partirLote(filas)) {
+        const r = await aceptarLotePorRuta(cotizacionId, envio)
+        for (const fila of envio) {
+          const c = porId.get(fila.id)!
+          aceptando.current.delete(c.id)
+          const resultado = r.ok ? r.resultados.find(x => x.id === fila.id)?.resultado ?? null : { ok: false as const, codigo: r.codigo, mensaje: r.mensaje }
+          aplicarDesenlace(c, antes.get(c.id)!, desenlaceDeAceptacion(resultado))
+        }
+        if (r.ok && r.tarifas) toast.warning(`Las capturas entraron, pero las tarifas no se pusieron al día: ${r.tarifas}`)
+      }
+    })
+    colaAceptar.current = turno.catch(() => undefined)
+    try {
+      await turno
+    } finally {
+      setAceptandoLote(false)
+      refrescar()
+    }
+  }
+
+  // «Aceptar N» de la cotización por pasos («Sigue:»): el lote, con un solo recálculo (C5).
+  useEffect(() => {
+    aceptarListasRef.current = () => { void aceptarLote() }
+  })
 
   /** «Agregar igual» / «Agregar como otra opción» / «Es una habitación más». */
   function agregarIgual(c: Captura) {
@@ -842,7 +1022,17 @@ export default function BandejaCapturas({
           }}
         />
       </label>
-      {manualAbierto ? (
+      {porPasos ? (
+        // C5 · «o ✎ Escríbelo a mano», al lado del pegado y siempre a la vista: reemplaza
+        // «Ingresar a mano» (solo con la forma por pasos).
+        manualAbierto ? (
+          <IngresoManualForm porPasos composicion={composicion} fechasViaje={fechasViaje} onEnviar={enviarManual} onCerrar={() => setManualAbierto(false)} />
+        ) : (
+          <p className="m-0 text-[13px] text-[#6E6A62]">
+            o <button type="button" onClick={() => setManualAbierto(true)} className={LINK} data-abrir-escrito-a-mano>{TITULO_A_MANO}</button>
+          </p>
+        )
+      ) : manualAbierto ? (
         <IngresoManualForm composicion={composicion} fechasViaje={fechasViaje} onEnviar={enviarManual} onCerrar={() => setManualAbierto(false)} />
       ) : (
         <p className="m-0 text-[13px] text-[#6E6A62]">
@@ -850,20 +1040,54 @@ export default function BandejaCapturas({
           <button type="button" onClick={() => setManualAbierto(true)} className={LINK} data-abrir-ingreso-manual>Ingresar a mano</button>
         </p>
       )}
+      {porPasos && frases.size >= 2 && (
+        <div className="flex flex-wrap items-center gap-2 rounded-lg bg-[#EAF1EE] px-3 py-2" data-aceptar-lote>
+          <span className="min-w-0 flex-1 text-[13px]">{frases.size} pantallazos leídos. Revisa la frase de cada uno: si está bien, acéptalos juntos.</span>
+          <button type="button" onClick={() => void aceptarLote()} className={BTN_PRIM} disabled={aceptandoLote} data-boton-aceptar-lote>
+            {aceptandoLote && <span className={SPIN} aria-hidden />}
+            Aceptar los {frases.size}
+          </button>
+        </div>
+      )}
       {visibles.length > 0 && (
         <ul className="m-0 flex list-none flex-col p-0" aria-label="Pantallazos pegados" data-lista-capturas>
           {visibles.map(c => {
             const p = pronostico.get(c.id)
+            const f = frases.get(c.id)
+            const ini = f && c.borrador ? estadoInicial(c.borrador, f.destino) : null
+            const pasos: PasosDeFila | undefined = f && c.borrador ? {
+              frase: f.frase,
+              razon: f.destino.razon,
+              duda: f.destino.duda,
+              completa: f.destino.como === 'completa',
+              menu: menuDeFila(
+                { id: c.id, titulo: tituloDeCaptura(c.borrador.tipo, c.borrador.lectura, false) || 'Pantallazo', borrador: c.borrador },
+                items,
+                capturas.filter(x => frases.has(x.id) && x.borrador).map(x => ({
+                  captura: { id: x.id, titulo: tituloDeCaptura(x.borrador!.tipo, x.borrador!.lectura, false) || 'Pantallazo', borrador: x.borrador! },
+                  frase: frases.get(x.id)!,
+                })),
+              ).map(m => ({ etiqueta: m.etiqueta, onElegir: () => setElecciones(prev => ({ ...prev, [c.id]: m.eleccion })) })),
+              estado: ini ? {
+                valor: estadosElegidos[c.id] ?? ini.estado,
+                motivo: ini.motivo,
+                onCambiar: (e: EstadoAlAceptar) => setEstadosElegidos(prev => ({ ...prev, [c.id]: e })),
+              } : null,
+              aMano: esManual(c.borrador.lectura),
+              onAceptar: correcciones => aceptarPorPasos(c, correcciones),
+            } : undefined
             return (
               <FilaCaptura
                 key={c.id}
                 captura={p ? { ...c, donde: p.donde, como: p.como } : c}
                 ubicaciones={ubicaciones}
+                pasos={pasos}
                 onAceptar={correcciones => void aceptar(c, 'auto', null, correcciones)}
                 onBorrar={() => borrar(c)}
                 onDescartar={() => borrar(c, 'descartada')}
                 onDeshacer={() => void deshacer(c)}
                 onElegirTipo={t => void procesar(c.id, c.dataUrl, t)}
+                tiposElegibles={porPasos ? TIPOS_RANURA : TIPOS_CON_PANTALLAZO}
                 onReintentar={() => reintentar(c)}
                 onElegirOpcion={o => elegirOpcion(c, o)}
                 onAgregarIgual={() => agregarIgual(c)}
@@ -883,10 +1107,29 @@ export default function BandejaCapturas({
 
 const NADA = () => {}
 
+/**
+ * Lo que la fila de la cotización por pasos agrega (C5): la frase de a dónde va (tocable), su
+ * razón, el estado con que llega y la marca «✎ a mano».
+ */
+export interface PasosDeFila {
+  frase: string
+  razon: string | null
+  /** ONE dudó: la razón va en ámbar. */
+  duda: boolean
+  /** «Completa SATENA: precio del niño»: en verde, no crea un servicio. */
+  completa: boolean
+  menu: { etiqueta: string; onElegir: () => void }[]
+  /** Incluido · Opcional de un servicio nuevo de traslado o actividad. `null` = no aplica. */
+  estado: { valor: EstadoAlAceptar; motivo: string | null; onCambiar: (e: EstadoAlAceptar) => void } | null
+  aMano: boolean
+  onAceptar: (correcciones: CorreccionDeBandeja[]) => void
+}
+
 /** Exportada para la prueba de render. */
 export function FilaCaptura({
   captura: c,
   ubicaciones = SIN_UBICACIONES,
+  pasos,
   onAceptar = NADA,
   onBorrar = NADA,
   onDescartar = NADA,
@@ -898,8 +1141,14 @@ export function FilaCaptura({
   onReemplazarPrecio = NADA,
   onVer,
   onAmpliar,
+  tiposElegibles = TIPOS_CON_PANTALLAZO,
 }: {
   captura: Captura
+  /**
+   * Los tipos que se ofrecen cuando ONE no reconoce el pantallazo. La cotización por pasos suma
+   * «Es otro servicio» (asistencia médica, seguro); la de siempre, los cuatro de siempre.
+   */
+  tiposElegibles?: readonly TipoRanura[]
   ubicaciones?: Readonly<Record<string, Ubicacion>>
   /** Con lo que la persona corrigió en la fila (H4). */
   onAceptar?: (correcciones: CorreccionDeBandeja[]) => void
@@ -918,10 +1167,13 @@ export function FilaCaptura({
   onReemplazarPrecio?: () => void
   onVer?: (itemId: string) => void
   onAmpliar?: (src: string, caption: string) => void
+  /** La cotización por pasos (C5). Sin esto, la fila de siempre. */
+  pasos?: PasosDeFila
 }) {
   // Lo que la persona escribió en los campos de la fila. Lo que no tocó sigue siendo lo leído.
   const [escritos, setEscritos] = useState<Record<string, string>>({})
   const [errores, setErrores] = useState<Record<string, string>>({})
+  const [menuAbierto, setMenuAbierto] = useState(false)
 
   const e = c.estado
   const lectura = c.borrador?.lectura ?? null
@@ -1011,7 +1263,7 @@ export function FilaCaptura({
         {estado(e.motivo === MENSAJE_DETECCION_SIN_RED ? 'Se cortó la conexión' : 'No se reconoce qué es')}
         <span className="text-[13px] text-[#6E6A62]">{e.motivo}</span>
         <div className="mt-1 flex flex-wrap gap-2">
-          {TIPOS_RANURA.map(t => (
+          {tiposElegibles.map(t => (
             <button key={t} type="button" onClick={() => onElegirTipo(t)} className={BTN}>
               Es {definicionDeTipo(t).label.toLowerCase()}
             </button>
@@ -1050,6 +1302,16 @@ export function FilaCaptura({
         {e.reintentar && (
           <div className="mt-1 flex flex-wrap gap-2">
             <button type="button" onClick={onReintentar} className={BTN_PRIM} data-reintentar-captura>Reintentar</button>
+          </div>
+        )}
+        {/* H19 · un rechazo de la lectura nunca deja la fila sin salida: se puede decir qué es. */}
+        {!e.reintentar && tipo && (
+          <div className="mt-1 flex flex-wrap gap-2" data-reclasificar-captura>
+            {tiposElegibles.filter(t => t !== tipo).map(t => (
+              <button key={t} type="button" onClick={() => onElegirTipo(t)} className={BTN}>
+                Es {definicionDeTipo(t).label.toLowerCase()}
+              </button>
+            ))}
           </div>
         )}
       </>,
@@ -1116,15 +1378,58 @@ export function FilaCaptura({
     const r = correccionesDeRevision(tipo, campos, escritos)
     if (!r.ok) { setErrores(r.errores); return }
     setErrores({})
-    onAceptar(r.correcciones)
+    if (pasos) pasos.onAceptar(r.correcciones)
+    else onAceptar(r.correcciones)
   }
+
+  // C5 · la frase de a dónde va, tocable, con su razón; el estado con que llega; «✎ a mano».
+  const bloquePasos = pasos ? (
+    <div className="flex flex-col gap-1" data-frase-fila>
+      <div className="relative flex flex-wrap items-center gap-x-2 gap-y-1">
+        <button
+          type="button"
+          onClick={() => setMenuAbierto(v => !v)}
+          aria-expanded={menuAbierto}
+          className={`rounded-md border px-2 py-0.5 text-left text-[13px] font-semibold ${pasos.completa ? 'border-[#0E5C43] bg-[#EAF1EE] text-[#0E5C43]' : 'border-[#CFCAC0] bg-white text-[#191713]'}`}
+          data-frase-destino
+        >
+          {pasos.frase} ▾
+        </button>
+        {pasos.estado && (
+          <select
+            value={pasos.estado.valor}
+            onChange={ev => pasos.estado!.onCambiar(ev.target.value as EstadoAlAceptar)}
+            aria-label="Cómo llega"
+            className="rounded-md border border-[#CFCAC0] bg-white px-1.5 py-0.5 text-[13px]"
+            data-estado-al-aceptar
+          >
+            <option value="incluido">Incluido</option>
+            <option value="opcional">Opcional</option>
+          </select>
+        )}
+        {menuAbierto && (
+          <div role="menu" className="absolute left-0 top-full z-10 mt-1 flex min-w-[240px] flex-col rounded-lg border border-[#CFCAC0] bg-white py-1 shadow-md" data-menu-frase>
+            {pasos.menu.map(m => (
+              <button key={m.etiqueta} type="button" role="menuitem" onClick={() => { m.onElegir(); setMenuAbierto(false) }} className="px-3 py-1.5 text-left text-[13px] hover:bg-[#F8F7F3]">
+                {m.etiqueta}
+              </button>
+            ))}
+          </div>
+        )}
+      </div>
+      {pasos.razon && <span className={`text-xs ${pasos.duda ? 'font-medium text-[#9A5F0C]' : 'text-[#6E6A62]'}`} data-razon-destino>{pasos.razon}</span>}
+      {pasos.estado?.valor === 'opcional' && pasos.estado.motivo && (
+        <span className="text-xs text-[#6E6A62]" data-motivo-opcional>Llega Opcional: el pantallazo dice «{pasos.estado.motivo}».</span>
+      )}
+    </div>
+  ) : null
 
   return fila(
     miniatura,
     <>
-      {tituloFila}
+      {pasos?.aMano ? <span className="flex flex-wrap items-center gap-2">{tituloFila}<span className="rounded-full bg-[#F1EEE7] px-2 py-0.5 text-[11px] font-semibold text-[#6E6A62]" data-marca-a-mano>✎ a mano</span></span> : tituloFila}
       {textoFechas}
-      {pregunta && <span className="text-sm">{pregunta}</span>}
+      {bloquePasos ?? (pregunta && <span className="text-sm">{pregunta}</span>)}
       {sinDatos && <span className="text-[13px] text-[#6E6A62]">La lectura no dejó datos para la ficha: al aceptarla, revísala en su bloque.</span>}
       {campos.length > 0 && (
         <div className="mt-1 grid grid-cols-3 gap-2 max-sm:grid-cols-2">

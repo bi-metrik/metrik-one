@@ -82,6 +82,7 @@ import {
   absorberRedondeo,
   altoEstimadoDeGrupoDeVuelos,
   capitulosDelViaje,
+  aerolineaDeFila,
   circuloDeFecha,
   claveDeFecha,
   clienteDeLaPortada,
@@ -101,7 +102,6 @@ import {
   numerosSinTramo,
   rangoCompacto,
   renglonesDeFotos,
-  siglaAerolinea,
   sinCancelacionDelProveedor,
   sinTildes,
   tablaDeVuelosVaEntera,
@@ -121,6 +121,7 @@ import { estructurarTerminos, type BloqueDeTerminos } from '@/lib/cotizaciones/t
 import { tituloDeBloquePDF } from '@/lib/cotizaciones/itinerarios'
 import { textoIvaIncluido } from '@/lib/fiscal/iva-cotizacion'
 import type { HotelPDF, VueloPDF } from '@/lib/cotizaciones/detalle-viaje'
+import { asiPuedesPagar, notaDeFila, TITULO_ASI_PUEDES_PAGAR } from '@/lib/viaje/asi-puedes-pagar'
 
 /** Ver la nota de `SIN_GUION` en la plantilla de Termotech: la regla es por `<Text>`. */
 const SIN_GUION = partirPalabraLarga
@@ -798,9 +799,14 @@ function TablaVuelos({ vuelos, general, tarifas, titulo, marca, esp }: { vuelos:
   const ancho = (c: ColumnaVuelo) => `${(PESO_COLUMNA[c] / total) * 100}%`
   const pad = (j: number) => (j === columnas.length - 1 ? 0 : CANAL)
 
-  const celda = (f: FilaVuelo, c: ColumnaVuelo): ReactNode => {
+  const celda = (filas: FilaVuelo[], fi: number, c: ColumnaVuelo): ReactNode => {
+    const f = filas[fi]
     if (c === 'aerolinea') {
-      const sigla = siglaAerolinea(f.vuelo.aerolinea, f.vuelo.numeroVuelo)
+      // Una pastilla por vuelo: la primera fila nombra la aerolínea; las demás van vacías (la
+      // celda se lee alta), salvo un trayecto de otra aerolínea (`aerolineaDeFila`).
+      const marca = aerolineaDeFila(filas, fi)
+      if (!marca) return <View />
+      const sigla = marca.sigla
       // El color sale del catálogo de aerolíneas (brief del 2026-10-08); el secundario va como
       // franja de 3 pt al pie, DENTRO de los 14 pt de la pastilla: la fila no cambia de alto.
       const color = sigla ? colorDeAerolinea(sigla) : null
@@ -827,7 +833,7 @@ function TablaVuelos({ vuelos, general, tarifas, titulo, marca, esp }: { vuelos:
             </View>
           )}
           <Text hyphenationCallback={SIN_GUION} style={{ fontSize: 8.5, fontFamily: 'Helvetica-Bold', color: C.tinta, flex: 1 }}>
-            {f.vuelo.aerolinea ?? f.vuelo.linea}
+            {marca.nombre}
           </Text>
         </View>
       )
@@ -875,12 +881,16 @@ function TablaVuelos({ vuelos, general, tarifas, titulo, marca, esp }: { vuelos:
           <View
             key={`vuelo-${gi}`}
             wrap={false}
-            style={{ backgroundColor: gi % 2 === 1 ? C.tarjeta : C.blanco, paddingHorizontal: 8, paddingVertical: 4 }}
+            style={{
+              backgroundColor: gi % 2 === 1 ? C.tarjeta : C.blanco, paddingHorizontal: 8, paddingVertical: 4,
+              // Una línea entre un vuelo y el siguiente: la celda de la aerolínea se lee por vuelo.
+              ...(gi > 0 ? { borderTopWidth: 0.5, borderTopColor: C.linea } : {}),
+            }}
           >
-            {g.filas.map((f, fi) => (
+            {g.filas.map((_f, fi) => (
               <View key={`f-${fi}`} style={{ flexDirection: 'row', marginTop: fi === 0 ? 0 : 4 }}>
                 {columnas.map((c, j) => (
-                  <View key={`td-${c}`} style={{ width: ancho(c), paddingRight: pad(j) }}>{celda(f, c)}</View>
+                  <View key={`td-${c}`} style={{ width: ancho(c), paddingRight: pad(j) }}>{celda(g.filas, fi, c)}</View>
                 ))}
               </View>
             ))}
@@ -1204,6 +1214,7 @@ export default function CotizacionTrappvelPDF({
   negocio,
   emisor,
   viaje,
+  asiPuedesPagar: entradaPlan,
   composicion,
 }: CotizacionPDFProps & {
   /**
@@ -1239,6 +1250,8 @@ export default function CotizacionTrappvelPDF({
   const notaIva = ivaIncluido && ivaIncluido.nota && ivaIncluido.iva > 0 ? textoIvaIncluido(ivaIncluido.iva, pesos) : null
   const iva = ivaIncluido ? 0 : fiscal?.iva ?? 0
   const total = fiscal?.totalBruto ?? subtotal + iva
+  /** «Así puedes pagar» sobre ESTE total (Vera F2-1): sin la entrada, no existe. */
+  const planCliente = entradaPlan ? asiPuedesPagar(total, entradaPlan) : null
 
   /**
    * R7 · las TRES tarifas que van en la propuesta. Cada bloque imprime SU combinación,
@@ -1808,6 +1821,38 @@ export default function CotizacionTrappvelPDF({
             </View>
           )}
           </>
+
+          {/* ── Así puedes pagar (F2, Noor §4.1) ─────────────────────────────
+              Debajo del TOTAL, con montos y fechas de la regla 80/15 sobre ese mismo total.
+              Sin fecha de salida, la regla en palabras. Solo con `plan_pagos.activo`. */}
+          {planCliente && (
+            <>
+              <Aire alto={ei.tarjetas} />
+              <View wrap={false} style={{ borderRadius: 8, backgroundColor: C.tarjeta, padding: ei.dentro }}>
+                <Text style={{ fontSize: 9, fontFamily: 'Helvetica-Bold', color: C.tinta }}>{TITULO_ASI_PUEDES_PAGAR}</Text>
+                {planCliente.filas ? (
+                  <>
+                    {planCliente.filas.map((f, i) => {
+                      const nota = notaDeFila(f, planCliente.pctMinimo, pesos)
+                      return (
+                        <View key={`plan-${i}`} style={{ flexDirection: 'row', marginTop: ei.fino }}>
+                          <Text style={{ fontSize: 8.5, fontFamily: 'Helvetica-Bold', color: C.tinta, width: 90 }}>{pesos(f.monto)}</Text>
+                          <Text style={{ fontSize: 8.5, color: C.tinta, flexGrow: 1, flexBasis: 0 }}>
+                            {f.cuando}{nota ? ` · ${nota}` : ''}
+                          </Text>
+                        </View>
+                      )
+                    })}
+                    <Text style={{ fontSize: 7.5, color: C.gris, marginTop: ei.dentro }}>{planCliente.pie}</Text>
+                  </>
+                ) : (
+                  <Text style={{ fontSize: 8.5, color: C.tinta, marginTop: ei.fino }}>
+                    {planCliente.regla} {planCliente.pie}
+                  </Text>
+                )}
+              </View>
+            </>
+          )}
 
           {/* ── Precio por tipo de pasajero, del viaje entero ──────────────────
               ⚠️⚠️ Esta tabla y el TOTAL son dinero del MISMO viaje: la diferencia se
