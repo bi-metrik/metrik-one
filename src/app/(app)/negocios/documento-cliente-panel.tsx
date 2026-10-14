@@ -15,6 +15,7 @@ import {
   type TextoCliente,
 } from '@/lib/cotizaciones/documento-cliente'
 import { LIMITE_TERMINOS, normalizarTerminos, terminosAlAbrir } from '@/lib/cotizaciones/terminos-cotizacion'
+import { lineasPropias } from '@/lib/cotizaciones/incluye-por-one'
 import { formatBogotaFechaHora } from '@/lib/dates/bogota'
 
 /**
@@ -70,6 +71,18 @@ function textoDe(t: TextoCliente | null): Omit<Borrador, 'terminos'> {
     incluye: t?.incluye.length ? [...t.incluye] : [],
     antes: t?.antes_de_viajar.length ? [...t.antes_de_viajar] : [],
   }
+}
+
+/**
+ * C6 · con «Incluye» armado por ONE, el formulario solo edita las líneas PROPIAS de la asesora:
+ * las del documento marcado, o las que escribió una persona y no repiten un renglón de ONE. Lo que
+ * redactó el modelo no es propio de nadie: lo reemplaza lo de ONE.
+ */
+function textoPorPasos(doc: PanelTextoCliente['documento'], deOne: readonly string[]): Omit<Borrador, 'terminos'> {
+  const base = textoDe(doc)
+  if (!doc) return base
+  const propias = doc.incluye_origen === 'one' ? doc.incluye : doc.origen === 'persona' ? lineasPropias(doc.incluye, deOne) : []
+  return { ...base, incluye: [...propias] }
 }
 
 const mismoTexto = (a: Borrador, b: Borrador) =>
@@ -199,24 +212,35 @@ function ListaEditable({
 export default function DocumentoClientePanel({
   cotizacionId,
   inicial,
+  incluyeDeOne = null,
 }: {
   cotizacionId: string
   inicial: PanelTextoCliente
+  /**
+   * C6 · la forma por pasos con la pieza `incluye_por_one`: los renglones que arma ONE con lo que
+   * se cobra. Con ellos «Incluido en el plan» se muestra armado y solo se editan las líneas
+   * propias; guardar y redactar dejan la marca. `null` = el panel de siempre.
+   */
+  incluyeDeOne?: string[] | null
 }) {
+  const porPasos = incluyeDeOne !== null
+  const textoInicial = (doc: PanelTextoCliente['documento']) => (porPasos ? textoPorPasos(doc, incluyeDeOne ?? []) : textoDe(doc))
   const [panel, setPanel] = useState(inicial)
   // Los términos al abrir: los guardados, o la propuesta de la línea en un borrador sin términos.
   const [apertura] = useState(() =>
     terminosAlAbrir({ terminos: inicial.terminos, terminosBase: inicial.terminosBase, editable: inicial.editable && inicial.columnaPresente }),
   )
-  const [guardado, setGuardado] = useState<Borrador>(() => ({ ...textoDe(inicial.documento), terminos: inicial.terminos ?? '' }))
-  const [form, setForm] = useState<Borrador>(() => ({ ...textoDe(inicial.documento), terminos: apertura.valor }))
+  const [guardado, setGuardado] = useState<Borrador>(() => ({ ...textoInicial(inicial.documento), terminos: inicial.terminos ?? '' }))
+  const [form, setForm] = useState<Borrador>(() => ({ ...textoInicial(inicial.documento), terminos: apertura.valor }))
   const [foco, setFoco] = useState<Zona | null>(null)
   const [redactando, startRedactar] = useTransitionTolerante()
   const [guardando, startGuardar] = useTransitionTolerante()
 
   const doc = panel.documento
   const estado = estadoDelTexto(doc)
-  const cambiosTexto = !mismoTexto(form, guardado)
+  // C6 · un texto guardado sin la marca todavía imprime el «Incluye» viejo: hay que guardarlo.
+  const sinMarca = porPasos && !!doc && doc.incluye_origen !== 'one'
+  const cambiosTexto = !mismoTexto(form, guardado) || sinMarca
   const cambios = cambiosTexto || !mismosTerminos(form, guardado)
   const editable = panel.editable && panel.columnaPresente
   const ocupado = redactando || guardando
@@ -242,7 +266,7 @@ export default function DocumentoClientePanel({
    */
   const aplicar = (nuevo: PanelTextoCliente, opciones?: { conservarTerminos?: boolean }) => {
     setPanel(nuevo)
-    const texto = textoDe(nuevo.documento)
+    const texto = textoInicial(nuevo.documento)
     const terminosGuardados = nuevo.terminos ?? ''
     setGuardado({ ...texto, terminos: terminosGuardados })
     setForm(f => ({ ...texto, terminos: opciones?.conservarTerminos ? f.terminos : terminosGuardados }))
@@ -257,7 +281,7 @@ export default function DocumentoClientePanel({
       return
     }
     startRedactar(async () => {
-      const res = await redactarDocumentoCliente(cotizacionId, { reemplazarRevisado })
+      const res = await redactarDocumentoCliente(cotizacionId, porPasos ? { reemplazarRevisado, porPasos: true } : { reemplazarRevisado })
       if (res.success) {
         aplicar(res.panel, { conservarTerminos: true })
         toast.success('Borrador listo. Revísalo y guárdalo para que salga en el PDF.')
@@ -275,7 +299,9 @@ export default function DocumentoClientePanel({
       antes_de_viajar: form.antes,
     }
     startGuardar(async () => {
-      const res = await guardarDocumentoCliente(cotizacionId, texto, form.terminos)
+      const res = porPasos
+        ? await guardarDocumentoCliente(cotizacionId, texto, form.terminos, { porPasos: true })
+        : await guardarDocumentoCliente(cotizacionId, texto, form.terminos)
       if (res.success) {
         aplicar(res.panel)
         toast.success(
@@ -395,14 +421,46 @@ export default function DocumentoClientePanel({
         )}
       </div>
 
-      <ListaEditable
-        zona="incluye"
-        filas={form.incluye}
-        onChange={incluye => setForm({ ...form, incluye })}
-        onFocus={() => setFoco('incluye')}
-        editable={editable}
-        placeholder="Agregar renglón"
-      />
+      {porPasos ? (
+        // C6 · «Incluye · Lo arma ONE con lo que se cobra»: lo de ONE no se edita (nunca queda
+        // viejo); debajo, las líneas propias, que se conservan.
+        <div className="space-y-1.5" onFocus={() => setFoco('incluye')} data-incluye-por-one>
+          <div>
+            <p className="text-xs font-semibold">Incluye · Lo arma ONE con lo que se cobra</p>
+            <p className="text-[11px] text-muted-foreground">Sale al final. ONE lo rehace solo cuando cambia un servicio: no se edita aquí.</p>
+          </div>
+          {incluyeDeOne!.length === 0
+            ? <p className="text-xs text-muted-foreground">Todavía no hay servicios que se cobren en la Recomendada.</p>
+            : incluyeDeOne!.map(r => (
+              <div key={r} className="flex items-start gap-1.5">
+                <span className="mt-2 h-1.5 w-1.5 shrink-0 rounded-full bg-muted-foreground/60" />
+                <p className="flex-1 py-1 text-xs">{r}</p>
+              </div>
+            ))}
+          <ListaEditable
+            zona="incluye"
+            filas={form.incluye}
+            onChange={incluye => setForm({ ...form, incluye })}
+            onFocus={() => setFoco('incluye')}
+            editable={editable}
+            placeholder="Agregar una línea tuya"
+          />
+          {sinMarca && editable && (
+            <p className="text-[11px] text-amber-800" data-incluye-sin-guardar>
+              Guarda el texto para que el PDF use la lista que arma ONE.
+            </p>
+          )}
+        </div>
+      ) : (
+        <ListaEditable
+          zona="incluye"
+          filas={form.incluye}
+          onChange={incluye => setForm({ ...form, incluye })}
+          onFocus={() => setFoco('incluye')}
+          editable={editable}
+          placeholder="Agregar renglón"
+        />
+      )}
       <ListaEditable
         zona="antes"
         filas={form.antes}

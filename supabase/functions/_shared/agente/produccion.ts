@@ -22,14 +22,17 @@ import { cargarEnExistente, trazaCarga } from '../wa-carga-reglas.ts';
 import { textoParaModelo } from '../wa-guardianes.ts';
 import { lineaCargada, mensajesDeTextos, planDeCarga, propuestoDe, registradoDe } from './bandeja/carga.ts';
 import type { PlanCarga } from './bandeja/carga.ts';
-import { esquemaCarga, instruccionesCarga } from './bandeja/extraccion.ts';
+import { esquemaCarga, esquemaCargaCompacta, instruccionesCarga, omitidosCompacta } from './bandeja/extraccion.ts';
 import { aplanarBloques, calcularNiveles } from '../niveles-solicitud.ts';
 import { todayBogotaISO } from '../bogota.ts';
+import { renombrarSegunPlantilla } from '../nombre-viaje.ts';
 import { enviarAvisoInterno } from '../wa-alerta.ts';
 import type { SupabaseClient } from '../types.ts';
 import { fichaValida, huellaDe } from './reglamento.ts';
 import type { PuertoBandeja, ViajeAgente } from './bandeja/dominio.ts';
 import type { AutorizacionAgente } from './bandeja/autorizacion.ts';
+import { planGuardado } from '../perfil-contacto.ts';
+import type { EstadoPerfil } from '../perfil-contacto.ts';
 import type { PuertosCupo } from './uso.ts';
 import type { Almacen, FilaConversacion, Mensajero, Reglamento, Salida, Traza } from './tipos.ts';
 
@@ -146,9 +149,11 @@ function relUno(v: unknown): Fila | null {
   return Array.isArray(v) ? (v[0] as Fila | undefined) ?? null : (v as Fila | null) ?? null;
 }
 
-export function puertoBandejaSupabase(supabase: SupabaseClient, workspaceId: string, staffId: string | null): PuertoBandeja {
+export function puertoBandejaSupabase(
+  supabase: SupabaseClient, workspaceId: string, staffId: string | null, o: { extraccionCompacta?: boolean } = {},
+): PuertoBandeja {
   const leerViaje = async (codigo: string): Promise<ViajeAgente | null | 'error'> => {
-    const { data: neg, error } = await supabase.from('negocios').select('id, codigo, nombre, estado, contactos(nombre)')
+    const { data: neg, error } = await supabase.from('negocios').select('id, codigo, nombre, estado, contacto_id, contactos(nombre)')
       .eq('workspace_id', workspaceId).eq('codigo', codigo).maybeSingle();
     if (error) return 'error';
     if (!neg) return null;
@@ -161,6 +166,7 @@ export function puertoBandejaSupabase(supabase: SupabaseClient, workspaceId: str
       codigo: String(neg.codigo),
       nombre: String(neg.nombre ?? ''),
       cliente: (relUno(neg.contactos)?.nombre as string | undefined) ?? null,
+      contactoId: (neg.contacto_id as string | null) ?? null,
       destino: typeof valores.destino === 'string' ? valores.destino : null,
       abierto: neg.estado === 'abierto',
       faltaCotizar: n.minimo.faltan.map((f) => f.label),
@@ -179,6 +185,12 @@ export function puertoBandejaSupabase(supabase: SupabaseClient, workspaceId: str
     porNombre: (t) => fichasPorNombre(supabase, workspaceId, t),
     porLlave: (l) => fichasPorLlave(supabase, workspaceId, l),
     viaje: leerViaje,
+    async codigosExistentes(candidatos) {
+      if (!candidatos.length) return [];
+      const { data, error } = await supabase.from('negocios').select('codigo').eq('workspace_id', workspaceId).in('codigo', candidatos.slice(0, 20));
+      if (error) return 'error';
+      return ((data ?? []) as Fila[]).map((x) => String(x.codigo));
+    },
     async crearViaje(p) {
       const cfg = await configDeLinea(supabase, workspaceId);
       if (typeof cfg === 'string') throw new Error(cfg);
@@ -194,8 +206,20 @@ export function puertoBandejaSupabase(supabase: SupabaseClient, workspaceId: str
       if (typeof bloques === 'string') throw new Error(bloques);
       const { fields, valores: yaTiene } = aplanarBloques(bloques.map((b) => ({ fields: b.fields, data: b.data })));
       const campos = fields as CampoEntendible[];
-      const lectura = await leerConModelo(instruccionesCarga(campos, todayBogotaISO(), yaTiene, propuestoDe(previo)), `Mensajes:\n${textoParaModelo(mensajesDeTextos(textos))}`, esquemaCarga(campos));
+      const compacta = o.extraccionCompacta === true;
+      const t0 = performance.now();
+      const lectura = await leerConModelo(
+        // `perfil`: lo de la persona sale aparte y va a su perfil como sugerido con el toque de la carga.
+        instruccionesCarga(campos, todayBogotaISO(), yaTiene, propuestoDe(previo), undefined, { compacta, perfil: true }),
+        `Mensajes:\n${textoParaModelo(mensajesDeTextos(textos))}`,
+        compacta ? esquemaCargaCompacta(campos, { perfil: true }) : esquemaCarga(campos, { perfil: true }),
+      );
       if (lectura.error || lectura.json === null) throw new Error(lectura.error ?? 'sin lectura');
+      if (compacta) {
+        // Para medir la compacta en vivo: cuánto tardó y si se saltó campos (ni en datos ni en sin_dato).
+        const omitidos = omitidosCompacta(lectura.json, campos);
+        console.log(`[agente] extracción compacta ${Math.round(performance.now() - t0)} ms${omitidos.length ? `; omitió ${omitidos.join(', ')}` : ''}`);
+      }
       return planDeCarga({
         bloques: bloques.map((b) => ({ fields: b.fields as CampoEntendible[], data: b.data })), textos, raw: lectura.json,
         hoyISO: todayBogotaISO(), ahoraIso: new Date().toISOString(), previo,
@@ -224,6 +248,8 @@ export function puertoBandejaSupabase(supabase: SupabaseClient, workspaceId: str
           quitados.push(...r.quitados);
         }
       }
+      // El nombre automático del viaje sigue a sus campos (destino, fechas), si nadie lo renombró a mano.
+      if (escritos.length || quitados.length) await renombrarSegunPlantilla(supabase, viajeId, [...escritos, ...quitados]);
       const { data: neg } = await supabase.from('negocios').select('codigo').eq('id', viajeId).maybeSingle();
       const { error } = await supabase.from('activity_log').insert({
         workspace_id: workspaceId, entidad_tipo: 'negocio', entidad_id: viajeId, tipo: 'cambio_sistema', autor_id: staffId,
@@ -274,6 +300,50 @@ export function puertoBandejaSupabase(supabase: SupabaseClient, workspaceId: str
         whatsapp: texto(mensajes.whatsapp),
         instruccion: texto(mensajes.instruccion_comercial),
       };
+    },
+    async autorizado(contactoId: string) {
+      // Solo lee (no crea enlaces). La regla de vigencia es la de la app y del gate: la RPC.
+      const { data: est, error } = await supabase.rpc('autorizacion_datos_estado', { p_workspace_id: workspaceId, p_contacto_id: contactoId });
+      if (error || !est || est.existe !== true) {
+        if (error) console.error('[agente] no se pudo leer la autorización:', error.message);
+        return 'error' as const;
+      }
+      return est.vigente?.generales === true;
+    },
+    async perfilDe(contactoId: string) {
+      const { data, error } = await supabase.from('contacto_perfil_hechos').select('id, texto, estado')
+        .eq('workspace_id', workspaceId).eq('contacto_id', contactoId).limit(500);
+      if (error) {
+        console.error('[agente] no se pudo leer el perfil:', error.message);
+        return 'error' as const;
+      }
+      return ((data ?? []) as Fila[]).map((x) => ({ id: String(x.id), texto: String(x.texto ?? ''), estado: x.estado as EstadoPerfil }));
+    },
+    async guardarPerfil(p) {
+      // El contacto es de este workspace (el trigger de la tabla lo vuelve a exigir, con la autorización vigente).
+      const { data: c, error: errC } = await supabase.from('contactos').select('id').eq('id', p.contactoId).eq('workspace_id', workspaceId).maybeSingle();
+      if (errC) throw new Error(`no se pudo revisar el contacto: ${errC.message}`);
+      if (!c) throw new Error('el contacto no es de este workspace');
+      const { data: ex, error: errEx } = await supabase.from('contacto_perfil_hechos').select('id, texto, estado')
+        .eq('workspace_id', workspaceId).eq('contacto_id', p.contactoId).limit(500);
+      if (errEx) throw new Error(`no se pudo leer el perfil: ${errEx.message}`);
+      const existentes = ((ex ?? []) as Fila[]).map((x) => ({ id: String(x.id), texto: String(x.texto ?? ''), estado: x.estado as EstadoPerfil }));
+      const plan = planGuardado(p.hechos, existentes, p.estado);
+      const ahora = new Date().toISOString();
+      if (plan.insertar.length) {
+        const { error } = await supabase.from('contacto_perfil_hechos').insert(plan.insertar.map((h) => ({
+          workspace_id: workspaceId, contacto_id: p.contactoId, dimension: h.dimension, texto: h.texto, estado: p.estado,
+          origen_tipo: p.origenTipo, origen_ref: h.origenRef, creado_por: staffId,
+          ...(p.estado === 'confirmado' ? { confirmado_por: staffId, confirmado_at: ahora } : {}),
+        })));
+        if (error) throw new Error(`no se pudo guardar en el perfil: ${error.message}`);
+      }
+      for (const x of plan.confirmar) {
+        const { error } = await supabase.from('contacto_perfil_hechos').update({ estado: 'confirmado', confirmado_por: staffId, confirmado_at: ahora })
+          .eq('id', x.id).eq('workspace_id', workspaceId).eq('estado', 'sugerido');
+        if (error) throw new Error(`no se pudo confirmar en el perfil: ${error.message}`);
+      }
+      return { guardados: [...plan.insertar, ...plan.confirmar.map((x) => x.hecho)], yaEstaban: plan.yaEstaban };
     },
     async crearCliente(nombre: string, llave: Llave) {
       const r = await crearContactoConGuardian(supabase, workspaceId, { nombre, llave });

@@ -20,9 +20,10 @@ import {
   registrarConEvidencia,
   versionesPublicadas,
 } from '@/lib/autorizacion-datos/servidor'
-import { faseDe, type FaseAutorizacion } from '@/lib/autorizacion-datos/estado'
+import { armarVista, type VistaAutorizacionContacto } from '@/lib/autorizacion-datos/vista'
 import { MENSAJE_SIN_CORREO } from '@/lib/autorizacion-datos/correo'
-import type { ClaveCasilla } from '@/lib/autorizacion-datos/texto'
+import { leerPerfil } from '@/lib/perfil-contacto/servidor'
+import type { HechoPerfilVista } from '@/lib/perfil-contacto/vista'
 
 /**
  * Acciones del bloque `contacto`. Escriben en `contactos`, no en `negocio_bloques`.
@@ -61,6 +62,8 @@ async function resolverContacto(
 export interface FichaContacto {
   contactoId: string
   valores: ValoresContacto
+  /** El perfil CONFIRMADO del contacto, de solo lectura (para cotizar). Vacío si no hay o no se pudo leer. */
+  perfil: HechoPerfilVista[]
 }
 
 /**
@@ -93,6 +96,10 @@ export async function cargarFichaContacto(
   if (!c) return { ficha: null, error: null }
 
   const row = c as ValoresContacto & { id: string; custom_data: Record<string, unknown> | null }
+  // El perfil confirmado viaja con la ficha: la comercial lo ve al cotizar. Si no se puede leer, la
+  // ficha sale igual (el perfil es de consulta, no bloquea nada).
+  const perfil = await leerPerfil(supabase, workspaceId, row.id, { soloConfirmados: true })
+  if (perfil.error) console.error('[cargarFichaContacto] perfil:', perfil.error)
   return {
     ficha: {
       contactoId: row.id,
@@ -104,6 +111,7 @@ export async function cargarFichaContacto(
         segmento: row.segmento,
         custom_data: row.custom_data ?? {},
       },
+      perfil: perfil.hechos,
     },
     error: null,
   }
@@ -172,24 +180,8 @@ export async function guardarFichaContacto(
  * no cuentan para el gate.
  */
 
-export interface VistaAutorizacionBloque {
-  contactoNombre: string
-  tieneCorreo: boolean
-  fase: FaseAutorizacion
-  aceptadoAt: string | null
-  version: string | null
-  casillas: Partial<Record<ClaveCasilla, boolean | null>> | null
-  vigente: Record<ClaveCasilla, boolean>
-  correoEnviadoAt: string | null
-  rechazadoAt: string | null
-  manualSinEvidencia: { fecha: string | null } | null
-  textoPublicado: boolean
-  versionVigente: string | null
-  /** `link` o `evidencia` (registrada por el equipo con el archivo). */
-  via: 'link' | 'evidencia' | null
-  /** La vía «recibida por otro medio» está encendida en el workspace: sus versiones para elegir. */
-  evidencia: { versiones: Array<{ id: string; version: string; casillas: Array<{ clave: ClaveCasilla; texto: string }> }> } | null
-}
+/** La misma vista que la ficha del directorio (`lib/autorizacion-datos/vista.ts`). */
+export type VistaAutorizacionBloque = VistaAutorizacionContacto
 
 async function contactoDelBloque(negocioBloqueId: string, editar: boolean) {
   const { supabase, workspaceId, staffId, error } = await getWorkspace()
@@ -216,26 +208,8 @@ export async function cargarAutorizacionContacto(
     configDelWorkspace(c.workspaceId),
   ])
   if (error) return { vista: null, error: 'No se pudo leer la autorización de datos' }
-  const evidencia = config.registroConEvidencia ? { versiones: await versionesPublicadas(c.workspaceId) } : null
-  return {
-    vista: {
-      contactoNombre: estado.contacto?.nombre ?? '',
-      tieneCorreo: !!estado.contacto?.email,
-      fase: faseDe(estado),
-      aceptadoAt: estado.aceptacion?.aceptado_at ?? null,
-      version: estado.aceptacion?.version ?? null,
-      casillas: estado.aceptacion?.casillas ?? null,
-      vigente: estado.vigente,
-      correoEnviadoAt: estado.pendiente?.correo_enviado_at ?? null,
-      rechazadoAt: estado.pendiente?.rechazado_at ?? null,
-      manualSinEvidencia: estado.manual_sin_evidencia,
-      textoPublicado: !!estado.texto,
-      versionVigente: estado.texto?.version ?? null,
-      via: estado.aceptacion?.via ?? null,
-      evidencia,
-    },
-    error: null,
-  }
+  const evidencia = config.registroConEvidencia ? await versionesPublicadas(c.workspaceId) : null
+  return { vista: armarVista(estado, evidencia), error: null }
 }
 
 /** El link del titular para copiarlo (reusa el pendiente). */

@@ -29,6 +29,7 @@ import {
   type MotivoDevolucion,
 } from '@/lib/negocios/devolucion'
 import { registrarActividad } from '@/lib/activity/registrar-actividad'
+import { asignarResponsableAlEntrar } from '@/lib/negocios/responsable-automatico'
 import { soltarSeccionalDelRut } from '@/lib/negocios/seccional-desde-documento'
 
 /**
@@ -323,6 +324,7 @@ export async function devolverBloque(
       console.error('[devolucion] no se pudo mover el caso:', errMover)
     } else {
       movidoA = etapaOrigen.nombre
+      await asignarResponsableAlEntrar(supabase, { negocioId: b.negocio_id, etapaId: etapaOrigen.id, workspaceId })
       if (staffId) {
         await registrarActividad(db(supabase), {
           workspace_id: workspaceId,

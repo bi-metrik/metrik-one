@@ -462,9 +462,10 @@ describe('contrato · toda acción de la tarjeta pasa por la relectura', () => {
     expect(editor).toContain('setVistaFresca(prev => laMasNueva(prev, v))')
   })
 
-  it('la tarjeta y las dos bandejas reciben ese `refrescar`', () => {
+  it('la tarjeta y las tres bandejas reciben ese `refrescar`', () => {
     const editor = fuente('cotizacion-editor.tsx')
-    expect(editor.match(/onCambio=\{refrescar\}/g)?.length).toBe(2)
+    // La tercera es la bandeja de la cotización por pasos (C4), dentro de «Armar el viaje».
+    expect(editor.match(/onCambio=\{refrescar\}/g)?.length).toBe(3)
     const tarjeta = editor.slice(editor.indexOf('<TarjetaOpcion'), editor.indexOf('<TarjetaOpcion') + 6000)
     expect(tarjeta).toContain('onCambio={() => refrescar()}')
   })

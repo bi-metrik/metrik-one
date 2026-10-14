@@ -23,6 +23,11 @@ import type { ActivityEntry } from '@/components/activity-log'
 import { leerDevolucionesDelNegocio } from '@/lib/cobros/devoluciones-servidor'
 import { cobradoDelNegocio } from '@/lib/cobros/devolucion-dinero'
 import { DevolucionesNegocio } from './devoluciones-negocio'
+import { leerConfirmacionViaje } from './confirmacion-viaje'
+import { leerRielCobro } from './riel-cobro'
+import { leerEntregaViaje } from './entrega-viaje'
+import { leerViajeFinal } from './viaje-final'
+import { leerFacturaViaje } from './factura-viaje'
 
 /**
  * Todo lo que la página del negocio le pasa a `NegocioDetailClient`, armado en UN sitio.
@@ -170,7 +175,7 @@ export async function cargarVistaNegocio(id: string): Promise<VistaNegocio | nul
   // propio `mx-auto max-w-2xl`: al ensancharse el contenedor del detalle
   // quedaban desalineados. JSX del servidor se puede pasar como prop a un
   // componente cliente; convertir esta página en cliente no es opción.
-  const banner = tieneBannerDeCierre && data.negocio.cierre_motivo
+  const bannerCierre = tieneBannerDeCierre && data.negocio.cierre_motivo
     ? (
       <div className="mb-3">
         <CerradoHeaderBanner
@@ -182,6 +187,28 @@ export async function cargarVistaNegocio(id: string): Promise<VistaNegocio | nul
           hasAreaComercial={hasAreaComercial}
         />
       </div>
+    )
+    : null
+
+  // Confirmación del viaje (F2): solo en líneas con `plan_pagos.activo`; en las demás no lee nada.
+  // Riel de cobro (F2): solo con plan acordado. Va arriba, debajo de la cabecera.
+  const argsViaje = { workspaceId: workspaceId ?? '', negocioId: id, staffId: staffId ?? null, role: role ?? null, areas: (areas ?? []) as string[] }
+  // Riel de facturación (F5): solo en líneas que facturan por evento (`facturacion.por_titular`).
+  // Documentos y entrega (F4): solo con `entrega_viaje.activo` y en la etapa que declara sus gates.
+  // En viaje, Cierre económico y Postventa (F6): solo con `cierre_viaje.activo` y en su etapa.
+  const [rielCobro, confirmacionViaje, facturaViaje, entregaViaje, viajeFinal] = workspaceId
+    ? await Promise.all([leerRielCobro(supabase, argsViaje), leerConfirmacionViaje(supabase, argsViaje), leerFacturaViaje(supabase, argsViaje), leerEntregaViaje(supabase, argsViaje), leerViajeFinal(supabase, argsViaje)])
+    : [null, null, null, null, null]
+  const banner = bannerCierre || rielCobro || confirmacionViaje || facturaViaje || entregaViaje || viajeFinal
+    ? (
+      <>
+        {bannerCierre}
+        {rielCobro}
+        {facturaViaje}
+        {confirmacionViaje}
+        {entregaViaje}
+        {viajeFinal}
+      </>
     )
     : null
 
@@ -272,6 +299,7 @@ export async function cargarVistaNegocio(id: string): Promise<VistaNegocio | nul
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     bloquesEtapasPrevias: data.bloquesEtapasPrevias as any,
     pausaEnabled: data.pausaEnabled,
+    seguimiento: data.seguimiento,
     registrarPagoEnabled: conciliacionActiva,
     registrarPagoSimple: pagoSimpleActivo,
     puedeCierreNoFacturable: puedeCierreNoFacturable,

@@ -29,6 +29,7 @@
  * donde vive el historial.
  */
 
+import { traerTodo } from '@/lib/supabase/paginar';
 import { createServiceClient } from '@/lib/supabase/server';
 import { todayBogotaISO } from '@/lib/dates/bogota';
 import {
@@ -60,10 +61,8 @@ import { correoDeltaMonitoreo } from './correo-delta';
 const VALIDA_API_BASE = process.env.VALIDA_API_BASE || 'https://api.valida.metrikone.co';
 const FROM_CORREO = 'MéTRIK ONE <noreply@metrikone.co>';
 
-/** Techo del universo que se examina. Si se topa, el barrido lo dice. */
-const LIMITE_CONSULTAS = 5000;
-const LIMITE_LIBERACIONES = 5000;
-const LIMITE_SUJETOS = 20000;
+/** Lo que se espera a Valida por una contraparte antes de darla por fallida. */
+const TIMEOUT_VALIDA_MS = 45_000;
 
 export type ResumenBarrido = {
   barrido_id: string | null;
@@ -196,7 +195,7 @@ export async function ejecutarBarrido(
     universo_truncado: truncado,
   };
 
-  const { data: cab } = await svc
+  const { data: cab, error: errCab } = await svc
     .from('compliance_barridos')
     .insert({
       workspace_id: workspaceId,
@@ -213,7 +212,26 @@ export async function ejecutarBarrido(
 
   const barridoId: string | null = cab?.id ?? null;
   resumen.barrido_id = barridoId;
-  if (!barridoId) return resumen;
+  if (!barridoId) {
+    throw new Error(`barrido_sin_encabezado: ${errCab?.message ?? 'insert sin id'}`);
+  }
+
+  // Los contadores se guardan después de CADA contraparte y no solo al final:
+  // el tope del mes se calcula sumando `ejecutadas`, y una función que Vercel
+  // corta a los 300 s dejaba consultas pagadas con el encabezado en cero, así
+  // que el día siguiente creía tener el cupo entero.
+  const guardarContadores = async () => {
+    const { error } = await svc
+      .from('compliance_barridos')
+      .update({
+        ejecutadas: resumen.ejecutadas,
+        con_delta: resumen.con_delta,
+        notificadas: resumen.notificadas,
+        fallidas: resumen.fallidas,
+      })
+      .eq('id', barridoId);
+    if (error) console.error('[barrido] contadores_no_guardados', barridoId, error.message);
+  };
 
   const porClave = new Map(contrapartes.map((c) => [c.clave, c] as const));
   const slug = await slugDeWorkspace(svc, workspaceId);
@@ -254,17 +272,8 @@ export async function ejecutarBarrido(
     else resumen.ejecutadas += 1;
     if (r.delta) resumen.con_delta += 1;
     if (r.notificada) resumen.notificadas += 1;
+    await guardarContadores();
   }
-
-  await svc
-    .from('compliance_barridos')
-    .update({
-      ejecutadas: resumen.ejecutadas,
-      con_delta: resumen.con_delta,
-      notificadas: resumen.notificadas,
-      fallidas: resumen.fallidas,
-    })
-    .eq('id', barridoId);
 
   if (avisos.length > 0) {
     await enviarCorreoDelta(svc, workspaceId, oficiales, avisos);
@@ -295,43 +304,55 @@ async function cargarUniverso(
   excluidasRelacionCerrada: number;
   truncado: boolean;
 }> {
-  const { data: consultasRaw } = await svc
-    .from('consultas_listas_dual')
-    .select(
-      'id, documento_tipo, documento_numero, nombre_consultado, tipo_persona, severidad, '
-      + 'total_matches, matches, created_at, vigente_hasta, tier_maximo, segmento_id',
-    )
-    .eq('workspace_id', workspaceId)
-    .order('created_at', { ascending: false })
-    .limit(LIMITE_CONSULTAS);
+  // Las tres lecturas van completas y por páginas: PostgREST corta en 1.000
+  // filas sin avisar, y aquí una lista recortada no es un dato menos sino
+  // contrapartes que se dejan de vigilar, liberadas que se vuelven a cobrar o
+  // desvinculados que se vuelven a consultar. Si una lectura falla, `traerTodo`
+  // lanza y el barrido del workspace se reporta como fallido en vez de quedar
+  // registrado como "sin candidatos".
+  const consultasRaw = await traerTodo<FilaConsulta>(
+    (desde, hasta) => svc
+      .from('consultas_listas_dual')
+      .select(
+        'id, documento_tipo, documento_numero, nombre_consultado, tipo_persona, severidad, '
+        + 'total_matches, matches, created_at, vigente_hasta, tier_maximo, segmento_id',
+      )
+      .eq('workspace_id', workspaceId)
+      .order('created_at', { ascending: false })
+      .order('id', { ascending: true })
+      .range(desde, hasta),
+    { etiqueta: 'barrido:consultas' },
+  );
 
-  const { data: liberacionesRaw } = await svc
-    .from('compliance_liberaciones')
-    .select('*')
-    .eq('workspace_id', workspaceId)
-    .order('created_at', { ascending: false })
-    .limit(LIMITE_LIBERACIONES);
+  const liberacionesRaw = await traerTodo<ComplianceLiberacion>(
+    (desde, hasta) => svc
+      .from('compliance_liberaciones')
+      .select('*')
+      .eq('workspace_id', workspaceId)
+      .order('created_at', { ascending: false })
+      .order('id', { ascending: true })
+      .range(desde, hasta),
+    { etiqueta: 'barrido:liberaciones' },
+  );
 
   // Tercera lectura: quién sigue adentro. Va por separado y no por join porque
   // la ausencia de ficha NO excluye a nadie (ver `clavesConRelacionCerrada`), y
   // un join dejaría esa decisión escondida en el tipo de unión.
-  const { data: sujetosRaw } = await svc
-    .from('compliance_sujetos')
-    .select('documento_tipo, documento_numero, relacion_hasta')
-    .eq('workspace_id', workspaceId)
-    .not('relacion_hasta', 'is', null)
-    .limit(LIMITE_SUJETOS);
-
-  const consultas = (consultasRaw ?? []) as FilaConsulta[];
-  const coberturas = indexarCoberturas(
-    (liberacionesRaw ?? []) as ComplianceLiberacion[],
-    hoyISO,
+  const sujetosRaw = await traerTodo<FilaSujetoBarrido>(
+    (desde, hasta) => svc
+      .from('compliance_sujetos')
+      .select('id, documento_tipo, documento_numero, relacion_hasta')
+      .eq('workspace_id', workspaceId)
+      .not('relacion_hasta', 'is', null)
+      .order('id', { ascending: true })
+      .range(desde, hasta),
+    { etiqueta: 'barrido:sujetos_cerrados' },
   );
 
-  const relacionesCerradas = clavesConRelacionCerrada(
-    (sujetosRaw ?? []) as FilaSujetoBarrido[],
-    hoyISO,
-  );
+  const consultas = consultasRaw;
+  const coberturas = indexarCoberturas(liberacionesRaw, hoyISO);
+
+  const relacionesCerradas = clavesConRelacionCerrada(sujetosRaw, hoyISO);
 
   const porClave = new Map<string, Contraparte>();
   const excluidas = new Set<string>();
@@ -382,7 +403,8 @@ async function cargarUniverso(
     contrapartes: [...porClave.values()],
     sinDocumento,
     excluidasRelacionCerrada: excluidas.size,
-    truncado: consultas.length >= LIMITE_CONSULTAS,
+    // `traerTodo` lanza antes de recortar: lo que llega está completo.
+    truncado: false,
   };
 }
 
@@ -448,7 +470,7 @@ async function barrerContraparte(
   const clasificacion = await clasificarParaGuardar(matches);
   const vigencia = await calcularVigenciaParaGuardar(ctx.workspaceId, clasificacion);
 
-  const { data: filaNueva } = await svc
+  const { data: filaNueva, error: errFila } = await svc
     .from('consultas_listas_dual')
     .insert({
       workspace_id: ctx.workspaceId,
@@ -503,9 +525,13 @@ async function barrerContraparte(
     habilita_reevaluacion: efecto.habilita_reevaluacion,
     // Hubo delta que exigia avisar y no habia a quien: el workspace no tiene
     // oficial con rol. Se dice, no se calla.
-    error_mensaje: efecto.notifica && ctx.oficiales.length === 0
-      ? 'sin_oficial_a_quien_notificar'
-      : null,
+    // La consulta se pagó aunque no se haya podido guardar: cuenta como
+    // ejecutada, y el item lo dice para que no parezca una revalidación limpia.
+    error_mensaje: errFila
+      ? `consulta_no_guardada: ${errFila.message}`.slice(0, 500)
+      : efecto.notifica && ctx.oficiales.length === 0
+        ? 'sin_oficial_a_quien_notificar'
+        : null,
   });
 
   return { fallo: false, delta: delta.hay, notificada };
@@ -656,12 +682,14 @@ async function consumidasEnPeriodo(
   workspaceId: string,
   hoyISO: string,
 ): Promise<number> {
-  const { data } = await svc
+  const { data, error } = await svc
     .from('compliance_barridos')
     .select('ejecutadas')
     .eq('workspace_id', workspaceId)
     .gte('dia', inicioDePeriodo(hoyISO))
     .lte('dia', hoyISO);
+  // Leer cero por un error sería gastar el cupo del mes otra vez.
+  if (error) throw new Error(`consumo_no_leido: ${error.message}`);
 
   return ((data ?? []) as { ejecutadas: number | null }[])
     .reduce((acc, f) => acc + (f.ejecutadas ?? 0), 0);
@@ -715,6 +743,8 @@ async function consultarValida(
         identificacion: input.identificacion,
       }),
       cache: 'no-store',
+      // Una llamada colgada se comía los 300 s de la función entera.
+      signal: AbortSignal.timeout(TIMEOUT_VALIDA_MS),
     });
     if (!res.ok) {
       const texto = await res.text().catch(() => '');

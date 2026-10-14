@@ -1,8 +1,28 @@
 /*
- * Service worker del piloto de red de MeTRIK ONE (soena, 2026-10-06).
- * Brief: proyectos/soena/ve/2026-10-06_brief-max-piloto-red-documentos.md
+ * Service worker de MeTRIK ONE.
  *
- * QUÉ HACE, y nada más:
+ * Nació como piloto de red de soena (2026-10-06, brief
+ * proyectos/soena/ve/2026-10-06_brief-max-piloto-red-documentos.md). Desde el 2026-10-12 corre en
+ * TODOS los workspaces, pero lo que hace cada uno depende del subdominio:
+ *
+ * EN TODOS (desde 2026-10-12, Claro móvil perdía chunks de Vercel en trappvel):
+ *  0. Estáticos inmutables de Next (`/_next/static/chunks/*` y `/_next/static/media/*` con hash en
+ *     el nombre): cache-first. Al pedirlos por primera vez, la red con reintento y el archivo
+ *     se lee ENTERO antes de entregarlo (un corte a media descarga se repite aquí, no rompe la
+ *     página); después salen del Cache Storage sin tocar la red.
+ *     La llave es la RUTA sin `?dpl=`: Turbopack nombra cada archivo por el hash de su
+ *     contenido, así que el mismo nombre en otro deployment es el mismo archivo (medido el
+ *     2026-10-12 en producción: 16 de 20 archivos de /login idénticos byte a byte entre dos
+ *     deployments; el runtime, que lleva el id del deployment adentro, cambia de nombre). Eso
+ *     es lo que el cache HTTP del navegador no da: su llave incluye `?dpl=` y cada deploy
+ *     (~76/semana) vuelve a bajar todo. En un fallo de caché se pide la URL TAL CUAL (con
+ *     `?dpl=`), así que Skew Protection sigue mandando.
+ *     Limpieza: cada entrada anota el deployment que la usó por última vez y se re-anota (al
+ *     final de la fila) la primera vez que la pide un deployment nuevo; pasado el tope de
+ *     entradas sale lo que lleva más deploys sin usarse.
+ *
+ * SOLO EN LOS WORKSPACES DEL PILOTO (`PILOTO`, igual que `WORKSPACES_PILOTO_RED` en
+ * src/lib/red/piloto.ts):
  *  1. Carga de página (navegación GET a una pantalla de la app): si la red no responde, la
  *     reintenta dos veces con espera creciente; si sigue sin red, en vez del error de Chrome
  *     («No se puede acceder a este sitio», ERR_TIMED_OUT) muestra «Reconectando» y la página
@@ -15,20 +35,27 @@
  *     manda a /api/red/eventos con la siguiente carga que sí llega.
  *
  * QUÉ NO HACE, a propósito:
- *  - NO guarda respuestas (no hay Cache Storage): nunca puede servir la pantalla de otra
- *    persona ni de otro workspace, ni datos viejos después de cerrar sesión.
+ *  - NO guarda nada que no sea un estático con hash: ni HTML, ni RSC (`?_rsc=`, cabecera RSC),
+ *    ni /api/, ni nada con sesión, ni Supabase (otro dominio). Nunca puede servir la pantalla
+ *    de otra persona ni de otro workspace, ni datos viejos después de cerrar sesión.
  *  - NO toca nada que no sea GET (server actions, subidas, formularios pasan directo), ni
- *    /api/, ni /auth/ (el código del enlace mágico es de un solo uso: no se repite), ni otros
- *    dominios, ni prefetch.
+ *    /auth/ (el código del enlace mágico es de un solo uso: no se repite), ni otros dominios,
+ *    ni prefetch.
+ *  - Fuera del piloto, las peticiones que no son estáticos ni siquiera despiertan al SW
+ *    (Static Routing API, Chrome 123+): van directo a la red.
  *
  * INTERRUPTOR DE APAGADO: poner `APAGADO = true` y publicar. El navegador revisa este archivo
  * en cada navegación (se registra con `updateViaCache: 'none'`); la versión apagada se instala,
- * borra todo lo suyo y se desregistra sola. La app además desregistra si el piloto se apaga en
- * código (`SW_PILOTO_ACTIVO` en src/lib/red/piloto.ts). Probado en scripts/sw-piloto.e2e.mjs.
+ * borra todo lo suyo (caché incluido) y se desregistra sola. La app además desregistra si el
+ * interruptor en código se apaga (`SW_ACTIVO` en src/lib/red/piloto.ts). Probado en
+ * scripts/sw-piloto.e2e.mjs.
  */
 
-const VERSION = '2026-10-06.1'
+const VERSION = '2026-10-12.1'
 const APAGADO = false
+
+/** Subdominios con navegación y RSC atendidos por el SW (el piloto de red). */
+const PILOTO = ['soena']
 
 const DB = 'metrik-red-piloto'
 const STORE = 'eventos'
@@ -40,16 +67,42 @@ const ESPERAS = [600, 1800]
 const TOPE_PRIMERO_MS = 20000
 const TOPE_REINTENTO_MS = 10000
 
-self.addEventListener('install', () => {
+/** Estáticos: caché, tope de entradas y reintentos de red dentro del SW. */
+const CACHE_ESTATICOS = 'one-estaticos-v1'
+const MAX_ESTATICOS = 600
+const ESPERAS_ESTATICO = [500, 1500]
+const TOPE_ESTATICO_MS = 30000
+const CABECERA_DPL = 'x-one-dpl'
+
+const ES_PILOTO = PILOTO.includes(String(self.location.hostname).split('.')[0])
+
+self.addEventListener('install', (event) => {
   self.skipWaiting()
+  // Fuera del piloto el SW solo atiende estáticos: todo lo demás va directo a la red sin
+  // arrancar el SW (ahorra el arranque en cada navegación en teléfonos lentos). Navegadores
+  // sin Static Routing API: el `fetch` de abajo devuelve sin `respondWith`, igual de inocuo.
+  if (!APAGADO && !ES_PILOTO && event.addRoutes && typeof URLPattern === 'function') {
+    try {
+      event.waitUntil(
+        Promise.resolve(
+          event.addRoutes([
+            { condition: { urlPattern: new URLPattern({ pathname: '/_next/static/*' }) }, source: 'fetch-event' },
+            { condition: { urlPattern: new URLPattern({ pathname: '*' }) }, source: 'network' },
+          ]),
+        ).catch(() => {}),
+      )
+    } catch {
+      // sin rutas estáticas: sigue por el fetch
+    }
+  }
 })
 
 self.addEventListener('activate', (event) => {
   event.waitUntil(
     (async () => {
-      // Este SW no guarda respuestas; si alguna vez quedó algo en Cache Storage, fuera.
+      // Fuera todo caché que no sea el de estáticos vigente (versiones viejas, o lo que fuera).
       const claves = await caches.keys()
-      await Promise.all(claves.map((k) => caches.delete(k)))
+      await Promise.all(claves.filter((k) => APAGADO || k !== CACHE_ESTATICOS).map((k) => caches.delete(k)))
       if (APAGADO) {
         await borrarBase()
         await self.registration.unregister()
@@ -57,11 +110,14 @@ self.addEventListener('activate', (event) => {
       }
       if (self.registration.navigationPreload) {
         try {
-          await self.registration.navigationPreload.enable()
+          // Solo el piloto atiende navegaciones: fuera de él, un preload pediría cada página dos veces.
+          if (ES_PILOTO) await self.registration.navigationPreload.enable()
+          else await self.registration.navigationPreload.disable()
         } catch {
           // sin navigation preload: el primer intento usa fetch normal
         }
       }
+      await podarEstaticos()
       await self.clients.claim()
     })(),
   )
@@ -78,7 +134,13 @@ self.addEventListener('fetch', (event) => {
     return
   }
   if (url.origin !== self.location.origin) return
-  if (url.pathname.startsWith('/api/') || url.pathname.startsWith('/auth/') || url.pathname.startsWith('/_next/')) return
+
+  if (url.pathname.startsWith('/_next/')) {
+    if (esEstaticoInmutable(url) && !req.headers.has('range')) event.respondWith(estatico(event, url))
+    return
+  }
+  if (!ES_PILOTO) return
+  if (url.pathname.startsWith('/api/') || url.pathname.startsWith('/auth/')) return
 
   if (req.mode === 'navigate') {
     event.respondWith(navegar(event, url))
@@ -88,6 +150,114 @@ self.addEventListener('fetch', (event) => {
     event.respondWith(rscConReintento(event, url))
   }
 })
+
+// ── Estáticos inmutables ──────────────────────────────────────────────────────────────
+
+/** Un archivo de `/_next/static/chunks|media/` con hash (8+ hex) en el nombre. */
+function esEstaticoInmutable(url) {
+  const m = /^\/_next\/static\/(chunks|media)\/(.+)$/.exec(url.pathname)
+  if (!m) return false
+  const nombre = m[2].split('/').pop() || ''
+  return /[0-9a-f]{8,}/i.test(nombre)
+}
+
+async function abrirCache() {
+  try {
+    return await caches.open(CACHE_ESTATICOS)
+  } catch {
+    return null
+  }
+}
+
+async function estatico(event, url) {
+  const llave = new Request(url.origin + url.pathname)
+  const dpl = url.searchParams.get('dpl') || ''
+  const cache = await abrirCache()
+  if (cache) {
+    let guardada = null
+    try {
+      guardada = await cache.match(llave, { ignoreVary: true })
+    } catch {
+      guardada = null
+    }
+    if (guardada) {
+      // Primer uso desde un deployment nuevo: se re-anota al final de la fila (la poda saca
+      // primero lo que lleva más deploys sin usarse).
+      if (dpl && guardada.headers.get(CABECERA_DPL) !== dpl) {
+        event.waitUntil(reanotar(cache, llave, guardada.clone(), dpl))
+      }
+      return guardada
+    }
+  }
+
+  let ultimo = null
+  for (let intento = 0; intento <= ESPERAS_ESTATICO.length; intento++) {
+    if (intento > 0) {
+      if (event.request.signal && event.request.signal.aborted) break
+      await dormir(ESPERAS_ESTATICO[intento - 1])
+    }
+    const ac = typeof AbortController === 'function' ? new AbortController() : null
+    const tope = setTimeout(() => ac && ac.abort(), TOPE_ESTATICO_MS)
+    try {
+      const res = await fetch(event.request, ac ? { signal: ac.signal } : undefined)
+      // 404 (deployment fuera de Skew Protection), 5xx, opaco, redirigido: tal cual y sin guardar.
+      if (res.status !== 200 || res.redirected || res.type === 'opaque' || res.type === 'opaqueredirect') {
+        clearTimeout(tope)
+        return res
+      }
+      // Entero antes de entregarlo: un corte a media descarga lanza aquí y se repite.
+      const cuerpo = await res.arrayBuffer()
+      clearTimeout(tope)
+      const cabeceras = new Headers(res.headers)
+      if (dpl) cabeceras.set(CABECERA_DPL, dpl)
+      const lista = new Response(cuerpo, { status: 200, statusText: res.statusText, headers: cabeceras })
+      if (cache) event.waitUntil(guardar(cache, llave, lista.clone()))
+      return lista
+    } catch (e) {
+      clearTimeout(tope)
+      ultimo = e
+      if (event.request.signal && event.request.signal.aborted) break
+    }
+  }
+  // Sin red: la página lo ve como un chunk que no bajó y aplica su propio reintento.
+  void ultimo
+  return Response.error()
+}
+
+let guardadas = 0
+async function guardar(cache, llave, res) {
+  try {
+    await cache.put(llave, res)
+    guardadas++
+    if (guardadas % 25 === 0) await podarEstaticos()
+  } catch {
+    // Cuota llena u otro error: el archivo ya llegó a la página, solo no queda guardado.
+  }
+}
+
+async function reanotar(cache, llave, res, dpl) {
+  try {
+    const cabeceras = new Headers(res.headers)
+    cabeceras.set(CABECERA_DPL, dpl)
+    const cuerpo = await res.arrayBuffer()
+    // `put` sobre una llave existente la borra y la agrega al final (orden de inserción).
+    await cache.put(llave, new Response(cuerpo, { status: 200, statusText: res.statusText, headers: cabeceras }))
+  } catch {
+    // no importa
+  }
+}
+
+/** Deja a lo sumo `MAX_ESTATICOS` entradas: salen las primeras (las menos recientes). */
+async function podarEstaticos() {
+  try {
+    const cache = await caches.open(CACHE_ESTATICOS)
+    const llaves = await cache.keys()
+    const sobran = llaves.length - MAX_ESTATICOS
+    if (sobran > 0) await Promise.all(llaves.slice(0, sobran).map((k) => cache.delete(k)))
+  } catch {
+    // no importa
+  }
+}
 
 // ── Utilidades ────────────────────────────────────────────────────────────────────────
 

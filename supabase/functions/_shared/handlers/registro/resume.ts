@@ -15,6 +15,7 @@ import { decidirConfirmacionGasto, decidirMontoPendiente } from './monto-pendien
 import { executeRegistro } from './execute.ts';
 import { BOTONES_SOPORTE, decidirSoporte } from './soporte-foto.ts';
 import { seguirConLaCola } from './cola-gastos.ts';
+import { confirmarPagoServicio, seleccionDeViaje } from './servicio-viaje.ts';
 
 const AWAITING_SELECTION_TIMEOUT_MS = 10 * 60 * 1000; // 10 min
 
@@ -233,6 +234,13 @@ export async function reconfirmarGasto(ctx: HandlerContext, fields: ParsedFields
     return;
   }
 
+  // Pago a un servicio del viaje: la descripción no cambia el servicio ni el medio.
+  if (c.servicio_id) {
+    await ctx.updateSession('confirming', { parsed_fields: fields });
+    await confirmarPagoServicio(ctx);
+    return;
+  }
+
   if (c.negocio_id) {
     const { data: negocio } = await supabase
       .from('negocios')
@@ -258,6 +266,12 @@ export async function reconfirmarGasto(ctx: HandlerContext, fields: ParsedFields
 async function handleW01Selection(ctx: HandlerContext, selected: { id: string; label: string; _tipo?: string }): Promise<void> {
   const { session, supabase, user } = ctx;
   const context = session.context;
+
+  // Pago a un proveedor del viaje (F3): servicio y medio de pago.
+  if (context.paso_viaje) {
+    await seleccionDeViaje(ctx, selected);
+    return;
+  }
 
   if (selected.id === 'cancelar') {
     await ctx.sendMessage('❌ Cancelado.');

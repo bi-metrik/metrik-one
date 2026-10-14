@@ -12,7 +12,13 @@
  * columna la lee cualquier miembro del workspace por REST (frente 2026-09-14).
  *
  * Uso:
- *   npx tsx scripts/setup-siigo-workspace.ts <slug-workspace>
+ *   npx tsx scripts/setup-siigo-workspace.ts <slug-workspace> [--viajes]
+ *
+ * Espacios con viajes (adenda Siigo, ola 4): si alguna línea declara `servicios_viaje` o
+ * `plan_pagos` (o con `--viajes`), además pregunta el producto de ingreso propio y el de
+ * recibido para terceros, el centro de costo (opcional), la forma de pago del recibo POR CUENTA
+ * donde entra la plata (`cuentas_recaudo`) y el ENTORNO (pruebas o producción). Sin eso, el
+ * `siigo_config` queda como el de siempre (SOENA).
  *
  * Las credenciales se piden por stdin (no como argumento) para que no queden
  * en el historial del shell.
@@ -31,6 +37,7 @@ config({ path: resolve(process.cwd(), '.env.local') });
 
 const SIIGO_BASE = 'https://api.siigo.com';
 const slug = process.argv[2];
+const forzarViajes = process.argv.includes('--viajes');
 
 if (!slug) {
   console.error('Uso: npx tsx scripts/setup-siigo-workspace.ts <slug-workspace>');
@@ -129,6 +136,8 @@ async function main() {
   type Pay = { id: number; name: string; active: boolean };
   type User = { id: number; username: string; identification: string; active: boolean };
 
+  type Prod = { code: string; name: string; active: boolean };
+  type Cc = { id: number; code?: string; name: string; active?: boolean };
   const [docsFV, docsRC, taxes, paysFV, paysRC, users] = await Promise.all([
     siigoGet<Doc[]>(token, partnerId, '/v1/document-types?type=FV'),
     siigoGet<Doc[]>(token, partnerId, '/v1/document-types?type=RC'),
@@ -160,7 +169,7 @@ async function main() {
   const reciboPaymentId = Number(await preguntar('  Forma de pago del RECIBO (id): '));
   const productoCode = await preguntar('  Código del PRODUCTO a facturar: ');
 
-  const siigo_config = {
+  const siigo_config: Record<string, unknown> = {
     facturaDocumentId, reciboDocumentId, sellerId, ivaId,
     facturaPaymentId, reciboPaymentId, productoCode,
   };
@@ -168,6 +177,59 @@ async function main() {
   if (Object.entries(siigo_config).some(([, v]) => v === '' || (typeof v === 'number' && !Number.isFinite(v)))) {
     console.error('\nAlgún valor quedó vacío o no es numérico. No se guardó nada.');
     process.exit(1);
+  }
+
+  // ── Viajes (adenda Siigo) ──────────────────────────────────────────────────
+  // Solo si el espacio los necesita: SOENA no ve ninguna de estas preguntas.
+  const { data: lineas } = await one.from('lineas_negocio').select('id, nombre, config_extra').eq('workspace_id', (ws as { id: string }).id);
+  const lineasViaje = ((lineas ?? []) as Array<{ id: string; nombre: string; config_extra: Record<string, unknown> | null }>)
+    .filter(l => l.config_extra && ('servicios_viaje' in l.config_extra || 'plan_pagos' in l.config_extra));
+  if (forzarViajes || lineasViaje.length > 0) {
+    console.log(`\n--- Viajes (${lineasViaje.map(l => l.nombre).join(', ') || 'forzado con --viajes'}) ---`);
+    const prods = await siigoGet<{ results: Prod[] }>(token, partnerId, '/v1/products?page_size=100');
+    console.log('\nProductos:');
+    prods.results.forEach(p => console.log(`  code=${p.code}  ${p.name}  activo=${p.active}`));
+    const productoPropioCode = await preguntar('  Producto de INGRESO PROPIO (fee, margen; con IVA) (code): ');
+    const productoTercerosCode = await preguntar('  Producto RECIBIDO PARA TERCEROS (sin IVA) (code): ');
+    if (!productoPropioCode || !productoTercerosCode) {
+      console.error('\nUn espacio con viajes necesita los dos productos. No se guardó nada.');
+      process.exit(1);
+    }
+    siigo_config.productoPropioCode = productoPropioCode;
+    siigo_config.productoTercerosCode = productoTercerosCode;
+
+    try {
+      const ccs = await siigoGet<Cc[]>(token, partnerId, '/v1/cost-centers');
+      console.log('\nCentros de costo:');
+      ccs.forEach(c => console.log(`  id=${c.id}  ${c.code ?? ''} ${c.name}`));
+    } catch (e) {
+      console.log(`\n(No se pudieron listar los centros de costo: ${e instanceof Error ? e.message : e})`);
+    }
+    const cc = await preguntar('  Centro de costo (id, vacío = ninguno): ');
+    if (cc) {
+      if (!Number.isFinite(Number(cc))) { console.error('\nEl centro de costo no es numérico. No se guardó nada.'); process.exit(1); }
+      siigo_config.centroCostoId = Number(cc);
+    }
+
+    // La forma de pago del recibo depende de la cuenta donde entró la plata.
+    const { cuentasDeRecaudo } = await import('../src/lib/viaje/riel-cobro');
+    const terminos = lineasViaje.map(l => l.config_extra?.terminos_base).find((t): t is string => typeof t === 'string') ?? null;
+    const cuentas = cuentasDeRecaudo((ws as { config_extra?: unknown }).config_extra, terminos);
+    if (cuentas.length === 0) console.log('\n⚠️  El espacio no tiene cuentas de recaudo configuradas: los recibos quedarán con «falta configurar».');
+    const porCuenta: Record<string, number> = {};
+    for (const c of cuentas) {
+      const v = await preguntar(`  Forma de pago del RECIBO para la cuenta «${c.nombre}» [${c.id}] (id): `);
+      if (!v || !Number.isFinite(Number(v))) { console.error(`\nFalta la forma de pago de la cuenta ${c.id}. No se guardó nada.`); process.exit(1); }
+      porCuenta[c.id] = Number(v);
+    }
+    siigo_config.reciboPaymentIdPorCuenta = porCuenta;
+
+    const entorno = (await preguntar('  ¿Esta empresa de Siigo es de PRUEBAS o de PRODUCCION? (pruebas/produccion): ')).toLowerCase();
+    if (entorno !== 'pruebas' && entorno !== 'produccion') {
+      console.error('\nEl entorno tiene que ser «pruebas» o «produccion». No se guardó nada.');
+      process.exit(1);
+    }
+    siigo_config.entorno = entorno;
   }
 
   // 3a. Credenciales a Vault.

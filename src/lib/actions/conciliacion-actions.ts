@@ -56,6 +56,7 @@ import { avisarSobrepagoSiCorresponde } from '@/lib/cobros/aviso-sobrepago-servi
 import { abonarEnSegundoPlano } from '@/lib/siigo/segundo-plano'
 import { registrarActividad } from '@/lib/activity/registrar-actividad'
 import { negocioCerrado, MENSAJE_NEGOCIO_CERRADO } from '@/lib/negocios/motivo-cierre'
+import { negociosDePruebaOcultos, sinOcultos } from '@/lib/negocios/negocios-de-prueba'
 
 // Cast a untyped para tablas/columnas nuevas no en database.ts
 // (negocio_conciliacion, cobros.split_json).
@@ -785,6 +786,7 @@ async function cargarPropuestasEconomicas(
 async function cargarNegociosYCobros(
   supabase: unknown,
   workspaceId: string,
+  staffId: string | null,
 ): Promise<{
   negocios: Map<string, NegocioRow>
   cobros: CobroRow[]
@@ -801,13 +803,16 @@ async function cargarNegociosYCobros(
     `)
     .eq('workspace_id', workspaceId)
 
-  const filas = (negociosRaw ?? []) as Array<{
+  // El viaje de prueba (metadata.es_prueba, F8-1) no entra al panel ni a sus totales para quien
+  // no lo lleva ni lo aprueba: ni sus negocios ni sus pagos.
+  const ocultosPrueba = await negociosDePruebaOcultos(db(supabase), workspaceId, staffId)
+  const filas = sinOcultos((negociosRaw ?? []) as Array<{
     id: string; codigo: string | null; nombre: string | null
     precio_aprobado: number | null; precio_estimado: number | null
     estado: string | null; stage_actual: string | null; created_at: string | null
     etapas_negocio: { nombre: string | null; orden: number | null } | null
     empresas: { nombre: string | null } | null
-  }>
+  }>, ocultosPrueba, (n) => n.id)
   const ids = filas.map((n) => n.id)
 
   // Una sola marca de tiempo para TODAS las filas de la respuesta: si cada negocio
@@ -822,7 +827,7 @@ async function cargarNegociosYCobros(
     .from('cobros')
     .select('id, negocio_id, monto, tipo_cobro, plan_cobro_id, external_ref, fuente, fecha, split_json, anulado_at, monto_anulado, anulacion_motivo')
     .eq('workspace_id', workspaceId)
-  const cobros = (cobrosRaw ?? []) as CobroRow[]
+  const cobros = sinOcultos((cobrosRaw ?? []) as CobroRow[], ocultosPrueba, (c) => c.negocio_id)
 
   // El check de la financiera se necesita ANTES de sumar: es lo que decide si una porción
   // propuesta por el comercial cuenta como recaudo. Se lee aquí, y no más abajo donde ya
@@ -999,9 +1004,9 @@ async function cobrosConCuentaDeCobroViva(
 export async function getConciliacionV2(): Promise<{ data: ConciliacionV2 | null; error?: string }> {
   const ctx = await ctxFinanciero()
   if (!ctx.ok) return { data: null, error: ctx.error }
-  const { supabase, workspaceId } = ctx
+  const { supabase, workspaceId, staffId } = ctx
 
-  const { negocios, cobros, cobrado, pendienteConfirmar } = await cargarNegociosYCobros(supabase, workspaceId)
+  const { negocios, cobros, cobrado, pendienteConfirmar } = await cargarNegociosYCobros(supabase, workspaceId, staffId ?? null)
 
   const negocioIds = Array.from(negocios.keys())
   const responsablePorNegocio = new Map<string, string>()

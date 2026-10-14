@@ -58,6 +58,9 @@ const TIPOS_ACCION_PROPIA = new Set([
   'aprobacion', // actualizarAprobacion
   'facturacion',
   'contacto',
+  // Servicios del viaje: lo cierra su gate (`servicios_listos`, F3) con la plata de cada fila,
+  // nunca un «marcar completo» que se salte los pagos con soporte.
+  'servicios',
   // De solo visualización: nadie los completa.
   'resumen_financiero',
   'resultado',

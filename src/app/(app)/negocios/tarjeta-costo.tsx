@@ -52,6 +52,7 @@ export default function TarjetaCosto({
   margenCotizacion,
   moneda,
   onCambio,
+  autorizador = null,
 }: {
   itemId: string
   editable: boolean
@@ -70,6 +71,11 @@ export default function TarjetaCosto({
   margenCotizacion: { margenPct: number | null; convencion: ConvencionMargen | null }
   moneda: MonedaDeTarifa
   onCambio: () => void
+  /**
+   * Quién autoriza bajo el mínimo, con su nombre de pila: sale de la configuración del workspace
+   * (su dueño), nunca del código (P7). Sin un dueño único, «quien autoriza».
+   */
+  autorizador?: string | null
 }) {
   const [ajustando, setAjustando] = useState(false)
   const [conAdicional, setConAdicional] = useState(false)
@@ -302,7 +308,7 @@ export default function TarjetaCosto({
           Margen <b className="tabular-nums text-[#191713]">{margenReal === null ? '—' : porcentaje(margenReal)}</b>
           {bajo && (
             <AlertaDecision tip="Con este margen necesitas autorización para enviar">
-              <p className="m-0">Con un margen menor al {porcentaje(pisoPct)} la cotización no se puede enviar sin la autorización de Edgar. Súbelo o pídele la autorización.</p>
+              <p className="m-0">Con un margen menor al {porcentaje(pisoPct)} la cotización no se puede enviar sin la autorización de {autorizador ?? 'quien autoriza'}. Súbelo o pídele la autorización.</p>
             </AlertaDecision>
           )}
           {editable && (

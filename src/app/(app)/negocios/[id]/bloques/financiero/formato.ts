@@ -6,8 +6,8 @@
 // categoría rotulada distinto según en qué bloque la mires.
 // ============================================================
 
-import { TIPOS_RUBRO, TIPOS_RUBRO_VIAJE } from '@/lib/catalogos/constants'
-import { TIPO_RUBRO_SIN_DETALLE } from '@/lib/negocios/presupuesto-ejecucion'
+import { CATEGORIAS_GASTO_VIAJE, TIPOS_RUBRO, TIPOS_RUBRO_VIAJE } from '@/lib/catalogos/constants'
+import { TIPO_RUBRO_PROVEEDOR_VIAJE, TIPO_RUBRO_SIN_DETALLE } from '@/lib/negocios/presupuesto-ejecucion'
 
 export const CATEGORIA_LABELS: Record<string, string> = {
   materiales: 'Materiales',
@@ -23,6 +23,7 @@ export const CATEGORIA_LABELS: Record<string, string> = {
   marketing: 'Marketing',
   capacitacion: 'Capacitación',
   otros: 'Otros',
+  ...Object.fromEntries(CATEGORIAS_GASTO_VIAJE.map(c => [c.value, c.label])),
 }
 
 // Etiqueta de cada rubro. Sale del catálogo (`TIPOS_RUBRO`), no de una copia a mano:
@@ -34,6 +35,8 @@ export const RUBRO_LABELS: Record<string, string> = {
   // catálogo seleccionable (`TIPOS_RUBRO`): meterlos ahí los ofrecería en el editor
   // de rubros de cualquier cotización. Sin rótulo, la barra mostraría el slug.
   ...Object.fromEntries(TIPOS_RUBRO_VIAJE.map(t => [t.value, t.label])),
+  // El cubo en que se pliegan los tres de arriba cuando la línea lleva servicios del viaje.
+  [TIPO_RUBRO_PROVEEDOR_VIAJE]: 'Proveedores del viaje',
 }
 
 export const fmt = (v: number) =>

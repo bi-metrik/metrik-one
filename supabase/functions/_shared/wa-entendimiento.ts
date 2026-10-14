@@ -117,9 +117,12 @@ import type { ConsultaBandeja } from './wa-consulta-bandeja.ts';
 import { datoDeLaFicha, leerEsLaMisma, llavesDelTexto, nombreEnElDirectorio, pareceNombre, separarNombreYLlave, soloLlave, textoDelCliente, textoLlave, textoNoEsLaMisma, tieneLlave, unirLlaves } from './wa-cliente-reglas.ts';
 import type { Directorio, FichaCliente, Llave, ResolucionCliente } from './wa-cliente-reglas.ts';
 import type { SupabaseClient } from './types.ts';
+import { leerConGemini, MODELO_ENTENDIMIENTO_POR_DEFECTO } from './lectura-gemini.ts';
+import type { Lectura } from './lectura-gemini.ts';
+import { nombreSegunPlantilla, plantillaDeLinea, renombrarSegunPlantilla } from './nombre-viaje.ts';
 
 /** El mismo proveedor y el mismo modelo base que ONE ya usa para leer mensajes (`wa-parse.ts`). */
-const GEMINI_MODEL = Deno.env.get('GEMINI_ENTENDIMIENTO_MODEL') || Deno.env.get('GEMINI_PARSE_MODEL') || 'gemini-2.5-flash-lite';
+const GEMINI_MODEL = Deno.env.get('GEMINI_ENTENDIMIENTO_MODEL') || Deno.env.get('GEMINI_PARSE_MODEL') || MODELO_ENTENDIMIENTO_POR_DEFECTO;
 const INTENT = 'bandeja_entendimiento';
 const MAX_INTENTOS = 3;
 const LOTE = 5;
@@ -149,49 +152,13 @@ async function actualizar(supabase: SupabaseClient, id: string, cambios: Fila): 
 
 // ── Modelo ───────────────────────────────────────────────────────────────────
 
-interface Lectura { json: unknown | null; finishReason: string | null; error: string | null }
-
 /**
  * Llama al modelo con el esquema dado. Verifica el MOTIVO DE TERMINACIÓN, no solo que haya
- * texto: media respuesta aceptada en silencio es un falso verde (§3 del diseño).
+ * texto: media respuesta aceptada en silencio es un falso verde (§3 del diseño). El pedido vive
+ * en `lectura-gemini.ts`, que comparte con la app (pegar una conversación en el viaje).
  */
-export async function leerConModelo(instrucciones: string, texto: string, esquema: unknown): Promise<Lectura> {
-  const apiKey = Deno.env.get('GEMINI_API_KEY');
-  if (!apiKey) return { json: null, finishReason: null, error: 'GEMINI_NO_KEY' };
-  const url = `https://generativelanguage.googleapis.com/v1beta/models/${GEMINI_MODEL}:generateContent?key=${apiKey}`;
-  try {
-    const res = await fetch(url, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        system_instruction: { parts: [{ text: instrucciones }] },
-        contents: [{ role: 'user', parts: [{ text: texto }] }],
-        generationConfig: {
-          temperature: 0.1,
-          maxOutputTokens: 8192,
-          responseMimeType: 'application/json',
-          responseSchema: esquema,
-        },
-      }),
-    });
-    if (!res.ok) return { json: null, finishReason: null, error: `GEMINI_HTTP_${res.status}: ${(await res.text()).slice(0, 200)}` };
-    const data = await res.json();
-    const bloqueo = data.promptFeedback?.blockReason;
-    if (bloqueo) return { json: null, finishReason: null, error: `GEMINI_BLOCKED: ${bloqueo}` };
-    const finishReason: string | null = data.candidates?.[0]?.finishReason ?? null;
-    if (finishReason !== 'STOP') {
-      return { json: null, finishReason, error: `GEMINI_INCOMPLETO: finishReason ${finishReason ?? '(ausente)'}` };
-    }
-    const txt = data.candidates?.[0]?.content?.parts?.[0]?.text;
-    if (!txt) return { json: null, finishReason, error: 'GEMINI_EMPTY' };
-    try {
-      return { json: JSON.parse(txt), finishReason, error: null };
-    } catch {
-      return { json: null, finishReason, error: 'GEMINI_JSON_INVALIDO' };
-    }
-  } catch (err) {
-    return { json: null, finishReason: null, error: `GEMINI_RED: ${String(err).slice(0, 200)}` };
-  }
+export function leerConModelo(instrucciones: string, texto: string, esquema: unknown): Promise<Lectura> {
+  return leerConGemini({ apiKey: Deno.env.get('GEMINI_API_KEY'), modelo: GEMINI_MODEL, instrucciones, texto, esquema });
 }
 
 // ── Config de la línea ───────────────────────────────────────────────────────
@@ -329,7 +296,12 @@ export async function crearNegocio(
   // uno provisional sin destino («Viaje de Laura Prueba»). La marca dice que lo puso el bot: si
   // alguien lo cambia a mano, el bot ya no lo toca (prueba en vivo del 2026-10-01, parte B).
   const sug = p.salida.sugeridos;
-  const auto = nombreViajeNuevo({
+  // Si la línea declara su regla de nombre (`lineas_negocio.config_extra.nombre_automatico`), manda esa; si no, la
+  // convención de siempre.
+  const plantilla = await plantillaDeLinea(supabase, p.cfg.lineaId);
+  const valoresNombre = Object.fromEntries(Object.entries(sug).map(([k, x]) => [k, x?.valor]));
+  const segunLinea = plantilla ? nombreSegunPlantilla(plantilla, valoresNombre, (contacto?.nombre as string | null) ?? null) : null;
+  const auto = segunLinea ?? nombreViajeNuevo({
     destino: sug.destino?.valor, salida: sug.fecha_salida?.valor, regreso: sug.fecha_regreso?.valor,
     mes: p.pistas.mes, duracion: p.pistas.duracion, cliente: (contacto?.nombre as string | null) ?? null,
   });
@@ -1877,6 +1849,8 @@ async function renombrarSiEsProvisional(
   const actual = (neg.nombre as string | null) ?? null;
   const meta = (neg.metadata && typeof neg.metadata === 'object' ? neg.metadata : {}) as Fila;
   if (!actual || meta.nombre_auto !== actual) return actual;
+  // La línea con regla de nombre propia (`nombre_automatico`) la aplica con lo que el negocio tiene ahora.
+  if (await plantillaDeLinea(supabase, neg.linea_id as string | null)) return (await renombrarSegunPlantilla(supabase, neg.id as string)) ?? actual;
   const antes = (meta.nombre_pistas && typeof meta.nombre_pistas === 'object' ? meta.nombre_pistas : {}) as { mes?: number | null; duracion?: string | null };
   const juntas = { mes: pistas.mes ?? antes.mes ?? null, duracion: pistas.duracion ?? antes.duracion ?? null };
   const nuevo = nombreViajeNuevo({

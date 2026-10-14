@@ -70,6 +70,7 @@ import {
   type MarcaRecibo,
 } from '@/lib/siigo/recibo-componentes'
 import { ETIQUETA_ABONO_A_MANO, esMotivoAbonoAMano } from '@/lib/siigo/abono'
+import { negociosDePruebaOcultos, sinOcultos } from '@/lib/negocios/negocios-de-prueba'
 
 export type EstadoRecibo = 'con_recibo' | 'no_aplica' | 'pendiente'
 
@@ -197,7 +198,7 @@ export interface AbonoParaTesoreria {
 
 /** Mismo criterio de área que facturación: el recaudo es del área financiera. */
 async function ctxFinanciero(): Promise<
-  { ok: true; workspaceId: string } | { ok: false; error: string }
+  { ok: true; workspaceId: string; staffId: string | null } | { ok: false; error: string }
 > {
   const { workspaceId, staffId, role, areas, error } = await getWorkspace()
   if (error || !workspaceId) return { ok: false, error: error ?? 'No autenticado' }
@@ -209,14 +210,14 @@ async function ctxFinanciero(): Promise<
   if (!canEditBloque(user, { stage: 'cobro' }, [])) {
     return { ok: false, error: 'Solo el área financiera puede ver el control de recibos' }
   }
-  return { ok: true, workspaceId }
+  return { ok: true, workspaceId, staffId: staffId ?? null }
 }
 
 export async function getControlRecibos(): Promise<{ data: ControlRecibos | null; error?: string }> {
   const ctx = await ctxFinanciero()
   if (!ctx.ok) return { data: null, error: ctx.error }
   try {
-    return { data: await armarControl(ctx.workspaceId) }
+    return { data: await armarControl(ctx.workspaceId, ctx.staffId) }
   } catch (e) {
     // Igual que la cola de facturación: una lista recortada tiene el mismo aspecto que
     // una lista entera, y aquí decide si se emite un documento contable. Se prefiere
@@ -225,7 +226,7 @@ export async function getControlRecibos(): Promise<{ data: ControlRecibos | null
   }
 }
 
-async function armarControl(workspaceId: string): Promise<ControlRecibos> {
+async function armarControl(workspaceId: string, staffId: string | null): Promise<ControlRecibos> {
   const svc = createServiceClient()
 
   type FilaCobro = {
@@ -240,7 +241,7 @@ async function armarControl(workspaceId: string): Promise<ControlRecibos> {
     recibo_no_aplica: { motivo?: string } | null
   }
 
-  const cobros = await traerTodo<FilaCobro>(
+  const cobrosTodos = await traerTodo<FilaCobro>(
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     (d, h) => (svc as any)
       .from('cobros')
@@ -252,6 +253,9 @@ async function armarControl(workspaceId: string): Promise<ControlRecibos> {
       .range(d, h),
     { etiqueta: 'recibos/cobros' },
   )
+  // Los pagos del viaje de prueba (F8-1) no entran al control ni a sus totales para quien no lo
+  // lleva ni lo aprueba.
+  const cobros = sinOcultos(cobrosTodos, await negociosDePruebaOcultos(svc, workspaceId, staffId), c => c.negocio_id)
 
   const negocioIds = [...new Set(cobros.map(c => c.negocio_id).filter((v): v is string => !!v))]
   if (negocioIds.length === 0) {

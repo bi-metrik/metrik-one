@@ -7,6 +7,8 @@ import { toast } from 'sonner'
 import { actualizarBloqueData, marcarBloqueCompleto } from '../../negocio-v2-actions'
 import type { NegocioBloque } from '../../negocio-v2-actions'
 import AvisoHonorarioPendiente from './AvisoHonorarioPendiente'
+import { FechaDelPago } from './FechaDelPago'
+import { fechasDePagosMulti, type CobroMultiConFecha } from '@/lib/epayco/fecha-cobro-multi-pago'
 
 export interface MultiPagoField {
   slug: string
@@ -32,6 +34,11 @@ interface BloqueDatosMultiPagoProps {
    * captura se cierra y el aviso llega antes de teclear referencia y valor.
    */
   faltaHonorario?: boolean
+  /**
+   * Cobros del negocio. De aquí sale la fecha del PAGO de cada fila: el cobro con la misma
+   * referencia y el mismo valor (ver `fechasDePagosMulti`).
+   */
+  cobros?: ReadonlyArray<CobroMultiConFecha>
 }
 
 const fmt = (v: number) =>
@@ -44,6 +51,7 @@ export default function BloqueDatosMultiPago({
   fields,
   onComplete,
   faltaHonorario = false,
+  cobros = [],
 }: BloqueDatosMultiPagoProps) {
   const saved = (instancia?.data ?? {}) as Record<string, unknown>
   const savedPagos = (saved.pagos ?? []) as PagoRow[]
@@ -111,12 +119,14 @@ export default function BloqueDatosMultiPago({
     if (savedPagos.length === 0) {
       return <p className="text-xs text-tinta-suave italic">Sin pagos registrados</p>
     }
+    const fechasGuardadas = fechasDePagosMulti(savedPagos, cobros)
     return (
       <div className="space-y-1.5">
         {savedPagos.map((p, i) => (
           <div key={i} className="flex items-center gap-3 rounded-lg border border-[#E5E7EB] p-2.5">
             <div className="flex-1 min-w-0">
               <p className="text-xs font-medium text-tinta">Ref: {p.referencia_epayco || '---'}</p>
+              <FechaDelPago fecha={fechasGuardadas[i]} />
             </div>
             <span className="text-xs font-semibold text-tinta tabular-nums shrink-0">
               {p.valor_pago ? fmt(Number(p.valor_pago)) : '---'}
@@ -134,6 +144,7 @@ export default function BloqueDatosMultiPago({
   }
 
   // Modo editable: filas dinamicas
+  const fechas = fechasDePagosMulti(pagos, cobros)
   return (
     <div className="space-y-3">
       {faltaHonorario && <AvisoHonorarioPendiente />}
@@ -169,6 +180,7 @@ export default function BloqueDatosMultiPago({
                 className="w-full rounded-lg border border-[#E5E7EB] bg-white px-3 py-2 text-xs text-tinta focus:border-acento focus:outline-none focus:ring-2 focus:ring-acento/15 disabled:opacity-60"
               />
             </div>
+            <FechaDelPago fecha={fechas[i]} />
           </div>
           {pagos.length > 1 && (
             <button

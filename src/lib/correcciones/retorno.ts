@@ -27,6 +27,7 @@ import {
 } from '@/lib/negocios/retorno-decision'
 import { LABEL_CAUSA, type CausaCorreccion } from './causas'
 import { registrarActividad } from '@/lib/activity/registrar-actividad'
+import { asignarResponsableAlEntrar } from '@/lib/negocios/responsable-automatico'
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 function db(supabase: unknown): any {
@@ -464,6 +465,7 @@ export async function ejecutarRetorno(params: {
       console.error('[retorno] no se pudo mover el negocio', errMover)
       return null
     }
+    await asignarResponsableAlEntrar(supabase, { negocioId, etapaId: retorno.etapaId, workspaceId })
 
     // ── Traza ─────────────────────────────────────────────────────────────
     // `autor_id` es FK a **staff(id)**, NO a profiles. Pasarle el profile.id viola la FK y

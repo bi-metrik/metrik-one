@@ -4,6 +4,7 @@ import { randomUUID } from 'crypto'
 
 import { revalidatePath } from 'next/cache'
 
+import { exigirPorPasos } from '@/lib/cotizaciones/por-pasos-datos'
 import { getWorkspace } from '@/lib/actions/get-workspace'
 import { exigirModulo, MENSAJE_MODULO_NO_ACTIVO, REQUISITO } from '@/lib/modulos/exigir-modulo'
 import { ranuraDeGrupo } from '@/lib/cotizaciones/ranuras-pantallazo'
@@ -27,6 +28,11 @@ import {
   describirOcupacion,
   normalizarComposicion,
   resolverTarifa,
+  costosAManoComoMapa,
+  preciosQueFaltan,
+  cantidadDeTipo,
+  TIPOS_PASAJERO,
+  type TipoPasajero,
   sumarAlertas,
   validarLecturaEnCasilla,
   type CasillasLeidas,
@@ -66,11 +72,13 @@ import {
 } from '@/lib/cotizaciones/habitaciones'
 import { opcionLeidaDeFila, type OpcionLeida } from '@/lib/cotizaciones/bandeja-capturas'
 import { leerImagenDeCaptura } from '@/lib/cotizaciones/leer-imagen-captura'
-import { avisoFechaActividadFueraDelViaje, leerHotelManual, leerTrasladoManual, lecturaManual, type ErroresManual } from '@/lib/cotizaciones/ingreso-manual'
+import { avisoFechaActividadFueraDelViaje, leerActividadManual, leerHotelManual, leerOtroServicioManual, leerTrasladoManual, leerVueloManual, lecturaManual, type EntradaManual, type ErroresManual } from '@/lib/cotizaciones/ingreso-manual'
+import { marcarAsistenciaMedica } from '@/lib/cotizaciones/asistencia-medica'
 import { fechaDeActividad, lugarDeBloqueNuevo } from '@/lib/cotizaciones/actividad-pantallazo'
 import { diaDeFecha } from '@/lib/cotizaciones/actividad-en-cotizacion'
 import { borradorValido, firmarBorrador } from '@/lib/cotizaciones/firma-borrador'
 import { opcionElegidaDeActividad, ubicarLectura, type LineaParaUbicar } from '@/lib/cotizaciones/ubicar-lectura'
+import { completaDe, mismoTipo } from '@/lib/cotizaciones/destino-por-pasos'
 import { aceptacionPrevia, idAceptacionValido } from '@/lib/cotizaciones/aceptacion-idempotente'
 import { definicionDeTipo, esTipoRanura, tipoDeDefinicion, type TipoRanura } from '@/lib/cotizaciones/ranuras-cotizacion'
 import { lugarDeOpcion } from '@/lib/cotizaciones/opcion-viaje'
@@ -534,6 +542,12 @@ export async function leerCapturaEnBorrador(
   }
   const ctx = await contextoDeCotizacion(cotizacionId)
   if ('error' in ctx) return { ok: false, codigo: 'CONTEXTO', mensaje: ctx.error as string }
+  // «Es otro servicio» solo existe en la cotización por pasos: con el interruptor apagado no se
+  // lee (ni se gasta una llamada al modelo).
+  if (tipo === 'otro') {
+    const guard = await exigirPorPasos(ctx.supabase, cotizacionId)
+    if (!guard.ok) return { ok: false, codigo: 'POR_PASOS', mensaje: guard.error }
+  }
   const ranura = definicionDeTipo(tipo)
   const r = await leerImagenDeCaptura({ ranura, dataUrl, viaje: ctx.viaje, enfoque })
   if (!r.ok) return r
@@ -548,6 +562,8 @@ export async function leerCapturaEnBorrador(
   // 2026-10-01). Es un aviso: la captura entra igual.
   const fueraDelViaje = tipo === 'actividad' ? avisoFechaActividadFueraDelViaje(fechaDeActividad(leida), ctx.viaje.fechas) : null
   leida.alertas = sumarAlertas(leida.alertas, v.alertas, fueraDelViaje ? [fueraDelViaje] : [])
+  // Una asistencia médica leída de un pantallazo queda marcada igual que la escrita a mano.
+  if (tipo === 'otro') marcarAsistenciaMedica(tipo, leida)
   const lecturaJson = JSON.stringify(leida)
   const firma = firmarBorrador(cotizacionId, tipo, lecturaJson)
   if (!firma) return { ok: false, codigo: 'CONFIG', mensaje: 'Falta configurar la firma de la bandeja. Avísale a MeTRIK.' }
@@ -565,21 +581,43 @@ export type ResultadoManualEnBorrador =
 
 export async function lecturaManualEnBorrador(
   cotizacionId: string,
-  tipo: 'hotel' | 'traslado',
+  tipo: 'hotel' | 'traslado' | 'vuelo' | 'actividad' | 'otro',
   datos: unknown,
+  /**
+   * «✎ Escríbelo a mano» de la cotización por pasos (C5): suma vuelo y actividad, y la fuente es
+   * opcional. Se comprueba el interruptor contra la base: con él apagado, solo hotel y traslado,
+   * exactamente como siempre.
+   */
+  opciones?: { porPasos?: boolean } | null,
 ): Promise<ResultadoManualEnBorrador> {
-  if (tipo !== 'hotel' && tipo !== 'traslado') return { ok: false, codigo: 'TIPO', mensaje: 'Tipo de componente desconocido.' }
+  const porPasos = opciones?.porPasos === true
+  const deSiempre = tipo === 'hotel' || tipo === 'traslado'
+  if (!deSiempre && !(porPasos && (tipo === 'vuelo' || tipo === 'actividad' || tipo === 'otro'))) return { ok: false, codigo: 'TIPO', mensaje: 'Tipo de componente desconocido.' }
   if (!(await exigirModulo(REQUISITO.clarity)).ok) {
     return { ok: false, codigo: 'MODULO', mensaje: MENSAJE_MODULO_NO_ACTIVO }
   }
   const ctx = await contextoDeCotizacion(cotizacionId)
   if ('error' in ctx) return { ok: false, codigo: 'CONTEXTO', mensaje: ctx.error as string }
+  if (porPasos) {
+    const guard = await exigirPorPasos(ctx.supabase, cotizacionId)
+    if (!guard.ok) return { ok: false, codigo: 'POR_PASOS', mensaje: guard.error }
+  }
   const ranura = definicionDeTipo(tipo)
+  const entrada: EntradaManual = tipo === 'hotel'
+    ? { tipo, datos: leerHotelManual(datos) }
+    : tipo === 'traslado'
+      ? { tipo, datos: leerTrasladoManual(datos) }
+      : tipo === 'vuelo'
+        ? { tipo, datos: leerVueloManual(datos) }
+        : tipo === 'actividad'
+          ? { tipo, datos: leerActividadManual(datos) }
+          : { tipo, datos: leerOtroServicioManual(datos) }
   const r = lecturaManual({
     ranura,
-    entrada: tipo === 'hotel' ? { tipo, datos: leerHotelManual(datos) } : { tipo, datos: leerTrasladoManual(datos) },
+    entrada,
     leidaEn: new Date().toISOString(),
     viaje: ctx.viaje.fechas,
+    ...(porPasos ? { fuenteOpcional: true } : {}),
   })
   if (!r.ok) return { ok: false, codigo: 'CAMPOS', mensaje: r.errores._ ?? 'Revisa los campos marcados.', errores: r.errores }
   const leida = r.lectura
@@ -605,7 +643,7 @@ export interface BorradorParaAceptar {
    * igual»). `habitacion`: habitación de `destinoId` aunque el grupo ya esté cubierto.
    * `reemplazar`: la lectura reemplaza la de `destinoId` («Reemplazar el precio»).
    */
-  decision: 'auto' | 'opcion' | 'habitacion' | 'reemplazar'
+  decision: 'auto' | 'opcion' | 'habitacion' | 'reemplazar' | DecisionPorPasos
   destinoId?: string | null
   /**
    * El pantallazo leído (data URL), para guardarlo con la opción. Solo se guarda si su huella
@@ -627,8 +665,16 @@ export interface BorradorParaAceptar {
   idAceptacion?: string | null
 }
 
+/**
+ * Las decisiones que solo manda la cotización por pasos (C5): lo que dijo la frase de la fila
+ * cuando la eligió el modelo o la asesora. `nueva`: servicio aparte. `hermana`: otra opción del
+ * servicio de `destinoId` (del mismo tipo). `completa`: el pantallazo trae el precio por pasajero
+ * que le faltaba a `destinoId` y no crea nada. Las rutas solo las dejan pasar con el interruptor.
+ */
+export type DecisionPorPasos = 'nueva' | 'hermana' | 'completa'
+
 /** Cómo entró la captura: otra opción, una ranura nueva, una habitación o sobre una opción. */
-export type ComoEntro = 'hermana' | 'nueva' | 'habitacion' | 'reemplazo'
+export type ComoEntro = 'hermana' | 'nueva' | 'habitacion' | 'reemplazo' | 'completa'
 
 export type ResultadoAceptarCaptura =
   | {
@@ -672,6 +718,12 @@ export async function aceptarCapturaDeBandeja(cotizacionId: string, b: BorradorP
   if (idAceptacion) lectura.aceptacion = idAceptacion
   const ctx = await medirEtapa('contexto', () => contextoDeCotizacion(cotizacionId))
   if ('error' in ctx) return { ok: false, codigo: 'CONTEXTO', mensaje: ctx.error as string }
+  // «Otro servicio» solo entra con la cotización por pasos (N5): aunque la lectura venga firmada,
+  // con el interruptor apagado se rechaza sin escribir nada.
+  if (b.tipo === 'otro') {
+    const guard = await exigirPorPasos(ctx.supabase, cotizacionId)
+    if (!guard.ok) return { ok: false, codigo: 'POR_PASOS', mensaje: guard.error }
+  }
   // El pantallazo se sube ahora, al aceptar: mientras estuvo en la bandeja no se guardó. Una
   // lectura que ya trae su imagen (volvió a la bandeja desde una opción eliminada) no la sube
   // otra vez. Brief del 2026-10-05, punto 13: la subida va EN PARALELO con la lectura de las
@@ -715,7 +767,7 @@ export async function aceptarCapturaDeBandeja(cotizacionId: string, b: BorradorP
     const ref = await subida
     if (ref) await borrarImagenesDeCaptura(workspaceId, [ref])
   }
-  if (!r.ok || r.como === 'habitacion') return r
+  if (!r.ok || r.como === 'habitacion' || r.como === 'completa') return r
   const fallidas = await medirEtapa('correcciones', () => aplicarCorreccionesDeBandeja(r.itemId, b.correcciones))
   // Punto 2 del brief del 2026-10-05: la actividad con fecha dentro del viaje llega con su día.
   if (b.tipo === 'actividad') await medirEtapa('dia', () => proponerDiaDeActividad(ctx.supabase, r.itemId, ctx.viaje.fechas))
@@ -783,8 +835,41 @@ async function aceptarLectura(
     return terminarAceptacion(ctx.supabase, cotizacionId, b.destinoId!, { como: 'reemplazo' })
   }
 
+  // ── Completa el precio por pasajero que le faltaba a una opción (por pasos, C5) ──
+  // Se vuelve a comprobar contra la opción de ESTE momento: si ya no le falta, no se escribe.
+  if (b.decision === 'completa') {
+    const linea = lineas.find(l => l.id === b.destinoId)
+    const c = linea ? completaDe(b.tipo, lectura, [linea as unknown as LineaParaUbicar], ctx.viaje.composicion) : null
+    if (!c) return { ok: false, codigo: 'DESTINO', mensaje: 'A esa opción ya no le falta ese precio. Toca la frase y elige a dónde va.' }
+    const ctxItem = await contexto(c.itemId)
+    if ('error' in ctxItem) return { ok: false, codigo: 'CONTEXTO', mensaje: ctxItem.error as string }
+    await conImagen()
+    // El precio que faltaba queda como el escrito a mano (`costosAMano`), con la marca de que
+    // salió de este pantallazo y su imagen: así lo leen igual el total, el PDF y la tarjeta.
+    const quien = await quienEscribe(ctxItem.supabase)
+    const en = new Date().toISOString()
+    const g = await guardarTarifa(ctxItem.supabase, c.itemId, actual => {
+      const costosAMano = { ...(actual.costosAMano ?? {}) }
+      for (const t of c.tipos) {
+        const unitario = c.precios[t]
+        if (typeof unitario !== 'number' || costosAMano[t]) continue
+        costosAMano[t] = {
+          unitario, por: quien.por, porId: quien.porId, en, desde: 'pantallazo',
+          ...(lectura.imagenRef ? { imagenRef: lectura.imagenRef } : {}),
+        }
+      }
+      return { ...actual, costosAMano }
+    })
+    if ('error' in g) return { ok: false, codigo: 'GUARDAR', mensaje: g.error }
+    return terminarAceptacion(ctx.supabase, cotizacionId, c.itemId, { como: 'completa' })
+  }
+
   // ── Dónde va, contra la cotización de ESTE momento ──
-  const destino = b.decision === 'habitacion'
+  const destino = b.decision === 'nueva'
+    ? { como: 'nueva' as const }
+    : b.decision === 'hermana'
+    ? hermanaElegida(b.tipo, b.destinoId, lineas as unknown as LineaParaUbicar[])
+    : b.decision === 'habitacion'
     ? (delaCotizacion(b.destinoId) ? { como: 'habitacion' as const, itemId: b.destinoId!, grupo: '', sobra: false } : null)
     // Una actividad solo es opción de otra si quien cotiza lo eligió (brief del 2026-10-05,
     // «actividades tras la limpieza»): «Agregar como otra opción» manda la actividad de al lado.
@@ -810,7 +895,12 @@ async function aceptarLectura(
     ? await medirEtapa('crear', () => agregarOpcionARanura(cotizacionId, destino.grupo))
     // Una actividad sin ciudad en la captura nombra su bloque con el destino del viaje, no
     // con el nombre de la excursión que tomó el detector (punto 4 del brief del 2026-10-01).
-    : await medirEtapa('crear', () => crearRanuraConOpcion(cotizacionId, b.tipo, { ...pistas, lugar: lugarDeBloqueNuevo(b.tipo, lectura, pistas.lugar, b.correcciones) }))
+    : await medirEtapa('crear', () => crearRanuraConOpcion(cotizacionId, b.tipo, {
+      ...pistas,
+      lugar: lugarDeBloqueNuevo(b.tipo, lectura, pistas.lugar, b.correcciones),
+      // «Otro servicio» se llama como lo que es («Asistencia médica»), no por un lugar.
+      ...(b.tipo === 'otro' ? { servicio: servicioDeLectura(lectura, b.correcciones) } : {}),
+    }))
   if (!creada.success) return { ok: false, codigo: 'CREAR', mensaje: creada.error || 'No se pudo abrir la opción para esta captura. Toca «Aceptar» otra vez.' }
   const ctxItem = await contexto(creada.itemId)
   await conImagen()
@@ -823,6 +913,24 @@ async function aceptarLectura(
     return { ok: false, codigo: g.codigo, mensaje: g.mensaje }
   }
   return terminarAceptacion(ctx.supabase, cotizacionId, creada.itemId, { como: destino.como })
+}
+
+/** El nombre de un «Otro servicio»: el corregido en la fila, o el leído. */
+function servicioDeLectura(lectura: LecturaCasilla, correcciones: BorradorParaAceptar['correcciones']): string | null {
+  const corregido = Array.isArray(correcciones) ? correcciones.find(c => c?.slug === 'nombre' && typeof c.valor === 'string')?.valor : undefined
+  const t = (corregido ?? lectura.nombre ?? '').trim()
+  return t === '' ? null : t
+}
+
+/**
+ * «Otra opción de: …» que eligió la asesora o el modelo (por pasos, C5): va como hermana del
+ * servicio de `destinoId`, que tiene que seguir en la cotización y ser del MISMO tipo (M3).
+ */
+function hermanaElegida(tipo: TipoRanura, destinoId: string | null | undefined, lineas: readonly LineaParaUbicar[]): { como: 'hermana'; grupo: string } | null {
+  const linea = destinoId ? lineas.find(l => l.id === destinoId && l.es_ajuste !== true) : null
+  if (!linea || !mismoTipo(linea, tipo)) return null
+  const grupo = normalizarGrupo(linea.grupo ?? null)
+  return grupo ? { como: 'hermana', grupo } : null
 }
 
 /** Confirma el costo (un faltante queda pendiente en su bloque, R1) y dice dónde quedó. */
@@ -1418,6 +1526,27 @@ export interface LecturaDevuelta {
 export async function devolverOpcionABandeja(itemId: string): Promise<{ ok: true; devueltas: LecturaDevuelta[] } | { ok: false; mensaje: string }> {
   const ctx = await contexto(itemId)
   if ('error' in ctx) return { ok: false, mensaje: ctx.error as string }
+  const lecturas = await lecturasDevueltasDe(ctx)
+  if (!lecturas.ok) return lecturas
+  const devueltas = lecturas.devueltas
+  const r = await deleteItem(itemId)
+  if (!r.success) return { ok: false, mensaje: r.error ?? 'No se pudo eliminar la opción.' }
+  await recalcularTotales(ctx.item.cotizacionId)
+  if (ctx.item.negocioId) revalidatePath(`/negocios/${ctx.item.negocioId}`)
+  return { ok: true, devueltas }
+}
+
+/**
+ * Los pantallazos de una opción, firmados para volver a la bandeja, SIN borrar la opción (la
+ * cotización por pasos borra en el acto y deja «Deshacer» con los mismos ids: C4). Solo lee.
+ */
+export async function lecturasParaLaBandeja(itemId: string): Promise<{ ok: true; devueltas: LecturaDevuelta[] } | { ok: false; mensaje: string }> {
+  const ctx = await contexto(itemId)
+  if ('error' in ctx) return { ok: false, mensaje: ctx.error as string }
+  return lecturasDevueltasDe(ctx)
+}
+
+async function lecturasDevueltasDe(ctx: ContextoDeItem): Promise<{ ok: true; devueltas: LecturaDevuelta[] } | { ok: false; mensaje: string }> {
   const tipo = tipoDeDefinicion(ctx.ranura)
   if (!tipo) return { ok: false, mensaje: 'Tipo de componente desconocido.' }
   const lecturas = conHabitaciones(ctx.tarifa)
@@ -1435,10 +1564,6 @@ export async function devolverOpcionABandeja(itemId: string): Promise<{ ok: true
     const pistas = lugarDeOpcion({ nombre: ctx.item.nombre, grupo: ctx.item.grupo, tarifa_pax: { casillas: { grupo_completo: l } } })
     devueltas.push({ tipo, lecturaJson, firma, pistas, imagen, huella: l.huellaImagen ?? null })
   }
-  const r = await deleteItem(itemId)
-  if (!r.success) return { ok: false, mensaje: r.error ?? 'No se pudo eliminar la opción.' }
-  await recalcularTotales(ctx.item.cotizacionId)
-  if (ctx.item.negocioId) revalidatePath(`/negocios/${ctx.item.negocioId}`)
   return { ok: true, devueltas }
 }
 
@@ -1514,6 +1639,62 @@ export async function confirmarMenorNoPaga(
   if ('error' in guardado) return { success: false, error: guardado.error }
   if (ctx.item.negocioId) revalidatePath(`/negocios/${ctx.item.negocioId}`)
   return { success: true, tarifa: guardado.tarifa }
+}
+
+// ── El precio por pasajero que falta, escrito a mano (forma por pasos, P12) ─────
+
+/**
+ * «Escribir a mano» el costo c/u de un tipo de pasajero que el pantallazo no trae, o «No paga en
+ * este proveedor» (`unitario = 0`). Regla del 2026-10-12 (aprobada por Mauricio): una opción de
+ * vuelo o actividad a la que le falta el precio del niño o del infante no se envía, y se cierra
+ * con un pantallazo nuevo, a mano o con «No paga». Queda registrado con quién y cuándo.
+ *
+ * Es de la forma por pasos: relee el interruptor (C1) y con él apagado no escribe nada. Lo
+ * escrito vive en `tarifa_pax.costosAMano` y lo usa `resolverTarifa` solo cuando no hay otra
+ * captura pegada para restar. Confirma el costo enseguida, como un pantallazo.
+ *
+ * `unitario = null` lo QUITA (el «Deshacer»).
+ */
+export async function escribirPrecioQueFalta(
+  itemId: string,
+  tipo: TipoPasajero,
+  unitario: number | null,
+): Promise<ResultadoTarifa & { anterior?: number | null }> {
+  const ctx = await contexto(itemId)
+  if ('error' in ctx) return { success: false, error: ctx.error as string }
+  const guard = await exigirPorPasos(ctx.supabase, ctx.item.cotizacionId)
+  if (!guard.ok) return { success: false, error: guard.error }
+  if (!ctx.composicion) return { success: false, error: 'Falta decir a cuántos pasajeros cubre la línea.' }
+  if (!TIPOS_PASAJERO.includes(tipo) || cantidadDeTipo(ctx.composicion, tipo) === 0) {
+    return { success: false, error: 'Ese tipo de pasajero no viaja en esta opción.' }
+  }
+  if (unitario !== null && (!Number.isFinite(unitario) || unitario < 0)) {
+    return { success: false, error: 'Escribe un costo de cero o más.' }
+  }
+  const anterior = ctx.tarifa.costosAMano?.[tipo]?.unitario ?? null
+  if (unitario !== null && anterior === null) {
+    // Solo se escribe lo que de verdad falta: un precio que el pantallazo trae no se tapa a mano.
+    const casillas = casillasConEstadia(ctx.tarifa.casillas ?? {}, ctx.tarifa.correcciones)
+    const faltan = preciosQueFaltan(ctx.composicion, casillas, ctx.ranura.slug, {
+      moneda: monedaDeTarifa(ctx.tarifa).moneda,
+      aMano: costosAManoComoMapa(ctx.tarifa),
+    })
+    if (!faltan.includes(tipo)) return { success: false, error: 'A esta opción no le falta ese precio.' }
+  }
+  const quien = await quienEscribe(ctx.supabase)
+  const guardado = await guardarTarifa(ctx.supabase, itemId, actual => {
+    const costosAMano = { ...(actual.costosAMano ?? {}) }
+    if (unitario === null) delete costosAMano[tipo]
+    else costosAMano[tipo] = { unitario, por: quien.por, porId: quien.porId, en: new Date().toISOString() }
+    const { costosAMano: _viejo, ...resto } = actual
+    void _viejo
+    return Object.keys(costosAMano).length > 0 ? { ...resto, costosAMano } : resto
+  })
+  if ('error' in guardado) return { success: false, error: guardado.error }
+  // Con lo escrito, el costo se confirma (y el total se recalcula) igual que con un pantallazo.
+  const c = await confirmarTarifaPorPasajero(itemId, null)
+  if (ctx.item.negocioId) revalidatePath(`/negocios/${ctx.item.negocioId}`)
+  return { success: true, tarifa: c.tarifa ?? guardado.tarifa, anterior, ...(c.success ? {} : { error: c.error }) }
 }
 
 // ── Composición de la línea (CC4b, P7) ───────────────────────────────────────
@@ -1639,7 +1820,11 @@ export async function confirmarTarifaPorPasajero(
   const porHabitaciones = conHabitaciones(tarifa)
   const estado = porHabitaciones
     ? resolverHabitaciones(tarifa, ctx.viaje.composicion ?? composicion, { moneda: monedaTarifa.moneda })
-    : resolverTarifa(composicion, casillasConEstadia(casillas, tarifa.correcciones), ranura.slug, { moneda: monedaTarifa.moneda })
+    : resolverTarifa(composicion, casillasConEstadia(casillas, tarifa.correcciones), ranura.slug, {
+        moneda: monedaTarifa.moneda,
+        // Lo escrito a mano en la forma por pasos (P12). Sin esa llave, como siempre.
+        aMano: costosAManoComoMapa(tarifa),
+      })
   if (estado.estado !== 'resuelta') return { success: false, error: estado.mensaje, codigo: 'PENDIENTE' }
   // «$» sin moneda: COP está preseleccionada pero nadie la ha dicho. No pasa callada.
   if (monedaTarifa.asumida) return { success: false, error: MENSAJE_MONEDA_ASUMIDA, codigo: 'PENDIENTE' }

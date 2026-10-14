@@ -30,6 +30,7 @@
  * Puro: sin red y sin base. La fecha de lectura entra por parámetro.
  */
 
+import { marcarAsistenciaMedica } from './asistencia-medica'
 import { nochesEntre } from './estadia'
 import { construirLecturaCasilla } from './lectura-casilla'
 import { evaluarLectura, type FilaTipoPaxCruda, type LecturaCruda, type ValorLeido } from './lectura-pantallazo'
@@ -50,6 +51,11 @@ export interface DatosManuales {
   incluye: string | null
   /** El rango de edad del niño que da el hotel. `null` = no se llenó. */
   edadNino: EdadNino | null
+  /**
+   * «Es opcional: el cliente decide (no suma)», marcado en «✎ Escríbelo a mano» (por pasos, C5):
+   * el servicio llega a la bandeja en «Opcional». Ausente = no se marcó.
+   */
+  opcional?: boolean
 }
 
 export interface HotelManual {
@@ -105,8 +111,98 @@ export interface TrasladoManual {
   netoInfante: number | null
   /** Solo cuenta con `precio: 'por_trayecto'`: in-out ya es ida y regreso. */
   idaYRegreso: boolean
+  /**
+   * H20 (prueba Europa, 2026-10-14) · la moneda del proveedor. Un tren en EUR se cargaba
+   * convertido a ojo; ahora entra en su moneda y la tasa se escribe como en un pantallazo.
+   * Ausente = COP, como antes.
+   */
+  moneda?: MonedaManual
   fuente: string
 }
+
+export const MONEDAS_MANUALES = ['COP', 'EUR', 'USD'] as const
+export type MonedaManual = (typeof MONEDAS_MANUALES)[number]
+
+function monedaManual(v: unknown): MonedaManual {
+  const t = String(v ?? '').trim().toUpperCase()
+  return (MONEDAS_MANUALES as readonly string[]).includes(t) ? (t as MonedaManual) : 'COP'
+}
+
+/**
+ * Un vuelo escrito a mano («✎ Escríbelo a mano», cotización por pasos, C5). Obligatorio: origen,
+ * destino, fecha de ida y costo del adulto. El costo del niño y del infante vacío es que FALTA
+ * (no 0): entra el flujo del precio por pasajero que falta, que impide enviar hasta tenerlo.
+ */
+export interface VueloManual {
+  aerolinea: string
+  origen: string
+  destino: string
+  /** «AAAA-MM-DD». */
+  ida: string
+  horaSalida: string
+  horaLlegada: string
+  numero: string
+  tarifa: string
+  /** «AAAA-MM-DD», o vacío = solo ida. */
+  regreso: string
+  horaSalidaRegreso: string
+  horaLlegadaRegreso: string
+  numeroRegreso: string
+  adultos: number
+  ninos: number
+  infantes: number
+  /** Costo NETO por pasajero, de todo el itinerario (ida y regreso). */
+  netoAdulto: number | null
+  netoNino: number | null
+  netoInfante: number | null
+  fuente: string
+}
+
+/**
+ * Una actividad escrita a mano (C5). Obligatorio: nombre y costo del adulto. Como el vuelo, el
+ * niño o el infante sin costo es que falta.
+ */
+export interface ActividadManual {
+  nombre: string
+  ciudad: string
+  /** «AAAA-MM-DD», o vacío. */
+  fecha: string
+  adultos: number
+  ninos: number
+  infantes: number
+  /** Costo NETO por persona. */
+  netoAdulto: number | null
+  netoNino: number | null
+  netoInfante: number | null
+  /** «Es opcional: el cliente decide (no suma)». */
+  opcional: boolean
+  fuente: string
+}
+
+/** Cómo cobra un «Otro servicio»: el mismo valor por cada viajero, o un valor por todo. */
+export type CobroOtroServicio = 'por_persona' | 'total'
+
+/**
+ * «Otro servicio» escrito a mano (cotización por pasos, 2026-10-13): asistencia médica, seguro de
+ * viaje, tarjeta de turismo, equipaje adicional. Obligatorio: nombre y costo. Por persona, el costo
+ * es el mismo para cada viajero (adulto, niño o infante: así cobran los planes); por todo, un solo
+ * valor. Opcional: proveedor o detalle y la fuente.
+ */
+export interface OtroServicioManual {
+  nombre: string
+  /** «Assist Card, plan Básico». Va a la descripción de la opción: lo ve el cliente. */
+  proveedor: string
+  adultos: number
+  ninos: number
+  infantes: number
+  cobro: CobroOtroServicio
+  /** Costo NETO por persona, o de todo el servicio. */
+  neto: number | null
+  fuente: string
+}
+
+/** Los atajos del nombre (Noor, Paso 1): lo que más se escribe. */
+export const ATAJOS_OTRO_SERVICIO = ['Asistencia médica', 'Seguro de viaje', 'Tarjeta de turismo', 'Equipaje adicional'] as const
 
 export type ErroresManual = Record<string, string>
 
@@ -188,11 +284,69 @@ export function leerTrasladoManual(raw: unknown): TrasladoManual {
     netoNino: montoManual(r.netoNino),
     netoInfante: montoManual(r.netoInfante),
     idaYRegreso: r.idaYRegreso === true,
+    moneda: monedaManual(r.moneda),
+    fuente: texto(r.fuente),
+  }
+}
+
+export function leerVueloManual(raw: unknown): VueloManual {
+  const r = (raw && typeof raw === 'object' ? raw : {}) as Record<string, unknown>
+  return {
+    aerolinea: texto(r.aerolinea, 80),
+    origen: texto(r.origen, 80),
+    destino: texto(r.destino, 80),
+    ida: texto(r.ida, 10),
+    horaSalida: texto(r.horaSalida, 5),
+    horaLlegada: texto(r.horaLlegada, 5),
+    numero: texto(r.numero, 40),
+    tarifa: texto(r.tarifa, 60),
+    regreso: texto(r.regreso, 10),
+    horaSalidaRegreso: texto(r.horaSalidaRegreso, 5),
+    horaLlegadaRegreso: texto(r.horaLlegadaRegreso, 5),
+    numeroRegreso: texto(r.numeroRegreso, 40),
+    adultos: entero(r.adultos),
+    ninos: entero(r.ninos),
+    infantes: entero(r.infantes),
+    netoAdulto: montoManual(r.netoAdulto),
+    netoNino: montoManual(r.netoNino),
+    netoInfante: montoManual(r.netoInfante),
+    fuente: texto(r.fuente),
+  }
+}
+
+export function leerActividadManual(raw: unknown): ActividadManual {
+  const r = (raw && typeof raw === 'object' ? raw : {}) as Record<string, unknown>
+  return {
+    nombre: texto(r.nombre),
+    ciudad: texto(r.ciudad, 80),
+    fecha: texto(r.fecha, 10),
+    adultos: entero(r.adultos),
+    ninos: entero(r.ninos),
+    infantes: entero(r.infantes),
+    netoAdulto: montoManual(r.netoAdulto),
+    netoNino: montoManual(r.netoNino),
+    netoInfante: montoManual(r.netoInfante),
+    opcional: r.opcional === true,
+    fuente: texto(r.fuente),
+  }
+}
+
+export function leerOtroServicioManual(raw: unknown): OtroServicioManual {
+  const r = (raw && typeof raw === 'object' ? raw : {}) as Record<string, unknown>
+  return {
+    nombre: texto(r.nombre, 100),
+    proveedor: texto(r.proveedor, 120),
+    adultos: entero(r.adultos),
+    ninos: entero(r.ninos),
+    infantes: entero(r.infantes),
+    cobro: r.cobro === 'total' ? 'total' : 'por_persona',
+    neto: montoManual(r.neto),
     fuente: texto(r.fuente),
   }
 }
 
 const OBLIGATORIO = 'Escríbelo.'
+const HORA = /^([01]\d|2[0-3]):[0-5]\d$/
 
 function erroresDePasajeros(p: { adultos: number; ninos: number; infantes: number }, e: ErroresManual) {
   if (p.adultos < 0) e.adultos = 'Un número de 0 a 99.'
@@ -243,6 +397,40 @@ export function validarTrasladoManual(t: TrasladoManual): ErroresManual {
   return e
 }
 
+export function validarVueloManual(v: VueloManual): ErroresManual {
+  const e: ErroresManual = {}
+  if (!v.origen) e.origen = OBLIGATORIO
+  if (!v.destino) e.destino = OBLIGATORIO
+  if (!FECHA.test(v.ida)) e.ida = 'Escoge la fecha.'
+  if (v.regreso !== '' && !FECHA.test(v.regreso)) e.regreso = 'Escoge la fecha.'
+  if (!e.ida && !e.regreso && v.regreso !== '' && v.regreso < v.ida) e.regreso = 'El regreso va después de la ida.'
+  for (const k of ['horaSalida', 'horaLlegada', 'horaSalidaRegreso', 'horaLlegadaRegreso'] as const) {
+    if (v[k] !== '' && !HORA.test(v[k])) e[k] = 'Una hora como 07:45.'
+  }
+  erroresDePasajeros(v, e)
+  if (v.adultos === 0 && !e.adultos) e.adultos = 'Al menos un adulto.'
+  if (v.adultos > 0 && !(v.netoAdulto && v.netoAdulto > 0)) e.netoAdulto = 'Escribe lo que cobra el proveedor por adulto.'
+  return e
+}
+
+export function validarActividadManual(a: ActividadManual): ErroresManual {
+  const e: ErroresManual = {}
+  if (!a.nombre) e.nombre = OBLIGATORIO
+  if (a.fecha !== '' && !FECHA.test(a.fecha)) e.fecha = 'Escoge la fecha.'
+  erroresDePasajeros(a, e)
+  if (a.adultos === 0 && !e.adultos) e.adultos = 'Al menos un adulto.'
+  if (a.adultos > 0 && !(a.netoAdulto && a.netoAdulto > 0)) e.netoAdulto = 'Escribe lo que cobra el proveedor por adulto.'
+  return e
+}
+
+export function validarOtroServicioManual(o: OtroServicioManual): ErroresManual {
+  const e: ErroresManual = {}
+  if (!o.nombre) e.nombre = OBLIGATORIO
+  erroresDePasajeros(o, e)
+  if (!(o.neto && o.neto > 0)) e.neto = o.cobro === 'total' ? 'Escribe lo que cobra el proveedor por todo.' : 'Escribe lo que cobra el proveedor por persona.'
+  return e
+}
+
 const leido = (value: string | null): ValorLeido => ({ value, confidence: 1 })
 
 function crudaDe(campos: Record<string, string | null>, porTipoPax: FilaTipoPaxCruda[], totalGeneral: number | null): LecturaCruda {
@@ -257,11 +445,11 @@ function crudaDe(campos: Record<string, string | null>, porTipoPax: FilaTipoPaxC
   }
 }
 
-function filas(p: Composicion, unitario: (tipo: 'adulto' | 'nino' | 'infante') => number, veces: number): FilaTipoPaxCruda[] {
+function filas(p: Composicion, unitario: (tipo: 'adulto' | 'nino' | 'infante') => number, veces: number, moneda: MonedaManual = 'COP'): FilaTipoPaxCruda[] {
   const out: FilaTipoPaxCruda[] = []
   for (const [tipo, cantidad] of [['adulto', p.adultos], ['nino', p.ninos], ['infante', p.infantes]] as const) {
     if (cantidad <= 0) continue
-    out.push({ tipo, cantidad, subtotal_tipo: Math.round(unitario(tipo) * veces * cantidad), moneda: 'COP', confidence: 1 })
+    out.push({ tipo, cantidad, subtotal_tipo: Math.round(unitario(tipo) * veces * cantidad), moneda, confidence: 1 })
   }
   return out
 }
@@ -299,7 +487,7 @@ export function crudaDeTrasladoManual(t: TrasladoManual): LecturaCruda {
   const personas = t.adultos + t.ninos + t.infantes
   // El mismo reparto del hotel: cada tipo con su costo, y el infante sin costo escrito en 0.
   const porTipo = t.cobro === 'por_persona'
-    ? filas(pax, tipo => (tipo === 'adulto' ? t.neto : tipo === 'nino' ? t.netoNino : t.netoInfante) ?? 0, trayectos)
+    ? filas(pax, tipo => (tipo === 'adulto' ? t.neto : tipo === 'nino' ? t.netoNino : t.netoInfante) ?? 0, trayectos, t.moneda ?? 'COP')
     : []
   const total = t.cobro === 'por_persona' ? porTipo.reduce((a, f) => a + f.subtotal_tipo, 0) : Math.round((t.neto ?? 0) * trayectos)
   return crudaDe({
@@ -309,11 +497,110 @@ export function crudaDeTrasladoManual(t: TrasladoManual): LecturaCruda {
     ocupacion_adultos: String(t.adultos),
     ocupacion_ninos: String(t.ninos),
     ocupacion_infantes: String(t.infantes),
-    moneda: 'COP',
+    moneda: t.moneda ?? 'COP',
     precio_total: String(total),
     base_precio: 'total',
   }, porTipo, porTipo.length > 0 ? total : null)
 }
+
+/**
+ * Las filas por pasajero de lo escrito a mano en un vuelo o una actividad: cada tipo con su costo.
+ * Un niño o un infante SIN costo escrito no lleva fila: es el precio que falta (no un 0).
+ */
+function filasConFaltante(p: Composicion, netos: { adulto: number | null; nino: number | null; infante: number | null }): FilaTipoPaxCruda[] {
+  const out: FilaTipoPaxCruda[] = []
+  for (const [tipo, cantidad] of [['adulto', p.adultos], ['nino', p.ninos], ['infante', p.infantes]] as const) {
+    const neto = netos[tipo]
+    if (cantidad <= 0 || neto === null) continue
+    out.push({ tipo, cantidad, subtotal_tipo: Math.round(neto * cantidad), moneda: 'COP', confidence: 1 })
+  }
+  return out
+}
+
+/** Lo que habría leído el modelo del pantallazo de este vuelo. */
+export function crudaDeVueloManual(v: VueloManual): LecturaCruda {
+  const pax: Composicion = { adultos: v.adultos, ninos: v.ninos, infantes: v.infantes }
+  const porTipo = filasConFaltante(pax, { adulto: v.netoAdulto, nino: v.netoNino, infante: v.netoInfante })
+  const total = porTipo.reduce((a, f) => a + f.subtotal_tipo, 0)
+  const numero = [v.numero, v.numeroRegreso].filter(Boolean).join(' / ')
+  return crudaDe({
+    aerolinea: v.aerolinea || null,
+    origen: v.origen,
+    destino: v.destino,
+    fecha_salida: v.ida,
+    fecha_regreso: v.regreso || null,
+    hora_salida: v.horaSalida || null,
+    hora_llegada: v.horaLlegada || null,
+    hora_salida_regreso: v.regreso ? v.horaSalidaRegreso || null : null,
+    hora_llegada_regreso: v.regreso ? v.horaLlegadaRegreso || null : null,
+    numero_vuelo: numero || null,
+    familia_tarifa: v.tarifa || null,
+    pax: String(v.adultos + v.ninos + v.infantes),
+    ocupacion: describirOcupacion(pax),
+    ocupacion_adultos: String(v.adultos),
+    ocupacion_ninos: String(v.ninos),
+    ocupacion_infantes: String(v.infantes),
+    moneda: 'COP',
+    precio_total: String(total),
+    base_precio: 'total',
+  }, porTipo, total)
+}
+
+/** Lo que habría leído el modelo de la ficha de esta actividad. */
+export function crudaDeActividadManual(a: ActividadManual): LecturaCruda {
+  const pax: Composicion = { adultos: a.adultos, ninos: a.ninos, infantes: a.infantes }
+  const porTipo = filasConFaltante(pax, { adulto: a.netoAdulto, nino: a.netoNino, infante: a.netoInfante })
+  const total = porTipo.reduce((x, f) => x + f.subtotal_tipo, 0)
+  return crudaDe({
+    nombre: a.nombre,
+    ciudad: a.ciudad || null,
+    fecha: a.fecha || null,
+    pax: String(a.adultos + a.ninos + a.infantes),
+    ocupacion: describirOcupacion(pax),
+    ocupacion_adultos: String(a.adultos),
+    ocupacion_ninos: String(a.ninos),
+    ocupacion_infantes: String(a.infantes),
+    moneda: 'COP',
+    precio_total: String(total),
+    base_precio: 'total',
+  }, porTipo, total)
+}
+
+/**
+ * Lo que habría leído el modelo de la cotización de este «Otro servicio». Por persona, cada
+ * viajero con el mismo costo. Por todo, el valor se reparte por igual entre los viajeros, con el
+ * redondeo en el primer tipo: así suma exactamente lo escrito y el costo se confirma solo, sin
+ * pedir «otra búsqueda con los niños» (un solo total con menores pide desglose, TP4).
+ */
+export function crudaDeOtroServicioManual(o: OtroServicioManual): LecturaCruda {
+  const pax: Composicion = { adultos: o.adultos, ninos: o.ninos, infantes: o.infantes }
+  const personas = o.adultos + o.ninos + o.infantes
+  const neto = o.neto ?? 0
+  const porTipo = filas(pax, () => (o.cobro === 'por_persona' ? neto : personas > 0 ? neto / personas : 0), 1)
+  if (o.cobro === 'total' && porTipo.length > 0) {
+    porTipo[0].subtotal_tipo += Math.round(neto) - porTipo.reduce((a, f) => a + f.subtotal_tipo, 0)
+  }
+  const total = porTipo.reduce((a, f) => a + f.subtotal_tipo, 0)
+  return crudaDe({
+    nombre: o.nombre,
+    proveedor: o.proveedor || null,
+    pax: String(o.adultos + o.ninos + o.infantes),
+    ocupacion_adultos: String(o.adultos),
+    ocupacion_ninos: String(o.ninos),
+    ocupacion_infantes: String(o.infantes),
+    moneda: 'COP',
+    precio_total: String(total),
+    base_precio: 'total',
+  }, porTipo, total)
+}
+
+/** Lo que entra a `lecturaManual`: uno de los cinco tipos con sus datos. */
+export type EntradaManual =
+  | { tipo: 'hotel'; datos: HotelManual }
+  | { tipo: 'traslado'; datos: TrasladoManual }
+  | { tipo: 'vuelo'; datos: VueloManual }
+  | { tipo: 'actividad'; datos: ActividadManual }
+  | { tipo: 'otro'; datos: OtroServicioManual }
 
 const MESES = ['ene', 'feb', 'mar', 'abr', 'may', 'jun', 'jul', 'ago', 'sep', 'oct', 'nov', 'dic']
 const fechaCorta = (f: string) => `${Number(f.slice(8, 10))} ${MESES[Number(f.slice(5, 7)) - 1]} ${f.slice(0, 4)}`
@@ -381,15 +668,37 @@ export function esAvisoFechasFueraDelViaje(alerta: string): boolean {
  */
 export function lecturaManual(args: {
   ranura: DefinicionRanura
-  entrada: { tipo: 'hotel'; datos: HotelManual } | { tipo: 'traslado'; datos: TrasladoManual }
+  entrada: EntradaManual
   leidaEn: string
   hoy?: string
   viaje?: { inicio: string | null; fin: string | null } | null
+  /**
+   * «✎ Escríbelo a mano» de la cotización por pasos (C5): la fuente de la tarifa es opcional,
+   * como el resto de lo que no lleva *. El ingreso manual de siempre la sigue pidiendo.
+   */
+  fuenteOpcional?: boolean
 }): ResultadoManual {
   const { ranura, entrada } = args
-  const errores = entrada.tipo === 'hotel' ? validarHotelManual(entrada.datos) : validarTrasladoManual(entrada.datos)
+  const errores = entrada.tipo === 'hotel'
+    ? validarHotelManual(entrada.datos)
+    : entrada.tipo === 'traslado'
+      ? validarTrasladoManual(entrada.datos)
+      : entrada.tipo === 'vuelo'
+        ? validarVueloManual(entrada.datos)
+        : entrada.tipo === 'actividad'
+          ? validarActividadManual(entrada.datos)
+          : validarOtroServicioManual(entrada.datos)
+  if (args.fuenteOpcional) delete errores.fuente
   if (Object.keys(errores).length > 0) return { ok: false, errores }
-  const cruda = entrada.tipo === 'hotel' ? crudaDeHotelManual(entrada.datos) : crudaDeTrasladoManual(entrada.datos)
+  const cruda = entrada.tipo === 'hotel'
+    ? crudaDeHotelManual(entrada.datos)
+    : entrada.tipo === 'traslado'
+      ? crudaDeTrasladoManual(entrada.datos)
+      : entrada.tipo === 'vuelo'
+        ? crudaDeVueloManual(entrada.datos)
+        : entrada.tipo === 'actividad'
+          ? crudaDeActividadManual(entrada.datos)
+          : crudaDeOtroServicioManual(entrada.datos)
   const veredicto = evaluarLectura(ranura, cruda, { soloMinimosDeCosto: true, manual: true, ...(args.hoy ? { hoy: args.hoy } : {}) })
   if (!veredicto.ok) return { ok: false, errores: { _: veredicto.instruccion } }
   const lectura = construirLecturaCasilla(ranura, veredicto, args.leidaEn)
@@ -397,12 +706,25 @@ export function lecturaManual(args: {
   lectura.origen = 'manual'
   const aviso = h ? avisoFechasFueraDelViaje(h.entrada, h.salida, args.viaje) : null
   if (aviso) lectura.alertas = [...lectura.alertas, aviso]
+  // Vuelo y actividad: el niño o el infante sin costo escrito viajan igual, sin precio (C5).
+  if (entrada.tipo === 'vuelo' || entrada.tipo === 'actividad') {
+    const d = entrada.datos
+    const sinPrecio = ([['nino', d.ninos, d.netoNino], ['infante', d.infantes, d.netoInfante]] as const)
+      .filter(([, cantidad, neto]) => cantidad > 0 && neto === null)
+      .map(([tipo]) => tipo)
+    if (sinPrecio.length > 0) lectura.sinPrecio = [...sinPrecio]
+  }
+  // «Otro servicio» que es una asistencia médica: marcada para «Documentos del viajero».
+  if (entrada.tipo === 'otro') marcarAsistenciaMedica('otro', lectura)
+  const avisoActividad = entrada.tipo === 'actividad' ? avisoFechaActividadFueraDelViaje(entrada.datos.fecha, args.viaje) : null
+  if (avisoActividad) lectura.alertas = [...lectura.alertas, avisoActividad]
   lectura.manual = {
     fuente: entrada.datos.fuente,
     incluye: h?.incluye ? h.incluye : null,
     edadNino: h && h.edadDesde !== null && h.edadHasta !== null && h.edadDesde >= 0 && h.edadHasta >= 0
       ? { desde: h.edadDesde, hasta: h.edadHasta }
       : null,
+    ...(entrada.tipo === 'actividad' && entrada.datos.opcional ? { opcional: true } : {}),
   }
   return { ok: true, lectura }
 }
@@ -424,5 +746,6 @@ export function datosManuales(l: { origen?: unknown; manual?: unknown } | null |
     fuente: typeof m.fuente === 'string' ? m.fuente : '',
     incluye: typeof m.incluye === 'string' && m.incluye.trim() !== '' ? m.incluye : null,
     edadNino,
+    ...(m.opcional === true ? { opcional: true } : {}),
   }
 }

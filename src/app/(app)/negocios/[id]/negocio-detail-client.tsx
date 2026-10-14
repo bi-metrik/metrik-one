@@ -1,6 +1,7 @@
 'use client'
 
 import dynamic from 'next/dynamic'
+import type { DatosBloqueServicios } from '@/lib/viaje/bloque-servicios'
 import { useState, useRef, useEffect, useCallback } from 'react'
 import { useTransitionTolerante } from '@/hooks/use-transition-tolerante'
 import { useRouter } from 'next/navigation'
@@ -52,6 +53,7 @@ import { encabezadoDelMarco, type MarcoDelNegocio } from '@/lib/cotizaciones/mar
 import { MarcoCotizacionContexto, VAR_ALTO_ENCABEZADO } from '../marco-cotizacion-contexto'
 import type { EtapaNoAplica } from '@/lib/negocios/ruta-descartada-negocio'
 import { MOTIVOS_PAUSA, MAX_DIAS_PAUSA, MAX_PAUSAS } from '@/lib/negocios/constants'
+import type { ConfigSeguimiento } from '@/lib/negocios/seguimiento'
 import { siguienteEtapaPorDefecto } from '@/lib/negocios/flujo'
 import { soloLecturaPorDatoLleno } from '@/lib/negocios/editable-si-vacio'
 import { copiaDeSoloLectura, modoDeCopiaGenerable, origenDeCopiaGenerable } from '@/lib/negocios/copia-heredada'
@@ -110,6 +112,7 @@ const BloqueResumenFinanciero = dynamic(() => import('./bloques/BloqueResumenFin
 const BloqueEjecucion = dynamic(() => import('./bloques/BloqueEjecucion'))
 const BloqueMovimientos = dynamic(() => import('./bloques/BloqueMovimientos'))
 const BloqueResultado = dynamic(() => import('./bloques/BloqueResultado'))
+const BloqueServicios = dynamic(() => import('./bloques/BloqueServicios'))
 const BloqueHistorial = dynamic(() => import('./bloques/BloqueHistorial'))
 const BloqueFormulario = dynamic(() => import('./bloques/BloqueFormulario'))
 const BloquePagosEpayco = dynamic(() => import('./bloques/BloquePagosEpayco'))
@@ -848,6 +851,7 @@ function SelectorEtapa({
   puedeOmitirGates,
   puedeAvanzarCruces,
   esResponsable = false,
+  seguimiento,
 }: {
   negocioId: string
   etapasLinea: EtapaNegocio[]
@@ -867,6 +871,8 @@ function SelectorEtapa({
   puedeAvanzarCruces: boolean
   /** Quien mira es responsable del caso: habilita el reproceso del operativo (SOE-001). */
   esResponsable?: boolean
+  /** Seguimiento de la línea (F1): motivos de pérdida y plazo del aplazamiento. */
+  seguimiento?: ConfigSeguimiento
 }) {
   const router = useRouter()
   // Una clave por intención: un reintento de la misma acción no la ejecuta dos veces.
@@ -1105,6 +1111,7 @@ function SelectorEtapa({
             resumenFinanciero={resumenFinanciero}
             precioAprobado={precioAprobado}
             puedeCierreNoFacturable={puedeCierreNoFacturable}
+            motivosPerdida={seguimiento?.activo ? seguimiento.motivosPerdida : undefined}
             onClose={() => setShowCierreDialog(false)}
           />
         )}
@@ -1212,6 +1219,7 @@ function SelectorEtapa({
           resumenFinanciero={resumenFinanciero}
           precioAprobado={precioAprobado}
           puedeCierreNoFacturable={puedeCierreNoFacturable}
+          motivosPerdida={seguimiento?.activo ? seguimiento.motivosPerdida : undefined}
           onClose={() => setShowCierreDialog(false)}
         />
       )}
@@ -1220,6 +1228,8 @@ function SelectorEtapa({
         <PausaNegocioDialog
           negocioId={negocioId}
           vecesPausado={vecesPausado}
+          maxDias={seguimiento?.maxDiasAplazar ?? MAX_DIAS_PAUSA}
+          aplazar={seguimiento?.activo === true}
           onClose={() => setShowPausaDialog(false)}
         />
       )}
@@ -1232,10 +1242,16 @@ function SelectorEtapa({
 function PausaNegocioDialog({
   negocioId,
   vecesPausado,
+  maxDias = MAX_DIAS_PAUSA,
+  aplazar = false,
   onClose,
 }: {
   negocioId: string
   vecesPausado: number
+  /** Plazo de la línea (`config_extra.pausa.max_dias`); 14 si no lo dice. */
+  maxDias?: number
+  /** Seguimiento encendido (F1-4): «Aplazar», sin auto-cierre al cuarto. */
+  aplazar?: boolean
   onClose: () => void
 }) {
   const [motivo, setMotivo] = useState<string>('')
@@ -1244,10 +1260,11 @@ function PausaNegocioDialog({
   const today = todayBogotaISO()
   const maxDate = (() => {
     const d = new Date(`${today}T00:00:00Z`)
-    d.setUTCDate(d.getUTCDate() + MAX_DIAS_PAUSA)
+    d.setUTCDate(d.getUTCDate() + maxDias)
     return d.toISOString().slice(0, 10)
   })()
-  const [fecha, setFecha] = useState(maxDate)
+  // Aplazar pide el día en que le vuelve a escribir: no se propone el más lejano.
+  const [fecha, setFecha] = useState(aplazar ? '' : maxDate)
   const [isPending, startTransition] = useTransitionTolerante()
 
   const pausasRestantes = MAX_PAUSAS - vecesPausado
@@ -1262,6 +1279,10 @@ function PausaNegocioDialog({
       toast.error('Especifica el detalle del motivo')
       return
     }
+    if (!fecha) {
+      toast.error('Escoge el día en que le vuelves a escribir.')
+      return
+    }
     startTransition(async () => {
       const result = await pausarNegocio(negocioId, motivo, fecha, detalle.trim() || undefined)
       if (result.error) {
@@ -1271,7 +1292,7 @@ function PausaNegocioDialog({
       if (result.autoPerdido) {
         toast.error(`Negocio auto-cerrado: ${MAX_PAUSAS} pausas sin conversion`)
       } else {
-        toast.success(`Negocio pausado hasta ${fecha}`)
+        toast.success(aplazar ? `Aplazado. El ${fecha} te recordamos escribirle.` : `Negocio pausado hasta ${fecha}`)
       }
       onClose()
     })
@@ -1288,10 +1309,11 @@ function PausaNegocioDialog({
       <div className="my-auto flex max-h-[90vh] w-full max-w-md flex-col overflow-y-auto rounded-xl bg-background border border-border shadow-xl">
         <div className="flex items-center justify-between border-b border-border px-4 py-3">
           <div>
-            <h2 className="text-sm font-semibold">Pausar negocio</h2>
+            <h2 className="text-sm font-semibold">{aplazar ? 'Aplazar' : 'Pausar negocio'}</h2>
             <p className="text-xs text-muted-foreground mt-0.5">
-              Pausas usadas: {vecesPausado}/{MAX_PAUSAS}
-              {esUltima && <span className="ml-1 text-amber-600 font-medium">— última antes de auto-cierre</span>}
+              {aplazar ? 'Aplazamientos usados' : 'Pausas usadas'}: {vecesPausado}/{MAX_PAUSAS}
+              {esUltima && !aplazar && <span className="ml-1 text-amber-600 font-medium">— última antes de auto-cierre</span>}
+              {esUltima && aplazar && <span className="ml-1 text-amber-600 font-medium">— es el último</span>}
             </p>
           </div>
           <button onClick={onClose} className="text-muted-foreground hover:text-foreground">
@@ -1328,7 +1350,7 @@ function PausaNegocioDialog({
           )}
 
           <div>
-            <label className="block text-xs font-medium mb-1">Fecha de reapertura</label>
+            <label className="block text-xs font-medium mb-1">{aplazar ? '¿Cuándo le vuelves a escribir?' : 'Fecha de reapertura'}</label>
             <input
               type="date"
               value={fecha}
@@ -1338,7 +1360,9 @@ function PausaNegocioDialog({
               className="w-full rounded-md border border-border bg-background px-3 py-2 text-sm"
             />
             <p className="text-[11px] text-muted-foreground mt-1">
-              Máximo {MAX_DIAS_PAUSA} días desde hoy. El negocio vuelve al pipeline automáticamente en esa fecha.
+              {aplazar
+                ? `Hasta ${maxDias} días. Ese día te llega el aviso para escribirle.`
+                : `Máximo ${maxDias} días desde hoy. El negocio vuelve al pipeline automáticamente en esa fecha.`}
             </p>
           </div>
         </div>
@@ -1352,11 +1376,11 @@ function PausaNegocioDialog({
           </button>
           <button
             onClick={handleSubmit}
-            disabled={isPending || !motivo}
-            className="inline-flex items-center gap-1 rounded-md bg-amber-600 px-3 py-1.5 text-xs font-medium text-white hover:bg-amber-700 disabled:opacity-50"
+            disabled={isPending || !motivo || !fecha}
+            className="inline-flex min-h-[44px] items-center gap-1 rounded-md bg-amber-600 px-3 py-1.5 text-xs font-medium text-white hover:bg-amber-700 disabled:opacity-50 sm:min-h-0"
           >
             <Pause className="h-3 w-3" />
-            {isPending ? 'Pausando…' : 'Pausar'}
+            {isPending ? (aplazar ? 'Aplazando…' : 'Pausando…') : (aplazar ? 'Aplazar' : 'Pausar')}
           </button>
         </div>
       </div>
@@ -1798,6 +1822,7 @@ function BloqueRenderer({
             nota={configExtra.nota as string | undefined}
             validarEpayco={!!configExtra.validar_epayco}
             faltaHonorario={faltaHonorarioConfirmado}
+            cobros={cobros}
           />
         )
       }
@@ -1821,6 +1846,7 @@ function BloqueRenderer({
             modo={modo}
             fields={fields as MultiPagoField[]}
             faltaHonorario={faltaHonorarioConfirmado}
+            cobros={cobros}
           />
         )
       }
@@ -1962,6 +1988,8 @@ function BloqueRenderer({
           modo={modo}
           cotizaciones={cotizacionesNegocio}
           skipEnviar={configExtra?.skip_enviar === true}
+          pedirOrigenAlDuplicar={configExtra?._seguimiento === true}
+          porPasos={configExtra?._porPasos === true}
           // Corregir es de la etapa VIVA. Desde el historial la copia se ve y no se
           // toca — mismo criterio que el registro de pagos de BloqueCobros.
           puedeCorregir={
@@ -2136,6 +2164,17 @@ function BloqueRenderer({
 
     case 'ejecucion':
       return <BloqueEjecucion negocioId={negocioId} data={ejecucionData} />
+
+    // Servicios del viaje (F0): los datos los deja el servidor en `_servicios`.
+    case 'servicios':
+      return (
+        <BloqueServicios
+          negocioId={negocioId}
+          modo={modo}
+          datos={(configExtra as { _servicios?: DatosBloqueServicios })._servicios}
+          esResponsable={bloque._esResponsable ?? false}
+        />
+      )
 
     case 'historial':
       return <BloqueHistorial data={historialData} />
@@ -2422,6 +2461,8 @@ interface Props {
   datosPorSlug?: Record<string, Record<string, unknown>>
   bloquesEtapasPrevias?: BloqueHistorialItem[]
   pausaEnabled: boolean
+  /** Seguimiento de la línea (F1). Ausente = apagado, como hoy. */
+  seguimiento?: ConfigSeguimiento
   /** Habilita "Registrar pago" dentro del bloque de pagos (opt-in modules.conciliacion). */
   registrarPagoEnabled?: boolean
   /** Pago simple (sin reparto) desde el bloque de Movimientos: `modules.fab_registrar_pago`. */
@@ -2502,6 +2543,7 @@ export default function NegocioDetailClient({
   datosPorSlug = {},
   bloquesEtapasPrevias = [],
   pausaEnabled,
+  seguimiento,
   registrarPagoEnabled = false,
   registrarPagoSimple = false,
   puedeCierreNoFacturable = false,
@@ -2727,6 +2769,7 @@ export default function NegocioDetailClient({
             puedeOmitirGates={puedeOmitirGates}
             puedeAvanzarCruces={puedeAvanzarCruces}
             esResponsable={currentUserEsResponsable}
+            seguimiento={seguimiento}
           />
         </div>
         </div>

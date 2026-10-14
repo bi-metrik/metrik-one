@@ -839,6 +839,14 @@ export function resumenDeLinea(
     return { nombre, descripcion: unir(partes) }
   }
 
+  // «Otro servicio» (asistencia médica, seguro): el servicio es el nombre; el proveedor o el
+  // plan, la descripción. Sin él, caía en la rama del traslado y se llamaba «Otro servicio».
+  if (ranura.slug === 'otro_detalle') {
+    const nombre = v('nombre') || ranura.label
+    partes.push(etiqueta('Proveedor', v('proveedor')))
+    return { nombre, descripcion: unir(partes) }
+  }
+
   const nombre = v('trayecto') || ranura.label
   partes.push(
     etiqueta('Vehículo', v('tipo_vehiculo')),
