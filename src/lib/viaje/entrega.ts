@@ -264,6 +264,44 @@ export function avisoVencimiento(doc: Pick<DocumentoViajero, 'tipo' | 'fecha_ven
 
 export const TEXTO_VIAJE_NACIONAL = 'Viaje nacional: no pide pasaporte ni visa.'
 
+/**
+ * La asistencia médica que va en el viaje (Noor §11): aparece sola en «Documentos del viajero»
+ * cuando la cotización la incluye. Sale de los servicios del viaje de tipo «asistencia»: la
+ * asistencia médica escrita o leída como «Otro servicio» llega así marcada desde la cotización
+ * (`asistencia-medica.ts` → `tipoDeServicio`). Su certificado es el voucher de ese servicio: no
+ * se pide aparte ni frena la entrega.
+ */
+export interface AsistenciaDelViaje {
+  id: string
+  /**
+   * «Asistencia médica · Assist Card»: el servicio (en frase, aunque se guarde en mayúscula) y su
+   * proveedor, si se sabe. Si el nombre no lo dice, va antes «Asistencia médica:».
+   */
+  texto: string
+  tieneCertificado: boolean
+}
+
+export const TEXTO_CERTIFICADO_ASISTENCIA = 'Su certificado se carga como voucher del servicio.'
+
+export function asistenciasDelViaje(filas: readonly FilaEntrega[]): AsistenciaDelViaje[] {
+  return filas
+    .filter(f => f.tipo === 'asistencia' && f.estado !== 'cancelado')
+    .map(f => {
+      const proveedor = (f.proveedor_nombre ?? '').trim()
+      const nombre = enFrase(f.nombre.trim()) || ETIQUETA_DOCUMENTO.asistencia_medica
+      const dice = /asistencia/i.test(nombre.normalize('NFD').replace(/[\u0300-\u036f]/g, ''))
+      const base = dice ? nombre : `${ETIQUETA_DOCUMENTO.asistencia_medica}: ${nombre}`
+      return { id: f.id, texto: proveedor ? `${base} · ${proveedor}` : base, tieneCertificado: !!f.voucher_ref }
+    })
+}
+
+/** «ASISTENCIA MÉDICA» → «Asistencia médica»: lo guardado todo en mayúscula, en frase. */
+function enFrase(t: string): string {
+  if (t === '' || t !== t.toLocaleUpperCase('es-CO')) return t
+  const bajo = t.toLocaleLowerCase('es-CO')
+  return bajo.charAt(0).toLocaleUpperCase('es-CO') + bajo.slice(1)
+}
+
 /** Lo que el gate de documentos pide (solo internacional): un pasaporte vigente y sin aviso. */
 export function faltaDocumentos(p: {
   internacional: boolean | null

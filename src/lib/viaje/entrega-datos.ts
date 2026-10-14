@@ -22,6 +22,7 @@ import {
   GATE_DOCUMENTOS,
   GATE_PAQUETE,
   GATE_VOUCHERS,
+  asistenciasDelViaje,
   avisoVencimiento,
   cobroMinimo,
   configEntrega,
@@ -34,6 +35,7 @@ import {
   pideVoucher,
   textoCuentaRegresiva,
   vouchersDelViaje,
+  type AsistenciaDelViaje,
   type DocumentoViajero,
   type EstadoCobroMinimo,
   type PaqueteEnviado,
@@ -59,6 +61,8 @@ export interface VistaEntrega {
   internacional: boolean | null
   documentos: Array<DocumentoViajero & { aviso: string | null }>
   faltaDocumento: string | null
+  /** La asistencia médica que va en el viaje (Noor §11). Vacío si la cotización no la incluye. */
+  asistencias: AsistenciaDelViaje[]
   paquete: PaqueteEnviado | null
   cambioVoucher: boolean
   /** Los gates de la etapa actual que son de esta etapa. */
@@ -150,6 +154,7 @@ async function armarVista(db: Db, workspaceId: string, base: Base): Promise<Vist
     internacional,
     documentos: docs.map(d => ({ ...d, aviso: avisoVencimiento(d, viaje.fechas.fin, nombre) })),
     faltaDocumento: faltaDocumentos({ internacional, documentos: docs, fechaRegreso: viaje.fechas.fin, nombreContacto: nombre }),
+    asistencias: asistenciasDelViaje(filas),
     paquete,
     cambioVoucher: !!paquete && paquete.huella_vouchers !== huellaVouchers(filas),
     gates: gates.filter(g => (GATES_ENTREGA as readonly string[]).includes(g)),

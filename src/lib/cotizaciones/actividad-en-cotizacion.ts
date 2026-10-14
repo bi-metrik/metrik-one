@@ -35,7 +35,7 @@
  * Puro: sin red ni base. Lo usan la tarjeta, el editor, la acción del servidor y la bandeja.
  */
 
-import { diaDeItem, esVueloDeLaCotizacion, fueraDelPrecio, hayDiasAsignados, type ItemConDia } from './dia-relativo'
+import { diaDeItem, fueraDelPrecio, hayDiasAsignados, soloVaONoVa, type ItemConDia } from './dia-relativo'
 import { ranuraDeGrupo } from './ranuras-pantallazo'
 
 export type EstadoActividad = 'incluida' | 'opcional' | 'no_va'
@@ -69,7 +69,7 @@ export function estadoDeVuelo(item: Pick<ItemConDia, 'entra_al_precio'>): 'inclu
  */
 export function lineaQueNoVa(item: Pick<ItemConDia, 'id' | 'grupo' | 'entra_al_precio' | 'mostrar_en_sugeridos' | 'es_ajuste'>): boolean {
   if (esActividad(item.grupo)) return estadoDeActividad(item) === 'no_va'
-  return esVueloDeLaCotizacion(item) && estadoDeVuelo(item) === 'no_va'
+  return soloVaONoVa(item) && estadoDeVuelo(item) === 'no_va'
 }
 
 /** Lo que pide la operadora: marcar o quitar el check, o pasar de Incluida a Opcional. */

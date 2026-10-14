@@ -82,6 +82,7 @@ import {
   absorberRedondeo,
   altoEstimadoDeGrupoDeVuelos,
   capitulosDelViaje,
+  aerolineaDeFila,
   circuloDeFecha,
   claveDeFecha,
   clienteDeLaPortada,
@@ -101,7 +102,6 @@ import {
   numerosSinTramo,
   rangoCompacto,
   renglonesDeFotos,
-  siglaAerolinea,
   sinCancelacionDelProveedor,
   sinTildes,
   tablaDeVuelosVaEntera,
@@ -799,9 +799,14 @@ function TablaVuelos({ vuelos, general, tarifas, titulo, marca, esp }: { vuelos:
   const ancho = (c: ColumnaVuelo) => `${(PESO_COLUMNA[c] / total) * 100}%`
   const pad = (j: number) => (j === columnas.length - 1 ? 0 : CANAL)
 
-  const celda = (f: FilaVuelo, c: ColumnaVuelo): ReactNode => {
+  const celda = (filas: FilaVuelo[], fi: number, c: ColumnaVuelo): ReactNode => {
+    const f = filas[fi]
     if (c === 'aerolinea') {
-      const sigla = siglaAerolinea(f.vuelo.aerolinea, f.vuelo.numeroVuelo)
+      // Una pastilla por vuelo: la primera fila nombra la aerolínea; las demás van vacías (la
+      // celda se lee alta), salvo un trayecto de otra aerolínea (`aerolineaDeFila`).
+      const marca = aerolineaDeFila(filas, fi)
+      if (!marca) return <View />
+      const sigla = marca.sigla
       // El color sale del catálogo de aerolíneas (brief del 2026-10-08); el secundario va como
       // franja de 3 pt al pie, DENTRO de los 14 pt de la pastilla: la fila no cambia de alto.
       const color = sigla ? colorDeAerolinea(sigla) : null
@@ -828,7 +833,7 @@ function TablaVuelos({ vuelos, general, tarifas, titulo, marca, esp }: { vuelos:
             </View>
           )}
           <Text hyphenationCallback={SIN_GUION} style={{ fontSize: 8.5, fontFamily: 'Helvetica-Bold', color: C.tinta, flex: 1 }}>
-            {f.vuelo.aerolinea ?? f.vuelo.linea}
+            {marca.nombre}
           </Text>
         </View>
       )
@@ -876,12 +881,16 @@ function TablaVuelos({ vuelos, general, tarifas, titulo, marca, esp }: { vuelos:
           <View
             key={`vuelo-${gi}`}
             wrap={false}
-            style={{ backgroundColor: gi % 2 === 1 ? C.tarjeta : C.blanco, paddingHorizontal: 8, paddingVertical: 4 }}
+            style={{
+              backgroundColor: gi % 2 === 1 ? C.tarjeta : C.blanco, paddingHorizontal: 8, paddingVertical: 4,
+              // Una línea entre un vuelo y el siguiente: la celda de la aerolínea se lee por vuelo.
+              ...(gi > 0 ? { borderTopWidth: 0.5, borderTopColor: C.linea } : {}),
+            }}
           >
-            {g.filas.map((f, fi) => (
+            {g.filas.map((_f, fi) => (
               <View key={`f-${fi}`} style={{ flexDirection: 'row', marginTop: fi === 0 ? 0 : 4 }}>
                 {columnas.map((c, j) => (
-                  <View key={`td-${c}`} style={{ width: ancho(c), paddingRight: pad(j) }}>{celda(f, c)}</View>
+                  <View key={`td-${c}`} style={{ width: ancho(c), paddingRight: pad(j) }}>{celda(g.filas, fi, c)}</View>
                 ))}
               </View>
             ))}

@@ -54,6 +54,7 @@
  * retiró es el documento del cliente.
  */
 
+import { esElOrigen, origenDelViaje } from '@/lib/pdf/fotos-del-viaje'
 import { composicionDeLectura, describirOcupacion, leerTarifaPax, mismaComposicion, type LecturaCasilla } from './tarifa-pasajero'
 import { ranuraDeGrupo, ranuraPorSlug, slugsDeRanura, type DefinicionRanura } from './ranuras-pantallazo'
 import { aplicarCorrecciones, leidosPorSlug, type Correcciones } from './correcciones'
@@ -708,6 +709,21 @@ export function serviciosDeItems(items: ItemConLectura[]): ServicioPDF[] {
   return out
 }
 
+/**
+ * «Otro servicio» (asistencia médica, seguro, tarjeta de turismo): lo que es y quién lo presta,
+ * con lo corregido encima. `null` si la línea no es un otro servicio.
+ */
+export interface OtroServicioPDF {
+  nombre: string | null
+  proveedor: string | null
+}
+
+export function otroServicioDeItem(item: ItemConLectura): OtroServicioPDF | null {
+  if (ranuraDelItem(item)?.slug !== 'otro_detalle') return null
+  const d = detalleDelItem(item)
+  return { nombre: texto(d, 'nombre'), proveedor: texto(d, 'proveedor') }
+}
+
 /** Un cargo en destino: el valor y su moneda local (ISO de tres letras, o `null`). */
 export interface CargoDeOpcion {
   valor: number
@@ -776,7 +792,10 @@ export function destinoDeItinerario(vuelos: VueloPDF[], hoteles: HotelPDF[]): st
   const ciudades: string[] = []
   for (const h of hoteles) if (h.ciudad) ciudades.push(h.ciudad)
   for (const v of vuelos) if (v.destino) ciudades.push(v.destino)
-  const unicas = [...new Set(ciudades.map(c => c.trim()).filter(Boolean))]
+  // La ciudad de salida del cliente no es destino: la llegada del vuelo de regreso lo es en el
+  // papel, y la portada decía «Bogotá» en un viaje a Europa (prueba Europa, 2026-10-14).
+  const origen = origenDelViaje(vuelos)
+  const unicas = [...new Set(ciudades.map(c => c.trim()).filter(c => c && !esElOrigen(c, origen)))]
   return unicas.length === 0 ? null : unicas.join(' · ')
 }
 

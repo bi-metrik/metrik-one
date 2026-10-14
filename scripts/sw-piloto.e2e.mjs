@@ -23,7 +23,9 @@ import { createRequire } from 'node:module'
 const require = createRequire(import.meta.url)
 const { chromium } = require(process.env.PW_CORE ?? 'playwright-core')
 const RAIZ = join(dirname(fileURLToPath(import.meta.url)), '..')
-const SW = readFileSync(join(RAIZ, 'public/sw.js'), 'utf8')
+// Navegación y RSC los atiende solo en los subdominios del piloto: aquí el host es `localhost`.
+const SW = readFileSync(join(RAIZ, 'public/sw.js'), 'utf8').replace("const PILOTO = ['soena']", "const PILOTO = ['soena', 'localhost']")
+if (!SW.includes("'localhost'")) throw new Error('sw.js cambió la lista PILOTO: ajustar esta prueba')
 const PNG = readFileSync(join(RAIZ, 'public/pulso.png'))
 
 // ── Servidor que simula la red ────────────────────────────────────────────────────────

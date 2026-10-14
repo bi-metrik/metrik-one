@@ -17,7 +17,7 @@ import { useTransitionTolerante } from '@/hooks/use-transition-tolerante'
 import { useIntencion } from '@/hooks/use-intencion'
 import { createClient } from '@/lib/supabase/client'
 import { BUCKET_DOCUMENTOS_ONE } from '@/lib/almacenamiento/referencia'
-import { ETIQUETA_DOCUMENTO, TEXTO_CAMBIO_VOUCHER, TEXTO_VIAJE_NACIONAL, fechaConAnio } from '@/lib/viaje/entrega'
+import { ETIQUETA_DOCUMENTO, TEXTO_CAMBIO_VOUCHER, TEXTO_CERTIFICADO_ASISTENCIA, TEXTO_VIAJE_NACIONAL, fechaConAnio } from '@/lib/viaje/entrega'
 import type { VistaEntrega } from '@/lib/viaje/entrega-datos'
 import {
   enviarPaquete,
@@ -188,6 +188,13 @@ export default function EntregaViajePanel({
             </p>
           ))}
           {vista.faltaDocumento && vista.documentos.length === 0 && <p className="text-red-700">{vista.faltaDocumento}</p>}
+          {/* Noor §11: la asistencia médica aparece sola cuando la cotización la incluye. */}
+          {(vista.asistencias ?? []).map(a => (
+            <p key={a.id} data-asistencia-medica>
+              {a.texto}
+              {!a.tieneCertificado && <span className="block text-muted-foreground">{TEXTO_CERTIFICADO_ASISTENCIA}</span>}
+            </p>
+          ))}
           {docsInternacional && puedeDocumentos && !doc && (
             <label className="inline-flex min-h-11 cursor-pointer items-center gap-1 rounded-md border px-3 font-medium">
               <Paperclip className="h-3.5 w-3.5" aria-hidden />

@@ -10,7 +10,7 @@
  */
 
 import type { HotelPDF, VueloPDF } from '@/lib/cotizaciones/detalle-viaje'
-import { siglaAerolinea } from '@/lib/cotizaciones/aerolineas'
+import { aerolineaDeSigla, siglaAerolinea } from '@/lib/cotizaciones/aerolineas'
 
 // ── Tokens (§2) ───────────────────────────────────────────────────────────────
 
@@ -374,12 +374,47 @@ export function capitulosDelViaje(hoteles: HotelPDF[], principal: number | null,
     else capitulos.push({ ciudad: ciudadDeCapitulo(h.ciudad), hotel: h, alternativas: [] })
   }
   if (capitulos.length === 0) capitulos.push({ ciudad: destino, hotel: null, alternativas: [] })
+  // Hallazgo del PDF de la prueba Europa (2026-10-14): el Waldorf Astoria Amsterdam salía como
+  // opción Premium de MADRID, porque un hotel cuya ciudad no se igualaba caía al PRIMER capítulo.
+  // La ciudad sale del dato del hotel: su ciudad (también escrita dentro de un texto más largo),
+  // y si no la dice, sus fechas. Solo sin ninguno de los dos queda en el primero, como antes.
   for (const h of otros) {
-    const clave = claveDeCiudad(h.ciudad)
-    const destinoCap = capitulos.find(c => claveDeCiudad(c.ciudad) === clave) ?? capitulos[0]
+    const destinoCap = capituloDeCiudad(capitulos, h.ciudad)
+      ?? capitulos.find(c => mismaEstadia(c.hotel, h))
+      ?? (ciudadDeCapitulo(h.ciudad) ? nuevoCapitulo(capitulos, h.ciudad) : capitulos[0])
     destinoCap.alternativas.push(h)
   }
   return capitulos
+}
+
+/** El capítulo de esa ciudad: la misma llave, o su nombre como palabras dentro del texto leído. */
+function capituloDeCiudad(capitulos: Capitulo[], ciudad: string | null | undefined): Capitulo | undefined {
+  const clave = claveDeCiudad(ciudad)
+  if (!clave) return undefined
+  const exacto = capitulos.find(c => c.ciudad && claveDeCiudad(c.ciudad) === clave)
+  if (exacto) return exacto
+  const largo = ` ${comparable(ciudad ?? '')} `
+  return capitulos.find(c => {
+    const suya = c.ciudad ? comparable(claveDeCiudad(c.ciudad)) : ''
+    return suya.length >= 3 && largo.includes(` ${suya} `)
+  })
+}
+
+/** Un capítulo nuevo, al final, para un hotel de una ciudad que la principal no tiene. */
+function nuevoCapitulo(capitulos: Capitulo[], ciudad: string | null | undefined): Capitulo {
+  const c: Capitulo = { ciudad: ciudadDeCapitulo(ciudad), hotel: null, alternativas: [] }
+  capitulos.push(c)
+  return c
+}
+
+/** ¿Entran el mismo día al mismo lugar? Mismo check-in (mes y día; el año si los dos lo dicen). */
+function mismaEstadia(a: HotelPDF | null, b: HotelPDF): boolean {
+  if (!a) return false
+  const x = leerFecha(a.checkIn)
+  const y = leerFecha(b.checkIn)
+  if (!x || !y) return false
+  if (x.anio !== null && y.anio !== null && x.anio !== y.anio) return false
+  return x.mes === y.mes && x.dia === y.dia
 }
 
 /**
@@ -1026,6 +1061,25 @@ export function numerosDelVuelo(v: VueloPDF): { ida: string | null; regreso: str
   const regreso = tieneRegreso(v)
   if (v.numeros && (regreso || !v.numeros.regreso)) return v.numeros
   return numerosDeVuelo(v.numeroVuelo, regreso)
+}
+
+/**
+ * UNA PASTILLA POR VUELO (regla del 2026-10-12, pedido de Mauricio; N9 de Vera). La aerolínea va
+ * una vez, en la primera fila del vuelo; los trayectos que siguen van sin pastilla ni nombre, para
+ * que la columna se lea como una sola celda alta. Solo un trayecto de OTRA aerolínea (código
+ * compartido, regreso con otra) lleva la suya: se reconoce por el prefijo de su número de vuelo.
+ *
+ * `null` = esa fila no lleva aerolínea. Vale igual en el PDF y en la hoja del cliente.
+ */
+export function aerolineaDeFila(filas: readonly FilaVuelo[], i: number): { sigla: string | null; nombre: string } | null {
+  const f = filas[i]
+  if (!f) return null
+  const v = f.vuelo
+  const delVuelo = siglaAerolinea(v.aerolinea, v.numeroVuelo)
+  if (i === 0) return { sigla: delVuelo, nombre: v.aerolinea ?? v.linea }
+  const deLaFila = /^([A-Z][A-Z0-9]|[0-9][A-Z])\s?\d{1,4}\b/.exec((f.numero ?? '').trim().toUpperCase())?.[1] ?? null
+  if (!deLaFila || deLaFila === delVuelo) return null
+  return { sigla: deLaFila, nombre: aerolineaDeSigla(deLaFila)?.nombre ?? deLaFila }
 }
 
 export function filasDelVuelo(v: VueloPDF): FilaVuelo[] {
