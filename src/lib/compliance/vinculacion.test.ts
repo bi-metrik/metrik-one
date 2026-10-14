@@ -67,6 +67,7 @@ import {
   resumirExpedientes,
   slotsFaltantes,
   llegoElArchivo,
+  validarMotivoDevolucion,
   validarMotivoRechazo,
   type ExpedienteCampo,
   type ExpedienteDoc,
@@ -595,5 +596,18 @@ describe('el sello frente a la decisión', () => {
     expect(selloImpideAprobar(null)).toBeNull();
     expect(selloImpideAprobar(sello('no_verificable'))).toBeNull();
     expect(selloImpideAprobar(sello('sin_firmar'))).toBeNull();
+  });
+});
+
+describe('devolver un expediente firmado', () => {
+  it('exige un motivo que le diga a la contraparte qué corregir', () => {
+    expect(validarMotivoDevolucion('')).not.toBeNull();
+    expect(validarMotivoDevolucion('   corto  ')).not.toBeNull();
+    expect(validarMotivoDevolucion('La cédula se leyó después de la firma.')).toBeNull();
+  });
+
+  it('un devuelto no se decide y dice por qué', () => {
+    expect(puedeDecidirse('devuelto')).toBe(false);
+    expect(razonNoDecidible('devuelto')).toMatch(/devolvió/);
   });
 });
