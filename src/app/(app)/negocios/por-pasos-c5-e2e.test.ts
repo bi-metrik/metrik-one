@@ -333,6 +333,52 @@ describe('C5 · V4 · el pantallazo que COMPLETA el precio del niño', () => {
   }, 60_000)
 })
 
+describe('H1 · V4 con la lectura REAL: el pantallazo de solo adultos fija 6/0/0 en la línea', () => {
+  /**
+   * El pantallazo de SATENA que trae solo «Adulto · 6» (verificación D de Vera): la lectura guarda
+   * su propia composición, no la del viaje. Es la forma que tenía la base en `trappvel-pruebas`.
+   */
+  async function satenaDePantallazo(): Promise<string> {
+    sembrarVacia()
+    const lectura = leer({ ...SATENA, datos: { ...SATENA.datos, adultos: 6, ninos: 0, infantes: 0, netoAdulto: 470_314, netoNino: null, netoInfante: null } })
+    delete (lectura as { origen?: string }).origen
+    const sat: Pantallazo = { id: 'cap-satena-real', tipo: 'vuelo', lectura, pistas: { lugar: null, origen: 'San Andrés', destino: 'Providencia' } }
+    const r = await postLote([{ id: sat.id, borrador: borrador(sat) }])
+    const itemId = r.resultados![0].resultado.itemId!
+    const tp = tabla('items').find(i => i.id === itemId)!.tarifa_pax as { composicion: unknown }
+    expect(tp.composicion).toEqual({ adultos: 6, ninos: 0, infantes: 0 })
+    return itemId
+  }
+
+  it('le falta el precio del niño y del infante, y Enviar se rechaza', async () => {
+    const itemId = await satenaDePantallazo()
+    const linea = tabla('items').find(i => i.id === itemId)!
+    expect(tiposSinPrecio({ grupo: linea.grupo as string, tarifa_pax: linea.tarifa_pax }, { adultos: 6, ninos: 1, infantes: 1 })).toEqual(['nino', 'infante'])
+    const r = await enviarPorPasos(COT_SAN_ANDRES)
+    expect((r as { error?: string }).error ?? '').toMatch(/niño e infante/)
+  }, 60_000)
+
+  it('«Completa SATENA: precio del niño» deja el costo de los 6 adultos MÁS el niño', async () => {
+    const itemId = await satenaDePantallazo()
+    const nino = leer({ ...SATENA, datos: { ...SATENA.datos, adultos: 6, ninos: 1, infantes: 0, netoAdulto: 470_314, netoNino: 470_312, netoInfante: null } })
+    delete (nino as { origen?: string }).origen
+    const completa: Pantallazo = { id: 'cap-satena-real-nino', tipo: 'vuelo', lectura: nino, pistas: { lugar: null, origen: 'San Andrés', destino: 'Providencia' } }
+    const lineas = tabla('items') as unknown as Parameters<typeof destinoDeReglas>[0]['lineas']
+    const d = destinoDeReglas({ tipo: 'vuelo', lectura: completa.lectura, pistas: completa.pistas, lineas, grupoViaje: { adultos: 6, ninos: 1, infantes: 1 } })
+    expect(d).toMatchObject({ como: 'completa', itemId, tipos: ['nino'] })
+    const { decision, destinoId } = decisionParaAceptar(d)
+    const r = await postLote([{ id: completa.id, borrador: borrador(completa, decision, destinoId) }])
+    expect(r.resultados![0].resultado).toMatchObject({ ok: true, itemId, como: 'completa' })
+    const ei = await escribirPrecioQueFalta(itemId, 'infante', 0); expect(ei.error ?? 'ok').toBe('ok')
+    const linea = tabla('items').find(i => i.id === itemId)!
+    const tp = linea.tarifa_pax as { confirmada: { costos: { tipo: string; cantidad: number; totalCOP: number }[]; costoTotalCOP: number } }
+    expect(tp.confirmada.costos.map(c => [c.tipo, c.cantidad])).toEqual([['adulto', 6], ['nino', 1], ['infante', 1]])
+    expect(tp.confirmada.costoTotalCOP).toBe(2_821_884 + 470_312)
+    const r2 = await enviarPorPasos(COT_SAN_ANDRES)
+    expect((r2 as { error?: string }).error ?? '').not.toMatch(/precio por pasajero/)
+  }, 60_000)
+})
+
 describe('C5 · P11 · «Opcional» al aceptar', () => {
   it('la actividad marcada «Es opcional» llega Opcional: no suma y se ofrece aparte', async () => {
     sembrarVacia()

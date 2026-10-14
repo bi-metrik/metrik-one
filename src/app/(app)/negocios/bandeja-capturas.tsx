@@ -484,6 +484,7 @@ export default function BandejaCapturas({
         destinoViaje: destinoVivo.current,
         ubicaciones: ubicacionesVivas.current,
         comparar: !forzadas.current.has(id),
+        ...(porPasos ? { porPasos: true } : {}),
       }),
       vigente: () => turnos.current.get(id) === turno,
       informar: cambio => actualizar(id, cambio),
@@ -555,6 +556,7 @@ export default function BandejaCapturas({
         destinoViaje: destinoVivo.current,
           ubicaciones: ubicacionesVivas.current,
           comparar: true,
+          ...(porPasos ? { porPasos: true } : {}),
         })
         const alertas = lectura.alertas ?? []
         if (l.huella) huellas.current.set(l.huella, id)
@@ -568,7 +570,7 @@ export default function BandejaCapturas({
       }
       if (nuevas.length > 0) setCapturas(cs => [...nuevas, ...cs])
     }
-  }, [])
+  }, [porPasos])
   // Las listas, aceptadas de a una en la fila de siempre (el lote con un solo recálculo es C5).
   const aceptarListasRef = useRef<() => void>(() => {})
   useImperativeHandle(receptor, () => ({
@@ -610,6 +612,7 @@ export default function BandejaCapturas({
         destinoViaje: destinoVivo.current,
       ubicaciones: ubicacionesVivas.current,
       comparar: true,
+      ...(porPasos ? { porPasos: true } : {}),
     })
     const alertas = r.alertas ?? []
     setCapturas(cs => [{

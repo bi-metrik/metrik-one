@@ -21,6 +21,7 @@ import { etiquetaDeRanura } from './ranuras-pantallazo'
 import type { Composicion, LecturaCasilla } from './tarifa-pasajero'
 import { ubicarLectura, type DestinoDeLectura, type LineaParaUbicar } from './ubicar-lectura'
 import { lugarDeBloqueNuevo } from './actividad-pantallazo'
+import { completaDe } from './destino-por-pasos'
 
 /** El id de una opción que solo existe en la bandeja. Nunca llega a la base. */
 export const PREFIJO_BORRADOR = 'borrador:'
@@ -82,6 +83,11 @@ export function revisarBorrador(a: {
   comparar: boolean
   /** El destino del negocio: nombra el bloque nuevo de una actividad sin ciudad. */
   destinoViaje?: string | null
+  /**
+   * La cotización por pasos (C5). Ahí un pantallazo que COMPLETA el precio que le falta a una
+   * opción no se pregunta como «el precio cambió»: su frase es «Completa {opción}» (H1).
+   */
+  porPasos?: boolean
 }): Revision {
   const { capId, borrador, ubicaciones } = a
   const destino = ubicarLectura({
@@ -105,6 +111,7 @@ export function revisarBorrador(a: {
     }
   }
   if (!a.comparar) return { leida, donde, como }
+  if (a.porPasos && completaDe(borrador.tipo, borrador.lectura, a.lineas, a.composicion)) return { leida, donde, como }
   const r = compararConExistentes(leida, a.comparables)
   if (!r) return { leida, donde, como }
   const conBorrador = esIdDeBorrador(r.con.id)
