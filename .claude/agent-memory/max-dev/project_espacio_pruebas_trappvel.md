@@ -1,6 +1,6 @@
 ---
 name: project-espacio-pruebas-trappvel
-description: trappvel-pruebas (2026-10-13) — script clonar-config-workspace SIN correr contra producción; sin almacén propio no guarda fotos ni pantallazos; el preview sin GEMINI no lee pantallazos
+description: trappvel-pruebas (2026-10-13) — script clonar-config-workspace SIN correr contra producción; listUsers caído en prod (banned_until infinity), se busca por ?filter=; sin almacén propio no guarda fotos ni pantallazos; el preview sin GEMINI no lee pantallazos
 metadata:
   type: project
 ---
@@ -22,3 +22,8 @@ el simulacro y el `--apply` contra producción los corre la sesión principal.
   `mauricio.moreno+trappvel-pruebas-dueno|asesora@metrik.com.co`.
 - Una tabla nueva de configuración hay que clasificarla en `src/lib/espacio-pruebas/clasificacion.ts`: si tiene filas de
   la cliente y no está, `--apply` se niega.
+- ⚠️ `auth.admin.listUsers` está CAÍDO en producción (2026-10-14): una fila de otro cliente con
+  `banned_until = 'infinity'` rompe el escáner de GoTrue en cualquier página. Mauricio decidió no tocar el dato. El
+  clonador busca por `GET /auth/v1/admin/users?filter=<correo>` (`src/lib/espacio-pruebas/auth.ts`, PR
+  fix/clonar-workspace-sin-listusers) — la vía `filter` NO se pudo probar contra prod desde el subagente (clasificador
+  negó la lectura): la valida el primer simulacro. `getUserById` no lee la fila rota.

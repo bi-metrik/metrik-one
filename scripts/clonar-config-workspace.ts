@@ -46,6 +46,7 @@ import { createClient, type SupabaseClient } from '@supabase/supabase-js'
 import { config } from 'dotenv'
 
 import type { Almacen, Fila, Filtro } from '@/lib/espacio-pruebas/almacen'
+import { buscarIdDeAuthPorCorreo } from '@/lib/espacio-pruebas/auth'
 import {
   contarPorTabla,
   crearUsuarios,
@@ -174,16 +175,9 @@ function almacenSupabase(url: string, llave: string): Almacen {
       return out
     },
     async buscarUsuario(correo) {
-      // `auth.admin` no busca por correo: se recorren las páginas. Si el listado falla, se para
-      // (crear a ciegas un usuario que ya existe deja un perfil sin dueño).
-      for (let page = 1; page <= 50; page++) {
-        const { data, error } = await sb.auth.admin.listUsers({ page, perPage: 1000 })
-        if (error) throw new Error(`Buscar ${correo} en auth.users: ${error.message}`)
-        const u = data.users.find(x => (x.email ?? '').toLowerCase() === correo.toLowerCase())
-        if (u) return u.id
-        if (data.users.length < 1000) return null
-      }
-      throw new Error('auth.users tiene más de 50.000 usuarios: búsqueda cortada.')
+      // NO por `listUsers`: una fila de otro cliente con `banned_until = 'infinity'` lo tumba
+      // para cualquier página. Búsqueda puntual por correo; el porqué en `espacio-pruebas/auth.ts`.
+      return buscarIdDeAuthPorCorreo(url, llave, correo)
     },
     async crearUsuario(correo, nombreCompleto) {
       const { data, error } = await sb.auth.admin.createUser({ email: correo, email_confirm: true, user_metadata: { full_name: nombreCompleto } })
