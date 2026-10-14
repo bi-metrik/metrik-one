@@ -412,3 +412,114 @@ export function drillSeAcotaAVentas(args: {
   if (args.mes !== null) return false
   return args.campaignId === null || args.columna !== undefined
 }
+
+// ── Leads por ciudad ─────────────────────────────────────────────────────────
+//
+// SOE-015 (Daniela, 2026-10-14): «poder identificar de qué ciudades estamos recibiendo
+// los leads». La ciudad aquí es la de RESIDENCIA que la persona declara en el
+// formulario de Meta, no la seccional DIAN de «Ventas por ciudad». Son dos ciudades
+// distintas y por eso son dos tablas.
+//
+// ⚠️ Las columnas NO son las seis del tablero directivo. Ese corte (Bogotá, Cali,
+// Medellín, Bucaramanga) es el de la seccional del RUT, y para los leads deja fuera
+// justo lo que Daniela pregunta: medido el 2026-10-14 en SOENA, Barranquilla es la
+// cuarta ciudad con más leads (65) y Bogotá apenas tiene 19. Las columnas son las
+// ciudades con más leads EN LA LENTE QUE SE ESTÁ VIENDO, más «Otras ciudades» y
+// «Sin ciudad».
+
+/** Un lead (contacto × campaña) con su mes y la ciudad que declaró, ya normalizada. */
+export interface FilaLeadCiudad {
+  campaignId: string
+  /** 'YYYY-MM-01' del mes de su primera interacción con la campaña. */
+  mes: string | null
+  /** Nombre ya normalizado para mostrar. `null` = el formulario no trae ciudad. */
+  ciudad: string | null
+}
+
+export const OTRAS_CIUDADES = 'Otras ciudades'
+export const SIN_CIUDAD = 'Sin ciudad'
+
+/** Cuántas ciudades se nombran una por una antes de «Otras ciudades». */
+export const CIUDADES_NOMBRADAS = 6
+
+export interface FilaLeadsCiudad {
+  campaignId: string
+  campana: string
+  /** Una entrada por columna, siempre todas, aunque valgan cero. */
+  celdas: Record<string, number>
+  total: number
+}
+
+export interface LeadsPorCiudad {
+  /** Las nombradas en orden de leads, luego «Otras ciudades» y «Sin ciudad». */
+  columnas: string[]
+  filas: FilaLeadsCiudad[]
+  totales: Record<string, number>
+  total: number
+  /** Lo que hay dentro de «Otras ciudades», de más a menos, para decirlo debajo. */
+  otras: Array<{ ciudad: string; leads: number }>
+}
+
+/**
+ * Los leads de cada campaña repartidos por ciudad de residencia.
+ *
+ * Igual que `ventasPorCiudad`, las filas salen de `campanas` —la lista que ya pinta la
+ * tabla de arriba— y en su orden; `mes` fija la misma lente (con mes, los leads cuya
+ * primera interacción cae en ese mes; con `null`, todos). Una campaña sin leads en la
+ * lente no se pinta: aquí sería una fila de rayas.
+ */
+export function leadsPorCiudad(
+  campanas: CampanaAgregada[],
+  leads: FilaLeadCiudad[],
+  mes: string | null,
+  nombradas: number = CIUDADES_NOMBRADAS,
+): LeadsPorCiudad {
+  const enLente = leads.filter(l => mes === null || l.mes === mes)
+
+  const porCiudad = new Map<string, number>()
+  for (const l of enLente) {
+    if (l.ciudad === null) continue
+    porCiudad.set(l.ciudad, (porCiudad.get(l.ciudad) ?? 0) + 1)
+  }
+  const ranking = [...porCiudad.entries()].sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0], 'es'))
+  // Si solo sobra UNA ciudad, se nombra: una columna «Otras» con una sola ciudad dentro
+  // esconde un nombre a cambio de nada.
+  const corte = ranking.length <= nombradas + 1 ? ranking.length : nombradas
+  const nombradasSet = new Set(ranking.slice(0, corte).map(([c]) => c))
+  const columnas = [...ranking.slice(0, corte).map(([c]) => c), OTRAS_CIUDADES, SIN_CIUDAD]
+  const otras = ranking.slice(corte).map(([ciudad, n]) => ({ ciudad, leads: n }))
+
+  const columnaDe = (ciudad: string | null) =>
+    ciudad === null ? SIN_CIUDAD : nombradasSet.has(ciudad) ? ciudad : OTRAS_CIUDADES
+  const enCero = () => Object.fromEntries(columnas.map(c => [c, 0])) as Record<string, number>
+
+  const acumulado = new Map<string, Record<string, number>>()
+  for (const l of enLente) {
+    const celdas = acumulado.get(l.campaignId) ?? enCero()
+    celdas[columnaDe(l.ciudad)] += 1
+    acumulado.set(l.campaignId, celdas)
+  }
+
+  const fila = (campaignId: string, campana: string): FilaLeadsCiudad => {
+    const celdas = acumulado.get(campaignId) ?? enCero()
+    return { campaignId, campana, celdas, total: columnas.reduce((s, c) => s + celdas[c], 0) }
+  }
+
+  const filas: FilaLeadsCiudad[] = []
+  const conocidas = new Set<string>()
+  for (const c of campanas) {
+    if (c.sinRastro || c.campaignId === null) continue
+    conocidas.add(c.campaignId)
+    if (acumulado.has(c.campaignId)) filas.push(fila(c.campaignId, c.campana))
+  }
+  // Un lead de una campaña que la tabla de arriba no tiene NO se descarta: se pinta con
+  // su id. No debería pasar —la vista crea la fila (campaña, mes) con el primer lead— y
+  // justo por eso, si pasa, tiene que verse.
+  for (const k of acumulado.keys()) if (!conocidas.has(k)) filas.push(fila(k, k))
+
+  const totales = enCero()
+  for (const f of filas) for (const c of columnas) totales[c] += f.celdas[c]
+  const total = columnas.reduce((s, c) => s + totales[c], 0)
+
+  return { columnas, filas, totales, total, otras }
+}

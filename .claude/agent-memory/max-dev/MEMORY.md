@@ -40,6 +40,7 @@
 - ⚠️ [«Otro servicio» en la cotización por pasos](project_cotizacion_otro_servicio.md) — migración 20261013140000 APLICADA (13-oct); valor por todo se reparte; 3 guardas
 - ⚠️⚠️ [Cotización integrada C0 (igualdad del servidor)](project_cotizacion_integrada_c0.md) — fixture sobre 54568adf NO se regenera; P12 frena por faltaCosto; V1 PW choca con preview=prod
 - ⚠️ [R1: el servidor sí toma la Recomendada](project_r1_total_recomendada_adicionales.md) — la diferencia eran adicionales; precio_venta no los suma
+- ⚠️ [SOE-015: leads por ciudad de residencia](project_leads_por_ciudad_soe015.md) — copia JS de la CTE leads; cuadre sin medir en prod; DIVIPOLA solo servidor
 - [Colores de aerolíneas (#1082)](project_colores_aerolineas.md) — catálogo único en src/lib/cotizaciones/aerolineas.ts; colores de tarifa vetados
 - [Fecha del pago en el bloque Pagos ePayco (SOE-013)](project_fecha_pagos_epayco_bloque.md) — pagos[].fecha viejo = registro; leer cobros.fecha; multi-pago fecha por ePayco (12-oct)
 - [Columna Pago de cuotas CDA](project_columna_pago_cuota_cda.md) — pago↔cuota por FIFO (RPC sin plan/cuota); la UI no nombra a Bold
