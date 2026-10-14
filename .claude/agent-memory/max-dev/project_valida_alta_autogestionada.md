@@ -1,6 +1,6 @@
 ---
 name: valida-alta-autogestionada
-description: Alta autogestionada de Valida (18-recorrido-baja-friccion). Al 2026-10-12, #1102 mergeado; pila #1104→#1107→#1110 abierta más metrik-valida#57, todo apagado. Migración 20261012100000 (#1107) SIN aplicar; 20261013090000 APLICADA (14-oct, no volver a aplicar); 20261014153000 (intentos con tarjeta) SIN aplicar. Lo que no se ve en el código: el plan es una bolsa por mes, los términos van por empresa y la tarjeta nunca toca ONE.
+description: Alta autogestionada de Valida (18-recorrido-baja-friccion). Pila #1104→#1107→#1110 abierta más metrik-valida#57. Migraciones SIN aplicar: 20261012100000, 20261014153000, 20261014203000 (Términos en el registro); 20261013090000 APLICADA. Desde el 14-oct los Términos v2.0 se aceptan en el registro (canal 'registro') y el cobro del día 7 llega a la tarjeta. Plan = bolsa por mes; términos por empresa; la tarjeta nunca toca ONE.
 metadata:
   type: project
 ---
@@ -31,7 +31,11 @@ Ya mergeados: #1095 (corte de la bolsa), #1097 (`valida_registros`, APLICADA, no
    - Desde el 2026-10-12 trae además el cobro a los 7 días (decisión de Mauricio, opción A, fecha fija): Condiciones v2.0 + aviso v1.2, el paso 7a del cron, «Cancelar prueba», el borrado de la tarjeta y el aviso antes de suspender (paso 8b). Migración 20261013090000 APLICADA en producción el 2026-10-14 (no tocar el archivo).
    - Calendario de mora (Mauricio, 2026-10-14, Carmen en `crecimiento-mrr/28-…`): `DIAS_GRACIA_CICLO = 10`; cuota 2+ con tarjeta: intentos días 0, 3 y 7 (`cobro_intentos_tarjeta`, migración 20261014153000 SIN aplicar; sin la tabla NO cobra), enlace el día 0 (paso 7c), aviso día 7, suspensión día 10. La cuota 1 nunca se reintenta (7.5). `DIAS_GRACIA` del cron y `DIAS_GRACIA_RENOVACION` se quedan en 5 a propósito.
    - Los planes `epayco` ya NO reciben enlace automático antes de un rechazo (antes sí, por el fallback a `cobros.pasarela_en_linea` = bold del espacio metrik: doble pago).
-   - El cobro automático NO cobra mientras `ACEPTACION_EN_REGISTRO_CONSTRUIDA = false`: la guarda `aceptaciones_terminos_modulo()` exige cédula y persona designada, y aceptar los Términos en el registro necesita otro canal (migración, con Emilio).
+   - **Términos en el registro (2026-10-14, migración 20261014203000 SIN aplicar):** la casilla v1.2 acepta los Términos v2.0 llenos con la Orden de la empresa; `valida_registros` guarda `aceptado_texto` (su sha = `condiciones_sha256`) y `terminos_*`, inmutables por trigger. El día 7 la activación registra ESE texto (no lo rearma) y `aceptarTerminosDelRegistro` inserta en `aceptaciones_terminos` con `canal = 'registro'`; la guarda de la base exige documento = texto aceptado, persona = designada, declaración = la casilla dentro de `aceptado_texto`, y pone hora/IP/correo desde el registro. `ACEPTACION_EN_REGISTRO_CONSTRUIDA = true`. Un registro sin `terminos_sha256` (anterior) queda en `esperando_terminos`.
+   - Sin esa migración aplicada, un registro con tarjeta FALLA (la puerta escribe columnas nuevas) y el paso 7a responde error: aplicarla antes de probar en un preview y antes del merge.
+   - Lecturas de Max sin confirmar con Emilio: `{fecha_publicacion}` («Rige desde») = día del registro; `{recomendado_afi: …}` pasó a `{recomendado_afi}` con «sí»/«no».
+   - El botón «Activar plan» ya no activa un registro con tarjeta (`cobro_al_terminar_prueba`): cobraría la cuota 1 antes de los 7 días.
+   - Mora de autoservicio (`REGLA_MORA_AUTOSERVICIO`): restringe consultas desde D+10, pausa /valida desde D+40 (no D+31). La puerta la elige si el contrato tiene un documento con slug `terminos-uso-valida-autogestion`.
    - Textos: la fuente son los archivos de `docs/legal/` (Emilio pasó ahí el texto de Vera). El código se comparó byte por byte con esos archivos el 2026-10-12; si cambian, se vuelve a copiar y se sube la versión.
    - ⚠️ Llaves con sufijo `_METRIK` (cuenta 1595165). `EPAYCO_PUBLIC_KEY`/`PRIVATE_KEY` sin sufijo son de OTRA cuenta (conciliación de un cliente); leerlas cobraría en la cuenta equivocada. Cargadas solo en Production (2026-10-12): Preview no las tiene.
 5. **metrik-valida#57**: los parches de PR 1 y 9, `POST /api/one/v1/autogestion/{cliente}/ciclos` y la marca PRUEBA en el PDF.
@@ -69,10 +73,10 @@ Ya mergeados: #1095 (corte de la bolsa), #1097 (`valida_registros`, APLICADA, no
 
 - Aplicar la migración de #1107 antes de su merge.
 - Desplegar metrik-valida#57.
-- Términos v2.0 aprobados (pegarlos en `terminos-plan.ts`). El texto ya está en `terminos-valida-v2.0-autoservicio.md`, APROBADO CON CAMBIOS por Vera; `{N}` = 10 (decidido el 2026-10-14) = `DIAS_GRACIA_CICLO`.
+- Términos v2.0: YA en `terminos-plan.ts` (14-oct, huella de la Parte II fijada en `terminos-plan.test.ts`). Si Emilio cambia el archivo, se recopia y se sube la versión.
 - El retiro del plan, el cambio de medio de pago, la factura de cada cobro automático (hoy no se emite ninguna) y el procedimiento de cancelación por correo.
 - Decisión sobre la comisión de AFI en autoservicio (el contrato nace con `comision = null` y el origen en los parámetros).
 - La prueba de Vera en un preview.
-- Para el cobro al terminar la prueba sin clic: Términos aceptados en el registro (condición 4 de §2.1) y una cuenta ePayco.
+- Para el cobro sin clic en producción: aplicar las 3 migraciones, `CLAUSULA_COBRO_APROBADA_PARA_PRODUCCION`, `EPAYCO_PRODUCCION`, metrik-valida#57 desplegado (abre la bolsa al pagar), y lo de Emilio (16.4: enviar Términos + constancia al correo, no construido).
 
 Relacionado: [[secop-autogestion-registro]], [[radar-trial-y-cobro]], [[valida-renovacion-continua]], [[sql-y-despliegue-metrik-valida]].
