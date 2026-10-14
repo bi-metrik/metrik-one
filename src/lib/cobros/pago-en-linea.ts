@@ -88,6 +88,12 @@ export interface RepoPagoEnLinea {
    * idempotente.
    */
   trasPagoRegistrado?(cobro: CobroParaPago): Promise<{ revisar: boolean; detalle: string } | null>
+  /**
+   * La factura electrónica del pago (`src/lib/facturacion-electronica/`). Corre después de
+   * `trasPagoRegistrado`, también en un reintento (`ya_pagado`): encolar es idempotente. NO puede
+   * cambiar el resultado del pago: si lanza, se ignora (el barrido del cron la encuentra).
+   */
+  facturarPago?(cobro: CobroParaPago): Promise<void>
 }
 
 export interface SalidaPagoEnLinea {
@@ -237,17 +243,27 @@ async function procesar(e: EventoPasarela, repo: RepoPagoEnLinea, hoy: string): 
     }
   }
   const salida = await registrarPagoAprobado(e, cobro, repo, hoy)
-  if ((salida.resultado === 'registrado' || salida.resultado === 'ya_pagado') && repo.trasPagoRegistrado) {
-    const despues = await repo.trasPagoRegistrado(cobro)
-    if (despues) {
-      return {
-        ...salida,
-        resultado: despues.revisar ? 'requiere_revision' : salida.resultado,
-        detalle: `${salida.detalle} ${despues.detalle}`,
-      }
-    }
+  if (salida.resultado !== 'registrado' && salida.resultado !== 'ya_pagado') return salida
+  const despues = repo.trasPagoRegistrado ? await repo.trasPagoRegistrado(cobro) : null
+  // El pago entró: se factura aunque lo que sigue pida revisión (la Res. DIAN 165/2023 pide factura
+  // por cada operación; si luego se devuelve, va una nota crédito).
+  await facturar(cobro, repo)
+  if (!despues) return salida
+  return {
+    ...salida,
+    resultado: despues.revisar ? 'requiere_revision' : salida.resultado,
+    detalle: `${salida.detalle} ${despues.detalle}`,
   }
-  return salida
+}
+
+/** La factura del pago. Nunca tumba el registro del pago. */
+async function facturar(cobro: CobroParaPago, repo: RepoPagoEnLinea): Promise<void> {
+  if (!repo.facturarPago) return
+  try {
+    await repo.facturarPago(cobro)
+  } catch (err) {
+    console.error(`[pago-en-linea] la factura del cobro ${cobro.id} no se encoló:`, (err as Error)?.message ?? err)
+  }
 }
 
 export async function procesarEventoPasarela(e: EventoPasarela, repo: RepoPagoEnLinea, hoy: string): Promise<SalidaPagoEnLinea> {
