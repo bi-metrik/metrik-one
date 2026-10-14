@@ -265,5 +265,19 @@ describe('planes que cobran con la tarjeta guardada (pasarela epayco)', () => {
     expect(r.resumen.generados.map((g) => g.numero)).toEqual([2])
     expect(r.enviar).toHaveBeenCalledTimes(1)
     expect(r.resumen.conTarjetaSinRechazo).toBe(1)
+    // El correo del día 0 dice que la tarjeta no pasó (Términos de autoservicio 3.6).
+    const m = r.enviar.mock.calls[0][0]
+    expect(m.subject).toBe('No pudimos cobrar tu cuota con MéTRIK a la tarjeta: puedes pagarla en línea')
+    expect(m.text).toContain('No pudimos cobrar la cuota 2 de CDA Pruebas a la tarjeta que registraste en ePayco: la tarjeta rechazó el cobro.')
+    expect(m.html).toContain('la tarjeta rechazó el cobro')
+  })
+
+  it('el primer cobro rechazado (el plan volvió al enlace, Condiciones 7.5) también lo dice; la otra cuota, no', async () => {
+    const r = await correr(tablasBase({ cobro_intentos_tarjeta: [{ plan_cobro_id: 'plan1', numero_cuota: 1, intento: 0, resultado: 'rechazado' }] }))
+    expect(r.resumen.generados.map((g) => g.numero)).toEqual([1, 2])
+    const [c1, c2] = r.enviar.mock.calls.map((c) => c[0])
+    expect(c1.text).toContain('la tarjeta rechazó el cobro')
+    expect(c2.text).not.toContain('tarjeta')
+    expect(c2.subject).not.toContain('No pudimos cobrar')
   })
 })

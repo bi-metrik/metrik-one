@@ -29,6 +29,12 @@ export interface DatosAvisoEnlace {
   /** ISO del vencimiento del enlace, si la pasarela lo dio. */
   enlaceExpira: string | null
   urlSuscripcion: string
+  /**
+   * La tarjeta guardada en ePayco rechazó el cobro de esta cuota (Términos de autoservicio 3.6 y
+   * Condiciones 7.5: «METRIK lo informa al correo de notificaciones, envía un enlace de pago»). El
+   * correo lo dice: sin eso, quien tiene cobro automático lee un «ya puedes pagar» y cree que ya pagó.
+   */
+  tarjetaRechazada?: boolean
 }
 
 /** «Suscripción VALIDA · Plan CDA — … · periodo del ...» → «Suscripción VALIDA · Plan CDA — …». */
@@ -65,6 +71,7 @@ function fechaBogota(iso: string): string | null {
 
 export function asuntoAvisoEnlace(d: DatosAvisoEnlace): string {
   const fecha = formatFechaLetras(d.fechaVencimiento)
+  if (d.tarjetaRechazada) return `No pudimos cobrar tu cuota con MéTRIK a la tarjeta: puedes pagarla en línea`
   return d.fechaVencimiento < d.hoy
     ? `Tu cuota con MéTRIK está pendiente: ya puedes pagarla en línea`
     : `Ya puedes pagar en línea tu cuota con MéTRIK, vence el ${fecha}`
@@ -96,7 +103,9 @@ function parrafos(d: DatosAvisoEnlace): { saludo: string; intro: string; cierre:
   cierre.push('Si ya hiciste este pago, no tienes que hacer nada.')
   return {
     saludo: nombre ? `Hola, ${nombre}.` : 'Hola.',
-    intro: vencida
+    intro: d.tarjetaRechazada
+      ? `No pudimos cobrar la cuota ${d.numeroCuota} de ${d.espacioNombre} a la tarjeta que registraste en ePayco: la tarjeta rechazó el cobro. Puedes pagarla en línea desde la sección Suscripción de MéTRIK ONE.`
+      : vencida
       ? `La cuota ${d.numeroCuota} de ${d.espacioNombre} sigue pendiente. Ya puedes pagarla en línea desde la sección Suscripción de MéTRIK ONE.`
       : `Ya puedes pagar en línea la cuota ${d.numeroCuota} de ${d.espacioNombre} desde la sección Suscripción de MéTRIK ONE.`,
     cierre,

@@ -18,6 +18,7 @@ import { leerProximoPagoCda, type LecturaPago } from './pago-servidor'
 import { TIPOS_CUOTA_SIN_MORA } from './plan-anual'
 import { puedeVerSuscripcion } from '@/lib/seccion-suscripcion/estado'
 import {
+  REGLA_MORA_AUTOSERVICIO,
   enPlazoParaAceptar,
   estadoMora,
   mensajeConsultasRestringidas,
@@ -25,6 +26,7 @@ import {
   vigenciaRestriccion,
   type EstadoMora,
 } from './plazos'
+import { TERMINOS_PLAN as TERMINOS_AUTOSERVICIO } from '@/lib/valida-registro/terminos-plan'
 
 /**
  * La puerta de Valida para los CDA: antes de consultar listas, la persona designada por la empresa
@@ -120,6 +122,12 @@ export type EntradaValidaCda =
       modificacion: EstadoEntrada | null
       /** Desde cuándo rige la restricción de los 5 días para este contrato; `null` = no rige. */
       restriccionDesde: string | null
+      /**
+       * El contrato es de una cuenta autogestionada (sus Términos son los de autoservicio): la mora
+       * sigue la 11 de ESOS Términos (`REGLA_MORA_AUTOSERVICIO`: suspensión a los 10 días con los
+       * reportes abiertos, pausa a los 40), no la del Plan CDA.
+       */
+      autoservicio: boolean
       /**
        * La persona REAL de la sesión es un usuario del cliente en este espacio (no el soporte de MeTRIK
        * ni alguien de otro espacio). Solo así su vista del aviso cuenta como constancia del preaviso.
@@ -223,6 +231,7 @@ async function resolver(): Promise<EntradaValidaCda> {
     modificaciones,
     modificacion,
     restriccionDesde: vigenciaRestriccion(documentos),
+    autoservicio: documentos.some((d) => d.slug === TERMINOS_AUTOSERVICIO.slug),
     usuarioDelCliente:
       perfil !== null && !perfil.platformAdmin && perfil.workspaceId === workspaceId && impersonating !== true,
   }
@@ -270,8 +279,14 @@ async function resolverMora(): Promise<MoraValidaCda> {
   // La restricción de los 5 días (11.1, v1.4) y la pausa de los 30 se miden sobre la misma cuota del
   // SERVICIO: un período cubierto por el Plan Anual no tiene cuota de servicio (su cuota pasó a usuarios
   // adicionales y la anual está pagada), así que no produce aviso, restricción ni pausa (anexo 6.1).
+  // Autoservicio: la restricción de la 11.1 de sus Términos rige desde siempre (no hay aviso de por
+  // medio), así que su vigencia es la del primer día que pudo vencer algo.
   const mora: EstadoMora =
-    delServicio.estado === 'ok' ? estadoMora(delServicio.pago, e.hoy, e.restriccionDesde) : { estado: 'al_dia' }
+    delServicio.estado !== 'ok'
+      ? { estado: 'al_dia' }
+      : e.autoservicio
+        ? estadoMora(delServicio.pago, e.hoy, '2000-01-01', REGLA_MORA_AUTOSERVICIO)
+        : estadoMora(delServicio.pago, e.hoy, e.restriccionDesde)
   return { tipo: 'ok', lectura, mora }
 }
 

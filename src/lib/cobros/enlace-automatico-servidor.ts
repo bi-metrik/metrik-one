@@ -229,18 +229,24 @@ export async function generarEnlacesAutomaticos(
   })
   for (const d of seleccion.descartadas) resumen.descartadas[d.motivo] += 1
 
-  // 3a. Planes con la tarjeta guardada: solo las cuotas que la tarjeta ya rechazó reciben enlace.
+  // 3a. Las cuotas que la tarjeta guardada ya rechazó: las de un plan que sigue en la tarjeta (cuota 2
+  // en adelante) y las del primer cobro, cuyo plan volvió al enlace (Condiciones 7.5). Su correo dice
+  // que la tarjeta no pasó (Términos 3.6: «METRIK lo informa al correo de notificaciones»).
   const conTarjeta = new Set(planes.filter((x) => x.pasarela === 'epayco').map((x) => x.id))
-  if (conTarjeta.size > 0) {
+  const planesCandidatos = [...new Set(seleccion.candidatas.map((c) => c.planCobroId))]
+  let rechazadas = new Set<string>()
+  if (planesCandidatos.length > 0) {
     const rech = await db
       .from('cobro_intentos_tarjeta')
       .select('plan_cobro_id, numero_cuota')
-      .in('plan_cobro_id', [...conTarjeta])
+      .in('plan_cobro_id', planesCandidatos)
       .eq('resultado', 'rechazado')
     // Sin poder leer los rechazos (la tabla aún no existe), ninguna cuota con tarjeta recibe enlace.
-    const rechazadas = new Set(
+    rechazadas = new Set(
       rech.error ? [] : ((rech.data ?? []) as { plan_cobro_id: string; numero_cuota: number }[]).map((f) => `${f.plan_cobro_id}|${f.numero_cuota}`),
     )
+  }
+  if (conTarjeta.size > 0) {
     const antes = seleccion.candidatas.length
     seleccion.candidatas = seleccion.candidatas.filter((c) => !conTarjeta.has(c.planCobroId) || rechazadas.has(`${c.planCobroId}|${c.numero}`))
     resumen.conTarjetaSinRechazo = antes - seleccion.candidatas.length
@@ -281,7 +287,7 @@ export async function generarEnlacesAutomaticos(
       continue
     }
 
-    const aviso = await avisarEnlaceGenerado(db, deps, cand, r, contratos, p)
+    const aviso = await avisarEnlaceGenerado(db, deps, cand, r, contratos, { ...p, tarjetaRechazada: rechazadas.has(`${cand.planCobroId}|${cand.numero}`) })
     await registrarActividad(
       db,
       {
@@ -343,7 +349,7 @@ async function avisarEnlaceGenerado(
   cand: CuotaCandidata,
   r: Extract<ResultadoEnlaceCuota, { ok: true }>,
   contratos: readonly FilaContrato[],
-  p: { hoy: string; ahoraMs: number },
+  p: { hoy: string; ahoraMs: number; tarjetaRechazada: boolean },
 ): Promise<{ estado: EstadoAviso; motivo: string | null }> {
   const registrar = async (fila: { estado: EstadoAviso; destino?: string | null; titulo?: string | null; motivo?: string | null; proveedorId?: string | null }) => {
     const ins = await db.from('avisos_cliente').insert({
@@ -390,6 +396,7 @@ async function avisarEnlaceGenerado(
     hoy: p.hoy,
     enlaceExpira: r.expira,
     urlSuscripcion: (deps.urlSuscripcion ?? urlSuscripcionPorDefecto)(slug),
+    tarjetaRechazada: p.tarjetaRechazada,
   }
   const asunto = asuntoAvisoEnlace(datos)
   const envio = await (deps.enviarCorreo ?? enviarPorResend)({
