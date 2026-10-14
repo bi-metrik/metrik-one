@@ -8,6 +8,7 @@
 - ⚠️⚠️ [Post-cotización ola 5: F4 entrega y F6 cierre](project_post_cotizacion_f4_f6.md) — #1131 migración contacto_documentos SIN aplicar; pila hasta #1133
 - ⚠️ [Post-cotización ola 4: F3, F5 y Siigo listo](project_post_cotizacion_f3_f5.md) — #1119/#1120/#1123 apilados; wa-webhook sin desplegar; piso $0
 - ⚠️ [Post-cotización olas 2-3: confirmación y riel de cobro](project_post_cotizacion_f2.md) — #1116/#1117 sin migración; destrabados con merge de main (12-oct)
+- ⚠️ [Cotizador de viajes: plata de la prueba Europa](project_cotizador_viajes_plata_europa.md) — H27 era el editor sin adicionales; resta en repartirHabitaciones
 - [Post-cotización ola 1: servicios del viaje F0](project_post_cotizacion_servicios_f0.md) — migración APLICADA; datos en `_servicios`; Q1-Q8 sin medir
 - ⚠️⚠️ [Alta autogestionada de Valida (#1095, #1097, #1098)](project_valida_alta_autogestionada.md) — #1097 aplicada y mergeada; PR 1/9 de Valida son parches
 - ⚠️⚠️ [Renovación continua de Valida (fila A)](project_valida_renovacion_continua.md) — paso 6b agrega 1 cuota; script de los 4 CDA SIN correr; ficha sin dias_trial
