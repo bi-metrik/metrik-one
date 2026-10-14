@@ -1021,25 +1021,27 @@ export async function recalcularTotales(cotizacionId: string) {
   // Los parámetros de la cascada se leen de la fila, no de la línea de negocio: se
   // congelan al crear la cotización y no se resincronizan, para que reconfigurar la
   // línea no le mueva el precio a una cotización ya enviada al cliente.
+  // H2 (verificación D) · la fila de la cotización y sus líneas no dependen una de otra: van en
+  // paralelo. Las mismas dos consultas, una ida menos en serie.
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const { data: cot } = await (supabase as any)
+  const [{ data: cot }, { data: items }] = await Promise.all([(supabase as any)
     .from('cotizaciones')
     .select('convencion_margen, aiu_admin_pct, aiu_imprevistos_pct, margen_porcentaje, margen_default_pct, descuento_porcentaje')
     .eq('id', cotizacionId)
-    .maybeSingle()
+    .maybeSingle(),
 
   // `select('*')` y no la lista de columnas: `grupo`, `opcion_de` y `orden` los agrega
   // la migración `20260914200000`, y nombrarlos devolvería un 400 mientras no esté
   // aplicada — o sea que el editor dejaría de recalcular en cada tecla. Misma
   // tolerancia que `contextoDeCotizacion`.
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const { data: items } = await (supabase as any)
+  (supabase as any)
     .from('items')
     // `rubros(*)` y no la lista de columnas: `sugerido` lo agrega
     // `20260914230000` y nombrarlo devolveria un 400 mientras no este aplicada.
     // Un rubro son cinco numeros y un texto corto: traerlo entero no cuesta nada.
     .select('*, rubros(*)')
-    .eq('cotizacion_id', cotizacionId)
+    .eq('cotizacion_id', cotizacionId)])
 
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const filas = (items ?? []) as any[]
@@ -1220,8 +1222,9 @@ export async function recalcularTotales(cotizacionId: string) {
   // ⚠️ La cotizacion, sus items y sus itinerarios se leen UNA vez y se pasan a los
   // dos helpers. Esta funcion corre en cada tecla del editor: releerlos por cada uno
   // eran cuatro idas y vueltas mas por recalculo, en la pantalla mas pesada.
-  const ctxItin = await contextoDeCotizacion(supabase, cotizacionId)
-  const filasItin = ctxItin ? await leerItinerarios(supabase, cotizacionId) : null
+  // H2 · en paralelo: `leerItinerarios` no depende del contexto (si no hay contexto, se descarta).
+  const [ctxItin, filasLeidas] = await Promise.all([contextoDeCotizacion(supabase, cotizacionId), leerItinerarios(supabase, cotizacionId)])
+  const filasItin = ctxItin ? filasLeidas : null
   const principal = ctxItin ? await totalDelPrincipal(supabase, cotizacionId, ctxItin, filasItin) : null
 
   await supabase
