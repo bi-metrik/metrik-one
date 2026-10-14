@@ -21,7 +21,7 @@ import { duplicarCotizacionCompleta } from '@/lib/cotizaciones/duplicar-cotizaci
 import { terminosInicialesDeCotizacion } from '@/lib/cotizaciones/terminos-al-crear'
 import { recalcularTotales } from '@/app/(app)/negocios/cotizacion-actions'
 import { createServiceClient } from '@/lib/supabase/server'
-import { deshacerEnvioDescargado, registrarEnvioCotizacion } from '@/lib/negocios/seguimiento-datos'
+import { registrarEnvioCotizacion } from '@/lib/negocios/seguimiento-datos'
 import { esOrigenVersion } from '@/lib/negocios/seguimiento'
 import { generarServiciosDesdeTarifa, soltarServiciosDeAceptacion } from '@/lib/viaje/servicios-viaje-datos'
 
@@ -689,25 +689,4 @@ export async function duplicarCotizacionNegocio(cotizacionId: string, negocioId:
 
   revalidatePath(`/negocios/${negocioId}`)
   return { success: true as const, id: res.id }
-}
-
-/**
- * «No lo envié» (Vera C3.2): la descarga del PDF ya no cuenta como envío. Solo en borrador y
- * dentro de los 2 minutos siguientes (el toast da 8 s).
- */
-export async function deshacerEnvioPorDescarga(cotizacionId: string) {
-  const { supabase, workspaceId, staffId, error } = await getWorkspace()
-  if (error || !workspaceId) return { success: false as const, error: 'No autenticado' }
-  const { data: cot } = await supabase
-    .from('cotizaciones')
-    .select('negocio_id')
-    .eq('id', cotizacionId)
-    .eq('workspace_id', workspaceId)
-    .maybeSingle()
-  const negocioId = (cot as { negocio_id: string | null } | null)?.negocio_id
-  if (!negocioId) return { success: false as const, error: 'Cotización no encontrada' }
-  const r = await deshacerEnvioDescargado(supabase, { workspaceId, negocioId, cotizacionId, staffId: staffId ?? null })
-  if (!r.ok) return { success: false as const, error: r.error ?? 'No se pudo deshacer' }
-  revalidatePath(`/negocios/${negocioId}`)
-  return { success: true as const }
 }
