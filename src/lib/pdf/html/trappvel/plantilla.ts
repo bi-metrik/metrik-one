@@ -128,6 +128,12 @@ function fondo(f: FotoResuelta | null, extra = ''): string {
   return ` style="background-image:url(${f.src});background-position:${pos};${extra}"`
 }
 
+/** «Madrid Atocha - Barcelona Sants · AVE 03071 Renfe, Estándar» → «AVE 03071 Renfe». */
+function etiquetaDeTren(descripcion: string): string {
+  const servicio = descripcion.split(' · ')[1]
+  return (servicio ?? descripcion).split(',')[0].trim()
+}
+
 /** El texto corto de un servicio: «Sagrada Familia · 1 h 30 · Barcelona» → «Sagrada Familia». */
 function cabeza(texto: string): string {
   return texto.split(' · ')[0].trim()
@@ -218,7 +224,7 @@ function ruta(m: ModeloPropuesta): string {
     )
     if (i < paradas.length - 1) {
       const tren = x.siguiente !== null
-      const lbl = tren ? cabeza(x.siguiente as string) : ''
+      const lbl = tren ? etiquetaDeTren(x.siguiente as string) : ''
       partes.push(
         `<div class="leg"><div class="bar${tren ? ' train' : ''}"></div><div class="ico">${icono(tren ? 'train' : 'plane')}</div><div class="lbl">${esc(lbl)}</div></div>`,
       )
@@ -408,13 +414,14 @@ function trenesYTraslados(m: ModeloPropuesta): string {
   const hayTren = filas.some((t) => t.tipo === 'tren')
   const titulo = hayTren ? 'Trenes y traslados' : 'Traslados'
   const sub = m.tarifas.length > 0 && m.trayectos.igualEnTodas ? 'Iguales en todas las versiones.' : null
+  const conHora = filas.some((t) => t.hora)
   const cuerpo = filas.map((t) => {
     const dia = diaCorto(t.fecha) ?? t.fecha ?? ''
     const desc = t.tipo === 'tren' ? `<b>${esc(t.descripcion)}</b>` : esc(t.descripcion)
-    return `<tr><td>${esc(dia)}</td><td>${icono(t.tipo === 'tren' ? 'train' : 'van')} ${desc}</td><td>${esc(t.hora ?? '')}</td>${conColumna ? `<td>${etiquetasDe(t.tarifas, porIndice)}</td>` : ''}</tr>`
+    return `<tr><td>${esc(dia)}</td><td>${icono(t.tipo === 'tren' ? 'train' : 'van')} ${desc}</td>${conHora ? `<td>${esc(t.hora ?? '')}</td>` : ''}${conColumna ? `<td>${etiquetasDe(t.tarifas, porIndice)}</td>` : ''}</tr>`
   })
   return `<section class="sec">\n${encabezadoDeSeccion(hayTren ? 'train' : 'van', titulo, sub)}
-  <table class="nobr"><tr><th style="width:20mm">Día</th><th>Servicio</th><th style="width:18mm">Hora</th>${conColumna ? '<th>Versión</th>' : ''}</tr>
+  <table class="nobr"><tr><th style="width:20mm">Día</th><th>Servicio</th>${conHora ? '<th style="width:18mm">Hora</th>' : ''}${conColumna ? '<th>Versión</th>' : ''}</tr>
 ${cuerpo.join('\n')}
   </table>\n</section>`
 }
@@ -477,7 +484,7 @@ function eligeTuVersion(m: ModeloPropuesta): string {
       const f = g.filas[0]
       const vuelo = [f.aerolinea, f.numero].filter(Boolean).join(' ')
       const horas = f.salida || f.llegada ? ` · ${f.salida ?? '?'} → ${f.llegada ?? '?'}` : ''
-      const extra = [f.tarifaAerolinea, f.equipaje].filter(Boolean).join(' · ')
+      const extra = [f.tarifaAerolinea, f.equipaje, ...f.adicionales].filter(Boolean).join(' · ')
       return `<div class="row"><b>${esc(g.titulo.split(' · ')[0])}${f.fecha ? ` · ${esc(diaCorto(f.fecha) ?? '')}` : ''}</b>${esc(vuelo)}${f.escala ? ` · ${esc(f.escala)}` : ''}${esc(horas)}${extra ? `<br><span class="muted">${esc(extra)}</span>` : ''}</div>`
     })
     const hoteles = t.hoteles.length > 0
@@ -544,8 +551,8 @@ function incluyeYPagos(m: ModeloPropuesta): string {
   }
   const antes = m.formal.antesDeViajar.length > 0 ? `<h3 style="margin-top:5mm">Antes de viajar</h3>${lista(m.formal.antesDeViajar)}` : ''
   if (columnas.length === 0 && !plan && !antes) return ''
-  return `<section class="sec">\n${encabezadoDeSeccion('doc', plan ? 'Qué incluye y cuándo se paga' : 'Qué incluye', null)}
-  ${columnas.length > 0 ? `<div class="two">${columnas.join('\n')}</div>` : ''}
+  return `<section class="sec">\n<div class="nobr">${encabezadoDeSeccion('doc', plan ? 'Qué incluye y cuándo se paga' : 'Qué incluye', null)}
+  ${columnas.length > 0 ? `<div class="two">${columnas.join('\n')}</div>` : ''}</div>
   ${plan ? `<h3 style="margin-top:6mm">Cuánto pagan y cuándo</h3>${plan}` : ''}
   ${antes}\n</section>`
 }

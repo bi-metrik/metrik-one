@@ -308,14 +308,45 @@ export function lineasDelDocumento(
   })
 }
 
+const MARCA_DE_TREN = /\b(tren|trenes|ave|avlo|alvia|iryo|ouigo|renfe|tgv|inoui|sncf|eurostar|thalys|ice|italo|trenitalia|frecciarossa|railjet)\b/i
+const ESTACION = /\b(estaci[oó]n|gare|station|bahnhof|hbf|centraal|sants|atocha|termini)\b/i
+const NO_ES_ESTACION = /\b(hotel|aeropuerto|airport)\b/i
+
 /**
  * ¿Este traslado es un tren? No hay tipo «Tren» todavía (los trenes son traslados con su
  * trayecto leído, max.md §4): se reconoce por el trayecto. Un tipo propio es otro PR.
+ *
+ * Por la marca del tren (AVE, TGV, Eurostar…), o de estación a estación. Una estación en UN
+ * extremo no basta: «Hotel - estación Puerta de Atocha» es el traslado que lleva al tren (lo
+ * vio la prueba del documento del 2026-10-14, que contaba 9 trenes donde había 3).
  */
 export function esTren(descripcion: string): boolean {
-  return /\b(tren|trenes|ave|avlo|alvia|iryo|ouigo|renfe|tgv|inoui|sncf|eurostar|thalys|ice|italo|trenitalia|frecciarossa|railjet|estaci[oó]n|gare|station|bahnhof|centraal|sants|atocha|termini)\b/i.test(
-    descripcion,
-  )
+  if (MARCA_DE_TREN.test(descripcion)) return true
+  const trayecto = descripcion.split(' · ')[0]
+  if (NO_ES_ESTACION.test(trayecto)) return false
+  const extremos = trayecto.split(/\s+(?:-|→|–)\s+/)
+  return extremos.length === 2 && extremos.every((e) => ESTACION.test(e))
+}
+
+/**
+ * Sin la cancelación del proveedor, también cuando viene pegada a la descripción
+ * («… del Real Madrid. Cancelación: gratuita hasta 01/12/2026»). La propuesta no imprime
+ * políticas de cancelación (decisión del 2026-10-14).
+ */
+export function sinCancelacion(descripcion: string | null | undefined): string | null {
+  const base = sinCancelacionDelProveedor(descripcion)
+  if (!base) return null
+  const partes = base
+    .split(' · ')
+    .map((parte) =>
+      parte
+        .split(/(?<=\.)\s+/)
+        .filter((frase) => !/^\s*cancelaci[oó]n\b/i.test(frase))
+        .join(' ')
+        .trim(),
+    )
+    .filter(Boolean)
+  return partes.length === 0 ? null : partes.join(' · ')
 }
 
 function iso(f: Fecha | null): string | null {
@@ -536,7 +567,7 @@ export function modeloDePropuesta({
 
   const opcionales: OpcionalDoc[] = (props.sugeridos ?? []).map((o) => ({
     nombre: o.nombre,
-    descripcion: sinCancelacionDelProveedor(o.descripcion),
+    descripcion: sinCancelacion(o.descripcion),
     valor: Math.round((o.precio_venta || 0) * (o.cantidad ?? 1)),
     unidad: o.unidad ?? null,
   }))
