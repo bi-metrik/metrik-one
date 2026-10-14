@@ -1,13 +1,16 @@
 // ============================================================
 // Núcleo conversacional — el dominio de la bandeja de solicitudes (Trappvel primero)
 // ------------------------------------------------------------
-// Las dos lecturas (`buscar`, `ver_viaje`) y los cinco ejecutores de `proponer` (`viaje_nuevo`, `cargar_tanda`,
-// `anotar_en_viaje`, `crear_cliente`, `descartar`), con sus candados en código (§3.5):
+// Las dos lecturas (`buscar`, `ver_viaje`) y los seis ejecutores de `proponer` (`viaje_nuevo`, `cargar_tanda`,
+// `anotar_en_viaje`, `crear_cliente`, `descartar`, `perfil_contacto`), con sus candados en código (§3.5):
 //   · cliente nuevo: llave escrita en la conversación + guardián (llave de otro, parecidos por nombre); crear exige [Crear];
 //   · escribir solo en un viaje nombrado: su código está en un escrito del comercial, en una opción que él tocó, o es el
 //     viaje que se acaba de abrir con su toque;
 //   · lo reenviado es dato: un reenvío nunca nombra un viaje para escribir ni dicta el texto a anotar;
-//   · la búsqueda que falla dice «no pude revisar», nunca «no existe».
+//   · la búsqueda que falla dice «no pude revisar», nunca «no existe»;
+//   · el perfil del contacto (2026-10-12): sin autorización vigente no se guarda nada; lo sensible, los juicios y los
+//     nombres de menores (las marcas del modelo) no entran; lo explícito exige [Guardar] y lo que trae una carga entra
+//     como sugerido con el mismo toque.
 // La base la toca un `PuertoBandeja` (producción: `puerto-supabase.ts`; pruebas y arnés: `memoria.ts`).
 // ============================================================
 
@@ -16,7 +19,13 @@ import type { FichaCliente, Llave } from '../../wa-cliente-reglas.ts';
 import { normal } from '../verificador.ts';
 import { propuestaVigente } from '../nucleo.ts';
 import { escritosDelViaje, mismoEntendido, nombramientos } from './carga.ts';
+import { codigosCanonicos, resolverCodigo, resolverSueltos } from './codigo.ts';
 import { salidasLinkAutorizacion, type AutorizacionAgente } from './autorizacion.ts';
+import {
+  DIMENSIONES_PERFIL, ETIQUETA_DIMENSION, esquemaHecho, lineaHecho, planGuardado, separarHechos, textoComparable,
+} from '../../perfil-contacto.ts';
+import type { HechoExistente, HechoFuera, HechoPerfil, OrigenPerfil } from '../../perfil-contacto.ts';
+import type { PlanCarga } from './carga.ts';
 import type { ContextoDominio, DeclaracionHerramienta, Dominio, FilaConversacion, Hechos, Propuesta, ResultadoHerramienta } from '../tipos.ts';
 
 export interface ViajeAgente {
@@ -32,7 +41,12 @@ export interface ViajeAgente {
   enVuelo?: boolean;
   /** Lo que el viaje tiene, por etiqueta y legible (`registradoDe`): respalda «está registrada…». */
   registrado?: Record<string, string>;
+  /** El contacto del viaje (a su perfil va lo de la persona que traiga una carga). */
+  contactoId?: string | null;
 }
+
+/** Un hecho del perfil con la fila de la conversación de donde salió (`origen_ref`). */
+export type HechoConOrigen = HechoPerfil & { origenRef: string };
 
 /** Lo que devuelve `prepararCarga`: lo que cambiaría, lo que faltaría, la duda de la extracción y el plan del toque. */
 export interface CargaPreparada { entendido: string[]; falta: string[]; duda?: string; plan: unknown }
@@ -44,6 +58,11 @@ export interface PuertoBandeja {
   porLlave(llave: Llave): Promise<FichaCliente[] | null>;
   /** `null`: no hay viaje con ese código. `'error'`: no se pudo consultar. */
   viaje(codigo: string): Promise<ViajeAgente | null | 'error'>;
+  /**
+   * Cuáles de estos códigos (con espacios) existen en el workspace: resuelve un código escrito sin espacios («m1261»)
+   * contra los que hay, sin adivinar. `'error'`: no se pudo consultar.
+   */
+  codigosExistentes(candidatos: string[]): Promise<string[] | 'error'>;
   crearViaje(p: { contactoId: string; destino: string | null }): Promise<{ id: string; codigo: string; nombre: string }>;
   /**
    * La extracción de hoy, sin escribir: lo que cambiaría y lo que faltaría. `plan` es lo que se escribe con el toque.
@@ -58,11 +77,22 @@ export interface PuertoBandeja {
    * no se pudo revisar. No escribe nada en el contacto: a lo sumo crea el enlace pendiente.
    */
   autorizacion(contactoId: string): Promise<AutorizacionAgente | 'error'>;
+  /**
+   * ¿El contacto tiene la autorización de datos VIGENTE (`vigente.generales` de `autorizacion_datos_estado`, la misma regla
+   * del gate)? Solo lee: no crea enlaces. `'error'`: no se pudo revisar.
+   */
+  autorizado(contactoId: string): Promise<boolean | 'error'>;
+  /** Lo que el perfil del contacto ya tiene (todos los estados). `'error'`: no se pudo revisar. */
+  perfilDe(contactoId: string): Promise<HechoExistente[] | 'error'>;
+  /**
+   * Escribe en el perfil (`planGuardado` contra lo que ya tiene): `confirmado` inserta o confirma el sugerido igual;
+   * `sugerido` solo inserta lo nuevo (lo descartado no vuelve). Lanza si no pudo.
+   */
+  guardarPerfil(p: { contactoId: string; hechos: HechoConOrigen[]; estado: 'sugerido' | 'confirmado'; origenTipo: OrigenPerfil }): Promise<{ guardados: HechoConOrigen[]; yaEstaban: HechoConOrigen[] }>;
 }
 
 export const BOT_BANDEJA = 'bandeja-solicitudes';
-export const ACCIONES = ['viaje_nuevo', 'cargar_tanda', 'anotar_en_viaje', 'crear_cliente', 'descartar'];
-const RE_CODIGO = /\b[A-ZÑ]\d{0,2} \d{2} \d{1,4}\b/gu;
+export const ACCIONES = ['viaje_nuevo', 'cargar_tanda', 'anotar_en_viaje', 'crear_cliente', 'descartar', 'perfil_contacto'];
 
 // ── Lo que dice la conversación ──────────────────────────────────────────────
 
@@ -98,9 +128,10 @@ export function opcionNombrada(opciones: ReadonlyArray<{ titulo: string; descrip
 /**
  * Los viajes que el comercial nombró: códigos en sus escritos o en lo que tocó, la opción que eligió escribiendo
  * (número o palabra propia de esa opción, en el mensaje que sigue a las opciones) y los que abrió con su toque.
+ * `sueltos`: los códigos que escribió sin espacios, ya resueltos contra la base (`resolverSueltos`).
  */
-export function viajesNombrados(filas: FilaConversacion[]): string[] {
-  return [...new Set(nombramientos(filas, opcionNombrada).map((x) => x.clave).filter((c) => !c.startsWith('nuevo:')))];
+export function viajesNombrados(filas: FilaConversacion[], sueltos: Record<string, string> = {}): string[] {
+  return [...new Set(nombramientos(filas, opcionNombrada, {}, sueltos).map((x) => x.clave).filter((c) => !c.startsWith('nuevo:')))];
 }
 
 /** ¿El texto está en un escrito del equipo? (para anotar: nada sale del modelo ni de un reenvío). */
@@ -131,6 +162,16 @@ export function filaDesde(filas: FilaConversacion[], desde: unknown): { id: stri
 function enLaConversacion(filas: FilaConversacion[], dato: string): boolean {
   const d = normal(dato).trim();
   return !!d && filas.filter(noBot).some((f) => normal(f.texto ?? '').includes(d));
+}
+
+/**
+ * La fila (la última) donde está escrita esta frase, entre las que cumplen `cual`: es el `origen_ref` de un hecho del
+ * perfil. Compara el texto sin tildes ni mayúsculas; no interpreta. Pura.
+ */
+export function filaDeLaFrase(filas: FilaConversacion[], frase: string, cual: (f: FilaConversacion) => boolean = noBot): string | null {
+  const t = textoComparable(frase);
+  if (!t) return null;
+  return [...filas].reverse().find((f) => cual(f) && textoComparable(f.texto ?? '').includes(t))?.id ?? null;
 }
 
 // ── Las fichas ───────────────────────────────────────────────────────────────
@@ -229,7 +270,18 @@ export const CIERRES: DeclaracionHerramienta[] = [
 ];
 
 const DATOS_PROPONER = {
-  cliente: { type: 'string', description: 'viaje_nuevo: la ref de la ficha tal como la devolvió buscar.' },
+  cliente: { type: 'string', description: 'viaje_nuevo / perfil_contacto: la ref de la ficha tal como la devolvió buscar.' },
+  hechos: {
+    type: 'array',
+    items: esquemaHecho(),
+    description: [
+      'perfil_contacto: lo que el comercial quiere que se recuerde de una PERSONA para atenderla mejor en sus próximos viajes,',
+      'sin un viaje de por medio («recuerda que a … le gusta …», «… siempre viaja con …»). Un elemento por hecho.',
+      `dimension: ${DIMENSIONES_PERFIL.map((d) => `${d} = ${ETIQUETA_DIMENSION[d]}`).join('; ')}.`,
+      'De los menores solo cuántos y de qué edades, sin nombres. Marca con clase lo que no es un dato: sensible (salud,',
+      'creencias, vida íntima) o juicio (una opinión sobre la persona); el sistema no los guarda y te dice qué contestar.',
+    ].join(' '),
+  },
   destino: { type: 'string', description: 'viaje_nuevo: el destino, si lo dijeron.' },
   desde: { type: 'integer', description: 'viaje_nuevo: el número (#n) del mensaje del comercial donde empezó a pedir este viaje, si fue antes de este turno. El sistema lee desde ahí lo que dijo del viaje.' },
   viaje: { type: 'string', description: 'cargar_tanda / anotar_en_viaje: el código del viaje.' },
@@ -238,6 +290,29 @@ const DATOS_PROPONER = {
   llave: { type: 'string', description: 'crear_cliente: el celular, correo o usuario tal como lo escribieron.' },
   distinto_de_parecidos: { type: 'boolean', description: 'crear_cliente: true solo si ya mostraste los parecidos y el comercial dijo que es otra persona.' },
 };
+
+// ── El perfil ────────────────────────────────────────────────────────────────
+
+/**
+ * Lo que no va al perfil, dicho en una línea por motivo (va en el resumen o es lo que el modelo contesta). Lo sensible va
+ * en un viaje, como requisito especial, si hay uno abierto (la casilla 2 del texto: «solo para mi viaje»); un juicio no se
+ * guarda en ningún lado. El motivo lo marcó el modelo; esto solo lo dice. Pura.
+ */
+export function lineasFuera(fuera: ReadonlyArray<HechoFuera>, ficha: Pick<FichaAgente, 'viajes_abiertos'>): string[] {
+  const out: string[] = [];
+  const citar = (fs: HechoFuera[]) => fs.map((f) => `«${f.texto}»`).join(', ');
+  const sensibles = fuera.filter((f) => f.motivo === 'sensible');
+  const juicios = fuera.filter((f) => f.motivo === 'juicio');
+  if (sensibles.length) {
+    const codigos = ficha.viajes_abiertos.map((v) => v.codigo).filter((c): c is string => !!c);
+    const donde = codigos.length
+      ? `va en el viaje, como requisito especial (${codigos.length === 1 ? codigos[0] : `tiene abiertos ${codigos.join(', ')}`}): dime y lo anoto ahí.`
+      : 'solo se anota en un viaje, como requisito especial, y no tiene viajes abiertos.';
+    out.push(`${citar(sensibles)} no va al perfil (es de salud o creencias): ${donde}`);
+  }
+  if (juicios.length) out.push(`${citar(juicios)} no lo guardo: es una opinión sobre la persona, no un dato.`);
+  return out;
+}
 
 // ── El dominio ───────────────────────────────────────────────────────────────
 
@@ -249,10 +324,13 @@ const DATOS_PROPONER = {
  */
 export function propuestaDeCarga(
   accion: 'cargar_tanda' | 'anotar_en_viaje',
-  v: { id: string; codigo: string; nombre: string },
+  v: { id: string; codigo: string; nombre: string; contactoId?: string | null; cliente?: string | null },
   prep: CargaPreparada,
   mensajes: string[],
 ): Propuesta {
+  // Lo de la persona (si la extracción lo separó) va al perfil del contacto del viaje con el mismo toque, como sugerido.
+  const perfil = (prep.plan as Partial<PlanCarga> | null)?.perfil ?? [];
+  const delContacto = perfil.length && v.contactoId ? { contactoId: v.contactoId, cliente: v.cliente ?? null } : {};
   const verbo = accion === 'cargar_tanda' ? `¿Cargo esto en ${v.codigo} · ${v.nombre}?` : `¿Lo anoto en ${v.codigo} · ${v.nombre}?`;
   const resumen = [
     ...(prep.duda ? [prep.duda] : []),
@@ -261,18 +339,20 @@ export function propuestaDeCarga(
     prep.falta.length ? `Para cotizar faltaría: ${prep.falta.join(', ')}.` : 'Con esto queda el mínimo para cotizar.',
   ].join('\n');
   return {
-    accion, sobre: v.codigo, datos: { viajeId: v.id, codigo: v.codigo, mensajes, plan: prep.plan, entendido: prep.entendido, ...(prep.duda ? { duda: prep.duda } : {}) }, resumen,
+    accion, sobre: v.codigo, datos: { viajeId: v.id, codigo: v.codigo, mensajes, plan: prep.plan, entendido: prep.entendido, ...(prep.duda ? { duda: prep.duda } : {}), ...delContacto }, resumen,
     si: accion === 'cargar_tanda' ? 'Cargar' : 'Anotar', no: 'No',
   };
 }
 
 export function dominioBandeja(puerto: PuertoBandeja): Dominio {
+  const existentes = (c: string[]) => puerto.codigosExistentes(c);
   const leer = async (nombre: string, args: Record<string, unknown>): Promise<ResultadoHerramienta> => {
     if (nombre === 'buscar') {
       const texto = String(args.texto ?? '').trim();
       if (!texto) return { ok: false, datos: null, error: 'Dime qué buscar: un nombre, un código, un celular o un correo.' };
       const llave = llavesDelTexto(texto);
-      const codigos = [...texto.toUpperCase().matchAll(RE_CODIGO)].map((m) => m[0]);
+      const sueltos = await resolverSueltos([texto], existentes);
+      const codigos = [...new Set([...codigosCanonicos(texto), ...Object.values(sueltos)])];
       const sinLlave = texto.replace(/[\w.+-]+@[\w.-]+/g, ' ').replace(/\+?\d[\d\s().-]{5,}\d/g, ' ').trim();
       const [porLlave, porNombre, viajes] = await Promise.all([
         llave ? puerto.porLlave(llave) : Promise.resolve([] as FichaCliente[]),
@@ -292,7 +372,9 @@ export function dominioBandeja(puerto: PuertoBandeja): Dominio {
       };
     }
     if (nombre === 'ver_viaje') {
-      const codigo = String(args.codigo ?? '').trim().toUpperCase().replace(/\s+/g, ' ');
+      const r = await codigoDe(args.codigo);
+      if (!r.ok) return r.error === 'lectura' ? { ok: false, datos: null, error: 'No pude revisar ese viaje ahora. No digas que no existe.' } : { ok: true, datos: { nota: r.error } };
+      const codigo = r.codigo;
       const v = await puerto.viaje(codigo);
       if (v === 'error') return { ok: false, datos: null, error: 'No pude revisar ese viaje ahora. No digas que no existe.' };
       if (!v) return { ok: true, datos: { nota: `No hay un viaje con el código ${codigo}.` } };
@@ -310,11 +392,26 @@ export function dominioBandeja(puerto: PuertoBandeja): Dominio {
     return { ok: false, datos: null, error: `No existe la herramienta «${nombre}».` };
   };
 
+  /** Los códigos que el equipo escribió sin espacios en la conversación, resueltos contra la base (sin sueltos, nada). */
+  const sueltosDe = (ctx: ContextoDominio) => resolverSueltos(ctx.conversacion.filter(delEquipo).map((f) => f.texto ?? ''), existentes);
+
+  /** El código que dio el modelo, con espacios: tal cual si ya los trae, o la única lectura que existe («m1261»). */
+  const codigoDe = async (dado: unknown): Promise<{ ok: true; codigo: string } | { ok: false; error: string }> => {
+    const texto = String(dado ?? '').trim();
+    const r = await resolverCodigo(texto, existentes);
+    if (r === 'error') return { ok: false, error: 'lectura' };
+    if (r && 'codigo' in r) return { ok: true, codigo: r.codigo };
+    if (r) return { ok: false, error: `«${texto}» puede ser ${r.varios.join(' o ')}. Pregúntale al comercial cuál, con opciones.` };
+    return { ok: true, codigo: texto.toUpperCase().replace(/\s+/g, ' ') };
+  };
+
   /** El viaje para escribir: nombrado en la conversación y abierto. */
   const viajeParaEscribir = async (ctx: ContextoDominio, codigoDado: unknown): Promise<{ ok: true; v: ViajeAgente } | { ok: false; error: string; candado: string }> => {
-    const codigo = String(codigoDado ?? '').trim().toUpperCase().replace(/\s+/g, ' ');
-    if (!codigo) return { ok: false, error: 'Falta el código del viaje.', candado: 'viaje_nombrado' };
-    if (!viajesNombrados(ctx.conversacion).includes(codigo)) {
+    if (!String(codigoDado ?? '').trim()) return { ok: false, error: 'Falta el código del viaje.', candado: 'viaje_nombrado' };
+    const [rc, sueltos] = await Promise.all([codigoDe(codigoDado), sueltosDe(ctx)]);
+    if (!rc.ok) return rc.error === 'lectura' ? { ok: false, error: 'No pude revisar ese viaje ahora.', candado: 'lectura_fallida' } : { ok: false, error: rc.error, candado: 'codigo_ambiguo' };
+    const codigo = rc.codigo;
+    if (!viajesNombrados(ctx.conversacion, sueltos).includes(codigo)) {
       return { ok: false, error: `El comercial no nombró ${codigo} en esta conversación. Pregúntale a qué viaje va (puedes mostrarle opciones) o propón un viaje nuevo.`, candado: 'viaje_nombrado' };
     }
     const v = await puerto.viaje(codigo);
@@ -322,6 +419,63 @@ export function dominioBandeja(puerto: PuertoBandeja): Dominio {
     if (!v) return { ok: false, error: `No hay un viaje con el código ${codigo}.`, candado: 'viaje_inexistente' };
     if (!v.abierto) return { ok: false, error: `${codigo} ya no está abierto.`, candado: 'viaje_cerrado' };
     return { ok: true, v };
+  };
+
+  /**
+   * `perfil_contacto`: lo que el comercial pide recordar de una persona. El modelo decide que es eso y marca cada hecho
+   * (dato, sensible, juicio, nombra a un menor); el código solo obedece las marcas y protege las invariantes:
+   *   · el contacto salió de `buscar` en esta conversación (es del workspace);
+   *   · la frase de cada hecho está en un escrito del equipo (no sale del modelo ni de un reenvío);
+   *   · sensible, juicio y nombres de menores no se guardan (y el modelo sabe qué contestar);
+   *   · sin autorización vigente no se propone nada (y se ofrece el link);
+   *   · no se escribe sin el toque de [Guardar] (el ejecutor vuelve a revisar la autorización).
+   */
+  const proponerPerfil = async (datos: Record<string, unknown>, ctx: ContextoDominio): Promise<Awaited<ReturnType<Dominio['proponer']>>> => {
+    const ref = String(datos.cliente ?? '').trim();
+    const ficha = resolverFicha(ctx, ref);
+    if (ficha === 'varias') return { ok: false, error: `Hay varias fichas que coinciden con «${ref}». Pregúntale al comercial cuál, con opciones, y usa la ref exacta.`, candado: 'cliente_ambiguo' };
+    if (!ficha) return { ok: false, error: 'Esa persona no salió de una búsqueda en esta conversación. Primero `buscar` y usa la ref de su ficha; si no existe, pregunta si la creas (crear_cliente, con su llave).', candado: 'cliente_sin_buscar' };
+    const nombre = ficha.ficha.nombre.toUpperCase();
+    const { guardables, fuera } = separarHechos(datos.hechos, ctx.conversacion.filter(delEquipo).map((f) => f.texto ?? ''));
+    const de = (m: HechoFuera['motivo']) => fuera.filter((f) => f.motivo === m);
+    if (de('nombra_menores').length) {
+      return { ok: false, error: `De los menores solo va el patrón (cuántos y de qué edades), sin nombres: vuelve a proponer sin el nombre (${de('nombra_menores').map((f) => `«${f.texto}»`).join(', ')}).`, candado: 'menor_con_nombre' };
+    }
+    const malos = [...de('sin_respaldo'), ...de('forma')];
+    if (malos.length) {
+      return { ok: false, error: `Cada hecho necesita su dimensión y la frase EXACTA que escribió el comercial (no un reenvío ni una frase tuya). Corrige: ${malos.map((f) => `«${f.texto}»${f.detalle ? ` (${f.detalle})` : ''}`).join(', ')}.`, candado: 'texto_sin_respaldo' };
+    }
+    const noVan = lineasFuera(fuera, ficha.ficha);
+    if (!guardables.length) {
+      if (!noVan.length) return { ok: false, error: 'No hay nada que guardar: pregúntale al comercial qué quiere que recuerde de la persona.', candado: 'perfil_vacio' };
+      return { ok: false, error: `No se guarda nada en el perfil de ${nombre}. Contesta con \`responder\`, en una o dos líneas, sin sermón: ${noVan.join(' ')}`, candado: 'perfil_no_guardable' };
+    }
+    const aut = await puerto.autorizado(ficha.id);
+    if (aut === 'error') return { ok: false, error: 'No pude revisar la autorización de datos ahora: no se guarda nada. Dilo así, sin inventar.', candado: 'lectura_fallida' };
+    if (!aut) {
+      return {
+        ok: false,
+        error: `Sin autorización de datos vigente no se guarda nada en el perfil. Contesta con \`responder\`, tal cual: «${nombre} todavía no autoriza el uso de sus datos; no lo guardo. ¿Te paso su link?», con las opciones «Sí, pásamelo» y «No». Si dice que sí, \`link_autorizacion\` con la ref de su ficha.`,
+        candado: 'sin_autorizacion',
+      };
+    }
+    const existentes = await puerto.perfilDe(ficha.id);
+    if (existentes === 'error') return { ok: false, error: 'No pude revisar el perfil ahora: no se guarda nada. Dilo así.', candado: 'lectura_fallida' };
+    const plan = planGuardado(guardables, existentes, 'confirmado');
+    const nuevos = [...plan.insertar, ...plan.confirmar.map((x) => x.hecho)];
+    if (!nuevos.length) {
+      return { ok: false, error: `Eso ya está en el perfil de ${nombre} (${plan.yaEstaban.map((h) => h.texto).join('; ')}). Dilo en una línea; no propongas guardarlo otra vez.`, candado: 'ya_en_perfil' };
+    }
+    const resumen = [
+      nuevos.length === 1 ? `Guardo en el perfil de ${nombre}: ${lineaHecho(nuevos[0])}` : `Guardo en el perfil de ${nombre}:`,
+      ...(nuevos.length > 1 ? nuevos.map((h) => `• ${lineaHecho(h)}`) : []),
+      ...(plan.yaEstaban.length ? [`Ya estaba: ${plan.yaEstaban.map((h) => h.texto).join('; ')}.`] : []),
+      ...noVan,
+    ].join('\n');
+    const hechos: HechoConOrigen[] = nuevos.map((h) => ({
+      dimension: h.dimension, texto: h.texto, frase: h.frase, origenRef: filaDeLaFrase(ctx.conversacion, h.frase, delEquipo) ?? 'wa_conversacion',
+    }));
+    return { ok: true, propuesta: { accion: 'perfil_contacto', datos: { contactoId: ficha.id, cliente: nombre, hechos }, resumen, si: 'Guardar', no: 'Corregir' } };
   };
 
   const proponer: Dominio['proponer'] = async (accion, datos, ctx) => {
@@ -353,7 +507,7 @@ export function dominioBandeja(puerto: PuertoBandeja): Dominio {
       }
       // anotar_en_viaje: lo que el comercial escribió de ESE viaje en la conversación, no solo el texto del modelo
       // (en vivo, «salen desde Bogotá» se anotaba sin la fecha ni los pasajeros dichos un mensaje antes).
-      let textos = escritosDelViaje(ctx.conversacion, r.v.codigo, opcionNombrada);
+      let textos = escritosDelViaje(ctx.conversacion, r.v.codigo, opcionNombrada, {}, await sueltosDe(ctx));
       if (!textos.length) {
         const texto = String(datos.texto ?? '').trim();
         if (!texto || !enEscritoDelEquipo(ctx.conversacion, texto)) {
@@ -405,6 +559,7 @@ export function dominioBandeja(puerto: PuertoBandeja): Dominio {
       const dato = llave.celular ? `cel. …${llave.celular.slice(-4)}` : llave.correo ? llave.correo : `@${llave.usuario}`;
       return { ok: true, propuesta: { accion, datos: { nombre, llave }, resumen: `¿Creo este cliente?\n${titulo(nombre)} · ${dato}`, si: 'Crear', no: 'No es nuevo' } };
     }
+    if (accion === 'perfil_contacto') return proponerPerfil(datos, ctx);
     if (accion === 'descartar') {
       const t = tanda(ctx.conversacion);
       if (!t.length) return { ok: false, error: 'No hay nada reenviado pendiente para descartar.', candado: 'tanda_vacia' };
@@ -413,7 +568,29 @@ export function dominioBandeja(puerto: PuertoBandeja): Dominio {
     return { ok: false, error: `Acción desconocida: ${accion}.`, candado: 'accion_desconocida' };
   };
 
-  const ejecutar = async (p: Propuesta, _ctx: ContextoDominio): Promise<Hechos> => {
+  const perfilDeLaCarga = async (p: Propuesta, ctx: ContextoDominio): Promise<{ lineas: string[]; escrituras: Array<Record<string, unknown>> }> => {
+    const d = p.datos;
+    const perfil = (d.plan as Partial<PlanCarga> | null)?.perfil ?? [];
+    const contactoId = typeof d.contactoId === 'string' ? d.contactoId : null;
+    if (!perfil.length || !contactoId) return { lineas: [], escrituras: [] };
+    const quien = typeof d.cliente === 'string' && d.cliente ? d.cliente : 'el cliente';
+    try {
+      const aut = await puerto.autorizado(contactoId);
+      if (aut === 'error') return { lineas: ['No pude revisar la autorización de datos: lo de la persona no lo guardé en su perfil.'], escrituras: [] };
+      if (!aut) return { lineas: [`Lo de la persona no lo guardé en su perfil: ${quien} todavía no autoriza el uso de sus datos.`], escrituras: [] };
+      const hechos: HechoConOrigen[] = perfil.map((h) => ({ ...h, origenRef: filaDeLaFrase(ctx.conversacion, h.frase) ?? `negocio:${String(d.viajeId)}` }));
+      const r = await puerto.guardarPerfil({ contactoId, hechos, estado: 'sugerido', origenTipo: 'bot_conversacion' });
+      return {
+        lineas: r.guardados.length ? [`Dejé en el perfil de ${quien}, por confirmar en ONE: ${r.guardados.map((h) => h.texto).join('; ')}.`] : [],
+        escrituras: r.guardados.map((h) => ({ tipo: 'perfil', contactoId, estado: 'sugerido', dimension: h.dimension, texto: h.texto })),
+      };
+    } catch (err) {
+      console.error('[agente] perfil de la carga:', err);
+      return { lineas: ['Lo de la persona no alcancé a guardarlo en su perfil; lo del viaje sí quedó.'], escrituras: [] };
+    }
+  };
+
+  const ejecutar = async (p: Propuesta, ctx: ContextoDominio): Promise<Hechos> => {
     const d = p.datos;
     if (p.accion === 'viaje_nuevo') {
       const v = await puerto.crearViaje({ contactoId: String(d.contactoId), destino: (d.destino as string | null) ?? null });
@@ -431,10 +608,29 @@ export function dominioBandeja(puerto: PuertoBandeja): Dominio {
     }
     if (p.accion === 'cargar_tanda' || p.accion === 'anotar_en_viaje') {
       const r = await puerto.cargar(String(d.viajeId), d.plan);
+      // Lo de la persona va a su perfil como SUGERIDO con este mismo toque (no cuenta hasta que alguien lo confirme en ONE),
+      // y solo con la autorización vigente. Si falla, lo del viaje ya quedó: se dice y no se deshace.
+      const perfil = await perfilDeLaCarga(p, ctx);
       return {
-        lineas: r.lineas,
+        lineas: [...r.lineas, ...perfil.lineas],
         consumidos: (d.mensajes as string[] | undefined) ?? [],
-        escrituras: [{ tipo: p.accion === 'cargar_tanda' ? 'carga' : 'anotacion', viajeId: d.viajeId, codigo: d.codigo, mensajes: d.mensajes ?? [], ...(r.escritos ? { escritos: r.escritos } : {}) }],
+        escrituras: [
+          { tipo: p.accion === 'cargar_tanda' ? 'carga' : 'anotacion', viajeId: d.viajeId, codigo: d.codigo, mensajes: d.mensajes ?? [], ...(r.escritos ? { escritos: r.escritos } : {}) },
+          ...perfil.escrituras,
+        ],
+      };
+    }
+    if (p.accion === 'perfil_contacto') {
+      const contactoId = String(d.contactoId);
+      // Se vuelve a revisar al tocar: entre la propuesta y el toque la autorización pudo caerse.
+      if ((await puerto.autorizado(contactoId)) !== true) throw new Error('sin autorización de datos vigente: no se guardó nada');
+      const r = await puerto.guardarPerfil({ contactoId, hechos: (d.hechos as HechoConOrigen[]) ?? [], estado: 'confirmado', origenTipo: 'bot_explicito' });
+      return {
+        lineas: [
+          ...(r.guardados.length ? [`Guardé en el perfil de ${d.cliente}: ${r.guardados.map((h) => h.texto).join('; ')}.`] : []),
+          ...(r.yaEstaban.length ? [`Ya estaba en su perfil: ${r.yaEstaban.map((h) => h.texto).join('; ')}.`] : []),
+        ],
+        escrituras: r.guardados.map((h) => ({ tipo: 'perfil', contactoId, estado: 'confirmado', dimension: h.dimension, texto: h.texto })),
       };
     }
     if (p.accion === 'crear_cliente') {
@@ -462,7 +658,7 @@ export function dominioBandeja(puerto: PuertoBandeja): Dominio {
     if (p.accion !== 'viaje_nuevo') return null;
     const v = h.escrituras?.find((x) => x.tipo === 'viaje') as { id: string; codigo: string; nombre?: string } | undefined;
     if (!v) return null;
-    const textos = escritosDelViaje(ctx.conversacion, v.codigo, opcionNombrada, { [`nuevo:${huella}`]: v.codigo });
+    const textos = escritosDelViaje(ctx.conversacion, v.codigo, opcionNombrada, { [`nuevo:${huella}`]: v.codigo }, await sueltosDe(ctx));
     if (!textos.length) return null;
     const abri = h.lineas[0];
     let prep: CargaPreparada;
@@ -472,7 +668,8 @@ export function dominioBandeja(puerto: PuertoBandeja): Dominio {
       return { lineas: [abri, 'No alcancé a leer lo que me escribiste de este viaje: dime «anótalo» y lo vuelvo a leer.'] };
     }
     if (!prep.entendido.length) return prep.duda ? { lineas: [abri, prep.duda] } : null;
-    return { lineas: [abri], propuesta: propuestaDeCarga('anotar_en_viaje', { id: v.id, codigo: v.codigo, nombre: v.nombre ?? '' }, prep, []) };
+    const delContacto = { contactoId: (p.datos.contactoId as string | undefined) ?? null, cliente: (p.datos.cliente as string | undefined) ?? null };
+    return { lineas: [abri], propuesta: propuestaDeCarga('anotar_en_viaje', { id: v.id, codigo: v.codigo, nombre: v.nombre ?? '', ...delContacto }, prep, []) };
   };
 
   const cerrar: NonNullable<Dominio['cerrar']> = async (nombre, args, ctx) => {
@@ -508,9 +705,9 @@ export function dominioBandeja(puerto: PuertoBandeja): Dominio {
       const ahora = tanda(ctx.conversacion).map((f) => f.id).join(',');
       return ahora === ((p.datos.mensajes as string[] | undefined) ?? []).join(',');
     },
-    estado(ctx) {
+    async estado(ctx) {
       const t = tanda(ctx.conversacion);
-      const nombrados = viajesNombrados(ctx.conversacion);
+      const nombrados = viajesNombrados(ctx.conversacion, await sueltosDe(ctx));
       return [
         `Tanda abierta: ${t.length ? `${t.length} mensaje${t.length === 1 ? '' : 's'} reenviado${t.length === 1 ? '' : 's'} sin cargar` : 'ninguna'}.`,
         `Viajes nombrados en esta conversación: ${nombrados.length ? nombrados.join(', ') : 'ninguno'}.`,

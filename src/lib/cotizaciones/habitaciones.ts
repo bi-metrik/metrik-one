@@ -273,6 +273,27 @@ export function repartirHabitaciones(
       const elegida = (conPar.length > 0 ? conPar : candidatas)[(conPar.length > 0 ? conPar : candidatas).length - 1]
       elegida.rol = 'referencia'
     }
+    // H14 (prueba Europa, 2026-10-14) · las capturas de la RESTA. Con el grupo 2A+1N+1I ya
+    // cubierto por una habitación, «2 adultos + 1 niño» entraba como habitación 2 y sumaba: el
+    // hotel se cobraba dos veces. Mientras lo cubierto pase del grupo, la captura cuya ocupación
+    // CABE en la de otra habitación (misma o menos gente de cada tipo, y no la misma) es de
+    // referencia: no suma. La última que llegó primero. Un toque de una persona manda.
+    const contenida = (a: Composicion, b: Composicion) =>
+      a.adultos <= b.adultos && a.ninos <= b.ninos && a.infantes <= b.infantes
+      && totalPasajeros(a) < totalPasajeros(b)
+    // Solo cuenta si quitarla baja lo que SOBRA: con un niño de más (un infante leído como niño),
+    // una habitación de solo adultos no es la sobrante.
+    const sobranEn = (): (keyof Composicion)[] => {
+      const s = cubren()
+      return (['adultos', 'ninos', 'infantes'] as const).filter(t => s[t] > grupo[t])
+    }
+    for (let tipos = sobranEn(); tipos.length > 0; tipos = sobranEn()) {
+      const candidatas = filas.filter(f => !f.manual && f.rol === 'habitacion' && f.ocupacion
+        && tipos.some(t => f.ocupacion![t] > 0)
+        && filas.some(b => b !== f && b.rol === 'habitacion' && b.ocupacion && contenida(f.ocupacion!, b.ocupacion)))
+      if (candidatas.length === 0) break
+      candidatas[candidatas.length - 1].rol = 'referencia'
+    }
   }
 
   let n = 0

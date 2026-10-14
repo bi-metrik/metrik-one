@@ -119,6 +119,8 @@ export function modeloGemini(o: OpcionesGemini): Modelo {
         return solo.ok ? { ok: true, mensaje: solo.mensaje, usos: [solo.uso] } : { ok: false, motivo: solo.motivo, usos: [solo.uso] };
       }
       const respaldo = o.respaldo;
+      // El respaldo puede llevar declaraciones más estrictas (sin `texto` en `proponer`: ver `declaracionesRespaldo`).
+      const pr: PedidoModelo = p.herramientasRespaldo ? { ...p, herramientas: p.herramientasRespaldo } : p;
       const cancelarPrincipal = new AbortController();
       const principal = intentar(p, o.principal, p.timeoutMs, o, cancelarPrincipal.signal);
       const corte = espera(Math.min(o.corteMs, p.timeoutMs));
@@ -128,7 +130,7 @@ export function modeloGemini(o: OpcionesGemini): Modelo {
       if (antes) {
         // Falló antes del corte (429, 5xx, red): al respaldo con lo que quede, como siempre.
         if (resta() < 300) return { ok: false, motivo: antes.motivo, usos: [antes.uso] };
-        const r = await intentar(p, respaldo, resta(), o);
+        const r = await intentar(pr, respaldo, resta(), o);
         return r.ok
           ? { ok: true, mensaje: r.mensaje, usos: [antes.uso, r.uso] }
           : { ok: false, motivo: `${antes.motivo}; respaldo: ${r.motivo}`, usos: [antes.uso, r.uso] };
@@ -140,7 +142,7 @@ export function modeloGemini(o: OpcionesGemini): Modelo {
         return p1.ok ? { ok: true, mensaje: p1.mensaje, usos: [p1.uso] } : { ok: false, motivo: p1.motivo, usos: [p1.uso] };
       }
       const cancelarRespaldo = new AbortController();
-      const segundo = intentar(p, respaldo, resta(), o, cancelarRespaldo.signal);
+      const segundo = intentar(pr, respaldo, resta(), o, cancelarRespaldo.signal);
       const ganador = await new Promise<'principal' | 'respaldo' | null>((resolver) => {
         let pendientes = 2;
         const fin = (quien: 'principal' | 'respaldo') => (r: Intento) => {

@@ -61,6 +61,8 @@ export interface PedidoModelo {
   sistema: string;
   mensajes: Mensaje[];
   herramientas: DeclaracionHerramienta[];
+  /** Las declaraciones para el modelo de respaldo, si son otras (más estrictas). Sin esto, las mismas. */
+  herramientasRespaldo?: DeclaracionHerramienta[];
   /** Las que puede llamar en este llamado (modo ANY): en el último llamado, solo las que cierran el turno. */
   permitidas: string[];
   /** Tope duro de este llamado (lo que queda del turno). */
@@ -218,7 +220,7 @@ export interface Dominio {
   /** ¿La propuesta sigue sirviendo? (la tanda no cambió desde que se armó). Ausente = sí. */
   sigueVigente?(propuesta: Propuesta, ctx: ContextoDominio): boolean;
   /** Una línea del estado que solo el dominio sabe (la tanda abierta). */
-  estado?(ctx: ContextoDominio): string[];
+  estado?(ctx: ContextoDominio): string[] | Promise<string[]>;
   /**
    * Herramientas del dominio que CIERRAN el turno con una salida que escribe el código, no el modelo (`link_autorizacion`:
    * el link real y el mensaje para reenviar tal cual). Pueden ser varios mensajes: el primero va como respuesta y los

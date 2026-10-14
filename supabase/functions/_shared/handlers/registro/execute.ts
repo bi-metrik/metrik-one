@@ -10,6 +10,7 @@ import { downloadAndStoreImage } from '../../wa-media.ts';
 import { registrarMapeoAutomaticoWA } from '../../centro-costos.ts';
 import { BOTONES_SOPORTE, MSG_SOPORTE } from './soporte-foto.ts';
 import { descripcionParaGuardar, descripcionVisible, detalleGasto } from '../../wa-gasto-descripcion.ts';
+import { aplicarReglasTrasRegistrar } from './servicio-viaje.ts';
 
 export async function executeRegistro(ctx: HandlerContext): Promise<void> {
   const { session, supabase } = ctx;
@@ -56,12 +57,22 @@ async function executeW01(ctx: HandlerContext): Promise<boolean> {
 
   if (c.negocio_id) {
     insertData.negocio_id = c.negocio_id;
+    // Pago a un proveedor del viaje (F3): atado a su fila, con medio y el titular del medio.
+    if (c.servicio_id && c.medio_pago && c.titular_medio) {
+      insertData.servicio_id = c.servicio_id;
+      insertData.medio_pago = c.medio_pago;
+      insertData.titular_medio = c.titular_medio;
+      insertData.categoria = 'proveedor_viaje';
+      insertData.centro_costos = 'directa_negocio';
+      insertData.origen_asignacion = 'sugerido';
+      if (!detalle) insertData.descripcion = `Pago · ${c.servicio_nombre ?? 'servicio del viaje'}`;
+    }
   } else if (c.proyecto_id) {
     insertData.proyecto_id = c.proyecto_id;
   }
 
   // Centro de costos (si el handler lo persistió en session.context)
-  if (c.centro_costos) {
+  if (c.centro_costos && !c.servicio_id) {
     insertData.centro_costos = c.centro_costos;
   }
   if (c.origen_asignacion) {
@@ -81,7 +92,10 @@ async function executeW01(ctx: HandlerContext): Promise<boolean> {
   }
 
   let msg: string;
-  if (c.destino_tipo === 'empresa') {
+  if (c.servicio_id && gasto?.id) {
+    // Mismas reglas que la pantalla: si rompe una, queda esperando a Edgar (nunca «Pagado»).
+    msg = await aplicarReglasTrasRegistrar(ctx, gasto.id);
+  } else if (c.destino_tipo === 'empresa') {
     msg = `✅ Gasto empresa: ${formatCOP(c.amount!)} — ${CATEGORIA_LABELS[c.categoria || 'otros'] || c.categoria}`;
   } else if (c.proyecto_id) {
     const { data: project } = await supabase

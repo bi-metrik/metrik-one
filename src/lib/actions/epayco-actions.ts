@@ -293,13 +293,20 @@ async function registrarPagoEpaycoSinClave(
     // ── 3. Crear cobro (idempotente via external_ref) ──────────────────────
     const { data: existingCobro } = await db(supabase)
       .from('cobros')
-      .select('id')
+      .select('id, fecha')
       .eq('workspace_id', workspaceId)
       .eq('negocio_id', negocioId)
       .eq('external_ref', String(desgloseFinal.ref_payco))
       .limit(1)
 
-    let cobroId: string | null = ((existingCobro ?? [])[0] as { id: string } | undefined)?.id ?? null
+    const cobroPrevio = (existingCobro ?? [])[0] as { id: string; fecha: string | null } | undefined
+    let cobroId: string | null = cobroPrevio?.id ?? null
+    // La fecha del pago en ePayco (dia civil de Bogota), o null si el crudo no se lee.
+    const fechaPago = fechaTransaccionBogota(desgloseFinal.fecha)
+    // La que queda en `pagos[].fecha` es la MISMA del cobro (SOE-013): si el cobro ya
+    // existia, la suya; si no, la que se le pone abajo. Antes era el dia del registro y
+    // el bloque «Pagos» quedaba un dia corrido contra el cobro (V0136, ref 386159602).
+    const fechaDelCobro = cobroPrevio?.fecha ?? fechaPago ?? todayBogotaISO()
     if (!cobroId) {
       // La fecha del cobro es la del PAGO en ePayco, no la del registro en ONE
       // (decision de Mauricio, 2026-08-18). `v_venta_mes_comercial.fecha_venta`
@@ -310,7 +317,6 @@ async function registrarPagoEpaycoSinClave(
       // Si el crudo de ePayco no se puede leer NO se inventa la fecha: se cae en
       // el dia de registro, que es lo unico cierto, y queda dicho en la nota. Un
       // fallback mudo repondria el defecto sin que nadie lo vea.
-      const fechaPago = fechaTransaccionBogota(desgloseFinal.fecha)
       const notaBase = tipoCobro === 'anticipo' ? 'Anticipo' : 'Pago'
       const cobro = {
         workspace_id: workspaceId,
@@ -320,7 +326,7 @@ async function registrarPagoEpaycoSinClave(
           : `${notaBase} — fecha de registro: ePayco no devolvio una fecha legible para la ref ${desgloseFinal.ref_payco}`,
         monto: desgloseFinal.monto_bruto,
         tipo_cobro: tipoCobro,
-        fecha: fechaPago ?? todayBogotaISO(),
+        fecha: fechaDelCobro,
         external_ref: String(desgloseFinal.ref_payco),
       }
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -416,7 +422,8 @@ async function registrarPagoEpaycoSinClave(
       total_descuentos: desgloseFinal.total_descuentos,
       monto_neto: desgloseFinal.monto_neto,
       tipo_cobro: tipoCobro,
-      fecha: todayBogotaISO(),
+      // Fecha del PAGO (la del cobro), no la del registro en ONE. Ver SOE-013 arriba.
+      fecha: fechaDelCobro,
     }
     const updatedPagos = [...currentPagos, newPago]
     const updatedData = { ...currentData, pagos: updatedPagos }

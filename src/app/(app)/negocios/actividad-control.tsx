@@ -110,6 +110,7 @@ export function ModoYDia({
   ocupado,
   onModo,
   onDia,
+  sinModo = false,
 }: {
   estado: EstadoActividad
   dia: number | null
@@ -119,6 +120,8 @@ export function ModoYDia({
   ocupado: boolean
   onModo: (modo: 'incluida' | 'opcional') => void
   onDia: (dia: number | null) => void
+  /** La cotización por pasos: Incluida u Opcional se escoge en el servicio; aquí solo el día. */
+  sinModo?: boolean
 }) {
   if (estado === 'no_va') {
     return <p className="m-0 text-xs font-semibold text-[#6E6A62]" data-actividad-no-va>{TEXTO_ACTIVIDAD_NO_VA}</p>
@@ -139,11 +142,13 @@ export function ModoYDia({
   )
   return (
     <div className="flex flex-col gap-1.5" data-actividad-modo={estado}>
-      <span className="flex flex-wrap items-center gap-1.5" role="group" aria-label="¿Cómo va en la cotización?">
-        {boton('incluida', 'Incluida en el precio')}
-        {boton('opcional', 'Opcional, el cliente decide')}
-      </span>
-      {estado === 'opcional' && (
+      {!sinModo && (
+        <span className="flex flex-wrap items-center gap-1.5" role="group" aria-label="¿Cómo va en la cotización?">
+          {boton('incluida', 'Incluida en el precio')}
+          {boton('opcional', 'Opcional, el cliente decide')}
+        </span>
+      )}
+      {estado === 'opcional' && !sinModo && (
         <span className="text-xs text-[#6E6A62]" data-actividad-opcional>
           No suma al total{precioPorPersona ? ` · ${precioPorPersona} por persona` : ''}. Sale en «Opcionales» del PDF.
         </span>

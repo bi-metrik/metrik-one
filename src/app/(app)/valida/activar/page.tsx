@@ -1,6 +1,7 @@
 import { redirect } from 'next/navigation'
 import { getWorkspace } from '@/lib/actions/get-workspace'
 import { createServiceClient } from '@/lib/supabase/server'
+import { enlaceActivarPlan } from '@/lib/valida/corte-bolsa'
 import { activacionAbierta } from '@/lib/valida-registro/activacion'
 import { esEspacioAutogestion, parametrosDelPlan } from '@/lib/valida-registro/plan'
 import { nitLegible } from '@/lib/valida-registro/terminos-plan'
@@ -56,7 +57,7 @@ export default async function ActivarPlanPage() {
         <p>Así sigue: 1. activas el plan; 2. lees y aceptas los Términos de tu empresa; 3. pagas el primer mes en línea.</p>
       </section>
 
-      <ActivarClient abierta={activacionAbierta()} />
+      <ActivarClient abierta={activacionAbierta()} whatsapp={enlaceActivarPlan(empresa.razon_social)} />
     </main>
   )
 }

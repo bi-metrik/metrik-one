@@ -47,7 +47,13 @@ export type ResultadoDuplicado =
  */
 export async function duplicarCotizacionCompleta(
   supabase: Supabase,
-  args: { workspaceId: string; cotizacionId: string; negocioId?: string | null },
+  args: {
+    workspaceId: string
+    cotizacionId: string
+    negocioId?: string | null
+    /** Por qué existe la versión nueva (F1-3, seguimiento). Sin él, la copia queda sin origen. */
+    origenVersion?: string | null
+  },
 ): Promise<ResultadoDuplicado> {
   const { data: original, error: errOrig } = await supabase
     .from('cotizaciones')
@@ -87,12 +93,15 @@ export async function duplicarCotizacionCompleta(
 
   const { data: nueva, error: errIns } = await supabase
     .from('cotizaciones')
-    .insert(cotizacionParaLaCopia(orig, {
-      workspaceId: args.workspaceId,
-      consecutivo,
-      descripcion,
-      originalId: args.cotizacionId,
-    }))
+    .insert({
+      ...cotizacionParaLaCopia(orig, {
+        workspaceId: args.workspaceId,
+        consecutivo,
+        descripcion,
+        originalId: args.cotizacionId,
+      }),
+      ...(args.origenVersion ? { origen_version: args.origenVersion } : {}),
+    })
     .select('id')
     .single()
   if (errIns || !nueva) return { ok: false, error: errIns?.message ?? 'No se pudo crear la copia' }

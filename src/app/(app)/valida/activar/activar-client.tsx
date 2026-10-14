@@ -7,7 +7,7 @@ import { activarPlan } from './acciones'
  * El botón «Activar plan» con la subida opcional del RUT. Una columna, botón de ancho completo, la
  * subida abre la cámara en el celular (§2.1 «Mobile»).
  */
-export default function ActivarClient({ abierta }: { abierta: boolean }) {
+export default function ActivarClient({ abierta, whatsapp }: { abierta: boolean; whatsapp: string }) {
   const [error, setError] = useState('')
   const [pendiente, iniciar] = useTransition()
 
@@ -23,7 +23,11 @@ export default function ActivarClient({ abierta }: { abierta: boolean }) {
   if (!abierta) {
     return (
       <p className="rounded-lg border border-border bg-white p-4 text-sm text-tinta-suave">
-        La activación en línea abre pronto. Mientras tanto, escríbenos a{' '}
+        La activación en línea abre pronto. Mientras tanto,{' '}
+        <a className="underline" href={whatsapp} target="_blank" rel="noopener noreferrer">
+          escríbenos por WhatsApp
+        </a>{' '}
+        o a{' '}
         <a className="underline" href="mailto:mauricio.moreno@metrik.com.co">
           mauricio.moreno@metrik.com.co
         </a>{' '}

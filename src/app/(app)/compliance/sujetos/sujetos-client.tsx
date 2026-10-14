@@ -424,17 +424,22 @@ function Detalle({
             <div className="text-xs text-[#9CA3AF] mt-1">
               Según el último aviso recibido, del {sujeto.vinculacion.actualizado_en.slice(0, 10)}.
             </div>
-            <Link
-              href="/compliance/vinculacion"
-              className="inline-block mt-2 text-xs text-tinta underline"
-            >
-              Abrir el expediente en la bandeja
-            </Link>
+            {/* La bandeja es solo de la oficial (owner/admin): a otro rol el
+                enlace lo mandaba de vuelta al inicio sin explicación. */}
+            {esOficial && (
+              <Link
+                href="/compliance/vinculacion"
+                className="inline-block mt-2 text-xs text-tinta underline"
+              >
+                Abrir el expediente en la bandeja
+              </Link>
+            )}
           </>
         ) : (
           <div className="text-xs text-tinta-suave mt-1">
-            No hay expediente de vinculación para este documento. Invítalo desde la bandeja de
-            vinculación para que llene el formulario y firme.
+            {esOficial
+              ? 'No hay expediente de vinculación para este documento. Invítalo desde la bandeja de vinculación para que llene el formulario y firme.'
+              : 'No hay expediente de vinculación para este documento. La oficial de cumplimiento lo invita desde la bandeja de vinculación.'}
           </div>
         )}
       </div>

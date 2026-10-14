@@ -63,10 +63,11 @@ npx supabase gen types typescript --project-id yfjqscvvxetobiidnepa > src/types/
 # IMPORTANTE: Despues de gen types, re-agregar los ~26 type aliases al final de database.ts
 # (Gasto, Proyecto, Oportunidad, Profile, Workspace, etc.)
 
-# Migraciones
+# Migraciones: el archivo se crea con
 npx supabase migration new nombre_migracion
-npx supabase db push
 ```
+
+**Migraciones a produccion:** NUNCA `supabase db push` ni `migration repair` contra produccion. El ledger (`supabase_migrations.schema_migrations`) es derivado: `db push` re-aplicaria cientos de migraciones, incluidos cargues de datos de clientes. Se aplican por SQL (MCP `execute_sql`/`apply_migration` o PostgREST), revisando el ledger antes, y luego se inserta a mano la fila `(version, name)` con el timestamp del archivo.
 
 ## Multi-Tenancy
 

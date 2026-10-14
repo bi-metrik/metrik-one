@@ -216,7 +216,8 @@ function comoLectura(l: unknown): ItemConLectura {
   return { ...x, grupo: x.grupo ?? null }
 }
 
-const RANGO_TIPO: Record<TipoRanura, number> = { vuelo: 0, hotel: 1, traslado: 2, actividad: 3 }
+// «Otro servicio» (asistencia médica, seguro) va al final del viaje, antes de las líneas sueltas.
+const RANGO_TIPO: Record<TipoRanura, number> = { vuelo: 0, hotel: 1, traslado: 2, actividad: 3, otro: 4 }
 
 /** «2026-11-09 06:05» del primer tramo de ida, para ordenar. `--MM-DD` va después de lo fechado. */
 function claveDeSalida(item: ItemConLectura): string | null {
@@ -287,14 +288,24 @@ export const NOMBRE_TIPO_BLOQUE: Record<TipoRanura | 'otro', string> = {
 export { equipajeDeTramo }
 
 /**
+ * La ruta de la IDA de un vuelo: de dónde sale, a dónde llega AL FINAL y qué día sale (H9, prueba
+ * Europa del 2026-10-14). El `destino` de la lectura es la llegada final de la ida (así lo pide la
+ * ranura), así que una escala no lo cambia: BOG→CDG→MAD llega a Madrid.
+ */
+export function rutaDeVueloDeOpcion(item: ItemConLectura): { origen: string | null; destino: string | null; fecha: string | null } {
+  const ida = tramosDelItem(item).tramos.find(t => t.sentido === 'ida')
+  return { origen: ida?.origen ?? null, destino: ida?.destino ?? null, fecha: ida?.fecha ?? null }
+}
+
+/**
  * Dónde queda una opción, para agrupar capturas en la bandeja (P7): la ruta de la ida en un
  * vuelo, la ciudad en un hotel. `null` en lo que la lectura no dejó.
  */
 export function lugarDeOpcion(item: ItemConLectura): { lugar: string | null; origen: string | null; destino: string | null } {
   const ranura = ranuraDelItem(item)
   if (ranura?.slug === 'vuelo_detalle') {
-    const ida = tramosDelItem(item).tramos.find(t => t.sentido === 'ida')
-    return { lugar: null, origen: ida?.origen ?? null, destino: ida?.destino ?? null }
+    const { origen, destino } = rutaDeVueloDeOpcion(item)
+    return { lugar: null, origen, destino }
   }
   if (ranura?.slug === 'hotel_detalle') {
     const [h] = hotelesDeItems([item])

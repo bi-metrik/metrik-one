@@ -21,6 +21,9 @@ import { duplicarCotizacionCompleta } from '@/lib/cotizaciones/duplicar-cotizaci
 import { terminosInicialesDeCotizacion } from '@/lib/cotizaciones/terminos-al-crear'
 import { recalcularTotales } from '@/app/(app)/negocios/cotizacion-actions'
 import { createServiceClient } from '@/lib/supabase/server'
+import { deshacerEnvioDescargado, registrarEnvioCotizacion } from '@/lib/negocios/seguimiento-datos'
+import { esOrigenVersion } from '@/lib/negocios/seguimiento'
+import { generarServiciosDesdeTarifa, soltarServiciosDeAceptacion } from '@/lib/viaje/servicios-viaje-datos'
 
 export async function getCotizacionesNegocio(negocioId: string) {
   const { supabase, error } = await getWorkspace()
@@ -135,6 +138,10 @@ export async function enviarCotizacionNegocio(cotizacionId: string, negocioId: s
     .eq('id', cotizacionId)
 
   if (updErr) return { success: false as const, error: updErr.message }
+
+  // Seguimiento (F1-1): con la línea encendida, el envío deja fecha, versión y canal, y de ahí
+  // cuelgan los toques. Apagada no escribe nada (este camino nunca llenó `fecha_envio`).
+  await registrarEnvioCotizacion(supabase, { workspaceId, negocioId, cotizacionId, staffId: staffId ?? null, canal: 'enviar' })
 
   revalidatePath(`/negocios/${negocioId}`)
   return { success: true as const }
@@ -353,6 +360,23 @@ export async function aceptarCotizacionNegocio(
     }, 'aceptarCotizacionNegocio')
   }
 
+  // Aprobar desde borrador se salta el envío: con el seguimiento encendido, cuenta como envío
+  // para el embudo (F1-1). Si ya había fecha de envío, no la toca.
+  if (estadoCot === 'borrador') {
+    await registrarEnvioCotizacion(supabase, { workspaceId, negocioId, cotizacionId, staffId: staffId ?? null, canal: 'aprobada' })
+  }
+  // Servicios del viaje (F0): una fila por ítem de la tarifa aceptada, solo con
+  // `servicios_viaje.activo` en la línea. Va AL FINAL y no deshace nada si falla (F0-4): la
+  // aceptación ya quedó, y las filas se traen después desde el bloque con el mismo cálculo.
+  // Con el interruptor apagado no lee la cotización ni escribe nada (F0-7).
+  const servicios = await generarServiciosDesdeTarifa(supabase, {
+    workspaceId,
+    negocioId,
+    cotizacionId,
+    staffId: staffId ?? null,
+  })
+  if (!servicios.ok) console.error('[aceptarCotizacionNegocio] no se crearon los servicios del viaje:', servicios.error)
+
   revalidatePath(`/negocios/${negocioId}`)
   return { success: true as const }
 }
@@ -494,6 +518,12 @@ export async function corregirCotizacionAceptada(cotizacionId: string, negocioId
     recaudoConfirmado,
   })
   if (!validacion.valid) return { success: false as const, error: validacion.error ?? 'No se puede corregir' }
+
+  // Servicios del viaje (F0-5): los que salieron de esta aceptación y no tienen pagos se
+  // borran; si alguno ya tiene un pago a proveedor, no se corrige nada y se duplica. Va ANTES
+  // de tocar la cotización para que el rechazo no deje la corrección a medias.
+  const soltados = await soltarServiciosDeAceptacion(supabase, { workspaceId, negocioId })
+  if (!soltados.ok) return { success: false as const, error: soltados.error }
 
   const ahora = new Date().toISOString()
 
@@ -640,11 +670,17 @@ export async function eliminarCotizacionBorrador(cotizacionId: string, negocioId
  * La copia nace en `borrador` y vuelve a medir: se recalcula aquí mismo, así que su total
  * y su margen salen de lo que se copió, no de lo que la original tenía guardado.
  */
-export async function duplicarCotizacionNegocio(cotizacionId: string, negocioId: string) {
+export async function duplicarCotizacionNegocio(cotizacionId: string, negocioId: string, origen?: string | null) {
   const { supabase, workspaceId, error } = await getWorkspace()
   if (error || !workspaceId) return { success: false as const, error: 'No autenticado' }
 
-  const res = await duplicarCotizacionCompleta(supabase, { workspaceId, cotizacionId, negocioId })
+  // Origen de la versión nueva (F1-3). La prerreserva vencida la escribe el sistema (C9), no
+  // este botón.
+  if (origen != null && (!esOrigenVersion(origen) || origen === 'prerreserva_vencida')) {
+    return { success: false as const, error: 'Escoge de dónde sale la versión nueva.' }
+  }
+
+  const res = await duplicarCotizacionCompleta(supabase, { workspaceId, cotizacionId, negocioId, origenVersion: origen ?? null })
   if (!res.ok) return { success: false as const, error: res.error }
 
   // Una cotización rápida no tiene líneas: su total es el que traía, y recalcular lo
@@ -653,4 +689,25 @@ export async function duplicarCotizacionNegocio(cotizacionId: string, negocioId:
 
   revalidatePath(`/negocios/${negocioId}`)
   return { success: true as const, id: res.id }
+}
+
+/**
+ * «No lo envié» (Vera C3.2): la descarga del PDF ya no cuenta como envío. Solo en borrador y
+ * dentro de los 2 minutos siguientes (el toast da 8 s).
+ */
+export async function deshacerEnvioPorDescarga(cotizacionId: string) {
+  const { supabase, workspaceId, staffId, error } = await getWorkspace()
+  if (error || !workspaceId) return { success: false as const, error: 'No autenticado' }
+  const { data: cot } = await supabase
+    .from('cotizaciones')
+    .select('negocio_id')
+    .eq('id', cotizacionId)
+    .eq('workspace_id', workspaceId)
+    .maybeSingle()
+  const negocioId = (cot as { negocio_id: string | null } | null)?.negocio_id
+  if (!negocioId) return { success: false as const, error: 'Cotización no encontrada' }
+  const r = await deshacerEnvioDescargado(supabase, { workspaceId, negocioId, cotizacionId, staffId: staffId ?? null })
+  if (!r.ok) return { success: false as const, error: r.error ?? 'No se pudo deshacer' }
+  revalidatePath(`/negocios/${negocioId}`)
+  return { success: true as const }
 }

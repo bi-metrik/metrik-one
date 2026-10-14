@@ -20,6 +20,7 @@
 import type { SupabaseClient } from '@supabase/supabase-js'
 import { getWorkspace } from '@/lib/actions/get-workspace'
 import { traerTodo } from '@/lib/supabase/paginar'
+import { negociosDePruebaOcultos, sinOcultos } from '@/lib/negocios/negocios-de-prueba'
 import { bogotaYearMonth, todayBogotaISO } from '@/lib/dates/bogota'
 import {
   armarBandejas,
@@ -58,14 +59,14 @@ interface NegocioRow {
 const num = (v: number | string | null | undefined) => (v == null ? null : Number(v))
 
 export async function getBandejasOperativas(): Promise<BandejasData | null> {
-  const { supabase, workspaceId, error } = await getWorkspace()
+  const { supabase, workspaceId, staffId, error } = await getWorkspace()
   if (error || !workspaceId || !supabase) return null
   const db = supabase as unknown as SupabaseClient
   const ws = workspaceId
   const hoy = todayBogotaISO()
   const mesInicio = `${bogotaYearMonth()}-01`
 
-  const [negociosRaw, actividad, carteraR, cuotas, gastosR, pylR, cobrosMes, cambiosEtapa, perdidosLog] = await Promise.all([
+  const [negociosTodos, actividad, carteraR, cuotasTodas, gastosR, pylR, cobrosMes, cambiosEtapa, perdidosLog, ocultosPrueba] = await Promise.all([
     traerTodo<NegocioRow>(
       (desde, hasta) =>
         db
@@ -110,7 +111,7 @@ export async function getBandejasOperativas(): Promise<BandejasData | null> {
     ),
     db
       .from('gastos')
-      .select('id, fecha, monto, descripcion, categoria')
+      .select('id, fecha, monto, descripcion, categoria, negocio_id')
       .eq('workspace_id', ws)
       .eq('soporte_pendiente', true),
     db
@@ -122,7 +123,7 @@ export async function getBandejasOperativas(): Promise<BandejasData | null> {
     // Respaldo del cobrado cuando la vista no tiene fila del mes, igual que /numeros.
     db
       .from('cobros')
-      .select('monto')
+      .select('monto, negocio_id')
       .eq('workspace_id', ws)
       .gte('fecha', mesInicio)
       .lte('fecha', hoy)
@@ -154,7 +155,11 @@ export async function getBandejasOperativas(): Promise<BandejasData | null> {
           .range(desde, hasta),
       { etiqueta: 'perdidos registrados' },
     ),
+    // El viaje de prueba (F8-1) no entra a las bandejas de quien no lo lleva ni lo aprueba.
+    negociosDePruebaOcultos(db, ws, staffId ?? null),
   ])
+  const negociosRaw = sinOcultos(negociosTodos, ocultosPrueba, (n) => n.id)
+  const cuotas = sinOcultos(cuotasTodas, ocultosPrueba, (c) => c.negocio_id)
   lanzar('cartera', carteraR.error)
   lanzar('gastos', gastosR.error)
   lanzar('cobros del mes', cobrosMes.error)
@@ -204,36 +209,38 @@ export async function getBandejasOperativas(): Promise<BandejasData | null> {
   const pyl = pylR.data as { ingresos_con_iva: number | string | null } | null
   const cobradoMes = pyl?.ingresos_con_iva != null
     ? Number(pyl.ingresos_con_iva)
-    : ((cobrosMes.data ?? []) as { monto: number | string }[]).reduce((s, c) => s + Number(c.monto), 0)
+    : sinOcultos((cobrosMes.data ?? []) as { monto: number | string; negocio_id: string | null }[], ocultosPrueba, (c) => c.negocio_id)
+        .reduce((s, c) => s + Number(c.monto), 0)
 
   return {
     hoy,
     bandejas: armarBandejas(
       {
         negocios,
-        cartera: (carteraR.data ?? []) as FilaCarteraBandeja[],
+        cartera: sinOcultos((carteraR.data ?? []) as FilaCarteraBandeja[], ocultosPrueba, (c) => (c as { negocio_id?: unknown }).negocio_id),
         cuotasPendientes: cuotas.map((c) => ({
           negocioId: c.negocio_id,
           monto: Number(c.monto),
           fechaEsperada: c.fecha_esperada,
         })),
-        gastosSinSoporte: ((gastosR.data ?? []) as {
+        gastosSinSoporte: sinOcultos((gastosR.data ?? []) as {
           id: string
           fecha: string
           monto: number | string
           descripcion: string | null
           categoria: string | null
-        }[]).map((g) => ({ ...g, monto: Number(g.monto) })),
+          negocio_id: string | null
+        }[], ocultosPrueba, (g) => g.negocio_id).map(({ negocio_id: _n, ...g }) => ({ ...g, monto: Number(g.monto) })),
         cobradoMes,
         historial: {
           etapas: listaEtapas.map((e) => ({ id: e.id, lineaId: e.linea_id, nombre: e.nombre ?? '', stage: e.stage })),
-          cambios: cambiosEtapa.map((c) => ({
+          cambios: sinOcultos(cambiosEtapa, ocultosPrueba, (c) => c.entidad_id).map((c) => ({
             negocioId: c.entidad_id,
             anterior: c.valor_anterior,
             nuevo: c.valor_nuevo,
             fecha: c.created_at,
           })),
-          perdidosRegistrados: perdidosLog.map((p) => p.entidad_id),
+          perdidosRegistrados: sinOcultos(perdidosLog, ocultosPrueba, (p) => p.entidad_id).map((p) => p.entidad_id),
         },
       },
       hoy,

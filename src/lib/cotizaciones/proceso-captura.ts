@@ -86,7 +86,7 @@ export type Deteccion =
 
 export type LecturaDeBorrador =
   | { ok: true; lectura: LecturaCasilla; lecturaJson: string; firma: string; alertas: string[] }
-  | { ok: false; mensaje: string; detalle?: string; opciones?: OpcionDeLectura[]; reintentar?: boolean }
+  | { ok: false; mensaje: string; detalle?: string; opciones?: OpcionDeLectura[]; reintentar?: boolean; codigo?: string }
 
 /** Cómo entra una captura a Componentes: habitación de una opción, otra opción o ranura nueva. */
 export type ComoQueda = 'habitacion' | 'hermana' | 'nueva'
@@ -145,6 +145,9 @@ function lecturaCaida(e: unknown): LecturaDeBorrador & { ok: false } {
 export const MENSAJE_SIN_DETECCION = 'ONE no alcanzó a reconocer qué es. Dinos qué es y lo lee.'
 const DETECCION_CAIDA = MENSAJE_SIN_DETECCION
 
+/** Lo que dice la fila cuando la lectura dice que la captura es de OTRO tipo (RX4). */
+export const MENSAJE_OTRO_TIPO = 'No parece lo que ONE creyó. Dinos qué es y lo vuelve a leer.'
+
 /** Informa solo si la pasada sigue vigente. */
 function si(deps: DependenciasDeProceso, cambio: CambioDeCaptura) {
   if (deps.vigente()) deps.informar(cambio)
@@ -172,6 +175,13 @@ export async function leerCaptura(
   if (!lectura.ok) {
     if (!enfoque && (lectura.opciones ?? []).length > 0) {
       deps.informar({ estado: { fase: 'eligiendo_opcion', mensaje: lectura.mensaje, opciones: lectura.opciones ?? [] }, abierta: true })
+      return
+    }
+    // H19 (prueba Europa, 2026-10-14) · «no es un vuelo»: el AVE Madrid→Barcelona se detectó
+    // como vuelo, la lectura lo rechazó y la fila quedaba sin salida. Que no sea lo que se creyó
+    // no es un callejón: se pregunta qué es, con los mismos botones que una captura sin detectar.
+    if (lectura.codigo === 'RX4') {
+      deps.informar({ estado: { fase: 'eligiendo_tipo', motivo: `${MENSAJE_OTRO_TIPO} ${lectura.detalle ?? ''}`.trim() }, leida: null, borrador: null, abierta: true })
       return
     }
     deps.informar({

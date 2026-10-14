@@ -49,7 +49,18 @@ const nextConfig: NextConfig = {
   },
   outputFileTracingIncludes: {
     '/**/*': ['./src/lib/pdf/templates/**/*'],
+    // Motor Chromium (ensayo del PR 0 de la propuesta de Trappvel). El binario comprimido de
+    // @sparticuz/chromium (~67 MB) se lee por ruta en tiempo de ejecucion y el trazado no lo
+    // ve solo; va acotado a esta ruta, nunca a '/**/*'. Las fuentes y el fixture, igual.
+    '/api/interno/ensayo-chromium': [
+      './node_modules/@sparticuz/chromium/bin/**/*',
+      './src/lib/pdf/chromium/fuentes/**/*',
+      './src/lib/pdf/chromium/ensayo/**/*',
+    ],
   },
+  // Se cargan con require de Node, no por el bundler: @sparticuz/chromium ubica su binario
+  // relativo a su propio paquete y puppeteer-core trae dependencias opcionales nativas.
+  serverExternalPackages: ['@sparticuz/chromium', 'puppeteer-core'],
 }
 
 export default nextConfig

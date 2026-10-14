@@ -177,6 +177,18 @@ describe('el formulario', () => {
     expect(bloque).not.toContain('checked')
   })
 
+  it('H20 · traslado: pregunta la moneda del proveedor (COP, EUR, USD), con COP marcado, en las dos formas', () => {
+    for (const porPasos of [false, true]) {
+      const html = renderToStaticMarkup(React.createElement(IngresoManualForm, {
+        composicion: { adultos: 2, ninos: 0, infantes: 0 }, onEnviar: async () => ({ ok: true as const }), onCerrar: () => {}, tipoInicial: 'traslado', porPasos,
+      }))
+      const bloque = html.match(/data-campo-manual="moneda"[\s\S]*?<\/div>/)?.[0] ?? ''
+      expect(texto(bloque), String(porPasos)).toContain('Moneda del proveedor')
+      for (const m of ['COP', 'EUR', 'USD']) expect(texto(bloque)).toContain(m)
+      expect(bloque.match(/checked/g)?.length).toBe(1)
+    }
+  })
+
   it('no pide cancelación: esa es la condición del proveedor y el cliente no la ve', () => {
     expect(texto(pintar())).not.toMatch(/Cancelaci/)
   })

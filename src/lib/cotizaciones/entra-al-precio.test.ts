@@ -16,6 +16,7 @@ import { describe, it, expect } from 'vitest'
 import {
   avisoSugeridosQueCobran,
   fueraDelPrecio,
+  puedeSerSugerido,
   itemsSugeridos,
   sugeridosVisibles,
   type ItemConPrecio,
@@ -41,8 +42,11 @@ describe('la regla: fuera del precio exige las tres condiciones a la vez', () =>
     expect(fueraDelPrecio({ ...tour, dia_relativo: 2, entra_al_precio: false })).toBe(true)
   })
 
-  it('⚠️ un hotel marcado fuera se IGNORA: nunca se imprime como no incluido', () => {
-    expect(fueraDelPrecio({ id: 'h', grupo: 'alojamiento', entra_al_precio: false })).toBe(false)
+  it('un hotel marcado fuera SÍ sale del precio («No va» de la cotización por pasos, 2026-10-12), pero nunca se imprime como no incluido', () => {
+    // Hasta el 2026-10-12 se ignoraba. Ninguna acción lo escribía (los guards lo rechazaban);
+    // desde C3 lo escribe solo «No va» de la forma nueva, igual que el vuelo.
+    expect(fueraDelPrecio({ id: 'h', grupo: 'alojamiento', entra_al_precio: false })).toBe(true)
+    expect(puedeSerSugerido({ id: 'h', grupo: 'alojamiento', entra_al_precio: false })).toBe(false)
   })
 
   it('un vuelo marcado fuera SÍ sale del precio: es su check «Va en la cotización» (brief del 2026-10-08)', () => {

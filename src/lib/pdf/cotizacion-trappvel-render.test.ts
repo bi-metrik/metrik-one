@@ -24,6 +24,8 @@ import { textoParaElViaje, type DocumentoCliente } from '@/lib/cotizaciones/docu
 import { fotosDelViaje } from './fotos-del-viaje'
 import { fotosDeCiudad } from './fotos-ciudad'
 import { TERMINOS_BASE_TRAPPVEL } from '@/lib/cotizaciones/__fixtures__/terminos-base-trappvel'
+import { asiPuedesPagar } from '@/lib/viaje/asi-puedes-pagar'
+import { REGLA_POR_DEFECTO } from '@/lib/viaje/plan-pagos'
 
 const VUELO = {
   linea: 'AVIANCA CUCUTA-ARMENIA',
@@ -293,6 +295,14 @@ describe('el documento del cliente', () => {
     expect(t).toContain('LLEGADA VUELO')
     expect(t).toContain('AV9459')
     expect(t).toContain('AV9460')
+  })
+
+  it('N9 · una pastilla por vuelo: el regreso de la misma aerolínea va sin nombre; uno de código compartido lleva el suyo', async () => {
+    const mismo = await texto(props({ viaje: viaje({ vuelos: [{ ...VUELO, numeroVuelo: 'AV9459 AV9460' }] }) }))
+    expect(mismo.match(/Avianca/g)).toHaveLength(1)
+    const compartido = await texto(props({ viaje: viaje({ vuelos: [{ ...VUELO, numeroVuelo: 'AV9459 LA4521' }] }) }))
+    expect(compartido.match(/Avianca/g)).toHaveLength(1)
+    expect(compartido).toMatch(/LA\s*LATAM/)
   })
 
   it('un viaje de solo ida no imprime una fila de regreso vacía', async () => {
@@ -855,8 +865,11 @@ describe('COT-2026-0006: San Andrés - Providencia', () => {
     expect(t).not.toMatch(/23 NOV Bogotá San Andrés Isla Avianca/)
     // ⚠️ El renderizador parte la corrida después del dígito del día («28  nov»): se busca
     // con `\s+`. Tabla de vuelos: las dos filas de Avianca, cada una con su fecha y su número.
+    // Una pastilla por vuelo (regla del 2026-10-12): la aerolínea va en la primera fila y el
+    // regreso, de la misma aerolínea, va sin pastilla ni nombre.
     expect(t).toMatch(/Avianca Bogotá San Andrés Isla Vuelo directo 23\s+nov 2026 9782/)
-    expect(t).toMatch(/Avianca San Andrés Isla Bogotá Vuelo directo 28\s+nov 2026 9779/)
+    expect(t).toMatch(/9782 San Andrés Isla Bogotá Vuelo directo 28\s+nov 2026 9779/)
+    expect(t.match(/Avianca/g)).toHaveLength(1)
   })
 
   it('1b · con un día que no es vuelo, el «Día a día» vuelve y cada vuelo va en su día', async () => {
@@ -1420,5 +1433,41 @@ describe('toda foto de hotel que cargó el asesor sale en el PDF (2026-10-08)', 
     for (const n of NOMBRES) expect(t).toContain(n)
     // En «normal» la línea de una alternativa junta nombre, régimen y habitación.
     expect(t).toContain('Hotel Centro Economico · Todo incluido · Standard Double')
+  })
+})
+
+describe('«Así puedes pagar» (F2-1, PR 7)', () => {
+  const pesosPdf = (v: number) =>
+    new Intl.NumberFormat('es-CO', { style: 'currency', currency: 'COP', maximumFractionDigits: 0 }).format(v)
+  const plano = (t: string) => t.replace(/\s+/g, ' ')
+  const entrada = { fechaSalida: '2026-12-19', hoy: '2026-10-12', regla: REGLA_POR_DEFECTO }
+
+  it('sin la entrada (línea sin plan_pagos.activo) el documento no cambia', async () => {
+    const sin = await texto(props())
+    expect(sin).not.toContain('Así puedes pagar')
+    expect(await texto(props({ asiPuedesPagar: null }))).toBe(sin)
+  })
+
+  it('con fecha: las filas que imprime suman el TOTAL que imprime', async () => {
+    const p = props({ asiPuedesPagar: entrada })
+    const total = 1_294_351 + 3_780_884
+    const t = plano(await texto(p))
+    expect(t).toContain('Así puedes pagar')
+    expect(t).toContain(plano(pesosPdf(total)))
+    const plan = asiPuedesPagar(total, entrada)
+    expect(plan.filas).toHaveLength(3)
+    for (const f of plan.filas!) {
+      expect(t).toContain(plano(pesosPdf(f.monto)))
+      expect(t).toContain(f.cuando)
+    }
+    expect(plan.filas!.reduce((a, f) => a + f.monto, 0)).toBe(total)
+    expect(t).toContain('con esto llevas el 80 %')
+    expect(t).toContain('Puedes repartirlo en más cuotas: lo acordamos contigo.')
+  })
+
+  it('sin fecha de salida: la regla en palabras y ningún monto', async () => {
+    const t = plano(await texto(props({ asiPuedesPagar: { ...entrada, fechaSalida: null } })))
+    expect(t).toContain('El 80 % quince días antes de salir y el resto el día del viaje.')
+    expect(t).not.toContain('al confirmar (anticipo)')
   })
 })
