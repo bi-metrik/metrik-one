@@ -50,7 +50,7 @@ import {
   usaMotorHtml,
 } from '@/lib/pdf/plantillas-cotizacion'
 import type { ServicioDelDocumento } from '@/lib/cotizaciones/propuesta/modelo-documento'
-import { serviciosDelDocumento } from '@/lib/cotizaciones/propuesta/servicios-del-documento'
+import { lugaresDeOpcionales, serviciosDelDocumento, type LugarDeOpcional } from '@/lib/cotizaciones/propuesta/servicios-del-documento'
 import { leerAnticipo } from '@/lib/cotizaciones/propuesta/anticipo'
 import { whatsappDesdeTelefono } from '@/lib/contactos/telefono'
 import { avisoDelTextoEnPdf, avisoDelTextoViejoEnPdf, leerDocumentoCliente, textoParaElViaje } from '@/lib/cotizaciones/documento-cliente'
@@ -250,7 +250,17 @@ async function registrarDecisionesDeLaSalida(
   }
 }
 
-export async function generateCotizacionPDF(cotizacionId: string) {
+export async function generateCotizacionPDF(
+  cotizacionId: string,
+  /**
+   * H4 (verificación D, D7) · `vistaPrevia`: el mismo documento, con las mismas props y el mismo
+   * motor, para MOSTRARLO en «Revisar y enviar». No escribe nada: ni la pérdida de la autorización
+   * del dueño, ni el almacenamiento, ni Drive, ni el registro de la salida. Sin la opción, todo como
+   * siempre.
+   */
+  opciones?: { vistaPrevia?: boolean },
+) {
+  const vistaPrevia = opciones?.vistaPrevia === true
   const { supabase, workspaceId, staffId, error } = await getWorkspace()
   if (error || !workspaceId) return { success: false, error: 'No autenticado' }
 
@@ -272,7 +282,7 @@ export async function generateCotizacionPDF(cotizacionId: string) {
     workspaceId,
     cotizacionId,
     staffId: staffId ?? null,
-    registrarPerdida: true,
+    registrarPerdida: !vistaPrevia,
   })
   // El borrador se decide más abajo, cuando se sabe si el IVA se pudo calcular.
   const salidaBloquea = salida?.aplica === true && salida.bloquea
@@ -754,6 +764,8 @@ export async function generateCotizacionPDF(cotizacionId: string) {
 
       const buffer = renderizado
       const filename = `${cot.codigo ?? cot.consecutivo}.pdf`
+      // Vista previa: el documento, sin guardarlo ni registrarlo.
+      if (vistaPrevia) return { success: true, pdf: buffer.toString('base64'), filename, fiscal, vistaPrevia: true as const, renderedVia: 'weasyprint' as const }
 
       // Almacenamiento externo: el PDF va al proyecto del cliente y Drive ni se intenta.
       const externo = await guardarPdfEnAlmacenamientoExterno(workspaceId, negocioInfo?.id ?? null, filename, buffer)
@@ -1065,11 +1077,13 @@ export async function generateCotizacionPDF(cotizacionId: string) {
     const item = conDiaPorId.get(id)
     return item !== undefined && fueraDelPrecio(item)
   })
+  // Las líneas de los sugeridos, en el orden en que salen: el motor `html` les busca la ciudad.
+  const itemsSugeridosPDF = idsSugeridosVisibles
+    .map(id => porId.get(id))
+    .filter((i): i is ItemRow => i !== undefined)
   const sugeridosPDF = idsSugeridosVisibles.length === 0
     ? null
-    : idsSugeridosVisibles
-        .map(id => porId.get(id))
-        .filter((i): i is ItemRow => i !== undefined)
+    : itemsSugeridosPDF
         // Con IVA incluido como el resto del documento: el precio de una actividad
         // opcional es lo que el cliente pagaría si la toma.
         .map(conIva)
@@ -1106,6 +1120,8 @@ export async function generateCotizacionPDF(cotizacionId: string) {
   let viajePDF: CotizacionPDFProps['viaje'] = null
   // Motor `html`: los traslados, trenes y actividades que @react-pdf no recibe (pendiente del PR 1).
   let serviciosDoc: ServicioDelDocumento[] = []
+  // Motor `html`: la ciudad y el día de cada plan opcional, para ponerlo en los días libres.
+  let lugaresOpcionalesDoc: LugarDeOpcional[] = []
   // «Así puedes pagar» (F2, PR 7): solo con `plan_pagos.activo` en la línea del negocio.
   let entradaPlan: CotizacionPDFProps['asiPuedesPagar'] = null
   // Un borrador de ONE sin revisar no sale en el PDF; se avisa, sin bloquear la descarga.
@@ -1199,6 +1215,10 @@ export async function generateCotizacionPDF(cotizacionId: string) {
           dia_relativo: i.dia_relativo ?? null,
           ...(i.id && marcas.has(i.id) ? { tarifas: marcas.get(i.id) } : {}),
         })),
+        delNegocio.fechas.inicio,
+      )
+      lugaresOpcionalesDoc = lugaresDeOpcionales(
+        itemsSugeridosPDF.map(i => ({ ...paraLecturaDe(i), dia_relativo: i.dia_relativo ?? null })),
         delNegocio.fechas.inicio,
       )
     }
@@ -1338,6 +1358,7 @@ export async function generateCotizacionPDF(cotizacionId: string) {
       buffer = await propuestaConMotorHtml(supabase, {
         props: propsPDF,
         servicios: serviciosDoc,
+        lugaresDeOpcionales: lugaresOpcionalesDoc,
         documentoCliente: (cot as unknown as Record<string, unknown>).documento_cliente,
         staffId: staffId ?? null,
         workspaceId,
@@ -1381,6 +1402,8 @@ export async function generateCotizacionPDF(cotizacionId: string) {
 
   const base64 = Buffer.from(buffer).toString('base64')
   const filename = `${cot.consecutivo}.pdf`
+  // Vista previa: el documento, sin guardarlo ni registrarlo.
+  if (vistaPrevia) return { success: true, pdf: base64, filename, fiscal, vistaPrevia: true as const, renderedVia }
 
   // Este camino nunca guardó el PDF en ningún lado (solo lo devuelve para descargar), y
   // en un workspace en Drive sigue igual. Con almacenamiento externo queda además en el
@@ -1437,6 +1460,7 @@ async function propuestaConMotorHtml(
   e: {
     props: CotizacionPDFProps
     servicios: ServicioDelDocumento[]
+    lugaresDeOpcionales: LugarDeOpcional[]
     documentoCliente: unknown
     staffId: string | null
     workspaceId: string
@@ -1463,6 +1487,7 @@ async function propuestaConMotorHtml(
     {
       props: e.props,
       servicios: e.servicios,
+      lugaresDeOpcionales: e.lugaresDeOpcionales,
       anticipo: leerAnticipo(e.documentoCliente),
       asesora,
     },

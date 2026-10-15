@@ -23,6 +23,7 @@ import { conAnticipo, normalizarAnticipo } from '@/lib/cotizaciones/propuesta/an
 import { getServerKey } from '@/lib/server-keys'
 import { exigirPorPasos } from '@/lib/cotizaciones/por-pasos-datos'
 import { INCLUYE_POR_ONE } from '@/lib/cotizaciones/incluye-por-one'
+import { nombresDelViaje, parrafosViejos, type ZonaDeParrafo } from '@/lib/cotizaciones/parrafo-viejo'
 
 /**
  * C6 · «Incluye» armado por ONE: la forma por pasos pide guardar (o redactar) con la marca
@@ -72,12 +73,16 @@ function panelDe(
   motorHtml = false,
   anticipo = ctx.anticipo,
 ): PanelTextoCliente {
+  const desactualizado = textoDesactualizado(documento, ctx.huella)
+  // D5 · qué párrafo quedó viejo: solo un texto de la forma por pasos guarda los nombres.
+  const viejos = desactualizado && documento?.fuente_nombres ? parrafosViejos(documento, nombresDelViaje(ctx.viaje)) : null
   return {
     anticipo,
     imprimeAnticipo: motorHtml,
     columnaPresente: ctx.columnaPresente,
     documento,
-    desactualizado: textoDesactualizado(documento, ctx.huella),
+    desactualizado,
+    ...(viejos ? { parrafosViejos: viejos } : {}),
     hayViaje: hayViajeQueRedactar(ctx.viaje),
     editable: isEditable((ctx.estado ?? '') as EstadoCotizacion),
     terminos,
@@ -198,6 +203,8 @@ export async function redactarDocumentoCliente(
   const documento: DocumentoCliente = {
     ...redactado.texto,
     ...(m.marca || ctx.documento?.incluye_origen === INCLUYE_POR_ONE ? { incluye: [], incluye_origen: INCLUYE_POR_ONE } : {}),
+    // D5 · la forma por pasos guarda con qué servicios se escribió, para marcar el párrafo viejo.
+    ...(m.marca ? { fuente_nombres: nombresDelViaje(ctx.viaje) } : {}),
     origen: 'ia',
     modelo: redactado.modelo,
     redactado_en: new Date().toISOString(),
@@ -282,6 +289,8 @@ export async function guardarDocumentoCliente(
       // Lo que la persona decidió dejar, para que quede dicho; nunca se corrige solo.
       ...conAlertas(revisarEstilo(limpio)),
       ...(m.marca || ctx.documento?.incluye_origen === INCLUYE_POR_ONE ? { incluye_origen: INCLUYE_POR_ONE } : {}),
+      // D5 · los servicios con que se revisó (la forma por pasos).
+      ...(m.marca ? { fuente_nombres: nombresDelViaje(ctx.viaje) } : {}),
     }
   }
 
@@ -346,4 +355,35 @@ export async function guardarAnticipoPropuesta(cotizacionId: string, raw: unknow
 
   revalidar(ctx)
   return { success: true, panel: panelDe(ctx, ctx.documento, ctx.terminos, motorHtml, n.anticipo) }
+}
+
+/**
+ * H4 (verificación D, D5) · «Actualizar con ONE» de UN párrafo: ONE redacta con el viaje de ahora y
+ * devuelve SOLO ese párrafo (el titular, la presentación o «Antes de viajar»). No guarda nada: el
+ * panel lo pone en el formulario y la asesora lo lee y guarda, como todo (guardar es revisar).
+ *
+ * Solo la forma por pasos (`exigirPorPasos`).
+ */
+export async function actualizarParrafoConOne(
+  cotizacionId: string,
+  zona: ZonaDeParrafo,
+): Promise<{ success: true; zona: ZonaDeParrafo; texto: string | string[] } | Fallo> {
+  if (zona !== 'titular' && zona !== 'intro' && zona !== 'antes') return { success: false, error: 'Ese párrafo no se redacta con ONE.' }
+  const r = await contextoParaEscribir(cotizacionId)
+  if ('fallo' in r) return r.fallo as Fallo
+  const guard = await exigirPorPasos(r.supabase, cotizacionId)
+  if (!guard.ok) return { success: false, error: guard.error }
+  if (!hayViajeQueRedactar(r.ctx.viaje)) {
+    return { success: false, error: 'Todavía no hay viaje que describir: faltan el destino o las líneas (vuelos, hoteles, traslados).' }
+  }
+  const apiKey = getServerKey('gemini')
+  if (!apiKey) return { success: false, error: 'La redacción con ONE no está configurada en el servidor.' }
+  try {
+    const { texto } = await redactarTextoCliente(r.ctx.viaje, apiKey, { ejemplos: r.ctx.configLinea.ejemplos })
+    const nuevo = zona === 'titular' ? (texto.titular ?? '') : zona === 'intro' ? (texto.intro ?? '') : texto.antes_de_viajar
+    return { success: true, zona, texto: nuevo }
+  } catch (e) {
+    console.error('[actualizarParrafoConOne]', e)
+    return { success: false, error: 'ONE no pudo redactar ese párrafo esta vez. Inténtalo de nuevo.' }
+  }
 }

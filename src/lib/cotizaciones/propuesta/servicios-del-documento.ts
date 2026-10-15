@@ -12,7 +12,7 @@
  *
  * Puro.
  */
-import { fechaCorta, serviciosDeItems, type ItemConLectura } from '@/lib/cotizaciones/detalle-viaje'
+import { fechaCorta, lugarDelServicio, serviciosDeItems, type ItemConLectura } from '@/lib/cotizaciones/detalle-viaje'
 import { esFechaCivil, sumarDiasCivil } from '@/lib/viaje/plan-pagos'
 import type { ServicioDelDocumento } from './modelo-documento'
 
@@ -39,4 +39,25 @@ export function serviciosDelDocumento(items: readonly ItemDeServicio[], inicio: 
     }
   }
   return salida
+}
+
+/** Dónde y cuándo es un plan opcional: la ciudad leída y la fecha (el día asignado manda). */
+export interface LugarDeOpcional {
+  ciudad: string | null
+  fecha: string | null
+}
+
+/**
+ * Los lugares de los planes opcionales, en el MISMO orden que `props.sugeridos` (el modelo los
+ * empareja por posición). Igual que `serviciosDelDocumento`: el día asignado manda sobre la
+ * fecha leída. Puro.
+ */
+export function lugaresDeOpcionales(items: readonly ItemDeServicio[], inicio: string | null): LugarDeOpcional[] {
+  const inicioIso = inicio && esFechaCivil(inicio.slice(0, 10)) ? inicio.slice(0, 10) : null
+  return items.map((item) => {
+    const dia = typeof item.dia_relativo === 'number' && item.dia_relativo >= 1 ? item.dia_relativo : null
+    const fechaDelDia = dia !== null && inicioIso ? fechaCorta(sumarDiasCivil(inicioIso, dia - 1)) : null
+    const leido = lugarDelServicio(item)
+    return { ciudad: leido.ciudad, fecha: fechaDelDia ?? leido.fecha }
+  })
 }

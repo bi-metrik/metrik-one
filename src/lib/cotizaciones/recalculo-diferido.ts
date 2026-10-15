@@ -31,3 +31,8 @@ export function diferirRecalculo(cotizacionId: string): boolean {
   estado.pendientes.add(cotizacionId)
   return true
 }
+
+/** ¿Estamos dentro de un lote con el recálculo diferido? No anota nada. */
+export function diferirRecalculoActivo(): boolean {
+  return !!almacen.getStore()
+}

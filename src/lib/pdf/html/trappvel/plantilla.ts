@@ -277,27 +277,83 @@ function tituloDelDia(d: DiaDoc, i: number, dias: DiaDoc[], m: ModeloPropuesta):
   const tipos = new Set(d.eventos.map((e) => e.tipo))
   const anterior = i > 0 ? dias[i - 1].ciudad : null
   const ciudadSola = (s: string | null) => (s ?? '').replace(/\s*\(?\b[A-Z]{3}\b\)?\s*$/, '').trim() || null
-  if (i === 0 && tipos.has('vuelo')) {
+  // El título que escriba el texto generado (PR 6) manda; el lugar sigue saliendo de los datos.
+  const conTitulo = (t: { titulo: string; lugar: string | null }) => (d.titulo ? { ...t, titulo: d.titulo } : t)
+  const sale = d.eventos.some((e) => e.tipo === 'vuelo' && e.momento === 'salida')
+  if (i === 0 && sale) {
     const origen = ciudadSola(m.ruta.origen)
-    return { titulo: origen ? `Salida desde ${origen}` : 'Salida', lugar: origen }
+    return conTitulo({ titulo: origen ? `Salida desde ${origen}` : 'Salida', lugar: origen })
   }
-  if (i === dias.length - 1 && tipos.has('vuelo')) {
+  if (i === dias.length - 1 && sale) {
     const casa = ciudadSola(m.ruta.regreso)
-    return { titulo: 'Regreso a casa', lugar: [anterior, casa].filter(Boolean).join(' → ') || null }
+    return conTitulo({ titulo: 'Regreso a casa', lugar: [anterior, casa].filter(Boolean).join(' → ') || null })
   }
   if (tipos.has('tren') && d.ciudad && anterior && d.ciudad !== anterior) {
-    return { titulo: `En tren a ${d.ciudad}`, lugar: `${anterior} → ${d.ciudad}` }
+    return conTitulo({ titulo: `En tren a ${d.ciudad}`, lugar: `${anterior} → ${d.ciudad}` })
   }
-  if (d.ciudad && d.ciudad !== anterior) return { titulo: `Llegada a ${d.ciudad}`, lugar: d.ciudad }
+  if (d.ciudad && d.ciudad !== anterior) return conTitulo({ titulo: `Llegada a ${d.ciudad}`, lugar: d.ciudad })
   const actividad = d.eventos.find((e) => e.tipo === 'actividad')
-  if (actividad) return { titulo: cabeza(actividad.texto), lugar: d.ciudad }
-  if (d.libre) return { titulo: 'Día libre', lugar: d.ciudad }
-  return { titulo: d.ciudad ? `En ${d.ciudad}` : 'En ruta', lugar: d.ciudad }
+  if (actividad) return conTitulo({ titulo: cabeza(actividad.texto), lugar: d.ciudad })
+  if (d.libre) return conTitulo({ titulo: 'Día libre', lugar: d.ciudad })
+  return conTitulo({ titulo: d.ciudad ? `En ${d.ciudad}` : 'En ruta', lugar: d.ciudad })
 }
 
-function eventoHtml(e: EventoDoc, porIndice: Map<number, TarifaDoc>): string {
-  const linea = `<div class="ev"><span class="h">${esc(e.hora ?? '')}</span><span class="i">${icono(ICONO_EVENTO[e.tipo])}</span><span>${esc(e.texto)}${e.tipo === 'actividad' ? ' <b>Incluida.</b>' : ''}</span></div>`
-  if (e.porTarifa.length === 0) return linea
+/** «A», «A o B», «A, B o C». */
+function oLista(xs: string[]): string {
+  return xs.length <= 1 ? (xs[0] ?? '') : `${xs.slice(0, -1).join(', ')} o ${xs[xs.length - 1]}`
+}
+
+/** «Aeropuerto Barajas T4 - hotel» → «Aeropuerto Barajas T4 → hotel». */
+function flecha(trayecto: string): string {
+  // «Hotel» va en minúscula en medio de la frase: «Traslado hotel → estación».
+  return trayecto.replace(/\s+(?:-|–)\s+/, ' → ').replace(/^Hotel\b/, 'hotel')
+}
+
+const minuscula = (s: string) => (s ? s[0].toLowerCase() + s.slice(1) : s)
+
+/** «Barcelona Sants - hotel · Compartido» con hora o sin ella: ¿es el traslado al llegar a la ciudad? */
+function esTrasladoAlLlegar(texto: string): boolean {
+  const extremos = cabeza(texto).split(/\s+(?:-|→|–)\s+/)
+  return extremos.length === 2 && /\bhotel\b/i.test(extremos[1]) && !/\bhotel\b/i.test(extremos[0])
+}
+
+/**
+ * Un renglón del día: hora a la izquierda (o «al llegar»), ícono y el texto en frase. Nada que no
+ * esté en los datos: sin hora, la columna queda en blanco.
+ */
+function renglonDeEvento(e: EventoDoc, d: DiaDoc, porIndice: Map<number, TarifaDoc>): string {
+  let hora = e.hora ?? ''
+  let texto: string
+  switch (e.tipo) {
+    case 'vuelo':
+      texto = e.momento === 'llegada' ? esc(e.texto.replace(/^Llegada a /, 'Llegan a ')) : `Vuelo ${esc(e.texto)}`
+      break
+    case 'tren': {
+      const [trayecto, ...resto] = e.texto.split(' · ')
+      texto = resto.length > 0 ? `Tren ${esc(resto.join(' · '))} · ${esc(flecha(trayecto))}` : `Tren ${esc(flecha(trayecto))}`
+      break
+    }
+    case 'traslado': {
+      const [trayecto, ...resto] = e.texto.split(' · ')
+      texto = `Traslado ${esc(flecha(trayecto))}${resto.length > 0 ? ` · ${esc(minuscula(resto.join(' · ')))}` : ''}`
+      // Del aeropuerto o la estación al hotel, el día que llegan: «al llegar».
+      if (!hora && esTrasladoAlLlegar(e.texto) && d.eventos.some((x) => x.tipo === 'tren' || x.tipo === 'vuelo')) hora = 'al llegar'
+      break
+    }
+    case 'actividad': {
+      // La ciudad del día ya está en el título: «Museo del Prado · 2 h · Madrid» → «Museo del Prado · 2 h».
+      const partes = e.texto.split(' · ')
+      const ultima = partes[partes.length - 1]
+      const sinCiudad = partes.length > 1 && d.ciudad && llano(ultima) === llano(d.ciudad) ? partes.slice(0, -1) : partes
+      texto = `${esc(sinCiudad.join(' · '))}. <b>Incluida.</b>`
+      break
+    }
+    default:
+      texto = esc(e.texto)
+  }
+  const linea = `<div class="ev"><span class="h">${esc(hora)}</span><span class="i">${icono(ICONO_EVENTO[e.tipo])}</span><span>${texto}</span></div>`
+  // Las cajitas por versión: solo los vuelos (el modelo ya no las pone en los hoteles).
+  if (e.tipo !== 'vuelo' || e.porTarifa.length === 0) return linea
   const celdas = e.porTarifa
     .map((pt) => {
       const nombres = pt.tarifas
@@ -311,28 +367,46 @@ function eventoHtml(e: EventoDoc, porIndice: Map<number, TarifaDoc>): string {
   return `${linea}<div class="opt3" style="grid-template-columns:repeat(${Math.min(3, e.porTarifa.length)},1fr)">${celdas}</div>`
 }
 
+function llano(s: string): string {
+  return s.normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase().trim()
+}
+
+/**
+ * «Así se ve cada día», como el prototipo v4 (pedido de Mauricio del 2026-10-14): el número del
+ * día grande con «JUE · DIC» debajo, el título y la ciudad en rosado, un renglón por hecho, las
+ * versiones en cajitas solo el día de un vuelo, y los días libres con los planes de su ciudad.
+ * Un día no se parte entre hojas (`.day` es `break-inside: avoid`).
+ */
 function diaADia(m: ModeloPropuesta): string {
   if (m.dias.length === 0) return ''
   const porIndice = tarifaPorIndice(m)
   const hayOpcionales = m.opcionales.length > 0
-  let ciudadAnterior: string | null = null
+  const ubicados = new Set(m.dias.flatMap((d) => d.opcionales))
+  const sueltos = m.opcionales.some((o) => !ubicados.has(o.nombre))
+  const ver = '(ver «Planes para los días libres»)'
   const bloques = m.dias.map((d, i) => {
-    const pill = d.ciudad && d.ciudad !== ciudadAnterior ? `<div class="pill"><span>${esc(d.ciudad)}</span></div>` : ''
-    ciudadAnterior = d.ciudad ?? ciudadAnterior
     const f = fecha(d.fecha)
     const { titulo, lugar } = tituloDelDia(d, i, m.dias, m)
-    const cuerpo = d.libre
-      ? `<div class="ev"><span class="h"></span><span class="i">${icono('sun')}</span><span class="free">Libre para ustedes.${hayOpcionales ? ' Pueden sumar uno de los planes del final.' : ''}</span></div>`
-      : d.eventos.map((e) => eventoHtml(e, porIndice)).join('\n')
-    return `${pill}<div class="day"><div class="d">${f ? f.getUTCDate() : d.numero}<small>${f ? `${DIAS[f.getUTCDay()]} · ${MESES[f.getUTCMonth()]}` : `día ${d.numero}`}</small></div><div>
+    const renglones = d.eventos.map((e) => renglonDeEvento(e, d, porIndice))
+    const sol = (h: string, contenido: string) =>
+      `<div class="ev"><span class="h">${esc(h)}</span><span class="i">${icono('sun')}</span><span class="free">${contenido}</span></div>`
+    const opcional = d.opcionales.length > 0 ? `<b>Opcional:</b> ${esc(oLista(d.opcionales))} ${ver}.` : null
+    if (d.libre) {
+      const resto = opcional ?? (hayOpcionales && sueltos ? 'Pueden sumar uno de los planes del final.' : '')
+      renglones.push(sol('', `Libre para ustedes.${resto ? ` ${resto}` : ''}`))
+    } else if (opcional) {
+      renglones.push(sol('', opcional))
+    }
+    if (d.sugerencia) renglones.push(sol('', `Sugerencia: ${esc(d.sugerencia)}`))
+    return `<div class="day"><div class="d">${f ? f.getUTCDate() : d.numero}<small>${f ? `${DIAS[f.getUTCDay()]} · ${MESES[f.getUTCMonth()]}` : `día ${d.numero}`}</small></div><div>
     <div class="t">${esc(titulo)}${lugar ? ` <span class="city">${esc(lugar)}</span>` : ''}</div>
-    ${cuerpo}
+    ${renglones.join('\n')}
   </div></div>`
   })
   const sub = hayOpcionales
-    ? 'Lo marcado como incluido ya va en el precio. Los días libres los pueden llenar con los planes del final, o simplemente caminar.'
-    : 'Lo marcado como incluido ya va en el precio.'
-  return `<section class="sec brk">\n${encabezadoDeSeccion('cal', 'Itinerario día a día', sub)}\n${bloques.join('\n')}\n</section>`
+    ? 'Lo que está en negrilla ya está incluido. Los días libres los pueden llenar con los planes opcionales del final, o simplemente caminar.'
+    : 'Lo que está en negrilla ya está incluido.'
+  return `<section class="sec brk dias">\n${encabezadoDeSeccion('cal', 'Así se ve cada día', sub)}\n${bloques.join('\n')}\n</section>`
 }
 
 function dondeDuermen(m: ModeloPropuesta, r: RecursosPropuesta): string {
@@ -593,6 +667,16 @@ const CSS_EXTRA = `
 .hc .img .tags .tag { position: static; }
 .hc .b > .tags { display:flex; gap: 1mm; flex-wrap: wrap; margin-bottom: 1.2mm; }
 .top b.mont { font-size: 13pt; color: var(--navy); }
+/* Día a día como el prototipo v4: número grande, «JUE · DIC» debajo y un separador fino entre
+   días (sin la línea de tiempo ni los círculos del v5). */
+.dias .day { grid-template-columns: 22mm 1fr; gap: 4mm; padding: 2.6mm 0; border-bottom: 1px solid var(--line); }
+.dias .day:last-child { border-bottom: 0; }
+.dias .day::before { display: none; }
+.dias .day .d { width: auto; height: auto; border-radius: 0; background: none; color: var(--navy); font: 800 15pt Montserrat; line-height: 1; display: block; }
+.dias .day .d small { color: var(--mute); opacity: 1; font: 600 7pt Montserrat; letter-spacing: 1px; text-transform: uppercase; margin-top: 1mm; }
+.dias .day .t { font-size: 10pt; margin-top: 0; }
+.dias .ev { grid-template-columns: 14mm 5mm 1fr; }
+.dias .ev .h { white-space: nowrap; }
 /* Las tablas siguen en la hoja siguiente (cabecera repetida); una fila nunca se parte. */
 tr { break-inside: avoid; }
 thead { display: table-header-group; }

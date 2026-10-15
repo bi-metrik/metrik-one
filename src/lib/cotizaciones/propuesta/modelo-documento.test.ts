@@ -261,7 +261,7 @@ describe('las cifras del modelo son las del PDF de hoy', () => {
   it('el opcional vale lo que imprime su tarjeta hoy, sin la cancelación del proveedor', { timeout: 30_000 }, async () => {
     const p = props()
     const m = modeloDePropuesta({ props: p })
-    expect(m.opcionales).toEqual([{ nombre: 'Tour del estadio', descripcion: 'Vestuarios y museo', valor: 780_000, unidad: null }])
+    expect(m.opcionales).toEqual([{ nombre: 'Tour del estadio', descripcion: 'Vestuarios y museo', valor: 780_000, unidad: null, ciudad: null, fecha: null }])
     expect(await textoDelPdfDeHoy(p)).toContain(plano(pesos(780_000)))
   })
 })
@@ -327,14 +327,25 @@ describe('las secciones del prototipo', () => {
     expect(esTren('Roma Termini - Firenze SMN · Frecciarossa')).toBe(true)
   })
 
-  it('el día a día también con tarifas: lo que cambia va por tarifa', () => {
+  it('el día a día también con tarifas: solo el vuelo va por tarifa', () => {
     expect(m.dias).toHaveLength(14)
     expect(m.dias[0].fecha).toBe('2026-12-10')
     const salida = m.dias[0].eventos.find((e) => e.tipo === 'vuelo')!
     expect(salida.texto).toBe('Bogota (BOG) → Madrid (MAD)')
+    expect(salida.momento).toBe('salida')
     expect(salida.porTarifa.map((x) => x.tarifas)).toEqual([[R], [E], [P]])
+    // Como el prototipo v4: aerolínea, hora, directo o vía. Con cajas, la hora va en cada una.
+    expect(salida.porTarifa.map((x) => x.texto)).toEqual(['Air France 18:45, vía Paris', 'Avianca 19:20, directo', 'Iberia 16:55, directo'])
+    expect(salida.hora).toBeNull()
+    // Llega al día siguiente: ese día dice a qué hora llega cada versión.
+    const llega = m.dias[1].eventos[0]
+    expect(llega).toMatchObject({ tipo: 'vuelo', momento: 'llegada', hora: null, texto: 'Llegada a Madrid (MAD)' })
+    expect(llega.porTarifa.map((x) => x.texto)).toEqual(['llega 16:10', 'llega 11:15', 'llega 08:45'])
+    // El hotel de cada versión ya está en «Dónde duermen»: el día a día no lo repite.
     const llegadaMadrid = m.dias[1].eventos.find((e) => e.tipo === 'hotel')!
-    expect(llegadaMadrid.porTarifa.map((x) => x.texto)).toEqual(['Hostal Prado Tres', 'Hotel Sol Cuatro', 'Gran Hotel Cinco'])
+    expect(llegadaMadrid.texto).toBe('Llegada al hotel en Madrid')
+    expect(llegadaMadrid.porTarifa).toEqual([])
+    expect(m.dias.flatMap((d) => d.eventos).filter((e) => e.tipo !== 'vuelo' && e.porTarifa.length > 0)).toEqual([])
     expect(m.dias[2].eventos.map((e) => e.texto)).toEqual(['Museo del Prado · 2 h · Madrid'])
     expect(m.dias[2].ciudad).toBe('Madrid')
     // Un día sin nada programado se marca libre.
@@ -363,5 +374,69 @@ describe('las secciones del prototipo', () => {
     expect(m.formal.pie).toBe('Agencia de ejemplo · contacto@agencia.example')
     expect(m.formal.firma?.nombre).toBe('Asesora de Ejemplo')
     expect(m.portada.titulo).toBe('Europa en familia')
+  })
+})
+
+describe('los planes opcionales en los días libres', () => {
+  const sugeridos = [
+    { nombre: 'Palacio Real de Madrid', descripcion: null, precio_venta: 520_000, cantidad: 1, unidad: null },
+    { nombre: 'Tour del Bernabéu', descripcion: 'Museo del Real Madrid', precio_venta: 780_000, cantidad: 1, unidad: null },
+    { nombre: 'Disneyland', descripcion: 'Dos parques', precio_venta: 2_000_000, cantidad: 1, unidad: null },
+    { nombre: 'El Louvre en familia', descripcion: null, precio_venta: 890_000, cantidad: 1, unidad: null },
+    { nombre: 'Crucero por el Sena', descripcion: null, precio_venta: 1_150_000, cantidad: 1, unidad: null },
+    { nombre: 'Molinos', descripcion: 'A 20 minutos de Amsterdam', precio_venta: 690_000, cantidad: 1, unidad: null },
+    { nombre: 'Cena de gala', descripcion: null, precio_venta: 500_000, cantidad: 1, unidad: null },
+  ]
+  const lugares = [
+    null, // Madrid: lo dice el nombre
+    { ciudad: 'MADRID', fecha: null }, // leída, con otra grafía: se ajusta a la parada
+    { ciudad: 'París', fecha: null }, // «Paris» en la parada, con tilde en la lectura
+    { ciudad: 'Paris', fecha: null },
+    { ciudad: 'Paris', fecha: null },
+    null, // Ámsterdam: lo dice la descripción, y la ciudad no tiene días libres
+    null, // sin ciudad: se queda en la sección del final
+  ]
+  const servicios: ServicioDelDocumento[] = [
+    ...SERVICIOS,
+    { tipo: 'actividad', descripcion: 'Torre Eiffel · 2 h · Paris', fecha: '18 dic 2026', hora: null },
+    { tipo: 'actividad', descripcion: 'Canales · 1 h · Amsterdam', fecha: '22 dic 2026', hora: null },
+    { tipo: 'traslado', descripcion: 'Hotel - aeropuerto Schiphol · Privado', fecha: '23 dic 2026', hora: null },
+  ]
+  const m = modeloDePropuesta({ props: props({ sugeridos }), servicios, lugaresDeOpcionales: lugares })
+  const dia = (iso: string) => m.dias.find((d) => d.fecha === iso)!
+
+  it('cada plan sabe su ciudad: la leída, o la que nombra', () => {
+    expect(m.opcionales.map((o) => o.ciudad)).toEqual(['Madrid', 'Madrid', 'Paris', 'Paris', 'Paris', 'Amsterdam', null])
+  })
+
+  it('van a los días libres de su ciudad, repartidos en orden', () => {
+    expect(dia('2026-12-13').libre).toBe(true)
+    expect(dia('2026-12-13').opcionales).toEqual(['Palacio Real de Madrid', 'Tour del Bernabéu'])
+    // París tiene dos días libres (19 y 20) y tres planes: dos y uno.
+    expect(dia('2026-12-19').opcionales).toEqual(['Disneyland', 'El Louvre en familia'])
+    expect(dia('2026-12-20').opcionales).toEqual(['Crucero por el Sena'])
+    // Ámsterdam no tiene días libres: el plan va al día de solo visitas.
+    expect(dia('2026-12-22').libre).toBe(false)
+    expect(dia('2026-12-22').opcionales).toEqual(['Molinos'])
+    // El que no tiene ciudad no aparece en ningún día.
+    expect(m.dias.flatMap((d) => d.opcionales)).not.toContain('Cena de gala')
+  })
+
+  it('un plan con día va a ese día, aunque no sea libre', () => {
+    const conDia = modeloDePropuesta({
+      props: props({ sugeridos: sugeridos.slice(0, 1) }),
+      servicios,
+      lugaresDeOpcionales: [{ ciudad: 'Madrid', fecha: '12 dic' }],
+    })
+    expect(conDia.dias.find((d) => d.fecha === '2026-12-12')!.opcionales).toEqual(['Palacio Real de Madrid'])
+    expect(conDia.dias.find((d) => d.fecha === '2026-12-13')!.opcionales).toEqual([])
+  })
+
+  it('el traslado al aeropuerto va antes que el vuelo de ese día', () => {
+    expect(dia('2026-12-23').eventos.map((e) => e.tipo)).toEqual(['traslado', 'vuelo'])
+  })
+
+  it('los ganchos del texto generado nacen vacíos', () => {
+    expect(m.dias.every((d) => d.titulo === null && d.sugerencia === null)).toBe(true)
   })
 })

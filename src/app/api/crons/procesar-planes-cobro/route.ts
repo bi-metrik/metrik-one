@@ -35,7 +35,8 @@ import { renovarPlanesPorCiclo, type ResumenRenovacion } from '@/lib/cobros/reno
 //      (`dias_trial` contado desde la aceptacion). Hoy ese paso lo hacia una persona a mano. Corre
 //      ANTES del paso 6 para que el contrato enrolado hoy reciba su enlace en esta misma corrida.
 //      Alcance: los modulos `radar_secop` y `valida_consulta` (ver `enrolar-ciclo.ts`).
-//   6b. Renovacion continua: el plan con `auto_renovar` de un contrato activo de Valida recibe su
+//   6b. Renovacion continua: el plan con `auto_renovar` de un contrato activo de Valida o de la
+//      licencia de Clarity (modulo `business`) recibe su
 //      cuota SIGUIENTE (una sola) cuando la ultima vence dentro de 30 dias. Sin permanencia: dar de
 //      baja es apagar `auto_renovar` y terminar el contrato (ver `renovar-ciclo.ts`).
 //   6. Enlaces de pago en linea de los contratos de servicio (CDA): la cuota que vence en 7 dias
