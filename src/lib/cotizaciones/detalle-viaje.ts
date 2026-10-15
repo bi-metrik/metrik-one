@@ -710,6 +710,21 @@ export function serviciosDeItems(items: ItemConLectura[]): ServicioPDF[] {
 }
 
 /**
+ * Dónde y cuándo es una actividad o un traslado, según su lectura (con lo corregido encima):
+ * la ciudad (solo la actividad la lee) y la fecha corta («14 dic»). Lo usa la propuesta para
+ * poner cada plan opcional en los días libres de su ciudad.
+ */
+export function lugarDelServicio(item: ItemConLectura): { ciudad: string | null; fecha: string | null } {
+  const slug = ranuraDelItem(item)?.slug
+  if (slug !== 'traslado_detalle' && slug !== 'actividad_detalle') return { ciudad: null, fecha: null }
+  const d = detalleDelItem(item)
+  return {
+    ciudad: slug === 'actividad_detalle' ? texto(d, 'ciudad') : null,
+    fecha: fechaCorta(texto(d, slug === 'traslado_detalle' ? 'fecha_hora' : 'fecha')),
+  }
+}
+
+/**
  * «Otro servicio» (asistencia médica, seguro, tarjeta de turismo): lo que es y quién lo presta,
  * con lo corregido encima. `null` si la línea no es un otro servicio.
  */

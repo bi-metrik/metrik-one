@@ -79,6 +79,8 @@ import { diaDeFecha } from '@/lib/cotizaciones/actividad-en-cotizacion'
 import { borradorValido, firmarBorrador } from '@/lib/cotizaciones/firma-borrador'
 import { opcionElegidaDeActividad, ubicarLectura, type LineaParaUbicar } from '@/lib/cotizaciones/ubicar-lectura'
 import { completaDe, mismoTipo } from '@/lib/cotizaciones/destino-por-pasos'
+import { enLoteDeAceptacion, memoDeAceptacion } from '@/lib/cotizaciones/memo-de-aceptacion'
+import { dondeQuedoLaOpcion } from '@/lib/cotizaciones/ubicacion-de-opcion'
 import { conPasajerosDelViaje } from '@/lib/cotizaciones/precio-que-falta'
 import { aceptacionPrevia, idAceptacionValido } from '@/lib/cotizaciones/aceptacion-idempotente'
 import { definicionDeTipo, esTipoRanura, tipoDeDefinicion, type TipoRanura } from '@/lib/cotizaciones/ranuras-cotizacion'
@@ -358,7 +360,17 @@ export async function leerCasillaDeItem(
  * línea, el nombre leído y el mensaje. Lo usan la casilla de la opción (después de leer) y el
  * «Aceptar» de la bandeja (con la lectura del borrador): las dos terminan igual.
  */
-async function guardarLecturaEnItem(ctx: ContextoDeItem, itemId: string, clave: ClaveCasilla, leida: LecturaCasilla): Promise<ResultadoCasilla> {
+async function guardarLecturaEnItem(
+  ctx: ContextoDeItem,
+  itemId: string,
+  clave: ClaveCasilla,
+  leida: LecturaCasilla,
+  /**
+   * `false` desde «Aceptar» de la bandeja: su respuesta no lleva la foto de la opción (la fila dice
+   * dónde quedó y la pantalla se refresca), y leerla era una ida más por pantallazo (H3).
+   */
+  conFoto = true,
+): Promise<ResultadoCasilla> {
   const { supabase, item, ranura, tarifa, composicion } = ctx
 
   // ── Quién decide a cuántos cubre la línea (§2.4) ──────────────────────────
@@ -452,7 +464,7 @@ async function guardarLecturaEnItem(ctx: ContextoDeItem, itemId: string, clave: 
   if (item.negocioId) revalidatePath(`/negocios/${item.negocioId}`)
 
   // Después del nombre: es la foto que pinta la ficha de la bandeja.
-  const opcion = await fotoDeOpcion(supabase, itemId)
+  const opcion = conFoto ? await fotoDeOpcion(supabase, itemId) : null
 
   // La captura no dijo a cuántos cubre y nadie lo había declarado: la pregunta sale AHORA,
   // con la lectura ya guardada, y diciendo por qué (§2.4). Preguntarlo antes de pegar era
@@ -506,7 +518,9 @@ async function contextoDeCotizacion(cotizacionId: string, sesion?: Awaited<Retur
   if (error) return { error: 'No autenticado' as const }
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const sb = supabase as any
-  const { data: cot } = await sb.from('cotizaciones').select('id, estado, negocio_id').eq('id', cotizacionId).maybeSingle()
+  // Dentro de una aceptación por pasos, una vez (`memo-de-aceptacion.ts`); fuera, como siempre.
+  const { data: cot } = await memoDeAceptacion(`cotizacion:${cotizacionId}`, async () =>
+    sb.from('cotizaciones').select('id, estado, negocio_id').eq('id', cotizacionId).maybeSingle() as Promise<{ data: { id: string; estado: string | null; negocio_id: string | null } | null }>)
   if (!cot) return { error: 'Cotización no encontrada' as const }
   if (!isEditable((cot.estado ?? 'borrador') as EstadoCotizacion)) {
     return { error: 'Esta cotización ya no se edita. Duplícala para trabajar sobre una nueva.' as const }
@@ -699,15 +713,6 @@ export type ResultadoAceptarCaptura =
   | { ok: false; codigo: 'SOBRA'; mensaje: string; conItemId: string }
   | { ok: false; codigo: string; mensaje: string }
 
-/** «Hotel en Providencia» y «2»: dónde quedó una opción, como se ve en Componentes. */
-function ubicacionDeOpcion(lineas: Record<string, unknown>[], itemId: string): { bloque: string; opcion: number | null } {
-  const linea = lineas.find(l => l.id === itemId)
-  const grupo = normalizarGrupo((linea?.grupo ?? null) as string | null)
-  if (!linea || !grupo) return { bloque: 'Componentes', opcion: null }
-  const hermanas = lineas.filter(l => l.es_ajuste !== true && normalizarGrupo((l.grupo ?? null) as string | null) === grupo)
-  return { bloque: etiquetaDeRanura(grupo), opcion: hermanas.findIndex(l => l.id === itemId) + 1 }
-}
-
 export async function aceptarCapturaDeBandeja(cotizacionId: string, b: BorradorParaAceptar): Promise<ResultadoAceptarCaptura> {
   if (!b || !esTipoRanura(b.tipo)) return { ok: false, codigo: 'TIPO', mensaje: 'Tipo de componente desconocido.' }
   if (!borradorValido(cotizacionId, b.tipo, b.lecturaJson, b.firma)) {
@@ -838,7 +843,7 @@ async function aceptarLectura(
     const ctxItem = await contexto(b.destinoId!)
     if ('error' in ctxItem) return { ok: false, codigo: 'CONTEXTO', mensaje: ctxItem.error as string }
     await conImagen()
-    const g = await guardarLecturaEnItem(ctxItem, b.destinoId!, 'grupo_completo', lectura)
+    const g = await guardarLecturaEnItem(ctxItem, b.destinoId!, 'grupo_completo', lectura, false)
     if (!g.ok) return { ok: false, codigo: g.codigo, mensaje: g.mensaje }
     return terminarAceptacion(ctx.supabase, cotizacionId, b.destinoId!, { como: 'reemplazo' })
   }
@@ -917,7 +922,7 @@ async function aceptarLectura(
   await conImagen()
   const g = 'error' in ctxItem
     ? { ok: false as const, codigo: 'CONTEXTO', mensaje: ctxItem.error as string }
-    : await medirEtapa('guardar', () => guardarLecturaEnItem(ctxItem, creada.itemId, 'grupo_completo', lectura))
+    : await medirEtapa('guardar', () => guardarLecturaEnItem(ctxItem, creada.itemId, 'grupo_completo', lectura, false))
   if (!g.ok) {
     // Nada a medias en Componentes: si la lectura no entra, la opción recién creada se va.
     await deleteItem(creada.itemId)
@@ -953,16 +958,19 @@ async function terminarAceptacion(
 ): Promise<ResultadoAceptarCaptura> {
   const c = await medirEtapa('confirmar', () => confirmarTarifaPorPasajero(itemId, null))
   const pendiente = c.success ? null : (c.error ?? 'falta un dato de la tarifa')
+  // En un lote (por pasos) la ubicación se calcula una vez al final (`aceptarLotePorPasos`).
+  if (enLoteDeAceptacion()) {
+    return {
+      ok: true, itemId, donde: 'Componentes', pendiente, como: entrada.como, bloque: 'Componentes', opcion: null,
+      habitacionId: entrada.habitacionId ?? null, habitacionNumero: entrada.habitacionNumero ?? null,
+    }
+  }
   const lineas = await medirEtapa('ubicacion', () => lineasDeCotizacion(supabase, cotizacionId))
-  const { bloque, opcion } = 'error' in lineas ? { bloque: 'Componentes', opcion: null } : ubicacionDeOpcion(lineas, itemId)
-  const lugar = opcion ? `${bloque} · Opción ${opcion}` : bloque
-  const habitacion = entrada.como === 'habitacion'
-    ? ` como habitación${entrada.habitacionNumero ? ` ${entrada.habitacionNumero}` : ''}`
-    : ''
+  const { donde, bloque, opcion } = dondeQuedoLaOpcion('error' in lineas ? null : lineas, itemId, entrada)
   return {
     ok: true,
     itemId,
-    donde: `${lugar}${habitacion}`,
+    donde,
     pendiente,
     como: entrada.como,
     bloque,

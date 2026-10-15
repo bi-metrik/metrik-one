@@ -221,4 +221,15 @@ export const ENTRADA_EUROPA: EntradaModeloPropuesta = {
   servicios: SERVICIOS_EUROPA,
   anticipo: { monto: 5_421_000, texto: 'Con esto les bloqueamos los hoteles y les guardamos esta propuesta por 5 días hábiles.' },
   asesora: { nombre: 'Asesora de Ejemplo', whatsapp: '573000000000' },
+  // La ciudad que la lectura de cada actividad opcional trae, en el orden de `sugeridos`.
+  lugaresDeOpcionales: [
+    { ciudad: 'Madrid', fecha: null },
+    { ciudad: 'Madrid', fecha: null },
+    { ciudad: 'Barcelona', fecha: null },
+    { ciudad: 'Barcelona', fecha: null },
+    { ciudad: 'París', fecha: null },
+    { ciudad: 'París', fecha: null },
+    { ciudad: 'París', fecha: null },
+    { ciudad: 'Ámsterdam', fecha: null },
+  ],
 }

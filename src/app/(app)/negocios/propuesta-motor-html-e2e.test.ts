@@ -151,9 +151,22 @@ describe('motor html de la propuesta en la acción del PDF', () => {
     expect(entrada.servicios?.map(s => [s.tipo, s.fecha])).toEqual([['traslado', '23 nov 2026']])
     expect(entrada.anticipo).toEqual({ monto: 1_500_000, texto: 'Con esto les apartamos el hotel.' })
     expect(entrada.asesora).toEqual({ nombre: 'Asesora de prueba', whatsapp: '573000000000' })
+    // Sin planes opcionales, la lista va vacía (y alineada con `sugeridos`).
+    expect(entrada.lugaresDeOpcionales).toEqual([])
     // El PDF es el del motor (una hoja en blanco del doble), no el de @react-pdf.
     const doc = await PDFDocument.load(Buffer.from(r.pdf, 'base64'))
     expect(doc.getPageCount()).toBe(1)
+  })
+
+  it('encendido: cada plan opcional llega con su día, en el orden de los sugeridos', async () => {
+    sembrar({ motor: true })
+    ;(base.tablas.items as Fila[]).push(
+      linea('a-opcional', 300_000, { nombre: 'Tour Johnny Cay', grupo: 'actividad: Tour en San Andrés', orden: 3, dia_relativo: 3, entra_al_precio: false, mostrar_en_sugeridos: true }),
+    )
+    await generar()
+    const entrada = motor.llamadas[0] as EntradaModeloPropuesta
+    expect(entrada.props.sugeridos?.map(s => s.nombre)).toHaveLength(1)
+    expect(entrada.lugaresDeOpcionales).toEqual([{ ciudad: null, fecha: '25 nov 2026' }])
   })
 
   it('si el motor falla, sale el PDF de @react-pdf con un aviso', async () => {
