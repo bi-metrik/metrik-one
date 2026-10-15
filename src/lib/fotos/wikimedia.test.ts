@@ -142,11 +142,28 @@ describe('el crédito y la consulta', () => {
   })
 
   it('Commons exige todas las palabras: la actividad se afloja; la ciudad no', () => {
-    expect(consultasDeFoto('actividad', 'Park Güell con guía', 'Barcelona')).toEqual(['Park Güell con guía Barcelona', 'Park Güell Barcelona', 'Park Güell'])
-    expect(consultasDeFoto('actividad', 'Molinos de Zaanse Schans', 'Ámsterdam')).toEqual([
+    expect(consultasDeFoto('actividad', 'Park Güell con guía', 'Barcelona')).toEqual(['Park Güell con guía Barcelona', 'Park Güell Barcelona', 'Park Güell', 'Güell Barcelona'])
+    expect(consultasDeFoto('actividad', 'Molinos de Zaanse Schans', 'Ámsterdam').slice(0, 3)).toEqual([
       'Molinos de Zaanse Schans Ámsterdam', 'Molinos Zaanse Schans Ámsterdam', 'Molinos Zaanse Schans',
     ])
     expect(consultasDeFoto('ciudad', 'Ámsterdam', null)).toEqual(['Ámsterdam'])
+  })
+
+  it('con los nombres largos de los proveedores (COT-2026-0026 real) llega al lugar; nunca más de 8 consultas', () => {
+    // Las tres que el panel dejó «sin foto con licencia libre».
+    expect(consultasDeFoto('actividad', 'Torre Eiffel: acceso a la cumbre en ascensor', 'París')).toContain('Torre Eiffel París')
+    expect(consultasDeFoto('actividad', 'Disneyland Paris: entrada de 1 día a los 2 parques', 'París')).toContain('Disneyland Paris')
+    const canales = consultasDeFoto('actividad', 'Paseo en barco por los canales de Ámsterdam', 'Ámsterdam')
+    expect(canales).toContain('canales Ámsterdam')
+    // La palabra más larga primero: «canales» antes que «Paseo» o «barco».
+    expect(canales.indexOf('canales Ámsterdam')).toBeLessThan(canales.indexOf('Paseo Ámsterdam'))
+    // Ni números sueltos ni la ciudad repetida.
+    expect(canales.some((q) => /Ámsterdam.*Ámsterdam/.test(q))).toBe(false)
+    // La primera es el nombre tal cual; de ahí en adelante, sin los números sueltos.
+    expect(consultasDeFoto('actividad', 'Disneyland Paris: entrada de 1 día a los 2 parques', 'París').slice(1).some((q) => /\b[12]\b/.test(q))).toBe(false)
+    for (const n of ['Visita guiada al Museo del Prado con entrada sin colas', 'Molinos de Zaanse Schans', 'Sagrada Familia: visita guiada con acceso a las torres']) {
+      expect(consultasDeFoto('actividad', n, 'Madrid').length).toBeLessThanOrEqual(8)
+    }
   })
 
   it('solo se baja de los servidores de archivos de Wikimedia, por https', () => {

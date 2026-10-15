@@ -81,23 +81,45 @@ const RELLENO = new Set([
 
 const sinTilde = (s: string) => s.normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase()
 
+/** Tope de consultas por objetivo: cada una es una ida a Commons. */
+export const MAX_CONSULTAS = 8
+
 /**
  * Las consultas a Commons, de la más precisa a la más amplia: Commons exige TODAS las palabras,
  * y «Park Güell con guía Barcelona» no encuentra nada que «Park Güell Barcelona» sí. Solo las
  * actividades se aflojan: primero el nombre con la ciudad, luego sin las palabras de relleno, y al
  * final sin ciudad. Una ciudad, solo con su nombre completo. Un hotel, ninguna: no se busca.
+ *
+ * Con los nombres reales de los proveedores (COT-2026-0026, 2026-10-14) eso no alcanzaba: «Torre
+ * Eiffel: acceso a la cumbre en ascensor», «Disneyland Paris: entrada de 1 día a los 2 parques» y
+ * «Paseo en barco por los canales de Ámsterdam» daban 0 y el panel decía «no tienen foto». Después
+ * de lo anterior van: lo que está antes de «:» (el lugar: «Torre Eiffel París»), pares de palabras
+ * útiles con la ciudad y, al final, cada palabra útil con la ciudad, la más larga primero
+ * («canales Ámsterdam»). Nunca más de `MAX_CONSULTAS`.
  */
 export function consultasDeFoto(tipo: TipoFoto, nombre: string, ciudad: string | null): string[] {
   // Un hotel no se busca en Commons: su foto la sube la asesora (`seSugiereDeCommons`).
   if (!seSugiereDeCommons(tipo)) return []
   const completa = consultaDeFoto(tipo, nombre, ciudad)
   if (tipo !== 'actividad') return [completa]
-  const util = nombre.replace(/\s+/g, ' ').trim().split(' ').filter((w) => !RELLENO.has(sinTilde(w).replace(/[^a-z0-9]/g, '')))
+  const util = nombre.replace(/\s+/g, ' ').trim().split(' ').filter((w) => !RELLENO.has(sinTilde(w).replace(/[^a-z0-9]/g, '')) && !/^\d+$/.test(w))
   const corto = util.join(' ')
   const salida = [completa]
   if (corto && corto !== nombre.trim()) salida.push(consultaDeFoto(tipo, corto, ciudad))
   if (tipo === 'actividad' && util.length >= 2) salida.push(corto)
-  return [...new Set(salida)]
+  // El lugar: lo que va antes de «:», « - » o «(».
+  const cabeza = nombre.split(/:|\s[-–]\s|\(/)[0].replace(/\s+/g, ' ').trim()
+  if (cabeza && cabeza !== nombre.trim() && cabeza.split(' ').length <= 4) {
+    salida.push(consultaDeFoto(tipo, cabeza, ciudad), cabeza)
+  }
+  // Pares y palabras sueltas, sin números ni la ciudad (que va al final de cada consulta).
+  const deLaCiudad = new Set((ciudad ?? '').split(/[\s,]+/).map((w) => sinTilde(w)).filter(Boolean))
+  const palabras = util
+    .map((w) => w.replace(/[^\p{L}\p{N}'’-]/gu, ''))
+    .filter((w) => w.length >= 3 && !/\d/.test(w) && !deLaCiudad.has(sinTilde(w)))
+  for (let i = 0; i + 1 < palabras.length; i++) salida.push(consultaDeFoto(tipo, `${palabras[i]} ${palabras[i + 1]}`, ciudad))
+  for (const w of [...palabras].sort((a, b) => b.length - a.length)) if (w.length >= 5) salida.push(consultaDeFoto(tipo, w, ciudad))
+  return [...new Set(salida)].slice(0, MAX_CONSULTAS)
 }
 
 /**

@@ -408,7 +408,13 @@ function diaADia(m: ModeloPropuesta): string {
   const sub = hayOpcionales
     ? 'Lo que está en negrilla ya está incluido. Los días libres los pueden llenar con los planes opcionales del final, o simplemente caminar.'
     : 'Lo que está en negrilla ya está incluido.'
-  return `<section class="sec brk dias">\n${encabezadoDeSeccion('cal', 'Así se ve cada día', sub)}\n${bloques.join('\n')}\n</section>`
+  // Sin salto de hoja forzado: con la portada larga (la COT-2026-0026 real, ruta con textos crudos)
+  // las tarjetas de «Lo que van a vivir» pasaban a la hoja 2 y el salto la dejaba con dos tarjetas
+  // y 85 % en blanco.
+  // El encabezado va pegado al primer día en un bloque que no se parte: `break-after: avoid` del
+  // `.sh` Chromium no lo respeta y el título quedaba solo al pie de la hoja 1.
+  const [primero, ...resto] = bloques
+  return `<section class="sec dias">\n<div class="nobr">${encabezadoDeSeccion('cal', 'Así se ve cada día', sub)}\n${primero}</div>\n${resto.join('\n')}\n</section>`
 }
 
 function dondeDuermen(m: ModeloPropuesta, r: RecursosPropuesta): string {
@@ -702,7 +708,7 @@ const CSS_EXTRA = `
 /* Día a día como el prototipo v4: número grande, «JUE · DIC» debajo y un separador fino entre
    días (sin la línea de tiempo ni los círculos del v5). */
 .dias .day { grid-template-columns: 22mm 1fr; gap: 4mm; padding: 2.6mm 0; border-bottom: 1px solid var(--line); }
-.dias .day:last-child { border-bottom: 0; }
+.dias > .day:last-child { border-bottom: 0; }
 .dias .day::before { display: none; }
 .dias .day .d { width: auto; height: auto; border-radius: 0; background: none; color: var(--navy); font: 800 15pt Montserrat; line-height: 1; display: block; }
 .dias .day .d small { color: var(--mute); opacity: 1; font: 600 7pt Montserrat; letter-spacing: 1px; text-transform: uppercase; margin-top: 1mm; }

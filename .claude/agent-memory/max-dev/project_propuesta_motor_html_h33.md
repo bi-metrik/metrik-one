@@ -1,6 +1,6 @@
 ---
 name: propuesta-motor-html-h33
-description: Propuesta de Trappvel PR 3 (#1165, H33 «¿Ya se la mandaste?») y PR 2 (motor html con Chromium, encendido por workspace); anticipo en documento_cliente; SQL del interruptor SIN aplicar
+description: Propuesta de Trappvel PR 3 (#1165, H33) y PR 2 (motor html con Chromium por workspace); anticipo en documento_cliente; datos reales de la captura (zona en ciudad, traslados ida y vuelta, proveedor) en fix/propuesta-datos-reales
 metadata:
   type: project
 ---
@@ -44,4 +44,11 @@ anticipo a mano + wa.me). Un anticipo registrado como pago mueve el negocio a Re
   la sigla viaja en `porTarifa[].siglas` del modelo. El HTML ordena las cajitas por versión
   (E, R, P), no en el orden del modelo. El `node_modules` del repo principal no trae `unpdf`
   (va atrasado): `npm ci` en el worktree, no symlink.
-- Relacionado: [[propuesta-chromium-modelo]], [[fotos-catalogo]].
+- Datos reales (14-oct, rama `fix/propuesta-datos-reales`, COT-2026-0026 real): la captura trae ciudad con zona
+  («Madrid - Sol»; `ciudadDeCapitulo` corta en ` - `/` · ` con espacios, en TODO ONE), traslados de ida y vuelta en una
+  línea con dos fechas o «\n hotel y hotel \n» (`propuesta/trayectos.ts` los parte; vuelta sin fecha = salida de la
+  estadía), fichas crudas con PROVEEDOR en los sugeridos (`descripcionDeOpcional`), y el `documento_cliente` viejo de
+  Gemini en usted, con «¡» y 13 noches (`textoConLaVozDelDocumento` → `introDeterminista`). «Incluido en todas» filtra
+  las líneas que nombran hotel/aerolínea de una sola versión. Día a día sin `brk` (título en `.nobr` con el 1er día).
+  Al leer prod el 14-oct ~23 h, `config_extra.documento_viaje` de trappvel NO tenía `motor: 'html'`.
+- Relacionado: [[propuesta-chromium-modelo]], [[fotos-catalogo]], [[reproducir-pdf-real-solo-lectura]].
