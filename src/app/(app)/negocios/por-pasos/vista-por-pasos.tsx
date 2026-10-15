@@ -203,7 +203,10 @@ export default function VistaPorPasos(p: PropsVistaPorPasos) {
     bajoMinimo: autorizacionVigente ? [] : bajoMinimo.map(t => t.nombre ?? 'Tarifa'),
     tarifasVistas,
     vanAlCliente: vanAlCliente.map(t => t.nombre ?? 'Tarifa'),
-    rojos: p.conteoLista.rojos + (sinCosto.length > 0 ? 1 : 0),
+    // D8 (H7) · un solo conteo: con la lista única, la barra cuenta sus renglones rojos, que ya traen
+    // el precio por pasajero que falta y la línea sin costo. Sumarle `sinCosto` contaba dos veces lo
+    // mismo («2 cosas impiden enviar» con una sola en la lista). Sin la lista, como siempre.
+    rojos: p.listaUnica ? p.listaUnica.impide.length : p.conteoLista.rojos + (sinCosto.length > 0 ? 1 : 0),
     ambar: p.conteoLista.ambar + p.pantallazosPorAceptar,
     texto: p.texto,
     enviada: p.enviada,
