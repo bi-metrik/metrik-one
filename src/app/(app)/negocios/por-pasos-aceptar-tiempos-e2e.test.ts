@@ -8,7 +8,7 @@
  * paralelo se solapan, así que el tiempo de pared cuenta las idas EN SERIE, que son lo que
  * espera la asesora.
  *
- * Lo que fija esta prueba (y el PR de H2 reporta antes y después):
+ * Lo que fija esta prueba (los PR de H2 y H3 reportan antes y después):
  *  · con el interruptor APAGADO, aceptar uno hace las mismas idas que en C0 (34): la condición de
  *    Mauricio;
  *  · ENCENDIDO, aceptar uno y aceptar en lote no pasan de su techo de idas en serie.
@@ -160,20 +160,46 @@ async function medirLote(): Promise<Medida> {
   return { idas: tomarRegistro().length, ms: Math.round(ms), serverTiming: res.headers.get('Server-Timing') ?? '' }
 }
 
+describe('H3 · con las mismas lecturas, el lote deja siempre lo mismo', () => {
+  /** El lote de 11 sobre la cotización vacía, sin latencia: el total y las líneas en su orden. */
+  async function correrLote() {
+    ponerLatencia(0)
+    await medirLote()
+    const cot = base.tablas.cotizaciones.find(c => c.id === COT_SAN_ANDRES)!
+    const lineas = [...base.tablas.items].sort((a, b) => Number(a.orden) - Number(b.orden))
+    return {
+      valorTotal: cot.valor_total,
+      lineas: lineas.map(i => [i.orden, i.grupo, i.nombre, i.subtotal, i.precio_venta]),
+    }
+  }
+
+  it('dos corridas del mismo lote dan el mismo total y las líneas en el mismo orden (el pegado)', async () => {
+    const a = await correrLote()
+    const b = await correrLote()
+    expect(b).toEqual(a)
+    expect(a.valorTotal).toBeGreaterThan(0)
+    // El orden de las líneas es el del pegado, aunque las cadenas de cada tipo corran en paralelo.
+    const once = onceDelCasoFijo()
+    expect(a.lineas.map(l => l[0])).toEqual(once.map((_, i) => i + 1))
+  }, 120_000)
+})
+
 describe(`V1/V2/V4 · aceptar en el servidor, con ${LATENCIA} ms por ida`, () => {
   it('mide uno (apagado y encendido) y el lote de 11', async () => {
     const apagado = await medirUno(false)
     const encendido = await medirUno(true)
     const lote = await medirLote()
     console.info(`[tiempos-aceptar] ${JSON.stringify({ latenciaMs: LATENCIA, apagado, encendido, lote }, null, 1)}`)
-    // La condición de Mauricio: apagado, las idas de C0.
-    expect(apagado.idas).toBe(34)
-    // Encendido, antes de H2: 66 idas y 1.703 ms (todas en serie). Después: 50 idas, ≈ 35 en serie.
-    expect(encendido.idas).toBeLessThanOrEqual(50)
-    // El lote de 11, antes de H2: 286 idas. El techo de C0 (fixture) sigue siendo 286.
-    expect(lote.idas).toBeLessThanOrEqual(285)
-    // El tiempo de pared es indicativo (la máquina de CI puede ir cargada): con 25 ms por ida, uno
-    // encendido no pasa de 45 idas en serie.
+    // La condición de Mauricio: apagado, ni una ida más que en C0 (34). H3 quitó una lectura que la
+    // respuesta de «Aceptar» no usaba (la foto de la opción): 33.
+    expect(apagado.idas).toBe(33)
+    // Encendido, antes de H2: 66 idas y 1.703 ms (todas en serie). Después de H2/H3: 48 idas.
+    expect(encendido.idas).toBeLessThanOrEqual(48)
+    // El lote de 11, antes: 286 idas y 7,1 s en serie. Después de H3: 236 idas y las cadenas de cada
+    // tipo en paralelo (≈ 2,2 s).
+    expect(lote.idas).toBeLessThanOrEqual(236)
+    // El tiempo de pared es indicativo (la máquina de CI puede ir cargada), con 25 ms por ida.
     expect(encendido.ms).toBeLessThan(45 * LATENCIA)
+    expect(lote.ms).toBeLessThan(4000)
   }, 120_000)
 })

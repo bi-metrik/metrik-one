@@ -35,12 +35,13 @@ import { ranurasConAlternativas } from '@/lib/cotizaciones/itinerarios'
 import { estadosPermitidos, type EstadoServicio } from '@/lib/cotizaciones/estado-servicio'
 import { YA_CAMBIO } from '@/lib/cotizaciones/deshacer-por-pasos'
 import { textoCortoSinPrecio, tiposSinPrecio } from '@/lib/cotizaciones/precio-que-falta'
-import type { Composicion } from '@/lib/cotizaciones/tarifa-pasajero'
+import { leerTarifaPax, monedaDeTarifa, type Composicion } from '@/lib/cotizaciones/tarifa-pasajero'
 import { nombreVisibleDeLinea } from '@/lib/cotizaciones/nombre-visible'
 import { resumenDeOpcion } from '@/lib/cotizaciones/opcion-viaje'
 import type { ItemConLectura } from '@/lib/cotizaciones/detalle-viaje'
 import type { DestinoDeIr, ListaUnica } from '@/lib/cotizaciones/lista-unica'
 import { ListaUnicaPorPasos } from './lista-unica-por-pasos'
+import { PrecioQueFaltaPorPasos } from './precio-que-falta'
 import {
   cascadaDelTotal,
   estadoDeLosPasos,
@@ -429,6 +430,19 @@ export default function VistaPorPasos(p: PropsVistaPorPasos) {
                               </>
                             ),
                           })}
+                          {p.editable && (() => {
+                            const f = porId.get(id)
+                            const tipos = f ? tiposSinPrecio({ grupo: f.grupo ?? null, tarifa_pax: f.tarifa_pax }, p.composicionViaje) : []
+                            return tipos.length > 0 ? (
+                              <PrecioQueFaltaPorPasos
+                                itemId={id}
+                                nombre={nombreDeOpcion(id)}
+                                tipos={tipos}
+                                moneda={monedaDeTarifa(leerTarifaPax(f?.tarifa_pax)).moneda}
+                                onGuardado={p.refrescar}
+                              />
+                            ) : null
+                          })()}
                         </div>
                       )
                     })}

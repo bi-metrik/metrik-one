@@ -30,6 +30,7 @@ import { etiquetaDeRanura } from '@/lib/cotizaciones/ranuras-pantallazo'
 import { SIN_OPCIONES } from '@/lib/cotizaciones/ubicador-capturas'
 import { aMayusculas } from '@/lib/negocios/mayusculas'
 import { exigirPorPasos } from '@/lib/cotizaciones/por-pasos-datos'
+import { ordenDeFila } from '@/lib/cotizaciones/memo-de-aceptacion'
 
 /**
  * La ranura desde la pantalla: crearla con su nombre, agregarle una opción hermana y
@@ -105,7 +106,9 @@ async function insertarOpcion(
   c: Contexto,
   args: { grupo: string; nombre: string; unidad: string | null; cantidad: number },
 ): Promise<{ id: string } | { error: string }> {
-  const orden = c.items.reduce((m, i) => Math.max(m, Number(i.orden) || 0), 0) + 1
+  // En un lote por pasos el orden lo fija la posición del pantallazo (`ordenDeFila`): las cadenas
+  // de cada tipo corren en paralelo y «el último + 1» daría dos líneas con el mismo orden (H3).
+  const orden = ordenDeFila() ?? c.items.reduce((m, i) => Math.max(m, Number(i.orden) || 0), 0) + 1
   const { data, error } = await c.supabase
     .from('items')
     .insert({
