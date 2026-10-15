@@ -1,12 +1,11 @@
 'use server';
 
-import { textoLatinoProfundo } from '@/lib/texto/texto-latino'
 import { createServiceClient } from '@/lib/supabase/server';
 import { credencialValida, VALIDA_API_BASE } from '@/lib/valida/credencial-servidor';
 import { motivoCorteDeError } from '@/lib/valida/corte-bolsa';
 import { resolverNombresUsuarios } from './_usuarios';
-import { exigirModulo, REQUISITO } from '@/lib/modulos/exigir-modulo';
-import { validaCdaPermiteConsultar, validaCdaPermiteOperar } from '@/lib/valida-cda/puerta';
+import { accesoValida as accesoValidaBase } from '@/lib/valida/acceso-servidor';
+import { llamarValida, persistirConsulta, recalcularScoreNegocio } from '@/lib/valida/consulta-servidor';
 import * as XLSX from 'xlsx';
 import { getCachedUser } from '@/lib/supabase/auth-user'
 
@@ -103,65 +102,18 @@ export type FilaLotePreparada = {
 // ─── Helpers ──────────────────────────────────────────────────────────────
 
 /**
- * Todo lo de este archivo es del módulo Valida (`/valida`, y su sección en el detalle del
- * negocio de un workspace que lo tenga). La sesión no basta: un workspace sin el módulo
- * (4D SOFT, con solo `valida_api`) no consulta, no lista ni descarga reportes aquí.
+ * La puerta de todo el módulo (ver `@/lib/valida/acceso-servidor`). Aquí el «no» viaja al navegador
+ * tal cual, sin el `workspaceId` que la puerta trae para el cargue masivo.
  */
 async function accesoValida(
   opts: { consultaNueva?: boolean } = {},
 ): Promise<{ ok: true; workspaceId: string } | { ok: false; error: string }> {
-  const r = await exigirModulo(REQUISITO.validaConsulta);
-  if (!r.ok) return { ok: false, error: r.error === 'no_autenticado' ? 'workspace_no_encontrado' : r.error };
-  // Los CDA con contrato directo con METRIK IA S.A.S. no operan hasta que la persona designada
-  // acepte sus términos (cláusula 16.3), salvo dentro del plazo para aceptar, ni con más de 30 días
-  // de mora (cláusula 11.3). Desde el 2026-11-05, con más de 5 días de mora no hacen CONSULTAS
-  // NUEVAS (`consultaNueva`), pero listan y descargan lo ya generado (cláusula 11.1, v1.4). Un
-  // espacio sin contrato de Valida (AFI, metrik) pasa igual que antes: la puerta no le aplica. Ver
-  // `src/lib/valida-cda/puerta.ts`.
-  const puerta = opts.consultaNueva ? await validaCdaPermiteConsultar() : await validaCdaPermiteOperar();
-  if (!puerta.ok) return puerta;
-  return r;
+  const r = await accesoValidaBase(opts);
+  return r.ok ? r : { ok: false, error: r.error };
 }
 
 async function getWorkspaceValidaApiKey(workspaceId: string): Promise<string | null> {
   return (await credencialValida(workspaceId)).llave;
-}
-
-/**
- * Tope de la llamada a la API de Valida. Sin el, una API colgada dejaba colgado el server
- * action y, con el, la fila del cargue masivo. Al agotarse la consulta se guarda como error
- * (`valida_tiempo_agotado`). Menor que `TIMEOUT_FILA_MS` del navegador
- * (`@/lib/valida/cargue-lote`) para que corte primero el servidor y la fila quede guardada.
- */
-const TIMEOUT_VALIDA_MS = 30_000;
-
-async function llamarValida(
-  apiKey: string,
-  input: ValidaConsultaInput
-): Promise<{ ok: true; data: ValidaResultado } | { ok: false; error: string }> {
-  try {
-    const res = await fetch(`${VALIDA_API_BASE}/api/v1/validate`, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        Authorization: `Bearer ${apiKey}`,
-      },
-      body: JSON.stringify(input),
-      cache: 'no-store',
-      signal: AbortSignal.timeout(TIMEOUT_VALIDA_MS),
-    });
-    if (!res.ok) {
-      const body = await res.json().catch(() => ({}));
-      return { ok: false, error: body.error ?? `HTTP ${res.status}` };
-    }
-    const data = (await res.json()) as ValidaResultado;
-    return { ok: true, data };
-  } catch (err) {
-    if (err instanceof Error && (err.name === 'TimeoutError' || err.name === 'AbortError')) {
-      return { ok: false, error: 'valida_tiempo_agotado' };
-    }
-    return { ok: false, error: err instanceof Error ? err.message : 'error_desconocido' };
-  }
 }
 
 /**
@@ -212,48 +164,6 @@ async function consultaYaGuardadaEnLote(
       fecha_reporte: (fila.created_at as string) ?? '',
     },
   };
-}
-
-async function persistirConsulta(opts: {
-  workspaceId: string;
-  userId: string | null;
-  negocioId: string | null;
-  loteId: string | null;
-  tipo: 'puntual' | 'masiva_item';
-  input: ValidaConsultaInput;
-  resultado:
-    | { ok: true; data: ValidaResultado }
-    | { ok: false; error: string };
-}): Promise<{ ok: true; id: string } | { ok: false; error: string }> {
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const svc = createServiceClient() as any;
-  const isError = !opts.resultado.ok;
-  const data = opts.resultado.ok ? opts.resultado.data : null;
-
-  const row = {
-    workspace_id: opts.workspaceId,
-    negocio_id: opts.negocioId,
-    lote_id: opts.loteId,
-    tipo: opts.tipo,
-    tipo_persona: opts.input.tipo,
-    nombre_consultado: opts.input.nombre || null,
-    documento_tipo: opts.input.documento?.tipo ?? null,
-    documento_numero: opts.input.documento?.numero ?? null,
-    valida_consulta_id: data?.consulta_id ?? null,
-    severidad: (isError ? 'error' : data!.severidad) as Severidad,
-    total_matches: data?.total_matches ?? 0,
-    matches: data?.matches ?? null,
-    hash_reporte: data?.hash_reporte ?? null,
-    created_by: opts.userId,
-  };
-
-  const { data: ins, error } = await svc.from('valida_consultas')
-    .insert(row)
-    .select('id')
-    .single();
-
-  if (error) return { ok: false, error: error.message };
-  return { ok: true, id: ins.id };
 }
 
 /**
@@ -337,31 +247,7 @@ export async function consultarValida(
   if (!persisted.ok) return { ok: false, error: persisted.error };
 
   // Recalcular score SARLAFT del negocio si tiene datos configurados
-  if (opts.negocio_id) {
-    try {
-      const { calcularScoreNegocio, persistirScore } = await import('@/lib/valida/calculo-score');
-      const calc = await calcularScoreNegocio({ workspaceId, negocioId: opts.negocio_id });
-      if (calc.ok) {
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        const svc = createServiceClient() as any;
-        const { data: datos } = await svc
-          .from('valida_sarlaft_datos_negocio')
-          .select('universo')
-          .eq('negocio_id', opts.negocio_id)
-          .maybeSingle();
-        if (datos) {
-          await persistirScore({
-            workspaceId,
-            negocioId: opts.negocio_id,
-            universo: datos.universo,
-            resultado: calc.resultado,
-          });
-        }
-      }
-    } catch {
-      // Re-cálculo silencioso — no afecta el flujo principal de la consulta
-    }
-  }
+  if (opts.negocio_id) await recalcularScoreNegocio(workspaceId, opts.negocio_id);
 
   return { ok: true, data: resultado.data, consulta_local_id: persisted.id };
 }
@@ -408,126 +294,6 @@ export async function descargarPlantillaValida(
   } catch (err) {
     return { ok: false, error: err instanceof Error ? err.message : 'error_plantilla' };
   }
-}
-
-// ─── Preparar lote ────────────────────────────────────────────────────────
-//
-// Parsea el XLSX server-side y devuelve la lista de filas listas para que el
-// cliente las procese una a una (loop con barra de progreso visible).
-// No llama a Valida ni persiste resultados — eso ocurre por fila via
-// `consultarValida(..., { lote_id })`.
-
-type FilaXLSX = {
-  tipo_persona: string;
-  nombre_completo: string;
-  tipo_documento?: string;
-  numero_documento?: string;
-  negocio_codigo?: string;
-};
-
-export async function prepararLoteValida(
-  fd: FormData,
-  opts: { negocio_id_lote?: string | null } = {}
-): Promise<
-  | { ok: true; data: { lote_id: string; total: number; filas: FilaLotePreparada[] } }
-  | { ok: false; error: string }
-> {
-  const acceso = await accesoValida({ consultaNueva: true });
-  if (!acceso.ok) return acceso;
-  const workspaceId = acceso.workspaceId;
-
-  const file = fd.get('archivo');
-  if (!(file instanceof File)) return { ok: false, error: 'archivo_no_provisto' };
-  if (file.size > 5 * 1024 * 1024) return { ok: false, error: 'archivo_excede_5mb' };
-
-  let rows: FilaXLSX[];
-  try {
-    const buf = Buffer.from(await file.arrayBuffer());
-    const wb = XLSX.read(buf, { type: 'buffer' });
-    const sheet = wb.Sheets[wb.SheetNames[0]];
-    if (!sheet) return { ok: false, error: 'archivo_sin_hojas' };
-    rows = textoLatinoProfundo(XLSX.utils.sheet_to_json<FilaXLSX>(sheet, { defval: '' }));
-  } catch {
-    return { ok: false, error: 'archivo_no_legible' };
-  }
-
-  if (rows.length === 0) return { ok: false, error: 'archivo_vacio' };
-  if (rows.length > 500) return { ok: false, error: 'maximo_500_filas_por_lote' };
-
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const svc = createServiceClient() as any;
-
-  // El negocio del lote entero llega del navegador: ajeno o inexistente, el lote no se
-  // prepara (cada fila sin codigo propio heredaria ese id).
-  if (opts.negocio_id_lote && !(await negocioEsDelWorkspace(svc, opts.negocio_id_lote, workspaceId))) {
-    return { ok: false, error: 'negocio_no_encontrado' };
-  }
-
-  // Resolver mapping codigo → negocio_id (para columna negocio_codigo)
-  const codigos = Array.from(
-    new Set(
-      rows
-        .map(r => String(r.negocio_codigo ?? '').trim())
-        .filter(c => c.length > 0)
-    )
-  );
-  const codigoToId = new Map<string, string>();
-  if (codigos.length > 0) {
-    const { data: negs } = await svc.from('negocios')
-      .select('id, codigo')
-      .eq('workspace_id', workspaceId)
-      .in('codigo', codigos);
-    for (const n of (negs ?? []) as Array<{ id: string; codigo: string }>) {
-      codigoToId.set(n.codigo, n.id);
-    }
-  }
-
-  const loteId = crypto.randomUUID();
-  const filas: FilaLotePreparada[] = rows.map((fila, idx) => {
-    const tipoPersona = String(fila.tipo_persona ?? '').trim().toLowerCase() as TipoPersona;
-    const nombre = String(fila.nombre_completo ?? '').trim();
-    const tipoDoc = String(fila.tipo_documento ?? '').trim().toUpperCase() as TipoDocumento;
-    const numDoc = String(fila.numero_documento ?? '').trim();
-    const negocioCodigo = String(fila.negocio_codigo ?? '').trim();
-
-    const negocioId = negocioCodigo
-      ? codigoToId.get(negocioCodigo) ?? null
-      : opts.negocio_id_lote ?? null;
-
-    const tipoValido = tipoPersona === 'natural' || tipoPersona === 'juridica';
-    const tieneDoc = !!(numDoc && tipoDoc);
-
-    // Al menos un dato identificador: nombre o documento (consistente con el motor).
-    if (!tipoValido || (!nombre && !tieneDoc)) {
-      return {
-        posicion: idx + 1,
-        input: {
-          tipo: tipoPersona === 'juridica' ? 'juridica' : 'natural',
-          ...(nombre ? { nombre } : {}),
-        },
-        negocio_id: negocioId,
-        error: 'tipo_persona invalido o fila sin nombre ni documento',
-      };
-    }
-
-    const input: ValidaConsultaInput = {
-      tipo: tipoPersona,
-      ...(nombre ? { nombre } : {}),
-      ...(tieneDoc ? { documento: { tipo: tipoDoc, numero: numDoc } } : {}),
-    };
-
-    return {
-      posicion: idx + 1,
-      input,
-      negocio_id: negocioId,
-      error: null,
-    };
-  });
-
-  return {
-    ok: true,
-    data: { lote_id: loteId, total: filas.length, filas },
-  };
 }
 
 // ─── Descargar PDF reporte individual ─────────────────────────────────────

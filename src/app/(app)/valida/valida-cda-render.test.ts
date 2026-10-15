@@ -25,11 +25,19 @@ vi.mock('@/lib/valida-cda/acciones', () => ({ aprobarEntradaValidaCda: async () 
 vi.mock('@/lib/actions/valida-consultas', () => ({
   consultarValida: async () => ({ ok: false, error: 'x' }),
   descargarPlantillaValida: async () => ({ ok: false, error: 'x' }),
-  prepararLoteValida: async () => ({ ok: false, error: 'x' }),
   descargarPDFConsultaValida: async () => ({ ok: false, error: 'x' }),
   generarPDFLoteValida: async () => ({ ok: false, error: 'x' }),
   listarConsultasValida: async () => ({ ok: true, consultas: [] }),
   buscarNegociosParaValida: async () => ({ ok: true, negocios: [] }),
+}))
+vi.mock('@/lib/actions/valida-lotes', () => ({
+  crearLoteValida: async () => ({ ok: false, error: 'x' }),
+  progresoLoteValida: async () => ({ ok: false, error: 'x' }),
+  loteVigenteValida: async () => ({ ok: true, lote: null }),
+  reanudarLoteValida: async () => ({ ok: false, error: 'x' }),
+  cancelarLoteValida: async () => ({ ok: false, error: 'x' }),
+  pdfLoteValida: async () => ({ ok: false, error: 'x' }),
+  resultadosLoteValida: async () => ({ ok: false, error: 'x' }),
 }))
 vi.mock('@/components/tutorial/TutorialTour', () => ({ default: () => null }))
 
