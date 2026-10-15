@@ -30,7 +30,7 @@ tsc limpio y 15.328 pruebas verdes.
 - **Medir el servidor sin producción**: `test/latencia-doble.ts` (25 ms por ida, las de `Promise.all` se
   solapan). Calza con el `Server-Timing` de Vera: modelo 1,7 s contra 2,0–2,4 s reales. `LISTAR_IDAS=1` en
   `por-pasos-aceptar-tiempos-e2e` lista cada ida.
-- **Sin decidir:** un hotel de varias habitaciones en un solo pantallazo queda «sin costo» (TP4 por diseño).
-  La propuesta es costo = total y PDF por habitación; la aprueba Mauricio.
+- **Decidido el 2026-10-14:** un hotel de varias habitaciones en un solo pantallazo cuesta su total, sin partirlo
+  (ver [[cotizacion-reverificacion-d]]).
 
 Relacionado: [[cotizacion-integrada-c1-c6]], [[cotizacion-integrada-c0]], [[pruebas-por-mutacion]].
