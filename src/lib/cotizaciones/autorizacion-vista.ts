@@ -30,6 +30,8 @@ export interface AutorizacionDeLaVista {
   esDueno: boolean
   vigente: { por: string; motivo: string } | null
   perdida: boolean
+  /** Lo que dice la pantalla cuando la autorización ya no vale: la causa guardada, en palabras. */
+  textoPerdida: string | null
   pedido: { por: string | null } | null
   disponible: boolean
 }
@@ -46,7 +48,21 @@ export function autorizacionDeLaSalida(
     esDueno: vigente ? salida.esDueno === true || salida.puedeAutorizar : salida.puedeAutorizar,
     vigente,
     perdida: !!salida.perdida,
+    textoPerdida: salida.perdida ? textoDePerdida(salida.perdida) : null,
     pedido,
     disponible: salida.excepcionesDisponibles,
   }
+}
+
+/** La causa que deja «Retirar la autorización» (`retirarAutorizacionPorPasos`). */
+export const CAUSA_RETIRADA = 'La retiró el dueño.'
+
+/**
+ * Por qué la autorización ya no vale, en la pantalla. Re-verificación D: después de «Retirar la
+ * autorización» decía «se perdió: cambió el margen o un costo», que no era la causa.
+ */
+export function textoDePerdida(perdida: unknown): string {
+  const causa = perdida && typeof perdida === 'object' ? (perdida as { causa?: unknown }).causa : null
+  if (causa === CAUSA_RETIRADA) return 'El dueño retiró la autorización.'
+  return 'La autorización se perdió: cambió el margen o un costo.'
 }

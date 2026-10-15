@@ -21,6 +21,7 @@ import type { Borrador } from './proceso-captura'
 import { definicionDeTipo, type TipoRanura } from './ranuras-cotizacion'
 import type { Composicion } from './tarifa-pasajero'
 import type { LineaParaUbicar } from './ubicar-lectura'
+import { resolverRanura } from './ranuras-pantallazo'
 import { lugarDeBloqueNuevo } from './actividad-pantallazo'
 
 export type EstadoAlAceptar = 'incluido' | 'opcional'
@@ -169,4 +170,21 @@ export function filasDelLote(listas: readonly {
     ...(l.estado ? { estado: l.estado } : {}),
     ...(l.frase.capturaDestino && ids.has(l.frase.capturaDestino) ? { destinoCaptura: l.frase.capturaDestino } : {}),
   }))
+}
+
+/**
+ * Re-verificación D · el pantallazo de una opción BORRADA vuelve a la bandeja sabiendo dónde
+ * estaba: si su pista no trae lugar, se toma del servicio del que salió («Traslado en San Andrés»
+ * → «San Andrés»). Sin esto la frase decía «Suma aparte: Traslado», sin el lugar. Un vuelo no se
+ * nombra por lugar; una pista que ya trae lugar no se toca.
+ */
+export function pistasConLugarDelServicio(
+  pistas: { lugar: string | null; origen: string | null; destino: string | null },
+  grupo: string | null | undefined,
+): { lugar: string | null; origen: string | null; destino: string | null } {
+  if (pistas.lugar) return pistas
+  const inst = resolverRanura(grupo ?? null)
+  if (!inst || inst.definicion.slug === 'vuelo_detalle') return pistas
+  const m = /\ben\s+(.+)$/i.exec((inst.nombre ?? '').trim())
+  return m ? { ...pistas, lugar: m[1].trim() } : pistas
 }

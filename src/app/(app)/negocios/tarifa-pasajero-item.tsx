@@ -28,6 +28,7 @@ import {
   composicionDeLinea,
   confirmacionDesactualizada,
   confirmadaVigente,
+  costosAManoComoMapa,
   describirOcupacion,
   faltanPorAcomodar,
   textoFaltanPorAcomodar,
@@ -171,7 +172,12 @@ export default function TarifaPasajeroItem({
   const confirmacionVieja = confirmacionDesactualizada(tarifa, composicion)
 
   const defs = composicion ? casillasDe(composicion, ranura.slug) : []
-  const estado = composicion ? resolverTarifa(composicion, casillasConEstadia(casillas, tarifa.correcciones), ranura.slug, { moneda: monedaTarifa.moneda }) : null
+  const estado = composicion ? resolverTarifa(composicion, casillasConEstadia(casillas, tarifa.correcciones), ranura.slug, {
+    moneda: monedaTarifa.moneda,
+    // Lo escrito a mano en la forma por pasos (P12), igual que el servidor al confirmar: sin
+    // esto la tarjeta seguía pidiendo «busca con 6 adultos y 1 niño» después de «Completa».
+    aMano: costosAManoComoMapa(tarifa),
+  }) : null
   const primera = casillas.grupo_completo
   const primeraResuelve = !!(composicion && primera && traeDesgloseCompleto(primera, composicion))
 

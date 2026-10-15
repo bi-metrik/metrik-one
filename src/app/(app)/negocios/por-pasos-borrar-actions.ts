@@ -14,6 +14,7 @@
  * Todo con el interruptor encendido: con él apagado se rechaza sin escribir (N5).
  */
 
+import { pistasConLugarDelServicio } from '@/lib/cotizaciones/bandeja-por-pasos'
 import { getWorkspace } from '@/lib/actions/get-workspace'
 import { lecturasParaLaBandeja, type LecturaDevuelta } from '@/app/(app)/negocios/tarifa-pax-actions'
 import { exigirPorPasos } from '@/lib/cotizaciones/por-pasos-datos'
@@ -73,7 +74,9 @@ export async function borrarOpcionesPorPasos(
   const devueltas: Record<string, LecturaDevuelta[]> = {}
   for (const id of ids) {
     const l = await lecturasParaLaBandeja(id)
-    devueltas[id] = l.ok ? l.devueltas : []
+    // Re-verificación D · vuelve con el lugar del servicio del que salió («en San Andrés»).
+    const grupo = fotos.find(f => f.item.id === id)?.item.grupo as string | null | undefined
+    devueltas[id] = l.ok ? l.devueltas.map(d => ({ ...d, pistas: pistasConLugarDelServicio(d.pistas, grupo) })) : []
   }
 
   const { error: errDel } = await supabase.from('items').delete().in('id', ids).eq('cotizacion_id', cotizacionId)

@@ -3655,6 +3655,7 @@ export default function CotizacionEditor({ oportunidadId, cotizacion, initialIte
       salida: salidaVista as never,
       pantallazosPorAceptar: conteoBandeja.porAceptar,
       texto: estadoTexto as 'nada' | 'sinrevisar' | 'viejo' | 'ok',
+      parrafosMarcados: textoCliente?.parrafosViejos ? textoCliente.parrafosViejos.length : null,
       noVan: [...noVan.values()],
       faltaDia: avisoFaltaDia ?? null,
       margenBajoAviso: null,
