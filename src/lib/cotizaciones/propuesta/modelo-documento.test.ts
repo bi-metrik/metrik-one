@@ -336,6 +336,8 @@ describe('las secciones del prototipo', () => {
     expect(salida.porTarifa.map((x) => x.tarifas)).toEqual([[R], [E], [P]])
     // Como el prototipo v4: aerolínea, hora, directo o vía. Con cajas, la hora va en cada una.
     expect(salida.porTarifa.map((x) => x.texto)).toEqual(['Air France 18:45, vía Paris', 'Avianca 19:20, directo', 'Iberia 16:55, directo'])
+    // Cada caja lleva la sigla de su aerolínea, para la pastilla (brief del 2026-10-08).
+    expect(salida.porTarifa.map((x) => x.siglas)).toEqual([['AF'], ['AV'], ['IB']])
     expect(salida.hora).toBeNull()
     // Llega al día siguiente: ese día dice a qué hora llega cada versión.
     const llega = m.dias[1].eventos[0]

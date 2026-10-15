@@ -27,6 +27,7 @@ import type {
 } from '@/lib/cotizaciones/propuesta/modelo-documento'
 import { notaDeFila } from '@/lib/viaje/asi-puedes-pagar'
 import { CSS_PROPUESTA, ICONOS_PROPUESTA } from './estilos'
+import { nombreDeAerolinea, pastillaAerolinea, pastillasDeVuelo } from './aerolinea'
 
 export interface FotoResuelta {
   /** data URL ya reducida. */
@@ -359,7 +360,7 @@ function renglonDeEvento(e: EventoDoc, d: DiaDoc, porIndice: Map<number, TarifaD
         .filter((t): t is TarifaDoc => t !== undefined)
         .map((t) => `<span class="c${LETRA[t.clave]} fl">${esc(t.nombre)}</span>`)
         .join(' · ')
-      return `<div>${nombres || '<span class="fl">Todas</span>'}<br>${esc(pt.texto)}</div>`
+      return `<div>${nombres || '<span class="fl">Todas</span>'}<br>${(pt.siglas ?? []).map(pastillaAerolinea).join('')}${esc(pt.texto)}</div>`
     })
     .join('')
   return `${linea}<div class="opt3" style="grid-template-columns:repeat(${Math.min(3, e.porTarifa.length)},1fr)">${celdas}</div>`
@@ -467,10 +468,10 @@ function vuelos(m: ModeloPropuesta): string {
     const cols = conTarifas ? 4 : 3
     const sub = `<tr class="sub"><td colspan="${cols}">${esc(g.titulo)}</td></tr>`
     const cuerpo = g.filas.map((f) => {
-      const vuelo = [f.aerolinea, f.numero].filter(Boolean).join(' ')
+      const vuelo = [nombreDeAerolinea(f.aerolinea, f.numero), f.numero].filter(Boolean).join(' ')
       const horario = f.salida || f.llegada ? `${f.salida ?? '?'} → ${f.llegada ?? '?'}` : ''
       const equipaje = [f.tarifaAerolinea, f.equipaje, ...f.adicionales].filter(Boolean).join(' · ')
-      return `<tr>${conTarifas ? `<td>${etiquetasDe(f.tarifas.length > 0 ? f.tarifas : m.tarifas.map((t) => t.indice), porIndice)}</td>` : ''}<td><span class="fl">${esc(vuelo)}</span>${f.escala ? `<br>${esc(f.escala)}` : ''}</td><td>${esc(horario)}</td><td>${esc(equipaje)}</td></tr>`
+      return `<tr>${conTarifas ? `<td>${etiquetasDe(f.tarifas.length > 0 ? f.tarifas : m.tarifas.map((t) => t.indice), porIndice)}</td>` : ''}<td>${pastillasDeVuelo(f.aerolinea, f.numero)}<span class="fl">${esc(vuelo)}</span>${f.escala ? `<br>${esc(f.escala)}` : ''}</td><td>${esc(horario)}</td><td>${esc(equipaje)}</td></tr>`
     })
     // Cada tramo (ida, regreso) es un bloque que no se parte; la tabla sí puede seguir en la
     // hoja siguiente, con la cabecera repetida. Antes la tabla entera no se partía y, detrás de
@@ -559,10 +560,10 @@ function eligeTuVersion(m: ModeloPropuesta): string {
     const pp = ['el grupo', t.estrellas ? `${t.estrellas}★` : null].filter(Boolean).join(' · ')
     const filasVuelo = gruposDeVuelos({ ...m, vuelos: t.vuelos }).map((g) => {
       const f = g.filas[0]
-      const vuelo = [f.aerolinea, f.numero].filter(Boolean).join(' ')
+      const vuelo = [nombreDeAerolinea(f.aerolinea, f.numero), f.numero].filter(Boolean).join(' ')
       const horas = f.salida || f.llegada ? ` · ${f.salida ?? '?'} → ${f.llegada ?? '?'}` : ''
       const extra = [f.tarifaAerolinea, f.equipaje, ...f.adicionales].filter(Boolean).join(' · ')
-      return `<div class="row"><b>${esc(g.titulo.split(' · ')[0])}${f.fecha ? ` · ${esc(diaCorto(f.fecha) ?? '')}` : ''}</b>${esc(vuelo)}${f.escala ? ` · ${esc(f.escala)}` : ''}${esc(horas)}${extra ? `<br><span class="muted">${esc(extra)}</span>` : ''}</div>`
+      return `<div class="row"><b>${esc(g.titulo.split(' · ')[0])}${f.fecha ? ` · ${esc(diaCorto(f.fecha) ?? '')}` : ''}</b>${pastillasDeVuelo(f.aerolinea, f.numero)}${esc(vuelo)}${f.escala ? ` · ${esc(f.escala)}` : ''}${esc(horas)}${extra ? `<br><span class="muted">${esc(extra)}</span>` : ''}</div>`
     })
     const hoteles = t.hoteles.length > 0
       ? `<div class="row"><b>Hoteles</b>${t.hoteles.map((h) => `${esc(h.nombre)} ${estrellas(h.estrellas)}`).join('<br>')}</div>`
