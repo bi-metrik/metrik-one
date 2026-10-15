@@ -174,7 +174,11 @@ export function cotizacionParaLaCopia(
  */
 export function documentoClienteSinRevisar(raw: unknown): unknown {
   if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return raw ?? null
-  return { ...(raw as Record<string, unknown>), revisado_en: null, revisado_por: null, revisado_por_nombre: null }
+  // El anticipo para apartar tampoco viaja (`propuesta/anticipo.ts`): es un monto de ESE precio.
+  const { anticipo: _anticipo, ...resto } = raw as Record<string, unknown>
+  void _anticipo
+  if (Object.keys(resto).length === 0) return null
+  return { ...resto, revisado_en: null, revisado_por: null, revisado_por_nombre: null }
 }
 
 /**

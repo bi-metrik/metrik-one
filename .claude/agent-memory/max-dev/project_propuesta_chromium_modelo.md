@@ -6,7 +6,7 @@ metadata:
 ---
 
 Plan en `proyectos/trappvel/clarity/diseno/propuesta-emocional/max.md` §3 (orden 0 → 1 → 3 → 2 → 4 → 6 → 5 → 7 → 8).
-Abiertos el 2026-10-14, SIN mergear (los mergea la sesión principal):
+Abiertos el 2026-10-14 y mergeados el mismo día (siguen: [[propuesta-motor-html-h33]]):
 
 - **#1161 (PR 0):**
   - `src/lib/pdf/chromium/` y la ruta `/api/interno/ensayo-chromium`. El GET queda abierto solo en preview; en producción y para el POST, solo platform admin.

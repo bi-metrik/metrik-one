@@ -47,7 +47,12 @@ import {
   plantillaImprimePreciosConIva,
   plantillaUsaFotosDeCiudad,
   plantillaUsaTextoDelCliente,
+  usaMotorHtml,
 } from '@/lib/pdf/plantillas-cotizacion'
+import type { ServicioDelDocumento } from '@/lib/cotizaciones/propuesta/modelo-documento'
+import { serviciosDelDocumento } from '@/lib/cotizaciones/propuesta/servicios-del-documento'
+import { leerAnticipo } from '@/lib/cotizaciones/propuesta/anticipo'
+import { whatsappDesdeTelefono } from '@/lib/contactos/telefono'
 import { avisoDelTextoEnPdf, avisoDelTextoViejoEnPdf, leerDocumentoCliente, textoParaElViaje } from '@/lib/cotizaciones/documento-cliente'
 import { incluyeDeOne } from '@/lib/cotizaciones/incluye-por-one'
 import { leerContextoTextoCliente } from '@/lib/cotizaciones/documento-cliente-datos'
@@ -644,6 +649,9 @@ export async function generateCotizacionPDF(cotizacionId: string) {
   // llama al servicio externo: pedirle un template que no tiene daria un 4xx y una
   // caida al fallback, o sea el PDF generico con aspecto de exito.
   const plantillaPropia = plantillaCotizacionPropia(templateSlug)
+  // Motor `html` (propuesta de viaje con Chromium, 2026-10-14): solo con la plantilla propia y
+  // encendido por workspace. Apagado no se calcula nada nuevo y el PDF es el de siempre.
+  const motorHtml = plantillaPropia !== null && usaMotorHtml(templateSlug, ws?.config_extra)
   const useService =
     isPdfRenderConfigured() && templateSlug !== PLANTILLA_POR_DEFECTO && !plantillaPropia
 
@@ -1096,6 +1104,8 @@ export async function generateCotizacionPDF(cotizacionId: string) {
   const itemsImpresos = lineasQueDescribeElDocumento(items, idsDelPrincipal, aportaDoc)
 
   let viajePDF: CotizacionPDFProps['viaje'] = null
+  // Motor `html`: los traslados, trenes y actividades que @react-pdf no recibe (pendiente del PR 1).
+  let serviciosDoc: ServicioDelDocumento[] = []
   // «Así puedes pagar» (F2, PR 7): solo con `plan_pagos.activo` en la línea del negocio.
   let entradaPlan: CotizacionPDFProps['asiPuedesPagar'] = null
   // Un borrador de ONE sin revisar no sale en el PDF; se avisa, sin bloquear la descarga.
@@ -1170,6 +1180,27 @@ export async function generateCotizacionPDF(cotizacionId: string) {
         const url = await imagenComoDataUrl(workspaceId, h.fotoRef)
         return url ? { ...h, foto: { url, proporcion: h.fotoProporcion ?? null } } : h
       }))
+    }
+    if (motorHtml) {
+      // Con varias tarifas, cada servicio lleva las tarifas a las que pertenece (los mismos
+      // índices que marcan vuelos y hoteles); con una, los que describe el documento.
+      const marcas = new Map<string, number[]>()
+      if (bloques && bloques.length > 1) {
+        bloques.forEach((b, idx) => {
+          for (const id of b.itemIds) marcas.set(id, [...(marcas.get(id) ?? []), idx])
+        })
+      }
+      const fuente = marcas.size > 0
+        ? [...marcas.keys()].map(id => itemPorId.get(id)).filter((i): i is ItemRow => i !== undefined)
+        : itemsImpresos
+      serviciosDoc = serviciosDelDocumento(
+        fuente.map(i => ({
+          ...paraLecturaDe(i),
+          dia_relativo: i.dia_relativo ?? null,
+          ...(i.id && marcas.has(i.id) ? { tarifas: marcas.get(i.id) } : {}),
+        })),
+        delNegocio.fechas.inicio,
+      )
     }
     const config = leerConfigDocumentoViaje(ws?.config_extra)
     const destino = delNegocio.destino ?? destinoDeItinerario(vuelos, hoteles)
@@ -1297,11 +1328,36 @@ export async function generateCotizacionPDF(cotizacionId: string) {
   // Una plantilla que se COMPONE (Trappvel: renderiza, mide el PDF y recompone para que la
   // última hoja trabaje) se entrega por su compositor; las demás se renderizan una vez.
   const compositor = compositorDePlantilla(templateSlug)
-  const buffer = compositor
-    ? await compositor(propsPDF)
-    // renderToBuffer espera DocumentElement; nuestro createElement lo produce correctamente en runtime
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    : await renderToBuffer(createElement(plantillaPropia ?? CotizacionPDF, propsPDF) as any)
+  let buffer: Buffer | null = null
+  let renderedVia: 'react-pdf' | 'chromium' = 'react-pdf'
+  let avisoFormato: string | null = null
+  if (motorHtml) {
+    // Si el motor nuevo falla (Chromium, tiempo, una foto rota), el cliente no se queda sin
+    // cotización: sale la de @react-pdf y quien descarga lo sabe.
+    try {
+      buffer = await propuestaConMotorHtml(supabase, {
+        props: propsPDF,
+        servicios: serviciosDoc,
+        documentoCliente: (cot as unknown as Record<string, unknown>).documento_cliente,
+        staffId: staffId ?? null,
+        marca: ws?.name ?? 'Mi Empresa',
+        logoUrl: ws?.logo_url ?? null,
+      })
+      renderedVia = 'chromium'
+    } catch (e) {
+      console.error('[cotizacion-pdf] el motor html falló; sale el formato anterior:', e instanceof Error ? e.message : e)
+      avisoFormato = AVISO_FORMATO_ANTERIOR
+    }
+  }
+  if (!buffer) {
+    buffer = compositor
+      ? await compositor(propsPDF)
+      // renderToBuffer espera DocumentElement; nuestro createElement lo produce correctamente en runtime
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      : await renderToBuffer(createElement(plantillaPropia ?? CotizacionPDF, propsPDF) as any)
+  }
+  // La clave solo existe con el motor encendido: apagado, la respuesta es la de siempre.
+  const conMotor = motorHtml ? { avisoFormato } : {}
 
   // Borrador: marca de agua y fuera, sin guardar ni registrar (ver `esBorrador`).
   if (esBorrador) {
@@ -1317,7 +1373,8 @@ export async function generateCotizacionPDF(cotizacionId: string) {
       // Mismo criterio que en el camino del servicio externo: el borrador no calla el aviso.
       avisosCaptura,
       avisoTexto,
-      renderedVia: 'react-pdf' as const,
+      ...conMotor,
+      renderedVia,
     }
   }
 
@@ -1355,6 +1412,60 @@ export async function generateCotizacionPDF(cotizacionId: string) {
     avisoTexto,
     // H33: ver el comentario del camino externo.
     envioRegistrado: false,
-    renderedVia: 'react-pdf' as const,
+    ...conMotor,
+    renderedVia,
   }
+}
+
+const AVISO_FORMATO_ANTERIOR =
+  'La propuesta salió con el formato anterior: el formato nuevo no se pudo generar esta vez. Si se repite, avísale a MéTRIK.'
+
+/**
+ * El PDF con el motor `html` (`src/lib/pdf/html/propuesta-html.ts`). Se carga a demanda: sharp,
+ * puppeteer y las fuentes solo los paga el workspace que lo tiene encendido.
+ *
+ * Lo que el modelo recibe además de las props de @react-pdf:
+ *  · los servicios (traslados, trenes, actividades);
+ *  · el anticipo que la asesora asignó (`documento_cliente.anticipo`); sin él, ninguna cifra;
+ *  · quien genera, con su WhatsApp (`staff.phone_whatsapp`), para el botón de apartar.
+ * Los nombres de los viajeros no van: ONE no los guarda todavía (decisión 1, queda la guarda).
+ */
+async function propuestaConMotorHtml(
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  supabase: any,
+  e: {
+    props: CotizacionPDFProps
+    servicios: ServicioDelDocumento[]
+    documentoCliente: unknown
+    staffId: string | null
+    marca: string
+    logoUrl: string | null
+  },
+): Promise<Buffer> {
+  let asesora: { nombre: string | null; whatsapp: string | null } | null = null
+  if (e.staffId) {
+    const { data } = await supabase
+      .from('staff')
+      .select('full_name, phone_whatsapp')
+      .eq('id', e.staffId)
+      .maybeSingle()
+    const fila = data as { full_name?: string | null; phone_whatsapp?: string | null } | null
+    if (fila) asesora = { nombre: fila.full_name?.trim() || null, whatsapp: whatsappDesdeTelefono(fila.phone_whatsapp) }
+  }
+  const { pdfDePropuestaHtml } = await import('@/lib/pdf/html/propuesta-html')
+  const { pdf, medidas } = await pdfDePropuestaHtml(
+    {
+      props: e.props,
+      servicios: e.servicios,
+      anticipo: leerAnticipo(e.documentoCliente),
+      asesora,
+    },
+    {
+      marca: e.marca,
+      logoUrl: e.logoUrl,
+      fotoDeCiudad: ciudad => fotosDeCiudad(ciudad).map(f => ({ url: f.ruta, rotulo: f.rotulo, credito: f.credito, foco: f.foco, proporcion: f.proporcion })),
+    },
+  )
+  console.info('[pdf-html] propuesta', JSON.stringify({ totalMs: medidas.totalMs, pdfBytes: medidas.pdfBytes, bloqueadas: medidas.peticionesBloqueadas.length }))
+  return pdf
 }
