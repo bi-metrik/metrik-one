@@ -281,3 +281,43 @@ describe('planes que cobran con la tarjeta guardada (pasarela epayco)', () => {
     expect(c2.subject).not.toContain('No pudimos cobrar')
   })
 })
+
+describe('generarEnlacesAutomaticos sobre una suscripción (suscripciones_producto)', () => {
+  function deSuscripcion(): Tablas {
+    return tablasBase({
+      servicios_contratados: [
+        {
+          id: 'sc1', workspace_id: 'wsM', negocio_id: null, suscripcion_id: 's1', estado: 'activo', vigente_desde: '2026-09-01',
+          aceptante_designado_id: 'p1', workspace_pagador_id: 'wsC',
+        },
+      ],
+      planes_cobro: [{ id: 'plan1', workspace_id: 'wsM', negocio_id: null, suscripcion_id: 's1', total_cuotas: 3, pasarela: 'manual', activo: false }],
+      suscripciones_producto: [{ id: 's1', workspace_id: 'wsM', workspace_cliente_id: 'wsC', datos_fiscales: {} }],
+      suscripciones_producto_eventos: [],
+    })
+  }
+
+  it('genera el enlace, el cobro cuelga de la suscripción y el aviso va a su bitácora (no a avisos_cliente ni a activity_log)', async () => {
+    const r = await correr(deSuscripcion())
+    expect(r.resumen.errores).toEqual([])
+    expect(r.resumen.generados.map((g) => g.numero)).toEqual([1, 2])
+    expect(r.resumen.generados[0]).toMatchObject({ negocioId: null, suscripcionId: 's1' })
+    const c1 = programado(r.tablas, 1)!
+    expect(c1).toMatchObject({ negocio_id: null, suscripcion_id: 's1', fecha: null })
+    expect(r.enviar).toHaveBeenCalledTimes(2)
+    expect(r.tablas.avisos_cliente).toHaveLength(0)
+    expect(r.tablas.activity_log).toHaveLength(0)
+    const tipos = (r.tablas.suscripciones_producto_eventos as Fila[]).map((e) => e.tipo)
+    expect(tipos.filter((t) => t === 'aviso_enlace')).toHaveLength(2)
+    expect(tipos.filter((t) => t === 'enlace_pago')).toHaveLength(2)
+  })
+
+  it('un contrato de negocio no le presta su plan a una suscripción con el mismo espacio', async () => {
+    const t = deSuscripcion()
+    // El contrato de la suscripción está cancelado; uno de negocio vivo en el mismo espacio no la cubre.
+    t.servicios_contratados[0].estado = 'cancelado'
+    t.servicios_contratados.push({ id: 'sc2', workspace_id: 'wsM', negocio_id: 'n9', estado: 'activo', vigente_desde: '2026-09-01', workspace_pagador_id: 'wsC' })
+    const r = await correr(t)
+    expect(r.resumen.generados).toEqual([])
+  })
+})

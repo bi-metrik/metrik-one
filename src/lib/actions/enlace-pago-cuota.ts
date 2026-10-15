@@ -34,7 +34,9 @@ export async function generarEnlacePagoDeCuota(cuotaId: string): Promise<Resulta
   const r = await generarEnlacePagoCuota({ workspaceId, cuotaId }, { db })
   if (!r.ok) return r
 
-  if (r.estado === 'generado' && staffId) {
+  // Una cuota de suscripción no tiene negocio ni timeline del CRM: su bitácora la deja el cron; desde el
+  // botón del negocio solo se llega a cuotas de negocios.
+  if (r.estado === 'generado' && staffId && r.negocioId) {
     await registrarActividad(
       db,
       {
@@ -50,6 +52,6 @@ export async function generarEnlacePagoDeCuota(cuotaId: string): Promise<Resulta
     )
   }
 
-  revalidatePath(`/negocios/${r.negocioId}`)
+  if (r.negocioId) revalidatePath(`/negocios/${r.negocioId}`)
   return { ok: true, estado: r.estado, url: r.url, expira: r.expira, monto: r.monto }
 }
