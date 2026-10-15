@@ -12,12 +12,14 @@ import {
   Quote,
   ShieldAlert,
   ShieldCheck,
+  Undo2,
   User,
   X,
 } from 'lucide-react';
 import {
   decidirVinculacion,
   detalleVinculacion,
+  devolverVinculacion,
   type DetalleVinculacion,
 } from '@/lib/actions/compliance-vinculacion';
 import {
@@ -44,6 +46,7 @@ import {
   resumirIntegridad,
   selloImpideAprobar,
   slotsFaltantes,
+  validarMotivoDevolucion,
   validarMotivoRechazo,
   type ConfidenceEstado,
   type EstadoExtraccion,
@@ -92,6 +95,8 @@ export default function DetalleClient({ inicial }: { inicial: DetalleVinculacion
   const [rechazando, setRechazando] = useState(false);
   const [motivo, setMotivo] = useState('');
   const [constancia, setConstancia] = useState(false);
+  const [devolviendo, setDevolviendo] = useState(false);
+  const [motivoDev, setMotivoDev] = useState('');
 
   const exp = d.expediente;
   const grupos = agruparCamposPorDocumento(d.campos, d.documentos);
@@ -105,6 +110,9 @@ export default function DetalleClient({ inicial }: { inicial: DetalleVinculacion
   const decidible = puedeDecidirse(exp.estado);
   const razon = razonNoDecidible(exp.estado);
   const errMotivo = rechazando ? validarMotivoRechazo(motivo) : null;
+  const errMotivoDev = devolviendo ? validarMotivoDevolucion(motivoDev) : null;
+  const devolucion = exp.estado === 'devuelto' ? exp.metadata?.devolucion ?? null : null;
+  const firmasAnteriores = exp.firmas_anteriores ?? [];
   // Aprobar un expediente al que le falta algo se permite: el criterio es del
   // oficial. Lo que no se permite es que después no se sepa que fue así.
   const exigeConstancia = exigeConstanciaSinLectura(d.alertas);
@@ -134,6 +142,27 @@ export default function DetalleClient({ inicial }: { inicial: DetalleVinculacion
       setMotivo('');
       setConstancia(false);
       setAviso(decision === 'aprobado' ? 'Contraparte vinculada.' : 'Vinculación rechazada.');
+    });
+  }
+
+  function devolver() {
+    startTransition(async () => {
+      setError(null);
+      setAviso(null);
+      const r = await devolverVinculacion({ expedienteId: exp.expediente_id, motivo: motivoDev });
+      if (!r.ok) {
+        setError(r.error);
+        return;
+      }
+      const rec = await detalleVinculacion(exp.expediente_id);
+      if (rec.ok) setD(rec.data);
+      setDevolviendo(false);
+      setMotivoDev('');
+      setAviso(
+        r.data.correo === 'enviado'
+          ? 'Expediente devuelto. A la contraparte le llegó el motivo con su enlace.'
+          : `Expediente devuelto, pero el correo no salió. Compártele este enlace: ${r.data.url ?? ''}`,
+      );
     });
   }
 
@@ -413,6 +442,36 @@ export default function DetalleClient({ inicial }: { inicial: DetalleVinculacion
       {/* ── La decisión ── */}
       <h2 className="text-base font-bold text-tinta mt-6 mb-2">Decisión</h2>
 
+      {devolucion && (
+        <div className="mb-3 rounded-lg border border-advertencia/30 bg-advertencia/5 p-4 text-sm">
+          <p className="font-semibold text-[#B45309]">
+            Devuelto a la contraparte el {fecha(devolucion.devuelto_en)}
+          </p>
+          <p className="text-[#4B5563] mt-1 whitespace-pre-wrap">{devolucion.motivo}</p>
+        </div>
+      )}
+
+      {firmasAnteriores.length > 0 && (
+        <div className="mb-3 rounded-lg border border-[#E5E7EB] p-4 text-sm">
+          <p className="font-semibold text-tinta">Firmas anteriores</p>
+          <p className="text-xs text-tinta-suave mt-0.5">
+            Se devolvieron para corregir. Quedan guardadas y no se pueden editar.
+          </p>
+          <ul className="mt-2 space-y-2">
+            {firmasAnteriores.map((f) => (
+              <li key={f.devuelta_en} className="border-t border-[#F3F4F6] pt-2">
+                <p className="text-tinta">
+                  Firmada el {fecha(f.firmado_en)}
+                  {f.firmante_nombre ? ` por ${f.firmante_nombre}` : ''} · devuelta el{' '}
+                  {fecha(f.devuelta_en)}
+                </p>
+                <p className="text-tinta-suave whitespace-pre-wrap">{f.motivo}</p>
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
+
       {exp.decision_oc ? (
         <div className="rounded-lg border border-[#E5E7EB] p-4 text-sm">
           <p className="font-semibold text-tinta">
@@ -438,7 +497,7 @@ export default function DetalleClient({ inicial }: { inicial: DetalleVinculacion
         <p className="text-sm text-tinta-suave">Solo el oficial de cumplimiento decide.</p>
       ) : (
         <div className="rounded-lg border border-[#E5E7EB] p-4">
-          {!rechazando ? (
+          {!rechazando && !devolviendo ? (
             <div>
               {exigeConstancia && (
                 <label className="flex items-start gap-2 mb-3 text-sm text-[#4B5563] cursor-pointer">
@@ -457,7 +516,9 @@ export default function DetalleClient({ inicial }: { inicial: DetalleVinculacion
                 </label>
               )}
               {selloBloquea && (
-                <p className="mb-3 text-sm text-[#B91C1C]">{selloBloquea}</p>
+                <p className="mb-3 text-sm text-[#B91C1C]">
+                  {selloBloquea} Puedes devolverlo para que la contraparte revise y firme de nuevo.
+                </p>
               )}
               <div className="flex flex-wrap gap-2">
               <button
@@ -471,11 +532,54 @@ export default function DetalleClient({ inicial }: { inicial: DetalleVinculacion
               <button
                 type="button"
                 disabled={pending}
+                onClick={() => setDevolviendo(true)}
+                className="inline-flex items-center gap-1.5 px-4 py-2 rounded-lg border border-[#D1D5DB] text-[#4B5563] text-sm font-semibold disabled:opacity-50"
+              >
+                <Undo2 className="w-4 h-4" /> Devolver para corregir
+              </button>
+              <button
+                type="button"
+                disabled={pending}
                 onClick={() => setRechazando(true)}
                 className="inline-flex items-center gap-1.5 px-4 py-2 rounded-lg border border-alerta/40 text-[#B91C1C] text-sm font-semibold disabled:opacity-50"
               >
                 <X className="w-4 h-4" /> Rechazar
               </button>
+              </div>
+            </div>
+          ) : devolviendo ? (
+            <div>
+              <label className="block text-xs font-semibold text-[#4B5563] mb-1">
+                Qué tiene que corregir la contraparte
+              </label>
+              <textarea
+                value={motivoDev}
+                onChange={(ev) => setMotivoDev(ev.target.value)}
+                rows={3}
+                placeholder="Le llega por correo con su enlace. Su firma actual pasa al historial y tendrá que firmar de nuevo."
+                className="w-full px-3 py-2 rounded-lg border border-[#E5E7EB] text-sm"
+              />
+              {errMotivoDev && <p className="text-xs text-[#B91C1C] mt-1">{errMotivoDev}</p>}
+              <div className="flex gap-2 mt-3">
+                <button
+                  type="button"
+                  disabled={pending || errMotivoDev !== null}
+                  onClick={devolver}
+                  className="px-4 py-2 rounded-lg bg-tinta text-white text-sm font-semibold disabled:opacity-50"
+                >
+                  Devolver y avisarle
+                </button>
+                <button
+                  type="button"
+                  disabled={pending}
+                  onClick={() => {
+                    setDevolviendo(false);
+                    setMotivoDev('');
+                  }}
+                  className="px-4 py-2 rounded-lg border border-[#E5E7EB] text-sm font-semibold text-[#4B5563]"
+                >
+                  Cancelar
+                </button>
               </div>
             </div>
           ) : (
