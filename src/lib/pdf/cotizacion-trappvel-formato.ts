@@ -424,9 +424,13 @@ function mismaEstadia(a: HotelPDF | null, b: HotelPDF): boolean {
  * «Providencia, San Andrés y Providencia, Colombia» (Bedsonline escribe la ciudad, el
  * departamento y el país). Comparando el texto entero eran dos ciudades, y el PDF abría
  * «Destino 2 de 2» para la misma isla.
+ *
+ * Tampoco la zona: la lectura escribe «Madrid - Sol» o «Ámsterdam · Herengracht» (el barrio del
+ * hotel), y la propuesta real de la prueba Europa (2026-10-14) decía «Llegada a Madrid - Sol».
+ * Solo con el separador entre espacios: «Saint-Tropez» o «Madrid-Barajas» siguen enteros.
  */
 export function ciudadDeCapitulo(ciudad: string | null | undefined): string | null {
-  const t = (ciudad ?? '').split(',')[0].trim()
+  const t = (ciudad ?? '').split(',')[0].split(/\s+[-–—·|/]\s+/)[0].trim()
   return t === '' ? null : t
 }
 

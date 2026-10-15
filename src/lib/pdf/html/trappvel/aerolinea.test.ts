@@ -69,7 +69,7 @@ describe('COT-2026-0026: la pastilla en cada lugar donde aparece un vuelo', () =
   })
 
   it('las cajitas del día a día: la aerolínea de cada versión', () => {
-    const d = seccion(h, 'class="sec brk dias"')
+    const d = seccion(h, 'class="sec dias"')
     const sale = d.slice(d.indexOf('<div class="d">10<small>'), d.indexOf('<div class="d">11<small>'))
     expect(siglas(sale)).toEqual(['AV', 'AF', 'IB'])
     expect(sale).toMatch(/>AV<\/span>Avianca 19:20, directo/)
@@ -92,7 +92,7 @@ describe('COT-2026-0026: la pastilla en cada lugar donde aparece un vuelo', () =
     const vuelos = VUELOS_EUROPA.map((v) => (v.numeroVuelo === 'AF423' ? { ...v, numeroVuelo: 'AF423 · KL1704' } : v))
     const h2 = html({ ...ENTRADA_EUROPA, props: { ...PROPS_EUROPA, viaje: { ...PROPS_EUROPA.viaje!, vuelos } } })
     expect(siglas(seccion(h2, '>Vuelos<'))).toEqual(['AV', 'AF', 'KL', 'IB', 'IB', 'LH', 'KL'])
-    const d = seccion(h2, 'class="sec brk dias"')
+    const d = seccion(h2, 'class="sec dias"')
     expect(siglas(d.slice(d.indexOf('<div class="d">10<small>'), d.indexOf('<div class="d">11<small>')))).toEqual(['AV', 'AF', 'KL', 'IB'])
     const recomendada = seccion(h2, '>Elijan su versión<').split('<div class="tf').slice(1)[1]
     expect(siglas(recomendada)).toEqual(['AF', 'KL', 'LH'])

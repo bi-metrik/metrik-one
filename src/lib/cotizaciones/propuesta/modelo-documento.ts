@@ -39,6 +39,7 @@ import type { CotizacionPDFProps, FotoPDF } from '@/lib/pdf/cotizacion-props'
 import type { HotelPDF, ServicioPDF, VueloPDF } from '@/lib/cotizaciones/detalle-viaje'
 import {
   capitulosDelViaje,
+  ciudadDeCapitulo,
   claveDeCiudad,
   claveDeFecha,
   conAnio,
@@ -64,6 +65,11 @@ export interface ServicioDelDocumento extends ServicioPDF {
   /** «09:30» si la lectura la trae. */
   hora?: string | null
   tarifas?: number[]
+  /**
+   * El trayecto de vuelta de un traslado de ida y vuelta cuya captura trae una sola fecha: la del
+   * de ida. El modelo le pone la salida de la estadía donde cae esa fecha (`trayectos.ts`).
+   */
+  fechaIda?: string | null
 }
 
 /** Un viajero con nombre. `menor` = niño o infante. */
@@ -526,9 +532,21 @@ export function modeloDePropuesta({
       opciones: [c.hotel, ...c.alternativas].filter((h): h is HotelPDF => h !== null).map(opcion).sort((a, b) => ordenDeOpcion(a) - ordenDeOpcion(b)),
     }
   })
+  // En el orden del viaje, no en el de las líneas: la COT-2026-0026 real decía «Madrid ·
+  // Ámsterdam · Barcelona · París» porque Ámsterdam se cargó segundo. Sin fecha, al final.
+  hoteles.sort((a, b) => (a.desde ?? '9999').localeCompare(b.desde ?? '9999'))
+
+  // El trayecto de vuelta sin fecha propia sale el día que termina la estadía donde cae el de ida
+  // («Amsterdam Centraal - hotel» el 21 y «hotel - aeropuerto Schiphol» el 23).
+  const serviciosConFecha: ServicioDelDocumento[] = servicios.map((s) => {
+    if (s.fecha || !s.fechaIda) return s
+    const ida = fechaIso(s.fechaIda, inicio)
+    const estadia = ida ? hoteles.find((h) => h.desde && h.hasta && ida >= h.desde && ida < h.hasta) : undefined
+    return estadia?.hasta ? { ...s, fecha: estadia.hasta } : s
+  })
 
   // ── Trenes y traslados ──
-  const filasTrayecto: TrayectoDoc[] = servicios
+  const filasTrayecto: TrayectoDoc[] = serviciosConFecha
     .filter((s) => s.tipo === 'traslado')
     .map((s) => ({
       tipo: esTren(s.descripcion) ? ('tren' as const) : ('traslado' as const),
@@ -563,8 +581,12 @@ export function modeloDePropuesta({
 
   // ── Elige tu versión ──
   for (const t of tarifas) {
-    const suyos = hotelesTodos.filter((h) => deLaTarifa(h, t.indice))
-    t.hoteles = suyos.map((h) => ({ nombre: h.hotel ?? h.linea, estrellas: h.estrellas ?? null, ciudad: h.ciudad }))
+    const suyos = hotelesTodos
+      .filter((h) => deLaTarifa(h, t.indice))
+      .map((h) => ({ h, desde: fechaIso(h.checkIn, inicio) ?? '9999' }))
+      .sort((a, b) => a.desde.localeCompare(b.desde))
+      .map((x) => x.h)
+    t.hoteles = suyos.map((h) => ({ nombre: h.hotel ?? h.linea, estrellas: h.estrellas ?? null, ciudad: ciudadDeCapitulo(h.ciudad) }))
     const conCategoria = suyos.map((h) => h.estrellas).filter((e): e is number => e !== null && e !== undefined)
     t.estrellas = conCategoria.length > 0 && conCategoria.length === suyos.length && conCategoria.every((e) => e === conCategoria[0]) ? conCategoria[0] : null
     t.vuelos = vuelos.filter((f) => deLaTarifa(f, t.indice))
@@ -605,7 +627,7 @@ export function modeloDePropuesta({
     const lugar = lugaresDeOpcionales[i] ?? null
     return {
       nombre: o.nombre,
-      descripcion: sinCancelacion(o.descripcion),
+      descripcion: descripcionDeOpcional(o.descripcion),
       valor: Math.round((o.precio_venta || 0) * (o.cantidad ?? 1)),
       unidad: o.unidad ?? null,
       ciudad: ciudadDelOpcional(lugar?.ciudad ?? null, `${o.nombre} ${o.descripcion ?? ''}`, paradas.map((x) => x.ciudad)),
@@ -614,12 +636,15 @@ export function modeloDePropuesta({
   })
 
   const noIncluye = [
-    ...new Set((v?.cargosEnDestino ?? []).map((c) => `${c.concepto}${c.ciudad ? ` (${c.ciudad})` : ''}, que se pagan en destino`)),
+    ...new Set((v?.cargosEnDestino ?? []).map((c) => {
+      const ciudad = ciudadDeCapitulo(c.ciudad)
+      return `${c.concepto}${ciudad ? ` (${ciudad})` : ''}, que se pagan en destino`
+    })),
     ...(opcionales.length > 0 ? ['Las actividades opcionales listadas al final de este documento'] : []),
   ]
 
   // ── Día a día ──
-  const dias = diaADia({ props, inicio, vuelos: v?.vuelos ?? [], hoteles: hotelesTodos, capitulos: hoteles, servicios, porTarifas, principal })
+  const dias = diaADia({ props, inicio, vuelos: v?.vuelos ?? [], hoteles: hotelesTodos, capitulos: hoteles, servicios: serviciosConFecha, porTarifas, principal })
   repartirOpcionales(dias, opcionales)
 
   // ── Portada y lo formal ──
@@ -627,15 +652,27 @@ export function modeloDePropuesta({
   const pie = v?.pie ?? [props.vendedor.nombre, props.vendedor.email, props.vendedor.telefono, props.vendedor.ciudad].filter(Boolean).join(' · ')
   const firma = v?.firma ?? (props.emisor ? { nombre: props.emisor.nombre, cargo: props.emisor.cargo, contacto: null } : null)
 
+  // Las noches son las de hotel: el vuelo nocturno no es noche (la COT-2026-0026 real decía
+  // «14 días / 13 noches» arriba e «Incluye 12 noches» al lado).
+  const nochesDeHotel = paradas.reduce((a, x) => a + (x.noches ?? 0), 0)
+  const diasDelViaje = Number(/(\d+)\s*d[ií]as?/i.exec(v?.duracion ?? '')?.[1] ?? 0) || (dias.length > 0 ? dias.length : 0)
+  const duracion = nochesDeHotel > 0 && diasDelViaje > 0
+    ? `${diasDelViaje} ${diasDelViaje === 1 ? 'día' : 'días'} · ${nochesDeHotel} ${nochesDeHotel === 1 ? 'noche' : 'noches'}`
+    : v?.duracion ?? null
+  const introGuardado = v?.intro?.trim() || null
+  const intro = introGuardado && textoConLaVozDelDocumento(introGuardado, nochesDeHotel)
+    ? introGuardado
+    : introDeterminista({ paradas, trenes: filasTrayecto.filter((t) => t.tipo === 'tren').length, hoteles, dias })
+
   return {
     portada: {
       consecutivo: props.cotizacion.consecutivo,
       titulo,
-      intro: v?.intro?.trim() || null,
+      intro,
       viajeros: v?.viajeros ?? null,
       destino: v?.destino ?? null,
       fechas: v?.fechas ?? null,
-      duracion: v?.duracion ?? null,
+      duracion,
       foto: v?.foto ?? null,
       fotosCiudades: v?.fotosCiudades ?? [],
       nombres: nombresParaLaPropuesta(viajeros, menoresAutorizados),
@@ -655,7 +692,7 @@ export function modeloDePropuesta({
       notaIva,
       totalEsDeLaRecomendada,
       lineas,
-      incluye: v?.incluye ?? [],
+      incluye: porTarifas ? incluyeDeTodas(v?.incluye ?? [], { hoteles, vuelos, tarifas: bloques.length, noches: nochesDeHotel }) : v?.incluye ?? [],
       noIncluye,
       planes,
       anticipo: anticipo && anticipo.monto > 0 ? anticipo : null,
@@ -665,11 +702,153 @@ export function modeloDePropuesta({
       pie,
       firma,
       creditos: creditosDeFotos([v?.foto, ...(v?.fotosCiudades ?? [])]),
-      antesDeViajar: v?.antesDeViajar ?? [],
+      antesDeViajar: (v?.antesDeViajar ?? []).map(enLaVozDelDocumento),
       asesora,
     },
     avisos,
   }
+}
+
+// ── Textos con datos reales (hallazgos de la COT-2026-0026 real, 2026-10-14) ──
+
+const MESES_CORTOS = ['ene', 'feb', 'mar', 'abr', 'may', 'jun', 'jul', 'ago', 'sep', 'oct', 'nov', 'dic']
+
+/** «2026-12-19» → «19 dic»: una fecha cruda no va al cliente. */
+function fechasLegibles(texto: string): string {
+  return texto.replace(/\b(\d{4})-(\d{2})-(\d{2})\b/g, (m, _a, mes, dia) => {
+    const nombre = MESES_CORTOS[Number(mes) - 1]
+    return nombre ? `${Number(dia)} ${nombre}` : m
+  })
+}
+
+/** «1 DÍA» → «1 día»; lo que ya viene en minúsculas o con mayúscula inicial queda igual. */
+function sinGritar(s: string): string {
+  return s === s.toUpperCase() && /[A-ZÁÉÍÓÚÑ]{2}/.test(s) ? s.toLowerCase() : s
+}
+
+/**
+ * La descripción corta de un plan opcional. La línea guarda la ficha del sistema («Ciudad: París ·
+ * Fecha: 2026-12-19 · Duración: 1 día · Idioma: Francés / Inglés · Proveedor: Explora Tours») y la
+ * propuesta real la imprimía entera: con el PROVEEDOR, que nunca va al cliente. Quedan la duración y
+ * el idioma («1 día · en francés o inglés»); la ciudad y el día ya están sobre la foto. El texto
+ * libre (sin «Campo:») queda como está, sin cancelación y con las fechas legibles.
+ */
+export function descripcionDeOpcional(descripcion: string | null | undefined): string | null {
+  const base = sinCancelacion(descripcion)
+  if (!base) return null
+  const salida: string[] = []
+  for (const parte of base.split(' · ').map((p) => p.trim()).filter(Boolean)) {
+    if (/proveedor|operador/i.test(parte)) continue
+    const campo = /^([A-Za-zÁÉÍÓÚáéíóúÑñ /]{3,30}):\s*(.+)$/.exec(parte)
+    if (!campo) {
+      salida.push(fechasLegibles(parte))
+      continue
+    }
+    const nombre = llano(campo[1]).trim()
+    const valor = sinGritar(campo[2].trim())
+    if (nombre === 'duracion') salida.push(valor)
+    else if (nombre === 'idioma' || nombre === 'idiomas') {
+      salida.push(/\ben\b/i.test(valor) ? valor[0].toLowerCase() + valor.slice(1) : `en ${valor.toLowerCase().replace(/\s*\/\s*/g, ' o ')}`)
+    } else if (nombre === 'incluye') salida.push(`Incluye ${valor[0].toLowerCase()}${valor.slice(1)}`)
+    // Ciudad, fecha, proveedor, precio, personas y demás campos de la ficha: fuera.
+  }
+  return salida.length > 0 ? salida.join(' · ') : null
+}
+
+/**
+ * ¿El texto guardado (`documento_cliente`) habla como la propuesta? La voz decidida es «ustedes»,
+ * sin exclamaciones (decisión de marca). El de Gemini de la COT-2026-0026 decía «¡Prepárese para un
+ * viaje por Europa! … 13 noches» (usted, exclamación y una noche de más). Un texto que no pasa no se
+ * imprime: sale el determinista (`introDeterminista`).
+ */
+export function textoConLaVozDelDocumento(texto: string, nochesDeHotel: number): boolean {
+  if (/[¡!]/.test(texto)) return false
+  if (/\busted\b/i.test(texto)) return false
+  // Imperativos de usted que los modelos repiten al abrir.
+  if (/\b(prep[aá]rese|disfrute|descubra|recuerde|tenga|llegue|conozca|rel[aá]jese|d[eé]jese|sum[eé]rjase|viva)\b/i.test(texto)) return false
+  const noches = /(\d+)\s+noches?\b/i.exec(texto)
+  if (noches && nochesDeHotel > 0 && Number(noches[1]) !== nochesDeHotel) return false
+  return true
+}
+
+const IMPERATIVOS_DE_USTED: [string, string][] = [
+  ['recuerde', 'recuerden'], ['llegue', 'lleguen'], ['tenga', 'tengan'], ['lleve', 'lleven'], ['verifique', 'verifiquen'],
+  ['revise', 'revisen'], ['consulte', 'consulten'], ['disfrute', 'disfruten'], ['prepárese', 'prepárense'],
+  ['asegúrese', 'asegúrense'], ['empaque', 'empaquen'], ['considere', 'consideren'], ['confirme', 'confirmen'],
+  ['presente', 'presenten'], ['evite', 'eviten'], ['reserve', 'reserven'], ['descubra', 'descubran'], ['conozca', 'conozcan'],
+]
+
+/**
+ * Un renglón del texto guardado («Antes de viajar»), llevado a la voz del documento: de usted a
+ * ustedes y sin exclamaciones. El de Gemini de la COT-2026-0026 decía «Recuerde llevar sus
+ * documentos», «Llegue al aeropuerto…», «le sugerimos empacar ropa abrigada». Solo cambia lo que
+ * conoce (una lista cerrada de imperativos y «le sugerimos»); el resto queda como se revisó.
+ */
+export function enLaVozDelDocumento(texto: string): string {
+  let t = texto.replace(/¡/g, '').replace(/!/g, '.').replace(/\.{2,}/g, '.')
+  for (const [uno, varios] of IMPERATIVOS_DE_USTED) {
+    t = t.replace(new RegExp(`(^|[^\\p{L}])(${uno})(?![\\p{L}])`, 'giu'), (_m, antes: string, palabra: string) =>
+      `${antes}${palabra[0] === palabra[0].toUpperCase() ? varios[0].toUpperCase() + varios.slice(1) : varios}`,
+    )
+  }
+  return t
+    .replace(/\b([Ll])e (sugerimos|recomendamos|pedimos|aconsejamos|recordamos)\b/g, '$1es $2')
+    .replace(/\busted\b/g, 'ustedes')
+    .replace(/\bUsted\b/g, 'Ustedes')
+    .trim()
+}
+
+/** «A», «A y B», «A, B y C». */
+function yLista(xs: string[]): string {
+  return xs.length <= 1 ? (xs[0] ?? '') : `${xs.slice(0, -1).join(', ')} y ${xs[xs.length - 1]}`
+}
+
+/** El intro armado solo con datos, en la voz del documento. `null` sin paradas. */
+export function introDeterminista(p: { paradas: ParadaDoc[]; trenes: number; hoteles: CiudadDoc[]; dias: DiaDoc[] }): string | null {
+  if (p.paradas.length === 0) return null
+  const noches = p.paradas.reduce((a, x) => a + (x.noches ?? 0), 0)
+  const ciudades = yLista(p.paradas.map((x) => x.ciudad))
+  const abre = noches > 0 ? `${noches} ${noches === 1 ? 'noche' : 'noches'} en ${ciudades}` : `Un viaje por ${ciudades}`
+  const tren = p.trenes > 0 && p.paradas.length > 1 ? ', y entre ciudades van en tren, de centro a centro' : ''
+  const frases = [`${abre}${tren}.`]
+  const regimenes = p.hoteles.flatMap((c) => c.opciones.map((o) => o.regimen ?? ''))
+  if (regimenes.length > 0 && regimenes.every((r) => /desayuno/i.test(r))) frases.push('Todos los hoteles incluyen el desayuno.')
+  if (p.dias.some((d) => d.libre)) frases.push('Los días libres quedan abiertos para que ustedes decidan.')
+  return frases.join(' ')
+}
+
+/**
+ * «Incluido en todas», de verdad en todas. El texto guardado describe la Recomendada («3 noches en
+ * el Hotel Catalonia Puerta del Sol», «Tiquetes … con Air France») y la propuesta real lo imprimía
+ * bajo «Incluido en todas», o sea que le decía al cliente de la Económica que dormía en el Catalonia.
+ * La línea que nombra un hotel o una aerolínea que cambia según la versión sale, y en su lugar va
+ * una sola que lo dice.
+ */
+export function incluyeDeTodas(
+  incluye: string[],
+  m: { hoteles: CiudadDoc[]; vuelos: FilaVueloDoc[]; tarifas: number; noches: number },
+): string[] {
+  const deUnaVersion = (tarifas: number[]) => tarifas.length > 0 && tarifas.length < m.tarifas
+  const nombres = (xs: (string | null)[]) =>
+    [...new Set(xs.filter((x): x is string => !!x).flatMap((x) => [llano(x).trim(), llano(x.replace(/^hotel\s+/i, '')).trim()]))].filter((x) => x.length >= 3)
+  const hoteles = nombres(m.hoteles.flatMap((c) => c.opciones.filter((o) => deUnaVersion(o.tarifas)).map((o) => o.hotel)))
+  const aerolineas = nombres(m.vuelos.filter((f) => deUnaVersion(f.tarifas)).map((f) => f.aerolinea))
+  const nombra = (linea: string, lista: string[]) => {
+    const t = ` ${llano(linea).replace(/[^a-z0-9]+/g, ' ')} `
+    return lista.some((n) => t.includes(` ${n.replace(/[^a-z0-9]+/g, ' ').trim()} `))
+  }
+  const desayuno = m.hoteles.length > 0 && m.hoteles.every((c) => c.opciones.every((o) => /desayuno/i.test(o.regimen ?? '')))
+  const lineaHotel = `${m.noches > 0 ? `${m.noches} ${m.noches === 1 ? 'noche' : 'noches'} de hotel` : 'Hoteles'}${desayuno ? ' con desayuno' : ''}; el hotel cambia según la versión`
+  const lineaVuelo = 'Tiquetes aéreos de ida y regreso; la aerolínea cambia según la versión'
+  const salida: string[] = []
+  for (const linea of incluye) {
+    if (nombra(linea, hoteles)) {
+      if (!salida.includes(lineaHotel)) salida.push(lineaHotel)
+    } else if (nombra(linea, aerolineas)) {
+      if (!salida.includes(lineaVuelo)) salida.push(lineaVuelo)
+    } else salida.push(linea)
+  }
+  return salida
 }
 
 /** Más días que esto es un dato mal leído, no un viaje. */
@@ -758,15 +937,22 @@ function diaADia(p: {
   const fin = fechas.reduce((a, f) => (diaNumero(f) > diaNumero(a) ? f : a), inicio)
   // Tope: una fecha mal leída (el año de otro viaje) no puede pintar meses de días vacíos.
   const total = Math.min(diaNumero(fin) - diaNumero(inicio) + 1, MAX_DIAS)
-  const orden: Record<EventoDoc['tipo'], number> = { vuelo: 0, traslado: 1, tren: 1, hotel: 2, actividad: 3 }
-  // El traslado HACIA el aeropuerto va antes que el vuelo de ese día.
-  const rango = (e: EventoDoc) => (e.tipo === 'traslado' && vaAlAeropuerto(e.texto) ? -1 : orden[e.tipo])
+  const orden: Record<EventoDoc['tipo'], number> = { vuelo: 1, traslado: 1, tren: 1, hotel: 3, actividad: 4 }
+  // El traslado que sale del hotel (al aeropuerto, a la estación) va antes que el vuelo o el tren
+  // de ese día; el que llega al hotel, después. La COT-2026-0026 real ponía «Estación Barcelona
+  // Sants → hotel» antes del AVE que los llevaba a Barcelona.
+  const rango = (e: EventoDoc) => {
+    if (e.tipo !== 'traslado') return orden[e.tipo]
+    if (llegaAlHotel(e.texto)) return 2
+    return vaAlAeropuerto(e.texto) || saleDelHotel(e.texto) ? 0 : orden.traslado
+  }
   const salida: DiaDoc[] = []
   for (let n = 0; n < total; n++) {
     const fecha = sumarDias(inicio, n)
     const lista = (eventos.get(fecha) ?? []).slice().sort((a, b) => {
+      if (rango(a) !== rango(b)) return rango(a) - rango(b)
       if (a.hora && b.hora && a.hora !== b.hora) return a.hora.localeCompare(b.hora)
-      return rango(a) - rango(b)
+      return 0
     })
     const ciudad = p.capitulos.find((c) => c.desde && c.hasta && fecha >= c.desde && fecha < c.hasta)?.ciudad ?? null
     salida.push({ fecha, numero: n + 1, ciudad, eventos: lista, libre: lista.length === 0, opcionales: [], titulo: null, sugerencia: null })
@@ -778,6 +964,23 @@ function diaADia(p: {
 function vaAlAeropuerto(descripcion: string): boolean {
   const extremos = descripcion.split(' · ')[0].split(/\s+(?:-|→|–)\s+/)
   return extremos.length === 2 && /\b(aeropuerto|airport|aeroporto|a[ée]roport)\b/i.test(extremos[1])
+}
+
+/** Los dos extremos de un trayecto («Hotel - estación · Privado» → [«Hotel», «estación»]). */
+function extremosDe(descripcion: string): string[] {
+  return descripcion.split(' · ')[0].split(/\s+(?:-|→|–)\s+/)
+}
+
+/** «Barcelona Sants - hotel»: llega al hotel desde otro sitio. */
+function llegaAlHotel(descripcion: string): boolean {
+  const e = extremosDe(descripcion)
+  return e.length === 2 && /\bhotel\b/i.test(e[1]) && !/\bhotel\b/i.test(e[0])
+}
+
+/** «Hotel - estación Puerta de Atocha»: sale del hotel hacia otro sitio. */
+function saleDelHotel(descripcion: string): boolean {
+  const e = extremosDe(descripcion)
+  return e.length === 2 && /\bhotel\b/i.test(e[0]) && !/\bhotel\b/i.test(e[1])
 }
 
 /** Sale y llega con hora, y llega «antes» de salir: llega al día siguiente (vuelo de noche). */

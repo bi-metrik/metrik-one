@@ -138,7 +138,7 @@ describe('escape', () => {
 
 describe('«Así se ve cada día» como el prototipo v4', () => {
   const h = html()
-  const inicio = h.indexOf('class="sec brk dias"')
+  const inicio = h.indexOf('class="sec dias"')
   const dias = h.slice(inicio, h.indexOf('</section>', inicio))
   /** El bloque de un día, por su número («13»). */
   const dia = (n: number) => {
@@ -146,6 +146,16 @@ describe('«Así se ve cada día» como el prototipo v4', () => {
     const fin = dias.indexOf('<div class="day">', i + 1)
     return dias.slice(i, fin === -1 ? undefined : fin)
   }
+
+  it('sin salto de hoja forzado, y el título pegado al primer día (no queda solo al pie de la hoja)', () => {
+    // Con la portada larga de la COT-2026-0026 real, el salto dejaba la hoja 2 con dos tarjetas.
+    expect(h).not.toContain('class="sec brk dias"')
+    const pegado = dias.slice(dias.indexOf('<div class="nobr">'), dias.indexOf('<div class="day">') + 1)
+    expect(dias.indexOf('<div class="nobr">')).toBeGreaterThan(-1)
+    expect(pegado).toContain('Así se ve cada día')
+    expect(dias.indexOf('<div class="nobr">')).toBeLessThan(dias.indexOf('Así se ve cada día'))
+    expect((dias.match(/<div class="day">/g) ?? []).length).toBe(14)
+  })
 
   it('el número del día grande con «jue · dic» debajo, título y ciudad; sin las píldoras del v5', () => {
     expect(dia(10)).toContain('<div class="d">10<small>jue · dic</small></div>')

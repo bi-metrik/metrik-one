@@ -4,17 +4,20 @@
  * sección «Trenes y traslados» salía vacía y el día a día no los ponía.
  *
  * Sale de la MISMA lectura que el resto del documento (`serviciosDeItems`), línea por línea,
- * con dos cosas más:
+ * con tres cosas más:
  * - el día: si alguien le asignó un día a la línea (`dia_relativo`), manda sobre la fecha
  *   leída del pantallazo, como en la pantalla por pasos (`por-pasos-vista.ts`);
  * - las tarifas a las que pertenece la línea, con varias tarifas en la propuesta (los mismos
- *   índices de `itinerarios` que marcan vuelos y hoteles).
+ *   índices de `itinerarios` que marcan vuelos y hoteles);
+ * - un traslado de ida y vuelta sale en sus trayectos, con su fecha y su hora
+ *   (`trayectosDeTraslado`, hallazgo de la COT-2026-0026 real del 2026-10-14).
  *
  * Puro.
  */
-import { fechaCorta, lugarDelServicio, serviciosDeItems, type ItemConLectura } from '@/lib/cotizaciones/detalle-viaje'
+import { fechaCorta, lecturaDeTraslado, lugarDelServicio, serviciosDeItems, type ItemConLectura } from '@/lib/cotizaciones/detalle-viaje'
 import { esFechaCivil, sumarDiasCivil } from '@/lib/viaje/plan-pagos'
 import type { ServicioDelDocumento } from './modelo-documento'
+import { trayectosDeTraslado } from './trayectos'
 
 export interface ItemDeServicio extends ItemConLectura {
   /** Día del viaje asignado (1 = el de salida). */
@@ -29,13 +32,26 @@ export function serviciosDelDocumento(items: readonly ItemDeServicio[], inicio: 
   for (const item of items) {
     const dia = typeof item.dia_relativo === 'number' && item.dia_relativo >= 1 ? item.dia_relativo : null
     const fechaDelDia = dia !== null && inicioIso ? fechaCorta(sumarDiasCivil(inicioIso, dia - 1)) : null
-    for (const s of serviciosDeItems([item])) {
-      salida.push({
-        ...s,
-        fecha: fechaDelDia ?? s.fecha,
-        hora: null,
-        ...(item.tarifas && item.tarifas.length > 0 ? { tarifas: [...item.tarifas] } : {}),
+    const tarifas = item.tarifas && item.tarifas.length > 0 ? { tarifas: [...item.tarifas] } : {}
+    const lectura = lecturaDeTraslado(item)
+    if (lectura) {
+      trayectosDeTraslado(lectura).forEach((t, i) => {
+        // El día asignado es el del primer trayecto; el de vuelta sin fecha propia se deduce de él.
+        const fecha = i === 0 ? fechaDelDia ?? t.fecha : t.fecha
+        const fechaIda = i > 0 && !t.fecha ? fechaDelDia ?? t.fechaIda ?? null : null
+        salida.push({
+          tipo: 'traslado',
+          descripcion: t.descripcion,
+          fecha,
+          hora: t.hora,
+          ...(fechaIda ? { fechaIda } : {}),
+          ...tarifas,
+        })
       })
+      continue
+    }
+    for (const s of serviciosDeItems([item])) {
+      salida.push({ ...s, fecha: fechaDelDia ?? s.fecha, hora: null, ...tarifas })
     }
   }
   return salida

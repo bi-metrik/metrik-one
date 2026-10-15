@@ -710,6 +710,23 @@ export function serviciosDeItems(items: ItemConLectura[]): ServicioPDF[] {
 }
 
 /**
+ * La lectura CRUDA de un traslado (con lo corregido encima): el trayecto, el vehículo y la fecha
+ * tal como los escribió la captura («2026-12-11 y 2026-12-14», «2026-12-21/lun 10:25»). La usa
+ * la propuesta nueva para partir un traslado de ida y vuelta en sus trayectos
+ * (`propuesta/trayectos.ts`). `serviciosDeItems` no cambia: lo que lee el redactor del texto
+ * (y su huella) sigue igual. `null` si la línea no es un traslado.
+ */
+export function lecturaDeTraslado(item: ItemConLectura): { trayecto: string | null; vehiculo: string | null; fecha: string | null } | null {
+  if (ranuraDelItem(item)?.slug !== 'traslado_detalle') return null
+  const d = detalleDelItem(item)
+  return {
+    trayecto: texto(d, 'trayecto') ?? ((item.nombre ?? '').trim() || null),
+    vehiculo: texto(d, 'tipo_vehiculo'),
+    fecha: texto(d, 'fecha_hora'),
+  }
+}
+
+/**
  * Dónde y cuándo es una actividad o un traslado, según su lectura (con lo corregido encima):
  * la ciudad (solo la actividad la lee) y la fecha corta («14 dic»). Lo usa la propuesta para
  * poner cada plan opcional en los días libres de su ciudad.
