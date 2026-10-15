@@ -119,6 +119,10 @@ export function textoSaldo(s: SaldoBolsa): string {
 }
 
 export function textoCorte(motivo: MotivoCorte, esPrueba: boolean): { titulo: string; detalle: string } {
+  // Una prueba CON tarjeta que agota las 10 no ve este texto sino la confirmación del cobro
+  // («Activa tu plan ahora: se cobran $150.000 a tu tarjeta terminada en …», `textoConfirmacionCobro`
+  // de `valida-registro/cobro-prueba.ts`, Condiciones v2.1 7.1 literal a). Este queda para la prueba
+  // sin tarjeta y para quien aceptó la v2.0 (se le cobra el día 7, como aceptó).
   if (esPrueba) {
     return motivo === 'bolsa_agotada'
       ? { titulo: 'Usaste todas tus consultas de prueba', detalle: 'Activa tu plan para seguir consultando. Lo que ya consultaste sigue en el historial.' }

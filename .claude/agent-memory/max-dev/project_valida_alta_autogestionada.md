@@ -79,4 +79,22 @@ Ya mergeados: #1095 (corte de la bolsa), #1097 (`valida_registros`, APLICADA, no
 - La prueba de Vera en un preview.
 - Para el cobro sin clic en producción: aplicar las 3 migraciones, `CLAUSULA_COBRO_APROBADA_PARA_PRODUCCION`, `EPAYCO_PRODUCCION`, metrik-valida#57 desplegado (abre la bolsa al pagar), y lo de Emilio (16.4: enviar Términos + constancia al correo, no construido).
 
+## Cobro al confirmar en la consulta 11 (2026-10-14, PR apilado sobre feat/valida-epayco-pruebas)
+- Decisión de Mauricio: primer mes = lo primero entre día 7 y consulta 11, pero la consulta 11 SOLO con clic de
+  confirmación (nunca en silencio). Condiciones v2.1 + Términos autoservicio v2.1: texto de Max, **lo aprueba Emilio
+  antes de encender**; los archivos legales de `proyectos/metrik/valida/docs/legal/` siguen en v2.0 (no los toca Max).
+- Solo se ofrece a registros que aceptaron condiciones-2.1+ (la v2.0 prometía «no se adelanta»).
+- Migración `20261014234500_valida_cobro_al_confirmar.sql` SIN aplicar: sin ella el clic falla al reclamar y no cobra.
+- Emilio APROBÓ CON CAMBIOS (dictamen-cobro-consulta-11.md, C1-C9); C1-C8 aplicados en #1169. C9 (Política de
+  Devoluciones) es un archivo legal, no está en el repo. El 7.5 (rechazo del literal a → día 7 sigue en pie) es texto
+  de Max por decisión del coordinador: vuelve a Emilio.
+- Gotcha: las columnas de la constancia (`cobro_confirmado_*`) solo las lee el camino de la confirmación; el cron NO
+  las selecciona, para que el día 7 siga funcionando aunque la migración no esté aplicada.
+
 Relacionado: [[secop-autogestion-registro]], [[radar-trial-y-cobro]], [[valida-renovacion-continua]], [[sql-y-despliegue-metrik-valida]].
+
+## Gate de carpeta local en metrik (2026-10-15, #1169)
+`metrik` exige `metadata.carpeta_local` (`trg_zz_gate_carpeta_local`, MK001). La RPC crea el negocio en «Cobro» (orden 2), y el gate revertía TODA la activación (preview, consulta 11). **Por qué:** los tests de la RPC corrían sin el gate. Ahora `activacion-sql.test` lo enciende.
+- Mauricio decidió eximir. `20261015180000_gate_carpeta_local_exime_valida_autogestion.sql` pide `metadata.origen='valida_autogestion'` Y que `workspace_one` tenga fila en `valida_registros`. Está **SIN aplicar** y va ANTES del merge.
+- **Cómo aplicar:** los 3 caminos (consulta 11, «Activar plan», día 7) pasan por `activarPlanDelEspacio` → un solo INSERT. Un 4º camino que cree el negocio debe poner las mismas dos marcas.
+- Mauricio preguntó si los clientes de Valida deben vivir fuera del CRM de metrik. Eso queda abierto: recomendé una base propia de suscripciones a futuro.

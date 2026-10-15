@@ -84,14 +84,22 @@ export const CONDICIONES_PRUEBA = {
   texto: [BLOQUE_1, BLOQUE_2, BLOQUE_3].join('\n\n'),
 } as const
 
-// ── Condiciones v2.0 (con medio de pago y cobro al cumplirse los 7 días) ─────────────────────
+// ── Condiciones v2.1 (con medio de pago; el primer mes, al confirmar o al cumplirse los 7 días) ──
+//
+// v2.1 (decisión de Mauricio, 2026-10-14): el primer mes se cobra en el primero de dos momentos, la
+// confirmación de la Empresa en su cuenta (la pide la consulta 11, y el botón «Activar plan») o los 7
+// días. Cambian el numeral 1, el título del 7 y los 7.1, 7.2, 7.3, 7.4 y 7.5. Emilio lo APROBÓ CON
+// CAMBIOS (`dictamen-cobro-consulta-11.md`): C1 (num. 1), C2 (final del 7), C3 (final del 7.2), C4
+// (num. 8) y C5 (texto junto a la tarjeta), copiados literales. El 7.5 lleva además la decisión del
+// 2026-10-14 sobre su pregunta abierta (el rechazo del literal a conserva la prueba y deja en pie el b):
+// ⚠️ ese 7.5 es texto de Max y vuelve a Emilio.
 
 // Bloque 1 v2.0: encabezado y numerales 1 a 5. Cambia el numeral 1 (texto de Vera); 2 a 5, iguales.
-const BLOQUE_1_V2 = `CONDICIONES DE LA PRUEBA GRATIS DE VALIDA · Versión 2.0
+const BLOQUE_1_V2 = `CONDICIONES DE LA PRUEBA GRATIS DE VALIDA · Versión 2.1
 
 METRIK IA S.A.S., NIT 902.079.601-9 ("METRIK"), presta el servicio Valida. Estas condiciones las acepta, en nombre de la empresa que se registra (la "Empresa"), la persona que marca la casilla del registro.
 
-1. Qué incluye la prueba. La prueba da 10 consultas de listas restrictivas y vinculantes durante 7 días calendario desde que se abre. Termina cuando se agotan las 10 consultas o cuando pasan los 7 días, lo que ocurra primero. Es gratis: durante la prueba no se cobra nada. Para abrirla, la Empresa registra un medio de pago. Si no cancela a tiempo, a ese medio de pago se le cobra el plan mensual de Valida: el primer mes al cumplirse los 7 días y después cada mes, hasta que se retire, como dicen los numerales 7.1 y 7.4. No tiene permanencia. Hay una sola prueba por NIT.
+1. Qué incluye la prueba. La prueba da 10 consultas de listas restrictivas y vinculantes durante 7 días calendario desde que se abre. Termina cuando se agotan las 10 consultas, cuando pasan los 7 días o cuando la Empresa confirma que activa el plan (numeral 7.1, literal a), lo que ocurra primero. Es gratis: la prueba no se cobra. Para abrirla, la Empresa registra un medio de pago. Si no cancela a tiempo, a ese medio de pago se le cobra el plan mensual de Valida: el primer mes cuando la Empresa confirma en su cuenta que activa el plan o, si no lo confirma, al cumplirse los 7 días, y después cada mes, hasta que se retire, como dicen los numerales 7.1 y 7.4. No tiene permanencia. Hay una sola prueba por NIT.
 
 2. Quién puede usarla. Solo una Empresa que (a) esté obligada por la norma de su supervisor a consultar listas, como un CDA vigilado por la Superintendencia de Transporte, o (b) tenga otra base legal para consultar a terceros en listas, como la autorización del titular o la debida diligencia de sus propias contrapartes. Quien acepta declara que actúa por la Empresa con facultad para hacerlo y que la razón social y el NIT registrados son ciertos.
 
@@ -102,25 +110,25 @@ METRIK IA S.A.S., NIT 902.079.601-9 ("METRIK"), presta el servicio Valida. Estas
 5. Responsabilidad de la Empresa. Valida es una herramienta de consulta: no es asesoría jurídica ni reemplaza el sistema de gestión del riesgo de la Empresa (SARLAFT, SAGRILAFT u otro). Analizar cada coincidencia, confirmar o descartar homonimias, decidir qué hacer y reportar a la UIAF o al supervisor le corresponde a la Empresa, que sigue siendo la responsable ante su supervisor. Que una consulta no arroje coincidencias no certifica nada sobre la persona consultada. Como la prueba es gratuita, METRIK no responde por lucro cesante ni por daños indirectos, salvo dolo o culpa grave.`
 
 // Bloque 3 v2.0: numerales 7 (7.1 a 7.6) y 8.
-const BLOQUE_3_V2 = `7. Medio de pago y cobro al cumplirse los 7 días de la prueba. Para abrir la prueba, la Empresa registra un medio de pago en la pasarela ePayco. METRIK no guarda los datos de la tarjeta: los guarda la pasarela. Durante la prueba no se cobra nada.
+const BLOQUE_3_V2 = `7. Medio de pago y cobro del primer mes. Para abrir la prueba, la Empresa registra un medio de pago en la pasarela ePayco. METRIK no guarda los datos de la tarjeta: los guarda la pasarela. La prueba no se cobra; el plan se cobra solo en los momentos del numeral 7.1.
 
-7.1. Cobro. Si la Empresa no cancela antes de que se cumplan los 7 días de la prueba, a partir de ese momento METRIK cobra a ese medio de pago el primer mes del plan mensual de Valida: $150.000, valor total, sin IVA que sumar. El cobro no se adelanta aunque las 10 consultas se agoten antes. METRIK informa al abrir la prueba la fecha y la hora en que se cumplen los 7 días; el cobro se hace después de ese momento, nunca antes. Desde ese día el plan queda activo bajo los Términos de Uso de Valida que la Empresa aceptó en este registro, con hasta 3.000 consultas al mes.
+7.1. Cobro. METRIK cobra a ese medio de pago el primer mes del plan mensual de Valida, $150.000, valor total, sin IVA que sumar, en el primero de estos dos momentos: (a) cuando la Empresa confirma en su cuenta en Valida que activa el plan. Valida le pide esa confirmación cuando intenta una consulta después de agotar las 10 de la prueba, y la Empresa también puede darla antes con el botón "Activar plan". Antes de confirmar, la pantalla muestra el valor y los últimos 4 dígitos de la tarjeta, y el cobro se hace en ese momento; o (b) si la Empresa no ha confirmado ni cancelado, al cumplirse los 7 días de la prueba. METRIK informa al abrir la prueba la fecha y la hora en que se cumplen los 7 días; este cobro se hace después de ese momento, nunca antes. Sin la confirmación del literal (a), agotar las 10 consultas no adelanta el cobro. Desde el cobro el plan queda activo bajo los Términos de Uso de Valida que la Empresa aceptó en este registro, con hasta 3.000 consultas al mes.
 
-7.2. Aviso previo. METRIK escribe al correo registrado al menos 48 horas antes del cobro, con la fecha, el valor y cómo cancelar.
+7.2. Aviso previo. Para el cobro del literal (b) del numeral 7.1, METRIK escribe al correo registrado al menos 48 horas antes del cobro, con la fecha, el valor y cómo cancelar. El cobro del literal (a) no lleva ese aviso: lo pide la Empresa al confirmar. Después del cobro del literal (a), METRIK envía al correo registrado la confirmación del cobro, con la fecha, el valor y los últimos 4 dígitos de la tarjeta.
 
-7.3. Cómo cancelar. La Empresa cancela desde el botón "Cancelar prueba" de su cuenta en Valida o escribiendo a mauricio.moreno@metrik.com.co antes de que se cumplan los 7 días de la prueba. Si cancela a tiempo, no se cobra nada y METRIK pide a la pasarela eliminar el medio de pago registrado. Cancelar no quita las consultas que le queden de la prueba.
+7.3. Cómo cancelar. La Empresa cancela desde el botón "Cancelar prueba" de su cuenta en Valida o escribiendo a mauricio.moreno@metrik.com.co antes de que se cumplan los 7 días de la prueba y antes de que se le cobre el primer mes. Si cancela a tiempo, no se cobra nada y METRIK pide a la pasarela eliminar el medio de pago registrado. Cancelar no quita las consultas que le queden de la prueba.
 
-7.4. Sin permanencia. Al cumplirse los 7 días de la prueba se cobra un solo mes. Después, el plan se renueva y se cobra a ese medio de pago cada mes según los Términos de Uso de Valida, y la Empresa puede retirarse cuando quiera, sin penalidad; el mes ya pagado no se reembolsa.
+7.4. Sin permanencia. El primer cobro es de un solo mes. Después, el plan se renueva y se cobra a ese medio de pago cada mes según los Términos de Uso de Valida, y la Empresa puede retirarse cuando quiera, sin penalidad; el mes ya pagado no se reembolsa.
 
-7.5. Si el cobro falla. No se activa el plan y METRIK envía un enlace de pago. La Empresa no queda debiendo nada por la prueba.
+7.5. Si el cobro falla. Si falla el cobro del literal (a) del numeral 7.1, no se activa el plan, METRIK envía un enlace de pago y la Empresa conserva lo que le quede de la prueba, las consultas y el plazo; si no paga ni cancela antes, el cobro del literal (b) sigue en pie al cumplirse los 7 días, con el aviso del numeral 7.2. Si falla el cobro del literal (b), no se activa el plan, no se vuelve a intentar con la tarjeta y METRIK envía un enlace de pago. La Empresa no queda debiendo nada por la prueba.
 
 7.6. Supresión. La Empresa puede pedir la supresión de los datos de su cuenta, salvo los que la ley o el numeral 6.5 obligan a conservar.
 
-8. Aceptación y contacto. Estas condiciones se aceptan por mensaje de datos al marcar la casilla del registro (Ley 527 de 1999). METRIK guarda como prueba la versión aceptada, la huella del texto, la fecha y hora, el usuario, el correo verificado con código, la dirección IP y la referencia del medio de pago registrado en la pasarela. Se rigen por la ley colombiana. Contacto: mauricio.moreno@metrik.com.co.`
+8. Aceptación y contacto. Estas condiciones se aceptan por mensaje de datos al marcar la casilla del registro (Ley 527 de 1999). METRIK guarda como prueba la versión aceptada, la huella del texto, la fecha y hora, el usuario, el correo verificado con código, la dirección IP y la referencia del medio de pago registrado en la pasarela. Si la Empresa confirma la activación del plan (numeral 7.1, literal a), METRIK guarda además la fecha y hora de la confirmación, el usuario, la dirección IP y el texto exacto que vio antes de confirmar. Se rigen por la ley colombiana. Contacto: mauricio.moreno@metrik.com.co.`
 
 export const CONDICIONES_PRUEBA_CON_COBRO = {
   slug: 'condiciones-prueba-valida',
-  version: '2.0',
+  version: '2.1',
   titulo: 'Condiciones de la prueba gratis de Valida',
   texto: [BLOQUE_1_V2, BLOQUE_2, BLOQUE_3_V2].join('\n\n'),
 } as const
@@ -146,14 +154,18 @@ export const AVISO_DATOS_FORMULARIO_CON_COBRO = `METRIK IA S.A.S. (NIT 902.079.6
 /** La casilla sin cobro (la de la v1.0; el aviso v1.1 no la cambia). */
 export const TEXTO_CASILLA = `Acepto, en nombre de la empresa, las Condiciones de la prueba gratis, incluido el encargo de los datos de las personas que consulte, y autorizo el tratamiento de mis datos según este aviso.`
 
-/** La casilla con cobro (aviso v1.2, texto corregido por Vera): autoriza el cobro de cada mes. */
-export const TEXTO_CASILLA_CON_COBRO = `Acepto, en nombre de la empresa, las Condiciones de la prueba gratis, incluido el cobro del plan mensual al medio de pago registrado si no cancelo antes de que se cumplan los 7 días (el primer mes y después cada mes hasta que me retire), el encargo de los datos de las personas que consulte y los Términos de Uso de Valida, y autorizo el tratamiento de mis datos según este aviso.`
+/**
+ * La casilla con cobro (aviso v1.3): autoriza el cobro de cada mes (Vera) y dice los dos momentos del
+ * primero con el léxico de la 7.1 v2.1 (2026-10-14; texto de Max, pendiente de Emilio). La v1.2 decía
+ * solo «si no cancelo antes de que se cumplan los 7 días».
+ */
+export const TEXTO_CASILLA_CON_COBRO = `Acepto, en nombre de la empresa, las Condiciones de la prueba gratis, incluido el cobro del plan mensual al medio de pago registrado: el primer mes cuando confirme en mi cuenta que activo el plan, lo que Valida me pide cuando intento una consulta después de agotar las 10 de la prueba o antes con el botón "Activar plan", o, si no lo confirmo ni cancelo, después de que se cumplan los 7 días de la prueba y nunca antes; y después cada mes hasta que me retire. Acepto también el encargo de los datos de las personas que consulte y los Términos de Uso de Valida, y autorizo el tratamiento de mis datos según este aviso.`
 
 /**
  * El texto junto a la tarjeta (aviso §2.3, texto de Vera). NO entra a la huella: es ayuda en pantalla.
  * `{fecha_y_hora_vence}` lo llena la pantalla con `textoJuntoATarjeta`.
  */
-export const TEXTO_JUNTO_A_TARJETA = `Durante la prueba no se cobra nada. Si no cancela antes del {fecha_y_hora_vence}, después de ese momento se cobran $150.000 por el primer mes y luego cada mes. La tarjeta la guarda ePayco, no METRIK.`
+export const TEXTO_JUNTO_A_TARJETA = `La prueba es gratis. El primer mes, $150.000, se cobra cuando usted confirme en su cuenta que activa el plan: Valida se lo pide si intenta una consulta después de agotar las 10 de la prueba, y también puede hacerlo antes con el botón "Activar plan". Si no lo confirma ni cancela antes del {fecha_y_hora_vence}, se cobra después de ese momento, nunca antes. Luego se cobra cada mes hasta que se retire. La tarjeta la guarda ePayco, no METRIK.`
 
 export function textoJuntoATarjeta(fechaYHoraVence: string): string {
   return TEXTO_JUNTO_A_TARJETA.replace('{fecha_y_hora_vence}', fechaYHoraVence)
@@ -164,9 +176,10 @@ export const AVISO_REGISTRO = {
   version: '1.1',
 } as const
 
+/** v1.3 (2026-10-14): la casilla dice los dos momentos del primer cobro (Condiciones v2.1, 7.1). */
 export const AVISO_REGISTRO_CON_COBRO = {
   slug: 'aviso-formulario-registro-valida',
-  version: '1.2',
+  version: '1.3',
 } as const
 
 // ── Las Condiciones vigentes ──────────────────────────────────────────────────────────────────

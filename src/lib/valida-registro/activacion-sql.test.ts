@@ -51,7 +51,7 @@ const ESQUEMA_BASE = `
   create schema storage;
   create table storage.buckets (id text primary key, name text not null, public boolean not null default false);
 
-  create table public.workspaces (id uuid primary key, slug text, modules jsonb not null default '{}'::jsonb);
+  create table public.workspaces (id uuid primary key, slug text, modules jsonb not null default '{}'::jsonb, config_extra jsonb);
   create table public.profiles (
     id uuid primary key, workspace_id uuid references public.workspaces(id),
     role text, full_name text, platform_admin boolean not null default false
@@ -63,6 +63,7 @@ const ESQUEMA_BASE = `
     custom_data jsonb, created_at timestamptz default now()
   );
   create table public.lineas_negocio (id uuid primary key, nombre text);
+  create table public.etapas_negocio (id uuid primary key, linea_id uuid references public.lineas_negocio(id), nombre text, orden integer);
   create table public.negocios (
     id uuid primary key default gen_random_uuid(),
     workspace_id uuid not null references public.workspaces(id),
@@ -100,7 +101,8 @@ const ESQUEMA_BASE = `
   create function public.current_user_workspace_id() returns uuid
     language sql stable as $$ select nullif(current_setting('prueba.ws', true), '')::uuid $$;
 
-  insert into public.workspaces (id, slug) values ('${METRIK}', 'metrik');
+  -- metrik exige la carpeta del cerebro, como en producción: el negocio nace en «Cobro» (orden 2).
+  insert into public.workspaces (id, slug, config_extra) values ('${METRIK}', 'metrik', '{"exigir_carpeta_local": true}');
   insert into public.workspaces (id, slug, modules) values
     ('${WS_PRUEBA}', 'cda-ejemplo', '{"valida_consulta": true}'),
     ('${WS_OTRO}', 'otro', '{}'),
@@ -111,6 +113,9 @@ const ESQUEMA_BASE = `
     ('${AJENO}', '${WS_OTRO}', 'owner', 'otro', false),
     ('${DUENO_CDA}', '${WS_CDA}', 'owner', 'cda', false);
   insert into public.lineas_negocio (id, nombre) values ('${LINEA}', 'Valida');
+  insert into public.etapas_negocio (id, linea_id, nombre, orden) values
+    ('00000000-0000-4000-8000-00000000a004', '${LINEA}', 'Venta', 1),
+    ('${ETAPA}', '${LINEA}', 'Cobro', 2);
 `
 
 const TEXTO = '# TÉRMINOS DE USO DE VALIDA\n\nEL CLIENTE: CDA EJEMPLO S.A.S., NIT 900.123.456-7.'
@@ -163,6 +168,9 @@ beforeAll(async () => {
   await db.exec(migracion('20261010090000_valida_registros.sql'))
   await db.exec(migracion('20261012100000_valida_activar_autogestion.sql'))
   await db.exec(migracion('20261014203000_terminos_aceptados_en_registro.sql'))
+  // El gate de carpeta local (MK001) y la exención de la activación autogestionada (prueba del 2026-10-15).
+  await db.exec(migracion('20260914223000_gate_carpeta_local.sql'))
+  await db.exec(migracion('20261015180000_gate_carpeta_local_exime_valida_autogestion.sql'))
 
   // El espacio de la prueba, como lo deja `crearEspacioValida`.
   await db.exec(`insert into public.valida_registros
@@ -237,7 +245,13 @@ describe('valida_activar_autogestion', () => {
     expect(await contar('public.servicio_contratado_beneficiarios', `servicio_contratado_id = '${res.contrato_id}' and workspace_id = '${WS_PRUEBA}'`)).toBe(1)
     expect(await contar('public.servicios_contratados_cambios', `servicio_contratado_id = '${res.contrato_id}' and campo = 'alta'`)).toBe(1)
     expect(await contar('public.workspace_modulos', `workspace_id = '${WS_PRUEBA}' and modulo = 'valida_consulta' and activo_hasta is null and servicio_contratado_id = '${res.contrato_id}'`)).toBe(1)
-    expect(await contar('public.negocios', `id = '${res.negocio_id}' and workspace_id = '${METRIK}' and linea_id = '${LINEA}'`)).toBe(1)
+    // Nace en «Cobro» sin carpeta del cerebro, con metrik exigiéndola: pasa por la exención (20261015180000).
+    expect(
+      await contar(
+        'public.negocios',
+        `id = '${res.negocio_id}' and workspace_id = '${METRIK}' and linea_id = '${LINEA}' and etapa_actual_id = '${ETAPA}' and not (metadata ? 'carpeta_local')`,
+      ),
+    ).toBe(1)
   })
 
   it('es idempotente: el segundo clic responde ya_activo sin escribir', async () => {
@@ -407,5 +421,36 @@ describe('los Términos aceptados en el registro', () => {
 
   it('la fila del registro no se modifica después', async () => {
     expect(await falla(`update public.aceptaciones_terminos set texto_aceptacion = 'x' where canal = 'registro'`)).toContain('no se modifica')
+  })
+})
+
+// ── El gate de carpeta local exime SOLO al negocio de la activación autogestionada (20261015180000) ──
+
+describe('gate de carpeta local y la activación autogestionada', () => {
+  const VENTA = '00000000-0000-4000-8000-00000000a004'
+  const nuevo = (metadata: Record<string, unknown> | null) =>
+    `insert into public.negocios (workspace_id, linea_id, etapa_actual_id, nombre, metadata)
+     values ('${METRIK}', '${LINEA}', '${ETAPA}', 'prueba gate', ${metadata === null ? 'null' : `'${JSON.stringify(metadata)}'::jsonb`})`
+
+  it('sigue rechazando con MK001 todo lo demás: sin marca, marca sin espacio del registro, otro origen', async () => {
+    expect(await falla(nuevo(null))).toContain('sin su carpeta del cerebro')
+    expect(await falla(nuevo({ origen: 'valida_autogestion' }))).toContain('sin su carpeta del cerebro')
+    // `otro` existe pero no nació en el registro autogestionado.
+    expect(await falla(nuevo({ origen: 'valida_autogestion', workspace_one: 'otro' }))).toContain('sin su carpeta del cerebro')
+    expect(await falla(nuevo({ origen: 'manual', workspace_one: 'cda-ejemplo' }))).toContain('sin su carpeta del cerebro')
+  })
+
+  it('la carpeta sigue bastando, y la primera etapa no la pide', async () => {
+    await db.exec(nuevo({ carpeta_local: 'proyectos/metrik/valida/' }))
+    await db.exec(`insert into public.negocios (workspace_id, linea_id, etapa_actual_id, nombre) values ('${METRIK}', '${LINEA}', '${VENTA}', 'en venta')`)
+  })
+
+  it('la exención es del negocio, no solo del INSERT: volver a «Venta» y a «Cobro» no pide carpeta', async () => {
+    const id = (await db.query<{ id: string }>(`select id from public.negocios where metadata->>'workspace_one' = 'cda-ejemplo'`)).rows[0].id
+    await db.exec(`update public.negocios set etapa_actual_id = '${VENTA}' where id = '${id}'`)
+    await db.exec(`update public.negocios set etapa_actual_id = '${ETAPA}' where id = '${id}'`)
+    // Un negocio cualquiera de metrik, en cambio, no pasa a «Cobro» sin carpeta.
+    const otro = (await db.query<{ id: string }>(`select id from public.negocios where nombre = 'en venta'`)).rows[0].id
+    expect(await falla(`update public.negocios set etapa_actual_id = '${ETAPA}' where id = '${otro}'`)).toContain('no puede pasar a la etapa')
   })
 })

@@ -20,6 +20,11 @@
  * Si el archivo cambia una letra, se vuelve a copiar y se sube `version`: la prueba fija la huella
  * de la Parte II (`terminos-plan.test.ts`).
  *
+ * v2.1 (decisión de Mauricio, 2026-10-14): el primer cobro también se hace cuando el Cliente confirma
+ * en su cuenta que activa el plan (la consulta 11 y el botón «Activar plan»). Cambian la versión del
+ * encabezado, la fila «Fin del plazo para cancelar la prueba» de la Orden y las cláusulas 0.5, 3.5 y
+ * 16.6. ⚠️ Texto de Max: lo aprueba Emilio antes de encender y lo lleva a `terminos-valida-v2.1-autoservicio.md`.
+ *
  * ## Dos partes, como el documento
  *
  *   - **Parte I, la Orden** (`PARTE_I_ORDEN`): los datos que el Cliente dio al registrarse. Sus campos
@@ -43,7 +48,7 @@ export const MARCADOR_TERMINOS_PENDIENTES = /\[TEXTO (EMILIO|LUCÍA|LUCIA)\b/
 /** Parte I: la Orden de Suscripción, con sus campos `{campo}`. */
 export const PARTE_I_ORDEN = `# TÉRMINOS DE USO DE VALIDA
 
-**Variante: Autoservicio · Versión 2.0 · Rige desde {fecha_publicacion}**
+**Variante: Autoservicio · Versión 2.1 · Rige desde {fecha_publicacion}**
 
 **EL PRESTADOR:** METRIK IA S.A.S., NIT 902.079.601-9, domiciliada en la Calle 24A Bis # 100-71, Bogotá D.C., representada legalmente por Brallan Mauricio Moreno Guzmán. Correo: mauricio.moreno@metrik.com.co ("METRIK").
 
@@ -74,7 +79,7 @@ Fecha del registro: {fecha_registro}
 | Forma de pago | Cobro automático mensual al medio de pago registrado en la pasarela ePayco (cláusula 3.5) |
 | **Vigencia** | |
 | Prueba gratis | Según las Condiciones de la prueba gratis aceptadas en el registro |
-| Fin del plazo para cancelar la prueba | {fecha_hora_vence_prueba} (7 días después de abrir la prueba). El primer cobro se hace después de ese momento, nunca antes, salvo que el Cliente cancele a tiempo |
+| Fin del plazo para cancelar la prueba | {fecha_hora_vence_prueba} (7 días después de abrir la prueba). El primer cobro se hace cuando el Cliente confirma en su cuenta que activa el plan o, si no lo confirma ni cancela a tiempo, después de ese momento y nunca antes (cláusula 3.5) |
 | Período | Mensual, se renueva solo cada mes |
 | Permanencia mínima | Ninguna. El Cliente se retira cuando quiera, sin penalidad (cláusula 12.3) |
 | **Alianza** | |
@@ -97,7 +102,7 @@ export const PARTE_II_TERMINOS = `## PARTE II. TÉRMINOS
 
 0.4. Forman parte de este acuerdo, en su versión vigente publicada en https://valida.metrik.com.co/recursos: la Política de Tratamiento de Datos Personales de VALIDA, la Política de Devoluciones de VALIDA, el Acuerdo de Nivel de Servicio (ANS), la Política de Atención y Soporte y el catálogo de listas. Los cambios en esos documentos se avisan conforme a la cláusula 13.
 
-0.5. **Prueba gratis.** La prueba gratis se rige por las Condiciones de la prueba gratis que el Cliente aceptó en el registro. Estos Términos obligan desde la aceptación; el plan que regulan inicia con el primer cobro exitoso, que se hace después del fin del plazo para cancelar que indica la Orden. Si el Cliente cancela la prueba a tiempo, el plan no inicia y estos Términos terminan sin obligaciones para ninguna de las Partes, salvo las cláusulas 7 y 9.
+0.5. **Prueba gratis.** La prueba gratis se rige por las Condiciones de la prueba gratis que el Cliente aceptó en el registro. Estos Términos obligan desde la aceptación; el plan que regulan inicia con el primer cobro exitoso, que se hace cuando el Cliente confirma en su cuenta que activa el plan o, si no lo confirma, después del fin del plazo para cancelar que indica la Orden. Si el Cliente cancela la prueba a tiempo, el plan no inicia y estos Términos terminan sin obligaciones para ninguna de las Partes, salvo las cláusulas 7 y 9.
 
 ### 1. Objeto y alcance
 
@@ -141,7 +146,7 @@ export const PARTE_II_TERMINOS = `## PARTE II. TÉRMINOS
 
 3.4. **Usuarios y consultas adicionales.** Los usuarios y las consultas incluidos son los de la Orden. Si el Cliente necesita más, lo pide por escrito y METRIK le ofrece un plan acorde, que requiere una nueva Orden.
 
-3.5. **Pago automático.** El pago es anticipado y automático. El Cliente autoriza a METRIK a cobrar el valor mensual de la Orden al medio de pago que registró en la pasarela ePayco: el primer mes, después de que se cumplan los 7 días de la prueba y nunca antes; y después cada mes, en el mismo día del mes del primer cobro, o el último día del mes cuando ese día no exista, hasta que el Cliente se retire. METRIK no guarda los datos de la tarjeta; los guarda la pasarela. Por cada cobro, METRIK envía la factura electrónica al correo de notificaciones. El Cliente puede reemplazar el medio de pago escribiendo a mauricio.moreno@metrik.com.co o desde su cuenta, cuando esa opción esté disponible. La autorización de cobro termina cuando el Cliente se retira (cláusula 12.3): retirarse es la forma de revocarla.
+3.5. **Pago automático.** El pago es anticipado y automático. El Cliente autoriza a METRIK a cobrar el valor mensual de la Orden al medio de pago que registró en la pasarela ePayco: el primer mes, en el momento en que el Cliente confirma en su cuenta que activa el plan, confirmación que Valida le pide cuando intenta una consulta después de agotar las 10 de la prueba y que también puede dar antes con el botón "Activar plan", viendo el valor y los últimos 4 dígitos de la tarjeta; o, si no la da, después de que se cumplan los 7 días de la prueba y nunca antes; y después cada mes, en el mismo día del mes del primer cobro, o el último día del mes cuando ese día no exista, hasta que el Cliente se retire. METRIK no guarda los datos de la tarjeta; los guarda la pasarela. Por cada cobro, METRIK envía la factura electrónica al correo de notificaciones. El Cliente puede reemplazar el medio de pago escribiendo a mauricio.moreno@metrik.com.co o desde su cuenta, cuando esa opción esté disponible. La autorización de cobro termina cuando el Cliente se retira (cláusula 12.3): retirarse es la forma de revocarla.
 
 3.6. **Si un cobro falla.** Si el primer cobro es rechazado, aplica el numeral 7.5 de las Condiciones de la prueba gratis. Si es rechazado un cobro mensual posterior, METRIK lo informa al correo de notificaciones, envía un enlace de pago y puede intentar el cobro de nuevo al mismo medio de pago durante los 10 días calendario siguientes. Si en ese plazo no se paga, aplica la cláusula 11.1.
 
@@ -283,14 +288,14 @@ export const PARTE_II_TERMINOS = `## PARTE II. TÉRMINOS
 
 16.5. **Ejecución.** El uso del Servicio después del inicio del plan y el pago del primer período ratifican la aceptación (Código de Comercio, art. 854). Si el Cliente no reconoce la aceptación, lo comunica a mauricio.moreno@metrik.com.co: antes del inicio del plan, se trata como la cancelación de la prueba y no se cobra nada; después, tiene efectos de retiro conforme a la cláusula 12.3, sin perjuicio de la Política de Devoluciones de VALIDA.
 
-16.6. **Habilitación.** El acceso se habilita con la prueba gratis. El plan inicia con el primer cobro exitoso, después del fin del plazo para cancelar que indica la Orden; si ese cobro falla, aplica el numeral 7.5 de las Condiciones de la prueba gratis.`
+16.6. **Habilitación.** El acceso se habilita con la prueba gratis. El plan inicia con el primer cobro exitoso, hecho cuando el Cliente confirma en su cuenta que activa el plan o, sin esa confirmación, después del fin del plazo para cancelar que indica la Orden; si ese cobro falla, aplica el numeral 7.5 de las Condiciones de la prueba gratis.`
 
 /** Entre la Orden y los Términos, como en el documento. */
 export const SEPARADOR_PARTES = '\n\n---\n\n'
 
 export const TERMINOS_PLAN = {
   slug: 'terminos-uso-valida-autogestion',
-  version: 'v2.0',
+  version: 'v2.1',
   titulo: 'Términos de Uso de VALIDA',
   plantilla: `${PARTE_I_ORDEN}${SEPARADOR_PARTES}${PARTE_II_TERMINOS}`,
 } as const

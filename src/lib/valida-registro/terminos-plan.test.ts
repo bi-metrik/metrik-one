@@ -18,7 +18,8 @@ import { huellaParteII, terminosParaElRegistro } from './terminos-registro-servi
  * Los Términos de Uso de VALIDA v2.0 autoservicio, copiados de
  * `proyectos/metrik/valida/docs/legal/terminos-valida-v2.0-autoservicio.md` (título → 16.6).
  *
- * La huella de la Parte II se fijó el 2026-10-14 comparando el código con el archivo: si alguien
+ * La huella de la Parte II se fijó el 2026-10-14 comparando el código con el archivo, y otra vez con la v2.1
+ * (cobro del primer mes al confirmar, texto de Max pendiente de Emilio): si alguien
  * cambia una letra del texto, esta prueba cae y obliga a subir la versión (lo ya aceptado no cambia).
  */
 
@@ -27,17 +28,17 @@ const sha = (t: string) => createHash('sha256').update(t, 'utf8').digest('hex')
 describe('el texto de los Términos', () => {
   it('ya no es un marcador', () => {
     expect(terminosPlanListos()).toBe(true)
-    expect(TERMINOS_PLAN).toMatchObject({ slug: 'terminos-uso-valida-autogestion', version: 'v2.0', titulo: 'Términos de Uso de VALIDA' })
+    expect(TERMINOS_PLAN).toMatchObject({ slug: 'terminos-uso-valida-autogestion', version: 'v2.1', titulo: 'Términos de Uso de VALIDA' })
   })
 
   it('la Parte II es la del archivo, letra por letra (huella fijada)', () => {
-    expect(sha(PARTE_II_TERMINOS)).toBe('fe7ef9f52744154155d59455e6b8c179239e1151fc1437c53a33cffd7857ba8a')
-    expect(PARTE_II_TERMINOS.length).toBe(29480)
+    expect(sha(PARTE_II_TERMINOS)).toBe('7d5389c619f2bb99603aa7f0bfa32b246cd0fcfda9a70d67beff51f4fc8684eb')
+    expect(PARTE_II_TERMINOS.length).toBe(29953)
     expect(huellaParteII()).toBe(sha(PARTE_II_TERMINOS))
   })
 
   it('va del título a la 16.6: sin las secciones A a D ni la marca del PDF', () => {
-    expect(TERMINOS_PLAN.plantilla.startsWith('# TÉRMINOS DE USO DE VALIDA\n\n**Variante: Autoservicio · Versión 2.0 · Rige desde {fecha_publicacion}**')).toBe(true)
+    expect(TERMINOS_PLAN.plantilla.startsWith('# TÉRMINOS DE USO DE VALIDA\n\n**Variante: Autoservicio · Versión 2.1 · Rige desde {fecha_publicacion}**')).toBe(true)
     expect(PARTE_II_TERMINOS.startsWith('## PARTE II. TÉRMINOS\n\n### 0. Cómo se leen estos Términos')).toBe(true)
     expect(PARTE_II_TERMINOS.endsWith('si ese cobro falla, aplica el numeral 7.5 de las Condiciones de la prueba gratis.')).toBe(true)
     expect(TERMINOS_PLAN.plantilla).toBe(`${PARTE_I_ORDEN}${SEPARADOR_PARTES}${PARTE_II_TERMINOS}`)
@@ -68,6 +69,19 @@ describe('el texto de los Términos', () => {
     ])
   })
 
+  it('v2.1: el primer cobro, al confirmar el Cliente o después del plazo y nunca antes (0.5, 3.5, 16.6 y la Orden)', () => {
+    expect(PARTE_I_ORDEN).toContain(
+      'El primer cobro se hace cuando el Cliente confirma en su cuenta que activa el plan o, si no lo confirma ni cancela a tiempo, después de ese momento y nunca antes (cláusula 3.5)',
+    )
+    expect(PARTE_I_ORDEN).not.toContain('nunca antes, salvo que el Cliente cancele a tiempo')
+    expect(PARTE_II_TERMINOS).toContain('que se hace cuando el Cliente confirma en su cuenta que activa el plan o, si no lo confirma, después del fin del plazo')
+    expect(PARTE_II_TERMINOS).toContain(
+      'el primer mes, en el momento en que el Cliente confirma en su cuenta que activa el plan, confirmación que Valida le pide cuando intenta una consulta después de agotar las 10 de la prueba',
+    )
+    expect(PARTE_II_TERMINOS).toContain('o, si no la da, después de que se cumplan los 7 días de la prueba y nunca antes;')
+    expect(PARTE_II_TERMINOS).toContain('hecho cuando el Cliente confirma en su cuenta que activa el plan o, sin esa confirmación, después del fin del plazo')
+  })
+
   it('el plan, el precio y la forma de pago van escritos en la Orden, no en campos', () => {
     expect(PARTE_I_ORDEN).toContain('| Usuarios incluidos | 2 |')
     expect(PARTE_I_ORDEN).toContain('| Consultas incluidas | Hasta 3.000 por mes |')
@@ -91,7 +105,7 @@ describe('los Términos de una empresa, llenos en el registro', () => {
     const r = terminosParaElRegistro(p, { VERCEL_ENV: 'production' })
     if (!r.ok) throw new Error(r.faltan.join(','))
     const t = r.terminos
-    expect(t.version).toBe('v2.0')
+    expect(t.version).toBe('v2.1')
     expect(t.sha256).toBe(sha(t.texto))
     expect(t.texto).toContain('| Razón social (declarada en el registro) | ACME S.A.S. |')
     expect(t.texto).toContain('| NIT (declarado en el registro) | 900.123.456-7 |')
