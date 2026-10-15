@@ -550,6 +550,13 @@ export async function leerCapturaEnBorrador(
   tipo: TipoRanura,
   dataUrl: string,
   enfoque?: { nombre: string; precio: string | null } | null,
+  /**
+   * La bandeja de la cotización por pasos. Con ella, un hotel se lee sabiendo que un pantallazo
+   * de VARIAS habitaciones con un total es UNA opción (decisión del 2026-10-14,
+   * `reserva-habitaciones.ts`). Se comprueba el interruptor contra la base: apagado, la lectura
+   * es la de siempre y esa reserva queda en «¿Cuál de estas?».
+   */
+  opciones?: { porPasos?: boolean } | null,
 ): Promise<ResultadoBorrador> {
   if (!esTipoRanura(tipo)) return { ok: false, codigo: 'TIPO', mensaje: 'Tipo de componente desconocido.' }
   if (!(await exigirModulo(REQUISITO.clarity)).ok) {
@@ -564,7 +571,15 @@ export async function leerCapturaEnBorrador(
     if (!guard.ok) return { ok: false, codigo: 'POR_PASOS', mensaje: guard.error }
   }
   const ranura = definicionDeTipo(tipo)
-  const r = await leerImagenDeCaptura({ ranura, dataUrl, viaje: ctx.viaje, enfoque })
+  const reservaVariasHabitaciones = tipo === 'hotel' && opciones?.porPasos === true
+    && (await exigirPorPasos(ctx.supabase, cotizacionId)).ok
+  const r = await leerImagenDeCaptura({
+    ranura,
+    dataUrl,
+    viaje: ctx.viaje,
+    enfoque,
+    ...(reservaVariasHabitaciones ? { opciones: { reservaVariasHabitaciones: true } } : {}),
+  })
   if (!r.ok) return r
   const leida = r.leida
   // La misma validación que tenía la captura al leerse sobre su opción vacía: contra la

@@ -30,6 +30,7 @@ import { esAvisoDeAnioViejo } from './anio-fecha'
 import type { MargenProveedor } from './margen-proveedor'
 import { leerCorrecciones, type Correcciones } from './correcciones'
 import { firmaDeEstadia } from './estadia'
+import type { HabitacionDeReserva } from './reserva-habitaciones'
 
 // ── Tipos de pasajero y composición ──────────────────────────────────────────
 
@@ -366,6 +367,12 @@ export interface LecturaCasilla {
   asistenciaMedica?: true
   /** Lo que el formulario manual deja además de la lectura (`DatosManuales`). */
   manual?: { fuente: string; incluye: string | null; edadNino: { desde: number; hasta: number } | null; opcional?: boolean }
+  /**
+   * El registro de las habitaciones de UNA reserva de varias con un precio total
+   * (`reserva-habitaciones.ts`, decisión de Mauricio del 2026-10-14): cuántas, de qué tipo y con
+   * qué ocupación. Solo registro: el costo es el `total` de la lectura. Ausente en toda otra.
+   */
+  habitacionesReserva?: HabitacionDeReserva[]
 }
 
 /**
