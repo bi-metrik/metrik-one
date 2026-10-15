@@ -101,4 +101,8 @@ sería trabajo desechable.
 - La tabla `suscripciones` de 20260908 (licencias ONE, 0 filas, ciclo propio en el paso 5 del cron) queda como está.
   Su concepto lo cubre ahora `suscripciones_producto`; retirarla es otra decisión.
 - La factura electrónica de un cobro de suscripción: el resolutor está aquí (`contratoDelCobro`, `anclasDeOrigenes`)
-  y la integración con #1153 va en su propio PR de integración.
+  y el cambio en #1153 (que no está en esta pila) va como parche listo:
+  `docs/specs/2026-10-16_aliaddo-sobre-suscripcion.patch` (contexto del cobro, barrido por negocios Y suscripciones,
+  aviso a la bitácora, y su prueba). Verificado fuera de git sobre #1191 + #1153: typecheck limpio, 88 tests en verde,
+  y la prueba nueva falla sin el parche. Se aplica en #1153 cuando esta pila esté en main. La activación deja
+  `metadata.origen = 'valida_autogestion'` en la suscripción, la marca que la factura usa para decidir.
