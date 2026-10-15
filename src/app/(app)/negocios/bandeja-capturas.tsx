@@ -540,6 +540,11 @@ export default function BandejaCapturas({
       if (recibidas.current.has(d.clave)) return
       recibidas.current.add(d.clave)
       const lineas = itemsVivos.current.filter(i => i.id !== d.itemId)
+      // D2 (H5, por pasos) · la fila «Agregada a…» de la opción que se borró ya no apunta a nada:
+      // sale de la bandeja, y el pantallazo que vuelve no se compara contra ella (era «el mismo
+      // servicio», sin «Aceptar»).
+      const deLaBorrada = (c: Captura) => porPasos && c.estado.fase === 'aceptada' && c.itemId === d.itemId
+      const vigentesSinLaBorrada = vigentes.current.filter(c => !deLaBorrada(c))
       const nuevas: Captura[] = []
       for (const l of d.lecturas) {
         let lectura: LecturaCasilla
@@ -550,7 +555,7 @@ export default function BandejaCapturas({
           capId: id,
           borrador,
           lineas,
-          comparables: opcionesParaComparar(lineas, [...nuevas, ...vigentes.current], id),
+          comparables: opcionesParaComparar(lineas, [...nuevas, ...vigentesSinLaBorrada], id),
           composicion: composicionViva.current,
         destinoViaje: destinoVivo.current,
           ubicaciones: ubicacionesVivas.current,
@@ -566,9 +571,9 @@ export default function BandejaCapturas({
           leida: r.leida, error: null, huella: l.huella, ...(r.pregunta ? { abierta: true } : {}),
         })
       }
-      if (nuevas.length > 0) setCapturas(cs => [...nuevas, ...cs])
+      if (nuevas.length > 0 || porPasos) setCapturas(cs => [...nuevas, ...cs.filter(c => !deLaBorrada(c))])
     }
-  }, [])
+  }, [porPasos])
   // Las listas, aceptadas de a una en la fila de siempre (el lote con un solo recálculo es C5).
   const aceptarListasRef = useRef<() => void>(() => {})
   useImperativeHandle(receptor, () => ({
