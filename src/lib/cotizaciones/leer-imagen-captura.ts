@@ -1,6 +1,6 @@
 import 'server-only'
 
-import { extraerRanuraDesdeImagen } from '@/lib/ai/extraer-ranura'
+import { extraerRanuraDesdeImagen, type OpcionesDeLectura } from '@/lib/ai/extraer-ranura'
 import { getServerKey } from '@/lib/server-keys'
 import { huellaDeImagen } from './captura-repetida'
 import { construirLecturaCasilla } from './lectura-casilla'
@@ -29,8 +29,10 @@ export async function leerImagenDeCaptura(args: {
   viaje: ViajeDelNegocio
   monedaIndicada?: string | null
   enfoque?: { nombre: string; precio: string | null } | null
+  /** Ausente = la lectura de siempre (`OpcionesDeLectura`). */
+  opciones?: OpcionesDeLectura | null
 }): Promise<LecturaDeImagen> {
-  const { ranura, dataUrl, viaje, monedaIndicada, enfoque } = args
+  const { ranura, dataUrl, viaje, monedaIndicada, enfoque, opciones } = args
   const m = /^data:([^;]+);base64,([\s\S]+)$/.exec(dataUrl)
   if (!m) return { ok: false, codigo: 'RX5', mensaje: 'La imagen no llegó en un formato legible. Vuelve a pegarla.' }
 
@@ -41,7 +43,9 @@ export async function leerImagenDeCaptura(args: {
   const enfoqueLimpio = enfoque && typeof enfoque.nombre === 'string' && enfoque.nombre.trim() !== ''
     ? { nombre: enfoque.nombre.trim().slice(0, 160), precio: typeof enfoque.precio === 'string' ? enfoque.precio.trim().slice(0, 40) || null : null }
     : null
-  const lectura = await extraerRanuraDesdeImagen(Buffer.from(m[2], 'base64'), m[1], ranura, apiKey, enfoqueLimpio)
+  const lectura = opciones
+    ? await extraerRanuraDesdeImagen(Buffer.from(m[2], 'base64'), m[1], ranura, apiKey, enfoqueLimpio, opciones)
+    : await extraerRanuraDesdeImagen(Buffer.from(m[2], 'base64'), m[1], ranura, apiKey, enfoqueLimpio)
   if (!lectura.data) {
     return {
       ok: false,

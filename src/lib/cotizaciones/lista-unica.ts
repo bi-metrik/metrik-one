@@ -62,6 +62,11 @@ export interface EntradaDeLista {
   viaje: string | null
   /** IVA sin calcular: ámbar, no impide enviar (Vera 10). */
   ivaSinCalcular: string | null
+  /**
+   * Las reservas de varias habitaciones en un solo pantallazo cuya ocupación no cuadra con los
+   * viajeros (`avisoDeReservaQueNoCuadra`). Avisa, no impide (decisión del 2026-10-14).
+   */
+  reservasQueNoCuadran?: readonly { itemId: string; texto: string }[]
 }
 
 /** «Nada impide enviar y no hay nada por revisar.» */
@@ -100,5 +105,6 @@ export function listaUnica(e: EntradaDeLista): ListaUnica {
   if (e.recargo) revisar.push({ clave: 'recargo', texto: e.recargo, ir: null })
   if (e.viaje) revisar.push({ clave: 'viaje', texto: e.viaje, ir: { a: 'viaje' } })
   if (e.ivaSinCalcular) revisar.push({ clave: 'iva', texto: e.ivaSinCalcular, ir: null })
+  for (const r of e.reservasQueNoCuadran ?? []) revisar.push({ clave: `reserva:${r.itemId}`, texto: r.texto, ir: { a: 'opcion', itemId: r.itemId } })
   return { impide, revisar }
 }

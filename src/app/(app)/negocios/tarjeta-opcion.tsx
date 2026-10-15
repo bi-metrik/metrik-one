@@ -58,7 +58,9 @@ import {
   preguntaEliminarOpcion,
   referenciasTexto,
   resumenDeAlojamiento,
+  textoDeHabitacionDeReserva,
 } from '@/lib/cotizaciones/tarjeta-opcion'
+import { registroDeReserva } from '@/lib/cotizaciones/reserva-habitaciones'
 import { parseMontoCop } from '@/lib/negocios/monto-cop'
 import {
   agregarEspera,
@@ -878,7 +880,10 @@ function FilaHabitacionTarjeta({
   // La que no va (de referencia) se nombra así y dice que no suma (brief del 2026-10-01,
   // punto 2): el resumen decía «1 habitación» y no se entendía que había otra que no contaba.
   const va = h.rol === 'habitacion'
-  const titulo = `Habitación ${posicion}`
+  // Un pantallazo con VARIAS habitaciones y un total (decisión del 2026-10-14): se nombra con su
+  // registro («3 habitaciones dobles») y lista cada una. El precio es el total del pantallazo.
+  const registro = registroDeReserva(h.lectura)
+  const titulo = registro.length > 0 ? h.tipoHabitacion ?? `${registro.length} habitaciones` : `Habitación ${posicion}`
   const precio = h.moneda === 'COP' ? pesos(h.total) : formatoMonto(h.total, h.moneda)
   const src = urlDePantallazo(h.lectura.imagenRef)
   const manual = datosManuales(h.lectura)
@@ -910,6 +915,11 @@ function FilaHabitacionTarjeta({
           <b className={`block font-semibold ${va ? '' : 'text-[#6E6A62]'}`}>{titulo}</b>
         </span>
         {ocupacion && <span className="text-[13px] text-[#6E6A62]">{ocupacion}</span>}
+        {registro.length > 0 && (
+          <ul className="m-0 mt-0.5 list-none p-0 text-xs text-[#6E6A62]" data-registro-habitaciones>
+            {registro.map((r, i) => <li key={`${r.nombre}-${i}`}>{textoDeHabitacionDeReserva(r)}</li>)}
+          </ul>
+        )}
         {manual?.fuente && <span className="block text-xs text-[#6E6A62]">{manual.fuente}</span>}
         {!va && <span className="block text-xs text-[#6E6A62]" data-no-suma>{TEXTO_NO_VA}</span>}
         {notaReferencia && (

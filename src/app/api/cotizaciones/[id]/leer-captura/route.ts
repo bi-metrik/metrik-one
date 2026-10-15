@@ -53,7 +53,7 @@ export async function POST(req: Request, { params }: { params: Promise<{ id: str
   const r = await responderBandeja('leer-captura', id, bytesDeImagen(dataUrl), () => enPeticionDeRuta(async () => {
     // La pieza se pregunta EN PARALELO con la lectura: no le suma espera.
     const encendido = modeloDeDestinoEncendido(id)
-    const leida = await leerCapturaEnBorrador(id, tipo as TipoRanura, dataUrl, enfoque)
+    const leida = await leerCapturaEnBorrador(id, tipo as TipoRanura, dataUrl, enfoque, { porPasos: true })
     if (!leida.ok || !(await encendido)) return leida
     return { ...leida, modelo: await decisionEnLaLectura(tipo as TipoRanura, leida.lectura, servicios) }
   }))

@@ -63,7 +63,7 @@ import { MarcoCotizacionContexto } from '@/app/(app)/negocios/marco-cotizacion-c
 import { usePublicarTotalVivo } from '@/app/(app)/negocios/total-vivo'
 import { laMasNueva, lineasParaPintar, traerVistaFresca, type VistaFresca } from '@/lib/cotizaciones/vista-fresca'
 import { esAvisoSoloInformativo, estadoDeBloque, resumenDeBloques, type EstadoDeBloque } from '@/lib/cotizaciones/bandeja-capturas'
-import { avisoDePasajerosDeOpcion, pesos as pesosTarjeta } from '@/lib/cotizaciones/tarjeta-opcion'
+import { avisoDePasajerosDeOpcion, avisoDeReservaQueNoCuadra, pesos as pesosTarjeta } from '@/lib/cotizaciones/tarjeta-opcion'
 import { crearRanuraConOpcion, eliminarRanura } from '@/app/(app)/negocios/ranura-actions'
 import { avisoDeBorradoDeBloque, preguntaTarifaMarcada, tarifasMarcadasCon } from '@/lib/cotizaciones/eliminar-opciones'
 import { bloquesPorRanura, esNombreDeOpcion, tipoDeDefinicion, type BloqueDeLineas } from '@/lib/cotizaciones/ranuras-cotizacion'
@@ -3661,6 +3661,12 @@ export default function CotizacionEditor({ oportunidadId, cotizacion, initialIte
       recargo: recargo.estado === 'falta' ? `Falta el ${recargo.etiqueta.toLowerCase()}.` : null,
       viaje: viaje.motivo ? `Pendiente: ${viaje.motivo}.` : null,
       ivaSinCalcular: !mostrarResumenFiscal && ivaVigente && !ivaVigente.calculable && cascadaTotal.precioVenta > 0 ? motivoIvaSinCalcular(ivaVigente.sinCosto) : null,
+      // Decisión del 2026-10-14 · la reserva de varias habitaciones que no cuadra con el viaje.
+      reservasQueNoCuadran: lineasConLectura.flatMap(i => {
+        if (!idsQueSalen.has(i.id) || ranuraDeGrupo(i.grupo ?? null)?.slug !== 'hotel_detalle') return []
+        const texto = avisoDeReservaQueNoCuadra(nombreVisibleDeLinea(i as never) || i.nombre || 'El hotel', leerTarifaPax(i.tarifa_pax), composicionViaje ?? null)
+        return texto ? [{ itemId: i.id, texto }] : []
+      }),
     })
   })() : null
   const vistaPorPasos = porPasosOn ? (

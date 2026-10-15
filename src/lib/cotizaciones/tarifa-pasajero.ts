@@ -30,6 +30,7 @@ import { esAvisoDeAnioViejo } from './anio-fecha'
 import type { MargenProveedor } from './margen-proveedor'
 import { leerCorrecciones, type Correcciones } from './correcciones'
 import { firmaDeEstadia } from './estadia'
+import { registroDeReserva, resumenDeReserva, type HabitacionDeReserva } from './reserva-habitaciones'
 
 // ── Tipos de pasajero y composición ──────────────────────────────────────────
 
@@ -366,6 +367,12 @@ export interface LecturaCasilla {
   asistenciaMedica?: true
   /** Lo que el formulario manual deja además de la lectura (`DatosManuales`). */
   manual?: { fuente: string; incluye: string | null; edadNino: { desde: number; hasta: number } | null; opcional?: boolean }
+  /**
+   * El registro de las habitaciones de UNA reserva de varias con un precio total
+   * (`reserva-habitaciones.ts`, decisión de Mauricio del 2026-10-14): cuántas, de qué tipo y con
+   * qué ocupación. Solo registro: el costo es el `total` de la lectura. Ausente en toda otra.
+   */
+  habitacionesReserva?: HabitacionDeReserva[]
 }
 
 /**
@@ -1141,6 +1148,11 @@ export interface CostoDeHabitacion {
   numero: number
   ocupacion: Composicion
   total: number
+  /**
+   * Cómo se nombra cuando no es «Habitación N»: una reserva de varias habitaciones en un solo
+   * pantallazo («3 habitaciones dobles», `reserva-habitaciones.ts`). Ausente = «Habitación N».
+   */
+  nombre?: string
 }
 
 const dosDecimales = (v: number) => Math.round(v * 100) / 100
@@ -1329,6 +1341,26 @@ export function resolverTarifa(
       costoTotal: costo,
       origen: 'por_grupo',
       mensaje: 'El traslado se cobra por vehículo: el pantallazo trae el costo de todo el grupo. No hace falta nada más.',
+    }
+  }
+
+  // 2d · hotel: UNA reserva de varias habitaciones en un solo pantallazo, con un total
+  // (decisión de Mauricio, 2026-10-14). El costo es el total, sin partirlo por pasajero ni por
+  // habitación: no hay de dónde sacar cuánto paga cada uno, y TP4 pediría dos búsquedas más de
+  // una reserva que ya está completa. Va como UNA fila «por habitación» con el nombre del
+  // registro («3 habitaciones dobles»). Con otra captura pegada para restar, manda la resta.
+  const registro = ranuraSlug === 'hotel_detalle' ? registroDeReserva(l1) : []
+  if (registro.length > 0 && !defs.slice(1).some(d => casillas[d.clave])) {
+    const costo = montoDeCosto(l1)
+    const nombre = (l1.identidad.tipo_habitacion ?? '').trim() || resumenDeReserva(registro, null)
+    return {
+      estado: 'resuelta',
+      costos: [],
+      moneda,
+      costoTotal: costo,
+      origen: 'habitaciones',
+      mensaje: `Una reserva de ${registro.length} habitaciones en un pantallazo: el costo es su total, ${formatoMonto(costo, moneda)}. No hace falta nada más.`,
+      porHabitacion: [{ numero: 1, ocupacion: c, total: costo, nombre }],
     }
   }
 
@@ -1574,7 +1606,7 @@ export interface TarifaConfirmada {
    * R8 · el costo por habitación, cuando no hay cómo partirlo por pasajero (`costos` vacío).
    * El PDF imprime entonces el precio de cada habitación en vez del de cada pasajero.
    */
-  porHabitacion?: { numero: number; ocupacion: Composicion; totalCOP: number }[]
+  porHabitacion?: { numero: number; ocupacion: Composicion; totalCOP: number; nombre?: string }[]
   /** R8 · qué habitaciones y con qué papel se confirmaron (`firmaDeHabitaciones`). */
   firmaHabitaciones?: string
   /**
