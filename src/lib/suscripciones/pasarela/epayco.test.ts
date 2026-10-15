@@ -18,10 +18,10 @@ import {
 import { adapterPara } from './registro'
 
 const ENV = {
-  EPAYCO_METRIK_PUBLIC_KEY: 'publica',
-  EPAYCO_METRIK_PRIVATE_KEY: 'privada',
-  EPAYCO_METRIK_CUST_ID: '1234567',
-  EPAYCO_METRIK_P_KEY: 'pkey-de-prueba',
+  EPAYCO_PUBLIC_KEY_METRIK: 'publica',
+  EPAYCO_PRIVATE_KEY_METRIK: 'privada',
+  EPAYCO_P_CUST_ID_CLIENTE: '1234567',
+  EPAYCO_P_KEY: 'pkey-de-prueba',
   NEXT_PUBLIC_BASE_DOMAIN: 'metrikone.co',
 }
 const COBRO = '0f8e2f4a-1c2b-4d5e-9f00-112233445566'
