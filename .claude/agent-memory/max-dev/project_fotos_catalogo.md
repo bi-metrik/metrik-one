@@ -18,8 +18,10 @@ Abierto el 2026-10-14, NO listo para merge hasta aplicar `supabase/migrations/20
   `thumb.wikimedia.org`, no solo de `upload.`.
 - La sugerencia corre sola al abrir el panel (una vez por apertura) y queda `revisada=false`; igual se imprime.
   Emilio no ha cerrado derechos de uso comercial de fotos BY-SA (plan §2.5): Mauricio lo pidió igual.
-- Choca con #1178 (día a día v4) solo por la cercanía en `propuesta-html`/`plantilla.ts`/`detalle-viaje.ts`: el que
-  mergee segundo resuelve. La etiqueta «Madrid · dom 13» de la tarjeta del plan no entró (la ciudad del plan es de #1178).
+- #1178 ya en main (merge limpio el 14-oct). La etiqueta «Madrid · dom 13» sale en `.where` sobre la foto del plan:
+  ciudad del plan + `o.fecha` o el día donde `repartirOpcionales` lo puso; solo si hay alguna foto de plan.
+- Saltos (14-oct): `.tarifas nobr` + `.tf` sin partir; tablas largas por `tramosDeFilas` (3 filas juntas arriba con el
+  título, 2 abajo). Muestra: 7 hojas, ningún hueco > 16 %; no hizo falta reordenar secciones.
 
 **How to apply:** antes de mergear, aplicar la migración y registrar la fila del ledger; sin ella el panel dice
 «falta aplicar la migración» y el PDF sale como hoy. Relacionado: [[propuesta-motor-html-h33]].

@@ -23,6 +23,7 @@ import type {
   EventoDoc,
   FilaVueloDoc,
   ModeloPropuesta,
+  OpcionalDoc,
   TarifaDoc,
 } from '@/lib/cotizaciones/propuesta/modelo-documento'
 import { notaDeFila } from '@/lib/viaje/asi-puedes-pagar'
@@ -501,8 +502,31 @@ function trenesYTraslados(m: ModeloPropuesta): string {
   })
   return `<section class="sec">\n${encabezadoDeSeccion(hayTren ? 'train' : 'van', titulo, sub)}
   <table><thead><tr><th style="width:20mm">Día</th><th>Servicio</th>${conHora ? '<th style="width:18mm">Hora</th>' : ''}${conColumna ? '<th>Versión</th>' : ''}</tr></thead>
-${cuerpo.join('\n')}
+${tramosDeFilas(cuerpo)}
   </table>\n</section>`
+}
+
+/**
+ * Las filas de una tabla larga en tramos: las primeras van juntas (el título de la sección, que no
+ * se separa de lo que sigue, nunca queda al pie con una sola fila) y las últimas también (ninguna
+ * fila sola arriba de la hoja siguiente). Lo del medio se parte entre cualquier par de filas.
+ */
+function tramosDeFilas(filas: string[], juntas = FILAS_JUNTAS): string {
+  if (filas.length <= juntas * 2) return `<tbody class="nobr">${filas.join('\n')}</tbody>`
+  const cola = Math.min(2, filas.length - juntas)
+  return [
+    `<tbody class="nobr">${filas.slice(0, juntas).join('\n')}</tbody>`,
+    `<tbody>${filas.slice(juntas, filas.length - cola).join('\n')}</tbody>`,
+    `<tbody class="nobr">${filas.slice(filas.length - cola).join('\n')}</tbody>`,
+  ].join('\n')
+}
+const FILAS_JUNTAS = 3
+
+/** «Madrid · dom 13»: la ciudad del plan y el día en que el día a día lo propone. */
+function lugarDelOpcional(o: OpcionalDoc, m: ModeloPropuesta): string | null {
+  const fechaDelDia = o.fecha ?? m.dias.find((d) => d.opcionales.includes(o.nombre))?.fecha ?? null
+  const partes = [o.ciudad, diaCorto(fechaDelDia)].filter(Boolean)
+  return partes.length > 0 ? partes.join(' · ') : null
 }
 
 function opcionales(m: ModeloPropuesta, r: RecursosPropuesta): string {
@@ -513,7 +537,10 @@ function opcionales(m: ModeloPropuesta, r: RecursosPropuesta): string {
   const conImagen = fotos.some(Boolean)
   const tarjetas = m.opcionales.map((o, i) => {
     const valor = o.valor > 0 ? `+ ${pesos(o.valor)}` : 'consultar'
-    const imagen = conImagen ? `<div class="img${fotos[i] ? '' : ' sinfoto'}"${fondo(fotos[i])}></div>` : ''
+    const lugar = lugarDelOpcional(o, m)
+    const imagen = conImagen
+      ? `<div class="img${fotos[i] ? '' : ' sinfoto'}"${fondo(fotos[i])}>${lugar ? `<div class="where">${esc(lugar)}</div>` : ''}</div>`
+      : ''
     return `<div class="oc">${imagen}<div class="b"><div class="n">${esc(o.nombre)}</div>${o.descripcion ? `<div class="muted">${esc(o.descripcion)}</div>` : ''}<div class="foot"><span class="muted">${esc(o.unidad ?? '')}</span><span class="pr money">${esc(valor)}</span></div></div></div>`
   })
   return `<section class="sec">\n${encabezadoDeSeccion('sun', 'Planes para los días libres', 'Escojan los que quieran y los sumamos a la reserva. Precio para el grupo.')}
@@ -587,7 +614,7 @@ function eligeTuVersion(m: ModeloPropuesta): string {
     ? 'Precio total para el grupo. Lo demás va igual en todas; cambian los vuelos y los hoteles.'
     : 'Precio total para el grupo.'
   return `<section class="sec">\n${encabezadoDeSeccion('tag', 'Elijan su versión', sub)}
-  <div class="tarifas" style="grid-template-columns:repeat(${Math.min(3, m.tarifas.length)},1fr)">${tarjetas.join('\n')}</div>
+  <div class="tarifas nobr" style="grid-template-columns:repeat(${Math.min(3, m.tarifas.length)},1fr)">${tarjetas.join('\n')}</div>
   ${apartar(m)}\n</section>`
 }
 
@@ -633,7 +660,7 @@ function incluyeYPagos(m: ModeloPropuesta): string {
       plan = `<table class="nobr">${cabecera}${filas.join('\n')}</table><p class="small muted">${esc(conFilas[0].plan.regla)} ${esc(conFilas[0].plan.pie)}</p>`
     }
   }
-  const antes = m.formal.antesDeViajar.length > 0 ? `<h3 style="margin-top:5mm">Antes de viajar</h3>${lista(m.formal.antesDeViajar)}` : ''
+  const antes = m.formal.antesDeViajar.length > 0 ? `<div class="nobr"><h3 style="margin-top:5mm">Antes de viajar</h3>${lista(m.formal.antesDeViajar)}</div>` : ''
   if (columnas.length === 0 && !plan && !antes) return ''
   return `<section class="sec">\n<div class="nobr">${encabezadoDeSeccion('doc', plan ? 'Qué incluye y cuándo se paga' : 'Qué incluye', null)}
   ${columnas.length > 0 ? `<div class="two">${columnas.join('\n')}</div>` : ''}</div>
@@ -680,6 +707,8 @@ const CSS_EXTRA = `
 /* Las tablas siguen en la hoja siguiente (cabecera repetida); una fila nunca se parte. */
 tr { break-inside: avoid; }
 thead { display: table-header-group; }
+/* Una tarjeta de versión no se parte nunca; si las tres no caben, el bloque salta entero. */
+.tf { break-inside: avoid; }
 `
 
 export function htmlDePropuesta(m: ModeloPropuesta, r: RecursosPropuesta): string {
