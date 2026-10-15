@@ -8,6 +8,7 @@ import {
   ChevronDown, ChevronRight, Lock, BookOpen, Loader2, Calculator, AlertTriangle, FileText, X,
 } from 'lucide-react'
 import { toast } from 'sonner'
+import { aplicarEvento, provisionalesVigentes, type EventoProvisional, type Provisional } from '@/lib/cotizaciones/aceptar-optimista'
 import {
   updateCotizacion, enviarCotizacion, duplicarCotizacion,
   addItem, updateItem, deleteItem,
@@ -451,6 +452,23 @@ export default function CotizacionEditor({ oportunidadId, cotizacion, initialIte
   // sus cuatro condiciones. Apagado, este editor queda exactamente como siempre.
   const porPasosOn = lineasPorTipo && porPasos?.encendido === true
   const [conteoBandeja, setConteoBandeja] = useState({ porAceptar: 0, leyendo: 0 })
+  // V2 (por pasos) · los servicios nuevos que se están aceptando: su bloque se pinta ya
+  // (`aceptar-optimista.ts`). Si el servidor no los acepta, se quitan y se dice (D1).
+  const [provisionales, setProvisionales] = useState<Provisional[]>([])
+  const provisionalesVivos = useRef<Provisional[]>([])
+  const recibirProvisional = (e: EventoProvisional) => {
+    const r = aplicarEvento(provisionalesVivos.current, e, initialItems)
+    provisionalesVivos.current = r.provisionales
+    setProvisionales(r.provisionales)
+    if (r.aviso) toast.error(r.aviso)
+  }
+  useEffect(() => {
+    // La página ya trae la opción de verdad: su bloque provisional sobra.
+    const vivos = provisionalesVigentes(provisionalesVivos.current, new Set(initialItems.map(i => i.id)))
+    if (vivos.length === provisionalesVivos.current.length) return
+    provisionalesVivos.current = vivos
+    setProvisionales(vivos)
+  }, [initialItems])
   const estado = cotizacion.estado as EstadoCotizacion
   const editable = isEditable(estado) && !frozen
   const estadoConfig = ESTADO_COTIZACION_CONFIG[estado]
@@ -3694,6 +3712,7 @@ export default function CotizacionEditor({ oportunidadId, cotizacion, initialIte
           enMarco={conMarco}
           porPasos
           onConteo={setConteoBandeja}
+          onProvisional={recibirProvisional}
           cotizacionId={cotizacion.id}
           items={initialItems}
           composicion={composicionViaje}
@@ -3756,6 +3775,7 @@ export default function CotizacionEditor({ oportunidadId, cotizacion, initialIte
       onAbrirOpcion={mostrarOpcion}
       onRecibirEnBandeja={(itemId, lecturas) => receptorBandeja.current?.recibir({ clave: `${itemId}:${Date.now()}`, itemId, lecturas })}
       refrescar={refrescar}
+      provisionales={provisionales}
     />
   ) : null
 

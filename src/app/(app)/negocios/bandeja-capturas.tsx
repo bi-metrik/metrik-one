@@ -40,6 +40,7 @@ import {
   filasDelLote,
   fraseDeFila,
   menuDeFila,
+  nombreNuevo,
   type Eleccion,
   type EstadoAlAceptar,
   type FraseDeFila,
@@ -67,6 +68,7 @@ import {
 import { leidosPorSlug } from '@/lib/cotizaciones/correcciones'
 import { definicionDeTipo, TIPOS_CON_PANTALLAZO, TIPOS_RANURA, type TipoRanura } from '@/lib/cotizaciones/ranuras-cotizacion'
 import type { Composicion, LecturaCasilla } from '@/lib/cotizaciones/tarifa-pasajero'
+import type { EventoProvisional } from '@/lib/cotizaciones/aceptar-optimista'
 import { PREGUNTA_AL_SALIR, saleDeLaPagina } from '@/lib/cotizaciones/aviso-al-salir'
 import { AlertaDecision } from '@/components/viaje/alerta-decision'
 import { BTN, BTN_PRIM, BTN_X, INPUT, INPUT_DUDOSO, LINK, SPIN } from '@/components/viaje/estilo'
@@ -364,6 +366,7 @@ export default function BandejaCapturas({
   onCambio,
   porPasos = false,
   onConteo,
+  onProvisional,
 }: {
   cotizacionId: string
   /** Las líneas de la cotización: contra ellas se dice a dónde irá cada captura. */
@@ -395,6 +398,11 @@ export default function BandejaCapturas({
   porPasos?: boolean
   /** Cuántos esperan «Aceptar» y cuántos se leen: lo cuenta la barra de pasos. */
   onConteo?: (c: { porAceptar: number; leyendo: number }) => void
+  /**
+   * V2 (por pasos) · «Aceptar» de un servicio NUEVO: el bloque se pinta en el acto
+   * (`aceptar-optimista.ts`). Avisa cuándo empieza, cuándo el servidor lo aceptó y cuándo no.
+   */
+  onProvisional?: (e: EventoProvisional) => void
 }) {
   const router = useRouter()
   const refrescar = () => (onCambio ? onCambio() : router.refresh())
@@ -805,12 +813,16 @@ export default function BandejaCapturas({
     correcciones: CorreccionDeBandeja[] = [],
     /** Por pasos (C5): el estado con que llega un servicio nuevo (P11). */
     estado?: EstadoAlAceptar | null,
+    /** V2 · un servicio nuevo: su bloque se pinta ya, con este nombre. */
+    servicioNuevo?: string | null,
   ) {
     const b = c.borrador
     if (!b || aceptando.current.has(c.id)) return
     aceptando.current.add(c.id)
     const antes = c.estado
     actualizar(c.id, { estado: { fase: 'aceptando' }, error: null })
+    const provisional = porPasos && servicioNuevo && onProvisional ? onProvisional : null
+    provisional?.({ tipo: 'inicio', capturaId: c.id, tipoRanura: b.tipo, lectura: b.lectura, nombreServicio: servicioNuevo! })
     const cuerpo: BorradorParaAceptar = {
       tipo: b.tipo, lecturaJson: b.lecturaJson, firma: b.firma, pistas: b.pistas, decision,
       destinoId: destinoId ?? null, imagen: c.dataUrl || null,
@@ -823,6 +835,13 @@ export default function BandejaCapturas({
     colaAceptar.current = turno.catch(() => undefined)
     const d = desenlaceDeAceptacion(await turno)
     aceptando.current.delete(c.id)
+    // D1 · si el servidor no la aceptó, el bloque se quita y se dice; si la aceptó, se queda hasta
+    // que la página traiga la opción.
+    if (provisional) {
+      provisional(d.tipo === 'aceptada'
+        ? { tipo: 'aceptada', capturaId: c.id, itemId: d.itemId }
+        : { tipo: 'revertir', capturaId: c.id, mensaje: d.tipo === 'error' ? d.mensaje : null, avisar: d.tipo === 'error' })
+    }
     aplicarDesenlace(c, antes, d)
     // Como antes: un error deja la fila como estaba y no refresca la página.
     if (d.tipo !== 'error') refrescar()
@@ -901,7 +920,9 @@ export default function BandejaCapturas({
       return
     }
     const cuerpo = cuerpoDeAceptar(c.borrador, f, { imagen: null, correcciones: null, idAceptacion: c.id, destinoId: dest })
-    void aceptar(c, cuerpo.decision, cuerpo.destinoId, correcciones, estadoDe(c, f))
+    // V2 · un servicio nuevo se pinta ya, con el nombre que dice su frase.
+    const nuevo = f.destino.como === 'nueva' && !f.capturaDestino ? nombreNuevo(c.borrador, destinoViaje) : null
+    void aceptar(c, cuerpo.decision, cuerpo.destinoId, correcciones, estadoDe(c, f), nuevo)
   }
 
   /**
