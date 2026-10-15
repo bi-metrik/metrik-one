@@ -120,7 +120,7 @@ export function composicionDeTexto(texto: string | null | undefined): Composicio
   const adultos = contar(/(\d+)\s*(?:adultos?|adults?|adt)\b/g)
   let ninos = contar(/(\d+)\s*(?:ninos?|menor(?:es)?|child(?:ren)?|kids?|chd)\b/g)
   let infantes = contar(/(\d+)\s*(?:infantes?|infants?|bebes?|babies|baby|inf)\b/g)
-  // Menos de 2 años es infante aunque la pantalla lo llame niño: «1 niño (0 años)» (R8).
+  // Un menor que la pantalla llama niño pero con edad 0 o 1 es infante (R8, `menoresDeDosAnios`).
   for (const g of t.matchAll(/(?:ninos?|menor(?:es)?|child(?:ren)?|kids?)\s*\(([^)]*)\)/g)) {
     for (const edad of g[1].matchAll(/\d+/g)) {
       if (Number(edad[0]) < 2 && ninos > 0) {
