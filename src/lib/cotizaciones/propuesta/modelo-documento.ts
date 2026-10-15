@@ -52,6 +52,7 @@ import {
 import { creditosDeFotos } from '@/lib/pdf/fotos-del-viaje'
 import { tituloDeBloquePDF } from '@/lib/cotizaciones/itinerarios'
 import { claveTarifa } from '@/lib/cotizaciones/tarifas'
+import { siglasDeTramos } from '@/lib/cotizaciones/aerolineas'
 import { textoIvaIncluido } from '@/lib/fiscal/iva-cotizacion'
 import { asiPuedesPagar, type AsiPuedesPagar } from '@/lib/viaje/asi-puedes-pagar'
 import type { AnticipoPropuesta } from './anticipo'
@@ -157,7 +158,7 @@ export interface EventoDoc {
    * vía): el hotel de cada versión ya está en «Dónde duermen» y no se repite día a día.
    * Vacío = igual en todas.
    */
-  porTarifa: { tarifas: number[]; texto: string }[]
+  porTarifa: { tarifas: number[]; texto: string; siglas?: string[] }[]
   /** Solo vuelos: `salida` el día que sale, `llegada` el día que llega (si llega al día siguiente). */
   momento?: 'salida' | 'llegada'
 }
@@ -701,7 +702,11 @@ function diaADia(p: {
   for (const llave of llaves) {
     const grupo = tramos.filter((t) => `${t.fecha}|${t.sentido}` === llave)
     const primero = grupo.find((t) => esDeLaPrincipal({ tarifas: t.tarifas }, p.principal)) ?? grupo[0]
-    const porTarifa = p.porTarifas ? agruparPorTexto(grupo, (t) => textoDeVueloDelDia(t.vu, t.f)) : []
+    // Cada caja lleva la pastilla de su aerolínea (una por tramo), como la tabla «Vuelos».
+    const porTarifa = (p.porTarifas ? agruparPorTexto(grupo, (t) => textoDeVueloDelDia(t.vu, t.f)) : []).map((pt) => {
+      const t = grupo.find((x) => textoDeVueloDelDia(x.vu, x.f) === pt.texto)
+      return { ...pt, siglas: t ? siglasDeTramos(t.vu.aerolinea ?? t.vu.linea, t.f.numero) : [] }
+    })
     const conCajas = porTarifa.length > 1
     poner(primero.fecha, {
       tipo: 'vuelo',

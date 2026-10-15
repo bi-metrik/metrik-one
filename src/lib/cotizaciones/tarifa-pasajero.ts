@@ -1337,7 +1337,7 @@ export function resolverTarifa(
   const faltan = necesarias.filter(d => !casillas[d.clave])
   // 3a · lo que falta se escribió a mano («Escribir a mano» o «No paga en este proveedor»):
   // solo si no hay otra captura pegada para restar, que manda sobre lo escrito.
-  const aMano = faltan.length === necesarias.length ? conPrecioAMano(c, l1, opciones.aMano ?? null, moneda) : null
+  const aMano = faltan.length === necesarias.length ? conPrecioAMano(c, l1, opciones.aMano ?? null, moneda, ranuraSlug) : null
   if (aMano) return aMano
   if (faltan.length > 0) {
     const siguiente = faltan[0]
@@ -1453,6 +1453,7 @@ function conPrecioAMano(
   l1: LecturaCasilla,
   aMano: Partial<Record<TipoPasajero, number>> | null,
   moneda: string,
+  ranuraSlug?: string,
 ): EstadoTarifa | null {
   if (!aMano || !Object.values(aMano).some(v => typeof v === 'number' && Number.isFinite(v) && v >= 0)) return null
   const presentes = tiposPresentes(c)
@@ -1464,6 +1465,11 @@ function conPrecioAMano(
       return { tipo: t, total: sub, deDonde: `Pantallazo 1: ${formatoMonto(sub, moneda)} por ${describirOcupacion(soloTipo(t, n))}` }
     }
     const escrito = aMano[t]
+    // H3 (verificación D) · en una actividad el infante no paga (decisión de Mauricio, 2026-10-01):
+    // con el precio del niño ya escrito, el infante sin precio es 0, no «falta».
+    if (t === 'infante' && ranuraSlug === 'actividad_detalle' && !(typeof escrito === 'number' && Number.isFinite(escrito) && escrito >= 0)) {
+      return { tipo: t, total: 0, deDonde: 'En una actividad el infante no paga' }
+    }
     if (typeof escrito === 'number' && Number.isFinite(escrito) && escrito >= 0) {
       return {
         tipo: t,
@@ -1516,9 +1522,16 @@ export function preciosQueFaltan(
   if (estado.estado !== 'falta') return []
   const l1 = casillas.grupo_completo
   if (!l1) return []
-  return tiposPresentes(c).filter(t => t !== 'adulto'
+  const faltan = tiposPresentes(c).filter(t => t !== 'adulto'
     && !l1.porTipo.some(f => f.tipo === t && f.cantidad > 0)
     && !(typeof opciones.aMano?.[t] === 'number'))
+  // H3 (verificación D) · en una actividad el infante no paga (decisión del 2026-10-01): mientras
+  // falte el niño, el infante no se pide aparte, porque al escribir el niño queda en 0 solo
+  // (`conPrecioAMano`). Si es lo único que falta, se deja: se cierra con «No paga».
+  if (ranuraSlug === 'actividad_detalle' && faltan.includes('infante') && faltan.some(t => t !== 'infante')) {
+    return faltan.filter(t => t !== 'infante')
+  }
+  return faltan
 }
 
 /** Lo que la tarjeta dice del reparto de una actividad con infante (punto 1 del brief). */

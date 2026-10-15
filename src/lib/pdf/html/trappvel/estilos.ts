@@ -24,6 +24,8 @@ h3 { font-size: 11.5pt; margin: 0 0 1.5mm; color: var(--navy); }
 .tag { display:inline-block; font: 700 6.8pt Montserrat, sans-serif; letter-spacing: .8px; text-transform: uppercase; padding: .6mm 2mm; border-radius: 1mm; color:#fff; }
 .tE { background: var(--e); } .tR { background: var(--r); } .tP { background: var(--p); }
 .cE { color: var(--e); } .cR { color: var(--r); } .cP { color: var(--p); }
+/* Pastilla de aerolínea (brief 2026-10-08): redonda y más chica que la etiqueta de versión. */
+.al { display:inline-flex; align-items:center; justify-content:center; box-sizing:border-box; min-width: 5.6mm; height: 3.6mm; padding: 0 1.1mm; border-radius: 1.8mm; font: 700 6pt/1 Montserrat, sans-serif; letter-spacing: .2px; margin-right: 1.2mm; overflow: hidden; }
 
 /* Portada */
 .cover { width: 210mm; height: 297mm; position: relative; overflow: hidden; color: #fff; background: var(--navy); }

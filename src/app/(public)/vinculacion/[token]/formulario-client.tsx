@@ -468,6 +468,18 @@ export default function FormularioClient({
           ))}
         </div>
 
+        {v.devolucion && v.estado === 'devuelto' && (
+          <div className="mb-5 rounded-lg border border-advertencia/30 bg-advertencia/5 p-4 text-sm">
+            <p className="font-semibold text-[#B45309]">
+              {v.marca.nombre} te pide corregir algo antes de aprobar tu vinculación
+            </p>
+            <p className="text-[#4B5563] mt-1.5 whitespace-pre-wrap">{v.devolucion.motivo}</p>
+            <p className="text-xs text-tinta-suave mt-2">
+              Lo que ya entregaste sigue aquí. Corrige lo que se te pide y vuelve a firmar al final.
+            </p>
+          </div>
+        )}
+
         {error && (
           <div className="mb-5 rounded-lg border border-alerta/30 bg-alerta/5 p-3 text-sm text-[#B91C1C]">
             {error}

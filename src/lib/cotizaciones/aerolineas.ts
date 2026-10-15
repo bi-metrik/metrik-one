@@ -116,3 +116,20 @@ export function colorDeAerolinea(sigla: string | null | undefined): ColorDeAerol
   const x = aerolineaDeSigla(sigla)
   return x ? { fondo: x.fondo, franja: x.franja, texto: x.texto } : COLOR_SIN_IDENTIFICAR
 }
+
+/**
+ * Las siglas de los TRAMOS de un vuelo, en orden y sin repetir: una pastilla por aerolínea que
+ * opera algún tramo (`IB6586 · LA4521` → `['IB', 'LA']`; `AV26 · AV9779` → `['AV']`). Las lee
+ * del prefijo de cada número de vuelo, que es un dato leído; sin ningún número con prefijo, la
+ * del nombre (`siglaAerolinea`). Vacío = no se pinta pastilla.
+ */
+export function siglasDeTramos(aerolinea: string | null | undefined, numeros: string | null | undefined): string[] {
+  const siglas: string[] = []
+  const re = /(?:^|[^A-Z0-9])([A-Z][A-Z0-9]|[0-9][A-Z])\s?\d{1,4}(?![0-9])/g
+  for (const m of (numeros ?? '').toUpperCase().matchAll(re)) {
+    if (!siglas.includes(m[1])) siglas.push(m[1])
+  }
+  if (siglas.length > 0) return siglas
+  const delNombre = siglaAerolinea(aerolinea ?? null)
+  return delNombre ? [delNombre] : []
+}

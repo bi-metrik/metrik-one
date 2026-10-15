@@ -19,6 +19,7 @@
 
 import { nivelDetalleDesde, type NivelDetalle } from './detalle-viaje'
 import { normalizarComposicion, type Composicion } from './tarifa-pasajero'
+import { memoDeAceptacion } from './memo-de-aceptacion'
 
 export interface ViajeDelNegocio {
   composicion: Composicion | null
@@ -87,6 +88,15 @@ export async function leerViajeDelNegocio(
   negocioId: string | null,
 ): Promise<{ viaje: ViajeDelNegocio; error: string | null }> {
   if (!negocioId) return { viaje: VIAJE_VACIO, error: null }
+  // Dentro de una aceptación de la forma por pasos (una o un lote) el viaje no cambia: se lee una
+  // vez (`memo-de-aceptacion.ts`). Fuera, como siempre.
+  return memoDeAceptacion(`viaje:${negocioId}`, () => leerViajeSinMemo(supabase, negocioId))
+}
+
+async function leerViajeSinMemo(
+  supabase: unknown,
+  negocioId: string,
+): Promise<{ viaje: ViajeDelNegocio; error: string | null }> {
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const { data, error } = await (supabase as any)
     .from('negocio_bloques')

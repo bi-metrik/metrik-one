@@ -13,6 +13,7 @@ import {
   aerolineaDeSigla,
   colorDeAerolinea,
   siglaAerolinea,
+  siglasDeTramos,
 } from './aerolineas'
 import { TOKENS, colorDeTarifa } from '@/lib/pdf/cotizacion-trappvel-formato'
 import PastillaAerolinea from '@/app/(app)/negocios/pastilla-aerolinea'
@@ -132,5 +133,22 @@ describe('la pastilla en ONE', () => {
 
   it('Spirit: texto negro', () => {
     expect(html('Spirit', null)).toContain('color:#000000')
+  })
+})
+
+describe('las siglas de los tramos (una pastilla por tramo, como #1147)', () => {
+  it('una por aerolínea que opera algún tramo, en orden y sin repetir', () => {
+    expect(siglasDeTramos('Iberia', 'IB6586 · LA4521')).toEqual(['IB', 'LA'])
+    expect(siglasDeTramos('Avianca', 'AV26 · AV9779')).toEqual(['AV'])
+    expect(siglasDeTramos('JetSMART', 'J6 1234')).toEqual(['J6'])
+    expect(siglasDeTramos('LATAM', '4C1234 / LA20')).toEqual(['4C', 'LA'])
+  })
+
+  it('sin número con prefijo, la del nombre; sin nada, ninguna', () => {
+    expect(siglasDeTramos('Avianca', '9782')).toEqual(['AV'])
+    expect(siglasDeTramos('Avianca', null)).toEqual(['AV'])
+    expect(siglasDeTramos('Aerolínea Rara', null)).toEqual([])
+    // Cinco dígitos no son un número de vuelo: no se lee una sigla de adentro.
+    expect(siglasDeTramos(null, 'AV12345')).toEqual([])
   })
 })

@@ -39,4 +39,9 @@ anticipo a mano + wa.me). Un anticipo registrado como pago mueve el negocio a Re
   `sugerencia` son ganchos del PR 6, hoy siempre null.
 - Regenerar la muestra: `PROPUESTA_PDF_SALIDA=<pdf> CHROMIUM_EJECUTABLE=~/.cache/ms-playwright/chromium-1243/chrome-linux64/chrome npx vitest run src/lib/pdf/html/propuesta-html.test.ts`.
   En el worktree aislado, `node`/`vitest` con variables de shell (`$S`) los bloquea el hook: rutas literales.
-- Relacionado: [[propuesta-chromium-modelo]].
+- Pastilla de aerolínea (14-oct, pedido de Mauricio): `trappvel/aerolinea.ts` pinta, `siglasDeTramos`
+  (catálogo) lee una sigla por prefijo de número. Las cajitas del día a día no tienen fila de vuelo:
+  la sigla viaja en `porTarifa[].siglas` del modelo. El HTML ordena las cajitas por versión
+  (E, R, P), no en el orden del modelo. El `node_modules` del repo principal no trae `unpdf`
+  (va atrasado): `npm ci` en el worktree, no symlink.
+- Relacionado: [[propuesta-chromium-modelo]], [[fotos-catalogo]].
