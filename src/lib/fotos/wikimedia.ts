@@ -128,7 +128,8 @@ export function candidatasDeRespuesta(json: unknown): CandidataFoto[] {
       if (!autor) return []
       const pagina = ii.descriptionurl ?? null
       const descarga = ii.thumburl ?? ii.url ?? null
-      if (!pagina || !pagina.startsWith('https://commons.wikimedia.org/') || !descarga || !descarga.startsWith('https://')) return []
+      // Solo de los servidores de Wikimedia: la URL de descarga la baja el servidor de ONE.
+      if (!pagina || !pagina.startsWith('https://commons.wikimedia.org/') || !descarga || !descarga.startsWith('https://upload.wikimedia.org/')) return []
       return [{
         titulo: p.title,
         pagina,

@@ -14,6 +14,7 @@ import { fotosDelViaje } from '@/lib/pdf/fotos-del-viaje'
 import { textoDelPdf } from '@/lib/ai/texto-pdf'
 import { pdfDePropuestaHtml, prepararPropuestaHtml, reducirFoto } from './propuesta-html'
 import { pesos } from './trappvel/plantilla'
+import { CATALOGO_EUROPA } from '../../../../test/catalogo-europa'
 
 const bancoComoFotoPDF = (ciudad: string) =>
   fotosDeCiudad(ciudad).map((f) => ({ url: f.ruta, rotulo: f.rotulo, credito: f.credito, foco: f.foco, proporcion: f.proporcion }))
@@ -65,6 +66,60 @@ describe('prepararPropuestaHtml', () => {
   })
 })
 
+describe('prepararPropuestaHtml con el catálogo de fotos (PR 4)', () => {
+  /** El HTML de una sección, por su título. */
+  const seccion = (html: string, titulo: string) => {
+    const i = html.indexOf(`>${titulo}<`)
+    return html.slice(i, html.indexOf('</section>', i))
+  }
+
+  it('foto en cada plan opcional, ciudades sin banco con foto, y su crédito al pie', { timeout: 30_000 }, async () => {
+    const { html } = await prepararPropuestaHtml(entradaComoLaAccion(), {
+      marca: 'Agencia de ejemplo',
+      logoUrl: null,
+      fotoDeCiudad: bancoComoFotoPDF,
+      catalogo: CATALOGO_EUROPA,
+    })
+    const planes = seccion(html, 'Planes para los días libres')
+    expect((planes.match(/<div class="img" style="background-image:url\(data:image\/jpeg/g) ?? []).length).toBe(8)
+    expect(planes).not.toContain('sinfoto')
+    // «Lo que van a vivir»: Barcelona y Ámsterdam ya no van con el degradado.
+    const vivir = seccion(html, 'Lo que van a vivir')
+    expect(vivir).not.toContain('sinfoto')
+    // Los créditos de Commons, como el prototipo.
+    expect(html).toContain('Park Güell, Isiwal (Wikimedia Commons, CC BY-SA 3.0)')
+    expect(html).toContain('Casa Batlló, Txllxt TxllxT (Wikimedia Commons, CC BY-SA 4.0)')
+    expect(Buffer.byteLength(html)).toBeLessThan(3_000_000)
+  })
+
+  it('sin catálogo, los planes van sin imagen y las ciudades sin banco con el degradado (como antes)', { timeout: 30_000 }, async () => {
+    const { html } = await prepararPropuestaHtml(entradaComoLaAccion(), { marca: 'A', logoUrl: null, fotoDeCiudad: bancoComoFotoPDF })
+    expect(seccion(html, 'Planes para los días libres')).not.toContain('class="img')
+    expect(seccion(html, 'Lo que van a vivir')).toContain('sinfoto')
+  })
+
+  it('con foto en algunos planes, los demás llevan el degradado; el hotel sin foto propia toma la del catálogo', { timeout: 30_000 }, async () => {
+    const e = entradaComoLaAccion()
+    const v = e.props.viaje!
+    const sinFoto = { ...e, props: { ...e.props, viaje: { ...v, hoteles: v.hoteles.map((h, i) => (i === 0 ? { ...h, foto: undefined } : h)) } } }
+    const hotel0 = v.hoteles[0]
+    const { html, modelo } = await prepararPropuestaHtml(sinFoto, {
+      marca: 'A',
+      logoUrl: null,
+      fotoDeCiudad: bancoComoFotoPDF,
+      catalogo: {
+        ciudad: () => null,
+        hotel: (nombre, ciudad) => (nombre === hotel0.hotel && ciudad === 'Madrid' ? { src: hotel0.foto!.url, credito: 'Hotel, Autora (Wikimedia Commons, CC BY 4.0)' } : null),
+        actividad: (nombre) => (nombre === 'Palacio Real de Madrid' ? CATALOGO_EUROPA.actividad(nombre) : null),
+      },
+    })
+    const planes = seccion(html, 'Planes para los días libres')
+    expect((planes.match(/class="img sinfoto"/g) ?? []).length).toBe(7)
+    expect(modelo.hoteles[0].opciones.find((o) => o.hotel === hotel0.hotel)!.foto?.url).toBe(hotel0.foto!.url)
+    expect(html).toContain('Hotel, Autora (Wikimedia Commons, CC BY 4.0)')
+  })
+})
+
 const SALIDA = process.env.PROPUESTA_PDF_SALIDA
 
 describe.skipIf(!SALIDA)('pdfDePropuestaHtml (con Chromium local)', () => {
@@ -73,6 +128,7 @@ describe.skipIf(!SALIDA)('pdfDePropuestaHtml (con Chromium local)', () => {
       marca: 'Agencia de ejemplo',
       logoUrl: process.env.PROPUESTA_LOGO ?? null,
       fotoDeCiudad: bancoComoFotoPDF,
+      catalogo: CATALOGO_EUROPA,
     })
     writeFileSync(SALIDA!, pdf)
     console.info('[propuesta-html]', JSON.stringify(medidas))

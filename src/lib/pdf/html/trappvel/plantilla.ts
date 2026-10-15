@@ -40,6 +40,8 @@ export interface RecursosPropuesta {
   foto: (url: string | null | undefined) => FotoResuelta | null
   /** Foto del banco de ciudades para una parada. `null` = la ciudad no tiene foto. */
   fotoDeCiudad: (ciudad: string | null) => FotoResuelta | null
+  /** Foto del catálogo (`fotos_catalogo`) para un plan opcional, por su nombre. Sin ella, degradado. */
+  fotoDeOpcional?: (nombre: string) => FotoResuelta | null
   /** Logo del workspace como data URL; sin logo va el nombre escrito. */
   logo: string | null
   marca: string
@@ -429,11 +431,16 @@ ${cuerpo.join('\n')}
   </table>\n</section>`
 }
 
-function opcionales(m: ModeloPropuesta): string {
+function opcionales(m: ModeloPropuesta, r: RecursosPropuesta): string {
   if (m.opcionales.length === 0) return ''
-  const tarjetas = m.opcionales.map((o) => {
+  const fotos = m.opcionales.map((o) => r.fotoDeOpcional?.(o.nombre) ?? null)
+  // Con alguna foto, todas las tarjetas llevan imagen (la que no tiene, el degradado): una fila
+  // de tarjetas con y sin imagen se ve rota. Sin ninguna, como antes.
+  const conImagen = fotos.some(Boolean)
+  const tarjetas = m.opcionales.map((o, i) => {
     const valor = o.valor > 0 ? `+ ${pesos(o.valor)}` : 'consultar'
-    return `<div class="oc"><div class="b"><div class="n">${esc(o.nombre)}</div>${o.descripcion ? `<div class="muted">${esc(o.descripcion)}</div>` : ''}<div class="foot"><span class="muted">${esc(o.unidad ?? '')}</span><span class="pr money">${esc(valor)}</span></div></div></div>`
+    const imagen = conImagen ? `<div class="img${fotos[i] ? '' : ' sinfoto'}"${fondo(fotos[i])}></div>` : ''
+    return `<div class="oc">${imagen}<div class="b"><div class="n">${esc(o.nombre)}</div>${o.descripcion ? `<div class="muted">${esc(o.descripcion)}</div>` : ''}<div class="foot"><span class="muted">${esc(o.unidad ?? '')}</span><span class="pr money">${esc(valor)}</span></div></div></div>`
   })
   return `<section class="sec">\n${encabezadoDeSeccion('sun', 'Planes para los días libres', 'Escojan los que quieran y los sumamos a la reserva. Precio para el grupo.')}
   <div class="opcs">${tarjetas.join('\n')}</div>\n</section>`
@@ -605,7 +612,7 @@ ${diaADia(m)}
 ${dondeDuermen(m, r)}
 ${vuelos(m)}
 ${trenesYTraslados(m)}
-${opcionales(m)}
+${opcionales(m, r)}
 ${eligeTuVersion(m)}
 ${incluyeYPagos(m)}
 ${formal(m, r)}

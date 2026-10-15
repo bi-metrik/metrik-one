@@ -77,12 +77,33 @@ export async function reducirLogo(src: string | null | undefined, ancho: number 
   }
 }
 
+/** Una foto del catálogo del workspace (`fotos_catalogo`), ya leída. */
+export interface FotoDeCatalogo {
+  /** data URL (o ruta en disco); `prepararPropuestaHtml` la reduce como las demás. */
+  src: string
+  /** La línea de crédito («Park Güell, Autora (Wikimedia Commons, CC BY-SA 3.0)»); `null` = propia. */
+  credito: string | null
+  foco?: { x: number; y: number } | null
+}
+
+/** Lo que el documento le pide al catálogo. Cada uno `null` = no hay foto. */
+export interface CatalogoPropuesta {
+  ciudad: (ciudad: string) => FotoDeCatalogo | null
+  hotel: (hotel: string, ciudad: string | null) => FotoDeCatalogo | null
+  actividad: (nombre: string) => FotoDeCatalogo | null
+}
+
 export interface OpcionesPropuestaHtml {
   /** Nombre del workspace: va escrito si no hay logo. */
   marca: string
   logoUrl: string | null
   /** El banco de fotos de ciudad (`fotosDeCiudad` → FotoPDF). Sin él, «Lo que van a vivir» va sin fotos. */
   fotoDeCiudad?: (ciudad: string) => FotoPDF[]
+  /**
+   * El catálogo de fotos del workspace (PR 4). Manda sobre el banco en las ciudades (alguien la
+   * eligió), llena el hotel sin foto propia y pone foto a los planes opcionales. Sin él, como antes.
+   */
+  catalogo?: CatalogoPropuesta | null
   timeoutMs?: number
 }
 
@@ -99,14 +120,62 @@ export async function prepararPropuestaHtml(
   opts: OpcionesPropuestaHtml,
 ): Promise<{ html: string; pie: string; encabezado: string; modelo: ModeloPropuesta }> {
   const modelo = modeloDePropuesta(entrada)
+  const catalogo = opts.catalogo ?? null
+  const comoFotoPDF = (f: FotoDeCatalogo, rotulo: string | null): FotoPDF => ({
+    url: f.src,
+    rotulo,
+    credito: f.credito,
+    ...(f.foco ? { foco: { x: f.foco.x, y: f.foco.y } } : {}),
+  })
 
-  // Fotos de ciudad por parada, del banco. La de la portada no se repite en su tarjeta.
+  // Sin foto de portada en el banco (Barcelona, Ámsterdam), la del catálogo de la primera parada que la tenga.
+  if (!modelo.portada.foto && catalogo) {
+    for (const p of modelo.ruta.paradas) {
+      const f = catalogo.ciudad(p.ciudad)
+      if (f) {
+        modelo.portada.foto = comoFotoPDF(f, p.ciudad.toUpperCase())
+        modelo.formal.creditos = [...new Set([...modelo.formal.creditos, ...(f.credito ? [f.credito] : [])])]
+        break
+      }
+    }
+  }
+
+  // Fotos de ciudad por parada: la del catálogo (alguien la eligió) o la del banco. La de la
+  // portada no se repite en su tarjeta.
   const portadaUrl = modelo.portada.foto?.url ?? null
   const deCiudad = new Map<string, FotoPDF>()
   for (const p of modelo.ruta.paradas) {
+    const delCatalogo = catalogo?.ciudad(p.ciudad) ?? null
+    if (delCatalogo && delCatalogo.src !== portadaUrl) {
+      deCiudad.set(p.ciudad, comoFotoPDF(delCatalogo, null))
+      continue
+    }
     const fotos = opts.fotoDeCiudad?.(p.ciudad) ?? []
     const elegida = fotos.find((f) => f.url !== portadaUrl) ?? fotos[0]
     if (elegida) deCiudad.set(p.ciudad, elegida)
+  }
+
+  // El hotel sin foto propia en esta cotización: la del catálogo (la que se subió la última vez,
+  // o la sugerida). Su crédito, si es de Commons, va al pie.
+  const creditosCatalogo: string[] = []
+  if (catalogo) {
+    for (const c of modelo.hoteles) {
+      for (const o of c.opciones) {
+        if (o.foto) continue
+        const f = catalogo.hotel(o.hotel, c.ciudad)
+        if (!f) continue
+        o.foto = { url: f.src, proporcion: null }
+        if (f.credito) creditosCatalogo.push(f.credito)
+      }
+    }
+  }
+  // Los planes opcionales, por su nombre.
+  const deOpcional = new Map<string, FotoDeCatalogo>()
+  if (catalogo) {
+    for (const o of modelo.opcionales) {
+      const f = catalogo.actividad(o.nombre)
+      if (f) deOpcional.set(o.nombre, f)
+    }
   }
 
   const pedidos = new Map<string, number>()
@@ -117,6 +186,7 @@ export async function prepararPropuestaHtml(
   pedir(portadaUrl, ANCHO_FOTO.portada)
   for (const f of deCiudad.values()) pedir(f.url, ANCHO_FOTO.tarjeta)
   for (const c of modelo.hoteles) for (const o of c.opciones) pedir(o.foto?.url, ANCHO_FOTO.tarjeta)
+  for (const f of deOpcional.values()) pedir(f.src, ANCHO_FOTO.tarjeta)
 
   const [resueltas, logo] = await Promise.all([
     Promise.all([...pedidos].map(async ([url, ancho]) => [url, await reducirFoto(url, ancho)] as const)),
@@ -126,17 +196,23 @@ export async function prepararPropuestaHtml(
   const focoDe = new Map<string, FotoPDF['foco']>()
   if (modelo.portada.foto) focoDe.set(modelo.portada.foto.url, modelo.portada.foto.foco)
   for (const f of deCiudad.values()) focoDe.set(f.url, f.foco)
+  for (const f of deOpcional.values()) if (f.foco) focoDe.set(f.src, f.foco)
   const resolver = (url: string | null | undefined): FotoResuelta | null => {
     if (!url) return null
     const src = porUrl.get(url)
     return src ? { src, foco: focoDe.get(url) ?? null } : null
   }
 
-  const creditosExtra = [...deCiudad.values()].filter((f) => porUrl.has(f.url)).map((f) => f.credito).filter((c): c is string => !!c)
+  const creditosExtra = [
+    ...[...deCiudad.values()].filter((f) => porUrl.has(f.url)).map((f) => f.credito),
+    ...creditosCatalogo,
+    ...[...deOpcional.values()].filter((f) => porUrl.has(f.src)).map((f) => f.credito),
+  ].filter((c): c is string => !!c)
 
   const crudo = htmlDePropuesta(modelo, {
     foto: resolver,
     fotoDeCiudad: (ciudad) => (ciudad ? resolver(deCiudad.get(ciudad)?.url) : null),
+    fotoDeOpcional: (nombre) => resolver(deOpcional.get(nombre)?.src),
     logo,
     marca: opts.marca,
     creditosExtra,
