@@ -41,6 +41,7 @@ import { resumenDeOpcion } from '@/lib/cotizaciones/opcion-viaje'
 import type { ItemConLectura } from '@/lib/cotizaciones/detalle-viaje'
 import type { DestinoDeIr, ListaUnica } from '@/lib/cotizaciones/lista-unica'
 import { ListaUnicaPorPasos } from './lista-unica-por-pasos'
+import { DocumentoEnRevisar } from './documento-en-revisar'
 import {
   cascadaDelTotal,
   estadoDeLosPasos,
@@ -525,6 +526,9 @@ export default function VistaPorPasos(p: PropsVistaPorPasos) {
     />
   )
 
+  // D7 · el documento de Revisar se vuelve a pedir cuando cambia lo que imprime: las líneas (costo,
+  // precio, grupo, si suman), las tarifas, el margen y el estado del texto.
+  const claveDelDocumento = `${total.precioVenta}|${p.texto}|${claveServidor}|${p.filas.map(f => `${f.subtotal ?? ''}:${f.precio_venta ?? ''}`).join(',')}`
   const paso3 = (
     <RevisarPorPasos
       total={total.precioVenta}
@@ -535,7 +539,12 @@ export default function VistaPorPasos(p: PropsVistaPorPasos) {
         ? (p.listaUnica.impide[0]?.texto ?? null)
         : p.motivoBotonEnviar ?? (sinCosto.length > 0 ? `${sinCosto[0].motivo}: ${sinCosto[0].servicio}.` : null)}
       lista={p.listaUnica ? <ListaUnicaPorPasos lista={p.listaUnica} onIr={irDesdeLaLista} /> : p.revisarLista}
-      documento={p.revisarDocumento}
+      documento={(
+        <>
+          <DocumentoEnRevisar cotizacionId={p.cotizacionId} clave={claveDelDocumento} />
+          {p.revisarDocumento}
+        </>
+      )}
       onDescargar={p.onDescargar}
       onEnviar={() => void correr(async () => {
         const r = await enviarPorPasos(p.cotizacionId)
