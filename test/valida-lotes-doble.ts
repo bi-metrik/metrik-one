@@ -42,7 +42,7 @@ export function crearDobleLotes(opciones: { ahora?: () => number; tablas?: Recor
       await ceder()
       const filas = t(tabla)
       if (op === 'insert') {
-        const nuevas = (Array.isArray(payload) ? payload : [payload]).map((f) => ({ id: uuid(), created_at: iso(ahora()), ...f }))
+        const nuevas: Fila[] = (Array.isArray(payload) ? payload : [payload]).map((f) => ({ id: uuid(), created_at: iso(ahora()), ...f }))
         if (tabla === 'valida_consultas') {
           for (const n of nuevas) {
             if (n.lote_fila_id && filas.some((f) => f.lote_fila_id === n.lote_fila_id)) {
