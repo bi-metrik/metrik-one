@@ -2,7 +2,7 @@
  * Las acciones de «Fotos de la propuesta» sobre el doble de Supabase: quién puede, qué se puede
  * pedir y que el nombre de la foto salga de la cotización, no del navegador.
  */
-import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import sharp from 'sharp'
 
 import { base, clienteFalso, type Fila } from '../../../../test/cotizacion-pdf-doble'
@@ -21,7 +21,7 @@ vi.mock('@/lib/fotos/catalogo-almacen', async (original) => ({
 const WS = '11111111-2222-3333-4444-555555555555'
 const COT = 'cot-1'
 
-import { fotosDeLaPropuesta, subirFotoPropia } from './fotos-catalogo-actions'
+import { confirmarFotoDelCatalogo, fotosDeLaPropuesta, otraFotoDeCommons, subirFotoPropia, sugerirFotosQueFaltan } from './fotos-catalogo-actions'
 
 function sembrar(motor: boolean) {
   base.secuencia = 0
@@ -78,5 +78,62 @@ describe('fotos de la propuesta', () => {
 
   it('lo que no es una foto no entra', async () => {
     expect(await subirFotoPropia(COT, 'actividad', 'tour johnny cay|', 'data:text/html;base64,PHNjcmlwdD4=')).toEqual({ ok: false, error: expect.stringContaining('no es una foto') })
+  })
+})
+
+describe('hoteles: solo la foto que sube la asesora (Mauricio, 2026-10-14)', () => {
+  const HOTEL = 'hotel decameron|'
+  let llamadas: string[] = []
+  beforeEach(() => {
+    ;(base.tablas.items as Fila[]).push({ id: 'i-3', cotizacion_id: COT, nombre: 'Hotel Decameron', grupo: 'hotel', tarifa_pax: null, descripcion: null })
+    llamadas = []
+    // Commons sin resultados: lo que importa es QUÉ se le pregunta.
+    vi.stubGlobal('fetch', async (url: string) => {
+      llamadas.push(String(url))
+      return new Response(JSON.stringify({ query: { pages: [] } }))
+    })
+  })
+  afterEach(() => {
+    vi.unstubAllGlobals()
+  })
+
+  it('el panel muestra el hotel sin «Otra»/«Buscar» (no es sugerible)', async () => {
+    const r = await fotosDeLaPropuesta(COT)
+    expect(r.ok).toBe(true)
+    if (!r.ok) return
+    expect(r.fotos.find((f) => f.tipo === 'hotel')).toMatchObject({ clave: HOTEL, sugerible: false, foto: null })
+    expect(r.fotos.find((f) => f.tipo === 'actividad')!.sugerible).toBe(true)
+  })
+
+  it('la sugerencia automática busca la actividad y NUNCA el hotel', async () => {
+    const r = await sugerirFotosQueFaltan(COT)
+    expect(r.ok).toBe(true)
+    expect(llamadas.some((u) => /Johnny/i.test(decodeURIComponent(u)))).toBe(true)
+    expect(llamadas.some((u) => /Decameron/i.test(decodeURIComponent(u)))).toBe(false)
+    expect((base.tablas.fotos_catalogo as Fila[]).filter((f) => f.tipo === 'hotel')).toHaveLength(0)
+  })
+
+  it('«Otra» y «Está bien» no existen para un hotel, ni llamándolas a mano', async () => {
+    expect(await otraFotoDeCommons(COT, 'hotel', HOTEL)).toEqual({ ok: false, error: expect.stringContaining('Subir la mía') })
+    expect(await confirmarFotoDelCatalogo(COT, 'hotel', HOTEL)).toEqual({ ok: false, error: expect.stringContaining('Subir la mía') })
+    expect(llamadas).toEqual([])
+  })
+
+  it('«Subir la mía» sí: queda en el catálogo como propia y se imprime', { timeout: 20_000 }, async () => {
+    const r = await subirFotoPropia(COT, 'hotel', HOTEL, await dataUrl())
+    expect(r.ok).toBe(true)
+    if (!r.ok) return
+    expect(r.fotos.find((f) => f.tipo === 'hotel')!.foto).toMatchObject({ origen: 'asesora', seImprime: true })
+  })
+
+  it('una de Commons que quedó en el catálogo para un hotel se ve marcada: no sale en la propuesta', async () => {
+    ;(base.tablas.fotos_catalogo as Fila[]).push({
+      id: 'f-1', workspace_id: WS, tipo: 'hotel', clave: HOTEL, nombre_clave: 'hotel decameron', nombre: 'Hotel Decameron', ciudad: null,
+      ref: `one://fotos-catalogo/${WS}/hotel/0123456789abcdef.jpg`, origen: 'wikimedia', fuente_url: null, titulo_fuente: 'File:X.jpg',
+      autor: 'A', licencia: 'CC BY 4.0', foco_x: null, foco_y: null, proporcion: 1.5, revisada: false, descartadas: [],
+    })
+    const r = await fotosDeLaPropuesta(COT)
+    if (!r.ok) throw new Error(r.error)
+    expect(r.fotos.find((f) => f.tipo === 'hotel')!.foto).toMatchObject({ origen: 'wikimedia', seImprime: false })
   })
 })

@@ -11,11 +11,12 @@ import 'server-only'
  * devuelve el motivo, nunca un error sin explicar. La propuesta sale como hoy.
  */
 import { borrarDeCatalogo, bytesDeCatalogo, guardarEnCatalogo, prepararFoto } from './catalogo-almacen'
-import { nombreLlano, type ObjetivoFoto, type TipoFoto } from './clave'
+import { nombreLlano, seSugiereDeCommons, type ObjetivoFoto, type TipoFoto } from './clave'
 import { AGENTE_COMMONS, buscarEnCommons, consultasDeFoto, creditoDeCatalogo, elegirCandidata, esDeWikimedia, type CandidataFoto } from './wikimedia'
 
 export const TABLA_CATALOGO = 'fotos_catalogo'
 export const MENSAJE_SIN_TABLA = 'El catálogo de fotos todavía no está disponible: falta aplicar la migración de la base.'
+export const MENSAJE_HOTEL_SIN_COMMONS = 'La foto de un hotel la sube la asesora: usa «Subir la mía».'
 
 export interface FilaCatalogo {
   id: string
@@ -176,6 +177,8 @@ export async function sugerirDesdeCommons(a: {
   descartadas?: string[]
   fetch?: typeof fetch
 }): Promise<Resultado> {
+  // Un hotel lleva la foto que sube la asesora, nunca una de Commons.
+  if (!seSugiereDeCommons(a.objetivo.tipo)) return { ok: false, mensaje: MENSAJE_HOTEL_SIN_COMMONS }
   const f = a.fetch ?? fetch
   const descartadas = [...new Set(a.descartadas ?? [])]
   // De la consulta más precisa a la más amplia, hasta que alguna dé una foto que nadie descartó.

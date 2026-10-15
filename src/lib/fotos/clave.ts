@@ -62,3 +62,22 @@ export function sinRepetir(objetivos: (ObjetivoFoto | null)[]): ObjetivoFoto[] {
   }
   return salida
 }
+
+export type OrigenFoto = 'wikimedia' | 'asesora'
+
+/**
+ * ¿Se le busca foto en Wikimedia Commons? Las ciudades y las actividades sí; los hoteles NUNCA
+ * (Mauricio, 2026-10-14: «las de los hoteles sí las debe cargar»). Un hotel lleva la foto que
+ * sube la asesora o el degradado.
+ */
+export function seSugiereDeCommons(tipo: TipoFoto): boolean {
+  return tipo !== 'hotel'
+}
+
+/**
+ * ¿Esta foto del catálogo sale en la propuesta? La de un hotel, solo si la subió la asesora: una
+ * de Commons que hubiera quedado en el catálogo no se imprime. Las demás, siempre.
+ */
+export function fotoImprimible(tipo: TipoFoto, origen: OrigenFoto | null | undefined): boolean {
+  return tipo === 'hotel' ? origen === 'asesora' : true
+}

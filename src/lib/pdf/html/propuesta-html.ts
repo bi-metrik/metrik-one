@@ -15,6 +15,7 @@ import { readFile } from 'node:fs/promises'
 import sharp from 'sharp'
 import { modeloDePropuesta, type EntradaModeloPropuesta, type ModeloPropuesta } from '@/lib/cotizaciones/propuesta/modelo-documento'
 import type { FotoPDF } from '@/lib/pdf/cotizacion-props'
+import { fotoImprimible, type OrigenFoto } from '@/lib/fotos/clave'
 import { fuentesDelDocumento } from '@/lib/pdf/chromium/fuentes'
 import { cssDeFuentes, inyectarEstilo } from '@/lib/pdf/chromium/recursos'
 import { imprimirHtmlAPdf, type MedidasRender } from '@/lib/pdf/chromium/render-chromium'
@@ -81,6 +82,8 @@ export async function reducirLogo(src: string | null | undefined, ancho: number 
 export interface FotoDeCatalogo {
   /** data URL (o ruta en disco); `prepararPropuestaHtml` la reduce como las demás. */
   src: string
+  /** De dónde salió: un hotel solo se imprime con la que subió la asesora (`fotoImprimible`). */
+  origen: OrigenFoto
   /** La línea de crédito («Park Güell, Autora (Wikimedia Commons, CC BY-SA 3.0)»); `null` = propia. */
   credito: string | null
   foco?: { x: number; y: number } | null
@@ -155,15 +158,15 @@ export async function prepararPropuestaHtml(
     if (elegida) deCiudad.set(p.ciudad, elegida)
   }
 
-  // El hotel sin foto propia en esta cotización: la del catálogo (la que se subió la última vez,
-  // o la sugerida). Su crédito, si es de Commons, va al pie.
+  // El hotel sin foto propia en esta cotización: la que la asesora subió para ese hotel en otra
+  // (catálogo). Una de Commons NUNCA: sin foto subida, el degradado.
   const creditosCatalogo: string[] = []
   if (catalogo) {
     for (const c of modelo.hoteles) {
       for (const o of c.opciones) {
         if (o.foto) continue
         const f = catalogo.hotel(o.hotel, c.ciudad)
-        if (!f) continue
+        if (!f || !fotoImprimible('hotel', f.origen)) continue
         o.foto = { url: f.src, proporcion: null }
         if (f.credito) creditosCatalogo.push(f.credito)
       }

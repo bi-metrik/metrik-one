@@ -12,9 +12,9 @@
  */
 import { getWorkspace } from '@/lib/actions/get-workspace'
 import { bytesDeDataUrl } from '@/lib/cotizaciones/imagen-captura'
-import { confirmarFoto, creditoDeFila, filaDe, leerCatalogo, MENSAJE_SIN_TABLA, ponerFotoPropia, quitarFoto, sugerirDesdeCommons, TABLA_CATALOGO } from '@/lib/fotos/catalogo'
+import { confirmarFoto, creditoDeFila, filaDe, leerCatalogo, MENSAJE_HOTEL_SIN_COMMONS, MENSAJE_SIN_TABLA, ponerFotoPropia, quitarFoto, sugerirDesdeCommons, TABLA_CATALOGO } from '@/lib/fotos/catalogo'
 import { enlaceDeCatalogo } from '@/lib/fotos/catalogo-almacen'
-import type { ObjetivoFoto, TipoFoto } from '@/lib/fotos/clave'
+import { fotoImprimible, seSugiereDeCommons, type ObjetivoFoto, type TipoFoto } from '@/lib/fotos/clave'
 import { objetivosDeItems } from '@/lib/fotos/objetivos'
 import { fotosDeCiudad } from '@/lib/pdf/fotos-ciudad'
 import { PLANTILLA_POR_DEFECTO, usaMotorHtml } from '@/lib/pdf/plantillas-cotizacion'
@@ -30,7 +30,11 @@ export interface FotoDelPanel {
   ciudad: string | null
   /** La ciudad ya tiene foto en el banco de ONE: no hace falta una del catálogo. */
   enBanco: boolean
+  /** Se le puede buscar foto en Commons («Otra», «Buscar»). Un hotel no: la sube la asesora. */
+  sugerible: boolean
   foto: {
+    /** Sale en la propuesta. Una de Commons para un hotel queda en el catálogo pero no se imprime. */
+    seImprime: boolean
     url: string | null
     origen: 'wikimedia' | 'asesora'
     credito: string | null
@@ -83,8 +87,10 @@ async function panel(ctx: Contexto, aviso?: string): Promise<PanelFotos> {
         nombre: o.nombre,
         ciudad: o.ciudad,
         enBanco: enBanco(o),
+        sugerible: seSugiereDeCommons(o.tipo),
         foto: f
           ? {
+              seImprime: fotoImprimible(o.tipo, f.origen),
               url: await enlaceDeCatalogo(ctx.workspaceId, f.ref),
               origen: f.origen,
               credito: creditoDeFila(f),
@@ -111,8 +117,9 @@ export async function fotosDeLaPropuesta(cotizacionId: string): Promise<PanelFot
 }
 
 /**
- * Busca en Wikimedia Commons una foto para cada ciudad, hotel y actividad que no la tenga. Las
- * ciudades del banco de ONE no se buscan. Quedan sin revisar: la asesora las ve y las cambia.
+ * Busca en Wikimedia Commons una foto para cada ciudad y actividad que no la tenga. Las ciudades
+ * del banco de ONE no se buscan, y los hoteles NUNCA (su foto la sube la asesora). Quedan sin
+ * revisar: la asesora las ve y las cambia.
  */
 export async function sugerirFotosQueFaltan(cotizacionId: string): Promise<PanelFotos> {
   const ctx = await contexto(cotizacionId, true)
@@ -120,7 +127,8 @@ export async function sugerirFotosQueFaltan(cotizacionId: string): Promise<Panel
   const { error: sinMigracion } = await ctx.db.from(TABLA_CATALOGO).select('id').limit(1)
   if (sinMigracion) return { ok: false, error: MENSAJE_SIN_TABLA }
   const filas = await leerCatalogo(ctx.db, ctx.workspaceId, { objetivos: ctx.objetivos })
-  const faltan = ctx.objetivos.filter((o) => !filaDe(filas, o) && !enBanco(o)).slice(0, TOPE_SUGERENCIAS)
+  // Los hoteles no: su foto la sube la asesora.
+  const faltan = ctx.objetivos.filter((o) => seSugiereDeCommons(o.tipo) && !filaDe(filas, o) && !enBanco(o)).slice(0, TOPE_SUGERENCIAS)
   let sinFoto = 0
   // Una por una: Commons pide no lanzar búsquedas en paralelo.
   for (const o of faltan) {
@@ -139,6 +147,7 @@ export async function otraFotoDeCommons(cotizacionId: string, tipo: TipoFoto, cl
   if ('error' in ctx) return { ok: false, error: ctx.error as string }
   const o = objetivoPedido(ctx, tipo, clave)
   if (!o) return { ok: false, error: 'Esa foto no es de esta cotización. Recarga.' }
+  if (!seSugiereDeCommons(o.tipo)) return { ok: false, error: MENSAJE_HOTEL_SIN_COMMONS }
   const filas = await leerCatalogo(ctx.db, ctx.workspaceId, { objetivos: [o] })
   const actual = filaDe(filas, o)
   const descartadas = [...(actual?.descartadas ?? []), ...(actual?.titulo_fuente ? [actual.titulo_fuente] : [])]
@@ -169,6 +178,7 @@ export async function confirmarFotoDelCatalogo(cotizacionId: string, tipo: TipoF
   const ctx = await contexto(cotizacionId, true)
   if ('error' in ctx) return { ok: false, error: ctx.error as string }
   if (!objetivoPedido(ctx, tipo, clave)) return { ok: false, error: 'Esa foto no es de esta cotización. Recarga.' }
+  if (!seSugiereDeCommons(tipo)) return { ok: false, error: MENSAJE_HOTEL_SIN_COMMONS }
   const r = await confirmarFoto(ctx.db, ctx.workspaceId, ctx.staffId, { tipo, clave })
   if (!r.ok) return { ok: false, error: r.mensaje ?? 'No se pudo confirmar la foto.' }
   return panel(ctx)

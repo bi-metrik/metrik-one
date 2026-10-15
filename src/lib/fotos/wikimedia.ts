@@ -11,7 +11,7 @@
  * `candidatasDeRespuesta` es PURA (se prueba con una respuesta de ejemplo); `buscarEnCommons`
  * hace la llamada, con `fetch` inyectable. Commons pide identificarse con un User-Agent propio.
  */
-import type { TipoFoto } from './clave'
+import { seSugiereDeCommons, type TipoFoto } from './clave'
 
 export const API_COMMONS = 'https://commons.wikimedia.org/w/api.php'
 export const AGENTE_COMMONS = 'MetrikONE/1.0 (https://metrikone.co; mauricio.moreno@metrik.com.co)'
@@ -85,12 +85,12 @@ const sinTilde = (s: string) => s.normalize('NFD').replace(/[\u0300-\u036f]/g, '
  * Las consultas a Commons, de la más precisa a la más amplia: Commons exige TODAS las palabras,
  * y «Park Güell con guía Barcelona» no encuentra nada que «Park Güell Barcelona» sí. Solo las
  * actividades se aflojan: primero el nombre con la ciudad, luego sin las palabras de relleno, y al
- * final sin ciudad. Una ciudad o un hotel, solo con su nombre completo.
+ * final sin ciudad. Una ciudad, solo con su nombre completo. Un hotel, ninguna: no se busca.
  */
 export function consultasDeFoto(tipo: TipoFoto, nombre: string, ciudad: string | null): string[] {
+  // Un hotel no se busca en Commons: su foto la sube la asesora (`seSugiereDeCommons`).
+  if (!seSugiereDeCommons(tipo)) return []
   const completa = consultaDeFoto(tipo, nombre, ciudad)
-  // Un hotel, solo con su nombre completo: sin «Hotel» ni «del», «Catalonia Puerta del Sol»
-  // trae fotos de la plaza (lo vio la prueba contra Commons del 2026-10-14). Mejor el degradado.
   if (tipo !== 'actividad') return [completa]
   const util = nombre.replace(/\s+/g, ' ').trim().split(' ').filter((w) => !RELLENO.has(sinTilde(w).replace(/[^a-z0-9]/g, '')))
   const corto = util.join(' ')

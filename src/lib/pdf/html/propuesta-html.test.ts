@@ -14,7 +14,7 @@ import { fotosDelViaje } from '@/lib/pdf/fotos-del-viaje'
 import { textoDelPdf } from '@/lib/ai/texto-pdf'
 import { pdfDePropuestaHtml, prepararPropuestaHtml, reducirFoto } from './propuesta-html'
 import { pesos } from './trappvel/plantilla'
-import { CATALOGO_EUROPA } from '../../../../test/catalogo-europa'
+import { CATALOGO_EUROPA, CREDITO_HOTEL_DE_COMMONS, sinFotosDeHotel } from '../../../../test/catalogo-europa'
 
 const bancoComoFotoPDF = (ciudad: string) =>
   fotosDeCiudad(ciudad).map((f) => ({ url: f.ruta, rotulo: f.rotulo, credito: f.credito, foco: f.foco, proporcion: f.proporcion }))
@@ -98,7 +98,7 @@ describe('prepararPropuestaHtml con el catálogo de fotos (PR 4)', () => {
     expect(seccion(html, 'Lo que van a vivir')).toContain('sinfoto')
   })
 
-  it('con foto en algunos planes, los demás llevan el degradado; el hotel sin foto propia toma la del catálogo', { timeout: 30_000 }, async () => {
+  it('con foto en algunos planes, los demás llevan el degradado; el hotel sin foto en la opción toma la que subió la asesora', { timeout: 30_000 }, async () => {
     const e = entradaComoLaAccion()
     const v = e.props.viaje!
     const sinFoto = { ...e, props: { ...e.props, viaje: { ...v, hoteles: v.hoteles.map((h, i) => (i === 0 ? { ...h, foto: undefined } : h)) } } }
@@ -109,14 +109,44 @@ describe('prepararPropuestaHtml con el catálogo de fotos (PR 4)', () => {
       fotoDeCiudad: bancoComoFotoPDF,
       catalogo: {
         ciudad: () => null,
-        hotel: (nombre, ciudad) => (nombre === hotel0.hotel && ciudad === 'Madrid' ? { src: hotel0.foto!.url, credito: 'Hotel, Autora (Wikimedia Commons, CC BY 4.0)' } : null),
+        hotel: (nombre, ciudad) => (nombre === hotel0.hotel && ciudad === 'Madrid' ? { src: hotel0.foto!.url, origen: 'asesora', credito: null } : null),
         actividad: (nombre) => (nombre === 'Palacio Real de Madrid' ? CATALOGO_EUROPA.actividad(nombre) : null),
       },
     })
     const planes = seccion(html, 'Planes para los días libres')
     expect((planes.match(/class="img sinfoto"/g) ?? []).length).toBe(7)
     expect(modelo.hoteles[0].opciones.find((o) => o.hotel === hotel0.hotel)!.foto?.url).toBe(hotel0.foto!.url)
-    expect(html).toContain('Hotel, Autora (Wikimedia Commons, CC BY 4.0)')
+  })
+
+  it('un hotel NUNCA sale con una foto de Commons del catálogo: va con el degradado y sin su crédito', { timeout: 30_000 }, async () => {
+    const e = sinFotosDeHotel(entradaComoLaAccion())
+    const commons = { src: `${process.cwd()}/src/lib/pdf/chromium/ensayo/fotos/catalonia.jpg`, origen: 'wikimedia' as const, credito: 'Hotel, Autora (Wikimedia Commons, CC BY 4.0)' }
+    const { html, modelo } = await prepararPropuestaHtml(e, {
+      marca: 'A',
+      logoUrl: null,
+      fotoDeCiudad: bancoComoFotoPDF,
+      catalogo: { ciudad: () => null, hotel: () => commons, actividad: () => null },
+    })
+    expect(modelo.hoteles.flatMap((c) => c.opciones).every((o) => !o.foto)).toBe(true)
+    expect(html).not.toContain('Hotel, Autora (Wikimedia Commons, CC BY 4.0)')
+    // Ningún hotel con foto: las tarjetas van sin imagen, como antes.
+    expect(seccion(html, 'Dónde duermen')).not.toContain('class="img')
+  })
+
+  it('la muestra: solo los 3 hoteles con foto subida la llevan; los demás, el degradado', { timeout: 30_000 }, async () => {
+    const { html, modelo } = await prepararPropuestaHtml(sinFotosDeHotel(entradaComoLaAccion()), {
+      marca: 'A',
+      logoUrl: null,
+      fotoDeCiudad: bancoComoFotoPDF,
+      catalogo: CATALOGO_EUROPA,
+    })
+    const conFoto = modelo.hoteles.flatMap((c) => c.opciones).filter((o) => o.foto).map((o) => o.hotel)
+    expect(conFoto).toEqual(['Catalonia Puerta del Sol', 'H10 Metropolitan', 'Pullman Paris Tour Eiffel'])
+    const hoteles = seccion(html, 'Dónde duermen')
+    expect((hoteles.match(/class="img" style="background-image:url\(data:image\/jpeg/g) ?? []).length).toBe(3)
+    expect((hoteles.match(/class="img sinfoto"/g) ?? []).length).toBe(9)
+    // Le Meurice tiene en el catálogo una de Commons: ni la foto ni su crédito.
+    expect(html).not.toContain(CREDITO_HOTEL_DE_COMMONS)
   })
 })
 
@@ -124,7 +154,8 @@ const SALIDA = process.env.PROPUESTA_PDF_SALIDA
 
 describe.skipIf(!SALIDA)('pdfDePropuestaHtml (con Chromium local)', () => {
   it('imprime el COT-2026-0026 de muestra', { timeout: 120_000 }, async () => {
-    const { pdf, medidas } = await pdfDePropuestaHtml(entradaComoLaAccion(), {
+    // Como en producción tras la regla de hoteles: la asesora subió foto solo para 3.
+    const { pdf, medidas } = await pdfDePropuestaHtml(sinFotosDeHotel(entradaComoLaAccion()), {
       marca: 'Agencia de ejemplo',
       logoUrl: process.env.PROPUESTA_LOGO ?? null,
       fotoDeCiudad: bancoComoFotoPDF,

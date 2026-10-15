@@ -9,7 +9,7 @@ import 'server-only'
 import type { CotizacionPDFProps } from '@/lib/pdf/cotizacion-props'
 import type { CatalogoPropuesta, FotoDeCatalogo } from '@/lib/pdf/html/propuesta-html'
 import { actividadPorNombre, creditoDeFila, dataUrlDeFila, filaDe, leerCatalogo, type FilaCatalogo } from './catalogo'
-import { claveDeFoto, objetivo, sinRepetir } from './clave'
+import { claveDeFoto, fotoImprimible, objetivo, sinRepetir } from './clave'
 
 /** Lo que una propuesta pide al catálogo, de las mismas props que imprime el documento. */
 export function pedidoDeLaPropuesta(props: CotizacionPDFProps) {
@@ -26,7 +26,8 @@ export function pedidoDeLaPropuesta(props: CotizacionPDFProps) {
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 export async function catalogoParaLaPropuesta(supabase: any, workspaceId: string, props: CotizacionPDFProps): Promise<CatalogoPropuesta | null> {
   const pedido = pedidoDeLaPropuesta(props)
-  const filas = await leerCatalogo(supabase, workspaceId, pedido)
+  // Un hotel solo con la foto que subió la asesora: una de Commons no se baja ni se imprime.
+  const filas = (await leerCatalogo(supabase, workspaceId, pedido)).filter((f) => fotoImprimible(f.tipo, f.origen))
   if (filas.length === 0) return null
   const leidas = new Map<string, FotoDeCatalogo>()
   await Promise.all(
@@ -35,6 +36,7 @@ export async function catalogoParaLaPropuesta(supabase: any, workspaceId: string
       if (src) {
         leidas.set(f.id, {
           src,
+          origen: f.origen,
           credito: creditoDeFila(f),
           foco: f.foco_x !== null && f.foco_y !== null ? { x: Number(f.foco_x), y: Number(f.foco_y) } : null,
         })

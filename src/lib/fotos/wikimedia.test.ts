@@ -15,7 +15,7 @@ import {
   licenciaImprimible,
   urlDeBusqueda,
 } from './wikimedia'
-import { claveDeFoto, objetivo, sinRepetir } from './clave'
+import { claveDeFoto, fotoImprimible, objetivo, seSugiereDeCommons, sinRepetir } from './clave'
 
 const pagina = (over: { title: string; index: number; licencia?: string; artist?: string; width?: number; height?: number; mime?: string; restrictions?: string }) => ({
   title: over.title,
@@ -126,12 +126,26 @@ describe('el crédito y la consulta', () => {
     expect(url.searchParams.get('gsrnamespace')).toBe('6')
   })
 
-  it('Commons exige todas las palabras: la actividad se afloja; el hotel y la ciudad no', () => {
+  it('un hotel NUNCA se busca en Commons: su foto la sube la asesora', () => {
+    expect(consultasDeFoto('hotel', 'Catalonia Puerta del Sol', 'Madrid')).toEqual([])
+    expect(seSugiereDeCommons('hotel')).toBe(false)
+    expect(seSugiereDeCommons('ciudad')).toBe(true)
+    expect(seSugiereDeCommons('actividad')).toBe(true)
+  })
+
+  it('la foto de un hotel solo se imprime si la subió la asesora; la de ciudad o plan, siempre', () => {
+    expect(fotoImprimible('hotel', 'asesora')).toBe(true)
+    expect(fotoImprimible('hotel', 'wikimedia')).toBe(false)
+    expect(fotoImprimible('hotel', null)).toBe(false)
+    expect(fotoImprimible('ciudad', 'wikimedia')).toBe(true)
+    expect(fotoImprimible('actividad', 'wikimedia')).toBe(true)
+  })
+
+  it('Commons exige todas las palabras: la actividad se afloja; la ciudad no', () => {
     expect(consultasDeFoto('actividad', 'Park Güell con guía', 'Barcelona')).toEqual(['Park Güell con guía Barcelona', 'Park Güell Barcelona', 'Park Güell'])
     expect(consultasDeFoto('actividad', 'Molinos de Zaanse Schans', 'Ámsterdam')).toEqual([
       'Molinos de Zaanse Schans Ámsterdam', 'Molinos Zaanse Schans Ámsterdam', 'Molinos Zaanse Schans',
     ])
-    expect(consultasDeFoto('hotel', 'Catalonia Puerta del Sol', 'Madrid')).toEqual(['Catalonia Puerta del Sol Madrid'])
     expect(consultasDeFoto('ciudad', 'Ámsterdam', null)).toEqual(['Ámsterdam'])
   })
 

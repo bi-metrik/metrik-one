@@ -177,6 +177,21 @@ describe('escrituras del catálogo', () => {
     expect(String(db.filas[0].fuente_url)).toMatch(/^https:\/\/commons\.wikimedia\.org\//)
   })
 
+  it('un hotel NUNCA se sugiere de Commons: ni busca, ni baja, ni escribe', async () => {
+    const db = dobleTabla()
+    const llamadas: string[] = []
+    const espia = (async (url: string) => {
+      llamadas.push(url)
+      return commonsFalso(['File:A.jpg'], await jpeg())(url)
+    }) as unknown as typeof fetch
+    const hotel = objetivo('hotel', 'H10 Metropolitan', 'Barcelona')!
+    const r = await sugerirDesdeCommons({ supabase: db, workspaceId: WS, staffId: 's1', objetivo: hotel, fetch: espia })
+    expect(r).toEqual({ ok: false, mensaje: expect.stringContaining('Subir la mía') })
+    expect(llamadas).toEqual([])
+    expect(db.filas).toHaveLength(0)
+    expect(almacen.guardadas).toEqual([])
+  })
+
   it('«Otra foto»: salta la descartada, reemplaza la fila y borra el archivo viejo', { timeout: 20_000 }, async () => {
     const db = dobleTabla()
     const f = commonsFalso(['File:A.jpg', 'File:B.jpg'], await jpeg())

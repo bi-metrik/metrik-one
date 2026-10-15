@@ -25,8 +25,9 @@ const TITULO: Record<TipoFoto, string> = { ciudad: 'Ciudades', hotel: 'Hoteles',
  * propuesta nueva. Son del catálogo del espacio: la que se pone aquí sirve para las siguientes
  * cotizaciones que nombren lo mismo.
  *
- * Al abrir, las que faltan se buscan solas en Wikimedia Commons (solo licencias libres, con su
- * crédito al pie del documento). La asesora pide otra, sube la suya o la quita.
+ * Al abrir, las ciudades y actividades que faltan se buscan solas en Wikimedia Commons (solo
+ * licencias libres, con su crédito al pie del documento). La asesora pide otra, sube la suya o la
+ * quita. Los hoteles NUNCA se buscan: solo «Subir la mía» y «Quitar» (Mauricio, 2026-10-14).
  */
 export default function FotosPropuestaPanel({ cotizacionId, editable }: { cotizacionId: string; editable: boolean }) {
   const [estado, setEstado] = useState<PanelFotos | null>(null)
@@ -63,7 +64,8 @@ export default function FotosPropuestaPanel({ cotizacionId, editable }: { cotiza
       if (!vivo) return
       setEstado(r)
       // Sugerencia automática: una vez por apertura, solo si falta alguna y se puede escribir.
-      const faltan = r.ok && r.editable && editable && r.fotos.some((f) => !f.foto && !f.enBanco)
+      // Los hoteles no cuentan: su foto la sube la asesora, nunca se busca.
+      const faltan = r.ok && r.editable && editable && r.fotos.some((f) => f.sugerible && !f.foto && !f.enBanco)
       if (faltan && !buscado.current) {
         buscado.current = true
         setOcupado('todas')
@@ -111,8 +113,9 @@ export default function FotosPropuestaPanel({ cotizacionId, editable }: { cotiza
         )}
       </div>
       <p className="text-[11px] text-muted-foreground">
-        Las que faltan se buscan solas en Wikimedia Commons, solo con licencia libre y con su crédito al pie. Revísalas: cámbialas o
-        sube la tuya. Quedan guardadas para las próximas cotizaciones. Sin foto, sale el degradado.
+        Las de ciudades y actividades que faltan se buscan solas en Wikimedia Commons, solo con licencia libre y con su crédito al
+        pie. Revísalas: cámbialas o sube la tuya. La de cada hotel la subes tú. Quedan guardadas para las próximas cotizaciones. Sin
+        foto, sale el degradado.
       </p>
       {grupos.map((g) => (
         <div key={g.tipo} className="space-y-1">
@@ -135,25 +138,32 @@ export default function FotosPropuestaPanel({ cotizacionId, editable }: { cotiza
                     </p>
                     <p className="truncate text-[10px] text-muted-foreground" title={f.foto?.credito ?? undefined}>
                       {f.foto
-                        ? f.foto.origen === 'asesora'
-                          ? 'Foto propia'
-                          : `${f.foto.revisada ? '' : 'Sugerida · '}${f.foto.credito ?? 'Wikimedia Commons'}`
+                        ? !f.foto.seImprime
+                          ? 'No sale en la propuesta: sube la foto del hotel'
+                          : f.foto.origen === 'asesora'
+                            ? 'Foto propia'
+                            : `${f.foto.revisada ? '' : 'Sugerida · '}${f.foto.credito ?? 'Wikimedia Commons'}`
                         : f.enBanco
                           ? 'Usa la foto de ONE de esta ciudad'
-                          : 'Sin foto: sale el degradado'}
+                          : f.sugerible
+                            ? 'Sin foto: sale el degradado'
+                            : 'Sin foto: sale el degradado. Sube la del hotel'}
                     </p>
                     {puede && (
                       <div className="flex flex-wrap items-center gap-1">
-                        {f.foto && f.foto.origen === 'wikimedia' && !f.foto.revisada && (
+                        {f.sugerible && f.foto && f.foto.origen === 'wikimedia' && !f.foto.revisada && (
                           <button type="button" disabled={!!ocupado} onClick={() => correr(k, () => confirmarFotoDelCatalogo(cotizacionId, f.tipo, f.clave))}
                             className="inline-flex items-center gap-0.5 rounded px-1.5 py-0.5 text-[10px] hover:bg-accent disabled:opacity-50">
                             <Check className="h-3 w-3" /> Está bien
                           </button>
                         )}
-                        <button type="button" disabled={!!ocupado} onClick={() => correr(k, () => otraFotoDeCommons(cotizacionId, f.tipo, f.clave))}
-                          className="inline-flex items-center gap-0.5 rounded px-1.5 py-0.5 text-[10px] hover:bg-accent disabled:opacity-50">
-                          {trabajando ? <Loader2 className="h-3 w-3 animate-spin" /> : <RefreshCw className="h-3 w-3" />} {f.foto ? 'Otra' : 'Buscar'}
-                        </button>
+                        {f.sugerible && (
+                          <button type="button" disabled={!!ocupado} onClick={() => correr(k, () => otraFotoDeCommons(cotizacionId, f.tipo, f.clave))}
+                            className="inline-flex items-center gap-0.5 rounded px-1.5 py-0.5 text-[10px] hover:bg-accent disabled:opacity-50">
+                            {trabajando ? <Loader2 className="h-3 w-3 animate-spin" /> : <RefreshCw className="h-3 w-3" />} {f.foto ? 'Otra' : 'Buscar'}
+                          </button>
+                        )}
+                        {!f.sugerible && trabajando && <Loader2 className="h-3 w-3 animate-spin text-muted-foreground" />}
                         <label className={`inline-flex cursor-pointer items-center gap-0.5 rounded px-1.5 py-0.5 text-[10px] hover:bg-accent ${ocupado ? 'pointer-events-none opacity-50' : ''}`}>
                           <ImagePlus className="h-3 w-3" /> Subir la mía
                           <input type="file" accept="image/*" className="hidden" onChange={(e) => { const a = e.target.files?.[0]; e.target.value = ''; if (a) subir(f, a) }} />

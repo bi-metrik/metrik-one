@@ -419,13 +419,15 @@ function dondeDuermen(m: ModeloPropuesta, r: RecursosPropuesta): string {
     regimenes.length === 1 ? `${regimenes[0]} en todos los hoteles.` : null,
     m.tarifas.length > 0 ? 'Un hotel por versión del viaje; la etiqueta de color dice cuál.' : null,
   ].filter(Boolean).join(' ')
+  // Un hotel solo lleva la foto que subió la asesora (Mauricio, 2026-10-14); sin ella, el
+  // degradado. Repetir la de la ciudad en cada hotel diría que los tres son el mismo sitio. Si
+  // ningún hotel tiene foto, las tarjetas van sin imagen, como antes.
+  const conImagen = m.hoteles.some((c) => c.opciones.some((o) => r.foto(o.foto?.url)))
   const ciudades = m.hoteles.map((c) => {
     const cuando = rango(c.desde, c.hasta)
     const noches = c.noches ? `${c.noches} ${c.noches === 1 ? 'noche' : 'noches'}` : null
     const tarjetas = c.opciones.map((o) => {
       const principal = o.tarifas.some((i) => porIndice.get(i)?.esPrincipal)
-      // Sin foto propia del hotel, la tarjeta va sin imagen: repetir la de la ciudad en cada
-      // hotel diría que los tres son el mismo sitio.
       const foto = r.foto(o.foto?.url)
       const tags = etiquetasDe(o.tarifas, porIndice)
       const tagsHtml = tags ? `<span class="tags">${tags}</span>` : ''
@@ -434,8 +436,10 @@ function dondeDuermen(m: ModeloPropuesta, r: RecursosPropuesta): string {
         o.habitacion ? esc(o.habitacion) : '',
       ].filter(Boolean).join(' · ')
       // Decisión 2 (2026-10-14): la cancelación del hotel NO se imprime.
-      const imagen = foto ? `<div class="img"${fondo(foto)}>${tagsHtml}</div>` : ''
-      return `<div class="hc${principal && m.tarifas.length > 0 ? ' rec' : ''}">${imagen}<div class="b">${foto ? '' : tagsHtml}<div class="n">${esc(o.hotel)}</div>${detalle}${o.regimen && regimenes.length !== 1 ? `<br>${esc(o.regimen)}` : ''}${o.cargoEnDestino ? `<br><span class="muted">${esc(o.cargoEnDestino)}, se paga en el hotel</span>` : ''}</div></div>`
+      const imagen = foto
+        ? `<div class="img"${fondo(foto)}>${tagsHtml}</div>`
+        : conImagen ? `<div class="img sinfoto">${tagsHtml}</div>` : ''
+      return `<div class="hc${principal && m.tarifas.length > 0 ? ' rec' : ''}">${imagen}<div class="b">${imagen ? '' : tagsHtml}<div class="n">${esc(o.hotel)}</div>${detalle}${o.regimen && regimenes.length !== 1 ? `<br>${esc(o.regimen)}` : ''}${o.cargoEnDestino ? `<br><span class="muted">${esc(o.cargoEnDestino)}, se paga en el hotel</span>` : ''}</div></div>`
     })
     const columnas = Math.min(3, Math.max(1, c.opciones.length))
     return `<div class="nobr">
