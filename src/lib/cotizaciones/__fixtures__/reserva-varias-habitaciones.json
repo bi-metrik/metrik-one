@@ -1,0 +1,772 @@
+{
+ "_fuente": "Lecturas REALES de gemini-2.5-flash (extraerRanuraDesdeImagen, 2026-10-14) sobre pantallazos SINTETICOS de la verificacion D de Vera (03-posada, 05-verdemar) y uno de control hecho por Max (n1: grilla para elegir, sin total). Sin datos de personas. posadaSiempre = la lectura de siempre, 3 corridas; las demas, con reservaVariasHabitaciones.",
+ "posadaSiempre": [
+  {
+   "veredicto": "detalle_unico",
+   "observacion": "Se muestra un resumen de una reserva de hotel con 3 habitaciones dobles, cada una con su ocupación y precio, y un total general para la estadía completa.",
+   "campos": {
+    "hotel": {
+     "value": "Posada Enilda",
+     "confidence": 1
+    },
+    "ciudad": {
+     "value": "Isla de Providencia",
+     "confidence": 1
+    },
+    "tipo_habitacion": {
+     "value": "Doble",
+     "confidence": 0.9
+    },
+    "regimen": {
+     "value": "Alojamiento y desayuno",
+     "confidence": 1
+    },
+    "check_in": {
+     "value": "2026-11-23",
+     "confidence": 1
+    },
+    "check_out": {
+     "value": "2026-11-25",
+     "confidence": 1
+    },
+    "noches": {
+     "value": "2",
+     "confidence": 1
+    },
+    "ocupacion": {
+     "value": "6 adultos, 1 niño, 1 infante",
+     "confidence": 0.9
+    },
+    "politica_cancelacion": {
+     "value": null,
+     "confidence": 0
+    },
+    "impuestos_incluidos": {
+     "value": null,
+     "confidence": 0
+    },
+    "impuestos_destino_valor": {
+     "value": null,
+     "confidence": 0
+    },
+    "impuestos_destino_moneda": {
+     "value": null,
+     "confidence": 0
+    },
+    "ocupacion_adultos": {
+     "value": "6",
+     "confidence": 0.9
+    },
+    "ocupacion_ninos": {
+     "value": "1",
+     "confidence": 0.9
+    },
+    "ocupacion_infantes": {
+     "value": "1",
+     "confidence": 0.9
+    },
+    "ocupacion_total": {
+     "value": "8",
+     "confidence": 0.9
+    },
+    "moneda": {
+     "value": "COP",
+     "confidence": 1
+    },
+    "precio_total": {
+     "value": "1229098",
+     "confidence": 1
+    },
+    "base_precio": {
+     "value": "total",
+     "confidence": 1
+    },
+    "total_a_pagar_agencia": {
+     "value": null,
+     "confidence": 0
+    },
+    "comision_agencia_valor": {
+     "value": null,
+     "confidence": 0
+    },
+    "comision_agencia_pct": {
+     "value": null,
+     "confidence": 0
+    },
+    "estrellas": {
+     "value": null,
+     "confidence": 0
+    }
+   },
+   "desglose": [],
+   "porTipoPax": [],
+   "totalGeneral": null,
+   "opcionesVisibles": 1,
+   "opcionesVistas": [
+    {
+     "nombre": "Total 3 habitaciones dobles",
+     "precio": "COP 1.229.098",
+     "seleccionada": true
+    }
+   ],
+   "iconosEquipaje": [],
+   "estrellasDeteccion": {
+    "valor": null,
+    "corridas": [
+     null,
+     null
+    ],
+    "error": null
+   }
+  },
+  {
+   "veredicto": "varias_opciones",
+   "observacion": "Se muestra una tabla con varias habitaciones y sus precios individuales, además de un total general. No hay una opción única seleccionada.",
+   "campos": {
+    "hotel": {
+     "value": null,
+     "confidence": 0
+    },
+    "ciudad": {
+     "value": null,
+     "confidence": 0
+    },
+    "tipo_habitacion": {
+     "value": null,
+     "confidence": 0
+    },
+    "regimen": {
+     "value": null,
+     "confidence": 0
+    },
+    "check_in": {
+     "value": null,
+     "confidence": 0
+    },
+    "check_out": {
+     "value": null,
+     "confidence": 0
+    },
+    "noches": {
+     "value": null,
+     "confidence": 0
+    },
+    "ocupacion": {
+     "value": null,
+     "confidence": 0
+    },
+    "politica_cancelacion": {
+     "value": null,
+     "confidence": 0
+    },
+    "impuestos_incluidos": {
+     "value": null,
+     "confidence": 0
+    },
+    "impuestos_destino_valor": {
+     "value": null,
+     "confidence": 0
+    },
+    "impuestos_destino_moneda": {
+     "value": null,
+     "confidence": 0
+    },
+    "ocupacion_adultos": {
+     "value": null,
+     "confidence": 0
+    },
+    "ocupacion_ninos": {
+     "value": null,
+     "confidence": 0
+    },
+    "ocupacion_infantes": {
+     "value": null,
+     "confidence": 0
+    },
+    "ocupacion_total": {
+     "value": null,
+     "confidence": 0
+    },
+    "moneda": {
+     "value": null,
+     "confidence": 0
+    },
+    "precio_total": {
+     "value": null,
+     "confidence": 0
+    },
+    "base_precio": {
+     "value": null,
+     "confidence": 0
+    },
+    "total_a_pagar_agencia": {
+     "value": null,
+     "confidence": 0
+    },
+    "comision_agencia_valor": {
+     "value": null,
+     "confidence": 0
+    },
+    "comision_agencia_pct": {
+     "value": null,
+     "confidence": 0
+    },
+    "estrellas": {
+     "value": null,
+     "confidence": 0
+    }
+   },
+   "desglose": [],
+   "porTipoPax": [],
+   "totalGeneral": null,
+   "opcionesVisibles": 3,
+   "opcionesVistas": [
+    {
+     "nombre": "Doble 1",
+     "precio": "COP 409.699",
+     "seleccionada": false
+    },
+    {
+     "nombre": "Doble 2",
+     "precio": "COP 409.699",
+     "seleccionada": false
+    },
+    {
+     "nombre": "Doble 3",
+     "precio": "COP 409.700",
+     "seleccionada": false
+    }
+   ],
+   "iconosEquipaje": [],
+   "estrellasDeteccion": {
+    "valor": null,
+    "corridas": [
+     null,
+     null
+    ],
+    "error": null
+   }
+  },
+  {
+   "veredicto": "varias_opciones",
+   "observacion": "Se muestra una tabla con tres opciones de habitación diferentes, cada una con su propio precio de estadía, y un total general para las tres habitaciones.",
+   "campos": {
+    "hotel": {
+     "value": null,
+     "confidence": 0
+    },
+    "ciudad": {
+     "value": null,
+     "confidence": 0
+    },
+    "tipo_habitacion": {
+     "value": null,
+     "confidence": 0
+    },
+    "regimen": {
+     "value": null,
+     "confidence": 0
+    },
+    "check_in": {
+     "value": null,
+     "confidence": 0
+    },
+    "check_out": {
+     "value": null,
+     "confidence": 0
+    },
+    "noches": {
+     "value": null,
+     "confidence": 0
+    },
+    "ocupacion": {
+     "value": null,
+     "confidence": 0
+    },
+    "politica_cancelacion": {
+     "value": null,
+     "confidence": 0
+    },
+    "impuestos_incluidos": {
+     "value": null,
+     "confidence": 0
+    },
+    "impuestos_destino_valor": {
+     "value": null,
+     "confidence": 0
+    },
+    "impuestos_destino_moneda": {
+     "value": null,
+     "confidence": 0
+    },
+    "ocupacion_adultos": {
+     "value": null,
+     "confidence": 0
+    },
+    "ocupacion_ninos": {
+     "value": null,
+     "confidence": 0
+    },
+    "ocupacion_infantes": {
+     "value": null,
+     "confidence": 0
+    },
+    "ocupacion_total": {
+     "value": null,
+     "confidence": 0
+    },
+    "moneda": {
+     "value": null,
+     "confidence": 0
+    },
+    "precio_total": {
+     "value": null,
+     "confidence": 0
+    },
+    "base_precio": {
+     "value": null,
+     "confidence": 0
+    },
+    "total_a_pagar_agencia": {
+     "value": null,
+     "confidence": 0
+    },
+    "comision_agencia_valor": {
+     "value": null,
+     "confidence": 0
+    },
+    "comision_agencia_pct": {
+     "value": null,
+     "confidence": 0
+    },
+    "estrellas": {
+     "value": null,
+     "confidence": 0
+    }
+   },
+   "desglose": [],
+   "porTipoPax": [],
+   "totalGeneral": null,
+   "opcionesVisibles": 3,
+   "opcionesVistas": [
+    {
+     "nombre": "Doble 1",
+     "precio": "COP 409.699",
+     "seleccionada": false
+    },
+    {
+     "nombre": "Doble 2",
+     "precio": "COP 409.699",
+     "seleccionada": false
+    },
+    {
+     "nombre": "Doble 3",
+     "precio": "COP 409.700",
+     "seleccionada": false
+    }
+   ],
+   "iconosEquipaje": [],
+   "estrellasDeteccion": {
+    "valor": null,
+    "corridas": [
+     null,
+     null
+    ],
+    "error": null
+   }
+  }
+ ],
+ "posadaReserva": {
+  "veredicto": "detalle_unico",
+  "observacion": "Se ve el detalle de una reserva de hotel con 3 habitaciones y el precio total.",
+  "campos": {
+   "hotel": {
+    "value": "Posada Enilda",
+    "confidence": 1
+   },
+   "ciudad": {
+    "value": "Isla de Providencia",
+    "confidence": 0.9
+   },
+   "tipo_habitacion": {
+    "value": "Doble",
+    "confidence": 0.9
+   },
+   "regimen": {
+    "value": "Alojamiento y desayuno",
+    "confidence": 1
+   },
+   "check_in": {
+    "value": "2026-11-23",
+    "confidence": 1
+   },
+   "check_out": {
+    "value": "2026-11-25",
+    "confidence": 1
+   },
+   "noches": {
+    "value": "2",
+    "confidence": 1
+   },
+   "ocupacion": {
+    "value": "6 adultos, 1 niño, 1 infante",
+    "confidence": 0.9
+   },
+   "politica_cancelacion": {
+    "value": null,
+    "confidence": 0
+   },
+   "impuestos_incluidos": {
+    "value": null,
+    "confidence": 0
+   },
+   "impuestos_destino_valor": {
+    "value": null,
+    "confidence": 0
+   },
+   "impuestos_destino_moneda": {
+    "value": null,
+    "confidence": 0
+   },
+   "ocupacion_adultos": {
+    "value": "6",
+    "confidence": 0.9
+   },
+   "ocupacion_ninos": {
+    "value": "1",
+    "confidence": 0.9
+   },
+   "ocupacion_infantes": {
+    "value": "1",
+    "confidence": 0.9
+   },
+   "ocupacion_total": {
+    "value": "8",
+    "confidence": 0.9
+   },
+   "moneda": {
+    "value": "COP",
+    "confidence": 1
+   },
+   "precio_total": {
+    "value": "1229098",
+    "confidence": 1
+   },
+   "base_precio": {
+    "value": "total",
+    "confidence": 1
+   },
+   "total_a_pagar_agencia": {
+    "value": null,
+    "confidence": 0
+   },
+   "comision_agencia_valor": {
+    "value": null,
+    "confidence": 0
+   },
+   "comision_agencia_pct": {
+    "value": null,
+    "confidence": 0
+   },
+   "estrellas": {
+    "value": null,
+    "confidence": 0
+   }
+  },
+  "desglose": [],
+  "porTipoPax": [],
+  "totalGeneral": null,
+  "opcionesVisibles": 1,
+  "opcionesVistas": [
+   {
+    "nombre": "Posada Enilda - Isla de Providencia - Alojamiento y desayuno - 3 habitaciones dobles",
+    "precio": "COP 1.229.098",
+    "seleccionada": true
+   }
+  ],
+  "iconosEquipaje": [],
+  "habitacionesReserva": [
+   {
+    "nombre": "Doble 1",
+    "ocupacion": "2 adultos",
+    "precio": "COP 409.699"
+   },
+   {
+    "nombre": "Doble 2",
+    "ocupacion": "2 adultos",
+    "precio": "COP 409.699"
+   },
+   {
+    "nombre": "Doble 3",
+    "ocupacion": "2 adultos, 1 niño, 1 infante",
+    "precio": "COP 409.700"
+   }
+  ],
+  "estrellasDeteccion": {
+   "valor": null,
+   "corridas": [
+    null,
+    null
+   ],
+   "error": null
+  }
+ },
+ "verdeMarReserva": {
+  "veredicto": "detalle_unico",
+  "observacion": "Se ve el detalle de una reserva de hotel con dos habitaciones y el precio total.",
+  "campos": {
+   "hotel": {
+    "value": "Hotel Verde Mar",
+    "confidence": 1
+   },
+   "ciudad": {
+    "value": "San Andrés",
+    "confidence": 1
+   },
+   "tipo_habitacion": {
+    "value": "Cuádruple 1, Cuádruple 2",
+    "confidence": 1
+   },
+   "regimen": {
+    "value": "Alojamiento y desayuno",
+    "confidence": 1
+   },
+   "check_in": {
+    "value": "2026-11-25",
+    "confidence": 1
+   },
+   "check_out": {
+    "value": "2026-11-28",
+    "confidence": 1
+   },
+   "noches": {
+    "value": "3",
+    "confidence": 1
+   },
+   "ocupacion": {
+    "value": "4 adultos, 2 adultos, 1 niño, 1 infante",
+    "confidence": 1
+   },
+   "politica_cancelacion": {
+    "value": null,
+    "confidence": 0
+   },
+   "impuestos_incluidos": {
+    "value": null,
+    "confidence": 0
+   },
+   "impuestos_destino_valor": {
+    "value": null,
+    "confidence": 0
+   },
+   "impuestos_destino_moneda": {
+    "value": null,
+    "confidence": 0
+   },
+   "ocupacion_adultos": {
+    "value": "6",
+    "confidence": 1
+   },
+   "ocupacion_ninos": {
+    "value": "1",
+    "confidence": 1
+   },
+   "ocupacion_infantes": {
+    "value": "1",
+    "confidence": 1
+   },
+   "ocupacion_total": {
+    "value": null,
+    "confidence": 0
+   },
+   "moneda": {
+    "value": "COP",
+    "confidence": 1
+   },
+   "precio_total": {
+    "value": "5712000",
+    "confidence": 1
+   },
+   "base_precio": {
+    "value": "total",
+    "confidence": 1
+   },
+   "total_a_pagar_agencia": {
+    "value": null,
+    "confidence": 0
+   },
+   "comision_agencia_valor": {
+    "value": null,
+    "confidence": 0
+   },
+   "comision_agencia_pct": {
+    "value": null,
+    "confidence": 0
+   },
+   "estrellas": {
+    "value": null,
+    "confidence": 0
+   }
+  },
+  "desglose": [],
+  "porTipoPax": [],
+  "totalGeneral": null,
+  "opcionesVisibles": 1,
+  "opcionesVistas": [
+   {
+    "nombre": "Hotel Verde Mar - San Andrés",
+    "precio": "COP 5.712.000",
+    "seleccionada": true
+   }
+  ],
+  "iconosEquipaje": [],
+  "habitacionesReserva": [
+   {
+    "nombre": "Cuádruple 1",
+    "ocupacion": "4 adultos",
+    "precio": "COP 2.856.000"
+   },
+   {
+    "nombre": "Cuádruple 2",
+    "ocupacion": "2 adultos, 1 niño, 1 infante",
+    "precio": "COP 2.856.000"
+   }
+  ],
+  "estrellasDeteccion": {
+   "valor": null,
+   "corridas": [
+    null,
+    null
+   ],
+   "error": null
+  }
+ },
+ "eligeHabitacionReserva": {
+  "veredicto": "varias_opciones",
+  "observacion": "Se ven varias opciones de habitación con sus precios y botones para reservar, por lo que no se puede elegir una.",
+  "campos": {
+   "hotel": {
+    "value": "Hotel Mar Azul",
+    "confidence": 0.9
+   },
+   "ciudad": {
+    "value": "San Andrés",
+    "confidence": 0.9
+   },
+   "tipo_habitacion": {
+    "value": null,
+    "confidence": 0
+   },
+   "regimen": {
+    "value": null,
+    "confidence": 0
+   },
+   "check_in": {
+    "value": "--11-25/nov",
+    "confidence": 0.8
+   },
+   "check_out": {
+    "value": "--11-28/nov",
+    "confidence": 0.8
+   },
+   "noches": {
+    "value": "3",
+    "confidence": 0.8
+   },
+   "ocupacion": {
+    "value": "2 adultos",
+    "confidence": 0.8
+   },
+   "politica_cancelacion": {
+    "value": null,
+    "confidence": 0
+   },
+   "impuestos_incluidos": {
+    "value": null,
+    "confidence": 0
+   },
+   "impuestos_destino_valor": {
+    "value": null,
+    "confidence": 0
+   },
+   "impuestos_destino_moneda": {
+    "value": null,
+    "confidence": 0
+   },
+   "ocupacion_adultos": {
+    "value": "2",
+    "confidence": 0.8
+   },
+   "ocupacion_ninos": {
+    "value": "0",
+    "confidence": 0.8
+   },
+   "ocupacion_infantes": {
+    "value": "0",
+    "confidence": 0.8
+   },
+   "ocupacion_total": {
+    "value": "2",
+    "confidence": 0.8
+   },
+   "moneda": {
+    "value": null,
+    "confidence": 0
+   },
+   "precio_total": {
+    "value": null,
+    "confidence": 0
+   },
+   "base_precio": {
+    "value": null,
+    "confidence": 0
+   },
+   "total_a_pagar_agencia": {
+    "value": null,
+    "confidence": 0
+   },
+   "comision_agencia_valor": {
+    "value": null,
+    "confidence": 0
+   },
+   "comision_agencia_pct": {
+    "value": null,
+    "confidence": 0
+   },
+   "estrellas": {
+    "value": null,
+    "confidence": 0
+   }
+  },
+  "desglose": [],
+  "porTipoPax": [],
+  "totalGeneral": null,
+  "opcionesVisibles": 3,
+  "opcionesVistas": [
+   {
+    "nombre": "Doble estándar · Alojamiento y desayuno",
+    "precio": "COP 1.250.000",
+    "seleccionada": false
+   },
+   {
+    "nombre": "Doble superior · Alojamiento y desayuno",
+    "precio": "COP 1.480.000",
+    "seleccionada": false
+   },
+   {
+    "nombre": "Suite vista al mar · Todo incluido",
+    "precio": "COP 2.900.000",
+    "seleccionada": false
+   }
+  ],
+  "iconosEquipaje": [],
+  "estrellasDeteccion": {
+   "valor": null,
+   "corridas": [
+    null,
+    null
+   ],
+   "error": null
+  }
+ }
+}

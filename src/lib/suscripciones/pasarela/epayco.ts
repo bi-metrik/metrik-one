@@ -58,14 +58,15 @@ import type {
 export const EPAYCO_APIFY_BASE = 'https://apify.epayco.co'
 
 export const ENV_EPAYCO = {
-  llavePublica: 'EPAYCO_METRIK_PUBLIC_KEY',
-  llavePrivada: 'EPAYCO_METRIK_PRIVATE_KEY',
-  idCliente: 'EPAYCO_METRIK_CUST_ID',
-  pKey: 'EPAYCO_METRIK_P_KEY',
+  // Los nombres con que Mauricio las cargó en Vercel (metrik-one) el 2026-10-12.
+  llavePublica: 'EPAYCO_PUBLIC_KEY_METRIK',
+  llavePrivada: 'EPAYCO_PRIVATE_KEY_METRIK',
+  idCliente: 'EPAYCO_P_CUST_ID_CLIENTE',
+  pKey: 'EPAYCO_P_KEY',
 } as const
 
 export const MOTIVO_EPAYCO_SIN_LLAVE =
-  'ePayco sin configurar: faltan las llaves del comercio de MeTRIK (EPAYCO_METRIK_PUBLIC_KEY y EPAYCO_METRIK_PRIVATE_KEY) en el servidor. No se creó ningún link.'
+  'ePayco sin configurar: faltan las llaves del comercio de MeTRIK (EPAYCO_PUBLIC_KEY_METRIK y EPAYCO_PRIVATE_KEY_METRIK) en el servidor. No se creó ningún link.'
 
 /** Adonde ePayco confirma los pagos de los links de ONE. */
 export const RUTA_CONFIRMACION_EPAYCO = '/api/webhooks/epayco'

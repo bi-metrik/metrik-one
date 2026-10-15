@@ -5,7 +5,7 @@ import { toast } from 'sonner'
 
 import { BarraPasos } from './barra-pasos'
 import { LoQueSuma } from './lo-que-suma'
-import { ServicioPorPasos } from './servicio-por-pasos'
+import { ServicioPorPasos, ServicioProvisional } from './servicio-por-pasos'
 import { TarifasPorPasos, type AutorizacionVista, type ServicioConOpciones } from './tarifas-por-pasos'
 import { RevisarPorPasos } from './revisar-por-pasos'
 import { useDeshacer } from './deshacer'
@@ -38,6 +38,7 @@ import { textoCortoDeOpcion, tiposSinPrecio } from '@/lib/cotizaciones/precio-qu
 import { leerTarifaPax, monedaDeTarifa, type Composicion } from '@/lib/cotizaciones/tarifa-pasajero'
 import { nombreVisibleDeLinea } from '@/lib/cotizaciones/nombre-visible'
 import { resumenDeOpcion } from '@/lib/cotizaciones/opcion-viaje'
+import { provisionalesVigentes, type Provisional } from '@/lib/cotizaciones/aceptar-optimista'
 import type { ItemConLectura } from '@/lib/cotizaciones/detalle-viaje'
 import type { DestinoDeIr, ListaUnica } from '@/lib/cotizaciones/lista-unica'
 import { ListaUnicaPorPasos } from './lista-unica-por-pasos'
@@ -116,6 +117,11 @@ export interface PropsVistaPorPasos {
   onAbrirOpcion: (itemId: string) => void
   onRecibirEnBandeja: (itemId: string, lecturas: LecturaDevuelta[]) => void
   refrescar: () => void
+  /**
+   * V2 · los servicios nuevos que se están aceptando: su bloque se pinta ya, con «Guardando…» en
+   * el precio, y no entran al total hasta que el servidor responde (`aceptar-optimista.ts`).
+   */
+  provisionales?: readonly Provisional[]
 }
 
 type Override = { seleccion?: string[]; va?: boolean }
@@ -180,12 +186,25 @@ export default function VistaPorPasos(p: PropsVistaPorPasos) {
   const tarifas = useMemo(() => tarifasCalculadas(lineas, params, tarifasPantalla), [lineas, params, tarifasPantalla])
   const total = useMemo(() => cascadaDelTotal(lineas, params, tarifasPantalla), [lineas, params, tarifasPantalla])
   const precios = useMemo(() => preciosDeLasOpciones(lineas, params), [lineas, params])
+  // V2 · los bloques que se están aceptando se pintan en el viaje; al total y a las tarifas no
+  // entran (no tienen precio todavía).
+  const provisionales = useMemo(() => {
+    const ids = new Set(p.filas.map(f => f.id))
+    return provisionalesVigentes(p.provisionales ?? [], ids).map(x => x.fila)
+  }, [p.provisionales, p.filas])
+  const idsProvisionales = useMemo(() => new Set(provisionales.map(f => f.id)), [provisionales])
   const tramos = useMemo(
     () => viajeEnOrden(filasVivas, { destino: p.destinoViaje, fechaInicio: p.fechasViaje?.inicio ?? null }),
     [filasVivas, p.destinoViaje, p.fechasViaje],
   )
+  // Lo que pinta «El viaje, en orden»: los de verdad y, en su lugar del viaje, los provisionales.
+  const tramosDelPaso1 = useMemo(
+    () => (provisionales.length === 0 ? tramos : viajeEnOrden([...filasVivas, ...provisionales], { destino: p.destinoViaje, fechaInicio: p.fechasViaje?.inicio ?? null })),
+    [tramos, filasVivas, provisionales, p.destinoViaje, p.fechasViaje],
+  )
   const servicios = tramos.flatMap(t => t.servicios)
-  const porId = useMemo(() => new Map(filasDeLaVista.map(f => [f.id, f])), [filasDeLaVista])
+  const serviciosDelPaso1 = tramosDelPaso1.flatMap(t => t.servicios)
+  const porId = useMemo(() => new Map([...filasDeLaVista, ...provisionales].map(f => [f.id, f])), [filasDeLaVista, provisionales])
   const nombreDeOpcion = useCallback((id: string) => {
     const f = porId.get(id)
     return f ? nombreVisibleDeLinea(f) || f.nombre || 'Opción' : 'Opción'
@@ -391,7 +410,7 @@ export default function VistaPorPasos(p: PropsVistaPorPasos) {
       <h2 className="m-0 text-base font-bold">1 · Armar el viaje</h2>
       <p className="m-0 text-[13px] text-[#6E6A62]">Pega los pantallazos de lo que cotizaste, en el orden que quieras. ONE lee cada uno y te dice a dónde va.</p>
       {p.editable && p.bandeja}
-      {servicios.length === 0 ? (
+      {serviciosDelPaso1.length === 0 ? (
         <p className="m-0 rounded-xl border border-[#E2DED5] bg-white p-6 text-center text-[13px] text-[#6E6A62]">
           Todavía no hay servicios. Cada pantallazo que aceptes aparece aquí, en el orden del viaje.
         </p>
@@ -408,13 +427,17 @@ export default function VistaPorPasos(p: PropsVistaPorPasos) {
               {abiertos.size === servicios.length ? 'Contraer todo' : 'Expandir todo'}
             </button>
           </div>
-          {tramos.map(tr => (
+          {tramosDelPaso1.map(tr => (
             <div key={tr.clave} className="flex flex-col gap-2" data-tramo={tr.clave}>
               <div className="flex items-baseline gap-2">
                 <h4 className="m-0 text-[13px] font-bold uppercase tracking-wide text-[#6E6A62]">{tr.titulo}</h4>
                 <span className="h-px flex-1 bg-[#E2DED5]" />
               </div>
               {tr.servicios.map(s => {
+                if (s.opciones.every(id => idsProvisionales.has(id))) {
+                  const resumenProv = resumenDeOpcion(porId.get(s.opciones[0])!) ?? nombreDeOpcion(s.opciones[0])
+                  return <ServicioProvisional key={s.grupo} servicio={s} resumen={resumenProv} />
+                }
                 const renglon = renglones.find(r => r.grupo === s.grupo)
                 const resumen = s.opciones.length > 1
                   ? `${s.opciones.length} opciones · ${s.opciones.map(nombreDeOpcion).join(' · ')}`

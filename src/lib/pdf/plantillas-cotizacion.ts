@@ -29,6 +29,7 @@ import type { CotizacionPDFProps } from './cotizacion-props'
 import CotizacionTermotechPDF from './cotizacion-termotech-pdf'
 import CotizacionTrappvelPDF from './cotizacion-trappvel-pdf'
 import { componerCotizacionTrappvel } from './cotizacion-trappvel-paginacion'
+import { propsParaHelvetica } from './texto-helvetica'
 
 /** Slug de la plantilla genérica de MeTRIK. Es el default de la columna. */
 export const PLANTILLA_POR_DEFECTO = 'metrik'
@@ -69,7 +70,8 @@ export function slugsConPlantillaPropia(): string[] {
 const COMPOSITORES: Record<string, (props: CotizacionPDFProps) => Promise<Buffer>> = {
   trappvel: async props => {
     const desde = Date.now()
-    const { pdf, informe } = await componerCotizacionTrappvel(props)
+    // Re-verificación D · las flechas que Helvetica no tiene («⇄» salía «Ä»), cambiadas antes de pintar.
+    const { pdf, informe } = await componerCotizacionTrappvel(propsParaHelvetica(props))
     console.info('[pdf-trappvel] composición', JSON.stringify({ ms: Date.now() - desde, ...informe }))
     return pdf
   },

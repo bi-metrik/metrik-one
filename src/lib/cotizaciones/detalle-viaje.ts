@@ -63,7 +63,8 @@ import { estrellasDesdeTexto } from './estrellas'
 import { notaDeLaLinea } from './nota-linea'
 import { datosManuales } from './ingreso-manual'
 import { habitacionesDeTarifa, repartirHabitaciones, type RepartoHabitaciones } from './habitaciones'
-import { acomodacionDeHabitaciones, ocupacionConEdades, ocupacionCorta } from './tarjeta-opcion'
+import { acomodacionDeHabitaciones, acomodacionDeReserva, ocupacionConEdades, ocupacionCorta } from './tarjeta-opcion'
+import { registroDeReserva } from './reserva-habitaciones'
 import { vueloDesdeNombre } from '@/lib/pdf/cotizacion-trappvel-formato'
 import { parseMontoCop } from '@/lib/negocios/monto-cop'
 import { equipajeDeCampos, leerTramos, tramosDeCampos, type EquipajeTramo, type TramoVuelo } from './tramos-vuelo'
@@ -624,7 +625,10 @@ export function hotelesDeItems(items: ItemConLectura[]): HotelPDF[] {
     const tarifa = leerTarifaPax(item.tarifa_pax)
     const habs = habitacionesDeTarifa(tarifa)
     const reparto = habs.length > 1 ? repartirHabitaciones(habs, tarifa.composicion ?? null, tarifa.correcciones) : null
-    const acomodacion = reparto ? acomodacionDeHabitaciones(reparto) ?? ocupacionDeLaUnicaQueVa(reparto) : null
+    // Decisión del 2026-10-14 · un pantallazo con varias habitaciones y un total dice cada una
+    // («Doble 1: 2 adultos; …»). El precio no se parte: es el del pantallazo.
+    const reserva = !reparto && habs.length === 1 ? acomodacionDeReserva(registroDeReserva(habs[0].lectura)) : null
+    const acomodacion = reparto ? acomodacionDeHabitaciones(reparto) ?? ocupacionDeLaUnicaQueVa(reparto) : reserva
     // Ingreso manual: lo que incluye y la edad del niño viven fuera de los campos de la ranura.
     const primera = casillaDelItem(item) ?? habs[0]?.lectura ?? null
     const manual = datosManuales(primera)
@@ -880,4 +884,14 @@ export function leerConfigDocumentoViaje(raw: unknown): ConfigDocumentoViaje {
         }
       : null,
   }
+}
+
+/**
+ * La ciudad de una actividad según su lectura (con lo corregido encima). Lo usa el catálogo de
+ * fotos de la propuesta para nombrar la foto de cada actividad. `null` si la línea no es una
+ * actividad o la lectura no trae ciudad.
+ */
+export function ciudadDeActividad(item: ItemConLectura): string | null {
+  if (ranuraDelItem(item)?.slug !== 'actividad_detalle') return null
+  return texto(detalleDelItem(item), 'ciudad')
 }

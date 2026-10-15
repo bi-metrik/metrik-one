@@ -1361,6 +1361,7 @@ export async function generateCotizacionPDF(
         lugaresDeOpcionales: lugaresOpcionalesDoc,
         documentoCliente: (cot as unknown as Record<string, unknown>).documento_cliente,
         staffId: staffId ?? null,
+        workspaceId,
         marca: ws?.name ?? 'Mi Empresa',
         logoUrl: ws?.logo_url ?? null,
       })
@@ -1462,6 +1463,7 @@ async function propuestaConMotorHtml(
     lugaresDeOpcionales: LugarDeOpcional[]
     documentoCliente: unknown
     staffId: string | null
+    workspaceId: string
     marca: string
     logoUrl: string | null
   },
@@ -1476,6 +1478,10 @@ async function propuestaConMotorHtml(
     const fila = data as { full_name?: string | null; phone_whatsapp?: string | null } | null
     if (fila) asesora = { nombre: fila.full_name?.trim() || null, whatsapp: whatsappDesdeTelefono(fila.phone_whatsapp) }
   }
+  // El catálogo de fotos del workspace (PR 4): ciudades sin foto en el banco, hoteles sin foto
+  // propia y planes opcionales. Sin filas o sin la migración, `null`: como antes.
+  const { catalogoParaLaPropuesta } = await import('@/lib/fotos/catalogo-propuesta')
+  const catalogo = await catalogoParaLaPropuesta(supabase, e.workspaceId, e.props).catch(() => null)
   const { pdfDePropuestaHtml } = await import('@/lib/pdf/html/propuesta-html')
   const { pdf, medidas } = await pdfDePropuestaHtml(
     {
@@ -1489,6 +1495,7 @@ async function propuestaConMotorHtml(
       marca: e.marca,
       logoUrl: e.logoUrl,
       fotoDeCiudad: ciudad => fotosDeCiudad(ciudad).map(f => ({ url: f.ruta, rotulo: f.rotulo, credito: f.credito, foco: f.foco, proporcion: f.proporcion })),
+      catalogo,
     },
   )
   console.info('[pdf-html] propuesta', JSON.stringify({ totalMs: medidas.totalMs, pdfBytes: medidas.pdfBytes, bloqueadas: medidas.peticionesBloqueadas.length }))
