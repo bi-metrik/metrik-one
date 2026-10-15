@@ -8,6 +8,8 @@ import {
   minutosDePruebaAcortada,
   momentoDelCobro,
   pasoDelCobro,
+  constanciaConfirmacion,
+  correoCobroConfirmado,
   permiteCobroAlConfirmar,
   puedeCancelar,
   textoConfirmacionCobro,
@@ -141,17 +143,40 @@ describe('el cobro al confirmar (Condiciones v2.1, 7.1 literal a)', () => {
     expect(permiteCobroAlConfirmar('2.1')).toBe(false)
   })
 
-  it('la pantalla de la consulta 11 dice exactamente lo que decidió Mauricio, con UN botón', () => {
+  it('la pantalla de la consulta 11 (C7 de Emilio): valor, 4 dígitos, renovación y fecha de corte, con UN botón', () => {
     expect(textoConfirmacionCobro({ valor: 150_000, ultimos4: '0326', agotada: true, consultasPrueba: 10 })).toEqual({
       titulo: 'Usaste tus 10 consultas de prueba',
-      detalle: 'Activa tu plan ahora: se cobran $150.000 a tu tarjeta terminada en 0326.',
+      detalle: 'Activa tu plan ahora: se cobran $150.000 a tu tarjeta terminada en 0326 por el primer mes, y después cada mes en esta misma fecha hasta que te retires.',
       boton: 'Activar y pagar $150.000',
     })
   })
 
-  it('desde «Activar plan» con consultas todavía, y sin los 4 dígitos (ePayco no respondió)', () => {
-    const t = textoConfirmacionCobro({ valor: 150_000, ultimos4: null, agotada: false, consultasPrueba: 10 })
+  it('desde «Activar plan» con consultas todavía: además, el plan activo desde el pago y el fin de la prueba', () => {
+    const t = textoConfirmacionCobro({ valor: 150_000, ultimos4: '0326', agotada: false, consultasPrueba: 10 })
     expect(t.titulo).toBe('Activa tu plan antes de que termine la prueba')
-    expect(t.detalle).toContain('Activa tu plan ahora: se cobran $150.000 a la tarjeta que registraste.')
+    expect(t.detalle).toBe(
+      'Activa tu plan ahora: se cobran $150.000 a tu tarjeta terminada en 0326 por el primer mes, y después cada mes en esta misma fecha hasta que te retires. Tu plan queda activo desde este pago y la prueba termina.',
+    )
+    expect(t.boton).toBe('Activar y pagar $150.000')
+  })
+
+  it('la constancia es el texto de la pantalla en un renglón', () => {
+    const t = textoConfirmacionCobro({ valor: 150_000, ultimos4: '0326', agotada: true, consultasPrueba: 10 })
+    expect(constanciaConfirmacion(t)).toBe(`Usaste tus 10 consultas de prueba. ${t.detalle} [Activar y pagar $150.000]`)
+  })
+
+  it('el correo del cobro (C3): fecha, valor y los 4 dígitos', () => {
+    const c = correoCobroConfirmado({
+      razonSocial: 'ACME S.A.S.',
+      cobradoAt: '2026-10-15T23:00:00.000Z',
+      valor: 150_000,
+      ultimos4: '0326',
+      urlCuenta: 'https://acme.metrikone.co/valida',
+    })
+    expect(c.subject).toBe('Cobramos $150.000 por tu plan de Valida (tarjeta terminada en 0326)')
+    expect(c.text).toMatch(/El jueves, 15 de octubre de 2026, 6:00\s?p\.\s?m\. \(hora de Colombia\) cobramos \$150\.000/)
+    expect(c.text).toContain('por el primer mes a tu tarjeta terminada en 0326')
+    expect(c.text).toContain('Después se cobra cada mes en esta misma fecha a la misma tarjeta, hasta que te retires.')
+    expect(c.html).not.toContain('<script')
   })
 })

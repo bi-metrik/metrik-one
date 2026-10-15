@@ -194,16 +194,18 @@ afterAll(() => {
   }
 })
 
-function epaycoDePrueba(resultado: ResultadoCargo) {
+/** ePayco de mentira. Con una lista, cada cargo responde el siguiente (el último se repite). */
+function epaycoDePrueba(resultados: ResultadoCargo | ResultadoCargo[]) {
+  const lista = Array.isArray(resultados) ? resultados : [resultados]
   const cargos: SolicitudCargo[] = []
   const adapter = {
     nombre: 'epayco',
     capacidades: { cobroSinClic: true, tokenizacion: true, linkDePago: false, webhook: true },
     cobrar: async (s: SolicitudCargo) => {
       cargos.push(s)
-      return resultado
+      return lista[Math.min(cargos.length, lista.length) - 1]
     },
-    consultar: async () => resultado,
+    consultar: async () => lista[lista.length - 1],
   } as unknown as PasarelaAdapter
   return { adapter, cargos }
 }
@@ -329,7 +331,7 @@ describe('registro → consulta 11 → confirma → cobro YA; el cron del día 7
     pagos.length = 0
 
     const { crearEspacioValida } = await import('./registro-servidor')
-    const { procesarCobrosTrasPrueba, cobrarAlConfirmar } = await import('./cobro-prueba-servidor')
+    const { procesarCobrosTrasPrueba, cobrarAlConfirmar, ofertaCobroAlConfirmar } = await import('./cobro-prueba-servidor')
     const { cobrarCuotaConTarjeta } = await import('./cobro-token-servidor')
     const { enrolarContratosPorCiclo } = await import('@/lib/cobros/enrolar-ciclo-servidor')
     const { condicionesVigentes, versionAceptada } = await import('./condiciones')
@@ -367,8 +369,16 @@ describe('registro → consulta 11 → confirma → cobro YA; el cron del día 7
         cobrarCuotaConTarjeta({ ...d, adapterPara: (x) => (x === 'epayco' ? ePayco.adapter : null) }, p),
     }
 
-    // Minuto 3 de la prueba (de 14): agotó las 10 y confirma. Se cobra YA, sin aviso previo.
-    const r = await cobrarAlConfirmar({ ...deps, ahoraMs: inicio + 3 * 60_000 }, { workspaceId: String(reg.workspace_id), usuarioId: PERSONA.id, agotada: true, ip: '181.50.1.3' })
+    // Minuto 3 de la prueba (de 14): agotó las 10, ve la pantalla y confirma. Se cobra YA, sin aviso previo.
+    const oferta = await ofertaCobroAlConfirmar(deps, { workspaceId: String(reg.workspace_id), usuarioId: PERSONA.id, agotada: true })
+    if (!oferta.disponible) throw new Error(`sin oferta: ${oferta.motivo}`)
+    expect(oferta.detalle).toBe(
+      'Activa tu plan ahora: se cobran $150.000 a tu tarjeta terminada en 0326 por el primer mes, y después cada mes en esta misma fecha hasta que te retires.',
+    )
+    const r = await cobrarAlConfirmar(
+      { ...deps, ahoraMs: inicio + 3 * 60_000 },
+      { workspaceId: String(reg.workspace_id), usuarioId: PERSONA.id, agotada: true, ip: '181.50.1.3', huella: oferta.huella },
+    )
     expect(r).toEqual({ tipo: 'cobrado', ultimos4: '0326' })
     expect(reg.cobro_estado).toBe('cobrado')
     expect(reg.cobro_aviso_enviado_at ?? null).toBeNull()
@@ -389,5 +399,89 @@ describe('registro → consulta 11 → confirma → cobro YA; el cron del día 7
       tipo: expect.stringMatching(/^(pagada|ya_intentado)$/),
     })
     expect(ePayco.cargos).toHaveLength(1)
+  })
+})
+
+describe('consulta 11 → confirma → la tarjeta rechaza → conserva la prueba → el día 7 se cobra (intento 1)', () => {
+  it('el rechazo de la confirmación no cierra el registro y el cobro del día 7 sigue en pie, una sola vez', async () => {
+    for (const filas of Object.values(tablas)) filas.length = 0
+    tablas.workspaces.push({ id: METRIK, slug: 'metrik', config_extra: {} })
+    tablas.catalogo_servicios.push({ slug: 'valida-cda-licencia', nombre: 'Licencia Valida', modulo: 'valida_consulta', disparador_cobro: 'ciclo' })
+    tablas.catalogo_servicios_versiones.push({ slug: 'valida-cda-licencia', version: 1, definicion: { parametros: { dias_trial: { por_defecto: 0 } } } })
+    pagos.length = 0
+
+    const { crearEspacioValida } = await import('./registro-servidor')
+    const { procesarCobrosTrasPrueba, cobrarAlConfirmar, ofertaCobroAlConfirmar } = await import('./cobro-prueba-servidor')
+    const { cobrarCuotaConTarjeta } = await import('./cobro-token-servidor')
+    const { enrolarContratosPorCiclo } = await import('@/lib/cobros/enrolar-ciclo-servidor')
+    const { condicionesVigentes, versionAceptada } = await import('./condiciones')
+    const { pasarelaBold } = await import('@/lib/suscripciones/pasarela/bold')
+    const { dvParaNit } = await import('./datos')
+
+    const inicio = Date.now()
+    const alta = await crearEspacioValida({
+      razonSocial: 'GAMA S.A.S.',
+      nit: '901234569',
+      dv: dvParaNit('901234569'),
+      acepta: true,
+      condicionesVersion: versionAceptada(condicionesVigentes()),
+      recomendadoAfi: false,
+      codigoAfi: null,
+      ref: null,
+      utm: {},
+      ip: '181.50.1.4',
+      tarjeta: { token: 'XCX92PZqBKfmcWFbA', titular: 'Ana Pérez', celular: '3001234567' },
+    })
+    expect(alta).toMatchObject({ tipo: 'ok' })
+    const reg = tablas.valida_registros[0]
+    const programado = reg.cobro_programado_at
+
+    const ePayco = epaycoDePrueba([
+      { estado: 'rechazado', externalRef: 'epayco-1', codigo: 'rechazada', mensaje: 'Fondos insuficientes', reintentable: false },
+      { estado: 'aprobado', externalRef: 'epayco-2', fecha: '2026-10-20', monto: 150_000 },
+    ])
+    const correos: { idempotencyKey: string }[] = []
+    const deps = {
+      db: db as never,
+      env: ENV_PREVIEW,
+      enviarCorreo: async (m: { idempotencyKey: string }) => {
+        correos.push(m)
+        return { ok: true as const, id: 'resend-1' }
+      },
+      urlCuenta: (slug: string) => `https://${slug}.metrikone.co/valida`,
+      ultimos4: async () => '0326',
+      enrolar: (d: Parameters<typeof enrolarContratosPorCiclo>[0]) =>
+        enrolarContratosPorCiclo({ ...d, adapterPara: (p) => (p === 'bold' ? pasarelaBold : p === 'epayco' ? ePayco.adapter : null) }),
+      cobrarCuota: (d: Parameters<typeof cobrarCuotaConTarjeta>[0], p: Parameters<typeof cobrarCuotaConTarjeta>[1]) =>
+        cobrarCuotaConTarjeta({ ...d, adapterPara: (x) => (x === 'epayco' ? ePayco.adapter : null) }, p),
+    }
+
+    const oferta = await ofertaCobroAlConfirmar(deps, { workspaceId: String(reg.workspace_id), usuarioId: PERSONA.id, agotada: true })
+    if (!oferta.disponible) throw new Error(`sin oferta: ${oferta.motivo}`)
+    const r = await cobrarAlConfirmar(
+      { ...deps, ahoraMs: inicio + 3 * 60_000 },
+      { workspaceId: String(reg.workspace_id), usuarioId: PERSONA.id, agotada: true, ip: '181.50.1.4', huella: oferta.huella },
+    )
+    expect(r).toMatchObject({ tipo: 'rechazado', ultimos4: '0326' })
+    // Conserva la prueba: programado, con el mismo plazo; el plan volvió al enlace; sin correo de cobro.
+    expect(reg).toMatchObject({ cobro_estado: 'programado', cobro_programado_at: programado })
+    expect(reg.cobro_confirmacion_rechazada_at).toBeTruthy()
+    expect(tablas.planes_cobro[0].pasarela).toBe('bold')
+    expect(correos).toEqual([])
+    expect((await ofertaCobroAlConfirmar(deps, { workspaceId: String(reg.workspace_id), usuarioId: PERSONA.id, agotada: true })).disponible).toBe(false)
+
+    // Minuto 9: el aviso de 48 h (escalado). Minuto 15: el cobro del día 7, intento 1 de la cuota 1.
+    expect((await procesarCobrosTrasPrueba({ ...deps, ahoraMs: inicio + 9 * 60_000 })).avisos).toBe(1)
+    const dia7 = await procesarCobrosTrasPrueba({ ...deps, ahoraMs: inicio + 15 * 60_000 })
+    expect(dia7).toMatchObject({ cobrados: 1, aRevisar: [], errores: [] })
+    expect(reg.cobro_estado).toBe('cobrado')
+    expect(ePayco.cargos).toHaveLength(2)
+    expect(tablas.cobro_intentos_tarjeta.map((i) => [i.intento, i.resultado])).toEqual([
+      [0, 'rechazado'],
+      [1, 'aprobado'],
+    ])
+    // Y nada más: otra corrida no cobra.
+    await procesarCobrosTrasPrueba({ ...deps, ahoraMs: inicio + 16 * 60_000 })
+    expect(ePayco.cargos).toHaveLength(2)
   })
 })

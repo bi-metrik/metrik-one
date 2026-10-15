@@ -229,17 +229,26 @@ describe('la constancia del cobro al confirmar (20261014234500)', () => {
     expect(r.rows[0].n).toBe(0)
   })
 
-  it('una confirmación sin el texto que se vio no entra', async () => {
-    const base = `insert into public.valida_registros (correo, correo_dominio, estado, cobro_estado, cobro_programado_at, cobro_entorno, cobro_confirmado_at, cobro_confirmado_texto)`
-    expect(await falla(`${base} values ('c1@x.co', 'x.co', 'intento', 'cobrando', now(), 'preview', now(), null)`)).toMatch(
+  it('una confirmación sin el texto que se vio, o sin quién confirmó, no entra', async () => {
+    const base = `insert into public.valida_registros (correo, correo_dominio, estado, cobro_estado, cobro_programado_at, cobro_entorno, cobro_confirmado_at, cobro_confirmado_texto, cobro_confirmado_por)`
+    const U = `'00000000-0000-4000-8000-0000000000c1'`
+    expect(await falla(`${base} values ('c1@x.co', 'x.co', 'intento', 'cobrando', now(), 'preview', now(), null, ${U})`)).toMatch(
       /valida_registros_cobro_confirmado_coherente/,
     )
-    expect(await falla(`${base} values ('c2@x.co', 'x.co', 'intento', 'cobrando', now(), 'preview', now(), '')`)).toMatch(
+    expect(await falla(`${base} values ('c2@x.co', 'x.co', 'intento', 'cobrando', now(), 'preview', now(), '', ${U})`)).toMatch(
+      /valida_registros_cobro_confirmado_coherente/,
+    )
+    expect(await falla(`${base} values ('c4@x.co', 'x.co', 'intento', 'cobrando', now(), 'preview', now(), 'Texto visto', null)`)).toMatch(
       /valida_registros_cobro_confirmado_coherente/,
     )
     expect(
-      await falla(`${base} values ('c3@x.co', 'x.co', 'intento', 'cobrando', now(), 'preview', now(), 'Usaste tus 10 consultas de prueba. [Activar y pagar $150.000]')`),
+      await falla(`${base} values ('c3@x.co', 'x.co', 'intento', 'cobrando', now(), 'preview', now(), 'Usaste tus 10 consultas de prueba. [Activar y pagar $150.000]', ${U})`),
     ).toBeNull()
+  })
+
+  it('la marca del rechazo de la confirmación existe y nace nula', async () => {
+    const r = await db.query<{ n: number }>(`select count(*)::int n from public.valida_registros where cobro_confirmacion_rechazada_at is not null`)
+    expect(r.rows[0].n).toBe(0)
   })
 
   it('sigue sin privilegios para authenticated', async () => {

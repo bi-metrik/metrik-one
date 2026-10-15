@@ -112,7 +112,7 @@ export async function pasarElPlanATarjeta(deps: DepsCobroToken, p: { cobradorId:
  */
 export async function cobrarCuotaConTarjeta(
   deps: DepsCobroToken,
-  p: { cobradorId: string; cuotaId: string; intento?: number },
+  p: { cobradorId: string; cuotaId: string; intento?: number; reintentoTrasConfirmacion?: boolean },
 ): Promise<ResultadoCobroToken> {
   const intento = p.intento ?? 0
   const db = deps.db as Db
@@ -177,7 +177,11 @@ export async function cobrarCuotaConTarjeta(
   // El reclamo del intento, ANTES de llamar a ePayco. La llave única (cobro, intento) de la base es la
   // guarda de verdad; la lectura previa solo evita el error en el caso común. Sin la tabla (migración
   // 20261014153000 sin aplicar) no se cobra: es el lado seguro.
-  if (cuota.data.numero === 1 && intento !== 0) return { tipo: 'no_aplica', motivo: 'primer_cobro_sin_reintento' }
+  // La cuota 1 tiene un solo intento (Términos 3.6 → Condiciones 7.5), salvo uno: si el intento 0 fue
+  // el cobro al confirmar (7.1 literal a) y se rechazó, el del día 7 (literal b) es el intento 1.
+  if (cuota.data.numero === 1 && intento !== 0 && !(intento === 1 && p.reintentoTrasConfirmacion)) {
+    return { tipo: 'no_aplica', motivo: 'primer_cobro_sin_reintento' }
+  }
   const yaHecho = await db
     .from('cobro_intentos_tarjeta')
     .select('id')

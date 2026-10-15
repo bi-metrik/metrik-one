@@ -31,7 +31,9 @@ export function CobroAlConfirmar({ agotada, oferta: inicial, children }: { agota
 
   function confirmar() {
     iniciar(async () => {
-      const r = await confirmarCobroAlConfirmar(agotada)
+      if (!oferta?.disponible) return
+      // La huella del texto que se ve: el servidor no cobra si arma otro (C8).
+      const r = await confirmarCobroAlConfirmar(agotada, oferta.huella)
       setResultado(r)
       // El plan quedó activo: la página se recarga con el mes abierto y la consulta sigue.
       if (r.ok) setTimeout(() => window.location.assign('/valida'), 1500)

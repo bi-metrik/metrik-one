@@ -85,6 +85,10 @@ Ya mergeados: #1095 (corte de la bolsa), #1097 (`valida_registros`, APLICADA, no
   antes de encender**; los archivos legales de `proyectos/metrik/valida/docs/legal/` siguen en v2.0 (no los toca Max).
 - Solo se ofrece a registros que aceptaron condiciones-2.1+ (la v2.0 prometía «no se adelanta»).
 - Migración `20261014234500_valida_cobro_al_confirmar.sql` SIN aplicar: sin ella el clic falla al reclamar y no cobra.
-- Casilla con cobro (aviso v1.3) y texto junto a la tarjeta ya dicen la regla nueva; todo pendiente de Emilio.
+- Emilio APROBÓ CON CAMBIOS (dictamen-cobro-consulta-11.md, C1-C9); C1-C8 aplicados en #1169. C9 (Política de
+  Devoluciones) es un archivo legal, no está en el repo. El 7.5 (rechazo del literal a → día 7 sigue en pie) es texto
+  de Max por decisión del coordinador: vuelve a Emilio.
+- Gotcha: las columnas de la constancia (`cobro_confirmado_*`) solo las lee el camino de la confirmación; el cron NO
+  las selecciona, para que el día 7 siga funcionando aunque la migración no esté aplicada.
 
 Relacionado: [[secop-autogestion-registro]], [[radar-trial-y-cobro]], [[valida-renovacion-continua]], [[sql-y-despliegue-metrik-valida]].

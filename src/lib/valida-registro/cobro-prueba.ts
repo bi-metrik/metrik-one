@@ -127,17 +127,51 @@ const PESOS_CONFIRMACION = new Intl.NumberFormat('es-CO', { maximumFractionDigit
  * (`valida_registros.cobro_confirmado_texto`). `agotada`: la llegó a ver al intentar la consulta 11;
  * si no, la abrió desde «Activar plan» con consultas de prueba todavía.
  */
-export function textoConfirmacionCobro(p: { valor: number; ultimos4: string | null; agotada: boolean; consultasPrueba: number }): {
+export function textoConfirmacionCobro(p: { valor: number; ultimos4: string; agotada: boolean; consultasPrueba: number }): {
   titulo: string
   detalle: string
   boton: string
 } {
-  const tarjeta = p.ultimos4 ? `a tu tarjeta terminada en ${p.ultimos4}` : 'a la tarjeta que registraste'
-  const detalle = `Activa tu plan ahora: se cobran ${valorEnPesos(p.valor)} ${tarjeta}.`
+  // C7 del dictamen de Emilio (2026-10-14): la renovación mensual y la fecha de corte, en las dos variantes.
+  const detalle = `Activa tu plan ahora: se cobran ${valorEnPesos(p.valor)} a tu tarjeta terminada en ${p.ultimos4} por el primer mes, y después cada mes en esta misma fecha hasta que te retires.`
   return {
     titulo: p.agotada ? `Usaste tus ${p.consultasPrueba} consultas de prueba` : 'Activa tu plan antes de que termine la prueba',
-    detalle: p.agotada ? detalle : `${detalle} Tu plan queda activo desde este pago y no esperas al fin de la prueba.`,
+    detalle: p.agotada ? detalle : `${detalle} Tu plan queda activo desde este pago y la prueba termina.`,
     boton: `Activar y pagar ${valorEnPesos(p.valor)}`,
+  }
+}
+
+/** El texto de la pantalla en un solo renglón: lo que se guarda (y se compara por huella) como lo que vio. */
+export function constanciaConfirmacion(t: { titulo: string; detalle: string; boton: string }): string {
+  return `${t.titulo}. ${t.detalle} [${t.boton}]`
+}
+
+/**
+ * El correo que confirma el cobro del literal (a) (Condiciones v2.1, 7.2 con la C3 de Emilio): la fecha,
+ * el valor y los últimos 4 dígitos. Es la prueba más útil ante un contracargo.
+ *
+ * ⚠️ Texto de Max (2026-10-14), no revisado por Vera. No promete nada que no digan la 7.1, la 7.4 y la
+ * 3.5 de los Términos.
+ */
+export function correoCobroConfirmado(p: { razonSocial: string; cobradoAt: string; valor: number; ultimos4: string; urlCuenta: string }): {
+  subject: string
+  text: string
+  html: string
+} {
+  const fecha = fechaYHoraBogota(p.cobradoAt)
+  const valor = valorEnPesos(p.valor)
+  const lineas = [
+    'Hola:',
+    `Confirmaste en tu cuenta la activación del plan de Valida de ${p.razonSocial}. El ${fecha} (hora de Colombia) cobramos ${valor} (valor total, sin IVA que sumar) por el primer mes a tu tarjeta terminada en ${p.ultimos4}.`,
+    `Tu plan quedó activo desde ese pago, con hasta ${COBRO_TRAS_PRUEBA.limiteMensual.toLocaleString('es-CO')} consultas al mes. Después se cobra cada mes en esta misma fecha a la misma tarjeta, hasta que te retires. Puedes retirarte cuando quieras, sin penalidad; el mes ya pagado no se reembolsa.`,
+    `Tu cuenta: ${p.urlCuenta}. Si no reconoces este cobro, escríbenos a mauricio.moreno@metrik.com.co.`,
+    'METRIK IA S.A.S.',
+  ]
+  const esc = (x: string) => x.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+  return {
+    subject: `Cobramos ${valor} por tu plan de Valida (tarjeta terminada en ${p.ultimos4})`,
+    text: lineas.join('\n\n'),
+    html: lineas.map((l) => `<p>${esc(l)}</p>`).join('\n'),
   }
 }
 
@@ -152,7 +186,8 @@ export function textoTrasConfirmar(d: DesenlaceConfirmacion, p: { valor: number;
     case 'pendiente':
       return 'ePayco dejó el pago en revisión. Tu plan se activa apenas lo apruebe y te avisamos al correo. No lo intentes de nuevo.'
     case 'rechazado':
-      return `No se pudo cobrar a ${tarjeta}: el pago fue rechazado. No se cobró nada y tu plan no quedó activo. Te enviamos al correo un enlace para pagar el primer mes con otro medio.`
+      // 7.5 v2.1 (decisión 2026-10-14): conserva la prueba y el cobro del día 7 sigue en pie.
+      return `No se pudo cobrar a ${tarjeta}: el pago fue rechazado. No se cobró nada y tu plan no quedó activo. Conservas lo que te queda de la prueba. Te enviamos al correo un enlace para pagar con otro medio; si no pagas ni cancelas, el cobro se intenta otra vez al cumplirse los 7 días.`
     case 'revisar':
       return 'No pudimos confirmar con ePayco si el cobro se hizo. No lo intentes de nuevo: lo revisamos y te escribimos al correo.'
     case 'reintentar':

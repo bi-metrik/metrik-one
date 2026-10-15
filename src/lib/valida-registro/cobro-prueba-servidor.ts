@@ -1,4 +1,6 @@
 import 'server-only'
+import { createHash } from 'node:crypto'
+import { registrarActividad } from '@/lib/activity/registrar-actividad'
 import type { SupabaseClient } from '@supabase/supabase-js'
 import { enrolarContratosPorCiclo, type DepsEnrolamiento, type ResumenEnrolamiento } from '@/lib/cobros/enrolar-ciclo-servidor'
 import type { CorreoSaliente, ResultadoEnvio } from '@/lib/cobros/enlace-automatico-servidor'
@@ -14,6 +16,8 @@ import {
   correoAvisoCobro,
   entornoDeCobro,
   pasoDelCobro,
+  constanciaConfirmacion,
+  correoCobroConfirmado,
   permiteCobroAlConfirmar,
   puedeCancelar,
   textoConfirmacionCobro,
@@ -312,7 +316,12 @@ function anotarDesenlace(resumen: ResumenCobroPrueba, registroId: string, d: Des
  * confirmar (`cobrarAlConfirmar`): el mismo plan, la misma cuota 1 y el mismo `cobrarCuotaConTarjeta`,
  * con su intento reclamado en `cobro_intentos_tarjeta`.
  */
-async function activarYCobrarReclamado(deps: DepsCobroPrueba, r: RegistroCobro, ahoraMs: number): Promise<Desenlace> {
+async function activarYCobrarReclamado(
+  deps: DepsCobroPrueba,
+  r: RegistroCobro,
+  ahoraMs: number,
+  origen: 'dia_7' | 'confirmacion' = 'dia_7',
+): Promise<Desenlace> {
   const db = deps.db as Db
   const ahora = new Date(ahoraMs).toISOString()
   const cerrar = cerrarCobro(db, r.id)
@@ -362,10 +371,17 @@ async function activarYCobrarReclamado(deps: DepsCobroPrueba, r: RegistroCobro, 
     const cuota = await db.from('plan_cobro_cuotas').select('id').eq('plan_cobro_id', planId).eq('numero', 1).maybeSingle()
     if (cuota.error || !cuota.data) return soltar('sin cuota 1')
 
-    // e. El cobro. Desde aquí no se vuelve a `programado`.
+    // Si la confirmación del literal (a) ya se intentó y fue rechazada, el del día 7 es el intento 1 de
+    // la cuota 1 (Condiciones v2.1, 7.5: «el cobro del literal (b) sigue en pie»). Sin eso, el 0.
+    const intento = origen === 'dia_7' && (await confirmacionRechazada(db, planId)) ? 1 : 0
+
+    // e. El cobro. Desde aquí no se vuelve a `programado` (salvo el rechazo de la confirmación, 7.5).
     fase = 'cobro'
-    const res = await (deps.cobrarCuota ?? cobrarCuotaConTarjeta)({ db: deps.db, ahoraMs }, { cobradorId: contrato.workspace_id, cuotaId: cuota.data.id as string })
-    return await registrarResultado(db, res, planId, cerrar)
+    const res = await (deps.cobrarCuota ?? cobrarCuotaConTarjeta)(
+      { db: deps.db, ahoraMs },
+      { cobradorId: contrato.workspace_id, cuotaId: cuota.data.id as string, intento, reintentoTrasConfirmacion: intento === 1 },
+    )
+    return await registrarResultado(db, res, planId, cerrar, origen === 'confirmacion' ? volverAlDia7(db, r.id, ahoraMs) : null)
   } catch (e) {
     const msg = e instanceof Error ? e.message : String(e)
     if (fase === 'antes') return soltar(`error: ${msg}`)
@@ -374,7 +390,37 @@ async function activarYCobrarReclamado(deps: DepsCobroPrueba, r: RegistroCobro, 
   }
 }
 
-async function registrarResultado(db: Db, res: ResultadoCobroToken, planId: string, cerrar: Cerrar): Promise<Desenlace> {
+/** ¿La cuota 1 de este plan ya tuvo su intento 0 rechazado? Solo pasa con la confirmación del literal (a). */
+async function confirmacionRechazada(db: Db, planId: string): Promise<boolean> {
+  const q = await db.from('cobro_intentos_tarjeta').select('intento, resultado').eq('plan_cobro_id', planId).eq('numero_cuota', 1)
+  if (q.error) return false
+  const filas = (q.data ?? []) as { intento: number; resultado: string }[]
+  return filas.some((f) => f.intento === 0 && f.resultado === 'rechazado') && !filas.some((f) => f.intento === 1)
+}
+
+/**
+ * El rechazo del cobro al confirmar NO cierra el registro (7.5 v2.1, decisión del 2026-10-14): la fila
+ * vuelve a `programado`, con la marca del rechazo (que impide ofrecer otra confirmación), y conserva su
+ * `cobro_programado_at`: el plazo de la prueba sigue igual y el cobro del día 7 sigue en pie.
+ */
+function volverAlDia7(db: Db, registroId: string, ahoraMs: number) {
+  return async (detalle: string) => {
+    const ahora = new Date(ahoraMs).toISOString()
+    await db
+      .from('valida_registros')
+      .update({ cobro_estado: 'programado', cobro_detalle: detalle.slice(0, 300), cobro_confirmacion_rechazada_at: ahora, updated_at: ahora })
+      .eq('id', registroId)
+      .eq('cobro_estado', 'cobrando')
+  }
+}
+
+async function registrarResultado(
+  db: Db,
+  res: ResultadoCobroToken,
+  planId: string,
+  cerrar: Cerrar,
+  alRechazo: ((detalle: string) => Promise<void>) | null,
+): Promise<Desenlace> {
   switch (res.tipo) {
     case 'aprobado':
     case 'pagada':
@@ -386,7 +432,9 @@ async function registrarResultado(db: Db, res: ResultadoCobroToken, planId: stri
       return { tipo: 'pendiente' }
     case 'rechazado':
       // 7.5: no se activa el plan y va un enlace de pago (el plan ya volvió a enlace en `cobrarCuotaConTarjeta`).
-      await cerrar('rechazado', `rechazado: ${res.mensaje}`)
+      // Del literal (a): la prueba sigue y el día 7 se intenta otra vez. Del (b): se cierra.
+      if (alRechazo) await alRechazo(`confirmación rechazada: ${res.mensaje}`)
+      else await cerrar('rechazado', `rechazado: ${res.mensaje}`)
       return { tipo: 'rechazado', mensaje: res.mensaje }
     default: {
       // Dudoso: quizá ePayco cobró y no alcanzó a responder. El plan sale de la tarjeta para que nadie
@@ -617,6 +665,15 @@ export async function estadoCobroDelEspacio(db: SupabaseClient, workspaceId: str
 }
 
 // ── El cobro del primer mes al confirmar (Condiciones v2.1, 7.1 literal a) ─────────────────────
+//
+// Con los cambios del dictamen de Emilio (`dictamen-cobro-consulta-11.md`, 2026-10-14):
+//   C6  sin los últimos 4 dígitos no se ofrece: el cobro queda para el día 7;
+//   C7  la pantalla dice la renovación mensual y la fecha de corte (`textoConfirmacionCobro`);
+//   C8  se cobra solo si el texto que el servidor arma al cobrar es EL MISMO que se mostró (huella),
+//       se guarda quién confirmó, y un intento anterior no se pisa sin dejarlo en `activity_log`;
+//   C3  después del cobro sale el correo con la fecha, el valor y los 4 dígitos.
+// Y la decisión sobre la pregunta de Emilio: si el cobro al confirmar se rechaza, la Empresa conserva la
+// prueba y el cobro del día 7 sigue en pie (`volverAlDia7`, intento 1 de la cuota 1).
 
 export type MotivoSinCobroAlConfirmar =
   | 'sin_registro'
@@ -626,17 +683,35 @@ export type MotivoSinCobroAlConfirmar =
   | 'condiciones_sin_cobro_al_confirmar'
   | 'esperando_terminos'
   | 'sin_tarjeta'
+  | 'confirmacion_rechazada'
+  | 'sin_ultimos4'
+  | 'texto_distinto'
+  | 'sin_bitacora'
+
+/** Las columnas de la constancia (migración 20261014234500). Solo las lee este camino, nunca el cron. */
+interface ConstanciaConfirmacion {
+  cobro_confirmado_at?: string | null
+  cobro_confirmado_por?: string | null
+  cobro_confirmado_ip?: string | null
+  cobro_confirmado_texto?: string | null
+  cobro_confirmacion_rechazada_at?: string | null
+}
+
+type RegistroConfirmacion = RegistroCobro & ConstanciaConfirmacion
+
+const COLUMNAS_CONFIRMACION = `${COLUMNAS}, cobro_confirmado_at, cobro_confirmado_por, cobro_confirmado_ip, cobro_confirmado_texto, cobro_confirmacion_rechazada_at`
 
 /**
  * Por qué a ESTE registro no se le puede cobrar al confirmar, o null si sí. Lo exige todo lo que el
  * cron exige para cobrar (Términos aceptados en el registro, tarjeta, el mismo despliegue), menos el
  * aviso de 48 horas y la fecha: esos son del cobro del literal (b). Y además:
  *   - quien confirma es la persona que se registró y aceptó (no otra persona del espacio, ni «Ver como»);
- *   - el registro aceptó un texto que contempla este cobro (Condiciones v2.1 o posterior).
+ *   - el registro aceptó un texto que contempla este cobro (Condiciones v2.1 o posterior);
+ *   - no tuvo ya una confirmación rechazada: la tarjeta se vuelve a intentar solo el día 7 (7.5).
  */
 function motivoSinCobroAlConfirmar(
   deps: Pick<DepsCobroPrueba, 'terminosDelRegistroListos'>,
-  r: RegistroCobro | null,
+  r: RegistroConfirmacion | null,
   usuarioId: string,
   env: Env,
 ): MotivoSinCobroAlConfirmar | null {
@@ -647,34 +722,52 @@ function motivoSinCobroAlConfirmar(
   if (!permiteCobroAlConfirmar(r.condiciones_version)) return 'condiciones_sin_cobro_al_confirmar'
   if (!terminosDelRegistro(deps, r)) return 'esperando_terminos'
   if (!r.metodo_pago_ref) return 'sin_tarjeta'
+  if (r.cobro_confirmacion_rechazada_at) return 'confirmacion_rechazada'
   return null
 }
 
-async function registroDelEspacio(db: Db, workspaceId: string): Promise<RegistroCobro | null> {
-  const reg = await db.from('valida_registros').select(COLUMNAS).eq('workspace_id', workspaceId).eq('estado', 'creado').maybeSingle()
+async function registroDelEspacio(db: Db, workspaceId: string): Promise<RegistroConfirmacion | null> {
+  const reg = await db.from('valida_registros').select(COLUMNAS_CONFIRMACION).eq('workspace_id', workspaceId).eq('estado', 'creado').maybeSingle()
   if (reg.error) throw new Error(`registro del espacio: ${reg.error.message}`)
-  return (reg.data as RegistroCobro | null) ?? null
+  return (reg.data as RegistroConfirmacion | null) ?? null
+}
+
+const huella = (t: string) => createHash('sha256').update(t, 'utf8').digest('hex')
+
+/** La pantalla tal como se muestra, su texto en un renglón y su huella. */
+function pantallaDeConfirmacion(p: { ultimos4: string; agotada: boolean }) {
+  const t = textoConfirmacionCobro({ valor: COBRO_TRAS_PRUEBA.precio, ultimos4: p.ultimos4, agotada: p.agotada, consultasPrueba: PRUEBA_DE_LAS_CONDICIONES.consultas })
+  const texto = constanciaConfirmacion(t)
+  return { ...t, texto, huella: huella(texto) }
 }
 
 export type OfertaCobroAlConfirmar =
-  | { disponible: true; valor: number; ultimos4: string | null }
+  | { disponible: true; valor: number; ultimos4: string; titulo: string; detalle: string; boton: string; huella: string }
   | { disponible: false; motivo: MotivoSinCobroAlConfirmar }
 
 type DepsOferta = Pick<DepsCobroPrueba, 'db' | 'env' | 'ultimos4' | 'terminosDelRegistroListos'>
 
-/** Lo que muestra la pantalla antes del botón: el valor y los últimos 4 dígitos de la tarjeta. */
-export async function ofertaCobroAlConfirmar(deps: DepsOferta, p: { workspaceId: string; usuarioId: string }): Promise<OfertaCobroAlConfirmar> {
+/**
+ * Lo que muestra la pantalla antes del botón: el valor, los últimos 4 dígitos y la huella del texto, que
+ * vuelve con el clic (C8). Sin los 4 dígitos, no hay oferta (C6).
+ */
+export async function ofertaCobroAlConfirmar(
+  deps: DepsOferta,
+  p: { workspaceId: string; usuarioId: string; agotada: boolean },
+): Promise<OfertaCobroAlConfirmar> {
   const r = await registroDelEspacio(deps.db as Db, p.workspaceId)
   const motivo = motivoSinCobroAlConfirmar(deps, r, p.usuarioId, deps.env ?? process.env)
   if (motivo) return { disponible: false, motivo }
   const ultimos4 = await (deps.ultimos4 ?? ((ref) => ultimosDigitosTarjetaEpayco(ref)))((r as RegistroCobro).metodo_pago_ref)
-  return { disponible: true, valor: COBRO_TRAS_PRUEBA.precio, ultimos4 }
+  if (!ultimos4) return { disponible: false, motivo: 'sin_ultimos4' }
+  const pantalla = pantallaDeConfirmacion({ ultimos4, agotada: p.agotada })
+  return { disponible: true, valor: COBRO_TRAS_PRUEBA.precio, ultimos4, titulo: pantalla.titulo, detalle: pantalla.detalle, boton: pantalla.boton, huella: pantalla.huella }
 }
 
 export type ResultadoCobroAlConfirmar =
-  | { tipo: 'cobrado'; ultimos4: string | null }
+  | { tipo: 'cobrado'; ultimos4: string }
   | { tipo: 'pendiente' }
-  | { tipo: 'rechazado'; mensaje: string; ultimos4: string | null }
+  | { tipo: 'rechazado'; mensaje: string; ultimos4: string }
   | { tipo: 'revisar' }
   | { tipo: 'reintentar' }
   /** Otra corrida (el cron, u otro clic) ya reclamó el cobro: este no cobra. */
@@ -690,38 +783,65 @@ export type ResultadoCobroAlConfirmar =
  * Quien llega segundo no cobra (el cron ve `cobrado`, o `cobrando` mientras este clic cobra). Y si los
  * dos llegaran a la cuota, el intento 0 de la cuota 1 solo se reclama una vez.
  *
- * El reclamo deja la constancia de lo confirmado: cuándo, desde qué IP y el texto exacto que vio
- * (`cobro_confirmado_*`, migración 20261014234500). Si la activación falla ANTES del cobro, la fila
- * vuelve a `programado` (no se cobró nada) y el cobro del día 7 sigue en pie.
+ * La constancia (Ley 527; C4 y C8): cuándo, quién, desde qué IP y el texto exacto que vio. `huella` es
+ * la que la pantalla recibió con la oferta: si el texto que se arma ahora (con los 4 dígitos pedidos
+ * otra vez a ePayco) no es el mismo, no se cobra. Si hubo un intento anterior que no cobró, se deja en
+ * `activity_log` antes de pisarlo; si esa anotación falla, no se cobra.
+ *
+ * Si la activación falla ANTES del cobro, la fila vuelve a `programado` (no se cobró nada). Si ePayco
+ * rechaza, también vuelve a `programado` con la marca del rechazo: conserva la prueba y el cobro del
+ * día 7 sigue en pie (7.5).
  */
 export async function cobrarAlConfirmar(
   deps: DepsCobroPrueba,
-  p: { workspaceId: string; usuarioId: string; agotada: boolean; ip: string | null },
+  p: { workspaceId: string; usuarioId: string; agotada: boolean; ip: string | null; huella: string },
 ): Promise<ResultadoCobroAlConfirmar> {
   const db = deps.db as Db
   const env = deps.env ?? process.env
   const r = await registroDelEspacio(db, p.workspaceId)
   const motivo = motivoSinCobroAlConfirmar(deps, r, p.usuarioId, env)
   if (motivo) return { tipo: 'no_disponible', motivo }
-  const registro = r as RegistroCobro
+  const registro = r as RegistroConfirmacion
 
   const ultimos4 = await (deps.ultimos4 ?? ((ref) => ultimosDigitosTarjetaEpayco(ref)))(registro.metodo_pago_ref)
-  const t = textoConfirmacionCobro({ valor: COBRO_TRAS_PRUEBA.precio, ultimos4, agotada: p.agotada, consultasPrueba: PRUEBA_DE_LAS_CONDICIONES.consultas })
+  if (!ultimos4) return { tipo: 'no_disponible', motivo: 'sin_ultimos4' }
+  const pantalla = pantallaDeConfirmacion({ ultimos4, agotada: p.agotada })
+  if (pantalla.huella !== p.huella) return { tipo: 'no_disponible', motivo: 'texto_distinto' }
+
+  // Un intento anterior que no cobró (la activación falló antes del cobro): a la bitácora, no al olvido.
+  if (registro.cobro_confirmado_at) {
+    const log = await registrarActividad(
+      db,
+      {
+        workspace_id: registro.workspace_id,
+        entidad_tipo: 'workspace',
+        entidad_id: registro.workspace_id,
+        tipo: 'sistema',
+        autor_id: null,
+        contenido: `Valida: confirmación anterior del cobro del primer mes, sin cobro (registro ${registro.id}). Confirmó ${registro.cobro_confirmado_por ?? 'sin usuario'} el ${registro.cobro_confirmado_at} desde ${registro.cobro_confirmado_ip ?? 'IP desconocida'}. Vio: ${registro.cobro_confirmado_texto ?? ''}`.slice(0, 1000),
+      },
+      'valida-cobro-al-confirmar',
+    )
+    if (!log.ok) return { tipo: 'no_disponible', motivo: 'sin_bitacora' }
+  }
+
   const ahoraMs = deps.ahoraMs ?? Date.now()
   const ahora = new Date(ahoraMs).toISOString()
   const reclamado = await reclamarCobro(db, registro.id, {
     cobro_estado: 'cobrando',
     cobro_intento_at: ahora,
     cobro_confirmado_at: ahora,
+    cobro_confirmado_por: p.usuarioId,
     cobro_confirmado_ip: p.ip,
-    cobro_confirmado_texto: `${t.titulo}. ${t.detalle} [${t.boton}]`,
+    cobro_confirmado_texto: pantalla.texto,
     updated_at: ahora,
   })
   if (!reclamado) return { tipo: 'en_curso' }
 
-  const d = await activarYCobrarReclamado(deps, registro, ahoraMs)
+  const d = await activarYCobrarReclamado(deps, registro, ahoraMs, 'confirmacion')
   switch (d.tipo) {
     case 'cobrado':
+      await correoDelCobro(deps, registro, ahoraMs, ultimos4)
       return { tipo: 'cobrado', ultimos4 }
     case 'pendiente':
       return { tipo: 'pendiente' }
@@ -733,5 +853,28 @@ export async function cobrarAlConfirmar(
     default:
       console.error('[valida-cobro] cobro al confirmar sin cobrar:', registro.id, d.detalle)
       return { tipo: 'reintentar' }
+  }
+}
+
+/** C3: la confirmación del cobro al correo. Si no sale, se registra; el cobro ya está hecho. */
+async function correoDelCobro(deps: DepsCobroPrueba, r: RegistroCobro, ahoraMs: number, ultimos4: string) {
+  const c = correoCobroConfirmado({
+    razonSocial: r.razon_social,
+    cobradoAt: new Date(ahoraMs).toISOString(),
+    valor: COBRO_TRAS_PRUEBA.precio,
+    ultimos4,
+    urlCuenta: (deps.urlCuenta ?? urlCuentaPorDefecto)(r.slug_creado ?? ''),
+  })
+  try {
+    const envio = await (deps.enviarCorreo ?? enviarPorResend)({
+      to: r.correo,
+      subject: c.subject,
+      html: c.html,
+      text: c.text,
+      idempotencyKey: `valida-cobro-confirmado-${r.id}`,
+    })
+    if (!envio.ok) console.error('[valida-cobro] correo del cobro al confirmar no salió:', r.id, envio.error)
+  } catch (e) {
+    console.error('[valida-cobro] correo del cobro al confirmar:', r.id, e instanceof Error ? e.message : e)
   }
 }

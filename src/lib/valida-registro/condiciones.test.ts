@@ -38,7 +38,7 @@ const sha = (t: string) => createHash('sha256').update(t, 'utf8').digest('hex')
  *     con el cobro del primer mes al confirmar; texto de Max, pendiente de Emilio).
  */
 const HUELLA_SIN_COBRO = '88ddf9d4d3050e5b309041c6693dbf3d0174bd0d2e7020e1fa32f957a5d2ae80'
-const HUELLA_CON_COBRO = '9b73eff0b05025eef9cd1b8f52076a2a2ffffcc9d09a0b9c93532b2d6feb7c74'
+const HUELLA_CON_COBRO = 'e269485b50cac68d7a9f69a35f0894b5ac08c1e04aad1a0f41a8d5d83c5c7d1c'
 
 const EPAYCO = { EPAYCO_HABILITADO: '1', EPAYCO_PUBLIC_KEY_METRIK: 'pub_prueba' }
 const COBRO = { VALIDA_COBRO_TRAS_PRUEBA: '1', ...EPAYCO }
@@ -107,7 +107,29 @@ describe('con cobro: Condiciones v2.1 completas, aviso v1.2 y casilla con cobro'
     // El aviso de 48 h es del (b); cancelar, hasta confirmar; si el primer cobro falla, no se reintenta.
     expect(t).toContain('7.2. Aviso previo. Para el cobro del literal (b) del numeral 7.1')
     expect(t).toContain('antes de que se cumplan los 7 días de la prueba y antes de confirmar la activación del plan.')
-    expect(t).toContain('no se activa el plan, no se vuelve a intentar con la tarjeta y METRIK envía un enlace de pago.')
+  })
+
+  it('los cambios C1 a C4 del dictamen de Emilio y el 7.5 de la decisión del 2026-10-14, literales', () => {
+    // C1: numeral 1.
+    expect(t).toContain(
+      'Termina cuando se agotan las 10 consultas, cuando pasan los 7 días o cuando la Empresa confirma que activa el plan (numeral 7.1, literal a), lo que ocurra primero. Es gratis: la prueba no se cobra.',
+    )
+    expect(t).not.toContain('durante la prueba no se cobra nada')
+    expect(t).not.toContain('Durante la prueba no se cobra nada')
+    // C2: final del párrafo 7.
+    expect(t).toContain('METRIK no guarda los datos de la tarjeta: los guarda la pasarela. La prueba no se cobra; el plan se cobra solo en los momentos del numeral 7.1.')
+    // C3: final del 7.2.
+    expect(t).toContain(
+      'Después del cobro del literal (a), METRIK envía al correo registrado la confirmación del cobro, con la fecha, el valor y los últimos 4 dígitos de la tarjeta.',
+    )
+    // C4: numeral 8.
+    expect(t).toContain(
+      'registrado en la pasarela. Si la Empresa confirma la activación del plan (numeral 7.1, literal a), METRIK guarda además la fecha y hora de la confirmación, el usuario, la dirección IP y el texto exacto que vio antes de confirmar.',
+    )
+    // 7.5: el rechazo del (a) conserva la prueba y deja en pie el (b); el del (b) cierra.
+    expect(t).toContain(
+      '7.5. Si el cobro falla. Si falla el cobro del literal (a) del numeral 7.1, no se activa el plan, METRIK envía un enlace de pago y la Empresa conserva lo que le quede de la prueba, las consultas y el plazo; si no paga ni cancela antes, el cobro del literal (b) sigue en pie al cumplirse los 7 días, con el aviso del numeral 7.2. Si falla el cobro del literal (b), no se activa el plan, no se vuelve a intentar con la tarjeta y METRIK envía un enlace de pago.',
+    )
   })
 
   it('los valores de la cláusula van escritos y coinciden con los del código', () => {
@@ -154,10 +176,10 @@ describe('con cobro: Condiciones v2.1 completas, aviso v1.2 y casilla con cobro'
 
   it('el texto junto a la tarjeta lleva la fecha y la hora en que se cumplen los 7 días', () => {
     const x = textoJuntoATarjeta('martes, 20 de octubre de 2026, 3:00 p. m.')
-    expect(x).toContain('Durante la prueba no se cobra nada sin su confirmación.')
-    expect(x).toContain('El primer mes, $150.000, se cobra cuando confirme en su cuenta que activa el plan')
-    expect(x).toContain('cuando intenta una consulta después de agotar las 10 de la prueba o antes con el botón "Activar plan"')
-    expect(x).toContain('Si no lo confirma ni cancela antes del martes, 20 de octubre de 2026, 3:00 p. m., se cobra después de ese momento, nunca antes, y luego cada mes.')
+    // C5 del dictamen de Emilio, literal.
+    expect(x).toBe(
+      'La prueba es gratis. El primer mes, $150.000, se cobra cuando usted confirme en su cuenta que activa el plan: Valida se lo pide si intenta una consulta después de agotar las 10 de la prueba, y también puede hacerlo antes con el botón "Activar plan". Si no lo confirma ni cancela antes del martes, 20 de octubre de 2026, 3:00 p. m., se cobra después de ese momento, nunca antes. Luego se cobra cada mes hasta que se retire. La tarjeta la guarda ePayco, no METRIK.',
+    )
     expect(x).not.toContain('{')
   })
 })
