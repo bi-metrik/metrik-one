@@ -167,7 +167,7 @@ export function filasDeCosto(a: {
       const precioUnitario = p?.precio ?? 0
       filas.push({
         clave: claveDeHabitacion(h.numero),
-        nombre: `Habitación ${h.numero}`,
+        nombre: h.nombre ?? `Habitación ${h.numero}`,
         det: ocupacionCorta(h.ocupacion),
         extra: false,
         adicionalId: null,

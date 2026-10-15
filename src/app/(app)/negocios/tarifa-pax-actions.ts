@@ -1903,7 +1903,7 @@ export async function confirmarTarifaPorPasajero(
         codigo: 'PENDIENTE',
       }
     }
-    porHabitacion.push({ numero: h.numero, ocupacion: h.ocupacion, totalCOP })
+    porHabitacion.push({ numero: h.numero, ocupacion: h.ocupacion, totalCOP, ...(h.nombre ? { nombre: h.nombre } : {}) })
   }
   const costoTotalCOP = Math.round(
     (costos.length > 0 ? costos.reduce((a, c) => a + c.totalCOP, 0) : porHabitacion.reduce((a, h) => a + h.totalCOP, 0)) * 100,
@@ -1933,7 +1933,7 @@ export async function confirmarTarifaPorPasajero(
       : porHabitacion.map((h, i) => ({
           item_id: itemId,
           tipo: TIPO_RUBRO_POR_PASAJERO,
-          descripcion: `Habitación ${h.numero} · ${describirOcupacion(h.ocupacion, 'y')}`,
+          descripcion: `${h.nombre ?? `Habitación ${h.numero}`} · ${describirOcupacion(h.ocupacion, 'y')}`,
           cantidad: 1,
           unidad: 'habitación',
           valor_unitario: h.totalCOP,
