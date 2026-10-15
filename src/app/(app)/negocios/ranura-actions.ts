@@ -61,21 +61,25 @@ interface Contexto {
 async function contexto(cotizacionId: string): Promise<Contexto | { error: string }> {
   const { supabase, workspaceId, error } = await getWorkspace()
   if (error || !workspaceId) return { error: 'No autenticado' }
-  const { data: cot } = await (supabase as Supabase)
-    .from('cotizaciones')
-    .select('id, estado, negocio_id, oportunidad_id')
-    .eq('id', cotizacionId)
-    .maybeSingle()
+  // H2 (verificación D) · la cotización y sus líneas, en paralelo: las mismas dos consultas, una
+  // ida menos en serie. Si la cotización no se edita, las líneas se descartan sin usarse.
+  const [{ data: cot }, { data: filas, error: errItems }] = await Promise.all([
+    (supabase as Supabase)
+      .from('cotizaciones')
+      .select('id, estado, negocio_id, oportunidad_id')
+      .eq('id', cotizacionId)
+      .maybeSingle(),
+    // `select('*')`: `ranura_id` la agrega `20260923233000` y nombrarla daría un 400 sin ella.
+    (supabase as Supabase)
+      .from('items')
+      .select('*')
+      .eq('cotizacion_id', cotizacionId)
+      .order('orden'),
+  ])
   if (!cot) return { error: 'Cotización no encontrada' }
   if (!isEditable((cot.estado ?? 'borrador') as EstadoCotizacion)) {
     return { error: 'Esta cotización ya no se edita. Duplícala para trabajar sobre una nueva.' }
   }
-  // `select('*')`: `ranura_id` la agrega `20260923233000` y nombrarla daría un 400 sin ella.
-  const { data: filas, error: errItems } = await (supabase as Supabase)
-    .from('items')
-    .select('*')
-    .eq('cotizacion_id', cotizacionId)
-    .order('orden')
   if (errItems) return { error: errItems.message as string }
   return {
     supabase,

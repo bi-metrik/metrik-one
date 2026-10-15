@@ -501,8 +501,8 @@ export async function quitarCasillaDeItem(
 // va CONTRA LA COTIZACIÓN DE ESE MOMENTO (`ubicarLectura`) y recién ahí crea la ranura, la
 // opción o la habitación, guarda la lectura y confirma el costo.
 
-async function contextoDeCotizacion(cotizacionId: string) {
-  const { supabase, error } = await getWorkspace()
+async function contextoDeCotizacion(cotizacionId: string, sesion?: Awaited<ReturnType<typeof getWorkspace>>) {
+  const { supabase, error } = sesion ?? await getWorkspace()
   if (error) return { error: 'No autenticado' as const }
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const sb = supabase as any
@@ -717,8 +717,15 @@ export async function aceptarCapturaDeBandeja(cotizacionId: string, b: BorradorP
   // La llave viaja con la lectura que se escribe: un reintento la encuentra (ver abajo).
   const idAceptacion = idAceptacionValido(b.idAceptacion)
   if (idAceptacion) lectura.aceptacion = idAceptacion
-  const ctx = await medirEtapa('contexto', () => contextoDeCotizacion(cotizacionId))
-  if ('error' in ctx) return { ok: false, codigo: 'CONTEXTO', mensaje: ctx.error as string }
+  // H2 (verificación D) · las líneas solo dependen del id de la cotización: se leen en paralelo con
+  // el contexto. Si el contexto falla, se descartan.
+  const sesion = await getWorkspace()
+  const lineasP = medirEtapa('lineas', () => lineasDeCotizacion(sesion.supabase, cotizacionId))
+  const ctx = await medirEtapa('contexto', () => contextoDeCotizacion(cotizacionId, sesion))
+  if ('error' in ctx) {
+    await lineasP.catch(() => null)
+    return { ok: false, codigo: 'CONTEXTO', mensaje: ctx.error as string }
+  }
   // «Otro servicio» solo entra con la cotización por pasos (N5): aunque la lectura venga firmada,
   // con el interruptor apagado se rechaza sin escribir nada.
   if (b.tipo === 'otro') {
@@ -737,7 +744,7 @@ export async function aceptarCapturaDeBandeja(cotizacionId: string, b: BorradorP
     const ref = await subida
     if (ref) lectura.imagenRef = ref
   }
-  const lineas = await medirEtapa('lineas', () => lineasDeCotizacion(ctx.supabase, cotizacionId))
+  const lineas = await lineasP
   if ('error' in lineas) {
     const ref = await subida
     if (ref) await borrarImagenesDeCaptura(workspaceId, [ref])

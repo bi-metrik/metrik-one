@@ -211,22 +211,32 @@ export async function contextoDeCotizacion(
   supabase: Supabase,
   cotizacionId: string,
 ): Promise<ContextoCotizacion | null> {
+  // H2 (verificación D) · las líneas (y sus adicionales) solo dependen del id de la cotización:
+  // se leen en paralelo con ella, y la línea de negocio también, en cuanto se sabe cuál es. Las
+  // mismas consultas y el mismo resultado; la mitad de idas EN SERIE (5 → 3), y esta función
+  // corre en cada recálculo y en cada foto de tarifas.
+  const leerLineasConAdicionales = async () => {
+    const { data: filas } = await supabase
+      .from('items')
+      .select('*, rubros(*)')
+      .eq('cotizacion_id', cotizacionId)
+      .order('orden')
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const idsDeItems = ((filas ?? []) as any[]).map(f => f.id as string)
+    return { filas, filasAdicionales: await leerAdicionalesDeItems(supabase, idsDeItems) }
+  }
+  const lineasP = leerLineasConAdicionales()
   const { data: cot } = await supabase
     .from('cotizaciones')
     .select('*')
     .eq('id', cotizacionId)
     .maybeSingle()
-  if (!cot) return null
-
-  const { data: filas } = await supabase
-    .from('items')
-    .select('*, rubros(*)')
-    .eq('cotizacion_id', cotizacionId)
-    .order('orden')
-
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const idsDeItems = ((filas ?? []) as any[]).map(f => f.id as string)
-  const filasAdicionales = await leerAdicionalesDeItems(supabase, idsDeItems)
+  if (!cot) {
+    await lineasP.catch(() => null)
+    return null
+  }
+  const negocioP = leerPoliticaDeLinea(supabase, cot)
+  const [{ filas, filasAdicionales }, politica] = await Promise.all([lineasP, negocioP])
 
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const sinAdicionales = ((filas ?? []) as any[]).map(fila => {
@@ -265,8 +275,39 @@ export async function contextoDeCotizacion(
   // le cobraría a la tarifa que eligió LATAM la maleta que alguien cargó en Avianca.
   const items: ItemDeCotizacion[] = adjuntarAdicionales(sinAdicionales, filasAdicionales)
 
-  // La política de la línea hace falta si la cotización no congeló los umbrales, y la
-  // configuración de la línea, para saber si el piso se exige en la salida.
+  const { politicaLinea, pisoEnLaSalida, configLineaLeida } = politica
+  const negocioId = (cot.negocio_id ?? null) as string | null
+
+  return {
+    items,
+    params: {
+      administrativosPct: (Number(cot.aiu_admin_pct) || 0) + (Number(cot.aiu_imprevistos_pct) || 0),
+      margenPct: cot.margen_porcentaje ?? cot.margen_default_pct ?? null,
+      descuentoComercialPct: cot.descuento_porcentaje ?? null,
+      convencionMargen: (cot.convencion_margen ?? null) as ConvencionMargen | null,
+    },
+    umbrales: umbralesDeCotizacion(
+      { pisoPct: cot.piso_margen_pct, avisoPct: cot.aviso_margen_pct },
+      politicaLinea,
+    ),
+    negocioId,
+    oportunidadId: (cot.oportunidad_id ?? null) as string | null,
+    pisoEnLaSalida,
+    configLinea: configLineaLeida,
+    estado: (cot.estado ?? null) as string | null,
+    tarifaAceptadaId: (cot.tarifa_aceptada_id ?? null) as string | null,
+  }
+}
+
+/**
+ * La política de margen de la línea del negocio: hace falta si la cotización no congeló los
+ * umbrales, y la configuración de la línea, para saber si el piso se exige en la salida.
+ */
+async function leerPoliticaDeLinea(
+  supabase: Supabase,
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  cot: any,
+): Promise<{ politicaLinea: UmbralesMargen; pisoEnLaSalida: boolean; configLineaLeida: unknown }> {
   let politicaLinea: UmbralesMargen = UMBRALES_MARGEN_POR_DEFECTO
   let pisoEnLaSalida = false
   let configLineaLeida: unknown = null
@@ -291,26 +332,7 @@ export async function contextoDeCotizacion(
       configLinea,
     )
   }
-
-  return {
-    items,
-    params: {
-      administrativosPct: (Number(cot.aiu_admin_pct) || 0) + (Number(cot.aiu_imprevistos_pct) || 0),
-      margenPct: cot.margen_porcentaje ?? cot.margen_default_pct ?? null,
-      descuentoComercialPct: cot.descuento_porcentaje ?? null,
-      convencionMargen: (cot.convencion_margen ?? null) as ConvencionMargen | null,
-    },
-    umbrales: umbralesDeCotizacion(
-      { pisoPct: cot.piso_margen_pct, avisoPct: cot.aviso_margen_pct },
-      politicaLinea,
-    ),
-    negocioId,
-    oportunidadId: (cot.oportunidad_id ?? null) as string | null,
-    pisoEnLaSalida,
-    configLinea: configLineaLeida,
-    estado: (cot.estado ?? null) as string | null,
-    tarifaAceptadaId: (cot.tarifa_aceptada_id ?? null) as string | null,
-  }
+  return { politicaLinea, pisoEnLaSalida, configLineaLeida }
 }
 
 /**

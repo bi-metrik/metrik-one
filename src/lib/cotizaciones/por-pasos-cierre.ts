@@ -25,8 +25,9 @@ import { revisarExcepcionTrasCambio } from './piso-salida-datos'
 import { createServiceClient } from '@/lib/supabase/server'
 import { piezaEncendida, type EstadoPorPasos } from './por-pasos'
 import { cambiosDeEstado, estadosPermitidos } from './estado-servicio'
-import { conRecalculoDiferido } from './recalculo-diferido'
+import { conRecalculoDiferido, diferirRecalculoActivo } from './recalculo-diferido'
 import { normalizarGrupo } from './itinerarios'
+import { medirEtapa } from '@/lib/actions/tiempos-de-ruta'
 import { ranuraDeGrupo } from './ranuras-pantallazo'
 
 export type ResultadoPorPasos<T = object> = ({ success: true } & T) | { success: false; error: string }
@@ -45,15 +46,21 @@ export async function cerrarAccionPorPasos(
 ): Promise<ResultadoPorPasos<{ valorTotal: number | null }>> {
   const s = await sincronizarTarifas(supabase, { workspaceId: args.workspaceId, cotizacionId: args.cotizacionId, antes: args.antes })
   if (!s.ok) return { success: false, error: s.error }
-  try {
-    await revisarExcepcionTrasCambio(supabase, {
-      servicio: createServiceClient,
-      workspaceId: args.workspaceId,
-      cotizacionId: args.cotizacionId,
-      staffId: args.staffId ?? null,
-    })
-  } catch (e) {
-    console.error('[por-pasos] no se pudo revisar la excepción de margen:', e instanceof Error ? e.message : String(e))
+  // La autorización del dueño se revisa contra la huella nueva DENTRO de `recalcularTotales`, después
+  // de escribir el total (y con quien hizo el cambio como autor). Hasta H2 (verificación D) se
+  // revisaba además aquí, antes: la misma consulta dos veces en cada cierre.
+  // Si el recálculo está diferido (dentro de un lote), lo revisa el cierre del lote.
+  if (diferirRecalculoActivo()) {
+    try {
+      await revisarExcepcionTrasCambio(supabase, {
+        servicio: createServiceClient,
+        workspaceId: args.workspaceId,
+        cotizacionId: args.cotizacionId,
+        staffId: args.staffId ?? null,
+      })
+    } catch (e) {
+      console.error('[por-pasos] no se pudo revisar la excepción de margen:', e instanceof Error ? e.message : String(e))
+    }
   }
   const r = await recalcularTotales(args.cotizacionId)
   const negocioId = s.despues.ctx.negocioId
@@ -88,14 +95,22 @@ export async function aceptarPorPasos(
   /** P11 · el desplegable de la fila: un servicio NUEVO llega «Opcional» si así se aceptó. */
   estado?: EstadoAlAceptar | null,
 ): Promise<ResultadoAceptarCaptura & { tarifas?: string }> {
-  const { supabase } = await getWorkspace()
-  const guard = await exigirPorPasos(supabase, cotizacionId)
+  const { supabase, workspaceId, staffId, error } = await getWorkspace()
+  if (error || !workspaceId) return { ok: false, codigo: 'CONTEXTO', mensaje: 'No autenticado' }
+  // H2 (verificación D) · el guard y la foto de ANTES no dependen uno de otro: en paralelo. Con el
+  // interruptor apagado la foto se lee y se descarta; no se escribe nada.
+  const [guard, antes] = await Promise.all([
+    medirEtapa('guard', () => exigirPorPasos(supabase, cotizacionId)),
+    medirEtapa('foto', () => fotoDeTarifas(supabase, cotizacionId)),
+  ])
   if (!guard.ok) return { ok: false, codigo: 'POR_PASOS', mensaje: guard.error }
-  const antes = await fotoDeTarifas(supabase, cotizacionId)
-  const aceptada = await aceptarCapturaDeBandeja(cotizacionId, borrador)
+  // Un solo recálculo, en el cierre (como el lote): el de `confirmarTarifaPorPasajero` se difiere.
+  // Antes eran dos recálculos completos por aceptación.
+  const { resultado: aceptada } = await conRecalculoDiferido(() => aceptarCapturaDeBandeja(cotizacionId, borrador))
   if (!aceptada.ok) return aceptada
   await estadoDelServicioNuevo(supabase, guard.estado, aceptada, estado)
-  const t = await tarifasTrasAceptar(cotizacionId, antes)
+  // El interruptor ya se comprobó en ESTA petición: el cierre no lo vuelve a leer.
+  const t = await medirEtapa('cierre', () => cerrarAccionPorPasos(supabase, { workspaceId, cotizacionId, antes, staffId }))
   return t.success ? aceptada : { ...aceptada, tarifas: t.error }
 }
 
