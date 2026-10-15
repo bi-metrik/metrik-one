@@ -15,7 +15,8 @@ import { NextResponse } from 'next/server'
 
 import { aceptarCapturaDeBandeja, type BorradorParaAceptar } from '@/app/(app)/negocios/tarifa-pax-actions'
 import { enPeticionDeRuta } from '@/lib/actions/memo-de-ruta'
-import { conTiempos, encabezadoServerTiming } from '@/lib/actions/tiempos-de-ruta'
+import { conTiempos, encabezadoServerTiming, medirEtapa } from '@/lib/actions/tiempos-de-ruta'
+import { vistaTrasAceptar } from '@/lib/cotizaciones/vista-tras-aceptar'
 import { bytesDeImagen, registrarEnBandeja, responderBandeja } from '@/lib/cotizaciones/bandeja-registro'
 import { aceptarPorPasos, esEstadoAlAceptar, type EstadoAlAceptar } from '@/lib/cotizaciones/por-pasos-cierre'
 
@@ -70,9 +71,17 @@ export async function POST(req: Request, { params }: { params: Promise<{ id: str
   // base: con él apagado (una pestaña vieja) no se acepta nada y se pide recargar. Sin la marca,
   // la ruta hace exactamente lo de siempre.
   const porPasos = (cuerpo as { porPasos?: unknown }).porPasos === true
+  // V2 (re-verificación D) · por pasos, la respuesta trae además la cotización como quedó
+  // (`vistaTrasAceptar`): el editor pinta el precio y el total sin pedir otra vez. Sin la marca, lo
+  // de siempre.
   const { resultado: r, etapas } = await conTiempos(() =>
     responderBandeja('aceptar-captura', id, bytesDeImagen(borrador.imagen), () => porPasos
-      ? enPeticionDeRuta(() => aceptarPorPasos(id, borrador, esEstadoAlAceptar((cuerpo as { estado?: unknown }).estado) ? (cuerpo as { estado: EstadoAlAceptar }).estado : null))
+      ? enPeticionDeRuta(async () => {
+          const aceptada = await aceptarPorPasos(id, borrador, esEstadoAlAceptar((cuerpo as { estado?: unknown }).estado) ? (cuerpo as { estado: EstadoAlAceptar }).estado : null)
+          if (!aceptada.ok) return aceptada
+          const vista = await medirEtapa('vista', () => vistaTrasAceptar(id))
+          return vista ? { ...aceptada, vista } : aceptada
+        })
       : enPeticionDeRuta(() => aceptarCapturaDeBandeja(id, borrador))))
   const ms = performance.now() - inicio
   return NextResponse.json(r, { headers: { 'Server-Timing': encabezadoServerTiming(['aceptar', ms], etapas) } })

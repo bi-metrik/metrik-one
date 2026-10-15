@@ -8,6 +8,7 @@ import {
   ChevronDown, ChevronRight, Lock, BookOpen, Loader2, Calculator, AlertTriangle, FileText, X,
 } from 'lucide-react'
 import { toast } from 'sonner'
+import { aplicarEvento, provisionalesVigentes, type EventoProvisional, type Provisional } from '@/lib/cotizaciones/aceptar-optimista'
 import {
   updateCotizacion, enviarCotizacion, duplicarCotizacion,
   addItem, updateItem, deleteItem,
@@ -61,7 +62,7 @@ import TarjetaOpcion from '@/app/(app)/negocios/tarjeta-opcion'
 import { devolverOpcionABandeja } from '@/app/(app)/negocios/tarifa-pax-actions'
 import { MarcoCotizacionContexto } from '@/app/(app)/negocios/marco-cotizacion-contexto'
 import { usePublicarTotalVivo } from '@/app/(app)/negocios/total-vivo'
-import { laMasNueva, lineasParaPintar, traerVistaFresca, type VistaFresca } from '@/lib/cotizaciones/vista-fresca'
+import { interpretarVistaFresca, laMasNueva, lineasParaPintar, traerVistaFresca, type VistaFresca } from '@/lib/cotizaciones/vista-fresca'
 import { esAvisoSoloInformativo, estadoDeBloque, resumenDeBloques, type EstadoDeBloque } from '@/lib/cotizaciones/bandeja-capturas'
 import { avisoDePasajerosDeOpcion, avisoDeReservaQueNoCuadra, pesos as pesosTarjeta } from '@/lib/cotizaciones/tarjeta-opcion'
 import { crearRanuraConOpcion, eliminarRanura } from '@/app/(app)/negocios/ranura-actions'
@@ -451,6 +452,28 @@ export default function CotizacionEditor({ oportunidadId, cotizacion, initialIte
   // sus cuatro condiciones. Apagado, este editor queda exactamente como siempre.
   const porPasosOn = lineasPorTipo && porPasos?.encendido === true
   const [conteoBandeja, setConteoBandeja] = useState({ porAceptar: 0, leyendo: 0 })
+  // V2 (por pasos) · los servicios nuevos que se están aceptando: su bloque se pinta ya
+  // (`aceptar-optimista.ts`). Si el servidor no los acepta, se quitan y se dice (D1).
+  const [provisionales, setProvisionales] = useState<Provisional[]>([])
+  const provisionalesVivos = useRef<Provisional[]>([])
+  const recibirProvisional = (e: EventoProvisional) => {
+    const r = aplicarEvento(provisionalesVivos.current, e, initialItems)
+    provisionalesVivos.current = r.provisionales
+    setProvisionales(r.provisionales)
+    if (r.aviso) toast.error(r.aviso)
+  }
+  /** V2 · la cotización que trajo la respuesta de «Aceptar»: se pinta como una lectura propia. */
+  const recibirVistaFresca = (cuerpo: unknown) => {
+    const v = interpretarVistaFresca({ ok: true, ...(cuerpo as object) })
+    if (v) setVistaFresca(prev => laMasNueva(prev, v))
+  }
+  useEffect(() => {
+    // La página ya trae la opción de verdad: su bloque provisional sobra.
+    const vivos = provisionalesVigentes(provisionalesVivos.current, new Set(initialItems.map(i => i.id)))
+    if (vivos.length === provisionalesVivos.current.length) return
+    provisionalesVivos.current = vivos
+    setProvisionales(vivos)
+  }, [initialItems])
   const estado = cotizacion.estado as EstadoCotizacion
   const editable = isEditable(estado) && !frozen
   const estadoConfig = ESTADO_COTIZACION_CONFIG[estado]
@@ -3700,6 +3723,8 @@ export default function CotizacionEditor({ oportunidadId, cotizacion, initialIte
           enMarco={conMarco}
           porPasos
           onConteo={setConteoBandeja}
+          onProvisional={recibirProvisional}
+          onVistaFresca={recibirVistaFresca}
           cotizacionId={cotizacion.id}
           items={initialItems}
           composicion={composicionViaje}
@@ -3762,6 +3787,7 @@ export default function CotizacionEditor({ oportunidadId, cotizacion, initialIte
       onAbrirOpcion={mostrarOpcion}
       onRecibirEnBandeja={(itemId, lecturas) => receptorBandeja.current?.recibir({ clave: `${itemId}:${Date.now()}`, itemId, lecturas })}
       refrescar={refrescar}
+      provisionales={provisionales}
     />
   ) : null
 

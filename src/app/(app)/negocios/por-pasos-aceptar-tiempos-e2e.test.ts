@@ -106,6 +106,8 @@ export interface Medida {
   idas: number
   ms: number
   serverTiming: string
+  /** La respuesta trae la cotización como quedó (V2, solo por pasos). */
+  vista?: boolean
 }
 
 async function medirUno(interruptor: boolean): Promise<Medida> {
@@ -121,10 +123,11 @@ async function medirUno(interruptor: boolean): Promise<Medida> {
   )
   const ms = performance.now() - t0
   ponerLatencia(0)
-  const json = await res.json() as { ok: boolean; mensaje?: string }
+  const json = await res.json() as { ok: boolean; mensaje?: string; vista?: { items?: unknown[] } }
   expect(json.ok, json.mensaje).toBe(true)
+  if (json.vista) expect(json.vista.items?.length).toBe(base.tablas.items.length)
   if (process.env.LISTAR_IDAS) console.info(base.registro.map((i, n) => `${n + 1} ${i.op} ${i.tabla} ${JSON.stringify(i.filtros)}`).join('\n'))
-  return { idas: tomarRegistro().length, ms: Math.round(ms), serverTiming: res.headers.get('Server-Timing') ?? '' }
+  return { idas: tomarRegistro().length, ms: Math.round(ms), serverTiming: res.headers.get('Server-Timing') ?? '', vista: !!json.vista }
 }
 
 async function medirLote(): Promise<Medida> {
@@ -194,7 +197,13 @@ describe(`V1/V2/V4 · aceptar en el servidor, con ${LATENCIA} ms por ida`, () =>
     // respuesta de «Aceptar» no usaba (la foto de la opción): 33.
     expect(apagado.idas).toBe(33)
     // Encendido, antes de H2: 66 idas y 1.703 ms (todas en serie). Después de H2/H3: 48 idas.
-    expect(encendido.idas).toBeLessThanOrEqual(48)
+    // Re-verificación D (V2): la respuesta trae además la cotización como quedó (`vistaTrasAceptar`,
+    // 4 lecturas, 2 en serie). Son las mismas lecturas que el navegador pedía DESPUÉS en otra
+    // petición (`/api/cotizaciones/[id]/vista`, con su propia sesión): esa petición ya no hace falta
+    // para pintar el precio y el total.
+    expect(encendido.idas).toBeLessThanOrEqual(52)
+    expect(encendido.vista).toBe(true)
+    expect(apagado.vista).toBe(false)
     // El lote de 11, antes: 286 idas y 7,1 s en serie. Después de H3: 236 idas y las cadenas de cada
     // tipo en paralelo (≈ 2,2 s).
     expect(lote.idas).toBeLessThanOrEqual(236)
