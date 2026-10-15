@@ -116,7 +116,7 @@ const BLOQUE_3_V2 = `7. Medio de pago y cobro del primer mes. Para abrir la prue
 
 7.2. Aviso previo. Para el cobro del literal (b) del numeral 7.1, METRIK escribe al correo registrado al menos 48 horas antes del cobro, con la fecha, el valor y cómo cancelar. El cobro del literal (a) no lleva ese aviso: lo pide la Empresa al confirmar. Después del cobro del literal (a), METRIK envía al correo registrado la confirmación del cobro, con la fecha, el valor y los últimos 4 dígitos de la tarjeta.
 
-7.3. Cómo cancelar. La Empresa cancela desde el botón "Cancelar prueba" de su cuenta en Valida o escribiendo a mauricio.moreno@metrik.com.co antes de que se cumplan los 7 días de la prueba y antes de confirmar la activación del plan. Si cancela a tiempo, no se cobra nada y METRIK pide a la pasarela eliminar el medio de pago registrado. Cancelar no quita las consultas que le queden de la prueba.
+7.3. Cómo cancelar. La Empresa cancela desde el botón "Cancelar prueba" de su cuenta en Valida o escribiendo a mauricio.moreno@metrik.com.co antes de que se cumplan los 7 días de la prueba y antes de que se le cobre el primer mes. Si cancela a tiempo, no se cobra nada y METRIK pide a la pasarela eliminar el medio de pago registrado. Cancelar no quita las consultas que le queden de la prueba.
 
 7.4. Sin permanencia. El primer cobro es de un solo mes. Después, el plan se renueva y se cobra a ese medio de pago cada mes según los Términos de Uso de Valida, y la Empresa puede retirarse cuando quiera, sin penalidad; el mes ya pagado no se reembolsa.
 

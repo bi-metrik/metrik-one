@@ -38,7 +38,7 @@ const sha = (t: string) => createHash('sha256').update(t, 'utf8').digest('hex')
  *     con el cobro del primer mes al confirmar; texto de Max, pendiente de Emilio).
  */
 const HUELLA_SIN_COBRO = '88ddf9d4d3050e5b309041c6693dbf3d0174bd0d2e7020e1fa32f957a5d2ae80'
-const HUELLA_CON_COBRO = 'e269485b50cac68d7a9f69a35f0894b5ac08c1e04aad1a0f41a8d5d83c5c7d1c'
+const HUELLA_CON_COBRO = '471774f367828d7d9dbf2c1eb61d7771963af37403c6fa50274b5066eccd73f0'
 
 const EPAYCO = { EPAYCO_HABILITADO: '1', EPAYCO_PUBLIC_KEY_METRIK: 'pub_prueba' }
 const COBRO = { VALIDA_COBRO_TRAS_PRUEBA: '1', ...EPAYCO }
@@ -82,6 +82,9 @@ describe('con cobro: Condiciones v2.1 completas, aviso v1.2 y casilla con cobro'
   it('versión 2.1 y aviso 1.2', () => {
     expect(t).toMatch(/^CONDICIONES DE LA PRUEBA GRATIS DE VALIDA · Versión 2\.1/)
     expect(versionAceptada(VIGENTES_CON_COBRO)).toBe('condiciones-2.1+aviso-1.3+terminos-auto-2.1')
+    // El texto es el de `proyectos/metrik/valida/docs/legal/condiciones-prueba-valida-v2.1.md` (los tres bloques
+    // `text`, unidos con una línea en blanco), comparado letra por letra el 2026-10-14 con el 7.3 final de Emilio.
+    expect(sha(t)).toBe('59e74708b7cd41bda2bbbc6052de8d953b49aa101b9fe6549565e4252146e07b')
   })
 
   it('el numeral 1 ya no dice que no pide tarjeta, y autoriza el cobro de cada mes (Vera)', () => {
@@ -106,7 +109,7 @@ describe('con cobro: Condiciones v2.1 completas, aviso v1.2 y casilla con cobro'
     expect(t).toContain('Sin la confirmación del literal (a), agotar las 10 consultas no adelanta el cobro.')
     // El aviso de 48 h es del (b); cancelar, hasta confirmar; si el primer cobro falla, no se reintenta.
     expect(t).toContain('7.2. Aviso previo. Para el cobro del literal (b) del numeral 7.1')
-    expect(t).toContain('antes de que se cumplan los 7 días de la prueba y antes de confirmar la activación del plan.')
+    expect(t).toContain('antes de que se cumplan los 7 días de la prueba y antes de que se le cobre el primer mes.')
   })
 
   it('los cambios C1 a C4 del dictamen de Emilio y el 7.5 de la decisión del 2026-10-14, literales', () => {
