@@ -34,6 +34,11 @@ export interface SalidaVista {
   perdida: { autorizadaPor: string; autorizadaAt: string; causa: string } | null
   /** ¿Quien mira puede autorizar? Solo el dueño del workspace. */
   puedeAutorizar: boolean
+  /**
+   * ¿Quien mira es el dueño? Con la excepción vigente ya no se «puede autorizar» (no bloquea),
+   * pero el dueño la puede RETIRAR (P6, H6 de la verificación D). Ausente = no aplica la regla.
+   */
+  esDueno?: boolean
   /** A quién pedírselo, dicho con su nombre. */
   dueno: string | null
   excepcionesDisponibles: boolean
@@ -113,6 +118,7 @@ export async function getSalidaDeCotizacion(cotizacionId: string): Promise<Salid
         }
       : null,
     puedeAutorizar: esDueno && salida.bloquea && salida.excepcionesDisponibles,
+    esDueno,
     dueno: salida.dueno,
     excepcionesDisponibles: salida.excepcionesDisponibles,
     lineas: salida.medicion?.conteo.lineas,

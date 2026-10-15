@@ -41,6 +41,7 @@ import { resumenDeOpcion } from '@/lib/cotizaciones/opcion-viaje'
 import type { ItemConLectura } from '@/lib/cotizaciones/detalle-viaje'
 import type { DestinoDeIr, ListaUnica } from '@/lib/cotizaciones/lista-unica'
 import { ListaUnicaPorPasos } from './lista-unica-por-pasos'
+import { autorizacionDeLaSalida } from '@/lib/cotizaciones/autorizacion-vista'
 import {
   cascadaDelTotal,
   estadoDeLosPasos,
@@ -329,17 +330,8 @@ export default function VistaPorPasos(p: PropsVistaPorPasos) {
     })
   }
 
-  const autorizacion: AutorizacionVista | null = p.salida?.aplica
-    ? {
-        bloquea: p.salida.bloquea,
-        dueno: p.salida.dueno,
-        esDueno: p.salida.puedeAutorizar || (!!p.salida.excepcion && p.salida.puedeAutorizar),
-        vigente: p.salida.excepcion ? { por: p.salida.excepcion.autorizadaPor, motivo: p.salida.excepcion.motivo } : null,
-        perdida: !!p.salida.perdida,
-        pedido: p.pedido,
-        disponible: p.salida.excepcionesDisponibles,
-      }
-    : null
+  // P6 · con la excepción vigente, el dueño la puede retirar (`autorizacion-vista.ts`, H6).
+  const autorizacion: AutorizacionVista | null = autorizacionDeLaSalida(p.salida, p.pedido)
 
   const alternar = (grupo: string) => setAbiertos(a => {
     const n = new Set(a)
