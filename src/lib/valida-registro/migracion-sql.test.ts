@@ -15,7 +15,7 @@ import { PGlite } from '@electric-sql/pglite'
 
 const MIGRACION = join(process.cwd(), 'supabase/migrations/20261010090000_valida_registros.sql')
 const MIGRACION_COBRO = join(process.cwd(), 'supabase/migrations/20261013090000_valida_cobro_tras_prueba.sql')
-const MIGRACION_CONFIRMAR = join(process.cwd(), 'supabase/migrations/20261014233000_valida_cobro_al_confirmar.sql')
+const MIGRACION_CONFIRMAR = join(process.cwd(), 'supabase/migrations/20261014234500_valida_cobro_al_confirmar.sql')
 const WS1 = '00000000-0000-4000-8000-0000000000b1'
 const WS2 = '00000000-0000-4000-8000-0000000000b2'
 const WS3 = '00000000-0000-4000-8000-0000000000b3'
@@ -221,7 +221,7 @@ describe('el cobro al cumplirse los 7 días (20261013090000)', () => {
   })
 })
 
-describe('la constancia del cobro al confirmar (20261014233000)', () => {
+describe('la constancia del cobro al confirmar (20261014234500)', () => {
   it('se aplica dos veces sin error y deja las filas existentes sin confirmación', async () => {
     await db.exec(readFileSync(MIGRACION_CONFIRMAR, 'utf8'))
     await db.exec(readFileSync(MIGRACION_CONFIRMAR, 'utf8'))

@@ -1,5 +1,5 @@
 -- ============================================================
--- 20261014233000 — La constancia del cobro del primer mes AL CONFIRMAR (Valida autogestionada)
+-- 20261014234500 — La constancia del cobro del primer mes AL CONFIRMAR (Valida autogestionada)
 --
 -- Decisión de Mauricio (2026-10-14): el primer mes se cobra en el primero de dos momentos, los 7 días
 -- de la prueba o la consulta 11 (agotó las 10 de prueba), y en este segundo caso solo con la

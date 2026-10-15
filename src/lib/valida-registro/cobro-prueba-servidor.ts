@@ -691,7 +691,7 @@ export type ResultadoCobroAlConfirmar =
  * dos llegaran a la cuota, el intento 0 de la cuota 1 solo se reclama una vez.
  *
  * El reclamo deja la constancia de lo confirmado: cuándo, desde qué IP y el texto exacto que vio
- * (`cobro_confirmado_*`, migración 20261014233000). Si la activación falla ANTES del cobro, la fila
+ * (`cobro_confirmado_*`, migración 20261014234500). Si la activación falla ANTES del cobro, la fila
  * vuelve a `programado` (no se cobró nada) y el cobro del día 7 sigue en pie.
  */
 export async function cobrarAlConfirmar(
