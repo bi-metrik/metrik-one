@@ -303,7 +303,8 @@ function oLista(xs: string[]): string {
 
 /** «Aeropuerto Barajas T4 - hotel» → «Aeropuerto Barajas T4 → hotel». */
 function flecha(trayecto: string): string {
-  return trayecto.replace(/\s+(?:-|–)\s+/, ' → ')
+  // «Hotel» va en minúscula en medio de la frase: «Traslado hotel → estación».
+  return trayecto.replace(/\s+(?:-|–)\s+/, ' → ').replace(/^Hotel\b/, 'hotel')
 }
 
 const minuscula = (s: string) => (s ? s[0].toLowerCase() + s.slice(1) : s)
