@@ -6,6 +6,7 @@ import { revalidatePath } from 'next/cache'
 
 import { exigirPorPasos } from '@/lib/cotizaciones/por-pasos-datos'
 import { getWorkspace } from '@/lib/actions/get-workspace'
+import { copiarFotoDeHotelAlCatalogo } from '@/lib/fotos/copiar-foto-hotel'
 import { exigirModulo, MENSAJE_MODULO_NO_ACTIVO, REQUISITO } from '@/lib/modulos/exigir-modulo'
 import { ranuraDeGrupo } from '@/lib/cotizaciones/ranuras-pantallazo'
 import { isEditable, type EstadoCotizacion } from '@/lib/cotizaciones/state-machine'
@@ -1595,7 +1596,7 @@ export async function ponerFotoDelHotel(itemId: string, dataUrl: string, proporc
   const ctx = await contexto(itemId)
   if ('error' in ctx) return { success: false, error: ctx.error as string }
   if (ctx.ranura.slug !== 'hotel_detalle') return { success: false, error: 'Solo una opción de hotel lleva foto del hotel.' }
-  const { workspaceId } = await getWorkspace()
+  const { workspaceId, staffId } = await getWorkspace()
   const g = await guardarFotoHotel({
     workspaceId, negocioId: ctx.item.negocioId, cotizacionId: ctx.item.cotizacionId, itemId, dataUrl,
   })
@@ -1611,6 +1612,11 @@ export async function ponerFotoDelHotel(itemId: string, dataUrl: string, proporc
     return { success: false, error: guardado.error }
   }
   if (anterior && anterior !== g.ref) await borrarImagenesDeCaptura(workspaceId, [anterior])
+  // PR 4: también al catálogo del espacio, para que la próxima cotización con este hotel la traiga.
+  await copiarFotoDeHotelAlCatalogo({
+    supabase: ctx.supabase, workspaceId, staffId,
+    item: { nombre: ctx.item.nombre, grupo: ctx.item.grupo, tarifa_pax: guardado.tarifa }, dataUrl,
+  })
   if (ctx.item.negocioId) revalidatePath(`/negocios/${ctx.item.negocioId}`)
   return { success: true, tarifa: guardado.tarifa }
 }

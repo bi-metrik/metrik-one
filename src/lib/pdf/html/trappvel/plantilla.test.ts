@@ -192,3 +192,55 @@ describe('«Así se ve cada día» como el prototipo v4', () => {
     expect(t).toContain('Sugerencia: Parque del Retiro y el Palacio de Cristal.')
   })
 })
+
+describe('htmlDePropuesta · saltos de hoja y la etiqueta del plan', () => {
+  const h = html()
+  const seccionDe = (doc: string, titulo: string) => {
+    const i = doc.indexOf(`>${titulo}<`)
+    return doc.slice(i, doc.indexOf('</section>', i))
+  }
+  const seccion = (titulo: string) => seccionDe(h, titulo)
+  const filas = (tbody: string) => (tbody.match(/<tr>/g) ?? []).length
+
+  it('«Trenes y traslados»: el título nunca queda al pie con menos de 3 filas, ni una fila sola arriba', () => {
+    const tbodies = [...seccion('Trenes y traslados').matchAll(/<tbody( class="nobr")?>([\s\S]*?)<\/tbody>/g)]
+    expect(tbodies).toHaveLength(3)
+    expect(tbodies[0][1]).toBe(' class="nobr"')
+    expect(filas(tbodies[0][2])).toBe(3)
+    expect(tbodies[1][1]).toBeUndefined()
+    expect(tbodies[2][1]).toBe(' class="nobr"')
+    expect(filas(tbodies[2][2])).toBe(2)
+    // El encabezado de la sección no se separa de lo que sigue.
+    expect(h).toMatch(/\.sh \{[^}]*break-after: avoid/)
+  })
+
+  it('una tabla corta va en un solo tramo que no se parte', () => {
+    const m = modeloDePropuesta(ENTRADA_EUROPA)
+    m.trayectos = { ...m.trayectos, filas: m.trayectos.filas.slice(0, 4) }
+    const trenes = seccionDe(htmlDePropuesta(m, RECURSOS), 'Trenes y traslados')
+    expect(trenes.match(/<tbody class="nobr">/g) ?? []).toHaveLength(1)
+    expect(trenes).not.toMatch(/<tbody>/)
+  })
+
+  it('«Elijan su versión»: ninguna tarjeta se parte y el bloque de las tres salta entero', () => {
+    expect(seccion('Elijan su versión')).toContain('<div class="tarifas nobr"')
+    expect(h).toMatch(/\.tf \{ break-inside: avoid; \}/)
+    expect(h).toMatch(/\.nobr \{ break-inside: avoid; \}/)
+  })
+
+  it('«Antes de viajar» no queda solo al pie: va con su lista', () => {
+    expect(h).toMatch(/<div class="nobr"><h3 style="margin-top:5mm">Antes de viajar<\/h3><ul/)
+  })
+
+  it('la foto de cada plan lleva su ciudad y el día en que el día a día lo propone', () => {
+    const conFoto = htmlDePropuesta(modeloDePropuesta(ENTRADA_EUROPA), { ...RECURSOS, fotoDeOpcional: () => ({ src: 'data:image/jpeg;base64,FOTO', foco: null }) })
+    const planes = seccionDe(conFoto, 'Planes para los días libres')
+    expect(planes).toContain('<div class="where">Madrid · dom 13</div></div><div class="b"><div class="n">Palacio Real de Madrid')
+    expect(planes).toContain('<div class="where">Barcelona · mié 16</div></div><div class="b"><div class="n">Park Güell con guía')
+    expect((planes.match(/class="where"/g) ?? []).length).toBe(8)
+  })
+
+  it('sin ninguna foto de plan, la tarjeta sigue como antes (sin imagen ni etiqueta)', () => {
+    expect(seccion('Planes para los días libres')).not.toContain('class="where"')
+  })
+})
