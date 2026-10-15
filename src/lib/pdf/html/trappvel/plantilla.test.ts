@@ -32,7 +32,7 @@ describe('htmlDePropuesta · COT-2026-0026 de muestra', () => {
   })
 
   it('las secciones del prototipo v5', () => {
-    for (const s of ['Lo que van a vivir', 'Itinerario día a día', 'Dónde duermen', 'Vuelos', 'Trenes y traslados', 'Planes para los días libres', 'Elijan su versión', 'Qué incluye y cuándo se paga', 'Términos y condiciones']) {
+    for (const s of ['Lo que van a vivir', 'Así se ve cada día', 'Dónde duermen', 'Vuelos', 'Trenes y traslados', 'Planes para los días libres', 'Elijan su versión', 'Qué incluye y cuándo se paga', 'Términos y condiciones']) {
       expect(t).toContain(s)
     }
     // 14 días de viaje, una tarjeta por día.
@@ -133,5 +133,62 @@ describe('escape', () => {
     const h = html({ ...ENTRADA_EUROPA, props: { ...PROPS_EUROPA, viaje: { ...PROPS_EUROPA.viaje!, hoteles } } })
     expect(h).not.toContain('<script>alert(1)</script>')
     expect(h).toContain('&lt;script&gt;alert(1)&lt;/script&gt;')
+  })
+})
+
+describe('«Así se ve cada día» como el prototipo v4', () => {
+  const h = html()
+  const inicio = h.indexOf('class="sec brk dias"')
+  const dias = h.slice(inicio, h.indexOf('</section>', inicio))
+  /** El bloque de un día, por su número («13»). */
+  const dia = (n: number) => {
+    const i = dias.indexOf(`<div class="d">${n}<small>`)
+    const fin = dias.indexOf('<div class="day">', i + 1)
+    return dias.slice(i, fin === -1 ? undefined : fin)
+  }
+
+  it('el número del día grande con «jue · dic» debajo, título y ciudad; sin las píldoras del v5', () => {
+    expect(dia(10)).toContain('<div class="d">10<small>jue · dic</small></div>')
+    expect(texto(dia(10))).toContain('Salida desde Bogotá')
+    expect(texto(dia(14))).toContain('En tren a Barcelona Madrid → Barcelona')
+    expect(dias).not.toContain('class="pill"')
+  })
+
+  it('las cajitas de las tres versiones SOLO el día de un vuelo', () => {
+    const conCajas = [...dias.matchAll(/<div class="d">(\d+)<small>/g)]
+      .map((x) => Number(x[1]))
+      .filter((n) => dia(n).includes('class="opt3"'))
+    // Sale (10), llega a Madrid (11) y regresa (23). Los hoteles ya no se repiten por día.
+    expect(conCajas).toEqual([10, 11, 23])
+    expect(texto(dia(10))).toContain('Avianca 19:20, directo')
+    expect(texto(dia(10))).toContain('Air France 18:45, vía París')
+    expect(texto(dia(11))).toContain('llega 11:15')
+    expect(texto(dia(23))).toContain('Iberia 06:25, vía Madrid · llega 15:45')
+    expect(texto(dias)).not.toContain('Catalonia Puerta del Sol')
+  })
+
+  it('un renglón por hecho, en frase: traslados, trenes e incluidas', () => {
+    expect(texto(dia(11))).toContain('al llegar Traslado Aeropuerto Barajas T4 → hotel · privado, van con silla de bebé')
+    expect(texto(dia(14))).toContain('Tren AVE 03071 Renfe, Estándar · Madrid Atocha → Barcelona Sants')
+    expect(texto(dia(12))).toContain('Museo del Prado con guía en español · 2 h. Incluida.')
+  })
+
+  it('el día libre propone los planes de su ciudad', () => {
+    expect(texto(dia(13))).toContain('Día libre')
+    expect(texto(dia(13))).toContain('Libre para ustedes. Opcional: Palacio Real de Madrid o Tour del Bernabéu (ver «Planes para los días libres»).')
+    expect(texto(dia(16))).toContain('Opcional: Park Güell con guía o Aquàrium de Barcelona')
+  })
+
+  it('separador fino entre días y un día que no se parte', () => {
+    expect(h).toMatch(/\.dias \.day \{[^}]*border-bottom: 1px solid var\(--line\)/)
+    expect(h).toMatch(/\.day \{[^}]*break-inside: avoid/)
+  })
+
+  it('los ganchos del texto generado: título y sugerencia, si llegan', () => {
+    const m = modeloDePropuesta(ENTRADA_EUROPA)
+    m.dias[2] = { ...m.dias[2], titulo: 'Arte para toda la familia', sugerencia: 'Parque del Retiro y el Palacio de Cristal.' }
+    const t = texto(htmlDePropuesta(m, RECURSOS))
+    expect(t).toContain('Arte para toda la familia Madrid')
+    expect(t).toContain('Sugerencia: Parque del Retiro y el Palacio de Cristal.')
   })
 })

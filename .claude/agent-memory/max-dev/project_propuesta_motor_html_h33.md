@@ -32,4 +32,11 @@ anticipo a mano + wa.me). Un anticipo registrado como pago mueve el negocio a Re
   que no se parte es el tramo (`<tbody class="nobr">`), con `<thead>` repetido y `tr { break-inside: avoid }`.
   Medir el hueco por hoja con `medir-hojas.mjs` (scratchpad): última fila no blanca sobre el alto útil.
 - `esTren` por marca o estación-a-estación; una estación en un extremo es el traslado al tren.
+- Día a día v4 (14-oct, pedido de Mauricio): cajitas por versión SOLO en vuelos (el modelo ya no
+  pone `porTarifa` en hoteles); los opcionales van a los días libres de su ciudad por
+  `lugaresDeOpcionales` (alineado por POSICIÓN con `props.sugeridos`, se arma en la acción solo con
+  el motor encendido; sin lectura de ciudad, se busca la parada en el nombre). `DiaDoc.titulo` y
+  `sugerencia` son ganchos del PR 6, hoy siempre null.
+- Regenerar la muestra: `PROPUESTA_PDF_SALIDA=<pdf> CHROMIUM_EJECUTABLE=~/.cache/ms-playwright/chromium-1243/chrome-linux64/chrome npx vitest run src/lib/pdf/html/propuesta-html.test.ts`.
+  En el worktree aislado, `node`/`vitest` con variables de shell (`$S`) los bloquea el hook: rutas literales.
 - Relacionado: [[propuesta-chromium-modelo]].

@@ -82,6 +82,11 @@ export interface EntradaModeloPropuesta {
   anticipo?: AnticipoPropuesta | null
   /** Decisión 3: quien atiende al cliente; su WhatsApp es el botón de apartar. */
   asesora?: { nombre: string | null; whatsapp: string | null } | null
+  /**
+   * Dónde y cuándo es cada plan opcional, en el MISMO orden que `props.sugeridos`
+   * (`lugaresDeOpcionales`). Sin él, la ciudad se busca en el nombre del plan.
+   */
+  lugaresDeOpcionales?: ({ ciudad: string | null; fecha: string | null } | null)[]
 }
 
 // ── Salida ────────────────────────────────────────────────────────────────────
@@ -147,8 +152,14 @@ export interface EventoDoc {
   tipo: 'vuelo' | 'hotel' | 'tren' | 'traslado' | 'actividad'
   hora: string | null
   texto: string
-  /** Con varias tarifas, lo que cambia en cada una (un vuelo, un hotel). Vacío = igual en todas. */
+  /**
+   * Con varias tarifas, lo que cambia en cada una. Solo los VUELOS (aerolínea, hora, directo o
+   * vía): el hotel de cada versión ya está en «Dónde duermen» y no se repite día a día.
+   * Vacío = igual en todas.
+   */
   porTarifa: { tarifas: number[]; texto: string }[]
+  /** Solo vuelos: `salida` el día que sale, `llegada` el día que llega (si llega al día siguiente). */
+  momento?: 'salida' | 'llegada'
 }
 
 export interface DiaDoc {
@@ -161,6 +172,14 @@ export interface DiaDoc {
   eventos: EventoDoc[]
   /** Sin nada programado. */
   libre: boolean
+  /** Los planes opcionales que se proponen ese día (los de su ciudad, en sus días libres). */
+  opcionales: string[]
+  /**
+   * Ganchos para el texto generado (PR 6): el título del día («Arte para toda la familia») y una
+   * sugerencia libre. Hoy siempre `null`: la plantilla arma un título con los datos.
+   */
+  titulo: string | null
+  sugerencia: string | null
 }
 
 export interface OpcionHotelDoc {
@@ -198,6 +217,10 @@ export interface OpcionalDoc {
   /** Lo que imprime la tarjeta de hoy: `precio_venta × cantidad`. 0 = sin precio. */
   valor: number
   unidad: string | null
+  /** La parada del viaje donde se hace (la leída, o la que el nombre nombra). `null` = no se sabe. */
+  ciudad: string | null
+  /** ISO, si el plan tiene día. */
+  fecha: string | null
 }
 
 export interface PlanDoc {
@@ -382,9 +405,20 @@ function agruparPorTexto<T extends { tarifas?: number[] }>(lista: T[], texto: (x
   return salida
 }
 
-function textoDeVuelo(v: VueloPDF, fila: { numero: string | null; salida: string | null; llegada: string | null; escala: string | null }): string {
-  const horas = fila.salida || fila.llegada ? `${fila.salida ?? '?'} → ${fila.llegada ?? '?'}` : null
-  return [[v.aerolinea ?? v.linea, fila.numero].filter(Boolean).join(' '), fila.escala, horas].filter(Boolean).join(' · ')
+/**
+ * El vuelo en la caja de su versión, como el prototipo v4: «Avianca 19:20, directo»,
+ * «Iberia 06:25, vía Madrid · llega 15:45». La llegada solo si es el mismo día; si llega al día
+ * siguiente, se cuenta ese día.
+ */
+function textoDeVueloDelDia(v: VueloPDF, fila: { salida: string | null; llegada: string | null; escala: string | null }): string {
+  const via = fila.escala?.startsWith('Escala en ')
+    ? `vía ${fila.escala.slice('Escala en '.length).replace(/\s*\(?\b[A-Z]{3}\b\)?\s*$/, '').trim()}`
+    : fila.escala === 'Vuelo directo'
+      ? 'directo'
+      : null
+  const sale = [v.aerolinea ?? v.linea, fila.salida].filter(Boolean).join(' ')
+  const llega = fila.llegada && !llegaAlDiaSiguiente(fila) ? `llega ${fila.llegada}` : null
+  return [[sale, via].filter(Boolean).join(', '), llega].filter(Boolean).join(' · ')
 }
 
 function cargoDelHotel(props: CotizacionPDFProps, h: HotelPDF): string | null {
@@ -418,6 +452,7 @@ export function modeloDePropuesta({
   menoresAutorizados = false,
   anticipo = null,
   asesora = null,
+  lugaresDeOpcionales = [],
 }: EntradaModeloPropuesta): ModeloPropuesta {
   const v = props.viaje ?? null
   const inicio = v?.fechaInicio ?? null
@@ -565,12 +600,17 @@ export function modeloDePropuesta({
     )
   }
 
-  const opcionales: OpcionalDoc[] = (props.sugeridos ?? []).map((o) => ({
-    nombre: o.nombre,
-    descripcion: sinCancelacion(o.descripcion),
-    valor: Math.round((o.precio_venta || 0) * (o.cantidad ?? 1)),
-    unidad: o.unidad ?? null,
-  }))
+  const opcionales: OpcionalDoc[] = (props.sugeridos ?? []).map((o, i) => {
+    const lugar = lugaresDeOpcionales[i] ?? null
+    return {
+      nombre: o.nombre,
+      descripcion: sinCancelacion(o.descripcion),
+      valor: Math.round((o.precio_venta || 0) * (o.cantidad ?? 1)),
+      unidad: o.unidad ?? null,
+      ciudad: ciudadDelOpcional(lugar?.ciudad ?? null, `${o.nombre} ${o.descripcion ?? ''}`, paradas.map((x) => x.ciudad)),
+      fecha: fechaIso(lugar?.fecha, inicio),
+    }
+  })
 
   const noIncluye = [
     ...new Set((v?.cargosEnDestino ?? []).map((c) => `${c.concepto}${c.ciudad ? ` (${c.ciudad})` : ''}, que se pagan en destino`)),
@@ -579,6 +619,7 @@ export function modeloDePropuesta({
 
   // ── Día a día ──
   const dias = diaADia({ props, inicio, vuelos: v?.vuelos ?? [], hoteles: hotelesTodos, capitulos: hoteles, servicios, porTarifas, principal })
+  repartirOpcionales(dias, opcionales)
 
   // ── Portada y lo formal ──
   const titulo = (v?.titular?.trim() || props.negocio?.nombre || props.cotizacion.descripcion || 'Propuesta de viaje').trim()
@@ -651,7 +692,8 @@ function diaADia(p: {
     eventos.set(fecha, [...(eventos.get(fecha) ?? []), e])
   }
 
-  // Vuelos: uno por fecha y sentido; con tarifas, lo que cambia va por tarifa.
+  // Vuelos: uno por fecha y sentido; con tarifas, lo que cambia va por tarifa (aerolínea, hora,
+  // directo o vía). Un vuelo que llega al día siguiente también se cuenta el día que llega.
   const tramos = p.vuelos.flatMap((vu) =>
     filasDelVuelo(vu).map((f, k) => ({ vu, f, sentido: k, fecha: fechaIso(f.fecha, p.inicio), tarifas: p.porTarifas ? vu.tarifas ?? [] : [] })),
   )
@@ -659,24 +701,39 @@ function diaADia(p: {
   for (const llave of llaves) {
     const grupo = tramos.filter((t) => `${t.fecha}|${t.sentido}` === llave)
     const primero = grupo.find((t) => esDeLaPrincipal({ tarifas: t.tarifas }, p.principal)) ?? grupo[0]
-    const porTarifa = p.porTarifas ? agruparPorTexto(grupo, (t) => textoDeVuelo(t.vu, t.f)) : []
+    const porTarifa = p.porTarifas ? agruparPorTexto(grupo, (t) => textoDeVueloDelDia(t.vu, t.f)) : []
+    const conCajas = porTarifa.length > 1
     poner(primero.fecha, {
       tipo: 'vuelo',
-      hora: primero.f.salida,
+      // Con una caja por versión, la hora va en cada caja: cada versión sale a una hora distinta.
+      hora: conCajas ? null : primero.f.salida,
       texto: `${primero.f.desde ?? '?'} → ${primero.f.hasta ?? '?'}`,
-      porTarifa: porTarifa.length > 1 ? porTarifa : [],
+      porTarifa: conCajas ? porTarifa : [],
+      momento: 'salida',
     })
+    const llegan = grupo.filter((t) => llegaAlDiaSiguiente(t.f))
+    if (llegan.length > 0 && primero.fecha) {
+      const alLlegar = p.porTarifas ? agruparPorTexto(llegan, (t) => `llega ${t.f.llegada}`) : []
+      const cajas = alLlegar.length > 1
+      poner(sumarDias(primero.fecha, 1), {
+        tipo: 'vuelo',
+        hora: cajas ? null : (llegan[0].f.llegada ?? null),
+        texto: `Llegada a ${primero.f.hasta ?? '?'}`,
+        porTarifa: cajas ? alLlegar : [],
+        momento: 'llegada',
+      })
+    }
   }
 
-  // Hoteles: la entrada a cada ciudad, con el hotel de cada tarifa.
+  // Hoteles: la entrada a cada ciudad. El hotel de cada versión NO va aquí: ya está en «Dónde
+  // duermen» (pedido de Mauricio del 2026-10-14, al ver el día a día con los hoteles repetidos).
   for (const c of p.capitulos) {
     if (!c.desde) continue
-    const porTarifa = p.porTarifas ? agruparPorTexto(c.opciones, (o) => o.hotel) : []
     poner(c.desde, {
       tipo: 'hotel',
       hora: null,
       texto: c.ciudad ? `Llegada al hotel en ${c.ciudad}` : 'Llegada al hotel',
-      porTarifa: porTarifa.length > 1 ? porTarifa : [],
+      porTarifa: [],
     })
   }
 
@@ -697,15 +754,85 @@ function diaADia(p: {
   // Tope: una fecha mal leída (el año de otro viaje) no puede pintar meses de días vacíos.
   const total = Math.min(diaNumero(fin) - diaNumero(inicio) + 1, MAX_DIAS)
   const orden: Record<EventoDoc['tipo'], number> = { vuelo: 0, traslado: 1, tren: 1, hotel: 2, actividad: 3 }
+  // El traslado HACIA el aeropuerto va antes que el vuelo de ese día.
+  const rango = (e: EventoDoc) => (e.tipo === 'traslado' && vaAlAeropuerto(e.texto) ? -1 : orden[e.tipo])
   const salida: DiaDoc[] = []
   for (let n = 0; n < total; n++) {
     const fecha = sumarDias(inicio, n)
     const lista = (eventos.get(fecha) ?? []).slice().sort((a, b) => {
       if (a.hora && b.hora && a.hora !== b.hora) return a.hora.localeCompare(b.hora)
-      return orden[a.tipo] - orden[b.tipo]
+      return rango(a) - rango(b)
     })
     const ciudad = p.capitulos.find((c) => c.desde && c.hasta && fecha >= c.desde && fecha < c.hasta)?.ciudad ?? null
-    salida.push({ fecha, numero: n + 1, ciudad, eventos: lista, libre: lista.length === 0 })
+    salida.push({ fecha, numero: n + 1, ciudad, eventos: lista, libre: lista.length === 0, opcionales: [], titulo: null, sugerencia: null })
   }
   return salida
+}
+
+/** «Hotel - aeropuerto Schiphol · Privado»: el destino del trayecto es un aeropuerto. */
+function vaAlAeropuerto(descripcion: string): boolean {
+  const extremos = descripcion.split(' · ')[0].split(/\s+(?:-|→|–)\s+/)
+  return extremos.length === 2 && /\b(aeropuerto|airport|aeroporto|a[ée]roport)\b/i.test(extremos[1])
+}
+
+/** Sale y llega con hora, y llega «antes» de salir: llega al día siguiente (vuelo de noche). */
+function llegaAlDiaSiguiente(f: { salida: string | null; llegada: string | null }): boolean {
+  const hhmm = /^\d{1,2}:\d{2}$/
+  if (!f.salida || !f.llegada || !hhmm.test(f.salida.trim()) || !hhmm.test(f.llegada.trim())) return false
+  const min = (h: string) => Number(h.split(':')[0]) * 60 + Number(h.split(':')[1])
+  return min(f.llegada.trim()) < min(f.salida.trim())
+}
+
+/** Minúsculas y sin tildes, para comparar nombres de ciudad. */
+function llano(s: string): string {
+  return s.normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase()
+}
+
+/**
+ * La parada del viaje donde se hace un plan opcional: la ciudad leída si es una de las paradas
+ * (con el nombre de la parada), si no la leída tal cual; sin lectura, la parada que el nombre o
+ * la descripción del plan nombran («Palacio Real de Madrid»). Si nombra varias, ninguna.
+ */
+export function ciudadDelOpcional(leida: string | null, texto: string, paradas: string[]): string | null {
+  if (leida && leida.trim()) {
+    const k = claveDeCiudad(leida)
+    return paradas.find((p) => claveDeCiudad(p) === k) ?? leida.trim()
+  }
+  const t = llano(texto)
+  const nombradas = paradas.filter((p) => {
+    const k = llano(p).trim()
+    return k.length > 0 && new RegExp(`(^|[^a-z])${k.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}([^a-z]|$)`).test(t)
+  })
+  return nombradas.length === 1 ? nombradas[0] : null
+}
+
+/**
+ * Pone cada plan opcional en un día: el de su fecha si la tiene; si no, en los días LIBRES de su
+ * ciudad, repartidos en orden (con dos días libres y tres planes: dos y uno). Una ciudad sin
+ * días libres los propone en sus días de solo visitas. Lo que no tiene ciudad queda en la
+ * sección del final.
+ */
+function repartirOpcionales(dias: DiaDoc[], opcionales: OpcionalDoc[]): void {
+  const porCiudad = new Map<string, string[]>()
+  for (const o of opcionales) {
+    const dia = o.fecha ? dias.find((d) => d.fecha === o.fecha) : undefined
+    if (dia) {
+      dia.opcionales.push(o.nombre)
+      continue
+    }
+    if (!o.ciudad) continue
+    const k = claveDeCiudad(o.ciudad)
+    porCiudad.set(k, [...(porCiudad.get(k) ?? []), o.nombre])
+  }
+  for (const [k, nombres] of porCiudad) {
+    const deLaCiudad = dias.filter((d) => d.ciudad && claveDeCiudad(d.ciudad) === k && d.opcionales.length === 0)
+    const libres = deLaCiudad.filter((d) => d.libre)
+    const destino = libres.length > 0 ? libres : deLaCiudad.filter((d) => d.eventos.length > 0 && d.eventos.every((e) => e.tipo === 'actividad'))
+    if (destino.length === 0) continue
+    destino.forEach((d, j) => {
+      const desde = Math.round((j * nombres.length) / destino.length)
+      const hasta = Math.round(((j + 1) * nombres.length) / destino.length)
+      d.opcionales.push(...nombres.slice(desde, hasta))
+    })
+  }
 }
