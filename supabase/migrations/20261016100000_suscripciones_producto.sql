@@ -73,7 +73,7 @@
 --   drop function public.suscripciones_producto_eventos_inmutable();
 --   drop table public.suscripciones_producto;
 --   drop function public.suscripciones_producto_touch();
---   (el archivo `..._reversa.sql` de la spec lo trae listo para pegar)
+--   (`sql/suscripciones-producto/reversa-20261016.sql` lo trae listo, junto con la de 20261016100100)
 -- ============================================================
 
 

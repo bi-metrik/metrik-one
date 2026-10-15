@@ -37,7 +37,7 @@
 --
 -- ## Reversa
 --
---   `docs/specs/2026-10-16_suscripciones-multiproducto-reversa.sql`: los mismos reemplazos al revés
+--   `sql/suscripciones-producto/reversa-20261016.sql`: los mismos reemplazos al revés
 --   sobre la definición viva, el trigger fuera y `valida_activar_autogestion` con el cuerpo de
 --   20261012100000. Primero la reversa de esta migración, después la de 20261016100000.
 -- ============================================================
@@ -299,7 +299,9 @@ begin
     v_ficha.slug, 'activa', v_reg.aceptado_at, v_reg.prueba_vence_en, now(),
     v_reg.origen, v_reg.origen_fuente, v_reg.id,
     case when v_con_tarjeta then 'epayco' end, case when v_con_tarjeta then v_reg.metodo_pago_ref end,
-    jsonb_build_object('workspace_one', v_ws.slug, 'fuente', 'registro autogestionado de Valida'),
+    -- `origen` es la marca que decide la factura electrónica automática (`ORIGENES_AUTOMATICOS` de
+    -- facturacion-electronica): la misma que llevaba el negocio de esta activación hasta 20261016.
+    jsonb_build_object('origen', 'valida_autogestion', 'workspace_one', v_ws.slug, 'fuente', 'registro autogestionado de Valida'),
     p_usuario
   )
   returning id into v_suscripcion;
