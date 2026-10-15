@@ -689,6 +689,16 @@ export async function purgar(
     }
   }
   if (o.soloSemillas && ids.negocio_id.length) objetivos.push({ tabla: 'negocios', filtro: ['id', 'in', ids.negocio_id] })
+  // La actividad de lo sembrado (comentarios y cambios del negocio, de su cotización y de sus
+  // líneas) cuelga de `entidad_id`, no de una llave: sin esto `--resembrar` la dejaba huérfana.
+  if (o.soloSemillas) {
+    const entidades = [...ids.negocio_id, ...ids.cotizacion_id, ...ids.item_id]
+    for (const [tabla, columnas] of esquema) {
+      if (entidades.length && columnas.includes('entidad_id') && columnas.includes('workspace_id')) {
+        objetivos.push({ tabla, filtro: ['entidad_id', 'in', entidades] })
+      }
+    }
+  }
 
   // Pasadas de borrado. Cada objetivo es UNA sentencia (el DELETE dice cuántas borró; antes se
   // contaba y luego se borraba, el doble de llamadas, en serie y sin imprimir nada). Una pasada
