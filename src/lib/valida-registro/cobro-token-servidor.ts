@@ -1,7 +1,8 @@
 import 'server-only'
 import type { SupabaseClient } from '@supabase/supabase-js'
 import { todayBogotaISO } from '@/lib/dates/bogota'
-import { registrarActividad } from '@/lib/activity/registrar-actividad'
+import { anclaDeFila, columnasDeAncla, filtrarPorAncla, type Ancla } from '@/lib/suscripciones-producto/ancla'
+import { anotarEnAncla } from '@/lib/suscripciones-producto/bitacora'
 import { referenciaEnlaceCobro } from '@/lib/cobros/referencia-enlace'
 import { procesarEventoPasarela } from '@/lib/cobros/pago-en-linea'
 import { repoPagoEnLinea } from '@/lib/cobros/pago-en-linea-servidor'
@@ -61,17 +62,22 @@ interface Pagador {
   celular: string | null
 }
 
-/** La tarjeta y los datos del pagador de un negocio del cobrador, si es una cuenta autogestionada con tarjeta. */
-async function pagadorConTarjeta(db: Db, cobradorId: string, negocioId: string): Promise<Pagador | null> {
-  const sc = await db
-    .from('servicios_contratados')
-    .select('workspace_pagador_id')
-    .eq('workspace_id', cobradorId)
-    .eq('negocio_id', negocioId)
+/**
+ * La tarjeta y los datos del pagador del contrato (de un negocio o de una suscripción) del cobrador, si es
+ * una cuenta autogestionada con tarjeta.
+ *
+ * - Suscripción (las altas autogestionadas desde 20261016): la tarjeta es la de la suscripción
+ *   (`suscripciones_producto.metodo_pago_ref`, copiada del registro al activar) y los datos del pagador,
+ *   los que la empresa declaró en ella.
+ * - Negocio (las altas anteriores, si las hubo): la del registro del espacio que paga, como antes.
+ */
+async function pagadorConTarjeta(db: Db, cobradorId: string, ancla: Ancla): Promise<Pagador | null> {
+  const sc = await filtrarPorAncla(db.from('servicios_contratados').select('workspace_pagador_id').eq('workspace_id', cobradorId), ancla)
     .in('estado', ['activo', 'pausado'])
-  if (sc.error) throw new Error(`contrato del negocio ${negocioId}: ${sc.error.message}`)
+  if (sc.error) throw new Error(`contrato de ${ancla.tipo} ${ancla.id}: ${sc.error.message}`)
   const pagadores = [...new Set(((sc.data ?? []) as { workspace_pagador_id: string | null }[]).map((c) => c.workspace_pagador_id).filter(Boolean))] as string[]
   if (pagadores.length !== 1) return null
+  if (ancla.tipo === 'suscripcion') return pagadorDeSuscripcion(db, cobradorId, ancla.id, pagadores[0])
   const [ws, reg] = await Promise.all([
     db.from('workspaces').select('config_extra').eq('id', pagadores[0]).maybeSingle(),
     db
@@ -97,10 +103,46 @@ async function pagadorConTarjeta(db: Db, cobradorId: string, negocioId: string):
   }
 }
 
+/** La suscripción con su tarjeta: viva, del espacio que paga el contrato y con una referencia de ePayco. */
+async function pagadorDeSuscripcion(db: Db, cobradorId: string, suscripcionId: string, pagadorId: string): Promise<Pagador | null> {
+  const [s, ws] = await Promise.all([
+    db
+      .from('suscripciones_producto')
+      .select('workspace_cliente_id, estado, metodo_pago_pasarela, metodo_pago_ref, correo_facturacion, numero_documento, razon_social')
+      .eq('id', suscripcionId)
+      .eq('workspace_id', cobradorId)
+      .maybeSingle(),
+    db.from('workspaces').select('config_extra').eq('id', pagadorId).maybeSingle(),
+  ])
+  if (s.error) throw new Error(`suscripción ${suscripcionId}: ${s.error.message}`)
+  if (ws.error) throw new Error(`espacio ${pagadorId}: ${ws.error.message}`)
+  const fila = s.data as {
+    workspace_cliente_id: string
+    estado: string
+    metodo_pago_pasarela: string | null
+    metodo_pago_ref: string | null
+    correo_facturacion: string | null
+    numero_documento: string
+    razon_social: string
+  } | null
+  if (!fila || fila.estado === 'cancelada' || fila.workspace_cliente_id !== pagadorId) return null
+  if (fila.metodo_pago_pasarela !== 'epayco' || !leerRefMedioPagoEpayco(fila.metodo_pago_ref) || !fila.correo_facturacion) return null
+  const config = (ws.data?.config_extra ?? null) as Record<string, unknown> | null
+  const pagadorCfg = (config?.valida_pagador ?? null) as { celular?: unknown } | null
+  return {
+    workspaceId: pagadorId,
+    ref: fila.metodo_pago_ref as string,
+    correo: fila.correo_facturacion,
+    nit: fila.numero_documento,
+    razonSocial: fila.razon_social,
+    celular: typeof pagadorCfg?.celular === 'string' ? pagadorCfg.celular : null,
+  }
+}
+
 /** Al nacer el plan: si la cuenta tiene tarjeta, se cobra por token y no por enlace. */
-export async function pasarElPlanATarjeta(deps: DepsCobroToken, p: { cobradorId: string; planCobroId: string; negocioId: string }): Promise<boolean> {
+export async function pasarElPlanATarjeta(deps: DepsCobroToken, p: { cobradorId: string; planCobroId: string; ancla: Ancla }): Promise<boolean> {
   const db = deps.db as Db
-  if (!(await pagadorConTarjeta(db, p.cobradorId, p.negocioId))) return false
+  if (!(await pagadorConTarjeta(db, p.cobradorId, p.ancla))) return false
   const u = await db.from('planes_cobro').update({ pasarela: 'epayco' }).eq('id', p.planCobroId).eq('pasarela', 'bold')
   if (u.error) throw new Error(`pasar el plan ${p.planCobroId} a tarjeta: ${u.error.message}`)
   return true
@@ -127,11 +169,13 @@ export async function cobrarCuotaConTarjeta(
     .eq('workspace_id', p.cobradorId)
     .maybeSingle()
   if (cuota.error || !cuota.data) return { tipo: 'error', mensaje: `cuota ${p.cuotaId}: ${cuota.error?.message ?? 'no existe'}` }
-  const plan = await db.from('planes_cobro').select('id, negocio_id, pasarela, total_cuotas').eq('id', cuota.data.plan_cobro_id).maybeSingle()
+  const plan = await db.from('planes_cobro').select('id, negocio_id, suscripcion_id, pasarela, total_cuotas').eq('id', cuota.data.plan_cobro_id).maybeSingle()
   if (plan.error || !plan.data) return { tipo: 'error', mensaje: `plan de la cuota ${p.cuotaId}` }
   if (plan.data.pasarela !== 'epayco') return { tipo: 'no_aplica', motivo: 'plan_sin_tarjeta' }
+  const ancla = anclaDeFila(plan.data)
+  if (!ancla) return { tipo: 'error', mensaje: `el plan ${plan.data.id} no tiene ancla` }
 
-  const pagador = await pagadorConTarjeta(db, p.cobradorId, plan.data.negocio_id)
+  const pagador = await pagadorConTarjeta(db, p.cobradorId, ancla)
   if (!pagador) return { tipo: 'no_aplica', motivo: 'sin_tarjeta' }
 
   // El cobro programado de la cuota (lo mismo que hace el enlace).
@@ -156,7 +200,7 @@ export async function cobrarCuotaConTarjeta(
       .from('cobros')
       .insert({
         workspace_id: p.cobradorId,
-        negocio_id: plan.data.negocio_id,
+        ...columnasDeAncla(ancla),
         plan_cobro_id: plan.data.id,
         numero_cuota: cuota.data.numero,
         monto,
@@ -269,15 +313,14 @@ export async function cobrarCuotaConTarjeta(
       : ultimo
         ? `Último intento con la tarjeta; queda el enlace de pago y la suspensión el día ${CALENDARIO_MORA.suspension}.`
         : `Se manda el enlace de pago y se reintenta con la tarjeta el día ${CALENDARIO_MORA.intentos[intento + 1]}.`
-    await registrarActividad(
+    await anotarEnAncla(
       db,
       {
-        workspace_id: p.cobradorId,
-        entidad_tipo: 'negocio',
-        entidad_id: plan.data.negocio_id,
-        tipo: 'sistema',
-        autor_id: null,
-        contenido: `Cobro con tarjeta (ePayco) rechazado en la cuota ${cuota.data.numero}, intento del día ${CALENDARIO_MORA.intentos[intento]}: ${r.mensaje}. ${sigue}`.slice(0, 280),
+        ancla,
+        workspaceId: p.cobradorId,
+        tipo: 'cobro_tarjeta_rechazado',
+        texto: `Cobro con tarjeta (ePayco) rechazado en la cuota ${cuota.data.numero}, intento del día ${CALENDARIO_MORA.intentos[intento]}: ${r.mensaje}. ${sigue}`,
+        datos: { cobro_id: cobroId, numero_cuota: cuota.data.numero, intento },
       },
       'cobro-token-epayco',
     )

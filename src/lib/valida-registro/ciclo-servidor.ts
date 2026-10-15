@@ -1,6 +1,7 @@
 import 'server-only'
 import type { SupabaseClient } from '@supabase/supabase-js'
 import { llamarValida } from '@/lib/valida-api/cliente'
+import { anclaDeFila, filtrarPorAncla, type Ancla } from '@/lib/suscripciones-producto/ancla'
 import type { PeticionValida, ResultadoValida } from '@/lib/valida-api/cliente-nucleo'
 import {
   abreCiclo,
@@ -57,6 +58,7 @@ interface FilaCobro {
   id: string
   workspace_id: string
   negocio_id: string | null
+  suscripcion_id?: string | null
   plan_cobro_id: string | null
   numero_cuota: number | null
   monto: number | string | null
@@ -72,14 +74,12 @@ interface FilaContrato {
   estado: string
 }
 
-/** El contrato de Valida (módulo `valida_consulta`) vivo del negocio del cobro, si hay uno. */
-async function contratoValidaDelNegocio(db: Db, cobro: FilaCobro): Promise<FilaContrato | null> {
-  const r = await db
-    .from('servicios_contratados')
-    .select('id, servicio_slug, parametros, workspace_pagador_id, estado')
-    .eq('workspace_id', cobro.workspace_id)
-    .eq('negocio_id', cobro.negocio_id)
-    .in('estado', ['activo', 'pausado'])
+/** El contrato de Valida (módulo `valida_consulta`) vivo del ancla del cobro (negocio o suscripción), si hay uno. */
+async function contratoValidaDelAncla(db: Db, cobro: FilaCobro, ancla: Ancla): Promise<FilaContrato | null> {
+  const r = await filtrarPorAncla(
+    db.from('servicios_contratados').select('id, servicio_slug, parametros, workspace_pagador_id, estado').eq('workspace_id', cobro.workspace_id),
+    ancla,
+  ).in('estado', ['activo', 'pausado'])
   if (r.error) throw new Error(`leer el contrato del cobro ${cobro.id}: ${r.error.message}`)
   const contratos = (r.data ?? []) as FilaContrato[]
   if (contratos.length === 0) return null
@@ -90,7 +90,7 @@ async function contratoValidaDelNegocio(db: Db, cobro: FilaCobro): Promise<FilaC
   if (cat.error) throw new Error(`leer el catálogo del cobro ${cobro.id}: ${cat.error.message}`)
   const deValida = new Set(((cat.data ?? []) as { slug: string; modulo: string }[]).filter((s) => s.modulo === 'valida_consulta').map((s) => s.slug))
   const candidatos = contratos.filter((c) => deValida.has(c.servicio_slug))
-  // Dos contratos vivos de Valida en el mismo negocio no se resuelven adivinando.
+  // Dos contratos vivos de Valida en la misma ancla no se resuelven adivinando.
   return candidatos.length === 1 ? candidatos[0] : null
 }
 
@@ -105,16 +105,17 @@ export async function abrirCicloSiCorresponde(cobroId: string, deps: DepsCiclo):
 
   const c = await db
     .from('cobros')
-    .select('id, workspace_id, negocio_id, plan_cobro_id, numero_cuota, monto, fecha, anulado_at')
+    .select('id, workspace_id, negocio_id, suscripcion_id, plan_cobro_id, numero_cuota, monto, fecha, anulado_at')
     .eq('id', cobroId)
     .maybeSingle()
   if (c.error) throw new Error(`leer el cobro ${cobroId}: ${c.error.message}`)
   const cobro = c.data as FilaCobro | null
   if (!cobro) return { tipo: 'no_aplica', motivo: 'cobro_no_existe' }
   if (!cobro.fecha || cobro.anulado_at) return { tipo: 'no_aplica', motivo: 'cobro_sin_pago' }
-  if (!cobro.negocio_id || !cobro.plan_cobro_id || cobro.numero_cuota === null) return { tipo: 'no_aplica', motivo: 'no_es_cuota_de_plan' }
+  const ancla = anclaDeFila(cobro)
+  if (!ancla || !cobro.plan_cobro_id || cobro.numero_cuota === null) return { tipo: 'no_aplica', motivo: 'no_es_cuota_de_plan' }
 
-  const contrato = await contratoValidaDelNegocio(db, cobro)
+  const contrato = await contratoValidaDelAncla(db, cobro, ancla)
   if (!contrato?.workspace_pagador_id) return { tipo: 'no_aplica', motivo: 'sin_contrato_valida' }
 
   const ws = await db.from('workspaces').select('id, config_extra').eq('id', contrato.workspace_pagador_id).maybeSingle()
@@ -221,19 +222,17 @@ export async function reconciliarCiclosValida(deps: DepsCiclo): Promise<ResumenR
 
   const sc = await db
     .from('servicios_contratados')
-    .select('workspace_id, negocio_id, workspace_pagador_id')
+    .select('workspace_id, negocio_id, suscripcion_id, workspace_pagador_id')
     .in('workspace_pagador_id', espacios.map((e) => e.id))
     .in('estado', ['activo', 'pausado'])
   if (sc.error) throw new Error(`contratos de los espacios autogestionados: ${sc.error.message}`)
 
-  for (const contrato of (sc.data ?? []) as { workspace_id: string; negocio_id: string; workspace_pagador_id: string }[]) {
+  for (const contrato of (sc.data ?? []) as { workspace_id: string; negocio_id: string | null; suscripcion_id?: string | null; workspace_pagador_id: string }[]) {
     resumen.revisados += 1
     try {
-      const cobros = await db
-        .from('cobros')
-        .select('id, numero_cuota')
-        .eq('workspace_id', contrato.workspace_id)
-        .eq('negocio_id', contrato.negocio_id)
+      const ancla = anclaDeFila(contrato)
+      if (!ancla) throw new Error('el contrato no tiene ancla (ni negocio ni suscripción)')
+      const cobros = await filtrarPorAncla(db.from('cobros').select('id, numero_cuota').eq('workspace_id', contrato.workspace_id), ancla)
         .not('plan_cobro_id', 'is', null)
         .not('fecha', 'is', null)
         .is('anulado_at', null)

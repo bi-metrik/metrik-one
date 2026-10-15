@@ -6,6 +6,7 @@ import { enrolarContratosPorCiclo, type DepsEnrolamiento, type ResumenEnrolamien
 import type { CorreoSaliente, ResultadoEnvio } from '@/lib/cobros/enlace-automatico-servidor'
 import { cobrarConTokenEpayco, eliminarTarjetasEpayco, epaycoEnPruebas, ultimosDigitosTarjetaEpayco } from '@/lib/suscripciones/pasarela/epayco'
 import type { ResultadoCargo } from '@/lib/suscripciones/pasarela/adapter'
+import { anclaDeFila, columnasDeAncla, filtrarPorAncla } from '@/lib/suscripciones-producto/ancla'
 import { activarPlanDelEspacio, type ResultadoActivacionEspacio } from './activacion-servidor'
 import { cobrarCuotaConTarjeta, pasarElPlanATarjeta, type ResultadoCobroToken } from './cobro-token-servidor'
 import { COBRO_TRAS_PRUEBA } from './condiciones-cobro'
@@ -352,22 +353,25 @@ async function activarYCobrarReclamado(
 
     const sc = await db
       .from('servicios_contratados')
-      .select('id, workspace_id, negocio_id')
+      .select('id, workspace_id, negocio_id, suscripcion_id')
       .eq('workspace_pagador_id', r.workspace_id)
       .eq('estado', 'activo')
-    const contratos = (sc.data ?? []) as { id: string; workspace_id: string; negocio_id: string }[]
+    const contratos = (sc.data ?? []) as { id: string; workspace_id: string; negocio_id: string | null; suscripcion_id?: string | null }[]
     if (sc.error || contratos.length !== 1) return soltar(`contrato: ${sc.error?.message ?? `${contratos.length} activos`}`)
     const contrato = contratos[0]
+    // Desde 20261016 el contrato cuelga de la suscripción; uno anterior, del negocio.
+    const ancla = anclaDeFila(contrato)
+    if (!ancla) return soltar('contrato sin ancla')
 
     const acept = await (deps.aceptarTerminos ?? ((p) => aceptarTerminosDelRegistro(deps.db, p)))({ registro: r, contratoId: contrato.id })
     if (!acept.ok) return soltar(`terminos: ${acept.motivo}`)
 
     const enr = await (deps.enrolar ?? enrolarContratosPorCiclo)({ db: deps.db, contratoId: contrato.id, anclaAt: ahora })
     if (enr.errores.length > 0) return soltar(`enrolamiento: ${enr.errores.map((e) => e.error).join('; ')}`)
-    const plan = await db.from('planes_cobro').select('id').eq('workspace_id', contrato.workspace_id).eq('negocio_id', contrato.negocio_id).maybeSingle()
+    const plan = await filtrarPorAncla(db.from('planes_cobro').select('id').eq('workspace_id', contrato.workspace_id), ancla).maybeSingle()
     if (plan.error || !plan.data) return soltar('sin plan de cobro')
     const planId = plan.data.id as string
-    await (deps.pasarATarjeta ?? pasarElPlanATarjeta)({ db: deps.db }, { cobradorId: contrato.workspace_id, planCobroId: planId, negocioId: contrato.negocio_id })
+    await (deps.pasarATarjeta ?? pasarElPlanATarjeta)({ db: deps.db }, { cobradorId: contrato.workspace_id, planCobroId: planId, ancla })
     const cuota = await db.from('plan_cobro_cuotas').select('id').eq('plan_cobro_id', planId).eq('numero', 1).maybeSingle()
     if (cuota.error || !cuota.data) return soltar('sin cuota 1')
 
@@ -502,25 +506,29 @@ export async function aceptarTerminosDelRegistro(
   if (!r.terminos_sha256 || !r.usuario_id) return { ok: false, motivo: 'registro_sin_terminos' }
 
   // La casilla que marcó, tal como quedó en lo que aceptó (no la de hoy: puede haber cambiado).
-  const reg = await db.from('valida_registros').select('aceptado_texto').eq('id', r.id).maybeSingle()
+  const reg = await db.from('valida_registros').select('aceptado_texto, aceptado_at').eq('id', r.id).maybeSingle()
   if (reg.error || !reg.data) return { ok: false, motivo: `registro: ${reg.error?.message ?? 'no existe'}` }
+  const aceptadoAt = (reg.data as { aceptado_at?: string | null }).aceptado_at ?? null
   const casilla = casillaMarcada((reg.data as { aceptado_texto: string | null }).aceptado_texto)
   if (!casilla) return { ok: false, motivo: 'registro_sin_casilla' }
 
   const sc = await db
     .from('servicios_contratados')
-    .select('id, workspace_id, empresa_id, negocio_id')
+    .select('id, workspace_id, empresa_id, negocio_id, suscripcion_id')
     .eq('id', p.contratoId)
     .maybeSingle()
   if (sc.error || !sc.data) return { ok: false, motivo: `contrato: ${sc.error?.message ?? 'no existe'}` }
-  const contrato = sc.data as { id: string; workspace_id: string; empresa_id: string; negocio_id: string }
+  const contrato = sc.data as { id: string; workspace_id: string; empresa_id: string | null; negocio_id: string | null; suscripcion_id?: string | null }
+  const ancla = anclaDeFila(contrato)
+  if (!ancla) return { ok: false, motivo: 'contrato sin ancla' }
 
-  // El documento de ESA empresa con el texto exacto aceptado en el registro (lo dejó la activación).
-  const docs = await db
+  // El documento de ESA empresa (o de ESA suscripción) con el texto exacto aceptado en el registro (lo
+  // dejó la activación).
+  const delCliente = db
     .from('documentos_contractuales_versiones')
     .select('id, titulo, version, texto_sha256, pdf_sha256')
     .eq('workspace_id', contrato.workspace_id)
-    .eq('empresa_id', contrato.empresa_id)
+  const docs = await (ancla.tipo === 'suscripcion' ? delCliente.eq('suscripcion_id', ancla.id) : delCliente.eq('empresa_id', contrato.empresa_id))
     .eq('slug', TERMINOS_PLAN.slug)
     .eq('texto_sha256', r.terminos_sha256)
   if (docs.error) return { ok: false, motivo: `documento: ${docs.error.message}` }
@@ -528,10 +536,7 @@ export async function aceptarTerminosDelRegistro(
   if (lista.length !== 1) return { ok: false, motivo: `documento: ${lista.length} con el texto del registro` }
   const doc = lista[0]
 
-  const previa = await db
-    .from('aceptaciones_terminos')
-    .select('id')
-    .eq('negocio_id', contrato.negocio_id)
+  const previa = await filtrarPorAncla(db.from('aceptaciones_terminos').select('id'), ancla)
     .eq('documento_sha256', doc.pdf_sha256)
     .eq('estado', 'aceptado')
   if (previa.error) return { ok: false, motivo: `aceptación previa: ${previa.error.message}` }
@@ -541,7 +546,7 @@ export async function aceptarTerminosDelRegistro(
     canal: 'registro',
     estado: 'aceptado',
     workspace_id: contrato.workspace_id,
-    negocio_id: contrato.negocio_id,
+    ...columnasDeAncla(ancla),
     workspace_cliente_id: r.workspace_id,
     usuario_id: r.usuario_id,
     valida_registro_id: r.id,
@@ -562,6 +567,15 @@ export async function aceptarTerminosDelRegistro(
     // Otra corrida la registró entre la lectura y el insert.
     if (ins.error.code === '23505') return { ok: true }
     return { ok: false, motivo: `aceptación: ${ins.error.message}` }
+  }
+  // La suscripción dice desde cuándo rigen sus Términos (la constancia sigue en `aceptaciones_terminos`).
+  if (ancla.tipo === 'suscripcion') {
+    const u = await db
+      .from('suscripciones_producto')
+      .update({ terminos_aceptados_at: aceptadoAt ?? new Date().toISOString() })
+      .eq('id', ancla.id)
+      .is('terminos_aceptados_at', null)
+    if (u.error) console.error('[valida-cobro] fecha de aceptación en la suscripción:', ancla.id, u.error.message)
   }
   return { ok: true }
 }
@@ -585,6 +599,14 @@ async function borrarTarjeta(deps: DepsCobroPrueba, r: RegistroCobro, ahoraMs: n
     .update({ cobro_token_borrado_at: ahora, metodo_pago_estado: 'eliminado', updated_at: ahora })
     .eq('id', r.id)
     .is('cobro_token_borrado_at', null)
+  // Si el registro ya tenía suscripción (no debería: se cancela antes de activar), su copia de la
+  // referencia tampoco sirve ya. Sin la suscripción, no hace nada.
+  const sus = await db
+    .from('suscripciones_producto')
+    .update({ metodo_pago_ref: null, metodo_pago_pasarela: null })
+    .eq('valida_registro_id', r.id)
+    .not('metodo_pago_ref', 'is', null)
+  if (sus?.error) console.error('[valida-cobro] referencia de la tarjeta en la suscripción:', r.id, sus.error.message)
   return true
 }
 

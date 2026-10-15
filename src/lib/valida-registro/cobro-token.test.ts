@@ -157,7 +157,7 @@ describe('cobrar una cuota con la tarjeta', () => {
 describe('el plan nace por token si hay tarjeta', () => {
   it('bold → epayco con tarjeta; sin tarjeta no se toca', async () => {
     const con = crearDoble(base({ planes_cobro: [{ id: 'p1', workspace_id: METRIK, negocio_id: 'n1', pasarela: 'bold' }] }))
-    expect(await pasarElPlanATarjeta({ db: con.db }, { cobradorId: METRIK, planCobroId: 'p1', negocioId: 'n1' })).toBe(true)
+    expect(await pasarElPlanATarjeta({ db: con.db }, { cobradorId: METRIK, planCobroId: 'p1', ancla: { tipo: 'negocio', id: 'n1' } })).toBe(true)
     expect(con.tablas.planes_cobro[0].pasarela).toBe('epayco')
     const sin = crearDoble(
       base({
@@ -165,7 +165,75 @@ describe('el plan nace por token si hay tarjeta', () => {
         valida_registros: [{ workspace_id: PAGADOR, estado: 'creado', metodo_pago_estado: 'no_requerido', metodo_pago_ref: null, correo: 'a', identificacion: '1', razon_social: 'x' }],
       }),
     )
-    expect(await pasarElPlanATarjeta({ db: sin.db }, { cobradorId: METRIK, planCobroId: 'p1', negocioId: 'n1' })).toBe(false)
+    expect(await pasarElPlanATarjeta({ db: sin.db }, { cobradorId: METRIK, planCobroId: 'p1', ancla: { tipo: 'negocio', id: 'n1' } })).toBe(false)
     expect(sin.tablas.planes_cobro[0].pasarela).toBe('bold')
+  })
+})
+
+describe('una suscripción (suscripciones_producto) se cobra igual que un negocio', () => {
+  const SUS = 'sus-1'
+  function deSuscripcion(extra: Partial<Tablas> = {}): Tablas {
+    return base({
+      servicios_contratados: [{ id: 'sc', workspace_id: METRIK, negocio_id: null, suscripcion_id: SUS, estado: 'activo', workspace_pagador_id: PAGADOR }],
+      suscripciones_producto: [
+        {
+          id: SUS,
+          workspace_id: METRIK,
+          workspace_cliente_id: PAGADOR,
+          estado: 'activa',
+          metodo_pago_pasarela: 'epayco',
+          metodo_pago_ref: REF,
+          correo_facturacion: 'facturas@cda.co',
+          numero_documento: '900123456',
+          razon_social: 'CDA EJEMPLO S.A.S.',
+        },
+      ],
+      // El registro ya no es la fuente: la tarjeta es la de la suscripción.
+      valida_registros: [],
+      planes_cobro: [{ id: 'p1', workspace_id: METRIK, negocio_id: null, suscripcion_id: SUS, pasarela: 'epayco', total_cuotas: 12 }],
+      ...extra,
+    })
+  }
+
+  it('aprobado: el cobro cuelga de la suscripción (sin negocio) y el cargo usa la tarjeta y los datos de la suscripción', async () => {
+    const d = crearDoble(deSuscripcion())
+    const e = epayco({ estado: 'aprobado', externalRef: 'epayco-1', fecha: '2026-10-12', monto: 150000 })
+    const r = await cobrarCuotaConTarjeta({ db: d.db, adapterPara: e.adapterPara, ahoraMs: AHORA }, { cobradorId: METRIK, cuotaId: 'q1' })
+    expect(r.tipo).toBe('aprobado')
+    expect(d.tablas.cobros[0]).toMatchObject({ negocio_id: null, suscripcion_id: SUS, plan_cobro_id: 'p1', numero_cuota: 1, fecha: null })
+    expect(e.cargos[0]).toMatchObject({
+      medioPago: { token_ref: REF },
+      cliente: { documento: '900123456', email: 'facturas@cda.co', celular: '3001234567', nombre: 'CDA EJEMPLO S.A.S.' },
+    })
+  })
+
+  it('rechazado: la línea va a la bitácora de la suscripción, no a un negocio', async () => {
+    const d = crearDoble(deSuscripcion())
+    const e = epayco({ estado: 'rechazado', externalRef: 'epayco-5', codigo: '2', mensaje: 'Fondos insuficientes', reintentable: false })
+    const r = await cobrarCuotaConTarjeta({ db: d.db, adapterPara: e.adapterPara, ahoraMs: AHORA }, { cobradorId: METRIK, cuotaId: 'q1' })
+    expect(r.tipo).toBe('rechazado')
+    expect(d.tablas.suscripciones_producto_eventos).toEqual([
+      expect.objectContaining({ suscripcion_id: SUS, workspace_id: METRIK, tipo: 'cobro_tarjeta_rechazado' }),
+    ])
+    expect(d.tablas.planes_cobro[0].pasarela).toBe('bold')
+  })
+
+  it('una suscripción cancelada, de otro espacio o sin tarjeta no se cobra', async () => {
+    const e = epayco({ estado: 'aprobado', externalRef: 'epayco-1', fecha: '2026-10-12', monto: 150000 })
+    for (const cambio of [{ estado: 'cancelada' }, { workspace_cliente_id: 'otro' }, { metodo_pago_ref: null, metodo_pago_pasarela: null }]) {
+      const t = deSuscripcion()
+      Object.assign(t.suscripciones_producto[0], cambio)
+      const r = await cobrarCuotaConTarjeta({ db: crearDoble(t).db, adapterPara: e.adapterPara }, { cobradorId: METRIK, cuotaId: 'q1' })
+      expect(r, JSON.stringify(cambio)).toEqual({ tipo: 'no_aplica', motivo: 'sin_tarjeta' })
+    }
+    expect(e.cargos).toHaveLength(0)
+  })
+
+  it('el plan de la suscripción pasa a la tarjeta al nacer', async () => {
+    const t = deSuscripcion()
+    t.planes_cobro[0].pasarela = 'bold'
+    const d = crearDoble(t)
+    expect(await pasarElPlanATarjeta({ db: d.db }, { cobradorId: METRIK, planCobroId: 'p1', ancla: { tipo: 'suscripcion', id: SUS } })).toBe(true)
+    expect(d.tablas.planes_cobro[0].pasarela).toBe('epayco')
   })
 })

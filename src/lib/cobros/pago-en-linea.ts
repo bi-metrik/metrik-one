@@ -55,6 +55,8 @@ export interface CobroParaPago {
   id: string
   workspaceId: string
   negocioId: string | null
+  /** El ancla cuando el cobro es de una suscripción (`suscripciones_producto`) y no de un negocio. */
+  suscripcionId?: string | null
   monto: number
   fecha: string | null
   anuladoAt: string | null
@@ -78,7 +80,10 @@ export interface RepoPagoEnLinea {
   /** Cobros cuyo enlace es ese id de la pasarela. Más de uno es ambiguo y no se toca. */
   cobrosPorIdEnlace(idEnlace: string): Promise<CobroParaPago[]>
   confirmarPago(c: ConfirmacionPago): Promise<ResultadoConfirmacion>
-  /** Deja la línea en el timeline del negocio. No lanza: el pago ya quedó registrado o marcado. */
+  /**
+   * Deja la línea en la historia del cliente: el timeline del negocio, o la bitácora de la suscripción.
+   * No lanza: el pago ya quedó registrado o marcado.
+   */
   anotarEnNegocio(cobro: CobroParaPago, texto: string): Promise<void>
   /**
    * Lo que sigue a un pago registrado (o ya registrado, en un reintento), si el cobro lo pide: hoy,

@@ -7,6 +7,7 @@ import { parseRut } from '@/lib/rut/parse-rut'
 import { getServerKey } from '@/lib/server-keys'
 import { BUCKET_ACEPTACIONES } from '@/lib/retencion-bot/plazos'
 import { enrolarContratosPorCiclo } from '@/lib/cobros/enrolar-ciclo-servidor'
+import { anclaDeFila } from '@/lib/suscripciones-producto/ancla'
 import { cobrarCuotasConTarjeta, pasarElPlanATarjeta } from './cobro-token-servidor'
 import { COBRADOR_VALIDA, FICHA_PLAN_VALIDA, activacionAbierta, plazoTerminos, type ErrorActivacion } from './activacion'
 import { parametrosDelPlan, esEspacioAutogestion } from './plan'
@@ -22,8 +23,10 @@ import { TERMINOS_PLAN, terminosPlanListos } from './terminos-plan'
  *      decide si la empresa queda verificada; lo que no coincide lo revisa una persona;
  *   2. los Términos del plan de SU empresa son los que la persona aceptó en el registro, tal cual
  *      (`valida_registros.terminos_texto`): aquí se les hace el PDF y las huellas, no se vuelven a armar;
- *   3. `valida_activar_autogestion` crea, en UNA transacción, empresa, negocio, términos, contrato con
- *      ella como persona designada, y el módulo apuntando al contrato.
+ *   3. `valida_activar_autogestion` crea, en UNA transacción, la SUSCRIPCIÓN (`suscripciones_producto`:
+ *      la empresa declarada, el RUT, el origen comercial y la tarjeta), sus términos, el contrato colgado
+ *      de ella con la persona como designada, y el módulo apuntando al contrato. Desde 20261016 ya no crea
+ *      empresa en el directorio de `metrik` ni negocio en su CRM (ni carpeta, ni tablero comercial).
  * Después la persona acepta los Términos en `/valida` (la entrada de siempre, con su constancia), el
  * enrolamiento le crea el plan de cobro al aceptar (`asegurarCobroDelEspacio`) y paga desde
  * `/suscripcion`. El pago abre su mes en Valida (`ciclo-servidor.ts`).
@@ -206,7 +209,7 @@ export async function activarPlanDelEspacio(
     console.error('[valida-activacion] valida_activar_autogestion:', error.message)
     return { ok: false, error: 'error' }
   }
-  const r = (data ?? {}) as { ok?: boolean; error?: ErrorActivacion; resultado?: string; contrato_id?: string }
+  const r = (data ?? {}) as { ok?: boolean; error?: ErrorActivacion; resultado?: string; contrato_id?: string; suscripcion_id?: string }
   if (!r.ok) return { ok: false, error: r.error ?? 'error' }
   return { ok: true, resultado: r.resultado === 'ya_activo' ? 'ya_activo' : 'activado', contratoId: r.contrato_id ?? null }
 }
@@ -226,18 +229,20 @@ export async function asegurarCobroDelEspacio(workspaceId: string): Promise<void
     if (ws.error || !esEspacioAutogestion(ws.data?.config_extra ?? null)) return
     const sc = await svc
       .from('servicios_contratados')
-      .select('id, workspace_id, negocio_id')
+      .select('id, workspace_id, negocio_id, suscripcion_id')
       .eq('workspace_pagador_id', workspaceId)
       .eq('estado', 'activo')
-    const contratos = (sc.data ?? []) as { id: string; workspace_id: string; negocio_id: string }[]
+    const contratos = (sc.data ?? []) as { id: string; workspace_id: string; negocio_id: string | null; suscripcion_id: string | null }[]
     if (sc.error || contratos.length !== 1) return
     const contrato = contratos[0]
+    const ancla = anclaDeFila(contrato)
+    if (!ancla) return
     const r = await enrolarContratosPorCiclo({ db: svc, contratoId: contrato.id })
     if (r.errores.length > 0) console.error('[valida-activacion] enrolamiento al aceptar:', r.errores.map((e) => e.error).join('; '))
     // Con tarjeta registrada (ePayco, cláusula de cobro): el plan cobra por token y la cuota 1, que
     // vence hoy, se cobra ya. Sin tarjeta, nada cambia: paga con el enlace desde /suscripcion.
     for (const creado of r.creados) {
-      if (await pasarElPlanATarjeta({ db: svc }, { cobradorId: contrato.workspace_id, planCobroId: creado.planCobroId, negocioId: contrato.negocio_id })) {
+      if (await pasarElPlanATarjeta({ db: svc }, { cobradorId: contrato.workspace_id, planCobroId: creado.planCobroId, ancla })) {
         await cobrarCuotasConTarjeta({ db: svc, hoy: todayBogotaISO(), soloPlan: creado.planCobroId })
       }
     }
