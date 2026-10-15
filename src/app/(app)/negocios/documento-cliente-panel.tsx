@@ -18,6 +18,7 @@ import { LIMITE_TERMINOS, normalizarTerminos, terminosAlAbrir } from '@/lib/coti
 import { lineasPropias } from '@/lib/cotizaciones/incluye-por-one'
 import { formatBogotaFechaHora } from '@/lib/dates/bogota'
 import AnticipoPropuestaPanel from './anticipo-propuesta-panel'
+import FotosPropuestaPanel from './fotos-propuesta-panel'
 
 /**
  * «Texto para el cliente» (Trappvel): lo que el documento dice del viaje con palabras, no
@@ -512,6 +513,9 @@ export default function DocumentoClientePanel({
       {panel.imprimeAnticipo && (
         <AnticipoPropuestaPanel cotizacionId={cotizacionId} inicial={panel.anticipo ?? null} editable={editable} />
       )}
+
+      {/* PR 4: las fotos de la propuesta nueva (catálogo del espacio). */}
+      {panel.imprimeAnticipo && <FotosPropuestaPanel cotizacionId={cotizacionId} editable={editable} />}
     </section>
   )
 }

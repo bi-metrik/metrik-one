@@ -59,6 +59,46 @@ export function urlDeBusqueda(consulta: string, limite = 8): string {
 }
 
 const MIMES = new Set(['image/jpeg', 'image/png', 'image/tiff', 'image/webp'])
+const HOSTS_DESCARGA = new Set(['upload.wikimedia.org', 'thumb.wikimedia.org'])
+
+/** ¿La URL de descarga es de los servidores de archivos de Wikimedia (y por https)? */
+export function esDeWikimedia(url: string | null | undefined): boolean {
+  try {
+    const u = new URL(url ?? '')
+    return u.protocol === 'https:' && HOSTS_DESCARGA.has(u.hostname)
+  } catch {
+    return false
+  }
+}
+
+/** Palabras que en Commons no ayudan a encontrar el lugar («con guía», «en familia», «tour»). */
+const RELLENO = new Set([
+  'a', 'al', 'con', 'de', 'del', 'el', 'en', 'la', 'las', 'los', 'para', 'por', 'sin', 'y', 'e', 'o', 'u',
+  'guia', 'guiada', 'guiado', 'visita', 'visitas', 'tour', 'tours', 'entrada', 'entradas', 'ticket', 'tickets',
+  'familia', 'ninos', 'privado', 'privada', 'compartido', 'compartida', 'filas', 'espanol', 'excursion',
+  'dia', 'medio', 'completo', 'noche', 'cena', 'almuerzo', 'recorrido', 'corto', 'hotel', 'hoteles',
+])
+
+const sinTilde = (s: string) => s.normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase()
+
+/**
+ * Las consultas a Commons, de la más precisa a la más amplia: Commons exige TODAS las palabras,
+ * y «Park Güell con guía Barcelona» no encuentra nada que «Park Güell Barcelona» sí. Solo las
+ * actividades se aflojan: primero el nombre con la ciudad, luego sin las palabras de relleno, y al
+ * final sin ciudad. Una ciudad o un hotel, solo con su nombre completo.
+ */
+export function consultasDeFoto(tipo: TipoFoto, nombre: string, ciudad: string | null): string[] {
+  const completa = consultaDeFoto(tipo, nombre, ciudad)
+  // Un hotel, solo con su nombre completo: sin «Hotel» ni «del», «Catalonia Puerta del Sol»
+  // trae fotos de la plaza (lo vio la prueba contra Commons del 2026-10-14). Mejor el degradado.
+  if (tipo !== 'actividad') return [completa]
+  const util = nombre.replace(/\s+/g, ' ').trim().split(' ').filter((w) => !RELLENO.has(sinTilde(w).replace(/[^a-z0-9]/g, '')))
+  const corto = util.join(' ')
+  const salida = [completa]
+  if (corto && corto !== nombre.trim()) salida.push(consultaDeFoto(tipo, corto, ciudad))
+  if (tipo === 'actividad' && util.length >= 2) salida.push(corto)
+  return [...new Set(salida)]
+}
 
 /**
  * La licencia corta de Commons, normalizada, si se puede imprimir; `null` si no.
@@ -129,7 +169,7 @@ export function candidatasDeRespuesta(json: unknown): CandidataFoto[] {
       const pagina = ii.descriptionurl ?? null
       const descarga = ii.thumburl ?? ii.url ?? null
       // Solo de los servidores de Wikimedia: la URL de descarga la baja el servidor de ONE.
-      if (!pagina || !pagina.startsWith('https://commons.wikimedia.org/') || !descarga || !descarga.startsWith('https://upload.wikimedia.org/')) return []
+      if (!pagina || !pagina.startsWith('https://commons.wikimedia.org/') || !descarga || !esDeWikimedia(descarga)) return []
       return [{
         titulo: p.title,
         pagina,

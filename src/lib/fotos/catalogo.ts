@@ -12,7 +12,7 @@ import 'server-only'
  */
 import { borrarDeCatalogo, bytesDeCatalogo, guardarEnCatalogo, prepararFoto } from './catalogo-almacen'
 import { nombreLlano, type ObjetivoFoto, type TipoFoto } from './clave'
-import { AGENTE_COMMONS, buscarEnCommons, consultaDeFoto, creditoDeCatalogo, elegirCandidata } from './wikimedia'
+import { AGENTE_COMMONS, buscarEnCommons, consultasDeFoto, creditoDeCatalogo, elegirCandidata, esDeWikimedia, type CandidataFoto } from './wikimedia'
 
 export const TABLA_CATALOGO = 'fotos_catalogo'
 export const MENSAJE_SIN_TABLA = 'El catálogo de fotos todavía no está disponible: falta aplicar la migración de la base.'
@@ -178,9 +178,14 @@ export async function sugerirDesdeCommons(a: {
 }): Promise<Resultado> {
   const f = a.fetch ?? fetch
   const descartadas = [...new Set(a.descartadas ?? [])]
-  const candidatas = await buscarEnCommons(consultaDeFoto(a.objetivo.tipo, a.objetivo.nombre, a.objetivo.ciudad), { fetch: f })
-  const elegida = elegirCandidata(candidatas, descartadas)
+  // De la consulta más precisa a la más amplia, hasta que alguna dé una foto que nadie descartó.
+  let elegida: CandidataFoto | null = null
+  for (const q of consultasDeFoto(a.objetivo.tipo, a.objetivo.nombre, a.objetivo.ciudad)) {
+    elegida = elegirCandidata(await buscarEnCommons(q, { fetch: f }), descartadas)
+    if (elegida) break
+  }
   if (!elegida) return { ok: false, mensaje: 'Wikimedia Commons no tiene otra foto con licencia libre para esto. Sube la tuya.' }
+  if (!esDeWikimedia(elegida.descarga)) return { ok: false, mensaje: 'No se pudo bajar la foto de Wikimedia Commons.' }
   let bytes: Buffer
   try {
     const r = await f(elegida.descarga, { headers: { 'User-Agent': AGENTE_COMMONS }, signal: AbortSignal.timeout(15_000) })

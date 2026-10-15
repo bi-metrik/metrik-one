@@ -8,8 +8,10 @@ import {
   buscarEnCommons,
   candidatasDeRespuesta,
   consultaDeFoto,
+  consultasDeFoto,
   creditoDeCatalogo,
   elegirCandidata,
+  esDeWikimedia,
   licenciaImprimible,
   urlDeBusqueda,
 } from './wikimedia'
@@ -122,6 +124,24 @@ describe('el crédito y la consulta', () => {
     const url = new URL(urlDeBusqueda('Park Güell Barcelona'))
     expect(url.searchParams.get('gsrsearch')).toBe('Park Güell Barcelona filetype:bitmap')
     expect(url.searchParams.get('gsrnamespace')).toBe('6')
+  })
+
+  it('Commons exige todas las palabras: la actividad se afloja; el hotel y la ciudad no', () => {
+    expect(consultasDeFoto('actividad', 'Park Güell con guía', 'Barcelona')).toEqual(['Park Güell con guía Barcelona', 'Park Güell Barcelona', 'Park Güell'])
+    expect(consultasDeFoto('actividad', 'Molinos de Zaanse Schans', 'Ámsterdam')).toEqual([
+      'Molinos de Zaanse Schans Ámsterdam', 'Molinos Zaanse Schans Ámsterdam', 'Molinos Zaanse Schans',
+    ])
+    expect(consultasDeFoto('hotel', 'Catalonia Puerta del Sol', 'Madrid')).toEqual(['Catalonia Puerta del Sol Madrid'])
+    expect(consultasDeFoto('ciudad', 'Ámsterdam', null)).toEqual(['Ámsterdam'])
+  })
+
+  it('solo se baja de los servidores de archivos de Wikimedia, por https', () => {
+    expect(esDeWikimedia('https://upload.wikimedia.org/wikipedia/commons/a.jpg')).toBe(true)
+    expect(esDeWikimedia('https://thumb.wikimedia.org/wikipedia/commons/a.jpg')).toBe(true)
+    expect(esDeWikimedia('http://upload.wikimedia.org/a.jpg')).toBe(false)
+    expect(esDeWikimedia('https://upload.wikimedia.org.evil.example/a.jpg')).toBe(false)
+    expect(esDeWikimedia('https://169.254.169.254/latest')).toBe(false)
+    expect(esDeWikimedia(null)).toBe(false)
   })
 
   it('sin red, lista vacía (nunca un error)', async () => {

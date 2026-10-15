@@ -866,3 +866,13 @@ export function leerConfigDocumentoViaje(raw: unknown): ConfigDocumentoViaje {
       : null,
   }
 }
+
+/**
+ * La ciudad de una actividad según su lectura (con lo corregido encima). Lo usa el catálogo de
+ * fotos de la propuesta para nombrar la foto de cada actividad. `null` si la línea no es una
+ * actividad o la lectura no trae ciudad.
+ */
+export function ciudadDeActividad(item: ItemConLectura): string | null {
+  if (ranuraDelItem(item)?.slug !== 'actividad_detalle') return null
+  return texto(detalleDelItem(item), 'ciudad')
+}
