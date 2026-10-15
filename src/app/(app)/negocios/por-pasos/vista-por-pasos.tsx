@@ -128,19 +128,36 @@ export default function VistaPorPasos(p: PropsVistaPorPasos) {
   const [overrides, setOverrides] = useState<Record<string, Override>>({})
   const [margenLocal, setMargenLocal] = useState<number | null>(null)
   const [ocultos, setOcultos] = useState<ReadonlySet<string>>(() => new Set())
-  const claveServidor = JSON.stringify(p.tarifasDelServidor) + p.margenPct + p.filas.map(f => `${f.id}:${f.grupo}:${f.entra_al_precio}`).join(',')
-  const [claveVista, setClaveVista] = useState(claveServidor)
-  if (claveVista !== claveServidor) {
-    setClaveVista(claveServidor)
+  // D2 (H5) · las opciones que «Deshacer» acaba de reponer, mientras el servidor no las trae: sin
+  // ellas, la tarifa se calculaba un momento sin la opción repuesta (una cifra que no existe).
+  const [repuestas, setRepuestas] = useState<PropsVistaPorPasos['filas']>([])
+  // Lo optimista se borra cuando llega la versión del servidor, cada cosa con SU parte: la
+  // elección de las tarifas con las tarifas, lo oculto con las líneas. Hasta H5 una sola clave
+  // borraba todo en cuanto llegaban las líneas (la vista fresca, antes que el refresco de las
+  // tarifas), y la tarifa se pintaba un momento con la elección vieja del servidor.
+  const claveTarifas = JSON.stringify(p.tarifasDelServidor) + p.margenPct
+  const claveFilas = p.filas.map(f => `${f.id}:${f.grupo}:${f.entra_al_precio}`).join(',')
+  const [claveVistaTarifas, setClaveVistaTarifas] = useState(claveTarifas)
+  if (claveVistaTarifas !== claveTarifas) {
+    setClaveVistaTarifas(claveTarifas)
     setOverrides({})
     setMargenLocal(null)
+  }
+  const [claveVistaFilas, setClaveVistaFilas] = useState(claveFilas)
+  if (claveVistaFilas !== claveFilas) {
+    setClaveVistaFilas(claveFilas)
     setOcultos(new Set())
   }
+  if (repuestas.length > 0 && repuestas.every(r => p.filas.some(f => f.id === r.id))) setRepuestas([])
+  const filasDeLaVista = useMemo(
+    () => (repuestas.length === 0 ? p.filas : [...p.filas, ...repuestas.filter(r => !p.filas.some(f => f.id === r.id))]),
+    [p.filas, repuestas],
+  )
 
   const { ofrecer, aviso } = useDeshacer(p.refrescar)
 
   // ── Lo calculado en el navegador ──
-  const filasVivas = useMemo(() => p.filas.filter(f => !ocultos.has(f.id)), [p.filas, ocultos])
+  const filasVivas = useMemo(() => filasDeLaVista.filter(f => !ocultos.has(f.id)), [filasDeLaVista, ocultos])
   const params = useMemo(() => (margenLocal === null ? p.params : { ...p.params, margenPct: margenLocal }), [p.params, margenLocal])
   const lineas = useMemo(() => lineasParaLaCascada(filasVivas, p.adicionalesPorItem), [filasVivas, p.adicionalesPorItem])
   const tarifasPantalla = useMemo(
@@ -155,7 +172,7 @@ export default function VistaPorPasos(p: PropsVistaPorPasos) {
     [filasVivas, p.destinoViaje, p.fechasViaje],
   )
   const servicios = tramos.flatMap(t => t.servicios)
-  const porId = useMemo(() => new Map(p.filas.map(f => [f.id, f])), [p.filas])
+  const porId = useMemo(() => new Map(filasDeLaVista.map(f => [f.id, f])), [filasDeLaVista])
   const nombreDeOpcion = useCallback((id: string) => {
     const f = porId.get(id)
     return f ? nombreVisibleDeLinea(f) || f.nombre || 'Opción' : 'Opción'
@@ -278,6 +295,10 @@ export default function VistaPorPasos(p: PropsVistaPorPasos) {
   }
 
   const borrar = (itemIds: string[], mensaje: string) => {
+    // D2 · lo que hay que volver a pintar si se deshace: las opciones y la elección de cada tarifa.
+    const filasBorradas = p.filas.filter(f => itemIds.includes(f.id))
+    const eleccionAntes: Record<string, Override> = Object.fromEntries(tarifasPantalla.map(t => [t.id, { seleccion: [...t.seleccion], va: t.vaEnPropuesta }]))
+    setRepuestas(r => r.filter(f => !itemIds.includes(f.id)))
     setOcultos(o => new Set([...o, ...itemIds]))
     void correr(async () => {
       const r = await borrarOpcionesPorPasos(p.cotizacionId, itemIds)
@@ -290,7 +311,16 @@ export default function VistaPorPasos(p: PropsVistaPorPasos) {
         for (const [id, lecturas] of Object.entries(r.devueltas)) if (lecturas.length > 0) p.onRecibirEnBandeja(id, lecturas)
         void soltarImagenesPorPasos(p.cotizacionId, r.fotos)
       }
-      ofrecer(mensaje, () => reponerOpcionesPorPasos(p.cotizacionId, r.fotos, r.marcas), devolverALaBandeja)
+      ofrecer(mensaje, async () => {
+        const repuesto = await reponerOpcionesPorPasos(p.cotizacionId, r.fotos, r.marcas)
+        if (repuesto.success) {
+          // Se pinta ya como quedó en la base (la opción y la tarifa de antes), sin esperar el refresco.
+          setRepuestas(filasBorradas)
+          setOverrides(eleccionAntes)
+          setOcultos(o => { const n = new Set(o); itemIds.forEach(id => n.delete(id)); return n })
+        }
+        return repuesto
+      }, devolverALaBandeja)
       p.refrescar()
     })
   }
