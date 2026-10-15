@@ -4,8 +4,10 @@
  * por interruptores: lo que se prueba aquí es qué hace el seguimiento cuando pasan o no pasan.
  *
  * Criterios de Vera:
- *   · F1-1: «Enviar», o descargar con las guardas pasadas, escribe `fecha_envio`, versión y canal.
- *     Descargar bloqueado por margen o capturas no registra nada. «No lo envié» lo deshace (C3).
+ *   · F1-1: «Enviar» escribe `fecha_envio`, versión y canal.
+ *   · H33 (2026-10-14, reemplaza C3): descargar NO registra nada; el «Sí, ya se la mandé» pasa por
+ *     `enviarCotizacion` con canal «descargado»: estado `enviada` y `fecha_envio` juntos, con las
+ *     guardas de «Enviar». Bloqueado por margen o capturas, o fuera de borrador, no marca nada.
  *   · F1-3: el origen de la versión se pide al duplicar; la prerreserva vencida no la pone el botón.
  *   · F1-4: «Aplazar» con el plazo de la línea y sin auto-perdido al cuarto (C10); «Se perdió» con
  *     uno de los motivos de la línea, cada uno sobre un `value` global.
@@ -14,7 +16,6 @@
  * VISTO FALLAR (2026-10-12), una mutación a la vez:
  *   · `registrarEnvioCotizacion` sin `if (!cfg.activo) return` → cae «apagado: Enviar no escribe
  *     fecha_envio»;
- *   · `registrarEnvioPorDescarga` sin la guarda de margen → cae «bloqueada por margen no registra»;
  *   · `motivoPerdidaInvalido` devolviendo siempre `null` → cae «exige uno de los 5 motivos»;
  *   · quitar el `return { error: mensajeTopeAplazamientos… }` → cae «el cuarto aplazamiento no
  *     pierde el negocio»;
@@ -107,9 +108,10 @@ function consulta(tabla: string) {
 }
 
 import { reiniciarModulo, MODULES } from '../../../../test/exigir-modulo-doble'
-import { enviarCotizacionNegocio, duplicarCotizacionNegocio, deshacerEnvioPorDescarga } from './[id]/cotizacion/actions'
+import { enviarCotizacionNegocio, duplicarCotizacionNegocio } from './[id]/cotizacion/actions'
+import { enviarCotizacion } from './cotizacion-actions'
 import { perderNegocio, pausarNegocio } from './negocio-v2-actions'
-import { registrarEnvioCotizacion, registrarEnvioPorDescarga } from '@/lib/negocios/seguimiento-datos'
+import { registrarEnvioCotizacion } from '@/lib/negocios/seguimiento-datos'
 import { evaluarGatesSeguimiento } from '@/lib/negocios/gates-seguimiento'
 import { MENSAJE_GATE_COTIZACION_ENVIADA } from '@/lib/negocios/seguimiento'
 
@@ -150,12 +152,12 @@ describe('apagado = como hoy (§7.1.6)', () => {
     expect(envios()).toHaveLength(0)
   })
 
-  it('apagado: descargar no cuenta como envío', async () => {
-    const ok = await registrarEnvioPorDescarga(cliente(), { workspaceId: WS, negocioId: NEG, cotizacionId: 'cot-2', staffId: 's-dani' }, {
-      capturas: async () => null, margen: async () => null,
-    })
-    expect(ok).toBe(false)
-    expect(cot('cot-2').fecha_envio).toBeNull()
+  it('apagado: el «Sí, ya se la mandé» deja enviada con fecha (como «Enviar» del editor) y sin línea de seguimiento', async () => {
+    const r = await enviarCotizacion('cot-2', 'descargado')
+    expect(r.success).toBe(true)
+    expect(cot('cot-2').estado).toBe('enviada')
+    expect(cot('cot-2').fecha_envio).toBeTruthy()
+    expect(envios()).toHaveLength(0)
   })
 
   it('apagado: el cuarto aplazamiento sigue perdiendo el negocio solo, y perder acepta los motivos de siempre', async () => {
@@ -178,24 +180,42 @@ describe('envío (F1-1, C3)', () => {
     expect(String(envios()[0].contenido)).toContain('v2')
   })
 
-  it('descargar bloqueada por capturas o por margen no registra nada', async () => {
-    const args = { workspaceId: WS, negocioId: NEG, cotizacionId: 'cot-2', staffId: 's-dani' }
-    expect(await registrarEnvioPorDescarga(cliente(), args, { capturas: async () => 'pantallazo viejo', margen: async () => null })).toBe(false)
-    expect(await registrarEnvioPorDescarga(cliente(), args, { capturas: async () => null, margen: async () => 'bajo el mínimo' })).toBe(false)
-    expect(cot('cot-2').fecha_envio).toBeNull()
+  it('«Sí, ya se la mandé» bloqueado por capturas o por margen no marca nada', async () => {
+    bloqueoCapturas = 'pantallazo viejo'
+    expect((await enviarCotizacion('cot-2', 'descargado')).success).toBe(false)
+    bloqueoCapturas = null
+    bloqueoMargen = 'bajo el mínimo'
+    expect((await enviarCotizacion('cot-2', 'descargado')).success).toBe(false)
+    expect(cot('cot-2')).toMatchObject({ estado: 'borrador', fecha_envio: null })
     expect(envios()).toHaveLength(0)
   })
 
-  it('descargar con las guardas pasadas registra «descargado»; una segunda descarga no corre la fecha', async () => {
-    const args = { workspaceId: WS, negocioId: NEG, cotizacionId: 'cot-2', staffId: 's-dani' }
-    const guardas = { capturas: async () => null, margen: async () => null }
-    expect(await registrarEnvioPorDescarga(cliente(), args, guardas)).toBe(true)
-    const primera = cot('cot-2').fecha_envio
-    cot('cot-2').fecha_envio = '2026-10-05T15:00:00Z'
-    expect(await registrarEnvioPorDescarga(cliente(), args, guardas)).toBe(false)
-    expect(cot('cot-2').fecha_envio).toBe('2026-10-05T15:00:00Z')
-    expect(primera).toBeTruthy()
+  it('«Sí, ya se la mandé» deja enviada, fecha y canal «descargado» en un solo paso (nunca fecha en borrador)', async () => {
+    const r = await enviarCotizacion('cot-2', 'descargado')
+    expect(r.success).toBe(true)
+    expect(cot('cot-2').estado).toBe('enviada')
+    expect(cot('cot-2').fecha_envio).toBeTruthy()
     expect(envios().map((e) => e.valor_nuevo)).toEqual(['descargado'])
+    expect(String(envios()[0].contenido)).toContain('v2')
+  })
+
+  it('un canal desconocido desde el navegador cuenta como «Enviar»', async () => {
+    await enviarCotizacion('cot-2', 'otro' as never)
+    expect(envios().map((e) => e.valor_nuevo)).toEqual(['enviar'])
+  })
+
+  it('«Sí» sobre una cotización que ya no está en borrador no dice «enviada» ni escribe', async () => {
+    cot('cot-2').estado = 'aceptada'
+    const r = await enviarCotizacion('cot-2', 'descargado')
+    expect(r.success).toBe(false)
+    expect(cot('cot-2')).toMatchObject({ estado: 'aceptada', fecha_envio: null })
+    expect(envios()).toHaveLength(0)
+  })
+
+  it('con otra cotización ya enviada en el negocio, el «Sí» no marca una segunda', async () => {
+    cot('cot-1').estado = 'enviada'
+    expect((await enviarCotizacion('cot-2', 'descargado')).success).toBe(false)
+    expect(cot('cot-2')).toMatchObject({ estado: 'borrador', fecha_envio: null })
   })
 
   it('un segundo registro no corre la fecha (doble clic, dos caminos a la vez)', async () => {
@@ -204,21 +224,6 @@ describe('envío (F1-1, C3)', () => {
     expect(r.registrado).toBe(false)
     expect(cot('cot-2').fecha_envio).toBe('2026-10-05T15:00:00Z')
     expect(envios()).toHaveLength(0)
-  })
-
-  it('«No lo envié» deshace la descarga; no si ya salió con Enviar ni pasado el tiempo', async () => {
-    const args = { workspaceId: WS, negocioId: NEG, cotizacionId: 'cot-2', staffId: 's-dani' }
-    await registrarEnvioPorDescarga(cliente(), args, { capturas: async () => null, margen: async () => null })
-    expect((await deshacerEnvioPorDescarga('cot-2')).success).toBe(true)
-    expect(cot('cot-2').fecha_envio).toBeNull()
-
-    cot('cot-2').fecha_envio = new Date(Date.now() - 3 * 60_000).toISOString()
-    expect((await deshacerEnvioPorDescarga('cot-2')).success).toBe(false)
-
-    cot('cot-2').fecha_envio = new Date().toISOString()
-    cot('cot-2').estado = 'enviada'
-    expect((await deshacerEnvioPorDescarga('cot-2')).success).toBe(false)
-    expect(cot('cot-2').fecha_envio).toBeTruthy()
   })
 })
 

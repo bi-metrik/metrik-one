@@ -209,6 +209,32 @@ describe('C5 · «✎ Escríbelo a mano» solo con la forma por pasos', () => {
     }
   })
 
+  it('H5 · D2 · la fila «Agregada a…» de una opción borrada sale, y su pantallazo vuelve listo para aceptar (no como repetido)', async () => {
+    const r = await montar(true)
+    const casos = once.onceDelCasoFijo()
+    const verdeMar = casos[4]
+    await meter(r, [verdeMar])
+    await meter(r, [casos[8]])
+    await clic(contenedor.querySelector('[data-boton-aceptar-lote]')!)
+    await act(async () => { await new Promise(res => setTimeout(res, 0)) })
+    // Quedaron aceptadas como `item-0` y `item-1` (la respuesta del lote de la prueba).
+    const agregadas = () => (textoDe(contenedor).match(/Agregada a un bloque nuevo/g) ?? []).length
+    expect(agregadas()).toBe(2)
+    // La opción se borra y su pantallazo vuelve a la bandeja.
+    await act(async () => {
+      r.current!.recibir({
+        clave: 'vuelve-1', itemId: 'item-0',
+        lecturas: [{ tipo: verdeMar.tipo, lecturaJson: JSON.stringify(verdeMar.lectura), firma: 'firma', pistas: verdeMar.pistas, imagen: null, huella: null }],
+      })
+    })
+    const filas = [...contenedor.querySelectorAll('[data-captura]')]
+    // La de la opción borrada salió; la otra aceptada sigue.
+    expect(filas).toHaveLength(2)
+    expect(agregadas()).toBe(1)
+    expect(textoDe(contenedor)).not.toMatch(/Mismo servicio/)
+    expect(contenedor.querySelectorAll('[data-frase-destino]')).toHaveLength(1)
+  })
+
   it('apagada, la bandeja es la de siempre: «Ingresar a mano», sin frase ni «Aceptar los N»', async () => {
     const r = await montar(false)
     expect(contenedor.querySelector('[data-abrir-ingreso-manual]')).not.toBeNull()

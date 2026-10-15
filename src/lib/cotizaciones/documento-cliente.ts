@@ -22,6 +22,7 @@
  *    desactualizado. La huella se calcula sobre la MISMA entrada que ve el modelo.
  */
 
+import type { AnticipoPropuesta } from './propuesta/anticipo'
 import type { ViajePDF } from '@/lib/pdf/cotizacion-props'
 import type { Composicion } from './tarifa-pasajero'
 import {
@@ -35,6 +36,7 @@ import {
 } from './detalle-viaje'
 import { normalizarTerminos } from './terminos-cotizacion'
 import { incluyeConPropias } from './incluye-por-one'
+import type { ParrafoViejo } from './parrafo-viejo'
 
 export const MODELO_REDACTOR = 'gemini-2.5-flash'
 
@@ -71,6 +73,13 @@ export interface DocumentoCliente extends TextoCliente {
    * guardado, como siempre. La escribe la forma por pasos; el PDF la lee sin mirar el interruptor.
    */
   incluye_origen?: 'one'
+  /**
+   * H4 (verificación D, D5) · los nombres de los servicios con que se escribió o se revisó
+   * (`nombresDelViaje`), para decir QUÉ párrafo quedó viejo cuando uno sale (`parrafo-viejo.ts`).
+   * Lo escribe solo la forma por pasos; ausente = solo se sabe que el texto entero es de otras
+   * líneas (`fuente_hash`), como siempre.
+   */
+  fuente_nombres?: string[]
 }
 
 export const LIMITES_TEXTO = {
@@ -145,6 +154,7 @@ export function leerDocumentoCliente(raw: unknown): DocumentoCliente | null {
     revisado_en: cadena(r.revisado_en),
     ...conAlertas(leerAlertasDeEstilo(r.estilo_por_revisar)),
     ...(r.incluye_origen === 'one' ? { incluye_origen: 'one' as const } : {}),
+    ...(Array.isArray(r.fuente_nombres) ? { fuente_nombres: r.fuente_nombres.filter((x): x is string => typeof x === 'string').slice(0, 60) } : {}),
   }
 }
 
@@ -235,6 +245,18 @@ export interface PanelTextoCliente {
    * propone en un borrador sin términos (`terminosAlAbrir`); el PDF nunca las lee.
    */
   terminosBase: string | null
+  /**
+   * El anticipo para apartar que la asesora asignó (decisión del 2026-10-14, `anticipo.ts`).
+   * Vive en la misma columna que el texto, con su propio ciclo de vida.
+   */
+  anticipo?: AnticipoPropuesta | null
+  /** ¿El documento lo imprime? Solo con el motor `html` encendido en el workspace. */
+  imprimeAnticipo?: boolean
+  /**
+   * H4 · D5 · los párrafos que nombran un servicio que ya no va (`parrafo-viejo.ts`). Solo con un
+   * texto escrito por la forma por pasos (que guarda los nombres); ausente en los demás.
+   */
+  parrafosViejos?: ParrafoViejo[]
 }
 
 // ── La entrada del modelo ─────────────────────────────────────────────────────

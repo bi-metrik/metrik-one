@@ -16,7 +16,9 @@ import {
 } from '@/app/(app)/negocios/cotizacion-actions'
 import { getServiciosActivos } from '@/app/(app)/config/servicios-actions'
 import { generateCotizacionPDF } from '@/app/(app)/negocios/cotizacion-pdf-actions'
-import { deshacerEnvioPorDescarga } from '@/app/(app)/negocios/[id]/cotizacion/actions'
+import { enviarPorPasos } from '@/app/(app)/negocios/por-pasos-actions'
+import PreguntaEnvio from '@/components/cotizacion/pregunta-envio'
+import { debePreguntarEnvio } from '@/lib/negocios/pregunta-envio'
 import ElegirOrigenVersion from '@/components/cotizacion/elegir-origen-version'
 import type { OrigenVersion } from '@/lib/negocios/seguimiento'
 import PanelMargenSalida from '@/app/(app)/negocios/panel-margen-salida'
@@ -83,6 +85,7 @@ import {
   gruposCanonicos,
   ranuraDeGrupo,
   ranuraPorSlug,
+  resolverRanura,
   siguienteGrupoDeTipo,
 } from '@/lib/cotizaciones/ranuras-pantallazo'
 import { nombreProvisionalDeGrupo } from '@/lib/cotizaciones/nombre-linea'
@@ -376,7 +379,7 @@ interface Props {
   leidaEn?: string | null
   /**
    * Seguimiento encendido en la línea (F1): «Duplicar» pregunta de dónde sale la versión, y
-   * descargar el PDF desde «Revisar y enviar» puede contar como envío (con «No lo envié»).
+   * descargar el PDF pregunta «¿Ya se la mandaste?» (H33).
    */
   seguimiento?: boolean
   /**
@@ -620,6 +623,24 @@ export default function CotizacionEditor({ oportunidadId, cotizacion, initialIte
     })
   }
 
+  // H33 · «¿Ya se la mandaste?». El «Sí» pasa por el mismo envío que el botón «Enviar» (con la
+  // forma por pasos, el suyo, que suma la regla del precio por pasajero) con canal «descargado».
+  const [preguntandoEnvio, setPreguntandoEnvio] = useState(false)
+  const confirmarEnvio = () => {
+    startTransition(async () => {
+      const res = porPasosOn
+        ? await enviarPorPasos(cotizacion.id, 'descargado')
+        : await enviarCotizacion(cotizacion.id, 'descargado')
+      setPreguntandoEnvio(false)
+      if (res.success) {
+        toast.success('Quedó enviada: arranca el seguimiento.')
+        refrescar()
+      } else {
+        toast.error(res.error ?? 'No se pudo marcar como enviada.')
+      }
+    })
+  }
+
   const handleDescargarPDF = () => {
     startTransition(async () => {
       const res = await generateCotizacionPDF(cotizacion.id)
@@ -643,27 +664,15 @@ export default function CotizacionEditor({ oportunidadId, cotizacion, initialIte
           // el PDF lleva marca de agua y no se guardó. Se dice en ámbar y se queda en
           // pantalla, no como un «listo».
           toast.warning(aviso ?? 'PDF de borrador: no se puede enviar.', { duration: Infinity, closeButton: true })
-        } else if ((res as { envioRegistrado?: boolean }).envioRegistrado) {
-          // Seguimiento (Vera C3): la descarga contó como envío. 8 s para deshacerlo.
-          toast.success('PDF descargado. Quedó como enviada: arranca el seguimiento.', {
-            duration: 8000,
-            action: {
-              label: 'No lo envié',
-              onClick: () => {
-                void deshacerEnvioPorDescarga(cotizacion.id).then((r) => {
-                  if (r.success) { toast.success('Deshecho.'); refrescar() } else toast.error(r.error)
-                })
-              },
-            },
-          })
-          refrescar()
-          const aviso = (res as { aviso?: string | null }).aviso
-          if (aviso) toast.error(aviso)
         } else {
           toast.success('PDF descargado')
           // Almacenamiento externo: el PDF se descargó pero no quedó guardado en el
           // proyecto del cliente. El servidor dice por qué; aquí solo se muestra.
           if (aviso) toast.error(aviso)
+          // H33: descargar es revisar. Se pregunta si ya salió; solo el «Sí» la marca enviada.
+          if (debePreguntarEnvio({ pdfBorrador: false, estado, editable, viaje: lineasPorTipo, seguimiento })) {
+            setPreguntandoEnvio(true)
+          }
         }
         // §4.3 · qué cubre cada opción. Sale AQUÍ y no solo en el banner porque quien
         // imprime no siempre es quien cargó: el PDF ya salió (avisa, no bloquea) y el
@@ -680,6 +689,9 @@ export default function CotizacionEditor({ oportunidadId, cotizacion, initialIte
         // salió con el texto de siempre.
         const avisoTexto = (res as { avisoTexto?: string | null }).avisoTexto
         if (avisoTexto) toast.warning(avisoTexto, { duration: 10000, closeButton: true })
+        // Motor `html`: si falló, salió el PDF de antes; quien descarga lo sabe.
+        const avisoFormato = (res as { avisoFormato?: string | null }).avisoFormato
+        if (avisoFormato) toast.warning(avisoFormato, { duration: 10000, closeButton: true })
       } else {
         toast.error(res.error || 'Error generando PDF')
       }
@@ -3632,7 +3644,9 @@ export default function CotizacionEditor({ oportunidadId, cotizacion, initialIte
     for (const i of lineasConLectura) {
       const g = normalizarGrupo(i.grupo)
       if (!g || noVan.has(g) || estadoDeLinea(i) !== 'no') continue
-      noVan.set(g, { itemId: i.id, nombre: etiquetaDeRanura(g) })
+      // H8 · el nombre del servicio como lo pinta la forma por pasos («Vuelo San Andrés ⇄ Providencia»),
+      // no la etiqueta con su ordinal («Vuelo 2 · …»), que es una clave interna.
+      noVan.set(g, { itemId: i.id, nombre: resolverRanura(g)?.nombre ?? etiquetaDeRanura(g) })
     }
     return listaUnica({
       sinPrecio: opcionesSinPrecio(lineasConLectura, idsQueSalen, composicionViaje ?? null),
@@ -3749,6 +3763,9 @@ export default function CotizacionEditor({ oportunidadId, cotizacion, initialIte
     // Trappvel: el ancho del prototipo de la tarjeta (880 px); fuera del viaje, el de siempre (R6).
     <div className={porPasosOn ? 'mx-auto max-w-[1180px] space-y-4 py-6 sm:px-4' : `mx-auto ${lineasPorTipo ? 'max-w-[880px]' : 'max-w-2xl'} space-y-4 px-4 py-6`}>
       {jsxEncabezado}
+      {preguntandoEnvio && (
+        <PreguntaEnvio pendiente={isPending} onSi={confirmarEnvio} onNo={() => setPreguntandoEnvio(false)} />
+      )}
       {!lineasPorTipo && jsxPanelMargen}
       {!lineasPorTipo && jsxPanelTexto}
       {jsxAvisoCongelada}
