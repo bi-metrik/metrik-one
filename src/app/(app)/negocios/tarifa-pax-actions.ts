@@ -79,6 +79,7 @@ import { diaDeFecha } from '@/lib/cotizaciones/actividad-en-cotizacion'
 import { borradorValido, firmarBorrador } from '@/lib/cotizaciones/firma-borrador'
 import { opcionElegidaDeActividad, ubicarLectura, type LineaParaUbicar } from '@/lib/cotizaciones/ubicar-lectura'
 import { completaDe, mismoTipo } from '@/lib/cotizaciones/destino-por-pasos'
+import { conPasajerosDelViaje } from '@/lib/cotizaciones/precio-que-falta'
 import { aceptacionPrevia, idAceptacionValido } from '@/lib/cotizaciones/aceptacion-idempotente'
 import { definicionDeTipo, esTipoRanura, tipoDeDefinicion, type TipoRanura } from '@/lib/cotizaciones/ranuras-cotizacion'
 import { lugarDeOpcion } from '@/lib/cotizaciones/opcion-viaje'
@@ -500,8 +501,8 @@ export async function quitarCasillaDeItem(
 // va CONTRA LA COTIZACIÓN DE ESE MOMENTO (`ubicarLectura`) y recién ahí crea la ranura, la
 // opción o la habitación, guarda la lectura y confirma el costo.
 
-async function contextoDeCotizacion(cotizacionId: string) {
-  const { supabase, error } = await getWorkspace()
+async function contextoDeCotizacion(cotizacionId: string, sesion?: Awaited<ReturnType<typeof getWorkspace>>) {
+  const { supabase, error } = sesion ?? await getWorkspace()
   if (error) return { error: 'No autenticado' as const }
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const sb = supabase as any
@@ -716,8 +717,15 @@ export async function aceptarCapturaDeBandeja(cotizacionId: string, b: BorradorP
   // La llave viaja con la lectura que se escribe: un reintento la encuentra (ver abajo).
   const idAceptacion = idAceptacionValido(b.idAceptacion)
   if (idAceptacion) lectura.aceptacion = idAceptacion
-  const ctx = await medirEtapa('contexto', () => contextoDeCotizacion(cotizacionId))
-  if ('error' in ctx) return { ok: false, codigo: 'CONTEXTO', mensaje: ctx.error as string }
+  // H2 (verificación D) · las líneas solo dependen del id de la cotización: se leen en paralelo con
+  // el contexto. Si el contexto falla, se descartan.
+  const sesion = await getWorkspace()
+  const lineasP = medirEtapa('lineas', () => lineasDeCotizacion(sesion.supabase, cotizacionId))
+  const ctx = await medirEtapa('contexto', () => contextoDeCotizacion(cotizacionId, sesion))
+  if ('error' in ctx) {
+    await lineasP.catch(() => null)
+    return { ok: false, codigo: 'CONTEXTO', mensaje: ctx.error as string }
+  }
   // «Otro servicio» solo entra con la cotización por pasos (N5): aunque la lectura venga firmada,
   // con el interruptor apagado se rechaza sin escribir nada.
   if (b.tipo === 'otro') {
@@ -736,7 +744,7 @@ export async function aceptarCapturaDeBandeja(cotizacionId: string, b: BorradorP
     const ref = await subida
     if (ref) lectura.imagenRef = ref
   }
-  const lineas = await medirEtapa('lineas', () => lineasDeCotizacion(ctx.supabase, cotizacionId))
+  const lineas = await lineasP
   if ('error' in lineas) {
     const ref = await subida
     if (ref) await borrarImagenesDeCaptura(workspaceId, [ref])
@@ -848,7 +856,10 @@ async function aceptarLectura(
     // salió de este pantallazo y su imagen: así lo leen igual el total, el PDF y la tarjeta.
     const quien = await quienEscribe(ctxItem.supabase)
     const en = new Date().toISOString()
-    const g = await guardarTarifa(ctxItem.supabase, c.itemId, actual => {
+    const g = await guardarTarifa(ctxItem.supabase, c.itemId, leida => {
+      // H1 · la línea de un pantallazo de solo adultos queda cubriendo a los del viaje: sin esto
+      // el precio del niño se guardaba y el costo seguía siendo el de los 6 adultos.
+      const actual = conPasajerosDelViaje(leida, ctx.viaje.composicion, ctxItem.ranura.slug)
       const costosAMano = { ...(actual.costosAMano ?? {}) }
       for (const t of c.tipos) {
         const unitario = c.precios[t]
@@ -1664,8 +1675,11 @@ export async function escribirPrecioQueFalta(
   if ('error' in ctx) return { success: false, error: ctx.error as string }
   const guard = await exigirPorPasos(ctx.supabase, ctx.item.cotizacionId)
   if (!guard.ok) return { success: false, error: guard.error }
-  if (!ctx.composicion) return { success: false, error: 'Falta decir a cuántos pasajeros cubre la línea.' }
-  if (!TIPOS_PASAJERO.includes(tipo) || cantidadDeTipo(ctx.composicion, tipo) === 0) {
+  // H1 · la composición que decide qué falta es la del viaje, no la del pantallazo de solo adultos.
+  const tarifaDelViaje = conPasajerosDelViaje(ctx.tarifa, ctx.viaje.composicion, ctx.ranura.slug)
+  const composicionDelViaje = composicionDeLinea(tarifaDelViaje, ctx.viaje.composicion)
+  if (!composicionDelViaje) return { success: false, error: 'Falta decir a cuántos pasajeros cubre la línea.' }
+  if (!TIPOS_PASAJERO.includes(tipo) || cantidadDeTipo(composicionDelViaje, tipo) === 0) {
     return { success: false, error: 'Ese tipo de pasajero no viaja en esta opción.' }
   }
   if (unitario !== null && (!Number.isFinite(unitario) || unitario < 0)) {
@@ -1674,15 +1688,16 @@ export async function escribirPrecioQueFalta(
   const anterior = ctx.tarifa.costosAMano?.[tipo]?.unitario ?? null
   if (unitario !== null && anterior === null) {
     // Solo se escribe lo que de verdad falta: un precio que el pantallazo trae no se tapa a mano.
-    const casillas = casillasConEstadia(ctx.tarifa.casillas ?? {}, ctx.tarifa.correcciones)
-    const faltan = preciosQueFaltan(ctx.composicion, casillas, ctx.ranura.slug, {
-      moneda: monedaDeTarifa(ctx.tarifa).moneda,
-      aMano: costosAManoComoMapa(ctx.tarifa),
+    const casillas = casillasConEstadia(tarifaDelViaje.casillas ?? {}, tarifaDelViaje.correcciones)
+    const faltan = preciosQueFaltan(composicionDelViaje, casillas, ctx.ranura.slug, {
+      moneda: monedaDeTarifa(tarifaDelViaje).moneda,
+      aMano: costosAManoComoMapa(tarifaDelViaje),
     })
     if (!faltan.includes(tipo)) return { success: false, error: 'A esta opción no le falta ese precio.' }
   }
   const quien = await quienEscribe(ctx.supabase)
-  const guardado = await guardarTarifa(ctx.supabase, itemId, actual => {
+  const guardado = await guardarTarifa(ctx.supabase, itemId, leida => {
+    const actual = conPasajerosDelViaje(leida, ctx.viaje.composicion, ctx.ranura.slug)
     const costosAMano = { ...(actual.costosAMano ?? {}) }
     if (unitario === null) delete costosAMano[tipo]
     else costosAMano[tipo] = { unitario, por: quien.por, porId: quien.porId, en: new Date().toISOString() }

@@ -8,6 +8,10 @@
  * nada en ONE renovaba: `planes_cobro.auto_renovar` solo lo leía el trigger que apaga el plan al
  * pagarse la última cuota, y un plan llegaba a su cuota N y se quedaba sin cuotas.
  *
+ * El 2026-10-14 Mauricio extendió el mismo principio a la licencia de Clarity (módulo `business`):
+ * la suscripción ONE de Termotech va mes a mes, sin permanencia ni contrato firmado, y se retira
+ * cuando quiera. El módulo entra a la lista; qué plan se renueva lo sigue decidiendo `auto_renovar`.
+ *
  * ## Renovar es agregar UNA cuota, nunca un año
  *
  * Sin permanencia, el calendario no debe mostrar un compromiso que el cliente no hizo. Este eslabón
@@ -18,7 +22,7 @@
  *
  * ## Las barreras, todas del lado de NO cobrar
  *
- *   1. **Módulo en la lista** (`MODULOS_CON_RENOVACION_AUTOMATICA`, hoy solo `valida_consulta`) y
+ *   1. **Módulo en la lista** (`MODULOS_CON_RENOVACION_AUTOMATICA`: `valida_consulta` y `business`) y
  *      **`auto_renovar = true` en el plan**: el plan es el consentimiento. Dar de baja a un cliente
  *      es apagar ese interruptor (y terminar el contrato).
  *   2. **Contrato `activo`.** Pausado (por mora), cancelado o terminado no renuevan.
@@ -38,7 +42,7 @@ import { diaMes, sumarDias, sumarMeses } from './enrolar-ciclo'
 import { leerPeriodoEnConcepto, quitarPeriodo } from './periodo-en-concepto'
 
 /** Los módulos cuyo cobro por ciclo se renueva solo. Sumar uno es una decisión de Mauricio. */
-export const MODULOS_CON_RENOVACION_AUTOMATICA = ['valida_consulta'] as const
+export const MODULOS_CON_RENOVACION_AUTOMATICA = ['valida_consulta', 'business'] as const
 
 /** La cuota siguiente se crea cuando la última vence dentro de estos días. */
 export const HORIZONTE_RENOVACION_DIAS = 30

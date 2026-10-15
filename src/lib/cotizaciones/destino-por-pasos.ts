@@ -27,7 +27,7 @@
  */
 
 import { normalizarGrupo } from './itinerarios'
-import { listaDeTipos, tiposSinPrecio } from './precio-que-falta'
+import { conPasajerosDelViaje, listaDeTipos, tiposSinPrecio } from './precio-que-falta'
 import { definicionDeTipo, type TipoRanura } from './ranuras-cotizacion'
 import { etiquetaDeRanura, ranuraDeGrupo } from './ranuras-pantallazo'
 import {
@@ -116,7 +116,8 @@ export function completaDe(
     if (!mismoTipo(l, tipo)) continue
     const faltan = tiposSinPrecio({ grupo: l.grupo ?? null, tarifa_pax: l.tarifa_pax ?? null }, composicionViaje)
     if (faltan.length === 0) continue
-    const tarifa = leerTarifaPax(l.tarifa_pax)
+    // H1 · la composición del VIAJE, no la del pantallazo de solo adultos (`conPasajerosDelViaje`).
+    const tarifa = conPasajerosDelViaje(leerTarifaPax(l.tarifa_pax), composicionViaje, slug)
     const primera = tarifa.casillas?.grupo_completo
     const c = composicionDeLinea(tarifa, composicionViaje)
     if (!primera || !c) continue

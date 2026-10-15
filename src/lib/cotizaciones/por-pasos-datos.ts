@@ -61,24 +61,32 @@ export async function estadoPorPasosDeCotizacion(
     .maybeSingle()
   if (!cot) return null
 
-  const { data: ws } = await supabase
-    .from('workspaces')
-    .select('config_extra, cotizacion_template_slug')
-    .eq('id', cot.workspace_id)
-    .maybeSingle()
-
-  let lineaId: string | null = null
-  if (cot.negocio_id) {
-    const { data: neg } = await supabase
-      .from('negocios')
-      .select('linea_id')
-      .eq('id', cot.negocio_id)
+  // H2 (verificación D) · el workspace y la línea del negocio no dependen uno del otro: van en
+  // paralelo. Mismas consultas, mismo resultado; una ida menos en serie en cada guard.
+  const leerWorkspace = async () => {
+    const { data } = await supabase
+      .from('workspaces')
+      .select('config_extra, cotizacion_template_slug')
+      .eq('id', cot.workspace_id)
       .maybeSingle()
-    lineaId = (neg?.linea_id ?? null) as string | null
+    return data
   }
+  const leerLineas = async () => {
+    let lineaId: string | null = null
+    if (cot.negocio_id) {
+      const { data: neg } = await supabase
+        .from('negocios')
+        .select('linea_id')
+        .eq('id', cot.negocio_id)
+        .maybeSingle()
+      lineaId = (neg?.linea_id ?? null) as string | null
+    }
+    return leerLineasPorTipo(supabase, lineaId)
+  }
+  const [ws, lineasPorTipo] = await Promise.all([leerWorkspace(), leerLineas()])
 
   return estadoPorPasos({
-    lineasPorTipo: await leerLineasPorTipo(supabase, lineaId),
+    lineasPorTipo,
     plantilla: (ws?.cotizacion_template_slug ?? null) as string | null,
     configWorkspace: ws?.config_extra ?? null,
     estado: (cot.estado ?? null) as string | null,
