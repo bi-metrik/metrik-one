@@ -34,7 +34,7 @@ import type { ParametrosCascada } from '@/lib/cotizaciones/totales'
 import { ranurasConAlternativas } from '@/lib/cotizaciones/itinerarios'
 import { estadosPermitidos, type EstadoServicio } from '@/lib/cotizaciones/estado-servicio'
 import { YA_CAMBIO } from '@/lib/cotizaciones/deshacer-por-pasos'
-import { textoCortoSinPrecio, tiposSinPrecio } from '@/lib/cotizaciones/precio-que-falta'
+import { textoCortoDeOpcion } from '@/lib/cotizaciones/precio-que-falta'
 import type { Composicion } from '@/lib/cotizaciones/tarifa-pasajero'
 import { nombreVisibleDeLinea } from '@/lib/cotizaciones/nombre-visible'
 import { resumenDeOpcion } from '@/lib/cotizaciones/opcion-viaje'
@@ -162,8 +162,7 @@ export default function VistaPorPasos(p: PropsVistaPorPasos) {
   const faltaPrecio = useCallback((id: string) => {
     const f = porId.get(id)
     if (!f) return null
-    const tipos = tiposSinPrecio({ grupo: f.grupo ?? null, tarifa_pax: f.tarifa_pax }, p.composicionViaje)
-    return tipos.length > 0 ? textoCortoSinPrecio(tipos) : null
+    return textoCortoDeOpcion({ grupo: f.grupo ?? null, tarifa_pax: f.tarifa_pax }, p.composicionViaje)
   }, [porId, p.composicionViaje])
   const candidatasPorServicio = useMemo(() => new Map(ranurasConAlternativas(lineas).map(r => [r.grupo, r.candidatos])), [lineas])
   const conOpciones: ServicioConOpciones[] = servicios
