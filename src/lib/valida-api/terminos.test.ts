@@ -190,6 +190,7 @@ describe('prepararAceptacion: lo que se decide antes de escribir', () => {
     expect(r.fila).toEqual({
       workspace_id: VERSION_V11.workspaceCobradorId,
       negocio_id: VERSION_V11.negocioId,
+      suscripcion_id: null,
       canal: 'modulo',
       estado: 'aceptado',
       nombre_aceptante: 'Johann Manuel Valbuena Alfonso',

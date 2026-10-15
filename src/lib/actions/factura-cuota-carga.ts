@@ -3,7 +3,8 @@
 import { createHash } from 'node:crypto'
 import { revalidatePath } from 'next/cache'
 import { getWorkspace } from '@/lib/actions/get-workspace'
-import { registrarActividad } from '@/lib/activity/registrar-actividad'
+import { anclaDeFila, filtrarPorAncla } from '@/lib/suscripciones-producto/ancla'
+import { anotarEnAncla } from '@/lib/suscripciones-producto/bitacora'
 import { getCachedUser } from '@/lib/supabase/auth-user'
 import { createServiceClient } from '@/lib/supabase/server'
 import { BUCKET_DOCUMENTOS_SERVICIO } from '@/lib/valida-api/recibo-manual'
@@ -86,17 +87,16 @@ export async function cargarFacturaCuota(formData: FormData): Promise<ResultadoF
 
   const plan = await svc
     .from('planes_cobro')
-    .select('negocio_id')
+    .select('negocio_id, suscripcion_id')
     .eq('id', cuota.data.plan_cobro_id)
     .eq('workspace_id', workspaceId)
     .maybeSingle()
   if (plan.error || !plan.data) return { ok: false, error: 'Cuota no encontrada.' }
-  const negocioId = plan.data.negocio_id as string
+  // El ancla del plan: un negocio, o (desde 20261016) una suscripción.
+  const ancla = anclaDeFila(plan.data as { negocio_id: string | null; suscripcion_id?: string | null })
+  if (!ancla) return { ok: false, error: 'Cuota no encontrada.' }
 
-  const contrato = await svc
-    .from('servicios_contratados')
-    .select('id')
-    .eq('negocio_id', negocioId)
+  const contrato = await filtrarPorAncla(svc.from('servicios_contratados').select('id'), ancla)
     .eq('workspace_id', workspaceId)
     .limit(1)
   if (contrato.error) return { ok: false, error: `No se pudo leer el contrato: ${contrato.error.message}` }
@@ -150,21 +150,21 @@ export async function cargarFacturaCuota(formData: FormData): Promise<ResultadoF
   if (staffId) {
     const cargado = partes.map((p) => p.clase.toUpperCase()).join(' y ') || 'número'
     const verbo = previa.data ? 'actualizada' : 'cargada'
-    await registrarActividad(
+    await anotarEnAncla(
       svc,
       {
-        workspace_id: workspaceId,
-        entidad_tipo: 'negocio',
-        entidad_id: negocioId,
-        tipo: 'sistema',
-        autor_id: staffId, // FK a staff(id), NO a profiles
-        // `activity_log.contenido` tiene CHECK de 280 caracteres.
-        contenido: `Factura ${numero} ${verbo} para la cuota ${cuota.data.numero} (${cargado}).`.slice(0, 280),
+        ancla,
+        workspaceId,
+        tipo: 'factura_cuota',
+        autorStaffId: staffId, // FK a staff(id), NO a profiles
+        autorPerfilId: user?.id ?? null,
+        texto: `Factura ${numero} ${verbo} para la cuota ${cuota.data.numero} (${cargado}).`,
+        datos: { cuota_id: cuotaId, numero },
       },
       'cargarFacturaCuota',
     )
   }
 
-  revalidatePath(`/negocios/${negocioId}`)
+  if (ancla.tipo === 'negocio') revalidatePath(`/negocios/${ancla.id}`)
   return { ok: true, numero }
 }

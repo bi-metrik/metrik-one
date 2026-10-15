@@ -128,6 +128,8 @@ interface FilaVersion {
   workspace_id: string
   alcance: string
   empresa_id: string | null
+  /** Desde 20261016: un 'cliente' puede ser de una suscripción (`suscripciones_producto`) y no de una empresa. */
+  suscripcion_id?: string | null
   modulo: string | null
   titulo: string
   version: string
@@ -137,14 +139,15 @@ interface FilaVersion {
 
 interface FilaContrato {
   id: string
-  negocio_id: string
+  negocio_id: string | null
+  suscripcion_id?: string | null
   estado: string
   vigente_desde: string
-  empresa_id: string
+  empresa_id: string | null
   servicio_slug: string
 }
 
-const CAMPOS_CONTRATO = 'id, negocio_id, estado, vigente_desde, empresa_id, servicio_slug'
+const CAMPOS_CONTRATO = 'id, negocio_id, suscripcion_id, estado, vigente_desde, empresa_id, servicio_slug'
 
 /**
  * La versión con el contrato del cliente que la respalda y los datos de la empresa, leídos con el
@@ -174,7 +177,7 @@ export async function versionContratada(
 
   const version = await svc
     .from('documentos_contractuales_versiones')
-    .select('id, workspace_id, alcance, empresa_id, modulo, titulo, version, texto_sha256, pdf_sha256')
+    .select('id, workspace_id, alcance, empresa_id, suscripcion_id, modulo, titulo, version, texto_sha256, pdf_sha256')
     .eq('id', documentoId)
     .maybeSingle()
   if (version.error) {
@@ -185,7 +188,7 @@ export async function versionContratada(
   if (!v) return null
   // El CHECK `documentos_versiones_empresa_coherente` y `documentos_versiones_modulo_coherente` ya
   // exigen esta correspondencia; si faltara el dato, el documento no se puede atar a nada.
-  if (v.alcance === 'cliente' && !v.empresa_id) return null
+  if (v.alcance === 'cliente' && !v.empresa_id && !v.suscripcion_id) return null
   if (v.alcance === 'plantilla' && !v.modulo) return null
   if (v.alcance !== 'cliente' && v.alcance !== 'plantilla') return null
 
@@ -205,7 +208,11 @@ export async function versionContratada(
   /** Los contratos del cobrador que corresponden al documento, sin decidir todavía quién los cubre. */
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const delDocumento = (q: any) =>
-    v.alcance === 'cliente' ? q.eq('empresa_id', v.empresa_id) : q.in('servicio_slug', slugsDelModulo)
+    v.alcance !== 'cliente'
+      ? q.in('servicio_slug', slugsDelModulo)
+      : v.suscripcion_id
+        ? q.eq('suscripcion_id', v.suscripcion_id)
+        : q.eq('empresa_id', v.empresa_id)
 
   const [pagados, beneficiario] = await Promise.all([
     delDocumento(
@@ -245,23 +252,41 @@ export async function versionContratada(
   )
 
   // La empresa que firma es la del contrato elegido. En un documento 'cliente' es la misma que el
-  // documento nombra (el filtro de arriba lo garantiza); en un 'plantilla' es la única que hay.
-  const empresaId = contratos[0].empresa_id
-  const empresa = await svc
-    .from('empresas')
-    .select('nombre, razon_social, numero_documento')
-    .eq('id', empresaId)
-    .maybeSingle()
-  if (empresa.error) {
-    console.error('[valida-api] empresa del contrato:', empresa.error.message)
-    return 'error'
+  // documento nombra (el filtro de arriba lo garantiza); en un 'plantilla' es la única que hay. Un
+  // contrato de suscripción no tiene empresa en el directorio: la empresa es la que declaró la
+  // suscripción.
+  const elegido = contratos[0]
+  let empresaNombre = ''
+  let empresaNit = ''
+  if (elegido.suscripcion_id) {
+    const s = await svc
+      .from('suscripciones_producto')
+      .select('razon_social, numero_documento, dv')
+      .eq('id', elegido.suscripcion_id)
+      .maybeSingle()
+    if (s.error) {
+      console.error('[valida-api] suscripción del contrato:', s.error.message)
+      return 'error'
+    }
+    const f = s.data as { razon_social: string | null; numero_documento: string | null; dv: string | null } | null
+    empresaNombre = (f?.razon_social || '').trim()
+    empresaNit = f?.numero_documento ? `${f.numero_documento}${f.dv ? `-${f.dv}` : ''}` : ''
+  } else {
+    const empresa = await svc
+      .from('empresas')
+      .select('nombre, razon_social, numero_documento')
+      .eq('id', elegido.empresa_id)
+      .maybeSingle()
+    if (empresa.error) {
+      console.error('[valida-api] empresa del contrato:', empresa.error.message)
+      return 'error'
+    }
+    const e = empresa.data as { nombre: string | null; razon_social: string | null; numero_documento: string | null } | null
+    empresaNombre = (e?.razon_social || e?.nombre || '').trim()
+    empresaNit = (e?.numero_documento || '').trim()
   }
-
-  const e = empresa.data as { nombre: string | null; razon_social: string | null; numero_documento: string | null } | null
-  const empresaNombre = (e?.razon_social || e?.nombre || '').trim()
-  const empresaNit = (e?.numero_documento || '').trim()
   if (!empresaNombre || !empresaNit) {
-    console.error('[valida-api] la empresa del contrato no tiene razón social o NIT:', empresaId)
+    console.error('[valida-api] la empresa del contrato no tiene razón social o NIT:', elegido.empresa_id ?? elegido.suscripcion_id)
     return null
   }
 
@@ -274,6 +299,7 @@ export async function versionContratada(
     pdfSha256: v.pdf_sha256,
     empresaNombre,
     empresaNit,
-    negocioId: contratos[0].negocio_id,
+    negocioId: elegido.negocio_id,
+    suscripcionId: elegido.suscripcion_id ?? null,
   }
 }

@@ -17,7 +17,17 @@ type Db = any
 
 export async function anotarEnAncla(
   db: unknown,
-  p: { ancla: Ancla | null; workspaceId: string; texto: string; tipo?: string; datos?: Record<string, unknown> },
+  p: {
+    ancla: Ancla | null
+    workspaceId: string
+    texto: string
+    tipo?: string
+    datos?: Record<string, unknown>
+    /** Solo para el timeline de un negocio: `activity_log.autor_id` es FK a `staff(id)`. */
+    autorStaffId?: string | null
+    /** Solo para la bitácora de una suscripción: `autor_id` es FK a `profiles(id)`. */
+    autorPerfilId?: string | null
+  },
   origen: string,
 ): Promise<void> {
   if (!p.ancla) return
@@ -29,7 +39,7 @@ export async function anotarEnAncla(
         entidad_tipo: 'negocio',
         entidad_id: p.ancla.id,
         tipo: 'sistema',
-        autor_id: null,
+        autor_id: p.autorStaffId ?? null,
         // `activity_log.contenido` tiene CHECK de 280 caracteres.
         contenido: p.texto.slice(0, 280),
       },
@@ -45,6 +55,7 @@ export async function anotarEnAncla(
       detalle: p.texto.slice(0, 1000),
       datos: p.datos ?? {},
       origen,
+      autor_id: p.autorPerfilId ?? null,
     })
     if (error) console.error(`[${origen}] bitácora de la suscripción ${p.ancla.id}:`, error.message)
   } catch (e) {

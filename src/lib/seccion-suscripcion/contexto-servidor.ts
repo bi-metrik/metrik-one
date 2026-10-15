@@ -31,9 +31,14 @@ export interface ContratoSuscripcion {
   vigenteDesde: string
   vigenteHasta: string | null
   parametros: Record<string, unknown>
-  empresaId: string
+  /**
+   * El ancla del contrato: un negocio del CRM (con su empresa del directorio) o, desde 20261016, una
+   * suscripción (`suscripciones_producto`, sin empresa en el directorio). Exactamente uno.
+   */
+  empresaId: string | null
   empresaNombre: string | null
-  negocioId: string
+  negocioId: string | null
+  suscripcionId: string | null
   /** El espacio que cobra (metrik): donde viven el plan y sus cuotas. */
   cobradorId: string
   servicioNombre: string | null
@@ -72,12 +77,14 @@ interface FilaContrato {
   vigente_desde: string
   vigente_hasta: string | null
   parametros: Record<string, unknown> | null
-  empresa_id: string
-  negocio_id: string
+  empresa_id: string | null
+  negocio_id: string | null
+  suscripcion_id: string | null
   workspace_id: string
   comision: unknown
   servicio_slug: string
   empresas: { nombre: string | null; razon_social: string | null } | null
+  suscripciones_producto: { razon_social: string | null } | null
 }
 
 async function resolver(): Promise<ContextoSuscripcion> {
@@ -98,7 +105,7 @@ async function resolver(): Promise<ContextoSuscripcion> {
     svc
       .from('servicios_contratados')
       .select(
-        'id, estado, vigente_desde, vigente_hasta, parametros, empresa_id, negocio_id, workspace_id, comision, servicio_slug, empresas(nombre, razon_social)',
+        'id, estado, vigente_desde, vigente_hasta, parametros, empresa_id, negocio_id, suscripcion_id, workspace_id, comision, servicio_slug, empresas(nombre, razon_social), suscripciones_producto(razon_social)',
       )
       .eq('id', entrada.servicioContratadoId)
       .eq('workspace_pagador_id', entrada.workspaceId)
@@ -151,8 +158,9 @@ async function resolver(): Promise<ContextoSuscripcion> {
       vigenteHasta: fila.vigente_hasta,
       parametros: fila.parametros ?? {},
       empresaId: fila.empresa_id,
-      empresaNombre: fila.empresas?.razon_social ?? fila.empresas?.nombre ?? null,
+      empresaNombre: fila.empresas?.razon_social ?? fila.empresas?.nombre ?? fila.suscripciones_producto?.razon_social ?? null,
       negocioId: fila.negocio_id,
+      suscripcionId: fila.suscripcion_id ?? null,
       cobradorId: fila.workspace_id,
       servicioNombre: catalogo?.nombre ?? null,
       comision: fila.comision,
