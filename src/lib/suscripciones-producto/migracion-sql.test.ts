@@ -418,6 +418,7 @@ describe('la activación autogestionada crea una suscripción', () => {
       terminos_sha256: sha256(TEXTO),
     })
     expect(s.terminos_documento_id).toEqual(expect.any(String))
+    expect(s.metadata).toMatchObject({ origen: 'valida_autogestion', workspace_one: 'cda-ejemplo' })
     expect(await contar('public.suscripciones_producto_eventos', `suscripcion_id = '${res.suscripcion_id}' and tipo = 'alta'`)).toBe(1)
   })
 
