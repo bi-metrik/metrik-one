@@ -250,7 +250,17 @@ async function registrarDecisionesDeLaSalida(
   }
 }
 
-export async function generateCotizacionPDF(cotizacionId: string) {
+export async function generateCotizacionPDF(
+  cotizacionId: string,
+  /**
+   * H4 (verificación D, D7) · `vistaPrevia`: el mismo documento, con las mismas props y el mismo
+   * motor, para MOSTRARLO en «Revisar y enviar». No escribe nada: ni la pérdida de la autorización
+   * del dueño, ni el almacenamiento, ni Drive, ni el registro de la salida. Sin la opción, todo como
+   * siempre.
+   */
+  opciones?: { vistaPrevia?: boolean },
+) {
+  const vistaPrevia = opciones?.vistaPrevia === true
   const { supabase, workspaceId, staffId, error } = await getWorkspace()
   if (error || !workspaceId) return { success: false, error: 'No autenticado' }
 
@@ -272,7 +282,7 @@ export async function generateCotizacionPDF(cotizacionId: string) {
     workspaceId,
     cotizacionId,
     staffId: staffId ?? null,
-    registrarPerdida: true,
+    registrarPerdida: !vistaPrevia,
   })
   // El borrador se decide más abajo, cuando se sabe si el IVA se pudo calcular.
   const salidaBloquea = salida?.aplica === true && salida.bloquea
@@ -754,6 +764,8 @@ export async function generateCotizacionPDF(cotizacionId: string) {
 
       const buffer = renderizado
       const filename = `${cot.codigo ?? cot.consecutivo}.pdf`
+      // Vista previa: el documento, sin guardarlo ni registrarlo.
+      if (vistaPrevia) return { success: true, pdf: buffer.toString('base64'), filename, fiscal, vistaPrevia: true as const, renderedVia: 'weasyprint' as const }
 
       // Almacenamiento externo: el PDF va al proyecto del cliente y Drive ni se intenta.
       const externo = await guardarPdfEnAlmacenamientoExterno(workspaceId, negocioInfo?.id ?? null, filename, buffer)
@@ -1380,6 +1392,8 @@ export async function generateCotizacionPDF(cotizacionId: string) {
 
   const base64 = Buffer.from(buffer).toString('base64')
   const filename = `${cot.consecutivo}.pdf`
+  // Vista previa: el documento, sin guardarlo ni registrarlo.
+  if (vistaPrevia) return { success: true, pdf: base64, filename, fiscal, vistaPrevia: true as const, renderedVia }
 
   // Este camino nunca guardó el PDF en ningún lado (solo lo devuelve para descargar), y
   // en un workspace en Drive sigue igual. Con almacenamiento externo queda además en el
