@@ -36,6 +36,7 @@ import { createServiceClient } from '@/lib/supabase/server'
 import { registrarActividad } from '@/lib/activity/registrar-actividad'
 import { evaluarSalida, leerUltimaExcepcion, recortarParaLog, TABLA_EXCEPCIONES } from '@/lib/cotizaciones/piso-salida-datos'
 import { pctTexto } from '@/lib/cotizaciones/piso-salida'
+import { CAUSA_RETIRADA } from '@/lib/cotizaciones/autorizacion-vista'
 import { esDuenoDelWorkspace, leerPlatformAdmin } from '@/lib/permissions/dueno-workspace'
 
 
@@ -551,7 +552,7 @@ export async function retirarAutorizacionPorPasos(cotizacionId: string): Promise
   if (!ultima || ultima.perdidaAt !== null) return { success: false, error: 'No hay una autorización vigente que retirar.' }
   const { data: marcada, error: errUpd } = await servicio
     .from(TABLA_EXCEPCIONES)
-    .update({ perdida_at: new Date().toISOString(), perdida_causa: 'La retiró el dueño.' })
+    .update({ perdida_at: new Date().toISOString(), perdida_causa: CAUSA_RETIRADA })
     .eq('id', ultima.id)
     .eq('workspace_id', workspaceId)
     .is('perdida_at', null)

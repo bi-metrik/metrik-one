@@ -34,6 +34,8 @@ export interface AutorizacionVista {
   esDueno: boolean
   vigente: { por: string; motivo: string } | null
   perdida: boolean
+  /** Por qué ya no vale (`textoDePerdida`). Ausente = el texto de siempre. */
+  textoPerdida?: string | null
   pedido: { por: string | null } | null
   disponible: boolean
 }
@@ -175,7 +177,7 @@ export function TarifasPorPasos({
             </>
           ) : (
             <>
-              {autorizacion.perdida && <span className="text-xs text-[#B3382C]">La autorización se perdió: cambió el margen o un costo.</span>}
+              {autorizacion.perdida && <span className="text-xs text-[#B3382C]">{autorizacion.textoPerdida ?? 'La autorización se perdió: cambió el margen o un costo.'}</span>}
               {autorizacion.esDueno ? (
                 autorizando ? (
                   <span className="flex flex-col gap-1.5">

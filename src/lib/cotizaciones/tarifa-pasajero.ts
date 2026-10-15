@@ -1373,6 +1373,23 @@ export function resolverTarifa(
   if (aMano) return aMano
   if (faltan.length > 0) {
     const siguiente = faltan[0]
+    // Re-verificación D · con parte del precio ya escrito («Completa» con el pantallazo del niño),
+    // lo que falta es el precio de los que quedan, no volver a buscar el grupo con el niño. Sin
+    // nada escrito (siempre, con el interruptor apagado), el mensaje de siempre.
+    const escritos = opciones.aMano ?? null
+    if (escritos && faltan.length === necesarias.length && Object.values(escritos).some(v => typeof v === 'number' && Number.isFinite(v) && v >= 0)) {
+      const quedan = tiposPresentes(c).filter(t => t !== 'adulto'
+        && !l1.porTipo.some(f => f.tipo === t && f.cantidad > 0)
+        && !(typeof escritos[t] === 'number'))
+      if (quedan.length > 0) {
+        return {
+          estado: 'falta',
+          siguiente,
+          faltan,
+          mensaje: `Falta el precio ${quedan.map(t => `${cantidadDeTipo(c, t) === 1 ? 'del' : 'de los'} ${PALABRA[t][cantidadDeTipo(c, t) === 1 ? 0 : 1]}`).join(' y ')}: escríbelo o pega su pantallazo.`,
+        }
+      }
+    }
     const prefijo = faltan.length === necesarias.length
       ? 'Este pantallazo tiene un solo total para el grupo. '
       : ''
