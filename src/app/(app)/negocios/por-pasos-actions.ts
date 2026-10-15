@@ -478,7 +478,7 @@ export async function deshacerPorPasos(op: OperacionDeshacer): Promise<Resultado
  * workspace por la tabla `notificaciones` (P7 de la nota técnica). Quién autoriza sale de la
  * configuración del workspace (el rol de dueño), nunca de un nombre escrito en el código.
  */
-export async function pedirAutorizacionPorPasos(cotizacionId: string): Promise<ResultadoPorPasos<{ a: string | null }>> {
+export async function pedirAutorizacionPorPasos(cotizacionId: string): Promise<ResultadoPorPasos<{ a: string | null; notificado: boolean }>> {
   const { supabase, workspaceId, staffId, error } = await getWorkspace()
   if (error || !workspaceId) return { success: false, error: 'No autenticado' }
   const guard = await exigirPorPasos(supabase, cotizacionId)
@@ -513,6 +513,9 @@ export async function pedirAutorizacionPorPasos(cotizacionId: string): Promise<R
   const svc = servicio as any
   const { data: duenos } = await svc.from('profiles').select('id').eq('workspace_id', workspaceId).eq('role', 'owner').eq('platform_admin', false)
   const destinatarios = ((duenos ?? []) as { id: string }[]).map(d => d.id)
+  // P7 (H8 de la verificación D) · si la notificación no se escribe, la pantalla no puede decir
+  // «le llega en sus notificaciones»: el pedido quedó en la actividad, y eso es lo que se dice.
+  let notificado = false
   if (destinatarios.length > 0) {
     const { error: errNot } = await svc.from('notificaciones').insert(destinatarios.map(id => ({
       workspace_id: workspaceId,
@@ -526,8 +529,9 @@ export async function pedirAutorizacionPorPasos(cotizacionId: string): Promise<R
       metadata: { cotizacion_id: cotizacionId, motivo: 'margen_bajo_minimo' },
     })))
     if (errNot) console.error('[por-pasos] no se pudo avisar al dueño:', errNot.message)
+    else notificado = true
   }
-  return { success: true, a: salida.dueno }
+  return { success: true, a: salida.dueno, notificado }
 }
 
 /**

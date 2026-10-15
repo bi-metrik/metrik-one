@@ -1,6 +1,6 @@
 'use client'
 
-import { useCallback, useMemo, useState, type ReactNode } from 'react'
+import { useCallback, useEffect, useMemo, useState, type ReactNode } from 'react'
 import { toast } from 'sonner'
 
 import { BarraPasos } from './barra-pasos'
@@ -121,6 +121,17 @@ type Override = { seleccion?: string[]; va?: boolean }
 export default function VistaPorPasos(p: PropsVistaPorPasos) {
   const [paso, setPaso] = useState<NumeroDePaso>(p.pasoInicial)
   const [tarifasVistas, setTarifasVistas] = useState(p.pasoInicial === 2)
+  // H8 · el ✓ de «Tarifas» se perdía al recargar: queda anotado en esta pestaña, por cotización.
+  const claveTarifasVistas = `one:tarifas-vistas:${p.cotizacionId}`
+  useEffect(() => {
+    try {
+      if (window.sessionStorage.getItem(claveTarifasVistas) === '1') setTarifasVistas(true)
+    } catch { /* sin almacenamiento: como antes */ }
+  }, [claveTarifasVistas])
+  useEffect(() => {
+    if (!tarifasVistas) return
+    try { window.sessionStorage.setItem(claveTarifasVistas, '1') } catch { /* sin almacenamiento */ }
+  }, [tarifasVistas, claveTarifasVistas])
   const [abiertos, setAbiertos] = useState<ReadonlySet<string>>(() => new Set())
   const [ocupado, setOcupado] = useState(false)
   // Lo que la asesora acaba de tocar y el servidor todavía no confirma: la pantalla lo muestra ya
@@ -514,7 +525,9 @@ export default function VistaPorPasos(p: PropsVistaPorPasos) {
       onPedir={() => void correr(async () => {
         const r = await pedirAutorizacionPorPasos(p.cotizacionId)
         if (!r.success) { toast.error(r.error); return }
-        toast.success(`Quedó pedido a ${r.a ?? 'quien autoriza'}: le llega en sus notificaciones.`)
+        // P7 · solo se promete la notificación si se escribió; si no, queda en la actividad del negocio.
+        if (r.notificado) toast.success(`Quedó pedido a ${r.a ?? 'quien autoriza'}: le llega en sus notificaciones.`)
+        else toast.warning(`Quedó pedido en la actividad del negocio, pero no le llegó la notificación a ${r.a ?? 'quien autoriza'}: avísale tú.`)
         p.refrescar()
       })}
       onAutorizar={motivo => {
