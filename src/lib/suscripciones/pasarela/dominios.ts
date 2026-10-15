@@ -7,6 +7,7 @@
  */
 export const DOMINIOS_ENLACE_PAGO: Readonly<Record<string, readonly string[]>> = {
   bold: ['bold.co'],
+  epayco: ['payco.link'],
 }
 
 /** Todos los dominios aceptados, sin importar la pasarela. */
