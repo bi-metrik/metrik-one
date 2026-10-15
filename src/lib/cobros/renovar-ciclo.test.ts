@@ -123,8 +123,8 @@ describe('la cuota siguiente de un CDA', () => {
 describe('las barreras: todas del lado de no cobrar', () => {
   const tocaRenovar = '2026-11-28'
 
-  it('solo Valida: otro módulo no se renueva aunque tenga auto_renovar', () => {
-    for (const modulo of ['business', 'compliance', 'radar_secop', null]) {
+  it('solo Valida y la licencia de Clarity: otro módulo no se renueva aunque tenga auto_renovar', () => {
+    for (const modulo of ['compliance', 'radar_secop', null]) {
       expect(renovar(tocaRenovar, { modulo }), String(modulo)).toEqual({ tipo: 'no', motivo: 'modulo_no_automatico' })
     }
   })
@@ -199,5 +199,77 @@ describe('mesDelPlan', () => {
 
   it('el horizonte deja margen sobre la ventana del enlace (7 días)', () => {
     expect(HORIZONTE_RENOVACION_DIAS).toBeGreaterThan(7)
+  })
+})
+
+/**
+ * La licencia de Clarity de Termotech (ws metrik, A3 26 2), con su calendario REAL: inicio el 5-sep,
+ * cada cuota vence el primer día del periodo que paga y el concepto lleva el periodo con año.
+ * Mauricio, 2026-10-14: mes a mes, sin permanencia, igual que Valida.
+ */
+describe('la cuota siguiente de la licencia de Clarity (Termotech)', () => {
+  const CONCEPTO_TT = 'Suscripción MeTRIK ONE · Termotech'
+  const dd = (iso: string) => iso.split('-').reverse().join('/')
+  const cuotaTT = (numero: number, desde: string, hasta: string, pagada = false): CuotaDelPlan => ({
+    numero,
+    tipo: 'cuota',
+    monto: 150_000,
+    fecha_vencimiento: desde,
+    concepto_detalle: `${CONCEPTO_TT} — periodo del ${dd(desde)} al ${dd(hasta)}`,
+    pagada,
+  })
+  const TERMOTECH: PlanCandidatoRenovacion = {
+    planId: '31d4bc5f-711c-4221-a184-fec75caa70c9',
+    frecuencia: 'mensual',
+    fechaInicio: '2026-09-05',
+    fechaFin: '2027-02-05',
+    totalCuotas: 6,
+    autoRenovar: true,
+    conceptoTemplate: 'Cuota {numero_cuota} de {total_cuotas} — Suscripcion MeTRIK ONE · Termotech',
+    modulo: 'business',
+    contratoEstado: 'activo',
+    parametros: { dia_cobro: 5, precio_mensual: 150_000 },
+    vigenteHasta: null,
+    planAnualEnCurso: false,
+    variosPlanes: false,
+    cuotas: [
+      cuotaTT(1, '2026-09-05', '2026-10-04', true),
+      cuotaTT(2, '2026-10-05', '2026-11-04', true),
+      cuotaTT(3, '2026-11-05', '2026-12-04', true),
+      cuotaTT(4, '2026-12-05', '2027-01-04', true),
+      cuotaTT(5, '2027-01-05', '2027-02-04', true),
+      cuotaTT(6, '2027-02-05', '2027-03-04'),
+    ],
+  }
+  const renovarTT = (hoy: string, c: Partial<PlanCandidatoRenovacion> = {}) => planearRenovacion({ ...TERMOTECH, ...c }, hoy)
+
+  it('hoy (14-oct) no agrega nada: la cuota 6 vence el 5-feb', () => {
+    expect(renovarTT('2026-10-14')).toEqual({ tipo: 'no', motivo: 'horizonte_cubierto' })
+    expect(renovarTT('2027-01-06')).toEqual({ tipo: 'no', motivo: 'horizonte_cubierto' })
+  })
+
+  it('el 7-ene agrega la 7: vence el 5-mar y paga del 5-mar al 4-abr, al precio del contrato', () => {
+    const r = renovarTT('2027-01-07')
+    expect(r.tipo).toBe('renovar')
+    if (r.tipo !== 'renovar') return
+    expect(r.cuota).toEqual({
+      numero: 7,
+      tipo: 'cuota',
+      monto: 150_000,
+      fecha_vencimiento: '2027-03-05',
+      concepto_detalle: `${CONCEPTO_TT} · periodo del 5-mar al 4-abr`,
+    })
+    expect(r.totalCuotas).toBe(7)
+    expect(r.fechaFin).toBe('2027-04-04')
+  })
+
+  it('con el plan como está hoy (auto_renovar apagado) no se renueva', () => {
+    expect(renovarTT('2027-01-07', { autoRenovar: false })).toEqual({ tipo: 'no', motivo: 'sin_auto_renovar' })
+  })
+
+  it('la cuota 5 sin pagar a 2 días del corte todavía no frena; vencida hace más de 5 días, sí', () => {
+    const cuotas = TERMOTECH.cuotas.map((c) => (c.numero === 5 ? { ...c, pagada: false } : c))
+    expect(renovarTT('2027-01-07', { cuotas }).tipo).toBe('renovar')
+    expect(renovarTT('2027-01-11', { cuotas })).toEqual({ tipo: 'no', motivo: 'en_mora' })
   })
 })
