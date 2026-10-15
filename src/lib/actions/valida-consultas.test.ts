@@ -177,12 +177,14 @@ function constructor(tabla: string) {
 
 import {
   consultarValida,
-  prepararLoteValida,
   listarConsultasValida,
   descargarPDFConsultaValida,
   generarPDFLoteValida,
   buscarNegociosParaValida,
 } from './valida-consultas'
+// El cargue masivo nació aparte el 2026-10-15 (`crearLoteValida` reemplaza a `prepararLoteValida`):
+// pasa por la MISMA puerta, y estas pruebas lo siguen cubriendo con ella.
+import { crearLoteValida } from './valida-lotes'
 import { MODULES, reiniciarModulo } from '../../../test/exigir-modulo-doble'
 
 const PERSONA = { tipo: 'natural' as const, nombre: 'Juan Perez' }
@@ -228,7 +230,7 @@ describe('un CDA con los términos sin aceptar no opera Valida (2026-09-23)', ()
       await descargarPDFConsultaValida('val-1'),
       await generarPDFLoteValida('lote-1'),
       await listarConsultasValida(),
-      await prepararLoteValida(loteSinCodigo()),
+      await crearLoteValida(loteSinCodigo()),
       await buscarNegociosParaValida('P'),
     ]
     expect(resultados).toEqual(resultados.map(() => PENDIENTE))
@@ -262,7 +264,7 @@ describe('consultas restringidas por mora: el histórico sigue abierto (cláusul
 
   it('la consulta individual y la masiva se niegan antes de llegar a Valida o a la base', async () => {
     expect(await consultarValida(PERSONA)).toEqual(RESTRINGIDO)
-    expect(await prepararLoteValida(loteSinCodigo())).toEqual(RESTRINGIDO)
+    expect(await crearLoteValida(loteSinCodigo())).toEqual(RESTRINGIDO)
     expect(fetchValida).not.toHaveBeenCalled()
     expect(inserts).toHaveLength(0)
   })
@@ -308,8 +310,8 @@ describe('el módulo Valida, no la sesión, abre estas acciones (tercera ronda)'
     expect((await listarConsultasValida()).ok).toBe(false)
   })
 
-  it('no prepara lotes', async () => {
-    expect((await prepararLoteValida(loteSinCodigo())).ok).toBe(false)
+  it('no crea lotes', async () => {
+    expect((await crearLoteValida(loteSinCodigo())).ok).toBe(false)
   })
 
   it('no busca negocios', async () => {
@@ -425,19 +427,7 @@ describe('consultarValida — tope de tiempo y reintento del cargue masivo (2026
   })
 })
 
-describe('prepararLoteValida — el negocio del lote', () => {
-  it('un negocio propio se reparte a las filas sin codigo', async () => {
-    const r = await prepararLoteValida(loteSinCodigo(), { negocio_id_lote: 'neg-propio' })
-    expect(r.ok).toBe(true)
-    if (!r.ok) return
-    expect(r.data.filas.map((f) => f.negocio_id)).toEqual(['neg-propio'])
-  })
-
-  it('un negocio de otro workspace no se reparte a las filas', async () => {
-    const r = await prepararLoteValida(loteSinCodigo(), { negocio_id_lote: 'neg-ajeno' })
-    expect(r).toEqual({ ok: false, error: 'negocio_no_encontrado' })
-  })
-})
+// El negocio del lote se prueba con el lote nuevo en `valida-lotes.test.ts`.
 
 describe('listarConsultasValida — codigo y nombre del negocio', () => {
   it('una consulta atada a un negocio ajeno no trae su codigo ni su nombre', async () => {
