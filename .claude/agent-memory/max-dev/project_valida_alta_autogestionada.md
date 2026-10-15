@@ -92,3 +92,9 @@ Ya mergeados: #1095 (corte de la bolsa), #1097 (`valida_registros`, APLICADA, no
   las selecciona, para que el día 7 siga funcionando aunque la migración no esté aplicada.
 
 Relacionado: [[secop-autogestion-registro]], [[radar-trial-y-cobro]], [[valida-renovacion-continua]], [[sql-y-despliegue-metrik-valida]].
+
+## Gate de carpeta local en metrik (2026-10-15, #1169)
+`metrik` exige `metadata.carpeta_local` (`trg_zz_gate_carpeta_local`, MK001). La RPC crea el negocio en «Cobro» (orden 2), y el gate revertía TODA la activación (preview, consulta 11). **Por qué:** los tests de la RPC corrían sin el gate. Ahora `activacion-sql.test` lo enciende.
+- Mauricio decidió eximir. `20261015180000_gate_carpeta_local_exime_valida_autogestion.sql` pide `metadata.origen='valida_autogestion'` Y que `workspace_one` tenga fila en `valida_registros`. Está **SIN aplicar** y va ANTES del merge.
+- **Cómo aplicar:** los 3 caminos (consulta 11, «Activar plan», día 7) pasan por `activarPlanDelEspacio` → un solo INSERT. Un 4º camino que cree el negocio debe poner las mismas dos marcas.
+- Mauricio preguntó si los clientes de Valida deben vivir fuera del CRM de metrik. Eso queda abierto: recomendé una base propia de suscripciones a futuro.
