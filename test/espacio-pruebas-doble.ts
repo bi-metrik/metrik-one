@@ -160,6 +160,7 @@ function esquemaDe(tablas: Record<string, Fila[]>): Record<string, string[]> {
     workspace_features: ['id', 'workspace_id', 'feature_key'],
     custom_field_mappings: ['id', 'workspace_id'],
     stage_transition_rules: ['id', 'workspace_id'],
+    activity_log: ['id', 'workspace_id', 'entidad_id', 'entidad_tipo', 'contenido'],
   }
   const out: Record<string, string[]> = {}
   for (const [t, filas] of Object.entries(tablas)) out[t] = [...new Set([...(extra[t] ?? []), ...filas.flatMap(f => Object.keys(f))])]
