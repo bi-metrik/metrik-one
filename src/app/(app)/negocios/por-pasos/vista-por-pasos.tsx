@@ -528,7 +528,14 @@ export default function VistaPorPasos(p: PropsVistaPorPasos) {
 
   // D7 · el documento de Revisar se vuelve a pedir cuando cambia lo que imprime: las líneas (costo,
   // precio, grupo, si suman), las tarifas, el margen y el estado del texto.
-  const claveDelDocumento = `${total.precioVenta}|${p.texto}|${claveServidor}|${p.filas.map(f => `${f.subtotal ?? ''}:${f.precio_venta ?? ''}`).join(',')}`
+  // Armada aparte (no con la clave de lo optimista de arriba): es la del documento, y cambia con él.
+  const claveDelDocumento = [
+    total.precioVenta,
+    p.texto,
+    p.margenPct,
+    JSON.stringify(p.tarifasDelServidor),
+    p.filas.map(f => `${f.id}:${f.grupo}:${f.entra_al_precio}:${f.subtotal ?? ''}:${f.precio_venta ?? ''}`).join(','),
+  ].join('|')
   const paso3 = (
     <RevisarPorPasos
       total={total.precioVenta}
