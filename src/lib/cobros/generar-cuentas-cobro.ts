@@ -20,6 +20,13 @@
  *      e. Asocia planilla_pila_periodo del mes si existe
  *      f. Notificación in-app a Mauricio (owner del workspace)
  *
+ * Suscripciones (`suscripciones_producto`, desde 20261016): este emisor NO les emite. La cuenta de
+ * cobro es de persona natural (Mauricio, `EMISOR_MAURICIO`) y lleva el PDF a la carpeta de Drive del
+ * negocio; una suscripción la vende METRIK IA S.A.S. y no tiene negocio ni carpeta. Su documento es la
+ * factura electrónica del cobro (Aliaddo, `facturacion-electronica/`). Un plan o un cobro con
+ * `suscripcion_id` se salta y se cuenta en `omitidasPorSuscripcion`, nunca se mezcla en la cuenta de
+ * una empresa. (Hoy ningún plan de suscripción llega aquí: el enrolamiento los crea con `activo = false`.)
+ *
  * Refs:
  *   - cerebro/conceptos/cobros-recurrentes-metrik.md
  *   - cerebro/reglas/cuenta-cobro-persona-natural-mauricio.md
@@ -53,6 +60,8 @@ export type GenerarCuentasOptions = {
 export type GenerarCuentasResult = {
   cuentasCreadas: number
   cuentasOmitidas: number  // ya existían
+  /** Planes o cobros de una suscripción: no se les emite cuenta de cobro (ver la cabecera). */
+  omitidasPorSuscripcion: number
   errores: { empresa_id: string; error: string }[]
   detalles: {
     empresa_id: string
@@ -144,20 +153,27 @@ export async function generarCuentasCobroPeriodo(
   const result: GenerarCuentasResult = {
     cuentasCreadas: 0,
     cuentasOmitidas: 0,
+    omitidasPorSuscripcion: 0,
     errores: [],
     detalles: [],
   }
 
   // 1. Planes activos del workspace
-  const { data: planes, error: pErr } = await supabase
+  const { data: planesTodos, error: pErr } = await supabase
     .from('planes_cobro')
-    .select('id, workspace_id, negocio_id, monto, total_cuotas, fecha_inicio, fecha_fin, concepto_detalle_template')
+    .select('id, workspace_id, negocio_id, suscripcion_id, monto, total_cuotas, fecha_inicio, fecha_fin, concepto_detalle_template')
     .eq('workspace_id', workspaceId)
     .eq('activo', true)
     .eq('frecuencia', 'mensual')
 
   if (pErr) throw new Error(`Error leyendo planes_cobro: ${pErr.message}`)
-  if (!planes || planes.length === 0) return result
+  // Los de una suscripción no reciben cuenta de cobro de persona natural (ver la cabecera).
+  const planes = ((planesTodos ?? []) as (PlanRow & { suscripcion_id?: string | null })[]).filter((p) => {
+    if (!p.suscripcion_id) return true
+    result.omitidasPorSuscripcion++
+    return false
+  })
+  if (planes.length === 0) return result
 
   // 1b. Los planes CON cronograma explicito no pasan por aqui: su monto y su
   // vencimiento salen de `plan_cobro_cuotas`, no de `plan.monto` + dia 15.
@@ -227,7 +243,7 @@ export async function generarCuentasCobroPeriodo(
   const { data: cobros, error: cErr } = await supabase
     .from('cobros')
     .select(`
-      id, plan_cobro_id, numero_cuota, monto, negocio_id, fecha_esperada,
+      id, plan_cobro_id, numero_cuota, monto, negocio_id, suscripcion_id, fecha_esperada,
       negocios:negocio_id (id, codigo, nombre, empresa_id, carpeta_url)
     `)
     .eq('workspace_id', workspaceId)
@@ -248,6 +264,7 @@ export async function generarCuentasCobroPeriodo(
     numero_cuota: number
     monto: number
     negocio_id: string
+    suscripcion_id?: string | null
     negocios: NegocioRow | null
   }
 
@@ -258,6 +275,11 @@ export async function generarCuentasCobroPeriodo(
     // existiera con vencimiento el dia 15 caeria igual en esta relectura y se
     // colaria dentro de la cuenta agrupada de la empresa.
     if (c.plan_cobro_id && idsExplicitos.has(c.plan_cobro_id)) continue
+    // El cobro de una suscripción no entra en la cuenta de cobro de nadie (ver la cabecera).
+    if (c.suscripcion_id) {
+      result.omitidasPorSuscripcion++
+      continue
+    }
     const empresaId = c.negocios?.empresa_id
     if (!empresaId) {
       result.errores.push({

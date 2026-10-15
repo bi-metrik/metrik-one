@@ -334,3 +334,31 @@ describe('emitirCuentaDesdeCuota · idempotencia', () => {
     if (r.success) expect(r.numero).toBe('CC-2026-09-003')
   })
 })
+
+describe('generarCuentasCobroPeriodo · una suscripción no recibe cuenta de cobro de persona natural', () => {
+  it('el plan y el cobro de una suscripción se saltan (se cuentan aparte) y no tocan la cuenta de la empresa', async () => {
+    sembrarSeptiembre([CC_09_001, CC_09_003])
+    estado.fixtures.planes_cobro.push({ ...plan('plan-sus', 'x', 150_000, '2026-09-15', 12), negocio_id: null, suscripcion_id: 'sus-1' })
+    estado.fixtures.cobros.push({
+      id: 'cob-sus', workspace_id: WS, plan_cobro_id: 'plan-sus-otro', numero_cuota: 1, monto: 150_000,
+      negocio_id: null, suscripcion_id: 'sus-1', fecha_esperada: '2026-09-15', fecha: null, tipo_cobro: 'programado', negocios: null,
+    })
+
+    const r = await emitirSeptiembre()
+
+    expect(r.omitidasPorSuscripcion).toBe(2)
+    // Ni error de «cobro sin empresa» ni el cobro de la suscripción dentro de la agrupada de AFI.
+    expect(r.errores).toEqual([])
+    expect(detalleDe(r, AFI)?.cobros_ids.sort()).toEqual([...GRUPO_AFI].sort())
+    expect(r.detalles.flatMap((d) => d.cobros_ids)).not.toContain('cob-sus')
+  })
+
+  it('emitir la cuenta de una cuota de suscripción se rechaza con el motivo', async () => {
+    estado.fixtures = {
+      plan_cobro_cuotas: [{ id: 'q-sus', workspace_id: WS, plan_cobro_id: 'plan-sus', numero: 1, monto: 150_000, fecha_vencimiento: '2026-09-15', concepto_detalle: 'Valida' }],
+      planes_cobro: [{ id: 'plan-sus', workspace_id: WS, negocio_id: null, suscripcion_id: 'sus-1', total_cuotas: 12, concepto_detalle_template: null }],
+    }
+    const r = await emitirCuentaDesdeCuota(clienteFalso() as unknown as SupabaseClient, 'q-sus', { dryRun: true })
+    expect(r).toMatchObject({ success: false, error: expect.stringMatching(/suscripción/) })
+  })
+})
