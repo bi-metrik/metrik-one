@@ -153,3 +153,39 @@ describe('el cron recoge lo que el webhook no alcanzó', () => {
     expect(v.llamadas).toHaveLength(1)
   })
 })
+
+describe('el pago de una cuota de una SUSCRIPCIÓN (suscripciones_producto) abre el ciclo igual', () => {
+  function deSuscripcion(): Tablas {
+    const t = base()
+    t.servicios_contratados[0] = { ...t.servicios_contratados[0], negocio_id: null, suscripcion_id: 's-prueba' }
+    t.cobros[0] = { ...t.cobros[0], negocio_id: null, suscripcion_id: 's-prueba' }
+    return t
+  }
+
+  it('el webhook (abrirCicloSiCorresponde) encuentra el contrato por la suscripción del cobro', async () => {
+    const { db, tablas } = crearDoble(deSuscripcion())
+    const v = valida()
+    const r = await abrirCicloSiCorresponde('cobro-1', { db, llamar: v.llamar, ahora: AHORA, env: {} })
+    expect(r.tipo).toBe('abierto')
+    expect(v.llamadas[0].cuerpo).toMatchObject({ workspace_one_id: PRUEBA, referencia: 'one-ciclo:cobro-1', consultas: 3000 })
+    const config = tablas.workspaces.find((w) => w.id === PRUEBA)?.config_extra as Record<string, unknown>
+    expect(config.valida_plan).toMatchObject({ cobro_id: 'cobro-1', cuota_numero: 1 })
+  })
+
+  it('el paso 8 (reconciliar) lee los cobros de la suscripción', async () => {
+    const { db } = crearDoble(deSuscripcion())
+    const v = valida()
+    const r = await reconciliarCiclosValida({ db, llamar: v.llamar, ahora: AHORA, env: {} })
+    expect(r.errores).toEqual([])
+    expect(r.abiertos).toBe(1)
+  })
+
+  it('un cobro de OTRA suscripción no abre el ciclo de esta', async () => {
+    const t = deSuscripcion()
+    t.cobros[0] = { ...t.cobros[0], suscripcion_id: 's-otra' }
+    const v = valida()
+    const r = await abrirCicloSiCorresponde('cobro-1', { db: crearDoble(t).db, llamar: v.llamar, ahora: AHORA, env: {} })
+    expect(r).toEqual({ tipo: 'no_aplica', motivo: 'sin_contrato_valida' })
+    expect(v.llamadas).toHaveLength(0)
+  })
+})
