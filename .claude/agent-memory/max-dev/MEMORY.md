@@ -3,6 +3,7 @@
 ## Project memories
 
 - ⚠️⚠️ [Propuesta: H33 (#1165) y motor html (PR 2)](project_propuesta_motor_html_h33.md) — SQL del interruptor SIN aplicar; anticipo en documento_cliente
+- ⚠️⚠️ [Propuesta PR 4: catálogo de fotos](project_fotos_catalogo.md) — migración 20261014221500 SIN aplicar (tabla + bucket); Commons pide todas las palabras
 - [Propuesta de viaje: Chromium (#1161) y modelo (#1162)](project_propuesta_chromium_modelo.md) — mergeados; vercel curl crea bypass (no); Montserrat OTF
 - ⚠️⚠️ [Perfil del contacto por el bot (corte 1)](project_perfil_contacto_bot.md) — migración 20261012234500 SIN aplicar; fichas sin publicar; el esquema manda sobre el prompt
 - ⚠️ [SOE-016: responsable automático por etapa](project_responsable_automatico_etapa.md) — sin migración; config SOENA SIN aplicar; crear negocio no cubierto
