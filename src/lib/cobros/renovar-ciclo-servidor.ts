@@ -1,6 +1,7 @@
 import 'server-only'
 import type { SupabaseClient } from '@supabase/supabase-js'
 import { traerTodo } from '@/lib/supabase/paginar'
+import { anclaDeFila, idsPorTipo, llaveDeFila, type Ancla } from '@/lib/suscripciones-producto/ancla'
 import {
   MODULOS_CON_RENOVACION_AUTOMATICA,
   planearRenovacion,
@@ -39,7 +40,8 @@ export interface ResumenRenovacion {
 interface FilaContrato {
   id: string
   workspace_id: string
-  negocio_id: string
+  negocio_id: string | null
+  suscripcion_id?: string | null
   estado: string
   servicio_slug: string
   parametros: Record<string, unknown> | null
@@ -50,7 +52,8 @@ interface FilaContrato {
 interface FilaPlan {
   id: string
   workspace_id: string
-  negocio_id: string
+  negocio_id: string | null
+  suscripcion_id?: string | null
   frecuencia: string
   fecha_inicio: string
   fecha_fin: string
@@ -90,40 +93,49 @@ export async function renovarPlanesPorCiclo(deps: { db: SupabaseClient; hoy: str
     (desde, hasta) =>
       db
         .from('servicios_contratados')
-        .select('id, workspace_id, negocio_id, estado, servicio_slug, parametros, vigente_desde, vigente_hasta')
+        .select('id, workspace_id, negocio_id, suscripcion_id, estado, servicio_slug, parametros, vigente_desde, vigente_hasta')
         .in('servicio_slug', [...moduloPorSlug.keys()])
         .order('id')
         .range(desde, hasta),
     { etiqueta: 'contratos por ciclo para renovar' },
   )
   if (contratos.length === 0) return resumen
-  const contratoPorNegocio = new Map<string, FilaContrato>()
+  // La llave es el ANCLA del contrato: su negocio o su suscripción (desde 20261016).
+  const contratoPorAncla = new Map<string, FilaContrato>()
   for (const c of contratos) {
-    const llave = `${c.workspace_id}|${c.negocio_id}`
-    const previo = contratoPorNegocio.get(llave)
-    if (!previo || manda(c, previo)) contratoPorNegocio.set(llave, c)
+    const ancla = llaveDeFila(c)
+    if (!ancla) continue
+    const llave = `${c.workspace_id}|${ancla}`
+    const previo = contratoPorAncla.get(llave)
+    if (!previo || manda(c, previo)) contratoPorAncla.set(llave, c)
   }
-  const negocioIds = [...new Set(contratos.map((c) => c.negocio_id))]
-
-  // 3. Los planes con `auto_renovar` de esos negocios.
-  const planes = await traerTodo<FilaPlan>(
-    (desde, hasta) =>
-      db
-        .from('planes_cobro')
-        .select('id, workspace_id, negocio_id, frecuencia, fecha_inicio, fecha_fin, total_cuotas, auto_renovar, concepto_detalle_template')
-        .in('negocio_id', negocioIds)
-        .eq('auto_renovar', true)
-        .order('id')
-        .range(desde, hasta),
-    { etiqueta: 'planes con renovación automática' },
+  const { negocios: negocioIds, suscripciones: suscripcionIds } = idsPorTipo(
+    contratos.map((c) => anclaDeFila(c)).filter((a): a is Ancla => a !== null),
   )
+
+  // 3. Los planes con `auto_renovar` de esos negocios y suscripciones.
+  const planesDe = (col: 'negocio_id' | 'suscripcion_id', ids: string[]) =>
+    ids.length === 0
+      ? Promise.resolve([] as FilaPlan[])
+      : traerTodo<FilaPlan>(
+          (desde, hasta) =>
+            db
+              .from('planes_cobro')
+              .select('id, workspace_id, negocio_id, suscripcion_id, frecuencia, fecha_inicio, fecha_fin, total_cuotas, auto_renovar, concepto_detalle_template')
+              .in(col, ids)
+              .eq('auto_renovar', true)
+              .order('id')
+              .range(desde, hasta),
+          { etiqueta: `planes con renovación automática (${col})` },
+        )
+  const planes = (await Promise.all([planesDe('negocio_id', negocioIds), planesDe('suscripcion_id', suscripcionIds)])).flat()
   if (planes.length === 0) return resumen
   resumen.planes = planes.length
   const planIds = planes.map((p) => p.id)
-  const planesPorNegocio = new Map<string, number>()
+  const planesPorAncla = new Map<string, number>()
   for (const p of planes) {
-    const llave = `${p.workspace_id}|${p.negocio_id}`
-    planesPorNegocio.set(llave, (planesPorNegocio.get(llave) ?? 0) + 1)
+    const llave = `${p.workspace_id}|${llaveDeFila(p)}`
+    planesPorAncla.set(llave, (planesPorAncla.get(llave) ?? 0) + 1)
   }
 
   // 4. Cuotas, cobros y planes anuales de esos planes.
@@ -190,8 +202,8 @@ export async function renovarPlanesPorCiclo(deps: { db: SupabaseClient; hoy: str
 
   // 5. Renovar, uno por uno: un plan que falle no impide el siguiente.
   for (const p of planes) {
-    const llave = `${p.workspace_id}|${p.negocio_id}`
-    const contrato = contratoPorNegocio.get(llave) ?? null
+    const llave = `${p.workspace_id}|${llaveDeFila(p)}`
+    const contrato = contratoPorAncla.get(llave) ?? null
     const decision = planearRenovacion(
       {
         planId: p.id,
@@ -206,7 +218,7 @@ export async function renovarPlanesPorCiclo(deps: { db: SupabaseClient; hoy: str
         parametros: contrato?.parametros ?? null,
         vigenteHasta: contrato?.vigente_hasta ?? null,
         planAnualEnCurso: conPlanAnual.has(p.id),
-        variosPlanes: (planesPorNegocio.get(llave) ?? 0) > 1,
+        variosPlanes: (planesPorAncla.get(llave) ?? 0) > 1,
         cuotas: cuotasPorPlan.get(p.id) ?? [],
       },
       deps.hoy,
@@ -250,7 +262,7 @@ export async function renovarPlanesPorCiclo(deps: { db: SupabaseClient; hoy: str
   return resumen
 }
 
-/** El contrato que manda en un negocio: el activo, y entre varios el de vigencia más reciente. */
+/** El contrato que manda en un negocio (o suscripción): el activo, y entre varios el de vigencia más reciente. */
 function manda(a: FilaContrato, b: FilaContrato): boolean {
   const activo = Number(a.estado === 'activo') - Number(b.estado === 'activo')
   if (activo !== 0) return activo > 0
