@@ -122,6 +122,7 @@ function arnes(filasIniciales: Fila[], receptor: { current: Receptor | null }, p
       bandeja: React.createElement(Bandeja, {
         cotizacionId: caso.COT_SAN_ANDRES, items: filas as never, composicion: caso.COMPOSICION, porPasos: true, receptor: receptor as never,
         destinoViaje: caso.DESTINO, onProvisional: recibir, onCambio: () => {},
+        onVistaFresca: (v: unknown) => setFilas((v as { items: Fila[] }).items),
       }),
       agregarSinPantallazo: null,
       tarjetaDeOpcion: (id: string) => React.createElement('div', { 'data-opcion-stub': id }, id),
@@ -135,8 +136,8 @@ function arnes(filasIniciales: Fila[], receptor: { current: Receptor | null }, p
 /** El caso fijo SIN el buceo; el buceo entra por la bandeja como servicio nuevo. */
 async function montar() {
   const filas = caso.LINEAS_CASO_FIJO
-    .map(l => ({ ...structuredClone(l.item), rubros: [structuredClone(l.rubro)] }))
-    .filter(f => f.id !== 'a-buceo') as Fila[]
+    .map(l => ({ ...structuredClone(l.item), rubros: [structuredClone(l.rubro)] }) as Fila)
+    .filter(f => f.id !== 'a-buceo')
   const receptor = React.createRef<Receptor>()
   const ponerFilas: { current: ((f: Fila[]) => void) | null } = { current: null }
   await act(async () => { root!.render(React.createElement(arnes(filas, receptor, ponerFilas))) })
@@ -151,8 +152,9 @@ async function montar() {
   const fila = [...contenedor.querySelectorAll('[data-captura]')].find(li => /Buceo/i.test(texto(li)))!
   expect(texto(fila.querySelector('[data-frase-destino]'))).toMatch(/^Suma aparte/)
   const aceptar = [...fila.querySelectorAll('button')].find(b => texto(b) === 'Aceptar')!
-  const buceoReal = { ...structuredClone(caso.LINEAS_CASO_FIJO.find(l => l.item.id === 'a-buceo')!.item), rubros: [structuredClone(caso.LINEAS_CASO_FIJO.find(l => l.item.id === 'a-buceo')!.rubro)] }
-  return { filas, aceptar, ponerFilas, buceoReal: { ...buceoReal, id: 'item-buceo-nuevo' } as Fila }
+  const linea = caso.LINEAS_CASO_FIJO.find(l => l.item.id === 'a-buceo')!
+  const buceoReal = { ...structuredClone(linea.item), rubros: [structuredClone(linea.rubro)], id: 'item-buceo-nuevo' } as Fila
+  return { filas, aceptar, ponerFilas, buceoReal }
 }
 
 describe('V2 · aceptar uno: el bloque se pinta antes de que el servidor conteste', () => {
@@ -174,20 +176,37 @@ describe('V2 · aceptar uno: el bloque se pinta antes de que el servidor contest
     console.info(`[V2] del clic al bloque visible, en el navegador de prueba: ${ms.toFixed(1)} ms (servidor sin contestar)`)
     expect(ms).toBeLessThan(1000)
 
-    // El servidor acepta: el bloque provisional se queda hasta que la página trae la opción.
+    // El servidor acepta y su respuesta trae la cotización como quedó: en ese mismo momento, un
+    // solo bloque, con su precio, y el total nuevo. Sin esperar otra petición.
+    void ponerFilas
     await act(async () => {
-      soltar!(new Response(JSON.stringify({ ok: true, itemId: 'item-buceo-nuevo', donde: 'Actividad en San Andrés', pendiente: null, como: 'nueva', bloque: 'Actividad en San Andrés', opcion: null }), { status: 200 }))
+      soltar!(new Response(JSON.stringify({
+        ok: true, itemId: 'item-buceo-nuevo', donde: 'Actividad en San Andrés', pendiente: null, como: 'nueva', bloque: 'Actividad en San Andrés', opcion: null,
+        vista: { leidaEn: '2026-10-14T12:00:00.000Z', items: [...filas, buceoReal], adicionalesPorItem: {}, valorTotal: 1 },
+      }), { status: 200 }))
     })
-    await asentar()
-    expect(precios()).toContain('Guardando…')
-    // La página se refresca con la opción de verdad: un solo bloque, con precio.
-    await act(async () => { ponerFilas.current!([...filas, buceoReal]) })
     await asentar()
     expect(contenedor.querySelector('[data-provisional]')).toBeNull()
     expect(precios()).toHaveLength(antes.length + 1)
     expect(precios()).not.toContain('Guardando…')
     expect(total()).not.toBe(totalAntes)
     expect(avisos.error).toEqual([])
+  })
+
+  it('sin la cotización en la respuesta, el bloque provisional se queda hasta que la página trae la opción', async () => {
+    const { filas, aceptar, ponerFilas, buceoReal } = await montar()
+    const antes = precios()
+    await act(async () => { aceptar.dispatchEvent(new MouseEvent('click', { bubbles: true })) })
+    await act(async () => {
+      soltar!(new Response(JSON.stringify({ ok: true, itemId: 'item-buceo-nuevo', donde: 'Actividad en San Andrés', pendiente: null, como: 'nueva', bloque: 'Actividad en San Andrés', opcion: null }), { status: 200 }))
+    })
+    await asentar()
+    expect(precios()).toContain('Guardando…')
+    await act(async () => { ponerFilas.current!([...filas, buceoReal]) })
+    await asentar()
+    expect(contenedor.querySelector('[data-provisional]')).toBeNull()
+    expect(precios()).toHaveLength(antes.length + 1)
+    expect(precios()).not.toContain('Guardando…')
   })
 
   it('D1 · si el servidor falla, el bloque se quita y se dice por qué', async () => {

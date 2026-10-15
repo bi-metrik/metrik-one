@@ -62,7 +62,7 @@ import TarjetaOpcion from '@/app/(app)/negocios/tarjeta-opcion'
 import { devolverOpcionABandeja } from '@/app/(app)/negocios/tarifa-pax-actions'
 import { MarcoCotizacionContexto } from '@/app/(app)/negocios/marco-cotizacion-contexto'
 import { usePublicarTotalVivo } from '@/app/(app)/negocios/total-vivo'
-import { laMasNueva, lineasParaPintar, traerVistaFresca, type VistaFresca } from '@/lib/cotizaciones/vista-fresca'
+import { interpretarVistaFresca, laMasNueva, lineasParaPintar, traerVistaFresca, type VistaFresca } from '@/lib/cotizaciones/vista-fresca'
 import { esAvisoSoloInformativo, estadoDeBloque, resumenDeBloques, type EstadoDeBloque } from '@/lib/cotizaciones/bandeja-capturas'
 import { avisoDePasajerosDeOpcion, pesos as pesosTarjeta } from '@/lib/cotizaciones/tarjeta-opcion'
 import { crearRanuraConOpcion, eliminarRanura } from '@/app/(app)/negocios/ranura-actions'
@@ -461,6 +461,11 @@ export default function CotizacionEditor({ oportunidadId, cotizacion, initialIte
     provisionalesVivos.current = r.provisionales
     setProvisionales(r.provisionales)
     if (r.aviso) toast.error(r.aviso)
+  }
+  /** V2 · la cotización que trajo la respuesta de «Aceptar»: se pinta como una lectura propia. */
+  const recibirVistaFresca = (cuerpo: unknown) => {
+    const v = interpretarVistaFresca({ ok: true, ...(cuerpo as object) })
+    if (v) setVistaFresca(prev => laMasNueva(prev, v))
   }
   useEffect(() => {
     // La página ya trae la opción de verdad: su bloque provisional sobra.
@@ -3713,6 +3718,7 @@ export default function CotizacionEditor({ oportunidadId, cotizacion, initialIte
           porPasos
           onConteo={setConteoBandeja}
           onProvisional={recibirProvisional}
+          onVistaFresca={recibirVistaFresca}
           cotizacionId={cotizacion.id}
           items={initialItems}
           composicion={composicionViaje}

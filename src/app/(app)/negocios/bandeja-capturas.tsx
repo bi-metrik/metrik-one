@@ -367,6 +367,7 @@ export default function BandejaCapturas({
   porPasos = false,
   onConteo,
   onProvisional,
+  onVistaFresca,
 }: {
   cotizacionId: string
   /** Las líneas de la cotización: contra ellas se dice a dónde irá cada captura. */
@@ -403,6 +404,8 @@ export default function BandejaCapturas({
    * (`aceptar-optimista.ts`). Avisa cuándo empieza, cuándo el servidor lo aceptó y cuándo no.
    */
   onProvisional?: (e: EventoProvisional) => void
+  /** V2 · la cotización como quedó después de «Aceptar» (por pasos): la respuesta ya la trae. */
+  onVistaFresca?: (vista: unknown) => void
 }) {
   const router = useRouter()
   const refrescar = () => (onCambio ? onCambio() : router.refresh())
@@ -833,8 +836,12 @@ export default function BandejaCapturas({
     } as BorradorParaAceptar
     const turno = colaAceptar.current.then(() => aceptarPorRuta(cotizacionId, cuerpo))
     colaAceptar.current = turno.catch(() => undefined)
-    const d = desenlaceDeAceptacion(await turno)
+    const crudo = await turno
+    const d = desenlaceDeAceptacion(crudo)
     aceptando.current.delete(c.id)
+    // V2 · por pasos, la respuesta ya trae la cotización como quedó: se pinta sin pedirla otra vez.
+    const vista = porPasos && d.tipo === 'aceptada' ? (crudo as { vista?: unknown } | null)?.vista : null
+    if (vista && onVistaFresca) onVistaFresca(vista)
     // D1 · si el servidor no la aceptó, el bloque se quita y se dice; si la aceptó, se queda hasta
     // que la página traiga la opción.
     if (provisional) {
