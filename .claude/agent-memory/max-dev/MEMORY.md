@@ -14,6 +14,8 @@
 - ⚠️ [Post-cotización ola 4: F3, F5 y Siigo listo](project_post_cotizacion_f3_f5.md) — #1119/#1120/#1123 apilados; wa-webhook sin desplegar; piso $0
 - ⚠️ [Post-cotización olas 2-3: confirmación y riel de cobro](project_post_cotizacion_f2.md) — #1116/#1117 sin migración; destrabados con merge de main (12-oct)
 - ⚠️ [Cotizador de viajes: plata de la prueba Europa](project_cotizador_viajes_plata_europa.md) — H27 era el editor sin adicionales; resta en repartirHabitaciones
+- ⚠️⚠️ [Cargue masivo de Valida en el servidor](project_valida_lote_servidor.md) — migración 20261015231700 SIN aplicar; cron por minuto; puerta CDA = autorización ≤ 2 h
+- ⚠️ [Latencia del cargue masivo de Valida](project_valida_latencia_masiva.md) — Next encola server actions: lote en serie; ONE pesa más que Valida desde la 0036
 - ⚠️⚠️ [Alta autogestionada de Valida (#1095, #1097, #1098)](project_valida_alta_autogestionada.md) — #1097 aplicada y mergeada; PR 1/9 de Valida son parches
 - ⚠️ [«Activar plan» por WhatsApp (temporal)](project_activar_plan_whatsapp_temporal.md) — hasta #1107; choca con #1107 en corte-bolsa.ts
 - ⚠️⚠️ [Renovación continua de Valida (fila A)](project_valida_renovacion_continua.md) — paso 6b agrega 1 cuota; script de los 4 CDA SIN correr; ficha sin dias_trial

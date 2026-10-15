@@ -13,3 +13,7 @@ Cargue masivo de Valida (2026-10-04, rama `fix/valida-cargue-masivo-concurrente`
 - El reintento por red pasa `reintento: true` a `consultarValida`, que devuelve la fila ya guardada del lote (misma persona) en vez de cobrar otra vez. Límite: misma persona dos veces en el XLSX + reintento = una fila menos.
 - El tiempo agotado en el navegador NO reintenta: el server action pudo seguir y cobrar.
 - El PDF de lote ordena por `created_at`: con concurrencia el orden ya no es exactamente el del XLSX. Arreglarlo pide una columna de índice (migración).
+
+**Corrección medida el 2026-10-15:** las 3 filas a la vez nunca ocurren en producción. Next encola las server actions del cliente y las corre de a una, así que el lote va en serie. Ver [[valida-latencia-masiva]].
+
+**Reemplazado el 2026-10-15** por el lote en el servidor ([[valida-lote-servidor]]): `cargue-lote.ts` se borró y el reintento `reintento: true` de `consultarValida` ya no lo usa la pantalla.
