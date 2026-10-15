@@ -1,4 +1,5 @@
 import type { NextConfig } from 'next'
+import { RUTA_REGISTRO_VALIDA, politicaRegistroValida } from './src/lib/valida-registro/csp'
 
 const nextConfig: NextConfig = {
   // Skew Protection: sella cada peticion con el id del deployment que la
@@ -32,6 +33,24 @@ const nextConfig: NextConfig = {
   // van por `fetchPropio` (`src/lib/version/fetch-propio.ts`). Y no cubre la base
   // de datos, que es una sola: para eso esta la epoca (`src/lib/version/epoca.ts`).
   deploymentId: process.env.VERCEL_DEPLOYMENT_ID,
+  // La página donde se escribe la tarjeta (Valida, alta autogestionada) lleva su propia CSP: ningún
+  // script de terceros salvo jQuery y ePayco.js. Ver `src/lib/valida-registro/csp.ts`.
+  async headers() {
+    return [
+      {
+        source: RUTA_REGISTRO_VALIDA,
+        headers: [
+          {
+            key: 'Content-Security-Policy',
+            value: politicaRegistroValida(
+              process.env.NEXT_PUBLIC_SUPABASE_URL,
+              process.env.NODE_ENV === 'development',
+            ),
+          },
+        ],
+      },
+    ]
+  },
   // Permit images from Supabase storage
   images: {
     remotePatterns: [

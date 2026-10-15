@@ -12,6 +12,7 @@
 - ⚠️ [Post-cotización olas 2-3: confirmación y riel de cobro](project_post_cotizacion_f2.md) — #1116/#1117 sin migración; destrabados con merge de main (12-oct)
 - ⚠️ [Cotizador de viajes: plata de la prueba Europa](project_cotizador_viajes_plata_europa.md) — H27 era el editor sin adicionales; resta en repartirHabitaciones
 - [Post-cotización ola 1: servicios del viaje F0](project_post_cotizacion_servicios_f0.md) — migración APLICADA; datos en `_servicios`; Q1-Q8 sin medir
+- ⚠️ [ePayco.js en el registro de Valida](project_epayco_tokenizacion_navegador.md) — sin captura alojada; 1er intento fallaba por la sesión; CSP de la ruta
 - [«Activar plan»: WhatsApp solo de respaldo](project_activar_plan_whatsapp_temporal.md) — desde la pila #1107: botón a /valida/activar; WA solo con la activación cerrada
 - ⚠️⚠️ [Renovación continua de Valida (fila A)](project_valida_renovacion_continua.md) — paso 6b agrega 1 cuota; script de los 4 CDA SIN correr; ficha sin dias_trial
 - ⚠️⚠️ [SOE-007: devolución de dinero y venta reembolsada](project_devoluciones_dinero_soe007.md) — 20261009210000 APLICADA; devuelto ≥ cobrado sale de ventas; read-only API sí mide

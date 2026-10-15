@@ -1,7 +1,11 @@
 'use client'
 
+import Image from 'next/image'
 import Script from 'next/script'
+import { Lock } from 'lucide-react'
 import { forwardRef, useImperativeHandle, useRef, useState } from 'react'
+import { INTEGRIDAD_JQUERY, SCRIPT_EPAYCO, SCRIPT_JQUERY } from '@/lib/valida-registro/csp'
+import { asegurarSesionEpayco, textoErrorEpayco } from '@/lib/valida-registro/error-epayco'
 
 /**
  * La tarjeta para el cobro al cumplirse los 7 días de la prueba (numeral 7 de la v2.0, decisión A2). Solo se pinta cuando
@@ -12,10 +16,16 @@ import { forwardRef, useImperativeHandle, useRef, useState } from 'react'
  * devuelve un TOKEN. A ONE solo llegan el token, el titular y el celular.
  *
  * ePayco.js usa `$.ajax`, así que se carga jQuery antes (documentación oficial de tokenización).
+ *
+ * Los campos de la tarjeta van dentro de un recuadro de ePayco, con su distintivo oficial (el de
+ * franquicias, de https://epayco.com/recursos-graficos/, sin recortar ni recolorear): quien paga ve
+ * que esos datos los recibe ePayco y no un formulario de METRIK. ePayco no ofrece una captura
+ * alojada que devuelva un token reutilizable; ver la CSP de esta página en `lib/valida-registro/csp.ts`.
  */
 
-const JQUERY = 'https://code.jquery.com/jquery-3.7.1.min.js'
-const EPAYCO_JS = 'https://checkout.epayco.co/epayco.min.js'
+/** Lo que dice el recuadro, encima de los campos. */
+const TEXTO_RECUADRO_EPAYCO =
+  'Tus datos los recibe ePayco directamente; METRIK nunca ve el número de tu tarjeta.'
 
 type EpaycoGlobal = {
   setPublicKey: (k: string) => void
@@ -70,11 +80,14 @@ const TarjetaEpayco = forwardRef<TarjetaEpaycoHandle, PropsTarjeta>(function Tar
           rechazar(new Error('La pasarela de pago todavía está cargando. Espera un momento.'))
           return
         }
+        asegurarSesionEpayco(window.localStorage, () => crypto.randomUUID())
         ePayco.setPublicKey(llavePublica)
         ePayco.setLanguage?.('es')
         ePayco.token.create(bloque.current, (error, token) => {
           if (error || !token) {
-            rechazar(new Error('ePayco no aceptó la tarjeta. Revisa los datos e inténtalo de nuevo.'))
+            // El objeto de ePayco entero, para diagnosticar: no trae datos de la tarjeta (ver error-epayco.ts).
+            console.error('[ePayco] no tokenizó', error ?? { token })
+            rechazar(new Error(textoErrorEpayco(error)))
             return
           }
           resolver({ token, titular: campoTitular.current?.value ?? '', celular })
@@ -84,21 +97,41 @@ const TarjetaEpayco = forwardRef<TarjetaEpaycoHandle, PropsTarjeta>(function Tar
 
   return (
     <fieldset className="space-y-3 rounded-lg border border-border p-3" data-tarjeta-epayco>
-      <Script src={JQUERY} strategy="afterInteractive" />
-      <Script src={EPAYCO_JS} strategy="afterInteractive" onLoad={() => setCargado(true)} />
+      <Script src={SCRIPT_JQUERY} integrity={INTEGRIDAD_JQUERY} crossOrigin="anonymous" strategy="afterInteractive" />
+      <Script src={SCRIPT_EPAYCO} strategy="afterInteractive" onLoad={() => setCargado(true)} />
       <legend className="px-1 text-sm font-medium text-foreground">Tarjeta para el plan</legend>
       <p className="text-xs text-muted-foreground">{texto.replace('{fecha_y_hora_vence}', vence)}</p>
-      {/* Lo que lee ePayco.js. Sin `name`: estos datos no se envían a ONE. */}
-      <div ref={bloque} className="space-y-3">
-        <input type="hidden" data-epayco="card[email]" value={correo} readOnly />
-        <input ref={campoTitular} className={claseCampo} data-epayco="card[name]" aria-label="Nombre en la tarjeta" placeholder="Nombre en la tarjeta" autoComplete="cc-name" />
-        <input className={claseCampo} data-epayco="card[number]" aria-label="Número de la tarjeta" placeholder="Número de la tarjeta" inputMode="numeric" autoComplete="cc-number" />
-        <div className="flex gap-2">
-          <input className={claseCampo} data-epayco="card[exp_month]" aria-label="Mes (MM)" placeholder="MM" inputMode="numeric" autoComplete="cc-exp-month" maxLength={2} />
-          <input className={claseCampo} data-epayco="card[exp_year]" aria-label="Año (AAAA)" placeholder="AAAA" inputMode="numeric" autoComplete="cc-exp-year" maxLength={4} />
-          <input className={claseCampo} data-epayco="card[cvc]" aria-label="CVC" placeholder="CVC" inputMode="numeric" autoComplete="cc-csc" maxLength={4} />
+      {/* El recuadro de ePayco: solo lo que va a ePayco. El celular queda afuera porque lo recibe ONE. */}
+      <section
+        aria-label="Pago seguro con ePayco"
+        className="space-y-3 rounded-xl border-2 border-neutral-900 bg-white p-3"
+        data-recuadro-epayco
+      >
+        <div className="flex items-center gap-1.5 text-sm font-semibold text-neutral-900">
+          <Lock className="size-4" aria-hidden />
+          Pago seguro con ePayco
         </div>
-      </div>
+        <Image
+          src="/pasarela/epayco-franquicias.png"
+          alt="ePayco: Visa, Mastercard, American Express, Diners Club y Codensa"
+          width={664}
+          height={210}
+          className="h-auto w-full max-w-[240px]"
+        />
+        <p className="text-xs text-neutral-700">{TEXTO_RECUADRO_EPAYCO}</p>
+        {/* Lo que lee ePayco.js. Sin `name`: estos datos no se envían a ONE. */}
+        <div ref={bloque} className="space-y-3">
+          <input type="hidden" data-epayco="card[email]" value={correo} readOnly />
+          <input ref={campoTitular} className={claseCampo} data-epayco="card[name]" aria-label="Nombre en la tarjeta" placeholder="Nombre en la tarjeta" autoComplete="cc-name" />
+          <input className={claseCampo} data-epayco="card[number]" aria-label="Número de la tarjeta" placeholder="Número de la tarjeta" inputMode="numeric" autoComplete="cc-number" />
+          <div className="flex gap-2">
+            <input className={claseCampo} data-epayco="card[exp_month]" aria-label="Mes (MM)" placeholder="MM" inputMode="numeric" autoComplete="cc-exp-month" maxLength={2} />
+            <input className={claseCampo} data-epayco="card[exp_year]" aria-label="Año (AAAA)" placeholder="AAAA" inputMode="numeric" autoComplete="cc-exp-year" maxLength={4} />
+            <input className={claseCampo} data-epayco="card[cvc]" aria-label="CVC" placeholder="CVC" inputMode="numeric" autoComplete="cc-csc" maxLength={4} />
+          </div>
+        </div>
+        {!cargado && <p className="text-xs text-neutral-700">Cargando la pasarela de pago...</p>}
+      </section>
       <input
         className={claseCampo}
         aria-label="Celular"
@@ -108,7 +141,6 @@ const TarjetaEpayco = forwardRef<TarjetaEpaycoHandle, PropsTarjeta>(function Tar
         value={celular}
         onChange={(e) => setCelular(e.target.value)}
       />
-      {!cargado && <p className="text-xs text-muted-foreground">Cargando la pasarela de pago...</p>}
     </fieldset>
   )
 })
