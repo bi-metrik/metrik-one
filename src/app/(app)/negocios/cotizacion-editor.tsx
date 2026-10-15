@@ -85,6 +85,7 @@ import {
   gruposCanonicos,
   ranuraDeGrupo,
   ranuraPorSlug,
+  resolverRanura,
   siguienteGrupoDeTipo,
 } from '@/lib/cotizaciones/ranuras-pantallazo'
 import { nombreProvisionalDeGrupo } from '@/lib/cotizaciones/nombre-linea'
@@ -3643,7 +3644,9 @@ export default function CotizacionEditor({ oportunidadId, cotizacion, initialIte
     for (const i of lineasConLectura) {
       const g = normalizarGrupo(i.grupo)
       if (!g || noVan.has(g) || estadoDeLinea(i) !== 'no') continue
-      noVan.set(g, { itemId: i.id, nombre: etiquetaDeRanura(g) })
+      // H8 · el nombre del servicio como lo pinta la forma por pasos («Vuelo San Andrés ⇄ Providencia»),
+      // no la etiqueta con su ordinal («Vuelo 2 · …»), que es una clave interna.
+      noVan.set(g, { itemId: i.id, nombre: resolverRanura(g)?.nombre ?? etiquetaDeRanura(g) })
     }
     return listaUnica({
       sinPrecio: opcionesSinPrecio(lineasConLectura, idsQueSalen, composicionViaje ?? null),

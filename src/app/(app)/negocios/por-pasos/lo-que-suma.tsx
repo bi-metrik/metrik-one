@@ -31,7 +31,11 @@ function Lista({ d }: { d: DatosLoQueSuma }) {
       <ul className="m-0 flex list-none flex-col gap-2 p-0">
         {d.renglones.map(r => {
           const falta = r.opcionId ? d.faltaPrecio(r.opcionId) : null
-          const otras = r.otras.map(o => `${d.nombreDeOpcion(o.opcionId)} ${o.tarifas.length > 0 ? `va en ${o.tarifas.join(' y ')}` : 'no está en ninguna tarifa'}`)
+          // H8 · cada otra opción en su línea y con la tarifa ADELANTE: los nombres ya traen « · ciudad»,
+          // y pegados con otro «·» se leían como una sola cosa («POSADA · PROVIDENCIA · CABAÑAS…»).
+          const otras = r.otras.map(o => (o.tarifas.length > 0
+            ? `En ${o.tarifas.join(' y ')}: ${d.nombreDeOpcion(o.opcionId)}`
+            : `En ninguna tarifa: ${d.nombreDeOpcion(o.opcionId)}`))
           return (
             <li key={r.grupo} className="text-[13px]" data-renglon-suma={r.grupo} data-no-suma={r.noSuma ? 'si' : undefined}>
               <span className="flex items-baseline justify-between gap-2">
@@ -45,8 +49,8 @@ function Lista({ d }: { d: DatosLoQueSuma }) {
               </span>
               <small className="block pl-3.5 text-[11.5px] text-[#6E6A62]">
                 {r.noSuma ?? (r.opcionId ? d.nombreDeOpcion(r.opcionId) : '')}
-                {!r.noSuma && otras.length > 0 && ` · ${otras.join(' · ')}`}
                 {falta && <span className="font-semibold text-[#B3382C]"> · {falta}</span>}
+                {!r.noSuma && otras.map(o => <span key={o} className="block" data-otra-opcion>{o}</span>)}
               </small>
             </li>
           )
