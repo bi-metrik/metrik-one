@@ -69,3 +69,36 @@ export function sinFotosDeHotel<T extends EntradaModeloPropuesta>(e: T): T {
   if (!v) return e
   return { ...e, props: { ...e.props, viaje: { ...v, hoteles: v.hoteles.map((h) => ({ ...h, foto: undefined })) } } }
 }
+
+/**
+ * La biblioteca (2026-10-16): 3 fotos en 2 hoteles y en un plan (principal + 2 extras). Las
+ * extras de los hoteles son propias (sin crédito); las del plan, de Commons con su crédito. La
+ * primera extra de H10 es AUTOMÁTICA (sin revisar): en un hotel no debe salir.
+ */
+export const CREDITO_EXTRA_HOTEL_AUTOMATICA = creditoDeCatalogo({ nombre: 'Lobby H10', autor: 'Autor Automático', licencia: 'CC BY 4.0' })!
+const EXTRAS: Record<string, FotoDeCatalogo[]> = {
+  [claveDeFoto('hotel', 'Catalonia Puerta del Sol', 'Madrid')]: [propia('ibis_mad.jpg'), propia('c_madrid.jpg')],
+  [claveDeFoto('hotel', 'H10 Metropolitan', 'Barcelona')]: [
+    { ...foto('ibis_bcn.jpg', 'Lobby H10', 'Autor Automático', 'CC BY 4.0'), revisada: false },
+    propia('hl_bcn.jpg'),
+    propia('ibis_bcn.jpg'),
+  ],
+  [nombreLlano('Park Güell con guía')]: [
+    foto('c_bcn.jpg', 'Casa Batlló', 'Txllxt TxllxT', 'CC BY-SA 4.0'),
+    foto('o_aqua.jpg', 'Aquàrium de Barcelona', 'Paul Hermans', 'CC BY-SA 3.0'),
+  ],
+}
+
+export const CATALOGO_EUROPA_BIBLIOTECA: CatalogoPropuesta = {
+  ciudad: CATALOGO_EUROPA.ciudad,
+  hotel: (hotel, ciudad) => {
+    const f = CATALOGO_EUROPA.hotel(hotel, ciudad)
+    const extras = EXTRAS[claveDeFoto('hotel', hotel, ciudad)]
+    return f && extras ? { ...f, extras } : f
+  },
+  actividad: (nombre) => {
+    const f = CATALOGO_EUROPA.actividad(nombre)
+    const extras = EXTRAS[nombreLlano(nombre)]
+    return f && extras ? { ...f, extras } : f
+  },
+}
