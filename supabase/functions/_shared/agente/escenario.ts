@@ -26,7 +26,7 @@ export async function reglamentoDePrueba(fichas: Ficha[] = REGLAMENTO_ANEXO_A): 
 }
 
 export interface PasoRegistrado {
-  clase: 'escrito' | 'reenvio' | 'toque';
+  clase: 'escrito' | 'reenvio' | 'toque' | 'audio';
   texto: string;
   salidas: Salida[];
   /** Desde que la fila entró (el webhook) hasta el primer envío. Nulo si no salió nada. */
@@ -46,6 +46,8 @@ export interface Escenario {
   deps: DepsCola;
   escribe(texto: string, o?: { despuesMs?: number }): Promise<Salida[]>;
   reenvia(texto: string, o?: { despuesMs?: number }): Promise<Salida[]>;
+  /** Un audio del comercial, ya transcrito (en producción la transcripción llega antes del turno: `wa-agente.ts`). */
+  dicta(texto: string, o?: { despuesMs?: number }): Promise<Salida[]>;
   /** Toca la opción cuyo título es (o contiene) `titulo` en el mensaje más reciente del bot que la tenga. */
   toca(titulo: string, o?: { despuesMs?: number; atras?: number }): Promise<Salida[]>;
   trazas(): Traza[];
@@ -83,7 +85,7 @@ export async function escenario(p: {
     nuevoId,
   };
   const pasos: PasoRegistrado[] = [];
-  const correr = async (clase: 'escrito' | 'reenvio' | 'toque', texto: string, toqueId?: string, despuesMs = 20_000) => {
+  const correr = async (clase: 'escrito' | 'reenvio' | 'toque' | 'audio', texto: string, toqueId?: string, despuesMs = 20_000) => {
     reloj.avanzar(despuesMs);
     const antes = mensajero.enviados.length;
     const trazasAntes = almacen.trazas().length;
@@ -108,6 +110,7 @@ export async function escenario(p: {
     reloj, almacen, mensajero, puerto, deps,
     escribe: (t, o) => correr('escrito', t, undefined, o?.despuesMs),
     reenvia: (t, o) => correr('reenvio', t, undefined, o?.despuesMs ?? 3_000),
+    dicta: (t, o) => correr('audio', t, undefined, o?.despuesMs),
     toca: (titulo, o) => {
       // El mensaje más reciente que tenga esa opción (`atras`: saltarse los N más recientes que la tienen, para tocar un
       // botón viejo). Exacto primero: «No» no puede tocar «Anotar» porque «anotar» contiene «no» (arnés, 2026-10-06).

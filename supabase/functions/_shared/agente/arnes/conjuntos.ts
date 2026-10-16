@@ -10,11 +10,12 @@
 // ============================================================
 
 import type { ContactoMem, PuertoMemoria, ViajeMem } from '../memoria.ts';
+import type { MiembroEquipo } from '../bandeja/dominio.ts';
 import type { FilaConversacion, Traza } from '../tipos.ts';
 import type { CampoEntendible } from '../../wa-entendimiento-reglas.ts';
 
 /** `toca` con `oEscribe`: si el bot no mostró ese botón, la persona escribe eso (y no «sí»). */
-export interface PasoGuion { escribe?: string; reenvia?: string; toca?: string; oEscribe?: string }
+export interface PasoGuion { escribe?: string; reenvia?: string; toca?: string; oEscribe?: string; /** Un audio, ya transcrito. */ dicta?: string }
 
 export interface Veredicto { ok: boolean; motivo: string }
 
@@ -41,6 +42,9 @@ export interface CasoArnes {
   extraccion?: boolean;
   /** Contactos con la autorización de datos vigente (los demás no han autorizado). */
   autorizados?: string[];
+  /** El equipo comercial y quien escribe (por defecto, los de `escenario`). */
+  equipo?: MiembroEquipo[];
+  remitente?: { nombre: string; rol: string };
   esperado(p: PuertoMemoria, trazas: Traza[]): Veredicto;
 }
 
@@ -112,6 +116,8 @@ export const CONJUNTO_1: CasoArnes[] = [
     pasos: [
       { escribe: 'Quiero cotizar un nuevo viaje para Martín Mora' },
       { escribe: 'No, pero abramos uno nuevo a San Andrés' },
+      // Desde 2026-10-16 el bot pregunta quién lleva el viaje antes de proponerlo (no estaba en la conversación real).
+      { toca: 'Carla Comercial', oEscribe: 'la llevo yo' },
       { toca: 'Sí' },
     ],
     botDeHoy: [
@@ -130,6 +136,7 @@ export const CONJUNTO_1: CasoArnes[] = [
       { escribe: 'Nuevo Martín Mora' },
       { escribe: 'No. Es para uno nuevo' },
       { escribe: 'No es un cliente nuevo, es una cotización nueva sobre un cliente antiguo' },
+      { toca: 'Carla Comercial', oEscribe: 'la llevo yo' },
       { toca: 'Sí' },
     ],
     botDeHoy: [
@@ -258,7 +265,7 @@ export const CONJUNTO_2: CasoArnes[] = [
   {
     id: 'c2-solicitud-existente', conjunto: 2, titulo: 'p.solicitud_nueva: cliente que ya existe, viaje nuevo con sus mensajes',
     contactos: DIRECTORIO, viajes: VIAJES, sinClienteNuevo: true,
-    objetivo: 'Tu clienta Laura Gómez (ya la tienen en el sistema) te escribió pidiendo un viaje. Quieres que quede un viaje NUEVO para ella con lo que te escribió cargado. Primero le dices al asistente de quién es, después reenvías sus mensajes y al final pides que lo cargue.',
+    objetivo: 'Tu clienta Laura Gómez (ya la tienen en el sistema) te escribió pidiendo un viaje. Quieres que quede un viaje NUEVO para ella con lo que te escribió cargado. Primero le dices al asistente de quién es, después reenvías sus mensajes y al final pides que lo cargue. Si te preguntan quién lleva el viaje, lo llevas tú.',
     estilo: ESTILO_CORTO,
     mensajesCliente: ['Hola! Queremos ir a Cartagena del 12 al 16 de diciembre', 'Seríamos mi esposo y yo', 'Hotel cerca a la playa ojalá'],
     esperado: (p) => {
@@ -293,7 +300,7 @@ export const CONJUNTO_2: CasoArnes[] = [
   {
     id: 'c2-cliente-nuevo', conjunto: 2, titulo: 'p.cliente_nuevo: clienta que no existe, con su celular',
     contactos: DIRECTORIO, viajes: VIAJES,
-    objetivo: 'Tienes una clienta nueva, Sofía Rincón, celular 310 555 8812, que quiere viajar a Medellín. Quieres que quede creada y con su viaje nuevo abierto.',
+    objetivo: 'Tienes una clienta nueva, Sofía Rincón, celular 310 555 8812, que quiere viajar a Medellín. Quieres que quede creada y con su viaje nuevo abierto. Si te preguntan quién lleva el viaje, lo llevas tú.',
     estilo: ESTILO_CORTO,
     esperado: (p) => {
       const cs = de(p, 'cliente');
@@ -305,7 +312,7 @@ export const CONJUNTO_2: CasoArnes[] = [
   {
     id: 'c2-homonimos', conjunto: 2, titulo: 'variante: dos fichas con el mismo nombre',
     contactos: DIRECTORIO, viajes: VIAJES, sinClienteNuevo: true, viajesPermitidos: [],
-    objetivo: 'Quieres abrir un viaje nuevo a Santa Marta para tu clienta Ana Torres. Es la del celular que termina en 1203. No dices el celular hasta que te pregunten.',
+    objetivo: 'Quieres abrir un viaje nuevo a Santa Marta para tu clienta Ana Torres. Es la del celular que termina en 1203. No dices el celular hasta que te pregunten. Si te preguntan quién lleva el viaje, lo llevas tú.',
     estilo: ESTILO_CORTO,
     esperado: (p) => soloUnViajeNuevo(p, 'c-ana1') ?? ok('viaje de la Ana Torres correcta'),
   },
@@ -319,7 +326,7 @@ export const CONJUNTO_2: CasoArnes[] = [
   {
     id: 'c2-anacondas', conjunto: 2, titulo: 'variante: «anacondas en el Amazonas» es una solicitud',
     contactos: DIRECTORIO, viajes: VIAJES, sinClienteNuevo: true, viajesPermitidos: [],
-    objetivo: 'Tu cliente Pedro Pardo quiere ver anacondas en el Amazonas. Quieres abrirle un viaje nuevo al Amazonas.',
+    objetivo: 'Tu cliente Pedro Pardo quiere ver anacondas en el Amazonas. Quieres abrirle un viaje nuevo al Amazonas. Si te preguntan quién lleva el viaje, lo llevas tú.',
     estilo: ESTILO_CORTO,
     esperado: (p) => soloUnViajeNuevo(p, 'c-pedro', 'amazon') ?? ok('viaje nuevo de Pedro al Amazonas'),
   },
@@ -418,3 +425,109 @@ export const CONJUNTO_PERFIL: CasoArnes[] = [
     },
   },
 ];
+
+// ── Quién lleva el viaje (brief 2026-10-16) ──────────────────────────────────
+// Al abrir un viaje nuevo el bot pregunta siempre quién lo lleva; las opciones son el equipo comercial. Escribe Tatiana
+// (es del equipo). Lo que se mira es el viaje en la base en memoria: si se abrió y con quién (`responsableId`).
+
+const EQUIPO_TRAPPVEL_INVENTADO: MiembroEquipo[] = [
+  { id: 'st-ale', nombre: 'Alejandra Pinto', esQuienEscribe: false },
+  { id: 'st-dani', nombre: 'Daniela Suárez', esQuienEscribe: false },
+  { id: 'st-edgar', nombre: 'Edgar Alba', esQuienEscribe: false },
+  { id: 'st-tati', nombre: 'Tatiana Ríos', esQuienEscribe: true },
+];
+const conEquipo = { contactos: DIRECTORIO, viajes: VIAJES, viajesPermitidos: [] as string[], equipo: EQUIPO_TRAPPVEL_INVENTADO, remitente: { nombre: 'Tatiana', rol: 'operator' } };
+
+/**
+ * El viaje nuevo, con quién lo lleva. Y la PRIMERA propuesta de viaje nuevo ya traía a esa persona: si el bot propuso a
+ * otra (p. ej. asumió a quien escribe sin preguntar) y el comercial lo corrigió, el caso falla igual.
+ */
+function viajeCon(p: PuertoMemoria, contactoId: string, responsableId: string, t: Traza[] = []): Veredicto {
+  const primera = t.find((x) => x.propuesta?.accion === 'viaje_nuevo');
+  if (primera && primera.propuesta!.datos.responsableId !== responsableId) {
+    return mal(`la primera propuesta traía a ${String(primera.propuesta!.datos.responsable)} sin que lo eligieran`);
+  }
+  const vs = de(p, 'viaje');
+  if (vs.length !== 1) return mal(`se esperaba 1 viaje nuevo y hay ${vs.length}`);
+  if (vs[0].contactoId !== contactoId) return mal(`el viaje quedó a nombre de ${vs[0].contactoId}`);
+  if (vs[0].responsableId !== responsableId) return mal(`lo lleva ${vs[0].responsableId ?? 'nadie'}, no ${responsableId}`);
+  return ok(`viaje ${vs[0].codigo} con ${responsableId}`);
+}
+
+/** El último mensaje del bot pregunta quién lleva el viaje (con el equipo en opciones o nombrándolo). */
+function preguntaQuienLleva(pasos: Array<{ salidas: Array<{ texto: string; opciones?: Array<{ titulo: string }> }> }>): boolean {
+  const s = [...pasos].reverse().flatMap((x) => [...x.salidas].reverse())[0];
+  if (!s) return false;
+  const ops = (s.opciones ?? []).map((o) => o.titulo);
+  return EQUIPO_TRAPPVEL_INVENTADO.filter((m) => ops.includes(m.nombre)).length >= 2 || /lleva|responsable/i.test(s.texto);
+}
+
+export const CONJUNTO_RESPONSABLE: CasoArnes[] = [
+  {
+    ...conEquipo, id: 'r-lista', conjunto: 1, sinClienteNuevo: true, titulo: 'elige por la lista',
+    pasos: [{ escribe: 'Viaje nuevo para Martín Mora a Cartagena' }, { toca: 'Edgar Alba', oEscribe: 'Edgar' }, { toca: 'Sí, ábrelo', oEscribe: 'sí' }],
+    esperado: (p, t) => viajeCon(p, 'c-martin', 'st-edgar', t),
+  },
+  {
+    ...conEquipo, id: 'r-yo', conjunto: 1, sinClienteNuevo: true, titulo: '«la llevo yo»',
+    pasos: [{ escribe: 'Ábreme un viaje nuevo de Diana Duarte a Santa Marta, la llevo yo' }, { toca: 'Sí, ábrelo', oEscribe: 'sí' }],
+    esperado: (p, t) => viajeCon(p, 'c-diana', 'st-tati', t),
+  },
+  {
+    ...conEquipo, id: 'r-apodo', conjunto: 1, sinClienteNuevo: true, titulo: 'un apodo: «Ale»',
+    pasos: [{ escribe: 'Hay que abrir un viaje nuevo para Pedro Pardo a Bogotá' }, { escribe: 'Ale' }, { toca: 'Sí, ábrelo', oEscribe: 'sí' }],
+    esperado: (p, t) => viajeCon(p, 'c-pedro', 'st-ale', t),
+  },
+  {
+    ...conEquipo, id: 'r-fuera', conjunto: 1, sinClienteNuevo: true, titulo: 'un nombre que no está en el equipo, y luego uno que sí',
+    pasos: [{ escribe: 'Viaje nuevo para Laura Gómez a Medellín, que lo lleve Rodrigo' }, { escribe: 'ah, entonces Dani' }, { toca: 'Sí, ábrelo', oEscribe: 'sí' }],
+    esperado: (p, t) => {
+      const r = viajeCon(p, 'c-laura', 'st-dani', t);
+      if (!r.ok) return r;
+      // Rodrigo no es del equipo: la primera vez el código lo atajó o el modelo ni lo propuso; nunca quedó propuesto.
+      return t.some((x) => x.propuesta?.accion === 'viaje_nuevo' && /rodrigo/i.test(String(x.propuesta.datos.responsable ?? ''))) ? mal('propuso el viaje con Rodrigo') : r;
+    },
+  },
+  {
+    ...conEquipo, id: 'r-audio', conjunto: 1, sinClienteNuevo: true, titulo: 'responde con un audio (transcrito)',
+    pasos: [
+      { escribe: 'Viaje nuevo para Martín Mora a San Andrés' },
+      { dicta: 'eh sí, ese viaje lo va a llevar la Dani, que ella ya habló con el señor' },
+      { toca: 'Sí, ábrelo', oEscribe: 'sí' },
+    ],
+    esperado: (p, t) => viajeCon(p, 'c-martin', 'st-dani', t),
+  },
+  {
+    ...conEquipo, id: 'r-ignora', conjunto: 1, sinClienteNuevo: true, titulo: 'ignora la pregunta y manda otra cosa: no se abre y la pregunta sigue',
+    pasos: [{ escribe: 'Viaje nuevo para Diana Duarte a Cartagena' }, { escribe: 'oye, y el viaje de Martín Mora a Miami ¿qué le falta?' }],
+    esperado: (p, _t) => {
+      if (de(p, 'viaje').length) return mal('abrió un viaje sin que eligieran quién lo lleva');
+      return ok('no abrió el viaje');
+    },
+  },
+  {
+    ...conEquipo, id: 'r-cliente-nuevo', conjunto: 1, titulo: 'cliente nuevo con la pregunta incluida',
+    pasos: [
+      { escribe: 'Necesito cotizar Punta Cana para Camila Prieto, cel 3004441122, 2 adultos del 3 al 8 de diciembre' },
+      { toca: 'Crear', oEscribe: 'sí, créala' },
+      { toca: 'Alejandra Pinto', oEscribe: 'Alejandra' },
+      { toca: 'Sí, ábrelo', oEscribe: 'sí' },
+    ],
+    esperado: (p, t) => {
+      const c = de(p, 'cliente');
+      if (c.length !== 1) return mal(`se esperaba 1 cliente nuevo y hay ${c.length}`);
+      return viajeCon(p, String(c[0].id), 'st-ale', t);
+    },
+  },
+  {
+    ...conEquipo, id: 'r-ambiguo', conjunto: 1, sinClienteNuevo: true, titulo: 'dos Danielas: pregunta cuál, no escoge',
+    equipo: [...EQUIPO_TRAPPVEL_INVENTADO, { id: 'st-danim', nombre: 'Daniela Mora', esQuienEscribe: false }],
+    pasos: [{ escribe: 'Viaje nuevo para Pedro Pardo a Cancún, lo lleva Daniela' }, { toca: 'Daniela Mora', oEscribe: 'Daniela Mora' }, { toca: 'Sí, ábrelo', oEscribe: 'sí' }],
+    esperado: (p, t) => {
+      // En el primer turno no podía haber propuesta con una Daniela: tenía que preguntar.
+      return viajeCon(p, 'c-pedro', 'st-danim', t);
+    },
+  },
+];
+
+export { preguntaQuienLleva };

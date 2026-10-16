@@ -42,7 +42,7 @@ describe('viaje nuevo: el bot pregunta quién lo lleva', () => {
       // El toque de la lista vuelve al modelo como texto; él nombra a la persona.
       (p) => {
         expect(JSON.stringify(p.mensajes)).toContain('[toque: Edgar Alba]')
-        return { name: 'proponer', args: { accion: 'viaje_nuevo', datos: { cliente: REF, destino: 'San Andrés', responsable: 'Edgar Alba' } } }
+        return { name: 'proponer', args: { accion: 'viaje_nuevo', datos: { cliente: REF, destino: 'San Andrés', responsable: 'Edgar Alba', dicho_en: 3 } } }
       },
     ])
     const e = await escenario({ modelo, contactos: [MARTIN], viajes: [], equipo: EQUIPO, remitente: { nombre: 'Tatiana', rol: 'operator' } })
@@ -68,16 +68,37 @@ describe('viaje nuevo: el bot pregunta quién lo lleva', () => {
     const modelo = modeloGuionado([
       (p) => {
         expect(estadoDe(p)).toContain('Equipo comercial (quién puede llevar un viaje nuevo): Alejandra Pinto · Daniela Suárez · Edgar Alba · Tatiana Ríos.')
-        expect(estadoDe(p)).toContain('Quien te escribe es Tatiana Ríos.')
+        expect(estadoDe(p)).toContain('Si quien te escribe dice «yo», es Tatiana Ríos.')
         return { name: 'buscar', args: { texto: 'Martín Mora' } }
       },
-      { name: 'proponer', args: { accion: 'viaje_nuevo', datos: { cliente: REF, responsable: 'Tatiana Ríos' } } },
+      { name: 'proponer', args: { accion: 'viaje_nuevo', datos: { cliente: REF, responsable: 'Tatiana Ríos', dicho_en: 1 } } },
     ])
     const e = await escenario({ modelo, contactos: [MARTIN], viajes: [], equipo: EQUIPO })
-    await e.escribe('Viaje nuevo para Martín Mora, la llevo yo')
+    const r = await e.escribe('Viaje nuevo para Martín Mora, la llevo yo')
+    // Que se lo asigna a sí misma queda dicho en el resumen, antes del toque.
+    expect(r[0].texto).toBe(`¿Abro este viaje?\n${REF} · Viaje a medida\nLo llevas tú (Tatiana Ríos)`)
     const t = await e.toca('Sí, ábrelo')
     expect(t[0].texto).toContain('Lo llevas tú.')
     expect(e.puerto.escrituras[0]).toMatchObject({ tipo: 'viaje', responsableId: 'st-tati' })
+  })
+
+  it('el modelo no puede asumir: sin señalar dónde lo dijo el comercial (o señalando un mensaje del bot), no hay propuesta', async () => {
+    // QA real, 2026-10-16: el modelo propuso «Lo lleva: Tatiana Ríos» (quien escribe) sin que nadie lo dijera.
+    const modelo = modeloGuionado([
+      { name: 'buscar', args: { texto: 'Martín Mora' } },
+      { name: 'proponer', args: { accion: 'viaje_nuevo', datos: { cliente: REF, responsable: 'Tatiana Ríos' } } },
+      (p) => {
+        expect(ultimaRespuesta(p)).toContain('`dicho_en` tiene que ser el número')
+        return { name: 'proponer', args: { accion: 'viaje_nuevo', datos: { cliente: REF, responsable: 'Tatiana Ríos', dicho_en: 1 } } }
+      },
+    ])
+    const e = await escenario({ modelo, contactos: [MARTIN], viajes: [], equipo: EQUIPO })
+    e.semilla([{ direccion: 'saliente', clase: 'bot', texto: 'Hola, ¿en qué te ayudo?' }])
+    await e.escribe('Viaje nuevo para Martín Mora')
+    expect(propuestaVigente(e.almacen.filas)).toBeNull()
+    // #1 es el saludo del bot: no respalda nada.
+    expect(e.almacen.trazas().at(-1)!.candados?.map((c) => c.candado)).toEqual(['falta_responsable', 'falta_responsable'])
+    expect(modelo.restantes()).toBe(0)
   })
 
   it('alguien que no está en el equipo: candado, sin propuesta, y el modelo vuelve a preguntar', async () => {
@@ -102,13 +123,13 @@ describe('viaje nuevo: el bot pregunta quién lo lleva', () => {
       { name: 'proponer', args: { accion: 'viaje_nuevo', datos: { cliente: REF } } },
       { name: 'responder', args: { tema: 'solicitud', texto: '¿Quién lleva este viaje?', opciones: OPCIONES } },
       (p) => {
-        expect(estadoDe(p)).toContain('Pendiente: preguntaste quién lleva el viaje nuevo y no lo han elegido.')
+        expect(estadoDe(p)).toContain('Pendiente: preguntaste quién lleva el viaje nuevo.')
         return { name: 'responder', args: { tema: 'solicitud', texto: 'Hoy es jueves. ¿Quién lleva el viaje de Martín Mora?', opciones: OPCIONES } }
       },
       (p) => {
         // Elegido y propuesto: la pregunta ya no está pendiente.
         expect(estadoDe(p)).toContain('Pendiente: preguntaste quién lleva')
-        return { name: 'proponer', args: { accion: 'viaje_nuevo', datos: { cliente: REF, responsable: 'Daniela Suárez' } } }
+        return { name: 'proponer', args: { accion: 'viaje_nuevo', datos: { cliente: REF, responsable: 'Daniela Suárez', dicho_en: 5 } } }
       },
       (p) => {
         expect(estadoDe(p)).not.toContain('Pendiente: preguntaste quién lleva')
@@ -119,10 +140,31 @@ describe('viaje nuevo: el bot pregunta quién lo lleva', () => {
     await e.escribe('Viaje nuevo para Martín Mora')
     await e.escribe('¿qué día es hoy?')
     expect(e.puerto.escrituras).toEqual([])
-    expect(responsablePendiente(e.almacen.filas)).toBe(true)
+    expect(responsablePendiente(e.almacen.filas, EQUIPO)).toBe(true)
     await e.escribe('Dani')
-    expect(responsablePendiente(e.almacen.filas)).toBe(false)
+    expect(responsablePendiente(e.almacen.filas, EQUIPO)).toBe(false)
     await e.escribe('gracias')
+    expect(e.puerto.escrituras).toEqual([])
+    expect(modelo.restantes()).toBe(0)
+  })
+
+  it('la pregunta hecha por el modelo sin pasar por el candado también queda pendiente (opciones = el equipo)', async () => {
+    // QA real, 2026-10-16 (r-ignora): el modelo preguntó directo con `responder`, sin proponer; no hubo candado y el
+    // estado no decía que la pregunta seguía en pie, así que contestó lo otro y no volvió a preguntar.
+    const modelo = modeloGuionado([
+      { name: 'buscar', args: { texto: 'Diana Duarte' } },
+      { name: 'responder', args: { tema: 'solicitud', texto: '¿Quién lleva este viaje?', opciones: [{ titulo: 'Yo' }, ...OPCIONES.slice(0, 3)] } },
+      (p) => {
+        expect(estadoDe(p)).toContain('Pendiente: preguntaste quién lleva el viaje nuevo')
+        return { name: 'responder', args: { tema: 'solicitud', texto: 'Eso lo reviso. ¿Quién lleva el viaje de Diana?', opciones: OPCIONES } }
+      },
+    ])
+    const e = await escenario({ modelo, contactos: [{ id: 'c-diana', nombre: 'DIANA DUARTE', celular: '3157774410' }], viajes: [], equipo: EQUIPO })
+    await e.escribe('Viaje nuevo para Diana Duarte a Cartagena')
+    expect(responsablePendiente(e.almacen.filas, EQUIPO)).toBe(true)
+    // Sin el equipo (o con opciones que no son personas) no hay nada pendiente.
+    expect(responsablePendiente(e.almacen.filas, [])).toBe(false)
+    await e.escribe('oye, ¿qué le falta al de Martín?')
     expect(e.puerto.escrituras).toEqual([])
     expect(modelo.restantes()).toBe(0)
   })
@@ -130,7 +172,7 @@ describe('viaje nuevo: el bot pregunta quién lo lleva', () => {
   it('si la persona sale del equipo entre la propuesta y el toque, no se abre nada', async () => {
     const modelo = modeloGuionado([
       { name: 'buscar', args: { texto: 'Martín Mora' } },
-      { name: 'proponer', args: { accion: 'viaje_nuevo', datos: { cliente: REF, responsable: 'Edgar Alba' } } },
+      { name: 'proponer', args: { accion: 'viaje_nuevo', datos: { cliente: REF, responsable: 'Edgar Alba', dicho_en: 1 } } },
     ])
     const e = await escenario({ modelo, contactos: [MARTIN], viajes: [], equipo: EQUIPO })
     await e.escribe('Viaje nuevo para Martín Mora, que lo lleve Edgar')

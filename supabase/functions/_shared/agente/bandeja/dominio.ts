@@ -283,12 +283,17 @@ export function nombresDelEquipo(equipo: ReadonlyArray<MiembroEquipo>): string {
 }
 
 /**
- * ¿Quedó sin contestar la pregunta de quién lleva el viaje? Sí, si el último candado `falta_responsable` (o el de alguien
- * fuera del equipo) es posterior a la última propuesta o apertura de un viaje nuevo. Lee las trazas, no el texto. Pura.
+ * ¿Quedó sin contestar la pregunta de quién lleva el viaje? Sí, si después de la última propuesta o apertura de un viaje
+ * nuevo el bot preguntó: un candado `falta_responsable` (o el de alguien fuera del equipo), o un mensaje del bot cuyas
+ * opciones son personas del equipo (al menos dos, o la única que hay). No lee lo que escribió el comercial: mira las
+ * trazas y las opciones que mandó el bot, contra la lista del equipo. Pura.
  */
-export function responsablePendiente(filas: ReadonlyArray<FilaConversacion>): boolean {
+export function responsablePendiente(filas: ReadonlyArray<FilaConversacion>, equipo: ReadonlyArray<MiembroEquipo> = []): boolean {
+  const nombres = new Set(equipo.map((m) => normal(m.nombre)));
+  const minimo = Math.min(2, nombres.size);
   let pendiente = false;
   for (const f of filas) {
+    if (f.direccion === 'saliente' && minimo > 0 && (f.opciones ?? []).filter((o) => nombres.has(normal(o.titulo))).length >= minimo) pendiente = true;
     const t = f.traza;
     if (!t) continue;
     if (t.propuesta?.accion === 'viaje_nuevo' || (t.ejecucion?.accion === 'viaje_nuevo' && t.ejecucion.resultado === 'ejecutada')) pendiente = false;
@@ -347,6 +352,10 @@ const DATOS_PROPONER = {
       'apodo o solo el nombre es la persona de la lista que corresponde. Si puede ser más de una persona, o nombra a alguien que',
       'no está en la lista, pregunta otra vez con las opciones; nunca escojas tú ni asumas que es quien escribe.',
     ].join(' '),
+  },
+  dicho_en: {
+    type: 'integer',
+    description: 'viaje_nuevo: OBLIGATORIO con `responsable`. El número (#n) del mensaje, audio o toque del comercial donde dijo quién lleva este viaje: uno que nombra a la persona, dice «yo» o toca su nombre. Pedir el viaje no es decir quién lo lleva. Si no hay ninguno, no lo dijo: pregúntale.',
   },
   desde: { type: 'integer', description: 'viaje_nuevo: el número (#n) del mensaje del comercial donde empezó a pedir este viaje, si fue antes de este turno. El sistema lee desde ahí lo que dijo del viaje.' },
   viaje: { type: 'string', description: 'cargar_tanda / anotar_en_viaje: el código del viaje.' },
@@ -495,7 +504,7 @@ export function dominioBandeja(puerto: PuertoBandeja): Dominio {
    * que pregunte con las opciones; el código no escoge (Mauricio, 2026-10-16: «preguntar siempre obligatoriamente quién va
    * a ser el responsable de la ejecución»).
    */
-  const responsableDe = async (dado: unknown, ctx: ContextoDominio): Promise<{ ok: true; m: MiembroEquipo } | { ok: false; error: string; candado: string }> => {
+  const responsableDe = async (dado: unknown, dichoEn: unknown, ctx: ContextoDominio): Promise<{ ok: true; m: MiembroEquipo } | { ok: false; error: string; candado: string }> => {
     const eq = await equipoComercial();
     if (eq === 'error') return { ok: false, error: 'No pude revisar quién es del equipo comercial ahora: no se abre el viaje. Dilo así e intenta en un momento.', candado: 'lectura_fallida' };
     if (!eq.length) {
@@ -509,6 +518,12 @@ export function dominioBandeja(puerto: PuertoBandeja): Dominio {
     const m = resolverResponsable(eq, ref);
     if (m === 'varias') return { ok: false, error: `«${ref}» puede ser más de una persona del equipo. Pregunta cuál, con las opciones: ${lista}.`, candado: 'responsable_fuera_del_equipo' };
     if (!m) return { ok: false, error: `«${ref}» no está en el equipo comercial (${lista}). Dile que esa persona no puede llevar el viaje y pregúntale quién lo lleva, con esas opciones.`, candado: 'responsable_fuera_del_equipo' };
+    // La elección tiene que señalar DÓNDE la dijo el comercial (QA real, 2026-10-16: el respaldo propuso a quien escribe
+    // sin que nadie lo dijera). El código no lee ese mensaje: solo exige que exista y sea del equipo, como `desde`.
+    const dicho = filaDesde(ctx.conversacion, dichoEn);
+    if (!dicho || dicho === 'invalida') {
+      return { ok: false, error: `\`dicho_en\` tiene que ser el número (#n) del mensaje, audio o toque del comercial donde dijo quién lleva este viaje. Si no lo ha dicho, no propongas: pregúntale con \`responder\`, «¿Quién lleva este viaje?», con estas opciones: ${lista}.`, candado: 'falta_responsable' };
+    }
     return { ok: true, m };
   };
 
@@ -581,12 +596,12 @@ export function dominioBandeja(puerto: PuertoBandeja): Dominio {
       }
       const desde = filaDesde(ctx.conversacion, datos.desde);
       if (desde === 'invalida') return { ok: false, error: '`desde` tiene que ser el número (#n) de un mensaje escrito por el comercial en la conversación, o vacío.', candado: 'desde_invalido' };
-      const quien = await responsableDe(datos.responsable, ctx);
+      const quien = await responsableDe(datos.responsable, datos.dicho_en, ctx);
       if (!quien.ok) return quien;
       // La línea solo la nombra este resumen: leerla antes de cada acción eran cuatro consultas en serie delante de la
       // extracción de `anotar_en_viaje` y `cargar_tanda` (medido en vivo, 2026-10-09).
       const linea = await puerto.linea();
-      const resumen = `¿Abro este viaje?\n${ficha.ficha.ref}${destino ? ` · ${destino}` : ''} · ${linea}\nLo lleva: ${quien.m.nombre}`;
+      const resumen = `¿Abro este viaje?\n${ficha.ficha.ref}${destino ? ` · ${destino}` : ''} · ${linea}\n${quien.m.esQuienEscribe ? `Lo llevas tú (${quien.m.nombre})` : `Lo lleva: ${quien.m.nombre}`}`;
       return {
         ok: true,
         propuesta: {
@@ -815,8 +830,8 @@ export function dominioBandeja(puerto: PuertoBandeja): Dominio {
       const [nombrados, eq] = await Promise.all([sueltosDe(ctx).then((s) => viajesNombrados(ctx.conversacion, s)), equipoComercial()]);
       const yo = eq === 'error' ? undefined : eq.find((m) => m.esQuienEscribe);
       const lineasEquipo = eq === 'error' || !eq.length ? [] : [
-        `Equipo comercial (quién puede llevar un viaje nuevo): ${nombresDelEquipo(eq)}. ${yo ? `Quien te escribe es ${yo.nombre}.` : 'Quien te escribe no es del equipo comercial: no puede llevar el viaje.'}`,
-        ...(responsablePendiente(ctx.conversacion) ? ['Pendiente: preguntaste quién lleva el viaje nuevo y no lo han elegido. El viaje no se abre hasta que lo elijan: si te hablan de otra cosa, atiéndela y vuelve a preguntar.'] : []),
+        `Equipo comercial (quién puede llevar un viaje nuevo): ${nombresDelEquipo(eq)}. ${yo ? `Si quien te escribe dice «yo», es ${yo.nombre}.` : 'Quien te escribe no es del equipo comercial: no puede llevar el viaje.'}`,
+        ...(responsablePendiente(ctx.conversacion, eq) ? ['Pendiente: preguntaste quién lleva el viaje nuevo. Si en los mensajes nuevos lo eligió (tocó un nombre, lo escribió o lo dijo en un audio), propón el viaje con esa persona. Si te habla de otra cosa, contéstala y en el mismo mensaje vuelve a preguntar quién lo lleva, con el equipo en `opciones` (salvo que te diga que ya no lo abras).'] : []),
       ];
       return [
         ...lineasEquipo,
