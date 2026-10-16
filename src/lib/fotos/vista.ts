@@ -108,6 +108,17 @@ export function vistaDeElemento(
 }
 
 /**
+ * Lo que la tarjeta del hotel muestra de la biblioteca: la foto que sale en la propuesta (la
+ * principal si se imprime; si no, la primera que sí, igual que `catalogoParaLaPropuesta`) y
+ * cuántas más tiene el elemento que también salen («+2»). Sin ninguna imprimible, la tarjeta queda
+ * vacía con «Buscar fotos».
+ */
+export function fotoDeLaTarjeta(e: ElementoVista | null | undefined): { foto: FotoVista | null; mas: number; admiteOtra: boolean } {
+  const imprimibles = (e?.fotos ?? []).filter((f) => f.seImprime)
+  return { foto: imprimibles[0] ?? null, mas: Math.max(0, imprimibles.length - 1), admiteOtra: e ? e.admiteOtra : true }
+}
+
+/**
  * Lo que el navegador pide (tipo, nombre, ciudad) como objetivo del catálogo, revisado. La llave
  * la calcula el servidor, nunca el navegador. `null` si no sirve.
  */

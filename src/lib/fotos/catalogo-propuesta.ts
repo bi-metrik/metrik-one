@@ -75,3 +75,40 @@ export async function catalogoParaLaPropuesta(supabase: any, workspaceId: string
     actividad: (nombre) => de(actividadPorNombre(filas, nombre, pedido.claveCiudades)),
   }
 }
+
+/**
+ * Las fotos de hotel de la biblioteca para el documento (`foto-hotel-documento.ts`): por llave
+ * `hotel|ciudad`, la primera imprimible (la principal si se imprime). Sirve a los dos motores: el
+ * html la usa para saber que NO va la foto vieja de la opción; @react-pdf además la imprime.
+ */
+export async function hotelesEnBiblioteca(
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  supabase: any,
+  workspaceId: string,
+  hoteles: { hotel: string | null; linea: string; ciudad: string | null }[],
+  /** El `config_extra` del workspace que quien llama ya leyó (una ida menos a la base). */
+  configExtraWorkspace: unknown,
+) {
+  const objetivos = sinRepetir(hoteles.map((h) => objetivo('hotel', h.hotel ?? h.linea, h.ciudad)))
+  const mapa = new Map<string, { proporcion: number | null }>()
+  const porClave = new Map<string, FilaCatalogo>()
+  if (objetivos.length > 0) {
+    const sitioOficial = usaFotosDeSitioOficial(configExtraWorkspace)
+    const filas = (await leerCatalogo(supabase, workspaceId, { objetivos })).filter(
+      (f) => f.tipo === 'hotel' && fotoImprimible(f.tipo, f.origen, f.revisada, { sitioOficial }),
+    )
+    for (const o of objetivos) {
+      const f = filaDe(filas, o)
+      if (!f) continue
+      porClave.set(o.clave, f)
+      mapa.set(o.clave, { proporcion: f.proporcion === null || f.proporcion === undefined ? null : Number(f.proporcion) })
+    }
+  }
+  return {
+    mapa,
+    leer: async (clave: string) => {
+      const f = porClave.get(clave)
+      return f ? dataUrlDeFila(workspaceId, f) : null
+    },
+  }
+}
