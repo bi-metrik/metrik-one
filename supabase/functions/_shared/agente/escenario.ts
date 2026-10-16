@@ -13,6 +13,7 @@ import { dominioBandeja } from './bandeja/dominio.ts';
 import { REGLAMENTO_ANEXO_A } from './bandeja/reglamento-anexo-a.ts';
 import { AlmacenMemoria, MensajeroMemoria, PuertoMemoria, Reloj, nuevoId } from './memoria.ts';
 import type { ContactoMem, ExtractorMemoria, ViajeMem } from './memoria.ts';
+import type { MiembroEquipo } from './bandeja/dominio.ts';
 import type { CampoEntendible } from '../wa-entendimiento-reglas.ts';
 import { huellaDe } from './reglamento.ts';
 import type { Ficha, FilaConversacion, Modelo, Reglamento, Salida, Traza } from './tipos.ts';
@@ -61,11 +62,14 @@ export async function escenario(p: {
   reglamento?: Reglamento;
   /** Reloj monotónico real (arnés) o falso (pruebas). */
   reloj?: () => number;
+  /** El equipo comercial (por defecto `EQUIPO_PRUEBA`) y quien escribe (por defecto «el comercial»). */
+  equipo?: MiembroEquipo[];
+  remitente?: { nombre: string; rol: string };
 }): Promise<Escenario> {
   const reloj = new Reloj();
   const almacen = new AlmacenMemoria(reloj);
   const mensajero = new MensajeroMemoria(almacen);
-  const puerto = new PuertoMemoria({ contactos: p.contactos, viajes: p.viajes, campos: p.campos, extraer: p.extraer, ahora: reloj.ahora });
+  const puerto = new PuertoMemoria({ contactos: p.contactos, viajes: p.viajes, campos: p.campos, extraer: p.extraer, ahora: reloj.ahora, equipo: p.equipo });
   const deps: DepsCola = {
     modelo: p.modelo,
     dominio: dominioBandeja(puerto),
@@ -75,7 +79,7 @@ export async function escenario(p: {
     reloj: p.reloj ?? (() => reloj.ahora()),
     almacen, mensajero,
     workspaceId: WS_PRUEBA, phone: TEL_PRUEBA,
-    remitente: { nombre: 'el comercial', rol: 'colaborador' },
+    remitente: p.remitente ?? { nombre: 'el comercial', rol: 'colaborador' },
     nuevoId,
   };
   const pasos: PasoRegistrado[] = [];

@@ -61,7 +61,7 @@ const M5 = 'Son 4 noches desde el 3 de diciembre, ella con su esposo y la hija d
 const M6 = 'salen desde medellín'
 const M8 = 'Salen desde Medellín. Calcula tú la fecha de regreso.'
 const LISTA = 'Lucia Barrera tiene 2 viajes abiertos: L1 26 1 Cartagena y L1 26 2 Miami. ¿Abro el nuevo a Santa Marta?'
-const VIAJE_NUEVO = { accion: 'viaje_nuevo', datos: { cliente: ref, destino: 'Santa Marta' } }
+const VIAJE_NUEVO = { accion: 'viaje_nuevo', datos: { responsable: 'Carla Comercial', cliente: ref, destino: 'Santa Marta' } }
 
 type Valores = Record<string, { valor: string; frase: string; calculo?: string }>
 /** La salida cruda de la extracción, como la devuelve Gemini. Sin `clases`, todos los mensajes son del viaje. */

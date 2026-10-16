@@ -22,7 +22,7 @@ describe('una propuesta pendiente queda atrás cuando la conversación pasa a ot
     const modelo = modeloGuionado([
       // 12:51 «vamos a iniciar un viaje nuevo para…»
       { name: 'buscar', args: { texto: 'Martín Mora' } },
-      { name: 'proponer', args: { accion: 'viaje_nuevo', datos: { cliente: ref } } },
+      { name: 'proponer', args: { accion: 'viaje_nuevo', datos: { responsable: 'Carla Comercial', cliente: ref } } },
       // 12:52 «primero dime qué viajes tiene abiertos» (buscar no es una cosa concreta: la propuesta sigue)
       { name: 'buscar', args: { texto: 'Martín Mora' } },
       { name: 'responder', args: { tema: 'viaje', texto: 'Tiene abiertos M1 26 1 y M1 26 2.' } },

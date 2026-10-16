@@ -1,4 +1,5 @@
 import 'server-only'
+import { sincronizarResponsablePrincipal } from '../../../supabase/functions/_shared/asignar-responsable.ts'
 import { registrarActividad } from '@/lib/activity/registrar-actividad'
 import { primerCampoOficialNoValido, textoLatinoProfundo } from '@/lib/texto/texto-latino'
 import { esOrigenNegocioValido, ORIGEN_ALIANZA } from '@/lib/catalogos/constants'
@@ -146,24 +147,8 @@ export function computeFieldDefaults(configExtra: Record<string, unknown> | null
 
 // Mantiene negocios.responsable_id (legacy/display) = responsable más antiguo
 // restante, o null si no quedan. La fuente de verdad de permisos es la tabla N:M.
-export async function sincronizarResponsablePrincipal(
-  supabase: unknown,
-  negocioId: string,
-  workspaceId: string,
-): Promise<void> {
-  const { data } = await db(supabase)
-    .from('negocio_responsables')
-    .select('staff_id')
-    .eq('negocio_id', negocioId)
-    .order('assigned_at', { ascending: true })
-    .limit(1)
-  const principal = ((data ?? []) as { staff_id: string }[])[0]?.staff_id ?? null
-  await db(supabase)
-    .from('negocios')
-    .update({ responsable_id: principal })
-    .eq('id', negocioId)
-    .eq('workspace_id', workspaceId)
-}
+// Vive en `_shared/asignar-responsable.ts`: el bot de WhatsApp sincroniza con la misma.
+export { sincronizarResponsablePrincipal }
 
 // ── Auto-crear cotización al crear negocio ──────────────────────────────────
 // Se llama internamente desde crearNegocio() si el bloque cotización tiene

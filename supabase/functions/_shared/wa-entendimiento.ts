@@ -18,6 +18,7 @@
 // ============================================================
 
 import { sendTextMessage } from './wa-respond.ts';
+import { asignarResponsableCon, sincronizarResponsablePrincipal } from './asignar-responsable.ts';
 import { pedirCorreoAutorizacionAlCrear } from './autorizacion-al-crear.ts';
 import { anotarConsultaPendiente, anotarFoco, pedidosDeLaCarga, leerConversacion, viajeEnFoco } from './wa-foco.ts';
 import { enviarConBotones, enviarPunto } from './wa-enviar-botones.ts';
@@ -263,6 +264,12 @@ function aViaje(crudos: ReadonlyArray<MensajeCrudo>): MensajeViaje[] {
   }));
 }
 
+/** El `profiles.id` de un staff (lo que pide `negocio_responsables.assigned_by`), o null. */
+async function profileDeStaff(supabase: SupabaseClient, staffId: string): Promise<string | null> {
+  const { data } = await supabase.from('staff').select('profile_id').eq('id', staffId).maybeSingle();
+  return (data?.profile_id as string | null | undefined) ?? null;
+}
+
 /** N3: deja anotado quién habla en cada mensaje (auditoría de dónde salió cada dato). */
 async function guardarClases(
   supabase: SupabaseClient, crudos: ReadonlyArray<MensajeCrudo>, mensajes: ReadonlyArray<MensajeEntrega>, clases: Record<number, ClaseMensaje>,
@@ -289,6 +296,12 @@ export async function crearNegocio(
   p: {
     workspaceId: string; cfg: ConfigLinea; contactoId: string; entregaId: string;
     staffId: string | null; salida: SalidaEntendida; pistas: { mes: number | null; duracion: string | null };
+    /**
+     * Quién lleva el viaje, cuando el comercial lo eligió (el núcleo conversacional pregunta siempre, 2026-10-16):
+     * `staffId` de la persona elegida y `asignadoPor` = `profiles.id` de quien escribe. Sin esto, el de siempre: queda
+     * quien reenvió (`staffId`), asignado por sí misma.
+     */
+    responsable?: { staffId: string; asignadoPor: string | null };
   },
 ): Promise<{ negocioId: string; valores: Record<string, unknown> } | string> {
   const { data: contacto } = await supabase.from('contactos').select('nombre').eq('id', p.contactoId).maybeSingle();
@@ -345,15 +358,16 @@ export async function crearNegocio(
     if (eB) console.error(`[wa-entendimiento] negocio ${negocioId} sin bloques:`, eB.message);
   }
 
-  // Responsable: quien reenvió. Mismo rol por área que `asignarResponsable`.
-  if (p.staffId) {
-    const { data: areas } = await supabase.from('staff_areas').select('area').eq('staff_id', p.staffId);
-    const lista = ((areas ?? []) as Fila[]).map(a => a.area);
-    const rol = lista.includes('comercial') ? 'comercial' : lista.includes('operaciones') ? 'operaciones' : null;
-    const { error: eR } = await supabase.from('negocio_responsables')
-      .upsert({ negocio_id: negocioId, staff_id: p.staffId, assigned_by: null, rol }, { onConflict: 'negocio_id,staff_id' });
-    if (eR) console.error(`[wa-entendimiento] negocio ${negocioId} sin responsable:`, eR.message);
-    else await supabase.from('negocios').update({ responsable_id: p.staffId }).eq('id', negocioId);
+  // Responsable: el elegido o, sin elección, quien reenvió. Con la MISMA escritura que la app (`asignarResponsable`):
+  // la fila con su rol, la línea en el timeline y `responsable_id`. El aviso a la persona lo da el trigger de la tabla.
+  const resp = p.responsable ?? (p.staffId ? { staffId: p.staffId, asignadoPor: await profileDeStaff(supabase, p.staffId) } : null);
+  if (resp) {
+    const r = await asignarResponsableCon(supabase, { negocioId, staffId: resp.staffId, assignedBy: resp.asignadoPor }, async (fila) => {
+      const { error: eL } = await supabase.from('activity_log').insert(fila);
+      if (eL) console.error(`[wa-entendimiento] negocio ${negocioId} sin la línea del responsable:`, eL.message);
+    });
+    if (r.error) console.error(`[wa-entendimiento] negocio ${negocioId} sin responsable:`, r.error);
+    else await sincronizarResponsablePrincipal(supabase, negocioId, p.workspaceId);
   }
 
   // La historia al timeline: son citas del cliente, no un resumen (N7).

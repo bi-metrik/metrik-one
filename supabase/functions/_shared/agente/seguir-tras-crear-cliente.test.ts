@@ -34,7 +34,7 @@ describe('después de crear un cliente, el modelo sigue con la solicitud pendien
         expect(estadoDe(p)).toContain(`Acaba de quedar hecho, con el toque de el comercial: Creé a ${REF}.`)
         expect(estadoDe(p)).toContain('Propuesta pendiente: ninguna.')
         expect(p.herramientas.map((h) => h.name)).toContain('terminar')
-        return { name: 'proponer', args: { accion: 'viaje_nuevo', datos: { cliente: REF, destino: 'Punta Cana', desde: 1 } } }
+        return { name: 'proponer', args: { accion: 'viaje_nuevo', datos: { responsable: 'Carla Comercial', cliente: REF, destino: 'Punta Cana', desde: 1 } } }
       },
     ])
     const e = await escenario({ modelo })
@@ -46,7 +46,7 @@ describe('después de crear un cliente, el modelo sigue con la solicitud pendien
     const t3 = await e.toca('Crear')
     // Un solo mensaje, en orden: lo hecho arriba, la propuesta debajo, con sus botones.
     expect(t3).toHaveLength(1)
-    expect(t3[0]).toMatchObject({ tipo: 'botones', texto: `Creé a ${REF}.\n¿Abro este viaje?\n${REF} · Punta Cana · Viaje a medida` })
+    expect(t3[0]).toMatchObject({ tipo: 'botones', texto: `Creé a ${REF}.\n¿Abro este viaje?\n${REF} · Punta Cana · Viaje a medida\nLo lleva: Carla Comercial` })
     expect('opciones' in t3[0] && t3[0].opciones.map((o) => o.titulo)).toEqual(['Sí, ábrelo', 'No'])
     // Se creó el cliente; el viaje todavía no (espera su toque).
     expect(e.puerto.escrituras.map((x) => x.tipo)).toEqual(['cliente'])
@@ -142,7 +142,7 @@ describe('después de crear un cliente, el modelo sigue con la solicitud pendien
   it('`desde` tiene que señalar un escrito del comercial: un mensaje del bot no sirve', async () => {
     const modelo = modeloGuionado([
       { name: 'proponer', args: { accion: 'crear_cliente', datos: { nombre: 'Camilo Rojas', llave: '300 555 0199' } } },
-      { name: 'proponer', args: { accion: 'viaje_nuevo', datos: { cliente: REF, desde: 2 } } },
+      { name: 'proponer', args: { accion: 'viaje_nuevo', datos: { responsable: 'Carla Comercial', cliente: REF, desde: 2 } } },
       { name: 'terminar', args: {} },
     ])
     const e = await escenario({ modelo })
