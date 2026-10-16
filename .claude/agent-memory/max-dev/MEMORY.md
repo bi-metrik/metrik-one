@@ -2,7 +2,7 @@
 
 ## Project memories
 
-- ⚠️⚠️ [Suscripciones multiproducto (#1191)](project_suscripciones_multiproducto.md) — 100000-100200 aplicadas; 170000 (nace en prueba) SIN aplicar; cargo ePayco sin verificar
+- ⚠️⚠️ [Suscripciones multiproducto (#1191)](project_suscripciones_multiproducto.md) — 100000-170000 aplicadas; cargo ePayco sin verificar; cron de prueba con ?ws=
 - ⚠️⚠️ [Alta autogestionada de Valida](project_valida_alta_autogestionada.md) — pila #1104→#1107→#1110; 3 migraciones SIN aplicar (…100000, …153000, …203000); Términos en el registro, canal 'registro'; +…234500 cobro al confirmar (texto v2.1 espera a Emilio); +…180000 exime del gate de carpeta (SIN aplicar)
 - ⚠️⚠️ [Perfil del contacto por el bot (corte 1)](project_perfil_contacto_bot.md) — migración 20261012234500 SIN aplicar; fichas sin publicar; trigger exige autorización
 - ⚠️ [SOE-016: responsable automático por etapa](project_responsable_automatico_etapa.md) — sin migración; config SOENA SIN aplicar; crear negocio no cubierto

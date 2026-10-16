@@ -22,7 +22,7 @@ Relacionado: [[valida-alta-autogestionada]], [[secop-autogestion-registro]].
 
 ## 2026-10-16 (tarde): prueba como cliente nuevo en `cda-pruebas-futuras`
 - **La suscripción nace EN PRUEBA al registrarse** (`asegurarSuscripcionEnPrueba`); la activación pasa
-  ESA fila a activa (migración `20261016170000`, SIN aplicar). Sin la migración y con el código desplegado,
+  ESA fila a activa (migración `20261016170000`, aplicada el 16-oct). Sin la migración y con el código desplegado,
   la activación de un registro nuevo responde `nit_con_contrato` y el día 7 lo deja en `revisar`:
   aplicarla ANTES de probar un registro nuevo en preview. Backfill en
   `sql/suscripciones-producto/backfill-suscripcion-en-prueba.sql` (3 espacios de prueba al 16-oct).
@@ -34,5 +34,7 @@ Relacionado: [[valida-alta-autogestionada]], [[secop-autogestion-registro]].
   es `no_procesado` (no culpa a la tarjeta, sin enlace).
 - ⚠️ Una confirmación rechazada deja contrato ACTIVO + cuota 1 y la prueba sigue (`programado`): si luego
   cancela la prueba, el contrato queda vivo y entraría en mora. Decisión pendiente de Mauricio.
+- `/api/crons/valida-cobro-prueba?ws=<slug|id>` procesa un solo espacio (reintentos en preview sin tocar
+  otros registros del mismo despliegue, p. ej. `test-de-pruebas`). Migración 20261016170000 APLICADA (16-oct).
 - `test/tablas-doble.ts` ya soporta `neq` y `not(c, 'in', '(a,b)')`.
 
