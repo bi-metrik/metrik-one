@@ -53,6 +53,8 @@ export interface ClienteCargo {
   apellido?: string | null
   celular?: string | null
   direccion?: string | null
+  /** La IP de la persona que dio la orden (el registro o la confirmación). ePayco la pide en el cargo. */
+  ip?: string | null
 }
 
 export interface SolicitudCargo {
@@ -110,6 +112,12 @@ export type ResultadoCargo =
       estado: 'error'
       mensaje: string
       reintentable: boolean
+      /**
+       * `true` = la pasarela respondió que NO procesó la solicitud (p. ej. ePayco «Some fields are
+       * required»): es seguro que no hubo transacción ni cobro. Sin la marca, un error es dudoso (quizá
+       * cobró y no alcanzó a responder) y lo revisa una persona.
+       */
+      sinTransaccion?: true
     }
 
 export interface CapacidadesPasarela {

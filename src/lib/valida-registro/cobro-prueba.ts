@@ -175,7 +175,7 @@ export function correoCobroConfirmado(p: { razonSocial: string; cobradoAt: strin
   }
 }
 
-export type DesenlaceConfirmacion = 'cobrado' | 'pendiente' | 'rechazado' | 'revisar' | 'reintentar' | 'en_curso' | 'no_disponible'
+export type DesenlaceConfirmacion = 'cobrado' | 'pendiente' | 'rechazado' | 'no_procesado' | 'revisar' | 'reintentar' | 'en_curso' | 'no_disponible'
 
 /** Lo que ve la persona después de oprimir «Activar y pagar». */
 export function textoTrasConfirmar(d: DesenlaceConfirmacion, p: { valor: number; ultimos4: string | null }): string {
@@ -188,6 +188,10 @@ export function textoTrasConfirmar(d: DesenlaceConfirmacion, p: { valor: number;
     case 'rechazado':
       // 7.5 v2.1 (decisión 2026-10-14): conserva la prueba y el cobro del día 7 sigue en pie.
       return `No se pudo cobrar a ${tarjeta}: el pago fue rechazado. No se cobró nada y tu plan no quedó activo. Conservas lo que te queda de la prueba. Te enviamos al correo un enlace para pagar con otro medio; si no pagas ni cancelas, el cobro se intenta otra vez al cumplirse los 7 días.`
+    case 'no_procesado':
+      // Error nuestro (un dato que la pasarela pidió), no de la tarjeta: no se la culpa ni se promete
+      // un enlace (el enlace automático solo sale tras un rechazo del banco).
+      return `No pudimos procesar el cobro por un error de nuestro lado; ${tarjeta} no fue rechazada. No se cobró nada y tu plan no quedó activo. Conservas lo que te queda de la prueba. Ya lo estamos revisando y te escribimos al correo; si no cancelas, el cobro se intenta otra vez al cumplirse los 7 días.`
     case 'revisar':
       return 'No pudimos confirmar con ePayco si el cobro se hizo. No lo intentes de nuevo: lo revisamos y te escribimos al correo.'
     case 'reintentar':

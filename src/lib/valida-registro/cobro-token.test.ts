@@ -203,8 +203,67 @@ describe('una suscripción (suscripciones_producto) se cobra igual que un negoci
     expect(d.tablas.cobros[0]).toMatchObject({ negocio_id: null, suscripcion_id: SUS, plan_cobro_id: 'p1', numero_cuota: 1, fecha: null })
     expect(e.cargos[0]).toMatchObject({
       medioPago: { token_ref: REF },
-      cliente: { documento: '900123456', email: 'facturas@cda.co', celular: '3001234567', nombre: 'CDA EJEMPLO S.A.S.' },
+      cliente: { documento: '900123456', email: 'facturas@cda.co', celular: '3001234567', nombre: 'CDA', apellido: 'EJEMPLO S.A.S.' },
     })
+  })
+
+  // 2026-10-16, cda-pruebas-futuras: el primer cargo con token de la historia respondió «Some fields are
+  // required» (cobro_intentos_tarjeta, intento 0). La API simulada valida como ePayco: sin `ip`, sin
+  // celular o con un apellido que no es apellido, no procesa. Sin el arreglo esta prueba falla.
+  it('el cargo real de ePayco lleva la IP de la orden, el celular y nombre/apellido; si ePayco no lo procesa no culpa a la tarjeta', async () => {
+    const { crearAdapterEpayco } = await import('@/lib/suscripciones/pasarela/epayco')
+    const ENV = { EPAYCO_HABILITADO: '1', EPAYCO_PUBLIC_KEY_METRIK: 'pub', EPAYCO_PRIVATE_KEY_METRIK: 'priv', EPAYCO_P_CUST_ID_CLIENTE: '1', EPAYCO_P_KEY: 'k', VERCEL_ENV: 'preview' }
+    const cuerpos: Record<string, unknown>[] = []
+    const exigente = (async (url: string, init: RequestInit) => {
+      const ruta = new URL(url).pathname
+      if (ruta === '/login') return new Response(JSON.stringify({ token: 'jwt' }), { status: 200 })
+      const c = JSON.parse(String(init.body)) as Record<string, string>
+      cuerpos.push(c)
+      const faltan = ['ip', 'cellPhone', 'lastName', 'docNumber', 'email', 'address'].filter((k) => !c[k] || !/[A-Za-z0-9]/.test(String(c[k])))
+      if (faltan.length > 0) {
+        return new Response(
+          JSON.stringify({ success: false, textResponse: 'Some fields are required, please correct the errors and try again', data: { errors: faltan.map((f) => ({ codError: 'E001', errorMessage: `field ${f} required` })) } }),
+          { status: 200 },
+        )
+      }
+      return new Response(JSON.stringify({ success: true, data: { transaction: { data: { ref_payco: 77, estado: 'Aceptada', valor: '150000', fecha: '2026-10-16 11:35:40' } } } }), { status: 200 })
+    }) as unknown as typeof fetch
+    const adapter = crearAdapterEpayco({ env: ENV, fetch: exigente })
+    const adapterPara = (p: string) => (p === 'epayco' ? adapter : null)
+
+    const t = deSuscripcion()
+    Object.assign(t.suscripciones_producto[0], { valida_registro_id: 'reg-1' })
+    t.valida_registros = [{ id: 'reg-1', workspace_id: PAGADOR, estado: 'creado', ip: '186.155.120.92', cobro_confirmado_ip: '186.155.120.93' }]
+    const d = crearDoble(t)
+    const r = await cobrarCuotaConTarjeta({ db: d.db, adapterPara, ahoraMs: AHORA }, { cobradorId: METRIK, cuotaId: 'q1' })
+    expect(r.tipo).toBe('aprobado')
+    // La IP de la confirmación (la orden de cobro) manda sobre la del registro.
+    expect(cuerpos[0]).toMatchObject({ ip: '186.155.120.93', country: 'CO', name: 'CDA', lastName: 'EJEMPLO S.A.S.', cellPhone: '3001234567', docNumber: '900123456' })
+
+    // Sin celular ni IP: ePayco no lo procesa. Es un error nuestro, no un rechazo del banco: el intento
+    // queda en `error`, sin enlace automático, la bitácora lo dice y el plan sigue en la tarjeta.
+    const sinDatos = deSuscripcion({ workspaces: [{ id: PAGADOR, config_extra: { origen_registro: 'valida_autogestion' } }] })
+    const d2 = crearDoble(sinDatos)
+    const r2 = await cobrarCuotaConTarjeta({ db: d2.db, adapterPara, ahoraMs: AHORA }, { cobradorId: METRIK, cuotaId: 'q1' })
+    expect(r2).toMatchObject({ tipo: 'no_procesado' })
+    expect(d2.tablas.cobro_intentos_tarjeta[0]).toMatchObject({ resultado: 'error', numero_cuota: 1, intento: 0 })
+    expect(d2.tablas.planes_cobro[0].pasarela).toBe('epayco')
+    expect(d2.tablas.suscripciones_producto_eventos).toEqual([expect.objectContaining({ tipo: 'cobro_tarjeta_no_procesado' })])
+  })
+
+  it('ePayco responde que faltan campos: el motivo llega con el campo que pidió', async () => {
+    const { crearAdapterEpayco } = await import('@/lib/suscripciones/pasarela/epayco')
+    const ENV = { EPAYCO_HABILITADO: '1', EPAYCO_PUBLIC_KEY_METRIK: 'pub', EPAYCO_PRIVATE_KEY_METRIK: 'priv', EPAYCO_P_CUST_ID_CLIENTE: '1', EPAYCO_P_KEY: 'k', VERCEL_ENV: 'preview' }
+    const f = (async (url: string) =>
+      new URL(url).pathname === '/login'
+        ? new Response(JSON.stringify({ token: 'jwt' }), { status: 200 })
+        : new Response(JSON.stringify({ success: false, textResponse: 'Some fields are required, please correct the errors and try again', data: { totalErrors: 1, errors: [{ codError: 'E002', errorMessage: 'field city required' }] } }), { status: 200 })) as unknown as typeof fetch
+    const adapter = crearAdapterEpayco({ env: ENV, fetch: f })
+    const t = deSuscripcion()
+    const d = crearDoble(t)
+    const r = await cobrarCuotaConTarjeta({ db: d.db, adapterPara: () => adapter, ahoraMs: AHORA }, { cobradorId: METRIK, cuotaId: 'q1' })
+    expect(r.tipo).toBe('no_procesado')
+    expect(d.tablas.cobro_intentos_tarjeta[0].mensaje).toContain('field city required')
   })
 
   it('rechazado: la línea va a la bitácora de la suscripción, no a un negocio', async () => {

@@ -301,6 +301,8 @@ type Desenlace =
   | { tipo: 'cobrado' }
   | { tipo: 'pendiente' }
   | { tipo: 'rechazado'; mensaje: string }
+  /** ePayco no procesó la solicitud (error nuestro de datos): seguro que no cobró. */
+  | { tipo: 'no_procesado'; mensaje: string }
   | { tipo: 'revisar'; detalle: string }
   | { tipo: 'reintentar'; detalle: string }
 
@@ -309,6 +311,7 @@ function anotarDesenlace(resumen: ResumenCobroPrueba, registroId: string, d: Des
   else if (d.tipo === 'pendiente') resumen.pendientes += 1
   else if (d.tipo === 'rechazado') resumen.rechazados += 1
   else if (d.tipo === 'revisar') resumen.aRevisar.push({ registroId, detalle: d.detalle })
+  else if (d.tipo === 'no_procesado') resumen.aRevisar.push({ registroId, detalle: `no procesado: ${d.mensaje}` })
   else resumen.reintentar.push({ registroId, detalle: d.detalle })
 }
 
@@ -399,7 +402,9 @@ async function confirmacionRechazada(db: Db, planId: string): Promise<boolean> {
   const q = await db.from('cobro_intentos_tarjeta').select('intento, resultado').eq('plan_cobro_id', planId).eq('numero_cuota', 1)
   if (q.error) return false
   const filas = (q.data ?? []) as { intento: number; resultado: string }[]
-  return filas.some((f) => f.intento === 0 && f.resultado === 'rechazado') && !filas.some((f) => f.intento === 1)
+  // `error` también: solo vuelve a `programado` un intento 0 que ePayco NO procesó (`no_procesado`); uno
+  // dudoso deja el registro en `revisar` y el día 7 no llega aquí.
+  return filas.some((f) => f.intento === 0 && (f.resultado === 'rechazado' || f.resultado === 'error')) && !filas.some((f) => f.intento === 1)
 }
 
 /**
@@ -440,6 +445,17 @@ async function registrarResultado(
       if (alRechazo) await alRechazo(`confirmación rechazada: ${res.mensaje}`)
       else await cerrar('rechazado', `rechazado: ${res.mensaje}`)
       return { tipo: 'rechazado', mensaje: res.mensaje }
+    case 'no_procesado':
+      // Error nuestro (un dato que ePayco pidió), no del banco: no se cobró nada. Del literal (a): la
+      // prueba sigue y el día 7 lo intenta otra vez con el plan en la tarjeta. Del (b): lo revisa una
+      // persona (la cuota 1 no tiene otro intento con la tarjeta), sin enlace automático.
+      if (alRechazo) {
+        await alRechazo(`confirmación no procesada (error técnico, sin cobro): ${res.mensaje}`)
+      } else {
+        await db.from('planes_cobro').update({ pasarela: 'manual' }).eq('id', planId).eq('pasarela', 'epayco')
+        await cerrar('revisar', `no procesado (error técnico, sin cobro): ${res.mensaje}`)
+      }
+      return { tipo: 'no_procesado', mensaje: res.mensaje }
     default: {
       // Dudoso: quizá ePayco cobró y no alcanzó a responder. El plan sale de la tarjeta para que nadie
       // (ni el paso 7b) lo vuelva a cobrar; lo revisa una persona contra el panel de ePayco.
@@ -790,6 +806,8 @@ export type ResultadoCobroAlConfirmar =
   | { tipo: 'cobrado'; ultimos4: string }
   | { tipo: 'pendiente' }
   | { tipo: 'rechazado'; mensaje: string; ultimos4: string }
+  /** No se cobró por un error de datos nuestro: la tarjeta no tuvo la culpa. La prueba sigue. */
+  | { tipo: 'no_procesado' }
   | { tipo: 'revisar' }
   | { tipo: 'reintentar' }
   /** Otra corrida (el cron, u otro clic) ya reclamó el cobro: este no cobra. */
@@ -869,6 +887,9 @@ export async function cobrarAlConfirmar(
       return { tipo: 'pendiente' }
     case 'rechazado':
       return { tipo: 'rechazado', mensaje: d.mensaje, ultimos4 }
+    case 'no_procesado':
+      console.error('[valida-cobro] cobro al confirmar no procesado por ePayco:', registro.id, d.mensaje)
+      return { tipo: 'no_procesado' }
     case 'revisar':
       console.error('[valida-cobro] cobro al confirmar a revisar:', registro.id, d.detalle)
       return { tipo: 'revisar' }

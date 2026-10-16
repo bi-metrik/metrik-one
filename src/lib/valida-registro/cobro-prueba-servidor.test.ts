@@ -425,6 +425,34 @@ describe('el cobro del primer mes AL CONFIRMAR (Condiciones v2.1, 7.1 literal a)
     expect(m.registro().cobro_estado).toBe('cobrado')
   })
 
+  it('ePayco NO procesó la confirmación (error nuestro de datos): no culpa a la tarjeta, conserva la prueba y el día 7 cobra como intento 1', async () => {
+    const intentos: unknown[] = []
+    const m = montar(conTablas(V21), {
+      cobrarCuota: async (_d, p) => {
+        intentos.push(p)
+        return intentos.length === 1
+          ? { tipo: 'no_procesado', cobroId: 'cobro-1', mensaje: 'ePayco no procesó el cobro: Some fields are required' }
+          : { tipo: 'aprobado', cobroId: 'cobro-1', detalle: 'pagado' }
+      },
+    })
+    // `cobrarCuotaConTarjeta` anota el intento 0 como `error` (no hubo transacción).
+    m.tablas.cobro_intentos_tarjeta = [{ plan_cobro_id: 'plan-1', numero_cuota: 1, intento: 0, resultado: 'error' }]
+    const r = await confirmar(m)
+    expect(r).toEqual({ tipo: 'no_procesado' })
+    const texto = textoTrasConfirmar(r.tipo, { valor: 150_000, ultimos4: null })
+    expect(texto).toContain('error de nuestro lado')
+    expect(texto).not.toMatch(/rechazado\b|Te enviamos al correo un enlace/)
+    expect(m.registro()).toMatchObject({ cobro_estado: 'programado', cobro_programado_at: VENCE })
+    expect(String(m.registro().cobro_detalle)).toContain('error técnico')
+    await procesarCobrosTrasPrueba({ ...m.deps, ahoraMs: cron('2026-10-18') })
+    await procesarCobrosTrasPrueba({ ...m.deps, ahoraMs: cron('2026-10-21') })
+    expect(intentos).toEqual([
+      { cobradorId: 'ws-metrik', cuotaId: 'cuota-1', intento: 0, reintentoTrasConfirmacion: false },
+      { cobradorId: 'ws-metrik', cuotaId: 'cuota-1', intento: 1, reintentoTrasConfirmacion: true },
+    ])
+    expect(m.registro().cobro_estado).toBe('cobrado')
+  })
+
   it('si el cobro del día 7 tras la confirmación rechazada también falla, se cierra (7.5 literal b)', async () => {
     const m = montar(conTablas({ ...V21, ...AVISADO, cobro_confirmacion_rechazada_at: new Date(JUEVES).toISOString() }))
     m.tablas.cobro_intentos_tarjeta = [{ plan_cobro_id: 'plan-1', numero_cuota: 1, intento: 0, resultado: 'rechazado' }]

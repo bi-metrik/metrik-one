@@ -10,6 +10,7 @@ import type { PasarelaAdapter } from '@/lib/suscripciones/pasarela/adapter'
 import { leerRefMedioPagoEpayco } from '@/lib/suscripciones/pasarela/epayco'
 import { adapterPara } from '@/lib/suscripciones/pasarela/registro'
 import { CALENDARIO_MORA, esEspacioAutogestion, intentoDelDia } from './plan'
+import { partirNombre } from './metodo-pago'
 
 /**
  * El cobro recurrente con la tarjeta guardada en ePayco, para el plan de Valida de una cuenta
@@ -51,6 +52,11 @@ export type ResultadoCobroToken =
   | { tipo: 'aprobado'; cobroId: string; detalle: string }
   | { tipo: 'pendiente'; cobroId: string }
   | { tipo: 'rechazado'; cobroId: string; mensaje: string }
+  /**
+   * La pasarela NO procesó la solicitud (faltó un dato, la sesión, el comercio): seguro que no cobró, y
+   * no es un rechazo del banco. Error nuestro: no se culpa a la tarjeta ni se manda un enlace por él.
+   */
+  | { tipo: 'no_procesado'; cobroId: string; mensaje: string }
   | { tipo: 'error'; mensaje: string }
 
 interface Pagador {
@@ -60,6 +66,18 @@ interface Pagador {
   nit: string
   razonSocial: string
   celular: string | null
+  /** La IP con que la persona dio la orden: la de la confirmación, o la del registro (Condiciones 7.1). */
+  ip: string | null
+}
+
+function nombreYApellido(razonSocial: string): { nombre: string; apellido: string } {
+  return partirNombre(razonSocial)
+}
+
+/** La IP de la orden de cobro: la confirmación (literal a) manda; si no hubo, la del registro. */
+function ipDeLaOrden(r: { cobro_confirmado_ip?: string | null; ip?: string | null } | null): string | null {
+  const ip = (r?.cobro_confirmado_ip || r?.ip || '').trim()
+  return ip || null
 }
 
 /**
@@ -82,7 +100,7 @@ async function pagadorConTarjeta(db: Db, cobradorId: string, ancla: Ancla): Prom
     db.from('workspaces').select('config_extra').eq('id', pagadores[0]).maybeSingle(),
     db
       .from('valida_registros')
-      .select('metodo_pago_estado, metodo_pago_ref, correo, identificacion, razon_social')
+      .select('metodo_pago_estado, metodo_pago_ref, correo, identificacion, razon_social, ip, cobro_confirmado_ip')
       .eq('workspace_id', pagadores[0])
       .eq('estado', 'creado')
       .maybeSingle(),
@@ -90,7 +108,15 @@ async function pagadorConTarjeta(db: Db, cobradorId: string, ancla: Ancla): Prom
   if (ws.error) throw new Error(`espacio ${pagadores[0]}: ${ws.error.message}`)
   if (reg.error) throw new Error(`registro de ${pagadores[0]}: ${reg.error.message}`)
   const config = (ws.data?.config_extra ?? null) as Record<string, unknown> | null
-  const r = reg.data as { metodo_pago_estado: string; metodo_pago_ref: string | null; correo: string; identificacion: string; razon_social: string } | null
+  const r = reg.data as {
+    metodo_pago_estado: string
+    metodo_pago_ref: string | null
+    correo: string
+    identificacion: string
+    razon_social: string
+    ip: string | null
+    cobro_confirmado_ip?: string | null
+  } | null
   if (!esEspacioAutogestion(config) || !r || r.metodo_pago_estado !== 'registrado' || !leerRefMedioPagoEpayco(r.metodo_pago_ref)) return null
   const pagadorCfg = (config?.valida_pagador ?? null) as { celular?: unknown } | null
   return {
@@ -100,6 +126,7 @@ async function pagadorConTarjeta(db: Db, cobradorId: string, ancla: Ancla): Prom
     nit: r.identificacion,
     razonSocial: r.razon_social,
     celular: typeof pagadorCfg?.celular === 'string' ? pagadorCfg.celular : null,
+    ip: ipDeLaOrden(r),
   }
 }
 
@@ -108,7 +135,7 @@ async function pagadorDeSuscripcion(db: Db, cobradorId: string, suscripcionId: s
   const [s, ws] = await Promise.all([
     db
       .from('suscripciones_producto')
-      .select('workspace_cliente_id, estado, metodo_pago_pasarela, metodo_pago_ref, correo_facturacion, numero_documento, razon_social')
+      .select('workspace_cliente_id, estado, metodo_pago_pasarela, metodo_pago_ref, correo_facturacion, numero_documento, razon_social, valida_registro_id')
       .eq('id', suscripcionId)
       .eq('workspace_id', cobradorId)
       .maybeSingle(),
@@ -124,9 +151,17 @@ async function pagadorDeSuscripcion(db: Db, cobradorId: string, suscripcionId: s
     correo_facturacion: string | null
     numero_documento: string
     razon_social: string
+    valida_registro_id?: string | null
   } | null
   if (!fila || fila.estado === 'cancelada' || fila.workspace_cliente_id !== pagadorId) return null
   if (fila.metodo_pago_pasarela !== 'epayco' || !leerRefMedioPagoEpayco(fila.metodo_pago_ref) || !fila.correo_facturacion) return null
+  // La IP de la orden vive en el registro del que nació la suscripción (no se copia: es evidencia de él).
+  let registro: { ip?: string | null; cobro_confirmado_ip?: string | null } | null = null
+  if (fila.valida_registro_id) {
+    const reg = await db.from('valida_registros').select('ip, cobro_confirmado_ip').eq('id', fila.valida_registro_id).maybeSingle()
+    if (reg.error) throw new Error(`registro de la suscripción ${suscripcionId}: ${reg.error.message}`)
+    registro = reg.data
+  }
   const config = (ws.data?.config_extra ?? null) as Record<string, unknown> | null
   const pagadorCfg = (config?.valida_pagador ?? null) as { celular?: unknown } | null
   return {
@@ -136,6 +171,7 @@ async function pagadorDeSuscripcion(db: Db, cobradorId: string, suscripcionId: s
     nit: fila.numero_documento,
     razonSocial: fila.razon_social,
     celular: typeof pagadorCfg?.celular === 'string' ? pagadorCfg.celular : null,
+    ip: ipDeLaOrden(registro),
   }
 }
 
@@ -265,12 +301,14 @@ export async function cobrarCuotaConTarjeta(
     facturaRef: null,
     medioPago: { tipo: 'tarjeta', token_ref: pagador.ref, pasarela: 'epayco' },
     cliente: {
-      nombre: pagador.razonSocial,
-      apellido: '.',
+      // Nombre y apellido partidos de la razón social, como el ensayo y el alta del cliente: ePayco
+      // valida los dos y un «.» no es un apellido.
+      ...nombreYApellido(pagador.razonSocial),
       email: pagador.correo,
       documento: pagador.nit,
       tipoDocumento: 'NIT',
       celular: pagador.celular,
+      ip: pagador.ip,
     },
   })
 
@@ -327,6 +365,20 @@ export async function cobrarCuotaConTarjeta(
     return { tipo: 'rechazado', cobroId: cobroId as string, mensaje: r.mensaje }
   }
   await anotar('error', null, r.mensaje)
+  if (r.sinTransaccion) {
+    await anotarEnAncla(
+      db,
+      {
+        ancla,
+        workspaceId: p.cobradorId,
+        tipo: 'cobro_tarjeta_no_procesado',
+        texto: `ePayco no procesó el cobro con tarjeta de la cuota ${cuota.data.numero} (no hubo transacción ni cobro): ${r.mensaje}`,
+        datos: { cobro_id: cobroId, numero_cuota: cuota.data.numero, intento },
+      },
+      'cobro-token-epayco',
+    )
+    return { tipo: 'no_procesado', cobroId: cobroId as string, mensaje: r.mensaje }
+  }
   return { tipo: 'error', mensaje: r.mensaje }
 }
 
@@ -397,7 +449,7 @@ export async function cobrarCuotasConTarjeta(deps: DepsCobroToken & { hoy: strin
           // Primer cobro: el plan pasó a enlace. Las demás: la cuota sigue su calendario; no se cobra
           // una cuota más nueva mientras esta esté rechazada.
           break
-        } else if (r.tipo === 'error') resumen.errores.push({ cuotaId: c.id, error: r.mensaje })
+        } else if (r.tipo === 'error' || r.tipo === 'no_procesado') resumen.errores.push({ cuotaId: c.id, error: r.mensaje })
       } catch (e) {
         resumen.errores.push({ cuotaId: c.id, error: e instanceof Error ? e.message : String(e) })
       }
