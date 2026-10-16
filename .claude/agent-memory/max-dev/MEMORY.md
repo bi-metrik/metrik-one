@@ -2,15 +2,12 @@
 
 ## Project memories
 
-- [Fotos: web del hotel que bloquea (Hilton 403)](project_fotos_web_bloqueada.md) — aviso por motivo; leerPagina con galerías; Ctrl+V en captura
-- ⚠️⚠️ [Galería de fotos del hotel + reglas de Emilio](project_galeria_fotos_hotel.md) — migración 20261016233000 SIN aplicar; toda escritura de fotos la usa
+- ⚠️⚠️ [Fotos: biblioteca propia por hotel y tour](project_fotos_perfiles.md) — migración 20261017090000 SIN aplicar; sin búsqueda automática; PDF por vista (1 ida)
 - ⚠️⚠️ [Quién lleva el viaje desde el bot (Trappvel)](project_responsable_desde_bot.md) — responsable + dicho_en; migración 20261016193000 SIN aplicar; deploy antes
 - ⚠️⚠️ [Valida: tabla angosta de búsqueda (metrik-valida #64)](project_valida_tabla_angosta_busqueda.md) — 0038/0039 SIN aplicar; poblar antes de 0039; seqscan off obligatorio; tokens societarios pierden matches
 - ⚠️⚠️ [Re-verificación D (#1183, #1185-#1188)](project_cotizacion_reverificacion_d.md) — sin mergear; reserva solo por pasos (hash del prompt); V8 pide --resembrar; «actividades opcionales» reportado
 - ⚠️⚠️ [Verificación D de la cotización (#1170-#1179)](project_cotizacion_verificacion_d.md) — sin mergear; #1172 apilado en #1171; imports chocan; lectura real fija 6/0/0
 - ⚠️⚠️ [Propuesta: H33 (#1165) y motor html (PR 2)](project_propuesta_motor_html_h33.md) — SQL del interruptor SIN aplicar; anticipo en documento_cliente
-- ⚠️⚠️ [Fotos del hotel por categoría](project_fotos_hotel_por_categoria.md) — migración 20261016221500 SIN aplicar (ANTES del merge); modelo sin medir
-- ⚠️ [Biblioteca de fotos y su puerta en la tarjeta](project_biblioteca_fotos.md) — foto del hotel solo en la biblioteca; C0 en tope 23
 - ⚠️⚠️ [Propuesta PR 4: catálogo de fotos](project_fotos_catalogo.md) — migración 20261014221500 (tabla + bucket); hoteles NUNCA de Commons
 - ⚠️⚠️ [Perfil del contacto por el bot (corte 1)](project_perfil_contacto_bot.md) — migración 20261012234500 SIN aplicar; fichas sin publicar; el esquema manda sobre el prompt
 - ⚠️ [SOE-016: responsable automático por etapa](project_responsable_automatico_etapa.md) — sin migración; config SOENA SIN aplicar; crear negocio no cubierto

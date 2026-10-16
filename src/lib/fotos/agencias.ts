@@ -1,9 +1,8 @@
 /**
  * Las agencias de viaje en línea (OTA) NUNCA son fuente de fotos (Emilio, 2026-10-16): Booking,
- * Expedia, Despegar y las demás no autorizan usar sus fotos. Si alguien pega un enlace de una de
- * ellas, se rechaza con `MENSAJE_AGENCIA`; si la página oficial de un hotel trae imágenes servidas
- * desde sus servidores (el widget de reservas de Booking sirve desde bstatic.com), esas no se
- * ofrecen. PURO: lo usan el navegador y el servidor.
+ * Expedia, Despegar y las demás no autorizan usar sus fotos. Queda una sola guarda, sobre lo que la
+ * persona escribe en «¿De dónde viene?» al subir una foto (`revisarAutorizacion`): un enlace de una
+ * de ellas se rechaza con `MENSAJE_AGENCIA`. PURO: lo usan el navegador y el servidor.
  *
  * Se compara el nombre REGISTRABLE del dominio («booking» en www.booking.com, «despegar» en
  * despegar.com.co), no cualquier pedazo: hotels.marriott.com no es hotels.com.
@@ -55,17 +54,6 @@ export function nombreRegistrable(host: string): string | null {
   partes.pop()
   if (partes.length >= 2 && SEGUNDO_NIVEL.has(partes[partes.length - 1])) partes.pop()
   return partes[partes.length - 1] ?? null
-}
-
-/** ¿Esta URL (una imagen o la página leída tras redirecciones) está en un servidor de una agencia? Solo mira el host. */
-export function urlEsDeAgencia(url: string | null | undefined): boolean {
-  if (typeof url !== 'string') return false
-  try {
-    const n = nombreRegistrable(new URL(url).hostname)
-    return n !== null && AGENCIAS.has(n)
-  } catch {
-    return false
-  }
 }
 
 /**

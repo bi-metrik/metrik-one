@@ -1,69 +1,44 @@
 'use server'
 
 /**
- * La biblioteca de fotos del workspace (decisión de Mauricio del 2026-10-16): ver, buscar,
- * precargar y cambiar las fotos de hoteles, tours/planes y ciudades, fuera de la cotización. Se
- * reusan en todas las propuestas.
+ * «Hoteles y tours» (Mauricio, 2026-10-16): la biblioteca de fotos del espacio, armada por la
+ * agencia. Cada hotel y cada tour tiene su perfil con hasta tres fotos; la propuesta las usa solas.
+ * La búsqueda automática (Wikimedia Commons, la página oficial, el clasificador) se quitó.
  *
  * Lo que se decide AQUÍ y no en el navegador:
- *  · que la plantilla del workspace tenga propuesta html y que el rol escriba;
- *  · la llave de cada elemento (sale del tipo, el nombre y la ciudad, `objetivoDelPedido`);
- *  · que la foto de Commons tenga licencia imprimible (se vuelve a pedir a Commons al elegirla);
- *  · que la página oficial esté encendida en el workspace y que la imagen esté en esa página;
- *  · el tope de 3 por elemento y la única principal (también los hace cumplir la base);
+ *  · que la plantilla del workspace tenga propuesta de viaje y que el rol escriba;
+ *  · la llave de cada hotel o tour (sale del tipo, el nombre y la ciudad, `objetivoDelPedido`) y a
+ *    qué perfil pertenece (`resolverPedidos`: propia, alias o la duda que contesta la persona);
+ *  · el tope de 3 por perfil y la única principal (también los hace cumplir la base);
  *  · que una foto subida o pegada traiga la casilla «Tengo autorización» (y quién la marcó, que lo
- *    pone el servidor con el usuario de la sesión);
- *  · que nada venga de una agencia en línea (Booking, Expedia, Despegar…): nunca son fuente.
- * Las 12 opciones del selector NO se guardan: solo la que se elige.
+ *    pone el servidor con el usuario de la sesión).
  */
 import { getWorkspace } from '@/lib/actions/get-workspace'
-import { esDeAgenciaDeViajes, MENSAJE_AGENCIA, urlEsDeAgencia } from '@/lib/fotos/agencias'
 import { revisarAutorizacion } from '@/lib/fotos/autorizacion'
 import { bytesDeDataUrl } from '@/lib/cotizaciones/imagen-captura'
 import { esCategoria, type CategoriaFoto } from '@/lib/fotos/categoria'
-import {
-  anotarCategoria,
-  COLUMNAS,
-  elegirDeCommons,
-  elegirDeSitioOficial,
-  elementosDe,
-  leerBiblioteca,
-  leerCatalogo,
-  marcarPrincipal,
-  ponerFotoPropia,
-  quitarFotoPorId,
-  TABLA_CATALOGO,
-  type FilaCatalogo,
-} from '@/lib/fotos/catalogo'
-import { bytesDeCatalogo, enlacesDeCatalogo } from '@/lib/fotos/catalogo-almacen'
-import { sinRepetir, usaFotosDeSitioOficial, type ObjetivoFoto } from '@/lib/fotos/clave'
-import { clasificar, opcionesDeHotelEnCommons, opcionesDeHotelEnSitio } from '@/lib/fotos/opciones-hotel'
-import type { MotivoFallaPagina } from '@/lib/fotos/falla-pagina'
-import { datosDesdeWikidata, imagenPegadaPorUrl, opcionesDeSitioOficial, paginaOficialDesdeWikidata } from '@/lib/fotos/sitio-oficial'
-import { dominio, objetivoDelPedido, vistaDeElemento, type EleccionFoto, type ElementoVista, type OpcionFoto } from '@/lib/fotos/vista'
-import { opcionesDeCommons } from '@/lib/fotos/wikimedia'
+import { elementosDe, filaPorId, fotosDelElemento, ordenar, ponerFotoPropia, quitarFotoPorId, reordenarFotos, type FilaCatalogo } from '@/lib/fotos/catalogo'
+import { enlacesDeCatalogo } from '@/lib/fotos/catalogo-almacen'
+import { esTipoPerfil, sinRepetir, type ObjetivoFoto, type TipoFoto } from '@/lib/fotos/clave'
+import { aliasPorPerfil, contestarDuda, leerConocidos, listaDePerfiles, resolverPedidos, separarAlias, type Conocidos } from '@/lib/fotos/perfiles-db'
+import { objetivoDelPedido, vistaDeElemento, type DudaVista, type ElementoVista } from '@/lib/fotos/vista'
 import { tienePropuestaHtml } from '@/lib/pdf/motor-html'
 
 const ROLES_SIN_ESCRITURA = new Set(['read_only', 'contador'])
-const MENSAJE_SIN_SITIO = 'Las fotos de la página oficial no están encendidas en este espacio.'
+const MENSAJE_SIN_ROL = 'Tu rol puede ver las fotos pero no cambiarlas.'
 
-export type BibliotecaFotos =
-  | { ok: true; elementos: ElementoVista[]; editable: boolean; sitioOficial: boolean }
+/** Lo que el navegador pide: qué hotel, tour o ciudad (la llave la pone el servidor). */
+export interface PedidoFoto {
+  tipo: TipoFoto
+  nombre: string
+  ciudad: string | null
+}
+
+export type HotelesYTours =
+  | { ok: true; elementos: ElementoVista[]; editable: boolean }
   | { ok: false; error: string }
 
 export type ResultadoElemento = { ok: true; elemento: ElementoVista | null } | { ok: false; error: string }
-
-/**
- * Una búsqueda en la página oficial que no dio opciones: `motivo` dice cuál aviso mostrar
- * (la página bloquea, no trae fotos, la red falló) y `pagina` la que se abre para copiar la foto.
- */
-export type FallaBusqueda = { ok: false; error: string; motivo?: MotivoFallaPagina; pagina?: string }
-
-export type OpcionesDeFoto =
-  | { ok: true; opciones: OpcionFoto[]; siguiente: string | null; pagina?: string }
-  | FallaBusqueda
-
-export type PaginaSugerida = { ok: true; url: string | null; desde: 'biblioteca' | 'wikidata' | null } | { ok: false; error: string }
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type Cliente = any
@@ -71,200 +46,163 @@ type Cliente = any
 async function contexto(escribir: boolean) {
   const { supabase, workspaceId, staffId, userId, role, error } = await getWorkspace()
   if (error || !workspaceId) return { error: String(error ?? 'No autenticado') }
-  if (escribir && role && ROLES_SIN_ESCRITURA.has(role)) return { error: 'Tu rol puede ver las fotos pero no cambiarlas.' }
+  if (escribir && role && ROLES_SIN_ESCRITURA.has(role)) return { error: MENSAJE_SIN_ROL }
   const db = supabase as Cliente
-  const { data: ws } = await db.from('workspaces').select('cotizacion_template_slug, config_extra').eq('id', workspaceId).maybeSingle()
-  const fila = ws as { cotizacion_template_slug?: string | null; config_extra?: unknown } | null
-  if (!tienePropuestaHtml(fila?.cotizacion_template_slug)) return { error: 'La biblioteca de fotos es de la propuesta de viaje, que este espacio no tiene.' }
+  const { data: ws } = await db.from('workspaces').select('cotizacion_template_slug').eq('id', workspaceId).maybeSingle()
+  if (!tienePropuestaHtml((ws as { cotizacion_template_slug?: string | null } | null)?.cotizacion_template_slug)) {
+    return { error: 'Los hoteles y tours son de la propuesta de viaje, que este espacio no tiene.' }
+  }
   return {
     db,
     workspaceId,
     staffId: (staffId as string | null) ?? null,
     userId: (userId as string | null | undefined) ?? null,
     editable: !(role && ROLES_SIN_ESCRITURA.has(role as string)),
-    sitioOficial: usaFotosDeSitioOficial(fila?.config_extra),
   }
 }
 
 type Contexto = Exclude<Awaited<ReturnType<typeof contexto>>, { error: string }>
 
-async function vistas(ctx: Contexto, filas: FilaCatalogo[]): Promise<ElementoVista[]> {
-  const urls = await enlacesDeCatalogo(ctx.workspaceId, filas.map((f) => f.ref))
-  return elementosDe(filas).map((e) => vistaDeElemento(e, urls, { sitioOficial: ctx.sitioOficial }))
+/** Los elementos (perfiles con sus fotos, y ciudades con fotos) como los ve el navegador. */
+async function vistasDe(ctx: Contexto, c: Conocidos, soloClaves?: Set<string>): Promise<ElementoVista[]> {
+  const fotosPorClave = new Map(elementosDe(c.fotos).map((e) => [`${e.tipo}:${e.clave}`, e]))
+  const alias = aliasPorPerfil(c)
+  const elementos = [
+    ...listaDePerfiles(c).map((p) => ({ tipo: p.tipo as TipoFoto, clave: p.clave, nombre: p.nombre, ciudad: p.ciudad })),
+    ...[...fotosPorClave.values()].filter((e) => e.tipo === 'ciudad'),
+  ]
+    .filter((e) => !soloClaves || soloClaves.has(`${e.tipo}:${e.clave}`))
+    .map((e) => ({
+      ...e,
+      fotos: fotosPorClave.get(`${e.tipo}:${e.clave}`)?.fotos ?? [],
+      alias: (alias.get(`${e.tipo}:${e.clave}`) ?? []).map((a) => ({ id: a.id, nombre: a.nombre, ciudad: a.ciudad })),
+    }))
+  const urls = await enlacesDeCatalogo(ctx.workspaceId, elementos.flatMap((e) => e.fotos.map((f) => f.ref)))
+  return elementos.map((e) => vistaDeElemento(e, urls))
 }
 
-/** El elemento como queda después de un cambio (`null` si ya no tiene fotos). */
+/** Un perfil como queda después de un cambio. `null` = no tiene perfil ni fotos. */
 async function elementoActual(ctx: Contexto, o: Pick<ObjetivoFoto, 'tipo' | 'clave'>): Promise<ResultadoElemento> {
-  const { data, error } = await ctx.db
-    .from(TABLA_CATALOGO)
-    .select(COLUMNAS)
-    .eq('workspace_id', ctx.workspaceId)
-    .eq('tipo', o.tipo)
-    .eq('clave', o.clave)
-  if (error) return { ok: false, error: 'No se pudo leer la biblioteca de fotos.' }
-  const [elemento] = await vistas(ctx, (data ?? []) as FilaCatalogo[])
-  return { ok: true, elemento: elemento ?? null }
+  const leidos = await leerConocidos(ctx.db, ctx.workspaceId)
+  if (!leidos.ok) return { ok: false, error: leidos.mensaje }
+  const [e] = await vistasDe(ctx, leidos.conocidos, new Set([`${o.tipo}:${o.clave}`]))
+  if (e) return { ok: true, elemento: e }
+  // Una ciudad sin fotos, o un perfil que todavía no tiene fila: vacío.
+  return { ok: true, elemento: null }
 }
 
-/** Toda la biblioteca del workspace (la pantalla filtra y busca en el navegador). */
-export async function leerBibliotecaDeFotos(): Promise<BibliotecaFotos> {
+/** «Hoteles y tours»: todos los perfiles del espacio (y las ciudades que tienen fotos). */
+export async function leerHotelesYTours(): Promise<HotelesYTours> {
   const ctx = await contexto(false)
   if ('error' in ctx) return { ok: false, error: ctx.error as string }
-  const r = await leerBiblioteca(ctx.db, ctx.workspaceId)
-  if (!r.ok) return { ok: false, error: r.mensaje }
-  const urls = await enlacesDeCatalogo(ctx.workspaceId, r.elementos.flatMap((e) => e.fotos.map((f) => f.ref)))
-  return {
-    ok: true,
-    elementos: r.elementos.map((e) => vistaDeElemento(e, urls, { sitioOficial: ctx.sitioOficial })),
-    editable: ctx.editable,
-    sitioOficial: ctx.sitioOficial,
-  }
+  const leidos = await leerConocidos(ctx.db, ctx.workspaceId)
+  if (!leidos.ok) return { ok: false, error: leidos.mensaje }
+  const orden: Record<TipoFoto, number> = { hotel: 0, actividad: 1, ciudad: 2 }
+  const elementos = (await vistasDe(ctx, leidos.conocidos)).sort((a, b) => orden[a.tipo] - orden[b.tipo] || a.nombre.localeCompare(b.nombre, 'es'))
+  return { ok: true, elementos, editable: ctx.editable }
 }
 
 /** Cuántos elementos pide de una vez el editor de la cotización (sus tarjetas). */
 const TOPE_PEDIDOS_TARJETAS = 80
 
-export type FotosDeTarjetas =
-  | { ok: true; elementos: ElementoVista[]; editable: boolean; sitioOficial: boolean }
-  | { ok: false; error: string }
+/** Lo que una tarjeta recibe: el perfil de su hotel o tour, o la pregunta. */
+export interface FotoDeTarjeta {
+  tipo: TipoFoto
+  /** La llave de lo que pidió la tarjeta (con ella la ubica el navegador). */
+  clave: string
+  /** El perfil con sus fotos; `null` si todavía no tiene (o si hay duda). */
+  elemento: ElementoVista | null
+  /** «¿Es el mismo hotel que …?» (sin contestar). */
+  duda: DudaVista | null
+}
+
+export type FotosDeTarjetas = { ok: true; tarjetas: FotoDeTarjeta[]; editable: boolean } | { ok: false; error: string }
 
 /**
- * Las fotos de la biblioteca para las tarjetas de una cotización (el recuadro de la foto del
- * hotel es la puerta a la biblioteca, Mauricio 2026-10-16): una sola lectura para todas las
- * tarjetas a la vista. La llave de cada una la calcula el servidor. Sin biblioteca en el espacio
- * (otra plantilla, o sin la migración) responde `ok: false` y la tarjeta queda como antes.
+ * Los perfiles de los hoteles y tours de una cotización, en una sola lectura para todas sus
+ * tarjetas (las server actions de Next van en fila). La primera vez que un hotel o un tour aparece,
+ * su perfil se crea aquí (si el rol escribe); si su nombre se parece a uno conocido, la tarjeta
+ * pregunta. Sin propuesta de viaje en el espacio, o sin la migración, `ok: false`: la tarjeta queda
+ * como antes.
  */
-export async function fotosParaTarjetas(pedidos: { tipo: string; nombre: string; ciudad: string | null }[]): Promise<FotosDeTarjetas> {
+export async function fotosParaTarjetas(pedidos: PedidoFoto[]): Promise<FotosDeTarjetas> {
   const ctx = await contexto(false)
   if ('error' in ctx) return { ok: false, error: ctx.error as string }
   const objetivos = sinRepetir((Array.isArray(pedidos) ? pedidos.slice(0, TOPE_PEDIDOS_TARJETAS) : []).map(objetivoDelPedido))
-  const { error: sinMigracion } = await ctx.db.from(TABLA_CATALOGO).select('id').limit(1)
-  if (sinMigracion) return { ok: false, error: 'La biblioteca de fotos todavía no está disponible.' }
-  const filas = objetivos.length > 0 ? await leerCatalogo(ctx.db, ctx.workspaceId, { objetivos }) : []
-  const pedidas = new Set(objetivos.map((o) => `${o.tipo}:${o.clave}`))
+  const leidos = await leerConocidos(ctx.db, ctx.workspaceId)
+  if (!leidos.ok) return { ok: false, error: leidos.mensaje }
+  const c = leidos.conocidos
+  const resueltos = await resolverPedidos(ctx.db, ctx.workspaceId, ctx.staffId, objetivos, c, { escribir: ctx.editable })
+  const claves = new Set(resueltos.flatMap((r) => [r.perfil, r.duda && { tipo: r.pedido.tipo, clave: r.duda.clave }]).filter((x): x is ObjetivoFoto => !!x).map((x) => `${x.tipo}:${x.clave}`))
+  const porClave = new Map((await vistasDe(ctx, c, claves)).map((e) => [`${e.tipo}:${e.clave}`, e]))
   return {
     ok: true,
-    elementos: await vistas(ctx, filas.filter((f) => pedidas.has(`${f.tipo}:${f.clave}`))),
     editable: ctx.editable,
-    sitioOficial: ctx.sitioOficial,
+    tarjetas: resueltos.map((r) => {
+      const conocido = r.duda ? porClave.get(`${r.pedido.tipo}:${r.duda.clave}`) : null
+      return {
+        tipo: r.pedido.tipo,
+        clave: r.pedido.clave,
+        elemento: r.perfil ? porClave.get(`${r.perfil.tipo}:${r.perfil.clave}`) ?? null : null,
+        duda: r.duda ? { ...r.duda, url: conocido?.fotos[0]?.url ?? null } : null,
+      }
+    }),
   }
+}
+
+/** El perfil de lo que pide una tarjeta o la pantalla (resolviendo alias). Error si hay duda. */
+async function perfilDelPedido(ctx: Contexto, pedido: unknown): Promise<{ perfil: ObjetivoFoto } | { error: string }> {
+  const o = objetivoDelPedido(pedido)
+  if (!o) return { error: 'Falta el nombre de lo que quieres ilustrar.' }
+  if (!esTipoPerfil(o.tipo)) return { perfil: o }
+  const leidos = await leerConocidos(ctx.db, ctx.workspaceId)
+  if (!leidos.ok) return { error: leidos.mensaje }
+  const [r] = await resolverPedidos(ctx.db, ctx.workspaceId, ctx.staffId, [o], leidos.conocidos, { escribir: true })
+  if (!r?.perfil) return { error: `Primero dinos si es el mismo ${o.tipo === 'hotel' ? 'hotel' : 'tour'} que «${r?.duda?.nombre ?? ''}».` }
+  return { perfil: r.perfil }
 }
 
 /**
- * 12 opciones para elegir de una fuente. `siguiente` es lo que devolvió la tanda anterior («Ver
- * más»). En la página oficial, `paginaUrl` es la que pegó o confirmó la persona.
+ * La respuesta a «¿Es el mismo hotel que …?» desde la tarjeta: `mismo` lo une al perfil conocido
+ * (`clavePerfil`) y la próxima vez se reconoce solo; si no, queda con su perfil propio.
  */
-export async function opcionesDeFoto(
-  pedido: { tipo: string; nombre: string; ciudad: string | null },
-  fuente: 'wikimedia' | 'sitio_oficial',
-  siguiente: string | null,
-  paginaUrl?: string | null,
-): Promise<OpcionesDeFoto> {
+export async function contestarMismoPerfil(pedido: PedidoFoto, clavePerfil: string, mismo: boolean): Promise<ResultadoElemento> {
   const ctx = await contexto(true)
   if ('error' in ctx) return { ok: false, error: ctx.error as string }
   const o = objetivoDelPedido(pedido)
   if (!o) return { ok: false, error: 'Falta el nombre de lo que quieres ilustrar.' }
-  const desde = Math.max(0, Math.min(10_000, Number.parseInt(siguiente ?? '0', 10) || 0))
-  if (fuente === 'wikimedia') {
-    const r = await opcionesDeCommons(o, { pagina: desde })
-    return {
-      ok: true,
-      opciones: r.candidatas.map((c) => ({
-        id: c.titulo,
-        fuente: 'wikimedia',
-        miniatura: c.descarga,
-        ancho: c.ancho,
-        alto: c.alto,
-        titulo: c.titulo,
-        credito: `${c.autor} · ${c.licencia}`,
-        pagina: c.pagina,
-      })),
-      siguiente: r.hayMas ? String(desde + 1) : null,
-    }
-  }
-  if (fuente !== 'sitio_oficial') return { ok: false, error: 'Fuente desconocida.' }
-  if (esDeAgenciaDeViajes(paginaUrl)) return { ok: false, error: MENSAJE_AGENCIA }
-  if (!ctx.sitioOficial) return { ok: false, error: MENSAJE_SIN_SITIO }
-  if (typeof paginaUrl !== 'string' || !paginaUrl.trim()) return { ok: false, error: 'Pega la dirección de la página oficial (https://…).' }
-  const r = await opcionesDeSitioOficial(paginaUrl.trim(), { desde })
-  if (!r.ok) return r
-  return {
-    ok: true,
-    pagina: r.pagina,
-    opciones: r.candidatas.map((c) => ({
-      id: c.imagen,
-      fuente: 'sitio_oficial',
-      miniatura: c.miniatura,
-      ancho: c.ancho,
-      alto: c.alto,
-      titulo: c.imagen,
-      credito: dominio(c.pagina),
-      pagina: c.pagina,
-      imagen: c.imagen,
-    })),
-    siguiente: r.siguiente === null ? null : String(r.siguiente),
-  }
-}
-
-/**
- * La página oficial que ONE propone para un elemento: la que ya se usó en la biblioteca para ese
- * elemento, o la de Wikidata si hay UNA entidad con ese nombre en esa ciudad. La persona la ve y
- * la confirma antes de buscar fotos.
- */
-export async function paginaOficialSugerida(pedido: { tipo: string; nombre: string; ciudad: string | null }): Promise<PaginaSugerida> {
-  const ctx = await contexto(true)
-  if ('error' in ctx) return { ok: false, error: ctx.error as string }
-  if (!ctx.sitioOficial) return { ok: false, error: MENSAJE_SIN_SITIO }
-  const o = objetivoDelPedido(pedido)
-  if (!o) return { ok: false, error: 'Falta el nombre de lo que quieres ilustrar.' }
-  const { data } = await ctx.db
-    .from(TABLA_CATALOGO)
-    .select('fuente_url')
-    .eq('workspace_id', ctx.workspaceId)
-    .eq('tipo', o.tipo)
-    .eq('clave', o.clave)
-    .eq('origen', 'sitio_oficial')
-    .limit(1)
-  const usada = (data as { fuente_url?: string | null }[] | null)?.[0]?.fuente_url
-  if (usada && !urlEsDeAgencia(usada)) return { ok: true, url: usada, desde: 'biblioteca' }
-  const w = await paginaOficialDesdeWikidata(o)
-  const deWikidata = w && !urlEsDeAgencia(w.url) ? w : null
-  return { ok: true, url: deWikidata?.url ?? null, desde: deWikidata ? 'wikidata' : null }
-}
-
-/** Guarda la opción elegida en el elemento: agrega (hasta 3) o reemplaza `reemplaza`. */
-export async function elegirFoto(
-  pedido: { tipo: string; nombre: string; ciudad: string | null },
-  eleccion: EleccionFoto,
-  reemplaza?: string | null,
-  categoria?: string | null,
-): Promise<ResultadoElemento> {
-  const ctx = await contexto(true)
-  if ('error' in ctx) return { ok: false, error: ctx.error as string }
-  const o = objetivoDelPedido(pedido)
-  if (!o) return { ok: false, error: 'Falta el nombre de lo que quieres ilustrar.' }
-  const base = { supabase: ctx.db, workspaceId: ctx.workspaceId, staffId: ctx.staffId, objetivo: o, reemplaza: reemplaza ?? null, ...categoriaDelPedido(o.tipo, categoria) }
-  let r
-  if (eleccion?.fuente === 'wikimedia' && typeof eleccion.titulo === 'string') {
-    r = await elegirDeCommons({ ...base, titulo: eleccion.titulo })
-  } else if (eleccion?.fuente === 'sitio_oficial' && typeof eleccion.pagina === 'string' && typeof eleccion.imagen === 'string') {
-    if (esDeAgenciaDeViajes(eleccion.pagina) || urlEsDeAgencia(eleccion.imagen)) return { ok: false, error: MENSAJE_AGENCIA }
-    if (!ctx.sitioOficial) return { ok: false, error: MENSAJE_SIN_SITIO }
-    r = await elegirDeSitioOficial({ ...base, paginaUrl: eleccion.pagina, imagenUrl: eleccion.imagen })
-  } else {
-    return { ok: false, error: 'Esa opción no se puede elegir.' }
-  }
+  const r = await contestarDuda(ctx.db, ctx.workspaceId, ctx.staffId, o, typeof clavePerfil === 'string' ? clavePerfil : '', mismo === true)
   if (!r.ok) return { ok: false, error: r.mensaje }
-  return elementoActual(ctx, o)
+  return elementoActual(ctx, r.perfil)
 }
 
 /**
- * «Subir la mía» (o pegar) en la biblioteca: agrega (hasta 3) o reemplaza `reemplaza`. Un hotel,
- * con la categoría de la pestaña. `autorizacion` = la casilla «Tengo autorización para usar esta
- * foto» (obligatoria) y, si la persona lo dijo, de dónde viene (Emilio, 2026-10-16).
+ * «Agregar un hotel o un tour» desde la pantalla, antes de que llegue a una cotización. Si el
+ * nombre se parece a uno conocido, devuelve la duda (la pantalla pregunta igual que la tarjeta).
+ */
+export async function crearPerfil(pedido: PedidoFoto): Promise<ResultadoElemento | { ok: true; elemento: null; duda: DudaVista }> {
+  const ctx = await contexto(true)
+  if ('error' in ctx) return { ok: false, error: ctx.error as string }
+  const o = objetivoDelPedido(pedido)
+  if (!o || !esTipoPerfil(o.tipo)) return { ok: false, error: 'Escribe el nombre del hotel o del tour.' }
+  const leidos = await leerConocidos(ctx.db, ctx.workspaceId)
+  if (!leidos.ok) return { ok: false, error: leidos.mensaje }
+  const [r] = await resolverPedidos(ctx.db, ctx.workspaceId, ctx.staffId, [o], leidos.conocidos, { escribir: true })
+  if (r.duda) {
+    const [conocido] = await vistasDe(ctx, leidos.conocidos, new Set([`${o.tipo}:${r.duda.clave}`]))
+    return { ok: true, elemento: null, duda: { ...r.duda, url: conocido?.fotos[0]?.url ?? null } }
+  }
+  return elementoActual(ctx, r.perfil ?? o)
+}
+
+/**
+ * Subir o pegar una foto en un perfil (la tarjeta o la pantalla): se agrega (hasta 3) o reemplaza
+ * `reemplaza`. `autorizacion` = la casilla «Tengo autorización para usar esta foto» (obligatoria)
+ * y, si la persona lo dijo, de dónde viene (Emilio, 2026-10-16). Un hotel, con su categoría si la
+ * dijo.
  */
 export async function subirFotoABiblioteca(
-  pedido: { tipo: string; nombre: string; ciudad: string | null },
+  pedido: PedidoFoto,
   dataUrl: string,
   reemplaza?: string | null,
   categoria?: string | null,
@@ -272,173 +210,74 @@ export async function subirFotoABiblioteca(
 ): Promise<ResultadoElemento> {
   const ctx = await contexto(true)
   if ('error' in ctx) return { ok: false, error: ctx.error as string }
-  const o = objetivoDelPedido(pedido)
-  if (!o) return { ok: false, error: 'Falta el nombre de lo que quieres ilustrar.' }
   const permiso = revisarAutorizacion(autorizacion)
   if (!permiso.ok) return { ok: false, error: permiso.error }
   if (!ctx.userId) return { ok: false, error: 'No se pudo saber quién sube la foto. Vuelve a entrar.' }
   const partes = typeof dataUrl === 'string' ? bytesDeDataUrl(dataUrl) : null
   if (!partes || !/^image\/(jpeg|png|webp)$/.test(partes.mime)) return { ok: false, error: 'Ese archivo no es una foto. Usa un JPG o un PNG.' }
+  const p = await perfilDelPedido(ctx, pedido)
+  if ('error' in p) return { ok: false, error: p.error }
   const r = await ponerFotoPropia({
-    supabase: ctx.db, workspaceId: ctx.workspaceId, staffId: ctx.staffId, objetivo: o, bytes: partes.buffer,
-    reemplaza: reemplaza ?? null, agregar: !reemplaza, ...categoriaDelPedido(o.tipo, categoria),
+    supabase: ctx.db,
+    workspaceId: ctx.workspaceId,
+    staffId: ctx.staffId,
+    objetivo: p.perfil,
+    bytes: partes.buffer,
+    reemplaza: typeof reemplaza === 'string' && reemplaza ? reemplaza : null,
+    ...categoriaDelPedido(p.perfil.tipo, categoria),
     autorizacion: { userId: ctx.userId, procedencia: permiso.procedencia },
   })
   if (!r.ok) return { ok: false, error: r.mensaje }
-  return elementoActual(ctx, o)
+  return elementoActual(ctx, p.perfil)
 }
 
-export type ImagenPegada = { ok: true; dataUrl: string } | { ok: false; error: string }
-
-/**
- * Una imagen PEGADA que llegó al portapapeles solo como HTML (`<img src="https://…">`, lo que dejan
- * algunos navegadores al copiar una imagen o un pedazo de página): el servidor la baja por la misma
- * vía segura de la página oficial y la devuelve como data URL para que pase por la casilla de
- * autorización y por «Subir» como cualquier foto pegada. NO guarda nada; no depende del interruptor
- * de la página oficial (es la foto que la persona trajo). Una imagen de agencia en línea se rechaza.
- */
-export async function traerImagenPegada(url: string): Promise<ImagenPegada> {
-  const ctx = await contexto(true)
-  if ('error' in ctx) return { ok: false, error: ctx.error as string }
-  if (typeof url !== 'string' || !url.trim()) return { ok: false, error: 'No llegó ninguna imagen.' }
-  return imagenPegadaPorUrl(url.trim())
-}
-
-/**
- * La categoría que manda el navegador (la pestaña), revisada: solo para un hotel y solo una de las
- * cuatro. Sin ella, `{}` (la foto entra como antes, sin reparto por categoría).
- */
-function categoriaDelPedido(tipo: ObjetivoFoto['tipo'], categoria: unknown): { categoria?: CategoriaFoto } {
+/** La categoría que manda el navegador, revisada: solo para un hotel y solo una de las cuatro. */
+function categoriaDelPedido(tipo: TipoFoto, categoria: unknown): { categoria?: CategoriaFoto } {
   return tipo === 'hotel' && esCategoria(categoria) ? { categoria } : {}
 }
 
-export type OpcionesDeHotel =
-  | {
-      ok: true
-      opciones: OpcionFoto[]
-      siguiente: string | null
-      /** ¿El modelo alcanzó a mirar alguna? (sin él, todo queda «sin clasificar»). */
-      clasificadas: boolean
-      /** La página leída (sitio oficial). */
-      pagina?: string
-      /** Con el interruptor encendido: la página oficial que ONE propone para pegar. */
-      paginaSugerida?: { url: string; desde: 'biblioteca' | 'wikidata' } | null
-    }
-  | FallaBusqueda
-
-/**
- * Las opciones del selector de un HOTEL, ya clasificadas por pestaña (fachada, habitación, zonas
- * comunes). Sin `paginaUrl`: Commons (categoría exacta del hotel y títulos que lo nombran) y, con
- * el interruptor, la página oficial propuesta. Con `paginaUrl` (solo con el interruptor): la
- * galería de esa página, de a 12. Nada se guarda.
- */
-export async function opcionesDeHotel(
-  pedido: { tipo: string; nombre: string; ciudad: string | null },
-  paginaUrl?: string | null,
-  siguiente?: string | null,
-): Promise<OpcionesDeHotel> {
-  const ctx = await contexto(true)
-  if ('error' in ctx) return { ok: false, error: ctx.error as string }
-  const o = objetivoDelPedido(pedido)
-  if (!o || o.tipo !== 'hotel') return { ok: false, error: 'Falta el nombre del hotel.' }
-  const apiKey = process.env.GEMINI_API_KEY
-  if (typeof paginaUrl === 'string' && paginaUrl.trim()) {
-    if (esDeAgenciaDeViajes(paginaUrl)) return { ok: false, error: MENSAJE_AGENCIA }
-    if (!ctx.sitioOficial) return { ok: false, error: MENSAJE_SIN_SITIO }
-    const desde = Math.max(0, Math.min(10_000, Number.parseInt(siguiente ?? '0', 10) || 0))
-    const r = await opcionesDeHotelEnSitio(paginaUrl.trim(), o, { apiKey, desde })
-    if (!r.ok) return r
-    return {
-      ok: true,
-      opciones: r.opciones,
-      siguiente: r.siguiente === null ? null : String(r.siguiente),
-      clasificadas: r.opciones.some((x) => x.categoria),
-      pagina: r.pagina,
-    }
-  }
-  const wd = await datosDesdeWikidata(o)
-  const r = await opcionesDeHotelEnCommons(o, { apiKey, categoriaWikidata: wd.categoria })
-  let paginaSugerida: { url: string; desde: 'biblioteca' | 'wikidata' } | null = null
-  if (ctx.sitioOficial) {
-    const { data } = await ctx.db
-      .from(TABLA_CATALOGO)
-      .select('fuente_url')
-      .eq('workspace_id', ctx.workspaceId)
-      .eq('tipo', o.tipo)
-      .eq('clave', o.clave)
-      .eq('origen', 'sitio_oficial')
-      .limit(1)
-    const usada = (data as { fuente_url?: string | null }[] | null)?.[0]?.fuente_url
-    paginaSugerida =
-      usada && !urlEsDeAgencia(usada)
-        ? { url: usada, desde: 'biblioteca' }
-        : wd.pagina && !urlEsDeAgencia(wd.pagina.url)
-          ? { url: wd.pagina.url, desde: 'wikidata' }
-          : null
-  }
-  return { ok: true, opciones: r.opciones, siguiente: null, clasificadas: r.clasificadas, paginaSugerida }
+async function elementoDeFoto(ctx: Contexto, id: string): Promise<FilaCatalogo | null> {
+  return filaPorId(ctx.db, ctx.workspaceId, id)
 }
 
 /**
- * Las fotos que ya tiene un hotel en la biblioteca, con su categoría. Las de antes de las
- * categorías se clasifican UNA vez con el modelo y la categoría queda en su fila (no se vuelve a
- * preguntar). `null` si el hotel no tiene fotos.
+ * Cambia el orden de una foto en su perfil: `antes` y `despues` la corren un puesto; `primera` la
+ * deja principal. La primera del orden es la principal.
  */
-export async function fotosDelHotel(pedido: { tipo: string; nombre: string; ciudad: string | null }): Promise<ResultadoElemento> {
-  const ctx = await contexto(false)
-  if ('error' in ctx) return { ok: false, error: ctx.error as string }
-  const o = objetivoDelPedido(pedido)
-  if (!o || o.tipo !== 'hotel') return { ok: false, error: 'Falta el nombre del hotel.' }
-  const { data, error } = await ctx.db.from(TABLA_CATALOGO).select(COLUMNAS).eq('workspace_id', ctx.workspaceId).eq('tipo', 'hotel').eq('clave', o.clave)
-  if (error) return { ok: false, error: 'No se pudo leer la biblioteca de fotos.' }
-  const filas = (data ?? []) as FilaCatalogo[]
-  const sin = ctx.editable ? filas.filter((f) => !f.categoria) : []
-  if (sin.length > 0 && process.env.GEMINI_API_KEY) {
-    const clases = await clasificar(
-      sin.map((f) => ({
-        clave: `fila:${f.id}:${f.ref}`,
-        leer: async () => {
-          const bytes = await bytesDeCatalogo(ctx.workspaceId, f.ref)
-          return bytes ? { bytes, mime: 'image/jpeg' } : null
-        },
-      })),
-      { apiKey: process.env.GEMINI_API_KEY, hotel: o.nombre, ciudad: o.ciudad },
-    )
-    await Promise.all(
-      sin.map(async (f, i) => {
-        const c = clases[i]
-        if (c && c !== 'no_es_hotel' && (await anotarCategoria(ctx.db, ctx.workspaceId, f.id, c))) f.categoria = c
-      }),
-    )
-  }
-  const [elemento] = await vistas(ctx, filas)
-  return { ok: true, elemento: elemento ?? null }
-}
-
-async function porId(ctx: Contexto, id: string): Promise<{ tipo: FilaCatalogo['tipo']; clave: string } | null> {
-  if (typeof id !== 'string' || !id) return null
-  const { data } = await ctx.db.from(TABLA_CATALOGO).select('tipo, clave').eq('workspace_id', ctx.workspaceId).eq('id', id).maybeSingle()
-  return (data as { tipo: FilaCatalogo['tipo']; clave: string } | null) ?? null
-}
-
-/** Marca la foto como la principal de su elemento (la que sale primero en la propuesta). */
-export async function marcarFotoPrincipal(id: string): Promise<ResultadoElemento> {
+export async function moverFoto(id: string, hacia: 'antes' | 'despues' | 'primera'): Promise<ResultadoElemento> {
   const ctx = await contexto(true)
   if ('error' in ctx) return { ok: false, error: ctx.error as string }
-  const el = await porId(ctx, id)
-  if (!el) return { ok: false, error: 'Esa foto ya no está en la biblioteca. Recarga.' }
-  const r = await marcarPrincipal(ctx.db, ctx.workspaceId, ctx.staffId, id)
-  if (!r.ok) return { ok: false, error: r.mensaje ?? 'No se pudo cambiar la principal.' }
-  return elementoActual(ctx, el)
+  const f = await elementoDeFoto(ctx, id)
+  if (!f) return { ok: false, error: 'Esa foto ya no está en la biblioteca. Recarga.' }
+  const leidas = await fotosDelElemento(ctx.db, ctx.workspaceId, f)
+  if ('error' in leidas) return { ok: false, error: leidas.error as string }
+  const ids = ordenar(leidas.filas).map((x) => x.id)
+  const i = ids.indexOf(id)
+  const j = hacia === 'primera' ? 0 : hacia === 'antes' ? i - 1 : i + 1
+  if (i < 0 || j < 0 || j >= ids.length || i === j) return elementoActual(ctx, f)
+  ids.splice(i, 1)
+  ids.splice(j, 0, id)
+  const r = await reordenarFotos(ctx.db, ctx.workspaceId, ctx.staffId, ids)
+  if (!r.ok) return { ok: false, error: r.mensaje ?? 'No se pudo cambiar el orden.' }
+  return elementoActual(ctx, f)
 }
 
-/** Quita una foto de la biblioteca (si era la principal, la siguiente pasa a serlo). */
+/** Quita una foto del perfil (si era la principal, la siguiente pasa a serlo). */
 export async function quitarFotoDeBiblioteca(id: string): Promise<ResultadoElemento> {
   const ctx = await contexto(true)
   if ('error' in ctx) return { ok: false, error: ctx.error as string }
-  const el = await porId(ctx, id)
-  if (!el) return { ok: false, error: 'Esa foto ya no está en la biblioteca. Recarga.' }
+  const f = await elementoDeFoto(ctx, id)
+  if (!f) return { ok: false, error: 'Esa foto ya no está en la biblioteca. Recarga.' }
   const r = await quitarFotoPorId(ctx.db, ctx.workspaceId, id)
   if (!r.ok) return { ok: false, error: r.mensaje ?? 'No se pudo quitar la foto.' }
-  return elementoActual(ctx, el)
+  return elementoActual(ctx, f)
+}
+
+/** «No es el mismo»: separa un nombre de su perfil (la próxima cotización que lo nombre pregunta). */
+export async function separarNombreDelPerfil(aliasId: string): Promise<ResultadoElemento> {
+  const ctx = await contexto(true)
+  if ('error' in ctx) return { ok: false, error: ctx.error as string }
+  const r = await separarAlias(ctx.db, ctx.workspaceId, aliasId)
+  if (!r.ok) return { ok: false, error: r.mensaje }
+  return elementoActual(ctx, { tipo: r.tipo, clave: r.clavePerfil })
 }

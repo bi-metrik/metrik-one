@@ -170,10 +170,10 @@ export async function prepararPropuestaHtml(
 
   // El hotel sin foto propia en esta cotización: la que una persona eligió para ese hotel en la
   // biblioteca. Una automática NUNCA (`fotoImprimible`): sin elegida, el degradado. El catálogo ya
-  // filtró las de la página oficial con el interruptor apagado; aquí se repite la regla del hotel.
+  // filtró lo que no se imprime; aquí se repite la regla del hotel.
   // Las extras solo acompañan a la principal de la biblioteca (con la foto propia de la opción no:
   // podrían ser la misma).
-  const imprimibleHotel = (f: FotoDeCatalogo) => fotoImprimible('hotel', f.origen, f.revisada, { sitioOficial: true })
+  const imprimibleHotel = (f: FotoDeCatalogo) => fotoImprimible('hotel', f.origen, f.revisada)
   const creditosCatalogo: string[] = []
   const extrasHotel = new Map<string, { src: string; extras: FotoDeCatalogo[] }>()
   if (catalogo) {

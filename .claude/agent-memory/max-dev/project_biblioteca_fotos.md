@@ -1,6 +1,6 @@
 ---
 name: biblioteca-fotos
-description: Biblioteca de fotos /fotos (#1194, migración 20261016153000 APLICADA) y su puerta en la tarjeta del hotel (feat/biblioteca-en-tarjeta) — una sola verdad: la foto del hotel vive en la biblioteca, la de la opción es respaldo viejo
+description: REEMPLAZADA por fotos-perfiles (2026-10-16): Biblioteca de fotos /fotos (#1194, migración 20261016153000 APLICADA) y su puerta en la tarjeta del hotel (feat/biblioteca-en-tarjeta) — una sola verdad: la foto del hotel vive en la biblioteca, la de la opción es respaldo viejo
 metadata:
   type: project
 ---

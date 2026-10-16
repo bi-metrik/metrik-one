@@ -3,21 +3,21 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 
 import { claveDeFoto } from '@/lib/fotos/clave'
-import type { ElementoVista } from '@/lib/fotos/vista'
-import { fotosParaTarjetas, type FotosDeTarjetas } from '../fotos/actions'
-import type { PedidoFoto } from '../fotos/selector-fotos'
+import type { DudaVista, ElementoVista } from '@/lib/fotos/vista'
+import { fotosParaTarjetas, type FotosDeTarjetas, type PedidoFoto } from '../fotos/actions'
 
 /**
- * La biblioteca de fotos vista desde las tarjetas de la cotización (Mauricio, 2026-10-16: el
- * recuadro de la foto del hotel es la puerta a la biblioteca). Cada tarjeta dice qué foto
- * necesita (`useFotoDeBiblioteca`) y el proveedor las pide TODAS en una sola acción: las server
- * actions de Next van en fila, una por tarjeta haría esperar a la cotización entera.
+ * Los perfiles de hotel y de tour vistos desde las tarjetas de la cotización (Mauricio,
+ * 2026-10-16): cada tarjeta dice qué hotel o tour muestra (`useFotoDeBiblioteca`) y el proveedor
+ * los pide TODOS en una sola acción (las server actions de Next van en fila; una por tarjeta haría
+ * esperar a la cotización entera). El servidor crea el perfil la primera vez, reconoce los alias y
+ * devuelve la pregunta «¿Es el mismo hotel que …?» cuando el nombre se parece a otro.
  *
  * Sin proveedor (o sin biblioteca en el espacio) la tarjeta queda como antes: la foto en la opción.
  */
 
-/** Lo cambió alguien (la tarjeta, el panel «Fotos de la propuesta»): los demás vuelven a leer. */
-export const EVENTO_FOTOS_BIBLIOTECA = 'one:fotos-biblioteca'
+/** Lo cambió alguien (otra tarjeta del mismo hotel, el perfil): los demás vuelven a leer. */
+const EVENTO_FOTOS_BIBLIOTECA = 'one:fotos-biblioteca'
 
 export function avisarCambioDeFotos(): void {
   if (typeof window !== 'undefined') window.dispatchEvent(new Event(EVENTO_FOTOS_BIBLIOTECA))
@@ -25,13 +25,17 @@ export function avisarCambioDeFotos(): void {
 
 const llave = (p: PedidoFoto) => `${p.tipo}:${claveDeFoto(p.tipo, p.nombre, p.ciudad)}`
 
+interface Leido {
+  elemento: ElementoVista | null
+  duda: DudaVista | null
+}
+
 interface Estado {
   /** `null` = todavía no se sabe; `false` = el espacio no tiene biblioteca. */
   disponible: boolean | null
   editable: boolean
-  sitioOficial: boolean
-  /** Lo leído por llave; `null` = leído y sin fotos. Ausente = sin leer. */
-  elementos: Record<string, ElementoVista | null>
+  /** Lo leído por llave de la tarjeta. Ausente = sin leer. */
+  leidos: Record<string, Leido>
 }
 
 interface Contexto {
@@ -50,7 +54,7 @@ export function FotosEnTarjetas({
   /** Inyectable para verla con datos de muestra. */
   leer?: (pedidos: PedidoFoto[]) => Promise<FotosDeTarjetas>
 }) {
-  const [estado, setEstado] = useState<Estado>({ disponible: null, editable: false, sitioOficial: false, elementos: {} })
+  const [estado, setEstado] = useState<Estado>({ disponible: null, editable: false, leidos: {} })
   const pedidos = useRef(new Map<string, { pedido: PedidoFoto; usos: number }>())
   const pedidas = useRef(new Set<string>())
   const [version, setVersion] = useState(0)
@@ -70,11 +74,14 @@ export function FotosEnTarjetas({
           return
         }
         disponible.current = true
-        const porLlave = new Map(r.elementos.map((e) => [`${e.tipo}:${e.clave}`, e]))
+        const porLlave = new Map(r.tarjetas.map((t) => [`${t.tipo}:${t.clave}`, t]))
         setEstado((e) => {
-          const elementos = { ...e.elementos }
-          for (const [k] of faltan) elementos[k] = porLlave.get(k) ?? null
-          return { disponible: true, editable: r.editable, sitioOficial: r.sitioOficial, elementos }
+          const leidos = { ...e.leidos }
+          for (const [k] of faltan) {
+            const t = porLlave.get(k)
+            leidos[k] = { elemento: t?.elemento ?? null, duda: t?.duda ?? null }
+          }
+          return { disponible: true, editable: r.editable, leidos }
         })
       } catch {
         // Sin red: se reintenta con la próxima tarjeta o el próximo cambio.
@@ -111,7 +118,7 @@ export function FotosEnTarjetas({
   }, [])
 
   const poner = useCallback((p: PedidoFoto, e: ElementoVista | null) => {
-    setEstado((s) => ({ ...s, elementos: { ...s.elementos, [llave(p)]: e } }))
+    setEstado((s) => ({ ...s, leidos: { ...s.leidos, [llave(p)]: { elemento: e, duda: null } } }))
   }, [])
 
   const valor = useMemo(() => ({ estado, registrar, poner }), [estado, registrar, poner])
@@ -122,13 +129,15 @@ export interface FotoDeBiblioteca {
   /** `null` = todavía no se sabe. */
   disponible: boolean | null
   editable: boolean
-  sitioOficial: boolean
-  /** `undefined` = sin leer; `null` = sin fotos en la biblioteca. */
+  /** `undefined` = sin leer; `null` = el perfil sin fotos (o sin perfil todavía). */
   elemento: ElementoVista | null | undefined
+  /** «¿Es el mismo hotel que …?», sin contestar. */
+  duda: DudaVista | null
+  /** Lo que quedó después de un cambio (subir, contestar la duda): se pinta ya. */
   poner: (e: ElementoVista | null) => void
 }
 
-/** La foto de la biblioteca para lo que muestra una tarjeta. `null` sin proveedor o sin pedido. */
+/** El perfil del hotel o tour que muestra una tarjeta. `null` sin proveedor o sin pedido. */
 export function useFotoDeBiblioteca(pedido: PedidoFoto | null): FotoDeBiblioteca | null {
   const ctx = useContext(Ctx)
   const tipo = pedido?.tipo
@@ -140,12 +149,12 @@ export function useFotoDeBiblioteca(pedido: PedidoFoto | null): FotoDeBiblioteca
     return registrar({ tipo, nombre, ciudad })
   }, [registrar, tipo, nombre, ciudad])
   if (!ctx || !pedido || !pedido.nombre) return null
-  const k = llave(pedido)
+  const leido = ctx.estado.leidos[llave(pedido)]
   return {
     disponible: ctx.estado.disponible,
     editable: ctx.estado.editable,
-    sitioOficial: ctx.estado.sitioOficial,
-    elemento: ctx.estado.elementos[k],
+    elemento: leido ? leido.elemento : undefined,
+    duda: leido?.duda ?? null,
     poner: (e) => ctx.poner(pedido, e),
   }
 }

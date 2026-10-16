@@ -1,6 +1,6 @@
 ---
 name: project-fotos-web-bloqueada
-description: Fotos de la página oficial cuando la web bloquea (Hilton 403) o arma la galería con JS; aviso, galerías extra y Ctrl+V por documento (feat/fotos-web-bloqueada, 2026-10-16)
+description: REEMPLAZADA por fotos-perfiles (2026-10-16): Fotos de la página oficial cuando la web bloquea (Hilton 403) o arma la galería con JS; aviso, galerías extra y Ctrl+V por documento (feat/fotos-web-bloqueada, 2026-10-16)
 metadata:
   type: project
 ---

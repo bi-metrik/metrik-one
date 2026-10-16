@@ -243,3 +243,35 @@ describe('la foto que se pone en la tarjeta va a la biblioteca, no a la opción'
     expect(((base.tablas.items as Fila[])[0].tarifa_pax as Record<string, unknown>).fotoHotel).toMatchObject({ proporcion: 1.5 })
   })
 })
+
+describe('perfiles: el alias y los planes opcionales llegan al documento', () => {
+  const fotoDe = (tipo: string, clave: string, nombre: string, ciudad: string | null): Fila => ({
+    id: `foto-${clave}`, workspace_id: WS, tipo, clave, nombre_clave: nombre.toLowerCase(), nombre, ciudad,
+    ref: 'one://fotos-catalogo/x/hotel/0123456789abcdef.jpg', origen: 'asesora', fuente_url: null, titulo_fuente: null,
+    autor: null, licencia: null, foco_x: null, foco_y: null, proporcion: 1.5, revisada: true, descartadas: [], principal: true, posicion: 1, imagen_url: null,
+  })
+
+  it('@react-pdf: «Hotel Verde Mar» es alias del perfil «Verde Mar»: imprime la foto del perfil', async () => {
+    sembrar({ motor: false })
+    base.tablas.fotos_catalogo = [fotoDe('hotel', 'verde mar|san andres', 'Verde Mar', 'San Andrés')]
+    base.tablas.fotos_perfiles = [{ id: 'p1', workspace_id: WS, tipo: 'hotel', clave: 'verde mar|san andres', nombre: 'Verde Mar', ciudad: 'San Andrés' }]
+    base.tablas.fotos_perfiles_alias = [{ id: 'a1', workspace_id: WS, perfil_id: 'p1', tipo: 'hotel', clave: 'hotel verde mar|san andres', nombre: 'Hotel Verde Mar', ciudad: 'San Andrés' }]
+    await generar()
+    expect(hotelDeReactPdf()?.foto).toEqual({ url: BIB, proporcion: 1.5, credito: null })
+  })
+
+  it('@react-pdf: el plan opcional con foto en su perfil la lleva; sin ella, la tarjeta de siempre', async () => {
+    sembrar({ motor: false })
+    ;(base.tablas.items as Fila[]).push(
+      linea('o-manglar', 300_000, { nombre: 'Tour de manglares', grupo: 'tour: Tour de manglares', orden: 2, entra_al_precio: false }),
+      linea('o-buceo', 400_000, { nombre: 'Buceo', grupo: 'tour: Buceo', orden: 3, entra_al_precio: false }),
+    )
+    base.tablas.fotos_catalogo = [fotoDe('actividad', 'tour de manglares|', 'Tour de manglares', null)]
+    await generar()
+    const sugeridos = (compuesta.props[0] as { sugeridos?: { nombre: string; foto?: { url: string } }[] }).sugeridos ?? []
+    expect(sugeridos.map((s) => [s.nombre, s.foto?.url ?? null])).toEqual([
+      ['Tour de manglares', BIB],
+      ['Buceo', null],
+    ])
+  })
+})

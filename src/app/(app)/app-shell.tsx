@@ -163,7 +163,7 @@ const BUSINESS_NAV_ITEMS = [
 
 // Biblioteca de fotos de la propuesta de viaje (2026-10-16): detrás de Negocios, solo en espacios
 // cuya plantilla tiene propuesta html (`bibliotecaFotos`).
-const FOTOS_NAV_ITEM = { href: '/fotos', label: 'Fotos', icon: Images, roles: ['owner', 'admin', 'supervisor', 'operator'] }
+const FOTOS_NAV_ITEM = { href: '/fotos', label: 'Hoteles y tours', icon: Images, roles: ['owner', 'admin', 'supervisor', 'operator'] }
 
 // Caja — agrupa flujos de ingreso y salida.
 // Movimientos siempre visible si business activo.

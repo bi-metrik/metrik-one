@@ -28,6 +28,7 @@ import { avisosDeCobertura } from '@/lib/cotizaciones/cobertura-opciones'
 import { diasDelItinerario, fueraDelPrecio, itemsSugeridos, sugeridosVisibles } from '@/lib/cotizaciones/dia-relativo'
 import {
   cargosEnDestinoDeItems,
+  ciudadDeActividad,
   destinoDeItinerario,
   duracionDelViaje,
   hotelesDeItems,
@@ -89,6 +90,7 @@ import { ponerMarcaDeBorrador } from '@/lib/pdf/marca-borrador'
 import { avisoDeBorrador, motivosDeBorrador } from '@/lib/cotizaciones/motivos-borrador'
 import { imagenComoDataUrl } from '@/lib/cotizaciones/imagen-captura'
 import { fotosDeHotelesDelDocumento } from '@/lib/fotos/foto-hotel-documento'
+import type { OpcionalDelDocumento } from '@/lib/fotos/catalogo-propuesta'
 
 // Campos agregados por migration 20260515000001 — pendiente regenerar database.ts
 // post-apply. Hasta entonces, accedemos via cast tipado a este shape.
@@ -1083,7 +1085,7 @@ export async function generateCotizacionPDF(
   const itemsSugeridosPDF = idsSugeridosVisibles
     .map(id => porId.get(id))
     .filter((i): i is ItemRow => i !== undefined)
-  const sugeridosPDF = idsSugeridosVisibles.length === 0
+  const sugeridosPDF: CotizacionPDFProps['sugeridos'] = idsSugeridosVisibles.length === 0
     ? null
     : itemsSugeridosPDF
         // Con IVA incluido como el resto del documento: el precio de una actividad
@@ -1098,6 +1100,12 @@ export async function generateCotizacionPDF(
           cantidad: Number(i.cantidad) || 1,
           unidad: i.unidad ?? null,
         }))
+  // Cada plan opcional con la ciudad de su línea: la misma llave que su tarjeta en el editor, para
+  // encontrar su foto en la biblioteca (`catalogo-propuesta.ts`).
+  const opcionalesDoc: OpcionalDelDocumento[] = itemsSugeridosPDF.map(i => ({
+    nombre: nombreVisibleDeLinea(i),
+    ciudad: ciudadDeActividad({ nombre: i.nombre ?? '', grupo: i.grupo ?? null, tarifa_pax: i.tarifa_pax }),
+  }))
 
   /**
    * El VIAJE que describe el documento del cliente (Entrega B del brief del 17-sep).
@@ -1189,20 +1197,29 @@ export async function generateCotizacionPDF(
       hotelesDelDocumento = itemsDeLaPropuesta.flatMap(i => marcar(hotelesDeItems([paraLecturaDe(i)]), i))
       cargosEnDestino = itemsDeLaPropuesta.flatMap(i => marcar(cargosEnDestinoDeItems([paraLecturaDe(i)]), i))
     }
-    // La foto del hotel (`foto-hotel-documento.ts`): manda la de la biblioteca del espacio (la que
-    // se pone en la tarjeta, en el panel o en /fotos); la vieja de la opción solo si la biblioteca
-    // no tiene una imprimible. Solo en la plantilla que imprime fotos; si no se puede leer, el
-    // capítulo sale con la foto de la ciudad, como antes.
-    if (plantillaUsaFotosDeCiudad(templateSlug) && hotelesDelDocumento.length > 0) {
+    // Las fotos de la biblioteca (`foto-hotel-documento.ts`): la del perfil del hotel manda; la vieja
+    // de la opción solo si el perfil no tiene una imprimible. Con @react-pdf, además, cada plan
+    // opcional con foto en su perfil la lleva (el motor html las pone él mismo, con sus extras).
+    // Solo en la plantilla que imprime fotos; si no se puede leer, el documento sale como antes.
+    const opcionalesConFoto = motorHtml ? [] : opcionalesDoc
+    if (plantillaUsaFotosDeCiudad(templateSlug) && (hotelesDelDocumento.length > 0 || opcionalesConFoto.length > 0)) {
       const enBiblioteca = tienePropuestaHtml(templateSlug) && workspaceId
-        ? await (await import('@/lib/fotos/catalogo-propuesta')).hotelesEnBiblioteca(supabase, workspaceId, hotelesDelDocumento, ws?.config_extra).catch(() => null)
+        ? await (await import('@/lib/fotos/catalogo-propuesta')).fotosDeBibliotecaDelDocumento(supabase, workspaceId, hotelesDelDocumento, opcionalesConFoto).catch(() => null)
         : null
-      hotelesDelDocumento = await fotosDeHotelesDelDocumento(hotelesDelDocumento, {
-        biblioteca: enBiblioteca?.mapa ?? new Map(),
-        motorHtml,
-        leerDeBiblioteca: clave => enBiblioteca?.leer(clave) ?? Promise.resolve(null),
-        leerDeOpcion: ref => imagenComoDataUrl(workspaceId, ref),
-      })
+      if (hotelesDelDocumento.length > 0) {
+        hotelesDelDocumento = await fotosDeHotelesDelDocumento(hotelesDelDocumento, {
+          biblioteca: enBiblioteca?.hoteles ?? new Map(),
+          motorHtml,
+          leerDeBiblioteca: clave => enBiblioteca?.leerHotel(clave) ?? Promise.resolve(null),
+          leerDeOpcion: ref => imagenComoDataUrl(workspaceId, ref),
+        })
+      }
+      if (enBiblioteca && sugeridosPDF) {
+        for (const sug of sugeridosPDF) {
+          const f = await enBiblioteca.opcional(sug.nombre).catch(() => null)
+          if (f) sug.foto = { url: f.url, rotulo: null, credito: f.credito, proporcion: f.proporcion ?? undefined }
+        }
+      }
     }
     if (motorHtml) {
       // Con varias tarifas, cada servicio lleva las tarifas a las que pertenece (los mismos
@@ -1366,6 +1383,7 @@ export async function generateCotizacionPDF(
         props: propsPDF,
         servicios: serviciosDoc,
         lugaresDeOpcionales: lugaresOpcionalesDoc,
+        opcionales: opcionalesDoc,
         documentoCliente: (cot as unknown as Record<string, unknown>).documento_cliente,
         staffId: staffId ?? null,
         workspaceId,
@@ -1468,6 +1486,8 @@ async function propuestaConMotorHtml(
     props: CotizacionPDFProps
     servicios: ServicioDelDocumento[]
     lugaresDeOpcionales: LugarDeOpcional[]
+    /** Cada plan opcional con su ciudad: la llave de su foto en la biblioteca. */
+    opcionales: OpcionalDelDocumento[]
     documentoCliente: unknown
     staffId: string | null
     workspaceId: string
@@ -1485,10 +1505,10 @@ async function propuestaConMotorHtml(
     const fila = data as { full_name?: string | null; phone_whatsapp?: string | null } | null
     if (fila) asesora = { nombre: fila.full_name?.trim() || null, whatsapp: whatsappDesdeTelefono(fila.phone_whatsapp) }
   }
-  // El catálogo de fotos del workspace (PR 4): ciudades sin foto en el banco, hoteles sin foto
-  // propia y planes opcionales. Sin filas o sin la migración, `null`: como antes.
+  // La biblioteca de fotos del espacio: ciudades sin foto en el banco, el perfil de cada hotel y
+  // de cada plan opcional (por su llave o un alias). Sin filas o sin la migración, `null`: como antes.
   const { catalogoParaLaPropuesta } = await import('@/lib/fotos/catalogo-propuesta')
-  const catalogo = await catalogoParaLaPropuesta(supabase, e.workspaceId, e.props).catch(() => null)
+  const catalogo = await catalogoParaLaPropuesta(supabase, e.workspaceId, e.props, e.opcionales).catch(() => null)
   const { pdfDePropuestaHtml } = await import('@/lib/pdf/html/propuesta-html')
   const { pdf, medidas } = await pdfDePropuestaHtml(
     {

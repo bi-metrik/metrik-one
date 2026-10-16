@@ -55,6 +55,18 @@ function constructor(tabla: string) {
   }
 
   const ejecutar = (): { data: unknown; error: { code?: string; message: string } | null } => {
+    // La vista `fotos_catalogo_por_clave` (migración 20261017090000): las fotos por su llave y por
+    // la de cada alias de su perfil. Se calcula de las tablas en cada lectura, como la base.
+    if (tabla === 'fotos_catalogo_por_clave') {
+      const fotos = tablas.fotos_catalogo ?? []
+      const perfiles = tablas.fotos_perfiles ?? []
+      const deAlias = (tablas.fotos_perfiles_alias ?? []).flatMap(a => {
+        const p = perfiles.find(x => x.id === a.perfil_id)
+        return p ? fotos.filter(f => f.workspace_id === p.workspace_id && f.tipo === p.tipo && f.clave === p.clave).map(f => ({ ...f, clave_pedida: a.clave })) : []
+      })
+      const filas = [...fotos.map(f => ({ ...f, clave_pedida: f.clave })), ...deAlias].filter(f => filtros.every(fn => fn(f)))
+      return { data: filas, error: null }
+    }
     const todas = tablas[tabla] ?? (tablas[tabla] = [])
     const coinciden = todas.filter(f => filtros.every(fn => fn(f)))
     if (operacion === 'insert') {

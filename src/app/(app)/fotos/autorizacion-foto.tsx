@@ -6,11 +6,13 @@ import { Loader2, ShieldCheck } from 'lucide-react'
 import { Dialog, DialogContent, DialogDescription, DialogTitle } from '@/components/ui/dialog'
 import { esDeAgenciaDeViajes, MENSAJE_AGENCIA } from '@/lib/fotos/agencias'
 import { MAX_PROCEDENCIA, TEXTO_CASILLA_AUTORIZACION, type PedidoAutorizacion } from '@/lib/fotos/autorizacion'
+import { CATEGORIAS, NOMBRE_CATEGORIA, type CategoriaFoto } from '@/lib/fotos/categoria'
 
 /**
  * Antes de guardar una foto subida o pegada (Emilio, 2026-10-16): la persona ve la foto, marca
  * «Tengo autorización para usar esta foto» (sin marcarla no se guarda) y, si quiere, dice de dónde
- * viene. El servidor vuelve a revisar la casilla y pone quién y cuándo.
+ * viene. El servidor vuelve a revisar la casilla y pone quién y cuándo. En un hotel, además, puede
+ * decir qué muestra (fachada, habitación…): opcional, no frena el guardado.
  */
 export function AutorizacionFoto({
   archivo,
@@ -18,19 +20,23 @@ export function AutorizacionFoto({
   onConfirmar,
   onCancelar,
   destino,
+  conCategoria = false,
 }: {
   archivo: Blob
   guardando: boolean
-  onConfirmar: (permiso: PedidoAutorizacion) => void
+  onConfirmar: (permiso: PedidoAutorizacion, categoria: CategoriaFoto | null) => void
   onCancelar: () => void
-  /** «Queda en Habitaciones», «Queda en la biblioteca»… */
+  /** «Queda en el perfil de Catalonia Puerta del Sol»… */
   destino?: string
+  /** Hotel: ofrece «¿Qué muestra?». */
+  conCategoria?: boolean
 }) {
   // Quien la abre la desmonta al guardar o cancelar: cada foto empieza con la casilla sin marcar.
   const vista = useMemo(() => URL.createObjectURL(archivo), [archivo])
   useEffect(() => () => URL.revokeObjectURL(vista), [vista])
   const [marcada, setMarcada] = useState(false)
   const [procedencia, setProcedencia] = useState('')
+  const [categoria, setCategoria] = useState<CategoriaFoto | null>(null)
 
   const deAgencia = esDeAgenciaDeViajes(procedencia)
 
@@ -40,7 +46,7 @@ export function AutorizacionFoto({
       data-autorizacion-foto
       onSubmit={(e) => {
         e.preventDefault()
-        if (marcada && !deAgencia && !guardando) onConfirmar({ autorizada: true, procedencia: procedencia.trim() || null })
+        if (marcada && !deAgencia && !guardando) onConfirmar({ autorizada: true, procedencia: procedencia.trim() || null }, categoria)
       }}
     >
       <div
@@ -80,6 +86,25 @@ export function AutorizacionFoto({
             data-procedencia
           />
         </label>
+        {conCategoria && (
+          <div className="text-[11px] text-muted-foreground" role="group" aria-label="¿Qué muestra?">
+            ¿Qué muestra? (opcional)
+            <div className="mt-0.5 flex flex-wrap gap-1">
+              {CATEGORIAS.map((c) => (
+                <button
+                  key={c}
+                  type="button"
+                  aria-pressed={categoria === c}
+                  onClick={() => setCategoria(categoria === c ? null : c)}
+                  className={`rounded-full border px-2 py-0.5 text-[11px] ${categoria === c ? 'border-[#0071C2] bg-[#0071C2] text-white' : 'text-foreground hover:bg-accent'}`}
+                  data-categoria={c}
+                >
+                  {NOMBRE_CATEGORIA[c]}
+                </button>
+              ))}
+            </div>
+          </div>
+        )}
         {deAgencia && <p className="text-[11px] text-red-700">{MENSAJE_AGENCIA}</p>}
         <div className="mt-auto flex flex-wrap items-center justify-end gap-2">
           {destino && <span className="mr-auto text-[11px] text-muted-foreground">{destino}</span>}
@@ -99,26 +124,33 @@ export function AutorizacionFoto({
   )
 }
 
-/** La misma casilla en su propia ventana (la tarjeta del hotel y el panel de la cotización). */
+/** La misma casilla en su propia ventana (la tarjeta del hotel o del tour en la cotización). */
 export function DialogoAutorizacionFoto({
   archivo,
   guardando,
   onConfirmar,
   onCancelar,
+  conCategoria = false,
+  nombre,
 }: {
   archivo: Blob | null
   guardando: boolean
-  onConfirmar: (permiso: PedidoAutorizacion) => void
+  onConfirmar: (permiso: PedidoAutorizacion, categoria: CategoriaFoto | null) => void
   onCancelar: () => void
+  conCategoria?: boolean
+  /** El hotel o el tour: «Queda en el perfil de …». */
+  nombre?: string
 }) {
   return (
     <Dialog open={archivo !== null} onOpenChange={(v) => !v && !guardando && onCancelar()}>
       <DialogContent className="gap-3 sm:max-w-xl">
         <div className="space-y-0.5 pr-6">
           <DialogTitle className="text-base">Subir una foto</DialogTitle>
-          <DialogDescription className="text-xs">Queda en la biblioteca del espacio y sale en las propuestas.</DialogDescription>
+          <DialogDescription className="text-xs">
+            {nombre ? `Queda en el perfil de ${nombre} y sale sola en las propuestas.` : 'Queda en la biblioteca del espacio y sale sola en las propuestas.'}
+          </DialogDescription>
         </div>
-        {archivo && <AutorizacionFoto archivo={archivo} guardando={guardando} onConfirmar={onConfirmar} onCancelar={onCancelar} />}
+        {archivo && <AutorizacionFoto archivo={archivo} guardando={guardando} onConfirmar={onConfirmar} onCancelar={onCancelar} conCategoria={conCategoria} />}
       </DialogContent>
     </Dialog>
   )

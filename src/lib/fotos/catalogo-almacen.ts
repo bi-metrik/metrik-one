@@ -69,18 +69,6 @@ export async function bytesDeCatalogo(workspaceId: string, ref: string): Promise
   }
 }
 
-/** Un enlace firmado corto para verla en la pantalla. */
-export async function enlaceDeCatalogo(workspaceId: string, ref: string, segundos = 300): Promise<string | null> {
-  const ruta = rutaDeReferencia(ref, workspaceId)
-  if (!ruta) return null
-  try {
-    const { data, error } = await bucket().createSignedUrl(ruta, segundos)
-    return error ? null : data?.signedUrl ?? null
-  } catch {
-    return null
-  }
-}
-
 /** Enlaces firmados de varias fotos de una vez (la biblioteca). Las que no son del workspace, sin enlace. */
 export async function enlacesDeCatalogo(workspaceId: string, refs: string[], segundos = 3600): Promise<Map<string, string>> {
   const salida = new Map<string, string>()

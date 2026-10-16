@@ -1456,6 +1456,8 @@ export default function CotizacionTrappvelPDF({
     v.foto,
     ...fotosCiudades.filter(f => !reemplazadas.has(f)),
     ...capitulos.flatMap(c => [c.hotel, ...c.alternativas]).map(h => (h ? fotoDelHotel(h) : null)),
+    // La foto del perfil de un plan opcional (biblioteca, 2026-10-16), si se imprime.
+    ...opcionales.map(o => o.foto ?? null),
   ])
   const antesDeViajar = v.antesDeViajar ?? []
 
@@ -2006,6 +2008,13 @@ export default function CotizacionTrappvelPDF({
                     minPresenceAhead={i > 0 && i === opcionales.length - 1 ? conCierre('opcionales') : undefined}
                     style={{ flexDirection: 'row', backgroundColor: C.tarjeta, borderRadius: 8, padding: eo.dentro, marginTop: i === 0 ? eo.tarjetas : 0 }}
                   >
+                    {/* La foto del perfil del plan (biblioteca, 2026-10-16): miniatura 3:2 a un cuarto
+                        del ancho, a la izquierda. Sin foto, la tarjeta de siempre. */}
+                    {o.foto && (
+                      <View style={{ marginRight: 10 }}>
+                        <Miniatura foto={o.foto} ancho={ANCHO_CUARTO - eo.dentro} alto={(ANCHO_CUARTO - eo.dentro) / 1.5} />
+                      </View>
+                    )}
                     <View style={{ flex: 1, paddingRight: 8 }}>
                       <Text hyphenationCallback={SIN_GUION} style={{ fontSize: 9.5, fontFamily: 'Helvetica-Bold', color: C.tinta }}>{o.nombre}</Text>
                       {!general && descripcion && (

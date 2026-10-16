@@ -1,6 +1,6 @@
 ---
 name: galeria-fotos-hotel
-description: Galería de fotos del hotel tipo Booking + reglas de Emilio (feat/galeria-fotos-hotel, 2026-10-16) — migración 20261016233000 SIN aplicar y va ANTES del merge porque TODA escritura a fotos_catalogo la usa
+description: REEMPLAZADA por fotos-perfiles (2026-10-16): Galería de fotos del hotel tipo Booking + reglas de Emilio (feat/galeria-fotos-hotel, 2026-10-16) — migración 20261016233000 SIN aplicar y va ANTES del merge porque TODA escritura a fotos_catalogo la usa
 metadata:
   type: project
 ---
