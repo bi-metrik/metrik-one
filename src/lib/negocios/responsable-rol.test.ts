@@ -149,6 +149,13 @@ describe('asignarResponsable', () => {
     expect(res.desplazado).toBeNull()
   })
 
+  it('reasignar a la misma persona NO borra su fila: el upsert la actualiza (borrarla la haría «nueva» para el aviso)', async () => {
+    const { client, ops } = fakeDb({ areas: ['comercial'], ocupanteActual: 's1' })
+    await asignarResponsable(client, { negocioId: 'n1', staffId: 's1', assignedBy: 'p1' })
+    expect(ops.find((o) => o.accion === 'delete')).toBeUndefined()
+    expect(ops.find((o) => o.accion === 'upsert')?.payload).toMatchObject({ negocio_id: 'n1', staff_id: 's1', rol: 'comercial' })
+  })
+
   it('sin área comercial ni operaciones asigna igual, con rol null y sin liberar puesto', async () => {
     const { client, ops } = fakeDb({ areas: ['financiera'] })
     const res = await asignarResponsable(client, {

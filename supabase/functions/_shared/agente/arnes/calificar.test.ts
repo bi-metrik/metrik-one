@@ -14,7 +14,7 @@ describe('calificar', () => {
       modelo: modeloGuionado([
         { name: 'buscar', args: { texto: 'Martín Mora' } },
         { name: 'responder', args: { tema: 'solicitud', texto: '¿A dónde quiere ir?' } },
-        { name: 'proponer', args: { accion: 'viaje_nuevo', datos: { cliente: 'Martin Mora (cel. …7311)', destino: 'San Andrés' } } },
+        { name: 'proponer', args: { accion: 'viaje_nuevo', datos: { responsable: 'Carla Comercial', dicho_en: 1, cliente: 'Martin Mora (cel. …7311)', destino: 'San Andrés' } } },
       ]),
       contactos: caso.contactos, viajes: caso.viajes,
     })
@@ -45,7 +45,7 @@ describe('calificar', () => {
       modelo: modeloGuionado([
         { name: 'buscar', args: { texto: 'Sofia Rincon 3105558812' } },
         { name: 'proponer', args: { accion: 'crear_cliente', datos: { nombre: 'Sofia Rincon', llave: '3105558812' } } },
-        { name: 'proponer', args: { accion: 'viaje_nuevo', datos: { cliente: ref, destino: 'Medellin' } } },
+        { name: 'proponer', args: { accion: 'viaje_nuevo', datos: { responsable: 'Carla Comercial', dicho_en: 1, cliente: ref, destino: 'Medellin' } } },
       ]),
       contactos: caso.contactos, viajes: caso.viajes,
     })

@@ -29,7 +29,8 @@ import { renombrarSegunPlantilla } from '../nombre-viaje.ts';
 import { enviarAvisoInterno } from '../wa-alerta.ts';
 import type { SupabaseClient } from '../types.ts';
 import { fichaValida, huellaDe } from './reglamento.ts';
-import type { PuertoBandeja, ViajeAgente } from './bandeja/dominio.ts';
+import type { MiembroEquipo, PuertoBandeja, ViajeAgente } from './bandeja/dominio.ts';
+import { equipoDesdeFilas, staffDePrueba } from './bandeja/equipo.ts';
 import type { AutorizacionAgente } from './bandeja/autorizacion.ts';
 import { planGuardado } from '../perfil-contacto.ts';
 import type { EstadoPerfil } from '../perfil-contacto.ts';
@@ -136,6 +137,7 @@ export function cupoSupabase(supabase: SupabaseClient, almacen: Almacen): Puerto
 
 // ── La bandeja ───────────────────────────────────────────────────────────────
 
+
 /** El CHECK de `activity_log.contenido` en producción. */
 export const MAX_CONTENIDO_ACTIVIDAD = 280;
 
@@ -175,7 +177,31 @@ export function puertoBandejaSupabase(
     };
   };
 
+  const equipoComercial = async (): Promise<MiembroEquipo[] | 'error'> => {
+    const [st, ws] = await Promise.all([
+      supabase.from('staff').select('id, full_name, is_active, staff_areas(area)').eq('workspace_id', workspaceId).eq('is_active', true).limit(200),
+      supabase.from('workspaces').select('config_extra').eq('id', workspaceId).maybeSingle(),
+    ]);
+    if (st.error || ws.error) {
+      console.error('[agente] no se pudo leer el equipo comercial:', (st.error ?? ws.error)?.message);
+      return 'error';
+    }
+    const filas = ((st.data ?? []) as Fila[]).map((f) => ({
+      id: String(f.id), full_name: (f.full_name as string | null) ?? null, is_active: f.is_active === true,
+      areas: (Array.isArray(f.staff_areas) ? f.staff_areas as Fila[] : []).map((a) => String(a.area)),
+    }));
+    return equipoDesdeFilas(filas, staffDePrueba(ws.data?.config_extra), staffId);
+  };
+
+  /** El `profiles.id` de quien escribe: es `assigned_by` (y con eso el trigger sabe si se asignó a sí misma). */
+  const perfilDeQuienEscribe = async (): Promise<string | null> => {
+    if (!staffId) return null;
+    const { data } = await supabase.from('staff').select('profile_id').eq('id', staffId).eq('workspace_id', workspaceId).maybeSingle();
+    return (data?.profile_id as string | null | undefined) ?? null;
+  };
+
   return {
+    equipoComercial,
     async linea() {
       const cfg = await configDeLinea(supabase, workspaceId);
       if (typeof cfg === 'string') return 'la línea de la bandeja';
@@ -192,11 +218,17 @@ export function puertoBandejaSupabase(
       return ((data ?? []) as Fila[]).map((x) => String(x.codigo));
     },
     async crearViaje(p) {
-      const cfg = await configDeLinea(supabase, workspaceId);
+      // Se vuelve a validar al escribir: entre la propuesta y el toque la persona pudo salir del equipo comercial.
+      const [eq, cfg, asignadoPor] = await Promise.all([equipoComercial(), configDeLinea(supabase, workspaceId), perfilDeQuienEscribe()]);
+      if (eq === 'error') throw new Error('no se pudo revisar el equipo comercial');
+      if (!eq.some((m) => m.id === p.responsableId)) throw new Error('quien iba a llevar el viaje ya no es del equipo comercial activo');
       if (typeof cfg === 'string') throw new Error(cfg);
       const sugeridos: Record<string, Sugerido> = p.destino ? { destino: { valor: p.destino, frase: p.destino } } : {};
       const salida: SalidaEntendida = { historia: '', cliente: { nombre: null, telefono: null }, sugeridos, descartados: [] };
-      const r = await crearNegocio(supabase, { workspaceId, cfg, contactoId: p.contactoId, entregaId: 'agente', staffId, salida, pistas: { mes: null, duracion: null } });
+      const r = await crearNegocio(supabase, {
+        workspaceId, cfg, contactoId: p.contactoId, entregaId: 'agente', staffId, salida, pistas: { mes: null, duracion: null },
+        responsable: { staffId: p.responsableId, asignadoPor },
+      });
       if (typeof r === 'string') throw new Error(r);
       const { data } = await supabase.from('negocios').select('codigo, nombre').eq('id', r.negocioId).maybeSingle();
       return { id: r.negocioId, codigo: String(data?.codigo ?? ''), nombre: String(data?.nombre ?? '') };
