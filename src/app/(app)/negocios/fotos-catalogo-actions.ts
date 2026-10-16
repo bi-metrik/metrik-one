@@ -12,9 +12,9 @@
  */
 import { getWorkspace } from '@/lib/actions/get-workspace'
 import { bytesDeDataUrl } from '@/lib/cotizaciones/imagen-captura'
-import { confirmarFoto, creditoDeFila, filaDe, leerCatalogo, MENSAJE_HOTEL_SIN_COMMONS, MENSAJE_SIN_TABLA, ponerFotoPropia, quitarFoto, sugerirDesdeCommons, TABLA_CATALOGO } from '@/lib/fotos/catalogo'
+import { confirmarFoto, creditoDeFila, filaDe, fotosDe, leerCatalogo, MENSAJE_HOTEL_SIN_COMMONS, MENSAJE_SIN_TABLA, ponerFotoPropia, quitarFoto, sugerirDesdeCommons, TABLA_CATALOGO } from '@/lib/fotos/catalogo'
 import { enlaceDeCatalogo } from '@/lib/fotos/catalogo-almacen'
-import { fotoImprimible, seSugiereDeCommons, type ObjetivoFoto, type TipoFoto } from '@/lib/fotos/clave'
+import { fotoImprimible, seSugiereDeCommons, usaFotosDeSitioOficial, type ObjetivoFoto, type OrigenFoto, type TipoFoto } from '@/lib/fotos/clave'
 import { objetivosDeItems } from '@/lib/fotos/objetivos'
 import { fotosDeCiudad } from '@/lib/pdf/fotos-ciudad'
 import { PLANTILLA_POR_DEFECTO, usaMotorHtml } from '@/lib/pdf/plantillas-cotizacion'
@@ -30,13 +30,17 @@ export interface FotoDelPanel {
   ciudad: string | null
   /** La ciudad ya tiene foto en el banco de ONE: no hace falta una del catálogo. */
   enBanco: boolean
-  /** Se le puede buscar foto en Commons («Otra», «Buscar»). Un hotel no: la sube la asesora. */
+  /** Se le busca foto SOLA en Commons («Otra», «Buscar»). Un hotel no: lo elige una persona. */
   sugerible: boolean
+  /** Cuántas fotos tiene en la biblioteca (hasta 3). */
+  total: number
   foto: {
-    /** Sale en la propuesta. Una de Commons para un hotel queda en el catálogo pero no se imprime. */
+    /** La principal, para cambiarla desde el selector. */
+    id: string
+    /** Sale en la propuesta. Una automática para un hotel queda en la biblioteca pero no se imprime. */
     seImprime: boolean
     url: string | null
-    origen: 'wikimedia' | 'asesora'
+    origen: OrigenFoto
     credito: string | null
     fuente: string | null
     revisada: boolean
@@ -44,7 +48,7 @@ export interface FotoDelPanel {
 }
 
 export type PanelFotos =
-  | { ok: true; fotos: FotoDelPanel[]; editable: boolean; aviso?: string }
+  | { ok: true; fotos: FotoDelPanel[]; editable: boolean; sitioOficial: boolean; aviso?: string }
   | { ok: false; error: string }
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -64,7 +68,7 @@ async function contexto(cotizacionId: string, escribir: boolean) {
   if (!cot) return { error: 'Cotización no encontrada' }
   const { data: items } = await db.from('items').select('id, nombre, grupo, tarifa_pax, descripcion').eq('cotizacion_id', cotizacionId)
   const objetivos = objetivosDeItems((items ?? []) as { nombre: string | null; grupo: string | null; tarifa_pax?: unknown }[])
-  return { db, workspaceId, staffId: (staffId as string | null) ?? null, role: role as string | null, objetivos }
+  return { db, workspaceId, staffId: (staffId as string | null) ?? null, role: role as string | null, objetivos, sitioOficial: usaFotosDeSitioOficial(fila?.config_extra) }
 }
 
 type Contexto = Exclude<Awaited<ReturnType<typeof contexto>>, { error: string }>
@@ -88,9 +92,11 @@ async function panel(ctx: Contexto, aviso?: string): Promise<PanelFotos> {
         ciudad: o.ciudad,
         enBanco: enBanco(o),
         sugerible: seSugiereDeCommons(o.tipo),
+        total: fotosDe(filas, o).length,
         foto: f
           ? {
-              seImprime: fotoImprimible(o.tipo, f.origen),
+              id: f.id,
+              seImprime: fotoImprimible(o.tipo, f.origen, f.revisada, { sitioOficial: ctx.sitioOficial }),
               url: await enlaceDeCatalogo(ctx.workspaceId, f.ref),
               origen: f.origen,
               credito: creditoDeFila(f),
@@ -102,7 +108,7 @@ async function panel(ctx: Contexto, aviso?: string): Promise<PanelFotos> {
     }),
   )
   const editable = !(ctx.role && ROLES_SIN_ESCRITURA.has(ctx.role))
-  return { ok: true, fotos, editable, ...(aviso ? { aviso } : {}) }
+  return { ok: true, fotos, editable, sitioOficial: ctx.sitioOficial, ...(aviso ? { aviso } : {}) }
 }
 
 function objetivoPedido(ctx: Contexto, tipo: TipoFoto, clave: string): ObjetivoFoto | null {

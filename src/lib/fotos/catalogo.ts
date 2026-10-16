@@ -470,7 +470,7 @@ export async function quitarFotoPorId(supabase: Cliente, workspaceId: string, id
   if (error) return { ok: false, mensaje: sinTabla(error) ? MENSAJE_SIN_TABLA : 'No se pudo quitar la foto.' }
   if (f.principal) {
     const quedan = await fotosDelElemento(supabase, workspaceId, f)
-    const siguiente = 'filas' in quedan ? quedan.filas[0] : undefined
+    const siguiente = quedan.filas?.[0]
     if (siguiente && !siguiente.principal) {
       await supabase.from(TABLA_CATALOGO).update({ principal: true, updated_at: new Date().toISOString() }).eq('workspace_id', workspaceId).eq('id', siguiente.id)
     }

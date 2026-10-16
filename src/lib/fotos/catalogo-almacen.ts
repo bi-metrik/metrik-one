@@ -81,6 +81,28 @@ export async function enlaceDeCatalogo(workspaceId: string, ref: string, segundo
   }
 }
 
+/** Enlaces firmados de varias fotos de una vez (la biblioteca). Las que no son del workspace, sin enlace. */
+export async function enlacesDeCatalogo(workspaceId: string, refs: string[], segundos = 3600): Promise<Map<string, string>> {
+  const salida = new Map<string, string>()
+  const rutas = new Map<string, string>()
+  for (const ref of new Set(refs)) {
+    const ruta = rutaDeReferencia(ref, workspaceId)
+    if (ruta) rutas.set(ruta, ref)
+  }
+  if (rutas.size === 0) return salida
+  try {
+    const { data, error } = await bucket().createSignedUrls([...rutas.keys()], segundos)
+    if (error || !data) return salida
+    for (const d of data as { path: string | null; signedUrl: string | null; error: string | null }[]) {
+      const ref = d.path ? rutas.get(d.path) : undefined
+      if (ref && d.signedUrl && !d.error) salida.set(ref, d.signedUrl)
+    }
+  } catch {
+    // Sin enlaces, la pantalla muestra el degradado.
+  }
+  return salida
+}
+
 /** Borra el archivo. Best-effort: un archivo huérfano no le hace daño a nadie. */
 export async function borrarDeCatalogo(workspaceId: string, ref: string | null | undefined): Promise<void> {
   const ruta = rutaDeReferencia(ref, workspaceId)
