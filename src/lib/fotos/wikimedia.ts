@@ -12,6 +12,7 @@
  * hace la llamada, con `fetch` inyectable. Commons pide identificarse con un User-Agent propio.
  */
 import { OPCIONES_POR_PAGINA, seSugiereDeCommons, type TipoFoto } from './clave'
+import { firmaDelHotel, tituloEsDelHotel } from './nombre-hotel'
 
 export const API_COMMONS = 'https://commons.wikimedia.org/w/api.php'
 export const AGENTE_COMMONS = 'MetrikONE/1.0 (https://metrikone.co; mauricio.moreno@metrik.com.co)'
@@ -311,4 +312,111 @@ export async function archivoDeCommons(titulo: string, opts: { fetch?: typeof fe
   } catch {
     return null
   }
+}
+
+// ── Hoteles: precisión antes que cantidad (Mauricio, 2026-10-16) ─────────────
+
+/** Los archivos de una categoría de Commons («Category:Hotel Arts Barcelona»), con su imageinfo. */
+export function urlDeCategoria(categoria: string, limite = 50, ancho = ANCHO_MINIATURA): string {
+  const titulo = categoria.startsWith('Category:') ? categoria : `Category:${categoria}`
+  const p = new URLSearchParams({
+    action: 'query',
+    format: 'json',
+    formatversion: '2',
+    generator: 'categorymembers',
+    gcmtitle: titulo,
+    gcmtype: 'file',
+    gcmlimit: String(limite),
+    prop: 'imageinfo',
+    iiprop: 'url|extmetadata|size|mime',
+    iiurlwidth: String(ancho),
+  })
+  return `${API_COMMONS}?${p.toString()}`
+}
+
+/** Búsqueda de CATEGORÍAS de Commons (espacio 14). */
+export function urlDeBusquedaDeCategorias(consulta: string, limite = 10): string {
+  const p = new URLSearchParams({
+    action: 'query',
+    format: 'json',
+    formatversion: '2',
+    list: 'search',
+    srsearch: consulta,
+    srnamespace: '14',
+    srlimit: String(limite),
+  })
+  return `${API_COMMONS}?${p.toString()}`
+}
+
+/** Los títulos de categoría de una respuesta de `urlDeBusquedaDeCategorias`. PURO. */
+export function categoriasDeRespuesta(json: unknown): string[] {
+  const s = (json as { query?: { search?: { title?: unknown }[] } } | null)?.query?.search
+  return (Array.isArray(s) ? s : []).map((x) => x.title).filter((t): t is string => typeof t === 'string' && t.startsWith('Category:'))
+}
+
+/** Tope de candidatas de Commons para un hotel (cada una se clasifica con el modelo). */
+export const MAX_CANDIDATAS_HOTEL = 36
+
+async function pedirCommons(url: string, f: typeof fetch): Promise<unknown> {
+  try {
+    const r = await f(url, {
+      headers: { 'User-Agent': AGENTE_COMMONS, 'Api-User-Agent': AGENTE_COMMONS },
+      signal: AbortSignal.timeout(8000),
+    })
+    return r.ok ? await r.json() : null
+  } catch {
+    return null
+  }
+}
+
+/** De dónde salió una candidata de un hotel: su categoría exacta en Commons o un título que lo nombra. */
+export type ViaCommons = 'categoria' | 'titulo'
+
+/** Una candidata de un hotel: por dónde llegó y si su título nombra el hotel. */
+export type CandidataHotel = CandidataFoto & { via: ViaCommons; nombraElHotel: boolean }
+
+/**
+ * Las candidatas de Commons para un HOTEL, solo las que pueden ser de ese hotel:
+ *   1. los archivos de su categoría exacta: la de Wikidata (P373, `categoriaWikidata`) o una
+ *      categoría cuyo título nombra el hotel (`tituloEsDelHotel`);
+ *   2. los archivos de la búsqueda cuyo título nombra el hotel.
+ * Lo demás se descarta: «Parc Can Dragó» no sale para «Ibis Barcelona Centro».
+ *
+ * ⚠️ La categoría exacta NO basta sola: medido el 2026-10-16, «Category:Pullman Paris Tour Eiffel»
+ * trae «The Eiffel Tower» y «Summit @ Eiffel Tower» (vistas DESDE el hotel). Un archivo de la
+ * categoría cuyo título no nombra el hotel sale con `nombraElHotel = false`, y solo se ofrece si el
+ * modelo dice que es una foto de hotel (`opciones-hotel.ts`). Las miniaturas son de
+ * `ANCHO_MINIATURA` px (para verlas y clasificarlas). Nunca lanza.
+ */
+export async function candidatasDeHotelEnCommons(
+  o: { nombre: string; ciudad: string | null },
+  opts: { fetch?: typeof fetch; categoriaWikidata?: string | null; descartadas?: readonly string[] } = {},
+): Promise<{ candidatas: CandidataHotel[]; categoria: string | null }> {
+  const f = opts.fetch ?? fetch
+  const firma = firmaDelHotel(o.nombre, o.ciudad)
+  if (firma.vacia) return { candidatas: [], categoria: null }
+  const vistas = new Map<string, CandidataHotel>()
+  const fuera = new Set(opts.descartadas ?? [])
+  const poner = (lista: CandidataFoto[], via: ViaCommons) => {
+    for (const c of lista) {
+      if (vistas.size >= MAX_CANDIDATAS_HOTEL) return
+      if (!vistas.has(c.titulo) && !fuera.has(c.titulo)) vistas.set(c.titulo, { ...c, via, nombraElHotel: tituloEsDelHotel(c.titulo, firma) })
+    }
+  }
+
+  // 1. La categoría exacta del hotel.
+  let categoria = opts.categoriaWikidata ? `Category:${opts.categoriaWikidata.replace(/^Category:/, '')}` : null
+  if (!categoria) {
+    const consulta = consultaDeFoto('hotel', o.nombre, o.ciudad)
+    categoria = categoriasDeRespuesta(await pedirCommons(urlDeBusquedaDeCategorias(consulta), f)).find((t) => tituloEsDelHotel(t, firma)) ?? null
+  }
+  if (categoria) poner(candidatasDeRespuesta(await pedirCommons(urlDeCategoria(categoria), f)), 'categoria')
+
+  // 2. Los archivos cuyo título nombra el hotel.
+  for (const q of consultasParaElegir('hotel', o.nombre, o.ciudad)) {
+    if (vistas.size >= MAX_CANDIDATAS_HOTEL) break
+    const lista = await buscarEnCommons(q, { fetch: f, limite: 50, ancho: ANCHO_MINIATURA })
+    poner(lista.filter((c) => tituloEsDelHotel(c.titulo, firma)), 'titulo')
+  }
+  return { candidatas: [...vistas.values()], categoria }
 }

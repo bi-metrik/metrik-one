@@ -364,6 +364,37 @@ export function lugaresDe(e: EntidadWikidata): string[] {
   return valoresDe(e, 'P131').map((v) => (v as { id?: string })?.id).filter((x): x is string => typeof x === 'string')
 }
 
+/** ¿La entidad tiene el mismo nombre (etiqueta o alias) y está en la ciudad? */
+function coincide(
+  e: EntidadWikidata,
+  buscado: string,
+  ciudad: string | null,
+  nombreDeLugar: Record<string, string[]>,
+): boolean {
+  const nombres = [
+    ...Object.values(e.labels ?? {}).map((l) => l.value ?? ''),
+    ...Object.values(e.aliases ?? {}).flat().map((a) => a.value ?? ''),
+  ].map(nombreComparable)
+  if (!nombres.includes(buscado)) return false
+  if (!ciudad) return true
+  const descripciones = Object.values(e.descriptions ?? {}).map((d) => nombreLlano(d.value ?? ''))
+  const enDescripcion = descripciones.some((d) => ` ${d} `.includes(` ${ciudad} `))
+  const enLugar = lugaresDe(e).some((id) => (nombreDeLugar[id] ?? []).map((n) => nombreLlano(n)).includes(ciudad))
+  return enDescripcion || enLugar
+}
+
+/** Las entidades que son ESE lugar (mismo nombre, misma ciudad). */
+function entidadesQueCoinciden(
+  o: { nombre: string; ciudad: string | null },
+  entidades: EntidadWikidata[],
+  nombreDeLugar: Record<string, string[]>,
+): EntidadWikidata[] {
+  const buscado = nombreComparable(o.nombre)
+  if (!buscado) return []
+  const ciudad = o.ciudad ? nombreLlano(claveDeFoto('ciudad', o.ciudad)) : null
+  return entidades.filter((e) => coincide(e, buscado, ciudad, nombreDeLugar))
+}
+
 /**
  * La página oficial, si UNA sola entidad tiene el mismo nombre (etiqueta o alias), está en la
  * ciudad (su descripción la nombra o su P131 se llama así) y declara sitio web oficial (P856,
@@ -374,28 +405,31 @@ export function paginaConfiable(
   entidades: EntidadWikidata[],
   nombreDeLugar: Record<string, string[]>,
 ): { url: string; entidad: string } | null {
-  const buscado = nombreComparable(o.nombre)
-  const ciudad = o.ciudad ? nombreLlano(claveDeFoto('ciudad', o.ciudad)) : null
-  if (!buscado) return null
   const paginas = new Map<string, string>()
-  for (const e of entidades) {
-    const nombres = [
-      ...Object.values(e.labels ?? {}).map((l) => l.value ?? ''),
-      ...Object.values(e.aliases ?? {}).flat().map((a) => a.value ?? ''),
-    ].map(nombreComparable)
-    if (!nombres.includes(buscado)) continue
-    if (ciudad) {
-      const descripciones = Object.values(e.descriptions ?? {}).map((d) => nombreLlano(d.value ?? ''))
-      const enDescripcion = descripciones.some((d) => ` ${d} `.includes(` ${ciudad} `))
-      const enLugar = lugaresDe(e).some((id) => (nombreDeLugar[id] ?? []).map((n) => nombreLlano(n)).includes(ciudad))
-      if (!enDescripcion && !enLugar) continue
-    }
+  for (const e of entidadesQueCoinciden(o, entidades, nombreDeLugar)) {
     const web = valoresDe(e, 'P856').find((v): v is string => typeof v === 'string' && v.startsWith('https://'))
     if (web) paginas.set(web, e.id)
   }
   if (paginas.size !== 1) return null
   const [[url, entidad]] = [...paginas]
   return { url, entidad }
+}
+
+/**
+ * La categoría de Commons del lugar (P373, «Hotel Arts»), con la misma regla: UNA sola entidad con
+ * ese nombre en esa ciudad que la declare. Más de una distinta, o ninguna: `null`. PURO.
+ */
+export function categoriaCommonsConfiable(
+  o: { nombre: string; ciudad: string | null },
+  entidades: EntidadWikidata[],
+  nombreDeLugar: Record<string, string[]>,
+): string | null {
+  const categorias = new Set<string>()
+  for (const e of entidadesQueCoinciden(o, entidades, nombreDeLugar)) {
+    const c = valoresDe(e, 'P373').find((v): v is string => typeof v === 'string' && v.trim().length > 0)
+    if (c) categorias.add(c.trim())
+  }
+  return categorias.size === 1 ? [...categorias][0] : null
 }
 
 async function wikidata(params: Record<string, string>, f: typeof fetch): Promise<unknown> {
@@ -405,17 +439,25 @@ async function wikidata(params: Record<string, string>, f: typeof fetch): Promis
   return r.json()
 }
 
-/** Propone la página oficial desde Wikidata. Nunca lanza; `null` = no hay una confiable. */
-export async function paginaOficialDesdeWikidata(
+/** Lo que Wikidata sabe de un hotel o un lugar con ese nombre en esa ciudad. */
+export interface DatosWikidata {
+  pagina: { url: string; entidad: string } | null
+  /** La categoría de Commons (P373), sin «Category:». */
+  categoria: string | null
+}
+
+/** La página oficial (P856) y la categoría de Commons (P373) desde Wikidata. Nunca lanza. */
+export async function datosDesdeWikidata(
   o: { tipo: TipoFoto; nombre: string; ciudad: string | null },
   opts: { fetch?: typeof fetch } = {},
-): Promise<{ url: string; entidad: string } | null> {
-  if (o.tipo === 'ciudad') return null
+): Promise<DatosWikidata> {
+  const nada: DatosWikidata = { pagina: null, categoria: null }
+  if (o.tipo === 'ciudad') return nada
   const f = opts.fetch ?? fetch
   try {
     const busqueda = (await wikidata({ action: 'wbsearchentities', search: o.nombre, language: 'es', uselang: 'es', type: 'item', limit: '7' }, f)) as { search?: { id?: string }[] }
     const ids = (busqueda.search ?? []).map((s) => s.id).filter((x): x is string => typeof x === 'string' && /^Q\d+$/.test(x))
-    if (ids.length === 0) return null
+    if (ids.length === 0) return nada
     const datos = (await wikidata({ action: 'wbgetentities', ids: ids.join('|'), props: 'labels|aliases|descriptions|claims', languages: 'es|en' }, f)) as { entities?: Record<string, EntidadWikidata> }
     const entidades = Object.values(datos.entities ?? {})
     const lugares = [...new Set(entidades.flatMap(lugaresDe))].slice(0, 40)
@@ -424,8 +466,16 @@ export async function paginaOficialDesdeWikidata(
       const l = (await wikidata({ action: 'wbgetentities', ids: lugares.join('|'), props: 'labels', languages: 'es|en' }, f)) as { entities?: Record<string, EntidadWikidata> }
       for (const e of Object.values(l.entities ?? {})) nombreDeLugar[e.id] = Object.values(e.labels ?? {}).map((x) => x.value ?? '')
     }
-    return paginaConfiable(o, entidades, nombreDeLugar)
+    return { pagina: paginaConfiable(o, entidades, nombreDeLugar), categoria: categoriaCommonsConfiable(o, entidades, nombreDeLugar) }
   } catch {
-    return null
+    return nada
   }
+}
+
+/** Propone la página oficial desde Wikidata. Nunca lanza; `null` = no hay una confiable. */
+export async function paginaOficialDesdeWikidata(
+  o: { tipo: TipoFoto; nombre: string; ciudad: string | null },
+  opts: { fetch?: typeof fetch } = {},
+): Promise<{ url: string; entidad: string } | null> {
+  return (await datosDesdeWikidata(o, opts)).pagina
 }

@@ -15,7 +15,10 @@
  */
 import { getWorkspace } from '@/lib/actions/get-workspace'
 import { bytesDeDataUrl } from '@/lib/cotizaciones/imagen-captura'
+import { esCategoria, type CategoriaFoto } from '@/lib/fotos/categoria'
 import {
+  anotarCategoria,
+  COLUMNAS,
   elegirDeCommons,
   elegirDeSitioOficial,
   elementosDe,
@@ -27,9 +30,10 @@ import {
   TABLA_CATALOGO,
   type FilaCatalogo,
 } from '@/lib/fotos/catalogo'
-import { enlacesDeCatalogo } from '@/lib/fotos/catalogo-almacen'
+import { bytesDeCatalogo, enlacesDeCatalogo } from '@/lib/fotos/catalogo-almacen'
 import { sinRepetir, usaFotosDeSitioOficial, type ObjetivoFoto } from '@/lib/fotos/clave'
-import { opcionesDeSitioOficial, paginaOficialDesdeWikidata } from '@/lib/fotos/sitio-oficial'
+import { clasificar, opcionesDeHotelEnCommons, opcionesDeHotelEnSitio } from '@/lib/fotos/opciones-hotel'
+import { datosDesdeWikidata, opcionesDeSitioOficial, paginaOficialDesdeWikidata } from '@/lib/fotos/sitio-oficial'
 import { dominio, objetivoDelPedido, vistaDeElemento, type EleccionFoto, type ElementoVista, type OpcionFoto } from '@/lib/fotos/vista'
 import { opcionesDeCommons } from '@/lib/fotos/wikimedia'
 import { tienePropuestaHtml } from '@/lib/pdf/motor-html'
@@ -80,7 +84,7 @@ async function vistas(ctx: Contexto, filas: FilaCatalogo[]): Promise<ElementoVis
 async function elementoActual(ctx: Contexto, o: Pick<ObjetivoFoto, 'tipo' | 'clave'>): Promise<ResultadoElemento> {
   const { data, error } = await ctx.db
     .from(TABLA_CATALOGO)
-    .select('id, tipo, clave, nombre_clave, nombre, ciudad, ref, origen, fuente_url, titulo_fuente, autor, licencia, foco_x, foco_y, proporcion, revisada, descartadas, principal, posicion, imagen_url')
+    .select(COLUMNAS)
     .eq('workspace_id', ctx.workspaceId)
     .eq('tipo', o.tipo)
     .eq('clave', o.clave)
@@ -218,12 +222,13 @@ export async function elegirFoto(
   pedido: { tipo: string; nombre: string; ciudad: string | null },
   eleccion: EleccionFoto,
   reemplaza?: string | null,
+  categoria?: string | null,
 ): Promise<ResultadoElemento> {
   const ctx = await contexto(true)
   if ('error' in ctx) return { ok: false, error: ctx.error as string }
   const o = objetivoDelPedido(pedido)
   if (!o) return { ok: false, error: 'Falta el nombre de lo que quieres ilustrar.' }
-  const base = { supabase: ctx.db, workspaceId: ctx.workspaceId, staffId: ctx.staffId, objetivo: o, reemplaza: reemplaza ?? null }
+  const base = { supabase: ctx.db, workspaceId: ctx.workspaceId, staffId: ctx.staffId, objetivo: o, reemplaza: reemplaza ?? null, ...categoriaDelPedido(o.tipo, categoria) }
   let r
   if (eleccion?.fuente === 'wikimedia' && typeof eleccion.titulo === 'string') {
     r = await elegirDeCommons({ ...base, titulo: eleccion.titulo })
@@ -237,11 +242,12 @@ export async function elegirFoto(
   return elementoActual(ctx, o)
 }
 
-/** «Subir la mía» en la biblioteca: agrega (hasta 3) o reemplaza `reemplaza`. */
+/** «Subir la mía» en la biblioteca: agrega (hasta 3) o reemplaza `reemplaza`. Un hotel, en la pestaña `categoria`. */
 export async function subirFotoABiblioteca(
   pedido: { tipo: string; nombre: string; ciudad: string | null },
   dataUrl: string,
   reemplaza?: string | null,
+  categoria?: string | null,
 ): Promise<ResultadoElemento> {
   const ctx = await contexto(true)
   if ('error' in ctx) return { ok: false, error: ctx.error as string }
@@ -251,10 +257,115 @@ export async function subirFotoABiblioteca(
   if (!partes || !/^image\/(jpeg|png|webp)$/.test(partes.mime)) return { ok: false, error: 'Ese archivo no es una foto. Usa un JPG o un PNG.' }
   const r = await ponerFotoPropia({
     supabase: ctx.db, workspaceId: ctx.workspaceId, staffId: ctx.staffId, objetivo: o, bytes: partes.buffer,
-    reemplaza: reemplaza ?? null, agregar: !reemplaza,
+    reemplaza: reemplaza ?? null, agregar: !reemplaza, ...categoriaDelPedido(o.tipo, categoria),
   })
   if (!r.ok) return { ok: false, error: r.mensaje }
   return elementoActual(ctx, o)
+}
+
+/**
+ * La categoría que manda el navegador (la pestaña), revisada: solo para un hotel y solo una de las
+ * cuatro. Sin ella, `{}` (la foto entra como antes, sin reparto por categoría).
+ */
+function categoriaDelPedido(tipo: ObjetivoFoto['tipo'], categoria: unknown): { categoria?: CategoriaFoto } {
+  return tipo === 'hotel' && esCategoria(categoria) ? { categoria } : {}
+}
+
+export type OpcionesDeHotel =
+  | {
+      ok: true
+      opciones: OpcionFoto[]
+      siguiente: string | null
+      /** ¿El modelo alcanzó a mirar alguna? (sin él, todo queda «sin clasificar»). */
+      clasificadas: boolean
+      /** La página leída (sitio oficial). */
+      pagina?: string
+      /** Con el interruptor encendido: la página oficial que ONE propone para pegar. */
+      paginaSugerida?: { url: string; desde: 'biblioteca' | 'wikidata' } | null
+    }
+  | { ok: false; error: string }
+
+/**
+ * Las opciones del selector de un HOTEL, ya clasificadas por pestaña (fachada, habitación, zonas
+ * comunes). Sin `paginaUrl`: Commons (categoría exacta del hotel y títulos que lo nombran) y, con
+ * el interruptor, la página oficial propuesta. Con `paginaUrl` (solo con el interruptor): la
+ * galería de esa página, de a 12. Nada se guarda.
+ */
+export async function opcionesDeHotel(
+  pedido: { tipo: string; nombre: string; ciudad: string | null },
+  paginaUrl?: string | null,
+  siguiente?: string | null,
+): Promise<OpcionesDeHotel> {
+  const ctx = await contexto(true)
+  if ('error' in ctx) return { ok: false, error: ctx.error as string }
+  const o = objetivoDelPedido(pedido)
+  if (!o || o.tipo !== 'hotel') return { ok: false, error: 'Falta el nombre del hotel.' }
+  const apiKey = process.env.GEMINI_API_KEY
+  if (typeof paginaUrl === 'string' && paginaUrl.trim()) {
+    if (!ctx.sitioOficial) return { ok: false, error: MENSAJE_SIN_SITIO }
+    const desde = Math.max(0, Math.min(10_000, Number.parseInt(siguiente ?? '0', 10) || 0))
+    const r = await opcionesDeHotelEnSitio(paginaUrl.trim(), o, { apiKey, desde })
+    if (!r.ok) return { ok: false, error: r.error }
+    return {
+      ok: true,
+      opciones: r.opciones,
+      siguiente: r.siguiente === null ? null : String(r.siguiente),
+      clasificadas: r.opciones.some((x) => x.categoria),
+      pagina: r.pagina,
+    }
+  }
+  const wd = await datosDesdeWikidata(o)
+  const r = await opcionesDeHotelEnCommons(o, { apiKey, categoriaWikidata: wd.categoria })
+  let paginaSugerida: { url: string; desde: 'biblioteca' | 'wikidata' } | null = null
+  if (ctx.sitioOficial) {
+    const { data } = await ctx.db
+      .from(TABLA_CATALOGO)
+      .select('fuente_url')
+      .eq('workspace_id', ctx.workspaceId)
+      .eq('tipo', o.tipo)
+      .eq('clave', o.clave)
+      .eq('origen', 'sitio_oficial')
+      .limit(1)
+    const usada = (data as { fuente_url?: string | null }[] | null)?.[0]?.fuente_url
+    paginaSugerida = usada ? { url: usada, desde: 'biblioteca' } : wd.pagina ? { url: wd.pagina.url, desde: 'wikidata' } : null
+  }
+  return { ok: true, opciones: r.opciones, siguiente: null, clasificadas: r.clasificadas, paginaSugerida }
+}
+
+/**
+ * Las fotos que ya tiene un hotel en la biblioteca, con su categoría. Las de antes de las
+ * categorías se clasifican UNA vez con el modelo y la categoría queda en su fila (no se vuelve a
+ * preguntar). `null` si el hotel no tiene fotos.
+ */
+export async function fotosDelHotel(pedido: { tipo: string; nombre: string; ciudad: string | null }): Promise<ResultadoElemento> {
+  const ctx = await contexto(false)
+  if ('error' in ctx) return { ok: false, error: ctx.error as string }
+  const o = objetivoDelPedido(pedido)
+  if (!o || o.tipo !== 'hotel') return { ok: false, error: 'Falta el nombre del hotel.' }
+  const { data, error } = await ctx.db.from(TABLA_CATALOGO).select(COLUMNAS).eq('workspace_id', ctx.workspaceId).eq('tipo', 'hotel').eq('clave', o.clave)
+  if (error) return { ok: false, error: 'No se pudo leer la biblioteca de fotos.' }
+  const filas = (data ?? []) as FilaCatalogo[]
+  const sin = ctx.editable ? filas.filter((f) => !f.categoria) : []
+  if (sin.length > 0 && process.env.GEMINI_API_KEY) {
+    const clases = await clasificar(
+      sin.map((f) => ({
+        clave: `fila:${f.id}:${f.ref}`,
+        leer: async () => {
+          const bytes = await bytesDeCatalogo(ctx.workspaceId, f.ref)
+          return bytes ? { bytes, mime: 'image/jpeg' } : null
+        },
+      })),
+      { apiKey: process.env.GEMINI_API_KEY, hotel: o.nombre, ciudad: o.ciudad },
+    )
+    await Promise.all(
+      sin.map(async (f, i) => {
+        const c = clases[i]
+        if (c && c !== 'no_es_hotel' && (await anotarCategoria(ctx.db, ctx.workspaceId, f.id, c))) f.categoria = c
+      }),
+    )
+  }
+  const [elemento] = await vistas(ctx, filas)
+  return { ok: true, elemento: elemento ?? null }
 }
 
 async function porId(ctx: Contexto, id: string): Promise<{ tipo: FilaCatalogo['tipo']; clave: string } | null> {

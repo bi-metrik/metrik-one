@@ -14,6 +14,7 @@ import 'server-only'
  * Sin la migración del catálogo la tabla no existe: leer devuelve un catálogo vacío y escribir
  * devuelve el motivo, nunca un error sin explicar. La propuesta sale como hoy.
  */
+import { puestoParaCategoria, type CategoriaFoto } from './categoria'
 import { borrarDeCatalogo, bytesDeCatalogo, guardarEnCatalogo, prepararFoto, type FotoPreparada } from './catalogo-almacen'
 import { MAX_FOTOS_POR_ELEMENTO, nombreLlano, seSugiereDeCommons, type ObjetivoFoto, type OrigenFoto, type TipoFoto } from './clave'
 import { bajarFotoDeSitio, type Resolver } from './sitio-oficial'
@@ -48,10 +49,15 @@ export interface FilaCatalogo {
   posicion: number
   /** Origen `sitio_oficial`: la imagen bajada (`fuente_url` es la página). */
   imagen_url: string | null
+  /**
+   * Hotel: fachada, habitación o zonas comunes (migración `20261016221500`). `null` en las filas
+   * de antes y en ciudades y actividades.
+   */
+  categoria: CategoriaFoto | null
 }
 
-const COLUMNAS =
-  'id, tipo, clave, nombre_clave, nombre, ciudad, ref, origen, fuente_url, titulo_fuente, autor, licencia, foco_x, foco_y, proporcion, revisada, descartadas, principal, posicion, imagen_url'
+export const COLUMNAS =
+  'id, tipo, clave, nombre_clave, nombre, ciudad, ref, origen, fuente_url, titulo_fuente, autor, licencia, foco_x, foco_y, proporcion, revisada, descartadas, principal, posicion, imagen_url, categoria'
 
 /** El crédito que imprime el documento para esta foto (`null` = propia, sin crédito). */
 export function creditoDeFila(f: Pick<FilaCatalogo, 'nombre' | 'autor' | 'licencia' | 'origen' | 'fuente_url'>): string | null {
@@ -224,6 +230,8 @@ type Procedencia = Pick<FilaCatalogo, 'origen' | 'fuente_url' | 'titulo_fuente' 
  *  · `reemplaza` = el id de una de sus fotos → esa cambia (conserva su puesto y si es principal);
  *  · sin `reemplaza` → se agrega en el primer puesto libre; la primera del elemento es la
  *    principal. Con tres, no entra (`MENSAJE_TOPE`) y no se sube nada.
+ *  · un HOTEL con `categoria` y sin `reemplaza` → el reparto por categoría decide
+ *    (`puestoParaCategoria`): si ya tiene una de esa categoría, la cambia; si no, se agrega.
  */
 export async function guardarFoto(a: {
   supabase: Cliente
@@ -233,12 +241,20 @@ export async function guardarFoto(a: {
   foto: FotoPreparada
   procedencia: Procedencia
   reemplaza?: string | null
+  /** Hotel: la pestaña donde se eligió. Sin ella (quien llamaba antes), la foto queda sin categoría. */
+  categoria?: CategoriaFoto | null
 }): Promise<Resultado> {
   const leidas = await fotosDelElemento(a.supabase, a.workspaceId, a.objetivo)
   if ('error' in leidas) return { ok: false, mensaje: leidas.error as string }
   const actuales = leidas.filas
-  const anterior = a.reemplaza ? actuales.find((f) => f.id === a.reemplaza) ?? null : null
-  if (a.reemplaza && !anterior) return { ok: false, mensaje: 'Esa foto ya no está en la biblioteca. Recarga.' }
+  let reemplaza = a.reemplaza ?? null
+  if (!reemplaza && a.objetivo.tipo === 'hotel' && a.categoria !== undefined) {
+    const puesto = puestoParaCategoria(actuales, a.categoria ?? null)
+    if (puesto.tipo === 'tope') return { ok: false, mensaje: MENSAJE_TOPE }
+    if (puesto.tipo === 'reemplazar') reemplaza = puesto.id
+  }
+  const anterior = reemplaza ? actuales.find((f) => f.id === reemplaza) ?? null : null
+  if (reemplaza && !anterior) return { ok: false, mensaje: 'Esa foto ya no está en la biblioteca. Recarga.' }
   const ocupados = new Set(actuales.map((f) => f.posicion ?? 1))
   const libre = [1, 2, 3].slice(0, MAX_FOTOS_POR_ELEMENTO).find((p) => !ocupados.has(p))
   if (!anterior && (actuales.length >= MAX_FOTOS_POR_ELEMENTO || !libre)) return { ok: false, mensaje: MENSAJE_TOPE }
@@ -263,6 +279,7 @@ export async function guardarFoto(a: {
     autor: a.procedencia.autor,
     licencia: a.procedencia.licencia,
     imagen_url: a.procedencia.imagen_url,
+    categoria: a.objetivo.tipo === 'hotel' ? a.categoria ?? null : null,
     revisada: a.procedencia.revisada,
     descartadas: a.procedencia.descartadas ?? anterior?.descartadas ?? [],
     foco_x: null,
@@ -358,6 +375,7 @@ export async function elegirDeCommons(a: {
   objetivo: ObjetivoFoto
   titulo: string
   reemplaza?: string | null
+  categoria?: CategoriaFoto | null
   fetch?: typeof fetch
 }): Promise<Resultado> {
   const f = a.fetch ?? fetch
@@ -380,6 +398,7 @@ export async function elegirDeSitioOficial(a: {
   paginaUrl: string
   imagenUrl: string
   reemplaza?: string | null
+  categoria?: CategoriaFoto | null
   red?: { fetch?: typeof fetch; resolver?: Resolver }
 }): Promise<Resultado> {
   const r = await bajarFotoDeSitio(a.paginaUrl, a.imagenUrl, a.red)
@@ -407,6 +426,7 @@ export async function ponerFotoPropia(a: {
   descartadas?: string[]
   reemplaza?: string | null
   agregar?: boolean
+  categoria?: CategoriaFoto | null
 }): Promise<Resultado> {
   const lista = await prepararFoto(a.bytes)
   if (!lista) return { ok: false, mensaje: 'Ese archivo no es una foto o pesa demasiado. Usa un JPG o un PNG.' }
@@ -424,6 +444,7 @@ export async function ponerFotoPropia(a: {
     foto: lista,
     procedencia: { origen: 'asesora', fuente_url: null, titulo_fuente: null, autor: null, licencia: null, imagen_url: null, revisada: true, descartadas: a.descartadas },
     reemplaza,
+    ...(a.categoria !== undefined ? { categoria: a.categoria } : {}),
   })
 }
 
@@ -506,4 +527,20 @@ export async function quitarFoto(supabase: Cliente, workspaceId: string, o: Pick
 export async function dataUrlDeFila(workspaceId: string, f: Pick<FilaCatalogo, 'ref'>): Promise<string | null> {
   const bytes = await bytesDeCatalogo(workspaceId, f.ref)
   return bytes ? `data:image/jpeg;base64,${bytes.toString('base64')}` : null
+}
+
+/**
+ * Guarda en la fila la categoría que el modelo vio en una foto de hotel que no la tenía (las de
+ * antes de las categorías): así no se vuelve a preguntar. Solo si sigue sin categoría.
+ */
+export async function anotarCategoria(supabase: Cliente, workspaceId: string, id: string, categoria: CategoriaFoto): Promise<boolean> {
+  const { data, error } = await supabase
+    .from(TABLA_CATALOGO)
+    .update({ categoria })
+    .eq('workspace_id', workspaceId)
+    .eq('id', id)
+    .eq('tipo', 'hotel')
+    .is('categoria', null)
+    .select('id')
+  return !error && Array.isArray(data) && data.length > 0
 }
