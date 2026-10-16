@@ -34,11 +34,11 @@ import {
 } from '@/lib/actions/valida-consultas';
 import TutorialTour from '@/components/tutorial/TutorialTour';
 import TutorialButton from '@/components/tutorial/TutorialButton';
-import TutorialEmptyState from '@/components/tutorial/TutorialEmptyState';
 import { useFileDrop } from '@/hooks/use-file-drop';
 import { correrFilaTolerante, procesarEnParalelo } from '@/lib/valida/cargue-lote';
 import { esMotivoCorte, type MotivoCorte, type SaldoBolsa } from '@/lib/valida/corte-bolsa';
 import { ActivaTuPlan, SaldoConsultas } from './activa-tu-plan';
+import { FranjaPrueba, type PruebaEnPantalla } from './franja-prueba';
 import { formatFecha } from '@/lib/dates/bogota'
 import { PALETA } from '@/lib/marca/paleta'
 
@@ -126,6 +126,11 @@ type Props = {
    * reemplaza los formularios de consulta.
    */
   saldo?: SaldoBolsa | null;
+  /**
+   * La prueba gratis del registro autogestionado: con ella, el contador, la fecha y el cobro van en UNA
+   * franja (`FranjaPrueba`) en vez de la línea del saldo. null = no es una prueba.
+   */
+  prueba?: PruebaEnPantalla | null;
 };
 
 export default function ValidaClient({
@@ -138,6 +143,7 @@ export default function ValidaClient({
   consultasEnPausa = null,
   consultasRestringidas: restringidasPorMora = null,
   saldo = null,
+  prueba = null,
 }: Props) {
   const [saldoLocal, setSaldoLocal] = useState<SaldoBolsa | null>(saldo);
   const [corte, setCorte] = useState<MotivoCorte | null>(saldo?.bloqueada ? (saldo.motivo ?? 'bolsa_agotada') : null);
@@ -148,8 +154,11 @@ export default function ValidaClient({
   const [historial, setHistorial] = useState<ConsultaHistorialItem[]>(historialInicial);
   const [historialError, setHistorialError] = useState<string | null>(errorHistorial);
   const [tourTrigger, setTourTrigger] = useState(0);
+  // Sin filtros, un historial vacío invita a la primera consulta; con filtros, dice que no hay resultados.
+  const [conFiltros, setConFiltros] = useState(Boolean(negocioInicial));
 
   async function refrescarHistorial(filtros?: FiltrosHistorial) {
+    setConFiltros(Boolean(filtros && Object.entries(filtros).some(([k, v]) => k !== 'limite' && v !== undefined && v !== '')));
     const r = await listarConsultasValida(filtros);
     if (r.ok) {
       setHistorial(r.consultas);
@@ -163,8 +172,6 @@ export default function ValidaClient({
     setTourTrigger(t => t + 1);
     setTab('puntual');
   }
-
-  const mostrarEmpty = historial.length === 0 && !historialError;
 
   return (
     <div className="space-y-6">
@@ -180,17 +187,14 @@ export default function ValidaClient({
       </div>
 
       {encabezado}
-      {saldoLocal && !corte && !consultasEnPausa && !restringidasPorMora && <SaldoConsultas saldo={saldoLocal} />}
+      {prueba && !consultasEnPausa && !restringidasPorMora ? (
+        <FranjaPrueba saldo={saldoLocal} prueba={prueba} />
+      ) : (
+        saldoLocal && !corte && !consultasEnPausa && !restringidasPorMora && <SaldoConsultas saldo={saldoLocal} />
+      )}
 
       <div className="space-y-6">
       {consultasEnPausa ? consultasEnPausa : (<>
-      {mostrarEmpty && !consultasRestringidas && (
-        <TutorialEmptyState
-          onStartDemo={dispararTutorial}
-          onTryConsulta={() => setTab('puntual')}
-        />
-      )}
-
       <div className="flex gap-1 border-b border-[#E5E7EB]">
         <TabButton
           active={tab === 'puntual'}
@@ -242,6 +246,7 @@ export default function ValidaClient({
           onFiltrar={refrescarHistorial}
           negocioInicial={negocioInicial}
           modoVitrina={modoVitrina}
+          textoVacio={conFiltros ? undefined : 'Haz tu primera consulta arriba.'}
         />
       )}
       </>)}
@@ -1138,12 +1143,15 @@ function Historial({
   onFiltrar,
   negocioInicial = null,
   modoVitrina = false,
+  textoVacio,
 }: {
   consultas: ConsultaHistorialItem[];
   error: string | null;
   onFiltrar: (filtros: FiltrosHistorial) => Promise<void>;
   negocioInicial?: NegocioBusqueda | null;
   modoVitrina?: boolean;
+  /** Lo que dice la tabla vacía. Por defecto, «Sin consultas con los filtros aplicados.». */
+  textoVacio?: string;
 }) {
   const [negocio, setNegocio] = useState<NegocioBusqueda | null>(negocioInicial);
   const [severidad, setSeveridad] = useState<Severidad | ''>('');
@@ -1264,7 +1272,7 @@ function Historial({
         </div>
       </div>
 
-      <HistorialTable consultas={consultas} error={error} mostrarNegocio={!modoVitrina} />
+      <HistorialTable consultas={consultas} error={error} mostrarNegocio={!modoVitrina} textoVacio={textoVacio} />
     </div>
   );
 }
@@ -1273,10 +1281,12 @@ export function HistorialTable({
   consultas,
   error,
   mostrarNegocio,
+  textoVacio = 'Sin consultas con los filtros aplicados.',
 }: {
   consultas: ConsultaHistorialItem[];
   error: string | null;
   mostrarNegocio?: boolean;
+  textoVacio?: string;
 }) {
   if (error) {
     return (
@@ -1288,7 +1298,7 @@ export function HistorialTable({
   if (consultas.length === 0) {
     return (
       <div className="bg-white rounded-lg border border-[#E5E7EB] p-8 text-center text-sm text-tinta-suave">
-        Sin consultas con los filtros aplicados.
+        {textoVacio}
       </div>
     );
   }
