@@ -94,7 +94,8 @@ const db = {
 }
 
 /**
- * `valida_activar_autogestion`, lo que deja desde 20261016 (la función real corre en
+ * `valida_activar_autogestion`, lo que deja desde 20261016 (y desde 20261016170000 activa la fila en
+ * prueba que nació en el registro, en vez de crear otra). La función real corre en
  * `suscripciones-producto/migracion-sql.test.ts`): la suscripción con la empresa declarada y la tarjeta
  * del registro, los Términos de ESA suscripción y el contrato colgado de ella. Ni empresa ni negocio.
  */
@@ -106,8 +107,12 @@ function activarEnLaBase(a: Record<string, unknown>) {
   const d = a.p_documento as Record<string, string>
   if (sha(d.texto_md) !== d.texto_sha256) return { ok: false, error: 'documento_invalido' }
   const conTarjeta = reg.metodo_pago_estado === 'registrado' && String(reg.metodo_pago_ref ?? '').startsWith('epayco:')
+  // 20261016170000: la suscripción EN PRUEBA del registro pasa a activa; no se crea otra.
+  const enPrueba = tablas.suscripciones_producto.find(
+    (x) => x.workspace_cliente_id === a.p_workspace_cliente && x.producto === 'valida' && x.estado === 'prueba',
+  )
   const suscripcion = {
-    id: nuevoId('suscripcion'),
+    id: (enPrueba?.id as string | undefined) ?? nuevoId('suscripcion'),
     workspace_id: METRIK,
     producto: 'valida',
     workspace_cliente_id: a.p_workspace_cliente,
@@ -139,7 +144,8 @@ function activarEnLaBase(a: Record<string, unknown>) {
     estado: 'activo',
     aceptante_designado_id: a.p_usuario,
   }
-  tablas.suscripciones_producto.push(suscripcion)
+  if (enPrueba) Object.assign(enPrueba, suscripcion)
+  else tablas.suscripciones_producto.push(suscripcion)
   tablas.documentos_contractuales_versiones.push(doc)
   tablas.servicios_contratados.push(contrato)
   return { ok: true, resultado: 'activado', contrato_id: contrato.id, suscripcion_id: suscripcion.id, documento_id: doc.id }
@@ -345,6 +351,9 @@ describe('registro → 14 minutos → cobro de la tarjeta con el plan activado',
     const sus = tablas.suscripciones_producto[0]
     expect(tablas.suscripciones_producto).toHaveLength(1)
     expect(sus).toMatchObject({ workspace_cliente_id: reg.workspace_id, razon_social: 'ACME S.A.S.', metodo_pago_ref: REF_TARJETA })
+    // Es LA MISMA fila que nació en prueba al registrarse (su línea «prueba» de la bitácora), ahora activa.
+    expect(sus.estado).toBe('activa')
+    expect(tablas.suscripciones_producto_eventos).toContainEqual(expect.objectContaining({ suscripcion_id: sus.id, tipo: 'prueba' }))
     expect(tablas.negocios).toHaveLength(0)
     expect(tablas.empresas).toHaveLength(0)
     expect(tablas.servicios_contratados[0]).toMatchObject({ negocio_id: null, empresa_id: null, suscripcion_id: sus.id })
@@ -433,6 +442,8 @@ describe('registro → consulta 11 → confirma → cobro YA; el cron del día 7
     expect(tablas.negocios).toHaveLength(0)
     expect(tablas.suscripciones_producto).toHaveLength(1)
     expect(tablas.cobros[0]).toMatchObject({ negocio_id: null, suscripcion_id: tablas.suscripciones_producto[0].id })
+    expect(tablas.suscripciones_producto[0].estado).toBe('activa')
+    expect(tablas.suscripciones_producto_eventos).toContainEqual(expect.objectContaining({ suscripcion_id: tablas.suscripciones_producto[0].id, tipo: 'prueba' }))
 
     // El aviso y el día 7 del cron: nada más se cobra, ni se avisa de un cobro que ya se hizo.
     const aviso = await procesarCobrosTrasPrueba({ ...deps, ahoraMs: inicio + 9 * 60_000 })
@@ -580,7 +591,9 @@ describe('«Activar plan» (el tercer camino) también crea una suscripción y s
     expect(tablas.negocios).toHaveLength(0)
     expect(tablas.empresas).toHaveLength(0)
     const sus = tablas.suscripciones_producto[0]
-    expect(sus).toMatchObject({ workspace_cliente_id: reg.workspace_id, razon_social: 'DELTA S.A.S.' })
+    expect(tablas.suscripciones_producto).toHaveLength(1)
+    expect(sus).toMatchObject({ workspace_cliente_id: reg.workspace_id, razon_social: 'DELTA S.A.S.', estado: 'activa' })
+    expect(tablas.suscripciones_producto_eventos).toContainEqual(expect.objectContaining({ suscripcion_id: sus.id, tipo: 'prueba' }))
     expect(tablas.servicios_contratados[0]).toMatchObject({ suscripcion_id: sus.id, negocio_id: null })
 
     // La persona acepta los Términos en /valida (canal módulo, aquí ya sembrado sobre la suscripción):

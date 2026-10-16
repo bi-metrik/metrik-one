@@ -24,6 +24,7 @@ import {
   textoConfirmacionCobro,
 } from './cobro-prueba'
 import { partirNombre } from './metodo-pago'
+import { cancelarSuscripcionEnPrueba } from './suscripcion-prueba-servidor'
 import { TERMINOS_PLAN, terminosPlanListos } from './terminos-plan'
 
 /**
@@ -667,6 +668,8 @@ export async function cancelarCobroDelEspacio(
     const estado = (otra.data?.cobro_estado as string | null) ?? null
     return estado === 'cancelado' ? { tipo: 'ya_cancelada' } : { tipo: 'tarde', estado }
   }
+  // La suscripción en prueba se cierra con la misma acción (desde /valida o desde /suscripcion).
+  await cancelarSuscripcionEnPrueba(db, { workspaceId: p.workspaceId, por: p.por, ahora })
   const borrada = r.metodo_pago_ref ? await borrarTarjeta(deps as DepsCobroPrueba, r, ahoraMs) : false
   return { tipo: 'cancelada', tarjetaBorrada: borrada }
 }

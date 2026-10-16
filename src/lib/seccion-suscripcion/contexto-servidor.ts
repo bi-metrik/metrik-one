@@ -6,6 +6,7 @@ import { leerProximoPagoCda, type LecturaPago } from '@/lib/valida-cda/pago-serv
 import { moraValidaCda } from '@/lib/valida-cda/puerta'
 import { estadoMora, type EstadoMora } from '@/lib/valida-cda/plazos'
 import { entradaSuscripcion, type EntradaOk, type ProductoSuscripcion } from './entrada-servidor'
+import { suscripcionEnPrueba } from './prueba-servidor'
 import { puedeOperarSuscripcion, puedeVerSuscripcion, resumenEstado, tonoDelPunto, type ResumenEstado, type TerminosDeEntrada } from './estado'
 
 /**
@@ -183,11 +184,17 @@ export const contextoSuscripcion = cache(resolver)
  * El ítem del menú: `null` si la persona no ve la sección (la ruta da 404), o el tono del punto.
  * Corre en el layout de todas las pantallas del espacio, así que nunca lanza: una lectura caída
  * esconde el ítem en vez de tumbar la navegación.
+ *
+ * Sin contrato, la prueba gratis de Valida también tiene sección (2026-10-16): la ve la persona que se
+ * registró (`suscripcionEnPrueba`), sin punto de color (no hay nada vencido ni por pagar todavía).
+ * Los CDA (con contrato) siguen exactamente igual: su contexto responde `ok` antes de mirar la prueba.
  */
 export async function menuSuscripcion(): Promise<{ tono: 'verde' | 'ambar' | 'rojo' | null } | null> {
   try {
     const ctx = await contextoSuscripcion()
-    return ctx.tipo === 'ok' ? { tono: tonoDelPunto(ctx.resumen) } : null
+    if (ctx.tipo === 'ok') return { tono: tonoDelPunto(ctx.resumen) }
+    if (ctx.tipo === 'no_aplica' && (await suscripcionEnPrueba())) return { tono: null }
+    return null
   } catch (e) {
     console.error('[suscripcion] menú:', e instanceof Error ? e.message : e)
     return null

@@ -102,7 +102,14 @@ export function crearDoble(tablas: Tablas) {
       },
       // `columna->>llave`: el texto de una llave de un jsonb, como PostgREST.
       eq: (c: string, v: unknown) => (filtros.push((f) => valor(f, c) === v), chain),
+      neq: (c: string, v: unknown) => (filtros.push((f) => valor(f, c) !== v), chain),
       not: (c: string, op: string, v: unknown) => {
+        // `not('estado', 'in', '(a,b)')`, como PostgREST.
+        if (op === 'in' && typeof v === 'string') {
+          const vs = v.replace(/^\(|\)$/g, '').split(',').map((x) => x.trim())
+          filtros.push((f) => !vs.includes(String(valor(f, c))))
+          return chain
+        }
         if (op !== 'is') throw new Error(`doble: not(${c}, ${op}) sin soporte`)
         filtros.push((f) => (f[c] ?? null) !== v)
         return chain

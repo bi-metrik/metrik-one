@@ -7,7 +7,8 @@ import { esEspacioAutogestion } from '@/lib/valida-registro/plan'
 import { cancelarCobroDelEspacio } from '@/lib/valida-registro/cobro-prueba-servidor'
 
 /**
- * «Cancelar prueba» (Condiciones v2.0, 7.3). ⚠️ Endpoint alcanzable desde cualquier sesión: el espacio
+ * «Cancelar prueba» (Condiciones v2.0, 7.3), desde la franja de `/valida` y desde `/suscripcion`: la misma
+ * acción (cancela el cobro, pide borrar la tarjeta y cierra la suscripción en prueba). ⚠️ Endpoint alcanzable desde cualquier sesión: el espacio
  * sale de la sesión (nunca del navegador), solo la persona dueña de un espacio del registro
  * autogestionado cancela, y la guarda del cobro (`cobro_estado = 'programado'`) está en el update.
  */
@@ -26,6 +27,7 @@ export async function cancelarPruebaValida(): Promise<{ ok: true; texto: string 
   try {
     const r = await cancelarCobroDelEspacio({ db: svc }, { workspaceId, por: 'boton' })
     revalidatePath('/valida')
+    revalidatePath('/suscripcion')
     switch (r.tipo) {
       case 'cancelada':
       case 'ya_cancelada':

@@ -24,6 +24,7 @@ import { leerTarjeta, partirNombre, pideMetodoPago, textoProblemaTarjeta } from 
 import { registrarClienteEpayco } from '@/lib/suscripciones/pasarela/epayco'
 import { emitirPruebaDelEspacio } from './prueba-servidor'
 import { terminosParaElRegistro, type TerminosDelRegistroArmados } from './terminos-registro-servidor'
+import { asegurarSuscripcionEnPrueba } from './suscripcion-prueba-servidor'
 
 /**
  * El alta autogestionada de Valida, en el SERVIDOR (`18-recorrido-baja-friccion.md`, PR 3).
@@ -378,6 +379,9 @@ export async function crearEspacioValida(datos: DatosRegistroValida): Promise<Re
     dv,
     conCobro: filaBase.metodo_pago_estado === 'registrado',
   })
+  // ── 6. La suscripción EN PRUEBA (2026-10-16): la sección Suscripción existe desde hoy. Si falla, no
+  //      tumba el registro: la activación la crea igual (`valida_activar_autogestion`).
+  await suscripcionEnPrueba(svc, workspaceId)
   if (prueba.tipo !== 'ok') return { tipo: 'prueba_pendiente', slug }
   return { tipo: 'ok', slug }
 }
@@ -420,5 +424,12 @@ async function reintentarPruebaPendiente(
     dv: r.dv,
     conCobro: r.metodo_pago_estado === 'registrado',
   })
+  await suscripcionEnPrueba(svc, workspaceId)
   return prueba.tipo === 'ok' ? { tipo: 'ok', slug } : { tipo: 'prueba_pendiente', slug }
+}
+
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+async function suscripcionEnPrueba(svc: any, workspaceId: string): Promise<void> {
+  const r = await asegurarSuscripcionEnPrueba(svc, { workspaceId })
+  if (r.tipo === 'error') console.error('[valida-registro] suscripción en prueba:', r.mensaje)
 }

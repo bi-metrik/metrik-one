@@ -310,6 +310,7 @@ beforeAll(async () => {
   await db.exec(migracion('20261016100000_suscripciones_producto.sql'))
   await db.exec(migracion('20261016100100_motor_cobro_ancla_suscripcion.sql'))
   await db.exec(migracion('20261016100200_mrr_por_producto.sql'))
+  await db.exec(migracion('20261016170000_suscripcion_valida_nace_en_prueba.sql'))
 }, 120_000)
 
 afterAll(async () => {
@@ -582,6 +583,73 @@ describe('las guardas', () => {
       }
     }
   })
+})
+
+describe('la suscripción nace EN PRUEBA en el registro y la activación pasa ESA fila a activa (20261016170000)', () => {
+  const DOC_DOBLE = { ...DOC, pdf_sha256: 'f'.repeat(64), pdf_path: 'cda-ejemplo-2/terminos.pdf' }
+  let prueba: string
+
+  beforeAll(async () => {
+    // Lo que deja `asegurarSuscripcionEnPrueba` al registrarse (con service_role).
+    prueba = (await db.query<{ id: string }>(`insert into public.suscripciones_producto (workspace_id, producto, workspace_cliente_id,
+      nombre, razon_social, numero_documento, dv, correo_facturacion, plan_slug, estado, prueba_desde, prueba_hasta,
+      origen_comercial, valida_registro_id, metadata)
+      select '${METRIK}', 'valida', r.workspace_id, 'Valida — ' || r.razon_social, r.razon_social, r.identificacion, r.dv, r.correo,
+        'valida-cda-licencia', 'prueba', r.aceptado_at, now() + interval '7 days', r.origen, r.id, '{"origen": "valida_autogestion"}'
+      from public.valida_registros r where r.workspace_id = '${WS_DOBLE}' and r.estado = 'creado'
+      returning id`)).rows[0].id
+  })
+
+  it('el estado «prueba» lo admite la tabla, y la fila es la única viva del espacio', async () => {
+    expect(await contar('public.suscripciones_producto', `workspace_cliente_id = '${WS_DOBLE}' and estado <> 'cancelada'`)).toBe(1)
+    // Una segunda en prueba del mismo espacio choca con «una viva por espacio y producto».
+    const e = await falla(`insert into public.suscripciones_producto (workspace_id, producto, workspace_cliente_id, nombre, razon_social,
+      numero_documento, plan_slug, estado) values ('${METRIK}', 'valida', '${WS_DOBLE}', 'Valida — X', 'X', '900777777', 'valida-cda-licencia', 'prueba')`)
+    expect(e).toMatch(/uq_suscripciones_producto_viva/)
+  })
+
+  it('los tres caminos (consulta 11, «Activar plan», día 7) dejan UNA suscripción: la misma fila, ahora activa', async () => {
+    // Los tres llaman a la misma RPC (`activarPlanDelEspacio`); sin la migración, la fila en prueba haría
+    // responder `nit_con_contrato` a su propia activación.
+    const primero = await r(activar({ ws: WS_DOBLE, usuario: DUENA_DOBLE, doc: DOC_DOBLE }))
+    expect(primero).toMatchObject({ ok: true, resultado: 'activado', suscripcion_id: prueba })
+    const segundo = await r(activar({ ws: WS_DOBLE, usuario: DUENA_DOBLE, doc: { ...DOC_DOBLE, pdf_sha256: '9'.repeat(64) } }))
+    const tercero = await r(activar({ ws: WS_DOBLE, usuario: DUENA_DOBLE, doc: { ...DOC_DOBLE, pdf_sha256: '8'.repeat(64) } }))
+    expect(segundo).toMatchObject({ ok: true, resultado: 'ya_activo', contrato_id: primero.contrato_id })
+    expect(tercero).toMatchObject({ ok: true, resultado: 'ya_activo', contrato_id: primero.contrato_id })
+    expect(await contar('public.suscripciones_producto', `workspace_cliente_id = '${WS_DOBLE}'`)).toBe(1)
+    const s = (await db.query<Record<string, unknown>>(`select * from public.suscripciones_producto where id = '${prueba}'`)).rows[0]
+    expect(s).toMatchObject({ estado: 'activa', razon_social: 'OTRO CDA S.A.S.', numero_documento: '900777777', terminos_version: 'v2.0' })
+    expect(s.activada_at).not.toBeNull()
+    expect(s.prueba_hasta).not.toBeNull()
+    expect(s.terminos_documento_id).toEqual(expect.any(String))
+    const sc = (await db.query<Record<string, unknown>>(`select * from public.servicios_contratados where id = '${primero.contrato_id}'`)).rows[0]
+    expect(sc).toMatchObject({ suscripcion_id: prueba, negocio_id: null, empresa_id: null })
+    expect(await contar('public.suscripciones_producto_eventos', `suscripcion_id = '${prueba}' and tipo = 'alta'`)).toBe(1)
+  })
+
+  it('la reversa devuelve la definición de 20261016100100', async () => {
+    const otra = new PGlite()
+    try {
+      await otra.exec(ESQUEMA_BASE)
+      for (const m of CADENA) await otra.exec(migracion(m))
+      await otra.exec(migracion('20261016100000_suscripciones_producto.sql'))
+      await otra.exec(migracion('20261016100100_motor_cobro_ancla_suscripcion.sql'))
+      const firma = `'public.valida_activar_autogestion(uuid,uuid,uuid,uuid,uuid,text,jsonb,date,jsonb,jsonb)'::regprocedure`
+      const def = async () => (await otra.query<{ d: string }>(`select pg_get_functiondef(${firma}) as d`)).rows[0].d
+      const antes = await def()
+      await otra.exec(migracion('20261016170000_suscripcion_valida_nace_en_prueba.sql'))
+      expect(await def()).not.toBe(antes)
+      for (const rol of ['anon', 'authenticated']) {
+        const p = (await otra.query<{ p: boolean }>(`select has_function_privilege('${rol}', ${firma}, 'execute') as p`)).rows[0].p
+        expect(p, rol).toBe(false)
+      }
+      await otra.exec(readFileSync(join(RAIZ, 'sql/suscripciones-producto/reversa-20261016-170000.sql'), 'utf8'))
+      expect(await def()).toBe(antes)
+    } finally {
+      await otra.close()
+    }
+  }, 120_000)
 })
 
 describe('la reversa', () => {
