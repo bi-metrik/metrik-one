@@ -1,6 +1,6 @@
 'use client'
 
-import { useEffect, useId, useRef, useState, type ReactNode, type RefObject } from 'react'
+import { useEffect, useId, useRef, useState, useSyncExternalStore, type ReactNode } from 'react'
 import { createPortal } from 'react-dom'
 
 import { pesos } from '@/lib/cotizaciones/tarjeta-opcion'
@@ -51,18 +51,33 @@ function leerPreferencia(): PreferenciaLoQueSuma {
   }
 }
 
+// Otra pestaña que cambia la preferencia avisa por `storage`; esta pestaña avisa a mano.
+const oyentes = new Set<() => void>()
+function suscribir(avisar: () => void) {
+  oyentes.add(avisar)
+  window.addEventListener('storage', avisar)
+  return () => {
+    oyentes.delete(avisar)
+    window.removeEventListener('storage', avisar)
+  }
+}
+
 /**
- * La preferencia de la columna, leída de `localStorage` después de montar: el servidor no la
- * conoce, así que el primer pintado es el de la regla del ancho, igual en los dos lados.
+ * La preferencia de la columna. El servidor no la conoce (`null`): el primer pintado es el de la
+ * regla del ancho, igual en los dos lados, y después manda lo guardado. Si no se puede guardar, lo
+ * elegido vale mientras la pantalla esté abierta.
  */
 export function usePreferenciaLoQueSuma() {
-  const [preferencia, setPreferencia] = useState<PreferenciaLoQueSuma>(null)
-  useEffect(() => { setPreferencia(leerPreferencia()) }, [])
+  const guardada = useSyncExternalStore(suscribir, leerPreferencia, () => null)
+  const [elegida, setElegida] = useState<PreferenciaLoQueSuma>(null)
   const elegir = (p: 'abierta' | 'cerrada') => {
-    setPreferencia(p)
-    try { window.localStorage.setItem(CLAVE_LO_QUE_SUMA, p) } catch { /* sin almacenamiento: vale por esta visita */ }
+    setElegida(p)
+    try {
+      window.localStorage.setItem(CLAVE_LO_QUE_SUMA, p)
+      for (const avisar of oyentes) avisar()
+    } catch { /* sin almacenamiento: vale por esta visita */ }
   }
-  return { preferencia, elegir }
+  return { preferencia: elegida ?? guardada, elegir }
 }
 
 /**
@@ -139,13 +154,16 @@ export function LoQueSuma({
   datos,
   preferencia = null,
   onElegir = () => {},
-  encabezado = null,
+  encabezado,
 }: {
   datos: DatosLoQueSuma
   preferencia?: PreferenciaLoQueSuma
   onElegir?: (p: 'abierta' | 'cerrada') => void
-  /** El encabezado fijo del negocio, donde va la pastilla. Sin marco, la pastilla va arriba de la cotización. */
-  encabezado?: RefObject<HTMLDivElement | null> | null
+  /**
+   * El encabezado fijo del negocio, donde va la pastilla: `undefined` = sin marco (la pastilla va
+   * arriba de la cotización); `null` = el marco todavía no lo montó.
+   */
+  encabezado?: HTMLElement | null
 }) {
   const [abierta, setAbierta] = useState(false)
   const clases = clasesLoQueSuma(preferencia)
@@ -206,14 +224,12 @@ function PastillaLoQueSuma({
 }: {
   datos: DatosLoQueSuma
   clase: string
-  encabezado: RefObject<HTMLDivElement | null> | null
+  encabezado: HTMLElement | null | undefined
   onFijar: () => void
   children: ReactNode
 }) {
   const [panel, setPanel] = useState(false)
-  // El encabezado existe recién después de montar: el portal espera a tenerlo.
-  const [destino, setDestino] = useState<HTMLElement | null>(null)
-  useEffect(() => { setDestino(encabezado?.current ?? null) }, [encabezado])
+  const destino = encabezado ?? null
   const caja = useRef<HTMLDivElement>(null)
   const boton = useRef<HTMLButtonElement>(null)
   const botonCerrar = useRef<HTMLButtonElement>(null)
@@ -299,5 +315,5 @@ function PastillaLoQueSuma({
   )
   if (destino) return createPortal(pastilla, destino)
   // Con marco, hasta tener el encabezado no se pinta: pintada en la rejilla, saltaría al encabezado.
-  return encabezado ? null : pastilla
+  return encabezado === null ? null : pastilla
 }

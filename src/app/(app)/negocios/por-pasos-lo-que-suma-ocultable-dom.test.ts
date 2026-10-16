@@ -126,10 +126,10 @@ function props(extra: { rojos?: number; pantallazos?: number } = {}) {
 
 /** La página: el encabezado fijo del negocio y, en el centro, la cotización (como el marco real). */
 function Pagina(p: ReturnType<typeof props>) {
-  const ref = React.useRef<HTMLDivElement>(null)
-  const [marco] = React.useState(() => ({ activo: true as const, encabezado: ref }))
+  const [el, setEl] = React.useState<HTMLDivElement | null>(null)
+  const marco = React.useMemo(() => ({ activo: true as const, encabezado: el }), [el])
   return React.createElement(React.Fragment, null,
-    React.createElement('div', { ref, 'data-encabezado-prueba': '', className: 'sticky top-0' }, React.createElement('h1', null, 'E2 26 1')),
+    React.createElement('div', { ref: setEl, 'data-encabezado-prueba': '', className: 'sticky top-0' }, React.createElement('h1', null, 'E2 26 1')),
     React.createElement(Marco.Provider, { value: marco }, React.createElement(VistaPorPasos, p)),
   )
 }

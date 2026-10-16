@@ -2,7 +2,7 @@
 
 import dynamic from 'next/dynamic'
 import type { DatosBloqueServicios } from '@/lib/viaje/bloque-servicios'
-import { useState, useRef, useEffect, useCallback } from 'react'
+import { useState, useRef, useEffect, useCallback, useMemo } from 'react'
 import { useTransitionTolerante } from '@/hooks/use-transition-tolerante'
 import { useRouter } from 'next/navigation'
 import { createPortal } from 'react-dom'
@@ -2564,9 +2564,14 @@ export default function NegocioDetailClient({
   // encabezado fijo: se mide su alto y viaja como variable CSS. En el negocio no se mide.
   const encabezadoRef = useRef<HTMLDivElement>(null)
   const [altoEncabezado, setAltoEncabezado] = useState(0)
-  // El valor del contexto del marco: estable (la ref no cambia), para no re-renderizar el editor.
-  // Lleva el encabezado para que la cotización por pasos ponga ahí la pastilla de «Lo que suma».
-  const [marcoActivo] = useState(() => ({ activo: true as const, encabezado: encabezadoRef }))
+  // El encabezado también viaja en el contexto del marco: la cotización por pasos pone ahí la
+  // pastilla de «Lo que suma». El valor cambia una sola vez (cuando el encabezado monta).
+  const [elEncabezado, setElEncabezado] = useState<HTMLDivElement | null>(null)
+  const fijarEncabezado = useCallback((el: HTMLDivElement | null) => {
+    encabezadoRef.current = el
+    setElEncabezado(el)
+  }, [])
+  const marcoActivo = useMemo(() => ({ activo: true as const, encabezado: elEncabezado }), [elEncabezado])
   const conCentro = centro !== undefined
   useEffect(() => {
     const el = encabezadoRef.current
@@ -2715,7 +2720,7 @@ export default function NegocioDetailClient({
           `backdrop-blur`, que crea un containing block y ya obligó a sacar tres
           modales por portal a `document.body`. El panel es `sticky` (no `fixed`)
           y vive fuera de este nodo, así que no lo toca. */}
-      <div ref={encabezadoRef} className="sticky top-0 z-30 -mx-4 px-4 lg:mx-0 lg:px-0 py-2 mb-2.5 bg-background/95 backdrop-blur-sm border-b border-border/40">
+      <div ref={fijarEncabezado} className="sticky top-0 z-30 -mx-4 px-4 lg:mx-0 lg:px-0 py-2 mb-2.5 bg-background/95 backdrop-blur-sm border-b border-border/40">
         <div className="flex items-start justify-between gap-3">
         <div className="min-w-0">
           {/* Fila A — estado: [STAGE] › [E{N} ETAPA] */}

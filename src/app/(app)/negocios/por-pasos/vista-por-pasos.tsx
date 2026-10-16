@@ -659,7 +659,7 @@ export default function VistaPorPasos(p: PropsVistaPorPasos) {
         <LoQueSuma
           preferencia={sumaVisible.preferencia}
           onElegir={sumaVisible.elegir}
-          encabezado={marco?.encabezado ?? null}
+          encabezado={marco ? (marco.encabezado ?? null) : undefined}
           datos={{
             renglones,
             nombreDeOpcion,
