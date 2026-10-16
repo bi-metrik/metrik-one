@@ -21,7 +21,7 @@ import 'server-only'
  */
 import { clasificarFotosDeHotel } from '@/lib/ai/clasificar-fotos-hotel'
 import type { CategoriaHotel, Clasificacion } from './categoria'
-import { opcionesDeSitioOficial, type Resolver } from './sitio-oficial'
+import { opcionesDeSitioOficial, type FallaSitio, type Resolver } from './sitio-oficial'
 import type { OpcionFoto } from './vista'
 import { AGENTE_COMMONS, candidatasDeHotelEnCommons, esDeWikimedia } from './wikimedia'
 
@@ -124,7 +124,7 @@ export async function opcionesDeHotelEnSitio(
   paginaUrl: string,
   o: { nombre: string; ciudad: string | null },
   a: { apiKey: string | undefined; desde?: number; red?: { fetch?: typeof fetch; resolver?: Resolver }; fetchModelo?: typeof fetch },
-): Promise<{ ok: true; pagina: string; opciones: OpcionHotel[]; siguiente: number | null } | { ok: false; error: string }> {
+): Promise<{ ok: true; pagina: string; opciones: OpcionHotel[]; siguiente: number | null } | FallaSitio> {
   const r = await opcionesDeSitioOficial(paginaUrl, { ...a.red, desde: a.desde })
   if (!r.ok) return r
   const clases = await clasificar(

@@ -25,6 +25,9 @@ vi.mock('@/lib/fotos/catalogo-almacen', async (original) => ({
   bytesDeCatalogo: async () => Buffer.from('foto vieja: lobby del hotel'),
 }))
 
+// La página oficial resuelve a una IP pública falsa: ninguna página real se baja ni se resuelve.
+vi.mock('node:dns/promises', () => ({ lookup: async () => [{ address: '93.184.216.34', family: 4 }] }))
+
 const WS = '11111111-2222-3333-4444-555555555555'
 const USUARIO = '99999999-8888-7777-6666-555555555555'
 const AUTORIZADA = { autorizada: true, procedencia: null }
@@ -33,7 +36,8 @@ import { olvidarClasificaciones } from '@/lib/fotos/opciones-hotel'
 import { MENSAJE_AGENCIA } from '@/lib/fotos/agencias'
 import { MENSAJE_SIN_AUTORIZACION } from '@/lib/fotos/autorizacion'
 import { MENSAJE_TOPE } from '@/lib/fotos/catalogo'
-import { elegirFoto, fotosDelHotel, marcarFotoPrincipal, opcionesDeFoto, opcionesDeHotel, quitarFotoDeBiblioteca, subirFotoABiblioteca } from './actions'
+import { mensajeDeFalla } from '@/lib/fotos/falla-pagina'
+import { elegirFoto, fotosDelHotel, marcarFotoPrincipal, opcionesDeFoto, opcionesDeHotel, quitarFotoDeBiblioteca, subirFotoABiblioteca, traerImagenPegada } from './actions'
 
 const HOTEL = { tipo: 'hotel', nombre: 'Pullman Paris Tour Eiffel', ciudad: 'París' }
 
@@ -104,6 +108,15 @@ function red() {
           },
         },
       })
+    }
+    // Una web de cadena que niega la lectura automática (como Hilton) y una que arma la galería con JS.
+    if (u.hostname === 'www.cadena-bloqueada.example') return new Response('<h1>Access Denied</h1>', { status: 403, headers: { 'content-type': 'text/html' } })
+    if (u.hostname === 'www.galeria-js.example') {
+      return u.pathname === '/' ? new Response('<html lang="en"><div id="app"></div></html>', { headers: { 'content-type': 'text/html' } }) : new Response('no', { status: 404 })
+    }
+    if (u.hostname === 'cdn.hotel-propio.example') {
+      const b = await sharp({ create: { width: 1600, height: 1000, channels: 3, background: { r: 200, g: 120, b: 40 } } }).png().toBuffer()
+      return new Response(new Uint8Array(b), { headers: { 'content-type': 'image/png' } })
     }
     if (u.hostname === 'generativelanguage.googleapis.com') {
       llamadasModelo++
@@ -274,5 +287,43 @@ describe('las fotos de antes', () => {
     const antes = llamadasModelo
     await fotosDelHotel(HOTEL)
     expect(llamadasModelo).toBe(antes)
+  })
+})
+
+describe('la página del hotel que no deja leer sus fotos (Mauricio, 2026-10-16)', () => {
+  const ENCENDIDA = () => {
+    base.tablas.workspaces = [{ id: WS, cotizacion_template_slug: 'trappvel', config_extra: { documento_viaje: { fotos_sitio_oficial: true } } }]
+  }
+
+  it('bloqueada: el aviso llega al navegador con su motivo y la página para abrirla', async () => {
+    ENCENDIDA()
+    const url = 'https://www.cadena-bloqueada.example/en/hotels/ctg/'
+    const esperado = { ok: false, motivo: 'bloqueada', pagina: url, error: mensajeDeFalla('bloqueada') }
+    expect(await opcionesDeHotel(HOTEL, url)).toEqual(esperado)
+    expect(await opcionesDeFoto(HOTEL, 'sitio_oficial', null, url)).toEqual(esperado)
+    expect(base.tablas.fotos_catalogo).toHaveLength(0)
+  })
+
+  it('cargó sin fotos (galería con JavaScript): ok y sin opciones (el navegador muestra «No encontramos fotos»)', async () => {
+    ENCENDIDA()
+    const r = await opcionesDeHotel(HOTEL, 'https://www.galeria-js.example/')
+    expect(r).toMatchObject({ ok: true, opciones: [], siguiente: null })
+  })
+
+  it('pegar una imagen que llegó como <img src>: el servidor la trae sin guardarla; luego exige la casilla', async () => {
+    const r = await traerImagenPegada('https://cdn.hotel-propio.example/hab.png')
+    expect(r.ok).toBe(true)
+    expect(base.tablas.fotos_catalogo).toHaveLength(0)
+    if (!r.ok) return
+    expect(r.dataUrl).toMatch(/^data:image\/jpeg;base64,/)
+    expect(await subirFotoABiblioteca(HOTEL, r.dataUrl, null, 'habitacion', undefined)).toEqual({ ok: false, error: MENSAJE_SIN_AUTORIZACION })
+    expect(await subirFotoABiblioteca(HOTEL, r.dataUrl, null, 'habitacion', { autorizada: false })).toEqual({ ok: false, error: MENSAJE_SIN_AUTORIZACION })
+    expect(base.tablas.fotos_catalogo).toHaveLength(0)
+    expect((await subirFotoABiblioteca(HOTEL, r.dataUrl, null, 'habitacion', AUTORIZADA)).ok).toBe(true)
+    expect((base.tablas.fotos_catalogo as Fila[])[0]).toMatchObject({ origen: 'asesora', autorizada_por: USUARIO })
+  })
+
+  it('pegar una imagen de una agencia en línea se rechaza', async () => {
+    expect(await traerImagenPegada('https://cf.bstatic.com/xdata/images/hotel/max1024x768/1.jpg')).toEqual({ ok: false, error: MENSAJE_AGENCIA })
   })
 })

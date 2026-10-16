@@ -22,8 +22,10 @@ import {
   type PestanaGaleria,
 } from '@/lib/fotos/galeria'
 import { fondoDeMiniatura, type EleccionFoto, type ElementoVista, type OpcionFoto } from '@/lib/fotos/vista'
-import type { OpcionesDeHotel, ResultadoElemento } from './actions'
+import type { ImagenPegada, OpcionesDeHotel, ResultadoElemento } from './actions'
 import { AutorizacionFoto } from './autorizacion-foto'
+import { AvisoPaginaSinFotos, type AvisoPagina } from './aviso-pagina'
+import { useImagenPegada } from './usar-imagen-pegada'
 
 export interface PedidoHotel {
   tipo: 'hotel'
@@ -39,6 +41,8 @@ export interface AccionesHotel {
   subir: (p: PedidoHotel, dataUrl: string, reemplaza?: string | null, categoria?: string | null, autorizacion?: PedidoAutorizacion) => Promise<ResultadoElemento>
   principal: (id: string) => Promise<ResultadoElemento>
   quitar: (id: string) => Promise<ResultadoElemento>
+  /** Baja en el servidor una imagen pegada que llegó solo como `<img src>` (sin ella, no se puede). */
+  traerPegada?: (url: string) => Promise<ImagenPegada>
 }
 
 const NOMBRE_PESTANA: Record<PestanaGaleria, string> = { ...NOMBRE_CATEGORIA, todas: 'Todas' }
@@ -61,7 +65,9 @@ const AZUL = '#0071C2'
  * quita. Las opciones son de ESE hotel (Commons y, con el interruptor, la página oficial).
  *
  * Subir o pegar (Ctrl+V) pide antes la casilla «Tengo autorización para usar esta foto» (Emilio).
- * Un enlace de Booking, Expedia, Despegar u otra agencia en línea se rechaza.
+ * Un enlace de Booking, Expedia, Despegar u otra agencia en línea se rechaza. Si la página del hotel
+ * no deja leer sus fotos, no las trae o no responde, se dice cuál de las tres y se ofrece abrirla
+ * para copiar la foto y pegarla aquí.
  */
 export default function SelectorHotel({
   pedido,
@@ -98,6 +104,7 @@ export default function SelectorHotel({
   // Cada foto nueva remonta la casilla (sin marcar), aunque se pegue otra con una pendiente.
   const [subidaN, setSubidaN] = useState(0)
   const [reemplazo, setReemplazo] = useState<string | null>(reemplaza)
+  const [aviso, setAviso] = useState<AvisoPagina | null>(null)
   const zonaSubir = useRef<HTMLDivElement | null>(null)
 
   // Al abrir: las fotos que ya tiene el hotel y las opciones de Commons (clasificadas).
@@ -111,6 +118,7 @@ export default function SelectorHotel({
     setSiguiente(null)
     setSugerida(null)
     setPorSubir(null)
+    setAviso(null)
     setReemplazo(reemplaza)
     let vigente = true
     void acciones.fotos(pedido).then((r) => vigente && r.ok && setElemento(r.elemento)).catch(() => {})
@@ -147,19 +155,26 @@ export default function SelectorHotel({
       }
       setCargando(true)
       setError(null)
+      setAviso(null)
+      const pedida = desde ? paginaLeida ?? paginaUrl : paginaUrl
       try {
-        const r = await acciones.opciones(pedido, desde ? paginaLeida ?? paginaUrl : paginaUrl, desde)
+        const r = await acciones.opciones(pedido, pedida, desde)
         if (!r.ok) {
-          toast.error(r.error)
+          // Bloqueada, sin fotos o sin red: el aviso con la salida (abrirla y pegar la foto).
+          if (r.motivo) setAviso({ motivo: r.motivo, pagina: r.pagina ?? pedida.trim() })
+          else toast.error(r.error)
           return
         }
         // Las de la página se suman a las de Commons (sin repetir).
         setOpciones((antes) => [...antes.filter((o) => !r.opciones.some((x) => x.id === o.id)), ...r.opciones])
         setSiguiente(r.siguiente)
         if (r.pagina) setPaginaLeida(r.pagina)
-        if (r.opciones.length === 0 && !desde) toast.message('Esa página no tiene fotos del hotel que sirvan.')
+        if (r.opciones.length === 0 && !desde) {
+          if (r.siguiente) toast.message('Esas fotos de la página no eran del hotel: prueba «Más fotos de la página».')
+          else setAviso({ motivo: 'sin_fotos', pagina: r.pagina ?? pedida.trim() })
+        }
       } catch {
-        toast.error('No se pudo leer la página. Vuelve a intentarlo.')
+        setAviso({ motivo: 'red', pagina: pedida.trim() })
       } finally {
         setCargando(false)
       }
@@ -231,6 +246,7 @@ export default function SelectorHotel({
       toast.error(MENSAJE_TRES_MARCADAS)
       return
     }
+    setAviso(null)
     setPorSubir(archivo)
     setSubidaN((n) => n + 1)
     requestAnimationFrame(() => zonaSubir.current?.scrollIntoView({ block: 'nearest' }))
@@ -257,6 +273,9 @@ export default function SelectorHotel({
       setOcupado(null)
     }
   }
+
+  // Ctrl+V de una imagen (archivo, data: URL o <img src> bajado en el servidor): a la casilla.
+  const { trayendo } = useImagenPegada({ abierto, ocupado: !!ocupado, onImagen: pedirAutorizacion, traerPegada: acciones.traerPegada })
 
   const cerrar = () => (cambio ? onElegida(elemento) : onCerrar())
 
@@ -343,19 +362,6 @@ export default function SelectorHotel({
         data-selector-hotel
         // Sin foco automático en la primera pestaña: se veía como seleccionada sin estarlo.
         onOpenAutoFocus={(e) => e.preventDefault()}
-        onPaste={(e) => {
-          const archivo = [...e.clipboardData.files].find((f) => f.type.startsWith('image/'))
-          if (archivo) {
-            e.preventDefault()
-            if (!ocupado) pedirAutorizacion(archivo)
-            return
-          }
-          const texto = e.clipboardData.getData('text')
-          if (texto && esDeAgenciaDeViajes(texto)) {
-            e.preventDefault()
-            toast.error(MENSAJE_AGENCIA)
-          }
-        }}
       >
         <div className="shrink-0 space-y-0.5 border-b pr-6 pb-2 text-center">
           <DialogTitle className="text-base font-bold">{pedido?.nombre}</DialogTitle>
@@ -445,6 +451,12 @@ export default function SelectorHotel({
                 </label>
                 <span className="text-[11px] text-muted-foreground">o pega una imagen aquí (Ctrl+V). Te pedimos confirmar que tienes autorización para usarla.</span>
               </div>
+            )}
+            {aviso && !porSubir && <AvisoPaginaSinFotos aviso={aviso} onReintentar={() => void buscarEnPagina(null)} />}
+            {trayendo && (
+              <p className="inline-flex items-center gap-1 text-[11px] text-muted-foreground">
+                <Loader2 className="h-3 w-3 animate-spin" /> Trayendo la imagen que pegaste…
+              </p>
             )}
             {sitioOficial && !porSubir && (
               <form

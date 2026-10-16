@@ -19,12 +19,16 @@ import {
   opcionesDeHotel,
   paginaOficialSugerida,
   subirFotoABiblioteca,
+  traerImagenPegada,
+  type ImagenPegada,
   type OpcionesDeFoto,
   type PaginaSugerida,
   type ResultadoElemento,
 } from './actions'
 import { AutorizacionFoto } from './autorizacion-foto'
+import { AvisoPaginaSinFotos, type AvisoPagina } from './aviso-pagina'
 import SelectorHotel, { type AccionesHotel } from './selector-hotel'
+import { useImagenPegada } from './usar-imagen-pegada'
 
 export interface PedidoFoto {
   tipo: TipoFoto
@@ -38,6 +42,8 @@ export interface AccionesSelector {
   sugerida: (p: PedidoFoto) => Promise<PaginaSugerida>
   elegir: (p: PedidoFoto, e: EleccionFoto, reemplaza?: string | null) => Promise<ResultadoElemento>
   subir: (p: PedidoFoto, dataUrl: string, reemplaza?: string | null, categoria?: string | null, autorizacion?: PedidoAutorizacion) => Promise<ResultadoElemento>
+  /** Baja en el servidor una imagen pegada que llegó solo como `<img src>`. */
+  traerPegada?: (url: string) => Promise<ImagenPegada>
   /** Las del selector de hotel por categoría (sin ellas, las de ONE). */
   hotel?: AccionesHotel
 }
@@ -49,6 +55,7 @@ const ACCIONES_HOTEL: AccionesHotel = {
   subir: subirFotoABiblioteca,
   principal: marcarFotoPrincipal,
   quitar: quitarFotoDeBiblioteca,
+  traerPegada: traerImagenPegada,
 }
 
 const ACCIONES: AccionesSelector = {
@@ -56,6 +63,7 @@ const ACCIONES: AccionesSelector = {
   sugerida: paginaOficialSugerida,
   elegir: elegirFoto,
   subir: subirFotoABiblioteca,
+  traerPegada: traerImagenPegada,
   hotel: ACCIONES_HOTEL,
 }
 
@@ -129,25 +137,35 @@ function SelectorPorFuente({
   const [paginaLeida, setPaginaLeida] = useState<string | null>(null)
   const [sugerencia, setSugerencia] = useState<PaginaSugerida | null>(null)
   const [porSubir, setPorSubir] = useState<Blob | null>(null)
+  const [aviso, setAviso] = useState<AvisoPagina | null>(null)
+  // Ctrl+V de una imagen en cualquier pestaña: a la casilla de autorización (Emilio, 2026-10-16).
+  const { trayendo } = useImagenPegada({ abierto, ocupado: guardando, onImagen: setPorSubir, traerPegada: acciones.traerPegada })
 
   const cargar = useCallback(
     async (f: 'wikimedia' | 'sitio_oficial', desde: string | null, url?: string | null) => {
       if (!pedido) return
       setCargando(true)
       setError(null)
+      setAviso(null)
       try {
         const r = await acciones.opciones(pedido, f, desde, url)
         if (!r.ok) {
-          setError(r.error)
+          // Página oficial bloqueada, sin fotos o sin red: el aviso con la salida (pegar la foto).
+          if (r.motivo) setAviso({ motivo: r.motivo, pagina: r.pagina ?? url?.trim() ?? null })
+          else setError(r.error)
           if (!desde) setOpciones([])
           return
         }
         setOpciones((antes) => (desde ? [...antes, ...r.opciones] : r.opciones))
         setSiguiente(r.siguiente)
         if (r.pagina) setPaginaLeida(r.pagina)
-        if (!desde && r.opciones.length === 0) setError(f === 'wikimedia' ? 'Wikimedia Commons no tiene fotos con licencia libre para esto.' : 'Esa página no tiene fotos que sirvan.')
+        if (!desde && r.opciones.length === 0) {
+          if (f === 'wikimedia') setError('Wikimedia Commons no tiene fotos con licencia libre para esto.')
+          else setAviso({ motivo: 'sin_fotos', pagina: r.pagina ?? url?.trim() ?? null })
+        }
       } catch {
-        setError('No se pudo buscar. Vuelve a intentarlo.')
+        if (f === 'sitio_oficial') setAviso({ motivo: 'red', pagina: url?.trim() ?? null })
+        else setError('No se pudo buscar. Vuelve a intentarlo.')
       } finally {
         setCargando(false)
       }
@@ -165,6 +183,7 @@ function SelectorPorFuente({
     setError(null)
     setPaginaLeida(null)
     setPorSubir(null)
+    setAviso(null)
     if (fuente === 'wikimedia') void cargar('wikimedia', null)
     if (fuente === 'sitio_oficial') {
       setSugerencia(null)
@@ -294,12 +313,25 @@ function SelectorPorFuente({
           </div>
         )}
 
-        {fuente === 'subida' && porSubir ? (
+        {trayendo && (
+          <p className="inline-flex items-center gap-1 text-[11px] text-muted-foreground">
+            <Loader2 className="h-3 w-3 animate-spin" /> Trayendo la imagen que pegaste…
+          </p>
+        )}
+        {fuente === 'sitio_oficial' && aviso && !porSubir && (
+          <AvisoPaginaSinFotos
+            aviso={aviso}
+            etiqueta={pedido?.tipo === 'hotel' ? 'Abrir la página del hotel' : 'Abrir la página'}
+            onReintentar={() => void cargar('sitio_oficial', null, paginaUrl)}
+          />
+        )}
+
+        {porSubir ? (
           <AutorizacionFoto archivo={porSubir} guardando={guardando} onCancelar={() => setPorSubir(null)} onConfirmar={(permiso) => void subir(permiso)} />
         ) : fuente === 'subida' ? (
           <label className={`flex min-h-48 flex-1 cursor-pointer flex-col items-center justify-center gap-2 rounded-lg border-2 border-dashed text-sm text-muted-foreground hover:bg-accent/40 ${guardando ? 'pointer-events-none opacity-60' : ''}`}>
             {guardando ? <Loader2 className="h-5 w-5 animate-spin" /> : <ImagePlus className="h-6 w-6" />}
-            <span>Elige una foto de tu equipo (JPG o PNG)</span>
+            <span>Elige una foto de tu equipo (JPG o PNG) o pégala aquí (Ctrl+V)</span>
             <span className="text-[11px]">Antes de guardarla te pedimos confirmar que tienes autorización para usarla.</span>
             <input type="file" accept="image/*" className="hidden" onChange={(e) => { const a = e.target.files?.[0]; e.target.value = ''; if (a) setPorSubir(a) }} />
           </label>
@@ -349,7 +381,7 @@ function SelectorPorFuente({
           </div>
         )}
 
-        {fuente !== 'subida' && (
+        {fuente !== 'subida' && !porSubir && (
           <div className="flex items-center justify-between gap-2 border-t pt-2">
             <span className="min-w-0 truncate text-[11px] text-muted-foreground">
               {(() => {
