@@ -1,6 +1,6 @@
 ---
 name: suscripciones-multiproducto
-description: PR #1191 (apilado sobre #1169). Clientes de Valida/Sustenta/Business salen del CRM de metrik a suscripciones_producto; el motor de cobro cobra por el «ancla» (negocio O suscripción). 3 migraciones 20261016100000/100100/100200 SIN aplicar; la primera toca tablas con datos (solo DDL). Parche Aliaddo aparte.
+description: PR #1191 (apilado sobre #1169). Clientes de Valida/Sustenta/Business salen del CRM de metrik a suscripciones_producto; el motor de cobro cobra por el «ancla» (negocio O suscripción). 100000/100100/100200 APLICADAS (16-oct); 20261016170000 (suscripción nace en prueba) SIN aplicar y va antes de probar en preview. Parche Aliaddo aparte.
 metadata:
   type: project
 ---
@@ -19,3 +19,20 @@ Decisión de Mauricio 2026-10-15 («ejecuta todo el panel de suscripción»). Sp
 - Los 4 CDA NO se migraron; plan en la spec §4. Devoluciones de dinero siguen solo para negocios.
 
 Relacionado: [[valida-alta-autogestionada]], [[secop-autogestion-registro]].
+
+## 2026-10-16 (tarde): prueba como cliente nuevo en `cda-pruebas-futuras`
+- **La suscripción nace EN PRUEBA al registrarse** (`asegurarSuscripcionEnPrueba`); la activación pasa
+  ESA fila a activa (migración `20261016170000`, SIN aplicar). Sin la migración y con el código desplegado,
+  la activación de un registro nuevo responde `nit_con_contrato` y el día 7 lo deja en `revisar`:
+  aplicarla ANTES de probar un registro nuevo en preview. Backfill en
+  `sql/suscripciones-producto/backfill-suscripcion-en-prueba.sql` (3 espacios de prueba al 16-oct).
+- **/suscripcion y el menú en prueba** salen de `seccion-suscripcion/prueba.ts`, NO de
+  `contextoSuscripcion` (ese sigue exigiendo contrato). La ve la persona que se registró.
+- **El primer cargo con token de la historia** (consulta 11) respondió «Some fields are required». El cuerpo
+  no dependía del ancla. Se agregó `ip`, `country` y nombre/apellido partidos; NO está verificado contra
+  ePayco cuál faltaba: ahora `data.errors[]` queda en `cobro_intentos_tarjeta.mensaje`. Un `success:false`
+  es `no_procesado` (no culpa a la tarjeta, sin enlace).
+- ⚠️ Una confirmación rechazada deja contrato ACTIVO + cuota 1 y la prueba sigue (`programado`): si luego
+  cancela la prueba, el contrato queda vivo y entraría en mora. Decisión pendiente de Mauricio.
+- `test/tablas-doble.ts` ya soporta `neq` y `not(c, 'in', '(a,b)')`.
+
