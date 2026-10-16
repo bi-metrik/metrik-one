@@ -90,7 +90,7 @@ export async function hotelesEnBiblioteca(
   configExtraWorkspace: unknown,
 ) {
   const objetivos = sinRepetir(hoteles.map((h) => objetivo('hotel', h.hotel ?? h.linea, h.ciudad)))
-  const mapa = new Map<string, { proporcion: number | null }>()
+  const mapa = new Map<string, { proporcion: number | null; credito: string | null }>()
   const porClave = new Map<string, FilaCatalogo>()
   if (objetivos.length > 0) {
     const sitioOficial = usaFotosDeSitioOficial(configExtraWorkspace)
@@ -101,7 +101,11 @@ export async function hotelesEnBiblioteca(
       const f = filaDe(filas, o)
       if (!f) continue
       porClave.set(o.clave, f)
-      mapa.set(o.clave, { proporcion: f.proporcion === null || f.proporcion === undefined ? null : Number(f.proporcion) })
+      mapa.set(o.clave, {
+        proporcion: f.proporcion === null || f.proporcion === undefined ? null : Number(f.proporcion),
+        // El crédito de Commons tiene que salir en el PDF de @react-pdf también (Emilio, 2026-10-16).
+        credito: creditoDeFila(f),
+      })
     }
   }
   return {

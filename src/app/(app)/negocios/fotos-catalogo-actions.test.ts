@@ -9,7 +9,7 @@ import { base, clienteFalso, type Fila } from '../../../../test/cotizacion-pdf-d
 
 const sesion = vi.hoisted(() => ({ role: 'operator' as string }))
 vi.mock('@/lib/actions/get-workspace', () => ({
-  getWorkspace: async () => ({ supabase: clienteFalso(), workspaceId: WS, staffId: 's-1', role: sesion.role, error: null }),
+  getWorkspace: async () => ({ supabase: clienteFalso(), workspaceId: WS, staffId: 's-1', userId: 'u-1', role: sesion.role, error: null }),
 }))
 vi.mock('@/lib/fotos/catalogo-almacen', async (original) => ({
   ...(await original<typeof import('@/lib/fotos/catalogo-almacen')>()),
@@ -22,6 +22,10 @@ const WS = '11111111-2222-3333-4444-555555555555'
 const COT = 'cot-1'
 
 import { confirmarFotoDelCatalogo, fotosDeLaPropuesta, otraFotoDeCommons, subirFotoPropia, sugerirFotosQueFaltan } from './fotos-catalogo-actions'
+import { MENSAJE_SIN_AUTORIZACION } from '@/lib/fotos/autorizacion'
+
+/** La casilla «Tengo autorización para usar esta foto» (Emilio, 2026-10-16). */
+const AUTORIZADA = { autorizada: true, procedencia: 'kit de medios del hotel' }
 
 function sembrar(motor: boolean) {
   base.secuencia = 0
@@ -61,9 +65,9 @@ describe('fotos de la propuesta', () => {
   })
 
   it('subir la propia: la llave tiene que ser de la cotización; el nombre lo pone el servidor', { timeout: 20_000 }, async () => {
-    const ajena = await subirFotoPropia(COT, 'actividad', 'tour ajeno|', await dataUrl())
+    const ajena = await subirFotoPropia(COT, 'actividad', 'tour ajeno|', await dataUrl(), AUTORIZADA)
     expect(ajena).toEqual({ ok: false, error: expect.stringContaining('no es de esta cotización') })
-    const r = await subirFotoPropia(COT, 'actividad', 'tour johnny cay|', await dataUrl())
+    const r = await subirFotoPropia(COT, 'actividad', 'tour johnny cay|', await dataUrl(), AUTORIZADA)
     expect(r.ok).toBe(true)
     const filas = base.tablas.fotos_catalogo as Fila[]
     expect(filas).toHaveLength(1)
@@ -73,11 +77,13 @@ describe('fotos de la propuesta', () => {
 
   it('un rol de solo lectura no cambia fotos', async () => {
     sesion.role = 'read_only'
-    expect(await subirFotoPropia(COT, 'actividad', 'tour johnny cay|', await dataUrl())).toEqual({ ok: false, error: expect.stringContaining('no cambiarlas') })
+    expect(await subirFotoPropia(COT, 'actividad', 'tour johnny cay|', await dataUrl(), AUTORIZADA)).toEqual({ ok: false, error: expect.stringContaining('no cambiarlas') })
   })
 
   it('lo que no es una foto no entra', async () => {
-    expect(await subirFotoPropia(COT, 'actividad', 'tour johnny cay|', 'data:text/html;base64,PHNjcmlwdD4=')).toEqual({ ok: false, error: expect.stringContaining('no es una foto') })
+    expect(await subirFotoPropia(COT, 'actividad', 'tour johnny cay|', 'data:text/html;base64,PHNjcmlwdD4=', AUTORIZADA)).toEqual({ ok: false, error: expect.stringContaining('no es una foto') })
+    // Sin la casilla de autorización no entra, aunque sea una foto (Emilio, 2026-10-16).
+    expect(await subirFotoPropia(COT, 'actividad', 'tour johnny cay|', await dataUrl())).toEqual({ ok: false, error: MENSAJE_SIN_AUTORIZACION })
   })
 })
 
@@ -120,7 +126,7 @@ describe('hoteles: solo la foto que sube la asesora (Mauricio, 2026-10-14)', () 
   })
 
   it('«Subir la mía» sí: queda en el catálogo como propia y se imprime', { timeout: 20_000 }, async () => {
-    const r = await subirFotoPropia(COT, 'hotel', HOTEL, await dataUrl())
+    const r = await subirFotoPropia(COT, 'hotel', HOTEL, await dataUrl(), AUTORIZADA)
     expect(r.ok).toBe(true)
     if (!r.ok) return
     expect(r.fotos.find((f) => f.tipo === 'hotel')!.foto).toMatchObject({ origen: 'asesora', seImprime: true })

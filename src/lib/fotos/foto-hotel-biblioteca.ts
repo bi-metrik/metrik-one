@@ -12,6 +12,7 @@ import 'server-only'
 import { hotelesDeItems, type ItemConLectura } from '@/lib/cotizaciones/detalle-viaje'
 import { bytesDeDataUrl } from '@/lib/cotizaciones/imagen-captura'
 import { tienePropuestaHtml } from '@/lib/pdf/motor-html'
+import { revisarAutorizacion } from './autorizacion'
 import { elementosDe, ponerFotoPropia, TABLA_CATALOGO, type FilaCatalogo } from './catalogo'
 import { enlacesDeCatalogo } from './catalogo-almacen'
 import { objetivo, usaFotosDeSitioOficial, type ObjetivoFoto } from './clave'
@@ -66,6 +67,10 @@ export async function fotoDeHotelABiblioteca(a: {
   item: ItemConLectura
   dataUrl: string
   reemplaza?: string | null
+  /** El usuario de la sesión, que marcó «Tengo autorización para usar esta foto». */
+  userId: string | null | undefined
+  /** La casilla y la procedencia que mandó el navegador (`revisarAutorizacion`). */
+  autorizacion: unknown
 }): Promise<FotoHotelEnBiblioteca | null> {
   if (!a.workspaceId) return null
   const biblioteca = await bibliotecaDelEspacio(a.supabase, a.workspaceId)
@@ -73,6 +78,9 @@ export async function fotoDeHotelABiblioteca(a: {
   const o = objetivoDelHotel(a.item)
   if (!o) return null
   if (a.role && ROLES_SIN_ESCRITURA.has(a.role)) return { ok: false, mensaje: 'Tu rol puede ver las fotos pero no cambiarlas.' }
+  const permiso = revisarAutorizacion(a.autorizacion)
+  if (!permiso.ok) return { ok: false, mensaje: permiso.error }
+  if (!a.userId) return { ok: false, mensaje: 'No se pudo saber quién sube la foto. Vuelve a entrar.' }
   const partes = bytesDeDataUrl(a.dataUrl)
   if (!partes || !/^image\/(jpeg|png|webp)$/.test(partes.mime)) return { ok: false, mensaje: 'Ese archivo no es una foto. Usa un JPG o un PNG.' }
   const r = await ponerFotoPropia({
@@ -82,6 +90,7 @@ export async function fotoDeHotelABiblioteca(a: {
     objetivo: o,
     bytes: partes.buffer,
     reemplaza: typeof a.reemplaza === 'string' && a.reemplaza ? a.reemplaza : null,
+    autorizacion: { userId: a.userId, procedencia: permiso.procedencia },
   })
   if (!r.ok) return { ok: false, mensaje: r.mensaje }
   return { ok: true, elemento: await elementoDeBiblioteca(a.supabase, a.workspaceId, o, biblioteca.sitioOficial) }

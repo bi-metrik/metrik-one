@@ -6,9 +6,24 @@ import { toast } from 'sonner'
 
 import { Dialog, DialogContent, DialogDescription, DialogTitle } from '@/components/ui/dialog'
 import { comprimirFotoHotel } from '@/lib/cotizaciones/foto-hotel-navegador'
-import { CATEGORIAS_HOTEL, fotosPorCategoria, NOMBRE_CATEGORIA, NOMBRE_CATEGORIA_SINGULAR, type CategoriaHotel } from '@/lib/fotos/categoria'
-import { fondoDeMiniatura, opcionesDeLaPestana, type EleccionFoto, type ElementoVista, type OpcionFoto } from '@/lib/fotos/vista'
+import { esDeAgenciaDeViajes, MENSAJE_AGENCIA } from '@/lib/fotos/agencias'
+import type { PedidoAutorizacion } from '@/lib/fotos/autorizacion'
+import { NOMBRE_CATEGORIA } from '@/lib/fotos/categoria'
+import { MAX_FOTOS_POR_ELEMENTO } from '@/lib/fotos/clave'
+import {
+  cabeOtraMarca,
+  categoriaAlMarcar,
+  cuadrosDelHotel,
+  cuadrosDeLaPestana,
+  MENSAJE_TRES_MARCADAS,
+  PESTANAS_GALERIA,
+  portadaDeLaPestana,
+  type CuadroGaleria,
+  type PestanaGaleria,
+} from '@/lib/fotos/galeria'
+import { fondoDeMiniatura, type EleccionFoto, type ElementoVista, type OpcionFoto } from '@/lib/fotos/vista'
 import type { OpcionesDeHotel, ResultadoElemento } from './actions'
+import { AutorizacionFoto } from './autorizacion-foto'
 
 export interface PedidoHotel {
   tipo: 'hotel'
@@ -21,25 +36,32 @@ export interface AccionesHotel {
   opciones: (p: PedidoHotel, paginaUrl?: string | null, siguiente?: string | null) => Promise<OpcionesDeHotel>
   fotos: (p: PedidoHotel) => Promise<ResultadoElemento>
   elegir: (p: PedidoHotel, e: EleccionFoto, reemplaza?: string | null, categoria?: string | null) => Promise<ResultadoElemento>
-  subir: (p: PedidoHotel, dataUrl: string, reemplaza?: string | null, categoria?: string | null) => Promise<ResultadoElemento>
+  subir: (p: PedidoHotel, dataUrl: string, reemplaza?: string | null, categoria?: string | null, autorizacion?: PedidoAutorizacion) => Promise<ResultadoElemento>
   principal: (id: string) => Promise<ResultadoElemento>
+  quitar: (id: string) => Promise<ResultadoElemento>
 }
 
-const VACIO: Record<CategoriaHotel, string> = {
-  fachada: 'No encontramos fotos de este hotel: súbela.',
+const NOMBRE_PESTANA: Record<PestanaGaleria, string> = { ...NOMBRE_CATEGORIA, todas: 'Todas' }
+
+const VACIO: Record<PestanaGaleria, string> = {
+  fachada: 'No encontramos fotos de la fachada de este hotel: súbela o pégala.',
   habitacion: 'No encontramos fotos de las habitaciones de este hotel: súbela o pégala.',
   zonas_comunes: 'No encontramos fotos de las zonas comunes de este hotel: súbela o pégala.',
+  todas: 'No encontramos fotos de este hotel: súbela o pégala.',
 }
 
+/** El azul de la marca (el de la referencia de Mauricio). */
+const AZUL = '#0071C2'
+
 /**
- * El selector de fotos de un HOTEL por categoría (Mauricio, 2026-10-16): pestañas Fachada ·
- * Habitaciones · Zonas comunes y, en cada una, las opciones que ONE encontró de ESE hotel (Commons
- * y, con el interruptor, la página oficial), ya clasificadas. La asesora elige; la foto queda en la
- * biblioteca con su categoría. La propuesta lleva hasta 3, de preferencia una de cada categoría:
- * elegir otra de una categoría que ya tiene foto la reemplaza. La principal la marca la asesora.
+ * La galería de fotos de un HOTEL (Mauricio, 2026-10-16, referencia: la galería de Booking): fotos
+ * grandes en cuadrícula, con pestañas Fachada · Habitaciones · Zonas comunes · Todas. La asesora
+ * MARCA hasta 3, de cualquier categoría: el número es el orden en la propuesta y la 1 es la
+ * principal («Hacer principal» la cambia). Marcar guarda la foto en la biblioteca; desmarcar la
+ * quita. Las opciones son de ESE hotel (Commons y, con el interruptor, la página oficial).
  *
- * Mejor cero opciones que una equivocada: si no hay, la pestaña lo dice y ofrece subir, pegar
- * (Ctrl+V) o, con el interruptor, el enlace de la página del hotel.
+ * Subir o pegar (Ctrl+V) pide antes la casilla «Tengo autorización para usar esta foto» (Emilio).
+ * Un enlace de Booking, Expedia, Despegar u otra agencia en línea se rechaza.
  */
 export default function SelectorHotel({
   pedido,
@@ -49,7 +71,7 @@ export default function SelectorHotel({
   onCerrar,
   onElegida,
   acciones,
-  categoriaInicial = 'fachada',
+  pestanaInicial = 'todas',
 }: {
   pedido: PedidoHotel | null
   reemplaza?: string | null
@@ -58,35 +80,38 @@ export default function SelectorHotel({
   onCerrar: () => void
   onElegida: (elemento: ElementoVista | null) => void
   acciones: AccionesHotel
-  categoriaInicial?: CategoriaHotel
+  pestanaInicial?: PestanaGaleria
 }) {
-  const [pestana, setPestana] = useState<CategoriaHotel>(categoriaInicial)
+  const [pestana, setPestana] = useState<PestanaGaleria>(pestanaInicial)
   const [opciones, setOpciones] = useState<OpcionFoto[]>([])
   const [cargando, setCargando] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [clasificadas, setClasificadas] = useState(true)
-  const [elegida, setElegida] = useState<string | null>(null)
-  const [guardando, setGuardando] = useState(false)
+  const [ocupado, setOcupado] = useState<string | null>(null)
   const [elemento, setElemento] = useState<ElementoVista | null>(null)
   const [cambio, setCambio] = useState(false)
   const [paginaUrl, setPaginaUrl] = useState('')
   const [paginaLeida, setPaginaLeida] = useState<string | null>(null)
   const [siguiente, setSiguiente] = useState<string | null>(null)
   const [sugerida, setSugerida] = useState<'biblioteca' | 'wikidata' | null>(null)
-  const pendienteReemplazo = useRef<string | null>(reemplaza)
+  const [porSubir, setPorSubir] = useState<Blob | null>(null)
+  // Cada foto nueva remonta la casilla (sin marcar), aunque se pegue otra con una pendiente.
+  const [subidaN, setSubidaN] = useState(0)
+  const [reemplazo, setReemplazo] = useState<string | null>(reemplaza)
+  const zonaSubir = useRef<HTMLDivElement | null>(null)
 
   // Al abrir: las fotos que ya tiene el hotel y las opciones de Commons (clasificadas).
   useEffect(() => {
     if (!abierto || !pedido) return
-    setPestana(categoriaInicial)
+    setPestana(pestanaInicial)
     setOpciones([])
-    setElegida(null)
     setError(null)
     setCambio(false)
     setPaginaLeida(null)
     setSiguiente(null)
     setSugerida(null)
-    pendienteReemplazo.current = reemplaza
+    setPorSubir(null)
+    setReemplazo(reemplaza)
     let vigente = true
     void acciones.fotos(pedido).then((r) => vigente && r.ok && setElemento(r.elemento)).catch(() => {})
     setCargando(true)
@@ -116,6 +141,10 @@ export default function SelectorHotel({
   const buscarEnPagina = useCallback(
     async (desde: string | null) => {
       if (!pedido || !paginaUrl.trim()) return
+      if (esDeAgenciaDeViajes(paginaUrl)) {
+        toast.error(MENSAJE_AGENCIA)
+        return
+      }
       setCargando(true)
       setError(null)
       try {
@@ -145,186 +174,235 @@ export default function SelectorHotel({
     }
     setElemento(r.elemento)
     setCambio(true)
-    pendienteReemplazo.current = null
     return true
   }
 
-  const usar = async () => {
-    if (!pedido || !elegida) return
-    const o = opciones.find((x) => x.id === elegida)
+  const fotos = elemento?.fotos ?? []
+  const cuadros = cuadrosDelHotel(opciones, fotos)
+  const { propios, sinClasificar } = cuadrosDeLaPestana(cuadros, pestana)
+
+  /** Clic en un cuadro: marca (guarda en la biblioteca) o desmarca (la quita). */
+  const alternar = async (c: CuadroGaleria) => {
+    if (!pedido || ocupado) return
+    if (c.fotoId) {
+      if (c.origen === 'asesora' && !window.confirm('Esta foto la subieron a mano: si la desmarcas, sale de la biblioteca. ¿Quitarla?')) return
+      setOcupado(c.clave)
+      try {
+        quedo(await acciones.quitar(c.fotoId))
+      } catch {
+        toast.error('No se pudo quitar. Vuelve a intentarlo.')
+      } finally {
+        setOcupado(null)
+      }
+      return
+    }
+    const o = c.opcion
     if (!o) return
+    if (!reemplazo && !cabeOtraMarca(fotos)) {
+      toast.error(MENSAJE_TRES_MARCADAS)
+      return
+    }
     const eleccion: EleccionFoto =
       o.fuente === 'wikimedia' ? { fuente: 'wikimedia', titulo: o.titulo } : { fuente: 'sitio_oficial', pagina: o.pagina, imagen: o.imagen ?? o.titulo }
-    setGuardando(true)
+    setOcupado(c.clave)
     try {
-      if (quedo(await acciones.elegir(pedido, eleccion, pendienteReemplazo.current, pestana))) {
-        toast.success(`Foto de ${NOMBRE_CATEGORIA_SINGULAR[pestana]} guardada en la biblioteca.`)
-        setElegida(null)
-      }
+      if (quedo(await acciones.elegir(pedido, eleccion, reemplazo, categoriaAlMarcar(c, pestana)))) setReemplazo(null)
     } catch {
       toast.error('No se pudo guardar. Vuelve a intentarlo.')
     } finally {
-      setGuardando(false)
-    }
-  }
-
-  const subir = async (archivo: Blob) => {
-    if (!pedido) return
-    setGuardando(true)
-    try {
-      const foto = await comprimirFotoHotel(archivo)
-      if (!foto) {
-        toast.error('Ese archivo no es una foto. Usa un JPG o un PNG.')
-        return
-      }
-      if (quedo(await acciones.subir(pedido, foto.dataUrl, pendienteReemplazo.current, pestana))) {
-        toast.success(`Foto de ${NOMBRE_CATEGORIA_SINGULAR[pestana]} guardada en la biblioteca.`)
-      }
-    } catch {
-      toast.error('No se pudo subir. Vuelve a intentarlo.')
-    } finally {
-      setGuardando(false)
+      setOcupado(null)
     }
   }
 
   const hacerPrincipal = async (id: string) => {
-    setGuardando(true)
+    setOcupado(`principal:${id}`)
     try {
       quedo(await acciones.principal(id))
     } catch {
       toast.error('No se pudo cambiar la principal.')
     } finally {
-      setGuardando(false)
+      setOcupado(null)
+    }
+  }
+
+  /** Una foto subida o pegada: primero la casilla de autorización. */
+  const pedirAutorizacion = (archivo: Blob) => {
+    if (!reemplazo && !cabeOtraMarca(fotos)) {
+      toast.error(MENSAJE_TRES_MARCADAS)
+      return
+    }
+    setPorSubir(archivo)
+    setSubidaN((n) => n + 1)
+    requestAnimationFrame(() => zonaSubir.current?.scrollIntoView({ block: 'nearest' }))
+  }
+
+  const subir = async (permiso: PedidoAutorizacion) => {
+    if (!pedido || !porSubir) return
+    setOcupado('subir')
+    try {
+      const foto = await comprimirFotoHotel(porSubir)
+      if (!foto) {
+        toast.error('Ese archivo no es una foto. Usa un JPG o un PNG.')
+        return
+      }
+      const categoria = categoriaAlMarcar(null, pestana)
+      if (quedo(await acciones.subir(pedido, foto.dataUrl, reemplazo, categoria, permiso))) {
+        toast.success('Foto guardada en la biblioteca.')
+        setPorSubir(null)
+        setReemplazo(null)
+      }
+    } catch {
+      toast.error('No se pudo subir. Vuelve a intentarlo.')
+    } finally {
+      setOcupado(null)
     }
   }
 
   const cerrar = () => (cambio ? onElegida(elemento) : onCerrar())
 
-  const puestos = fotosPorCategoria(elemento?.fotos ?? [])
-  const { propias, sinClasificar } = opcionesDeLaPestana(opciones, pestana)
-  const ocupada = puestos[pestana]
-  const elegidaOpcion = opciones.find((x) => x.id === elegida) ?? null
-
-  const cuadricula = (lista: OpcionFoto[]) => (
-    <ul className="grid grid-cols-2 gap-2 sm:grid-cols-4">
-      {lista.map((o) => {
-        const activa = elegida === o.id
-        return (
-          <li key={o.id}>
+  const cuadro = (c: CuadroGaleria) => {
+    const marcada = c.marca !== null
+    const trabajando = ocupado === c.clave || ocupado === `principal:${c.fotoId}`
+    return (
+      <li key={c.clave} className="group relative" data-cuadro={c.clave} data-marca={c.marca ?? undefined}>
+        <button
+          type="button"
+          onClick={() => void alternar(c)}
+          disabled={!!ocupado}
+          aria-pressed={marcada}
+          aria-label={marcada ? `Desmarcar (es la ${c.marca} en la propuesta)` : 'Marcar para la propuesta'}
+          className={`relative block aspect-[4/3] w-full overflow-hidden rounded-lg bg-muted bg-cover bg-center transition disabled:cursor-wait ${marcada ? 'ring-[3px] ring-[#0071C2] ring-offset-2' : 'hover:brightness-95'}`}
+          style={c.imagen ? { backgroundImage: fondoDeMiniatura(c.imagen) } : undefined}
+        >
+          {/* Autor y licencia (Commons) o la página: al pasar el mouse; en el celular, siempre. */}
+          {c.credito && (
+            <span
+              className="absolute inset-x-0 bottom-0 truncate bg-gradient-to-t from-black/70 to-transparent px-2 pt-4 pb-1 text-left text-[10px] text-white opacity-100 transition sm:opacity-0 sm:group-hover:opacity-100 sm:group-focus-within:opacity-100"
+              title={c.credito}
+              data-credito
+            >
+              {c.origen === 'wikimedia' ? `© ${c.credito}` : c.origen === 'sitio_oficial' ? `Página oficial · ${c.credito}` : c.credito}
+            </span>
+          )}
+          {!c.credito && c.origen === 'asesora' && (
+            <span className="absolute inset-x-0 bottom-0 bg-gradient-to-t from-black/60 to-transparent px-2 pt-4 pb-1 text-left text-[10px] text-white">Subida por la agencia</span>
+          )}
+        </button>
+        {marcada ? (
+          <span
+            className="pointer-events-none absolute top-2 left-2 flex h-7 w-7 items-center justify-center rounded-full text-sm font-bold text-white shadow"
+            style={{ backgroundColor: AZUL }}
+            data-numero
+          >
+            {trabajando ? <Loader2 className="h-4 w-4 animate-spin" /> : c.marca}
+          </span>
+        ) : (
+          <span className="pointer-events-none absolute top-2 left-2 flex h-7 w-7 items-center justify-center rounded-full border-2 border-white bg-black/20 text-white opacity-0 shadow transition group-hover:opacity-100">
+            {trabajando ? <Loader2 className="h-4 w-4 animate-spin" /> : <Check className="h-4 w-4" />}
+          </span>
+        )}
+        {marcada && c.fotoId && (
+          c.principal ? (
+            <span className="pointer-events-none absolute top-2 right-2 inline-flex items-center gap-0.5 rounded-full bg-white/95 px-2 py-0.5 text-[11px] font-semibold shadow" style={{ color: AZUL }}>
+              <Star className="h-3 w-3 fill-current" /> Principal
+            </span>
+          ) : (
             <button
               type="button"
-              onClick={() => setElegida(o.id)}
-              className={`relative block w-full overflow-hidden rounded-md border text-left transition ${activa ? 'ring-2 ring-[#10B981] ring-offset-1' : 'hover:border-foreground/40'}`}
-              aria-pressed={activa}
-              data-opcion={o.id}
+              disabled={!!ocupado}
+              onClick={() => c.fotoId && void hacerPrincipal(c.fotoId)}
+              className="absolute top-2 right-2 rounded-full bg-white/95 px-2 py-0.5 text-[11px] font-medium shadow hover:bg-white disabled:opacity-60"
+              style={{ color: AZUL }}
+              data-hacer-principal
             >
-              <div className="aspect-[4/3] w-full bg-muted bg-cover bg-center" style={{ backgroundImage: fondoDeMiniatura(o.miniatura) }} />
-              {activa && (
-                <span className="absolute top-1 right-1 rounded-full bg-[#10B981] p-0.5 text-white">
-                  <Check className="h-3 w-3" />
-                </span>
-              )}
-              <span className="block truncate px-1.5 py-1 text-[10px] text-muted-foreground" title={o.credito ?? undefined}>
-                {o.fuente === 'sitio_oficial' ? 'Página oficial' : 'Commons'} · {o.credito ?? '—'}
-              </span>
+              Hacer principal
             </button>
-          </li>
-        )
-      })}
-    </ul>
-  )
+          )
+        )}
+        {c.pagina && (
+          <a
+            href={c.pagina}
+            target="_blank"
+            rel="noreferrer"
+            className="absolute right-2 bottom-6 hidden rounded-full bg-white/90 p-1 text-foreground shadow group-hover:block"
+            title={c.origen === 'wikimedia' ? 'Ver en Wikimedia Commons' : 'Ver la página'}
+          >
+            <ExternalLink className="h-3 w-3" />
+          </a>
+        )}
+      </li>
+    )
+  }
+
+  const cuadricula = (lista: CuadroGaleria[]) => <ul className="grid grid-cols-2 gap-2 sm:grid-cols-4 sm:gap-3">{lista.map(cuadro)}</ul>
 
   return (
     <Dialog open={abierto} onOpenChange={(v) => !v && cerrar()}>
       <DialogContent
-        className="flex max-h-[92vh] flex-col gap-3 sm:max-w-3xl"
+        className="flex max-h-[94vh] flex-col gap-3 p-4 sm:max-w-5xl sm:p-5"
         data-selector-hotel
+        // Sin foco automático en la primera pestaña: se veía como seleccionada sin estarlo.
+        onOpenAutoFocus={(e) => e.preventDefault()}
         onPaste={(e) => {
           const archivo = [...e.clipboardData.files].find((f) => f.type.startsWith('image/'))
-          if (archivo && !guardando) {
+          if (archivo) {
             e.preventDefault()
-            void subir(archivo)
+            if (!ocupado) pedirAutorizacion(archivo)
+            return
+          }
+          const texto = e.clipboardData.getData('text')
+          if (texto && esDeAgenciaDeViajes(texto)) {
+            e.preventDefault()
+            toast.error(MENSAJE_AGENCIA)
           }
         }}
       >
-        <div className="space-y-0.5 pr-6">
-          <DialogTitle className="text-base">Fotos del hotel · {pedido?.nombre}</DialogTitle>
+        <div className="shrink-0 space-y-0.5 border-b pr-6 pb-2 text-center">
+          <DialogTitle className="text-base font-bold">{pedido?.nombre}</DialogTitle>
           <DialogDescription className="text-xs">
-            {pedido?.ciudad ? `${pedido.ciudad}. ` : ''}
-            Elige por categoría: la propuesta lleva hasta 3, de preferencia una de cada una. ONE nunca la pone sola.
+            {pedido?.ciudad ? `${pedido.ciudad} · ` : ''}Marca hasta {MAX_FOTOS_POR_ELEMENTO}: el número es el orden en la propuesta y la 1 es la principal.
           </DialogDescription>
         </div>
 
-        {/* Lo que el hotel ya tiene, por categoría; la principal la marca la asesora. */}
-        <div className="grid grid-cols-3 gap-2" data-puestos>
-          {CATEGORIAS_HOTEL.map((c) => {
-            const f = puestos[c]
+        {/* Las pestañas, con su portada (como la galería de Booking). */}
+        <div className="flex shrink-0 gap-3 overflow-x-auto pb-1" role="tablist">
+          {PESTANAS_GALERIA.map((p) => {
+            const portada = portadaDeLaPestana(cuadros, p)
+            const n = cuadrosDeLaPestana(cuadros, p).propios.length
+            const activa = pestana === p
             return (
-              <div key={c} className={`flex items-center gap-2 rounded-md border p-1.5 ${pestana === c ? 'border-foreground/40' : ''}`} data-puesto={c}>
-                <div className="h-10 w-14 shrink-0 rounded bg-muted bg-cover bg-center" style={f?.url ? { backgroundImage: fondoDeMiniatura(f.url) } : undefined} />
-                <div className="min-w-0 text-[11px] leading-tight">
-                  <div className="font-medium">{NOMBRE_CATEGORIA[c]}</div>
-                  {!f ? (
-                    <div className="text-muted-foreground">Sin foto</div>
-                  ) : f.principal ? (
-                    <div className="inline-flex items-center gap-0.5 text-[#059669]">
-                      <Star className="h-3 w-3 fill-current" /> Principal
-                    </div>
-                  ) : (
-                    <button type="button" disabled={guardando} onClick={() => void hacerPrincipal(f.id)} className="text-muted-foreground underline hover:text-foreground disabled:opacity-50">
-                      Hacer principal
-                    </button>
-                  )}
-                </div>
-              </div>
-            )
-          })}
-        </div>
-        {puestos.sin.length > 0 && (
-          <p className="text-[11px] text-muted-foreground">
-            {puestos.sin.length === 1 ? 'Tiene 1 foto sin categoría' : `Tiene ${puestos.sin.length} fotos sin categoría`} (de antes). Una nueva ocupa su lugar si no hay espacio.
-          </p>
-        )}
-
-        <div className="flex flex-wrap gap-1 border-b pb-2" role="tablist">
-          {CATEGORIAS_HOTEL.map((c) => {
-            const n = opcionesDeLaPestana(opciones, c).propias.length
-            return (
-              <button
-                key={c}
-                type="button"
-                role="tab"
-                aria-selected={pestana === c}
-                data-categoria={c}
-                onClick={() => {
-                  setPestana(c)
-                  setElegida(null)
-                }}
-                className={`rounded-full px-3 py-1 text-xs font-medium transition ${pestana === c ? 'bg-foreground text-background' : 'text-muted-foreground hover:bg-accent'}`}
-              >
-                {NOMBRE_CATEGORIA[c]}
-                {!cargando && n > 0 ? <span className="ml-1 opacity-70">{n}</span> : null}
+              <button key={p} type="button" role="tab" aria-selected={activa} data-pestana-galeria={p} onClick={() => setPestana(p)} className="w-24 shrink-0 text-left sm:w-28">
+                <span
+                  className={`block aspect-[4/3] w-full rounded-lg bg-muted bg-cover bg-center ${activa ? 'ring-2 ring-[#0071C2] ring-offset-1' : 'opacity-90 hover:opacity-100'}`}
+                  style={portada ? { backgroundImage: fondoDeMiniatura(portada) } : undefined}
+                />
+                <span className={`mt-1 block text-xs ${activa ? 'font-semibold' : 'text-foreground'}`} style={activa ? { color: AZUL } : undefined}>
+                  {NOMBRE_PESTANA[p]}
+                  {!cargando && n > 0 ? <span className="ml-1 font-normal text-muted-foreground">{n}</span> : null}
+                </span>
               </button>
             )
           })}
         </div>
 
-        <div className="min-h-0 flex-1 space-y-3 overflow-y-auto" data-pestana={pestana} data-opciones={propias.length}>
-          {ocupada && (
-            <p className="text-[11px] text-muted-foreground">
-              Ya tiene una foto de {NOMBRE_CATEGORIA_SINGULAR[pestana]}: la que elijas la reemplaza.
+        <div className="min-h-0 flex-1 space-y-3 overflow-y-auto pr-1" data-pestana={pestana} data-opciones={propios.length}>
+          <div className="flex items-baseline justify-between gap-2">
+            <p className="text-sm font-semibold">{pestana === 'todas' ? 'Fotos del alojamiento' : NOMBRE_PESTANA[pestana]}</p>
+            <p className="text-[11px] text-muted-foreground" data-marcadas={fotos.length}>
+              {fotos.length} de {MAX_FOTOS_POR_ELEMENTO} marcadas
             </p>
-          )}
-          {cargando && propias.length === 0 ? (
-            <ul className="grid grid-cols-2 gap-2 sm:grid-cols-4">
+          </div>
+          {reemplazo && <p className="text-[11px]" style={{ color: AZUL }}>La que marques reemplaza la foto que querías cambiar.</p>}
+          {cargando && propios.length === 0 ? (
+            <ul className="grid grid-cols-2 gap-2 sm:grid-cols-4 sm:gap-3">
               {Array.from({ length: 8 }).map((_, i) => (
-                <li key={i} className="aspect-[4/3] animate-pulse rounded-md bg-muted" />
+                <li key={i} className="aspect-[4/3] animate-pulse rounded-lg bg-muted" />
               ))}
             </ul>
-          ) : propias.length > 0 ? (
-            cuadricula(propias)
+          ) : propios.length > 0 ? (
+            cuadricula(propios)
           ) : (
-            <div className="rounded-md border border-dashed px-3 py-4 text-center text-xs text-muted-foreground" data-vacia>
+            <div className="rounded-lg border border-dashed px-3 py-6 text-center text-xs text-muted-foreground" data-vacia>
               {error ?? VACIO[pestana]}
               {!error && sitioOficial ? ' O pega abajo el enlace de la página del hotel.' : ''}
             </div>
@@ -334,21 +412,41 @@ export default function SelectorHotel({
             <div className="space-y-1.5" data-sin-clasificar>
               <p className="inline-flex items-center gap-1 text-[11px] text-amber-700">
                 <AlertTriangle className="h-3 w-3" />
-                {clasificadas ? 'ONE no pudo mirar estas fotos.' : 'ONE no pudo revisar las fotos.'} Son de este hotel por su nombre: revisa que sean de {NOMBRE_CATEGORIA_SINGULAR[pestana]}.
+                {clasificadas ? 'ONE no pudo mirar estas fotos.' : 'ONE no pudo revisar las fotos.'} Son de este hotel por su nombre: revisa qué muestran antes de marcarlas.
               </p>
               {cuadricula(sinClasificar)}
             </div>
           )}
 
-          <div className="space-y-2 rounded-md bg-muted/40 p-2">
-            <div className="flex flex-wrap items-center gap-2">
-              <label className={`inline-flex cursor-pointer items-center gap-1 rounded-md border bg-background px-3 py-1.5 text-xs font-medium hover:bg-accent ${guardando ? 'pointer-events-none opacity-60' : ''}`}>
-                {guardando ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <ImagePlus className="h-3.5 w-3.5" />} Subir la mía
-                <input type="file" accept="image/*" className="hidden" onChange={(e) => { const a = e.target.files?.[0]; e.target.value = ''; if (a) void subir(a) }} />
-              </label>
-              <span className="text-[11px] text-muted-foreground">o pega una imagen aquí (Ctrl+V). Queda como {NOMBRE_CATEGORIA_SINGULAR[pestana]}. Úsala solo si tienes permiso para publicarla.</span>
-            </div>
-            {sitioOficial && (
+          <div ref={zonaSubir} className="space-y-2 rounded-lg bg-muted/40 p-2" data-zona-subir>
+            {porSubir ? (
+              <AutorizacionFoto
+                key={subidaN}
+                archivo={porSubir}
+                guardando={ocupado === 'subir'}
+                onCancelar={() => setPorSubir(null)}
+                onConfirmar={(permiso) => void subir(permiso)}
+                destino={pestana === 'todas' ? 'Queda en la biblioteca del hotel.' : `Queda en ${NOMBRE_PESTANA[pestana]}.`}
+              />
+            ) : (
+              <div className="flex flex-wrap items-center gap-2">
+                <label className={`inline-flex cursor-pointer items-center gap-1 rounded-md border bg-background px-3 py-1.5 text-xs font-medium hover:bg-accent ${ocupado ? 'pointer-events-none opacity-60' : ''}`}>
+                  <ImagePlus className="h-3.5 w-3.5" /> Subir la mía
+                  <input
+                    type="file"
+                    accept="image/*"
+                    className="hidden"
+                    onChange={(e) => {
+                      const a = e.target.files?.[0]
+                      e.target.value = ''
+                      if (a) pedirAutorizacion(a)
+                    }}
+                  />
+                </label>
+                <span className="text-[11px] text-muted-foreground">o pega una imagen aquí (Ctrl+V). Te pedimos confirmar que tienes autorización para usarla.</span>
+              </div>
+            )}
+            {sitioOficial && !porSubir && (
               <form
                 className="flex gap-2"
                 onSubmit={(e) => {
@@ -361,7 +459,7 @@ export default function SelectorHotel({
                   <input
                     value={paginaUrl}
                     onChange={(e) => setPaginaUrl(e.target.value)}
-                    placeholder="Pega el enlace de la página del hotel (https://…)"
+                    placeholder="Pega el enlace de la página oficial del hotel (https://…)"
                     className="h-8 w-full rounded-md border bg-background pr-2 pl-7 text-xs"
                     inputMode="url"
                   />
@@ -371,12 +469,12 @@ export default function SelectorHotel({
                 </button>
               </form>
             )}
-            {sitioOficial && sugerida && !paginaLeida && (
+            {sitioOficial && sugerida && !paginaLeida && !porSubir && (
               <p className="text-[11px] text-muted-foreground">
                 {sugerida === 'wikidata' ? 'ONE encontró esta página oficial en Wikidata: revisa que sea la del hotel y busca.' : 'Es la página oficial que ya se usó para este hotel.'}
               </p>
             )}
-            {siguiente && !cargando && (
+            {siguiente && !cargando && !porSubir && (
               <button type="button" onClick={() => void buscarEnPagina(siguiente)} className="rounded-md border bg-background px-3 py-1 text-xs hover:bg-accent">
                 Más fotos de la página
               </button>
@@ -384,31 +482,14 @@ export default function SelectorHotel({
           </div>
         </div>
 
-        <div className="flex items-center justify-between gap-2 border-t pt-2">
-          <span className="min-w-0 truncate text-[11px] text-muted-foreground">
-            {elegidaOpcion ? (
-              <a href={elegidaOpcion.pagina} target="_blank" rel="noreferrer" className="inline-flex items-center gap-1 underline">
-                {elegidaOpcion.fuente === 'wikimedia' ? 'Ver en Wikimedia Commons' : 'Ver la página'} <ExternalLink className="h-3 w-3" />
-              </a>
-            ) : (
-              'Toca una foto para elegirla.'
-            )}
-          </span>
-          <div className="flex gap-2">
-            <button type="button" onClick={cerrar} className="rounded-md border px-3 py-1.5 text-xs font-medium hover:bg-accent">
-              {cambio ? 'Listo' : 'Cerrar'}
-            </button>
-            <button
-              type="button"
-              disabled={!elegida || guardando}
-              onClick={() => void usar()}
-              className="inline-flex items-center gap-1 rounded-md bg-[#10B981] px-3 py-1.5 text-xs font-medium text-white hover:bg-[#059669] disabled:opacity-50"
-            >
-              {guardando && <Loader2 className="h-3.5 w-3.5 animate-spin" />} Usar como {NOMBRE_CATEGORIA_SINGULAR[pestana]}
-            </button>
-          </div>
+        <div className="flex shrink-0 items-center justify-between gap-2 border-t pt-2">
+          <span className="min-w-0 truncate text-[11px] text-muted-foreground">Toca una foto para marcarla; tócala otra vez para quitarla.</span>
+          <button type="button" onClick={cerrar} className="rounded-md px-4 py-1.5 text-xs font-medium text-white" style={{ backgroundColor: AZUL }}>
+            {cambio ? 'Listo' : 'Cerrar'}
+          </button>
         </div>
       </DialogContent>
     </Dialog>
   )
 }
+

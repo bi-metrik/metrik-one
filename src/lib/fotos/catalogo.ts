@@ -14,7 +14,8 @@ import 'server-only'
  * Sin la migración del catálogo la tabla no existe: leer devuelve un catálogo vacío y escribir
  * devuelve el motivo, nunca un error sin explicar. La propuesta sale como hoy.
  */
-import { puestoParaCategoria, type CategoriaFoto } from './categoria'
+import type { AutorizacionFoto } from './autorizacion'
+import type { CategoriaFoto } from './categoria'
 import { borrarDeCatalogo, bytesDeCatalogo, guardarEnCatalogo, prepararFoto, type FotoPreparada } from './catalogo-almacen'
 import { MAX_FOTOS_POR_ELEMENTO, nombreLlano, seSugiereDeCommons, type ObjetivoFoto, type OrigenFoto, type TipoFoto } from './clave'
 import { bajarFotoDeSitio, type Resolver } from './sitio-oficial'
@@ -223,6 +224,8 @@ async function fotosDelElemento(supabase: Cliente, workspaceId: string, o: Pick<
 /** Los campos de la foto que dicen de dónde salió. */
 type Procedencia = Pick<FilaCatalogo, 'origen' | 'fuente_url' | 'titulo_fuente' | 'autor' | 'licencia' | 'imagen_url' | 'revisada'> & {
   descartadas?: string[]
+  /** Foto subida o pegada: quién marcó «Tengo autorización» y de dónde dijo que viene. */
+  autorizacion?: AutorizacionFoto
 }
 
 /**
@@ -230,8 +233,11 @@ type Procedencia = Pick<FilaCatalogo, 'origen' | 'fuente_url' | 'titulo_fuente' 
  *  · `reemplaza` = el id de una de sus fotos → esa cambia (conserva su puesto y si es principal);
  *  · sin `reemplaza` → se agrega en el primer puesto libre; la primera del elemento es la
  *    principal. Con tres, no entra (`MENSAJE_TOPE`) y no se sube nada.
- *  · un HOTEL con `categoria` y sin `reemplaza` → el reparto por categoría decide
- *    (`puestoParaCategoria`): si ya tiene una de esa categoría, la cambia; si no, se agrega.
+ * La categoría de un hotel solo se anota: no decide el puesto (la galería, Mauricio 2026-10-16,
+ * deja marcar hasta 3 de cualquier categoría, p. ej. dos habitaciones).
+ *
+ * La autorización (`autorizada_por`, `autorizada_at`, `procedencia`) se escribe SIEMPRE: con la
+ * de la foto subida, o en NULL, para que un reemplazo por una de Commons no herede la de antes.
  */
 export async function guardarFoto(a: {
   supabase: Cliente
@@ -247,12 +253,7 @@ export async function guardarFoto(a: {
   const leidas = await fotosDelElemento(a.supabase, a.workspaceId, a.objetivo)
   if ('error' in leidas) return { ok: false, mensaje: leidas.error as string }
   const actuales = leidas.filas
-  let reemplaza = a.reemplaza ?? null
-  if (!reemplaza && a.objetivo.tipo === 'hotel' && a.categoria !== undefined) {
-    const puesto = puestoParaCategoria(actuales, a.categoria ?? null)
-    if (puesto.tipo === 'tope') return { ok: false, mensaje: MENSAJE_TOPE }
-    if (puesto.tipo === 'reemplazar') reemplaza = puesto.id
-  }
+  const reemplaza = a.reemplaza ?? null
   const anterior = reemplaza ? actuales.find((f) => f.id === reemplaza) ?? null : null
   if (reemplaza && !anterior) return { ok: false, mensaje: 'Esa foto ya no está en la biblioteca. Recarga.' }
   const ocupados = new Set(actuales.map((f) => f.posicion ?? 1))
@@ -279,7 +280,11 @@ export async function guardarFoto(a: {
     autor: a.procedencia.autor,
     licencia: a.procedencia.licencia,
     imagen_url: a.procedencia.imagen_url,
-    categoria: a.objetivo.tipo === 'hotel' ? a.categoria ?? null : null,
+    // Sin categoría nueva (la tarjeta cambia la foto sin decir cuál), conserva la de la que reemplaza.
+    categoria: a.objetivo.tipo === 'hotel' ? (a.categoria !== undefined ? a.categoria : anterior?.categoria ?? null) : null,
+    autorizada_por: a.procedencia.autorizacion?.userId ?? null,
+    autorizada_at: a.procedencia.autorizacion ? new Date().toISOString() : null,
+    procedencia: a.procedencia.autorizacion?.procedencia ?? null,
     revisada: a.procedencia.revisada,
     descartadas: a.procedencia.descartadas ?? anterior?.descartadas ?? [],
     foco_x: null,
@@ -416,6 +421,9 @@ export async function elegirDeSitioOficial(a: {
  * La foto que sube una persona (ya en bytes). Queda revisada y sin crédito. Sin `reemplaza` ni
  * `agregar`, cambia la principal (como el panel de la cotización y la foto del hotel de una
  * opción); con `agregar`, entra en un puesto libre.
+ *
+ * `autorizacion` es OBLIGATORIA (Emilio, 2026-10-16): quien llama ya revisó la casilla
+ * (`revisarAutorizacion`) y pone el usuario de la sesión. Sin usuario no se guarda.
  */
 export async function ponerFotoPropia(a: {
   supabase: Cliente
@@ -427,7 +435,11 @@ export async function ponerFotoPropia(a: {
   reemplaza?: string | null
   agregar?: boolean
   categoria?: CategoriaFoto | null
+  autorizacion: AutorizacionFoto
 }): Promise<Resultado> {
+  if (!a.autorizacion || typeof a.autorizacion.userId !== 'string' || !a.autorizacion.userId) {
+    return { ok: false, mensaje: 'Falta registrar quién autoriza la foto. Vuelve a entrar e intenta de nuevo.' }
+  }
   const lista = await prepararFoto(a.bytes)
   if (!lista) return { ok: false, mensaje: 'Ese archivo no es una foto o pesa demasiado. Usa un JPG o un PNG.' }
   let reemplaza = a.reemplaza ?? null
@@ -442,7 +454,10 @@ export async function ponerFotoPropia(a: {
     staffId: a.staffId,
     objetivo: a.objetivo,
     foto: lista,
-    procedencia: { origen: 'asesora', fuente_url: null, titulo_fuente: null, autor: null, licencia: null, imagen_url: null, revisada: true, descartadas: a.descartadas },
+    procedencia: {
+      origen: 'asesora', fuente_url: null, titulo_fuente: null, autor: null, licencia: null, imagen_url: null, revisada: true,
+      descartadas: a.descartadas, autorizacion: a.autorizacion,
+    },
     reemplaza,
     ...(a.categoria !== undefined ? { categoria: a.categoria } : {}),
   })

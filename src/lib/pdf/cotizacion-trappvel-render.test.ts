@@ -625,6 +625,16 @@ describe('la foto del hotel ocupa el lugar de la foto de la ciudad (2026-09-24)'
     expect(t).not.toContain('Fotografías')
     expect(t).toContain('Crown Paradise')
   })
+
+  it('la foto del hotel que salió de Commons (biblioteca) imprime su crédito: autor y licencia (Emilio, 2026-10-16)', async () => {
+    const credito = 'Crown Paradise, foto de Ana Pérez (Wikimedia Commons, CC BY-SA 4.0)'
+    const t = await texto(props({
+      viaje: viaje({ fotosCiudades: [DE_LA_CIUDAD], hoteles: [{ ...HOTEL, foto: { url: PNG, proporcion: 1.5, credito } }] }),
+    }))
+    expect(t).toContain(`Fotografías: ${credito}`)
+    // La de la ciudad que reemplazó no se acredita.
+    expect(t).not.toContain('Autor de la ciudad')
+  })
 })
 
 describe('los tres niveles de detalle', () => {

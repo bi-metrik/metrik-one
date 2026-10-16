@@ -6,12 +6,15 @@ import { toast } from 'sonner'
 
 import { Dialog, DialogContent, DialogDescription, DialogTitle } from '@/components/ui/dialog'
 import { comprimirFotoHotel } from '@/lib/cotizaciones/foto-hotel-navegador'
+import { esDeAgenciaDeViajes, MENSAJE_AGENCIA } from '@/lib/fotos/agencias'
+import type { PedidoAutorizacion } from '@/lib/fotos/autorizacion'
 import { fuentesDelSelector, OPCIONES_POR_PAGINA, type FuenteFoto, type TipoFoto } from '@/lib/fotos/clave'
 import { fondoDeMiniatura, type EleccionFoto, type ElementoVista, type OpcionFoto } from '@/lib/fotos/vista'
 import {
   elegirFoto,
   fotosDelHotel,
   marcarFotoPrincipal,
+  quitarFotoDeBiblioteca,
   opcionesDeFoto,
   opcionesDeHotel,
   paginaOficialSugerida,
@@ -20,6 +23,7 @@ import {
   type PaginaSugerida,
   type ResultadoElemento,
 } from './actions'
+import { AutorizacionFoto } from './autorizacion-foto'
 import SelectorHotel, { type AccionesHotel } from './selector-hotel'
 
 export interface PedidoFoto {
@@ -33,7 +37,7 @@ export interface AccionesSelector {
   opciones: (p: PedidoFoto, fuente: 'wikimedia' | 'sitio_oficial', siguiente: string | null, pagina?: string | null) => Promise<OpcionesDeFoto>
   sugerida: (p: PedidoFoto) => Promise<PaginaSugerida>
   elegir: (p: PedidoFoto, e: EleccionFoto, reemplaza?: string | null) => Promise<ResultadoElemento>
-  subir: (p: PedidoFoto, dataUrl: string, reemplaza?: string | null) => Promise<ResultadoElemento>
+  subir: (p: PedidoFoto, dataUrl: string, reemplaza?: string | null, categoria?: string | null, autorizacion?: PedidoAutorizacion) => Promise<ResultadoElemento>
   /** Las del selector de hotel por categoría (sin ellas, las de ONE). */
   hotel?: AccionesHotel
 }
@@ -44,6 +48,7 @@ const ACCIONES_HOTEL: AccionesHotel = {
   elegir: elegirFoto,
   subir: subirFotoABiblioteca,
   principal: marcarFotoPrincipal,
+  quitar: quitarFotoDeBiblioteca,
 }
 
 const ACCIONES: AccionesSelector = {
@@ -123,6 +128,7 @@ function SelectorPorFuente({
   const [paginaUrl, setPaginaUrl] = useState('')
   const [paginaLeida, setPaginaLeida] = useState<string | null>(null)
   const [sugerencia, setSugerencia] = useState<PaginaSugerida | null>(null)
+  const [porSubir, setPorSubir] = useState<Blob | null>(null)
 
   const cargar = useCallback(
     async (f: 'wikimedia' | 'sitio_oficial', desde: string | null, url?: string | null) => {
@@ -158,6 +164,7 @@ function SelectorPorFuente({
     setElegida(null)
     setError(null)
     setPaginaLeida(null)
+    setPorSubir(null)
     if (fuente === 'wikimedia') void cargar('wikimedia', null)
     if (fuente === 'sitio_oficial') {
       setSugerencia(null)
@@ -191,21 +198,23 @@ function SelectorPorFuente({
     }
   }
 
-  const subir = async (archivo: File) => {
-    if (!pedido) return
+  /** La foto subida, después de la casilla «Tengo autorización» (Emilio, 2026-10-16). */
+  const subir = async (permiso: PedidoAutorizacion) => {
+    if (!pedido || !porSubir) return
     setGuardando(true)
     try {
-      const foto = await comprimirFotoHotel(archivo)
+      const foto = await comprimirFotoHotel(porSubir)
       if (!foto) {
         toast.error('Ese archivo no es una foto. Usa un JPG o un PNG.')
         return
       }
-      const r = await acciones.subir(pedido, foto.dataUrl, reemplaza)
+      const r = await acciones.subir(pedido, foto.dataUrl, reemplaza, null, permiso)
       if (!r.ok) {
         toast.error(r.error)
         return
       }
       toast.success('Foto guardada en la biblioteca.')
+      setPorSubir(null)
       onElegida(r.elemento)
     } catch {
       toast.error('No se pudo subir. Vuelve a intentarlo.')
@@ -250,6 +259,10 @@ function SelectorPorFuente({
               className="flex gap-2"
               onSubmit={(e) => {
                 e.preventDefault()
+                if (esDeAgenciaDeViajes(paginaUrl)) {
+                  toast.error(MENSAJE_AGENCIA)
+                  return
+                }
                 setElegida(null)
                 void cargar('sitio_oficial', null, paginaUrl)
               }}
@@ -281,12 +294,14 @@ function SelectorPorFuente({
           </div>
         )}
 
-        {fuente === 'subida' ? (
+        {fuente === 'subida' && porSubir ? (
+          <AutorizacionFoto archivo={porSubir} guardando={guardando} onCancelar={() => setPorSubir(null)} onConfirmar={(permiso) => void subir(permiso)} />
+        ) : fuente === 'subida' ? (
           <label className={`flex min-h-48 flex-1 cursor-pointer flex-col items-center justify-center gap-2 rounded-lg border-2 border-dashed text-sm text-muted-foreground hover:bg-accent/40 ${guardando ? 'pointer-events-none opacity-60' : ''}`}>
             {guardando ? <Loader2 className="h-5 w-5 animate-spin" /> : <ImagePlus className="h-6 w-6" />}
             <span>Elige una foto de tu equipo (JPG o PNG)</span>
-            <span className="text-[11px]">Úsala solo si tienes permiso para publicarla.</span>
-            <input type="file" accept="image/*" className="hidden" onChange={(e) => { const a = e.target.files?.[0]; e.target.value = ''; if (a) void subir(a) }} />
+            <span className="text-[11px]">Antes de guardarla te pedimos confirmar que tienes autorización para usarla.</span>
+            <input type="file" accept="image/*" className="hidden" onChange={(e) => { const a = e.target.files?.[0]; e.target.value = ''; if (a) setPorSubir(a) }} />
           </label>
         ) : (
           <div className="min-h-0 flex-1 overflow-y-auto">

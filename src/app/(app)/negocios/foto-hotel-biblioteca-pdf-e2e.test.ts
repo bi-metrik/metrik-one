@@ -100,7 +100,7 @@ function linea(id: string, precio: number, extra: Fila): Fila {
   }
 }
 
-function sembrar(opts: { motor: boolean; anticipo?: boolean; fotoVieja?: boolean; biblioteca?: boolean }) {
+function sembrar(opts: { motor: boolean; anticipo?: boolean; fotoVieja?: boolean; biblioteca?: boolean; commons?: boolean }) {
   base.secuencia = 0
   compuesta.props = []
   motor.llamadas = []
@@ -141,6 +141,10 @@ function sembrar(opts: { motor: boolean; anticipo?: boolean; fotoVieja?: boolean
       id: 'foto-1', workspace_id: WS, tipo: 'hotel', clave: 'hotel verde mar|san andres', nombre_clave: 'hotel verde mar', nombre: 'Hotel Verde Mar',
       ciudad: 'San Andrés', ref: 'one://fotos-catalogo/x/hotel/0123456789abcdef.jpg', origen: 'asesora', fuente_url: null, titulo_fuente: null,
       autor: null, licencia: null, foco_x: null, foco_y: null, proporcion: 1.5, revisada: true, descartadas: [], principal: true, posicion: 1, imagen_url: null,
+      ...(opts.commons ? {
+        origen: 'wikimedia', fuente_url: 'https://commons.wikimedia.org/wiki/File:Verde_Mar.jpg', titulo_fuente: 'File:Verde_Mar.jpg',
+        autor: 'Ana Pérez', licencia: 'CC BY-SA 4.0',
+      } : {}),
     }] : [],
     fiscal_profiles: [{
       workspace_id: WS, person_type: 'persona_juridica', tax_regime: 'ordinario', iva_responsible: true,
@@ -172,7 +176,15 @@ describe('la foto del hotel en el documento: la biblioteca manda', () => {
     sembrar({ motor: false, fotoVieja: true, biblioteca: true })
     await generar()
     expect(hotelDeReactPdf()?.hotel).toBe('Hotel Verde Mar')
-    expect(hotelDeReactPdf()?.foto).toEqual({ url: BIB, proporcion: 1.5 })
+    expect(hotelDeReactPdf()?.foto).toEqual({ url: BIB, proporcion: 1.5, credito: null })
+  })
+
+  it('@react-pdf: la de Commons viaja con su crédito (autor y licencia) para la línea «Fotografías»', async () => {
+    sembrar({ motor: false, biblioteca: true, commons: true })
+    await generar()
+    const credito = (hotelDeReactPdf()?.foto as { credito?: string | null } | undefined)?.credito
+    expect(credito).toMatch(/Ana Pérez/)
+    expect(credito).toMatch(/CC BY-SA 4\.0/)
   })
 
   it('@react-pdf: sin foto en la biblioteca, la vieja de la opción (como antes)', async () => {
@@ -204,7 +216,7 @@ describe('la foto que se pone en la tarjeta va a la biblioteca, no a la opción'
   it('queda en la biblioteca con la llave del hotel, se suelta la vieja de la opción y el documento la imprime', async () => {
     sembrar({ motor: false, fotoVieja: true })
     borradas.refs = []
-    const r = await ponerFotoDelHotel('h-hotel', await jpeg(), 1.5)
+    const r = await ponerFotoDelHotel('h-hotel', await jpeg(), 1.5, null, { autorizada: true, procedencia: 'kit de medios del hotel' })
     expect(r.success).toBe(true)
     expect(r.fotoBiblioteca?.fotos[0]).toMatchObject({ principal: true, seImprime: true, url: 'https://firmada.example/foto.jpg' })
     const filas = base.tablas.fotos_catalogo as Fila[]
@@ -223,7 +235,7 @@ describe('la foto que se pone en la tarjeta va a la biblioteca, no a la opción'
     ;(base.tablas.workspaces as Fila[])[0].cotizacion_template_slug = 'termotech'
     // El doble no proyecta el embed `cotizaciones(...)`: la fila lo trae ya puesto (la foto en la opción va por negocio).
     ;(base.tablas.items as Fila[])[0].cotizaciones = { estado: 'borrador', negocio_id: NEG }
-    const r = await ponerFotoDelHotel('h-hotel', await jpeg(), 1.5)
+    const r = await ponerFotoDelHotel('h-hotel', await jpeg(), 1.5, null, { autorizada: true, procedencia: 'kit de medios del hotel' })
     expect(r.error).toBeUndefined()
     expect(r.success).toBe(true)
     expect(r.fotoBiblioteca).toBeUndefined()

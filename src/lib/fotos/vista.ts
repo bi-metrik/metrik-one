@@ -21,6 +21,11 @@ export interface FotoVista {
   seImprime: boolean
   /** Hotel: fachada, habitación o zonas comunes; `null` = sin categoría (las de antes). */
   categoria: CategoriaFoto | null
+  /**
+   * Cómo se reconoce entre las opciones del selector: el título del archivo en Commons o la URL de
+   * la imagen de la página oficial (el `id` de `OpcionFoto`). `null` = subida.
+   */
+  fuenteId: string | null
 }
 
 export interface ElementoVista {
@@ -71,6 +76,8 @@ interface FilaParaVista {
   principal: boolean
   posicion: number
   categoria?: CategoriaFoto | null
+  titulo_fuente?: string | null
+  imagen_url?: string | null
 }
 
 export function dominio(url: string | null | undefined): string | null {
@@ -110,6 +117,7 @@ export function vistaDeElemento(
       revisada: f.revisada,
       seImprime: fotoImprimible(e.tipo, f.origen, f.revisada, opts),
       categoria: f.categoria ?? null,
+      fuenteId: f.origen === 'wikimedia' ? f.titulo_fuente ?? null : f.origen === 'sitio_oficial' ? f.imagen_url ?? null : null,
     })),
   }
 }

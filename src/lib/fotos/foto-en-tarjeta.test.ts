@@ -123,7 +123,7 @@ describe('el documento: la biblioteca manda, la foto vieja de la opción es el r
 
   it('@react-pdf: con foto en la biblioteca imprime ESA aunque la opción tenga la vieja', async () => {
     const [h] = await fotosDeHotelesDelDocumento([hotel({ fotoRef: REF_VIEJA, fotoProporcion: 1.2 })], { biblioteca, motorHtml: false, ...leer })
-    expect(h.foto).toEqual({ url: 'data:image/jpeg;base64,BIB', proporcion: 1.5 })
+    expect(h.foto).toEqual({ url: 'data:image/jpeg;base64,BIB', proporcion: 1.5, credito: null })
     expect(lecturas).toEqual(['bib:posada enilda|providencia'])
   })
 
@@ -151,7 +151,7 @@ describe('el documento: la biblioteca manda, la foto vieja de la opción es el r
 
 describe('lo que la tarjeta muestra de la biblioteca', () => {
   const foto = (over: Partial<FotoVista>): FotoVista => ({
-    id: 'x', url: 'https://u/x.jpg', principal: false, posicion: 1, origen: 'asesora', fuente: null, fuenteUrl: null, revisada: true, seImprime: true, categoria: null, ...over,
+    id: 'x', url: 'https://u/x.jpg', principal: false, posicion: 1, origen: 'asesora', fuente: null, fuenteUrl: null, revisada: true, seImprime: true, categoria: null, fuenteId: null, ...over,
   })
   const elemento = (fotos: FotoVista[]): ElementoVista => ({ tipo: 'hotel', clave: 'k', nombre: 'H', ciudad: 'C', fotos, admiteOtra: fotos.length < 3 })
 
@@ -230,7 +230,10 @@ describe('el recuadro de la tarjeta («Así lo ve el cliente»)', () => {
 })
 
 describe('la foto de la tarjeta se guarda en la biblioteca (servidor)', () => {
-  const base_ = { supabase: clienteFalso(), workspaceId: WS, staffId: 's-1', role: 'operator', item: ITEM }
+  const base_ = {
+    supabase: clienteFalso(), workspaceId: WS, staffId: 's-1', role: 'operator', item: ITEM,
+    userId: 'u-1', autorizacion: { autorizada: true, procedencia: 'kit de medios del hotel' },
+  }
 
   it('en un espacio con propuesta de viaje: queda en la biblioteca con la llave del hotel, elegida por una persona', async () => {
     const r = await fotoDeHotelABiblioteca({ ...base_, dataUrl: await dataUrl() })
@@ -267,8 +270,25 @@ describe('el documento lee las fotos de hotel de la biblioteca', () => {
   it('la imprimible, con su proporción', async () => {
     sembrar('trappvel', {}, [filaHotel({})])
     const r = await hotelesEnBiblioteca(clienteFalso(), WS, hoteles, {})
-    expect([...r.mapa]).toEqual([['posada enilda|providencia', { proporcion: 1.5 }]])
+    expect([...r.mapa]).toEqual([['posada enilda|providencia', { proporcion: 1.5, credito: null }]])
     expect(await r.leer('posada enilda|providencia')).toMatch(/^data:image\/jpeg;base64,/)
+  })
+
+  it('una de Commons lleva su crédito (autor y licencia) hasta el PDF de @react-pdf', async () => {
+    sembrar('trappvel', {}, [
+      filaHotel({
+        origen: 'wikimedia', fuente_url: 'https://commons.wikimedia.org/wiki/File:Posada.jpg', titulo_fuente: 'File:Posada.jpg',
+        autor: 'Ana Pérez', licencia: 'CC BY-SA 4.0',
+      }),
+    ])
+    const r = await hotelesEnBiblioteca(clienteFalso(), WS, hoteles, {})
+    const credito = r.mapa.get('posada enilda|providencia')?.credito
+    expect(credito).toMatch(/Ana Pérez/)
+    expect(credito).toMatch(/CC BY-SA 4\.0/)
+    const [h] = await fotosDeHotelesDelDocumento([{ hotel: 'Posada Enilda', linea: 'Posada Enilda', ciudad: 'Providencia' } as never], {
+      biblioteca: r.mapa, motorHtml: false, leerDeBiblioteca: r.leer, leerDeOpcion: async () => null,
+    })
+    expect((h as { foto?: { credito?: string | null } }).foto?.credito).toBe(credito)
   })
 
   it('una de la página oficial con el interruptor apagado no cuenta: la siguiente que sí', async () => {
@@ -276,7 +296,7 @@ describe('el documento lee las fotos de hotel de la biblioteca', () => {
       filaHotel({ id: 'a', origen: 'sitio_oficial', fuente_url: 'https://hotel.example/', principal: true, posicion: 1 }),
       filaHotel({ id: 'b', principal: false, posicion: 2, proporcion: 1.33 }),
     ])
-    expect([...(await hotelesEnBiblioteca(clienteFalso(), WS, hoteles, {})).mapa]).toEqual([['posada enilda|providencia', { proporcion: 1.33 }]])
+    expect([...(await hotelesEnBiblioteca(clienteFalso(), WS, hoteles, {})).mapa]).toEqual([['posada enilda|providencia', { proporcion: 1.33, credito: null }]])
   })
 
   it('sin fotos en la biblioteca: vacía (el documento usa la de la opción)', async () => {

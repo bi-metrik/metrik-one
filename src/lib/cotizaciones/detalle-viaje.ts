@@ -189,7 +189,8 @@ export interface HotelPDF {
    * del PDF la descarga del almacenamiento a partir de `fotoRef`. La plantilla la pone en el
    * lugar de la foto provisional de la ciudad; sin foto, el documento sale como antes.
    */
-  foto?: { url: string; proporcion?: number | null } | null
+  /** `credito`: la foto de la biblioteca que es de Commons lleva su autor y licencia («Autora, CC BY-SA 4.0»). */
+  foto?: { url: string; proporcion?: number | null; credito?: string | null } | null
   /** Dónde está guardada la foto del hotel (`sbext://…`). Ausente = sin foto. */
   fotoRef?: string
   /** Ancho entre alto de la foto guardada. */

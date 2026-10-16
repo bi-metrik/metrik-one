@@ -3,7 +3,10 @@
  * Supabase y con Commons, Wikidata y el modelo falsos:
  *   · precisión: lo que no nombra el hotel, y lo que el modelo dice que «no es un hotel», no sale;
  *   · cada opción va a su pestaña; sin modelo, solo lo que nombra el hotel, «sin clasificar»;
- *   · al elegir, la foto queda con su categoría y el reparto deja una por categoría;
+ *   · al marcar, la foto queda con su categoría; se marcan hasta 3 de CUALQUIER categoría (galería,
+ *     Mauricio 2026-10-16): dos habitaciones valen, la cuarta no entra;
+ *   · subir o pegar exige la casilla de autorización y guarda quién, cuándo y de dónde (Emilio);
+ *   · un enlace de Booking, Expedia, Despegar u otra agencia en línea se rechaza;
  *   · las fotos de antes se clasifican UNA vez y la categoría queda en la fila.
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
@@ -12,7 +15,7 @@ import sharp from 'sharp'
 import { base, clienteFalso, type Fila } from '../../../../test/cotizacion-pdf-doble'
 
 vi.mock('@/lib/actions/get-workspace', () => ({
-  getWorkspace: async () => ({ supabase: clienteFalso(), workspaceId: WS, staffId: 's-1', role: 'operator', error: null }),
+  getWorkspace: async () => ({ supabase: clienteFalso(), workspaceId: WS, staffId: 's-1', userId: USUARIO, role: 'operator', error: null }),
 }))
 vi.mock('@/lib/fotos/catalogo-almacen', async (original) => ({
   ...(await original<typeof import('@/lib/fotos/catalogo-almacen')>()),
@@ -23,9 +26,14 @@ vi.mock('@/lib/fotos/catalogo-almacen', async (original) => ({
 }))
 
 const WS = '11111111-2222-3333-4444-555555555555'
+const USUARIO = '99999999-8888-7777-6666-555555555555'
+const AUTORIZADA = { autorizada: true, procedencia: null }
 
 import { olvidarClasificaciones } from '@/lib/fotos/opciones-hotel'
-import { elegirFoto, fotosDelHotel, opcionesDeHotel, subirFotoABiblioteca } from './actions'
+import { MENSAJE_AGENCIA } from '@/lib/fotos/agencias'
+import { MENSAJE_SIN_AUTORIZACION } from '@/lib/fotos/autorizacion'
+import { MENSAJE_TOPE } from '@/lib/fotos/catalogo'
+import { elegirFoto, fotosDelHotel, marcarFotoPrincipal, opcionesDeFoto, opcionesDeHotel, quitarFotoDeBiblioteca, subirFotoABiblioteca } from './actions'
 
 const HOTEL = { tipo: 'hotel', nombre: 'Pullman Paris Tour Eiffel', ciudad: 'París' }
 
@@ -176,30 +184,89 @@ describe('precisión antes que cantidad', () => {
   })
 })
 
-describe('al elegir: la categoría queda en la fila, una por categoría', () => {
-  it('Commons en Fachada, la propia en Habitaciones; otra fachada reemplaza la fachada', { timeout: 30_000 }, async () => {
+describe('al marcar: hasta 3, de cualquier categoría', () => {
+  it('dos fachadas y una habitación entran; la cuarta no; la primera es la principal y se puede cambiar', { timeout: 30_000 }, async () => {
     const a = await elegirFoto(HOTEL, { fuente: 'wikimedia', titulo: 'File:Pullman Eiffel Tower Hotel Paris France 1.jpg' }, null, 'fachada')
     expect(a.ok).toBe(true)
-    expect((await subirFotoABiblioteca(HOTEL, await dataUrl(), null, 'habitacion')).ok).toBe(true)
-    let filas = base.tablas.fotos_catalogo as Fila[]
-    expect(filas.map((f) => [f.categoria, f.posicion, f.principal])).toEqual([['fachada', 1, true], ['habitacion', 2, false]])
+    // Otra fachada YA NO reemplaza la primera: se suma.
     const b = await elegirFoto(HOTEL, { fuente: 'wikimedia', titulo: 'File:Pullman Eiffel Tower Hotel Paris France 2.jpg' }, null, 'fachada')
     expect(b.ok).toBe(true)
-    filas = base.tablas.fotos_catalogo as Fila[]
-    expect(filas).toHaveLength(2)
-    expect(filas.find((f) => f.categoria === 'fachada')).toMatchObject({ titulo_fuente: 'File:Pullman Eiffel Tower Hotel Paris France 2.jpg', posicion: 1, principal: true })
-    if (b.ok) expect(b.elemento?.fotos.map((f) => f.categoria)).toEqual(['fachada', 'habitacion'])
+    expect((await subirFotoABiblioteca(HOTEL, await dataUrl(), null, 'habitacion', AUTORIZADA)).ok).toBe(true)
+    const filas = base.tablas.fotos_catalogo as Fila[]
+    expect(filas.map((f) => [f.categoria, f.posicion, f.principal])).toEqual([['fachada', 1, true], ['fachada', 2, false], ['habitacion', 3, false]])
+    // La galería reconoce cada una entre las opciones por su título.
+    if (b.ok) expect(b.elemento?.fotos.map((f) => f.fuenteId)).toEqual(['File:Pullman Eiffel Tower Hotel Paris France 1.jpg', 'File:Pullman Eiffel Tower Hotel Paris France 2.jpg'])
+
+    const cuarta = await elegirFoto(HOTEL, { fuente: 'wikimedia', titulo: 'File:Pullman Paris Tour Eiffel chambre.jpg' }, null, 'habitacion')
+    expect(cuarta).toEqual({ ok: false, error: MENSAJE_TOPE })
+    expect(base.tablas.fotos_catalogo).toHaveLength(3)
+
+    // «Hacer principal» sobre la habitación: pasa a ser la 1.
+    const hab = filas.find((f) => f.categoria === 'habitacion') as Fila
+    const p = await marcarFotoPrincipal(hab.id as string)
+    expect(p.ok && p.elemento?.fotos[0].id).toBe(hab.id)
+
+    // Desmarcar la quita y libera el puesto: ahora sí entra la habitación.
+    expect((await quitarFotoDeBiblioteca(filas.find((f) => f.posicion === 2)?.id as string)).ok).toBe(true)
+    const otra = await elegirFoto(HOTEL, { fuente: 'wikimedia', titulo: 'File:Pullman Paris Tour Eiffel chambre.jpg' }, null, 'habitacion')
+    expect(otra.ok && otra.elemento?.fotos.map((f) => f.categoria)).toEqual(['habitacion', 'fachada', 'habitacion'])
   })
 
   it('una categoría que no existe se ignora (entra sin categoría, como antes)', async () => {
-    expect((await subirFotoABiblioteca(HOTEL, await dataUrl(), null, 'no_es_hotel')).ok).toBe(true)
+    expect((await subirFotoABiblioteca(HOTEL, await dataUrl(), null, 'no_es_hotel', AUTORIZADA)).ok).toBe(true)
     expect((base.tablas.fotos_catalogo as Fila[])[0].categoria).toBeNull()
+  })
+})
+
+describe('subir o pegar: la casilla de autorización (Emilio)', () => {
+  it('sin la casilla no se guarda nada', async () => {
+    for (const permiso of [undefined, { autorizada: false }, { autorizada: 'sí' }]) {
+      expect(await subirFotoABiblioteca(HOTEL, await dataUrl(), null, 'fachada', permiso)).toEqual({ ok: false, error: MENSAJE_SIN_AUTORIZACION })
+    }
+    expect(base.tablas.fotos_catalogo).toHaveLength(0)
+  })
+
+  it('con la casilla: guarda quién (el usuario de la sesión, no lo que mande el navegador), cuándo y de dónde', async () => {
+    const r = await subirFotoABiblioteca(HOTEL, await dataUrl(), null, 'fachada', { autorizada: true, procedencia: ' kit de medios del hotel ', userId: 'otro' })
+    expect(r.ok).toBe(true)
+    const [f] = base.tablas.fotos_catalogo as Fila[]
+    expect(f).toMatchObject({ origen: 'asesora', autorizada_por: USUARIO, procedencia: 'kit de medios del hotel' })
+    expect(Date.now() - Date.parse(f.autorizada_at as string)).toBeLessThan(60_000)
+  })
+
+  it('una de Commons no lleva autorización (su fuente es el autor y la licencia), ni hereda la de la foto que reemplaza', { timeout: 30_000 }, async () => {
+    await subirFotoABiblioteca(HOTEL, await dataUrl(), null, 'fachada', { autorizada: true, procedencia: 'mayorista X' })
+    const vieja = (base.tablas.fotos_catalogo as Fila[])[0]
+    const r = await elegirFoto(HOTEL, { fuente: 'wikimedia', titulo: 'File:Pullman Eiffel Tower Hotel Paris France 1.jpg' }, vieja.id as string, 'fachada')
+    expect(r.ok).toBe(true)
+    expect((base.tablas.fotos_catalogo as Fila[])[0]).toMatchObject({ origen: 'wikimedia', autorizada_por: null, autorizada_at: null, procedencia: null, autor: 'Autora', licencia: 'CC BY-SA 4.0' })
+  })
+})
+
+describe('agencias en línea: nunca son fuente', () => {
+  it('un enlace de Booking, Expedia o Despegar se rechaza aunque la página oficial esté encendida', async () => {
+    base.tablas.workspaces = [{ id: WS, cotizacion_template_slug: 'trappvel', config_extra: { documento_viaje: { fotos_sitio_oficial: true } } }]
+    for (const url of ['https://www.booking.com/hotel/fr/pullman-paris-tour-eiffel.html', 'https://www.expedia.com/Paris-Hotels-Pullman.h1.Hotel-Information', 'https://www.despegar.com.co/hoteles/h-1']) {
+      expect(await opcionesDeHotel(HOTEL, url)).toEqual({ ok: false, error: MENSAJE_AGENCIA })
+      expect(await opcionesDeFoto(HOTEL, 'sitio_oficial', null, url)).toEqual({ ok: false, error: MENSAJE_AGENCIA })
+    }
+    const r = await elegirFoto(HOTEL, { fuente: 'sitio_oficial', pagina: 'https://www.pullman.example/', imagen: 'https://cf.bstatic.com/xdata/images/hotel/1.jpg' }, null, 'fachada')
+    expect(r).toEqual({ ok: false, error: MENSAJE_AGENCIA })
+    expect(base.tablas.fotos_catalogo).toHaveLength(0)
+  })
+
+  it('también con la página oficial apagada (el mensaje dice por qué)', async () => {
+    expect(await opcionesDeHotel(HOTEL, 'https://www.booking.com/hotel/x.html')).toEqual({ ok: false, error: MENSAJE_AGENCIA })
+  })
+
+  it('la procedencia de una subida tampoco puede ser una agencia', async () => {
+    expect(await subirFotoABiblioteca(HOTEL, await dataUrl(), null, 'fachada', { autorizada: true, procedencia: 'https://www.booking.com/hotel/x' })).toEqual({ ok: false, error: MENSAJE_AGENCIA })
   })
 })
 
 describe('las fotos de antes', () => {
   it('se clasifican una vez y la categoría queda en la fila', async () => {
-    expect((await subirFotoABiblioteca(HOTEL, await dataUrl())).ok).toBe(true)
+    expect((await subirFotoABiblioteca(HOTEL, await dataUrl(), null, null, AUTORIZADA)).ok).toBe(true)
     expect((base.tablas.fotos_catalogo as Fila[])[0].categoria).toBeNull()
     const r = await fotosDelHotel(HOTEL)
     expect(r.ok && r.elemento?.fotos[0].categoria).toBe('zonas_comunes')
