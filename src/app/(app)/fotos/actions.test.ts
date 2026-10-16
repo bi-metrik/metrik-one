@@ -1,6 +1,8 @@
 /**
- * Las acciones de la biblioteca de fotos sobre el doble de Supabase: quién puede, el interruptor
- * de la página oficial, las 12 opciones que no se guardan y el tope de 3.
+ * «Hoteles y tours» sobre el doble de Supabase (Mauricio, 2026-10-16): el perfil se crea solo la
+ * primera vez que el hotel o el tour entra a una cotización; el mismo hotel con otro nombre se
+ * reconoce (sin preguntar si es seguro, preguntando si es dudoso, y la respuesta se recuerda); las
+ * fotos se suben al perfil y entran por cualquiera de sus nombres. Nada sale a la red.
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import sharp from 'sharp'
@@ -14,42 +16,36 @@ vi.mock('@/lib/actions/get-workspace', () => ({
 vi.mock('@/lib/fotos/catalogo-almacen', async (original) => ({
   ...(await original<typeof import('@/lib/fotos/catalogo-almacen')>()),
   guardarEnCatalogo: async (ws: string, tipo: string) => `one://fotos-catalogo/${ws}/${tipo}/${Math.random().toString(16).slice(2).padEnd(16, '0')}.jpg`,
-  enlacesDeCatalogo: async () => new Map(),
+  enlacesDeCatalogo: async (_ws: string, refs: string[]) => new Map(refs.map((r) => [r, `https://firmada.example/${r.split('/').pop()}`])),
   borrarDeCatalogo: async () => {},
 }))
 
 const WS = '11111111-2222-3333-4444-555555555555'
 
-import { fuentesDelSelector } from '@/lib/fotos/clave'
-import { elegirFoto, leerBibliotecaDeFotos, opcionesDeFoto, paginaOficialSugerida, subirFotoABiblioteca } from './actions'
+import { MENSAJE_SIN_AUTORIZACION } from '@/lib/fotos/autorizacion'
+import { claveDeFoto } from '@/lib/fotos/clave'
+import { fotosDeBibliotecaDelDocumento } from '@/lib/fotos/catalogo-propuesta'
+import {
+  contestarMismoPerfil,
+  crearPerfil,
+  fotosParaTarjetas,
+  leerHotelesYTours,
+  moverFoto,
+  quitarFotoDeBiblioteca,
+  separarNombreDelPerfil,
+  subirFotoABiblioteca,
+  type PedidoFoto,
+} from './actions'
 
-function sembrar(configExtra: Record<string, unknown> = {}, plantilla = 'trappvel') {
+function sembrar(plantilla = 'trappvel', extra: Record<string, Fila[]> = {}) {
   base.secuencia = 0
   base.tablas = {
-    workspaces: [{ id: WS, cotizacion_template_slug: plantilla, config_extra: configExtra }],
+    workspaces: [{ id: WS, cotizacion_template_slug: plantilla, config_extra: {} }],
     fotos_catalogo: [],
+    fotos_perfiles: [],
+    fotos_perfiles_alias: [],
+    ...extra,
   }
-}
-
-let llamadas: string[] = []
-function commons() {
-  const pagina = (i: number) => ({
-    title: `File:Foto ${i}.jpg`,
-    index: i + 1,
-    imageinfo: [{
-      descriptionurl: `https://commons.wikimedia.org/wiki/File:Foto_${i}.jpg`,
-      thumburl: `https://upload.wikimedia.org/thumb/${i}.jpg`,
-      thumbwidth: 400, thumbheight: 266, width: 3000, height: 2000, mime: 'image/jpeg',
-      extmetadata: { LicenseShortName: { value: 'CC BY 4.0' }, Artist: { value: `Autora ${i}` } },
-    }],
-  })
-  vi.stubGlobal('fetch', async (url: string) => {
-    llamadas.push(String(url))
-    if (String(url).startsWith('https://commons.wikimedia.org/w/api.php')) {
-      return new Response(JSON.stringify({ query: { pages: Array.from({ length: 30 }, (_, i) => pagina(i)) } }))
-    }
-    return new Response('no', { status: 404 })
-  })
 }
 
 async function dataUrl(color = 90): Promise<string> {
@@ -57,73 +53,176 @@ async function dataUrl(color = 90): Promise<string> {
   return `data:image/jpeg;base64,${b.toString('base64')}`
 }
 
-const HOTEL = { tipo: 'hotel', nombre: 'H10 Metropolitan', ciudad: 'Barcelona' }
+const AUTORIZADA = { autorizada: true, procedencia: 'kit de medios del hotel' }
+const CATALONIA: PedidoFoto = { tipo: 'hotel', nombre: 'Catalonia Puerta del Sol', ciudad: 'Madrid' }
+const CATALONIA_LARGO: PedidoFoto = { tipo: 'hotel', nombre: 'Hotel Catalonia Puerta del Sol Madrid', ciudad: 'Madrid' }
+const IBEROSTAR: PedidoFoto = { tipo: 'hotel', nombre: 'Iberostar Selection Bávaro', ciudad: 'Punta Cana' }
+const IBEROSTAR_SUITES: PedidoFoto = { tipo: 'hotel', nombre: 'Iberostar Selection Bávaro Suites', ciudad: 'Punta Cana' }
+const TOUR: PedidoFoto = { tipo: 'actividad', nombre: 'City tour Madrid', ciudad: 'Madrid' }
+const clave = (p: PedidoFoto) => claveDeFoto(p.tipo, p.nombre, p.ciudad)
 
 beforeEach(() => {
   sesion.role = 'operator'
-  llamadas = []
   sembrar()
-  commons()
-})
-afterEach(() => {
-  vi.unstubAllGlobals()
-})
-
-describe('la biblioteca', () => {
-  it('solo en espacios con propuesta de viaje', async () => {
-    sembrar({}, 'termotech')
-    expect(await leerBibliotecaDeFotos()).toEqual({ ok: false, error: expect.stringContaining('no tiene') })
-  })
-
-  it('un rol de solo lectura la ve pero no cambia nada', async () => {
-    sesion.role = 'read_only'
-    expect((await leerBibliotecaDeFotos()).ok).toBe(true)
-    expect(await subirFotoABiblioteca(HOTEL, await dataUrl(), null, null, { autorizada: true })).toEqual({ ok: false, error: expect.stringContaining('no cambiarlas') })
+  vi.stubGlobal('fetch', async () => {
+    throw new Error('nada sale a la red')
   })
 })
+afterEach(() => vi.unstubAllGlobals())
 
-describe('12 opciones, «Ver más» y nada se guarda hasta elegir', () => {
-  it('Commons da 12 por tanda para un hotel (lo elige una persona), sin escribir nada', async () => {
-    const r = await opcionesDeFoto(HOTEL, 'wikimedia', null)
+describe('el perfil se crea solo la primera vez', () => {
+  it('un hotel y un tour nuevos en una cotización: perfil propio, sin fotos, sin pregunta', async () => {
+    const r = await fotosParaTarjetas([CATALONIA, TOUR])
     expect(r.ok).toBe(true)
     if (!r.ok) return
-    expect(r.opciones).toHaveLength(12)
-    expect(r.opciones[0]).toMatchObject({ fuente: 'wikimedia', titulo: 'File:Foto 0.jpg', credito: 'Autora 0 · CC BY 4.0' })
-    expect(r.siguiente).toBe('1')
-    const mas = await opcionesDeFoto(HOTEL, 'wikimedia', r.siguiente)
-    expect(mas.ok && mas.opciones.map((o) => o.titulo)[0]).toBe('File:Foto 12.jpg')
-    // Las candidatas NO se guardan.
-    expect(base.tablas.fotos_catalogo).toHaveLength(0)
+    expect(r.tarjetas.map((t) => [t.tipo, t.clave, t.elemento?.fotos.length, t.duda])).toEqual([
+      ['hotel', clave(CATALONIA), 0, null],
+      ['actividad', clave(TOUR), 0, null],
+    ])
+    expect(base.tablas.fotos_perfiles.map((p) => [p.tipo, p.clave, p.nombre, p.ciudad])).toEqual([
+      ['hotel', clave(CATALONIA), 'Catalonia Puerta del Sol', 'Madrid'],
+      ['actividad', clave(TOUR), 'City tour Madrid', 'Madrid'],
+    ])
+    // La segunda vez no crea otro.
+    await fotosParaTarjetas([CATALONIA, TOUR])
+    expect(base.tablas.fotos_perfiles).toHaveLength(2)
   })
-})
 
-describe('la página oficial, detrás del interruptor', () => {
-  it('apagada (por defecto): el selector no la ofrece y las acciones la rechazan sin salir a la red', async () => {
-    expect(fuentesDelSelector(false)).toEqual(['wikimedia', 'subida'])
-    expect((await leerBibliotecaDeFotos()) as { sitioOficial?: boolean }).toMatchObject({ ok: true, sitioOficial: false })
-    expect(await opcionesDeFoto(HOTEL, 'sitio_oficial', null, 'https://www.hotel.example/galeria')).toEqual({ ok: false, error: expect.stringContaining('no están encendidas') })
-    expect(await paginaOficialSugerida(HOTEL)).toEqual({ ok: false, error: expect.stringContaining('no están encendidas') })
-    expect(await elegirFoto(HOTEL, { fuente: 'sitio_oficial', pagina: 'https://www.hotel.example/', imagen: 'https://www.hotel.example/a.jpg' })).toEqual({
-      ok: false,
-      error: expect.stringContaining('no están encendidas'),
+  it('un rol de solo lectura ve las tarjetas pero no crea perfiles ni sube fotos', async () => {
+    sesion.role = 'read_only'
+    const r = await fotosParaTarjetas([CATALONIA])
+    expect(r.ok && r.editable).toBe(false)
+    expect(base.tablas.fotos_perfiles).toHaveLength(0)
+    const s = await subirFotoABiblioteca(CATALONIA, await dataUrl(), null, null, AUTORIZADA)
+    expect(s.ok).toBe(false)
+  })
+
+  it('en un espacio sin propuesta de viaje no hay perfiles ni pantalla', async () => {
+    sembrar('generica')
+    expect((await fotosParaTarjetas([CATALONIA])).ok).toBe(false)
+    const p = await leerHotelesYTours()
+    expect(p.ok === false && /no tiene/.test(p.error)).toBe(true)
+  })
+
+  it('un hotel con fotos de antes (sin fila de perfil) es su perfil: recibe la fila y muestra sus fotos', async () => {
+    sembrar('trappvel', {
+      fotos_catalogo: [{ id: 'f1', workspace_id: WS, tipo: 'hotel', clave: clave(CATALONIA), nombre: 'Catalonia Puerta del Sol', ciudad: 'Madrid', ref: `one://fotos-catalogo/${WS}/hotel/${'a'.repeat(16)}.jpg`, origen: 'asesora', revisada: true, principal: true, posicion: 1 }],
     })
-    expect(llamadas).toEqual([])
-    expect(base.tablas.fotos_catalogo).toHaveLength(0)
-  })
-
-  it('encendida: va primera en el selector y pide la URL si no la tiene', async () => {
-    sembrar({ documento_viaje: { fotos_sitio_oficial: true } })
-    expect(fuentesDelSelector(true)[0]).toBe('sitio_oficial')
-    expect(await opcionesDeFoto(HOTEL, 'sitio_oficial', null, '')).toEqual({ ok: false, error: expect.stringContaining('Pega la dirección') })
+    const r = await fotosParaTarjetas([CATALONIA])
+    expect(r.ok && r.tarjetas[0].elemento?.fotos.map((f) => f.id)).toEqual(['f1'])
+    expect(base.tablas.fotos_perfiles.map((p) => p.clave)).toEqual([clave(CATALONIA)])
   })
 })
 
-describe('máximo 3 por elemento', () => {
-  it('la cuarta subida no entra', { timeout: 30_000 }, async () => {
-    for (let i = 0; i < 3; i++) expect((await subirFotoABiblioteca(HOTEL, await dataUrl(i * 50), null, null, { autorizada: true })).ok).toBe(true)
-    const filas = base.tablas.fotos_catalogo as Fila[]
-    expect(filas.map((f) => [f.posicion, f.principal])).toEqual([[1, true], [2, false], [3, false]])
-    expect(await subirFotoABiblioteca(HOTEL, await dataUrl(220), null, null, { autorizada: true })).toEqual({ ok: false, error: expect.stringContaining('Ya tiene 3 fotos') })
-    expect(base.tablas.fotos_catalogo).toHaveLength(3)
+describe('el mismo hotel con otro nombre', () => {
+  it('«Hotel Catalonia Puerta del Sol Madrid» = «Catalonia Puerta del Sol»: alias solo, sin preguntar, y trae sus fotos', async () => {
+    await fotosParaTarjetas([CATALONIA])
+    expect((await subirFotoABiblioteca(CATALONIA, await dataUrl(), null, 'fachada', AUTORIZADA)).ok).toBe(true)
+    const r = await fotosParaTarjetas([CATALONIA_LARGO])
+    expect(r.ok).toBe(true)
+    if (!r.ok) return
+    expect(r.tarjetas[0]).toMatchObject({ clave: clave(CATALONIA_LARGO), duda: null })
+    expect(r.tarjetas[0].elemento).toMatchObject({ clave: clave(CATALONIA), nombre: 'Catalonia Puerta del Sol' })
+    expect(r.tarjetas[0].elemento?.fotos).toHaveLength(1)
+    expect(base.tablas.fotos_perfiles).toHaveLength(1)
+    expect(base.tablas.fotos_perfiles_alias.map((a) => [a.clave, a.nombre])).toEqual([[clave(CATALONIA_LARGO), 'Hotel Catalonia Puerta del Sol Madrid']])
+  })
+
+  it('el documento encuentra las fotos por el alias (la misma lectura de la vista)', async () => {
+    await fotosParaTarjetas([CATALONIA])
+    await subirFotoABiblioteca(CATALONIA, await dataUrl(), null, null, AUTORIZADA)
+    await fotosParaTarjetas([CATALONIA_LARGO])
+    const doc = await fotosDeBibliotecaDelDocumento(clienteFalso(), WS, [{ hotel: CATALONIA_LARGO.nombre, linea: CATALONIA_LARGO.nombre, ciudad: 'Madrid' }])
+    expect([...doc.hoteles.keys()]).toEqual([clave(CATALONIA_LARGO)])
+  })
+
+  it('dudoso: pregunta «¿Es el mismo hotel que …?» con la foto del conocido, y no escribe nada hasta la respuesta', async () => {
+    await fotosParaTarjetas([IBEROSTAR])
+    await subirFotoABiblioteca(IBEROSTAR, await dataUrl(), null, null, AUTORIZADA)
+    const r = await fotosParaTarjetas([IBEROSTAR_SUITES])
+    expect(r.ok).toBe(true)
+    if (!r.ok) return
+    expect(r.tarjetas[0].elemento).toBeNull()
+    expect(r.tarjetas[0].duda).toMatchObject({ clave: clave(IBEROSTAR), nombre: 'Iberostar Selection Bávaro', ciudad: 'Punta Cana' })
+    expect(r.tarjetas[0].duda?.url).toMatch(/^https:\/\/firmada\.example\//)
+    expect(base.tablas.fotos_perfiles).toHaveLength(1)
+    expect(base.tablas.fotos_perfiles_alias).toHaveLength(0)
+    // Subir antes de contestar no adivina: pide la respuesta.
+    const s = await subirFotoABiblioteca(IBEROSTAR_SUITES, await dataUrl(), null, null, AUTORIZADA)
+    expect(s.ok === false && s.error).toMatch(/Primero dinos si es el mismo hotel/)
+  })
+
+  it('«Sí, es el mismo»: queda como alias, trae las fotos y la próxima vez no pregunta', async () => {
+    await fotosParaTarjetas([IBEROSTAR])
+    await subirFotoABiblioteca(IBEROSTAR, await dataUrl(), null, null, AUTORIZADA)
+    const r = await contestarMismoPerfil(IBEROSTAR_SUITES, clave(IBEROSTAR), true)
+    expect(r.ok && r.elemento?.clave).toBe(clave(IBEROSTAR))
+    expect(r.ok && r.elemento?.alias.map((a) => a.nombre)).toEqual(['Iberostar Selection Bávaro Suites'])
+    const otra = await fotosParaTarjetas([IBEROSTAR_SUITES])
+    expect(otra.ok && otra.tarjetas[0]).toMatchObject({ duda: null, elemento: { clave: clave(IBEROSTAR) } })
+  })
+
+  it('«No, es otro»: perfil propio, sin las fotos del otro, y la próxima vez no pregunta', async () => {
+    await fotosParaTarjetas([IBEROSTAR])
+    await subirFotoABiblioteca(IBEROSTAR, await dataUrl(), null, null, AUTORIZADA)
+    const r = await contestarMismoPerfil(IBEROSTAR_SUITES, clave(IBEROSTAR), false)
+    expect(r.ok && r.elemento).toMatchObject({ clave: clave(IBEROSTAR_SUITES), fotos: [] })
+    const otra = await fotosParaTarjetas([IBEROSTAR_SUITES])
+    expect(otra.ok && otra.tarjetas[0]).toMatchObject({ duda: null, elemento: { clave: clave(IBEROSTAR_SUITES) } })
+    expect(base.tablas.fotos_perfiles_alias).toHaveLength(0)
+  })
+
+  it('separar un alias equivocado: la próxima cotización vuelve a preguntar', async () => {
+    await fotosParaTarjetas([IBEROSTAR])
+    const r = await contestarMismoPerfil(IBEROSTAR_SUITES, clave(IBEROSTAR), true)
+    const alias = r.ok ? r.elemento?.alias[0] : null
+    expect(alias).toBeTruthy()
+    const s = await separarNombreDelPerfil(alias!.id)
+    expect(s.ok && s.elemento?.alias).toEqual([])
+    const otra = await fotosParaTarjetas([IBEROSTAR_SUITES])
+    expect(otra.ok && otra.tarjetas[0].duda?.clave).toBe(clave(IBEROSTAR))
+  })
+})
+
+describe('fotos del perfil', () => {
+  it('sin la casilla de autorización no se guarda; con ella, hasta 3, y se ordenan y se quitan', { timeout: 30_000 }, async () => {
+    expect(await subirFotoABiblioteca(TOUR, await dataUrl(), null, null, { autorizada: false })).toEqual({ ok: false, error: MENSAJE_SIN_AUTORIZACION })
+    for (let i = 0; i < 3; i++) expect((await subirFotoABiblioteca(TOUR, await dataUrl(i * 30), null, null, AUTORIZADA)).ok).toBe(true)
+    const cuarta = await subirFotoABiblioteca(TOUR, await dataUrl(200), null, null, AUTORIZADA)
+    expect(cuarta.ok === false && cuarta.error).toMatch(/Ya tiene 3 fotos/)
+    const p = await leerHotelesYTours()
+    const fotos = p.ok ? p.elementos.find((e) => e.clave === clave(TOUR))!.fotos : []
+    expect(fotos.map((f) => f.principal)).toEqual([true, false, false])
+    const [a, b, c] = fotos.map((f) => f.id)
+    const movida = await moverFoto(c, 'primera')
+    expect(movida.ok && movida.elemento?.fotos.map((f) => f.id)).toEqual([c, a, b])
+    const atras = await moverFoto(c, 'despues')
+    expect(atras.ok && atras.elemento?.fotos.map((f) => f.id)).toEqual([a, c, b])
+    const quitada = await quitarFotoDeBiblioteca(a)
+    expect(quitada.ok && quitada.elemento?.fotos.map((f) => [f.id, f.principal])).toEqual([[c, true], [b, false]])
+  })
+
+  it('«Agregar» desde la pantalla: crea el perfil antes de la cotización; si se parece a otro, pregunta', async () => {
+    const r = await crearPerfil(CATALONIA)
+    expect(r.ok && r.elemento?.clave).toBe(clave(CATALONIA))
+    const seguro = await crearPerfil(CATALONIA_LARGO)
+    expect(seguro.ok && seguro.elemento?.clave).toBe(clave(CATALONIA))
+    await crearPerfil(IBEROSTAR)
+    const dudoso = await crearPerfil(IBEROSTAR_SUITES)
+    expect(dudoso.ok && 'duda' in dudoso && dudoso.duda.clave).toBe(clave(IBEROSTAR))
+  })
+
+  it('la pantalla lista hoteles y tours (las ciudades solo si tienen fotos), con sus otros nombres', async () => {
+    await fotosParaTarjetas([CATALONIA, CATALONIA_LARGO, TOUR])
+    sembrar('trappvel', {
+      ...base.tablas,
+      fotos_catalogo: [{ id: 'c1', workspace_id: WS, tipo: 'ciudad', clave: 'barcelona', nombre: 'Barcelona', ciudad: 'Barcelona', ref: `one://fotos-catalogo/${WS}/ciudad/${'b'.repeat(16)}.jpg`, origen: 'wikimedia', revisada: false, principal: true, posicion: 1 }],
+    })
+    const p = await leerHotelesYTours()
+    expect(p.ok && p.elementos.map((e) => [e.tipo, e.nombre, e.alias.map((a) => a.nombre)])).toEqual([
+      ['hotel', 'Catalonia Puerta del Sol', ['Hotel Catalonia Puerta del Sol Madrid']],
+      ['actividad', 'City tour Madrid', []],
+      ['ciudad', 'Barcelona', []],
+    ])
   })
 })

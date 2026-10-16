@@ -338,6 +338,11 @@ export interface CotizacionPDFProps {
     precio_venta: number
     cantidad: number
     unidad?: string | null
+    /**
+     * La foto del perfil del plan en la biblioteca del espacio (2026-10-16), si tiene. Solo la
+     * llena la plantilla de Trappvel de @react-pdf; ausente, la tarjeta sale como siempre.
+     */
+    foto?: FotoPDF
   }[] | null
 
   /**

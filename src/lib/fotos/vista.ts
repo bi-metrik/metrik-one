@@ -1,8 +1,9 @@
 /**
- * Lo que la pantalla de la biblioteca y el selector ven de una foto. PURO: de las filas del
- * catálogo (`FilaCatalogo`) a lo que viaja al navegador, sin rutas del bucket ni ids de staff.
+ * Lo que la pantalla «Hoteles y tours» y la tarjeta de la cotización ven de una foto y de un
+ * perfil. PURO: de las filas del catálogo (`FilaCatalogo`) a lo que viaja al navegador, sin rutas
+ * del bucket ni ids de staff.
  */
-import type { CategoriaFoto, CategoriaHotel } from './categoria'
+import type { CategoriaFoto } from './categoria'
 import { fotoImprimible, MAX_FOTOS_POR_ELEMENTO, objetivo, TIPOS_FOTO, type ObjetivoFoto, type OrigenFoto, type TipoFoto } from './clave'
 
 export interface FotoVista {
@@ -10,94 +11,67 @@ export interface FotoVista {
   /** Enlace firmado corto; `null` = no se pudo firmar (se ve el degradado). */
   url: string | null
   principal: boolean
-  posicion: number
   origen: OrigenFoto
-  /** «Autora · CC BY-SA 4.0», «hotel.com» o `null` (propia). */
+  /** «Autora · CC BY-SA 4.0» (Commons, de antes) o `null` (propia). */
   fuente: string | null
-  /** La página de donde salió (Commons o el sitio oficial). */
-  fuenteUrl: string | null
-  revisada: boolean
-  /** ¿Sale en la propuesta? (un hotel sin elegir no; una del sitio oficial con el interruptor apagado no). */
+  /** ¿Sale en la propuesta? (una de la página oficial no; un hotel que nadie eligió no). */
   seImprime: boolean
-  /** Hotel: fachada, habitación o zonas comunes; `null` = sin categoría (las de antes). */
+  /** Hotel: fachada, habitación, zonas comunes u otra; `null` sin categoría. */
   categoria: CategoriaFoto | null
-  /**
-   * Cómo se reconoce entre las opciones del selector: el título del archivo en Commons o la URL de
-   * la imagen de la página oficial (el `id` de `OpcionFoto`). `null` = subida.
-   */
-  fuenteId: string | null
+}
+
+/** Otro nombre del mismo perfil («Hotel Catalonia Puerta del Sol Madrid»). */
+export interface AliasVista {
+  id: string
+  nombre: string
+  ciudad: string | null
 }
 
 export interface ElementoVista {
   tipo: TipoFoto
+  /** La llave del perfil (donde viven las fotos). */
   clave: string
   nombre: string
   ciudad: string | null
   fotos: FotoVista[]
   /** ¿Cabe otra foto? (hasta `MAX_FOTOS_POR_ELEMENTO`). */
   admiteOtra: boolean
+  /** Los otros nombres con que llegó este hotel o tour. */
+  alias: AliasVista[]
 }
 
-/** Una de las 12 opciones del selector. Nada de esto se guarda hasta que la persona la elige. */
-export interface OpcionFoto {
-  /** Identifica la opción en la cuadrícula. */
-  id: string
-  fuente: 'wikimedia' | 'sitio_oficial'
-  miniatura: string
-  ancho: number
-  alto: number
-  /** Título del archivo en Commons, o la URL de la imagen en el sitio oficial. */
-  titulo: string
-  /** «Autora · CC BY-SA 4.0» o el dominio del sitio. */
-  credito: string | null
-  /** La página donde está. */
-  pagina: string
-  /** Sitio oficial: la URL de la imagen. */
-  imagen?: string
-  /** Hotel: la pestaña donde va (lo dijo el modelo); `null` = sin clasificar. */
-  categoria?: CategoriaHotel | null
-}
-
-/** Lo que el navegador manda al elegir: SOLO cómo encontrarla; el servidor revalida todo. */
-export type EleccionFoto = { fuente: 'wikimedia'; titulo: string } | { fuente: 'sitio_oficial'; pagina: string; imagen: string }
-
-interface FilaParaVista {
-  id: string
-  tipo: TipoFoto
+/**
+ * «¿Es el mismo hotel que …?»: el nombre de la cotización se parece a uno que el espacio ya conoce
+ * y la persona decide. `clave` es la del perfil conocido.
+ */
+export interface DudaVista {
   clave: string
   nombre: string
   ciudad: string | null
+  /** La principal del perfil conocido, para reconocerlo de un vistazo. */
+  url: string | null
+}
+
+interface FilaParaVista {
+  id: string
   ref: string
   origen: OrigenFoto
-  fuente_url: string | null
   autor: string | null
   licencia: string | null
   revisada: boolean
-  principal: boolean
-  posicion: number
   categoria?: CategoriaFoto | null
-  titulo_fuente?: string | null
-  imagen_url?: string | null
 }
 
-export function dominio(url: string | null | undefined): string | null {
-  try {
-    return url ? new URL(url).hostname.replace(/^www\./, '') : null
-  } catch {
-    return null
-  }
-}
-
-export function fuenteDeFila(f: Pick<FilaParaVista, 'origen' | 'autor' | 'licencia' | 'fuente_url'>): string | null {
+function fuenteDeFila(f: Pick<FilaParaVista, 'origen' | 'autor' | 'licencia'>): string | null {
   if (f.origen === 'wikimedia') return [f.autor, f.licencia].filter(Boolean).join(' · ') || 'Wikimedia Commons'
-  if (f.origen === 'sitio_oficial') return dominio(f.fuente_url)
+  if (f.origen === 'sitio_oficial') return 'Página oficial'
   return null
 }
 
+/** Un elemento (perfil o ciudad) con sus fotos YA ordenadas (la principal primero). */
 export function vistaDeElemento(
-  e: { tipo: TipoFoto; clave: string; nombre: string; ciudad: string | null; fotos: FilaParaVista[] },
+  e: { tipo: TipoFoto; clave: string; nombre: string; ciudad: string | null; fotos: FilaParaVista[]; alias?: AliasVista[] },
   urls: Map<string, string>,
-  opts: { sitioOficial: boolean },
 ): ElementoVista {
   return {
     tipo: e.tipo,
@@ -105,28 +79,24 @@ export function vistaDeElemento(
     nombre: e.nombre,
     ciudad: e.ciudad,
     admiteOtra: e.fotos.length < MAX_FOTOS_POR_ELEMENTO,
+    alias: e.alias ?? [],
     fotos: e.fotos.slice(0, MAX_FOTOS_POR_ELEMENTO).map((f, i) => ({
       id: f.id,
       url: urls.get(f.ref) ?? null,
       // La primera del orden es la principal aunque la fila no lo diga (código anterior).
       principal: i === 0,
-      posicion: f.posicion ?? 1,
       origen: f.origen,
       fuente: fuenteDeFila(f),
-      fuenteUrl: f.fuente_url,
-      revisada: f.revisada,
-      seImprime: fotoImprimible(e.tipo, f.origen, f.revisada, opts),
+      seImprime: fotoImprimible(e.tipo, f.origen, f.revisada),
       categoria: f.categoria ?? null,
-      fuenteId: f.origen === 'wikimedia' ? f.titulo_fuente ?? null : f.origen === 'sitio_oficial' ? f.imagen_url ?? null : null,
     })),
   }
 }
 
 /**
- * Lo que la tarjeta del hotel muestra de la biblioteca: la foto que sale en la propuesta (la
- * principal si se imprime; si no, la primera que sí, igual que `catalogoParaLaPropuesta`) y
- * cuántas más tiene el elemento que también salen («+2»). Sin ninguna imprimible, la tarjeta queda
- * vacía con «Buscar fotos».
+ * Lo que la tarjeta muestra del perfil: la foto que sale en la propuesta (la principal si se
+ * imprime; si no, la primera que sí, igual que el documento) y cuántas más salen con ella («+2»).
+ * Sin ninguna imprimible, el recuadro queda vacío: «Agrega fotos de este hotel».
  */
 export function fotoDeLaTarjeta(e: ElementoVista | null | undefined): { foto: FotoVista | null; mas: number; admiteOtra: boolean } {
   const imprimibles = (e?.fotos ?? []).filter((f) => f.seImprime)
@@ -144,25 +114,4 @@ export function objetivoDelPedido(p: unknown): ObjetivoFoto | null {
   if (typeof nombre !== 'string' || nombre.trim().length === 0 || nombre.length > 200) return null
   if (ciudad !== null && ciudad !== undefined && (typeof ciudad !== 'string' || ciudad.length > 120)) return null
   return objetivo(tipo as TipoFoto, nombre, typeof ciudad === 'string' ? ciudad : null)
-}
-
-/**
- * Lo que muestra una pestaña del selector de un hotel: las opciones que el modelo puso en ella y,
- * aparte, las que no pudo clasificar (salen en todas las pestañas, con aviso). Sin repetir. PURO.
- */
-export function opcionesDeLaPestana(opciones: readonly OpcionFoto[], categoria: CategoriaHotel): { propias: OpcionFoto[]; sinClasificar: OpcionFoto[] } {
-  const vistas = new Set<string>()
-  const unica = (o: OpcionFoto) => (vistas.has(o.id) ? false : (vistas.add(o.id), true))
-  const propias = opciones.filter((o) => o.categoria === categoria).filter(unica)
-  const sinClasificar = opciones.filter((o) => o.categoria === null || o.categoria === undefined).filter(unica)
-  return { propias, sinClasificar }
-}
-
-/**
- * El `background-image` de una miniatura, con la URL ENTRE COMILLAS: las de Commons traen
- * paréntesis literales («…Eiffel_Tower_(32767454980).jpg») que cortan un `url(…)` sin comillas y
- * la miniatura sale vacía.
- */
-export function fondoDeMiniatura(url: string): string {
-  return `url(${JSON.stringify(url)})`
 }

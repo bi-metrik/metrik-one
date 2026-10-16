@@ -18,9 +18,11 @@ import {
 import { comprimirFotoHotel } from '@/lib/cotizaciones/foto-hotel-navegador'
 import HojaCliente from '@/app/(app)/negocios/hoja-cliente'
 import { avisarCambioDeFotos, useFotoDeBiblioteca } from '@/app/(app)/negocios/fotos-tarjeta'
-import SelectorFotos from '@/app/(app)/fotos/selector-fotos'
+import PerfilFotos from '@/app/(app)/fotos/perfil-fotos'
 import { DialogoAutorizacionFoto } from '@/app/(app)/fotos/autorizacion-foto'
+import { contestarMismoPerfil, subirFotoABiblioteca, type PedidoFoto } from '@/app/(app)/fotos/actions'
 import type { PedidoAutorizacion } from '@/lib/fotos/autorizacion'
+import type { CategoriaFoto } from '@/lib/fotos/categoria'
 import { fotoDeLaTarjeta, type ElementoVista } from '@/lib/fotos/vista'
 import TarjetaCosto from '@/app/(app)/negocios/tarjeta-costo'
 import PastillaAerolinea from '@/app/(app)/negocios/pastilla-aerolinea'
@@ -30,7 +32,7 @@ import { ItemMenu, MenuAcciones, SeparadorMenu } from '@/components/viaje/menu-a
 import { Miniatura, MiniaturaManual, useVistaAmpliada } from '@/components/viaje/pantallazo'
 import type { FilaAdicional } from '@/lib/cotizaciones/adicionales'
 import { aplicarCorrecciones, esCorregible, leerCorrecciones, leidosPorSlug } from '@/lib/cotizaciones/correcciones'
-import { cargoDeItem, hotelesDeItems, vuelosDeItems, type ItemConLectura } from '@/lib/cotizaciones/detalle-viaje'
+import { cargoDeItem, ciudadDeActividad, hotelesDeItems, vuelosDeItems, type ItemConLectura } from '@/lib/cotizaciones/detalle-viaje'
 import {
   costoPorTipoDeHabitaciones,
   habitacionesDeTarifa,
@@ -318,20 +320,27 @@ export default function TarjetaOpcion({
   const fotoRef = fotoConfirmada && fotoConfirmada.antes === fotoDeLaPagina ? fotoConfirmada.ahora : fotoDeLaPagina
   const [subiendoFoto, setSubiendoFoto] = useState(false)
 
-  // La biblioteca de fotos (2026-10-16): el recuadro de la foto es su puerta. La foto del hotel
-  // es del espacio (llave hotel|ciudad), la misma en la tarjeta, el panel, /fotos y el documento.
-  const pedidoFoto = esHotel && hotel && (hotel.hotel ?? hotel.linea)
-    ? { tipo: 'hotel' as const, nombre: (hotel.hotel ?? hotel.linea) as string, ciudad: hotel.ciudad ?? null }
-    : null
+  // El perfil del hotel o del tour (2026-10-16): sus fotos son del espacio y entran solas en la
+  // propuesta; la tarjeta las muestra, deja pegar o subir otra y pregunta «¿Es el mismo …?».
+  const nombreActividad = esActividad ? nombreVisibleDeLinea(item) : null
+  const pedidoFoto: PedidoFoto | null = esHotel && hotel && (hotel.hotel ?? hotel.linea)
+    ? { tipo: 'hotel', nombre: (hotel.hotel ?? hotel.linea) as string, ciudad: hotel.ciudad ?? null }
+    : esActividad && nombreActividad
+      ? { tipo: 'actividad', nombre: nombreActividad, ciudad: ciudadDeActividad(item) }
+      : null
   const bib = useFotoDeBiblioteca(pedidoFoto)
+  // El espacio tiene biblioteca: toda foto nueva va al perfil (con la casilla de autorización).
   const conBiblioteca = bib?.disponible === true
-  const enTarjeta = conBiblioteca ? fotoDeLaTarjeta(bib.elemento) : null
-  const [selectorFoto, setSelectorFoto] = useState<{ reemplaza: string | null } | null>(null)
+  // Mientras el perfil se lee, la tarjeta muestra lo de antes (sin parpadear a «vacía»).
+  const enTarjeta = conBiblioteca && bib.elemento !== undefined ? fotoDeLaTarjeta(bib.elemento) : null
+  const [perfilAbierto, setPerfilAbierto] = useState(false)
+  const [contestando, setContestando] = useState(false)
 
-  /** Lo que quedó en la biblioteca: se pinta ya, los demás lo releen y la foto vieja de la opción se suelta. */
+  /** Lo que quedó en el perfil: se pinta ya, las demás tarjetas lo releen y la foto vieja de la opción se suelta. */
   function quedoEnBiblioteca(elemento: ElementoVista | null) {
     bib?.poner(elemento)
     avisarCambioDeFotos()
+    if (esHotel && elemento && elemento.fotos.length > 0) soltarFotoVieja()
   }
 
   function soltarFotoVieja() {
@@ -341,25 +350,57 @@ export default function TarjetaOpcion({
     }).catch(() => {})
   }
 
-  // Con biblioteca, la foto subida pide antes «Tengo autorización para usar esta foto» (Emilio, 2026-10-16).
+  function contestar(mismo: boolean) {
+    if (!pedidoFoto || !bib?.duda || contestando) return
+    setContestando(true)
+    void contestarMismoPerfil(pedidoFoto, bib.duda.clave, mismo)
+      .then(r => {
+        if (!r.ok) { toast.error(r.error); return }
+        quedoEnBiblioteca(r.elemento)
+      })
+      .catch(() => toast.error('No se pudo guardar. Vuelve a intentarlo.'))
+      .finally(() => setContestando(false))
+  }
+
+  // Con perfil, la foto subida pide antes «Tengo autorización para usar esta foto» (Emilio, 2026-10-16).
   const [fotoPorAutorizar, setFotoPorAutorizar] = useState<File | null>(null)
 
   function ponerFoto(archivo: File) {
     if (subiendoFoto) return
     if (conBiblioteca) { setFotoPorAutorizar(archivo); return }
-    enviarFoto(archivo)
+    if (esHotel) enviarFotoDeLaOpcion(archivo)
   }
 
-  function enviarFoto(archivo: File, permiso?: PedidoAutorizacion) {
+  /** Con perfil: la foto va al perfil del hotel o del tour (se agrega si cabe). */
+  function enviarAlPerfil(archivo: File, permiso: PedidoAutorizacion, categoria: CategoriaFoto | null) {
+    if (subiendoFoto || !pedidoFoto) return
+    setSubiendoFoto(true)
+    void (async () => {
+      try {
+        const foto = await comprimirFotoHotel(archivo)
+        if (!foto) { toast.error('Ese archivo no es una foto. Usa un JPG o un PNG.'); return }
+        const r = await subirFotoABiblioteca(pedidoFoto, foto.dataUrl, null, categoria, permiso)
+        if (!r.ok) { toast.error(r.error); return }
+        setFotoPorAutorizar(null)
+        quedoEnBiblioteca(r.elemento)
+      } catch {
+        toast.error('No se pudo guardar la foto. Vuelve a intentarlo.')
+      } finally {
+        setSubiendoFoto(false)
+      }
+    })()
+  }
+
+  /** Sin perfil (otra plantilla): la foto del hotel queda en la opción, como antes. */
+  function enviarFotoDeLaOpcion(archivo: File) {
     if (subiendoFoto) return
     setSubiendoFoto(true)
     void (async () => {
       try {
         const foto = await comprimirFotoHotel(archivo)
         if (!foto) { toast.error('Ese archivo no es una foto. Usa un JPG o un PNG.'); return }
-        const r = await ponerFotoDelHotel(itemId, foto.dataUrl, foto.proporcion, enTarjeta?.foto?.id ?? null, permiso)
+        const r = await ponerFotoDelHotel(itemId, foto.dataUrl, foto.proporcion)
         if (!r.success) { toast.error(r.error ?? 'No se pudo guardar la foto. Vuelve a intentarlo.'); return }
-        setFotoPorAutorizar(null)
         if (r.fotoBiblioteca !== undefined) quedoEnBiblioteca(r.fotoBiblioteca)
         setFotoConfirmada({ antes: fotoDeLaPagina, ahora: r.tarifa?.fotoHotel?.ref ?? null })
         onCambio()
@@ -613,36 +654,36 @@ export default function TarjetaOpcion({
             editable={editable}
             onGuardarNota={onGuardarNota}
             {...(esHotel ? { fotoRef, subiendoFoto, onPonerFoto: ponerFoto, onQuitarFoto: quitarFoto } : {})}
-            biblioteca={esHotel && enTarjeta && bib && pedidoFoto ? {
+            {...(esActividad && conBiblioteca ? { subiendoFoto, onPonerFoto: ponerFoto } : {})}
+            biblioteca={enTarjeta && bib && pedidoFoto && (esHotel || esActividad) ? {
+              tipo: esHotel ? 'hotel' : 'actividad',
               foto: enTarjeta.foto ? { url: enTarjeta.foto.url } : null,
               mas: enTarjeta.mas,
               admiteOtra: enTarjeta.admiteOtra,
-              onAbrir: modo => {
-                if (!bib.editable) { toast.error('Tu rol puede ver las fotos pero no cambiarlas.'); return }
-                setSelectorFoto({ reemplaza: modo === 'cambiar' ? enTarjeta.foto?.id ?? null : null })
-              },
+              duda: bib.duda,
+              contestando,
+              onContestar: contestar,
+              onVerFotos: () => setPerfilAbierto(true),
             } : null}
           />}
-          {esHotel && conBiblioteca && (
+          {conBiblioteca && pedidoFoto && (
             <DialogoAutorizacionFoto
               archivo={fotoPorAutorizar}
               guardando={subiendoFoto}
+              conCategoria={esHotel}
+              nombre={bib.elemento?.nombre ?? pedidoFoto.nombre}
               onCancelar={() => setFotoPorAutorizar(null)}
-              onConfirmar={permiso => fotoPorAutorizar && enviarFoto(fotoPorAutorizar, permiso)}
+              onConfirmar={(permiso, categoria) => fotoPorAutorizar && enviarAlPerfil(fotoPorAutorizar, permiso, categoria)}
             />
           )}
-          {esHotel && conBiblioteca && pedidoFoto && (
-            <SelectorFotos
+          {conBiblioteca && pedidoFoto && perfilAbierto && (
+            <PerfilFotos
+              elemento={bib.elemento ?? null}
               pedido={pedidoFoto}
-              reemplaza={selectorFoto?.reemplaza ?? null}
-              sitioOficial={bib.sitioOficial}
-              abierto={!!selectorFoto}
-              onCerrar={() => setSelectorFoto(null)}
-              onElegida={elemento => {
-                setSelectorFoto(null)
-                quedoEnBiblioteca(elemento)
-                soltarFotoVieja()
-              }}
+              abierto
+              editable={editable && bib.editable}
+              onCerrar={() => setPerfilAbierto(false)}
+              onCambio={quedoEnBiblioteca}
             />
           )}
         </div>

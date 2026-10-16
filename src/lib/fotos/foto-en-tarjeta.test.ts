@@ -1,10 +1,10 @@
 /**
- * La biblioteca en la tarjeta del hotel (Mauricio, 2026-10-16: «dónde quedó lo de la biblioteca,
- * debería ser aquí»). Una sola verdad para la foto del hotel:
- *  · la foto que se pega, arrastra o sube en la tarjeta va a la BIBLIOTECA (llave hotel|ciudad);
- *  · la tarjeta muestra la de la biblioteca (la que sale en la propuesta) con «+N»; vacía,
- *    «Buscar fotos» al lado de pegar/arrastrar/subir;
- *  · el documento toma la de la biblioteca y la vieja de la opción solo de respaldo.
+ * El perfil del hotel o del tour en su tarjeta (Mauricio, 2026-10-16). Una sola verdad:
+ *  · la foto que se pega, arrastra o sube en la tarjeta va al PERFIL (llave hotel|ciudad, o la del
+ *    perfil si el nombre es un alias);
+ *  · la tarjeta muestra la del perfil (la que sale en la propuesta) con «+N»; vacía, «Agrega fotos
+ *    de este hotel»; si el nombre se parece a otro, «¿Es el mismo hotel que …?»;
+ *  · el documento toma la del perfil y la vieja de la opción solo de respaldo.
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { createElement } from 'react'
@@ -32,11 +32,10 @@ import { hotelesDeItems } from '@/lib/cotizaciones/detalle-viaje'
 import type { LecturaCasilla } from '@/lib/cotizaciones/tarifa-pasajero'
 import { TEXTO_AGREGAR_FOTO_HOTEL } from '@/lib/cotizaciones/foto-hotel'
 import { claveDeFoto } from './clave'
-import { objetivosDeItems } from './objetivos'
 import { claveDeHotel, fotosDeHotelesDelDocumento, fuenteDeFotoDeHotel } from './foto-hotel-documento'
 import { fotoDeLaTarjeta, type ElementoVista, type FotoVista } from './vista'
 import { fotoDeHotelABiblioteca } from './foto-hotel-biblioteca'
-import { hotelesEnBiblioteca } from './catalogo-propuesta'
+import { fotosDeBibliotecaDelDocumento } from './catalogo-propuesta'
 import { fotosParaTarjetas } from '@/app/(app)/fotos/actions'
 import HojaCliente from '@/app/(app)/negocios/hoja-cliente'
 
@@ -60,7 +59,7 @@ async function dataUrl(color = 90): Promise<string> {
 
 function sembrar(plantilla = 'trappvel', configExtra: Record<string, unknown> = {}, fotos: Fila[] = []) {
   base.secuencia = 0
-  base.tablas = { workspaces: [{ id: WS, cotizacion_template_slug: plantilla, config_extra: configExtra }], fotos_catalogo: fotos }
+  base.tablas = { workspaces: [{ id: WS, cotizacion_template_slug: plantilla, config_extra: configExtra }], fotos_catalogo: fotos, fotos_perfiles: [], fotos_perfiles_alias: [] }
 }
 
 const filaHotel = (over: Fila): Fila => ({
@@ -98,9 +97,7 @@ describe('la misma llave en la tarjeta, la biblioteca y el documento', () => {
   it('el hotel de la opción, el de la cotización y el del documento dan la misma llave hotel|ciudad', () => {
     const [h] = hotelesDeItems([ITEM])
     const delPedidoDeLaTarjeta = claveDeFoto('hotel', h.hotel ?? h.linea, h.ciudad)
-    const deLaCotizacion = objetivosDeItems([ITEM]).find((o) => o.tipo === 'hotel')?.clave
     expect(delPedidoDeLaTarjeta).toBe('posada enilda|providencia')
-    expect(deLaCotizacion).toBe(delPedidoDeLaTarjeta)
     expect(claveDeHotel(h)).toBe(delPedidoDeLaTarjeta)
   })
 })
@@ -151,17 +148,17 @@ describe('el documento: la biblioteca manda, la foto vieja de la opción es el r
 
 describe('lo que la tarjeta muestra de la biblioteca', () => {
   const foto = (over: Partial<FotoVista>): FotoVista => ({
-    id: 'x', url: 'https://u/x.jpg', principal: false, posicion: 1, origen: 'asesora', fuente: null, fuenteUrl: null, revisada: true, seImprime: true, categoria: null, fuenteId: null, ...over,
+    id: 'x', url: 'https://u/x.jpg', principal: false, origen: 'asesora', fuente: null, seImprime: true, categoria: null, ...over,
   })
-  const elemento = (fotos: FotoVista[]): ElementoVista => ({ tipo: 'hotel', clave: 'k', nombre: 'H', ciudad: 'C', fotos, admiteOtra: fotos.length < 3 })
+  const elemento = (fotos: FotoVista[]): ElementoVista => ({ tipo: 'hotel', clave: 'k', nombre: 'H', ciudad: 'C', fotos, admiteOtra: fotos.length < 3, alias: [] })
 
   it('la principal y «+2» con tres fotos', () => {
-    const r = fotoDeLaTarjeta(elemento([foto({ id: 'a', principal: true }), foto({ id: 'b', posicion: 2 }), foto({ id: 'c', posicion: 3 })]))
+    const r = fotoDeLaTarjeta(elemento([foto({ id: 'a', principal: true }), foto({ id: 'b' }), foto({ id: 'c' })]))
     expect(r).toEqual({ foto: expect.objectContaining({ id: 'a' }), mas: 2, admiteOtra: false })
   })
 
-  it('si la principal no sale en la propuesta (página oficial apagada), muestra la primera que sí', () => {
-    const r = fotoDeLaTarjeta(elemento([foto({ id: 'a', principal: true, origen: 'sitio_oficial', seImprime: false }), foto({ id: 'b', posicion: 2 })]))
+  it('si la principal no sale en la propuesta (una de la página oficial, de antes), muestra la primera que sí', () => {
+    const r = fotoDeLaTarjeta(elemento([foto({ id: 'a', principal: true, origen: 'sitio_oficial', seImprime: false }), foto({ id: 'b' })]))
     expect(r.foto?.id).toBe('b')
     expect(r.mas).toBe(0)
   })
@@ -179,53 +176,82 @@ describe('el recuadro de la tarjeta («Así lo ve el cliente»)', () => {
   }
   const pintar = (over: Record<string, unknown>) =>
     renderToStaticMarkup(createElement(HojaCliente, { ...props, ...over } as unknown as Parameters<typeof HojaCliente>[0]))
-  const biblioteca = (over: Record<string, unknown> = {}) => ({ foto: null, mas: 0, admiteOtra: true, onAbrir: () => {}, ...over })
+  const biblioteca = (over: Record<string, unknown> = {}) => ({
+    tipo: 'hotel', foto: null, mas: 0, admiteOtra: true, duda: null, contestando: false, onContestar: () => {}, onVerFotos: () => {}, ...over,
+  })
 
-  it('con foto en la biblioteca: la muestra de una vez, con «+2» y «Cambiar», sin «Quitar»', () => {
+  it('con foto en el perfil: la muestra de una vez, con «+2» y «Ver fotos»; lleno, sin «Agregar»; nunca «Quitar»', () => {
     const html = pintar({ editable: true, onPonerFoto: () => {}, onQuitarFoto: () => {}, biblioteca: biblioteca({ foto: { url: 'https://firmada.example/a.jpg' }, mas: 2, admiteOtra: false }) })
     expect(html).toContain('data-foto-hotel="con-foto"')
     expect(html).toContain('data-de-biblioteca')
     expect(html).toContain('src="https://firmada.example/a.jpg"')
     expect(html).toMatch(/data-mas-fotos[^>]*>\+2</)
-    expect(html).toContain('Cambiar')
+    expect(html).toContain('Ver fotos')
+    expect(html).not.toContain('data-agregar-foto')
     expect(html).not.toContain('Quitar')
-    expect(html).not.toContain('data-buscar-fotos')
   })
 
-  it('la biblioteca manda sobre la foto vieja de la opción', () => {
+  it('con foto y lugar para otra: «Agregar» (pegar o subir otra al perfil)', () => {
+    const html = pintar({ editable: true, onPonerFoto: () => {}, biblioteca: biblioteca({ foto: { url: 'https://firmada.example/a.jpg' }, mas: 0, admiteOtra: true }) })
+    expect(html).toContain('data-agregar-foto')
+    expect(html).toContain('type="file"')
+  })
+
+  it('el perfil manda sobre la foto vieja de la opción', () => {
     const html = pintar({ editable: true, onPonerFoto: () => {}, fotoRef: REF_VIEJA, biblioteca: biblioteca({ foto: { url: 'https://firmada.example/a.jpg' } }) })
     expect(html).toContain('src="https://firmada.example/a.jpg"')
     expect(html).not.toContain(encodeURIComponent(REF_VIEJA))
   })
 
-  it('vacía: conserva pegar/arrastrar/subir y suma «Buscar fotos»', () => {
+  it('vacía: «Agrega fotos de este hotel» para pegar, arrastrar o subir; nada de búsquedas', () => {
     const html = pintar({ editable: true, onPonerFoto: () => {}, biblioteca: biblioteca() })
     expect(html).toContain('data-foto-hotel="vacia"')
-    expect(html).toContain(TEXTO_AGREGAR_FOTO_HOTEL)
+    expect(html).toContain('Agrega fotos de este hotel')
     expect(html).toContain('Pégala, arrástrala o súbela')
     expect(html).toContain('type="file"')
-    expect(html).toContain('data-buscar-fotos')
-    expect(html).toContain('Buscar fotos')
+    expect(html).not.toContain('Buscar fotos')
   })
 
-  it('sin foto en la biblioteca pero con la vieja de la opción: se ve la vieja, «Cambiar» abre la biblioteca y «Quitar» la suelta', () => {
+  it('sin foto en el perfil pero con la vieja de la opción: se ve la vieja, con «Agregar», «Ver fotos» y «Quitar»', () => {
     const html = pintar({ editable: true, onPonerFoto: () => {}, onQuitarFoto: () => {}, fotoRef: REF_VIEJA, biblioteca: biblioteca() })
     expect(html).toContain(`src="/api/archivos/abrir?ref=${encodeURIComponent(REF_VIEJA)}"`)
-    expect(html).toContain('Cambiar')
+    expect(html).toContain('data-agregar-foto')
+    expect(html).toContain('Ver fotos')
     expect(html).toContain('Quitar')
   })
 
-  it('sin poder editar: la foto de la biblioteca se ve, sin botones', () => {
+  it('sin poder editar: la foto del perfil se ve y se puede abrir, sin agregar', () => {
     const html = pintar({ editable: false, biblioteca: biblioteca({ foto: { url: 'https://firmada.example/a.jpg' }, mas: 1 }) })
     expect(html).toContain('src="https://firmada.example/a.jpg"')
     expect(html).toContain('+1')
-    expect(html).not.toContain('Cambiar')
+    expect(html).toContain('Ver fotos')
+    expect(html).not.toContain('data-agregar-foto')
   })
 
-  it('un espacio sin biblioteca queda como antes: sin «Buscar fotos»', () => {
+  it('con duda: en el lugar de la foto, «¿Es el mismo hotel que …?» con sus dos respuestas', () => {
+    const duda = { clave: 'posada enilda|providencia', nombre: 'Posada Enilda Providencia', ciudad: 'Providencia', url: 'https://firmada.example/p.jpg' }
+    const html = pintar({ editable: true, onPonerFoto: () => {}, biblioteca: biblioteca({ duda }) })
+    expect(html).toContain('data-pregunta-mismo')
+    expect(html).toContain('¿Es el mismo hotel que <b>«Posada Enilda Providencia»</b> (Providencia)?')
+    expect(html).toContain('Sí, es el mismo')
+    expect(html).toContain('No, es otro')
+    expect(html).not.toContain('data-foto-hotel')
+  })
+
+  it('un espacio sin biblioteca queda como antes: la foto de la opción, sin perfil', () => {
     const html = pintar({ editable: true, onPonerFoto: () => {} })
     expect(html).toContain('data-foto-hotel="vacia"')
-    expect(html).not.toContain('Buscar fotos')
+    expect(html).toContain(TEXTO_AGREGAR_FOTO_HOTEL)
+    expect(html).not.toContain('Ver fotos')
+  })
+
+  it('un tour con perfil lleva su recuadro de foto al lado de su línea', () => {
+    const TOUR: ItemConLectura = { nombre: 'City tour', grupo: 'actividad', tarifa_pax: {} }
+    const html = pintar({ item: TOUR, editable: true, onPonerFoto: () => {}, biblioteca: biblioteca({ tipo: 'actividad' }) })
+    expect(html).toContain('data-linea-cliente')
+    expect(html).toContain('Agrega fotos de este tour')
+    const sinPerfil = pintar({ item: TOUR, editable: true })
+    expect(sinPerfil).not.toContain('data-foto-hotel')
   })
 })
 
@@ -244,7 +270,12 @@ describe('la foto de la tarjeta se guarda en la biblioteca (servidor)', () => {
     if (r?.ok) expect(r.elemento?.fotos[0]).toMatchObject({ seImprime: true, principal: true, url: expect.stringContaining('https://firmada.example/') })
   })
 
-  it('pegar sobre la foto que se ve la cambia (no agrega una segunda)', async () => {
+  it('la primera vez crea el perfil del hotel', async () => {
+    await fotoDeHotelABiblioteca({ ...base_, dataUrl: await dataUrl() })
+    expect(base.tablas.fotos_perfiles.map((p) => p.clave)).toEqual(['posada enilda|providencia'])
+  })
+
+  it('con `reemplaza`, cambia esa foto (no agrega una segunda)', async () => {
     const primera = await fotoDeHotelABiblioteca({ ...base_, dataUrl: await dataUrl() })
     const id = primera?.ok ? primera.elemento?.fotos[0].id : null
     const r = await fotoDeHotelABiblioteca({ ...base_, dataUrl: await dataUrl(200), reemplaza: id })
@@ -264,43 +295,52 @@ describe('la foto de la tarjeta se guarda en la biblioteca (servidor)', () => {
   })
 })
 
-describe('el documento lee las fotos de hotel de la biblioteca', () => {
+describe('el documento lee las fotos de hotel y de plan de la biblioteca', () => {
   const hoteles = [{ hotel: 'Posada Enilda', linea: 'Posada Enilda', ciudad: 'Providencia' }]
 
   it('la imprimible, con su proporción', async () => {
     sembrar('trappvel', {}, [filaHotel({})])
-    const r = await hotelesEnBiblioteca(clienteFalso(), WS, hoteles, {})
-    expect([...r.mapa]).toEqual([['posada enilda|providencia', { proporcion: 1.5, credito: null }]])
-    expect(await r.leer('posada enilda|providencia')).toMatch(/^data:image\/jpeg;base64,/)
+    const r = await fotosDeBibliotecaDelDocumento(clienteFalso(), WS, hoteles)
+    expect([...r.hoteles]).toEqual([['posada enilda|providencia', { proporcion: 1.5, credito: null }]])
+    expect(await r.leerHotel('posada enilda|providencia')).toMatch(/^data:image\/jpeg;base64,/)
   })
 
-  it('una de Commons lleva su crédito (autor y licencia) hasta el PDF de @react-pdf', async () => {
+  it('una de Commons (de antes) lleva su crédito (autor y licencia) hasta el PDF de @react-pdf', async () => {
     sembrar('trappvel', {}, [
       filaHotel({
         origen: 'wikimedia', fuente_url: 'https://commons.wikimedia.org/wiki/File:Posada.jpg', titulo_fuente: 'File:Posada.jpg',
         autor: 'Ana Pérez', licencia: 'CC BY-SA 4.0',
       }),
     ])
-    const r = await hotelesEnBiblioteca(clienteFalso(), WS, hoteles, {})
-    const credito = r.mapa.get('posada enilda|providencia')?.credito
+    const r = await fotosDeBibliotecaDelDocumento(clienteFalso(), WS, hoteles)
+    const credito = r.hoteles.get('posada enilda|providencia')?.credito
     expect(credito).toMatch(/Ana Pérez/)
     expect(credito).toMatch(/CC BY-SA 4\.0/)
     const [h] = await fotosDeHotelesDelDocumento([{ hotel: 'Posada Enilda', linea: 'Posada Enilda', ciudad: 'Providencia' } as never], {
-      biblioteca: r.mapa, motorHtml: false, leerDeBiblioteca: r.leer, leerDeOpcion: async () => null,
+      biblioteca: r.hoteles, motorHtml: false, leerDeBiblioteca: r.leerHotel, leerDeOpcion: async () => null,
     })
     expect((h as { foto?: { credito?: string | null } }).foto?.credito).toBe(credito)
   })
 
-  it('una de la página oficial con el interruptor apagado no cuenta: la siguiente que sí', async () => {
+  it('una de la página oficial (de antes) nunca cuenta: la siguiente que sí', async () => {
     sembrar('trappvel', {}, [
       filaHotel({ id: 'a', origen: 'sitio_oficial', fuente_url: 'https://hotel.example/', principal: true, posicion: 1 }),
       filaHotel({ id: 'b', principal: false, posicion: 2, proporcion: 1.33 }),
     ])
-    expect([...(await hotelesEnBiblioteca(clienteFalso(), WS, hoteles, {})).mapa]).toEqual([['posada enilda|providencia', { proporcion: 1.33, credito: null }]])
+    expect([...(await fotosDeBibliotecaDelDocumento(clienteFalso(), WS, hoteles)).hoteles]).toEqual([['posada enilda|providencia', { proporcion: 1.33, credito: null }]])
+  })
+
+  it('el plan opcional, por la llave de su nombre y su ciudad (la misma de su tarjeta)', async () => {
+    sembrar('trappvel', {}, [
+      filaHotel({ id: 'p', tipo: 'actividad', clave: 'tour de manglares|providencia', nombre: 'Tour de manglares', ciudad: 'Providencia', proporcion: 1.5 }),
+    ])
+    const r = await fotosDeBibliotecaDelDocumento(clienteFalso(), WS, [], [{ nombre: 'Tour de manglares', ciudad: 'Providencia' }, { nombre: 'Otro plan', ciudad: null }])
+    expect(await r.opcional('Tour de manglares')).toMatchObject({ url: expect.stringMatching(/^data:image\/jpeg;base64,/), proporcion: 1.5, credito: null })
+    expect(await r.opcional('Otro plan')).toBeNull()
   })
 
   it('sin fotos en la biblioteca: vacía (el documento usa la de la opción)', async () => {
-    expect((await hotelesEnBiblioteca(clienteFalso(), WS, hoteles, {})).mapa.size).toBe(0)
+    expect((await fotosDeBibliotecaDelDocumento(clienteFalso(), WS, hoteles)).hoteles.size).toBe(0)
   })
 })
 
@@ -310,8 +350,8 @@ describe('una sola lectura para todas las tarjetas', () => {
     const r = await fotosParaTarjetas([{ tipo: 'hotel', nombre: 'Posada Enilda', ciudad: 'PROVIDENCIA' }])
     expect(r.ok).toBe(true)
     if (!r.ok) return
-    expect(r.elementos.map((e) => e.clave)).toEqual(['posada enilda|providencia'])
-    expect(r).toMatchObject({ editable: true, sitioOficial: false })
+    expect(r.tarjetas.map((t) => [t.clave, t.elemento?.clave, t.elemento?.fotos.length])).toEqual([['posada enilda|providencia', 'posada enilda|providencia', 1]])
+    expect(r).toMatchObject({ editable: true })
   })
 
   it('un espacio sin propuesta de viaje: no hay biblioteca y la tarjeta queda como antes', async () => {

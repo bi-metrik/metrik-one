@@ -1,6 +1,6 @@
 ---
 name: fotos-hotel-por-categoria
-description: Selector de fotos de HOTEL por pestañas Fachada/Habitaciones/Zonas comunes (feat/fotos-hotel-por-categoria, 2026-10-16) — migración 20261016221500 SIN aplicar y va ANTES del merge; la categoría exacta de Commons trae fotos que no son del hotel
+description: REEMPLAZADA por fotos-perfiles (2026-10-16): Selector de fotos de HOTEL por pestañas Fachada/Habitaciones/Zonas comunes (feat/fotos-hotel-por-categoria, 2026-10-16) — migración 20261016221500 SIN aplicar y va ANTES del merge; la categoría exacta de Commons trae fotos que no son del hotel
 metadata:
   type: project
 ---

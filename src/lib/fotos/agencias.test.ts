@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 
-import { esDeAgenciaDeViajes, MENSAJE_AGENCIA, nombreRegistrable, urlEsDeAgencia } from './agencias'
+import { esDeAgenciaDeViajes, MENSAJE_AGENCIA, nombreRegistrable } from './agencias'
 import { MENSAJE_SIN_AUTORIZACION, revisarAutorizacion } from './autorizacion'
 
 describe('agencias en línea: nunca son fuente de fotos', () => {
@@ -33,13 +33,6 @@ describe('agencias en línea: nunca son fuente de fotos', () => {
     '',
   ])('deja pasar %s', (texto) => {
     expect(esDeAgenciaDeViajes(texto)).toBe(false)
-  })
-
-  it('las imágenes servidas por una agencia (el widget de Booking) se reconocen por el host', () => {
-    expect(urlEsDeAgencia('https://cf.bstatic.com/xdata/images/hotel/max1024x768/1.jpg?k=a')).toBe(true)
-    expect(urlEsDeAgencia('https://images.trvl-media.com/lodging/1.jpg')).toBe(true)
-    expect(urlEsDeAgencia('https://www.hotel.example/fotos/booking.com.jpg')).toBe(false)
-    expect(urlEsDeAgencia('no es url')).toBe(false)
   })
 
   it('el nombre registrable salta el segundo nivel de un ccTLD', () => {

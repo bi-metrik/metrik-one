@@ -1,6 +1,7 @@
 'use client'
 
 import { useState, type ReactNode } from 'react'
+import Link from 'next/link'
 import { useTransitionTolerante } from '@/hooks/use-transition-tolerante'
 import { AlertTriangle, CheckCircle2, Loader2, Plus, Sparkles, Trash2 } from 'lucide-react'
 import { toast } from 'sonner'
@@ -19,7 +20,6 @@ import { LIMITE_TERMINOS, normalizarTerminos, terminosAlAbrir } from '@/lib/coti
 import { lineasPropias } from '@/lib/cotizaciones/incluye-por-one'
 import { formatBogotaFechaHora } from '@/lib/dates/bogota'
 import AnticipoPropuestaPanel from './anticipo-propuesta-panel'
-import FotosPropuestaPanel from './fotos-propuesta-panel'
 
 /**
  * «Texto para el cliente» (Trappvel): lo que el documento dice del viaje con palabras, no
@@ -642,8 +642,14 @@ export default function DocumentoClientePanel({
         <AnticipoPropuestaPanel cotizacionId={cotizacionId} inicial={panel.anticipo ?? null} editable={editable} />
       )}
 
-      {/* PR 4: las fotos de la propuesta nueva (catálogo del espacio). */}
-      {panel.imprimeAnticipo && <FotosPropuestaPanel cotizacionId={cotizacionId} editable={editable} />}
+      {/* Las fotos de la propuesta salen solas del perfil de cada hotel y tour (2026-10-16): se
+          ponen en su tarjeta o en «Hoteles y tours». */}
+      {panel.imprimeAnticipo && (
+        <p className="border-t pt-3 text-[11px] text-muted-foreground" data-fotos-propuesta>
+          Las fotos de cada hotel y tour salen solas de su perfil: pégalas en su tarjeta o en{' '}
+          <Link href="/fotos" className="underline underline-offset-2">Hoteles y tours</Link>.
+        </p>
+      )}
     </section>
   )
 }

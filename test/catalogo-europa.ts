@@ -10,8 +10,9 @@
 import path from 'node:path'
 import type { EntradaModeloPropuesta } from '@/lib/cotizaciones/propuesta/modelo-documento'
 import type { CatalogoPropuesta, FotoDeCatalogo } from '@/lib/pdf/html/propuesta-html'
-import { claveDeFoto, nombreLlano } from '@/lib/fotos/clave'
-import { creditoDeCatalogo } from '@/lib/fotos/wikimedia'
+import { claveDeFoto, creditoDeFoto, nombreLlano } from '@/lib/fotos/clave'
+
+const creditoDeCatalogo = (f: { nombre: string; autor: string; licencia: string }) => creditoDeFoto({ ...f, origen: 'wikimedia' })
 
 const FOTOS = path.join(process.cwd(), 'src/lib/pdf/chromium/ensayo/fotos')
 
