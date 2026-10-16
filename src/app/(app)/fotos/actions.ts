@@ -38,7 +38,8 @@ import {
 import { bytesDeCatalogo, enlacesDeCatalogo } from '@/lib/fotos/catalogo-almacen'
 import { sinRepetir, usaFotosDeSitioOficial, type ObjetivoFoto } from '@/lib/fotos/clave'
 import { clasificar, opcionesDeHotelEnCommons, opcionesDeHotelEnSitio } from '@/lib/fotos/opciones-hotel'
-import { datosDesdeWikidata, opcionesDeSitioOficial, paginaOficialDesdeWikidata } from '@/lib/fotos/sitio-oficial'
+import type { MotivoFallaPagina } from '@/lib/fotos/falla-pagina'
+import { datosDesdeWikidata, imagenPegadaPorUrl, opcionesDeSitioOficial, paginaOficialDesdeWikidata } from '@/lib/fotos/sitio-oficial'
 import { dominio, objetivoDelPedido, vistaDeElemento, type EleccionFoto, type ElementoVista, type OpcionFoto } from '@/lib/fotos/vista'
 import { opcionesDeCommons } from '@/lib/fotos/wikimedia'
 import { tienePropuestaHtml } from '@/lib/pdf/motor-html'
@@ -52,9 +53,15 @@ export type BibliotecaFotos =
 
 export type ResultadoElemento = { ok: true; elemento: ElementoVista | null } | { ok: false; error: string }
 
+/**
+ * Una búsqueda en la página oficial que no dio opciones: `motivo` dice cuál aviso mostrar
+ * (la página bloquea, no trae fotos, la red falló) y `pagina` la que se abre para copiar la foto.
+ */
+export type FallaBusqueda = { ok: false; error: string; motivo?: MotivoFallaPagina; pagina?: string }
+
 export type OpcionesDeFoto =
   | { ok: true; opciones: OpcionFoto[]; siguiente: string | null; pagina?: string }
-  | { ok: false; error: string }
+  | FallaBusqueda
 
 export type PaginaSugerida = { ok: true; url: string | null; desde: 'biblioteca' | 'wikidata' | null } | { ok: false; error: string }
 
@@ -180,7 +187,7 @@ export async function opcionesDeFoto(
   if (!ctx.sitioOficial) return { ok: false, error: MENSAJE_SIN_SITIO }
   if (typeof paginaUrl !== 'string' || !paginaUrl.trim()) return { ok: false, error: 'Pega la dirección de la página oficial (https://…).' }
   const r = await opcionesDeSitioOficial(paginaUrl.trim(), { desde })
-  if (!r.ok) return { ok: false, error: r.error }
+  if (!r.ok) return r
   return {
     ok: true,
     pagina: r.pagina,
@@ -281,6 +288,22 @@ export async function subirFotoABiblioteca(
   return elementoActual(ctx, o)
 }
 
+export type ImagenPegada = { ok: true; dataUrl: string } | { ok: false; error: string }
+
+/**
+ * Una imagen PEGADA que llegó al portapapeles solo como HTML (`<img src="https://…">`, lo que dejan
+ * algunos navegadores al copiar una imagen o un pedazo de página): el servidor la baja por la misma
+ * vía segura de la página oficial y la devuelve como data URL para que pase por la casilla de
+ * autorización y por «Subir» como cualquier foto pegada. NO guarda nada; no depende del interruptor
+ * de la página oficial (es la foto que la persona trajo). Una imagen de agencia en línea se rechaza.
+ */
+export async function traerImagenPegada(url: string): Promise<ImagenPegada> {
+  const ctx = await contexto(true)
+  if ('error' in ctx) return { ok: false, error: ctx.error as string }
+  if (typeof url !== 'string' || !url.trim()) return { ok: false, error: 'No llegó ninguna imagen.' }
+  return imagenPegadaPorUrl(url.trim())
+}
+
 /**
  * La categoría que manda el navegador (la pestaña), revisada: solo para un hotel y solo una de las
  * cuatro. Sin ella, `{}` (la foto entra como antes, sin reparto por categoría).
@@ -301,7 +324,7 @@ export type OpcionesDeHotel =
       /** Con el interruptor encendido: la página oficial que ONE propone para pegar. */
       paginaSugerida?: { url: string; desde: 'biblioteca' | 'wikidata' } | null
     }
-  | { ok: false; error: string }
+  | FallaBusqueda
 
 /**
  * Las opciones del selector de un HOTEL, ya clasificadas por pestaña (fachada, habitación, zonas
@@ -324,7 +347,7 @@ export async function opcionesDeHotel(
     if (!ctx.sitioOficial) return { ok: false, error: MENSAJE_SIN_SITIO }
     const desde = Math.max(0, Math.min(10_000, Number.parseInt(siguiente ?? '0', 10) || 0))
     const r = await opcionesDeHotelEnSitio(paginaUrl.trim(), o, { apiKey, desde })
-    if (!r.ok) return { ok: false, error: r.error }
+    if (!r.ok) return r
     return {
       ok: true,
       opciones: r.opciones,

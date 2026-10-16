@@ -2,6 +2,7 @@
 
 ## Project memories
 
+- [Fotos: web del hotel que bloquea (Hilton 403)](project_fotos_web_bloqueada.md) — aviso por motivo; leerPagina con galerías; Ctrl+V en captura
 - ⚠️⚠️ [Galería de fotos del hotel + reglas de Emilio](project_galeria_fotos_hotel.md) — migración 20261016233000 SIN aplicar; toda escritura de fotos la usa
 - ⚠️⚠️ [Quién lleva el viaje desde el bot (Trappvel)](project_responsable_desde_bot.md) — responsable + dicho_en; migración 20261016193000 SIN aplicar; deploy antes
 - ⚠️⚠️ [Valida: tabla angosta de búsqueda (metrik-valida #64)](project_valida_tabla_angosta_busqueda.md) — 0038/0039 SIN aplicar; poblar antes de 0039; seqscan off obligatorio; tokens societarios pierden matches
