@@ -93,7 +93,7 @@ beforeAll(async () => {
   db = new PGlite()
   await db.exec(ESQUEMA)
   await db.exec(MIGRACION)
-})
+}, 60_000)
 
 beforeEach(async () => {
   await db.exec(`delete from negocio_responsables; delete from notificaciones; delete from net.llamadas; update falla_aviso set activa = false;

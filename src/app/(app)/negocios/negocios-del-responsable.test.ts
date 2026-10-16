@@ -49,5 +49,6 @@ describe('el viaje asignado le aparece a su responsable', () => {
     expect((await getNegociosV2('abierto', false, false)).map((n) => n.id)).toEqual(['n-bot'])
     quien = STAFF.ale
     expect(await getNegociosV2('abierto', false, false)).toEqual([])
-  })
+    // Importar las acciones de negocios tarda ~5 s en frío.
+  }, 60_000)
 })
