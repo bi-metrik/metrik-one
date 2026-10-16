@@ -13,6 +13,11 @@
  *  · Se borra al cambiarla, al quitarla y al borrar la opción (también cuando la opción
  *    vuelve a la bandeja: la foto no es una captura, no vuelve con ella).
  *
+ * ⚠️ Desde el 2026-10-16, en los espacios con propuesta de viaje (biblioteca de fotos) la foto NO
+ * se guarda en la opción: va a la biblioteca del espacio (`fotos/foto-hotel-biblioteca.ts`) y el
+ * documento la toma de ahí (`fotos/foto-hotel-documento.ts`). Lo de arriba sigue valiendo para
+ * los demás espacios y para las fotos viejas de la opción, que quedan de respaldo.
+ *
  * Este módulo es puro (lo usan el navegador y el servidor): medidas y textos.
  */
 

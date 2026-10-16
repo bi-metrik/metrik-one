@@ -47,6 +47,7 @@ import {
   plantillaImprimePreciosConIva,
   plantillaUsaFotosDeCiudad,
   plantillaUsaTextoDelCliente,
+  tienePropuestaHtml,
   usaMotorHtml,
 } from '@/lib/pdf/plantillas-cotizacion'
 import type { ServicioDelDocumento } from '@/lib/cotizaciones/propuesta/modelo-documento'
@@ -87,6 +88,7 @@ import { motivoSinRecomendada } from '@/lib/cotizaciones/tarifas'
 import { ponerMarcaDeBorrador } from '@/lib/pdf/marca-borrador'
 import { avisoDeBorrador, motivosDeBorrador } from '@/lib/cotizaciones/motivos-borrador'
 import { imagenComoDataUrl } from '@/lib/cotizaciones/imagen-captura'
+import { fotosDeHotelesDelDocumento } from '@/lib/fotos/foto-hotel-documento'
 
 // Campos agregados por migration 20260515000001 — pendiente regenerar database.ts
 // post-apply. Hasta entonces, accedemos via cast tipado a este shape.
@@ -1187,15 +1189,20 @@ export async function generateCotizacionPDF(
       hotelesDelDocumento = itemsDeLaPropuesta.flatMap(i => marcar(hotelesDeItems([paraLecturaDe(i)]), i))
       cargosEnDestino = itemsDeLaPropuesta.flatMap(i => marcar(cargosEnDestinoDeItems([paraLecturaDe(i)]), i))
     }
-    // La foto del hotel que puso el asesor (`foto-hotel.ts`): se baja del almacenamiento del
-    // workspace para imprimirla. Solo en la plantilla que imprime fotos; si no se puede leer,
-    // el capítulo sale con la foto de la ciudad, como antes.
-    if (plantillaUsaFotosDeCiudad(templateSlug) && hotelesDelDocumento.some(h => h.fotoRef)) {
-      hotelesDelDocumento = await Promise.all(hotelesDelDocumento.map(async h => {
-        if (!h.fotoRef) return h
-        const url = await imagenComoDataUrl(workspaceId, h.fotoRef)
-        return url ? { ...h, foto: { url, proporcion: h.fotoProporcion ?? null } } : h
-      }))
+    // La foto del hotel (`foto-hotel-documento.ts`): manda la de la biblioteca del espacio (la que
+    // se pone en la tarjeta, en el panel o en /fotos); la vieja de la opción solo si la biblioteca
+    // no tiene una imprimible. Solo en la plantilla que imprime fotos; si no se puede leer, el
+    // capítulo sale con la foto de la ciudad, como antes.
+    if (plantillaUsaFotosDeCiudad(templateSlug) && hotelesDelDocumento.length > 0) {
+      const enBiblioteca = tienePropuestaHtml(templateSlug) && workspaceId
+        ? await (await import('@/lib/fotos/catalogo-propuesta')).hotelesEnBiblioteca(supabase, workspaceId, hotelesDelDocumento, ws?.config_extra).catch(() => null)
+        : null
+      hotelesDelDocumento = await fotosDeHotelesDelDocumento(hotelesDelDocumento, {
+        biblioteca: enBiblioteca?.mapa ?? new Map(),
+        motorHtml,
+        leerDeBiblioteca: clave => enBiblioteca?.leer(clave) ?? Promise.resolve(null),
+        leerDeOpcion: ref => imagenComoDataUrl(workspaceId, ref),
+      })
     }
     if (motorHtml) {
       // Con varias tarifas, cada servicio lleva las tarifas a las que pertenece (los mismos

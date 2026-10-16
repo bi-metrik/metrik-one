@@ -6,7 +6,8 @@ import { revalidatePath } from 'next/cache'
 
 import { exigirPorPasos } from '@/lib/cotizaciones/por-pasos-datos'
 import { getWorkspace } from '@/lib/actions/get-workspace'
-import { copiarFotoDeHotelAlCatalogo } from '@/lib/fotos/copiar-foto-hotel'
+import { fotoDeHotelABiblioteca } from '@/lib/fotos/foto-hotel-biblioteca'
+import type { ElementoVista } from '@/lib/fotos/vista'
 import { exigirModulo, MENSAJE_MODULO_NO_ACTIVO, REQUISITO } from '@/lib/modulos/exigir-modulo'
 import { ranuraDeGrupo } from '@/lib/cotizaciones/ranuras-pantallazo'
 import { isEditable, type EstadoCotizacion } from '@/lib/cotizaciones/state-machine'
@@ -87,7 +88,6 @@ import { aceptacionPrevia, idAceptacionValido } from '@/lib/cotizaciones/aceptac
 import { definicionDeTipo, esTipoRanura, tipoDeDefinicion, type TipoRanura } from '@/lib/cotizaciones/ranuras-cotizacion'
 import { lugarDeOpcion } from '@/lib/cotizaciones/opcion-viaje'
 import { normalizarGrupo } from '@/lib/cotizaciones/itinerarios'
-import { etiquetaDeRanura } from '@/lib/cotizaciones/ranuras-pantallazo'
 import { agregarOpcionARanura, crearRanuraConOpcion } from '@/app/(app)/negocios/ranura-actions'
 import { borrarImagenesDeCaptura, guardarImagenDeCaptura, imagenComoDataUrl, imagenesDeTarifa } from '@/lib/cotizaciones/imagen-captura'
 import { guardarFotoHotel } from '@/lib/cotizaciones/foto-hotel-almacen'
@@ -167,6 +167,11 @@ export type ResultadoTarifa = {
    * faltante queda en su bloque (R1, reunión del 2026-09-23). `CONTEXTO` y `ERROR` sí frenan.
    */
   codigo?: 'CONTEXTO' | 'PENDIENTE' | 'ERROR'
+  /**
+   * Solo `ponerFotoDelHotel` en un espacio con biblioteca de fotos: el hotel como quedó en la
+   * biblioteca (la foto ya NO se guarda en la opción). Ausente = se guardó en la opción, como antes.
+   */
+  fotoBiblioteca?: ElementoVista | null
 }
 
 interface ItemLeido {
@@ -1606,12 +1611,32 @@ async function lecturasDevueltasDe(ctx: ContextoDeItem): Promise<{ ok: true; dev
 //
 // Reglas en `foto-hotel.ts`. Solo en opciones de hotel; la foto llega ya comprimida en JPEG.
 
-/** Pone o cambia la foto del hotel de la opción. La anterior se borra al quedar la nueva. */
-export async function ponerFotoDelHotel(itemId: string, dataUrl: string, proporcion: number | null): Promise<ResultadoTarifa> {
+/**
+ * Pone o cambia la foto del hotel de la opción.
+ *
+ * En un espacio con biblioteca de fotos (propuesta de viaje) la foto va a la BIBLIOTECA (llave
+ * `hotel|ciudad`): es la misma para la tarjeta, el panel, `/fotos` y el documento. `reemplaza` =
+ * la foto de la biblioteca que se cambia (sin él, la principal). La foto vieja de la opción, si
+ * la había, se quita: desde aquí hay una sola verdad (`foto-hotel-documento.ts`).
+ *
+ * En los demás espacios, en la opción (`tarifa_pax.fotoHotel`), como antes; la anterior se borra
+ * al quedar la nueva.
+ */
+export async function ponerFotoDelHotel(itemId: string, dataUrl: string, proporcion: number | null, reemplaza?: string | null): Promise<ResultadoTarifa> {
   const ctx = await contexto(itemId)
   if ('error' in ctx) return { success: false, error: ctx.error as string }
   if (ctx.ranura.slug !== 'hotel_detalle') return { success: false, error: 'Solo una opción de hotel lleva foto del hotel.' }
-  const { workspaceId, staffId } = await getWorkspace()
+  const { workspaceId, staffId, role } = await getWorkspace()
+  const enBiblioteca = await fotoDeHotelABiblioteca({
+    supabase: ctx.supabase, workspaceId, staffId, role,
+    item: { nombre: ctx.item.nombre, grupo: ctx.item.grupo, descripcion: ctx.item.descripcion, tarifa_pax: ctx.item.tarifaRaw }, dataUrl, reemplaza,
+  })
+  if (enBiblioteca) {
+    if (!enBiblioteca.ok) return { success: false, error: enBiblioteca.mensaje }
+    const quitada = ctx.tarifa.fotoHotel ? await soltarFotoDeLaOpcion(ctx.supabase, itemId, workspaceId) : null
+    if (ctx.item.negocioId) revalidatePath(`/negocios/${ctx.item.negocioId}`)
+    return { success: true, tarifa: quitada && 'tarifa' in quitada ? quitada.tarifa : ctx.tarifa, fotoBiblioteca: enBiblioteca.elemento }
+  }
   const g = await guardarFotoHotel({
     workspaceId, negocioId: ctx.item.negocioId, cotizacionId: ctx.item.cotizacionId, itemId, dataUrl,
   })
@@ -1627,31 +1652,34 @@ export async function ponerFotoDelHotel(itemId: string, dataUrl: string, proporc
     return { success: false, error: guardado.error }
   }
   if (anterior && anterior !== g.ref) await borrarImagenesDeCaptura(workspaceId, [anterior])
-  // PR 4: también al catálogo del espacio, para que la próxima cotización con este hotel la traiga.
-  await copiarFotoDeHotelAlCatalogo({
-    supabase: ctx.supabase, workspaceId, staffId,
-    item: { nombre: ctx.item.nombre, grupo: ctx.item.grupo, tarifa_pax: guardado.tarifa }, dataUrl,
-  })
   if (ctx.item.negocioId) revalidatePath(`/negocios/${ctx.item.negocioId}`)
   return { success: true, tarifa: guardado.tarifa }
 }
 
-/** Quita la foto del hotel: el documento vuelve a la foto de la ciudad, si la hay. */
-export async function quitarFotoDelHotel(itemId: string): Promise<ResultadoTarifa> {
-  const ctx = await contexto(itemId)
-  if ('error' in ctx) return { success: false, error: ctx.error as string }
+/** Quita la foto vieja de la opción (y su archivo). */
+async function soltarFotoDeLaOpcion(supabase: unknown, itemId: string, workspaceId: string | null | undefined) {
   let anterior: string | null = null
-  const guardado = await guardarTarifa(ctx.supabase, itemId, actual => {
+  const guardado = await guardarTarifa(supabase, itemId, actual => {
     anterior = actual.fotoHotel?.ref ?? null
     const { fotoHotel: _foto, ...resto } = actual
     void _foto
     return resto
   })
+  if ('error' in guardado) return guardado
+  if (anterior) await borrarImagenesDeCaptura(workspaceId, [anterior])
+  return guardado
+}
+
+/**
+ * Quita la foto vieja de la opción (`tarifa_pax.fotoHotel`). La de la biblioteca no se toca
+ * aquí: es del espacio y se cambia o se quita en el selector, el panel o `/fotos`.
+ */
+export async function quitarFotoDelHotel(itemId: string): Promise<ResultadoTarifa> {
+  const ctx = await contexto(itemId)
+  if ('error' in ctx) return { success: false, error: ctx.error as string }
+  const { workspaceId } = await getWorkspace()
+  const guardado = await soltarFotoDeLaOpcion(ctx.supabase, itemId, workspaceId)
   if ('error' in guardado) return { success: false, error: guardado.error }
-  if (anterior) {
-    const { workspaceId } = await getWorkspace()
-    await borrarImagenesDeCaptura(workspaceId, [anterior])
-  }
   if (ctx.item.negocioId) revalidatePath(`/negocios/${ctx.item.negocioId}`)
   return { success: true, tarifa: guardado.tarifa }
 }

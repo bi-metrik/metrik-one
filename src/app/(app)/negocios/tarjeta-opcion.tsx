@@ -17,6 +17,9 @@ import {
 } from '@/app/(app)/negocios/tarifa-pax-actions'
 import { comprimirFotoHotel } from '@/lib/cotizaciones/foto-hotel-navegador'
 import HojaCliente from '@/app/(app)/negocios/hoja-cliente'
+import { avisarCambioDeFotos, useFotoDeBiblioteca } from '@/app/(app)/negocios/fotos-tarjeta'
+import SelectorFotos from '@/app/(app)/fotos/selector-fotos'
+import { fotoDeLaTarjeta, type ElementoVista } from '@/lib/fotos/vista'
 import TarjetaCosto from '@/app/(app)/negocios/tarjeta-costo'
 import PastillaAerolinea from '@/app/(app)/negocios/pastilla-aerolinea'
 import { AlertaDecision } from '@/components/viaje/alerta-decision'
@@ -313,6 +316,29 @@ export default function TarjetaOpcion({
   const fotoRef = fotoConfirmada && fotoConfirmada.antes === fotoDeLaPagina ? fotoConfirmada.ahora : fotoDeLaPagina
   const [subiendoFoto, setSubiendoFoto] = useState(false)
 
+  // La biblioteca de fotos (2026-10-16): el recuadro de la foto es su puerta. La foto del hotel
+  // es del espacio (llave hotel|ciudad), la misma en la tarjeta, el panel, /fotos y el documento.
+  const pedidoFoto = esHotel && hotel && (hotel.hotel ?? hotel.linea)
+    ? { tipo: 'hotel' as const, nombre: (hotel.hotel ?? hotel.linea) as string, ciudad: hotel.ciudad ?? null }
+    : null
+  const bib = useFotoDeBiblioteca(pedidoFoto)
+  const conBiblioteca = bib?.disponible === true
+  const enTarjeta = conBiblioteca ? fotoDeLaTarjeta(bib.elemento) : null
+  const [selectorFoto, setSelectorFoto] = useState<{ reemplaza: string | null } | null>(null)
+
+  /** Lo que quedó en la biblioteca: se pinta ya, los demás lo releen y la foto vieja de la opción se suelta. */
+  function quedoEnBiblioteca(elemento: ElementoVista | null) {
+    bib?.poner(elemento)
+    avisarCambioDeFotos()
+  }
+
+  function soltarFotoVieja() {
+    if (!fotoRef) return
+    void quitarFotoDelHotel(itemId).then(r => {
+      if (r.success) { setFotoConfirmada({ antes: fotoDeLaPagina, ahora: null }); onCambio() }
+    }).catch(() => {})
+  }
+
   function ponerFoto(archivo: File) {
     if (subiendoFoto) return
     setSubiendoFoto(true)
@@ -320,8 +346,9 @@ export default function TarjetaOpcion({
       try {
         const foto = await comprimirFotoHotel(archivo)
         if (!foto) { toast.error('Ese archivo no es una foto. Usa un JPG o un PNG.'); return }
-        const r = await ponerFotoDelHotel(itemId, foto.dataUrl, foto.proporcion)
+        const r = await ponerFotoDelHotel(itemId, foto.dataUrl, foto.proporcion, enTarjeta?.foto?.id ?? null)
         if (!r.success) { toast.error(r.error ?? 'No se pudo guardar la foto. Vuelve a intentarlo.'); return }
+        if (r.fotoBiblioteca !== undefined) quedoEnBiblioteca(r.fotoBiblioteca)
         setFotoConfirmada({ antes: fotoDeLaPagina, ahora: r.tarifa?.fotoHotel?.ref ?? null })
         onCambio()
       } catch {
@@ -574,7 +601,30 @@ export default function TarjetaOpcion({
             editable={editable}
             onGuardarNota={onGuardarNota}
             {...(esHotel ? { fotoRef, subiendoFoto, onPonerFoto: ponerFoto, onQuitarFoto: quitarFoto } : {})}
+            biblioteca={esHotel && enTarjeta && bib && pedidoFoto ? {
+              foto: enTarjeta.foto ? { url: enTarjeta.foto.url } : null,
+              mas: enTarjeta.mas,
+              admiteOtra: enTarjeta.admiteOtra,
+              onAbrir: modo => {
+                if (!bib.editable) { toast.error('Tu rol puede ver las fotos pero no cambiarlas.'); return }
+                setSelectorFoto({ reemplaza: modo === 'cambiar' ? enTarjeta.foto?.id ?? null : null })
+              },
+            } : null}
           />}
+          {esHotel && conBiblioteca && pedidoFoto && (
+            <SelectorFotos
+              pedido={pedidoFoto}
+              reemplaza={selectorFoto?.reemplaza ?? null}
+              sitioOficial={bib.sitioOficial}
+              abierto={!!selectorFoto}
+              onCerrar={() => setSelectorFoto(null)}
+              onElegida={elemento => {
+                setSelectorFoto(null)
+                quedoEnBiblioteca(elemento)
+                soltarFotoVieja()
+              }}
+            />
+          )}
         </div>
       )}
       {isPending && <span className="sr-only" role="status">Guardando…</span>}

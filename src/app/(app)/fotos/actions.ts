@@ -20,6 +20,7 @@ import {
   elegirDeSitioOficial,
   elementosDe,
   leerBiblioteca,
+  leerCatalogo,
   marcarPrincipal,
   ponerFotoPropia,
   quitarFotoPorId,
@@ -27,7 +28,7 @@ import {
   type FilaCatalogo,
 } from '@/lib/fotos/catalogo'
 import { enlacesDeCatalogo } from '@/lib/fotos/catalogo-almacen'
-import { usaFotosDeSitioOficial, type ObjetivoFoto } from '@/lib/fotos/clave'
+import { sinRepetir, usaFotosDeSitioOficial, type ObjetivoFoto } from '@/lib/fotos/clave'
 import { opcionesDeSitioOficial, paginaOficialDesdeWikidata } from '@/lib/fotos/sitio-oficial'
 import { dominio, objetivoDelPedido, vistaDeElemento, type EleccionFoto, type ElementoVista, type OpcionFoto } from '@/lib/fotos/vista'
 import { opcionesDeCommons } from '@/lib/fotos/wikimedia'
@@ -98,6 +99,35 @@ export async function leerBibliotecaDeFotos(): Promise<BibliotecaFotos> {
   return {
     ok: true,
     elementos: r.elementos.map((e) => vistaDeElemento(e, urls, { sitioOficial: ctx.sitioOficial })),
+    editable: ctx.editable,
+    sitioOficial: ctx.sitioOficial,
+  }
+}
+
+/** Cuántos elementos pide de una vez el editor de la cotización (sus tarjetas). */
+const TOPE_PEDIDOS_TARJETAS = 80
+
+export type FotosDeTarjetas =
+  | { ok: true; elementos: ElementoVista[]; editable: boolean; sitioOficial: boolean }
+  | { ok: false; error: string }
+
+/**
+ * Las fotos de la biblioteca para las tarjetas de una cotización (el recuadro de la foto del
+ * hotel es la puerta a la biblioteca, Mauricio 2026-10-16): una sola lectura para todas las
+ * tarjetas a la vista. La llave de cada una la calcula el servidor. Sin biblioteca en el espacio
+ * (otra plantilla, o sin la migración) responde `ok: false` y la tarjeta queda como antes.
+ */
+export async function fotosParaTarjetas(pedidos: { tipo: string; nombre: string; ciudad: string | null }[]): Promise<FotosDeTarjetas> {
+  const ctx = await contexto(false)
+  if ('error' in ctx) return { ok: false, error: ctx.error as string }
+  const objetivos = sinRepetir((Array.isArray(pedidos) ? pedidos.slice(0, TOPE_PEDIDOS_TARJETAS) : []).map(objetivoDelPedido))
+  const { error: sinMigracion } = await ctx.db.from(TABLA_CATALOGO).select('id').limit(1)
+  if (sinMigracion) return { ok: false, error: 'La biblioteca de fotos todavía no está disponible.' }
+  const filas = objetivos.length > 0 ? await leerCatalogo(ctx.db, ctx.workspaceId, { objetivos }) : []
+  const pedidas = new Set(objetivos.map((o) => `${o.tipo}:${o.clave}`))
+  return {
+    ok: true,
+    elementos: await vistas(ctx, filas.filter((f) => pedidas.has(`${f.tipo}:${f.clave}`))),
     editable: ctx.editable,
     sitioOficial: ctx.sitioOficial,
   }

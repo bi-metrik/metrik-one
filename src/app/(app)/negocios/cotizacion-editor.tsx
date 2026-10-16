@@ -59,6 +59,7 @@ import { totalDelDocumento, type EntradaAsiPuedesPagar } from '@/lib/viaje/asi-p
 import BotonesRevisar from '@/app/(app)/negocios/botones-revisar'
 import BandejaCapturas, { type ReceptorDeBandeja } from '@/app/(app)/negocios/bandeja-capturas'
 import TarjetaOpcion from '@/app/(app)/negocios/tarjeta-opcion'
+import { FotosEnTarjetas } from '@/app/(app)/negocios/fotos-tarjeta'
 import { devolverOpcionABandeja } from '@/app/(app)/negocios/tarifa-pax-actions'
 import { MarcoCotizacionContexto } from '@/app/(app)/negocios/marco-cotizacion-contexto'
 import { usePublicarTotalVivo } from '@/app/(app)/negocios/total-vivo'
@@ -3792,8 +3793,10 @@ export default function CotizacionEditor({ oportunidadId, cotizacion, initialIte
     />
   ) : null
 
+  // Trappvel: el ancho del prototipo de la tarjeta (880 px); fuera del viaje, el de siempre (R6).
+  // `FotosEnTarjetas`: la foto de cada hotel sale de la biblioteca, en una sola lectura.
   return (
-    // Trappvel: el ancho del prototipo de la tarjeta (880 px); fuera del viaje, el de siempre (R6).
+    <FotosEnTarjetas>
     <div className={porPasosOn ? 'mx-auto max-w-[1180px] space-y-4 py-6 sm:px-4' : `mx-auto ${lineasPorTipo ? 'max-w-[880px]' : 'max-w-2xl'} space-y-4 px-4 py-6`}>
       {jsxEncabezado}
       {preguntandoEnvio && (
@@ -3849,6 +3852,7 @@ export default function CotizacionEditor({ oportunidadId, cotizacion, initialIte
         </datalist>
       )}
     </div>
+    </FotosEnTarjetas>
   )
 }
 
