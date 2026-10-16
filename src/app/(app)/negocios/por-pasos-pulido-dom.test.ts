@@ -29,7 +29,7 @@ describe('H8 · «Lo que suma» se lee', () => {
         ] as never,
         nombreDeOpcion: id => nombres[id] ?? id,
         faltaPrecio: () => null,
-        total: 1, costo: 1, margenPct: 15, otrasQueVan: [], pantallazosEnBandeja: 0, incompleto: false,
+        total: 1, costo: 1, margenPct: 15, otrasQueVan: [], pantallazosEnBandeja: 0, incompleto: false, rojos: 0,
       },
     }))
     const t = texto(html)

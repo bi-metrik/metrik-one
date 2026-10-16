@@ -2517,9 +2517,6 @@ interface Props {
 
 // ── Componente principal ──────────────────────────────────────────────────────
 
-/** El valor del contexto del marco: estable, para no re-renderizar el editor. */
-const MARCO_ACTIVO = { activo: true } as const
-
 export default function NegocioDetailClient({
   negocio,
   bloques,
@@ -2567,6 +2564,9 @@ export default function NegocioDetailClient({
   // encabezado fijo: se mide su alto y viaja como variable CSS. En el negocio no se mide.
   const encabezadoRef = useRef<HTMLDivElement>(null)
   const [altoEncabezado, setAltoEncabezado] = useState(0)
+  // El valor del contexto del marco: estable (la ref no cambia), para no re-renderizar el editor.
+  // Lleva el encabezado para que la cotización por pasos ponga ahí la pastilla de «Lo que suma».
+  const [marcoActivo] = useState(() => ({ activo: true as const, encabezado: encabezadoRef }))
   const conCentro = centro !== undefined
   useEffect(() => {
     const el = encabezadoRef.current
@@ -2914,7 +2914,7 @@ export default function NegocioDetailClient({
 
       {/* ── CENTRO: la cotización, cuando se pinta dentro del marco del negocio ── */}
       {conCentro ? (
-        <MarcoCotizacionContexto.Provider value={MARCO_ACTIVO}>
+        <MarcoCotizacionContexto.Provider value={marcoActivo}>
           <div data-centro-cotizacion>{centro}</div>
         </MarcoCotizacionContexto.Provider>
       ) : (

@@ -1,10 +1,11 @@
 'use client'
 
-import { useCallback, useEffect, useMemo, useState, type ReactNode } from 'react'
+import { useCallback, useContext, useEffect, useMemo, useState, type ReactNode } from 'react'
 import { toast } from 'sonner'
 
 import { BarraPasos } from './barra-pasos'
-import { LoQueSuma } from './lo-que-suma'
+import { clasesLoQueSuma, LoQueSuma, usePreferenciaLoQueSuma } from './lo-que-suma'
+import { MarcoCotizacionContexto } from '@/app/(app)/negocios/marco-cotizacion-contexto'
 import { ServicioPorPasos, ServicioProvisional } from './servicio-por-pasos'
 import { TarifasPorPasos, type AutorizacionVista, type ServicioConOpciones } from './tarifas-por-pasos'
 import { RevisarPorPasos } from './revisar-por-pasos'
@@ -128,6 +129,9 @@ type Override = { seleccion?: string[]; va?: boolean }
 
 export default function VistaPorPasos(p: PropsVistaPorPasos) {
   const [paso, setPaso] = useState<NumeroDePaso>(p.pasoInicial)
+  // «Lo que suma» se puede ocultar (brief del 2026-10-16); cerrada, su pastilla va al encabezado.
+  const sumaVisible = usePreferenciaLoQueSuma()
+  const marco = useContext(MarcoCotizacionContexto)
   const [tarifasVistas, setTarifasVistas] = useState(p.pasoInicial === 2)
   // H8 · el ✓ de «Tarifas» se perdía al recargar: queda anotado en esta pestaña, por cotización.
   const claveTarifasVistas = `one:tarifas-vistas:${p.cotizacionId}`
@@ -651,8 +655,11 @@ export default function VistaPorPasos(p: PropsVistaPorPasos) {
           else if (a.tipo === 'pegar') p.onPegar()
         }}
       />
-      <div className="grid grid-cols-1 gap-4 lg:grid-cols-[260px_minmax(0,1fr)]">
+      <div className={`grid grid-cols-1 gap-4 ${clasesLoQueSuma(sumaVisible.preferencia).rejilla}`}>
         <LoQueSuma
+          preferencia={sumaVisible.preferencia}
+          onElegir={sumaVisible.elegir}
+          encabezado={marco?.encabezado ?? null}
           datos={{
             renglones,
             nombreDeOpcion,
@@ -663,6 +670,7 @@ export default function VistaPorPasos(p: PropsVistaPorPasos) {
             otrasQueVan: vanAlCliente.filter(t => !t.esPrincipal).map(t => ({ nombre: t.nombre ?? 'Tarifa', precio: t.precio })),
             pantallazosEnBandeja: p.pantallazosPorAceptar,
             incompleto: sinCosto.length > 0,
+            rojos: entradaPasos.rojos,
           }}
         />
         <div className="min-w-0 pb-36 lg:pb-4">{paso === 1 ? paso1 : paso === 2 ? paso2 : paso3}</div>

@@ -1,6 +1,6 @@
 'use client'
 
-import { createContext } from 'react'
+import { createContext, type RefObject } from 'react'
 
 /**
  * La cotización de viaje se está pintando dentro del marco del negocio
@@ -9,6 +9,11 @@ import { createContext } from 'react'
  */
 export interface ContextoMarcoCotizacion {
   activo: true
+  /**
+   * El encabezado fijo del negocio. La cotización por pasos pone ahí, por portal, la pastilla de
+   * «Lo que suma» cuando la columna está cerrada (brief del 2026-10-16). No cambia su marcado.
+   */
+  encabezado?: RefObject<HTMLDivElement | null>
 }
 
 export const MarcoCotizacionContexto = createContext<ContextoMarcoCotizacion | null>(null)
