@@ -19,10 +19,10 @@ siempre: con el interruptor apagado, ONE byte a byte igual (#1192 graba un fixtu
 - ⚠️ **La barra de pasos es `sticky top-0` y queda DEBAJO del encabezado del negocio** (z-30): lo que asoma al
   bajar es solo el «Sigue:». Todo lo que haga crecer el encabezado lo tapa. Por eso la pastilla flota en el renglón
   del viaje y, si no cabe, se acorta («$X · Y %») en vez de bajar a un renglón propio.
-- **Con ≥ 1500 px la cotización sigue a 404 px**: la página es `max-w-5xl` a cualquier ancho; las tres columnas del
-  diseño de Noor §10 no existen en el código. El default «abierta desde 1500» conserva el amontonamiento.
-- El punto rojo suma el conteo H7 (`entradaPasos.rojos`) y los pantallazos sin aceptar, que en la lista son ámbar:
-  el brief pedía las dos cosas a la vez. Queda para que Noor decida.
+- **Cerrada por defecto en TODO escritorio** (Noor, 2026-10-16): la página es `max-w-5xl` a cualquier ancho y las
+  tres columnas del diseño §10 no existen, así que abierta deja la cotización en 404 px siempre. «Dejar fija» la abre.
+- El punto de la pastilla: rojo con el conteo H7 (`entradaPasos.rojos`), ámbar con solo pantallazos sin aceptar
+  (como la barra y la lista); con los dos, rojo (Noor, 2026-10-16).
 - Arnés de pantalla viva de la vista por pasos: vite + alias de 6 módulos de acciones y `sonner` a un doble,
   `test/caso-san-andres.ts` como datos, `tarjetaDeOpcion` con la `TarjetaCosto` real; medir montajes con
   `Range.getBoundingClientRect` del texto contra la celda. Ver [[qa-pantalla-viva-cdp]].

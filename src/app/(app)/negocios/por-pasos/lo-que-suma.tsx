@@ -15,9 +15,10 @@ import type { RenglonQueSuma } from '@/lib/cotizaciones/por-pasos-vista'
  *
  * Se puede ocultar (brief del 2026-10-16): cerrada, la cotización usa todo el ancho y en el
  * encabezado del negocio queda una pastilla «Total $X · margen Y %» que abre la lista como panel
- * ENCIMA de la cotización (no la empuja). Por defecto cerrada por debajo de 1500 px y abierta desde
- * ahí; lo que cada persona elija («Ocultar» en la columna o «Dejar fija» en el panel) se guarda
- * en este navegador.
+ * ENCIMA de la cotización (no la empuja). Por defecto cerrada en todo escritorio (decisión de Noor,
+ * 2026-10-16: no hay tres columnas, así que abierta deja la cotización en 404 px a cualquier ancho);
+ * quien la quiera la deja fija, y lo que cada persona elija («Ocultar» en la columna o «Dejar fija»
+ * en el panel) se guarda en este navegador.
  * En celular (< 1024 px) nada cambia: barra abajo y hoja.
  */
 
@@ -36,8 +37,7 @@ export interface DatosLoQueSuma {
 }
 
 /**
- * Lo que eligió la persona para la columna. `null` = no ha elegido (o no se pudo leer): manda el
- * ancho de la ventana, resuelto en CSS para que no haya salto al cargar.
+ * Lo que eligió la persona para la columna. `null` = no ha elegido (o no se pudo leer): cerrada.
  */
 export type PreferenciaLoQueSuma = 'abierta' | 'cerrada' | null
 
@@ -64,8 +64,8 @@ function suscribir(avisar: () => void) {
 }
 
 /**
- * La preferencia de la columna. El servidor no la conoce (`null`): el primer pintado es el de la
- * regla del ancho, igual en los dos lados, y después manda lo guardado. Si no se puede guardar, lo
+ * La preferencia de la columna. El servidor no la conoce (`null`): el primer pintado es el de
+ * siempre (cerrada), igual en los dos lados, y después manda lo guardado. Si no se puede guardar, lo
  * elegido vale mientras la pantalla esté abierta.
  */
 export function usePreferenciaLoQueSuma() {
@@ -87,14 +87,8 @@ export function usePreferenciaLoQueSuma() {
  */
 export function clasesLoQueSuma(p: PreferenciaLoQueSuma) {
   if (p === 'abierta') return { rejilla: 'lg:grid-cols-[260px_minmax(0,1fr)]', columna: 'lg:flex', pastilla: 'hidden' }
-  if (p === 'cerrada') return { rejilla: '', columna: '', pastilla: 'hidden lg:block' }
-  return {
-    rejilla: 'min-[1500px]:grid-cols-[260px_minmax(0,1fr)]',
-    columna: 'min-[1500px]:flex',
-    // Un rango, no `lg:block min-[1500px]:hidden`: Tailwind ordena el valor arbitrario ANTES de
-    // `lg`, y `lg:block` le ganaba (medido en Chromium: pastilla y columna a la vez a 1600 px).
-    pastilla: 'hidden lg:max-[1499px]:block',
-  }
+  // Cerrada, elegida o por defecto: la pastilla solo en escritorio (celular tiene su barra).
+  return { rejilla: '', columna: '', pastilla: 'hidden lg:block' }
 }
 
 const margenTexto = (m: number) => `${String(Math.round(m * 10) / 10).replace('.', ',')} %`
@@ -281,8 +275,10 @@ function PastillaLoQueSuma({
     }
   }, [panel])
 
-  // El punto rojo: lo rojo de la lista (el conteo H7 de la barra) y los pantallazos sin aceptar.
-  const conRojo = datos.rojos > 0 || datos.pantallazosEnBandeja > 0
+  // El punto, con los colores de la barra y la lista (decisión de Noor, 2026-10-16): rojo si algo
+  // impide enviar (el conteo H7); ámbar si solo hay pantallazos sin aceptar. Con los dos, rojo.
+  const punto = datos.rojos > 0 ? 'rojo' : datos.pantallazosEnBandeja > 0 ? 'ambar' : null
+  const conRojo = punto !== null
   const porQueRojo = [
     datos.rojos > 0 ? `${datos.rojos} ${datos.rojos === 1 ? 'cosa impide' : 'cosas impiden'} enviar` : null,
     datos.pantallazosEnBandeja > 0 ? `${datos.pantallazosEnBandeja} ${datos.pantallazosEnBandeja === 1 ? 'pantallazo' : 'pantallazos'} sin aceptar` : null,
@@ -304,7 +300,7 @@ function PastillaLoQueSuma({
         title={porQueRojo || undefined}
         className={`inline-flex items-center gap-1.5 whitespace-nowrap rounded-full border bg-white px-3 py-1 text-[13px] text-[#191713] shadow-[0_1px_2px_rgba(25,23,19,.06)] hover:bg-[#F8F7F3] ${panel ? 'border-[#0E5C43]' : 'border-[#CFCAC0]'}`}
       >
-        {conRojo && <span className="h-2 w-2 shrink-0 rounded-full bg-[#B3382C]" data-punto-rojo aria-hidden />}
+        {punto && <span className={`h-2 w-2 shrink-0 rounded-full ${punto === 'rojo' ? 'bg-[#B3382C]' : 'bg-[#D08A1C]'}`} data-punto={punto} aria-hidden />}
         {corta ? (
           <span data-texto-pastilla="corto">
             <span className="sr-only">Total </span><b className="tabular-nums">{pesos(datos.total)}</b>

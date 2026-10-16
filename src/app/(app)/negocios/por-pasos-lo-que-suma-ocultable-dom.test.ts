@@ -6,10 +6,11 @@ import { Window } from 'happy-dom'
  * con React de verdad sobre happy-dom, dentro de un marco con su encabezado (como lo pinta
  * `NegocioDetailClient` con la cotización en el centro), con el caso fijo de San Andrés.
  *
- *  · Sin elección, la columna se rige por el ancho EN CSS: cerrada por debajo de 1500 px, abierta
- *    desde ahí; la rejilla cambia con ella (si no, la cotización caería en la columna de 260 px).
+ *  · Sin elección, cerrada en todo escritorio (decisión de Noor, 2026-10-16); la rejilla cambia con
+ *    la columna (si no, la cotización caería en la columna de 260 px).
  *  · Cerrada, la pastilla «Total $X · margen Y %» va al ENCABEZADO del negocio, con la cifra de
- *    «Lo que suma», y un punto rojo con el mismo conteo de rojos de la barra (H7).
+ *    «Lo que suma». Su punto: rojo con el conteo H7 de la barra; ámbar con solo pantallazos sin
+ *    aceptar, como en la barra y la lista; con los dos, rojo.
  *  · La pastilla abre «Lo que suma» como panel encima (dentro del encabezado, fuera de la rejilla):
  *    se cierra con ✕, con Esc y con un clic afuera; con teclado, el foco entra y vuelve.
  *  · «Ocultar» y «Dejar fija» se guardan en `localStorage`; si no se puede leer, manda
@@ -144,21 +145,18 @@ const clic = async (el: Element | null | undefined) => {
   await asentar()
 }
 
-describe('Sin elección: manda el ancho de la ventana', () => {
-  it('cerrada por debajo de 1500 px y abierta desde ahí, con la rejilla a la par', async () => {
+describe('Sin elección: cerrada en todo escritorio', () => {
+  it('la columna no se ve a ningún ancho, la rejilla es de una columna y la pastilla va en escritorio', async () => {
     await montar()
     const columna = clases('[data-lo-que-suma]')
     expect(columna).toContain('hidden')
-    expect(columna).toContain('min-[1500px]:flex')
-    expect(columna).not.toContain('lg:flex')
-    expect(rejilla()).toContain('min-[1500px]:grid-cols-[260px_minmax(0,1fr)]')
-    expect(rejilla()).not.toContain('lg:grid-cols-[260px_minmax(0,1fr)]')
-    // La pastilla: en el encabezado, solo en pantalla ancha y solo mientras la columna no se ve.
+    // Ninguna variante la muestra: ni `lg:flex` ni la regla vieja de 1500 px.
+    expect(columna.filter(c => c.endsWith(':flex'))).toEqual([])
+    expect(rejilla().some(c => c.includes('grid-cols-[260px'))).toBe(false)
+    // La pastilla: en el encabezado, desde 1024 px y sin tope de ancho.
     const caja = encabezado().querySelector('[data-pastilla-suma]')!
-    // Un RANGO de 1024 a 1499 px: `lg:block min-[1500px]:hidden` no sirve, Tailwind pone el valor
-    // arbitrario antes de `lg` en la hoja y `lg:block` gana (pastilla y columna a la vez a 1600 px).
-    expect(caja.getAttribute('class')!.split(/\s+/)).toEqual(expect.arrayContaining(['hidden', 'lg:max-[1499px]:block']))
-    expect(caja.getAttribute('class')).not.toMatch(/(^|\s)lg:block/)
+    expect(caja.getAttribute('class')!.split(/\s+/)).toEqual(expect.arrayContaining(['hidden', 'lg:block']))
+    expect(caja.getAttribute('class')).not.toMatch(/max-\[|min-\[/)
     // No queda otra pastilla dentro de la cotización.
     expect(q('[data-cotizacion-por-pasos] [data-pastilla-suma]')).toBeNull()
   })
@@ -171,24 +169,32 @@ describe('Sin elección: manda el ancho de la ventana', () => {
   })
 })
 
-describe('El punto rojo de la pastilla', () => {
-  it('sin nada en rojo, no hay punto', async () => {
+describe('El punto de la pastilla', () => {
+  it('sin nada pendiente, no hay punto', async () => {
     await montar()
-    expect(pastilla()!.querySelector('[data-punto-rojo]')).toBeNull()
+    expect(pastilla()!.querySelector('[data-punto]')).toBeNull()
   })
 
-  it('con rojos, el punto y el MISMO conteo que la barra de pasos (H7)', async () => {
+  it('con rojos, punto rojo y el MISMO conteo que la barra de pasos (H7)', async () => {
     await montar({ rojos: 2 })
-    expect(pastilla()!.querySelector('[data-punto-rojo]')).not.toBeNull()
+    expect(pastilla()!.querySelector('[data-punto]')!.getAttribute('data-punto')).toBe('rojo')
+    expect(pastilla()!.querySelector('[data-punto]')!.getAttribute('class')).toContain('bg-[#B3382C]')
     const barra = q('[data-paso="3"] [data-estado-paso]')!.textContent
     expect(barra).toBe('2 cosas impiden enviar')
     expect(pastilla()!.textContent).toContain(barra)
   })
 
-  it('con pantallazos sin aceptar, también', async () => {
+  it('con solo pantallazos sin aceptar, punto ámbar, como en la barra y la lista', async () => {
     await montar({ pantallazos: 1 })
-    expect(pastilla()!.querySelector('[data-punto-rojo]')).not.toBeNull()
+    expect(pastilla()!.querySelector('[data-punto]')!.getAttribute('data-punto')).toBe('ambar')
+    expect(pastilla()!.querySelector('[data-punto]')!.getAttribute('class')).not.toContain('bg-[#B3382C]')
     expect(pastilla()!.textContent).toContain('1 pantallazo sin aceptar')
+  })
+
+  it('con rojos y pantallazos a la vez, rojo', async () => {
+    await montar({ rojos: 1, pantallazos: 3 })
+    expect(pastilla()!.querySelector('[data-punto]')!.getAttribute('data-punto')).toBe('rojo')
+    expect(pastilla()!.textContent).toContain('1 cosa impide enviar · 3 pantallazos sin aceptar')
   })
 })
 
@@ -228,15 +234,8 @@ describe('La pastilla abre «Lo que suma» encima de la cotización', () => {
 })
 
 describe('La elección de cada persona', () => {
-  it('«Ocultar» la cierra en todo ancho y se guarda; «Dejar fija» la abre y se guarda', async () => {
+  it('«Dejar fija» la abre y se guarda; «Ocultar» la vuelve a cerrar y se guarda', async () => {
     await montar()
-    await clic(q('[data-ocultar-suma]'))
-    expect(localStorage.getItem(CLAVE)).toBe('cerrada')
-    expect(clases('[data-lo-que-suma]').filter(c => c.endsWith(':flex'))).toEqual([])
-    expect(rejilla().some(c => c.includes('grid-cols-[260px'))).toBe(false)
-    expect(encabezado().querySelector('[data-pastilla-suma]')!.getAttribute('class')!.split(/\s+/)).toEqual(expect.arrayContaining(['hidden', 'lg:block']))
-    expect(encabezado().querySelector('[data-pastilla-suma]')!.getAttribute('class')).not.toContain('max-[1499px]')
-
     await clic(pastilla())
     await clic(encabezado().querySelector('[data-fijar-suma]'))
     expect(localStorage.getItem(CLAVE)).toBe('abierta')
@@ -245,9 +244,15 @@ describe('La elección de cada persona', () => {
     expect(encabezado().querySelector('[data-panel-suma]')).toBeNull()
     expect(encabezado().querySelector('[data-pastilla-suma]')!.getAttribute('class')!.split(/\s+/)).toContain('hidden')
     expect(encabezado().querySelector('[data-pastilla-suma]')!.getAttribute('class')).not.toContain('block')
+
+    await clic(q('[data-ocultar-suma]'))
+    expect(localStorage.getItem(CLAVE)).toBe('cerrada')
+    expect(clases('[data-lo-que-suma]').filter(c => c.endsWith(':flex'))).toEqual([])
+    expect(rejilla().some(c => c.includes('grid-cols-[260px'))).toBe(false)
+    expect(encabezado().querySelector('[data-pastilla-suma]')!.getAttribute('class')!.split(/\s+/)).toEqual(expect.arrayContaining(['hidden', 'lg:block']))
   })
 
-  it('al volver, lo guardado manda sobre el ancho', async () => {
+  it('al volver, lo guardado manda sobre el valor por defecto', async () => {
     localStorage.setItem(CLAVE, 'cerrada')
     await montar()
     expect(clases('[data-lo-que-suma]').filter(c => c.endsWith(':flex'))).toEqual([])
@@ -258,13 +263,14 @@ describe('La elección de cada persona', () => {
     expect(clases('[data-lo-que-suma]')).toContain('lg:flex')
   })
 
-  it('si el almacenamiento no se puede leer ni escribir, manda el ancho y nada se rompe', async () => {
+  it('si el almacenamiento no se puede leer ni escribir, queda cerrada y elegir vale por esta visita', async () => {
     vi.spyOn(localStorage, 'getItem').mockImplementation(() => { throw new Error('SecurityError') })
     vi.spyOn(localStorage, 'setItem').mockImplementation(() => { throw new Error('QuotaExceededError') })
     await montar()
-    expect(clases('[data-lo-que-suma]')).toContain('min-[1500px]:flex')
-    await clic(q('[data-ocultar-suma]'))
     expect(clases('[data-lo-que-suma]').filter(c => c.endsWith(':flex'))).toEqual([])
+    await clic(pastilla())
+    await clic(encabezado().querySelector('[data-fijar-suma]'))
+    expect(clases('[data-lo-que-suma]')).toContain('lg:flex')
   })
 })
 
