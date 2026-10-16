@@ -167,7 +167,7 @@ describe('Sin elección: manda el ancho de la ventana', () => {
     await montar()
     const total = q('[data-total-suma] b')!.textContent!
     expect(total).toMatch(/^\$\d/)
-    expect(pastilla()!.textContent).toMatch(new RegExp(`^Total ${total.replace(/[$.]/g, '\\$&')} · margen \\d+(,\\d)? %$`))
+    expect(pastilla()!.querySelector('[data-texto-pastilla]')!.textContent).toMatch(new RegExp(`^Total ${total.replace(/[$.]/g, '\\$&')} · margen \\d+(,\\d)? %$`))
   })
 })
 

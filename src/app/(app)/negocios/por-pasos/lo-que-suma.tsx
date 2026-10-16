@@ -236,7 +236,32 @@ function PastillaLoQueSuma({
   const caja = useRef<HTMLDivElement>(null)
   const boton = useRef<HTMLButtonElement>(null)
   const botonCerrar = useRef<HTMLButtonElement>(null)
+  const regla = useRef<HTMLSpanElement>(null)
   const id = useId()
+
+  // ¿Cabe «Total $X · margen Y %» en el renglón del viaje? Si no, la pastilla bajaría a un renglón
+  // propio y el encabezado crecería, tapando el «Sigue:» de los pasos al bajar. Entonces va corta
+  // («$X · Y %»). Se mide con el texto largo siempre presente (invisible) en `regla`.
+  const [corta, setCorta] = useState(false)
+  useEffect(() => {
+    if (!destino || typeof ResizeObserver === 'undefined') return
+    const medir = () => {
+      const c = caja.current
+      const b = boton.current
+      const r = regla.current
+      const viaje = destino.querySelector<HTMLElement>('[data-encabezado-viaje]')
+      if (!c || !b || !r || !viaje || c.offsetWidth === 0) return
+      const visible = b.querySelector<HTMLElement>('[data-texto-pastilla]')
+      const marco = b.offsetWidth - (visible?.offsetWidth ?? 0)
+      const derecha = destino.clientWidth - parseFloat(getComputedStyle(destino).paddingRight || '0')
+      const libre = derecha - (viaje.offsetLeft + viaje.offsetWidth) - 12
+      setCorta(marco + r.offsetWidth > libre)
+    }
+    const ro = new ResizeObserver(medir)
+    ro.observe(destino)
+    if (caja.current) ro.observe(caja.current)
+    return () => ro.disconnect()
+  }, [destino])
 
   useEffect(() => {
     if (!panel) return
@@ -266,7 +291,7 @@ function PastillaLoQueSuma({
   const pastilla = (
     <div
       ref={caja}
-      className={destino ? `absolute bottom-2 right-0 z-10 ${clase}` : `relative justify-self-end ${clase}`}
+      className={destino ? `relative z-10 float-right ml-3 mt-1 ${clase}` : `relative justify-self-end ${clase}`}
       data-pastilla-suma
     >
       <button
@@ -280,9 +305,19 @@ function PastillaLoQueSuma({
         className={`inline-flex items-center gap-1.5 whitespace-nowrap rounded-full border bg-white px-3 py-1 text-[13px] text-[#191713] shadow-[0_1px_2px_rgba(25,23,19,.06)] hover:bg-[#F8F7F3] ${panel ? 'border-[#0E5C43]' : 'border-[#CFCAC0]'}`}
       >
         {conRojo && <span className="h-2 w-2 shrink-0 rounded-full bg-[#B3382C]" data-punto-rojo aria-hidden />}
-        <span>
-          Total <b className="tabular-nums">{pesos(datos.total)}</b>
-          {datos.margenPct !== null && <> · margen <b className="tabular-nums">{margenTexto(datos.margenPct)}</b></>}
+        {corta ? (
+          <span data-texto-pastilla="corto">
+            <span className="sr-only">Total </span><b className="tabular-nums">{pesos(datos.total)}</b>
+            {datos.margenPct !== null && <> · <span className="sr-only">margen </span><b className="tabular-nums">{margenTexto(datos.margenPct)}</b></>}
+          </span>
+        ) : (
+          <span data-texto-pastilla="largo">
+            Total <b className="tabular-nums">{pesos(datos.total)}</b>
+            {datos.margenPct !== null && <> · margen <b className="tabular-nums">{margenTexto(datos.margenPct)}</b></>}
+          </span>
+        )}
+        <span ref={regla} aria-hidden className="pointer-events-none invisible absolute left-0 top-0 whitespace-nowrap">
+          Total <b>{pesos(datos.total)}</b>{datos.margenPct !== null && <> · margen <b>{margenTexto(datos.margenPct)}</b></>}
         </span>
         {conRojo && <span className="sr-only">. {porQueRojo}</span>}
       </button>
@@ -316,7 +351,10 @@ function PastillaLoQueSuma({
       )}
     </div>
   )
-  if (destino) return createPortal(pastilla, destino)
+  // En el encabezado va FLOTANDO a la derecha, al final: comparte renglón con la línea del viaje
+  // (que es `inline-flex`) si cabe, y si no baja al siguiente; nunca se monta sobre el texto. El
+  // `clear` hace que el encabezado la contenga cuando baja.
+  if (destino) return createPortal(<>{pastilla}<div className="clear-both" aria-hidden /></>, destino)
   // Con marco, hasta tener el encabezado no se pinta: pintada en la rejilla, saltaría al encabezado.
   return encabezado === null ? null : pastilla
 }
