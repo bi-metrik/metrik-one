@@ -19,6 +19,7 @@ import {
 import { comprimirFotoHotel } from '@/lib/cotizaciones/foto-hotel-navegador'
 import type { TipoFoto } from '@/lib/fotos/clave'
 import SelectorFotos, { type PedidoFoto } from '../fotos/selector-fotos'
+import { avisarCambioDeFotos, EVENTO_FOTOS_BIBLIOTECA } from './fotos-tarjeta'
 
 const TITULO: Record<TipoFoto, string> = { ciudad: 'Ciudades', hotel: 'Hoteles', actividad: 'Actividades y planes opcionales' }
 
@@ -49,12 +50,30 @@ export default function FotosPropuestaPanel({ cotizacionId, editable }: { cotiza
     if (r.aviso) toast.message(r.aviso)
   }
 
+  // La misma foto se cambia también en la tarjeta del hotel: las dos se avisan (`fotos-tarjeta.tsx`).
+  const propio = useRef(false)
+  const avisar = () => {
+    propio.current = true
+    avisarCambioDeFotos()
+    propio.current = false
+  }
+  useEffect(() => {
+    const releer = () => {
+      if (propio.current) return
+      void fotosDeLaPropuesta(cotizacionId).then((r) => r.ok && setEstado(r))
+    }
+    window.addEventListener(EVENTO_FOTOS_BIBLIOTECA, releer)
+    return () => window.removeEventListener(EVENTO_FOTOS_BIBLIOTECA, releer)
+  }, [cotizacionId])
+
   const correr = (clave: string, accion: () => Promise<PanelFotos>) => {
     if (ocupado) return
     setOcupado(clave)
     start(async () => {
       try {
-        aplicar(await accion())
+        const r = await accion()
+        aplicar(r)
+        if (r.ok) avisar()
       } catch {
         toast.error('No se pudo. Vuelve a intentarlo.')
       } finally {
@@ -75,7 +94,11 @@ export default function FotosPropuestaPanel({ cotizacionId, editable }: { cotiza
         buscado.current = true
         setOcupado('todas')
         void sugerirFotosQueFaltan(cotizacionId)
-          .then((s) => vivo && aplicar(s))
+          .then((s) => {
+            if (!vivo) return
+            aplicar(s)
+            if (s.ok) avisar()
+          })
           .finally(() => vivo && setOcupado(null))
       }
     })
@@ -206,6 +229,7 @@ export default function FotosPropuestaPanel({ cotizacionId, editable }: { cotiza
         onCerrar={() => setSelector(null)}
         onElegida={() => {
           setSelector(null)
+          avisar()
           void fotosDeLaPropuesta(cotizacionId).then(aplicar)
         }}
       />

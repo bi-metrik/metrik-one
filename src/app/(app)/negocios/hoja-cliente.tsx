@@ -29,6 +29,22 @@ import PastillaAerolinea from './pastilla-aerolinea'
  */
 
 const HELVETICA = '"Helvetica Neue", Helvetica, Arial, sans-serif'
+
+/**
+ * La biblioteca de fotos en la tarjeta del hotel (Mauricio, 2026-10-16): el recuadro es su
+ * puerta. Con foto en la biblioteca, se ve esa (la que sale en la propuesta) con «+N» si tiene
+ * más; vacío, además de pegar, arrastrar o subir, «Buscar fotos» abre el selector de 12.
+ */
+export interface BibliotecaEnTarjeta {
+  /** La foto de la biblioteca que sale en la propuesta. `null` = no tiene. */
+  foto: { url: string | null } | null
+  /** Cuántas más del mismo hotel salen con ella. */
+  mas: number
+  /** ¿Cabe otra (hasta 3)? */
+  admiteOtra: boolean
+  /** Abre el selector: `cambiar` reemplaza la que se ve; si no, agrega. */
+  onAbrir: (modo: 'buscar' | 'cambiar' | 'agregar') => void
+}
 const PLACEHOLDER_NOTA = 'Agrega una nota para el cliente…'
 
 export default function HojaCliente({
@@ -47,6 +63,7 @@ export default function HojaCliente({
   subiendoFoto = false,
   onPonerFoto,
   onQuitarFoto,
+  biblioteca = null,
 }: {
   /** La opción, con su descripción: la nota sale de ahí (`notaDeLaLinea`). */
   item: ItemConLectura
@@ -68,6 +85,8 @@ export default function HojaCliente({
   /** Pegada, arrastrada o subida: quien llama la comprime y la guarda. */
   onPonerFoto?: (archivo: File) => void
   onQuitarFoto?: () => void
+  /** Con biblioteca en el espacio, el recuadro la muestra y abre su selector. */
+  biblioteca?: BibliotecaEnTarjeta | null
 }) {
   const enLaFicha = adicionales.map(f => adicionalEnLaFicha(aAdicional(f)))
   const [h] = hotelesDeItems([{ ...item, adicionales: enLaFicha }])
@@ -144,13 +163,14 @@ export default function HojaCliente({
               ) : null}
             </div>
           </div>
-          {(fotoRef || (editable && onPonerFoto)) && (
+          {(fotoRef || biblioteca?.foto || (editable && onPonerFoto)) && (
             <FotoDelHotel
               fotoRef={fotoRef}
               editable={editable}
               subiendo={subiendoFoto}
               onPoner={onPonerFoto}
               onQuitar={onQuitarFoto}
+              biblioteca={biblioteca}
             />
           )}
           </div>
@@ -258,8 +278,11 @@ function VueloDelCliente({ v, general }: { v: VueloPDF; general: boolean }) {
 
 /**
  * La foto del hotel sobre la hoja: vacía, invita a pegarla, arrastrarla o subirla (como la
- * nota); con foto, se ve como sale en el documento (3:2, recortada al centro) y se cambia o se
- * quita. El pegado se queda aquí: la bandeja escucha el pegado en toda la página.
+ * nota) y, con biblioteca, a buscarla; con foto, se ve como sale en el documento (3:2, recortada
+ * al centro) y se cambia. El pegado se queda aquí: la bandeja escucha el pegado en toda la página.
+ *
+ * Con biblioteca, manda la foto de la biblioteca; la vieja de la opción (`fotoRef`) solo se ve si
+ * la biblioteca no tiene una, igual que en el documento (`foto-hotel-documento.ts`).
  */
 function FotoDelHotel({
   fotoRef,
@@ -267,16 +290,20 @@ function FotoDelHotel({
   subiendo,
   onPoner,
   onQuitar,
+  biblioteca,
 }: {
   fotoRef: string | null
   editable: boolean
   subiendo: boolean
   onPoner?: (archivo: File) => void
   onQuitar?: () => void
+  biblioteca: BibliotecaEnTarjeta | null
 }) {
   const idEntrada = useId()
   const [sobre, setSobre] = useState(false)
-  const src = urlDeFotoHotel(fotoRef)
+  const deBiblioteca = !!biblioteca?.foto
+  // Una foto de la biblioteca sin enlace firmado se ve como el degradado, no como vacía.
+  const src = deBiblioteca ? biblioteca!.foto!.url ?? '' : urlDeFotoHotel(fotoRef)
   const puede = editable && !!onPoner && !subiendo
 
   function tomar(archivo: File | null | undefined) {
@@ -316,7 +343,7 @@ function FotoDelHotel({
     />
   )
 
-  if (!src) {
+  if (src === null) {
     return (
       <label
         htmlFor={idEntrada}
@@ -332,6 +359,19 @@ function FotoDelHotel({
         </svg>
         <span>{subiendo ? 'Guardando la foto…' : TEXTO_AGREGAR_FOTO_HOTEL}</span>
         {!subiendo && <small className="text-[10px] opacity-80">Pégala, arrástrala o súbela</small>}
+        {biblioteca && !subiendo && (
+          <button
+            type="button"
+            onClick={e => { e.preventDefault(); e.stopPropagation(); biblioteca.onAbrir('buscar') }}
+            className="mt-1 inline-flex items-center gap-1 rounded-full border border-[#E63380] bg-white px-2.5 py-0.5 text-[11px] font-semibold text-[#E63380] hover:bg-[#FFF7FB]"
+            data-buscar-fotos
+          >
+            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+              <circle cx="11" cy="11" r="7" /><path d="m20 20-3.5-3.5" />
+            </svg>
+            Buscar fotos
+          </button>
+        )}
         {entrada}
       </label>
     )
@@ -344,19 +384,40 @@ function FotoDelHotel({
       {...(editable ? alSoltar : {})}
       className={`group relative aspect-[3/2] w-[34%] shrink-0 overflow-hidden rounded-lg max-sm:w-full ${sobre ? 'ring-2 ring-[#E63380]' : ''}`}
       data-foto-hotel="con-foto"
+      data-de-biblioteca={deBiblioteca ? '' : undefined}
     >
-      {/* eslint-disable-next-line @next/next/no-img-element -- enlace firmado de 5 minutos, fuera del optimizador */}
-      <img src={src} alt="Foto del hotel" className="h-full w-full object-cover" />
+      {src
+        // eslint-disable-next-line @next/next/no-img-element -- enlace firmado de 5 minutos, fuera del optimizador
+        ? <img src={src} alt="Foto del hotel" className="h-full w-full object-cover" />
+        : <span className="block h-full w-full bg-gradient-to-br from-[#e63380] via-[#8b4fa0] to-[#1fa7bd]" aria-label="Foto del hotel" />}
+      {deBiblioteca && biblioteca!.mas > 0 && (
+        <span className="absolute top-1.5 right-1.5 rounded-full bg-black/60 px-1.5 py-0.5 text-[10.5px] font-semibold text-white tabular-nums" title={`${biblioteca!.mas} ${biblioteca!.mas === 1 ? 'foto más' : 'fotos más'} en la biblioteca`} data-mas-fotos>
+          +{biblioteca!.mas}
+        </span>
+      )}
       {subiendo && (
         <span className="absolute inset-0 flex items-center justify-center bg-white/70 text-[11.5px] text-[#3A3F55]">Guardando la foto…</span>
       )}
       {editable && !subiendo && (
         <span className="absolute inset-x-0 bottom-0 flex justify-end gap-1.5 bg-gradient-to-t from-black/45 to-transparent p-1.5 opacity-0 transition-opacity focus-within:opacity-100 group-hover:opacity-100 max-sm:opacity-100">
-          <label htmlFor={idEntrada} className="cursor-pointer rounded bg-white/90 px-2 py-0.5 text-[11px] font-semibold text-[#3A3F55] hover:bg-white">
-            Cambiar
-            {entrada}
-          </label>
-          {onQuitar && (
+          {biblioteca ? (
+            <>
+              {deBiblioteca && biblioteca.admiteOtra && (
+                <button type="button" onClick={() => biblioteca.onAbrir('agregar')} className="rounded border-0 bg-white/90 px-2 py-0.5 text-[11px] font-semibold text-[#3A3F55] hover:bg-white">
+                  Otra
+                </button>
+              )}
+              <button type="button" onClick={() => biblioteca.onAbrir('cambiar')} className="rounded border-0 bg-white/90 px-2 py-0.5 text-[11px] font-semibold text-[#3A3F55] hover:bg-white">
+                Cambiar
+              </button>
+            </>
+          ) : (
+            <label htmlFor={idEntrada} className="cursor-pointer rounded bg-white/90 px-2 py-0.5 text-[11px] font-semibold text-[#3A3F55] hover:bg-white">
+              Cambiar
+              {entrada}
+            </label>
+          )}
+          {onQuitar && !deBiblioteca && (
             <button type="button" onClick={onQuitar} className="rounded border-0 bg-white/90 px-2 py-0.5 text-[11px] font-semibold text-[#B3382C] hover:bg-white">
               Quitar
             </button>
