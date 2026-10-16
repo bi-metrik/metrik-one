@@ -114,6 +114,24 @@ describe('el aviso de 48 horas', () => {
   })
 })
 
+describe('el filtro de un solo espacio (reintento a mano en un preview, `?ws=`)', () => {
+  it('con `soloWorkspaceId` procesa SOLO ese espacio; sin él, todos los del despliegue', async () => {
+    const t = tablas()
+    // Otro registro del mismo preview, también con cobro programado (p. ej. `test-de-pruebas`).
+    t.valida_registros.push({ ...t.valida_registros[0], id: 'reg-otro', workspace_id: 'ws-otro', correo: 'otro@x.co', slug_creado: 'otro' })
+    const solo = montar(t)
+    await procesarCobrosTrasPrueba({ ...solo.deps, ahoraMs: cron('2026-10-18'), soloWorkspaceId: 'ws-cli' })
+    expect(solo.correos.map((c) => c.to)).toEqual(['gerencia@acme.co'])
+    expect(solo.tablas.valida_registros.find((r) => r.id === 'reg-otro')?.cobro_aviso_enviado_at).toBeNull()
+
+    const t2 = tablas()
+    t2.valida_registros.push({ ...t2.valida_registros[0], id: 'reg-otro', workspace_id: 'ws-otro', correo: 'otro@x.co', slug_creado: 'otro' })
+    const todos = montar(t2)
+    await procesarCobrosTrasPrueba({ ...todos.deps, ahoraMs: cron('2026-10-18') })
+    expect(todos.correos.map((c) => c.to).sort()).toEqual(['gerencia@acme.co', 'otro@x.co'])
+  })
+})
+
 describe('el cobro en la fecha fija', () => {
   it('el cron del martes 07:00 (antes de las 15:00) no cobra; el del miércoles sí', async () => {
     const m = montar(tablas(AVISADO))
@@ -417,6 +435,34 @@ describe('el cobro del primer mes AL CONFIRMAR (Condiciones v2.1, 7.1 literal a)
     // El aviso de 48 h y el día 7: el cobro del literal (b), como intento 1 de la cuota 1.
     await procesarCobrosTrasPrueba({ ...m.deps, ahoraMs: cron('2026-10-18') })
     expect(m.correos.map((c) => c.idempotencyKey)).toEqual(['valida-aviso-cobro-reg-1'])
+    await procesarCobrosTrasPrueba({ ...m.deps, ahoraMs: cron('2026-10-21') })
+    expect(intentos).toEqual([
+      { cobradorId: 'ws-metrik', cuotaId: 'cuota-1', intento: 0, reintentoTrasConfirmacion: false },
+      { cobradorId: 'ws-metrik', cuotaId: 'cuota-1', intento: 1, reintentoTrasConfirmacion: true },
+    ])
+    expect(m.registro().cobro_estado).toBe('cobrado')
+  })
+
+  it('ePayco NO procesó la confirmación (error nuestro de datos): no culpa a la tarjeta, conserva la prueba y el día 7 cobra como intento 1', async () => {
+    const intentos: unknown[] = []
+    const m = montar(conTablas(V21), {
+      cobrarCuota: async (_d, p) => {
+        intentos.push(p)
+        return intentos.length === 1
+          ? { tipo: 'no_procesado', cobroId: 'cobro-1', mensaje: 'ePayco no procesó el cobro: Some fields are required' }
+          : { tipo: 'aprobado', cobroId: 'cobro-1', detalle: 'pagado' }
+      },
+    })
+    // `cobrarCuotaConTarjeta` anota el intento 0 como `error` (no hubo transacción).
+    m.tablas.cobro_intentos_tarjeta = [{ plan_cobro_id: 'plan-1', numero_cuota: 1, intento: 0, resultado: 'error' }]
+    const r = await confirmar(m)
+    expect(r).toEqual({ tipo: 'no_procesado' })
+    const texto = textoTrasConfirmar(r.tipo, { valor: 150_000, ultimos4: null })
+    expect(texto).toContain('error de nuestro lado')
+    expect(texto).not.toMatch(/rechazado\b|Te enviamos al correo un enlace/)
+    expect(m.registro()).toMatchObject({ cobro_estado: 'programado', cobro_programado_at: VENCE })
+    expect(String(m.registro().cobro_detalle)).toContain('error técnico')
+    await procesarCobrosTrasPrueba({ ...m.deps, ahoraMs: cron('2026-10-18') })
     await procesarCobrosTrasPrueba({ ...m.deps, ahoraMs: cron('2026-10-21') })
     expect(intentos).toEqual([
       { cobradorId: 'ws-metrik', cuotaId: 'cuota-1', intento: 0, reintentoTrasConfirmacion: false },

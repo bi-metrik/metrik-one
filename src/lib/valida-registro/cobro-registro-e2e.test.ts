@@ -12,7 +12,9 @@
  *   - la base: el doble de tablas (`test/tablas-doble.ts`). Las dos funciones de la base que el
  *     recorrido llama (`valida_activar_autogestion`, `enrolar_cobro_por_ciclo`) van como dobles que
  *     hacen lo mismo; la guarda del canal `registro` se emula en el insert (pone la hora, la IP y el
- *     correo desde el registro). Las tres se ejecutan de verdad en PGlite en `activacion-sql.test.ts`;
+ *     correo desde el registro). Las tres se ejecutan de verdad en PGlite en
+ *     `suscripciones-producto/migracion-sql.test.ts` (desde 20261016 la activación crea una
+ *     SUSCRIPCIÓN, no empresa ni negocio en `metrik`);
  *   - Valida (la prueba), ePayco, el PDF, Resend y el registro del pago (`procesarEventoPasarela`).
  */
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest'
@@ -35,6 +37,8 @@ const tablas: Tablas = {
   fiscal_profiles: [],
   empresas: [],
   negocios: [],
+  suscripciones_producto: [],
+  suscripciones_producto_eventos: [],
   documentos_contractuales_versiones: [],
   servicios_contratados: [],
   aceptaciones_terminos: [],
@@ -89,7 +93,12 @@ const db = {
   },
 }
 
-/** `valida_activar_autogestion`, lo que deja (la función real corre en `activacion-sql.test.ts`). */
+/**
+ * `valida_activar_autogestion`, lo que deja desde 20261016 (y desde 20261016170000 activa la fila en
+ * prueba que nació en el registro, en vez de crear otra). La función real corre en
+ * `suscripciones-producto/migracion-sql.test.ts`): la suscripción con la empresa declarada y la tarjeta
+ * del registro, los Términos de ESA suscripción y el contrato colgado de ella. Ni empresa ni negocio.
+ */
 function activarEnLaBase(a: Record<string, unknown>) {
   const reg = tablas.valida_registros.find((r) => r.workspace_id === a.p_workspace_cliente && r.estado === 'creado')
   if (!reg) return { ok: false, error: 'sin_registro' }
@@ -97,14 +106,37 @@ function activarEnLaBase(a: Record<string, unknown>) {
   if (vivo) return { ok: true, resultado: 'ya_activo', contrato_id: vivo.id }
   const d = a.p_documento as Record<string, string>
   if (sha(d.texto_md) !== d.texto_sha256) return { ok: false, error: 'documento_invalido' }
-  const empresa = { id: nuevoId('empresa'), workspace_id: METRIK, razon_social: reg.razon_social }
-  const negocio = { id: nuevoId('negocio'), workspace_id: METRIK, empresa_id: empresa.id }
-  const doc = { id: nuevoId('doc'), workspace_id: METRIK, empresa_id: empresa.id, alcance: 'cliente', ...d }
+  const conTarjeta = reg.metodo_pago_estado === 'registrado' && String(reg.metodo_pago_ref ?? '').startsWith('epayco:')
+  // 20261016170000: la suscripción EN PRUEBA del registro pasa a activa; no se crea otra.
+  const enPrueba = tablas.suscripciones_producto.find(
+    (x) => x.workspace_cliente_id === a.p_workspace_cliente && x.producto === 'valida' && x.estado === 'prueba',
+  )
+  const suscripcion = {
+    id: (enPrueba?.id as string | undefined) ?? nuevoId('suscripcion'),
+    workspace_id: METRIK,
+    producto: 'valida',
+    workspace_cliente_id: a.p_workspace_cliente,
+    nombre: `Valida — ${reg.razon_social}`,
+    razon_social: reg.razon_social,
+    tipo_documento: 'NIT',
+    numero_documento: reg.identificacion,
+    dv: reg.dv,
+    correo_facturacion: reg.correo,
+    estado: 'activa',
+    origen_comercial: reg.origen,
+    valida_registro_id: reg.id,
+    metodo_pago_pasarela: conTarjeta ? 'epayco' : null,
+    metodo_pago_ref: conTarjeta ? reg.metodo_pago_ref : null,
+    datos_fiscales: {},
+    metadata: { origen: 'valida_autogestion' },
+  }
+  const doc = { id: nuevoId('doc'), workspace_id: METRIK, empresa_id: null, suscripcion_id: suscripcion.id, alcance: 'cliente', ...d }
   const contrato = {
     id: nuevoId('contrato'),
     workspace_id: METRIK,
-    empresa_id: empresa.id,
-    negocio_id: negocio.id,
+    empresa_id: null,
+    negocio_id: null,
+    suscripcion_id: suscripcion.id,
     servicio_slug: a.p_servicio_slug,
     servicio_version: 1,
     parametros: a.p_parametros,
@@ -112,11 +144,11 @@ function activarEnLaBase(a: Record<string, unknown>) {
     estado: 'activo',
     aceptante_designado_id: a.p_usuario,
   }
-  tablas.empresas.push(empresa)
-  tablas.negocios.push(negocio)
+  if (enPrueba) Object.assign(enPrueba, suscripcion)
+  else tablas.suscripciones_producto.push(suscripcion)
   tablas.documentos_contractuales_versiones.push(doc)
   tablas.servicios_contratados.push(contrato)
-  return { ok: true, resultado: 'activado', contrato_id: contrato.id, negocio_id: negocio.id, documento_id: doc.id }
+  return { ok: true, resultado: 'activado', contrato_id: contrato.id, suscripcion_id: suscripcion.id, documento_id: doc.id }
 }
 
 /** `enrolar_cobro_por_ciclo`: plan, cuotas y acta en una transacción. */
@@ -124,7 +156,7 @@ function enrolarEnLaBase(a: Record<string, unknown>) {
   const contrato = tablas.servicios_contratados.find((c) => c.id === a.p_servicio_contratado_id) as Fila
   const plan = a.p_plan as Record<string, unknown>
   const planId = nuevoId('plan')
-  tablas.planes_cobro.push({ id: planId, workspace_id: contrato.workspace_id, negocio_id: contrato.negocio_id, ...plan })
+  tablas.planes_cobro.push({ id: planId, workspace_id: contrato.workspace_id, negocio_id: contrato.negocio_id ?? null, suscripcion_id: contrato.suscripcion_id ?? null, ...plan })
   for (const [i, c] of (a.p_cuotas as Fila[]).entries()) {
     tablas.plan_cobro_cuotas.push({ id: nuevoId('cuota'), workspace_id: contrato.workspace_id, plan_cobro_id: planId, numero: i + 1, ...c })
   }
@@ -314,6 +346,24 @@ describe('registro → 14 minutos → cobro de la tarjeta con el plan activado',
     expect(pagos).toHaveLength(1)
     expect(rpcs).toEqual(['valida_activar_autogestion', 'enrolar_cobro_por_ciclo'])
 
+    // Desde 20261016: el cliente vive en su SUSCRIPCIÓN, no en el CRM de `metrik`. Contrato, plan,
+    // cobro y aceptación cuelgan de ella; ni empresa en el directorio ni negocio.
+    const sus = tablas.suscripciones_producto[0]
+    expect(tablas.suscripciones_producto).toHaveLength(1)
+    expect(sus).toMatchObject({ workspace_cliente_id: reg.workspace_id, razon_social: 'ACME S.A.S.', metodo_pago_ref: REF_TARJETA })
+    // Es LA MISMA fila que nació en prueba al registrarse (su línea «prueba» de la bitácora), ahora activa.
+    expect(sus.estado).toBe('activa')
+    expect(tablas.suscripciones_producto_eventos).toContainEqual(expect.objectContaining({ suscripcion_id: sus.id, tipo: 'prueba' }))
+    expect(tablas.negocios).toHaveLength(0)
+    expect(tablas.empresas).toHaveLength(0)
+    expect(tablas.servicios_contratados[0]).toMatchObject({ negocio_id: null, empresa_id: null, suscripcion_id: sus.id })
+    expect(tablas.planes_cobro[0]).toMatchObject({ negocio_id: null, suscripcion_id: sus.id })
+    expect(tablas.cobros[0]).toMatchObject({ negocio_id: null, suscripcion_id: sus.id, numero_cuota: 1 })
+    expect(tablas.aceptaciones_terminos[0]).toMatchObject({ negocio_id: null, suscripcion_id: sus.id })
+    expect(doc).toMatchObject({ empresa_id: null, suscripcion_id: sus.id })
+    // La suscripción dice desde cuándo rigen sus Términos (la hora de la casilla).
+    expect(sus.terminos_aceptados_at).toBe(reg.aceptado_at)
+
     // 4. El cron vuelve a correr: nada se cobra dos veces.
     await procesarCobrosTrasPrueba({ ...deps, ahoraMs: inicio + 16 * 60_000 })
     expect(ePayco.cargos).toHaveLength(1)
@@ -388,6 +438,12 @@ describe('registro → consulta 11 → confirma → cobro YA; el cron del día 7
     expect(tablas.cobro_intentos_tarjeta).toHaveLength(1)
     expect(tablas.aceptaciones_terminos).toHaveLength(1)
     expect(pagos).toHaveLength(1)
+    // La consulta 11 también deja una suscripción, no un negocio.
+    expect(tablas.negocios).toHaveLength(0)
+    expect(tablas.suscripciones_producto).toHaveLength(1)
+    expect(tablas.cobros[0]).toMatchObject({ negocio_id: null, suscripcion_id: tablas.suscripciones_producto[0].id })
+    expect(tablas.suscripciones_producto[0].estado).toBe('activa')
+    expect(tablas.suscripciones_producto_eventos).toContainEqual(expect.objectContaining({ suscripcion_id: tablas.suscripciones_producto[0].id, tipo: 'prueba' }))
 
     // El aviso y el día 7 del cron: nada más se cobra, ni se avisa de un cobro que ya se hizo.
     const aviso = await procesarCobrosTrasPrueba({ ...deps, ahoraMs: inicio + 9 * 60_000 })
@@ -483,5 +539,83 @@ describe('consulta 11 → confirma → la tarjeta rechaza → conserva la prueba
     // Y nada más: otra corrida no cobra.
     await procesarCobrosTrasPrueba({ ...deps, ahoraMs: inicio + 16 * 60_000 })
     expect(ePayco.cargos).toHaveLength(2)
+  })
+})
+
+describe('«Activar plan» (el tercer camino) también crea una suscripción y su plan cobra por ella', () => {
+  it('activarPlanValida → suscripción; al aceptar, asegurarCobroDelEspacio enrola el plan de la suscripción y lo pasa a la tarjeta', async () => {
+    for (const filas of Object.values(tablas)) filas.length = 0
+    tablas.workspaces.push({ id: METRIK, slug: 'metrik', config_extra: {} })
+    tablas.catalogo_servicios.push({ slug: 'valida-cda-licencia', nombre: 'Licencia Valida', modulo: 'valida_consulta', disparador_cobro: 'ciclo' })
+    tablas.catalogo_servicios_versiones.push({ slug: 'valida-cda-licencia', version: 1, definicion: { parametros: { dias_trial: { por_defecto: 0 } } } })
+    pagos.length = 0
+    rpcs.length = 0
+
+    const { crearEspacioValida } = await import('./registro-servidor')
+    const { activarPlanValida, asegurarCobroDelEspacio } = await import('./activacion-servidor')
+    const { condicionesVigentes, versionAceptada } = await import('./condiciones')
+    const { dvParaNit } = await import('./datos')
+
+    const alta = await crearEspacioValida({
+      razonSocial: 'DELTA S.A.S.',
+      nit: '901234570',
+      dv: dvParaNit('901234570'),
+      acepta: true,
+      condicionesVersion: versionAceptada(condicionesVigentes()),
+      recomendadoAfi: true,
+      codigoAfi: null,
+      ref: null,
+      utm: {},
+      ip: '181.50.1.5',
+      tarjeta: { token: 'XCX92PZqBKfmcWFbA', titular: 'Ana Pérez', celular: '3001234567' },
+    })
+    expect(alta).toMatchObject({ tipo: 'ok' })
+    const reg = tablas.valida_registros[0]
+    // El botón no activa un registro con cobro programado (cobraría antes de los 7 días): este registro
+    // es el de antes de la tarjeta (sin cobro programado) con sus Términos aceptados.
+    reg.cobro_estado = null
+    const perfil = tablas.profiles.find((p) => p.id === PERSONA.id)
+    if (perfil) perfil.role = 'owner'
+    else tablas.profiles.push({ id: PERSONA.id, workspace_id: reg.workspace_id, role: 'owner' })
+
+    const antes = process.env.VALIDA_ACTIVACION_ABIERTA
+    process.env.VALIDA_ACTIVACION_ABIERTA = '1'
+    try {
+      const r = await activarPlanValida({ rut: null })
+      expect(r).toEqual({ ok: true, destino: '/valida?terminos=1' })
+    } finally {
+      if (antes === undefined) delete process.env.VALIDA_ACTIVACION_ABIERTA
+      else process.env.VALIDA_ACTIVACION_ABIERTA = antes
+    }
+    expect(rpcs).toEqual(['valida_activar_autogestion'])
+    expect(tablas.negocios).toHaveLength(0)
+    expect(tablas.empresas).toHaveLength(0)
+    const sus = tablas.suscripciones_producto[0]
+    expect(tablas.suscripciones_producto).toHaveLength(1)
+    expect(sus).toMatchObject({ workspace_cliente_id: reg.workspace_id, razon_social: 'DELTA S.A.S.', estado: 'activa' })
+    expect(tablas.suscripciones_producto_eventos).toContainEqual(expect.objectContaining({ suscripcion_id: sus.id, tipo: 'prueba' }))
+    expect(tablas.servicios_contratados[0]).toMatchObject({ suscripcion_id: sus.id, negocio_id: null })
+
+    // La persona acepta los Términos en /valida (canal módulo, aquí ya sembrado sobre la suscripción):
+    // el plan nace YA, colgado de la suscripción, y pasa a la tarjeta.
+    tablas.aceptaciones_terminos.push({
+      id: 'acept-1', canal: 'modulo', estado: 'aceptado', suscripcion_id: sus.id, negocio_id: null, respondido_at: new Date().toISOString(),
+    })
+    // ePayco apagado en este paso: el cargo de la cuota 1 ya se probó arriba, y aquí no debe salir a la red.
+    const epaycoAntes = process.env.EPAYCO_HABILITADO
+    delete process.env.EPAYCO_HABILITADO
+    const fetchAntes = globalThis.fetch
+    globalThis.fetch = (async () => {
+      throw new Error('sin red en la prueba')
+    }) as typeof fetch
+    try {
+      await asegurarCobroDelEspacio(String(reg.workspace_id))
+    } finally {
+      process.env.EPAYCO_HABILITADO = epaycoAntes
+      globalThis.fetch = fetchAntes
+    }
+    expect(rpcs).toEqual(['valida_activar_autogestion', 'enrolar_cobro_por_ciclo'])
+    expect(tablas.planes_cobro).toHaveLength(1)
+    expect(tablas.planes_cobro[0]).toMatchObject({ suscripcion_id: sus.id, negocio_id: null, pasarela: 'epayco' })
   })
 })

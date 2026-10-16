@@ -148,11 +148,16 @@ export async function emitirCuentaDesdeCuota(
 
   const { data: planData } = await supabase
     .from('planes_cobro')
-    .select('id, negocio_id, total_cuotas, concepto_detalle_template')
+    .select('id, negocio_id, suscripcion_id, total_cuotas, concepto_detalle_template')
     .eq('id', cuota.plan_cobro_id)
     .maybeSingle()
   if (!planData) return fallo('Plan de cobro no encontrado')
-  const plan = planData as PlanRow
+  const plan = planData as PlanRow & { suscripcion_id?: string | null }
+  // Una suscripción no recibe cuenta de cobro de persona natural: la vende METRIK IA S.A.S. y su
+  // documento es la factura electrónica del cobro (ver `generar-cuentas-cobro.ts`).
+  if (plan.suscripcion_id || !plan.negocio_id) {
+    return fallo('La cuota es de una suscripción: se factura con factura electrónica, no con cuenta de cobro')
+  }
 
   const { data: negData } = await supabase
     .from('negocios')
@@ -395,6 +400,8 @@ export async function emitirCuentasExplicitasPeriodo(
     .select('id, fecha_vencimiento, numero, planes_cobro!inner(activo, workspace_id)')
     .eq('planes_cobro.workspace_id', workspaceId)
     .eq('planes_cobro.activo', true)
+    // Una suscripción no recibe cuenta de cobro (ver `generar-cuentas-cobro.ts`).
+    .is('planes_cobro.suscripcion_id', null)
     .gte('fecha_vencimiento', desde)
     .lte('fecha_vencimiento', hasta)
     .order('fecha_vencimiento', { ascending: true })

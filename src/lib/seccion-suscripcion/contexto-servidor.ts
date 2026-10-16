@@ -6,6 +6,7 @@ import { leerProximoPagoCda, type LecturaPago } from '@/lib/valida-cda/pago-serv
 import { moraValidaCda } from '@/lib/valida-cda/puerta'
 import { estadoMora, type EstadoMora } from '@/lib/valida-cda/plazos'
 import { entradaSuscripcion, type EntradaOk, type ProductoSuscripcion } from './entrada-servidor'
+import { suscripcionEnPrueba } from './prueba-servidor'
 import { puedeOperarSuscripcion, puedeVerSuscripcion, resumenEstado, tonoDelPunto, type ResumenEstado, type TerminosDeEntrada } from './estado'
 
 /**
@@ -31,9 +32,14 @@ export interface ContratoSuscripcion {
   vigenteDesde: string
   vigenteHasta: string | null
   parametros: Record<string, unknown>
-  empresaId: string
+  /**
+   * El ancla del contrato: un negocio del CRM (con su empresa del directorio) o, desde 20261016, una
+   * suscripción (`suscripciones_producto`, sin empresa en el directorio). Exactamente uno.
+   */
+  empresaId: string | null
   empresaNombre: string | null
-  negocioId: string
+  negocioId: string | null
+  suscripcionId: string | null
   /** El espacio que cobra (metrik): donde viven el plan y sus cuotas. */
   cobradorId: string
   servicioNombre: string | null
@@ -72,12 +78,14 @@ interface FilaContrato {
   vigente_desde: string
   vigente_hasta: string | null
   parametros: Record<string, unknown> | null
-  empresa_id: string
-  negocio_id: string
+  empresa_id: string | null
+  negocio_id: string | null
+  suscripcion_id: string | null
   workspace_id: string
   comision: unknown
   servicio_slug: string
   empresas: { nombre: string | null; razon_social: string | null } | null
+  suscripciones_producto: { razon_social: string | null } | null
 }
 
 async function resolver(): Promise<ContextoSuscripcion> {
@@ -98,7 +106,7 @@ async function resolver(): Promise<ContextoSuscripcion> {
     svc
       .from('servicios_contratados')
       .select(
-        'id, estado, vigente_desde, vigente_hasta, parametros, empresa_id, negocio_id, workspace_id, comision, servicio_slug, empresas(nombre, razon_social)',
+        'id, estado, vigente_desde, vigente_hasta, parametros, empresa_id, negocio_id, suscripcion_id, workspace_id, comision, servicio_slug, empresas(nombre, razon_social), suscripciones_producto(razon_social)',
       )
       .eq('id', entrada.servicioContratadoId)
       .eq('workspace_pagador_id', entrada.workspaceId)
@@ -151,8 +159,9 @@ async function resolver(): Promise<ContextoSuscripcion> {
       vigenteHasta: fila.vigente_hasta,
       parametros: fila.parametros ?? {},
       empresaId: fila.empresa_id,
-      empresaNombre: fila.empresas?.razon_social ?? fila.empresas?.nombre ?? null,
+      empresaNombre: fila.empresas?.razon_social ?? fila.empresas?.nombre ?? fila.suscripciones_producto?.razon_social ?? null,
       negocioId: fila.negocio_id,
+      suscripcionId: fila.suscripcion_id ?? null,
       cobradorId: fila.workspace_id,
       servicioNombre: catalogo?.nombre ?? null,
       comision: fila.comision,
@@ -175,11 +184,17 @@ export const contextoSuscripcion = cache(resolver)
  * El ítem del menú: `null` si la persona no ve la sección (la ruta da 404), o el tono del punto.
  * Corre en el layout de todas las pantallas del espacio, así que nunca lanza: una lectura caída
  * esconde el ítem en vez de tumbar la navegación.
+ *
+ * Sin contrato, la prueba gratis de Valida también tiene sección (2026-10-16): la ve la persona que se
+ * registró (`suscripcionEnPrueba`), sin punto de color (no hay nada vencido ni por pagar todavía).
+ * Los CDA (con contrato) siguen exactamente igual: su contexto responde `ok` antes de mirar la prueba.
  */
 export async function menuSuscripcion(): Promise<{ tono: 'verde' | 'ambar' | 'rojo' | null } | null> {
   try {
     const ctx = await contextoSuscripcion()
-    return ctx.tipo === 'ok' ? { tono: tonoDelPunto(ctx.resumen) } : null
+    if (ctx.tipo === 'ok') return { tono: tonoDelPunto(ctx.resumen) }
+    if (ctx.tipo === 'no_aplica' && (await suscripcionEnPrueba())) return { tono: null }
+    return null
   } catch (e) {
     console.error('[suscripcion] menú:', e instanceof Error ? e.message : e)
     return null

@@ -5,6 +5,7 @@ import { PestanaTerminos } from '@/components/terminos/pestana-terminos'
 import { formatBogotaFechaCortaAno } from '@/lib/dates/bogota'
 import { leerEquipo } from '@/lib/seccion-suscripcion/carga-servidor'
 import { contextoSuscripcion } from '@/lib/seccion-suscripcion/contexto-servidor'
+import { suscripcionEnPrueba } from '@/lib/seccion-suscripcion/prueba-servidor'
 import { PLAN_CDA, PLAN_ONE } from '@/lib/valida-cda/redaccion-fiscal'
 import { fechaConAnio } from '@/lib/seccion-suscripcion/estado'
 import { estadoSugerencia } from '@/lib/seccion-suscripcion/sustenta-servidor'
@@ -15,6 +16,7 @@ import { OpcionesPago } from './opciones-pago'
 import { PestanaPagos } from './pestana-pagos'
 import SuscripcionClient, { type PestanaSuscripcion } from './suscripcion-client'
 import { TarjetaPago } from './tarjeta-pago'
+import { SuscripcionEnPruebaVista } from './suscripcion-en-prueba'
 
 export const dynamic = 'force-dynamic'
 
@@ -43,7 +45,12 @@ interface Props {
  */
 export default async function SuscripcionPage({ searchParams }: Props) {
   const ctx = await contextoSuscripcion()
-  if (ctx.tipo === 'no_aplica') notFound()
+  if (ctx.tipo === 'no_aplica') {
+    // Sin contrato todavía: la prueba gratis de Valida (la persona que se registró la ve desde el día 1).
+    const prueba = await suscripcionEnPrueba()
+    if (prueba) return <SuscripcionEnPruebaVista s={prueba} />
+    notFound()
+  }
   if (ctx.tipo === 'no_disponible') {
     return (
       <EmptyState

@@ -169,6 +169,8 @@ export interface PagadorEpayco {
   email: string
   celular: string
   direccion?: string | null
+  /** La IP de quien dio la orden de cobro (el cargo con token la pide; el alta del cliente no). */
+  ip?: string | null
 }
 
 /** El medio de pago guardado: un puntero, nunca la tarjeta. `epayco:<customerId>:<cardTokenId>`. */
@@ -300,6 +302,24 @@ export async function ultimosDigitosTarjetaEpayco(ref: string | null | undefined
   }
 }
 
+/**
+ * El texto de un `success: false` de APIFY con lo que ePayco dice que falta: `textResponse` y, si viene,
+ * `data.errors[]` (`codError`, `errorMessage`). Sin la llave ni la tarjeta: ePayco no las devuelve.
+ */
+export function detalleDelError(cuerpo: Record<string, unknown>): string {
+  const texto = String(cuerpo.textResponse ?? cuerpo.titleResponse ?? 'sin detalle')
+  const datos = (cuerpo.data ?? null) as Record<string, unknown> | null
+  const errores = Array.isArray(datos?.errors) ? (datos.errors as unknown[]) : []
+  const campos = errores
+    .map((e) => {
+      if (typeof e === 'string') return e
+      const o = (e ?? {}) as Record<string, unknown>
+      return [o.codError, o.errorMessage ?? o.message].filter((x) => x !== undefined && x !== null && x !== '').join(' ')
+    })
+    .filter(Boolean)
+  return (campos.length > 0 ? `${texto} (${campos.join('; ')})` : texto).slice(0, 280)
+}
+
 /** `estado` de ePayco → resultado del ciclo. */
 export function resultadoDeEstado(estado: string | null | undefined): 'aprobado' | 'rechazado' | 'pendiente' {
   const e = (estado ?? '').trim().toLowerCase()
@@ -341,6 +361,8 @@ export async function cobrarConTokenEpayco(s: SolicitudCargo & { pagador: Pagado
       cellPhone: s.pagador.celular,
       phone: s.pagador.celular,
       address: s.pagador.direccion || 'Sin dirección',
+      country: 'CO',
+      ...(s.pagador.ip ? { ip: s.pagador.ip } : {}),
       cardTokenId: medio.cardTokenId,
       customerId: medio.customerId,
       invoice: s.referencia,
@@ -356,9 +378,13 @@ export async function cobrarConTokenEpayco(s: SolicitudCargo & { pagador: Pagado
   if (!r.ok) return { estado: 'error', mensaje: r.error, reintentable: r.reintentable }
   const tx = ((r.cuerpo.data as Record<string, unknown> | undefined)?.transaction ?? null) as Record<string, unknown> | null
   const d = (tx?.data ?? null) as Record<string, unknown> | null
-  if (r.cuerpo.success !== true || !d) {
-    return { estado: 'rechazado', externalRef: null, codigo: 'epayco_error', mensaje: String(r.cuerpo.textResponse ?? 'ePayco no procesó el cobro.'), reintentable: false }
+  if (r.cuerpo.success !== true) {
+    // ePayco no procesó la solicitud (validación de campos, sesión, comercio): no hubo transacción y no
+    // es un rechazo del banco. Se guarda qué campo pidió, para no volver a adivinar (2026-10-16: el
+    // primer cargo con token respondió «Some fields are required» sin decir cuál).
+    return { estado: 'error', mensaje: `ePayco no procesó el cobro: ${detalleDelError(r.cuerpo)}`, reintentable: false, sinTransaccion: true }
   }
+  if (!d) return { estado: 'error', mensaje: 'ePayco respondió sin la transacción: hay que revisar si cobró.', reintentable: false }
   const ref = d.ref_payco !== undefined && d.ref_payco !== null ? `epayco-${String(d.ref_payco)}` : null
   const res = resultadoDeEstado(typeof d.estado === 'string' ? d.estado : null)
   if (res === 'aprobado' && ref) {
@@ -472,8 +498,10 @@ export function crearAdapterEpayco(deps: DepsEpayco = {}): PasarelaAdapter {
       if (!c?.documento || !c.email || !c.nombre) {
         return { estado: 'error', mensaje: 'Faltan los datos del pagador (documento, correo, nombre).', reintentable: false }
       }
+      // ePayco exige el celular en el cargo: sin él responde «Some fields are required». No se llama.
+      if (!c.celular) return { estado: 'error', mensaje: 'Falta el celular del pagador.', reintentable: false, sinTransaccion: true }
       return cobrarConTokenEpayco(
-        { ...s, pagador: { tipoDocumento: c.tipoDocumento ?? 'NIT', documento: c.documento, nombre: c.nombre, apellido: c.apellido ?? '.', email: c.email, celular: c.celular ?? '', direccion: c.direccion ?? null } },
+        { ...s, pagador: { tipoDocumento: c.tipoDocumento ?? 'NIT', documento: c.documento, nombre: c.nombre, apellido: c.apellido ?? '.', email: c.email, celular: c.celular ?? '', direccion: c.direccion ?? null, ip: c.ip ?? null } },
         deps,
       )
     },

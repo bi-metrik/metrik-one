@@ -102,13 +102,20 @@ export function crearDoble(tablas: Tablas) {
       },
       // `columna->>llave`: el texto de una llave de un jsonb, como PostgREST.
       eq: (c: string, v: unknown) => (filtros.push((f) => valor(f, c) === v), chain),
+      neq: (c: string, v: unknown) => (filtros.push((f) => valor(f, c) !== v), chain),
       not: (c: string, op: string, v: unknown) => {
+        // `not('estado', 'in', '(a,b)')`, como PostgREST.
+        if (op === 'in' && typeof v === 'string') {
+          const vs = v.replace(/^\(|\)$/g, '').split(',').map((x) => x.trim())
+          filtros.push((f) => !vs.includes(String(valor(f, c))))
+          return chain
+        }
         if (op !== 'is') throw new Error(`doble: not(${c}, ${op}) sin soporte`)
         filtros.push((f) => (f[c] ?? null) !== v)
         return chain
       },
       is: (c: string, v: unknown) => (filtros.push((f) => (f[c] ?? null) === v), chain),
-      in: (c: string, vs: unknown[]) => (filtros.push((f) => vs.includes(f[c])), chain),
+      in: (c: string, vs: unknown[]) => (filtros.push((f) => vs.includes(valor(f, c))), chain),
       lte: (c: string, v: string) => (filtros.push((f) => String(f[c]) <= v), chain),
       gte: (c: string, v: string) => (filtros.push((f) => String(f[c]) >= v), chain),
       gt: (c: string, v: number) => (filtros.push((f) => Number(f[c]) > v), chain),

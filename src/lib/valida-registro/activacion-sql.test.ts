@@ -5,9 +5,15 @@ import { createHash } from 'node:crypto'
 import { PGlite } from '@electric-sql/pglite'
 
 /**
- * `valida_activar_autogestion`, EJECUTADA sobre las migraciones reales en PGlite: lo que deja, que
- * es idempotente, que no le cuelga un contrato a un NIT que ya es cliente (los 4 CDA de hoy) y que
- * rechaza una huella que no es la del texto.
+ * `valida_activar_autogestion` en su versión de 20261012100000 (empresa + negocio en `metrik`), con el
+ * gate de carpeta y su exención (20261015180000), EJECUTADA sobre las migraciones reales en PGlite: lo
+ * que deja, que es idempotente, que no le cuelga un contrato a un NIT que ya es cliente (los 4 CDA de
+ * hoy) y que rechaza una huella que no es la del texto.
+ *
+ * ⚠️ Desde 20261016100100 la función crea una SUSCRIPCIÓN (`suscripciones_producto`) y no un negocio:
+ * esa versión, la vigente, se prueba en `src/lib/suscripciones-producto/migracion-sql.test.ts`. Esta
+ * suite queda como prueba de la exención del gate (red de seguridad) y de la versión anterior, que es la
+ * que vuelve a quedar si se corre la reversa.
  */
 
 const RAIZ = process.cwd()

@@ -86,7 +86,9 @@ export const runtime = 'nodejs'
 interface PlanCobro {
   id: string
   workspace_id: string
-  negocio_id: string
+  /** El ancla: un negocio o (desde 20261016) una suscripción. Exactamente uno. */
+  negocio_id: string | null
+  suscripcion_id?: string | null
   monto: number
   frecuencia: 'mensual' | 'trimestral' | 'anual'
   fecha_inicio: string
@@ -137,7 +139,7 @@ export async function GET(req: NextRequest) {
   // ── 1. Generar cobros programados (T+3 dias) ─────────────
   const { data: planes } = await supabase
     .from('planes_cobro')
-    .select('id, workspace_id, negocio_id, monto, frecuencia, fecha_inicio, fecha_fin, total_cuotas, pasarela')
+    .select('id, workspace_id, negocio_id, suscripcion_id, monto, frecuencia, fecha_inicio, fecha_fin, total_cuotas, pasarela')
     .eq('activo', true)
 
   // Un plan CON cronograma explicito no se toca aqui: sus cuotas tienen monto y
@@ -170,6 +172,7 @@ export async function GET(req: NextRequest) {
         .insert({
           workspace_id: plan.workspace_id,
           negocio_id: plan.negocio_id,
+          suscripcion_id: plan.suscripcion_id ?? null,
           plan_cobro_id: plan.id,
           numero_cuota: n,
           monto: plan.monto,
@@ -194,7 +197,7 @@ export async function GET(req: NextRequest) {
 
   const { data: cobrosPorVencer } = await supabase
     .from('cobros')
-    .select('id, workspace_id, negocio_id, plan_cobro_id, numero_cuota, monto, fecha_esperada')
+    .select('id, workspace_id, negocio_id, suscripcion_id, plan_cobro_id, numero_cuota, monto, fecha_esperada')
     .eq('tipo_cobro', 'programado')
     .eq('vencido', false)
     .is('fecha', null)
@@ -220,11 +223,19 @@ export async function GET(req: NextRequest) {
 
     // ── 3. Notificaciones a 3 destinatarios ─────────────────
     // Buscar responsable + dueno (owner) + staff del area financiera (staff_areas)
-    const { data: negocio } = await supabase
-      .from('negocios')
-      .select('responsable_id, nombre, codigo, staff:responsable_id(profile_id)')
-      .eq('id', cobro.negocio_id!)
-      .single()
+    // El cobro de una suscripción (suscripciones_producto) no tiene negocio ni responsable: se avisa al
+    // dueño y a financiera con el nombre de la suscripción.
+    const susId = (cobro as { suscripcion_id?: string | null }).suscripcion_id ?? null
+    const { data: negocio } = cobro.negocio_id
+      ? await supabase
+          .from('negocios')
+          .select('responsable_id, nombre, codigo, staff:responsable_id(profile_id)')
+          .eq('id', cobro.negocio_id)
+          .single()
+      : { data: null }
+    const { data: suscripcion } = susId
+      ? await supabase.from('suscripciones_producto').select('nombre').eq('id', susId).maybeSingle()
+      : { data: null }
 
     const staffJoined = negocio?.staff as unknown as { profile_id: string | null } | { profile_id: string | null }[] | null
     const responsableProfile = Array.isArray(staffJoined)
@@ -274,7 +285,8 @@ export async function GET(req: NextRequest) {
       ? diasEntreBogota(new Date(`${fechaEsp}T05:00:00Z`), hoy) - DIAS_GRACIA
       : 0
     const negocioCodigo = (negocio as { codigo: string | null } | null)?.codigo ?? ''
-    const negocioNombre = (negocio as { nombre: string | null } | null)?.nombre ?? 'Negocio'
+    const negocioNombre =
+      (negocio as { nombre: string | null } | null)?.nombre ?? (suscripcion as { nombre: string | null } | null)?.nombre ?? 'Negocio'
 
     for (const profileId of destinatarios) {
       const { error: notifErr } = await supabase
@@ -287,7 +299,7 @@ export async function GET(req: NextRequest) {
           contenido: `Cuota ${cobro.numero_cuota ?? ''} de ${negocioCodigo} ${negocioNombre} vencida hace ${diasVencido} dia${diasVencido !== 1 ? 's' : ''} ($${Number(cobro.monto).toLocaleString('es-CO')})`,
           entidad_tipo: 'cobro',
           entidad_id: cobro.id,
-          deep_link: `/negocios/${cobro.negocio_id}`,
+          deep_link: cobro.negocio_id ? `/negocios/${cobro.negocio_id}` : null,
           metadata: {
             plan_cobro_id: cobro.plan_cobro_id,
             numero_cuota: cobro.numero_cuota,

@@ -151,7 +151,9 @@ export function cuotasDelCiclo(p: {
 export interface ContratoCandidato {
   id: string
   workspaceId: string
-  negocioId: string
+  /** El ancla del contrato: su negocio o (desde 20261016) su suscripción. Exactamente uno. */
+  negocioId: string | null
+  suscripcionId?: string | null
   estado: string
   servicioSlug: string
   /** Nombre del tipo de servicio en el catálogo, para el concepto de las cuotas. */
@@ -167,7 +169,7 @@ export interface ContratoCandidato {
   anclaAt: string | null
   /** Ya tiene acta de enrolamiento. */
   yaEnrolado: boolean
-  /** Su negocio ya tiene un plan de cobro (cargado a mano o por una corrida anterior). */
+  /** Su negocio (o su suscripción) ya tiene un plan de cobro (cargado a mano o por una corrida anterior). */
   tienePlan: boolean
   /** La pasarela en línea con que se le va a generar el enlace. `null` = no hay. */
   pasarela: string | null

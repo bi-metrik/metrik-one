@@ -97,4 +97,4 @@ Relacionado: [[secop-autogestion-registro]], [[radar-trial-y-cobro]], [[valida-r
 `metrik` exige `metadata.carpeta_local` (`trg_zz_gate_carpeta_local`, MK001). La RPC crea el negocio en «Cobro» (orden 2), y el gate revertía TODA la activación (preview, consulta 11). **Por qué:** los tests de la RPC corrían sin el gate. Ahora `activacion-sql.test` lo enciende.
 - Mauricio decidió eximir. `20261015180000_gate_carpeta_local_exime_valida_autogestion.sql` pide `metadata.origen='valida_autogestion'` Y que `workspace_one` tenga fila en `valida_registros`. Está **SIN aplicar** y va ANTES del merge.
 - **Cómo aplicar:** los 3 caminos (consulta 11, «Activar plan», día 7) pasan por `activarPlanDelEspacio` → un solo INSERT. Un 4º camino que cree el negocio debe poner las mismas dos marcas.
-- Mauricio preguntó si los clientes de Valida deben vivir fuera del CRM de metrik. Eso queda abierto: recomendé una base propia de suscripciones a futuro.
+- Mauricio decidió (15-oct) sacarlos del CRM: #1191 hace que la activación cree una suscripción (`suscripciones_producto`), no un negocio. Ver [[suscripciones-multiproducto]]. La exención del gate queda como red de seguridad.

@@ -1,6 +1,7 @@
 import 'server-only'
 import type { SupabaseClient } from '@supabase/supabase-js'
-import { registrarActividad } from '@/lib/activity/registrar-actividad'
+import { anclaDeFila } from '@/lib/suscripciones-producto/ancla'
+import { anotarEnAncla } from '@/lib/suscripciones-producto/bitacora'
 import { todayBogotaISO } from '@/lib/dates/bogota'
 import { adapterPara } from '@/lib/suscripciones/pasarela/registro'
 import type { EventoPasarela, PasarelaAdapter } from '@/lib/suscripciones/pasarela/adapter'
@@ -25,12 +26,13 @@ import { procesarEventoPasarela, type CobroParaPago, type RepoPagoEnLinea } from
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type Db = any
 
-const COLUMNAS_COBRO = 'id, workspace_id, negocio_id, monto, retencion_iva, fecha, anulado_at, tipo_cobro, external_ref, notas, enlace_pago_url'
+const COLUMNAS_COBRO = 'id, workspace_id, negocio_id, suscripcion_id, monto, retencion_iva, fecha, anulado_at, tipo_cobro, external_ref, notas, enlace_pago_url'
 
 type FilaCobro = {
   id: string
   workspace_id: string
   negocio_id: string | null
+  suscripcion_id?: string | null
   monto: number | string | null
   retencion_iva: number | string | null
   fecha: string | null
@@ -46,6 +48,7 @@ function aCobro(f: FilaCobro): CobroParaPago {
     id: f.id,
     workspaceId: f.workspace_id,
     negocioId: f.negocio_id,
+    suscripcionId: f.suscripcion_id ?? null,
     monto: Number(f.monto ?? 0),
     retencionIva: Number(f.retencion_iva ?? 0),
     fecha: f.fecha,
@@ -152,17 +155,15 @@ export function repoPagoEnLinea(dbCliente: SupabaseClient, pasarela: string, ada
     },
 
     async anotarEnNegocio(cobro, texto) {
-      if (!cobro.negocioId) return
-      await registrarActividad(
+      // El negocio (su timeline) o la suscripción (su bitácora): `anotarEnAncla` decide y nunca lanza.
+      await anotarEnAncla(
         dbCliente,
         {
-          workspace_id: cobro.workspaceId,
-          entidad_tipo: 'negocio',
-          entidad_id: cobro.negocioId,
-          tipo: 'sistema',
-          autor_id: null,
-          // `activity_log.contenido` tiene CHECK de 280 caracteres.
-          contenido: texto.slice(0, 280),
+          ancla: anclaDeFila({ negocio_id: cobro.negocioId, suscripcion_id: cobro.suscripcionId ?? null }),
+          workspaceId: cobro.workspaceId,
+          tipo: 'pago_en_linea',
+          texto,
+          datos: { cobro_id: cobro.id },
         },
         `webhook-${pasarela}`,
       )
