@@ -13,7 +13,8 @@ Pedido de Mauricio (2026-10-16): Commons traía fotos que no eran del hotel. Ram
 - Medido en Commons vivo: `Category:Pullman Paris Tour Eiffel` contiene «The Eiffel Tower» y «Summit @ Eiffel
   Tower». La categoría exacta NO basta: lo que no nombra el hotel solo pasa con el modelo diciendo «es hotel».
   «Gran Hotel Inglés» encontraba «RIU hotel, Playa del Inglés, Gran Canaria»: por eso otra marca en el título = fuera.
-- Filtro de nombre en `nombre-hotel.ts`; reparto en `categoria.ts` (`puestoParaCategoria`: una por categoría).
+- Filtro de nombre en `nombre-hotel.ts`. El reparto «una por categoría» (`puestoParaCategoria`) se BORRÓ en
+  [[galeria-fotos-hotel]]: ahora se marcan hasta 3 de cualquier categoría.
 - Clasificador `src/lib/ai/clasificar-fotos-hotel.ts` (gemini-2.5-flash, de a 12). NUNCA se probó con el modelo
   real (sin llave de QA; la de prod gasta cuota). Sin llave: solo «sin clasificar» de títulos que nombran el hotel.
 - Las candidatas se recuerdan en memoria del servidor (no hay tabla); las filas viejas sin categoría se clasifican

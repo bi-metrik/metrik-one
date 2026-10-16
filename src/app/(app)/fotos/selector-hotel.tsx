@@ -233,7 +233,7 @@ export default function SelectorHotel({
     }
     setPorSubir(archivo)
     setSubidaN((n) => n + 1)
-    requestAnimationFrame(() => zonaSubir.current?.scrollIntoView({ block: 'nearest', behavior: 'smooth' }))
+    requestAnimationFrame(() => zonaSubir.current?.scrollIntoView({ block: 'nearest' }))
   }
 
   const subir = async (permiso: PedidoAutorizacion) => {
@@ -341,6 +341,8 @@ export default function SelectorHotel({
       <DialogContent
         className="flex max-h-[94vh] flex-col gap-3 p-4 sm:max-w-5xl sm:p-5"
         data-selector-hotel
+        // Sin foco automático en la primera pestaña: se veía como seleccionada sin estarlo.
+        onOpenAutoFocus={(e) => e.preventDefault()}
         onPaste={(e) => {
           const archivo = [...e.clipboardData.files].find((f) => f.type.startsWith('image/'))
           if (archivo) {
@@ -355,7 +357,7 @@ export default function SelectorHotel({
           }
         }}
       >
-        <div className="space-y-0.5 border-b pr-6 pb-2 text-center">
+        <div className="shrink-0 space-y-0.5 border-b pr-6 pb-2 text-center">
           <DialogTitle className="text-base font-bold">{pedido?.nombre}</DialogTitle>
           <DialogDescription className="text-xs">
             {pedido?.ciudad ? `${pedido.ciudad} · ` : ''}Marca hasta {MAX_FOTOS_POR_ELEMENTO}: el número es el orden en la propuesta y la 1 es la principal.
@@ -363,7 +365,7 @@ export default function SelectorHotel({
         </div>
 
         {/* Las pestañas, con su portada (como la galería de Booking). */}
-        <div className="flex gap-3 overflow-x-auto pb-1" role="tablist">
+        <div className="flex shrink-0 gap-3 overflow-x-auto pb-1" role="tablist">
           {PESTANAS_GALERIA.map((p) => {
             const portada = portadaDeLaPestana(cuadros, p)
             const n = cuadrosDeLaPestana(cuadros, p).propios.length
@@ -480,7 +482,7 @@ export default function SelectorHotel({
           </div>
         </div>
 
-        <div className="flex items-center justify-between gap-2 border-t pt-2">
+        <div className="flex shrink-0 items-center justify-between gap-2 border-t pt-2">
           <span className="min-w-0 truncate text-[11px] text-muted-foreground">Toca una foto para marcarla; tócala otra vez para quitarla.</span>
           <button type="button" onClick={cerrar} className="rounded-md px-4 py-1.5 text-xs font-medium text-white" style={{ backgroundColor: AZUL }}>
             {cambio ? 'Listo' : 'Cerrar'}
