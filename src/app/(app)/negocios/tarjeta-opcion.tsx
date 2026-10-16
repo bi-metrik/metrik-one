@@ -551,6 +551,7 @@ export default function TarjetaOpcion({
             moneda={monedaDeTarifa(tarifa)}
             onCambio={onCambio}
             autorizador={autorizador}
+            apilable={porPasos !== null}
           />
 
           {!confirmada && respaldo}
