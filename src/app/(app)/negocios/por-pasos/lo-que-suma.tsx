@@ -146,6 +146,23 @@ function Lista({ d }: { d: DatosLoQueSuma }) {
   )
 }
 
+/**
+ * En celular el «+» del shell (`fab.tsx`: botón `fixed bottom-20 right-6 z-50` y sus menús, que van
+ * con las mismas clases) quedaba ENCIMA del botón «Lo que suma» de la barra (observación de Vera en
+ * V10, 2026-10-16). Mientras la barra existe, el «+» y sus menús suben lo que haga falta para quedar
+ * 12 px por encima de ella: la barra va a 3.5rem del borde y el «+», a 5rem.
+ *
+ * Es una regla de CSS que pinta la propia barra, así que solo existe en la cotización por pasos: con
+ * el interruptor apagado el «+» no cambia ni de lugar ni de marcado. Si se cambian esas clases del
+ * FAB, la prueba `por-pasos-boton-mas-dom.test.ts` avisa.
+ */
+export const SELECTOR_BOTON_MAS = '.fixed.right-6.z-50'
+/** Alto de la barra medido en Chromium a 390 px (px). Lo corrige la medida real al montar. */
+const ALTO_BARRA_INICIAL = 65
+export function reglaBotonMas(altoBarra: number): string {
+  return `@media (width < 64rem) { ${SELECTOR_BOTON_MAS} { translate: 0 calc(5rem - 3.5rem - ${Math.round(altoBarra)}px - 0.75rem); } }`
+}
+
 const TITULO = <>Lo que suma <span className="text-xs font-semibold text-[#6E6A62]">Recomendada</span></>
 const BOTON_SUAVE = 'shrink-0 rounded-md border-0 bg-transparent px-1.5 py-0.5 text-xs font-semibold text-[#6E6A62] hover:bg-[#F3F1EC] hover:text-[#191713]'
 
@@ -166,6 +183,16 @@ export function LoQueSuma({
 }) {
   const [abierta, setAbierta] = useState(false)
   const clases = clasesLoQueSuma(preferencia)
+  // El alto real de la barra de celular (crece si el texto de abajo se parte): el «+» sube sobre ella.
+  const barra = useRef<HTMLDivElement>(null)
+  const [altoBarra, setAltoBarra] = useState(ALTO_BARRA_INICIAL)
+  useEffect(() => {
+    const el = barra.current
+    if (!el || typeof ResizeObserver === 'undefined') return
+    const ro = new ResizeObserver(() => { if (el.offsetHeight > 0) setAltoBarra(el.offsetHeight) })
+    ro.observe(el)
+    return () => ro.disconnect()
+  }, [])
   const contenido = datos.renglones.length === 0
     ? <p className="m-0 text-[13px] text-[#6E6A62]">Cada servicio que aceptes aparece aquí con lo que aporta a la Recomendada. Lo que no suma sale tachado, con la razón.</p>
     : <Lista d={datos} />
@@ -189,7 +216,7 @@ export function LoQueSuma({
         {contenido}
       </PastillaLoQueSuma>
       {/* Celular: barra abajo con el total; «Lo que suma» abre la hoja. */}
-      <div className="fixed inset-x-0 bottom-14 z-40 flex items-center gap-3 border-t border-[#E2DED5] bg-white px-4 py-2 lg:hidden" data-barra-suma>
+      <div ref={barra} className="fixed inset-x-0 bottom-14 z-40 flex items-center gap-3 border-t border-[#E2DED5] bg-white px-4 py-2 lg:hidden" data-barra-suma>
         <span className="min-w-0 flex-1">
           <b className="block text-base tabular-nums">{pesos(datos.total)}</b>
           <small className="text-xs text-[#6E6A62]">
@@ -200,8 +227,14 @@ export function LoQueSuma({
           {abierta ? 'Cerrar' : 'Lo que suma'}
         </button>
       </div>
+      <style data-boton-mas-sobre-barra>{reglaBotonMas(altoBarra)}</style>
       {abierta && (
-        <div className="fixed inset-x-0 bottom-[7.5rem] z-40 flex max-h-[70vh] flex-col gap-3 overflow-y-auto rounded-t-2xl border border-[#E2DED5] bg-white p-4 shadow-[0_-10px_30px_rgba(0,0,0,.2)] lg:hidden">
+        // Abajo deja libre lo que el «+», ya subido, le tapa a la hoja: el total no queda debajo de él.
+        <div
+          className="fixed inset-x-0 bottom-[7.5rem] z-40 flex max-h-[70vh] flex-col gap-3 overflow-y-auto rounded-t-2xl border border-[#E2DED5] bg-white p-4 shadow-[0_-10px_30px_rgba(0,0,0,.2)] lg:hidden"
+          style={{ paddingBottom: Math.round(altoBarra) + 12 }}
+          data-hoja-suma
+        >
           <h2 className="m-0 text-[15px] font-bold">{TITULO}</h2>
           <Lista d={datos} />
         </div>
