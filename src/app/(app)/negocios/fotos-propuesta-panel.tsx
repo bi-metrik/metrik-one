@@ -1,7 +1,8 @@
 'use client'
 
 import { useEffect, useRef, useState } from 'react'
-import { Check, ImagePlus, Loader2, RefreshCw, Trash2 } from 'lucide-react'
+import Link from 'next/link'
+import { Check, ImagePlus, Images, Loader2, RefreshCw, Trash2 } from 'lucide-react'
 import { toast } from 'sonner'
 
 import { useTransitionTolerante } from '@/hooks/use-transition-tolerante'
@@ -17,6 +18,7 @@ import {
 } from '@/app/(app)/negocios/fotos-catalogo-actions'
 import { comprimirFotoHotel } from '@/lib/cotizaciones/foto-hotel-navegador'
 import type { TipoFoto } from '@/lib/fotos/clave'
+import SelectorFotos, { type PedidoFoto } from '../fotos/selector-fotos'
 
 const TITULO: Record<TipoFoto, string> = { ciudad: 'Ciudades', hotel: 'Hoteles', actividad: 'Actividades y planes opcionales' }
 
@@ -26,14 +28,17 @@ const TITULO: Record<TipoFoto, string> = { ciudad: 'Ciudades', hotel: 'Hoteles',
  * cotizaciones que nombren lo mismo.
  *
  * Al abrir, las ciudades y actividades que faltan se buscan solas en Wikimedia Commons (solo
- * licencias libres, con su crédito al pie del documento). La asesora pide otra, sube la suya o la
- * quita. Los hoteles NUNCA se buscan: solo «Subir la mía» y «Quitar» (Mauricio, 2026-10-14).
+ * licencias libres, con su crédito al pie del documento). La asesora pide otra, abre el selector
+ * de 12 opciones («Elegir»), sube la suya o la quita. Los hoteles NUNCA se buscan solos: los elige
+ * una persona en el selector o los sube (Mauricio, 2026-10-14 y 2026-10-16). Las demás fotos de
+ * cada elemento (hasta 3) se manejan en la biblioteca (`/fotos`).
  */
 export default function FotosPropuestaPanel({ cotizacionId, editable }: { cotizacionId: string; editable: boolean }) {
   const [estado, setEstado] = useState<PanelFotos | null>(null)
   const [ocupado, setOcupado] = useState<string | null>(null)
   const [, start] = useTransitionTolerante()
   const buscado = useRef(false)
+  const [selector, setSelector] = useState<{ pedido: PedidoFoto; reemplaza: string | null } | null>(null)
 
   const aplicar = (r: PanelFotos) => {
     if (!r.ok) {
@@ -106,6 +111,9 @@ export default function FotosPropuestaPanel({ cotizacionId, editable }: { cotiza
     <div className="space-y-2 border-t pt-3" data-fotos-propuesta>
       <div className="flex items-center justify-between gap-2">
         <p className="text-xs font-semibold">Fotos de la propuesta</p>
+        <Link href="/fotos" className="inline-flex items-center gap-1 text-[11px] text-muted-foreground underline-offset-2 hover:underline">
+          <Images className="h-3 w-3" /> Biblioteca de fotos
+        </Link>
         {ocupado === 'todas' && (
           <span className="inline-flex items-center gap-1 text-[11px] text-muted-foreground">
             <Loader2 className="h-3 w-3 animate-spin" /> Buscando en Wikimedia Commons…
@@ -114,8 +122,8 @@ export default function FotosPropuestaPanel({ cotizacionId, editable }: { cotiza
       </div>
       <p className="text-[11px] text-muted-foreground">
         Las de ciudades y actividades que faltan se buscan solas en Wikimedia Commons, solo con licencia libre y con su crédito al
-        pie. Revísalas: cámbialas o sube la tuya. La de cada hotel la subes tú. Quedan guardadas para las próximas cotizaciones. Sin
-        foto, sale el degradado.
+        pie. Revísalas: elige otra entre 12 opciones o sube la tuya. La de cada hotel la eliges tú. Quedan en la biblioteca para las
+        próximas cotizaciones. Sin foto, sale el degradado.
       </p>
       {grupos.map((g) => (
         <div key={g.tipo} className="space-y-1">
@@ -139,15 +147,18 @@ export default function FotosPropuestaPanel({ cotizacionId, editable }: { cotiza
                     <p className="truncate text-[10px] text-muted-foreground" title={f.foto?.credito ?? undefined}>
                       {f.foto
                         ? !f.foto.seImprime
-                          ? 'No sale en la propuesta: sube la foto del hotel'
+                          ? 'No sale en la propuesta: elige la foto del hotel'
                           : f.foto.origen === 'asesora'
                             ? 'Foto propia'
-                            : `${f.foto.revisada ? '' : 'Sugerida · '}${f.foto.credito ?? 'Wikimedia Commons'}`
+                            : f.foto.origen === 'sitio_oficial'
+                              ? `Página oficial · ${f.foto.credito ?? ''}`
+                              : `${f.foto.revisada ? '' : 'Sugerida · '}${f.foto.credito ?? 'Wikimedia Commons'}`
                         : f.enBanco
                           ? 'Usa la foto de ONE de esta ciudad'
                           : f.sugerible
                             ? 'Sin foto: sale el degradado'
-                            : 'Sin foto: sale el degradado. Sube la del hotel'}
+                            : 'Sin foto: sale el degradado. Elige la del hotel'}
+                      {f.total > 1 ? ` · ${f.total} fotos` : ''}
                     </p>
                     {puede && (
                       <div className="flex flex-wrap items-center gap-1">
@@ -164,6 +175,10 @@ export default function FotosPropuestaPanel({ cotizacionId, editable }: { cotiza
                           </button>
                         )}
                         {!f.sugerible && trabajando && <Loader2 className="h-3 w-3 animate-spin text-muted-foreground" />}
+                        <button type="button" disabled={!!ocupado} onClick={() => setSelector({ pedido: { tipo: f.tipo, nombre: f.nombre, ciudad: f.ciudad }, reemplaza: f.foto?.id ?? null })}
+                          className="inline-flex items-center gap-0.5 rounded px-1.5 py-0.5 text-[10px] hover:bg-accent disabled:opacity-50" data-elegir>
+                          <Images className="h-3 w-3" /> Elegir
+                        </button>
                         <label className={`inline-flex cursor-pointer items-center gap-0.5 rounded px-1.5 py-0.5 text-[10px] hover:bg-accent ${ocupado ? 'pointer-events-none opacity-50' : ''}`}>
                           <ImagePlus className="h-3 w-3" /> Subir la mía
                           <input type="file" accept="image/*" className="hidden" onChange={(e) => { const a = e.target.files?.[0]; e.target.value = ''; if (a) subir(f, a) }} />
@@ -183,6 +198,17 @@ export default function FotosPropuestaPanel({ cotizacionId, editable }: { cotiza
           </ul>
         </div>
       ))}
+      <SelectorFotos
+        pedido={selector?.pedido ?? null}
+        reemplaza={selector?.reemplaza ?? null}
+        sitioOficial={estado.sitioOficial}
+        abierto={!!selector}
+        onCerrar={() => setSelector(null)}
+        onElegida={() => {
+          setSelector(null)
+          void fotosDeLaPropuesta(cotizacionId).then(aplicar)
+        }}
+      />
     </div>
   )
 }

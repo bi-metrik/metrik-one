@@ -13,8 +13,9 @@ import { fotosDeCiudad } from '@/lib/pdf/fotos-ciudad'
 import { fotosDelViaje } from '@/lib/pdf/fotos-del-viaje'
 import { textoDelPdf } from '@/lib/ai/texto-pdf'
 import { pdfDePropuestaHtml, prepararPropuestaHtml, reducirFoto } from './propuesta-html'
-import { pesos } from './trappvel/plantilla'
-import { CATALOGO_EUROPA, CREDITO_HOTEL_DE_COMMONS, sinFotosDeHotel } from '../../../../test/catalogo-europa'
+import { getDocumentProxy } from 'unpdf'
+import { COLUMNAS_OPCIONALES, extrasQueCaben, pesos } from './trappvel/plantilla'
+import { CATALOGO_EUROPA, CATALOGO_EUROPA_BIBLIOTECA, CREDITO_EXTRA_HOTEL_AUTOMATICA, CREDITO_HOTEL_DE_COMMONS, sinFotosDeHotel } from '../../../../test/catalogo-europa'
 
 const bancoComoFotoPDF = (ciudad: string) =>
   fotosDeCiudad(ciudad).map((f) => ({ url: f.ruta, rotulo: f.rotulo, credito: f.credito, foco: f.foco, proporcion: f.proporcion }))
@@ -150,18 +151,65 @@ describe('prepararPropuestaHtml con el catálogo de fotos (PR 4)', () => {
   })
 })
 
+describe('biblioteca: hasta 2 fotos extra por hotel o plan (2026-10-16)', () => {
+  const opciones = (catalogo: typeof CATALOGO_EUROPA) => ({ marca: 'A', logoUrl: null, fotoDeCiudad: bancoComoFotoPDF, catalogo })
+  /** El mosaico vuelto recuadro simple, y sin la línea de créditos: lo único que puede cambiar. */
+  const sinMosaico = (html: string) =>
+    html
+      .replace(/<div class="img mosaico n\d"><div class="m0"( style="[^"]*")><\/div>(?:<div class="mx" style="[^"]*"><\/div>)+/g, '<div class="img"$1>')
+      .replace(/<div class="credits">[\s\S]*?<\/div>/, '')
+
+  it('van DENTRO del recuadro de la principal: fuera de él, el documento es el mismo (no agregan hojas ni huecos)', { timeout: 60_000 }, async () => {
+    const e = sinFotosDeHotel(entradaComoLaAccion())
+    const sin = await prepararPropuestaHtml(e, opciones(CATALOGO_EUROPA))
+    const con = await prepararPropuestaHtml(e, opciones(CATALOGO_EUROPA_BIBLIOTECA))
+    // 2 hoteles y 1 plan con mosaico de principal + 2.
+    expect((con.html.match(/class="img mosaico n2"/g) ?? []).length).toBe(3)
+    expect(sinMosaico(con.html)).toBe(sinMosaico(sin.html))
+    expect(sin.html).not.toContain('mosaico n')
+    // El mosaico no le pone alto, margen ni relleno al recuadro: mide lo mismo que la foto sola.
+    const reglas = [...con.html.matchAll(/\.img\.mosaico[^{]*\{([^}]*)\}/g)].map((m) => m[1])
+    expect(reglas.length).toBeGreaterThan(0)
+    for (const r of reglas) expect(r).not.toMatch(/height|margin|padding/)
+  })
+
+  it('un hotel no lleva una extra automática (sin elegir): ni la foto ni su crédito', { timeout: 60_000 }, async () => {
+    const { html } = await prepararPropuestaHtml(sinFotosDeHotel(entradaComoLaAccion()), opciones(CATALOGO_EUROPA_BIBLIOTECA))
+    expect(html).not.toContain(CREDITO_EXTRA_HOTEL_AUTOMATICA)
+    const hoteles = html.slice(html.indexOf('>Dónde duermen<'), html.indexOf('</section>', html.indexOf('>Dónde duermen<')))
+    expect((hoteles.match(/class="img mosaico n2"/g) ?? []).length).toBe(2)
+  })
+
+  it('cuántas caben sin achicarlas de más: 2 en hoteles de 1 a 3 columnas y en planes de 4; ninguna en tarjetas angostas', () => {
+    expect([1, 2, 3].map((c) => extrasQueCaben('hotel', c))).toEqual([2, 2, 2])
+    expect(extrasQueCaben('opcional', COLUMNAS_OPCIONALES)).toBe(2)
+    expect(extrasQueCaben('opcional', 6)).toBe(0)
+  })
+})
+
+async function hojas(pdf: Buffer): Promise<number> {
+  const doc = await getDocumentProxy(new Uint8Array(pdf))
+  return doc.numPages
+}
+
 const SALIDA = process.env.PROPUESTA_PDF_SALIDA
 
 describe.skipIf(!SALIDA)('pdfDePropuestaHtml (con Chromium local)', () => {
-  it('imprime el COT-2026-0026 de muestra', { timeout: 120_000 }, async () => {
-    // Como en producción tras la regla de hoteles: la asesora subió foto solo para 3.
-    const { pdf, medidas } = await pdfDePropuestaHtml(sinFotosDeHotel(entradaComoLaAccion()), {
+  it('imprime el COT-2026-0026 de muestra (biblioteca: 3 fotos en 2 hoteles y un plan) sin hojas de más', { timeout: 180_000 }, async () => {
+    // Como en producción tras la regla de hoteles: la asesora subió foto solo para 3. Con la
+    // biblioteca, 2 de esos hoteles y un plan llevan 3 fotos.
+    const opts = (catalogo: typeof CATALOGO_EUROPA) => ({
       marca: 'Agencia de ejemplo',
       logoUrl: process.env.PROPUESTA_LOGO ?? null,
       fotoDeCiudad: bancoComoFotoPDF,
-      catalogo: CATALOGO_EUROPA,
+      catalogo,
     })
+    const sinExtras = await pdfDePropuestaHtml(sinFotosDeHotel(entradaComoLaAccion()), opts(CATALOGO_EUROPA))
+    const { pdf, medidas } = await pdfDePropuestaHtml(sinFotosDeHotel(entradaComoLaAccion()), opts(CATALOGO_EUROPA_BIBLIOTECA))
     writeFileSync(SALIDA!, pdf)
+    const [hojasSin, hojasCon] = [await hojas(sinExtras.pdf), await hojas(pdf)]
+    console.info('[propuesta-html] hojas sin extras:', hojasSin, '· con extras:', hojasCon)
+    expect(hojasCon).toBe(hojasSin)
     console.info('[propuesta-html]', JSON.stringify(medidas))
     expect(medidas.peticionesBloqueadas).toEqual([])
     const texto = ((await textoDelPdf(pdf)) ?? '').replace(/\s+/g, ' ')

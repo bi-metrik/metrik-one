@@ -133,12 +133,24 @@ describe('el crédito y la consulta', () => {
     expect(seSugiereDeCommons('actividad')).toBe(true)
   })
 
-  it('la foto de un hotel solo se imprime si la subió la asesora; la de ciudad o plan, siempre', () => {
-    expect(fotoImprimible('hotel', 'asesora')).toBe(true)
-    expect(fotoImprimible('hotel', 'wikimedia')).toBe(false)
-    expect(fotoImprimible('hotel', null)).toBe(false)
-    expect(fotoImprimible('ciudad', 'wikimedia')).toBe(true)
-    expect(fotoImprimible('actividad', 'wikimedia')).toBe(true)
+  it('la foto de un hotel solo se imprime si la eligió una persona; la de ciudad o plan, siempre', () => {
+    expect(fotoImprimible('hotel', 'asesora', true)).toBe(true)
+    expect(fotoImprimible('hotel', 'asesora', undefined)).toBe(true)
+    // Automática (sin revisar): nunca, de ninguna fuente.
+    expect(fotoImprimible('hotel', 'wikimedia', false)).toBe(false)
+    expect(fotoImprimible('hotel', 'wikimedia', undefined)).toBe(false)
+    expect(fotoImprimible('hotel', null, false)).toBe(false)
+    // Elegida en el selector (revisada): de cualquier fuente.
+    expect(fotoImprimible('hotel', 'wikimedia', true)).toBe(true)
+    expect(fotoImprimible('ciudad', 'wikimedia', false)).toBe(true)
+    expect(fotoImprimible('actividad', 'wikimedia', false)).toBe(true)
+  })
+
+  it('una foto de la página oficial solo se imprime con el interruptor encendido', () => {
+    expect(fotoImprimible('hotel', 'sitio_oficial', true)).toBe(false)
+    expect(fotoImprimible('actividad', 'sitio_oficial', true, { sitioOficial: false })).toBe(false)
+    expect(fotoImprimible('hotel', 'sitio_oficial', true, { sitioOficial: true })).toBe(true)
+    expect(fotoImprimible('hotel', 'sitio_oficial', false, { sitioOficial: true })).toBe(false)
   })
 
   it('Commons exige todas las palabras: la actividad se afloja; la ciudad no', () => {

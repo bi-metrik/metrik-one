@@ -2,6 +2,7 @@ import { cookies, headers } from 'next/headers'
 import { redirect } from 'next/navigation'
 import { createClient, createServiceClient } from '@/lib/supabase/server'
 import AppShell from './app-shell'
+import { tienePropuestaHtml } from '@/lib/pdf/motor-html'
 import { RUTA_DESINCRONIZADA, hayDesincronizacionDeTenant } from '@/lib/tenant/desincronizacion'
 import NotificationBell from '@/components/notification-bell'
 import DevWorkspaceBar from '@/components/dev-workspace-bar'
@@ -121,6 +122,7 @@ export default async function AppLayout({
     modules: Record<string, boolean> | null
     config_extra: Record<string, unknown> | null
     subscription_status: string | null
+    cotizacion_template_slug: string | null
   }
   const [staffSelfResult, workspaceResult, lineasResult] = await Promise.all([
     // El header muestra el Cargo (staff.position) del usuario; si no tiene, cae al
@@ -135,7 +137,7 @@ export default async function AppLayout({
       .maybeSingle(),
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     (activeClient.from('workspaces') as any)
-      .select('name, slug, color_primario, color_secundario, logo_url, modules, config_extra, subscription_status')
+      .select('name, slug, color_primario, color_secundario, logo_url, modules, config_extra, subscription_status, cotizacion_template_slug')
       .eq('id', activeWorkspaceId)
       .single() as Promise<{ data: WorkspaceRow | null; error: unknown }>,
     // hasLineas: workspace tiene al menos una linea activa → habilita item /flujo
@@ -222,6 +224,7 @@ export default async function AppLayout({
         suscripcion={suscripcion}
         impersonacion={impersonacion}
         timerActivo={timerActivo}
+        bibliotecaFotos={tienePropuestaHtml(workspace.cotizacion_template_slug)}
         notificationBell={
           <NotificationBell
             userId={user.id}

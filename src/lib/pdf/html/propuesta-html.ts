@@ -19,10 +19,10 @@ import { fotoImprimible, type OrigenFoto } from '@/lib/fotos/clave'
 import { fuentesDelDocumento } from '@/lib/pdf/chromium/fuentes'
 import { cssDeFuentes, inyectarEstilo } from '@/lib/pdf/chromium/recursos'
 import { imprimirHtmlAPdf, type MedidasRender } from '@/lib/pdf/chromium/render-chromium'
-import { encabezadoDeHoja, htmlDePropuesta, pieDeHoja, type FotoResuelta } from './trappvel/plantilla'
+import { COLUMNAS_OPCIONALES, encabezadoDeHoja, extrasQueCaben, htmlDePropuesta, pieDeHoja, type FotoResuelta } from './trappvel/plantilla'
 
 /** Ancho tope por uso, en px (a ~150 ppp sobre el ancho impreso). */
-export const ANCHO_FOTO = { portada: 1400, tarjeta: 700, logo: 600 } as const
+export const ANCHO_FOTO = { portada: 1400, tarjeta: 700, extra: 400, logo: 600 } as const
 
 async function bytesDe(src: string, timeoutMs: number): Promise<Buffer | null> {
   try {
@@ -82,8 +82,16 @@ export async function reducirLogo(src: string | null | undefined, ancho: number 
 export interface FotoDeCatalogo {
   /** data URL (o ruta en disco); `prepararPropuestaHtml` la reduce como las demás. */
   src: string
-  /** De dónde salió: un hotel solo se imprime con la que subió la asesora (`fotoImprimible`). */
+  /** De dónde salió: un hotel solo se imprime con la que eligió una persona (`fotoImprimible`). */
   origen: OrigenFoto
+  /** Una persona la eligió o la confirmó. */
+  revisada?: boolean
+  /**
+   * Hasta dos fotos más del mismo elemento (biblioteca, 2026-10-16). Salen en el MISMO recuadro de
+   * la principal (mosaico), solo en hoteles y planes, y solo si caben (`extrasQueCaben`): nunca
+   * agregan altura, ni hojas, ni huecos.
+   */
+  extras?: FotoDeCatalogo[]
   /** La línea de crédito («Park Güell, Autora (Wikimedia Commons, CC BY-SA 3.0)»); `null` = propia. */
   credito: string | null
   foco?: { x: number; y: number } | null
@@ -95,6 +103,8 @@ export interface CatalogoPropuesta {
   hotel: (hotel: string, ciudad: string | null) => FotoDeCatalogo | null
   actividad: (nombre: string) => FotoDeCatalogo | null
 }
+
+const claveHotel = (ciudad: string | null, hotel: string) => `${ciudad ?? ''}|${hotel}`
 
 export interface OpcionesPropuestaHtml {
   /** Nombre del workspace: va escrito si no hay logo. */
@@ -158,26 +168,35 @@ export async function prepararPropuestaHtml(
     if (elegida) deCiudad.set(p.ciudad, elegida)
   }
 
-  // El hotel sin foto propia en esta cotización: la que la asesora subió para ese hotel en otra
-  // (catálogo). Una de Commons NUNCA: sin foto subida, el degradado.
+  // El hotel sin foto propia en esta cotización: la que una persona eligió para ese hotel en la
+  // biblioteca. Una automática NUNCA (`fotoImprimible`): sin elegida, el degradado. El catálogo ya
+  // filtró las de la página oficial con el interruptor apagado; aquí se repite la regla del hotel.
+  // Las extras solo acompañan a la principal de la biblioteca (con la foto propia de la opción no:
+  // podrían ser la misma).
+  const imprimibleHotel = (f: FotoDeCatalogo) => fotoImprimible('hotel', f.origen, f.revisada, { sitioOficial: true })
   const creditosCatalogo: string[] = []
+  const extrasHotel = new Map<string, { src: string; extras: FotoDeCatalogo[] }>()
   if (catalogo) {
     for (const c of modelo.hoteles) {
+      const caben = extrasQueCaben('hotel', Math.min(3, Math.max(1, c.opciones.length)))
       for (const o of c.opciones) {
         if (o.foto) continue
         const f = catalogo.hotel(o.hotel, c.ciudad)
-        if (!f || !fotoImprimible('hotel', f.origen)) continue
+        if (!f || !imprimibleHotel(f)) continue
         o.foto = { url: f.src, proporcion: null }
         if (f.credito) creditosCatalogo.push(f.credito)
+        const extras = (f.extras ?? []).filter(imprimibleHotel).slice(0, caben)
+        if (extras.length > 0) extrasHotel.set(claveHotel(c.ciudad, o.hotel), { src: f.src, extras })
       }
     }
   }
   // Los planes opcionales, por su nombre.
   const deOpcional = new Map<string, FotoDeCatalogo>()
+  const cabenEnPlan = extrasQueCaben('opcional', COLUMNAS_OPCIONALES)
   if (catalogo) {
     for (const o of modelo.opcionales) {
       const f = catalogo.actividad(o.nombre)
-      if (f) deOpcional.set(o.nombre, f)
+      if (f) deOpcional.set(o.nombre, { ...f, extras: (f.extras ?? []).slice(0, cabenEnPlan) })
     }
   }
 
@@ -190,6 +209,8 @@ export async function prepararPropuestaHtml(
   for (const f of deCiudad.values()) pedir(f.url, ANCHO_FOTO.tarjeta)
   for (const c of modelo.hoteles) for (const o of c.opciones) pedir(o.foto?.url, ANCHO_FOTO.tarjeta)
   for (const f of deOpcional.values()) pedir(f.src, ANCHO_FOTO.tarjeta)
+  for (const h of extrasHotel.values()) for (const f of h.extras) pedir(f.src, ANCHO_FOTO.extra)
+  for (const f of deOpcional.values()) for (const x of f.extras ?? []) pedir(x.src, ANCHO_FOTO.extra)
 
   const [resueltas, logo] = await Promise.all([
     Promise.all([...pedidos].map(async ([url, ancho]) => [url, await reducirFoto(url, ancho)] as const)),
@@ -200,22 +221,31 @@ export async function prepararPropuestaHtml(
   if (modelo.portada.foto) focoDe.set(modelo.portada.foto.url, modelo.portada.foto.foco)
   for (const f of deCiudad.values()) focoDe.set(f.url, f.foco)
   for (const f of deOpcional.values()) if (f.foco) focoDe.set(f.src, f.foco)
+  for (const lista of [...[...extrasHotel.values()].map((h) => h.extras), ...[...deOpcional.values()].map((f) => f.extras ?? [])]) {
+    for (const f of lista) if (f.foco) focoDe.set(f.src, f.foco)
+  }
   const resolver = (url: string | null | undefined): FotoResuelta | null => {
     if (!url) return null
     const src = porUrl.get(url)
     return src ? { src, foco: focoDe.get(url) ?? null } : null
   }
 
+  // Las extras solo salen junto a su principal: sin ella, ni foto ni crédito.
+  const conArchivo = (lista: FotoDeCatalogo[] | undefined) => (lista ?? []).filter((f) => porUrl.has(f.src))
+  const extrasDeHotelResueltas = (h: { src: string; extras: FotoDeCatalogo[] } | undefined) => (h && porUrl.has(h.src) ? conArchivo(h.extras) : [])
   const creditosExtra = [
     ...[...deCiudad.values()].filter((f) => porUrl.has(f.url)).map((f) => f.credito),
     ...creditosCatalogo,
-    ...[...deOpcional.values()].filter((f) => porUrl.has(f.src)).map((f) => f.credito),
+    ...[...extrasHotel.values()].flatMap(extrasDeHotelResueltas).map((f) => f.credito),
+    ...[...deOpcional.values()].filter((f) => porUrl.has(f.src)).flatMap((f) => [f.credito, ...conArchivo(f.extras).map((x) => x.credito)]),
   ].filter((c): c is string => !!c)
 
   const crudo = htmlDePropuesta(modelo, {
     foto: resolver,
     fotoDeCiudad: (ciudad) => (ciudad ? resolver(deCiudad.get(ciudad)?.url) : null),
     fotoDeOpcional: (nombre) => resolver(deOpcional.get(nombre)?.src),
+    extrasDeHotel: (ciudad, hotel) => extrasDeHotelResueltas(extrasHotel.get(claveHotel(ciudad, hotel))).map((f) => resolver(f.src)!),
+    extrasDeOpcional: (nombre) => conArchivo(deOpcional.get(nombre)?.extras).map((f) => resolver(f.src)!),
     logo,
     marca: opts.marca,
     creditosExtra,
