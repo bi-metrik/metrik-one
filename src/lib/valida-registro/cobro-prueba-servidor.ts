@@ -105,6 +105,11 @@ const COLUMNAS =
 
 export interface DepsCobroPrueba {
   db: SupabaseClient
+  /**
+   * Solo este espacio (el reintento a mano en un preview, `?ws=` de `/api/crons/valida-cobro-prueba`).
+   * Sin él, todos los registros del despliegue, como siempre.
+   */
+  soloWorkspaceId?: string
   ahoraMs?: number
   env?: Env
   enviarCorreo?: (m: CorreoSaliente) => Promise<ResultadoEnvio>
@@ -178,12 +183,14 @@ export async function procesarCobrosTrasPrueba(deps: DepsCobroPrueba): Promise<R
     errores: [],
   }
 
-  const { data, error } = await db
+  let consulta = db
     .from('valida_registros')
     .select(COLUMNAS)
     .eq('estado', 'creado')
     .eq('cobro_entorno', entornoDeCobro(env))
     .in('cobro_estado', ['programado', 'cancelado'])
+  if (deps.soloWorkspaceId) consulta = consulta.eq('workspace_id', deps.soloWorkspaceId)
+  const { data, error } = await consulta
   if (error) throw new Error(`registros con cobro: ${error.message}`)
 
   for (const r of (data ?? []) as RegistroCobro[]) {

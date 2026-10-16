@@ -114,6 +114,24 @@ describe('el aviso de 48 horas', () => {
   })
 })
 
+describe('el filtro de un solo espacio (reintento a mano en un preview, `?ws=`)', () => {
+  it('con `soloWorkspaceId` procesa SOLO ese espacio; sin él, todos los del despliegue', async () => {
+    const t = tablas()
+    // Otro registro del mismo preview, también con cobro programado (p. ej. `test-de-pruebas`).
+    t.valida_registros.push({ ...t.valida_registros[0], id: 'reg-otro', workspace_id: 'ws-otro', correo: 'otro@x.co', slug_creado: 'otro' })
+    const solo = montar(t)
+    await procesarCobrosTrasPrueba({ ...solo.deps, ahoraMs: cron('2026-10-18'), soloWorkspaceId: 'ws-cli' })
+    expect(solo.correos.map((c) => c.to)).toEqual(['gerencia@acme.co'])
+    expect(solo.tablas.valida_registros.find((r) => r.id === 'reg-otro')?.cobro_aviso_enviado_at).toBeNull()
+
+    const t2 = tablas()
+    t2.valida_registros.push({ ...t2.valida_registros[0], id: 'reg-otro', workspace_id: 'ws-otro', correo: 'otro@x.co', slug_creado: 'otro' })
+    const todos = montar(t2)
+    await procesarCobrosTrasPrueba({ ...todos.deps, ahoraMs: cron('2026-10-18') })
+    expect(todos.correos.map((c) => c.to).sort()).toEqual(['gerencia@acme.co', 'otro@x.co'])
+  })
+})
+
 describe('el cobro en la fecha fija', () => {
   it('el cron del martes 07:00 (antes de las 15:00) no cobra; el del miércoles sí', async () => {
     const m = montar(tablas(AVISADO))
