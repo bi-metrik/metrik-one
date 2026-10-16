@@ -7,16 +7,20 @@ import { toast } from 'sonner'
 import { Dialog, DialogContent, DialogDescription, DialogTitle } from '@/components/ui/dialog'
 import { comprimirFotoHotel } from '@/lib/cotizaciones/foto-hotel-navegador'
 import { fuentesDelSelector, OPCIONES_POR_PAGINA, type FuenteFoto, type TipoFoto } from '@/lib/fotos/clave'
-import type { EleccionFoto, ElementoVista, OpcionFoto } from '@/lib/fotos/vista'
+import { fondoDeMiniatura, type EleccionFoto, type ElementoVista, type OpcionFoto } from '@/lib/fotos/vista'
 import {
   elegirFoto,
+  fotosDelHotel,
+  marcarFotoPrincipal,
   opcionesDeFoto,
+  opcionesDeHotel,
   paginaOficialSugerida,
   subirFotoABiblioteca,
   type OpcionesDeFoto,
   type PaginaSugerida,
   type ResultadoElemento,
 } from './actions'
+import SelectorHotel, { type AccionesHotel } from './selector-hotel'
 
 export interface PedidoFoto {
   tipo: TipoFoto
@@ -30,6 +34,16 @@ export interface AccionesSelector {
   sugerida: (p: PedidoFoto) => Promise<PaginaSugerida>
   elegir: (p: PedidoFoto, e: EleccionFoto, reemplaza?: string | null) => Promise<ResultadoElemento>
   subir: (p: PedidoFoto, dataUrl: string, reemplaza?: string | null) => Promise<ResultadoElemento>
+  /** Las del selector de hotel por categoría (sin ellas, las de ONE). */
+  hotel?: AccionesHotel
+}
+
+const ACCIONES_HOTEL: AccionesHotel = {
+  opciones: opcionesDeHotel,
+  fotos: fotosDelHotel,
+  elegir: elegirFoto,
+  subir: subirFotoABiblioteca,
+  principal: marcarFotoPrincipal,
 }
 
 const ACCIONES: AccionesSelector = {
@@ -37,6 +51,39 @@ const ACCIONES: AccionesSelector = {
   sugerida: paginaOficialSugerida,
   elegir: elegirFoto,
   subir: subirFotoABiblioteca,
+  hotel: ACCIONES_HOTEL,
+}
+
+type PropsSelector = {
+  pedido: PedidoFoto | null
+  reemplaza?: string | null
+  sitioOficial: boolean
+  abierto: boolean
+  onCerrar: () => void
+  onElegida: (elemento: ElementoVista | null) => void
+  acciones?: AccionesSelector
+  fuenteInicial?: FuenteFoto
+}
+
+/**
+ * El selector de fotos. Un HOTEL se elige por categoría (Fachada · Habitaciones · Zonas comunes,
+ * `SelectorHotel`, Mauricio 2026-10-16); una ciudad o una actividad, por fuente (`SelectorPorFuente`).
+ */
+export default function SelectorFotos(props: PropsSelector) {
+  if (props.pedido?.tipo === 'hotel') {
+    return (
+      <SelectorHotel
+        pedido={{ tipo: 'hotel', nombre: props.pedido.nombre, ciudad: props.pedido.ciudad }}
+        reemplaza={props.reemplaza}
+        sitioOficial={props.sitioOficial}
+        abierto={props.abierto}
+        onCerrar={props.onCerrar}
+        onElegida={props.onElegida}
+        acciones={props.acciones?.hotel ?? ACCIONES_HOTEL}
+      />
+    )
+  }
+  return <SelectorPorFuente {...props} />
 }
 
 const NOMBRE_FUENTE: Record<FuenteFoto, string> = {
@@ -55,7 +102,7 @@ const TIPO: Record<TipoFoto, string> = { hotel: 'Hotel', actividad: 'Tour o plan
  *
  * `reemplaza` = el id de la foto que se cambia; sin él, la elegida se agrega (hasta 3).
  */
-export default function SelectorFotos({
+function SelectorPorFuente({
   pedido,
   reemplaza = null,
   sitioOficial,
@@ -64,16 +111,7 @@ export default function SelectorFotos({
   onElegida,
   acciones = ACCIONES,
   fuenteInicial,
-}: {
-  pedido: PedidoFoto | null
-  reemplaza?: string | null
-  sitioOficial: boolean
-  abierto: boolean
-  onCerrar: () => void
-  onElegida: (elemento: ElementoVista | null) => void
-  acciones?: AccionesSelector
-  fuenteInicial?: FuenteFoto
-}) {
+}: PropsSelector) {
   const fuentes = fuentesDelSelector(sitioOficial)
   const [fuente, setFuente] = useState<FuenteFoto>(fuenteInicial ?? fuentes[0])
   const [opciones, setOpciones] = useState<OpcionFoto[]>([])
@@ -264,7 +302,7 @@ export default function SelectorFotos({
                       className={`group relative block w-full overflow-hidden rounded-md border text-left transition ${activa ? 'ring-2 ring-[#10B981] ring-offset-1' : 'hover:border-foreground/40'}`}
                       aria-pressed={activa}
                     >
-                      <div className="aspect-[4/3] w-full bg-muted bg-cover bg-center" style={{ backgroundImage: `url(${o.miniatura})` }} />
+                      <div className="aspect-[4/3] w-full bg-muted bg-cover bg-center" style={{ backgroundImage: fondoDeMiniatura(o.miniatura) }} />
                       {activa && (
                         <span className="absolute top-1 right-1 rounded-full bg-[#10B981] p-0.5 text-white">
                           <Check className="h-3 w-3" />

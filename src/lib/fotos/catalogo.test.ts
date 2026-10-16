@@ -62,6 +62,7 @@ const fila = (over: Partial<FilaCatalogo>): FilaCatalogo => ({
   principal: true,
   posicion: 1,
   imagen_url: null,
+  categoria: null,
   ...over,
 })
 

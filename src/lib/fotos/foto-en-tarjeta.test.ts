@@ -151,7 +151,7 @@ describe('el documento: la biblioteca manda, la foto vieja de la opción es el r
 
 describe('lo que la tarjeta muestra de la biblioteca', () => {
   const foto = (over: Partial<FotoVista>): FotoVista => ({
-    id: 'x', url: 'https://u/x.jpg', principal: false, posicion: 1, origen: 'asesora', fuente: null, fuenteUrl: null, revisada: true, seImprime: true, ...over,
+    id: 'x', url: 'https://u/x.jpg', principal: false, posicion: 1, origen: 'asesora', fuente: null, fuenteUrl: null, revisada: true, seImprime: true, categoria: null, ...over,
   })
   const elemento = (fotos: FotoVista[]): ElementoVista => ({ tipo: 'hotel', clave: 'k', nombre: 'H', ciudad: 'C', fotos, admiteOtra: fotos.length < 3 })
 

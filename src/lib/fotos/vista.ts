@@ -2,6 +2,7 @@
  * Lo que la pantalla de la biblioteca y el selector ven de una foto. PURO: de las filas del
  * catálogo (`FilaCatalogo`) a lo que viaja al navegador, sin rutas del bucket ni ids de staff.
  */
+import type { CategoriaFoto, CategoriaHotel } from './categoria'
 import { fotoImprimible, MAX_FOTOS_POR_ELEMENTO, objetivo, TIPOS_FOTO, type ObjetivoFoto, type OrigenFoto, type TipoFoto } from './clave'
 
 export interface FotoVista {
@@ -18,6 +19,8 @@ export interface FotoVista {
   revisada: boolean
   /** ¿Sale en la propuesta? (un hotel sin elegir no; una del sitio oficial con el interruptor apagado no). */
   seImprime: boolean
+  /** Hotel: fachada, habitación o zonas comunes; `null` = sin categoría (las de antes). */
+  categoria: CategoriaFoto | null
 }
 
 export interface ElementoVista {
@@ -46,6 +49,8 @@ export interface OpcionFoto {
   pagina: string
   /** Sitio oficial: la URL de la imagen. */
   imagen?: string
+  /** Hotel: la pestaña donde va (lo dijo el modelo); `null` = sin clasificar. */
+  categoria?: CategoriaHotel | null
 }
 
 /** Lo que el navegador manda al elegir: SOLO cómo encontrarla; el servidor revalida todo. */
@@ -65,6 +70,7 @@ interface FilaParaVista {
   revisada: boolean
   principal: boolean
   posicion: number
+  categoria?: CategoriaFoto | null
 }
 
 export function dominio(url: string | null | undefined): string | null {
@@ -103,6 +109,7 @@ export function vistaDeElemento(
       fuenteUrl: f.fuente_url,
       revisada: f.revisada,
       seImprime: fotoImprimible(e.tipo, f.origen, f.revisada, opts),
+      categoria: f.categoria ?? null,
     })),
   }
 }
@@ -129,4 +136,25 @@ export function objetivoDelPedido(p: unknown): ObjetivoFoto | null {
   if (typeof nombre !== 'string' || nombre.trim().length === 0 || nombre.length > 200) return null
   if (ciudad !== null && ciudad !== undefined && (typeof ciudad !== 'string' || ciudad.length > 120)) return null
   return objetivo(tipo as TipoFoto, nombre, typeof ciudad === 'string' ? ciudad : null)
+}
+
+/**
+ * Lo que muestra una pestaña del selector de un hotel: las opciones que el modelo puso en ella y,
+ * aparte, las que no pudo clasificar (salen en todas las pestañas, con aviso). Sin repetir. PURO.
+ */
+export function opcionesDeLaPestana(opciones: readonly OpcionFoto[], categoria: CategoriaHotel): { propias: OpcionFoto[]; sinClasificar: OpcionFoto[] } {
+  const vistas = new Set<string>()
+  const unica = (o: OpcionFoto) => (vistas.has(o.id) ? false : (vistas.add(o.id), true))
+  const propias = opciones.filter((o) => o.categoria === categoria).filter(unica)
+  const sinClasificar = opciones.filter((o) => o.categoria === null || o.categoria === undefined).filter(unica)
+  return { propias, sinClasificar }
+}
+
+/**
+ * El `background-image` de una miniatura, con la URL ENTRE COMILLAS: las de Commons traen
+ * paréntesis literales («…Eiffel_Tower_(32767454980).jpg») que cortan un `url(…)` sin comillas y
+ * la miniatura sale vacía.
+ */
+export function fondoDeMiniatura(url: string): string {
+  return `url(${JSON.stringify(url)})`
 }
