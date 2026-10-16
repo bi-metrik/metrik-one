@@ -11,13 +11,15 @@
  * `candidatasDeRespuesta` es PURA (se prueba con una respuesta de ejemplo); `buscarEnCommons`
  * hace la llamada, con `fetch` inyectable. Commons pide identificarse con un User-Agent propio.
  */
-import { seSugiereDeCommons, type TipoFoto } from './clave'
+import { OPCIONES_POR_PAGINA, seSugiereDeCommons, type TipoFoto } from './clave'
 
 export const API_COMMONS = 'https://commons.wikimedia.org/w/api.php'
 export const AGENTE_COMMONS = 'MetrikONE/1.0 (https://metrikone.co; mauricio.moreno@metrik.com.co)'
 /** Ancho de la miniatura que se baja y se guarda. */
 export const ANCHO_DESCARGA = 1600
 export const ANCHO_MINIMO = 800
+/** Ancho de la miniatura que ve la persona en el selector (no se guarda). */
+export const ANCHO_MINIATURA = 400
 
 export interface CandidataFoto {
   /** «File:Sagrada Familia 01.jpg» */
@@ -42,7 +44,7 @@ export function consultaDeFoto(tipo: TipoFoto, nombre: string, ciudad: string | 
   return yaLaDice || !c ? n : `${n} ${c}`
 }
 
-export function urlDeBusqueda(consulta: string, limite = 8): string {
+export function urlDeBusqueda(consulta: string, limite = 8, ancho = ANCHO_DESCARGA): string {
   const p = new URLSearchParams({
     action: 'query',
     format: 'json',
@@ -53,7 +55,21 @@ export function urlDeBusqueda(consulta: string, limite = 8): string {
     gsrlimit: String(limite),
     prop: 'imageinfo',
     iiprop: 'url|extmetadata|size|mime',
-    iiurlwidth: String(ANCHO_DESCARGA),
+    iiurlwidth: String(ancho),
+  })
+  return `${API_COMMONS}?${p.toString()}`
+}
+
+/** Un archivo por su título, con la miniatura a `ancho` px: para revalidarlo al elegirlo. */
+export function urlDeArchivo(titulo: string, ancho = ANCHO_DESCARGA): string {
+  const p = new URLSearchParams({
+    action: 'query',
+    format: 'json',
+    formatversion: '2',
+    titles: titulo,
+    prop: 'imageinfo',
+    iiprop: 'url|extmetadata|size|mime',
+    iiurlwidth: String(ancho),
   })
   return `${API_COMMONS}?${p.toString()}`
 }
@@ -120,6 +136,18 @@ export function consultasDeFoto(tipo: TipoFoto, nombre: string, ciudad: string |
   for (let i = 0; i + 1 < palabras.length; i++) salida.push(consultaDeFoto(tipo, `${palabras[i]} ${palabras[i + 1]}`, ciudad))
   for (const w of [...palabras].sort((a, b) => b.length - a.length)) if (w.length >= 5) salida.push(consultaDeFoto(tipo, w, ciudad))
   return [...new Set(salida)].slice(0, MAX_CONSULTAS)
+}
+
+/**
+ * Las consultas del SELECTOR (una persona elige): como `consultasDeFoto`, y para un hotel también,
+ * por su nombre con la ciudad y luego solo. Elegir no es sugerir: un hotel nunca se busca solo,
+ * pero la persona sí puede ver sus fotos de Commons y escoger una (Mauricio, 2026-10-16).
+ */
+export function consultasParaElegir(tipo: TipoFoto, nombre: string, ciudad: string | null): string[] {
+  if (tipo !== 'hotel') return consultasDeFoto(tipo, nombre, ciudad)
+  const n = nombre.replace(/\s+/g, ' ').trim()
+  if (!n) return []
+  return [...new Set([consultaDeFoto(tipo, n, ciudad), n])]
 }
 
 /**
@@ -219,11 +247,11 @@ export function elegirCandidata(candidatas: CandidataFoto[], descartadas: readon
  */
 export async function buscarEnCommons(
   consulta: string,
-  opts: { fetch?: typeof fetch; timeoutMs?: number; limite?: number } = {},
+  opts: { fetch?: typeof fetch; timeoutMs?: number; limite?: number; ancho?: number } = {},
 ): Promise<CandidataFoto[]> {
   const f = opts.fetch ?? fetch
   try {
-    const r = await f(urlDeBusqueda(consulta, opts.limite), {
+    const r = await f(urlDeBusqueda(consulta, opts.limite, opts.ancho), {
       headers: { 'User-Agent': AGENTE_COMMONS, 'Api-User-Agent': AGENTE_COMMONS },
       signal: AbortSignal.timeout(opts.timeoutMs ?? 8000),
     })
@@ -241,4 +269,46 @@ export async function buscarEnCommons(
 export function creditoDeCatalogo(f: { nombre: string; autor: string | null; licencia: string | null }): string | null {
   if (!f.autor || !f.licencia) return null
   return `${f.nombre}, ${f.autor} (Wikimedia Commons, ${f.licencia})`
+}
+
+/**
+ * Las opciones de Commons para el selector: hasta `OPCIONES_POR_PAGINA` por tanda, de la consulta
+ * más precisa a la más amplia, sin repetir archivo ni mostrar los descartados. `pagina` 0 es la
+ * primera tanda; «Ver más» pide la 1, la 2… Nada se guarda: la miniatura (`descarga`, a
+ * `ANCHO_MINIATURA` px) es solo para verla. Nunca lanza.
+ */
+export async function opcionesDeCommons(
+  o: { tipo: TipoFoto; nombre: string; ciudad: string | null },
+  opts: { pagina?: number; descartadas?: readonly string[]; fetch?: typeof fetch } = {},
+): Promise<{ candidatas: CandidataFoto[]; hayMas: boolean }> {
+  const pagina = Math.max(0, Math.floor(opts.pagina ?? 0))
+  const hasta = (pagina + 1) * OPCIONES_POR_PAGINA
+  const vistas = new Map<string, CandidataFoto>()
+  // Una consulta a la vez (Commons pide no lanzarlas en paralelo), hasta tener una de más.
+  for (const q of consultasParaElegir(o.tipo, o.nombre, o.ciudad)) {
+    if (vistas.size > hasta) break
+    const lista = await buscarEnCommons(q, { fetch: opts.fetch, limite: 50, ancho: ANCHO_MINIATURA })
+    for (const c of lista) if (!vistas.has(c.titulo) && !(opts.descartadas ?? []).includes(c.titulo)) vistas.set(c.titulo, c)
+  }
+  const todas = [...vistas.values()]
+  return { candidatas: todas.slice(pagina * OPCIONES_POR_PAGINA, hasta), hayMas: todas.length > hasta }
+}
+
+/**
+ * Un archivo de Commons por su título, revalidado al elegirlo (licencia, autor, tamaño): el
+ * navegador solo manda el título, nunca la licencia ni la URL. `null` si ya no se puede imprimir.
+ */
+export async function archivoDeCommons(titulo: string, opts: { fetch?: typeof fetch } = {}): Promise<CandidataFoto | null> {
+  if (typeof titulo !== 'string' || !/^File:.{1,240}$/.test(titulo)) return null
+  const f = opts.fetch ?? fetch
+  try {
+    const r = await f(urlDeArchivo(titulo), {
+      headers: { 'User-Agent': AGENTE_COMMONS, 'Api-User-Agent': AGENTE_COMMONS },
+      signal: AbortSignal.timeout(8000),
+    })
+    if (!r.ok) return null
+    return candidatasDeRespuesta(await r.json()).find((c) => c.titulo === titulo) ?? null
+  } catch {
+    return null
+  }
 }
