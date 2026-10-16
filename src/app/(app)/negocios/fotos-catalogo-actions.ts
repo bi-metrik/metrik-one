@@ -12,6 +12,7 @@
  */
 import { getWorkspace } from '@/lib/actions/get-workspace'
 import { bytesDeDataUrl } from '@/lib/cotizaciones/imagen-captura'
+import { revisarAutorizacion } from '@/lib/fotos/autorizacion'
 import { confirmarFoto, creditoDeFila, filaDe, fotosDe, leerCatalogo, MENSAJE_HOTEL_SIN_COMMONS, MENSAJE_SIN_TABLA, ponerFotoPropia, quitarFoto, sugerirDesdeCommons, TABLA_CATALOGO } from '@/lib/fotos/catalogo'
 import { enlaceDeCatalogo } from '@/lib/fotos/catalogo-almacen'
 import { fotoImprimible, seSugiereDeCommons, usaFotosDeSitioOficial, type ObjetivoFoto, type OrigenFoto, type TipoFoto } from '@/lib/fotos/clave'
@@ -55,7 +56,7 @@ export type PanelFotos =
 type Cliente = any
 
 async function contexto(cotizacionId: string, escribir: boolean) {
-  const { supabase, workspaceId, staffId, role, error } = await getWorkspace()
+  const { supabase, workspaceId, staffId, userId, role, error } = await getWorkspace()
   if (error || !workspaceId) return { error: String(error ?? 'No autenticado') }
   if (escribir && role && ROLES_SIN_ESCRITURA.has(role)) return { error: 'Tu rol puede ver las fotos pero no cambiarlas.' }
   const db = supabase as Cliente
@@ -68,7 +69,7 @@ async function contexto(cotizacionId: string, escribir: boolean) {
   if (!cot) return { error: 'Cotización no encontrada' }
   const { data: items } = await db.from('items').select('id, nombre, grupo, tarifa_pax, descripcion').eq('cotizacion_id', cotizacionId)
   const objetivos = objetivosDeItems((items ?? []) as { nombre: string | null; grupo: string | null; tarifa_pax?: unknown }[])
-  return { db, workspaceId, staffId: (staffId as string | null) ?? null, role: role as string | null, objetivos, sitioOficial: usaFotosDeSitioOficial(fila?.config_extra) }
+  return { db, workspaceId, staffId: (staffId as string | null) ?? null, userId: (userId as string | null | undefined) ?? null, role: role as string | null, objetivos, sitioOficial: usaFotosDeSitioOficial(fila?.config_extra) }
 }
 
 type Contexto = Exclude<Awaited<ReturnType<typeof contexto>>, { error: string }>
@@ -161,12 +162,18 @@ export async function otraFotoDeCommons(cotizacionId: string, tipo: TipoFoto, cl
   return panel(ctx, r.ok ? undefined : r.mensaje)
 }
 
-/** La foto propia de la asesora (JPEG ya comprimido en el navegador). */
-export async function subirFotoPropia(cotizacionId: string, tipo: TipoFoto, clave: string, dataUrl: string): Promise<PanelFotos> {
+/**
+ * La foto propia de la asesora (JPEG ya comprimido en el navegador), con la casilla «Tengo
+ * autorización para usar esta foto» (`autorizacion`, obligatoria; Emilio, 2026-10-16).
+ */
+export async function subirFotoPropia(cotizacionId: string, tipo: TipoFoto, clave: string, dataUrl: string, autorizacion?: unknown): Promise<PanelFotos> {
   const ctx = await contexto(cotizacionId, true)
   if ('error' in ctx) return { ok: false, error: ctx.error as string }
   const o = objetivoPedido(ctx, tipo, clave)
   if (!o) return { ok: false, error: 'Esa foto no es de esta cotización. Recarga.' }
+  const permiso = revisarAutorizacion(autorizacion)
+  if (!permiso.ok) return { ok: false, error: permiso.error }
+  if (!ctx.userId) return { ok: false, error: 'No se pudo saber quién sube la foto. Vuelve a entrar.' }
   const partes = typeof dataUrl === 'string' ? bytesDeDataUrl(dataUrl) : null
   if (!partes || !/^image\/(jpeg|png|webp)$/.test(partes.mime)) return { ok: false, error: 'Ese archivo no es una foto. Usa un JPG o un PNG.' }
   const filas = await leerCatalogo(ctx.db, ctx.workspaceId, { objetivos: [o] })
@@ -174,6 +181,7 @@ export async function subirFotoPropia(cotizacionId: string, tipo: TipoFoto, clav
   const r = await ponerFotoPropia({
     supabase: ctx.db, workspaceId: ctx.workspaceId, staffId: ctx.staffId, objetivo: o, bytes: partes.buffer,
     descartadas: [...(actual?.descartadas ?? []), ...(actual?.titulo_fuente ? [actual.titulo_fuente] : [])],
+    autorizacion: { userId: ctx.userId, procedencia: permiso.procedencia },
   })
   if (!r.ok) return { ok: false, error: r.mensaje }
   return panel(ctx)

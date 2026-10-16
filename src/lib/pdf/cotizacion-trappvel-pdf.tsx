@@ -586,13 +586,13 @@ function TarjetaHotel({ h, general, tarifas, margen, e, llenar = false }: { h: H
 }
 
 /**
- * La foto del hotel que puso el asesor, como foto del documento: sin rótulo ni crédito (es
- * del cliente o del proveedor, no del banco) y recortada al centro, igual que en «Así lo ve
- * el cliente».
+ * La foto del hotel que puso el asesor, como foto del documento: sin rótulo y recortada al
+ * centro, igual que en «Así lo ve el cliente». Sin crédito si es propia (subida, o de la opción);
+ * con el de Commons si salió de la biblioteca (autor y licencia, Emilio 2026-10-16).
  */
 function fotoDelHotel(h: HotelPDF): FotoPDF | null {
   if (!h.foto) return null
-  return { url: h.foto.url, rotulo: null, credito: null, proporcion: h.foto.proporcion ?? undefined }
+  return { url: h.foto.url, rotulo: null, credito: h.foto.credito ?? null, proporcion: h.foto.proporcion ?? undefined }
 }
 
 /**
@@ -1451,8 +1451,12 @@ export default function CotizacionTrappvelPDF({
   }
 
   // Los créditos de las fotos que se IMPRIMEN: una foto de ciudad que reemplazó la del hotel
-  // no se nombra.
-  const creditos = creditosDeFotos([v.foto, ...fotosCiudades.filter(f => !reemplazadas.has(f))])
+  // no se nombra; la del hotel (la del capítulo y la de cada alternativa con foto), sí.
+  const creditos = creditosDeFotos([
+    v.foto,
+    ...fotosCiudades.filter(f => !reemplazadas.has(f)),
+    ...capitulos.flatMap(c => [c.hotel, ...c.alternativas]).map(h => (h ? fotoDelHotel(h) : null)),
+  ])
   const antesDeViajar = v.antesDeViajar ?? []
 
   /**

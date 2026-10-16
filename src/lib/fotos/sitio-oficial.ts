@@ -24,6 +24,7 @@ import { lookup } from 'node:dns/promises'
 import { isIP } from 'node:net'
 import sharp from 'sharp'
 
+import { esDeAgenciaDeViajes, MENSAJE_AGENCIA, urlEsDeAgencia } from './agencias'
 import { claveDeFoto, nombreLlano, OPCIONES_POR_PAGINA, type TipoFoto } from './clave'
 import { AGENTE_COMMONS } from './wikimedia'
 
@@ -279,11 +280,14 @@ export interface CandidataSitio {
 
 type Red = { fetch?: typeof fetch; resolver?: Resolver }
 
-/** La página y sus imágenes. `null` si no se pudo leer. */
+/**
+ * La página y sus imágenes. `null` si no se pudo leer. Las imágenes servidas desde una agencia en
+ * línea (el widget de Booking en la página del hotel sirve desde bstatic.com) no se ofrecen nunca.
+ */
 export async function leerPagina(paginaUrl: string, red: Red = {}): Promise<{ pagina: string; imagenes: string[] } | null> {
   const r = await traerSeguro(paginaUrl, { ...red, maxBytes: BYTES_MAXIMOS_PAGINA, tipo: /^(text\/html|application\/xhtml\+xml)$/ })
   if (!r) return null
-  return { pagina: r.url, imagenes: imagenesDePagina(r.bytes.toString('utf8'), r.url) }
+  return { pagina: r.url, imagenes: imagenesDePagina(r.bytes.toString('utf8'), r.url).filter((im) => !urlEsDeAgencia(im)) }
 }
 
 /** Una imagen de la página, si es una foto de verdad (tamaño mínimo). */
@@ -309,8 +313,12 @@ export async function opcionesDeSitioOficial(
   paginaUrl: string,
   opts: Red & { desde?: number } = {},
 ): Promise<{ ok: true; pagina: string; candidatas: CandidataSitio[]; siguiente: number | null } | { ok: false; error: string }> {
+  // Booking, Expedia, Despegar y las demás agencias en línea nunca son fuente (Emilio, 2026-10-16),
+  // tampoco si la página pegada redirige a una de ellas.
+  if (esDeAgenciaDeViajes(paginaUrl)) return { ok: false, error: MENSAJE_AGENCIA }
   const leida = await leerPagina(paginaUrl, opts)
   if (!leida) return { ok: false, error: 'No se pudo abrir esa página. Revisa que sea https y pública.' }
+  if (urlEsDeAgencia(leida.pagina)) return { ok: false, error: MENSAJE_AGENCIA }
   const candidatas: CandidataSitio[] = []
   let i = Math.max(0, Math.floor(opts.desde ?? 0))
   while (i < leida.imagenes.length && candidatas.length < OPCIONES_POR_PAGINA) {
@@ -331,8 +339,10 @@ export async function bajarFotoDeSitio(
   imagenUrl: string,
   red: Red = {},
 ): Promise<{ ok: true; bytes: Buffer; pagina: string; imagen: string } | { ok: false; error: string }> {
+  if (esDeAgenciaDeViajes(paginaUrl) || urlEsDeAgencia(imagenUrl)) return { ok: false, error: MENSAJE_AGENCIA }
   const leida = await leerPagina(paginaUrl, red)
   if (!leida) return { ok: false, error: 'No se pudo abrir la página oficial. Vuelve a intentarlo.' }
+  if (urlEsDeAgencia(leida.pagina)) return { ok: false, error: MENSAJE_AGENCIA }
   if (!leida.imagenes.includes(imagenUrl)) return { ok: false, error: 'Esa foto ya no está en la página oficial. Vuelve a buscar.' }
   const r = await traerSeguro(imagenUrl, { ...red, maxBytes: BYTES_MAXIMOS_IMAGEN, tipo: /^image\/(jpeg|jpg|png|webp|avif)$/ })
   if (!r) return { ok: false, error: 'No se pudo bajar la foto de la página oficial.' }

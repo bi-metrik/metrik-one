@@ -9,7 +9,7 @@ import { base, clienteFalso, type Fila } from '../../../../test/cotizacion-pdf-d
 
 const sesion = vi.hoisted(() => ({ role: 'operator' as string }))
 vi.mock('@/lib/actions/get-workspace', () => ({
-  getWorkspace: async () => ({ supabase: clienteFalso(), workspaceId: WS, staffId: 's-1', role: sesion.role, error: null }),
+  getWorkspace: async () => ({ supabase: clienteFalso(), workspaceId: WS, staffId: 's-1', userId: 'u-1', role: sesion.role, error: null }),
 }))
 vi.mock('@/lib/fotos/catalogo-almacen', async (original) => ({
   ...(await original<typeof import('@/lib/fotos/catalogo-almacen')>()),
@@ -78,7 +78,7 @@ describe('la biblioteca', () => {
   it('un rol de solo lectura la ve pero no cambia nada', async () => {
     sesion.role = 'read_only'
     expect((await leerBibliotecaDeFotos()).ok).toBe(true)
-    expect(await subirFotoABiblioteca(HOTEL, await dataUrl())).toEqual({ ok: false, error: expect.stringContaining('no cambiarlas') })
+    expect(await subirFotoABiblioteca(HOTEL, await dataUrl(), null, null, { autorizada: true })).toEqual({ ok: false, error: expect.stringContaining('no cambiarlas') })
   })
 })
 
@@ -120,10 +120,10 @@ describe('la página oficial, detrás del interruptor', () => {
 
 describe('máximo 3 por elemento', () => {
   it('la cuarta subida no entra', { timeout: 30_000 }, async () => {
-    for (let i = 0; i < 3; i++) expect((await subirFotoABiblioteca(HOTEL, await dataUrl(i * 50))).ok).toBe(true)
+    for (let i = 0; i < 3; i++) expect((await subirFotoABiblioteca(HOTEL, await dataUrl(i * 50), null, null, { autorizada: true })).ok).toBe(true)
     const filas = base.tablas.fotos_catalogo as Fila[]
     expect(filas.map((f) => [f.posicion, f.principal])).toEqual([[1, true], [2, false], [3, false]])
-    expect(await subirFotoABiblioteca(HOTEL, await dataUrl(220))).toEqual({ ok: false, error: expect.stringContaining('Ya tiene 3 fotos') })
+    expect(await subirFotoABiblioteca(HOTEL, await dataUrl(220), null, null, { autorizada: true })).toEqual({ ok: false, error: expect.stringContaining('Ya tiene 3 fotos') })
     expect(base.tablas.fotos_catalogo).toHaveLength(3)
   })
 })

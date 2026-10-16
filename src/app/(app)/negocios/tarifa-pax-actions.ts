@@ -1622,13 +1622,13 @@ async function lecturasDevueltasDe(ctx: ContextoDeItem): Promise<{ ok: true; dev
  * En los demás espacios, en la opción (`tarifa_pax.fotoHotel`), como antes; la anterior se borra
  * al quedar la nueva.
  */
-export async function ponerFotoDelHotel(itemId: string, dataUrl: string, proporcion: number | null, reemplaza?: string | null): Promise<ResultadoTarifa> {
+export async function ponerFotoDelHotel(itemId: string, dataUrl: string, proporcion: number | null, reemplaza?: string | null, autorizacion?: unknown): Promise<ResultadoTarifa> {
   const ctx = await contexto(itemId)
   if ('error' in ctx) return { success: false, error: ctx.error as string }
   if (ctx.ranura.slug !== 'hotel_detalle') return { success: false, error: 'Solo una opción de hotel lleva foto del hotel.' }
-  const { workspaceId, staffId, role } = await getWorkspace()
+  const { workspaceId, staffId, userId, role } = await getWorkspace()
   const enBiblioteca = await fotoDeHotelABiblioteca({
-    supabase: ctx.supabase, workspaceId, staffId, role,
+    supabase: ctx.supabase, workspaceId, staffId, role, userId, autorizacion,
     item: { nombre: ctx.item.nombre, grupo: ctx.item.grupo, descripcion: ctx.item.descripcion, tarifa_pax: ctx.item.tarifaRaw }, dataUrl, reemplaza,
   })
   if (enBiblioteca) {

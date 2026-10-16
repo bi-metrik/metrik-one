@@ -19,6 +19,8 @@ import { comprimirFotoHotel } from '@/lib/cotizaciones/foto-hotel-navegador'
 import HojaCliente from '@/app/(app)/negocios/hoja-cliente'
 import { avisarCambioDeFotos, useFotoDeBiblioteca } from '@/app/(app)/negocios/fotos-tarjeta'
 import SelectorFotos from '@/app/(app)/fotos/selector-fotos'
+import { DialogoAutorizacionFoto } from '@/app/(app)/fotos/autorizacion-foto'
+import type { PedidoAutorizacion } from '@/lib/fotos/autorizacion'
 import { fotoDeLaTarjeta, type ElementoVista } from '@/lib/fotos/vista'
 import TarjetaCosto from '@/app/(app)/negocios/tarjeta-costo'
 import PastillaAerolinea from '@/app/(app)/negocios/pastilla-aerolinea'
@@ -339,15 +341,25 @@ export default function TarjetaOpcion({
     }).catch(() => {})
   }
 
+  // Con biblioteca, la foto subida pide antes «Tengo autorización para usar esta foto» (Emilio, 2026-10-16).
+  const [fotoPorAutorizar, setFotoPorAutorizar] = useState<File | null>(null)
+
   function ponerFoto(archivo: File) {
+    if (subiendoFoto) return
+    if (conBiblioteca) { setFotoPorAutorizar(archivo); return }
+    enviarFoto(archivo)
+  }
+
+  function enviarFoto(archivo: File, permiso?: PedidoAutorizacion) {
     if (subiendoFoto) return
     setSubiendoFoto(true)
     void (async () => {
       try {
         const foto = await comprimirFotoHotel(archivo)
         if (!foto) { toast.error('Ese archivo no es una foto. Usa un JPG o un PNG.'); return }
-        const r = await ponerFotoDelHotel(itemId, foto.dataUrl, foto.proporcion, enTarjeta?.foto?.id ?? null)
+        const r = await ponerFotoDelHotel(itemId, foto.dataUrl, foto.proporcion, enTarjeta?.foto?.id ?? null, permiso)
         if (!r.success) { toast.error(r.error ?? 'No se pudo guardar la foto. Vuelve a intentarlo.'); return }
+        setFotoPorAutorizar(null)
         if (r.fotoBiblioteca !== undefined) quedoEnBiblioteca(r.fotoBiblioteca)
         setFotoConfirmada({ antes: fotoDeLaPagina, ahora: r.tarifa?.fotoHotel?.ref ?? null })
         onCambio()
@@ -611,6 +623,14 @@ export default function TarjetaOpcion({
               },
             } : null}
           />}
+          {esHotel && conBiblioteca && (
+            <DialogoAutorizacionFoto
+              archivo={fotoPorAutorizar}
+              guardando={subiendoFoto}
+              onCancelar={() => setFotoPorAutorizar(null)}
+              onConfirmar={permiso => fotoPorAutorizar && enviarFoto(fotoPorAutorizar, permiso)}
+            />
+          )}
           {esHotel && conBiblioteca && pedidoFoto && (
             <SelectorFotos
               pedido={pedidoFoto}

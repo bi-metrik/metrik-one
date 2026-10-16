@@ -10,10 +10,15 @@
  *  · la llave de cada elemento (sale del tipo, el nombre y la ciudad, `objetivoDelPedido`);
  *  · que la foto de Commons tenga licencia imprimible (se vuelve a pedir a Commons al elegirla);
  *  · que la página oficial esté encendida en el workspace y que la imagen esté en esa página;
- *  · el tope de 3 por elemento y la única principal (también los hace cumplir la base).
+ *  · el tope de 3 por elemento y la única principal (también los hace cumplir la base);
+ *  · que una foto subida o pegada traiga la casilla «Tengo autorización» (y quién la marcó, que lo
+ *    pone el servidor con el usuario de la sesión);
+ *  · que nada venga de una agencia en línea (Booking, Expedia, Despegar…): nunca son fuente.
  * Las 12 opciones del selector NO se guardan: solo la que se elige.
  */
 import { getWorkspace } from '@/lib/actions/get-workspace'
+import { esDeAgenciaDeViajes, MENSAJE_AGENCIA, urlEsDeAgencia } from '@/lib/fotos/agencias'
+import { revisarAutorizacion } from '@/lib/fotos/autorizacion'
 import { bytesDeDataUrl } from '@/lib/cotizaciones/imagen-captura'
 import { esCategoria, type CategoriaFoto } from '@/lib/fotos/categoria'
 import {
@@ -57,7 +62,7 @@ export type PaginaSugerida = { ok: true; url: string | null; desde: 'biblioteca'
 type Cliente = any
 
 async function contexto(escribir: boolean) {
-  const { supabase, workspaceId, staffId, role, error } = await getWorkspace()
+  const { supabase, workspaceId, staffId, userId, role, error } = await getWorkspace()
   if (error || !workspaceId) return { error: String(error ?? 'No autenticado') }
   if (escribir && role && ROLES_SIN_ESCRITURA.has(role)) return { error: 'Tu rol puede ver las fotos pero no cambiarlas.' }
   const db = supabase as Cliente
@@ -68,6 +73,7 @@ async function contexto(escribir: boolean) {
     db,
     workspaceId,
     staffId: (staffId as string | null) ?? null,
+    userId: (userId as string | null | undefined) ?? null,
     editable: !(role && ROLES_SIN_ESCRITURA.has(role as string)),
     sitioOficial: usaFotosDeSitioOficial(fila?.config_extra),
   }
@@ -170,6 +176,7 @@ export async function opcionesDeFoto(
     }
   }
   if (fuente !== 'sitio_oficial') return { ok: false, error: 'Fuente desconocida.' }
+  if (esDeAgenciaDeViajes(paginaUrl)) return { ok: false, error: MENSAJE_AGENCIA }
   if (!ctx.sitioOficial) return { ok: false, error: MENSAJE_SIN_SITIO }
   if (typeof paginaUrl !== 'string' || !paginaUrl.trim()) return { ok: false, error: 'Pega la dirección de la página oficial (https://…).' }
   const r = await opcionesDeSitioOficial(paginaUrl.trim(), { desde })
@@ -212,9 +219,10 @@ export async function paginaOficialSugerida(pedido: { tipo: string; nombre: stri
     .eq('origen', 'sitio_oficial')
     .limit(1)
   const usada = (data as { fuente_url?: string | null }[] | null)?.[0]?.fuente_url
-  if (usada) return { ok: true, url: usada, desde: 'biblioteca' }
+  if (usada && !urlEsDeAgencia(usada)) return { ok: true, url: usada, desde: 'biblioteca' }
   const w = await paginaOficialDesdeWikidata(o)
-  return { ok: true, url: w?.url ?? null, desde: w ? 'wikidata' : null }
+  const deWikidata = w && !urlEsDeAgencia(w.url) ? w : null
+  return { ok: true, url: deWikidata?.url ?? null, desde: deWikidata ? 'wikidata' : null }
 }
 
 /** Guarda la opción elegida en el elemento: agrega (hasta 3) o reemplaza `reemplaza`. */
@@ -233,6 +241,7 @@ export async function elegirFoto(
   if (eleccion?.fuente === 'wikimedia' && typeof eleccion.titulo === 'string') {
     r = await elegirDeCommons({ ...base, titulo: eleccion.titulo })
   } else if (eleccion?.fuente === 'sitio_oficial' && typeof eleccion.pagina === 'string' && typeof eleccion.imagen === 'string') {
+    if (esDeAgenciaDeViajes(eleccion.pagina) || urlEsDeAgencia(eleccion.imagen)) return { ok: false, error: MENSAJE_AGENCIA }
     if (!ctx.sitioOficial) return { ok: false, error: MENSAJE_SIN_SITIO }
     r = await elegirDeSitioOficial({ ...base, paginaUrl: eleccion.pagina, imagenUrl: eleccion.imagen })
   } else {
@@ -242,22 +251,31 @@ export async function elegirFoto(
   return elementoActual(ctx, o)
 }
 
-/** «Subir la mía» en la biblioteca: agrega (hasta 3) o reemplaza `reemplaza`. Un hotel, en la pestaña `categoria`. */
+/**
+ * «Subir la mía» (o pegar) en la biblioteca: agrega (hasta 3) o reemplaza `reemplaza`. Un hotel,
+ * con la categoría de la pestaña. `autorizacion` = la casilla «Tengo autorización para usar esta
+ * foto» (obligatoria) y, si la persona lo dijo, de dónde viene (Emilio, 2026-10-16).
+ */
 export async function subirFotoABiblioteca(
   pedido: { tipo: string; nombre: string; ciudad: string | null },
   dataUrl: string,
   reemplaza?: string | null,
   categoria?: string | null,
+  autorizacion?: unknown,
 ): Promise<ResultadoElemento> {
   const ctx = await contexto(true)
   if ('error' in ctx) return { ok: false, error: ctx.error as string }
   const o = objetivoDelPedido(pedido)
   if (!o) return { ok: false, error: 'Falta el nombre de lo que quieres ilustrar.' }
+  const permiso = revisarAutorizacion(autorizacion)
+  if (!permiso.ok) return { ok: false, error: permiso.error }
+  if (!ctx.userId) return { ok: false, error: 'No se pudo saber quién sube la foto. Vuelve a entrar.' }
   const partes = typeof dataUrl === 'string' ? bytesDeDataUrl(dataUrl) : null
   if (!partes || !/^image\/(jpeg|png|webp)$/.test(partes.mime)) return { ok: false, error: 'Ese archivo no es una foto. Usa un JPG o un PNG.' }
   const r = await ponerFotoPropia({
     supabase: ctx.db, workspaceId: ctx.workspaceId, staffId: ctx.staffId, objetivo: o, bytes: partes.buffer,
     reemplaza: reemplaza ?? null, agregar: !reemplaza, ...categoriaDelPedido(o.tipo, categoria),
+    autorizacion: { userId: ctx.userId, procedencia: permiso.procedencia },
   })
   if (!r.ok) return { ok: false, error: r.mensaje }
   return elementoActual(ctx, o)
@@ -302,6 +320,7 @@ export async function opcionesDeHotel(
   if (!o || o.tipo !== 'hotel') return { ok: false, error: 'Falta el nombre del hotel.' }
   const apiKey = process.env.GEMINI_API_KEY
   if (typeof paginaUrl === 'string' && paginaUrl.trim()) {
+    if (esDeAgenciaDeViajes(paginaUrl)) return { ok: false, error: MENSAJE_AGENCIA }
     if (!ctx.sitioOficial) return { ok: false, error: MENSAJE_SIN_SITIO }
     const desde = Math.max(0, Math.min(10_000, Number.parseInt(siguiente ?? '0', 10) || 0))
     const r = await opcionesDeHotelEnSitio(paginaUrl.trim(), o, { apiKey, desde })
@@ -327,7 +346,12 @@ export async function opcionesDeHotel(
       .eq('origen', 'sitio_oficial')
       .limit(1)
     const usada = (data as { fuente_url?: string | null }[] | null)?.[0]?.fuente_url
-    paginaSugerida = usada ? { url: usada, desde: 'biblioteca' } : wd.pagina ? { url: wd.pagina.url, desde: 'wikidata' } : null
+    paginaSugerida =
+      usada && !urlEsDeAgencia(usada)
+        ? { url: usada, desde: 'biblioteca' }
+        : wd.pagina && !urlEsDeAgencia(wd.pagina.url)
+          ? { url: wd.pagina.url, desde: 'wikidata' }
+          : null
   }
   return { ok: true, opciones: r.opciones, siguiente: null, clasificadas: r.clasificadas, paginaSugerida }
 }

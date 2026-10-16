@@ -35,8 +35,8 @@ export function fuenteDeFotoDeHotel(enBiblioteca: boolean, fotoRef: string | nul
 export async function fotosDeHotelesDelDocumento<H extends HotelPDF>(
   hoteles: H[],
   a: {
-    /** Las llaves de hotel con foto imprimible en la biblioteca, con su proporción. */
-    biblioteca: Map<string, { proporcion: number | null }>
+    /** Las llaves de hotel con foto imprimible en la biblioteca, con su proporción y su crédito (Commons). */
+    biblioteca: Map<string, { proporcion: number | null; credito?: string | null }>
     motorHtml: boolean
     leerDeBiblioteca: (clave: string) => Promise<string | null>
     leerDeOpcion: (ref: string) => Promise<string | null>
@@ -50,7 +50,7 @@ export async function fotosDeHotelesDelDocumento<H extends HotelPDF>(
       if (fuente === 'biblioteca') {
         if (a.motorHtml) return h
         const url = await a.leerDeBiblioteca(clave)
-        if (url) return { ...h, foto: { url, proporcion: deBiblioteca?.proporcion ?? null } }
+        if (url) return { ...h, foto: { url, proporcion: deBiblioteca?.proporcion ?? null, credito: deBiblioteca?.credito ?? null } }
         // La biblioteca falló al leer: el respaldo de la opción, si lo hay.
         if (!h.fotoRef) return h
       }

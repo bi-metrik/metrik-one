@@ -41,6 +41,9 @@ import {
 } from './catalogo'
 import { MAX_FOTOS_POR_ELEMENTO, objetivo } from './clave'
 
+/** La casilla «Tengo autorización» que la acción ya revisó (Emilio, 2026-10-16). */
+const AUTORIZADA = { userId: '00000000-0000-4000-8000-0000000000aa', procedencia: null }
+
 const WS = '11111111-2222-3333-4444-555555555555'
 type Fila = Record<string, unknown>
 
@@ -159,11 +162,11 @@ describe('máximo 3 fotos por elemento', () => {
   it('la cuarta no entra, no se sube y el elemento queda con 3', { timeout: 30_000 }, async () => {
     const db = dobleConLlaves()
     for (let i = 0; i < MAX_FOTOS_POR_ELEMENTO; i++) {
-      const r = await ponerFotoPropia({ supabase: db, workspaceId: WS, staffId: 's1', objetivo: plan, bytes: await jpeg(i * 40), agregar: true })
+      const r = await ponerFotoPropia({ supabase: db, workspaceId: WS, staffId: 's1', objetivo: plan, bytes: await jpeg(i * 40), agregar: true , autorizacion: AUTORIZADA })
       expect(r.ok).toBe(true)
     }
     expect(db.filas.map((f) => f.posicion).sort()).toEqual([1, 2, 3])
-    const cuarta = await ponerFotoPropia({ supabase: db, workspaceId: WS, staffId: 's1', objetivo: plan, bytes: await jpeg(200), agregar: true })
+    const cuarta = await ponerFotoPropia({ supabase: db, workspaceId: WS, staffId: 's1', objetivo: plan, bytes: await jpeg(200), agregar: true , autorizacion: AUTORIZADA })
     expect(cuarta).toEqual({ ok: false, mensaje: MENSAJE_TOPE })
     expect(db.filas).toHaveLength(3)
     // No se subió un archivo que iba a quedar huérfano.
@@ -172,10 +175,10 @@ describe('máximo 3 fotos por elemento', () => {
 
   it('con 3, «Cambiar» sí entra (reemplaza el puesto, no agrega)', { timeout: 30_000 }, async () => {
     const db = dobleConLlaves()
-    for (let i = 0; i < 3; i++) await ponerFotoPropia({ supabase: db, workspaceId: WS, staffId: null, objetivo: plan, bytes: await jpeg(i * 40), agregar: true })
+    for (let i = 0; i < 3; i++) await ponerFotoPropia({ supabase: db, workspaceId: WS, staffId: null, objetivo: plan, bytes: await jpeg(i * 40), agregar: true , autorizacion: AUTORIZADA })
     const segunda = db.filas.find((f) => f.posicion === 2)!
     const vieja = segunda.ref
-    const r = await ponerFotoPropia({ supabase: db, workspaceId: WS, staffId: null, objetivo: plan, bytes: await jpeg(250), reemplaza: segunda.id as string })
+    const r = await ponerFotoPropia({ supabase: db, workspaceId: WS, staffId: null, objetivo: plan, bytes: await jpeg(250), reemplaza: segunda.id as string , autorizacion: AUTORIZADA })
     expect(r.ok).toBe(true)
     expect(db.filas).toHaveLength(3)
     expect(db.filas.find((f) => f.id === segunda.id)).toMatchObject({ posicion: 2, principal: false })
@@ -199,7 +202,7 @@ describe('máximo 3 fotos por elemento', () => {
 describe('una sola principal', () => {
   it('la primera es la principal; las que se agregan no; marcar otra deja una sola', { timeout: 30_000 }, async () => {
     const db = dobleConLlaves()
-    for (let i = 0; i < 3; i++) await ponerFotoPropia({ supabase: db, workspaceId: WS, staffId: 's1', objetivo: hotel, bytes: await jpeg(i * 40), agregar: true })
+    for (let i = 0; i < 3; i++) await ponerFotoPropia({ supabase: db, workspaceId: WS, staffId: 's1', objetivo: hotel, bytes: await jpeg(i * 40), agregar: true , autorizacion: AUTORIZADA })
     expect(db.filas.filter((f) => f.principal).map((f) => f.posicion)).toEqual([1])
     const tercera = db.filas.find((f) => f.posicion === 3)!
     expect((await marcarPrincipal(db, WS, 's1', tercera.id as string)).ok).toBe(true)
@@ -212,7 +215,7 @@ describe('una sola principal', () => {
 
   it('quitar la principal pasa la principal a la del primer puesto que queda', { timeout: 30_000 }, async () => {
     const db = dobleConLlaves()
-    for (let i = 0; i < 3; i++) await ponerFotoPropia({ supabase: db, workspaceId: WS, staffId: null, objetivo: hotel, bytes: await jpeg(i * 40), agregar: true })
+    for (let i = 0; i < 3; i++) await ponerFotoPropia({ supabase: db, workspaceId: WS, staffId: null, objetivo: hotel, bytes: await jpeg(i * 40), agregar: true , autorizacion: AUTORIZADA })
     const principal = db.filas.find((f) => f.principal)!
     expect((await quitarFotoPorId(db, WS, principal.id as string)).ok).toBe(true)
     expect(db.filas).toHaveLength(2)

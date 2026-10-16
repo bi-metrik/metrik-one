@@ -18,6 +18,8 @@ import {
 } from '@/app/(app)/negocios/fotos-catalogo-actions'
 import { comprimirFotoHotel } from '@/lib/cotizaciones/foto-hotel-navegador'
 import type { TipoFoto } from '@/lib/fotos/clave'
+import type { PedidoAutorizacion } from '@/lib/fotos/autorizacion'
+import { DialogoAutorizacionFoto } from '../fotos/autorizacion-foto'
 import SelectorFotos, { type PedidoFoto } from '../fotos/selector-fotos'
 import { avisarCambioDeFotos, EVENTO_FOTOS_BIBLIOTECA } from './fotos-tarjeta'
 
@@ -40,6 +42,8 @@ export default function FotosPropuestaPanel({ cotizacionId, editable }: { cotiza
   const [, start] = useTransitionTolerante()
   const buscado = useRef(false)
   const [selector, setSelector] = useState<{ pedido: PedidoFoto; reemplaza: string | null } | null>(null)
+  // La foto subida espera la casilla «Tengo autorización para usar esta foto» (Emilio, 2026-10-16).
+  const [porAutorizar, setPorAutorizar] = useState<{ f: FotoDelPanel; archivo: File } | null>(null)
 
   const aplicar = (r: PanelFotos) => {
     if (!r.ok) {
@@ -119,11 +123,13 @@ export default function FotosPropuestaPanel({ cotizacionId, editable }: { cotiza
   }
 
   const puede = editable && estado.editable
-  const subir = (f: FotoDelPanel, archivo: File) =>
+  const subir = (f: FotoDelPanel, archivo: File, permiso: PedidoAutorizacion) =>
     correr(`${f.tipo}:${f.clave}`, async () => {
       const foto = await comprimirFotoHotel(archivo)
       if (!foto) return { ok: false, error: 'Ese archivo no es una foto. Usa un JPG o un PNG.' }
-      return subirFotoPropia(cotizacionId, f.tipo, f.clave, foto.dataUrl)
+      const r = await subirFotoPropia(cotizacionId, f.tipo, f.clave, foto.dataUrl, permiso)
+      if (r.ok) setPorAutorizar(null)
+      return r
     })
 
   const grupos = (['ciudad', 'hotel', 'actividad'] as TipoFoto[])
@@ -204,7 +210,7 @@ export default function FotosPropuestaPanel({ cotizacionId, editable }: { cotiza
                         </button>
                         <label className={`inline-flex cursor-pointer items-center gap-0.5 rounded px-1.5 py-0.5 text-[10px] hover:bg-accent ${ocupado ? 'pointer-events-none opacity-50' : ''}`}>
                           <ImagePlus className="h-3 w-3" /> Subir la mía
-                          <input type="file" accept="image/*" className="hidden" onChange={(e) => { const a = e.target.files?.[0]; e.target.value = ''; if (a) subir(f, a) }} />
+                          <input type="file" accept="image/*" className="hidden" onChange={(e) => { const a = e.target.files?.[0]; e.target.value = ''; if (a) setPorAutorizar({ f, archivo: a }) }} />
                         </label>
                         {f.foto && (
                           <button type="button" disabled={!!ocupado} onClick={() => correr(k, () => quitarFotoDelCatalogo(cotizacionId, f.tipo, f.clave))}
@@ -221,6 +227,12 @@ export default function FotosPropuestaPanel({ cotizacionId, editable }: { cotiza
           </ul>
         </div>
       ))}
+      <DialogoAutorizacionFoto
+        archivo={porAutorizar?.archivo ?? null}
+        guardando={!!porAutorizar && ocupado === `${porAutorizar.f.tipo}:${porAutorizar.f.clave}`}
+        onCancelar={() => setPorAutorizar(null)}
+        onConfirmar={(permiso) => porAutorizar && subir(porAutorizar.f, porAutorizar.archivo, permiso)}
+      />
       <SelectorFotos
         pedido={selector?.pedido ?? null}
         reemplaza={selector?.reemplaza ?? null}

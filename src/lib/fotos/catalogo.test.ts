@@ -26,6 +26,9 @@ import { actividadPorNombre, filaDe, ponerFotoPropia, quitarFoto, sugerirDesdeCo
 import { objetivo } from './clave'
 import { rutaDeReferencia } from './referencia-catalogo'
 
+/** La casilla «Tengo autorización» que la acción ya revisó (Emilio, 2026-10-16). */
+const AUTORIZADA = { userId: '00000000-0000-4000-8000-0000000000aa', procedencia: null }
+
 const WS = '11111111-2222-3333-4444-555555555555'
 const OTRO = '99999999-2222-3333-4444-555555555555'
 
@@ -214,11 +217,11 @@ describe('escrituras del catálogo', () => {
 
   it('la propia: revisada, sin crédito; lo que no es foto no entra', { timeout: 20_000 }, async () => {
     const db = dobleTabla()
-    const r = await ponerFotoPropia({ supabase: db, workspaceId: WS, staffId: 's1', objetivo: sagrada, bytes: await jpeg(3000, 2000) })
+    const r = await ponerFotoPropia({ supabase: db, workspaceId: WS, staffId: 's1', objetivo: sagrada, bytes: await jpeg(3000, 2000) , autorizacion: AUTORIZADA })
     expect(r.ok).toBe(true)
     expect(db.filas[0]).toMatchObject({ origen: 'asesora', revisada: true, autor: null, licencia: null, fuente_url: null })
     expect(Number(db.filas[0].proporcion)).toBeCloseTo(1.5, 1)
-    expect((await ponerFotoPropia({ supabase: db, workspaceId: WS, staffId: 's1', objetivo: sagrada, bytes: Buffer.from('no soy una foto') })).ok).toBe(false)
+    expect((await ponerFotoPropia({ supabase: db, workspaceId: WS, staffId: 's1', objetivo: sagrada, bytes: Buffer.from('no soy una foto') , autorizacion: AUTORIZADA })).ok).toBe(false)
   })
 
   it('quitar: borra la fila y el archivo, salvo que otra fila use el mismo', async () => {
@@ -236,7 +239,7 @@ describe('escrituras del catálogo', () => {
 
   it('sin la migración: el motivo, y el archivo subido no queda huérfano', { timeout: 20_000 }, async () => {
     const db = dobleTabla([], { sinTabla: true })
-    const r = await ponerFotoPropia({ supabase: db, workspaceId: WS, staffId: null, objetivo: sagrada, bytes: await jpeg() })
+    const r = await ponerFotoPropia({ supabase: db, workspaceId: WS, staffId: null, objetivo: sagrada, bytes: await jpeg() , autorizacion: AUTORIZADA })
     expect(r).toEqual({ ok: false, mensaje: expect.stringContaining('migración') })
   })
 })
