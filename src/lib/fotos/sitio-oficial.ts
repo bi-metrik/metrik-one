@@ -198,7 +198,12 @@ function imagenesDeJsonLd(nodo: unknown, salida: string[], hondura = 0): void {
   for (const [k, v] of Object.entries(nodo as Record<string, unknown>)) {
     if (k === 'image' || k === 'photo' || k === 'contentUrl' || k === 'thumbnailUrl') {
       if (typeof v === 'string') salida.push(v)
-      else if (Array.isArray(v)) for (const x of v) typeof x === 'string' ? salida.push(x) : imagenesDeJsonLd(x, salida, hondura + 1)
+      else if (Array.isArray(v)) {
+        for (const x of v) {
+          if (typeof x === 'string') salida.push(x)
+          else imagenesDeJsonLd(x, salida, hondura + 1)
+        }
+      }
       else imagenesDeJsonLd(v, salida, hondura + 1)
     } else if (k === 'url' && typeof v === 'string' && /\.(jpe?g|png|webp)(\?|$)/i.test(v)) {
       salida.push(v)

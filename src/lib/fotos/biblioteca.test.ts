@@ -65,7 +65,7 @@ function violacion(filas: Fila[]): { code: string; message: string } | null {
 }
 
 function dobleConLlaves(inicial: Fila[] = []) {
-  let filas = inicial.map((f) => ({ principal: true, posicion: 1, descartadas: [], ...f }))
+  let filas: Fila[] = inicial.map((f) => ({ principal: true, posicion: 1, descartadas: [], ...f }))
   let n = filas.length
   return {
     get filas() {
