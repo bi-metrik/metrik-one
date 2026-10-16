@@ -131,6 +131,16 @@ async function medir(pagina) {
       tocaFab: golpe(fab, true),
       tocaSuma: s ? golpe(boton) : null,
       seTocan: !!(f && s && f.x < s.r && f.r > s.x && f.y < s.b && f.b > s.y),
+      // Con la hoja abierta: su último texto (margen, «También van») y el total no quedan bajo el «+».
+      hojaLibre: (() => {
+        const hoja = document.querySelector('.fixed.bottom-\\[7\\.5rem\\]')
+        if (!hoja || !f) return null
+        return [...hoja.querySelectorAll('[data-total-suma], [data-total-suma] ~ p')].every(el => {
+          const rango = document.createRange()
+          rango.selectNodeContents(el)
+          return [...rango.getClientRects()].every(r => !(r.left < f.r && r.right > f.x && r.top < f.b && r.bottom > f.y))
+        })
+      })(),
     }
   })
 }
@@ -164,6 +174,7 @@ for (const ancho of [390, 1023]) {
   const mh = await medir(h.pagina)
   if (SHOTS && ancho === 390) await h.pagina.screenshot({ path: join(SHOTS, `barra-${ancho}-hoja.png`) })
   comprobar(`${ancho}px · con la hoja abierta, «Cerrar» se puede tocar`, mh.tocaSuma === true, mh)
+  comprobar(`${ancho}px · con la hoja abierta, el «+» no tapa el total ni el margen`, mh.hojaLibre === true, mh)
   comprobar(`${ancho}px · sin errores`, errores.length === 0 && h.errores.length === 0, [...errores, ...h.errores])
   await h.pagina.close()
 }
