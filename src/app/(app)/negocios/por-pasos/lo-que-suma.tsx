@@ -16,7 +16,8 @@ import type { RenglonQueSuma } from '@/lib/cotizaciones/por-pasos-vista'
  * Se puede ocultar (brief del 2026-10-16): cerrada, la cotización usa todo el ancho y en el
  * encabezado del negocio queda una pastilla «Total $X · margen Y %» que abre la lista como panel
  * ENCIMA de la cotización (no la empuja). Por defecto cerrada por debajo de 1500 px y abierta desde
- * ahí; lo que cada persona elija («Ocultar» o «Fijar a la izquierda») se guarda en este navegador.
+ * ahí; lo que cada persona elija («Ocultar» en la columna o «Dejar fija» en el panel) se guarda
+ * en este navegador.
  * En celular (< 1024 px) nada cambia: barra abajo y hoja.
  */
 
@@ -90,7 +91,9 @@ export function clasesLoQueSuma(p: PreferenciaLoQueSuma) {
   return {
     rejilla: 'min-[1500px]:grid-cols-[260px_minmax(0,1fr)]',
     columna: 'min-[1500px]:flex',
-    pastilla: 'hidden lg:block min-[1500px]:hidden',
+    // Un rango, no `lg:block min-[1500px]:hidden`: Tailwind ordena el valor arbitrario ANTES de
+    // `lg`, y `lg:block` le ganaba (medido en Chromium: pastilla y columna a la vez a 1600 px).
+    pastilla: 'hidden lg:max-[1499px]:block',
   }
 }
 
@@ -292,10 +295,10 @@ function PastillaLoQueSuma({
           data-panel-suma
         >
           <div className="flex items-start justify-between gap-2">
-            <h2 className="m-0 flex items-baseline gap-2 text-[15px] font-bold">{TITULO}</h2>
+            <h2 className="m-0 flex items-baseline gap-2 whitespace-nowrap text-[15px] font-bold">{TITULO}</h2>
             <span className="flex shrink-0 items-center gap-1">
               <button type="button" onClick={() => { setPanel(false); onFijar() }} className={BOTON_SUAVE} data-fijar-suma>
-                Fijar a la izquierda
+                Dejar fija
               </button>
               <button
                 ref={botonCerrar}

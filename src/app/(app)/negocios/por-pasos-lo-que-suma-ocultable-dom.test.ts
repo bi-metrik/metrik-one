@@ -12,7 +12,7 @@ import { Window } from 'happy-dom'
  *    «Lo que suma», y un punto rojo con el mismo conteo de rojos de la barra (H7).
  *  · La pastilla abre «Lo que suma» como panel encima (dentro del encabezado, fuera de la rejilla):
  *    se cierra con ✕, con Esc y con un clic afuera; con teclado, el foco entra y vuelve.
- *  · «Ocultar» y «Fijar a la izquierda» se guardan en `localStorage`; si no se puede leer, manda
+ *  · «Ocultar» y «Dejar fija» se guardan en `localStorage`; si no se puede leer, manda
  *    el ancho.
  *  · Celular: la barra de abajo no cambia.
  */
@@ -155,7 +155,10 @@ describe('Sin elección: manda el ancho de la ventana', () => {
     expect(rejilla()).not.toContain('lg:grid-cols-[260px_minmax(0,1fr)]')
     // La pastilla: en el encabezado, solo en pantalla ancha y solo mientras la columna no se ve.
     const caja = encabezado().querySelector('[data-pastilla-suma]')!
-    expect(caja.getAttribute('class')!.split(/\s+/)).toEqual(expect.arrayContaining(['hidden', 'lg:block', 'min-[1500px]:hidden']))
+    // Un RANGO de 1024 a 1499 px: `lg:block min-[1500px]:hidden` no sirve, Tailwind pone el valor
+    // arbitrario antes de `lg` en la hoja y `lg:block` gana (pastilla y columna a la vez a 1600 px).
+    expect(caja.getAttribute('class')!.split(/\s+/)).toEqual(expect.arrayContaining(['hidden', 'lg:max-[1499px]:block']))
+    expect(caja.getAttribute('class')).not.toMatch(/(^|\s)lg:block/)
     // No queda otra pastilla dentro de la cotización.
     expect(q('[data-cotizacion-por-pasos] [data-pastilla-suma]')).toBeNull()
   })
@@ -225,14 +228,14 @@ describe('La pastilla abre «Lo que suma» encima de la cotización', () => {
 })
 
 describe('La elección de cada persona', () => {
-  it('«Ocultar» la cierra en todo ancho y se guarda; «Fijar a la izquierda» la abre y se guarda', async () => {
+  it('«Ocultar» la cierra en todo ancho y se guarda; «Dejar fija» la abre y se guarda', async () => {
     await montar()
     await clic(q('[data-ocultar-suma]'))
     expect(localStorage.getItem(CLAVE)).toBe('cerrada')
     expect(clases('[data-lo-que-suma]').filter(c => c.endsWith(':flex'))).toEqual([])
     expect(rejilla().some(c => c.includes('grid-cols-[260px'))).toBe(false)
     expect(encabezado().querySelector('[data-pastilla-suma]')!.getAttribute('class')!.split(/\s+/)).toEqual(expect.arrayContaining(['hidden', 'lg:block']))
-    expect(encabezado().querySelector('[data-pastilla-suma]')!.getAttribute('class')).not.toContain('min-[1500px]:hidden')
+    expect(encabezado().querySelector('[data-pastilla-suma]')!.getAttribute('class')).not.toContain('max-[1499px]')
 
     await clic(pastilla())
     await clic(encabezado().querySelector('[data-fijar-suma]'))
@@ -241,7 +244,7 @@ describe('La elección de cada persona', () => {
     expect(rejilla()).toContain('lg:grid-cols-[260px_minmax(0,1fr)]')
     expect(encabezado().querySelector('[data-panel-suma]')).toBeNull()
     expect(encabezado().querySelector('[data-pastilla-suma]')!.getAttribute('class')!.split(/\s+/)).toContain('hidden')
-    expect(encabezado().querySelector('[data-pastilla-suma]')!.getAttribute('class')).not.toContain('lg:block')
+    expect(encabezado().querySelector('[data-pastilla-suma]')!.getAttribute('class')).not.toContain('block')
   })
 
   it('al volver, lo guardado manda sobre el ancho', async () => {
