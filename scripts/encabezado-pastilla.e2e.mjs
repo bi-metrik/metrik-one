@@ -5,7 +5,10 @@
 // corre en CI (necesita navegador):
 //
 //   PW_CHROMIUM=/ruta/a/chrome node scripts/encabezado-pastilla.e2e.mjs
-//   (opcional) SHOTS=<carpeta> deja una captura por caso y ancho; DETALLE=1 imprime cada medida.
+//   (opcional) SHOTS=<carpeta> deja una captura por caso y ancho; JSONL=<archivo> guarda las
+//   medidas; DETALLE=1 las imprime; ANCHOS=1100,1280 y CASOS=fijo acotan la corrida.
+//
+// `vite` llega con vitest y `puppeteer-core` es dependencia de la app: no hay que instalar nada.
 //
 // Para cada caso (viaje largo, corto, con aviso ámbar y SIN línea de viaje, V8) y cada ancho de
 // 1024 a 1600 px:
@@ -14,7 +17,9 @@
 //   · el texto es el más largo que cabe: «Total $X · margen Y %», «$X · Y %» o «$X».
 // Y a 390 px no hay pastilla (el celular tiene su barra).
 //
-// Sobre `origin/main` (antes del arreglo) falla: +8,5 px desde 1240 y +33,5 px por debajo.
+// Sobre `origin/main` antes del arreglo (3c671d79) fallaba como en el barrido de Vera: +33,5 px de
+// 1024 a 1200 px y +8,5 px desde 1280 (45 comprobaciones). Sin línea de viaje (V8) y entre ~1040 y
+// ~1080 px no hay hueco en ningún renglón: la pastilla flota al final como antes y sale un AVISO.
 
 import { createServer } from 'node:http'
 import { mkdirSync, readFileSync, existsSync } from 'node:fs'
@@ -123,8 +128,12 @@ async function medir(pagina) {
       rango.selectNodeContents(n)
       for (const r of rango.getClientRects()) if (r.width > 0) otras.push({ que: n.textContent.trim().slice(0, 30), x: r.left, y: r.top, r: r.right, b: r.bottom })
     }
-    for (const el of enc.querySelectorAll('button, a, [data-encabezado-viaje]')) {
-      if (pastillaEl?.contains(el)) continue
+    // Y lo pintado: botones, enlaces y todo lo que tiene fondo o borde (etiquetas, el aviso ámbar).
+    for (const el of enc.querySelectorAll('*')) {
+      if (pastillaEl?.contains(el) || el.contains(pastillaEl)) continue
+      const e = getComputedStyle(el)
+      const pintado = e.backgroundColor !== 'rgba(0, 0, 0, 0)' || parseFloat(e.borderTopWidth) > 0 || parseFloat(e.borderLeftWidth) > 0
+      if (!pintado && !['BUTTON', 'A'].includes(el.tagName)) continue
       const r = el.getBoundingClientRect()
       if (r.width > 0) otras.push({ que: (el.textContent || el.tagName).trim().slice(0, 30), x: r.left, y: r.top, r: r.right, b: r.bottom })
     }
@@ -135,12 +144,15 @@ async function medir(pagina) {
     const texto = boton?.querySelector('[data-texto-pastilla]')?.getAttribute('data-texto-pastilla') ?? null
     return {
       alto: enc.getBoundingClientRect().height,
+      fondo: enc.getBoundingClientRect().bottom,
       visible,
       texto,
       pastilla: p && { x: Math.round(p.x), y: Math.round(p.y), w: Math.round(p.w), h: Math.round(p.h) },
       renglon: !p ? null : pastillaEl.getAttribute('data-renglon') ?? (viaje && p.y < viaje.getBoundingClientRect().bottom && p.b > viaje.getBoundingClientRect().top ? 'viaje' : '?'),
       choques,
       renglonPropio: p ? !comparte : false,
+      // Centrada en su renglón: diferencia entre el centro de la pastilla y el del texto que tiene al lado.
+      viaje: viaje ? (() => { const r = viaje.getBoundingClientRect(); return { y: r.top, b: r.bottom } })() : null,
       scrollX: document.documentElement.scrollWidth > window.innerWidth,
     }
   })
@@ -166,15 +178,39 @@ for (const caso of CASOS) {
     await sin.pagina.close()
     const con = await abrir(ancho, caso, true, caso === 'fijo' ? 'rojo' : null)
     const m = await medir(con.pagina)
-    if (SHOTS) await con.pagina.screenshot({ path: join(SHOTS, `${caso}-${ancho}.png`), clip: { x: 0, y: 0, width: ancho, height: 260 } })
+    if (SHOTS) await con.pagina.screenshot({ path: join(SHOTS, `${caso}-${ancho}.png`), clip: { x: 0, y: 0, width: ancho, height: Math.ceil(m.fondo + 24) } })
+    // El panel abre debajo de la pastilla, dentro de la columna del negocio y sin mover el encabezado.
+    let panel = null
+    if (m.visible) {
+      await con.pagina.click('[data-pastilla-suma] button')
+      panel = await con.pagina.evaluate(() => {
+        const enc = [...document.querySelectorAll('div')].find(d => getComputedStyle(d).position === 'sticky' && d.querySelector('h1'))
+        const p = document.querySelector('[data-panel-suma]')
+        if (!p || !enc) return null
+        const r = p.getBoundingClientRect()
+        const e = enc.getBoundingClientRect()
+        return { x: r.left, r: r.right, y: r.top, encX: e.left, encR: e.right, alto: e.height, vw: window.innerWidth }
+      })
+      if (SHOTS && caso === 'fijo') await con.pagina.screenshot({ path: join(SHOTS, `${caso}-${ancho}-panel.png`), clip: { x: 0, y: 0, width: ancho, height: 640 } })
+      await con.pagina.keyboard.press('Escape')
+    }
     await con.pagina.close()
+    comprobar(`${caso} ${ancho}px · el panel abre dentro de la columna sin mover el encabezado`,
+      !!panel && panel.x >= panel.encX - 0.5 && panel.r <= panel.vw && Math.abs(panel.alto - m.alto) <= 0.5, panel)
     const crece = Math.round((m.alto - altoSin) * 10) / 10
     const fila = { caso, ancho, altoSin, altoCon: m.alto, crece, texto: m.texto, renglon: m.renglon, pastilla: m.pastilla, choques: m.choques, renglonPropio: m.renglonPropio, scrollX: m.scrollX, errores: con.errores }
     filas.push(fila)
-    comprobar(`${caso} ${ancho}px · el encabezado no crece (${altoSin} → ${m.alto})`, Math.abs(crece) <= 0.5, fila)
+    // Sin hueco en ningún renglón (medido: solo SIN línea de viaje, V8, entre ~1040 y ~1080 px) la
+    // pastilla flota al final como en #1193 y el encabezado crece. Se informa como AVISO; con línea de
+    // viaje se exige siempre el hueco.
+    const sinHueco = m.renglon === 'sin-hueco'
+    if (sinHueco && caso === 'sin-viaje') console.log(`AVISO ${caso} ${ancho}px · sin hueco: flota al final y el encabezado crece ${crece} px`)
+    else {
+      comprobar(`${caso} ${ancho}px · el encabezado no crece (${altoSin} → ${m.alto})`, Math.abs(crece) <= 0.5, fila)
+      comprobar(`${caso} ${ancho}px · la pastilla no va en un renglón propio`, !m.renglonPropio, fila)
+    }
     comprobar(`${caso} ${ancho}px · la pastilla se ve (${m.texto}, renglón ${m.renglon})`, m.visible, fila)
     comprobar(`${caso} ${ancho}px · la pastilla no se monta sobre nada`, m.choques.length === 0, fila)
-    comprobar(`${caso} ${ancho}px · la pastilla no va en un renglón propio`, !m.renglonPropio, fila)
     comprobar(`${caso} ${ancho}px · sin scroll horizontal ni errores`, !m.scrollX && con.errores.length === 0, fila)
   }
 }

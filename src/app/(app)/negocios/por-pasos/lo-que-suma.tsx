@@ -1,10 +1,12 @@
 'use client'
 
-import { useEffect, useId, useRef, useState, useSyncExternalStore, type ReactNode } from 'react'
+import { useEffect, useId, useLayoutEffect, useRef, useState, useSyncExternalStore, type ReactNode } from 'react'
 import { createPortal } from 'react-dom'
 
 import { pesos } from '@/lib/cotizaciones/tarjeta-opcion'
 import type { RenglonQueSuma } from '@/lib/cotizaciones/por-pasos-vista'
+
+import { ubicarPastilla, type Caja, type RenglonPastilla, type TextoPastilla, type UbicacionPastilla } from './ubicar-pastilla'
 
 /**
  * «Lo que suma» (diseño, secciones 1 y 10): cada servicio con lo que aporta a la Recomendada, lo
@@ -208,9 +210,136 @@ export function LoQueSuma({
   )
 }
 
+
+/** Alto de la pastilla en el encabezado: el del renglón del viaje (brief del 2026-10-16). */
+const ALTO_PASTILLA = 20
+
+/** Lo que se ve en el encabezado y la pastilla no puede tapar: líneas de texto y cajas pintadas. */
+function obstaculosDelEncabezado(encabezado: HTMLElement, pastilla: HTMLElement): Caja[] {
+  const cajas: Caja[] = []
+  const agregar = (r: DOMRect) => { if (r.width > 0 && r.height > 0) cajas.push({ x: r.left, y: r.top, r: r.right, b: r.bottom }) }
+  const textos = document.createTreeWalker(encabezado, NodeFilter.SHOW_TEXT)
+  for (let n = textos.nextNode(); n; n = textos.nextNode()) {
+    if (!n.textContent?.trim() || pastilla.contains(n)) continue
+    const rango = document.createRange()
+    rango.selectNodeContents(n)
+    // La caja de una línea de texto trae el aire de la fuente arriba y abajo; lo que se ve cabe en
+    // su caja «em» (alto = tamaño de letra), centrada.
+    const tamano = parseFloat(getComputedStyle(n.parentElement ?? encabezado).fontSize) || 0
+    for (const r of rango.getClientRects()) {
+      const aire = Math.max(0, (r.height - tamano) / 2)
+      agregar(new DOMRect(r.left, r.top + aire, r.width, r.height - 2 * aire))
+    }
+  }
+  for (const el of encabezado.querySelectorAll<HTMLElement>('*')) {
+    if (pastilla.contains(el)) continue
+    const e = getComputedStyle(el)
+    const pintada = e.backgroundColor !== 'rgba(0, 0, 0, 0)' && e.backgroundColor !== 'transparent'
+    const borde = parseFloat(e.borderTopWidth) > 0 || parseFloat(e.borderLeftWidth) > 0
+    if (pintada || borde || el.tagName === 'BUTTON' || el.tagName === 'A' || el.tagName === 'svg') agregar(el.getBoundingClientRect())
+  }
+  return cajas
+}
+
+/**
+ * La altura en la que se centra la pastilla dentro de un renglón: el centro de su caja si el texto
+ * va en una línea; el de su última línea si se partió.
+ */
+function centroDelRenglon(el: HTMLElement): number {
+  const caja = el.getBoundingClientRect()
+  const rango = document.createRange()
+  rango.selectNodeContents(el)
+  const lineas = [...rango.getClientRects()].filter(r => r.width > 0 && r.height > 0)
+  const ultima = lineas.reduce<DOMRect | null>((a, b) => (!a || b.bottom > a.bottom ? b : a), null)
+  const enUnaLinea = !ultima || lineas.every(l => l.top < ultima.bottom && l.bottom > ultima.top)
+  return enUnaLinea ? (caja.top + caja.bottom) / 2 : (ultima.top + ultima.bottom) / 2
+}
+
+/**
+ * Mide el encabezado y decide dónde va la pastilla (`ubicarPastilla`). `null` = no hay hueco, o el
+ * encabezado no tiene la forma que se espera.
+ */
+interface PastillaUbicada {
+  renglon: UbicacionPastilla['renglon']
+  texto: TextoPastilla
+  /** Posición dentro del encabezado (px desde su esquina de arriba a la izquierda). */
+  left: number
+  top: number
+  /** Dónde arranca el panel, respecto de la pastilla: alineado a su derecha, sin salirse del encabezado. */
+  panelIzquierda: number
+}
+
+/** Ancho del panel de «Lo que suma» (px), el de la clase `w-[340px]`. */
+const ANCHO_PANEL = 340
+
+/** El ancho de la pastilla con cada texto: su marco (borde, relleno, punto) más el texto medido. */
+function medirAnchos(boton: HTMLElement, reglas: Record<TextoPastilla, HTMLElement | null>): Record<TextoPastilla, number> | null {
+  const visible = boton.querySelector<HTMLElement>('[data-texto-pastilla]')
+  if (!visible || boton.offsetWidth === 0) return null
+  const marco = boton.offsetWidth - visible.offsetWidth
+  return {
+    largo: marco + (reglas.largo?.offsetWidth ?? 0),
+    corto: marco + (reglas.corto?.offsetWidth ?? 0),
+    total: marco + (reglas.total?.offsetWidth ?? 0),
+  }
+}
+
+/** La fila de arriba del encabezado, [estado | botones], y la caja de los botones. */
+function filaDeBotones(encabezado: HTMLElement): { fila: HTMLElement; botones: HTMLElement } | null {
+  const fila = encabezado.firstElementChild as HTMLElement | null
+  if (!fila || fila.hasAttribute('data-pastilla-suma') || fila.children.length < 2) return null
+  return { fila, botones: fila.lastElementChild as HTMLElement }
+}
+
+/** Decide dónde va la pastilla (`pastilla` no cuenta como obstáculo). `null` = no hay hueco. */
+function medirUbicacion(encabezado: HTMLElement, pastilla: HTMLElement, anchos: Record<TextoPastilla, number>): PastillaUbicada | null {
+  const enc = encabezado.getBoundingClientRect()
+  const estilo = getComputedStyle(encabezado)
+  const izquierda = enc.left + parseFloat(estilo.paddingLeft || '0')
+  const derecha = enc.right - parseFloat(estilo.paddingRight || '0')
+  // Dentro del encabezado, sin pisar su borde de abajo.
+  const techo = enc.top + 2
+  const piso = enc.bottom - parseFloat(estilo.borderBottomWidth || '0') - 2
+
+  const renglones: RenglonPastilla[] = []
+  // Su renglón: el del viaje; si el negocio no lo tiene (V8), el del título.
+  const propio = encabezado.querySelector<HTMLElement>('[data-encabezado-viaje]') ?? encabezado.querySelector<HTMLElement>('h1')
+  if (propio) {
+    const r = propio.getBoundingClientRect()
+    const siguiente = propio.nextElementSibling
+    const esUltimo = !siguiente || siguiente === pastilla || pastilla.contains(siguiente) || siguiente.hasAttribute('data-pastilla-suma')
+    renglones.push({ nombre: 'inicio', derecha, centro: centroDelRenglon(propio), arriba: Math.max(techo, r.top - 2), abajo: esUltimo ? piso : r.bottom + 2 })
+  }
+  // El de los botones: la primera fila del encabezado es [estado | botones].
+  const filaB = filaDeBotones(encabezado)
+  if (filaB) {
+    const f = filaB.fila.getBoundingClientRect()
+    const b = filaB.botones.getBoundingClientRect()
+    renglones.push({ nombre: 'botones', derecha: b.left - 8, centro: (b.top + b.bottom) / 2, arriba: Math.max(techo, f.top - 2), abajo: f.bottom + 2 })
+  }
+  const u = ubicarPastilla({ anchos, alto: ALTO_PASTILLA, renglones, obstaculos: obstaculosDelEncabezado(encabezado, pastilla), izquierda })
+  if (!u) return null
+  return {
+    renglon: u.renglon,
+    texto: u.texto,
+    left: u.x - enc.left,
+    top: u.y - enc.top,
+    panelIzquierda: Math.max(izquierda - u.x, u.ancho - ANCHO_PANEL),
+  }
+}
+
 /**
  * La pastilla del encabezado y su panel. El panel es no modal: se cierra con ✕, con Esc o con un
  * clic afuera, y al cerrarse con ✕ o Esc el foco vuelve a la pastilla.
+ *
+ * En el encabezado va ENCIMA (posición absoluta), en el hueco libre que elige `ubicarPastilla`:
+ * así el encabezado fijo mide lo mismo con ella que sin ella (D1 y D2 de Vera, 2026-10-16). Mide
+ * 20 px, como el renglón del viaje.
+ *
+ * Si no hay hueco en ningún renglón, flota a la derecha al final del encabezado, como en #1193 (y
+ * el encabezado crece). Medido el 2026-10-16: solo pasa SIN línea de viaje (V8) entre ~1040 y
+ * ~1080 px. Meterla en el flujo de la fila de los botones, como pide la regla, monta la etiqueta de
+ * la etapa debajo de la pastilla (la fila de estado se encoge por debajo de su mínimo).
  */
 function PastillaLoQueSuma({
   datos,
@@ -230,31 +359,46 @@ function PastillaLoQueSuma({
   const caja = useRef<HTMLDivElement>(null)
   const boton = useRef<HTMLButtonElement>(null)
   const botonCerrar = useRef<HTMLButtonElement>(null)
-  const regla = useRef<HTMLSpanElement>(null)
+  const reglaLarga = useRef<HTMLSpanElement>(null)
+  const reglaCorta = useRef<HTMLSpanElement>(null)
+  const reglaTotal = useRef<HTMLSpanElement>(null)
   const id = useId()
 
-  // ¿Cabe «Total $X · margen Y %» en el renglón del viaje? Si no, la pastilla bajaría a un renglón
-  // propio y el encabezado crecería, tapando el «Sigue:» de los pasos al bajar. Entonces va corta
-  // («$X · Y %»). Se mide con el texto largo siempre presente (invisible) en `regla`.
-  const [corta, setCorta] = useState(false)
-  useEffect(() => {
+  // `undefined` = sin medir todavía; `null` = medido y sin hueco (flota al final, como en #1193).
+  const [ubicacion, setUbicacion] = useState<PastillaUbicada | null | undefined>(undefined)
+  useLayoutEffect(() => {
     if (!destino || typeof ResizeObserver === 'undefined') return
+    let cuadro = 0
     const medir = () => {
       const c = caja.current
       const b = boton.current
-      const r = regla.current
-      const viaje = destino.querySelector<HTMLElement>('[data-encabezado-viaje]')
-      if (!c || !b || !r || !viaje || c.offsetWidth === 0) return
-      const visible = b.querySelector<HTMLElement>('[data-texto-pastilla]')
-      const marco = b.offsetWidth - (visible?.offsetWidth ?? 0)
-      const derecha = destino.clientWidth - parseFloat(getComputedStyle(destino).paddingRight || '0')
-      const libre = derecha - (viaje.offsetLeft + viaje.offsetWidth) - 12
-      setCorta(marco + r.offsetWidth > libre)
+      if (!c || !b) return
+      const anchos = medirAnchos(b, { largo: reglaLarga.current, corto: reglaCorta.current, total: reglaTotal.current })
+      if (!anchos) return // escondida (celular): no hay nada que ubicar
+      // Se mide el encabezado con la pastilla FUERA del flujo aunque esté flotando: si no, el que se
+      // mide es el que ella misma agrandó.
+      const antes = c.style.position
+      c.style.position = 'absolute'
+      const u = medirUbicacion(destino, c, anchos)
+      c.style.position = antes
+      setUbicacion(prev => (
+        prev && u && prev.renglon === u.renglon && prev.texto === u.texto && Math.abs(prev.left - u.left) < 0.5 && Math.abs(prev.top - u.top) < 0.5 ? prev : u
+      ))
     }
-    const ro = new ResizeObserver(medir)
+    const pedir = () => { cancelAnimationFrame(cuadro); cuadro = requestAnimationFrame(medir) }
+    medir()
+    const ro = new ResizeObserver(pedir)
     ro.observe(destino)
+    for (const hijo of destino.children) if (!hijo.hasAttribute('data-pastilla-suma')) ro.observe(hijo)
     if (caja.current) ro.observe(caja.current)
-    return () => ro.disconnect()
+    window.addEventListener('resize', pedir)
+    document.fonts?.addEventListener?.('loadingdone', pedir)
+    return () => {
+      cancelAnimationFrame(cuadro)
+      ro.disconnect()
+      window.removeEventListener('resize', pedir)
+      document.fonts?.removeEventListener?.('loadingdone', pedir)
+    }
   }, [destino])
 
   useEffect(() => {
@@ -284,11 +428,26 @@ function PastillaLoQueSuma({
     datos.pantallazosEnBandeja > 0 ? `${datos.pantallazosEnBandeja} ${datos.pantallazosEnBandeja === 1 ? 'pantallazo' : 'pantallazos'} sin aceptar` : null,
   ].filter(Boolean).join(' · ')
 
+  const margen = datos.margenPct !== null ? margenTexto(datos.margenPct) : null
+  // En el encabezado el texto sale de la medida (antes de pintar). Sin hueco, «$X · Y %», como en
+  // #1193; sin encabezado (o sin medir, como en el servidor), el largo.
+  const texto: TextoPastilla = ubicacion === null ? 'corto' : ubicacion?.texto ?? 'largo'
+  const enEncabezado = destino !== null
+  const encima = enEncabezado && ubicacion !== null
+  const posicion = encima ? { left: ubicacion?.left ?? 0, top: ubicacion?.top ?? 0 } : undefined
+  const panelIzquierda = encima && ubicacion ? ubicacion.panelIzquierda : undefined
+
   const pastilla = (
     <div
       ref={caja}
-      className={destino ? `relative z-10 float-right ml-3 mt-1 ${clase}` : `relative justify-self-end ${clase}`}
+      className={
+        !enEncabezado ? `relative justify-self-end ${clase}`
+          : encima ? `absolute z-10 ${ubicacion === undefined ? 'invisible' : ''} ${clase}`
+            : `relative z-10 float-right ml-3 mt-1 ${clase}`
+      }
+      style={posicion}
       data-pastilla-suma
+      data-renglon={enEncabezado && ubicacion !== undefined ? (ubicacion?.renglon ?? 'sin-hueco') : undefined}
     >
       <button
         ref={boton}
@@ -298,22 +457,34 @@ function PastillaLoQueSuma({
         aria-controls={panel ? id : undefined}
         aria-haspopup="dialog"
         title={porQueRojo || undefined}
-        className={`inline-flex items-center gap-1.5 whitespace-nowrap rounded-full border bg-white px-3 py-1 text-[13px] text-[#191713] shadow-[0_1px_2px_rgba(25,23,19,.06)] hover:bg-[#F8F7F3] ${panel ? 'border-[#0E5C43]' : 'border-[#CFCAC0]'}`}
+        className={`relative items-center gap-1.5 whitespace-nowrap rounded-full border bg-white text-[#191713] shadow-[0_1px_2px_rgba(25,23,19,.06)] hover:bg-[#F8F7F3] ${enEncabezado ? 'flex h-5 px-2.5 text-xs leading-4' : 'inline-flex px-3 py-1 text-[13px]'} ${panel ? 'border-[#0E5C43]' : 'border-[#CFCAC0]'}`}
       >
         {punto && <span className={`h-2 w-2 shrink-0 rounded-full ${punto === 'rojo' ? 'bg-[#B3382C]' : 'bg-[#D08A1C]'}`} data-punto={punto} aria-hidden />}
-        {corta ? (
-          <span data-texto-pastilla="corto">
-            <span className="sr-only">Total </span><b className="tabular-nums">{pesos(datos.total)}</b>
-            {datos.margenPct !== null && <> · <span className="sr-only">margen </span><b className="tabular-nums">{margenTexto(datos.margenPct)}</b></>}
-          </span>
-        ) : (
+        {texto === 'largo' ? (
           <span data-texto-pastilla="largo">
             Total <b className="tabular-nums">{pesos(datos.total)}</b>
-            {datos.margenPct !== null && <> · margen <b className="tabular-nums">{margenTexto(datos.margenPct)}</b></>}
+            {margen !== null && <> · margen <b className="tabular-nums">{margen}</b></>}
+          </span>
+        ) : texto === 'corto' ? (
+          <span data-texto-pastilla="corto">
+            <span className="sr-only">Total </span><b className="tabular-nums">{pesos(datos.total)}</b>
+            {margen !== null && <> · <span className="sr-only">margen </span><b className="tabular-nums">{margen}</b></>}
+          </span>
+        ) : (
+          <span data-texto-pastilla="total">
+            <span className="sr-only">Total </span><b className="tabular-nums">{pesos(datos.total)}</b>
+            {margen !== null && <span className="sr-only">, margen {margen}</span>}
           </span>
         )}
-        <span ref={regla} aria-hidden className="pointer-events-none invisible absolute left-0 top-0 whitespace-nowrap">
-          Total <b>{pesos(datos.total)}</b>{datos.margenPct !== null && <> · margen <b>{margenTexto(datos.margenPct)}</b></>}
+        {/* Los tres textos, invisibles, para medir cuál cabe. */}
+        <span ref={reglaLarga} aria-hidden className="pointer-events-none invisible absolute left-0 top-0 whitespace-nowrap">
+          Total <b>{pesos(datos.total)}</b>{margen !== null && <> · margen <b>{margen}</b></>}
+        </span>
+        <span ref={reglaCorta} aria-hidden className="pointer-events-none invisible absolute left-0 top-0 whitespace-nowrap">
+          <b>{pesos(datos.total)}</b>{margen !== null && <> · <b>{margen}</b></>}
+        </span>
+        <span ref={reglaTotal} aria-hidden className="pointer-events-none invisible absolute left-0 top-0 whitespace-nowrap">
+          <b>{pesos(datos.total)}</b>
         </span>
         {conRojo && <span className="sr-only">. {porQueRojo}</span>}
       </button>
@@ -322,7 +493,8 @@ function PastillaLoQueSuma({
           id={id}
           role="dialog"
           aria-label="Lo que suma"
-          className="absolute right-0 top-[calc(100%+8px)] flex max-h-[calc(100dvh-var(--alto-encabezado-negocio,0px)-2rem)] w-[340px] max-w-[calc(100vw-2rem)] flex-col gap-3 overflow-y-auto rounded-xl border border-[#E2DED5] bg-white p-3 text-left shadow-[0_10px_30px_rgba(0,0,0,.18)]"
+          className={`absolute top-[calc(100%+8px)] flex max-h-[calc(100dvh-var(--alto-encabezado-negocio,0px)-2rem)] w-[340px] max-w-[calc(100vw-2rem)] flex-col gap-3 overflow-y-auto rounded-xl border border-[#E2DED5] bg-white p-3 text-left shadow-[0_10px_30px_rgba(0,0,0,.18)] ${panelIzquierda === undefined ? 'right-0' : ''}`}
+          style={panelIzquierda === undefined ? undefined : { left: panelIzquierda }}
           data-panel-suma
         >
           <div className="flex items-start justify-between gap-2">
@@ -347,10 +519,9 @@ function PastillaLoQueSuma({
       )}
     </div>
   )
-  // En el encabezado va FLOTANDO a la derecha, al final: comparte renglón con la línea del viaje
-  // (que es `inline-flex`) si cabe, y si no baja al siguiente; nunca se monta sobre el texto. El
-  // `clear` hace que el encabezado la contenga cuando baja.
-  if (destino) return createPortal(<>{pastilla}<div className="clear-both" aria-hidden /></>, destino)
+  // En el encabezado va ENCIMA, en el hueco que se midió. Sin hueco, flota a la derecha al final
+  // (el `clear` hace que el encabezado la contenga).
+  if (destino) return createPortal(<>{pastilla}{ubicacion === null && <div className="clear-both" aria-hidden />}</>, destino)
   // Con marco, hasta tener el encabezado no se pinta: pintada en la rejilla, saltaría al encabezado.
   return encabezado === null ? null : pastilla
 }
