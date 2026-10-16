@@ -6,7 +6,9 @@ metadata:
 ---
 
 El `node_modules` del repo principal puede ir atrás de `package.json` de `origin/main` (2026-10-02:
-faltaba `unpdf`, 18 archivos de prueba y el build caían por eso, no por el cambio).
+faltaba `unpdf`, 18 archivos de prueba y el build caían por eso, no por el cambio; 2026-10-16: faltaban
+`happy-dom`, `unpdf`, `puppeteer-core` y `@sparticuz/chromium`, y vitest NO resuelve hacia arriba lo que falta:
+hay que armar el directorio de symlinks y copiar `happy-dom` con `whatwg-mimetype`, `buffer-image-size` y `entities`).
 
 Receta sin tocar el repo principal:
 1. `node_modules` del worktree como DIRECTORIO real con un symlink por entrada del principal

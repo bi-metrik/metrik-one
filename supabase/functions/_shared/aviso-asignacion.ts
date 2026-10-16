@@ -2,7 +2,7 @@
 // El texto del aviso de asignación (correo de `avisar-asignacion`)
 // ------------------------------------------------------------
 // La campanita la escribe el trigger `avisar_asignacion_responsable` con el MISMO título y mensaje (migración
-// 20261016153000): si cambia uno, cambia el otro. Puro.
+// 20261016193000): si cambia uno, cambia el otro. Puro.
 // ============================================================
 
 export function textoAvisoAsignacion(p: { codigo: string | null; nombre: string | null; rol: string | null; quienAsigna: string | null }): {

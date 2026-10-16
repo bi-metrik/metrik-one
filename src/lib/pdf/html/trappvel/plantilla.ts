@@ -44,6 +44,12 @@ export interface RecursosPropuesta {
   fotoDeCiudad: (ciudad: string | null) => FotoResuelta | null
   /** Foto del catálogo (`fotos_catalogo`) para un plan opcional, por su nombre. Sin ella, degradado. */
   fotoDeOpcional?: (nombre: string) => FotoResuelta | null
+  /**
+   * Las fotos extra (biblioteca, hasta dos) de un hotel o de un plan. Van en el MISMO recuadro de
+   * la principal (`imagenDeTarjeta`): la tarjeta no crece, así que no agregan hojas ni huecos.
+   */
+  extrasDeHotel?: (ciudad: string | null, hotel: string) => FotoResuelta[]
+  extrasDeOpcional?: (nombre: string) => FotoResuelta[]
   /** Logo del workspace como data URL; sin logo va el nombre escrito. */
   logo: string | null
   marca: string
@@ -130,6 +136,47 @@ function fondo(f: FotoResuelta | null, extra = ''): string {
   if (!f) return extra ? ` style="${extra}"` : ''
   const pos = f.foco ? `${Math.round(f.foco.x * 100)}% ${Math.round(f.foco.y * 100)}%` : 'center'
   return ` style="background-image:url(${f.src});background-position:${pos};${extra}"`
+}
+
+// ── Fotos extra en el mismo recuadro ─────────────────────────────────────────
+
+/** Columnas de la cuadrícula de planes (`.opcs` en estilos.ts). */
+export const COLUMNAS_OPCIONALES = 4
+/** Ancho útil de la hoja (A4 menos 12 mm por lado, `@page` de estilos.ts) y separación de las tarjetas. */
+const ANCHO_UTIL_MM = 186
+const SEPARACION_MM = 3
+/** Alto del recuadro de foto (`.hc .img` y `.oc .img`, la versión compacta de estilos.ts). */
+const ALTO_FOTO_MM = { hotel: 29, opcional: 25 } as const
+/** Una foto extra más chica que esto no se reconoce: mejor no ponerla. */
+const EXTRA_MINIMA_MM = { ancho: 14, alto: 12 } as const
+const ESPACIO_MOSAICO_MM = 0.6
+
+/**
+ * Cuántas fotos extra (0 a 2) caben en el recuadro de una tarjeta SIN agrandarla: la principal
+ * ocupa dos tercios y las extras, apiladas, el tercio de la derecha. Las extras nunca cambian el
+ * alto de la tarjeta (Edgar se quejó de los blancos y del exceso de fotos: la regla de saltos
+ * manda), así que no pueden agregar hojas; aquí solo se decide si se verían.
+ */
+export function extrasQueCaben(seccion: 'hotel' | 'opcional', columnas: number): number {
+  const cols = Math.max(1, Math.floor(columnas))
+  const tarjeta = (ANCHO_UTIL_MM - SEPARACION_MM * (cols - 1)) / cols
+  const ancho = (tarjeta - ESPACIO_MOSAICO_MM) / 3
+  if (ancho < EXTRA_MINIMA_MM.ancho) return 0
+  for (const n of [2, 1]) {
+    const alto = (ALTO_FOTO_MM[seccion] - ESPACIO_MOSAICO_MM * (n - 1)) / n
+    if (alto >= EXTRA_MINIMA_MM.alto) return n
+  }
+  return 0
+}
+
+/**
+ * El recuadro de foto de una tarjeta: la principal sola o, con extras, el mosaico (principal a la
+ * izquierda, extras apiladas a la derecha) en el MISMO alto. `dentro` = etiquetas o rótulo.
+ */
+function imagenDeTarjeta(principal: FotoResuelta | null, extras: FotoResuelta[], dentro: string): string {
+  if (!principal) return `<div class="img sinfoto">${dentro}</div>`
+  if (extras.length === 0) return `<div class="img"${fondo(principal)}>${dentro}</div>`
+  return `<div class="img mosaico n${extras.length}"><div class="m0"${fondo(principal)}></div>${extras.map((e) => `<div class="mx"${fondo(e)}></div>`).join('')}${dentro}</div>`
 }
 
 /** «Madrid Atocha - Barcelona Sants · AVE 03071 Renfe, Estándar» → «AVE 03071 Renfe». */
@@ -430,6 +477,7 @@ function dondeDuermen(m: ModeloPropuesta, r: RecursosPropuesta): string {
   // ningún hotel tiene foto, las tarjetas van sin imagen, como antes.
   const conImagen = m.hoteles.some((c) => c.opciones.some((o) => r.foto(o.foto?.url)))
   const ciudades = m.hoteles.map((c) => {
+    const caben = extrasQueCaben('hotel', Math.min(3, Math.max(1, c.opciones.length)))
     const cuando = rango(c.desde, c.hasta)
     const noches = c.noches ? `${c.noches} ${c.noches === 1 ? 'noche' : 'noches'}` : null
     const tarjetas = c.opciones.map((o) => {
@@ -442,9 +490,8 @@ function dondeDuermen(m: ModeloPropuesta, r: RecursosPropuesta): string {
         o.habitacion ? esc(o.habitacion) : '',
       ].filter(Boolean).join(' · ')
       // Decisión 2 (2026-10-14): la cancelación del hotel NO se imprime.
-      const imagen = foto
-        ? `<div class="img"${fondo(foto)}>${tagsHtml}</div>`
-        : conImagen ? `<div class="img sinfoto">${tagsHtml}</div>` : ''
+      const extras = foto ? (r.extrasDeHotel?.(c.ciudad, o.hotel) ?? []).slice(0, caben) : []
+      const imagen = foto || conImagen ? imagenDeTarjeta(foto, extras, tagsHtml) : ''
       return `<div class="hc${principal && m.tarifas.length > 0 ? ' rec' : ''}">${imagen}<div class="b">${imagen ? '' : tagsHtml}<div class="n">${esc(o.hotel)}</div>${detalle}${o.regimen && regimenes.length !== 1 ? `<br>${esc(o.regimen)}` : ''}${o.cargoEnDestino ? `<br><span class="muted">${esc(o.cargoEnDestino)}, se paga en el hotel</span>` : ''}</div></div>`
     })
     const columnas = Math.min(3, Math.max(1, c.opciones.length))
@@ -546,12 +593,12 @@ function opcionales(m: ModeloPropuesta, r: RecursosPropuesta): string {
   // Con alguna foto, todas las tarjetas llevan imagen (la que no tiene, el degradado): una fila
   // de tarjetas con y sin imagen se ve rota. Sin ninguna, como antes.
   const conImagen = fotos.some(Boolean)
+  const caben = extrasQueCaben('opcional', COLUMNAS_OPCIONALES)
   const tarjetas = m.opcionales.map((o, i) => {
     const valor = o.valor > 0 ? `+ ${pesos(o.valor)}` : 'consultar'
     const lugar = lugarDelOpcional(o, m)
-    const imagen = conImagen
-      ? `<div class="img${fotos[i] ? '' : ' sinfoto'}"${fondo(fotos[i])}>${lugar ? `<div class="where">${esc(lugar)}</div>` : ''}</div>`
-      : ''
+    const extras = fotos[i] ? (r.extrasDeOpcional?.(o.nombre) ?? []).slice(0, caben) : []
+    const imagen = conImagen ? imagenDeTarjeta(fotos[i], extras, lugar ? `<div class="where">${esc(lugar)}</div>` : '') : ''
     return `<div class="oc">${imagen}<div class="b"><div class="n">${esc(o.nombre)}</div>${o.descripcion ? `<div class="muted">${esc(o.descripcion)}</div>` : ''}<div class="foot"><span class="muted">${esc(o.unidad ?? '')}</span><span class="pr money">${esc(valor)}</span></div></div></div>`
   })
   return `<section class="sec">\n${encabezadoDeSeccion('sun', 'Planes para los días libres', 'Escojan los que quieran y los sumamos a la reserva. Precio para el grupo.')}
@@ -718,6 +765,12 @@ const CSS_EXTRA = `
 /* Las tablas siguen en la hoja siguiente (cabecera repetida); una fila nunca se parte. */
 tr { break-inside: avoid; }
 thead { display: table-header-group; }
+/* Fotos extra de la biblioteca: en el MISMO recuadro (mismo alto), principal 2/3 y extras 1/3. */
+.img.mosaico { display:grid; grid-template-columns: 2fr 1fr; gap: .6mm; background: #fff; }
+.img.mosaico.n1 { grid-template-rows: 1fr; }
+.img.mosaico.n2 { grid-template-rows: 1fr 1fr; }
+.img.mosaico .m0 { grid-row: 1 / -1; background-size: cover; background-position: center; }
+.img.mosaico .mx { background-size: cover; background-position: center; }
 /* Una tarjeta de versión no se parte nunca; si las tres no caben, el bloque salta entero. */
 .tf { break-inside: avoid; }
 `

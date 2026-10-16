@@ -1,5 +1,5 @@
 /**
- * `20261016153000_aviso_asignacion_responsable.sql` corrida de verdad en Postgres en memoria (PGlite).
+ * `20261016193000_aviso_asignacion_responsable.sql` corrida de verdad en Postgres en memoria (PGlite).
  *
  * El aviso a la persona asignada sale de un trigger sobre `negocio_responsables`, así que cubre todos los caminos
  * (el bot, la pantalla, la automática por etapa, un script). Lo que se prueba:
@@ -17,7 +17,7 @@ import { join } from 'node:path'
 import { PGlite } from '@electric-sql/pglite'
 import { textoAvisoAsignacion } from '../../../supabase/functions/_shared/aviso-asignacion.ts'
 
-const MIGRACION = readFileSync(join(process.cwd(), 'supabase/migrations/20261016153000_aviso_asignacion_responsable.sql'), 'utf8')
+const MIGRACION = readFileSync(join(process.cwd(), 'supabase/migrations/20261016193000_aviso_asignacion_responsable.sql'), 'utf8')
 
 const WS = '00000000-0000-4000-8000-00000000f001'
 const WS_APAGADO = '00000000-0000-4000-8000-00000000f002'

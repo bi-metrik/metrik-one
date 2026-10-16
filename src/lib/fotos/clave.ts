@@ -63,21 +63,66 @@ export function sinRepetir(objetivos: (ObjetivoFoto | null)[]): ObjetivoFoto[] {
   return salida
 }
 
-export type OrigenFoto = 'wikimedia' | 'asesora'
+/**
+ * De dónde salió una foto:
+ *  · `wikimedia`: Wikimedia Commons (CC0, CC BY, CC BY-SA), con crédito;
+ *  · `asesora`: la subió una persona («Subir la mía»);
+ *  · `sitio_oficial`: la página oficial del hotel o del tour. Solo con el interruptor del
+ *    workspace (`usaFotosDeSitioOficial`), apagado por defecto: Emilio no ha validado su uso
+ *    comercial (2026-10-16).
+ */
+export type OrigenFoto = 'wikimedia' | 'asesora' | 'sitio_oficial'
+
+/** Hasta tres fotos por elemento en la biblioteca, una principal (Mauricio, 2026-10-16). */
+export const MAX_FOTOS_POR_ELEMENTO = 3
+
+/** Cuántas opciones muestra el selector por tanda («Ver más» trae las siguientes). */
+export const OPCIONES_POR_PAGINA = 12
+
+/** La propuesta imprime la principal y, si caben, hasta estas más. */
+export const MAX_FOTOS_EXTRA = MAX_FOTOS_POR_ELEMENTO - 1
 
 /**
- * ¿Se le busca foto en Wikimedia Commons? Las ciudades y las actividades sí; los hoteles NUNCA
- * (Mauricio, 2026-10-14: «las de los hoteles sí las debe cargar»). Un hotel lleva la foto que
- * sube la asesora o el degradado.
+ * ¿Se le busca foto SOLA (sin que nadie la elija) en Wikimedia Commons? Las ciudades y las
+ * actividades sí; los hoteles NUNCA (Mauricio, 2026-10-14 y 2026-10-16: «siempre los elige una
+ * persona»). Un hotel lleva la que alguien eligió en la biblioteca (de cualquier fuente) o el
+ * degradado.
  */
 export function seSugiereDeCommons(tipo: TipoFoto): boolean {
   return tipo !== 'hotel'
 }
 
 /**
- * ¿Esta foto del catálogo sale en la propuesta? La de un hotel, solo si la subió la asesora: una
- * de Commons que hubiera quedado en el catálogo no se imprime. Las demás, siempre.
+ * El interruptor de las fotos de la página oficial: `config_extra.documento_viaje.fotos_sitio_oficial
+ * = true`. Sin él (el valor por defecto), ni se ofrecen ni se imprimen las que hubiera.
  */
-export function fotoImprimible(tipo: TipoFoto, origen: OrigenFoto | null | undefined): boolean {
-  return tipo === 'hotel' ? origen === 'asesora' : true
+export function usaFotosDeSitioOficial(configExtraWorkspace: unknown): boolean {
+  if (!configExtraWorkspace || typeof configExtraWorkspace !== 'object') return false
+  const doc = (configExtraWorkspace as Record<string, unknown>).documento_viaje
+  if (!doc || typeof doc !== 'object' || Array.isArray(doc)) return false
+  return (doc as Record<string, unknown>).fotos_sitio_oficial === true
+}
+
+/** Las fuentes del selector de 12, en el orden de Mauricio: la página oficial, Commons y la propia. */
+export type FuenteFoto = 'sitio_oficial' | 'wikimedia' | 'subida'
+
+export function fuentesDelSelector(sitioOficial: boolean): FuenteFoto[] {
+  return sitioOficial ? ['sitio_oficial', 'wikimedia', 'subida'] : ['wikimedia', 'subida']
+}
+
+/**
+ * ¿Esta foto de la biblioteca sale en la propuesta?
+ *  · una de la página oficial, solo con el interruptor encendido;
+ *  · la de un hotel, solo si una persona la eligió (`revisada`, o la subió ella): nunca una
+ *    automática;
+ *  · las demás, siempre.
+ */
+export function fotoImprimible(
+  tipo: TipoFoto,
+  origen: OrigenFoto | null | undefined,
+  revisada: boolean | null | undefined,
+  opts: { sitioOficial?: boolean } = {},
+): boolean {
+  if (origen === 'sitio_oficial' && !opts.sitioOficial) return false
+  return tipo === 'hotel' ? revisada === true || origen === 'asesora' : true
 }

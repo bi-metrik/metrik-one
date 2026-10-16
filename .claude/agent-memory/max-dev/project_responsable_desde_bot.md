@@ -1,6 +1,6 @@
 ---
 name: responsable-desde-bot
-description: Trappvel 2026-10-16 (feat/responsable-desde-bot) — viaje_nuevo exige responsable + dicho_en; aviso por trigger en negocio_responsables, opt-in avisar_asignacion; migración 20261016153000 SIN aplicar; staff de prueba por config
+description: Trappvel 2026-10-16 (feat/responsable-desde-bot) — viaje_nuevo exige responsable + dicho_en; aviso por trigger en negocio_responsables, opt-in avisar_asignacion; migración 20261016193000 SIN aplicar; staff de prueba por config
 metadata:
   type: project
 ---
