@@ -23,6 +23,8 @@ import { esTipoPerfil, sinRepetir, type ObjetivoFoto, type TipoFoto } from '@/li
 import { aliasPorPerfil, contestarDuda, leerConocidos, listaDePerfiles, resolverPedidos, separarAlias, type Conocidos } from '@/lib/fotos/perfiles-db'
 import { objetivoDelPedido, vistaDeElemento, type DudaVista, type ElementoVista } from '@/lib/fotos/vista'
 import { tienePropuestaHtml } from '@/lib/pdf/motor-html'
+import { proveedoresDeTarjetas } from '@/lib/proveedores/tarjeta-db'
+import type { ProveedorDeTarjeta } from '@/lib/proveedores/vigencia'
 
 const ROLES_SIN_ESCRITURA = new Set(['read_only', 'contador'])
 const MENSAJE_SIN_ROL = 'Tu rol puede ver las fotos pero no cambiarlas.'
@@ -91,6 +93,14 @@ async function elementoActual(ctx: Contexto, o: Pick<ObjetivoFoto, 'tipo' | 'cla
   return { ok: true, elemento: null }
 }
 
+/** Un perfil con sus fotos, por su llave propia (la sección «Fotos» de la ficha del proveedor). */
+export async function elementoDelPerfil(tipo: TipoFoto, clave: string): Promise<ResultadoElemento> {
+  const ctx = await contexto(false)
+  if ('error' in ctx) return { ok: false, error: ctx.error as string }
+  if (!esTipoPerfil(tipo) || typeof clave !== 'string' || !clave) return { ok: true, elemento: null }
+  return elementoActual(ctx, { tipo, clave })
+}
+
 /** «Hoteles y tours»: todos los perfiles del espacio (y las ciudades que tienen fotos). */
 export async function leerHotelesYTours(): Promise<HotelesYTours> {
   const ctx = await contexto(false)
@@ -114,6 +124,11 @@ export interface FotoDeTarjeta {
   elemento: ElementoVista | null
   /** «¿Es el mismo hotel que …?» (sin contestar). */
   duda: DudaVista | null
+  /**
+   * El proveedor (la ficha) con sus tarifarios y los de su mayorista, para el aviso de vigencia
+   * (2026-10-18). `null` sin ficha todavía, con duda o sin la migración de proveedores.
+   */
+  proveedor: ProveedorDeTarjeta | null
 }
 
 export type FotosDeTarjetas = { ok: true; tarjetas: FotoDeTarjeta[]; editable: boolean } | { ok: false; error: string }
@@ -134,7 +149,9 @@ export async function fotosParaTarjetas(pedidos: PedidoFoto[]): Promise<FotosDeT
   const c = leidos.conocidos
   const resueltos = await resolverPedidos(ctx.db, ctx.workspaceId, ctx.staffId, objetivos, c, { escribir: ctx.editable })
   const claves = new Set(resueltos.flatMap((r) => [r.perfil, r.duda && { tipo: r.pedido.tipo, clave: r.duda.clave }]).filter((x): x is ObjetivoFoto => !!x).map((x) => `${x.tipo}:${x.clave}`))
-  const porClave = new Map((await vistasDe(ctx, c, claves)).map((e) => [`${e.tipo}:${e.clave}`, e]))
+  const perfiles = resueltos.flatMap((r) => (r.perfil && esTipoPerfil(r.perfil.tipo) ? [r.perfil] : []))
+  const [vistas, proveedores] = await Promise.all([vistasDe(ctx, c, claves), proveedoresDeTarjetas(ctx.db, ctx.workspaceId, perfiles)])
+  const porClave = new Map(vistas.map((e) => [`${e.tipo}:${e.clave}`, e]))
   return {
     ok: true,
     editable: ctx.editable,
@@ -145,6 +162,7 @@ export async function fotosParaTarjetas(pedidos: PedidoFoto[]): Promise<FotosDeT
         clave: r.pedido.clave,
         elemento: r.perfil ? porClave.get(`${r.perfil.tipo}:${r.perfil.clave}`) ?? null : null,
         duda: r.duda ? { ...r.duda, url: conocido?.fotos[0]?.url ?? null } : null,
+        proveedor: r.perfil ? proveedores.get(`${r.perfil.tipo}:${r.perfil.clave}`) ?? null : null,
       }
     }),
   }
@@ -210,22 +228,63 @@ export async function subirFotoABiblioteca(
 ): Promise<ResultadoElemento> {
   const ctx = await contexto(true)
   if ('error' in ctx) return { ok: false, error: ctx.error as string }
-  const permiso = revisarAutorizacion(autorizacion)
-  if (!permiso.ok) return { ok: false, error: permiso.error }
-  if (!ctx.userId) return { ok: false, error: 'No se pudo saber quién sube la foto. Vuelve a entrar.' }
-  const partes = typeof dataUrl === 'string' ? bytesDeDataUrl(dataUrl) : null
-  if (!partes || !/^image\/(jpeg|png|webp)$/.test(partes.mime)) return { ok: false, error: 'Ese archivo no es una foto. Usa un JPG o un PNG.' }
+  // Antes de resolver el perfil (que puede escribir): la casilla y el archivo.
+  const sub = revisarSubida(ctx, dataUrl, autorizacion)
+  if ('error' in sub) return { ok: false, error: String(sub.error) }
   const p = await perfilDelPedido(ctx, pedido)
   if ('error' in p) return { ok: false, error: p.error }
+  return subirAlPerfil(ctx, p, sub, reemplaza, categoria)
+}
+
+/**
+ * Lo mismo desde la ficha del proveedor: el perfil va por su id (su llave no cambia aunque la ficha
+ * cambie de nombre o de ciudad), así no se crea un alias ni se pregunta «¿es el mismo?».
+ */
+export async function subirFotoAlProveedor(
+  perfilId: string,
+  dataUrl: string,
+  reemplaza?: string | null,
+  categoria?: string | null,
+  autorizacion?: unknown,
+): Promise<ResultadoElemento> {
+  const ctx = await contexto(true)
+  if ('error' in ctx) return { ok: false, error: ctx.error as string }
+  const sub = revisarSubida(ctx, dataUrl, autorizacion)
+  if ('error' in sub) return { ok: false, error: String(sub.error) }
+  const { data } = typeof perfilId === 'string' && perfilId
+    ? await ctx.db.from('fotos_perfiles').select('tipo, clave, nombre, ciudad').eq('workspace_id', ctx.workspaceId).eq('id', perfilId).maybeSingle()
+    : { data: null }
+  const fila = data as { tipo: string; clave: string; nombre: string; ciudad: string | null } | null
+  if (!fila || !esTipoPerfil(fila.tipo)) return { ok: false, error: 'Este proveedor no tiene fotos.' }
+  return subirAlPerfil(ctx, { perfil: { tipo: fila.tipo, clave: fila.clave, nombre: fila.nombre, ciudad: fila.ciudad } }, sub, reemplaza, categoria)
+}
+
+/** La casilla «Tengo autorización», quién sube y que el archivo sea una foto. */
+function revisarSubida(ctx: Contexto, dataUrl: unknown, autorizacion: unknown) {
+  const permiso = revisarAutorizacion(autorizacion)
+  if (!permiso.ok) return { error: permiso.error }
+  if (!ctx.userId) return { error: 'No se pudo saber quién sube la foto. Vuelve a entrar.' }
+  const partes = typeof dataUrl === 'string' ? bytesDeDataUrl(dataUrl) : null
+  if (!partes || !/^image\/(jpeg|png|webp)$/.test(partes.mime)) return { error: 'Ese archivo no es una foto. Usa un JPG o un PNG.' }
+  return { userId: ctx.userId, procedencia: permiso.procedencia, buffer: partes.buffer }
+}
+
+async function subirAlPerfil(
+  ctx: Contexto,
+  p: { perfil: ObjetivoFoto },
+  sub: Exclude<ReturnType<typeof revisarSubida>, { error: string }>,
+  reemplaza: string | null | undefined,
+  categoria: string | null | undefined,
+): Promise<ResultadoElemento> {
   const r = await ponerFotoPropia({
     supabase: ctx.db,
     workspaceId: ctx.workspaceId,
     staffId: ctx.staffId,
     objetivo: p.perfil,
-    bytes: partes.buffer,
+    bytes: sub.buffer,
     reemplaza: typeof reemplaza === 'string' && reemplaza ? reemplaza : null,
     ...categoriaDelPedido(p.perfil.tipo, categoria),
-    autorizacion: { userId: ctx.userId, procedencia: permiso.procedencia },
+    autorizacion: { userId: sub.userId, procedencia: sub.procedencia },
   })
   if (!r.ok) return { ok: false, error: r.mensaje }
   return elementoActual(ctx, p.perfil)

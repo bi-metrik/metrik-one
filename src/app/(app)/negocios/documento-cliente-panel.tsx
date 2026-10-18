@@ -643,11 +643,11 @@ export default function DocumentoClientePanel({
       )}
 
       {/* Las fotos de la propuesta salen solas del perfil de cada hotel y tour (2026-10-16): se
-          ponen en su tarjeta o en «Hoteles y tours». */}
+          ponen en su tarjeta o en la ficha del proveedor. */}
       {panel.imprimeAnticipo && (
         <p className="border-t pt-3 text-[11px] text-muted-foreground" data-fotos-propuesta>
           Las fotos de cada hotel y tour salen solas de su perfil: pégalas en su tarjeta o en{' '}
-          <Link href="/fotos" className="underline underline-offset-2">Hoteles y tours</Link>.
+          <Link href="/proveedores" className="underline underline-offset-2">Proveedores</Link>.
         </p>
       )}
     </section>

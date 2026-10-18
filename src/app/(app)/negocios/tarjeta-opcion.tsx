@@ -18,6 +18,7 @@ import {
 import { comprimirFotoHotel } from '@/lib/cotizaciones/foto-hotel-navegador'
 import HojaCliente from '@/app/(app)/negocios/hoja-cliente'
 import { avisarCambioDeFotos, useFotoDeBiblioteca } from '@/app/(app)/negocios/fotos-tarjeta'
+import { AvisoTarifarioTarjeta } from '@/app/(app)/proveedores/aviso-tarifario'
 import PerfilFotos from '@/app/(app)/fotos/perfil-fotos'
 import { DialogoAutorizacionFoto } from '@/app/(app)/fotos/autorizacion-foto'
 import { contestarMismoPerfil, subirFotoABiblioteca, type PedidoFoto } from '@/app/(app)/fotos/actions'
@@ -579,6 +580,11 @@ export default function TarjetaOpcion({
             </div>
           ))}
         </div>
+      )}
+
+      {/* La vigencia del tarifario del proveedor (2026-10-18): informativa, no frena cotizar. */}
+      {conBiblioteca && bib.proveedor && !noVa && (
+        <AvisoTarifarioTarjeta proveedor={bib.proveedor} fechasViaje={fechasViaje} />
       )}
 
       {mover}

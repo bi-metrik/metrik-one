@@ -4,6 +4,7 @@ import { createContext, useCallback, useContext, useEffect, useMemo, useRef, use
 
 import { claveDeFoto } from '@/lib/fotos/clave'
 import type { DudaVista, ElementoVista } from '@/lib/fotos/vista'
+import type { ProveedorDeTarjeta } from '@/lib/proveedores/vigencia'
 import { fotosParaTarjetas, type FotosDeTarjetas, type PedidoFoto } from '../fotos/actions'
 
 /**
@@ -28,6 +29,8 @@ const llave = (p: PedidoFoto) => `${p.tipo}:${claveDeFoto(p.tipo, p.nombre, p.ci
 interface Leido {
   elemento: ElementoVista | null
   duda: DudaVista | null
+  /** La ficha del proveedor con sus tarifarios (aviso de vigencia). */
+  proveedor: ProveedorDeTarjeta | null
 }
 
 interface Estado {
@@ -79,7 +82,7 @@ export function FotosEnTarjetas({
           const leidos = { ...e.leidos }
           for (const [k] of faltan) {
             const t = porLlave.get(k)
-            leidos[k] = { elemento: t?.elemento ?? null, duda: t?.duda ?? null }
+            leidos[k] = { elemento: t?.elemento ?? null, duda: t?.duda ?? null, proveedor: t?.proveedor ?? null }
           }
           return { disponible: true, editable: r.editable, leidos }
         })
@@ -118,7 +121,7 @@ export function FotosEnTarjetas({
   }, [])
 
   const poner = useCallback((p: PedidoFoto, e: ElementoVista | null) => {
-    setEstado((s) => ({ ...s, leidos: { ...s.leidos, [llave(p)]: { elemento: e, duda: null } } }))
+    setEstado((s) => ({ ...s, leidos: { ...s.leidos, [llave(p)]: { elemento: e, duda: null, proveedor: s.leidos[llave(p)]?.proveedor ?? null } } }))
   }, [])
 
   const valor = useMemo(() => ({ estado, registrar, poner }), [estado, registrar, poner])
@@ -133,6 +136,8 @@ export interface FotoDeBiblioteca {
   elemento: ElementoVista | null | undefined
   /** «¿Es el mismo hotel que …?», sin contestar. */
   duda: DudaVista | null
+  /** La ficha del proveedor con sus tarifarios; `null` sin ficha (o sin leer). */
+  proveedor: ProveedorDeTarjeta | null
   /** Lo que quedó después de un cambio (subir, contestar la duda): se pinta ya. */
   poner: (e: ElementoVista | null) => void
 }
@@ -155,6 +160,7 @@ export function useFotoDeBiblioteca(pedido: PedidoFoto | null): FotoDeBiblioteca
     editable: ctx.estado.editable,
     elemento: leido ? leido.elemento : undefined,
     duda: leido?.duda ?? null,
+    proveedor: leido?.proveedor ?? null,
     poner: (e) => ctx.poner(pedido, e),
   }
 }

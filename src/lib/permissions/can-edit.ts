@@ -355,6 +355,23 @@ export function puedeGestionarPagosExternos(user: UserContext): boolean {
   return getAreasEfectivas(user).has('financiera')
 }
 
+// ── puedeVerCuentasDeProveedor ───────────────────────────────────────
+
+/**
+ * Ver, cargar, cambiar y verificar las CUENTAS BANCARIAS de un proveedor (Mauricio,
+ * 2026-10-18). Es a donde sale la plata de la agencia: un «cambio de cuenta principal»
+ * en un PDF de tarifas es el camino típico de fraude. Mismo criterio que
+ * `puedeGestionarPagosExternos`: owner/admin siempre; read_only/contador nunca; el resto
+ * solo con 'financiera' en sus áreas efectivas ('direccion' la expande).
+ *
+ * Verificar además exige ser OTRA persona que quien la cargó (lo hace cumplir la base).
+ * Fuente única: la consumen las acciones de `/proveedores` y la ficha, que decide con
+ * ella si dibuja la sección.
+ */
+export function puedeVerCuentasDeProveedor(user: UserContext): boolean {
+  return puedeGestionarPagosExternos(user)
+}
+
 // ── puedeDevolverCasoPorRuta ─────────────────────────────────────────
 
 /**

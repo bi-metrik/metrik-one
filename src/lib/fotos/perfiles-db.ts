@@ -49,7 +49,8 @@ export interface Conocidos {
 
 export async function leerConocidos(supabase: Cliente, workspaceId: string): Promise<{ ok: true; conocidos: Conocidos } | { ok: false; mensaje: string }> {
   const [p, a, f] = await Promise.all([
-    supabase.from(TABLA_PERFILES).select('id, tipo, clave, nombre, ciudad').eq('workspace_id', workspaceId).limit(TOPE),
+    // Solo los que tienen fotos: un proveedor sin fotos (espacio `proveedor`, migración 20261018150000) no se reconoce aquí.
+    supabase.from(TABLA_PERFILES).select('id, tipo, clave, nombre, ciudad').eq('workspace_id', workspaceId).in('tipo', ['hotel', 'actividad']).limit(TOPE),
     supabase.from(TABLA_ALIAS).select('id, perfil_id, tipo, clave, nombre, ciudad').eq('workspace_id', workspaceId).limit(TOPE),
     leerTodasLasFotos(supabase, workspaceId),
   ])
