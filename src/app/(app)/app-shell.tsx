@@ -6,7 +6,7 @@ import Link from 'next/link'
 import {
   FileSpreadsheet,
   FolderOpen,
-  Images,
+  Handshake,
   Timer,
   Radar,
   BarChart3,
@@ -161,9 +161,10 @@ const BUSINESS_NAV_ITEMS = [
   { href: '/equipo', label: 'Equipo', icon: UserCheck, roles: ['owner', 'admin', 'supervisor'] },
 ]
 
-// Biblioteca de fotos de la propuesta de viaje (2026-10-16): detrás de Negocios, solo en espacios
-// cuya plantilla tiene propuesta html (`bibliotecaFotos`).
-const FOTOS_NAV_ITEM = { href: '/fotos', label: 'Hoteles y tours', icon: Images, roles: ['owner', 'admin', 'supervisor', 'operator'] }
+// Proveedores (antes «Hoteles y tours», 2026-10-18): la ficha de cada hotel, operador o mayorista,
+// con sus tarifarios y sus fotos. Detrás de Negocios, solo en espacios cuya plantilla tiene
+// propuesta html (`bibliotecaFotos`). `/fotos` redirige aquí.
+const FOTOS_NAV_ITEM = { href: '/proveedores', label: 'Proveedores', icon: Handshake, roles: ['owner', 'admin', 'supervisor', 'operator'] }
 
 // Caja — agrupa flujos de ingreso y salida.
 // Movimientos siempre visible si business activo.
