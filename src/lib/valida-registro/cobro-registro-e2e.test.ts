@@ -277,7 +277,7 @@ describe('registro → 14 minutos → cobro de la tarjeta con el plan activado',
     const reg = tablas.valida_registros[0]
     expect(reg).toMatchObject({
       estado: 'creado',
-      condiciones_version: 'condiciones-2.1+aviso-1.4+terminos-auto-2.1',
+      condiciones_version: 'condiciones-2.1+aviso-1.5+terminos-auto-2.1',
       terminos_version: 'v2.1',
       metodo_pago_ref: REF_TARJETA,
       cobro_estado: 'programado',
@@ -415,7 +415,7 @@ describe('registro → consulta 11 → confirma → cobro YA; el cron del día 7
     })
     expect(alta).toMatchObject({ tipo: 'ok' })
     const reg = tablas.valida_registros[0]
-    expect(reg).toMatchObject({ condiciones_version: 'condiciones-2.1+aviso-1.4+terminos-auto-2.1', cobro_estado: 'programado' })
+    expect(reg).toMatchObject({ condiciones_version: 'condiciones-2.1+aviso-1.5+terminos-auto-2.1', cobro_estado: 'programado' })
 
     const ePayco = epaycoDePrueba({ estado: 'aprobado', externalRef: 'epayco-888', fecha: '2026-10-15', monto: 150_000 })
     const deps = {
