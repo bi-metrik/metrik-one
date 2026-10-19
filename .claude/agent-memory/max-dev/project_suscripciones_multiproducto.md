@@ -39,5 +39,10 @@ Relacionado: [[valida-alta-autogestionada]], [[secop-autogestion-registro]].
 - 19-oct: ePayco exige `tax`/`taxBase` NÚMERO (`'0'` → «field tax is type float»); `value` string sí lo acepta.
   Una falla técnica (`no_procesado#N` en la fila del intento) NO gasta el intento: se reclama la misma fila
   hasta 3. Solo un rechazo del banco cuenta.
+- ⚠️⚠️ main trae OTRO `pasarela/epayco.ts` (#1182/#1184: link de cobro por cuota, `?ref=` en la URL de
+  confirmación); la pila trae el de token. Conflicto seguro al mergear: hay que fusionar los dos adaptadores.
+  El paso 6 de main busca planes por `negocio_id`: no manda enlaces a suscripciones hasta el merge.
+- Tarjeta de prueba ePayco aceptada = 4575623182290326 con 12/2027 y CVV 123 (medios-de-pruebas-1);
+  el 19-oct salió «Tarjeta restringida», sin saber qué fecha/CVV se tokenizó.
 - `test/tablas-doble.ts` ya soporta `neq` y `not(c, 'in', '(a,b)')`.
 
