@@ -67,6 +67,34 @@ export function claveDeProveedor(nombre: string | null | undefined, ciudad: stri
   return `${n}|${claveDeCiudad(ciudad ?? '').toLowerCase()}`
 }
 
+/** Neta (el precio es el costo de la agencia) o comisionable (se le descuenta la comisión). */
+export const TARIFA_CANALES = ['neta', 'comisionable'] as const
+export type TarifaCanal = (typeof TARIFA_CANALES)[number]
+
+export const NOMBRE_TARIFA_CANAL: Record<TarifaCanal, string> = { neta: 'Neta', comisionable: 'Comisionable' }
+
+export function esTarifaCanal(t: unknown): t is TarifaCanal {
+  return typeof t === 'string' && (TARIFA_CANALES as readonly string[]).includes(t)
+}
+
+/** La ciudad como iría en la llave: «Cartagena de Indias» → «cartagena de indias». */
+export function claveCiudad(ciudad: string | null | undefined): string {
+  return claveDeCiudad(ciudad ?? '').toLowerCase()
+}
+
+/**
+ * El alias que hay que guardar cuando la ficha cambia de nombre o de ciudad (2026-10-19): la llave
+ * de la ficha no cambia (de ella cuelgan las fotos), así que la llave NUEVA se guarda como otro
+ * nombre del mismo proveedor. Sin él, la próxima cotización que nombre el hotel con su ciudad
+ * nueva crearía una ficha duplicada. `null` si no hace falta (sin fotos, o la llave es la misma).
+ */
+export function aliasPorCambio(f: { espacio: string; clave: string }, nombre: string, ciudad: string | null): { clave: string; nombre: string; ciudad: string | null } | null {
+  if (!tieneFotos(f.espacio)) return null
+  const clave = claveDeProveedor(nombre, ciudad)
+  if (!clave || clave === f.clave) return null
+  return { clave, nombre, ciudad }
+}
+
 /** La ciudad como va en la llave (después de la barra): para filtrar «en la ciudad Z». */
 export function ciudadDeClave(clave: string): string {
   const i = clave.indexOf('|')

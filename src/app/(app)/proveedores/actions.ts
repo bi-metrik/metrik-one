@@ -25,7 +25,8 @@ import { tienePropuestaHtml } from '@/lib/pdf/motor-html'
 import { borrarArchivo, confirmarSubida, enlaceDeArchivo, urlDeSubida } from '@/lib/proveedores/almacen'
 import { BYTES_MAXIMOS_ARCHIVO, extensionDeMime, type ClaseArchivo } from '@/lib/proveedores/archivos'
 import { revisarCuenta, revisarDatos, revisarVigencia } from '@/lib/proveedores/datos'
-import { claveDeProveedor, ciudadDeClave, espacioDeTipo, esTipoProveedor, tieneFotos, type EspacioProveedor, type TipoProveedor } from '@/lib/proveedores/tipos'
+import { faltasDeFicha, quitarNotaCiudadPorConfirmar, tieneNotaCiudadPorConfirmar, type FaltaFicha } from '@/lib/proveedores/completitud'
+import { aliasPorCambio, claveCiudad, claveDeProveedor, ciudadDeClave, espacioDeTipo, esTipoProveedor, tieneFotos, type EspacioProveedor, type TarifaCanal, type TipoProveedor } from '@/lib/proveedores/tipos'
 import { hoyBogota, type VigenciaTarifario } from '@/lib/proveedores/vigencia'
 import {
   COLUMNAS_PROVEEDOR,
@@ -54,7 +55,7 @@ type Resultado<T = object> = ({ ok: true } & T) | { ok: false; error: string }
 
 /** ¿El error es «la columna o la tabla no existe» (migración sin aplicar)? */
 function sinMigracion(e: { code?: string; message?: string } | null | undefined): boolean {
-  return !!e && (e.code === '42703' || e.code === '42P01' || e.code === 'PGRST204' || e.code === 'PGRST205' || /tipo_proveedor|proveedor_tarifarios|proveedor_cuentas/.test(e.message ?? ''))
+  return !!e && (e.code === '42703' || e.code === '42P01' || e.code === 'PGRST204' || e.code === 'PGRST205' || /tipo_proveedor|proveedor_tarifarios|proveedor_cuentas|departamento|tarifa_canal|iva_declarado/.test(e.message ?? ''))
 }
 
 async function contexto(escribir: boolean) {
@@ -62,7 +63,7 @@ async function contexto(escribir: boolean) {
   if (error || !workspaceId) return { error: String(error ?? 'No autenticado') }
   if (escribir && role && ROLES_SIN_ESCRITURA.has(role)) return { error: MENSAJE_SIN_ROL }
   const db = supabase as Cliente
-  const { data: ws } = await db.from('workspaces').select('cotizacion_template_slug').eq('id', workspaceId).maybeSingle()
+  const { data: ws } = await db.from('workspaces').select('name, cotizacion_template_slug').eq('id', workspaceId).maybeSingle()
   if (!tienePropuestaHtml((ws as { cotizacion_template_slug?: string | null } | null)?.cotizacion_template_slug)) {
     return { error: 'Los proveedores son de la propuesta de viaje, que este espacio no tiene.' }
   }
@@ -73,6 +74,7 @@ async function contexto(escribir: boolean) {
     staffId: (staffId as string | null) ?? null,
     editable: !(role && ROLES_SIN_ESCRITURA.has(role as string)),
     verCuentas: puedeVerCuentasDeProveedor(usuario),
+    agencia: ((ws as { name?: string | null } | null)?.name ?? '').trim() || 'la agencia',
   }
 }
 
@@ -149,7 +151,10 @@ export async function leerProveedores(): Promise<ListaProveedores> {
         nombre: f.nombre,
         tipoProveedor: f.tipo_proveedor,
         ciudad: f.ciudad,
-        ciudadClave: ciudadDeClave(f.clave),
+        // La ciudad de la ficha (la llave conserva la de cuando nació).
+        ciudadClave: f.ciudad ? claveCiudad(f.ciudad) : ciudadDeClave(f.clave),
+        destino: f.destino ?? null,
+        faltas: faltasDeFicha(f).map((x) => x.texto),
         estrellas: f.estrellas,
         etiquetas: f.etiquetas ?? [],
         responsableId: f.responsable_tarifas_id,
@@ -251,6 +256,16 @@ export interface FichaProveedor {
   compradoViaId: string | null
   origen: FilaProveedor['origen']
   origenRef: string | null
+  departamento: string | null
+  destino: string | null
+  ivaDeclarado: boolean | null
+  ivaIncluido: boolean | null
+  tarifaCanal: TarifaCanal | null
+  tarifasSolicitadasAt: string | null
+  /** Lo que le falta para poder cotizar. Vacío = completa (`faltasDeFicha`). */
+  faltas: FaltaFicha[]
+  /** La nota «Ciudad por confirmar» está en las notas (el botón «Confirmar ciudad» la quita). */
+  ciudadPorConfirmar: boolean
   tarifarios: TarifarioVista[]
   /** El mayorista por el que se compra, con sus tarifarios (respaldo del aviso de vigencia). */
   via: { id: string; nombre: string; tarifarios: TarifarioVista[] } | null
@@ -264,6 +279,7 @@ export type LecturaFicha = Resultado<{
   editable: boolean
   verCuentas: boolean
   yo: string | null
+  agencia: string
 }>
 
 export async function leerFicha(id: string): Promise<LecturaFicha> {
@@ -291,6 +307,7 @@ export async function leerFicha(id: string): Promise<LecturaFicha> {
     editable: ctx.editable,
     verCuentas: ctx.verCuentas,
     yo: ctx.staffId,
+    agencia: ctx.agencia,
     equipo: personas,
     mayoristas: mayoristas.sort((a, b) => a.nombre.localeCompare(b.nombre, 'es')),
     ficha: {
@@ -316,6 +333,14 @@ export async function leerFicha(id: string): Promise<LecturaFicha> {
       compradoViaId: f.comprado_via_id,
       origen: f.origen,
       origenRef: f.origen_ref,
+      departamento: f.departamento ?? null,
+      destino: f.destino ?? null,
+      ivaDeclarado: f.iva_declarado ?? null,
+      ivaIncluido: f.iva_incluido ?? null,
+      tarifaCanal: f.tarifa_canal ?? null,
+      tarifasSolicitadasAt: f.tarifas_solicitadas_at ?? null,
+      faltas: faltasDeFicha(f),
+      ciudadPorConfirmar: tieneNotaCiudadPorConfirmar(f.notas),
       tarifarios: propios.map((x) => tarifarioVista(x, hoy, nombres)),
       via: via ? { ...via, tarifarios: deVia.map((x) => tarifarioVista(x, hoy, nombres)) } : null,
       semaforo: estadoDeProveedor(f, porProveedor, hoy),
@@ -323,8 +348,16 @@ export async function leerFicha(id: string): Promise<LecturaFicha> {
   }
 }
 
-/** Guarda la sección «Datos». Solo nombre y tipo son obligatorios. */
-export async function guardarDatos(id: string, entrada: unknown): Promise<Resultado> {
+/**
+ * Guarda la sección «Datos». Solo nombre y tipo son obligatorios.
+ *
+ * Si cambian el nombre o la ciudad, la llave de la ficha NO cambia (de ella cuelgan las fotos): se
+ * guarda la llave nueva como alias (`fotos_perfiles_alias`), igual que se hizo por SQL el
+ * 2026-10-19, para que la próxima cotización reconozca el hotel con su ciudad nueva en vez de crear
+ * otra ficha. Si la llave nueva ya es de OTRA ficha, no se guarda: serían dos fichas del mismo
+ * proveedor.
+ */
+export async function guardarDatos(id: string, entrada: unknown): Promise<Resultado<{ alias?: boolean }>> {
   const ctx = await contexto(true)
   if ('error' in ctx) return { ok: false, error: ctx.error as string }
   const f = await filaDe(ctx, id)
@@ -340,13 +373,67 @@ export async function guardarDatos(id: string, entrada: unknown): Promise<Result
     const via = await filaDe(ctx, c.comprado_via_id)
     if (!via || via.tipo_proveedor !== 'mayorista') return { ok: false, error: '«Se compra a través de» tiene que ser un mayorista de la lista.' }
   }
+  const alias = aliasPorCambio({ espacio: f.tipo, clave: f.clave }, c.nombre, c.ciudad)
+  let aliasNuevo = false
+  if (alias) {
+    const [{ data: otra }, { data: ya }] = await Promise.all([
+      ctx.db.from('fotos_perfiles').select('id, nombre').eq('workspace_id', ctx.workspaceId).eq('tipo', f.tipo).eq('clave', alias.clave).maybeSingle(),
+      ctx.db.from('fotos_perfiles_alias').select('id, perfil_id').eq('workspace_id', ctx.workspaceId).eq('tipo', f.tipo).eq('clave', alias.clave).maybeSingle(),
+    ])
+    const otraFicha = otra as { id: string; nombre: string } | null
+    if (otraFicha && otraFicha.id !== f.id) {
+      return { ok: false, error: `Ya hay otra ficha, «${otraFicha.nombre}», con ese nombre en esa ciudad. Ábrela desde la lista o cambia el nombre.` }
+    }
+    const yaAlias = ya as { id: string; perfil_id: string } | null
+    if (yaAlias && yaAlias.perfil_id !== f.id) {
+      return { ok: false, error: 'Ese nombre en esa ciudad ya es otro nombre de otra ficha. Revisa la lista antes de guardar.' }
+    }
+    aliasNuevo = !yaAlias
+  }
   const { error } = await ctx.db
     .from('fotos_perfiles')
     .update({ ...c, updated_by: ctx.staffId, updated_at: new Date().toISOString() })
     .eq('workspace_id', ctx.workspaceId)
     .eq('id', f.id)
   if (error) return { ok: false, error: sinMigracion(error) ? MENSAJE_SIN_MIGRACION : 'No se pudo guardar. Vuelve a intentarlo.' }
-  return { ok: true }
+  if (alias && aliasNuevo) {
+    const { error: e } = await ctx.db
+      .from('fotos_perfiles_alias')
+      .insert({ workspace_id: ctx.workspaceId, perfil_id: f.id, tipo: f.tipo, clave: alias.clave, nombre: alias.nombre, ciudad: alias.ciudad, created_by: ctx.staffId })
+    // 23505: otra pestaña lo guardó al mismo tiempo.
+    if (e && e.code !== '23505') return { ok: false, error: 'Los datos se guardaron, pero no el nombre nuevo para las cotizaciones. Vuelve a guardar.' }
+  }
+  return { ok: true, alias: aliasNuevo }
+}
+
+/** «Confirmar ciudad»: quita la nota «Ciudad por confirmar» (la ciudad que está es la buena). */
+export async function confirmarCiudad(id: string): Promise<Resultado> {
+  const ctx = await contexto(true)
+  if ('error' in ctx) return { ok: false, error: ctx.error as string }
+  const f = await filaDe(ctx, id)
+  if (!f) return { ok: false, error: 'Ese proveedor no está en este espacio.' }
+  if (!f.ciudad?.trim()) return { ok: false, error: 'Primero escribe la ciudad y guarda los datos.' }
+  if (!tieneNotaCiudadPorConfirmar(f.notas)) return { ok: true }
+  const { error } = await ctx.db
+    .from('fotos_perfiles')
+    .update({ notas: quitarNotaCiudadPorConfirmar(f.notas), updated_by: ctx.staffId, updated_at: new Date().toISOString() })
+    .eq('workspace_id', ctx.workspaceId)
+    .eq('id', f.id)
+  return error ? { ok: false, error: 'No se pudo guardar. Vuelve a intentarlo.' } : { ok: true }
+}
+
+/** «Ya la pedí»: anota cuándo y quién le pidió las tarifas al proveedor. */
+export async function marcarTarifasPedidas(id: string): Promise<Resultado> {
+  const ctx = await contexto(true)
+  if ('error' in ctx) return { ok: false, error: ctx.error as string }
+  const f = await filaDe(ctx, id)
+  if (!f) return { ok: false, error: 'Ese proveedor no está en este espacio.' }
+  const { error } = await ctx.db
+    .from('fotos_perfiles')
+    .update({ tarifas_solicitadas_at: new Date().toISOString(), tarifas_solicitadas_por: ctx.staffId })
+    .eq('workspace_id', ctx.workspaceId)
+    .eq('id', f.id)
+  return error ? { ok: false, error: sinMigracion(error) ? MENSAJE_SIN_MIGRACION : 'No se pudo guardar. Vuelve a intentarlo.' } : { ok: true }
 }
 
 // ── Archivos (tarifarios y certificados) ─────────────────────────────────────

@@ -3,13 +3,15 @@
 import { useState } from 'react'
 import Link from 'next/link'
 import { useRouter } from 'next/navigation'
-import { ChevronLeft, ImagePlus } from 'lucide-react'
+import { ChevronLeft, ImagePlus, Loader2 } from 'lucide-react'
+import { toast } from 'sonner'
 
 import type { ElementoVista } from '@/lib/fotos/vista'
 import { NOMBRE_TIPO_PROVEEDOR } from '@/lib/proveedores/tipos'
 import { moverFoto, quitarFotoDeBiblioteca, separarNombreDelPerfil, subirFotoAlProveedor } from '../../fotos/actions'
 import PerfilFotos, { textoAgregarFotos, type AccionesPerfil } from '../../fotos/perfil-fotos'
-import type { CuentaVista, FichaProveedor, PersonaEquipo } from '../actions'
+import { confirmarCiudad, type CuentaVista, type FichaProveedor, type PersonaEquipo } from '../actions'
+import PedirTarifas from './pedir-tarifas'
 import SeccionCuentas from './seccion-cuentas'
 import SeccionDatos from './seccion-datos'
 import SeccionTarifarios from './seccion-tarifarios'
@@ -29,7 +31,9 @@ export default function FichaProveedorVista({
   fotos,
   cuentas,
   errorCuentas,
+  agencia,
 }: {
+  agencia: string
   ficha: FichaProveedor
   equipo: PersonaEquipo[]
   mayoristas: PersonaEquipo[]
@@ -45,6 +49,21 @@ export default function FichaProveedorVista({
   const refrescar = () => router.refresh()
   const [elemento, setElemento] = useState<ElementoVista | null>(fotos?.elemento ?? null)
   const [fotosAbiertas, setFotosAbiertas] = useState(false)
+  const [confirmando, setConfirmando] = useState(false)
+  const confirmar = async () => {
+    if (confirmando) return
+    setConfirmando(true)
+    try {
+      const r = await confirmarCiudad(ficha.id)
+      if (!r.ok) return void toast.error(r.error)
+      toast.success('Ciudad confirmada')
+      refrescar()
+    } catch {
+      toast.error('No se pudo guardar. Vuelve a intentarlo.')
+    } finally {
+      setConfirmando(false)
+    }
+  }
   const tipoFoto = ficha.espacio === 'hotel' ? 'hotel' : 'actividad'
   // La foto va al perfil por su id: la llave no cambia aunque la ficha cambie de nombre o ciudad.
   const acciones: AccionesPerfil = {
@@ -62,14 +81,37 @@ export default function FichaProveedorVista({
         </Link>
         <h1 className="text-lg font-semibold break-words">{ficha.nombre}</h1>
         <p className="m-0 text-xs text-muted-foreground">
-          {[NOMBRE_TIPO_PROVEEDOR[ficha.tipoProveedor], ficha.ciudad, ORIGEN[ficha.origen]].filter(Boolean).join(' · ')}
+          {[NOMBRE_TIPO_PROVEEDOR[ficha.tipoProveedor], ficha.ciudad, ficha.destino, ORIGEN[ficha.origen]].filter(Boolean).join(' · ')}
         </p>
       </div>
+
+      {ficha.faltas.length > 0 && (
+        <div className="space-y-1.5 rounded-lg border border-[#F4D7A1] bg-[#FFF8EC] p-3 text-xs" data-ficha-incompleta>
+          <p className="m-0 font-semibold text-[#7A4B08]">Ficha por clasificar: no se usa para cotizar hasta completarla.</p>
+          <ul className="m-0 list-disc pl-4 text-[#7A4B08]">
+            {ficha.faltas.map((f) => (
+              <li key={f.texto}>{f.texto}</li>
+            ))}
+          </ul>
+          {editable && ficha.ciudadPorConfirmar && ficha.ciudad && (
+            <button
+              type="button"
+              onClick={() => void confirmar()}
+              disabled={confirmando}
+              className="inline-flex h-8 items-center gap-1 rounded-md border border-[#E0B566] bg-background px-3 font-medium disabled:opacity-50"
+              data-confirmar-ciudad
+            >
+              {confirmando && <Loader2 className="h-3.5 w-3.5 animate-spin" />} Confirmar que la ciudad es {ficha.ciudad}
+            </button>
+          )}
+        </div>
+      )}
 
       <SeccionDatos key={`datos-${ficha.id}`} ficha={ficha} equipo={equipo} mayoristas={mayoristas} editable={editable} onGuardado={refrescar} />
 
       <hr />
       <SeccionTarifarios ficha={ficha} editable={editable} onCambio={refrescar} />
+      <PedirTarifas ficha={ficha} agencia={agencia} editable={editable} onCambio={refrescar} />
 
       {fotos && (
         <>

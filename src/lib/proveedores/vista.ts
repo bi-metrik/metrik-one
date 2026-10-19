@@ -2,7 +2,7 @@
  * Lo que viaja al navegador de un proveedor (lista y ficha). PURO: de las filas de la base a lo
  * que se pinta, sin rutas del bucket ni datos bancarios.
  */
-import type { EspacioProveedor, TipoProveedor } from './tipos'
+import type { EspacioProveedor, TarifaCanal, TipoProveedor } from './tipos'
 import { estadoTarifario, semaforo, tarifariosEfectivos, type EstadoTarifario, type Semaforo, type VigenciaTarifario } from './vigencia'
 
 /** La fila de `fotos_perfiles` que lee la pantalla. */
@@ -29,10 +29,17 @@ export interface FilaProveedor {
   comprado_via_id: string | null
   origen: 'cotizacion' | 'importacion' | 'manual'
   origen_ref: string | null
+  // Migración 20261019120000.
+  departamento: string | null
+  destino: string | null
+  iva_declarado: boolean | null
+  iva_incluido: boolean | null
+  tarifa_canal: TarifaCanal | null
+  tarifas_solicitadas_at: string | null
 }
 
 export const COLUMNAS_PROVEEDOR =
-  'id, tipo, clave, nombre, ciudad, tipo_proveedor, pais, estrellas, web, contacto_nombre, celular, celular_original, correo, telefono, direccion, notas, etiquetas, tarifas_mayorista, responsable_tarifas_id, comprado_via_id, origen, origen_ref'
+  'id, tipo, clave, nombre, ciudad, tipo_proveedor, pais, estrellas, web, contacto_nombre, celular, celular_original, correo, telefono, direccion, notas, etiquetas, tarifas_mayorista, responsable_tarifas_id, comprado_via_id, origen, origen_ref, departamento, destino, iva_declarado, iva_incluido, tarifa_canal, tarifas_solicitadas_at'
 
 export interface FilaTarifario {
   id: string
@@ -58,8 +65,11 @@ export interface ProveedorEnLista {
   nombre: string
   tipoProveedor: TipoProveedor
   ciudad: string | null
-  /** La ciudad como va en la llave (para filtrar sin tildes). */
+  /** La ciudad como va en la llave (para filtrar sin tildes). La de la ficha, no la de la llave vieja. */
   ciudadClave: string
+  destino: string | null
+  /** Lo que le falta para poder cotizar (`faltasDeFicha`). Vacío = completa. */
+  faltas: string[]
   estrellas: number | null
   etiquetas: string[]
   responsableId: string | null

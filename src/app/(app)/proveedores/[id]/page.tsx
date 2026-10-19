@@ -28,6 +28,7 @@ export default async function ProveedorPage({ params }: { params: Promise<{ id: 
   return (
     <FichaProveedorVista
       ficha={r.ficha}
+      agencia={r.agencia}
       equipo={r.equipo}
       mayoristas={r.mayoristas}
       editable={r.editable}
