@@ -28,6 +28,7 @@ import { claveContraparte, type ComplianceLiberacion } from '@/lib/compliance/li
 import {
   claveSujeto,
   esTipoSujeto,
+  indexarConsultasLimpias,
   indexarUltimasConsultas,
   normalizarDocumento,
   puedeGestionarSujetos,
@@ -37,7 +38,6 @@ import {
   validarMotivoCierre,
   validarSujeto,
   type ComplianceSujeto,
-  type ConsultaLimpia,
   type ResumenSujetos,
   type SituacionSujeto,
   type TipoSujeto,
@@ -124,18 +124,6 @@ export type ExpedienteSujetos = {
 };
 
 /**
- * Techo de consultas limpias que se traen para el cruce.
- *
- * No es paginación: es un tope explícito para que una tabla que crece no
- * convierta esta pantalla en un timeout silencioso. Se ordenan por fecha
- * descendente, así que lo que se pierde al toparse es lo más viejo, que es
- * justamente lo que ya no decide ningún estado (la consulta que manda es la más
- * reciente de cada sujeto). Si un workspace llega acá, la pantalla lo avisa
- * antes de mentir.
- */
-const TOPE_CONSULTAS = 5000;
-
-/**
  * La fecha la ve todo el que ve la base; el resultado (si hubo hallazgo y de qué
  * severidad) solo el oficial, por el mismo dictamen que deja el fundamento del
  * hallazgo en /liberaciones. Se recorta en el servidor por la misma razón que la
@@ -172,14 +160,30 @@ export async function listarSujetos(): Promise<Result<ExpedienteSujetos>> {
         'id, consulta_id, documento_tipo, documento_numero, nombre, decision, justificacion, vigente_desde, vigente_hasta, control_id, liberada_por, created_at, seguimiento',
       )
       .eq('workspace_id', workspaceId),
-    svc
-      .from('consultas_listas_dual')
-      .select('documento_tipo, documento_numero, created_at, vigente_hasta')
-      .eq('workspace_id', workspaceId)
-      .eq('severidad', 'sin_hallazgo')
-      .not('documento_numero', 'is', null)
-      .order('created_at', { ascending: false })
-      .limit(TOPE_CONSULTAS),
+    // Las limpias, que alimentan el estado. COMPLETAS por páginas: con un tope,
+    // PostgREST corta en 1.000 sin avisar y el sujeto cuya última limpia quede
+    // afuera sale "sin consultar". A diferencia de la columna informativa, si
+    // esta lectura falla se cae la pantalla: un estado sin su evidencia mentiría.
+    traerTodo<{
+      documento_tipo: string | null;
+      documento_numero: string | null;
+      created_at: string;
+      vigente_hasta: string | null;
+    }>(
+      (desde, hasta) =>
+        svc
+          .from('consultas_listas_dual')
+          .select('documento_tipo, documento_numero, created_at, vigente_hasta')
+          .eq('workspace_id', workspaceId)
+          .eq('severidad', 'sin_hallazgo')
+          .not('documento_numero', 'is', null)
+          .order('id')
+          .range(desde, hasta),
+      { etiqueta: 'sujetos/consultas-limpias' },
+    ).then(
+      (filas) => ({ ok: true as const, filas }),
+      (e: unknown) => ({ ok: false as const, error: e instanceof Error ? e.message : String(e) }),
+    ),
     svc.from('compliance_segmentos').select('id, nombre').eq('workspace_id', workspaceId),
     svc.from('profiles').select('id, full_name').eq('workspace_id', workspaceId),
     // El espejo de los expedientes de vinculación. Se lee entero por workspace
@@ -220,7 +224,8 @@ export async function listarSujetos(): Promise<Result<ExpedienteSujetos>> {
 
   if (sujetosRes.error) return { ok: false, error: sujetosRes.error.message };
   if (liberacionesRes.error) return { ok: false, error: liberacionesRes.error.message };
-  if (consultasRes.error) return { ok: false, error: consultasRes.error.message };
+  if (!consultasRes.ok) return { ok: false, error: consultasRes.error };
+  const consultasLimpias = consultasRes.filas;
 
   // El espejo NO es fuente: si falla, la pantalla vale igual sin la columna de
   // vinculación. Tumbar la base de sujetos entera por un espejo caído sería
@@ -242,19 +247,9 @@ export async function listarSujetos(): Promise<Result<ExpedienteSujetos>> {
     else porClave.set(clave, [l]);
   }
 
-  // La consulta limpia MÁS RECIENTE de cada contraparte. Vienen ordenadas
-  // descendente, así que la primera de cada clave es la que manda.
-  const limpias = new Map<string, ConsultaLimpia>();
-  for (const c of (consultasRes.data ?? []) as Array<{
-    documento_tipo: string | null;
-    documento_numero: string | null;
-    created_at: string;
-    vigente_hasta: string | null;
-  }>) {
-    const clave = claveContraparte(c.documento_tipo, c.documento_numero);
-    if (!clave || limpias.has(clave)) continue;
-    limpias.set(clave, { created_at: c.created_at, vigente_hasta: c.vigente_hasta });
-  }
+  // La consulta limpia MÁS RECIENTE de cada contraparte. Llegan por id, así que
+  // el índice compara fechas en vez de quedarse con la primera.
+  const limpias = indexarConsultasLimpias(consultasLimpias);
 
   const nombreSegmento = new Map<string, string>(
     ((segmentosRes.data ?? []) as Array<{ id: string; nombre: string }>).map((s) => [s.id, s.nombre]),
