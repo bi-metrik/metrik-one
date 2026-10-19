@@ -63,3 +63,17 @@ Relacionado: [[valida-alta-autogestionada]], [[secop-autogestion-registro]].
   reintenta sobre ellos, cobra $150.000 aunque la pantalla diga otra cosa. Probar con un registro nuevo.
 - El webhook de main con una confirmación real del cargo por token: `ref` sale solo de `?ref=` (la
   urlConfirmation del cargo no lo trae) → `sin_cobro`, 200, una fila en `pasarela_eventos`. No paga nada.
+
+## 2026-10-19 (tarde): eControl y el documento del titular
+- El cobro REAL 390341460 ($150.000, Visa personal) salió «Rechazada eControl»: soporte de ePayco dijo
+  que el documento del cobro no coincidía con el del medio de pago. Mandábamos `NIT` + NIT de la empresa
+  (y la razón social como nombre en los cargos). Desde e1ed1b73 el registro pide tipo (CC/CE/NIT/PP) y
+  número del TITULAR; van en `/token/customer` y en todo cargo vía `titularDelCobro`; se guardan en
+  `workspaces.config_extra.valida_pagador.titular` (sin migración). Registro viejo sin titular = NIT.
+- ⚠️ El aviso de datos v1.3 (`condiciones.ts`, AVISO_DATOS_FORMULARIO_CON_COBRO) aún dice que METRIK
+  guarda solo token + celular y que a ePayco va «el NIT»: cambiarlo es de Emilio (sube versión y huella).
+- Cierre de los 3 contratos de prueba (futuras, -2, -3) en `scratchpad/cerrar_futuras3.sql` (sin correr al
+  19-oct): contrato `cancelado`, suscripción `cancelada` sin ref, plan `manual`, cobro anulado. La tarjeta
+  en ePayco NO se borra por SQL (`eliminarTarjetasEpayco`); `cobro_token_borrado_at` solo tras su respuesta.
+- El paso 7b cobra todo plan con `pasarela='epayco'` sin mirar `activo` ni el entorno del registro; lo que
+  frena es `pagadorConTarjeta` (contrato activo/pausado + suscripción viva con ref) o el cobro anulado.
