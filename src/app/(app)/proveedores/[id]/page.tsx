@@ -4,8 +4,13 @@ import { elementoDelPerfil } from '../../fotos/actions'
 import { leerCuentas, leerExtraccion, leerFicha, type CuentaVista } from '../actions'
 import FichaProveedorVista from './ficha-proveedor'
 
-/** «Extraer con el motor» corre como acción de esta página y puede tardar minutos (punto 6). */
-export const maxDuration = 300
+/**
+ * «Extraer con el motor» corre como acción de esta página y puede tardar minutos (punto 6). 800 s es
+ * el tope de Vercel Pro con Fluid Compute (doc «Configuring maximum duration», 2026-10-19); el motor
+ * se rinde a los 12 min (`MS_MAXIMOS_MODELO`) para responder «tiempo agotado» antes de que Vercel
+ * corte la función.
+ */
+export const maxDuration = 800
 
 /**
  * La ficha de un proveedor en una sola página (Noor, 2026-10-18): Datos · Tarifarios · Fotos ·

@@ -789,6 +789,16 @@ export async function guardarExtraccion(proveedorId: string, json: string, meta?
  * versión de la instrucción. Queda en borrador: la carga se cierra al confirmar vigencia y moneda.
  */
 export async function extraerTarifario(proveedorId: string): Promise<Resultado<{ avisos: string[] }>> {
+  // Cualquier excepción vuelve como mensaje: una acción que revienta llega a la pantalla sin texto.
+  try {
+    return await extraerTarifarioSinCapturar(proveedorId)
+  } catch (e) {
+    console.error('[motor-extraccion] la extracción falló:', e instanceof Error ? e.message : e)
+    return { ok: false, error: 'La extracción no se pudo completar. Vuelve a intentarlo en un rato.' }
+  }
+}
+
+async function extraerTarifarioSinCapturar(proveedorId: string): Promise<Resultado<{ avisos: string[] }>> {
   const ctx = await contexto(true)
   if ('error' in ctx) return { ok: false, error: ctx.error as string }
   const f = await filaDe(ctx, proveedorId)
