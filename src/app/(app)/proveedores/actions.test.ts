@@ -20,7 +20,30 @@ vi.mock('@/lib/proveedores/almacen', () => ({
     subida.confirma ? { ok: true, ref: `one://fotos-catalogo/${ruta}`, bytes: 1000, mime: 'application/pdf' } : { ok: false, error: 'No encontramos el archivo subido. Vuelve a subirlo.' },
   enlaceDeArchivo: async () => 'https://firmada.example/x',
   borrarArchivo: async () => {},
+  descargarArchivo: async (_ws: string, _p: string, clase: string, ref: string) => (clase === 'tarifarios' && ref ? { datos: new Uint8Array([37, 80, 68, 70]), mime: 'application/pdf' } : null),
 }))
+// El motor corre con un modelo SIMULADO: ninguna prueba llama al modelo de verdad.
+const motor = vi.hoisted(() => ({ respuesta: '{}', llamadas: [] as string[][] }))
+vi.mock('@/lib/proveedores/motor', async (original) => {
+  const real = await original<typeof import('@/lib/proveedores/motor')>()
+  const { MockLanguageModelV4 } = await import('ai/test')
+  return {
+    ...real,
+    correrMotor: (p: Parameters<typeof real.correrMotor>[0]) => {
+      motor.llamadas.push(p.archivos.map((a) => a.nombre))
+      const modelo = new MockLanguageModelV4({
+        modelId: 'modelo-simulado',
+        doGenerate: async () => ({
+          content: [{ type: 'text', text: motor.respuesta }],
+          finishReason: { unified: 'stop', raw: undefined },
+          usage: { inputTokens: { total: 1, noCache: 1, cacheRead: undefined, cacheWrite: undefined }, outputTokens: { total: 1, text: 1, reasoning: undefined } },
+          warnings: [],
+        }),
+      })
+      return real.correrMotor({ ...p, modelo })
+    },
+  }
+})
 vi.mock('@/lib/fotos/catalogo-almacen', async (original) => ({
   ...(await original<typeof import('@/lib/fotos/catalogo-almacen')>()),
   enlacesDeCatalogo: async (_ws: string, refs: string[]) => new Map(refs.map((r) => [r, `https://firmada.example/${r.split('/').pop()}`])),
@@ -37,7 +60,7 @@ const IBEROSTAR = 'd0000000-0000-4000-8000-000000000003'
 
 import { claveDeFoto } from '@/lib/fotos/clave'
 import { fotosParaTarjetas } from '../fotos/actions'
-import { confirmarCiudad, guardarExtraccion, leerExtraccion, usarSugerenciasDeExtraccion, crearProveedor, guardarCuenta, guardarDatos, leerCuentas, leerFicha, leerProveedores, marcarTarifasPedidas, pedirSubida, registrarTarifario, verificarCuenta } from './actions'
+import { cerrarCargaExtraccion, confirmarCiudad, elegirTarifarioDeFicha, extraerTarifario, guardarExtraccion, leerExtraccion, usarSugerenciasDeExtraccion, crearProveedor, guardarCuenta, guardarDatos, leerCuentas, leerFicha, leerProveedores, marcarTarifasPedidas, pedirSubida, registrarTarifario, verificarCuenta } from './actions'
 
 const perfil = (id: string, tipo: string, nombre: string, ciudad: string | null, extra: Fila = {}): Fila => ({
   id, workspace_id: WS, tipo, clave: claveDeFoto(tipo === 'proveedor' ? 'hotel' : (tipo as 'hotel'), nombre, ciudad), nombre, ciudad,
@@ -313,9 +336,9 @@ describe('extracciones del motor', () => {
   })
 
   it('se guarda en el espacio con quien la subió; la ficha ve el resumen y usa lo que no sabía', async () => {
-    expect(await leerExtraccion(HOTEL)).toEqual({ ok: true, extraccion: null })
+    expect(await leerExtraccion(HOTEL)).toMatchObject({ ok: true, extraccion: null })
     expect(await guardarExtraccion(HOTEL, '{"esquema_version":"9.9","expediente":{}}')).toMatchObject({ ok: false })
-    expect(await guardarExtraccion(HOTEL, json, { instruccion: 'v8', modelo: 'modelo-de-prueba' })).toEqual({ ok: true })
+    expect(await guardarExtraccion(HOTEL, json, { instruccion: 'v8', modelo: 'modelo-de-prueba' })).toEqual({ ok: true, avisos: ['Vigencia por confirmar al cargar.'] })
     expect(base.tablas.proveedor_extracciones[0]).toMatchObject({ workspace_id: WS, proveedor_id: HOTEL, esquema_version: '0.2', instruccion_version: 'v8', creada_por: ANA, archivos: ['tar0_TARIFAS 2027.pdf'] })
     base.tablas.proveedor_extracciones[0].estado = 'borrador'
     base.tablas.proveedor_extracciones[0].created_at = '2026-10-19T10:00:00Z'
@@ -336,6 +359,97 @@ describe('extracciones del motor', () => {
 
   it('una extracción de otro espacio no se lee', async () => {
     base.tablas.proveedor_extracciones.push({ id: 'x9', workspace_id: OTRO_WS, proveedor_id: HOTEL, estado: 'borrador', created_at: '2026-10-19T10:00:00Z', expediente: {}, tarifario: null, archivos: [] })
-    expect(await leerExtraccion(HOTEL)).toEqual({ ok: true, extraccion: null })
+    expect(await leerExtraccion(HOTEL)).toMatchObject({ ok: true, extraccion: null, uso: { fichasConExtraccion: [] } })
+  })
+})
+
+describe('motor v13: carga, cadena y extracción desde ONE', () => {
+  const CADENA = HOTEL
+  /** Un PDF ficticio de una cadena con tres hoteles, sin vigencia escrita (L40). */
+  const extraccion = (vigencia: Record<string, unknown> = { desde: null, hasta: null, texto: 'Tarifas temporada actual', fuente: 'ninguna', requiere_confirmacion: true }) =>
+    JSON.stringify({
+      esquema_version: '0.3',
+      expediente: { archivos: [{ archivo: 'tar0_Tarifas cadena.pdf', decision: 'usar' }], pedir_actualizacion: ['pedir la vigencia del tarifario'] },
+      tarifario: {
+        moneda: 'COP',
+        vigencia,
+        tarifas: [
+          { establecimiento: 'Cadena Ficticia Centro', categoria: 'Estándar', precio: 300000, moneda: 'COP' },
+          { establecimiento: 'Cadena Ficticia Playa', categoria: 'Estándar', precio: 350000, moneda: 'COP' },
+          { establecimiento: 'Cadena Ficticia Cancún', categoria: 'Estándar', precio: 180, moneda: 'COP' },
+        ],
+      },
+    })
+  const sembrarExtraccion = async (json = extraccion()) => {
+    expect(await guardarExtraccion(CADENA, json)).toMatchObject({ ok: true })
+    const x = base.tablas.proveedor_extracciones[base.tablas.proveedor_extracciones.length - 1]
+    Object.assign(x, { id: 'e0000000-0000-4000-8000-000000000001', estado: 'borrador', created_at: '2026-10-19T10:00:00Z', monedas: {} })
+    return x
+  }
+
+  it('sin vigencia, la carga no se cierra hasta que la persona escribe las fechas; entonces cuenta para cotizar', async () => {
+    const x = await sembrarExtraccion()
+    let r = await leerExtraccion(CADENA)
+    expect(r.ok && r.extraccion).toMatchObject({ estado: 'borrador', vigenciaPorConfirmar: true, vigenciaConfirmada: null })
+    expect(r.ok && r.uso?.cotiza).toEqual({ ok: false, motivo: expect.stringMatching(/no se ha cerrado/) })
+
+    expect(await cerrarCargaExtraccion(x.id as string, {})).toMatchObject({ ok: false, error: expect.stringMatching(/escribe la vigencia/) })
+    expect(x.estado).toBe('borrador')
+    expect(await cerrarCargaExtraccion(x.id as string, { desde: '2027-01-01', hasta: '2027-12-31', monedas: { establecimientos: { 'Cadena Ficticia Cancún': 'USD' } } })).toEqual({ ok: true })
+    expect(x).toMatchObject({ estado: 'revisada', vigencia_desde: '2027-01-01', vigencia_hasta: '2027-12-31', vigencia_por: 'persona', revisada_por: ANA, monedas: { establecimientos: { 'Cadena Ficticia Cancún': 'USD' } } })
+
+    // Tres hoteles en el PDF: la ficha tiene que elegir el suyo.
+    r = await leerExtraccion(CADENA)
+    expect(r.ok && r.uso?.cotiza).toEqual({ ok: false, motivo: expect.stringMatching(/varios establecimientos/) })
+    expect(await elegirTarifarioDeFicha(CADENA, { establecimiento: 'Cadena Ficticia Centro' })).toEqual({ ok: true })
+    r = await leerExtraccion(CADENA)
+    expect(r.ok && r.uso).toMatchObject({ establecimiento: 'Cadena Ficticia Centro', cotiza: { ok: true, tarifas: 1 } })
+  })
+
+  it('una segunda ficha usa el mismo PDF de cadena con su propio establecimiento', async () => {
+    const x = await sembrarExtraccion(extraccion({ desde: '2027-01-01', hasta: '2027-12-31', texto: 'Vigencia 2027', fuente: 'contenido', requiere_confirmacion: false }))
+    expect(await cerrarCargaExtraccion(x.id as string, {})).toEqual({ ok: true })
+    expect(x).toMatchObject({ vigencia_desde: '2027-01-01', vigencia_hasta: '2027-12-31', vigencia_por: 'motor' })
+
+    // La otra ficha ve la de la cadena como opción…
+    let r = await leerExtraccion(IBEROSTAR)
+    expect(r.ok && r.uso?.fichasConExtraccion).toEqual([{ id: CADENA, nombre: 'Catalonia Puerta del Sol' }])
+    expect(await elegirTarifarioDeFicha(IBEROSTAR, { tarifarioDeId: IBEROSTAR })).toMatchObject({ ok: false })
+    expect(await elegirTarifarioDeFicha(IBEROSTAR, { tarifarioDeId: CADENA, establecimiento: 'Hotel que no está' })).toMatchObject({ ok: false, error: expect.stringMatching(/no es un establecimiento/) })
+    expect(await elegirTarifarioDeFicha(IBEROSTAR, { tarifarioDeId: CADENA, establecimiento: 'Cadena Ficticia Playa' })).toEqual({ ok: true })
+    r = await leerExtraccion(IBEROSTAR)
+    expect(r.ok && r.extraccion?.deOtraFicha).toEqual({ id: CADENA, nombre: 'Catalonia Puerta del Sol' })
+    expect(r.ok && r.uso).toMatchObject({ tarifarioDe: { id: CADENA }, establecimiento: 'Cadena Ficticia Playa', cotiza: { ok: true, tarifas: 1 } })
+  })
+
+  it('una extracción de otro espacio no se cierra desde aquí', async () => {
+    base.tablas.proveedor_extracciones.push({ id: 'e0000000-0000-4000-8000-000000000009', workspace_id: OTRO_WS, proveedor_id: HOTEL, estado: 'borrador', tarifario: null, expediente: {}, archivos: [] })
+    expect(await cerrarCargaExtraccion('e0000000-0000-4000-8000-000000000009', { desde: '2027-01-01', hasta: '2027-12-31' })).toMatchObject({ ok: false })
+    expect(base.tablas.proveedor_extracciones[0].estado).toBe('borrador')
+  })
+
+  it('«Extraer con el motor» manda los tarifarios con archivo y guarda con modelo e instrucción v13', async () => {
+    base.tablas.proveedor_tarifarios.push(
+      { id: 't2', workspace_id: WS, proveedor_id: CADENA, ref: `one://fotos-catalogo/${WS}/proveedores/${CADENA}/tarifarios/${'b'.repeat(32)}.pdf`, nombre_archivo: 'Tarifas cadena.pdf', mime: 'application/pdf', subido_at: '2026-10-01T00:00:00Z' },
+      { id: 't3', workspace_id: WS, proveedor_id: CADENA, ref: null, nombre_archivo: 'Importado sin archivo.pdf', mime: null, subido_at: '2026-10-02T00:00:00Z' },
+    )
+    motor.llamadas = []
+    motor.respuesta = extraccion()
+    expect(await extraerTarifario(CADENA)).toEqual({ ok: true, avisos: ['Vigencia por confirmar al cargar.'] })
+    expect(motor.llamadas).toEqual([['tar0_Tarifas cadena.pdf']])
+    expect(base.tablas.proveedor_extracciones[0]).toMatchObject({ workspace_id: WS, proveedor_id: CADENA, esquema_version: '0.3', modelo: 'modelo-simulado', instruccion_version: 'v13', creada_por: ANA })
+
+    // Una salida que la torre rechaza no se guarda.
+    motor.respuesta = JSON.stringify({ esquema_version: '0.3', expediente: { archivos: [] }, tarifario: { tarifas: [{ precio: 1 }] } })
+    expect(await extraerTarifario(CADENA)).toMatchObject({ ok: false, error: expect.stringMatching(/sin moneda/) })
+    expect(base.tablas.proveedor_extracciones).toHaveLength(1)
+  })
+
+  it('sin tarifarios con archivo no llama al motor; un rol de solo lectura tampoco', async () => {
+    motor.llamadas = []
+    expect(await extraerTarifario(IBEROSTAR)).toMatchObject({ ok: false, error: expect.stringMatching(/sube al menos uno/) })
+    sesion.role = 'read_only'
+    expect(await extraerTarifario(CADENA)).toMatchObject({ ok: false })
+    expect(motor.llamadas).toEqual([[]])
   })
 })

@@ -798,11 +798,11 @@ export async function extraerTarifario(proveedorId: string): Promise<Resultado<{
     .select('id, ref, nombre_archivo, mime')
     .eq('workspace_id', ctx.workspaceId)
     .eq('proveedor_id', f.id)
-    .not('ref', 'is', null)
     .order('subido_at', { ascending: true })
-    .limit(40)
+    .limit(200)
   if (error) return { ok: false, error: sinMigracion(error) ? MENSAJE_SIN_MIGRACION : 'No se pudieron leer los tarifarios.' }
-  const filas = (data ?? []) as { id: string; ref: string; nombre_archivo: string | null; mime: string | null }[]
+  // Los registrados sin archivo (importados de Airtable) no tienen nada que leer.
+  const filas = ((data ?? []) as { id: string; ref: string | null; nombre_archivo: string | null; mime: string | null }[]).filter((t): t is { id: string; ref: string; nombre_archivo: string | null; mime: string | null } => !!t.ref).slice(0, 40)
   const archivos: ArchivoParaMotor[] = []
   for (const [i, t] of filas.entries()) {
     const bajado = await descargarArchivo(ctx.workspaceId, f.id, 'tarifarios', t.ref)

@@ -67,6 +67,8 @@ export async function correrMotor(p: {
       model: modelo,
       instructions: p.instruccion,
       maxOutputTokens: TOKENS_MAXIMOS_SALIDA,
+      // Un reintento como mucho: cada corrida cuesta y un tiempo agotado puede haber cobrado.
+      maxRetries: 1,
       abortSignal: p.senal,
       messages: [
         {
