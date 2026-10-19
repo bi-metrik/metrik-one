@@ -4,11 +4,13 @@ import { useState } from 'react'
 import { Loader2 } from 'lucide-react'
 import { toast } from 'sonner'
 
-import { NOMBRE_TIPO_PROVEEDOR, TIPOS_PROVEEDOR, etiquetasDeTexto, type TipoProveedor } from '@/lib/proveedores/tipos'
+import { NOMBRE_TARIFA_CANAL, NOMBRE_TIPO_PROVEEDOR, TARIFA_CANALES, TIPOS_PROVEEDOR, etiquetasDeTexto, type TipoProveedor } from '@/lib/proveedores/tipos'
 import { guardarDatos, type FichaProveedor, type PersonaEquipo } from '../actions'
 
 const campo = 'block h-9 w-full min-w-0 rounded-md border bg-background px-2 text-sm text-foreground disabled:opacity-70'
 const etiqueta = 'min-w-0 space-y-0.5 text-[11px] text-muted-foreground'
+
+const triestadoTexto = (v: boolean | null) => (v === true ? 'si' : v === false ? 'no' : '')
 
 /**
  * «Datos» de la ficha. Solo nombre y tipo son obligatorios; el resto se llena cuando se sepa.
@@ -45,6 +47,11 @@ export default function SeccionDatos({
     tarifasMayorista: ficha.tarifasMayorista,
     responsableId: ficha.responsableId ?? '',
     compradoViaId: ficha.compradoViaId ?? '',
+    departamento: ficha.departamento ?? '',
+    destino: ficha.destino ?? '',
+    ivaDeclarado: triestadoTexto(ficha.ivaDeclarado),
+    ivaIncluido: triestadoTexto(ficha.ivaIncluido),
+    tarifaCanal: ficha.tarifaCanal ?? '',
   })
   const [guardando, setGuardando] = useState(false)
   const poner = (k: keyof typeof d) => (e: { target: { value: string } }) => setD({ ...d, [k]: e.target.value })
@@ -60,7 +67,7 @@ export default function SeccionDatos({
         compradoViaId: d.tipoProveedor === 'mayorista' ? '' : d.compradoViaId,
       })
       if (!r.ok) return void toast.error(r.error)
-      toast.success('Guardado')
+      toast.success(r.alias ? 'Guardado. Las cotizaciones lo reconocerán con su nombre y ciudad nuevos.' : 'Guardado')
       onGuardado()
     } catch {
       toast.error('No se pudo guardar. Vuelve a intentarlo.')
@@ -89,9 +96,19 @@ export default function SeccionDatos({
           </select>
         </label>
         <label className={etiqueta}>
-          Ciudad
+          Ciudad (municipio donde duerme o se presta el servicio)
           <input className={campo} value={d.ciudad} onChange={poner('ciudad')} disabled={ro} placeholder="Cartagena" />
         </label>
+        <div className="grid grid-cols-2 gap-3">
+          <label className={etiqueta}>
+            Departamento
+            <input className={campo} value={d.departamento} onChange={poner('departamento')} disabled={ro} placeholder="Bolívar" />
+          </label>
+          <label className={etiqueta}>
+            Destino
+            <input className={campo} value={d.destino} onChange={poner('destino')} disabled={ro} placeholder="Caribe - Cartagena" />
+          </label>
+        </div>
         <div className="grid grid-cols-2 gap-3">
           <label className={etiqueta}>
             País (código)
@@ -161,6 +178,38 @@ export default function SeccionDatos({
               ))}
             </select>
           </label>
+        )}
+        <label className={etiqueta}>
+          Tarifa
+          <select className={campo} value={d.tarifaCanal} onChange={poner('tarifaCanal')} disabled={ro}>
+            <option value="">No se sabe</option>
+            {TARIFA_CANALES.map((t) => (
+              <option key={t} value={t}>
+                {NOMBRE_TARIFA_CANAL[t]}
+              </option>
+            ))}
+          </select>
+        </label>
+        <div className="grid grid-cols-2 gap-3">
+          <label className={etiqueta}>
+            ¿Cobra IVA?
+            <select className={campo} value={d.ivaDeclarado} onChange={poner('ivaDeclarado')} disabled={ro}>
+              <option value="">No se sabe</option>
+              <option value="si">Sí</option>
+              <option value="no">No</option>
+            </select>
+          </label>
+          <label className={etiqueta}>
+            ¿Sus precios lo incluyen?
+            <select className={campo} value={d.ivaIncluido} onChange={poner('ivaIncluido')} disabled={ro}>
+              <option value="">No se sabe</option>
+              <option value="si">Sí</option>
+              <option value="no">No</option>
+            </select>
+          </label>
+        </div>
+        {d.ivaIncluido === 'si' && (
+          <p className="m-0 text-[11px] text-[#9A5F0C] sm:col-span-2">ONE guarda los costos SIN IVA: al cargar un precio de este proveedor, descuéntale el IVA.</p>
         )}
         <label className="flex items-center gap-2 text-xs sm:col-span-2">
           <input type="checkbox" checked={d.tarifasMayorista} onChange={(e) => setD({ ...d, tarifasMayorista: e.target.checked })} disabled={ro} />

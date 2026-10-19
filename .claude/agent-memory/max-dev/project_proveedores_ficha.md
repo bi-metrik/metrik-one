@@ -1,6 +1,6 @@
 ---
 name: proveedores-ficha
-description: Módulo Proveedores de Trappvel (feat/proveedores-ficha, 2026-10-18) — la ficha ES la fila de fotos_perfiles; migración 20261018150000 SIN aplicar (va ANTES del merge y después de 20261017090000); bucket fotos-catalogo pasa a aceptar PDF 20 MB; cuentas server-only
+description: Módulo Proveedores de Trappvel (feat/proveedores-ficha, 2026-10-18) — la ficha ES la fila de fotos_perfiles; #1204 mergeado (5b00f7e6) con la migración 20261018150000 aplicada y la importación de Airtable corrida el 2026-10-19; bucket fotos-catalogo pasa a aceptar PDF 20 MB; cuentas server-only
 metadata:
   type: project
 ---

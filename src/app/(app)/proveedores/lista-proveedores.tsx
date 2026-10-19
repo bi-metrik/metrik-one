@@ -40,6 +40,8 @@ export default function ListaProveedores({
   const [etiqueta, setEtiqueta] = useState('')
   const [estado, setEstado] = useState<Semaforo | 'todos'>('todos')
   const [mios, setMios] = useState(false)
+  const [porClasificar, setPorClasificar] = useState(false)
+  const [destino, setDestino] = useState('')
   const [nuevo, setNuevo] = useState<{ nombre: string; tipoProveedor: TipoProveedor; ciudad: string } | null>(null)
   const [duda, setDuda] = useState<{ id: string | null; nombre: string; ciudad: string | null } | null>(null)
   const [ocupado, setOcupado] = useState(false)
@@ -51,6 +53,8 @@ export default function ListaProveedores({
   }, [proveedores])
   const etiquetas = useMemo(() => [...new Set(proveedores.flatMap((p) => p.etiquetas))].sort(), [proveedores])
   const nombrePersona = useMemo(() => new Map(equipo.map((p) => [p.id, p.nombre])), [equipo])
+  const destinos = useMemo(() => [...new Set(proveedores.map((p) => p.destino).filter((d): d is string => !!d))].sort((a, b) => a.localeCompare(b, 'es')), [proveedores])
+  const incompletas = useMemo(() => proveedores.filter((p) => p.faltas.length > 0).length, [proveedores])
   const misPorRenovar = useMemo(() => proveedores.filter((p) => p.responsableId === yo && porRenovar(p.semaforo)).length, [proveedores, yo])
 
   const visibles = useMemo(() => {
@@ -62,9 +66,11 @@ export default function ListaProveedores({
         (!ciudad || p.ciudadClave === ciudad) &&
         (!etiqueta || p.etiquetas.includes(etiqueta)) &&
         (estado === 'todos' || p.semaforo === estado) &&
+        (!destino || p.destino === destino) &&
+        (!porClasificar || p.faltas.length > 0) &&
         (!mios || (p.responsableId === yo && porRenovar(p.semaforo))),
     )
-  }, [proveedores, buscar, tipo, ciudad, etiqueta, estado, mios, yo])
+  }, [proveedores, buscar, tipo, ciudad, etiqueta, estado, destino, porClasificar, mios, yo])
 
   const terminar = (r: ResultadoCrear) => {
     if (!r.ok) return void toast.error(r.error)
@@ -204,6 +210,26 @@ export default function ListaProveedores({
             ))}
           </select>
         </div>
+        {destinos.length > 0 && (
+          <select aria-label="Destino" value={destino} onChange={(e) => setDestino(e.target.value)} className={`${select} w-full sm:w-auto`}>
+            <option value="">Todos los destinos</option>
+            {destinos.map((d) => (
+              <option key={d} value={d}>
+                {d}
+              </option>
+            ))}
+          </select>
+        )}
+        <div className="flex flex-wrap gap-2">
+        <button
+          type="button"
+          onClick={() => setPorClasificar((m) => !m)}
+          aria-pressed={porClasificar}
+          className={`rounded-full px-3 py-1 text-xs ${porClasificar ? 'bg-foreground text-background' : 'border text-muted-foreground hover:bg-accent'}`}
+          data-por-clasificar
+        >
+          Por clasificar{incompletas > 0 ? ` (${incompletas})` : ''}
+        </button>
         {yo && (
           <button
             type="button"
@@ -215,6 +241,12 @@ export default function ListaProveedores({
             Mis tarifarios por renovar{misPorRenovar > 0 ? ` (${misPorRenovar})` : ''}
           </button>
         )}
+        </div>
+        {porClasificar && (
+          <p className="m-0 text-[11px] text-muted-foreground">
+            Fichas que no se pueden usar para cotizar: les falta la ciudad (el municipio), el país o el tipo, o la ciudad está por confirmar.
+          </p>
+        )}
       </div>
 
       {visibles.length === 0 ? (
@@ -223,7 +255,9 @@ export default function ListaProveedores({
             ? 'Todavía no hay proveedores. Aparecen solos cuando un hotel o un tour entra a una cotización, o agrégalos con «Agregar proveedor».'
             : mios
               ? 'No tienes tarifarios vencidos ni por vencer. Nada que pedir por ahora.'
-              : 'Nada coincide con los filtros.'}
+              : porClasificar
+                ? 'Todas las fichas están completas. Nada por clasificar.'
+                : 'Nada coincide con los filtros.'}
         </p>
       ) : (
         <ul className="divide-y rounded-lg border" data-filas-proveedores>
@@ -243,6 +277,11 @@ export default function ListaProveedores({
                   <span className="block truncate text-[11px] text-muted-foreground">
                     {[NOMBRE_TIPO_PROVEEDOR[p.tipoProveedor], p.ciudad, p.responsableId ? nombrePersona.get(p.responsableId) : null].filter(Boolean).join(' · ')}
                   </span>
+                  {p.faltas.length > 0 && (
+                    <span className="block truncate text-[11px] text-[#9A5F0C]" data-faltas>
+                      Por clasificar: {p.faltas.join(' · ')}
+                    </span>
+                  )}
                 </span>
                 <span className="flex shrink-0 flex-col items-end gap-0.5">
                   <PastillaSemaforo semaforo={p.semaforo} />

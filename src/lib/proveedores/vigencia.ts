@@ -83,6 +83,20 @@ export interface ProveedorDeTarjeta {
   tarifarios: VigenciaTarifario[]
   /** «Se compra a través de»: el mayorista, con sus tarifarios. */
   via: { id: string; nombre: string; tarifarios: VigenciaTarifario[] } | null
+  /**
+   * Lo que le falta a la ficha para poder cotizar (`faltasDeFicha`, 2026-10-19). Con algo, la
+   * tarjeta avisa «Ficha por clasificar» antes que el tarifario. Ausente = completa (lecturas de antes).
+   */
+  faltas?: string[]
+  /** El proveedor cobra IVA (`iva_declarado`): decide la casilla «Calcular con IVA». */
+  ivaDeclarado?: boolean | null
+}
+
+/** El aviso de la tarjeta cuando la ficha está incompleta: manda sobre el del tarifario. */
+export function avisoDeFicha(p: Pick<ProveedorDeTarjeta, 'id' | 'faltas'>): AvisoTarifario | null {
+  const faltas = p.faltas ?? []
+  if (faltas.length === 0) return null
+  return { texto: 'Ficha por clasificar: no la uses para cotizar', accion: faltas[0], proveedorId: p.id, tono: 'ambar' }
 }
 
 export interface AvisoTarifario {

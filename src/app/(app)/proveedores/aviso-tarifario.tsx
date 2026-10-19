@@ -2,7 +2,7 @@
 
 import Link from 'next/link'
 
-import { avisoDeTarifario, hoyBogota, type ProveedorDeTarjeta } from '@/lib/proveedores/vigencia'
+import { avisoDeFicha, avisoDeTarifario, hoyBogota, type ProveedorDeTarjeta } from '@/lib/proveedores/vigencia'
 
 /**
  * El aviso discreto de la tarjeta de la cotización (Mauricio, 2026-10-18): «Tarifario vencido
@@ -16,7 +16,8 @@ export function AvisoTarifarioTarjeta({
   proveedor: ProveedorDeTarjeta
   fechasViaje: { inicio: string | null; fin: string | null } | null | undefined
 }) {
-  const aviso = avisoDeTarifario(proveedor, fechasViaje, hoyBogota())
+  // Una ficha por clasificar no se usa para cotizar (2026-10-19): ese aviso va primero.
+  const aviso = avisoDeFicha(proveedor) ?? avisoDeTarifario(proveedor, fechasViaje, hoyBogota())
   if (!aviso) return null
   return (
     <div className="-mt-1 pb-2.5 pl-[42px] pr-3" data-aviso-tarifario={aviso.tono}>

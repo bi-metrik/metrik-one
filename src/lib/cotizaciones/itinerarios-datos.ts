@@ -36,7 +36,7 @@ import {
 } from './itinerarios'
 import { faltanLasTablasDeItinerarios } from './tolerar-itinerarios'
 import { idDelPrincipal } from './tarifas'
-import { costoDeRubrosConfirmados } from './rubros-sugeridos'
+import { costosDelItem } from './iva-costo'
 import { pasajerosParaCuadre, type FilaDePasajeros } from './cuadre-pasajero'
 import { esBaseIvaLinea, type BaseIvaLinea } from '@/lib/fiscal/iva-cotizacion'
 import {
@@ -241,7 +241,8 @@ export async function contextoDeCotizacion(
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const sinAdicionales = ((filas ?? []) as any[]).map(fila => {
     // R-P1 · los rubros SUGERIDOS no entran al costo hasta que alguien confirme.
-    const { numeroDeRubros, costoDeRubros } = costoDeRubrosConfirmados(fila.rubros)
+    // IVA del proveedor (2026-10-19): el costo se guarda sin IVA y `costosDelItem` se lo suma.
+    const { numeroDeRubros, costoDeRubros, subtotal, costoSinIva } = costosDelItem(fila as never)
     return {
       id: fila.id as string,
       nombre: (fila.nombre ?? null) as string | null,
@@ -254,7 +255,7 @@ export async function contextoDeCotizacion(
       dia_relativo: (fila.dia_relativo ?? null) as number | null,
       entra_al_precio: (fila.entra_al_precio ?? null) as boolean | null,
       cantidad: fila.cantidad ?? 1,
-      subtotal: fila.subtotal ?? 0,
+      subtotal: subtotal ?? 0,
       numeroDeRubros,
       costoDeRubros,
       descuento_porcentaje: fila.descuento_porcentaje ?? 0,
@@ -263,7 +264,7 @@ export async function contextoDeCotizacion(
       precio_manual: fila.precio_manual ?? false,
       base_iva: esBaseIvaLinea(fila.base_iva) ? fila.base_iva : null,
       // Punto 11 del brief del 2026-10-05: lo mismo que `recalcularTotales` y el editor.
-      pasajeros: pasajerosParaCuadre(fila.tarifa_pax, costoDeRubros),
+      pasajeros: pasajerosParaCuadre(fila.tarifa_pax, costoSinIva),
       // Lo leído del pantallazo: el motivo de «falta el costo» dice si lo que falta es la tasa
       // de cambio (punto 12) y nombra la línea como se lee (punto 10).
       tarifa_pax: fila.tarifa_pax ?? null,

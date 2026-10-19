@@ -3,7 +3,7 @@
  * Devuelve las columnas de `fotos_perfiles` tal como se escriben.
  */
 import { correosDeTexto, normalizarCelular, normalizarWeb } from './contacto'
-import { esTipoProveedor, normalizarEtiquetas, etiquetasDeTexto, type TipoProveedor } from './tipos'
+import { esTarifaCanal, esTipoProveedor, normalizarEtiquetas, etiquetasDeTexto, type TarifaCanal, type TipoProveedor } from './tipos'
 
 export interface DatosFicha {
   nombre: string
@@ -23,6 +23,12 @@ export interface DatosFicha {
   tarifasMayorista: boolean
   responsableId: string | null
   compradoViaId: string | null
+  departamento: string | null
+  destino: string | null
+  /** `null` = no se sabe todavía. */
+  ivaDeclarado: boolean | null
+  ivaIncluido: boolean | null
+  tarifaCanal: TarifaCanal | null
 }
 
 export interface ColumnasFicha {
@@ -43,6 +49,18 @@ export interface ColumnasFicha {
   tarifas_mayorista: boolean
   responsable_tarifas_id: string | null
   comprado_via_id: string | null
+  departamento: string | null
+  destino: string | null
+  iva_declarado: boolean | null
+  iva_incluido: boolean | null
+  tarifa_canal: TarifaCanal | null
+}
+
+/** «sí» / «no» / «no se sabe» de un selector de tres estados. */
+export function triestado(v: unknown): boolean | null {
+  if (v === true || v === 'si' || v === 'true') return true
+  if (v === false || v === 'no' || v === 'false') return false
+  return null
 }
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
@@ -98,6 +116,11 @@ export function revisarDatos(entrada: unknown): { ok: true; columnas: ColumnasFi
       tarifas_mayorista: d.tarifasMayorista === true,
       responsable_tarifas_id: responsable,
       comprado_via_id: via,
+      departamento: corto(d.departamento, 120),
+      destino: corto(d.destino, 120),
+      iva_declarado: triestado(d.ivaDeclarado),
+      iva_incluido: triestado(d.ivaIncluido),
+      tarifa_canal: esTarifaCanal(d.tarifaCanal) ? d.tarifaCanal : null,
     },
   }
 }

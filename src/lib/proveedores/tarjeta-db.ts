@@ -8,6 +8,7 @@ import 'server-only'
  * Nunca rompe la tarjeta: si la migración `20261018150000` no está (o algo falla), devuelve un
  * mapa vacío y la tarjeta queda sin aviso.
  */
+import { faltasDeFicha } from './completitud'
 import type { ProveedorDeTarjeta, VigenciaTarifario } from './vigencia'
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -19,6 +20,12 @@ interface Fila {
   clave: string
   nombre: string
   comprado_via_id?: string | null
+  tipo_proveedor?: string | null
+  ciudad?: string | null
+  pais?: string | null
+  departamento?: string | null
+  notas?: string | null
+  iva_declarado?: boolean | null
 }
 
 export async function proveedoresDeTarjetas(
@@ -32,7 +39,7 @@ export async function proveedoresDeTarjetas(
   try {
     const { data: filas, error } = await supabase
       .from('fotos_perfiles')
-      .select('id, tipo, clave, nombre, comprado_via_id')
+      .select('id, tipo, clave, nombre, comprado_via_id, tipo_proveedor, ciudad, pais, departamento, notas, iva_declarado')
       .eq('workspace_id', workspaceId)
       .in('clave', claves)
     if (error || !filas) return salida
@@ -57,7 +64,14 @@ export async function proveedoresDeTarjetas(
       const via = f.comprado_via_id && nombreVia.has(f.comprado_via_id)
         ? { id: f.comprado_via_id, nombre: nombreVia.get(f.comprado_via_id) as string, tarifarios: porProveedor.get(f.comprado_via_id) ?? [] }
         : null
-      salida.set(`${f.tipo}:${f.clave}`, { id: f.id, nombre: f.nombre, tarifarios: porProveedor.get(f.id) ?? [], via })
+      salida.set(`${f.tipo}:${f.clave}`, {
+        id: f.id,
+        nombre: f.nombre,
+        tarifarios: porProveedor.get(f.id) ?? [],
+        via,
+        faltas: faltasDeFicha({ tipo_proveedor: f.tipo_proveedor ?? 'otro', ciudad: f.ciudad ?? null, pais: f.pais ?? null, departamento: f.departamento ?? null, notas: f.notas ?? null }).map((x) => x.texto),
+        ivaDeclarado: f.iva_declarado ?? null,
+      })
     }
   } catch {
     // Sin aviso: la tarjeta sigue igual.

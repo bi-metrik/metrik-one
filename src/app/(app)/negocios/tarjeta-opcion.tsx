@@ -33,7 +33,7 @@ import { ItemMenu, MenuAcciones, SeparadorMenu } from '@/components/viaje/menu-a
 import { Miniatura, MiniaturaManual, useVistaAmpliada } from '@/components/viaje/pantallazo'
 import type { FilaAdicional } from '@/lib/cotizaciones/adicionales'
 import { aplicarCorrecciones, esCorregible, leerCorrecciones, leidosPorSlug } from '@/lib/cotizaciones/correcciones'
-import { cargoDeItem, ciudadDeActividad, hotelesDeItems, vuelosDeItems, type ItemConLectura } from '@/lib/cotizaciones/detalle-viaje'
+import { cargoDeItem, hotelesDeItems, vuelosDeItems, type ItemConLectura } from '@/lib/cotizaciones/detalle-viaje'
 import {
   costoPorTipoDeHabitaciones,
   habitacionesDeTarifa,
@@ -80,6 +80,7 @@ import {
 } from '@/lib/cotizaciones/espera-deshacer'
 import { datosManuales, esManual, montoConMiles } from '@/lib/cotizaciones/ingreso-manual'
 import { nombreVisibleDeLinea } from '@/lib/cotizaciones/nombre-visible'
+import { pedidoDeLinea } from '@/lib/cotizaciones/proveedor-de-linea'
 import { CheckVa, ModoYDia, useActividad, type ActividadDeTarjeta } from '@/app/(app)/negocios/actividad-control'
 import { TEXTO_ACTIVIDAD_NO_VA, TEXTO_VUELO_NO_VA } from '@/lib/cotizaciones/actividad-en-cotizacion'
 
@@ -323,12 +324,8 @@ export default function TarjetaOpcion({
 
   // El perfil del hotel o del tour (2026-10-16): sus fotos son del espacio y entran solas en la
   // propuesta; la tarjeta las muestra, deja pegar o subir otra y pregunta «¿Es el mismo …?».
-  const nombreActividad = esActividad ? nombreVisibleDeLinea(item) : null
-  const pedidoFoto: PedidoFoto | null = esHotel && hotel && (hotel.hotel ?? hotel.linea)
-    ? { tipo: 'hotel', nombre: (hotel.hotel ?? hotel.linea) as string, ciudad: hotel.ciudad ?? null }
-    : esActividad && nombreActividad
-      ? { tipo: 'actividad', nombre: nombreActividad, ciudad: ciudadDeActividad(item) }
-      : null
+  // El mismo pedido que usa el servidor para la casilla del IVA (`pedidoDeLinea`).
+  const pedidoFoto: PedidoFoto | null = pedidoDeLinea(item)
   const bib = useFotoDeBiblioteca(pedidoFoto)
   // El espacio tiene biblioteca: toda foto nueva va al perfil (con la casilla de autorización).
   const conBiblioteca = bib?.disponible === true

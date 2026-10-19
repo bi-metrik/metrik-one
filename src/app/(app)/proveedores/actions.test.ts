@@ -37,7 +37,7 @@ const IBEROSTAR = 'd0000000-0000-4000-8000-000000000003'
 
 import { claveDeFoto } from '@/lib/fotos/clave'
 import { fotosParaTarjetas } from '../fotos/actions'
-import { crearProveedor, guardarCuenta, guardarDatos, leerCuentas, leerFicha, leerProveedores, pedirSubida, registrarTarifario, verificarCuenta } from './actions'
+import { confirmarCiudad, guardarExtraccion, leerExtraccion, usarSugerenciasDeExtraccion, crearProveedor, guardarCuenta, guardarDatos, leerCuentas, leerFicha, leerProveedores, marcarTarifasPedidas, pedirSubida, registrarTarifario, verificarCuenta } from './actions'
 
 const perfil = (id: string, tipo: string, nombre: string, ciudad: string | null, extra: Fila = {}): Fila => ({
   id, workspace_id: WS, tipo, clave: claveDeFoto(tipo === 'proveedor' ? 'hotel' : (tipo as 'hotel'), nombre, ciudad), nombre, ciudad,
@@ -68,6 +68,7 @@ function sembrar(plantilla = 'trappvel') {
     ],
     proveedor_cuentas: [],
     proveedor_cuentas_historial: [],
+    proveedor_extracciones: [],
   }
 }
 
@@ -133,12 +134,67 @@ describe('crear sin duplicar', () => {
 
 describe('datos de la ficha', () => {
   it('guarda normalizado; el responsable es del equipo; se compra solo a través de un mayorista', async () => {
-    const r = await guardarDatos(IBEROSTAR, { nombre: 'Iberostar Selection Bávaro', tipoProveedor: 'hotel', celular: '300 123 4567', etiquetas: ['Luna de Miel', 'lujo'], responsableId: BETO, compradoViaId: MAYORISTA, estrellas: 5 })
-    expect(r).toEqual({ ok: true })
+    const r = await guardarDatos(IBEROSTAR, { nombre: 'Iberostar Selection Bávaro', tipoProveedor: 'hotel', ciudad: 'Punta Cana', celular: '300 123 4567', etiquetas: ['Luna de Miel', 'lujo'], responsableId: BETO, compradoViaId: MAYORISTA, estrellas: 5 })
+    expect(r).toEqual({ ok: true, alias: false })
+    expect(base.tablas.fotos_perfiles_alias).toEqual([])
     expect(base.tablas.fotos_perfiles.find((p) => p.id === IBEROSTAR)).toMatchObject({ celular: '+573001234567', celular_original: '300 123 4567', etiquetas: ['luna de miel', 'lujo'], responsable_tarifas_id: BETO, comprado_via_id: MAYORISTA, estrellas: 5, updated_by: ANA })
     expect(await guardarDatos(IBEROSTAR, { nombre: 'X', tipoProveedor: 'hotel', responsableId: CAROL })).toMatchObject({ ok: false, error: expect.stringMatching(/equipo/) })
     expect(await guardarDatos(IBEROSTAR, { nombre: 'X', tipoProveedor: 'hotel', compradoViaId: HOTEL })).toMatchObject({ ok: false, error: expect.stringMatching(/mayorista/) })
     expect(await guardarDatos(IBEROSTAR, { nombre: '', tipoProveedor: 'hotel' })).toMatchObject({ ok: false })
+  })
+
+  it('cambiar la ciudad no mueve la llave: guarda el alias con la llave nueva (una vez)', async () => {
+    const claveVieja = claveDeFoto('hotel', 'Iberostar Selection Bávaro', 'Punta Cana')
+    const r = await guardarDatos(IBEROSTAR, { nombre: 'Iberostar Selection Bávaro', tipoProveedor: 'hotel', ciudad: 'Higüey', departamento: 'La Altagracia', destino: 'Internacional - República Dominicana', pais: 'DO' })
+    expect(r).toEqual({ ok: true, alias: true })
+    const fila = base.tablas.fotos_perfiles.find((p) => p.id === IBEROSTAR)
+    expect(fila).toMatchObject({ clave: claveVieja, ciudad: 'Higüey', departamento: 'La Altagracia', destino: 'Internacional - República Dominicana', pais: 'DO' })
+    expect(base.tablas.fotos_perfiles_alias).toEqual([
+      expect.objectContaining({ workspace_id: WS, perfil_id: IBEROSTAR, tipo: 'hotel', clave: claveDeFoto('hotel', 'Iberostar Selection Bávaro', 'Higüey'), ciudad: 'Higüey', created_by: ANA }),
+    ])
+    // Guardar otra vez lo mismo no duplica el alias.
+    expect(await guardarDatos(IBEROSTAR, { nombre: 'Iberostar Selection Bávaro', tipoProveedor: 'hotel', ciudad: 'Higüey', pais: 'DO' })).toEqual({ ok: true, alias: false })
+    expect(base.tablas.fotos_perfiles_alias).toHaveLength(1)
+  })
+
+  it('si la llave nueva ya es de otra ficha, no guarda (serían dos fichas del mismo proveedor)', async () => {
+    const r = await guardarDatos(IBEROSTAR, { nombre: 'Catalonia Puerta del Sol', tipoProveedor: 'hotel', ciudad: 'Madrid' })
+    expect(r).toMatchObject({ ok: false, error: expect.stringMatching(/otra ficha/) })
+    expect(base.tablas.fotos_perfiles.find((p) => p.id === IBEROSTAR)).toMatchObject({ nombre: 'Iberostar Selection Bávaro', ciudad: 'Punta Cana' })
+    expect(base.tablas.fotos_perfiles_alias).toEqual([])
+  })
+
+  it('un proveedor sin fotos (mayorista) cambia de ciudad sin alias', async () => {
+    expect(await guardarDatos(MAYORISTA, { nombre: 'Mayorista Uno', tipoProveedor: 'mayorista', ciudad: 'Bogotá' })).toEqual({ ok: true, alias: false })
+    expect(base.tablas.fotos_perfiles_alias).toEqual([])
+  })
+
+  it('confirmar la ciudad quita la nota «Ciudad por confirmar» y la ficha queda completa', async () => {
+    const f = base.tablas.fotos_perfiles.find((p) => p.id === IBEROSTAR) as Fila
+    Object.assign(f, { pais: 'DO', notas: 'Ciudad por confirmar\nPide tarifas por correo' })
+    const antes = await leerFicha(IBEROSTAR)
+    expect(antes.ok && antes.ficha.faltas.map((x) => x.texto)).toEqual(['La ciudad está por confirmar'])
+    expect(antes.ok && antes.ficha.ciudadPorConfirmar).toBe(true)
+    expect(await confirmarCiudad(IBEROSTAR)).toEqual({ ok: true })
+    expect(f.notas).toBe('Pide tarifas por correo')
+    const despues = await leerFicha(IBEROSTAR)
+    expect(despues.ok && despues.ficha.faltas).toEqual([])
+    sesion.role = 'read_only'
+    expect(await confirmarCiudad(IBEROSTAR)).toMatchObject({ ok: false })
+  })
+
+  it('la lista marca las fichas por clasificar', async () => {
+    const r = await leerProveedores()
+    expect(r.ok).toBe(true)
+    if (!r.ok) return
+    const porId = new Map(r.proveedores.map((p) => [p.id, p.faltas]))
+    expect(porId.get(HOTEL)).toEqual(['Falta el país'])
+    expect(porId.get(MAYORISTA)).toEqual(['Falta la ciudad (el municipio donde duerme o se presta el servicio)', 'Falta el país'])
+  })
+
+  it('marcar las tarifas como pedidas anota fecha y persona', async () => {
+    expect(await marcarTarifasPedidas(HOTEL)).toEqual({ ok: true })
+    expect(base.tablas.fotos_perfiles.find((p) => p.id === HOTEL)).toMatchObject({ tarifas_solicitadas_por: ANA, tarifas_solicitadas_at: expect.any(String) })
   })
 
   it('la ficha trae los tarifarios del mayorista como respaldo', async () => {
@@ -209,6 +265,44 @@ describe('la tarjeta de la cotización', () => {
       nombre: 'Catalonia Puerta del Sol',
       tarifarios: [],
       via: { id: MAYORISTA, nombre: 'Mayorista Uno', tarifarios: [{ desde: '2025-01-01', hasta: '2025-12-31' }] },
+      faltas: ['Falta el país'],
+      ivaDeclarado: null,
     })
+  })
+})
+
+describe('extracciones del motor', () => {
+  const json = JSON.stringify({
+    esquema_version: '0.2',
+    expediente: { archivos: [{ archivo: 'tar0_TARIFAS 2027.pdf', decision: 'usar' }], pedir_actualizacion: ['Temporada media sin fechas'] },
+    tarifario: { canal: 'neta', moneda: 'COP', impuestos: { iva_declarado: true, iva_incluido: false }, temporadas: [{}], tarifas: [{}, {}] },
+    datos_ficha: { ciudad: 'Madrid' },
+  })
+
+  it('se guarda en el espacio con quien la subió; la ficha ve el resumen y usa lo que no sabía', async () => {
+    expect(await leerExtraccion(HOTEL)).toEqual({ ok: true, extraccion: null })
+    expect(await guardarExtraccion(HOTEL, '{"esquema_version":"9.9","expediente":{}}')).toMatchObject({ ok: false })
+    expect(await guardarExtraccion(HOTEL, json, { instruccion: 'v8', modelo: 'modelo-de-prueba' })).toEqual({ ok: true })
+    expect(base.tablas.proveedor_extracciones[0]).toMatchObject({ workspace_id: WS, proveedor_id: HOTEL, esquema_version: '0.2', instruccion_version: 'v8', creada_por: ANA, archivos: ['tar0_TARIFAS 2027.pdf'] })
+    base.tablas.proveedor_extracciones[0].estado = 'borrador'
+    base.tablas.proveedor_extracciones[0].created_at = '2026-10-19T10:00:00Z'
+    const r = await leerExtraccion(HOTEL)
+    expect(r.ok && r.extraccion?.resumen).toMatchObject({ tarifas: 2, temporadas: 1, pedir: ['Temporada media sin fechas'] })
+    expect(r.ok && r.extraccion?.sugerencias).toEqual({ tarifaCanal: 'neta', ivaDeclarado: true, ivaIncluido: false })
+    expect(await usarSugerenciasDeExtraccion(HOTEL)).toEqual({ ok: true })
+    expect(base.tablas.fotos_perfiles.find((p) => p.id === HOTEL)).toMatchObject({ tarifa_canal: 'neta', iva_declarado: true, iva_incluido: false })
+  })
+
+  it('no pisa lo que una persona ya anotó en la ficha', async () => {
+    Object.assign(base.tablas.fotos_perfiles.find((p) => p.id === HOTEL) as Fila, { tarifa_canal: 'comisionable', iva_declarado: false })
+    await guardarExtraccion(HOTEL, json)
+    Object.assign(base.tablas.proveedor_extracciones[0], { estado: 'borrador', created_at: '2026-10-19T10:00:00Z' })
+    const r = await leerExtraccion(HOTEL)
+    expect(r.ok && r.extraccion?.sugerencias).toEqual({ tarifaCanal: null, ivaDeclarado: null, ivaIncluido: false })
+  })
+
+  it('una extracción de otro espacio no se lee', async () => {
+    base.tablas.proveedor_extracciones.push({ id: 'x9', workspace_id: OTRO_WS, proveedor_id: HOTEL, estado: 'borrador', created_at: '2026-10-19T10:00:00Z', expediente: {}, tarifario: null, archivos: [] })
+    expect(await leerExtraccion(HOTEL)).toEqual({ ok: true, extraccion: null })
   })
 })
