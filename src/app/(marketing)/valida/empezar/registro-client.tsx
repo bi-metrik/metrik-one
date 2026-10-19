@@ -4,7 +4,7 @@ import { useEffect, useRef, useState } from 'react'
 import MetrikLockup from '@/components/metrik-lockup'
 import { createClient } from '@/lib/supabase/client'
 import { fetchPropio } from '@/lib/version/fetch-propio'
-import TarjetaEpayco, { type TarjetaEpaycoHandle } from './tarjeta-epayco'
+import TarjetaEpayco, { type DatosTarjeta, type TarjetaEpaycoHandle } from './tarjeta-epayco'
 import {
   casillasDesdeNit,
   listoParaEnviar as datosListos,
@@ -186,7 +186,7 @@ export default function RegistroValidaClient({
     setError('')
     setErrorCampo('')
     // Con la cláusula de cobro vigente: primero el token de ePayco (la tarjeta nunca viaja a ONE).
-    let datosTarjeta: { token: string; titular: string; celular: string } | null = null
+    let datosTarjeta: DatosTarjeta | null = null
     if (tarjeta) {
       try {
         datosTarjeta = (await refTarjeta.current?.tokenizar()) ?? null

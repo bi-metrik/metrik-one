@@ -182,8 +182,12 @@ vi.mock('@/lib/cobros/pago-en-linea', () => ({
 vi.mock('@/lib/cobros/pago-en-linea-servidor', () => ({ repoPagoEnLinea: () => ({}) }))
 vi.mock('@/lib/suscripciones/pasarela/epayco', async (original) => ({
   ...(await original<typeof import('@/lib/suscripciones/pasarela/epayco')>()),
-  registrarClienteEpayco: async () => ({ ok: true, ref: REF_TARJETA }),
+  registrarClienteEpayco: async (p: { pagador: Record<string, unknown> }) => {
+    clientesEpayco.push(p.pagador)
+    return { ok: true, ref: REF_TARJETA }
+  },
 }))
+const clientesEpayco: Record<string, unknown>[] = []
 // La prueba la emite Valida; aquí, lo que deja en el registro (con el cobro programado de verdad).
 vi.mock('./prueba-servidor', async () => {
   const { momentoDelCobro, entornoDeCobro } = await import('./cobro-prueba')
@@ -267,7 +271,7 @@ describe('registro → 14 minutos → cobro de la tarjeta con el plan activado',
       ref: null,
       utm: {},
       ip: '181.50.1.2',
-      tarjeta: { token: 'XCX92PZqBKfmcWFbA', titular: 'Ana Pérez', celular: '3001234567' },
+      tarjeta: { token: 'XCX92PZqBKfmcWFbA', titular: 'Ana Pérez', tipoDocumento: 'CC', documento: '1.020.304.050', celular: '3001234567' },
     })
     expect(alta).toMatchObject({ tipo: 'ok' })
     const reg = tablas.valida_registros[0]
@@ -343,6 +347,13 @@ describe('registro → 14 minutos → cobro de la tarjeta con el plan activado',
     expect(tablas.planes_cobro[0].pasarela).toBe('epayco')
     expect(ePayco.cargos).toHaveLength(1)
     expect(ePayco.cargos[0]).toMatchObject({ monto: 150_000, numeroCuota: 1, medioPago: { token_ref: REF_TARJETA, pasarela: 'epayco' } })
+    // Transacción 390341460 (2026-10-19, «Rechazada eControl»): el cliente de ePayco y el cargo llevan
+    // el documento y el nombre del TITULAR de la tarjeta, no el NIT ni la razón social de la empresa.
+    expect(clientesEpayco.at(-1)).toMatchObject({ tipoDocumento: 'CC', documento: '1020304050', nombre: 'Ana', apellido: 'Pérez' })
+    expect(ePayco.cargos[0].cliente).toMatchObject({ tipoDocumento: 'CC', documento: '1020304050', nombre: 'Ana', apellido: 'Pérez' })
+    expect(tablas.workspaces.find((w) => w.id === reg.workspace_id)?.config_extra).toMatchObject({
+      valida_pagador: { celular: '3001234567', titular: { nombre: 'Ana Pérez', tipo_documento: 'CC', documento: '1020304050' } },
+    })
     expect(pagos).toHaveLength(1)
     expect(rpcs).toEqual(['valida_activar_autogestion', 'enrolar_cobro_por_ciclo'])
 
@@ -400,7 +411,7 @@ describe('registro → consulta 11 → confirma → cobro YA; el cron del día 7
       ref: null,
       utm: {},
       ip: '181.50.1.3',
-      tarjeta: { token: 'XCX92PZqBKfmcWFbA', titular: 'Ana Pérez', celular: '3001234567' },
+      tarjeta: { token: 'XCX92PZqBKfmcWFbA', titular: 'Ana Pérez', tipoDocumento: 'CC', documento: '1.020.304.050', celular: '3001234567' },
     })
     expect(alta).toMatchObject({ tipo: 'ok' })
     const reg = tablas.valida_registros[0]
@@ -486,7 +497,7 @@ describe('consulta 11 → confirma → la tarjeta rechaza → conserva la prueba
       ref: null,
       utm: {},
       ip: '181.50.1.4',
-      tarjeta: { token: 'XCX92PZqBKfmcWFbA', titular: 'Ana Pérez', celular: '3001234567' },
+      tarjeta: { token: 'XCX92PZqBKfmcWFbA', titular: 'Ana Pérez', tipoDocumento: 'CC', documento: '1.020.304.050', celular: '3001234567' },
     })
     expect(alta).toMatchObject({ tipo: 'ok' })
     const reg = tablas.valida_registros[0]
@@ -567,7 +578,7 @@ describe('«Activar plan» (el tercer camino) también crea una suscripción y s
       ref: null,
       utm: {},
       ip: '181.50.1.5',
-      tarjeta: { token: 'XCX92PZqBKfmcWFbA', titular: 'Ana Pérez', celular: '3001234567' },
+      tarjeta: { token: 'XCX92PZqBKfmcWFbA', titular: 'Ana Pérez', tipoDocumento: 'CC', documento: '1.020.304.050', celular: '3001234567' },
     })
     expect(alta).toMatchObject({ tipo: 'ok' })
     const reg = tablas.valida_registros[0]

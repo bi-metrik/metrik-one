@@ -23,7 +23,7 @@ import {
   puedeCancelar,
   textoConfirmacionCobro,
 } from './cobro-prueba'
-import { partirNombre } from './metodo-pago'
+import { titularDelCobro } from './metodo-pago'
 import { cancelarSuscripcionEnPrueba } from './suscripcion-prueba-servidor'
 import { TERMINOS_PLAN, terminosPlanListos } from './terminos-plan'
 
@@ -498,8 +498,9 @@ async function ensayoDeCobro(
 ) {
   const db = deps.db as Db
   const ws = await db.from('workspaces').select('config_extra').eq('id', r.workspace_id).maybeSingle()
-  const celular = (((ws.data?.config_extra ?? {}) as Record<string, unknown>).valida_pagador as { celular?: string } | undefined)?.celular ?? ''
-  const { nombre, apellido } = partirNombre(r.razon_social)
+  const pagadorCfg = ((ws.data?.config_extra ?? {}) as Record<string, unknown>).valida_pagador as { celular?: string } | undefined
+  const celular = pagadorCfg?.celular ?? ''
+  const titular = titularDelCobro(pagadorCfg, { nit: r.identificacion, razonSocial: r.razon_social })
   const referencia = `vpr-${r.id.replace(/-/g, '').slice(0, 20)}`
   const res: ResultadoCargo = await (deps.cobrarDirecto ?? cobrarConTokenEpayco)({
     referencia,
@@ -514,7 +515,7 @@ async function ensayoDeCobro(
     facturaRef: null,
     medioPago: { tipo: 'tarjeta', token_ref: r.metodo_pago_ref ?? undefined, pasarela: 'epayco' },
     cliente: null,
-    pagador: { tipoDocumento: 'NIT', documento: r.identificacion, nombre, apellido, email: r.correo, celular },
+    pagador: { ...titular, email: r.correo, celular },
   })
   const estado = res.estado === 'aprobado' ? 'cobrado' : res.estado === 'pendiente' ? 'cobro_pendiente' : res.estado === 'rechazado' ? 'rechazado' : 'revisar'
   const ref = res.estado === 'error' ? null : res.externalRef

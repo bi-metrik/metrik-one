@@ -6,6 +6,7 @@ import { Lock } from 'lucide-react'
 import { forwardRef, useImperativeHandle, useRef, useState } from 'react'
 import { INTEGRIDAD_JQUERY, SCRIPT_EPAYCO, SCRIPT_JQUERY } from '@/lib/valida-registro/csp'
 import { asegurarSesionEpayco, textoErrorEpayco } from '@/lib/valida-registro/error-epayco'
+import { TIPOS_DOCUMENTO_TITULAR, type TipoDocumentoTitular } from '@/lib/valida-registro/documento-titular'
 
 /**
  * La tarjeta para el cobro al cumplirse los 7 días de la prueba (numeral 7 de la v2.0, decisión A2). Solo se pinta cuando
@@ -13,7 +14,10 @@ import { asegurarSesionEpayco, textoErrorEpayco } from '@/lib/valida-registro/er
  *
  * ⚠️ El número, la fecha y el CVC NO tienen `name`: no viajan en ningún formulario de ONE. ePayco.js
  * (el script oficial) los lee de los atributos `data-epayco` de este bloque, los manda a ePayco y
- * devuelve un TOKEN. A ONE solo llegan el token, el titular y el celular.
+ * devuelve un TOKEN. A ONE solo llegan el token, el titular, su documento y el celular.
+ *
+ * El documento es el del TITULAR de la tarjeta (no el NIT de la empresa): el antifraude de ePayco lo
+ * compara con el del medio de pago y, si no coincide, rechaza el cobro.
  *
  * ePayco.js usa `$.ajax`, así que se carga jQuery antes (documentación oficial de tokenización).
  *
@@ -33,9 +37,17 @@ type EpaycoGlobal = {
   token: { create: (form: HTMLElement, cb: (error: unknown, token: string | null) => void) => void }
 }
 
+export interface DatosTarjeta {
+  token: string
+  titular: string
+  tipoDocumento: TipoDocumentoTitular
+  documento: string
+  celular: string
+}
+
 export interface TarjetaEpaycoHandle {
   /** Pide el token a ePayco con lo que hay en los campos. Rechaza con un texto para la persona. */
-  tokenizar: () => Promise<{ token: string; titular: string; celular: string }>
+  tokenizar: () => Promise<DatosTarjeta>
 }
 
 const claseCampo = 'h-11 w-full rounded-lg border border-border bg-white px-3 text-base text-foreground'
@@ -69,6 +81,8 @@ const TarjetaEpayco = forwardRef<TarjetaEpaycoHandle, PropsTarjeta>(function Tar
   // campo controlado podría entregarle un valor viejo. Se lee del campo al tokenizar.
   const campoTitular = useRef<HTMLInputElement>(null)
   const [celular, setCelular] = useState('')
+  const [tipoDocumento, setTipoDocumento] = useState<TipoDocumentoTitular>('CC')
+  const [documento, setDocumento] = useState('')
   // Se calcula una vez, al pintar: la prueba abre al enviar, minutos después.
   const [vence] = useState(() => FECHA_HORA.format(new Date(Date.now() + duracionMs)))
 
@@ -90,7 +104,7 @@ const TarjetaEpayco = forwardRef<TarjetaEpaycoHandle, PropsTarjeta>(function Tar
             rechazar(new Error(textoErrorEpayco(error)))
             return
           }
-          resolver({ token, titular: campoTitular.current?.value ?? '', celular })
+          resolver({ token, titular: campoTitular.current?.value ?? '', tipoDocumento, documento, celular })
         })
       }),
   }))
@@ -101,7 +115,7 @@ const TarjetaEpayco = forwardRef<TarjetaEpaycoHandle, PropsTarjeta>(function Tar
       <Script src={SCRIPT_EPAYCO} strategy="afterInteractive" onLoad={() => setCargado(true)} />
       <legend className="px-1 text-sm font-medium text-foreground">Tarjeta para el plan</legend>
       <p className="text-xs text-muted-foreground">{texto.replace('{fecha_y_hora_vence}', vence)}</p>
-      {/* El recuadro de ePayco: solo lo que va a ePayco. El celular queda afuera porque lo recibe ONE. */}
+      {/* El recuadro de ePayco: solo lo que va a ePayco. El documento y el celular quedan afuera porque los recibe ONE. */}
       <section
         aria-label="Pago seguro con ePayco"
         className="space-y-3 rounded-xl border-2 border-neutral-900 bg-white p-3"
@@ -132,6 +146,35 @@ const TarjetaEpayco = forwardRef<TarjetaEpaycoHandle, PropsTarjeta>(function Tar
         </div>
         {!cargado && <p className="text-xs text-neutral-700">Cargando la pasarela de pago...</p>}
       </section>
+      <div className="space-y-1.5">
+        <label htmlFor="documento-titular" className="text-sm font-medium text-foreground">
+          Documento del titular de la tarjeta
+        </label>
+        <div className="flex gap-2">
+          <select
+            aria-label="Tipo de documento del titular"
+            className={`${claseCampo} w-24 shrink-0 px-2`}
+            value={tipoDocumento}
+            onChange={(e) => setTipoDocumento(e.target.value as TipoDocumentoTitular)}
+          >
+            {TIPOS_DOCUMENTO_TITULAR.map((t) => (
+              <option key={t.codigo} value={t.codigo} title={t.nombre}>
+                {t.codigo}
+              </option>
+            ))}
+          </select>
+          <input
+            id="documento-titular"
+            className={claseCampo}
+            placeholder="Número, sin puntos"
+            inputMode={tipoDocumento === 'PP' ? 'text' : 'numeric'}
+            autoComplete="off"
+            value={documento}
+            onChange={(e) => setDocumento(e.target.value)}
+          />
+        </div>
+        <p className="text-xs text-muted-foreground">El de la persona o empresa dueña de la tarjeta.</p>
+      </div>
       <input
         className={claseCampo}
         aria-label="Celular"

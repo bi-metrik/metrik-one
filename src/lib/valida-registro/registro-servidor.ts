@@ -20,7 +20,7 @@ import {
   textoProblemaNit,
 } from './datos'
 import { registroAbierto } from './llave'
-import { leerTarjeta, partirNombre, pideMetodoPago, textoProblemaTarjeta } from './metodo-pago'
+import { leerTarjeta, pagadorParaGuardar, partirNombre, pideMetodoPago, textoProblemaTarjeta, type PagadorGuardado } from './metodo-pago'
 import { registrarClienteEpayco } from '@/lib/suscripciones/pasarela/epayco'
 import { emitirPruebaDelEspacio } from './prueba-servidor'
 import { terminosParaElRegistro, type TerminosDelRegistroArmados } from './terminos-registro-servidor'
@@ -99,7 +99,7 @@ export interface DatosRegistroValida {
   ip: string | null
   /**
    * Solo cuando las Condiciones vigentes traen la cláusula de cobro y ePayco está encendido: el token
-   * de ePayco.js, el titular y un celular. Nunca la tarjeta (`metodo-pago.ts`).
+   * de ePayco.js, el titular con su documento y un celular. Nunca la tarjeta (`metodo-pago.ts`).
    */
   tarjeta?: unknown
 }
@@ -205,14 +205,15 @@ export async function crearEspacioValida(datos: DatosRegistroValida): Promise<Re
   // ── El método de pago (decisión A2), solo con la cláusula de cobro vigente y ePayco encendido ───
   // Antes de crear nada: si la tarjeta no se registra, no hay espacio ni prueba que limpiar. ePayco
   // guarda la tarjeta; aquí queda solo su referencia (`epayco:<cliente>:<token>`).
-  let celularPago: string | null = null
+  let pagadorGuardado: PagadorGuardado | null = null
   if (pideMetodoPago(condiciones.conCobro)) {
     const t = leerTarjeta(datos.tarjeta)
     if (!t.ok) return { tipo: 'dato', campo: 'tarjeta', texto: textoProblemaTarjeta(t.problema) }
     const { nombre, apellido } = partirNombre(t.tarjeta.titular)
     const cliente = await registrarClienteEpayco({
       cardTokenId: t.tarjeta.token,
-      pagador: { tipoDocumento: 'NIT', documento: nit, nombre, apellido, email: correo, celular: t.tarjeta.celular },
+      // El documento del TITULAR de la tarjeta, no el NIT de la empresa: ePayco los compara (eControl).
+      pagador: { tipoDocumento: t.tarjeta.tipoDocumento, documento: t.tarjeta.documento, nombre, apellido, email: correo, celular: t.tarjeta.celular },
     })
     if (!cliente.ok) {
       console.error('[valida-registro] ePayco:', cliente.error)
@@ -220,7 +221,7 @@ export async function crearEspacioValida(datos: DatosRegistroValida): Promise<Re
     }
     filaBase.metodo_pago_estado = 'registrado'
     filaBase.metodo_pago_ref = cliente.ref
-    celularPago = t.tarjeta.celular
+    pagadorGuardado = pagadorParaGuardar(t.tarjeta)
   }
 
   // ── Los Términos de esta empresa, si la casilla los acepta (con cobro) ───────────────────────
@@ -283,8 +284,8 @@ export async function crearEspacioValida(datos: DatosRegistroValida): Promise<Re
         config_extra: {
           modo_vitrina: true,
           origen_registro: 'valida_autogestion',
-          // El celular que pide ePayco para cobrar con la tarjeta (de la persona dueña de la cuenta).
-          ...(celularPago ? { valida_pagador: { celular: celularPago } } : {}),
+          // Lo que pide ePayco en cada cobro con la tarjeta: el celular y el titular (nombre y documento).
+          ...(pagadorGuardado ? { valida_pagador: pagadorGuardado } : {}),
         },
         drive_folder_id: null,
       })

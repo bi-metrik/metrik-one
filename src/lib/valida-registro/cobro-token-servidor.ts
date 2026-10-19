@@ -10,7 +10,7 @@ import type { PasarelaAdapter } from '@/lib/suscripciones/pasarela/adapter'
 import { leerRefMedioPagoEpayco } from '@/lib/suscripciones/pasarela/epayco'
 import { adapterPara } from '@/lib/suscripciones/pasarela/registro'
 import { CALENDARIO_MORA, esEspacioAutogestion, intentoDelDia } from './plan'
-import { partirNombre } from './metodo-pago'
+import { titularDelCobro } from './metodo-pago'
 
 /**
  * El cobro recurrente con la tarjeta guardada en ePayco, para el plan de Valida de una cuenta
@@ -72,6 +72,8 @@ interface Pagador {
   nit: string
   razonSocial: string
   celular: string | null
+  /** El titular de la tarjeta con su documento (o, en un registro viejo, la empresa con su NIT). */
+  titular: { tipoDocumento: string; documento: string; nombre: string; apellido: string }
   /** La IP con que la persona dio la orden: la de la confirmación, o la del registro (Condiciones 7.1). */
   ip: string | null
 }
@@ -96,10 +98,6 @@ export function fallasTecnicas(fila: { resultado: string | null; referencia?: st
   const m = /^no_procesado#(\d+):/.exec(fila.mensaje ?? '')
   if (m) return Number(m[1])
   return (fila.mensaje ?? '').startsWith('ePayco no procesó el cobro') ? 1 : null
-}
-
-function nombreYApellido(razonSocial: string): { nombre: string; apellido: string } {
-  return partirNombre(razonSocial)
 }
 
 /** La IP de la orden de cobro: la confirmación (literal a) manda; si no hubo, la del registro. */
@@ -154,6 +152,7 @@ async function pagadorConTarjeta(db: Db, cobradorId: string, ancla: Ancla): Prom
     nit: r.identificacion,
     razonSocial: r.razon_social,
     celular: typeof pagadorCfg?.celular === 'string' ? pagadorCfg.celular : null,
+    titular: titularDelCobro(pagadorCfg, { nit: r.identificacion, razonSocial: r.razon_social }),
     ip: ipDeLaOrden(r),
   }
 }
@@ -199,6 +198,7 @@ async function pagadorDeSuscripcion(db: Db, cobradorId: string, suscripcionId: s
     nit: fila.numero_documento,
     razonSocial: fila.razon_social,
     celular: typeof pagadorCfg?.celular === 'string' ? pagadorCfg.celular : null,
+    titular: titularDelCobro(pagadorCfg, { nit: fila.numero_documento, razonSocial: fila.razon_social }),
     ip: ipDeLaOrden(registro),
   }
 }
@@ -349,12 +349,13 @@ export async function cobrarCuotaConTarjeta(
     facturaRef: null,
     medioPago: { tipo: 'tarjeta', token_ref: pagador.ref, pasarela: 'epayco' },
     cliente: {
-      // Nombre y apellido partidos de la razón social, como el ensayo y el alta del cliente: ePayco
-      // valida los dos y un «.» no es un apellido.
-      ...nombreYApellido(pagador.razonSocial),
+      // El titular de la tarjeta (nombre y documento), como en el alta del cliente: el antifraude de
+      // ePayco los compara con los del medio de pago. Nombre y apellido partidos: un «.» no es apellido.
+      nombre: pagador.titular.nombre,
+      apellido: pagador.titular.apellido,
       email: pagador.correo,
-      documento: pagador.nit,
-      tipoDocumento: 'NIT',
+      documento: pagador.titular.documento,
+      tipoDocumento: pagador.titular.tipoDocumento,
       celular: pagador.celular,
       ip: pagador.ip,
     },

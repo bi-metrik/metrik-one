@@ -5,7 +5,8 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { crearDoble, type Tablas } from '../../../test/tablas-doble'
 import type { PasarelaAdapter, ResultadoCargo, SolicitudCargo } from '@/lib/suscripciones/pasarela/adapter'
 import type { EventoPasarela } from '@/lib/suscripciones/pasarela/adapter'
-import { leerTarjeta, partirNombre, pideMetodoPago } from './metodo-pago'
+import { leerTarjeta, pagadorParaGuardar, partirNombre, pideMetodoPago, textoProblemaTarjeta, titularDelCobro } from './metodo-pago'
+import { limpiarDocumentoTitular } from './documento-titular'
 
 const eventos: EventoPasarela[] = []
 vi.mock('@/lib/cobros/pago-en-linea', () => ({
@@ -25,15 +26,49 @@ describe('el método de pago al registrarse', () => {
     expect(pideMetodoPago(true, {})).toBe(false)
     expect(pideMetodoPago(true, { EPAYCO_HABILITADO: '1' })).toBe(true)
   })
-  it('del navegador llega el token, el titular y un celular; nada más se acepta', () => {
-    expect(leerTarjeta({ token: 'XCX92PZqBKfmcWFbA', titular: ' Ana  María Pérez ', celular: '300 123 4567' })).toEqual({
+  it('del navegador llega el token, el titular con su documento y un celular; nada más se acepta', () => {
+    const doc = { tipoDocumento: 'CC', documento: '1.020.304.050' }
+    expect(leerTarjeta({ token: 'XCX92PZqBKfmcWFbA', titular: ' Ana  María Pérez ', ...doc, celular: '300 123 4567' })).toEqual({
       ok: true,
-      tarjeta: { token: 'XCX92PZqBKfmcWFbA', titular: 'Ana María Pérez', celular: '3001234567' },
+      tarjeta: { token: 'XCX92PZqBKfmcWFbA', titular: 'Ana María Pérez', tipoDocumento: 'CC', documento: '1020304050', celular: '3001234567' },
     })
-    expect(leerTarjeta({ token: '4575623182290326 123', titular: 'Ana', celular: '3001234567' })).toEqual({ ok: false, problema: 'token' })
-    expect(leerTarjeta({ token: 'XCX92PZqBKfmcWFbA', titular: 'A', celular: '3001234567' })).toEqual({ ok: false, problema: 'titular' })
-    expect(leerTarjeta({ token: 'XCX92PZqBKfmcWFbA', titular: 'Ana', celular: '6011234567' })).toEqual({ ok: false, problema: 'celular' })
+    expect(leerTarjeta({ token: '4575623182290326 123', titular: 'Ana', ...doc, celular: '3001234567' })).toEqual({ ok: false, problema: 'token' })
+    expect(leerTarjeta({ token: 'XCX92PZqBKfmcWFbA', titular: 'A', ...doc, celular: '3001234567' })).toEqual({ ok: false, problema: 'titular' })
+    expect(leerTarjeta({ token: 'XCX92PZqBKfmcWFbA', titular: 'Ana', ...doc, celular: '6011234567' })).toEqual({ ok: false, problema: 'celular' })
     expect(leerTarjeta(undefined)).toEqual({ ok: false, problema: 'sin_tarjeta' })
+  })
+  it('el documento del titular es obligatorio y tiene la forma de su tipo', () => {
+    const t = { token: 'XCX92PZqBKfmcWFbA', titular: 'Ana Pérez', celular: '3001234567' }
+    // Sin documento (el formulario de antes del 2026-10-19) no pasa: sería cobrar con el NIT de la empresa.
+    expect(leerTarjeta(t)).toEqual({ ok: false, problema: 'tipo_documento' })
+    expect(leerTarjeta({ ...t, tipoDocumento: 'TI', documento: '1020304050' })).toEqual({ ok: false, problema: 'tipo_documento' })
+    expect(leerTarjeta({ ...t, tipoDocumento: 'CC', documento: '' })).toEqual({ ok: false, problema: 'documento' })
+    expect(leerTarjeta({ ...t, tipoDocumento: 'CC', documento: '10A20' })).toEqual({ ok: false, problema: 'documento' })
+    expect(leerTarjeta({ ...t, tipoDocumento: 'CC', documento: '123456789012' })).toEqual({ ok: false, problema: 'documento' })
+    expect(leerTarjeta({ ...t, tipoDocumento: 'NIT', documento: '1234' })).toEqual({ ok: false, problema: 'documento' })
+    expect(textoProblemaTarjeta('documento')).toContain('titular de la tarjeta')
+  })
+  it('limpia el número según el tipo: CC y CE dígitos, NIT sin DV, pasaporte alfanumérico', () => {
+    expect(limpiarDocumentoTitular('CC', ' 1.020.304.050 ')).toBe('1020304050')
+    expect(limpiarDocumentoTitular('CE', '123456')).toBe('123456')
+    expect(limpiarDocumentoTitular('NIT', '900.123.456-7')).toBe('900123456')
+    expect(limpiarDocumentoTitular('NIT', '900123456')).toBe('900123456')
+    expect(limpiarDocumentoTitular('PP', 'ab 12-3456')).toBe('AB123456')
+    expect(limpiarDocumentoTitular('PP', 'AB*1')).toBeNull()
+    expect(limpiarDocumentoTitular('CC', 12345 as unknown)).toBeNull()
+  })
+  it('se guarda lo mínimo y se cobra con el titular; un registro viejo cobra con la empresa', () => {
+    const t = leerTarjeta({ token: 'XCX92PZqBKfmcWFbA', titular: 'Ana María Pérez', tipoDocumento: 'CC', documento: '1020304050', celular: '3001234567' })
+    if (!t.ok) throw new Error('debía leerse')
+    const guardado = pagadorParaGuardar(t.tarjeta)
+    // Nunca el token: la tarjeta vive en `metodo_pago_ref`.
+    expect(guardado).toEqual({ celular: '3001234567', titular: { nombre: 'Ana María Pérez', tipo_documento: 'CC', documento: '1020304050' } })
+    const respaldo = { nit: '900123456', razonSocial: 'CDA EJEMPLO S.A.S.' }
+    expect(titularDelCobro(guardado, respaldo)).toEqual({ tipoDocumento: 'CC', documento: '1020304050', nombre: 'Ana', apellido: 'María Pérez' })
+    expect(titularDelCobro({ celular: '3001234567' }, respaldo)).toEqual({ tipoDocumento: 'NIT', documento: '900123456', nombre: 'CDA', apellido: 'EJEMPLO S.A.S.' })
+    expect(titularDelCobro(null, respaldo).tipoDocumento).toBe('NIT')
+    // Un titular guardado a medias no se usa: se cobra como antes, no con un documento roto.
+    expect(titularDelCobro({ titular: { nombre: 'Ana', tipo_documento: 'CC', documento: 'x' } }, respaldo).documento).toBe('900123456')
   })
   it('nombre y apellido para ePayco', () => {
     expect(partirNombre('Ana María Pérez')).toEqual({ nombre: 'Ana', apellido: 'María Pérez' })
@@ -100,6 +135,16 @@ describe('cobrar una cuota con la tarjeta', () => {
     expect(eventos[0]).toMatchObject({ tipo: 'aprobado', referenciaPago: 'epayco-7363332', referencia: e.cargos[0].referencia, monto: 150000 })
     // Nunca un número de tarjeta en lo que se manda.
     expect(JSON.stringify(e.cargos)).not.toMatch(/cardNumber|cardCvc|card\[number\]|cvc/i)
+  })
+
+  it('con el titular guardado, la cuota se cobra con SU documento y nombre (no con el NIT de la empresa)', async () => {
+    const titular = { nombre: 'Ana María Pérez', tipo_documento: 'CC', documento: '1020304050' }
+    const d = crearDoble(
+      base({ workspaces: [{ id: PAGADOR, config_extra: { origen_registro: 'valida_autogestion', valida_pagador: { celular: '3001234567', titular } } }] }),
+    )
+    const e = epayco({ estado: 'aprobado', externalRef: 'epayco-1', fecha: '2026-10-12', monto: 150000 })
+    await cobrarCuotaConTarjeta({ db: d.db, adapterPara: e.adapterPara, ahoraMs: AHORA }, { cobradorId: METRIK, cuotaId: 'q1' })
+    expect(e.cargos[0].cliente).toMatchObject({ tipoDocumento: 'CC', documento: '1020304050', nombre: 'Ana', apellido: 'María Pérez', email: 'ana@cda.co', celular: '3001234567' })
   })
 
   it('una cuota pagada o con un cobro pendiente en ePayco no se vuelve a cobrar', async () => {
