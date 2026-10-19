@@ -57,6 +57,18 @@ export async function enlaceDeArchivo(workspaceId: string, proveedorId: string, 
   return error || !data?.signedUrl ? null : data.signedUrl
 }
 
+/**
+ * Los bytes del archivo, para mandárselos al motor de extracción. `null` si la referencia no es de
+ * ese proveedor y esa clase (un certificado bancario nunca sale por aquí con clase `tarifarios`).
+ */
+export async function descargarArchivo(workspaceId: string, proveedorId: string, clase: ClaseArchivo, ref: unknown): Promise<{ datos: Uint8Array; mime: string | null } | null> {
+  const ruta = rutaValida(ref, workspaceId, proveedorId, clase)
+  if (!ruta) return null
+  const { data, error } = await bucket().download(ruta)
+  if (error || !data) return null
+  return { datos: new Uint8Array(await data.arrayBuffer()), mime: data.type || null }
+}
+
 /** Borra el archivo. Best-effort: un huérfano no le hace daño a nadie. */
 export async function borrarArchivo(workspaceId: string, proveedorId: string, clase: ClaseArchivo, ref: unknown): Promise<void> {
   const ruta = rutaValida(ref, workspaceId, proveedorId, clase)
