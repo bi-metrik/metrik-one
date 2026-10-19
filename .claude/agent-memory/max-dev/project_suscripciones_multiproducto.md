@@ -74,6 +74,14 @@ Relacionado: [[valida-alta-autogestionada]], [[secop-autogestion-registro]].
   cobro 82df1921…. ⚠️ La Política v1.6 publicada (repo metrik-valida, `app/recursos/privacidad/page.tsx` +
   `lib/recursos/terceros-numeral-9.ts`) NO nombra a ePayco, la tarjeta, el registro autogestionado ni AFI:
   propuesta de texto entregada a Emilio el 19-oct, sin publicar.
+- ⚠️⚠️ Política v1.7 en metrik-valida PR #65 (BORRADOR) y ONE sube `POLITICA_DATOS_VALIDA.version` a 1.7
+  en #1191 (4b91bc56): #65 se publica ANTES o con #1191, nunca después (constancia sobre texto no
+  publicado). Vigencia «19 de octubre de 2026» en 5 sitios: cambiarla si se publica otro día.
+  ePayco NIT 900.471.052-8 (sus T&C); AFI = AFI INTERNATIONAL GROUP S.A.S. 902.003.244-6 (RUT DIAN).
+  Los T&C de ePayco NO traen cláusula de encargo, y eControl exige al comercio autorización para
+  consultar centrales de riesgo.
+- Gotcha: el aislamiento del worktree bloquea git sobre otros checkouts; un `git clone` de GitHub en
+  el scratchpad sí deja trabajar otro repo (rama, commit, push, `gh pr create -R`).
 - Cierre de los 3 contratos de prueba (futuras, -2, -3) en `scratchpad/cerrar_futuras3.sql` (sin correr al
   19-oct): contrato `cancelado`, suscripción `cancelada` sin ref, plan `manual`, cobro anulado. La tarjeta
   en ePayco NO se borra por SQL (`eliminarTarjetasEpayco`); `cobro_token_borrado_at` solo tras su respuesta.
