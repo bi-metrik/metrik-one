@@ -141,10 +141,10 @@ import {
 } from '@/lib/cotizaciones/itinerarios'
 import { avisosDeCobertura } from '@/lib/cotizaciones/cobertura-opciones'
 import {
-  costoDeRubrosConfirmados,
   soloConfirmados,
   soloSugeridos,
 } from '@/lib/cotizaciones/rubros-sugeridos'
+import { costosDelItem } from '@/lib/cotizaciones/iva-costo'
 import { nombreMostrable } from '@/lib/cotizaciones/nombre-cotizacion'
 import { aMayusculas } from '@/lib/negocios/mayusculas'
 import { isEditable } from '@/lib/cotizaciones/state-machine'
@@ -882,21 +882,22 @@ export default function CotizacionEditor({ oportunidadId, cotizacion, initialIte
   // (y un plan de pagos) por debajo de la Recomendada justo en la maleta de bodega, mientras la
   // base, la tabla de tarifas y el PDF sí la cobraban.
   const paraCascada = adjuntarAdicionales(initialItems.map(item => {
-    const rubros = item.rubros ?? []
-    const delDesglose = costoDeRubrosConfirmados(rubros)
+    // R-P1 · los SUGERIDOS no entran al costo hasta que alguien confirme. Y el IVA del
+    // proveedor (2026-10-19) se suma aquí, igual que en `recalcularTotales`.
+    const { numeroDeRubros, costoDeRubros, subtotal, costoSinIva } = costosDelItem(item)
     return {
       id: item.id,
       es_ajuste: item.es_ajuste,
       cantidad: item.cantidad,
-      subtotal: item.subtotal,
-      // R-P1 · los SUGERIDOS no entran al costo hasta que alguien confirme.
-      ...delDesglose,
+      subtotal,
+      numeroDeRubros,
+      costoDeRubros,
       descuento_porcentaje: item.descuento_porcentaje,
       margen_porcentaje: item.margen_porcentaje,
       precio_venta: item.precio_venta,
       precio_manual: item.precio_manual,
       // Punto 11 del brief del 2026-10-05: lo mismo que `recalcularTotales`.
-      pasajeros: pasajerosParaCuadre(item.tarifa_pax, delDesglose.costoDeRubros),
+      pasajeros: pasajerosParaCuadre(item.tarifa_pax, costoSinIva),
     }
   }), Object.values(adicionales.porItem).flat())
   const paramsCascada = {

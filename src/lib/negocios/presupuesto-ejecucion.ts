@@ -30,6 +30,8 @@ export interface ItemPresupuesto {
   dia_relativo?: number | null
   entra_al_precio?: boolean | null
   rubros?: Array<{ tipo?: string | null; valor_total?: number | null; sugerido?: boolean | null }> | null
+  /** IVA del proveedor sobre el costo (2026-10-19): el presupuesto es lo que se le paga, con IVA. */
+  iva_costo_pct?: number | string | null
 }
 
 export interface RubroPresupuesto {
@@ -48,6 +50,7 @@ export interface RubroPresupuestoEjecutado extends RubroPresupuesto {
  * tenga dónde caer en la comparación en vez de desaparecer.
  */
 import { soloConfirmados } from '@/lib/cotizaciones/rubros-sugeridos'
+import { conIva } from '@/lib/cotizaciones/iva-costo'
 import { CATEGORIAS_GASTO } from '@/lib/catalogos/constants'
 import { fueraDelPrecio } from '@/lib/cotizaciones/dia-relativo'
 import { itemsDelItinerario, type ItemConGrupo } from '@/lib/cotizaciones/itinerarios'
@@ -212,12 +215,12 @@ export function calcularPresupuestoPorRubro(
     if (rubros.length > 0) {
       for (const rubro of rubros) {
         const tipo = tipoDe(rubro.tipo ?? TIPO_RUBRO_SIN_DETALLE)
-        porTipo[tipo] = (porTipo[tipo] ?? 0) + (Number(rubro.valor_total) || 0) * cantidad
+        porTipo[tipo] = (porTipo[tipo] ?? 0) + conIva(Number(rubro.valor_total) || 0, item.iva_costo_pct) * cantidad
       }
     } else {
       // Ítem sin desglose: su `subtotal` es el costo unitario.
       porTipo[TIPO_RUBRO_SIN_DETALLE] =
-        (porTipo[TIPO_RUBRO_SIN_DETALLE] ?? 0) + (Number(item.subtotal) || 0) * cantidad
+        (porTipo[TIPO_RUBRO_SIN_DETALLE] ?? 0) + conIva(Number(item.subtotal) || 0, item.iva_costo_pct) * cantidad
     }
   }
 

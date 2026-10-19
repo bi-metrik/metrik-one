@@ -21,7 +21,7 @@ import {
   ranurasConAlternativas,
   type ItemConGrupo,
 } from './itinerarios'
-import { costoDeRubrosConfirmados } from './rubros-sugeridos'
+import { costosDelItem } from './iva-costo'
 import { pasajerosParaCuadre } from './cuadre-pasajero'
 import { adjuntarAdicionales, type Adicional, type FilaAdicional } from './adicionales'
 import { esBaseIvaLinea } from '@/lib/fiscal/iva-cotizacion'
@@ -59,6 +59,8 @@ export interface FilaDeLinea {
   tramos?: unknown
   descripcion?: string | null
   rubros?: { valor_total?: number | null; sugerido?: boolean | null }[] | null
+  /** IVA del proveedor sobre el costo (2026-10-19): `costosDelItem` se lo suma. */
+  iva_costo_pct?: number | string | null
 }
 
 /** Una línea lista para la cascada: la MISMA forma que arma `contextoDeCotizacion`. */
@@ -92,7 +94,8 @@ export interface LineaDeCascada extends ItemConGrupo {
  */
 export function lineasParaLaCascada(filas: readonly FilaDeLinea[], adicionalesPorItem: Record<string, readonly FilaAdicional[]>): LineaDeCascada[] {
   const sinAdicionales = filas.map(fila => {
-    const { numeroDeRubros, costoDeRubros } = costoDeRubrosConfirmados(fila.rubros as never)
+    // IVA del proveedor (2026-10-19): el costo se guarda sin IVA y `costosDelItem` se lo suma.
+    const { numeroDeRubros, costoDeRubros, subtotal, costoSinIva } = costosDelItem(fila)
     return {
       id: fila.id,
       nombre: (fila.nombre ?? null) as string | null,
@@ -103,7 +106,7 @@ export function lineasParaLaCascada(filas: readonly FilaDeLinea[], adicionalesPo
       dia_relativo: (fila.dia_relativo ?? null) as number | null,
       entra_al_precio: (fila.entra_al_precio ?? null) as boolean | null,
       cantidad: fila.cantidad ?? 1,
-      subtotal: fila.subtotal ?? 0,
+      subtotal: subtotal ?? 0,
       numeroDeRubros,
       costoDeRubros,
       descuento_porcentaje: fila.descuento_porcentaje ?? 0,
@@ -111,7 +114,7 @@ export function lineasParaLaCascada(filas: readonly FilaDeLinea[], adicionalesPo
       precio_venta: fila.precio_venta ?? 0,
       precio_manual: fila.precio_manual ?? false,
       base_iva: esBaseIvaLinea(fila.base_iva) ? fila.base_iva : null,
-      pasajeros: pasajerosParaCuadre(fila.tarifa_pax, costoDeRubros),
+      pasajeros: pasajerosParaCuadre(fila.tarifa_pax, costoSinIva),
       tarifa_pax: fila.tarifa_pax ?? null,
     }
   })

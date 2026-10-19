@@ -21,6 +21,7 @@ import { duplicarCotizacionCompleta } from '@/lib/cotizaciones/duplicar-cotizaci
 import { retirarRanuraSiQuedoVacia } from '@/lib/cotizaciones/ranuras-datos'
 import { itemsQueAportanAlTotal, normalizarGrupo } from '@/lib/cotizaciones/itinerarios'
 import { costoDeRubrosConfirmados, esConfirmado } from '@/lib/cotizaciones/rubros-sugeridos'
+import { costosDelItem, costoUnitarioSinIva } from '@/lib/cotizaciones/iva-costo'
 import { pasajerosParaCuadre } from '@/lib/cotizaciones/cuadre-pasajero'
 import { patchDeRecalculo } from '@/lib/cotizaciones/patch-recalculo'
 import { motivoParaNoSalir, revisarExcepcionTrasCambio } from '@/lib/cotizaciones/piso-salida-datos'
@@ -1111,13 +1112,14 @@ export async function recalcularTotales(cotizacionId: string) {
   }
   const paraCascadaSinAdic = filas.map(item => {
     // R-P1 · los rubros SUGERIDOS no entran al costo hasta que alguien confirme.
-    const { numeroDeRubros, costoDeRubros } = costoDeRubrosConfirmados(item.rubros)
+    // IVA del proveedor (2026-10-19): el costo se guarda sin IVA y `costosDelItem` se lo suma.
+    const { numeroDeRubros, costoDeRubros, subtotal, costoSinIva } = costosDelItem(item)
     const conManuales = precioConManuales.get(item.id as string)
     return {
       id: item.id as string,
       es_ajuste: item.es_ajuste,
       cantidad: item.cantidad,
-      subtotal: item.subtotal,
+      subtotal,
       numeroDeRubros,
       costoDeRubros,
       descuento_porcentaje: item.descuento_porcentaje,
@@ -1125,7 +1127,7 @@ export async function recalcularTotales(cotizacionId: string) {
       precio_venta: conManuales !== undefined ? conManuales / (Number(item.cantidad) || 1) : item.precio_venta,
       precio_manual: conManuales !== undefined ? true : item.precio_manual,
       // Punto 11 del brief del 2026-10-05: el precio cuadra con lo que paga cada pasajero.
-      pasajeros: pasajerosParaCuadre(item.tarifa_pax, costoDeRubros),
+      pasajeros: pasajerosParaCuadre(item.tarifa_pax, costoSinIva),
     }
   })
   // El MISMO emparejamiento que usa `contextoDeCotizacion`: por id de variante. Escrito
@@ -1151,7 +1153,8 @@ export async function recalcularTotales(cotizacionId: string) {
   for (const linea of cascada.lineas) {
     const fila = filas.find(f => f.id === linea.id)
     if (!fila || fila.es_ajuste) continue
-    const patch = patchDeRecalculo(fila, linea, linea.id ? precioConManuales.has(linea.id) : false)
+    // `items.subtotal` guarda el costo SIN IVA: la cascada trae el costo con IVA de la línea.
+    const patch = patchDeRecalculo(fila, { ...linea, costoUnitario: costoUnitarioSinIva(fila) }, linea.id ? precioConManuales.has(linea.id) : false)
     if (patch) escrituras.push(supabase.from('items').update(patch as never).eq('id', fila.id))
   }
   await Promise.all(escrituras)
