@@ -118,7 +118,7 @@ export async function consultarEpayco(
         return {
           success: false,
           negocio_existente: dup,
-          error: `Esta referencia ePayco ya está registrada en ${dup.codigo ?? dup.negocio_id}. No se puede cargar duplicada — pide al área financiera que distribuya ese pago entre los negocios.`,
+          error: `Esta referencia ePayco ya está registrada en ${dup.codigo ?? dup.negocio_id}. No se puede cargar dos veces. Si el pago cubre los dos negocios, pídele al área financiera que lo redistribuya desde Conciliación (si es un reparto tuyo todavía sin aprobar, ábrelo en ${dup.codigo ?? 'ese negocio'} y usa «Editar reparto»).`,
         }
       }
     }
@@ -265,7 +265,7 @@ async function registrarPagoEpaycoSinClave(
         return {
           success: false,
           negocio_existente: dup,
-          error: `Esta referencia ePayco ya está registrada en ${dup.codigo ?? dup.negocio_id}. No se puede cargar duplicada — pide al área financiera que distribuya ese pago entre los negocios.`,
+          error: `Esta referencia ePayco ya está registrada en ${dup.codigo ?? dup.negocio_id}. No se puede cargar dos veces. Si el pago cubre los dos negocios, pídele al área financiera que lo redistribuya desde Conciliación (si es un reparto tuyo todavía sin aprobar, ábrelo en ${dup.codigo ?? 'ese negocio'} y usa «Editar reparto»).`,
         }
       }
     }
