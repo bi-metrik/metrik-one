@@ -6,6 +6,7 @@ import { MENSAJE_EN_CURSO } from '@/lib/idempotencia/clave'
 import { getWorkspace } from '@/lib/actions/get-workspace'
 import { enPeticionDeRuta } from '@/lib/actions/memo-de-ruta'
 import { revalidatePath } from 'next/cache'
+import { randomUUID } from 'crypto'
 import { after } from 'next/server'
 import { correoAlCrearNegocio } from '@/lib/autorizacion-datos/servidor'
 import { bloqueoAutorizacionDatos } from '@/lib/autorizacion-datos/gate-servidor'
@@ -43,6 +44,8 @@ import type { EtapaDelSegmentador } from '@/lib/negocios/linea-de-flujo'
 import type { GuiaEtapa } from '@/lib/negocios/guia-etapa'
 import { todayBogotaISO } from '@/lib/dates/bogota'
 import { fechasDeCobrosMulti, notaCobroMulti } from '@/lib/epayco/fecha-cobro-multi-pago'
+import { filasConId, planearGuardadoMulti, type CobroExistente, type FilaMultiPago } from '@/lib/epayco/multi-pago-filas'
+import { puedeEditarMultiPago } from '@/lib/permissions/multi-pago'
 import { consultarTransaccionEpayco } from '@/lib/epayco'
 import { bloqueTipoCode } from '@/components/workflow/types'
 import { seccionalDesdeRut, requiereCitaDian, nombreOficialSeccional, labelCanonicoSeccional } from '@/lib/dian/seccionales'
@@ -4550,6 +4553,9 @@ async function marcarBloqueCompletoSinMemo(
   const cfg = (cfgRaw as { bloque_configs?: { es_gate?: boolean; config_extra?: Record<string, unknown> | null; bloque_definitions?: { tipo?: string } | null } } | null)?.bloque_configs
   const tipoBloque = cfg?.bloque_definitions?.tipo
   const configExtraBloque = cfg?.config_extra ?? {}
+  // El bloque multi-pago crea cobros reales: se escribe solo con «Guardar pagos»
+  // (`guardarPagosMulti`), nunca por el cierre genérico.
+  if (configExtraBloque.es_multi_pago === true) return { error: MENSAJE_MULTI_PAGO_POR_BOTON }
 
   // Lista blanca de lo que el navegador escribe (ver `lib/negocios/data-escribible.ts`):
   // antes se mezclaba `data` entero, así que por aquí entraban `docs`, `drive_url` o
@@ -4793,13 +4799,8 @@ async function marcarBloqueCompletoSinMemo(
       }
     }
 
-    const autoCobrosMulti = triggers.find(t => t.action === 'auto_cobros_multi')
-    if (tipo === 'datos' && autoCobrosMulti && huboCambio) {
-      const pagos = (mergedData.pagos ?? []) as Array<{ referencia_epayco: string; valor_pago: number }>
-      if (pagos.length > 0) {
-        await autoCrearCobrosMulti(bloque.negocio_id, pagos)
-      }
-    }
+    // `auto_cobros_multi` ya no crea cobros desde aquí: el bloque multi-pago se escribe solo
+    // con `guardarPagosMulti` (ver arriba, y el rechazo al inicio de esta función).
 
     // ── Hook AFI: si es uno de los bloques accionables del workspace afi, señalar al cliente
     // que dispare el endpoint correspondiente (route handlers tienen maxDuration=60s).
@@ -5332,6 +5333,9 @@ async function actualizarBloqueDataSinMemo(
     { config_extra?: Record<string, unknown> | null; bloque_definitions?: { tipo?: string } | null } | null
   const ce = cfgAbierto?.config_extra ?? null
   const tipoAbierto = cfgAbierto?.bloque_definitions?.tipo ?? null
+  // El bloque multi-pago no se autoguarda: cada pausa a mitad de una cifra terminaba en un
+  // cobro real. Se escribe solo con «Guardar pagos» (`guardarPagosMulti`).
+  if ((ce as { es_multi_pago?: unknown } | null)?.es_multi_pago === true) return { error: MENSAJE_MULTI_PAGO_POR_BOTON }
 
   // La copia local de un bloque compartido está vacía por diseño: el dato vive en el origen.
   let dataDestino: Record<string, unknown> | null =
@@ -5745,88 +5749,201 @@ async function autoCrearCobros(
   return { error: null }
 }
 
-// ── Auto-crear cobros multi-pago (etapa 7, idempotente por external_ref) ─────
+// ── Bloque multi-pago: «Guardar pagos» (etapa 7) ─────────────────────────────
 
-async function autoCrearCobrosMulti(
-  negocioId: string,
-  pagos: Array<{ referencia_epayco: string; valor_pago: number }>
+/**
+ * Guarda las filas del bloque «Pagos ePayco» multi-pago (`config_extra.es_multi_pago`) y
+ * deja sus cobros como dicen las filas. Es la ÚNICA vía que escribe ese bloque: el
+ * autoguardado (`actualizarBloqueData`) y el cierre genérico (`marcarBloqueCompleto`) lo
+ * rechazan. Reemplaza a `autoCrearCobrosMulti` (2026-10-19), que creaba un cobro por cada
+ * pausa del autoguardado: ver `lib/epayco/multi-pago-filas.ts`.
+ *
+ * Permiso: el MISMO de la pantalla, `puedeEditarMultiPago` (owner/admin), además del guard
+ * del bloque. Antes la pantalla lo pedía y el servidor no.
+ *
+ * Valida antes de escribir nada: cada referencia que exista en ePayco tiene que estar
+ * Aceptada y el valor no puede pasar del pago real (la misma regla de `registrarPagoEpayco`
+ * y del reparto), y una referencia ya registrada en OTRO negocio no se carga dos veces.
+ */
+async function guardarPagosMultiSinClave(
+  negocioBloqueId: string,
+  filasEntrantes: ReadonlyArray<Partial<FilaMultiPago>>,
 ): Promise<{ error: string | null }> {
-  const { supabase, workspaceId, error } = await getWorkspace()
+  const { supabase, workspaceId, userId, staffId, role, error } = await getWorkspace()
   if (error || !workspaceId) return { error: 'No autenticado' }
+  if (!puedeEditarMultiPago(role)) return { error: MENSAJE_SIN_PERMISO_MULTI_PAGO }
+  const guard = await guardEditarBloque(negocioBloqueId)
+  if (!guard.ok) return { error: guard.error ?? 'Sin permiso' }
 
-  if (!pagos.length) return { error: null }
+  const { data: bloqueRaw } = await db(supabase)
+    .from('negocio_bloques')
+    .select('negocio_id, data, bloque_configs!inner(config_extra)')
+    .eq('id', negocioBloqueId)
+    .maybeSingle()
+  const bloque = bloqueRaw as { negocio_id: string; data: Record<string, unknown> | null; bloque_configs: { config_extra: Record<string, unknown> | null } | null } | null
+  if (!bloque?.negocio_id) return { error: 'Bloque no encontrado' }
+  if (bloque.bloque_configs?.config_extra?.es_multi_pago !== true) return { error: 'Este bloque no es de pagos múltiples' }
+  const negocioId = bloque.negocio_id
 
-  // Idempotencia por MULTIPLICIDAD de (external_ref, monto), no por external_ref
-  // como conjunto. Bug 26 (SOENA): dos abonos reales que comparten la misma
-  // referencia ePayco (o referencia vacía/repetida) colapsaban en un Set →
-  // tras insertar el primero, el segundo se descartaba como "ya existe" y el
-  // saldo no bajaba. Contando cuántos cobros ya existen por cada par (ref, monto)
-  // e insertando solo el delta faltante, distinguimos "re-guardar el mismo pago"
-  // (idempotente, delta 0) de "dos pagos reales distintos" (ambos se registran).
-  const claveDe = (ref: string, monto: number) =>
-    `${ref ?? ''} ${Math.round(Number(monto) * 100)}`
+  const previas = filasConId(((bloque.data?.pagos ?? []) as Array<Partial<FilaMultiPago>>), () => randomUUID())
+  const filas = filasConId(filasEntrantes ?? [], () => randomUUID())
 
-  const { data: existentes } = await db(supabase)
-    .from('cobros')
-    .select('external_ref, monto')
-    .eq('workspace_id', workspaceId)
-    .eq('negocio_id', negocioId)
-    .eq('tipo_cobro', 'pago')
+  const [cobrosRes, concRes] = await Promise.all([
+    db(supabase)
+      .from('cobros')
+      .select('id, external_ref, monto, siigo_recibo')
+      .eq('workspace_id', workspaceId)
+      .eq('negocio_id', negocioId)
+      .eq('tipo_cobro', 'pago')
+      .is('anulado_at', null),
+    db(supabase)
+      .from('negocio_conciliacion')
+      .select('conciliado')
+      .eq('workspace_id', workspaceId)
+      .eq('negocio_id', negocioId)
+      .maybeSingle(),
+  ])
+  // «Confirmado por la financiera»: el negocio conciliado, o el pago con recibo de caja ya
+  // emitido. Cualquiera de los dos y la fila queda quieta.
+  const conciliado = (concRes.data as { conciliado?: boolean } | null)?.conciliado === true
+  const existentes: CobroExistente[] = ((cobrosRes.data ?? []) as Array<{ id: string; external_ref: string | null; monto: number; siigo_recibo: unknown }>)
+    .map((c) => ({ id: c.id, external_ref: c.external_ref, monto: Number(c.monto), bloqueado: conciliado || c.siigo_recibo != null }))
 
-  // Cuántos cobros ya existen por cada par (ref, monto)
-  const restante = new Map<string, number>()
-  for (const e of (existentes ?? []) as Array<{ external_ref: string | null; monto: number }>) {
-    const k = claveDe(e.external_ref ?? '', e.monto)
-    restante.set(k, (restante.get(k) ?? 0) + 1)
+  const plan = planearGuardadoMulti(filas, previas, existentes)
+  if (plan.errores.length > 0) return { error: plan.errores[0] }
+
+  // ── Validación contra ePayco y contra otros negocios, solo de lo que cambia ──
+  const aValidar = [...plan.crear, ...plan.corregir]
+  const conEpayco = (await exigirModulo(REQUISITO.pagoEpayco)).ok
+  // Una consulta por referencia: la validación y la fecha del cobro leen la misma respuesta.
+  const consultasEpayco = new Map<number, ReturnType<typeof consultarTransaccionEpayco>>()
+  const consultar = (ref: number) => {
+    if (!consultasEpayco.has(ref)) consultasEpayco.set(ref, consultarTransaccionEpayco(ref))
+    return consultasEpayco.get(ref)!
+  }
+  for (const v of aValidar) {
+    const { data: dup } = await db(supabase)
+      .from('cobros')
+      .select('negocio_id, negocios:negocio_id ( codigo )')
+      .eq('workspace_id', workspaceId)
+      .eq('external_ref', v.referencia)
+      .neq('negocio_id', negocioId)
+      .is('anulado_at', null)
+      .limit(1)
+      .maybeSingle()
+    if (dup) {
+      const codigo = (dup as { negocios: { codigo: string | null } | null }).negocios?.codigo ?? 'otro negocio'
+      return { error: `La referencia ${v.referencia} ya está registrada en ${codigo}. No se puede cargar dos veces: si el pago cubre los dos negocios, pídele al área financiera que lo redistribuya.` }
+    }
+    const refNum = /^\d+$/.test(v.referencia) ? parseInt(v.referencia, 10) : NaN
+    if (!conEpayco || !(refNum > 0)) continue
+    let tx: Awaited<ReturnType<typeof consultarTransaccionEpayco>> | null = null
+    try { tx = await consultar(refNum) } catch { tx = null } // no existe o ePayco caído: no hay contra qué validar
+    if (!tx) continue
+    if (tx.estado !== 'Aceptada') {
+      return { error: `La referencia ${v.referencia} está "${tx.estado}" en ePayco: solo se registran pagos aprobados.` }
+    }
+    if (Number.isFinite(tx.monto_bruto) && v.monto - tx.monto_bruto > 1) {
+      return { error: `El valor de la referencia ${v.referencia} (${fmtCopMulti(v.monto)}) supera el pago real de ePayco (${fmtCopMulti(tx.monto_bruto)}).` }
+    }
   }
 
-  // Recorrer las filas pedidas; insertar solo las que exceden lo ya registrado
-  // por su par (ref, monto). El Map se decrementa por cada par "consumido" para
-  // que un pago repetido legítimamente (2 filas iguales) registre 2 cobros.
-  const pendientes = pagos
-    .filter(p => {
-      const k = claveDe(p.referencia_epayco, p.valor_pago)
-      const ya = restante.get(k) ?? 0
-      if (ya > 0) {
-        restante.set(k, ya - 1) // este par ya está cubierto por un cobro existente
-        return false
-      }
-      return true
-    })
-
-  // La fecha del cobro es la del PAGO en ePayco, no la del registro (decisión 2026-08-18,
-  // el mismo defecto que #312 arregló en `registrarPagoEpayco`). Solo se consulta lo que
-  // es nuevo: re-guardar el mismo pago no vuelve a llamar a ePayco. Sin fecha legible cae
-  // en el día del registro y la nota lo dice. Ver `lib/epayco/fecha-cobro-multi-pago.ts`.
-  const fechas = pendientes.length > 0
-    ? await fechasDeCobrosMulti(pendientes.map(p => p.referencia_epayco), {
-        puedeConsultar: async () => (await exigirModulo(REQUISITO.pagoEpayco)).ok,
-        consultar: consultarTransaccionEpayco,
+  // ── Escribir ──
+  // La fecha del cobro es la del PAGO en ePayco, no la del registro (decisión 2026-08-18).
+  const fechas = plan.crear.length > 0
+    ? await fechasDeCobrosMulti(plan.crear.map((c) => c.referencia), {
+        puedeConsultar: async () => conEpayco,
+        consultar,
         hoy: todayBogotaISO(),
       })
     : []
+  const cobroDeFila = new Map<string, string>()
+  for (let i = 0; i < plan.crear.length; i++) {
+    const c = plan.crear[i]
+    const { data: ins, error: insErr } = await db(supabase).from('cobros').insert({
+      workspace_id: workspaceId,
+      negocio_id: negocioId,
+      notas: notaCobroMulti(c.referencia, fechas[i].dePago),
+      monto: c.monto,
+      tipo_cobro: 'pago',
+      fecha: fechas[i].fecha,
+      external_ref: c.referencia,
+      created_by: userId,
+    }).select('id').single()
+    if (insErr) return { error: (insErr as { message: string }).message }
+    cobroDeFila.set(c.filaId, (ins as { id: string }).id)
+  }
+  for (const c of plan.corregir) {
+    const { error: upErr } = await db(supabase).from('cobros')
+      .update({ monto: c.monto, external_ref: c.referencia })
+      .eq('id', c.cobroId).eq('workspace_id', workspaceId).is('anulado_at', null)
+    if (upErr) return { error: (upErr as { message: string }).message }
+  }
+  for (const c of plan.anular) {
+    const { error: anErr } = await db(supabase).from('cobros')
+      .update({
+        monto: 0,
+        monto_anulado: c.montoAnterior,
+        anulado_at: new Date().toISOString(),
+        anulado_por: userId,
+        anulacion_motivo: `Se quitó la fila del pago ${c.referencia} en el bloque de pagos`.slice(0, 300),
+      })
+      .eq('id', c.cobroId).eq('workspace_id', workspaceId).is('anulado_at', null)
+    if (anErr) return { error: (anErr as { message: string }).message }
+  }
 
-  const nuevos = pendientes.map((p, i) => ({
-    workspace_id: workspaceId,
-    negocio_id: negocioId,
-    notas: notaCobroMulti(p.referencia_epayco, fechas[i].dePago),
-    monto: p.valor_pago,
-    tipo_cobro: 'pago',
-    fecha: fechas[i].fecha,
-    external_ref: p.referencia_epayco,
-  }))
+  const pagos = plan.filas.map((f) => ({ ...f, cobro_id: f.cobro_id ?? cobroDeFila.get(f.id) ?? null }))
+  const completo = pagos.length > 0
+  const ahora = new Date().toISOString()
+  const { error: bErr } = await db(supabase)
+    .from('negocio_bloques')
+    .update({
+      data: { ...(bloque.data ?? {}), pagos },
+      estado: completo ? 'completo' : 'pendiente',
+      completado_at: completo ? ahora : null,
+      updated_at: ahora,
+    })
+    .eq('id', negocioBloqueId)
+  if (bErr) return { error: (bErr as { message: string }).message }
 
-  if (nuevos.length > 0) {
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const { error: insertError } = await (supabase as any).from('cobros').insert(nuevos)
-    if (insertError) return { error: (insertError as { message: string }).message }
-    // Con factura, el honorario de estos pagos se abona solo. Nunca devuelve error.
+  if (plan.crear.length + plan.corregir.length + plan.anular.length > 0) {
+    await registrarActividad(supabase, {
+      workspace_id: workspaceId,
+      entidad_tipo: 'negocio',
+      entidad_id: negocioId,
+      tipo: 'cambio',
+      autor_id: staffId,
+      contenido: [
+        plan.crear.length ? `${plan.crear.length} pago(s) nuevo(s): ${plan.crear.map((c) => `${c.referencia} ${fmtCopMulti(c.monto)}`).join(', ')}` : '',
+        plan.corregir.length ? `${plan.corregir.length} corregido(s): ${plan.corregir.map((c) => `${c.referencia} → ${fmtCopMulti(c.monto)}`).join(', ')}` : '',
+        plan.anular.length ? `${plan.anular.length} anulado(s): ${plan.anular.map((c) => `${c.referencia} ${fmtCopMulti(c.montoAnterior)}`).join(', ')}` : '',
+      ].filter(Boolean).join('. ').slice(0, 280),
+    }, 'guardarPagosMulti')
+    // Con factura, el honorario de los pagos nuevos se abona solo. Nunca devuelve error.
     await abonarEnSegundoPlano(workspaceId, [negocioId])
   }
 
   await reevaluarBloquesCobros(negocioId)
   revalidatePath(`/negocios/${negocioId}`)
   return { error: null }
+}
+
+function fmtCopMulti(n: number): string {
+  return `$${Math.round(n).toLocaleString('es-CO')}`
+}
+
+/** Sin `export`: un archivo `'use server'` que exporta una constante pierde todos sus exports. */
+const MENSAJE_SIN_PERMISO_MULTI_PAGO = 'Solo el dueño o un administrador registran los pagos de este bloque.'
+
+/** Mensaje para quien intente escribir el bloque multi-pago por el guardado genérico. */
+const MENSAJE_MULTI_PAGO_POR_BOTON = 'Los pagos de este bloque se guardan con «Guardar pagos».'
+
+/** Filas sin `id` (guardadas antes del 2026-10-19) se aceptan: el servidor les pone uno. */
+export async function guardarPagosMulti(negocioBloqueId: string, filas: ReadonlyArray<Partial<FilaMultiPago>>, intencion?: string) {
+  return accionIdempotente<Awaited<ReturnType<typeof guardarPagosMultiSinClave>>>(
+    { accion: 'guardarPagosMulti', clave: intencion, args: [negocioBloqueId, filas], enCurso: () => ({ error: MENSAJE_EN_CURSO }) },
+    () => guardarPagosMultiSinClave(negocioBloqueId, filas),
+  )
 }
 
 // ── Responsable de un paso del cronograma ────────────────────────────────────

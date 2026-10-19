@@ -382,13 +382,13 @@ describe('tipos manuales: escriben como antes', () => {
     expect(filaDe('nb-datos').estado).toBe('completo')
   })
 
-  it('el multi-pago', async () => {
+  it('el multi-pago NO: se cierra con «Guardar pagos», que es la que crea sus cobros', async () => {
     tablas.negocio_bloques.push(bloque('nb-multi', 'datos', { es_multi_pago: true }))
 
     const r = await marcarBloqueCompleto('nb-multi', { pagos: [] })
 
-    expect(r.error).toBeNull()
-    expect(filaDe('nb-multi').estado).toBe('completo')
+    expect(r.error).toMatch(/Guardar pagos/)
+    expect(filaDe('nb-multi').estado).not.toBe('completo')
   })
 
   it('el sello de completado', async () => {
