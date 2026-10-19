@@ -31,7 +31,7 @@ import {
  * ($1.000): aquí no se está decidiendo si una deuda se persigue, se está diciendo a dónde
  * va cada peso de un pago que ya entró. Es la misma tolerancia que usa la base.
  */
-export const TOLERANCIA_CUADRE_COP = 1
+const TOLERANCIA_CUADRE_COP = 1
 
 // ── Lo que debe un negocio ───────────────────────────────────────────────────
 
@@ -72,7 +72,7 @@ export function deudaParaReparto(input: {
 
 // ── ¿Cuadra? ─────────────────────────────────────────────────────────────────
 
-export type EstadoCuadre = 'cuadra' | 'faltan' | 'sobran'
+type EstadoCuadre = 'cuadra' | 'faltan' | 'sobran'
 
 export interface Cuadre {
   total: number

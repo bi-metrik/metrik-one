@@ -1,8 +1,10 @@
 /**
- * BloqueDatosMultiPago (trigger `auto_cobros_multi`): el cobro que crea queda con la fecha
- * del PAGO en ePayco, no con la del registro (sigue a SOE-013; decisión 2026-08-18).
- * Pasa por la acción real (`marcarBloqueCompleto` → `autoCrearCobrosMulti`) con el doble
- * de base de `guardado-bloque-concurrente.test.ts`.
+ * BloqueDatosMultiPago: el cobro que crea «Guardar pagos» queda con la fecha del PAGO en
+ * ePayco, no con la del registro (sigue a SOE-013; decisión 2026-08-18). Y desde el
+ * 2026-10-19 (sin autoguardado): escribir despacio no crea cobros, editar una fila corrige
+ * SU cobro, quitarla lo anula, una fila confirmada no se toca, y el permiso es el de la
+ * pantalla. Pasa por la acción real (`guardarPagosMulti`) con el doble de base de
+ * `guardado-bloque-concurrente.test.ts`.
  */
 
 import { beforeEach, describe, expect, it, vi } from 'vitest'
@@ -16,7 +18,9 @@ let version = 0
 
 const HOY = '2026-10-02'
 const consultas: number[] = []
-let respuestaEpayco: (ref: number) => Promise<{ fecha: string | null }> = async () => ({ fecha: '2026-09-16 20:15:00' })
+type RespuestaEpayco = { fecha: string | null; estado?: string; monto_bruto?: number }
+const aceptada = (fecha: string | null): RespuestaEpayco => ({ fecha, estado: 'Aceptada', monto_bruto: 10_000_000 })
+let respuestaEpayco: (ref: number) => Promise<RespuestaEpayco> = async () => aceptada('2026-09-16 20:15:00')
 vi.mock('@/lib/epayco', () => ({
   consultarTransaccionEpayco: async (ref: number) => { consultas.push(ref); return respuestaEpayco(ref) },
 }))
@@ -34,6 +38,7 @@ vi.mock('@/lib/actions/get-workspace', () => ({
     workspaceId: 'ws-1',
     userId: 'user-1',
     staffId: 'staff-1',
+    role: rol,
     error: null,
   }),
 }))
@@ -43,6 +48,7 @@ vi.mock('@/lib/permissions/guard-negocio', () => ({
   guardAvanzarStage: async () => ({ ok: true }),
 }))
 let compartidoCon: string | null = null
+let rol = 'owner'
 vi.mock('@/lib/negocios/casilla-compartida', async importOriginal => ({
   ...(await importOriginal<typeof import('@/lib/negocios/casilla-compartida')>()),
   resolverDestinoCompartido: async (_s: unknown, id: string) => compartidoCon ?? id,
@@ -78,7 +84,7 @@ function consulta(tabla: string) {
   const ejecutar = (): Fila[] => {
     tablas[tabla] ??= []
     if (op === 'insert') {
-      const filas = (Array.isArray(payload) ? payload : [payload]).map(f => ({ ...f }))
+      const filas = (Array.isArray(payload) ? payload : [payload]).map(f => ({ id: `${tabla}-${tablas[tabla].length + 1}`, ...f }))
       tablas[tabla].push(...filas)
       return filas
     }
@@ -96,6 +102,7 @@ function consulta(tabla: string) {
     insert: (p: Fila | Fila[]) => { op = 'insert'; payload = p; return api },
     eq: (c: string, v: unknown) => { filtros.push(f => f[c] === v); return api },
     is: (c: string, v: unknown) => { filtros.push(f => (f[c] ?? null) === v); return api },
+    neq: (c: string, v: unknown) => { filtros.push(f => f[c] !== v); return api },
     in: (c: string, vs: unknown[]) => { filtros.push(f => vs.includes(f[c])); return api },
     order: () => api,
     limit: () => api,
@@ -107,7 +114,7 @@ function consulta(tabla: string) {
   return api
 }
 
-const { marcarBloqueCompleto } = await import('./negocio-v2-actions')
+const { marcarBloqueCompleto, actualizarBloqueData, guardarPagosMulti } = await import('./negocio-v2-actions')
 
 const NEG = 'neg-1'
 
@@ -138,20 +145,23 @@ function bloquePagos(): Fila {
 }
 
 const cobros = () => tablas.cobros
+const vivos = () => tablas.cobros.filter(c => !c.anulado_at)
+const guardadas = () => ((tablas.negocio_bloques[0].data as Fila).pagos ?? []) as Array<Fila>
 
 beforeEach(() => {
   version = 0
   historial = []
   compartidoCon = null
   consultas.length = 0
-  respuestaEpayco = async () => ({ fecha: '2026-09-16 20:15:00' })
+  respuestaEpayco = async () => aceptada('2026-09-16 20:15:00')
+  rol = 'owner'
   reiniciarModulo('ws-1', MODULES.soena)
   tablas = { negocio_bloques: [bloquePagos()], cobros: [], negocios: [{ id: NEG, workspace_id: 'ws-1' }], etapas_negocio: [] }
 })
 
 describe('la fecha del cobro de BloqueDatosMultiPago', () => {
   it('es la del pago en ePayco, no la del registro', async () => {
-    const r = await marcarBloqueCompleto('nb-pagos', { pagos: [{ referencia_epayco: '386159602', valor_pago: 500_000 }] })
+    const r = await guardarPagosMulti('nb-pagos', [{ referencia_epayco: '386159602', valor_pago: 500_000 }])
     expect(r.error).toBeNull()
     expect(cobros()).toHaveLength(1)
     expect(cobros()[0]).toMatchObject({ external_ref: '386159602', monto: 500_000, fecha: '2026-09-16', notas: 'Pago' })
@@ -159,15 +169,15 @@ describe('la fecha del cobro de BloqueDatosMultiPago', () => {
   })
 
   it('sin fecha legible usa el día del registro y lo anota', async () => {
-    respuestaEpayco = async () => ({ fecha: null })
-    await marcarBloqueCompleto('nb-pagos', { pagos: [{ referencia_epayco: '386159602', valor_pago: 500_000 }] })
+    respuestaEpayco = async () => aceptada(null)
+    await guardarPagosMulti('nb-pagos', [{ referencia_epayco: '386159602', valor_pago: 500_000 }])
     expect(cobros()[0].fecha).toBe(HOY)
     expect(cobros()[0].notas).toMatch(/fecha de registro: ePayco no devolvio una fecha legible para la ref 386159602/)
   })
 
   it('ePayco caído no frena el guardado: día del registro, anotado', async () => {
     respuestaEpayco = async () => { throw new Error('ePayco transaction/detail failed: 500') }
-    const r = await marcarBloqueCompleto('nb-pagos', { pagos: [{ referencia_epayco: '386159602', valor_pago: 500_000 }] })
+    const r = await guardarPagosMulti('nb-pagos', [{ referencia_epayco: '386159602', valor_pago: 500_000 }])
     expect(r.error).toBeNull()
     expect(cobros()[0]).toMatchObject({ fecha: HOY })
     expect(cobros()[0].notas).toMatch(/fecha de registro/)
@@ -175,12 +185,12 @@ describe('la fecha del cobro de BloqueDatosMultiPago', () => {
 
   it('re-guardar el mismo pago no duplica el cobro ni vuelve a consultar ePayco', async () => {
     const p1 = { referencia_epayco: '386159602', valor_pago: 500_000 }
-    await marcarBloqueCompleto('nb-pagos', { pagos: [p1] })
+    await guardarPagosMulti('nb-pagos', [p1])
     // Se agrega un segundo pago: el primero ya tiene cobro, solo el nuevo se crea y consulta.
-    respuestaEpayco = async () => ({ fecha: '2026-09-20 09:00:00' })
+    respuestaEpayco = async () => aceptada('2026-09-20 09:00:00')
     const p2 = { referencia_epayco: '386159700', valor_pago: 200_000 }
-    await marcarBloqueCompleto('nb-pagos', { pagos: [p1, p2] })
-    await marcarBloqueCompleto('nb-pagos', { pagos: [p1, p2] })
+    await guardarPagosMulti('nb-pagos', [p1, p2])
+    await guardarPagosMulti('nb-pagos', [p1, p2])
     expect(cobros().map(c => [c.external_ref, c.fecha])).toEqual([
       ['386159602', '2026-09-16'],
       ['386159700', '2026-09-20'],
@@ -190,9 +200,60 @@ describe('la fecha del cobro de BloqueDatosMultiPago', () => {
 
   it('un workspace sin ePayco no consulta la cuenta global: día del registro, anotado', async () => {
     reiniciarModulo('ws-1', MODULES.termotech)
-    await marcarBloqueCompleto('nb-pagos', { pagos: [{ referencia_epayco: '386159602', valor_pago: 500_000 }] })
+    await guardarPagosMulti('nb-pagos', [{ referencia_epayco: '386159602', valor_pago: 500_000 }])
     expect(consultas).toEqual([])
     expect(cobros()[0]).toMatchObject({ fecha: HOY })
     expect(cobros()[0].notas).toMatch(/fecha de registro/)
+  })
+})
+
+const fila = (id: string, ref: string, valor: number | '') => ({ id, referencia_epayco: ref, valor_pago: valor })
+
+describe('sin autoguardado: el bloque se escribe solo con «Guardar pagos»', () => {
+  it('escribir despacio no crea cobros: el guardado genérico lo rechaza', async () => {
+    const r1 = await actualizarBloqueData('nb-pagos', { pagos: [{ referencia_epayco: '386159602', valor_pago: 150 }] })
+    const r2 = await marcarBloqueCompleto('nb-pagos', { pagos: [{ referencia_epayco: '386159602', valor_pago: 150 }] })
+    expect(r1.error).toMatch(/Guardar pagos/)
+    expect(r2.error).toMatch(/Guardar pagos/)
+    expect(cobros()).toHaveLength(0)
+  })
+
+  it('editar una fila corrige SU cobro: no duplica', async () => {
+    await guardarPagosMulti('nb-pagos', [fila('f1', '386159602', 150)])
+    const r = await guardarPagosMulti('nb-pagos', [{ ...fila('f1', '386159602', 1_500_000), cobro_id: guardadas()[0].cobro_id as string }])
+    expect(r.error).toBeNull()
+    expect(vivos()).toHaveLength(1)
+    expect(vivos()[0].monto).toBe(1_500_000)
+  })
+
+  it('borrar una fila anula su cobro no confirmado', async () => {
+    await guardarPagosMulti('nb-pagos', [fila('f1', '386159602', 500_000), fila('f2', '386159700', 200_000)])
+    const [g1] = guardadas()
+    await guardarPagosMulti('nb-pagos', [{ ...fila('f1', '386159602', 500_000), cobro_id: g1.cobro_id as string }])
+    expect(vivos().map(c => c.external_ref)).toEqual(['386159602'])
+    const anulado = cobros().find(c => c.external_ref === '386159700')!
+    expect(anulado).toMatchObject({ monto: 0, monto_anulado: 200_000 })
+  })
+
+  it('una fila confirmada por la financiera no se edita', async () => {
+    await guardarPagosMulti('nb-pagos', [fila('f1', '386159602', 500_000)])
+    tablas.negocio_conciliacion = [{ negocio_id: NEG, workspace_id: 'ws-1', conciliado: true }]
+    const r = await guardarPagosMulti('nb-pagos', [{ ...fila('f1', '386159602', 400_000), cobro_id: guardadas()[0].cobro_id as string }])
+    expect(r.error).toMatch(/ya lo confirmó/)
+    expect(vivos()[0].monto).toBe(500_000)
+  })
+
+  it('una referencia no Aceptada en ePayco no se registra', async () => {
+    respuestaEpayco = async () => ({ fecha: null, estado: 'Rechazada', monto_bruto: 500_000 })
+    const r = await guardarPagosMulti('nb-pagos', [fila('f1', '386159602', 500_000)])
+    expect(r.error).toMatch(/Rechazada/)
+    expect(cobros()).toHaveLength(0)
+  })
+
+  it('permiso igual en pantalla y servidor: un supervisor no guarda aunque llame la acción', async () => {
+    rol = 'supervisor'
+    const r = await guardarPagosMulti('nb-pagos', [fila('f1', '386159602', 500_000)])
+    expect(r.error).toMatch(/dueño o un administrador/)
+    expect(cobros()).toHaveLength(0)
   })
 })
