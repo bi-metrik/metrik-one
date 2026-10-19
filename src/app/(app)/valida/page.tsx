@@ -224,7 +224,7 @@ export default async function ValidaPage({ searchParams }: Props) {
       <div className="space-y-3">
         {avisoPlazo}
         {avisoModificacion}
-        {enMora && <AvisoMora mora={enMora} />}
+        {enMora && <AvisoMora mora={enMora} pagar={autogestion && vePagos} />}
         {restringido && <AvisoRestriccion mora={restringido} vePagos={vePagos} />}
         {franja && <FranjaSuscripcion texto={franja} />}
       </div>

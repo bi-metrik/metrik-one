@@ -124,14 +124,35 @@ export function AvisoModificacionTerminos({
 }
 
 /** Cuota vencida, antes de la restricción: la fecha en que se restringe (cláusula 11.2). */
-export function AvisoMora({ mora }: { mora: Extract<EstadoMora, { estado: 'en_mora' }> }) {
+export function AvisoMora({
+  mora,
+  pagar = false,
+}: {
+  mora: Extract<EstadoMora, { estado: 'en_mora' }>
+  /**
+   * El botón «Pagar ahora» (a /suscripcion, donde se pide el enlace). Solo la cuenta autogestionada y
+   * quien ve la plata; a los CDA el aviso les queda como siempre.
+   */
+  pagar?: boolean
+}) {
   return (
     <section
       data-aviso-mora
-      className="flex items-start gap-3 rounded-lg border border-amber-300 bg-amber-50 p-4 text-sm text-amber-900"
+      className="flex flex-col gap-3 rounded-lg border border-amber-300 bg-amber-50 p-4 text-sm text-amber-900 sm:flex-row sm:items-start"
     >
-      <AlertTriangle className="mt-0.5 h-5 w-5 shrink-0" />
-      <p className="font-semibold">{textoAvisoMora(mora)}</p>
+      <div className="flex items-start gap-3">
+        <AlertTriangle className="mt-0.5 h-5 w-5 shrink-0" />
+        <p className="font-semibold">{textoAvisoMora(mora)}</p>
+      </div>
+      {pagar && (
+        <Link
+          href="/suscripcion"
+          data-pagar-mora
+          className="inline-flex h-9 shrink-0 items-center justify-center rounded-lg bg-acento px-4 text-sm font-semibold text-white sm:ml-auto"
+        >
+          Pagar ahora
+        </Link>
+      )}
     </section>
   )
 }

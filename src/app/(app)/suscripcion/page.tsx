@@ -6,6 +6,8 @@ import { formatBogotaFechaCortaAno } from '@/lib/dates/bogota'
 import { leerEquipo } from '@/lib/seccion-suscripcion/carga-servidor'
 import { contextoSuscripcion } from '@/lib/seccion-suscripcion/contexto-servidor'
 import { suscripcionEnPrueba } from '@/lib/seccion-suscripcion/prueba-servidor'
+import { ofrecePagarAhora, rechazoDeLaTarjeta } from '@/lib/seccion-suscripcion/pagar-ahora'
+import { createServiceClient } from '@/lib/supabase/server'
 import { PLAN_CDA, PLAN_ONE } from '@/lib/valida-cda/redaccion-fiscal'
 import { fechaConAnio } from '@/lib/seccion-suscripcion/estado'
 import { estadoSugerencia } from '@/lib/seccion-suscripcion/sustenta-servidor'
@@ -66,6 +68,8 @@ export default async function SuscripcionPage({ searchParams }: Props) {
   const esOne = ctx.producto === 'one'
 
   // La licencia de ONE no tiene términos publicados que releer ni oferta de Sustenta (es para los CDA).
+  // Una suscripción cuya tarjeta rechazó el banco: se dice en la tarjeta de pago (2026-10-19).
+  const rechazoTarjeta = ctx.contrato.suscripcionId ? await rechazoDeLaTarjeta(ctx, createServiceClient()) : null
   const [pagos, terminos, equipo, sugerencia, opcionesPago] = await Promise.all([
     leerPagosCda(ctx.entrada),
     esOne ? null : leerTerminosEmpresaCda(ctx.entrada),
@@ -105,7 +109,7 @@ export default async function SuscripcionPage({ searchParams }: Props) {
         )}
       </section>
     ) : ctx.pago ? (
-      <TarjetaPago lectura={ctx.pago} />
+      <TarjetaPago lectura={ctx.pago} pagarAhora={!soloLectura && ofrecePagarAhora(ctx)} rechazoTarjeta={rechazoTarjeta} />
     ) : null
 
   // «Aceptados el {fecha} por {nombre}», de la constancia verificada.
