@@ -37,7 +37,7 @@ const IBEROSTAR = 'd0000000-0000-4000-8000-000000000003'
 
 import { claveDeFoto } from '@/lib/fotos/clave'
 import { fotosParaTarjetas } from '../fotos/actions'
-import { confirmarCiudad, crearProveedor, guardarCuenta, guardarDatos, leerCuentas, leerFicha, leerProveedores, marcarTarifasPedidas, pedirSubida, registrarTarifario, verificarCuenta } from './actions'
+import { confirmarCiudad, guardarExtraccion, leerExtraccion, usarSugerenciasDeExtraccion, crearProveedor, guardarCuenta, guardarDatos, leerCuentas, leerFicha, leerProveedores, marcarTarifasPedidas, pedirSubida, registrarTarifario, verificarCuenta } from './actions'
 
 const perfil = (id: string, tipo: string, nombre: string, ciudad: string | null, extra: Fila = {}): Fila => ({
   id, workspace_id: WS, tipo, clave: claveDeFoto(tipo === 'proveedor' ? 'hotel' : (tipo as 'hotel'), nombre, ciudad), nombre, ciudad,
@@ -68,6 +68,7 @@ function sembrar(plantilla = 'trappvel') {
     ],
     proveedor_cuentas: [],
     proveedor_cuentas_historial: [],
+    proveedor_extracciones: [],
   }
 }
 
@@ -267,5 +268,41 @@ describe('la tarjeta de la cotización', () => {
       faltas: ['Falta el país'],
       ivaDeclarado: null,
     })
+  })
+})
+
+describe('extracciones del motor', () => {
+  const json = JSON.stringify({
+    esquema_version: '0.2',
+    expediente: { archivos: [{ archivo: 'tar0_TARIFAS 2027.pdf', decision: 'usar' }], pedir_actualizacion: ['Temporada media sin fechas'] },
+    tarifario: { canal: 'neta', moneda: 'COP', impuestos: { iva_declarado: true, iva_incluido: false }, temporadas: [{}], tarifas: [{}, {}] },
+    datos_ficha: { ciudad: 'Madrid' },
+  })
+
+  it('se guarda en el espacio con quien la subió; la ficha ve el resumen y usa lo que no sabía', async () => {
+    expect(await leerExtraccion(HOTEL)).toEqual({ ok: true, extraccion: null })
+    expect(await guardarExtraccion(HOTEL, '{"esquema_version":"9.9","expediente":{}}')).toMatchObject({ ok: false })
+    expect(await guardarExtraccion(HOTEL, json, { instruccion: 'v8', modelo: 'modelo-de-prueba' })).toEqual({ ok: true })
+    expect(base.tablas.proveedor_extracciones[0]).toMatchObject({ workspace_id: WS, proveedor_id: HOTEL, esquema_version: '0.2', instruccion_version: 'v8', creada_por: ANA, archivos: ['tar0_TARIFAS 2027.pdf'] })
+    base.tablas.proveedor_extracciones[0].estado = 'borrador'
+    base.tablas.proveedor_extracciones[0].created_at = '2026-10-19T10:00:00Z'
+    const r = await leerExtraccion(HOTEL)
+    expect(r.ok && r.extraccion?.resumen).toMatchObject({ tarifas: 2, temporadas: 1, pedir: ['Temporada media sin fechas'] })
+    expect(r.ok && r.extraccion?.sugerencias).toEqual({ tarifaCanal: 'neta', ivaDeclarado: true, ivaIncluido: false })
+    expect(await usarSugerenciasDeExtraccion(HOTEL)).toEqual({ ok: true })
+    expect(base.tablas.fotos_perfiles.find((p) => p.id === HOTEL)).toMatchObject({ tarifa_canal: 'neta', iva_declarado: true, iva_incluido: false })
+  })
+
+  it('no pisa lo que una persona ya anotó en la ficha', async () => {
+    Object.assign(base.tablas.fotos_perfiles.find((p) => p.id === HOTEL) as Fila, { tarifa_canal: 'comisionable', iva_declarado: false })
+    await guardarExtraccion(HOTEL, json)
+    Object.assign(base.tablas.proveedor_extracciones[0], { estado: 'borrador', created_at: '2026-10-19T10:00:00Z' })
+    const r = await leerExtraccion(HOTEL)
+    expect(r.ok && r.extraccion?.sugerencias).toEqual({ tarifaCanal: null, ivaDeclarado: null, ivaIncluido: false })
+  })
+
+  it('una extracción de otro espacio no se lee', async () => {
+    base.tablas.proveedor_extracciones.push({ id: 'x9', workspace_id: OTRO_WS, proveedor_id: HOTEL, estado: 'borrador', created_at: '2026-10-19T10:00:00Z', expediente: {}, tarifario: null, archivos: [] })
+    expect(await leerExtraccion(HOTEL)).toEqual({ ok: true, extraccion: null })
   })
 })

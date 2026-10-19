@@ -25,6 +25,7 @@ import { tienePropuestaHtml } from '@/lib/pdf/motor-html'
 import { borrarArchivo, confirmarSubida, enlaceDeArchivo, urlDeSubida } from '@/lib/proveedores/almacen'
 import { BYTES_MAXIMOS_ARCHIVO, extensionDeMime, type ClaseArchivo } from '@/lib/proveedores/archivos'
 import { revisarCuenta, revisarDatos, revisarVigencia } from '@/lib/proveedores/datos'
+import { resumenExtraccion, revisarExtraccion, sugerenciasParaFicha, type ResumenExtraccion } from '@/lib/proveedores/extraccion'
 import { faltasDeFicha, quitarNotaCiudadPorConfirmar, tieneNotaCiudadPorConfirmar, type FaltaFicha } from '@/lib/proveedores/completitud'
 import { aliasPorCambio, claveCiudad, claveDeProveedor, ciudadDeClave, espacioDeTipo, esTipoProveedor, tieneFotos, type EspacioProveedor, type TarifaCanal, type TipoProveedor } from '@/lib/proveedores/tipos'
 import { hoyBogota, type VigenciaTarifario } from '@/lib/proveedores/vigencia'
@@ -537,6 +538,118 @@ export async function abrirTarifario(id: string): Promise<Resultado<{ url: strin
   if (!t?.ref) return { ok: false, error: 'Ese tarifario no tiene archivo todavía.' }
   const url = await enlaceDeArchivo(ctx.workspaceId, t.proveedor_id, 'tarifarios', t.ref)
   return url ? { ok: true, url } : { ok: false, error: 'No se pudo abrir el archivo. Vuelve a intentarlo.' }
+}
+
+// ── Extracciones del motor de tarifarios (server-only) ───────────────────────
+
+export interface ExtraccionVista {
+  id: string
+  creadaAt: string
+  creadaPor: string | null
+  modelo: string | null
+  instruccion: string | null
+  archivos: string[]
+  resumen: ResumenExtraccion
+  /** Lo que la extracción le propone a la ficha y la ficha todavía no sabe. */
+  sugerencias: ReturnType<typeof sugerenciasParaFicha>
+}
+
+/**
+ * La última extracción del motor para este proveedor (esquema 0.2), resumida. La tabla es
+ * server-only (el JSON puede citar datos bancarios de los PDF): se lee con el cliente de servicio
+ * y SIEMPRE filtrando por workspace. Sin la migración, `null`.
+ */
+export async function leerExtraccion(proveedorId: string): Promise<Resultado<{ extraccion: ExtraccionVista | null }>> {
+  const ctx = await contexto(false)
+  if ('error' in ctx) return { ok: false, error: ctx.error as string }
+  const f = await filaDe(ctx, proveedorId)
+  if (!f) return { ok: false, error: 'Ese proveedor no está en este espacio.' }
+  const servicio = createServiceClient() as Cliente
+  const { data, error } = await servicio
+    .from('proveedor_extracciones')
+    .select('id, created_at, creada_por, modelo, instruccion_version, archivos, expediente, tarifario')
+    .eq('workspace_id', ctx.workspaceId)
+    .eq('proveedor_id', f.id)
+    .neq('estado', 'descartada')
+    .order('created_at', { ascending: false })
+    .limit(1)
+    .maybeSingle()
+  if (error) return sinMigracion(error) ? { ok: true, extraccion: null } : { ok: false, error: 'No se pudo leer la extracción.' }
+  if (!data) return { ok: true, extraccion: null }
+  const x = data as { id: string; created_at: string; creada_por: string | null; modelo: string | null; instruccion_version: string | null; archivos: string[] | null; expediente: Record<string, unknown>; tarifario: Record<string, unknown> | null }
+  const resumen = resumenExtraccion({ expediente: x.expediente ?? {}, tarifario: x.tarifario })
+  const sug = sugerenciasParaFicha(resumen)
+  const personas = await equipo(ctx)
+  return {
+    ok: true,
+    extraccion: {
+      id: x.id,
+      creadaAt: x.created_at,
+      creadaPor: x.creada_por ? personas.find((p) => p.id === x.creada_por)?.nombre ?? null : null,
+      modelo: x.modelo,
+      instruccion: x.instruccion_version,
+      archivos: x.archivos ?? [],
+      resumen,
+      sugerencias: {
+        tarifaCanal: f.tarifa_canal ? null : sug.tarifaCanal,
+        ivaDeclarado: f.iva_declarado !== null && f.iva_declarado !== undefined ? null : sug.ivaDeclarado,
+        ivaIncluido: f.iva_incluido !== null && f.iva_incluido !== undefined ? null : sug.ivaIncluido,
+      },
+    },
+  }
+}
+
+/**
+ * Guarda una extracción del motor (el JSON que devuelve, esquema 0.2) en la ficha. Se revisa la
+ * forma mínima; el contenido se guarda tal cual, una fila por corrida.
+ */
+export async function guardarExtraccion(proveedorId: string, json: string, meta?: { modelo?: string | null; instruccion?: string | null }): Promise<Resultado> {
+  const ctx = await contexto(true)
+  if ('error' in ctx) return { ok: false, error: ctx.error as string }
+  const f = await filaDe(ctx, proveedorId)
+  if (!f) return { ok: false, error: 'Ese proveedor no está en este espacio.' }
+  const r = revisarExtraccion(json)
+  if (!r.ok) return r
+  const corto = (v: unknown, n: number) => (typeof v === 'string' && v.trim() ? v.trim().slice(0, n) : null)
+  const servicio = createServiceClient() as Cliente
+  const { error } = await servicio.from('proveedor_extracciones').insert({
+    workspace_id: ctx.workspaceId,
+    proveedor_id: f.id,
+    esquema_version: r.extraccion.esquemaVersion,
+    instruccion_version: corto(meta?.instruccion, 40),
+    modelo: corto(meta?.modelo, 120),
+    expediente: r.extraccion.expediente,
+    tarifario: r.extraccion.tarifario,
+    datos_ficha: r.extraccion.datosFicha,
+    archivos: r.extraccion.archivos,
+    creada_por: ctx.staffId,
+  })
+  if (error) return { ok: false, error: sinMigracion(error) ? MENSAJE_SIN_MIGRACION : 'No se pudo guardar la extracción. Vuelve a intentarlo.' }
+  return { ok: true }
+}
+
+/**
+ * «Usar en la ficha»: pasa a la ficha lo que la última extracción dice del canal y del IVA, solo en
+ * lo que la ficha todavía no sabe (nunca pisa lo que una persona anotó).
+ */
+export async function usarSugerenciasDeExtraccion(proveedorId: string): Promise<Resultado> {
+  const ctx = await contexto(true)
+  if ('error' in ctx) return { ok: false, error: ctx.error as string }
+  const r = await leerExtraccion(proveedorId)
+  if (!r.ok) return r
+  const s = r.extraccion?.sugerencias
+  if (!s) return { ok: false, error: 'Este proveedor no tiene extracción del motor.' }
+  const patch: Record<string, unknown> = {}
+  if (s.tarifaCanal) patch.tarifa_canal = s.tarifaCanal
+  if (s.ivaDeclarado !== null) patch.iva_declarado = s.ivaDeclarado
+  if (s.ivaIncluido !== null) patch.iva_incluido = s.ivaIncluido
+  if (Object.keys(patch).length === 0) return { ok: true }
+  const { error } = await ctx.db
+    .from('fotos_perfiles')
+    .update({ ...patch, updated_by: ctx.staffId, updated_at: new Date().toISOString() })
+    .eq('workspace_id', ctx.workspaceId)
+    .eq('id', proveedorId)
+  return error ? { ok: false, error: 'No se pudo guardar. Vuelve a intentarlo.' } : { ok: true }
 }
 
 // ── Cuentas bancarias (server-only) ──────────────────────────────────────────

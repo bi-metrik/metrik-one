@@ -1,7 +1,7 @@
 import { notFound } from 'next/navigation'
 
 import { elementoDelPerfil } from '../../fotos/actions'
-import { leerCuentas, leerFicha, type CuentaVista } from '../actions'
+import { leerCuentas, leerExtraccion, leerFicha, type CuentaVista } from '../actions'
 import FichaProveedorVista from './ficha-proveedor'
 
 /**
@@ -21,14 +21,16 @@ export default async function ProveedorPage({ params }: { params: Promise<{ id: 
     )
   }
   const conFotos = r.ficha.espacio === 'hotel' || r.ficha.espacio === 'actividad'
-  const [fotos, cuentas] = await Promise.all([
+  const [fotos, cuentas, extraccion] = await Promise.all([
     conFotos ? elementoDelPerfil(r.ficha.espacio as 'hotel' | 'actividad', r.ficha.clave) : Promise.resolve(null),
     r.verCuentas ? leerCuentas(r.ficha.id) : Promise.resolve(null),
+    leerExtraccion(r.ficha.id),
   ])
   return (
     <FichaProveedorVista
       ficha={r.ficha}
       agencia={r.agencia}
+      extraccion={extraccion.ok ? extraccion.extraccion : null}
       equipo={r.equipo}
       mayoristas={r.mayoristas}
       editable={r.editable}
