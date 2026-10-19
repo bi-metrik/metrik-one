@@ -11,6 +11,7 @@
 - ⚠️⚠️ [Propuesta: H33 (#1165) y motor html (PR 2)](project_propuesta_motor_html_h33.md) — SQL del interruptor SIN aplicar; anticipo en documento_cliente
 - ⚠️⚠️ [Propuesta PR 4: catálogo de fotos](project_fotos_catalogo.md) — migración 20261014221500 (tabla + bucket); hoteles NUNCA de Commons
 - ⚠️⚠️ [Perfil del contacto por el bot (corte 1)](project_perfil_contacto_bot.md) — migración 20261012234500 SIN aplicar; fichas sin publicar; el esquema manda sobre el prompt
+- ⚠️ [Operador sin staff no ve negocios (#1205)](project_operador_sin_staff_no_ve.md) — sin mergear; alma-afi tiene 4 staff sin profile (duplicaría)
 - [SOE-018: supervisor marca bloque restringido (#1203)](project_supervisor_marca_bloque_restringido.md) — pantalla usa canEditBloque; es_multi_pago solo pantalla
 - ⚠️ [SOE-016: responsable automático por etapa](project_responsable_automatico_etapa.md) — sin migración; config SOENA SIN aplicar; crear negocio no cubierto
 - ⚠️⚠️ [Espacio de pruebas trappvel-pruebas](project_espacio_pruebas_trappvel.md) — 2 --apply fallidos; restos 90226eac en prod; ensayo PGlite antes del próximo
@@ -83,7 +84,7 @@
 - ⚠️⚠️ [Transcripción a ciegas del NIT](project_confirmacion_nit_ciegas.md) — #807: la casilla NO viaja al navegador
 - ⚠️ [Animación de marca y RPC de Tableros (caída 2026-10-03)](project_animacion_marca_y_rpc_tableros.md) — loading de (app) por segmento; 12 RPC en paralelo por apertura; cacheables por ws+params
 - ⚠️⚠️ [Caché de 5 min de Tableros (#1001)](project_tableros_cache.md) — cifras hasta 5 min atrasadas; ventana en la llave (SWR); guarda verificada antes de guardar
-- ⚠️ [Barrera OFFSET 0 en RPC Comercial SOENA (#978)](project_perf_fence_venta_mes_soena.md) — 6 RPC aplicadas; pagos sigue lento (guard); la "deriva" eran comentarios
+- ⚠️⚠️ [RPC Comercial SOENA: OFFSET 0 y plan genérico (#1206)](project_perf_fence_venta_mes_soena.md) — pagos = plan genérico de función sql; 20261018190000 SIN aplicar
 - ⚠️ [Tableros operativos por fase (#939)](project_tableros_operativos.md) — inerte hasta encender config_extra.tableros_operativos en metrik
 - ⚠️⚠️ [El preview abre un workspace (#968)](project_preview_abre_workspace.md) — `?__ws=<slug>`; base de PRODUCCION; sin GEMINI en Preview; login por código
 - ⚠️ [Limpieza tras merge (hook)](project_limpieza_tras_merge.md) — settings.json vivo NO es symlink; registro del hook pendiente
