@@ -177,6 +177,37 @@ export function indexarUltimasConsultas(
   return ultimas;
 }
 
+/**
+ * Indexa por `claveContraparte` la consulta LIMPIA más reciente de cada
+ * contraparte: el segundo insumo de `situacionSujeto`.
+ *
+ * Igual que `indexarUltimasConsultas`, no supone orden en la entrada y compara
+ * fechas: las filas llegan paginadas por id, no por fecha. Antes se confiaba en
+ * un `order(created_at desc)` con `limit(5000)`, pero PostgREST corta en 1.000
+ * sin avisar, y la limpia de un sujeto que cayera después de la fila 1.000
+ * desaparecía: el sujeto salía "sin consultar" habiéndose consultado.
+ *
+ * Quien llama filtra la severidad; aquí no se vuelve a mirar.
+ */
+export function indexarConsultasLimpias(
+  consultas: readonly {
+    documento_tipo: string | null;
+    documento_numero: string | null;
+    created_at: string;
+    vigente_hasta: string | null;
+  }[],
+): Map<string, ConsultaLimpia> {
+  const limpias = new Map<string, ConsultaLimpia>();
+  for (const c of consultas) {
+    const clave = claveContraparte(c.documento_tipo, c.documento_numero);
+    if (!clave) continue;
+    const previa = limpias.get(clave);
+    if (previa && previa.created_at >= c.created_at) continue;
+    limpias.set(clave, { created_at: c.created_at, vigente_hasta: c.vigente_hasta });
+  }
+  return limpias;
+}
+
 /** "sin hallazgo" o "con hallazgo (alto)", para la columna de la base. */
 export function etiquetaResultadoConsulta(severidad: string | null): string {
   if (severidad === 'sin_hallazgo') return 'sin hallazgo';
