@@ -23,7 +23,7 @@ vi.mock('@/lib/proveedores/almacen', () => ({
   descargarArchivo: async (_ws: string, _p: string, clase: string, ref: string) => (clase === 'tarifarios' && ref ? { datos: new Uint8Array([37, 80, 68, 70]), mime: 'application/pdf' } : null),
 }))
 // El motor corre con un modelo SIMULADO: ninguna prueba llama al modelo de verdad.
-const motor = vi.hoisted(() => ({ respuesta: '{}', llamadas: [] as string[][] }))
+const motor = vi.hoisted(() => ({ respuesta: '{}', llamadas: [] as string[][], revienta: false }))
 vi.mock('@/lib/proveedores/motor', async (original) => {
   const real = await original<typeof import('@/lib/proveedores/motor')>()
   const { MockLanguageModelV4 } = await import('ai/test')
@@ -31,6 +31,7 @@ vi.mock('@/lib/proveedores/motor', async (original) => {
     ...real,
     correrMotor: (p: Parameters<typeof real.correrMotor>[0]) => {
       motor.llamadas.push(p.archivos.map((a) => a.nombre))
+      if (motor.revienta) throw new Error('excepción inesperada')
       const modelo = new MockLanguageModelV4({
         modelId: 'modelo-simulado',
         doGenerate: async () => ({
@@ -443,6 +444,17 @@ describe('motor v13: carga, cadena y extracción desde ONE', () => {
     motor.respuesta = JSON.stringify({ esquema_version: '0.3', expediente: { archivos: [] }, tarifario: { tarifas: [{ precio: 1 }] } })
     expect(await extraerTarifario(CADENA)).toMatchObject({ ok: false, error: expect.stringMatching(/sin moneda/) })
     expect(base.tablas.proveedor_extracciones).toHaveLength(1)
+  })
+
+  it('si la extracción revienta, la acción responde con un mensaje y no guarda', async () => {
+    base.tablas.proveedor_tarifarios.push({ id: 't2', workspace_id: WS, proveedor_id: CADENA, ref: `one://fotos-catalogo/${WS}/proveedores/${CADENA}/tarifarios/${'b'.repeat(32)}.pdf`, nombre_archivo: 'Tarifas cadena.pdf', mime: 'application/pdf', subido_at: '2026-10-01T00:00:00Z' })
+    motor.revienta = true
+    try {
+      expect(await extraerTarifario(CADENA)).toEqual({ ok: false, error: 'La extracción no se pudo completar. Vuelve a intentarlo en un rato.' })
+    } finally {
+      motor.revienta = false
+    }
+    expect(base.tablas.proveedor_extracciones).toHaveLength(0)
   })
 
   it('sin tarifarios con archivo no llama al motor; un rol de solo lectura tampoco', async () => {

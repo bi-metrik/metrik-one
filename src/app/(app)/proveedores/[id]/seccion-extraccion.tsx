@@ -41,6 +41,9 @@ function limpios(a: AjustesMoneda): AjustesMoneda {
   return r
 }
 
+
+/** Cuando la acción ni siquiera responde (red cortada o la página agotó su tiempo en Vercel). */
+const MENSAJE_MOTOR_SIN_RESPUESTA = 'No llegó la respuesta del motor: se cortó la conexión o se agotó el tiempo. Recarga la página para ver si la extracción quedó guardada y, si no, vuelve a intentarlo.'
 /**
  * «Extracción del motor» (Mauricio, 2026-10-19): la última lectura de los tarifarios del proveedor y
  * su CARGA. El motor corre desde aquí («Extraer con el motor») o se sube su JSON. La carga se cierra
@@ -72,16 +75,25 @@ export default function SeccionExtraccion({
   const [fuente, setFuente] = useState(uso?.tarifarioDe?.id ?? '')
   const [establecimiento, setEstablecimiento] = useState(uso?.establecimiento ?? '')
 
+  // El fallo del motor queda escrito en la sección (no solo en un aviso que se va): la corrida tarda
+  // minutos y la persona puede no estar mirando cuando termina.
+  const [errorMotor, setErrorMotor] = useState<string | null>(null)
+
   const correr = async <T,>(cual: NonNullable<typeof ocupado>, fn: () => Promise<{ ok: true } & T | { ok: false; error: string }>, exito: (r: T) => string) => {
     if (ocupado) return
     setOcupado(cual)
+    if (cual === 'motor') setErrorMotor(null)
+    const fallo = (mensaje: string) => {
+      if (cual === 'motor') setErrorMotor(mensaje)
+      toast.error(mensaje, cual === 'motor' ? { duration: 15_000 } : undefined)
+    }
     try {
       const res = await fn()
-      if (!res.ok) return void toast.error(res.error)
+      if (!res.ok) return void fallo(res.error)
       toast.success(exito(res as T))
       onCambio()
     } catch {
-      toast.error('No se pudo completar. Vuelve a intentarlo.')
+      fallo(cual === 'motor' ? MENSAJE_MOTOR_SIN_RESPUESTA : 'No se pudo completar. Vuelve a intentarlo.')
     } finally {
       setOcupado(null)
       if (entrada.current) entrada.current.value = ''
@@ -143,6 +155,11 @@ export default function SeccionExtraccion({
         )}
       </div>
       {ocupado === 'motor' && <p className="m-0 text-xs text-muted-foreground">El motor lee todos los tarifarios del proveedor: puede tardar unos minutos.</p>}
+      {errorMotor && ocupado !== 'motor' && (
+        <p role="alert" className="m-0 rounded-md border border-destructive/40 bg-destructive/5 px-2 py-1.5 text-xs text-destructive" data-error-motor>
+          {errorMotor}
+        </p>
+      )}
 
       {!x || !r ? (
         <p className="m-0 text-xs text-muted-foreground">Todavía no hay una extracción de los tarifarios de {uso?.tarifarioDe ? uso.tarifarioDe.nombre : 'este proveedor'}.</p>

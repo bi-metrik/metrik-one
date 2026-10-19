@@ -2,7 +2,7 @@
 
 ## Project memories
 
-- ⚠️⚠️ [Motor v13 de extracción en ONE](project_motor_v13.md) — migración 20261019203000 SIN aplicar; solo carga revisada cotiza; TRM sin fuente
+- ⚠️⚠️ [Motor v13 de extracción en ONE](project_motor_v13.md) — 20261019203000 SIN aplicar; directo a Anthropic con ANTHROPIC_API_KEY; TRM sin fuente
 - ⚠️⚠️ [Fichas, temporadas e IVA del proveedor](project_fichas_temporadas_iva.md) — migración 20261019130000 APLICADA (19-oct, renombrada); IVA por línea al leer; subtotal sin IVA
 - ⚠️ [Proveedores: ficha = fotos_perfiles](project_proveedores_ficha.md) — #1204 mergeado y aplicado (19-oct); bucket acepta PDF; cuentas server-only
 - ⚠️⚠️ [Fotos: biblioteca propia por hotel y tour](project_fotos_perfiles.md) — migración 20261017090000 SIN aplicar; sin búsqueda automática; PDF por vista (1 ida)
