@@ -328,7 +328,7 @@ describe('aprobar la entrada: un usuario con el contrato ya aceptado', () => {
         usuario_id: USUARIO,
         workspace_id: WS,
         documento_slug: 'politica-datos-valida',
-        documento_version: '1.6',
+        documento_version: '1.7',
         aviso_texto_sha256: sha(textoAvisoPolitica()),
       }),
       expect.objectContaining({

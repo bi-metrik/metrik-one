@@ -4,14 +4,17 @@
  * ## De dónde sale la versión
  *
  * Tiene que ser la publicada en `bi-metrik/metrik-valida` (`POLITICA_PRIVACIDAD.version` en
- * `lib/recursos/politica-privacidad.ts`, servida en `/recursos/privacidad`). Hoy es la **1.6**,
- * vigente desde el 2026-10-05 (verificada en la página publicada el 2026-10-11): ajusta el numeral
- * 13.3 (OFAC y UE como «listas restrictivas internacionales») y retira la cita de la Circular
- * 100-000016 de Supersociedades. La 1.5 (2026-09-16) corrigió la razón social del Responsable, que la
- * 1.4 nombraba sin «IA». El Responsable es METRIK IA S.A.S., NIT 902.079.601-9.
+ * `lib/recursos/politica-privacidad.ts`, servida en `/recursos/privacidad`). Desde el PR #1191 es la
+ * **1.7** (texto de Emilio, 2026-10-19): agrega el registro desde la página de Valida (5.12), el medio
+ * de pago y la pasarela ePayco (4.3, 5.11, 9 bis), a AFI como destinataria (9 bis) y sus plazos (12.1).
+ * ⚠️ La 1.7 se publica con el PR de metrik-valida `docs/politica-datos-v1.7`: tiene que estar
+ * publicada ANTES o en el mismo despliegue que este cambio, nunca después (Emilio, «Antes de
+ * publicar» 4). La 1.6 (2026-10-05) ajustó el 13.3 y retiró la Circular 100-000016; la 1.5
+ * (2026-09-16) corrigió la razón social del Responsable: METRIK IA S.A.S., NIT 902.079.601-9.
  *
- * ⚠️ Pasar de 1.5 a 1.6 vuelve a pedir la Política una vez a quien entra a Valida API y al Radar
- * (`exigeAprobacionPorUsuario`); en Valida de los CDA no se pide por usuario y no cambia nada.
+ * ⚠️ Pasar de 1.6 a 1.7 vuelve a pedir la Política una vez a quien entra a Valida API y al Radar
+ * (`exigeAprobacionPorUsuario`); en Valida de los CDA no se pide por usuario y no cambia nada. Es el
+ * aviso previo del cambio sustancial (Decreto 1074 de 2015, art. 2.2.2.25.3.1, inc. final).
  *
  * ⚠️ La spec de servicios y cobro llama «v1.5» a la versión que agrega a Wompi como destinatario
  * (entrega B5). Esa ya no puede ser la 1.5: será la siguiente. Donde la spec o el catálogo exijan
@@ -39,7 +42,7 @@ import { PRODUCTOS_ENTRADA, type ProductoEntrada } from './producto'
 
 export const POLITICA_DATOS_VALIDA = {
   slug: 'politica-datos-valida',
-  version: '1.6',
+  version: '1.7',
   titulo: 'Política de Tratamiento de Datos Personales',
   url: 'https://valida.metrik.com.co/recursos/privacidad',
 } as const

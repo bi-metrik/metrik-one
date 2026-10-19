@@ -4,10 +4,10 @@ import { POLITICA_DATOS_VALIDA, requiereAceptacion, textoAvisoPolitica } from '.
 import { huellaAvisoPolitica } from './politica-huella'
 
 describe('versión de la Política', () => {
-  it('es la publicada hoy en Valida (1.6, vigente desde el 2026-10-05)', () => {
+  it('es la 1.7 que publica el PR de metrik-valida docs/politica-datos-v1.7 (texto de Emilio, 2026-10-19)', () => {
     // Si alguien la sube antes de que Valida publique la siguiente, esta línea lo obliga a
     // decidirlo a propósito: la constancia quedaría sobre un texto que nadie puede leer.
-    expect(POLITICA_DATOS_VALIDA.version).toBe('1.6')
+    expect(POLITICA_DATOS_VALIDA.version).toBe('1.7')
     expect(POLITICA_DATOS_VALIDA.url).toBe('https://valida.metrik.com.co/recursos/privacidad')
   })
 })
@@ -34,11 +34,12 @@ describe('requiereAceptacion', () => {
   })
 
   it('con la versión vigente aceptada, no se vuelve a pedir', () => {
-    expect(requiereAceptacion([{ documento_version: '1.6', aceptada_at: '2026-10-11T10:00:00Z' }])).toBe(false)
+    expect(requiereAceptacion([{ documento_version: '1.7', aceptada_at: '2026-10-20T10:00:00Z' }])).toBe(false)
   })
 
   it('una versión anterior no autoriza la vigente: se vuelve a pedir', () => {
     expect(requiereAceptacion([{ documento_version: '1.4', aceptada_at: '2026-09-15T10:00:00Z' }])).toBe(true)
     expect(requiereAceptacion([{ documento_version: '1.5', aceptada_at: '2026-09-16T10:00:00Z' }])).toBe(true)
+    expect(requiereAceptacion([{ documento_version: '1.6', aceptada_at: '2026-10-11T10:00:00Z' }])).toBe(true)
   })
 })
