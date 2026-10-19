@@ -43,6 +43,12 @@ Relacionado: [[valida-alta-autogestionada]], [[secop-autogestion-registro]].
   confirmación); la pila trae el de token. Conflicto seguro al mergear: hay que fusionar los dos adaptadores.
   El paso 6 de main busca planes por `negocio_id`: no manda enlaces a suscripciones hasta el merge.
 - Tarjeta de prueba ePayco aceptada = 4575623182290326 con 12/2027 y CVV 123 (medios-de-pruebas-1);
-  el 19-oct salió «Tarjeta restringida», sin saber qué fecha/CVV se tokenizó.
+  el 19-oct salió «Tarjeta restringida» DOS veces (390317490, 390318763; cod 2). Diagnóstico: es el texto
+  que el propio equipo de ePayco obtiene con la tarjeta de prueba y `test=false` (PRs epayco-node #86,
+  epayco-php #109, epayco-python #81). El cargo SÍ va en pruebas; lo que va en vivo es el token:
+  ePayco.js no manda ningún flag de prueba (solo campos cifrados + llave + sesión) y `/token/customer`
+  tampoco. Los tokens tienen modo (`livemode` en la respuesta de `/token/card`); el SDK oficial y el plugin
+  «Subscription ePayco» tokenizan en el SERVIDOR con `test` en token, customer y cargo. Sin verificar el
+  arreglo: no se tocó código. Con ePayco.js, el sandbox probablemente nunca aprueba; en producción sí cuadra.
 - `test/tablas-doble.ts` ya soporta `neq` y `not(c, 'in', '(a,b)')`.
 
