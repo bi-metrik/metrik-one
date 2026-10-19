@@ -29,7 +29,7 @@ export type ArchivoEnCarpeta = {
 
 export type NombreEnDisco = { rec: string; clase: 'tar' | 'doc'; indice: number; original: string }
 
-const NOMBRE_EN_DISCO = /^(rec[A-Za-z0-9]+)_(tar|doc)(\d+)_(.+)$/s
+const NOMBRE_EN_DISCO = /^(rec[A-Za-z0-9]+)_(tar|doc)(\d+)_([\s\S]+)$/
 /** Lo que `origen_ref` puede medir como máximo (CHECK de la tabla y `importar-airtable.ts`). */
 export const LARGO_MAXIMO_ORIGEN_REF = 400
 

@@ -86,7 +86,7 @@ function preparar(fila: FilaImportada, archivo: ArchivoEnCarpeta, carpeta: strin
       return { archivo, motivo: `no se pudo convertir a PDF (${e instanceof Error ? e.message : e})` }
     }
   }
-  let datos = new Uint8Array(readFileSync(ruta))
+  let datos: Uint8Array = new Uint8Array(readFileSync(ruta))
   const mime = mimeDelContenido(datos)
   if (!mime) return { archivo, motivo: 'el contenido no es PDF ni imagen aceptada' }
   let comprimido = false
