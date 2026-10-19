@@ -132,6 +132,58 @@ export type ConsultaLimpia = {
   vigente_hasta: string | null;
 };
 
+/**
+ * La consulta a listas MÁS RECIENTE de un sujeto, de cualquier severidad.
+ *
+ * Es solo informativa: responde "¿cuándo fue la última evaluación de este
+ * tercero?", que el oficial necesita ver en la base. NO entra a
+ * `situacionSujeto`: el estado sigue saliendo de la consulta limpia y de las
+ * liberaciones, con su precedencia. Una consulta con hallazgo más reciente que
+ * la limpia no cambia el estado; lo cambia la liberación que el oficial escriba.
+ */
+export type UltimaConsulta = {
+  created_at: string;
+  /** Tal cual la guarda `consultas_listas_dual`: 'sin_hallazgo', 'alto', etc. */
+  severidad: string | null;
+};
+
+/**
+ * Indexa por `claveContraparte` la consulta más reciente de cada contraparte.
+ *
+ * Usa la MISMA clave que el estado (tipo + número normalizado, NIT sin DV), así
+ * que la fecha que se muestra y el estado que se muestra hablan del mismo
+ * tercero. Un CC y un NIT con el mismo número son dos claves distintas y no se
+ * cruzan.
+ *
+ * No supone orden en la entrada: compara fechas, porque las filas llegan
+ * paginadas por id.
+ */
+export function indexarUltimasConsultas(
+  consultas: readonly {
+    documento_tipo: string | null;
+    documento_numero: string | null;
+    created_at: string;
+    severidad: string | null;
+  }[],
+): Map<string, UltimaConsulta> {
+  const ultimas = new Map<string, UltimaConsulta>();
+  for (const c of consultas) {
+    const clave = claveContraparte(c.documento_tipo, c.documento_numero);
+    if (!clave) continue;
+    const previa = ultimas.get(clave);
+    if (previa && previa.created_at >= c.created_at) continue;
+    ultimas.set(clave, { created_at: c.created_at, severidad: c.severidad });
+  }
+  return ultimas;
+}
+
+/** "sin hallazgo" o "con hallazgo (alto)", para la columna de la base. */
+export function etiquetaResultadoConsulta(severidad: string | null): string {
+  if (severidad === 'sin_hallazgo') return 'sin hallazgo';
+  if (!severidad) return 'sin resultado';
+  return `con hallazgo (${severidad.replace(/_/g, ' ')})`;
+}
+
 /** El resultado completo: el estado y de dónde salió. */
 export type SituacionSujeto = {
   estado: EstadoSujeto;
