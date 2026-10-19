@@ -48,8 +48,8 @@ describe('motor de extracción', () => {
     expect(prompt).toContain('INSTRUCCIÓN DE PRUEBA')
     expect(prompt).toContain('tar0_Tarifas 2027.pdf')
     expect(prompt).toContain('tar1_Condiciones.png')
-    const archivos = m.doGenerateCalls[0].prompt.flatMap((msg) => (Array.isArray(msg.content) ? msg.content : [])).filter((p) => typeof p === 'object' && p.type === 'file')
-    expect(archivos.map((p) => (p as { mediaType: string }).mediaType)).toEqual(['application/pdf', 'image/png'])
+    const partes: { type?: string; mediaType?: string }[] = m.doGenerateCalls[0].prompt.flatMap((msg) => (Array.isArray(msg.content) ? (msg.content as { type?: string; mediaType?: string }[]) : []))
+    expect(partes.filter((p) => p.type === 'file').map((p) => p.mediaType)).toEqual(['application/pdf', 'image/png'])
   })
 
   it('una salida con errores de la torre no pasa', async () => {
