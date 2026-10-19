@@ -79,7 +79,8 @@ Relacionado: [[valida-alta-autogestionada]], [[secop-autogestion-registro]].
   publicado). Vigencia «19 de octubre de 2026» en 5 sitios: cambiarla si se publica otro día.
   ePayco NIT 900.471.052-8 (sus T&C); AFI = AFI INTERNATIONAL GROUP S.A.S. 902.003.244-6 (RUT DIAN).
   Los T&C de ePayco NO traen cláusula de encargo, y eControl exige al comercio autorización para
-  consultar centrales de riesgo.
+  consultar centrales de riesgo. Emilio (19-oct): ePayco es RESPONSABLE (sin acuerdo de encargo) y el
+  aviso pasa a v1.5 (a91419cc, huella con cobro 4e0c3bdd…) con la autorización de esa consulta.
 - Gotcha: el aislamiento del worktree bloquea git sobre otros checkouts; un `git clone` de GitHub en
   el scratchpad sí deja trabajar otro repo (rama, commit, push, `gh pr create -R`).
 - Cierre de los 3 contratos de prueba (futuras, -2, -3) en `scratchpad/cerrar_futuras3.sql` (sin correr al
