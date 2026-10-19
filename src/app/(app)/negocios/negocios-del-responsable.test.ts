@@ -17,7 +17,8 @@ const TABLAS: Record<string, Array<Record<string, unknown>>> = {
   ],
 }
 
-let quien = STAFF.edgar
+let quien: string | null = STAFF.edgar
+let rol = 'operator'
 function cliente() {
   return {
     from(tabla: string) {
@@ -39,7 +40,7 @@ function cliente() {
 }
 
 vi.mock('@/lib/actions/get-workspace', () => ({
-  getWorkspace: async () => ({ supabase: cliente(), workspaceId: 'ws', userId: 'p-x', role: 'operator', staffId: quien, error: null }),
+  getWorkspace: async () => ({ supabase: cliente(), workspaceId: 'ws', userId: 'p-x', role: rol, staffId: quien, error: null }),
 }))
 
 describe('el viaje asignado le aparece a su responsable', () => {
@@ -50,5 +51,21 @@ describe('el viaje asignado le aparece a su responsable', () => {
     quien = STAFF.ale
     expect(await getNegociosV2('abierto', false, false)).toEqual([])
     // Importar las acciones de negocios tarda ~5 s en frío.
+  }, 60_000)
+
+  it('un operador SIN fila en staff no ve ninguno (antes veía todos)', async () => {
+    const { getNegociosV2 } = await import('./negocio-v2-actions')
+    rol = 'operator'
+    quien = null
+    expect(await getNegociosV2('abierto', false, false)).toEqual([])
+    expect(await getNegociosV2('todos', false, false)).toEqual([])
+  }, 60_000)
+
+  it('el dueño sin staff sigue viendo todos (el default seguro es solo del operador)', async () => {
+    const { getNegociosV2 } = await import('./negocio-v2-actions')
+    rol = 'owner'
+    quien = null
+    expect((await getNegociosV2('abierto', false, false)).map((n) => n.id).sort()).toEqual(['n-bot', 'n-otro'])
+    rol = 'operator'
   }, 60_000)
 })

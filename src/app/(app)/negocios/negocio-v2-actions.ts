@@ -717,8 +717,16 @@ export async function getNegociosV2(
   // ── Modelo roles-areas-stages Fase 2: filtrado por operator ──
   // Operator solo ve negocios donde es responsable (negocio_responsables N:M).
   // Otros roles (owner/admin/supervisor/read_only) ven todos. Contador no llega aqui.
+  //
+  // Un operator SIN staffId no ve ninguno. Hasta el 2026-10-18 la condición era
+  // `role === 'operator' && staffId`: sin fila en `staff` el filtro se saltaba y el
+  // operator veía TODOS los negocios del workspace. `getWorkspace` autocrea el staff
+  // del operator (#988), pero hay caminos donde igual queda null (su staff vive en otro
+  // workspace, el upsert falló); el default seguro es la lista vacía, igual que el
+  // detalle (`getNegocioDetalleCompleto`) y `canViewNegocio` ya hacían.
   let negocioIdsPermitidos: string[] | null = null
-  if (role === 'operator' && staffId) {
+  if (role === 'operator') {
+    if (!staffId) return []
     const { data: nrRows, error: errorResponsables } = await db(supabase)
       .from('negocio_responsables')
       .select('negocio_id')
