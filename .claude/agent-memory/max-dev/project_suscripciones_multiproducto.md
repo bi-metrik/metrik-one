@@ -36,5 +36,8 @@ Relacionado: [[valida-alta-autogestionada]], [[secop-autogestion-registro]].
   cancela la prueba, el contrato queda vivo y entraría en mora. Decisión pendiente de Mauricio.
 - `/api/crons/valida-cobro-prueba?ws=<slug|id>` procesa un solo espacio (reintentos en preview sin tocar
   otros registros del mismo despliegue, p. ej. `test-de-pruebas`). Migración 20261016170000 APLICADA (16-oct).
+- 19-oct: ePayco exige `tax`/`taxBase` NÚMERO (`'0'` → «field tax is type float»); `value` string sí lo acepta.
+  Una falla técnica (`no_procesado#N` en la fila del intento) NO gasta el intento: se reclama la misma fila
+  hasta 3. Solo un rechazo del banco cuenta.
 - `test/tablas-doble.ts` ya soporta `neq` y `not(c, 'in', '(a,b)')`.
 
