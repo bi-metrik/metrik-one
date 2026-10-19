@@ -52,3 +52,14 @@ Relacionado: [[valida-alta-autogestionada]], [[secop-autogestion-registro]].
   arreglo: no se tocó código. Con ePayco.js, el sandbox probablemente nunca aprueba; en producción sí cuadra.
 - `test/tablas-doble.ts` ya soporta `neq` y `not(c, 'in', '(a,b)')`.
 
+
+## 2026-10-19: cobro real pequeño en preview (diseño, sin código)
+- Mauricio descartó la variable de entorno para el monto: el precio se configura desde el ws metrik
+  (lista por producto + precio especial por suscripción). Diseño entregado; migraciones SIN escribir.
+- Mínimo de ePayco: $5.000 COP por transacción («Topes por transacción», epayco.com/terminos-y-condiciones-generales-2026).
+  docs.epayco.com no lo dice.
+- ⚠️ El monto cobrado sale de `plan_cobro_cuotas.monto` ← `servicios_contratados.parametros.precio_mensual`,
+  que se fija al ACTIVAR. Los contratos de cda-pruebas-futuras(-2) ya existen en $150.000: si se
+  reintenta sobre ellos, cobra $150.000 aunque la pantalla diga otra cosa. Probar con un registro nuevo.
+- El webhook de main con una confirmación real del cargo por token: `ref` sale solo de `?ref=` (la
+  urlConfirmation del cargo no lo trae) → `sin_cobro`, 200, una fila en `pasarela_eventos`. No paga nada.
