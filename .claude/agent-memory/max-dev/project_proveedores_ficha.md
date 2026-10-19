@@ -24,5 +24,8 @@ cotización ya es proveedor; dos tablas obligaban a sincronizar alta, reconocimi
   solo lectura). Sin `--conocidos` solo une por llave exacta. Rechaza rutas de entrada/salida dentro del repo.
 - Sin QA visual ni prueba en preview al abrir el PR; la lista de «ciudades» con fotos de antes ya no tiene pantalla.
 
+- Departamento en «Ciudad» (#1209, 2026-10-19): regla única `ciudadDeFichaEsDepartamento` (completitud, botón
+  «Confirmar ciudad», su acción y filtro de la lista). guardarDatos NO rechaza: guarda y devuelve `aviso`.
+
 **How to apply:** antes de tocar proveedores o fotos, recordar que son la misma fila; correr el importador DESPUÉS del
 merge (crea filas tipo `proveedor` que el código viejo de «Hoteles y tours» no sabe pintar). Ver [[fotos-perfiles]].

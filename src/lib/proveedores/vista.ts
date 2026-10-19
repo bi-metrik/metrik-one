@@ -70,6 +70,8 @@ export interface ProveedorEnLista {
   destino: string | null
   /** Lo que le falta para poder cotizar (`faltasDeFicha`). Vacío = completa. */
   faltas: string[]
+  /** La «ciudad» es un departamento colombiano (`ciudadDeFichaEsDepartamento`): el filtro la pone aparte. */
+  ciudadEsDepartamento: boolean
   estrellas: number | null
   etiquetas: string[]
   responsableId: string | null

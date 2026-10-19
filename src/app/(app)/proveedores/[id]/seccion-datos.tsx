@@ -67,7 +67,8 @@ export default function SeccionDatos({
         compradoViaId: d.tipoProveedor === 'mayorista' ? '' : d.compradoViaId,
       })
       if (!r.ok) return void toast.error(r.error)
-      toast.success(r.alias ? 'Guardado. Las cotizaciones lo reconocerán con su nombre y ciudad nuevos.' : 'Guardado')
+      if (r.aviso) toast.warning(r.aviso)
+      else toast.success(r.alias ? 'Guardado. Las cotizaciones lo reconocerán con su nombre y ciudad nuevos.' : 'Guardado')
       onGuardado()
     } catch {
       toast.error('No se pudo guardar. Vuelve a intentarlo.')

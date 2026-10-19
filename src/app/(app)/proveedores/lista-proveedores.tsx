@@ -46,10 +46,19 @@ export default function ListaProveedores({
   const [duda, setDuda] = useState<{ id: string | null; nombre: string; ciudad: string | null } | null>(null)
   const [ocupado, setOcupado] = useState(false)
 
-  const ciudades = useMemo(() => {
+  // Los departamentos escritos como ciudad van aparte: no son ciudades, son fichas por corregir.
+  const { ciudades, departamentos } = useMemo(() => {
     const m = new Map<string, string>()
-    for (const p of proveedores) if (p.ciudadClave && p.ciudad && !m.has(p.ciudadClave)) m.set(p.ciudadClave, p.ciudad)
-    return [...m.entries()].sort((a, b) => a[1].localeCompare(b[1], 'es'))
+    const d = new Map<string, string>()
+    for (const p of proveedores) {
+      if (!p.ciudadClave || !p.ciudad) continue
+      const destino = p.ciudadEsDepartamento ? d : m
+      if (!destino.has(p.ciudadClave)) destino.set(p.ciudadClave, p.ciudad)
+    }
+    // Una misma clave puede ser municipio en una ficha («Caldas, Antioquia») y departamento en otra.
+    for (const k of m.keys()) d.delete(k)
+    const orden = (a: [string, string], b: [string, string]) => a[1].localeCompare(b[1], 'es')
+    return { ciudades: [...m.entries()].sort(orden), departamentos: [...d.entries()].sort(orden) }
   }, [proveedores])
   const etiquetas = useMemo(() => [...new Set(proveedores.flatMap((p) => p.etiquetas))].sort(), [proveedores])
   const nombrePersona = useMemo(() => new Map(equipo.map((p) => [p.id, p.nombre])), [equipo])
@@ -193,6 +202,15 @@ export default function ListaProveedores({
                 {n}
               </option>
             ))}
+            {departamentos.length > 0 && (
+              <optgroup label="Departamentos (falta el municipio)">
+                {departamentos.map(([k, n]) => (
+                  <option key={k} value={k}>
+                    {n}
+                  </option>
+                ))}
+              </optgroup>
+            )}
           </select>
           <select aria-label="Etiqueta" value={etiqueta} onChange={(e) => setEtiqueta(e.target.value)} className={select}>
             <option value="">Todas las etiquetas</option>

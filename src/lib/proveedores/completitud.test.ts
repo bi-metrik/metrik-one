@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 
-import { ciudadEsDepartamento, faltasDeFicha, fichaCompleta, quitarNotaCiudadPorConfirmar, tieneNotaCiudadPorConfirmar } from './completitud'
+import { ciudadDeFichaEsDepartamento, ciudadEsDepartamento, faltasDeFicha, fichaCompleta, quitarNotaCiudadPorConfirmar, tieneNotaCiudadPorConfirmar } from './completitud'
 
 const ficha = (extra: Partial<Parameters<typeof faltasDeFicha>[0]> = {}) => ({ tipo_proveedor: 'hotel', ciudad: 'Cartagena', pais: 'CO', departamento: null, notas: null, ...extra })
 
@@ -26,6 +26,21 @@ describe('ficha completa para cotizar', () => {
     expect(faltasDeFicha(ficha({ ciudad: 'Cundinamarca' }))[0]?.texto).toMatch(/departamento/)
     // Fuera de Colombia no se juzga.
     expect(fichaCompleta(ficha({ ciudad: 'Panamá', pais: 'PA' }))).toBe(true)
+  })
+
+  it('departamento en «Ciudad» con o sin tildes y mayúsculas; solo en Colombia o sin país', () => {
+    for (const c of ['Boyaca', 'BOYACÁ', 'boyacá', 'Cundinamarca', 'Quindio', 'QUINDÍO', 'Caldas', ' Valle del Cauca ']) {
+      expect(ciudadDeFichaEsDepartamento({ ciudad: c, pais: 'CO', departamento: null })).toBe(true)
+      expect(ciudadDeFichaEsDepartamento({ ciudad: c, pais: null, departamento: null })).toBe(true)
+    }
+    expect(ciudadDeFichaEsDepartamento({ ciudad: 'Boyacá', pais: 'PE', departamento: null })).toBe(false)
+    expect(ciudadDeFichaEsDepartamento({ ciudad: 'Tunja', pais: 'CO', departamento: null })).toBe(false)
+    expect(ciudadDeFichaEsDepartamento({ ciudad: 'Bogotá', pais: 'CO', departamento: null })).toBe(false)
+    expect(ciudadDeFichaEsDepartamento({ ciudad: '', pais: 'CO', departamento: null })).toBe(false)
+  })
+
+  it('con la nota «Ciudad por confirmar» y un departamento, la falta dice que escriba el municipio', () => {
+    expect(faltasDeFicha(ficha({ ciudad: 'Boyaca', notas: 'Ciudad por confirmar' }))).toEqual([{ campo: 'ciudad', texto: '«Boyaca» es un departamento: escribe el municipio' }])
   })
 
   it('un nombre que es departamento y municipio vale si el departamento lo confirma', () => {

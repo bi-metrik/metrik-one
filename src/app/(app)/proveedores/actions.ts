@@ -26,7 +26,7 @@ import { borrarArchivo, confirmarSubida, enlaceDeArchivo, urlDeSubida } from '@/
 import { BYTES_MAXIMOS_ARCHIVO, extensionDeMime, type ClaseArchivo } from '@/lib/proveedores/archivos'
 import { revisarCuenta, revisarDatos, revisarVigencia } from '@/lib/proveedores/datos'
 import { resumenExtraccion, revisarExtraccion, sugerenciasParaFicha, type ResumenExtraccion } from '@/lib/proveedores/extraccion'
-import { faltasDeFicha, quitarNotaCiudadPorConfirmar, tieneNotaCiudadPorConfirmar, type FaltaFicha } from '@/lib/proveedores/completitud'
+import { ciudadDeFichaEsDepartamento, faltasDeFicha, quitarNotaCiudadPorConfirmar, textoCiudadEsDepartamento, tieneNotaCiudadPorConfirmar, type FaltaFicha } from '@/lib/proveedores/completitud'
 import { aliasPorCambio, claveCiudad, claveDeProveedor, ciudadDeClave, espacioDeTipo, esTipoProveedor, tieneFotos, type EspacioProveedor, type TarifaCanal, type TipoProveedor } from '@/lib/proveedores/tipos'
 import { hoyBogota, type VigenciaTarifario } from '@/lib/proveedores/vigencia'
 import {
@@ -156,6 +156,7 @@ export async function leerProveedores(): Promise<ListaProveedores> {
         ciudadClave: f.ciudad ? claveCiudad(f.ciudad) : ciudadDeClave(f.clave),
         destino: f.destino ?? null,
         faltas: faltasDeFicha(f).map((x) => x.texto),
+        ciudadEsDepartamento: ciudadDeFichaEsDepartamento(f),
         estrellas: f.estrellas,
         etiquetas: f.etiquetas ?? [],
         responsableId: f.responsable_tarifas_id,
@@ -267,6 +268,8 @@ export interface FichaProveedor {
   faltas: FaltaFicha[]
   /** La nota «Ciudad por confirmar» está en las notas (el botón «Confirmar ciudad» la quita). */
   ciudadPorConfirmar: boolean
+  /** La «ciudad» es un departamento colombiano: no se puede confirmar, hay que escribir el municipio. */
+  ciudadEsDepartamento: boolean
   tarifarios: TarifarioVista[]
   /** El mayorista por el que se compra, con sus tarifarios (respaldo del aviso de vigencia). */
   via: { id: string; nombre: string; tarifarios: TarifarioVista[] } | null
@@ -342,6 +345,7 @@ export async function leerFicha(id: string): Promise<LecturaFicha> {
       tarifasSolicitadasAt: f.tarifas_solicitadas_at ?? null,
       faltas: faltasDeFicha(f),
       ciudadPorConfirmar: tieneNotaCiudadPorConfirmar(f.notas),
+      ciudadEsDepartamento: ciudadDeFichaEsDepartamento(f),
       tarifarios: propios.map((x) => tarifarioVista(x, hoy, nombres)),
       via: via ? { ...via, tarifarios: deVia.map((x) => tarifarioVista(x, hoy, nombres)) } : null,
       semaforo: estadoDeProveedor(f, porProveedor, hoy),
@@ -358,7 +362,7 @@ export async function leerFicha(id: string): Promise<LecturaFicha> {
  * otra ficha. Si la llave nueva ya es de OTRA ficha, no se guarda: serían dos fichas del mismo
  * proveedor.
  */
-export async function guardarDatos(id: string, entrada: unknown): Promise<Resultado<{ alias?: boolean }>> {
+export async function guardarDatos(id: string, entrada: unknown): Promise<Resultado<{ alias?: boolean; aviso?: string }>> {
   const ctx = await contexto(true)
   if ('error' in ctx) return { ok: false, error: ctx.error as string }
   const f = await filaDe(ctx, id)
@@ -404,6 +408,10 @@ export async function guardarDatos(id: string, entrada: unknown): Promise<Result
     // 23505: otra pestaña lo guardó al mismo tiempo.
     if (e && e.code !== '23505') return { ok: false, error: 'Los datos se guardaron, pero no el nombre nuevo para las cotizaciones. Vuelve a guardar.' }
   }
+  // Se guarda igual (el resto de los datos vale), pero la ficha sigue por clasificar y se dice por qué.
+  if (c.ciudad && ciudadDeFichaEsDepartamento(c)) {
+    return { ok: true, alias: aliasNuevo, aviso: `Guardado, pero ${textoCiudadEsDepartamento(c.ciudad)}. La ficha sigue por clasificar.` }
+  }
   return { ok: true, alias: aliasNuevo }
 }
 
@@ -414,6 +422,8 @@ export async function confirmarCiudad(id: string): Promise<Resultado> {
   const f = await filaDe(ctx, id)
   if (!f) return { ok: false, error: 'Ese proveedor no está en este espacio.' }
   if (!f.ciudad?.trim()) return { ok: false, error: 'Primero escribe la ciudad y guarda los datos.' }
+  // Confirmar un departamento dejaría la ficha con un departamento por ciudad (no se confía en la pantalla).
+  if (ciudadDeFichaEsDepartamento(f)) return { ok: false, error: `${textoCiudadEsDepartamento(f.ciudad)} y guarda los datos.` }
   if (!tieneNotaCiudadPorConfirmar(f.notas)) return { ok: true }
   const { error } = await ctx.db
     .from('fotos_perfiles')

@@ -97,7 +97,12 @@ export default function FichaProveedorVista({
               <li key={f.texto}>{f.texto}</li>
             ))}
           </ul>
-          {editable && ficha.ciudadPorConfirmar && ficha.ciudad && (
+          {editable && ficha.ciudadPorConfirmar && ficha.ciudad && ficha.ciudadEsDepartamento && (
+            <p className="m-0 text-[#7A4B08]" data-ciudad-es-departamento>
+              No se puede confirmar: «{ficha.ciudad}» es un departamento. Escribe el municipio en «Ciudad» y guarda.
+            </p>
+          )}
+          {editable && ficha.ciudadPorConfirmar && ficha.ciudad && !ficha.ciudadEsDepartamento && (
             <button
               type="button"
               onClick={() => void confirmar()}

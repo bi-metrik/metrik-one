@@ -105,6 +105,22 @@ export function ciudadEsDepartamento(ciudad: string | null | undefined, departam
   return !(codigo && MUNICIPIOS_POR_DEPTO[codigo]?.[n] !== undefined)
 }
 
+/**
+ * ¿La ficha tiene un departamento colombiano en «Ciudad»? Solo se juzga en Colombia (o sin país):
+ * «Panamá» en una ficha de PA es la ciudad. Lo usan la completitud, el botón «Confirmar ciudad» y
+ * su acción del servidor, y el filtro de ciudades de la lista: una sola regla.
+ */
+export function ciudadDeFichaEsDepartamento(f: Pick<FichaParaCompletitud, 'ciudad' | 'pais' | 'departamento'>): boolean {
+  const ciudad = (f.ciudad ?? '').trim()
+  const pais = (f.pais ?? '').trim().toUpperCase()
+  return !!ciudad && (pais === 'CO' || !pais) && ciudadEsDepartamento(ciudad, f.departamento)
+}
+
+/** El texto de la falta cuando la «ciudad» es un departamento (ficha, aviso al guardar, botón). */
+export function textoCiudadEsDepartamento(ciudad: string): string {
+  return `«${ciudad.trim()}» es un departamento: escribe el municipio`
+}
+
 /** Lo que le falta a la ficha para poder cotizar. Vacío = completa. */
 export function faltasDeFicha(f: FichaParaCompletitud): FaltaFicha[] {
   const faltas: FaltaFicha[] = []
@@ -112,10 +128,11 @@ export function faltasDeFicha(f: FichaParaCompletitud): FaltaFicha[] {
   const pais = (f.pais ?? '').trim().toUpperCase()
   if (!ciudad) {
     faltas.push({ campo: 'ciudad', texto: 'Falta la ciudad (el municipio donde duerme o se presta el servicio)' })
+  } else if (ciudadDeFichaEsDepartamento(f)) {
+    // Antes que la nota: confirmar un departamento no sirve, hay que escribir el municipio.
+    faltas.push({ campo: 'ciudad', texto: textoCiudadEsDepartamento(ciudad) })
   } else if (tieneNotaCiudadPorConfirmar(f.notas)) {
     faltas.push({ campo: 'ciudad', texto: 'La ciudad está por confirmar' })
-  } else if ((pais === 'CO' || !pais) && ciudadEsDepartamento(ciudad, f.departamento)) {
-    faltas.push({ campo: 'ciudad', texto: `«${ciudad}» es un departamento: escribe el municipio` })
   }
   if (!/^[A-Z]{2}$/.test(pais)) faltas.push({ campo: 'pais', texto: 'Falta el país' })
   if (f.tipo_proveedor === 'otro') faltas.push({ campo: 'tipo', texto: 'Falta el tipo (está en «Otro»)' })
