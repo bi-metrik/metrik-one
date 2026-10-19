@@ -163,14 +163,16 @@ describe('el mismo guardado dos veces A LA VEZ', () => {
     expect(lineasBloque()).toHaveLength(1)
   })
 
-  it('los pagos automáticos del bloque se crean una sola vez', async () => {
+  it('el cierre genérico ya no crea los pagos del bloque multi-pago (los crea «Guardar pagos»)', async () => {
+    // Desde el 2026-10-19 `auto_cobros_multi` no escribe cobros desde aquí: ver
+    // `guardarPagosMulti` y `auto-cobros-multi-fecha.test.ts`.
     tablas.negocio_bloques.push(bloque('nb-pagos', {}, { triggers: [{ event: 'complete', action: 'auto_cobros_multi' }] }))
     const pagos = [{ referencia_epayco: 'REF-1', valor_pago: 100_000 }]
     await Promise.all([
       marcarBloqueCompleto('nb-pagos', { pagos }),
       marcarBloqueCompleto('nb-pagos', { pagos }),
     ])
-    expect(tablas.cobros.filter(c => c.external_ref === 'REF-1')).toHaveLength(1)
+    expect((tablas.cobros ?? []).filter(c => c.external_ref === 'REF-1')).toHaveLength(0)
   })
 
   it('dos guardados DISTINTOS a la vez: gana el último y los dos quedan en el historial', async () => {

@@ -4,7 +4,8 @@ import { useState, useEffect } from 'react'
 import { useTransitionTolerante } from '@/hooks/use-transition-tolerante'
 import { useRouter } from 'next/navigation'
 import DistribuirPagoModal from '@/components/distribuir-pago-modal'
-import { Search } from 'lucide-react'
+import EstadoRepartoComercial from '@/components/estado-reparto-comercial'
+import { AlertTriangle, Search } from 'lucide-react'
 import { toast } from 'sonner'
 import { consultarEpayco, registrarPagoEpayco, type NegocioExistente } from '@/lib/actions/epayco-actions'
 import type { EpaycoDesglose } from '@/lib/epayco'
@@ -13,6 +14,9 @@ import AvisoHonorarioPendiente from './AvisoHonorarioPendiente'
 import { useIntencion } from '@/hooks/use-intencion'
 import { FechaDelPago } from './FechaDelPago'
 import { fechaDelPagoEpayco, type CobroConFecha } from '@/lib/epayco/fecha-de-pago'
+import { prepararRepartoComercial } from '@/lib/actions/conciliacion-actions'
+import { sugerenciaPorExceso, type SugerenciaPorExceso } from '@/lib/cobros/reparto-comercial'
+import { TOLERANCIA_SALDO_COP } from '@/lib/negocios/tolerancia-saldo'
 
 export interface PagoRegistrado {
   ref_payco: number
@@ -91,6 +95,9 @@ export default function BloquePagosEpayco({
   const [duplicado, setDuplicado] = useState<NegocioExistente | null>(null)
   const [justificacion, setJustificacion] = useState('')
   const [showReparto, setShowReparto] = useState(false)
+  // Aviso «no repartió»: el pago supera lo que debe este caso. `debe` null = no se midió.
+  const [exceso, setExceso] = useState<{ debe: number; sugerencia: SugerenciaPorExceso | null } | null>(null)
+  const [sugeridosReparto, setSugeridosReparto] = useState<string[]>([])
   const router = useRouter()
   // Registrar el pago consulta ePayco y escribe el cobro: si la respuesta se pierde, se
   // relee la ficha para ver si el pago quedó antes de registrarlo otra vez.
@@ -103,6 +110,25 @@ export default function BloquePagosEpayco({
     setDuplicado(null)
     setJustificacion('')
     setPreviewDesglose(null)
+    setExceso(null)
+    setSugeridosReparto([])
+  }
+
+  /**
+   * ¿El pago supera lo que debe este caso? Es la firma del «no repartió» (EXT-43545,
+   * EXT-251163): el pago de dos negocios cargado entero en uno. Avisa, no bloquea.
+   */
+  async function medirExceso(monto: number) {
+    const r = await prepararRepartoComercial({ negocioIds: [negocioId], negocioOrigenId: negocioId })
+    if (!r.ok) return
+    const debe = r.negocios[0]?.debe
+    if (debe == null || monto - debe <= TOLERANCIA_SALDO_COP) return
+    const sugerencia = sugerenciaPorExceso({
+      monto,
+      debeOrigen: debe,
+      candidatos: r.sugeridos.map((s) => ({ ...s, debe: s.debe ?? 0 })),
+    })
+    setExceso({ debe, sugerencia })
   }
 
   async function handleConsultar() {
@@ -126,6 +152,7 @@ export default function BloquePagosEpayco({
           setError('Este pago ya está registrado en este negocio.')
         } else {
           setPreviewDesglose(result.data)
+          void medirExceso(result.data.monto_bruto)
         }
       }
     } catch {
@@ -194,6 +221,7 @@ export default function BloquePagosEpayco({
   if (modo === 'visible') {
     return (
       <div className="space-y-1.5">
+        <EstadoRepartoComercial negocioId={negocioId} />
         {pagos.length === 0 && <p className="text-xs text-tinta-suave italic">Sin pagos registrados</p>}
         {pagos.map((p, i) => (
           <div key={i} className="flex items-center gap-3 rounded-lg border border-[#E5E7EB] p-2.5">
@@ -222,6 +250,7 @@ export default function BloquePagosEpayco({
   // ── Modo editable ───────────────────────────────────────────────────────────
   return (
     <div className="space-y-3">
+      <EstadoRepartoComercial negocioId={negocioId} />
       {/* Existing payments list */}
       {pagos.length > 0 && (
         <div className="space-y-1.5">
@@ -363,6 +392,26 @@ export default function BloquePagosEpayco({
             </p>
           )}
           <p className="text-xs font-semibold text-tinta tabular-nums">Neto: {fmt(previewDesglose.monto_neto)}</p>
+          {exceso && (
+            <div className="mt-2 rounded-lg border border-amber-300 bg-amber-50 p-2.5 text-[11px] text-amber-900">
+              <p className="flex items-center gap-1 font-semibold"><AlertTriangle className="h-3.5 w-3.5" /> Este pago supera lo que debe el caso</p>
+              <p className="mt-0.5">
+                Este negocio debe {fmt(exceso.debe)} y el pago es de {fmt(previewDesglose.monto_bruto)}.
+                {exceso.sugerencia
+                  ? ` ¿Cubre también ${exceso.sugerencia.candidatos.map(c => c.codigo ?? 'otro negocio').join(' o ')}?`
+                  : ' ¿Cubre otro negocio? Repártelo.'}
+              </p>
+              <button
+                onClick={() => { setSugeridosReparto(exceso.sugerencia?.candidatos.map(c => c.negocio_id) ?? []); setShowReparto(true) }}
+                disabled={isPending}
+                className="mt-1.5 w-full rounded-md border border-amber-400 bg-white py-1.5 text-[11px] font-semibold text-amber-900 hover:bg-amber-100 disabled:opacity-40"
+              >
+                {exceso.sugerencia
+                  ? `Repartir con ${exceso.sugerencia.candidatos.map(c => c.codigo ?? 'el otro negocio').join(' y ')}`
+                  : 'Repartir entre negocios'}
+              </button>
+            </div>
+          )}
           <button
             onClick={handleRegistrar}
             disabled={isPending}
@@ -371,7 +420,7 @@ export default function BloquePagosEpayco({
             {isPending ? 'Registrando...' : 'Registrar pago'}
           </button>
           <button
-            onClick={() => setShowReparto(true)}
+            onClick={() => { setSugeridosReparto([]); setShowReparto(true) }}
             disabled={isPending}
             className="w-full mt-1.5 rounded-lg border border-acento py-2 text-xs font-semibold text-acento hover:bg-[var(--acento-tinte)] disabled:opacity-40 transition-colors"
           >
@@ -385,6 +434,7 @@ export default function BloquePagosEpayco({
           referenciaInicial={newRef.trim()}
           totalInicial={previewDesglose.monto_bruto}
           contextoEpayco
+          sugeridosIniciales={sugeridosReparto}
           onClose={() => setShowReparto(false)}
           onDone={() => { setShowReparto(false); resetEstado(); setNewRef(''); router.refresh() }}
         />

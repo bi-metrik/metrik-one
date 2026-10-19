@@ -75,6 +75,7 @@ import type { ConfirmacionAvance } from '@/lib/negocios/confirmacion-avance'
 import type { PendienteHandoff, ModeloDinero } from '@/lib/upme/modelo-dinero'
 import type { EpaycoCostoCobro } from '@/lib/epayco'
 import type { MultiPagoField } from './bloques/BloqueDatosMultiPago'
+import { puedeEditarMultiPago } from '@/lib/permissions/multi-pago'
 import type { HistorialData } from './bloques/BloqueHistorial'
 import { STAGE_BADGE_CLASSES, type WorkflowStage } from '@/components/workflow/types'
 import { GuiaEtapaCard } from './GuiaEtapaCard'
@@ -1615,7 +1616,6 @@ function BloqueRenderer({
   // Tier 2 (supervisor+): owner, admin, supervisor editan — operator solo ve
   // Tier 3 (gerencial): solo owner, admin editan — resto solo ve
   // Visualización: siempre solo lectura
-  const GERENCIAL = ['owner', 'admin']
   const SUPERVISOR_UP = ['owner', 'admin', 'supervisor']
 
   // `editable_siempre` NO abre una copia heredada que no pueda escribir en su origen: el
@@ -1674,7 +1674,8 @@ function BloqueRenderer({
     if (bloque.instancia?.estado === 'completo' && tipo !== 'datos' && tipo !== 'documento') return 'visible'
     switch (tipo) {
       case 'datos':
-        return (configExtra.es_multi_pago && !GERENCIAL.includes(userRole)) ? 'visible' : 'editable'
+        // Misma regla que `guardarPagosMulti` en el servidor (`lib/permissions/multi-pago.ts`).
+        return (configExtra.es_multi_pago && !puedeEditarMultiPago(userRole)) ? 'visible' : 'editable'
       case 'documentos':
       case 'checklist':
       case 'checklist_soporte':
