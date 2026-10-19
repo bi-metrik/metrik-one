@@ -183,6 +183,39 @@ describe('datos de la ficha', () => {
     expect(await confirmarCiudad(IBEROSTAR)).toMatchObject({ ok: false })
   })
 
+  it('un departamento por ciudad no se confirma: ni el botón ni la acción del servidor', async () => {
+    const f = base.tablas.fotos_perfiles.find((p) => p.id === IBEROSTAR) as Fila
+    for (const ciudad of ['Boyaca', 'CUNDINAMARCA', 'Quindío']) {
+      Object.assign(f, { ciudad, pais: 'CO', notas: 'Ciudad por confirmar' })
+      const r = await leerFicha(IBEROSTAR)
+      expect(r.ok && r.ficha.ciudadEsDepartamento).toBe(true)
+      expect(r.ok && r.ficha.faltas.map((x) => x.texto)).toEqual([`«${ciudad}» es un departamento: escribe el municipio`])
+      expect(await confirmarCiudad(IBEROSTAR)).toMatchObject({ ok: false, error: expect.stringMatching(/departamento: escribe el municipio/) })
+      expect(f.notas).toBe('Ciudad por confirmar')
+    }
+    // Con el municipio, sí.
+    Object.assign(f, { ciudad: 'Tunja' })
+    const r = await leerFicha(IBEROSTAR)
+    expect(r.ok && r.ficha.ciudadEsDepartamento).toBe(false)
+    expect(await confirmarCiudad(IBEROSTAR)).toEqual({ ok: true })
+    expect(f.notas).toBeNull()
+  })
+
+  it('guardar un departamento en «Ciudad» avisa y la ficha sigue por clasificar', async () => {
+    const r = await guardarDatos(IBEROSTAR, { nombre: 'Hotel Ficticio', tipoProveedor: 'hotel', ciudad: 'Boyacá', pais: 'CO' })
+    expect(r).toMatchObject({ ok: true, aviso: expect.stringMatching(/«Boyacá» es un departamento: escribe el municipio.*por clasificar/) })
+    const ficha = await leerFicha(IBEROSTAR)
+    expect(ficha.ok && ficha.ficha.faltas.map((x) => x.campo)).toEqual(['ciudad'])
+    // Fuera de Colombia el mismo nombre no se juzga.
+    expect(await guardarDatos(IBEROSTAR, { nombre: 'Hotel Ficticio', tipoProveedor: 'hotel', ciudad: 'Boyacá', pais: 'PE' })).not.toHaveProperty('aviso')
+    const lista = await leerProveedores()
+    expect(lista.ok && lista.proveedores.find((p) => p.id === IBEROSTAR)?.ciudadEsDepartamento).toBe(false)
+    await guardarDatos(IBEROSTAR, { nombre: 'Hotel Ficticio', tipoProveedor: 'hotel', ciudad: 'Cundinamarca', pais: 'CO' })
+    const lista2 = await leerProveedores()
+    expect(lista2.ok && lista2.proveedores.find((p) => p.id === IBEROSTAR)?.ciudadEsDepartamento).toBe(true)
+    expect(lista2.ok && lista2.proveedores.find((p) => p.id === HOTEL)?.ciudadEsDepartamento).toBe(false)
+  })
+
   it('la lista marca las fichas por clasificar', async () => {
     const r = await leerProveedores()
     expect(r.ok).toBe(true)
