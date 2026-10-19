@@ -60,6 +60,7 @@ import BotonesRevisar from '@/app/(app)/negocios/botones-revisar'
 import BandejaCapturas, { type ReceptorDeBandeja } from '@/app/(app)/negocios/bandeja-capturas'
 import TarjetaOpcion from '@/app/(app)/negocios/tarjeta-opcion'
 import { FotosEnTarjetas } from '@/app/(app)/negocios/fotos-tarjeta'
+import CasillaIvaCostos from '@/app/(app)/negocios/casilla-iva-costos'
 import { devolverOpcionABandeja } from '@/app/(app)/negocios/tarifa-pax-actions'
 import { MarcoCotizacionContexto } from '@/app/(app)/negocios/marco-cotizacion-contexto'
 import { usePublicarTotalVivo } from '@/app/(app)/negocios/total-vivo'
@@ -3809,6 +3810,8 @@ export default function CotizacionEditor({ oportunidadId, cotizacion, initialIte
       {jsxAvisoNoEditable}
       {!lineasPorTipo && jsxAvisoDesactualizadas}
       {jsxEncabezadoViaje}
+      {/* La casilla «Calcular con IVA» (2026-10-19): solo en la cotización de viaje. */}
+      {lineasPorTipo && <CasillaIvaCostos cotizacionId={cotizacion.id} onRecalculo={refrescar} />}
       {/* Con el marco, la bandeja de pantallazos va antes de «Componentes», como en el
           prototipo de la tarjeta (2026-09-24): una sección de la página, no una franja fija. */}
       {conMarco && editable && !porPasosOn && (
