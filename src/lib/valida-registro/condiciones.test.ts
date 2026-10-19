@@ -34,11 +34,12 @@ const sha = (t: string) => createHash('sha256').update(t, 'utf8').digest('hex')
  * subir la versión que corresponda (Condiciones o aviso) y, solo entonces, actualizar el valor.
  *
  *   - sin cobro: Condiciones v1.0 + aviso v1.1 + casilla v1.0 (2026-10-12, aviso sin «tipo de empresa»);
- *   - con cobro: Condiciones v2.1 + aviso v1.3 + casilla con cobro (2026-10-14: la v2.0 de Vera y Emilio
- *     con el cobro del primer mes al confirmar; texto de Max, pendiente de Emilio).
+ *   - con cobro: Condiciones v2.1 + aviso v1.4 + casilla con cobro (2026-10-19: el aviso nombra el
+ *     documento del titular de la tarjeta, aprobado por Emilio). La de la v1.3 (2026-10-14) era
+ *     471774f367828d7d9dbf2c1eb61d7771963af37403c6fa50274b5066eccd73f0: la conservan los registros que la aceptaron.
  */
 const HUELLA_SIN_COBRO = '88ddf9d4d3050e5b309041c6693dbf3d0174bd0d2e7020e1fa32f957a5d2ae80'
-const HUELLA_CON_COBRO = '471774f367828d7d9dbf2c1eb61d7771963af37403c6fa50274b5066eccd73f0'
+const HUELLA_CON_COBRO = '82df1921e925fadedd7d6424be95b8c27b44411e3dc84bf3afb125d0849aa033'
 
 const EPAYCO = { EPAYCO_HABILITADO: '1', EPAYCO_PUBLIC_KEY_METRIK: 'pub_prueba' }
 const COBRO = { VALIDA_COBRO_TRAS_PRUEBA: '1', ...EPAYCO }
@@ -81,7 +82,7 @@ describe('con cobro: Condiciones v2.1 completas, aviso v1.2 y casilla con cobro'
 
   it('versión 2.1 y aviso 1.2', () => {
     expect(t).toMatch(/^CONDICIONES DE LA PRUEBA GRATIS DE VALIDA · Versión 2\.1/)
-    expect(versionAceptada(VIGENTES_CON_COBRO)).toBe('condiciones-2.1+aviso-1.3+terminos-auto-2.1')
+    expect(versionAceptada(VIGENTES_CON_COBRO)).toBe('condiciones-2.1+aviso-1.4+terminos-auto-2.1')
     // El texto es el de `proyectos/metrik/valida/docs/legal/condiciones-prueba-valida-v2.1.md` (los tres bloques
     // `text`, unidos con una línea en blanco), comparado letra por letra el 2026-10-14 con el 7.3 final de Emilio.
     expect(sha(t)).toBe('59e74708b7cd41bda2bbbc6052de8d953b49aa101b9fe6549565e4252146e07b')
@@ -165,6 +166,18 @@ describe('con cobro: Condiciones v2.1 completas, aviso v1.2 y casilla con cobro'
     expect(AVISO_DATOS_FORMULARIO_CON_COBRO.endsWith('están en la')).toBe(true)
   })
 
+  it('el aviso v1.4 nombra el documento del titular de la tarjeta, literal de Emilio (2026-10-19)', () => {
+    expect(AVISO_DATOS_FORMULARIO_CON_COBRO).toContain(
+      'A METRIK le llegan una referencia de la tarjeta (token) y el nombre, el tipo y el número de documento del titular de la tarjeta, que guarda junto con su celular solo para cobrar el plan como dicen las Condiciones y prevenir fraude, hasta que se cancele el plan y se borre la tarjeta. Para registrar la tarjeta y hacer los cobros le entregamos a ePayco el nombre y el documento del titular, su celular y su correo; ePayco los compara con los de la tarjeta para prevenir fraude y los trata según su propia política. Si la tarjeta es de otra persona, usted declara que esa persona lo autorizó a entregar estos datos para este fin. Si indica que lo recomendó AFI',
+    )
+    // Lo de la v1.3 ya no está: «solo» el token y el NIT a ePayco.
+    expect(AVISO_DATOS_FORMULARIO_CON_COBRO).not.toContain('A METRIK solo le llega')
+    expect(AVISO_DATOS_FORMULARIO_CON_COBRO).not.toContain('su correo y el NIT.')
+    // Lo de antes y lo de después del tramo, igual que en la v1.3.
+    expect(AVISO_DATOS_FORMULARIO_CON_COBRO.startsWith('METRIK IA S.A.S. (NIT 902.079.601-9) es la responsable de sus datos.')).toBe(true)
+    expect(AVISO_DATOS_FORMULARIO_CON_COBRO).toContain('no METRIK. A METRIK le llegan')
+  })
+
   it('la casilla con cobro (aviso v1.3) dice los dos momentos del primer mes, con el léxico de la 7.1, y cada mes siguiente', () => {
     expect(TEXTO_CASILLA_CON_COBRO).toContain('el primer mes cuando confirme en mi cuenta que activo el plan')
     expect(TEXTO_CASILLA_CON_COBRO).toContain('lo que Valida me pide cuando intento una consulta después de agotar las 10 de la prueba o antes con el botón "Activar plan"')
@@ -174,7 +187,7 @@ describe('con cobro: Condiciones v2.1 completas, aviso v1.2 y casilla con cobro'
     expect(TEXTO_CASILLA_CON_COBRO).toContain('los Términos de Uso de Valida')
     // Un solo renglón: `casillaMarcada` la recupera de lo aceptado con «Casilla: …».
     expect(TEXTO_CASILLA_CON_COBRO).not.toContain('\n')
-    expect(AVISO_REGISTRO_CON_COBRO.version).toBe('1.3')
+    expect(AVISO_REGISTRO_CON_COBRO.version).toBe('1.4')
   })
 
   it('el texto junto a la tarjeta lleva la fecha y la hora en que se cumplen los 7 días', () => {
@@ -197,7 +210,7 @@ describe('la huella cubre Condiciones, aviso y casilla DE LA VERSIÓN QUE SE MOS
     const tx = textoAceptado(VIGENTES_CON_COBRO)
     expect(tx).toContain(avisoComoSeLee(AVISO_DATOS_FORMULARIO_CON_COBRO))
     expect(tx).toContain(`Casilla: ${TEXTO_CASILLA_CON_COBRO}`)
-    expect(tx).toContain('Aviso del formulario de registro · v1.3')
+    expect(tx).toContain('Aviso del formulario de registro · v1.4')
     expect(tx).not.toContain(`Casilla: ${TEXTO_CASILLA}`)
     expect(huellaAceptacion(tx)).toBe(HUELLA_CON_COBRO)
   })

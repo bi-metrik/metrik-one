@@ -17,7 +17,8 @@ import { TERMINOS_PLAN, terminosPlanListos } from './terminos-plan'
  *       · Condiciones v2.0: `condiciones-prueba-valida-v2.0.md` §1 con las correcciones de Vera
  *         (`vera-condiciones-v2.0.md`: numeral 1, título del 7, tercera frase del 7.1 y 7.4);
  *       · aviso v1.2 (`aviso-formulario-registro-v1.1.md` §2.1) y la casilla con cobro, en el texto
- *         corregido por Vera (autoriza el cobro de CADA MES, no solo del primero).
+ *         corregido por Vera (autoriza el cobro de CADA MES, no solo del primero). Hoy va el aviso
+ *         v1.4 (2026-10-19, Emilio): nombra el documento del titular de la tarjeta; casilla igual.
  *     Las Condiciones v2.0 van COMPLETAS (`BLOQUE_1_V2`, `BLOQUE_3_V2`), no armadas con reemplazos sobre
  *     la v1.0: así se armaban antes, y dejaban el numeral 1 de la v1.0 («no pide tarjeta») contra el 7.
  *
@@ -148,8 +149,15 @@ export const PRUEBA_DE_LAS_CONDICIONES = { consultas: 10, dias: 7 } as const
  */
 export const AVISO_DATOS_FORMULARIO = `METRIK IA S.A.S. (NIT 902.079.601-9) es la responsable de sus datos. Usamos su correo, la razón social, el NIT, cómo llegó a Valida (incluido si lo recomendó AFI) y la dirección IP del registro para abrir y proteger su cuenta, darle la prueba, evitar pruebas repetidas, guardar la prueba de su aceptación y escribirle sobre su prueba y su plan. Si indica que lo recomendó AFI, le informamos a AFI la razón social y el NIT de su empresa, no su correo. Puede conocer, actualizar, rectificar y suprimir sus datos, revocar esta autorización y dejar de recibir nuestros correos escribiendo a mauricio.moreno@metrik.com.co. Sus derechos y cómo ejercerlos están en la`
 
-/** El aviso v1.2: el de la v1.1 más lo que va a ePayco y lo que guarda METRIK (token y celular). */
-export const AVISO_DATOS_FORMULARIO_CON_COBRO = `METRIK IA S.A.S. (NIT 902.079.601-9) es la responsable de sus datos. Usamos su correo, la razón social, el NIT, cómo llegó a Valida (incluido si lo recomendó AFI) y la dirección IP del registro para abrir y proteger su cuenta, darle la prueba, evitar pruebas repetidas, guardar la prueba de su aceptación y escribirle sobre su prueba y su plan. Los datos de la tarjeta los recibe y los guarda la pasarela ePayco (EPAYCO.COM S.A.S.), no METRIK. A METRIK solo le llega una referencia de la tarjeta (token), que guarda junto con su celular para cobrar el plan como dicen las Condiciones. Para registrar la tarjeta y hacer los cobros le entregamos a ePayco el nombre del titular, su celular, su correo y el NIT. Si indica que lo recomendó AFI, le informamos a AFI la razón social y el NIT de su empresa y si contrató el plan y sigue activo, no su correo. Puede conocer, actualizar, rectificar y suprimir sus datos, revocar esta autorización y dejar de recibir nuestros correos escribiendo a mauricio.moreno@metrik.com.co. Sus derechos y cómo ejercerlos están en la`
+/**
+ * El aviso con cobro, v1.4 (2026-10-19, aprobado por Emilio): el de la v1.1 más lo que va a ePayco y lo
+ * que guarda METRIK. La v1.4 agrega el nombre y el documento del TITULAR de la tarjeta (el antifraude de
+ * ePayco los compara con los de la tarjeta: transacción 390341460, «Rechazada eControl»), cuánto se
+ * guardan y la declaración cuando la tarjeta es de otra persona. La v1.2/v1.3 decía que a METRIK solo
+ * le llegaba el token y que a ePayco iba el NIT. Los registros anteriores conservan la versión que
+ * aceptaron (`condiciones_version` y su huella).
+ */
+export const AVISO_DATOS_FORMULARIO_CON_COBRO = `METRIK IA S.A.S. (NIT 902.079.601-9) es la responsable de sus datos. Usamos su correo, la razón social, el NIT, cómo llegó a Valida (incluido si lo recomendó AFI) y la dirección IP del registro para abrir y proteger su cuenta, darle la prueba, evitar pruebas repetidas, guardar la prueba de su aceptación y escribirle sobre su prueba y su plan. Los datos de la tarjeta los recibe y los guarda la pasarela ePayco (EPAYCO.COM S.A.S.), no METRIK. A METRIK le llegan una referencia de la tarjeta (token) y el nombre, el tipo y el número de documento del titular de la tarjeta, que guarda junto con su celular solo para cobrar el plan como dicen las Condiciones y prevenir fraude, hasta que se cancele el plan y se borre la tarjeta. Para registrar la tarjeta y hacer los cobros le entregamos a ePayco el nombre y el documento del titular, su celular y su correo; ePayco los compara con los de la tarjeta para prevenir fraude y los trata según su propia política. Si la tarjeta es de otra persona, usted declara que esa persona lo autorizó a entregar estos datos para este fin. Si indica que lo recomendó AFI, le informamos a AFI la razón social y el NIT de su empresa y si contrató el plan y sigue activo, no su correo. Puede conocer, actualizar, rectificar y suprimir sus datos, revocar esta autorización y dejar de recibir nuestros correos escribiendo a mauricio.moreno@metrik.com.co. Sus derechos y cómo ejercerlos están en la`
 
 /** La casilla sin cobro (la de la v1.0; el aviso v1.1 no la cambia). */
 export const TEXTO_CASILLA = `Acepto, en nombre de la empresa, las Condiciones de la prueba gratis, incluido el encargo de los datos de las personas que consulte, y autorizo el tratamiento de mis datos según este aviso.`
@@ -176,10 +184,14 @@ export const AVISO_REGISTRO = {
   version: '1.1',
 } as const
 
-/** v1.3 (2026-10-14): la casilla dice los dos momentos del primer cobro (Condiciones v2.1, 7.1). */
+/**
+ * v1.4 (2026-10-19): el aviso nombra el documento del titular de la tarjeta (ver
+ * `AVISO_DATOS_FORMULARIO_CON_COBRO`). La casilla no cambia.
+ * v1.3 (2026-10-14): la casilla dice los dos momentos del primer cobro (Condiciones v2.1, 7.1).
+ */
 export const AVISO_REGISTRO_CON_COBRO = {
   slug: 'aviso-formulario-registro-valida',
-  version: '1.3',
+  version: '1.4',
 } as const
 
 // ── Las Condiciones vigentes ──────────────────────────────────────────────────────────────────
