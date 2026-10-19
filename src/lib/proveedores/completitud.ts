@@ -88,8 +88,8 @@ export function codigoDepartamento(texto: string | null | undefined): string | n
   return DEPARTAMENTOS_DANE[n] ?? ALIAS_DEPARTAMENTO[n] ?? null
 }
 
-/** Ciudades que se llaman como un departamento y siempre son la ciudad (Bogotá). */
-const SIEMPRE_MUNICIPIO = new Set(['bogota'])
+/** Ciudades que se llaman como un departamento y siempre son la ciudad (Bogotá, San Andrés isla). */
+const SIEMPRE_MUNICIPIO = new Set(['bogota', 'san andres'])
 
 /**
  * ¿La «ciudad» de una ficha colombiana es en realidad un departamento? `true` si el nombre es el de
