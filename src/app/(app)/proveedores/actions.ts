@@ -22,10 +22,13 @@ import { fotoImprimible, objetivo } from '@/lib/fotos/clave'
 import { leerConocidos, resolverPedidos } from '@/lib/fotos/perfiles-db'
 import { puedeVerCuentasDeProveedor, type Area, type Role } from '@/lib/permissions/can-edit'
 import { tienePropuestaHtml } from '@/lib/pdf/motor-html'
-import { borrarArchivo, confirmarSubida, enlaceDeArchivo, urlDeSubida } from '@/lib/proveedores/almacen'
+import { borrarArchivo, confirmarSubida, descargarArchivo, enlaceDeArchivo, urlDeSubida } from '@/lib/proveedores/almacen'
 import { BYTES_MAXIMOS_ARCHIVO, extensionDeMime, type ClaseArchivo } from '@/lib/proveedores/archivos'
 import { revisarCuenta, revisarDatos, revisarVigencia } from '@/lib/proveedores/datos'
-import { resumenExtraccion, revisarExtraccion, sugerenciasParaFicha, type ResumenExtraccion } from '@/lib/proveedores/extraccion'
+import { establecimientosDe, llaveEstablecimiento, resumenExtraccion, revisarExtraccion, sugerenciasParaFicha, vigenciaPorConfirmar, type ExtraccionRevisada, type ResumenExtraccion } from '@/lib/proveedores/extraccion'
+import { INSTRUCCION_VERSION, instruccionVigente } from '@/lib/proveedores/instruccion'
+import { correrMotor, type ArchivoParaMotor } from '@/lib/proveedores/motor'
+import { revisarAjustesMoneda, tarifasParaCotizar, TEXTO_NO_COTIZA, vigenciaParaCerrar, type AjustesMoneda } from '@/lib/proveedores/tarifas-extraidas'
 import { ciudadDeFichaEsDepartamento, faltasDeFicha, quitarNotaCiudadPorConfirmar, textoCiudadEsDepartamento, tieneNotaCiudadPorConfirmar, type FaltaFicha } from '@/lib/proveedores/completitud'
 import { aliasPorCambio, claveCiudad, claveDeProveedor, ciudadDeClave, espacioDeTipo, esTipoProveedor, tieneFotos, type EspacioProveedor, type TarifaCanal, type TipoProveedor } from '@/lib/proveedores/tipos'
 import { hoyBogota, type VigenciaTarifario } from '@/lib/proveedores/vigencia'
@@ -56,7 +59,7 @@ type Resultado<T = object> = ({ ok: true } & T) | { ok: false; error: string }
 
 /** ¿El error es «la columna o la tabla no existe» (migración sin aplicar)? */
 function sinMigracion(e: { code?: string; message?: string } | null | undefined): boolean {
-  return !!e && (e.code === '42703' || e.code === '42P01' || e.code === 'PGRST204' || e.code === 'PGRST205' || /tipo_proveedor|proveedor_tarifarios|proveedor_cuentas|departamento|tarifa_canal|iva_declarado/.test(e.message ?? ''))
+  return !!e && (e.code === '42703' || e.code === '42P01' || e.code === 'PGRST204' || e.code === 'PGRST205' || /tipo_proveedor|proveedor_tarifarios|proveedor_cuentas|departamento|tarifa_canal|iva_declarado|tarifario_de_id|tarifario_establecimiento|vigencia_desde|vigencia_por|monedas/.test(e.message ?? ''))
 }
 
 async function contexto(escribir: boolean) {
@@ -552,52 +555,181 @@ export async function abrirTarifario(id: string): Promise<Resultado<{ url: strin
 
 // ── Extracciones del motor de tarifarios (server-only) ───────────────────────
 
+/** Una fila del tarifario como la ve la revisión (sin citas ni notas: solo lo que se decide). */
+export interface FilaExtraccionVista {
+  i: number
+  establecimiento: string | null
+  categoria: string | null
+  temporada: string | null
+  plan: string | null
+  ocupacion: string | null
+  pasajero: string | null
+  pax: string | null
+  base: string | null
+  precio: number | null
+  /** La moneda que propuso el motor para la fila (o la del tarifario). */
+  monedaMotor: string | null
+}
+
 export interface ExtraccionVista {
   id: string
   creadaAt: string
   creadaPor: string | null
   modelo: string | null
   instruccion: string | null
+  esquema: string
   archivos: string[]
   resumen: ResumenExtraccion
   /** Lo que la extracción le propone a la ficha y la ficha todavía no sabe. */
   sugerencias: ReturnType<typeof sugerenciasParaFicha>
+  /** `borrador` = la carga no se ha cerrado; `revisada` = cerrada, cuenta para cotizar. */
+  estado: 'borrador' | 'revisada'
+  /** La vigencia que confirmó la persona (o tomó del motor) al cerrar la carga. */
+  vigenciaConfirmada: { desde: string; hasta: string; por: 'motor' | 'persona' } | null
+  /** La carga no se cierra sin que la persona escriba la vigencia. */
+  vigenciaPorConfirmar: boolean
+  monedas: AjustesMoneda
+  filas: FilaExtraccionVista[]
+  /** La ficha dueña de la extracción cuando esta ficha toma el tarifario de otra (cadena). */
+  deOtraFicha: { id: string; nombre: string } | null
+}
+
+export interface UsoTarifario {
+  /** La ficha de la que esta toma el tarifario (cadena). `null` = el suyo. */
+  tarifarioDe: { id: string; nombre: string } | null
+  /** El establecimiento del tarifario que es esta ficha. */
+  establecimiento: string | null
+  /** Las otras fichas del espacio con extracción: de cuál puede tomar el tarifario. */
+  fichasConExtraccion: { id: string; nombre: string }[]
+  /** ¿Con lo cargado y lo elegido, esta ficha tiene tarifas para cotizar? */
+  cotiza: { ok: true; tarifas: number } | { ok: false; motivo: string }
+}
+
+type FilaExtraccion = {
+  id: string
+  proveedor_id: string
+  created_at: string
+  creada_por: string | null
+  modelo: string | null
+  instruccion_version: string | null
+  esquema_version: string
+  archivos: string[] | null
+  expediente: Record<string, unknown>
+  tarifario: Record<string, unknown> | null
+  estado: 'borrador' | 'revisada' | 'descartada'
+  vigencia_desde?: string | null
+  vigencia_hasta?: string | null
+  vigencia_por?: 'motor' | 'persona' | null
+  monedas?: AjustesMoneda | null
+}
+
+const MAX_FILAS_VISTA = 3000
+
+/** Lo nuevo de la ficha (cadena) leído aparte: sin la migración del motor v13 viene vacío. */
+async function usoDeFicha(ctx: Contexto, id: string): Promise<{ tarifarioDeId: string | null; establecimiento: string | null }> {
+  const { data } = await ctx.db.from('fotos_perfiles').select('*').eq('workspace_id', ctx.workspaceId).eq('id', id).maybeSingle()
+  const d = (data ?? {}) as { tarifario_de_id?: string | null; tarifario_establecimiento?: string | null }
+  return { tarifarioDeId: d.tarifario_de_id ?? null, establecimiento: d.tarifario_establecimiento ?? null }
+}
+
+/** La última extracción no descartada de un proveedor (cliente de servicio, SIEMPRE por workspace). */
+async function ultimaExtraccion(servicio: Cliente, workspaceId: string, proveedorId: string): Promise<{ fila: FilaExtraccion | null; error: { code?: string; message?: string } | null }> {
+  const { data, error } = await servicio
+    .from('proveedor_extracciones')
+    .select('*')
+    .eq('workspace_id', workspaceId)
+    .eq('proveedor_id', proveedorId)
+    .neq('estado', 'descartada')
+    .order('created_at', { ascending: false })
+    .limit(1)
+    .maybeSingle()
+  return { fila: (data as FilaExtraccion | null) ?? null, error }
+}
+
+const textoDe = (v: unknown): string | null => (typeof v === 'string' && v.trim() ? v.trim().slice(0, 200) : null)
+
+function filasVista(tarifario: Record<string, unknown> | null): FilaExtraccionVista[] {
+  const tarifas = Array.isArray(tarifario?.tarifas) ? (tarifario.tarifas as unknown[]) : []
+  const monedaT = textoDe(tarifario?.moneda)
+  return tarifas.slice(0, MAX_FILAS_VISTA).map((x, i) => {
+    const r = (x && typeof x === 'object' ? x : {}) as Record<string, unknown>
+    const min = typeof r.pax_min === 'number' ? r.pax_min : null
+    const max = typeof r.pax_max === 'number' ? r.pax_max : null
+    return {
+      i,
+      establecimiento: textoDe(r.establecimiento),
+      categoria: textoDe(r.categoria),
+      temporada: textoDe(r.temporada_id),
+      plan: textoDe(r.plan),
+      ocupacion: textoDe(r.ocupacion),
+      pasajero: textoDe(r.tipo_pasajero),
+      pax: min === null && max === null ? null : min === max ? `${min}` : `${min ?? 1}–${max ?? '…'}`,
+      base: textoDe(r.base_precio),
+      precio: typeof r.precio === 'number' && Number.isFinite(r.precio) ? r.precio : null,
+      monedaMotor: textoDe(r.moneda) ?? monedaT,
+    }
+  })
 }
 
 /**
- * La última extracción del motor para este proveedor (esquema 0.2), resumida. La tabla es
- * server-only (el JSON puede citar datos bancarios de los PDF): se lee con el cliente de servicio
- * y SIEMPRE filtrando por workspace. Sin la migración, `null`.
+ * La extracción del motor que usa esta ficha, resumida, con su carga (vigencia y monedas) y lo que
+ * la ficha eligió del tarifario de cadena. La tabla es server-only (el JSON puede citar datos de los
+ * PDF): se lee con el cliente de servicio y SIEMPRE filtrando por workspace. Sin la migración,
+ * `null`.
  */
-export async function leerExtraccion(proveedorId: string): Promise<Resultado<{ extraccion: ExtraccionVista | null }>> {
+export async function leerExtraccion(proveedorId: string): Promise<Resultado<{ extraccion: ExtraccionVista | null; uso: UsoTarifario | null }>> {
   const ctx = await contexto(false)
   if ('error' in ctx) return { ok: false, error: ctx.error as string }
   const f = await filaDe(ctx, proveedorId)
   if (!f) return { ok: false, error: 'Ese proveedor no está en este espacio.' }
   const servicio = createServiceClient() as Cliente
-  const { data, error } = await servicio
-    .from('proveedor_extracciones')
-    .select('id, created_at, creada_por, modelo, instruccion_version, archivos, expediente, tarifario')
-    .eq('workspace_id', ctx.workspaceId)
-    .eq('proveedor_id', f.id)
-    .neq('estado', 'descartada')
-    .order('created_at', { ascending: false })
-    .limit(1)
-    .maybeSingle()
-  if (error) return sinMigracion(error) ? { ok: true, extraccion: null } : { ok: false, error: 'No se pudo leer la extracción.' }
-  if (!data) return { ok: true, extraccion: null }
-  const x = data as { id: string; created_at: string; creada_por: string | null; modelo: string | null; instruccion_version: string | null; archivos: string[] | null; expediente: Record<string, unknown>; tarifario: Record<string, unknown> | null }
+  const uso = await usoDeFicha(ctx, f.id)
+  const fuenteId = uso.tarifarioDeId ?? f.id
+  const [ultima, conExtraccion] = await Promise.all([
+    ultimaExtraccion(servicio, ctx.workspaceId, fuenteId),
+    servicio.from('proveedor_extracciones').select('proveedor_id').eq('workspace_id', ctx.workspaceId).neq('estado', 'descartada').limit(TOPE),
+  ])
+  if (ultima.error) return sinMigracion(ultima.error) ? { ok: true, extraccion: null, uso: null } : { ok: false, error: 'No se pudo leer la extracción.' }
+  const idsConExtraccion = [...new Set(((conExtraccion.data ?? []) as { proveedor_id: string }[]).map((r) => r.proveedor_id))].filter((id) => id !== f.id)
+  const nombresFichas = new Map<string, string>()
+  const pedir = [...new Set([...idsConExtraccion, ...(uso.tarifarioDeId ? [uso.tarifarioDeId] : [])])]
+  if (pedir.length > 0) {
+    const { data } = await ctx.db.from('fotos_perfiles').select('id, nombre').eq('workspace_id', ctx.workspaceId).in('id', pedir.slice(0, 300))
+    for (const r of (data ?? []) as { id: string; nombre: string }[]) nombresFichas.set(r.id, r.nombre)
+  }
+  const tarifarioDe = uso.tarifarioDeId ? { id: uso.tarifarioDeId, nombre: nombresFichas.get(uso.tarifarioDeId) ?? 'Otra ficha' } : null
+  const fichasConExtraccion = idsConExtraccion
+    .filter((id) => nombresFichas.has(id))
+    .map((id) => ({ id, nombre: nombresFichas.get(id) as string }))
+    .sort((a, b) => a.nombre.localeCompare(b.nombre, 'es'))
+  const x = ultima.fila
+  if (!x) {
+    return { ok: true, extraccion: null, uso: { tarifarioDe, establecimiento: uso.establecimiento, fichasConExtraccion, cotiza: { ok: false, motivo: 'Todavía no hay una extracción del tarifario.' } } }
+  }
   const resumen = resumenExtraccion({ expediente: x.expediente ?? {}, tarifario: x.tarifario })
   const sug = sugerenciasParaFicha(resumen)
   const personas = await equipo(ctx)
+  const monedas = (x.monedas ?? {}) as AjustesMoneda
+  const confirmada = x.vigencia_desde && x.vigencia_hasta && x.vigencia_por ? { desde: x.vigencia_desde, hasta: x.vigencia_hasta, por: x.vigencia_por } : null
+  const usables = tarifasParaCotizar(
+    { estado: x.estado, vigenciaDesde: x.vigencia_desde ?? null, vigenciaHasta: x.vigencia_hasta ?? null, tarifario: x.tarifario, monedas },
+    uso.establecimiento,
+  )
   return {
     ok: true,
+    uso: {
+      tarifarioDe,
+      establecimiento: uso.establecimiento,
+      fichasConExtraccion,
+      cotiza: usables.ok ? { ok: true, tarifas: usables.tarifas.length } : { ok: false, motivo: TEXTO_NO_COTIZA[usables.motivo] },
+    },
     extraccion: {
       id: x.id,
       creadaAt: x.created_at,
       creadaPor: x.creada_por ? personas.find((p) => p.id === x.creada_por)?.nombre ?? null : null,
       modelo: x.modelo,
       instruccion: x.instruccion_version,
+      esquema: x.esquema_version,
       archivos: x.archivos ?? [],
       resumen,
       sugerencias: {
@@ -605,37 +737,146 @@ export async function leerExtraccion(proveedorId: string): Promise<Resultado<{ e
         ivaDeclarado: f.iva_declarado !== null && f.iva_declarado !== undefined ? null : sug.ivaDeclarado,
         ivaIncluido: f.iva_incluido !== null && f.iva_incluido !== undefined ? null : sug.ivaIncluido,
       },
+      estado: x.estado === 'revisada' ? 'revisada' : 'borrador',
+      vigenciaConfirmada: confirmada,
+      vigenciaPorConfirmar: vigenciaPorConfirmar(x.tarifario),
+      monedas,
+      filas: filasVista(x.tarifario),
+      deOtraFicha: tarifarioDe,
     },
   }
 }
 
-/**
- * Guarda una extracción del motor (el JSON que devuelve, esquema 0.2) en la ficha. Se revisa la
- * forma mínima; el contenido se guarda tal cual, una fila por corrida.
- */
-export async function guardarExtraccion(proveedorId: string, json: string, meta?: { modelo?: string | null; instruccion?: string | null }): Promise<Resultado> {
-  const ctx = await contexto(true)
-  if ('error' in ctx) return { ok: false, error: ctx.error as string }
-  const f = await filaDe(ctx, proveedorId)
-  if (!f) return { ok: false, error: 'Ese proveedor no está en este espacio.' }
-  const r = revisarExtraccion(json)
-  if (!r.ok) return r
+/** Guarda una extracción ya revisada (subida a mano o del motor), en borrador: falta cerrar la carga. */
+async function insertarExtraccion(ctx: Contexto, proveedorId: string, e: ExtraccionRevisada, meta: { modelo: string | null; instruccion: string | null }): Promise<Resultado> {
   const corto = (v: unknown, n: number) => (typeof v === 'string' && v.trim() ? v.trim().slice(0, n) : null)
   const servicio = createServiceClient() as Cliente
   const { error } = await servicio.from('proveedor_extracciones').insert({
     workspace_id: ctx.workspaceId,
-    proveedor_id: f.id,
-    esquema_version: r.extraccion.esquemaVersion,
-    instruccion_version: corto(meta?.instruccion, 40),
-    modelo: corto(meta?.modelo, 120),
-    expediente: r.extraccion.expediente,
-    tarifario: r.extraccion.tarifario,
-    datos_ficha: r.extraccion.datosFicha,
-    archivos: r.extraccion.archivos,
+    proveedor_id: proveedorId,
+    esquema_version: e.esquemaVersion,
+    instruccion_version: corto(meta.instruccion, 40),
+    modelo: corto(meta.modelo, 120),
+    expediente: e.expediente,
+    tarifario: e.tarifario,
+    datos_ficha: e.datosFicha,
+    archivos: e.archivos,
     creada_por: ctx.staffId,
   })
   if (error) return { ok: false, error: sinMigracion(error) ? MENSAJE_SIN_MIGRACION : 'No se pudo guardar la extracción. Vuelve a intentarlo.' }
   return { ok: true }
+}
+
+/**
+ * Guarda una extracción del motor subida a mano (el JSON, esquema 0.2 o 0.3) en la ficha. Se
+ * revisa con los chequeos de la torre; el contenido se guarda tal cual, una fila por corrida.
+ */
+export async function guardarExtraccion(proveedorId: string, json: string, meta?: { modelo?: string | null; instruccion?: string | null }): Promise<Resultado<{ avisos: string[] }>> {
+  const ctx = await contexto(true)
+  if ('error' in ctx) return { ok: false, error: ctx.error as string }
+  const f = await filaDe(ctx, proveedorId)
+  if (!f) return { ok: false, error: 'Ese proveedor no está en este espacio.' }
+  const r = revisarExtraccion(json, { hoy: hoyBogota() })
+  if (!r.ok) return { ok: false, error: r.error }
+  const g = await insertarExtraccion(ctx, f.id, r.extraccion, { modelo: meta?.modelo ?? null, instruccion: meta?.instruccion ?? null })
+  return g.ok ? { ok: true, avisos: r.extraccion.avisos } : g
+}
+
+/**
+ * «Extraer con el motor» (punto 6): manda TODOS los tarifarios con archivo de este proveedor (los
+ * certificados bancarios viven en otra tabla y otra carpeta: no viajan) con la instrucción vigente
+ * al modelo del gateway, revisa la salida con `revisarExtraccion` y la guarda con el modelo y la
+ * versión de la instrucción. Queda en borrador: la carga se cierra al confirmar vigencia y moneda.
+ */
+export async function extraerTarifario(proveedorId: string): Promise<Resultado<{ avisos: string[] }>> {
+  const ctx = await contexto(true)
+  if ('error' in ctx) return { ok: false, error: ctx.error as string }
+  const f = await filaDe(ctx, proveedorId)
+  if (!f) return { ok: false, error: 'Ese proveedor no está en este espacio.' }
+  const { data, error } = await ctx.db
+    .from('proveedor_tarifarios')
+    .select('id, ref, nombre_archivo, mime')
+    .eq('workspace_id', ctx.workspaceId)
+    .eq('proveedor_id', f.id)
+    .not('ref', 'is', null)
+    .order('subido_at', { ascending: true })
+    .limit(40)
+  if (error) return { ok: false, error: sinMigracion(error) ? MENSAJE_SIN_MIGRACION : 'No se pudieron leer los tarifarios.' }
+  const filas = (data ?? []) as { id: string; ref: string; nombre_archivo: string | null; mime: string | null }[]
+  const archivos: ArchivoParaMotor[] = []
+  for (const [i, t] of filas.entries()) {
+    const bajado = await descargarArchivo(ctx.workspaceId, f.id, 'tarifarios', t.ref)
+    if (!bajado) return { ok: false, error: `No se pudo leer el archivo «${t.nombre_archivo ?? 'tarifario'}». Vuelve a intentarlo.` }
+    const mime = t.mime ?? bajado.mime ?? (t.ref.endsWith('.pdf') ? 'application/pdf' : 'image/jpeg')
+    archivos.push({ nombre: `tar${i}_${t.nombre_archivo ?? 'tarifario'}`, mime, datos: bajado.datos })
+  }
+  const hoy = hoyBogota()
+  const r = await correrMotor({ archivos, instruccion: instruccionVigente(hoy), hoy })
+  if (!r.ok) return { ok: false, error: r.error }
+  const g = await insertarExtraccion(ctx, f.id, r.extraccion, { modelo: r.modelo, instruccion: INSTRUCCION_VERSION })
+  return g.ok ? { ok: true, avisos: r.extraccion.avisos } : g
+}
+
+/**
+ * Cierra la carga de una extracción (puntos 7 y 8): la vigencia confirmada (obligatoria si el motor
+ * no la fijó o la marcó para confirmar; nunca del nombre del archivo ni de la fecha de carga) y los
+ * cambios de moneda. Desde aquí cuenta para cotizar. Se puede volver a guardar para corregir.
+ */
+export async function cerrarCargaExtraccion(extraccionId: string, entrada: { desde?: string | null; hasta?: string | null; monedas?: unknown }): Promise<Resultado> {
+  const ctx = await contexto(true)
+  if ('error' in ctx) return { ok: false, error: ctx.error as string }
+  if (!ctx.staffId) return { ok: false, error: 'Tu usuario no está en el equipo de este espacio: no puede cerrar la carga.' }
+  if (typeof extraccionId !== 'string' || !UUID.test(extraccionId)) return { ok: false, error: 'Esa extracción ya no está. Recarga.' }
+  const servicio = createServiceClient() as Cliente
+  const { data, error } = await servicio
+    .from('proveedor_extracciones')
+    .select('id, proveedor_id, tarifario, estado')
+    .eq('workspace_id', ctx.workspaceId)
+    .eq('id', extraccionId)
+    .maybeSingle()
+  if (error) return { ok: false, error: sinMigracion(error) ? MENSAJE_SIN_MIGRACION : 'No se pudo leer la extracción.' }
+  const x = data as { id: string; tarifario: Record<string, unknown> | null; estado: string } | null
+  if (!x || x.estado === 'descartada') return { ok: false, error: 'Esa extracción ya no está. Recarga.' }
+  const vig = vigenciaParaCerrar(x.tarifario, { desde: entrada?.desde, hasta: entrada?.hasta })
+  if (!vig.ok) return vig
+  const mon = revisarAjustesMoneda(entrada?.monedas, x.tarifario)
+  if (!mon.ok) return mon
+  const ahora = new Date().toISOString()
+  const { error: e2 } = await servicio
+    .from('proveedor_extracciones')
+    .update({ estado: 'revisada', vigencia_desde: vig.desde, vigencia_hasta: vig.hasta, vigencia_por: vig.por, monedas: mon.ajustes, revisada_por: ctx.staffId, revisada_at: ahora })
+    .eq('workspace_id', ctx.workspaceId)
+    .eq('id', x.id)
+  if (e2) return { ok: false, error: sinMigracion(e2) ? MENSAJE_SIN_MIGRACION : 'No se pudo cerrar la carga. Vuelve a intentarlo.' }
+  return { ok: true }
+}
+
+/**
+ * El tarifario de cadena (2026-10-19): de qué ficha toma esta el tarifario (`null` = el suyo) y qué
+ * establecimiento del tarifario es ella. Solo esas filas cuentan para cotizarla.
+ */
+export async function elegirTarifarioDeFicha(proveedorId: string, entrada: { tarifarioDeId?: string | null; establecimiento?: string | null }): Promise<Resultado> {
+  const ctx = await contexto(true)
+  if ('error' in ctx) return { ok: false, error: ctx.error as string }
+  const f = await filaDe(ctx, proveedorId)
+  if (!f) return { ok: false, error: 'Ese proveedor no está en este espacio.' }
+  const deId = typeof entrada?.tarifarioDeId === 'string' && entrada.tarifarioDeId ? entrada.tarifarioDeId : null
+  if (deId !== null) {
+    if (deId === f.id) return { ok: false, error: 'Una ficha no puede tomar el tarifario de sí misma.' }
+    if (!(await filaDe(ctx, deId))) return { ok: false, error: 'Esa ficha no está en este espacio.' }
+  }
+  const establecimiento = typeof entrada?.establecimiento === 'string' && entrada.establecimiento.trim() ? entrada.establecimiento.trim().slice(0, 200) : null
+  if (establecimiento) {
+    const ultima = await ultimaExtraccion(createServiceClient() as Cliente, ctx.workspaceId, deId ?? f.id)
+    const ests = establecimientosDe(ultima.fila?.tarifario ?? null)
+    if (!ests.some((e) => llaveEstablecimiento(e) === llaveEstablecimiento(establecimiento))) return { ok: false, error: `«${establecimiento}» no es un establecimiento de ese tarifario.` }
+  }
+  const { error } = await ctx.db
+    .from('fotos_perfiles')
+    .update({ tarifario_de_id: deId, tarifario_establecimiento: establecimiento, updated_by: ctx.staffId, updated_at: new Date().toISOString() })
+    .eq('workspace_id', ctx.workspaceId)
+    .eq('id', f.id)
+  return error ? { ok: false, error: sinMigracion(error) ? MENSAJE_SIN_MIGRACION : 'No se pudo guardar. Vuelve a intentarlo.' } : { ok: true }
 }
 
 /**

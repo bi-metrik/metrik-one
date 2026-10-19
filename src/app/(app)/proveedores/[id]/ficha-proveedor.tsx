@@ -10,7 +10,7 @@ import type { ElementoVista } from '@/lib/fotos/vista'
 import { NOMBRE_TIPO_PROVEEDOR } from '@/lib/proveedores/tipos'
 import { moverFoto, quitarFotoDeBiblioteca, separarNombreDelPerfil, subirFotoAlProveedor } from '../../fotos/actions'
 import PerfilFotos, { textoAgregarFotos, type AccionesPerfil } from '../../fotos/perfil-fotos'
-import { confirmarCiudad, type CuentaVista, type ExtraccionVista, type FichaProveedor, type PersonaEquipo } from '../actions'
+import { confirmarCiudad, type CuentaVista, type ExtraccionVista, type FichaProveedor, type PersonaEquipo, type UsoTarifario } from '../actions'
 import SeccionExtraccion from './seccion-extraccion'
 import PedirTarifas from './pedir-tarifas'
 import SeccionCuentas from './seccion-cuentas'
@@ -34,10 +34,13 @@ export default function FichaProveedorVista({
   errorCuentas,
   agencia,
   extraccion = null,
+  usoTarifario = null,
 }: {
   agencia: string
   /** La última extracción del motor de tarifarios (`null` = no hay). */
   extraccion?: ExtraccionVista | null
+  /** Qué tarifario y qué establecimiento usa esta ficha para cotizar (cadena). */
+  usoTarifario?: UsoTarifario | null
   ficha: FichaProveedor
   equipo: PersonaEquipo[]
   mayoristas: PersonaEquipo[]
@@ -121,7 +124,7 @@ export default function FichaProveedorVista({
       <hr />
       <SeccionTarifarios ficha={ficha} editable={editable} onCambio={refrescar} />
       <PedirTarifas ficha={ficha} agencia={agencia} editable={editable} onCambio={refrescar} />
-      <SeccionExtraccion proveedorId={ficha.id} extraccion={extraccion} editable={editable} onCambio={refrescar} />
+      <SeccionExtraccion key={`extraccion-${extraccion?.id ?? 'no'}-${usoTarifario?.tarifarioDe?.id ?? 'propio'}`} proveedorId={ficha.id} extraccion={extraccion} uso={usoTarifario} editable={editable} onCambio={refrescar} />
 
       {fotos && (
         <>
