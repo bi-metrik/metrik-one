@@ -443,18 +443,20 @@ describe('el cobro del primer mes AL CONFIRMAR (Condiciones v2.1, 7.1 literal a)
     expect(m.registro().cobro_estado).toBe('cobrado')
   })
 
-  it('ePayco NO procesó la confirmación (error nuestro de datos): no culpa a la tarjeta, conserva la prueba y el día 7 cobra como intento 1', async () => {
+  it('ePayco NO procesó la confirmación (error nuestro de datos): no culpa a la tarjeta, conserva la prueba y el día 7 reclama el MISMO intento 0', async () => {
     const intentos: unknown[] = []
     const m = montar(conTablas(V21), {
       cobrarCuota: async (_d, p) => {
         intentos.push(p)
         return intentos.length === 1
-          ? { tipo: 'no_procesado', cobroId: 'cobro-1', mensaje: 'ePayco no procesó el cobro: Some fields are required' }
+          ? { tipo: 'no_procesado', cobroId: 'cobro-1', mensaje: 'ePayco no procesó el cobro: Some fields are required', agotado: false }
           : { tipo: 'aprobado', cobroId: 'cobro-1', detalle: 'pagado' }
       },
     })
-    // `cobrarCuotaConTarjeta` anota el intento 0 como `error` (no hubo transacción).
-    m.tablas.cobro_intentos_tarjeta = [{ plan_cobro_id: 'plan-1', numero_cuota: 1, intento: 0, resultado: 'error' }]
+    // `cobrarCuotaConTarjeta` anota el intento 0 como falla técnica (no hubo transacción).
+    m.tablas.cobro_intentos_tarjeta = [
+      { plan_cobro_id: 'plan-1', numero_cuota: 1, intento: 0, resultado: 'error', referencia: null, mensaje: 'no_procesado#1: ePayco no procesó el cobro: x' },
+    ]
     const r = await confirmar(m)
     expect(r).toEqual({ tipo: 'no_procesado' })
     const texto = textoTrasConfirmar(r.tipo, { valor: 150_000, ultimos4: null })
@@ -464,10 +466,47 @@ describe('el cobro del primer mes AL CONFIRMAR (Condiciones v2.1, 7.1 literal a)
     expect(String(m.registro().cobro_detalle)).toContain('error técnico')
     await procesarCobrosTrasPrueba({ ...m.deps, ahoraMs: cron('2026-10-18') })
     await procesarCobrosTrasPrueba({ ...m.deps, ahoraMs: cron('2026-10-21') })
+    // Una falla técnica no gasta el intento: el día 7 reclama otra vez el 0 (no el 1).
     expect(intentos).toEqual([
       { cobradorId: 'ws-metrik', cuotaId: 'cuota-1', intento: 0, reintentoTrasConfirmacion: false },
-      { cobradorId: 'ws-metrik', cuotaId: 'cuota-1', intento: 1, reintentoTrasConfirmacion: true },
+      { cobradorId: 'ws-metrik', cuotaId: 'cuota-1', intento: 0, reintentoTrasConfirmacion: false },
     ])
+    expect(m.registro().cobro_estado).toBe('cobrado')
+  })
+
+  it('día 7 con falla técnica: no gasta el intento, vuelve a programado y la corrida siguiente lo reclama; al tope, a revisar', async () => {
+    const llamadas: unknown[] = []
+    const m = montar(conTablas({ ...V21, ...AVISADO }), {
+      cobrarCuota: async (_d, p) => {
+        llamadas.push(p)
+        return { tipo: 'no_procesado', cobroId: 'cobro-1', mensaje: 'ePayco no procesó el cobro: x', agotado: llamadas.length >= 3 }
+      },
+    })
+    // El plan ya en la tarjeta (en la vida real lo pasa `pasarElPlanATarjeta`, que aquí es un doble).
+    m.tablas.planes_cobro[0].pasarela = 'epayco'
+    await procesarCobrosTrasPrueba({ ...m.deps, ahoraMs: cron('2026-10-21') })
+    expect(m.registro().cobro_estado).toBe('programado')
+    expect(String(m.registro().cobro_detalle)).toContain('se reintenta')
+    await procesarCobrosTrasPrueba({ ...m.deps, ahoraMs: cron('2026-10-22') })
+    expect(m.registro().cobro_estado).toBe('programado')
+    await procesarCobrosTrasPrueba({ ...m.deps, ahoraMs: cron('2026-10-23') })
+    expect(m.registro().cobro_estado).toBe('revisar')
+    expect(m.tablas.planes_cobro[0].pasarela).toBe('manual')
+    await procesarCobrosTrasPrueba({ ...m.deps, ahoraMs: cron('2026-10-24') })
+    expect(llamadas).toHaveLength(3)
+  })
+
+  it('cda-pruebas-futuras (19-oct): intento 0 rechazado por la confirmación y 1 en falla técnica → el día 7 va por el 1 otra vez', async () => {
+    const llamadas: unknown[] = []
+    const m = montar(conTablas({ ...V21, ...AVISADO, cobro_confirmacion_rechazada_at: new Date(JUEVES).toISOString() }), {
+      cobrarCuota: async (_d, p) => (llamadas.push(p), { tipo: 'aprobado', cobroId: 'cobro-1', detalle: 'pagado' }),
+    })
+    m.tablas.cobro_intentos_tarjeta = [
+      { plan_cobro_id: 'plan-1', numero_cuota: 1, intento: 0, resultado: 'rechazado', referencia: null, mensaje: 'epayco_error: Some fields are required' },
+      { plan_cobro_id: 'plan-1', numero_cuota: 1, intento: 1, resultado: 'error', referencia: null, mensaje: 'ePayco no procesó el cobro: Some fields are required (500 field tax is type float; 500 field taxBase is type float)' },
+    ]
+    await procesarCobrosTrasPrueba({ ...m.deps, ahoraMs: cron('2026-10-21') })
+    expect(llamadas).toEqual([{ cobradorId: 'ws-metrik', cuotaId: 'cuota-1', intento: 1, reintentoTrasConfirmacion: true }])
     expect(m.registro().cobro_estado).toBe('cobrado')
   })
 

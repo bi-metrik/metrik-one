@@ -17,7 +17,7 @@ vi.mock('@/lib/cobros/pago-en-linea', () => ({
 vi.mock('@/lib/cobros/pago-en-linea-servidor', () => ({ repoPagoEnLinea: () => ({}) }))
 vi.mock('@/lib/activity/registrar-actividad', () => ({ registrarActividad: async () => undefined }))
 
-const { cobrarCuotaConTarjeta, cobrarCuotasConTarjeta, pasarElPlanATarjeta } = await import('./cobro-token-servidor')
+const { cobrarCuotaConTarjeta, cobrarCuotasConTarjeta, pasarElPlanATarjeta, fallasTecnicas, TOPE_FALLAS_TECNICAS } = await import('./cobro-token-servidor')
 
 describe('el método de pago al registrarse', () => {
   it('solo con la cláusula de cobro vigente Y ePayco encendido', () => {
@@ -170,6 +170,25 @@ describe('el plan nace por token si hay tarjeta', () => {
   })
 })
 
+/**
+ * La validación de `/payment/process` como la hace ePayco (colección oficial de APIFY + lo que respondió
+ * en producción): campos obligatorios, y los TIPOS. El 2026-10-19 ePayco rechazó `tax: '0'` y
+ * `taxBase: '0'` («field tax is type float»): aquí también.
+ */
+function erroresDeEpayco(c: Record<string, unknown>): string[] {
+  const e: string[] = []
+  for (const k of ['ip', 'cellPhone', 'phone', 'name', 'lastName', 'docType', 'docNumber', 'email', 'address', 'dues', 'cardTokenId', 'customerId']) {
+    if (typeof c[k] !== 'string' || !/[A-Za-z0-9]/.test(c[k] as string)) e.push(`field ${k} required`)
+  }
+  if (!(typeof c.value === 'string' || typeof c.value === 'number') || !Number.isFinite(Number(c.value))) e.push('field value required')
+  for (const k of ['tax', 'taxBase']) if (k in c && typeof c[k] !== 'number') e.push(`field ${k} is type float`)
+  if ('testMode' in c && typeof c.testMode !== 'boolean') e.push('field testMode is type boolean')
+  for (const [k, max] of [['name', 50], ['lastName', 50], ['email', 50], ['cellPhone', 10], ['phone', 10], ['docType', 4], ['docNumber', 20]] as const) {
+    if (typeof c[k] === 'string' && (c[k] as string).length > max) e.push(`field ${k} max ${max}`)
+  }
+  return e
+}
+
 describe('una suscripción (suscripciones_producto) se cobra igual que un negocio', () => {
   const SUS = 'sus-1'
   function deSuscripcion(extra: Partial<Tablas> = {}): Tablas {
@@ -219,10 +238,10 @@ describe('una suscripción (suscripciones_producto) se cobra igual que un negoci
       if (ruta === '/login') return new Response(JSON.stringify({ token: 'jwt' }), { status: 200 })
       const c = JSON.parse(String(init.body)) as Record<string, string>
       cuerpos.push(c)
-      const faltan = ['ip', 'cellPhone', 'lastName', 'docNumber', 'email', 'address'].filter((k) => !c[k] || !/[A-Za-z0-9]/.test(String(c[k])))
-      if (faltan.length > 0) {
+      const errores = erroresDeEpayco(c)
+      if (errores.length > 0) {
         return new Response(
-          JSON.stringify({ success: false, textResponse: 'Some fields are required, please correct the errors and try again', data: { errors: faltan.map((f) => ({ codError: 'E001', errorMessage: `field ${f} required` })) } }),
+          JSON.stringify({ success: false, textResponse: 'Some fields are required, please correct the errors and try again', data: { errors: errores.map((e) => ({ codError: 500, errorMessage: e })) } }),
           { status: 200 },
         )
       }
@@ -296,3 +315,85 @@ describe('una suscripción (suscripciones_producto) se cobra igual que un negoci
     expect(d.tablas.planes_cobro[0].pasarela).toBe('epayco')
   })
 })
+
+describe('una falla técnica (ePayco no procesó) no gasta el intento del calendario', () => {
+  const NO_PROCESADO: ResultadoCargo = {
+    estado: 'error',
+    mensaje: 'ePayco no procesó el cobro: Some fields are required (500 field tax is type float)',
+    reintentable: false,
+    sinTransaccion: true,
+  }
+  const APROBADO: ResultadoCargo = { estado: 'aprobado', externalRef: 'epayco-9', fecha: '2026-10-19', monto: 150000 }
+  function secuencia(resultados: ResultadoCargo[]) {
+    const cargos: SolicitudCargo[] = []
+    const adapter = {
+      nombre: 'epayco',
+      cobrar: async (x: SolicitudCargo) => (cargos.push(x), resultados[Math.min(cargos.length - 1, resultados.length - 1)]),
+    } as unknown as PasarelaAdapter
+    return { adapterPara: (p: string) => (p === 'epayco' ? adapter : null), cargos }
+  }
+
+  it('la misma fila del intento se reclama otra vez y el siguiente cargo sale; solo queda UNA fila', async () => {
+    const d = crearDoble(base())
+    const e = secuencia([NO_PROCESADO, APROBADO])
+    const r1 = await cobrarCuotaConTarjeta({ db: d.db, adapterPara: e.adapterPara, ahoraMs: AHORA }, { cobradorId: METRIK, cuotaId: 'q1' })
+    expect(r1).toMatchObject({ tipo: 'no_procesado', agotado: false })
+    expect(d.tablas.cobro_intentos_tarjeta[0]).toMatchObject({ intento: 0, resultado: 'error' })
+    expect(String(d.tablas.cobro_intentos_tarjeta[0].mensaje)).toMatch(/^no_procesado#1: .*tax is type float/)
+    const r2 = await cobrarCuotaConTarjeta({ db: d.db, adapterPara: e.adapterPara, ahoraMs: AHORA + 60_000 }, { cobradorId: METRIK, cuotaId: 'q1' })
+    expect(r2.tipo).toBe('aprobado')
+    expect(e.cargos).toHaveLength(2)
+    expect(d.tablas.cobro_intentos_tarjeta).toHaveLength(1)
+    expect(d.tablas.cobro_intentos_tarjeta[0]).toMatchObject({ intento: 0, resultado: 'aprobado', referencia: 'epayco-9' })
+    // Un solo cobro de la cuota: el reintento usa el mismo.
+    expect(d.tablas.cobros).toHaveLength(1)
+  })
+
+  it(`con tope: a la falla técnica ${TOPE_FALLAS_TECNICAS} el intento se da por gastado y no se vuelve a llamar a ePayco`, async () => {
+    const d = crearDoble(base())
+    const e = secuencia([NO_PROCESADO])
+    const tipos: unknown[] = []
+    for (let i = 0; i < TOPE_FALLAS_TECNICAS + 1; i++) {
+      const r = await cobrarCuotaConTarjeta({ db: d.db, adapterPara: e.adapterPara, ahoraMs: AHORA + i }, { cobradorId: METRIK, cuotaId: 'q1' })
+      tipos.push(r.tipo === 'no_procesado' ? `no_procesado${r.agotado ? '_agotado' : ''}` : r.tipo)
+    }
+    expect(tipos).toEqual(['no_procesado', 'no_procesado', 'no_procesado_agotado', 'ya_intentado'])
+    expect(e.cargos).toHaveLength(TOPE_FALLAS_TECNICAS)
+    expect(String(d.tablas.cobro_intentos_tarjeta[0].mensaje)).toMatch(/^no_procesado#3:/)
+  })
+
+  it('un rechazo del banco SÍ gasta el intento: no se reclama otra vez', async () => {
+    const d = crearDoble(base())
+    const e = secuencia([{ estado: 'rechazado', externalRef: 'epayco-5', codigo: '2', mensaje: 'Fondos insuficientes', reintentable: false }])
+    await cobrarCuotaConTarjeta({ db: d.db, adapterPara: e.adapterPara, ahoraMs: AHORA }, { cobradorId: METRIK, cuotaId: 'q1' })
+    // Aunque el plan siguiera en la tarjeta, el intento ya está gastado.
+    d.tablas.planes_cobro[0].pasarela = 'epayco'
+    expect(await cobrarCuotaConTarjeta({ db: d.db, adapterPara: e.adapterPara, ahoraMs: AHORA }, { cobradorId: METRIK, cuotaId: 'q1' })).toEqual({ tipo: 'ya_intentado' })
+    expect(e.cargos).toHaveLength(1)
+  })
+
+  it('qué fila es una falla técnica: las de antes del 19-oct sin contador cuentan como una; un error dudoso o un rechazo, no', () => {
+    expect(fallasTecnicas({ resultado: 'error', referencia: null, mensaje: 'ePayco no procesó el cobro: Some fields are required (500 field tax is type float; 500 field taxBase is type float)' })).toBe(1)
+    expect(fallasTecnicas({ resultado: 'error', referencia: null, mensaje: 'no_procesado#2: ePayco no procesó el cobro: x' })).toBe(2)
+    expect(fallasTecnicas({ resultado: 'error', referencia: null, mensaje: 'Sin conexión con ePayco en /payment/process.' })).toBeNull()
+    expect(fallasTecnicas({ resultado: 'rechazado', referencia: null, mensaje: 'epayco_error: Some fields are required' })).toBeNull()
+    expect(fallasTecnicas({ resultado: 'en_curso', referencia: null, mensaje: null })).toBeNull()
+  })
+
+  it('cda-pruebas-futuras tal como está en prod (19-oct): intento 0 rechazado y 1 en falla técnica → el día 7 reclama el 1', async () => {
+    const t = base({
+      cobro_intentos_tarjeta: [
+        { id: 'i0', plan_cobro_id: 'p1', numero_cuota: 1, intento: 0, resultado: 'rechazado', referencia: null, mensaje: 'epayco_error: Some fields are required, please correct the errors and try again' },
+        { id: 'i1', plan_cobro_id: 'p1', numero_cuota: 1, intento: 1, resultado: 'error', referencia: null, mensaje: 'ePayco no procesó el cobro: Some fields are required, please correct the errors and try again (500 field tax is type float; 500 field taxBase is type float)' },
+      ],
+    })
+    const d = crearDoble(t)
+    const e = secuencia([APROBADO])
+    const r = await cobrarCuotaConTarjeta({ db: d.db, adapterPara: e.adapterPara, ahoraMs: AHORA }, { cobradorId: METRIK, cuotaId: 'q1', intento: 1, reintentoTrasConfirmacion: true })
+    expect(r.tipo).toBe('aprobado')
+    expect(d.tablas.cobro_intentos_tarjeta).toHaveLength(2)
+    expect(d.tablas.cobro_intentos_tarjeta.find((f) => f.id === 'i1')).toMatchObject({ resultado: 'aprobado', referencia: 'epayco-9' })
+    expect(d.tablas.cobro_intentos_tarjeta.find((f) => f.id === 'i0')).toMatchObject({ resultado: 'rechazado' })
+  })
+})
+

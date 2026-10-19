@@ -307,9 +307,13 @@ export async function ultimosDigitosTarjetaEpayco(ref: string | null | undefined
  * `data.errors[]` (`codError`, `errorMessage`). Sin la llave ni la tarjeta: ePayco no las devuelve.
  */
 export function detalleDelError(cuerpo: Record<string, unknown>): string {
-  const texto = String(cuerpo.textResponse ?? cuerpo.titleResponse ?? 'sin detalle')
+  // La colección trae tres formas: `textResponse` + `data.errors`, `text_response` + `data.errores` y
+  // `data.error.errors` («Error create transaction»).
+  const texto = String(cuerpo.textResponse ?? cuerpo.text_response ?? cuerpo.titleResponse ?? cuerpo.title_response ?? 'sin detalle')
   const datos = (cuerpo.data ?? null) as Record<string, unknown> | null
-  const errores = Array.isArray(datos?.errors) ? (datos.errors as unknown[]) : []
+  const anidado = (datos?.error ?? null) as Record<string, unknown> | null
+  const lista = datos?.errors ?? datos?.errores ?? anidado?.errors
+  const errores = Array.isArray(lista) ? (lista as unknown[]) : []
   const campos = errores
     .map((e) => {
       if (typeof e === 'string') return e
@@ -347,6 +351,17 @@ export async function cobrarConTokenEpayco(s: SolicitudCargo & { pagador: Pagado
 
   const sesion = await iniciarSesion(deps)
   if (!sesion.ok) return { estado: 'error', mensaje: sesion.error, reintentable: sesion.reintentable }
+  // El cuerpo, campo por campo contra la colección oficial de APIFY («Transacción TC», leída el
+  // 2026-10-19) y contra lo que ePayco respondió de verdad:
+  //   value         float(2) en la tabla, string en los ejemplos; como string lo ACEPTÓ el 2026-10-19
+  //                 (su validación listó solo tax y taxBase): se queda string.
+  //   tax, taxBase  NÚMERO: «field tax is type float» (2026-10-19) con '0'. El ejemplo de split manda 0.
+  //   docType string(4) · docNumber string(20) · name, lastName, email string(50) · cellPhone, phone
+  //   string(10) · address string obligatorio · dues string · currency, ip, country, city, invoice,
+  //   description, urlConfirmation, methodConfirmation, extra1..10 string · testMode Boolean ·
+  //   cardTokenId, customerId string(20).
+  // Nombre y apellido se recortan a 50 (una razón social larga los pasaría). `ico` no existe en el cargo
+  // con tarjeta (es de otros medios): no se manda.
   const r = await pedir(deps, '/payment/process', {
     bearer: sesion.token,
     cuerpo: {
@@ -355,8 +370,8 @@ export async function cobrarConTokenEpayco(s: SolicitudCargo & { pagador: Pagado
       dues: '1',
       docType: s.pagador.tipoDocumento,
       docNumber: s.pagador.documento,
-      name: s.pagador.nombre,
-      lastName: s.pagador.apellido,
+      name: s.pagador.nombre.slice(0, 50),
+      lastName: s.pagador.apellido.slice(0, 50),
       email: s.pagador.email,
       cellPhone: s.pagador.celular,
       phone: s.pagador.celular,
@@ -367,8 +382,8 @@ export async function cobrarConTokenEpayco(s: SolicitudCargo & { pagador: Pagado
       customerId: medio.customerId,
       invoice: s.referencia,
       description: s.descripcion.slice(0, 100),
-      tax: '0',
-      taxBase: '0',
+      tax: 0,
+      taxBase: 0,
       urlConfirmation: valor(env, 'EPAYCO_URL_CONFIRMACION') ?? EPAYCO_URL_CONFIRMACION_POR_DEFECTO,
       methodConfirmation: 'POST',
       testMode: epaycoEnPruebas(env),

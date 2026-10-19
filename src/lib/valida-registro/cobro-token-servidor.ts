@@ -56,7 +56,13 @@ export type ResultadoCobroToken =
    * La pasarela NO procesó la solicitud (faltó un dato, la sesión, el comercio): seguro que no cobró, y
    * no es un rechazo del banco. Error nuestro: no se culpa a la tarjeta ni se manda un enlace por él.
    */
-  | { tipo: 'no_procesado'; cobroId: string; mensaje: string }
+  | {
+      tipo: 'no_procesado'
+      cobroId: string
+      mensaje: string
+      /** Ya van `TOPE_FALLAS_TECNICAS` fallas técnicas en este intento: no se vuelve a intentar solo. */
+      agotado: boolean
+    }
   | { tipo: 'error'; mensaje: string }
 
 interface Pagador {
@@ -68,6 +74,28 @@ interface Pagador {
   celular: string | null
   /** La IP con que la persona dio la orden: la de la confirmación, o la del registro (Condiciones 7.1). */
   ip: string | null
+}
+
+/**
+ * Un error técnico (la pasarela NO procesó la solicitud: un campo, la sesión, el comercio) no gasta el
+ * intento del calendario: la fila del intento queda en `error` con `no_procesado#N: …` y la corrida
+ * siguiente la RECLAMA otra vez (misma fila, misma llave única) hasta `TOPE_FALLAS_TECNICAS`. Solo un
+ * rechazo del banco (o un resultado dudoso) cuenta como intento. Cada falla técnica queda además en la
+ * bitácora del cliente (`cobro_tarjeta_no_procesado`), que solo se agrega: la historia no se pierde
+ * aunque la fila del intento se reuse.
+ */
+export const TOPE_FALLAS_TECNICAS = 3
+
+/**
+ * Cuántas fallas técnicas lleva una fila de intento, o `null` si la fila no es de una falla técnica (un
+ * rechazo, un aprobado, un error dudoso o un intento en curso: esos no se reclaman). Las filas de antes
+ * del 2026-10-19 decían «ePayco no procesó el cobro: …» sin el contador: cuentan como una.
+ */
+export function fallasTecnicas(fila: { resultado: string | null; referencia?: string | null; mensaje: string | null }): number | null {
+  if (fila.resultado !== 'error' || fila.referencia) return null
+  const m = /^no_procesado#(\d+):/.exec(fila.mensaje ?? '')
+  if (m) return Number(m[1])
+  return (fila.mensaje ?? '').startsWith('ePayco no procesó el cobro') ? 1 : null
 }
 
 function nombreYApellido(razonSocial: string): { nombre: string; apellido: string } {
@@ -264,23 +292,43 @@ export async function cobrarCuotaConTarjeta(
   }
   const yaHecho = await db
     .from('cobro_intentos_tarjeta')
-    .select('id')
+    .select('id, resultado, referencia, mensaje')
     .eq('plan_cobro_id', plan.data.id)
     .eq('numero_cuota', cuota.data.numero)
     .eq('intento', intento)
     .maybeSingle()
   if (yaHecho.error) return { tipo: 'error', mensaje: `intentos de la tarjeta: ${yaHecho.error.message}` }
-  if (yaHecho.data) return { tipo: 'ya_intentado' }
-  const reclamo = await db
-    .from('cobro_intentos_tarjeta')
-    .insert({ workspace_id: p.cobradorId, cobro_id: cobroId, plan_cobro_id: plan.data.id, numero_cuota: cuota.data.numero, intento })
-    .select('id')
-    .single()
-  if (reclamo.error || !reclamo.data?.id) {
-    if (reclamo.error?.code === '23505') return { tipo: 'ya_intentado' }
-    return { tipo: 'error', mensaje: `reclamar el intento ${intento}: ${reclamo.error?.message ?? 'sin fila'}` }
+  let intentoId: string
+  // Fallas técnicas que ya lleva ESTE intento (0 = ninguna: la fila es nueva).
+  let previas = 0
+  if (yaHecho.data) {
+    const fila = yaHecho.data as { id: string; resultado: string | null; referencia: string | null; mensaje: string | null }
+    const n = fallasTecnicas(fila)
+    // Un rechazo del banco, un cobro hecho o dudoso, o el tope de fallas técnicas: el intento ya se gastó.
+    if (n === null || n >= TOPE_FALLAS_TECNICAS) return { tipo: 'ya_intentado' }
+    // Se reclama la MISMA fila con la guarda en el update: dos corridas a la vez, una sola cobra.
+    const re = await db
+      .from('cobro_intentos_tarjeta')
+      .update({ resultado: 'en_curso', updated_at: new Date().toISOString() })
+      .eq('id', fila.id)
+      .eq('resultado', 'error')
+      .select('id')
+    if (re.error) return { tipo: 'error', mensaje: `reclamar otra vez el intento ${intento}: ${re.error.message}` }
+    if ((re.data ?? []).length !== 1) return { tipo: 'ya_intentado' }
+    intentoId = fila.id
+    previas = n
+  } else {
+    const reclamo = await db
+      .from('cobro_intentos_tarjeta')
+      .insert({ workspace_id: p.cobradorId, cobro_id: cobroId, plan_cobro_id: plan.data.id, numero_cuota: cuota.data.numero, intento })
+      .select('id')
+      .single()
+    if (reclamo.error || !reclamo.data?.id) {
+      if (reclamo.error?.code === '23505') return { tipo: 'ya_intentado' }
+      return { tipo: 'error', mensaje: `reclamar el intento ${intento}: ${reclamo.error?.message ?? 'sin fila'}` }
+    }
+    intentoId = reclamo.data.id as string
   }
-  const intentoId = reclamo.data.id as string
   const anotar = (resultado: string, referenciaPasarela: string | null, mensaje: string | null) =>
     db
       .from('cobro_intentos_tarjeta')
@@ -364,21 +412,23 @@ export async function cobrarCuotaConTarjeta(
     )
     return { tipo: 'rechazado', cobroId: cobroId as string, mensaje: r.mensaje }
   }
-  await anotar('error', null, r.mensaje)
   if (r.sinTransaccion) {
+    const fallas = previas + 1
+    await anotar('error', null, `no_procesado#${fallas}: ${r.mensaje}`)
     await anotarEnAncla(
       db,
       {
         ancla,
         workspaceId: p.cobradorId,
         tipo: 'cobro_tarjeta_no_procesado',
-        texto: `ePayco no procesó el cobro con tarjeta de la cuota ${cuota.data.numero} (no hubo transacción ni cobro): ${r.mensaje}`,
-        datos: { cobro_id: cobroId, numero_cuota: cuota.data.numero, intento },
+        texto: `ePayco no procesó el cobro con tarjeta de la cuota ${cuota.data.numero} (no hubo transacción ni cobro; falla técnica ${fallas} de ${TOPE_FALLAS_TECNICAS}): ${r.mensaje}`,
+        datos: { cobro_id: cobroId, numero_cuota: cuota.data.numero, intento, fallas_tecnicas: fallas },
       },
       'cobro-token-epayco',
     )
-    return { tipo: 'no_procesado', cobroId: cobroId as string, mensaje: r.mensaje }
+    return { tipo: 'no_procesado', cobroId: cobroId as string, mensaje: r.mensaje, agotado: fallas >= TOPE_FALLAS_TECNICAS }
   }
+  await anotar('error', null, r.mensaje)
   return { tipo: 'error', mensaje: r.mensaje }
 }
 

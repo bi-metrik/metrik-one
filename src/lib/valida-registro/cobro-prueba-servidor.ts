@@ -8,7 +8,7 @@ import { cobrarConTokenEpayco, eliminarTarjetasEpayco, epaycoEnPruebas, ultimosD
 import type { ResultadoCargo } from '@/lib/suscripciones/pasarela/adapter'
 import { anclaDeFila, columnasDeAncla, filtrarPorAncla } from '@/lib/suscripciones-producto/ancla'
 import { activarPlanDelEspacio, type ResultadoActivacionEspacio } from './activacion-servidor'
-import { cobrarCuotaConTarjeta, pasarElPlanATarjeta, type ResultadoCobroToken } from './cobro-token-servidor'
+import { TOPE_FALLAS_TECNICAS, cobrarCuotaConTarjeta, fallasTecnicas, pasarElPlanATarjeta, type ResultadoCobroToken } from './cobro-token-servidor'
 import { COBRO_TRAS_PRUEBA } from './condiciones-cobro'
 import { PRUEBA_DE_LAS_CONDICIONES } from './condiciones'
 import {
@@ -386,9 +386,10 @@ async function activarYCobrarReclamado(
     const cuota = await db.from('plan_cobro_cuotas').select('id').eq('plan_cobro_id', planId).eq('numero', 1).maybeSingle()
     if (cuota.error || !cuota.data) return soltar('sin cuota 1')
 
-    // Si la confirmación del literal (a) ya se intentó y fue rechazada, el del día 7 es el intento 1 de
-    // la cuota 1 (Condiciones v2.1, 7.5: «el cobro del literal (b) sigue en pie»). Sin eso, el 0.
-    const intento = origen === 'dia_7' && (await confirmacionRechazada(db, planId)) ? 1 : 0
+    // Si la confirmación del literal (a) ya se intentó y el banco la rechazó, el del día 7 es el intento 1
+    // de la cuota 1 (Condiciones v2.1, 7.5: «el cobro del literal (b) sigue en pie»). Una falla técnica
+    // no gasta el intento: se vuelve a reclamar el mismo (`intentoDelDia7`).
+    const intento = origen === 'dia_7' ? await intentoDelDia7(db, planId) : 0
 
     // e. El cobro. Desde aquí no se vuelve a `programado` (salvo el rechazo de la confirmación, 7.5).
     fase = 'cobro'
@@ -405,14 +406,24 @@ async function activarYCobrarReclamado(
   }
 }
 
-/** ¿La cuota 1 de este plan ya tuvo su intento 0 rechazado? Solo pasa con la confirmación del literal (a). */
-async function confirmacionRechazada(db: Db, planId: string): Promise<boolean> {
-  const q = await db.from('cobro_intentos_tarjeta').select('intento, resultado').eq('plan_cobro_id', planId).eq('numero_cuota', 1)
-  if (q.error) return false
-  const filas = (q.data ?? []) as { intento: number; resultado: string }[]
-  // `error` también: solo vuelve a `programado` un intento 0 que ePayco NO procesó (`no_procesado`); uno
-  // dudoso deja el registro en `revisar` y el día 7 no llega aquí.
-  return filas.some((f) => f.intento === 0 && (f.resultado === 'rechazado' || f.resultado === 'error')) && !filas.some((f) => f.intento === 1)
+/**
+ * El intento de la cuota 1 que le toca al cobro del día 7:
+ *   - sin intentos, el 0;
+ *   - con el 1 ya reclamado, el 1 (si fue una falla técnica, `cobrarCuotaConTarjeta` lo reclama otra vez;
+ *     si no, responde `ya_intentado`);
+ *   - con el 0 rechazado por el banco (la confirmación del literal a), el 1;
+ *   - con el 0 en falla técnica bajo el tope, el MISMO 0: no cuenta como intento.
+ */
+async function intentoDelDia7(db: Db, planId: string): Promise<number> {
+  const q = await db.from('cobro_intentos_tarjeta').select('intento, resultado, referencia, mensaje').eq('plan_cobro_id', planId).eq('numero_cuota', 1)
+  if (q.error) throw new Error(`intentos de la cuota 1: ${q.error.message}`)
+  const filas = (q.data ?? []) as { intento: number; resultado: string; referencia: string | null; mensaje: string | null }[]
+  if (filas.some((f) => f.intento === 1)) return 1
+  const cero = filas.find((f) => f.intento === 0)
+  if (!cero) return 0
+  if (cero.resultado === 'rechazado') return 1
+  const n = fallasTecnicas(cero)
+  return n !== null && n >= TOPE_FALLAS_TECNICAS ? 1 : 0
 }
 
 /**
@@ -455,13 +466,16 @@ async function registrarResultado(
       return { tipo: 'rechazado', mensaje: res.mensaje }
     case 'no_procesado':
       // Error nuestro (un dato que ePayco pidió), no del banco: no se cobró nada. Del literal (a): la
-      // prueba sigue y el día 7 lo intenta otra vez con el plan en la tarjeta. Del (b): lo revisa una
-      // persona (la cuota 1 no tiene otro intento con la tarjeta), sin enlace automático.
+      // prueba sigue y el día 7 lo intenta otra vez con el plan en la tarjeta, sin enlace automático.
+      // Del (b) bajo el tope: vuelve a `programado` con el plan en la tarjeta y la corrida siguiente
+      // reclama el MISMO intento (una falla técnica no gasta el intento del calendario).
       if (alRechazo) {
         await alRechazo(`confirmación no procesada (error técnico, sin cobro): ${res.mensaje}`)
+      } else if (!res.agotado) {
+        await cerrar('programado', `no procesado (error técnico, sin cobro; se reintenta en la próxima corrida): ${res.mensaje}`)
       } else {
         await db.from('planes_cobro').update({ pasarela: 'manual' }).eq('id', planId).eq('pasarela', 'epayco')
-        await cerrar('revisar', `no procesado (error técnico, sin cobro): ${res.mensaje}`)
+        await cerrar('revisar', `no procesado ${TOPE_FALLAS_TECNICAS} veces (error técnico, sin cobro): ${res.mensaje}`)
       }
       return { tipo: 'no_procesado', mensaje: res.mensaje }
     default: {
