@@ -70,8 +70,10 @@ Relacionado: [[valida-alta-autogestionada]], [[secop-autogestion-registro]].
   (y la razón social como nombre en los cargos). Desde e1ed1b73 el registro pide tipo (CC/CE/NIT/PP) y
   número del TITULAR; van en `/token/customer` y en todo cargo vía `titularDelCobro`; se guardan en
   `workspaces.config_extra.valida_pagador.titular` (sin migración). Registro viejo sin titular = NIT.
-- ⚠️ El aviso de datos v1.3 (`condiciones.ts`, AVISO_DATOS_FORMULARIO_CON_COBRO) aún dice que METRIK
-  guarda solo token + celular y que a ePayco va «el NIT»: cambiarlo es de Emilio (sube versión y huella).
+- Aviso de datos v1.4 (bca0d521, texto literal de Emilio) ya nombra el documento del titular; huella con
+  cobro 82df1921…. ⚠️ La Política v1.6 publicada (repo metrik-valida, `app/recursos/privacidad/page.tsx` +
+  `lib/recursos/terceros-numeral-9.ts`) NO nombra a ePayco, la tarjeta, el registro autogestionado ni AFI:
+  propuesta de texto entregada a Emilio el 19-oct, sin publicar.
 - Cierre de los 3 contratos de prueba (futuras, -2, -3) en `scratchpad/cerrar_futuras3.sql` (sin correr al
   19-oct): contrato `cancelado`, suscripción `cancelada` sin ref, plan `manual`, cobro anulado. La tarjeta
   en ePayco NO se borra por SQL (`eliminarTarjetasEpayco`); `cobro_token_borrado_at` solo tras su respuesta.
