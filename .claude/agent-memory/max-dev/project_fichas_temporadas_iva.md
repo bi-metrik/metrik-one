@@ -1,12 +1,12 @@
 ---
 name: fichas-temporadas-iva
-description: Trappvel 2026-10-19 (feat/trappvel-fichas-temporadas-iva) — ficha completa = por clasificar, alias al cambiar ciudad, temporadas en Configuración, IVA del proveedor por línea (items.iva_costo_pct), extracciones del motor; migración 20261019120000 SIN aplicar (solo DDL, antes del merge)
+description: Trappvel 2026-10-19 (feat/trappvel-fichas-temporadas-iva) — ficha completa = por clasificar, alias al cambiar ciudad, temporadas en Configuración, IVA del proveedor por línea (items.iva_costo_pct), extracciones del motor; migración 20261019130000 APLICADA el 2026-10-19 (renombrada desde 120000, chocaba con #1207)
 metadata:
   type: project
 ---
 
 Brief de Mauricio del 2026-10-19 (decisiones en `proyectos/trappvel/clarity/decisions.md`). Un solo PR, una
-migración `20261019120000_proveedores_temporadas_iva.sql` (solo DDL, nada de datos) que va ANTES del merge: la lista
+migración `20261019130000_proveedores_temporadas_iva.sql` (solo DDL, nada de datos) que va ANTES del merge: la lista
 y la ficha nombran las columnas nuevas en `COLUMNAS_PROVEEDOR` y sin ellas «Proveedores» dice «falta la migración».
 
 - **IVA del proveedor**: costo SIEMPRE sin IVA; `items.iva_costo_pct` (19/NULL) lo suma `costosDelItem` en los 4

@@ -1,4 +1,4 @@
--- Dry-run de supabase/migrations/20261019120000_proveedores_temporadas_iva.sql contra producción.
+-- Dry-run de supabase/migrations/20261019130000_proveedores_temporadas_iva.sql contra producción.
 --
 -- UN solo statement: cuenta lo que existe; aplica la migración (cuerpo pegado TAL CUAL entre
 -- $mig$); ensaya las reglas nuevas DENTRO de un subbloque que se deshace; vuelve a contar y aborta

@@ -2,7 +2,7 @@
 
 ## Project memories
 
-- ⚠️⚠️ [Fichas, temporadas e IVA del proveedor](project_fichas_temporadas_iva.md) — migración 20261019120000 SIN aplicar; IVA por línea al leer; subtotal sin IVA
+- ⚠️⚠️ [Fichas, temporadas e IVA del proveedor](project_fichas_temporadas_iva.md) — migración 20261019130000 APLICADA (19-oct, renombrada); IVA por línea al leer; subtotal sin IVA
 - ⚠️ [Proveedores: ficha = fotos_perfiles](project_proveedores_ficha.md) — #1204 mergeado y aplicado (19-oct); bucket acepta PDF; cuentas server-only
 - ⚠️⚠️ [Fotos: biblioteca propia por hotel y tour](project_fotos_perfiles.md) — migración 20261017090000 SIN aplicar; sin búsqueda automática; PDF por vista (1 ida)
 - ⚠️⚠️ [Quién lleva el viaje desde el bot (Trappvel)](project_responsable_desde_bot.md) — responsable + dicho_en; migración 20261016193000 SIN aplicar; deploy antes

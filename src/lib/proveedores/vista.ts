@@ -29,7 +29,7 @@ export interface FilaProveedor {
   comprado_via_id: string | null
   origen: 'cotizacion' | 'importacion' | 'manual'
   origen_ref: string | null
-  // Migración 20261019120000.
+  // Migración 20261019130000.
   departamento: string | null
   destino: string | null
   iva_declarado: boolean | null

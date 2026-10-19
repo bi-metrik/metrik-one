@@ -4,7 +4,7 @@ import { join } from 'node:path'
 import { PGlite } from '@electric-sql/pglite'
 
 /**
- * La migración de fichas, temporadas e IVA (`20261019120000`), su dry-run y su reversa, corridos de
+ * La migración de fichas, temporadas e IVA (`20261019130000`), su dry-run y su reversa, corridos de
  * verdad en Postgres en memoria (PGlite) sobre las migraciones de fotos y proveedores TAL CUAL.
  */
 const raiz = process.cwd()
@@ -14,7 +14,7 @@ const sql = (a: string) => readFileSync(join(raiz, 'sql/proveedores', a), 'utf8'
 const WS = '00000000-0000-4000-8000-0000000000c1'
 const OTRO_WS = '00000000-0000-4000-8000-0000000000c2'
 const ANA = '00000000-0000-4000-8000-00000000c001'
-const MIGRACION = '20261019120000_proveedores_temporadas_iva.sql'
+const MIGRACION = '20261019130000_proveedores_temporadas_iva.sql'
 const DRY_RUN = '2026-10-19_dry-run_temporadas-iva.sql'
 
 const BASE = `

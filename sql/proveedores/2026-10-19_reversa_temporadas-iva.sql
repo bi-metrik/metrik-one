@@ -1,4 +1,4 @@
--- Reversa de supabase/migrations/20261019120000_proveedores_temporadas_iva.sql.
+-- Reversa de supabase/migrations/20261019130000_proveedores_temporadas_iva.sql.
 --
 -- SE PIERDE: el calendario de temporadas, las extracciones guardadas, el departamento, destino, IVA
 -- y canal de cada ficha, la fecha de la última solicitud de tarifas, la casilla del IVA de cada
@@ -6,7 +6,7 @@
 -- del costo. Correr SOLO después de revertir el código que los lee, y recalcular antes las
 -- cotizaciones en borrador que tenían la casilla encendida (si no, su precio guardado incluye un
 -- IVA que la cascada ya no suma). Y borrar la fila del ledger:
---   delete from supabase_migrations.schema_migrations where version = '20261019120000';
+--   delete from supabase_migrations.schema_migrations where version = '20261019130000';
 
 drop table if exists public.proveedor_extracciones;
 drop table if exists public.temporadas_agencia;
