@@ -10,8 +10,11 @@
  * Nadie la tocó (`cotizaciones.costos_con_iva` NULL) → nace encendida si algún proveedor de la
  * cotización declara IVA y el viajero es residente (`viajero_residente` NULL = residente).
  *
- * Qué proveedor tiene cada línea lo decide AQUÍ el servidor, con el mismo pedido que usa la
- * tarjeta (`pedidoDeLinea`) y el mismo reconocimiento de nombres (`resolverPedidos`, sin escribir).
+ * Qué proveedor tiene cada línea lo decide AQUÍ el servidor: la ficha que la línea guardó
+ * (`items.proveedor_id`, 2026-10-19) y, si no guardó ninguna, el mismo pedido que usa la tarjeta
+ * (`pedidoDeLinea`) con el mismo reconocimiento de nombres (`resolverPedidos`, sin escribir). La ficha
+ * reconocida por nombre se GUARDA en la línea (en borrador y con rol que escribe): desde ahí la línea
+ * ofrece las tarifas de esa ficha y la persona la puede cambiar con el buscador.
  *
  * Solo escribe en una cotización en BORRADOR y con un rol que escribe: una cotización enviada no
  * cambia de precio porque alguien clasificó un proveedor después.
@@ -65,6 +68,8 @@ interface FilaItem {
   tarifa_pax?: unknown
   es_ajuste?: boolean | null
   iva_costo_pct?: number | string | null
+  /** Ausente sin la migración `20261019233000`: entonces no se guarda la ficha reconocida. */
+  proveedor_id?: string | null
 }
 
 async function aplicar(cotizacionId: string, cambio: { encendida?: boolean; viajeroResidente?: boolean } | null): Promise<Resultado> {
@@ -106,14 +111,28 @@ async function aplicar(cotizacionId: string, cambio: { encendida?: boolean; viaj
   const { data: itemsData } = await db.from('items').select('*').eq('cotizacion_id', cot.id)
   const items = ((itemsData ?? []) as FilaItem[]).filter((i) => !i.es_ajuste)
 
-  // El proveedor de cada línea: el mismo pedido de la tarjeta, reconocido sin escribir.
+  const declara = new Map<string, { nombre: string; iva: boolean }>()
+  // 1 · La ficha que la línea guardó manda (2026-10-19).
+  const fijadas = items.filter((i) => typeof i.proveedor_id === 'string' && UUID.test(i.proveedor_id))
+  if (fijadas.length > 0) {
+    const ids = [...new Set(fijadas.map((i) => i.proveedor_id as string))]
+    const { data: fichas } = await db.from('fotos_perfiles').select('id, nombre, iva_declarado').eq('workspace_id', workspaceId).in('id', ids)
+    const porId = new Map(((fichas ?? []) as { id: string; nombre: string; iva_declarado: boolean | null }[]).map((f) => [f.id, f]))
+    for (const i of fijadas) {
+      const f = porId.get(i.proveedor_id as string)
+      if (f) declara.set(i.id, { nombre: f.nombre, iva: f.iva_declarado === true })
+    }
+  }
+  // 2 · Las demás: el mismo pedido de la tarjeta, reconocido sin escribir.
   const pedidos = new Map<string, ObjetivoFoto>()
   for (const i of items) {
+    if (fijadas.includes(i)) continue
     const p = pedidoDeLinea({ nombre: i.nombre, grupo: i.grupo, tarifa_pax: i.tarifa_pax })
     const o = p ? objetivo(p.tipo, p.nombre, p.ciudad) : null
     if (o) pedidos.set(i.id, o)
   }
-  const declara = new Map<string, { nombre: string; iva: boolean }>()
+  // La ficha reconocida por nombre que se guarda en la línea (solo con la columna y en borrador).
+  const reconocidas: { itemId: string; fichaId: string }[] = []
   if (pedidos.size > 0) {
     const leidos = await leerConocidos(db, workspaceId)
     if (leidos.ok) {
@@ -122,12 +141,15 @@ async function aplicar(cotizacionId: string, cambio: { encendida?: boolean; viaj
       const perfilDe = new Map(resueltos.map((r) => [`${r.pedido.tipo}:${r.pedido.clave}`, r.perfil]))
       const claves = [...new Set(resueltos.flatMap((r) => (r.perfil ? [r.perfil.clave] : [])))]
       if (claves.length > 0) {
-        const { data: fichas } = await db.from('fotos_perfiles').select('tipo, clave, nombre, iva_declarado').eq('workspace_id', workspaceId).in('clave', claves)
-        const porClave = new Map(((fichas ?? []) as { tipo: string; clave: string; nombre: string; iva_declarado: boolean | null }[]).map((f) => [`${f.tipo}:${f.clave}`, f]))
+        const { data: fichas } = await db.from('fotos_perfiles').select('id, tipo, clave, nombre, iva_declarado').eq('workspace_id', workspaceId).in('clave', claves)
+        const porClave = new Map(((fichas ?? []) as { id: string; tipo: string; clave: string; nombre: string; iva_declarado: boolean | null }[]).map((f) => [`${f.tipo}:${f.clave}`, f]))
         for (const [itemId, o] of pedidos) {
           const perfil = perfilDe.get(`${o.tipo}:${o.clave}`)
           const ficha = perfil ? porClave.get(`${perfil.tipo}:${perfil.clave}`) : undefined
-          if (ficha) declara.set(itemId, { nombre: ficha.nombre, iva: ficha.iva_declarado === true })
+          if (!ficha) continue
+          declara.set(itemId, { nombre: ficha.nombre, iva: ficha.iva_declarado === true })
+          const item = items.find((i) => i.id === itemId)
+          if (item && 'proveedor_id' in item && item.proveedor_id == null && typeof ficha.id === 'string') reconocidas.push({ itemId, fichaId: ficha.id })
         }
       }
     }
@@ -146,6 +168,11 @@ async function aplicar(cotizacionId: string, cambio: { encendida?: boolean; viaj
     if (deseado === actual) continue
     if (!editable) continue
     escrituras.push(db.from('items').update({ iva_costo_pct: deseado }).eq('cotizacion_id', cot.id).eq('id', i.id))
+  }
+  // La ficha reconocida queda guardada en la línea (no cambia precios: no hace falta recalcular).
+  // Si falla (otra sesión la cambió, o el trigger la rechaza) no se frena la casilla.
+  if (editable && reconocidas.length > 0) {
+    await Promise.all(reconocidas.map((r) => db.from('items').update({ proveedor_id: r.fichaId }).eq('cotizacion_id', cot.id).eq('id', r.itemId).is('proveedor_id', null)))
   }
   if (escrituras.length > 0) {
     const resultados = await Promise.all(escrituras)

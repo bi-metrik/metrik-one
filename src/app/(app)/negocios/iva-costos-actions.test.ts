@@ -24,6 +24,7 @@ const WS = '11111111-2222-4333-8444-555555555555'
 const ANA = 'a0000000-0000-4000-8000-000000000001'
 const COT = 'c0000000-0000-4000-8000-0000000000c1'
 const HOTEL = 'd0000000-0000-4000-8000-000000000001'
+const POSADA = 'd0000000-0000-4000-8000-000000000002'
 
 import { claveDeFoto } from '@/lib/fotos/clave'
 import { cambiarIvaDeCostos, sincronizarIvaDeCostos } from './iva-costos-actions'
@@ -50,7 +51,7 @@ function sembrar({ estado = 'borrador', declara = true as boolean | null, guarda
     ],
     fotos_perfiles: [
       { id: HOTEL, workspace_id: WS, tipo: 'hotel', clave: claveDeFoto('hotel', 'Hotel Ficticio Playa', 'Cartagena'), nombre: 'Hotel Ficticio Playa', ciudad: 'Cartagena', iva_declarado: declara },
-      { id: 'd2', workspace_id: WS, tipo: 'hotel', clave: claveDeFoto('hotel', 'Posada Inventada', 'Cartagena'), nombre: 'Posada Inventada', ciudad: 'Cartagena', iva_declarado: false },
+      { id: POSADA, workspace_id: WS, tipo: 'hotel', clave: claveDeFoto('hotel', 'Posada Inventada', 'Cartagena'), nombre: 'Posada Inventada', ciudad: 'Cartagena', iva_declarado: false },
     ],
     fotos_perfiles_alias: [],
     fotos_catalogo: [],
@@ -111,5 +112,39 @@ describe('casilla «Calcular con IVA»', () => {
     base.tablas.workspaces[0].cotizacion_template_slug = 'generica'
     expect(await sincronizarIvaDeCostos(COT)).toMatchObject({ ok: true, disponible: false })
     expect(pct('i1')).toBeNull()
+  })
+
+  it('la ficha guardada en la línea manda sobre la que se reconoce por el nombre (2026-10-19)', async () => {
+    // La línea dice «Hotel Ficticio Playa» (declara IVA) pero la persona le fijó la Posada (no declara).
+    Object.assign(base.tablas.items.find((i) => i.id === 'i1') as Record<string, unknown>, { proveedor_id: POSADA })
+    expect(await sincronizarIvaDeCostos(COT)).toMatchObject({ ok: true, encendida: false, proveedoresConIva: [] })
+    expect(pct('i1')).toBeNull()
+    // Y al revés: la Posada con la ficha del hotel que declara lleva el 19 %.
+    sembrar()
+    Object.assign(base.tablas.items.find((i) => i.id === 'i2') as Record<string, unknown>, { proveedor_id: HOTEL })
+    Object.assign(base.tablas.items.find((i) => i.id === 'i1') as Record<string, unknown>, { proveedor_id: POSADA })
+    await sincronizarIvaDeCostos(COT)
+    expect([pct('i1'), pct('i2')]).toEqual([null, 19])
+  })
+
+  it('la ficha reconocida por nombre se guarda en la línea; sin la columna, o fuera de borrador, no', async () => {
+    for (const i of base.tablas.items) i.proveedor_id = null
+    await sincronizarIvaDeCostos(COT)
+    expect(base.tablas.items.map((i) => i.proveedor_id)).toEqual([HOTEL, POSADA, null])
+    // Una ficha que alguien ya fijó no se pisa.
+    sembrar()
+    for (const i of base.tablas.items) i.proveedor_id = null
+    ;(base.tablas.items[0] as Record<string, unknown>).proveedor_id = POSADA
+    await sincronizarIvaDeCostos(COT)
+    expect(base.tablas.items.map((i) => i.proveedor_id)).toEqual([POSADA, POSADA, null])
+    // Sin la migración (la fila no trae la columna) no se escribe.
+    sembrar()
+    await sincronizarIvaDeCostos(COT)
+    expect(base.tablas.items.every((i) => !('proveedor_id' in i))).toBe(true)
+    // Enviada: no se escribe.
+    sembrar({ estado: 'enviada' })
+    for (const i of base.tablas.items) i.proveedor_id = null
+    await sincronizarIvaDeCostos(COT)
+    expect(base.tablas.items.map((i) => i.proveedor_id)).toEqual([null, null, null])
   })
 })

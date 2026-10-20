@@ -53,6 +53,7 @@ import {
 } from '@/lib/cotizaciones/dia-relativo'
 import SelectorRanura from '@/app/(app)/negocios/selector-ranura'
 import TarifaPasajeroItem from '@/app/(app)/negocios/tarifa-pasajero-item'
+import TarifasProveedorLinea from '@/app/(app)/negocios/tarifas-proveedor-linea'
 import BloqueRanura from '@/app/(app)/negocios/bloque-ranura'
 import AsiPuedesPagarPanel from './asi-puedes-pagar-panel'
 import { totalDelDocumento, type EntradaAsiPuedesPagar } from '@/lib/viaje/asi-puedes-pagar'
@@ -238,6 +239,8 @@ interface ItemRow {
   tramos?: unknown
   /** El cargo en destino de la opción (B2). */
   cargo_destino_valor?: number | string | null
+  /** La ficha del proveedor de la línea (`20261019233000`). Ausente sin la migración. */
+  proveedor_id?: string | null
   cargo_destino_moneda?: string | null
   rubros: RubroRow[]
 }
@@ -1669,6 +1672,13 @@ export default function CotizacionEditor({ oportunidadId, cotizacion, initialIte
                   sugeridosGuardados={rubrosSugeridos}
                   onCambio={() => refrescar()}
                 />
+              )}
+              {/* Las tarifas del proveedor (2026-10-19): ONE las ofrece, la persona elige. Al lado
+                  del pantallazo y del costo a mano, que siguen igual. */}
+              {editable && ranuraDeItem && lineasPorTipo && (
+                <div className="mt-2">
+                  <TarifasProveedorLinea itemId={item.id} onCambio={() => refrescar()} />
+                </div>
               )}
           </>
         )

@@ -2,6 +2,7 @@
 
 ## Project memories
 
+- ⚠️⚠️ [Tarifas extraídas en la cotización](project_tarifas_en_cotizacion.md) — 20261019233000 SIN aplicar; elegir = casilla 1 'tarifario' + confirmar de siempre
 - ⚠️⚠️ [Motor v13 de extracción en ONE](project_motor_v13.md) — 20261019203000 SIN aplicar; directo a Anthropic con ANTHROPIC_API_KEY; TRM sin fuente
 - ⚠️⚠️ [Fichas, temporadas e IVA del proveedor](project_fichas_temporadas_iva.md) — migración 20261019130000 APLICADA (19-oct, renombrada); IVA por línea al leer; subtotal sin IVA
 - ⚠️ [Subir tarifarios importados (script)](project_subir_tarifarios_importados.md) — sin correr en prod; nombres en disco saneados ≠ origen_ref

@@ -49,6 +49,11 @@ function constructor(tabla: string) {
     if (tabla === 'bloque_configs' && columnas.includes('bloque_definitions')) {
       salida.bloque_definitions = { tipo: f.tipo }
     }
+    // La cotización de una línea (`items` con `cotizaciones(...)`): su estado, negocio y espacio.
+    if (tabla === 'items' && columnas.includes('cotizaciones(')) {
+      const c = (tablas.cotizaciones ?? []).find(x => x.id === f.cotizacion_id)
+      salida.cotizaciones = c ? { estado: c.estado, negocio_id: c.negocio_id ?? null, workspace_id: c.workspace_id ?? null, convencion_margen: c.convencion_margen ?? null } : null
+    }
     if (columnas.includes('empresas(')) salida.empresas = null
     if (columnas.includes('oportunidades(')) salida.oportunidades = null
     return salida
@@ -108,6 +113,11 @@ function constructor(tabla: string) {
     neq(col: string, val: unknown) { filtros.push(f => f[col] !== val); return api },
     is(col: string, val: unknown) { filtros.push(f => (f[col] ?? null) === val); return api },
     in(col: string, vals: unknown[]) { filtros.push(f => vals.includes(f[col])); return api },
+    ilike(col: string, patron: string) {
+      const re = new RegExp(`^${patron.replace(/[.*+?^${}()|[\]\\]/g, '\\$&').replace(/%/g, '.*').replace(/_/g, '.')}$`, 'i')
+      filtros.push(f => typeof f[col] === 'string' && re.test(f[col] as string))
+      return api
+    },
     order(col: string, opts?: { ascending?: boolean }) {
       orden = { col, asc: opts?.ascending !== false }
       return api

@@ -325,7 +325,10 @@ export default function TarjetaOpcion({
   // El perfil del hotel o del tour (2026-10-16): sus fotos son del espacio y entran solas en la
   // propuesta; la tarjeta las muestra, deja pegar o subir otra y pregunta «¿Es el mismo …?».
   // El mismo pedido que usa el servidor para la casilla del IVA (`pedidoDeLinea`).
-  const pedidoFoto: PedidoFoto | null = pedidoDeLinea(item)
+  // Con la ficha fijada en la línea (`items.proveedor_id`), el aviso de vigencia sale de ella.
+  const proveedorFijado = (item as { proveedor_id?: string | null }).proveedor_id ?? null
+  const pedidoLinea = pedidoDeLinea(item)
+  const pedidoFoto: PedidoFoto | null = pedidoLinea ? { ...pedidoLinea, ...(proveedorFijado ? { proveedorId: proveedorFijado } : {}) } : null
   const bib = useFotoDeBiblioteca(pedidoFoto)
   // El espacio tiene biblioteca: toda foto nueva va al perfil (con la casilla de autorización).
   const conBiblioteca = bib?.disponible === true

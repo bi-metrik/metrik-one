@@ -328,6 +328,35 @@ describe('la tarjeta de la cotización', () => {
   })
 })
 
+describe('la tarjeta: una sola vigencia y la ficha fijada en la línea', () => {
+  it('con una extracción revisada, el aviso usa su vigencia confirmada (la del tarifario queda de respaldo)', async () => {
+    // El mayorista tiene un tarifario de 2025, y una extracción revisada que vale todo 2027.
+    base.tablas.proveedor_extracciones.push(
+      { id: 'x1', workspace_id: WS, proveedor_id: MAYORISTA, estado: 'revisada', created_at: '2026-10-19T10:00:00Z', vigencia_desde: '2027-01-01', vigencia_hasta: '2027-12-31' },
+      // Un borrador más nuevo no cambia la vigencia, y la de otro espacio no se lee.
+      { id: 'x2', workspace_id: WS, proveedor_id: MAYORISTA, estado: 'borrador', created_at: '2026-10-20T10:00:00Z', vigencia_desde: null, vigencia_hasta: null },
+      { id: 'x3', workspace_id: OTRO_WS, proveedor_id: HOTEL, estado: 'revisada', created_at: '2026-10-21T10:00:00Z', vigencia_desde: '2030-01-01', vigencia_hasta: '2030-12-31' },
+    )
+    const r = await fotosParaTarjetas([{ tipo: 'hotel', nombre: 'Catalonia Puerta del Sol', ciudad: 'Madrid' }])
+    expect(r.ok && r.tarjetas[0].proveedor).toMatchObject({ id: HOTEL, tarifarios: [], via: { id: MAYORISTA, tarifarios: [{ desde: '2027-01-01', hasta: '2027-12-31' }] } })
+  })
+
+  it('la ficha que la línea fijó manda sobre la que se reconoce por el nombre', async () => {
+    const r = await fotosParaTarjetas([
+      { tipo: 'hotel', nombre: 'Catalonia Puerta del Sol', ciudad: 'Madrid' },
+      { tipo: 'hotel', nombre: 'Catalonia Puerta del Sol', ciudad: 'Madrid', proveedorId: IBEROSTAR },
+    ])
+    expect(r.ok).toBe(true)
+    if (!r.ok) return
+    expect(r.tarjetas.find((t) => !t.proveedorId)?.proveedor?.id).toBe(HOTEL)
+    expect(r.tarjetas.find((t) => t.proveedorId === IBEROSTAR)?.proveedor).toMatchObject({ id: IBEROSTAR, nombre: 'Iberostar Selection Bávaro' })
+    // Una ficha de otro espacio no se lee aunque la pidan por id.
+    base.tablas.fotos_perfiles.push({ ...perfil('d0000000-0000-4000-8000-0000000000ff', 'hotel', 'Ajeno', 'Madrid'), workspace_id: OTRO_WS })
+    const otra = await fotosParaTarjetas([{ tipo: 'hotel', nombre: 'Catalonia Puerta del Sol', ciudad: 'Madrid', proveedorId: 'd0000000-0000-4000-8000-0000000000ff' }])
+    expect(otra.ok && otra.tarjetas.find((t) => t.proveedorId)?.proveedor).toBeNull()
+  })
+})
+
 describe('extracciones del motor', () => {
   const json = JSON.stringify({
     esquema_version: '0.2',
@@ -421,6 +450,22 @@ describe('motor v13: carga, cadena y extracción desde ONE', () => {
     r = await leerExtraccion(IBEROSTAR)
     expect(r.ok && r.extraccion?.deOtraFicha).toEqual({ id: CADENA, nombre: 'Catalonia Puerta del Sol' })
     expect(r.ok && r.uso).toMatchObject({ tarifarioDe: { id: CADENA }, establecimiento: 'Cadena Ficticia Playa', cotiza: { ok: true, tarifas: 1 } })
+  })
+
+  it('una extracción nueva sin revisar no tapa la revisada: la cotización sigue con sus precios y la ficha avisa', async () => {
+    const x = await sembrarExtraccion(extraccion({ desde: '2027-01-01', hasta: '2027-12-31', texto: 'Vigencia 2027', fuente: 'contenido', requiere_confirmacion: false }))
+    expect(await cerrarCargaExtraccion(x.id as string, {})).toEqual({ ok: true })
+    expect(await elegirTarifarioDeFicha(CADENA, { establecimiento: 'Cadena Ficticia Centro' })).toEqual({ ok: true })
+    let r = await leerExtraccion(CADENA)
+    expect(r.ok && r.uso).toMatchObject({ cotiza: { ok: true, tarifas: 1 }, nuevaPorRevisar: null })
+    // Otra corrida del motor, más nueva, queda en borrador.
+    expect(await guardarExtraccion(CADENA, extraccion())).toMatchObject({ ok: true })
+    Object.assign(base.tablas.proveedor_extracciones[base.tablas.proveedor_extracciones.length - 1], { id: 'e0000000-0000-4000-8000-000000000002', estado: 'borrador', created_at: '2026-10-20T10:00:00Z', monedas: {} })
+    r = await leerExtraccion(CADENA)
+    // La ficha muestra la nueva para revisarla…
+    expect(r.ok && r.extraccion).toMatchObject({ id: 'e0000000-0000-4000-8000-000000000002', estado: 'borrador' })
+    // …pero para cotizar cuenta la revisada, y lo dice.
+    expect(r.ok && r.uso).toMatchObject({ cotiza: { ok: true, tarifas: 1 }, nuevaPorRevisar: { revisadaAt: '2026-10-19T10:00:00Z' } })
   })
 
   it('una extracción de otro espacio no se cierra desde aquí', async () => {

@@ -31,6 +31,7 @@ import type { MargenProveedor } from './margen-proveedor'
 import { leerCorrecciones, type Correcciones } from './correcciones'
 import { firmaDeEstadia } from './estadia'
 import { registroDeReserva, resumenDeReserva, type HabitacionDeReserva } from './reserva-habitaciones'
+import { leerOrigenTarifaExtraida, type OrigenTarifaExtraida } from './origen-tarifa'
 
 // ── Tipos de pasajero y composición ──────────────────────────────────────────
 
@@ -356,9 +357,11 @@ export interface LecturaCasilla {
   aceptacion?: string
   /**
    * `manual` = la escribió una persona en el formulario de ingreso manual
-   * (`ingreso-manual.ts`): no hay imagen detrás. Ausente = salió de un pantallazo.
+   * (`ingreso-manual.ts`): no hay imagen detrás. `tarifario` = la persona eligió tarifas de la
+   * extracción del tarifario del proveedor (`oferta-tarifas.ts`); el origen exacto (extracción y
+   * filas) va en `TarifaPax.tarifaExtraida`. Ausente = salió de un pantallazo.
    */
-  origen?: 'manual'
+  origen?: 'manual' | 'tarifario'
   /**
    * «Otro servicio» que es una ASISTENCIA MÉDICA, escrita a mano o leída de un pantallazo en la
    * cotización por pasos (Noor §Paso 1 y §11): el negocio la muestra en «Documentos del viajero».
@@ -1750,6 +1753,12 @@ export interface TarifaPax {
    * Ausente = como siempre: lo que falta se busca con otra captura.
    */
   costosAMano?: CostosAMano
+  /**
+   * La persona eligió tarifas del tarifario extraído del proveedor (`oferta-tarifas.ts`): de qué
+   * extracción, qué filas, con cuántos y cuántas noches, y el canal y el IVA con que se costeó. Vale
+   * mientras la casilla 1 sea la que escribió (`origenVigente`). Ausente = como siempre.
+   */
+  tarifaExtraida?: OrigenTarifaExtraida
 }
 
 /** Lo escrito a mano de un tipo de pasajero, con quién y cuándo. */
@@ -1985,6 +1994,7 @@ export function leerTarifaPax(raw: unknown): TarifaPax {
   const fotoHotel = leerFotoDelHotel(r.fotoHotel)
   const noVa = leerMarcaNoVa(r.noVa)
   const costosAMano = leerCostosAMano(r.costosAMano)
+  const tarifaExtraida = leerOrigenTarifaExtraida(r.tarifaExtraida)
   return {
     composicion: normalizarComposicion(r.composicion),
     casillas,
@@ -2007,6 +2017,8 @@ export function leerTarifaPax(raw: unknown): TarifaPax {
     ...(noVa ? { noVa } : {}),
     // Igual: sin precios de pasajero escritos a mano la llave no aparece.
     ...(costosAMano ? { costosAMano } : {}),
+    // Igual: sin tarifa elegida del tarifario la llave no aparece.
+    ...(tarifaExtraida ? { tarifaExtraida } : {}),
   }
 }
 

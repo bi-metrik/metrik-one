@@ -29,6 +29,7 @@ import { establecimientosDe, llaveEstablecimiento, resumenExtraccion, revisarExt
 import { INSTRUCCION_VERSION, instruccionVigente } from '@/lib/proveedores/instruccion'
 import { correrMotor, type ArchivoParaMotor } from '@/lib/proveedores/motor'
 import { revisarAjustesMoneda, tarifasParaCotizar, TEXTO_NO_COTIZA, vigenciaParaCerrar, type AjustesMoneda } from '@/lib/proveedores/tarifas-extraidas'
+import { extraccionParaCotizar } from '@/lib/proveedores/extraccion-para-cotizar'
 import { ciudadDeFichaEsDepartamento, faltasDeFicha, quitarNotaCiudadPorConfirmar, textoCiudadEsDepartamento, tieneNotaCiudadPorConfirmar, type FaltaFicha } from '@/lib/proveedores/completitud'
 import { aliasPorCambio, claveCiudad, claveDeProveedor, ciudadDeClave, espacioDeTipo, esTipoProveedor, tieneFotos, type EspacioProveedor, type TarifaCanal, type TipoProveedor } from '@/lib/proveedores/tipos'
 import { hoyBogota, type VigenciaTarifario } from '@/lib/proveedores/vigencia'
@@ -601,8 +602,16 @@ export interface UsoTarifario {
   establecimiento: string | null
   /** Las otras fichas del espacio con extracción: de cuál puede tomar el tarifario. */
   fichasConExtraccion: { id: string; nombre: string }[]
-  /** ¿Con lo cargado y lo elegido, esta ficha tiene tarifas para cotizar? */
+  /**
+   * ¿Con lo cargado y lo elegido, esta ficha tiene tarifas para cotizar? Se mide sobre la ÚLTIMA
+   * extracción revisada (punto 5 del 2026-10-19): un borrador posterior no le quita los precios.
+   */
   cotiza: { ok: true; tarifas: number } | { ok: false; motivo: string }
+  /**
+   * Hay una extracción más nueva que la revisada, sin revisar: la cotización sigue con la revisada
+   * hasta que se cierre la carga de la nueva. `revisadaAt` = de cuándo es la que cuenta (`null` sin ninguna).
+   */
+  nuevaPorRevisar?: { revisadaAt: string | null } | null
 }
 
 type FilaExtraccion = {
@@ -685,9 +694,10 @@ export async function leerExtraccion(proveedorId: string): Promise<Resultado<{ e
   const servicio = createServiceClient() as Cliente
   const uso = await usoDeFicha(ctx, f.id)
   const fuenteId = uso.tarifarioDeId ?? f.id
-  const [ultima, conExtraccion] = await Promise.all([
+  const [ultima, conExtraccion, paraCotizar] = await Promise.all([
     ultimaExtraccion(servicio, ctx.workspaceId, fuenteId),
     servicio.from('proveedor_extracciones').select('proveedor_id').eq('workspace_id', ctx.workspaceId).neq('estado', 'descartada').limit(TOPE),
+    extraccionParaCotizar(servicio, ctx.workspaceId, fuenteId),
   ])
   if (ultima.error) return sinMigracion(ultima.error) ? { ok: true, extraccion: null, uso: null } : { ok: false, error: 'No se pudo leer la extracción.' }
   const idsConExtraccion = [...new Set(((conExtraccion.data ?? []) as { proveedor_id: string }[]).map((r) => r.proveedor_id))].filter((id) => id !== f.id)
@@ -711,10 +721,12 @@ export async function leerExtraccion(proveedorId: string): Promise<Resultado<{ e
   const personas = await equipo(ctx)
   const monedas = (x.monedas ?? {}) as AjustesMoneda
   const confirmada = x.vigencia_desde && x.vigencia_hasta && x.vigencia_por ? { desde: x.vigencia_desde, hasta: x.vigencia_hasta, por: x.vigencia_por } : null
-  const usables = tarifasParaCotizar(
-    { estado: x.estado, vigenciaDesde: x.vigencia_desde ?? null, vigenciaHasta: x.vigencia_hasta ?? null, tarifario: x.tarifario, monedas },
-    uso.establecimiento,
-  )
+  // Punto 5 (2026-10-19): para cotizar cuenta la última REVISADA, no la última corrida. Un borrador
+  // más nuevo se muestra para revisar, pero no le quita los precios a la cotización.
+  const r = paraCotizar.revisada
+  const usables = r
+    ? tarifasParaCotizar({ estado: 'revisada', vigenciaDesde: r.vigencia_desde ?? null, vigenciaHasta: r.vigencia_hasta ?? null, tarifario: r.tarifario, monedas: (r.monedas ?? {}) as AjustesMoneda }, uso.establecimiento)
+    : tarifasParaCotizar({ estado: x.estado, vigenciaDesde: x.vigencia_desde ?? null, vigenciaHasta: x.vigencia_hasta ?? null, tarifario: x.tarifario, monedas }, uso.establecimiento)
   return {
     ok: true,
     uso: {
@@ -722,6 +734,7 @@ export async function leerExtraccion(proveedorId: string): Promise<Resultado<{ e
       establecimiento: uso.establecimiento,
       fichasConExtraccion,
       cotiza: usables.ok ? { ok: true, tarifas: usables.tarifas.length } : { ok: false, motivo: TEXTO_NO_COTIZA[usables.motivo] },
+      nuevaPorRevisar: paraCotizar.nuevaPorRevisar && r ? { revisadaAt: r.created_at } : null,
     },
     extraccion: {
       id: x.id,
