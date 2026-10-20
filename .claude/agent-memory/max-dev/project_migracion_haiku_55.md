@@ -1,9 +1,14 @@
 ---
 name: migracion-haiku-55
-description: Gemini → Claude Haiku 5.5 en ONE (rama feat/migracion-haiku-5-5, 2026-10-20) — traductor en un solo archivo, interruptor LLM_PROVEEDOR, eval sin correr de verdad
+description: Gemini → Claude Haiku 5.5 en ONE (PR #1217, 2026-10-20) — traductor en un solo archivo, interruptor LLM_PROVEEDOR; el merge pasa la app a Haiku de inmediato
 metadata:
   type: project
 ---
+
+PR #1217 abierto el 2026-10-20, checks verdes, NO mergear sin Mauricio: Vercel ya tiene la llave y el default es
+`anthropic`, así que el merge pasa a Haiku documentos, RUT y actas sin eval real. Edge: deploy aparte + secreto en Supabase.
+Eval de la sesión principal (2.ª corrida): bot 20/20, intención WA 24/34, gastos 15/18 (revisados).
+El esquema de carga del bot pasaba de 24 opcionales (400): el traductor ahora lo dice en el sistema de una.
 
 Mauricio aprobó el 2026-10-20 apagar Gemini y poner `claude-haiku-5-5` en todo ONE salvo el audio.
 
