@@ -23,10 +23,11 @@ import { esTipoPerfil, sinRepetir, type ObjetivoFoto, type TipoFoto } from '@/li
 import { aliasPorPerfil, contestarDuda, leerConocidos, listaDePerfiles, resolverPedidos, separarAlias, type Conocidos } from '@/lib/fotos/perfiles-db'
 import { objetivoDelPedido, vistaDeElemento, type DudaVista, type ElementoVista } from '@/lib/fotos/vista'
 import { tienePropuestaHtml } from '@/lib/pdf/motor-html'
-import { proveedoresDeTarjetas } from '@/lib/proveedores/tarjeta-db'
+import { proveedoresDeTarjetas, proveedoresPorId } from '@/lib/proveedores/tarjeta-db'
 import type { ProveedorDeTarjeta } from '@/lib/proveedores/vigencia'
 
 const ROLES_SIN_ESCRITURA = new Set(['read_only', 'contador'])
+const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
 const MENSAJE_SIN_ROL = 'Tu rol puede ver las fotos pero no cambiarlas.'
 
 /** Lo que el navegador pide: qué hotel, tour o ciudad (la llave la pone el servidor). */
@@ -34,6 +35,11 @@ export interface PedidoFoto {
   tipo: TipoFoto
   nombre: string
   ciudad: string | null
+  /**
+   * La ficha que la línea FIJÓ (`items.proveedor_id`, 2026-10-19). Con ella el aviso de vigencia
+   * sale de esa ficha y no de la que se reconoce por el nombre; las fotos siguen saliendo del nombre.
+   */
+  proveedorId?: string | null
 }
 
 export type HotelesYTours =
@@ -129,6 +135,8 @@ export interface FotoDeTarjeta {
    * (2026-10-18). `null` sin ficha todavía, con duda o sin la migración de proveedores.
    */
   proveedor: ProveedorDeTarjeta | null
+  /** La ficha fijada en la línea que pidió esta tarjeta (`PedidoFoto.proveedorId`). Ausente = por nombre. */
+  proveedorId?: string
 }
 
 export type FotosDeTarjetas = { ok: true; tarjetas: FotoDeTarjeta[]; editable: boolean } | { ok: false; error: string }
@@ -143,29 +151,41 @@ export type FotosDeTarjetas = { ok: true; tarjetas: FotoDeTarjeta[]; editable: b
 export async function fotosParaTarjetas(pedidos: PedidoFoto[]): Promise<FotosDeTarjetas> {
   const ctx = await contexto(false)
   if ('error' in ctx) return { ok: false, error: ctx.error as string }
-  const objetivos = sinRepetir((Array.isArray(pedidos) ? pedidos.slice(0, TOPE_PEDIDOS_TARJETAS) : []).map(objetivoDelPedido))
+  const lista = Array.isArray(pedidos) ? pedidos.slice(0, TOPE_PEDIDOS_TARJETAS) : []
+  const objetivos = sinRepetir(lista.map(objetivoDelPedido))
+  // Las líneas con ficha fijada: su aviso sale de esa ficha (por id), no del nombre.
+  const fijados = lista.flatMap((p) => {
+    const o = objetivoDelPedido(p)
+    const id = p && typeof p === 'object' && typeof p.proveedorId === 'string' && UUID.test(p.proveedorId) ? p.proveedorId : null
+    return o && id ? [{ o, id }] : []
+  })
   const leidos = await leerConocidos(ctx.db, ctx.workspaceId)
   if (!leidos.ok) return { ok: false, error: leidos.mensaje }
   const c = leidos.conocidos
   const resueltos = await resolverPedidos(ctx.db, ctx.workspaceId, ctx.staffId, objetivos, c, { escribir: ctx.editable })
   const claves = new Set(resueltos.flatMap((r) => [r.perfil, r.duda && { tipo: r.pedido.tipo, clave: r.duda.clave }]).filter((x): x is ObjetivoFoto => !!x).map((x) => `${x.tipo}:${x.clave}`))
   const perfiles = resueltos.flatMap((r) => (r.perfil && esTipoPerfil(r.perfil.tipo) ? [r.perfil] : []))
-  const [vistas, proveedores] = await Promise.all([vistasDe(ctx, c, claves), proveedoresDeTarjetas(ctx.db, ctx.workspaceId, perfiles)])
+  const [vistas, proveedores, porId] = await Promise.all([
+    vistasDe(ctx, c, claves),
+    proveedoresDeTarjetas(ctx.db, ctx.workspaceId, perfiles),
+    proveedoresPorId(ctx.db, ctx.workspaceId, fijados.map((f) => f.id)),
+  ])
   const porClave = new Map(vistas.map((e) => [`${e.tipo}:${e.clave}`, e]))
-  return {
-    ok: true,
-    editable: ctx.editable,
-    tarjetas: resueltos.map((r) => {
-      const conocido = r.duda ? porClave.get(`${r.pedido.tipo}:${r.duda.clave}`) : null
-      return {
-        tipo: r.pedido.tipo,
-        clave: r.pedido.clave,
-        elemento: r.perfil ? porClave.get(`${r.perfil.tipo}:${r.perfil.clave}`) ?? null : null,
-        duda: r.duda ? { ...r.duda, url: conocido?.fotos[0]?.url ?? null } : null,
-        proveedor: r.perfil ? proveedores.get(`${r.perfil.tipo}:${r.perfil.clave}`) ?? null : null,
-      }
-    }),
+  const tarjetas: FotoDeTarjeta[] = resueltos.map((r) => {
+    const conocido = r.duda ? porClave.get(`${r.pedido.tipo}:${r.duda.clave}`) : null
+    return {
+      tipo: r.pedido.tipo,
+      clave: r.pedido.clave,
+      elemento: r.perfil ? porClave.get(`${r.perfil.tipo}:${r.perfil.clave}`) ?? null : null,
+      duda: r.duda ? { ...r.duda, url: conocido?.fotos[0]?.url ?? null } : null,
+      proveedor: r.perfil ? proveedores.get(`${r.perfil.tipo}:${r.perfil.clave}`) ?? null : null,
+    }
+  })
+  for (const f of fijados) {
+    const t = tarjetas.find((x) => x.tipo === f.o.tipo && x.clave === f.o.clave && !x.proveedorId)
+    if (t) tarjetas.push({ ...t, proveedorId: f.id, proveedor: porId.get(f.id) ?? null })
   }
+  return { ok: true, editable: ctx.editable, tarjetas }
 }
 
 /** El perfil de lo que pide una tarjeta o la pantalla (resolviendo alias). Error si hay duda. */

@@ -328,6 +328,35 @@ describe('la tarjeta de la cotización', () => {
   })
 })
 
+describe('la tarjeta: una sola vigencia y la ficha fijada en la línea', () => {
+  it('con una extracción revisada, el aviso usa su vigencia confirmada (la del tarifario queda de respaldo)', async () => {
+    // El mayorista tiene un tarifario de 2025, y una extracción revisada que vale todo 2027.
+    base.tablas.proveedor_extracciones.push(
+      { id: 'x1', workspace_id: WS, proveedor_id: MAYORISTA, estado: 'revisada', created_at: '2026-10-19T10:00:00Z', vigencia_desde: '2027-01-01', vigencia_hasta: '2027-12-31' },
+      // Un borrador más nuevo no cambia la vigencia, y la de otro espacio no se lee.
+      { id: 'x2', workspace_id: WS, proveedor_id: MAYORISTA, estado: 'borrador', created_at: '2026-10-20T10:00:00Z', vigencia_desde: null, vigencia_hasta: null },
+      { id: 'x3', workspace_id: OTRO_WS, proveedor_id: HOTEL, estado: 'revisada', created_at: '2026-10-21T10:00:00Z', vigencia_desde: '2030-01-01', vigencia_hasta: '2030-12-31' },
+    )
+    const r = await fotosParaTarjetas([{ tipo: 'hotel', nombre: 'Catalonia Puerta del Sol', ciudad: 'Madrid' }])
+    expect(r.ok && r.tarjetas[0].proveedor).toMatchObject({ id: HOTEL, tarifarios: [], via: { id: MAYORISTA, tarifarios: [{ desde: '2027-01-01', hasta: '2027-12-31' }] } })
+  })
+
+  it('la ficha que la línea fijó manda sobre la que se reconoce por el nombre', async () => {
+    const r = await fotosParaTarjetas([
+      { tipo: 'hotel', nombre: 'Catalonia Puerta del Sol', ciudad: 'Madrid' },
+      { tipo: 'hotel', nombre: 'Catalonia Puerta del Sol', ciudad: 'Madrid', proveedorId: IBEROSTAR },
+    ])
+    expect(r.ok).toBe(true)
+    if (!r.ok) return
+    expect(r.tarjetas.find((t) => !t.proveedorId)?.proveedor?.id).toBe(HOTEL)
+    expect(r.tarjetas.find((t) => t.proveedorId === IBEROSTAR)?.proveedor).toMatchObject({ id: IBEROSTAR, nombre: 'Iberostar Selection Bávaro' })
+    // Una ficha de otro espacio no se lee aunque la pidan por id.
+    base.tablas.fotos_perfiles.push({ ...perfil('d0000000-0000-4000-8000-0000000000ff', 'hotel', 'Ajeno', 'Madrid'), workspace_id: OTRO_WS })
+    const otra = await fotosParaTarjetas([{ tipo: 'hotel', nombre: 'Catalonia Puerta del Sol', ciudad: 'Madrid', proveedorId: 'd0000000-0000-4000-8000-0000000000ff' }])
+    expect(otra.ok && otra.tarjetas.find((t) => t.proveedorId)?.proveedor).toBeNull()
+  })
+})
+
 describe('extracciones del motor', () => {
   const json = JSON.stringify({
     esquema_version: '0.2',
