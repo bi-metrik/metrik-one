@@ -1,6 +1,6 @@
-import { fetchModelo } from '@/lib/ai/modelo-llm'
 import 'server-only'
 
+import { fetchModelo } from '@/lib/ai/modelo-llm'
 import { getServerKey } from '@/lib/server-keys'
 import { CATEGORIAS_GASTO } from '@/lib/catalogos/constants'
 import {

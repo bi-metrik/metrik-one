@@ -148,6 +148,20 @@ describe('cuerpoAnthropicDesdeGemini', () => {
     expect(t.cuerpo.tool_choice).toEqual({ type: 'any' });
     expect(t.cuerpo.thinking).toEqual({ type: 'disabled' });
   });
+  it('dos turnos seguidos del usuario se juntan y el tool_result queda primero', () => {
+    const t = cuerpoAnthropicDesdeGemini({
+      contents: [
+        { role: 'model', parts: [{ functionCall: { name: 'buscar', args: {} } }] },
+        { role: 'user', parts: [{ text: 'y además' }] },
+        { role: 'user', parts: [{ functionResponse: { name: 'buscar', response: { n: 1 } } }] },
+      ],
+    });
+    expect(t.ok).toBe(true);
+    if (!t.ok) return;
+    const m = t.cuerpo.messages as Array<{ role: string; content: Array<Record<string, unknown>> }>;
+    expect(m.map((x) => x.role)).toEqual(['assistant', 'user']);
+    expect(m[1].content.map((b) => b.type)).toEqual(['tool_result', 'text']);
+  });
 });
 
 describe('respuestaGeminiDesdeAnthropic', () => {
