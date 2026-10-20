@@ -100,3 +100,29 @@ describe('migración: la línea guarda su proveedor', () => {
     expect(await columna(db)).toBe(1)
   })
 })
+
+describe('medir de dónde sale el precio (solo lectura)', () => {
+  it('cuenta tarifa extraída, ingreso manual, pantallazo, costo a mano y sin costo, solo del espacio pedido', async () => {
+    const m = new PGlite()
+    await m.exec(`
+      create table public.cotizaciones (id uuid primary key, workspace_id uuid);
+      create table public.items (id uuid primary key default gen_random_uuid(), cotizacion_id uuid, grupo text, es_ajuste boolean default false, subtotal numeric, tarifa_pax jsonb);
+      insert into public.cotizaciones values ('${COT}', '${WS}'), ('00000000-0000-4000-8000-00000000c0e2', '${OTRO_WS}');
+      insert into public.items (cotizacion_id, grupo, subtotal, tarifa_pax) values
+        ('${COT}', 'hotel', 0, '{"casillas": {"grupo_completo": {"origen": "tarifario"}}, "tarifaExtraida": {"extraccion_id": "x"}}'),
+        ('${COT}', 'hotel', 0, '{"casillas": {"grupo_completo": {"origen": "tarifario"}}}'),
+        ('${COT}', 'tour', 0, '{"casillas": {"grupo_completo": {"origen": "manual"}}}'),
+        ('${COT}', 'vuelo', 0, '{"casillas": {"grupo_completo": {"total": 1}}}'),
+        ('${COT}', 'hotel', 0, '{"habitaciones": []}'),
+        ('${COT}', 'seguro', 120000, null),
+        ('${COT}', 'otro', 0, null),
+        ('${COT}', null, 5, null),
+        ('00000000-0000-4000-8000-00000000c0e2', 'hotel', 0, '{"casillas": {"grupo_completo": {"origen": "tarifario"}}}');
+    `)
+    const consulta = sql('2026-10-19_medir-origen-precio.sql').replace(/<workspace_id>/g, WS)
+    const filas = (await m.query<{ origen: string; lineas: number; pct: string }>(consulta)).rows
+    expect(Object.fromEntries(filas.map((f) => [f.origen, Number(f.lineas)]))).toEqual({ tarifa_extraida: 2, ingreso_manual: 1, pantallazo: 2, costo_a_mano: 1, sin_costo: 1 })
+    expect(filas.find((f) => f.origen === 'tarifa_extraida')?.pct).toBe('28.6')
+    await m.close()
+  })
+})
