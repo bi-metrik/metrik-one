@@ -9,7 +9,13 @@ import {
   esquemaJsonDesdeGemini,
   proveedorLLM,
   respuestaGeminiDesdeAnthropic,
+  ajustarEsquema,
+  contarEsquema,
+  promoverOpcionales,
+  LIMITE_OPCIONALES,
 } from './llm-anthropic.ts';
+import { esquemaCarga } from './agente/bandeja/extraccion.ts';
+import { CAMPOS_ARNES } from './agente/arnes/conjuntos.ts';
 
 const URL_G = 'https://generativelanguage.googleapis.com/v1beta/models/gemini-3.5-flash-lite:generateContent?key=g';
 
@@ -247,5 +253,58 @@ describe('crearFetchModelo', () => {
     const f = crearFetchModelo({ fetch: real as unknown as typeof fetch, entorno: (k) => (k === 'ANTHROPIC_API_KEY' ? 'sk' : undefined), avisar: () => {} });
     await f(URL_G, { method: 'POST', body: JSON.stringify({ contents: [{ parts: [{ inline_data: { mime_type: 'audio/ogg', data: 'x' } }] }] }) });
     expect(real.mock.calls[0][0]).toBe(URL_G);
+  });
+});
+
+describe('presupuesto del esquema (400 «too many optional parameters»)', () => {
+  const muchos = (n: number, tipo: 'array' | 'string') => ({
+    type: 'object',
+    properties: Object.fromEntries(Array.from({ length: n }, (_, i) => [`c${i}`, tipo === 'array' ? { type: 'array', items: { type: 'string' } } : { type: 'string' }])),
+    required: [],
+    additionalProperties: false,
+  });
+
+  it('cuenta opcionales y uniones en todos los niveles', () => {
+    expect(contarEsquema({
+      type: 'object',
+      properties: { a: { type: 'string' }, b: { anyOf: [{ type: 'string' }, { type: 'null' }] }, l: { type: 'array', items: { type: 'object', properties: { x: { type: 'string' } } } } },
+      required: ['a'],
+    })).toEqual({ opcionales: 3, uniones: 1 });
+  });
+
+  it('un esquema que cabe viaja tal cual', () => {
+    const e = muchos(LIMITE_OPCIONALES, 'string');
+    expect(ajustarEsquema(e)).toEqual({ modo: 'estricto', esquema: e, promovido: false });
+  });
+
+  it('arreglos opcionales de más: pasan a requeridos (sin dato = lista vacía) y el esquema queda estricto', () => {
+    const r = ajustarEsquema(muchos(30, 'array'));
+    expect(r.modo).toBe('estricto');
+    if (r.modo !== 'estricto') return;
+    expect(r.promovido).toBe(true);
+    expect(contarEsquema(r.esquema).opcionales).toBe(0);
+    expect((r.esquema as { properties: Record<string, unknown> }).properties.c0).toEqual({ type: 'array', items: { type: 'string' } });
+  });
+
+  it('promover: lo opcional que no es arreglo admite null, lo que ya admitía null no se envuelve dos veces', () => {
+    const p = promoverOpcionales({ type: 'object', properties: { a: { type: 'string', description: 'd' }, b: { anyOf: [{ type: 'string' }, { type: 'null' }] } }, required: [] }) as { properties: Record<string, unknown>; required: string[] };
+    expect(p.required).toEqual(['a', 'b']);
+    expect(p.properties.a).toEqual({ description: 'd', anyOf: [{ type: 'string' }, { type: 'null' }] });
+    expect(p.properties.b).toEqual({ anyOf: [{ type: 'string' }, { type: 'null' }] });
+  });
+
+  it('el esquema de carga real del bot (33 opcionales) va en el sistema desde la primera llamada, sin format', () => {
+    const esquema = esquemaCarga(CAMPOS_ARNES, { perfil: true });
+    const t = cuerpoAnthropicDesdeGemini({
+      system_instruction: { parts: [{ text: 'Extrae.' }] },
+      contents: [{ parts: [{ text: 'Mensajes: hola' }] }],
+      generationConfig: { maxOutputTokens: 8192, responseMimeType: 'application/json', responseSchema: esquema },
+    });
+    expect(t.ok).toBe(true);
+    if (!t.ok) return;
+    expect(contarEsquema(esquemaJsonDesdeGemini(esquema)).opcionales).toBeGreaterThan(LIMITE_OPCIONALES);
+    expect(t.cuerpo.output_config).toBeUndefined();
+    expect(t.conEsquema).toBe(false);
+    expect(String(t.cuerpo.system)).toMatch(/^Extrae\.\n\nResponde únicamente con un objeto JSON válido que cumpla este JSON Schema/);
   });
 });

@@ -118,6 +118,88 @@ export function esquemaJsonDesdeGemini(e: unknown): unknown {
   return r;
 }
 
+// ── El presupuesto del esquema ──────────────────────────────────────────────
+
+/**
+ * Topes de complejidad de la salida estructurada. El de opcionales lo midió el eval real del 2026-10-20 (el esquema de
+ * carga del bot dio 400 «Schemas contains too many optional parameters (33)»); el de uniones (`anyOf` o arreglo de
+ * tipos) es el que recuerdo de la doc de Anthropic y NO está verificado contra la API: si fuera más alto, el único
+ * efecto es que algunos esquemas se dicen en el sistema cuando podrían ir estrictos. El 400 sigue con su reintento.
+ */
+export const LIMITE_OPCIONALES = 24;
+export const LIMITE_UNIONES = 16;
+
+const esUnion = (e: Esq) => Array.isArray(e.anyOf) || Array.isArray(e.type);
+
+/** Cuántos parámetros opcionales y cuántos con unión trae el esquema, contando todos los niveles. Pura. */
+export function contarEsquema(e: unknown): { opcionales: number; uniones: number } {
+  let opcionales = 0;
+  let uniones = 0;
+  const visitar = (x: unknown) => {
+    if (!x || typeof x !== 'object' || Array.isArray(x)) return;
+    const s = x as Esq;
+    if (s.properties && typeof s.properties === 'object') {
+      const req = new Set(Array.isArray(s.required) ? (s.required as string[]) : []);
+      for (const [k, v] of Object.entries(s.properties as Esq)) {
+        if (!req.has(k)) opcionales++;
+        if (v && typeof v === 'object' && esUnion(v as Esq)) uniones++;
+        visitar(v);
+      }
+    }
+    if (s.items) visitar(s.items);
+    if (Array.isArray(s.anyOf)) s.anyOf.forEach(visitar);
+  };
+  visitar(e);
+  return { opcionales, uniones };
+}
+
+/**
+ * Cada propiedad opcional pasa a requerida: un arreglo tal cual (sin dato = lista vacía) y lo demás admitiendo
+ * `null` (sin dato = null). Pura.
+ */
+export function promoverOpcionales(e: unknown): unknown {
+  if (!e || typeof e !== 'object' || Array.isArray(e)) return e;
+  const s = { ...(e as Esq) };
+  if (s.properties && typeof s.properties === 'object') {
+    const req = new Set(Array.isArray(s.required) ? (s.required as string[]) : []);
+    const props: Esq = {};
+    for (const [k, v0] of Object.entries(s.properties as Esq)) {
+      let v = promoverOpcionales(v0) as Esq;
+      if (!req.has(k)) {
+        const yaAdmiteNull = Array.isArray(v.anyOf) && (v.anyOf as Esq[]).some((x) => x?.type === 'null');
+        if (v.type !== 'array' && !yaAdmiteNull) {
+          const { description, ...resto } = v;
+          v = { ...(description ? { description } : {}), anyOf: [resto, { type: 'null' }] };
+        }
+      }
+      props[k] = v;
+    }
+    s.properties = props;
+    s.required = Object.keys(props);
+  }
+  if (s.items) s.items = promoverOpcionales(s.items);
+  if (Array.isArray(s.anyOf)) s.anyOf = s.anyOf.map(promoverOpcionales);
+  return s;
+}
+
+const dentro = (c: { opcionales: number; uniones: number }) => c.opcionales <= LIMITE_OPCIONALES && c.uniones <= LIMITE_UNIONES;
+
+/**
+ * Cómo viaja el esquema: estricto tal cual si cabe; si no, con los opcionales promovidos a requeridos si ASÍ cabe; y
+ * si tampoco, dicho en el sistema (sin `format`), que es lo mismo que hacía el reintento tras el 400 pero sin gastar
+ * la primera llamada. Pura.
+ */
+export function ajustarEsquema(e: unknown): { modo: 'estricto'; esquema: unknown; promovido: boolean } | { modo: 'en_sistema'; esquema: unknown } {
+  if (dentro(contarEsquema(e))) return { modo: 'estricto', esquema: e, promovido: false };
+  const p = promoverOpcionales(e);
+  if (dentro(contarEsquema(p))) return { modo: 'estricto', esquema: p, promovido: true };
+  return { modo: 'en_sistema', esquema: e };
+}
+
+export function instruccionEsquemaEnSistema(esquema: unknown): string {
+  return `Responde únicamente con un objeto JSON válido que cumpla este JSON Schema, sin texto alrededor ni cercas de código:\n${JSON.stringify(esquema)}`;
+}
+
 // ── El pedido ───────────────────────────────────────────────────────────────
 
 interface ParteGemini {
@@ -265,11 +347,15 @@ export function cuerpoAnthropicDesdeGemini(cuerpo: unknown, modelo: string = MOD
   const esquemaG = gc.responseJsonSchema ?? gc.response_json_schema ?? gc.responseSchema ?? gc.response_schema;
   const quiereJson = mime === 'application/json';
   // `responseSchema` (OpenAPI de Gemini) y `responseJsonSchema` (JSON Schema) pasan por la misma normalización.
-  const esquema = quiereJson && esquemaG ? esquemaJsonDesdeGemini(esquemaG) : null;
+  const ajuste = quiereJson && esquemaG ? ajustarEsquema(esquemaJsonDesdeGemini(esquemaG)) : null;
+  const esquema = ajuste?.modo === 'estricto' ? ajuste.esquema : null;
 
   let sistema = textoDeSistema(c);
-  // `responseMimeType: application/json` sin esquema: Gemini garantiza JSON; aquí se pide en el sistema.
-  if (quiereJson && !esquema) {
+  if (ajuste?.modo === 'en_sistema') {
+    // Demasiado complejo para la salida estructurada: el esquema va en el sistema y el sitio valida el JSON como siempre.
+    sistema = [sistema, instruccionEsquemaEnSistema(ajuste.esquema)].filter(Boolean).join('\n\n');
+  } else if (quiereJson && !esquema) {
+    // `responseMimeType: application/json` sin esquema: Gemini garantiza JSON; aquí se pide en el sistema.
     sistema = [sistema, 'Responde únicamente con un objeto JSON válido, sin texto alrededor ni cercas de código.'].filter(Boolean).join('\n\n');
   }
 
@@ -416,7 +502,7 @@ export function crearFetchModelo(o: OpcionesFetchModelo = {}): typeof fetch {
         const { output_config, ...resto } = t.cuerpo as { output_config?: Record<string, unknown> } & Record<string, unknown>;
         const esquema = (output_config?.format as { schema?: unknown } | undefined)?.schema;
         const oc = output_config?.effort ? { output_config: { effort: output_config.effort } } : {};
-        const sistema = [resto.system, `Responde únicamente con un objeto JSON válido que cumpla este JSON Schema, sin texto alrededor ni cercas de código:\n${JSON.stringify(esquema)}`]
+        const sistema = [resto.system, instruccionEsquemaEnSistema(esquema)]
           .filter(Boolean).join('\n\n');
         avisar(`[llm] la salida estructurada rechazó el esquema; reintento con el esquema en el sistema: ${detalle.slice(0, 200)}`);
         res = await llamar({ ...resto, ...oc, system: sistema });
