@@ -11,6 +11,7 @@
 // se pasan aquí, no viven en el código del núcleo.
 // ============================================================
 
+import { fetchModelo } from '../../llm-anthropic.ts';
 import { CONFIG_POR_DEFECTO } from '../config.ts';
 import { escenario } from '../escenario.ts';
 import type { Escenario } from '../escenario.ts';
@@ -45,7 +46,7 @@ const MODELO_SIMULADOR = { modelo: 'gemini-3.5-flash-lite', razonamiento: 'MINIM
 /** UNA llamada mínima al modelo principal. `cuota`: 429 o RESOURCE_EXHAUSTED (hay que parar). */
 export async function llamadaDeHumo(llave: string): Promise<{ status: number; ms: number; uso: string; cuota: boolean }> {
   const t0 = performance.now();
-  const res = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${CONFIG_POR_DEFECTO.principal.modelo}:generateContent`, {
+  const res = await fetchModelo(`https://generativelanguage.googleapis.com/v1beta/models/${CONFIG_POR_DEFECTO.principal.modelo}:generateContent`, {
     method: 'POST', headers: { 'Content-Type': 'application/json', 'x-goog-api-key': llave },
     body: JSON.stringify({ contents: [{ role: 'user', parts: [{ text: 'Responde solo: ok' }] }], generationConfig: { maxOutputTokens: 64, thinkingConfig: { thinkingLevel: 'LOW' } } }),
   });

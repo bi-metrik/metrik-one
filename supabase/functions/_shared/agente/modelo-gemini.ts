@@ -15,6 +15,7 @@
 //   después del corte, contesta él. Los usos de los dos quedan en la traza (el que pierde, con su motivo).
 // ============================================================
 
+import { fetchModelo } from '../llm-anthropic.ts';
 import type { ConfigModelo } from './config.ts';
 import type { Mensaje, Modelo, Parte, PedidoModelo, RespuestaModelo, UsoLlamado } from './tipos.ts';
 
@@ -61,7 +62,7 @@ type Intento = { ok: true; mensaje: Mensaje; uso: UsoLlamado } | { ok: false; mo
 
 async function intentar(p: PedidoModelo, c: ConfigModelo, timeoutMs: number, o: OpcionesGemini, cancelar?: AbortSignal): Promise<Intento> {
   const ahora = o.ahora ?? (() => performance.now());
-  const f = o.fetch ?? fetch;
+  const f = o.fetch ?? fetchModelo;
   const t0 = ahora();
   const uso = (ok: boolean, extra: Partial<UsoLlamado> = {}): UsoLlamado => ({
     modelo: c.modelo, entrada: 0, salida: 0, razonamiento: 0, cache: 0, ms: Math.round(ahora() - t0), ok, ...extra,

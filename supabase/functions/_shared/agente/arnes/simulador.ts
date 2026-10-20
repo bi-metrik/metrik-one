@@ -6,6 +6,7 @@
 // Responde una acción por turno: escribir, reenviar el siguiente mensaje del cliente, tocar una opción o terminar.
 // ============================================================
 
+import { fetchModelo } from '../../llm-anthropic.ts';
 import type { UsoLlamado } from '../tipos.ts';
 
 export type AccionSimulada = { accion: 'escribe' | 'reenvia' | 'toca' | 'fin'; texto: string };
@@ -38,7 +39,7 @@ export async function simular(
   o: { llave: string; modelo: string; razonamiento: string | null; sistema: string; transcripcion: string; fetch?: typeof fetch },
 ): Promise<{ ok: true; accion: AccionSimulada; uso: UsoLlamado } | { ok: false; motivo: string; uso: UsoLlamado }> {
   const t0 = performance.now();
-  const f = o.fetch ?? fetch;
+  const f = o.fetch ?? fetchModelo;
   const uso: UsoLlamado = { modelo: o.modelo, entrada: 0, salida: 0, razonamiento: 0, cache: 0, ms: 0, ok: false };
   try {
     const res = await f(`https://generativelanguage.googleapis.com/v1beta/models/${o.modelo}:generateContent`, {

@@ -14,6 +14,7 @@
 // identifica al remitente) devuelve `{atendido:false}` sin tocar la base ni la red.
 // ============================================================
 
+import { fetchModelo } from './llm-anthropic.ts';
 import { sendButtons, sendTextMessage } from './wa-respond.ts';
 import { checkInboundLimit } from './wa-rate-limit.ts';
 import { botEquipoPermitido, MENSAJE_BOT_SIN_CLARITY } from './wa-modulos.ts';
@@ -147,7 +148,7 @@ export async function llamarGemini(p: PedidoModelo, env: (k: string) => string |
   if (!key) return { ok: false, motivo: 'http', ms: 0, detalle: 'sin GEMINI_API_KEY' };
   let res: Response;
   try {
-    res = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${p.modelo}:generateContent`, {
+    res = await fetchModelo(`https://generativelanguage.googleapis.com/v1beta/models/${p.modelo}:generateContent`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', 'x-goog-api-key': key },
       body: JSON.stringify({

@@ -7,6 +7,8 @@
 // Es pura salvo por `fetch` (inyectable para las pruebas).
 // ============================================================
 
+import { fetchModelo } from './llm-anthropic.ts';
+
 /**
  * El modelo cuando no hay secreto que diga otro. Producción del bot lo fija con `GEMINI_ENTENDIMIENTO_MODEL` (Supabase,
  * 2026-10: `gemini-3.5-flash-lite`); la app lee la variable del mismo nombre en Vercel y, sin ella, cae aquí.
@@ -29,7 +31,7 @@ export async function leerConGemini(p: {
 }): Promise<Lectura> {
   if (!p.apiKey) return { json: null, finishReason: null, error: 'GEMINI_NO_KEY' };
   const url = `https://generativelanguage.googleapis.com/v1beta/models/${p.modelo}:generateContent?key=${p.apiKey}`;
-  const f = p.fetch ?? fetch;
+  const f = p.fetch ?? fetchModelo;
   try {
     const res = await f(url, {
       method: 'POST',

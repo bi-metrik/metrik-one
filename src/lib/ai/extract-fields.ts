@@ -13,6 +13,7 @@
 // marginal. Familia 2.5 → se controla con `thinkingBudget` numérico (la
 // config previa mezclaba `gemini-3.1-flash-lite` con `thinkingBudget:0`, que
 // es sintaxis de la familia 2.5 y en 3.x se ignora).
+import { fetchModelo } from '@/lib/ai/modelo-llm'
 import { normalizarMontoExtraido } from './monto-extraido'
 import { revisarLetrasLeidas } from '@/lib/texto/texto-latino'
 import { serializarPersonas, type Persona } from '@/lib/documentos/personas'
@@ -244,7 +245,7 @@ export async function extractFieldsFromDocument(
 
   let debugRaw = ''
   try {
-    const res = await fetch(url, {
+    const res = await fetchModelo(url, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({

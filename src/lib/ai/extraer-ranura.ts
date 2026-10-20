@@ -32,6 +32,7 @@
  * fuera de este paso.
  */
 
+import { fetchModelo } from '@/lib/ai/modelo-llm'
 import type { DefinicionRanura } from '@/lib/cotizaciones/ranuras-pantallazo'
 import type {
   FilaTipoPaxCruda,
@@ -900,7 +901,7 @@ async function unaDeteccion(
 ): Promise<{ valor: number | null | undefined; error: string | null }> {
   const url = `https://generativelanguage.googleapis.com/v1beta/models/${MODELO_ESTRELLAS}:generateContent?key=${apiKey}`
   try {
-    const res = await fetch(url, {
+    const res = await fetchModelo(url, {
       method: 'POST',
       signal: AbortSignal.timeout(TIMEOUT_ESTRELLAS_MS),
       headers: { 'Content-Type': 'application/json' },
@@ -1004,7 +1005,7 @@ async function unaLlamada(
   const url = `https://generativelanguage.googleapis.com/v1beta/models/${GEMINI_MODEL}:generateContent?key=${apiKey}`
 
   try {
-    const res = await fetch(url, {
+    const res = await fetchModelo(url, {
       method: 'POST',
       signal: AbortSignal.timeout(TIMEOUT_MS),
       headers: { 'Content-Type': 'application/json' },

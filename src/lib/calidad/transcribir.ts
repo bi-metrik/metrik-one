@@ -45,6 +45,8 @@ export async function transcribirAudio(
   apiKey: string,
 ): Promise<Transcripcion> {
   const t = Date.now()
+  // Se queda en Gemini a propósito (migración a Claude Haiku 5.5, 2026-10-20): Haiku 5.5 no recibe audio, y no hay
+  // otro proveedor de voz a texto aprobado. Por eso usa el fetch de siempre y no `fetchModelo` (src/lib/ai/modelo-llm.ts).
   const res = await fetch(
     `https://generativelanguage.googleapis.com/v1beta/models/${MODELO_AUDITORIA}:generateContent?key=${apiKey}`,
     {

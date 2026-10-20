@@ -4,6 +4,7 @@
 // Pattern: wa-transcribe.ts (inline_data base64)
 // ============================================================
 
+import { fetchModelo } from '@/lib/ai/modelo-llm'
 import { textoLatinoProfundo } from '@/lib/texto/texto-latino'
 import type { RutParseResult, RutField } from './types'
 import { validateNit } from './validate-nit'
@@ -137,7 +138,7 @@ export async function parseRut(
 
   let debugRaw = ''
   try {
-    const res = await fetch(url, {
+    const res = await fetchModelo(url, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({

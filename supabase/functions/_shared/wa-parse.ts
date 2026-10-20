@@ -2,6 +2,7 @@
 // Gemini — NLP Parser (MVP — 8 intents)
 // ============================================================
 
+import { fetchModelo } from './llm-anthropic.ts';
 import type { ParseResult, Intent, LastContext } from './types.ts';
 import { CONFIDENCE_THRESHOLD, enrichFields, fastPathParse, regexParse } from './wa-parse-reglas.ts';
 
@@ -197,7 +198,7 @@ async function tryGemini(
   }
 
   try {
-    const res = await fetch(url, {
+    const res = await fetchModelo(url, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({

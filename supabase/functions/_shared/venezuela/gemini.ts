@@ -2,6 +2,8 @@
 // Portado VERBATIM del harness de eval (eval/gemini.ts); unico cambio: la key sale de Deno.env
 // en vez de process.env. Mismo patron: fetch nativo, usageMetadata, retry con backoff, thinking OFF.
 
+import { fetchModelo } from '../llm-anthropic.ts';
+
 export interface GenUsage {
   in: number;        // promptTokenCount
   out: number;       // candidatesTokenCount
@@ -64,7 +66,7 @@ export async function generate(opts: CallOpts): Promise<GenResult> {
   const url = `https://generativelanguage.googleapis.com/v1beta/models/${opts.model}:generateContent?key=${key}`;
 
   const data: any = await withRetry(async () => {
-    const res = await fetch(url, {
+    const res = await fetchModelo(url, {
       method: "POST",
       headers: { "content-type": "application/json" },
       body: JSON.stringify(body),

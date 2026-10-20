@@ -23,6 +23,7 @@
  * La imagen no se persiste, igual que en la lectura.
  */
 
+import { fetchModelo } from '@/lib/ai/modelo-llm'
 import { extraerConReintento, type ResultadoExtraccion } from './reintentar-extraccion'
 import { esTipoConPantallazo, type TipoRanura } from '@/lib/cotizaciones/ranuras-cotizacion'
 
@@ -140,7 +141,7 @@ export function rescatarCortada(texto: string): TipoDetectado | null {
 async function unaLlamada(buffer: Buffer, mime: string, apiKey: string): Promise<ResultadoExtraccion<TipoDetectado>> {
   const url = `https://generativelanguage.googleapis.com/v1beta/models/${GEMINI_MODEL}:generateContent?key=${apiKey}`
   try {
-    const res = await fetch(url, {
+    const res = await fetchModelo(url, {
       method: 'POST',
       signal: AbortSignal.timeout(TIMEOUT_MS),
       headers: { 'Content-Type': 'application/json' },
