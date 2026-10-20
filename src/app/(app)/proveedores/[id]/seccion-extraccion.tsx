@@ -325,6 +325,12 @@ export default function SeccionExtraccion({
           <p className={`m-0 ${uso.cotiza.ok ? 'text-emerald-700' : 'text-amber-700'}`} data-cotiza={uso.cotiza.ok || undefined}>
             {uso.cotiza.ok ? `${uso.cotiza.tarifas} tarifas cuentan para cotizar.` : uso.cotiza.motivo}
           </p>
+          {uso.nuevaPorRevisar && (
+            <p className="m-0 text-amber-700" data-nueva-por-revisar>
+              Hay una extracción nueva por revisar. La cotización sigue usando la revisada
+              {uso.nuevaPorRevisar.revisadaAt ? ` del ${new Date(uso.nuevaPorRevisar.revisadaAt).toLocaleDateString('es-CO', { timeZone: 'America/Bogota' })}` : ''} hasta que cierres la carga de la nueva.
+            </p>
+          )}
           {editable && (
             <div className="grid gap-2 sm:grid-cols-2">
               <label className="space-y-0.5 text-[11px] text-muted-foreground">

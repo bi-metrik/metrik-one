@@ -423,6 +423,22 @@ describe('motor v13: carga, cadena y extracción desde ONE', () => {
     expect(r.ok && r.uso).toMatchObject({ tarifarioDe: { id: CADENA }, establecimiento: 'Cadena Ficticia Playa', cotiza: { ok: true, tarifas: 1 } })
   })
 
+  it('una extracción nueva sin revisar no tapa la revisada: la cotización sigue con sus precios y la ficha avisa', async () => {
+    const x = await sembrarExtraccion(extraccion({ desde: '2027-01-01', hasta: '2027-12-31', texto: 'Vigencia 2027', fuente: 'contenido', requiere_confirmacion: false }))
+    expect(await cerrarCargaExtraccion(x.id as string, {})).toEqual({ ok: true })
+    expect(await elegirTarifarioDeFicha(CADENA, { establecimiento: 'Cadena Ficticia Centro' })).toEqual({ ok: true })
+    let r = await leerExtraccion(CADENA)
+    expect(r.ok && r.uso).toMatchObject({ cotiza: { ok: true, tarifas: 1 }, nuevaPorRevisar: null })
+    // Otra corrida del motor, más nueva, queda en borrador.
+    expect(await guardarExtraccion(CADENA, extraccion())).toMatchObject({ ok: true })
+    Object.assign(base.tablas.proveedor_extracciones[base.tablas.proveedor_extracciones.length - 1], { id: 'e0000000-0000-4000-8000-000000000002', estado: 'borrador', created_at: '2026-10-20T10:00:00Z', monedas: {} })
+    r = await leerExtraccion(CADENA)
+    // La ficha muestra la nueva para revisarla…
+    expect(r.ok && r.extraccion).toMatchObject({ id: 'e0000000-0000-4000-8000-000000000002', estado: 'borrador' })
+    // …pero para cotizar cuenta la revisada, y lo dice.
+    expect(r.ok && r.uso).toMatchObject({ cotiza: { ok: true, tarifas: 1 }, nuevaPorRevisar: { revisadaAt: '2026-10-19T10:00:00Z' } })
+  })
+
   it('una extracción de otro espacio no se cierra desde aquí', async () => {
     base.tablas.proveedor_extracciones.push({ id: 'e0000000-0000-4000-8000-000000000009', workspace_id: OTRO_WS, proveedor_id: HOTEL, estado: 'borrador', tarifario: null, expediente: {}, archivos: [] })
     expect(await cerrarCargaExtraccion('e0000000-0000-4000-8000-000000000009', { desde: '2027-01-01', hasta: '2027-12-31' })).toMatchObject({ ok: false })
