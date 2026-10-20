@@ -13,8 +13,8 @@ escrituras nuevas con «falta la migración».
 - **Solo una extracción `revisada` cuenta para cotizar** (`tarifasParaCotizar`), y el CHECK de la migración exige
   vigencia completa para estar revisada. Una extracción nace en borrador aunque el motor traiga fechas claras.
 - **La conversión con TRM NO se construyó**: el brief decía proponer la fuente antes (propuesta: datos.gov.co
-  `32sa-8pi3` para USD; EUR/MXN sin fuente oficial diaria en ONE). El cotizador todavía no lee tarifas de las
-  extracciones: `tarifasParaCotizar` es la puerta que debe usar cuando lo haga.
+  `32sa-8pi3` para USD; EUR/MXN sin fuente oficial diaria en ONE). Desde el PR de
+  [[tarifas-en-cotizacion]] el cotizador las ofrece pasando por `tarifasParaCotizar` (la última revisada).
 - **Modelo** (fix/motor-anthropic-directo, 19-oct): el gateway rechazó Haiku por «Free tier». Con `ANTHROPIC_API_KEY`
   (la carga Mauricio en Vercel) va directo con `@ai-sdk/anthropic@4.0.82` (`claude-haiku-5-5`); sin ella, gateway.
   OJO: `@ai-sdk/anthropic` 4.0.83 pide `@ai-sdk/provider@4.0.30`, que npm no encuentra: 4.0.82 calza con `ai` 7.0.143.
