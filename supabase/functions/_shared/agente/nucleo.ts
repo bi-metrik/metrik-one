@@ -17,10 +17,10 @@ import type { ConfigAgente } from './config.ts';
 import { fechaBogota, mensajeDelTurno, recortarResultado, sistema } from './contexto.ts';
 import { CIERRAN, cierranCon, declaraciones, declaracionesRespaldo } from './herramientas.ts';
 import { fichasDeHerramienta, respuestaFija, temas, bloqueSiempre } from './reglamento.ts';
-import { META, botonesPropuesta, cortarEnPalabra, opcionesDelModelo, renderizar } from './render.ts';
+import { BOTON_LISTA, META, PREFIJO_REVIVIR, botonesPropuesta, cortarEnPalabra, opcionesDelModelo, renderizar } from './render.ts';
 import { respaldoDe, verificar } from './verificador.ts';
 import type {
-  Almacen, ContextoDominio, Dominio, FilaConversacion, Mensaje, Modelo, Parte, Propuesta, Reglamento, Salida, Traza, UsoLlamado,
+  Almacen, ContextoDominio, Dominio, FilaConversacion, Mensaje, Modelo, Parte, Propuesta, Reglamento, Respuesta, Salida, Traza, UsoLlamado,
 } from './tipos.ts';
 
 export interface DepsTurno {
@@ -133,11 +133,17 @@ export async function huellaPropuesta(accion: string, datos: unknown, turnoId: s
  * resumen fijo del código. El cuerpo de botones de Meta va hasta 1024 caracteres: si no cabe, se corta lo de arriba
  * (nunca el resumen, que es lo que se confirma). Pura.
  */
-export function salidaPropuesta(p: Pick<PropuestaGuardada, 'huella' | 'resumen' | 'si' | 'no'>, arriba?: string | null): Salida {
-  const cabe = META.cuerpoBotones - [...p.resumen].length - 1;
+export function salidaPropuesta(p: Pick<PropuestaGuardada, 'huella' | 'resumen' | 'si' | 'no'> & Pick<Propuesta, 'extras'>, arriba?: string | null): Salida {
+  const opciones = botonesPropuesta(p.huella, p.si, p.no, p.extras ?? []);
+  const tope = opciones.length > META.botones ? META.cuerpoLista : META.cuerpoBotones;
+  const cabe = tope - [...p.resumen].length - 1;
   const sinRepetir = arriba ? sinLineasDelResumen(arriba, p.resumen) : '';
   const a = sinRepetir && cabe >= 20 ? cortarEnPalabra(sinRepetir, cabe) : '';
-  return { tipo: 'botones', texto: [a, p.resumen].filter(Boolean).join('\n'), opciones: botonesPropuesta(p.huella, p.si, p.no) };
+  const texto = [a, p.resumen].filter(Boolean).join('\n');
+  // Más de 3 botones (el listado de obras, una partida con varias salidas): lista de Meta.
+  return opciones.length > META.botones
+    ? { tipo: 'lista', texto, boton: BOTON_LISTA, opciones }
+    : { tipo: 'botones', texto, opciones };
 }
 
 const comparable = (s: string) => s.toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '').replace(/[^a-z0-9ñ]+/g, ' ').trim();
@@ -240,7 +246,36 @@ function caido(deps: DepsTurno, e: EntradaTurno): Salida {
 
 // ── El turno del modelo ──────────────────────────────────────────────────────
 
+/**
+ * El turno del modelo. Deja en la traza los mensajes que el modelo vio (el cupo, Anexo 1.4) y, si el dominio no deja
+ * vencer una propuesta en silencio (`pendienteSinConfirmar`, C19), antepone «Tienes … sin confirmar» [Verlos] cuando el
+ * turno dejó atrás la pendiente sin reenviarla ni cubrirla.
+ */
 export async function turnoDelModelo(deps: DepsTurno, e: EntradaTurno): Promise<SalidaTurno> {
+  const d = deps.dominio;
+  const pendiente = d.pendienteSinConfirmar && !e.tras ? vigenteDe(e.filas, d) : null;
+  const r = await turnoDelModeloBase(deps, e);
+  r.traza.mensajes = mensajesDelTurno(e.nuevos, d.quien ?? 'gestion');
+  if (!pendiente || !r.salida) return r;
+  const reenviada = 'opciones' in r.salida && r.salida.opciones.some((o) => o.id.includes(`|${pendiente.huella}|`));
+  const nueva = r.traza.propuesta;
+  if (reenviada || (nueva && d.cubre?.(pendiente, nueva))) return r;
+  const cuanto = d.pendienteSinConfirmar!(pendiente);
+  if (!cuanto) return r;
+  return { ...r, salida: recordatorio(pendiente.huella, cuanto), extras: [r.salida, ...(r.extras ?? [])], traza: { ...r.traza, recordatorio: pendiente.huella } };
+}
+
+/** «Tienes 2 pagos sin confirmar» con [Verlos]: revive esa propuesta sin modelo. Pura. */
+export function recordatorio(huella: string, cuanto: string): Salida {
+  return { tipo: 'botones', texto: `Tienes ${cuanto} sin confirmar.`, opciones: [{ id: `${PREFIJO_REVIVIR}${huella}`, titulo: 'Verlos' }] };
+}
+
+/** Los mensajes del turno que el modelo vio: los entrantes que no son toques. Pura. */
+export function mensajesDelTurno(nuevos: FilaConversacion[], quien: 'gestion' | 'operario'): Array<{ id: string; quien: 'gestion' | 'operario' }> {
+  return nuevos.filter((f) => f.direccion === 'entrante' && f.clase !== 'toque' && f.clase !== 'bot').map((f) => ({ id: f.id, quien }));
+}
+
+async function turnoDelModeloBase(deps: DepsTurno, e: EntradaTurno): Promise<SalidaTurno> {
   const t0 = deps.reloj();
   const { reglamento: r, config: c, dominio: d } = deps;
   const traza: Traza = {
@@ -379,6 +414,13 @@ export async function turnoDelModelo(deps: DepsTurno, e: EntradaTurno): Promise<
         devolver(r.error);
         continue;
       }
+      // Un cierre que arma una propuesta (el listado de obras del operario: tocar la obra ya es la confirmación).
+      if (r.propuesta) {
+        const huella = await huellaPropuesta(r.propuesta.accion, r.propuesta.datos, e.turnoId);
+        const guardada: PropuestaGuardada = { ...r.propuesta, huella, args_modelo: r.propuesta.args ?? { accion: r.propuesta.accion, datos: args } };
+        const encima = [...(e.tras?.lineas ?? []), ...r.salidas.map((x) => x.texto)].filter(Boolean).join('\n') || null;
+        return fin(salidaPropuesta(guardada, encima), { propuesta: guardada, tema: nombre });
+      }
       const [primera, ...resto] = r.salidas;
       if (!primera) return fin(caer(), { error: `${nombre} sin salida` });
       const s1 = fin(conHecho(primera), { tema: nombre, ...(resto.length ? { salidas_extra: resto } : {}) });
@@ -451,7 +493,7 @@ export async function turnoDelModelo(deps: DepsTurno, e: EntradaTurno): Promise<
         return fin(salidaPropuesta(vig, arriba ?? TEXTO_PROPUESTA_PENDIENTE), { tema: 'propuesta', ...(arriba ? {} : { respuesta_fija: 'propuesta_pendiente' }) });
       }
       const huella = await huellaPropuesta(accion, p.propuesta.datos, e.turnoId);
-      const guardada: PropuestaGuardada = { ...p.propuesta, huella, args_modelo: { accion, datos } };
+      const guardada: PropuestaGuardada = { ...p.propuesta, huella, args_modelo: p.propuesta.args ?? { accion, datos } };
       // Tras un hecho, la confirmación va primero y la propuesta debajo, en el mismo mensaje (si no cabe, se corta lo
       // del modelo, no la confirmación ni el resumen).
       const encima = e.tras ? [...e.tras.lineas, arriba].filter(Boolean).join('\n') : arriba;
@@ -519,17 +561,33 @@ export function esSiSolo(texto: string | null | undefined): boolean {
   return t === 'si';
 }
 
+/** Lo que el dominio contestó a un toque (`alTocar`, `trasRechazar`, `vencida`) como salida, con su propuesta nueva. */
+async function salidaDeRespuesta(r: Respuesta, turnoId: string, args?: Record<string, unknown>): Promise<{ salida: Salida; propuesta?: PropuestaGuardada }> {
+  const texto = r.lineas.join('\n');
+  if (r.propuesta) {
+    const huella = await huellaPropuesta(r.propuesta.accion, r.propuesta.datos, turnoId);
+    const nueva: PropuestaGuardada = { ...r.propuesta, huella, args_modelo: r.propuesta.args ?? args ?? { accion: r.propuesta.accion, datos: {} } };
+    return { salida: salidaPropuesta(nueva, texto), propuesta: nueva };
+  }
+  if (r.opciones?.length) {
+    const render = renderizar(texto, r.opciones, { turno: turnoId.slice(0, 8), topeTexto: 1000, final: true });
+    if (render.ok) return { salida: render.salida };
+  }
+  return { salida: { tipo: 'texto', texto } };
+}
+
 export async function toqueDePropuesta(
   deps: Omit<DepsTurno, 'modelo'> & { almacen: Pick<Almacen, 'tomarCandado' | 'soltarCandado'> },
   e: EntradaTurno,
-  toque: { huella: string; si: boolean },
+  toque: { huella: string; si: boolean; alt?: string; elige?: string },
   tipo: 'toque_propuesta' | 'si_escrito' = 'toque_propuesta',
 ): Promise<SalidaTurno> {
   const t0 = deps.reloj();
-  const base: Traza = { tipo, bot: deps.dominio.bot, reglamento: { id: deps.reglamento.id, version: deps.reglamento.version, huella: deps.reglamento.huella } };
+  const d = deps.dominio;
+  const base: Traza = { tipo, bot: d.bot, reglamento: { id: deps.reglamento.id, version: deps.reglamento.version, huella: deps.reglamento.huella } };
   const ps = propuestas(e.filas);
   const esta = ps.find((x) => x.p.huella === toque.huella);
-  const vig = vigenteDe(e.filas, deps.dominio);
+  const vig = vigenteDe(e.filas, d);
   const salida = (s: Salida, ejecucion: Traza['ejecucion'], extra: Partial<Traza> = {}): SalidaTurno =>
     ({ salida: s, traza: { ...base, ...extra, ejecucion, salida: s, ms_herramientas: Math.round(deps.reloj() - t0) } });
 
@@ -542,17 +600,42 @@ export async function toqueDePropuesta(
     return salida({ tipo: 'texto', texto: esta.resultado === 'ejecutada' ? TEXTO_YA_HECHO : respuestaFija(deps.reglamento, 'rf.no_hice_nada') }, { huella: toque.huella, resultado: 'repetida' });
   }
   if (!vig || vig.huella !== toque.huella) {
+    // Un dominio que no deja vencer en silencio (C19): el botón de una que quedó atrás la vuelve a mostrar armada de nuevo.
+    if (d.pendienteSinConfirmar) return await revivir(deps, e, esta.p, base, t0);
     return vig
       ? salida(salidaPropuesta(vig, respuestaFija(deps.reglamento, 'rf.toque_viejo')), { huella: toque.huella, resultado: 'vieja' })
       : salida({ tipo: 'texto', texto: TEXTO_SIN_VIGENTE }, { huella: toque.huella, resultado: 'vieja' });
   }
+  // Un botón que no escribe («Cambiar algo», «Revisar uno a uno»): contesta el dominio, sin modelo.
+  if (toque.alt !== undefined) {
+    if (!d.alTocar || !(vig.extras ?? []).some((x) => x.tipo === 'alt' && x.clave === toque.alt)) {
+      return salida({ tipo: 'texto', texto: TEXTO_SIN_VIGENTE }, { huella: toque.huella, resultado: 'vieja' });
+    }
+    const r = await d.alTocar(toque.alt, vig, e.ctx);
+    const o = await salidaDeRespuesta(r, e.turnoId, vig.args_modelo);
+    return salida(o.salida, { huella: toque.huella, accion: vig.accion, resultado: r.descarta ? 'rechazada' : 'alterna' }, o.propuesta ? { propuesta: o.propuesta } : {});
+  }
+  if (toque.elige !== undefined && !(vig.extras ?? []).some((x) => x.tipo === 'elige' && x.clave === toque.elige)) {
+    return salida({ tipo: 'texto', texto: TEXTO_SIN_VIGENTE }, { huella: toque.huella, resultado: 'vieja' });
+  }
   if (!toque.si) {
+    const sig = d.trasRechazar ? await d.trasRechazar(vig, e.ctx).catch(() => null) : null;
+    if (sig) {
+      const o = await salidaDeRespuesta({ ...sig, lineas: sig.lineas.length ? sig.lineas : [respuestaFija(deps.reglamento, 'rf.no_hice_nada')] }, e.turnoId, vig.args_modelo);
+      return salida(o.salida, { huella: toque.huella, accion: vig.accion, resultado: 'rechazada' }, o.propuesta ? { propuesta: o.propuesta } : {});
+    }
     return salida({ tipo: 'texto', texto: respuestaFija(deps.reglamento, 'rf.no_hice_nada') }, { huella: toque.huella, accion: vig.accion, resultado: 'rechazada' });
   }
-  // La tanda cambió desde que se armó: se vuelve a armar con los mismos datos del modelo y se muestra la de ahora.
-  if (deps.dominio.sigueVigente && !deps.dominio.sigueVigente(vig, e.ctx)) {
+  // Ya no sirve (la tanda cambió, la llegada era de ayer): el dominio dice qué hacer o se vuelve a armar con los mismos
+  // datos del modelo y se muestra la de ahora.
+  if (d.sigueVigente && !d.sigueVigente(vig, e.ctx)) {
+    const v = d.vencida ? await d.vencida(vig, e.ctx).catch(() => null) : null;
+    if (v) {
+      const o = await salidaDeRespuesta(v, e.turnoId, vig.args_modelo);
+      return salida(o.salida, { huella: toque.huella, resultado: 'vieja' }, o.propuesta ? { propuesta: o.propuesta } : {});
+    }
     const a = vig.args_modelo;
-    const p = await deps.dominio.proponer(String(a.accion), (a.datos ?? {}) as Record<string, unknown>, e.ctx);
+    const p = await d.proponer(String(a.accion), (a.datos ?? {}) as Record<string, unknown>, e.ctx);
     if (!p.ok) return salida({ tipo: 'texto', texto: TEXTO_SIN_VIGENTE }, { huella: toque.huella, resultado: 'vieja' }, { candados: [{ candado: p.candado, detalle: p.error }] });
     const huella = await huellaPropuesta(String(a.accion), p.propuesta.datos, e.turnoId);
     const nueva: PropuestaGuardada = { ...p.propuesta, huella, args_modelo: a };
@@ -564,21 +647,22 @@ export async function toqueDePropuesta(
     return salida({ tipo: 'texto', texto: TEXTO_YA_HECHO }, { huella: toque.huella, resultado: 'repetida' });
   }
   try {
-    const h = await deps.dominio.ejecutar(vig, e.ctx);
+    const aEjecutar = toque.elige !== undefined ? { ...vig, datos: { ...vig.datos, eleccion: toque.elige } } : vig;
+    const h = await d.ejecutar(aEjecutar, e.ctx);
     const ejecucion = {
       huella: toque.huella, accion: vig.accion, resultado: 'ejecutada' as const, lineas: h.lineas, escrituras: h.escrituras, nombrados: h.nombrados, consumidos: h.consumidos,
     };
     // Lo que ya se puede proponer con lo dicho (abrir un viaje → anotar lo que el comercial ya contó de él).
     let sig: Awaited<ReturnType<NonNullable<Dominio['trasEjecutar']>>> = null;
     try {
-      sig = deps.dominio.trasEjecutar ? await deps.dominio.trasEjecutar(vig, h, toque.huella, e.ctx) : null;
+      sig = d.trasEjecutar ? await d.trasEjecutar(aEjecutar, h, toque.huella, e.ctx) : null;
     } catch (err) {
       console.error('[agente] tras ejecutar:', err);
     }
     if (sig?.propuesta) {
       const p = sig.propuesta;
       const huella = await huellaPropuesta(p.accion, p.datos, e.turnoId);
-      const nueva: PropuestaGuardada = { ...p, huella, args_modelo: { accion: p.accion, datos: { viaje: p.datos.codigo }, origen: 'tras_ejecutar' } };
+      const nueva: PropuestaGuardada = { ...p, huella, args_modelo: p.args ?? { accion: p.accion, datos: { viaje: p.datos.codigo }, origen: 'tras_ejecutar' } };
       return salida(salidaPropuesta(nueva, sig.lineas.join('\n')), { ...ejecucion, lineas: sig.lineas }, { respuesta_fija: 'rf.hecho', propuesta: nueva });
     }
     const lineas = sig?.lineas ?? h.lineas;
@@ -588,6 +672,42 @@ export async function toqueDePropuesta(
     await deps.almacen.soltarCandado(clave);
     return salida({ tipo: 'texto', texto: TEXTO_NO_PUDE }, { huella: toque.huella, accion: vig.accion, resultado: 'error' }, { error: String(err).slice(0, 200) });
   }
+}
+
+export const TEXTO_SIGUE_SIN_CONFIRMAR = 'Esto sigue sin confirmar:';
+export const TEXTO_YA_NO_SE_ARMA = 'Eso ya cambió y no lo puedo armar igual. Escríbemelo de nuevo.';
+
+/**
+ * Vuelve a mostrar una propuesta que quedó atrás sin resolverse (C19), armada de nuevo con lo que pidió el modelo y los
+ * datos de ahora (la base manda). Sin modelo. Si la que estaba vigente queda atrás por esto, se recuerda debajo.
+ */
+async function revivir(
+  deps: Omit<DepsTurno, 'modelo'>, e: EntradaTurno, p: PropuestaGuardada, base: Traza, t0: number,
+): Promise<SalidaTurno> {
+  const d = deps.dominio;
+  const vig = vigenteDe(e.filas, d);
+  const fin = (s: Salida, ejecucion: Traza['ejecucion'], extra: Partial<Traza> = {}, extras: Salida[] = []): SalidaTurno =>
+    ({ salida: s, ...(extras.length ? { extras } : {}), traza: { ...base, tipo: 'revivir', ...extra, ejecucion, salida: s, ...(extras.length ? { salidas_extra: extras } : {}), ms_herramientas: Math.round(deps.reloj() - t0) } });
+  if (vig?.huella === p.huella) return fin(salidaPropuesta(vig, TEXTO_SIGUE_SIN_CONFIRMAR), { huella: p.huella, resultado: 'revivida' });
+  const a = p.args_modelo;
+  const r = await d.proponer(String(a.accion), (a.datos ?? {}) as Record<string, unknown>, e.ctx);
+  if (!r.ok) return fin({ tipo: 'texto', texto: TEXTO_YA_NO_SE_ARMA }, { huella: p.huella, resultado: 'vieja' }, { candados: [{ candado: r.candado, detalle: r.error }] });
+  const huella = await huellaPropuesta(String(a.accion), r.propuesta.datos, e.turnoId);
+  const nueva: PropuestaGuardada = { ...r.propuesta, huella, args_modelo: a };
+  const cuanto = vig && !d.cubre?.(vig, nueva) ? d.pendienteSinConfirmar?.(vig) : null;
+  return fin(salidaPropuesta(nueva, TEXTO_SIGUE_SIN_CONFIRMAR), { huella: p.huella, resultado: 'revivida' }, { propuesta: nueva, ...(cuanto ? { recordatorio: vig!.huella } : {}) }, cuanto ? [recordatorio(vig!.huella, `también ${cuanto}`)] : []);
+}
+
+/** El [Verlos] de un recordatorio: revive esa propuesta. Sin modelo. */
+export async function verPendiente(deps: Omit<DepsTurno, 'modelo'>, e: EntradaTurno, huella: string): Promise<SalidaTurno> {
+  const t0 = deps.reloj();
+  const base: Traza = { tipo: 'revivir', bot: deps.dominio.bot, reglamento: { id: deps.reglamento.id, version: deps.reglamento.version, huella: deps.reglamento.huella } };
+  const esta = propuestas(e.filas).find((x) => x.p.huella === huella);
+  const s = (texto: string, resultado: 'vieja' | 'repetida'): SalidaTurno =>
+    ({ salida: { tipo: 'texto', texto }, traza: { ...base, ejecucion: { huella, resultado }, salida: { tipo: 'texto', texto }, ms_herramientas: Math.round(deps.reloj() - t0) } });
+  if (!esta) return s(TEXTO_SIN_VIGENTE, 'vieja');
+  if (esta.resultado) return s(esta.resultado === 'ejecutada' ? TEXTO_YA_HECHO : respuestaFija(deps.reglamento, 'rf.no_hice_nada'), 'repetida');
+  return await revivir(deps, e, esta.p, base, t0);
 }
 
 /**

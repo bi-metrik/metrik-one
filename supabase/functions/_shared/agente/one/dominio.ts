@@ -397,6 +397,12 @@ export const VENTANA_ADJUNTOS_ONE_MS = 5000;
 const PREPARAR_DESDE_MS = 60 * 60 * 1000;
 const PREPARAR_MAX = 4;
 
+/** sha256 del archivo en hexadecimal (C22: el mismo pantallazo dos veces). */
+export async function huellaArchivo(bytes: Uint8Array): Promise<string> {
+  const d = await crypto.subtle.digest('SHA-256', bytes as Uint8Array<ArrayBuffer>);
+  return [...new Uint8Array(d)].map((b) => b.toString(16).padStart(2, '0')).join('');
+}
+
 const sinLectura = (motivo: string): LecturaAdjunto => ({ legible: false, monto: null, fecha: null, comercio: null, nit: null, descripcion: null, motivo });
 
 export function dominioOne(puerto: PuertoOne, o: { rol: string; ahora?: () => number; lector?: Lector | null }): Dominio {
@@ -421,6 +427,7 @@ export function dominioOne(puerto: PuertoOne, o: { rol: string; ahora?: () => nu
     const m: MediaFila = {
       ...f.media, mime: f.media.mime ?? archivo.mime, ref: ref ?? null,
       lectura: lectura ?? sinLectura(o.lector ? 'el lector no respondió' : 'sin lector'),
+      huella: await huellaArchivo(archivo.bytes),
     };
     await puerto.anotarMedia(f.id, m);
     return m;

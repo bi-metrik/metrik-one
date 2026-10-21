@@ -33,7 +33,8 @@ import {
 import { ctxCardumen } from '../_shared/cardumen/telemetria.ts';
 import { isVeTrigger, hasOpenVeChat, startVeChat, continueVeChat, VE_APAGADO, cerrarVeChatPorApagado } from '../_shared/venezuela/index.ts';
 import { resolverCustomerTrigger, hasOpenCustomerChat, startCustomerChat, continueCustomerChat } from '../_shared/customer/index.ts';
-import { checkInboundLimit, logMessage } from '../_shared/wa-rate-limit.ts';
+import { INBOUND_LIMIT_GESTION_OBRAS, TEXTO_TOPE_GESTION, checkInboundLimit, logMessage } from '../_shared/wa-rate-limit.ts';
+import { modoObras } from '../_shared/agente/config.ts';
 import { enviarAvisoInterno } from '../_shared/wa-alerta.ts';
 import { aplicarStatuses } from '../_shared/wa-envios.ts';
 import type { StatusEntrega } from '../_shared/wa-envios.ts';
@@ -571,10 +572,12 @@ async function processMessage(message: IncomingMessage): Promise<void> {
   }
 
   // 3. Rate limit check (D97)
-  const allowed = await checkInboundLimit(supabase, message.phone);
+  // Gestión en modo obras (C20): tope más alto y un texto que no regaña (la tanda ya quedó en la conversación).
+  const gestionObras = modoObras(user.modulos?.bot_conversacional) && !user.collaborator_id && ['owner', 'admin'].includes(user.role);
+  const allowed = await checkInboundLimit(supabase, message.phone, gestionObras ? INBOUND_LIMIT_GESTION_OBRAS : undefined);
   if (!allowed) {
-    await sendTextMessage(message.phone,
-      'Vas muy rápido, dame un momento. Espera unos minutos y volvemos.');
+    await sendTextMessage(message.phone, gestionObras ? TEXTO_TOPE_GESTION
+      : 'Vas muy rápido, dame un momento. Espera unos minutos y volvemos.');
     return;
   }
 

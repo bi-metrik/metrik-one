@@ -16,7 +16,7 @@
 
 import type { ConfigAgente } from './config.ts';
 import type { DepsTurno, SalidaTurno } from './nucleo.ts';
-import { esSiSolo, seguirTrasToque, toqueDePropuesta, turnoDelModelo, vigenteDe } from './nucleo.ts';
+import { esSiSolo, seguirTrasToque, toqueDePropuesta, turnoDelModelo, verPendiente, vigenteDe } from './nucleo.ts';
 import { leerToque } from './render.ts';
 import { respuestaFija } from './reglamento.ts';
 import type { Almacen, ContextoDominio, FilaConversacion, Mensajero, Traza } from './tipos.ts';
@@ -102,7 +102,7 @@ async function conEscribiendo<T>(d: DepsCola, wamid: string | null | undefined, 
  * El toque (o el «sí» escrito) ejecutado y, si el dominio pide seguir, el turno del modelo que sigue al hecho. Una sola
  * salida. El cupo cuenta el turno del modelo.
  */
-async function toqueYSeguir(d: DepsCola, e: Parameters<typeof toqueDePropuesta>[1], t: { huella: string; si: boolean }, tipo: 'toque_propuesta' | 'si_escrito'): Promise<SalidaTurno> {
+async function toqueYSeguir(d: DepsCola, e: Parameters<typeof toqueDePropuesta>[1], t: { huella: string; si: boolean; alt?: string; elige?: string }, tipo: 'toque_propuesta' | 'si_escrito'): Promise<SalidaTurno> {
   const wamid = e.nuevos.at(-1)?.wa_message_id;
   return await conEscribiendo(d, wamid, async () => {
     const r = await toqueDePropuesta(d, e, t, tipo);
@@ -134,11 +134,17 @@ export async function unTurno(d: DepsCola, ventana: { esperado?: boolean } = {})
   const ctx = contexto(d, filas);
 
   // 1) Un toque de una propuesta: código, sin modelo. Va solo (lo que llegó después espera su turno).
-  const toque = pend.find((f) => f.clase === 'toque' && leerToque(f.toque_id)?.clase === 'propuesta');
+  const toque = pend.find((f) => f.clase === 'toque' && ['propuesta', 'revivir'].includes(leerToque(f.toque_id)?.clase ?? ''));
   if (toque) {
     const antes = pend.slice(0, pend.indexOf(toque) + 1).filter((f) => f === toque || f.clase === 'reenvio');
-    const t = leerToque(toque.toque_id) as { clase: 'propuesta'; huella: string; si: boolean };
-    const r = await toqueYSeguir(d, { turnoId, filas, nuevos: [toque], ctx }, t, 'toque_propuesta');
+    const t = leerToque(toque.toque_id)!;
+    // [Verlos] de un recordatorio (C19): revive esa propuesta, sin modelo.
+    if (t.clase === 'revivir') {
+      const r = await verPendiente(d, { turnoId, filas, nuevos: [toque], ctx }, t.huella);
+      await enviarYCerrar(d, turnoId, antes, r, 'agente.revivir');
+      return true;
+    }
+    const r = await toqueYSeguir(d, { turnoId, filas, nuevos: [toque], ctx }, t as { huella: string; si: boolean; alt?: string; elige?: string }, 'toque_propuesta');
     await enviarYCerrar(d, turnoId, antes, r, 'agente.toque');
     return true;
   }
@@ -162,6 +168,14 @@ export async function unTurno(d: DepsCola, ventana: { esperado?: boolean } = {})
   if (vig && delEquipo.length === 1 && delEquipo[0].clase === 'escrito' && esSiSolo(delEquipo[0].texto)) {
     const r = await toqueYSeguir(d, { turnoId, filas, nuevos: delEquipo, ctx }, { huella: vig.huella, si: true }, 'si_escrito');
     await enviarYCerrar(d, turnoId, pend, r, 'agente.si');
+    return true;
+  }
+
+  // 3b) Lo que el código contesta por el rol, sin modelo ni cupo (el pantallazo de un operario).
+  const fija = d.dominio.sinModelo?.(delEquipo, ctx);
+  if (fija) {
+    const r: SalidaTurno = { salida: fija.salida, traza: { tipo: 'sin_turno', bot: d.dominio.bot, respuesta_fija: fija.clave, salida: fija.salida } };
+    await enviarYCerrar(d, turnoId, pend, r, 'agente.fija');
     return true;
   }
 

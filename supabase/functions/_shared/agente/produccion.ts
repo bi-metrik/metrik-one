@@ -112,8 +112,20 @@ export async function cargarReglamento(supabase: SupabaseClient, workspaceId: st
 
 // ── Cupo ─────────────────────────────────────────────────────────────────────
 
-export function cupoSupabase(supabase: SupabaseClient, almacen: Almacen): PuertosCupo {
+export function cupoSupabase(supabase: SupabaseClient, almacen: Almacen, o: { mensajes?: boolean } = {}): PuertosCupo {
   return {
+    // Con `mensajes` (modo obras, cupo del contrato en mensajes, Anexo 1.4): `bot_mensajes_mes`.
+    ...(o.mensajes ? {
+      async mensajesDelMes(workspaceId: string, mes: string) {
+        const { data, error } = await supabase.rpc('bot_mensajes_mes', { p_workspace_id: workspaceId, p_mes: `${mes}-01` });
+        if (error) {
+          console.error('[agente] no se pudieron contar los mensajes del mes:', error.message);
+          return null;
+        }
+        const d = (data ?? {}) as { total?: number; gestion?: number; operario?: number };
+        return { total: Number(d.total ?? 0), gestion: Number(d.gestion ?? 0), operario: Number(d.operario ?? 0) };
+      },
+    } : {}),
     async turnosDelMes(workspaceId, mes) {
       const { data, error } = await supabase.rpc('bot_uso_mes', { p_workspace_id: workspaceId, p_mes: `${mes}-01` });
       if (error) {
