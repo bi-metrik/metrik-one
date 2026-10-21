@@ -9,6 +9,7 @@ import {
   Handshake,
   Timer,
   Radar,
+  Armchair,
   BarChart3,
   QrCode,
   LayoutDashboard,
@@ -74,6 +75,8 @@ interface WorkspaceModules {
   ferreteria?: boolean
   /** Radar SECOP: convocatorias públicas cruzadas contra los temas del cliente (/radar). */
   radar_secop?: boolean
+  /** Funciones con cupo y mapa del salón (/funciones). Ver `src/lib/funciones/`. */
+  funciones?: boolean
   conciliacion?: boolean
   /** FAB global "Registrar pago" (opt-in por workspace). Ver fab-pago-actions.ts. */
   fab_registrar_pago?: boolean
@@ -328,6 +331,12 @@ const RADAR_NAV_ITEMS = [
   { href: '/radar', label: 'Radar SECOP', icon: Radar, roles: ['owner', 'admin', 'supervisor', 'operator', 'read_only'] },
 ]
 
+// Funciones: cupo, reservas y mapa del salón (extra inferior, activable por flag). Todos los roles ven; la base
+// decide quién escribe (las RPC de `funcion_*` exigen rol que edita).
+const FUNCIONES_NAV_ITEMS = [
+  { href: '/funciones', label: 'Funciones', icon: Armchair, roles: ['owner', 'admin', 'supervisor', 'operator', 'read_only'] },
+]
+
 // Compartidos (siempre visibles)
 const SHARED_NAV_ITEMS = [
   { href: '/directorio', label: 'Directorio', icon: Users, roles: ['owner', 'admin', 'supervisor'] },
@@ -567,8 +576,9 @@ export default function AppShell({
   const certItems = moduloGate(vitrinaGate(mod.cert_qr ? filterByRole(CERT_NAV_ITEMS, role) : []))
   const ferreteriaItems = moduloGate(vitrinaGate(mod.ferreteria ? filterByRole(FERRETERIA_NAV_ITEMS, role) : []))
   const radarItems = moduloGate(vitrinaGate(mod.radar_secop ? filterByRole(RADAR_NAV_ITEMS, role) : []))
+  const funcionesItems = moduloGate(vitrinaGate(mod.funciones ? filterByRole(FUNCIONES_NAV_ITEMS, role) : []))
   const solicitudesItems = moduloGate(vitrinaGate(mod.wa_customer_bot ? filterByRole(SOLICITUDES_NAV_ITEMS, role) : []))
-  const extrasItems = [...solicitudesItems, ...validaItems, ...validaApiItems, ...certItems, ...ferreteriaItems, ...radarItems]
+  const extrasItems = [...solicitudesItems, ...validaItems, ...validaApiItems, ...certItems, ...ferreteriaItems, ...radarItems, ...funcionesItems]
   // Caja: Movimientos (si business) + Cuentas de cobro (si cobros_recurrentes). Roles ya filtrados.
   const cajaItems = moduloGate(vitrinaGate([
     ...(mod.business && roleAllowed(CAJA_MOVIMIENTOS_ITEM.href, CAJA_MOVIMIENTOS_ITEM.roles) ? [CAJA_MOVIMIENTOS_ITEM] : []),
@@ -588,7 +598,7 @@ export default function AppShell({
         : (mod.calidad_llamadas ? '/calidad' : (mod.valida_api ? '/valida-api' : (mod.ferreteria ? '/ferreteria' : (mod.radar_secop ? '/radar' : '/mi-negocio'))))))
 
   // Mobile tab bar: split into primary (visible) and secondary (in "Más" panel)
-  const allMobileItems = [...businessItems, ...cajaItems, ...contabilidadItems, ...complianceItems, ...validacionItems, ...calidadItems, ...sharedItems, ...solicitudesItems, ...validaItems, ...validaApiItems, ...certItems, ...ferreteriaItems, ...radarItems, ...workflowsItems]
+  const allMobileItems = [...businessItems, ...cajaItems, ...contabilidadItems, ...complianceItems, ...validacionItems, ...calidadItems, ...sharedItems, ...solicitudesItems, ...validaItems, ...validaApiItems, ...certItems, ...ferreteriaItems, ...radarItems, ...funcionesItems, ...workflowsItems]
   const primaryHrefs = modoVitrina
     // Valida más las vitrinas que abre ESTE espacio (un CDA, ninguna): la misma regla del menú.
     ? ['/valida', ...vitrinasDelEspacio(mod)]
