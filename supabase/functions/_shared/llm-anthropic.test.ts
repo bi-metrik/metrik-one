@@ -415,3 +415,13 @@ describe('JSON sin esquema: sin cercas de código (RUT)', () => {
     expect((await res.json()).candidates[0].content.parts[0].text).toBe('```js\nx\n```');
   });
 });
+
+describe('falloDeCuenta: la cuenta de Anthropic no atiende → respaldo en Gemini', () => {
+  it('sin crédito (400), llave inválida (401) o sin permiso (403) sí; un 400 del pedido no', async () => {
+    const { falloDeCuenta } = await import('./llm-anthropic')
+    expect(falloDeCuenta(400, 'anthropic 400: Your credit balance is too low to access the Anthropic API. Please go to Plans & Billing')).toBe(true)
+    expect(falloDeCuenta(401, 'invalid x-api-key')).toBe(true)
+    expect(falloDeCuenta(403, 'forbidden')).toBe(true)
+    expect(falloDeCuenta(400, 'messages.2: tool_use ids were found without tool_result')).toBe(false)
+  })
+})

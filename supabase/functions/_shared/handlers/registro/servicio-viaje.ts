@@ -78,6 +78,15 @@ async function pendientesDelNegocio(supabase: Db, workspaceId: string, negocioId
 }
 
 /**
+ * ¿El negocio es de una línea con servicios del viaje y tiene servicios por pagar? Lo usa el modo agente de ONE
+ * (`agente/one/puerto-supabase.ts`): ese pago no se registra como gasto suelto, va por los servicios del viaje.
+ */
+export async function tieneServiciosPorPagar(supabase: Db, workspaceId: string, negocioId: string): Promise<boolean> {
+  if (!activo(await configDeLinea(supabase, negocioId))) return false;
+  return (await pendientesDelNegocio(supabase, workspaceId, negocioId)).length > 0;
+}
+
+/**
  * Si el negocio es de una línea con servicios del viaje y tiene servicios por pagar, toma el gasto
  * y pregunta de qué servicio es. Devuelve `true` si lo tomó (quien llama no sigue).
  */

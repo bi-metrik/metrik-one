@@ -50,7 +50,7 @@ import { atenderEscrito } from '../_shared/wa-interprete.ts';
 import { aLetraLatina } from '../_shared/texto-latino.ts';
 import { primeraVezDelMensaje } from '../_shared/wa-mensaje-unico.ts';
 import { completarTexto, registrarEntrante } from '../_shared/wa-conversacion.ts';
-import { atenderConAgente } from '../_shared/wa-agente.ts';
+import { atenderConAgente, atenderConAgenteOne } from '../_shared/wa-agente.ts';
 import type { BotSession, HandlerContext, IncomingMessage, Intent, WaUser } from '../_shared/types.ts';
 import { OPERATOR_ALLOWED_INTENTS, CONTADOR_ALLOWED_INTENTS, READ_ONLY_ALLOWED_INTENTS } from '../_shared/types.ts';
 
@@ -565,6 +565,13 @@ async function processMessage(message: IncomingMessage): Promise<void> {
       'Vas muy rápido, dame un momento. Espera unos minutos y volvemos.');
     return;
   }
+
+  // 3.2 Modo agente de ONE (2026-10-21, por defecto en todo workspace sin la bandeja; ver `_shared/wa-agente.ts`): el
+  //     núcleo conversacional con el dominio ONE (gastos con soporte, actividades, contactos, consultas). Nada se escribe
+  //     sin el toque sobre un resumen con código · empresa — nombre. Va después de las puertas del módulo, la suscripción
+  //     y el tope. Si no puede correr, devuelve false y sigue el bot de siempre (transcripción, parser, máquina de
+  //     estados). Apagado: `bot_conversacional.agente = false` en el workspace, o el secreto `AGENTE_ONE=off`.
+  if (await atenderConAgenteOne(supabase, user, message)) return;
 
   // 3.5 Transcribe audio before any processing
   if (message.type === 'audio' && message.audio_id) {

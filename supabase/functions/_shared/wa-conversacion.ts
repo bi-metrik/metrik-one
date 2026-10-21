@@ -16,6 +16,8 @@
 
 import type { IncomingMessage, WaUser } from './types.ts';
 import { LLAVE_BANDEJA } from './wa-bandeja-reglas.ts';
+import { agenteOnePorDefecto, dominioDelAgente } from './agente/config.ts';
+import { entornoPorDefecto } from './llm-anthropic.ts';
 
 // deno-lint-ignore no-explicit-any
 type Cliente = { from: (tabla: string) => any; rpc: (fn: string, args: Record<string, unknown>) => any }; // eslint-disable-line @typescript-eslint/no-explicit-any
@@ -41,17 +43,23 @@ export function soloDigitos(phone: string | null | undefined): string {
 }
 
 /**
- * ¿Se guarda la conversación de este remitente? Solo en los workspaces con la bandeja de solicitudes encendida o con el
- * bot conversacional configurado (cualquier objeto en `config_extra.bot_conversacional`, prendido o no): es la superficie
- * donde el núcleo conversacional va a leerla. El resto del bot (gastos de SOENA, etc.) no deja texto completo aquí.
+ * ¿Se guarda la conversación de este remitente? En los workspaces con la bandeja de solicitudes encendida, con el bot
+ * conversacional configurado (cualquier objeto en `config_extra.bot_conversacional`, prendido o no), y desde el
+ * 2026-10-21 donde atiende el modo agente de ONE (`dominioDelAgente` = 'one', por defecto en todo workspace): es la
+ * superficie donde el núcleo conversacional lee la conversación. Con el agente apagado (`agente: false`, o
+ * `AGENTE_ONE=off` sin dominio explícito) no deja texto completo aquí.
  */
-export function conversacionActiva(user: Pick<WaUser, 'modulos'> | null | undefined): boolean {
+export function conversacionActiva(
+  user: Pick<WaUser, 'modulos'> & Partial<Pick<WaUser, 'phone'>> | null | undefined,
+  o: { agenteOnePorDefecto?: boolean } = { agenteOnePorDefecto: agenteOnePorDefecto(entornoPorDefecto('AGENTE_ONE')) },
+): boolean {
   const m = user?.modulos;
   if (!m) return false;
   const modules = (m.modules ?? null) as Record<string, unknown> | null;
   if (modules && modules[LLAVE_BANDEJA] === true) return true;
   const bot = m.bot_conversacional;
-  return !!bot && typeof bot === 'object' && !Array.isArray(bot);
+  if (!!bot && typeof bot === 'object' && !Array.isArray(bot)) return true;
+  return dominioDelAgente(bot, user?.phone, { porDefecto: o.agenteOnePorDefecto !== false }) === 'one';
 }
 
 /** Qué es lo que llegó. Un reenvío gana a todo: lo reenviado es dato del cliente, aunque sea un audio. */
@@ -107,8 +115,8 @@ export function filaEntrante(user: Pick<WaUser, 'workspace_id'>, message: Incomi
  * Guarda lo que llegó. Un duplicado de Meta (mismo wamid) choca con el índice único y no se repite. Nunca lanza.
  * Devuelve si se guardó una fila nueva.
  */
-export async function registrarEntrante(supabase: Cliente, user: WaUser, message: IncomingMessage): Promise<boolean> {
-  if (!conversacionActiva(user)) return false;
+export async function registrarEntrante(supabase: Cliente, user: WaUser, message: IncomingMessage, o?: { agenteOnePorDefecto?: boolean }): Promise<boolean> {
+  if (!conversacionActiva(user, o)) return false;
   try {
     const { error } = await supabase.from(TABLA_CONVERSACION).insert(filaEntrante(user, message));
     if (!error) return true;

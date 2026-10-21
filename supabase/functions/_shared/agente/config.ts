@@ -140,3 +140,53 @@ export function agenteActivo(botConversacional: unknown, phone?: string | null):
   const t = digitos(phone);
   return t.length > 0 && lista.includes(t);
 }
+
+// ── Qué dominio atiende a este remitente (2026-10-21) ────────────────────────
+//
+// Mauricio, 2026-10-20: «necesito el modo agente en todo ONE, también para termotech». Desde aquí el núcleo corre en
+// TODO workspace con el dominio de ONE (gastos con su soporte, actividades, contactos, consultas de negocios), sin
+// configurar nada. Trappvel conserva su bandeja.
+//
+//   · `bot_conversacional.agente === true` (el encendido de siempre, solo Trappvel hoy) → `bandeja`, con su lista de
+//     teléfonos: el que no está en la lista sigue por el camino de hoy, igual que antes de este cambio.
+//   · `bot_conversacional.agente === false` → apagado: todo el workspace por el camino de hoy (el interruptor).
+//   · cualquier otra cosa (sin `bot_conversacional`, o sin la llave `agente`) → `one`. Si hay `agente_telefonos`, solo
+//     esos teléfonos.
+//   · `bot_conversacional.dominio` ('one' | 'bandeja') manda sobre lo anterior cuando `agente` no es `false`.
+//   · `porDefecto: false` (el secreto `AGENTE_ONE=off` de las edge functions) apaga el `one` por defecto en todos los
+//     workspaces sin tocar la base; los que lo piden explícito (`dominio: 'one'`) siguen.
+
+export type DominioAgente = 'bandeja' | 'one';
+
+/** ¿Qué dominio atiende a este remitente? `null` = el camino de hoy (wa-parse + máquina de estados). Pura. */
+export function dominioDelAgente(botConversacional: unknown, phone?: string | null, o: { porDefecto?: boolean } = {}): DominioAgente | null {
+  const b = obj(botConversacional);
+  if (b?.agente === false) return null;
+  const explicito = b?.dominio === 'one' || b?.dominio === 'bandeja' ? b.dominio as DominioAgente : null;
+  const dominio: DominioAgente | null = explicito ?? (b?.agente === true ? 'bandeja' : o.porDefecto === false ? null : 'one');
+  if (!dominio) return null;
+  const lista = leerTelefonos(b?.agente_telefonos);
+  if (lista === null) return dominio;
+  const t = digitos(phone);
+  return t.length > 0 && lista.includes(t) ? dominio : null;
+}
+
+/** El secreto `AGENTE_ONE` de las edge functions: solo `off` (o `0`, `false`, `no`) apaga el dominio ONE por defecto. Pura. */
+export function agenteOnePorDefecto(valor: string | null | undefined): boolean {
+  return !['off', '0', 'false', 'no', 'apagado'].includes(String(valor ?? '').trim().toLowerCase());
+}
+
+/**
+ * El corte del dominio ONE si el workspace no fija `agente_config.corte_ms`: 5 s. Con Claude Haiku 5.5 de principal y
+ * Gemini de respaldo (Mauricio, 2026-10-20: «siempre el respaldo de gemini»), un corte de 2,5 s pondría a Gemini a
+ * competir en casi un tercio de los llamados (medido con Haiku en el arnés de la bandeja el 2026-10-20: p50 2,2 s y p90
+ * 4,3 s por llamado) y contestaría muchos de ellos: Gemini dejaría de ser solo el respaldo.
+ */
+export const CORTE_ONE_MS = 5000;
+
+/** La configuración del dominio ONE: la de siempre, con el corte de ONE si el workspace no fija el suyo. Pura. */
+export function leerConfigOne(botConversacional: unknown): ConfigAgente {
+  const c = leerConfigAgente(botConversacional);
+  const propio = obj(obj(botConversacional)?.agente_config)?.corte_ms;
+  return typeof propio === 'number' ? c : { ...c, corteMs: CORTE_ONE_MS };
+}

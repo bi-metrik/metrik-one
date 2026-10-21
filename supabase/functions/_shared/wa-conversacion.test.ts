@@ -49,11 +49,20 @@ describe('conversacionActiva: solo bandeja o bot conversacional configurado', ()
   it('bot conversacional configurado, aunque esté apagado', () => {
     expect(conversacionActiva(usuario({ modules: {}, bot_conversacional: { hibrido: false } }))).toBe(true)
   })
-  it('sin ninguno de los dos (gastos de siempre): no se guarda', () => {
-    expect(conversacionActiva(usuario({ modules: { business: true } }))).toBe(false)
-    expect(conversacionActiva(usuario({ modules: { bandeja_solicitudes_wa: 'true' } }))).toBe(false)
-    expect(conversacionActiva(usuario({ modules: {}, bot_conversacional: true }))).toBe(false)
+  it('con el modo agente de ONE apagado (AGENTE_ONE=off) y sin ninguno de los dos: no se guarda', () => {
+    const apagado = { agenteOnePorDefecto: false }
+    expect(conversacionActiva(usuario({ modules: { business: true } }), apagado)).toBe(false)
+    expect(conversacionActiva(usuario({ modules: { bandeja_solicitudes_wa: 'true' } }), apagado)).toBe(false)
+    expect(conversacionActiva(usuario({ modules: {}, bot_conversacional: true }), apagado)).toBe(false)
     expect(conversacionActiva(usuario(null))).toBe(false)
+  })
+  it('modo agente de ONE (por defecto encendido, 2026-10-21): se guarda en todo workspace salvo con agente: false', () => {
+    expect(conversacionActiva(usuario({ modules: { business: true } }))).toBe(true)
+    expect(conversacionActiva(usuario({ modules: { business: true } }), { agenteOnePorDefecto: true })).toBe(true)
+    // `bot_conversacional` con objeto ya guardaba (aunque diga agente: false): no cambia.
+    expect(conversacionActiva(usuario({ modules: {}, bot_conversacional: { agente: false } }))).toBe(true)
+    // Lista de teléfonos para ONE: solo esos.
+    expect(conversacionActiva(usuario({ modules: {} }), { agenteOnePorDefecto: true })).toBe(true)
   })
 })
 
@@ -98,10 +107,15 @@ describe('filaEntrante', () => {
 })
 
 describe('registrarEntrante', () => {
-  it('fuera de la bandeja no hace ni una consulta', async () => {
+  it('con el agente apagado (agente: false) y sin la bandeja no hace ni una consulta', async () => {
     const f = clienteFalso()
-    expect(await registrarEntrante(f.cliente, usuario({ modules: {} }), msg({ text: 'hola' }))).toBe(false)
+    expect(await registrarEntrante(f.cliente, usuario({ modules: {}, bot_conversacional: undefined, aviso_datos_bot: null }), msg({ text: 'hola' }), { agenteOnePorDefecto: false })).toBe(false)
     expect(f.inserts).toHaveLength(0)
+  })
+  it('con el modo agente de ONE (por defecto) inserta la fila', async () => {
+    const f = clienteFalso()
+    expect(await registrarEntrante(f.cliente, usuario({ modules: {} }), msg({ text: 'hola', wa_message_id: 'w' }))).toBe(true)
+    expect(f.inserts).toHaveLength(1)
   })
   it('con la bandeja inserta la fila', async () => {
     const f = clienteFalso()

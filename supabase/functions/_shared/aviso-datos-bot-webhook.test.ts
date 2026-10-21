@@ -137,7 +137,8 @@ function crearDb() {
     from,
     rpc: async (nombre: string) => {
       if (nombre !== 'wa_identify_user') escrituras.push(`rpc:${nombre}`);
-      return { data: nombre === 'wa_identify_user' ? [] : null, error: null };
+      // `tomar_candado`: el candado por remitente del modo agente de ONE (sin él no corre el turno).
+      return { data: nombre === 'wa_identify_user' ? [] : nombre === 'tomar_candado' ? true : null, error: null };
     },
     storage: {
       from: (bucket: string) => ({
@@ -169,12 +170,13 @@ beforeAll(async () => {
   await import('../wa-webhook/index.ts');
 }, 60_000);
 
-function workspace(aviso: boolean, extra: { bandeja?: boolean; interprete?: boolean } = {}) {
+function workspace(aviso: boolean, extra: { bandeja?: boolean; interprete?: boolean; sinAgenteOne?: boolean } = {}) {
   return {
     id: WS,
     subscription_status: 'trial',
     modules: { business: true, ...(extra.bandeja ? { bandeja_solicitudes_wa: true } : {}) },
-    bot_conversacional: extra.interprete ? { activo: true } : null,
+    // El modo agente de ONE corre por defecto (2026-10-21); `agente: false` lo apaga para probar el bot de siempre.
+    bot_conversacional: extra.interprete ? { activo: true, agente: false } : extra.sinAgenteOne ? { agente: false } : null,
     aviso_datos_bot: aviso ? { activo: true, documento_version_id: DOC_ID, texto: 'Acepta el aviso de datos para usar el bot.', version: 'v1' } : null,
   };
 }
@@ -245,7 +247,13 @@ describe('control: con el aviso APAGADO cada camino si llega a su tercero', () =
     expect(gemini.length).toBeGreaterThan(0);
   });
 
-  it('escrito sin interprete: el parser (wa-parse) llama a Gemini', async () => {
+  it('escrito sin interprete ni agente: el parser (wa-parse) llama a Gemini', async () => {
+    preparar(workspace(false, { sinAgenteOne: true }));
+    await llega(texto('cuanto llevo gastado este mes en el negocio de la casa azul'));
+    expect(gemini.length).toBeGreaterThan(0);
+  });
+
+  it('escrito con el modo agente de ONE (por defecto): el núcleo llama al modelo', async () => {
     preparar(workspace(false));
     await llega(texto('cuanto llevo gastado este mes en el negocio de la casa azul'));
     expect(gemini.length).toBeGreaterThan(0);
