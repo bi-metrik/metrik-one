@@ -25,7 +25,6 @@ import type { ConfigAgente } from '../config.ts';
 import { esSiSolo, propuestaVigente, toqueDePropuesta, turnoDelModelo } from '../nucleo.ts';
 import type { DepsTurno, SalidaTurno } from '../nucleo.ts';
 import { leerToque, cortarEnPalabra } from '../render.ts';
-import { respuestaFija } from '../reglamento.ts';
 import type { PrecioModelo } from '../uso.ts';
 import type { ContextoDominio, Modelo, Reglamento, Salida } from '../tipos.ts';
 import {

@@ -20,11 +20,18 @@ const pedido = (o: Partial<PedidoModelo> = {}): PedidoModelo => ({
   ...o,
 })
 
+type Cuerpo = {
+  model: string; tool_choice: unknown; thinking: unknown; output_config?: unknown
+  system: Array<{ cache_control?: unknown }>
+  tools: Array<{ name: string; strict?: boolean; cache_control?: unknown; input_schema: { additionalProperties?: boolean } }>
+}
+const cuerpo = (p: PedidoModelo, o: Parameters<typeof cuerpoAnthropic>[1]) => cuerpoAnthropic(p, o) as unknown as Cuerpo
+
 const op = { modelo: 'claude-haiku-5-5', esfuerzo: 'low' as const, pensamiento: false, maxSalida: 1024, estricto: true }
 
 describe('cuerpo del pedido', () => {
   it('sin pensamiento: herramienta forzada (any), thinking apagado, caché en sistema y última herramienta, strict, sin temperature', () => {
-    const c = cuerpoAnthropic(pedido(), op) as Record<string, any>
+    const c = cuerpo(pedido(), op)
     expect(c.model).toBe('claude-haiku-5-5')
     expect(c.tool_choice).toEqual({ type: 'any' })
     expect(c.thinking).toEqual({ type: 'disabled' })
@@ -32,18 +39,18 @@ describe('cuerpo del pedido', () => {
     expect(c.system[0].cache_control).toEqual({ type: 'ephemeral' })
     expect(c.tools.at(-1).cache_control).toEqual({ type: 'ephemeral' })
     expect(c.tools[0].cache_control).toBeUndefined()
-    expect(c.tools.every((t: any) => t.strict === true)).toBe(true)
+    expect(c.tools.every((t) => t.strict === true)).toBe(true)
     expect(c.tools[1].input_schema.additionalProperties).toBe(false)
     expect(JSON.stringify(c)).not.toMatch(/temperature|top_p|top_k/)
   })
   it('con pensamiento: tool_choice auto y thinking adaptativo', () => {
-    const c = cuerpoAnthropic(pedido(), { ...op, pensamiento: true }) as Record<string, any>
+    const c = cuerpo(pedido(), { ...op, pensamiento: true })
     expect(c.tool_choice).toEqual({ type: 'auto' })
     expect(c.thinking).toEqual({ type: 'adaptive' })
   })
   it('en el último llamado solo van las permitidas (una sola: tool_choice tool)', () => {
-    const c = cuerpoAnthropic(pedido({ permitidas: ['responder'] }), op) as Record<string, any>
-    expect(c.tools.map((t: any) => t.name)).toEqual(['responder'])
+    const c = cuerpo(pedido({ permitidas: ['responder'] }), op)
+    expect(c.tools.map((t) => t.name)).toEqual(['responder'])
     expect(c.tool_choice).toEqual({ type: 'tool', name: 'responder' })
   })
   it('los ids de herramienta viajan reales y el tool_result va primero en el mensaje del usuario', () => {
@@ -85,7 +92,7 @@ describe('el llamado', () => {
     expect(urls.every((u) => u === 'https://api.anthropic.com/v1/messages')).toBe(true)
   })
   it('si la API rechaza el esfuerzo con 400, reintenta una vez sin output_config', async () => {
-    const cuerpos: any[] = []
+    const cuerpos: Array<{ output_config?: unknown }> = []
     const f = (async (_u: string, i: RequestInit) => {
       const c = JSON.parse(String(i.body))
       cuerpos.push(c)

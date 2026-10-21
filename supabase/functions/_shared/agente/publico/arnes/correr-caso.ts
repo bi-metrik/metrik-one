@@ -34,9 +34,10 @@ export async function correrUnaVez(caso: CasoPublico, o: OpcionesCorrida): Promi
   }
   const reglamento = await reglamentoSabor(caso.fichas ? caso.fichas(REGLAMENTO_SABOR) : REGLAMENTO_SABOR);
   const base = o.modelo ? o.modelo() : modeloGuionado(caso.guion ?? []);
-  let e!: EscenarioPublico;
-  const modelo = caso.envolver ? caso.envolver(base, () => e) : base;
-  e = await escenarioPublico({
+  // El envoltorio necesita el escenario, que se arma con el modelo ya envuelto: se lo pasa por referencia.
+  const ref: { e?: EscenarioPublico } = {};
+  const modelo = caso.envolver ? caso.envolver(base, () => ref.e!) : base;
+  const e = ref.e = await escenarioPublico({
     modelo, canal: caso.canal, config: caso.config, reglamento, vivo: o.vivo, fallarHerramienta: caso.fallarHerramienta ? () => true : undefined,
     precios: o.modelo ? (o.precios ?? []) : PRECIOS_GUION,
   });
