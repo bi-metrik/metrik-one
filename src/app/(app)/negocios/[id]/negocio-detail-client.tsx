@@ -2502,6 +2502,11 @@ interface Props {
   /** Igual que `banner`, pero al final de la columna principal (bloques de Valida). */
   extras?: React.ReactNode
   /**
+   * La obra (cierre, facturas y llegadas), armada en el servidor con `modules.obras`. Va antes de
+   * la Actividad. `null` en los workspaces sin obras.
+   */
+  obra?: React.ReactNode
+  /**
    * Negocio de viaje (Trappvel): el viaje con su IATA en el encabezado y la solicitud, el
    * perfil y las cotizaciones abiertas en el panel. Ausente en toda otra línea (R6).
    */
@@ -2553,6 +2558,7 @@ export default function NegocioDetailClient({
   errorMsg,
   banner,
   extras,
+  obra,
   viaje = null,
   centro,
   cotActualId = null,
@@ -2994,6 +3000,8 @@ export default function NegocioDetailClient({
             negocioCerrado={negocioCerrado}
           />
         )}
+
+        {obra}
 
         {/* ── Activity log ── */}
         <div className="rounded-xl border border-border bg-card">
