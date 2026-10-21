@@ -44,6 +44,7 @@ import {
   decidirAvisoAlCliente,
   ESTADOS_QUE_SALIERON,
 } from '../_shared/aviso-mismo-hecho.ts';
+import { lineaCasoHtml, valorDelCampo } from '../_shared/datos-opcionales-copy.ts';
 
 const FROM = 'MéTRIK ONE <noreply@metrikone.co>';
 
@@ -1203,21 +1204,20 @@ async function datosOpcionales(
       .in('bloque_configs.slug', slugs)
     : { data: [] };
 
-  const camposPorSlug = new Map<string, Record<string, unknown>>();
+  // Se guarda el `data` entero: un bloque de formulario trae `campos[campo].value`,
+  // pero otros (el radicado de certificación de SOENA) guardan el dato plano. La regla
+  // vive en `_shared/datos-opcionales-copy.ts`.
+  const dataPorSlug = new Map<string, unknown>();
   for (const fila of filas ?? []) {
     const slug = (fila?.bloque_configs as { slug?: string } | null)?.slug;
     if (!slug) continue;
-    const data = (fila?.data ?? {}) as { campos?: Record<string, unknown> };
-    camposPorSlug.set(slug, data.campos ?? {});
+    dataPorSlug.set(slug, fila?.data ?? {});
   }
 
   for (const clave of declaradas) {
     const decl = camposCopy[clave];
-    const bag = camposPorSlug.get(decl.bloque_slug);
-    const valores = (decl.campos ?? []).map((c) => {
-      const v = (bag?.[c] as { value?: unknown } | undefined)?.value;
-      return typeof v === 'string' ? v.trim() : '';
-    });
+    const data = dataPorSlug.get(decl.bloque_slug);
+    const valores = (decl.campos ?? []).map((c) => valorDelCampo(data, c));
     // El PRIMER campo declarado es el ancla: sin el no hay nada que nombrar. Los demas
     // se suman si estan. Con ["marca","linea","modelo"] eso da "TOYOTA RAV4" cuando
     // falta el modelo, y nada cuando falta la marca.
@@ -1420,7 +1420,7 @@ async function enviarAlCliente(
     <p style="margin:0 0 6px;font-size:11px;letter-spacing:.08em;text-transform:uppercase;color:#6B7280">${escapar(marca)}</p>
     <h1 style="margin:0 0 14px;font-size:19px;line-height:1.35">${escapar(titulo)}</h1>
     ${cuerpoHtml}
-    ${negocio.codigo ? `<p style="margin:0 0 22px;font-size:13px;color:#6B7280">Radicado: <strong style="color:#1A1A1A">${escapar(negocio.codigo)}</strong></p>` : ''}
+    ${lineaCasoHtml(negocio.codigo, escapar)}
     <p style="margin:24px 0 0;font-size:11px;color:#9CA3AF;border-top:1px solid #E5E7EB;padding-top:14px">
       Recibes este aviso porque ${escapar(marca)} gestiona un tramite a tu nombre.${
         replyTo ? ' Si tienes dudas o no quieres recibir mas avisos, responde a este correo.' : ''
