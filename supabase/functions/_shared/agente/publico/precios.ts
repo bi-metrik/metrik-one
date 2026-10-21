@@ -26,7 +26,7 @@ export function preciosSinHerramienta(texto: string, fuentes: ReadonlyArray<stri
   const fuera: string[] = [];
   for (const m of texto.matchAll(RE_PLATA)) {
     const v = m[1] !== undefined ? valor(m[1], m[2]) : valor(m[3], m[4]);
-    if (v && !conocidos.has(v) && !conocidos.has(String(Number(v)))) fuera.push(m[0].trim());
+    if (v && !conocidos.has(v) && !conocidos.has(String(Number(v)))) fuera.push(m[0].trim().replace(/[.,]+$/, ''));
   }
   return [...new Set(fuera)];
 }

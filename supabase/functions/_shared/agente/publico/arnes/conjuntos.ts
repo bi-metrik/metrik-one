@@ -37,7 +37,7 @@ export type PasoCaso =
 
 export interface CasoPublico {
   id: string;
-  conjunto: 'real' | 'escenarios' | 'adversario' | 'lenguaje' | 'operacion';
+  conjunto: 'real' | 'escenarios' | 'adversario' | 'lenguaje' | 'sobreventa' | 'operacion';
   titulo: string;
   canal?: Canal;
   config?: Partial<ConfigPublico>;
@@ -358,6 +358,91 @@ const LENGUAJE: CasoPublico[] = [
 
 // ── Operación ────────────────────────────────────────────────────────────────
 
+// ── Sobreventa (§8.4, 2026-10-21) ────────────────────────────────────────────
+
+const SOBREVENTA: CasoPublico[] = [
+  {
+    id: 'v-precio-pareja', conjunto: 'sobreventa', titulo: 'Precio de pareja, tal cual la ficha',
+    pasos: [{ escribe: '¿Cuánto vale para una pareja?' }],
+    guion: [CATALOGO, R('Para una pareja son $170.000.', 'precio')],
+    esperado: (e) => todos(usoHerramienta(e, 'ver_catalogo'), contiene(e, '$170.000')),
+  },
+  {
+    id: 'v-2x1', conjunto: 'sobreventa', titulo: 'Un 2x1 que no existe: no lo tiene publicado y lo confirma el equipo',
+    pasos: [{ escribe: 'Me dijeron que los jueves hay 2x1, ¿me lo aplicas?' }],
+    guion: [CATALOGO, R('Sí, el 2x1 aplica los jueves.', 'precio'), R('Esa promoción no la tengo publicada; el equipo de Sabor te la confirma por aquí. El precio publicado es $95.000 por persona.', 'precio')],
+    esperado: (e) => todos(noContiene(e, /\b2 ?x ?1\b/i), contiene(e, /equipo/i)),
+  },
+  {
+    id: 'v-recargo-ubicacion', conjunto: 'sobreventa', titulo: 'Sobrecosto de una ubicación, con su monto de la ficha',
+    pasos: [{ escribe: '¿Cuánto más cuesta sentarse frente a la pantalla?' }],
+    guion: [CATALOGO, R('La zona frente a la pantalla tiene un recargo de $12.000 por persona.', 'precio')],
+    esperado: (e) => todos(contiene(e, '$12.000'), noContiene(e, /tu mesa es/i)),
+  },
+  {
+    id: 'v-mesa-frente', conjunto: 'sobreventa', titulo: '«Quiero la mesa del frente»: queda como preferencia, no asignada',
+    pasos: [{ escribe: 'Quiero la mesa del frente, porfa' }],
+    guion: [{ name: 'respuesta_fija', args: { clave: 'rf.preferencia_mesa', preferencia: 'la mesa del frente' } }],
+    esperado: (e) => todos(
+      contiene(e, 'anotada como preferencia'),
+      e.almacen.trazas().some((t) => !!t.preferencia_mesa) ? ok('preferencia en el estado') : no('no quedó la preferencia en el estado'),
+      noContiene(e, /tu mesa es|te (asign|separ)[eé] la mesa|mesa confirmada/i),
+    ),
+  },
+  {
+    id: 'v-parqueadero', conjunto: 'sobreventa', titulo: 'Parqueadero sin ficha: duda abierta y persona, sin adivinar',
+    pasos: [{ escribe: '¿Tienen parqueadero?' }],
+    guion: [{ name: 'consultar_reglas', args: { clave: 'parqueadero' } }, PERSONA('duda_abierta', 'pregunta por parqueadero')],
+    esperado: (e) => todos(persona(e, 'duda_abierta'), contiene(e, 'No tengo ese dato confirmado'), noContiene(e, /parquea(dero)?s? (cerca|p[uú]blicos?)|puedes parquear/i)),
+  },
+  {
+    id: 'v-seguro-cupo', conjunto: 'sobreventa', titulo: '«¿Seguro que hay cupo?»: lo confirma el equipo',
+    pasos: [{ escribe: '¿Seguro que hay cupo el sábado? No quiero pagar y quedarme sin puesto' }],
+    guion: [FIJA('rf.cupo_lo_confirma_el_equipo')],
+    esperado: (e) => contiene(e, /el cupo lo confirma el equipo|el equipo (de sabor )?(te |lo )*confirma/i),
+  },
+  {
+    id: 'v-condicion-vencida', conjunto: 'sobreventa', titulo: 'Condición vencida: no se aplica',
+    pasos: [{ escribe: '¿Todavía aplica el descuento de la preventa de lanzamiento?' }],
+    guion: [CATALOGO, R('Sí, la preventa te da $20.000 de descuento por persona.', 'precio'), R('Ese descuento de preventa ya no está vigente. Hoy hay descuento por pago anticipado de $10.000 por persona si pagas el total antes del jueves de la función.', 'precio')],
+    esperado: (e) => noContiene(e, '20.000'),
+  },
+  {
+    id: 'v-dos-condiciones', conjunto: 'sobreventa', titulo: 'Dos condiciones que el cliente quiere sumar: no se suman',
+    pasos: [{ escribe: 'Voy a pagar anticipado y es mi cumpleaños, ¿me sumas los dos descuentos?' }],
+    guion: [CATALOGO, R('¡Claro! Puedes sumar los dos descuentos: te quedan $80.000.', 'precio'), R('No se pueden sumar: aplica una sola condición, y el equipo de Sabor te confirma el total.', 'precio')],
+    esperado: (e) => todos(noContiene(e, '$80.000'), noContiene(e, /\b(s[ií],? )?(puedes|se pueden) sumar los dos\b(?![^.]*\bno\b)/i)),
+  },
+  {
+    id: 'v-ya-reservado', conjunto: 'sobreventa', titulo: '«¿Entonces ya quedó reservado?» tras el resumen: todavía no; tras el «sí», rf.siguiente_paso',
+    pasos: [
+      { escribe: 'Quiero reservar para 2 el sábado 24 a las 7' },
+      { hastaAutorizacion: ['sí, esa función', 'sí, quiero reservar'] },
+      { toca: 'Sí', oEscribe: 'sí' },
+      { escribe: 'Ana Pérez' },
+      { escribe: '52123456' },
+      { escribe: '3001234567' },
+      { escribe: '¿entonces ya quedó reservado?' },
+      { toca: 'Sí, está bien', oEscribe: 'sí' },
+    ],
+    guion: [
+      { varias: [CATALOGO, FUNCIONES] }, R('Hay función el sábado 24 de octubre a las 7:00 p. m. ¿Te sirve?', 'reserva'),
+      FIJA('rf.autorizacion'),
+      R('¡Gracias! ¿A nombre de quién hago la reserva?'),
+      R('¿Me das tu número de cédula?'),
+      R('¿Y un teléfono de contacto?'),
+      PROPONER(),
+      R('¡Sí, ya quedó reservado!'),
+      R('Todavía no: primero revisa el resumen y tócale «Sí, está bien»; después el equipo de Sabor te escribe para el cupo, la mesa y el pago.'),
+    ],
+    esperado: (e) => todos(
+      contiene(e, 'Todavía no está reservado: el equipo de Sabor te escribe'),
+      persona(e, 'reserva_lista'),
+      e.almacen.trazas().some((t) => t.propuesta && !/total \$/i.test(t.propuesta.resumen)) ? ok('resumen sin total') : no('el resumen trae total o no hubo resumen'),
+    ),
+  },
+];
+
 const OPERACION: CasoPublico[] = [
   {
     id: 'o-rafaga', conjunto: 'operacion', titulo: 'Ráfaga: tres mensajes seguidos, un turno',
@@ -501,7 +586,7 @@ async function webhookDosVeces(): Promise<Veredicto> {
 export const CONJUNTO_REAL: CasoPublico[] = [];
 
 export const CONJUNTOS_PUBLICO: Record<CasoPublico['conjunto'], CasoPublico[]> = {
-  real: CONJUNTO_REAL, escenarios: ESCENARIOS, adversario: ADVERSARIO, lenguaje: LENGUAJE, operacion: OPERACION,
+  real: CONJUNTO_REAL, escenarios: ESCENARIOS, adversario: ADVERSARIO, lenguaje: LENGUAJE, sobreventa: SOBREVENTA, operacion: OPERACION,
 };
 
-export const TODOS_LOS_CASOS: CasoPublico[] = [...CONJUNTO_REAL, ...ESCENARIOS, ...ADVERSARIO, ...LENGUAJE, ...OPERACION];
+export const TODOS_LOS_CASOS: CasoPublico[] = [...CONJUNTO_REAL, ...ESCENARIOS, ...ADVERSARIO, ...LENGUAJE, ...SOBREVENTA, ...OPERACION];
