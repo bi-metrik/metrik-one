@@ -250,7 +250,7 @@ export function prepararImportacion(
         union = 'llave'
       } else if (espacio !== 'proveedor') {
         const nombres: NombreConocido[] = delEspacio.map((c) => ({ tipo: espacio, clave: c.clave, clavePerfil: c.clave_perfil, nombre: c.nombre, ciudad: c.ciudad }))
-        const r = reconocer({ tipo: espacio, clave: claveDeFoto(espacio, nombre, ubic.ciudad), nombre, ciudad: ubic.ciudad }, nombres)
+        const r = reconocer({ tipo: espacio, clave: claveDeFoto(espacio, nombre, ubic.ciudad), nombre, ciudad: ubic.ciudad }, nombres, { preguntarDudas: true })
         if (r.tipo === 'seguro' || r.tipo === 'exacto') {
           clave = r.clavePerfil
           union = 'mismas palabras'
@@ -273,7 +273,7 @@ export function prepararImportacion(
       const previos: NombreConocido[] = proveedores
         .filter((p) => p.espacio === espacio)
         .map((p) => ({ tipo: espacio, clave: p.clave, clavePerfil: p.clave, nombre: p.nombre, ciudad: p.ciudad }))
-      const r = reconocer({ tipo: espacio, clave, nombre, ciudad: ubic.ciudad }, previos)
+      const r = reconocer({ tipo: espacio, clave, nombre, ciudad: ubic.ciudad }, previos, { preguntarDudas: true })
       if (r.tipo === 'seguro') {
         nota(rec, nombre, `Parece el mismo que ${proveedores.find((p) => p.clave === r.clavePerfil)?.origenRef} en Airtable: no se importa`, true)
         continue

@@ -28,7 +28,7 @@ export function avisarCambioDeFotos(): void {
  * La llave de la tarjeta: la del nombre y, si la línea fijó su ficha, también su id. Sin ficha fijada,
  * la de un servicio escrito a mano va aparte (`~a`): no toma ficha por el nombre (2026-10-20).
  */
-const sufijo = (x: { proveedorId?: string | null; aMano?: boolean }) => (x.proveedorId ? `#${x.proveedorId}` : x.aMano ? '~a' : '')
+const sufijo = (x: { proveedorId?: string | null; aMano?: boolean; descartada?: string | null }) => (x.proveedorId ? `#${x.proveedorId}` : x.aMano ? '~a' : x.descartada ? `!${x.descartada}` : '')
 const llave = (p: PedidoFoto) => `${p.tipo}:${claveDeFoto(p.tipo, p.nombre, p.ciudad)}${sufijo(p)}`
 
 interface Leido {
@@ -36,6 +36,10 @@ interface Leido {
   duda: DudaVista | null
   /** La ficha del proveedor con sus tarifarios (aviso de vigencia). */
   proveedor: ProveedorDeTarjeta | null
+  /** De qué ficha son las fotos (brief del 2026-10-21, punto 5). */
+  fotosDe: { nombre: string; ciudad: string | null; deshacer: boolean } | null
+  /** El nombre se parece a varias fichas: no se asoció; va a «Por clasificar». */
+  porClasificar: number
 }
 
 interface Estado {
@@ -57,10 +61,13 @@ const Ctx = createContext<Contexto | null>(null)
 export function FotosEnTarjetas({
   children,
   leer = fotosParaTarjetas,
+  destino = null,
 }: {
   children: ReactNode
   /** Inyectable para verla con datos de muestra. */
-  leer?: (pedidos: PedidoFoto[]) => Promise<FotosDeTarjetas>
+  leer?: (pedidos: PedidoFoto[], opciones?: { destino?: string | null }) => Promise<FotosDeTarjetas>
+  /** El destino del viaje: la ciudad con que se compara un nombre que llegó sin ciudad (2026-10-21). */
+  destino?: string | null
 }) {
   const [estado, setEstado] = useState<Estado>({ disponible: null, editable: false, leidos: {} })
   const pedidos = useRef(new Map<string, { pedido: PedidoFoto; usos: number }>())
@@ -75,7 +82,7 @@ export function FotosEnTarjetas({
       if (faltan.length === 0) return
       for (const [k] of faltan) pedidas.current.add(k)
       try {
-        const r = await leer(faltan.map(([, v]) => v.pedido))
+        const r = await leer(faltan.map(([, v]) => v.pedido), { destino })
         if (!r.ok) {
           disponible.current = false
           setEstado((e) => ({ ...e, disponible: false }))
@@ -87,7 +94,7 @@ export function FotosEnTarjetas({
           const leidos = { ...e.leidos }
           for (const [k] of faltan) {
             const t = porLlave.get(k)
-            leidos[k] = { elemento: t?.elemento ?? null, duda: t?.duda ?? null, proveedor: t?.proveedor ?? null }
+            leidos[k] = { elemento: t?.elemento ?? null, duda: t?.duda ?? null, proveedor: t?.proveedor ?? null, fotosDe: t?.fotosDe ?? null, porClasificar: t?.porClasificar ?? 0 }
           }
           return { disponible: true, editable: r.editable, leidos }
         })
@@ -96,7 +103,7 @@ export function FotosEnTarjetas({
         for (const [k] of faltan) pedidas.current.delete(k)
       }
     },
-    [leer],
+    [leer, destino],
   )
 
   // Las tarjetas que aparecen en el mismo render se piden juntas.
@@ -126,7 +133,10 @@ export function FotosEnTarjetas({
   }, [])
 
   const poner = useCallback((p: PedidoFoto, e: ElementoVista | null) => {
-    setEstado((s) => ({ ...s, leidos: { ...s.leidos, [llave(p)]: { elemento: e, duda: null, proveedor: s.leidos[llave(p)]?.proveedor ?? null } } }))
+    setEstado((s) => {
+      const antes = s.leidos[llave(p)]
+      return { ...s, leidos: { ...s.leidos, [llave(p)]: { elemento: e, duda: null, proveedor: antes?.proveedor ?? null, fotosDe: antes?.fotosDe ?? null, porClasificar: antes?.porClasificar ?? 0 } } }
+    })
   }, [])
 
   const valor = useMemo(() => ({ estado, registrar, poner }), [estado, registrar, poner])
@@ -143,6 +153,10 @@ export interface FotoDeBiblioteca {
   duda: DudaVista | null
   /** La ficha del proveedor con sus tarifarios; `null` sin ficha (o sin leer). */
   proveedor: ProveedorDeTarjeta | null
+  /** «Fotos de: <ficha> · <ciudad>» (y si se ofrece «No es este»). */
+  fotosDe: { nombre: string; ciudad: string | null; deshacer: boolean } | null
+  /** Se parece a varias fichas: sin fotos de biblioteca hasta clasificarlo en Proveedores. */
+  porClasificar: number
   /** Lo que quedó después de un cambio (subir, contestar la duda): se pinta ya. */
   poner: (e: ElementoVista | null) => void
 }
@@ -155,11 +169,12 @@ export function useFotoDeBiblioteca(pedido: PedidoFoto | null): FotoDeBiblioteca
   const ciudad = pedido?.ciudad ?? null
   const proveedorId = pedido?.proveedorId ?? null
   const aMano = pedido?.aMano === true
+  const descartada = pedido?.descartada ?? null
   const registrar = ctx?.registrar
   useEffect(() => {
     if (!registrar || !tipo || !nombre) return
-    return registrar({ tipo, nombre, ciudad, ...(proveedorId ? { proveedorId } : {}), ...(aMano ? { aMano } : {}) })
-  }, [registrar, tipo, nombre, ciudad, proveedorId, aMano])
+    return registrar({ tipo, nombre, ciudad, ...(proveedorId ? { proveedorId } : {}), ...(aMano ? { aMano } : {}), ...(descartada ? { descartada } : {}) })
+  }, [registrar, tipo, nombre, ciudad, proveedorId, aMano, descartada])
   if (!ctx || !pedido || !pedido.nombre) return null
   const leido = ctx.estado.leidos[llave(pedido)]
   return {
@@ -168,6 +183,8 @@ export function useFotoDeBiblioteca(pedido: PedidoFoto | null): FotoDeBiblioteca
     elemento: leido ? leido.elemento : undefined,
     duda: leido?.duda ?? null,
     proveedor: leido?.proveedor ?? null,
+    fotosDe: leido?.fotosDe ?? null,
+    porClasificar: leido?.porClasificar ?? 0,
     poner: (e) => ctx.poner(pedido, e),
   }
 }

@@ -24,6 +24,7 @@ import { casillaIva, ivaDeLinea, pctDeIva } from '@/lib/cotizaciones/iva-costo'
 import { pedidoDeLinea } from '@/lib/cotizaciones/proveedor-de-linea'
 import { objetivo, type ObjetivoFoto } from '@/lib/fotos/clave'
 import { leerConocidos, resolverPedidos } from '@/lib/fotos/perfiles-db'
+import { leerViajeDelNegocio } from '@/lib/cotizaciones/viaje-negocio'
 import { tienePropuestaHtml } from '@/lib/pdf/motor-html'
 import { recalcularTotales } from './cotizacion-actions'
 
@@ -57,6 +58,7 @@ const NO_DISPONIBLE: EstadoIvaCostos = { disponible: false, encendida: false, po
 interface FilaCot {
   id: string
   estado: string
+  negocio_id?: string | null
   costos_con_iva?: boolean | null
   viajero_residente?: boolean | null
 }
@@ -82,7 +84,7 @@ async function aplicar(cotizacionId: string, cambio: { encendida?: boolean; viaj
 
   const { data: cotData, error: eCot } = await db
     .from('cotizaciones')
-    .select('id, estado, costos_con_iva, viajero_residente')
+    .select('id, estado, negocio_id, costos_con_iva, viajero_residente')
     .eq('workspace_id', workspaceId)
     .eq('id', cotizacionId)
     .maybeSingle()
@@ -125,12 +127,14 @@ async function aplicar(cotizacionId: string, cambio: { encendida?: boolean; viaj
   }
   // 2 · Las demás: el mismo pedido de la tarjeta, reconocido sin escribir.
   const pedidos = new Map<string, ObjetivoFoto>()
+  const descartadas = new Map<string, string>()
   for (const i of items) {
     if (fijadas.includes(i)) continue
     const p = pedidoDeLinea({ nombre: i.nombre, grupo: i.grupo, tarifa_pax: i.tarifa_pax })
     // Escrito a mano: el nombre del servicio no es un proveedor (2026-10-20). Sin ficha fijada, no declara.
     const o = p && !p.aMano ? objetivo(p.tipo, p.nombre, p.ciudad) : null
     if (o) pedidos.set(i.id, o)
+    if (o && p?.descartada) descartadas.set(i.id, p.descartada)
   }
   // La ficha reconocida por nombre que se guarda en la línea (solo con la columna y en borrador).
   const reconocidas: { itemId: string; fichaId: string }[] = []
@@ -138,7 +142,9 @@ async function aplicar(cotizacionId: string, cambio: { encendida?: boolean; viaj
     const leidos = await leerConocidos(db, workspaceId)
     if (leidos.ok) {
       const unicos = [...new Map([...pedidos.values()].map((o) => [`${o.tipo}:${o.clave}`, o])).values()]
-      const resueltos = await resolverPedidos(db, workspaceId, staffId ?? null, unicos, leidos.conocidos, { escribir: false })
+      // Un nombre sin ciudad se compara con el destino del viaje (brief del 2026-10-21, punto 5).
+      const { viaje } = await leerViajeDelNegocio(db, cot.negocio_id ?? null)
+      const resueltos = await resolverPedidos(db, workspaceId, staffId ?? null, unicos, leidos.conocidos, { escribir: false, ciudadDelViaje: viaje.destino ?? null })
       const perfilDe = new Map(resueltos.map((r) => [`${r.pedido.tipo}:${r.pedido.clave}`, r.perfil]))
       const claves = [...new Set(resueltos.flatMap((r) => (r.perfil ? [r.perfil.clave] : [])))]
       if (claves.length > 0) {
@@ -146,6 +152,8 @@ async function aplicar(cotizacionId: string, cambio: { encendida?: boolean; viaj
         const porClave = new Map(((fichas ?? []) as { id: string; tipo: string; clave: string; nombre: string; iva_declarado: boolean | null }[]).map((f) => [`${f.tipo}:${f.clave}`, f]))
         for (const [itemId, o] of pedidos) {
           const perfil = perfilDe.get(`${o.tipo}:${o.clave}`)
+          // «No es este» en la tarjeta: esa ficha no vuelve sola a la línea.
+          if (perfil && descartadas.get(itemId) === perfil.clave) continue
           const ficha = perfil ? porClave.get(`${perfil.tipo}:${perfil.clave}`) : undefined
           if (!ficha) continue
           declara.set(itemId, { nombre: ficha.nombre, iva: ficha.iva_declarado === true })

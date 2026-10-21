@@ -234,14 +234,14 @@ export async function crearProveedor(entrada: { nombre: string; tipoProveedor: s
     const leidos = await leerConocidos(ctx.db, ctx.workspaceId)
     if (!leidos.ok) return { ok: false, error: leidos.mensaje }
     if (!entrada.forzar) {
-      const [mirar] = await resolverPedidos(ctx.db, ctx.workspaceId, ctx.staffId, [o], leidos.conocidos, { escribir: false })
+      const [mirar] = await resolverPedidos(ctx.db, ctx.workspaceId, ctx.staffId, [o], leidos.conocidos, { escribir: false, preguntarDudas: true })
       if (mirar?.duda) {
         const id = await porClave(mirar.duda.clave, espacio)
         return { ok: true, duda: { id, nombre: mirar.duda.nombre, ciudad: mirar.duda.ciudad } }
       }
       if (mirar?.perfil && mirar.perfil.clave !== clave) {
         // El mismo con otro nombre: se guarda el alias y se abre el que ya estaba.
-        await resolverPedidos(ctx.db, ctx.workspaceId, ctx.staffId, [o], leidos.conocidos, { escribir: true })
+        await resolverPedidos(ctx.db, ctx.workspaceId, ctx.staffId, [o], leidos.conocidos, { escribir: true, preguntarDudas: true })
         const id = await porClave(mirar.perfil.clave, espacio)
         if (id) return { ok: true, id, yaExistia: true }
       }

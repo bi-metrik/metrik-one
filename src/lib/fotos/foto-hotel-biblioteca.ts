@@ -11,6 +11,7 @@ import 'server-only'
  * y la foto se guarda en la opción, como antes.
  */
 import { hotelesDeItems, type ItemConLectura } from '@/lib/cotizaciones/detalle-viaje'
+import { lineaEscritaAMano } from '@/lib/cotizaciones/proveedor-de-linea'
 import { bytesDeDataUrl } from '@/lib/cotizaciones/imagen-captura'
 import { tienePropuestaHtml } from '@/lib/pdf/motor-html'
 import { revisarAutorizacion } from './autorizacion'
@@ -78,7 +79,11 @@ export async function fotoDeHotelABiblioteca(a: {
   if (!partes || !/^image\/(jpeg|png|webp)$/.test(partes.mime)) return { ok: false, mensaje: 'Ese archivo no es una foto. Usa un JPG o un PNG.' }
   const leidos = await leerConocidos(a.supabase, a.workspaceId)
   if (!leidos.ok) return { ok: false, mensaje: leidos.mensaje }
-  const [r] = await resolverPedidos(a.supabase, a.workspaceId, a.staffId ?? null, [o], leidos.conocidos, { escribir: true })
+  // Un hotel escrito a mano NUNCA crea ficha, tampoco al subirle una foto (brief del 2026-10-21,
+  // punto 5): con una ficha que ya existe, la foto va a ella; si no, a la opción (`null`).
+  const aMano = lineaEscritaAMano(a.item)
+  const [r] = await resolverPedidos(a.supabase, a.workspaceId, a.staffId ?? null, [o], leidos.conocidos, { escribir: !aMano })
+  if (aMano && (!r?.perfil || r.como === 'nuevo')) return null
   if (!r?.perfil) return { ok: false, mensaje: `Primero dinos si es el mismo hotel que «${r?.duda?.nombre ?? ''}».` }
   const g = await ponerFotoPropia({
     supabase: a.supabase,

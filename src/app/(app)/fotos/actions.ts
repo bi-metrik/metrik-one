@@ -45,13 +45,18 @@ export interface PedidoFoto {
    * crea perfil ni ficha, y sin ficha fijada no se le toma una por el nombre.
    */
   aMano?: boolean
+  /** La ficha que la persona dijo que no es («No es este», `PedidoDeLinea.descartada`): su llave. */
+  descartada?: string
 }
 
 export type HotelesYTours =
   | { ok: true; elementos: ElementoVista[]; editable: boolean }
   | { ok: false; error: string }
 
-export type ResultadoElemento = { ok: true; elemento: ElementoVista | null } | { ok: false; error: string }
+export type ResultadoElemento =
+  | { ok: true; elemento: ElementoVista | null }
+  /** `A_MANO`: una línea escrita a mano sin ficha conocida; la foto va a la opción, no crea ficha. */
+  | { ok: false; error: string; codigo?: 'A_MANO' }
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type Cliente = any
@@ -144,6 +149,15 @@ export interface FotoDeTarjeta {
   proveedorId?: string
   /** La pidió la tarjeta de un servicio escrito a mano (`PedidoFoto.aMano`): sin ficha por el nombre. */
   aMano?: true
+  /** La pidió una línea que descartó una ficha (`PedidoFoto.descartada`): su llave. */
+  descartada?: string
+  /**
+   * De qué ficha son las fotos que se ven (brief del 2026-10-21, punto 5): «Fotos de: <ficha> ·
+   * <ciudad>». `deshacer` = se asoció sola (por el nombre) y la tarjeta ofrece «No es este».
+   */
+  fotosDe?: { nombre: string; ciudad: string | null; deshacer: boolean } | null
+  /** El nombre se parece a varias fichas (o a una de otra ciudad): no se asoció; va a «Por clasificar». */
+  porClasificar?: number
 }
 
 export type FotosDeTarjetas = { ok: true; tarjetas: FotoDeTarjeta[]; editable: boolean } | { ok: false; error: string }
@@ -155,30 +169,41 @@ export type FotosDeTarjetas = { ok: true; tarjetas: FotoDeTarjeta[]; editable: b
  * pregunta. Sin propuesta de viaje en el espacio, o sin la migración, `ok: false`: la tarjeta queda
  * como antes.
  */
-export async function fotosParaTarjetas(pedidos: PedidoFoto[]): Promise<FotosDeTarjetas> {
+export async function fotosParaTarjetas(pedidos: PedidoFoto[], opciones?: { destino?: string | null } | null): Promise<FotosDeTarjetas> {
   const ctx = await contexto(false)
   if ('error' in ctx) return { ok: false, error: ctx.error as string }
   const lista = Array.isArray(pedidos) ? pedidos.slice(0, TOPE_PEDIDOS_TARJETAS) : []
+  const ciudadDelViaje = typeof opciones?.destino === 'string' && opciones.destino.trim() ? opciones.destino.trim().slice(0, 120) : null
+  const idFijado = (p: PedidoFoto) => (p && typeof p === 'object' && typeof p.proveedorId === 'string' && UUID.test(p.proveedorId) ? p.proveedorId : null)
+  const descartadaDe = (p: PedidoFoto) => (p && typeof p === 'object' && typeof p.descartada === 'string' && p.descartada ? p.descartada.slice(0, 300) : null)
   const objetivos = sinRepetir(lista.map(objetivoDelPedido))
-  // Las líneas con ficha fijada: su aviso sale de esa ficha (por id), no del nombre.
+  // Las líneas con ficha fijada: sus fotos y su aviso salen de ESA ficha (por id), no del nombre
+  // (brief del 2026-10-21, punto 2: la línea nace con las fotos de la ficha).
   const fijados = lista.flatMap((p) => {
     const o = objetivoDelPedido(p)
-    const id = p && typeof p === 'object' && typeof p.proveedorId === 'string' && UUID.test(p.proveedorId) ? p.proveedorId : null
+    const id = idFijado(p)
     return o && id ? [{ o, id }] : []
   })
   const leidos = await leerConocidos(ctx.db, ctx.workspaceId)
   if (!leidos.ok) return { ok: false, error: leidos.mensaje }
   const c = leidos.conocidos
   // Un servicio escrito a mano no crea ficha por sí solo (brief del 2026-10-20, punto 2): solo se
-  // escribe lo que nombra al menos una línea leída de un pantallazo.
-  const llaveDe = (o: ObjetivoFoto) => `${o.tipo}:${o.clave}`
+  // escribe lo que nombra al menos una línea leída de un pantallazo sin ficha fijada ni descartada.
+  const llaveDe = (o: Pick<ObjetivoFoto, 'tipo' | 'clave'>) => `${o.tipo}:${o.clave}`
   const deLectura = new Set(lista.flatMap((p) => {
     const o = objetivoDelPedido(p)
-    return o && !(p && typeof p === 'object' && p.aMano === true) ? [llaveDe(o)] : []
+    return o && !(p && typeof p === 'object' && p.aMano === true) && !idFijado(p) && !descartadaDe(p) ? [llaveDe(o)] : []
   }))
   const soloAMano = (o: ObjetivoFoto) => !deLectura.has(llaveDe(o))
-  const resueltos = await resolverPedidos(ctx.db, ctx.workspaceId, ctx.staffId, objetivos, c, { escribir: (o) => ctx.editable && !soloAMano(o) })
+  const resueltos = await resolverPedidos(ctx.db, ctx.workspaceId, ctx.staffId, objetivos, c, { escribir: (o) => ctx.editable && !soloAMano(o), ciudadDelViaje })
+  // Las fichas fijadas, por id (su llave y su espacio de fotos).
+  const fichasFijadas = new Map<string, { tipo: string; clave: string; nombre: string; ciudad: string | null }>()
+  if (fijados.length > 0) {
+    const { data } = await ctx.db.from('fotos_perfiles').select('id, tipo, clave, nombre, ciudad').eq('workspace_id', ctx.workspaceId).in('id', [...new Set(fijados.map((f) => f.id))])
+    for (const f of (data ?? []) as { id: string; tipo: string; clave: string; nombre: string; ciudad: string | null }[]) fichasFijadas.set(f.id, f)
+  }
   const claves = new Set(resueltos.flatMap((r) => [r.perfil, r.duda && { tipo: r.pedido.tipo, clave: r.duda.clave }]).filter((x): x is ObjetivoFoto => !!x).map((x) => `${x.tipo}:${x.clave}`))
+  for (const f of fichasFijadas.values()) if (esTipoPerfil(f.tipo)) claves.add(`${f.tipo}:${f.clave}`)
   const perfiles = resueltos.flatMap((r) => (r.perfil && esTipoPerfil(r.perfil.tipo) ? [r.perfil] : []))
   const [vistas, proveedores, porId] = await Promise.all([
     vistasDe(ctx, c, claves),
@@ -187,41 +212,81 @@ export async function fotosParaTarjetas(pedidos: PedidoFoto[]): Promise<FotosDeT
   ])
   const porClave = new Map(vistas.map((e) => [`${e.tipo}:${e.clave}`, e]))
   const tarjetas: FotoDeTarjeta[] = resueltos.map((r) => {
-    const conocido = r.duda ? porClave.get(`${r.pedido.tipo}:${r.duda.clave}`) : null
+    // Duda: no se asocia ni se pregunta (brief del 2026-10-21, punto 5); queda «por clasificar».
+    const porDuda = r.duda ? { porClasificar: r.duda.candidatos?.length ?? 1 } : {}
+    const asociado = r.perfil && esTipoPerfil(r.perfil.tipo) && (r.como === 'exacto' || r.como === 'seguro')
     return {
       tipo: r.pedido.tipo,
       clave: r.pedido.clave,
       elemento: r.perfil ? porClave.get(`${r.perfil.tipo}:${r.perfil.clave}`) ?? null : null,
-      duda: r.duda ? { ...r.duda, url: conocido?.fotos[0]?.url ?? null } : null,
+      duda: null,
       // Sin ficha fijada, a un servicio escrito a mano no se le toma una por el nombre.
       proveedor: r.perfil && !soloAMano(r.pedido) ? proveedores.get(`${r.perfil.tipo}:${r.perfil.clave}`) ?? null : null,
+      fotosDe: asociado && r.perfil ? { nombre: r.perfil.nombre, ciudad: r.perfil.ciudad, deshacer: true } : null,
+      ...porDuda,
     }
   })
   // La tarjeta de un servicio escrito a mano va aparte (su llave lleva `aMano`): las fotos del
   // perfil sí, la ficha del proveedor no, aunque otra línea leída de un pantallazo nombre lo mismo.
   const conAMano = new Set(lista.flatMap((p) => {
-    const o = p && typeof p === 'object' && p.aMano === true && !p.proveedorId ? objetivoDelPedido(p) : null
+    const o = p && typeof p === 'object' && p.aMano === true && !idFijado(p) && !descartadaDe(p) ? objetivoDelPedido(p) : null
     return o ? [llaveDe(o)] : []
   }))
   for (const t of [...tarjetas]) {
-    if (conAMano.has(`${t.tipo}:${t.clave}`)) tarjetas.push({ ...t, proveedor: null, aMano: true })
+    if (conAMano.has(`${t.tipo}:${t.clave}`)) tarjetas.push({ ...t, proveedor: null, aMano: true, fotosDe: t.fotosDe ? { ...t.fotosDe, deshacer: false } : null })
+  }
+  // Las de una línea que descartó una ficha: sin esas fotos ni ese proveedor.
+  for (const p of lista) {
+    const o = objetivoDelPedido(p)
+    const descartada = descartadaDe(p)
+    if (!o || !descartada || idFijado(p)) continue
+    const t = tarjetas.find((x) => x.tipo === o.tipo && x.clave === o.clave && !x.proveedorId && !x.aMano && !x.descartada)
+    if (!t) continue
+    const resuelto = resueltos.find((r) => r.pedido.tipo === o.tipo && r.pedido.clave === o.clave)
+    const esLaDescartada = resuelto?.perfil?.clave === descartada
+    tarjetas.push({ ...t, descartada, ...(esLaDescartada ? { elemento: null, proveedor: null, fotosDe: null } : {}) })
   }
   for (const f of fijados) {
-    const t = tarjetas.find((x) => x.tipo === f.o.tipo && x.clave === f.o.clave && !x.proveedorId && !x.aMano)
-    if (t) tarjetas.push({ ...t, proveedorId: f.id, proveedor: porId.get(f.id) ?? null })
+    const t = tarjetas.find((x) => x.tipo === f.o.tipo && x.clave === f.o.clave && !x.proveedorId && !x.aMano && !x.descartada)
+    if (!t) continue
+    const ficha = fichasFijadas.get(f.id)
+    const elemento = ficha && esTipoPerfil(ficha.tipo) ? porClave.get(`${ficha.tipo}:${ficha.clave}`) ?? null : t.elemento
+    tarjetas.push({
+      ...t,
+      proveedorId: f.id,
+      proveedor: porId.get(f.id) ?? null,
+      elemento,
+      porClasificar: undefined,
+      // La ficha de la línea: la eligió la persona (tarifa) o se fijó sola por el nombre.
+      fotosDe: ficha ? { nombre: ficha.nombre, ciudad: ficha.ciudad, deshacer: true } : null,
+    })
   }
   return { ok: true, editable: ctx.editable, tarjetas }
 }
 
 /** El perfil de lo que pide una tarjeta o la pantalla (resolviendo alias). Error si hay duda. */
-async function perfilDelPedido(ctx: Contexto, pedido: unknown): Promise<{ perfil: ObjetivoFoto } | { error: string }> {
+async function perfilDelPedido(ctx: Contexto, pedido: unknown): Promise<{ perfil: ObjetivoFoto } | { error: string; codigo?: 'A_MANO' }> {
   const o = objetivoDelPedido(pedido)
   if (!o) return { error: 'Falta el nombre de lo que quieres ilustrar.' }
   if (!esTipoPerfil(o.tipo)) return { perfil: o }
+  const p = (pedido ?? {}) as PedidoFoto
+  // Con la ficha fijada en la línea, la foto va a ESA ficha (por id): ni alias ni ficha nueva.
+  if (typeof p.proveedorId === 'string' && UUID.test(p.proveedorId)) {
+    const { data } = await ctx.db.from('fotos_perfiles').select('tipo, clave, nombre, ciudad').eq('workspace_id', ctx.workspaceId).eq('id', p.proveedorId).maybeSingle()
+    const f = data as { tipo: string; clave: string; nombre: string; ciudad: string | null } | null
+    if (f && esTipoPerfil(f.tipo)) return { perfil: { tipo: f.tipo, clave: f.clave, nombre: f.nombre, ciudad: f.ciudad } }
+  }
   const leidos = await leerConocidos(ctx.db, ctx.workspaceId)
   if (!leidos.ok) return { error: leidos.mensaje }
-  const [r] = await resolverPedidos(ctx.db, ctx.workspaceId, ctx.staffId, [o], leidos.conocidos, { escribir: true })
-  if (!r?.perfil) return { error: `Primero dinos si es el mismo ${o.tipo === 'hotel' ? 'hotel' : 'tour'} que «${r?.duda?.nombre ?? ''}».` }
+  // Una línea escrita a mano NUNCA crea ficha, tampoco al subirle una foto (brief del 2026-10-21,
+  // punto 5): solo se usa una ficha que ya existe; si no hay, la foto se queda en la opción.
+  const aMano = p.aMano === true
+  const [r] = await resolverPedidos(ctx.db, ctx.workspaceId, ctx.staffId, [o], leidos.conocidos, { escribir: !aMano })
+  const descartada = typeof p.descartada === 'string' && r?.perfil?.clave === p.descartada
+  if (aMano && (!r?.perfil || r.como === 'nuevo' || descartada)) {
+    return { error: 'Este servicio se escribió a mano y no tiene ficha de proveedor: su foto se guarda en la opción.', codigo: 'A_MANO' }
+  }
+  if (!r?.perfil) return { error: 'Ese nombre se parece a varios proveedores: clasifícalo en Proveedores, «Por clasificar», y vuelve a subir la foto.' }
   return { perfil: r.perfil }
 }
 
@@ -250,7 +315,8 @@ export async function crearPerfil(pedido: PedidoFoto): Promise<ResultadoElemento
   if (!o || !esTipoPerfil(o.tipo)) return { ok: false, error: 'Escribe el nombre del hotel o del tour.' }
   const leidos = await leerConocidos(ctx.db, ctx.workspaceId)
   if (!leidos.ok) return { ok: false, error: leidos.mensaje }
-  const [r] = await resolverPedidos(ctx.db, ctx.workspaceId, ctx.staffId, [o], leidos.conocidos, { escribir: true })
+  // Lo que una persona crea a propósito no se une solo a un parecido: pregunta.
+  const [r] = await resolverPedidos(ctx.db, ctx.workspaceId, ctx.staffId, [o], leidos.conocidos, { escribir: true, preguntarDudas: true })
   if (r.duda) {
     const [conocido] = await vistasDe(ctx, leidos.conocidos, new Set([`${o.tipo}:${r.duda.clave}`]))
     return { ok: true, elemento: null, duda: { ...r.duda, url: conocido?.fotos[0]?.url ?? null } }
@@ -277,7 +343,7 @@ export async function subirFotoABiblioteca(
   const sub = revisarSubida(ctx, dataUrl, autorizacion)
   if ('error' in sub) return { ok: false, error: String(sub.error) }
   const p = await perfilDelPedido(ctx, pedido)
-  if ('error' in p) return { ok: false, error: p.error }
+  if ('error' in p) return { ok: false, error: p.error, ...(p.codigo ? { codigo: p.codigo } : {}) }
   return subirAlPerfil(ctx, p, sub, reemplaza, categoria)
 }
 

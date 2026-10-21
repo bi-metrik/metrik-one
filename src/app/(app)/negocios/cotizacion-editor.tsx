@@ -3819,7 +3819,7 @@ export default function CotizacionEditor({ oportunidadId, cotizacion, initialIte
   // Trappvel: el ancho del prototipo de la tarjeta (880 px); fuera del viaje, el de siempre (R6).
   // `FotosEnTarjetas`: la foto de cada hotel sale de la biblioteca, en una sola lectura.
   return (
-    <FotosEnTarjetas>
+    <FotosEnTarjetas destino={destinoViaje ?? null}>
     <div className={porPasosOn ? 'mx-auto max-w-[1180px] space-y-4 py-6 sm:px-4' : `mx-auto ${lineasPorTipo ? 'max-w-[880px]' : 'max-w-2xl'} space-y-4 px-4 py-6`}>
       {jsxEncabezado}
       {preguntandoEnvio && (

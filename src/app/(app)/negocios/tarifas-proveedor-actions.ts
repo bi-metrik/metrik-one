@@ -35,7 +35,7 @@ import { isEditable, type EstadoCotizacion } from '@/lib/cotizaciones/state-mach
 import { composicionDeLinea, leerTarifaPax, sumarAlertas, validarLecturaEnCasilla, type Composicion, type TarifaPax } from '@/lib/cotizaciones/tarifa-pasajero'
 import { leerViajeDelNegocio } from '@/lib/cotizaciones/viaje-negocio'
 import { objetivo } from '@/lib/fotos/clave'
-import { leerConocidos, resolverPedidos } from '@/lib/fotos/perfiles-db'
+import { aliasDelPedido, leerConocidos, resolverPedidos, separarAlias } from '@/lib/fotos/perfiles-db'
 import { extraccionParaCotizar } from '@/lib/proveedores/extraccion-para-cotizar'
 import { tarifasCitablesPorProveedor, type ExtraccionParaCitar } from '@/lib/proveedores/tarifas-citables'
 import {
@@ -272,7 +272,7 @@ async function fichaPorId(ctx: Contexto, id: unknown): Promise<FilaFicha | null>
  * se guarda con «Usar»), la fijada (`items.proveedor_id`) o la que se reconoce por el nombre leído
  * de un pantallazo (sin escribir).
  */
-async function fichaDeLinea(ctx: Contexto, elegida?: string | null): Promise<{ ficha: FilaFicha; por: 'linea' | 'nombre' } | null> {
+async function fichaDeLinea(ctx: Contexto, elegida?: string | null, ciudadDelViaje?: string | null): Promise<{ ficha: FilaFicha; por: 'linea' | 'nombre' } | null> {
   if (elegida) {
     const f = await fichaPorId(ctx, elegida)
     return f ? { ficha: f, por: 'linea' } : null
@@ -291,7 +291,7 @@ async function fichaDeLinea(ctx: Contexto, elegida?: string | null): Promise<{ f
   if (!o) return null
   const leidos = await leerConocidos(ctx.db, ctx.workspaceId)
   if (!leidos.ok) return null
-  const [r] = await resolverPedidos(ctx.db, ctx.workspaceId, ctx.staffId, [o], leidos.conocidos, { escribir: false })
+  const [r] = await resolverPedidos(ctx.db, ctx.workspaceId, ctx.staffId, [o], leidos.conocidos, { escribir: false, ciudadDelViaje: ciudadDelViaje ?? null })
   // «No es este» en la tarjeta (brief del 2026-10-21, punto 5): esa ficha no vuelve sola a la línea.
   if (!r?.perfil || (p?.descartada && r.perfil.clave === p.descartada)) return null
   const { data } = await ctx.db.from('fotos_perfiles').select('*').eq('workspace_id', ctx.workspaceId).eq('tipo', r.perfil.tipo).eq('clave', r.perfil.clave).maybeSingle()
@@ -392,7 +392,7 @@ async function preparar(ctx: Contexto, elegida?: string | null): Promise<Prepara
     elegida: elegidaHoy,
     conHabitaciones: conHabitaciones(ctx.tarifa),
   }
-  const r = await fichaDeLinea(ctx, elegida)
+  const r = await fichaDeLinea(ctx, elegida, viaje.destino ?? null)
   if (!r) return { ctx, vista, ficha: null, extraccionId: null, tarifario: null }
   const f = r.ficha
   vista.proveedor = { id: f.id, nombre: f.nombre, ciudad: f.ciudad ?? null, enlace: `/proveedores/${f.id}`, por: r.por }
@@ -707,4 +707,54 @@ export async function crearLineaConTarifa(
     total: x.calculo.total,
     aPagarAgencia: x.calculo.aPagarAgencia,
   }
+}
+
+// ── «No es este» (brief del 2026-10-21, punto 5) ─────────────────────────────
+
+/**
+ * La tarjeta dice «Fotos de: <ficha> · <ciudad>» cuando la línea se asoció sola a una ficha por el
+ * nombre del pantallazo. «No es este» lo deshace: quita el alias que unió el nombre a la ficha
+ * (`separarAlias`), suelta la ficha de la línea (`items.proveedor_id`) y la anota como descartada
+ * en la línea (`tarifa_pax.fichaDescartada`) para que no vuelva sola. No toca el costo: si el costo
+ * salió de la tarifa de esa ficha, se cambia con «Cambiar el costo».
+ */
+export async function noEsEsteProveedor(itemId: string): Promise<{ ok: true } | { ok: false; error: string }> {
+  const ctx = await contexto(itemId)
+  if ('error' in ctx) return { ok: false, error: ctx.error }
+  const bloqueo = noEditable(ctx)
+  if (bloqueo) return { ok: false, error: bloqueo }
+  const item = ctx.item as Record<string, unknown>
+  const fijada = typeof item.proveedor_id === 'string' ? item.proveedor_id : null
+  const t = ctx.tarifa
+  if (fijada && origenVigente(t.tarifaExtraida, t.casillas?.grupo_completo) && t.tarifaExtraida?.proveedor_id === fijada) {
+    return { ok: false, error: 'El costo de esta línea salió de la tarifa de ese proveedor: cámbialo con «Cambiar el costo».' }
+  }
+  const p = pedidoDeLinea({ nombre: (item.nombre ?? null) as string | null, grupo: (item.grupo ?? null) as string | null, tarifa_pax: item.tarifa_pax })
+  const o = p ? objetivo(p.tipo, p.nombre, p.ciudad) : null
+  const leidos = await leerConocidos(ctx.db, ctx.workspaceId)
+  if (!leidos.ok) return { ok: false, error: leidos.mensaje }
+  // La ficha que la tarjeta muestra: la fijada o la reconocida por el nombre (con el destino del viaje).
+  let clave: string | null = null
+  if (fijada) {
+    const f = await fichaPorId(ctx, fijada)
+    clave = (f as { clave?: string } | null)?.clave ?? null
+  } else if (o) {
+    const { viaje } = await leerViajeDelNegocio(ctx.db, ctx.negocioId)
+    const [r] = await resolverPedidos(ctx.db, ctx.workspaceId, ctx.staffId, [o], leidos.conocidos, { escribir: false, ciudadDelViaje: viaje.destino ?? null })
+    clave = r?.perfil?.clave ?? null
+  }
+  if (!clave) return { ok: false, error: 'Esta línea no tiene una ficha asociada.' }
+  const alias = o ? aliasDelPedido(leidos.conocidos, o) : null
+  if (alias) {
+    const s = await separarAlias(ctx.db, ctx.workspaceId, alias.id)
+    if (!s.ok) return { ok: false, error: s.mensaje }
+  }
+  const { data: fresca } = await ctx.db.from('items').select('*').eq('id', item.id).maybeSingle()
+  if (!fresca) return { ok: false, error: 'No se pudo leer la línea. Vuelve a intentarlo.' }
+  const patch: Record<string, unknown> = { tarifa_pax: { ...leerTarifaPax(fresca.tarifa_pax), fichaDescartada: clave } }
+  if ('proveedor_id' in fresca && fresca.proveedor_id) patch.proveedor_id = null
+  const { error } = await ctx.db.from('items').update(patch).eq('id', item.id)
+  if (error) return { ok: false, error: 'No se pudo guardar. Vuelve a intentarlo.' }
+  if (ctx.negocioId) revalidatePath(`/negocios/${ctx.negocioId}`)
+  return { ok: true }
 }
