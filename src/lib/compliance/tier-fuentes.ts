@@ -327,6 +327,15 @@ const RANGO: ReadonlyMap<TierResuelto, number> = new Map(
   PRECEDENCIA.map((t, i) => [t, i] as const),
 );
 
+/**
+ * La posición de un tier en la precedencia (0 = el más exigente). Para ordenar
+ * la cola del oficial. `null` (consulta anterior a la clasificación) se ordena
+ * como `sin_clasificar`: no saber qué es no la baja de prioridad (§1.4).
+ */
+export function rangoTier(t: TierResuelto | null | undefined): number {
+  return RANGO.get(t ?? 'sin_clasificar') ?? PRECEDENCIA.length;
+}
+
 /** El más alto de dos tiers. Sin suma, sin promedio: gana uno de los dos. */
 export function tierMasAlto(a: TierResuelto, b: TierResuelto): TierResuelto {
   return (RANGO.get(a) ?? PRECEDENCIA.length) <= (RANGO.get(b) ?? PRECEDENCIA.length) ? a : b;

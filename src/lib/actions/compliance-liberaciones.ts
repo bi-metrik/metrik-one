@@ -32,11 +32,14 @@ import {
 } from '@/lib/compliance/liberaciones';
 import {
   calcularIndicadores,
+  compararPorTriage,
   etiquetaDeContraparte,
   type EtiquetaBandeja,
   type IndicadoresBandeja,
 } from '@/lib/compliance/bandeja';
 import { estadoDeVigencia } from '@/lib/compliance/periodicidad';
+import { grupoClaveHallazgo } from '@/lib/compliance/alarma-hallazgo';
+import type { TierResuelto } from '@/lib/compliance/tier-fuentes';
 import type { InformaMatch } from './compliance-dual';
 
 type Result<T> = { ok: true; data: T } | { ok: false; error: string };
@@ -163,6 +166,21 @@ export async function registrarDecisionContraparte(
     .single();
 
   if (error) return { ok: false, error: error.message };
+
+  // La alarma de esta contraparte se apaga AQUÍ, al decidir, y no al abrir la
+  // campana (P1, 2026-10-20). Se resuelve para todos los que la tenían y queda
+  // quién decidió. Si falla, la decisión ya quedó escrita: no se deshace por un
+  // aviso, y la alarma que sigue abierta es el lado conservador.
+  const grupo = grupoClaveHallazgo(identidad.tipo, identidad.numero);
+  if (grupo) {
+    const { error: errAlarma } = await svc.rpc('resolver_grupo_notificaciones', {
+      p_workspace_id: guard.workspaceId,
+      p_grupo_clave: grupo,
+      p_resuelta_por: guard.userId,
+    });
+    if (errAlarma) console.error('[liberaciones] alarma_no_resuelta', grupo, errAlarma.message);
+  }
+
   return { ok: true, data: data as ComplianceLiberacion };
 }
 
@@ -263,6 +281,12 @@ export type ContraparteConHallazgo = {
   consulta_vigente_id: string;
   ultima_consulta_fecha: string;
   total_matches: number;
+  /**
+   * Tier máximo de la consulta vigente (la más reciente con hallazgo). Ordena la
+   * cola y rotula la fila (triage, P1 2026-10-20). null = consulta anterior a la
+   * clasificación; se trata como `sin_clasificar`.
+   */
+  tier_maximo: TierResuelto | null;
   cobertura: Cobertura;
   /**
    * R3: el barrido encontró un cambio despues de la liberacion vigente. La fila
@@ -330,6 +354,7 @@ type ConsultaBandeja = {
   matches: InformaMatch[];
   created_at: string;
   vigente_hasta: string | null;
+  tier_maximo: TierResuelto | null;
 };
 
 /**
@@ -359,7 +384,7 @@ export async function listarTableroLiberaciones(): Promise<Result<TableroLiberac
   // puede distinguir "salió limpia" de "no se supo".
   const { data: consultasRaw, error: errConsultas } = await svc
     .from('consultas_listas_dual')
-    .select('id, nombre_consultado, documento_tipo, documento_numero, severidad, total_matches, matches, created_at, vigente_hasta')
+    .select('id, nombre_consultado, documento_tipo, documento_numero, severidad, total_matches, matches, created_at, vigente_hasta, tier_maximo')
     .eq('workspace_id', guard.workspaceId)
     .order('created_at', { ascending: false })
     .limit(LIMITE_CONSULTAS);
@@ -461,6 +486,7 @@ export async function listarTableroLiberaciones(): Promise<Result<TableroLiberac
       consulta_vigente_id: hallazgo.consulta_id,
       ultima_consulta_fecha: hallazgo.created_at,
       total_matches: hallazgo.total_matches,
+      tier_maximo: c.tier_maximo ?? null,
       cobertura: coberturas.get(clave) ?? {
         cubierta: false,
         motivo: 'sin_registro',
@@ -494,12 +520,11 @@ export async function listarTableroLiberaciones(): Promise<Result<TableroLiberac
       .push(contraparte);
   }
 
-  // La cola se ordena por ANTIGÜEDAD (la más vieja arriba), no por severidad:
-  // lo que se mide acá es cuánto lleva la empresa sabiendo algo sin decidir.
-  buckets.hallazgos_sin_decidir.sort((a, b) =>
-    a.ultima_consulta_fecha.localeCompare(b.ultima_consulta_fecha));
-  buckets.sin_cobertura_vigente.sort((a, b) =>
-    a.ultima_consulta_fecha.localeCompare(b.ultima_consulta_fecha));
+  // Triage (P1, 2026-10-20): primero lo más exigente por tier, y dentro de cada
+  // tier por ANTIGÜEDAD (la más vieja arriba), que es lo que mide cuánto lleva
+  // la empresa sabiendo algo sin decidir.
+  buckets.hallazgos_sin_decidir.sort(compararPorTriage);
+  buckets.sin_cobertura_vigente.sort(compararPorTriage);
 
   // Vigilancia continua se cuenta sobre TODAS las contrapartes concluyentes sin
   // hallazgo, no solo las que alguna vez lo tuvieron.

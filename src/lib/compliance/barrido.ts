@@ -57,6 +57,7 @@ import { clasificarParaGuardar, calcularVigenciaParaGuardar } from './persistenc
 import type { TierResuelto } from './tier-fuentes';
 import type { InformaMatch } from '@/lib/actions/compliance-dual';
 import { correoDeltaMonitoreo } from './correo-delta';
+import { enlaceContraparte, grupoClaveHallazgo } from './alarma-hallazgo';
 
 const VALIDA_API_BASE = process.env.VALIDA_API_BASE || 'https://api.valida.metrikone.co';
 const FROM_CORREO = 'MéTRIK ONE <noreply@metrikone.co>';
@@ -634,7 +635,10 @@ async function notificarOficiales(
     contenido,
     entidad_tipo: null,
     entidad_id: null,
-    deep_link: '/compliance/liberaciones',
+    // A la ficha de esa contraparte, y con la clave de su alarma: el aviso del
+    // barrido también se cierra decidiendo, no abriendo la campana (P1, 2026-10-20).
+    deep_link: enlaceContraparte(c.clave),
+    grupo_clave: grupoClaveHallazgo(c.documento_tipo, c.documento_numero),
     metadata: {
       documento_tipo: c.documento_tipo,
       documento_numero: c.documento_numero,

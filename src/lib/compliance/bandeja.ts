@@ -30,6 +30,7 @@
  */
 
 import type { MotivoCobertura } from './liberaciones';
+import { rangoTier, type TierResuelto } from './tier-fuentes';
 
 // ─── Vocabulario ───────────────────────────────────────────────────────────
 
@@ -253,4 +254,48 @@ export function calcularIndicadores(
     antiguedad_max_sin_decidir_dias: max,
     sin_cobertura_vigente: sinCoberturaVigente,
   };
+}
+
+// ─── Triage por tier (P1, diagnóstico Noor + Lucía 2026-10-20) ─────────────
+
+/**
+ * Toda coincidencia se guarda con `severidad = 'alto'`, sea la ONU o una nota
+ * de prensa. Con el masivo, la cola se llena de incidentes judiciales y lo
+ * vinculante queda enterrado. El triage NO cambia la severidad guardada (eso
+ * pide el visto de Emilio): ordena y rotula con el tier que ya se guarda en
+ * cada consulta.
+ *
+ * Los rótulos de la bandeja no dicen "no vinculante" sobre ninguna lista
+ * internacional: desde 2026-10-05 la vinculancia de OFAC, UE y FTO se atribuye
+ * al supervisor del cliente (`cerebro/reglas/valida-alcance-normativo.md`).
+ */
+export type TonoTriage = 'alerta' | 'advertencia' | 'neutro';
+
+export const ROTULO_TRIAGE: Readonly<Record<TierResuelto, { texto: string; tono: TonoTriage }>> = {
+  tier_1: { texto: 'Lista vinculante', tono: 'alerta' },
+  tier_3: { texto: 'Lista restrictiva internacional', tono: 'advertencia' },
+  sin_clasificar: { texto: 'Fuente sin clasificar', tono: 'advertencia' },
+  tier_2: { texto: 'PEP', tono: 'advertencia' },
+  tier_4: { texto: 'Judicial o fuera de SARLAFT', tono: 'neutro' },
+  medios: { texto: 'Mención en medios', tono: 'neutro' },
+};
+
+/** El rótulo de una consulta por su tier máximo. null = anterior a la clasificación. */
+export function rotuloTriage(tier: TierResuelto | null | undefined): { texto: string; tono: TonoTriage } {
+  return ROTULO_TRIAGE[tier ?? 'sin_clasificar'];
+}
+
+/**
+ * Orden de la cola: primero por exigencia del tier (lo vinculante arriba) y,
+ * dentro del mismo tier, por antigüedad (la más vieja arriba). Lo segundo es
+ * el criterio del dictamen de Lucía del 2026-08-24 —lo que se mide es cuánto
+ * lleva la empresa sabiendo sin decidir— y se conserva dentro de cada tier.
+ */
+export function compararPorTriage(
+  a: { tier_maximo: TierResuelto | null; ultima_consulta_fecha: string },
+  b: { tier_maximo: TierResuelto | null; ultima_consulta_fecha: string },
+): number {
+  const porTier = rangoTier(a.tier_maximo) - rangoTier(b.tier_maximo);
+  if (porTier !== 0) return porTier;
+  return a.ultima_consulta_fecha.localeCompare(b.ultima_consulta_fecha);
 }
