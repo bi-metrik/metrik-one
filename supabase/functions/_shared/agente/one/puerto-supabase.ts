@@ -47,6 +47,7 @@ function gastoDeTabla(f: Fila): GastoOne {
     id: String(f.id), fecha: String(f.fecha ?? '').slice(0, 10), monto: Number(f.monto) || 0, categoria: String(f.categoria ?? 'otros'),
     descripcion: String(f.descripcion ?? ''), negocio: (uno(f.negocios)?.codigo as string | undefined) ?? null,
     soporte: f.soporte_pendiente === false || !!f.soporte_url,
+    ...(f.revisado === true ? { revisado: true } : {}),
   };
 }
 
@@ -138,10 +139,20 @@ export function puertoOneSupabase(supabase: SupabaseClient, user: WaUser): Puert
       return { total: todos.reduce((s, x) => s + (Number(x.monto) || 0), 0), cantidad: todos.length, gastos: ((l.data ?? []) as Fila[]).map(gastoDeTabla) };
     },
     async gasto(id) {
-      const { data, error } = await supabase.from('gastos').select('id, fecha, monto, categoria, descripcion, soporte_pendiente, soporte_url, negocios(codigo)')
+      const { data, error } = await supabase.from('gastos').select('id, fecha, monto, categoria, descripcion, soporte_pendiente, soporte_url, revisado, negocios(codigo)')
         .eq('workspace_id', ws).eq('id', id).maybeSingle();
       if (error) return 'error';
       return data ? gastoDeTabla(data as Fila) : null;
+    },
+    async gastosPorId(ids) {
+      if (!ids.length) return [];
+      const { data, error } = await supabase.from('gastos').select('id, fecha, monto, categoria, descripcion, soporte_pendiente, soporte_url, revisado, negocios(codigo)')
+        .eq('workspace_id', ws).in('id', ids.slice(0, 50));
+      if (error) {
+        console.error('[agente-one] gastos de la conversación:', error.message);
+        return 'error';
+      }
+      return ((data ?? []) as Fila[]).map(gastoDeTabla);
     },
     async contactoDuplicado(telefono) {
       const { data, error } = await supabase.rpc('buscar_contacto_duplicado', { p_workspace_id: ws, p_telefono: telefono, p_email: null, p_excluir_id: null });

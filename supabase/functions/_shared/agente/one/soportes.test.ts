@@ -177,7 +177,22 @@ describe('el caso real: gasto de $27.000 registrado y llega el recibo de $6.880 
     expect(e.puerto.escrituras).toEqual([])
   })
 
-  it('un gasto ya revisado no se corrige por aquí: no se escribe nada y se dice', async () => {
+  it('un gasto ya revisado no se corrige por aquí: ni se propone (candado gasto_revisado)', async () => {
+    const modelo = modeloGuionado([
+      { name: 'proponer', args: { accion: 'gasto', datos: { monto: 27000, negocio: 'V1 26 5', categoria: 'transporte' } } },
+      { name: 'proponer', args: { accion: 'corregir_gasto', datos: { gasto: 'G1', monto: 6880 } } },
+      { name: 'responder', args: { tema: 'gasto', texto: 'Contabilidad ya lo revisó: ese monto no se cambia por aquí.' } },
+    ])
+    const e = await escenarioOne({ modelo, negocios: NEGOCIOS })
+    await e.escribe('27000 al V1 26 5')
+    await e.toca('Registrar')
+    e.puerto.revisados.add('gasto-1')
+    await e.escribe('eran 6880')
+    expect(e.trazas().at(-1)!.candados!.map((c) => c.candado)).toEqual(['gasto_revisado'])
+    expect(e.puerto.escrituras.map((x) => x.tipo)).toEqual(['gasto'])
+  })
+
+  it('si lo revisan entre la propuesta y el toque, no se escribe nada y se dice', async () => {
     const modelo = modeloGuionado([
       { name: 'proponer', args: { accion: 'gasto', datos: { monto: 27000, negocio: 'V1 26 5', categoria: 'transporte' } } },
       { name: 'proponer', args: { accion: 'corregir_gasto', datos: { gasto: 'G1', monto: 6880 } } },
@@ -185,8 +200,8 @@ describe('el caso real: gasto de $27.000 registrado y llega el recibo de $6.880 
     const e = await escenarioOne({ modelo, negocios: NEGOCIOS })
     await e.escribe('27000 al V1 26 5')
     await e.toca('Registrar')
-    e.puerto.revisados.add('gasto-1')
     await e.escribe('eran 6880')
+    e.puerto.revisados.add('gasto-1')
     const t = await e.toca('Cambiar')
     expect(t[0].texto).toContain('No pude hacerlo ahora')
     expect(e.puerto.escrituras.map((x) => x.tipo)).toEqual(['gasto'])

@@ -19,7 +19,9 @@ import { CATEGORIA_LABELS } from '../../types.ts';
 
 export const BOT_ONE = 'one';
 // v2 (2026-10-21): soportes en foto o PDF, leídos con el modelo; lo leído se combina con lo que dice la persona.
-export const VERSION_REGLAMENTO_ONE = 2;
+// v3 (2026-10-21): los gastos registrados son los del Estado (revisados contra la base, no el historial) y lo que el bot
+// puede proponer (corregir el monto, adjuntar el soporte) no lo manda a hacer en la app.
+export const VERSION_REGLAMENTO_ONE = 3;
 
 const g = (clave: string, carga: Ficha['carga'], cuando: string, hacer: string, herramientas: string[] = []): Ficha =>
   ({ clave, tipo: 'guia', carga, cuando, hacer, herramientas });
@@ -36,12 +38,13 @@ export function fichasOne(negocio: string): Ficha[] {
     // Alcance
     { clave: 'alc.temas', tipo: 'alcance', carga: 'siempre', hacer: 'Tus temas: gastos (registrarlos, su soporte, consultarlos), actividades de un negocio, contactos nuevos, el estado de los negocios, y la ayuda de qué puedes hacer. Saludar, agradecer o cerrar también es de tu tema (`conversacion`).', valores: { temas: ['gasto', 'actividad', 'negocios', 'contacto', 'ayuda', 'conversacion'] } },
     { clave: 'alc.no_temas', tipo: 'alcance', carga: 'siempre', cuando: 'te piden algo fuera de esos temas (clima, chistes, programación, política, salud)', hacer: 'tema `fuera` (no lo contestes; el sistema dice qué sí puedes hacer)' },
-    { clave: 'alc.app', tipo: 'alcance', carga: 'siempre', cuando: 'piden cobros, facturas, cambios de etapa, horas, cartera, crear o cerrar negocios, o borrar un gasto, o editar uno que no se registró en esta conversación (el monto de uno de aquí sí: `corregir_gasto`)', hacer: 'eso se hace en la app de ONE: dilo en una línea (tema `ayuda`) y ofrece lo que sí puedes hacer aquí' },
+    { clave: 'alc.app', tipo: 'alcance', carga: 'siempre', cuando: 'piden cobros, facturas, cambios de etapa, horas, cartera, crear o cerrar negocios, borrar un gasto, o cambiarle a un gasto algo distinto del monto y el soporte (el monto de un gasto sin revisar sí: `corregir_gasto`; el soporte que le falta: `adjuntar_soporte`)', hacer: 'eso se hace en la app de ONE: dilo en una línea (tema `ayuda`) y ofrece lo que sí puedes hacer aquí' },
     // Invariantes
     { clave: 'inv.confirmar', tipo: 'invariante', carga: 'siempre', hacer: 'Nada se registra sin el toque de la persona sobre el resumen que arma el sistema. Para escribir, usa `proponer`; nunca digas que algo quedó registrado.' },
     { clave: 'inv.destino_real', tipo: 'invariante', carga: 'siempre', hacer: 'Un gasto va a UN negocio que existe (por su código, tal como lo devolvió una herramienta) o es gasto de empresa. «Gasto de empresa» solo si la persona lo dice o lo elige: nunca lo pongas tú porque no encontraste el negocio. Si no hay destino dicho, pregunta.' },
     { clave: 'inv.no_inventar', tipo: 'invariante', carga: 'siempre', hacer: 'No afirmes nada que una herramienta no te devolvió: códigos, montos, nombres, teléfonos, totales.' },
     { clave: 'inv.solo_lectura', tipo: 'invariante', carga: 'siempre', hacer: 'Las consultas no cambian nada.' },
+    { clave: 'inv.gastos_vigentes', tipo: 'invariante', carga: 'siempre', hacer: 'Los gastos registrados son los que el Estado dice, revisados contra ONE en este turno. Si el historial dice que un gasto quedó registrado y el Estado dice que ya no está en ONE, ya no está: no lo nombres como registrado ni lo corrijas; si preguntan, di que ya no está y ofrece registrarlo de nuevo.' },
     // Glosario
     { clave: 'glo.negocio', tipo: 'glosario', carga: 'siempre', hacer: 'negocio = un trabajo, proyecto, obra o servicio para un cliente. Tiene código («P1 26 5»: letra y número de la empresa, año, consecutivo), empresa (el cliente), nombre y etapa (venta, ejecución, cobro, cierre). La persona puede nombrarlo por el código, la empresa, el nombre o el contacto, y decirle «proyecto», «obra» o «negocio».' },
     { clave: 'glo.gasto_empresa', tipo: 'glosario', carga: 'siempre', hacer: 'gasto de empresa = un gasto que no es de ningún negocio (arriendo, software, papelería de la oficina).' },
@@ -66,6 +69,7 @@ export function fichasOne(negocio: string): Ficha[] {
     g('g.consultas', 'indice', 'preguntan por sus negocios («qué negocios tengo», «cuántos en venta», «cómo va el de Pérez») o por sus gastos («cuánto gasté hoy», «mis egresos», «movimientos»)', 'consulta con `negocios_abiertos`, `ver_negocio` o `gastos_recientes` y contesta solo lo preguntado, con las cifras tal como vienen'),
     g('g.ayuda', 'indice', 'saludan sin pedir nada, piden ayuda o preguntan qué puedes hacer', 'en 3 o 4 líneas: registrar gastos con su soporte (foto o PDF, que tú lees), anotar actividades en un negocio («llamé a Pérez»), crear contactos («nuevo contacto Juan Pérez y su celular») y consultar negocios y gastos («qué negocios tengo», «cuánto gasté hoy»). Sin cifras de ejemplo. Tema `ayuda`'),
     g('g.si_con_reserva', 'con_herramienta', 'el «sí» trae un «pero», una condición o un cambio («sí, pero son 30 mil»)', 'no es un sí: vuelve a proponer con el cambio', ['proponer']),
+    g('g.no_mandar_a_la_app', 'siempre', 'algo de un gasto está mal o le falta (el monto no cuadra con el recibo, falta el soporte, faltó registrar la otra parte)', 'si lo puedes proponer tú (`corregir_gasto`, `adjuntar_soporte`, un gasto nuevo), propónlo; no le digas que lo corrija en la app'),
     g('g.rol', 'siempre', 'el sistema dice que el rol de la persona no permite algo', 'dilo en una línea y sin rodeos; no lo intentes por otro lado'),
     // Estilo
     { clave: 'b.cerrada', tipo: 'estilo', carga: 'siempre', cuando: 'la respuesta es una de pocas salidas cerradas (elegir un negocio, empresa o negocio)', hacer: '`responder` con `opciones` (2-3 = botones; 4-10 = lista)' },

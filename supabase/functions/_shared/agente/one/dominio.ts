@@ -47,6 +47,8 @@ export interface GastoOne {
   /** Código del negocio, o `null` = gasto de empresa. */
   negocio: string | null;
   soporte: boolean;
+  /** Ya lo revisó contabilidad: el monto no se corrige por aquí. */
+  revisado?: boolean;
 }
 
 export type SoporteGuardado = 'guardado' | 'fallo' | 'sin';
@@ -65,6 +67,11 @@ export interface PuertoOne {
   gastosRecientes(p: { desdeIso: string; negocioId: string | null; limite: number }): Promise<{ total: number; cantidad: number; gastos: GastoOne[] } | 'error'>;
   /** Un gasto del workspace por id. */
   gasto(id: string): Promise<GastoOne | null | 'error'>;
+  /**
+   * Los que SIGUEN en la base de estos ids (los gastos que la conversación dice que se registraron). Uno borrado en la
+   * app no vuelve. Una sola consulta por turno.
+   */
+  gastosPorId(ids: string[]): Promise<GastoOne[] | 'error'>;
   /** Si ese teléfono ya es de un contacto, su nombre (`buscar_contacto_duplicado`). */
   contactoDuplicado(telefono: string): Promise<string | null | 'error'>;
   /**
@@ -78,8 +85,8 @@ export interface PuertoOne {
   /** Deja el soporte (ya subido, `ref`; si no, lo baja de Meta) en el gasto. false = no se pudo (no se escribió nada). */
   adjuntarSoporte(gastoId: string, mediaId: string, ref?: string | null): Promise<boolean>;
   /**
-   * Cambia el monto de un gasto que todavía no se revisó y, si viene, le deja el soporte. Lanza si no pudo (o si el
-   * gasto ya se revisó: eso se corrige en la app).
+   * Cambia el monto de un gasto que todavía no se revisó y, si viene, le deja el soporte. Lanza si no pudo (si el gasto
+   * ya no existe o ya se revisó).
    */
   corregirGasto(p: { gastoId: string; monto: number; mediaId: string | null; ref?: string | null }): Promise<{ soporte: SoporteGuardado }>;
   /** Baja un archivo de Meta (foto o documento). null = no se pudo. */
@@ -266,6 +273,43 @@ export function gastosDeLaConversacion(filas: FilaConversacion[]): GastoDeLaConv
   return out;
 }
 
+/**
+ * Los gastos de la conversación cruzados con lo que HOY hay en la base (2026-10-21, caso real: se borraron por SQL dos
+ * gastos de prueba y horas después el bot dijo «hoy quedaron registrados dos gastos de Impervium», sacado del historial).
+ * La traza dice que se registraron; la base dice si siguen. De los que siguen manda la base (monto y soporte: pudieron
+ * cambiarlos en la app). `revisada: false` = no se pudo leer la base: quedan como dice la traza, con la advertencia. Pura.
+ */
+export function cruzarConLaBase(
+  deAqui: GastoDeLaConversacion[],
+  enBase: GastoOne[] | 'error',
+): { vigentes: Array<GastoDeLaConversacion & { revisado?: boolean }>; borrados: GastoDeLaConversacion[]; revisada: boolean } {
+  if (enBase === 'error') return { vigentes: deAqui, borrados: [], revisada: false };
+  const porId = new Map(enBase.map((g) => [g.id, g]));
+  const vigentes: Array<GastoDeLaConversacion & { revisado?: boolean }> = [];
+  const borrados: GastoDeLaConversacion[] = [];
+  for (const g of deAqui) {
+    const b = porId.get(g.id);
+    if (!b) borrados.push(g);
+    else vigentes.push({ ...g, monto: b.monto, soporte: b.soporte || g.soporte, ...(b.revisado ? { revisado: true } : {}) });
+  }
+  return { vigentes, borrados, revisada: true };
+}
+
+/** Las líneas del Estado sobre los gastos de la conversación, ya cruzados con la base. Pura. */
+export function lineasGastos(c: ReturnType<typeof cruzarConLaBase>): string[] {
+  const linea = (g: GastoDeLaConversacion & { revisado?: boolean }) =>
+    `${g.ref} · ${formatCOP(g.monto)} · ${g.etiqueta} · ${g.soporte ? 'con soporte' : 'sin soporte'}${g.revisado ? ' · ya revisado por contabilidad' : ''}`;
+  const out = [
+    c.vigentes.length
+      ? `Gastos registrados en esta conversación${c.revisada ? '' : ' (no pude revisar si siguen en ONE: no afirmes que están)'}: ${c.vigentes.slice(-5).map(linea).join(' | ')}.`
+      : 'Gastos registrados en esta conversación: ninguno.',
+  ];
+  if (c.borrados.length) {
+    out.push(`Ya NO están en ONE (los borraron después de registrarlos aquí): ${c.borrados.map((g) => `${g.ref} (${formatCOP(g.monto)} · ${g.etiqueta})`).join(', ')}. Aunque la conversación diga que quedaron registrados, no existen: no los cuentes como registrados, no les propongas corregir_gasto ni adjuntar_soporte. Si la persona pregunta por ellos, dile que ya no están en ONE y ofrece registrarlos de nuevo.`);
+  }
+  return out;
+}
+
 /** El último texto que escribió (o dictó, o puso de pie de foto) el equipo: es el `mensaje_original` del gasto. Pura. */
 function ultimoTextoDelEquipo(filas: FilaConversacion[]): string | null {
   const f = [...filas].reverse().find((x) => x.direccion === 'entrante' && x.clase !== 'toque' && (x.texto ?? '').trim());
@@ -373,7 +417,7 @@ const DATOS_PROPONER_ONE: Record<string, unknown> = {
   categoria: { type: 'string', enum: categorias, description: 'gasto: la deduces del concepto; sin concepto, otros.' },
   descripcion: { type: 'string', description: 'gasto: el concepto con las palabras de la persona, corto, sin el monto ni el negocio. Vacío si no dijo concepto.' },
   soporte: { type: 'string', description: 'gasto / corregir_gasto: el #n de la foto o el PDF del recibo, si llegó uno. adjuntar_soporte: ese #n.' },
-  gasto: { type: 'string', description: 'adjuntar_soporte / corregir_gasto: el gasto (G1, G2… del Estado; adjuntar_soporte también acepta el id que devolvió gastos_recientes).' },
+  gasto: { type: 'string', description: 'adjuntar_soporte / corregir_gasto: el gasto (G1, G2… del Estado, o el id que devolvió gastos_recientes para uno de otro momento).' },
   monto_distinto: { type: 'boolean', description: 'adjuntar_soporte: true solo si la persona ya dijo que ese soporte va con ese gasto aunque el monto leído sea otro.' },
   tipo: { type: 'string', enum: [...TIPOS_ACTIVIDAD], description: 'actividad: qué fue.' },
   texto: { type: 'string', description: 'actividad: lo que pasó, con las palabras de la persona.' },
@@ -444,6 +488,49 @@ export function dominioOne(puerto: PuertoOne, o: { rol: string; ahora?: () => nu
       f.media = m;
       return { fila: f.id, tipo: m.tipo, guardado: !!m.ref, leido: !!m.lectura?.legible, monto: m.lectura?.monto ?? null, ms: Math.round(ahora() - t0) };
     }));
+  }
+
+  // Los gastos de la conversación contra la base: una consulta por turno (el Estado y la propuesta la piden en el mismo).
+  const cruces = new WeakMap<FilaConversacion[], Promise<ReturnType<typeof cruzarConLaBase>>>();
+  function gastosVigentes(ctx: ContextoDominio): Promise<ReturnType<typeof cruzarConLaBase>> {
+    let p = cruces.get(ctx.conversacion);
+    if (!p) {
+      const deAqui = gastosDeLaConversacion(ctx.conversacion);
+      p = (deAqui.length ? puerto.gastosPorId(deAqui.map((g) => g.id)).catch(() => 'error' as const) : Promise.resolve([] as GastoOne[]))
+        .then((enBase) => cruzarConLaBase(deAqui, enBase));
+      cruces.set(ctx.conversacion, p);
+    }
+    return p;
+  }
+
+  /**
+   * El gasto al que va un soporte o una corrección: uno de esta conversación (G1, G2…) o el id que devolvió
+   * `gastos_recientes`, y que SIGUE en la base (uno borrado en la app no se toca ni se nombra como registrado).
+   */
+  async function gastoParaTocar(ref: string, ctx: ContextoDominio): Promise<Resultado<{ id: string; ref: string; monto: number; etiqueta: string; soporte: boolean; revisado: boolean }>> {
+    const c = await gastosVigentes(ctx);
+    const borrado = c.borrados.find((x) => x.ref.toLowerCase() === ref.toLowerCase() || x.id === ref);
+    if (borrado) {
+      return { ok: false, error: `${borrado.ref} (${formatCOP(borrado.monto)} · ${borrado.etiqueta}) ya no está en ONE: lo borraron después de registrarlo. No digas que está registrado. Si este dato es de un gasto, propón un gasto nuevo.`, candado: 'gasto_borrado' };
+    }
+    const deAqui = c.vigentes.find((x) => x.ref.toLowerCase() === ref.toLowerCase() || x.id === ref);
+    if (deAqui) {
+      // La base no se pudo leer en el cruce: no se propone sobre un gasto que quizá ya no existe.
+      if (!c.revisada) return { ok: false, error: 'No pude revisar ese gasto ahora. Dilo así, sin decir que está registrado.', candado: 'gasto_no_leido' };
+      return { ok: true, v: { id: deAqui.id, ref: deAqui.ref, monto: deAqui.monto, etiqueta: deAqui.etiqueta, soporte: deAqui.soporte, revisado: deAqui.revisado === true } };
+    }
+    if (/^[0-9a-f-]{36}$/i.test(ref)) {
+      const leido = await puerto.gasto(ref);
+      if (leido === 'error') return { ok: false, error: 'No pude revisar ese gasto ahora.', candado: 'gasto_no_leido' };
+      if (!leido) return { ok: false, error: 'Ese gasto no está en ONE (no existe o lo borraron). No digas que está registrado.', candado: 'gasto_borrado' };
+      return { ok: true, v: { id: leido.id, ref: leido.id, monto: leido.monto, etiqueta: leido.negocio ?? 'Gasto de empresa', soporte: leido.soporte, revisado: leido.revisado === true } };
+    }
+    const lista = c.vigentes.map((x) => `${x.ref} (${formatCOP(x.monto)}, ${x.negocio ?? 'empresa'})`).join(', ');
+    return {
+      ok: false,
+      error: `No sé a qué gasto te refieres. ${lista ? `Los de esta conversación: ${lista}.` : 'En esta conversación no hay gastos registrados.'} Si es de otro momento, búscalo con gastos_recientes y usa su id.`,
+      candado: 'gasto_desconocido',
+    };
   }
 
   async function negocioReal(codigo: unknown): Promise<Resultado<NegocioOne>> {
@@ -570,19 +657,10 @@ export function dominioOne(puerto: PuertoOne, o: { rol: string; ahora?: () => nu
   async function proponerSoporte(d: Record<string, unknown>, ctx: ContextoDominio): Promise<Resultado<Propuesta>> {
     const f = soporteDe(ctx.conversacion, d.soporte);
     if ('error' in f) return { ok: false, error: f.error, candado: 'foto' };
-    const ref = String(d.gasto ?? '').trim();
-    const deAqui = gastosDeLaConversacion(ctx.conversacion);
-    let g: { id: string; monto: number; etiqueta: string; soporte: boolean } | undefined = deAqui.find((x) => x.ref.toLowerCase() === ref.toLowerCase());
-    if (!g && /^[0-9a-f-]{36}$/i.test(ref)) {
-      const leido = await puerto.gasto(ref);
-      if (leido === 'error') return { ok: false, error: 'No pude revisar ese gasto ahora.', candado: 'gasto_no_leido' };
-      if (leido) g = { id: leido.id, monto: leido.monto, etiqueta: leido.negocio ?? 'Gasto de empresa', soporte: leido.soporte };
-    }
-    if (!g) {
-      const lista = deAqui.map((x) => `${x.ref} (${formatCOP(x.monto)}, ${x.negocio ?? 'empresa'})`).join(', ');
-      return { ok: false, error: `No sé a qué gasto va el soporte. ${lista ? `Los de esta conversación: ${lista}.` : 'En esta conversación no hay gastos registrados: pregunta de qué gasto es.'}`, candado: 'gasto_desconocido' };
-    }
-    if (g.soporte) return { ok: false, error: 'Ese gasto ya tiene soporte. Si la persona quiere cambiarlo, es en la app.', candado: 'ya_tiene_soporte' };
+    const r = await gastoParaTocar(String(d.gasto ?? '').trim(), ctx);
+    if (!r.ok) return r;
+    const g = r.v;
+    if (g.soporte) return { ok: false, error: 'Ese gasto ya tiene soporte (cambiar el soporte de un gasto no se hace por aquí). Si este archivo es de otro gasto, propón ese gasto con este soporte.', candado: 'ya_tiene_soporte' };
     // El soporte dice otro monto (caso real: gasto de $27.000 y recibo de $6.880): no se adjunta callado.
     const distinto = montoDistinto(f.lectura, g.monto);
     if (distinto && d.monto_distinto !== true) {
@@ -608,15 +686,16 @@ export function dominioOne(puerto: PuertoOne, o: { rol: string; ahora?: () => nu
     };
   }
 
-  /** Cambiar el monto de un gasto de esta conversación (el soporte dice otro), con el soporte si viene. */
+  /**
+   * Cambiar el monto de un gasto (el soporte dice otro, o la persona lo corrige), con el soporte si viene: uno de esta
+   * conversación o uno de `gastos_recientes`, que siga en la base y que contabilidad no haya revisado. El bot lo propone
+   * él mismo en vez de mandar a «corregirlo en la app» (2026-10-21).
+   */
   async function proponerCorreccion(d: Record<string, unknown>, ctx: ContextoDominio): Promise<Resultado<Propuesta>> {
-    const ref = String(d.gasto ?? '').trim();
-    const deAqui = gastosDeLaConversacion(ctx.conversacion);
-    const g = deAqui.find((x) => x.ref.toLowerCase() === ref.toLowerCase());
-    if (!g) {
-      const lista = deAqui.map((x) => `${x.ref} (${formatCOP(x.monto)}, ${x.negocio ?? 'empresa'})`).join(', ');
-      return { ok: false, error: `Solo se corrige un gasto registrado en esta conversación (G1, G2…). ${lista ? `Los de aquí: ${lista}.` : 'Aquí no hay ninguno: si es de antes, se corrige en la app.'}`, candado: 'gasto_desconocido' };
-    }
+    const r = await gastoParaTocar(String(d.gasto ?? '').trim(), ctx);
+    if (!r.ok) return r;
+    const g = r.v;
+    if (g.revisado) return { ok: false, error: `Contabilidad ya revisó el gasto de ${formatCOP(g.monto)} · ${g.etiqueta}: ese monto ya no se cambia por aquí. Dilo en una línea (lo cambia quien administra la contabilidad, en la app).`, candado: 'gasto_revisado' };
     const monto = typeof d.monto === 'number' ? d.monto : /^\d+$/.test(String(d.monto ?? '').trim()) ? Number(d.monto) : NaN;
     if (!Number.isFinite(monto) || monto <= 0) return { ok: false, error: 'Falta el monto nuevo (un número mayor que cero).', candado: 'monto' };
     if (Math.abs(monto - g.monto) <= 1) return { ok: false, error: `El gasto ${g.ref} ya es de ${formatCOP(g.monto)}: no hay nada que corregir.`, candado: 'mismo_monto' };
@@ -782,17 +861,15 @@ export function dominioOne(puerto: PuertoOne, o: { rol: string; ahora?: () => nu
     leer: (n, a) => leer(n, a),
     proponer,
     ejecutar: (p, ctx) => ejecutar(p, ctx),
-    estado(ctx) {
-      const gastos = gastosDeLaConversacion(ctx.conversacion).slice(-5);
+    async estado(ctx) {
       const p = permisos;
       const puede = [p.escribir ? 'registrar gastos y actividades' : null, p.contactos ? 'crear contactos' : null, p.negocios ? 'consultar negocios' : null, p.gastos ? 'consultar gastos' : null].filter(Boolean);
       return [
         `Su rol permite: ${puede.length ? puede.join(', ') : 'nada por este chat'}.`,
         ultimaLista(ctx.conversacion),
         fotosSinUsar(ctx.conversacion),
-        gastos.length
-          ? `Gastos registrados en esta conversación: ${gastos.map((g) => `${g.ref} · ${formatCOP(g.monto)} · ${g.etiqueta} · ${g.soporte ? 'con soporte' : 'sin soporte'}`).join(' | ')}.`
-          : 'Gastos registrados en esta conversación: ninguno.',
+        // Revisados contra la base: un gasto borrado en la app no se nombra como registrado aunque el historial lo diga.
+        ...lineasGastos(await gastosVigentes(ctx)),
       ];
     },
   };
