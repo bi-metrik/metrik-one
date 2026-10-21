@@ -239,10 +239,11 @@ describe('la ventana de los adjuntos (5 s): texto y adjunto en mensajes separado
 
   it('el texto primero y el PDF llega mientras el modelo piensa: la respuesta no sale y el turno se repite con los dos', async () => {
     const lector = lectorDe({ 'application/pdf': LECTURA_UBER })
-    let e!: Awaited<ReturnType<typeof escenarioOne>>
+    const caja: { e: Awaited<ReturnType<typeof escenarioOne>> | null } = { e: null }
     const modelo = modeloGuionado([
       () => {
         // Mientras el modelo «piensa», llega el PDF (1,5 s después del texto).
+        const e = caja.e!
         e.reloj.avanzar(1500)
         e.puerto.archivos.set('m-pdf2', PDF_UBER)
         e.almacen.entrante({ workspaceId: WS_ONE_PRUEBA, phone: TEL_ONE_PRUEBA, clase: 'otro', texto: null, media: { tipo: 'documento', id: 'm-pdf2', mime: 'application/pdf', nombre: 'recibo-uber.pdf' } })
@@ -255,7 +256,8 @@ describe('la ventana de los adjuntos (5 s): texto y adjunto en mensajes separado
         return { name: 'proponer', args: { accion: 'gasto', datos: { monto: 6880, negocio: 'V1 26 5', categoria: 'transporte', soporte: '#2' } } }
       },
     ])
-    e = await escenarioOne({ modelo, negocios: NEGOCIOS, lector })
+    const e = await escenarioOne({ modelo, negocios: NEGOCIOS, lector })
+    caja.e = e
     await e.escribe('este fue la ida, para vértice')
     // Salió UNA respuesta: la propuesta con el soporte (el «¿De cuánto fue?» no salió).
     expect(e.mensajero.enviados).toHaveLength(1)
