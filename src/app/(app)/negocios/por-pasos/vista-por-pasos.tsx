@@ -1,11 +1,12 @@
 'use client'
 
-import { useCallback, useMemo, useState, type ReactNode } from 'react'
+import { useCallback, useContext, useEffect, useMemo, useState, type ReactNode } from 'react'
 import { toast } from 'sonner'
 
 import { BarraPasos } from './barra-pasos'
-import { LoQueSuma } from './lo-que-suma'
-import { ServicioPorPasos } from './servicio-por-pasos'
+import { clasesLoQueSuma, LoQueSuma, usePreferenciaLoQueSuma } from './lo-que-suma'
+import { MarcoCotizacionContexto } from '@/app/(app)/negocios/marco-cotizacion-contexto'
+import { ServicioPorPasos, ServicioProvisional } from './servicio-por-pasos'
 import { TarifasPorPasos, type AutorizacionVista, type ServicioConOpciones } from './tarifas-por-pasos'
 import { RevisarPorPasos } from './revisar-por-pasos'
 import { useDeshacer } from './deshacer'
@@ -34,13 +35,17 @@ import type { ParametrosCascada } from '@/lib/cotizaciones/totales'
 import { ranurasConAlternativas } from '@/lib/cotizaciones/itinerarios'
 import { estadosPermitidos, type EstadoServicio } from '@/lib/cotizaciones/estado-servicio'
 import { YA_CAMBIO } from '@/lib/cotizaciones/deshacer-por-pasos'
-import { textoCortoSinPrecio, tiposSinPrecio } from '@/lib/cotizaciones/precio-que-falta'
-import type { Composicion } from '@/lib/cotizaciones/tarifa-pasajero'
+import { textoCortoDeOpcion, tiposSinPrecio } from '@/lib/cotizaciones/precio-que-falta'
+import { leerTarifaPax, monedaDeTarifa, type Composicion } from '@/lib/cotizaciones/tarifa-pasajero'
 import { nombreVisibleDeLinea } from '@/lib/cotizaciones/nombre-visible'
 import { resumenDeOpcion } from '@/lib/cotizaciones/opcion-viaje'
+import { provisionalesVigentes, type Provisional } from '@/lib/cotizaciones/aceptar-optimista'
 import type { ItemConLectura } from '@/lib/cotizaciones/detalle-viaje'
 import type { DestinoDeIr, ListaUnica } from '@/lib/cotizaciones/lista-unica'
 import { ListaUnicaPorPasos } from './lista-unica-por-pasos'
+import { autorizacionDeLaSalida } from '@/lib/cotizaciones/autorizacion-vista'
+import { PrecioQueFaltaPorPasos } from './precio-que-falta'
+import { DocumentoEnRevisar } from './documento-en-revisar'
 import {
   cascadaDelTotal,
   estadoDeLosPasos,
@@ -113,13 +118,32 @@ export interface PropsVistaPorPasos {
   onAbrirOpcion: (itemId: string) => void
   onRecibirEnBandeja: (itemId: string, lecturas: LecturaDevuelta[]) => void
   refrescar: () => void
+  /**
+   * V2 · los servicios nuevos que se están aceptando: su bloque se pinta ya, con «Guardando…» en
+   * el precio, y no entran al total hasta que el servidor responde (`aceptar-optimista.ts`).
+   */
+  provisionales?: readonly Provisional[]
 }
 
 type Override = { seleccion?: string[]; va?: boolean }
 
 export default function VistaPorPasos(p: PropsVistaPorPasos) {
   const [paso, setPaso] = useState<NumeroDePaso>(p.pasoInicial)
+  // «Lo que suma» se puede ocultar (brief del 2026-10-16); cerrada, su pastilla va al encabezado.
+  const sumaVisible = usePreferenciaLoQueSuma()
+  const marco = useContext(MarcoCotizacionContexto)
   const [tarifasVistas, setTarifasVistas] = useState(p.pasoInicial === 2)
+  // H8 · el ✓ de «Tarifas» se perdía al recargar: queda anotado en esta pestaña, por cotización.
+  const claveTarifasVistas = `one:tarifas-vistas:${p.cotizacionId}`
+  useEffect(() => {
+    try {
+      if (window.sessionStorage.getItem(claveTarifasVistas) === '1') setTarifasVistas(true)
+    } catch { /* sin almacenamiento: como antes */ }
+  }, [claveTarifasVistas])
+  useEffect(() => {
+    if (!tarifasVistas) return
+    try { window.sessionStorage.setItem(claveTarifasVistas, '1') } catch { /* sin almacenamiento */ }
+  }, [tarifasVistas, claveTarifasVistas])
   const [abiertos, setAbiertos] = useState<ReadonlySet<string>>(() => new Set())
   const [ocupado, setOcupado] = useState(false)
   // Lo que la asesora acaba de tocar y el servidor todavía no confirma: la pantalla lo muestra ya
@@ -127,19 +151,36 @@ export default function VistaPorPasos(p: PropsVistaPorPasos) {
   const [overrides, setOverrides] = useState<Record<string, Override>>({})
   const [margenLocal, setMargenLocal] = useState<number | null>(null)
   const [ocultos, setOcultos] = useState<ReadonlySet<string>>(() => new Set())
-  const claveServidor = JSON.stringify(p.tarifasDelServidor) + p.margenPct + p.filas.map(f => `${f.id}:${f.grupo}:${f.entra_al_precio}`).join(',')
-  const [claveVista, setClaveVista] = useState(claveServidor)
-  if (claveVista !== claveServidor) {
-    setClaveVista(claveServidor)
+  // D2 (H5) · las opciones que «Deshacer» acaba de reponer, mientras el servidor no las trae: sin
+  // ellas, la tarifa se calculaba un momento sin la opción repuesta (una cifra que no existe).
+  const [repuestas, setRepuestas] = useState<PropsVistaPorPasos['filas']>([])
+  // Lo optimista se borra cuando llega la versión del servidor, cada cosa con SU parte: la
+  // elección de las tarifas con las tarifas, lo oculto con las líneas. Hasta H5 una sola clave
+  // borraba todo en cuanto llegaban las líneas (la vista fresca, antes que el refresco de las
+  // tarifas), y la tarifa se pintaba un momento con la elección vieja del servidor.
+  const claveTarifas = JSON.stringify(p.tarifasDelServidor) + p.margenPct
+  const claveFilas = p.filas.map(f => `${f.id}:${f.grupo}:${f.entra_al_precio}`).join(',')
+  const [claveVistaTarifas, setClaveVistaTarifas] = useState(claveTarifas)
+  if (claveVistaTarifas !== claveTarifas) {
+    setClaveVistaTarifas(claveTarifas)
     setOverrides({})
     setMargenLocal(null)
+  }
+  const [claveVistaFilas, setClaveVistaFilas] = useState(claveFilas)
+  if (claveVistaFilas !== claveFilas) {
+    setClaveVistaFilas(claveFilas)
     setOcultos(new Set())
   }
+  if (repuestas.length > 0 && repuestas.every(r => p.filas.some(f => f.id === r.id))) setRepuestas([])
+  const filasDeLaVista = useMemo(
+    () => (repuestas.length === 0 ? p.filas : [...p.filas, ...repuestas.filter(r => !p.filas.some(f => f.id === r.id))]),
+    [p.filas, repuestas],
+  )
 
   const { ofrecer, aviso } = useDeshacer(p.refrescar)
 
   // ── Lo calculado en el navegador ──
-  const filasVivas = useMemo(() => p.filas.filter(f => !ocultos.has(f.id)), [p.filas, ocultos])
+  const filasVivas = useMemo(() => filasDeLaVista.filter(f => !ocultos.has(f.id)), [filasDeLaVista, ocultos])
   const params = useMemo(() => (margenLocal === null ? p.params : { ...p.params, margenPct: margenLocal }), [p.params, margenLocal])
   const lineas = useMemo(() => lineasParaLaCascada(filasVivas, p.adicionalesPorItem), [filasVivas, p.adicionalesPorItem])
   const tarifasPantalla = useMemo(
@@ -149,12 +190,25 @@ export default function VistaPorPasos(p: PropsVistaPorPasos) {
   const tarifas = useMemo(() => tarifasCalculadas(lineas, params, tarifasPantalla), [lineas, params, tarifasPantalla])
   const total = useMemo(() => cascadaDelTotal(lineas, params, tarifasPantalla), [lineas, params, tarifasPantalla])
   const precios = useMemo(() => preciosDeLasOpciones(lineas, params), [lineas, params])
+  // V2 · los bloques que se están aceptando se pintan en el viaje; al total y a las tarifas no
+  // entran (no tienen precio todavía).
+  const provisionales = useMemo(() => {
+    const ids = new Set(p.filas.map(f => f.id))
+    return provisionalesVigentes(p.provisionales ?? [], ids).map(x => x.fila)
+  }, [p.provisionales, p.filas])
+  const idsProvisionales = useMemo(() => new Set(provisionales.map(f => f.id)), [provisionales])
   const tramos = useMemo(
     () => viajeEnOrden(filasVivas, { destino: p.destinoViaje, fechaInicio: p.fechasViaje?.inicio ?? null }),
     [filasVivas, p.destinoViaje, p.fechasViaje],
   )
+  // Lo que pinta «El viaje, en orden»: los de verdad y, en su lugar del viaje, los provisionales.
+  const tramosDelPaso1 = useMemo(
+    () => (provisionales.length === 0 ? tramos : viajeEnOrden([...filasVivas, ...provisionales], { destino: p.destinoViaje, fechaInicio: p.fechasViaje?.inicio ?? null })),
+    [tramos, filasVivas, provisionales, p.destinoViaje, p.fechasViaje],
+  )
   const servicios = tramos.flatMap(t => t.servicios)
-  const porId = useMemo(() => new Map(p.filas.map(f => [f.id, f])), [p.filas])
+  const serviciosDelPaso1 = tramosDelPaso1.flatMap(t => t.servicios)
+  const porId = useMemo(() => new Map([...filasDeLaVista, ...provisionales].map(f => [f.id, f])), [filasDeLaVista, provisionales])
   const nombreDeOpcion = useCallback((id: string) => {
     const f = porId.get(id)
     return f ? nombreVisibleDeLinea(f) || f.nombre || 'Opción' : 'Opción'
@@ -162,8 +216,7 @@ export default function VistaPorPasos(p: PropsVistaPorPasos) {
   const faltaPrecio = useCallback((id: string) => {
     const f = porId.get(id)
     if (!f) return null
-    const tipos = tiposSinPrecio({ grupo: f.grupo ?? null, tarifa_pax: f.tarifa_pax }, p.composicionViaje)
-    return tipos.length > 0 ? textoCortoSinPrecio(tipos) : null
+    return textoCortoDeOpcion({ grupo: f.grupo ?? null, tarifa_pax: f.tarifa_pax }, p.composicionViaje)
   }, [porId, p.composicionViaje])
   const candidatasPorServicio = useMemo(() => new Map(ranurasConAlternativas(lineas).map(r => [r.grupo, r.candidatos])), [lineas])
   const conOpciones: ServicioConOpciones[] = servicios
@@ -186,7 +239,10 @@ export default function VistaPorPasos(p: PropsVistaPorPasos) {
     bajoMinimo: autorizacionVigente ? [] : bajoMinimo.map(t => t.nombre ?? 'Tarifa'),
     tarifasVistas,
     vanAlCliente: vanAlCliente.map(t => t.nombre ?? 'Tarifa'),
-    rojos: p.conteoLista.rojos + (sinCosto.length > 0 ? 1 : 0),
+    // D8 (H7) · un solo conteo: con la lista única, la barra cuenta sus renglones rojos, que ya traen
+    // el precio por pasajero que falta y la línea sin costo. Sumarle `sinCosto` contaba dos veces lo
+    // mismo («2 cosas impiden enviar» con una sola en la lista). Sin la lista, como siempre.
+    rojos: p.listaUnica ? p.listaUnica.impide.length : p.conteoLista.rojos + (sinCosto.length > 0 ? 1 : 0),
     ambar: p.conteoLista.ambar + p.pantallazosPorAceptar,
     texto: p.texto,
     enviada: p.enviada,
@@ -278,6 +334,10 @@ export default function VistaPorPasos(p: PropsVistaPorPasos) {
   }
 
   const borrar = (itemIds: string[], mensaje: string) => {
+    // D2 · lo que hay que volver a pintar si se deshace: las opciones y la elección de cada tarifa.
+    const filasBorradas = p.filas.filter(f => itemIds.includes(f.id))
+    const eleccionAntes: Record<string, Override> = Object.fromEntries(tarifasPantalla.map(t => [t.id, { seleccion: [...t.seleccion], va: t.vaEnPropuesta }]))
+    setRepuestas(r => r.filter(f => !itemIds.includes(f.id)))
     setOcultos(o => new Set([...o, ...itemIds]))
     void correr(async () => {
       const r = await borrarOpcionesPorPasos(p.cotizacionId, itemIds)
@@ -290,7 +350,16 @@ export default function VistaPorPasos(p: PropsVistaPorPasos) {
         for (const [id, lecturas] of Object.entries(r.devueltas)) if (lecturas.length > 0) p.onRecibirEnBandeja(id, lecturas)
         void soltarImagenesPorPasos(p.cotizacionId, r.fotos)
       }
-      ofrecer(mensaje, () => reponerOpcionesPorPasos(p.cotizacionId, r.fotos, r.marcas), devolverALaBandeja)
+      ofrecer(mensaje, async () => {
+        const repuesto = await reponerOpcionesPorPasos(p.cotizacionId, r.fotos, r.marcas)
+        if (repuesto.success) {
+          // Se pinta ya como quedó en la base (la opción y la tarifa de antes), sin esperar el refresco.
+          setRepuestas(filasBorradas)
+          setOverrides(eleccionAntes)
+          setOcultos(o => { const n = new Set(o); itemIds.forEach(id => n.delete(id)); return n })
+        }
+        return repuesto
+      }, devolverALaBandeja)
       p.refrescar()
     })
   }
@@ -329,17 +398,8 @@ export default function VistaPorPasos(p: PropsVistaPorPasos) {
     })
   }
 
-  const autorizacion: AutorizacionVista | null = p.salida?.aplica
-    ? {
-        bloquea: p.salida.bloquea,
-        dueno: p.salida.dueno,
-        esDueno: p.salida.puedeAutorizar || (!!p.salida.excepcion && p.salida.puedeAutorizar),
-        vigente: p.salida.excepcion ? { por: p.salida.excepcion.autorizadaPor, motivo: p.salida.excepcion.motivo } : null,
-        perdida: !!p.salida.perdida,
-        pedido: p.pedido,
-        disponible: p.salida.excepcionesDisponibles,
-      }
-    : null
+  // P6 · con la excepción vigente, el dueño la puede retirar (`autorizacion-vista.ts`, H6).
+  const autorizacion: AutorizacionVista | null = autorizacionDeLaSalida(p.salida, p.pedido)
 
   const alternar = (grupo: string) => setAbiertos(a => {
     const n = new Set(a)
@@ -354,7 +414,7 @@ export default function VistaPorPasos(p: PropsVistaPorPasos) {
       <h2 className="m-0 text-base font-bold">1 · Armar el viaje</h2>
       <p className="m-0 text-[13px] text-[#6E6A62]">Pega los pantallazos de lo que cotizaste, en el orden que quieras. ONE lee cada uno y te dice a dónde va.</p>
       {p.editable && p.bandeja}
-      {servicios.length === 0 ? (
+      {serviciosDelPaso1.length === 0 ? (
         <p className="m-0 rounded-xl border border-[#E2DED5] bg-white p-6 text-center text-[13px] text-[#6E6A62]">
           Todavía no hay servicios. Cada pantallazo que aceptes aparece aquí, en el orden del viaje.
         </p>
@@ -371,13 +431,17 @@ export default function VistaPorPasos(p: PropsVistaPorPasos) {
               {abiertos.size === servicios.length ? 'Contraer todo' : 'Expandir todo'}
             </button>
           </div>
-          {tramos.map(tr => (
+          {tramosDelPaso1.map(tr => (
             <div key={tr.clave} className="flex flex-col gap-2" data-tramo={tr.clave}>
               <div className="flex items-baseline gap-2">
                 <h4 className="m-0 text-[13px] font-bold uppercase tracking-wide text-[#6E6A62]">{tr.titulo}</h4>
                 <span className="h-px flex-1 bg-[#E2DED5]" />
               </div>
               {tr.servicios.map(s => {
+                if (s.opciones.every(id => idsProvisionales.has(id))) {
+                  const resumenProv = resumenDeOpcion(porId.get(s.opciones[0])!) ?? nombreDeOpcion(s.opciones[0])
+                  return <ServicioProvisional key={s.grupo} servicio={s} resumen={resumenProv} />
+                }
                 const renglon = renglones.find(r => r.grupo === s.grupo)
                 const resumen = s.opciones.length > 1
                   ? `${s.opciones.length} opciones · ${s.opciones.map(nombreDeOpcion).join(' · ')}`
@@ -429,6 +493,19 @@ export default function VistaPorPasos(p: PropsVistaPorPasos) {
                               </>
                             ),
                           })}
+                          {p.editable && (() => {
+                            const f = porId.get(id)
+                            const tipos = f ? tiposSinPrecio({ grupo: f.grupo ?? null, tarifa_pax: f.tarifa_pax }, p.composicionViaje) : []
+                            return tipos.length > 0 ? (
+                              <PrecioQueFaltaPorPasos
+                                itemId={id}
+                                nombre={nombreDeOpcion(id)}
+                                tipos={tipos}
+                                moneda={monedaDeTarifa(leerTarifaPax(f?.tarifa_pax)).moneda}
+                                onGuardado={p.refrescar}
+                              />
+                            ) : null
+                          })()}
                         </div>
                       )
                     })}
@@ -481,7 +558,9 @@ export default function VistaPorPasos(p: PropsVistaPorPasos) {
       onPedir={() => void correr(async () => {
         const r = await pedirAutorizacionPorPasos(p.cotizacionId)
         if (!r.success) { toast.error(r.error); return }
-        toast.success(`Quedó pedido a ${r.a ?? 'quien autoriza'}: le llega en sus notificaciones.`)
+        // P7 · solo se promete la notificación si se escribió; si no, queda en la actividad del negocio.
+        if (r.notificado) toast.success(`Quedó pedido a ${r.a ?? 'quien autoriza'}: le llega en sus notificaciones.`)
+        else toast.warning(`Quedó pedido en la actividad del negocio, pero no le llegó la notificación a ${r.a ?? 'quien autoriza'}: avísale tú.`)
         p.refrescar()
       })}
       onAutorizar={motivo => {
@@ -525,6 +604,16 @@ export default function VistaPorPasos(p: PropsVistaPorPasos) {
     />
   )
 
+  // D7 · el documento de Revisar se vuelve a pedir cuando cambia lo que imprime: las líneas (costo,
+  // precio, grupo, si suman), las tarifas, el margen y el estado del texto.
+  // Armada aparte (no con la clave de lo optimista de arriba): es la del documento, y cambia con él.
+  const claveDelDocumento = [
+    total.precioVenta,
+    p.texto,
+    p.margenPct,
+    JSON.stringify(p.tarifasDelServidor),
+    p.filas.map(f => `${f.id}:${f.grupo}:${f.entra_al_precio}:${f.subtotal ?? ''}:${f.precio_venta ?? ''}`).join(','),
+  ].join('|')
   const paso3 = (
     <RevisarPorPasos
       total={total.precioVenta}
@@ -535,7 +624,12 @@ export default function VistaPorPasos(p: PropsVistaPorPasos) {
         ? (p.listaUnica.impide[0]?.texto ?? null)
         : p.motivoBotonEnviar ?? (sinCosto.length > 0 ? `${sinCosto[0].motivo}: ${sinCosto[0].servicio}.` : null)}
       lista={p.listaUnica ? <ListaUnicaPorPasos lista={p.listaUnica} onIr={irDesdeLaLista} /> : p.revisarLista}
-      documento={p.revisarDocumento}
+      documento={(
+        <>
+          <DocumentoEnRevisar cotizacionId={p.cotizacionId} clave={claveDelDocumento} />
+          {p.revisarDocumento}
+        </>
+      )}
       onDescargar={p.onDescargar}
       onEnviar={() => void correr(async () => {
         const r = await enviarPorPasos(p.cotizacionId)
@@ -561,8 +655,11 @@ export default function VistaPorPasos(p: PropsVistaPorPasos) {
           else if (a.tipo === 'pegar') p.onPegar()
         }}
       />
-      <div className="grid grid-cols-1 gap-4 lg:grid-cols-[260px_minmax(0,1fr)]">
+      <div className={`grid grid-cols-1 gap-4 ${clasesLoQueSuma(sumaVisible.preferencia).rejilla}`}>
         <LoQueSuma
+          preferencia={sumaVisible.preferencia}
+          onElegir={sumaVisible.elegir}
+          encabezado={marco ? (marco.encabezado ?? null) : undefined}
           datos={{
             renglones,
             nombreDeOpcion,
@@ -573,6 +670,7 @@ export default function VistaPorPasos(p: PropsVistaPorPasos) {
             otrasQueVan: vanAlCliente.filter(t => !t.esPrincipal).map(t => ({ nombre: t.nombre ?? 'Tarifa', precio: t.precio })),
             pantallazosEnBandeja: p.pantallazosPorAceptar,
             incompleto: sinCosto.length > 0,
+            rojos: entradaPasos.rojos,
           }}
         />
         <div className="min-w-0 pb-36 lg:pb-4">{paso === 1 ? paso1 : paso === 2 ? paso2 : paso3}</div>

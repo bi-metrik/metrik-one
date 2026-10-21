@@ -62,7 +62,7 @@ vi.mock('@/lib/supabase/server', () => ({
 vi.mock('@/lib/modulos/exigir-modulo', async () =>
   (await import('../../../test/exigir-modulo-doble')).dobleExigirModulo())
 const ejecutarBarrido = vi.fn(async (_ws: string) => ({ ejecutadas: 0 }))
-vi.mock('@/lib/compliance/barrido', () => ({ ejecutarBarrido: (ws: string) => ejecutarBarrido(ws) }))
+vi.mock('@/lib/compliance/barrido', () => ({ ejecutarBarrido: (ws: string) => ejecutarBarrido(ws), BarridoEnCurso: class extends Error {} }))
 
 function constructor(tabla: string) {
   const eqs: Fila = {}

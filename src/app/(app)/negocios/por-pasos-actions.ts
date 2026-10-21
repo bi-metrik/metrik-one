@@ -36,6 +36,7 @@ import { createServiceClient } from '@/lib/supabase/server'
 import { registrarActividad } from '@/lib/activity/registrar-actividad'
 import { evaluarSalida, leerUltimaExcepcion, recortarParaLog, TABLA_EXCEPCIONES } from '@/lib/cotizaciones/piso-salida-datos'
 import { pctTexto } from '@/lib/cotizaciones/piso-salida'
+import { CAUSA_RETIRADA } from '@/lib/cotizaciones/autorizacion-vista'
 import { esDuenoDelWorkspace, leerPlatformAdmin } from '@/lib/permissions/dueno-workspace'
 
 
@@ -478,7 +479,7 @@ export async function deshacerPorPasos(op: OperacionDeshacer): Promise<Resultado
  * workspace por la tabla `notificaciones` (P7 de la nota técnica). Quién autoriza sale de la
  * configuración del workspace (el rol de dueño), nunca de un nombre escrito en el código.
  */
-export async function pedirAutorizacionPorPasos(cotizacionId: string): Promise<ResultadoPorPasos<{ a: string | null }>> {
+export async function pedirAutorizacionPorPasos(cotizacionId: string): Promise<ResultadoPorPasos<{ a: string | null; notificado: boolean }>> {
   const { supabase, workspaceId, staffId, error } = await getWorkspace()
   if (error || !workspaceId) return { success: false, error: 'No autenticado' }
   const guard = await exigirPorPasos(supabase, cotizacionId)
@@ -513,6 +514,9 @@ export async function pedirAutorizacionPorPasos(cotizacionId: string): Promise<R
   const svc = servicio as any
   const { data: duenos } = await svc.from('profiles').select('id').eq('workspace_id', workspaceId).eq('role', 'owner').eq('platform_admin', false)
   const destinatarios = ((duenos ?? []) as { id: string }[]).map(d => d.id)
+  // P7 (H8 de la verificación D) · si la notificación no se escribe, la pantalla no puede decir
+  // «le llega en sus notificaciones»: el pedido quedó en la actividad, y eso es lo que se dice.
+  let notificado = false
   if (destinatarios.length > 0) {
     const { error: errNot } = await svc.from('notificaciones').insert(destinatarios.map(id => ({
       workspace_id: workspaceId,
@@ -526,8 +530,9 @@ export async function pedirAutorizacionPorPasos(cotizacionId: string): Promise<R
       metadata: { cotizacion_id: cotizacionId, motivo: 'margen_bajo_minimo' },
     })))
     if (errNot) console.error('[por-pasos] no se pudo avisar al dueño:', errNot.message)
+    else notificado = true
   }
-  return { success: true, a: salida.dueno }
+  return { success: true, a: salida.dueno, notificado }
 }
 
 /**
@@ -547,7 +552,7 @@ export async function retirarAutorizacionPorPasos(cotizacionId: string): Promise
   if (!ultima || ultima.perdidaAt !== null) return { success: false, error: 'No hay una autorización vigente que retirar.' }
   const { data: marcada, error: errUpd } = await servicio
     .from(TABLA_EXCEPCIONES)
-    .update({ perdida_at: new Date().toISOString(), perdida_causa: 'La retiró el dueño.' })
+    .update({ perdida_at: new Date().toISOString(), perdida_causa: CAUSA_RETIRADA })
     .eq('id', ultima.id)
     .eq('workspace_id', workspaceId)
     .is('perdida_at', null)
@@ -608,8 +613,10 @@ export async function getPedidoDeAutorizacion(cotizacionId: string): Promise<{ p
  * La regla nueva (aprobada por Mauricio el 2026-10-12, P12): una opción de vuelo o actividad
  * que va al cliente y no trae el precio del niño o del infante impide enviar. Solo aquí, con el
  * interruptor encendido: apagado, el envío de siempre no la conoce.
+ *
+ * `canal = 'descargado'` es el «Sí, ya se la mandé» tras descargar el PDF (H33).
  */
-export async function enviarPorPasos(cotizacionId: string): Promise<ResultadoPorPasos> {
+export async function enviarPorPasos(cotizacionId: string, canal?: 'enviar' | 'descargado'): Promise<ResultadoPorPasos> {
   const { supabase, error } = await getWorkspace()
   if (error) return { success: false, error: 'No autenticado' }
   const guard = await exigirPorPasos(supabase, cotizacionId)
@@ -625,6 +632,6 @@ export async function enviarPorPasos(cotizacionId: string): Promise<ResultadoPor
   const { viaje } = await leerViajeDelNegocio(supabase, foto.ctx.negocioId)
   const motivo = motivoSinPrecioPorPasajero(opcionesSinPrecio(foto.ctx.items, ids, viaje.composicion))
   if (motivo) return { success: false, error: motivo }
-  const r = await enviarCotizacion(cotizacionId)
+  const r = await enviarCotizacion(cotizacionId, canal)
   return r.success ? { success: true } : { success: false, error: r.error ?? 'No se pudo enviar.' }
 }

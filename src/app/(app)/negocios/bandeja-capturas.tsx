@@ -40,6 +40,7 @@ import {
   filasDelLote,
   fraseDeFila,
   menuDeFila,
+  nombreNuevo,
   type Eleccion,
   type EstadoAlAceptar,
   type FraseDeFila,
@@ -67,6 +68,7 @@ import {
 import { leidosPorSlug } from '@/lib/cotizaciones/correcciones'
 import { definicionDeTipo, TIPOS_CON_PANTALLAZO, TIPOS_RANURA, type TipoRanura } from '@/lib/cotizaciones/ranuras-cotizacion'
 import type { Composicion, LecturaCasilla } from '@/lib/cotizaciones/tarifa-pasajero'
+import type { EventoProvisional } from '@/lib/cotizaciones/aceptar-optimista'
 import { PREGUNTA_AL_SALIR, saleDeLaPagina } from '@/lib/cotizaciones/aviso-al-salir'
 import { AlertaDecision } from '@/components/viaje/alerta-decision'
 import { BTN, BTN_PRIM, BTN_X, INPUT, INPUT_DUDOSO, LINK, SPIN } from '@/components/viaje/estilo'
@@ -364,6 +366,8 @@ export default function BandejaCapturas({
   onCambio,
   porPasos = false,
   onConteo,
+  onProvisional,
+  onVistaFresca,
 }: {
   cotizacionId: string
   /** Las líneas de la cotización: contra ellas se dice a dónde irá cada captura. */
@@ -395,6 +399,13 @@ export default function BandejaCapturas({
   porPasos?: boolean
   /** Cuántos esperan «Aceptar» y cuántos se leen: lo cuenta la barra de pasos. */
   onConteo?: (c: { porAceptar: number; leyendo: number }) => void
+  /**
+   * V2 (por pasos) · «Aceptar» de un servicio NUEVO: el bloque se pinta en el acto
+   * (`aceptar-optimista.ts`). Avisa cuándo empieza, cuándo el servidor lo aceptó y cuándo no.
+   */
+  onProvisional?: (e: EventoProvisional) => void
+  /** V2 · la cotización como quedó después de «Aceptar» (por pasos): la respuesta ya la trae. */
+  onVistaFresca?: (vista: unknown) => void
 }) {
   const router = useRouter()
   const refrescar = () => (onCambio ? onCambio() : router.refresh())
@@ -484,6 +495,7 @@ export default function BandejaCapturas({
         destinoViaje: destinoVivo.current,
         ubicaciones: ubicacionesVivas.current,
         comparar: !forzadas.current.has(id),
+        ...(porPasos ? { porPasos: true } : {}),
       }),
       vigente: () => turnos.current.get(id) === turno,
       informar: cambio => actualizar(id, cambio),
@@ -540,6 +552,11 @@ export default function BandejaCapturas({
       if (recibidas.current.has(d.clave)) return
       recibidas.current.add(d.clave)
       const lineas = itemsVivos.current.filter(i => i.id !== d.itemId)
+      // D2 (H5, por pasos) · la fila «Agregada a…» de la opción que se borró ya no apunta a nada:
+      // sale de la bandeja, y el pantallazo que vuelve no se compara contra ella (era «el mismo
+      // servicio», sin «Aceptar»).
+      const deLaBorrada = (c: Captura) => porPasos && c.estado.fase === 'aceptada' && c.itemId === d.itemId
+      const vigentesSinLaBorrada = vigentes.current.filter(c => !deLaBorrada(c))
       const nuevas: Captura[] = []
       for (const l of d.lecturas) {
         let lectura: LecturaCasilla
@@ -550,11 +567,12 @@ export default function BandejaCapturas({
           capId: id,
           borrador,
           lineas,
-          comparables: opcionesParaComparar(lineas, [...nuevas, ...vigentes.current], id),
+          comparables: opcionesParaComparar(lineas, [...nuevas, ...vigentesSinLaBorrada], id),
           composicion: composicionViva.current,
         destinoViaje: destinoVivo.current,
           ubicaciones: ubicacionesVivas.current,
           comparar: true,
+          ...(porPasos ? { porPasos: true } : {}),
         })
         const alertas = lectura.alertas ?? []
         if (l.huella) huellas.current.set(l.huella, id)
@@ -566,9 +584,9 @@ export default function BandejaCapturas({
           leida: r.leida, error: null, huella: l.huella, ...(r.pregunta ? { abierta: true } : {}),
         })
       }
-      if (nuevas.length > 0) setCapturas(cs => [...nuevas, ...cs])
+      if (nuevas.length > 0 || porPasos) setCapturas(cs => [...nuevas, ...cs.filter(c => !deLaBorrada(c))])
     }
-  }, [])
+  }, [porPasos])
   // Las listas, aceptadas de a una en la fila de siempre (el lote con un solo recálculo es C5).
   const aceptarListasRef = useRef<() => void>(() => {})
   useImperativeHandle(receptor, () => ({
@@ -610,6 +628,7 @@ export default function BandejaCapturas({
         destinoViaje: destinoVivo.current,
       ubicaciones: ubicacionesVivas.current,
       comparar: true,
+      ...(porPasos ? { porPasos: true } : {}),
     })
     const alertas = r.alertas ?? []
     setCapturas(cs => [{
@@ -797,12 +816,16 @@ export default function BandejaCapturas({
     correcciones: CorreccionDeBandeja[] = [],
     /** Por pasos (C5): el estado con que llega un servicio nuevo (P11). */
     estado?: EstadoAlAceptar | null,
+    /** V2 · un servicio nuevo: su bloque se pinta ya, con este nombre. */
+    servicioNuevo?: string | null,
   ) {
     const b = c.borrador
     if (!b || aceptando.current.has(c.id)) return
     aceptando.current.add(c.id)
     const antes = c.estado
     actualizar(c.id, { estado: { fase: 'aceptando' }, error: null })
+    const provisional = porPasos && servicioNuevo && onProvisional ? onProvisional : null
+    provisional?.({ tipo: 'inicio', capturaId: c.id, tipoRanura: b.tipo, lectura: b.lectura, nombreServicio: servicioNuevo! })
     const cuerpo: BorradorParaAceptar = {
       tipo: b.tipo, lecturaJson: b.lecturaJson, firma: b.firma, pistas: b.pistas, decision,
       destinoId: destinoId ?? null, imagen: c.dataUrl || null,
@@ -813,8 +836,19 @@ export default function BandejaCapturas({
     } as BorradorParaAceptar
     const turno = colaAceptar.current.then(() => aceptarPorRuta(cotizacionId, cuerpo))
     colaAceptar.current = turno.catch(() => undefined)
-    const d = desenlaceDeAceptacion(await turno)
+    const crudo = await turno
+    const d = desenlaceDeAceptacion(crudo)
     aceptando.current.delete(c.id)
+    // V2 · por pasos, la respuesta ya trae la cotización como quedó: se pinta sin pedirla otra vez.
+    const vista = porPasos && d.tipo === 'aceptada' ? (crudo as { vista?: unknown } | null)?.vista : null
+    if (vista && onVistaFresca) onVistaFresca(vista)
+    // D1 · si el servidor no la aceptó, el bloque se quita y se dice; si la aceptó, se queda hasta
+    // que la página traiga la opción.
+    if (provisional) {
+      provisional(d.tipo === 'aceptada'
+        ? { tipo: 'aceptada', capturaId: c.id, itemId: d.itemId }
+        : { tipo: 'revertir', capturaId: c.id, mensaje: d.tipo === 'error' ? d.mensaje : null, avisar: d.tipo === 'error' })
+    }
     aplicarDesenlace(c, antes, d)
     // Como antes: un error deja la fila como estaba y no refresca la página.
     if (d.tipo !== 'error') refrescar()
@@ -893,7 +927,9 @@ export default function BandejaCapturas({
       return
     }
     const cuerpo = cuerpoDeAceptar(c.borrador, f, { imagen: null, correcciones: null, idAceptacion: c.id, destinoId: dest })
-    void aceptar(c, cuerpo.decision, cuerpo.destinoId, correcciones, estadoDe(c, f))
+    // V2 · un servicio nuevo se pinta ya, con el nombre que dice su frase.
+    const nuevo = f.destino.como === 'nueva' && !f.capturaDestino ? nombreNuevo(c.borrador, destinoViaje) : null
+    void aceptar(c, cuerpo.decision, cuerpo.destinoId, correcciones, estadoDe(c, f), nuevo)
   }
 
   /**

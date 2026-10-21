@@ -9,6 +9,12 @@ import { createContext } from 'react'
  */
 export interface ContextoMarcoCotizacion {
   activo: true
+  /**
+   * El encabezado fijo del negocio. La cotización por pasos pone ahí, por portal, la pastilla de
+   * «Lo que suma» cuando la columna está cerrada (brief del 2026-10-16). No cambia su marcado.
+   * `null` mientras no ha montado.
+   */
+  encabezado?: HTMLDivElement | null
 }
 
 export const MarcoCotizacionContexto = createContext<ContextoMarcoCotizacion | null>(null)

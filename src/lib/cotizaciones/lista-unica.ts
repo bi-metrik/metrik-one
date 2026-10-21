@@ -62,6 +62,16 @@ export interface EntradaDeLista {
   viaje: string | null
   /** IVA sin calcular: ámbar, no impide enviar (Vera 10). */
   ivaSinCalcular: string | null
+  /**
+   * Con el texto viejo, cuántos párrafos nombran un servicio que salió (`parrafosViejos`). `0` = el
+   * texto es de otros servicios pero ningún párrafo los nombra; ausente = no se sabe.
+   */
+  parrafosMarcados?: number | null
+  /**
+   * Las reservas de varias habitaciones en un solo pantallazo cuya ocupación no cuadra con los
+   * viajeros (`avisoDeReservaQueNoCuadra`). Avisa, no impide (decisión del 2026-10-14).
+   */
+  reservasQueNoCuadran?: readonly { itemId: string; texto: string }[]
 }
 
 /** «Nada impide enviar y no hay nada por revisar.» */
@@ -93,12 +103,19 @@ export function listaUnica(e: EntradaDeLista): ListaUnica {
     revisar.push({ clave: 'bandeja', texto: `${n} ${n === 1 ? 'pantallazo sin aceptar: no está' : 'pantallazos sin aceptar: no están'} en el precio.`, ir: { a: 'bandeja' } })
   }
   if (e.texto === 'sinrevisar') revisar.push({ clave: 'texto', texto: 'El texto para el cliente lo escribió ONE y nadie lo ha leído.', ir: { a: 'texto' } })
-  if (e.texto === 'viejo') revisar.push({ clave: 'texto', texto: 'El texto se escribió con otros servicios: revisa el párrafo marcado.', ir: { a: 'texto' } })
+  if (e.texto === 'viejo') {
+    // Re-verificación D · sin un párrafo que nombre lo que salió, no hay «párrafo marcado» que revisar.
+    const texto = e.parrafosMarcados === 0
+      ? 'El texto se escribió con otros servicios: léelo o actualízalo con ONE.'
+      : 'El texto se escribió con otros servicios: revisa el párrafo marcado.'
+    revisar.push({ clave: 'texto', texto, ir: { a: 'texto' } })
+  }
   for (const s of e.noVan) revisar.push({ clave: `no-va:${s.itemId}`, texto: `${s.nombre} no va: el cliente no lo verá ni lo paga.`, ir: { a: 'opcion', itemId: s.itemId } })
   if (e.faltaDia) revisar.push({ clave: 'dia', texto: e.faltaDia, ir: null })
   if (e.margenBajoAviso) revisar.push({ clave: 'aviso-margen', texto: e.margenBajoAviso, ir: { a: 'tarifas' } })
   if (e.recargo) revisar.push({ clave: 'recargo', texto: e.recargo, ir: null })
   if (e.viaje) revisar.push({ clave: 'viaje', texto: e.viaje, ir: { a: 'viaje' } })
   if (e.ivaSinCalcular) revisar.push({ clave: 'iva', texto: e.ivaSinCalcular, ir: null })
+  for (const r of e.reservasQueNoCuadran ?? []) revisar.push({ clave: `reserva:${r.itemId}`, texto: r.texto, ir: { a: 'opcion', itemId: r.itemId } })
   return { impide, revisar }
 }

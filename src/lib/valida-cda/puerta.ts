@@ -54,7 +54,7 @@ import { TERMINOS_PLAN as TERMINOS_AUTOSERVICIO } from '@/lib/valida-registro/te
  * En la página `/valida` (que se renderiza en cada navegación, a diferencia de un layout) y en
  * `accesoValida()` de `valida-consultas.ts`, por donde pasan TODAS las acciones del módulo: lo que
  * la pantalla no muestra también se niega por POST. Las dos preguntan a `validaCdaPermiteOperar()`;
- * las dos acciones que hacen una CONSULTA NUEVA (`consultarValida` y `prepararLoteValida`) preguntan
+ * las dos acciones que hacen una CONSULTA NUEVA (`consultarValida` y el cargue masivo de `valida-lotes.ts`) preguntan
  * además a `validaCdaPermiteConsultar()`, que niega con las consultas restringidas por mora.
  *
  * ## El plazo para aceptar y la mora (2026-09-23)

@@ -49,12 +49,29 @@ function constructor(tabla: string) {
     if (tabla === 'bloque_configs' && columnas.includes('bloque_definitions')) {
       salida.bloque_definitions = { tipo: f.tipo }
     }
+    // La cotización de una línea (`items` con `cotizaciones(...)`): su estado, negocio y espacio.
+    if (tabla === 'items' && columnas.includes('cotizaciones(')) {
+      const c = (tablas.cotizaciones ?? []).find(x => x.id === f.cotizacion_id)
+      salida.cotizaciones = c ? { estado: c.estado, negocio_id: c.negocio_id ?? null, workspace_id: c.workspace_id ?? null, convencion_margen: c.convencion_margen ?? null } : null
+    }
     if (columnas.includes('empresas(')) salida.empresas = null
     if (columnas.includes('oportunidades(')) salida.oportunidades = null
     return salida
   }
 
   const ejecutar = (): { data: unknown; error: { code?: string; message: string } | null } => {
+    // La vista `fotos_catalogo_por_clave` (migración 20261017090000): las fotos por su llave y por
+    // la de cada alias de su perfil. Se calcula de las tablas en cada lectura, como la base.
+    if (tabla === 'fotos_catalogo_por_clave') {
+      const fotos = tablas.fotos_catalogo ?? []
+      const perfiles = tablas.fotos_perfiles ?? []
+      const deAlias = (tablas.fotos_perfiles_alias ?? []).flatMap(a => {
+        const p = perfiles.find(x => x.id === a.perfil_id)
+        return p ? fotos.filter(f => f.workspace_id === p.workspace_id && f.tipo === p.tipo && f.clave === p.clave).map(f => ({ ...f, clave_pedida: a.clave })) : []
+      })
+      const filas = [...fotos.map(f => ({ ...f, clave_pedida: f.clave })), ...deAlias].filter(f => filtros.every(fn => fn(f)))
+      return { data: filas, error: null }
+    }
     const todas = tablas[tabla] ?? (tablas[tabla] = [])
     const coinciden = todas.filter(f => filtros.every(fn => fn(f)))
     if (operacion === 'insert') {
@@ -96,6 +113,11 @@ function constructor(tabla: string) {
     neq(col: string, val: unknown) { filtros.push(f => f[col] !== val); return api },
     is(col: string, val: unknown) { filtros.push(f => (f[col] ?? null) === val); return api },
     in(col: string, vals: unknown[]) { filtros.push(f => vals.includes(f[col])); return api },
+    ilike(col: string, patron: string) {
+      const re = new RegExp(`^${patron.replace(/[.*+?^${}()|[\]\\]/g, '\\$&').replace(/%/g, '.*').replace(/_/g, '.')}$`, 'i')
+      filtros.push(f => typeof f[col] === 'string' && re.test(f[col] as string))
+      return api
+    },
     order(col: string, opts?: { ascending?: boolean }) {
       orden = { col, asc: opts?.ascending !== false }
       return api

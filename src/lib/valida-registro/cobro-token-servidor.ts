@@ -7,7 +7,7 @@ import { referenciaEnlaceCobro } from '@/lib/cobros/referencia-enlace'
 import { procesarEventoPasarela } from '@/lib/cobros/pago-en-linea'
 import { repoPagoEnLinea } from '@/lib/cobros/pago-en-linea-servidor'
 import type { PasarelaAdapter } from '@/lib/suscripciones/pasarela/adapter'
-import { leerRefMedioPagoEpayco } from '@/lib/suscripciones/pasarela/epayco'
+import { epaycoHabilitado, leerRefMedioPagoEpayco } from '@/lib/suscripciones/pasarela/epayco'
 import { adapterPara } from '@/lib/suscripciones/pasarela/registro'
 import { CALENDARIO_MORA, esEspacioAutogestion, intentoDelDia } from './plan'
 import { titularDelCobro } from './metodo-pago'
@@ -37,6 +37,15 @@ import { titularDelCobro } from './metodo-pago'
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type Db = any
+
+/**
+ * El adaptador para cobrar CON TARJETA: el de ePayco solo con `EPAYCO_HABILITADO=1`. Desde el merge
+ * con #1182, `adapterPara('epayco')` existe siempre (los links de cobro solo piden las llaves); el
+ * cobro sin clic sigue detrás de su interruptor, como antes.
+ */
+function adapterTarjeta(pasarela: string): PasarelaAdapter | null {
+  return pasarela === 'epayco' && epaycoHabilitado() ? adapterPara(pasarela) : null
+}
 
 export interface DepsCobroToken {
   db: SupabaseClient
@@ -223,7 +232,7 @@ export async function cobrarCuotaConTarjeta(
   const intento = p.intento ?? 0
   const db = deps.db as Db
   const ahoraMs = deps.ahoraMs ?? Date.now()
-  const adapter = (deps.adapterPara ?? adapterPara)('epayco')
+  const adapter = (deps.adapterPara ?? adapterTarjeta)('epayco')
   if (!adapter) return { tipo: 'no_aplica', motivo: 'epayco_apagado' }
 
   const cuota = await db
@@ -458,7 +467,7 @@ function diasEntre(desde: string, hasta: string): number {
 export async function cobrarCuotasConTarjeta(deps: DepsCobroToken & { hoy: string; soloPlan?: string }): Promise<ResumenCobroToken> {
   const db = deps.db as Db
   const resumen: ResumenCobroToken = { revisadas: 0, aprobadas: 0, pendientes: 0, rechazadas: 0, yaIntentadas: 0, suspendidos: 0, errores: [] }
-  if (!(deps.adapterPara ?? adapterPara)('epayco')) return resumen
+  if (!(deps.adapterPara ?? adapterTarjeta)('epayco')) return resumen
   let q = db.from('planes_cobro').select('id, workspace_id').eq('pasarela', 'epayco')
   if (deps.soloPlan) q = q.eq('id', deps.soloPlan)
   const planes = await q

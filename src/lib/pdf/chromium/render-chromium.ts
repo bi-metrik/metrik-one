@@ -20,6 +20,8 @@ import { peticionPermitida } from './recursos'
 export interface OpcionesPdf {
   /** HTML del pie (ver `pieDePagina`). Sin él no se imprime pie. */
   pie?: string
+  /** HTML del encabezado de cada hoja. Sin él no se imprime encabezado. */
+  encabezado?: string
   /** Tope de toda la impresión, en ms. */
   timeoutMs?: number
 }
@@ -177,8 +179,8 @@ export async function imprimirHtmlAPdf(html: string, opts: OpcionesPdf = {}): Pr
     const pdf = await page.pdf({
       printBackground: true,
       preferCSSPageSize: true,
-      displayHeaderFooter: Boolean(opts.pie),
-      headerTemplate: '<span></span>',
+      displayHeaderFooter: Boolean(opts.pie || opts.encabezado),
+      headerTemplate: opts.encabezado ?? '<span></span>',
       footerTemplate: opts.pie ?? '<span></span>',
       timeout,
     })

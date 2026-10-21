@@ -13,6 +13,7 @@
 import { aAdicional, etiquetaDeAdicional, type FilaAdicional } from './adicionales'
 import { habitacionesDeTarifa, menoresDeDosAnios, precioPorHabitacion, repartirHabitaciones, type RepartoHabitaciones } from './habitaciones'
 import { precioConMargen, type ConvencionMargen } from './precio-item'
+import { composicionDeTexto, registroDeReserva, type HabitacionDeReserva } from './reserva-habitaciones'
 import {
   aPesos,
   cantidadDeTipo,
@@ -166,7 +167,7 @@ export function filasDeCosto(a: {
       const precioUnitario = p?.precio ?? 0
       filas.push({
         clave: claveDeHabitacion(h.numero),
-        nombre: `Habitación ${h.numero}`,
+        nombre: h.nombre ?? `Habitación ${h.numero}`,
         det: ocupacionCorta(h.ocupacion),
         extra: false,
         adicionalId: null,
@@ -264,7 +265,10 @@ function quienes(c: Composicion): string {
 }
 
 export function resumenDeAlojamiento(r: RepartoHabitaciones): ResumenAlojamiento {
-  const n = r.habitaciones.filter(h => h.rol === 'habitacion').length
+  const van = r.habitaciones.filter(h => h.rol === 'habitacion')
+  // Un pantallazo con el registro de VARIAS habitaciones (`reserva-habitaciones.ts`) cuenta las
+  // suyas: «3 habitaciones», no «1 habitación». Sin registro, una captura es una habitación.
+  const n = van.reduce((a, h) => a + Math.max(1, registroDeReserva(h.lectura).length), 0)
   const g = r.grupo
   const falta = r.faltan && totalPasajeros(r.faltan) > 0
     ? { verbo: (totalPasajeros(r.faltan) === 1 ? 'Falta' : 'Faltan') as 'Falta' | 'Faltan', quien: quienes(r.faltan) }
@@ -272,7 +276,7 @@ export function resumenDeAlojamiento(r: RepartoHabitaciones): ResumenAlojamiento
   const sobra = r.sobran && totalPasajeros(r.sobran) > 0
     ? { verbo: (totalPasajeros(r.sobran) === 1 ? 'Sobra' : 'Sobran') as 'Sobra' | 'Sobran', quien: quienes(r.sobran) }
     : null
-  const referencias = r.habitaciones.length - n
+  const referencias = r.habitaciones.length - van.length
   const cuadre = [
     falta ? `${falta.verbo.toLowerCase()} ${falta.quien}` : null,
     sobra ? `${sobra.verbo.toLowerCase()} ${sobra.quien}` : null,
@@ -395,6 +399,44 @@ export function acomodacionDeHabitaciones(r: RepartoHabitaciones): string | null
   const habs = r.habitaciones.filter(h => h.rol === 'habitacion' && h.ocupacion)
   if (habs.length < 2) return null
   return `${habs.length} habitaciones: ${habs.map(h => ocupacionCorta(h.ocupacion!)).join('; ')}`
+}
+
+/**
+ * La línea de la lista de Revisar cuando una reserva de varias habitaciones en un solo pantallazo
+ * no cuadra con los viajeros: «Posada Enilda: las 3 habitaciones del pantallazo dejan por fuera a
+ * 2 adultos.» `null` si la opción no es una reserva así, o si cuadra. Avisa, no impide enviar.
+ */
+export function avisoDeReservaQueNoCuadra(
+  nombre: string,
+  tarifa: TarifaPax,
+  grupo: Composicion | null,
+): string | null {
+  const habs = habitacionesDeTarifa(tarifa)
+  const registro = habs.length === 1 ? registroDeReserva(habs[0].lectura) : []
+  if (registro.length === 0) return null
+  const r = resumenDeAlojamiento(repartirHabitaciones(habs, grupo ?? tarifa.composicion ?? null, tarifa.correcciones))
+  const n = registro.length
+  const hotel = (habs[0].lectura.identidad.hotel ?? '').trim() || nombre
+  if (r.falta) return `${hotel}: las ${n} habitaciones del pantallazo dejan por fuera a ${r.falta.quien}. Revisa la reserva con el proveedor.`
+  if (r.sobra) return `${hotel}: las ${n} habitaciones del pantallazo son para más gente de la que viaja (${r.sobra.verbo.toLowerCase()} ${r.sobra.quien}). Revisa la reserva con el proveedor.`
+  return null
+}
+
+/**
+ * Cada habitación de una reserva de varias en un solo pantallazo, con su ocupación en las palabras
+ * de ONE: «Doble 1: 2 adultos; Doble 2: 2 adultos; Doble 3: 2 adultos + 1 niño + 1 infante». Es el
+ * registro: el costo sigue siendo el total del pantallazo. Una habitación sin ocupación legible va
+ * con su texto tal cual, o solo con su nombre.
+ */
+export function textoDeHabitacionDeReserva(h: HabitacionDeReserva): string {
+  const c = composicionDeTexto(h.ocupacion)
+  const ocupacion = c ? ocupacionCorta(c) : h.ocupacion
+  return ocupacion ? `${h.nombre}: ${ocupacion}` : h.nombre
+}
+
+/** La acomodación de una reserva de varias habitaciones (`textoDeHabitacionDeReserva`). `null` sin registro. */
+export function acomodacionDeReserva(registro: readonly HabitacionDeReserva[]): string | null {
+  return registro.length >= 2 ? registro.map(textoDeHabitacionDeReserva).join('; ') : null
 }
 
 /**

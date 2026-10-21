@@ -30,6 +30,7 @@ import { etiquetaDeRanura } from '@/lib/cotizaciones/ranuras-pantallazo'
 import { SIN_OPCIONES } from '@/lib/cotizaciones/ubicador-capturas'
 import { aMayusculas } from '@/lib/negocios/mayusculas'
 import { exigirPorPasos } from '@/lib/cotizaciones/por-pasos-datos'
+import { ordenDeFila } from '@/lib/cotizaciones/memo-de-aceptacion'
 
 /**
  * La ranura desde la pantalla: crearla con su nombre, agregarle una opción hermana y
@@ -61,21 +62,25 @@ interface Contexto {
 async function contexto(cotizacionId: string): Promise<Contexto | { error: string }> {
   const { supabase, workspaceId, error } = await getWorkspace()
   if (error || !workspaceId) return { error: 'No autenticado' }
-  const { data: cot } = await (supabase as Supabase)
-    .from('cotizaciones')
-    .select('id, estado, negocio_id, oportunidad_id')
-    .eq('id', cotizacionId)
-    .maybeSingle()
+  // H2 (verificación D) · la cotización y sus líneas, en paralelo: las mismas dos consultas, una
+  // ida menos en serie. Si la cotización no se edita, las líneas se descartan sin usarse.
+  const [{ data: cot }, { data: filas, error: errItems }] = await Promise.all([
+    (supabase as Supabase)
+      .from('cotizaciones')
+      .select('id, estado, negocio_id, oportunidad_id')
+      .eq('id', cotizacionId)
+      .maybeSingle(),
+    // `select('*')`: `ranura_id` la agrega `20260923233000` y nombrarla daría un 400 sin ella.
+    (supabase as Supabase)
+      .from('items')
+      .select('*')
+      .eq('cotizacion_id', cotizacionId)
+      .order('orden'),
+  ])
   if (!cot) return { error: 'Cotización no encontrada' }
   if (!isEditable((cot.estado ?? 'borrador') as EstadoCotizacion)) {
     return { error: 'Esta cotización ya no se edita. Duplícala para trabajar sobre una nueva.' }
   }
-  // `select('*')`: `ranura_id` la agrega `20260923233000` y nombrarla daría un 400 sin ella.
-  const { data: filas, error: errItems } = await (supabase as Supabase)
-    .from('items')
-    .select('*')
-    .eq('cotizacion_id', cotizacionId)
-    .order('orden')
   if (errItems) return { error: errItems.message as string }
   return {
     supabase,
@@ -101,7 +106,9 @@ async function insertarOpcion(
   c: Contexto,
   args: { grupo: string; nombre: string; unidad: string | null; cantidad: number },
 ): Promise<{ id: string } | { error: string }> {
-  const orden = c.items.reduce((m, i) => Math.max(m, Number(i.orden) || 0), 0) + 1
+  // En un lote por pasos el orden lo fija la posición del pantallazo (`ordenDeFila`): las cadenas
+  // de cada tipo corren en paralelo y «el último + 1» daría dos líneas con el mismo orden (H3).
+  const orden = ordenDeFila() ?? c.items.reduce((m, i) => Math.max(m, Number(i.orden) || 0), 0) + 1
   const { data, error } = await c.supabase
     .from('items')
     .insert({

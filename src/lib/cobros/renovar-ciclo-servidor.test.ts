@@ -68,6 +68,7 @@ function base(extra: Partial<Tablas> = {}): Tablas {
     catalogo_servicios: [
       { slug: 'valida-cda-licencia', modulo: 'valida_consulta', disparador_cobro: 'ciclo' },
       { slug: 'licencia-clarity', modulo: 'business', disparador_cobro: 'ciclo' },
+      { slug: 'licencia-sustenta', modulo: 'compliance', disparador_cobro: 'ciclo' },
     ],
     servicios_contratados: [
       // C1 26 1: un contrato cancelado al lado del activo, como en producción.
@@ -160,10 +161,24 @@ describe('lo que no renueva', () => {
     expect((await renovarPlanesPorCiclo({ db: vencido.db, hoy: '2026-11-28' })).renovados).toHaveLength(1)
   })
 
-  it('un plan de otro módulo con auto_renovar no se toca', async () => {
+  it('la licencia de Clarity (módulo business) con auto_renovar se renueva igual que Valida', async () => {
     const { db, tablas } = crearDoble(
       base({
         servicios_contratados: [{ ...contrato('cl', 'n-cl', 'activo'), servicio_slug: 'licencia-clarity' }],
+        planes_cobro: [plan('p-cl', 'n-cl', 4)],
+        plan_cobro_cuotas: cuotas('p-cl', 4),
+        cobros: [pagado('p-cl', 1), pagado('p-cl', 2), pagado('p-cl', 3)],
+      }),
+    )
+    const r = await renovarPlanesPorCiclo({ db, hoy: '2026-11-28' })
+    expect(r.renovados).toEqual([{ planCobroId: 'p-cl', numero: 5, fechaVencimiento: '2027-01-27', monto: 150_000 }])
+    expect(tablas.plan_cobro_cuotas).toHaveLength(5)
+  })
+
+  it('un plan de otro módulo con auto_renovar no se toca', async () => {
+    const { db, tablas } = crearDoble(
+      base({
+        servicios_contratados: [{ ...contrato('su', 'n-cl', 'activo'), servicio_slug: 'licencia-sustenta' }],
         planes_cobro: [plan('p-cl', 'n-cl', 4)],
         plan_cobro_cuotas: cuotas('p-cl', 4),
         cobros: [pagado('p-cl', 1), pagado('p-cl', 2), pagado('p-cl', 3)],

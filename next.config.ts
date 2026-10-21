@@ -76,6 +76,17 @@ const nextConfig: NextConfig = {
       './src/lib/pdf/chromium/fuentes/**/*',
       './src/lib/pdf/chromium/ensayo/**/*',
     ],
+    // Motor `html` de la propuesta de viaje (PR 2): la acción del PDF corre en la función de la
+    // página del editor de la cotización, que es a la que el navegador le manda la server action.
+    // Solo esa ruta carga el binario y las fuentes. La llave se compara con «contains» contra la
+    // ruta normalizada (`/app/negocios/[id]/cotizacion/[cotId]`).
+    // La instrucción del motor de extracción (un .md por versión) se lee por ruta en la acción
+    // «Extraer con el motor» de la ficha del proveedor.
+    '/proveedores/*': ['./src/lib/proveedores/instruccion/**/*'],
+    '/negocios/*/cotizacion/*': [
+      './node_modules/@sparticuz/chromium/bin/**/*',
+      './src/lib/pdf/chromium/fuentes/**/*',
+    ],
   },
   // Se cargan con require de Node, no por el bundler: @sparticuz/chromium ubica su binario
   // relativo a su propio paquete y puppeteer-core trae dependencias opcionales nativas.

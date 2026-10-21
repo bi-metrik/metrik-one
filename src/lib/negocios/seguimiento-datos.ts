@@ -9,6 +9,11 @@
  *     embudo cuenta el canal sin una columna más.
  *
  * Solo con `seguimiento.activo` en la línea del negocio; apagado no escribe nada (Vera §7.1.6).
+ *
+ * H33 (2026-10-14): descargar el PDF ya NO registra el envío. Antes la descarga escribía
+ * `fecha_envio` con la cotización en `borrador` (y un «No lo envié» de 8 s que nadie veía). Ahora
+ * el editor pregunta «¿Ya se la mandaste?» y el «Sí» pasa por `enviarCotizacion` (canal
+ * `descargado`): estado `enviada` y `fecha_envio` en el mismo UPDATE, con las guardas de «Enviar».
  */
 
 import { registrarActividad } from '@/lib/activity/registrar-actividad'
@@ -86,50 +91,6 @@ export async function registrarEnvioCotizacion(
   return { registrado: true, version }
 }
 
-/** Cuánto tiempo después de descargar se puede decir «No lo envié» (el toast dura 8 s). */
-export const VENTANA_DESHACER_MS = 2 * 60 * 1000
-
-/**
- * «No lo envié» (Vera C3.2): deshace un envío registrado al DESCARGAR. Solo si la cotización
- * sigue en borrador (con «Enviar» ya no es una descarga) y el envío es de hace menos de 2 min.
- */
-export async function deshacerEnvioDescargado(
-  supabase: Db,
-  args: { workspaceId: string; negocioId: string; cotizacionId: string; staffId: string | null; ahora?: Date },
-): Promise<{ ok: boolean; error?: string }> {
-  const { data: cot } = await supabase
-    .from('cotizaciones')
-    .select('id, estado, fecha_envio')
-    .eq('id', args.cotizacionId)
-    .eq('negocio_id', args.negocioId)
-    .maybeSingle()
-  const c = cot as { estado: string; fecha_envio: string | null } | null
-  if (!c || !c.fecha_envio) return { ok: false, error: 'No hay un envío que deshacer.' }
-  if (c.estado !== 'borrador') return { ok: false, error: 'La cotización ya salió con «Enviar»: no se deshace desde aquí.' }
-  const ahora = (args.ahora ?? new Date()).getTime()
-  if (ahora - Date.parse(c.fecha_envio) > VENTANA_DESHACER_MS) {
-    return { ok: false, error: 'Pasó el tiempo para deshacerlo.' }
-  }
-  const { error } = await supabase
-    .from('cotizaciones')
-    .update({ fecha_envio: null })
-    .eq('id', args.cotizacionId)
-    .eq('fecha_envio', c.fecha_envio)
-  if (error) return { ok: false, error: error.message }
-  await registrarActividad(supabase, {
-    workspace_id: args.workspaceId,
-    entidad_tipo: 'negocio',
-    entidad_id: args.negocioId,
-    tipo: 'cambio',
-    autor_id: args.staffId,
-    campo_modificado: CAMPO_ENVIO,
-    contenido: 'No se envió: la descarga del PDF ya no cuenta como envío.',
-    valor_anterior: 'descargado',
-    valor_nuevo: null,
-  }, 'deshacerEnvioDescargado')
-  return { ok: true }
-}
-
 /** ¿El negocio tiene alguna cotización enviada (`fecha_envio`)? Gate `cotizacion_enviada`. */
 export async function hayCotizacionEnviada(supabase: Db, negocioId: string): Promise<boolean> {
   const { count } = await supabase
@@ -138,30 +99,4 @@ export async function hayCotizacionEnviada(supabase: Db, negocioId: string): Pro
     .eq('negocio_id', negocioId)
     .not('fecha_envio', 'is', null)
   return (count ?? 0) > 0
-}
-
-/**
- * Descargar el PDF desde «Revisar y enviar» cuenta como envío (Vera C3), con canal
- * «descargado», SOLO si pasa las mismas guardas del servidor que «Enviar»: capturas al día y
- * margen mínimo autorizado. Las guardas llegan como funciones para no cobrarle sus consultas
- * a una línea apagada ni a una cotización que ya tiene envío.
- */
-export async function registrarEnvioPorDescarga(
-  supabase: Db,
-  args: { workspaceId: string; negocioId: string; cotizacionId: string; staffId: string | null },
-  guardas: { capturas: () => Promise<string | null>; margen: () => Promise<string | null> },
-): Promise<boolean> {
-  const cfg = await configSeguimientoDelNegocio(supabase, args.negocioId)
-  if (!cfg.activo) return false
-  const { data: cot } = await supabase
-    .from('cotizaciones')
-    .select('estado, fecha_envio')
-    .eq('id', args.cotizacionId)
-    .maybeSingle()
-  const c = cot as { estado: string; fecha_envio: string | null } | null
-  if (!c || c.fecha_envio || (c.estado !== 'borrador' && c.estado !== 'enviada')) return false
-  if (await guardas.capturas()) return false
-  if (await guardas.margen()) return false
-  const r = await registrarEnvioCotizacion(supabase, { ...args, canal: 'descargado' })
-  return r.registrado
 }

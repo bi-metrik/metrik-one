@@ -30,6 +30,7 @@ import {
   puedeVerVinculacion,
   selloImpideAprobar,
   resumirExpedientes,
+  validarMotivoDevolucion,
   validarMotivoRechazo,
   type Alerta,
   type ExpedienteCampo,
@@ -314,6 +315,59 @@ export async function decidirVinculacion(input: {
   return { ok: true, data: { estado: r.data.estado } };
 }
 
+// ─── Devolver ─────────────────────────────────────────────────────────────
+
+/**
+ * El oficial devuelve un expediente firmado para que la contraparte corrija y
+ * vuelva a firmar. La firma no se borra: Valida la pasa al historial del
+ * expediente. Es la salida cuando el sello dejó de cuadrar o cuando falta algo
+ * que la contraparte puede arreglar, sin convertirlo en un rechazo.
+ */
+export async function devolverVinculacion(input: {
+  expedienteId: string;
+  motivo: string;
+}): Promise<Result<{ estado: string; correo: 'enviado' | 'fallido'; url: string | null }>> {
+  const g = await guardVinculacion();
+  if (!g.ok) return g;
+  if (!puedeDecidirVinculacion(g.data.role)) {
+    return { ok: false, error: await traducirErrorVinculacion('forbidden_sin_permiso_para_decidir') };
+  }
+  const motivo = (input.motivo ?? '').trim();
+  const err = validarMotivoDevolucion(motivo);
+  if (err) return { ok: false, error: err };
+
+  const r = await pedirAValida<{ estado: string; etapa_actual: string; correo: 'enviado' | 'fallido'; url: string }>(
+    g.data.apiKey,
+    `/api/v1/kyc/expedientes/${encodeURIComponent(input.expedienteId)}/devolver`,
+    {
+      method: 'POST',
+      body: JSON.stringify({
+        motivo,
+        oc_revisor_id: g.data.userId,
+        // El enlace que le llega a la contraparte sale bajo el subdominio de
+        // este espacio, igual que la invitación.
+        enlace_base: await origenActual(),
+      }),
+    },
+  );
+  if (!r.ok) return { ok: false, error: await traducirErrorVinculacion(r.error) };
+
+  // El espejo se actualiza acá además del webhook: si el webhook falla, la
+  // bandeja seguiría mostrando "por revisar" algo que ya está con la contraparte.
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const svc = createServiceClient() as any;
+  const { error: errEspejo } = await svc
+    .from('kyc_expediente_ref')
+    .update({ estado_cache: r.data.estado, etapa_cache: r.data.etapa_actual, actualizado_en: new Date().toISOString() })
+    .eq('workspace_id', g.data.workspaceId)
+    .eq('expediente_kyc_id', input.expedienteId);
+  if (errEspejo) console.warn(`[vinculacion] espejo no actualizado (${input.expedienteId}): ${errEspejo.message}`);
+
+  revalidatePath('/compliance/vinculacion');
+  revalidatePath(`/compliance/vinculacion/${input.expedienteId}`);
+  return { ok: true, data: { estado: r.data.estado, correo: r.data.correo, url: r.data.url ?? null } };
+}
+
 // ─── Mensajes ─────────────────────────────────────────────────────────────
 
 export async function traducirErrorVinculacion(error: string): Promise<string> {
@@ -337,6 +391,12 @@ export async function traducirErrorVinculacion(error: string): Promise<string> {
       return 'El expediente quedó creado, pero no se pudo enviar el correo con el enlace.';
     case 'estado_invalido':
       return 'El expediente ya no está por revisar: alguien más lo decidió mientras lo mirabas.';
+    case 'motivo_requerido':
+      return 'Escribe el motivo: mínimo 10 caracteres.';
+    case 'sin_firma':
+      return 'El expediente no tiene una firma que devolver.';
+    case 'enlace_base_invalido':
+      return 'No se pudo armar el enlace para la contraparte desde esta dirección. Entra por el subdominio de tu empresa.';
     case 'modulo_no_activo':
       return 'Este espacio de trabajo no tiene activa la vinculación de contrapartes.';
     case 'lectura_fallida':
@@ -467,6 +527,7 @@ export async function invitarContraparte(input: {
     expediente_id: string;
     url: string;
     correo_distinto: boolean;
+    enlace_renovado?: boolean;
   }>(g.data.apiKey, '/api/v1/kyc/invitaciones', {
     method: 'POST',
     body: JSON.stringify({
@@ -492,6 +553,7 @@ export async function invitarContraparte(input: {
       const expedienteId = r.cuerpo?.expediente_id;
       const url = r.cuerpo?.url;
       if (typeof expedienteId === 'string' && typeof url === 'string') {
+        await registrarEnEspejo(g.data.workspaceId, expedienteId, input, denominacion);
         revalidatePath('/compliance/vinculacion');
         return {
           ok: true,
@@ -508,6 +570,7 @@ export async function invitarContraparte(input: {
     return { ok: false, error: await traducirErrorVinculacion(r.error) };
   }
 
+  await registrarEnEspejo(g.data.workspaceId, r.data.expediente_id, input, denominacion);
   revalidatePath('/compliance/vinculacion');
   return {
     ok: true,
@@ -517,6 +580,45 @@ export async function invitarContraparte(input: {
       url: r.data.url,
       correoDistinto: r.data.correo_distinto === true,
       correoSalio: true,
+      enlaceRenovado: r.data.enlace_renovado === true,
     },
   };
+}
+
+/**
+ * El expediente entra al espejo desde que se invita, no desde que se firma.
+ *
+ * `kyc_expediente_ref` solo se llenaba con el webhook de firma o de decisión, así
+ * que la invitación masiva no veía a nadie como "ya invitado" y repetir la vista
+ * previa les volvía a escribir a todos (QA ALMA 2026-10-12, V2). Valida ahora
+ * también avisa al invitar; esto lo cubre aunque ese aviso falle o llegue tarde.
+ *
+ * Solo INSERTA: si la fila ya existe, la que manda es la del webhook, que trae
+ * el estado real. Un "invitado" escrito desde acá no puede pisar un "firmado".
+ * Best-effort: si falla, la invitación ya salió y no se deshace por esto.
+ */
+async function registrarEnEspejo(
+  workspaceId: string,
+  expedienteId: string,
+  input: { tipoSujeto: TipoSujeto; tipoDocumento: TipoDocumento; documento: string },
+  denominacion: string,
+): Promise<void> {
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const svc = createServiceClient() as any;
+  const { error } = await svc
+    .from('kyc_expediente_ref')
+    .upsert(
+      {
+        workspace_id: workspaceId,
+        expediente_kyc_id: expedienteId,
+        razon_social: input.tipoSujeto === 'juridica' ? denominacion : null,
+        nombre: input.tipoSujeto === 'natural' ? denominacion : null,
+        documento_tipo: input.tipoDocumento,
+        documento_numero: input.documento,
+        estado_cache: 'invitado',
+        etapa_cache: 'invitacion',
+      },
+      { onConflict: 'expediente_kyc_id', ignoreDuplicates: true },
+    );
+  if (error) console.warn(`[vinculacion] espejo no registrado (${expedienteId}): ${error.message}`);
 }

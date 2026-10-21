@@ -6,6 +6,7 @@ import Link from 'next/link'
 import {
   FileSpreadsheet,
   FolderOpen,
+  Handshake,
   Timer,
   Radar,
   BarChart3,
@@ -130,6 +131,8 @@ interface AppShellProps {
    */
   impersonacion?: OpcionesImpersonacion | null
   timerActivo?: ActiveTimer | null
+  /** La biblioteca de fotos de la propuesta de viaje (`/fotos`): solo con plantilla html. */
+  bibliotecaFotos?: boolean
 }
 
 const COLOR_PUNTO = { verde: '#10B981', ambar: '#D97706', rojo: '#DC2626' } as const
@@ -157,6 +160,11 @@ const BUSINESS_NAV_ITEMS = [
   { href: '/negocios', label: 'Negocios', icon: Store, roles: ['owner', 'admin', 'supervisor', 'operator'] },
   { href: '/equipo', label: 'Equipo', icon: UserCheck, roles: ['owner', 'admin', 'supervisor'] },
 ]
+
+// Proveedores (antes «Hoteles y tours», 2026-10-18): la ficha de cada hotel, operador o mayorista,
+// con sus tarifarios y sus fotos. Detrás de Negocios, solo en espacios cuya plantilla tiene
+// propuesta html (`bibliotecaFotos`). `/fotos` redirige aquí.
+const FOTOS_NAV_ITEM = { href: '/proveedores', label: 'Proveedores', icon: Handshake, roles: ['owner', 'admin', 'supervisor', 'operator'] }
 
 // Caja — agrupa flujos de ingreso y salida.
 // Movimientos siempre visible si business activo.
@@ -426,6 +434,7 @@ export default function AppShell({
   suscripcion = null,
   impersonacion = null,
   timerActivo = null,
+  bibliotecaFotos = false,
 }: AppShellProps) {
   const pathname = usePathname()
   // Los Link del menu NO precargan al entrar en pantalla (prefetch={false}):
@@ -506,9 +515,12 @@ export default function AppShell({
           : i,
       )
     : BUSINESS_NAV_ITEMS
+  const conFotos = bibliotecaFotos
+    ? businessNavItems.flatMap((i) => (i.href === '/negocios' ? [i, FOTOS_NAV_ITEM] : [i]))
+    : businessNavItems
   const businessItems = moduloGate(modoVitrina
     ? [VITRINA_NUMEROS_ITEM]
-    : (mod.business ? filterByRole(applyOverride(businessNavItems), role) : []))
+    : (mod.business ? filterByRole(applyOverride(conFotos), role) : []))
   const contabilidadItems = moduloGate(vitrinaGate(mod.causacion ? filterByRole(applyOverride(CONTABILIDAD_NAV_ITEMS), role) : []))
   // Cumplimiento incluye items "compliance" estandar + comparativa interna metrik (compliance_audit)
   const complianceItems = moduloGate(vitrinaGate((mod.compliance || mod.compliance_audit)

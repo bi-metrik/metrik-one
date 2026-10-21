@@ -1,0 +1,10 @@
+/* Las mismas fuentes autoalojadas de `src/app/layout.tsx` (next/font/local), con las mismas
+   variables: sin ellas el ancho del texto no es el de producción y la medida no vale. */
+@font-face { font-family: 'Schibsted Arnes'; src: url('../../src/app/fonts/SchibstedGrotesk-latin-variable.woff2') format('woff2'); font-weight: 400 900; font-display: block; }
+@font-face { font-family: 'Newsreader Arnes'; src: url('../../src/app/fonts/Newsreader-latin-variable.woff2') format('woff2'); font-weight: 200 800; font-display: block; }
+@font-face { font-family: 'Martian Arnes'; src: url('../../src/app/fonts/MartianMono-latin-variable.woff2') format('woff2'); font-weight: 100 800; font-stretch: 100%; font-display: block; }
+body {
+  --font-schibsted: 'Schibsted Arnes';
+  --font-newsreader: 'Newsreader Arnes';
+  --font-martian-mono: 'Martian Arnes';
+}

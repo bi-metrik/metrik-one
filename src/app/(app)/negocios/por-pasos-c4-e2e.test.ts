@@ -261,6 +261,8 @@ describe('P6 y P7 · pedir, autorizar con motivo, retirar', () => {
     expect(r.success, (r as { error?: string }).error).toBe(true)
     const log = tabla('activity_log').find(l => l.campo_modificado === 'excepcion_margen')
     expect(log).toMatchObject({ valor_nuevo: 'pedida', entidad_id: NEG_SAN_ANDRES, autor_id: 's-asesora' })
+    // H8 · P7: la respuesta dice si la notificación se escribió (la pantalla solo la promete así).
+    expect((r as { notificado?: boolean }).notificado).toBe(true)
     const notif = tabla('notificaciones')
     expect(notif).toHaveLength(1)
     expect(notif[0]).toMatchObject({ destinatario_id: 'p-dueno', tipo: 'aprobacion_pendiente', entidad_tipo: 'negocio' })

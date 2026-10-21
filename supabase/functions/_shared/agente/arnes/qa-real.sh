@@ -9,6 +9,8 @@
 #   3. conversación: conjunto 1 del arnés (incluye c1-1009, con la extracción real) con el respaldo estricto de hoy.
 #   4. perfil del contacto (2026-10-12): el conjunto `perfil` (incluye cp-mixto, con la extracción real). Desde esta
 #      tanda todos los casos corren con las fichas del perfil (`conPerfil`), como quedará Trappvel al publicarlas.
+#   5. quién lleva el viaje (2026-10-16): el conjunto `responsable` (lista, «la llevo yo», apodo, alguien de fuera, audio,
+#      pregunta ignorada, cliente nuevo y dos personas con el mismo nombre).
 CREDENCIALES="${CREDENCIALES:-$HOME/Developer/metrik/.credentials.md}"
 export GEMINI_API_KEY="$(grep -m1 'Gemini API Key (pruebas)' "$CREDENCIALES" | awk -F'|' '{gsub(/ /,"",$3); print $3}')"
 [ ${#GEMINI_API_KEY} -gt 20 ] || { echo "No encontré la llave de pruebas en $CREDENCIALES"; exit 2; }
@@ -28,4 +30,6 @@ deno run -A --node-modules-dir=none "$ARNES/extraccion-casos.ts" --n "$N" --esqu
 deno run -A --node-modules-dir=none "$ARNES/correr.ts" --conjunto 1 --salida "$SALIDA"
 # 4. perfil del contacto (brief 2026-10-12): explícito, con quién viaja, ambiguo, sin autorización, sensible, juicio y mixto.
 deno run -A --node-modules-dir=none "$ARNES/correr.ts" --conjunto perfil --salida "$SALIDA/perfil"
+# 5. quién lleva el viaje (brief 2026-10-16).
+deno run -A --node-modules-dir=none "$ARNES/correr.ts" --conjunto responsable --salida "$SALIDA/responsable"
 echo "Resultados en $SALIDA"

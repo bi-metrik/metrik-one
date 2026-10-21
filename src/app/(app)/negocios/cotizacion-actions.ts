@@ -21,6 +21,7 @@ import { duplicarCotizacionCompleta } from '@/lib/cotizaciones/duplicar-cotizaci
 import { retirarRanuraSiQuedoVacia } from '@/lib/cotizaciones/ranuras-datos'
 import { itemsQueAportanAlTotal, normalizarGrupo } from '@/lib/cotizaciones/itinerarios'
 import { costoDeRubrosConfirmados, esConfirmado } from '@/lib/cotizaciones/rubros-sugeridos'
+import { costosDelItem, costoUnitarioSinIva } from '@/lib/cotizaciones/iva-costo'
 import { pasajerosParaCuadre } from '@/lib/cotizaciones/cuadre-pasajero'
 import { patchDeRecalculo } from '@/lib/cotizaciones/patch-recalculo'
 import { motivoParaNoSalir, revisarExcepcionTrasCambio } from '@/lib/cotizaciones/piso-salida-datos'
@@ -754,7 +755,13 @@ export async function deleteRubro(id: string) {
 
 // ── State transitions ────────────────────────────
 
-export async function enviarCotizacion(id: string) {
+/**
+ * Borrador → enviada. Con `canal = 'descargado'` es el «Sí, ya se la mandé» que el editor pregunta
+ * tras descargar el PDF (H33, 2026-10-14): mismas guardas, mismo UPDATE, solo cambia el canal que
+ * queda en la actividad. Cualquier otro valor cuenta como «Enviar»: el canal llega del navegador.
+ */
+export async function enviarCotizacion(id: string, canal?: 'enviar' | 'descargado') {
+  const canalEnvio: 'enviar' | 'descargado' = canal === 'descargado' ? 'descargado' : 'enviar'
   const { supabase, workspaceId, staffId, error } = await getWorkspace()
   if (error || !workspaceId) return { success: false, error: 'No autenticado' }
 
@@ -799,7 +806,7 @@ export async function enviarCotizacion(id: string) {
     }
   }
 
-  const { error: dbError } = await supabase
+  const { data: marcadas, error: dbError } = await supabase
     .from('cotizaciones')
     .update({
       estado: 'enviada',
@@ -808,14 +815,20 @@ export async function enviarCotizacion(id: string) {
     } as never)
     .eq('id', id)
     .eq('estado', 'borrador')
+    .select('id')
 
   if (dbError) return { success: false, error: dbError.message }
+  // Sin fila, la cotización ya no estaba en borrador (otra pestaña la envió o la aprobó). Antes
+  // esto devolvía éxito sin haber escrito nada; con la pregunta de H33 diría «quedó enviada».
+  if (!Array.isArray(marcadas) || marcadas.length === 0) {
+    return { success: false, error: 'Solo se pueden enviar cotizaciones en borrador' }
+  }
 
   if (cot.negocio_id) {
     // Seguimiento (F1-1): con la línea encendida queda la línea de actividad con versión y
     // canal. La fecha ya la escribió el update de arriba.
     await registrarEnvioCotizacion(supabase, {
-      workspaceId, negocioId: cot.negocio_id, cotizacionId: id, staffId: staffId ?? null, canal: 'enviar', fechaYaEscrita: true,
+      workspaceId, negocioId: cot.negocio_id, cotizacionId: id, staffId: staffId ?? null, canal: canalEnvio, fechaYaEscrita: true,
     })
     revalidatePath(`/negocios/${cot.negocio_id}`)
   } else {
@@ -1021,25 +1034,27 @@ export async function recalcularTotales(cotizacionId: string) {
   // Los parámetros de la cascada se leen de la fila, no de la línea de negocio: se
   // congelan al crear la cotización y no se resincronizan, para que reconfigurar la
   // línea no le mueva el precio a una cotización ya enviada al cliente.
+  // H2 (verificación D) · la fila de la cotización y sus líneas no dependen una de otra: van en
+  // paralelo. Las mismas dos consultas, una ida menos en serie.
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const { data: cot } = await (supabase as any)
+  const [{ data: cot }, { data: items }] = await Promise.all([(supabase as any)
     .from('cotizaciones')
     .select('convencion_margen, aiu_admin_pct, aiu_imprevistos_pct, margen_porcentaje, margen_default_pct, descuento_porcentaje')
     .eq('id', cotizacionId)
-    .maybeSingle()
+    .maybeSingle(),
 
   // `select('*')` y no la lista de columnas: `grupo`, `opcion_de` y `orden` los agrega
   // la migración `20260914200000`, y nombrarlos devolvería un 400 mientras no esté
   // aplicada — o sea que el editor dejaría de recalcular en cada tecla. Misma
   // tolerancia que `contextoDeCotizacion`.
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const { data: items } = await (supabase as any)
+  (supabase as any)
     .from('items')
     // `rubros(*)` y no la lista de columnas: `sugerido` lo agrega
     // `20260914230000` y nombrarlo devolveria un 400 mientras no este aplicada.
     // Un rubro son cinco numeros y un texto corto: traerlo entero no cuesta nada.
     .select('*, rubros(*)')
-    .eq('cotizacion_id', cotizacionId)
+    .eq('cotizacion_id', cotizacionId)])
 
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const filas = (items ?? []) as any[]
@@ -1097,13 +1112,14 @@ export async function recalcularTotales(cotizacionId: string) {
   }
   const paraCascadaSinAdic = filas.map(item => {
     // R-P1 · los rubros SUGERIDOS no entran al costo hasta que alguien confirme.
-    const { numeroDeRubros, costoDeRubros } = costoDeRubrosConfirmados(item.rubros)
+    // IVA del proveedor (2026-10-19): el costo se guarda sin IVA y `costosDelItem` se lo suma.
+    const { numeroDeRubros, costoDeRubros, subtotal, costoSinIva } = costosDelItem(item)
     const conManuales = precioConManuales.get(item.id as string)
     return {
       id: item.id as string,
       es_ajuste: item.es_ajuste,
       cantidad: item.cantidad,
-      subtotal: item.subtotal,
+      subtotal,
       numeroDeRubros,
       costoDeRubros,
       descuento_porcentaje: item.descuento_porcentaje,
@@ -1111,7 +1127,7 @@ export async function recalcularTotales(cotizacionId: string) {
       precio_venta: conManuales !== undefined ? conManuales / (Number(item.cantidad) || 1) : item.precio_venta,
       precio_manual: conManuales !== undefined ? true : item.precio_manual,
       // Punto 11 del brief del 2026-10-05: el precio cuadra con lo que paga cada pasajero.
-      pasajeros: pasajerosParaCuadre(item.tarifa_pax, costoDeRubros),
+      pasajeros: pasajerosParaCuadre(item.tarifa_pax, costoSinIva),
     }
   })
   // El MISMO emparejamiento que usa `contextoDeCotizacion`: por id de variante. Escrito
@@ -1137,7 +1153,8 @@ export async function recalcularTotales(cotizacionId: string) {
   for (const linea of cascada.lineas) {
     const fila = filas.find(f => f.id === linea.id)
     if (!fila || fila.es_ajuste) continue
-    const patch = patchDeRecalculo(fila, linea, linea.id ? precioConManuales.has(linea.id) : false)
+    // `items.subtotal` guarda el costo SIN IVA: la cascada trae el costo con IVA de la línea.
+    const patch = patchDeRecalculo(fila, { ...linea, costoUnitario: costoUnitarioSinIva(fila) }, linea.id ? precioConManuales.has(linea.id) : false)
     if (patch) escrituras.push(supabase.from('items').update(patch as never).eq('id', fila.id))
   }
   await Promise.all(escrituras)
@@ -1220,8 +1237,9 @@ export async function recalcularTotales(cotizacionId: string) {
   // ⚠️ La cotizacion, sus items y sus itinerarios se leen UNA vez y se pasan a los
   // dos helpers. Esta funcion corre en cada tecla del editor: releerlos por cada uno
   // eran cuatro idas y vueltas mas por recalculo, en la pantalla mas pesada.
-  const ctxItin = await contextoDeCotizacion(supabase, cotizacionId)
-  const filasItin = ctxItin ? await leerItinerarios(supabase, cotizacionId) : null
+  // H2 · en paralelo: `leerItinerarios` no depende del contexto (si no hay contexto, se descarta).
+  const [ctxItin, filasLeidas] = await Promise.all([contextoDeCotizacion(supabase, cotizacionId), leerItinerarios(supabase, cotizacionId)])
+  const filasItin = ctxItin ? filasLeidas : null
   const principal = ctxItin ? await totalDelPrincipal(supabase, cotizacionId, ctxItin, filasItin) : null
 
   await supabase

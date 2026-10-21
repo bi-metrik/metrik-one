@@ -1,5 +1,17 @@
 /**
- * Pasarela `epayco`: tarjeta tokenizada y cobro iniciado por el comercio (sin clic del cliente).
+ * Pasarela `epayco`, con DOS formas de cobrar una cuota (mismo comercio, mismas llaves, misma
+ * confirmación):
+ *
+ *   1. **Tarjeta tokenizada** (Valida autogestionada, PR #1191): cobro iniciado por el comercio, sin
+ *      clic del cliente. Se usa cuando la solicitud trae `medioPago.token_ref` de ePayco. Va APAGADA
+ *      salvo `EPAYCO_HABILITADO=1` y en modo prueba salvo `EPAYCO_PRODUCCION=1` (abajo).
+ *   2. **Link de cobro por cuota** (#1182, #1184): `crearEnlacePago` y `cobrar` sin token dejan un
+ *      `https://payco.link/<id>`; la plata la registra la confirmación. Solo pide las llaves; no
+ *      depende de `EPAYCO_HABILITADO`. Ver la sección «Links».
+ *
+ * Las dos confirman en `/api/webhooks/epayco?ref=<referencia de ONE>` (`urlConfirmacionEpayco`). El
+ * cargo con token manda además la referencia como `invoice`, que vuelve como `x_id_invoice`: si
+ * ePayco no conservara la consulta, el cobro se encuentra igual.
  *
  * Decisiones 7 e I (`2026-09-22_epayco-davivienda-reemplaza-wompi-bancolombia`): ePayco con la cuenta
  * Davivienda de MeTRIK reemplaza a Wompi y, con el tiempo, a Bold. Hoy NO hay llaves ni cuenta: todo
@@ -43,7 +55,7 @@
  *   EPAYCO_P_KEY                 P_KEY, para verificar la firma de la confirmación
  *   EPAYCO_PRODUCCION=1          cobros reales (sin esto: modo prueba)
  *   EPAYCO_API_BASE              opcional; por defecto https://apify.epayco.co
- *   EPAYCO_URL_CONFIRMACION      opcional; por defecto https://metrikone.co/api/webhooks/epayco
+ *   EPAYCO_URL_CONFIRMACION      opcional; por defecto https://<NEXT_PUBLIC_BASE_DOMAIN>/api/webhooks/epayco (+ ?ref=)
  *
  * ⚠️ `EPAYCO_PUBLIC_KEY` / `EPAYCO_PRIVATE_KEY` (sin sufijo) son las llaves de OTRA cuenta de ePayco
  * (conciliación de un cliente: `src/lib/epayco.ts` y scripts). Este adaptador NO las lee nunca: con
@@ -55,18 +67,22 @@
  */
 
 import { createHash, timingSafeEqual } from 'node:crypto'
+import { fechaTransaccionBogota } from '@/lib/epayco/fecha-transaccion'
+import { referenciaEnlaceCobro } from '@/lib/cobros/referencia-enlace'
+import { DIAS_VIGENCIA_ENLACE, descripcionEnlace } from './bold'
 import type {
   EventoPasarela,
   PasarelaAdapter,
   ResultadoCargo,
+  ResultadoEnlacePago,
   SolicitudCargo,
+  SolicitudEnlacePago,
   VerificacionWebhook,
 } from './adapter'
 
 type Env = Record<string, string | undefined>
 
 export const EPAYCO_API_BASE_POR_DEFECTO = 'https://apify.epayco.co'
-export const EPAYCO_URL_CONFIRMACION_POR_DEFECTO = 'https://metrikone.co/api/webhooks/epayco'
 /** El script oficial de tokenización. Pide jQuery (usa `$.ajax`): la pantalla lo carga antes. */
 export const EPAYCO_JS = 'https://checkout.epayco.co/epayco.min.js'
 const TIMEOUT_MS = 15_000
@@ -74,6 +90,41 @@ const TIMEOUT_MS = 15_000
 function valor(env: Env, nombre: string): string | null {
   const v = env[nombre]
   return typeof v === 'string' && v.trim() ? v.trim() : null
+}
+const llave = valor
+
+export const EPAYCO_APIFY_BASE = EPAYCO_API_BASE_POR_DEFECTO
+
+export const ENV_EPAYCO = {
+  // Los nombres con que Mauricio las cargó en Vercel (metrik-one) el 2026-10-12.
+  llavePublica: 'EPAYCO_PUBLIC_KEY_METRIK',
+  llavePrivada: 'EPAYCO_PRIVATE_KEY_METRIK',
+  idCliente: 'EPAYCO_P_CUST_ID_CLIENTE',
+  pKey: 'EPAYCO_P_KEY',
+} as const
+
+export const MOTIVO_EPAYCO_SIN_LLAVE =
+  'ePayco sin configurar: faltan las llaves del comercio de MeTRIK (EPAYCO_PUBLIC_KEY_METRIK y EPAYCO_PRIVATE_KEY_METRIK) en el servidor. No se creó ningún link.'
+
+/** Adonde ePayco confirma los pagos de ONE (links y cargos con token). */
+export const RUTA_CONFIRMACION_EPAYCO = '/api/webhooks/epayco'
+
+export function epaycoConfigurado(env: Env = process.env): { enlaces: boolean; confirmacion: boolean } {
+  return {
+    enlaces: llave(env, ENV_EPAYCO.llavePublica) !== null && llave(env, ENV_EPAYCO.llavePrivada) !== null,
+    confirmacion: llave(env, ENV_EPAYCO.idCliente) !== null && llave(env, ENV_EPAYCO.pKey) !== null,
+  }
+}
+
+/**
+ * `https://metrikone.co/api/webhooks/epayco?ref=<referencia de ONE>`. La base es
+ * `EPAYCO_URL_CONFIRMACION` si existe (un preview que quiere recibir sus propias confirmaciones) o
+ * el dominio del despliegue (`NEXT_PUBLIC_BASE_DOMAIN`, `metrikone.co` en producción).
+ */
+export function urlConfirmacionEpayco(referencia: string, env: Env = process.env): string {
+  const base =
+    valor(env, 'EPAYCO_URL_CONFIRMACION') ?? `https://${(env.NEXT_PUBLIC_BASE_DOMAIN || 'metrikone.co').trim()}${RUTA_CONFIRMACION_EPAYCO}`
+  return `${base}${base.includes('?') ? '&' : '?'}ref=${encodeURIComponent(referencia)}`
 }
 
 export function epaycoHabilitado(env: Env = process.env): boolean {
@@ -384,7 +435,8 @@ export async function cobrarConTokenEpayco(s: SolicitudCargo & { pagador: Pagado
       description: s.descripcion.slice(0, 100),
       tax: 0,
       taxBase: 0,
-      urlConfirmation: valor(env, 'EPAYCO_URL_CONFIRMACION') ?? EPAYCO_URL_CONFIRMACION_POR_DEFECTO,
+      // Con `?ref=`: la confirmación (pendiente → aceptada) vuelve al cobro aunque no traiga `x_id_invoice`.
+      urlConfirmation: urlConfirmacionEpayco(s.referencia, env),
       methodConfirmation: 'POST',
       testMode: epaycoEnPruebas(env),
       extra1: s.cobroId,
@@ -417,6 +469,131 @@ export async function cobrarConTokenEpayco(s: SolicitudCargo & { pagador: Pagado
   }
 }
 
+// ── Links ───────────────────────────────────────────────────────────────────
+
+const RE_LINK_EPAYCO = /^\d{1,15}$/
+
+/** El id del link (`https://payco.link/<id>`) dentro de una URL de link de ePayco. */
+export function idEnlaceEpaycoDeUrl(url: string | null | undefined): string | null {
+  if (!url) return null
+  let u: URL
+  try {
+    u = new URL(url.trim())
+  } catch {
+    return null
+  }
+  if (u.hostname !== 'payco.link') return null
+  const ultimo = u.pathname.split('/').filter(Boolean).pop() ?? ''
+  return RE_LINK_EPAYCO.test(ultimo) ? ultimo : null
+}
+
+/** `YYYY-MM-DD HH:mm:ss` en UTC (ver la nota ⚠️ 1 del encabezado). */
+export function fechaExpiracionEpayco(ms: number): string {
+  return new Date(ms).toISOString().slice(0, 19).replace('T', ' ')
+}
+
+function mensajeDeErrores(cuerpo: unknown): string | null {
+  const o = (cuerpo ?? {}) as Record<string, unknown>
+  const data = (o.data && typeof o.data === 'object' ? o.data : {}) as Record<string, unknown>
+  const errores = data.errors ?? data.errores
+  if (Array.isArray(errores) && errores.length > 0) {
+    return errores
+      .map((e) => (typeof e === 'string' ? e : String((e as Record<string, unknown>)?.errorMessage ?? JSON.stringify(e))))
+      .join('; ')
+  }
+  const texto = o.textResponse ?? o.text_response
+  return typeof texto === 'string' && texto.trim() ? texto.trim() : null
+}
+
+async function tokenApify(
+  publica: string,
+  privada: string,
+  f: typeof fetch,
+): Promise<{ ok: true; token: string } | { ok: false; error: string; reintentable: boolean }> {
+  let res: Response
+  try {
+    res = await f(`${EPAYCO_APIFY_BASE}/login`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Authorization: `Basic ${Buffer.from(`${publica}:${privada}`).toString('base64')}` },
+      signal: AbortSignal.timeout(TIMEOUT_MS),
+      cache: 'no-store',
+    })
+  } catch (e) {
+    return { ok: false, error: `No se pudo hablar con ePayco: ${(e as Error).message}`, reintentable: true }
+  }
+  const json = (await res.json().catch(() => null)) as { token?: unknown; error?: unknown } | null
+  if (!res.ok || typeof json?.token !== 'string' || !json.token) {
+    const motivo = typeof json?.error === 'string' ? `: ${json.error}` : ''
+    return { ok: false, error: `ePayco rechazó el ingreso con las llaves de MeTRIK (HTTP ${res.status})${motivo}`, reintentable: res.status >= 500 || res.status === 429 }
+  }
+  return { ok: true, token: json.token }
+}
+
+export async function crearEnlaceEpayco(
+  s: Omit<SolicitudEnlacePago, 'cobroId'>,
+  deps: DepsEpayco = {},
+): Promise<ResultadoEnlacePago> {
+  const env = deps.env ?? process.env
+  const publica = llave(env, ENV_EPAYCO.llavePublica)
+  const privada = llave(env, ENV_EPAYCO.llavePrivada)
+  if (!publica || !privada) return { ok: false, error: MOTIVO_EPAYCO_SIN_LLAVE, reintentable: false }
+
+  if (!Number.isInteger(s.monto) || s.monto <= 0) {
+    return { ok: false, error: `Monto inválido para ePayco: ${s.monto} (tiene que ser un entero positivo en pesos).`, reintentable: false }
+  }
+  if (!/^[A-Za-z0-9_-]{1,60}$/.test(s.referencia)) {
+    return { ok: false, error: `Referencia inválida para ePayco: ${s.referencia}`, reintentable: false }
+  }
+
+  const f = deps.fetch ?? fetch
+  const login = await tokenApify(publica, privada, f)
+  if (!login.ok) return login
+
+  const texto = descripcionEnlace(s.descripcion)
+  const cuerpo = {
+    quantity: 1,
+    onePayment: true,
+    amount: String(s.monto),
+    currency: 'COP',
+    id: 0,
+    title: texto,
+    description: texto,
+    typeSell: '2',
+    tax: '0',
+    urlConfirmation: urlConfirmacionEpayco(s.referencia, env),
+    methodConfirmation: 'POST',
+    expirationDate: fechaExpiracionEpayco(s.expiraMs),
+  }
+
+  let res: Response
+  try {
+    res = await f(`${EPAYCO_APIFY_BASE}/collection/link/create`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${login.token}` },
+      body: JSON.stringify(cuerpo),
+      signal: AbortSignal.timeout(TIMEOUT_MS),
+      cache: 'no-store',
+    })
+  } catch (e) {
+    return { ok: false, error: `No se pudo hablar con ePayco: ${(e as Error).message}`, reintentable: true }
+  }
+  const json = (await res.json().catch(() => null)) as { success?: unknown; data?: Record<string, unknown> } | null
+  if (!res.ok || json?.success !== true) {
+    const errores = mensajeDeErrores(json)
+    return {
+      ok: false,
+      error: `ePayco rechazó el link (HTTP ${res.status})${errores ? `: ${errores}` : ''}`,
+      reintentable: res.status >= 500 || res.status === 429,
+    }
+  }
+  const url = typeof json.data?.routeLink === 'string' ? json.data.routeLink.trim() : ''
+  const idEnlace = idEnlaceEpaycoDeUrl(url)
+  if (!idEnlace || url.length > 500) {
+    return { ok: false, error: 'ePayco respondió sin un link utilizable.', reintentable: false }
+  }
+  return { ok: true, idEnlace, url, expira: new Date(s.expiraMs).toISOString() }
+}
+
 // ── Confirmación (webhook) ───────────────────────────────────────────────────────────────────
 
 /** Los campos `x_*`: llegan como formulario (POST), como JSON o en la URL (GET). */
@@ -437,68 +614,127 @@ export function camposConfirmacion(cuerpoCrudo: string): Record<string, string> 
   return Object.keys(o).length > 0 ? o : null
 }
 
-export function firmaConfirmacion(c: Record<string, string>, custId: string, pKey: string): string {
+/**
+ * Lo que llega a la URL de confirmación, en una sola cadena `x-www-form-urlencoded`: los campos del
+ * cuerpo (form o JSON) y los de la consulta (`ref`). Es lo que la ruta le pasa al adaptador como
+ * «cuerpo crudo», y lo que queda en `pasarela_eventos`.
+ */
+export function cuerpoConfirmacionEpayco(cuerpo: string, tipoContenido: string | null, consulta: URLSearchParams): string {
+  const todo = new URLSearchParams()
+  const texto = cuerpo.trim()
+  if (texto) {
+    if ((tipoContenido ?? '').includes('json') || texto.startsWith('{')) {
+      try {
+        const j = JSON.parse(texto) as Record<string, unknown>
+        for (const [k, v] of Object.entries(j ?? {})) if (v !== null && v !== undefined) todo.set(k, String(v))
+      } catch {
+        // Cuerpo ilegible: se queda sin esos campos y la verificación lo rechaza por firma.
+      }
+    } else {
+      for (const [k, v] of new URLSearchParams(texto)) todo.set(k, v)
+    }
+  }
+  // La consulta la puso ONE al crear el link o el cargo; si ePayco manda un campo del mismo nombre, gana el suyo.
+  for (const [k, v] of consulta) if (!todo.has(k)) todo.set(k, v)
+  return todo.toString()
+}
+
+export function firmaEpayco(p: { idCliente: string; pKey: string; refPayco: string; transaccionId: string; monto: string; moneda: string }): string {
   return createHash('sha256')
-    .update(`${custId}^${pKey}^${c.x_ref_payco ?? ''}^${c.x_transaction_id ?? ''}^${c.x_amount ?? ''}^${c.x_currency_code ?? ''}`, 'utf8')
+    .update([p.idCliente, p.pKey, p.refPayco, p.transaccionId, p.monto, p.moneda].join('^'))
     .digest('hex')
 }
 
-function igual(a: string, b: string): boolean {
-  const x = Buffer.from(a.toLowerCase(), 'utf8')
-  const y = Buffer.from(b.toLowerCase(), 'utf8')
+/** La misma firma, sobre los campos `x_*` ya leídos. */
+export function firmaConfirmacion(c: Record<string, string>, custId: string, pKey: string): string {
+  return firmaEpayco({
+    idCliente: custId,
+    pKey,
+    refPayco: c.x_ref_payco ?? '',
+    transaccionId: c.x_transaction_id ?? '',
+    monto: c.x_amount ?? '',
+    moneda: c.x_currency_code ?? '',
+  })
+}
+
+function igualesEnTiempoConstante(a: string, b: string): boolean {
+  const x = Buffer.from(a.trim().toLowerCase(), 'utf8')
+  const y = Buffer.from(b.trim().toLowerCase(), 'utf8')
   return x.length === y.length && timingSafeEqual(x, y)
 }
 
-function tipoDeEstado(cod: string | undefined): EventoPasarela['tipo'] {
-  switch ((cod ?? '').trim()) {
-    case '1':
-      return 'aprobado'
-    case '2':
-    case '4':
-    case '9':
-    case '10':
-    case '11':
-      return 'rechazado'
-    case '6':
-      return 'anulado'
-    default:
-      // 3 pendiente, 7 retenida, 8 iniciada: no cambian nada todavía.
-      return 'otro'
+const ESTADOS: Record<string, EventoPasarela['tipo']> = {
+  '1': 'aprobado',
+  '2': 'rechazado',
+  '4': 'rechazado',
+  '9': 'rechazado',
+  '10': 'rechazado',
+  '11': 'rechazado',
+  '6': 'anulado',
+}
+
+/**
+ * Normaliza la confirmación YA verificada. `null` si le falta lo mínimo (recibo y estado).
+ *
+ * Una transacción de PRUEBA (`x_test_request=TRUE`) no registra plata, salvo `pruebaCuenta`: ePayco en
+ * modo prueba y fuera del despliegue de producción (un preview que prueba el recorrido con la tarjeta
+ * de prueba). En producción una tarjeta de prueba nunca paga una cuota real.
+ */
+export function parsearConfirmacionEpayco(cuerpoCrudo: string, opciones: { pruebaCuenta?: boolean } = {}): EventoPasarela | null {
+  const p = new URLSearchParams(cuerpoCrudo)
+  const campo = (k: string) => (p.get(k) ?? '').trim()
+  const refPayco = campo('x_ref_payco')
+  const estado = campo('x_cod_transaction_state') || campo('x_cod_response')
+  if (!/^\d+$/.test(refPayco) || !/^\d+$/.test(estado)) return null
+
+  const prueba = campo('x_test_request').toUpperCase() === 'TRUE'
+  const monto = Number(campo('x_amount'))
+  const fecha = fechaTransaccionBogota(campo('x_transaction_date') || campo('x_fecha_transaccion'))
+  // La referencia de ONE: la de la URL (`?ref=`, links y cargos) o, en un cargo con token, el `invoice`.
+  const referencia = campo('ref') || campo('x_id_invoice') || campo('x_id_factura') || null
+
+  return {
+    // Una confirmación por transacción Y estado: «pendiente» y luego «aceptada» son dos notificaciones.
+    eventoId: `${refPayco}-${estado}`,
+    tipoOriginal: `${estado} ${campo('x_transaction_state') || campo('x_response')}`.trim() + (prueba ? ' (prueba)' : ''),
+    tipo: prueba && !opciones.pruebaCuenta ? 'otro' : (ESTADOS[estado] ?? 'otro'),
+    transaccionId: refPayco,
+    referenciaPago: `epayco-${refPayco}`,
+    referencia,
+    idEnlace: null,
+    monto: Number.isFinite(monto) && campo('x_amount') !== '' ? monto : null,
+    moneda: campo('x_currency_code') || null,
+    ocurridoAt: fecha ? `${fecha}T12:00:00-05:00` : null,
+    crudo: Object.fromEntries([...p.entries()].filter(([k]) => k !== 'x_signature')),
   }
 }
 
-export function verificarConfirmacionEpayco(cuerpoCrudo: string, env: Env = process.env): VerificacionWebhook {
-  const custId = valor(env, 'EPAYCO_P_CUST_ID_CLIENTE')
-  const pKey = valor(env, 'EPAYCO_P_KEY')
-  if (!custId || !pKey) return { ok: false, motivo: 'no_configurado' }
+/** Formulario, JSON o la consulta de un GET (`?x_ref_payco=…`), a una cadena de formulario. */
+function comoFormulario(cuerpoCrudo: string): string {
   const c = camposConfirmacion(cuerpoCrudo)
-  if (!c || !c.x_ref_payco) return { ok: false, motivo: 'cuerpo_invalido' }
-  if (!c.x_signature) return { ok: false, motivo: 'sin_firma' }
-  if (!igual(firmaConfirmacion(c, custId, pKey), c.x_signature)) return { ok: false, motivo: 'firma_invalida' }
+  return c ? new URLSearchParams(c).toString() : ''
+}
 
-  const esPrueba = (c.x_test_request ?? '').toUpperCase() === 'TRUE'
-  // Un pago de prueba nunca registra plata fuera de modo prueba (ni en el despliegue de producción).
-  const pruebaFueraDeLugar = esPrueba && (!epaycoEnPruebas(env) || env.VERCEL_ENV === 'production')
-  const estado = c.x_cod_transaction_state || c.x_cod_response
-  const monto = Number(c.x_amount)
-  const fecha = /^(\d{4}-\d{2}-\d{2}) (\d{2}:\d{2}:\d{2})/.exec(c.x_transaction_date ?? c.x_fecha_transaccion ?? '')
-  return {
-    ok: true,
-    evento: {
-      tipo: pruebaFueraDeLugar ? 'otro' : tipoDeEstado(estado),
-      // ePayco no manda un id de notificación: la transacción + su estado lo hacen único.
-      eventoId: `${c.x_ref_payco}-${estado ?? 'x'}`,
-      tipoOriginal: `${c.x_transaction_state || c.x_response || 'estado'}${esPrueba ? ' (prueba)' : ''}`,
-      transaccionId: c.x_transaction_id || c.x_ref_payco,
-      referenciaPago: `epayco-${c.x_ref_payco}`,
-      referencia: c.x_id_invoice || c.x_id_factura || null,
-      idEnlace: null,
-      monto: Number.isFinite(monto) ? monto : null,
-      moneda: c.x_currency_code || null,
-      ocurridoAt: fecha ? `${fecha[1]}T${fecha[2]}-05:00` : null,
-      crudo: { ...c, x_signature: '[verificada]' },
-    },
-  }
+export function verificarConfirmacionEpayco(cuerpoCrudo: string, env: Env = process.env): VerificacionWebhook {
+  const idCliente = llave(env, ENV_EPAYCO.idCliente)
+  const pKey = llave(env, ENV_EPAYCO.pKey)
+  if (!idCliente || !pKey) return { ok: false, motivo: 'no_configurado' }
+  const form = comoFormulario(cuerpoCrudo)
+  const p = new URLSearchParams(form)
+  const firma = p.get('x_signature')
+  if (!firma) return { ok: false, motivo: 'sin_firma' }
+  const esperada = firmaEpayco({
+    idCliente,
+    pKey,
+    refPayco: p.get('x_ref_payco') ?? '',
+    transaccionId: p.get('x_transaction_id') ?? '',
+    monto: p.get('x_amount') ?? '',
+    moneda: p.get('x_currency_code') ?? '',
+  })
+  if (!igualesEnTiempoConstante(esperada, firma)) return { ok: false, motivo: 'firma_invalida' }
+  const evento = parsearConfirmacionEpayco(form, { pruebaCuenta: epaycoEnPruebas(env) && env.VERCEL_ENV !== 'production' })
+  if (!evento) return { ok: false, motivo: 'cuerpo_invalido' }
+  return { ok: true, evento }
 }
 
 // ── El adaptador ─────────────────────────────────────────────────────────────────────────────
@@ -507,8 +743,23 @@ export function crearAdapterEpayco(deps: DepsEpayco = {}): PasarelaAdapter {
   const env = () => deps.env ?? process.env
   return {
     nombre: 'epayco',
-    capacidades: { cobroSinClic: true, tokenizacion: true, linkDePago: false, webhook: true },
+    capacidades: { cobroSinClic: true, tokenizacion: true, linkDePago: true, webhook: true },
     async cobrar(s) {
+      // Sin tarjeta guardada: el link de cobro (#1182), igual que Bold.
+      if (!leerRefMedioPagoEpayco(s.medioPago?.token_ref)) {
+        const ahora = Date.now()
+        const r = await crearEnlaceEpayco(
+          {
+            monto: Math.round(s.monto),
+            descripcion: s.descripcion,
+            referencia: referenciaEnlaceCobro(s.cobroId, ahora),
+            expiraMs: ahora + DIAS_VIGENCIA_ENLACE * 86_400_000,
+          },
+          deps,
+        )
+        if (!r.ok) return { estado: 'error', mensaje: r.error, reintentable: r.reintentable }
+        return { estado: 'pendiente', externalRef: r.idEnlace, linkPago: r.url, expira: r.expira, detalle: 'Link de ePayco enviado: el pago lo registra la confirmación.' }
+      }
       const c = s.cliente
       if (!c?.documento || !c.email || !c.nombre) {
         return { estado: 'error', mensaje: 'Faltan los datos del pagador (documento, correo, nombre).', reintentable: false }
@@ -521,6 +772,10 @@ export function crearAdapterEpayco(deps: DepsEpayco = {}): PasarelaAdapter {
       )
     },
     async consultar(externalRef) {
+      // Un link (`<id>` de payco.link) no se consulta: lo registra la confirmación.
+      if (!externalRef.startsWith('epayco-')) {
+        return { estado: 'pendiente', externalRef, detalle: 'Link de ePayco: el pago lo registra la confirmación.' }
+      }
       const falta = faltaConfiguracionEpayco(env())
       if (falta) return { estado: 'error', mensaje: falta, reintentable: false }
       const s = await iniciarSesion(deps)
@@ -536,8 +791,16 @@ export function crearAdapterEpayco(deps: DepsEpayco = {}): PasarelaAdapter {
     verificarWebhook(cuerpoCrudo) {
       return verificarConfirmacionEpayco(cuerpoCrudo, env())
     },
+    // Lo que pide el LINK (las llaves). El cargo con token revisa además el interruptor y el modo
+    // (`faltaConfiguracionEpayco`) dentro de `cobrarConTokenEpayco`.
     faltaConfiguracion() {
-      return faltaConfiguracionEpayco(env())
+      return epaycoConfigurado(env()).enlaces ? null : MOTIVO_EPAYCO_SIN_LLAVE
+    },
+    crearEnlacePago(s: SolicitudEnlacePago) {
+      return crearEnlaceEpayco(s, deps)
+    },
+    idEnlaceDeUrl(url) {
+      return idEnlaceEpaycoDeUrl(url)
     },
   }
 }

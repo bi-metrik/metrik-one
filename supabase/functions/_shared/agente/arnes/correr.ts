@@ -22,7 +22,7 @@ import type { PrecioModelo } from '../uso.ts';
 import { sumarUso } from '../uso.ts';
 import { calificar, tabla } from './calificar.ts';
 import type { ResultadoCaso } from './calificar.ts';
-import { CAMPOS_ARNES, CONJUNTO_1, CONJUNTO_2, CONJUNTO_PERFIL } from './conjuntos.ts';
+import { CAMPOS_ARNES, CONJUNTO_1, CONJUNTO_2, CONJUNTO_PERFIL, CONJUNTO_RESPONSABLE, preguntaQuienLleva } from './conjuntos.ts';
 import { reglamentoDePrueba } from '../escenario.ts';
 import { REGLAMENTO_ANEXO_A } from '../bandeja/reglamento-anexo-a.ts';
 import { conPerfil } from '../bandeja/reglamento-perfil.ts';
@@ -95,7 +95,10 @@ async function correrCaso(caso: CasoArnes): Promise<{ r: ResultadoCaso; usoSimul
   const conExtraccion = caso.extraccion ? { campos: CAMPOS_ARNES, extraer: seco ? extraccionSeca : extraccionGemini(LLAVE, extracciones) } : {};
   // El reglamento que tendrá Trappvel al publicar las fichas del perfil (2026-10-12): todos los casos corren con él.
   const reglamento = await reglamentoDePrueba(conPerfil(REGLAMENTO_ANEXO_A));
-  const e = await escenario({ modelo: modeloParaCaso(), contactos: caso.contactos, viajes: caso.viajes, reglamento, reloj: () => performance.now(), ...conExtraccion });
+  const e = await escenario({
+    modelo: modeloParaCaso(), contactos: caso.contactos, viajes: caso.viajes, reglamento, reloj: () => performance.now(), ...conExtraccion,
+    ...(caso.equipo ? { equipo: caso.equipo } : {}), ...(caso.remitente ? { remitente: caso.remitente } : {}),
+  });
   for (const id of caso.autorizados ?? []) e.puerto.autorizaciones.set(id, { estado: 'autorizado', fecha: '2026-10-01T15:00:00Z', menores: false });
   if (caso.semilla) e.semilla(caso.semilla);
   const comercial: string[] = [];
@@ -106,6 +109,7 @@ async function correrCaso(caso: CasoArnes): Promise<{ r: ResultadoCaso; usoSimul
       for (const p of caso.pasos) {
         if (p.escribe !== undefined) { await e.escribe(p.escribe); comercial.push(p.escribe); }
         else if (p.reenvia !== undefined) { await e.reenvia(p.reenvia); comercial.push(`(reenvío) ${p.reenvia}`); }
+        else if (p.dicta !== undefined) { await e.dicta(p.dicta); comercial.push(`(audio) ${p.dicta}`); }
         else if (p.toca !== undefined) comercial.push(await tocarOEscribir(e, p.toca, p.oEscribe));
       }
     } else {
@@ -149,7 +153,9 @@ async function correrCaso(caso: CasoArnes): Promise<{ r: ResultadoCaso; usoSimul
   } catch (err) {
     error = String(err).slice(0, 300);
   }
-  const r = calificar(caso, e.pasos, e.puerto, e.almacen.trazas(), PRECIOS_312, error);
+  let r = calificar(caso, e.pasos, e.puerto, e.almacen.trazas(), PRECIOS_312, error);
+  // r-ignora: además de no abrir, la pregunta tiene que seguir en pie (el último mensaje vuelve a preguntar).
+  if (caso.id === 'r-ignora' && r.exito.ok && !preguntaQuienLleva(e.pasos)) r = { ...r, exito: { ok: false, motivo: 'no abrió, pero dejó de preguntar quién lleva el viaje' } };
   return { r, usoSimulador, comercial };
 }
 
@@ -183,7 +189,7 @@ if (import.meta.main) {
   if (!salida) { console.error('falta --salida <dir>'); Deno.exit(2); }
   const conjunto = arg('--conjunto') ?? 'todo';
   const solo = arg('--solo')?.split(',');
-  const casos = (conjunto === 'perfil' ? CONJUNTO_PERFIL : [
+  const casos = (conjunto === 'responsable' ? CONJUNTO_RESPONSABLE : conjunto === 'perfil' ? CONJUNTO_PERFIL : [
     ...(conjunto === '2' ? [] : CONJUNTO_1), ...(conjunto === '1' ? [] : CONJUNTO_2), ...(conjunto === 'todo' ? CONJUNTO_PERFIL : []),
   ]).filter((c) => !solo || solo.includes(c.id));
   const resultados: ResultadoCaso[] = [];

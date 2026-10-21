@@ -13,6 +13,7 @@ import { dominioBandeja } from './bandeja/dominio.ts';
 import { REGLAMENTO_ANEXO_A } from './bandeja/reglamento-anexo-a.ts';
 import { AlmacenMemoria, MensajeroMemoria, PuertoMemoria, Reloj, nuevoId } from './memoria.ts';
 import type { ContactoMem, ExtractorMemoria, ViajeMem } from './memoria.ts';
+import type { MiembroEquipo } from './bandeja/dominio.ts';
 import type { CampoEntendible } from '../wa-entendimiento-reglas.ts';
 import { huellaDe } from './reglamento.ts';
 import type { Ficha, FilaConversacion, Modelo, Reglamento, Salida, Traza } from './tipos.ts';
@@ -25,7 +26,7 @@ export async function reglamentoDePrueba(fichas: Ficha[] = REGLAMENTO_ANEXO_A): 
 }
 
 export interface PasoRegistrado {
-  clase: 'escrito' | 'reenvio' | 'toque';
+  clase: 'escrito' | 'reenvio' | 'toque' | 'audio';
   texto: string;
   salidas: Salida[];
   /** Desde que la fila entró (el webhook) hasta el primer envío. Nulo si no salió nada. */
@@ -45,6 +46,8 @@ export interface Escenario {
   deps: DepsCola;
   escribe(texto: string, o?: { despuesMs?: number }): Promise<Salida[]>;
   reenvia(texto: string, o?: { despuesMs?: number }): Promise<Salida[]>;
+  /** Un audio del comercial, ya transcrito (en producción la transcripción llega antes del turno: `wa-agente.ts`). */
+  dicta(texto: string, o?: { despuesMs?: number }): Promise<Salida[]>;
   /** Toca la opción cuyo título es (o contiene) `titulo` en el mensaje más reciente del bot que la tenga. */
   toca(titulo: string, o?: { despuesMs?: number; atras?: number }): Promise<Salida[]>;
   trazas(): Traza[];
@@ -61,11 +64,14 @@ export async function escenario(p: {
   reglamento?: Reglamento;
   /** Reloj monotónico real (arnés) o falso (pruebas). */
   reloj?: () => number;
+  /** El equipo comercial (por defecto `EQUIPO_PRUEBA`) y quien escribe (por defecto «el comercial»). */
+  equipo?: MiembroEquipo[];
+  remitente?: { nombre: string; rol: string };
 }): Promise<Escenario> {
   const reloj = new Reloj();
   const almacen = new AlmacenMemoria(reloj);
   const mensajero = new MensajeroMemoria(almacen);
-  const puerto = new PuertoMemoria({ contactos: p.contactos, viajes: p.viajes, campos: p.campos, extraer: p.extraer, ahora: reloj.ahora });
+  const puerto = new PuertoMemoria({ contactos: p.contactos, viajes: p.viajes, campos: p.campos, extraer: p.extraer, ahora: reloj.ahora, equipo: p.equipo });
   const deps: DepsCola = {
     modelo: p.modelo,
     dominio: dominioBandeja(puerto),
@@ -75,11 +81,11 @@ export async function escenario(p: {
     reloj: p.reloj ?? (() => reloj.ahora()),
     almacen, mensajero,
     workspaceId: WS_PRUEBA, phone: TEL_PRUEBA,
-    remitente: { nombre: 'el comercial', rol: 'colaborador' },
+    remitente: p.remitente ?? { nombre: 'el comercial', rol: 'colaborador' },
     nuevoId,
   };
   const pasos: PasoRegistrado[] = [];
-  const correr = async (clase: 'escrito' | 'reenvio' | 'toque', texto: string, toqueId?: string, despuesMs = 20_000) => {
+  const correr = async (clase: 'escrito' | 'reenvio' | 'toque' | 'audio', texto: string, toqueId?: string, despuesMs = 20_000) => {
     reloj.avanzar(despuesMs);
     const antes = mensajero.enviados.length;
     const trazasAntes = almacen.trazas().length;
@@ -104,6 +110,7 @@ export async function escenario(p: {
     reloj, almacen, mensajero, puerto, deps,
     escribe: (t, o) => correr('escrito', t, undefined, o?.despuesMs),
     reenvia: (t, o) => correr('reenvio', t, undefined, o?.despuesMs ?? 3_000),
+    dicta: (t, o) => correr('audio', t, undefined, o?.despuesMs),
     toca: (titulo, o) => {
       // El mensaje más reciente que tenga esa opción (`atras`: saltarse los N más recientes que la tienen, para tocar un
       // botón viejo). Exacto primero: «No» no puede tocar «Anotar» porque «anotar» contiene «no» (arnés, 2026-10-06).

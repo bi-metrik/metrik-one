@@ -59,11 +59,11 @@ describe('proponer lee la línea solo cuando la nombra', () => {
   it('viaje_nuevo sí, y el resumen la sigue nombrando', async () => {
     const modelo = modeloGuionado([
       { name: 'buscar', args: { texto: 'Rojas' } },
-      { name: 'proponer', args: { accion: 'viaje_nuevo', datos: { cliente: 'Lina Rojas (cel. …4455)', destino: '' } } },
+      { name: 'proponer', args: { accion: 'viaje_nuevo', datos: { responsable: 'Carla Comercial', dicho_en: 1, cliente: 'Lina Rojas (cel. …4455)', destino: '' } } },
     ])
     const e = await escenario({ modelo, contactos: [{ id: 'c-lina', nombre: 'LINA ROJAS', celular: '3001114455' }] })
     const s = await e.escribe('Abre un viaje para Lina Rojas')
-    expect(s[0].texto).toBe('¿Abro este viaje?\nLina Rojas (cel. …4455) · Viaje a medida')
+    expect(s[0].texto).toBe('¿Abro este viaje?\nLina Rojas (cel. …4455) · Viaje a medida\nLo llevas tú (Carla Comercial)')
   })
 })
 

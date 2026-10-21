@@ -6,6 +6,8 @@ import { revalidatePath } from 'next/cache'
 
 import { exigirPorPasos } from '@/lib/cotizaciones/por-pasos-datos'
 import { getWorkspace } from '@/lib/actions/get-workspace'
+import { fotoDeHotelABiblioteca } from '@/lib/fotos/foto-hotel-biblioteca'
+import type { ElementoVista } from '@/lib/fotos/vista'
 import { exigirModulo, MENSAJE_MODULO_NO_ACTIVO, REQUISITO } from '@/lib/modulos/exigir-modulo'
 import { ranuraDeGrupo } from '@/lib/cotizaciones/ranuras-pantallazo'
 import { isEditable, type EstadoCotizacion } from '@/lib/cotizaciones/state-machine'
@@ -79,11 +81,13 @@ import { diaDeFecha } from '@/lib/cotizaciones/actividad-en-cotizacion'
 import { borradorValido, firmarBorrador } from '@/lib/cotizaciones/firma-borrador'
 import { opcionElegidaDeActividad, ubicarLectura, type LineaParaUbicar } from '@/lib/cotizaciones/ubicar-lectura'
 import { completaDe, mismoTipo } from '@/lib/cotizaciones/destino-por-pasos'
+import { enLoteDeAceptacion, memoDeAceptacion } from '@/lib/cotizaciones/memo-de-aceptacion'
+import { dondeQuedoLaOpcion } from '@/lib/cotizaciones/ubicacion-de-opcion'
+import { conPasajerosDelViaje } from '@/lib/cotizaciones/precio-que-falta'
 import { aceptacionPrevia, idAceptacionValido } from '@/lib/cotizaciones/aceptacion-idempotente'
 import { definicionDeTipo, esTipoRanura, tipoDeDefinicion, type TipoRanura } from '@/lib/cotizaciones/ranuras-cotizacion'
 import { lugarDeOpcion } from '@/lib/cotizaciones/opcion-viaje'
 import { normalizarGrupo } from '@/lib/cotizaciones/itinerarios'
-import { etiquetaDeRanura } from '@/lib/cotizaciones/ranuras-pantallazo'
 import { agregarOpcionARanura, crearRanuraConOpcion } from '@/app/(app)/negocios/ranura-actions'
 import { borrarImagenesDeCaptura, guardarImagenDeCaptura, imagenComoDataUrl, imagenesDeTarifa } from '@/lib/cotizaciones/imagen-captura'
 import { guardarFotoHotel } from '@/lib/cotizaciones/foto-hotel-almacen'
@@ -163,6 +167,11 @@ export type ResultadoTarifa = {
    * faltante queda en su bloque (R1, reunión del 2026-09-23). `CONTEXTO` y `ERROR` sí frenan.
    */
   codigo?: 'CONTEXTO' | 'PENDIENTE' | 'ERROR'
+  /**
+   * Solo `ponerFotoDelHotel` en un espacio con biblioteca de fotos: el hotel como quedó en la
+   * biblioteca (la foto ya NO se guarda en la opción). Ausente = se guardó en la opción, como antes.
+   */
+  fotoBiblioteca?: ElementoVista | null
 }
 
 interface ItemLeido {
@@ -357,7 +366,17 @@ export async function leerCasillaDeItem(
  * línea, el nombre leído y el mensaje. Lo usan la casilla de la opción (después de leer) y el
  * «Aceptar» de la bandeja (con la lectura del borrador): las dos terminan igual.
  */
-async function guardarLecturaEnItem(ctx: ContextoDeItem, itemId: string, clave: ClaveCasilla, leida: LecturaCasilla): Promise<ResultadoCasilla> {
+async function guardarLecturaEnItem(
+  ctx: ContextoDeItem,
+  itemId: string,
+  clave: ClaveCasilla,
+  leida: LecturaCasilla,
+  /**
+   * `false` desde «Aceptar» de la bandeja: su respuesta no lleva la foto de la opción (la fila dice
+   * dónde quedó y la pantalla se refresca), y leerla era una ida más por pantallazo (H3).
+   */
+  conFoto = true,
+): Promise<ResultadoCasilla> {
   const { supabase, item, ranura, tarifa, composicion } = ctx
 
   // ── Quién decide a cuántos cubre la línea (§2.4) ──────────────────────────
@@ -451,7 +470,7 @@ async function guardarLecturaEnItem(ctx: ContextoDeItem, itemId: string, clave: 
   if (item.negocioId) revalidatePath(`/negocios/${item.negocioId}`)
 
   // Después del nombre: es la foto que pinta la ficha de la bandeja.
-  const opcion = await fotoDeOpcion(supabase, itemId)
+  const opcion = conFoto ? await fotoDeOpcion(supabase, itemId) : null
 
   // La captura no dijo a cuántos cubre y nadie lo había declarado: la pregunta sale AHORA,
   // con la lectura ya guardada, y diciendo por qué (§2.4). Preguntarlo antes de pegar era
@@ -500,12 +519,14 @@ export async function quitarCasillaDeItem(
 // va CONTRA LA COTIZACIÓN DE ESE MOMENTO (`ubicarLectura`) y recién ahí crea la ranura, la
 // opción o la habitación, guarda la lectura y confirma el costo.
 
-async function contextoDeCotizacion(cotizacionId: string) {
-  const { supabase, error } = await getWorkspace()
+async function contextoDeCotizacion(cotizacionId: string, sesion?: Awaited<ReturnType<typeof getWorkspace>>) {
+  const { supabase, error } = sesion ?? await getWorkspace()
   if (error) return { error: 'No autenticado' as const }
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const sb = supabase as any
-  const { data: cot } = await sb.from('cotizaciones').select('id, estado, negocio_id').eq('id', cotizacionId).maybeSingle()
+  // Dentro de una aceptación por pasos, una vez (`memo-de-aceptacion.ts`); fuera, como siempre.
+  const { data: cot } = await memoDeAceptacion(`cotizacion:${cotizacionId}`, async () =>
+    sb.from('cotizaciones').select('id, estado, negocio_id').eq('id', cotizacionId).maybeSingle() as Promise<{ data: { id: string; estado: string | null; negocio_id: string | null } | null }>)
   if (!cot) return { error: 'Cotización no encontrada' as const }
   if (!isEditable((cot.estado ?? 'borrador') as EstadoCotizacion)) {
     return { error: 'Esta cotización ya no se edita. Duplícala para trabajar sobre una nueva.' as const }
@@ -535,6 +556,13 @@ export async function leerCapturaEnBorrador(
   tipo: TipoRanura,
   dataUrl: string,
   enfoque?: { nombre: string; precio: string | null } | null,
+  /**
+   * La bandeja de la cotización por pasos. Con ella, un hotel se lee sabiendo que un pantallazo
+   * de VARIAS habitaciones con un total es UNA opción (decisión del 2026-10-14,
+   * `reserva-habitaciones.ts`). Se comprueba el interruptor contra la base: apagado, la lectura
+   * es la de siempre y esa reserva queda en «¿Cuál de estas?».
+   */
+  opciones?: { porPasos?: boolean } | null,
 ): Promise<ResultadoBorrador> {
   if (!esTipoRanura(tipo)) return { ok: false, codigo: 'TIPO', mensaje: 'Tipo de componente desconocido.' }
   if (!(await exigirModulo(REQUISITO.clarity)).ok) {
@@ -549,7 +577,15 @@ export async function leerCapturaEnBorrador(
     if (!guard.ok) return { ok: false, codigo: 'POR_PASOS', mensaje: guard.error }
   }
   const ranura = definicionDeTipo(tipo)
-  const r = await leerImagenDeCaptura({ ranura, dataUrl, viaje: ctx.viaje, enfoque })
+  const reservaVariasHabitaciones = tipo === 'hotel' && opciones?.porPasos === true
+    && (await exigirPorPasos(ctx.supabase, cotizacionId)).ok
+  const r = await leerImagenDeCaptura({
+    ranura,
+    dataUrl,
+    viaje: ctx.viaje,
+    enfoque,
+    ...(reservaVariasHabitaciones ? { opciones: { reservaVariasHabitaciones: true } } : {}),
+  })
   if (!r.ok) return r
   const leida = r.leida
   // La misma validación que tenía la captura al leerse sobre su opción vacía: contra la
@@ -698,15 +734,6 @@ export type ResultadoAceptarCaptura =
   | { ok: false; codigo: 'SOBRA'; mensaje: string; conItemId: string }
   | { ok: false; codigo: string; mensaje: string }
 
-/** «Hotel en Providencia» y «2»: dónde quedó una opción, como se ve en Componentes. */
-function ubicacionDeOpcion(lineas: Record<string, unknown>[], itemId: string): { bloque: string; opcion: number | null } {
-  const linea = lineas.find(l => l.id === itemId)
-  const grupo = normalizarGrupo((linea?.grupo ?? null) as string | null)
-  if (!linea || !grupo) return { bloque: 'Componentes', opcion: null }
-  const hermanas = lineas.filter(l => l.es_ajuste !== true && normalizarGrupo((l.grupo ?? null) as string | null) === grupo)
-  return { bloque: etiquetaDeRanura(grupo), opcion: hermanas.findIndex(l => l.id === itemId) + 1 }
-}
-
 export async function aceptarCapturaDeBandeja(cotizacionId: string, b: BorradorParaAceptar): Promise<ResultadoAceptarCaptura> {
   if (!b || !esTipoRanura(b.tipo)) return { ok: false, codigo: 'TIPO', mensaje: 'Tipo de componente desconocido.' }
   if (!borradorValido(cotizacionId, b.tipo, b.lecturaJson, b.firma)) {
@@ -716,8 +743,15 @@ export async function aceptarCapturaDeBandeja(cotizacionId: string, b: BorradorP
   // La llave viaja con la lectura que se escribe: un reintento la encuentra (ver abajo).
   const idAceptacion = idAceptacionValido(b.idAceptacion)
   if (idAceptacion) lectura.aceptacion = idAceptacion
-  const ctx = await medirEtapa('contexto', () => contextoDeCotizacion(cotizacionId))
-  if ('error' in ctx) return { ok: false, codigo: 'CONTEXTO', mensaje: ctx.error as string }
+  // H2 (verificación D) · las líneas solo dependen del id de la cotización: se leen en paralelo con
+  // el contexto. Si el contexto falla, se descartan.
+  const sesion = await getWorkspace()
+  const lineasP = medirEtapa('lineas', () => lineasDeCotizacion(sesion.supabase, cotizacionId))
+  const ctx = await medirEtapa('contexto', () => contextoDeCotizacion(cotizacionId, sesion))
+  if ('error' in ctx) {
+    await lineasP.catch(() => null)
+    return { ok: false, codigo: 'CONTEXTO', mensaje: ctx.error as string }
+  }
   // «Otro servicio» solo entra con la cotización por pasos (N5): aunque la lectura venga firmada,
   // con el interruptor apagado se rechaza sin escribir nada.
   if (b.tipo === 'otro') {
@@ -736,7 +770,7 @@ export async function aceptarCapturaDeBandeja(cotizacionId: string, b: BorradorP
     const ref = await subida
     if (ref) lectura.imagenRef = ref
   }
-  const lineas = await medirEtapa('lineas', () => lineasDeCotizacion(ctx.supabase, cotizacionId))
+  const lineas = await lineasP
   if ('error' in lineas) {
     const ref = await subida
     if (ref) await borrarImagenesDeCaptura(workspaceId, [ref])
@@ -830,7 +864,7 @@ async function aceptarLectura(
     const ctxItem = await contexto(b.destinoId!)
     if ('error' in ctxItem) return { ok: false, codigo: 'CONTEXTO', mensaje: ctxItem.error as string }
     await conImagen()
-    const g = await guardarLecturaEnItem(ctxItem, b.destinoId!, 'grupo_completo', lectura)
+    const g = await guardarLecturaEnItem(ctxItem, b.destinoId!, 'grupo_completo', lectura, false)
     if (!g.ok) return { ok: false, codigo: g.codigo, mensaje: g.mensaje }
     return terminarAceptacion(ctx.supabase, cotizacionId, b.destinoId!, { como: 'reemplazo' })
   }
@@ -848,7 +882,10 @@ async function aceptarLectura(
     // salió de este pantallazo y su imagen: así lo leen igual el total, el PDF y la tarjeta.
     const quien = await quienEscribe(ctxItem.supabase)
     const en = new Date().toISOString()
-    const g = await guardarTarifa(ctxItem.supabase, c.itemId, actual => {
+    const g = await guardarTarifa(ctxItem.supabase, c.itemId, leida => {
+      // H1 · la línea de un pantallazo de solo adultos queda cubriendo a los del viaje: sin esto
+      // el precio del niño se guardaba y el costo seguía siendo el de los 6 adultos.
+      const actual = conPasajerosDelViaje(leida, ctx.viaje.composicion, ctxItem.ranura.slug)
       const costosAMano = { ...(actual.costosAMano ?? {}) }
       for (const t of c.tipos) {
         const unitario = c.precios[t]
@@ -906,7 +943,7 @@ async function aceptarLectura(
   await conImagen()
   const g = 'error' in ctxItem
     ? { ok: false as const, codigo: 'CONTEXTO', mensaje: ctxItem.error as string }
-    : await medirEtapa('guardar', () => guardarLecturaEnItem(ctxItem, creada.itemId, 'grupo_completo', lectura))
+    : await medirEtapa('guardar', () => guardarLecturaEnItem(ctxItem, creada.itemId, 'grupo_completo', lectura, false))
   if (!g.ok) {
     // Nada a medias en Componentes: si la lectura no entra, la opción recién creada se va.
     await deleteItem(creada.itemId)
@@ -942,16 +979,19 @@ async function terminarAceptacion(
 ): Promise<ResultadoAceptarCaptura> {
   const c = await medirEtapa('confirmar', () => confirmarTarifaPorPasajero(itemId, null))
   const pendiente = c.success ? null : (c.error ?? 'falta un dato de la tarifa')
+  // En un lote (por pasos) la ubicación se calcula una vez al final (`aceptarLotePorPasos`).
+  if (enLoteDeAceptacion()) {
+    return {
+      ok: true, itemId, donde: 'Componentes', pendiente, como: entrada.como, bloque: 'Componentes', opcion: null,
+      habitacionId: entrada.habitacionId ?? null, habitacionNumero: entrada.habitacionNumero ?? null,
+    }
+  }
   const lineas = await medirEtapa('ubicacion', () => lineasDeCotizacion(supabase, cotizacionId))
-  const { bloque, opcion } = 'error' in lineas ? { bloque: 'Componentes', opcion: null } : ubicacionDeOpcion(lineas, itemId)
-  const lugar = opcion ? `${bloque} · Opción ${opcion}` : bloque
-  const habitacion = entrada.como === 'habitacion'
-    ? ` como habitación${entrada.habitacionNumero ? ` ${entrada.habitacionNumero}` : ''}`
-    : ''
+  const { donde, bloque, opcion } = dondeQuedoLaOpcion('error' in lineas ? null : lineas, itemId, entrada)
   return {
     ok: true,
     itemId,
-    donde: `${lugar}${habitacion}`,
+    donde,
     pendiente,
     como: entrada.como,
     bloque,
@@ -1571,12 +1611,32 @@ async function lecturasDevueltasDe(ctx: ContextoDeItem): Promise<{ ok: true; dev
 //
 // Reglas en `foto-hotel.ts`. Solo en opciones de hotel; la foto llega ya comprimida en JPEG.
 
-/** Pone o cambia la foto del hotel de la opción. La anterior se borra al quedar la nueva. */
-export async function ponerFotoDelHotel(itemId: string, dataUrl: string, proporcion: number | null): Promise<ResultadoTarifa> {
+/**
+ * Pone o cambia la foto del hotel de la opción.
+ *
+ * En un espacio con biblioteca de fotos (propuesta de viaje) la foto va a la BIBLIOTECA (llave
+ * `hotel|ciudad`): es la misma para la tarjeta, el panel, `/fotos` y el documento. `reemplaza` =
+ * la foto de la biblioteca que se cambia (sin él, la principal). La foto vieja de la opción, si
+ * la había, se quita: desde aquí hay una sola verdad (`foto-hotel-documento.ts`).
+ *
+ * En los demás espacios, en la opción (`tarifa_pax.fotoHotel`), como antes; la anterior se borra
+ * al quedar la nueva.
+ */
+export async function ponerFotoDelHotel(itemId: string, dataUrl: string, proporcion: number | null, reemplaza?: string | null, autorizacion?: unknown): Promise<ResultadoTarifa> {
   const ctx = await contexto(itemId)
   if ('error' in ctx) return { success: false, error: ctx.error as string }
   if (ctx.ranura.slug !== 'hotel_detalle') return { success: false, error: 'Solo una opción de hotel lleva foto del hotel.' }
-  const { workspaceId } = await getWorkspace()
+  const { workspaceId, staffId, userId, role } = await getWorkspace()
+  const enBiblioteca = await fotoDeHotelABiblioteca({
+    supabase: ctx.supabase, workspaceId, staffId, role, userId, autorizacion,
+    item: { nombre: ctx.item.nombre, grupo: ctx.item.grupo, descripcion: ctx.item.descripcion, tarifa_pax: ctx.item.tarifaRaw }, dataUrl, reemplaza,
+  })
+  if (enBiblioteca) {
+    if (!enBiblioteca.ok) return { success: false, error: enBiblioteca.mensaje }
+    const quitada = ctx.tarifa.fotoHotel ? await soltarFotoDeLaOpcion(ctx.supabase, itemId, workspaceId) : null
+    if (ctx.item.negocioId) revalidatePath(`/negocios/${ctx.item.negocioId}`)
+    return { success: true, tarifa: quitada && 'tarifa' in quitada ? quitada.tarifa : ctx.tarifa, fotoBiblioteca: enBiblioteca.elemento }
+  }
   const g = await guardarFotoHotel({
     workspaceId, negocioId: ctx.item.negocioId, cotizacionId: ctx.item.cotizacionId, itemId, dataUrl,
   })
@@ -1596,22 +1656,30 @@ export async function ponerFotoDelHotel(itemId: string, dataUrl: string, proporc
   return { success: true, tarifa: guardado.tarifa }
 }
 
-/** Quita la foto del hotel: el documento vuelve a la foto de la ciudad, si la hay. */
-export async function quitarFotoDelHotel(itemId: string): Promise<ResultadoTarifa> {
-  const ctx = await contexto(itemId)
-  if ('error' in ctx) return { success: false, error: ctx.error as string }
+/** Quita la foto vieja de la opción (y su archivo). */
+async function soltarFotoDeLaOpcion(supabase: unknown, itemId: string, workspaceId: string | null | undefined) {
   let anterior: string | null = null
-  const guardado = await guardarTarifa(ctx.supabase, itemId, actual => {
+  const guardado = await guardarTarifa(supabase, itemId, actual => {
     anterior = actual.fotoHotel?.ref ?? null
     const { fotoHotel: _foto, ...resto } = actual
     void _foto
     return resto
   })
+  if ('error' in guardado) return guardado
+  if (anterior) await borrarImagenesDeCaptura(workspaceId, [anterior])
+  return guardado
+}
+
+/**
+ * Quita la foto vieja de la opción (`tarifa_pax.fotoHotel`). La de la biblioteca no se toca
+ * aquí: es del espacio y se cambia o se quita en el selector, el panel o `/fotos`.
+ */
+export async function quitarFotoDelHotel(itemId: string): Promise<ResultadoTarifa> {
+  const ctx = await contexto(itemId)
+  if ('error' in ctx) return { success: false, error: ctx.error as string }
+  const { workspaceId } = await getWorkspace()
+  const guardado = await soltarFotoDeLaOpcion(ctx.supabase, itemId, workspaceId)
   if ('error' in guardado) return { success: false, error: guardado.error }
-  if (anterior) {
-    const { workspaceId } = await getWorkspace()
-    await borrarImagenesDeCaptura(workspaceId, [anterior])
-  }
   if (ctx.item.negocioId) revalidatePath(`/negocios/${ctx.item.negocioId}`)
   return { success: true, tarifa: guardado.tarifa }
 }
@@ -1664,8 +1732,11 @@ export async function escribirPrecioQueFalta(
   if ('error' in ctx) return { success: false, error: ctx.error as string }
   const guard = await exigirPorPasos(ctx.supabase, ctx.item.cotizacionId)
   if (!guard.ok) return { success: false, error: guard.error }
-  if (!ctx.composicion) return { success: false, error: 'Falta decir a cuántos pasajeros cubre la línea.' }
-  if (!TIPOS_PASAJERO.includes(tipo) || cantidadDeTipo(ctx.composicion, tipo) === 0) {
+  // H1 · la composición que decide qué falta es la del viaje, no la del pantallazo de solo adultos.
+  const tarifaDelViaje = conPasajerosDelViaje(ctx.tarifa, ctx.viaje.composicion, ctx.ranura.slug)
+  const composicionDelViaje = composicionDeLinea(tarifaDelViaje, ctx.viaje.composicion)
+  if (!composicionDelViaje) return { success: false, error: 'Falta decir a cuántos pasajeros cubre la línea.' }
+  if (!TIPOS_PASAJERO.includes(tipo) || cantidadDeTipo(composicionDelViaje, tipo) === 0) {
     return { success: false, error: 'Ese tipo de pasajero no viaja en esta opción.' }
   }
   if (unitario !== null && (!Number.isFinite(unitario) || unitario < 0)) {
@@ -1674,15 +1745,16 @@ export async function escribirPrecioQueFalta(
   const anterior = ctx.tarifa.costosAMano?.[tipo]?.unitario ?? null
   if (unitario !== null && anterior === null) {
     // Solo se escribe lo que de verdad falta: un precio que el pantallazo trae no se tapa a mano.
-    const casillas = casillasConEstadia(ctx.tarifa.casillas ?? {}, ctx.tarifa.correcciones)
-    const faltan = preciosQueFaltan(ctx.composicion, casillas, ctx.ranura.slug, {
-      moneda: monedaDeTarifa(ctx.tarifa).moneda,
-      aMano: costosAManoComoMapa(ctx.tarifa),
+    const casillas = casillasConEstadia(tarifaDelViaje.casillas ?? {}, tarifaDelViaje.correcciones)
+    const faltan = preciosQueFaltan(composicionDelViaje, casillas, ctx.ranura.slug, {
+      moneda: monedaDeTarifa(tarifaDelViaje).moneda,
+      aMano: costosAManoComoMapa(tarifaDelViaje),
     })
     if (!faltan.includes(tipo)) return { success: false, error: 'A esta opción no le falta ese precio.' }
   }
   const quien = await quienEscribe(ctx.supabase)
-  const guardado = await guardarTarifa(ctx.supabase, itemId, actual => {
+  const guardado = await guardarTarifa(ctx.supabase, itemId, leida => {
+    const actual = conPasajerosDelViaje(leida, ctx.viaje.composicion, ctx.ranura.slug)
     const costosAMano = { ...(actual.costosAMano ?? {}) }
     if (unitario === null) delete costosAMano[tipo]
     else costosAMano[tipo] = { unitario, por: quien.por, porId: quien.porId, en: new Date().toISOString() }
@@ -1865,7 +1937,7 @@ export async function confirmarTarifaPorPasajero(
         codigo: 'PENDIENTE',
       }
     }
-    porHabitacion.push({ numero: h.numero, ocupacion: h.ocupacion, totalCOP })
+    porHabitacion.push({ numero: h.numero, ocupacion: h.ocupacion, totalCOP, ...(h.nombre ? { nombre: h.nombre } : {}) })
   }
   const costoTotalCOP = Math.round(
     (costos.length > 0 ? costos.reduce((a, c) => a + c.totalCOP, 0) : porHabitacion.reduce((a, h) => a + h.totalCOP, 0)) * 100,
@@ -1895,7 +1967,7 @@ export async function confirmarTarifaPorPasajero(
       : porHabitacion.map((h, i) => ({
           item_id: itemId,
           tipo: TIPO_RUBRO_POR_PASAJERO,
-          descripcion: `Habitación ${h.numero} · ${describirOcupacion(h.ocupacion, 'y')}`,
+          descripcion: `${h.nombre ?? `Habitación ${h.numero}`} · ${describirOcupacion(h.ocupacion, 'y')}`,
           cantidad: 1,
           unidad: 'habitación',
           valor_unitario: h.totalCOP,

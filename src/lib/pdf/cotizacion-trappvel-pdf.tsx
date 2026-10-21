@@ -586,13 +586,13 @@ function TarjetaHotel({ h, general, tarifas, margen, e, llenar = false }: { h: H
 }
 
 /**
- * La foto del hotel que puso el asesor, como foto del documento: sin rótulo ni crédito (es
- * del cliente o del proveedor, no del banco) y recortada al centro, igual que en «Así lo ve
- * el cliente».
+ * La foto del hotel que puso el asesor, como foto del documento: sin rótulo y recortada al
+ * centro, igual que en «Así lo ve el cliente». Sin crédito si es propia (subida, o de la opción);
+ * con el de Commons si salió de la biblioteca (autor y licencia, Emilio 2026-10-16).
  */
 function fotoDelHotel(h: HotelPDF): FotoPDF | null {
   if (!h.foto) return null
-  return { url: h.foto.url, rotulo: null, credito: null, proporcion: h.foto.proporcion ?? undefined }
+  return { url: h.foto.url, rotulo: null, credito: h.foto.credito ?? null, proporcion: h.foto.proporcion ?? undefined }
 }
 
 /**
@@ -1451,8 +1451,14 @@ export default function CotizacionTrappvelPDF({
   }
 
   // Los créditos de las fotos que se IMPRIMEN: una foto de ciudad que reemplazó la del hotel
-  // no se nombra.
-  const creditos = creditosDeFotos([v.foto, ...fotosCiudades.filter(f => !reemplazadas.has(f))])
+  // no se nombra; la del hotel (la del capítulo y la de cada alternativa con foto), sí.
+  const creditos = creditosDeFotos([
+    v.foto,
+    ...fotosCiudades.filter(f => !reemplazadas.has(f)),
+    ...capitulos.flatMap(c => [c.hotel, ...c.alternativas]).map(h => (h ? fotoDelHotel(h) : null)),
+    // La foto del perfil de un plan opcional (biblioteca, 2026-10-16), si se imprime.
+    ...opcionales.map(o => o.foto ?? null),
+  ])
   const antesDeViajar = v.antesDeViajar ?? []
 
   /**
@@ -1645,6 +1651,14 @@ export default function CotizacionTrappvelPDF({
             // §4.11 punto 2: 48 entre capítulos con nombre; un capítulo sin encabezado (un solo
             // destino que ya dice la portada) es una sección más, a 32.
             const aire = conEncabezado ? ec.capitulo : ec.seccion
+            // Re-verificación D · el hotel de otra tarifa no queda solo arriba de una hoja («PREMIUM ·
+            // Lord Pierre» abría la hoja 2, lejos de su capítulo). Las líneas de las alternativas sin
+            // foto que siguen al hotel grande van en la MISMA unidad que él: si no caben, bajan juntos.
+            // Las que tienen foto ya son una fila entera que no se parte.
+            const primeraConFoto = c.alternativas.findIndex(h => fotoDelHotel(h) !== null)
+            const pegadas = primeraConFoto === -1 ? c.alternativas : c.alternativas.slice(0, primeraConFoto)
+            const sueltas = c.alternativas.slice(pegadas.length)
+            const lineasPegadas = pegadas.map((h, j) => <LineaHotelAlternativo key={`alt-${j}`} h={h} general={general} tarifas={tarifas} e={ec} />)
             return (
               <Fragment key={`capitulo-${i}`}>
               <Aire alto={aire} />
@@ -1652,15 +1666,18 @@ export default function CotizacionTrappvelPDF({
                 {fotoAlLado ? (
                   // Punto 7: la columna de la izquierda y la foto miden lo mismo; la tarjeta
                   // del hotel se estira hasta el pie de la foto (o la foto hasta el de ella).
-                  <View wrap={false} style={{ flexDirection: 'row' }}>
-                    <Marca seccion={id} />
-                    <View style={{ flex: 1, paddingRight: 12 }}>
-                      {encabezado}
-                      {c.hotel && (
-                        <TarjetaHotel h={c.hotel} general={general} tarifas={tarifas} margen={conEncabezado ? ec.bloque : 0} e={ec} llenar />
-                      )}
+                  <View wrap={false}>
+                    <View style={{ flexDirection: 'row' }}>
+                      <Marca seccion={id} />
+                      <View style={{ flex: 1, paddingRight: 12 }}>
+                        {encabezado}
+                        {c.hotel && (
+                          <TarjetaHotel h={c.hotel} general={general} tarifas={tarifas} margen={conEncabezado ? ec.bloque : 0} e={ec} llenar />
+                        )}
+                      </View>
+                      <Miniatura foto={fotos[0]} ancho={altoAlLado * 1.5} alto={altoAlLado} estirar={c.hotel !== null} />
                     </View>
-                    <Miniatura foto={fotos[0]} ancho={altoAlLado * 1.5} alto={altoAlLado} estirar={c.hotel !== null} />
+                    {lineasPegadas}
                   </View>
                 ) : (
                   <>
@@ -1669,11 +1686,15 @@ export default function CotizacionTrappvelPDF({
                       {encabezado}
                       {conFotos && <FranjaDeFotos fotos={fotos} e={ec} nivel={nivel} deCapitulo arriba={!conEncabezado} />}
                       {conHotel && c.hotel && <TarjetaHotel h={c.hotel} general={general} tarifas={tarifas} margen={conEncabezado ? ec.bloque : 0} e={ec} />}
+                      {(conHotel || !c.hotel) && lineasPegadas}
                     </View>
                     {!conHotel && c.hotel && (
                       <>
                         <Aire alto={ec.tarjetas} />
-                        <TarjetaHotel h={c.hotel} general={general} tarifas={tarifas} margen={0} e={ec} />
+                        <View wrap={false}>
+                          <TarjetaHotel h={c.hotel} general={general} tarifas={tarifas} margen={0} e={ec} />
+                          {lineasPegadas}
+                        </View>
                       </>
                     )}
                   </>
@@ -1681,11 +1702,11 @@ export default function CotizacionTrappvelPDF({
                 {/* Cada hotel con la foto que le puso el asesor la lleva al lado, en el mismo
                     orden: la foto de las alternativas NO reemplaza la de la ciudad, que es del
                     hotel grande del capítulo. */}
-                {c.alternativas.map((h, j) => {
+                {sueltas.map((h, j) => {
                   const foto = fotoDelHotel(h)
                   return foto
-                    ? <HotelAlternativoConFoto key={`alt-${j}`} h={h} foto={foto} general={general} tarifas={tarifas} e={ec} nivel={nivel} />
-                    : <LineaHotelAlternativo key={`alt-${j}`} h={h} general={general} tarifas={tarifas} e={ec} />
+                    ? <HotelAlternativoConFoto key={`alt-${pegadas.length + j}`} h={h} foto={foto} general={general} tarifas={tarifas} e={ec} nivel={nivel} />
+                    : <LineaHotelAlternativo key={`alt-${pegadas.length + j}`} h={h} general={general} tarifas={tarifas} e={ec} />
                 })}
                 <LineaDeTiempo entradas={suyas} esp={ec} />
               </View>
@@ -1987,6 +2008,13 @@ export default function CotizacionTrappvelPDF({
                     minPresenceAhead={i > 0 && i === opcionales.length - 1 ? conCierre('opcionales') : undefined}
                     style={{ flexDirection: 'row', backgroundColor: C.tarjeta, borderRadius: 8, padding: eo.dentro, marginTop: i === 0 ? eo.tarjetas : 0 }}
                   >
+                    {/* La foto del perfil del plan (biblioteca, 2026-10-16): miniatura 3:2 a un cuarto
+                        del ancho, a la izquierda. Sin foto, la tarjeta de siempre. */}
+                    {o.foto && (
+                      <View style={{ marginRight: 10 }}>
+                        <Miniatura foto={o.foto} ancho={ANCHO_CUARTO - eo.dentro} alto={(ANCHO_CUARTO - eo.dentro) / 1.5} />
+                      </View>
+                    )}
                     <View style={{ flex: 1, paddingRight: 8 }}>
                       <Text hyphenationCallback={SIN_GUION} style={{ fontSize: 9.5, fontFamily: 'Helvetica-Bold', color: C.tinta }}>{o.nombre}</Text>
                       {!general && descripcion && (

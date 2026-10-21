@@ -9,6 +9,7 @@ import { bogotaYear } from '@/lib/dates/bogota'
 import { getCachedUser } from '@/lib/supabase/auth-user'
 import { esBrandingPorDefecto } from '@/lib/marca/paleta'
 import { lineaUsaPoliticaDePrecio } from '@/lib/cotizaciones/politica-de-linea'
+import { tienePropuestaHtml } from '@/lib/pdf/motor-html'
 
 export default async function MiNegocioPage() {
   const supabase = await createClient()
@@ -60,7 +61,7 @@ export default async function MiNegocioPage() {
     // quedaban en el payload RSC de esta pagina.
     supabase
       .from('workspaces')
-      .select('id, name, logo_url, color_primario, color_secundario, equipo_declarado, max_seats, modules, tipo')
+      .select('id, name, logo_url, color_primario, color_secundario, equipo_declarado, max_seats, modules, tipo, cotizacion_template_slug')
       .eq('id', workspaceId)
       .single(),
 
@@ -215,6 +216,7 @@ export default async function MiNegocioPage() {
       lineasDisponibles={lineasDisponibles}
       lineaActivaId={lineaActivaId}
       usaPoliticaDePrecio={usaPoliticaDePrecio}
+      tienePropuestaViaje={tienePropuestaHtml((workspace as { cotizacion_template_slug?: string | null } | null)?.cotizacion_template_slug)}
       sectionScores={{
         fiscal: fiscalScore,
         marca: marcaScore,

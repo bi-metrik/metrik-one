@@ -65,6 +65,11 @@ export const MODULOS = {
       // La licencia de ONE que el cliente paga por cuotas (próxima cuota, enlace de pago, pagos).
       // La ruta exige además ser la persona designada del contrato que el espacio paga.
       '/suscripcion',
+      // La biblioteca de fotos de la propuesta de viaje (2026-10-16), que desde el 2026-10-18 es
+      // «Proveedores» (`/fotos` redirige). Las páginas exigen además la plantilla con propuesta
+      // html (`tienePropuestaHtml`).
+      '/fotos',
+      '/proveedores',
     ],
     funciones: [
       'comercial_negocios', 'conciliacion', 'cobros_recurrentes', 'aliados', 'causacion',

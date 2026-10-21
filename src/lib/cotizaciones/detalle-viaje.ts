@@ -63,7 +63,8 @@ import { estrellasDesdeTexto } from './estrellas'
 import { notaDeLaLinea } from './nota-linea'
 import { datosManuales } from './ingreso-manual'
 import { habitacionesDeTarifa, repartirHabitaciones, type RepartoHabitaciones } from './habitaciones'
-import { acomodacionDeHabitaciones, ocupacionConEdades, ocupacionCorta } from './tarjeta-opcion'
+import { acomodacionDeHabitaciones, acomodacionDeReserva, ocupacionConEdades, ocupacionCorta } from './tarjeta-opcion'
+import { registroDeReserva } from './reserva-habitaciones'
 import { vueloDesdeNombre } from '@/lib/pdf/cotizacion-trappvel-formato'
 import { parseMontoCop } from '@/lib/negocios/monto-cop'
 import { equipajeDeCampos, leerTramos, tramosDeCampos, type EquipajeTramo, type TramoVuelo } from './tramos-vuelo'
@@ -188,7 +189,8 @@ export interface HotelPDF {
    * del PDF la descarga del almacenamiento a partir de `fotoRef`. La plantilla la pone en el
    * lugar de la foto provisional de la ciudad; sin foto, el documento sale como antes.
    */
-  foto?: { url: string; proporcion?: number | null } | null
+  /** `credito`: la foto de la biblioteca que es de Commons lleva su autor y licencia («Autora, CC BY-SA 4.0»). */
+  foto?: { url: string; proporcion?: number | null; credito?: string | null } | null
   /** Dónde está guardada la foto del hotel (`sbext://…`). Ausente = sin foto. */
   fotoRef?: string
   /** Ancho entre alto de la foto guardada. */
@@ -624,7 +626,10 @@ export function hotelesDeItems(items: ItemConLectura[]): HotelPDF[] {
     const tarifa = leerTarifaPax(item.tarifa_pax)
     const habs = habitacionesDeTarifa(tarifa)
     const reparto = habs.length > 1 ? repartirHabitaciones(habs, tarifa.composicion ?? null, tarifa.correcciones) : null
-    const acomodacion = reparto ? acomodacionDeHabitaciones(reparto) ?? ocupacionDeLaUnicaQueVa(reparto) : null
+    // Decisión del 2026-10-14 · un pantallazo con varias habitaciones y un total dice cada una
+    // («Doble 1: 2 adultos; …»). El precio no se parte: es el del pantallazo.
+    const reserva = !reparto && habs.length === 1 ? acomodacionDeReserva(registroDeReserva(habs[0].lectura)) : null
+    const acomodacion = reparto ? acomodacionDeHabitaciones(reparto) ?? ocupacionDeLaUnicaQueVa(reparto) : reserva
     // Ingreso manual: lo que incluye y la edad del niño viven fuera de los campos de la ranura.
     const primera = casillaDelItem(item) ?? habs[0]?.lectura ?? null
     const manual = datosManuales(primera)
@@ -707,6 +712,38 @@ export function serviciosDeItems(items: ItemConLectura[]): ServicioPDF[] {
     })
   }
   return out
+}
+
+/**
+ * La lectura CRUDA de un traslado (con lo corregido encima): el trayecto, el vehículo y la fecha
+ * tal como los escribió la captura («2026-12-11 y 2026-12-14», «2026-12-21/lun 10:25»). La usa
+ * la propuesta nueva para partir un traslado de ida y vuelta en sus trayectos
+ * (`propuesta/trayectos.ts`). `serviciosDeItems` no cambia: lo que lee el redactor del texto
+ * (y su huella) sigue igual. `null` si la línea no es un traslado.
+ */
+export function lecturaDeTraslado(item: ItemConLectura): { trayecto: string | null; vehiculo: string | null; fecha: string | null } | null {
+  if (ranuraDelItem(item)?.slug !== 'traslado_detalle') return null
+  const d = detalleDelItem(item)
+  return {
+    trayecto: texto(d, 'trayecto') ?? ((item.nombre ?? '').trim() || null),
+    vehiculo: texto(d, 'tipo_vehiculo'),
+    fecha: texto(d, 'fecha_hora'),
+  }
+}
+
+/**
+ * Dónde y cuándo es una actividad o un traslado, según su lectura (con lo corregido encima):
+ * la ciudad (solo la actividad la lee) y la fecha corta («14 dic»). Lo usa la propuesta para
+ * poner cada plan opcional en los días libres de su ciudad.
+ */
+export function lugarDelServicio(item: ItemConLectura): { ciudad: string | null; fecha: string | null } {
+  const slug = ranuraDelItem(item)?.slug
+  if (slug !== 'traslado_detalle' && slug !== 'actividad_detalle') return { ciudad: null, fecha: null }
+  const d = detalleDelItem(item)
+  return {
+    ciudad: slug === 'actividad_detalle' ? texto(d, 'ciudad') : null,
+    fecha: fechaCorta(texto(d, slug === 'traslado_detalle' ? 'fecha_hora' : 'fecha')),
+  }
 }
 
 /**
@@ -865,4 +902,14 @@ export function leerConfigDocumentoViaje(raw: unknown): ConfigDocumentoViaje {
         }
       : null,
   }
+}
+
+/**
+ * La ciudad de una actividad según su lectura (con lo corregido encima). Lo usa el catálogo de
+ * fotos de la propuesta para nombrar la foto de cada actividad. `null` si la línea no es una
+ * actividad o la lectura no trae ciudad.
+ */
+export function ciudadDeActividad(item: ItemConLectura): string | null {
+  if (ranuraDelItem(item)?.slug !== 'actividad_detalle') return null
+  return texto(detalleDelItem(item), 'ciudad')
 }

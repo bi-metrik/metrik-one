@@ -18,7 +18,7 @@ describe('Anexo B: viaje nuevo de un cliente que ya existe, con 2 mensajes y 1 t
     const modelo = modeloGuionado([
       { name: 'buscar', args: { texto: 'Martín Mora' } },
       { name: 'responder', args: { tema: 'solicitud', texto: 'Listo, viaje nuevo para Martin Mora, el que ya tenemos (cel. …7311). ¿A dónde quiere ir?', reglas_usadas: ['g.buscar_primero'] } },
-      { name: 'proponer', args: { accion: 'viaje_nuevo', datos: { cliente: ref, destino: 'San Andrés' } } },
+      { name: 'proponer', args: { accion: 'viaje_nuevo', datos: { responsable: 'Carla Comercial', dicho_en: 1, cliente: ref, destino: 'San Andrés' } } },
     ])
     const e = await escenario({ modelo, contactos: [MARTIN], viajes: VIAJES })
 
@@ -31,14 +31,14 @@ describe('Anexo B: viaje nuevo de un cliente que ya existe, con 2 mensajes y 1 t
 
     const t2 = await e.escribe('No, pero abramos uno nuevo a San Andrés')
     expect(t2[0].tipo).toBe('botones')
-    expect(t2[0].texto).toBe('¿Abro este viaje?\nMartin Mora (cel. …7311) · San Andrés · Viaje a medida')
+    expect(t2[0].texto).toBe('¿Abro este viaje?\nMartin Mora (cel. …7311) · San Andrés · Viaje a medida\nLo llevas tú (Carla Comercial)')
     // El segundo turno vio la búsqueda del primero en la conversación.
     expect(JSON.stringify(modelo.pedidos[2].mensajes[0])).toContain('[bot consultó] buscar')
     expect(e.puerto.escrituras).toEqual([])
 
     const t3 = await e.toca('Sí, ábrelo')
     expect(t3[0].texto).toContain('Abrí M1 26 6 · San Andrés para Martin Mora.')
-    expect(e.puerto.escrituras).toEqual([{ tipo: 'viaje', codigo: 'M1 26 6', contactoId: 'c-martin', destino: 'San Andrés' }])
+    expect(e.puerto.escrituras).toEqual([{ tipo: 'viaje', codigo: 'M1 26 6', contactoId: 'c-martin', destino: 'San Andrés', responsableId: 'staff-carla' }])
     expect(modelo.restantes()).toBe(0)
     // El toque no llamó al modelo.
     expect(modelo.pedidos).toHaveLength(3)
@@ -47,7 +47,7 @@ describe('Anexo B: viaje nuevo de un cliente que ya existe, con 2 mensajes y 1 t
   it('un segundo toque al mismo botón no escribe dos veces', async () => {
     const modelo = modeloGuionado([
       { name: 'buscar', args: { texto: 'Martín Mora' } },
-      { name: 'proponer', args: { accion: 'viaje_nuevo', datos: { cliente: ref, destino: 'San Andrés' } } },
+      { name: 'proponer', args: { accion: 'viaje_nuevo', datos: { responsable: 'Carla Comercial', dicho_en: 1, cliente: ref, destino: 'San Andrés' } } },
     ])
     const e = await escenario({ modelo, contactos: [MARTIN], viajes: VIAJES })
     await e.escribe('abre un viaje nuevo de Martín Mora a San Andrés')
@@ -60,7 +60,7 @@ describe('Anexo B: viaje nuevo de un cliente que ya existe, con 2 mensajes y 1 t
   it('dos toques A LA VEZ (dos procesos con la misma foto de la conversación) escriben una sola vez', async () => {
     const modelo = modeloGuionado([
       { name: 'buscar', args: { texto: 'Martín Mora' } },
-      { name: 'proponer', args: { accion: 'viaje_nuevo', datos: { cliente: ref, destino: 'San Andrés' } } },
+      { name: 'proponer', args: { accion: 'viaje_nuevo', datos: { responsable: 'Carla Comercial', dicho_en: 1, cliente: ref, destino: 'San Andrés' } } },
     ])
     const e = await escenario({ modelo, contactos: [MARTIN], viajes: VIAJES })
     await e.escribe('abre un viaje nuevo de Martín Mora a San Andrés')
@@ -78,7 +78,7 @@ describe('Anexo B: viaje nuevo de un cliente que ya existe, con 2 mensajes y 1 t
   it('el «sí» escrito solo ejecuta la propuesta vigente; «sí, pero…» no', async () => {
     const modelo = modeloGuionado([
       { name: 'buscar', args: { texto: 'Martín Mora' } },
-      { name: 'proponer', args: { accion: 'viaje_nuevo', datos: { cliente: ref, destino: 'San Andrés' } } },
+      { name: 'proponer', args: { accion: 'viaje_nuevo', datos: { responsable: 'Carla Comercial', dicho_en: 1, cliente: ref, destino: 'San Andrés' } } },
       { name: 'responder', args: { tema: 'solicitud', texto: '¿Qué hago con la condición?' } },
     ])
     const e = await escenario({ modelo, contactos: [MARTIN], viajes: VIAJES })
@@ -127,7 +127,7 @@ describe('candados (§3.5)', () => {
     expect(r[0].texto).toContain('¿Cargo esto en M1 26 2')
     await e.toca('Cargar')
     expect(e.puerto.escrituras).toEqual([{ tipo: 'carga', codigo: 'M1 26 2', textos: ['Hola, queremos ir a Cartagena', 'somos 2 adultos'] }])
-    expect((await e.deps.dominio.estado!({ workspaceId: '', phone: '', remitente: { nombre: '', rol: '' }, conversacion: e.almacen.filas, resultadosPrevios: [] }))[0]).toBe('Tanda abierta: ninguna.')
+    expect((await e.deps.dominio.estado!({ workspaceId: '', phone: '', remitente: { nombre: '', rol: '' }, conversacion: e.almacen.filas, resultadosPrevios: [] })).find((l) => l.startsWith('Tanda'))).toBe('Tanda abierta: ninguna.')
   })
 
   it('el acuse de reenvío sale UNA vez por ráfaga y ningún reenvío llama al modelo', async () => {
@@ -207,7 +207,7 @@ describe('candados (§3.5)', () => {
   it('el modelo caído: respuesta fija con la propuesta vigente si la hay', async () => {
     const modelo = modeloGuionado([
       { name: 'buscar', args: { texto: 'Martín Mora' } },
-      { name: 'proponer', args: { accion: 'viaje_nuevo', datos: { cliente: ref } } },
+      { name: 'proponer', args: { accion: 'viaje_nuevo', datos: { responsable: 'Carla Comercial', dicho_en: 1, cliente: ref } } },
       { falla: 'http 503' },
     ])
     const e = await escenario({ modelo, contactos: [MARTIN], viajes: VIAJES })

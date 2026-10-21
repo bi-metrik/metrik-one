@@ -53,6 +53,7 @@ export default function TarjetaCosto({
   moneda,
   onCambio,
   autorizador = null,
+  apilable = false,
 }: {
   itemId: string
   editable: boolean
@@ -76,6 +77,12 @@ export default function TarjetaCosto({
    * (su dueño), nunca del código (P7). Sin un dueño único, «quien autoriza».
    */
   autorizador?: string | null
+  /**
+   * Solo la cotización por pasos (brief del 2026-10-16): la tabla mide su PROPIO ancho y, si las
+   * columnas no caben, se apila en una tarjeta por fila. Apagado, la tabla es byte a byte la de
+   * siempre (`tarjeta-costo-apilada.test.ts`).
+   */
+  apilable?: boolean
 }) {
   const [ajustando, setAjustando] = useState(false)
   const [conAdicional, setConAdicional] = useState(false)
@@ -205,9 +212,43 @@ export default function TarjetaCosto({
     }, () => {})
   }
 
+  // La celda del nombre, con sus marcas y su ⚠: la misma en la tabla de siempre y en la apilada.
+  const nombreDeFila = (f: FilaCosto) => (
+    <span className="flex min-w-0 items-center gap-1.5">
+      <span className="truncate">{f.nombre}</span>
+      {f.det && <span className="shrink-0 rounded bg-[#EEEBE4] px-[5px] py-px text-[11px] font-semibold text-[#6E6A62]">{f.det}</span>}
+      {f.extra && <span className="shrink-0 rounded bg-[#EEEBE4] px-[5px] py-px text-[11px] font-semibold text-[#6E6A62]">Adicional</span>}
+      {f.aMano && <span className="shrink-0 rounded bg-[#FBF1E2] px-[5px] py-px text-[11px] font-semibold text-[#9A5F0C]">a mano</span>}
+      {f.bajoCosto && (
+        <AlertaDecision tip="Este precio queda por debajo del costo" izquierda>
+          <p className="m-0">Con {pesos(f.precioUnitario)} por {f.nombre.toLowerCase()}, esta fila vende por debajo de lo que cuesta. Súbelo o confirma que es a propósito.</p>
+          {editable && f.aMano && (
+            <span className="mt-1 flex flex-wrap gap-2">
+              <button type="button" className={BTN} onClick={() => quitarPrecioAMano(f)}>Volver al precio de ONE</button>
+            </span>
+          )}
+        </AlertaDecision>
+      )}
+      {f.extra && editable && f.adicionalId && (
+        <button
+          type="button"
+          aria-label="Quitar adicional"
+          className={BTN_X}
+          onClick={() => guardar(() => eliminarAdicional(f.adicionalId!), () => {})}
+        >
+          <X className="h-4 w-4" aria-hidden />
+        </button>
+      )}
+    </span>
+  )
+
   // En el celular el encabezado se esconde: la primera fila de datos no lleva borde arriba.
   const fila = 'grid grid-cols-[minmax(0,1.6fr)_60px_repeat(3,minmax(0,1fr))] items-center gap-2 border-t border-[#E2DED5] px-3 py-[9px] max-sm:grid-cols-[minmax(0,1fr)_auto] max-sm:gap-x-2.5 max-sm:gap-y-0.5 max-sm:[&:nth-child(2)]:border-t-0'
   const num = 'text-right tabular-nums max-sm:hidden'
+  // La tabla apilable (por pasos): bloque con la tarjeta por debajo de 30rem de TABLA, subgrid encima.
+  const filaA = 'border-t border-[#E2DED5] px-3 py-[9px] @min-[30rem]:col-span-full @min-[30rem]:grid @min-[30rem]:grid-cols-subgrid @min-[30rem]:items-center'
+  const numA = 'hidden whitespace-nowrap text-right tabular-nums @min-[30rem]:block'
+  const pares = 'm-0 mt-1.5 grid grid-cols-2 gap-x-3 gap-y-1.5 @min-[30rem]:hidden'
 
   return (
     <section aria-label="Costo y precio" className="flex flex-col gap-2.5" data-costo-precio>
@@ -215,59 +256,79 @@ export default function TarjetaCosto({
         Costo y precio<span className="h-px flex-1 bg-[#E2DED5]" />
       </p>
       {/* Sin `overflow-hidden`: el ⚠ de una fila abre su detalle por encima de la tabla. */}
-      <div role="table" className="rounded-lg border border-[#E2DED5]">
-        <div role="row" className={`${fila} rounded-t-lg border-t-0 bg-[#F8F7F3] text-xs font-semibold text-[#6E6A62] max-sm:hidden`}>
-          <span>Pasajero</span><span className="text-right">Cant.</span><span className="text-right">Costo c/u</span><span className="text-right">Precio c/u</span><span className="text-right">Precio total</span>
+      {apilable ? (
+        // Por pasos (brief del 2026-10-16): la tabla es un contenedor y decide por SU ancho, no
+        // por el de la ventana. Desde 30rem van las columnas, y las de números toman el ancho de
+        // su cifra (subgrid: todas las filas comparten las mismas pistas), así que ninguna cifra
+        // se encoge por debajo de sí misma; el nombre es el que se corta. Por debajo, una tarjeta
+        // por fila con «Cant. · Costo c/u · Precio c/u · Precio total» como pares.
+        <div role="table" className="@container rounded-lg border border-[#E2DED5]" data-tabla-apilable>
+          <div className="@min-[30rem]:grid @min-[30rem]:grid-cols-[minmax(0,1fr)_repeat(4,auto)] @min-[30rem]:gap-x-4">
+            <div role="row" className={`${filaA} hidden rounded-t-lg border-t-0 bg-[#F8F7F3] text-xs font-semibold text-[#6E6A62] @min-[30rem]:grid`}>
+              <span>Pasajero</span>
+              <span className="whitespace-nowrap text-right">Cant.</span>
+              <span className="whitespace-nowrap text-right">Costo c/u</span>
+              <span className="whitespace-nowrap text-right">Precio c/u</span>
+              <span className="whitespace-nowrap text-right">Precio total</span>
+            </div>
+            {filas.map(f => (
+              <div role="row" key={f.clave} className={`${filaA} @max-[30rem]:[&:nth-child(2)]:border-t-0`} data-fila-costo={f.clave}>
+                {nombreDeFila(f)}
+                <span className={numA} data-celda="cantidad">{f.cantidad}</span>
+                <span className={numA} data-celda="costo">{mil(f.costoUnitario)}</span>
+                <span className={numA} data-celda="precio">{mil(f.precioUnitario)}</span>
+                <span className={numA} data-celda="total"><b>{mil(f.precioTotal)}</b></span>
+                <dl className={pares}>
+                  <Par k="cantidad" etiqueta="Cant." valor={String(f.cantidad)} />
+                  <Par k="costo" etiqueta="Costo c/u" valor={mil(f.costoUnitario)} />
+                  <Par k="precio" etiqueta="Precio c/u" valor={mil(f.precioUnitario)} />
+                  <Par k="total" etiqueta="Precio total" valor={mil(f.precioTotal)} fuerte />
+                </dl>
+              </div>
+            ))}
+            <div role="row" className={`${filaA} rounded-b-lg bg-[#F8F7F3] font-bold`} data-fila-total>
+              <span>Total</span>
+              <span className="hidden @min-[30rem]:block" />
+              <span className={numA}>{mil(costoTotal)}</span>
+              <span className="hidden @min-[30rem]:block" />
+              <span className={numA}>{pesos(precioTotal)}</span>
+              <dl className={pares}>
+                <Par k="costo" etiqueta="Costo" valor={mil(costoTotal)} />
+                <Par k="total" etiqueta="Precio total" valor={pesos(precioTotal)} fuerte />
+              </dl>
+            </div>
+          </div>
         </div>
-        {filas.map(f => (
-          <div role="row" key={f.clave} className={fila} data-fila-costo={f.clave}>
-            <span className="flex min-w-0 items-center gap-1.5">
-              <span className="truncate">{f.nombre}</span>
-              {f.det && <span className="shrink-0 rounded bg-[#EEEBE4] px-[5px] py-px text-[11px] font-semibold text-[#6E6A62]">{f.det}</span>}
-              {f.extra && <span className="shrink-0 rounded bg-[#EEEBE4] px-[5px] py-px text-[11px] font-semibold text-[#6E6A62]">Adicional</span>}
-              {f.aMano && <span className="shrink-0 rounded bg-[#FBF1E2] px-[5px] py-px text-[11px] font-semibold text-[#9A5F0C]">a mano</span>}
-              {f.bajoCosto && (
-                <AlertaDecision tip="Este precio queda por debajo del costo" izquierda>
-                  <p className="m-0">Con {pesos(f.precioUnitario)} por {f.nombre.toLowerCase()}, esta fila vende por debajo de lo que cuesta. Súbelo o confirma que es a propósito.</p>
-                  {editable && f.aMano && (
-                    <span className="mt-1 flex flex-wrap gap-2">
-                      <button type="button" className={BTN} onClick={() => quitarPrecioAMano(f)}>Volver al precio de ONE</button>
-                    </span>
-                  )}
-                </AlertaDecision>
-              )}
-              {f.extra && editable && f.adicionalId && (
-                <button
-                  type="button"
-                  aria-label="Quitar adicional"
-                  className={BTN_X}
-                  onClick={() => guardar(() => eliminarAdicional(f.adicionalId!), () => {})}
-                >
-                  <X className="h-4 w-4" aria-hidden />
-                </button>
-              )}
-            </span>
-            <span className={num}>{f.cantidad}</span>
-            <span className={num}>{mil(f.costoUnitario)}</span>
-            <span className={num}>{mil(f.precioUnitario)}</span>
-            <span className="text-right tabular-nums"><b>{mil(f.precioTotal)}</b></span>
-            <span className="col-span-2 hidden text-[12.5px] tabular-nums text-[#6E6A62] max-sm:block">
-              ×{f.cantidad} · {mil(f.costoUnitario)} → {mil(f.precioUnitario)} c/u
+      ) : (
+        <div role="table" className="rounded-lg border border-[#E2DED5]">
+          <div role="row" className={`${fila} rounded-t-lg border-t-0 bg-[#F8F7F3] text-xs font-semibold text-[#6E6A62] max-sm:hidden`}>
+            <span>Pasajero</span><span className="text-right">Cant.</span><span className="text-right">Costo c/u</span><span className="text-right">Precio c/u</span><span className="text-right">Precio total</span>
+          </div>
+          {filas.map(f => (
+            <div role="row" key={f.clave} className={fila} data-fila-costo={f.clave}>
+              {nombreDeFila(f)}
+              <span className={num}>{f.cantidad}</span>
+              <span className={num}>{mil(f.costoUnitario)}</span>
+              <span className={num}>{mil(f.precioUnitario)}</span>
+              <span className="text-right tabular-nums"><b>{mil(f.precioTotal)}</b></span>
+              <span className="col-span-2 hidden text-[12.5px] tabular-nums text-[#6E6A62] max-sm:block">
+                ×{f.cantidad} · {mil(f.costoUnitario)} → {mil(f.precioUnitario)} c/u
+              </span>
+            </div>
+          ))}
+          <div role="row" className={`${fila} rounded-b-lg bg-[#F8F7F3] font-bold`} data-fila-total>
+            <span>Total</span>
+            <span className="max-sm:hidden" />
+            <span className={num}>{mil(costoTotal)}</span>
+            <span className="max-sm:hidden" />
+            <span className="text-right tabular-nums">{pesos(precioTotal)}</span>
+            <span className="col-span-2 hidden text-[12.5px] font-normal tabular-nums text-[#6E6A62] max-sm:block">
+              Costo {mil(costoTotal)} → precio {mil(precioTotal)}
             </span>
           </div>
-        ))}
-        <div role="row" className={`${fila} rounded-b-lg bg-[#F8F7F3] font-bold`} data-fila-total>
-          <span>Total</span>
-          <span className="max-sm:hidden" />
-          <span className={num}>{mil(costoTotal)}</span>
-          <span className="max-sm:hidden" />
-          <span className="text-right tabular-nums">{pesos(precioTotal)}</span>
-          <span className="col-span-2 hidden text-[12.5px] font-normal tabular-nums text-[#6E6A62] max-sm:block">
-            Costo {mil(costoTotal)} → precio {mil(precioTotal)}
-          </span>
         </div>
-      </div>
 
+      )}
       {conAdicional && editable && (
         <FormAdicional
           itemId={itemId}
@@ -412,6 +473,16 @@ export default function TarjetaCosto({
 }
 
 /** «+ Adicional»: qué es, cuántos y cuánto cuesta. El precio sale del margen de la cotización. */
+/** Un par etiqueta-valor de la tabla apilada: la cifra nunca se parte en dos líneas. */
+function Par({ k, etiqueta, valor, fuerte = false }: { k: string; etiqueta: string; valor: string; fuerte?: boolean }) {
+  return (
+    <div className="flex min-w-0 flex-col" data-par={k}>
+      <dt className="text-[11.5px] font-normal text-[#6E6A62]">{etiqueta}</dt>
+      <dd className={`m-0 whitespace-nowrap tabular-nums text-[#191713] ${fuerte ? 'font-bold' : 'font-normal'}`}>{valor}</dd>
+    </div>
+  )
+}
+
 function FormAdicional({
   itemId,
   margenCotizacion,

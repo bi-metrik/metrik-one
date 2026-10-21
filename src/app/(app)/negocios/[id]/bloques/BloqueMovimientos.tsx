@@ -5,6 +5,7 @@ import Link from 'next/link'
 import { useRouter } from 'next/navigation'
 import { ArrowDownLeft, ArrowUpRight, Clock, Plus, Receipt, Wallet } from 'lucide-react'
 import DistribuirPagoModal from '@/components/distribuir-pago-modal'
+import EstadoRepartoComercial from '@/components/estado-reparto-comercial'
 import RegistrarPagoModal from '@/components/registrar-pago-modal'
 import { referenciaVisible } from '@/lib/cobros/referencia-externa'
 import { formatBogotaFechaCortaAno } from '@/lib/dates/bogota'
@@ -232,6 +233,8 @@ export default function BloqueMovimientos({
           <span className="text-[10px] font-bold tabular-nums text-blue-700">{fmt(costoHoras)}</span>
         </div>
       )}
+
+      {conReparto && <EstadoRepartoComercial negocioId={negocioId} />}
 
       {pagoModal && (conReparto ? (
         <DistribuirPagoModal

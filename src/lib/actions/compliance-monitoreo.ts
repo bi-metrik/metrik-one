@@ -22,7 +22,7 @@ import {
   validarHorizonte,
   type ModoBarrido,
 } from '@/lib/compliance/monitoreo';
-import { ejecutarBarrido, type ResumenBarrido } from '@/lib/compliance/barrido';
+import { BarridoEnCurso, ejecutarBarrido, type ResumenBarrido } from '@/lib/compliance/barrido';
 
 type Result<T> = { ok: true; data: T } | { ok: false; error: string };
 
@@ -199,6 +199,12 @@ export async function correrBarridoAhora(): Promise<Result<ResumenBarrido>> {
   try {
     return { ok: true, data: await ejecutarBarrido(guard.workspaceId) };
   } catch (err) {
+    if (err instanceof BarridoEnCurso) {
+      return {
+        ok: false,
+        error: 'Ya hay un barrido corriendo en este espacio (el automático o uno de otra persona). Espera a que termine y recarga.',
+      };
+    }
     return { ok: false, error: err instanceof Error ? err.message : 'barrido_fallo' };
   }
 }

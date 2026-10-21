@@ -13,7 +13,7 @@ import { cargarEnExistente } from '../wa-carga-reglas.ts';
 import { lineaCargada, mensajesDeTextos, planDeCarga, propuestoDe, registradoDe } from './bandeja/carga.ts';
 import { instruccionesCarga } from './bandeja/extraccion.ts';
 import type { PlanCarga } from './bandeja/carga.ts';
-import type { HechoConOrigen, PuertoBandeja, ViajeAgente } from './bandeja/dominio.ts';
+import type { HechoConOrigen, MiembroEquipo, PuertoBandeja, ViajeAgente } from './bandeja/dominio.ts';
 import type { AutorizacionAgente } from './bandeja/autorizacion.ts';
 import { planGuardado } from '../perfil-contacto.ts';
 import type { DimensionPerfil, EstadoPerfil, HechoExistente, OrigenPerfil } from '../perfil-contacto.ts';
@@ -23,6 +23,15 @@ export interface ContactoMem { id: string; nombre: string; celular?: string | nu
 export interface ViajeMem { id: string; codigo: string; contactoId: string; nombre: string; destino: string | null; abierto: boolean; datos: Record<string, unknown> }
 /** Un hecho del perfil (`contacto_perfil_hechos`), en memoria. */
 export interface HechoMem { id: string; contactoId: string; dimension: DimensionPerfil; texto: string; estado: EstadoPerfil; origenTipo: OrigenPerfil; origenRef: string }
+
+/**
+ * El equipo comercial por defecto de las pruebas (inventado): quien escribe y otra persona. Un viaje nuevo exige que el
+ * modelo nombre a una de las dos (`responsable`).
+ */
+export const EQUIPO_PRUEBA: MiembroEquipo[] = [
+  { id: 'staff-carla', nombre: 'Carla Comercial', esQuienEscribe: true },
+  { id: 'staff-beto', nombre: 'Beto Ventas', esQuienEscribe: false },
+];
 
 export class Reloj {
   constructor(public ms = Date.parse('2026-10-06T18:45:00Z')) {}
@@ -111,7 +120,12 @@ function normal(s: string): string {
  * Lo que la extracción le pide al modelo y lo que él devuelve (la salida cruda, como la de Gemini). En las pruebas es un
  * guion: así se prueba lo que el código hace con la salida, sin llamar a ningún modelo.
  */
-export type ExtractorMemoria = (p: { textos: string[]; mensajes: string; campos: CampoEntendible[]; yaTiene: Record<string, unknown>; instrucciones: string }) => Promise<unknown>;
+/**
+ * `perfil`: las instrucciones se armaron con el párrafo del perfil, así que el esquema tiene que traer `perfil` (como en
+ * producción, `prepararCarga` de `produccion.ts`). Sin él, el esquema de respuesta no deja al modelo devolver lo de la
+ * persona aunque el prompt se lo pida (cp-mixto, 2026-10-14).
+ */
+export type ExtractorMemoria = (p: { textos: string[]; mensajes: string; campos: CampoEntendible[]; yaTiene: Record<string, unknown>; instrucciones: string; perfil?: boolean }) => Promise<unknown>;
 
 /**
  * El directorio, los viajes y lo escrito. Sin `campos`, la extracción es determinista (sin modelo): guarda los textos
@@ -129,7 +143,10 @@ export class PuertoMemoria implements PuertoBandeja {
   /** Lo que recibió la extracción en cada llamado (para las pruebas). */
   extracciones: string[][] = [];
   private consecutivo = new Map<string, number>();
-  constructor(p: { contactos?: ContactoMem[]; viajes?: ViajeMem[]; campos?: CampoEntendible[]; extraer?: ExtractorMemoria; ahora?: () => number } = {}) {
+  /** El equipo comercial (`equipoComercial`). Reemplazable; `'error'` simula la lectura caída. */
+  equipo: MiembroEquipo[] | 'error';
+  constructor(p: { contactos?: ContactoMem[]; viajes?: ViajeMem[]; campos?: CampoEntendible[]; extraer?: ExtractorMemoria; ahora?: () => number; equipo?: MiembroEquipo[] } = {}) {
+    this.equipo = structuredClone(p.equipo ?? EQUIPO_PRUEBA);
     this.contactos = structuredClone(p.contactos ?? []);
     this.viajes = structuredClone(p.viajes ?? []);
     this.campos = p.campos ?? null;
@@ -140,6 +157,10 @@ export class PuertoMemoria implements PuertoBandeja {
   private hoyISO() { return new Date(this.ahora() - 5 * 3600 * 1000).toISOString().slice(0, 10); }
 
   async linea() { return 'Viaje a medida'; }
+
+  async equipoComercial(): Promise<MiembroEquipo[] | 'error'> {
+    return this.equipo === 'error' ? 'error' : structuredClone(this.equipo);
+  }
 
   private ficha(c: ContactoMem): FichaCliente {
     const ns = this.viajes.filter((v) => v.contactoId === c.id);
@@ -191,16 +212,18 @@ export class PuertoMemoria implements PuertoBandeja {
     return { id: v.id, codigo: v.codigo, nombre: v.nombre, cliente: c?.nombre ?? null, contactoId: v.contactoId, destino: v.destino, abierto: v.abierto, faltaCotizar: f.cotizar, faltaCompleto: f.completo, ...(registrado ? { registrado } : {}) };
   }
 
-  async crearViaje(p: { contactoId: string; destino: string | null }) {
+  async crearViaje(p: { contactoId: string; destino: string | null; responsableId: string }) {
     const c = this.contactos.find((x) => x.id === p.contactoId);
     if (!c) throw new Error('contacto inexistente');
+    // Como producción: se vuelve a validar al escribir.
+    if (this.equipo === 'error' || !this.equipo.some((m) => m.id === p.responsableId)) throw new Error('el responsable no es del equipo comercial');
     const letra = normal(c.nombre)[0].toUpperCase();
     const prefijo = this.viajes.find((v) => v.contactoId === c.id)?.codigo.split(' ')[0] ?? `${letra}${[...new Set(this.contactos.filter((x) => normal(x.nombre)[0] === normal(c.nombre)[0]).map((x) => x.id))].indexOf(c.id) + 1}`;
     const n = (this.consecutivo.get(prefijo) ?? this.viajes.filter((v) => v.codigo.startsWith(`${prefijo} 26 `)).length) + 1;
     this.consecutivo.set(prefijo, n);
     const v: ViajeMem = { id: nuevoId(), codigo: `${prefijo} 26 ${n}`, contactoId: c.id, nombre: p.destino ? p.destino.toUpperCase() : `Viaje de ${c.nombre}`, destino: p.destino, abierto: true, datos: {} };
     this.viajes.push(v);
-    this.escrituras.push({ tipo: 'viaje', codigo: v.codigo, contactoId: c.id, destino: p.destino });
+    this.escrituras.push({ tipo: 'viaje', codigo: v.codigo, contactoId: c.id, destino: p.destino, responsableId: p.responsableId });
     return { id: v.id, codigo: v.codigo, nombre: v.nombre };
   }
 
@@ -209,7 +232,7 @@ export class PuertoMemoria implements PuertoBandeja {
     if (this.campos && this.extraer) {
       this.extracciones.push([...textos]);
       const data = { destino: v.destino, ...v.datos };
-      const raw = await this.extraer({ textos, mensajes: mensajesDeTextos(textos).map((m) => `[${m.n}] ${m.cuerpo}`).join('\n'), campos: this.campos, yaTiene: data, instrucciones: instruccionesCarga(this.campos, this.hoyISO(), data, propuestoDe(previo), undefined, { perfil: true }) });
+      const raw = await this.extraer({ textos, mensajes: mensajesDeTextos(textos).map((m) => `[${m.n}] ${m.cuerpo}`).join('\n'), campos: this.campos, yaTiene: data, instrucciones: instruccionesCarga(this.campos, this.hoyISO(), data, propuestoDe(previo), undefined, { perfil: true }), perfil: true });
       return planDeCarga({ bloques: [{ fields: this.campos, data }], textos, raw, hoyISO: this.hoyISO(), ahoraIso: new Date(this.ahora()).toISOString(), previo });
     }
     const antes = (previo as { textos?: string[] } | undefined)?.textos ?? [];

@@ -10,7 +10,10 @@
 //   · la búsqueda que falla dice «no pude revisar», nunca «no existe»;
 //   · el perfil del contacto (2026-10-12): sin autorización vigente no se guarda nada; lo sensible, los juicios y los
 //     nombres de menores (las marcas del modelo) no entran; lo explícito exige [Guardar] y lo que trae una carga entra
-//     como sugerido con el mismo toque.
+//     como sugerido con el mismo toque;
+//   · un viaje nuevo nace con quien lo lleva (2026-10-16, Trappvel): sin responsable elegido no hay propuesta, y el
+//     elegido tiene que ser del equipo comercial activo del workspace. Quién es lo interpreta el modelo («la llevo yo»,
+//     «Ale», un audio); el código solo valida a quién nombró y lo vuelve a validar al escribir.
 // La base la toca un `PuertoBandeja` (producción: `puerto-supabase.ts`; pruebas y arnés: `memoria.ts`).
 // ============================================================
 
@@ -51,9 +54,23 @@ export type HechoConOrigen = HechoPerfil & { origenRef: string };
 /** Lo que devuelve `prepararCarga`: lo que cambiaría, lo que faltaría, la duda de la extracción y el plan del toque. */
 export interface CargaPreparada { entendido: string[]; falta: string[]; duda?: string; plan: unknown }
 
+/** Una persona que puede llevar un viaje: staff ACTIVO del workspace con área comercial. */
+export interface MiembroEquipo {
+  /** `staff.id`. */
+  id: string;
+  nombre: string;
+  /** Es quien está escribiendo («la llevo yo»). */
+  esQuienEscribe: boolean;
+}
+
 export interface PuertoBandeja {
   /** Nombre de la línea donde abre viajes («Viaje a medida»). */
   linea(): Promise<string>;
+  /**
+   * Quiénes pueden llevar un viaje: el staff activo del workspace con área comercial, sin el staff de prueba
+   * (`config_extra.staff_de_prueba`) salvo que quien escribe sea de prueba. `'error'`: no se pudo leer.
+   */
+  equipoComercial(): Promise<MiembroEquipo[] | 'error'>;
   porNombre(texto: string): Promise<FichaCliente[] | null>;
   porLlave(llave: Llave): Promise<FichaCliente[] | null>;
   /** `null`: no hay viaje con ese código. `'error'`: no se pudo consultar. */
@@ -63,7 +80,8 @@ export interface PuertoBandeja {
    * contra los que hay, sin adivinar. `'error'`: no se pudo consultar.
    */
   codigosExistentes(candidatos: string[]): Promise<string[] | 'error'>;
-  crearViaje(p: { contactoId: string; destino: string | null }): Promise<{ id: string; codigo: string; nombre: string }>;
+  /** Abre el viaje con su responsable. Lanza si `responsableId` ya no es del equipo comercial (se valida al escribir). */
+  crearViaje(p: { contactoId: string; destino: string | null; responsableId: string }): Promise<{ id: string; codigo: string; nombre: string }>;
   /**
    * La extracción de hoy, sin escribir: lo que cambiaría y lo que faltaría. `plan` es lo que se escribe con el toque.
    * `previo`: el plan de la propuesta pendiente del mismo viaje, que se une (lo nuevo gana solo en el mismo campo).
@@ -242,6 +260,48 @@ export function resolverFicha(ctx: ContextoDominio, ref: string): Vista | null |
   return null;
 }
 
+// ── Quién lleva el viaje ─────────────────────────────────────────────────────
+
+/**
+ * La persona del equipo que nombró el modelo: por su id, por su nombre exacto (sin tildes ni mayúsculas) o por su nombre
+ * seguido de una aclaración entre paréntesis («Tatiana Ruiz (quien escribe)»). No interpreta lo que dijo el comercial:
+ * eso lo hizo el modelo; esto solo comprueba que su elección es una persona de la lista. Pura.
+ */
+export function resolverResponsable(equipo: ReadonlyArray<MiembroEquipo>, ref: string): MiembroEquipo | null | 'varias' {
+  const r = normal(ref).trim();
+  if (!r) return null;
+  const porId = equipo.filter((m) => m.id === ref.trim());
+  if (porId.length === 1) return porId[0];
+  const iguales = equipo.filter((m) => normal(m.nombre) === r || r.startsWith(`${normal(m.nombre)} (`));
+  if (iguales.length === 1) return iguales[0];
+  return iguales.length > 1 ? 'varias' : null;
+}
+
+/** El equipo como lo ven el modelo y el comercial: los nombres, en una línea. Pura. */
+export function nombresDelEquipo(equipo: ReadonlyArray<MiembroEquipo>): string {
+  return equipo.map((m) => m.nombre).join(' · ');
+}
+
+/**
+ * ¿Quedó sin contestar la pregunta de quién lleva el viaje? Sí, si después de la última propuesta o apertura de un viaje
+ * nuevo el bot preguntó: un candado `falta_responsable` (o el de alguien fuera del equipo), o un mensaje del bot cuyas
+ * opciones son personas del equipo (al menos dos, o la única que hay). No lee lo que escribió el comercial: mira las
+ * trazas y las opciones que mandó el bot, contra la lista del equipo. Pura.
+ */
+export function responsablePendiente(filas: ReadonlyArray<FilaConversacion>, equipo: ReadonlyArray<MiembroEquipo> = []): boolean {
+  const nombres = new Set(equipo.map((m) => normal(m.nombre)));
+  const minimo = Math.min(2, nombres.size);
+  let pendiente = false;
+  for (const f of filas) {
+    if (f.direccion === 'saliente' && minimo > 0 && (f.opciones ?? []).filter((o) => nombres.has(normal(o.titulo))).length >= minimo) pendiente = true;
+    const t = f.traza;
+    if (!t) continue;
+    if (t.propuesta?.accion === 'viaje_nuevo' || (t.ejecucion?.accion === 'viaje_nuevo' && t.ejecucion.resultado === 'ejecutada')) pendiente = false;
+    if (t.candados?.some((c) => c.candado === 'falta_responsable' || c.candado === 'responsable_fuera_del_equipo')) pendiente = true;
+  }
+  return pendiente;
+}
+
 // ── Las declaraciones ────────────────────────────────────────────────────────
 
 export const LECTURAS: DeclaracionHerramienta[] = [
@@ -283,6 +343,20 @@ const DATOS_PROPONER = {
     ].join(' '),
   },
   destino: { type: 'string', description: 'viaje_nuevo: el destino, si lo dijeron.' },
+  responsable: {
+    type: 'string',
+    description: [
+      'viaje_nuevo: OBLIGATORIO. Quién lleva (ejecuta) este viaje: el nombre tal como sale en «Equipo comercial» del Estado.',
+      'Lo elige el comercial, no tú: si para este viaje no lo ha dicho, antes de proponer pregúntale «¿Quién lleva este viaje?»',
+      'con `responder` y el equipo comercial en `opciones`. Entiende cómo lo diga: «la llevo yo» o «yo» es quien escribe; un',
+      'apodo o solo el nombre es la persona de la lista que corresponde. Si puede ser más de una persona, o nombra a alguien que',
+      'no está en la lista, pregunta otra vez con las opciones; nunca escojas tú ni asumas que es quien escribe.',
+    ].join(' '),
+  },
+  dicho_en: {
+    type: 'integer',
+    description: 'viaje_nuevo: OBLIGATORIO con `responsable`. El número (#n) del mensaje, audio o toque del comercial donde dijo quién lleva este viaje: uno que nombra a la persona, dice «yo» o toca su nombre. Pedir el viaje no es decir quién lo lleva. Si no hay ninguno, no lo dijo: pregúntale.',
+  },
   desde: { type: 'integer', description: 'viaje_nuevo: el número (#n) del mensaje del comercial donde empezó a pedir este viaje, si fue antes de este turno. El sistema lee desde ahí lo que dijo del viaje.' },
   viaje: { type: 'string', description: 'cargar_tanda / anotar_en_viaje: el código del viaje.' },
   texto: { type: 'string', description: 'anotar_en_viaje: opcional. El sistema lee TODO lo que el comercial escribió de ese viaje en la conversación (también lo de antes de abrirlo) y lo une con la propuesta pendiente.' },
@@ -421,6 +495,38 @@ export function dominioBandeja(puerto: PuertoBandeja): Dominio {
     return { ok: true, v };
   };
 
+  /** El equipo comercial, leído una vez por turno (el estado y la propuesta lo piden en el mismo turno). */
+  let equipo: Promise<MiembroEquipo[] | 'error'> | null = null;
+  const equipoComercial = () => (equipo ??= puerto.equipoComercial());
+
+  /**
+   * Quién lleva el viaje nuevo: el que nombró el modelo, si es del equipo comercial. Sin él, el candado le dice al modelo
+   * que pregunte con las opciones; el código no escoge (Mauricio, 2026-10-16: «preguntar siempre obligatoriamente quién va
+   * a ser el responsable de la ejecución»).
+   */
+  const responsableDe = async (dado: unknown, dichoEn: unknown, ctx: ContextoDominio): Promise<{ ok: true; m: MiembroEquipo } | { ok: false; error: string; candado: string }> => {
+    const eq = await equipoComercial();
+    if (eq === 'error') return { ok: false, error: 'No pude revisar quién es del equipo comercial ahora: no se abre el viaje. Dilo así e intenta en un momento.', candado: 'lectura_fallida' };
+    if (!eq.length) {
+      return { ok: false, error: 'No hay nadie activo con área comercial en el equipo, y un viaje no se abre sin quién lo lleve. Dilo así: alguien tiene que darle el área comercial a una persona en ONE.', candado: 'sin_equipo_comercial' };
+    }
+    const lista = nombresDelEquipo(eq);
+    const ref = String(dado ?? '').trim();
+    if (!ref) {
+      return { ok: false, error: `Falta quién lleva este viaje. No propongas todavía: pregúntale a ${ctx.remitente.nombre} con \`responder\`, «¿Quién lleva este viaje?», con estas opciones: ${lista}. No lo elijas tú.`, candado: 'falta_responsable' };
+    }
+    const m = resolverResponsable(eq, ref);
+    if (m === 'varias') return { ok: false, error: `«${ref}» puede ser más de una persona del equipo. Pregunta cuál, con las opciones: ${lista}.`, candado: 'responsable_fuera_del_equipo' };
+    if (!m) return { ok: false, error: `«${ref}» no está en el equipo comercial (${lista}). Dile que esa persona no puede llevar el viaje y pregúntale quién lo lleva, con esas opciones.`, candado: 'responsable_fuera_del_equipo' };
+    // La elección tiene que señalar DÓNDE la dijo el comercial (QA real, 2026-10-16: el respaldo propuso a quien escribe
+    // sin que nadie lo dijera). El código no lee ese mensaje: solo exige que exista y sea del equipo, como `desde`.
+    const dicho = filaDesde(ctx.conversacion, dichoEn);
+    if (!dicho || dicho === 'invalida') {
+      return { ok: false, error: `\`dicho_en\` tiene que ser el número (#n) del mensaje, audio o toque del comercial donde dijo quién lleva este viaje. Si no lo ha dicho, no propongas: pregúntale con \`responder\`, «¿Quién lleva este viaje?», con estas opciones: ${lista}.`, candado: 'falta_responsable' };
+    }
+    return { ok: true, m };
+  };
+
   /**
    * `perfil_contacto`: lo que el comercial pide recordar de una persona. El modelo decide que es eso y marca cada hecho
    * (dato, sensible, juicio, nombra a un menor); el código solo obedece las marcas y protege las invariantes:
@@ -490,11 +596,23 @@ export function dominioBandeja(puerto: PuertoBandeja): Dominio {
       }
       const desde = filaDesde(ctx.conversacion, datos.desde);
       if (desde === 'invalida') return { ok: false, error: '`desde` tiene que ser el número (#n) de un mensaje escrito por el comercial en la conversación, o vacío.', candado: 'desde_invalido' };
+      const quien = await responsableDe(datos.responsable, datos.dicho_en, ctx);
+      if (!quien.ok) return quien;
       // La línea solo la nombra este resumen: leerla antes de cada acción eran cuatro consultas en serie delante de la
       // extracción de `anotar_en_viaje` y `cargar_tanda` (medido en vivo, 2026-10-09).
       const linea = await puerto.linea();
-      const resumen = `¿Abro este viaje?\n${ficha.ficha.ref}${destino ? ` · ${destino}` : ''} · ${linea}`;
-      return { ok: true, propuesta: { accion, datos: { contactoId: ficha.id, cliente: ficha.ficha.nombre, destino, ...(desde ? { desdeFila: desde.id } : {}) }, resumen, si: 'Sí, ábrelo', no: 'No' } };
+      const resumen = `¿Abro este viaje?\n${ficha.ficha.ref}${destino ? ` · ${destino}` : ''} · ${linea}\n${quien.m.esQuienEscribe ? `Lo llevas tú (${quien.m.nombre})` : `Lo lleva: ${quien.m.nombre}`}`;
+      return {
+        ok: true,
+        propuesta: {
+          accion,
+          datos: {
+            contactoId: ficha.id, cliente: ficha.ficha.nombre, destino, responsableId: quien.m.id, responsable: quien.m.nombre,
+            ...(quien.m.esQuienEscribe ? { suyo: true } : {}), ...(desde ? { desdeFila: desde.id } : {}),
+          },
+          resumen, si: 'Sí, ábrelo', no: 'No',
+        },
+      };
     }
     if (accion === 'cargar_tanda' || accion === 'anotar_en_viaje') {
       const r = await viajeParaEscribir(ctx, datos.viaje);
@@ -593,17 +711,19 @@ export function dominioBandeja(puerto: PuertoBandeja): Dominio {
   const ejecutar = async (p: Propuesta, ctx: ContextoDominio): Promise<Hechos> => {
     const d = p.datos;
     if (p.accion === 'viaje_nuevo') {
-      const v = await puerto.crearViaje({ contactoId: String(d.contactoId), destino: (d.destino as string | null) ?? null });
+      // Una propuesta sin responsable (armada antes de esta regla) no se ejecuta: hay que volver a proponerla.
+      if (typeof d.responsableId !== 'string' || !d.responsableId) throw new Error('el viaje no tiene quién lo lleve: vuelve a proponerlo');
+      const v = await puerto.crearViaje({ contactoId: String(d.contactoId), destino: (d.destino as string | null) ?? null, responsableId: d.responsableId });
       const det = await puerto.viaje(v.codigo);
       const falta = det && det !== 'error' ? det.faltaCotizar : [];
       return {
         lineas: [
-          `Abrí ${v.codigo}${d.destino ? ` · ${d.destino}` : ''} para ${d.cliente}.`,
+          `Abrí ${v.codigo}${d.destino ? ` · ${d.destino}` : ''} para ${d.cliente}. ${d.suyo ? 'Lo llevas tú.' : `Lo lleva ${d.responsable}.`}`,
           ...(falta.length ? [`Para cotizar falta: ${falta.join(', ')}.`] : []),
           'Reenvíame lo que te escribió y lo cargo ahí.',
         ],
         nombrados: [v.codigo],
-        escrituras: [{ tipo: 'viaje', id: v.id, codigo: v.codigo, nombre: v.nombre, contactoId: d.contactoId, destino: d.destino ?? null }],
+        escrituras: [{ tipo: 'viaje', id: v.id, codigo: v.codigo, nombre: v.nombre, contactoId: d.contactoId, destino: d.destino ?? null, responsableId: d.responsableId }],
       };
     }
     if (p.accion === 'cargar_tanda' || p.accion === 'anotar_en_viaje') {
@@ -707,8 +827,14 @@ export function dominioBandeja(puerto: PuertoBandeja): Dominio {
     },
     async estado(ctx) {
       const t = tanda(ctx.conversacion);
-      const nombrados = viajesNombrados(ctx.conversacion, await sueltosDe(ctx));
+      const [nombrados, eq] = await Promise.all([sueltosDe(ctx).then((s) => viajesNombrados(ctx.conversacion, s)), equipoComercial()]);
+      const yo = eq === 'error' ? undefined : eq.find((m) => m.esQuienEscribe);
+      const lineasEquipo = eq === 'error' || !eq.length ? [] : [
+        `Equipo comercial (quién puede llevar un viaje nuevo): ${nombresDelEquipo(eq)}. ${yo ? `Si quien te escribe dice «yo», es ${yo.nombre}.` : 'Quien te escribe no es del equipo comercial: no puede llevar el viaje.'}`,
+        ...(responsablePendiente(ctx.conversacion, eq) ? ['Pendiente: preguntaste quién lleva el viaje nuevo. Si en los mensajes nuevos lo eligió (tocó un nombre, lo escribió o lo dijo en un audio), propón el viaje con esa persona. Si te habla de otra cosa, contéstala y en el mismo mensaje vuelve a preguntar quién lo lleva, con el equipo en `opciones` (salvo que te diga que ya no lo abras).'] : []),
+      ];
       return [
+        ...lineasEquipo,
         `Tanda abierta: ${t.length ? `${t.length} mensaje${t.length === 1 ? '' : 's'} reenviado${t.length === 1 ? '' : 's'} sin cargar` : 'ninguna'}.`,
         `Viajes nombrados en esta conversación: ${nombrados.length ? nombrados.join(', ') : 'ninguno'}.`,
         // En vivo (2026-10-07) el bot buscó a la comercial como si fuera la clienta.

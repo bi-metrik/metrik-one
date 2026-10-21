@@ -9,6 +9,8 @@ import { filasDeCosto, pesos } from '@/lib/cotizaciones/tarjeta-opcion'
 import { aerolineaDeFila, filasDelVuelo, numerosSinTramo, TOKENS, textosDeTarjetaHotel } from '@/lib/pdf/cotizacion-trappvel-formato'
 import { TEXTO_AGREGAR_FOTO_HOTEL, urlDeFotoHotel } from '@/lib/cotizaciones/foto-hotel'
 import { nombreVisibleDeLinea } from '@/lib/cotizaciones/nombre-visible'
+import type { DudaVista } from '@/lib/fotos/vista'
+import PreguntaMismo from '../fotos/pregunta-mismo'
 import PastillaAerolinea from './pastilla-aerolinea'
 
 /**
@@ -29,6 +31,28 @@ import PastillaAerolinea from './pastilla-aerolinea'
  */
 
 const HELVETICA = '"Helvetica Neue", Helvetica, Arial, sans-serif'
+
+/**
+ * El perfil del hotel o del tour en su tarjeta (Mauricio, 2026-10-16): el recuadro muestra la foto
+ * que sale en la propuesta (con «+N» si tiene más); vacío, «Agrega fotos de este hotel» para
+ * pegar, arrastrar o subir. Si el nombre se parece a otro hotel del espacio, en su lugar va la
+ * pregunta «¿Es el mismo hotel que …?».
+ */
+export interface BibliotecaEnTarjeta {
+  tipo: 'hotel' | 'actividad'
+  /** La foto del perfil que sale en la propuesta. `null` = no tiene. */
+  foto: { url: string | null } | null
+  /** Cuántas más del mismo perfil salen con ella. */
+  mas: number
+  /** ¿Cabe otra (hasta 3)? */
+  admiteOtra: boolean
+  /** «¿Es el mismo hotel que …?», sin contestar. */
+  duda: DudaVista | null
+  contestando: boolean
+  onContestar: (mismo: boolean) => void
+  /** Abre el perfil (ordenar, quitar, ver las tres). */
+  onVerFotos: () => void
+}
 const PLACEHOLDER_NOTA = 'Agrega una nota para el cliente…'
 
 export default function HojaCliente({
@@ -47,6 +71,7 @@ export default function HojaCliente({
   subiendoFoto = false,
   onPonerFoto,
   onQuitarFoto,
+  biblioteca = null,
 }: {
   /** La opción, con su descripción: la nota sale de ahí (`notaDeLaLinea`). */
   item: ItemConLectura
@@ -68,6 +93,8 @@ export default function HojaCliente({
   /** Pegada, arrastrada o subida: quien llama la comprime y la guarda. */
   onPonerFoto?: (archivo: File) => void
   onQuitarFoto?: () => void
+  /** Con biblioteca en el espacio, el recuadro la muestra y abre su selector. */
+  biblioteca?: BibliotecaEnTarjeta | null
 }) {
   const enLaFicha = adicionales.map(f => adicionalEnLaFicha(aAdicional(f)))
   const [h] = hotelesDeItems([{ ...item, adicionales: enLaFicha }])
@@ -87,7 +114,23 @@ export default function HojaCliente({
       </>,
     )
   }
-  if (!h) return hoja(<LineaDelCliente numero={numero} nombre={nombreVisibleDeLinea(item)} adicionales={enLaFicha} />)
+  if (!h) {
+    const linea = <LineaDelCliente numero={numero} nombre={nombreVisibleDeLinea(item)} adicionales={enLaFicha} />
+    // Un tour o plan con perfil lleva su recuadro de foto al lado, como el hotel.
+    if (!biblioteca) return hoja(linea)
+    return hoja(
+      <div className="flex items-start gap-3 max-sm:flex-col">
+        <div className="min-w-0 flex-1 self-stretch max-sm:w-full">{linea}</div>
+        {biblioteca.duda ? (
+          <div className="w-[34%] shrink-0 max-sm:w-full">
+            <PreguntaMismo tipo={biblioteca.tipo} duda={biblioteca.duda} editable={editable} ocupado={biblioteca.contestando} onContestar={biblioteca.onContestar} compacta />
+          </div>
+        ) : (biblioteca.foto || (editable && onPonerFoto)) ? (
+          <FotoDeTarjeta fotoRef={null} editable={editable} subiendo={subiendoFoto} onPoner={onPonerFoto} biblioteca={biblioteca} />
+        ) : null}
+      </div>,
+    )
+  }
   const t = textosDeTarjetaHotel(h, general)
 
   return hoja(
@@ -144,13 +187,18 @@ export default function HojaCliente({
               ) : null}
             </div>
           </div>
-          {(fotoRef || (editable && onPonerFoto)) && (
-            <FotoDelHotel
+          {biblioteca?.duda ? (
+            <div className="w-[34%] shrink-0 max-sm:w-full">
+              <PreguntaMismo tipo="hotel" duda={biblioteca.duda} editable={editable} ocupado={biblioteca.contestando} onContestar={biblioteca.onContestar} compacta />
+            </div>
+          ) : (fotoRef || biblioteca?.foto || (editable && onPonerFoto)) && (
+            <FotoDeTarjeta
               fotoRef={fotoRef}
               editable={editable}
               subiendo={subiendoFoto}
               onPoner={onPonerFoto}
               onQuitar={onQuitarFoto}
+              biblioteca={biblioteca}
             />
           )}
           </div>
@@ -257,27 +305,38 @@ function VueloDelCliente({ v, general }: { v: VueloPDF; general: boolean }) {
 }
 
 /**
- * La foto del hotel sobre la hoja: vacía, invita a pegarla, arrastrarla o subirla (como la
- * nota); con foto, se ve como sale en el documento (3:2, recortada al centro) y se cambia o se
- * quita. El pegado se queda aquí: la bandeja escucha el pegado en toda la página.
+ * La foto del hotel o del tour sobre la hoja: vacía, invita a pegarla, arrastrarla o subirla (como
+ * la nota); con foto, se ve como sale en el documento (3:2, recortada al centro). El pegado se
+ * queda aquí: la bandeja escucha el pegado en toda la página.
+ *
+ * Con perfil (`biblioteca`), manda la foto del perfil; la vieja de la opción (`fotoRef`, solo
+ * hoteles) se ve si el perfil no tiene una, igual que en el documento (`foto-hotel-documento.ts`).
+ * Pegar o soltar sobre una foto AGREGA otra al perfil si cabe; «Ver fotos» abre el perfil para
+ * ordenar o quitar.
  */
-function FotoDelHotel({
+function FotoDeTarjeta({
   fotoRef,
   editable,
   subiendo,
   onPoner,
   onQuitar,
+  biblioteca,
 }: {
   fotoRef: string | null
   editable: boolean
   subiendo: boolean
   onPoner?: (archivo: File) => void
   onQuitar?: () => void
+  biblioteca: BibliotecaEnTarjeta | null
 }) {
   const idEntrada = useId()
   const [sobre, setSobre] = useState(false)
-  const src = urlDeFotoHotel(fotoRef)
-  const puede = editable && !!onPoner && !subiendo
+  const deBiblioteca = !!biblioteca?.foto
+  // Una foto de la biblioteca sin enlace firmado se ve como el degradado, no como vacía.
+  const src = deBiblioteca ? biblioteca!.foto!.url ?? '' : urlDeFotoHotel(fotoRef)
+  // Con el perfil lleno (3 fotos) pegar no agrega: «Ver fotos» para cambiar una.
+  const puede = editable && !!onPoner && !subiendo && (!deBiblioteca || biblioteca!.admiteOtra)
+  const textoVacio = biblioteca?.tipo === 'actividad' ? 'Agrega fotos de este tour' : biblioteca ? 'Agrega fotos de este hotel' : TEXTO_AGREGAR_FOTO_HOTEL
 
   function tomar(archivo: File | null | undefined) {
     if (!archivo || !puede) return
@@ -316,7 +375,7 @@ function FotoDelHotel({
     />
   )
 
-  if (!src) {
+  if (src === null) {
     return (
       <label
         htmlFor={idEntrada}
@@ -330,8 +389,9 @@ function FotoDelHotel({
         <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
           <rect x="3" y="5" width="18" height="14" rx="2" /><circle cx="9" cy="11" r="2" /><path d="m21 16-5-5-8 8" />
         </svg>
-        <span>{subiendo ? 'Guardando la foto…' : TEXTO_AGREGAR_FOTO_HOTEL}</span>
+        <span>{subiendo ? 'Guardando la foto…' : textoVacio}</span>
         {!subiendo && <small className="text-[10px] opacity-80">Pégala, arrástrala o súbela</small>}
+        {biblioteca && !subiendo && <small className="text-[10px] opacity-70">Queda para las próximas cotizaciones</small>}
         {entrada}
       </label>
     )
@@ -344,19 +404,41 @@ function FotoDelHotel({
       {...(editable ? alSoltar : {})}
       className={`group relative aspect-[3/2] w-[34%] shrink-0 overflow-hidden rounded-lg max-sm:w-full ${sobre ? 'ring-2 ring-[#E63380]' : ''}`}
       data-foto-hotel="con-foto"
+      data-de-biblioteca={deBiblioteca ? '' : undefined}
     >
-      {/* eslint-disable-next-line @next/next/no-img-element -- enlace firmado de 5 minutos, fuera del optimizador */}
-      <img src={src} alt="Foto del hotel" className="h-full w-full object-cover" />
+      {src
+        // eslint-disable-next-line @next/next/no-img-element -- enlace firmado de 5 minutos, fuera del optimizador
+        ? <img src={src} alt={biblioteca?.tipo === 'actividad' ? 'Foto del tour' : 'Foto del hotel'} className="h-full w-full object-cover" />
+        : <span className="block h-full w-full bg-gradient-to-br from-[#e63380] via-[#8b4fa0] to-[#1fa7bd]" aria-label="Foto" />}
+      {deBiblioteca && biblioteca!.mas > 0 && (
+        <span className="absolute top-1.5 right-1.5 rounded-full bg-black/60 px-1.5 py-0.5 text-[10.5px] font-semibold text-white tabular-nums" title={`${biblioteca!.mas} ${biblioteca!.mas === 1 ? 'foto más' : 'fotos más'} en el perfil`} data-mas-fotos>
+          +{biblioteca!.mas}
+        </span>
+      )}
       {subiendo && (
         <span className="absolute inset-0 flex items-center justify-center bg-white/70 text-[11.5px] text-[#3A3F55]">Guardando la foto…</span>
       )}
-      {editable && !subiendo && (
+      {(editable || deBiblioteca) && !subiendo && (
         <span className="absolute inset-x-0 bottom-0 flex justify-end gap-1.5 bg-gradient-to-t from-black/45 to-transparent p-1.5 opacity-0 transition-opacity focus-within:opacity-100 group-hover:opacity-100 max-sm:opacity-100">
-          <label htmlFor={idEntrada} className="cursor-pointer rounded bg-white/90 px-2 py-0.5 text-[11px] font-semibold text-[#3A3F55] hover:bg-white">
-            Cambiar
-            {entrada}
-          </label>
-          {onQuitar && (
+          {biblioteca ? (
+            <>
+              {editable && (!deBiblioteca || biblioteca.admiteOtra) && (
+                <label htmlFor={idEntrada} className="cursor-pointer rounded bg-white/90 px-2 py-0.5 text-[11px] font-semibold text-[#3A3F55] hover:bg-white" data-agregar-foto>
+                  Agregar
+                  {entrada}
+                </label>
+              )}
+              <button type="button" onClick={biblioteca.onVerFotos} className="rounded border-0 bg-white/90 px-2 py-0.5 text-[11px] font-semibold text-[#3A3F55] hover:bg-white" data-ver-fotos>
+                Ver fotos
+              </button>
+            </>
+          ) : (
+            <label htmlFor={idEntrada} className="cursor-pointer rounded bg-white/90 px-2 py-0.5 text-[11px] font-semibold text-[#3A3F55] hover:bg-white">
+              Cambiar
+              {entrada}
+            </label>
+          )}
+          {editable && onQuitar && !deBiblioteca && (
             <button type="button" onClick={onQuitar} className="rounded border-0 bg-white/90 px-2 py-0.5 text-[11px] font-semibold text-[#B3382C] hover:bg-white">
               Quitar
             </button>

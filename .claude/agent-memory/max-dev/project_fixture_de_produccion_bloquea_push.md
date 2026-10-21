@@ -19,3 +19,7 @@ SQL de config, ejecutarlo en PGlite sobre un bloque sintético (ver
 `src/lib/negocios/niveles-solicitud-trappvel.test.ts`), no reimplementar el merge en TS. Si el
 clasificador bloquea, parar y reportar exactamente qué bloqueó; no buscar otra vía.
 Relacionado: [[medicion-sin-mcp-supabase]].
+
+2026-10-14: segunda vez, con el prototipo de `proyectos/trappvel/` como fixture (cuentas bancarias, NIT
+y firma reales de la agencia): [Out-of-Place Publication]. Saneado y re-commiteado sobre el SHA base, el
+push pasó. Ver [[propuesta-chromium-modelo]].

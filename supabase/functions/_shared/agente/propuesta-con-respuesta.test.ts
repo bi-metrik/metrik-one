@@ -26,8 +26,8 @@ const TURNO_1 = 'Vamos a registrar un nuevo viaje. Es a San Andrés y es para Ro
 const TURNO_2 = 'antes dime que tenemos abierto de Rosa Quintero'
 const RESPUESTA_1 = 'Rosa Quintero tiene 5 viajes abiertos: Q1 26 1 Europa 2 Dias, Q1 26 2 Cancun, Q1 26 3 Cartagena, Q1 26 4 Madrid y Q1 26 5 Panama. ¿Abro uno nuevo a San Andrés?'
 const RESPUESTA_2 = 'Tiene abiertos Q1 26 1 Europa 2 Dias, Q1 26 2 Cancun, Q1 26 3 Cartagena, Q1 26 4 Madrid y Q1 26 5 Panama. El viaje nuevo a San Andrés sigue esperando tu toque.'
-const RESUMEN = '¿Abro este viaje?\nRosa Quintero (cel. …4821) · San Andrés · Viaje a medida'
-const PROPONER = { accion: 'viaje_nuevo', datos: { cliente: ref, destino: 'San Andrés' } }
+const RESUMEN = '¿Abro este viaje?\nRosa Quintero (cel. …4821) · San Andrés · Viaje a medida\nLo llevas tú (Carla Comercial)'
+const PROPONER = { accion: 'viaje_nuevo', datos: { responsable: 'Carla Comercial', dicho_en: 1, cliente: ref, destino: 'San Andrés' } }
 
 describe('falla en vivo 2026-10-07: preguntar y proponer en el mismo turno', () => {
   it('turno 1: la respuesta a la pregunta sale ARRIBA del resumen, en el mismo mensaje de botones', async () => {
@@ -99,7 +99,7 @@ describe('falla en vivo 2026-10-07: preguntar y proponer en el mismo turno', () 
     const modelo = modeloGuionado([
       { name: 'buscar', args: { texto: 'Rosa Quintero' } },
       { name: 'proponer', args: PROPONER },
-      { name: 'proponer', args: { accion: 'viaje_nuevo', datos: { cliente: ref, destino: 'Cartagena' } } },
+      { name: 'proponer', args: { accion: 'viaje_nuevo', datos: { responsable: 'Carla Comercial', dicho_en: 1, cliente: ref, destino: 'Cartagena' } } },
     ])
     const e = await escenario({ modelo, contactos: [ROSA], viajes: VIAJES })
     await e.escribe(TURNO_1)
@@ -186,7 +186,8 @@ describe('el prompt pide contestar lo preguntado', () => {
     const e = await escenario({ modelo: modeloGuionado([]) })
     const d = declaraciones(e.deps.dominio, r).find((x) => x.name === 'proponer')!
     expect(d.description).toContain('la respuesta va en `texto`')
-    expect(d.description).toContain('no la repitas')
+    // 2026-10-14 (c1-1215): con «contesta con `responder`» el modelo dibujó sus propios [Cargar] [No], que no ejecutan.
+    expect(d.description).toContain('llámala igual: el sistema no la duplica')
     // 2026-10-09 (69eeff52): «¿Anoto en M1 26 1 · MIAMI 7N que buscan hoteles 4 estrellas?» arriba de «¿Lo anoto en…?».
     expect(d.description).toContain('La pregunta de confirmación («¿Lo anoto en…?», «¿Abro este viaje?») y sus botones los pone el sistema')
     const texto = (d.parameters as { properties: { texto: { description: string } } }).properties.texto.description

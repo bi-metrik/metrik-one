@@ -17,6 +17,14 @@ import {
 } from '@/app/(app)/negocios/tarifa-pax-actions'
 import { comprimirFotoHotel } from '@/lib/cotizaciones/foto-hotel-navegador'
 import HojaCliente from '@/app/(app)/negocios/hoja-cliente'
+import { avisarCambioDeFotos, useFotoDeBiblioteca } from '@/app/(app)/negocios/fotos-tarjeta'
+import { AvisoTarifarioTarjeta } from '@/app/(app)/proveedores/aviso-tarifario'
+import PerfilFotos from '@/app/(app)/fotos/perfil-fotos'
+import { DialogoAutorizacionFoto } from '@/app/(app)/fotos/autorizacion-foto'
+import { contestarMismoPerfil, subirFotoABiblioteca, type PedidoFoto } from '@/app/(app)/fotos/actions'
+import type { PedidoAutorizacion } from '@/lib/fotos/autorizacion'
+import type { CategoriaFoto } from '@/lib/fotos/categoria'
+import { fotoDeLaTarjeta, type ElementoVista } from '@/lib/fotos/vista'
 import TarjetaCosto from '@/app/(app)/negocios/tarjeta-costo'
 import PastillaAerolinea from '@/app/(app)/negocios/pastilla-aerolinea'
 import { AlertaDecision } from '@/components/viaje/alerta-decision'
@@ -58,7 +66,9 @@ import {
   preguntaEliminarOpcion,
   referenciasTexto,
   resumenDeAlojamiento,
+  textoDeHabitacionDeReserva,
 } from '@/lib/cotizaciones/tarjeta-opcion'
+import { registroDeReserva } from '@/lib/cotizaciones/reserva-habitaciones'
 import { parseMontoCop } from '@/lib/negocios/monto-cop'
 import {
   agregarEspera,
@@ -70,6 +80,7 @@ import {
 } from '@/lib/cotizaciones/espera-deshacer'
 import { datosManuales, esManual, montoConMiles } from '@/lib/cotizaciones/ingreso-manual'
 import { nombreVisibleDeLinea } from '@/lib/cotizaciones/nombre-visible'
+import { pedidoDeLinea } from '@/lib/cotizaciones/proveedor-de-linea'
 import { CheckVa, ModoYDia, useActividad, type ActividadDeTarjeta } from '@/app/(app)/negocios/actividad-control'
 import { TEXTO_ACTIVIDAD_NO_VA, TEXTO_VUELO_NO_VA } from '@/lib/cotizaciones/actividad-en-cotizacion'
 
@@ -311,7 +322,78 @@ export default function TarjetaOpcion({
   const fotoRef = fotoConfirmada && fotoConfirmada.antes === fotoDeLaPagina ? fotoConfirmada.ahora : fotoDeLaPagina
   const [subiendoFoto, setSubiendoFoto] = useState(false)
 
+  // El perfil del hotel o del tour (2026-10-16): sus fotos son del espacio y entran solas en la
+  // propuesta; la tarjeta las muestra, deja pegar o subir otra y pregunta «¿Es el mismo …?».
+  // El mismo pedido que usa el servidor para la casilla del IVA (`pedidoDeLinea`).
+  // Con la ficha fijada en la línea (`items.proveedor_id`), el aviso de vigencia sale de ella.
+  const proveedorFijado = (item as { proveedor_id?: string | null }).proveedor_id ?? null
+  const pedidoLinea = pedidoDeLinea(item)
+  const pedidoFoto: PedidoFoto | null = pedidoLinea ? { ...pedidoLinea, ...(proveedorFijado ? { proveedorId: proveedorFijado } : {}) } : null
+  const bib = useFotoDeBiblioteca(pedidoFoto)
+  // El espacio tiene biblioteca: toda foto nueva va al perfil (con la casilla de autorización).
+  const conBiblioteca = bib?.disponible === true
+  // Mientras el perfil se lee, la tarjeta muestra lo de antes (sin parpadear a «vacía»).
+  const enTarjeta = conBiblioteca && bib.elemento !== undefined ? fotoDeLaTarjeta(bib.elemento) : null
+  const [perfilAbierto, setPerfilAbierto] = useState(false)
+  const [contestando, setContestando] = useState(false)
+
+  /** Lo que quedó en el perfil: se pinta ya, las demás tarjetas lo releen y la foto vieja de la opción se suelta. */
+  function quedoEnBiblioteca(elemento: ElementoVista | null) {
+    bib?.poner(elemento)
+    avisarCambioDeFotos()
+    if (esHotel && elemento && elemento.fotos.length > 0) soltarFotoVieja()
+  }
+
+  function soltarFotoVieja() {
+    if (!fotoRef) return
+    void quitarFotoDelHotel(itemId).then(r => {
+      if (r.success) { setFotoConfirmada({ antes: fotoDeLaPagina, ahora: null }); onCambio() }
+    }).catch(() => {})
+  }
+
+  function contestar(mismo: boolean) {
+    if (!pedidoFoto || !bib?.duda || contestando) return
+    setContestando(true)
+    void contestarMismoPerfil(pedidoFoto, bib.duda.clave, mismo)
+      .then(r => {
+        if (!r.ok) { toast.error(r.error); return }
+        quedoEnBiblioteca(r.elemento)
+      })
+      .catch(() => toast.error('No se pudo guardar. Vuelve a intentarlo.'))
+      .finally(() => setContestando(false))
+  }
+
+  // Con perfil, la foto subida pide antes «Tengo autorización para usar esta foto» (Emilio, 2026-10-16).
+  const [fotoPorAutorizar, setFotoPorAutorizar] = useState<File | null>(null)
+
   function ponerFoto(archivo: File) {
+    if (subiendoFoto) return
+    if (conBiblioteca) { setFotoPorAutorizar(archivo); return }
+    if (esHotel) enviarFotoDeLaOpcion(archivo)
+  }
+
+  /** Con perfil: la foto va al perfil del hotel o del tour (se agrega si cabe). */
+  function enviarAlPerfil(archivo: File, permiso: PedidoAutorizacion, categoria: CategoriaFoto | null) {
+    if (subiendoFoto || !pedidoFoto) return
+    setSubiendoFoto(true)
+    void (async () => {
+      try {
+        const foto = await comprimirFotoHotel(archivo)
+        if (!foto) { toast.error('Ese archivo no es una foto. Usa un JPG o un PNG.'); return }
+        const r = await subirFotoABiblioteca(pedidoFoto, foto.dataUrl, null, categoria, permiso)
+        if (!r.ok) { toast.error(r.error); return }
+        setFotoPorAutorizar(null)
+        quedoEnBiblioteca(r.elemento)
+      } catch {
+        toast.error('No se pudo guardar la foto. Vuelve a intentarlo.')
+      } finally {
+        setSubiendoFoto(false)
+      }
+    })()
+  }
+
+  /** Sin perfil (otra plantilla): la foto del hotel queda en la opción, como antes. */
+  function enviarFotoDeLaOpcion(archivo: File) {
     if (subiendoFoto) return
     setSubiendoFoto(true)
     void (async () => {
@@ -320,6 +402,7 @@ export default function TarjetaOpcion({
         if (!foto) { toast.error('Ese archivo no es una foto. Usa un JPG o un PNG.'); return }
         const r = await ponerFotoDelHotel(itemId, foto.dataUrl, foto.proporcion)
         if (!r.success) { toast.error(r.error ?? 'No se pudo guardar la foto. Vuelve a intentarlo.'); return }
+        if (r.fotoBiblioteca !== undefined) quedoEnBiblioteca(r.fotoBiblioteca)
         setFotoConfirmada({ antes: fotoDeLaPagina, ahora: r.tarifa?.fotoHotel?.ref ?? null })
         onCambio()
       } catch {
@@ -499,6 +582,11 @@ export default function TarjetaOpcion({
         </div>
       )}
 
+      {/* La vigencia del tarifario del proveedor (2026-10-18): informativa, no frena cotizar. */}
+      {conBiblioteca && bib.proveedor && !noVa && (
+        <AvisoTarifarioTarjeta proveedor={bib.proveedor} fechasViaje={fechasViaje} />
+      )}
+
       {mover}
 
       {abierta && (
@@ -549,6 +637,7 @@ export default function TarjetaOpcion({
             moneda={monedaDeTarifa(tarifa)}
             onCambio={onCambio}
             autorizador={autorizador}
+            apilable={porPasos !== null}
           />
 
           {!confirmada && respaldo}
@@ -571,7 +660,38 @@ export default function TarjetaOpcion({
             editable={editable}
             onGuardarNota={onGuardarNota}
             {...(esHotel ? { fotoRef, subiendoFoto, onPonerFoto: ponerFoto, onQuitarFoto: quitarFoto } : {})}
+            {...(esActividad && conBiblioteca ? { subiendoFoto, onPonerFoto: ponerFoto } : {})}
+            biblioteca={enTarjeta && bib && pedidoFoto && (esHotel || esActividad) ? {
+              tipo: esHotel ? 'hotel' : 'actividad',
+              foto: enTarjeta.foto ? { url: enTarjeta.foto.url } : null,
+              mas: enTarjeta.mas,
+              admiteOtra: enTarjeta.admiteOtra,
+              duda: bib.duda,
+              contestando,
+              onContestar: contestar,
+              onVerFotos: () => setPerfilAbierto(true),
+            } : null}
           />}
+          {conBiblioteca && pedidoFoto && (
+            <DialogoAutorizacionFoto
+              archivo={fotoPorAutorizar}
+              guardando={subiendoFoto}
+              conCategoria={esHotel}
+              nombre={bib.elemento?.nombre ?? pedidoFoto.nombre}
+              onCancelar={() => setFotoPorAutorizar(null)}
+              onConfirmar={(permiso, categoria) => fotoPorAutorizar && enviarAlPerfil(fotoPorAutorizar, permiso, categoria)}
+            />
+          )}
+          {conBiblioteca && pedidoFoto && perfilAbierto && (
+            <PerfilFotos
+              elemento={bib.elemento ?? null}
+              pedido={pedidoFoto}
+              abierto
+              editable={editable && bib.editable}
+              onCerrar={() => setPerfilAbierto(false)}
+              onCambio={quedoEnBiblioteca}
+            />
+          )}
         </div>
       )}
       {isPending && <span className="sr-only" role="status">Guardando…</span>}
@@ -878,7 +998,10 @@ function FilaHabitacionTarjeta({
   // La que no va (de referencia) se nombra así y dice que no suma (brief del 2026-10-01,
   // punto 2): el resumen decía «1 habitación» y no se entendía que había otra que no contaba.
   const va = h.rol === 'habitacion'
-  const titulo = `Habitación ${posicion}`
+  // Un pantallazo con VARIAS habitaciones y un total (decisión del 2026-10-14): se nombra con su
+  // registro («3 habitaciones dobles») y lista cada una. El precio es el total del pantallazo.
+  const registro = registroDeReserva(h.lectura)
+  const titulo = registro.length > 0 ? h.tipoHabitacion ?? `${registro.length} habitaciones` : `Habitación ${posicion}`
   const precio = h.moneda === 'COP' ? pesos(h.total) : formatoMonto(h.total, h.moneda)
   const src = urlDePantallazo(h.lectura.imagenRef)
   const manual = datosManuales(h.lectura)
@@ -910,6 +1033,11 @@ function FilaHabitacionTarjeta({
           <b className={`block font-semibold ${va ? '' : 'text-[#6E6A62]'}`}>{titulo}</b>
         </span>
         {ocupacion && <span className="text-[13px] text-[#6E6A62]">{ocupacion}</span>}
+        {registro.length > 0 && (
+          <ul className="m-0 mt-0.5 list-none p-0 text-xs text-[#6E6A62]" data-registro-habitaciones>
+            {registro.map((r, i) => <li key={`${r.nombre}-${i}`}>{textoDeHabitacionDeReserva(r)}</li>)}
+          </ul>
+        )}
         {manual?.fuente && <span className="block text-xs text-[#6E6A62]">{manual.fuente}</span>}
         {!va && <span className="block text-xs text-[#6E6A62]" data-no-suma>{TEXTO_NO_VA}</span>}
         {notaReferencia && (

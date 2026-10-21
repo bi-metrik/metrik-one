@@ -94,6 +94,8 @@ export type VistaPublica = {
   expedienteId: string;
   estado: string;
   tokenExpiraEn: string | null;
+  /** Si la empresa devolvió el expediente: qué pidió corregir. */
+  devolucion: { motivo: string; devuelto_en: string | null } | null;
   sujeto: { tipo: 'natural' | 'juridica'; razon_social: string | null; nombre: string | null };
   kit: SlotPedido[];
   documentos: DocumentoPublico[];
@@ -155,6 +157,7 @@ type PayloadValida = {
   estado: string;
   etapa_actual: string;
   token_expira_en: string | null;
+  devolucion?: { motivo: string; devuelto_en: string | null } | null;
   sujeto: { tipo: 'natural' | 'juridica'; razon_social: string | null; nombre: string | null };
   kit_requerido: SlotPedido[];
   documentos: DocumentoPublico[];
@@ -197,6 +200,7 @@ export async function abrirVinculacion(
       expedienteId: base.data.expediente_id,
       estado: base.data.estado,
       tokenExpiraEn: base.data.token_expira_en,
+      devolucion: base.data.devolucion ?? null,
       sujeto: base.data.sujeto,
       kit,
       documentos: base.data.documentos ?? [],

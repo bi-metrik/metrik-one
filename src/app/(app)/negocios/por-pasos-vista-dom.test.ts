@@ -234,3 +234,54 @@ describe('C4 · paso 3 y la misma cifra', () => {
     expect(servidor.enviar).toHaveBeenCalledWith(caso.COT_SAN_ANDRES)
   })
 })
+
+describe('H5 · D2 · deshacer un borrado no pinta una cifra que no existe', () => {
+  /** La vista con una tarjeta que se puede eliminar (la de siempre es un stub sin botones). */
+  const conEliminar = (base: ReturnType<typeof props>) => ({
+    ...base,
+    tarjetaDeOpcion: (id: string, pp: { onEliminar: () => void }) =>
+      React.createElement('button', { 'data-eliminar-stub': id, onClick: pp.onEliminar }, `Eliminar ${id}`),
+  })
+  const premium = () => texto('[data-tab-tarifa="tf-premium"] b')
+
+  it('borrar Agua Dulce (escogida en la Premium) y deshacer: la Premium vuelve a su cifra, sin pasar por otra', async () => {
+    const borrarMod = await import('@/app/(app)/negocios/por-pasos-borrar-actions')
+    vi.mocked(borrarMod.borrarOpcionesPorPasos).mockResolvedValue({
+      success: true, devueltas: {}, fotos: [{ item: { id: 'h-agua-dulce', cotizacion_id: caso.COT_SAN_ANDRES } }], marcas: [],
+    } as never)
+    vi.mocked(borrarMod.reponerOpcionesPorPasos).mockResolvedValue({ success: true, valorTotal: 1 } as never)
+
+    const A = conEliminar(props(1))
+    // Lo que trae el servidor después de borrar: sin Agua Dulce, y la Premium con Posada Enilda.
+    const B = {
+      ...A,
+      filas: (A.filas as unknown as { id: string }[]).filter(f => f.id !== 'h-agua-dulce') as never,
+      tarifasDelServidor: A.tarifasDelServidor.map(t => (t.id === 'tf-premium' ? { ...t, seleccion: ['h-posada', 'h-lord-pierre', 'a-cayo-privada'] } : t)),
+    }
+    const pintar = async (pp: typeof A) => {
+      await act(async () => { root!.render(React.createElement(VistaPorPasos, pp)) })
+      await asentar()
+    }
+    const irA = async (n: 1 | 2) => clic(contenedor.querySelector(`[data-barra-pasos] [data-paso="${n}"]`))
+
+    await pintar(A)
+    await irA(2)
+    const antes = premium()
+    expect(antes).toMatch(/\$/)
+    await irA(1)
+    await clic(contenedor.querySelector('[data-servicio="hotel: Hotel en Providencia"] [role="button"]'))
+    await clic(contenedor.querySelector('[data-eliminar-stub="h-agua-dulce"]'))
+    await pintar(B)
+    await clic(botonCon('Deshacer ('))
+    expect(borrarMod.reponerOpcionesPorPasos).toHaveBeenCalled()
+    // Recién deshecho, con el servidor todavía en B: la Premium ya es la de antes.
+    await irA(2)
+    expect(premium()).toBe(antes)
+    // Llegan las líneas (la vista fresca) antes que las tarifas: sigue siendo la de antes.
+    await pintar({ ...B, filas: A.filas })
+    expect(premium()).toBe(antes)
+    // Y con todo el servidor al día, igual.
+    await pintar(A)
+    expect(premium()).toBe(antes)
+  })
+})

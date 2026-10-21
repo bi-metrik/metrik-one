@@ -34,6 +34,8 @@ export interface AutorizacionVista {
   esDueno: boolean
   vigente: { por: string; motivo: string } | null
   perdida: boolean
+  /** Por qué ya no vale (`textoDePerdida`). Ausente = el texto de siempre. */
+  textoPerdida?: string | null
   pedido: { por: string | null } | null
   disponible: boolean
 }
@@ -125,6 +127,8 @@ export function TarifasPorPasos({
       <small className="text-[11px] opacity-75">
         {t.canon === 'Recomendada' ? 'siempre se manda' : vanAlCliente(t) ? 'se manda al cliente' : 'no se manda'}
       </small>
+      {/* N12 (H8) · una tarifa que no es Económica, Recomendada ni Premium lo dice: no es una pestaña más. */}
+      {t.canon === null && <small className="text-[10.5px] font-semibold opacity-75" data-tarifa-extra>No es una de las tres tarifas</small>}
     </>
   )
 
@@ -173,7 +177,7 @@ export function TarifasPorPasos({
             </>
           ) : (
             <>
-              {autorizacion.perdida && <span className="text-xs text-[#B3382C]">La autorización se perdió: cambió el margen o un costo.</span>}
+              {autorizacion.perdida && <span className="text-xs text-[#B3382C]">{autorizacion.textoPerdida ?? 'La autorización se perdió: cambió el margen o un costo.'}</span>}
               {autorizacion.esDueno ? (
                 autorizando ? (
                   <span className="flex flex-col gap-1.5">

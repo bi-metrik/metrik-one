@@ -43,7 +43,7 @@ describe('indexarVinculaciones', () => {
   it('encuentra al sujeto aunque el documento venga escrito de otra forma', () => {
     const idx = indexarVinculaciones([ref({ documento_numero: '900.123.456-7' })]);
     // La ficha guarda el documento ya normalizado; el espejo puede no estarlo.
-    expect(idx.get('NIT:9001234567')?.expediente_kyc_id).toBe('exp-1');
+    expect(idx.get('NIT:900123456')?.expediente_kyc_id).toBe('exp-1');
   });
 
   it('manda el expediente más reciente, no el aprobado', () => {
@@ -51,7 +51,7 @@ describe('indexarVinculaciones', () => {
       ref({ expediente_kyc_id: 'viejo', estado_cache: 'aprobado', actualizado_en: '2026-03-01T10:00:00.000Z' }),
       ref({ expediente_kyc_id: 'nuevo', estado_cache: 'rechazado', actualizado_en: '2026-08-01T10:00:00.000Z' }),
     ]);
-    const v = idx.get('NIT:9001234567');
+    const v = idx.get('NIT:900123456');
     expect(v?.expediente_kyc_id).toBe('nuevo');
     expect(v?.etiqueta).toBe('Rechazado');
     // Y no esconde que hubo otro antes.
@@ -61,8 +61,8 @@ describe('indexarVinculaciones', () => {
   it('con la misma fecha elige siempre el mismo, venga en el orden que venga', () => {
     const a = ref({ expediente_kyc_id: 'aaa', estado_cache: 'aprobado' });
     const b = ref({ expediente_kyc_id: 'bbb', estado_cache: 'rechazado' });
-    const uno = indexarVinculaciones([a, b]).get('NIT:9001234567');
-    const otro = indexarVinculaciones([b, a]).get('NIT:9001234567');
+    const uno = indexarVinculaciones([a, b]).get('NIT:900123456');
+    const otro = indexarVinculaciones([b, a]).get('NIT:900123456');
     expect(uno?.expediente_kyc_id).toBe(otro?.expediente_kyc_id);
   });
 
@@ -78,7 +78,7 @@ describe('indexarVinculaciones', () => {
       ref({ expediente_kyc_id: 'huerfano', documento_numero: null, actualizado_en: '2026-12-01T10:00:00.000Z' }),
       ref({ expediente_kyc_id: 'bueno' }),
     ]);
-    const v = idx.get('NIT:9001234567');
+    const v = idx.get('NIT:900123456');
     expect(v?.expediente_kyc_id).toBe('bueno');
     expect(v?.total).toBe(1);
   });

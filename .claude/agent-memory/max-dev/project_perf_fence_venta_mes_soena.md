@@ -1,20 +1,14 @@
 ---
 name: project-perf-fence-venta-mes-soena
-description: Barrera OFFSET 0 sobre v_venta_mes_comercial en las 6 RPC _mes_soena (#978 como 20261001140200 + #982 20261001160000, ambas APLICADAS); pagos sigue lento; la "deriva" eran comentarios borrados
+description: RPC _mes_soena de SOENA — barrera OFFSET 0 (#978/#982 APLICADAS) y pagos por plan genérico de función sql (#1206, migración 20261018190000 SIN aplicar)
 metadata:
   type: project
 ---
 
-PR #978 (rama perf/fence-venta-mes-soena, 2026-10-01): migracion `20261001140200_perf_fence_venta_mes_soena.sql` (nacio como 20261001140000, chocaba con la de tarifas y se renombro en #977) reescribe kpis, origen, plan_pago y seccional `_mes_soena` leyendo la vista desde `(SELECT * ... WHERE workspace_id = p_workspace_id OFFSET 0)`. SQL aplicado en prod; la fila del ledger va con la version 20261001140200.
+PR #978 + #982 (2026-10-01, APLICADAS): barrera `(SELECT * FROM v_venta_mes_comercial WHERE workspace_id = p_workspace_id OFFSET 0)` en las 6 RPC `_mes_soena`. Ventas ~9,7 s -> 0,15 s; pagos sin mejora.
 
-PR #982 (rama perf/fence-pagos-ventas-soena, 2026-10-01): `20261001160000_perf_fence_pagos_ventas_soena.sql` cubre ventas y pagos (en pagos la vista entra por LEFT JOIN). APLICADA en prod por la sesion principal (md5 verificados, ledger 20261001160000). Su encabezado cita a #978 con el nombre viejo 20261001140000.
+PR #1206 (rama perf/pagos-mes-soena, 2026-10-18, SIN mergear, migración `20261018190000_perf_pagos_mes_soena_plan_custom.sql` SIN aplicar): la causa de pagos era el PLAN GENÉRICO. Una función `LANGUAGE sql` SECURITY DEFINER no se inlinea y en PG 17 planifica con parámetros desconocidos: estima ~1 cobro en el mes y hace nested loop dentro de `v_cobro_valor` (82 vueltas, 5,3 s). Arreglo: plpgsql + `SET plan_cache_mode = force_custom_plan` (~0,15 s). Se agregó `cobro_id` como desempate del ORDER BY: el orden de empates dependía del plan (8 de 11 meses distintos en md5 exacto, conjunto idéntico). El PR trae el DO dry-run con md5 esperados por mes.
 
-md5(prosrc) en prod: ventas `46a343d8...`, pagos `a9f313d9...` (con comentarios); sin lineas `--`: `50be9f8c...` / `662bdda5...`.
+**Why:** "la consulta suelta tarda 70 ms y la función 2-5 s" es la firma del plan genérico, no de la vista.
 
-Medido 2026-10-01 (JWT SOENA, 11 meses, salida identica): ventas ~9,7 s -> ~0,15 s por mes; pagos SIN mejora (~2 s/mes). En pagos el costo no es la vista: la consulta suelta con workspace literal tarda ~70 ms; sospecha: el join con `guard` impide empujar el filtro de workspace a `v_cobro_valor`. Pendiente aparte.
-
-**La "deriva" repo-vs-prod que #978 dejo fuera NO era logica:** produccion tenia el cuerpo del repo con las lineas de comentario `--` borradas al aplicar. Comparar md5 quitando lineas `--` antes de concluir que hay deriva.
-
-**Why:** el repo no siempre es fuente de verdad para funciones SQL de ONE (ej. `20260927000001` reescribio `current_date -> public.hoy_bogota()` en kpis via pg_get_functiondef), pero un md5 distinto puede ser solo comentarios.
-
-**How to apply:** antes de reescribir una funcion SQL de ONE, comparar md5(prosrc) de prod contra el cuerpo del repo, con y sin lineas `--`; si no cuadra ninguno, partir de `pg_get_functiondef` (pedirlo a la sesion principal). Copiar cuerpos por script, y probar el cambio revirtiendo la linea nueva y recuperando el md5 base.
+**How to apply:** para medir una función sql por dentro, reproducir con `PREPARE` + `SET LOCAL plan_cache_mode = force_generic_plan` (igual al de la función) vs `force_custom_plan`. Las otras 5 RPC `_mes_soena` son sql con parámetros: candidatas al mismo problema, sin medir. Comparar md5 de funciones en prod con y sin líneas `--` (prod a veces las borra al aplicar).

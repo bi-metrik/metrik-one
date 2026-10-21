@@ -35,6 +35,7 @@
 import type { DefinicionRanura } from '@/lib/cotizaciones/ranuras-pantallazo'
 import type {
   FilaTipoPaxCruda,
+  HabitacionDeReservaCruda,
   IconoEquipajeCrudo,
   OpcionVista,
   LecturaCruda,
@@ -153,7 +154,57 @@ No eres tu quien elige: la eleccion ya esta hecha. Por eso:
 - En "opciones_vistas" sigue listando todas las que ves.`
 }
 
-export function construirPrompt(ranura: DefinicionRanura, enfoque: EnfoqueDeLectura | null = null): string {
+/**
+ * Lo que cambia en la lectura según quién la pide. Ausente = la lectura de siempre, byte a byte.
+ */
+export interface OpcionesDeLectura {
+  /**
+   * Un pantallazo de hotel con VARIAS HABITACIONES y un precio total es UNA opción (decisión de
+   * Mauricio del 2026-10-14: «mostramos el precio total y dejamos el registro de varias
+   * habitaciones»). Solo lo pide la cotización por pasos: con el interruptor apagado el prompt y
+   * el esquema son los de siempre, y esa reserva sigue en «¿Cuál de estas?».
+   */
+  reservaVariasHabitaciones?: boolean
+}
+
+/** ¿Esta lectura lleva el bloque de la reserva de varias habitaciones? Solo hotel, y solo si se pide. */
+function conReservaVariasHabitaciones(ranura: DefinicionRanura, opciones: OpcionesDeLectura | null | undefined): boolean {
+  return opciones?.reservaVariasHabitaciones === true && ranura.slug === 'hotel_detalle'
+}
+
+/**
+ * El bloque de la reserva de varias habitaciones. Va ANTES del paso 2 para que el veredicto ya
+ * lo sepa. No relaja la regla de no elegir: si las habitaciones son alternativas, o no hay un
+ * total que las sume, sigue siendo «varias opciones».
+ */
+const BLOQUE_RESERVA_VARIAS_HABITACIONES = `UNA RESERVA DE VARIAS HABITACIONES NO ES "VARIAS OPCIONES". Si la pantalla muestra varias
+habitaciones del MISMO hotel y las MISMAS fechas que se reservan TODAS JUNTAS para el grupo, y
+un TOTAL que las suma a todas ("Total 3 habitaciones dobles: COP 1.229.098", o "Total: COP
+5.712.000" debajo de la tabla de habitaciones), no hay nada que elegir: es UNA sola opcion, la
+reserva entera. Entonces:
+- En "opciones_vistas" devuelve UNA entrada: la reserva, con el TOTAL como precio.
+- El veredicto es "detalle_unico".
+- "precio_total" es ese TOTAL tal como se ve, para toda la estadia de todas las habitaciones.
+  No lo partas por habitacion.
+- "tipo_habitacion" es el tipo de habitacion tal como se ve ("Doble", "Cuadruple"). Si son de
+  tipos distintos, nombralos todos.
+- "ocupacion" junta a TODAS las personas de TODAS las habitaciones ("6 adultos, 1 nino, 1
+  infante"), y los conteos de ocupacion son los de todas las habitaciones juntas.
+- En "habitaciones_reserva" devuelve una entrada por habitacion, en el orden de la pantalla:
+  { "nombre": la habitacion tal como se ve ("Doble 1"), "ocupacion": SU texto de personas tal
+  cual ("2 adultos"), "precio": SU precio tal como se ve, o null si la pantalla no lo muestra }.
+Si NO hay un total que sume las habitaciones, o las habitaciones son ALTERNATIVAS entre las que
+habria que elegir (un boton "Reservar" o "Seleccionar" en cada una, la misma habitacion con
+regimenes distintos, precios para escoger), NO es una reserva: sigue la regla de varias opciones
+y deja "habitaciones_reserva" vacio. Una sola habitacion tampoco es una reserva de varias: deja
+"habitaciones_reserva" vacio.`
+
+export function construirPrompt(
+  ranura: DefinicionRanura,
+  enfoque: EnfoqueDeLectura | null = null,
+  opciones: OpcionesDeLectura | null = null,
+): string {
+  const reserva = conReservaVariasHabitaciones(ranura, opciones)
   const campos = camposDeLaLectura(ranura)
     .map(c => `- ${c.slug} (${c.label}${c.min ? ', OBLIGATORIO' : ''}): ${c.descripcion_ai}`)
     .join('\n')
@@ -182,7 +233,7 @@ Tarjetas de hotel, filas de vuelos, habitaciones o tarifas entre las que habria 
 - Una tabla que separa el precio de UNA reserva por tipo de pasajero (adultos, ninos,
   infantes) es UNA opcion, no varias.
 
-${enfoque ? bloqueDeEnfoque(enfoque) + '\n\n' : ''}PASO 2 — CLASIFICA LA IMAGEN. Devuelve "veredicto" con uno de:
+${enfoque ? bloqueDeEnfoque(enfoque) + '\n\n' : ''}${reserva ? BLOQUE_RESERVA_VARIAS_HABITACIONES + '\n\n' : ''}PASO 2 — CLASIFICA LA IMAGEN. Devuelve "veredicto" con uno de:
 
 - "varias_opciones": se ven DOS O MAS opciones con precio propio entre las que habria que
   ELEGIR (dos o mas entradas en opciones_vistas): un listado con varios hoteles, un comparador, una
@@ -271,7 +322,20 @@ NUNCA repartas un total entre tipos de pasajero.${enfoque ? '\n\nRECUERDA: la op
 
 // ── Esquema de salida ────────────────────────────────────────────────────────
 
-function construirEsquema(ranura: DefinicionRanura) {
+function construirEsquema(ranura: DefinicionRanura, opciones: OpcionesDeLectura | null = null) {
+  // La propiedad de la reserva va solo cuando se pide: sin ella el esquema es el de siempre.
+  const reserva = conReservaVariasHabitaciones(ranura, opciones)
+    ? {
+        habitaciones_reserva: {
+          type: 'ARRAY',
+          items: {
+            type: 'OBJECT',
+            properties: { nombre: { type: 'STRING' }, ocupacion: { type: 'STRING' }, precio: { type: 'STRING' } },
+            required: ['nombre'],
+          },
+        },
+      }
+    : {}
   return {
     type: 'OBJECT',
     properties: {
@@ -340,6 +404,7 @@ function construirEsquema(ranura: DefinicionRanura) {
         },
       },
       total_general: { type: 'NUMBER', nullable: true },
+      ...reserva,
     },
     required: ['opciones_vistas', 'veredicto', 'campos', 'desglose', 'por_tipo_pax'],
   }
@@ -438,7 +503,21 @@ export function normalizarRespuesta(raw: unknown): LecturaCruda {
     return [{ nombre, precio: textoOVacio(o.precio), seleccionada: o.seleccionada === true }]
   })
 
-  return { veredicto, observacion, campos, desglose, porTipoPax, totalGeneral, opcionesVisibles, opcionesVistas, iconosEquipaje }
+  // La reserva de varias habitaciones (`OpcionesDeLectura.reservaVariasHabitaciones`). Sin la
+  // propiedad en la respuesta, la lectura no la lleva: es la de siempre.
+  const habitacionesReserva: HabitacionDeReservaCruda[] | null = Array.isArray(obj.habitaciones_reserva)
+    ? obj.habitaciones_reserva.flatMap(h => {
+        const o = (h ?? {}) as Record<string, unknown>
+        const nombre = textoOVacio(o.nombre)
+        if (nombre === null) return []
+        return [{ nombre: recortar(nombre, MAX_CONCEPTO)!, ocupacion: recortar(textoOVacio(o.ocupacion), MAX_CONCEPTO), precio: recortar(textoOVacio(o.precio), MAX_CONCEPTO) }]
+      })
+    : null
+
+  return {
+    veredicto, observacion, campos, desglose, porTipoPax, totalGeneral, opcionesVisibles, opcionesVistas, iconosEquipaje,
+    ...(habitacionesReserva && habitacionesReserva.length > 0 ? { habitacionesReserva } : {}),
+  }
 }
 
 const SLUGS_EQUIPAJE = ['equipaje_personal', 'equipaje_mano', 'equipaje_bodega']
@@ -654,12 +733,14 @@ export async function extraerRanuraDesdeImagen(
   apiKey: string,
   /** La opción que ya eligió la persona en «¿Cuál de estas?» (P8). */
   enfoque: EnfoqueDeLectura | null = null,
+  /** Ausente = la lectura de siempre (`OpcionesDeLectura`). */
+  opciones: OpcionesDeLectura | null = null,
 ): Promise<ResultadoExtraccion<LecturaCruda>> {
   // Las estrellas se detectan EN PARALELO con la lectura: solo necesitan la imagen, así que
   // no le suman espera a quien cotiza (la lectura tarda más que ellas).
   const deteccion = pideEstrellas(ranura) ? detectarEstrellas(buffer, mimeType, apiKey) : null
   let lectura = await extraerConReintento(
-    () => unaLlamada(buffer, mimeType, ranura, apiKey, enfoque),
+    () => unaLlamada(buffer, mimeType, ranura, apiKey, enfoque, opciones),
     `ranura:${ranura.slug}`,
   )
   if (lectura.data && enfoque) {
@@ -671,7 +752,7 @@ export async function extraerRanuraDesdeImagen(
   const marcada = !enfoque ? opcionMarcada(lectura.data) : null
   if (marcada) {
     const enfocada = await extraerConReintento(
-      () => unaLlamada(buffer, mimeType, ranura, apiKey, marcada),
+      () => unaLlamada(buffer, mimeType, ranura, apiKey, marcada, opciones),
       `ranura:${ranura.slug}:marcada`,
     )
     if (enfocada.data?.veredicto === 'detalle_unico') {
@@ -911,6 +992,7 @@ async function unaLlamada(
   ranura: DefinicionRanura,
   apiKey: string,
   enfoque: EnfoqueDeLectura | null = null,
+  opciones: OpcionesDeLectura | null = null,
 ): Promise<ResultadoExtraccion<LecturaCruda>> {
   if (!apiKey) return { data: null, error: 'GEMINI_API_KEY no configurada en el servidor' }
 
@@ -927,7 +1009,7 @@ async function unaLlamada(
       signal: AbortSignal.timeout(TIMEOUT_MS),
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
-        system_instruction: { parts: [{ text: construirPrompt(ranura, enfoque) }] },
+        system_instruction: { parts: [{ text: construirPrompt(ranura, enfoque, opciones) }] },
         contents: [{
           parts: [
             { text: 'Clasifica y lee la siguiente captura.' },
@@ -938,7 +1020,7 @@ async function unaLlamada(
           temperature: 0.1,
           maxOutputTokens: MAX_OUTPUT_TOKENS,
           responseMimeType: 'application/json',
-          responseSchema: construirEsquema(ranura),
+          responseSchema: construirEsquema(ranura, opciones),
           thinkingConfig: { thinkingBudget: THINKING_BUDGET },
         },
       }),

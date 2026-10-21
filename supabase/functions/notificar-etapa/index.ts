@@ -33,6 +33,7 @@ import {
   textoDeRecibos,
 } from '../_shared/recibos-del-aviso.ts';
 import { todayBogotaISO } from '../_shared/bogota.ts';
+import { htmlCorreoInterno } from '../_shared/correo-interno.ts';
 import { marcaDelWorkspace } from '../_shared/marca-workspace.ts';
 import { esDiaHabil, paisDelWorkspace, siguienteDiaHabil } from '../_shared/dias-habiles.ts';
 import {
@@ -462,17 +463,8 @@ Deno.serve(async (req: Request) => {
     .replaceAll('{codigo}', negocio.codigo ?? '')
     .replaceAll('{etapa}', etapa?.nombre ?? '');
 
-  const html = `<!DOCTYPE html>
-<html lang="es"><body style="margin:0;padding:24px;background:#F5F4F2;font-family:Helvetica,Arial,sans-serif;color:#1A1A1A">
-  <div style="max-width:520px;margin:0 auto;background:#fff;border:1px solid #E5E7EB;border-radius:12px;padding:28px">
-    <p style="margin:0 0 6px;font-size:11px;letter-spacing:.08em;text-transform:uppercase;color:#6B7280">${escapar(etapa?.nombre ?? '')}</p>
-    <h1 style="margin:0 0 14px;font-size:19px;line-height:1.35">${escapar(titulo)}</h1>
-    <p style="margin:0 0 20px;font-size:14px;line-height:1.6;color:#374151">${escapar(mensaje)}</p>
-    <p style="margin:0 0 22px;font-size:13px;color:#6B7280">Negocio: <strong style="color:#1A1A1A">${escapar(etiqueta ?? '')}</strong></p>
-    <a href="${link}" style="display:inline-block;background:#10B981;color:#fff;text-decoration:none;padding:11px 20px;border-radius:8px;font-size:14px;font-weight:600">Abrir el negocio</a>
-    <p style="margin:24px 0 0;font-size:11px;color:#9CA3AF;border-top:1px solid #E5E7EB;padding-top:14px">Enviado por MéTRIK ONE</p>
-  </div>
-</body></html>`;
+  // La plantilla es la misma del aviso de asignación (`avisar-asignacion`): vive en `_shared/correo-interno.ts`.
+  const html = htmlCorreoInterno({ antetitulo: etapa?.nombre ?? '', titulo, mensaje, etiqueta: etiqueta ?? '', link });
 
   const res = await fetch('https://api.resend.com/emails', {
     method: 'POST',

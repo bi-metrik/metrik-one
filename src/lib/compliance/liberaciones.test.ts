@@ -162,6 +162,30 @@ describe('claveContraparte', () => {
     expect(claveContraparte('NIT', '900.123.456-7')).toBe(claveContraparte('nit', '9001234567'));
   });
 
+  // QA ALMA 2026-10-12, V3: Valida guarda el NIT sin DV y la ficha de ONE lo
+  // tenía pegado. `9001234567` NO verifica con el algoritmo (el DV de 900123456
+  // es 8): el cruce no puede depender de que el DV escrito esté bien.
+  it('el NIT con el DV pegado cruza con el NIT sin DV, aunque el DV no verifique', () => {
+    expect(claveContraparte('NIT', '9001234567')).toBe(claveContraparte('NIT', '900123456'));
+    expect(claveContraparte('NIT', '9001234568')).toBe('NIT:900123456');
+  });
+
+  it('el NIT de persona natural (cédula de 10 + DV) también cruza sin el DV', () => {
+    expect(claveContraparte('NIT', '10203040581')).toBe(claveContraparte('NIT', '1020304058'));
+  });
+
+  it('el DV solo se quita en un NIT: a una cédula no se le toca ningún dígito', () => {
+    expect(claveContraparte('CC', '9001234567')).toBe('CC:9001234567');
+    expect(claveContraparte('CC', '10203040581')).toBe('CC:10203040581');
+  });
+
+  it('un NIT de 9 dígitos no pierde ningún dígito aunque el último cuadre como DV', () => {
+    // Bancolombia: 890903938, y 8 es también el DV de 89090393.
+    expect(claveContraparte('NIT', '890903938')).toBe('NIT:890903938');
+    // Cédula vieja de 8 dígitos con DV: ambigua con un NIT de empresa, se deja.
+    expect(claveContraparte('NIT', '791234563')).toBe('NIT:791234563');
+  });
+
   it('el mismo número con distinto tipo de documento NO es la misma contraparte', () => {
     expect(claveContraparte('NIT', '123456')).not.toBe(claveContraparte('CC', '123456'));
   });

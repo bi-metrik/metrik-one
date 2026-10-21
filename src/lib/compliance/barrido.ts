@@ -133,12 +133,76 @@ type Contraparte = {
  * alcanzó a hacer: una evidencia parcial es evidencia, una corrida sin rastro no
  * se distingue de una corrida que nunca pasó.
  */
+/** Otro barrido del mismo workspace y día está corriendo. */
+export class BarridoEnCurso extends Error {
+  constructor(workspaceId: string, dia: string) {
+    super(`barrido_en_curso: ${workspaceId} ${dia}`);
+    this.name = 'BarridoEnCurso';
+  }
+}
+
+/**
+ * Lo que dura el candado si nadie lo suelta: un poco más que los 300 s que
+ * Vercel le da a la función. Si la corrida muere a mitad, el candado vence solo
+ * y el día no queda bloqueado.
+ */
+const CANDADO_BARRIDO_S = 330;
+
+export function claveCandadoBarrido(workspaceId: string, dia: string): string {
+  return `barrido-compliance:${workspaceId}:${dia}`;
+}
+
+/**
+ * Un solo barrido a la vez por workspace y día, venga del botón o del cron.
+ *
+ * El cron ya tenía su candado (`candadoDeCron`), pero ese solo evita dos
+ * entregas del cron: el botón "Correr ahora" no lo tomaba. Botón y cron a la
+ * vez leían el mismo cupo, elegían los mismos candidatos y los consultaban y
+ * cobraban dos veces (QA ALMA 2026-10-12, M1). El candado vive acá, en el
+ * motor que llaman los dos, y no en cada llamador.
+ *
+ * Falla cerrado: si no se puede tomar el candado, no se barre. Un barrido gasta
+ * consultas pagadas; perder un día de monitoreo se ve en la bitácora, cobrar
+ * dos veces no.
+ *
+ * Se suelta al terminar: una segunda corrida el mismo día, ya en serie, es
+ * legítima (subieron el tope y quedaron diferidos) y no repite consultas,
+ * porque las que se hicieron ya renovaron su vigencia.
+ */
 export async function ejecutarBarrido(
   workspaceId: string,
   hoyISO: string = todayBogotaISO(),
 ): Promise<ResumenBarrido> {
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const svc = createServiceClient() as any;
+  const clave = claveCandadoBarrido(workspaceId, hoyISO);
+
+  const { data: tomado, error } = await svc.rpc('tomar_candado', {
+    p_clave: clave,
+    p_segundos: CANDADO_BARRIDO_S,
+  });
+  if (error) throw new Error(`barrido_sin_candado: ${error.message}`);
+  if (tomado !== true) throw new BarridoEnCurso(workspaceId, hoyISO);
+
+  try {
+    return await barrerWorkspace(svc, workspaceId, hoyISO);
+  } finally {
+    const { error: errSoltar } = await svc
+      .from('claves_idempotencia')
+      .update({ vence_at: new Date().toISOString(), estado: 'hecha', terminada_at: new Date().toISOString() })
+      .eq('clave', clave)
+      .eq('ambito', 'candado');
+    // Si no se suelta, vence solo en CANDADO_BARRIDO_S.
+    if (errSoltar) console.warn('[barrido] candado_no_soltado', clave, errSoltar.message);
+  }
+}
+
+async function barrerWorkspace(
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  svc: any,
+  workspaceId: string,
+  hoyISO: string,
+): Promise<ResumenBarrido> {
 
   const config = await cargarConfigMonitoreo(svc, workspaceId);
   const modo = modoDelBarrido(config);

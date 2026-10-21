@@ -31,9 +31,9 @@ function costosDe(ctx: ContextoCotizacion): Map<string, number> {
 
 /** La cotización y sus tarifas en este instante. `null` si no se puede leer. */
 export async function fotoDeTarifas(supabase: Supabase, cotizacionId: string): Promise<FotoDeTarifas | null> {
-  const ctx = await contextoDeCotizacion(supabase, cotizacionId)
+  // H2 (verificación D) · la cotización y sus tarifas se leen en paralelo: no dependen una de otra.
+  const [ctx, filas] = await Promise.all([contextoDeCotizacion(supabase, cotizacionId), leerItinerarios(supabase, cotizacionId)])
   if (!ctx) return null
-  const filas = await leerItinerarios(supabase, cotizacionId)
   if (filas === null) return null
   const costos = costosDe(ctx)
   return {

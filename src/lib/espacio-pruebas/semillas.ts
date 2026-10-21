@@ -18,6 +18,15 @@
 
 import type { Fila } from './almacen'
 import { remapear } from './jsonb'
+import { sembrarPosadaV8 } from './semilla-v8'
+
+/** La Posada Enilda del caso fijo (`test/caso-san-andres.ts`): la que V8 vuelve tres dobles. */
+const ID_POSADA = 'h-posada'
+
+/** Quiénes viajan, de la casilla del viaje del caso. */
+function grupoDelViaje(viaje: Record<string, unknown>): { adultos: number; ninos: number; infantes: number } {
+  return { adultos: Number(viaje.adultos) || 0, ninos: Number(viaje.ninos) || 0, infantes: Number(viaje.infantes) || 0 }
+}
 
 type Base = 'caso-fijo' | 'flujo-nuevo' | 'vacia'
 
@@ -40,7 +49,7 @@ export const SEMILLAS: readonly DefSemilla[] = [
   { clave: 'v5', nombre: 'PRUEBA · V5 · traslado en USD', base: 'vacia', para: 'V5' },
   { clave: 'v6', nombre: 'PRUEBA · V6 · moneda supuesta', base: 'vacia', para: 'V6' },
   { clave: 'v7', nombre: 'PRUEBA · V7 · solo lanchas', base: 'vacia', para: 'V7, P9' },
-  { clave: 'v8', nombre: 'PRUEBA · V8 · habitación mal leída', base: 'caso-fijo', para: 'V8' },
+  { clave: 'v8', nombre: 'PRUEBA · V8 · habitación mal leída', base: 'caso-fijo', para: 'V8: Posada en 3 dobles; la Doble 3 leída «2 adultos» (eran 2 y 1 niño)' },
 ]
 
 /** La marca con que se reconoce un negocio sembrado (`negocios.metadata`). */
@@ -181,6 +190,14 @@ export function filasDeSemilla(def: DefSemilla, numero: number, ctx: CtxSemilla,
     const fila = destino?.find(f => f.id === nuevo)
     if (!fila || e.op !== 'update') throw new Error(`Semilla ${def.clave}: el recálculo grabado no casa con ${e.tabla} ${String(id)}`)
     Object.assign(fila, e.payload)
+  }
+
+  // V8 · la Posada como tres dobles con su ocupación, una mal leída (`semilla-v8.ts`). Cuestan lo
+  // mismo que la Posada de C0: los precios grabados siguen valiendo.
+  if (def.clave === 'v8') {
+    const posada = salida.items.find(i => i.id === ids.get(ID_POSADA))
+    if (!posada) throw new Error('Semilla v8: el caso no trae la Posada')
+    sembrarPosadaV8(posada, grupoDelViaje(viaje))
   }
   return salida
 }

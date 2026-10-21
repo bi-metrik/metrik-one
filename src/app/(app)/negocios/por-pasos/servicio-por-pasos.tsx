@@ -160,3 +160,38 @@ export function ServicioPorPasos({
     </section>
   )
 }
+
+/**
+ * V2 · el bloque de un servicio NUEVO mientras el servidor lo acepta (`aceptar-optimista.ts`): el
+ * tipo, el nombre y la ficha que ya trae la lectura. El precio dice «Guardando…»: lo calcula el
+ * servidor, y no se adivina. Sin acciones: todavía no existe en la cotización.
+ */
+export function ServicioProvisional({ servicio, resumen }: { servicio: ServicioDelViaje; resumen: string }) {
+  const Icono = ICONO[servicio.tipo]
+  return (
+    <section
+      id={`svc-${servicio.grupo}`}
+      data-servicio={servicio.grupo}
+      data-provisional
+      aria-busy="true"
+      className="rounded-xl border border-dashed border-[#CFCAC0] bg-white"
+      style={{ borderLeftWidth: 4, borderLeftStyle: 'solid', borderLeftColor: `var(--tipo-${servicio.tipo})` }}
+    >
+      <div className="flex flex-wrap items-start gap-2 px-3 py-2.5">
+        <span className="min-w-[180px] flex-1">
+          <span
+            className="inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[10.5px] font-bold uppercase tracking-wide text-white"
+            style={{ backgroundColor: `var(--tipo-${servicio.tipo})` }}
+          >
+            <Icono className="h-3 w-3" aria-hidden />{NOMBRE_TIPO[servicio.tipo]}
+          </span>
+          <b className="mt-0.5 block text-[15px]">{servicio.nombre}</b>
+          <small className="block text-xs text-[#6E6A62]">{resumen}</small>
+        </span>
+        <span className="flex flex-col items-end max-sm:order-last max-sm:w-full">
+          <span className="text-sm font-semibold text-[#6E6A62]" data-precio-servicio role="status">Guardando…</span>
+        </span>
+      </div>
+    </section>
+  )
+}

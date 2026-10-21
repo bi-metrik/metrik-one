@@ -18,6 +18,9 @@
 import { describe, it, expect } from 'vitest';
 import {
   claveSujeto,
+  etiquetaResultadoConsulta,
+  indexarConsultasLimpias,
+  indexarUltimasConsultas,
   normalizarDocumento,
   porVencer,
   puedeGestionarSujetos,
@@ -218,7 +221,7 @@ describe('identidad', () => {
     const a = claveSujeto({ documento_tipo: 'nit', documento_numero: '900.123.456-7' });
     const b = claveSujeto({ documento_tipo: 'NIT ', documento_numero: '9001234567' });
     expect(a).toBe(b);
-    expect(a).toBe('NIT:9001234567');
+    expect(a).toBe('NIT:900123456');
   });
 });
 
@@ -356,5 +359,118 @@ describe('clavesConRelacionCerrada', () => {
       HOY,
     );
     expect(set.size).toBe(0);
+  });
+});
+
+// ─── Última consulta (columna informativa) ─────────────────────────────────
+
+describe('indexarUltimasConsultas', () => {
+  const c = (
+    documento_tipo: string,
+    documento_numero: string,
+    created_at: string,
+    severidad: string | null = 'sin_hallazgo',
+  ) => ({ documento_tipo, documento_numero, created_at, severidad });
+
+  it('se queda con la más reciente de cualquier severidad, sin importar el orden de entrada', () => {
+    const idx = indexarUltimasConsultas([
+      c('NIT', '900123456', '2026-10-01T10:00:00Z', 'sin_hallazgo'),
+      c('NIT', '900123456', '2026-10-15T10:00:00Z', 'alto'),
+      c('NIT', '900123456', '2026-10-05T10:00:00Z', 'sin_hallazgo'),
+    ]);
+    expect(idx.get('NIT:900123456')).toEqual({
+      created_at: '2026-10-15T10:00:00Z',
+      severidad: 'alto',
+    });
+  });
+
+  it('cruza el NIT con y sin DV, y con puntos y guion, a la misma clave que usa el estado', () => {
+    const idx = indexarUltimasConsultas([
+      c('NIT', '900.123.456-7', '2026-10-01T10:00:00Z'),
+      c('nit', '900123456', '2026-10-02T10:00:00Z', 'alto'),
+    ]);
+    expect(idx.size).toBe(1);
+    const sujeto = { documento_tipo: 'NIT', documento_numero: '9001234567' };
+    expect(idx.get(claveSujeto(sujeto)!)?.created_at).toBe('2026-10-02T10:00:00Z');
+    const sinDv = { documento_tipo: 'NIT', documento_numero: '900123456' };
+    expect(idx.get(claveSujeto(sinDv)!)?.severidad).toBe('alto');
+  });
+
+  it('una CC y un NIT con el mismo número NO cruzan', () => {
+    const idx = indexarUltimasConsultas([c('CC', '900123456', '2026-10-01T10:00:00Z')]);
+    expect(idx.get(claveSujeto({ documento_tipo: 'NIT', documento_numero: '900123456' })!)).toBeUndefined();
+    expect(idx.get(claveSujeto({ documento_tipo: 'CC', documento_numero: '900123456' })!)).toBeDefined();
+  });
+
+  it('ignora consultas sin documento', () => {
+    const idx = indexarUltimasConsultas([
+      { documento_tipo: 'NIT', documento_numero: null, created_at: '2026-10-01T10:00:00Z', severidad: 'alto' },
+    ]);
+    expect(idx.size).toBe(0);
+  });
+});
+
+describe('indexarConsultasLimpias', () => {
+  const l = (
+    documento_numero: string,
+    created_at: string,
+    vigente_hasta: string | null = null,
+    documento_tipo = 'NIT',
+  ) => ({ documento_tipo, documento_numero, created_at, vigente_hasta });
+
+  it('se queda con la limpia más reciente aunque llegue al final (orden por id, no por fecha)', () => {
+    const idx = indexarConsultasLimpias([
+      l('900123456', '2026-08-01T10:00:00Z', '2027-08-01'),
+      l('900123456', '2026-10-01T10:00:00Z', '2027-10-01'),
+      l('900123456', '2026-09-01T10:00:00Z', '2027-09-01'),
+    ]);
+    expect(idx.get('NIT:900123456')).toEqual({
+      created_at: '2026-10-01T10:00:00Z',
+      vigente_hasta: '2027-10-01',
+    });
+  });
+
+  it('una limpia más vieja que llega después no pisa a la reciente', () => {
+    const idx = indexarConsultasLimpias([
+      l('900123456', '2026-10-01T10:00:00Z', '2027-10-01'),
+      l('900123456', '2026-01-01T10:00:00Z', '2027-01-01'),
+    ]);
+    expect(idx.get('NIT:900123456')?.vigente_hasta).toBe('2027-10-01');
+  });
+
+  it('con más de 1.000 filas no pierde al sujeto cuya única limpia quedó al final', () => {
+    // El fallo que arregla: con order(created_at desc) + tope mudo de PostgREST,
+    // la fila 1.001 no llegaba y el sujeto salía "sin consultar".
+    const filas = Array.from({ length: 1200 }, (_, i) =>
+      l(String(800000000 + i), '2026-10-01T10:00:00Z'),
+    );
+    filas.push(l('900123456', '2025-01-01T10:00:00Z', '2026-01-01'));
+    const idx = indexarConsultasLimpias(filas);
+    expect(idx.size).toBe(1201);
+    expect(idx.get(claveSujeto({ documento_tipo: 'NIT', documento_numero: '9001234567' })!)).toEqual({
+      created_at: '2025-01-01T10:00:00Z',
+      vigente_hasta: '2026-01-01',
+    });
+  });
+
+  it('usa la misma clave que el estado: NIT con DV cruza, CC con el mismo número no', () => {
+    const idx = indexarConsultasLimpias([l('900.123.456-7', '2026-10-01T10:00:00Z')]);
+    expect(idx.get(claveSujeto({ documento_tipo: 'NIT', documento_numero: '900123456' })!)).toBeDefined();
+    expect(idx.get(claveSujeto({ documento_tipo: 'CC', documento_numero: '900123456' })!)).toBeUndefined();
+  });
+
+  it('ignora consultas sin documento', () => {
+    const idx = indexarConsultasLimpias([
+      { documento_tipo: 'NIT', documento_numero: null, created_at: '2026-10-01T10:00:00Z', vigente_hasta: null },
+    ]);
+    expect(idx.size).toBe(0);
+  });
+});
+
+describe('etiquetaResultadoConsulta', () => {
+  it('distingue sin hallazgo de con hallazgo y nombra la severidad', () => {
+    expect(etiquetaResultadoConsulta('sin_hallazgo')).toBe('sin hallazgo');
+    expect(etiquetaResultadoConsulta('alto')).toBe('con hallazgo (alto)');
+    expect(etiquetaResultadoConsulta(null)).toBe('sin resultado');
   });
 });

@@ -4,7 +4,21 @@
 
 - ⚠️⚠️ [Suscripciones multiproducto (#1191)](project_suscripciones_multiproducto.md) — 100000-170000 aplicadas; eControl = documento del titular (19-oct); 7b ignora activo
 - ⚠️⚠️ [Alta autogestionada de Valida](project_valida_alta_autogestionada.md) — pila #1104→#1107→#1110; 3 migraciones SIN aplicar (…100000, …153000, …203000); Términos en el registro, canal 'registro'; +…234500 cobro al confirmar (texto v2.1 espera a Emilio); +…180000 exime del gate de carpeta (SIN aplicar)
-- ⚠️⚠️ [Perfil del contacto por el bot (corte 1)](project_perfil_contacto_bot.md) — migración 20261012234500 SIN aplicar; fichas sin publicar; trigger exige autorización
+- ⚠️⚠️ [Tarifas extraídas en la cotización](project_tarifas_en_cotizacion.md) — 20261019233000 SIN aplicar; elegir = casilla 1 'tarifario' + confirmar de siempre
+- ⚠️⚠️ [Motor v13 de extracción en ONE](project_motor_v13.md) — 20261019203000 SIN aplicar; directo a Anthropic con ANTHROPIC_API_KEY; TRM sin fuente
+- ⚠️⚠️ [Fichas, temporadas e IVA del proveedor](project_fichas_temporadas_iva.md) — migración 20261019130000 APLICADA (19-oct, renombrada); IVA por línea al leer; subtotal sin IVA
+- ⚠️ [Subir tarifarios importados (script)](project_subir_tarifarios_importados.md) — sin correr en prod; nombres en disco saneados ≠ origen_ref
+- ⚠️ [Proveedores: ficha = fotos_perfiles](project_proveedores_ficha.md) — #1204 mergeado y aplicado (19-oct); bucket acepta PDF; cuentas server-only
+- ⚠️⚠️ [Fotos: biblioteca propia por hotel y tour](project_fotos_perfiles.md) — migración 20261017090000 SIN aplicar; sin búsqueda automática; PDF por vista (1 ida)
+- ⚠️⚠️ [Quién lleva el viaje desde el bot (Trappvel)](project_responsable_desde_bot.md) — responsable + dicho_en; migración 20261016193000 SIN aplicar; deploy antes
+- ⚠️⚠️ [Valida: tabla angosta de búsqueda (metrik-valida #64)](project_valida_tabla_angosta_busqueda.md) — 0038/0039 SIN aplicar; poblar antes de 0039; seqscan off obligatorio; tokens societarios pierden matches
+- ⚠️⚠️ [Re-verificación D (#1183, #1185-#1188)](project_cotizacion_reverificacion_d.md) — sin mergear; reserva solo por pasos (hash del prompt); V8 pide --resembrar; «actividades opcionales» reportado
+- ⚠️⚠️ [Verificación D de la cotización (#1170-#1179)](project_cotizacion_verificacion_d.md) — sin mergear; #1172 apilado en #1171; imports chocan; lectura real fija 6/0/0
+- ⚠️⚠️ [Propuesta: H33 (#1165) y motor html (PR 2)](project_propuesta_motor_html_h33.md) — SQL del interruptor SIN aplicar; anticipo en documento_cliente
+- ⚠️⚠️ [Propuesta PR 4: catálogo de fotos](project_fotos_catalogo.md) — migración 20261014221500 (tabla + bucket); hoteles NUNCA de Commons
+- ⚠️⚠️ [Perfil del contacto por el bot (corte 1)](project_perfil_contacto_bot.md) — migración 20261012234500 SIN aplicar; fichas sin publicar; el esquema manda sobre el prompt
+- ⚠️ [Operador sin staff no ve negocios (#1205)](project_operador_sin_staff_no_ve.md) — sin mergear; alma-afi tiene 4 staff sin profile (duplicaría)
+- [SOE-018: supervisor marca bloque restringido (#1203)](project_supervisor_marca_bloque_restringido.md) — pantalla usa canEditBloque; es_multi_pago solo pantalla
 - ⚠️ [SOE-016: responsable automático por etapa](project_responsable_automatico_etapa.md) — sin migración; config SOENA SIN aplicar; crear negocio no cubierto
 - ⚠️⚠️ [Espacio de pruebas trappvel-pruebas](project_espacio_pruebas_trappvel.md) — 2 --apply fallidos; restos 90226eac en prod; ensayo PGlite antes del próximo
 - ⚠️⚠️ [F7/F8 Trappvel: SQL 11→9, clon e interruptores](project_f7_configurar_linea_trappvel.md) — SIN correr; gates 3-4 sin interruptor; cola F5 no filtra es_prueba
@@ -15,20 +29,21 @@
 - [Post-cotización ola 1: servicios del viaje F0](project_post_cotizacion_servicios_f0.md) — migración APLICADA; datos en `_servicios`; Q1-Q8 sin medir
 - ⚠️ [ePayco.js en el registro de Valida](project_epayco_tokenizacion_navegador.md) — sin captura alojada; 1er intento fallaba por la sesión; CSP de la ruta
 - [«Activar plan»: WhatsApp solo de respaldo](project_activar_plan_whatsapp_temporal.md) — desde la pila #1107: botón a /valida/activar; WA solo con la activación cerrada
+- ⚠️⚠️ [Cargue masivo de Valida en el servidor](project_valida_lote_servidor.md) — migración 20261015231700 SIN aplicar; cron por minuto; puerta CDA = autorización ≤ 2 h
+- ⚠️ [Latencia del cargue masivo de Valida](project_valida_latencia_masiva.md) — Next encola server actions: lote en serie; ONE pesa más que Valida desde la 0036
 - ⚠️⚠️ [Renovación continua de Valida (fila A)](project_valida_renovacion_continua.md) — paso 6b agrega 1 cuota; script de los 4 CDA SIN correr; ficha sin dias_trial
 - ⚠️⚠️ [SOE-007: devolución de dinero y venta reembolsada](project_devoluciones_dinero_soe007.md) — 20261009210000 APLICADA; devuelto ≥ cobrado sale de ventas; read-only API sí mide
 - ⚠️ [Pegar conversación en el viaje](project_pegar_conversacion.md) — Next importa _shared puro con `.ts`; llave de pruebas sin pago (403)
 - ⚠️⚠️ [SOE-006: histórico de inactivos (#1084)](project_historico_inactivos_soe006.md) — migración 20261008223000 SIN aplicar; promedio del supervisor solo activos (provisional)
 - ⚠️⚠️ [Autorización de datos por link (Trappvel)](project_autorizacion_datos_link.md) — migración 20261008230000 APLICADA (8-oct); marcas manuales no cuentan; directorio sin punto en la lista (N+1)
-- [SOE-004: aprobación fuera de tarifa](project_aprobacion_fuera_de_tarifa.md) — tope frena al APROBAR, no al generar; gerencial + motivo; recargos incluidos
-- [Reporte Supertransporte (ALMA)](project_reporte_supertransporte.md) — contrapartes = todos los segmentos; MéTRIK por platform_admin/correo; KYC sin created_by
 - ⚠️⚠️ [SOE-008/009: aviso al cliente una vez por hecho](project_aviso_mismo_hecho.md) — migración huella SIN aplicar; deploy notificar-etapa después
 - ⚠️⚠️ [SOE-006: Correcciones y etapas renombradas](project_correcciones_etapa_retirada.md) — migración SIN aplicar; resolver por momento; sin resolver CUENTA
+- ⚠️ [«Lo que suma» ocultable y tabla apilable (#1192, #1193, #1197, #1198)](project_lo_que_suma_ocultable.md) — pastilla absolute en hueco medido; arnés reproduce a Vera
 - ⚠️⚠️ [SOE-002: segundo pago en dos cifras](project_segundo_pago_dos_cifras.md) — ambas RPC APLICADAS (8-oct); umbral $1.000 en 2 funciones
 - ⚠️⚠️ [Plan Anual CDA (#1065)](project_valida_cda_restriccion_y_plan_anual.md) — migración 20261007210000 SIN aplicar; vigente_hasta=12.1 es null; anexo generado; pendientes #1072
 - ⚠️⚠️ [SOE-001: Seguimiento en 4 etapas de operaciones](project_soe001_seguimiento_operaciones.md) — migración APLICADA (7-oct); SQL de datos SIN aplicar; deploy alertas-plazo antes del SQL
 - ⚠️⚠️ [Tanda bot 2026-10-12 (#1121, #1127)](project_tanda_bot_1012.md) — compacta APAGADA hasta QA real (Google 403); nombre auto: SQL sin aplicar
-- ⚠️⚠️ [Núcleo conversacional (#1060-#1062)](project_nucleo_conversacional.md) — verificador solo datos (sin listas); propuesta vence por `sobre`; prod extrae con 2.5-flash-lite (sin acceso de QA)
+- ⚠️⚠️ [Núcleo conversacional (#1060-#1062)](project_nucleo_conversacional.md) — verificador solo datos; `responder.opciones` no ejecutan, ni «resueltos»; prod extrae con 2.5-flash-lite
 - ⚠️⚠️ [Términos CDA v1.4 por aviso (13.1)](project_valida_cda_terminos_v14_por_aviso.md) — SQL solo corre el 7-oct; deploy ANTES; no aceptar nunca pausa
 - ⚠️ [Turno del modelo tras un toque](project_nucleo_turno_tras_toque.md) — traza tipo `modelo` por el cupo; `desde` en viaje_nuevo
 - ⚠️⚠️ [Bot híbrido de la bandeja (#1056)](project_bandeja_hibrida.md) — detrás de bot_conversacional.hibrido (apagado = main); propuesta [Sí, ese]; decisión con 3.5-lite
@@ -46,11 +61,7 @@
 - ⚠️⚠️ [Cotización integrada C0 (igualdad del servidor)](project_cotizacion_integrada_c0.md) — fixture sobre 54568adf NO se regenera; P12 frena por faltaCosto; V1 PW choca con preview=prod
 - ⚠️ [R1: el servidor sí toma la Recomendada](project_r1_total_recomendada_adicionales.md) — la diferencia eran adicionales; precio_venta no los suma
 - ⚠️ [SOE-015: leads por ciudad de residencia](project_leads_por_ciudad_soe015.md) — copia JS de la CTE leads; cuadre sin medir en prod; DIVIPOLA solo servidor
-- [Colores de aerolíneas (#1082)](project_colores_aerolineas.md) — catálogo único en src/lib/cotizaciones/aerolineas.ts; colores de tarifa vetados
-- [Fecha del pago en el bloque Pagos ePayco (SOE-013)](project_fecha_pagos_epayco_bloque.md) — pagos[].fecha viejo = registro; leer cobros.fecha; multi-pago fecha por ePayco (12-oct)
-- [Columna Pago de cuotas CDA](project_columna_pago_cuota_cda.md) — pago↔cuota por FIFO (RPC sin plan/cuota); la UI no nombra a Bold
 - ⚠️ [Acciones lentas SOENA (#1010-#1012)](project_acciones_lentas_soena.md) — `cache()` no memoiza en server actions; `after()` lanza fuera de request
-- [Cargue masivo de Valida concurrente](project_valida_cargue_concurrente.md) — 3 filas; reintento de red no recobra; PDF de lote ya no sigue el orden del XLSX
 - ⚠️ [/negocios paginada en el servidor](project_lista_negocios_paginada.md) — viajan 30 tarjetas; `.in()` de 400+ uuid rompe por `Content-Location`
 - ⚠️ [loading.tsx de (app) no cubre la ficha](project_loading_app_no_cubre_ficha.md) — /negocios → /negocios/[id] no lo remonta, ni con precarga
 - ⚠️ [RUM y lecturas sin server actions (C y D)](project_rum_y_lecturas_sin_actions.md) — `[error-cliente]` se cuenta por `id`; `--query` sin corchetes
@@ -80,35 +91,13 @@
 - ⚠️⚠️ [Transcripción a ciegas del NIT](project_confirmacion_nit_ciegas.md) — #807: la casilla NO viaja al navegador
 - ⚠️ [Animación de marca y RPC de Tableros (caída 2026-10-03)](project_animacion_marca_y_rpc_tableros.md) — loading de (app) por segmento; 12 RPC en paralelo por apertura; cacheables por ws+params
 - ⚠️⚠️ [Caché de 5 min de Tableros (#1001)](project_tableros_cache.md) — cifras hasta 5 min atrasadas; ventana en la llave (SWR); guarda verificada antes de guardar
-- ⚠️ [Barrera OFFSET 0 en RPC Comercial SOENA (#978)](project_perf_fence_venta_mes_soena.md) — 6 RPC aplicadas; pagos sigue lento (guard); la "deriva" eran comentarios
+- ⚠️⚠️ [RPC Comercial SOENA: OFFSET 0 y plan genérico (#1206)](project_perf_fence_venta_mes_soena.md) — pagos = plan genérico de función sql; 20261018190000 SIN aplicar
 - ⚠️ [Tableros operativos por fase (#939)](project_tableros_operativos.md) — inerte hasta encender config_extra.tableros_operativos en metrik
 - ⚠️⚠️ [El preview abre un workspace (#968)](project_preview_abre_workspace.md) — `?__ws=<slug>`; base de PRODUCCION; sin GEMINI en Preview; login por código
-- ⚠️ [Publicar los términos del Radar](project_publicacion_terminos_radar.md) — APLICADO (PDF, fila, alcance plantilla); un genérico se ve por el módulo contratado; falta ejercitar la aceptación
-- ⚠️⚠️ [ONE SECOP autoservicio: registro (#961)](project_secop_autogestion_registro.md) — ENCENDIDO en producción sin ficha de catálogo; el magic link YA verifica el correo
-- ⚠️ [Radar SECOP como módulo (#952)](project_radar_secop_modulo.md) — MERGEADO y migrado; el cron NO lee disparador_cobro: enrolar el contrato no cobra
-- [Términos de un módulo nuevo](project_terminos_modulo_radar.md) — el gate de Valida ya es genérico; el ternario mandaba todo producto nuevo a Valida API
-- ⚠️ [Vencido por cuota en la cartera (#934)](project_cartera_vencido_por_cuota.md) — migración ANTES del merge; luego redesplegar wa-alerts y wa-webhook
-- [Buscador del reparto sin Valida (#877)](project_buscador_reparto_sin_valida.md) — escape de `.or()` sin probar contra PostgREST vivo
-- ⚠️⚠️ [Entrada única de /valida-api](project_entrada_unica_valida_api.md) — Términos exige texto_sha256 = sha256(texto_md) tal cual
-- ⚠️⚠️ [Plazo, mora y facturas de los CDA en Valida](project_valida_cda_gracia_facturas.md) — #849: migración SIN aplicar; cargar un CDA tras el 30-sep lo cierra
-- ⚠️⚠️ [Factura por cobro en /valida-api (#876)](project_factura_cobro_servicio.md) — migración SIN aplicar; CUFE de la FE-1 mal copiado (90/96)
-- ⚠️⚠️ [Retención de IVA: enlace por el neto](project_retencion_iva_cobro_neto.md) — migración SIN aplicar; inerte sin 3 datos; `null` en el RUT no retiene
-- ⚠️⚠️ [Carga de los 4 CDA sobre la carga revertida](project_carga_cdas_estado_revertido.md) — plazo 27-sep; cierra la activación del contrato cancelado
-- ⚠️⚠️ [«Licencia» → «suscripción» en los CDA (#885)](project_licencia_a_suscripcion.md) — Términos v1.2; SQL de cuotas SIN aplicar; periodo sin año
-- ⚠️⚠️ [Sección Suscripción de los CDA](project_seccion_suscripcion_cda.md) — #851: migración 20260924060000 ANTES del merge; sin valor_usuario_adicional no vende
-- [Administrador designado sin costo (#906)](project_admin_designado_sin_cupo.md) — el cupo cuenta solo operativos en /suscripcion, /config y /mi-negocio
-- ⚠️ [Suscripción solo para la designada (#857)](project_suscripcion_solo_designado.md) — «Ver como» compara la persona EFECTIVA; CDA sin vitrinas
-- ⚠️⚠️ [Pago en línea de cuotas (Bold temporal)](project_pago_en_linea_bold.md) — #850: migración SIN aplicar; la pasarela sale de un dato
-- ⚠️⚠️ [Licencia ONE en /suscripcion con Bold (Termotech)](project_licencia_one_suscripcion_bold.md) — SQL SIN correr; cuota pagada sin fila rompe el FIFO
-- ⚠️⚠️ [Enlace de pago automático de cuotas CDA](project_enlace_pago_automatico.md) — cron paso 6; ignora `planes_cobro.activo` a propósito
-- ⚠️ [Tarjeta de Sustenta en /suscripcion](project_sustenta_tarjeta_marca.md) — migración de eventos SIN aplicar; sin ella se pierden en silencio
-- ⚠️⚠️ [Razón social METRIK IA S.A.S.](project_razon_social_metrik_ia.md) — sin «IA» es otra sociedad
-- [Agrupación de hotel y traslado in-out (COT-2026-0018)](project_agrupacion_hotel_traslado_inout.md) — comparar opciones por `lecturaDeOpcion`; no fusiona las duplicadas
 - ⚠️ [Limpieza tras merge (hook)](project_limpieza_tras_merge.md) — settings.json vivo NO es symlink; registro del hook pendiente
 - ⚠️ [Hook de presupuesto al editar CLAUDE.md](project_hook_presupuesto_claude_md.md) — salta siempre; cifras de `.claude/rules/`
 - ⚠️ [El trigger de rol no espeja 'contador' (#988)](project_trigger_staff_rol_sin_contador.md) — staff 'contador' deja profiles.role NULL; no se autocrea
 - ⚠️⚠️ [Pestaña que quedó en otro workspace](project_pestana_desincronizada.md) — el guard va en el MIDDLEWARE
-- [Ciudad de actividad y tasa en Revisar (Trappvel)](project_ciudad_actividad_nombre_tour.md) — regla ANGOSTA (Punta Cana es destino); tasa solo en el editor
 - ⚠️⚠️ [Cotización Trappvel (30 frentes)](indice_cotizacion_trappvel.md) — ranuras, tarifas, pasajeros, PDF del cliente, captura A/B
 - ⚠️ [Montos de SOENA por parseMontoCop (#842)](project_soena_parse_monto_cop.md) — el regex viejo daba NaN con 2+ puntos; extractor cerrado en #843
 - ⚠️⚠️ [IVA sobre el ingreso propio (Trappvel)](project_iva_ingreso_propio.md) — config viva infla el total hasta el PR de iva_incluido + su SQL
@@ -129,6 +118,7 @@
 
 - [Build en worktree sin una dependencia](reference_build_en_worktree.md) — copiar el paquete, no symlink (raíz de Turbopack)
 - [Comandos en worktree aislado](reference_worktree_aislado_comandos.md) — editar y mutar con python; git siempre simple
+- [Reproducir el PDF real solo lectura](reference_reproducir_pdf_real_solo_lectura.md) — supabase-js con fetch solo GET; sin MCP
 - [Frentes secundarios](indice_frentes_secundarios.md) — ~145 entradas viejas: cobros, Valida, SOENA, recibos, Siigo, recetas; buscar ahí antes de crear
 
 ## Feedback

@@ -84,7 +84,7 @@ describe('parsearFilasCargue', () => {
   it('normaliza el documento para que cruce con el resto del módulo', () => {
     const { validas } = parsearFilasCargue([fila({ documento: '900.123.456-7' })]);
     expect(validas[0].documento_numero).toBe('9001234567');
-    expect(validas[0].clave).toBe('NIT:9001234567');
+    expect(validas[0].clave).toBe('NIT:900123456');
   });
 
   it('numera la fila como se ve en la hoja, contando el encabezado', () => {

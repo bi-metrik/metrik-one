@@ -8,6 +8,7 @@ import {
   ChevronDown, ChevronRight, Lock, BookOpen, Loader2, Calculator, AlertTriangle, FileText, X,
 } from 'lucide-react'
 import { toast } from 'sonner'
+import { aplicarEvento, provisionalesVigentes, type EventoProvisional, type Provisional } from '@/lib/cotizaciones/aceptar-optimista'
 import {
   updateCotizacion, enviarCotizacion, duplicarCotizacion,
   addItem, updateItem, deleteItem,
@@ -16,7 +17,9 @@ import {
 } from '@/app/(app)/negocios/cotizacion-actions'
 import { getServiciosActivos } from '@/app/(app)/config/servicios-actions'
 import { generateCotizacionPDF } from '@/app/(app)/negocios/cotizacion-pdf-actions'
-import { deshacerEnvioPorDescarga } from '@/app/(app)/negocios/[id]/cotizacion/actions'
+import { enviarPorPasos } from '@/app/(app)/negocios/por-pasos-actions'
+import PreguntaEnvio from '@/components/cotizacion/pregunta-envio'
+import { debePreguntarEnvio } from '@/lib/negocios/pregunta-envio'
 import ElegirOrigenVersion from '@/components/cotizacion/elegir-origen-version'
 import type { OrigenVersion } from '@/lib/negocios/seguimiento'
 import PanelMargenSalida from '@/app/(app)/negocios/panel-margen-salida'
@@ -50,18 +53,21 @@ import {
 } from '@/lib/cotizaciones/dia-relativo'
 import SelectorRanura from '@/app/(app)/negocios/selector-ranura'
 import TarifaPasajeroItem from '@/app/(app)/negocios/tarifa-pasajero-item'
+import TarifasProveedorLinea from '@/app/(app)/negocios/tarifas-proveedor-linea'
 import BloqueRanura from '@/app/(app)/negocios/bloque-ranura'
 import AsiPuedesPagarPanel from './asi-puedes-pagar-panel'
 import { totalDelDocumento, type EntradaAsiPuedesPagar } from '@/lib/viaje/asi-puedes-pagar'
 import BotonesRevisar from '@/app/(app)/negocios/botones-revisar'
 import BandejaCapturas, { type ReceptorDeBandeja } from '@/app/(app)/negocios/bandeja-capturas'
 import TarjetaOpcion from '@/app/(app)/negocios/tarjeta-opcion'
+import { FotosEnTarjetas } from '@/app/(app)/negocios/fotos-tarjeta'
+import CasillaIvaCostos from '@/app/(app)/negocios/casilla-iva-costos'
 import { devolverOpcionABandeja } from '@/app/(app)/negocios/tarifa-pax-actions'
 import { MarcoCotizacionContexto } from '@/app/(app)/negocios/marco-cotizacion-contexto'
 import { usePublicarTotalVivo } from '@/app/(app)/negocios/total-vivo'
-import { laMasNueva, lineasParaPintar, traerVistaFresca, type VistaFresca } from '@/lib/cotizaciones/vista-fresca'
+import { interpretarVistaFresca, laMasNueva, lineasParaPintar, traerVistaFresca, type VistaFresca } from '@/lib/cotizaciones/vista-fresca'
 import { esAvisoSoloInformativo, estadoDeBloque, resumenDeBloques, type EstadoDeBloque } from '@/lib/cotizaciones/bandeja-capturas'
-import { avisoDePasajerosDeOpcion, pesos as pesosTarjeta } from '@/lib/cotizaciones/tarjeta-opcion'
+import { avisoDePasajerosDeOpcion, avisoDeReservaQueNoCuadra, pesos as pesosTarjeta } from '@/lib/cotizaciones/tarjeta-opcion'
 import { crearRanuraConOpcion, eliminarRanura } from '@/app/(app)/negocios/ranura-actions'
 import { avisoDeBorradoDeBloque, preguntaTarifaMarcada, tarifasMarcadasCon } from '@/lib/cotizaciones/eliminar-opciones'
 import { bloquesPorRanura, esNombreDeOpcion, tipoDeDefinicion, type BloqueDeLineas } from '@/lib/cotizaciones/ranuras-cotizacion'
@@ -83,6 +89,7 @@ import {
   gruposCanonicos,
   ranuraDeGrupo,
   ranuraPorSlug,
+  resolverRanura,
   siguienteGrupoDeTipo,
 } from '@/lib/cotizaciones/ranuras-pantallazo'
 import { nombreProvisionalDeGrupo } from '@/lib/cotizaciones/nombre-linea'
@@ -136,10 +143,10 @@ import {
 } from '@/lib/cotizaciones/itinerarios'
 import { avisosDeCobertura } from '@/lib/cotizaciones/cobertura-opciones'
 import {
-  costoDeRubrosConfirmados,
   soloConfirmados,
   soloSugeridos,
 } from '@/lib/cotizaciones/rubros-sugeridos'
+import { costosDelItem } from '@/lib/cotizaciones/iva-costo'
 import { nombreMostrable } from '@/lib/cotizaciones/nombre-cotizacion'
 import { aMayusculas } from '@/lib/negocios/mayusculas'
 import { isEditable } from '@/lib/cotizaciones/state-machine'
@@ -232,6 +239,8 @@ interface ItemRow {
   tramos?: unknown
   /** El cargo en destino de la opción (B2). */
   cargo_destino_valor?: number | string | null
+  /** La ficha del proveedor de la línea (`20261019233000`). Ausente sin la migración. */
+  proveedor_id?: string | null
   cargo_destino_moneda?: string | null
   rubros: RubroRow[]
 }
@@ -376,7 +385,7 @@ interface Props {
   leidaEn?: string | null
   /**
    * Seguimiento encendido en la línea (F1): «Duplicar» pregunta de dónde sale la versión, y
-   * descargar el PDF desde «Revisar y enviar» puede contar como envío (con «No lo envié»).
+   * descargar el PDF pregunta «¿Ya se la mandaste?» (H33).
    */
   seguimiento?: boolean
   /**
@@ -448,6 +457,28 @@ export default function CotizacionEditor({ oportunidadId, cotizacion, initialIte
   // sus cuatro condiciones. Apagado, este editor queda exactamente como siempre.
   const porPasosOn = lineasPorTipo && porPasos?.encendido === true
   const [conteoBandeja, setConteoBandeja] = useState({ porAceptar: 0, leyendo: 0 })
+  // V2 (por pasos) · los servicios nuevos que se están aceptando: su bloque se pinta ya
+  // (`aceptar-optimista.ts`). Si el servidor no los acepta, se quitan y se dice (D1).
+  const [provisionales, setProvisionales] = useState<Provisional[]>([])
+  const provisionalesVivos = useRef<Provisional[]>([])
+  const recibirProvisional = (e: EventoProvisional) => {
+    const r = aplicarEvento(provisionalesVivos.current, e, initialItems)
+    provisionalesVivos.current = r.provisionales
+    setProvisionales(r.provisionales)
+    if (r.aviso) toast.error(r.aviso)
+  }
+  /** V2 · la cotización que trajo la respuesta de «Aceptar»: se pinta como una lectura propia. */
+  const recibirVistaFresca = (cuerpo: unknown) => {
+    const v = interpretarVistaFresca({ ok: true, ...(cuerpo as object) })
+    if (v) setVistaFresca(prev => laMasNueva(prev, v))
+  }
+  useEffect(() => {
+    // La página ya trae la opción de verdad: su bloque provisional sobra.
+    const vivos = provisionalesVigentes(provisionalesVivos.current, new Set(initialItems.map(i => i.id)))
+    if (vivos.length === provisionalesVivos.current.length) return
+    provisionalesVivos.current = vivos
+    setProvisionales(vivos)
+  }, [initialItems])
   const estado = cotizacion.estado as EstadoCotizacion
   const editable = isEditable(estado) && !frozen
   const estadoConfig = ESTADO_COTIZACION_CONFIG[estado]
@@ -620,6 +651,24 @@ export default function CotizacionEditor({ oportunidadId, cotizacion, initialIte
     })
   }
 
+  // H33 · «¿Ya se la mandaste?». El «Sí» pasa por el mismo envío que el botón «Enviar» (con la
+  // forma por pasos, el suyo, que suma la regla del precio por pasajero) con canal «descargado».
+  const [preguntandoEnvio, setPreguntandoEnvio] = useState(false)
+  const confirmarEnvio = () => {
+    startTransition(async () => {
+      const res = porPasosOn
+        ? await enviarPorPasos(cotizacion.id, 'descargado')
+        : await enviarCotizacion(cotizacion.id, 'descargado')
+      setPreguntandoEnvio(false)
+      if (res.success) {
+        toast.success('Quedó enviada: arranca el seguimiento.')
+        refrescar()
+      } else {
+        toast.error(res.error ?? 'No se pudo marcar como enviada.')
+      }
+    })
+  }
+
   const handleDescargarPDF = () => {
     startTransition(async () => {
       const res = await generateCotizacionPDF(cotizacion.id)
@@ -643,27 +692,15 @@ export default function CotizacionEditor({ oportunidadId, cotizacion, initialIte
           // el PDF lleva marca de agua y no se guardó. Se dice en ámbar y se queda en
           // pantalla, no como un «listo».
           toast.warning(aviso ?? 'PDF de borrador: no se puede enviar.', { duration: Infinity, closeButton: true })
-        } else if ((res as { envioRegistrado?: boolean }).envioRegistrado) {
-          // Seguimiento (Vera C3): la descarga contó como envío. 8 s para deshacerlo.
-          toast.success('PDF descargado. Quedó como enviada: arranca el seguimiento.', {
-            duration: 8000,
-            action: {
-              label: 'No lo envié',
-              onClick: () => {
-                void deshacerEnvioPorDescarga(cotizacion.id).then((r) => {
-                  if (r.success) { toast.success('Deshecho.'); refrescar() } else toast.error(r.error)
-                })
-              },
-            },
-          })
-          refrescar()
-          const aviso = (res as { aviso?: string | null }).aviso
-          if (aviso) toast.error(aviso)
         } else {
           toast.success('PDF descargado')
           // Almacenamiento externo: el PDF se descargó pero no quedó guardado en el
           // proyecto del cliente. El servidor dice por qué; aquí solo se muestra.
           if (aviso) toast.error(aviso)
+          // H33: descargar es revisar. Se pregunta si ya salió; solo el «Sí» la marca enviada.
+          if (debePreguntarEnvio({ pdfBorrador: false, estado, editable, viaje: lineasPorTipo, seguimiento })) {
+            setPreguntandoEnvio(true)
+          }
         }
         // §4.3 · qué cubre cada opción. Sale AQUÍ y no solo en el banner porque quien
         // imprime no siempre es quien cargó: el PDF ya salió (avisa, no bloquea) y el
@@ -680,6 +717,9 @@ export default function CotizacionEditor({ oportunidadId, cotizacion, initialIte
         // salió con el texto de siempre.
         const avisoTexto = (res as { avisoTexto?: string | null }).avisoTexto
         if (avisoTexto) toast.warning(avisoTexto, { duration: 10000, closeButton: true })
+        // Motor `html`: si falló, salió el PDF de antes; quien descarga lo sabe.
+        const avisoFormato = (res as { avisoFormato?: string | null }).avisoFormato
+        if (avisoFormato) toast.warning(avisoFormato, { duration: 10000, closeButton: true })
       } else {
         toast.error(res.error || 'Error generando PDF')
       }
@@ -846,21 +886,22 @@ export default function CotizacionEditor({ oportunidadId, cotizacion, initialIte
   // (y un plan de pagos) por debajo de la Recomendada justo en la maleta de bodega, mientras la
   // base, la tabla de tarifas y el PDF sí la cobraban.
   const paraCascada = adjuntarAdicionales(initialItems.map(item => {
-    const rubros = item.rubros ?? []
-    const delDesglose = costoDeRubrosConfirmados(rubros)
+    // R-P1 · los SUGERIDOS no entran al costo hasta que alguien confirme. Y el IVA del
+    // proveedor (2026-10-19) se suma aquí, igual que en `recalcularTotales`.
+    const { numeroDeRubros, costoDeRubros, subtotal, costoSinIva } = costosDelItem(item)
     return {
       id: item.id,
       es_ajuste: item.es_ajuste,
       cantidad: item.cantidad,
-      subtotal: item.subtotal,
-      // R-P1 · los SUGERIDOS no entran al costo hasta que alguien confirme.
-      ...delDesglose,
+      subtotal,
+      numeroDeRubros,
+      costoDeRubros,
       descuento_porcentaje: item.descuento_porcentaje,
       margen_porcentaje: item.margen_porcentaje,
       precio_venta: item.precio_venta,
       precio_manual: item.precio_manual,
       // Punto 11 del brief del 2026-10-05: lo mismo que `recalcularTotales`.
-      pasajeros: pasajerosParaCuadre(item.tarifa_pax, delDesglose.costoDeRubros),
+      pasajeros: pasajerosParaCuadre(item.tarifa_pax, costoSinIva),
     }
   }), Object.values(adicionales.porItem).flat())
   const paramsCascada = {
@@ -1631,6 +1672,13 @@ export default function CotizacionEditor({ oportunidadId, cotizacion, initialIte
                   sugeridosGuardados={rubrosSugeridos}
                   onCambio={() => refrescar()}
                 />
+              )}
+              {/* Las tarifas del proveedor (2026-10-19): ONE las ofrece, la persona elige. Al lado
+                  del pantallazo y del costo a mano, que siguen igual. */}
+              {editable && ranuraDeItem && lineasPorTipo && (
+                <div className="mt-2">
+                  <TarifasProveedorLinea itemId={item.id} onCambio={() => refrescar()} />
+                </div>
               )}
           </>
         )
@@ -3632,7 +3680,9 @@ export default function CotizacionEditor({ oportunidadId, cotizacion, initialIte
     for (const i of lineasConLectura) {
       const g = normalizarGrupo(i.grupo)
       if (!g || noVan.has(g) || estadoDeLinea(i) !== 'no') continue
-      noVan.set(g, { itemId: i.id, nombre: etiquetaDeRanura(g) })
+      // H8 · el nombre del servicio como lo pinta la forma por pasos («Vuelo San Andrés ⇄ Providencia»),
+      // no la etiqueta con su ordinal («Vuelo 2 · …»), que es una clave interna.
+      noVan.set(g, { itemId: i.id, nombre: resolverRanura(g)?.nombre ?? etiquetaDeRanura(g) })
     }
     return listaUnica({
       sinPrecio: opcionesSinPrecio(lineasConLectura, idsQueSalen, composicionViaje ?? null),
@@ -3641,12 +3691,19 @@ export default function CotizacionEditor({ oportunidadId, cotizacion, initialIte
       salida: salidaVista as never,
       pantallazosPorAceptar: conteoBandeja.porAceptar,
       texto: estadoTexto as 'nada' | 'sinrevisar' | 'viejo' | 'ok',
+      parrafosMarcados: textoCliente?.parrafosViejos ? textoCliente.parrafosViejos.length : null,
       noVan: [...noVan.values()],
       faltaDia: avisoFaltaDia ?? null,
       margenBajoAviso: null,
       recargo: recargo.estado === 'falta' ? `Falta el ${recargo.etiqueta.toLowerCase()}.` : null,
       viaje: viaje.motivo ? `Pendiente: ${viaje.motivo}.` : null,
       ivaSinCalcular: !mostrarResumenFiscal && ivaVigente && !ivaVigente.calculable && cascadaTotal.precioVenta > 0 ? motivoIvaSinCalcular(ivaVigente.sinCosto) : null,
+      // Decisión del 2026-10-14 · la reserva de varias habitaciones que no cuadra con el viaje.
+      reservasQueNoCuadran: lineasConLectura.flatMap(i => {
+        if (!idsQueSalen.has(i.id) || ranuraDeGrupo(i.grupo ?? null)?.slug !== 'hotel_detalle') return []
+        const texto = avisoDeReservaQueNoCuadra(nombreVisibleDeLinea(i as never) || i.nombre || 'El hotel', leerTarifaPax(i.tarifa_pax), composicionViaje ?? null)
+        return texto ? [{ itemId: i.id, texto }] : []
+      }),
     })
   })() : null
   const vistaPorPasos = porPasosOn ? (
@@ -3680,6 +3737,8 @@ export default function CotizacionEditor({ oportunidadId, cotizacion, initialIte
           enMarco={conMarco}
           porPasos
           onConteo={setConteoBandeja}
+          onProvisional={recibirProvisional}
+          onVistaFresca={recibirVistaFresca}
           cotizacionId={cotizacion.id}
           items={initialItems}
           composicion={composicionViaje}
@@ -3742,19 +3801,27 @@ export default function CotizacionEditor({ oportunidadId, cotizacion, initialIte
       onAbrirOpcion={mostrarOpcion}
       onRecibirEnBandeja={(itemId, lecturas) => receptorBandeja.current?.recibir({ clave: `${itemId}:${Date.now()}`, itemId, lecturas })}
       refrescar={refrescar}
+      provisionales={provisionales}
     />
   ) : null
 
+  // Trappvel: el ancho del prototipo de la tarjeta (880 px); fuera del viaje, el de siempre (R6).
+  // `FotosEnTarjetas`: la foto de cada hotel sale de la biblioteca, en una sola lectura.
   return (
-    // Trappvel: el ancho del prototipo de la tarjeta (880 px); fuera del viaje, el de siempre (R6).
+    <FotosEnTarjetas>
     <div className={porPasosOn ? 'mx-auto max-w-[1180px] space-y-4 py-6 sm:px-4' : `mx-auto ${lineasPorTipo ? 'max-w-[880px]' : 'max-w-2xl'} space-y-4 px-4 py-6`}>
       {jsxEncabezado}
+      {preguntandoEnvio && (
+        <PreguntaEnvio pendiente={isPending} onSi={confirmarEnvio} onNo={() => setPreguntandoEnvio(false)} />
+      )}
       {!lineasPorTipo && jsxPanelMargen}
       {!lineasPorTipo && jsxPanelTexto}
       {jsxAvisoCongelada}
       {jsxAvisoNoEditable}
       {!lineasPorTipo && jsxAvisoDesactualizadas}
       {jsxEncabezadoViaje}
+      {/* La casilla «Calcular con IVA» (2026-10-19): solo en la cotización de viaje. */}
+      {lineasPorTipo && <CasillaIvaCostos cotizacionId={cotizacion.id} onRecalculo={refrescar} />}
       {/* Con el marco, la bandeja de pantallazos va antes de «Componentes», como en el
           prototipo de la tarjeta (2026-09-24): una sección de la página, no una franja fija. */}
       {conMarco && editable && !porPasosOn && (
@@ -3799,6 +3866,7 @@ export default function CotizacionEditor({ oportunidadId, cotizacion, initialIte
         </datalist>
       )}
     </div>
+    </FotosEnTarjetas>
   )
 }
 

@@ -29,9 +29,12 @@ import { pruebaDeConfig } from '@/lib/valida/corte-bolsa';
 import { ModificacionTerminosCda } from './modificacion-terminos-cda';
 
 export const dynamic = 'force-dynamic';
+// El cargue masivo despierta su trabajador con `after()` desde las acciones de esta página
+// (`despertarTrabajador`): corre en esta misma función hasta 240 s. Ver `@/lib/valida/lote-servidor`.
+export const maxDuration = 300;
 
 interface Props {
-  searchParams: Promise<{ negocio_id?: string; terminos?: string; modificacion?: string }>;
+  searchParams: Promise<{ negocio_id?: string; terminos?: string; modificacion?: string; lote?: string }>;
 }
 
 export default async function ValidaPage({ searchParams }: Props) {
@@ -69,7 +72,8 @@ export default async function ValidaPage({ searchParams }: Props) {
       />
     );
   }
-  const { negocio_id: negocioId, terminos: verTerminos, modificacion: verModificacion } = await searchParams;
+  const { negocio_id: negocioId, terminos: verTerminos, modificacion: verModificacion, lote: loteParam } = await searchParams;
+  const loteInicialId = loteParam && /^[0-9a-f-]{36}$/i.test(loteParam) ? loteParam : null;
 
   // Términos pendientes: sin plazo (o vencido) se muestran los términos y Valida no opera; dentro
   // del plazo Valida opera con un aviso, y la persona designada abre los términos desde ese aviso
@@ -242,6 +246,7 @@ export default async function ValidaPage({ searchParams }: Props) {
       consultasRestringidas={restringido ? <ConsultasRestringidas /> : null}
       saldo={saldo}
       prueba={prueba}
+      loteInicialId={loteInicialId}
     />
   );
 }
