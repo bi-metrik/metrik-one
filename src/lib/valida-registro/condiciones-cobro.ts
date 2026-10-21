@@ -46,7 +46,7 @@ export function correoEnListaDePruebaCobro(correo: string | null | undefined, en
   const entradas = (env.VALIDA_COBRO_CORREOS_PRUEBA ?? '')
     .split(',')
     .map((e) => e.trim().toLowerCase())
-    .filter((e) => e.includes('@'))
+  // Una entrada sin arroba (o vacía) no iguala ningún correo válido: no hace falta filtrarla.
   return entradas.some((e) => (e.startsWith('@') ? e === dominio : e === limpio))
 }
 
