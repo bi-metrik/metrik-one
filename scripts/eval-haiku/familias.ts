@@ -67,6 +67,10 @@ const documento: Corrida = async (c, ctx) => {
   const { buffer, mime } = await ctx.leerArchivo(c.entrada)
   const r = await extractFieldsFromDocument(buffer, mime, campos as never, LLAVE_RELLENO)
   if (!r.data) return { campos: [], error: r.error ?? 'sin datos' }
+  // Igual que producción (`documento-actions`, paso 9): las normalizaciones deterministas (NIT sin DV, DV recalculado…)
+  // corren sobre lo leído antes de guardarlo. El oráculo se guardó ya normalizado.
+  const { aplicarNormalizaciones } = await import('../../src/lib/documentos/normalizaciones')
+  aplicarNormalizaciones(campos as never, r.data)
   const oraculo = (c.oraculo.campos ?? {}) as Record<string, { value?: unknown; edicion?: unknown }>
   return {
     campos: campos

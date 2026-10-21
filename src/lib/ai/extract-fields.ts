@@ -150,8 +150,10 @@ REGLAS:
 - Responde SOLO con JSON válido, sin texto adicional
 - Para cada campo devuelve { "value": <valor>, "confidence": <0.0 a 1.0> }
 - Si un campo no está en el documento, usa { "value": null, "confidence": 0.0 }
+- NO dejes en null un campo que SÍ aparece en el documento. Búscalo en todo el documento (encabezado, pie, tablas, sellos, otra página) y aunque la etiqueta no sea exactamente la del campo (ej. "Fecha de expedición" puede venir como "Expedido el", "Fecha de emisión" o junto al lugar de expedición). Si se lee con dificultad, devuélvelo con confidence baja; null es solo para lo que de verdad no está
 - confidence refleja certeza de lectura (1.0 = perfectamente legible, 0.5 = borroso pero probable, 0.0 = no visible)
 - Limpia valores: sin espacios al inicio/final
+- NIT: devuélvelo SIN el dígito de verificación (DV), salvo que el campo diga explícitamente "completo" o "con DV". El DV es el dígito que va después del guion ("860.047.657-1" → "860047657") o el que la DIAN pone aparte en su propia casilla; si el documento lo muestra pegado al final sin guion, igual quítalo. La cédula de una persona natural no tiene DV: va completa
 - Números de identificación de personas o empresas (NIT, cédula): solo dígitos, sin puntos, guiones ni espacios. NO apliques esta regla a números de factura, radicados u otros códigos que legítimamente incluyen un prefijo o serie con letras: esos se devuelven COMPLETOS, con su prefijo y tal como aparecen (ej. si el documento muestra "FVM 3903", devuelve "FVM 3903", NUNCA solo "3903")
 - MONEDA COLOMBIANA (campos tipo currency): los valores monetarios están en pesos colombianos (COP). El separador de miles es el punto (.) y el separador decimal es la coma (,). Ejemplo: $1.500.000 = un millón quinientos mil. Devuelve SOLO el valor numérico entero sin puntos, comas ni símbolo $. Ejemplo: si ves "$1.500.000" o "1.500.000,00", devuelve "1500000"
 - Campos tipo numero (no currency): devuelve el número tal cual, sin formato de moneda
