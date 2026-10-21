@@ -217,7 +217,15 @@ export async function listarSujetos(): Promise<Result<ExpedienteSujetos>> {
           .range(desde, hasta),
       { etiqueta: 'sujetos/ultima-consulta' },
     ).then(
-      (filas) => indexarUltimasConsultas(filas),
+      (filas) => ({
+        todas: indexarUltimasConsultas(filas),
+        // Para el estado (`en_revision`) cuenta la última CONCLUYENTE: una
+        // consulta fallida después de un hallazgo no dice que salió limpio, y
+        // tomarla como la última escondería el hallazgo.
+        concluyentes: indexarUltimasConsultas(
+          filas.filter((f) => f.severidad === 'alto' || f.severidad === 'sin_hallazgo'),
+        ),
+      }),
       () => null,
     ),
   ]);
@@ -268,6 +276,9 @@ export async function listarSujetos(): Promise<Result<ExpedienteSujetos>> {
       clave ? (porClave.get(clave) ?? []) : [],
       clave ? (limpias.get(clave) ?? null) : null,
       hoy,
+      // Sin enmascarar: el estado se calcula con la severidad real. Lo que se
+      // le oculta al ejecutor es la severidad en la columna, no el estado.
+      clave && ultimasRes ? (ultimasRes.concluyentes.get(clave) ?? null) : null,
     );
     return {
       ...s,
@@ -278,7 +289,7 @@ export async function listarSujetos(): Promise<Result<ExpedienteSujetos>> {
       segmento_nombre: s.segmento_id ? (nombreSegmento.get(s.segmento_id) ?? null) : null,
       vinculacion: clave ? (vinculaciones.get(clave) ?? null) : null,
       ultimaConsulta: ultimaConsultaVisible(
-        clave && ultimasRes ? (ultimasRes.get(clave) ?? null) : null,
+        clave && ultimasRes ? (ultimasRes.todas.get(clave) ?? null) : null,
         esOficial,
       ),
       // La nota interna es del oficial. Al ejecutor le llega null, y le llega

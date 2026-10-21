@@ -2,7 +2,7 @@
 
 import { useState, useEffect, useCallback, useRef } from 'react'
 import { useRouter } from 'next/navigation'
-import { Bell, Check, X, CheckCheck, Flame, FolderKanban, AtSign, TrendingDown, UserPlus, UserCheck, Package, CircleDollarSign } from 'lucide-react'
+import { Bell, Check, X, CheckCheck, Flame, FolderKanban, AtSign, TrendingDown, UserPlus, UserCheck, Package, CircleDollarSign, ShieldAlert } from 'lucide-react'
 import { LoadingSpinner } from '@/components/ui/loading-spinner'
 import {
   marcarCompletada,
@@ -12,6 +12,7 @@ import {
 } from '@/lib/actions/notificaciones'
 import { leerNotificaciones, REFRESCO_MINIMO_AL_VOLVER_MS } from '@/lib/notificaciones/leer'
 import { toast } from 'sonner'
+import { seCierraDecidiendo } from '@/lib/compliance/alarma-hallazgo'
 
 // ── Helpers ───────────────────────────────────────────
 
@@ -43,6 +44,8 @@ const TIPO_ICON: Record<string, React.ElementType> = {
   responsable_faltante_area: UserPlus,
   cobro_vencido: CircleDollarSign,
   cuenta_cobro_pendiente_aprobacion: CircleDollarSign,
+  compliance_hallazgo: ShieldAlert,
+  compliance_delta_contraparte: ShieldAlert,
 }
 
 const TIPO_COLOR: Record<string, string> = {
@@ -58,6 +61,8 @@ const TIPO_COLOR: Record<string, string> = {
   responsable_faltante_area: 'var(--advertencia)',
   cobro_vencido: 'var(--alerta)',
   cuenta_cobro_pendiente_aprobacion: '#8B5CF6',
+  compliance_hallazgo: 'var(--alerta)',
+  compliance_delta_contraparte: 'var(--alerta)',
 }
 
 // ── Componente principal ──────────────────────────────
@@ -267,8 +272,10 @@ export default function NotificationBell({ userId, initialItems, initialTotal }:
   }
 
   async function handleMarcarTodas() {
-    setItems([])
-    setTotal(0)
+    // Las alarmas de hallazgo se quedan: se cierran decidiendo (P1, 2026-10-20).
+    const quedan = items.filter(n => n.estado === 'pendiente' && seCierraDecidiendo(n.grupo_clave))
+    setItems(quedan)
+    setTotal(t => Math.max(quedan.length, t - (pendientes.length - quedan.length)))
     await marcarTodasCompletadas()
   }
 
@@ -277,6 +284,8 @@ export default function NotificationBell({ userId, initialItems, initialTotal }:
       setOpen(false)
       router.push(item.deep_link)
     }
+    // La alarma de hallazgo NO se apaga al abrirla: abrir no es decidir.
+    if (seCierraDecidiendo(item.grupo_clave)) return
     // Marcar como completada al hacer click en la notificación
     marcarCompletada(item.id)
     setItems(prev => prev.filter(n => n.id !== item.id))
@@ -396,6 +405,14 @@ export default function NotificationBell({ userId, initialItems, initialTotal }:
                   </div>
 
                   {/* Acciones */}
+                  {seCierraDecidiendo(item.grupo_clave) ? (
+                    <span
+                      className="shrink-0 ml-1 mt-0.5 text-[10px] font-medium text-muted-foreground"
+                      title="Este aviso se cierra cuando registras la decisión sobre la contraparte"
+                    >
+                      Se cierra al decidir
+                    </span>
+                  ) : (
                   <div className="flex shrink-0 items-center gap-1 ml-1">
                     <button
                       onClick={(e) => handleCompletar(item.id, e)}
@@ -412,6 +429,7 @@ export default function NotificationBell({ userId, initialItems, initialTotal }:
                       <X className="h-3 w-3" />
                     </button>
                   </div>
+                  )}
                 </div>
               )
             })}

@@ -47,6 +47,7 @@ import { formatFecha } from '@/lib/dates/bogota';
 const CHIP: Record<EstadoSujeto, string> = {
   habilitado: 'bg-[var(--acento-tinte)] text-acento border-acento/30',
   en_seguimiento: 'bg-[var(--acento-tinte)] text-[var(--acento)] border-acento/50',
+  en_revision: 'bg-alerta/10 text-[#B91C1C] border-alerta/30',
   vencido: 'bg-advertencia/10 text-[#B45309] border-advertencia/30',
   sin_consultar: 'bg-advertencia/10 text-[#B45309] border-advertencia/30',
   inhabilitado: 'bg-alerta/10 text-[#B91C1C] border-alerta/30',

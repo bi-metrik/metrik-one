@@ -37,6 +37,8 @@ import {
   type IndicadoresBandeja,
 } from '@/lib/compliance/bandeja';
 import { estadoDeVigencia } from '@/lib/compliance/periodicidad';
+import { grupoClaveHallazgo } from '@/lib/compliance/alarma-hallazgo';
+import type { TierResuelto } from '@/lib/compliance/tier-fuentes';
 import type { InformaMatch } from './compliance-dual';
 
 type Result<T> = { ok: true; data: T } | { ok: false; error: string };
@@ -163,6 +165,25 @@ export async function registrarDecisionContraparte(
     .single();
 
   if (error) return { ok: false, error: error.message };
+
+  // La alarma de esta contraparte se apaga AQUÍ, al decidir, y no al abrir la
+  // campana (P1, 2026-10-20). Se resuelve para todos los que la tenían y queda
+  // quién decidió. Si falla, la decisión ya quedó escrita: no se deshace por un
+  // aviso, y la alarma que sigue abierta es el lado conservador.
+  const grupo = grupoClaveHallazgo(identidad.tipo, identidad.numero);
+  if (grupo) {
+    try {
+      const { error: errAlarma } = await svc.rpc('resolver_grupo_notificaciones', {
+        p_workspace_id: guard.workspaceId,
+        p_grupo_clave: grupo,
+        p_resuelta_por: guard.userId,
+      });
+      if (errAlarma) console.error('[liberaciones] alarma_no_resuelta', grupo, errAlarma.message);
+    } catch (e) {
+      console.error('[liberaciones] alarma_no_resuelta', grupo, (e as Error).message);
+    }
+  }
+
   return { ok: true, data: data as ComplianceLiberacion };
 }
 
@@ -263,6 +284,12 @@ export type ContraparteConHallazgo = {
   consulta_vigente_id: string;
   ultima_consulta_fecha: string;
   total_matches: number;
+  /**
+   * Tier máximo de la consulta vigente (la más reciente con hallazgo). Solo
+   * rotula la fila (triage, P1 2026-10-20); no ordena ni decide (C1). null =
+   * consulta anterior a la clasificación; se rotula como `sin_clasificar`.
+   */
+  tier_maximo: TierResuelto | null;
   cobertura: Cobertura;
   /**
    * R3: el barrido encontró un cambio despues de la liberacion vigente. La fila
@@ -330,6 +357,7 @@ type ConsultaBandeja = {
   matches: InformaMatch[];
   created_at: string;
   vigente_hasta: string | null;
+  tier_maximo: TierResuelto | null;
 };
 
 /**
@@ -359,7 +387,7 @@ export async function listarTableroLiberaciones(): Promise<Result<TableroLiberac
   // puede distinguir "salió limpia" de "no se supo".
   const { data: consultasRaw, error: errConsultas } = await svc
     .from('consultas_listas_dual')
-    .select('id, nombre_consultado, documento_tipo, documento_numero, severidad, total_matches, matches, created_at, vigente_hasta')
+    .select('id, nombre_consultado, documento_tipo, documento_numero, severidad, total_matches, matches, created_at, vigente_hasta, tier_maximo')
     .eq('workspace_id', guard.workspaceId)
     .order('created_at', { ascending: false })
     .limit(LIMITE_CONSULTAS);
@@ -461,6 +489,7 @@ export async function listarTableroLiberaciones(): Promise<Result<TableroLiberac
       consulta_vigente_id: hallazgo.consulta_id,
       ultima_consulta_fecha: hallazgo.created_at,
       total_matches: hallazgo.total_matches,
+      tier_maximo: c.tier_maximo ?? null,
       cobertura: coberturas.get(clave) ?? {
         cubierta: false,
         motivo: 'sin_registro',
@@ -496,6 +525,8 @@ export async function listarTableroLiberaciones(): Promise<Result<TableroLiberac
 
   // La cola se ordena por ANTIGÜEDAD (la más vieja arriba), no por severidad:
   // lo que se mide acá es cuánto lleva la empresa sabiendo algo sin decidir.
+  // El tier rotula la fila pero NO reordena: C1 del concepto de Emilio
+  // (2026-08-31), hasta el bloque B con el catálogo firmado.
   buckets.hallazgos_sin_decidir.sort((a, b) =>
     a.ultima_consulta_fecha.localeCompare(b.ultima_consulta_fecha));
   buckets.sin_cobertura_vigente.sort((a, b) =>

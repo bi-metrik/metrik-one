@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useTransition } from 'react';
+import { useEffect, useState, useTransition } from 'react';
 import {
   AlertTriangle,
   Check,
@@ -27,7 +27,7 @@ import {
   type LiberacionDecision,
   type MotivoCobertura,
 } from '@/lib/compliance/liberaciones';
-import { ETIQUETAS, diasEntreISO } from '@/lib/compliance/bandeja';
+import { ETIQUETAS, diasEntreISO, rotuloTriage, type TonoTriage } from '@/lib/compliance/bandeja';
 import type { CoberturaCatalogo } from '@/lib/actions/compliance-tier-catalogo';
 import { formatBogotaFechaCortaAno, formatBogotaFechaHora, todayBogotaISO } from '@/lib/dates/bogota';
 
@@ -38,20 +38,43 @@ const ESTILO_MOTIVO: Record<MotivoCobertura, string> = {
   rechazada: 'bg-tinta text-white border-tinta',
 };
 
+const ESTILO_TONO: Record<TonoTriage, string> = {
+  alerta: 'bg-[#FEF2F2] text-[#B91C1C] border-alerta/30',
+  advertencia: 'bg-[#FFFBEB] text-[#B45309] border-advertencia/30',
+  neutro: 'bg-papel text-tinta-suave border-[#E5E7EB]',
+};
+
 export default function LiberacionesClient({
   inicial,
   controles,
   cobertura,
+  abrir = null,
 }: {
   inicial: TableroLiberaciones;
   controles: ControlParaLiberacion[];
   /** Cobertura del catálogo de tier en los últimos 90 días (C5). */
   cobertura: CoberturaCatalogo | null;
+  /** Clave de la contraparte que pide abrir el enlace de la alarma (`?c=`). */
+  abrir?: string | null;
 }) {
   const [tablero, setTablero] = useState(inicial);
   const [error, setError] = useState<string | null>(null);
   const [aviso, setAviso] = useState<string | null>(null);
-  const [abierta, setAbierta] = useState<string | null>(null);
+  const [abierta, setAbierta] = useState<string | null>(abrir);
+
+  // La campana navega con router.push: si la pantalla ya estaba montada, el
+  // estado inicial no se vuelve a leer. Se sigue al enlace nuevo durante el
+  // render (patrón de React para estado que depende de una prop) y el efecto
+  // solo lleva la fila a la vista.
+  const [abrirVisto, setAbrirVisto] = useState(abrir);
+  if (abrir !== abrirVisto) {
+    setAbrirVisto(abrir);
+    if (abrir) setAbierta(abrir);
+  }
+  useEffect(() => {
+    if (!abrir) return;
+    document.getElementById(`contraparte-${abrir}`)?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+  }, [abrir]);
   const [pending, startTransition] = useTransition();
 
   async function recargar() {
@@ -416,9 +439,13 @@ function FilaContraparte({
   pending: boolean;
 }) {
   const { cobertura } = contraparte;
+  const triage = rotuloTriage(contraparte.tier_maximo);
 
   return (
-    <div className="bg-white rounded-lg border border-[#E5E7EB] overflow-hidden">
+    <div
+      id={`contraparte-${contraparte.clave}`}
+      className="bg-white rounded-lg border border-[#E5E7EB] overflow-hidden scroll-mt-4"
+    >
       <button
         type="button"
         onClick={onToggle}
@@ -437,8 +464,15 @@ function FilaContraparte({
             {contraparte.documento_tipo} {contraparte.documento_numero} ·{' '}
             {contraparte.total_matches} coincidencia(s) · última consulta{' '}
             {formatBogotaFechaCortaAno(contraparte.ultima_consulta_fecha)}
+            <span className="sm:hidden"> · {triage.texto}</span>
           </p>
         </div>
+        <span
+          className={`shrink-0 hidden sm:inline text-[10px] font-semibold px-2.5 py-1 rounded-full border ${ESTILO_TONO[triage.tono]}`}
+          title="Tipo de lista de la coincidencia más exigente (clasificación del catálogo de listas). Informa; no cambia el orden ni la decisión."
+        >
+          {triage.texto}
+        </span>
         {diasEsperando !== null && (
           <span
             className={`shrink-0 text-xs font-semibold px-2.5 py-1 rounded-full border ${

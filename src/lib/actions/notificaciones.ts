@@ -2,6 +2,7 @@
 
 import { getWorkspace } from '@/lib/actions/get-workspace'
 import { revalidatePath } from 'next/cache'
+import { PREFIJO_ALARMA_HALLAZGO, seCierraDecidiendo } from '@/lib/compliance/alarma-hallazgo'
 
 // ── Tipos ─────────────────────────────────────────────
 
@@ -101,6 +102,10 @@ export async function marcarCompletada(id: string) {
 
   const grupoClave = (fila as { grupo_clave: string | null } | null)?.grupo_clave
 
+  // Una alarma de hallazgo de cumplimiento no se cierra leyéndola: se cierra
+  // cuando el oficial decide sobre la contraparte (P1, 2026-10-20).
+  if (seCierraDecidiendo(grupoClave)) return { success: false, error: 'se_cierra_decidiendo' }
+
   if (grupoClave && workspaceId) {
     // Lo atendió uno -> desaparece de la campana de todos. Es la diferencia
     // entre "ya se resolvió" y "cada quien arrastra su copia del pendiente".
@@ -133,6 +138,16 @@ export async function descartarNotificacion(id: string) {
   const { supabase, userId, error } = await getWorkspace()
   if (error || !userId) return { success: false, error: 'No autenticado' }
 
+  const { data: fila } = await supabase
+    .from('notificaciones')
+    .select('grupo_clave')
+    .eq('id', id)
+    .eq('destinatario_id', userId)
+    .maybeSingle()
+  if (seCierraDecidiendo((fila as { grupo_clave: string | null } | null)?.grupo_clave)) {
+    return { success: false, error: 'se_cierra_decidiendo' }
+  }
+
   const { error: dbError } = await supabase
     .from('notificaciones')
     .update({ estado: 'descartada', updated_at: new Date().toISOString() })
@@ -156,6 +171,8 @@ export async function marcarTodasCompletadas() {
     .update({ estado: 'completada', updated_at: new Date().toISOString() })
     .eq('destinatario_id', userId)
     .eq('estado', 'pendiente')
+    // Las alarmas de hallazgo quedan: se cierran decidiendo, no en bloque.
+    .or(`grupo_clave.is.null,grupo_clave.not.like.${PREFIJO_ALARMA_HALLAZGO}*`)
 
   if (dbError) return { success: false, error: dbError.message }
 

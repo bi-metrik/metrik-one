@@ -11,7 +11,11 @@ import LiberacionesClient from './liberaciones-client';
 
 export const dynamic = 'force-dynamic';
 
-export default async function LiberacionesPage() {
+export default async function LiberacionesPage({
+  searchParams,
+}: {
+  searchParams: Promise<{ c?: string | string[] }>;
+}) {
   const { workspaceId, role } = await getWorkspace();
   if (!workspaceId) redirect('/');
 
@@ -41,6 +45,11 @@ export default async function LiberacionesPage() {
     coberturaDelCatalogo(desde.toISOString(), hasta.toISOString()),
   ]);
 
+  // `?c=<clave>`: el enlace de la campana o del correo abre la ficha de ESA
+  // contraparte (P1, 2026-10-20), no la bandeja entera.
+  const { c } = await searchParams;
+  const abrir = typeof c === 'string' && c.trim() ? c.trim() : null;
+
   if (!tablero.ok) {
     return <div className="p-6 text-sm text-red-700">Error cargando las contrapartes: {tablero.error}</div>;
   }
@@ -50,6 +59,7 @@ export default async function LiberacionesPage() {
       inicial={tablero.data}
       controles={controles.ok ? controles.data : []}
       cobertura={cobertura}
+      abrir={abrir}
     />
   );
 }

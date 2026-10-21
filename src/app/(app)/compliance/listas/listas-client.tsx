@@ -29,6 +29,7 @@ import TutorialTour from '@/components/tutorial/TutorialTour';
 import TutorialButton from '@/components/tutorial/TutorialButton';
 import {
   consultaDualPersistente,
+  avisarLoteConHallazgos,
   generarPlantillaLoteDual,
   listarHistorialDual,
   prepararLoteDual,
@@ -501,6 +502,9 @@ function ConsultaMasivaForm() {
     }
 
     setEstado({ fase: 'completado', loteId: lote_id, total, severidades, tituloLote });
+    // Un solo correo a la oficial con los hallazgos del lote. Si falla, la
+    // campana ya quedó escrita fila por fila: no se le muestra error a quien consultó.
+    if ((severidades.alto ?? 0) > 0) void avisarLoteConHallazgos(lote_id).catch(() => {});
   }
 
   async function procesarFila(
@@ -1191,6 +1195,7 @@ function ReconsultaBar({
     }
 
     setEstado({ fase: 'listo', total: ejecutables.length, severidades, omitidas });
+    if ((severidades.alto ?? 0) > 0) void avisarLoteConHallazgos(loteId).catch(() => {});
     onTerminado();
   }
 
