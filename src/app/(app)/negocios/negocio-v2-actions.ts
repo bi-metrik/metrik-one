@@ -461,6 +461,8 @@ export type NegocioResumen = {
   contacto_nombre: string | null
   /** Celular del contacto. Solo para la búsqueda: la tarjeta no lo muestra. */
   contacto_telefono: string | null
+  /** Correo del contacto (`contactos.email`). Solo para el Excel: la tarjeta no lo muestra. */
+  contacto_email: string | null
   // Ejecucion
   costos_ejecutados: number
   // Pausa
@@ -768,7 +770,7 @@ export async function getNegociosV2(
       lineas_negocio(nombre, numero),
       etapas_negocio(nombre, stage, numero, config_extra),
       empresas(nombre),
-      contactos(nombre, telefono),
+      contactos(nombre, telefono, email),
       negocio_responsables(assigned_at, staff:staff!negocio_responsables_staff_id_fkey(id, full_name))
     `)
     .eq('workspace_id', workspaceId)
@@ -1104,6 +1106,7 @@ export async function getNegociosV2(
       contacto_nombre: (row.contactos as { nombre: string } | null)?.nombre ?? null,
       contacto_telefono:
         (row.contactos as { telefono: string | null } | null)?.telefono ?? null,
+      contacto_email: (row.contactos as { email: string | null } | null)?.email ?? null,
       costos_ejecutados: costosPorNeg[id] ?? 0,
       pausado: (row.pausado as boolean) ?? false,
       pausado_hasta: (row.pausado_hasta as string) ?? null,

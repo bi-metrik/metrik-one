@@ -175,7 +175,7 @@ export function aplicarFiltros(lista: NegocioResumen[], f: FiltrosTransversales)
  * servidor. `almacenamiento_externo` es del workspace, viaja una vez en la vista.
  */
 type SoloServidor =
-  | 'contacto_telefono' | 'created_at' | 'pausado_hasta' | 'motivo_pausa' | 'ciudad_label'
+  | 'contacto_telefono' | 'contacto_email' | 'created_at' | 'pausado_hasta' | 'motivo_pausa' | 'ciudad_label'
   | 'numero_factura' | 'servicio' | 'etapa_stage' | 'almacenamiento_externo'
 
 export type NegocioTarjeta = Omit<NegocioResumen, SoloServidor> & { almacenamiento_externo?: boolean }

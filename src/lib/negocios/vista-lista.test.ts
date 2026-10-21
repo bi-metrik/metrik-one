@@ -42,6 +42,7 @@ function negocio(i: number, estado = 'abierto'): NegocioResumen {
     empresa_nombre: i % 4 === 0 ? `Empresa ${i} S.A.S.` : null,
     contacto_nombre: `Contacto ${i} Pérez`,
     contacto_telefono: `+57 300 ${String(1000000 + i)}`,
+    contacto_email: i % 2 ? `cliente${i}@correo.co` : null,
     costos_ejecutados: 0,
     pausado: false,
     pausado_hasta: null,
@@ -151,7 +152,7 @@ describe('vista-lista · tarjeta compacta', () => {
   it('se reconstruye idéntica a la tarjeta (solo cambian las horas, a dos decimales)', () => {
     for (const n of [ABIERTOS[0], ABIERTOS[7], CERRADOS[1]]) {
       const vuelta = expandirTarjeta(JSON.parse(JSON.stringify(compactarTarjeta(n))), false)
-      const { contacto_telefono: _t, created_at: _c, pausado_hasta: _p, motivo_pausa: _m, ciudad_label: _ci,
+      const { contacto_telefono: _t, contacto_email: _ce, created_at: _c, pausado_hasta: _p, motivo_pausa: _m, ciudad_label: _ci,
         numero_factura: _f, servicio: _s, etapa_stage: _e, ...tarjeta } = n
       const esperada: NegocioTarjeta = {
         ...tarjeta,

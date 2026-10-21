@@ -31,7 +31,7 @@ import {
  * round-trip: una prueba que solo releyera el buffer habria pasado con el defecto puesto.
  */
 
-/** Fila con las 50 columnas del spec vacias; encima se ponen solo las que la prueba mira. */
+/** Fila con las 51 columnas del spec vacias; encima se ponen solo las que la prueba mira. */
 const filaVacia = (): FilaExcel =>
   Object.fromEntries(ENCABEZADOS.map((h) => [h, null])) as FilaExcel
 
