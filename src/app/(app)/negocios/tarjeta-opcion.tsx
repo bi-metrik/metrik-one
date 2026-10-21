@@ -231,9 +231,8 @@ export default function TarjetaOpcion({
   /** Lo que la opción todavía necesita a mano (sin costo confirmado). */
   respaldo: ReactNode
   /**
-   * Con el costo ya confirmado: «Cambiar el costo por una tarifa del proveedor» (brief del
-   * 2026-10-20, punto 1). Sin él, una línea escrita a mano nacía confirmada y el panel de tarifas,
-   * que vive en `respaldo`, no se veía nunca.
+   * El panel de las tarifas del proveedor, con o sin costo confirmado (brief del 2026-10-21, punto
+   * 6: un solo montaje). Antes vivía en `respaldo` y una línea confirmada no lo veía nunca.
    */
   cambiarCosto?: ReactNode
   /** La nota para el cliente de una opción que no es hotel (el hotel la escribe sobre la hoja). */
@@ -295,7 +294,7 @@ export default function TarjetaOpcion({
     avisoFechaDeActividad(ranura?.slug, tarifa, fechasViaje),
     avisoTasaPendiente(tarifa, composicionDeLinea(tarifa, composicionViaje), ranura?.slug),
     // Escrita a mano sin costo (2026-10-20): con la tarjeta cerrada también se lee que falta.
-    !confirmada && costoPendienteDelTarifario(tarifa) ? 'Sin costo todavía: elígelo en «Tarifas del proveedor».' : null,
+    !confirmada && costoPendienteDelTarifario(tarifa) ? 'Sin costo todavía: elígelo en «Usar tarifa de proveedor».' : null,
   ].filter((a): a is string => !!a)
 
   // Qué va y qué no (punto 0). El hook va siempre: en las demás opciones no pinta nada.
@@ -650,8 +649,10 @@ export default function TarjetaOpcion({
             apilable={porPasos !== null}
           />
 
+          {/* Las tarifas del proveedor: UN panel (brief del 2026-10-21, punto 6). Sin costo,
+              «Usar tarifa de proveedor»; con él, «Cambiar el costo». */}
+          {editable && cambiarCosto}
           {!confirmada && respaldo}
-          {confirmada && editable && cambiarCosto}
 
           {/* El traslado, la actividad y (desde el 2026-10-05, D3) el vuelo también tienen su
               hoja: la línea de «Inversión» del documento y, en el vuelo, sus filas de la tabla

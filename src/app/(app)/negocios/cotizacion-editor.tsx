@@ -97,7 +97,6 @@ import {
   composicionDeLinea,
   confirmacionDesactualizada,
   confirmadaVigente,
-  costoPendienteDelTarifario,
   leerTarifaPax,
   describirOcupacion,
   formatoMonto,
@@ -1663,8 +1662,6 @@ export default function CotizacionEditor({ oportunidadId, cotizacion, initialIte
 
         // El costo que la línea tiene hoy (pesos, sin IVA), para mostrarlo al lado del nuevo.
         const costoActualDeLinea = costoDelItem > 0 ? Math.round(costoDelItem * itemCantidad * 100) / 100 : null
-        // Escrita a mano «sin costo»: el precio sale del tarifario y el panel nace abierto.
-        const costoDelTarifario = !tarifaDelItem.confirmada && costoPendienteDelTarifario(tarifaDelItem)
         const jsxTarifaPax = (
           <>
               {editable && ranuraDeItem && (
@@ -1678,28 +1675,16 @@ export default function CotizacionEditor({ oportunidadId, cotizacion, initialIte
                   onCambio={() => refrescar()}
                 />
               )}
-              {/* Las tarifas del proveedor (2026-10-19): ONE las ofrece, la persona elige. Al lado
-                  del pantallazo y del costo a mano, que siguen igual. */}
-              {editable && ranuraDeItem && lineasPorTipo && (
-                <div className="mt-2">
-                  <TarifasProveedorLinea
-                    itemId={item.id}
-                    onCambio={() => refrescar()}
-                    costoActual={costoActualDeLinea}
-                    abiertaDeEntrada={costoDelTarifario}
-                  />
-                </div>
-              )}
           </>
         )
-        // Con el costo confirmado, el panel se ofrece igual para CAMBIARLO (brief del 2026-10-20,
-        // punto 1): la persona ve el costo de hoy y el nuevo, y nada cambia sin «Usar».
-        const jsxCambiarCosto = editable && ranuraDeItem && lineasPorTipo ? (
-          <div data-cambiar-costo-tarifa>
+        // Las tarifas del proveedor (2026-10-19): ONE las ofrece, la persona elige. UN solo panel
+        // (brief del 2026-10-21, punto 6): sin costo dice «Usar tarifa de proveedor»; con el costo
+        // confirmado, «Cambiar el costo», con «La que usas hoy» y el costo de antes y el nuevo.
+        const jsxPanelTarifas = editable && ranuraDeItem && lineasPorTipo ? (
+          <div className="mt-2" data-cambiar-costo-tarifa>
             <TarifasProveedorLinea
               itemId={item.id}
               onCambio={() => refrescar()}
-              titulo="Cambiar el costo por una tarifa del proveedor"
               costoActual={costoActualDeLinea}
             />
           </div>
@@ -2458,7 +2443,7 @@ export default function CotizacionEditor({ oportunidadId, cotizacion, initialIte
                   />
                 </div>
               ) : null}
-              cambiarCosto={jsxCambiarCosto}
+              cambiarCosto={jsxPanelTarifas}
               respaldo={editable ? (
                 <div className="space-y-2" data-respaldo-opcion>
                   {jsxTarifaPax}
@@ -2881,6 +2866,7 @@ export default function CotizacionEditor({ oportunidadId, cotizacion, initialIte
                   como «día-1», no lo ofrece: sin contrato el modelo devuelve lo que le
                   parezca y ese número acaba dentro de un costo. */}
               {jsxTarifaPax}
+              {jsxPanelTarifas}
               {/* Los adicionales DE ESTA VARIANTE (`adicionales.ts`). Se ofrecen donde
                   se ofrece el cargue de pantallazo —líneas con ranura del catálogo—
                   porque es donde la pregunta significa algo: una línea de Termotech no
@@ -2954,6 +2940,7 @@ export default function CotizacionEditor({ oportunidadId, cotizacion, initialIte
               fechasViaje={fechasViaje}
               destinoViaje={destinoViaje}
               onCambio={refrescar}
+              conTarifasDeProveedor
             />
           )}
           {/* C5 · con la forma por pasos, «O agrégalo sin pantallazo», sus botones por tipo y el
@@ -3772,6 +3759,7 @@ export default function CotizacionEditor({ oportunidadId, cotizacion, initialIte
           fechasViaje={fechasViaje}
           destinoViaje={destinoViaje}
           onCambio={refrescar}
+          conTarifasDeProveedor
         />
       )}
       agregarSinPantallazo={jsxAgregar}
@@ -3860,6 +3848,7 @@ export default function CotizacionEditor({ oportunidadId, cotizacion, initialIte
           fechasViaje={fechasViaje}
           destinoViaje={destinoViaje}
           onCambio={refrescar}
+          conTarifasDeProveedor
         />
       )}
       {porPasosOn ? vistaPorPasos : lineasPorTipo ? pasosDelViaje : (

@@ -5,6 +5,8 @@ import { useRouter } from 'next/navigation'
 import { X } from 'lucide-react'
 import { toast } from 'sonner'
 
+import { UsarTarifaDeProveedor } from '@/app/(app)/negocios/tarifas-proveedor-linea'
+
 import {
   quitarHabitacion,
   type BorradorParaAceptar,
@@ -368,6 +370,7 @@ export default function BandejaCapturas({
   onConteo,
   onProvisional,
   onVistaFresca,
+  conTarifasDeProveedor = false,
 }: {
   cotizacionId: string
   /** Las líneas de la cotización: contra ellas se dice a dónde irá cada captura. */
@@ -406,6 +409,11 @@ export default function BandejaCapturas({
   onProvisional?: (e: EventoProvisional) => void
   /** V2 · la cotización como quedó después de «Aceptar» (por pasos): la respuesta ya la trae. */
   onVistaFresca?: (vista: unknown) => void
+  /**
+   * El espacio tiene proveedores con tarifas (la cotización de viaje): al lado de pegar y de
+   * «Escríbelo a mano» va «Usar tarifa de proveedor» (brief del 2026-10-21, punto 2).
+   */
+  conTarifasDeProveedor?: boolean
 }) {
   const router = useRouter()
   const refrescar = () => (onCambio ? onCambio() : router.refresh())
@@ -1017,6 +1025,21 @@ export default function BandejaCapturas({
   }, [capturas, items])
   const pie = textoDelPie(otros)
 
+  // El tercer camino (brief del 2026-10-21, punto 2): la línea nace con la tarifa del proveedor.
+  const tercerCamino = conTarifasDeProveedor ? (
+    <>
+      {' · o '}
+      <UsarTarifaDeProveedor
+        cotizacionId={cotizacionId}
+        className={LINK}
+        onCreada={itemId => {
+          refrescar()
+          onOpcionCreada?.(itemId)
+        }}
+      />
+    </>
+  ) : null
+
   return (
     <section
       ref={raiz}
@@ -1066,6 +1089,7 @@ export default function BandejaCapturas({
         ) : (
           <p className="m-0 text-[13px] text-[#6E6A62]">
             o <button type="button" onClick={() => setManualAbierto(true)} className={LINK} data-abrir-escrito-a-mano>{TITULO_A_MANO}</button>
+            {tercerCamino}
           </p>
         )
       ) : manualAbierto ? (
@@ -1074,6 +1098,7 @@ export default function BandejaCapturas({
         <p className="m-0 text-[13px] text-[#6E6A62]">
           ¿La tarifa viene de un portafolio o por teléfono?{' '}
           <button type="button" onClick={() => setManualAbierto(true)} className={LINK} data-abrir-ingreso-manual>Ingresar a mano</button>
+          {tercerCamino}
         </p>
       )}
       {porPasos && frases.size >= 2 && (
