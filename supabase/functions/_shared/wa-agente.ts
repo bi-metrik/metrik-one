@@ -17,6 +17,7 @@ import { modeloGemini } from './agente/modelo-gemini.ts';
 import { entornoPorDefecto, haikuActivo } from './llm-anthropic.ts';
 import { BOT_ONE, dominioOne } from './agente/one/dominio.ts';
 import { puertoOneSupabase } from './agente/one/puerto-supabase.ts';
+import { lectorDeSoportes } from './agente/one/lectura-adjunto.ts';
 import { reglamentoOne } from './agente/one/reglamento.ts';
 import { logMessage } from './wa-rate-limit.ts';
 import { almacenSupabase, cargarReglamento, cupoSupabase, mensajeroWa, puertoBandejaSupabase } from './agente/produccion.ts';
@@ -132,7 +133,8 @@ export async function atenderConAgenteOne(supabase: SupabaseClient, user: WaUser
     const almacen = almacenSupabase(supabase);
     await atenderPendientes({
       modelo: modeloGemini({ llave, principal: config.principal, respaldo: config.respaldo, corteMs: config.corteMs }),
-      dominio: dominioOne(puertoOneSupabase(supabase, user), { rol: user.role }),
+      // Las fotos y los PDF que llegan se guardan como soporte al llegar y se leen con el modelo (Haiku; respaldo Gemini).
+      dominio: dominioOne(puertoOneSupabase(supabase, user), { rol: user.role, lector: lectorDeSoportes({ llaveGemini: llave }) }),
       reglamento,
       config,
       ahoraMs: () => Date.now(),

@@ -73,6 +73,8 @@ export async function escenarioOne(p: {
     workspaceId: WS_ONE_PRUEBA, phone: TEL_ONE_PRUEBA,
     remitente: p.remitente ?? { nombre: 'Ana Dueña', rol },
     nuevoId,
+    // La ventana de los adjuntos espera en el reloj de la prueba, no en el de verdad.
+    dormir: async (ms: number) => { reloj.avanzar(ms); },
   };
   const pasos: PasoOne[] = [];
   let fotos = 0;

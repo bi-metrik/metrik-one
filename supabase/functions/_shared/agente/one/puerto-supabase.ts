@@ -13,7 +13,8 @@
 
 import type { SupabaseClient, WaUser } from '../../types.ts';
 import { proponerCentroCostosWA } from '../../centro-costos.ts';
-import { downloadAndStoreImage } from '../../wa-media.ts';
+import { bajarMedia, downloadAndStoreImage, subirSoporte } from '../../wa-media.ts';
+import type { MediaFila } from '../tipos.ts';
 import { descripcionParaGuardar } from '../../wa-gasto-descripcion.ts';
 import { tieneServiciosPorPagar } from '../../handlers/registro/servicio-viaje.ts';
 import { EMOJI_ACTIVIDAD } from './dominio.ts';
@@ -61,8 +62,10 @@ export function puertoOneSupabase(supabase: SupabaseClient, user: WaUser): Puert
     return (data ?? []) as Fila[];
   };
 
-  const guardarSoporte = async (gastoId: string, mediaId: string): Promise<boolean> => {
-    const referencia = await downloadAndStoreImage(supabase, mediaId, ws, gastoId);
+  // El soporte: la referencia del archivo ya subido al llegar (`ref`, foto o PDF) o, si no se alcanzó, se baja de Meta
+  // como siempre. Mismo bucket (`gastos-soportes`), misma columna (`gastos.soporte_url`) y `soporte_pendiente = false`.
+  const guardarSoporte = async (gastoId: string, mediaId: string, ref?: string | null): Promise<boolean> => {
+    const referencia = ref || await downloadAndStoreImage(supabase, mediaId, ws, gastoId);
     if (!referencia) return false;
     const { error } = await supabase.from('gastos').update({ soporte_url: referencia, soporte_pendiente: false }).eq('id', gastoId).eq('workspace_id', ws);
     if (error) {
@@ -168,11 +171,33 @@ export function puertoOneSupabase(supabase: SupabaseClient, user: WaUser): Puert
       const { data, error } = await supabase.from('gastos').insert(insert).select('id').single();
       if (error || !data) throw new Error(`no se pudo registrar el gasto: ${error?.message ?? 'sin fila'}`);
       const id = String((data as Fila).id);
-      if (!p.mediaId) return { id, soporte: 'sin' };
-      // El gasto ya quedó: si la foto falla, se dice y se sube después desde la app (como el bot de siempre).
-      return { id, soporte: (await guardarSoporte(id, p.mediaId)) ? 'guardado' : 'fallo' };
+      if (!p.mediaId && !p.ref) return { id, soporte: 'sin' };
+      // El gasto ya quedó: si el soporte falla, se dice y se sube después desde la app (como el bot de siempre).
+      return { id, soporte: (await guardarSoporte(id, p.mediaId ?? '', p.ref)) ? 'guardado' : 'fallo' };
     },
-    adjuntarSoporte: (gastoId, mediaId) => guardarSoporte(gastoId, mediaId),
+    adjuntarSoporte: (gastoId, mediaId, ref) => guardarSoporte(gastoId, mediaId, ref),
+    async corregirGasto({ gastoId, monto, mediaId, ref }) {
+      // Solo un gasto sin revisar: uno revisado (o causado) se corrige en la app.
+      const { data, error } = await supabase.from('gastos').update({ monto }).eq('id', gastoId).eq('workspace_id', ws).eq('revisado', false).select('id');
+      if (error) throw new Error(`no se pudo corregir el gasto: ${error.message}`);
+      if (!((data ?? []) as Fila[]).length) throw new Error('el gasto no existe o ya se revisó');
+      if (!mediaId && !ref) return { soporte: 'sin' };
+      return { soporte: (await guardarSoporte(gastoId, mediaId ?? '', ref)) ? 'guardado' : 'fallo' };
+    },
+    async bajarAdjunto(mediaId) {
+      const m = await bajarMedia(mediaId);
+      return m ? { bytes: m.buffer, mime: m.mimeType } : null;
+    },
+    // Al llegar, sin gasto todavía: `gastos-soportes/<ws>/whatsapp/<fila>.<ext>` (cuelga del workspace, así lo abre la app).
+    guardarAdjunto: (filaId, archivo) => subirSoporte(supabase, ws, `whatsapp/${filaId}`, { buffer: archivo.bytes, mimeType: archivo.mime }),
+    async anotarMedia(filaId: string, media: MediaFila) {
+      try {
+        const { error } = await supabase.from('wa_conversacion').update({ media }).eq('id', filaId).eq('workspace_id', ws);
+        if (error) console.error('[agente-one] no se pudo anotar el soporte en la conversación:', error.message);
+      } catch (err) {
+        console.error('[agente-one] no se pudo anotar el soporte en la conversación:', err);
+      }
+    },
     async registrarActividad({ negocioId, tipo, texto }) {
       let autorId: string | null = null;
       if (user.user_id) {

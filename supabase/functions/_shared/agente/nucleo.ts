@@ -175,6 +175,15 @@ function fuentesDeRespaldo(e: EntradaTurno, extra: string[]): string[] {
   const f: string[] = [...extra];
   for (const x of e.filas) {
     if (x.texto) f.push(x.texto);
+    // Lo leído de un soporte respalda el «el recibo dice $6.880» (con la fecha también como «21/10/2026»).
+    const l = x.media?.lectura;
+    if (l) {
+      f.push(JSON.stringify(l));
+      if (l.fecha) {
+        const [a, m, d] = l.fecha.split('-');
+        f.push(`${Number(d)}/${Number(m)}/${a} ${d}/${m}/${a} ${Number(d)} de ${MESES[Number(m) - 1] ?? ''} de ${a}`);
+      }
+    }
     for (const o of x.opciones ?? []) f.push(`${o.titulo} ${o.descripcion ?? ''}`);
     for (const h of x.traza?.herramientas ?? []) f.push(JSON.stringify(h.datos ?? ''));
     if (x.traza?.propuesta) f.push(x.traza.propuesta.resumen);
@@ -183,6 +192,30 @@ function fuentesDeRespaldo(e: EntradaTurno, extra: string[]): string[] {
   }
   for (const r of e.ctx.resultadosPrevios) f.push(JSON.stringify(r.datos ?? ''));
   return f;
+}
+
+const MESES = ['enero', 'febrero', 'marzo', 'abril', 'mayo', 'junio', 'julio', 'agosto', 'septiembre', 'octubre', 'noviembre', 'diciembre'];
+
+/** Tope de la preparación de adjuntos (bajar, guardar y leer los soportes) dentro del turno. */
+export const TOPE_PREPARAR_MS = 9000;
+
+/** Corre la preparación del dominio con tope: si no alcanza, el turno sigue sin lo que faltó. Nunca lanza. */
+async function prepararAdjuntos(d: Dominio, ctx: ContextoDominio, topeMs: number): Promise<Array<Record<string, unknown>> | null> {
+  if (!d.prepararTurno) return null;
+  let soltar: () => void = () => {};
+  const corte = new Promise<'corte'>((r) => {
+    const t = setTimeout(() => r('corte'), Math.max(0, topeMs));
+    soltar = () => clearTimeout(t);
+  });
+  try {
+    const r = await Promise.race([d.prepararTurno(ctx), corte]);
+    if (r === 'corte') return [{ error: `tope de ${topeMs} ms: el turno sigue sin lo que faltó` }];
+    return r.length ? r : null;
+  } catch (err) {
+    return [{ error: String(err).slice(0, 160) }];
+  } finally {
+    soltar();
+  }
 }
 
 /** La respuesta fija de «no pude» con las opciones vigentes (la propuesta pendiente, si la hay). */
@@ -201,6 +234,9 @@ export async function turnoDelModelo(deps: DepsTurno, e: EntradaTurno): Promise<
     tipo: 'modelo', bot: d.bot, reglamento: { id: r.id, version: r.version, huella: r.huella },
     llamados: 0, uso: [], herramientas: [], candados: [], verificador: [], reglas_usadas: [], ms_modelo: 0, ms_herramientas: 0,
   };
+  // Los soportes que llegaron (fotos, PDF): se bajan, se guardan y se leen antes de armar lo que ve el modelo.
+  const adjuntos = await prepararAdjuntos(d, e.ctx, Math.min(TOPE_PREPARAR_MS, c.topes.turnoMs / 2));
+  if (adjuntos) traza.adjuntos = adjuntos;
   const est = await estado(deps, e);
   const sis = sistema(r, c);
   const usuario = mensajeDelTurno({ estado: est, filas: e.filas, nuevos: e.nuevos, quien: e.ctx.remitente.nombre });

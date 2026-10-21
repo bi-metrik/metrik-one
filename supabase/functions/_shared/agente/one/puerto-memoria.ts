@@ -7,6 +7,8 @@
 // ============================================================
 
 import type { GastoOne, NegocioOne, PuertoOne, SoporteGuardado, TipoActividad } from './dominio.ts';
+import type { ArchivoAdjunto } from './lectura-adjunto.ts';
+import type { MediaFila } from '../tipos.ts';
 
 export interface NegocioMem extends NegocioOne {
   /** Un viaje con servicios por pagar (el pago va por la pantalla de servicios). */
@@ -27,6 +29,13 @@ export class PuertoOneMemoria implements PuertoOne {
   mediaRota = new Set<string>();
   /** Para simular que la base no responde. */
   caida = false;
+  /** Los archivos que «están en Meta», por media id (un PDF sintético, una foto). Sin entrada: una foto de juguete. */
+  archivos = new Map<string, ArchivoAdjunto>();
+  /** Lo que se subió a `gastos-soportes` al llegar (ref → media id) y lo anotado en cada fila. */
+  subidos = new Map<string, string>();
+  anotados = new Map<string, MediaFila>();
+  /** Gastos ya revisados (no se corrigen por aquí). */
+  revisados = new Set<string>();
   private n = 0;
 
   constructor(p: { negocios?: NegocioMem[]; contactos?: Array<{ id: string; nombre: string; telefono: string | null }>; gastos?: GastoMem[] } = {}) {
@@ -89,17 +98,48 @@ export class PuertoOneMemoria implements PuertoOne {
     return this.contactos.find((c) => (c.telefono ?? '').replace(/\D/g, '').slice(-10) === t)?.nombre ?? null;
   }
 
+  private soporteDe(mediaId: string | null, ref?: string | null): SoporteGuardado {
+    if (ref) return 'guardado';
+    return mediaId ? (this.mediaRota.has(mediaId) ? 'fallo' : 'guardado') : 'sin';
+  }
+
+  async bajarAdjunto(mediaId: string): Promise<ArchivoAdjunto | null> {
+    if (this.mediaRota.has(mediaId)) return null;
+    return this.archivos.get(mediaId) ?? { bytes: new Uint8Array([0xff, 0xd8, 0xff, 0xd9]), mime: 'image/jpeg', nombre: null };
+  }
+
+  async guardarAdjunto(filaId: string, archivo: ArchivoAdjunto): Promise<string | null> {
+    const ref = `one://gastos-soportes/ws/whatsapp/${filaId}.${archivo.mime === 'application/pdf' ? 'pdf' : 'jpg'}`;
+    this.subidos.set(ref, filaId);
+    return ref;
+  }
+
+  async anotarMedia(filaId: string, media: MediaFila): Promise<void> {
+    this.anotados.set(filaId, media);
+  }
+
+  async corregirGasto(p: Parameters<PuertoOne['corregirGasto']>[0]): Promise<{ soporte: SoporteGuardado }> {
+    const g = this.gastos.find((x) => x.id === p.gastoId);
+    if (!g || this.revisados.has(p.gastoId)) throw new Error('el gasto no existe o ya se revisó');
+    const soporte = this.soporteDe(p.mediaId, p.ref);
+    const antes = g.monto;
+    g.monto = p.monto;
+    if (soporte === 'guardado') g.soporte = true;
+    this.escrituras.push({ tipo: 'correccion', gasto: p.gastoId, monto_antes: antes, monto: p.monto, soporte: soporte === 'guardado' });
+    return { soporte };
+  }
+
   async registrarGasto(p: Parameters<PuertoOne['registrarGasto']>[0]): Promise<{ id: string; soporte: SoporteGuardado }> {
     const id = this.id('gasto');
-    const soporte: SoporteGuardado = p.mediaId ? (this.mediaRota.has(p.mediaId) ? 'fallo' : 'guardado') : 'sin';
+    const soporte = this.soporteDe(p.mediaId, p.ref);
     const neg = this.negocios.find((n) => n.id === p.negocioId) ?? null;
     this.gastos.push({ id, fecha: '2026-10-21', monto: p.monto, categoria: p.categoria, descripcion: p.descripcion ?? '', negocio: neg?.codigo ?? null, negocioId: p.negocioId, soporte: soporte === 'guardado' });
     this.escrituras.push({ tipo: 'gasto', id, monto: p.monto, negocio: neg?.codigo ?? null, categoria: p.categoria, descripcion: p.descripcion, soporte: soporte === 'guardado', centro: p.centro });
     return { id, soporte };
   }
 
-  async adjuntarSoporte(gastoId: string, mediaId: string): Promise<boolean> {
-    if (this.mediaRota.has(mediaId)) return false;
+  async adjuntarSoporte(gastoId: string, mediaId: string, ref?: string | null): Promise<boolean> {
+    if (!ref && this.mediaRota.has(mediaId)) return false;
     const g = this.gastos.find((x) => x.id === gastoId);
     if (!g) return false;
     g.soporte = true;

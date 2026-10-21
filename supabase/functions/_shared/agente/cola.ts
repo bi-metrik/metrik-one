@@ -113,8 +113,18 @@ async function toqueYSeguir(d: DepsCola, e: Parameters<typeof toqueDePropuesta>[
   });
 }
 
-/** Un turno: atiende lo pendiente más viejo. Devuelve false si no había nada. */
-export async function unTurno(d: DepsCola): Promise<boolean> {
+/** ¿La fila trae un soporte (foto o documento)? Pura. */
+export function esAdjunto(f: FilaConversacion | undefined): boolean {
+  return !!f && f.direccion === 'entrante' && (f.media?.tipo === 'imagen' || f.media?.tipo === 'documento');
+}
+
+const dormirReal = (ms: number) => new Promise<void>((r) => setTimeout(r, ms));
+
+/**
+ * Un turno: atiende lo pendiente más viejo. Devuelve false si no había nada.
+ * `ventana` (con `dominio.ventanaAdjuntosMs`): ya se esperó o ya se repitió una vez por un adjunto (no se espera dos).
+ */
+export async function unTurno(d: DepsCola, ventana: { esperado?: boolean } = {}): Promise<boolean> {
   const c: ConfigAgente = d.config;
   const desde = new Date(d.ahoraMs() - c.topes.ventanaHoras * 3600 * 1000).toISOString();
   const filas = await d.almacen.leer(d.workspaceId, d.phone, desde);
@@ -155,8 +165,29 @@ export async function unTurno(d: DepsCola): Promise<boolean> {
     return true;
   }
 
+  // 4a) La ventana de los adjuntos (2026-10-21, Mauricio: lo leído se combina con el texto que llega en la misma ventana,
+  //     antes o después). Si lo último es una foto o un PDF recién llegado, se espera a que cierre la ventana por si viene
+  //     el texto que lo acompaña («este fue la ida»); mientras, el dominio ya va bajando y leyendo el archivo.
+  const vAdj = d.dominio.ventanaAdjuntosMs ?? 0;
+  if (vAdj > 0 && !ventana.esperado && esAdjunto(pend.at(-1))) {
+    const falta = vAdj - (d.ahoraMs() - Date.parse(pend.at(-1)!.created_at));
+    if (falta > 200) {
+      void d.dominio.prepararTurno?.(ctx).catch(() => {});
+      await conEscribiendo(d, pend.at(-1)!.wa_message_id, () => (d.dormir ?? dormirReal)(Math.min(falta, vAdj)));
+      return await unTurno(d, { esperado: true });
+    }
+  }
+
   // 4) Turno del modelo, con «escribiendo…» desde ya y re-encendido antes de los 25 s.
   const r = await conEscribiendo(d, delEquipo.at(-1)!.wa_message_id, () => turnoDelModelo(d, { turnoId, filas, nuevos: pend, ctx }));
+  // 4b) Si mientras el modelo pensaba llegó un adjunto dentro de la ventana (el texto primero y el PDF después), la
+  //     respuesta no sale: se repite el turno UNA vez con todo junto. El turno del modelo no escribe nada en el negocio.
+  if (vAdj > 0 && !ventana.esperado) {
+    const ids = new Set(pend.map((f) => f.id));
+    const ultimo = Date.parse(pend.at(-1)!.created_at);
+    const despues = pendientes(await d.almacen.leer(d.workspaceId, d.phone, desde)).filter((f) => !ids.has(f.id));
+    if (despues.some((f) => esAdjunto(f) && Date.parse(f.created_at) - ultimo <= vAdj)) return await unTurno(d, { esperado: true });
+  }
   await enviarYCerrar(d, turnoId, pend, r, 'agente.turno');
   if (d.despuesDelTurno) await d.despuesDelTurno(r.traza).catch((err) => console.error('[agente] después del turno:', err));
   return true;
