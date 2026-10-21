@@ -161,6 +161,15 @@ export function fotoDe(filas: FilaConversacion[], v: unknown): { fila: string; m
   return { fila: f.id, mediaId: f.media.id };
 }
 
+/** Las fotos de esta conversación que todavía no son soporte de ningún gasto (el modelo las ve en el Estado). Pura. */
+export function fotosSinUsar(filas: FilaConversacion[]): string {
+  const usadas = fotosUsadas(filas);
+  const n = filas.map((f, i) => (f.direccion === 'entrante' && f.media?.tipo === 'imagen' && !usadas.has(f.id) ? `#${i + 1}` : null)).filter(Boolean);
+  return n.length
+    ? `Fotos de la persona que todavía no son soporte de ningún gasto: ${n.join(', ')}. Si el gasto que propones es de esa foto, va en \`soporte\`.`
+    : 'Fotos sin usar: ninguna.';
+}
+
 export interface GastoDeLaConversacion {
   ref: string;
   id: string;
@@ -244,7 +253,7 @@ export const LECTURAS_ONE: DeclaracionHerramienta[] = [
   },
   {
     name: 'negocios_abiertos',
-    description: 'Los negocios abiertos, los más recientes primero: cuántos hay en total y por etapa, y la lista (código, empresa, nombre, etapa). Sirve para preguntar a qué negocio va algo y para «qué negocios tengo». Solo lectura.',
+    description: 'Los negocios abiertos, los más recientes primero: cuántos hay en total y por etapa, y la lista (código, empresa, nombre, etapa). Solo para CONSULTAS («qué negocios tengo», «cuántos en venta»). Para preguntar a qué negocio va un gasto o una actividad NO sirve: usa `preguntar_destino`. Solo lectura.',
     parameters: { type: 'object', properties: { etapa: { type: 'string', enum: ETAPAS, description: 'Opcional: solo los de esa etapa.' } } },
   },
   {
@@ -381,7 +390,7 @@ export function dominioOne(puerto: PuertoOne, o: { rol: string; ahora?: () => nu
     if (!categorias.includes(categoria)) return { ok: false, error: `Categoría inválida. Usa una de: ${categorias.join(', ')}.`, candado: 'categoria' };
     const codigo = String(d.negocio ?? '').trim();
     const deEmpresa = d.empresa === true;
-    if (!codigo && !deEmpresa) return { ok: false, error: 'Falta el destino: pregunta a qué negocio va (código, empresa o nombre) o si es gasto de empresa. No lo supongas.', candado: 'sin_destino' };
+    if (!codigo && !deEmpresa) return { ok: false, error: 'Falta el destino: llama `preguntar_destino` (el sistema manda la lista). No lo supongas ni armes tú la lista.', candado: 'sin_destino' };
     if (codigo && deEmpresa) return { ok: false, error: 'Un gasto va a un negocio O es de empresa, no las dos. Si no está claro, pregunta.', candado: 'destino_doble' };
     if (deEmpresa && !empresaDicha(ctx.conversacion, d.empresa_dicho_en)) {
       return { ok: false, error: 'Gasto de empresa solo si la persona lo dijo o lo eligió: pon en `empresa_dicho_en` el #n de ese mensaje suyo. Si no lo dijo, llama `preguntar_destino`.', candado: 'empresa_sin_respaldo' };
@@ -578,6 +587,7 @@ export function dominioOne(puerto: PuertoOne, o: { rol: string; ahora?: () => nu
       return [
         `Su rol permite: ${puede.length ? puede.join(', ') : 'nada por este chat'}.`,
         ultimaLista(ctx.conversacion),
+        fotosSinUsar(ctx.conversacion),
         gastos.length
           ? `Gastos registrados en esta conversación: ${gastos.map((g) => `${g.ref} · ${formatCOP(g.monto)} · ${g.etiqueta} · ${g.soporte ? 'con soporte' : 'sin soporte'}`).join(' | ')}.`
           : 'Gastos registrados en esta conversación: ninguno.',
