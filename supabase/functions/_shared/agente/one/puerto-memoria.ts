@@ -114,8 +114,12 @@ export class PuertoOneMemoria implements PuertoOne {
     return ref;
   }
 
+  /** Lo que hace `anotarMedia` con la conversación (el escenario lo conecta a su almacén, como la base en producción). */
+  alAnotar: ((filaId: string, media: MediaFila) => void) | null = null;
+
   async anotarMedia(filaId: string, media: MediaFila): Promise<void> {
     this.anotados.set(filaId, media);
+    this.alAnotar?.(filaId, media);
   }
 
   async corregirGasto(p: Parameters<PuertoOne['corregirGasto']>[0]): Promise<{ soporte: SoporteGuardado }> {
