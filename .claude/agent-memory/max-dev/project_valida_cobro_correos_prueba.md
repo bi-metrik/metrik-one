@@ -1,6 +1,6 @@
 ---
 name: valida-cobro-correos-prueba
-description: VALIDA_COBRO_CORREOS_PRUEBA abre en producción las Condiciones con cobro (v2.1 + aviso v1.5 + tarjeta ePayco) solo al correo de la SESIÓN listado; interruptor global sigue en false. PR apilado sobre #1191, gate de Vera antes del merge.
+description: VALIDA_COBRO_CORREOS_PRUEBA abre en producción las Condiciones con cobro (v2.1 + aviso v1.5 + tarjeta ePayco) solo al correo de la SESIÓN listado; interruptor global sigue en false. PR #1222 contra main (reemplaza #1220, cerrado al borrarse la base de #1191); gate de Vera antes del merge.
 metadata:
   type: project
 ---
