@@ -71,7 +71,8 @@ export async function turnoConReintento(p: {
     if (!antes.motivo) return { desenlace: ganar(antes), intentos, demora };
     if (antes.motivo === 'refusal') return { desenlace: { tipo: 'rechazo', r: antes.r }, intentos, demora };
     // Error (no demora): un reintento inmediato con lo que quede.
-    if (resta() < 500) return { desenlace: { tipo: 'falla', motivo: antes.motivo, ultimo: antes.r }, intentos, demora };
+    // Sin tiempo para otro intento (menos de 500 ms, o del 20 % del corte total si es más corto): falla.
+    if (resta() < Math.min(500, p.corteTotalMs * 0.2)) return { desenlace: { tipo: 'falla', motivo: antes.motivo, ultimo: antes.r }, intentos, demora };
     const dos = await Promise.race([correr(2, resta()), espera(resta())]);
     if (dos === 'tiempo') return { desenlace: { tipo: 'falla', motivo: 'corte_total', ultimo: antes.r }, intentos, demora };
     if (!dos.motivo) return { desenlace: ganar(dos), intentos, demora };
