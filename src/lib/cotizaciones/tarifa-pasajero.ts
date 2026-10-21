@@ -1053,8 +1053,8 @@ export function origenDeLaOcupacion(a: {
 }): string {
   const delViaje = !!a.composicionViaje && mismaComposicion(a.composicion, a.composicionViaje)
   if (a.laPusoLaLectura === 'pantallazo') return 'leído del pantallazo'
-  if (delViaje) return 'la del viaje'
   if (a.laPusoLaLectura === 'manual' || (a.esPropia && a.fuente === 'manual')) return 'escrito a mano'
+  if (delViaje) return 'la del viaje'
   if (a.laPusoLaLectura === 'tarifario') return 'el de la tarifa del proveedor'
   return a.esPropia ? 'ajustado en esta línea' : 'la del viaje'
 }
@@ -1270,7 +1270,7 @@ function listaTipos(tipos: TipoPasajero[]): string {
  * eligió una persona manda sobre la leída. Sin ella, la de la captura 1.
  */
 /** Lo que dice la opción escrita a mano sin costo mientras nadie lo elige. */
-export const MENSAJE_COSTO_PENDIENTE = 'Esta opción todavía no tiene costo: elígelo en «Tarifas del proveedor», pega un pantallazo o escríbelo a mano.'
+export const MENSAJE_COSTO_PENDIENTE = 'Esta opción todavía no tiene costo: elígelo con «Usar tarifa de proveedor», pega un pantallazo o escríbelo a mano.'
 
 /**
  * ¿La opción se escribió a mano sin costo, para sacarlo del tarifario del proveedor? Casilla 1, o

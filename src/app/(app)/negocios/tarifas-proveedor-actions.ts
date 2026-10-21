@@ -683,9 +683,10 @@ export async function crearLineaConTarifa(
     const guardada = actual.casillas?.grupo_completo
     if (guardada?.origen === 'tarifario' && guardada.leidaEn === leidaEn) {
       const origen = origenDe(p, x, eleccion, { por: await quienElige(ctx), porId: ctx.userId, leidaEn }, 'linea_nueva', opciones?.medida)
-      const patch: Record<string, unknown> = { tarifa_pax: { ...actual, tarifaExtraida: origen } }
-      if ('proveedor_id' in fresca) patch.proveedor_id = ficha.id
-      const { error } = await ctx.db.from('items').update(patch).eq('id', aceptada.itemId)
+      const tarifa_pax = { ...actual, tarifaExtraida: origen }
+      // La ficha va en `items.proveedor_id`; sin esa columna (migración sin aplicar), solo el origen.
+      let { error } = await ctx.db.from('items').update({ tarifa_pax, proveedor_id: ficha.id }).eq('id', aceptada.itemId)
+      if (error && sinColumna(error)) ({ error } = await ctx.db.from('items').update({ tarifa_pax }).eq('id', aceptada.itemId))
       if (error) console.warn('[tarifas-proveedor] la línea entró sin el origen de la tarifa:', error.message)
     }
   }
