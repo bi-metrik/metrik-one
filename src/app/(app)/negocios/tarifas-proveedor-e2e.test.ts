@@ -87,7 +87,9 @@ describe('la línea guarda su proveedor', () => {
     expect(await tarifasDeLinea(ITEM)).toMatchObject({ ok: true, proveedor: null, opciones: [] })
     const b = await buscarFichasParaLinea(ITEM, 'ficticio')
     expect(b.ok && b.fichas.map((f) => f.id)).toEqual([HOTEL])
-    expect(await buscarFichasParaLinea(ITEM, 'a')).toEqual({ ok: true, fichas: [] })
+    // Sin texto (o con una letra), todas las citables: solo las que tienen una extracción revisada.
+    const todas = await buscarFichasParaLinea(ITEM, 'a')
+    expect(todas.ok && todas.fichas.map((f) => f.id)).toEqual([HOTEL])
     expect(await fijarProveedorDeLinea(ITEM, AJENO)).toMatchObject({ ok: false })
     expect(item().proveedor_id).toBeNull()
     expect(await fijarProveedorDeLinea(ITEM, HOTEL)).toEqual({ ok: true })

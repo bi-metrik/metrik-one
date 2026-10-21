@@ -3,6 +3,7 @@
 import { MENSAJE_LECTURA_INTERRUMPIDA } from '@/lib/cotizaciones/lectura-sin-silencio'
 import { useEffect, useId, useRef, useState, type DragEvent, type ReactNode } from 'react'
 import { useTransitionTolerante } from '@/hooks/use-transition-tolerante'
+import Link from 'next/link'
 import { toast } from 'sonner'
 
 import {
@@ -22,6 +23,8 @@ import { AvisoTarifarioTarjeta } from '@/app/(app)/proveedores/aviso-tarifario'
 import PerfilFotos from '@/app/(app)/fotos/perfil-fotos'
 import { DialogoAutorizacionFoto } from '@/app/(app)/fotos/autorizacion-foto'
 import { contestarMismoPerfil, subirFotoABiblioteca, type PedidoFoto } from '@/app/(app)/fotos/actions'
+import { noEsEsteProveedor } from '@/app/(app)/negocios/tarifas-proveedor-actions'
+import { origenVigente } from '@/lib/cotizaciones/origen-tarifa'
 import type { PedidoAutorizacion } from '@/lib/fotos/autorizacion'
 import type { CategoriaFoto } from '@/lib/fotos/categoria'
 import { fotoDeLaTarjeta, type ElementoVista } from '@/lib/fotos/vista'
@@ -231,9 +234,8 @@ export default function TarjetaOpcion({
   /** Lo que la opción todavía necesita a mano (sin costo confirmado). */
   respaldo: ReactNode
   /**
-   * Con el costo ya confirmado: «Cambiar el costo por una tarifa del proveedor» (brief del
-   * 2026-10-20, punto 1). Sin él, una línea escrita a mano nacía confirmada y el panel de tarifas,
-   * que vive en `respaldo`, no se veía nunca.
+   * El panel de las tarifas del proveedor, con o sin costo confirmado (brief del 2026-10-21, punto
+   * 6: un solo montaje). Antes vivía en `respaldo` y una línea confirmada no lo veía nunca.
    */
   cambiarCosto?: ReactNode
   /** La nota para el cliente de una opción que no es hotel (el hotel la escribe sobre la hoja). */
@@ -295,7 +297,7 @@ export default function TarjetaOpcion({
     avisoFechaDeActividad(ranura?.slug, tarifa, fechasViaje),
     avisoTasaPendiente(tarifa, composicionDeLinea(tarifa, composicionViaje), ranura?.slug),
     // Escrita a mano sin costo (2026-10-20): con la tarjeta cerrada también se lee que falta.
-    !confirmada && costoPendienteDelTarifario(tarifa) ? 'Sin costo todavía: elígelo en «Tarifas del proveedor».' : null,
+    !confirmada && costoPendienteDelTarifario(tarifa) ? 'Sin costo todavía: elígelo en «Usar tarifa de proveedor».' : null,
   ].filter((a): a is string => !!a)
 
   // Qué va y qué no (punto 0). El hook va siempre: en las demás opciones no pinta nada.
@@ -361,6 +363,24 @@ export default function TarjetaOpcion({
     }).catch(() => {})
   }
 
+  // «No es este»: la ficha que se asoció sola por el nombre no es la de esta línea. No se ofrece
+  // si el costo salió de la tarifa de esa ficha (eso se cambia con «Cambiar el costo»).
+  const costoDeEsaFicha = !!proveedorFijado && origenVigente(tarifa.tarifaExtraida, tarifa.casillas?.grupo_completo) && tarifa.tarifaExtraida?.proveedor_id === proveedorFijado
+  const [deshaciendo, setDeshaciendo] = useState(false)
+  function noEsEste() {
+    if (deshaciendo) return
+    setDeshaciendo(true)
+    void noEsEsteProveedor(itemId)
+      .then(r => {
+        if (!r.ok) { toast.error(r.error); return }
+        toast.success('Listo: esa ficha ya no es la de esta línea.')
+        avisarCambioDeFotos()
+        onCambio()
+      })
+      .catch(() => toast.error('No se pudo guardar. Vuelve a intentarlo.'))
+      .finally(() => setDeshaciendo(false))
+  }
+
   function contestar(mismo: boolean) {
     if (!pedidoFoto || !bib?.duda || contestando) return
     setContestando(true)
@@ -386,11 +406,19 @@ export default function TarjetaOpcion({
   function enviarAlPerfil(archivo: File, permiso: PedidoAutorizacion, categoria: CategoriaFoto | null) {
     if (subiendoFoto || !pedidoFoto) return
     setSubiendoFoto(true)
+    let aLaOpcion = false
     void (async () => {
       try {
         const foto = await comprimirFotoHotel(archivo)
         if (!foto) { toast.error('Ese archivo no es una foto. Usa un JPG o un PNG.'); return }
         const r = await subirFotoABiblioteca(pedidoFoto, foto.dataUrl, null, categoria, permiso)
+        // Una línea escrita a mano sin ficha no crea una (brief del 2026-10-21, punto 5): la foto
+        // del hotel queda en la opción.
+        if (!r.ok && r.codigo === 'A_MANO' && esHotel) {
+          setFotoPorAutorizar(null)
+          aLaOpcion = true
+          return
+        }
         if (!r.ok) { toast.error(r.error); return }
         setFotoPorAutorizar(null)
         quedoEnBiblioteca(r.elemento)
@@ -398,6 +426,7 @@ export default function TarjetaOpcion({
         toast.error('No se pudo guardar la foto. Vuelve a intentarlo.')
       } finally {
         setSubiendoFoto(false)
+        if (aLaOpcion) enviarFotoDeLaOpcion(archivo)
       }
     })()
   }
@@ -650,8 +679,10 @@ export default function TarjetaOpcion({
             apilable={porPasos !== null}
           />
 
+          {/* Las tarifas del proveedor: UN panel (brief del 2026-10-21, punto 6). Sin costo,
+              «Usar tarifa de proveedor»; con él, «Cambiar el costo». */}
+          {editable && cambiarCosto}
           {!confirmada && respaldo}
-          {confirmada && editable && cambiarCosto}
 
           {/* El traslado, la actividad y (desde el 2026-10-05, D3) el vuelo también tienen su
               hoja: la línea de «Inversión» del documento y, en el vuelo, sus filas de la tabla
@@ -683,6 +714,24 @@ export default function TarjetaOpcion({
               onVerFotos: () => setPerfilAbierto(true),
             } : null}
           />}
+          {/* De qué ficha son las fotos (brief del 2026-10-21, punto 5): se asoció sola por el nombre,
+              y «No es este» lo deshace. Si el nombre se parece a varias, no se asocia: «Por clasificar». */}
+          {conBiblioteca && bib?.fotosDe && (
+            <p className="m-0 flex flex-wrap items-center gap-x-2 px-3 pb-1 text-[11px] text-[#6E6A62]" data-fotos-de>
+              <span>Fotos de: <b className="font-medium text-[#191713]">{bib.fotosDe.nombre}</b>{bib.fotosDe.ciudad ? ` · ${bib.fotosDe.ciudad}` : ''}</span>
+              {editable && bib.fotosDe.deshacer && !costoDeEsaFicha && (
+                <button type="button" onClick={noEsEste} disabled={deshaciendo} className="underline hover:text-[#191713] disabled:opacity-50" data-no-es-este>
+                  No es este
+                </button>
+              )}
+            </p>
+          )}
+          {conBiblioteca && !bib?.fotosDe && (bib?.porClasificar ?? 0) > 0 && (
+            <p className="m-0 px-3 pb-1 text-[11px] text-[#9A5F0C]" data-por-clasificar-tarjeta>
+              Sin fotos: el nombre se parece a {bib!.porClasificar} proveedores. Elige cuál es en{' '}
+              <Link href="/proveedores?por=clasificar" className="underline">Proveedores, «Por clasificar»</Link>.
+            </p>
+          )}
           {conBiblioteca && pedidoFoto && (
             <DialogoAutorizacionFoto
               archivo={fotoPorAutorizar}

@@ -1,0 +1,246 @@
+// ============================================================
+// Asistente público — los puertos de producción (Supabase y la API de Chatwoot)
+// ------------------------------------------------------------
+// · `almacenChatwootSupabase`: `chatwoot_conversacion` y `chatwoot_consentimientos` (migración 20261021090000), y
+//   `tomar_candado`/`claves_idempotencia` como el núcleo.
+// · `mensajeroChatwootApi`: la API de aplicación de Chatwoot con el token del Agent Bot (cabecera `api_access_token`):
+//   mensaje (`input_select` para Sí / No y opciones), nota privada, etiquetas (se suman: la API reemplaza la lista),
+//   asignación de equipo y `toggle_status`. SIN VERIFICAR (D7): que el token del Agent Bot pueda crear notas privadas,
+//   etiquetar y cambiar el estado en la cuenta real; plan B: token de un usuario de servicio con el rol más bajo que
+//   alcance (es otro valor de `CHATWOOT_API_TOKEN_<SLUG>`, sin cambiar código).
+// · `puertosEntradaSupabase`: lo que necesita la petición del webhook (`entrada.ts`).
+// Los secretos los pasa quien llama (la función los lee de `Deno.env`); este archivo no lee el entorno.
+// ============================================================
+
+import type { SupabaseClient } from '../../types.ts';
+import type { Salida } from '../tipos.ts';
+import type { PrecioModelo } from '../uso.ts';
+import { leerConfigPublico } from './config.ts';
+import type { EntranteNuevo, PuertosEntrada, WorkspacePublico } from './entrada.ts';
+import type { AlmacenPublico, Consentimiento, MensajeroChatwoot, ResultadoPublicar } from './puertos.ts';
+import type { FilaPublica, LlaveConversacion, TrazaPublica } from './tipos.ts';
+import { llaveTexto } from './tipos.ts';
+
+type Fila = Record<string, unknown>;
+const COLUMNAS = 'id, workspace_id, cuenta_id, conversacion_id, canal, direccion, clase, texto, enmascarado, adjunto, opciones, toque_id, chatwoot_message_id, turno_id, ranura, estado, traza, ms_webhook, created_at';
+export const TEXTO_ENMASCARADO = '[mensaje con un dato protegido: enmascarado]';
+
+/** Una fila de la tabla como la ve el núcleo. Pura. */
+export function filaDeTabla(x: Fila): FilaPublica {
+  return {
+    id: String(x.id), workspace_id: String(x.workspace_id), phone: `${x.cuenta_id}:${x.conversacion_id}`,
+    direccion: x.direccion as FilaPublica['direccion'], clase: x.clase as FilaPublica['clase'], texto: (x.texto as string | null) ?? null,
+    opciones: (x.opciones as FilaPublica['opciones']) ?? null, toque_id: (x.toque_id as string | null) ?? null,
+    wa_message_id: x.chatwoot_message_id === null || x.chatwoot_message_id === undefined ? null : String(x.chatwoot_message_id),
+    turno_id: (x.turno_id as string | null) ?? null, traza: (x.traza as TrazaPublica | null) ?? null, created_at: String(x.created_at),
+    canal: x.canal as FilaPublica['canal'], enmascarado: x.enmascarado === true, adjunto: (x.adjunto as FilaPublica['adjunto']) ?? null,
+    estado: (x.estado as FilaPublica['estado']) ?? null, ranura: (x.ranura as string | null) ?? null, ms_webhook: (x.ms_webhook as number | null) ?? null,
+  };
+}
+
+const duplicado = (e: { code?: string } | null) => e?.code === '23505';
+
+async function tomar(supabase: SupabaseClient, clave: string, segundos: number): Promise<boolean> {
+  const { data, error } = await supabase.rpc('tomar_candado', { p_clave: clave, p_segundos: Math.round(segundos) });
+  if (error) {
+    console.error('[asistente] no se pudo tomar el candado:', error.message);
+    return false;
+  }
+  return data === true;
+}
+
+async function soltar(supabase: SupabaseClient, clave: string): Promise<void> {
+  const { error } = await supabase.from('claves_idempotencia').delete().eq('clave', clave).eq('ambito', 'candado');
+  if (error) console.error('[asistente] no se pudo soltar el candado:', error.message);
+}
+
+// ── Almacén ──────────────────────────────────────────────────────────────────
+
+export function almacenChatwootSupabase(supabase: SupabaseClient): AlmacenPublico {
+  return {
+    async leer(l, desdeIso) {
+      const { data, error } = await supabase.from('chatwoot_conversacion').select(COLUMNAS)
+        .eq('workspace_id', l.workspaceId).eq('cuenta_id', l.cuentaId).eq('conversacion_id', l.conversacionId)
+        .neq('clase', 'nota').gte('created_at', desdeIso).order('created_at', { ascending: true }).limit(500);
+      if (error) throw new Error(`no se pudo leer la conversación: ${error.message}`);
+      return ((data ?? []) as Fila[]).map(filaDeTabla);
+    },
+    async cerrarTurno(p) {
+      const r = await Promise.all([
+        supabase.from('chatwoot_conversacion').update({ turno_id: p.turnoId }).in('id', p.filas),
+        supabase.from('chatwoot_conversacion').update({ traza: p.traza }).eq('id', p.filaTraza),
+      ]);
+      for (const x of r) if (x.error) console.error('[asistente] no se pudo cerrar el turno:', x.error.message);
+    },
+    async completarTexto(id, texto) {
+      const { error } = await supabase.from('chatwoot_conversacion').update({ texto }).eq('id', id);
+      if (error) console.error('[asistente] no se pudo guardar la transcripción:', error.message);
+    },
+    async enmascarar(ids) {
+      if (!ids.length) return;
+      const { error } = await supabase.from('chatwoot_conversacion').update({ texto: TEXTO_ENMASCARADO, enmascarado: true }).in('id', ids);
+      if (error) console.error('[asistente] no se pudo enmascarar:', error.message);
+    },
+    async reservarSalida(p) {
+      const { data, error } = await supabase.from('chatwoot_conversacion').insert({
+        workspace_id: p.llave.workspaceId, cuenta_id: p.llave.cuentaId, conversacion_id: p.llave.conversacionId, canal: p.canal,
+        direccion: 'saliente', clase: p.nota ? 'nota' : 'bot', texto: p.salida.texto, opciones: 'opciones' in p.salida ? p.salida.opciones : null,
+        turno_id: p.turnoId, ranura: p.ranura, estado: 'generado',
+      }).select('id').single();
+      if (duplicado(error)) return null;
+      if (error || !data) {
+        // Sin la fila no hay garantía de no publicar dos veces: no se publica.
+        console.error('[asistente] no se pudo guardar lo que iba a salir:', error?.message);
+        return null;
+      }
+      return String((data as Fila).id);
+    },
+    async marcarSalida(id, r) {
+      const { error } = await supabase.from('chatwoot_conversacion').update({
+        estado: r.estado, ...(r.chatwootMessageId ? { chatwoot_message_id: r.chatwootMessageId } : {}), ...(r.estado === 'publicado' ? { publicado_at: new Date().toISOString() } : {}),
+      }).eq('id', id);
+      if (error) console.error('[asistente] no se pudo marcar la salida:', error.message);
+    },
+    async registrarConsentimiento(c: Consentimiento) {
+      const { error } = await supabase.from('chatwoot_consentimientos').insert({
+        workspace_id: c.llave.workspaceId, cuenta_id: c.llave.cuentaId, conversacion_id: c.llave.conversacionId, canal: c.canal,
+        tipo: c.tipo, respuesta: c.respuesta, texto_clave: c.textoClave, texto_version: c.textoVersion, texto_huella: c.textoHuella,
+        mensaje_texto: c.mensajeTexto, chatwoot_message_id: c.chatwootMessageId,
+      });
+      // La prueba también queda en la traza del turno; si la fila falla, queda en el log para repararla.
+      if (error) console.error('[asistente] no se pudo guardar la prueba del consentimiento:', error.message, JSON.stringify({ ...c, llave: llaveTexto(c.llave) }));
+    },
+    async trazasDelModelo(workspaceId, desdeIso) {
+      const { data, error } = await supabase.from('chatwoot_conversacion').select('traza')
+        .eq('workspace_id', workspaceId).gte('created_at', desdeIso).eq('traza->>tipo', 'modelo').limit(5000);
+      if (error) {
+        console.error('[asistente] no se pudo leer el gasto del día:', error.message);
+        return null;
+      }
+      return ((data ?? []) as Fila[]).map((x) => x.traza as TrazaPublica);
+    },
+    tomarCandado: (clave, segundos) => tomar(supabase, clave, segundos),
+    soltarCandado: (clave) => soltar(supabase, clave),
+  };
+}
+
+/** Los precios de `bot_modelo_precios` (USD por millón). Vacío si no se pudo leer (el tope usa el de Haiku por defecto). */
+export async function preciosSupabase(supabase: SupabaseClient): Promise<PrecioModelo[]> {
+  const { data, error } = await supabase.from('bot_modelo_precios').select('modelo, usd_millon_entrada, usd_millon_salida, usd_millon_cache');
+  if (error) return [];
+  return ((data ?? []) as Fila[]).map((x) => ({ modelo: String(x.modelo), entrada: Number(x.usd_millon_entrada), salida: Number(x.usd_millon_salida), cache: x.usd_millon_cache === null ? null : Number(x.usd_millon_cache) }));
+}
+
+// ── Chatwoot ─────────────────────────────────────────────────────────────────
+
+/** El cuerpo de un mensaje de Chatwoot desde la salida del núcleo (`input_select` con los ids del código). Pura. */
+export function cuerpoMensajeChatwoot(s: Salida, privado = false): Record<string, unknown> {
+  const base = { content: s.texto, message_type: 'outgoing', private: privado };
+  if (s.tipo === 'texto' || privado) return base;
+  return { ...base, content_type: 'input_select', content_attributes: { items: s.opciones.map((o) => ({ title: o.titulo, value: o.id })) } };
+}
+
+export function mensajeroChatwootApi(o: { apiUrl: string; token: string; fetch?: typeof fetch; timeoutMs?: number }): MensajeroChatwoot {
+  const f = o.fetch ?? ((u: RequestInfo | URL, i?: RequestInit) => globalThis.fetch(u, i));
+  const base = (l: LlaveConversacion) => `${o.apiUrl}/api/v1/accounts/${l.cuentaId}/conversations/${l.conversacionId}`;
+  const pedir = (url: string, metodo: string, cuerpo?: unknown) => f(url, {
+    method: metodo,
+    headers: { 'content-type': 'application/json', api_access_token: o.token },
+    ...(cuerpo !== undefined ? { body: JSON.stringify(cuerpo) } : {}),
+    signal: AbortSignal.timeout(o.timeoutMs ?? 8000),
+  });
+  const crear = async (l: LlaveConversacion, cuerpo: Record<string, unknown>): Promise<ResultadoPublicar> => {
+    try {
+      const r = await pedir(`${base(l)}/messages`, 'POST', cuerpo);
+      if (r.ok) {
+        const d = await r.json().catch(() => ({}));
+        return { ok: true, id: typeof d?.id === 'number' ? d.id : null };
+      }
+      // 5xx: Chatwoot pudo haberlo creado. No se reintenta a ciegas (§3.3).
+      return { ok: false, incierto: r.status >= 500, motivo: `http ${r.status}: ${(await r.text()).slice(0, 120)}` };
+    } catch (e) {
+      return { ok: false, incierto: true, motivo: `red o corte: ${String(e).slice(0, 80)}` };
+    }
+  };
+  const bien = async (p: Promise<Response>): Promise<boolean> => {
+    try {
+      const r = await p;
+      if (!r.ok) console.error(`[asistente] Chatwoot respondió ${r.status}: ${(await r.text()).slice(0, 120)}`);
+      return r.ok;
+    } catch (e) {
+      console.error('[asistente] Chatwoot no respondió:', String(e).slice(0, 120));
+      return false;
+    }
+  };
+  return {
+    async estado(l) {
+      try {
+        const r = await pedir(base(l), 'GET');
+        if (!r.ok) return null;
+        const d = await r.json();
+        return typeof d?.status === 'string' ? d.status : null;
+      } catch {
+        return null;
+      }
+    },
+    publicar: (l, s) => crear(l, cuerpoMensajeChatwoot(s)),
+    nota: (l, texto) => crear(l, cuerpoMensajeChatwoot({ tipo: 'texto', texto }, true)),
+    async etiquetar(l, etiquetas) {
+      // La API reemplaza la lista: se leen las de hoy y se suman.
+      let actuales: string[] = [];
+      try {
+        const r = await pedir(`${base(l)}/labels`, 'GET');
+        if (r.ok) actuales = ((await r.json())?.payload ?? []).map(String);
+      } catch {
+        // sin las actuales, se mandan solo las nuevas (peor caso: se pierde una etiqueta que ya tenía).
+      }
+      return await bien(pedir(`${base(l)}/labels`, 'POST', { labels: [...new Set([...actuales, ...etiquetas])] }));
+    },
+    asignarEquipo: (l, equipo) => bien(pedir(`${base(l)}/assignments`, 'POST', { team_id: equipo })),
+    abrir: (l) => bien(pedir(`${base(l)}/toggle_status`, 'POST', { status: 'open' })),
+  };
+}
+
+// ── La entrada ───────────────────────────────────────────────────────────────
+
+const cacheWs = new Map<string, { w: WorkspacePublico | null; vence: number }>();
+
+export function puertosEntradaSupabase(supabase: SupabaseClient, secreto: (slug: string) => string | undefined): PuertosEntrada {
+  return {
+    secreto,
+    async workspace(slug) {
+      const c = cacheWs.get(slug);
+      if (c && c.vence > Date.now()) return c.w;
+      const { data, error } = await supabase.from('workspaces').select('id, slug, config_extra').eq('slug', slug).maybeSingle();
+      if (error) throw new Error(`no se pudo leer el workspace: ${error.message}`);
+      const w = data ? { id: String(data.id), slug: String(data.slug), config: leerConfigPublico((data.config_extra as Fila | null)?.bot_conversacional) } : null;
+      cacheWs.set(slug, { w, vence: Date.now() + 60_000 });
+      return w;
+    },
+    primeraVez: (clave) => tomar(supabase, clave, 7 * 24 * 3600),
+    async olvidar(clave) {
+      await soltar(supabase, clave);
+    },
+    async guardarEntrante(e: EntranteNuevo) {
+      const { error } = await supabase.from('chatwoot_conversacion').insert({
+        workspace_id: e.llave.workspaceId, cuenta_id: e.llave.cuentaId, conversacion_id: e.llave.conversacionId, inbox_id: e.inboxId, canal: e.canal,
+        direccion: 'entrante', clase: e.clase, texto: e.texto, toque_id: e.toqueId, chatwoot_message_id: e.mensajeId, adjunto: e.adjunto, ms_webhook: e.msWebhook,
+      });
+      if (duplicado(error)) return 'duplicado';
+      if (error) {
+        console.error('[asistente] no se pudo guardar el mensaje:', error.message);
+        return 'error';
+      }
+      return 'ok';
+    },
+    async completarAudio(p) {
+      const { data, error } = await supabase.from('chatwoot_conversacion').select('id, adjunto, turno_id')
+        .eq('workspace_id', p.workspaceId).eq('cuenta_id', p.cuentaId).eq('chatwoot_message_id', p.mensajeId).eq('direccion', 'entrante').maybeSingle();
+      if (error || !data || data.turno_id || (data.adjunto as Fila | null)?.url) return false;
+      const { error: e2 } = await supabase.from('chatwoot_conversacion').update({ adjunto: p.adjunto, clase: 'audio' }).eq('id', data.id);
+      return !e2;
+    },
+    ahoraS: () => Math.floor(Date.now() / 1000),
+    reloj: () => performance.now(),
+  };
+}
