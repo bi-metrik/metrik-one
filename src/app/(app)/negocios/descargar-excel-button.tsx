@@ -10,7 +10,7 @@ import { fetchPropio } from '@/lib/version/fetch-propio'
  * Pide al servidor los ids de la lista visible (ya filtrados y en su orden; la pantalla
  * solo tiene una página, `obtenerIds`) y los manda a `POST /api/negocios/export` y dispara la descarga con el nombre que la ruta pone en
  * `Content-Disposition`. El gate real está en la ruta; este botón solo se pinta para
- * los roles que pasan (`puedeDescargarNegocios`, resuelto en el servidor).
+ * los roles que pasan (`puedeDescargarNegociosDelWorkspace`, resuelto en el servidor).
  */
 
 const NOMBRE_POR_DEFECTO = 'negocios.xlsx'
