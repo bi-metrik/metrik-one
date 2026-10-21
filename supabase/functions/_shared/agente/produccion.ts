@@ -38,7 +38,7 @@ import type { PuertosCupo } from './uso.ts';
 import type { Almacen, FilaConversacion, Mensajero, Reglamento, Salida, Traza } from './tipos.ts';
 
 type Fila = Record<string, unknown>;
-const COLUMNAS = 'id, workspace_id, phone, direccion, clase, formato, texto, opciones, toque_id, contexto_wamid, wa_message_id, turno_id, traza, created_at';
+const COLUMNAS = 'id, workspace_id, phone, direccion, clase, formato, texto, opciones, toque_id, contexto_wamid, wa_message_id, media, turno_id, traza, created_at';
 
 // ── Almacén ──────────────────────────────────────────────────────────────────
 

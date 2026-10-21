@@ -1,0 +1,500 @@
+// ============================================================
+// Núcleo conversacional — el dominio de ONE (modo agente en todo workspace), 2026-10-21
+// ------------------------------------------------------------
+// Mauricio, 2026-10-20: «necesito el modo agente en todo ONE, también para termotech». Lo que hace el bot de siempre
+// (`handlers/registro/*`, `handlers/actividad.ts`, `handlers/consulta.ts`, `handlers/ayuda.ts`), con el modelo
+// interpretando y decidiendo el destino, y el código protegiendo solo invariantes:
+//   · nada se escribe sin el toque sobre un resumen que arma el código con datos reales (se acaba el autorregistro);
+//   · el negocio existe: se resuelve por su código en la base (`wa_find_negocios`); un código que no está, no se propone;
+//   · todo resumen que toca un negocio dice código · empresa — nombre;
+//   · el monto es un número positivo; la categoría, una de las nueve; la foto del soporte, una foto que llegó en esta
+//     conversación y que no se usó ya; el teléfono de un contacto nuevo, uno escrito por el equipo;
+//   · el rol manda (los mismos permisos del bot de siempre: un operador registra gastos y actividades; un contador
+//     consulta; solo lectura, sus números).
+// No hay reglas que lean el texto de la persona: qué negocio nombró, cuánto dijo y qué categoría es lo decide el modelo,
+// y la persona lo confirma en el resumen.
+// La base la toca un `PuertoOne` (producción: `puerto-supabase.ts`; pruebas y arnés: `puerto-memoria.ts`).
+// ============================================================
+
+import { CATEGORIA_LABELS } from '../../types.ts';
+import { formatCOP } from '../../wa-format.ts';
+import type { ContextoDominio, DeclaracionHerramienta, Dominio, FilaConversacion, Hechos, Propuesta, ResultadoHerramienta } from '../tipos.ts';
+import { BOT_ONE } from './reglamento.ts';
+
+export { BOT_ONE };
+
+export interface NegocioOne {
+  id: string;
+  codigo: string;
+  nombre: string;
+  empresa: string | null;
+  contacto: string | null;
+  etapa: string | null;
+  /** Valor del negocio (aprobado o estimado). Solo lo ve quien puede ver plata. */
+  valor?: number | null;
+  coincidencia?: 'codigo' | 'exacta' | 'parecida';
+}
+
+export interface GastoOne {
+  id: string;
+  fecha: string;
+  monto: number;
+  categoria: string;
+  descripcion: string;
+  /** Código del negocio, o `null` = gasto de empresa. */
+  negocio: string | null;
+  soporte: boolean;
+}
+
+export type SoporteGuardado = 'guardado' | 'fallo' | 'sin';
+
+export interface PuertoOne {
+  /** Negocios abiertos por código, nombre del negocio, empresa o contacto (`wa_find_negocios`). */
+  buscarNegocios(texto: string, limite: number): Promise<NegocioOne[] | 'error'>;
+  /** Los abiertos, los más recientes primero, con cuántos hay por etapa. */
+  negociosAbiertos(etapa: string | null, limite: number): Promise<{ total: number; porEtapa: Record<string, number>; negocios: NegocioOne[] } | 'error'>;
+  /** El negocio abierto con ese código exacto (normalizado: «i1-26-5» = «I1 26 5»). */
+  negocioPorCodigo(codigo: string): Promise<NegocioOne | null | 'error'>;
+  /** ¿Es un viaje con servicios por pagar? (esos pagos van por la pantalla de servicios del viaje, no como gasto suelto). */
+  serviciosPorPagar(negocioId: string): Promise<boolean | 'error'>;
+  /** El centro de costos como lo propone hoy el bot (`proponerCentroCostosWA`). */
+  centroCostos(p: { negocioId: string | null; descripcion: string | null }): Promise<{ centro: string | null; origen: string | null }>;
+  gastosRecientes(p: { desdeIso: string; negocioId: string | null; limite: number }): Promise<{ total: number; cantidad: number; gastos: GastoOne[] } | 'error'>;
+  /** Un gasto del workspace por id. */
+  gasto(id: string): Promise<GastoOne | null | 'error'>;
+  /** Si ese teléfono ya es de un contacto, su nombre (`buscar_contacto_duplicado`). */
+  contactoDuplicado(telefono: string): Promise<string | null | 'error'>;
+  /** Inserta el gasto como lo hace hoy el bot y, si trae foto, la baja de Meta y la guarda como soporte. Lanza si no pudo. */
+  registrarGasto(p: {
+    monto: number; categoria: string; descripcion: string | null; mensajeOriginal: string | null; negocioId: string | null;
+    centro: string | null; origen: string | null; mediaId: string | null;
+  }): Promise<{ id: string; soporte: SoporteGuardado }>;
+  /** Baja la foto de Meta y la deja como soporte del gasto. false = no se pudo (no se escribió nada). */
+  adjuntarSoporte(gastoId: string, mediaId: string): Promise<boolean>;
+  registrarActividad(p: { negocioId: string; tipo: TipoActividad; texto: string }): Promise<void>;
+  crearContacto(p: { nombre: string; telefono: string | null; cargo: string | null; decisor: boolean }): Promise<{ id: string }>;
+}
+
+export const ACCIONES_ONE = ['gasto', 'adjuntar_soporte', 'actividad', 'contacto_nuevo'];
+export const TIPOS_ACTIVIDAD = ['llamada', 'reunion', 'correo', 'visita', 'mensaje', 'nota'] as const;
+export type TipoActividad = typeof TIPOS_ACTIVIDAD[number];
+export const EMOJI_ACTIVIDAD: Record<TipoActividad, string> = { llamada: '📞', reunion: '🤝', correo: '📧', visita: '🚗', mensaje: '💬', nota: '📝' };
+const ETAPAS = ['venta', 'ejecucion', 'cobro', 'cierre'];
+
+// ── Permisos por rol (los del bot de siempre: OPERATOR/CONTADOR/READ_ONLY_ALLOWED_INTENTS) ───────────────────────
+
+export interface Permisos {
+  escribir: boolean;
+  contactos: boolean;
+  negocios: boolean;
+  plata: boolean;
+  gastos: boolean;
+}
+
+/** Pura. owner/admin: todo. supervisor/operator (y colaboradores): gastos y actividades. contador: consultas. read_only: sus números. */
+export function permisosDe(rol: string): Permisos {
+  switch (rol) {
+    case 'owner':
+    case 'admin':
+      return { escribir: true, contactos: true, negocios: true, plata: true, gastos: true };
+    case 'supervisor':
+    case 'operator':
+      return { escribir: true, contactos: false, negocios: true, plata: false, gastos: false };
+    case 'contador':
+      return { escribir: false, contactos: false, negocios: true, plata: true, gastos: true };
+    case 'read_only':
+      return { escribir: false, contactos: false, negocios: false, plata: true, gastos: true };
+    default:
+      return { escribir: false, contactos: false, negocios: false, plata: false, gastos: false };
+  }
+}
+
+// ── Cómo se nombra un negocio ────────────────────────────────────────────────
+
+const corto = (s: string, max: number) => ([...s].length <= max ? s : `${[...s].slice(0, max - 1).join('')}…`);
+
+/** «P1 26 5 · Pérez Construcciones — Remodelación cocina»: siempre código, empresa (o el contacto) y nombre. Pura. */
+export function nombreNegocio(n: Pick<NegocioOne, 'codigo' | 'nombre' | 'empresa' | 'contacto'>, max = 90): string {
+  const quien = n.empresa || n.contacto || 'sin empresa';
+  return `${n.codigo} · ${quien} — ${corto(n.nombre || '(sin nombre)', max)}`;
+}
+
+function negocioParaModelo(n: NegocioOne, plata: boolean): Record<string, unknown> {
+  return {
+    codigo: n.codigo, empresa: n.empresa, nombre: n.nombre, contacto: n.contacto, etapa: n.etapa,
+    ...(n.coincidencia ? { coincidencia: n.coincidencia } : {}),
+    ...(plata && typeof n.valor === 'number' ? { valor: formatCOP(n.valor) } : {}),
+  };
+}
+
+// ── Lo que dice la conversación (estructura, no texto) ───────────────────────
+
+/** El número `#n` de una fila como lo vio el modelo («#5», «5», 5). Pura. */
+export function numeroDeFila(v: unknown): number | null {
+  if (v === undefined || v === null || v === '') return null;
+  const n = Number(String(v).replace(/^#/, '').trim());
+  return Number.isInteger(n) && n >= 1 ? n : null;
+}
+
+/** Ids de las filas de foto que ya son soporte de un gasto escrito en esta conversación. */
+function fotosUsadas(filas: FilaConversacion[]): Set<string> {
+  const s = new Set<string>();
+  for (const f of filas) {
+    if (f.traza?.ejecucion?.resultado !== 'ejecutada') continue;
+    for (const e of f.traza.ejecucion.escrituras ?? []) if (typeof e.foto === 'string') s.add(e.foto);
+  }
+  return s;
+}
+
+/**
+ * La foto `#n`: una fila entrante con imagen (escrita o reenviada) que no es ya soporte de otro gasto. Devuelve el id de
+ * la fila y el id del archivo en Meta, o el error para el modelo. Pura.
+ */
+export function fotoDe(filas: FilaConversacion[], v: unknown): { fila: string; mediaId: string } | { error: string } {
+  const n = numeroDeFila(v);
+  const f = n ? filas[n - 1] : undefined;
+  if (!f || f.direccion !== 'entrante' || f.media?.tipo !== 'imagen' || !f.media.id) {
+    return { error: `«${String(v)}» no es una foto de esta conversación. El soporte es el #n de una línea «[foto de …]».` };
+  }
+  if (fotosUsadas(filas).has(f.id)) return { error: `La foto #${n} ya es el soporte de otro gasto. Pregunta si hay otra foto.` };
+  return { fila: f.id, mediaId: f.media.id };
+}
+
+export interface GastoDeLaConversacion {
+  ref: string;
+  id: string;
+  monto: number;
+  negocio: string | null;
+  etiqueta: string;
+  soporte: boolean;
+}
+
+/** Los gastos que se registraron en esta conversación (G1, G2… en orden) y si ya tienen soporte. Pura. */
+export function gastosDeLaConversacion(filas: FilaConversacion[]): GastoDeLaConversacion[] {
+  const out: GastoDeLaConversacion[] = [];
+  for (const f of filas) {
+    const e = f.traza?.ejecucion;
+    if (e?.resultado !== 'ejecutada') continue;
+    for (const w of e.escrituras ?? []) {
+      if (w.tipo === 'gasto' && typeof w.id === 'string') {
+        out.push({ ref: `G${out.length + 1}`, id: w.id, monto: Number(w.monto), negocio: (w.negocio as string | null) ?? null, etiqueta: String(w.etiqueta ?? ''), soporte: w.soporte === true });
+      }
+      if (w.tipo === 'soporte' && typeof w.gasto === 'string') {
+        const g = out.find((x) => x.id === w.gasto);
+        if (g) g.soporte = true;
+      }
+    }
+  }
+  return out;
+}
+
+/** El último texto que escribió (o dictó, o puso de pie de foto) el equipo: es el `mensaje_original` del gasto. Pura. */
+function ultimoTextoDelEquipo(filas: FilaConversacion[]): string | null {
+  const f = [...filas].reverse().find((x) => x.direccion === 'entrante' && x.clase !== 'toque' && (x.texto ?? '').trim());
+  return f?.texto?.trim() ?? null;
+}
+
+const digitos = (s: unknown) => String(s ?? '').replace(/\D/g, '');
+
+/** ¿El teléfono está escrito por el equipo en la conversación? (solo dígitos; el valor tiene que existir). Pura. */
+export function telefonoEnLaConversacion(filas: FilaConversacion[], telefono: string): boolean {
+  const t = digitos(telefono);
+  if (t.length < 7) return false;
+  return filas.some((f) => f.direccion === 'entrante' && digitos(f.texto).includes(t.slice(-7)));
+}
+
+// ── Las herramientas ─────────────────────────────────────────────────────────
+
+export const LECTURAS_ONE: DeclaracionHerramienta[] = [
+  {
+    name: 'buscar_negocios',
+    description: 'Busca negocios abiertos por código («I1 26 5», también escrito «i1-26-5» o «I1265»), por nombre del negocio, de la empresa (el cliente) o del contacto. Devuelve hasta 5 con código, empresa, nombre, etapa y `coincidencia` (codigo, exacta o parecida). Solo lectura.',
+    parameters: { type: 'object', properties: { texto: { type: 'string', description: 'Lo que la persona dijo del negocio: el código, la empresa, el nombre o el contacto, sin palabras como «proyecto» u «obra».' } }, required: ['texto'] },
+  },
+  {
+    name: 'negocios_abiertos',
+    description: 'Los negocios abiertos, los más recientes primero: cuántos hay en total y por etapa, y la lista (código, empresa, nombre, etapa). Sirve para preguntar a qué negocio va algo y para «qué negocios tengo». Solo lectura.',
+    parameters: { type: 'object', properties: { etapa: { type: 'string', enum: ETAPAS, description: 'Opcional: solo los de esa etapa.' } } },
+  },
+  {
+    name: 'ver_negocio',
+    description: 'El detalle de un negocio por su código: empresa, nombre, contacto, etapa y, si la persona puede verlo, el valor y lo gastado este mes. Solo lectura.',
+    parameters: { type: 'object', properties: { codigo: { type: 'string' } }, required: ['codigo'] },
+  },
+  {
+    name: 'gastos_recientes',
+    description: 'Los gastos registrados en los últimos días (de todo el workspace o de un negocio): total, cuántos y los últimos 10 con fecha, monto, categoría, descripción, negocio y si tienen soporte. Para «cuánto gasté hoy», «mis egresos», «movimientos». Solo lectura.',
+    parameters: { type: 'object', properties: { dias: { type: 'number', description: '1 = hoy (por defecto 1, máximo 60).' }, codigo: { type: 'string', description: 'Opcional: el código del negocio.' } } },
+  },
+];
+
+const categorias = Object.keys(CATEGORIA_LABELS);
+
+const DATOS_PROPONER_ONE: Record<string, unknown> = {
+  monto: { type: 'number', description: 'gasto: el monto en pesos como número (47.600 → 47600; 27 mil → 27000).' },
+  negocio: { type: 'string', description: 'gasto / actividad: el código del negocio tal como lo devolvió una herramienta («I1 26 5»). Vacío si es gasto de empresa.' },
+  empresa: { type: 'boolean', description: 'gasto: true si es gasto de empresa (sin negocio).' },
+  categoria: { type: 'string', enum: categorias, description: 'gasto: la deduces del concepto; sin concepto, otros.' },
+  descripcion: { type: 'string', description: 'gasto: el concepto con las palabras de la persona, corto, sin el monto ni el negocio. Vacío si no dijo concepto.' },
+  soporte: { type: 'string', description: 'gasto: el #n de la foto del recibo, si llegó una. adjuntar_soporte: la foto.' },
+  gasto: { type: 'string', description: 'adjuntar_soporte: el gasto (G1, G2… del Estado, o el id que devolvió gastos_recientes).' },
+  tipo: { type: 'string', enum: [...TIPOS_ACTIVIDAD], description: 'actividad: qué fue.' },
+  texto: { type: 'string', description: 'actividad: lo que pasó, con las palabras de la persona.' },
+  nombre: { type: 'string', description: 'contacto_nuevo: el nombre completo.' },
+  telefono: { type: 'string', description: 'contacto_nuevo: el celular, solo si la persona lo escribió.' },
+  cargo: { type: 'string', description: 'contacto_nuevo: el cargo o el rol, si lo dijo.' },
+  decisor: { type: 'boolean', description: 'contacto_nuevo: true si es quien decide la compra (dueño, gerente, arquitecto a cargo).' },
+};
+
+type Resultado<T> = { ok: true; v: T } | { ok: false; error: string; candado: string };
+
+const sinPermiso = (que: string): { ok: false; error: string; candado: string } =>
+  ({ ok: false, error: `El rol de quien escribe no permite ${que} por aquí. Dilo en una línea (puede pedírselo a su administrador o hacerlo en la app).`, candado: 'rol' });
+
+export function dominioOne(puerto: PuertoOne, o: { rol: string; ahora?: () => number }): Dominio {
+  const permisos = permisosDe(o.rol);
+  const ahora = o.ahora ?? (() => Date.now());
+
+  async function negocioReal(codigo: unknown): Promise<Resultado<NegocioOne>> {
+    const c = String(codigo ?? '').trim();
+    if (!c) return { ok: false, error: 'Falta el negocio: el código tal como lo devolvió buscar_negocios o negocios_abiertos.', candado: 'sin_negocio' };
+    const n = await puerto.negocioPorCodigo(c);
+    if (n === 'error') return { ok: false, error: 'No pude revisar el negocio ahora. Dilo así, sin decir que no existe.', candado: 'negocio_no_leido' };
+    if (!n) return { ok: false, error: `No hay un negocio abierto con código «${c}». Búscalo con buscar_negocios (por empresa o nombre) y usa el código que devuelva.`, candado: 'negocio_inexistente' };
+    return { ok: true, v: n };
+  }
+
+  async function leer(nombre: string, args: Record<string, unknown>): Promise<ResultadoHerramienta> {
+    if (nombre === 'buscar_negocios') {
+      if (!permisos.negocios) return { ok: false, datos: null, error: sinPermiso('consultar negocios').error };
+      const texto = String(args.texto ?? '').trim();
+      if (!texto) return { ok: false, datos: null, error: 'Falta el texto a buscar.' };
+      const r = await puerto.buscarNegocios(texto, 5);
+      if (r === 'error') return { ok: false, datos: null, error: 'No pude buscar ahora. Di que no pudiste revisar, no que no existe.' };
+      return { ok: true, datos: { negocios: r.map((n) => negocioParaModelo(n, permisos.plata)), ...(r.length ? {} : { nota: 'Ninguno abierto con eso.' }) }, privado: { ids: r.map((n) => n.id) } };
+    }
+    if (nombre === 'negocios_abiertos') {
+      if (!permisos.negocios) return { ok: false, datos: null, error: sinPermiso('consultar negocios').error };
+      const etapa = ETAPAS.includes(String(args.etapa ?? '')) ? String(args.etapa) : null;
+      const r = await puerto.negociosAbiertos(etapa, 10);
+      if (r === 'error') return { ok: false, datos: null, error: 'No pude leer los negocios ahora. Di que no pudiste revisar.' };
+      return { ok: true, datos: { total: r.total, por_etapa: r.porEtapa, negocios: r.negocios.map((n) => negocioParaModelo(n, permisos.plata)), ...(r.total > r.negocios.length ? { nota: `Se muestran ${r.negocios.length} de ${r.total}.` } : {}) } };
+    }
+    if (nombre === 'ver_negocio') {
+      if (!permisos.negocios) return { ok: false, datos: null, error: sinPermiso('consultar negocios').error };
+      const n = await negocioReal(args.codigo);
+      if (!n.ok) return { ok: false, datos: null, error: n.error };
+      let gastado: unknown;
+      if (permisos.plata) {
+        const inicioMes = new Date(ahora());
+        const desde = new Date(Date.UTC(inicioMes.getUTCFullYear(), inicioMes.getUTCMonth(), 1, 5)).toISOString();
+        const g = await puerto.gastosRecientes({ desdeIso: desde, negocioId: n.v.id, limite: 1 });
+        if (g !== 'error') gastado = { este_mes: formatCOP(g.total), gastos: g.cantidad };
+      }
+      return { ok: true, datos: { ...negocioParaModelo(n.v, permisos.plata), ...(gastado ? { gastado } : {}) }, sobre: n.v.codigo };
+    }
+    if (nombre === 'gastos_recientes') {
+      if (!permisos.gastos) return { ok: false, datos: null, error: sinPermiso('consultar los gastos').error };
+      const dias = Math.min(60, Math.max(1, Math.round(Number(args.dias) || 1)));
+      let negocioId: string | null = null;
+      if (args.codigo) {
+        const n = await negocioReal(args.codigo);
+        if (!n.ok) return { ok: false, datos: null, error: n.error };
+        negocioId = n.v.id;
+      }
+      // «Hoy» es desde la medianoche de Bogotá (UTC-5) de hace `dias - 1` días.
+      const bogota = new Date(ahora() - 5 * 3600 * 1000);
+      const desde = new Date(Date.UTC(bogota.getUTCFullYear(), bogota.getUTCMonth(), bogota.getUTCDate() - (dias - 1), 5)).toISOString();
+      const r = await puerto.gastosRecientes({ desdeIso: desde, negocioId, limite: 10 });
+      if (r === 'error') return { ok: false, datos: null, error: 'No pude leer los gastos ahora. Di que no pudiste revisar.' };
+      return {
+        ok: true,
+        datos: {
+          desde: desde.slice(0, 10), total: formatCOP(r.total), cantidad: r.cantidad,
+          gastos: r.gastos.map((g) => ({ id: g.id, fecha: g.fecha, monto: formatCOP(g.monto), categoria: CATEGORIA_LABELS[g.categoria] ?? g.categoria, descripcion: g.descripcion, negocio: g.negocio ?? 'empresa', soporte: g.soporte })),
+        },
+      };
+    }
+    return { ok: false, datos: null, error: `No existe la herramienta «${nombre}».` };
+  }
+
+  async function proponerGasto(d: Record<string, unknown>, ctx: ContextoDominio): Promise<Resultado<Propuesta>> {
+    // Un número (o solo dígitos): leer «47.600» o «27 mil» es del modelo (glo.monto), no del código.
+    const monto = typeof d.monto === 'number' ? d.monto : /^\d+$/.test(String(d.monto ?? '').trim()) ? Number(d.monto) : NaN;
+    if (!Number.isFinite(monto) || monto <= 0) return { ok: false, error: 'Falta el monto (un número mayor que cero). Pregúntalo si la persona no lo dijo.', candado: 'monto' };
+    const categoria = String(d.categoria ?? '');
+    if (!categorias.includes(categoria)) return { ok: false, error: `Categoría inválida. Usa una de: ${categorias.join(', ')}.`, candado: 'categoria' };
+    const codigo = String(d.negocio ?? '').trim();
+    const deEmpresa = d.empresa === true;
+    if (!codigo && !deEmpresa) return { ok: false, error: 'Falta el destino: pregunta a qué negocio va (código, empresa o nombre) o si es gasto de empresa. No lo supongas.', candado: 'sin_destino' };
+    if (codigo && deEmpresa) return { ok: false, error: 'Un gasto va a un negocio O es de empresa, no las dos. Si no está claro, pregunta.', candado: 'destino_doble' };
+    let negocio: NegocioOne | null = null;
+    if (codigo) {
+      const n = await negocioReal(codigo);
+      if (!n.ok) return n;
+      negocio = n.v;
+      const viaje = await puerto.serviciosPorPagar(negocio.id);
+      if (viaje === true) return { ok: false, error: `${nombreNegocio(negocio)} es un viaje con servicios por pagar: el pago a un proveedor del viaje se registra en la app, en los servicios del viaje. Dilo así.`, candado: 'servicio_viaje' };
+    }
+    let foto: { fila: string; mediaId: string } | null = null;
+    if (d.soporte !== undefined && d.soporte !== null && String(d.soporte).trim() !== '') {
+      const f = fotoDe(ctx.conversacion, d.soporte);
+      if ('error' in f) return { ok: false, error: f.error, candado: 'foto' };
+      foto = f;
+    }
+    const descripcion = String(d.descripcion ?? '').trim() || null;
+    const cc = await puerto.centroCostos({ negocioId: negocio?.id ?? null, descripcion });
+    const etiquetaCentro = cc.centro === 'directa_negocio' ? 'Negocio' : cc.centro === 'distribuible_one' ? 'ONE' : cc.centro === 'distribuible_clarity' ? 'Clarity' : cc.centro ? 'Mixto' : null;
+    const destino = negocio ? `📁 ${nombreNegocio(negocio)}` : '🏢 Gasto de empresa (sin negocio)';
+    const resumen = [
+      `💰 Gasto de ${formatCOP(monto)} · ${CATEGORIA_LABELS[categoria] ?? categoria}`,
+      destino,
+      ...(descripcion ? [`📝 ${corto(descripcion, 200)}`] : []),
+      foto ? `📷 Con la foto #${numeroDeFila(d.soporte)} como soporte` : '📷 Sin soporte todavía',
+      ...(etiquetaCentro ? [`🏷️ Centro: ${etiquetaCentro}`] : []),
+      '¿Lo registro?',
+    ].join('\n');
+    return {
+      ok: true,
+      v: {
+        accion: 'gasto',
+        datos: {
+          monto, categoria, descripcion, negocio_id: negocio?.id ?? null, negocio: negocio?.codigo ?? null,
+          etiqueta: negocio ? nombreNegocio(negocio) : 'Gasto de empresa', foto: foto?.fila ?? null, media_id: foto?.mediaId ?? null,
+          centro: cc.centro, origen: cc.origen, mensaje_original: ultimoTextoDelEquipo(ctx.conversacion),
+        },
+        resumen, ...(negocio ? { sobre: negocio.codigo } : {}), si: 'Registrar', no: 'No',
+      },
+    };
+  }
+
+  async function proponerSoporte(d: Record<string, unknown>, ctx: ContextoDominio): Promise<Resultado<Propuesta>> {
+    const f = fotoDe(ctx.conversacion, d.soporte);
+    if ('error' in f) return { ok: false, error: f.error, candado: 'foto' };
+    const ref = String(d.gasto ?? '').trim();
+    const deAqui = gastosDeLaConversacion(ctx.conversacion);
+    let g: { id: string; monto: number; etiqueta: string; soporte: boolean } | undefined = deAqui.find((x) => x.ref.toLowerCase() === ref.toLowerCase());
+    if (!g && /^[0-9a-f-]{36}$/i.test(ref)) {
+      const leido = await puerto.gasto(ref);
+      if (leido === 'error') return { ok: false, error: 'No pude revisar ese gasto ahora.', candado: 'gasto_no_leido' };
+      if (leido) g = { id: leido.id, monto: leido.monto, etiqueta: leido.negocio ?? 'Gasto de empresa', soporte: leido.soporte };
+    }
+    if (!g) {
+      const lista = deAqui.map((x) => `${x.ref} (${formatCOP(x.monto)}, ${x.negocio ?? 'empresa'})`).join(', ');
+      return { ok: false, error: `No sé a qué gasto va la foto. ${lista ? `Los de esta conversación: ${lista}.` : 'En esta conversación no hay gastos registrados: pregunta de qué gasto es.'}`, candado: 'gasto_desconocido' };
+    }
+    if (g.soporte) return { ok: false, error: 'Ese gasto ya tiene soporte. Si la persona quiere cambiarlo, es en la app.', candado: 'ya_tiene_soporte' };
+    return {
+      ok: true,
+      v: {
+        accion: 'adjuntar_soporte',
+        datos: { gasto_id: g.id, foto: f.fila, media_id: f.mediaId, etiqueta: g.etiqueta, monto: g.monto },
+        resumen: `📷 La foto #${numeroDeFila(d.soporte)} como soporte del gasto de ${formatCOP(g.monto)} · ${g.etiqueta}\n¿La adjunto?`,
+        si: 'Adjuntar', no: 'No',
+      },
+    };
+  }
+
+  async function proponerActividad(d: Record<string, unknown>): Promise<Resultado<Propuesta>> {
+    const texto = String(d.texto ?? '').trim();
+    if (!texto) return { ok: false, error: 'Falta el texto de la actividad (lo que pasó, con las palabras de la persona).', candado: 'sin_texto' };
+    const tipo = (TIPOS_ACTIVIDAD as readonly string[]).includes(String(d.tipo)) ? String(d.tipo) as TipoActividad : 'nota';
+    const n = await negocioReal(d.negocio);
+    if (!n.ok) return n;
+    return {
+      ok: true,
+      v: {
+        accion: 'actividad',
+        datos: { negocio_id: n.v.id, negocio: n.v.codigo, etiqueta: nombreNegocio(n.v), tipo, texto },
+        resumen: `${EMOJI_ACTIVIDAD[tipo]} Actividad en ${nombreNegocio(n.v)}:\n«${corto(texto, 400)}»\n¿La registro?`,
+        sobre: n.v.codigo, si: 'Registrar', no: 'No',
+      },
+    };
+  }
+
+  async function proponerContacto(d: Record<string, unknown>, ctx: ContextoDominio): Promise<Resultado<Propuesta>> {
+    const nombre = String(d.nombre ?? '').trim();
+    if (!nombre) return { ok: false, error: 'Falta el nombre del contacto.', candado: 'sin_nombre' };
+    const telefono = digitos(d.telefono) || null;
+    if (telefono) {
+      if (!telefonoEnLaConversacion(ctx.conversacion, telefono)) return { ok: false, error: 'Ese teléfono no está escrito en la conversación: usa el que escribió la persona, o ninguno.', candado: 'telefono_sin_respaldo' };
+      const dup = await puerto.contactoDuplicado(telefono);
+      if (dup === 'error') return { ok: false, error: 'No pude revisar si ese teléfono ya existe. No lo crees: dilo así.', candado: 'duplicado_no_leido' };
+      if (dup) return { ok: false, error: `Ese teléfono ya es del contacto ${dup}. No se crea otro: dilo así (si son dos personas distintas, que lo registre en la app).`, candado: 'contacto_duplicado' };
+    }
+    const cargo = String(d.cargo ?? '').trim() || null;
+    return {
+      ok: true,
+      v: {
+        accion: 'contacto_nuevo',
+        datos: { nombre, telefono, cargo, decisor: d.decisor === true },
+        resumen: `👤 Contacto nuevo: ${[nombre, telefono, cargo].filter(Boolean).join(' · ')}\n¿Lo creo?`,
+        si: 'Crear', no: 'No',
+      },
+    };
+  }
+
+  async function proponer(accion: string, datos: Record<string, unknown>, ctx: ContextoDominio): Promise<{ ok: true; propuesta: Propuesta } | { ok: false; error: string; candado: string }> {
+    if (accion === 'contacto_nuevo' ? !permisos.contactos : !permisos.escribir) {
+      return sinPermiso(accion === 'contacto_nuevo' ? 'crear contactos' : 'registrar');
+    }
+    const r = accion === 'gasto' ? await proponerGasto(datos, ctx)
+      : accion === 'adjuntar_soporte' ? await proponerSoporte(datos, ctx)
+        : accion === 'actividad' ? await proponerActividad(datos)
+          : accion === 'contacto_nuevo' ? await proponerContacto(datos, ctx)
+            : { ok: false as const, error: `Acción desconocida. Usa una de: ${ACCIONES_ONE.join(', ')}.`, candado: 'accion_desconocida' };
+    return r.ok ? { ok: true, propuesta: r.v } : r;
+  }
+
+  async function ejecutar(p: Propuesta): Promise<Hechos> {
+    const d = p.datos;
+    if (p.accion === 'gasto') {
+      const r = await puerto.registrarGasto({
+        monto: Number(d.monto), categoria: String(d.categoria), descripcion: (d.descripcion as string | null) ?? null,
+        mensajeOriginal: (d.mensaje_original as string | null) ?? null, negocioId: (d.negocio_id as string | null) ?? null,
+        centro: (d.centro as string | null) ?? null, origen: (d.origen as string | null) ?? null, mediaId: (d.media_id as string | null) ?? null,
+      });
+      const lineas = [
+        `✅ Gasto de ${formatCOP(Number(d.monto))} registrado · ${String(d.etiqueta)}`,
+        r.soporte === 'guardado' ? '📷 Con su soporte.' : r.soporte === 'fallo' ? '⚠️ No pude guardar la foto: súbela después desde la app.' : '📷 Si tienes la foto del soporte, mándamela.',
+      ];
+      return { lineas, escrituras: [{ tipo: 'gasto', id: r.id, monto: Number(d.monto), negocio: d.negocio ?? null, etiqueta: d.etiqueta, soporte: r.soporte === 'guardado', ...(r.soporte === 'guardado' ? { foto: d.foto } : {}) }] };
+    }
+    if (p.accion === 'adjuntar_soporte') {
+      const ok = await puerto.adjuntarSoporte(String(d.gasto_id), String(d.media_id));
+      if (!ok) throw new Error('no se pudo guardar la foto');
+      return { lineas: [`📷 Soporte guardado en el gasto de ${formatCOP(Number(d.monto))} · ${String(d.etiqueta)}.`], escrituras: [{ tipo: 'soporte', gasto: d.gasto_id, foto: d.foto }] };
+    }
+    if (p.accion === 'actividad') {
+      await puerto.registrarActividad({ negocioId: String(d.negocio_id), tipo: d.tipo as TipoActividad, texto: String(d.texto) });
+      return { lineas: [`✅ ${EMOJI_ACTIVIDAD[d.tipo as TipoActividad] ?? '📝'} Actividad registrada en ${String(d.etiqueta)}.`], escrituras: [{ tipo: 'actividad', negocio: d.negocio, texto: d.texto }] };
+    }
+    if (p.accion === 'contacto_nuevo') {
+      const r = await puerto.crearContacto({ nombre: String(d.nombre), telefono: (d.telefono as string | null) ?? null, cargo: (d.cargo as string | null) ?? null, decisor: d.decisor === true });
+      return { lineas: [`✅ Contacto creado: ${String(d.nombre)}.`, 'Completa sus datos fiscales en la app para poder facturarle.'], escrituras: [{ tipo: 'contacto', id: r.id, nombre: d.nombre, telefono: d.telefono ?? null }] };
+    }
+    throw new Error(`acción desconocida: ${p.accion}`);
+  }
+
+  return {
+    bot: BOT_ONE,
+    reenvios: 'mensaje',
+    lecturas: LECTURAS_ONE,
+    acciones: ACCIONES_ONE,
+    datosProponer: DATOS_PROPONER_ONE,
+    leer: (n, a) => leer(n, a),
+    proponer,
+    ejecutar: (p) => ejecutar(p),
+    estado(ctx) {
+      const gastos = gastosDeLaConversacion(ctx.conversacion).slice(-5);
+      const p = permisos;
+      const puede = [p.escribir ? 'registrar gastos y actividades' : null, p.contactos ? 'crear contactos' : null, p.negocios ? 'consultar negocios' : null, p.gastos ? 'consultar gastos' : null].filter(Boolean);
+      return [
+        `Su rol permite: ${puede.length ? puede.join(', ') : 'nada por este chat'}.`,
+        gastos.length
+          ? `Gastos registrados en esta conversación: ${gastos.map((g) => `${g.ref} · ${formatCOP(g.monto)} · ${g.etiqueta} · ${g.soporte ? 'con soporte' : 'sin soporte'}`).join(' | ')}.`
+          : 'Gastos registrados en esta conversación: ninguno.',
+      ];
+    },
+  };
+}

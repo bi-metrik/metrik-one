@@ -47,10 +47,11 @@ export class AlmacenMemoria implements Almacen {
   candados = new Map<string, number>();
   constructor(public reloj: Reloj) {}
 
-  entrante(p: { workspaceId: string; phone: string; clase: FilaConversacion['clase']; texto: string | null; toqueId?: string; wamid?: string }): FilaConversacion {
+  entrante(p: { workspaceId: string; phone: string; clase: FilaConversacion['clase']; texto: string | null; toqueId?: string; wamid?: string; media?: FilaConversacion['media'] }): FilaConversacion {
     const f: FilaConversacion = {
       id: nuevoId(), workspace_id: p.workspaceId, phone: p.phone, direccion: 'entrante', clase: p.clase, texto: p.texto,
       toque_id: p.toqueId ?? null, wa_message_id: p.wamid ?? `wamid.in.${secuencia}`, turno_id: null, traza: null,
+      ...(p.media ? { media: p.media } : {}),
       created_at: new Date(this.reloj.ahora()).toISOString(),
     };
     this.filas.push(f);

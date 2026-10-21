@@ -28,6 +28,8 @@ export interface FilaConversacion {
   toque_id?: string | null;
   contexto_wamid?: string | null;
   wa_message_id?: string | null;
+  /** El archivo que llegó con el mensaje (`{ tipo: 'imagen', id }` = el id de Meta para bajarlo). Solo entrantes. */
+  media?: { tipo: string; id: string } | null;
   turno_id?: string | null;
   traza?: Traza | null;
   created_at: string;
@@ -198,6 +200,11 @@ export interface ContextoDominio {
 export interface Dominio {
   /** Nombre del bot (`bandeja-solicitudes`). */
   bot: string;
+  /**
+   * Qué es un reenvío del equipo. `tanda` (por defecto, la bandeja): dato del cliente que se junta sin modelo hasta que el
+   * comercial pide el resumen. `mensaje` (ONE): entra al turno del modelo como cualquier otro mensaje (marcado como reenvío).
+   */
+  reenvios?: 'tanda' | 'mensaje';
   /** Las herramientas de lectura del dominio. */
   lecturas: DeclaracionHerramienta[];
   /** Las acciones de `proponer`. */

@@ -19,7 +19,7 @@
 //   de razonamiento de relleno viaja cuando ese historial va a Gemini y la traza dice quién contestó.
 // ============================================================
 
-import { fetchModelo, haikuActivo } from '../llm-anthropic.ts';
+import { fetchModelo, haikuActivo, MODELO_HAIKU } from '../llm-anthropic.ts';
 import type { ConfigModelo } from './config.ts';
 import type { Mensaje, Modelo, Parte, PedidoModelo, RespuestaModelo, UsoLlamado } from './tipos.ts';
 
@@ -74,8 +74,10 @@ async function intentar(p: PedidoModelo, c: ConfigModelo, timeoutMs: number, o: 
   // El respaldo va directo a Gemini (el `fetch` de siempre, leído al llamar); el principal, por `fetchModelo`.
   const f = esRespaldo ? (o.fetchRespaldo ?? o.fetch ?? ((u: RequestInfo | URL, i?: RequestInit) => globalThis.fetch(u, i))) : (o.fetch ?? fetchModelo);
   const t0 = ahora();
+  // Un principal que va a Haiku y falla (529, corte) queda en la traza como Haiku, no con el nombre de Gemini del pedido.
+  const deQuien = !esRespaldo && !o.fetch && (o.haiku ?? haikuActivo()) ? MODELO_HAIKU : c.modelo;
   const uso = (ok: boolean, extra: Partial<UsoLlamado> = {}): UsoLlamado => ({
-    modelo: c.modelo, entrada: 0, salida: 0, razonamiento: 0, cache: 0, ms: Math.round(ahora() - t0), ok, ...extra,
+    modelo: deQuien, entrada: 0, salida: 0, razonamiento: 0, cache: 0, ms: Math.round(ahora() - t0), ok, ...extra,
   });
   try {
     const res = await f(`${URL_BASE}/${c.modelo}:generateContent`, {

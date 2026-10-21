@@ -133,7 +133,8 @@ export async function unTurno(d: DepsCola): Promise<boolean> {
     return true;
   }
 
-  const delEquipo = pend.filter((f) => f.clase !== 'reenvio');
+  // En la bandeja los reenvíos son la tanda (sin modelo); en un dominio que los toma como mensajes, van al turno.
+  const delEquipo = d.dominio.reenvios === 'mensaje' ? pend : pend.filter((f) => f.clase !== 'reenvio');
   // 2) Solo reenvíos: a la tanda, con el acuse al primero de la ráfaga (un candado evita dos acuses a la vez).
   if (!delEquipo.length) {
     const abre = abreRafaga(filas, pend[0]);
