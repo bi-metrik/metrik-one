@@ -22,7 +22,7 @@ import {
   textoJuntoATarjeta,
   versionAceptada,
 } from './condiciones'
-import { CLAUSULA_COBRO_APROBADA_PARA_PRODUCCION, COBRO_TRAS_PRUEBA } from './condiciones-cobro'
+import { CLAUSULA_COBRO_APROBADA_PARA_PRODUCCION, COBRO_TRAS_PRUEBA, correoEnListaDePruebaCobro } from './condiciones-cobro'
 import { LICENCIAS_INCLUIDAS, LIMITE_CONSULTAS_MES_POR_DEFECTO, PRECIO_MENSUAL_VALIDA } from './plan'
 import { huellaAceptacion } from './registro-servidor'
 import { PRUEBA_POR_DEFECTO } from './llave'
@@ -256,9 +256,60 @@ describe('cuándo rigen las Condiciones con cobro', () => {
     expect(condicionesVigentes({ ...COBRO, VERCEL_ENV: 'production' }, true)).toBe(VIGENTES_SIN_COBRO)
   })
 
+  it('en producción, con el correo de la SESIÓN en la lista de pruebas: v2.1; fuera de ella o sin sesión: v1.0', () => {
+    const prod = { ...COBRO, VERCEL_ENV: 'production', VALIDA_COBRO_CORREOS_PRUEBA: '@metrik.com.co' }
+    expect(condicionesVigentes(prod, true, 'mauricio.moreno@metrik.com.co')).toBe(VIGENTES_CON_COBRO)
+    expect(condicionesVigentes(prod, true, 'ana@acme.co')).toBe(VIGENTES_SIN_COBRO)
+    expect(condicionesVigentes(prod, true, null)).toBe(VIGENTES_SIN_COBRO)
+    expect(condicionesVigentes(prod, true)).toBe(VIGENTES_SIN_COBRO)
+    // La lista no se salta lo demás: sin Términos, sin la llave del cobro o sin ePayco, v1.0.
+    expect(condicionesVigentes(prod, false, 'mauricio.moreno@metrik.com.co')).toBe(VIGENTES_SIN_COBRO)
+    expect(condicionesVigentes({ ...prod, VALIDA_COBRO_TRAS_PRUEBA: '0' }, true, 'mauricio.moreno@metrik.com.co')).toBe(VIGENTES_SIN_COBRO)
+    expect(condicionesVigentes({ ...prod, EPAYCO_HABILITADO: '0' }, true, 'mauricio.moreno@metrik.com.co')).toBe(VIGENTES_SIN_COBRO)
+  })
+
   it('la regla de ePayco es la misma del adaptador', () => {
     for (const env of [{}, EPAYCO, { ...EPAYCO, EPAYCO_HABILITADO: '0' }, { EPAYCO_HABILITADO: '1' }, { ...EPAYCO, EPAYCO_PUBLIC_KEY_METRIK: '' }]) {
       expect(epaycoPuedeTokenizar(env)).toBe(epaycoHabilitado(env) && llavePublicaEpayco(env) !== null)
     }
+  })
+})
+
+describe('lista de correos de prueba del cobro (VALIDA_COBRO_CORREOS_PRUEBA)', () => {
+  const env = (v: string | undefined) => ({ VALIDA_COBRO_CORREOS_PRUEBA: v })
+  const LISTA = env(' Diana@AFI.com.co , @metrik.com.co,,@dimpro.co ')
+
+  it('correo exacto', () => {
+    expect(correoEnListaDePruebaCobro('diana@afi.com.co', LISTA)).toBe(true)
+    expect(correoEnListaDePruebaCobro('otra@afi.com.co', LISTA)).toBe(false)
+  })
+
+  it('dominio con arroba adelante: cualquier correo de ese dominio, y solo de ese', () => {
+    expect(correoEnListaDePruebaCobro('mauricio.moreno@metrik.com.co', LISTA)).toBe(true)
+    expect(correoEnListaDePruebaCobro('compras@dimpro.co', LISTA)).toBe(true)
+    expect(correoEnListaDePruebaCobro('ana@falso-metrik.com.co', LISTA)).toBe(false)
+    expect(correoEnListaDePruebaCobro('ana@sub.metrik.com.co', LISTA)).toBe(false)
+    expect(correoEnListaDePruebaCobro('ana@metrik.com.co.evil', LISTA)).toBe(false)
+  })
+
+  it('mayúsculas y espacios no cuentan, ni en la lista ni en el correo', () => {
+    expect(correoEnListaDePruebaCobro('  DIANA@afi.COM.CO ', LISTA)).toBe(true)
+    expect(correoEnListaDePruebaCobro('Mauricio@METRIK.com.co', LISTA)).toBe(true)
+  })
+
+  it('vacía o ausente: nadie', () => {
+    for (const v of [undefined, '', ' ', ',,', ' , ']) {
+      expect(correoEnListaDePruebaCobro('mauricio.moreno@metrik.com.co', env(v))).toBe(false)
+    }
+  })
+
+  it('correo no listado, vacío o mal formado: no', () => {
+    for (const c of ['ana@acme.co', '', null, undefined, '@metrik.com.co', 'metrik.com.co', 'a@b@metrik.com.co', 'ana@']) {
+      expect(correoEnListaDePruebaCobro(c, LISTA)).toBe(false)
+    }
+  })
+
+  it('una entrada sin arroba no habilita a nadie (no se confunde un dominio con un correo mal escrito)', () => {
+    expect(correoEnListaDePruebaCobro('ana@metrik.com.co', env('metrik.com.co'))).toBe(false)
   })
 })
