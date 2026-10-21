@@ -2,9 +2,10 @@
 
 ## Project memories
 
-- ⚠️⚠️ [Suscripciones multiproducto (#1191)](project_suscripciones_multiproducto.md) — 100000-170000 aplicadas; eControl = documento del titular (19-oct); 7b ignora activo
-- ⚠️⚠️ [Alta autogestionada de Valida](project_valida_alta_autogestionada.md) — pila #1104→#1107→#1110; 3 migraciones SIN aplicar (…100000, …153000, …203000); Términos en el registro, canal 'registro'; +…234500 cobro al confirmar (texto v2.1 espera a Emilio); +…180000 exime del gate de carpeta (SIN aplicar)
+- ⚠️⚠️ [Gemini → Haiku 5.5 (fetchModelo)](project_migracion_haiku_55.md) — #1217 sin mergear; respaldo Gemini; VE apagado; documentos/actas en Gemini por defecto
 - ⚠️⚠️ [Tarifas extraídas en la cotización](project_tarifas_en_cotizacion.md) — 20261019233000 SIN aplicar; elegir = casilla 1 'tarifario' + confirmar de siempre
+- ⚠️⚠️ [Suscripciones multiproducto (#1191)](project_suscripciones_multiproducto.md) — 10 migraciones aplicadas (180000 sin ver); backfill SIN correr; cobro por lista de correos
+- ⚠️ [Alta autogestionada de Valida](project_valida_alta_autogestionada.md) — pila #1104→#1169 dentro de #1191; sus migraciones YA aplicadas (20-oct); canal 'registro'
 - ⚠️⚠️ [Motor v13 de extracción en ONE](project_motor_v13.md) — 20261019203000 SIN aplicar; directo a Anthropic con ANTHROPIC_API_KEY; TRM sin fuente
 - ⚠️⚠️ [Fichas, temporadas e IVA del proveedor](project_fichas_temporadas_iva.md) — migración 20261019130000 APLICADA (19-oct, renombrada); IVA por línea al leer; subtotal sin IVA
 - ⚠️ [Subir tarifarios importados (script)](project_subir_tarifarios_importados.md) — sin correr en prod; nombres en disco saneados ≠ origen_ref

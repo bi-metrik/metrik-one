@@ -1,6 +1,6 @@
 ---
 name: suscripciones-multiproducto
-description: PR #1191 (apilado sobre #1169). Clientes de Valida/Sustenta/Business salen del CRM de metrik a suscripciones_producto; el motor de cobro cobra por el «ancla» (negocio O suscripción). 100000/100100/100200 APLICADAS (16-oct); 20261016170000 (suscripción nace en prueba) SIN aplicar y va antes de probar en preview. Parche Aliaddo aparte.
+description: PR #1191 (contra main, trae la pila #1104→#1169). Clientes de Valida salen del CRM a suscripciones_producto; motor de cobro por «ancla». Las 10 migraciones del PR están en prod (20-oct, por objetos; 20261015180000 sin ver); backfill de suscripción en prueba SIN correr. PR apilado de lista de correos de prueba para el cobro.
 metadata:
   type: project
 ---
@@ -96,3 +96,15 @@ Relacionado: [[valida-alta-autogestionada]], [[secop-autogestion-registro]].
   en ePayco NO se borra por SQL (`eliminarTarjetasEpayco`); `cobro_token_borrado_at` solo tras su respuesta.
 - El paso 7b cobra todo plan con `pasarela='epayco'` sin mirar `activo` ni el entorno del registro; lo que
   frena es `pagadorConTarjeta` (contrato activo/pausado + suscripción viva con ref) o el cobro anulado.
+
+## 2026-10-20: estado real en prod y lista de correos de prueba
+- Verificado por objetos (PostgREST GET; el subagente no tiene MCP ni ledger): las 10 migraciones del PR
+  (20261012100000 → 20261016170000) están en prod. 20261015180000 solo cambia el cuerpo de un trigger y
+  no se ve por PostgREST: confirmarla en el ledger. El cuerpo del PR decía «SIN aplicar»: corregido.
+- Backfill `backfill-suscripcion-en-prueba.sql` NO corrido: 3 candidatos (cda-pruebas-metrik-2,
+  cda-pruebas-metrik-check, test-de-pruebas). Los 4 cda-pruebas-futuras* ya están cancelados.
+- Política v1.7 vigente desde el 21-oct (metrik-valida #65, fuera de borrador). `politica.ts` no lleva fecha.
+- Cobro con tarjeta en prod para una lista de correos (`VALIDA_COBRO_CORREOS_PRUEBA`) en PR apilado sobre
+  #1191: la decisión es por el correo de la SESIÓN, nunca del cuerpo. Ver [[valida-cobro-correos-prueba]].
+- Conflicto del #1191 con main solo en MEMORY.md (línea de Haiku de #1217): se resuelve poniendo esa línea
+  igual que main en la misma posición; el clasificador niega `git merge` en la rama del PR.
