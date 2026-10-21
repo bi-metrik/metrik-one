@@ -976,9 +976,14 @@ export interface MonedaDeTarifa {
   decision: DecisionMoneda | null
   /**
    * La lectura la escribió una persona en el ingreso manual, no salió de un pantallazo. Solo
-   * cambia lo que se dice del origen («ingresada a mano»); la moneda y `asumida` no cambian.
+   * cambia lo que se dice del origen («escrita a mano»); la moneda y `asumida` no cambian.
    */
   manual?: boolean
+  /**
+   * La lectura salió de las tarifas del tarifario del proveedor (`origen: 'tarifario'`). Como
+   * `manual`, solo cambia lo que se dice del origen («del tarifario del proveedor»).
+   */
+  tarifario?: boolean
 }
 
 /**
@@ -996,8 +1001,10 @@ export function monedaDeTarifa(tarifa: TarifaPax): MonedaDeTarifa {
   const decision = tarifa.moneda ?? null
   if (decision) return { moneda: decision.valor, asumida: false, origen: 'persona', leida, decision }
   // Solo para decir el origen. Con habitaciones (R8) la lectura vive en la habitación.
-  const manual = [...lecturas, ...(tarifa.habitaciones ?? []).map(h => h.lectura)].some(l => l?.origen === 'manual')
-  const deMano = manual ? { manual } : {}
+  const todas = [...lecturas, ...(tarifa.habitaciones ?? []).map(h => h.lectura)]
+  const manual = todas.some(l => l?.origen === 'manual')
+  const tarifario = todas.some(l => l?.origen === 'tarifario')
+  const deMano = { ...(manual ? { manual } : {}), ...(tarifario ? { tarifario } : {}) }
   if (leida) return { moneda: leida, asumida: false, origen: 'captura', leida, decision: null, ...deMano }
   if (lecturas.length > 0) return { moneda: 'COP', asumida: true, origen: 'supuesta', leida: null, decision: null, ...deMano }
   return { moneda: 'COP', asumida: false, origen: 'sin_lectura', leida: null, decision: null, ...deMano }
@@ -1010,7 +1017,22 @@ export function monedaDeTarifa(tarifa: TarifaPax): MonedaDeTarifa {
 export function origenDeMoneda(m: MonedaDeTarifa): string | null {
   if (m.asumida) return null
   if (m.origen === 'persona') return 'la elegiste tú'
-  return m.manual ? 'ingresada a mano' : 'leída del pantallazo'
+  return origenDeLecturas(m)
+}
+
+/**
+ * De dónde salió lo leído de la línea, dicho en llano (brief del 2026-10-21, punto 2): una línea
+ * escrita a mano o costeada con el tarifario del proveedor NUNCA dice «del pantallazo». Gana el
+ * tarifario: elegir una tarifa reemplaza la casilla 1 entera.
+ */
+export function origenDeLecturas(m: Pick<MonedaDeTarifa, 'manual' | 'tarifario'>): string {
+  return m.tarifario ? 'del tarifario del proveedor' : m.manual ? 'escrita a mano' : 'leída del pantallazo'
+}
+
+/** De dónde salió una lectura: `pantallazo` cuando no dice otra cosa (las de siempre). */
+export type FuenteDeLectura = 'pantallazo' | 'manual' | 'tarifario'
+export function fuenteDeLectura(l: Pick<LecturaCasilla, 'origen'> | null | undefined): FuenteDeLectura {
+  return l?.origen === 'manual' ? 'manual' : l?.origen === 'tarifario' ? 'tarifario' : 'pantallazo'
 }
 
 /**

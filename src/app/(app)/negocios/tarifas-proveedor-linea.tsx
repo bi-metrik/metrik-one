@@ -259,8 +259,16 @@ function Eleccion({ itemId, vista, costoActual, ocupado, onCambio }: { itemId: s
   const c = vista.composicion
   const cal = vista.calendario
   const [sinFiltro, setSinFiltro] = useState(false)
+  // Reemplazar un costo que ya existe (modo «Cambiar el costo», brief del 2026-10-21, punto 1): la
+  // fila de hoy se SEÑALA («La que usas hoy») pero no viene marcada. Marcada, elegir otra la sumaba
+  // y salía «Viajan 2 adultos y eligiste tarifa para 4: quita una»; ahora cambiar es un clic y el
+  // botón. Sin costo confirmado (p. ej. faltó la tasa), la elección de antes sí vuelve marcada.
+  const reemplaza = costoActual !== null && costoActual > 0
+  const actuales = new Set((vista.elegida?.filas ?? []).map((f) => f.indice_fila))
   const [marcadas, setMarcadas] = useState<Record<number, FilaElegida>>(() =>
-    Object.fromEntries((vista.elegida?.filas ?? []).map((f) => [f.indice_fila, { indice: f.indice_fila, cantidad: f.cantidad, noches: f.noches, tipo: f.tipo }])),
+    reemplaza
+      ? {}
+      : Object.fromEntries((vista.elegida?.filas ?? []).map((f) => [f.indice_fila, { indice: f.indice_fila, cantidad: f.cantidad, noches: f.noches, tipo: f.tipo }])),
   )
   const [noPagan, setNoPagan] = useState<TipoPasajero[]>(vista.elegida?.noPagan ?? [])
   const [ajustes, setAjustes] = useState<AjustesDeCosto>(
@@ -271,7 +279,7 @@ function Eleccion({ itemId, vista, costoActual, ocupado, onCambio }: { itemId: s
   const [tasa, setTasa] = useState('')
   const [isPending, startTransition] = useTransitionTolerante()
 
-  const visibles = vista.opciones.filter((o) => sinFiltro || o.fueraPor.length === 0 || marcadas[o.indice])
+  const visibles = vista.opciones.filter((o) => sinFiltro || o.fueraPor.length === 0 || marcadas[o.indice] || actuales.has(o.indice))
   const ocultas = vista.opciones.length - vista.opciones.filter((o) => o.fueraPor.length === 0).length
   const eleccion = { filas: Object.values(marcadas), noPagan }
   const calculo = useMemo(
@@ -282,7 +290,6 @@ function Eleccion({ itemId, vista, costoActual, ocupado, onCambio }: { itemId: s
   const moneda = calculo?.ok ? calculo.calculo.moneda : null
   // Reemplazar un costo que ya existe es de una vez: en otra moneda, con la tasa escrita. Sin ella el
   // costo nuevo quedaría pendiente y la línea a medias entre el de antes y el de ahora.
-  const reemplaza = costoActual !== null && costoActual > 0
   const faltaTasa = reemplaza && !!moneda && moneda !== 'COP' && numero(tasa) === null
   const menores = c ? TIPOS_PASAJERO.filter((t) => t !== 'adulto' && (t === 'nino' ? c.ninos : c.infantes) > 0) : []
 
@@ -347,6 +354,11 @@ function Eleccion({ itemId, vista, costoActual, ocupado, onCambio }: { itemId: s
                   <span className="flex flex-wrap items-baseline justify-between gap-x-2">
                     <span className="font-medium text-[#1A1A1A]">
                       {[o.categoria, o.plan, o.ocupacion, o.pasajero].filter(Boolean).join(' · ') || `Fila ${o.indice + 1}`}
+                      {reemplaza && actuales.has(o.indice) && (
+                        <span className="ml-1.5 whitespace-nowrap rounded bg-muted px-1 py-px text-[10px] font-medium text-muted-foreground" data-tarifa-actual>
+                          La que usas hoy
+                        </span>
+                      )}
                     </span>
                     <span className="tabular-nums font-semibold">{formatoMonto(o.precio, o.moneda)}{o.moneda === 'COP' && <span className="font-normal text-muted-foreground"> COP</span>}</span>
                   </span>
