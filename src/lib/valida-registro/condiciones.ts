@@ -1,5 +1,5 @@
 import { POLITICA_DATOS_VALIDA } from '@/lib/valida-api/politica'
-import { CLAUSULA_COBRO_APROBADA_PARA_PRODUCCION } from './condiciones-cobro'
+import { cobroAprobadoEnProduccionPara } from './condiciones-cobro'
 import { TERMINOS_PLAN, terminosPlanListos } from './terminos-plan'
 
 /**
@@ -315,16 +315,24 @@ export function epaycoPuedeTokenizar(env: Env = process.env): boolean {
  *   2. ePayco encendido y con llave pública (fila 14 de Vera): sin eso la tarjeta no se puede pedir, y
  *      aceptar un texto que dice «la Empresa registra un medio de pago» sin registrarlo dejaría una
  *      constancia falsa;
- *   3. en producción, además: `CLAUSULA_COBRO_APROBADA_PARA_PRODUCCION`, los Términos de Uso escritos
- *      (la casilla los nombra). El límite de 3.000 no se mira aquí: está fijo en `plan.ts`.
+ *   3. en producción, además: `CLAUSULA_COBRO_APROBADA_PARA_PRODUCCION` O el correo de la sesión en
+ *      `VALIDA_COBRO_CORREOS_PRUEBA` (pruebas internas, `cobroAprobadoEnProduccionPara`), y los Términos
+ *      de Uso escritos (la casilla los nombra). El límite de 3.000 no se mira aquí: está fijo en `plan.ts`.
  *
  * En un preview bastan 1 y 2, para poder recorrer el registro con la tarjeta de prueba.
+ *
+ * `correoDeSesion` es el de `getCachedUser()` y nada más: la página y `crearEspacioValida` lo leen de
+ * la sesión, nunca del cuerpo. Sin él (o sin sesión), producción da la v1.0.
  */
-export function condicionesVigentes(env: Env = process.env, terminosListos: boolean = terminosPlanListos()): CondicionesVigentes {
+export function condicionesVigentes(
+  env: Env = process.env,
+  terminosListos: boolean = terminosPlanListos(),
+  correoDeSesion: string | null = null,
+): CondicionesVigentes {
   if (env.VALIDA_COBRO_TRAS_PRUEBA !== '1') return VIGENTES_SIN_COBRO
   if (!epaycoPuedeTokenizar(env)) return VIGENTES_SIN_COBRO
   if (env.VERCEL_ENV === 'production') {
-    if (!CLAUSULA_COBRO_APROBADA_PARA_PRODUCCION) return VIGENTES_SIN_COBRO
+    if (!cobroAprobadoEnProduccionPara(correoDeSesion, env)) return VIGENTES_SIN_COBRO
     if (!terminosListos) return VIGENTES_SIN_COBRO
   }
   return VIGENTES_CON_COBRO

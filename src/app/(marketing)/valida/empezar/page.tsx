@@ -1,5 +1,6 @@
 import type { Metadata } from 'next'
 import { registroAbierto, tamanoPrueba } from '@/lib/valida-registro/llave'
+import { getCachedUser } from '@/lib/supabase/auth-user'
 import { TEXTO_JUNTO_A_TARJETA, condicionesVigentes, versionAceptada } from '@/lib/valida-registro/condiciones'
 import { minutosDePruebaAcortada } from '@/lib/valida-registro/cobro-prueba'
 import { POLITICA_DATOS_VALIDA } from '@/lib/valida-api/politica'
@@ -37,7 +38,10 @@ export default async function EmpezarValidaPage({ searchParams }: Props) {
     if (v) utm[k] = v.slice(0, 100)
   }
   const { consultas, dias } = tamanoPrueba()
-  const condiciones = condicionesVigentes()
+  // El correo de la sesión, si ya entró: en producción decide la lista de pruebas del cobro
+  // (`VALIDA_COBRO_CORREOS_PRUEBA`). Al entrar con el código, la pantalla pide otra vuelta del servidor.
+  const { user } = await getCachedUser()
+  const condiciones = condicionesVigentes(process.env, undefined, user?.email ?? null)
   const llavePublica = llavePublicaEpayco()
   // La fecha y la hora junto a la tarjeta: la apertura más 7 días (o los minutos de la prueba acortada
   // de un preview). La exacta se muestra en la cuenta apenas abre la prueba (7.1).
