@@ -14,7 +14,7 @@ import { showGastoConfirmation, proceedEmpresaGasto, handleGasto, categoriaDelGa
 import { decidirSeleccionGasto, textoRepregunta, type DecisionSeleccion, type OpcionGasto } from './seleccion-gasto.ts';
 import { decidirConfirmacionGasto, decidirMontoPendiente, unirMensajes } from './monto-pendiente.ts';
 import { executeRegistro } from './execute.ts';
-import { BOTONES_SOPORTE, decidirSoporte } from './soporte-foto.ts';
+import { archivoDeSoporte, BOTONES_SOPORTE, decidirSoporte } from './soporte-foto.ts';
 import { seguirConLaCola } from './cola-gastos.ts';
 import { confirmarPagoServicio, seleccionDeViaje } from './servicio-viaje.ts';
 
@@ -201,7 +201,7 @@ export async function handleResumeRegistro(ctx: HandlerContext): Promise<void> {
     const decision = decidirSoporte(
       {
         tipo: message.type,
-        tieneImagen: Boolean(message.image_id),
+        tieneImagen: Boolean(archivoDeSoporte(message)),
         botonId: message.interactive_reply,
         texto: message.text,
       },
@@ -220,19 +220,20 @@ export async function handleResumeRegistro(ctx: HandlerContext): Promise<void> {
     }
 
     if (decision.accion === 'guardar_foto') {
-      if (context.gasto_id && message.image_id) {
+      const archivo = archivoDeSoporte(message);
+      if (context.gasto_id && archivo) {
         // Lo que vuelve es una REFERENCIA (`one://gastos-soportes/…`), no una URL
         // publica: el bucket deja de serlo. La pantalla la abre por `/api/archivos/abrir`.
         const referencia = await downloadAndStoreImage(
-          supabase, message.image_id, user.workspace_id, context.gasto_id,
+          supabase, archivo, user.workspace_id, context.gasto_id,
         );
         if (referencia) {
           await supabase.from('gastos')
             .update({ soporte_url: referencia, soporte_pendiente: false })
             .eq('id', context.gasto_id);
-          await ctx.sendMessage('📷 Guardé el soporte fotográfico.');
+          await ctx.sendMessage(message.type === 'document' ? '📎 Guardé el soporte.' : '📷 Guardé el soporte fotográfico.');
         } else {
-          await ctx.sendMessage('⚠️ No pude guardar la foto. Puedes subirla después desde la app.');
+          await ctx.sendMessage('⚠️ No pude guardar el soporte. Puedes subirlo después desde la app.');
         }
       }
     } else {

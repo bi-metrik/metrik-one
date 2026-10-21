@@ -178,7 +178,7 @@ export function metaTs(ts: string | undefined): number | null {
 export function mensajeRetenido(raw: unknown, phone: string): IncomingMessage | null {
   if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return null;
   const m = raw as Record<string, unknown>;
-  const tipos = ['text', 'image', 'audio', 'interactive', 'button', 'location'];
+  const tipos = ['text', 'image', 'audio', 'interactive', 'button', 'location', 'document'];
   if (typeof m.type !== 'string' || !tipos.includes(m.type)) return null;
   // El telefono es el de la fila, no el del JSON: nunca se procesa a nombre de otro.
   return { ...(m as unknown as IncomingMessage), phone, text: typeof m.text === 'string' ? m.text : '' };

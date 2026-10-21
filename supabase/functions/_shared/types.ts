@@ -199,8 +199,19 @@ export interface IncomingMessage {
   /** Nombre de usuario de WhatsApp, sin arroba. Solo si la persona lo activo. */
   username?: string;
   text: string;
-  type: 'text' | 'image' | 'audio' | 'interactive' | 'button' | 'flow_response' | 'location';
+  /**
+   * `document`: un archivo (el PDF del recibo); su pie va en `text` (2026-10-21: antes se perdía sin rastro).
+   * `no_soportado`: un video, un sticker o una tarjeta de contacto: el bot dice que no lo puede leer en vez de callar
+   * (el tipo de Meta va en `tipo_meta`). Las reacciones y los eventos del sistema siguen sin construirse.
+   */
+  type: 'text' | 'image' | 'audio' | 'interactive' | 'button' | 'flow_response' | 'location' | 'document' | 'no_soportado';
   image_id?: string;
+  /** Solo `document`: el id del archivo en Meta, su tipo y su nombre tal como lo mandó la persona. */
+  document_id?: string;
+  document_mime?: string;
+  document_filename?: string;
+  /** Solo `no_soportado`: el `type` que mandó Meta (video, sticker, contacts). */
+  tipo_meta?: string;
   audio_id?: string;
   interactive_reply?: string;
   flow_response?: string; // JSON string del Flow completado (nfm_reply.response_json)
