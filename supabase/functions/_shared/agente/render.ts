@@ -19,6 +19,8 @@ export const META = {
 export const BOTON_LISTA = 'Ver opciones';
 export const PREFIJO_CONVERSACION = 'ag|c|';
 export const PREFIJO_PROPUESTA = 'ag|p|';
+/** [Verlos] de «Tienes … sin confirmar»: revive esa propuesta sin modelo (2026-10-21, obras). */
+export const PREFIJO_REVIVIR = 'ag|v|';
 
 export interface OpcionModelo { titulo: string; descripcion?: string }
 
@@ -107,21 +109,43 @@ function unicos(ops: Opcion[]): Opcion[] {
   });
 }
 
-/** Los botones de una propuesta: [sí] [no], con la huella en el id. */
-export function botonesPropuesta(huella: string, si: string, no: string): Opcion[] {
+/**
+ * Los botones de una propuesta: [sí] [extras…] [no], con la huella en el id. Un «sí» o un «no» vacío no sale (una lista
+ * de elecciones). Los extras: `|a:<clave>` (no escribe) o `|e:<clave>` (escribe con esa elección).
+ */
+export function botonesPropuesta(huella: string, si: string, no: string, extras: Array<{ clave: string; titulo: string; tipo: 'alt' | 'elige'; descripcion?: string }> = []): Opcion[] {
+  const conLista = (si ? 1 : 0) + (no ? 1 : 0) + extras.length > META.botones;
+  const tope = conLista ? META.tituloFila : META.tituloBoton;
   return [
-    { id: `${PREFIJO_PROPUESTA}${huella}|si`, titulo: cortarEnPalabra(si, META.tituloBoton) },
-    { id: `${PREFIJO_PROPUESTA}${huella}|no`, titulo: cortarEnPalabra(no, META.tituloBoton) },
+    ...(si ? [{ id: `${PREFIJO_PROPUESTA}${huella}|si`, titulo: cortarEnPalabra(si, tope) }] : []),
+    ...extras.map((x) => ({
+      id: `${PREFIJO_PROPUESTA}${huella}|${x.tipo === 'elige' ? 'e' : 'a'}:${x.clave}`,
+      titulo: cortarEnPalabra(x.titulo, tope),
+      ...(conLista && x.descripcion ? { descripcion: cortarEnPalabra(x.descripcion, META.descripcionFila) } : {}),
+    })),
+    ...(no ? [{ id: `${PREFIJO_PROPUESTA}${huella}|no`, titulo: cortarEnPalabra(no, tope) }] : []),
   ];
 }
 
+export type Toque =
+  | { clase: 'propuesta'; huella: string; si: boolean; alt?: string; elige?: string }
+  | { clase: 'revivir'; huella: string }
+  | { clase: 'conversacion' };
+
 /** Lee el id de un toque del agente. */
-export function leerToque(id: string | null | undefined): { clase: 'propuesta'; huella: string; si: boolean } | { clase: 'conversacion' } | null {
+export function leerToque(id: string | null | undefined): Toque | null {
   if (!id) return null;
   if (id.startsWith(PREFIJO_PROPUESTA)) {
     const [huella, accion] = id.slice(PREFIJO_PROPUESTA.length).split('|');
-    if (!huella || (accion !== 'si' && accion !== 'no')) return null;
-    return { clase: 'propuesta', huella, si: accion === 'si' };
+    if (!huella || !accion) return null;
+    if (accion === 'si' || accion === 'no') return { clase: 'propuesta', huella, si: accion === 'si' };
+    const m = /^([ae]):(.{1,80})$/.exec(accion);
+    if (!m) return null;
+    return m[1] === 'e' ? { clase: 'propuesta', huella, si: true, elige: m[2] } : { clase: 'propuesta', huella, si: false, alt: m[2] };
+  }
+  if (id.startsWith(PREFIJO_REVIVIR)) {
+    const huella = id.slice(PREFIJO_REVIVIR.length);
+    return /^[0-9a-f]{6,64}$/.test(huella) ? { clase: 'revivir', huella } : null;
   }
   if (id.startsWith(PREFIJO_CONVERSACION)) return { clase: 'conversacion' };
   return null;

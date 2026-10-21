@@ -200,9 +200,28 @@ export interface Propuesta {
   resumen: string;
   /** La cosa concreta donde escribe (el código del viaje); sin `sobre`, todavía no existe (un viaje nuevo, un cliente). */
   sobre?: string;
-  /** Los botones: el primero ejecuta, el último dice que no. Títulos ≤ 20. */
+  /** Los botones: el primero ejecuta, el último dice que no. Títulos ≤ 20. Vacío = sin ese botón (una lista de elecciones). */
   si: string;
   no: string;
+  /**
+   * Más botones entre el «sí» y el «no» (2026-10-21, obras). `elige`: escribe con esa elección (`datos.eleccion` = la
+   * clave; la obra que toca el operario en el listado ya es la confirmación). `alt`: no escribe; el dominio contesta con
+   * `alTocar` («Cambiar algo», «Revisar uno a uno»). Con más de 3 botones en total sale como lista.
+   */
+  extras?: Array<{ clave: string; titulo: string; tipo: 'alt' | 'elige'; descripcion?: string }>;
+  /** Con qué volver a armarla (revivir una pendiente, la siguiente de una cola). Sin esto, lo que pidió el modelo. */
+  args?: Record<string, unknown>;
+}
+
+/** Lo que el dominio contesta a un toque que no es el «sí» (`alTocar`, `trasRechazar`, `vencida`). */
+export interface Respuesta {
+  lineas: string[];
+  /** Una propuesta nueva (la siguiente partida, la misma con otro dato): va debajo de las líneas. */
+  propuesta?: Propuesta;
+  /** El toque descarta la propuesta (queda como rechazada). */
+  descarta?: boolean;
+  /** Opciones de conversación (sin escribir nada) debajo de las líneas. */
+  opciones?: Array<{ titulo: string; descripcion?: string }>;
 }
 
 export interface Hechos {
@@ -284,15 +303,35 @@ export interface Dominio {
    */
   cierres?: DeclaracionHerramienta[];
   cerrar?(nombre: string, args: Record<string, unknown>, ctx: ContextoDominio): Promise<
-    | { ok: true; salidas: Salida[]; datos?: unknown; privado?: unknown }
+    | { ok: true; salidas: Salida[]; datos?: unknown; privado?: unknown; propuesta?: Propuesta }
     | { ok: false; error: string; candado: string }
   >;
+  /** Un botón `alt` de la propuesta vigente (2026-10-21, obras). Sin modelo. */
+  alTocar?(clave: string, propuesta: Propuesta, ctx: ContextoDominio): Promise<Respuesta>;
+  /** Después del «no» (la siguiente partida de una revisión uno a uno). `null` = solo «no hice nada». */
+  trasRechazar?(propuesta: Propuesta, ctx: ContextoDominio): Promise<Respuesta | null>;
+  /** La propuesta ya no sirve (`sigueVigente` = false): qué decir en vez de rearmarla (la llegada de ayer). */
+  vencida?(propuesta: Propuesta, ctx: ContextoDominio): Promise<Respuesta | null>;
+  /**
+   * Una propuesta pendiente nunca vence en silencio (2026-10-21, obras, C19): si el turno la deja atrás sin cubrirla, el
+   * código manda primero «Tienes … sin confirmar» con [Verlos] (revive sin modelo). Devuelve el «2 pagos» de ese texto.
+   */
+  pendienteSinConfirmar?(propuesta: Propuesta): string | null;
+  /** ¿La propuesta nueva incluye todo lo de la vieja? (entonces la vieja no se recuerda). Ausente = no. */
+  cubre?(vieja: Propuesta, nueva: Propuesta): boolean;
+  /**
+   * Antes del turno del modelo: una respuesta que da el CÓDIGO por el rol, sin modelo y sin cupo (el pantallazo de un
+   * operario). `null` = sigue el turno.
+   */
+  sinModelo?(nuevos: FilaConversacion[], ctx: ContextoDominio): { salida: Salida; clave: string } | null;
+  /** Quién gasta el cupo (Anexo 1.4): `operario` o `gestion`. Ausente = gestión. */
+  quien?: 'gestion' | 'operario';
 }
 
 // ── La traza ─────────────────────────────────────────────────────────────────
 
 export interface Traza {
-  tipo: 'modelo' | 'toque_propuesta' | 'si_escrito' | 'reenvio' | 'sin_turno';
+  tipo: 'modelo' | 'toque_propuesta' | 'si_escrito' | 'reenvio' | 'sin_turno' | 'revivir';
   bot: string;
   reglamento?: { id: string; version: number; huella: string } | null;
   /** Desde que llegó el webhook del último mensaje del turno hasta que salió la respuesta. */
@@ -312,7 +351,7 @@ export interface Traza {
   ejecucion?: {
     huella: string;
     accion?: string;
-    resultado: 'ejecutada' | 'rechazada' | 'vieja' | 'repetida' | 'error';
+    resultado: 'ejecutada' | 'rechazada' | 'vieja' | 'repetida' | 'error' | 'alterna' | 'revivida';
     lineas?: string[];
     escrituras?: Array<Record<string, unknown>>;
     nombrados?: string[];
@@ -326,6 +365,13 @@ export interface Traza {
    */
   tras_toque?: { origen: 'toque_propuesta' | 'si_escrito'; resultado: 'propuesta' | 'respuesta' | 'terminar' | 'solo_hecho' } | null;
   salida?: Salida | null;
+  /**
+   * Los mensajes que el turno le pasó al modelo (texto, nota de voz, imagen o PDF): son los que cuentan en el cupo
+   * (Anexo 1.4, `bot_mensajes_mes`). Toques y lo que contesta el código no van.
+   */
+  mensajes?: Array<{ id: string; quien: 'gestion' | 'operario' }>;
+  /** La propuesta pendiente que este turno dejó atrás y se recordó con [Verlos]. */
+  recordatorio?: string | null;
   /** Los adjuntos que el dominio preparó antes del turno (bajados, guardados, leídos) y cuánto tardó. */
   adjuntos?: Array<Record<string, unknown>> | null;
   /** Los mensajes que salieron después de `salida` en el mismo turno (un cierre del dominio con varios mensajes). */
