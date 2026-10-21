@@ -39,6 +39,7 @@ import {
 import type { DefinicionRanura } from '@/lib/cotizaciones/ranuras-pantallazo'
 import type { TarifaCanal } from './tipos'
 import type { TarifaUsable } from './tarifas-extraidas'
+import { capitalizacionNormal, incluyeDeFila, nombreDeServicio, textoIncluye } from './nombre-de-tarifa'
 
 export { leerOrigenTarifaExtraida, origenVigente, type OrigenTarifaExtraida } from '@/lib/cotizaciones/origen-tarifa'
 
@@ -191,12 +192,23 @@ export interface OpcionTarifa {
   establecimiento: string | null
   categoria: string | null
   plan: string | null
+  /** «privado», «compartido» (tours y traslados). */
+  modalidad: string | null
+  /**
+   * El nombre completo del servicio, como lo lee el cliente: categoría, plan y modalidad, sin todo
+   * en mayúscula («Playa Blanca con almuerzo»). `null` si la fila no dice nada.
+   */
+  servicio: string | null
+  /** Lo que incluye la fila (su plan, la propia fila o su nota «Incluye …»). */
+  incluye: string[]
+  /** La fecha de salida que trae la fila (un tour con fecha fija), `AAAA-MM-DD`. */
+  fechaSalida: string | null
   ocupacion: string | null
   /** Como lo dice el tarifario («adulto adicional»); `null` si no lo dice. */
   pasajero: string | null
   /** El tipo de ONE al que va su costo. `null` = no lo dice (se toma adulto si es por persona). */
   tipo: TipoPasajero | null
-  /** «2–4», «6», «1–…». */
+  /** «2 a 4 pax», «6 pax», «desde 1 pax», «hasta 4 pax»: completo, sin «…» que parezca cortado. */
   pax: string | null
   temporada: TemporadaDelViaje | null
   /** El precio de qué canal es, según la fila (neto, público, comisionable…). */
@@ -217,10 +229,16 @@ export interface OfertaDeTarifas {
   avisos: string[]
 }
 
-function textoPax(min: number | null, max: number | null): string | null {
+/**
+ * El escalón de pasajeros de la fila, completo (prueba del #1229, punto c: «1–… pax» se leía como
+ * un texto cortado). Abierto arriba = «desde N pax».
+ */
+export function textoPax(min: number | null, max: number | null): string | null {
   if (min === null && max === null) return null
-  if (min !== null && min === max) return `${min}`
-  return `${min ?? 1}–${max ?? '…'}`
+  if (min !== null && min === max) return `${min} pax`
+  if (max === null) return `desde ${min} pax`
+  if (min === null) return `hasta ${max} pax`
+  return `${min} a ${max} pax`
 }
 
 function fueraDeEscalon(min: number | null, max: number | null, n: number): boolean {
@@ -273,6 +291,10 @@ export function ofrecerTarifas(args: {
       establecimiento: u.establecimiento,
       categoria: texto(f.categoria),
       plan: texto(f.plan),
+      modalidad: texto(f.modalidad, 40),
+      servicio: nombreDeServicio({ categoria: texto(f.categoria), plan: texto(f.plan), modalidad: texto(f.modalidad, 40) }),
+      incluye: incluyeDeFila(f, args.tarifario),
+      fechaSalida: fechaValida(f.fecha_salida),
       ocupacion: texto(f.ocupacion, 40),
       pasajero: typeof f.tipo_pasajero === 'string' ? PASAJERO_FILA[f.tipo_pasajero] ?? texto(f.tipo_pasajero, 40) : null,
       tipo,
@@ -344,7 +366,11 @@ export interface AjustesDeCosto {
   comisionPct: number | null
   /** El precio ya trae el IVA: se le quita para guardar el costo sin IVA. */
   ivaIncluido: boolean
-  ivaPct: number
+  /**
+   * El IVA del proveedor. `null` = nadie lo declara (ni el tarifario ni la ficha): no se inventa
+   * un 19 (prueba del #1229, punto 3), y «Calcular con IVA» no le suma nada a la línea.
+   */
+  ivaPct: number | null
 }
 
 export const IVA_POR_DEFECTO = 19
@@ -362,21 +388,28 @@ const pctValido = (v: unknown, max: number): number | null => (typeof v === 'num
 /**
  * Canal e IVA con que nace la elección. Manda lo más específico: la fila elegida (su `precio_tipo`
  * y `impuestos_incluidos`), después la ficha (lo que una persona anotó) y al final el tarifario.
+ *
+ * El % de IVA (prueba del #1229, punto 3): el que escribe el tarifario; si no lo escribe, el 19
+ * general SOLO con respaldo (el tarifario o la ficha dicen que cobra IVA, o el precio ya lo trae y
+ * hay que quitárselo). Sin respaldo queda `null`: un tarifario que no dice nada no cobra un IVA
+ * inventado. Una ficha que dice «no cobra IVA» manda sobre el tarifario.
  */
 export function ajustesPorDefecto(args: {
   fila?: Pick<OpcionTarifa, 'precioTipo' | 'impuestosIncluidos'> | null
-  ficha: { tarifaCanal: TarifaCanal | null; ivaIncluido: boolean | null }
+  ficha: { tarifaCanal: TarifaCanal | null; ivaIncluido: boolean | null; ivaDeclarado?: boolean | null }
   tarifario: Obj | null
 }): AjustesDeCosto {
   const t = args.tarifario ?? {}
   const imp = esObj(t.impuestos) ? t.impuestos : {}
   const canal = canalDeTexto(args.fila?.precioTipo) ?? args.ficha.tarifaCanal ?? canalDeTexto(t.canal) ?? 'sin_dato'
-  const ivaIncluido = args.fila?.impuestosIncluidos ?? args.ficha.ivaIncluido ?? (imp.iva_incluido === true)
+  const ivaIncluido = (args.fila?.impuestosIncluidos ?? args.ficha.ivaIncluido ?? (imp.iva_incluido === true)) === true
+  const declarado = args.ficha.ivaDeclarado ?? (imp.iva_declarado === true || pctValido(imp.iva_pct, 100) !== null ? true : null)
+  const ivaPct = ivaIncluido ? pctValido(imp.iva_pct, 100) ?? IVA_POR_DEFECTO : declarado === true ? pctValido(imp.iva_pct, 100) ?? IVA_POR_DEFECTO : null
   return {
     canal,
     comisionPct: canal === 'comisionable' ? pctValido(t.comision_pct, 100) : null,
-    ivaIncluido: ivaIncluido === true,
-    ivaPct: pctValido(imp.iva_pct, 100) ?? IVA_POR_DEFECTO,
+    ivaIncluido,
+    ivaPct,
   }
 }
 
@@ -389,8 +422,10 @@ export function revisarAjustes(entrada: unknown, defecto: AjustesDeCosto): { ok:
   const comisionPct = entrada.comisionPct === undefined ? defecto.comisionPct : entrada.comisionPct === null ? null : Number(entrada.comisionPct)
   if (comisionPct !== null && !(Number.isFinite(comisionPct) && comisionPct > 0 && comisionPct < 100)) return { ok: false, error: 'La comisión va entre 0 y 100 %.' }
   const ivaIncluido = entrada.ivaIncluido === undefined ? defecto.ivaIncluido : entrada.ivaIncluido === true
-  const ivaPct = entrada.ivaPct === undefined || entrada.ivaPct === null ? defecto.ivaPct : Number(entrada.ivaPct)
-  if (!(Number.isFinite(ivaPct) && ivaPct > 0 && ivaPct < 100)) return { ok: false, error: 'El IVA va entre 0 y 100 %.' }
+  // `null` llega cuando nadie declaró IVA; marcar «el precio ya trae IVA» exige un %: el general.
+  const pedido = entrada.ivaPct === undefined ? defecto.ivaPct : entrada.ivaPct === null ? null : Number(entrada.ivaPct)
+  const ivaPct = pedido === null && ivaIncluido ? defecto.ivaPct ?? IVA_POR_DEFECTO : pedido
+  if (ivaPct !== null && !(Number.isFinite(ivaPct) && ivaPct > 0 && ivaPct < 100)) return { ok: false, error: 'El IVA va entre 0 y 100 %.' }
   return { ok: true, ajustes: { canal, comisionPct: canal === 'comisionable' ? comisionPct : null, ivaIncluido, ivaPct } }
 }
 
@@ -569,9 +604,10 @@ export function calcularEleccion(args: {
   const bruto = dos(subtotales.reduce((a, s) => a + s, 0))
   let total = bruto
   if (ajustes.ivaIncluido) {
-    total = dos(bruto / (1 + ajustes.ivaPct / 100))
+    const pct = ajustes.ivaPct ?? IVA_POR_DEFECTO
+    total = dos(bruto / (1 + pct / 100))
     subtotales = repartirProporcional(total, subtotales)
-    avisos.push(`El precio traía IVA (${ajustes.ivaPct} %): se guarda sin IVA, ${formatoMonto(total, moneda as string)}.`)
+    avisos.push(`El precio traía IVA (${pct} %): se guarda sin IVA, ${formatoMonto(total, moneda as string)}.`)
   }
   let aPagarAgencia: number | null = null
   if (ajustes.canal === 'comisionable') {
@@ -628,8 +664,12 @@ export function lecturaDeTarifa(args: {
     if (enIdentidad) identidad[slug] = v
   }
   const unico = (xs: (string | null)[]) => [...new Set(xs.filter((x): x is string => !!x))].join(' / ') || null
-  const categorias = unico(elegidas.map((o) => o.categoria))
-  const planes = unico(elegidas.map((o) => o.plan))
+  // Lo que lee el cliente va sin TODO en mayúscula y con el nombre completo de la fila (prueba del
+  // #1229, punto 2): «Playa Blanca con almuerzo», no «PLAYA BLANCA».
+  const categorias = unico(elegidas.map((o) => (o.categoria ? capitalizacionNormal(o.categoria) : null)))
+  const planes = unico(elegidas.map((o) => (o.plan ? capitalizacionNormal(o.plan, 'oracion') : null)))
+  const servicios = unico(elegidas.map((o) => o.servicio))
+  const incluye = textoIncluye([...new Set(elegidas.flatMap((o) => o.incluye))])
   const pax = String(c.adultos + c.ninos + c.infantes)
   if (ranura.slug === 'hotel_detalle') {
     poner('hotel', proveedor.nombre, true)
@@ -641,19 +681,19 @@ export function lecturaDeTarifa(args: {
     poner('ocupacion', describirOcupacion(c))
   } else if (ranura.slug === 'actividad_detalle') {
     poner('proveedor', proveedor.nombre)
-    poner('nombre', categorias ?? proveedor.nombre, true)
+    poner('nombre', servicios ?? proveedor.nombre, true)
     poner('ciudad', proveedor.ciudad)
     poner('fecha', args.entrada, true)
     poner('pax', pax)
   } else if (ranura.slug === 'traslado_detalle') {
     poner('proveedor', proveedor.nombre)
-    poner('trayecto', categorias ?? proveedor.nombre, true)
+    poner('trayecto', servicios ?? proveedor.nombre, true)
     poner('fecha_hora', args.entrada, true)
     poner('pax', pax)
   } else if (ranura.slug === 'vuelo_detalle') {
     poner('aerolinea', proveedor.nombre, true)
   } else {
-    poner('nombre', categorias ?? proveedor.nombre, true)
+    poner('nombre', servicios ?? proveedor.nombre, true)
     poner('proveedor', proveedor.nombre)
     poner('pax', pax)
   }
@@ -669,7 +709,8 @@ export function lecturaDeTarifa(args: {
   if (calculo.ajustes.canal === 'comisionable' && calculo.aPagarAgencia !== null) {
     campos.push({ label: 'Comisión', valor: `${calculo.ajustes.comisionPct} %: la agencia paga ${formatoMonto(calculo.aPagarAgencia, calculo.moneda)}` })
   }
-  const nombre = ranura.slug === 'hotel_detalle' ? proveedor.nombre : categorias ?? proveedor.nombre
+  if (incluye) campos.push({ label: 'Incluye', valor: incluye.replace(/^Incluye: /, '').replace(/\.$/, '') })
+  const nombre = ranura.slug === 'hotel_detalle' ? proveedor.nombre : servicios ?? proveedor.nombre
   return {
     moneda: calculo.moneda,
     total: calculo.total,
@@ -679,11 +720,14 @@ export function lecturaDeTarifa(args: {
     ocupacion: { adultos: c.adultos, ninos: c.ninos, infantes: c.infantes, total: c.adultos + c.ninos + c.infantes },
     ocupacionDelItem: true,
     identidad,
-    notasCliente: [],
+    // También como nota: con una corrección en la ficha la descripción se rearma desde los campos
+    // de la ranura (`descripcionDeLinea`) y las notas son lo que sobrevive.
+    notasCliente: incluye ? [incluye] : [],
     alertas: calculo.avisos,
     campos,
     nombre,
-    descripcion: '',
+    // Lo que incluye la fila llega al documento del cliente (`descripcionDeLinea`).
+    descripcion: incluye,
     leidaEn: args.leidaEn,
     paraComposicion: c,
     origen: 'tarifario',
@@ -692,3 +736,17 @@ export function lecturaDeTarifa(args: {
 
 /** «Adulto», «Niño»: para la pantalla. */
 export const nombreTipo = (t: TipoPasajero) => NOMBRE_TIPO[t]
+
+/**
+ * El día con que nace una actividad desde la tarifa (prueba del #1229, punto e: «Día del viaje:
+ * Sin día» obligaba a un clic de más). La fecha de salida de la fila, si las elegidas traen una
+ * sola; si no, un viaje de UN día (entrada = salida) cae ese día. En otro caso `null`: queda «Sin
+ * día» y la tarjeta lo pide. Es una propuesta: la tarjeta lo deja cambiar.
+ */
+export function fechaDeActividadNueva(elegidas: readonly Pick<OpcionTarifa, 'fechaSalida'>[], viaje: { entrada: string | null; salida: string | null }): string | null {
+  const propias = [...new Set(elegidas.map((o) => o.fechaSalida).filter((f): f is string => !!f))]
+  if (propias.length === 1) return propias[0]
+  if (propias.length > 1) return null
+  const a = fechaValida(viaje.entrada)
+  return a && fechaValida(viaje.salida) === a ? a : null
+}

@@ -29,7 +29,8 @@ import { claveTarifa, esRecomendada, idDelPrincipal, NOMBRES_TARIFA, type Nombre
 import { firmaDeTarifa } from './tarifas-por-pasos'
 import { estadoDelServicio, type EstadoServicio } from './estado-servicio'
 import { resolverRanura } from './ranuras-pantallazo'
-import { ciudadCorta, tipoDeDefinicion, type TipoRanura } from './ranuras-cotizacion'
+import { ciudadCorta, esNombreDeOpcion, tipoDeDefinicion, type TipoRanura } from './ranuras-cotizacion'
+import { nombreVisibleDeLinea } from './nombre-visible'
 import { detalleDeLectura, hotelesDeItems, tramosDelItem, type ItemConLectura } from './detalle-viaje'
 import { leerTarifaPax } from './tarifa-pasajero'
 import { leerFecha } from '@/lib/pdf/cotizacion-trappvel-formato'
@@ -255,6 +256,18 @@ function leidoDe(item: FilaDeLinea): Record<string, string> {
   return d
 }
 
+/**
+ * La tarjeta de una actividad se titula con la actividad («Playa Blanca con almuerzo»), no con el
+ * nombre genérico del bloque («Actividad en Santa Marta»; prueba del #1229, punto d). Es el mismo
+ * criterio del editor (`tituloDeBloque`): el nombre visible de su primera opción, salvo que siga
+ * siendo «Opción N». El lugar del bloque se sigue sacando de su nombre.
+ */
+function nombreDeActividad(item: FilaDeLinea | undefined): string | null {
+  if (!item) return null
+  const n = nombreVisibleDeLinea({ nombre: item.nombre, grupo: item.grupo, tarifa_pax: item.tarifa_pax }).trim()
+  return n && !esNombreDeOpcion(n) ? n : null
+}
+
 function sumarDias(iso: string | null, dias: number): string | null {
   const m = /^(\d{4})-(\d{2})-(\d{2})/.exec(iso ?? '')
   if (!m) return null
@@ -308,7 +321,7 @@ export function viajeEnOrden(
     return {
       grupo,
       tipo,
-      nombre,
+      nombre: tipo === 'actividad' ? nombreDeActividad(ops[0]) ?? nombre : nombre,
       opciones: ops.map(o => o.id),
       estado: estadoDelServicio(ops),
       lugar,
