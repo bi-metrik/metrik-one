@@ -46,6 +46,13 @@ export type RespuestaManual = { ok: true } | { ok: false; mensaje: string; error
 export const AYUDA_NETO = 'Lo que te cobra el proveedor, sin sumarle nada. El margen lo pone ONE.'
 
 /**
+ * Empezar SIN COSTO cuando el precio va a salir del tarifario del proveedor (brief del 2026-10-20,
+ * punto 1): antes «Adulto *» obligaba a escribir un número de relleno.
+ */
+export const SIN_COSTO_DEL_TARIFARIO = 'Todavía no tengo el costo: lo saco del tarifario del proveedor'
+export const AYUDA_SIN_COSTO = 'La opción entra con el costo pendiente y se abre «Tarifas del proveedor» en ella. No se puede enviar hasta tener el costo.'
+
+/**
  * Cómo viene el precio del traslado (brief del 2026-09-30). Sin opción marcada a propósito:
  * con «Ida y regreso» por defecto, un portafolio in-out de 45.000 quedaba en 90.000.
  */
@@ -124,6 +131,8 @@ export default function IngresoManualForm({
   const [errores, setErrores] = useState<ErroresManual>({})
   const [mensaje, setMensaje] = useState<string | null>(null)
   const [enviando, setEnviando] = useState(false)
+  // Solo en la forma por pasos: el costo queda pendiente y sale del tarifario.
+  const [sinCosto, setSinCosto] = useState(false)
 
   function cambiarTipo(t: TipoEscritoAMano) {
     if (t === tipo) return
@@ -174,11 +183,12 @@ export default function IngresoManualForm({
     if (enviando) return
     setEnviando(true)
     setMensaje(null)
-    const datos: Record<string, unknown> = tipo === 'hotel' || tipo === 'vuelo'
+    const base: Record<string, unknown> = tipo === 'hotel' || tipo === 'vuelo'
       ? { ...v }
       : tipo === 'actividad'
         ? { ...v, opcional: v.opcional === 'si' }
         : { ...v, idaYRegreso: v.idaYRegreso === 'si' }
+    const datos: Record<string, unknown> = porPasos && sinCosto ? { ...base, sinCosto: true } : base
     const r = await (onEnviar as (t: TipoEscritoAMano, d: Record<string, unknown>) => Promise<RespuestaManual>)(tipo, datos)
     setEnviando(false)
     if (r.ok) {
@@ -207,6 +217,18 @@ export default function IngresoManualForm({
       )}
     </div>
   )
+
+  // «Todavía no tengo el costo»: la casilla, y lo que esconde cuando está marcada.
+  const casillaSinCosto = (
+    <label className="col-span-full inline-flex items-start gap-1.5 text-[13px] text-[#191713]" data-sin-costo>
+      <input type="checkbox" className="mt-0.5 accent-[#0E5C43]" checked={sinCosto} onChange={e => setSinCosto(e.target.checked)} data-campo-manual="sinCosto" />
+      <span>
+        {SIN_COSTO_DEL_TARIFARIO}
+        {sinCosto && <span className="block text-[11px] text-[#6E6A62]">{AYUDA_SIN_COSTO}</span>}
+      </span>
+    </label>
+  )
+  const conCosto = (n: ReactNode) => (sinCosto ? null : n)
 
   if (porPasos) {
     return (
@@ -243,11 +265,14 @@ export default function IngresoManualForm({
             {campo('ninos', 'Niños', { numerico: true })}
             {campo('infantes', 'Infantes', { numerico: true })}
             {titulo('Costo neto por pasajero (ida y regreso)')}
-            <p className="col-span-full m-0 text-xs text-[#6E6A62]">{AYUDA_NETO}</p>
-            {campo('netoAdulto', 'Adulto', { numerico: true, obligatorio: true })}
-            {campo('netoNino', 'Niño', { numerico: true, placeholder: 'vacío = falta' })}
-            {campo('netoInfante', 'Infante', { numerico: true, placeholder: 'vacío = falta', ayuda: '0 si no paga' })}
-            {campo('fuente', 'Fuente de la tarifa', { ancho: 'col-span-2 max-sm:col-span-2', placeholder: 'Teléfono de la aerolínea', ayuda: AYUDA_FUENTE })}
+            {casillaSinCosto}
+            {conCosto(<>
+              <p className="col-span-full m-0 text-xs text-[#6E6A62]">{AYUDA_NETO}</p>
+              {campo('netoAdulto', 'Adulto', { numerico: true, obligatorio: true })}
+              {campo('netoNino', 'Niño', { numerico: true, placeholder: 'vacío = falta' })}
+              {campo('netoInfante', 'Infante', { numerico: true, placeholder: 'vacío = falta', ayuda: '0 si no paga' })}
+              {campo('fuente', 'Fuente de la tarifa', { ancho: 'col-span-2 max-sm:col-span-2', placeholder: 'Teléfono de la aerolínea', ayuda: AYUDA_FUENTE })}
+            </>)}
           </div>
         ) : tipo === 'actividad' ? (
           <div className="grid grid-cols-3 gap-x-3 gap-y-2 max-sm:grid-cols-2">
@@ -259,15 +284,18 @@ export default function IngresoManualForm({
             {campo('ninos', 'Niños', { numerico: true })}
             {campo('infantes', 'Infantes', { numerico: true })}
             {titulo('Costo neto por persona')}
-            <p className="col-span-full m-0 text-xs text-[#6E6A62]">{AYUDA_NETO}</p>
-            {campo('netoAdulto', 'Adulto', { numerico: true, obligatorio: true })}
-            {campo('netoNino', 'Niño', { numerico: true, placeholder: 'vacío = falta' })}
-            {campo('netoInfante', 'Infante', { numerico: true, placeholder: 'vacío = falta', ayuda: '0 si no paga' })}
+            {casillaSinCosto}
+            {conCosto(<>
+              <p className="col-span-full m-0 text-xs text-[#6E6A62]">{AYUDA_NETO}</p>
+              {campo('netoAdulto', 'Adulto', { numerico: true, obligatorio: true })}
+              {campo('netoNino', 'Niño', { numerico: true, placeholder: 'vacío = falta' })}
+              {campo('netoInfante', 'Infante', { numerico: true, placeholder: 'vacío = falta', ayuda: '0 si no paga' })}
+            </>)}
             <label className="col-span-full inline-flex items-center gap-1.5 text-[13px] text-[#191713]">
               <input type="checkbox" className="accent-[#0E5C43]" checked={v.opcional === 'si'} onChange={e => setV(prev => ({ ...prev, opcional: e.target.checked ? 'si' : '' }))} data-campo-manual="opcional" />
               {ES_OPCIONAL}
             </label>
-            {campo('fuente', 'Fuente de la tarifa', { ancho: 'col-span-2 max-sm:col-span-2', placeholder: 'Operador local', ayuda: AYUDA_FUENTE })}
+            {conCosto(campo('fuente', 'Fuente de la tarifa', { ancho: 'col-span-2 max-sm:col-span-2', placeholder: 'Operador local', ayuda: AYUDA_FUENTE }))}
           </div>
         ) : tipo === 'otro' ? (
           <div className="grid grid-cols-3 gap-x-3 gap-y-2 max-sm:grid-cols-2">
@@ -292,9 +320,12 @@ export default function IngresoManualForm({
                 {campo('infantes', 'Infantes', { numerico: true })}
               </>
             )}
-            <p className="col-span-full m-0 text-xs text-[#6E6A62]">{AYUDA_NETO}</p>
-            {campo('neto', v.cobro === 'total' ? 'Costo total' : 'Costo por persona', { numerico: true, obligatorio: true })}
-            {campo('fuente', 'Fuente de la tarifa', { ancho: 'col-span-2 max-sm:col-span-2', placeholder: 'Portafolio 2026, llamada con el proveedor…', ayuda: AYUDA_FUENTE })}
+            {casillaSinCosto}
+            {conCosto(<>
+              <p className="col-span-full m-0 text-xs text-[#6E6A62]">{AYUDA_NETO}</p>
+              {campo('neto', v.cobro === 'total' ? 'Costo total' : 'Costo por persona', { numerico: true, obligatorio: true })}
+              {campo('fuente', 'Fuente de la tarifa', { ancho: 'col-span-2 max-sm:col-span-2', placeholder: 'Portafolio 2026, llamada con el proveedor…', ayuda: AYUDA_FUENTE })}
+            </>)}
             {esAsistenciaMedica(v.nombre) && <p className="col-span-full m-0 text-xs text-[#0E5C43]" data-nota-asistencia>{NOTA_ASISTENCIA_MEDICA}</p>}
           </div>
         ) : tipo === 'hotel' ? (
@@ -310,11 +341,14 @@ export default function IngresoManualForm({
             {campo('ninos', 'Niños', { numerico: true })}
             {campo('infantes', 'Infantes', { numerico: true })}
             {titulo('Costo neto por persona por noche')}
-            <p className="col-span-full m-0 text-xs text-[#6E6A62]">{AYUDA_NETO}</p>
-            {campo('netoAdulto', 'Adulto', { numerico: true, obligatorio: true })}
-            {campo('netoNino', 'Niño', { numerico: true })}
-            {campo('netoInfante', 'Infante', { numerico: true, placeholder: '0' })}
-            {campo('fuente', 'Fuente de la tarifa', { ancho: 'col-span-2 max-sm:col-span-2', placeholder: 'Portafolio del hotel', ayuda: AYUDA_FUENTE })}
+            {casillaSinCosto}
+            {conCosto(<>
+              <p className="col-span-full m-0 text-xs text-[#6E6A62]">{AYUDA_NETO}</p>
+              {campo('netoAdulto', 'Adulto', { numerico: true, obligatorio: true })}
+              {campo('netoNino', 'Niño', { numerico: true })}
+              {campo('netoInfante', 'Infante', { numerico: true, placeholder: '0' })}
+              {campo('fuente', 'Fuente de la tarifa', { ancho: 'col-span-2 max-sm:col-span-2', placeholder: 'Portafolio del hotel', ayuda: AYUDA_FUENTE })}
+            </>)}
           </div>
         ) : (
           <div className="grid grid-cols-3 gap-x-3 gap-y-2 max-sm:grid-cols-2">
@@ -324,6 +358,8 @@ export default function IngresoManualForm({
             {campo('adultos', 'Adultos', { numerico: true })}
             {campo('ninos', 'Niños', { numerico: true })}
             {campo('infantes', 'Infantes', { numerico: true })}
+            {casillaSinCosto}
+            {conCosto(<>
             <div className="col-span-full flex flex-col gap-0.5" data-campo-manual="precio">
               <div className="flex flex-wrap items-center gap-x-4 gap-y-1" role="radiogroup" aria-label={PREGUNTA_PRECIO_TRASLADO}>
                 <span className={`text-xs ${errores.precio ? 'text-[#9A5F0C]' : 'text-[#6E6A62]'}`}>{PREGUNTA_PRECIO_TRASLADO} *</span>
@@ -353,6 +389,7 @@ export default function IngresoManualForm({
               </div>
             )}
             {campo('fuente', 'Fuente de la tarifa', { ancho: 'col-span-2 max-sm:col-span-2', placeholder: 'Portafolio del proveedor', ayuda: AYUDA_FUENTE })}
+            </>)}
           </div>
         )}
         {fueraDelViaje && <p className="m-0 text-xs font-medium text-[#9A5F0C]" data-aviso-fechas>{fueraDelViaje}</p>}

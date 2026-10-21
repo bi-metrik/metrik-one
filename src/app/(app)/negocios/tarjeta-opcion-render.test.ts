@@ -150,6 +150,22 @@ describe('costo y precio: las alertas del prototipo', () => {
     expect(t).toMatch(/Margen -4,6 %/)
   })
 
+  it('con el costo confirmado se ofrece cambiarlo por una tarifa del proveedor (brief del 2026-10-20, punto 1)', () => {
+    const cambiar = React.createElement('div', { 'data-prueba-cambiar': '' }, 'Cambiar el costo por una tarifa del proveedor')
+    const respaldo = React.createElement('div', { 'data-prueba-respaldo': '' })
+    const conf = pintar(tarifaConHabitaciones({}, habs(POSADA), GRUPO), { confirmada: CONFIRMADA, cambiarCosto: cambiar, respaldo })
+    expect(conf).toContain('data-prueba-cambiar')
+    expect(conf).not.toContain('data-prueba-respaldo')
+    // Va después de «Costo y precio», donde se ve sin adivinar.
+    expect(conf.indexOf('data-prueba-cambiar')).toBeGreaterThan(conf.indexOf('aria-label="Costo y precio"'))
+    // Sin confirmar: el respaldo de siempre (que ya trae el panel), no el de cambiar.
+    const sin = pintar(tarifaConHabitaciones({}, habs(POSADA), GRUPO), { confirmada: null, cambiarCosto: cambiar, respaldo })
+    expect(sin).toContain('data-prueba-respaldo')
+    expect(sin).not.toContain('data-prueba-cambiar')
+    // Sin poder editar, no se ofrece.
+    expect(pintar(tarifaConHabitaciones({}, habs(POSADA), GRUPO), { confirmada: CONFIRMADA, cambiarCosto: cambiar, editable: false })).not.toContain('data-prueba-cambiar')
+  })
+
   it('con el margen sobre el piso no hay ⚠', () => {
     const html = pintar(tarifaConHabitaciones({}, habs(POSADA), GRUPO), { confirmada: CONFIRMADA, precioLinea: 4679294, costoLinea: 3977400 })
     expect(texto(html)).not.toContain('Con este margen necesitas autorización para enviar')

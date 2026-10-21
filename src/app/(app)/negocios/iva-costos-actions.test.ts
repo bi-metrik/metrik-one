@@ -147,4 +147,13 @@ describe('casilla «Calcular con IVA»', () => {
     await sincronizarIvaDeCostos(COT)
     expect(base.tablas.items.map((i) => i.proveedor_id)).toEqual([null, null, null])
   })
+
+  it('un hotel escrito a mano no toma por el nombre la ficha (ni su IVA) ni la guarda en la línea (2026-10-20)', async () => {
+    for (const i of base.tablas.items) i.proveedor_id = null
+    const i1 = base.tablas.items.find((i) => i.id === 'i1') as { tarifa_pax: { casillas: { grupo_completo: Record<string, unknown> } } }
+    i1.tarifa_pax.casillas.grupo_completo.origen = 'manual'
+    expect(await sincronizarIvaDeCostos(COT)).toMatchObject({ ok: true, proveedoresConIva: [] })
+    expect(pct('i1')).toBeNull()
+    expect(base.tablas.items.map((i) => i.proveedor_id)).toEqual([null, POSADA, null])
+  })
 })

@@ -172,6 +172,9 @@ export default function HabitacionesDeOpcion({
       {estado.estado === 'inconsistente' && (
         <p className="rounded-md bg-red-50 p-2 text-[11px] font-medium text-red-900">{estado.mensaje}</p>
       )}
+      {estado.estado === 'sin_costo' && (
+        <p className="rounded-md bg-amber-50 p-2 text-[11px] font-medium text-amber-900">{estado.mensaje}</p>
+      )}
 
       {estado.estado === 'resuelta' && hayPorConfirmar && (
         <div className="space-y-2 rounded-md border bg-background p-2.5">

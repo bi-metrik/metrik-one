@@ -200,6 +200,12 @@ export interface ContextoLectura {
    * vacío una persona, a propósito.
    */
   manual?: boolean
+  /**
+   * Escrita a mano SIN COSTO: el precio saldrá del tarifario del proveedor (brief del 2026-10-20,
+   * punto 1). El precio no es mínimo: la lectura trae solo los datos del servicio y queda marcada
+   * (`LecturaCasilla.costoPendiente`) para que nadie la costee en cero. Solo con `manual`.
+   */
+  sinCosto?: boolean
 }
 
 /**
@@ -485,7 +491,9 @@ export function evaluarLectura(
         MINIMOS_DE_COSTO.includes(def.slug)
         // Con tabla por tipo de pasajero el total ya es el de la tabla: `base_precio` no
         // multiplica nada y exigirlo rechazaría una captura que ya se puede costear.
-        && !(tieneTablaPorTipo && def.slug === 'base_precio'))
+        && !(tieneTablaPorTipo && def.slug === 'base_precio')
+        // Sin costo (a mano, del tarifario): el precio no se pide; la moneda sí.
+        && !(contexto.sinCosto && contexto.manual && (def.slug === 'precio_total' || def.slug === 'base_precio')))
     : todosFaltantes
   if (contexto.soloMinimosDeCosto && !contexto.manual) {
     const descriptivos = todosFaltantes.filter(def => !faltantes.includes(def))

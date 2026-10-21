@@ -648,12 +648,15 @@ export async function lecturaManualEnBorrador(
         : tipo === 'actividad'
           ? { tipo, datos: leerActividadManual(datos) }
           : { tipo, datos: leerOtroServicioManual(datos) }
+  // «Todavía no tengo el costo: lo saco del tarifario» (2026-10-20): solo en la forma por pasos.
+  const sinCosto = porPasos && !!datos && typeof datos === 'object' && (datos as Record<string, unknown>).sinCosto === true
   const r = lecturaManual({
     ranura,
     entrada,
     leidaEn: new Date().toISOString(),
     viaje: ctx.viaje.fechas,
     ...(porPasos ? { fuenteOpcional: true } : {}),
+    ...(sinCosto ? { sinCosto: true } : {}),
   })
   if (!r.ok) return { ok: false, codigo: 'CAMPOS', mensaje: r.errores._ ?? 'Revisa los campos marcados.', errores: r.errores }
   const leida = r.lectura

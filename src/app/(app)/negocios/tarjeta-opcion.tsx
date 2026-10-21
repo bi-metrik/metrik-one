@@ -48,6 +48,7 @@ import { ranuraDeGrupo } from '@/lib/cotizaciones/ranuras-pantallazo'
 import { avisoFechaDeActividad, avisoTasaPendiente } from '@/lib/cotizaciones/actividad-pantallazo'
 import {
   composicionDeLinea,
+  costoPendienteDelTarifario,
   formatoMonto,
   leerTarifaPax,
   monedaDeTarifa,
@@ -185,6 +186,7 @@ export default function TarjetaOpcion({
   onMover,
   mover,
   respaldo,
+  cambiarCosto = null,
   nota,
   bloqueTitulo,
   general = false,
@@ -228,6 +230,12 @@ export default function TarjetaOpcion({
   mover: ReactNode
   /** Lo que la opción todavía necesita a mano (sin costo confirmado). */
   respaldo: ReactNode
+  /**
+   * Con el costo ya confirmado: «Cambiar el costo por una tarifa del proveedor» (brief del
+   * 2026-10-20, punto 1). Sin él, una línea escrita a mano nacía confirmada y el panel de tarifas,
+   * que vive en `respaldo`, no se veía nunca.
+   */
+  cambiarCosto?: ReactNode
   /** La nota para el cliente de una opción que no es hotel (el hotel la escribe sobre la hoja). */
   nota: ReactNode
   /** «Hotel en Providencia»: el bloque, como lo nombra la hoja del cliente. */
@@ -286,6 +294,8 @@ export default function TarjetaOpcion({
   const avisosCerrada = [
     avisoFechaDeActividad(ranura?.slug, tarifa, fechasViaje),
     avisoTasaPendiente(tarifa, composicionDeLinea(tarifa, composicionViaje), ranura?.slug),
+    // Escrita a mano sin costo (2026-10-20): con la tarjeta cerrada también se lee que falta.
+    !confirmada && costoPendienteDelTarifario(tarifa) ? 'Sin costo todavía: elígelo en «Tarifas del proveedor».' : null,
   ].filter((a): a is string => !!a)
 
   // Qué va y qué no (punto 0). El hook va siempre: en las demás opciones no pinta nada.
@@ -641,6 +651,7 @@ export default function TarjetaOpcion({
           />
 
           {!confirmada && respaldo}
+          {confirmada && editable && cambiarCosto}
 
           {/* El traslado, la actividad y (desde el 2026-10-05, D3) el vuelo también tienen su
               hoja: la línea de «Inversión» del documento y, en el vuelo, sus filas de la tabla

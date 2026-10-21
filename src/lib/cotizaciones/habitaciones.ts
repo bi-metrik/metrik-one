@@ -25,6 +25,7 @@ import {
   describirOcupacion,
   composicionDeLectura,
   formatoMonto,
+  MENSAJE_COSTO_PENDIENTE,
   montoDeCosto,
   mismoTexto,
   normalizarComposicion,
@@ -418,6 +419,11 @@ export function resolverHabitaciones(
   const cuentan = r.habitaciones.filter(h => h.rol === 'habitacion')
   if (cuentan.length === 0) {
     return { estado: 'inconsistente', mensaje: 'Ninguna captura quedó como habitación: toca «Usar como habitación» en la que va.' }
+  }
+  // Una habitación escrita a mano sin costo (2026-10-20) no cuesta 0: falta su costo.
+  const correccionDe = new Map(habitacionesDeTarifa(tarifa).map(h => [h.id, h.correccion?.total ?? null]))
+  if (cuentan.some(h => h.lectura.costoPendiente && correccionDe.get(h.id) == null)) {
+    return { estado: 'sin_costo', mensaje: MENSAJE_COSTO_PENDIENTE }
   }
   const sinOcupacion = cuentan.find(h => !h.ocupacion)
   if (sinOcupacion) {

@@ -59,7 +59,8 @@ function vista(extra: Partial<TarifasDeLinea> = {}): TarifasDeLinea {
   }
 }
 
-const pintar = (v: TarifasDeLinea | null) => renderToStaticMarkup(React.createElement(TarifasProveedorLinea, { itemId: 'i1', onCambio: () => {}, inicial: v }))
+const pintar = (v: TarifasDeLinea | null, extra: Record<string, unknown> = {}) => renderToStaticMarkup(React.createElement(TarifasProveedorLinea, { itemId: 'i1', onCambio: () => {}, inicial: v, ...extra }))
+const ELEGIDA_FILA_0 = { extraccion_id: 'x', proveedor_id: 'p1', tarifario_de_id: null, filas: [{ indice_fila: 0, cantidad: 1, noches: 3, tipo: null }], noPagan: [], canal: 'neta' as const, comision_pct: null, iva_incluido: false, iva_pct: 19, moneda: 'COP', archivo: 'Tarifas Ficticias 2027.pdf', leidaEn: 't', por: 'Ana Ficticia', porId: null }
 
 describe('las tarifas del proveedor en la línea', () => {
   it('cerrada, es un botón: nada se pide ni se elige hasta abrirla', () => {
@@ -127,5 +128,42 @@ describe('las tarifas del proveedor en la línea', () => {
     const html = pintar({ ...v, proveedor: { ...v.proveedor!, por: 'nombre' } })
     expect(html).toContain('reconocido por el nombre del pantallazo')
     expect(html).toContain('Es otro proveedor')
+  })
+
+  it('en una línea con el costo confirmado: el título dice que lo cambia, y antes de usar se ven el costo actual y el nuevo', () => {
+    const cerrada = pintar(null, { titulo: 'Cambiar el costo por una tarifa del proveedor', costoActual: 240000 })
+    expect(cerrada).toContain('Cambiar el costo por una tarifa del proveedor')
+    expect(cerrada).toContain('aria-expanded="false"')
+    const html = pintar(vista({ elegida: ELEGIDA_FILA_0 }), { costoActual: 240000 })
+    expect(html).toContain('data-costo-actual-y-nuevo')
+    expect(html).toMatch(/Costo actual de la línea: <strong>\$240\.000<\/strong>/)
+    expect(html).toContain('$900.000')
+    expect(html).toContain('Nada cambia hasta que toques el botón.')
+    expect(html).toContain('Usar esta tarifa y reemplazar el costo')
+  })
+
+  it('sin costo todavía: no hay «costo actual» y el botón dice «en la línea»', () => {
+    const html = pintar(vista({ elegida: ELEGIDA_FILA_0 }), { costoActual: null })
+    expect(html).not.toContain('data-costo-actual-y-nuevo')
+    expect(html).toContain('Usar esta tarifa en la línea')
+  })
+
+  it('la línea escrita a mano sin costo la abre de entrada', () => {
+    const html = pintar(null, { abiertaDeEntrada: true })
+    expect(html).toContain('aria-expanded="true"')
+    expect(html).toContain('Buscando las tarifas…')
+  })
+
+  it('una actividad por persona de un día no habla de noches (punto 3)', () => {
+    const tour = {
+      temporadas: [{ id: 'A', nombre: 'Alta', rangos: [{ desde: '2027-11-01', hasta: '2027-11-30' }] }],
+      tarifas: [fila({ categoria: 'Tour Ficticio de Bahía', temporada_id: 'A', base_precio: 'por_persona', tipo_pasajero: 'adulto', precio: 105000 })],
+    }
+    const u = tarifasParaCotizar({ estado: 'revisada', vigenciaDesde: '2027-01-01', vigenciaHasta: '2027-12-31', tarifario: tour, monedas: null }, null)
+    if (!u.ok) throw new Error(u.motivo)
+    const o = ofrecerTarifas({ usables: u.tarifas, tarifario: tour, composicion, entrada: '2027-11-15', salida: null })
+    const html = pintar(vista({ opciones: o.opciones, avisos: o.avisos, calendario: o.calendario, fechas: { entrada: '2027-11-15', salida: null, deLaLinea: true } }))
+    expect(html).toContain('temporada Alta · aplica el 15 nov')
+    expect(html).not.toMatch(/noche/)
   })
 })

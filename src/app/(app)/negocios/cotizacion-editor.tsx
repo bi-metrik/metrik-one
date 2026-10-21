@@ -97,6 +97,7 @@ import {
   composicionDeLinea,
   confirmacionDesactualizada,
   confirmadaVigente,
+  costoPendienteDelTarifario,
   leerTarifaPax,
   describirOcupacion,
   formatoMonto,
@@ -1660,6 +1661,10 @@ export default function CotizacionEditor({ oportunidadId, cotizacion, initialIte
           </>
         )
 
+        // El costo que la línea tiene hoy (pesos, sin IVA), para mostrarlo al lado del nuevo.
+        const costoActualDeLinea = costoDelItem > 0 ? Math.round(costoDelItem * itemCantidad * 100) / 100 : null
+        // Escrita a mano «sin costo»: el precio sale del tarifario y el panel nace abierto.
+        const costoDelTarifario = !tarifaDelItem.confirmada && costoPendienteDelTarifario(tarifaDelItem)
         const jsxTarifaPax = (
           <>
               {editable && ranuraDeItem && (
@@ -1677,11 +1682,28 @@ export default function CotizacionEditor({ oportunidadId, cotizacion, initialIte
                   del pantallazo y del costo a mano, que siguen igual. */}
               {editable && ranuraDeItem && lineasPorTipo && (
                 <div className="mt-2">
-                  <TarifasProveedorLinea itemId={item.id} onCambio={() => refrescar()} />
+                  <TarifasProveedorLinea
+                    itemId={item.id}
+                    onCambio={() => refrescar()}
+                    costoActual={costoActualDeLinea}
+                    abiertaDeEntrada={costoDelTarifario}
+                  />
                 </div>
               )}
           </>
         )
+        // Con el costo confirmado, el panel se ofrece igual para CAMBIARLO (brief del 2026-10-20,
+        // punto 1): la persona ve el costo de hoy y el nuevo, y nada cambia sin «Usar».
+        const jsxCambiarCosto = editable && ranuraDeItem && lineasPorTipo ? (
+          <div data-cambiar-costo-tarifa>
+            <TarifasProveedorLinea
+              itemId={item.id}
+              onCambio={() => refrescar()}
+              titulo="Cambiar el costo por una tarifa del proveedor"
+              costoActual={costoActualDeLinea}
+            />
+          </div>
+        ) : null
         const jsxAdicionales = (
           <>
               {ranuraDeItem && (
@@ -2436,6 +2458,7 @@ export default function CotizacionEditor({ oportunidadId, cotizacion, initialIte
                   />
                 </div>
               ) : null}
+              cambiarCosto={jsxCambiarCosto}
               respaldo={editable ? (
                 <div className="space-y-2" data-respaldo-opcion>
                   {jsxTarifaPax}
