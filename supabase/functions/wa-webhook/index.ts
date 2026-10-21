@@ -44,6 +44,7 @@ import { handleAyuda, handleUnclear, handleUnclearResume } from '../_shared/hand
 import { atenderBotonTerminos, atenderPendienteTerminos } from '../_shared/aceptacion-terminos-flujo.ts';
 import { atenderAvisoDatos, cerrarAviso } from '../_shared/aviso-datos-bot-flujo.ts';
 import { botEquipoPermitido, MENSAJE_BOT_SIN_CLARITY } from '../_shared/wa-modulos.ts';
+import { contestarNoSoportado, textoNoSoportado } from '../_shared/wa-no-soportado.ts';
 import { atenderEnBandeja, rutaDelMensaje } from '../_shared/wa-bandeja.ts';
 import { identificarRemitente } from '../_shared/wa-identificar.ts';
 import { atenderEscrito } from '../_shared/wa-interprete.ts';
@@ -508,6 +509,17 @@ async function processMessage(message: IncomingMessage): Promise<void> {
   //     intérprete, la bandeja, el módulo, la transcripción y el parser: nada retenido llega a Gemini.
   //     Apagado, no hace ni una consulta. Ver `_shared/aviso-datos-bot.ts`.
   if (await atenderAvisoDatos(supabase, user, message, processMessage)) return;
+
+  // 1a-nosop. Lo que el bot no lee (video, sticker, tarjeta de contacto): antes se perdía en silencio. Se dice que no se
+  //     puede leer y qué sí recibe (foto o PDF del soporte). En un workspace con la bandeja sigue callado, como antes.
+  //     Ver `_shared/wa-no-soportado.ts`.
+  if (message.type === 'no_soportado') {
+    await logMessage(supabase, message.phone, 'inbound', user.workspace_id, 'no_soportado', `[${message.tipo_meta ?? 'desconocido'}]`).catch(() => {});
+    if (contestarNoSoportado(user, message) && botEquipoPermitido(user.modulos)) {
+      await sendTextMessage(message.phone, textoNoSoportado(message.tipo_meta));
+    }
+    return;
+  }
 
   // 1a-conv. La conversación completa (`wa_conversacion`, ver `_shared/wa-conversacion.ts`): solo en los workspaces con
   //     la bandeja o el bot conversacional configurado, y solo DESPUÉS del aviso de datos (lo retenido no se guarda).

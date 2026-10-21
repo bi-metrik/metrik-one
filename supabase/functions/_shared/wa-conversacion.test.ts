@@ -96,6 +96,18 @@ describe('filaEntrante', () => {
     }))
     expect(f).toMatchObject({ clase: 'toque', texto: 'Sí, ábrelo', toque_id: 't1|abc|si', contexto_wamid: 'wamid.del-boton' })
   })
+  it('un documento (el PDF del recibo) se guarda como `otro` con su medio, tipo y nombre, y el pie como texto', () => {
+    const f = filaEntrante(BANDEJA, msg({
+      type: 'document', text: 'Este fue la ida', document_id: 'media-pdf', document_mime: 'application/pdf', document_filename: 'recibo-uber.pdf', wa_message_id: 'wamid.doc',
+    }))
+    // `otro` y no `documento`: el CHECK de la tabla no lo tiene y así no hace falta migración.
+    expect(f).toMatchObject({ clase: 'otro', texto: 'Este fue la ida', wa_message_id: 'wamid.doc', media: { tipo: 'documento', id: 'media-pdf', mime: 'application/pdf', nombre: 'recibo-uber.pdf' } })
+    expect(claseDelEntrante({ type: 'document', reenviado: true })).toBe('reenvio')
+  })
+  it('un documento reenviado conserva su medio (sirve de soporte igual)', () => {
+    const f = filaEntrante(BANDEJA, msg({ type: 'document', reenviado: true, document_id: 'media-pdf2', wa_message_id: 'wamid.doc2' }))
+    expect(f).toMatchObject({ clase: 'reenvio', texto: null, media: { tipo: 'documento', id: 'media-pdf2' } })
+  })
   it('un audio llega sin texto y con su medio', () => {
     const f = filaEntrante(BANDEJA, msg({ type: 'audio', audio_id: 'media-9', wa_message_id: 'wamid.3' }))
     expect(f).toMatchObject({ clase: 'audio', texto: null, media: { tipo: 'audio', id: 'media-9' }, toque_id: null })

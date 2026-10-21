@@ -10,6 +10,7 @@ import {
   BTN_SIN_SOPORTE,
   MAX_REINTENTOS_SOPORTE,
   MSG_SOPORTE,
+  archivoDeSoporte,
   decidirSoporte,
   type EntradaSoporte,
 } from './soporte-foto';
@@ -144,5 +145,26 @@ describe('la invariante', () => {
     for (const e of entradas) {
       expect(decidirSoporte(e, 0).accion, JSON.stringify(e)).toBe('permanecer');
     }
+  });
+});
+
+describe('el PDF del soporte (2026-10-21)', () => {
+  it('un documento PDF o de imagen con id se guarda como soporte', () => {
+    expect(decidirSoporte({ tipo: 'document', tieneImagen: true, texto: 'Este fue la ida' }, 0)).toEqual({ accion: 'guardar_foto' });
+  });
+
+  it('archivoDeSoporte: la foto, o un documento PDF/imagen; otro tipo no', () => {
+    expect(archivoDeSoporte({ type: 'image', image_id: 'i1' })).toBe('i1');
+    expect(archivoDeSoporte({ type: 'document', document_id: 'd1', document_mime: 'application/pdf' })).toBe('d1');
+    expect(archivoDeSoporte({ type: 'document', document_id: 'd2' })).toBe('d2');
+    expect(archivoDeSoporte({ type: 'document', document_id: 'd3', document_mime: 'application/vnd.ms-excel' })).toBeNull();
+    expect(archivoDeSoporte({ type: 'text' })).toBeNull();
+  });
+
+  it('un documento que no es soporte no cierra: pide foto o PDF', () => {
+    const d = decidirSoporte({ tipo: 'document', tieneImagen: false, texto: '' }, 0);
+    expect(d).toMatchObject({ accion: 'permanecer', mensaje: MSG_SOPORTE.noEsFoto, conBotones: true });
+    expect(MSG_SOPORTE.noEsFoto).toContain('PDF');
+    expect(MSG_SOPORTE.pedir).toContain('PDF');
   });
 });

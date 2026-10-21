@@ -72,6 +72,8 @@ export function claseDelEntrante(message: Pick<IncomingMessage, 'type' | 'reenvi
     case 'audio': return 'audio';
     case 'image': return 'imagen';
     case 'location': return 'ubicacion';
+    // Un documento va como `otro` (el CHECK de `wa_conversacion.clase` no tiene `documento`: así no hace falta
+    // migración); lo que lo distingue es su `media` (`{ tipo: 'documento', … }`).
     default: return 'otro';
   }
 }
@@ -88,15 +90,28 @@ function textoDeUbicacion(message: IncomingMessage): string | null {
   return `[ubicación] ${l.name ?? l.address ?? `${l.latitude},${l.longitude}`}`;
 }
 
+/**
+ * El archivo que llegó con el mensaje: `{ tipo, id }` (el id de Meta para bajarlo) y, en un documento, su tipo y su
+ * nombre (`mime`, `nombre`). Un documento sin id no deja media. Pura.
+ */
+export function mediaDelEntrante(message: IncomingMessage): Record<string, unknown> | null {
+  if (message.type === 'audio' && message.audio_id) return { tipo: 'audio', id: message.audio_id };
+  if (message.type === 'image' && message.image_id) return { tipo: 'imagen', id: message.image_id };
+  if (message.type === 'document' && message.document_id) {
+    return {
+      tipo: 'documento', id: message.document_id,
+      ...(message.document_mime ? { mime: message.document_mime } : {}),
+      ...(message.document_filename ? { nombre: message.document_filename.slice(0, 200) } : {}),
+    };
+  }
+  return null;
+}
+
 /** La fila de un mensaje entrante, tal como se inserta. Pura. */
 export function filaEntrante(user: Pick<WaUser, 'workspace_id'>, message: IncomingMessage): Record<string, unknown> {
   const clase = claseDelEntrante(message);
   const texto = message.type === 'location' ? textoDeUbicacion(message) : ((message.text ?? '').trim() || null);
-  const media = message.type === 'audio' && message.audio_id
-    ? { tipo: 'audio', id: message.audio_id }
-    : message.type === 'image' && message.image_id
-      ? { tipo: 'imagen', id: message.image_id }
-      : null;
+  const media = mediaDelEntrante(message);
   const esToque = message.type === 'interactive' || message.type === 'button';
   return {
     workspace_id: user.workspace_id,

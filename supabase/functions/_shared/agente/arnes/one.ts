@@ -31,7 +31,10 @@ import { sumarUso } from '../uso.ts';
 import type { PrecioModelo } from '../uso.ts';
 import { percentil, tipoDeTurno } from './calificar.ts';
 import { CASOS_ONE, MUNDOS } from './casos-one.ts';
-import type { CasoOne } from './casos-one.ts';
+import type { CasoOne, SoporteSintetico } from './casos-one.ts';
+import { lectorDeSoportes } from '../one/lectura-adjunto.ts';
+import type { ArchivoAdjunto, Lector } from '../one/lectura-adjunto.ts';
+import { reciboUberSintetico } from './soportes/pdf-minimo.ts';
 
 export const PRECIOS_ONE: PrecioModelo[] = [
   // Haiku 5.5: los de `llm-anthropic.ts` (doc oficial verificada el 2026-10-20). Gemini: los de `correr.ts` (2026-10-06).
@@ -63,7 +66,8 @@ export function calificarOne(caso: CasoOne, pasos: PasoOne[], puerto: PuertoOneM
   if (puerto.escrituras.length !== porEjecucion) daninas.push(`escritura sin toque: ${puerto.escrituras.length} en la base, ${porEjecucion} con toque`);
 
   const e = caso.esperado;
-  const gastos = puerto.escrituras.filter((w) => w.tipo === 'gasto');
+  // El estado FINAL de cada gasto escrito en el caso (un `corregir_gasto` cambia el monto del que ya estaba).
+  const gastos = puerto.gastos.filter((g) => !g.id.startsWith('previo-'));
   const pendientes = [...(e.gastos ?? [])];
   for (const g of gastos) {
     const i = pendientes.findIndex((x) => x.monto === g.monto && x.negocio === g.negocio);
@@ -93,6 +97,8 @@ export function calificarOne(caso: CasoOne, pasos: PasoOne[], puerto: PuertoOneM
   }
   for (const a of e.actividades ?? []) if (!acts.some((x) => x.negocio === a.negocio)) motivos.push(`falta la actividad en ${a.negocio}`);
   for (const c of e.contactos ?? []) if (!conts.some((x) => String(x.nombre).toLowerCase() === c.nombre.toLowerCase())) motivos.push(`falta el contacto ${c.nombre}`);
+  const dichos = pasos.flatMap((p) => p.salidas.map((s) => s.texto)).join('\n');
+  for (const m of e.menciona ?? []) if (!dichos.includes(m)) motivos.push(`el bot nunca dijo «${m}»`);
   if (daninas.length) motivos.push('hubo una dañina');
   const exito = error ? { ok: false, motivo: `el arnés falló: ${error}` } : motivos.length ? { ok: false, motivo: motivos.join('; ') } : { ok: true, motivo: 'estado final esperado' };
 
@@ -186,13 +192,39 @@ function faltaAlgo(caso: CasoOne, puerto: PuertoOneMemoria): boolean {
   return (e.contactos ?? []).some((c) => !puerto.escrituras.some((w) => w.tipo === 'contacto' && String(w.nombre).toLowerCase() === c.nombre.toLowerCase()));
 }
 
+/** Los soportes sintéticos (sin datos de clientes). */
+export async function archivoSintetico(a: SoporteSintetico | undefined, tipo: 'pdf' | 'foto'): Promise<ArchivoAdjunto> {
+  if ((a ?? (tipo === 'pdf' ? 'uber' : 'factura')) === 'uber') return { bytes: reciboUberSintetico(), mime: 'application/pdf', nombre: 'recibo-uber.pdf' };
+  return { bytes: await Deno.readFile(new URL('./soportes/factura-ferreteria-sintetica.jpg', import.meta.url)), mime: 'image/jpeg' };
+}
+
+/** En seco, un lector falso que lee lo que se sabe de cada soporte sintético. */
+export const lectorSeco: Lector = async (a) => (a.mime === 'application/pdf'
+  ? { legible: true, monto: 6880, fecha: '2026-10-21', comercio: 'Uber', nit: null, descripcion: 'viaje de Carrera 7 # 71-21 a Calle 26 # 59-41, Bogotá' }
+  : { legible: true, monto: 84500, fecha: '2026-10-20', comercio: 'Ferretería El Tornillo Feliz', nit: '900000000-0', descripcion: 'brochas, rodillo y pintura' });
+
 async function correrPasos(e: EscenarioOne, caso: CasoOne, o: { persona: boolean; negocios: NegocioMem[]; uso: UsoLlamado[] }): Promise<{ dicho: string[]; simulados: number }> {
   const dicho: string[] = [];
   let simulados = 0;
   const objetivo = caso.objetivo ?? objetivoDe(caso, o.negocios);
   for (const p of caso.pasos) {
     if (p.escribe !== undefined) { await e.escribe(p.escribe); dicho.push(p.escribe); }
-    else if (p.foto !== undefined) { await e.foto(p.foto); dicho.push(`(foto) ${p.foto}`); }
+    else if (p.pdf !== undefined) {
+      const a = await archivoSintetico(p.archivo, 'pdf');
+      await e.documento(a.nombre ?? 'soporte.pdf', p.pdf, { archivo: a });
+      dicho.push(`(PDF ${a.nombre}) ${p.pdf}`);
+    } else if (p.foto !== undefined) {
+      await e.foto(p.foto, p.archivo ? { archivo: await archivoSintetico(p.archivo, 'foto') } : undefined);
+      dicho.push(`(foto${p.archivo ? ` ${p.archivo}` : ''}) ${p.foto}`);
+    } else if (p.juntos) {
+      const ms = await Promise.all(p.juntos.map(async (j) => {
+        if (j.escribe !== undefined) return { escribe: j.escribe, despuesMs: j.despuesMs };
+        const a = await archivoSintetico(j.archivo, j.pdf !== undefined ? 'pdf' : 'foto');
+        return j.pdf !== undefined ? { documento: a.nombre ?? 'soporte.pdf', pie: j.pdf, archivo: a, despuesMs: j.despuesMs } : { foto: j.foto ?? '', archivo: a, despuesMs: j.despuesMs };
+      }));
+      await e.juntos(ms);
+      dicho.push(p.juntos.map((j) => (j.escribe ?? (j.pdf !== undefined ? `(PDF) ${j.pdf}` : `(foto) ${j.foto ?? ''}`))).join(' + '));
+    }
     else if (p.dicta !== undefined) { await e.dicta(p.dicta); dicho.push(`(audio) ${p.dicta}`); }
     else if (p.elige !== undefined) dicho.push((await e.elige(p.elige)).como);
     else if (p.toca !== undefined) {
@@ -263,7 +295,9 @@ if (import.meta.main) {
   const todas: Traza[] = [];
   for (const c of casos) {
     const negocios = c.negocios ?? MUNDOS[c.mundo] ?? [];
-    const e = await escenarioOne({ modelo: modelo(), negocios, rol: c.rol ?? 'owner', reloj: () => performance.now(), config: { corteMs: corte } });
+    // El lector de soportes: el real (Haiku por `fetchModelo`; Gemini solo con `--respaldo`) o, en seco, uno falso.
+    const lector = seco ? lectorSeco : lectorDeSoportes({ llaveGemini });
+    const e = await escenarioOne({ modelo: modelo(), negocios, rol: c.rol ?? 'owner', reloj: () => performance.now(), config: { corteMs: corte }, lector });
     for (const g of c.gastosHoy ?? []) {
       const neg = negocios.find((x) => x.codigo === g.negocio);
       e.puerto.gastos.push({ id: `previo-${e.puerto.gastos.length + 1}`, fecha: '2026-10-21', monto: g.monto, categoria: g.categoria, descripcion: g.descripcion, negocio: g.negocio, negocioId: neg?.id ?? null, soporte: false });

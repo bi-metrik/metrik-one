@@ -90,11 +90,51 @@ describe('extraerEntrante — mensaje con telefono', () => {
     expect(r).toBeNull();
   });
 
-  it('con telefono, un tipo que el bot no atiende sigue sin entrar', () => {
+  it('con telefono, una reacción (o un evento del sistema) sigue sin entrar', () => {
+    for (const type of ['reaction', 'system', 'unsupported']) {
+      const r = extraerEntrante(webhook({
+        messages: [{ from: '573001234567', id: 'wamid.6', timestamp: '1', type }],
+      }), PROPIO);
+      expect(r).toBeNull();
+    }
+  });
+
+  it('un video, un sticker o una tarjeta de contacto entran como `no_soportado` (el bot dice que no los lee)', () => {
+    for (const type of ['video', 'sticker', 'contacts']) {
+      const r = extraerEntrante(webhook({
+        messages: [{ from: '573001234567', id: `wamid.${type}`, timestamp: '1', type }],
+      }), PROPIO);
+      expect(r?.tipo).toBe('con_telefono');
+      expect(r && r.tipo === 'con_telefono' && r.mensaje).toMatchObject({ type: 'no_soportado', tipo_meta: type, wa_message_id: `wamid.${type}`, phone: '573001234567' });
+    }
+  });
+
+  it('un documento (el PDF del recibo) entra con su id, tipo, nombre y el pie como texto', () => {
     const r = extraerEntrante(webhook({
-      messages: [{ from: '573001234567', id: 'wamid.6', timestamp: '1', type: 'sticker' }],
+      messages: [{
+        from: '573159509103', id: 'wamid.doc', timestamp: '1761060000', type: 'document',
+        document: { id: '1234567890', mime_type: 'application/pdf', filename: 'recibo-uber.pdf', caption: 'Este fue la ida' },
+      }],
     }), PROPIO);
-    expect(r).toBeNull();
+    expect(r?.tipo).toBe('con_telefono');
+    expect(r && r.tipo === 'con_telefono' && r.mensaje).toMatchObject({
+      type: 'document', document_id: '1234567890', document_mime: 'application/pdf', document_filename: 'recibo-uber.pdf',
+      text: 'Este fue la ida', wa_message_id: 'wamid.doc',
+    });
+  });
+
+  it('un documento sin pie entra con texto vacío; el tipo se normaliza', () => {
+    const r = extraerEntrante(webhook({
+      messages: [{ from: '573159509103', id: 'wamid.doc2', timestamp: '1', type: 'document', document: { id: '99', mime_type: 'Application/PDF; charset=binary' } }],
+    }), PROPIO);
+    expect(r && r.tipo === 'con_telefono' && r.mensaje).toMatchObject({ type: 'document', document_id: '99', document_mime: 'application/pdf', text: '' });
+  });
+
+  it('una foto ahora trae su wamid (se deduplica y se marca leída como los demás)', () => {
+    const r = extraerEntrante(webhook({
+      messages: [{ from: '573159509103', id: 'wamid.img', timestamp: '1', type: 'image', image: { id: '77', caption: 'peaje' } }],
+    }), PROPIO);
+    expect(r && r.tipo === 'con_telefono' && r.mensaje).toMatchObject({ type: 'image', image_id: '77', text: 'peaje', wa_message_id: 'wamid.img' });
   });
 });
 
