@@ -91,14 +91,28 @@ export function propuestas(filas: FilaConversacion[]): Array<{ p: PropuestaGuard
  * (2026-10-09, 12:51) «¿Abro este viaje?» siguió pendiente después de «Listo, retomamos M1 26 1», volvió pegada a una
  * respuesta fija y un «sí» escrito la habría ejecutado. Estructural: lee la traza, no el texto. Pura.
  */
-export function propuestaVigente(filas: FilaConversacion[]): PropuestaGuardada | null {
+export function propuestaVigente(filas: FilaConversacion[], o: { venceConRespuesta?: boolean } = {}): PropuestaGuardada | null {
   const ps = propuestas(filas);
   const u = ps.at(-1);
   if (!u || u.resultado) return null;
   const i = filas.findIndex((f) => f.traza?.propuesta?.huella === u.p.huella);
   const despues = i >= 0 ? filas.slice(i + 1) : [];
   const atras = despues.some((f) => (f.traza?.herramientas ?? []).some((h) => h.ok && h.sobre !== undefined && h.sobre !== u.p.sobre));
-  return atras ? null : u.p;
+  if (atras) return null;
+  // Con `venceConRespuesta`: cualquier mensaje posterior del modelo que no reenvía ESTA propuesta (sus botones llevan su
+  // huella) la deja atrás. Estructural: mira los ids de los botones que salieron, no el texto.
+  if (o.venceConRespuesta && despues.some((f) => f.traza?.tipo === 'modelo' && f.traza.salida && !reenviaLa(f.traza.salida, u.p.huella))) return null;
+  return u.p;
+}
+
+/** ¿Esta salida lleva los botones de la propuesta con esa huella? (el reenvío de la pendiente). Pura. */
+function reenviaLa(s: Salida, huella: string): boolean {
+  return 'opciones' in s && s.opciones.some((x) => x.id.includes(`|${huella}|`));
+}
+
+/** La vigente según el dominio (si sus propuestas vencen con cualquier respuesta). */
+export function vigenteDe(filas: FilaConversacion[], d: Pick<Dominio, 'propuestaVenceConRespuesta'>): PropuestaGuardada | null {
+  return propuestaVigente(filas, { venceConRespuesta: d.propuestaVenceConRespuesta === true });
 }
 
 export async function huellaPropuesta(accion: string, datos: unknown, turnoId: string): Promise<string> {
@@ -147,7 +161,7 @@ export function mismaPropuesta(a: Pick<Propuesta, 'accion' | 'datos'>, b: Pick<P
 // ── El estado y el respaldo ──────────────────────────────────────────────────
 
 async function estado(deps: DepsTurno, e: EntradaTurno): Promise<string[]> {
-  const vig = propuestaVigente(e.filas);
+  const vig = vigenteDe(e.filas, deps.dominio);
   const delDominio = (await deps.dominio.estado?.(e.ctx)) ?? [];
   return [
     `Ahora: ${fechaBogota(deps.ahoraMs())} (Bogotá).`,
@@ -179,7 +193,7 @@ function fuentesDeRespaldo(e: EntradaTurno, extra: string[]): string[] {
 /** La respuesta fija de «no pude» con las opciones vigentes (la propuesta pendiente, si la hay). */
 function caido(deps: DepsTurno, e: EntradaTurno): Salida {
   const t = respuestaFija(deps.reglamento, 'rf.modelo_caido');
-  const vig = propuestaVigente(e.filas);
+  const vig = vigenteDe(e.filas, deps.dominio);
   return vig ? salidaPropuesta(vig, t) : { tipo: 'texto', texto: t };
 }
 
@@ -280,8 +294,20 @@ export async function turnoDelModelo(deps: DepsTurno, e: EntradaTurno): Promise<
     const nombre = cierre.functionCall.name;
     const args = (cierre.functionCall.args ?? {}) as Record<string, unknown>;
     if (Array.isArray(args.reglas_usadas)) traza.reglas_usadas!.push(...args.reglas_usadas.map(String));
+    // Cada llamada del mensaje lleva su respuesta: Claude rechaza (HTTP 400) un `tool_use` sin su `tool_result` (medido
+    // en el arnés del 2026-10-21: el modelo cerró con dos llamadas y el segundo llamado del turno falló). Solo se atiende
+    // la primera; las demás vuelven sin ejecutar.
     const devolver = (error: string) => {
-      mensajes.push({ role: 'user', parts: [{ functionResponse: { name: nombre, response: { ok: false, error }, ...(cierre.functionCall.id ? { id: cierre.functionCall.id } : {}) } }] });
+      mensajes.push({
+        role: 'user',
+        parts: cierres.map((c) => ({
+          functionResponse: {
+            name: c.functionCall.name,
+            response: { ok: false, error: c === cierre ? error : 'No se ejecutó: llama una sola herramienta que cierre el turno por vez.' },
+            ...(c.functionCall.id ? { id: c.functionCall.id } : {}),
+          },
+        })),
+      });
     };
 
     if (nombre === TERMINAR) {
@@ -362,7 +388,7 @@ export async function turnoDelModelo(deps: DepsTurno, e: EntradaTurno): Promise<
       // Candado: la misma propuesta que ya está pendiente no se arma de nuevo. Se reenvía LA PENDIENTE (misma huella,
       // con sus botones) y arriba la respuesta del modelo o una línea fija: en vivo, el texto suelto dejaba los botones
       // muy arriba en el chat.
-      const vig = propuestaVigente(e.filas);
+      const vig = vigenteDe(e.filas, deps.dominio);
       if (vig && mismaPropuesta(vig, p.propuesta)) {
         traza.candados!.push({ candado: 'propuesta_repetida', detalle: `${accion}: igual a la pendiente ${vig.huella}` });
         return fin(salidaPropuesta(vig, arriba ?? TEXTO_PROPUESTA_PENDIENTE), { tema: 'propuesta', ...(arriba ? {} : { respuesta_fija: 'propuesta_pendiente' }) });
@@ -435,7 +461,7 @@ export async function toqueDePropuesta(
   const base: Traza = { tipo, bot: deps.dominio.bot, reglamento: { id: deps.reglamento.id, version: deps.reglamento.version, huella: deps.reglamento.huella } };
   const ps = propuestas(e.filas);
   const esta = ps.find((x) => x.p.huella === toque.huella);
-  const vig = propuestaVigente(e.filas);
+  const vig = vigenteDe(e.filas, deps.dominio);
   const salida = (s: Salida, ejecucion: Traza['ejecucion'], extra: Partial<Traza> = {}): SalidaTurno =>
     ({ salida: s, traza: { ...base, ...extra, ejecucion, salida: s, ms_herramientas: Math.round(deps.reloj() - t0) } });
 

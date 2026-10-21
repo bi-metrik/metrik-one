@@ -31,6 +31,7 @@ export default function FichaDeLinea({
   correcciones,
   deshabilitado,
   onGuardar,
+  fuente = 'pantallazo',
 }: {
   ranura: DefinicionRanura
   /** `LecturaCasilla.campos` de la captura principal. */
@@ -41,6 +42,8 @@ export default function FichaDeLinea({
   deshabilitado: boolean
   /** `valor: null` vuelve a lo leído; un texto (incluso vacío) corrige. */
   onGuardar: (slug: string, valor: string | null) => Promise<boolean>
+  /** De dónde salieron los campos: una línea escrita a mano no dice «leído del pantallazo». */
+  fuente?: 'pantallazo' | 'manual' | 'tarifario'
 }) {
   const ficha = fichaDeLinea(ranura, campos, correcciones, moneda)
   const vigente = (slug: string) => ficha.find(c => c.slug === slug)?.vigente ?? null
@@ -59,6 +62,7 @@ export default function FichaDeLinea({
             campo={c}
             deshabilitado={deshabilitado}
             onGuardar={onGuardar}
+            fuente={fuente}
             busqueda={c.slug === 'estrellas' && c.vigente === null ? busquedaDeCategoria(vigente('hotel'), vigente('ciudad')) : null}
           />
         ))}
@@ -91,7 +95,9 @@ function FilaDeFicha({
   deshabilitado,
   onGuardar,
   busqueda,
+  fuente,
 }: {
+  fuente: 'pantallazo' | 'manual' | 'tarifario'
   campo: CampoDeFicha
   deshabilitado: boolean
   onGuardar: (slug: string, valor: string | null) => Promise<boolean>
@@ -182,7 +188,11 @@ function FilaDeFicha({
       )}
       {!corregido && !editando && campo.slug === 'estrellas' && (
         <span className="block text-[9px] text-muted-foreground">
-          {campo.vigente ? 'Leído del pantallazo' : 'El pantallazo no la mostraba'}
+          {fuente === 'pantallazo'
+            ? (campo.vigente ? 'Leído del pantallazo' : 'El pantallazo no la mostraba')
+            : fuente === 'manual'
+              ? (campo.vigente ? 'Escrito a mano' : 'No se escribió')
+              : (campo.vigente ? 'Del tarifario del proveedor' : 'El tarifario no la trae')}
           {busqueda && (
             <>
               {' · '}

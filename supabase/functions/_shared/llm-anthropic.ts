@@ -102,6 +102,16 @@ export function falloTransitorio(estado: number): boolean {
   return estado === 429 || estado === 408 || estado >= 500;
 }
 
+/**
+ * La cuenta de Anthropic no atiende (llave inválida o revocada, sin permiso, o sin crédito): ningún pedido va a pasar
+ * hasta que alguien lo arregle, así que va al respaldo en Gemini. Medido el 2026-10-21 en el eval del bot: «Your credit
+ * balance is too low…» llega como HTTP 400 y, sin esto, no pasaba al respaldo. Pura.
+ */
+export function falloDeCuenta(estado: number, mensaje: string): boolean {
+  if (estado === 401 || estado === 403) return true;
+  return estado === 400 && /credit balance|billing|plans? ?& ?billing/i.test(mensaje);
+}
+
 // ── Esquemas ────────────────────────────────────────────────────────────────
 
 type Esq = Record<string, unknown>;
@@ -600,7 +610,7 @@ export function crearFetchModelo(o: OpcionesFetchModelo = {}): typeof fetch {
         // texto plano
       }
       const estado = estadoParaGemini(res.status);
-      if (falloTransitorio(res.status)) {
+      if (falloTransitorio(res.status) || falloDeCuenta(res.status, mensaje)) {
         return alRespaldo(`http ${res.status}`, () => respuestaJson({ error: { code: estado, message: `anthropic ${res.status}: ${mensaje}`, status: 'ANTHROPIC_ERROR' } }, estado));
       }
       return respuestaJson({ error: { code: estado, message: `anthropic ${res.status}: ${mensaje}`, status: 'ANTHROPIC_ERROR' } }, estado);
