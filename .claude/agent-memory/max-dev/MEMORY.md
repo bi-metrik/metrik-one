@@ -4,7 +4,7 @@
 
 - ⚠️⚠️ [Modo agente ONE en todo workspace](project_agente_one_todo_workspace.md) — #1226; deploy de wa-webhook lo enciende en todos; AGENTE_ONE=off; eval Haiku 6/6 limpio (21-oct)
 - ⚠️⚠️ [Gemini → Haiku 5.5 (fetchModelo)](project_migracion_haiku_55.md) — #1217 mergeado (ea16c7d2); respaldo Gemini; VE apagado; documentos/actas en Gemini por defecto
-- ⚠️⚠️ [Tarifas extraídas en la cotización](project_tarifas_en_cotizacion.md) — elegir = casilla 1 'tarifario' + confirmar; a mano = aMano; costoPendiente ⇒ sin_costo; la fuente de la casilla 1 decide los textos
+- ⚠️⚠️ [Tarifas extraídas en la cotización](project_tarifas_en_cotizacion.md) — línea nueva con tarifa por la aceptación de la bandeja; citable = revisada; no comparar monedas
 - ⚠️⚠️ [Suscripciones multiproducto (#1191)](project_suscripciones_multiproducto.md) — 10 migraciones aplicadas (180000 sin ver); backfill SIN correr; cobro por lista de correos
 - ⚠️ [Alta autogestionada de Valida](project_valida_alta_autogestionada.md) — pila #1104→#1169 dentro de #1191; sus migraciones YA aplicadas (20-oct); canal 'registro'
 - ⚠️⚠️ [Cobro con tarjeta por lista de correos](project_valida_cobro_correos_prueba.md) — VALIDA_COBRO_CORREOS_PRUEBA; correo de SESIÓN; después del registro no mira la lista
