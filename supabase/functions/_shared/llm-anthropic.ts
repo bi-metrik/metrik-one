@@ -473,6 +473,20 @@ export interface OpcionesFetchModelo {
   fetch?: typeof fetch;
   modelo?: string;
   avisar?: (m: string) => void;
+  /**
+   * Interruptor de una familia de sitios (p. ej. `LLM_PROVEEDOR_DOCUMENTOS`): manda sobre el global, salvo que el global
+   * diga `gemini` (el interruptor general siempre puede devolver todo a Gemini). Sin valor, rige `porDefecto`.
+   */
+  variable?: string;
+  porDefecto?: ProveedorLLM;
+}
+
+/** El proveedor que rige para un `fetchModelo` (global y, si la tiene, su familia). Pura. */
+export function proveedorDe(entorno: Entorno, o: Pick<OpcionesFetchModelo, 'variable' | 'porDefecto'> = {}): ProveedorLLM {
+  if (proveedorLLM(entorno('LLM_PROVEEDOR')) === 'gemini') return 'gemini';
+  if (!o.variable) return 'anthropic';
+  const v = (entorno(o.variable) ?? '').trim();
+  return v ? proveedorLLM(v) : (o.porDefecto ?? 'anthropic');
 }
 
 function respuestaJson(cuerpo: unknown, estado: number): Response {
@@ -498,7 +512,7 @@ export function crearFetchModelo(o: OpcionesFetchModelo = {}): typeof fetch {
   const fetchModelo = async (entrada: RequestInfo | URL, init?: RequestInit): Promise<Response> => {
     const real = o.fetch ?? globalThis.fetch;
     const url = typeof entrada === 'string' ? entrada : entrada instanceof URL ? entrada.href : entrada.url;
-    if (!esUrlGemini(url) || proveedorLLM(entorno('LLM_PROVEEDOR')) === 'gemini') return real(entrada, init);
+    if (!esUrlGemini(url) || proveedorDe(entorno, o) === 'gemini') return real(entrada, init);
     const llave = (entorno('ANTHROPIC_API_KEY') ?? '').trim();
     if (!llave) {
       avisarUnaVez(avisar, '[llm] LLM_PROVEEDOR=anthropic pero falta ANTHROPIC_API_KEY: sigue en Gemini');
@@ -583,3 +597,14 @@ export function crearFetchModelo(o: OpcionesFetchModelo = {}): typeof fetch {
 
 /** El fetch del modelo con el entorno del runtime (Deno o Node). */
 export const fetchModelo: typeof fetch = crearFetchModelo();
+
+/**
+ * Lectura de documentos (extract-fields, reconocer-documento, parse-rut, parse-ve-docs, documento del cliente y
+ * extraer-ranura). `LLM_PROVEEDOR_DOCUMENTOS`, por defecto `gemini`: el eval real del 2026-10-20 dio 91 % de campos
+ * con Haiku y fallos que Gemini no tenía (campos visibles vacíos, NIT con DV), así que se queda en Gemini hasta
+ * que el eval diga otra cosa.
+ */
+export const fetchModeloDocumentos: typeof fetch = crearFetchModelo({ variable: 'LLM_PROVEEDOR_DOCUMENTOS', porDefecto: 'gemini' });
+
+/** Actas de reunión (`actas/generacion.ts`). `LLM_PROVEEDOR_ACTAS`, por defecto `gemini` (eval real: 8 de 12). */
+export const fetchModeloActas: typeof fetch = crearFetchModelo({ variable: 'LLM_PROVEEDOR_ACTAS', porDefecto: 'gemini' });

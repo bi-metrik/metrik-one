@@ -14,7 +14,7 @@
 // Server-only. Nunca se llama al renderizar el PDF: solo desde el botón «Redactar con ONE».
 // ============================================================
 
-import { fetchModelo } from '@/lib/ai/modelo-llm'
+import { fetchModeloDocumentos } from '@/lib/ai/modelo-llm'
 import {
   MODELO_REDACTOR,
   contenidoDelRedactor,
@@ -57,7 +57,7 @@ export async function redactarTextoCliente(
   if (!apiKey) throw new Error('GEMINI_API_KEY no configurada en el servidor')
 
   const url = `https://generativelanguage.googleapis.com/v1beta/models/${MODELO_REDACTOR}:generateContent?key=${apiKey}`
-  const res = await fetchModelo(url, {
+  const res = await fetchModeloDocumentos(url, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({

@@ -25,6 +25,9 @@ export function cargarEntorno() {
   // Worktree en .claude/worktrees/<x>: el principal está 3 niveles arriba.
   cargarArchivo(path.resolve(RAIZ, '../../../.env.local'))
   process.env.LLM_PROVEEDOR = 'anthropic'
+  // El eval mide Haiku también en las familias que en producción siguen en Gemini por defecto.
+  process.env.LLM_PROVEEDOR_DOCUMENTOS = 'anthropic'
+  process.env.LLM_PROVEEDOR_ACTAS = 'anthropic'
 }
 
 export const llamadasBloqueadas: string[] = []

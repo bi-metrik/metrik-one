@@ -4,7 +4,7 @@
 // Pattern: parse-rut.ts (inline_data base64, structured output)
 // ============================================================
 
-import { fetchModelo } from '@/lib/ai/modelo-llm'
+import { fetchModeloDocumentos } from '@/lib/ai/modelo-llm'
 
 const GEMINI_MODEL = 'gemini-3.1-flash-lite'
 
@@ -169,7 +169,7 @@ export async function parseVeDocuments(
 
   let debugRaw = ''
   try {
-    const res = await fetchModelo(url, {
+    const res = await fetchModeloDocumentos(url, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({

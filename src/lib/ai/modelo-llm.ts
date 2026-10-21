@@ -20,6 +20,8 @@
 
 export {
   fetchModelo,
+  fetchModeloDocumentos,
+  fetchModeloActas,
   crearFetchModelo,
   proveedorLLM,
   MODELO_HAIKU,

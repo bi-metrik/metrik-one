@@ -13,6 +13,7 @@ import {
   contarEsquema,
   promoverOpcionales,
   LIMITE_OPCIONALES,
+  proveedorDe,
 } from './llm-anthropic.ts';
 import { esquemaCarga } from './agente/bandeja/extraccion.ts';
 import { CAMPOS_ARNES } from './agente/arnes/conjuntos.ts';
@@ -347,5 +348,28 @@ describe('presupuesto del esquema (400 «too many optional parameters»)', () =>
     expect(t.cuerpo.output_config).toBeUndefined();
     expect(t.conEsquema).toBe(false);
     expect(String(t.cuerpo.system)).toMatch(/^Extrae\.\n\nResponde únicamente con un objeto JSON válido que cumpla este JSON Schema/);
+  });
+});
+
+describe('interruptor por familia (LLM_PROVEEDOR_DOCUMENTOS, LLM_PROVEEDOR_ACTAS)', () => {
+  const ent = (v: Record<string, string>) => (k: string) => v[k];
+  const docs = { variable: 'LLM_PROVEEDOR_DOCUMENTOS', porDefecto: 'gemini' as const };
+
+  it('sin valor rige el de la familia (gemini); con valor manda la familia', () => {
+    expect(proveedorDe(ent({}), docs)).toBe('gemini');
+    expect(proveedorDe(ent({ LLM_PROVEEDOR: 'anthropic' }), docs)).toBe('gemini');
+    expect(proveedorDe(ent({ LLM_PROVEEDOR_DOCUMENTOS: 'anthropic' }), docs)).toBe('anthropic');
+    expect(proveedorDe(ent({}))).toBe('anthropic');
+  });
+
+  it('el global en gemini devuelve todo a Gemini, aunque la familia diga anthropic', () => {
+    expect(proveedorDe(ent({ LLM_PROVEEDOR: 'gemini', LLM_PROVEEDOR_DOCUMENTOS: 'anthropic' }), docs)).toBe('gemini');
+  });
+
+  it('un fetch de documentos sin la variable no toca a Anthropic aunque haya llave', async () => {
+    const real = vi.fn(async () => respuestaA({ ok: 1 }));
+    const f = crearFetchModelo({ ...docs, fetch: real as unknown as typeof fetch, entorno: ent({ ANTHROPIC_API_KEY: 'sk' }) });
+    await f(URL_G, { method: 'POST', body: JSON.stringify(cuerpoG()) });
+    expect(real.mock.calls[0][0]).toBe(URL_G);
   });
 });
