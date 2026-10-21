@@ -6,12 +6,13 @@
 import type { HandlerContext } from '../../types.ts';
 import { CATEGORIA_LABELS } from '../../types.ts';
 import { formatCOP, bold, formatProject } from '../../wa-format.ts';
-import { findActiveDestinos } from '../../wa-lookup.ts';
+import { buscarNegocios, findActiveNegocios } from '../../wa-lookup.ts';
 import { completeSession } from '../../wa-session.ts';
 import { downloadAndStoreImage } from '../../wa-media.ts';
 import type { ParsedFields } from '../../types.ts';
-import { showGastoConfirmation, proceedEmpresaGasto, handleGasto, categoriaDelGasto } from './gasto.ts';
-import { decidirConfirmacionGasto, decidirMontoPendiente } from './monto-pendiente.ts';
+import { showGastoConfirmation, proceedEmpresaGasto, handleGasto, categoriaDelGasto, ofrecerNegocios } from './gasto.ts';
+import { decidirSeleccionGasto, textoRepregunta, type DecisionSeleccion, type OpcionGasto } from './seleccion-gasto.ts';
+import { decidirConfirmacionGasto, decidirMontoPendiente, unirMensajes } from './monto-pendiente.ts';
 import { executeRegistro } from './execute.ts';
 import { BOTONES_SOPORTE, decidirSoporte } from './soporte-foto.ts';
 import { seguirConLaCola } from './cola-gastos.ts';
@@ -102,6 +103,25 @@ export async function handleResumeRegistro(ctx: HandlerContext): Promise<void> {
           { id: 'btn_cancel', title: '❌ Cancelar' },
         ]);
         return;
+      case 'cambiar_negocio': {
+        const [negocio] = await buscarNegocios(supabase, user.workspace_id, decision.codigo, 1);
+        if (negocio && negocio.coincidencia === 'codigo') {
+          const fields = { ...(context.parsed_fields ?? {}), mensaje_original: unirMensajes(context.parsed_fields?.mensaje_original, textoDe(ctx)) };
+          await showGastoConfirmation(ctx, negocio, context.amount!, context.categoria || 'otros', fields, 'negocio');
+          return;
+        }
+        await ctx.sendButtons(
+          `⚠️ No encontré ningún negocio activo con código ${decision.codigo}. ${destinoDelGasto(context)}`,
+          [{ id: 'btn_confirm', title: '✅ Confirmar' }, { id: 'btn_cancel', title: '❌ Cancelar' }],
+        );
+        return;
+      }
+      case 'aclarar_destino':
+        await ctx.sendButtons(destinoDelGasto(context), [
+          { id: 'btn_confirm', title: '✅ Confirmar' },
+          { id: 'btn_cancel', title: '❌ Cancelar' },
+        ]);
+        return;
     }
   }
 
@@ -143,6 +163,15 @@ export async function handleResumeRegistro(ctx: HandlerContext): Promise<void> {
 
     const options = context.options || [];
     const btnId = message.interactive_reply;
+
+    // A qué negocio va un gasto: además del número, el código del negocio, su nombre o «cancelar». El texto
+    // libre nunca se descarta (ver `seleccion-gasto.ts`). El pago a un proveedor del viaje (`paso_viaje`) tiene
+    // sus propias opciones y sigue como estaba.
+    if (context.pending_action === 'W01' && !context.paso_viaje) {
+      await responderSeleccionGasto(ctx, decidirSeleccionGasto({ texto: message.text ?? '', botonId: btnId }, options));
+      return;
+    }
+
     const btnMatch = btnId ? options.find((o: any) => o.id === btnId) : null;
     const selection = parseInt(text);
 
@@ -263,6 +292,62 @@ export async function reconfirmarGasto(ctx: HandlerContext, fields: ParsedFields
 
 // --- Selection sub-handlers ---
 
+/** Ejecuta la decisión sobre la respuesta a «¿Para cuál?» de un gasto. El gasto sigue en la sesión hasta el final. */
+async function responderSeleccionGasto(ctx: HandlerContext, decision: DecisionSeleccion): Promise<void> {
+  const { session, supabase, user } = ctx;
+  const c = session.context;
+  const options = (c.options || []) as OpcionGasto[];
+  const gasto = { amount: c.amount!, categoria: c.categoria || 'otros', fields: c.parsed_fields ?? {} };
+
+  switch (decision.accion) {
+    case 'opcion':
+      await handleW01Selection(ctx, decision.opcion);
+      return;
+    case 'cancelar':
+      await ctx.sendMessage('❌ Cancelado.');
+      await completeSession(supabase, session.id);
+      await seguirConLaCola(ctx);
+      return;
+    case 'repreguntar':
+      await ctx.sendOptions(textoRepregunta(), options.map((o) => o.label));
+      return;
+    case 'codigo':
+    case 'pista': {
+      const buscado = decision.accion === 'codigo' ? decision.codigo : decision.texto;
+      const encontrados = await buscarNegocios(supabase, user.workspace_id, buscado);
+      const seguros = decision.accion === 'codigo'
+        ? encontrados.filter((n) => n.coincidencia === 'codigo')
+        : encontrados;
+      if (seguros.length === 1) {
+        // El mensaje que nombró el negocio queda en el mensaje original del gasto, no en su descripción.
+        const fields = { ...gasto.fields, mensaje_original: unirMensajes(gasto.fields.mensaje_original, textoDe(ctx)) };
+        await showGastoConfirmation(ctx, seguros[0], gasto.amount, gasto.categoria, fields, 'negocio');
+        return;
+      }
+      if (seguros.length > 1) {
+        await ofrecerNegocios(ctx, `Encontré varios para «${buscado}». ¿Cuál?`, seguros, gasto, true);
+        return;
+      }
+      // Nada: se vuelve a preguntar con la misma lista. El gasto sigue esperando.
+      await ctx.sendOptions(textoRepregunta(buscado), options.map((o) => o.label));
+      return;
+    }
+  }
+}
+
+/** A dónde va el gasto que se está confirmando, dicho para repetir los botones sin perderlo. */
+function destinoDelGasto(c: HandlerContext['session']['context']): string {
+  const monto = c.amount ? ` de ${formatCOP(c.amount)}` : '';
+  if (c.destino_tipo === 'empresa') {
+    return `El gasto${monto} va como gasto de empresa. Si es de un negocio, escribe su código (p. ej. I1 26 5); si no, confirma o cancela.`;
+  }
+  return `El gasto${monto} va para ${bold(c.proyecto_nombre || 'el negocio')}. Si es otro, escribe su código (p. ej. I1 26 5); si no, confirma o cancela.`;
+}
+
+function textoDe(ctx: HandlerContext): string {
+  return String(ctx.message.text ?? '').trim();
+}
+
 async function handleW01Selection(ctx: HandlerContext, selected: { id: string; label: string; _tipo?: string }): Promise<void> {
   const { session, supabase, user } = ctx;
   const context = session.context;
@@ -293,11 +378,11 @@ async function handleW01Selection(ctx: HandlerContext, selected: { id: string; l
   }
 
   if (selected.id === 'otro_destino') {
-    const allActive = await findActiveDestinos(supabase, user.workspace_id);
-    const newOptions = allActive.all.slice(0, 5).map((d: any) => ({
+    const activos = await findActiveNegocios(supabase, user.workspace_id);
+    const newOptions = activos.slice(0, 5).map((d) => ({
       id: d.proyecto_id || d.id,
       label: formatProject(d),
-      _tipo: d._tipo,
+      _tipo: 'negocio',
     }));
     newOptions.push({ id: 'empresa', label: '🏢 Gasto de empresa', _tipo: 'empresa' as any });
     await ctx.sendOptions('Tus negocios:', newOptions.map((o) => o.label));

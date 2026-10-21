@@ -4,6 +4,7 @@
 
 import type { SupabaseClient } from './types.ts';
 import { bogotaYearMonth } from './bogota.ts';
+import { extraerCodigoNegocio, llaveCodigo } from './wa-codigo-negocio.ts';
 
 // ── Row shapes ────────────────────────────────────────────────
 // Only the columns these lookups and their callers actually read. The `*`
@@ -42,79 +43,13 @@ export type NegocioDestino = Omit<NegocioRow, 'codigo'> & {
   proyecto_id: string;
 };
 
-/**
- * A project row. Mind the key: `v_proyecto_financiero` exposes `proyecto_id`
- * and no `id`, while the `wa_find_projects` RPC aliases it back to `id`. That
- * is why callers resolve it through destinoId() instead of picking one.
- */
-export type ProyectoDestino = {
-  proyecto_id?: string;
-  id?: string;
-  codigo: string;
-  nombre: string;
-  estado: string;
-  presupuesto_total: number | null;
-  costo_acumulado: number;
-};
-
-/** Any destination for a movement: negocio or project, tagged with `_tipo`. */
-export type Destino =
-  | (NegocioDestino & { _tipo: 'negocio' })
-  | (ProyectoDestino & { _tipo: 'proyecto' });
-
 /** Resolve the id of a destino regardless of which lookup produced it. */
 export function destinoId(d: { proyecto_id?: string; id?: string }): string {
   return d.proyecto_id || d.id || '';
 }
 
-/** Find a single active project by its code (e.g., "KAE-1", "P-001", or numeric 12 → "P-012") */
-export async function findProjectByCode(
-  supabase: SupabaseClient,
-  workspaceId: string,
-  code: number | string,
-) {
-  // Normalize: if numeric, try "P-XXX" format; if string, match directly
-  const codeStr = typeof code === 'number'
-    ? `P-${String(code).padStart(3, '0')}`
-    : String(code).toUpperCase();
-
-  const { data, error } = (await supabase
-    .from('v_proyecto_financiero')
-    .select('*')
-    .eq('workspace_id', workspaceId)
-    .ilike('codigo', codeStr)
-    .eq('estado', 'en_ejecucion')
-    .single()) as { data: ProyectoDestino | null; error: QueryError };
-  if (error && error.code !== 'PGRST116') console.error('[wa-lookup] findProjectByCode error:', error);
-  return data ?? null;
-}
-
-/** Find active projects matching entity_hint by fuzzy name match */
-export async function findProjects(
-  supabase: SupabaseClient,
-  workspaceId: string,
-  entityHint: string,
-  limit = 5,
-) {
-  const { data, error } = (await supabase.rpc('wa_find_projects', {
-    p_workspace_id: workspaceId,
-    p_hint: entityHint,
-    p_limit: limit,
-  })) as { data: ProyectoDestino[] | null; error: QueryError };
-  if (error) console.error('[wa-lookup] findProjects error:', error);
-  return data ?? [];
-}
-
-/** Find all active projects for a workspace (no hint) */
-export async function findActiveProjects(supabase: SupabaseClient, workspaceId: string) {
-  const { data } = (await supabase
-    .from('v_proyecto_financiero')
-    .select('*')
-    .eq('workspace_id', workspaceId)
-    .eq('estado', 'en_ejecucion')
-    .order('updated_at', { ascending: false })) as { data: ProyectoDestino[] | null };
-  return data ?? [];
-}
+// Proyectos legacy: el bot ya no los busca (los gastos van a negocios desde el 2026-10-21). `wa_find_projects`
+// sigue en la base, arreglada (20261021093000), sin llamadas desde aquí.
 
 // ── NEGOCIOS ──────────────────────────────────────────────────
 
@@ -134,45 +69,67 @@ export async function findActiveNegocios(supabase: SupabaseClient, workspaceId: 
   }));
 }
 
-/** Find a single active negocio by its code (e.g., "R1 26 1") */
+/**
+ * Find a single active negocio by its code (e.g., "R1 26 1"). Compara por la llave del código (sin espacios ni
+ * guiones): "r1-26-1" y "R1261" son "R1 26 1". Antes buscaba con `ilike '%R1 26 1%'`, que también casaba
+ * "R1 26 10" y se quedaba con cualquiera de los dos; y el respaldo sin espacios solo miraba 20 negocios al azar.
+ */
 export async function findNegocioByCode(
   supabase: SupabaseClient,
   workspaceId: string,
   code: string,
 ) {
-  const codeStr = String(code).toUpperCase().trim();
-  // Try exact match first
+  const llave = llaveCodigo(code);
+  if (!llave) return null;
   const { data, error } = (await supabase
     .from('negocios')
     .select('id, nombre, codigo, precio_estimado, precio_aprobado, empresa_id, contacto_id, stage_actual')
     .eq('workspace_id', workspaceId)
-    .eq('estado', 'abierto')
-    .ilike('codigo', `%${codeStr}%`)
-    .limit(1)
-    .single()) as { data: NegocioRow | null; error: QueryError };
+    .eq('estado', 'abierto')) as { data: NegocioRow[] | null; error: QueryError };
+  if (error) console.error('[wa-lookup] findNegocioByCode error:', error);
+  const match = (data ?? []).find((n) => llaveCodigo(n.codigo) === llave);
+  return match ? { ...match, proyecto_id: match.id, codigo: match.codigo ?? '' } : null;
+}
 
-  if (!data) {
-    // Try matching without spaces (user might write "R1261" for "R1 26 1")
-    const codeNoSpaces = codeStr.replace(/\s+/g, '');
-    const { data: fuzzy } = (await supabase
-      .from('negocios')
-      .select('id, nombre, codigo, precio_estimado, precio_aprobado, empresa_id, contacto_id, stage_actual')
-      .eq('workspace_id', workspaceId)
-      .eq('estado', 'abierto')
-      .limit(20)) as { data: NegocioRow[] | null };
+/** Lo que devuelve `wa_find_negocios`: el negocio y cómo casó. */
+export type NegocioEncontrado = NegocioDestino & {
+  empresa_nombre?: string | null;
+  contacto_nombre?: string | null;
+  /** `codigo`: por el código; `exacta`: todas las palabras en el nombre, la empresa o el contacto; `parecida`: trigramas. */
+  coincidencia: 'codigo' | 'exacta' | 'parecida';
+};
 
-    const match = (fuzzy ?? []).find((n) =>
-      (n.codigo ?? '').replace(/\s+/g, '').toUpperCase() === codeNoSpaces
-    );
-
-    if (!match) {
-      if (error && error.code !== 'PGRST116') console.error('[wa-lookup] findNegocioByCode error:', error);
-      return null;
-    }
-    return { ...match, proyecto_id: match.id, codigo: match.codigo ?? '' };
+/**
+ * Negocios abiertos por código o por texto (nombre del negocio, de la empresa o del contacto), con la RPC
+ * `wa_find_negocios`. Si el texto trae un código («Revisa el I1 26 5»), se busca por el código.
+ *
+ * Si la RPC falla (p. ej. la función se desplegó antes que la migración), sigue con las búsquedas de siempre
+ * (código exacto y nombre del negocio): peor que la RPC, pero no deja el gasto sin destino.
+ */
+export async function buscarNegocios(
+  supabase: SupabaseClient,
+  workspaceId: string,
+  texto: string,
+  limit = 5,
+): Promise<NegocioEncontrado[]> {
+  const codigo = extraerCodigoNegocio(texto);
+  const hint = codigo ?? texto.trim();
+  if (!hint) return [];
+  const { data, error } = (await supabase.rpc('wa_find_negocios', {
+    p_workspace_id: workspaceId,
+    p_hint: hint,
+    p_limit: limit,
+  })) as { data: Array<NegocioRow & { coincidencia: NegocioEncontrado['coincidencia'] }> | null; error: QueryError };
+  if (!error) {
+    return (data ?? []).map((n) => ({ ...n, proyecto_id: n.id, codigo: n.codigo ?? '' }));
   }
-
-  return { ...data, proyecto_id: data.id, codigo: data.codigo ?? '' };
+  console.error('[wa-lookup] wa_find_negocios error, sigue con la búsqueda de siempre:', error);
+  if (codigo) {
+    const n = await findNegocioByCode(supabase, workspaceId, codigo);
+    return n ? [{ ...n, coincidencia: 'codigo' }] : [];
+  }
+  const porNombre = await findNegocios(supabase, workspaceId, hint, limit);
+  return porNombre.map((n) => ({ ...n, coincidencia: 'parecida' as const }));
 }
 
 /** Find active negocios matching hint by fuzzy name match */
@@ -196,46 +153,6 @@ export async function findNegocios(
     proyecto_id: n.id,
     codigo: n.codigo ?? '',
   }));
-}
-
-/**
- * Unified: find active destinos (negocios first, then projects).
- * Returns both types with a `_tipo` field to distinguish them.
- */
-export async function findActiveDestinos(supabase: SupabaseClient, workspaceId: string) {
-  const [negocios, projects] = await Promise.all([
-    findActiveNegocios(supabase, workspaceId),
-    findActiveProjects(supabase, workspaceId),
-  ]);
-  return {
-    negocios,
-    projects,
-    all: [
-      ...negocios.map((n) => ({ ...n, _tipo: 'negocio' as const })),
-      ...projects.map((p) => ({ ...p, _tipo: 'proyecto' as const })),
-    ],
-  };
-}
-
-/** Unified: find destinos matching hint (negocios + projects) */
-export async function findDestinos(
-  supabase: SupabaseClient,
-  workspaceId: string,
-  hint: string,
-  limit = 5,
-) {
-  const [negocios, projects] = await Promise.all([
-    findNegocios(supabase, workspaceId, hint, limit),
-    findProjects(supabase, workspaceId, hint, limit),
-  ]);
-  return {
-    negocios,
-    projects,
-    all: [
-      ...negocios.map((n) => ({ ...n, _tipo: 'negocio' as const })),
-      ...projects.map((p) => ({ ...p, _tipo: 'proyecto' as const })),
-    ],
-  };
 }
 
 /** Find contacts matching hint */
