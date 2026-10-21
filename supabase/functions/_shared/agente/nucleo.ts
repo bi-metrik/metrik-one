@@ -500,6 +500,18 @@ export async function turnoDelModelo(deps: DepsTurno, e: EntradaTurno): Promise<
       devolver(render.error);
       continue;
     }
+    // El dominio revisa lo que sale (ONE: una lista de negocios o «Gasto de empresa» armada por el modelo no sale).
+    const delDominio = d.revisarRespuesta?.(render.salida, e.ctx) ?? null;
+    if (delDominio) {
+      traza.candados!.push({ candado: 'respuesta_del_dominio', detalle: delDominio });
+      if (!correccionUsada) {
+        correccionUsada = true;
+        presupuesto = Math.max(presupuesto, traza.llamados! + 1);
+        devolver(delDominio);
+        continue;
+      }
+      return fin(caer(), { respuesta_fija: soloHecho ? 'rf.hecho' : 'rf.modelo_caido', error: 'respuesta_del_dominio' });
+    }
     const aVerificar = [render.salida.texto, ...('opciones' in render.salida ? render.salida.opciones.map((o) => `${o.titulo}. ${o.descripcion ?? ''}`) : [])].join('\n');
     const motivos = texto ? [...verificar(aVerificar, respaldoDe([...respaldoFijo, ...fuentesDeRespaldo(e, resultadosTurno)])), ...afirmaRegistroBorrado(aVerificar, regs)] : ['texto vacío'];
     if (motivos.length) {

@@ -309,7 +309,7 @@ describe('una propuesta vence cuando el bot manda otro mensaje (arnés 2026-10-2
     const modelo = modeloGuionado([
       { name: 'proponer', args: { accion: 'gasto', datos: { monto: 47600, negocio: 'A1 26 1', categoria: 'otros' } } },
       { name: 'negocios_abiertos', args: {} },
-      { name: 'responder', args: { tema: 'gasto', texto: '¿A cuál va?', opciones: [{ titulo: 'A1 26 1' }, { titulo: 'Gasto de empresa' }] } },
+      { name: 'responder', args: { tema: 'gasto', texto: '¿A cuál va?', opciones: [{ titulo: 'A1 26 1' }, { titulo: 'V1 26 5' }] } },
     ])
     const e = await escenarioOne({ modelo, negocios: NEGOCIOS })
     await e.escribe('47.600')
@@ -334,9 +334,9 @@ describe('una propuesta vence cuando el bot manda otro mensaje (arnés 2026-10-2
   it('el Estado lleva la última lista con su orden', async () => {
     const modelo = modeloGuionado([
       { name: 'negocios_abiertos', args: {} },
-      { name: 'responder', args: { tema: 'gasto', texto: '¿A cuál va?', opciones: [{ titulo: 'A1 26 1', descripcion: 'Alfa' }, { titulo: 'Gasto de empresa' }] } },
+      { name: 'responder', args: { tema: 'gasto', texto: '¿A cuál va?', opciones: [{ titulo: 'A1 26 1', descripcion: 'Alfa' }, { titulo: 'V1 26 5' }] } },
       (p) => {
-        expect(p.mensajes[0].parts[0].text).toContain('Última lista que mostraste (#2, 1 mensaje(s) de la persona después): 1) A1 26 1; 2) Gasto de empresa.')
+        expect(p.mensajes[0].parts[0].text).toContain('Última lista que mostraste (#2, 1 mensaje(s) de la persona después): 1) A1 26 1; 2) V1 26 5.')
         return { name: 'responder', args: { tema: 'gasto', texto: 'Listo.' } }
       },
     ])

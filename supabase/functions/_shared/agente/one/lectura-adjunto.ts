@@ -38,7 +38,7 @@ export function sePuedeLeer(mime: string): boolean {
 }
 
 export const PROMPT_LECTURA = [
-  'Eres un lector de soportes de gasto colombianos (recibos, facturas, tiquetes, comprobantes de pago, recibos de Uber, DiDi, peajes, tiendas).',
+  'Eres un lector de soportes de pago colombianos (recibos, facturas, tiquetes, comprobantes de pago, consignación, depósito o transferencia, hechos o recibidos, recibos de Uber, DiDi, peajes, tiendas).',
   'Lee el archivo y devuelve SOLO lo que está escrito en él. No adivines: si un dato no aparece, va null.',
   '- monto: el TOTAL pagado en pesos colombianos, como número entero sin puntos (6.880 → 6880; $1.234.567,00 → 1234567). Si hay propina incluida en el total, el total.',
   '- fecha: la fecha del pago o de la factura, en formato AAAA-MM-DD.',
@@ -111,7 +111,9 @@ export function normalizarLectura(v: unknown): LecturaAdjunto {
   const fecha = f && !Number.isNaN(Date.parse(`${f}T12:00:00Z`)) ? f : null;
   const nit = corto(o.nit, 20)?.replace(/[^\d-]/g, '') || null;
   return {
-    legible: o.legible !== false && monto !== null,
+    // Con el total leído, es legible aunque el modelo dude de qué clase de soporte es (arnés 2026-10-21: un comprobante de
+    // depósito de $350.000 volvió con el monto y `legible: false`, y el bot pidió el monto que el archivo traía).
+    legible: monto !== null,
     monto, fecha,
     comercio: corto(o.comercio, 80),
     nit,
