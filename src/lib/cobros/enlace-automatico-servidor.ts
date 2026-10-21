@@ -1,6 +1,7 @@
 import 'server-only'
 import type { SupabaseClient } from '@supabase/supabase-js'
-import { registrarActividad } from '@/lib/activity/registrar-actividad'
+import { anclaDeFila, idsPorTipo, type Ancla } from '@/lib/suscripciones-producto/ancla'
+import { anotarEnAncla } from '@/lib/suscripciones-producto/bitacora'
 import { traerTodo } from '@/lib/supabase/paginar'
 import { esDiaHabil, normalizarPais, PAIS_POR_DEFECTO } from '@/lib/dates/dias-habiles'
 import type { PasarelaAdapter } from '@/lib/suscripciones/pasarela/adapter'
@@ -10,6 +11,7 @@ import {
   ESTADOS_CONTRATO_CON_COBRO,
   esRechazoEsperado,
   limiteVentana,
+  llaveContrato,
   planesConEnlaceAutomatico,
   seleccionarCuotasParaEnlace,
   type CobroParaSeleccion,
@@ -67,7 +69,7 @@ export type EstadoAviso = 'enviado' | 'omitido' | 'fallido'
 
 export interface ResumenEnlacesAutomaticos {
   candidatas: number
-  generados: { cuotaId: string; negocioId: string; numero: number; aviso: EstadoAviso; motivoAviso: string | null }[]
+  generados: { cuotaId: string; negocioId: string | null; suscripcionId?: string | null; numero: number; aviso: EstadoAviso; motivoAviso: string | null }[]
   /** Otro proceso lo dejó vigente entre la selección y la generación. */
   yaVigentes: number
   /** Descartadas antes de llamar a la pasarela, por motivo. */
@@ -75,6 +77,12 @@ export interface ResumenEnlacesAutomaticos {
   /** La generación las rechazó por una razón esperada (cubierta con pagos anteriores, etc.). */
   omitidas: { cuotaId: string; motivo: string }[]
   errores: { cuotaId: string; error: string }[]
+  /**
+   * Cuotas de planes que cobran con la tarjeta guardada (pasarela `epayco`) que NO reciben enlace:
+   * la tarjeta todavía no las rechazó. Un enlace antes invitaría a pagar dos veces lo que la tarjeta
+   * cobra sola. Después del rechazo sí lo reciben (Carmen §2.3, día 0).
+   */
+  conTarjetaSinRechazo: number
 }
 
 const FROM_AVISO = 'MéTRIK · Facturación <facturacion@metrikone.co>'
@@ -107,7 +115,9 @@ async function enviarPorResend(m: CorreoSaliente): Promise<ResultadoEnvio> {
 
 interface FilaContrato {
   workspace_id: string
-  negocio_id: string
+  negocio_id: string | null
+  /** Desde 20261016: el contrato de una suscripción (`suscripciones_producto`), sin negocio. */
+  suscripcion_id?: string | null
   estado: string
   vigente_desde: string | null
   aceptante_designado_id: string | null
@@ -127,6 +137,7 @@ export async function generarEnlacesAutomaticos(
     descartadas: { pagada: 0, anulada: 0, enlace_vigente: 0 },
     omitidas: [],
     errores: [],
+    conTarjetaSinRechazo: 0,
   }
 
   // 1. Contratos de servicio que siguen cobrando.
@@ -134,26 +145,34 @@ export async function generarEnlacesAutomaticos(
     (desde, hasta) =>
       db
         .from('servicios_contratados')
-        .select('id, workspace_id, negocio_id, estado, vigente_desde, aceptante_designado_id, workspace_pagador_id')
+        .select('id, workspace_id, negocio_id, suscripcion_id, estado, vigente_desde, aceptante_designado_id, workspace_pagador_id')
         .in('estado', [...ESTADOS_CONTRATO_CON_COBRO])
         .order('id')
         .range(desde, hasta),
     { etiqueta: 'contratos de servicio (enlace automático)' },
   )
   if (contratos.length === 0) return resumen
-  const negocioIds = [...new Set(contratos.map((c) => c.negocio_id))]
+  const { negocios: negocioIds, suscripciones: suscripcionIds } = idsPorTipo(
+    contratos.map((c) => anclaDeFila(c)).filter((a): a is Ancla => a !== null),
+  )
 
   // 2. Sus planes (activos o no: ver `enlace-automatico.ts`) y la configuración de cobros del espacio.
-  const planesFilas = await traerTodo<{ id: string; workspace_id: string; negocio_id: string; pasarela: string | null }>(
-    (desde, hasta) =>
-      db
-        .from('planes_cobro')
-        .select('id, workspace_id, negocio_id, pasarela')
-        .in('negocio_id', negocioIds)
-        .order('id')
-        .range(desde, hasta),
-    { etiqueta: 'planes de los contratos (enlace automático)' },
-  )
+  //    Por las dos anclas: los de negocios y los de suscripciones.
+  type FilaPlan = { id: string; workspace_id: string; negocio_id: string | null; suscripcion_id?: string | null; pasarela: string | null }
+  const planesDe = (col: 'negocio_id' | 'suscripcion_id', ids: string[]) =>
+    ids.length === 0
+      ? Promise.resolve([] as FilaPlan[])
+      : traerTodo<FilaPlan>(
+          (desde, hasta) =>
+            db
+              .from('planes_cobro')
+              .select('id, workspace_id, negocio_id, suscripcion_id, pasarela')
+              .in(col, ids)
+              .order('id')
+              .range(desde, hasta),
+          { etiqueta: `planes de los contratos (enlace automático, ${col})` },
+        )
+  const planesFilas = (await Promise.all([planesDe('negocio_id', negocioIds), planesDe('suscripcion_id', suscripcionIds)])).flat()
   if (planesFilas.length === 0) return resumen
   const wsIds = [...new Set(planesFilas.map((x) => x.workspace_id))]
   const wsConfig = await db.from('workspaces').select('id, config_extra').in('id', wsIds)
@@ -163,8 +182,8 @@ export async function generarEnlacesAutomaticos(
   )
 
   const planes = planesConEnlaceAutomatico({
-    contratos: contratos.map((c): ContratoParaEnlace => ({ workspaceId: c.workspace_id, negocioId: c.negocio_id, estado: c.estado })),
-    planes: planesFilas.map((x): PlanParaEnlace => ({ id: x.id, workspaceId: x.workspace_id, negocioId: x.negocio_id, pasarela: x.pasarela })),
+    contratos: contratos.map((c): ContratoParaEnlace => ({ workspaceId: c.workspace_id, negocioId: c.negocio_id, suscripcionId: c.suscripcion_id ?? null, estado: c.estado })),
+    planes: planesFilas.map((x): PlanParaEnlace => ({ id: x.id, workspaceId: x.workspace_id, negocioId: x.negocio_id, suscripcionId: x.suscripcion_id ?? null, pasarela: x.pasarela })),
     configPorWorkspace,
     generaEnlaces: (x) => Boolean(resolver(x)?.crearEnlacePago),
   })
@@ -221,6 +240,29 @@ export async function generarEnlacesAutomaticos(
     ahoraMs: p.ahoraMs,
   })
   for (const d of seleccion.descartadas) resumen.descartadas[d.motivo] += 1
+
+  // 3a. Las cuotas que la tarjeta guardada ya rechazó: las de un plan que sigue en la tarjeta (cuota 2
+  // en adelante) y las del primer cobro, cuyo plan volvió al enlace (Condiciones 7.5). Su correo dice
+  // que la tarjeta no pasó (Términos 3.6: «METRIK lo informa al correo de notificaciones»).
+  const conTarjeta = new Set(planes.filter((x) => x.pasarela === 'epayco').map((x) => x.id))
+  const planesCandidatos = [...new Set(seleccion.candidatas.map((c) => c.planCobroId))]
+  let rechazadas = new Set<string>()
+  if (planesCandidatos.length > 0) {
+    const rech = await db
+      .from('cobro_intentos_tarjeta')
+      .select('plan_cobro_id, numero_cuota')
+      .in('plan_cobro_id', planesCandidatos)
+      .eq('resultado', 'rechazado')
+    // Sin poder leer los rechazos (la tabla aún no existe), ninguna cuota con tarjeta recibe enlace.
+    rechazadas = new Set(
+      rech.error ? [] : ((rech.data ?? []) as { plan_cobro_id: string; numero_cuota: number }[]).map((f) => `${f.plan_cobro_id}|${f.numero_cuota}`),
+    )
+  }
+  if (conTarjeta.size > 0) {
+    const antes = seleccion.candidatas.length
+    seleccion.candidatas = seleccion.candidatas.filter((c) => !conTarjeta.has(c.planCobroId) || rechazadas.has(`${c.planCobroId}|${c.numero}`))
+    resumen.conTarjetaSinRechazo = antes - seleccion.candidatas.length
+  }
   resumen.candidatas = seleccion.candidatas.length
 
   // 3b. Solo en día hábil del país del cliente que paga (decisión de Mauricio, 2026-09-27).
@@ -230,12 +272,12 @@ export async function generarEnlacesAutomaticos(
   // se genera y se avisa. El país es el del espacio que paga (`workspace_pagador_id`).
   const paisPorWorkspace = await paisesDeWorkspaces(
     db,
-    seleccion.candidatas.map((c) => pagadorDe(contratos, c.workspaceId, c.negocioId)),
+    seleccion.candidatas.map((c) => pagadorDe(contratos, c)),
   )
 
   // 4. Una por una: la pasarela no se llama en paralelo y un fallo no tumba las demás.
   for (const cand of seleccion.candidatas) {
-    const pais = paisPorWorkspace.get(pagadorDe(contratos, cand.workspaceId, cand.negocioId)) ?? PAIS_POR_DEFECTO
+    const pais = paisPorWorkspace.get(pagadorDe(contratos, cand)) ?? PAIS_POR_DEFECTO
     if (!esDiaHabil(p.hoy, pais)) {
       resumen.omitidas.push({ cuotaId: cand.cuotaId, motivo: `dia_no_habil_${pais}` })
       continue
@@ -257,21 +299,20 @@ export async function generarEnlacesAutomaticos(
       continue
     }
 
-    const aviso = await avisarEnlaceGenerado(db, deps, cand, r, contratos, p)
-    await registrarActividad(
+    const aviso = await avisarEnlaceGenerado(db, deps, cand, r, contratos, { ...p, tarjetaRechazada: rechazadas.has(`${cand.planCobroId}|${cand.numero}`) })
+    await anotarEnAncla(
       db,
       {
-        workspace_id: cand.workspaceId,
-        entidad_tipo: 'negocio',
-        entidad_id: r.negocioId,
-        tipo: 'sistema',
-        autor_id: null,
-        // `activity_log.contenido` tiene CHECK de 280 caracteres.
-        contenido: `Enlace de pago en línea generado automáticamente para la cuota ${r.numero}${r.monto ? ` por $${r.monto.toLocaleString('es-CO')}` : ''}${r.pasarela ? ` (${r.pasarela})` : ''}${r.retencionIva > 0 ? `, neto de $${r.retencionIva.toLocaleString('es-CO')} de retención de IVA (certificado pendiente)` : ''}. Aviso por correo: ${TEXTO_AVISO[aviso.estado]}${aviso.motivo ? ` (${aviso.motivo})` : ''}.`.slice(0, 280),
+        ancla: anclaDeFila({ negocio_id: r.negocioId, suscripcion_id: r.suscripcionId }),
+        workspaceId: cand.workspaceId,
+        tipo: 'enlace_pago',
+        datos: { cuota_id: cand.cuotaId, cobro_id: r.cobroId, aviso: aviso.estado },
+        // `activity_log.contenido` tiene CHECK de 280 caracteres (lo corta `anotarEnAncla`).
+        texto: `Enlace de pago en línea generado automáticamente para la cuota ${r.numero}${r.monto ? ` por $${r.monto.toLocaleString('es-CO')}` : ''}${r.pasarela ? ` (${r.pasarela})` : ''}${r.retencionIva > 0 ? `, neto de $${r.retencionIva.toLocaleString('es-CO')} de retención de IVA (certificado pendiente)` : ''}. Aviso por correo: ${TEXTO_AVISO[aviso.estado]}${aviso.motivo ? ` (${aviso.motivo})` : ''}.`,
       },
       'generarEnlacesAutomaticos',
     )
-    resumen.generados.push({ cuotaId: cand.cuotaId, negocioId: r.negocioId, numero: r.numero, aviso: aviso.estado, motivoAviso: aviso.motivo })
+    resumen.generados.push({ cuotaId: cand.cuotaId, negocioId: r.negocioId, suscripcionId: r.suscripcionId, numero: r.numero, aviso: aviso.estado, motivoAviso: aviso.motivo })
   }
 
   return resumen
@@ -280,8 +321,8 @@ export async function generarEnlacesAutomaticos(
 const TEXTO_AVISO: Record<EstadoAviso, string> = { enviado: 'enviado', omitido: 'no se envió', fallido: 'falló' }
 
 /** El espacio que paga la cuota: el pagador del contrato, o el dueño del plan si no lo declara. */
-function pagadorDe(contratos: readonly FilaContrato[], workspaceId: string, negocioId: string): string {
-  return contratoDelNegocio(contratos, workspaceId, negocioId)?.workspace_pagador_id ?? workspaceId
+function pagadorDe(contratos: readonly FilaContrato[], cand: { workspaceId: string; negocioId: string | null; suscripcionId?: string | null }): string {
+  return contratoDelAncla(contratos, cand)?.workspace_pagador_id ?? cand.workspaceId
 }
 
 /**
@@ -302,9 +343,15 @@ async function paisesDeWorkspaces(db: Db, ids: string[]): Promise<Map<string, st
   return out
 }
 
-/** El contrato del negocio que manda: el activo, y entre varios el de vigencia más reciente. */
-function contratoDelNegocio(contratos: readonly FilaContrato[], workspaceId: string, negocioId: string): FilaContrato | null {
-  const delNegocio = contratos.filter((c) => c.workspace_id === workspaceId && c.negocio_id === negocioId)
+/** El contrato del negocio (o de la suscripción) que manda: el activo, y entre varios el de vigencia más reciente. */
+function contratoDelAncla(
+  contratos: readonly FilaContrato[],
+  x: { workspaceId: string; negocioId: string | null; suscripcionId?: string | null },
+): FilaContrato | null {
+  const llave = llaveContrato(x)
+  const delNegocio = contratos.filter(
+    (c) => llaveContrato({ workspaceId: c.workspace_id, negocioId: c.negocio_id, suscripcionId: c.suscripcion_id ?? null }) === llave,
+  )
   delNegocio.sort(
     (a, b) =>
       Number(b.estado === 'activo') - Number(a.estado === 'activo') ||
@@ -319,9 +366,24 @@ async function avisarEnlaceGenerado(
   cand: CuotaCandidata,
   r: Extract<ResultadoEnlaceCuota, { ok: true }>,
   contratos: readonly FilaContrato[],
-  p: { hoy: string; ahoraMs: number },
+  p: { hoy: string; ahoraMs: number; tarjetaRechazada: boolean },
 ): Promise<{ estado: EstadoAviso; motivo: string | null }> {
   const registrar = async (fila: { estado: EstadoAviso; destino?: string | null; titulo?: string | null; motivo?: string | null; proveedorId?: string | null }) => {
+    // `avisos_cliente` es del negocio (negocio_id NOT NULL): el de una suscripción va a su bitácora.
+    if (!r.negocioId) {
+      await anotarEnAncla(
+        db,
+        {
+          ancla: anclaDeFila({ negocio_id: null, suscripcion_id: r.suscripcionId }),
+          workspaceId: cand.workspaceId,
+          tipo: 'aviso_enlace',
+          texto: `Aviso del enlace de la cuota ${r.numero} por correo: ${fila.estado}${fila.motivo ? ` (${fila.motivo})` : ''}.`,
+          datos: { canal: 'email', estado: fila.estado, destino: fila.destino ?? null, titulo: fila.titulo ?? null, motivo: fila.motivo ?? null, proveedor_id: fila.proveedorId ?? null },
+        },
+        'generarEnlacesAutomaticos',
+      )
+      return { estado: fila.estado, motivo: fila.motivo ?? null }
+    }
     const ins = await db.from('avisos_cliente').insert({
       workspace_id: cand.workspaceId,
       negocio_id: r.negocioId,
@@ -336,7 +398,7 @@ async function avisarEnlaceGenerado(
     return { estado: fila.estado, motivo: fila.motivo ?? null }
   }
 
-  const contrato = contratoDelNegocio(contratos, cand.workspaceId, r.negocioId)
+  const contrato = contratoDelAncla(contratos, { workspaceId: cand.workspaceId, negocioId: r.negocioId, suscripcionId: r.suscripcionId })
   const designadoId = contrato?.aceptante_designado_id ?? null
   if (!designadoId) return registrar({ estado: 'omitido', motivo: 'sin_designado' })
 
@@ -366,6 +428,7 @@ async function avisarEnlaceGenerado(
     hoy: p.hoy,
     enlaceExpira: r.expira,
     urlSuscripcion: (deps.urlSuscripcion ?? urlSuscripcionPorDefecto)(slug),
+    tarjetaRechazada: p.tarjetaRechazada,
   }
   const asunto = asuntoAvisoEnlace(datos)
   const envio = await (deps.enviarCorreo ?? enviarPorResend)({

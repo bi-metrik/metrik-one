@@ -4,6 +4,9 @@ import { accionIdempotente } from '@/lib/idempotencia/accion'
 import { MENSAJE_EN_CURSO } from '@/lib/idempotencia/clave'
 import { revalidatePath } from 'next/cache'
 import { createServiceClient } from '@/lib/supabase/server'
+import type { SupabaseClient } from '@supabase/supabase-js'
+import { generarEnlacePagoCuota } from '@/lib/cobros/enlace-pago-cuota-servidor'
+import { enlaceDeCuotaPendiente } from '@/lib/seccion-suscripcion/pagar-ahora'
 import { leerEquipo } from '@/lib/seccion-suscripcion/carga-servidor'
 import { contextoSuscripcion } from '@/lib/seccion-suscripcion/contexto-servidor'
 import { comprarLicencia, cotizarLicencia, liberarLicencia } from '@/lib/seccion-suscripcion/licencias-servidor'
@@ -275,6 +278,25 @@ export async function registrarEventoSustenta(evento: string): Promise<void> {
 }
 
 // ── Pagar: el mes o el plan anual (decisión de Mauricio del 2026-10-06) ──────────────────
+
+/**
+ * «Pagar ahora» de una SUSCRIPCIÓN (Valida autogestionada): el enlace de la cuota pendiente, ya, sin
+ * esperar al cron. La misma generación del botón y del paso 6 (`generarEnlacePagoCuota`).
+ */
+export async function pagarCuotaPendiente(): Promise<Resultado<{ url: string }>> {
+  const r = await ctxEscritura()
+  if (!r.ok) return r
+  const db = createServiceClient() as unknown as SupabaseClient
+  const res = await enlaceDeCuotaPendiente(r.ctx, {
+    db,
+    generar: async (p) => {
+      const g = await generarEnlacePagoCuota(p, { db })
+      return g.ok ? { ok: true, url: g.url } : { ok: false, error: g.error }
+    },
+  })
+  if (res.ok) refrescar()
+  return res
+}
 
 /** «Pagar el mes»: el enlace de la cuota pendiente (el vigente o uno nuevo). */
 export async function pagarElMes(): Promise<Resultado<{ url: string }>> {

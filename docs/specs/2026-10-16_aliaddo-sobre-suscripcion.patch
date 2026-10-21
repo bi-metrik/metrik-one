@@ -1,0 +1,231 @@
+# Factura electrónica automática (Aliaddo, #1153) sobre un cobro de SUSCRIPCIÓN
+#
+# Se aplica sobre `feat/facturacion-aliaddo` (#1153) DESPUÉS de que esta pila (#1191) esté en main, con
+# `patch -p1 < docs/specs/2026-10-16_aliaddo-sobre-suscripcion.patch`. Usa `contratoDelCobro` y
+# `anclasDeOrigenes` (src/lib/suscripciones-producto/contrato-del-cobro.ts, de #1191).
+#
+# Verificado el 2026-10-16 en una copia fuera de git (pila #1191 + #1153 + este parche): typecheck limpio,
+# los 88 tests de facturacion-electronica en verde y la prueba nueva (`suscripcion.test.ts`) falla sin el
+# parche (el cobro de la suscripción no se encola) y pasa con él.
+#
+--- a/src/lib/facturacion-electronica/emision-servidor.ts
++++ b/src/lib/facturacion-electronica/emision-servidor.ts
+@@ -1,7 +1,9 @@
+ import 'server-only'
+ import { createHash } from 'node:crypto'
+ import type { SupabaseClient } from '@supabase/supabase-js'
+-import { registrarActividad } from '@/lib/activity/registrar-actividad'
++import { anclaDeFila } from '@/lib/suscripciones-producto/ancla'
++import { anotarEnAncla } from '@/lib/suscripciones-producto/bitacora'
++import { anclasDeOrigenes, contratoDelCobro } from '@/lib/suscripciones-producto/contrato-del-cobro'
+ import { leerPeriodoEnConcepto } from '@/lib/cobros/periodo-en-concepto'
+ import { todayBogotaISO } from '@/lib/dates/bogota'
+ import { despuesDeResponder } from '@/lib/segundo-plano'
+@@ -99,7 +101,7 @@
+ async function contextoDelCobro(db: Db, cobroId: string): Promise<Contexto | null> {
+   const c = await db
+     .from('cobros')
+-    .select('id, workspace_id, negocio_id, monto, fecha, external_ref, anulado_at, plan_cobro_id, numero_cuota')
++    .select('id, workspace_id, negocio_id, suscripcion_id, monto, fecha, external_ref, anulado_at, plan_cobro_id, numero_cuota')
+     .eq('id', cobroId)
+     .maybeSingle()
+   if (c.error) throw new Error(`leer cobro ${cobroId}: ${c.error.message}`)
+@@ -108,6 +110,7 @@
+     id: string
+     workspace_id: string
+     negocio_id: string | null
++    suscripcion_id?: string | null
+     monto: number | string | null
+     fecha: string | null
+     external_ref: string | null
+@@ -116,43 +119,18 @@
+     numero_cuota: number | null
+   }
+ 
+-  let origenNegocio: string | null = null
+-  let contrato: { empresa_id: string; correo_facturacion: string | null; servicio_slug: string } | null = null
+-  let contratos = 0
+-  if (cobro.negocio_id) {
+-    const [n, sc] = await Promise.all([
+-      db.from('negocios').select('metadata').eq('id', cobro.negocio_id).maybeSingle(),
+-      db
+-        .from('servicios_contratados')
+-        .select('empresa_id, correo_facturacion, servicio_slug')
+-        .eq('negocio_id', cobro.negocio_id)
+-        .eq('workspace_id', cobro.workspace_id)
+-        .limit(2),
+-    ])
+-    if (n.error) throw new Error(`leer negocio: ${n.error.message}`)
+-    if (sc.error) throw new Error(`leer contrato: ${sc.error.message}`)
+-    const meta = (n.data?.metadata ?? null) as { origen?: unknown } | null
+-    origenNegocio = typeof meta?.origen === 'string' ? meta.origen : null
+-    contratos = (sc.data ?? []).length
+-    // Un negocio por contrato (§3.5). Dos = ambiguo: no se adivina a quién facturar.
+-    if (contratos === 1) contrato = sc.data[0]
+-  }
++  // El origen, el contrato y el comprador, de un negocio (empresa del directorio) o de una suscripción
++  // (`suscripciones_producto`, la empresa declarada). Un contrato por ancla: dos = ambiguo (§3.5).
++  const delCobro = await contratoDelCobro(db, cobro)
++  const origenNegocio = delCobro.origen
++  const contrato = delCobro.contrato
+ 
+   let modulo: string | null = null
+-  let empresa: EmpresaCompradora | null = null
++  const empresa: EmpresaCompradora | null = (delCobro.comprador as EmpresaCompradora | null) ?? null
+   if (contrato) {
+-    const [cs, em] = await Promise.all([
+-      db.from('catalogo_servicios').select('modulo').eq('slug', contrato.servicio_slug).maybeSingle(),
+-      db
+-        .from('empresas')
+-        .select('razon_social, nombre, tipo_documento, numero_documento, tipo_persona, regimen_tributario, responsable_iva, gran_contribuyente, autorretenedor, agente_retenedor, telefono')
+-        .eq('id', contrato.empresa_id)
+-        .maybeSingle(),
+-    ])
++    const cs = await db.from('catalogo_servicios').select('modulo').eq('slug', contrato.servicio_slug).maybeSingle()
+     if (cs.error) throw new Error(`leer ficha: ${cs.error.message}`)
+-    if (em.error) throw new Error(`leer empresa: ${em.error.message}`)
+     modulo = (cs.data?.modulo as string | undefined) ?? null
+-    empresa = (em.data as EmpresaCompradora | null) ?? null
+   }
+ 
+   // ¿Ya se facturó a mano? La factura del cobro, o la de su cuota (los CDA).
+@@ -474,8 +452,9 @@
+     async alertar(e, motivo, detalle) {
+       const texto = `${TITULOS[motivo]} (${e.numero ?? `cobro ${e.cobroId.slice(0, 8)}`}, ${e.modo}): ${detalle}`
+       console.error(`[factura-electronica] ${texto}`)
+-      const c = await db.from('cobros').select('negocio_id').eq('id', e.cobroId).maybeSingle()
++      const c = await db.from('cobros').select('negocio_id, suscripcion_id').eq('id', e.cobroId).maybeSingle()
+       const negocioId = (c.data?.negocio_id as string | null | undefined) ?? null
++      const ancla = anclaDeFila((c.data ?? null) as { negocio_id: string | null; suscripcion_id?: string | null } | null)
+       const perfiles = await db.from('profiles').select('id').eq('workspace_id', e.workspaceId).in('role', ['owner', 'admin'])
+       if (perfiles.error) {
+         console.error(`[factura-electronica] no se pudo leer a quién avisar: ${perfiles.error.message}`)
+@@ -496,20 +475,8 @@
+           if (ins.error) console.error(`[factura-electronica] no se pudo crear el aviso: ${ins.error.message}`)
+         }
+       }
+-      if (negocioId) {
+-        await registrarActividad(
+-          db,
+-          {
+-            workspace_id: e.workspaceId,
+-            entidad_tipo: 'negocio',
+-            entidad_id: negocioId,
+-            tipo: 'sistema',
+-            autor_id: null,
+-            contenido: texto.slice(0, 280),
+-          },
+-          'factura-electronica',
+-        )
+-      }
++      // El timeline del negocio, o la bitácora de la suscripción.
++      await anotarEnAncla(db, { ancla, workspaceId: e.workspaceId, tipo: 'factura_electronica', texto, datos: { factura_electronica_id: e.id, cobro_id: e.cobroId, motivo } }, 'factura-electronica')
+     },
+   }
+ }
+@@ -567,22 +534,21 @@
+ /** Cobros pagados desde `desde`, de los orígenes automáticos, que no tienen fila en este modo. */
+ async function cobrosSinFila(db: Db, cfg: ConfigFacturacion, limite: number): Promise<string[]> {
+   if (!cfg.desde) return []
+-  const n = await db
+-    .from('negocios')
+-    .select('id')
+-    .eq('workspace_id', cfg.emisorWorkspaceId)
+-    .in('metadata->>origen', ORIGENES_AUTOMATICOS as unknown as string[])
+-    .limit(1000)
+-  if (n.error) throw new Error(`barrido, negocios: ${n.error.message}`)
+-  const negocios = ((n.data ?? []) as { id: string }[]).map((x) => x.id)
+-  const candidatos: string[] = []
++  // Negocios Y suscripciones del cobrador con un origen automático (desde 20261016 las altas de Valida
++  // autogestionada son suscripciones, no negocios).
++  const anclas = await anclasDeOrigenes(db, { workspaceId: cfg.emisorWorkspaceId, origenes: ORIGENES_AUTOMATICOS })
++  const lotes: { col: 'negocio_id' | 'suscripcion_id'; ids: string[] }[] = []
+   // De a 100: un `.in()` con cientos de uuid rompe la URL.
+-  for (let i = 0; i < negocios.length && candidatos.length < limite; i += 100) {
++  for (let i = 0; i < anclas.negocios.length; i += 100) lotes.push({ col: 'negocio_id', ids: anclas.negocios.slice(i, i + 100) })
++  for (let i = 0; i < anclas.suscripciones.length; i += 100) lotes.push({ col: 'suscripcion_id', ids: anclas.suscripciones.slice(i, i + 100) })
++  const candidatos: string[] = []
++  for (const lote of lotes) {
++    if (candidatos.length >= limite) break
+     const c = await db
+       .from('cobros')
+       .select('id')
+       .eq('workspace_id', cfg.emisorWorkspaceId)
+-      .in('negocio_id', negocios.slice(i, i + 100))
++      .in(lote.col, lote.ids)
+       .gte('fecha', cfg.desde)
+       .is('anulado_at', null)
+       .gt('monto', 0)
+--- /dev/null
++++ b/src/lib/facturacion-electronica/suscripcion.test.ts
+@@ -0,0 +1,70 @@
++/**
++ * La factura electrónica automática (Aliaddo) de un cobro de SUSCRIPCIÓN (`suscripciones_producto`,
++ * desde 20261016): el barrido la encuentra por el origen de la suscripción, la decisión la ve
++ * facturable (contrato, módulo y origen automático) y el comprador es la empresa declarada. Un cobro de
++ * negocio con el mismo origen se sigue encolando igual. Nada sale a Muisca: la fila nace sin estado de
++ * trabajo en el doble y el paso 2 no la toma.
++ */
++import { describe, expect, it, vi } from 'vitest'
++import { crearDoble, type Tablas } from '../../../test/tablas-doble'
++
++vi.mock('server-only', () => ({}))
++vi.mock('@/lib/supabase/server', () => ({ createServiceClient: () => null }))
++
++const { procesarFacturasPendientes } = await import('./emision-servidor')
++
++const WS = 'a21bfc88-1a60-48c3-afcd-144226aa2392'
++const ENV = {
++  FACTURACION_ELECTRONICA_HABILITADA: '1',
++  ALIADDO_TOKEN: 'token-de-prueba',
++  ALIADDO_MODO: 'Test',
++  ALIADDO_EMISOR_WORKSPACE_ID: WS,
++  FACTURACION_ELECTRONICA_DESDE: '2026-10-01',
++}
++
++function tablas(): Tablas {
++  return {
++    catalogo_servicios: [{ slug: 'valida-cda-licencia', modulo: 'valida_consulta' }],
++    negocios: [{ id: 'n1', workspace_id: WS, metadata: { origen: 'valida_autogestion' } }],
++    empresas: [{ id: 'e1', razon_social: 'VIEJO S.A.S.', numero_documento: '900158425-0' }],
++    suscripciones_producto: [
++      {
++        id: 's1', workspace_id: WS, metadata: { origen: 'valida_autogestion' }, razon_social: 'CDA EJEMPLO S.A.S.',
++        tipo_documento: 'NIT', numero_documento: '900123456', dv: '7', correo_facturacion: 'facturas@cda.co', datos_fiscales: {},
++      },
++    ],
++    servicios_contratados: [
++      { id: 'sc-n', workspace_id: WS, negocio_id: 'n1', suscripcion_id: null, empresa_id: 'e1', correo_facturacion: 'a@b.co', servicio_slug: 'valida-cda-licencia' },
++      { id: 'sc-s', workspace_id: WS, negocio_id: null, suscripcion_id: 's1', empresa_id: null, correo_facturacion: null, servicio_slug: 'valida-cda-licencia' },
++    ],
++    cobros: [
++      { id: 'c-sus', workspace_id: WS, negocio_id: null, suscripcion_id: 's1', monto: 150000, fecha: '2026-10-20', anulado_at: null, plan_cobro_id: null, numero_cuota: null, external_ref: 'epayco-1' },
++      { id: 'c-neg', workspace_id: WS, negocio_id: 'n1', suscripcion_id: null, monto: 150000, fecha: '2026-10-20', anulado_at: null, plan_cobro_id: null, numero_cuota: null, external_ref: 'epayco-2' },
++    ],
++    facturas_cobro: [],
++    facturas_cuota: [],
++    facturas_electronicas: [],
++  }
++}
++
++describe('factura electrónica automática de un cobro de suscripción', () => {
++  it('el barrido encola el cobro de la suscripción y el del negocio, sin errores', async () => {
++    const d = crearDoble(tablas())
++    const r = await procesarFacturasPendientes({ db: d.db, env: ENV })
++    expect(r.estado).toBe('corrida')
++    expect(r.errores).toEqual([])
++    expect(r.encoladas).toBe(2)
++    expect(d.tablas.facturas_electronicas.map((f) => f.cobro_id).sort()).toEqual(['c-neg', 'c-sus'])
++  })
++
++  it('una suscripción con otro origen no se factura sola', async () => {
++    const t = tablas()
++    t.suscripciones_producto[0].metadata = { origen: 'directo_ventas' }
++    t.cobros = t.cobros.filter((c) => c.id === 'c-sus')
++    const d = crearDoble(t)
++    const r = await procesarFacturasPendientes({ db: d.db, env: ENV })
++    expect(r.estado).toBe('corrida')
++    expect(r.encoladas).toBe(0)
++    expect(d.tablas.facturas_electronicas).toEqual([])
++  })
++})

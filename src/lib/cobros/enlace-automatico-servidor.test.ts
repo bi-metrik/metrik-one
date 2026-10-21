@@ -249,3 +249,75 @@ describe('generarEnlacesAutomaticos', () => {
     })
   })
 })
+
+describe('planes que cobran con la tarjeta guardada (pasarela epayco)', () => {
+  const conTarjeta = (extra: Partial<Tablas> = {}) =>
+    tablasBase({ planes_cobro: [{ id: 'plan1', workspace_id: 'wsM', negocio_id: 'n1', total_cuotas: 3, pasarela: 'epayco', activo: false }], ...extra })
+
+  it('sin rechazo de la tarjeta, ninguna cuota recibe enlace (se pagaría dos veces)', async () => {
+    const r = await correr(conTarjeta({ cobro_intentos_tarjeta: [] }))
+    expect(r.pasarela.crear).not.toHaveBeenCalled()
+    expect(r.resumen.conTarjetaSinRechazo).toBe(2)
+  })
+
+  it('la cuota que la tarjeta rechazó recibe su enlace y su correo el mismo día (día 0 de Carmen)', async () => {
+    const r = await correr(conTarjeta({ cobro_intentos_tarjeta: [{ plan_cobro_id: 'plan1', numero_cuota: 2, intento: 0, resultado: 'rechazado' }] }))
+    expect(r.resumen.generados.map((g) => g.numero)).toEqual([2])
+    expect(r.enviar).toHaveBeenCalledTimes(1)
+    expect(r.resumen.conTarjetaSinRechazo).toBe(1)
+    // El correo del día 0 dice que la tarjeta no pasó (Términos de autoservicio 3.6).
+    const m = r.enviar.mock.calls[0][0]
+    expect(m.subject).toBe('No pudimos cobrar tu cuota con MéTRIK a la tarjeta: puedes pagarla en línea')
+    expect(m.text).toContain('No pudimos cobrar la cuota 2 de CDA Pruebas a la tarjeta que registraste en ePayco: la tarjeta rechazó el cobro.')
+    expect(m.html).toContain('la tarjeta rechazó el cobro')
+  })
+
+  it('el primer cobro rechazado (el plan volvió al enlace, Condiciones 7.5) también lo dice; la otra cuota, no', async () => {
+    const r = await correr(tablasBase({ cobro_intentos_tarjeta: [{ plan_cobro_id: 'plan1', numero_cuota: 1, intento: 0, resultado: 'rechazado' }] }))
+    expect(r.resumen.generados.map((g) => g.numero)).toEqual([1, 2])
+    const [c1, c2] = r.enviar.mock.calls.map((c) => c[0])
+    expect(c1.text).toContain('la tarjeta rechazó el cobro')
+    expect(c2.text).not.toContain('tarjeta')
+    expect(c2.subject).not.toContain('No pudimos cobrar')
+  })
+})
+
+describe('generarEnlacesAutomaticos sobre una suscripción (suscripciones_producto)', () => {
+  function deSuscripcion(): Tablas {
+    return tablasBase({
+      servicios_contratados: [
+        {
+          id: 'sc1', workspace_id: 'wsM', negocio_id: null, suscripcion_id: 's1', estado: 'activo', vigente_desde: '2026-09-01',
+          aceptante_designado_id: 'p1', workspace_pagador_id: 'wsC',
+        },
+      ],
+      planes_cobro: [{ id: 'plan1', workspace_id: 'wsM', negocio_id: null, suscripcion_id: 's1', total_cuotas: 3, pasarela: 'manual', activo: false }],
+      suscripciones_producto: [{ id: 's1', workspace_id: 'wsM', workspace_cliente_id: 'wsC', datos_fiscales: {} }],
+      suscripciones_producto_eventos: [],
+    })
+  }
+
+  it('genera el enlace, el cobro cuelga de la suscripción y el aviso va a su bitácora (no a avisos_cliente ni a activity_log)', async () => {
+    const r = await correr(deSuscripcion())
+    expect(r.resumen.errores).toEqual([])
+    expect(r.resumen.generados.map((g) => g.numero)).toEqual([1, 2])
+    expect(r.resumen.generados[0]).toMatchObject({ negocioId: null, suscripcionId: 's1' })
+    const c1 = programado(r.tablas, 1)!
+    expect(c1).toMatchObject({ negocio_id: null, suscripcion_id: 's1', fecha: null })
+    expect(r.enviar).toHaveBeenCalledTimes(2)
+    expect(r.tablas.avisos_cliente).toHaveLength(0)
+    expect(r.tablas.activity_log).toHaveLength(0)
+    const tipos = (r.tablas.suscripciones_producto_eventos as Fila[]).map((e) => e.tipo)
+    expect(tipos.filter((t) => t === 'aviso_enlace')).toHaveLength(2)
+    expect(tipos.filter((t) => t === 'enlace_pago')).toHaveLength(2)
+  })
+
+  it('un contrato de negocio no le presta su plan a una suscripción con el mismo espacio', async () => {
+    const t = deSuscripcion()
+    // El contrato de la suscripción está cancelado; uno de negocio vivo en el mismo espacio no la cubre.
+    t.servicios_contratados[0].estado = 'cancelado'
+    t.servicios_contratados.push({ id: 'sc2', workspace_id: 'wsM', negocio_id: 'n9', estado: 'activo', vigente_desde: '2026-09-01', workspace_pagador_id: 'wsC' })
+    const r = await correr(t)
+    expect(r.resumen.generados).toEqual([])
+  })
+})

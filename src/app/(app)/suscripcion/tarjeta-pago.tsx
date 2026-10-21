@@ -3,6 +3,7 @@ import { formatCOP } from '@/lib/cobros/format'
 import { NOTA_IVA_CDA } from '@/lib/valida-cda/redaccion-fiscal'
 import { fechaCorta } from '@/lib/valida-cda/pago-pendiente'
 import type { LecturaPago } from '@/lib/valida-cda/pago-servidor'
+import { PagarAhora } from './pagar-ahora'
 
 /**
  * El próximo pago de la suscripción, arriba del Resumen de `/suscripcion`.
@@ -16,7 +17,17 @@ import type { LecturaPago } from '@/lib/valida-cda/pago-servidor'
  *
  * Sin estado ni efectos: se pinta en el servidor.
  */
-export function TarjetaPago({ lectura }: { lectura: LecturaPago }) {
+export function TarjetaPago({
+  lectura,
+  pagarAhora = false,
+  rechazoTarjeta = null,
+}: {
+  lectura: LecturaPago
+  /** Una suscripción sin enlace vigente: «Pagar ahora» pide el enlace ya (`pagarCuotaPendiente`). */
+  pagarAhora?: boolean
+  /** La respuesta del banco al cobrar la tarjeta guardada, si la rechazó. */
+  rechazoTarjeta?: string | null
+}) {
   if (lectura.estado === 'no_disponible') {
     return (
       <p data-pago-cda="no_disponible" className="text-xs text-tinta-suave">
@@ -56,6 +67,12 @@ export function TarjetaPago({ lectura }: { lectura: LecturaPago }) {
               </p>
             )}
             <p className="text-xs text-tinta-suave">{NOTA_IVA_CDA}</p>
+            {rechazoTarjeta && (
+              <p data-rechazo-tarjeta className="text-sm text-tinta">
+                El banco rechazó el cobro a tu tarjeta: {rechazoTarjeta}. No se cobró nada. Puedes pagar ahora con otro
+                medio.
+              </p>
+            )}
             <p className={`flex items-center gap-1.5 text-sm ${pago.vencida ? 'font-semibold text-amber-800' : 'text-tinta'}`}>
               <CalendarClock className="h-4 w-4 shrink-0" />
               {pago.vencida ? 'Venció el' : 'Vence el'} {fechaCorta(pago.fechaVencimiento)}
@@ -73,6 +90,8 @@ export function TarjetaPago({ lectura }: { lectura: LecturaPago }) {
             >
               Pagar en línea
             </a>
+          ) : pagarAhora ? (
+            <PagarAhora />
           ) : (
             <p className="max-w-xs text-sm text-tinta-suave" data-sin-enlace>
               {pago.enlaceVencido

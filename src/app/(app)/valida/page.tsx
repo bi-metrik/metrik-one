@@ -22,6 +22,10 @@ import {
   PausaPorMora,
 } from './avisos-cda';
 import { TerminosCda } from './terminos-cda';
+import { esEspacioAutogestion } from '@/lib/valida-registro/plan';
+import { estadoCobroDelEspacio } from '@/lib/valida-registro/cobro-prueba-servidor';
+import { pruebaEnPantalla } from '@/lib/valida-registro/prueba-en-pantalla';
+import { pruebaDeConfig } from '@/lib/valida/corte-bolsa';
 import { ModificacionTerminosCda } from './modificacion-terminos-cda';
 
 export const dynamic = 'force-dynamic';
@@ -34,14 +38,14 @@ interface Props {
 }
 
 export default async function ValidaPage({ searchParams }: Props) {
-  const { workspaceId } = await getWorkspace();
+  const { workspaceId, realRole, impersonating } = await getWorkspace();
   if (!workspaceId) redirect('/');
 
   // Validar flag activo
   const svc = createServiceClient();
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const { data: wsRow } = await (svc.from('workspaces') as any)
-    .select('modules, config_extra, name, slug')
+    .select('modules, config_extra')
     .eq('id', workspaceId)
     .single();
   const modules = (wsRow?.modules ?? {}) as Record<string, boolean>;
@@ -188,8 +192,25 @@ export default async function ValidaPage({ searchParams }: Props) {
     enPausa ? Promise.resolve(null) : leerSaldoValida(workspaceId),
   ]);
 
+  // La prueba (registro autogestionado): contador, fecha, «Activar plan» y, con tarjeta, la fecha y la
+  // hora del cobro (Condiciones 7.1) y «Cancelar prueba» (7.3), en UNA franja (`FranjaPrueba`). Cancela
+  // solo la persona dueña, nunca «Ver como».
+  const configExtra = (wsRow?.config_extra ?? null) as Record<string, unknown> | null;
+  const autogestion = esEspacioAutogestion(configExtra);
+  const cobro = autogestion ? await estadoCobroDelEspacio(svc, workspaceId) : null;
+  const prueba = autogestion
+    ? pruebaEnPantalla({
+        saldo,
+        cobro,
+        venceConfig: pruebaDeConfig(configExtra)?.vence_en ?? null,
+        puedeCancelar: realRole === 'owner' && !impersonating,
+      })
+    : null;
+
+  // Mientras dura la prueba, su franja es la única: la de la suscripción («Tu cuota vence… · Pagar») no
+  // se le suma (una confirmación rechazada deja un contrato con la cuota 1 y la prueba sigue).
   const franja =
-    suscripcion?.tipo === 'ok'
+    !prueba && suscripcion?.tipo === 'ok'
       ? franjaValida(
           suscripcion.resumen,
           suscripcion.pago?.estado === 'ok' ? suscripcion.pago.pago : null,
@@ -201,12 +222,13 @@ export default async function ValidaPage({ searchParams }: Props) {
   // (11.1) y la pausa (11.3), sin montos. Cuota y plata son solo de la persona designada del contrato
   // (la misma regla que `/suscripcion`, `puedeVerPagosCda`): la franja y el enlace a Suscripción.
   const enMora = estadoMora?.estado === 'en_mora' ? estadoMora : null;
+
   const encabezado =
     avisoPlazo || avisoModificacion || franja || enMora || restringido ? (
       <div className="space-y-3">
         {avisoPlazo}
         {avisoModificacion}
-        {enMora && <AvisoMora mora={enMora} />}
+        {enMora && <AvisoMora mora={enMora} pagar={autogestion && vePagos} />}
         {restringido && <AvisoRestriccion mora={restringido} vePagos={vePagos} />}
         {franja && <FranjaSuscripcion texto={franja} />}
       </div>
@@ -223,7 +245,7 @@ export default async function ValidaPage({ searchParams }: Props) {
       consultasEnPausa={enPausa ? <PausaPorMora mora={enPausa} vePagos={vePagos} /> : null}
       consultasRestringidas={restringido ? <ConsultasRestringidas /> : null}
       saldo={saldo}
-      espacio={(wsRow?.name as string | undefined)?.trim() || (wsRow?.slug as string | undefined) || ''}
+      prueba={prueba}
       loteInicialId={loteInicialId}
     />
   );

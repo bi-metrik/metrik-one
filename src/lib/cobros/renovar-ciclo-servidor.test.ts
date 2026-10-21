@@ -189,3 +189,39 @@ describe('lo que no renueva', () => {
     expect(tablas.plan_cobro_cuotas).toHaveLength(4)
   })
 })
+
+describe('una suscripción (suscripciones_producto) se renueva igual que un negocio', () => {
+  const sus = (id: string) => ({ negocio_id: null, suscripcion_id: id })
+
+  it('el plan colgado de la suscripción recibe su cuota nueva; el contrato que manda es el de ESA suscripción', async () => {
+    const { db, tablas } = crearDoble(
+      base({
+        servicios_contratados: [
+          contrato('c-sus', 'x', 'activo', sus('s-1')),
+          // Un contrato cancelado de OTRA suscripción no se cruza con el de esta.
+          contrato('c-otra', 'x', 'cancelado', sus('s-2')),
+        ],
+        planes_cobro: [plan('p-sus', 'x', 4, sus('s-1'))],
+        plan_cobro_cuotas: cuotas('p-sus', 4),
+        cobros: [pagado('p-sus', 1), pagado('p-sus', 2), pagado('p-sus', 3)],
+      }),
+    )
+    const r = await renovarPlanesPorCiclo({ db, hoy: '2026-11-28' })
+    expect(r.errores).toEqual([])
+    expect(r.renovados).toEqual([{ planCobroId: 'p-sus', numero: 5, fechaVencimiento: '2027-01-27', monto: 150_000 }])
+    expect(tablas.planes_cobro?.[0]).toMatchObject({ total_cuotas: 5, suscripcion_id: 's-1' })
+  })
+
+  it('con el contrato de la suscripción cancelado, no renueva', async () => {
+    const { db } = crearDoble(
+      base({
+        servicios_contratados: [contrato('c-sus', 'x', 'cancelado', sus('s-1'))],
+        planes_cobro: [plan('p-sus', 'x', 4, sus('s-1'))],
+        plan_cobro_cuotas: cuotas('p-sus', 4),
+        cobros: [pagado('p-sus', 1), pagado('p-sus', 2), pagado('p-sus', 3)],
+      }),
+    )
+    const r = await renovarPlanesPorCiclo({ db, hoy: '2026-11-28' })
+    expect(r.renovados).toEqual([])
+  })
+})

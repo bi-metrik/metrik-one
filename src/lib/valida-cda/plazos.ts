@@ -35,6 +35,7 @@
  */
 
 import type { ProximoPago } from './pago-pendiente'
+import { DIAS_GRACIA_CICLO } from '@/lib/valida-registro/plan'
 
 /** Días de mora que la cláusula 11.3 tolera antes de suspender (más de 30: se pausa el día 31). */
 export const DIAS_MORA_ANTES_DE_SUSPENDER = 30
@@ -50,6 +51,35 @@ export const DIAS_MORA_ANTES_DE_RESTRINGIR = 5
  * testigo: una prueba exige que el SQL de alta de la v1.4 registre exactamente esta fecha.
  */
 export const RESTRICCION_VIGENTE_DESDE = '2026-11-06'
+
+/**
+ * Desde qué día de mora (contado desde el vencimiento D) se restringen las consultas nuevas y desde
+ * cuál se pausa Valida entera. Cada serie de Términos trae la suya.
+ */
+export interface ReglaMora {
+  /** D + este número: consultas nuevas restringidas, reportes abiertos. */
+  diaRestriccion: number
+  /** D + este número: Valida pausada entera. */
+  diaPausa: number
+}
+
+/** Plan CDA: restricción por más de 5 días (11.1, v1.4) y pausa por más de 30 (11.3). */
+export const REGLA_MORA_CDA: ReglaMora = { diaRestriccion: DIAS_MORA_ANTES_DE_RESTRINGIR + 1, diaPausa: DIAS_MORA_ANTES_DE_SUSPENDER + 1 }
+
+/** Días de suspensión sin pago tras los cuales termina la suscripción de autoservicio (Términos 11.2). */
+export const DIAS_SUSPENSION_ANTES_DE_TERMINAR = 30
+
+/**
+ * Términos de autoservicio v2.0: la suspensión (11.1) llega a los `DIAS_GRACIA_CICLO` (10) días y deja
+ * abiertos los reportes y la exportación de la bitácora (11.2); a los 30 días de suspensión la
+ * suscripción termina (11.2) y el acceso cesa (12.6). O sea: consultas restringidas desde D+10 y Valida
+ * pausada desde D+40, no desde D+31 como un CDA. No depende de un aviso (la regla viene en los
+ * Términos aceptados al registrarse).
+ */
+export const REGLA_MORA_AUTOSERVICIO: ReglaMora = {
+  diaRestriccion: DIAS_GRACIA_CICLO,
+  diaPausa: DIAS_GRACIA_CICLO + DIAS_SUSPENSION_ANTES_DE_TERMINAR,
+}
 
 /** La serie de los Términos de Suscripción VALIDA · Plan CDA en `documentos_contractuales_versiones`. */
 export const SLUG_TERMINOS_CDA = 'terminos-suscripcion-valida-cda'
@@ -122,14 +152,15 @@ export function estadoMora(
   pago: ProximoPago,
   hoy: string,
   vigenteDesde: string | null = RESTRICCION_VIGENTE_DESDE,
+  regla: ReglaMora = REGLA_MORA_CDA,
 ): EstadoMora {
   if (pago.estado !== 'pendiente') return { estado: 'al_dia' }
   const vencio = pago.fechaVencimiento
   if (!FECHA.test(vencio) || !(vencio < hoy)) return { estado: 'al_dia' }
-  const corteDesde = sumarDias(vencio, DIAS_MORA_ANTES_DE_SUSPENDER + 1)
+  const corteDesde = sumarDias(vencio, regla.diaPausa)
   if (corteDesde <= hoy) return { estado: 'suspendido', vencio, corteDesde }
   // La regla de los 5 días no existe antes de su vigencia, y desde ella alcanza a lo ya vencido.
-  const porDias = sumarDias(vencio, DIAS_MORA_ANTES_DE_RESTRINGIR + 1)
+  const porDias = sumarDias(vencio, regla.diaRestriccion)
   const desde = vigenteDesde === null ? null : porDias < vigenteDesde ? vigenteDesde : porDias
   const restringeDesde = desde !== null && desde < corteDesde ? desde : null
   if (restringeDesde && restringeDesde <= hoy) return { estado: 'restringido', vencio, restringeDesde, corteDesde }

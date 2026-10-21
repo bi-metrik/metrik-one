@@ -117,6 +117,7 @@ async function eleccionesDelContrato(db: Db, servicioContratadoId: string): Prom
 const SLUGS_TERMINOS_CDA = ['terminos-suscripcion-valida-cda', 'terminos-uso-valida']
 
 async function datosBase(ctx: Ctx, plazo: PlazoAnual, db: Db): Promise<DatosAnexoBase | 'error'> {
+  if (!ctx.contrato.empresaId) return 'error'
   const [empresa, docs] = await Promise.all([
     db.from('empresas').select('nombre, razon_social, numero_documento').eq('id', ctx.contrato.empresaId).maybeSingle(),
     documentosDelCliente(),
@@ -160,7 +161,8 @@ async function mencionVigente(db: Db, servicioContratadoId: string): Promise<Est
   return { autoriza: r.data.autoriza === true, desde: String(r.data.created_at) }
 }
 
-async function razonSocialDe(db: Db, empresaId: string): Promise<string | null> {
+async function razonSocialDe(db: Db, empresaId: string | null): Promise<string | null> {
+  if (!empresaId) return null
   const r = await db.from('empresas').select('nombre, razon_social').eq('id', empresaId).maybeSingle()
   return r.data ? String(r.data.razon_social || r.data.nombre || '').trim() || null : null
 }
@@ -168,6 +170,8 @@ async function razonSocialDe(db: Db, empresaId: string): Promise<string | null> 
 /** Lo que muestra la pestaña Pagos junto a la cuota pendiente. */
 export async function leerOpcionesPago(ctx: Ctx, ahoraMs: number = Date.now()): Promise<OpcionesPago> {
   if (ctx.producto !== 'valida_cda' || !planAnualHabilitado(ctx.contrato.parametros)) return { tipo: 'oculto' }
+  // El Plan Anual es de los CDA en negocios (anexo de sus Términos). Un contrato de suscripción no lo ve.
+  if (!ctx.contrato.negocioId || !ctx.contrato.empresaId) return { tipo: 'oculto' }
   const db = createServiceClient() as Db
   const hoy = ctx.entrada.hoy
 

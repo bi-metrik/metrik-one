@@ -110,28 +110,51 @@ export function saldoDePruebaVencida(prueba: PruebaValida): SaldoBolsa {
 const FECHA = new Intl.DateTimeFormat('es-CO', { day: 'numeric', month: 'long', timeZone: 'America/Bogota' })
 
 export function textoSaldo(s: SaldoBolsa): string {
-  const de = s.esPrueba ? ' de prueba' : ''
+  // El mes del plan pagado: el límite del mes, sin la fecha de la bolsa (lleva la gracia de la mora y
+  // no es el día en que se renueva).
+  if (!s.esPrueba) return `Te quedan ${s.saldo.toLocaleString('es-CO')} de ${s.compradas.toLocaleString('es-CO')} consultas de este mes.`
+  const de = ' de prueba'
   const cuantas = s.saldo === 1 ? `Te queda 1 consulta${de}` : `Te quedan ${s.saldo} consultas${de}`
   return s.venceEn ? `${cuantas}. Vence el ${FECHA.format(new Date(s.venceEn))}.` : `${cuantas}.`
 }
 
 export function textoCorte(motivo: MotivoCorte, esPrueba: boolean): { titulo: string; detalle: string } {
+  // Una prueba CON tarjeta que agota las 10 no ve este texto sino la confirmación del cobro
+  // («Activa tu plan ahora: se cobran $150.000 a tu tarjeta terminada en …», `textoConfirmacionCobro`
+  // de `valida-registro/cobro-prueba.ts`, Condiciones v2.1 7.1 literal a). Este queda para la prueba
+  // sin tarjeta y para quien aceptó la v2.0 (se le cobra el día 7, como aceptó).
   if (esPrueba) {
     return motivo === 'bolsa_agotada'
       ? { titulo: 'Usaste todas tus consultas de prueba', detalle: 'Activa tu plan para seguir consultando. Lo que ya consultaste sigue en el historial.' }
       : { titulo: 'Tu prueba terminó', detalle: 'Activa tu plan para seguir consultando. Lo que ya consultaste sigue en el historial.' }
   }
+  // Fuera de la prueba, la bolsa de `/valida` es el mes del plan autogestionado (`valida-registro/plan.ts`):
+  // una bolsa por cuota pagada, con el límite técnico del plan. No hay nada que «activar»: el límite
+  // vuelve con el mes siguiente, y un mes vencido se reabre pagando la cuota.
   return motivo === 'bolsa_agotada'
-    ? { titulo: 'Se agotaron las consultas de tu bolsa', detalle: 'Activa tu plan para seguir consultando. Esta consulta no se cobró.' }
-    : { titulo: 'Tu bolsa de consultas venció', detalle: 'Activa tu plan para seguir consultando. Esta consulta no se cobró.' }
+    ? {
+        titulo: 'Llegaste al límite de consultas de este mes',
+        detalle: 'Tu plan vuelve a tener consultas cuando empiece tu siguiente mes. Esta consulta no se cobró y lo que ya consultaste sigue en el historial.',
+      }
+    : {
+        titulo: 'Tu mes de Valida terminó',
+        detalle: 'Paga la cuota de tu suscripción para seguir consultando. Esta consulta no se cobró.',
+      }
 }
 
+/** A dónde lleva «Activar plan» desde la prueba: la activación autogestionada (`/valida/activar`). */
+export const RUTA_ACTIVAR_PLAN = '/valida/activar'
+
 /**
- * A dónde lleva el botón «Activar plan»: TEMPORAL, al WhatsApp de MéTRIK con el espacio en el texto.
- * `/suscripcion` responde 404 en un espacio de la prueba (no paga ningún contrato todavía). La
- * activación autogestionada (`/valida/activar`, PR #1107) reemplaza esta función al entrar a main.
+ * El respaldo mientras la activación en línea está cerrada (`activacionAbierta()` en falso): el
+ * WhatsApp de MéTRIK con la empresa en el texto. Lo muestra `/valida/activar`, no el botón.
  */
-export function enlaceActivarPlan(espacio: string): string {
-  const texto = `Hola, quiero activar el plan de Valida para ${espacio}`
+export function enlaceActivarPlan(empresa: string): string {
+  const texto = `Hola, quiero activar el plan de Valida para ${empresa}`
   return `https://wa.me/573159509103?text=${encodeURIComponent(texto)}`
+}
+
+/** El botón que acompaña al contador y al corte: activar desde la prueba, o ir a la suscripción del plan. */
+export function accionDelCorte(esPrueba: boolean): { texto: string; ruta: string } {
+  return esPrueba ? { texto: 'Activar plan', ruta: RUTA_ACTIVAR_PLAN } : { texto: 'Ver mi suscripción', ruta: '/suscripcion' }
 }

@@ -96,6 +96,22 @@ const CLASIFICACION: Record<string, Clasificacion> = {
       'numeral 6.5: la bitácora de consultas, también la de la prueba, se conserva 10 años (Ley 962 de 2005, ' +
       'art. 28). Es texto legal con huella SHA-256: va literal y no se interpola.',
   },
+  'src/lib/valida-registro/terminos-plan.ts': {
+    tipo: 'plazo',
+    declara: 'literal',
+    razon:
+      'los Términos de Uso de VALIDA v2.0, variante autoservicio (Emilio; {N} = 10 por decisión de Mauricio ' +
+      'del 2026-10-14), cláusula 9.6: la bitácora de consultas se conserva diez (10) años (Ley 962 de 2005, ' +
+      'art. 28). Texto legal con huella SHA-256: va literal y no se interpola.',
+    salvo: [
+      {
+        // La 7.4 es la duración de la CONFIDENCIALIDAD después de terminar, no un plazo de conservación
+        // de datos personales.
+        frase: 'La obligación rige durante la vigencia y cinco (5) años después de su terminación',
+        razon: 'confidencialidad (cláusula 7.4), no conservación de datos',
+      },
+    ],
+  },
   'src/lib/compliance/vinculacion-publica.ts': {
     tipo: 'plazo',
     declara: 'derivado',

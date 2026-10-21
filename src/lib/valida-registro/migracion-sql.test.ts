@@ -14,6 +14,8 @@ import { PGlite } from '@electric-sql/pglite'
  */
 
 const MIGRACION = join(process.cwd(), 'supabase/migrations/20261010090000_valida_registros.sql')
+const MIGRACION_COBRO = join(process.cwd(), 'supabase/migrations/20261013090000_valida_cobro_tras_prueba.sql')
+const MIGRACION_CONFIRMAR = join(process.cwd(), 'supabase/migrations/20261014234500_valida_cobro_al_confirmar.sql')
 const WS1 = '00000000-0000-4000-8000-0000000000b1'
 const WS2 = '00000000-0000-4000-8000-0000000000b2'
 const WS3 = '00000000-0000-4000-8000-0000000000b3'
@@ -52,6 +54,7 @@ beforeAll(async () => {
   db = new PGlite()
   await db.exec(ESQUEMA_BASE)
   await db.exec(readFileSync(MIGRACION, 'utf8'))
+  await db.exec(readFileSync(MIGRACION_COBRO, 'utf8'))
 }, 60_000)
 
 afterAll(async () => {
@@ -165,5 +168,91 @@ describe('valida_registros', () => {
     expect(await falla(`delete from public.workspaces where id = '${WS1}'`)).toBeNull()
     await db.exec(`insert into public.workspaces values ('${WS1}')`)
     expect(await falla(creado('nuevo@cdauno.co', '900111222', WS1, 'cda-uno-otra-vez'))).toBeNull()
+  })
+})
+
+describe('el cobro al cumplirse los 7 días (20261013090000)', () => {
+  it('las filas viejas quedan sin cobro', async () => {
+    const r = await db.query<{ n: number }>(`select count(*)::int n from public.valida_registros where cobro_estado is not null`)
+    expect(r.rows[0].n).toBe(0)
+  })
+
+  it('un cobro programado exige su instante y su entorno', async () => {
+    const e = await falla(
+      `insert into public.valida_registros (correo, correo_dominio, estado, cobro_estado) values ('p1@x.co', 'x.co', 'intento', 'programado')`,
+    )
+    expect(e).toMatch(/valida_registros_cobro_programado_coherente/)
+    expect(
+      await falla(
+        `insert into public.valida_registros (correo, correo_dominio, estado, cobro_estado, cobro_programado_at, cobro_entorno)
+         values ('p2@x.co', 'x.co', 'intento', 'programado', now(), 'preview')`,
+      ),
+    ).toBeNull()
+  })
+
+  it('cancelado exige cuándo; los estados y el canal de cancelación son cerrados', async () => {
+    const base = "insert into public.valida_registros (correo, correo_dominio, estado, cobro_programado_at, cobro_entorno, cobro_estado"
+    expect(await falla(`${base}) values ('p3@x.co', 'x.co', 'intento', now(), 'preview', 'cancelado')`)).toMatch(
+      /valida_registros_cobro_programado_coherente/,
+    )
+    expect(await falla(`${base}) values ('p4@x.co', 'x.co', 'intento', now(), 'preview', 'cobrandito')`)).toMatch(
+      /valida_registros_cobro_estado_check/,
+    )
+    expect(
+      await falla(`${base}, cobro_cancelado_at, cobro_cancelado_por) values ('p5@x.co', 'x.co', 'intento', now(), 'preview', 'cancelado', now(), 'whatsapp')`),
+    ).toMatch(/valida_registros_cobro_cancelado_por_check/)
+    expect(
+      await falla(`${base}, cobro_cancelado_at, cobro_cancelado_por) values ('p6@x.co', 'x.co', 'intento', now(), 'preview', 'cancelado', now(), 'boton')`),
+    ).toBeNull()
+  })
+
+  it('el método de pago admite eliminado', async () => {
+    expect(
+      await falla(`insert into public.valida_registros (correo, correo_dominio, estado, metodo_pago_estado) values ('p7@x.co', 'x.co', 'intento', 'eliminado')`),
+    ).toBeNull()
+    expect(
+      await falla(`insert into public.valida_registros (correo, correo_dominio, estado, metodo_pago_estado) values ('p8@x.co', 'x.co', 'intento', 'borrado')`),
+    ).toMatch(/valida_registros_metodo_pago_estado_check/)
+  })
+
+  it('sigue sin policy ni privilegios para anon y authenticated', async () => {
+    const r = await db.query<{ lee: boolean }>(`select has_table_privilege('authenticated', 'public.valida_registros', 'select') lee`)
+    expect(r.rows[0].lee).toBe(false)
+  })
+})
+
+describe('la constancia del cobro al confirmar (20261014234500)', () => {
+  it('se aplica dos veces sin error y deja las filas existentes sin confirmación', async () => {
+    await db.exec(readFileSync(MIGRACION_CONFIRMAR, 'utf8'))
+    await db.exec(readFileSync(MIGRACION_CONFIRMAR, 'utf8'))
+    const r = await db.query<{ n: number }>(`select count(*)::int n from public.valida_registros where cobro_confirmado_at is not null`)
+    expect(r.rows[0].n).toBe(0)
+  })
+
+  it('una confirmación sin el texto que se vio, o sin quién confirmó, no entra', async () => {
+    const base = `insert into public.valida_registros (correo, correo_dominio, estado, cobro_estado, cobro_programado_at, cobro_entorno, cobro_confirmado_at, cobro_confirmado_texto, cobro_confirmado_por)`
+    const U = `'00000000-0000-4000-8000-0000000000c1'`
+    expect(await falla(`${base} values ('c1@x.co', 'x.co', 'intento', 'cobrando', now(), 'preview', now(), null, ${U})`)).toMatch(
+      /valida_registros_cobro_confirmado_coherente/,
+    )
+    expect(await falla(`${base} values ('c2@x.co', 'x.co', 'intento', 'cobrando', now(), 'preview', now(), '', ${U})`)).toMatch(
+      /valida_registros_cobro_confirmado_coherente/,
+    )
+    expect(await falla(`${base} values ('c4@x.co', 'x.co', 'intento', 'cobrando', now(), 'preview', now(), 'Texto visto', null)`)).toMatch(
+      /valida_registros_cobro_confirmado_coherente/,
+    )
+    expect(
+      await falla(`${base} values ('c3@x.co', 'x.co', 'intento', 'cobrando', now(), 'preview', now(), 'Usaste tus 10 consultas de prueba. [Activar y pagar $150.000]', ${U})`),
+    ).toBeNull()
+  })
+
+  it('la marca del rechazo de la confirmación existe y nace nula', async () => {
+    const r = await db.query<{ n: number }>(`select count(*)::int n from public.valida_registros where cobro_confirmacion_rechazada_at is not null`)
+    expect(r.rows[0].n).toBe(0)
+  })
+
+  it('sigue sin privilegios para authenticated', async () => {
+    const r = await db.query<{ lee: boolean }>(`select has_table_privilege('authenticated', 'public.valida_registros', 'select') lee`)
+    expect(r.rows[0].lee).toBe(false)
   })
 })

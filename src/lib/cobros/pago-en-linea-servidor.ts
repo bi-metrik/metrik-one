@@ -1,11 +1,13 @@
 import 'server-only'
 import type { SupabaseClient } from '@supabase/supabase-js'
-import { registrarActividad } from '@/lib/activity/registrar-actividad'
+import { anclaDeFila } from '@/lib/suscripciones-producto/ancla'
+import { anotarEnAncla } from '@/lib/suscripciones-producto/bitacora'
 import { todayBogotaISO } from '@/lib/dates/bogota'
 import { adapterPara } from '@/lib/suscripciones/pasarela/registro'
 import type { EventoPasarela, PasarelaAdapter } from '@/lib/suscripciones/pasarela/adapter'
 import { createServiceClient } from '@/lib/supabase/server'
 import { activarPlanAnualSiCorresponde } from '@/lib/valida-cda/plan-anual-activacion-servidor'
+import { abrirCicloSiCorresponde, detalleCiclo } from '@/lib/valida-registro/ciclo-servidor'
 import { confirmarPagoCobroProgramado } from './confirmar-cobro-programado'
 import { procesarEventoPasarela, type CobroParaPago, type RepoPagoEnLinea } from './pago-en-linea'
 
@@ -24,12 +26,13 @@ import { procesarEventoPasarela, type CobroParaPago, type RepoPagoEnLinea } from
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type Db = any
 
-const COLUMNAS_COBRO = 'id, workspace_id, negocio_id, monto, retencion_iva, fecha, anulado_at, tipo_cobro, external_ref, notas, enlace_pago_url'
+const COLUMNAS_COBRO = 'id, workspace_id, negocio_id, suscripcion_id, monto, retencion_iva, fecha, anulado_at, tipo_cobro, external_ref, notas, enlace_pago_url'
 
 type FilaCobro = {
   id: string
   workspace_id: string
   negocio_id: string | null
+  suscripcion_id?: string | null
   monto: number | string | null
   retencion_iva: number | string | null
   fecha: string | null
@@ -45,6 +48,7 @@ function aCobro(f: FilaCobro): CobroParaPago {
     id: f.id,
     workspaceId: f.workspace_id,
     negocioId: f.negocio_id,
+    suscripcionId: f.suscripcion_id ?? null,
     monto: Number(f.monto ?? 0),
     retencionIva: Number(f.retencion_iva ?? 0),
     fecha: f.fecha,
@@ -135,26 +139,31 @@ export function repoPagoEnLinea(dbCliente: SupabaseClient, pasarela: string, ada
     },
 
     async trasPagoRegistrado(cobro) {
+      const partes: { revisar: boolean; detalle: string }[] = []
       const r = await activarPlanAnualSiCorresponde(dbCliente, cobro.id)
-      if (r.tipo === 'no_aplica') return null
       if (r.tipo === 'requiere_revision') {
-        return { revisar: true, detalle: `Plan anual NO activado: ${r.detalle} Revisar y devolver el pago si corresponde.` }
+        partes.push({ revisar: true, detalle: `Plan anual NO activado: ${r.detalle} Revisar y devolver el pago si corresponde.` })
+      } else if (r.tipo !== 'no_aplica') {
+        partes.push({ revisar: false, detalle: r.tipo === 'activado' ? 'Plan anual activado.' : 'El plan anual ya estaba activo.' })
       }
-      return { revisar: false, detalle: r.tipo === 'activado' ? 'Plan anual activado.' : 'El plan anual ya estaba activo.' }
+      // Valida autogestionada: el pago abre el ciclo del mes en Valida (y el primero le quita el
+      // vencimiento a la llave de la prueba). No aplica a ningún espacio que no venga del registro.
+      const ciclo = detalleCiclo(await abrirCicloSiCorresponde(cobro.id, { db: dbCliente }))
+      if (ciclo) partes.push(ciclo)
+      if (partes.length === 0) return null
+      return { revisar: partes.some((p) => p.revisar), detalle: partes.map((p) => p.detalle).join(' ') }
     },
 
     async anotarEnNegocio(cobro, texto) {
-      if (!cobro.negocioId) return
-      await registrarActividad(
+      // El negocio (su timeline) o la suscripción (su bitácora): `anotarEnAncla` decide y nunca lanza.
+      await anotarEnAncla(
         dbCliente,
         {
-          workspace_id: cobro.workspaceId,
-          entidad_tipo: 'negocio',
-          entidad_id: cobro.negocioId,
-          tipo: 'sistema',
-          autor_id: null,
-          // `activity_log.contenido` tiene CHECK de 280 caracteres.
-          contenido: texto.slice(0, 280),
+          ancla: anclaDeFila({ negocio_id: cobro.negocioId, suscripcion_id: cobro.suscripcionId ?? null }),
+          workspaceId: cobro.workspaceId,
+          tipo: 'pago_en_linea',
+          texto,
+          datos: { cobro_id: cobro.id },
         },
         `webhook-${pasarela}`,
       )

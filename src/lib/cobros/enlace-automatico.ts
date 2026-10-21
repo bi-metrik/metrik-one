@@ -7,7 +7,7 @@
  *
  * ## Qué entra
  *
- *   · La cuota es de un plan cuyo negocio es un contrato de servicio (`servicios_contratados`) del
+ *   · La cuota es de un plan cuyo negocio (o suscripción) es un contrato de servicio (`servicios_contratados`) del
  *     MISMO espacio, en estado `activo` o `pausado`. Pausado sigue debiendo: justamente se pausa por
  *     mora. Borrador, cancelado y terminado no reciben cobros nuevos.
  *   · La pasarela en línea del plan resuelve a una que genera enlaces (`pasarelaDeEnlaces`). Un plan
@@ -35,17 +35,28 @@ export const DIAS_ANTICIPACION_ENLACE = 7
 /** Estados del contrato que siguen recibiendo cobros. */
 export const ESTADOS_CONTRATO_CON_COBRO = ['activo', 'pausado'] as const
 
+/**
+ * El ancla del contrato y del plan: su negocio o (desde 20261016) su suscripción. Exactamente uno; el
+ * emparejamiento contrato ↔ plan es por el ancla (`llaveContrato`).
+ */
 export interface ContratoParaEnlace {
   workspaceId: string
-  negocioId: string
+  negocioId: string | null
+  suscripcionId?: string | null
   estado: string
 }
 
 export interface PlanParaEnlace {
   id: string
   workspaceId: string
-  negocioId: string
+  negocioId: string | null
+  suscripcionId?: string | null
   pasarela: string | null
+}
+
+/** `espacio|negocio:<id>` o `espacio|suscripcion:<id>`: con qué se empareja un plan con su contrato. */
+export function llaveContrato(x: { workspaceId: string; negocioId: string | null; suscripcionId?: string | null }): string {
+  return x.negocioId ? `${x.workspaceId}|negocio:${x.negocioId}` : `${x.workspaceId}|suscripcion:${x.suscripcionId ?? ''}`
 }
 
 export interface CuotaParaSeleccion {
@@ -69,7 +80,8 @@ export interface CuotaCandidata {
   cuotaId: string
   workspaceId: string
   planCobroId: string
-  negocioId: string
+  negocioId: string | null
+  suscripcionId?: string | null
   numero: number
   fechaVencimiento: string
 }
@@ -107,11 +119,11 @@ export function planesConEnlaceAutomatico(p: {
   const vigentes = new Set(
     p.contratos
       .filter((c) => (ESTADOS_CONTRATO_CON_COBRO as readonly string[]).includes(c.estado))
-      .map((c) => `${c.workspaceId}|${c.negocioId}`),
+      .map((c) => llaveContrato(c)),
   )
   return p.planes.filter(
     (plan) =>
-      vigentes.has(`${plan.workspaceId}|${plan.negocioId}`) &&
+      vigentes.has(llaveContrato(plan)) &&
       pasarelaDeEnlaces({
         pasarelaPlan: plan.pasarela,
         configWorkspace: p.configPorWorkspace.get(plan.workspaceId) ?? null,
@@ -163,6 +175,7 @@ export function seleccionarCuotasParaEnlace(p: {
       workspaceId: plan.workspaceId,
       planCobroId: plan.id,
       negocioId: plan.negocioId,
+      suscripcionId: plan.suscripcionId ?? null,
       numero: cuota.numero,
       fechaVencimiento: cuota.fechaVencimiento,
     })

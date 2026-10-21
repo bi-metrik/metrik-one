@@ -69,22 +69,32 @@ function dobleConRpc(tablas: Tablas) {
     if (!contrato) return { data: null, error: { message: 'contrato inexistente' } }
     const acta = (t.servicio_cobro_enrolamiento ?? []).find((a) => a.servicio_contratado_id === contratoId)
     if (acta) return { data: { resultado: 'ya_estaba', plan_cobro_id: acta.plan_cobro_id }, error: null }
+    // El ancla, como `coalesce(negocio_id, suscripcion_id)` en la función de la base (20261016100100).
+    const ancla = (f: Fila) => (f.negocio_id ?? f.suscripcion_id ?? null) as string | null
     const previo = (t.planes_cobro ?? []).find(
-      (p) => p.workspace_id === contrato.workspace_id && p.negocio_id === contrato.negocio_id,
+      (p) => p.workspace_id === contrato.workspace_id && ancla(p) === ancla(contrato),
     )
     if (previo) return { data: { resultado: 'plan_existente', plan_cobro_id: previo.id }, error: null }
 
     const plan = args.p_plan as Record<string, unknown>
     const cuotas = args.p_cuotas as Fila[]
     const planId = `plan-${++secuencia}`
-    ;(t.planes_cobro ??= []).push({ id: planId, workspace_id: contrato.workspace_id, negocio_id: contrato.negocio_id, activo: false, ...plan })
+    ;(t.planes_cobro ??= []).push({
+      id: planId,
+      workspace_id: contrato.workspace_id,
+      negocio_id: contrato.negocio_id ?? null,
+      suscripcion_id: contrato.suscripcion_id ?? null,
+      activo: false,
+      ...plan,
+    })
     for (const c of cuotas) {
       ;(t.plan_cobro_cuotas ??= []).push({ id: `cuota-${planId}-${c.numero}`, plan_cobro_id: planId, workspace_id: contrato.workspace_id, ...c })
     }
     ;(t.servicio_cobro_enrolamiento ??= []).push({
       servicio_contratado_id: contratoId,
       workspace_id: contrato.workspace_id,
-      negocio_id: contrato.negocio_id,
+      negocio_id: contrato.negocio_id ?? null,
+      suscripcion_id: contrato.suscripcion_id ?? null,
       plan_cobro_id: planId,
       ancla_at: args.p_ancla_at,
       dias_trial: args.p_dias_trial,
@@ -269,6 +279,54 @@ describe('Valida por CDA (decisión del 2026-10-09)', () => {
     expect(d.tablas.planes_cobro?.[0].auto_renovar).toBe(false)
   })
 
+  it('la cuenta autogestionada (dias_trial 0) se enrola sola al aceptar, angostada a SU contrato', async () => {
+    const AUTO = { ...CDA, id: 'c-auto', negocio_id: 'n-auto', parametros: { precio_mensual: 150_000, dias_trial: 0, limite_consultas_mes: 3000 } }
+    const d = dobleConRpc(
+      tablasBase({
+        servicios_contratados: [CDA, AUTO],
+        aceptaciones_terminos: [aceptacionCda, { id: 'a-auto', negocio_id: 'n-auto', estado: 'aceptado', respondido_at: '2026-10-12T15:00:00Z' }],
+        workspaces: [{ id: WS, config_extra: {} }],
+      }),
+    )
+    const r = await enrolarContratosPorCiclo({ db: d.db, contratoId: 'c-auto', adapterPara: (x) => (x === 'bold' ? ({ crearEnlacePago: async () => null } as never) : null) })
+    expect(r.candidatos).toBe(1)
+    expect(r.creados).toHaveLength(1)
+    expect(r.creados[0]).toMatchObject({ contratoId: 'c-auto', finTrial: '2026-10-12' })
+    expect(d.llamadas.map((l) => l.args.p_servicio_contratado_id)).toEqual(['c-auto'])
+  })
+
+  describe('el contrato que cobra al cumplirse los 7 días de la prueba', () => {
+    const TRAS = {
+      ...CDA,
+      id: 'c-tras',
+      negocio_id: 'n-tras',
+      parametros: { precio_mensual: 150_000, dias_trial: 0, limite_consultas_mes: 3000, cobro_tras_prueba: true },
+    }
+    // Aceptó en el registro, el 13 de octubre; el primer cobro es el 21.
+    const aceptacion = { id: 'a-tras', negocio_id: 'n-tras', estado: 'aceptado', respondido_at: '2026-10-13T20:00:00Z' }
+    const bold = { adapterPara: (x: string) => (x === 'bold' ? ({ crearEnlacePago: async () => null } as never) : null) }
+
+    it('el enrolamiento diario lo salta: lo enrola solo el cobro', async () => {
+      const d = dobleConRpc(tablasBase({ servicios_contratados: [TRAS], aceptaciones_terminos: [aceptacion], workspaces: [{ id: WS, config_extra: {} }] }))
+      const r = await enrolarContratosPorCiclo({ db: d.db, ...bold })
+      expect(r.creados).toEqual([])
+      expect(d.llamadas).toEqual([])
+    })
+
+    it('el cobro lo enrola con la cuota 1 el día del primer cobro, no el de la aceptación (fila 22)', async () => {
+      const d = dobleConRpc(tablasBase({ servicios_contratados: [TRAS], aceptaciones_terminos: [aceptacion], workspaces: [{ id: WS, config_extra: {} }] }))
+      const r = await enrolarContratosPorCiclo({ db: d.db, contratoId: 'c-tras', anclaAt: '2026-10-21T12:00:00Z', ...bold })
+      expect(r.creados[0]).toMatchObject({ contratoId: 'c-tras', finTrial: '2026-10-21' })
+      expect(d.llamadas[0].args.p_ancla_at).toBe('2026-10-21T12:00:00Z')
+    })
+
+    it('sin aceptación, el ancla no basta: no se enrola', async () => {
+      const d = dobleConRpc(tablasBase({ servicios_contratados: [TRAS], aceptaciones_terminos: [], workspaces: [{ id: WS, config_extra: {} }] }))
+      const r = await enrolarContratosPorCiclo({ db: d.db, contratoId: 'c-tras', anclaAt: '2026-10-21T12:00:00Z', ...bold })
+      expect(r.creados).toEqual([])
+    })
+  })
+
   it('sin días de trial en el contrato ni en la ficha no se enrola (la ficha v1 no los declara)', async () => {
     const d = dobleConRpc(
       tablasBase({
@@ -288,5 +346,54 @@ describe('diasTrialDeFicha', () => {
     expect(diasTrialDeFicha({ parametros: { precio_mensual: { por_defecto: 20_000 } } })).toBeNull()
     expect(diasTrialDeFicha({ parametros: { dias_trial: { tipo: 'entero' } } })).toBeNull()
     expect(diasTrialDeFicha(null)).toBeNull()
+  })
+})
+
+describe('un contrato colgado de una suscripción (suscripciones_producto) se enrola igual', () => {
+  const SUS = 'sus-1'
+  const CONTRATO_SUS = 'c-sus'
+  function conSuscripcion(extra: Partial<Tablas> = {}): Tablas {
+    return tablasBase({
+      servicios_contratados: [
+        {
+          id: CONTRATO_SUS,
+          workspace_id: WS,
+          negocio_id: null,
+          suscripcion_id: SUS,
+          estado: 'activo',
+          servicio_slug: 'radar-secop-licencia',
+          servicio_version: 1,
+          parametros: { precio_mensual: 15_000 },
+        },
+      ],
+      aceptaciones_terminos: [
+        // Una aceptación de un NEGOCIO no ancla a la suscripción, aunque sea más vieja.
+        { id: 'a0', negocio_id: NEGOCIO, estado: 'aceptado', respondido_at: '2026-09-01T14:30:00Z' },
+        { id: 'a1', negocio_id: null, suscripcion_id: SUS, estado: 'aceptado', respondido_at: '2026-09-29T14:30:00Z' },
+      ],
+      ...extra,
+    })
+  }
+
+  it('el plan nace colgado de la suscripción, anclado en SU aceptación', async () => {
+    const d = dobleConRpc(conSuscripcion())
+    const r = await enrolarContratosPorCiclo({ db: d.db, ...conPasarela })
+    expect(r.errores).toEqual([])
+    expect(r.creados).toHaveLength(1)
+    expect(r.creados[0].finTrial).toBe('2026-10-04')
+    expect(d.tablas.planes_cobro?.[0]).toMatchObject({ negocio_id: null, suscripcion_id: SUS })
+    expect(d.tablas.servicio_cobro_enrolamiento?.[0]).toMatchObject({ suscripcion_id: SUS, negocio_id: null })
+  })
+
+  it('sin aceptación de la suscripción no se enrola; un plan previo de la suscripción manda', async () => {
+    const sin = dobleConRpc(conSuscripcion({ aceptaciones_terminos: [{ id: 'a0', negocio_id: NEGOCIO, estado: 'aceptado', respondido_at: '2026-09-01T14:30:00Z' }] }))
+    const r = await enrolarContratosPorCiclo({ db: sin.db, ...conPasarela })
+    expect(r.creados).toHaveLength(0)
+    expect(r.descartes.sin_aceptacion).toBe(1)
+
+    const previo = dobleConRpc(conSuscripcion({ planes_cobro: [{ id: 'p-viejo', workspace_id: WS, negocio_id: null, suscripcion_id: SUS }] }))
+    const r2 = await enrolarContratosPorCiclo({ db: previo.db, ...conPasarela })
+    expect(r2.creados).toHaveLength(0)
+    expect(r2.descartes.plan_existente).toBe(1)
   })
 })

@@ -31,7 +31,6 @@ import {
 } from '@/lib/actions/valida-consultas';
 import TutorialTour from '@/components/tutorial/TutorialTour';
 import TutorialButton from '@/components/tutorial/TutorialButton';
-import TutorialEmptyState from '@/components/tutorial/TutorialEmptyState';
 import { useFileDrop } from '@/hooks/use-file-drop';
 import {
   cancelarLoteValida,
@@ -46,6 +45,7 @@ import {
 import { TOPE_FILAS_LOTE } from '@/lib/valida/lote';
 import { esMotivoCorte, type MotivoCorte, type SaldoBolsa } from '@/lib/valida/corte-bolsa';
 import { ActivaTuPlan, SaldoConsultas } from './activa-tu-plan';
+import { FranjaPrueba, type PruebaEnPantalla } from './franja-prueba';
 import { formatFecha } from '@/lib/dates/bogota'
 import { PALETA } from '@/lib/marca/paleta'
 
@@ -133,8 +133,11 @@ type Props = {
    * reemplaza los formularios de consulta.
    */
   saldo?: SaldoBolsa | null;
-  /** Nombre del espacio (o su slug): va en el mensaje de WhatsApp de «Activar plan». */
-  espacio?: string;
+  /**
+   * La prueba gratis del registro autogestionado: con ella, el contador, la fecha y el cobro van en UNA
+   * franja (`FranjaPrueba`) en vez de la línea del saldo. null = no es una prueba.
+   */
+  prueba?: PruebaEnPantalla | null;
   /** El lote del enlace del correo (`/valida?lote=<id>`): abre la carga masiva en ese lote. */
   loteInicialId?: string | null;
 };
@@ -149,22 +152,25 @@ export default function ValidaClient({
   consultasEnPausa = null,
   consultasRestringidas: restringidasPorMora = null,
   saldo = null,
-  espacio = '',
+  prueba = null,
   loteInicialId = null,
 }: Props) {
   const [saldoLocal, setSaldoLocal] = useState<SaldoBolsa | null>(saldo);
   const [corte, setCorte] = useState<MotivoCorte | null>(saldo?.bloqueada ? (saldo.motivo ?? 'bolsa_agotada') : null);
   // La mora manda (es un contrato con cuotas vencidas); si no, el corte de la bolsa.
   const consultasRestringidas =
-    restringidasPorMora ?? (corte ? <ActivaTuPlan motivo={corte} esPrueba={saldoLocal?.esPrueba ?? false} espacio={espacio} /> : null);
+    restringidasPorMora ?? (corte ? <ActivaTuPlan motivo={corte} esPrueba={saldoLocal?.esPrueba ?? false} /> : null);
   const [tab, setTab] = useState<TabKey>(
     negocioInicial || consultasRestringidas ? 'historial' : loteInicialId ? 'masiva' : 'puntual',
   );
   const [historial, setHistorial] = useState<ConsultaHistorialItem[]>(historialInicial);
   const [historialError, setHistorialError] = useState<string | null>(errorHistorial);
   const [tourTrigger, setTourTrigger] = useState(0);
+  // Sin filtros, un historial vacío invita a la primera consulta; con filtros, dice que no hay resultados.
+  const [conFiltros, setConFiltros] = useState(Boolean(negocioInicial));
 
   async function refrescarHistorial(filtros?: FiltrosHistorial) {
+    setConFiltros(Boolean(filtros && Object.entries(filtros).some(([k, v]) => k !== 'limite' && v !== undefined && v !== '')));
     const r = await listarConsultasValida(filtros);
     if (r.ok) {
       setHistorial(r.consultas);
@@ -178,8 +184,6 @@ export default function ValidaClient({
     setTourTrigger(t => t + 1);
     setTab('puntual');
   }
-
-  const mostrarEmpty = historial.length === 0 && !historialError;
 
   return (
     <div className="space-y-6">
@@ -195,17 +199,14 @@ export default function ValidaClient({
       </div>
 
       {encabezado}
-      {saldoLocal && !corte && !consultasEnPausa && !restringidasPorMora && <SaldoConsultas saldo={saldoLocal} espacio={espacio} />}
+      {prueba && !consultasEnPausa && !restringidasPorMora ? (
+        <FranjaPrueba saldo={saldoLocal} prueba={prueba} />
+      ) : (
+        saldoLocal && !corte && !consultasEnPausa && !restringidasPorMora && <SaldoConsultas saldo={saldoLocal} />
+      )}
 
       <div className="space-y-6">
       {consultasEnPausa ? consultasEnPausa : (<>
-      {mostrarEmpty && !consultasRestringidas && (
-        <TutorialEmptyState
-          onStartDemo={dispararTutorial}
-          onTryConsulta={() => setTab('puntual')}
-        />
-      )}
-
       <div className="flex gap-1 border-b border-[#E5E7EB]">
         <TabButton
           active={tab === 'puntual'}
@@ -248,7 +249,7 @@ export default function ValidaClient({
           onCorte={setCorte}
           onConsumidas={n => setSaldoLocal(s => (s ? { ...s, saldo: Math.max(0, s.saldo - n) } : s))}
           esPrueba={saldoLocal?.esPrueba ?? false}
-          espacio={espacio}
+         
           loteInicialId={loteInicialId}
         />
       )}
@@ -259,6 +260,7 @@ export default function ValidaClient({
           onFiltrar={refrescarHistorial}
           negocioInicial={negocioInicial}
           modoVitrina={modoVitrina}
+          textoVacio={conFiltros ? undefined : 'Haz tu primera consulta arriba.'}
         />
       )}
       </>)}
@@ -312,8 +314,6 @@ type PropsForm = {
   onConsumidas?: (n: number) => void;
   /** La bolsa es la prueba gratis (cambia el texto del corte). */
   esPrueba?: boolean;
-  /** Nombre del espacio, para el mensaje de «Activar plan». */
-  espacio?: string;
 };
 
 function ConsultaPuntualForm({ onPersisted, modoVitrina = false, onCorte, onConsumidas }: PropsForm) {
@@ -757,7 +757,6 @@ function ConsultaMasivaForm({
   onCorte,
   onConsumidas,
   esPrueba = false,
-  espacio = '',
   loteInicialId = null,
 }: PropsMasiva) {
   const [archivo, setArchivo] = useState<File | null>(null);
@@ -972,7 +971,7 @@ function ConsultaMasivaForm({
         <ResumenLote
           lote={estado.lote}
           esPrueba={esPrueba}
-          espacio={espacio}
+         
           descargando={descargando}
           errorDescarga={errorDescarga}
           accion={accion}
@@ -1193,7 +1192,6 @@ function DistribucionSeveridad({ sev }: { sev: Record<Severidad, number> }) {
 function ResumenLote({
   lote,
   esPrueba,
-  espacio,
   descargando,
   errorDescarga,
   accion,
@@ -1205,7 +1203,6 @@ function ResumenLote({
 }: {
   lote: LoteVista;
   esPrueba: boolean;
-  espacio: string;
   descargando: string | null;
   errorDescarga: string | null;
   accion: boolean;
@@ -1245,7 +1242,7 @@ function ResumenLote({
               : `${sinConsultar} filas quedaron sin consultar y no se cobraron.`}
           </p>
           {pausado && lote.textoPausa && !corte && <p className="text-sm text-tinta-suave">{lote.textoPausa}</p>}
-          {corte && <ActivaTuPlan motivo={corte} esPrueba={esPrueba} espacio={espacio} />}
+          {corte && <ActivaTuPlan motivo={corte} esPrueba={esPrueba} />}
           {pausado && (
             <div className="flex flex-col sm:flex-row gap-2">
               <button
@@ -1319,12 +1316,15 @@ function Historial({
   onFiltrar,
   negocioInicial = null,
   modoVitrina = false,
+  textoVacio,
 }: {
   consultas: ConsultaHistorialItem[];
   error: string | null;
   onFiltrar: (filtros: FiltrosHistorial) => Promise<void>;
   negocioInicial?: NegocioBusqueda | null;
   modoVitrina?: boolean;
+  /** Lo que dice la tabla vacía. Por defecto, «Sin consultas con los filtros aplicados.». */
+  textoVacio?: string;
 }) {
   const [negocio, setNegocio] = useState<NegocioBusqueda | null>(negocioInicial);
   const [severidad, setSeveridad] = useState<Severidad | ''>('');
@@ -1445,7 +1445,7 @@ function Historial({
         </div>
       </div>
 
-      <HistorialTable consultas={consultas} error={error} mostrarNegocio={!modoVitrina} />
+      <HistorialTable consultas={consultas} error={error} mostrarNegocio={!modoVitrina} textoVacio={textoVacio} />
     </div>
   );
 }
@@ -1454,10 +1454,12 @@ export function HistorialTable({
   consultas,
   error,
   mostrarNegocio,
+  textoVacio = 'Sin consultas con los filtros aplicados.',
 }: {
   consultas: ConsultaHistorialItem[];
   error: string | null;
   mostrarNegocio?: boolean;
+  textoVacio?: string;
 }) {
   if (error) {
     return (
@@ -1469,7 +1471,7 @@ export function HistorialTable({
   if (consultas.length === 0) {
     return (
       <div className="bg-white rounded-lg border border-[#E5E7EB] p-8 text-center text-sm text-tinta-suave">
-        Sin consultas con los filtros aplicados.
+        {textoVacio}
       </div>
     );
   }

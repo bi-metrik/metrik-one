@@ -1,6 +1,7 @@
 import 'server-only'
 import type { SupabaseClient } from '@supabase/supabase-js'
 import { traerTodo } from '@/lib/supabase/paginar'
+import { anclaDeFila, idsPorTipo, llaveDeFila, type Ancla } from '@/lib/suscripciones-producto/ancla'
 import { adapterPara } from '@/lib/suscripciones/pasarela/registro'
 import type { PasarelaAdapter } from '@/lib/suscripciones/pasarela/adapter'
 import { pasarelaDeEnlaces } from './enlace-pago-cuota'
@@ -42,6 +43,29 @@ type Db = any
 export interface DepsEnrolamiento {
   db: SupabaseClient
   adapterPara?: (pasarela: string) => PasarelaAdapter | null
+  /**
+   * Solo este contrato. Lo usa la cuenta autogestionada de Valida al aceptar sus Términos
+   * (`asegurarCobroDelEspacio`): su plan nace en ese momento y no al día siguiente con el cron.
+   * Mismas reglas, misma función de la base: solo se angosta la lectura.
+   */
+  contratoId?: string
+  /**
+   * Solo con `contratoId`: el ancla de la primera cuota en vez de la aceptación más vieja. La usa el
+   * cobro al cumplirse los 7 días de la prueba de Valida (`cobro-prueba-servidor.ts`): los Términos se
+   * aceptan en el registro, 7 días antes, y anclar ahí pondría la cuota 1 antes del primer cobro y la
+   * del mes 2 a los 23 días (fila 22 de Vera: la cuota 1 es el día del primer cobro). Igual exige que
+   * haya una aceptación.
+   */
+  anclaAt?: string
+}
+
+/**
+ * Un contrato que cobra al cumplirse los 7 días de la prueba (`parametros.cobro_tras_prueba`) lo enrola
+ * SOLO ese cobro, con su ancla. El enrolamiento diario lo salta: si no, el día que falle el cobro
+ * automático lo enrolaría con el ancla de la aceptación del registro y le mandaría un enlace.
+ */
+export function loEnrolaElCobroTrasPrueba(parametros: Record<string, unknown> | null | undefined): boolean {
+  return (parametros ?? {}).cobro_tras_prueba === true
 }
 
 export interface ResumenEnrolamiento {
@@ -65,7 +89,9 @@ interface FilaServicioCatalogo {
 interface FilaContrato {
   id: string
   workspace_id: string
-  negocio_id: string
+  negocio_id: string | null
+  /** Desde 20261016 un contrato puede colgar de una suscripción (`suscripciones_producto`) y no de un negocio. */
+  suscripcion_id?: string | null
   estado: string
   servicio_slug: string
   servicio_version: number
@@ -77,6 +103,19 @@ export function diasTrialDeFicha(definicion: unknown): number | null {
   const p = (definicion as { parametros?: Record<string, { por_defecto?: unknown }> } | null)?.parametros?.dias_trial
   const v = p?.por_defecto
   return typeof v === 'number' && Number.isFinite(v) ? Math.trunc(v) : null
+}
+
+interface FilaAnclada {
+  id: string
+  workspace_id: string
+  negocio_id: string | null
+  suscripcion_id?: string | null
+}
+
+interface FilaAceptacion {
+  negocio_id: string | null
+  suscripcion_id?: string | null
+  respondido_at: string | null
 }
 
 export async function enrolarContratosPorCiclo(deps: DepsEnrolamiento): Promise<ResumenEnrolamiento> {
@@ -111,23 +150,27 @@ export async function enrolarContratosPorCiclo(deps: DepsEnrolamiento): Promise<
 
   // 2. Sus contratos activos.
   const contratos = await traerTodo<FilaContrato>(
-    (desde, hasta) =>
-      db
+    (desde, hasta) => {
+      let q = db
         .from('servicios_contratados')
-        .select('id, workspace_id, negocio_id, estado, servicio_slug, servicio_version, parametros')
+        .select('id, workspace_id, negocio_id, suscripcion_id, estado, servicio_slug, servicio_version, parametros')
         .in('servicio_slug', [...porSlug.keys()])
         .eq('estado', 'activo')
-        .order('id')
-        .range(desde, hasta),
+      if (deps.contratoId) q = q.eq('id', deps.contratoId)
+      return q.order('id').range(desde, hasta)
+    },
     { etiqueta: 'contratos por ciclo sin enrolar' },
   )
   if (contratos.length === 0) return resumen
   resumen.candidatos = contratos.length
 
-  const negocioIds = [...new Set(contratos.map((c) => c.negocio_id))]
+  // El ancla de cada contrato: su negocio o su suscripción. Planes y aceptaciones se leen por las dos.
+  const { negocios: negocioIds, suscripciones: suscripcionIds } = idsPorTipo(
+    contratos.map((c) => anclaDeFila(c)).filter((a): a is Ancla => a !== null),
+  )
 
   // 3. Actas, planes, aceptaciones, versiones del catálogo y configuración del cobrador.
-  const [actas, planes, aceptaciones, versiones] = await Promise.all([
+  const [actas, planesNeg, planesSus, aceptacionesNeg, aceptacionesSus, versiones] = await Promise.all([
     traerTodo<{ servicio_contratado_id: string }>(
       (desde, hasta) =>
         db
@@ -138,27 +181,35 @@ export async function enrolarContratosPorCiclo(deps: DepsEnrolamiento): Promise<
           .range(desde, hasta),
       { etiqueta: 'actas de enrolamiento' },
     ),
-    traerTodo<{ id: string; workspace_id: string; negocio_id: string }>(
-      (desde, hasta) =>
-        db
-          .from('planes_cobro')
-          .select('id, workspace_id, negocio_id')
-          .in('negocio_id', negocioIds)
-          .order('id')
-          .range(desde, hasta),
-      { etiqueta: 'planes de cobro de los contratos por enrolar' },
-    ),
-    traerTodo<{ negocio_id: string | null; respondido_at: string | null }>(
-      (desde, hasta) =>
-        db
-          .from('aceptaciones_terminos')
-          .select('negocio_id, respondido_at')
-          .in('negocio_id', negocioIds)
-          .eq('estado', 'aceptado')
-          .order('negocio_id')
-          .range(desde, hasta),
-      { etiqueta: 'aceptaciones de términos de los contratos por enrolar' },
-    ),
+    ...(['negocio_id', 'suscripcion_id'] as const).map((col) => {
+      const ids = col === 'negocio_id' ? negocioIds : suscripcionIds
+      if (ids.length === 0) return Promise.resolve([] as FilaAnclada[])
+      return traerTodo<FilaAnclada>(
+        (desde, hasta) =>
+          db
+            .from('planes_cobro')
+            .select('id, workspace_id, negocio_id, suscripcion_id')
+            .in(col, ids)
+            .order('id')
+            .range(desde, hasta),
+        { etiqueta: `planes de cobro de los contratos por enrolar (${col})` },
+      )
+    }),
+    ...(['negocio_id', 'suscripcion_id'] as const).map((col) => {
+      const ids = col === 'negocio_id' ? negocioIds : suscripcionIds
+      if (ids.length === 0) return Promise.resolve([] as FilaAceptacion[])
+      return traerTodo<FilaAceptacion>(
+        (desde, hasta) =>
+          db
+            .from('aceptaciones_terminos')
+            .select('negocio_id, suscripcion_id, respondido_at')
+            .in(col, ids)
+            .eq('estado', 'aceptado')
+            .order(col)
+            .range(desde, hasta),
+        { etiqueta: `aceptaciones de términos de los contratos por enrolar (${col})` },
+      )
+    }),
     traerTodo<{ slug: string; version: number; definicion: unknown }>(
       (desde, hasta) =>
         db
@@ -171,17 +222,23 @@ export async function enrolarContratosPorCiclo(deps: DepsEnrolamiento): Promise<
     ),
   ])
 
-  const conActa = new Set(actas.map((a) => a.servicio_contratado_id))
-  const conPlan = new Set(planes.map((p) => `${p.workspace_id}|${p.negocio_id}`))
-  const fichaPorVersion = new Map(versiones.map((v) => [`${v.slug}|${v.version}`, diasTrialDeFicha(v.definicion)]))
+  const planes = [...(planesNeg as FilaAnclada[]), ...(planesSus as FilaAnclada[])]
+  const aceptaciones = [...(aceptacionesNeg as FilaAceptacion[]), ...(aceptacionesSus as FilaAceptacion[])]
+  const conActa = new Set((actas as { servicio_contratado_id: string }[]).map((a) => a.servicio_contratado_id))
+  const conPlan = new Set(planes.map((p) => `${p.workspace_id}|${llaveDeFila(p)}`))
+  const fichaPorVersion = new Map(
+    (versiones as { slug: string; version: number; definicion: unknown }[]).map((v) => [`${v.slug}|${v.version}`, diasTrialDeFicha(v.definicion)]),
+  )
 
-  // El ANCLA: la aceptación MÁS VIEJA del negocio del contrato. Aceptar una versión nueva de los
-  // términos no puede correr el trial hacia adelante, así que es un mínimo y nunca un máximo.
-  const anclaPorNegocio = new Map<string, string>()
+  // El ANCLA del trial: la aceptación MÁS VIEJA del negocio (o de la suscripción) del contrato. Aceptar
+  // una versión nueva de los términos no puede correr el trial hacia adelante, así que es un mínimo y
+  // nunca un máximo.
+  const anclaPorContrato = new Map<string, string>()
   for (const a of aceptaciones) {
-    if (!a.negocio_id || !a.respondido_at) continue
-    const previa = anclaPorNegocio.get(a.negocio_id)
-    if (!previa || a.respondido_at < previa) anclaPorNegocio.set(a.negocio_id, a.respondido_at)
+    const llave = llaveDeFila(a)
+    if (!llave || !a.respondido_at) continue
+    const previa = anclaPorContrato.get(llave)
+    if (!previa || a.respondido_at < previa) anclaPorContrato.set(llave, a.respondido_at)
   }
 
   const wsIds = [...new Set(contratos.map((c) => c.workspace_id))]
@@ -195,10 +252,19 @@ export async function enrolarContratosPorCiclo(deps: DepsEnrolamiento): Promise<
   for (const c of contratos) {
     const servicio = porSlug.get(c.servicio_slug)
     if (!servicio) continue
+    if (loEnrolaElCobroTrasPrueba(c.parametros) && deps.contratoId !== c.id) continue
+    const llave = llaveDeFila(c)
+    if (!llave) {
+      resumen.errores.push({ contratoId: c.id, error: 'el contrato no tiene ancla (ni negocio ni suscripción)' })
+      continue
+    }
+    const anclaAceptacion = anclaPorContrato.get(llave) ?? null
+    const ancla = deps.contratoId === c.id && deps.anclaAt && anclaAceptacion ? deps.anclaAt : anclaAceptacion
     const candidato: ContratoCandidato = {
       id: c.id,
       workspaceId: c.workspace_id,
       negocioId: c.negocio_id,
+      suscripcionId: c.suscripcion_id ?? null,
       estado: c.estado,
       servicioSlug: c.servicio_slug,
       nombreServicio: servicio.nombre,
@@ -206,9 +272,9 @@ export async function enrolarContratosPorCiclo(deps: DepsEnrolamiento): Promise<
       disparadorCobro: servicio.disparador_cobro,
       parametros: c.parametros,
       diasTrialFicha: fichaPorVersion.get(`${c.servicio_slug}|${c.servicio_version}`) ?? null,
-      anclaAt: anclaPorNegocio.get(c.negocio_id) ?? null,
+      anclaAt: ancla,
       yaEnrolado: conActa.has(c.id),
-      tienePlan: conPlan.has(`${c.workspace_id}|${c.negocio_id}`),
+      tienePlan: conPlan.has(`${c.workspace_id}|${llave}`),
       pasarela: pasarelaDeEnlaces({
         // El plan no existe todavía: la pasarela es la del módulo (Valida cobra por Bold) y, si el
         // módulo no declara una, la de la configuración del espacio cobrador.

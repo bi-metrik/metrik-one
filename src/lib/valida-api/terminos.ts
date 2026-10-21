@@ -279,13 +279,16 @@ export interface VersionContratada {
   pdfSha256: string
   empresaNombre: string
   empresaNit: string
-  negocioId: string
+  /** El ancla del contrato: su negocio, o (desde 20261016) su suscripción. Exactamente uno. */
+  negocioId: string | null
+  suscripcionId?: string | null
 }
 
 /** Fila de `aceptaciones_terminos` del canal módulo. `respondido_at` y la huella los pone la base. */
 export interface FilaAceptacionModulo {
   workspace_id: string
-  negocio_id: string
+  negocio_id: string | null
+  suscripcion_id: string | null
   canal: 'modulo'
   estado: 'aceptado'
   nombre_aceptante: string
@@ -365,6 +368,7 @@ export function prepararAceptacion(p: {
     fila: {
       workspace_id: v.workspaceCobradorId,
       negocio_id: v.negocioId,
+      suscripcion_id: v.suscripcionId ?? null,
       canal: 'modulo',
       estado: 'aceptado',
       nombre_aceptante: validos.datos.nombre,

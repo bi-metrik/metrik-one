@@ -18,6 +18,14 @@ const DEFAULTS: Record<string, Fila> = {
   cobros: { fecha: '2026-01-01', anulado_at: null, enlace_pago_url: null, enlace_pago_expira: null },
 }
 
+function valor(f: Fila, c: string): unknown {
+  const m = /^(\w+)->>(\w+)$/.exec(c)
+  if (!m) return f[c]
+  const j = f[m[1]] as Record<string, unknown> | null | undefined
+  const v = j?.[m[2]]
+  return v === undefined || v === null ? null : String(v)
+}
+
 export function crearDoble(tablas: Tablas) {
   let secuencia = 0
   const escrituras: { tabla: string; op: 'insert' | 'update'; fila: Fila }[] = []
@@ -27,6 +35,7 @@ export function crearDoble(tablas: Tablas) {
     let rango: [number, number] | null = null
     let tope: number | null = null
     let orden: string | null = null
+    let descendente = false
     let modo: 'select' | 'update' = 'select'
     let patch: Fila = {}
 
@@ -35,7 +44,11 @@ export function crearDoble(tablas: Tablas) {
       let r = filas().filter((f) => filtros.every((p) => p(f)))
       if (orden) {
         const o = orden
-        r = [...r].sort((a, b) => String(a[o] ?? '').localeCompare(String(b[o] ?? '')))
+        const cmp = (a: Fila, b: Fila) =>
+          typeof a[o] === 'number' && typeof b[o] === 'number'
+            ? (a[o] as number) - (b[o] as number)
+            : String(a[o] ?? '').localeCompare(String(b[o] ?? ''))
+        r = [...r].sort((a, b) => (descendente ? -cmp(a, b) : cmp(a, b)))
       }
       if (rango) r = r.slice(rango[0], rango[1] + 1)
       if (tope !== null) r = r.slice(0, tope)
@@ -78,12 +91,35 @@ export function crearDoble(tablas: Tablas) {
         }
         return ins
       },
-      eq: (c: string, v: unknown) => (filtros.push((f) => f[c] === v), chain),
+      // Upsert por la llave de `onConflict` (una columna): actualiza la fila que coincide o inserta.
+      upsert: (v: Fila, o?: { onConflict?: string }) => {
+        const llave = o?.onConflict ?? 'id'
+        const previa = filas().find((f) => f[llave] !== undefined && f[llave] === v[llave])
+        if (previa) Object.assign(previa, v)
+        else filas().push({ id: `${tabla}-${++secuencia}`, ...v })
+        escrituras.push({ tabla, op: previa ? 'update' : 'insert', fila: { ...v } })
+        return Promise.resolve({ data: null, error: null })
+      },
+      // `columna->>llave`: el texto de una llave de un jsonb, como PostgREST.
+      eq: (c: string, v: unknown) => (filtros.push((f) => valor(f, c) === v), chain),
+      neq: (c: string, v: unknown) => (filtros.push((f) => valor(f, c) !== v), chain),
+      not: (c: string, op: string, v: unknown) => {
+        // `not('estado', 'in', '(a,b)')`, como PostgREST.
+        if (op === 'in' && typeof v === 'string') {
+          const vs = v.replace(/^\(|\)$/g, '').split(',').map((x) => x.trim())
+          filtros.push((f) => !vs.includes(String(valor(f, c))))
+          return chain
+        }
+        if (op !== 'is') throw new Error(`doble: not(${c}, ${op}) sin soporte`)
+        filtros.push((f) => (f[c] ?? null) !== v)
+        return chain
+      },
       is: (c: string, v: unknown) => (filtros.push((f) => (f[c] ?? null) === v), chain),
-      in: (c: string, vs: unknown[]) => (filtros.push((f) => vs.includes(f[c])), chain),
+      in: (c: string, vs: unknown[]) => (filtros.push((f) => vs.includes(valor(f, c))), chain),
       lte: (c: string, v: string) => (filtros.push((f) => String(f[c]) <= v), chain),
+      gte: (c: string, v: string) => (filtros.push((f) => String(f[c]) >= v), chain),
       gt: (c: string, v: number) => (filtros.push((f) => Number(f[c]) > v), chain),
-      order: (c: string) => ((orden = c), chain),
+      order: (c: string, o?: { ascending?: boolean }) => ((orden = c), (descendente = o?.ascending === false), chain),
       range: (a: number, b: number) => ((rango = [a, b]), chain),
       limit: (n: number) => ((tope = n), chain),
       maybeSingle: async () => {
