@@ -32,3 +32,13 @@ Sigue a [[motor-v13]]. Decisión de Mauricio: ONE ofrece, la persona elige; nunc
 - `PedidoDeLinea.aMano`: sin crear perfil al pintar, sin ficha por nombre en panel, IVA ni aviso. Subir una foto
   (acción explícita) SÍ crea perfil todavía. Fichas creadas antes: `sql/proveedores/2026-10-20_fichas-creadas-solas.sql`.
 
+**Pulido (brief del 2026-10-21, feat/panel-tarifas-pulido, sin migración):**
+- Modo cambiar (`costoActual > 0`): la fila de hoy NO se pre-marca, se señala «La que usas hoy». Pre-marcada, elegir
+  otra la sumaba y `calcularEleccion` rechazaba por pax de más. Sin costo confirmado sí se pre-marca (reintento con tasa).
+- La fuente de la casilla 1 (`fuenteDeLectura`: pantallazo/manual/tarifario) decide TODO texto de origen. Los mensajes
+  de `resolverTarifa` se reescriben en un envoltorio (`conFuenteDeLaCasilla1`), no rama por rama: hay ~15 cadenas con
+  «pantallazo». Una cadena nueva que empiece por «Este pantallazo» / «Pantallazo 1» queda cubierta; otra forma, no.
+- La lectura del tarifario trae `ocupacionDelItem: true` ⇒ «ocupación no visible en la imagen» si no se mira la fuente.
+- «Montarse sobre la lista» no era solapamiento CSS: la lista con scroll iba pegada al texto, sin marco ni aire, y al
+  desplazarse las tarifas se cortaban justo bajo él. Se vio en Chromium con `scrollTop` puesto por script.
+
