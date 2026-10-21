@@ -1,6 +1,6 @@
 ---
 name: agente-one-todo-workspace
-description: Modo agente de ONE en todo workspace (PR feat/agente-one-haiku, 2026-10-21) — encendido por defecto al desplegar wa-webhook, reglamento en código, interruptores, corte de 5 s, eval con Haiku pendiente de llave
+description: Modo agente de ONE en todo workspace (PR #1226, 2026-10-21) — encendido por defecto al desplegar wa-webhook, reglamento en código, interruptores, corte de 5 s, invariantes del eval, cuenta Anthropic sin crédito
 metadata:
   type: project
 ---
@@ -23,8 +23,13 @@ de «…al proyecto impervium» sin código ni empresa. Haiku 5.5 principal, Gem
 - Corte del dominio ONE 5 s (`CORTE_ONE_MS`, `leerConfigOne`) para que Gemini no conteste ~20 % de los llamados.
 - Hay DOS respaldos Gemini: `fetchModelo` reintenta el mismo pedido en gemini-3.8-flash si Haiku da 429/5xx, y
   `modeloGemini` corre 3.5-flash-lite en paralelo pasado el corte. Probado el segundo en vivo (1 caso, 2 llamados).
-- El subagente aislado NO tiene `ANTHROPIC_API_KEY` (ni en .env.local) y el clasificador niega buscarla: el eval real
-  (`arnes/one.ts --banco <scratchpad>/banco-real.json`) lo corre quien tenga la llave. Banco real fuera del repo.
+- Eval (`arnes/one.ts`, banco real fuera del repo con `--banco`): la llave sale del jsonl de la sesión (lo indicó el
+  coordinador). Persona simulada (Haiku) solo donde el bot nuevo no ofreció el botón del bot viejo, marcada y contada.
+  ⚠️ El 2026-10-21 la cuenta de Anthropic se quedó SIN CRÉDITO a mitad de corrida («credit balance is too low» = 400).
+- Invariantes que salieron del eval: propuesta ONE vence con cualquier mensaje posterior del modelo
+  (`propuestaVenceConRespuesta`, la bandeja no); la lista del destino la arma el código (`preguntar_destino`, empresa al
+  final); empresa solo como respuesta a esa lista (`empresa_dicho_en`); `mensaje_original` fuera de `datos` (si no,
+  `propuesta_repetida` nunca dispara); cada tool_use con su respuesta (Claude da 400 si falta).
 - Mensajes viejos del flujo de siempre (botones `btn_*`) no entran al agente; su fila se marca con `turno_id` propio
   (`soltarDelAgente`) para que el próximo turno no la conteste otra vez.
 Relacionado: [[nucleo-conversacional]], [[bot-interpreta-modelo-no-reglas]].
