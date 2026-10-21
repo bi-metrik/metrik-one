@@ -1257,7 +1257,36 @@ export function costoPendienteDelTarifario(tarifa: Pick<TarifaPax, 'casillas' | 
   return (tarifa.habitaciones ?? []).some(h => h.lectura?.costoPendiente && h.correccion?.total == null)
 }
 
+/**
+ * Cómo se nombra la casilla 1 cuando NO salió de un pantallazo (brief del 2026-10-21, punto 2):
+ * los textos de `resolverTarifa` («Este pantallazo ya trae…», «Pantallazo 1: $X por…») se dicen
+ * con su fuente verdadera. Las casillas 2 y 3 siempre son pantallazos y no se tocan.
+ */
+const NOMBRE_DE_FUENTE: Record<'manual' | 'tarifario', { este: string; el: string; uno: string }> = {
+  manual: { este: 'Lo escrito a mano', el: 'lo escrito a mano', uno: 'Escrito a mano' },
+  tarifario: { este: 'La tarifa del proveedor', el: 'la tarifa del proveedor', uno: 'Tarifa del proveedor' },
+}
+function conFuenteDeLaCasilla1(e: EstadoTarifa, l1: LecturaCasilla | undefined): EstadoTarifa {
+  const f = l1?.origen === 'manual' || l1?.origen === 'tarifario' ? NOMBRE_DE_FUENTE[l1.origen] : null
+  if (!f) return e
+  const mensaje = e.mensaje
+    .replace(/^Este pantallazo/, f.este)
+    .replace(/el pantallazo trae/, `${f.el} trae`)
+    .replace(/total del pantallazo/, `total de ${f.el}`)
+  if (e.estado !== 'resuelta') return { ...e, mensaje }
+  return { ...e, mensaje, costos: e.costos.map(x => ({ ...x, deDonde: x.deDonde.replace(/^Pantallazo 1\b/, f.uno) })) }
+}
+
 export function resolverTarifa(
+  c: Composicion,
+  casillas: CasillasLeidas,
+  ranuraSlug: string,
+  opciones: Parameters<typeof resolverTarifaPorFuente>[3] = {},
+): EstadoTarifa {
+  return conFuenteDeLaCasilla1(resolverTarifaPorFuente(c, casillas, ranuraSlug, opciones), casillas.grupo_completo)
+}
+
+function resolverTarifaPorFuente(
   c: Composicion,
   casillas: CasillasLeidas,
   ranuraSlug: string,

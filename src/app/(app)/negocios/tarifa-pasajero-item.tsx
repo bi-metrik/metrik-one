@@ -182,6 +182,7 @@ export default function TarifaPasajeroItem({
     aMano: costosAManoComoMapa(tarifa),
   }) : null
   const primera = casillas.grupo_completo
+  const fuentePrimera = fuenteDeLectura(primera)
   const primeraResuelve = !!(composicion && primera && traeDesgloseCompleto(primera, composicion))
 
   // §2.1 · la secuencia de tres casillas solo existe cuando la primera lectura NO resolvió.
@@ -305,12 +306,20 @@ export default function TarifaPasajeroItem({
   return (
     <div className="mt-3 rounded-lg border border-dashed p-3">
       {/* ── Qué se pide, ANTES de pegar ── */}
-      <div className="mb-2">
-        <p className="text-[11px] font-medium">Pantallazo de {ranura.label.toLowerCase()} · precio por pasajero</p>
-        <p className="text-[10px] text-muted-foreground">{ranura.queSePide}</p>
-        <p className="text-[10px] text-muted-foreground">No sirve: {ranura.queNoSirve}</p>
-        <p className="text-[10px] text-muted-foreground">La imagen no se guarda: queda lo que se leyó de ella.</p>
-      </div>
+      {fuentePrimera === 'pantallazo' ? (
+        <div className="mb-2">
+          <p className="text-[11px] font-medium">Pantallazo de {ranura.label.toLowerCase()} · precio por pasajero</p>
+          <p className="text-[10px] text-muted-foreground">{ranura.queSePide}</p>
+          <p className="text-[10px] text-muted-foreground">No sirve: {ranura.queNoSirve}</p>
+          <p className="text-[10px] text-muted-foreground">La imagen no se guarda: queda lo que se leyó de ella.</p>
+        </div>
+      ) : (
+        // Sin pantallazo detrás (escrita a mano o con tarifa del proveedor): el bloque no se
+        // presenta como uno (brief del 2026-10-21, punto 2). Pegar uno sigue a mano, abajo.
+        <div className="mb-2">
+          <p className="text-[11px] font-medium">{ranura.label} · precio por pasajero</p>
+        </div>
+      )}
 
       {(sugeridosGuardados?.length ?? 0) > 0 && (
         <div className="mb-2 flex items-center justify-between gap-2 rounded-md border border-amber-300 bg-amber-50 p-2">
@@ -343,7 +352,7 @@ export default function TarifaPasajeroItem({
         detalleAbierto={!!detalleAbierto.grupo_completo}
         deshabilitado={isPending || leyendo !== null}
         onToggleDetalle={() => setDetalleAbierto(x => ({ ...x, grupo_completo: !x.grupo_completo }))}
-        onQuitar={() => accion(() => quitarCasillaDeItem(itemId, 'grupo_completo'), TEXTO_QUITADA[fuenteDeLectura(primera)])}
+        onQuitar={() => accion(() => quitarCasillaDeItem(itemId, 'grupo_completo'), TEXTO_QUITADA[fuentePrimera])}
         onPegar={e => pegar('grupo_completo', e)}
         onArchivo={f => usarArchivo('grupo_completo', f)}
         onElegir={o => {

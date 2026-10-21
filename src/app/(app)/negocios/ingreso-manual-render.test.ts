@@ -269,9 +269,9 @@ describe('la opción aceptada, en su tarjeta', () => {
     expect(texto(ficha)).toContain('Ingresado a mano Portafolio Verdemar 2026')
   })
 
-  it('la moneda del hotel a mano dice «ingresada a mano» (las lecturas viven en las habitaciones)', () => {
+  it('la moneda del hotel a mano dice «escrita a mano» (las lecturas viven en las habitaciones)', () => {
     const t = texto(pintar(tarifa()))
-    expect(t).toContain('COP · ingresada a mano')
+    expect(t).toContain('COP · escrita a mano')
     expect(t).not.toContain('leída del pantallazo')
   })
 
@@ -321,9 +321,9 @@ describe('el traslado a mano, en su tarjeta', () => {
     expect(texto(html.slice(html.indexOf('data-hoja-cliente')))).toContain('Incluye: Silla de bebé')
   })
 
-  it('bajo «Costo y precio» la moneda dice que se ingresó a mano, no que se leyó del pantallazo', () => {
+  it('bajo «Costo y precio» la moneda dice que se escribió a mano, no que se leyó del pantallazo', () => {
     const t = texto(pintar(trasladoManual()))
-    expect(t).toContain('COP · ingresada a mano')
+    expect(t).toContain('COP · escrita a mano')
     expect(t).not.toContain('leída del pantallazo')
   })
 })
