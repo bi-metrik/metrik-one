@@ -7,6 +7,7 @@ import {
   FileSpreadsheet,
   FolderOpen,
   Handshake,
+  HardHat,
   Timer,
   Radar,
   BarChart3,
@@ -165,6 +166,10 @@ const BUSINESS_NAV_ITEMS = [
 // con sus tarifarios y sus fotos. Detrás de Negocios, solo en espacios cuya plantilla tiene
 // propuesta html (`bibliotecaFotos`). `/fotos` redirige aquí.
 const FOTOS_NAV_ITEM = { href: '/proveedores', label: 'Proveedores', icon: Handshake, roles: ['owner', 'admin', 'supervisor', 'operator'] }
+
+// Obras (2026-10-21): cierre por obra, retenido por cliente y descargas CSV. Detrás de Negocios,
+// solo con la llave de función `obras`. El cierre lo ve también solo lectura.
+const OBRAS_NAV_ITEM = { href: '/obras', label: 'Obras', icon: HardHat, roles: ['owner', 'admin', 'supervisor', 'contador', 'read_only'] }
 
 // Caja — agrupa flujos de ingreso y salida.
 // Movimientos siempre visible si business activo.
@@ -515,9 +520,12 @@ export default function AppShell({
           : i,
       )
     : BUSINESS_NAV_ITEMS
-  const conFotos = bibliotecaFotos
+  const conProveedores = bibliotecaFotos
     ? businessNavItems.flatMap((i) => (i.href === '/negocios' ? [i, FOTOS_NAV_ITEM] : [i]))
     : businessNavItems
+  const conFotos = mod.obras
+    ? conProveedores.flatMap((i) => (i.href === '/negocios' ? [i, OBRAS_NAV_ITEM] : [i]))
+    : conProveedores
   const businessItems = moduloGate(modoVitrina
     ? [VITRINA_NUMEROS_ITEM]
     : (mod.business ? filterByRole(applyOverride(conFotos), role) : []))

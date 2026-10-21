@@ -5132,6 +5132,7 @@ export type Database = {
           fecha: string | null
           fecha_esperada: string | null
           fuente: string | null
+          huella_soporte: string | null
           id: string
           mensaje_original: string | null
           monto: number
@@ -5139,7 +5140,10 @@ export type Database = {
           negocio_id: string | null
           notas: string | null
           numero_cuota: number | null
+          numero_repetido: boolean
+          numero_transaccion: string | null
           plan_cobro_id: string | null
+          propuesta_huella: string | null
           proyecto_id: string | null
           recibo_no_aplica: Json | null
           retencion: number | null
@@ -5172,6 +5176,7 @@ export type Database = {
           fecha?: string | null
           fecha_esperada?: string | null
           fuente?: string | null
+          huella_soporte?: string | null
           id?: string
           mensaje_original?: string | null
           monto: number
@@ -5179,7 +5184,10 @@ export type Database = {
           negocio_id?: string | null
           notas?: string | null
           numero_cuota?: number | null
+          numero_repetido?: boolean
+          numero_transaccion?: string | null
           plan_cobro_id?: string | null
+          propuesta_huella?: string | null
           proyecto_id?: string | null
           recibo_no_aplica?: Json | null
           retencion?: number | null
@@ -5212,6 +5220,7 @@ export type Database = {
           fecha?: string | null
           fecha_esperada?: string | null
           fuente?: string | null
+          huella_soporte?: string | null
           id?: string
           mensaje_original?: string | null
           monto?: number
@@ -5219,7 +5228,10 @@ export type Database = {
           negocio_id?: string | null
           notas?: string | null
           numero_cuota?: number | null
+          numero_repetido?: boolean
+          numero_transaccion?: string | null
           plan_cobro_id?: string | null
+          propuesta_huella?: string | null
           proyecto_id?: string | null
           recibo_no_aplica?: Json | null
           retencion?: number | null
@@ -5354,6 +5366,51 @@ export type Database = {
           },
           {
             foreignKeyName: "cobros_workspace_id_fkey"
+            columns: ["workspace_id"]
+            isOneToOne: false
+            referencedRelation: "workspaces"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      colaborador_jornada_valores: {
+        Row: {
+          collaborator_id: string
+          created_at: string
+          created_by: string | null
+          id: string
+          valor: number
+          vigente_desde: string
+          workspace_id: string
+        }
+        Insert: {
+          collaborator_id: string
+          created_at?: string
+          created_by?: string | null
+          id?: string
+          valor: number
+          vigente_desde: string
+          workspace_id: string
+        }
+        Update: {
+          collaborator_id?: string
+          created_at?: string
+          created_by?: string | null
+          id?: string
+          valor?: number
+          vigente_desde?: string
+          workspace_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "colaborador_jornada_valores_collaborator_id_fkey"
+            columns: ["collaborator_id"]
+            isOneToOne: false
+            referencedRelation: "wa_collaborators"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "colaborador_jornada_valores_workspace_id_fkey"
             columns: ["workspace_id"]
             isOneToOne: false
             referencedRelation: "workspaces"
@@ -8868,43 +8925,77 @@ export type Database = {
         Row: {
           canal_registro: string | null
           created_at: string | null
+          created_by: string | null
+          created_by_wa_name: string | null
+          estado: string
           external_ref: string | null
           fecha_emision: string
           id: string
           monto: number
+          negocio_id: string | null
           notas: string | null
           numero_factura: string | null
+          numero_repetido: boolean
+          pagada_at: string | null
+          pagada_por: string | null
+          propuesta_huella: string | null
           proyecto_id: string
+          soporte_url: string | null
           updated_at: string | null
           workspace_id: string
         }
         Insert: {
           canal_registro?: string | null
           created_at?: string | null
+          created_by?: string | null
+          created_by_wa_name?: string | null
+          estado?: string
           external_ref?: string | null
           fecha_emision?: string
           id?: string
           monto: number
+          negocio_id?: string | null
           notas?: string | null
           numero_factura?: string | null
+          numero_repetido?: boolean
+          pagada_at?: string | null
+          pagada_por?: string | null
+          propuesta_huella?: string | null
           proyecto_id: string
+          soporte_url?: string | null
           updated_at?: string | null
           workspace_id: string
         }
         Update: {
           canal_registro?: string | null
           created_at?: string | null
+          created_by?: string | null
+          created_by_wa_name?: string | null
+          estado?: string
           external_ref?: string | null
           fecha_emision?: string
           id?: string
           monto?: number
+          negocio_id?: string | null
           notas?: string | null
           numero_factura?: string | null
+          numero_repetido?: boolean
+          pagada_at?: string | null
+          pagada_por?: string | null
+          propuesta_huella?: string | null
           proyecto_id?: string
+          soporte_url?: string | null
           updated_at?: string | null
           workspace_id?: string
         }
         Relationships: [
+          {
+            foreignKeyName: "facturas_negocio_id_fkey"
+            columns: ["negocio_id"]
+            isOneToOne: false
+            referencedRelation: "negocios"
+            referencedColumns: ["id"]
+          },
           {
             foreignKeyName: "facturas_proyecto_id_fkey"
             columns: ["proyecto_id"]
@@ -9282,11 +9373,16 @@ export type Database = {
           fecha: string
           fecha_pago: string | null
           gasto_fijo_ref_id: string | null
+          huella_soporte: string | null
           id: string
           mensaje_original: string | null
           monto: number
           negocio_id: string | null
+          numero_repetido: boolean
+          numero_transaccion: string | null
+          obra_rubro_id: string | null
           origen_asignacion: string | null
+          propuesta_huella: string | null
           proyecto_id: string | null
           retencion: number | null
           revisado: boolean
@@ -9316,11 +9412,16 @@ export type Database = {
           fecha?: string
           fecha_pago?: string | null
           gasto_fijo_ref_id?: string | null
+          huella_soporte?: string | null
           id?: string
           mensaje_original?: string | null
           monto: number
           negocio_id?: string | null
+          numero_repetido?: boolean
+          numero_transaccion?: string | null
+          obra_rubro_id?: string | null
           origen_asignacion?: string | null
+          propuesta_huella?: string | null
           proyecto_id?: string | null
           retencion?: number | null
           revisado?: boolean
@@ -9350,11 +9451,16 @@ export type Database = {
           fecha?: string
           fecha_pago?: string | null
           gasto_fijo_ref_id?: string | null
+          huella_soporte?: string | null
           id?: string
           mensaje_original?: string | null
           monto?: number
           negocio_id?: string | null
+          numero_repetido?: boolean
+          numero_transaccion?: string | null
+          obra_rubro_id?: string | null
           origen_asignacion?: string | null
+          propuesta_huella?: string | null
           proyecto_id?: string | null
           retencion?: number | null
           revisado?: boolean
@@ -9369,6 +9475,13 @@ export type Database = {
           workspace_id?: string
         }
         Relationships: [
+          {
+            foreignKeyName: "gastos_obra_rubro_id_fkey"
+            columns: ["obra_rubro_id"]
+            isOneToOne: false
+            referencedRelation: "obra_rubros"
+            referencedColumns: ["id"]
+          },
           {
             foreignKeyName: "fk_gastos_borrador"
             columns: ["gasto_fijo_ref_id"]
@@ -10417,6 +10530,76 @@ export type Database = {
           },
         ]
       }
+      llegadas_obra: {
+        Row: {
+          canal: string
+          collaborator_id: string
+          created_at: string
+          created_by: string | null
+          fecha: string
+          hora: string
+          id: string
+          negocio_id: string
+          propuesta_huella: string | null
+          updated_at: string
+          valor_jornada: number | null
+          wa_message_id: string | null
+          workspace_id: string
+        }
+        Insert: {
+          canal?: string
+          collaborator_id: string
+          created_at?: string
+          created_by?: string | null
+          fecha: string
+          hora: string
+          id?: string
+          negocio_id: string
+          propuesta_huella?: string | null
+          updated_at?: string
+          valor_jornada?: number | null
+          wa_message_id?: string | null
+          workspace_id: string
+        }
+        Update: {
+          canal?: string
+          collaborator_id?: string
+          created_at?: string
+          created_by?: string | null
+          fecha?: string
+          hora?: string
+          id?: string
+          negocio_id?: string
+          propuesta_huella?: string | null
+          updated_at?: string
+          valor_jornada?: number | null
+          wa_message_id?: string | null
+          workspace_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "llegadas_obra_collaborator_id_fkey"
+            columns: ["collaborator_id"]
+            isOneToOne: false
+            referencedRelation: "wa_collaborators"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "llegadas_obra_negocio_id_fkey"
+            columns: ["negocio_id"]
+            isOneToOne: false
+            referencedRelation: "negocios"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "llegadas_obra_workspace_id_fkey"
+            columns: ["workspace_id"]
+            isOneToOne: false
+            referencedRelation: "workspaces"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       meta_leads_eventos: {
         Row: {
           contacto_id: string | null
@@ -11023,6 +11206,7 @@ export type Database = {
       negocios: {
         Row: {
           aliado_id: string | null
+          anticipo_pct: number | null
           balance_final: Json | null
           carpeta_url: string | null
           cierre_motivo: string | null
@@ -11041,6 +11225,7 @@ export type Database = {
           estado: string
           etapa_actual_id: string | null
           etapa_cambiada_at: string | null
+          forma_pago: string | null
           id: string
           is_paused: boolean
           lecciones_aprendidas: string | null
@@ -11050,12 +11235,14 @@ export type Database = {
           motivo_pausa: string | null
           motivo_pausa_detalle: string | null
           nombre: string
+          nombre_corto: string | null
           origen: string | null
           pausado: boolean
           pausado_hasta: string | null
           paused_at: string | null
           paused_by: string | null
           paused_reason: string | null
+          plazo_pago_dias: number | null
           precio_aprobado: number | null
           precio_estimado: number | null
           razon_cierre: string | null
@@ -11069,6 +11256,7 @@ export type Database = {
         }
         Insert: {
           aliado_id?: string | null
+          anticipo_pct?: number | null
           balance_final?: Json | null
           carpeta_url?: string | null
           cierre_motivo?: string | null
@@ -11087,6 +11275,7 @@ export type Database = {
           estado?: string
           etapa_actual_id?: string | null
           etapa_cambiada_at?: string | null
+          forma_pago?: string | null
           id?: string
           is_paused?: boolean
           lecciones_aprendidas?: string | null
@@ -11096,12 +11285,14 @@ export type Database = {
           motivo_pausa?: string | null
           motivo_pausa_detalle?: string | null
           nombre: string
+          nombre_corto?: string | null
           origen?: string | null
           pausado?: boolean
           pausado_hasta?: string | null
           paused_at?: string | null
           paused_by?: string | null
           paused_reason?: string | null
+          plazo_pago_dias?: number | null
           precio_aprobado?: number | null
           precio_estimado?: number | null
           razon_cierre?: string | null
@@ -11115,6 +11306,7 @@ export type Database = {
         }
         Update: {
           aliado_id?: string | null
+          anticipo_pct?: number | null
           balance_final?: Json | null
           carpeta_url?: string | null
           cierre_motivo?: string | null
@@ -11133,6 +11325,7 @@ export type Database = {
           estado?: string
           etapa_actual_id?: string | null
           etapa_cambiada_at?: string | null
+          forma_pago?: string | null
           id?: string
           is_paused?: boolean
           lecciones_aprendidas?: string | null
@@ -11142,12 +11335,14 @@ export type Database = {
           motivo_pausa?: string | null
           motivo_pausa_detalle?: string | null
           nombre?: string
+          nombre_corto?: string | null
           origen?: string | null
           pausado?: boolean
           pausado_hasta?: string | null
           paused_at?: string | null
           paused_by?: string | null
           paused_reason?: string | null
+          plazo_pago_dias?: number | null
           precio_aprobado?: number | null
           precio_estimado?: number | null
           razon_cierre?: string | null
@@ -11397,6 +11592,53 @@ export type Database = {
         Relationships: [
           {
             foreignKeyName: "notifications_workspace_id_fkey"
+            columns: ["workspace_id"]
+            isOneToOne: false
+            referencedRelation: "workspaces"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      obra_rubros: {
+        Row: {
+          activo: boolean
+          categoria: string
+          created_at: string
+          descripcion: string | null
+          ejemplos: string | null
+          id: string
+          nombre: string
+          orden: number
+          updated_at: string
+          workspace_id: string
+        }
+        Insert: {
+          activo?: boolean
+          categoria?: string
+          created_at?: string
+          descripcion?: string | null
+          ejemplos?: string | null
+          id?: string
+          nombre: string
+          orden?: number
+          updated_at?: string
+          workspace_id: string
+        }
+        Update: {
+          activo?: boolean
+          categoria?: string
+          created_at?: string
+          descripcion?: string | null
+          ejemplos?: string | null
+          id?: string
+          nombre?: string
+          orden?: number
+          updated_at?: string
+          workspace_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "obra_rubros_workspace_id_fkey"
             columns: ["workspace_id"]
             isOneToOne: false
             referencedRelation: "workspaces"
@@ -15268,6 +15510,7 @@ export type Database = {
           name: string
           phone: string
           requires_approval: boolean | null
+          tipo: string
           workspace_id: string
         }
         Insert: {
@@ -15278,6 +15521,7 @@ export type Database = {
           name: string
           phone: string
           requires_approval?: boolean | null
+          tipo?: string
           workspace_id: string
         }
         Update: {
@@ -15288,6 +15532,7 @@ export type Database = {
           name?: string
           phone?: string
           requires_approval?: boolean | null
+          tipo?: string
           workspace_id?: string
         }
         Relationships: [
@@ -15742,6 +15987,31 @@ export type Database = {
           },
         ]
       }
+      v_cierre_obra: {
+        Row: {
+          cobrado: number | null
+          codigo: string | null
+          empresa_id: string | null
+          estado: string | null
+          facturado: number | null
+          gastos_por_rubro: Json | null
+          gastos_total: number | null
+          jornadas: number | null
+          jornadas_sin_valor: number | null
+          mano_obra: number | null
+          negocio_id: string | null
+          nombre: string | null
+          nombre_corto: string | null
+          por_cobrar: number | null
+          retenido: number | null
+          saldo_facturas: number | null
+          stage_actual: string | null
+          utilidad: number | null
+          vendido: number | null
+          workspace_id: string | null
+        }
+        Relationships: []
+      }
       v_cobro_valor: {
         Row: {
           a_tarifa: number | null
@@ -15896,6 +16166,23 @@ export type Database = {
           },
         ]
       }
+      v_facturas_obra: {
+        Row: {
+          empresa_id: string | null
+          estado: string | null
+          fecha_emision: string | null
+          id: string | null
+          monto: number | null
+          negocio_id: string | null
+          numero_factura: string | null
+          pagada_at: string | null
+          recibido: number | null
+          retenido: number | null
+          saldo_pendiente: number | null
+          workspace_id: string | null
+        }
+        Relationships: []
+      }
       v_gastos_fijos_mes_actual: {
         Row: {
           borrador_id: string | null
@@ -15917,6 +16204,21 @@ export type Database = {
             referencedColumns: ["id"]
           },
         ]
+      }
+      v_jornadas_dia: {
+        Row: {
+          colaborador: string | null
+          collaborator_id: string | null
+          costo: number | null
+          fecha: string | null
+          fraccion: number | null
+          hora: string | null
+          id: string | null
+          negocio_id: string | null
+          valor_jornada: number | null
+          workspace_id: string | null
+        }
+        Relationships: []
       }
       v_marketing_campana: {
         Row: {
@@ -16405,6 +16707,10 @@ export type Database = {
       borrar_secreto_accion_aceptacion: {
         Args: { p_accion_id: string }
         Returns: boolean
+      }
+      bot_mensajes_mes: {
+        Args: { p_mes: string; p_workspace_id: string }
+        Returns: Json
       }
       buscar_contacto_duplicado: {
         Args: {
@@ -17090,6 +17396,10 @@ export type Database = {
         Args: { p_usuario: string }
         Returns: string
       }
+      valor_jornada_vigente: {
+        Args: { p_collaborator_id: string; p_fecha: string }
+        Returns: number
+      }
       wa_aplicar_status: {
         Args: {
           p_error_code?: number
@@ -17352,3 +17662,6 @@ export type TutorialProgress = Database['public']['Tables']['tutorial_progress']
 export type CuentaCobroEmitida = Database['public']['Tables']['cuentas_cobro_emitidas']['Row']
 export type PlanillaPilaPeriodo = Database['public']['Tables']['planillas_pila_periodo']['Row']
 
+export type ObraRubro = Database['public']['Tables']['obra_rubros']['Row']
+export type LlegadaObra = Database['public']['Tables']['llegadas_obra']['Row']
+export type ColaboradorJornadaValor = Database['public']['Tables']['colaborador_jornada_valores']['Row']

@@ -72,6 +72,11 @@ interface Props {
    * ellos el selector les cobraba una pregunta que nunca respondieron.
    */
   centroCostosEnabled?: boolean
+  /**
+   * Rubros de obra activos del workspace (C3, `modules.obras`). Vacío = el formulario de siempre.
+   * Con un negocio de destino se puede elegir uno: el gasto guarda el rubro y su categoría fiscal.
+   */
+  rubrosObra?: { id: string; nombre: string; categoria: string; descripcion: string | null }[]
 }
 
 export default function NuevoGastoForm({
@@ -79,6 +84,7 @@ export default function NuevoGastoForm({
   defaultNegocioId,
   defaultProyectoId,
   centroCostosEnabled = false,
+  rubrosObra = [],
 }: Props) {
   const router = useRouter()
   const [isPending, startTransition] = useTransition()
@@ -94,6 +100,7 @@ export default function NuevoGastoForm({
   const [monto, setMonto] = useState('')
   const [destinoKey, setDestinoKey] = useState<string>(getDefaultDestino())
   const [rubroId, setRubroId] = useState('')
+  const [obraRubroId, setObraRubroId] = useState('')
   const [categoria, setCategoria] = useState('arriendo')
   const [clasificacion, setClasificacion] = useState<Clasificacion>(CATEGORIA_TO_CLASIF['arriendo'] ?? 'fijo')
   const [retencion, setRetencion] = useState('')
@@ -390,6 +397,7 @@ export default function NuevoGastoForm({
         destino_id: finalDestinoId,
         destino_tipo: finalDestinoTipo,
         rubro_id: rubroId || null,
+        obra_rubro_id: isNegocio && obraRubroId ? obraRubroId : null,
         estado_pago: yaPagado ? 'pagado' : 'pendiente',
         soporte_url: soporteUrl,
         centro_costos: centroCostos?.centro ?? null,
@@ -468,6 +476,29 @@ export default function NuevoGastoForm({
             )}
           </select>
         </div>
+
+        {/* Rubro de obra (C3): solo con un negocio de destino y si el workspace tiene rubros. */}
+        {isNegocio && rubrosObra.length > 0 && (
+          <div>
+            <label className="mb-1 block text-xs font-medium text-muted-foreground">Rubro de obra</label>
+            <select
+              value={obraRubroId}
+              onChange={e => setObraRubroId(e.target.value)}
+              className="w-full rounded-md border bg-background px-3 py-2.5 text-sm"
+              data-rubro-obra
+            >
+              <option value="">Sin rubro</option>
+              {rubrosObra.map(r => (
+                <option key={r.id} value={r.id}>{r.nombre}</option>
+              ))}
+            </select>
+            {obraRubroId && (
+              <p className="mt-1 text-[11px] text-muted-foreground">
+                {rubrosObra.find(r => r.id === obraRubroId)?.descripcion ?? 'La categoría fiscal sale del rubro.'}
+              </p>
+            )}
+          </div>
+        )}
 
         {/* Helper text empresa */}
         {isEmpresa && (
