@@ -175,6 +175,61 @@ export function decidirOrigen(s: SenalesOrigen): { origen: Origen; fuente: Fuent
 
 // ─── Slug y textos de rechazo ───────────────────────────────────────────
 
+/**
+ * Las formas societarias que se quitan del FINAL de la razón social para el slug, en palabras ya
+ * normalizadas (minúsculas, sin tildes, sin puntos): «S.A.S.» llega como `s a s`, «SAS» como `sas`.
+ * De la más larga a la más corta, para que «S.A.S.» no se quede en «S.» al quitar «A.S.».
+ */
+const FORMAS_SOCIETARIAS: readonly string[][] = [
+  ['sociedad', 'por', 'acciones', 'simplificada'],
+  ['s', 'a', 's', 'bic'],
+  ['sas', 'bic'],
+  ['s', 'en', 'c', 's'],
+  ['s', 'en', 'c', 'a'],
+  ['s', 'en', 'c'],
+  ['s', 'a', 's'],
+  ['s', 'c', 'a'],
+  ['s', 'c', 's'],
+  ['e', 'u'],
+  ['s', 'a'],
+  ['sas'],
+  ['sca'],
+  ['scs'],
+  ['ltda'],
+  ['limitada'],
+  ['sa'],
+  ['eu'],
+]
+
+/**
+ * La razón social sin su forma societaria al final, para derivar el slug: «CDA Pruebas Futuras 4
+ * S.A.S.» → «cda pruebas futuras 4». Solo quita al FINAL (una forma en medio del nombre es parte del
+ * nombre) y repite por si vienen dos («… S.A. LTDA»). Devuelve palabras normalizadas, no la razón
+ * social para mostrar: solo sirve para el slug.
+ */
+export function razonSinFormaSocietaria(razonSocial: string): string {
+  const palabras = razonSocial
+    .normalize('NFD')
+    .replace(/[̀-ͯ]/g, '')
+    .toLowerCase()
+    .split(/[^a-z0-9]+/)
+    .filter(Boolean)
+  let quito = true
+  while (quito) {
+    quito = false
+    for (const forma of FORMAS_SOCIETARIAS) {
+      if (palabras.length <= forma.length) continue
+      const cola = palabras.slice(-forma.length)
+      if (cola.every((p, i) => p === forma[i])) {
+        palabras.splice(-forma.length)
+        quito = true
+        break
+      }
+    }
+  }
+  return palabras.join(' ')
+}
+
 /** `cda-ejemplo`, `cda-ejemplo-2`, … `cda-ejemplo-9`, recortados para que quepan en 30. */
 export function candidatosDeSlug(base: string): string[] {
   const fuera = [base]

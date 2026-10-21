@@ -14,13 +14,14 @@ import {
   limpiarUtm,
   normalizarRazonSocial,
   problemaDeRazonSocial,
+  razonSinFormaSocietaria,
   problemaDelNit,
   soloDigitos,
   textoMotivoValida,
   textoProblemaNit,
 } from './datos'
 import { registroAbierto } from './llave'
-import { leerTarjeta, pagadorParaGuardar, partirNombre, pideMetodoPago, textoProblemaTarjeta, type PagadorGuardado } from './metodo-pago'
+import { leerTarjeta, pagadorParaGuardar, pideMetodoPago, textoProblemaTarjeta, type PagadorGuardado } from './metodo-pago'
 import { registrarClienteEpayco } from '@/lib/suscripciones/pasarela/epayco'
 import { emitirPruebaDelEspacio } from './prueba-servidor'
 import { terminosParaElRegistro, type TerminosDelRegistroArmados } from './terminos-registro-servidor'
@@ -209,7 +210,9 @@ export async function crearEspacioValida(datos: DatosRegistroValida): Promise<Re
   if (pideMetodoPago(condiciones.conCobro)) {
     const t = leerTarjeta(datos.tarjeta)
     if (!t.ok) return { tipo: 'dato', campo: 'tarjeta', texto: textoProblemaTarjeta(t.problema) }
-    const { nombre, apellido } = partirNombre(t.tarjeta.titular)
+    // Nombres y apellidos tal como los escribió en sus dos campos: ePayco los compara con la tarjeta.
+    const nombre = t.tarjeta.nombres
+    const apellido = t.tarjeta.apellidos
     const cliente = await registrarClienteEpayco({
       cardTokenId: t.tarjeta.token,
       // El documento del TITULAR de la tarjeta, no el NIT de la empresa: ePayco los compara (eControl).
@@ -262,7 +265,9 @@ export async function crearEspacioValida(datos: DatosRegistroValida): Promise<Re
   }
 
   // ── 2. El espacio ─────────────────────────────────────────────────────────
-  const slugBase = derivarSlug(razonSocial) || `valida-${nit.slice(-4)}`
+  // Sin la forma societaria («CDA Pruebas S.A.S.» → `cda-pruebas`). Solo para espacios nuevos: los
+  // slugs que ya existen no se tocan. Si sin ella no queda nada usable, la razón social entera.
+  const slugBase = derivarSlug(razonSinFormaSocietaria(razonSocial)) || derivarSlug(razonSocial) || `valida-${nit.slice(-4)}`
   let workspaceId: string | null = null
   let slug = ''
   for (const candidato of candidatosDeSlug(slugBase)) {

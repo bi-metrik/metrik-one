@@ -26,19 +26,37 @@ describe('el método de pago al registrarse', () => {
     expect(pideMetodoPago(true, {})).toBe(false)
     expect(pideMetodoPago(true, { EPAYCO_HABILITADO: '1' })).toBe(true)
   })
-  it('del navegador llega el token, el titular con su documento y un celular; nada más se acepta', () => {
+  it('del navegador llegan el token, los nombres y apellidos del titular, su documento y un celular; nada más se acepta', () => {
     const doc = { tipoDocumento: 'CC', documento: '1.020.304.050' }
-    expect(leerTarjeta({ token: 'XCX92PZqBKfmcWFbA', titular: ' Ana  María Pérez ', ...doc, celular: '300 123 4567' })).toEqual({
+    const titular = { nombres: ' Diana  Estefany ', apellidos: 'Sierra Martinez' }
+    expect(leerTarjeta({ token: 'XCX92PZqBKfmcWFbA', ...titular, ...doc, celular: '300 123 4567' })).toEqual({
       ok: true,
-      tarjeta: { token: 'XCX92PZqBKfmcWFbA', titular: 'Ana María Pérez', tipoDocumento: 'CC', documento: '1020304050', celular: '3001234567' },
+      tarjeta: {
+        token: 'XCX92PZqBKfmcWFbA',
+        nombres: 'Diana Estefany',
+        apellidos: 'Sierra Martinez',
+        titular: 'Diana Estefany Sierra Martinez',
+        tipoDocumento: 'CC',
+        documento: '1020304050',
+        celular: '3001234567',
+      },
     })
-    expect(leerTarjeta({ token: '4575623182290326 123', titular: 'Ana', ...doc, celular: '3001234567' })).toEqual({ ok: false, problema: 'token' })
-    expect(leerTarjeta({ token: 'XCX92PZqBKfmcWFbA', titular: 'A', ...doc, celular: '3001234567' })).toEqual({ ok: false, problema: 'titular' })
-    expect(leerTarjeta({ token: 'XCX92PZqBKfmcWFbA', titular: 'Ana', ...doc, celular: '6011234567' })).toEqual({ ok: false, problema: 'celular' })
+    expect(leerTarjeta({ token: '4575623182290326 123', ...titular, ...doc, celular: '3001234567' })).toEqual({ ok: false, problema: 'token' })
+    expect(leerTarjeta({ token: 'XCX92PZqBKfmcWFbA', ...titular, ...doc, celular: '6011234567' })).toEqual({ ok: false, problema: 'celular' })
     expect(leerTarjeta(undefined)).toEqual({ ok: false, problema: 'sin_tarjeta' })
   })
+  it('nombres y apellidos van en dos campos: no se adivina partiendo un nombre completo', () => {
+    const base = { token: 'XCX92PZqBKfmcWFbA', tipoDocumento: 'CC', documento: '1020304050', celular: '3001234567' }
+    // El formulario de antes (un solo «titular») ya no pasa: partirlo mandaba «Diana» / «Estefany Sierra Martinez».
+    expect(leerTarjeta({ ...base, titular: 'Diana Estefany Sierra Martinez' })).toEqual({ ok: false, problema: 'nombres' })
+    expect(leerTarjeta({ ...base, nombres: 'Diana', apellidos: '' })).toEqual({ ok: false, problema: 'apellidos' })
+    expect(leerTarjeta({ ...base, nombres: 'D', apellidos: 'Sierra' })).toEqual({ ok: false, problema: 'nombres' })
+    expect(leerTarjeta({ ...base, nombres: 'Diana', apellidos: 'Sierra 2' })).toEqual({ ok: false, problema: 'apellidos' })
+    expect(leerTarjeta({ ...base, nombres: 'D'.repeat(51), apellidos: 'Sierra' })).toEqual({ ok: false, problema: 'nombres' })
+    expect(textoProblemaTarjeta('apellidos')).toContain('apellidos del titular')
+  })
   it('el documento del titular es obligatorio y tiene la forma de su tipo', () => {
-    const t = { token: 'XCX92PZqBKfmcWFbA', titular: 'Ana Pérez', celular: '3001234567' }
+    const t = { token: 'XCX92PZqBKfmcWFbA', nombres: 'Ana', apellidos: 'Pérez', celular: '3001234567' }
     // Sin documento (el formulario de antes del 2026-10-19) no pasa: sería cobrar con el NIT de la empresa.
     expect(leerTarjeta(t)).toEqual({ ok: false, problema: 'tipo_documento' })
     expect(leerTarjeta({ ...t, tipoDocumento: 'TI', documento: '1020304050' })).toEqual({ ok: false, problema: 'tipo_documento' })
@@ -57,14 +75,24 @@ describe('el método de pago al registrarse', () => {
     expect(limpiarDocumentoTitular('PP', 'AB*1')).toBeNull()
     expect(limpiarDocumentoTitular('CC', 12345 as unknown)).toBeNull()
   })
-  it('se guarda lo mínimo y se cobra con el titular; un registro viejo cobra con la empresa', () => {
-    const t = leerTarjeta({ token: 'XCX92PZqBKfmcWFbA', titular: 'Ana María Pérez', tipoDocumento: 'CC', documento: '1020304050', celular: '3001234567' })
+  it('se guarda lo mínimo y se cobra con nombres y apellidos tal cual; un titular del 19-oct se parte como entonces', () => {
+    const t = leerTarjeta({ token: 'XCX92PZqBKfmcWFbA', nombres: 'Diana Estefany', apellidos: 'Sierra Martinez', tipoDocumento: 'CC', documento: '1020304050', celular: '3001234567' })
     if (!t.ok) throw new Error('debía leerse')
     const guardado = pagadorParaGuardar(t.tarjeta)
-    // Nunca el token: la tarjeta vive en `metodo_pago_ref`.
-    expect(guardado).toEqual({ celular: '3001234567', titular: { nombre: 'Ana María Pérez', tipo_documento: 'CC', documento: '1020304050' } })
+    // Nunca el token: la tarjeta vive en `metodo_pago_ref`. `nombre` (completo) queda para leer como los de antes.
+    expect(guardado).toEqual({
+      celular: '3001234567',
+      titular: { nombre: 'Diana Estefany Sierra Martinez', nombres: 'Diana Estefany', apellidos: 'Sierra Martinez', tipo_documento: 'CC', documento: '1020304050' },
+    })
     const respaldo = { nit: '900123456', razonSocial: 'CDA EJEMPLO S.A.S.' }
-    expect(titularDelCobro(guardado, respaldo)).toEqual({ tipoDocumento: 'CC', documento: '1020304050', nombre: 'Ana', apellido: 'María Pérez' })
+    expect(titularDelCobro(guardado, respaldo)).toEqual({ tipoDocumento: 'CC', documento: '1020304050', nombre: 'Diana Estefany', apellido: 'Sierra Martinez' })
+    // Guardado el 2026-10-19 (solo `nombre`): no se rompe, se parte como entonces.
+    expect(titularDelCobro({ titular: { nombre: 'Ana María Pérez', tipo_documento: 'CC', documento: '1020304050' } }, respaldo)).toEqual({
+      tipoDocumento: 'CC',
+      documento: '1020304050',
+      nombre: 'Ana',
+      apellido: 'María Pérez',
+    })
     expect(titularDelCobro({ celular: '3001234567' }, respaldo)).toEqual({ tipoDocumento: 'NIT', documento: '900123456', nombre: 'CDA', apellido: 'EJEMPLO S.A.S.' })
     expect(titularDelCobro(null, respaldo).tipoDocumento).toBe('NIT')
     // Un titular guardado a medias no se usa: se cobra como antes, no con un documento roto.

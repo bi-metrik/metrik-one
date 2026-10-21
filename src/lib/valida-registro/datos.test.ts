@@ -11,9 +11,10 @@ import {
   nitConPuntos,
   problemaDeRazonSocial,
   problemaDelNit,
+  razonSinFormaSocietaria,
   textoMotivoValida,
 } from './datos'
-import { problemaDelSlug } from '@/lib/secop-registro/slug'
+import { derivarSlug, problemaDelSlug } from '@/lib/secop-registro/slug'
 import { registroAbierto, tamanoPrueba } from './llave'
 import { CONDICIONES_PRUEBA, textosListos } from './condiciones'
 
@@ -118,6 +119,32 @@ describe('marca de origen', () => {
   it('de las UTM solo quedan las cinco llaves conocidas', () => {
     expect(limpiarUtm({ utm_source: ' meta ', gclid: 'x', utm_medium: 'cpc', otra: 1 })).toEqual({ utm_source: 'meta', utm_medium: 'cpc' })
     expect(limpiarUtm('nada')).toEqual({})
+  })
+})
+
+describe('slug sin la forma societaria', () => {
+  it('quita la forma societaria del final, escrita de cualquier modo', () => {
+    // El caso real: salió `cda-pruebas-futuras-4-s-a-s` (2026-10-19).
+    expect(derivarSlug(razonSinFormaSocietaria('CDA Pruebas Futuras 4 S.A.S.'))).toBe('cda-pruebas-futuras-4')
+    expect(razonSinFormaSocietaria('Acme SAS')).toBe('acme')
+    expect(razonSinFormaSocietaria('Acme S. A. S.')).toBe('acme')
+    expect(razonSinFormaSocietaria('Acme S.A.')).toBe('acme')
+    expect(razonSinFormaSocietaria('Acme Ltda.')).toBe('acme')
+    expect(razonSinFormaSocietaria('ACME LIMITADA')).toBe('acme')
+    expect(razonSinFormaSocietaria('Acme S. en C.')).toBe('acme')
+    expect(razonSinFormaSocietaria('Acme S.C.A.')).toBe('acme')
+    expect(razonSinFormaSocietaria('Acme E.U.')).toBe('acme')
+    expect(razonSinFormaSocietaria('Acme S.A.S. BIC')).toBe('acme')
+    expect(razonSinFormaSocietaria('Acme Sociedad por Acciones Simplificada')).toBe('acme')
+    // Dos seguidas al final.
+    expect(razonSinFormaSocietaria('Acme S.A. Ltda')).toBe('acme')
+  })
+  it('no quita lo que es parte del nombre ni deja el slug vacío', () => {
+    expect(razonSinFormaSocietaria('SAS Ingeniería Andina')).toBe('sas ingenieria andina')
+    expect(razonSinFormaSocietaria('Casa Sas Colombia')).toBe('casa sas colombia')
+    // Solo la forma: queda tal cual (el servidor cae a la razón social entera).
+    expect(razonSinFormaSocietaria('S.A.S.')).toBe('s a s')
+    expect(razonSinFormaSocietaria('SAS')).toBe('sas')
   })
 })
 

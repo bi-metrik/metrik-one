@@ -1,5 +1,5 @@
 import { epaycoHabilitado, esTokenTarjeta } from '@/lib/suscripciones/pasarela/epayco'
-import { esTipoDocumentoTitular, limpiarDocumentoTitular, type TipoDocumentoTitular } from './documento-titular'
+import { esTipoDocumentoTitular, limpiarDocumentoTitular, limpiarNombrePersona, nombreEnTarjeta, type TipoDocumentoTitular } from './documento-titular'
 
 /**
  * El método de pago al registrarse (decisión A2: la empresa registra la tarjeta y se le cobra al
@@ -24,26 +24,35 @@ export function pideMetodoPago(conCobro: boolean, env: Record<string, string | u
 
 export interface TarjetaRegistro {
   token: string
+  /** Nombres y apellidos del titular, en dos campos: partirlos en la primera palabra fallaba (390432324). */
+  nombres: string
+  apellidos: string
+  /** Los dos juntos, como van en `card[name]` y en lo que se guarda. */
   titular: string
   tipoDocumento: TipoDocumentoTitular
   documento: string
   celular: string
 }
 
-export type ProblemaTarjeta = 'sin_tarjeta' | 'token' | 'titular' | 'tipo_documento' | 'documento' | 'celular'
+export type ProblemaTarjeta = 'sin_tarjeta' | 'token' | 'nombres' | 'apellidos' | 'tipo_documento' | 'documento' | 'celular'
 
 export function leerTarjeta(v: unknown): { ok: true; tarjeta: TarjetaRegistro } | { ok: false; problema: ProblemaTarjeta } {
   if (!v || typeof v !== 'object') return { ok: false, problema: 'sin_tarjeta' }
   const t = v as Record<string, unknown>
   if (!esTokenTarjeta(t.token)) return { ok: false, problema: 'token' }
-  const titular = typeof t.titular === 'string' ? t.titular.trim().replace(/\s+/g, ' ') : ''
-  if (titular.length < 3 || titular.length > 100) return { ok: false, problema: 'titular' }
+  const nombres = limpiarNombrePersona(t.nombres)
+  if (!nombres) return { ok: false, problema: 'nombres' }
+  const apellidos = limpiarNombrePersona(t.apellidos)
+  if (!apellidos) return { ok: false, problema: 'apellidos' }
   if (!esTipoDocumentoTitular(t.tipoDocumento)) return { ok: false, problema: 'tipo_documento' }
   const documento = limpiarDocumentoTitular(t.tipoDocumento, t.documento)
   if (!documento) return { ok: false, problema: 'documento' }
   const celular = typeof t.celular === 'string' ? t.celular.replace(/\D/g, '') : ''
   if (!/^3\d{9}$/.test(celular)) return { ok: false, problema: 'celular' }
-  return { ok: true, tarjeta: { token: t.token as string, titular, tipoDocumento: t.tipoDocumento, documento, celular } }
+  return {
+    ok: true,
+    tarjeta: { token: t.token as string, nombres, apellidos, titular: nombreEnTarjeta(nombres, apellidos), tipoDocumento: t.tipoDocumento, documento, celular },
+  }
 }
 
 export function textoProblemaTarjeta(p: ProblemaTarjeta): string {
@@ -51,8 +60,10 @@ export function textoProblemaTarjeta(p: ProblemaTarjeta): string {
     case 'sin_tarjeta':
     case 'token':
       return 'No pudimos registrar la tarjeta. Revisa los datos e inténtalo de nuevo.'
-    case 'titular':
-      return 'Escribe el nombre como aparece en la tarjeta.'
+    case 'nombres':
+      return 'Escribe los nombres del titular como aparecen en la tarjeta.'
+    case 'apellidos':
+      return 'Escribe los apellidos del titular como aparecen en la tarjeta.'
     case 'tipo_documento':
       return 'Elige el tipo de documento del titular de la tarjeta.'
     case 'documento':
@@ -62,7 +73,10 @@ export function textoProblemaTarjeta(p: ProblemaTarjeta): string {
   }
 }
 
-/** «Nombre Apellido Otro» → nombre y apellido, como los pide ePayco. */
+/**
+ * «Nombre Apellido Otro» → nombre y apellido, partido en la primera palabra. Solo para lo que no trae
+ * los dos campos: la razón social de un registro viejo y el titular guardado antes del 2026-10-20.
+ */
 export function partirNombre(titular: string): { nombre: string; apellido: string } {
   const partes = titular.trim().split(/\s+/)
   if (partes.length === 1) return { nombre: partes[0], apellido: partes[0] }
@@ -75,12 +89,18 @@ export function partirNombre(titular: string): { nombre: string; apellido: strin
  */
 export interface PagadorGuardado {
   celular: string
-  /** Desde el 2026-10-19. Los registros de antes solo tienen el celular. */
-  titular?: { nombre: string; tipo_documento: TipoDocumentoTitular; documento: string }
+  /**
+   * Desde el 2026-10-19. Los registros de antes solo tienen el celular. `nombres` y `apellidos`,
+   * desde el 2026-10-20: los del 19 solo tienen `nombre` (completo) y se parten como antes.
+   */
+  titular?: { nombre: string; nombres?: string; apellidos?: string; tipo_documento: TipoDocumentoTitular; documento: string }
 }
 
 export function pagadorParaGuardar(t: TarjetaRegistro): PagadorGuardado {
-  return { celular: t.celular, titular: { nombre: t.titular, tipo_documento: t.tipoDocumento, documento: t.documento } }
+  return {
+    celular: t.celular,
+    titular: { nombre: t.titular, nombres: t.nombres, apellidos: t.apellidos, tipo_documento: t.tipoDocumento, documento: t.documento },
+  }
 }
 
 /**
@@ -95,7 +115,10 @@ export function titularDelCobro(
   const t = (pagador && typeof pagador === 'object' ? (pagador as { titular?: unknown }).titular : null) as Record<string, unknown> | null
   if (t && esTipoDocumentoTitular(t.tipo_documento) && typeof t.nombre === 'string' && t.nombre.trim()) {
     const documento = limpiarDocumentoTitular(t.tipo_documento, t.documento)
-    if (documento) return { tipoDocumento: t.tipo_documento, documento, ...partirNombre(t.nombre) }
+    const nombres = limpiarNombrePersona(t.nombres)
+    const apellidos = limpiarNombrePersona(t.apellidos)
+    const nombre = nombres && apellidos ? { nombre: nombres, apellido: apellidos } : partirNombre(t.nombre)
+    if (documento) return { tipoDocumento: t.tipo_documento, documento, ...nombre }
   }
   return { tipoDocumento: 'NIT', documento: respaldo.nit, ...partirNombre(respaldo.razonSocial) }
 }

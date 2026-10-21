@@ -271,12 +271,14 @@ describe('registro → 14 minutos → cobro de la tarjeta con el plan activado',
       ref: null,
       utm: {},
       ip: '181.50.1.2',
-      tarjeta: { token: 'XCX92PZqBKfmcWFbA', titular: 'Ana Pérez', tipoDocumento: 'CC', documento: '1.020.304.050', celular: '3001234567' },
+      tarjeta: { token: 'XCX92PZqBKfmcWFbA', nombres: 'Diana Estefany', apellidos: 'Sierra Martinez', tipoDocumento: 'CC', documento: '1.020.304.050', celular: '3001234567' },
     })
     expect(alta).toMatchObject({ tipo: 'ok' })
     const reg = tablas.valida_registros[0]
     expect(reg).toMatchObject({
       estado: 'creado',
+      // «ACME S.A.S.» → `acme`: el slug sale sin la forma societaria (2026-10-20).
+      slug_creado: 'acme',
       condiciones_version: 'condiciones-2.1+aviso-1.5+terminos-auto-2.1',
       terminos_version: 'v2.1',
       metodo_pago_ref: REF_TARJETA,
@@ -349,10 +351,15 @@ describe('registro → 14 minutos → cobro de la tarjeta con el plan activado',
     expect(ePayco.cargos[0]).toMatchObject({ monto: 150_000, numeroCuota: 1, medioPago: { token_ref: REF_TARJETA, pasarela: 'epayco' } })
     // Transacción 390341460 (2026-10-19, «Rechazada eControl»): el cliente de ePayco y el cargo llevan
     // el documento y el nombre del TITULAR de la tarjeta, no el NIT ni la razón social de la empresa.
-    expect(clientesEpayco.at(-1)).toMatchObject({ tipoDocumento: 'CC', documento: '1020304050', nombre: 'Ana', apellido: 'Pérez' })
-    expect(ePayco.cargos[0].cliente).toMatchObject({ tipoDocumento: 'CC', documento: '1020304050', nombre: 'Ana', apellido: 'Pérez' })
+    // Prueba 390432324 (2026-10-19): partir el nombre en la primera palabra mandaba «Diana» / «Estefany
+    // Sierra Martinez». Nombres y apellidos llegan en dos campos y así van a ePayco y al cargo.
+    expect(clientesEpayco.at(-1)).toMatchObject({ tipoDocumento: 'CC', documento: '1020304050', nombre: 'Diana Estefany', apellido: 'Sierra Martinez' })
+    expect(ePayco.cargos[0].cliente).toMatchObject({ tipoDocumento: 'CC', documento: '1020304050', nombre: 'Diana Estefany', apellido: 'Sierra Martinez' })
     expect(tablas.workspaces.find((w) => w.id === reg.workspace_id)?.config_extra).toMatchObject({
-      valida_pagador: { celular: '3001234567', titular: { nombre: 'Ana Pérez', tipo_documento: 'CC', documento: '1020304050' } },
+      valida_pagador: {
+        celular: '3001234567',
+        titular: { nombre: 'Diana Estefany Sierra Martinez', nombres: 'Diana Estefany', apellidos: 'Sierra Martinez', tipo_documento: 'CC', documento: '1020304050' },
+      },
     })
     expect(pagos).toHaveLength(1)
     expect(rpcs).toEqual(['valida_activar_autogestion', 'enrolar_cobro_por_ciclo'])
@@ -411,7 +418,7 @@ describe('registro → consulta 11 → confirma → cobro YA; el cron del día 7
       ref: null,
       utm: {},
       ip: '181.50.1.3',
-      tarjeta: { token: 'XCX92PZqBKfmcWFbA', titular: 'Ana Pérez', tipoDocumento: 'CC', documento: '1.020.304.050', celular: '3001234567' },
+      tarjeta: { token: 'XCX92PZqBKfmcWFbA', nombres: 'Diana Estefany', apellidos: 'Sierra Martinez', tipoDocumento: 'CC', documento: '1.020.304.050', celular: '3001234567' },
     })
     expect(alta).toMatchObject({ tipo: 'ok' })
     const reg = tablas.valida_registros[0]
@@ -497,7 +504,7 @@ describe('consulta 11 → confirma → la tarjeta rechaza → conserva la prueba
       ref: null,
       utm: {},
       ip: '181.50.1.4',
-      tarjeta: { token: 'XCX92PZqBKfmcWFbA', titular: 'Ana Pérez', tipoDocumento: 'CC', documento: '1.020.304.050', celular: '3001234567' },
+      tarjeta: { token: 'XCX92PZqBKfmcWFbA', nombres: 'Diana Estefany', apellidos: 'Sierra Martinez', tipoDocumento: 'CC', documento: '1.020.304.050', celular: '3001234567' },
     })
     expect(alta).toMatchObject({ tipo: 'ok' })
     const reg = tablas.valida_registros[0]
@@ -578,7 +585,7 @@ describe('«Activar plan» (el tercer camino) también crea una suscripción y s
       ref: null,
       utm: {},
       ip: '181.50.1.5',
-      tarjeta: { token: 'XCX92PZqBKfmcWFbA', titular: 'Ana Pérez', tipoDocumento: 'CC', documento: '1.020.304.050', celular: '3001234567' },
+      tarjeta: { token: 'XCX92PZqBKfmcWFbA', nombres: 'Diana Estefany', apellidos: 'Sierra Martinez', tipoDocumento: 'CC', documento: '1.020.304.050', celular: '3001234567' },
     })
     expect(alta).toMatchObject({ tipo: 'ok' })
     const reg = tablas.valida_registros[0]

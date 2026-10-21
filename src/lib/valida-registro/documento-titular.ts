@@ -37,3 +37,19 @@ export function limpiarDocumentoTitular(tipo: TipoDocumentoTitular, v: unknown):
   const [min, max] = tipo === 'NIT' ? [9, 10] : [3, 11]
   return d.length >= min && d.length <= max ? d : null
 }
+
+/**
+ * Nombres o apellidos del titular, limpios: sin espacios de más. `null` si no sirven: vacío, de una
+ * letra, de más de 50 caracteres (el tope de ePayco por campo) o con números.
+ */
+export function limpiarNombrePersona(v: unknown): string | null {
+  if (typeof v !== 'string') return null
+  const n = v.trim().replace(/\s+/g, ' ')
+  if (n.length < 2 || n.length > 50 || /\d/.test(n)) return null
+  return n
+}
+
+/** Lo que va en `card[name]` de ePayco.js: nombres y apellidos, como en la tarjeta. */
+export function nombreEnTarjeta(nombres: string, apellidos: string): string {
+  return `${nombres} ${apellidos}`.trim().replace(/\s+/g, ' ')
+}

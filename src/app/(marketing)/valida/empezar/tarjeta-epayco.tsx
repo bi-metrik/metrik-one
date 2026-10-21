@@ -6,7 +6,7 @@ import { Lock } from 'lucide-react'
 import { forwardRef, useImperativeHandle, useRef, useState } from 'react'
 import { INTEGRIDAD_JQUERY, SCRIPT_EPAYCO, SCRIPT_JQUERY } from '@/lib/valida-registro/csp'
 import { asegurarSesionEpayco, textoErrorEpayco } from '@/lib/valida-registro/error-epayco'
-import { TIPOS_DOCUMENTO_TITULAR, type TipoDocumentoTitular } from '@/lib/valida-registro/documento-titular'
+import { TIPOS_DOCUMENTO_TITULAR, nombreEnTarjeta, type TipoDocumentoTitular } from '@/lib/valida-registro/documento-titular'
 
 /**
  * La tarjeta para el cobro al cumplirse los 7 días de la prueba (numeral 7 de la v2.0, decisión A2). Solo se pinta cuando
@@ -14,7 +14,7 @@ import { TIPOS_DOCUMENTO_TITULAR, type TipoDocumentoTitular } from '@/lib/valida
  *
  * ⚠️ El número, la fecha y el CVC NO tienen `name`: no viajan en ningún formulario de ONE. ePayco.js
  * (el script oficial) los lee de los atributos `data-epayco` de este bloque, los manda a ePayco y
- * devuelve un TOKEN. A ONE solo llegan el token, el titular, su documento y el celular.
+ * devuelve un TOKEN. A ONE solo llegan el token, los nombres y apellidos del titular, su documento y el celular.
  *
  * El documento es el del TITULAR de la tarjeta (no el NIT de la empresa): el antifraude de ePayco lo
  * compara con el del medio de pago y, si no coincide, rechaza el cobro.
@@ -39,7 +39,8 @@ type EpaycoGlobal = {
 
 export interface DatosTarjeta {
   token: string
-  titular: string
+  nombres: string
+  apellidos: string
   tipoDocumento: TipoDocumentoTitular
   documento: string
   celular: string
@@ -77,9 +78,13 @@ const TarjetaEpayco = forwardRef<TarjetaEpaycoHandle, PropsTarjeta>(function Tar
 ) {
   const bloque = useRef<HTMLDivElement>(null)
   const [cargado, setCargado] = useState(false)
-  // El titular sin estado de React: ePayco.js lee `getAttribute('value')` antes que `.value`, y un
-  // campo controlado podría entregarle un valor viejo. Se lee del campo al tokenizar.
-  const campoTitular = useRef<HTMLInputElement>(null)
+  // El titular en DOS campos (nombres y apellidos): partir un nombre completo en la primera palabra
+  // mandaba «Diana» / «Estefany Sierra Martinez» a ePayco (prueba 390432324, 2026-10-19). ePayco.js lee
+  // UN campo `card[name]`: es un oculto que se llena con los dos justo antes de tokenizar, con
+  // `setAttribute('value')` porque ePayco.js lee el atributo antes que `.value`.
+  const campoNombreTarjeta = useRef<HTMLInputElement>(null)
+  const [nombres, setNombres] = useState('')
+  const [apellidos, setApellidos] = useState('')
   const [celular, setCelular] = useState('')
   const [tipoDocumento, setTipoDocumento] = useState<TipoDocumentoTitular>('CC')
   const [documento, setDocumento] = useState('')
@@ -94,6 +99,9 @@ const TarjetaEpayco = forwardRef<TarjetaEpaycoHandle, PropsTarjeta>(function Tar
           rechazar(new Error('La pasarela de pago todavía está cargando. Espera un momento.'))
           return
         }
+        const completo = nombreEnTarjeta(nombres, apellidos)
+        campoNombreTarjeta.current?.setAttribute('value', completo)
+        if (campoNombreTarjeta.current) campoNombreTarjeta.current.value = completo
         asegurarSesionEpayco(window.localStorage, () => crypto.randomUUID())
         ePayco.setPublicKey(llavePublica)
         ePayco.setLanguage?.('es')
@@ -104,7 +112,7 @@ const TarjetaEpayco = forwardRef<TarjetaEpaycoHandle, PropsTarjeta>(function Tar
             rechazar(new Error(textoErrorEpayco(error)))
             return
           }
-          resolver({ token, titular: campoTitular.current?.value ?? '', tipoDocumento, documento, celular })
+          resolver({ token, nombres, apellidos, tipoDocumento, documento, celular })
         })
       }),
   }))
@@ -136,7 +144,9 @@ const TarjetaEpayco = forwardRef<TarjetaEpaycoHandle, PropsTarjeta>(function Tar
         {/* Lo que lee ePayco.js. Sin `name`: estos datos no se envían a ONE. */}
         <div ref={bloque} className="space-y-3">
           <input type="hidden" data-epayco="card[email]" value={correo} readOnly />
-          <input ref={campoTitular} className={claseCampo} data-epayco="card[name]" aria-label="Nombre en la tarjeta" placeholder="Nombre en la tarjeta" autoComplete="cc-name" />
+          <input ref={campoNombreTarjeta} type="hidden" data-epayco="card[name]" defaultValue="" />
+          <input className={claseCampo} aria-label="Nombres del titular" placeholder="Nombres del titular" autoComplete="cc-given-name" value={nombres} onChange={(e) => setNombres(e.target.value)} />
+          <input className={claseCampo} aria-label="Apellidos del titular" placeholder="Apellidos del titular" autoComplete="cc-family-name" value={apellidos} onChange={(e) => setApellidos(e.target.value)} />
           <input className={claseCampo} data-epayco="card[number]" aria-label="Número de la tarjeta" placeholder="Número de la tarjeta" inputMode="numeric" autoComplete="cc-number" />
           <div className="flex gap-2">
             <input className={claseCampo} data-epayco="card[exp_month]" aria-label="Mes (MM)" placeholder="MM" inputMode="numeric" autoComplete="cc-exp-month" maxLength={2} />
@@ -150,10 +160,11 @@ const TarjetaEpayco = forwardRef<TarjetaEpaycoHandle, PropsTarjeta>(function Tar
         <label htmlFor="documento-titular" className="text-sm font-medium text-foreground">
           Documento del titular de la tarjeta
         </label>
-        <div className="flex gap-2">
+        {/* Selector angosto y el número con todo el resto: en una fila de 320 px el número se lee entero. */}
+        <div className="grid grid-cols-[5.5rem_minmax(0,1fr)] gap-2" data-documento-titular>
           <select
             aria-label="Tipo de documento del titular"
-            className={`${claseCampo} w-24 shrink-0 px-2`}
+            className={`${claseCampo} px-2`}
             value={tipoDocumento}
             onChange={(e) => setTipoDocumento(e.target.value as TipoDocumentoTitular)}
           >
@@ -165,7 +176,7 @@ const TarjetaEpayco = forwardRef<TarjetaEpaycoHandle, PropsTarjeta>(function Tar
           </select>
           <input
             id="documento-titular"
-            className={claseCampo}
+            className={`${claseCampo} min-w-0`}
             placeholder="Número, sin puntos"
             inputMode={tipoDocumento === 'PP' ? 'text' : 'numeric'}
             autoComplete="off"
