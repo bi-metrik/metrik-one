@@ -171,13 +171,13 @@ export function dominioOperario(puerto: PuertoObras, o: OpcionesOperario): Domin
     if (!negocioId) throw new Error('sin obra');
     // El listado se tocó: las mismas reglas del día, sin escribir si no aplica.
     const misma = ya.find((l) => l.negocio_id === negocioId);
-    if (misma) return { lineas: [`Ya quedó anotada su llegada a ${misma.obra}, ${horaBogota(misma.hora)}.`] };
+    if (misma) return { lineas: [`Ya quedó anotada su llegada a ${misma.obra}, ${horaBogota(misma.hora)}`] };
     const distintas = new Set(ya.map((l) => l.negocio_id));
     if (distintas.size >= 2) return { lineas: [`Hoy ya tiene medio día en ${ya[0].obra} y medio en ${ya.find((l) => l.negocio_id !== ya[0].negocio_id)!.obra}. Si quiere cambiar alguna, dígame a cuál obra llegó.`] };
     const r = await puerto.registrarLlegada({ collaboratorId: o.collaboratorId, negocioId, fecha, hora, waMessageId: (d.wamid as string | null) ?? null, propuestaHuella: huella });
     const linea = distintas.size === 1
-      ? `✅ Llegada a ${obra} anotada, ${horaBogota(hora)}. El día queda medio y medio.`
-      : eleccion ? `✅ Llegada a ${obra} anotada, ${horaBogota(hora)}. Que le vaya bien.` : '✅ Llegada anotada. Que le vaya bien.';
+      ? `✅ Llegada a ${obra} anotada, ${horaBogota(hora)} El día queda medio y medio.`
+      : eleccion ? `✅ Llegada a ${obra} anotada, ${horaBogota(hora)} Que le vaya bien.` : '✅ Llegada anotada. Que le vaya bien.';
     return { lineas: [linea], escrituras: [{ tipo: 'llegada', id: r.id, negocio_id: negocioId, obra, collaborator_id: o.collaboratorId, fecha, hora }] };
   }
 

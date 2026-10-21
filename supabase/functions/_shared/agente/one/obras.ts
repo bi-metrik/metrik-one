@@ -787,7 +787,7 @@ export function dominioObras(puerto: PuertoObras, o: OpcionesObras): Dominio {
     if (p.accion === 'pagos' && Array.isArray(p.datos.cola) && p.datos.cola.length) return await siguienteDeCola(p.datos.cola as PartidaPago[], ctx, ['Listo, ese no lo registré.']);
     // «No es de factura»: el mismo ingreso, sin factura.
     if (p.accion === 'ingreso' && p.datos.factura_id && !p.datos.repetido) {
-      const args = (p.args?.datos ?? {}) as Record<string, unknown>;
+      const args = ((p.args ?? (p as Propuesta & { args_modelo?: Record<string, unknown> }).args_modelo)?.datos ?? {}) as Record<string, unknown>;
       const r = await proponerIngreso({ ...args, factura: '', sin_factura: true }, ctx);
       if (r.ok) return { lineas: [], propuesta: { ...r.v, args: { accion: 'ingreso', datos: { ...args, factura: '', sin_factura: true } } } };
     }
