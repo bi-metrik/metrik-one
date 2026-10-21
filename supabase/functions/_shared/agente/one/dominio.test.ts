@@ -259,7 +259,7 @@ describe('piezas puras', () => {
   it('las declaraciones del dominio ONE pasan al núcleo con sus acciones', async () => {
     const r = await reglamentoOne('X')
     const decl = declaraciones(dominioOne(new PuertoOneMemoria(), { rol: 'owner' }), r)
-    expect(decl.map((d) => d.name)).toEqual(['buscar_negocios', 'negocios_abiertos', 'ver_negocio', 'gastos_recientes', 'proponer', 'responder'])
+    expect(decl.map((d) => d.name)).toEqual(['buscar_negocios', 'negocios_abiertos', 'ver_negocio', 'gastos_recientes', 'preguntar_destino', 'proponer', 'responder'])
     expect(JSON.stringify(decl.find((d) => d.name === 'responder'))).toContain('"ayuda"')
   })
 })
@@ -300,5 +300,77 @@ describe('la configuración del dominio ONE', () => {
     expect(leerConfigOne(null).corteMs).toBe(CORTE_ONE_MS)
     expect(leerConfigOne({ agente_config: { corte_ms: 3000 } }).corteMs).toBe(3000)
     expect(leerConfigOne(null).respaldo?.modelo).toBe('gemini-3.5-flash-lite')
+  })
+})
+
+describe('una propuesta vence cuando el bot manda otro mensaje (arnés 2026-10-21, t-mantenimiento)', () => {
+  it('el «Registrar» de una propuesta vieja no escribe si el bot ya volvió a preguntar', async () => {
+    const modelo = modeloGuionado([
+      { name: 'proponer', args: { accion: 'gasto', datos: { monto: 47600, empresa: true, categoria: 'otros' } } },
+      { name: 'negocios_abiertos', args: {} },
+      { name: 'responder', args: { tema: 'gasto', texto: '¿A cuál va?', opciones: [{ titulo: 'A1 26 1' }, { titulo: 'Gasto de empresa' }] } },
+    ])
+    const e = await escenarioOne({ modelo, negocios: NEGOCIOS })
+    await e.escribe('47.600')
+    await e.escribe('1')
+    const t = await e.toca('Registrar')
+    expect(t[0].texto).toBe('Ese botón ya no está vigente: no hice nada.')
+    expect(e.puerto.escrituras).toEqual([])
+  })
+
+  it('reenviar la MISMA propuesta (propuesta_repetida) no la vence', async () => {
+    const modelo = modeloGuionado([
+      { name: 'proponer', args: { accion: 'gasto', datos: { monto: 47600, negocio: 'A1 26 1', categoria: 'otros' } } },
+      { name: 'proponer', args: { accion: 'gasto', datos: { monto: 47600, negocio: 'A1 26 1', categoria: 'otros' }, texto: 'Sí, es el de Alfa.' } },
+    ])
+    const e = await escenarioOne({ modelo, negocios: NEGOCIOS })
+    await e.escribe('47600 al A1 26 1')
+    await e.escribe('¿ese es el de Alfa?')
+    await e.toca('Registrar')
+    expect(e.puerto.escrituras).toHaveLength(1)
+  })
+
+  it('el Estado lleva la última lista con su orden', async () => {
+    const modelo = modeloGuionado([
+      { name: 'negocios_abiertos', args: {} },
+      { name: 'responder', args: { tema: 'gasto', texto: '¿A cuál va?', opciones: [{ titulo: 'A1 26 1', descripcion: 'Alfa' }, { titulo: 'Gasto de empresa' }] } },
+      (p) => {
+        expect(p.mensajes[0].parts[0].text).toContain('Última lista que mostraste (#2, 1 mensaje(s) de la persona después): 1) A1 26 1; 2) Gasto de empresa.')
+        return { name: 'responder', args: { tema: 'gasto', texto: 'Listo.' } }
+      },
+    ])
+    const e = await escenarioOne({ modelo, negocios: NEGOCIOS })
+    await e.escribe('gasto de 5000')
+    await e.escribe('1')
+    expect(modelo.restantes()).toBe(0)
+  })
+})
+
+describe('preguntar_destino: la lista la arma el código', () => {
+  it('negocios en orden con código · empresa — nombre, y «Gasto de empresa» al final; un «1» es el primer negocio', async () => {
+    const modelo = modeloGuionado([
+      { name: 'preguntar_destino', args: { para: 'gasto', texto: '¿A cuál negocio va el gasto de $47.600?' } },
+      (p) => {
+        expect(p.mensajes[0].parts[0].text).toContain('1) V1 26 5 — Vértice Impermeables — Flujo corto')
+        expect(p.mensajes[0].parts[0].text).toContain('4) Gasto de empresa.')
+        return { name: 'proponer', args: { accion: 'gasto', datos: { monto: 47600, negocio: 'V1 26 5', categoria: 'otros' } } }
+      },
+    ])
+    const e = await escenarioOne({ modelo, negocios: NEGOCIOS })
+    const t = await e.escribe('47.600')
+    expect(t[0].tipo).toBe('lista')
+    expect('opciones' in t[0] && t[0].opciones.map((o) => o.titulo)).toEqual(['V1 26 5', 'A1 26 1', 'V1 26 6', 'Gasto de empresa'])
+    await e.escribe('1')
+    await e.toca('Registrar')
+    expect(e.puerto.escrituras[0]).toMatchObject({ monto: 47600, negocio: 'V1 26 5' })
+  })
+
+  it('para una actividad no ofrece «Gasto de empresa»; con pocos negocios el detalle va en el cuerpo', async () => {
+    const modelo = modeloGuionado([{ name: 'preguntar_destino', args: { para: 'actividad', texto: '¿En cuál negocio?' } }])
+    const e = await escenarioOne({ modelo, negocios: NEGOCIOS.slice(0, 2) })
+    const t = await e.escribe('llamé al cliente')
+    expect(t[0].tipo).toBe('botones')
+    expect(t[0].texto).toBe('¿En cuál negocio?\n• V1 26 5 · Vértice Impermeables — Flujo corto — de la obra vendida a la utilidad de cada obra\n• A1 26 1 · Alfa Grupo — Concesión de prueba')
+    expect('opciones' in t[0] && t[0].opciones.map((o) => o.titulo)).toEqual(['V1 26 5', 'A1 26 1'])
   })
 })

@@ -18,7 +18,8 @@
 
 import { CATEGORIA_LABELS } from '../../types.ts';
 import { formatCOP } from '../../wa-format.ts';
-import type { ContextoDominio, DeclaracionHerramienta, Dominio, FilaConversacion, Hechos, Propuesta, ResultadoHerramienta } from '../tipos.ts';
+import { renderizar } from '../render.ts';
+import type { ContextoDominio, DeclaracionHerramienta, Dominio, FilaConversacion, Hechos, Propuesta, ResultadoHerramienta, Salida } from '../tipos.ts';
 import { BOT_ONE } from './reglamento.ts';
 
 export { BOT_ONE };
@@ -203,6 +204,22 @@ export function telefonoEnLaConversacion(filas: FilaConversacion[], telefono: st
   return filas.some((f) => f.direccion === 'entrante' && digitos(f.texto).includes(t.slice(-7)));
 }
 
+/**
+ * La última lista (o botones de conversación) que el bot mostró, con su orden: el modelo interpreta «1», «el 2» o un
+ * título contra ella. Solo las opciones de conversación (`ag|c|`), no los botones de una propuesta. Pura.
+ */
+export function ultimaLista(filas: FilaConversacion[]): string {
+  for (let i = filas.length - 1; i >= 0; i--) {
+    const f = filas[i];
+    if (f.direccion !== 'saliente' || !f.opciones?.length) continue;
+    const ops = f.opciones.filter((o) => o.id.startsWith('ag|c|'));
+    if (!ops.length) continue;
+    const despues = filas.slice(i + 1).filter((x) => x.direccion === 'entrante').length;
+    return `Última lista que mostraste (#${i + 1}, ${despues === 0 ? 'sin respuesta todavía' : `${despues} mensaje(s) de la persona después`}): ${ops.map((o, k) => `${k + 1}) ${o.titulo}${o.descripcion ? ` — ${o.descripcion}` : ''}`).join('; ')}.`;
+  }
+  return 'Última lista que mostraste: ninguna.';
+}
+
 // ── Las herramientas ─────────────────────────────────────────────────────────
 
 export const LECTURAS_ONE: DeclaracionHerramienta[] = [
@@ -227,6 +244,29 @@ export const LECTURAS_ONE: DeclaracionHerramienta[] = [
     parameters: { type: 'object', properties: { dias: { type: 'number', description: '1 = hoy (por defecto 1, máximo 60).' }, codigo: { type: 'string', description: 'Opcional: el código del negocio.' } } },
   },
 ];
+
+/**
+ * Cierra el turno con la pregunta del destino armada por el CÓDIGO (2026-10-21): los negocios abiertos en su orden, con
+ * código, empresa y nombre, y «Gasto de empresa» siempre al final. Medido en el arnés: cuando el modelo armaba la lista,
+ * a veces ponía «Gasto de empresa» primero y un «1» (el primer negocio, como en el bot de siempre) terminaba en empresa.
+ */
+export const CIERRES_ONE: DeclaracionHerramienta[] = [
+  {
+    name: 'preguntar_destino',
+    description: 'Cuando falta a qué negocio va un gasto o una actividad: el sistema manda la pregunta con la lista de negocios abiertos (código, empresa y nombre, en orden) y, para un gasto, «Gasto de empresa» al final. Cierra el turno. No armes tú esa lista con `responder`.',
+    parameters: {
+      type: 'object',
+      properties: {
+        para: { type: 'string', enum: ['gasto', 'actividad'] },
+        texto: { type: 'string', description: 'La pregunta en una línea, con lo que ya sabes («¿A cuál negocio va el gasto de $47.600?»).' },
+        reglas_usadas: { type: 'array', items: { type: 'string' } },
+      },
+      required: ['para', 'texto'],
+    },
+  },
+];
+
+export const OPCION_EMPRESA = 'Gasto de empresa';
 
 const categorias = Object.keys(CATEGORIA_LABELS);
 
@@ -361,7 +401,9 @@ export function dominioOne(puerto: PuertoOne, o: { rol: string; ahora?: () => nu
         datos: {
           monto, categoria, descripcion, negocio_id: negocio?.id ?? null, negocio: negocio?.codigo ?? null,
           etiqueta: negocio ? nombreNegocio(negocio) : 'Gasto de empresa', foto: foto?.fila ?? null, media_id: foto?.mediaId ?? null,
-          centro: cc.centro, origen: cc.origen, mensaje_original: ultimoTextoDelEquipo(ctx.conversacion),
+          // `mensaje_original` NO va aquí: cambia con cada mensaje y la misma propuesta dejaría de ser «la misma»
+          // (`propuesta_repetida`). Se toma al ejecutar.
+          centro: cc.centro, origen: cc.origen,
         },
         resumen, ...(negocio ? { sobre: negocio.codigo } : {}), si: 'Registrar', no: 'No',
       },
@@ -446,12 +488,12 @@ export function dominioOne(puerto: PuertoOne, o: { rol: string; ahora?: () => nu
     return r.ok ? { ok: true, propuesta: r.v } : r;
   }
 
-  async function ejecutar(p: Propuesta): Promise<Hechos> {
+  async function ejecutar(p: Propuesta, ctx: ContextoDominio): Promise<Hechos> {
     const d = p.datos;
     if (p.accion === 'gasto') {
       const r = await puerto.registrarGasto({
         monto: Number(d.monto), categoria: String(d.categoria), descripcion: (d.descripcion as string | null) ?? null,
-        mensajeOriginal: (d.mensaje_original as string | null) ?? null, negocioId: (d.negocio_id as string | null) ?? null,
+        mensajeOriginal: ultimoTextoDelEquipo(ctx.conversacion), negocioId: (d.negocio_id as string | null) ?? null,
         centro: (d.centro as string | null) ?? null, origen: (d.origen as string | null) ?? null, mediaId: (d.media_id as string | null) ?? null,
       });
       const lineas = [
@@ -476,21 +518,48 @@ export function dominioOne(puerto: PuertoOne, o: { rol: string; ahora?: () => nu
     throw new Error(`acción desconocida: ${p.accion}`);
   }
 
+  async function cerrar(nombre: string, args: Record<string, unknown>): Promise<{ ok: true; salidas: Salida[]; datos?: unknown } | { ok: false; error: string; candado: string }> {
+    if (nombre !== 'preguntar_destino') return { ok: false, error: `No existe «${nombre}».`, candado: 'cierre_desconocido' };
+    if (!permisos.negocios) return sinPermiso('consultar negocios');
+    const r = await puerto.negociosAbiertos(null, 9);
+    if (r === 'error') return { ok: false, error: 'No pude leer los negocios ahora. Dilo así.', candado: 'negocios_no_leidos' };
+    const gasto = args.para !== 'actividad';
+    if (!r.negocios.length) {
+      return { ok: false, error: gasto ? 'No hay negocios abiertos: pregunta si es gasto de empresa.' : 'No hay negocios abiertos: dilo (la actividad va en un negocio).', candado: 'sin_negocios' };
+    }
+    const opciones = [
+      ...r.negocios.map((n) => ({ titulo: n.codigo, descripcion: `${n.empresa || n.contacto || 'sin empresa'} — ${n.nombre}` })),
+      ...(gasto ? [{ titulo: OPCION_EMPRESA }] : []),
+    ];
+    const pregunta = String(args.texto ?? '').trim().split('\n')[0].slice(0, 200) || '¿A cuál negocio va?';
+    // Con 3 opciones o menos salen botones (sin descripción): el detalle de cada negocio va en el cuerpo.
+    const cuerpo = opciones.length <= 3
+      ? [pregunta, ...r.negocios.map((n) => `• ${nombreNegocio(n)}`)].join('\n')
+      : pregunta;
+    const render = renderizar(cuerpo, opciones, { turno: crypto.randomUUID().slice(0, 8), topeTexto: 1000, final: true });
+    if (!render.ok) return { ok: false, error: render.error, candado: 'formato_meta' };
+    return { ok: true, salidas: [render.salida], datos: { negocios: r.negocios.map((n) => nombreNegocio(n)), empresa: gasto } };
+  }
+
   return {
     bot: BOT_ONE,
+    cierres: CIERRES_ONE,
+    cerrar: (n, a) => cerrar(n, a),
     reenvios: 'mensaje',
+    propuestaVenceConRespuesta: true,
     lecturas: LECTURAS_ONE,
     acciones: ACCIONES_ONE,
     datosProponer: DATOS_PROPONER_ONE,
     leer: (n, a) => leer(n, a),
     proponer,
-    ejecutar: (p) => ejecutar(p),
+    ejecutar: (p, ctx) => ejecutar(p, ctx),
     estado(ctx) {
       const gastos = gastosDeLaConversacion(ctx.conversacion).slice(-5);
       const p = permisos;
       const puede = [p.escribir ? 'registrar gastos y actividades' : null, p.contactos ? 'crear contactos' : null, p.negocios ? 'consultar negocios' : null, p.gastos ? 'consultar gastos' : null].filter(Boolean);
       return [
         `Su rol permite: ${puede.length ? puede.join(', ') : 'nada por este chat'}.`,
+        ultimaLista(ctx.conversacion),
         gastos.length
           ? `Gastos registrados en esta conversación: ${gastos.map((g) => `${g.ref} · ${formatCOP(g.monto)} · ${g.etiqueta} · ${g.soporte ? 'con soporte' : 'sin soporte'}`).join(' | ')}.`
           : 'Gastos registrados en esta conversación: ninguno.',

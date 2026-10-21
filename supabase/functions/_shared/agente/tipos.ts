@@ -205,6 +205,13 @@ export interface Dominio {
    * comercial pide el resumen. `mensaje` (ONE): entra al turno del modelo como cualquier otro mensaje (marcado como reenvío).
    */
   reenvios?: 'tanda' | 'mensaje';
+  /**
+   * `true` (ONE): una propuesta vence en cuanto el bot manda otro mensaje del modelo que no es ella misma (una pregunta,
+   * otra propuesta, una respuesta). Su botón deja de escribir. Medido en el arnés del 2026-10-21: el bot propuso «gasto de
+   * empresa», la persona contestó «1», el bot volvió a preguntar y el «Registrar» viejo, todavía vivo, registró a empresa.
+   * Sin la bandera (la bandeja) la propuesta sigue viva mientras la conversación no consulte otra cosa (`sobre`).
+   */
+  propuestaVenceConRespuesta?: boolean;
   /** Las herramientas de lectura del dominio. */
   lecturas: DeclaracionHerramienta[];
   /** Las acciones de `proponer`. */

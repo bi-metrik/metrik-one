@@ -25,7 +25,8 @@ import { modeloGuionado } from '../modelo-guionado.ts';
 import { escenarioOne } from '../one/escenario.ts';
 import type { EscenarioOne, PasoOne } from '../one/escenario.ts';
 import type { NegocioMem, PuertoOneMemoria } from '../one/puerto-memoria.ts';
-import type { Modelo, PedidoModelo, Salida, Traza } from '../tipos.ts';
+import type { Modelo, PedidoModelo, Salida, Traza, UsoLlamado } from '../tipos.ts';
+import { simular, transcripcionParaSimulador } from './simulador.ts';
 import { sumarUso } from '../uso.ts';
 import type { PrecioModelo } from '../uso.ts';
 import { percentil, tipoDeTurno } from './calificar.ts';
@@ -109,8 +110,86 @@ function verSalida(s: Salida): string {
   return `${s.texto}${ops}`;
 }
 
-async function correrPasos(e: EscenarioOne, caso: CasoOne): Promise<string[]> {
+// ── La persona simulada (2026-10-21) ─────────────────────────────────────────
+//
+// El banco reproduce los mensajes REALES de cada caso, que le contestaban al bot viejo. Cuando un paso no aplica porque
+// el bot nuevo no ofreció ese botón («Registrar», «⏰ Después»), en vez de escribir a ciegas lo que la persona escribió
+// entonces, una persona simulada (Haiku, por `fetchModelo`) contesta con la INTENCIÓN del caso. Y si al final de los pasos
+// reales lo esperado todavía no quedó y el bot está esperando algo, la persona tiene hasta 2 turnos más. Cada paso
+// simulado queda marcado en la transcripción y contado en el resultado: no se maquilla nada (si con eso el gasto no queda,
+// es falla).
+
+/** La intención del caso, dicha como la diría la persona, desde lo esperado. Pura. */
+export function objetivoDe(caso: CasoOne, negocios: NegocioMem[]): string {
+  const e = caso.esperado;
+  const nombre = (c: string | null) => {
+    if (!c) return 'como gasto de empresa (no es de ningún negocio)';
+    const n = negocios.find((x) => x.codigo === c);
+    return `al negocio ${c}${n ? ` (${n.empresa ?? ''} — ${n.nombre})` : ''}`;
+  };
+  const partes: string[] = [];
+  for (const g of e.gastos ?? []) partes.push(`registrar un gasto de $${g.monto.toLocaleString('es-CO')} ${nombre(g.negocio)}${g.soporte ? ', con la foto del recibo que ya mandaste' : ''}`);
+  for (const a of e.actividades ?? []) partes.push(`dejar anotada la actividad que contaste en el negocio ${a.negocio}`);
+  for (const c of e.contactos ?? []) partes.push(`crear el contacto ${c.nombre}`);
+  if (!partes.length) return 'No quieres registrar nada: solo lo que dijiste. Si te proponen registrar algo, di que no.';
+  return `Quieres ${partes.join('; y ')}. Si te piden la foto del soporte y no la has mandado, di que después. Cuando el asistente te muestre el resumen con un botón para confirmar, tócalo.`;
+}
+
+function promptPersona(objetivo: string): string {
+  return [
+    'Eres una persona del equipo de una pequeña empresa colombiana. Le escribes por WhatsApp a un asistente que registra gastos, actividades y contactos en el sistema de la empresa.',
+    `Tu intención en esta conversación: ${objetivo}`,
+    'Escribes corto, como en WhatsApp. Una acción por turno: «escribe» (un mensaje), «toca» (el título EXACTO de una opción del último mensaje del asistente) o «fin» (ya quedó lo que querías, o no hay nada más que hacer).',
+    'No inventes datos que no estén en tu intención. Si el asistente ya dijo que quedó registrado lo que querías, «fin».',
+  ].join('\n');
+}
+
+interface Vista { quien: 'tu' | 'asistente'; texto: string; opciones?: string[] }
+
+function vistas(e: EscenarioOne, dicho: string[]): Vista[] {
+  const out: Vista[] = [];
+  e.pasos.forEach((p, i) => {
+    out.push({ quien: 'tu', texto: dicho[i] ?? p.texto });
+    for (const s of p.salidas) out.push({ quien: 'asistente', texto: s.texto, opciones: 'opciones' in s ? s.opciones.map((o) => o.titulo) : undefined });
+  });
+  return out;
+}
+
+/** Un turno de la persona simulada. `null` = terminó (o el simulador falló). */
+async function turnoPersona(e: EscenarioOne, objetivo: string, dicho: string[], uso: UsoLlamado[]): Promise<string | null> {
+  const r = await simular({ llave: '', modelo: 'gemini-3.5-flash-lite', razonamiento: null, sistema: promptPersona(objetivo), transcripcion: transcripcionParaSimulador(vistas(e, dicho)) });
+  uso.push(r.uso);
+  if (!r.ok || r.accion.accion === 'fin') return null;
+  if (r.accion.accion === 'toca') {
+    try {
+      await e.toca(r.accion.texto);
+      return `[toque: ${r.accion.texto}] (simulada)`;
+    } catch {
+      // No existe esa opción: lo escribe.
+    }
+  }
+  const t = r.accion.texto.trim() || 'ok';
+  await e.escribe(t);
+  return `${t} (simulada)`;
+}
+
+function faltaAlgo(caso: CasoOne, puerto: PuertoOneMemoria): boolean {
+  const e = caso.esperado;
+  if (e.nada) return false;
+  const gs = [...puerto.gastos];
+  for (const g of e.gastos ?? []) {
+    const i = gs.findIndex((x) => x.monto === g.monto && x.negocio === g.negocio && (g.soporte === undefined || x.soporte === g.soporte));
+    if (i < 0) return true;
+    gs.splice(i, 1);
+  }
+  if ((e.actividades ?? []).some((a) => !puerto.escrituras.some((w) => w.tipo === 'actividad' && w.negocio === a.negocio))) return true;
+  return (e.contactos ?? []).some((c) => !puerto.escrituras.some((w) => w.tipo === 'contacto' && String(w.nombre).toLowerCase() === c.nombre.toLowerCase()));
+}
+
+async function correrPasos(e: EscenarioOne, caso: CasoOne, o: { persona: boolean; negocios: NegocioMem[]; uso: UsoLlamado[] }): Promise<{ dicho: string[]; simulados: number }> {
   const dicho: string[] = [];
+  let simulados = 0;
+  const objetivo = caso.objetivo ?? objetivoDe(caso, o.negocios);
   for (const p of caso.pasos) {
     if (p.escribe !== undefined) { await e.escribe(p.escribe); dicho.push(p.escribe); }
     else if (p.foto !== undefined) { await e.foto(p.foto); dicho.push(`(foto) ${p.foto}`); }
@@ -121,13 +200,25 @@ async function correrPasos(e: EscenarioOne, caso: CasoOne): Promise<string[]> {
         await e.toca(p.toca);
         dicho.push(`[toque: ${p.toca}]`);
       } catch {
-        const t = p.oEscribe ?? 'sí';
-        await e.escribe(t);
-        dicho.push(`«${t}» (no había botón «${p.toca}»)`);
+        if (o.persona) {
+          // El bot nuevo no ofreció ese botón: contesta la persona con la intención del caso (o calla si ya terminó).
+          const d = await turnoPersona(e, objetivo, dicho, o.uso);
+          if (d) { dicho.push(d); simulados++; }
+        } else {
+          const t = p.oEscribe ?? 'sí';
+          await e.escribe(t);
+          dicho.push(`«${t}» (no había botón «${p.toca}»)`);
+        }
       }
     }
   }
-  return dicho;
+  for (let i = 0; o.persona && i < 2 && faltaAlgo(caso, e.puerto); i++) {
+    const d = await turnoPersona(e, objetivo, dicho, o.uso);
+    if (!d) break;
+    dicho.push(d);
+    simulados++;
+  }
+  return { dicho, simulados };
 }
 
 function transcripcion(caso: CasoOne, r: ResultadoOne, dicho: string[]): string {
@@ -166,7 +257,8 @@ if (import.meta.main) {
     // Sin `--respaldo`, `llave` vacía y respaldo nulo: ni un llamado a Gemini.
     : modeloGemini({ llave: llaveGemini, principal: CONFIG_POR_DEFECTO.principal, respaldo: conRespaldo ? CONFIG_POR_DEFECTO.respaldo : null, corteMs: corte, haiku: true });
 
-  const resultados: ResultadoOne[] = [];
+  const resultados: Array<ResultadoOne & { simulados: number }> = [];
+  const usoPersona: UsoLlamado[] = [];
   const md: string[] = [];
   const todas: Traza[] = [];
   for (const c of casos) {
@@ -178,13 +270,14 @@ if (import.meta.main) {
     }
     let error: string | undefined;
     let dicho: string[] = [];
-    try { dicho = await correrPasos(e, c); } catch (err) { error = String(err).slice(0, 300); }
+    let simulados = 0;
+    try { ({ dicho, simulados } = await correrPasos(e, c, { persona: !seco && !args.includes('--sin-persona'), negocios, uso: usoPersona })); } catch (err) { error = String(err).slice(0, 300); }
     const trazas = e.trazas();
     todas.push(...trazas);
-    const r = calificarOne(c, e.pasos, e.puerto, trazas, error);
+    const r = { ...calificarOne(c, e.pasos, e.puerto, trazas, error), simulados };
     resultados.push(r);
     md.push(transcripcion(c, r, dicho));
-    console.log(JSON.stringify({ caso: c.id, exito: r.exito.ok, motivo: r.exito.motivo, daninas: r.daninas, regresion: r.regresion, caidos: r.caidos, error: r.error ?? null }));
+    console.log(JSON.stringify({ caso: c.id, simulados, exito: r.exito.ok, motivo: r.exito.motivo, daninas: r.daninas, regresion: r.regresion, caidos: r.caidos, error: r.error ?? null }));
   }
   const lat = resultados.flatMap((r) => r.latencias);
   const conModelo = lat.filter((l) => l.tipo.includes('llamado')).map((l) => l.ms);
@@ -195,6 +288,8 @@ if (import.meta.main) {
     daninas: resultados.reduce((n, r) => n + r.daninas.length, 0),
     regresiones: resultados.filter((r) => r.regresion).map((r) => r.id),
     caidos: resultados.reduce((n, r) => n + r.caidos, 0),
+    pasos_simulados: resultados.reduce((n, r) => n + r.simulados, 0),
+    persona: sumarUso([{ tipo: 'modelo', bot: 'persona', uso: usoPersona }], PRECIOS_ONE),
     turnos_con_modelo: { n: conModelo.length, p50: percentil(conModelo, 50), p90: percentil(conModelo, 90) },
     por_tipo: Object.fromEntries([...new Set(lat.map((l) => l.tipo))].sort().map((k) => { const xs = lat.filter((l) => l.tipo === k).map((l) => l.ms); return [k, { n: xs.length, p50: percentil(xs, 50), p90: percentil(xs, 90) }]; })),
     uso,
@@ -204,6 +299,7 @@ if (import.meta.main) {
   const etiqueta = seco ? 'seco' : `${MODELO_HAIKU}${conRespaldo ? `, respaldo ${CONFIG_POR_DEFECTO.respaldo?.modelo} al corte de ${corte} ms` : ', sin respaldo'}`;
   await Deno.writeTextFile(`${salida}/transcripciones.md`, [
     `# Arnés del dominio ONE — ${etiqueta}`, '',
+    `Pasos de la persona simulada (marcados «(simulada)»): ${t.pasos_simulados} · gasto de la persona ${t.persona.costo_usd === null ? 'sin precio' : `${t.persona.costo_usd.toFixed(4)} USD`}`,
     `Casos: ${t.casos} · éxito ${t.exitos} (${Math.round((100 * t.exitos) / Math.max(1, t.casos))} %) · dañinas ${t.daninas} · regresiones ${t.regresiones.length}${t.regresiones.length ? ` (${t.regresiones.join(', ')})` : ''} · «no pude» ${t.caidos}`,
     `Turnos con modelo: n=${t.turnos_con_modelo.n} · p50 ${t.turnos_con_modelo.p50} ms · p90 ${t.turnos_con_modelo.p90} ms`,
     `Tokens: entrada ${uso.entrada} · salida ${uso.salida} · ${uso.llamados} llamados · ${uso.costo_usd === null ? `sin precio (${uso.sin_precio.join(', ')})` : `${uso.costo_usd.toFixed(4)} USD`}`,

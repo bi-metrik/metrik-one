@@ -41,6 +41,8 @@ export interface CasoOne {
   pasos: PasoCasoOne[];
   esperado: EsperadoOne;
   viejoOk: boolean;
+  /** La intención de la persona para la persona simulada; sin ella, se arma de `esperado`. */
+  objetivo?: string;
   /** Gastos de hoy ya registrados (para las consultas). */
   gastosHoy?: Array<{ monto: number; categoria: string; descripcion: string; negocio: string | null }>;
 }

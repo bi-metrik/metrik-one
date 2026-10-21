@@ -16,7 +16,7 @@
 
 import type { ConfigAgente } from './config.ts';
 import type { DepsTurno, SalidaTurno } from './nucleo.ts';
-import { esSiSolo, seguirTrasToque, toqueDePropuesta, turnoDelModelo, propuestaVigente } from './nucleo.ts';
+import { esSiSolo, seguirTrasToque, toqueDePropuesta, turnoDelModelo, vigenteDe } from './nucleo.ts';
 import { leerToque } from './render.ts';
 import { respuestaFija } from './reglamento.ts';
 import type { Almacen, ContextoDominio, FilaConversacion, Mensajero, Traza } from './tipos.ts';
@@ -148,7 +148,7 @@ export async function unTurno(d: DepsCola): Promise<boolean> {
   }
 
   // 3) «sí» escrito solo con una propuesta vigente: código.
-  const vig = propuestaVigente(filas);
+  const vig = vigenteDe(filas, d.dominio);
   if (vig && delEquipo.length === 1 && delEquipo[0].clase === 'escrito' && esSiSolo(delEquipo[0].texto)) {
     const r = await toqueYSeguir(d, { turnoId, filas, nuevos: delEquipo, ctx }, { huella: vig.huella, si: true }, 'si_escrito');
     await enviarYCerrar(d, turnoId, pend, r, 'agente.si');
