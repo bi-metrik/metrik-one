@@ -39,7 +39,7 @@ export default async function NegociosPage({
     return (
       <div className="mx-auto max-w-2xl px-4 py-6">
         <PestanasNegocios activa="pendientes" />
-        {mp.activo ? <MisPendientes pendientes={mp.pendientes} proximo={mp.proximo} tablero={mp.tablero} /> : null}
+        {mp.activo ? <MisPendientes pendientes={mp.pendientes} servicios={mp.servicios} hoy={mp.hoy} proximo={mp.proximo} tablero={mp.tablero} /> : null}
       </div>
     )
   }

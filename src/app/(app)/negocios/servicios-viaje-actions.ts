@@ -49,7 +49,8 @@ import {
   serviciosViajeActivo,
   type QuienEdita,
 } from '@/lib/viaje/estado-servicio'
-import { generarServiciosDesdeTarifa } from '@/lib/viaje/servicios-viaje-datos'
+import { columnasDeFechas, generarServiciosDesdeTarifa } from '@/lib/viaje/servicios-viaje-datos'
+import { validarFechasEditadas, type FechasEditadas } from '@/lib/viaje/fechas-servicio'
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 const db = (c: unknown): any => c
@@ -201,6 +202,49 @@ export async function actualizarServicio(servicioId: string, cambios: CambiosSer
     .eq('id', servicioId)
     .eq('workspace_id', ctx.workspaceId)
   if (upErr) return { ok: false, error: upErr.message }
+  revalidatePath(`/negocios/${fila.negocio_id}`)
+  return { ok: true }
+}
+
+/**
+ * Corregir a mano las fechas de la fila: inicio, fin, horas y, en un vuelo, sus tramos. Queda
+ * marcado con quién y cuándo (`fechas_corregidas_*`): ni traer los servicios otra vez ni el
+ * completado desde la cotización la vuelven a pisar. Fin anterior al inicio se rechaza aquí y en
+ * la base (CHECK).
+ */
+export async function actualizarFechasServicio(servicioId: string, fechas: FechasEditadas): Promise<Resultado> {
+  const { supabase, workspaceId, error } = await getWorkspace()
+  if (error || !workspaceId) return { ok: false, error: 'No autenticado' }
+  const { data: filaRaw } = await db(supabase)
+    .from('negocio_servicios')
+    .select('id, negocio_id, tipo')
+    .eq('id', servicioId)
+    .eq('workspace_id', workspaceId)
+    .maybeSingle()
+  const fila = filaRaw as { id: string; negocio_id: string; tipo: string } | null
+  if (!fila) return { ok: false, error: 'Servicio no encontrado' }
+  const ctx = await contextoDelNegocio(fila.negocio_id)
+  if ('error' in ctx) return { ok: false, error: ctx.error }
+  if (!ctx.activo) return { ok: false, error: APAGADO }
+  if (!puedeEditarServicios(ctx.quien)) return { ok: false, error: SIN_PERMISO }
+
+  const v = validarFechasEditadas(fila.tipo, fechas)
+  if (!v.ok) return { ok: false, error: v.error }
+  const ahora = new Date().toISOString()
+  const { error: upErr } = await db(ctx.supabase)
+    .from('negocio_servicios')
+    .update({
+      ...columnasDeFechas(v.fechas),
+      fechas_corregidas_por: ctx.staffId,
+      fechas_corregidas_at: ahora,
+      updated_at: ahora,
+    })
+    .eq('id', servicioId)
+    .eq('workspace_id', ctx.workspaceId)
+  if (upErr) {
+    if (/negocio_servicios_fin_tras_inicio/.test(upErr.message)) return { ok: false, error: 'El fin no puede ser antes del inicio.' }
+    return { ok: false, error: upErr.message }
+  }
   revalidatePath(`/negocios/${fila.negocio_id}`)
   return { ok: true }
 }
