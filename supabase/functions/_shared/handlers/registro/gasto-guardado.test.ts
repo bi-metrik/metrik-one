@@ -47,14 +47,49 @@ function supabaseFalso(tablas: Record<string, Fila[]>) {
     b.then = (ok: (r: unknown) => unknown) => Promise.resolve({ data: filas(), error: null }).then(ok);
     return b;
   }
-  return { client: { from: builder, rpc: async () => ({ data: null, error: null }) }, insertados, actualizados };
+  const rpcs: Array<{ fn: string; args: Fila }> = [];
+  const rpc = async (fn: string, args: Fila) => {
+    rpcs.push({ fn, args });
+    if (fn === 'wa_find_negocios') return { data: buscarNegociosFalso(tablas, args), error: null };
+    if (fn === 'wa_find_projects') return { data: null, error: { code: '42703', message: 'column v.cartera does not exist' } };
+    return { data: null, error: null };
+  };
+  return { client: { from: builder, rpc }, insertados, actualizados, rpcs };
+}
+
+/**
+ * Lo que hace `wa_find_negocios` (20261021093000), en pequeño: código por llave (sin espacios ni guiones) y, si
+ * no, todas las palabras del texto en el nombre del negocio o de su empresa. Solo negocios abiertos del workspace.
+ */
+function buscarNegociosFalso(tablas: Record<string, Fila[]>, args: Fila): Fila[] {
+  const llave = (s: unknown) => String(s ?? '').toUpperCase().replace(/[^A-Z0-9]/g, '');
+  const norm = (s: unknown) => String(s ?? '').toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '').replace(/[^a-z0-9 ]/g, ' ');
+  const abiertos = (tablas.negocios ?? []).filter((n) =>
+    n.workspace_id === args.p_workspace_id && ['abierto', 'activo'].includes(String(n.estado)));
+  const hint = String(args.p_hint ?? '');
+  if (/\d/.test(llave(hint))) {
+    const m = abiertos.find((n) => llave(n.codigo) === llave(hint));
+    if (m) return [{ ...m, coincidencia: 'codigo', puntaje: 1 }];
+  }
+  const vacias = ['al', 'el', 'la', 'de', 'del', 'en', 'para', 'proyecto', 'negocio'];
+  const palabras = norm(hint).split(/\s+/).filter((w) => w.length >= 2 && !vacias.includes(w));
+  if (palabras.length === 0) return [];
+  return abiertos
+    .filter((n) => {
+      const empresa = (tablas.empresas ?? []).find((e) => e.id === n.empresa_id);
+      const todo = ` ${norm(n.nombre)} ${norm(empresa?.nombre)} `;
+      return palabras.every((w) => todo.includes(` ${w} `));
+    })
+    .slice(0, Number(args.p_limit) || 5)
+    .map((n) => ({ ...n, coincidencia: 'exacta', puntaje: 1 }));
 }
 
 const NEGOCIO = { id: 'neg-1', nombre: 'Barandas Conjunto', codigo: 'B1 26 2', estado: 'abierto', workspace_id: 'ws-1' };
 
-function escenario() {
+function escenario(negocios: Fila[] = [NEGOCIO], empresas: Fila[] = []) {
   const db = supabaseFalso({
-    negocios: [NEGOCIO],
+    negocios,
+    empresas,
     v_proyecto_financiero: [],
     gastos_recurrentes_map: [],
     bot_sessions: [{ id: 'ses-1', context: {} }],
@@ -362,5 +397,147 @@ describe('categoria que el parser invento', () => {
       amount: 50000, project_code: 'B1 26 2', category_hint: 'tintos', descripcion: 'tintos reunion', mensaje_original: 'x',
     }));
     expect(gastoGuardado(e.db).categoria).toBe('alimentacion');
+  });
+});
+
+// ── Producción, 2026-10-20 22:47 (workspace metrik) ─────────────────────────────────────────────────────────────
+// 1. «Registra un gasto de 27000 por transportes al proyecto impervium»: el bot buscó «impervium» solo en el NOMBRE
+//    de los negocios (Impervium es la EMPRESA) y en proyectos legacy con `wa_find_projects`, que reventó
+//    (42703 v.cartera). No encontró nada y mostró 4 negocios que no eran.
+// 2. «Revisa el I1 26 5» → «Responde con un número del 1 al 5.»
+// 3. «No quiero, te estoy dando el id del negocio» → lo mismo. El gasto se quedó colgado.
+describe('gasto al negocio de Impervium (los tres mensajes reales)', () => {
+  const IMPERVIUM = { id: 'emp-imp', nombre: 'Impervium', codigo: 'I1', workspace_id: 'ws-1' };
+  const NEG_IMPERVIUM = {
+    id: 'neg-imp', nombre: 'Impermeabilización bodega', codigo: 'I1 26 5', estado: 'abierto', workspace_id: 'ws-1', empresa_id: 'emp-imp',
+  };
+  // Cinco negocios más recientes que el de Impervium: la lista de «¿Para cuál?» no lo trae (como en producción).
+  const OTROS = [1, 2, 3, 4, 5].map((i) => ({
+    id: `neg-${i}`, nombre: `Negocio ${i}`, codigo: `C${i} 26 ${i}`, estado: 'abierto', workspace_id: 'ws-1',
+  }));
+  // Un negocio cerrado con un código que contiene al buscado: no debe salir.
+  const CERRADO = { id: 'neg-cerrado', nombre: 'Viejo', codigo: 'I1 26 50', estado: 'perdido', workspace_id: 'ws-1', empresa_id: 'emp-imp' };
+  const NEGOCIOS = [...OTROS, NEG_IMPERVIUM, CERRADO];
+
+  const mensaje1 = 'Registra un gasto de 27000 por transportes al proyecto impervium';
+  // Lo que devolvió el parser (intención GASTO, 0,95).
+  const fields1: ParsedFields = {
+    amount: 27000, concept: 'transportes', descripcion: 'transportes', category_hint: 'transporte',
+    entity_hint: 'impervium', mensaje_original: mensaje1,
+  };
+
+  it('mensaje 1: «impervium» es la empresa → el gasto queda en su negocio, sin tocar proyectos', async () => {
+    const e = escenario(NEGOCIOS, [IMPERVIUM]);
+    await handleGasto(e.ctxPara(mensaje1, fields1, 0.95));
+    const g = gastoGuardado(e.db);
+    expect(g.negocio_id).toBe('neg-imp');
+    expect(g.proyecto_id).toBeUndefined();
+    expect(g.monto).toBe(27000);
+    expect(g.descripcion).toBe('transportes');
+    expect(e.db.rpcs.map((r) => r.fn)).not.toContain('wa_find_projects');
+  });
+
+  it('mensaje 1 con confianza baja: propone el negocio de Impervium y pide confirmar', async () => {
+    const e = escenario(NEGOCIOS, [IMPERVIUM]);
+    await handleGasto(e.ctxPara(mensaje1, fields1, 0.6));
+    expect(e.session.state).toBe('confirming');
+    expect(e.enviados.at(-1)).toContain('I1 26 5 · Impermeabilización bodega');
+    expect(e.session.context.negocio_id).toBe('neg-imp');
+  });
+
+  // Para llegar a la pregunta pendiente como en producción: el parser no sacó ninguna pista útil.
+  async function hastaLaPregunta(e: ReturnType<typeof escenario>) {
+    await handleGasto(e.ctxPara(mensaje1, { ...fields1, entity_hint: undefined }, 0.95));
+    expect(e.session.state).toBe('awaiting_selection');
+    expect(e.enviados.at(-1)).not.toContain('I1 26 5');
+  }
+
+  it('mensaje 2: «Revisa el I1 26 5» en la pregunta pendiente resuelve ese negocio', async () => {
+    const e = escenario(NEGOCIOS, [IMPERVIUM]);
+    await hastaLaPregunta(e);
+    await e.responder('Revisa el I1 26 5');
+    expect(e.session.state).toBe('confirming');
+    expect(e.session.context.negocio_id).toBe('neg-imp');
+    expect(e.enviados.at(-1)).toContain('I1 26 5 · Impermeabilización bodega');
+    expect(e.enviados.at(-1)).not.toContain('Responde con un número');
+    await e.responder('si');
+    const g = gastoGuardado(e.db);
+    expect(g.negocio_id).toBe('neg-imp');
+    expect(g.descripcion).toBe('transportes');
+    expect(g.mensaje_original).toBe(`${mensaje1} / Revisa el I1 26 5`);
+  });
+
+  it.each(['i1 26 5', 'I1-26-5', 'I1265', 'es el i1-26-5 porfa'])('mensaje 2 escrito como «%s» también', async (texto) => {
+    const e = escenario(NEGOCIOS, [IMPERVIUM]);
+    await hastaLaPregunta(e);
+    await e.responder(texto);
+    expect(e.session.context.negocio_id).toBe('neg-imp');
+  });
+
+  it('mensaje 3 tras el código: «No quiero, te estoy dando el id del negocio» no pierde el gasto ni lo describe', async () => {
+    const e = escenario(NEGOCIOS, [IMPERVIUM]);
+    await hastaLaPregunta(e);
+    await e.responder('Revisa el I1 26 5');
+    await e.responder('No quiero, te estoy dando el id del negocio');
+    expect(sesionCerrada(e.db)).toBe(false);
+    expect(e.session.state).toBe('confirming');
+    expect(e.session.context.negocio_id).toBe('neg-imp');
+    // Le dice a dónde va el gasto; la descripción sigue siendo la del primer mensaje.
+    expect(e.enviados.at(-1)).toContain('Impermeabilización bodega');
+    expect(e.session.context.parsed_fields?.descripcion).toBe('transportes');
+    await e.responder('si');
+    const g = gastoGuardado(e.db);
+    expect(g.negocio_id).toBe('neg-imp');
+    expect(g.descripcion).toBe('transportes');
+  });
+
+  it('mensaje 3 SIN código previo: re-pregunta con la lista y el gasto sigue esperando', async () => {
+    const e = escenario(NEGOCIOS, [IMPERVIUM]);
+    await hastaLaPregunta(e);
+    await e.responder('No quiero, te estoy dando el id del negocio');
+    expect(sesionCerrada(e.db)).toBe(false);
+    expect(e.session.state).toBe('awaiting_selection');
+    expect(e.enviados.at(-1)).toContain('código del negocio');
+    expect(e.enviados.at(-1)).toContain('Negocio 1');
+    // Y el código después sí entra.
+    await e.responder('I1 26 5');
+    await e.responder('si');
+    expect(gastoGuardado(e.db).negocio_id).toBe('neg-imp');
+  });
+
+  it('en la pregunta pendiente, el nombre de la empresa también sirve', async () => {
+    const e = escenario(NEGOCIOS, [IMPERVIUM]);
+    await hastaLaPregunta(e);
+    await e.responder('el de impervium');
+    expect(e.session.context.negocio_id).toBe('neg-imp');
+  });
+
+  it('un código que no existe re-pregunta sin soltar el gasto', async () => {
+    const e = escenario(NEGOCIOS, [IMPERVIUM]);
+    await hastaLaPregunta(e);
+    await e.responder('Z9 26 1');
+    expect(e.session.state).toBe('awaiting_selection');
+    expect(sesionCerrada(e.db)).toBe(false);
+    expect(e.enviados.at(-1)).toContain('Z9 26 1');
+  });
+
+  it('el número de la lista sigue funcionando, y «cancelar» cancela', async () => {
+    const e = escenario(NEGOCIOS, [IMPERVIUM]);
+    await hastaLaPregunta(e);
+    await e.responder('2');
+    expect(e.session.context.negocio_id).toBe('neg-2');
+
+    const f = escenario(NEGOCIOS, [IMPERVIUM]);
+    await hastaLaPregunta(f);
+    await f.responder('cancelar');
+    expect(sesionCerrada(f.db)).toBe(true);
+    expect(f.db.insertados.gastos).toBeUndefined();
+  });
+
+  it('el código en el primer mensaje, aunque el parser no lo saque, va directo al negocio', async () => {
+    const e = escenario(NEGOCIOS, [IMPERVIUM]);
+    const texto = 'gasto 27000 transporte I1-26-5';
+    await handleGasto(e.ctxPara(texto, { amount: 27000, descripcion: 'transporte', mensaje_original: texto }, 0.95));
+    expect(gastoGuardado(e.db).negocio_id).toBe('neg-imp');
   });
 });

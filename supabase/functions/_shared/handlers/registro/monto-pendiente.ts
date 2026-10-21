@@ -18,6 +18,7 @@
 
 import type { ParsedFields } from '../../types.ts';
 import { parseAmount, regexParse } from '../../wa-parse-reglas.ts';
+import { extraerCodigoNegocio } from '../../wa-codigo-negocio.ts';
 import { extraerDescripcionGasto } from '../../wa-gasto-descripcion.ts';
 import { clasificarRespuesta, normalizarRespuesta } from '../../wa-intencion.ts';
 import { MSG_PEDIR_MONTO } from './mensajes-gasto.ts';
@@ -157,7 +158,19 @@ export type DecisionConfirmacion =
   /** Texto libre: es la descripcion del gasto (el usuario la da o la corrige). */
   | { accion: 'describir'; fields: ParsedFields }
   /** Ni respuesta ni descripcion: repetir los botones. */
-  | { accion: 'botones' };
+  | { accion: 'botones' }
+  /** Un codigo de negocio ("es el I1 26 5"): el gasto va a ese negocio, se vuelve a confirmar. */
+  | { accion: 'cambiar_negocio'; codigo: string }
+  /**
+   * Habla del destino sin dar un codigo ("No quiero, te estoy dando el id del negocio"): no es la descripcion
+   * del gasto. Se recuerda a donde va y se repiten los botones; la descripcion no se toca.
+   */
+  | { accion: 'aclarar_destino' };
+
+// "id"/"codigo" casi nunca describen un gasto; "negocio"/"proyecto" si ("materiales del proyecto"), por eso solo
+// cuentan en un reclamo que empieza por "no".
+const HABLA_DEL_CODIGO = /(?<![\p{L}\p{N}])(id|c[oó]digo)(?![\p{L}\p{N}])/iu;
+const RECLAMA_EL_DESTINO = /^no(?![\p{L}])[\s\S]*(?<![\p{L}])(negocio|proyecto)(?![\p{L}])/iu;
 
 /**
  * Lo que se escribe sobre la confirmacion de un gasto (W01, estado `confirming`).
@@ -185,6 +198,10 @@ export function decidirConfirmacionGasto(
     if (intencion === 'no' || intencion === 'cancelar') return { accion: 'cancelar' };
     if (intencion === 'despues') return { accion: 'botones' };
   }
+
+  const codigo = extraerCodigoNegocio(crudo);
+  if (codigo) return { accion: 'cambiar_negocio', codigo };
+  if (HABLA_DEL_CODIGO.test(crudo) || RECLAMA_EL_DESTINO.test(crudo)) return { accion: 'aclarar_destino' };
 
   // Un numero con forma de monto que NO es el ya registrado: el usuario quiere cambiar
   // el monto, no describir el gasto.

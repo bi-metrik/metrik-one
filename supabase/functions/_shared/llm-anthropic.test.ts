@@ -15,6 +15,7 @@ import {
   LIMITE_OPCIONALES,
   proveedorDe,
   sinCercas,
+  modeloQueRespondio,
 } from './llm-anthropic.ts';
 import { esquemaCarga } from './agente/bandeja/extraccion.ts';
 import { CAMPOS_ARNES } from './agente/arnes/conjuntos.ts';
@@ -188,6 +189,22 @@ describe('respuestaGeminiDesdeAnthropic', () => {
 
   it('costo con el precio de Haiku 5.5', () => {
     expect(costoUsd(1_000_000, 1_000_000)).toBeCloseTo(0.6);
+  });
+});
+
+describe('modeloQueRespondio (telemetría)', () => {
+  it('Haiku traducido a la forma de Gemini: el modelo de Anthropic, no el Gemini pedido', async () => {
+    const real = vi.fn(async () => respuestaA({ model: 'claude-haiku-5-5', content: [{ type: 'text', text: '{"a":"x"}' }], stop_reason: 'end_turn', usage: { input_tokens: 1, output_tokens: 1 } }));
+    const f = crearFetchModelo({ fetch: real as unknown as typeof fetch, entorno: (k) => (k === 'ANTHROPIC_API_KEY' ? 'sk' : undefined) });
+    const d = await (await f(URL_G, { method: 'POST', body: JSON.stringify(cuerpoG()) })).json();
+    expect(modeloQueRespondio(d, 'gemini-3.5-flash-lite')).toBe('claude-haiku-5-5');
+  });
+
+  it('Gemini (o el respaldo en Gemini): su modelVersion; sin modelVersion, el pedido', () => {
+    expect(modeloQueRespondio({ modelVersion: 'gemini-3.5-flash-lite' }, 'x')).toBe('gemini-3.5-flash-lite');
+    expect(modeloQueRespondio({}, 'gemini-3.5-flash-lite')).toBe('gemini-3.5-flash-lite');
+    expect(modeloQueRespondio(null, 'gemini-3.5-flash-lite')).toBe('gemini-3.5-flash-lite');
+    expect(modeloQueRespondio({ modelVersion: '  ' }, 'pedido')).toBe('pedido');
   });
 });
 

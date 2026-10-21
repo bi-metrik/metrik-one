@@ -14,7 +14,7 @@
 // identifica al remitente) devuelve `{atendido:false}` sin tocar la base ni la red.
 // ============================================================
 
-import { fetchModelo } from './llm-anthropic.ts';
+import { fetchModelo, modeloQueRespondio } from './llm-anthropic.ts';
 import { sendButtons, sendTextMessage } from './wa-respond.ts';
 import { checkInboundLimit } from './wa-rate-limit.ts';
 import { botEquipoPermitido, MENSAJE_BOT_SIN_CLARITY } from './wa-modulos.ts';
@@ -107,9 +107,9 @@ export interface UsoModelo {
 }
 
 export type RespuestaModelo =
-  | { ok: true; json: unknown; tokensIn: number | null; tokensOut: number | null; tokensRazonamiento?: number | null; ms: number }
+  | { ok: true; json: unknown; tokensIn: number | null; tokensOut: number | null; tokensRazonamiento?: number | null; ms: number; modelo?: string }
   /** Una falla tras un HTTP 200 (MAX_TOKENS, JSON roto) trae su `uso`: el razonamiento se cobró igual. */
-  | { ok: false; motivo: 'timeout' | 'http' | 'esquema'; ms: number; detalle?: string; uso?: UsoModelo };
+  | { ok: false; motivo: 'timeout' | 'http' | 'esquema'; ms: number; detalle?: string; uso?: UsoModelo; modelo?: string };
 
 function usoDe(d: unknown): UsoModelo | undefined {
   const u = (d as { usageMetadata?: Record<string, unknown> } | null)?.usageMetadata;
@@ -165,18 +165,21 @@ export async function llamarGemini(p: PedidoModelo, env: (k: string) => string |
   const ms = Date.now() - t0;
   if (res.status !== 200) return { ok: false, motivo: 'http', ms, detalle: `HTTP ${res.status}` };
   let uso: UsoModelo | undefined;
+  let modelo: string | undefined;
   try {
     const d = await res.json();
     uso = usoDe(d);
+    // El que contestó (Haiku 5.5 o Gemini), para la telemetría: no el que se pidió.
+    modelo = modeloQueRespondio(d, p.modelo);
     const c = d?.candidates?.[0];
-    if (c?.finishReason !== 'STOP') return { ok: false, motivo: 'esquema', ms, detalle: `finishReason ${c?.finishReason ?? 'ninguno'}`, uso };
+    if (c?.finishReason !== 'STOP') return { ok: false, motivo: 'esquema', ms, detalle: `finishReason ${c?.finishReason ?? 'ninguno'}`, uso, modelo };
     // Con razonamiento, `parts` puede traer más de una parte: la respuesta es la que no es `thought`.
     const partes = (c?.content?.parts ?? []) as Array<{ text?: string; thought?: boolean }>;
     const texto = partes.filter(x => !x.thought && typeof x.text === 'string').map(x => x.text).join('');
     const json = JSON.parse(texto);
-    return { ok: true, json, ms, tokensIn: uso?.tokensIn ?? null, tokensOut: uso?.tokensOut ?? null, tokensRazonamiento: uso?.tokensRazonamiento ?? null };
+    return { ok: true, json, ms, tokensIn: uso?.tokensIn ?? null, tokensOut: uso?.tokensOut ?? null, tokensRazonamiento: uso?.tokensRazonamiento ?? null, modelo };
   } catch (err) {
-    return { ok: false, motivo: 'esquema', ms, detalle: String(err), uso };
+    return { ok: false, motivo: 'esquema', ms, detalle: String(err), uso, modelo };
   }
 }
 
@@ -796,7 +799,7 @@ async function telemetria(b: Base, t: {
     // V18: una nota interna no deja su texto ni en la bitácora técnica.
     message_preview: t.nota ? PREVIEW_NOTA_INTERNA : String(b.message.text ?? '').slice(0, 100),
     parser_source: 'interprete',
-    gemini_model: b.cfg.modelo,
+    gemini_model: t.r.modelo ?? b.cfg.modelo,
     gemini_input_tokens: uso.tokensIn,
     gemini_output_tokens: uso.tokensOut,
     gemini_thoughts_tokens: uso.tokensRazonamiento,

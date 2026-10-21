@@ -7,6 +7,7 @@
 
 import type { ModelAdapter, ModelCallOpts, ModelResult, ModelMessage } from "./types.ts";
 import { generate } from "../modelo-texto.ts";
+import { modeloQueRespondio } from "../llm-anthropic.ts";
 
 async function withRetry<T>(fn: () => Promise<T>, tries = 5, baseMs = 800): Promise<T> {
   let lastErr: unknown;
@@ -117,7 +118,12 @@ export function geminiFlashLite(modelId: string = GEMINI_LECTOR_MODELO): ModelAd
         jsonMime: !opts.plainText,
       });
       // Los tokens de pensamiento se cobran como salida (asi lo dice el pricing): van en `out`.
-      return { text: r.text, usage: { in: r.usage.in, out: r.usage.out + r.usage.thoughts } };
+      return {
+        text: r.text,
+        usage: { in: r.usage.in, out: r.usage.out + r.usage.thoughts },
+        // `generate` pasa por `fetchModelo`: puede haber contestado Haiku 5.5 aunque se pidiera Gemini.
+        modelo: modeloQueRespondio(r.raw, modelId),
+      };
     },
   };
 }

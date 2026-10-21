@@ -2,7 +2,7 @@
 // Gemini — NLP Parser (MVP — 8 intents)
 // ============================================================
 
-import { fetchModelo } from './llm-anthropic.ts';
+import { fetchModelo, modeloQueRespondio } from './llm-anthropic.ts';
 import type { ParseResult, Intent, LastContext } from './types.ts';
 import { CONFIDENCE_THRESHOLD, enrichFields, fastPathParse, regexParse } from './wa-parse-reglas.ts';
 
@@ -237,7 +237,8 @@ async function tryGemini(
 
     _lastTelemetry = {
       parser_source: 'gemini',
-      gemini_model: model,
+      // El que contestó (Haiku 5.5 o Gemini, también en el respaldo), no el que se pidió.
+      gemini_model: modeloQueRespondio(data, model),
       gemini_input_tokens: data.usageMetadata?.promptTokenCount,
       gemini_output_tokens: data.usageMetadata?.candidatesTokenCount,
       gemini_latency_ms: latencyMs,

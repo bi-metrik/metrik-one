@@ -628,6 +628,20 @@ describe('tokens de razonamiento (thoughtsTokenCount) y el modelo fuera de la li
     expect(usoParaTelemetria({ ok: false, motivo: 'timeout', ms: 4000 })).toEqual({ tokensIn: null, tokensOut: null, tokensRazonamiento: null });
   });
 
+  it('llamarGemini dice qué modelo contestó: el modelVersion de la respuesta (Haiku o Gemini), o el pedido', async () => {
+    const ok = (extra: Record<string, unknown>) => new Response(JSON.stringify({ candidates: [{ finishReason: 'STOP', content: { parts: [{ text: '{"acciones":[]}' }] } }], ...extra }), { status: 200 });
+    vi.stubGlobal('fetch', vi.fn(async () => ok({ modelVersion: 'claude-haiku-5-5' })));
+    expect(await llamarGemini(pedido, env)).toMatchObject({ ok: true, modelo: 'claude-haiku-5-5' });
+    vi.stubGlobal('fetch', vi.fn(async () => ok({})));
+    expect(await llamarGemini(pedido, env)).toMatchObject({ ok: true, modelo: pedido.modelo });
+  });
+
+  it('la telemetría guarda el modelo que contestó, no el pedido (Haiku 5.5 detrás de un nombre de Gemini)', async () => {
+    const db = baseFalsa();
+    await atenderEscrito(db, usuario(), escrito('pagué 20 mil de taxi'), { llamarModelo: async () => ({ ok: true, json: { acciones: [{ accion: 'acuse', evidencia: 'pagué' }] }, tokensIn: 900, tokensOut: 60, ms: 800, modelo: 'claude-haiku-5-5' }), env: () => undefined });
+    expect(db.escrituras().find(o => o.tabla === 'wa_message_log')).toMatchObject({ payload: { gemini_model: 'claude-haiku-5-5' } });
+  });
+
   it('la telemetría guarda entrada, salida y razonamiento, también en un fallback que cobró', async () => {
     const db = baseFalsa();
     const r: RespuestaModelo = { ok: false, motivo: 'esquema', ms: 2100, detalle: 'finishReason MAX_TOKENS', uso: { tokensIn: 1500, tokensOut: null, tokensRazonamiento: 489 } };

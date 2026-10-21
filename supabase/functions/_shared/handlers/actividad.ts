@@ -10,6 +10,7 @@
 import type { HandlerContext } from '../types.ts';
 import { bold } from '../wa-format.ts';
 import { findNegocios, findNegocioByCode, findActiveNegocios, clienteDelNegocio } from '../wa-lookup.ts';
+import { extraerCodigoNegocio } from '../wa-codigo-negocio.ts';
 import { nombreDeViaje } from '../wa-entendimiento-reglas.ts';
 import { completeSession } from '../wa-session.ts';
 
@@ -157,8 +158,8 @@ async function handleResume(ctx: HandlerContext): Promise<void> {
       }
     }
 
-    // Texto: posiblemente un código de negocio
-    const n = await findNegocioByCode(supabase, user.workspace_id, text);
+    // Texto: posiblemente un código de negocio, también dentro de una frase ("es el R1 26 1").
+    const n = await findNegocioByCode(supabase, user.workspace_id, extraerCodigoNegocio(text) ?? text);
     if (n) {
       await persistActividad(ctx, n.id, n.nombre, context.activity_text || text);
       return;

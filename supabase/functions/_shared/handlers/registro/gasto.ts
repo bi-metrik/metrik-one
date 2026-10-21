@@ -16,13 +16,12 @@ import { CATEGORIA_LABELS } from '../../types.ts';
 import { CONFIDENCE_THRESHOLD } from '../../wa-parse-reglas.ts';
 import { formatCOP, formatPct, bold, formatProject } from '../../wa-format.ts';
 import {
-  findDestinos,
-  findActiveDestinos,
-  findProjectByCode,
-  findNegocioByCode,
+  buscarNegocios,
+  findActiveNegocios,
   matchCategory,
   destinoId,
 } from '../../wa-lookup.ts';
+import { extraerCodigoNegocio } from '../../wa-codigo-negocio.ts';
 import { executeRegistro } from './execute.ts';
 import { proponerCentroCostosWA, type PropuestaCC } from '../../centro-costos.ts';
 import { categoriaConocida, detalleGasto, descripcionVisible } from '../../wa-gasto-descripcion.ts';
@@ -78,10 +77,14 @@ export async function handleGasto(ctx: HandlerContext): Promise<void> {
 
   const isHighConfidence = parsed.confidence >= CONFIDENCE_THRESHOLD;
 
-  // Fast path: project_code → exact match by código (try negocio first, then project)
-  if (project_code) {
-    const negocio = await findNegocioByCode(supabase, user.workspace_id, String(project_code));
-    if (negocio) {
+  // El gasto va a un NEGOCIO. Los proyectos legacy ya no reciben gastos por el bot (0 en metrik, 0 gastos con
+  // proyecto en 60 días al 2026-10-20) y su búsqueda (`wa_find_projects`) llevaba meses rota.
+  //
+  // 1. Código del negocio: el que sacó el parser, o el que traiga el mensaje ("I1-26-5", "i1 26 5").
+  const codigo = project_code ? String(project_code) : extraerCodigoNegocio(fields.mensaje_original);
+  if (codigo) {
+    const [negocio] = await buscarNegocios(supabase, user.workspace_id, codigo, 1);
+    if (negocio && negocio.coincidencia === 'codigo') {
       if (isHighConfidence) {
         await autoRegisterGasto(ctx, negocio, amount, categoria, fields, 'negocio');
       } else {
@@ -89,100 +92,79 @@ export async function handleGasto(ctx: HandlerContext): Promise<void> {
       }
       return;
     }
-
-    const project = await findProjectByCode(supabase, user.workspace_id, String(project_code));
-    if (project) {
-      if (isHighConfidence) {
-        await autoRegisterGasto(ctx, project, amount, categoria, fields, 'proyecto');
-      } else {
-        await showGastoConfirmation(ctx, project, amount, categoria, fields, 'proyecto');
-      }
-      return;
-    }
-    await ctx.sendMessage(`⚠️ No encontré ningún negocio activo con código ${project_code}.`);
+    await ctx.sendMessage(`⚠️ No encontré ningún negocio activo con código ${codigo}.`);
   }
 
+  // 2. Sin pista: la lista de negocios activos.
   if (!entity_hint) {
-    // No hint — show list of active negocios + projects
-    const destinos = await findActiveDestinos(supabase, user.workspace_id);
-    if (destinos.all.length === 0) {
-      // Sin negocios activos → registrar como gasto de empresa
-      await proceedEmpresaGasto(ctx, amount, fields, categoria);
-      return;
-    }
-
-    const options: GastoOption[] = destinos.all.slice(0, 5).map((d) => ({
-      id: destinoId(d),
-      label: formatProject(d),
-      _tipo: d._tipo,
-    }));
-    options.push({ id: 'empresa', label: '🏢 Gasto de empresa', _tipo: 'empresa' });
-
-    await ctx.sendOptions(
-      `💰 ${formatCOP(amount)} en ${concept || categoria}. ¿Para cuál?`,
-      options.map((o) => o.label),
-    );
-    await ctx.updateSession('awaiting_selection', {
-      intent: 'GASTO', pending_action: 'W01',
-      amount, categoria, parsed_fields: parsed.fields, options,
+    await preguntarDestinoGasto(ctx, `💰 ${formatCOP(amount)} en ${concept || categoria}. ¿Para cuál?`, {
+      amount, categoria, fields,
     });
     return;
   }
 
-  // Find matching destinos (negocios + projects)
-  const destinos = await findDestinos(supabase, user.workspace_id, entity_hint);
+  // 3. Pista: nombre del negocio, de la empresa o del contacto ("impervium" es la empresa).
+  const encontrados = await buscarNegocios(supabase, user.workspace_id, entity_hint);
 
-  if (destinos.all.length === 0) {
-    // No match — show active destinos
-    const allActive = await findActiveDestinos(supabase, user.workspace_id);
-    if (allActive.all.length === 0) {
-      await proceedEmpresaGasto(ctx, amount, fields, categoria);
-      return;
-    }
-
-    const options: GastoOption[] = allActive.all.slice(0, 4).map((d) => ({
-      id: destinoId(d),
-      label: formatProject(d),
-      _tipo: d._tipo,
-    }));
-    options.push({ id: 'empresa', label: '🏢 Gasto de empresa', _tipo: 'empresa' });
-
-    await ctx.sendOptions(
-      `❌ No encontré "${entity_hint}". Tus negocios:`,
-      options.map((o) => o.label),
-    );
-    await ctx.updateSession('awaiting_selection', {
-      intent: 'GASTO', pending_action: 'W01',
-      amount, categoria, parsed_fields: parsed.fields, options,
-    });
+  if (encontrados.length === 0) {
+    await preguntarDestinoGasto(ctx, `❌ No encontré "${entity_hint}". Tus negocios:`, { amount, categoria, fields });
     return;
   }
 
-  if (destinos.all.length === 1) {
-    const d = destinos.all[0];
-    const tipo = d._tipo;
-    if (isHighConfidence) {
-      await autoRegisterGasto(ctx, d, amount, categoria, fields, tipo);
+  if (encontrados.length === 1) {
+    const n = encontrados[0];
+    // Solo una coincidencia segura se registra sin preguntar: un parecido por trigramas se confirma.
+    if (isHighConfidence && n.coincidencia !== 'parecida') {
+      await autoRegisterGasto(ctx, n, amount, categoria, fields, 'negocio');
     } else {
-      await showGastoConfirmation(ctx, d, amount, categoria, fields, tipo);
+      await showGastoConfirmation(ctx, n, amount, categoria, fields, 'negocio');
     }
     return;
   }
 
-  // Multiple matches
-  const options: GastoOption[] = destinos.all.slice(0, 5).map((d) => ({
+  // Varias coincidencias: que elija.
+  await ofrecerNegocios(ctx, `💰 ${formatCOP(amount)} en ${concept || categoria}. ¿Cuál?`, encontrados, {
+    amount, categoria, fields,
+  }, false);
+}
+
+/** Lo que la pregunta «¿para cuál?» necesita recordar del gasto. */
+type GastoPendiente = { amount: number; categoria: string; fields: ParsedFields };
+
+/**
+ * Pregunta a qué negocio va el gasto con la lista de negocios activos (más el gasto de empresa). Sin negocios
+ * activos, el gasto es de empresa. La usa también la respuesta a la pregunta (`resume.ts`) para volver a
+ * preguntar sin perder el gasto.
+ */
+export async function preguntarDestinoGasto(ctx: HandlerContext, encabezado: string, g: GastoPendiente): Promise<void> {
+  const activos = await findActiveNegocios(ctx.supabase, ctx.user.workspace_id);
+  if (activos.length === 0) {
+    await proceedEmpresaGasto(ctx, g.amount, g.fields, g.categoria);
+    return;
+  }
+  await ofrecerNegocios(ctx, encabezado, activos, g, true);
+}
+
+/** Muestra hasta 5 negocios como opciones y deja la sesión esperando la elección. */
+export async function ofrecerNegocios(
+  ctx: HandlerContext,
+  encabezado: string,
+  negocios: Array<{ id?: string; proyecto_id?: string; codigo?: string; nombre: string }>,
+  g: GastoPendiente,
+  conEmpresa: boolean,
+): Promise<void> {
+  const options: GastoOption[] = negocios.slice(0, 5).map((d) => ({
     id: destinoId(d),
     label: formatProject(d),
-    _tipo: d._tipo,
+    _tipo: 'negocio',
   }));
-
-  await ctx.sendOptions(
-    `💰 ${formatCOP(amount)} en ${concept || categoria}. ¿Cuál?`,
-    options.map((o) => o.label),
-  );
+  if (conEmpresa) options.push({ id: 'empresa', label: '🏢 Gasto de empresa', _tipo: 'empresa' });
+  await ctx.sendOptions(encabezado, options.map((o) => o.label));
   await ctx.updateSession('awaiting_selection', {
     intent: 'GASTO', pending_action: 'W01',
-    amount, categoria, parsed_fields: parsed.fields, options,
+    amount: g.amount, categoria: g.categoria, parsed_fields: g.fields, options,
+    // La pregunta es nueva: el reloj de los 10 minutos arranca otra vez.
+    awaiting_since: undefined,
   });
 }
 
