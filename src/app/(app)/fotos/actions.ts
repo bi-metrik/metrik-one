@@ -40,6 +40,11 @@ export interface PedidoFoto {
    * sale de esa ficha y no de la que se reconoce por el nombre; las fotos siguen saliendo del nombre.
    */
   proveedorId?: string | null
+  /**
+   * El servicio lo escribió una persona (`PedidoDeLinea.aMano`, 2026-10-20): pintar su tarjeta no
+   * crea perfil ni ficha, y sin ficha fijada no se le toma una por el nombre.
+   */
+  aMano?: boolean
 }
 
 export type HotelesYTours =
@@ -137,6 +142,8 @@ export interface FotoDeTarjeta {
   proveedor: ProveedorDeTarjeta | null
   /** La ficha fijada en la línea que pidió esta tarjeta (`PedidoFoto.proveedorId`). Ausente = por nombre. */
   proveedorId?: string
+  /** La pidió la tarjeta de un servicio escrito a mano (`PedidoFoto.aMano`): sin ficha por el nombre. */
+  aMano?: true
 }
 
 export type FotosDeTarjetas = { ok: true; tarjetas: FotoDeTarjeta[]; editable: boolean } | { ok: false; error: string }
@@ -162,7 +169,15 @@ export async function fotosParaTarjetas(pedidos: PedidoFoto[]): Promise<FotosDeT
   const leidos = await leerConocidos(ctx.db, ctx.workspaceId)
   if (!leidos.ok) return { ok: false, error: leidos.mensaje }
   const c = leidos.conocidos
-  const resueltos = await resolverPedidos(ctx.db, ctx.workspaceId, ctx.staffId, objetivos, c, { escribir: ctx.editable })
+  // Un servicio escrito a mano no crea ficha por sí solo (brief del 2026-10-20, punto 2): solo se
+  // escribe lo que nombra al menos una línea leída de un pantallazo.
+  const llaveDe = (o: ObjetivoFoto) => `${o.tipo}:${o.clave}`
+  const deLectura = new Set(lista.flatMap((p) => {
+    const o = objetivoDelPedido(p)
+    return o && !(p && typeof p === 'object' && p.aMano === true) ? [llaveDe(o)] : []
+  }))
+  const soloAMano = (o: ObjetivoFoto) => !deLectura.has(llaveDe(o))
+  const resueltos = await resolverPedidos(ctx.db, ctx.workspaceId, ctx.staffId, objetivos, c, { escribir: (o) => ctx.editable && !soloAMano(o) })
   const claves = new Set(resueltos.flatMap((r) => [r.perfil, r.duda && { tipo: r.pedido.tipo, clave: r.duda.clave }]).filter((x): x is ObjetivoFoto => !!x).map((x) => `${x.tipo}:${x.clave}`))
   const perfiles = resueltos.flatMap((r) => (r.perfil && esTipoPerfil(r.perfil.tipo) ? [r.perfil] : []))
   const [vistas, proveedores, porId] = await Promise.all([
@@ -178,11 +193,21 @@ export async function fotosParaTarjetas(pedidos: PedidoFoto[]): Promise<FotosDeT
       clave: r.pedido.clave,
       elemento: r.perfil ? porClave.get(`${r.perfil.tipo}:${r.perfil.clave}`) ?? null : null,
       duda: r.duda ? { ...r.duda, url: conocido?.fotos[0]?.url ?? null } : null,
-      proveedor: r.perfil ? proveedores.get(`${r.perfil.tipo}:${r.perfil.clave}`) ?? null : null,
+      // Sin ficha fijada, a un servicio escrito a mano no se le toma una por el nombre.
+      proveedor: r.perfil && !soloAMano(r.pedido) ? proveedores.get(`${r.perfil.tipo}:${r.perfil.clave}`) ?? null : null,
     }
   })
+  // La tarjeta de un servicio escrito a mano va aparte (su llave lleva `aMano`): las fotos del
+  // perfil sí, la ficha del proveedor no, aunque otra línea leída de un pantallazo nombre lo mismo.
+  const conAMano = new Set(lista.flatMap((p) => {
+    const o = p && typeof p === 'object' && p.aMano === true && !p.proveedorId ? objetivoDelPedido(p) : null
+    return o ? [llaveDe(o)] : []
+  }))
+  for (const t of [...tarjetas]) {
+    if (conAMano.has(`${t.tipo}:${t.clave}`)) tarjetas.push({ ...t, proveedor: null, aMano: true })
+  }
   for (const f of fijados) {
-    const t = tarjetas.find((x) => x.tipo === f.o.tipo && x.clave === f.o.clave && !x.proveedorId)
+    const t = tarjetas.find((x) => x.tipo === f.o.tipo && x.clave === f.o.clave && !x.proveedorId && !x.aMano)
     if (t) tarjetas.push({ ...t, proveedorId: f.id, proveedor: porId.get(f.id) ?? null })
   }
   return { ok: true, editable: ctx.editable, tarjetas }

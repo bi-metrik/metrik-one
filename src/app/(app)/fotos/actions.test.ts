@@ -114,6 +114,33 @@ describe('el perfil se crea solo la primera vez', () => {
   })
 })
 
+describe('un servicio escrito a mano no crea ficha por sí solo (brief del 2026-10-20, punto 2)', () => {
+  const A_MANO: PedidoFoto = { tipo: 'actividad', nombre: 'City Tour Ficticio', ciudad: 'Santa Marta', aMano: true }
+
+  it('pintar la tarjeta de una actividad escrita a mano no inserta en fotos_perfiles', async () => {
+    const r = await fotosParaTarjetas([A_MANO])
+    expect(r.ok).toBe(true)
+    if (!r.ok) return
+    expect(base.tablas.fotos_perfiles).toEqual([])
+    expect(base.tablas.fotos_perfiles_alias).toEqual([])
+    expect(r.tarjetas.find((t) => t.aMano)).toMatchObject({ tipo: 'actividad', clave: clave(A_MANO), elemento: null, proveedor: null })
+  })
+
+  it('si una línea leída de un pantallazo nombra lo mismo, esa sí crea el perfil; la escrita a mano sigue sin ficha', async () => {
+    const r = await fotosParaTarjetas([A_MANO, { ...A_MANO, aMano: false }])
+    expect(base.tablas.fotos_perfiles.map((p) => p.nombre)).toEqual(['City Tour Ficticio'])
+    expect(r.ok && r.tarjetas.find((t) => t.aMano)?.proveedor).toBeNull()
+  })
+
+  it('las fotos de un perfil que ya existe se siguen viendo en la escrita a mano', async () => {
+    await fotosParaTarjetas([CATALONIA])
+    await subirFotoABiblioteca(CATALONIA, await dataUrl(), null, null, AUTORIZADA)
+    const r = await fotosParaTarjetas([{ ...CATALONIA, aMano: true }])
+    expect(r.ok && r.tarjetas.find((t) => t.aMano)?.elemento?.fotos).toHaveLength(1)
+    expect(base.tablas.fotos_perfiles).toHaveLength(1)
+  })
+})
+
 describe('el mismo hotel con otro nombre', () => {
   it('«Hotel Catalonia Puerta del Sol Madrid» = «Catalonia Puerta del Sol»: alias solo, sin preguntar, y trae sus fotos', async () => {
     await fotosParaTarjetas([CATALONIA])

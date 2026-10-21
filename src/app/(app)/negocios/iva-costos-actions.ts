@@ -128,7 +128,8 @@ async function aplicar(cotizacionId: string, cambio: { encendida?: boolean; viaj
   for (const i of items) {
     if (fijadas.includes(i)) continue
     const p = pedidoDeLinea({ nombre: i.nombre, grupo: i.grupo, tarifa_pax: i.tarifa_pax })
-    const o = p ? objetivo(p.tipo, p.nombre, p.ciudad) : null
+    // Escrito a mano: el nombre del servicio no es un proveedor (2026-10-20). Sin ficha fijada, no declara.
+    const o = p && !p.aMano ? objetivo(p.tipo, p.nombre, p.ciudad) : null
     if (o) pedidos.set(i.id, o)
   }
   // La ficha reconocida por nombre que se guarda en la línea (solo con la columna y en borrador).
