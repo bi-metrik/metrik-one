@@ -50,7 +50,16 @@ export interface LecturaAdjunto {
   descripcion: string | null;
   /** Por qué no hay lectura (no se pudo bajar, el modelo no respondió). */
   motivo?: string;
+  /**
+   * Solo la lectura de la bandeja (documentos que manda el cliente de una agencia, `bandeja/lectura-adjunto.ts`): qué es
+   * el documento. `viaje` = pide o describe un viaje; `identidad` = pasaporte, cédula; `pago` = comprobante de pago.
+   */
+  clase?: ClaseDocumento;
+  /** Solo la bandeja: lo que el documento dice que sirve para el viaje, con sus palabras (entra a la carga como dato). */
+  texto?: string | null;
 }
+
+export type ClaseDocumento = 'viaje' | 'identidad' | 'pago' | 'otro';
 
 /**
  * `wa_conversacion.media` (jsonb). El webhook escribe `tipo` e `id` (y, en un documento, `mime` y `nombre`); el dominio

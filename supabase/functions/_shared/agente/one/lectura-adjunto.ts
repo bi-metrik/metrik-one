@@ -68,10 +68,23 @@ function base64(bytes: Uint8Array): string {
   return btoa(s);
 }
 
+/**
+ * Qué se lee de un archivo: las instrucciones, el esquema JSON y cómo se sanea la respuesta. El de los soportes de gasto
+ * es `PERFIL_SOPORTE_GASTO` (aquí); la bandeja de Trappvel tiene el suyo (`bandeja/lectura-adjunto.ts`).
+ */
+export interface PerfilLectura {
+  prompt: string;
+  esquema: Record<string, unknown>;
+  normalizar: (v: unknown) => LecturaAdjunto;
+  maxSalida?: number;
+  /** Para el log («[agente-one] lectura del soporte»). */
+  etiqueta?: string;
+}
+
 /** El pedido de `generateContent` (forma de Gemini; `fetchModelo` lo traduce a Haiku). Pura. */
-export function cuerpoLectura(a: ArchivoAdjunto): Record<string, unknown> {
+export function cuerpoLectura(a: ArchivoAdjunto, perfil: Pick<PerfilLectura, 'prompt' | 'esquema' | 'maxSalida'> = PERFIL_SOPORTE_GASTO): Record<string, unknown> {
   return {
-    system_instruction: { parts: [{ text: PROMPT_LECTURA }] },
+    system_instruction: { parts: [{ text: perfil.prompt }] },
     contents: [{
       role: 'user',
       parts: [
@@ -79,7 +92,7 @@ export function cuerpoLectura(a: ArchivoAdjunto): Record<string, unknown> {
         { text: `Archivo: ${a.nombre ? a.nombre.slice(0, 120) : '(sin nombre)'}. Devuelve el JSON.` },
       ],
     }],
-    generationConfig: { maxOutputTokens: 600, responseMimeType: 'application/json', responseJsonSchema: ESQUEMA },
+    generationConfig: { maxOutputTokens: perfil.maxSalida ?? 600, responseMimeType: 'application/json', responseJsonSchema: perfil.esquema },
   };
 }
 
@@ -117,30 +130,44 @@ export function jsonDeRespuesta(d: unknown): unknown {
   }
 }
 
+/** Los soportes de gasto del dominio ONE: total, fecha, comercio, NIT y concepto. */
+export const PERFIL_SOPORTE_GASTO: PerfilLectura = { prompt: PROMPT_LECTURA, esquema: ESQUEMA, normalizar: normalizarLectura, maxSalida: 600, etiqueta: '[agente-one] lectura del soporte' };
+
+export interface OpcionesLector { llaveGemini: string; fetch?: typeof fetch; entorno?: (k: string) => string | undefined; topeMs?: number }
+
 /**
- * El lector de producción. `llaveGemini` es para el respaldo (y para leer con Gemini si el interruptor lo pide). Nunca
- * lanza: si no pudo leer, devuelve null (el archivo se guarda igual y el bot pregunta lo que falta).
+ * Un lector con su perfil: Haiku por `fetchModelo` (bloques `document`/`image`), respaldo en Gemini con `inlineData`, y
+ * el interruptor `LLM_PROVEEDOR_SOPORTES`. Nunca lanza: si no pudo leer, devuelve null (el archivo se guarda igual).
  */
-export function lectorDeSoportes(o: { llaveGemini: string; fetch?: typeof fetch; entorno?: (k: string) => string | undefined; topeMs?: number }): Lector {
+export function crearLector(perfil: PerfilLectura, o: OpcionesLector): Lector {
   const f = crearFetchModelo({ variable: 'LLM_PROVEEDOR_SOPORTES', porDefecto: 'anthropic', ...(o.fetch ? { fetch: o.fetch } : {}), ...(o.entorno ? { entorno: o.entorno } : {}) });
+  const etiqueta = perfil.etiqueta ?? '[agente] lectura del adjunto';
   return async (a) => {
     if (!sePuedeLeer(a.mime)) return null;
     try {
       const res = await f(`${URL_BASE}/${MODELO_LECTURA_GEMINI}:generateContent`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', ...(o.llaveGemini ? { 'x-goog-api-key': o.llaveGemini } : {}) },
-        body: JSON.stringify(cuerpoLectura(a)),
+        body: JSON.stringify(cuerpoLectura(a, perfil)),
         signal: AbortSignal.timeout(o.topeMs ?? TOPE_LECTURA_MS),
       });
       if (res.status !== 200) {
-        console.error(`[agente-one] lectura del soporte: http ${res.status} ${(await res.text()).slice(0, 160)}`);
+        console.error(`${etiqueta}: http ${res.status} ${(await res.text()).slice(0, 160)}`);
         return null;
       }
       const j = jsonDeRespuesta(await res.json());
-      return j ? normalizarLectura(j) : null;
+      return j ? perfil.normalizar(j) : null;
     } catch (err) {
-      console.error('[agente-one] lectura del soporte:', String(err).slice(0, 160));
+      console.error(`${etiqueta}:`, String(err).slice(0, 160));
       return null;
     }
   };
+}
+
+/**
+ * El lector de producción de los soportes de gasto. `llaveGemini` es para el respaldo (y para leer con Gemini si el
+ * interruptor lo pide).
+ */
+export function lectorDeSoportes(o: OpcionesLector): Lector {
+  return crearLector(PERFIL_SOPORTE_GASTO, o);
 }

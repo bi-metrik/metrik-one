@@ -10,6 +10,7 @@ import {
 import { toast } from 'sonner'
 import { getActivityLog, addComment, deleteActivity, type AreaMencionable } from '@/app/(app)/activity-actions'
 import { etiquetasDeMencion } from '@/lib/activity/etiquetas-mencion'
+import { esReferenciaArchivo, hrefArchivo } from '@/lib/almacenamiento/referencia'
 import { formatBogotaFechaCorta } from '@/lib/dates/bogota'
 import { resolverStatusContacto } from '@/lib/catalogos/constants'
 import { useIntencion } from '@/hooks/use-intencion'
@@ -499,16 +500,16 @@ function CommentEntry({ entry, onDelete }: { entry: ActivityEntry; onDelete: (id
         </span>
       ))}
 
-      {/* Link */}
+      {/* Link (o un archivo guardado por referencia: el soporte que llegó por WhatsApp, que abre el endpoint que firma) */}
       {entry.link_url && (
         <a
-          href={entry.link_url}
+          href={hrefArchivo(entry.link_url) ?? entry.link_url}
           target="_blank"
           rel="noopener noreferrer"
           className="mt-1.5 inline-flex items-center gap-1 text-[10px] text-blue-600 hover:underline"
         >
           <LinkIcon className="h-2.5 w-2.5" />
-          {(() => {
+          {esReferenciaArchivo(entry.link_url) ? 'Ver archivo' : (() => {
             try { return new URL(entry.link_url).hostname } catch { return 'Enlace' }
           })()}
         </a>

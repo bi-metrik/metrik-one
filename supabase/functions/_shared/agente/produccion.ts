@@ -20,8 +20,10 @@ import {
 import type { CampoEntendible, SalidaEntendida, Sugerido } from '../wa-entendimiento-reglas.ts';
 import { cargarEnExistente, trazaCarga } from '../wa-carga-reglas.ts';
 import { textoParaModelo } from '../wa-guardianes.ts';
-import { lineaCargada, mensajesDeTextos, planDeCarga, propuestoDe, registradoDe } from './bandeja/carga.ts';
-import type { PlanCarga } from './bandeja/carga.ts';
+import { lineaCargada, mensajesDeTextos, planDeCarga, propuestoDe, registradoDe, traeArchivo } from './bandeja/carga.ts';
+import type { AdjuntoCarga, PlanCarga } from './bandeja/carga.ts';
+import { bajarMedia, subirSoporte } from '../wa-media.ts';
+import type { PuertoAdjuntos } from './adjuntos.ts';
 import { esquemaCarga, esquemaCargaCompacta, instruccionesCarga, omitidosCompacta } from './bandeja/extraccion.ts';
 import { aplanarBloques, calcularNiveles } from '../niveles-solicitud.ts';
 import { todayBogotaISO } from '../bogota.ts';
@@ -35,7 +37,7 @@ import type { AutorizacionAgente } from './bandeja/autorizacion.ts';
 import { planGuardado } from '../perfil-contacto.ts';
 import type { EstadoPerfil } from '../perfil-contacto.ts';
 import type { PuertosCupo } from './uso.ts';
-import type { Almacen, FilaConversacion, Mensajero, Reglamento, Salida, Traza } from './tipos.ts';
+import type { Almacen, FilaConversacion, MediaFila, Mensajero, Reglamento, Salida, Traza } from './tipos.ts';
 
 type Fila = Record<string, unknown>;
 const COLUMNAS = 'id, workspace_id, phone, direccion, clase, formato, texto, opciones, toque_id, contexto_wamid, wa_message_id, media, turno_id, traza, created_at';
@@ -147,12 +149,42 @@ export function cortarContenido(s: string): string {
   return c.length <= MAX_CONTENIDO_ACTIVIDAD ? s : `${c.slice(0, MAX_CONTENIDO_ACTIVIDAD - 1).join('')}…`;
 }
 
+/**
+ * Los adjuntos de la conversación (foto o PDF, 2026-10-21), igual que el dominio ONE (`one/puerto-supabase.ts`): se bajan
+ * de Meta, se suben al llegar a `gastos-soportes/<ws>/whatsapp/<fila>` (el bucket de los archivos que llegan por
+ * WhatsApp; la app lo abre por `/api/archivos/abrir`, que valida el workspace de la ruta) y lo preparado se anota en
+ * `wa_conversacion.media`.
+ */
+export function puertoAdjuntosSupabase(supabase: SupabaseClient, workspaceId: string): PuertoAdjuntos {
+  return {
+    async bajarAdjunto(mediaId) {
+      const m = await bajarMedia(mediaId);
+      return m ? { bytes: m.buffer, mime: m.mimeType } : null;
+    },
+    guardarAdjunto: (filaId, archivo) => subirSoporte(supabase, workspaceId, `whatsapp/${filaId}`, { buffer: archivo.bytes, mimeType: archivo.mime }),
+    async anotarMedia(filaId: string, media: MediaFila) {
+      try {
+        const { error } = await supabase.from('wa_conversacion').update({ media }).eq('id', filaId).eq('workspace_id', workspaceId);
+        if (error) console.error('[agente] no se pudo anotar el adjunto en la conversación:', error.message);
+      } catch (err) {
+        console.error('[agente] no se pudo anotar el adjunto en la conversación:', err);
+      }
+    },
+  };
+}
+
+/** La línea de la actividad del viaje por un archivo que quedó de soporte (≤ 280: CHECK de `activity_log.contenido`). Pura. */
+export function contenidoSoporte(a: Pick<AdjuntoCarga, 'tipo' | 'nombre'>): string {
+  const que = a.tipo === 'documento' ? `PDF «${(a.nombre ?? 'sin nombre').slice(0, 120)}»` : 'foto';
+  return `📎 Soporte que llegó por WhatsApp (${que}), cargado con el bot.`;
+}
+
 function relUno(v: unknown): Fila | null {
   return Array.isArray(v) ? (v[0] as Fila | undefined) ?? null : (v as Fila | null) ?? null;
 }
 
 export function puertoBandejaSupabase(
-  supabase: SupabaseClient, workspaceId: string, staffId: string | null, o: { extraccionCompacta?: boolean } = {},
+  supabase: SupabaseClient, workspaceId: string, staffId: string | null, o: { extraccionCompacta?: boolean; adjuntos?: boolean } = {},
 ): PuertoBandeja {
   const leerViaje = async (codigo: string): Promise<ViajeAgente | null | 'error'> => {
     const { data: neg, error } = await supabase.from('negocios').select('id, codigo, nombre, estado, contacto_id, contactos(nombre)')
@@ -202,6 +234,24 @@ export function puertoBandejaSupabase(
 
   return {
     equipoComercial,
+    // Leer adjuntos (2026-10-21): con `adjuntos` (el interruptor `agente_config.leer_adjuntos`, por defecto sí).
+    ...(o.adjuntos ? {
+      adjuntos: puertoAdjuntosSupabase(supabase, workspaceId),
+      async soportesEnViaje(viajeId: string, adjuntos: AdjuntoCarga[]) {
+        // El viaje es de este workspace (la propuesta ya lo validó; se vuelve a mirar al escribir).
+        const { data: neg, error: errN } = await supabase.from('negocios').select('id').eq('id', viajeId).eq('workspace_id', workspaceId).maybeSingle();
+        if (errN) throw new Error(`no se pudo revisar el viaje: ${errN.message}`);
+        if (!neg) throw new Error('el viaje no es de este workspace');
+        // Solo referencias de ESTE workspace (`one://gastos-soportes/<ws>/…`): la fila de la conversación las dejó así.
+        const propias = adjuntos.filter((a) => a.ref.startsWith(`one://gastos-soportes/${workspaceId}/`));
+        if (!propias.length) throw new Error('ningún archivo es de este workspace');
+        const { error } = await supabase.from('activity_log').insert(propias.map((a) => ({
+          workspace_id: workspaceId, entidad_tipo: 'negocio', entidad_id: viajeId, tipo: 'comentario', autor_id: staffId,
+          contenido: contenidoSoporte(a), link_url: a.ref,
+        })));
+        if (error) throw new Error(`no se pudo dejar el soporte en la actividad: ${error.message}`);
+      },
+    } : {}),
     async linea() {
       const cfg = await configDeLinea(supabase, workspaceId);
       if (typeof cfg === 'string') return 'la línea de la bandeja';
@@ -242,7 +292,8 @@ export function puertoBandejaSupabase(
       const t0 = performance.now();
       const lectura = await leerConModelo(
         // `perfil`: lo de la persona sale aparte y va a su perfil como sugerido con el toque de la carga.
-        instruccionesCarga(campos, todayBogotaISO(), yaTiene, propuestoDe(previo), undefined, { compacta, perfil: true }),
+        // `documentos`: algún texto trae lo leído de una foto o un PDF (sin archivos, el prompt de siempre).
+        instruccionesCarga(campos, todayBogotaISO(), yaTiene, propuestoDe(previo), undefined, { compacta, perfil: true, documentos: textos.some(traeArchivo) }),
         `Mensajes:\n${textoParaModelo(mensajesDeTextos(textos))}`,
         compacta ? esquemaCargaCompacta(campos, { perfil: true }) : esquemaCarga(campos, { perfil: true }),
       );

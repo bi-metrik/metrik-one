@@ -22,6 +22,7 @@ import { formatCOP } from '../../wa-format.ts';
 import { renderizar } from '../render.ts';
 import type { ContextoDominio, DeclaracionHerramienta, Dominio, FilaConversacion, Hechos, LecturaAdjunto, MediaFila, Propuesta, ResultadoHerramienta, Salida } from '../tipos.ts';
 import type { ArchivoAdjunto, Lector } from './lectura-adjunto.ts';
+import { esAdjuntoEntrante, preparadorDeAdjuntos } from '../adjuntos.ts';
 import { BOT_ONE } from './reglamento.ts';
 
 export { BOT_ONE };
@@ -171,9 +172,7 @@ function fotosUsadas(filas: FilaConversacion[]): Set<string> {
 }
 
 /** ¿La fila es un soporte que llegó (foto o documento, escrito o reenviado)? Pura. */
-export function esSoporte(f: FilaConversacion | undefined): f is FilaConversacion & { media: MediaFila } {
-  return !!f && f.direccion === 'entrante' && (f.media?.tipo === 'imagen' || f.media?.tipo === 'documento') && !!f.media.id;
-}
+export const esSoporte = esAdjuntoEntrante;
 
 export interface SoporteDeLaConversacion {
   /** Id de la fila (lo que queda en `escrituras.foto`). */
@@ -441,54 +440,13 @@ export const VENTANA_ADJUNTOS_ONE_MS = 5000;
 const PREPARAR_DESDE_MS = 60 * 60 * 1000;
 const PREPARAR_MAX = 4;
 
-const sinLectura = (motivo: string): LecturaAdjunto => ({ legible: false, monto: null, fecha: null, comercio: null, nit: null, descripcion: null, motivo });
-
 export function dominioOne(puerto: PuertoOne, o: { rol: string; ahora?: () => number; lector?: Lector | null }): Dominio {
   const permisos = permisosDe(o.rol);
   const ahora = o.ahora ?? (() => Date.now());
-  // Un archivo se prepara una vez por proceso aunque lo pidan a la vez la espera de la ventana y el turno.
-  const enCurso = new Map<string, Promise<MediaFila>>();
-
-  async function prepararUno(f: FilaConversacion & { media: MediaFila }): Promise<MediaFila> {
-    const archivo = await puerto.bajarAdjunto(f.media.id).catch(() => null);
-    if (!archivo) {
-      const m: MediaFila = { ...f.media, lectura: sinLectura('no se pudo bajar el archivo') };
-      await puerto.anotarMedia(f.id, m);
-      return m;
-    }
-    const conNombre: ArchivoAdjunto = { ...archivo, nombre: f.media.nombre ?? archivo.nombre ?? null };
-    // Se sube al llegar (no se pierde aunque nadie confirme) y se lee a la vez.
-    const [ref, lectura] = await Promise.all([
-      f.media.ref ? Promise.resolve(f.media.ref) : puerto.guardarAdjunto(f.id, conNombre).catch(() => null),
-      o.lector ? o.lector(conNombre).catch(() => null) : Promise.resolve(null),
-    ]);
-    const m: MediaFila = {
-      ...f.media, mime: f.media.mime ?? archivo.mime, ref: ref ?? null,
-      lectura: lectura ?? sinLectura(o.lector ? 'el lector no respondió' : 'sin lector'),
-    };
-    await puerto.anotarMedia(f.id, m);
-    return m;
-  }
-
-  /** Baja, sube y lee los soportes recientes que todavía no se prepararon. Lo deja en la fila (memoria y base). */
-  async function prepararTurno(ctx: ContextoDominio): Promise<Array<Record<string, unknown>>> {
-    const usadas = fotosUsadas(ctx.conversacion);
-    const desde = ahora() - PREPARAR_DESDE_MS;
-    const faltan = ctx.conversacion
-      .filter((f): f is FilaConversacion & { media: MediaFila } => esSoporte(f) && f.media.lectura === undefined && !usadas.has(f.id) && Date.parse(f.created_at) >= desde)
-      .slice(-PREPARAR_MAX);
-    const t0 = ahora();
-    return await Promise.all(faltan.map(async (f) => {
-      let p = enCurso.get(f.id);
-      if (!p) {
-        p = prepararUno(f);
-        enCurso.set(f.id, p);
-      }
-      const m = await p;
-      f.media = m;
-      return { fila: f.id, tipo: m.tipo, guardado: !!m.ref, leido: !!m.lectura?.legible, monto: m.lectura?.monto ?? null, ms: Math.round(ahora() - t0) };
-    }));
-  }
+  // Baja, sube y lee los soportes recientes que todavía no se prepararon (`../adjuntos.ts`, común con la bandeja).
+  const prepararTurno = preparadorDeAdjuntos(puerto, {
+    lector: o.lector ?? null, ahora, desdeMs: PREPARAR_DESDE_MS, max: PREPARAR_MAX, omitir: (ctx) => fotosUsadas(ctx.conversacion),
+  });
 
   // Los gastos de la conversación contra la base: una consulta por turno (el Estado y la propuesta la piden en el mismo).
   const cruces = new WeakMap<FilaConversacion[], Promise<ReturnType<typeof cruzarConLaBase>>>();
