@@ -22,7 +22,7 @@ import {
 
 const negocio = (p: Partial<NegocioExportable> & Pick<NegocioExportable, 'id'>): NegocioExportable => ({
   codigo: 'V0001', nombre: 'Negocio', empresa_nombre: null, contacto_nombre: 'Ana',
-  contacto_telefono: null, cedula: null, stage_actual: 'venta', etapa_stage: 'venta',
+  contacto_telefono: null, contacto_email: null, cedula: null, stage_actual: 'venta', etapa_stage: 'venta',
   etapa_nombre: 'Propuesta', estado: 'abierto', razon_cierre: null, created_at: null,
   closed_at: null, origen: null, aliado_nombre: null, es_meta_lead: false, servicio_label: null,
   seccional_label: null, ciudad_label: null, vehiculo_label: null, radicado: null,
