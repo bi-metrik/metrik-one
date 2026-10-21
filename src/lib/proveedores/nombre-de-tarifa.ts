@@ -113,6 +113,19 @@ export function nombreDeServicio(o: FilaConNombre): string | null {
   return nombre
 }
 
+/**
+ * El plan de la fila con su nombre: si la fila trae el CÓDIGO de un plan del tarifario («CA»), su
+ * nombre («con almuerzo»); si no, el plan tal cual.
+ */
+export function nombreDePlan(plan: string | null, tarifario: Obj | null | undefined): string | null {
+  const p = texto(plan)
+  if (!p) return null
+  for (const x of lista(tarifario?.planes)) {
+    if (esObj(x) && plano(texto(x.codigo)) === plano(p)) return texto(x.nombre) ?? p
+  }
+  return p
+}
+
 const MAX_INCLUYE = 12
 
 /**

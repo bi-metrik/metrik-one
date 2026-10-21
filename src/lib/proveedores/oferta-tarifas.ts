@@ -39,7 +39,7 @@ import {
 import type { DefinicionRanura } from '@/lib/cotizaciones/ranuras-pantallazo'
 import type { TarifaCanal } from './tipos'
 import type { TarifaUsable } from './tarifas-extraidas'
-import { capitalizacionNormal, incluyeDeFila, nombreDeServicio, textoIncluye } from './nombre-de-tarifa'
+import { capitalizacionNormal, incluyeDeFila, nombreDePlan, nombreDeServicio, textoIncluye } from './nombre-de-tarifa'
 
 export { leerOrigenTarifaExtraida, origenVigente, type OrigenTarifaExtraida } from '@/lib/cotizaciones/origen-tarifa'
 
@@ -290,9 +290,10 @@ export function ofrecerTarifas(args: {
       porNoche: base ? esPorNoche(base) : false,
       establecimiento: u.establecimiento,
       categoria: texto(f.categoria),
-      plan: texto(f.plan),
+      // Con el nombre del plan si la fila trae su código («CA» → «con almuerzo»).
+      plan: nombreDePlan(texto(f.plan), args.tarifario),
       modalidad: texto(f.modalidad, 40),
-      servicio: nombreDeServicio({ categoria: texto(f.categoria), plan: texto(f.plan), modalidad: texto(f.modalidad, 40) }),
+      servicio: nombreDeServicio({ categoria: texto(f.categoria), plan: nombreDePlan(texto(f.plan), args.tarifario), modalidad: texto(f.modalidad, 40) }),
       incluye: incluyeDeFila(f, args.tarifario),
       fechaSalida: fechaValida(f.fecha_salida),
       ocupacion: texto(f.ocupacion, 40),

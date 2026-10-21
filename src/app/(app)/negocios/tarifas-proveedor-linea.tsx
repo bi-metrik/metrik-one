@@ -635,7 +635,7 @@ function Eleccion({ modo, vista, elegido, ocupado, abiertaEn, onListo }: { modo:
                   {TEXTO_CANAL[ajustes.canal]}. El costo se guarda sin IVA
                   {ajustes.ivaPct === null
                     ? '; el tarifario no declara IVA, así que «Calcular con IVA» no le suma nada'
-                    : '; con la casilla «Calcular con IVA» encendida, la cotización se lo suma porque el proveedor cobra IVA'}.
+                    : '; la casilla «Calcular con IVA» de la cotización se lo suma porque el proveedor cobra IVA'}.
                 </p>
                 {calculo?.ok && (
                   <div className="space-y-0.5">

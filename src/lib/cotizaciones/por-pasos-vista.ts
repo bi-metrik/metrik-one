@@ -31,6 +31,7 @@ import { estadoDelServicio, type EstadoServicio } from './estado-servicio'
 import { resolverRanura } from './ranuras-pantallazo'
 import { ciudadCorta, esNombreDeOpcion, tipoDeDefinicion, type TipoRanura } from './ranuras-cotizacion'
 import { nombreVisibleDeLinea } from './nombre-visible'
+import { capitalizacionNormal } from '@/lib/proveedores/nombre-de-tarifa'
 import { detalleDeLectura, hotelesDeItems, tramosDelItem, type ItemConLectura } from './detalle-viaje'
 import { leerTarifaPax } from './tarifa-pasajero'
 import { leerFecha } from '@/lib/pdf/cotizacion-trappvel-formato'
@@ -256,16 +257,22 @@ function leidoDe(item: FilaDeLinea): Record<string, string> {
   return d
 }
 
+/** «Actividad», «Actividad en Santa Marta», «Actividades»: el nombre que el bloque trae de fábrica. */
+function esNombreGenericoDeActividad(nombre: string): boolean {
+  return /^actividad(es)?(\s+en\s+.+)?$/i.test(nombre.trim())
+}
+
 /**
  * La tarjeta de una actividad se titula con la actividad («Playa Blanca con almuerzo»), no con el
  * nombre genérico del bloque («Actividad en Santa Marta»; prueba del #1229, punto d). Es el mismo
  * criterio del editor (`tituloDeBloque`): el nombre visible de su primera opción, salvo que siga
- * siendo «Opción N». El lugar del bloque se sigue sacando de su nombre.
+ * siendo «Opción N»; si quedó todo en mayúscula, en capitalización normal. Un bloque que alguien
+ * nombró («Buceo de bautismo») se respeta. El lugar del bloque se sigue sacando de su nombre.
  */
 function nombreDeActividad(item: FilaDeLinea | undefined): string | null {
   if (!item) return null
   const n = nombreVisibleDeLinea({ nombre: item.nombre, grupo: item.grupo, tarifa_pax: item.tarifa_pax }).trim()
-  return n && !esNombreDeOpcion(n) ? n : null
+  return n && !esNombreDeOpcion(n) ? capitalizacionNormal(n) : null
 }
 
 function sumarDias(iso: string | null, dias: number): string | null {
@@ -321,7 +328,7 @@ export function viajeEnOrden(
     return {
       grupo,
       tipo,
-      nombre: tipo === 'actividad' ? nombreDeActividad(ops[0]) ?? nombre : nombre,
+      nombre: tipo === 'actividad' && esNombreGenericoDeActividad(nombre) ? nombreDeActividad(ops[0]) ?? nombre : nombre,
       opciones: ops.map(o => o.id),
       estado: estadoDelServicio(ops),
       lugar,
