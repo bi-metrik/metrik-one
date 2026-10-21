@@ -130,16 +130,16 @@ describe('las tarifas del proveedor en la línea', () => {
     expect(html).toContain('Es otro proveedor')
   })
 
-  it('en una línea con el costo confirmado: el título dice que lo cambia, y antes de usar se ven el costo actual y el nuevo', () => {
+  it('en una línea con el costo confirmado: el título dice que lo cambia y la fila de hoy se señala sin marcarse', () => {
     const cerrada = pintar(null, { titulo: 'Cambiar el costo por una tarifa del proveedor', costoActual: 240000 })
     expect(cerrada).toContain('Cambiar el costo por una tarifa del proveedor')
     expect(cerrada).toContain('aria-expanded="false"')
+    // Brief del 2026-10-21, punto 1: marcada, elegir otra la sumaba («quita una»). El costo actual
+    // y el nuevo salen al marcar otra (tarifas-proveedor-cambiar-dom.test.ts).
     const html = pintar(vista({ elegida: ELEGIDA_FILA_0 }), { costoActual: 240000 })
-    expect(html).toContain('data-costo-actual-y-nuevo')
-    expect(html).toMatch(/Costo actual de la línea: <strong>\$240\.000<\/strong>/)
-    expect(html).toContain('$900.000')
-    expect(html).toContain('Nada cambia hasta que toques el botón.')
-    expect(html).toContain('Usar esta tarifa y reemplazar el costo')
+    expect(html).toMatch(/data-opcion-tarifa="0"[\s\S]*data-tarifa-actual="true">La que usas hoy</)
+    expect(html).not.toMatch(/type="checkbox"[^>]*checked/)
+    expect(html).not.toContain('data-usar-tarifa')
   })
 
   it('sin costo todavía: no hay «costo actual» y el botón dice «en la línea»', () => {
