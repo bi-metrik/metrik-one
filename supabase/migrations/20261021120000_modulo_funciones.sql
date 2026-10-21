@@ -29,10 +29,14 @@
 --        funcion_cancelar_reserva     solo equipo
 --        funcion_asignar_mesas        solo equipo         NO la puede ejecutar service_role (la llave del asistente)
 --        funcion_guardar_restricciones equipo y servidor  solo con autorización `sensible` = `si` de esa conversación
+--      y las del formulario (F1, la única puerta de alta; solo equipo):
+--        funcion_guardar_experiencia, funcion_guardar_montaje (con su tabla de mesas), funcion_crear_funciones (una o
+--        varias fechas) y funcion_editar_funcion (cupo, estado y cierre de venta, con el candado).
+--      El PDF que pre-llena el formulario NO escribe nada: la extracción devuelve un borrador y se guarda lo que la
+--      persona confirma, por estas funciones.
 --
 -- Quién escribe: NADIE escribe las tablas directo, ni `authenticated` ni `service_role`. Se leen por workspace con
--- RLS; toda escritura pasa por las funciones de arriba, que validan las invariantes dentro del candado. Montajes,
--- mesas y funciones los carga MéTRIK por SQL cuando llegue el plano (decisión F1 abierta: editor en ONE).
+-- RLS; toda escritura pasa por las funciones de arriba, que validan las invariantes dentro del candado.
 --
 -- La ocupación NO se guarda en ningún contador: es la suma de las reservas `confirmada` más las `apartada` con
 -- `vence_at > now()`. Toda operación que cambia la ocupación de una función empieza con
@@ -66,7 +70,8 @@
 --   drop trigger funcion_consentimiento_borrado on public.chatwoot_consentimientos;
 --   drop table public.funcion_reserva_mesas, public.funcion_reservas, public.funcion_funciones,
 --              public.funcion_mesas, public.funcion_montajes, public.funcion_experiencias;
---   drop function public.funcion_actor, public.funcion_ocupadas, public.funcion_vencer_apartados, public.funcion_ocupacion,
+--   drop function public.funcion_guardar_experiencia, public.funcion_guardar_montaje, public.funcion_crear_funciones,
+--     public.funcion_editar_funcion, public.funcion_actor, public.funcion_ocupadas, public.funcion_vencer_apartados, public.funcion_ocupacion,
 --     public.funcion_consultar_cupo, public.funcion_apartar, public.funcion_confirmar_pago, public.funcion_cancelar_reserva,
 --     public.funcion_asignar_mesas, public.funcion_guardar_restricciones, y las de los triggers;
 --   -- y devolver las cuatro listas de llaves al cuerpo de 20260928180000 / 20260929030000.
@@ -208,7 +213,8 @@ create table public.funcion_mesas (
   created_at timestamptz not null default now(),
   constraint funcion_mesas_montaje foreign key (montaje_id, workspace_id)
     references public.funcion_montajes (id, workspace_id),
-  constraint funcion_mesas_etiqueta_unica unique (montaje_id, etiqueta),
+  -- Diferible: el formulario puede intercambiar dos etiquetas en un mismo guardado (`funcion_guardar_montaje`).
+  constraint funcion_mesas_etiqueta_unica unique (montaje_id, etiqueta) deferrable initially deferred,
   constraint funcion_mesas_id_montaje unique (id, montaje_id)
 );
 
@@ -1146,3 +1152,318 @@ $$;
 -- el workspace de la reserva y rol que edite.
 revoke execute on function public.funcion_guardar_restricciones(uuid, text, uuid) from public, anon;
 grant execute on function public.funcion_guardar_restricciones(uuid, text, uuid) to authenticated, service_role;
+
+
+-- ── 15. Alta desde el formulario (F1, resuelta por Mauricio el 2026-10-21) ───
+-- El formulario de ONE es la ÚNICA puerta de entrada de experiencias, montajes y funciones. El PDF que lo pre-llena
+-- nunca llega aquí: la extracción devuelve un borrador al navegador y lo que se guarda es lo que la persona confirma
+-- con el botón del formulario, por estas funciones. Solo el equipo (con sesión); ninguna se concede a service_role.
+
+create or replace function public.funcion_guardar_experiencia(
+  p_workspace_id uuid,
+  p_experiencia_id uuid,
+  p_nombre text,
+  p_minutos_apartado integer,
+  p_activa boolean
+) returns uuid
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+  v_nombre text := nullif(btrim(coalesce(p_nombre, '')), '');
+  v_id uuid;
+begin
+  if public.funcion_actor(p_workspace_id, true, 'experiencia_no_existe') <> 'equipo' then
+    raise exception 'sin_permiso' using errcode = 'P0001';
+  end if;
+  if v_nombre is null or length(v_nombre) > 200 then
+    raise exception 'datos_invalidos' using errcode = 'P0001', detail = 'nombre';
+  end if;
+  if p_minutos_apartado is not null and (p_minutos_apartado < 1 or p_minutos_apartado > 10080) then
+    raise exception 'datos_invalidos' using errcode = 'P0001', detail = 'minutos_apartado';
+  end if;
+
+  if p_experiencia_id is null then
+    insert into public.funcion_experiencias (workspace_id, nombre, minutos_apartado, activa)
+    values (p_workspace_id, v_nombre, p_minutos_apartado, coalesce(p_activa, true))
+    returning id into v_id;
+  else
+    update public.funcion_experiencias
+       set nombre = v_nombre, minutos_apartado = p_minutos_apartado, activa = coalesce(p_activa, activa),
+           updated_at = now()
+     where id = p_experiencia_id and workspace_id = p_workspace_id
+    returning id into v_id;
+    if v_id is null then
+      raise exception 'experiencia_no_existe' using errcode = 'P0001';
+    end if;
+  end if;
+  return v_id;
+end;
+$$;
+
+-- ejecutable-por-cliente: el formulario, con la sesión del equipo. SECURITY DEFINER; exige el workspace y rol que edite.
+revoke execute on function public.funcion_guardar_experiencia(uuid, uuid, text, integer, boolean) from public, anon, service_role;
+grant execute on function public.funcion_guardar_experiencia(uuid, uuid, text, integer, boolean) to authenticated;
+
+-- Crea (p_montaje_id nulo) o edita un montaje con su tabla de mesas completa:
+--   p_mesas = [{"id"?: uuid, "etiqueta", "puestos", "zona"?, "condicion"?, "x"?, "y"?, "ancho"?, "alto"?, "forma"?}, …]
+-- Las mesas con `id` se actualizan, las sin `id` se crean y las que ya no vienen se borran. Los candados de §1.2 los
+-- hacen cumplir los triggers de `funcion_mesas` (una mesa con reservas sentadas no se borra ni baja de lo asignado;
+-- el montaje no queda con menos puestos que el cupo de una función futura). Orden: altas, subidas, bajadas y bajas,
+-- para que un cambio que en total cuadra no falle a mitad de camino.
+create or replace function public.funcion_guardar_montaje(
+  p_workspace_id uuid,
+  p_montaje_id uuid,
+  p_experiencia_id uuid,
+  p_nombre text,
+  p_notas text,
+  p_mesas jsonb
+) returns uuid
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+  v_nombre text := nullif(btrim(coalesce(p_nombre, '')), '');
+  v_mesas jsonb := coalesce(p_mesas, '[]'::jsonb);
+  v_id uuid;
+  v_actual record;
+  v_item jsonb;
+  v_n integer;
+  v_etiquetas integer;
+  v_orden integer := 0;
+  v_nueva uuid;
+  v_nuevas uuid[] := '{}';
+begin
+  if public.funcion_actor(p_workspace_id, true, 'montaje_no_existe') <> 'equipo' then
+    raise exception 'sin_permiso' using errcode = 'P0001';
+  end if;
+  if v_nombre is null or length(v_nombre) > 200 then
+    raise exception 'datos_invalidos' using errcode = 'P0001', detail = 'nombre';
+  end if;
+  if not exists (select 1 from public.funcion_experiencias where id = p_experiencia_id and workspace_id = p_workspace_id) then
+    raise exception 'experiencia_no_existe' using errcode = 'P0001';
+  end if;
+  if jsonb_typeof(v_mesas) <> 'array' or jsonb_array_length(v_mesas) = 0 or jsonb_array_length(v_mesas) > 300 then
+    raise exception 'datos_invalidos' using errcode = 'P0001', detail = 'Un montaje tiene entre 1 y 300 mesas.';
+  end if;
+
+  v_n := jsonb_array_length(v_mesas);
+  for v_item in select value from jsonb_array_elements(v_mesas) loop
+    if jsonb_typeof(v_item) <> 'object' or nullif(btrim(coalesce(v_item->>'etiqueta', '')), '') is null
+       or length(btrim(v_item->>'etiqueta')) > 40 then
+      raise exception 'datos_invalidos' using errcode = 'P0001', detail = 'Toda mesa lleva etiqueta.';
+    end if;
+    if coalesce(v_item->>'puestos', '') !~ '^[0-9]{1,3}$' or (v_item->>'puestos')::integer not between 1 and 100 then
+      raise exception 'puestos_invalidos' using errcode = 'P0001',
+        detail = format('La mesa %s tiene que tener entre 1 y 100 puestos.', btrim(v_item->>'etiqueta'));
+    end if;
+    if v_item ? 'id' and coalesce(v_item->>'id', '') !~ '^[0-9a-fA-F-]{36}$' then
+      raise exception 'datos_invalidos' using errcode = 'P0001', detail = 'id de mesa';
+    end if;
+  end loop;
+  select count(distinct lower(btrim(value->>'etiqueta'))) into v_etiquetas from jsonb_array_elements(v_mesas);
+  if v_etiquetas <> v_n then
+    raise exception 'etiqueta_repetida' using errcode = 'P0001', detail = 'Dos mesas tienen la misma etiqueta.';
+  end if;
+
+  if p_montaje_id is null then
+    if exists (select 1 from jsonb_array_elements(v_mesas) e where e.value ? 'id') then
+      raise exception 'mesa_de_otro_montaje' using errcode = 'P0001';
+    end if;
+    insert into public.funcion_montajes (workspace_id, experiencia_id, nombre, notas)
+    values (p_workspace_id, p_experiencia_id, v_nombre, nullif(btrim(coalesce(p_notas, '')), ''))
+    returning id into v_id;
+  else
+    select * into v_actual from public.funcion_montajes where id = p_montaje_id and workspace_id = p_workspace_id;
+    if not found then
+      raise exception 'montaje_no_existe' using errcode = 'P0001';
+    end if;
+    if v_actual.experiencia_id <> p_experiencia_id
+       and exists (select 1 from public.funcion_funciones where montaje_id = p_montaje_id) then
+      raise exception 'montaje_en_uso' using errcode = 'P0001',
+        detail = 'Un montaje que ya usa una función no se cambia de experiencia.';
+    end if;
+    -- Una mesa con id que no es de este montaje no se "adopta".
+    if exists (
+      select 1 from jsonb_array_elements(v_mesas) e
+       where e.value ? 'id'
+         and not exists (select 1 from public.funcion_mesas m where m.id = (e.value->>'id')::uuid and m.montaje_id = p_montaje_id)
+    ) then
+      raise exception 'mesa_de_otro_montaje' using errcode = 'P0001';
+    end if;
+    update public.funcion_montajes
+       set experiencia_id = p_experiencia_id, nombre = v_nombre, notas = nullif(btrim(coalesce(p_notas, '')), '')
+     where id = p_montaje_id;
+    v_id := p_montaje_id;
+  end if;
+
+  -- Altas.
+  for v_item in select value from jsonb_array_elements(v_mesas) loop
+    v_orden := v_orden + 1;
+    if not (v_item ? 'id') then
+      insert into public.funcion_mesas (workspace_id, montaje_id, etiqueta, puestos, zona, condicion, x, y, ancho, alto, forma, orden)
+      values (p_workspace_id, v_id, btrim(v_item->>'etiqueta'), (v_item->>'puestos')::integer,
+              nullif(btrim(coalesce(v_item->>'zona', '')), ''), nullif(btrim(coalesce(v_item->>'condicion', '')), ''),
+              coalesce((v_item->>'x')::numeric, 0), coalesce((v_item->>'y')::numeric, 0),
+              coalesce((v_item->>'ancho')::numeric, 8), coalesce((v_item->>'alto')::numeric, 8),
+              coalesce(nullif(v_item->>'forma', ''), 'rectangular'), v_orden)
+      returning id into v_nueva;
+      v_nuevas := v_nuevas || v_nueva;
+    end if;
+  end loop;
+
+  -- Cambios de las mesas que siguen, primero las que suben de puestos.
+  for v_item in
+    select e.value from jsonb_array_elements(v_mesas) with ordinality e(value, i)
+      join public.funcion_mesas m on e.value ? 'id' and m.id = (e.value->>'id')::uuid
+     order by ((e.value->>'puestos')::integer - m.puestos) desc, e.i
+  loop
+    update public.funcion_mesas
+       set etiqueta = btrim(v_item->>'etiqueta'), puestos = (v_item->>'puestos')::integer,
+           zona = nullif(btrim(coalesce(v_item->>'zona', '')), ''), condicion = nullif(btrim(coalesce(v_item->>'condicion', '')), ''),
+           x = coalesce((v_item->>'x')::numeric, x), y = coalesce((v_item->>'y')::numeric, y),
+           ancho = coalesce((v_item->>'ancho')::numeric, ancho), alto = coalesce((v_item->>'alto')::numeric, alto),
+           forma = coalesce(nullif(v_item->>'forma', ''), forma)
+     where id = (v_item->>'id')::uuid;
+  end loop;
+  update public.funcion_mesas m
+     set orden = e.i
+    from jsonb_array_elements(v_mesas) with ordinality e(value, i)
+   where e.value ? 'id' and m.id = (e.value->>'id')::uuid;
+
+  -- Bajas: las mesas que ya no vienen.
+  if p_montaje_id is not null then
+    delete from public.funcion_mesas m
+     where m.montaje_id = v_id
+       and m.id <> all (v_nuevas)
+       and m.id not in (select (e.value->>'id')::uuid from jsonb_array_elements(v_mesas) e where e.value ? 'id');
+  end if;
+
+  -- La unicidad de etiquetas es diferible (para poder intercambiarlas): se verifica aquí, no al final de la transacción.
+  set constraints public.funcion_mesas_etiqueta_unica immediate;
+  return v_id;
+end;
+$$;
+
+-- ejecutable-por-cliente: el formulario de montajes, con la sesión del equipo. SECURITY DEFINER; exige el workspace.
+revoke execute on function public.funcion_guardar_montaje(uuid, uuid, uuid, text, text, jsonb) from public, anon, service_role;
+grant execute on function public.funcion_guardar_montaje(uuid, uuid, uuid, text, text, jsonb) to authenticated;
+
+-- Crea una o varias funciones de una experiencia (una película suele tener varias fechas y horas), todas con el mismo
+-- montaje, cupo, estado y cierre de venta (`p_cierre_minutos_antes` antes de cada inicio; nulo = hasta el inicio).
+-- `p_inicios` = ["2026-11-09T19:00:00-05:00", …]. Todo o nada.
+create or replace function public.funcion_crear_funciones(
+  p_workspace_id uuid,
+  p_experiencia_id uuid,
+  p_montaje_id uuid,
+  p_cupo_total integer,
+  p_estado text,
+  p_cierre_minutos_antes integer,
+  p_inicios jsonb
+) returns jsonb
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+  v_inicios jsonb := coalesce(p_inicios, '[]'::jsonb);
+  v_inicio timestamptz;
+  v_ids jsonb := '[]'::jsonb;
+  v_id uuid;
+  v_distintos integer;
+begin
+  if public.funcion_actor(p_workspace_id, true, 'experiencia_no_existe') <> 'equipo' then
+    raise exception 'sin_permiso' using errcode = 'P0001';
+  end if;
+  if not exists (select 1 from public.funcion_experiencias where id = p_experiencia_id and workspace_id = p_workspace_id) then
+    raise exception 'experiencia_no_existe' using errcode = 'P0001';
+  end if;
+  if p_montaje_id is not null and not exists (
+    select 1 from public.funcion_montajes where id = p_montaje_id and experiencia_id = p_experiencia_id
+  ) then
+    raise exception 'montaje_de_otra_experiencia' using errcode = 'P0001';
+  end if;
+  if p_cupo_total is null or p_cupo_total < 1 or p_cupo_total > 10000 then
+    raise exception 'datos_invalidos' using errcode = 'P0001', detail = 'cupo_total';
+  end if;
+  if coalesce(p_estado, '') not in ('abierta', 'cerrada') then
+    raise exception 'datos_invalidos' using errcode = 'P0001', detail = 'estado';
+  end if;
+  if p_cierre_minutos_antes is not null and (p_cierre_minutos_antes < 0 or p_cierre_minutos_antes > 20160) then
+    raise exception 'datos_invalidos' using errcode = 'P0001', detail = 'cierre de venta';
+  end if;
+  if jsonb_typeof(v_inicios) <> 'array' or jsonb_array_length(v_inicios) = 0 or jsonb_array_length(v_inicios) > 60 then
+    raise exception 'datos_invalidos' using errcode = 'P0001', detail = 'Entre 1 y 60 fechas.';
+  end if;
+  begin
+    select count(distinct value::timestamptz) into v_distintos from jsonb_array_elements_text(v_inicios);
+  exception when others then
+    raise exception 'datos_invalidos' using errcode = 'P0001', detail = 'Una fecha y hora no se entiende.';
+  end;
+  if v_distintos <> jsonb_array_length(v_inicios) then
+    raise exception 'datos_invalidos' using errcode = 'P0001', detail = 'Una fecha y hora aparece dos veces.';
+  end if;
+
+  for v_inicio in select value::timestamptz from jsonb_array_elements_text(v_inicios) loop
+    if v_inicio <= now() then
+      raise exception 'fecha_pasada' using errcode = 'P0001',
+        detail = to_char(v_inicio at time zone 'America/Bogota', 'YYYY-MM-DD HH24:MI');
+    end if;
+    -- El cupo contra los puestos del montaje lo verifica el trigger `trg_funcion_funciones_candados` (cupo_sobre_puestos).
+    insert into public.funcion_funciones (workspace_id, experiencia_id, montaje_id, inicia_at, cupo_total, estado, cierra_venta_at)
+    values (p_workspace_id, p_experiencia_id, p_montaje_id, v_inicio, p_cupo_total, p_estado,
+            case when p_cierre_minutos_antes is null then null else v_inicio - make_interval(mins => p_cierre_minutos_antes) end)
+    returning id into v_id;
+    v_ids := v_ids || to_jsonb(v_id);
+  end loop;
+  return v_ids;
+end;
+$$;
+
+-- ejecutable-por-cliente: el formulario de funciones, con la sesión del equipo. SECURITY DEFINER; exige el workspace.
+revoke execute on function public.funcion_crear_funciones(uuid, uuid, uuid, integer, text, integer, jsonb) from public, anon, service_role;
+grant execute on function public.funcion_crear_funciones(uuid, uuid, uuid, integer, text, integer, jsonb) to authenticated;
+
+-- Cambia cupo, estado y cierre de venta de una función, con el candado de la función tomado (el cupo no baja de lo
+-- ocupado ni pasa los puestos: lo dice el trigger). El montaje no se cambia aquí.
+create or replace function public.funcion_editar_funcion(
+  p_funcion_id uuid,
+  p_cupo_total integer,
+  p_estado text,
+  p_cierra_venta_at timestamptz
+) returns jsonb
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+  v_ws uuid;
+begin
+  select workspace_id into v_ws from public.funcion_funciones where id = p_funcion_id;
+  if not found then
+    raise exception 'funcion_no_existe' using errcode = 'P0001';
+  end if;
+  if public.funcion_actor(v_ws, true, 'funcion_no_existe') <> 'equipo' then
+    raise exception 'sin_permiso' using errcode = 'P0001';
+  end if;
+  if coalesce(p_estado, '') not in ('abierta', 'cerrada', 'cancelada') then
+    raise exception 'datos_invalidos' using errcode = 'P0001', detail = 'estado';
+  end if;
+  if p_cupo_total is null or p_cupo_total < 1 or p_cupo_total > 10000 then
+    raise exception 'datos_invalidos' using errcode = 'P0001', detail = 'cupo_total';
+  end if;
+
+  perform 1 from public.funcion_funciones where id = p_funcion_id for update;
+  perform public.funcion_vencer_apartados(p_funcion_id);
+  update public.funcion_funciones
+     set cupo_total = p_cupo_total, estado = p_estado, cierra_venta_at = p_cierra_venta_at
+   where id = p_funcion_id;
+  return public.funcion_ocupacion(p_funcion_id);
+end;
+$$;
+
+-- ejecutable-por-cliente: el equipo con su sesión. SECURITY DEFINER; exige el workspace de la función.
+revoke execute on function public.funcion_editar_funcion(uuid, integer, text, timestamptz) from public, anon, service_role;
+grant execute on function public.funcion_editar_funcion(uuid, integer, text, timestamptz) to authenticated;
