@@ -199,6 +199,10 @@ function depsTurno(d: DepsPublico, turnoMs: number): DepsTurno {
     ahoraMs: d.ahoraMs,
     reloj: d.reloj,
     sistema: (r, c) => sistemaPublico(r, c),
+    // Plata solo de herramienta: vuelve al modelo una vez para que corrija (Yuto, 2026-10-21). La guarda del final
+    // (antes de publicar) queda igual: nunca sale un monto que no devolvió una herramienta.
+    guardaTexto: (texto, herramientas) => preciosSinHerramienta(texto, herramientas)
+      .map((x) => `el monto ${x} no viene de ver_catalogo/ver_funciones; no lo repitas, usa el precio de la herramienta o di que no lo puedes confirmar`),
   };
 }
 

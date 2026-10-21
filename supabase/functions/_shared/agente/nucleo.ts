@@ -37,6 +37,14 @@ export interface DepsTurno {
    * siempre (`contexto.ts`): la bandeja de Trappvel no lo pasa y no cambia nada.
    */
   sistema?: (r: Reglamento, c: ConfigAgente) => string;
+  /**
+   * Una guarda más sobre el texto del modelo, después del verificador (el asistente público: un monto de plata solo si lo
+   * devolvió una herramienta). Devuelve los errores para el modelo; vacío = pasa. Como el verificador, vuelve al modelo
+   * UNA vez, pero sin pasarse del tope de llamados del turno; si no queda llamado o vuelve a fallar, sale la respuesta fija.
+   * `herramientas`: lo que devolvieron las herramientas de la conversación y del turno (y el resumen de la propuesta).
+   * Sin esto, no hay guarda (la bandeja de Trappvel no la pasa).
+   */
+  guardaTexto?: (texto: string, herramientas: string[]) => string[];
 }
 
 export interface EntradaTurno {
@@ -263,6 +271,8 @@ export async function turnoDelModelo(deps: DepsTurno, e: EntradaTurno): Promise<
   const respaldoFijo = [usuario, bloqueSiempre(r)];
   let presupuesto = c.topes.llamados;
   let correccionUsada = false;
+  let correccionGuarda = false;
+  const deHerramientas = (extra: string[] = []) => [...e.ctx.resultadosPrevios.map((x) => JSON.stringify(x.datos ?? '')), ...extra];
   const fin = (salida: Salida | null, extra: Partial<Traza> = {}): SalidaTurno => {
     const t: Traza = { ...traza, ...extra, salida };
     if (e.tras) {
@@ -418,7 +428,18 @@ export async function turnoDelModelo(deps: DepsTurno, e: EntradaTurno): Promise<
           }
           // Segunda vez: el texto no sale; la propuesta (que arma el código con datos reales) sí.
         } else {
-          arriba = render.salida.texto;
+          const guarda = deps.guardaTexto?.(render.salida.texto, deHerramientas([p.propuesta.resumen])) ?? [];
+          if (guarda.length) {
+            traza.candados!.push({ candado: 'guarda_texto', detalle: guarda.join('; ').slice(0, 200) });
+            if (!correccionGuarda && traza.llamados! < presupuesto) {
+              correccionGuarda = true;
+              devolver(`No se envió el \`texto\`: ${guarda.join('; ')}. Vuelve a llamar \`proponer\` con el texto corregido.`);
+              continue;
+            }
+            // Segunda vez (o sin llamado): el texto no sale; la propuesta (armada por el código) sí.
+          } else {
+            arriba = render.salida.texto;
+          }
         }
       }
       // Candado: la misma propuesta que ya está pendiente no se arma de nuevo. Se reenvía LA PENDIENTE (misma huella,
@@ -467,6 +488,17 @@ export async function turnoDelModelo(deps: DepsTurno, e: EntradaTurno): Promise<
         continue;
       }
       return fin(caer(), { respuesta_fija: soloHecho ? 'rf.hecho' : 'rf.modelo_caido', error: 'verificador' });
+    }
+    const guarda = texto ? (deps.guardaTexto?.(aVerificar, deHerramientas()) ?? []) : [];
+    if (guarda.length) {
+      traza.candados!.push({ candado: 'guarda_texto', detalle: guarda.join('; ').slice(0, 200) });
+      // Un reintento, dentro del tope de llamados del turno (no lo alarga, a diferencia del verificador).
+      if (!correccionGuarda && traza.llamados! < presupuesto) {
+        correccionGuarda = true;
+        devolver(`No se envió porque: ${guarda.join('; ')}. Escríbelo otra vez.`);
+        continue;
+      }
+      return fin(caer(), { respuesta_fija: soloHecho ? 'rf.hecho' : 'rf.modelo_caido', error: 'guarda' });
     }
     return fin(conHecho(render.salida));
   }
