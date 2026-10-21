@@ -2,6 +2,7 @@
 
 ## Project memories
 
+- ⚠️⚠️ [Asistente de Sabor sobre Chatwoot (etapa 1)](project_asistente_chatwoot_sabor.md) — 20261021090000 SIN aplicar; sin corrida real (sin llave de pruebas); payload de la doc
 - ⚠️⚠️ [Gemini → Haiku 5.5 (fetchModelo)](project_migracion_haiku_55.md) — #1217 sin mergear; respaldo Gemini; VE apagado; documentos/actas en Gemini por defecto
 - ⚠️⚠️ [Tarifas extraídas en la cotización](project_tarifas_en_cotizacion.md) — elegir = casilla 1 'tarifario' + confirmar; a mano = aMano; costoPendiente ⇒ sin_costo
 - ⚠️⚠️ [Suscripciones multiproducto (#1191)](project_suscripciones_multiproducto.md) — 10 migraciones aplicadas (180000 sin ver); backfill SIN correr; cobro por lista de correos
