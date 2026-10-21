@@ -14,6 +14,7 @@ import {
   lecturaDeTarifa,
   ofrecerTarifas,
   revisarAjustes,
+  textoTemporada,
   type AjustesDeCosto,
   type Eleccion,
 } from './oferta-tarifas'
@@ -237,5 +238,53 @@ describe('la elección como lectura de la casilla 1', () => {
     const e = resolverTarifa(FAMILIA, { grupo_completo: l }, ranura.slug)
     expect(e).toMatchObject({ estado: 'resuelta', origen: 'desglose', costoTotal: 810000 })
     if (e.estado === 'resuelta') expect(e.costos.map((x) => [x.tipo, x.total])).toEqual([['adulto', 540000], ['nino', 270000], ['infante', 0]])
+  })
+})
+
+describe('el texto de la temporada habla de noches solo en las bases por noche (brief del 2026-10-20, punto 3)', () => {
+  const TOUR = {
+    temporadas: [
+      { id: 'A', nombre: 'Alta', rangos: [{ desde: '2027-11-01', hasta: '2027-11-30' }] },
+      { id: 'B', nombre: 'Baja', rangos: [{ desde: '2027-12-01', hasta: '2027-12-14' }] },
+    ],
+    tarifas: [
+      fila({ categoria: 'Tour Ficticio de Bahía', temporada_id: 'A', base_precio: 'por_persona', tipo_pasajero: 'adulto', precio: 105000 }),
+      fila({ categoria: 'Hotel Ficticio', temporada_id: 'A', base_precio: 'por_habitacion_noche', precio: 300000 }),
+    ],
+  }
+  const ofrecer = (entrada: string | null, salida: string | null) => {
+    const u = tarifasParaCotizar({ estado: 'revisada', vigenciaDesde: '2027-01-01', vigenciaHasta: '2027-12-31', tarifario: TOUR, monedas: null }, null)
+    if (!u.ok) throw new Error(u.motivo)
+    return ofrecerTarifas({ usables: u.tarifas, tarifario: TOUR, composicion: DOS, entrada, salida })
+  }
+
+  it('actividad por persona de un día: «aplica el 15 nov», nunca «1 noche del viaje»', () => {
+    const [tour] = ofrecer('2027-11-15', null).opciones
+    const t = textoTemporada(tour, { entrada: '2027-11-15', salida: null })
+    expect(t).toBe('temporada Alta · aplica el 15 nov')
+    expect(t).not.toMatch(/noche/)
+  })
+
+  it('actividad por persona con las fechas del viaje (varios días): solo la temporada', () => {
+    const o = ofrecer('2027-11-10', '2027-11-14')
+    expect(textoTemporada(o.opciones[0], { entrada: '2027-11-10', salida: '2027-11-14' })).toBe('temporada Alta')
+  })
+
+  it('hotel por noche: sí cuenta las noches', () => {
+    const o = ofrecer('2027-11-10', '2027-11-13')
+    expect(textoTemporada(o.opciones[1], { entrada: '2027-11-10', salida: '2027-11-13' })).toBe('temporada Alta (3 noches del viaje)')
+  })
+
+  it('el viaje que cruza temporadas sin tarifas por noche habla de días', () => {
+    const u = tarifasParaCotizar({ estado: 'revisada', vigenciaDesde: '2027-01-01', vigenciaHasta: '2027-12-31', tarifario: { ...TOUR, tarifas: [TOUR.tarifas[0]] }, monedas: null }, null)
+    if (!u.ok) throw new Error(u.motivo)
+    const o = ofrecerTarifas({ usables: u.tarifas, tarifario: TOUR, composicion: DOS, entrada: '2027-11-29', salida: '2027-12-03' })
+    const aviso = o.avisos.find((a) => a.startsWith('El viaje cruza'))
+    expect(aviso).toBe('El viaje cruza 2 temporadas: Alta (2 días) y Baja (2 días). Elige una tarifa por temporada.')
+  })
+
+  it('sin temporada no dice nada; temporada sin fechas pide elegir', () => {
+    expect(textoTemporada({ temporada: null, porNoche: false }, { entrada: null, salida: null })).toBeNull()
+    expect(textoTemporada({ temporada: { id: 'F', nombre: 'Festivos', dias: null }, porNoche: false }, { entrada: null, salida: null })).toBe('temporada Festivos (sin fechas: elige tú)')
   })
 })

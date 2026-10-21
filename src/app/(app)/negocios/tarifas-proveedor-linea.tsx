@@ -19,6 +19,7 @@ import {
   propuestaDeFila,
   TEXTO_CANAL,
   TEXTO_FUERA,
+  textoTemporada,
   type AjustesDeCosto,
   type CanalCosto,
   type FilaElegida,
@@ -282,7 +283,7 @@ function Eleccion({ itemId, vista, ocupado, onCambio }: { itemId: string; vista:
       <div className="flex flex-wrap items-center gap-1 text-[11px]" data-filtro-tarifas>
         <span className="rounded bg-muted px-1.5 py-0.5">
           {vista.fechas.entrada
-            ? `${fechaCorta(vista.fechas.entrada)}${vista.fechas.salida ? ` – ${fechaCorta(vista.fechas.salida)}` : ''}${cal?.noches ? ` · ${cal.noches} ${cal.noches === 1 ? 'noche' : 'noches'}` : ''}${vista.fechas.deLaLinea ? '' : ' (del viaje)'}`
+            ? `${fechaCorta(vista.fechas.entrada)}${vista.fechas.salida ? ` – ${fechaCorta(vista.fechas.salida)}` : ''}${cal?.noches && vista.opciones.some((o) => o.porNoche) ? ` · ${cal.noches} ${cal.noches === 1 ? 'noche' : 'noches'}` : ''}${vista.fechas.deLaLinea ? '' : ' (del viaje)'}`
             : 'Sin fechas'}
         </span>
         {cal && Object.values(cal.temporadas).filter((t) => (t.dias ?? 0) > 0).map((t) => (
@@ -320,7 +321,7 @@ function Eleccion({ itemId, vista, ocupado, onCambio }: { itemId: string; vista:
                   </span>
                   <span className="block text-muted-foreground">
                     {o.baseTexto}
-                    {o.temporada ? ` · temporada ${o.temporada.nombre}${o.temporada.dias === null ? ' (sin fechas: elige tú)' : o.temporada.dias > 0 ? ` (${o.temporada.dias} ${o.temporada.dias === 1 ? 'noche' : 'noches'} del viaje)` : ''}` : ''}
+                    {o.temporada ? ` · ${textoTemporada(o, vista.fechas)}` : ''}
                     {o.pax ? ` · ${o.pax} pax` : ''}
                     {o.precioTipo ? ` · precio ${o.precioTipo}` : ''}
                   </span>

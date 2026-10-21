@@ -289,11 +289,42 @@ export function ofrecerTarifas(args: {
   })
   if (!calendario.conFechas) avisos.push('La línea no tiene fechas: no se filtra por temporada. Elige tú la tarifa de la temporada del viaje.')
   if (calendario.cruza.length >= 2) {
-    const partes = calendario.cruza.map((id) => calendario.temporadas[id]).map((t) => `${t.nombre} (${t.dias} ${t.dias === 1 ? 'noche' : 'noches'})`)
-    avisos.push(`El viaje cruza ${partes.length} temporadas: ${partes.join(' y ')}. Elige una tarifa por temporada; cada una cuenta sus noches.`)
+    // De noches se habla solo si alguna tarifa se cobra por noche (brief del 2026-10-20, punto 3).
+    const porNoche = opciones.some((o) => o.porNoche)
+    const unidad = (n: number | null) => (porNoche ? (n === 1 ? 'noche' : 'noches') : n === 1 ? 'día' : 'días')
+    const partes = calendario.cruza.map((id) => calendario.temporadas[id]).map((t) => `${t.nombre} (${t.dias} ${unidad(t.dias)})`)
+    avisos.push(`El viaje cruza ${partes.length} temporadas: ${partes.join(' y ')}. Elige una tarifa por temporada${porNoche ? '; cada una cuenta sus noches' : ''}.`)
   }
   if (temporadaSinFechas) avisos.push('Temporada sin fechas en el tarifario: elige tú la que corresponde al viaje.')
   return { opciones, calendario, avisos }
+}
+
+const MESES_CORTOS = ['ene', 'feb', 'mar', 'abr', 'may', 'jun', 'jul', 'ago', 'sep', 'oct', 'nov', 'dic']
+/** «15 nov». */
+function diaYMes(f: string): string {
+  return `${Number(f.slice(8, 10))} ${MESES_CORTOS[Number(f.slice(5, 7)) - 1]}`
+}
+
+/**
+ * Lo que la opción dice de su temporada (brief del 2026-10-20, punto 3). De noches se habla SOLO en
+ * las bases por noche (`*_noche`): una actividad por persona de un día no tiene «1 noche del viaje».
+ *
+ *   · por noche: «temporada Alta (3 noches del viaje)»;
+ *   · lo demás, un solo día: «temporada Alta · aplica el 15 nov»; con varios días (las fechas del
+ *     viaje, una actividad sin fecha propia): «temporada Alta»;
+ *   · la temporada sin fechas en el tarifario: «temporada Alta (sin fechas: elige tú)».
+ *
+ * `null` = la fila no trae temporada. `entrada`/`salida` son las fechas con que se filtró la línea.
+ */
+export function textoTemporada(o: Pick<OpcionTarifa, 'temporada' | 'porNoche'>, fechas: { entrada: string | null; salida: string | null }): string | null {
+  const t = o.temporada
+  if (!t) return null
+  const base = `temporada ${t.nombre}`
+  if (t.dias === null) return `${base} (sin fechas: elige tú)`
+  if (t.dias === 0) return base
+  if (o.porNoche) return `${base} (${t.dias} ${t.dias === 1 ? 'noche' : 'noches'} del viaje)`
+  const dias = diasDelViaje(fechas.entrada, fechas.salida)
+  return dias.length === 1 ? `${base} · aplica el ${diaYMes(dias[0])}` : base
 }
 
 // ── Canal e IVA ──────────────────────────────────────────────────────────────
