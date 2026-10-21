@@ -401,6 +401,34 @@ export const CIERRES_ONE: DeclaracionHerramienta[] = [
 
 export const OPCION_EMPRESA = 'Gasto de empresa';
 
+/**
+ * ¿La respuesta del modelo trae su propia lista para elegir el destino? (arnés con el modelo real, 2026-10-21: en vez de
+ * `preguntar_destino`, el modelo armó la lista con `negocios_abiertos` y puso «Gasto de empresa» PRIMERO; el «1» de la
+ * persona, que en el bot de siempre era el primer negocio, terminó como gasto de empresa). Esa lista solo la arma el
+ * código. Devuelve el error para el modelo, o null. Pura.
+ */
+export function listaDeDestinoDelModelo(salida: Salida): string | null {
+  if (!('opciones' in salida)) return null;
+  const titulos = salida.opciones.map((o) => o.titulo.trim());
+  // Elegir entre negocios que salieron de una búsqueda (dos de la misma empresa) sí lo pregunta el modelo; lo que no
+  // puede es ofrecer «Gasto de empresa» en su propia lista.
+  if (!titulos.some((t) => t.toLowerCase() === OPCION_EMPRESA.toLowerCase())) return null;
+  return 'No armes tú la lista para elegir el negocio (ni la opción «Gasto de empresa»): llama `preguntar_destino` y el sistema manda la lista en su orden. Si la persona ya eligió, propón con lo que eligió.';
+}
+
+/** Las filas de foto o PDF que ya son el soporte de ESTE gasto (para no confundirlo con el de otro). Pura. */
+function soportesDelGasto(filas: FilaConversacion[], gastoId: string): Set<string> {
+  const s = new Set<string>();
+  for (const f of filas) {
+    if (f.traza?.ejecucion?.resultado !== 'ejecutada') continue;
+    for (const e of f.traza.ejecucion.escrituras ?? []) {
+      const gasto = e.tipo === 'gasto' ? e.id : e.gasto;
+      if (gasto === gastoId && typeof e.foto === 'string') s.add(e.foto);
+    }
+  }
+  return s;
+}
+
 const categorias = Object.keys(CATEGORIA_LABELS);
 
 const DATOS_PROPONER_ONE: Record<string, unknown> = {
@@ -661,7 +689,11 @@ export function dominioOne(puerto: PuertoOne, o: { rol: string; ahora?: () => nu
     if (!Number.isFinite(monto) || monto <= 0) return { ok: false, error: 'Falta el monto nuevo (un número mayor que cero).', candado: 'monto' };
     if (Math.abs(monto - g.monto) <= 1) return { ok: false, error: `El gasto ${g.ref} ya es de ${formatCOP(g.monto)}: no hay nada que corregir.`, candado: 'mismo_monto' };
     let f: SoporteDeLaConversacion | null = null;
-    if (d.soporte !== undefined && d.soporte !== null && String(d.soporte).trim() !== '') {
+    // El soporte que ya es de ESTE gasto no es un soporte nuevo: se corrige solo el monto (arnés 2026-10-21, s-choque-monto:
+    // el modelo mandó el #1 del propio G1 y el candado de «ya es el soporte de otro gasto» trabó la corrección dos veces).
+    const n = numeroDeFila(d.soporte);
+    const propio = n !== null && soportesDelGasto(ctx.conversacion, g.id).has(ctx.conversacion[n - 1]?.id ?? '');
+    if (!propio && d.soporte !== undefined && d.soporte !== null && String(d.soporte).trim() !== '') {
       const s2 = soporteDe(ctx.conversacion, d.soporte);
       if ('error' in s2) return { ok: false, error: s2.error, candado: 'foto' };
       if (g.soporte) return { ok: false, error: `El gasto ${g.ref} ya tiene soporte: corrige solo el monto, o propón un gasto nuevo con este soporte.`, candado: 'ya_tiene_soporte' };
@@ -900,6 +932,7 @@ export function dominioOne(puerto: PuertoOne, o: { rol: string; ahora?: () => nu
       const quedan = ctx.conversacion.some((f) => esSoporte(f) && !usadas.has(f.id) && !usado.has(f.id) && f.media.lectura !== undefined);
       return p.accion === 'corregir_gasto' || (quedan && ['gasto', 'adjuntar_soporte'].includes(p.accion)) ? { lineas: h.lineas, seguir: true } : null;
     },
+    revisarRespuesta: (s) => listaDeDestinoDelModelo(s),
     cierres: CIERRES_ONE,
     cerrar: (n, a) => cerrar(n, a),
     reenvios: 'mensaje',

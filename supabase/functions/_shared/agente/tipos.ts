@@ -283,6 +283,11 @@ export interface Dominio {
    * demás salen después, en orden. El modelo solo decide llamarla y con qué ficha.
    */
   cierres?: DeclaracionHerramienta[];
+  /**
+   * Revisa una respuesta del modelo antes de que salga (2026-10-21). Devuelve el error para el modelo, o null. En ONE: la
+   * lista para elegir a qué negocio va un gasto (con «Gasto de empresa») solo la arma el código (`preguntar_destino`).
+   */
+  revisarRespuesta?(salida: Salida, ctx: ContextoDominio): string | null;
   cerrar?(nombre: string, args: Record<string, unknown>, ctx: ContextoDominio): Promise<
     | { ok: true; salidas: Salida[]; datos?: unknown; privado?: unknown }
     | { ok: false; error: string; candado: string }
