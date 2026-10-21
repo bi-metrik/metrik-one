@@ -18,7 +18,8 @@
 import { getWorkspace } from '@/lib/actions/get-workspace'
 import { elementosDe, leerTodasLasFotos } from '@/lib/fotos/catalogo'
 import { enlacesDeCatalogo } from '@/lib/fotos/catalogo-almacen'
-import { fotoImprimible, objetivo } from '@/lib/fotos/clave'
+import { fotoImprimible, objetivo, type ObjetivoFoto } from '@/lib/fotos/clave'
+import { pedidoDeLinea } from '@/lib/cotizaciones/proveedor-de-linea'
 import { leerConocidos, resolverPedidos } from '@/lib/fotos/perfiles-db'
 import { puedeVerCuentasDeProveedor, type Area, type Role } from '@/lib/permissions/can-edit'
 import { tienePropuestaHtml } from '@/lib/pdf/motor-html'
@@ -123,7 +124,21 @@ async function asegurarFilasDeFotos(ctx: Contexto): Promise<void> {
 
 // ── Lista ────────────────────────────────────────────────────────────────────
 
-export type ListaProveedores = Resultado<{ proveedores: ProveedorEnLista[]; equipo: PersonaEquipo[]; yo: string | null; editable: boolean; hoy: string }>
+/**
+ * Un nombre de hotel o tour de una cotización que no se asoció solo a ninguna ficha porque se parece
+ * a varias (o a una de otra ciudad, o sin ciudad): brief del 2026-10-21, punto 5. No tiene ficha:
+ * la persona dice cuál es (alias) o que es otro (ficha propia).
+ */
+export interface NombreSinClasificar {
+  tipo: 'hotel' | 'actividad'
+  nombre: string
+  ciudad: string | null
+  candidatos: { clave: string; nombre: string; ciudad: string | null; id: string | null }[]
+  /** En cuántas líneas de cotizaciones en borrador aparece. */
+  lineas: number
+}
+
+export type ListaProveedores = Resultado<{ proveedores: ProveedorEnLista[]; equipo: PersonaEquipo[]; yo: string | null; editable: boolean; hoy: string; sinClasificar?: NombreSinClasificar[] }>
 
 export async function leerProveedores(): Promise<ListaProveedores> {
   const ctx = await contexto(false)
@@ -175,7 +190,61 @@ export async function leerProveedores(): Promise<ListaProveedores> {
       }
     })
     .sort((a, b) => a.nombre.localeCompare(b.nombre, 'es'))
-  return { ok: true, proveedores, equipo: personas, yo: ctx.staffId, editable: ctx.editable, hoy }
+  const sinClasificar = await nombresSinClasificar(ctx, (p.data ?? []) as FilaProveedor[])
+  return { ok: true, proveedores, equipo: personas, yo: ctx.staffId, editable: ctx.editable, hoy, sinClasificar }
+}
+
+const TOPE_LINEAS_SIN_CLASIFICAR = 500
+
+/**
+ * Los nombres de las cotizaciones en borrador que quedaron en duda (no se asociaron ni crearon
+ * ficha). Se calculan al leer la lista: no hay tabla de «pendientes», es el mismo reconocimiento de
+ * la tarjeta (`resolverPedidos`, sin escribir). Sin el destino del viaje: un nombre sin ciudad que
+ * la tarjeta asocia con el destino aparece aquí hasta que una tarjeta lo asocia (y guarda el alias).
+ */
+async function nombresSinClasificar(ctx: Contexto, fichas: readonly FilaProveedor[]): Promise<NombreSinClasificar[]> {
+  try {
+    const { data, error } = await ctx.db
+      .from('items')
+      .select('*, cotizaciones!inner(workspace_id, estado)')
+      .eq('cotizaciones.workspace_id', ctx.workspaceId)
+      .eq('cotizaciones.estado', 'borrador')
+      .order('created_at', { ascending: false })
+      .limit(TOPE_LINEAS_SIN_CLASIFICAR)
+    if (error || !data) return []
+    const porLlave = new Map<string, { o: ObjetivoFoto; lineas: number }>()
+    for (const i of data as { nombre: string | null; grupo: string | null; tarifa_pax: unknown; proveedor_id?: string | null }[]) {
+      if (i.proveedor_id) continue
+      const p = pedidoDeLinea({ nombre: i.nombre, grupo: i.grupo, tarifa_pax: i.tarifa_pax })
+      if (!p || p.aMano || p.descartada) continue
+      const o = objetivo(p.tipo, p.nombre, p.ciudad)
+      if (!o) continue
+      const k = `${o.tipo}:${o.clave}`
+      porLlave.set(k, { o, lineas: (porLlave.get(k)?.lineas ?? 0) + 1 })
+    }
+    if (porLlave.size === 0) return []
+    const leidos = await leerConocidos(ctx.db, ctx.workspaceId)
+    if (!leidos.ok) return []
+    const resueltos = await resolverPedidos(ctx.db, ctx.workspaceId, ctx.staffId, [...porLlave.values()].map((x) => x.o), leidos.conocidos, { escribir: false })
+    const idPorClave = new Map(fichas.map((f) => [`${f.tipo}:${f.clave}`, f.id]))
+    return resueltos
+      .filter((r) => r.duda && (r.pedido.tipo === 'hotel' || r.pedido.tipo === 'actividad'))
+      .map((r) => ({
+        tipo: r.pedido.tipo as 'hotel' | 'actividad',
+        nombre: r.pedido.nombre,
+        ciudad: r.pedido.ciudad,
+        candidatos: (r.duda?.candidatos ?? [{ clavePerfil: r.duda!.clave, nombre: r.duda!.nombre, ciudad: r.duda!.ciudad }]).map((c) => ({
+          clave: c.clavePerfil,
+          nombre: c.nombre,
+          ciudad: c.ciudad,
+          id: idPorClave.get(`${r.pedido.tipo}:${c.clavePerfil}`) ?? null,
+        })),
+        lineas: porLlave.get(`${r.pedido.tipo}:${r.pedido.clave}`)?.lineas ?? 1,
+      }))
+      .sort((a, b) => b.lineas - a.lineas || a.nombre.localeCompare(b.nombre, 'es'))
+  } catch {
+    return []
+  }
 }
 
 /**

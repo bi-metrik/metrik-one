@@ -10,7 +10,8 @@ import { nombreLlano } from '@/lib/fotos/clave'
 import { NOMBRE_TIPO_PROVEEDOR, TIPOS_PROVEEDOR, type TipoProveedor } from '@/lib/proveedores/tipos'
 import { mesAnio, NOMBRE_SEMAFORO, type Semaforo } from '@/lib/proveedores/vigencia'
 import { porRenovar, type ProveedorEnLista } from '@/lib/proveedores/vista'
-import { crearProveedor, type PersonaEquipo, type ResultadoCrear } from './actions'
+import { contestarMismoPerfil } from '../fotos/actions'
+import { crearProveedor, type NombreSinClasificar, type PersonaEquipo, type ResultadoCrear } from './actions'
 import { PastillaSemaforo } from './semaforo'
 
 const FILTROS_SEMAFORO: (Semaforo | 'todos')[] = ['todos', 'vigente', 'por_vencer', 'vencido', 'sin_fechas', 'sin_tarifario']
@@ -26,12 +27,20 @@ export default function ListaProveedores({
   yo,
   editable,
   crear = crearProveedor,
+  sinClasificar = [],
+  porClasificarDeEntrada = false,
+  contestar = contestarMismoPerfil,
 }: {
   proveedores: ProveedorEnLista[]
   equipo: PersonaEquipo[]
   yo: string | null
   editable: boolean
   crear?: typeof crearProveedor
+  /** Nombres de cotizaciones que se parecen a varias fichas: no se asociaron (brief del 2026-10-21, punto 5). */
+  sinClasificar?: NombreSinClasificar[]
+  /** Llegó desde la tarjeta («Proveedores, Por clasificar»): abre con el filtro puesto. */
+  porClasificarDeEntrada?: boolean
+  contestar?: typeof contestarMismoPerfil
 }) {
   const router = useRouter()
   const [buscar, setBuscar] = useState('')
@@ -40,7 +49,7 @@ export default function ListaProveedores({
   const [etiqueta, setEtiqueta] = useState('')
   const [estado, setEstado] = useState<Semaforo | 'todos'>('todos')
   const [mios, setMios] = useState(false)
-  const [porClasificar, setPorClasificar] = useState(false)
+  const [porClasificar, setPorClasificar] = useState(porClasificarDeEntrada)
   // «Con tarifas / Sin tarifas» (brief del 2026-10-21, punto 4): el criterio del buscador de la
   // cotización. Con tarifas = extracción revisada; subir el archivo no cuenta.
   const [conTarifas, setConTarifas] = useState<'todas' | 'con' | 'sin'>('todas')
@@ -251,7 +260,7 @@ export default function ListaProveedores({
           className={`rounded-full px-3 py-1 text-xs ${porClasificar ? 'bg-foreground text-background' : 'border text-muted-foreground hover:bg-accent'}`}
           data-por-clasificar
         >
-          Por clasificar{incompletas > 0 ? ` (${incompletas})` : ''}
+          Por clasificar{incompletas + sinClasificar.length > 0 ? ` (${incompletas + sinClasificar.length})` : ''}
         </button>
         <div className="inline-flex overflow-hidden rounded-full border text-xs" role="group" aria-label="Tarifas" data-filtro-tarifas>
           {(['con', 'sin'] as const).map((k) => (
@@ -288,6 +297,9 @@ export default function ListaProveedores({
           <p className="m-0 text-[11px] text-muted-foreground">
             Fichas que no se pueden usar para cotizar: les falta la ciudad (el municipio), el país o el tipo, o la ciudad está por confirmar.
           </p>
+        )}
+        {porClasificar && sinClasificar.length > 0 && (
+          <NombresSinClasificar nombres={sinClasificar} editable={editable} contestar={contestar} onListo={() => router.refresh()} />
         )}
       </div>
 
@@ -339,6 +351,62 @@ export default function ListaProveedores({
           ))}
         </ul>
       )}
+    </div>
+  )
+}
+
+/**
+ * Los nombres de las cotizaciones que se parecen a varias fichas (o a una de otra ciudad): ONE no
+ * los asoció ni les creó ficha (brief del 2026-10-21, punto 5). Aquí la persona dice cuál es (queda
+ * como otro nombre de esa ficha y la tarjeta trae sus fotos) o que es otro (ficha propia).
+ */
+function NombresSinClasificar({ nombres, editable, contestar, onListo }: { nombres: NombreSinClasificar[]; editable: boolean; contestar: typeof contestarMismoPerfil; onListo: () => void }) {
+  const [ocupado, setOcupado] = useState<string | null>(null)
+  async function decidir(n: NombreSinClasificar, clave: string, mismo: boolean) {
+    const llave = `${n.tipo}:${n.nombre}:${n.ciudad ?? ''}`
+    if (ocupado) return
+    setOcupado(llave)
+    try {
+      const r = await contestar({ tipo: n.tipo, nombre: n.nombre, ciudad: n.ciudad }, clave, mismo)
+      if (!r.ok) return void toast.error(r.error)
+      toast.success(mismo ? 'Listo: ese nombre queda como de esa ficha.' : 'Listo: quedó con su propia ficha.')
+      onListo()
+    } catch {
+      toast.error('No se pudo guardar. Vuelve a intentarlo.')
+    } finally {
+      setOcupado(null)
+    }
+  }
+  return (
+    <div className="space-y-1.5 rounded-lg border border-[#F4D7A1] bg-[#FFF8EC] p-2.5" data-sin-clasificar>
+      <p className="m-0 text-xs font-medium">Nombres de cotizaciones sin ficha ({nombres.length})</p>
+      <p className="m-0 text-[11px] text-muted-foreground">Se parecen a más de un proveedor, así que ONE no los asoció solo y sus líneas van sin fotos. Dinos cuál es.</p>
+      <ul className="m-0 list-none space-y-1.5 p-0">
+        {nombres.map((n) => {
+          const llave = `${n.tipo}:${n.nombre}:${n.ciudad ?? ''}`
+          return (
+            <li key={llave} className="rounded-md border bg-background p-2 text-xs" data-nombre-sin-clasificar={n.nombre}>
+              <p className="m-0">
+                <b>{n.nombre}</b>
+                {n.ciudad ? ` · ${n.ciudad}` : ' · sin ciudad'}
+                <span className="text-muted-foreground"> · {n.lineas} {n.lineas === 1 ? 'línea' : 'líneas'}</span>
+              </p>
+              {editable && (
+                <div className="mt-1 flex flex-wrap gap-1.5">
+                  {n.candidatos.map((c) => (
+                    <button key={c.clave} type="button" disabled={!!ocupado} onClick={() => void decidir(n, c.clave, true)} className="min-h-9 rounded-md border px-2 py-1 hover:bg-accent disabled:opacity-50">
+                      Es {c.nombre}{c.ciudad ? ` (${c.ciudad})` : ''}
+                    </button>
+                  ))}
+                  <button type="button" disabled={!!ocupado} onClick={() => void decidir(n, n.candidatos[0]?.clave ?? '', false)} className="min-h-9 rounded-md px-2 py-1 text-muted-foreground underline disabled:opacity-50">
+                    Es otro: crear su ficha
+                  </button>
+                </div>
+              )}
+            </li>
+          )
+        })}
+      </ul>
     </div>
   )
 }
