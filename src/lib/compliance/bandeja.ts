@@ -30,7 +30,7 @@
  */
 
 import type { MotivoCobertura } from './liberaciones';
-import { rangoTier, type TierResuelto } from './tier-fuentes';
+import type { TierResuelto } from './tier-fuentes';
 
 // ─── Vocabulario ───────────────────────────────────────────────────────────
 
@@ -261,9 +261,12 @@ export function calcularIndicadores(
 /**
  * Toda coincidencia se guarda con `severidad = 'alto'`, sea la ONU o una nota
  * de prensa. Con el masivo, la cola se llena de incidentes judiciales y lo
- * vinculante queda enterrado. El triage NO cambia la severidad guardada (eso
- * pide el visto de Emilio): ordena y rotula con el tier que ya se guarda en
- * cada consulta.
+ * vinculante queda enterrado. El triage ROTULA cada fila con el tier que ya se
+ * guarda en cada consulta, para que la oficial vea de un vistazo qué es qué.
+ *
+ * NO reordena ni cambia la severidad: por el C1 del concepto de Emilio
+ * (2026-08-31) el tier se observa y no decide hasta el bloque B, con el
+ * catálogo firmado. Lo garantiza `compliance-tier-c1-observable.test.ts`.
  *
  * Los rótulos de la bandeja no dicen "no vinculante" sobre ninguna lista
  * internacional: desde 2026-10-05 la vinculancia de OFAC, UE y FTO se atribuye
@@ -283,19 +286,4 @@ export const ROTULO_TRIAGE: Readonly<Record<TierResuelto, { texto: string; tono:
 /** El rótulo de una consulta por su tier máximo. null = anterior a la clasificación. */
 export function rotuloTriage(tier: TierResuelto | null | undefined): { texto: string; tono: TonoTriage } {
   return ROTULO_TRIAGE[tier ?? 'sin_clasificar'];
-}
-
-/**
- * Orden de la cola: primero por exigencia del tier (lo vinculante arriba) y,
- * dentro del mismo tier, por antigüedad (la más vieja arriba). Lo segundo es
- * el criterio del dictamen de Lucía del 2026-08-24 —lo que se mide es cuánto
- * lleva la empresa sabiendo sin decidir— y se conserva dentro de cada tier.
- */
-export function compararPorTriage(
-  a: { tier_maximo: TierResuelto | null; ultima_consulta_fecha: string },
-  b: { tier_maximo: TierResuelto | null; ultima_consulta_fecha: string },
-): number {
-  const porTier = rangoTier(a.tier_maximo) - rangoTier(b.tier_maximo);
-  if (porTier !== 0) return porTier;
-  return a.ultima_consulta_fecha.localeCompare(b.ultima_consulta_fecha);
 }

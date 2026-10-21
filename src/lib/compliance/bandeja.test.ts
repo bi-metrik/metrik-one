@@ -31,6 +31,7 @@ import {
   type EtiquetaBandeja,
 } from './bandeja';
 import type { MotivoCobertura } from './liberaciones';
+import { rotuloTriage, ROTULO_TRIAGE } from './bandeja';
 
 const HOY = '2026-08-31';
 
@@ -205,5 +206,22 @@ describe('etiquetaDeContraparte — premisa cambiada (R3)', () => {
     // No hay marca que apagar: la premisa se deriva comparando fechas, así que
     // una liberación nueva (posterior al delta) devuelve la fila a reposo sola.
     expect(etiquetaDeContraparte(true, 'vigente', false)).toBe('excepciones_vigentes');
+  });
+});
+
+describe('rótulo de triage (P1, 2026-10-20)', () => {
+  it('sin clasificación se rotula como fuente sin clasificar, no como leve', () => {
+    expect(rotuloTriage(null).texto).toBe('Fuente sin clasificar');
+    expect(rotuloTriage(null).tono).toBe('advertencia');
+  });
+
+  it('lo vinculante se rotula en alerta', () => {
+    expect(rotuloTriage('tier_1')).toEqual({ texto: 'Lista vinculante', tono: 'alerta' });
+  });
+
+  it('ningún rótulo dice "no vinculante" (regla 2026-10-05)', () => {
+    for (const r of Object.values(ROTULO_TRIAGE)) {
+      expect(r.texto.toLowerCase()).not.toContain('no vinculante');
+    }
   });
 });

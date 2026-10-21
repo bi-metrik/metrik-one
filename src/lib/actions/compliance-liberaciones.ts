@@ -32,7 +32,6 @@ import {
 } from '@/lib/compliance/liberaciones';
 import {
   calcularIndicadores,
-  compararPorTriage,
   etiquetaDeContraparte,
   type EtiquetaBandeja,
   type IndicadoresBandeja,
@@ -173,12 +172,16 @@ export async function registrarDecisionContraparte(
   // aviso, y la alarma que sigue abierta es el lado conservador.
   const grupo = grupoClaveHallazgo(identidad.tipo, identidad.numero);
   if (grupo) {
-    const { error: errAlarma } = await svc.rpc('resolver_grupo_notificaciones', {
-      p_workspace_id: guard.workspaceId,
-      p_grupo_clave: grupo,
-      p_resuelta_por: guard.userId,
-    });
-    if (errAlarma) console.error('[liberaciones] alarma_no_resuelta', grupo, errAlarma.message);
+    try {
+      const { error: errAlarma } = await svc.rpc('resolver_grupo_notificaciones', {
+        p_workspace_id: guard.workspaceId,
+        p_grupo_clave: grupo,
+        p_resuelta_por: guard.userId,
+      });
+      if (errAlarma) console.error('[liberaciones] alarma_no_resuelta', grupo, errAlarma.message);
+    } catch (e) {
+      console.error('[liberaciones] alarma_no_resuelta', grupo, (e as Error).message);
+    }
   }
 
   return { ok: true, data: data as ComplianceLiberacion };
@@ -282,9 +285,9 @@ export type ContraparteConHallazgo = {
   ultima_consulta_fecha: string;
   total_matches: number;
   /**
-   * Tier máximo de la consulta vigente (la más reciente con hallazgo). Ordena la
-   * cola y rotula la fila (triage, P1 2026-10-20). null = consulta anterior a la
-   * clasificación; se trata como `sin_clasificar`.
+   * Tier máximo de la consulta vigente (la más reciente con hallazgo). Solo
+   * rotula la fila (triage, P1 2026-10-20); no ordena ni decide (C1). null =
+   * consulta anterior a la clasificación; se rotula como `sin_clasificar`.
    */
   tier_maximo: TierResuelto | null;
   cobertura: Cobertura;
@@ -520,11 +523,14 @@ export async function listarTableroLiberaciones(): Promise<Result<TableroLiberac
       .push(contraparte);
   }
 
-  // Triage (P1, 2026-10-20): primero lo más exigente por tier, y dentro de cada
-  // tier por ANTIGÜEDAD (la más vieja arriba), que es lo que mide cuánto lleva
-  // la empresa sabiendo algo sin decidir.
-  buckets.hallazgos_sin_decidir.sort(compararPorTriage);
-  buckets.sin_cobertura_vigente.sort(compararPorTriage);
+  // La cola se ordena por ANTIGÜEDAD (la más vieja arriba), no por severidad:
+  // lo que se mide acá es cuánto lleva la empresa sabiendo algo sin decidir.
+  // El tier rotula la fila pero NO reordena: C1 del concepto de Emilio
+  // (2026-08-31), hasta el bloque B con el catálogo firmado.
+  buckets.hallazgos_sin_decidir.sort((a, b) =>
+    a.ultima_consulta_fecha.localeCompare(b.ultima_consulta_fecha));
+  buckets.sin_cobertura_vigente.sort((a, b) =>
+    a.ultima_consulta_fecha.localeCompare(b.ultima_consulta_fecha));
 
   // Vigilancia continua se cuenta sobre TODAS las contrapartes concluyentes sin
   // hallazgo, no solo las que alguna vez lo tuvieron.

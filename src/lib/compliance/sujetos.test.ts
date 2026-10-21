@@ -474,3 +474,67 @@ describe('etiquetaResultadoConsulta', () => {
     expect(etiquetaResultadoConsulta(null)).toBe('sin resultado');
   });
 });
+
+describe('situacionSujeto — hallazgo sin decidir (P1, 2026-10-20)', () => {
+  const ALTO_RECIENTE = { created_at: '2026-09-01T10:00:00Z', severidad: 'alto' };
+
+  it('hallazgo sin decisión: en revisión, no "sin consultar"', () => {
+    const s = situacionSujeto(RELACION_ABIERTA, [], null, HOY, ALTO_RECIENTE);
+    expect(s.estado).toBe('en_revision');
+  });
+
+  it('hallazgo posterior a una limpia vigente: en revisión, no "puede contratarse"', () => {
+    const s = situacionSujeto(
+      RELACION_ABIERTA,
+      [],
+      { created_at: '2026-08-01T10:00:00Z', vigente_hasta: '2027-02-01' },
+      HOY,
+      ALTO_RECIENTE,
+    );
+    expect(s.estado).toBe('en_revision');
+  });
+
+  it('hallazgo posterior a la liberación vigente: en revisión (la premisa cambió)', () => {
+    const s = situacionSujeto(RELACION_ABIERTA, [liberacion()], null, HOY, ALTO_RECIENTE);
+    expect(s.estado).toBe('en_revision');
+  });
+
+  it('hallazgo anterior a la liberación: la decisión manda', () => {
+    const s = situacionSujeto(
+      RELACION_ABIERTA,
+      [liberacion({ created_at: '2026-09-02T10:00:00Z' })],
+      null,
+      HOY,
+      ALTO_RECIENTE,
+    );
+    expect(s.estado).toBe('habilitado');
+  });
+
+  it('un rechazo sigue ganando aunque haya hallazgo posterior', () => {
+    const s = situacionSujeto(
+      RELACION_ABIERTA,
+      [liberacion({ decision: 'rechazada', vigente_hasta: null })],
+      null,
+      HOY,
+      ALTO_RECIENTE,
+    );
+    expect(s.estado).toBe('inhabilitado');
+  });
+
+  it('última concluyente limpia: no queda en revisión', () => {
+    const s = situacionSujeto(
+      RELACION_ABIERTA,
+      [],
+      { created_at: '2026-09-01T10:00:00Z', vigente_hasta: '2027-03-01' },
+      HOY,
+      { created_at: '2026-09-01T10:00:00Z', severidad: 'sin_hallazgo' },
+    );
+    expect(s.estado).toBe('habilitado');
+  });
+
+  it('el resumen cuenta los que están en revisión', () => {
+    const r = resumirSujetos([situacionSujeto(RELACION_ABIERTA, [], null, HOY, ALTO_RECIENTE)], HOY);
+    expect(r.en_revision).toBe(1);
+    expect(r.sin_consultar).toBe(0);
+  });
+});

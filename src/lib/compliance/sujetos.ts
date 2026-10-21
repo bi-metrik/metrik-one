@@ -66,6 +66,13 @@ export type EstadoSujeto =
   | 'habilitado'
   /** Liberado, pero el oficial lo dejó bajo observación. */
   | 'en_seguimiento'
+  /**
+   * Su última consulta trajo hallazgo y el oficial todavía no decidió sobre ella
+   * (P1, 2026-10-20). Antes salía "Sin consultar" o, si tenía una limpia vigente
+   * de antes, "Habilitado": compras leía "puede contratarse" sobre alguien con
+   * un hallazgo abierto.
+   */
+  | 'en_revision'
   /** Estuvo habilitado y la vigencia caducó. Nadie lo tocó: caducó solo. */
   | 'vencido'
   /** El oficial lo rechazó. Solo otra decisión suya lo levanta. */
@@ -74,6 +81,7 @@ export type EstadoSujeto =
 export const ESTADOS_SUJETO: readonly EstadoSujeto[] = [
   'habilitado',
   'en_seguimiento',
+  'en_revision',
   'vencido',
   'inhabilitado',
   'sin_consultar',
@@ -83,6 +91,7 @@ export const ESTADO_SUJETO_LABEL: Readonly<Record<EstadoSujeto, string>> = {
   sin_consultar: 'Sin consultar',
   habilitado: 'Habilitado',
   en_seguimiento: 'Habilitado en seguimiento',
+  en_revision: 'En revisión del oficial',
   vencido: 'Vencido',
   inhabilitado: 'Inhabilitado',
 };
@@ -96,6 +105,9 @@ export const ESTADO_SUJETO_ACCION: Readonly<Record<EstadoSujeto, string>> = {
   sin_consultar: 'Falta consultarlo antes de vincularlo.',
   habilitado: 'Puede contratarse.',
   en_seguimiento: 'Puede contratarse, con las condiciones que fijó el oficial.',
+  // No dice "hallazgo" ni nombra la lista: al ejecutor le basta saber que no
+  // contrata todavía; qué salió es del oficial.
+  en_revision: 'No contratar todavía: el oficial está revisando esta contraparte.',
   vencido: 'No contratar hasta revalidar.',
   inhabilitado: 'No contratar.',
 };
@@ -135,11 +147,10 @@ export type ConsultaLimpia = {
 /**
  * La consulta a listas MÁS RECIENTE de un sujeto, de cualquier severidad.
  *
- * Es solo informativa: responde "¿cuándo fue la última evaluación de este
- * tercero?", que el oficial necesita ver en la base. NO entra a
- * `situacionSujeto`: el estado sigue saliendo de la consulta limpia y de las
- * liberaciones, con su precedencia. Una consulta con hallazgo más reciente que
- * la limpia no cambia el estado; lo cambia la liberación que el oficial escriba.
+ * Responde "¿cuándo fue la última evaluación de este tercero?", que el oficial
+ * necesita ver en la base. Desde P1 (2026-10-20) también entra a
+ * `situacionSujeto`, pero solo para una cosa: si trajo hallazgo y es posterior a
+ * la última decisión del oficial, el sujeto queda `en_revision`.
  */
 export type UltimaConsulta = {
   created_at: string;
@@ -304,6 +315,7 @@ export function situacionSujeto(
   liberaciones: readonly ComplianceLiberacion[],
   consultaLimpia: ConsultaLimpia | null,
   hoyISO: string,
+  ultimaConsulta: UltimaConsulta | null = null,
 ): SituacionSujeto {
   const relacionCerrada = relacionCerradaAl(sujeto.relacion_hasta, hoyISO);
 
@@ -311,6 +323,18 @@ export function situacionSujeto(
 
   if (cobertura.motivo === 'rechazada') {
     return { estado: 'inhabilitado', venceEl: null, fuente: 'liberacion', relacionCerrada };
+  }
+
+  // Un hallazgo posterior a la última decisión del oficial (o sin decisión
+  // alguna) gana sobre la limpia anterior y sobre la liberación vigente: el
+  // hecho sobre el que se habilitó cambió y nadie lo ha mirado (P1, 2026-10-20).
+  // Va después del rechazo porque un rechazo ya dice "no contratar".
+  const decididaEn = cobertura.liberacion?.created_at ?? null;
+  if (
+    ultimaConsulta?.severidad === 'alto' &&
+    (decididaEn === null || ultimaConsulta.created_at > decididaEn)
+  ) {
+    return { estado: 'en_revision', venceEl: null, fuente: 'consulta', relacionCerrada };
   }
 
   if (cobertura.cubierta && cobertura.liberacion) {
@@ -494,6 +518,7 @@ export function resumirSujetos(
     sin_consultar: 0,
     habilitado: 0,
     en_seguimiento: 0,
+    en_revision: 0,
     vencido: 0,
     inhabilitado: 0,
     total: 0,
