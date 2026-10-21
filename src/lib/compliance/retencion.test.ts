@@ -194,6 +194,18 @@ const CLASIFICACION: Record<string, Clasificacion> = {
       'el arnés re-actúa una pregunta real del bot («¿Viajan bebés (menores de 2 años)?»): una EDAD de pasajero. ' +
       'No hay plazo de conservación en este archivo.',
   },
+  'supabase/functions/_shared/agente/publico/reglamento-sabor.ts': {
+    tipo: 'no-es-plazo',
+    razon:
+      'el catálogo [EJEMPLO] del asistente de Sabor dice la edad sugerida de una experiencia («desde 8 años») y la ' +
+      'política de niños: EDADES de asistentes. No hay plazo de conservación en este archivo.',
+  },
+  'supabase/functions/_shared/agente/publico/arnes/conjuntos.ts': {
+    tipo: 'no-es-plazo',
+    razon:
+      'un caso adversario del arnés del asistente de Sabor es un menor que escribe («tengo 15 años»): una EDAD. ' +
+      'No hay plazo de conservación en este archivo.',
+  },
   'supabase/functions/_shared/agente/arnes/extraccion-casos.ts': {
     tipo: 'no-es-plazo',
     razon:
