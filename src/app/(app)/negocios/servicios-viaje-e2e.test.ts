@@ -419,6 +419,12 @@ describe('permisos en el servidor (§7.4)', () => {
 })
 
 // ── Fechas de los servicios (2026-10-21) ─────────────────────────────────────
+//
+// VISTO FALLAR (2026-10-21), una mutación a la vez: sin las fechas en `aFila` (2), sin completar al
+// traer (1), sin completar al abrir el tablero (1), sin `origen = 'cotizacion'` al completar (1),
+// sin la marca de corrección en la acción (3), sin el rastro al soltar (1). La guarda de
+// «corregida a mano» va DOS veces (en la lectura y en el UPDATE): quitar una sola no cae nada;
+// quitar las dos tumba 2.
 
 /** La lectura del pantallazo de una línea, como la guarda la cotización (datos ficticios). */
 const lectura = (identidad: Record<string, string | null>, campos: Array<{ label: string; valor: string }> = []) => ({
@@ -536,6 +542,14 @@ describe('fechas de los servicios', () => {
     const marca = fila('hotel').fechas_leidas_at
     expect((await completarFechasDeServicios(clienteFalso(), { workspaceId: WS, negocioId: NEG, soloSinMarca: true })).completadas).toBe(0)
     expect(fila('hotel').fechas_leidas_at).toBe(marca)
+  })
+
+  it('traer los servicios otra vez también completa las filas ya generadas (con la marca puesta)', async () => {
+    await aceptarCotizacionNegocio(COT, NEG, 'it-eco')
+    for (const f of servicios()) Object.assign(f, { fecha_fin: null, tramos: null, fechas_leidas_at: '2026-10-01T00:00:00Z' })
+    const r = await generarServiciosDesdeTarifa(clienteFalso(), { workspaceId: WS, negocioId: NEG, cotizacionId: COT })
+    expect(r).toMatchObject({ ok: true, creadas: 0, completadas: 2 }) // vuelo y hotel; traslado y fee no tienen fin
+    expect([fila('hotel').fecha_fin, (fila('va').tramos as unknown[]).length]).toEqual(['2026-11-13', 2])
   })
 
   it('corregir la aceptación deja en la Actividad las fechas corregidas a mano que se pierden', async () => {
