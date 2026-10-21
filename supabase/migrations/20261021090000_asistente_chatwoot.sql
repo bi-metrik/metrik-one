@@ -66,7 +66,7 @@ create table public.chatwoot_conversacion (
   constraint chatwoot_conversacion_clase check (clase in ('escrito', 'toque', 'audio', 'imagen', 'otro', 'bot', 'nota')),
   constraint chatwoot_conversacion_estado check (
     (direccion = 'entrante' and estado is null)
-    or (direccion = 'saliente' and estado in ('generado', 'publicado', 'fallido', 'incierto'))
+    or (direccion = 'saliente' and estado is not null and estado in ('generado', 'publicado', 'fallido', 'incierto'))
   ),
   constraint chatwoot_conversacion_ranura check ((direccion = 'saliente') = (ranura is not null))
 );

@@ -378,6 +378,13 @@ backend = "postgres"
 # y el bot queda caido (paso el 2026-05-26).
 verify_jwt = false
 
+[functions.chatwoot-agente]
+# Webhook del Agent Bot de Chatwoot (asistente publico, Sabor): NO usa el JWT de
+# Supabase. Chatwoot no lo envia; la autenticidad se valida dentro de la funcion
+# con la firma HMAC-SHA256 (X-Chatwoot-Signature + X-Chatwoot-Timestamp, 5 min)
+# y el secreto CHATWOOT_WEBHOOK_SECRET_<SLUG>. Con true, el gateway responde 401.
+verify_jwt = false
+
 [functions.wa-parse-test]
 # Endpoint de pruebas del parser, sin auth de Supabase.
 verify_jwt = false
