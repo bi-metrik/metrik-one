@@ -32,6 +32,11 @@ export interface DepsTurno {
   ahoraMs: () => number;
   /** Reloj monotónico (para medir). */
   reloj: () => number;
+  /**
+   * El prompt de sistema de otro bot (el asistente público arma el suyo por secciones, §7 de su diseño). Sin esto, el de
+   * siempre (`contexto.ts`): la bandeja de Trappvel no lo pasa y no cambia nada.
+   */
+  sistema?: (r: Reglamento, c: ConfigAgente) => string;
 }
 
 export interface EntradaTurno {
@@ -188,7 +193,7 @@ export async function turnoDelModelo(deps: DepsTurno, e: EntradaTurno): Promise<
     llamados: 0, uso: [], herramientas: [], candados: [], verificador: [], reglas_usadas: [], ms_modelo: 0, ms_herramientas: 0,
   };
   const est = await estado(deps, e);
-  const sis = sistema(r, c);
+  const sis = deps.sistema ? { texto: deps.sistema(r, c) } : sistema(r, c);
   const usuario = mensajeDelTurno({ estado: est, filas: e.filas, nuevos: e.nuevos, quien: e.ctx.remitente.nombre });
   const decl = [...declaraciones(d, r), ...(e.tras ? [DECLARACION_TERMINAR] : [])];
   const todas = decl.map((x) => x.name);
