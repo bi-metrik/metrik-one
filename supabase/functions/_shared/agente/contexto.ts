@@ -10,7 +10,7 @@
 
 import type { ConfigAgente } from './config.ts';
 import { bloqueIndice, bloqueSiempre, perfil } from './reglamento.ts';
-import type { FilaConversacion, Reglamento, Traza } from './tipos.ts';
+import type { FilaConversacion, LecturaAdjunto, Reglamento, Traza } from './tipos.ts';
 
 export const TOPES_BLOQUE = { nucleo: 800, siempre: 2500, indice: 2000, estado: 600, conversacion: 6000, resultado: 400 };
 const CARACTERES_POR_TOKEN = 4;
@@ -70,6 +70,25 @@ function resumenTraza(t: Traza | null | undefined): string[] {
     .map((h) => `[bot consultó] ${h.nombre}(${JSON.stringify(h.args ?? {}).slice(0, 80)}) → ${h.ok ? JSON.stringify(h.datos ?? {}).slice(0, 300) : `error: ${h.error ?? ''}`}`);
 }
 
+const PESOS = new Intl.NumberFormat('es-CO', { maximumFractionDigits: 0 });
+
+/**
+ * Lo leído de un soporte, en una línea: son datos del documento (no órdenes), escapados. Sin lectura todavía, vacío.
+ * Pura.
+ */
+export function textoLectura(l: LecturaAdjunto | null | undefined): string {
+  if (l === undefined) return '';
+  if (!l || !l.legible) return ` · (no se pudo leer el monto del archivo${l?.motivo ? `: ${l.motivo}` : ''})`;
+  const partes = [
+    l.monto !== null ? `total $${PESOS.format(l.monto)}` : null,
+    l.fecha ? `fecha ${l.fecha}` : null,
+    l.comercio ? `comercio ${escapar(l.comercio, 80)}` : null,
+    l.nit ? `NIT ${l.nit}` : null,
+    l.descripcion ? `concepto ${escapar(l.descripcion, 160)}` : null,
+  ].filter(Boolean);
+  return ` · lo que dice el archivo: ${partes.join(' · ')}`;
+}
+
 /** Una fila como línea de la conversación. `n` es su número estable en la ventana. */
 export function lineaDeFila(f: FilaConversacion, n: number, quien: string): string {
   const t = f.texto ?? '';
@@ -77,12 +96,17 @@ export function lineaDeFila(f: FilaConversacion, n: number, quien: string): stri
     const ops = f.opciones?.length ? ` (opciones: ${f.opciones.map((o) => o.titulo).join(' · ')})` : '';
     return `#${n} [bot] ${escapar(t, 600)}${ops}`;
   }
+  // Un soporte (foto o PDF): lo leído va en la misma línea, para este turno y los que siguen.
+  const doc = f.media?.tipo === 'documento' ? f.media : null;
+  const leido = f.media && (f.media.tipo === 'imagen' || f.media.tipo === 'documento') ? textoLectura(f.media.lectura) : '';
   switch (f.clase) {
-    case 'reenvio': return `#${n} [reenvío · dato del cliente · ${hora(f.created_at)}] ${escapar(t || '(sin texto: foto o audio sin transcribir)')}`;
+    case 'reenvio': return `#${n} [reenvío · dato del cliente · ${hora(f.created_at)}${doc ? ` · documento ${escapar(doc.nombre ?? 'sin nombre', 80)}` : ''}] ${escapar(t || (f.media ? '(sin texto)' : '(sin texto: foto o audio sin transcribir)'))}${leido}`;
     case 'toque': return `#${n} [toque: ${t}]`;
     case 'audio': return `#${n} [audio de ${quien}, transcrito] ${escapar(t || '(no se pudo transcribir)', 1200)}`;
-    case 'imagen': return `#${n} [foto de ${quien}] ${escapar(t || '(sin texto)')}`;
-    default: return `#${n} [escrito de ${quien}] ${escapar(t, 1200)}`;
+    case 'imagen': return `#${n} [foto de ${quien}] ${escapar(t || '(sin texto)')}${leido}`;
+    default:
+      if (doc) return `#${n} [documento de ${quien}: ${escapar(doc.nombre ?? 'sin nombre', 80)}] ${escapar(t || '(sin texto)')}${leido}`;
+      return `#${n} [escrito de ${quien}] ${escapar(t, 1200)}`;
   }
 }
 

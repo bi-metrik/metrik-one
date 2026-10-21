@@ -29,10 +29,40 @@ export interface FilaConversacion {
   contexto_wamid?: string | null;
   wa_message_id?: string | null;
   /** El archivo que llegó con el mensaje (`{ tipo: 'imagen', id }` = el id de Meta para bajarlo). Solo entrantes. */
-  media?: { tipo: string; id: string } | null;
+  media?: MediaFila | null;
   turno_id?: string | null;
   traza?: Traza | null;
   created_at: string;
+}
+
+/**
+ * Lo que se leyó de un soporte (foto o PDF) con el modelo (`one/lectura-adjunto.ts`). Son datos del DOCUMENTO: mandan en
+ * monto, fecha, comercio y NIT; el destino y a qué gasto corresponde los dice la persona.
+ */
+export interface LecturaAdjunto {
+  /** false = no es un soporte de pago o no se alcanzó a leer el total. */
+  legible: boolean;
+  monto: number | null;
+  /** AAAA-MM-DD. */
+  fecha: string | null;
+  comercio: string | null;
+  nit: string | null;
+  descripcion: string | null;
+  /** Por qué no hay lectura (no se pudo bajar, el modelo no respondió). */
+  motivo?: string;
+}
+
+/**
+ * `wa_conversacion.media` (jsonb). El webhook escribe `tipo` e `id` (y, en un documento, `mime` y `nombre`); el dominio
+ * ONE completa `ref` (el archivo ya subido a `gastos-soportes`, todavía sin gasto) y `lectura` al preparar el turno.
+ */
+export interface MediaFila {
+  tipo: string;
+  id: string;
+  mime?: string;
+  nombre?: string;
+  ref?: string | null;
+  lectura?: LecturaAdjunto | null;
 }
 
 // ── El modelo ────────────────────────────────────────────────────────────────
@@ -233,6 +263,18 @@ export interface Dominio {
   trasEjecutar?(propuesta: Propuesta, hechos: Hechos, huella: string, ctx: ContextoDominio): Promise<{ lineas: string[]; propuesta?: Propuesta; seguir?: boolean } | null>;
   /** ¿La propuesta sigue sirviendo? (la tanda no cambió desde que se armó). Ausente = sí. */
   sigueVigente?(propuesta: Propuesta, ctx: ContextoDominio): boolean;
+  /**
+   * Antes del turno del modelo (2026-10-21, soportes del dominio ONE): baja, guarda y lee los archivos que llegaron
+   * (fotos y PDF) y deja lo leído en la fila (`media.ref`, `media.lectura`), para que la conversación lo muestre como
+   * texto. Devuelve un resumen para la traza. Nunca escribe en el negocio. El núcleo le pone un tope de tiempo.
+   */
+  prepararTurno?(ctx: ContextoDominio): Promise<Array<Record<string, unknown>>>;
+  /**
+   * Ventana de los adjuntos (ms, 2026-10-21): un adjunto y el texto que lo acompaña en mensajes separados se atienden
+   * en el MISMO turno si llegan dentro de esta ventana (la cola espera tras un adjunto y repite el turno si un adjunto
+   * llegó mientras el modelo pensaba). Sin ella, cada mensaje es su turno.
+   */
+  ventanaAdjuntosMs?: number;
   /** Una línea del estado que solo el dominio sabe (la tanda abierta). */
   estado?(ctx: ContextoDominio): string[] | Promise<string[]>;
   /**
@@ -284,6 +326,8 @@ export interface Traza {
    */
   tras_toque?: { origen: 'toque_propuesta' | 'si_escrito'; resultado: 'propuesta' | 'respuesta' | 'terminar' | 'solo_hecho' } | null;
   salida?: Salida | null;
+  /** Los adjuntos que el dominio preparó antes del turno (bajados, guardados, leídos) y cuánto tardó. */
+  adjuntos?: Array<Record<string, unknown>> | null;
   /** Los mensajes que salieron después de `salida` en el mismo turno (un cierre del dominio con varios mensajes). */
   salidas_extra?: Salida[] | null;
   error?: string | null;

@@ -488,7 +488,8 @@ export function cuerpoDelMensaje(m: {
   const t = (m.text || '').trim();
   switch (m.type) {
     case 'text': return { cuerpo: m.text || '', origen: 'texto' };
-    case 'image': return t ? { cuerpo: m.text, origen: 'pie_de_foto' } : { cuerpo: null, origen: null };
+    case 'image':
+    case 'document': return t ? { cuerpo: m.text, origen: 'pie_de_foto' } : { cuerpo: null, origen: null };
     case 'interactive': return { cuerpo: t || null, origen: t ? 'interactivo' : null };
     case 'location': {
       const l = m.location;

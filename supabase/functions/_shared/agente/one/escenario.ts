@@ -15,12 +15,13 @@ import { dominioOne } from './dominio.ts';
 import { PuertoOneMemoria } from './puerto-memoria.ts';
 import type { GastoMem, NegocioMem } from './puerto-memoria.ts';
 import { reglamentoOne } from './reglamento.ts';
+import type { ArchivoAdjunto, Lector } from './lectura-adjunto.ts';
 
 export const WS_ONE_PRUEBA = '00000000-0000-4000-8000-0000000000e1';
 export const TEL_ONE_PRUEBA = '573000001234';
 
 export interface PasoOne {
-  clase: 'escrito' | 'imagen' | 'toque' | 'audio';
+  clase: 'escrito' | 'imagen' | 'toque' | 'audio' | 'documento';
   texto: string;
   salidas: Salida[];
   ms: number | null;
@@ -36,8 +37,15 @@ export interface EscenarioOne {
   deps: DepsCola;
   semilla(filas: Array<Partial<FilaConversacion> & Pick<FilaConversacion, 'direccion' | 'clase'>>): void;
   escribe(texto: string, o?: { despuesMs?: number }): Promise<Salida[]>;
-  /** Una foto (el recibo), con o sin pie de foto. */
-  foto(pie?: string, o?: { despuesMs?: number; mediaId?: string }): Promise<Salida[]>;
+  /** Una foto (el recibo), con o sin pie de foto. `archivo`: los bytes que «están en Meta» (para el lector). */
+  foto(pie?: string, o?: { despuesMs?: number; mediaId?: string; archivo?: ArchivoAdjunto }): Promise<Salida[]>;
+  /** Un documento (el PDF del recibo), con su nombre y, si lo trae, su pie. */
+  documento(nombre: string, pie?: string, o?: { despuesMs?: number; mediaId?: string; archivo?: ArchivoAdjunto }): Promise<Salida[]>;
+  /**
+   * Varios mensajes que llegan casi juntos (la ventana de los adjuntos): todos quedan guardados y se atiende una vez.
+   * `despuesMs` de cada uno es lo que pasa antes de que llegue.
+   */
+  juntos(mensajes: Array<{ escribe?: string; foto?: string; documento?: string; pie?: string; archivo?: ArchivoAdjunto; despuesMs?: number }>): Promise<Salida[]>;
   dicta(texto: string, o?: { despuesMs?: number }): Promise<Salida[]>;
   /** Toca la opción con ese título (exacto, luego prefijo, luego contiene) en el mensaje más reciente del bot que la tenga. */
   toca(titulo: string, o?: { despuesMs?: number }): Promise<Salida[]>;
@@ -56,15 +64,22 @@ export async function escenarioOne(p: {
   config?: Partial<ConfigAgente>;
   reglamento?: Reglamento;
   reloj?: () => number;
+  /** El lector de soportes (en pruebas, uno guionado; en el arnés, el real). Sin él, los soportes no se leen. */
+  lector?: Lector | null;
 }): Promise<EscenarioOne> {
   const reloj = new Reloj(Date.parse('2026-10-21T15:00:00Z'));
   const almacen = new AlmacenMemoria(reloj);
   const mensajero = new MensajeroMemoria(almacen);
   const puerto = new PuertoOneMemoria({ negocios: p.negocios, gastos: p.gastos, contactos: p.contactos });
+  // Lo que el dominio anota de un soporte (referencia, lectura) queda en la fila, como en `wa_conversacion`.
+  puerto.alAnotar = (filaId, media) => {
+    const f = almacen.filas.find((x) => x.id === filaId);
+    if (f) f.media = structuredClone(media);
+  };
   const rol = p.rol ?? 'owner';
   const deps: DepsCola = {
     modelo: p.modelo,
-    dominio: dominioOne(puerto, { rol, ahora: reloj.ahora }),
+    dominio: dominioOne(puerto, { rol, ahora: reloj.ahora, lector: p.lector ?? null }),
     reglamento: p.reglamento ?? await reglamentoOne('Empresa de Prueba'),
     config: { ...CONFIG_POR_DEFECTO, activo: true, ...p.config },
     ahoraMs: reloj.ahora,
@@ -73,6 +88,8 @@ export async function escenarioOne(p: {
     workspaceId: WS_ONE_PRUEBA, phone: TEL_ONE_PRUEBA,
     remitente: p.remitente ?? { nombre: 'Ana Dueña', rol },
     nuevoId,
+    // La ventana de los adjuntos espera en el reloj de la prueba, no en el de verdad.
+    dormir: async (ms: number) => { reloj.avanzar(ms); },
   };
   const pasos: PasoOne[] = [];
   let fotos = 0;
@@ -81,7 +98,7 @@ export async function escenarioOne(p: {
     const antes = mensajero.enviados.length;
     const trazasAntes = almacen.trazas().length;
     const t0 = performance.now();
-    almacen.entrante({ workspaceId: WS_ONE_PRUEBA, phone: TEL_ONE_PRUEBA, clase, texto: texto || null, toqueId: extra.toqueId, media: extra.media });
+    almacen.entrante({ workspaceId: WS_ONE_PRUEBA, phone: TEL_ONE_PRUEBA, clase: clase === 'documento' ? 'otro' : clase, texto: texto || null, toqueId: extra.toqueId, media: extra.media });
     await atenderPendientes(deps);
     const nuevos = mensajero.enviados.slice(antes);
     pasos.push({ clase, texto, salidas: nuevos.map((e) => e.salida), ms: nuevos.length ? Math.round(nuevos[0].at - t0) : null, trazas: almacen.trazas().slice(trazasAntes) });
@@ -100,7 +117,38 @@ export async function escenarioOne(p: {
       }
     },
     escribe: (t, o) => correr('escrito', t, {}, o?.despuesMs),
-    foto: (pie = '', o) => correr('imagen', pie, { media: { tipo: 'imagen', id: o?.mediaId ?? `media-${++fotos}` } }, o?.despuesMs ?? 10_000),
+    foto: (pie = '', o) => {
+      const id = o?.mediaId ?? `media-${++fotos}`;
+      if (o?.archivo) puerto.archivos.set(id, o.archivo);
+      return correr('imagen', pie, { media: { tipo: 'imagen', id } }, o?.despuesMs ?? 10_000);
+    },
+    documento: (nombre, pie = '', o) => {
+      const id = o?.mediaId ?? `media-${++fotos}`;
+      if (o?.archivo) puerto.archivos.set(id, o.archivo);
+      return correr('documento', pie, { media: { tipo: 'documento', id, mime: o?.archivo?.mime ?? 'application/pdf', nombre } }, o?.despuesMs ?? 10_000);
+    },
+    async juntos(mensajes) {
+      const antes = mensajero.enviados.length;
+      const trazasAntes = almacen.trazas().length;
+      const t0 = performance.now();
+      for (const m of mensajes) {
+        reloj.avanzar(m.despuesMs ?? 1_000);
+        if (m.escribe !== undefined) {
+          almacen.entrante({ workspaceId: WS_ONE_PRUEBA, phone: TEL_ONE_PRUEBA, clase: 'escrito', texto: m.escribe });
+          continue;
+        }
+        const id = `media-${++fotos}`;
+        if (m.archivo) puerto.archivos.set(id, m.archivo);
+        const media = m.documento !== undefined
+          ? { tipo: 'documento', id, mime: m.archivo?.mime ?? 'application/pdf', nombre: m.documento }
+          : { tipo: 'imagen', id };
+        almacen.entrante({ workspaceId: WS_ONE_PRUEBA, phone: TEL_ONE_PRUEBA, clase: m.documento !== undefined ? 'otro' : 'imagen', texto: (m.pie ?? m.foto ?? '') || null, media });
+      }
+      await atenderPendientes(deps);
+      const nuevos = mensajero.enviados.slice(antes);
+      pasos.push({ clase: 'escrito', texto: mensajes.map((m) => m.escribe ?? m.pie ?? m.foto ?? m.documento ?? '').join(' + '), salidas: nuevos.map((e) => e.salida), ms: nuevos.length ? Math.round(nuevos[0].at - t0) : null, trazas: almacen.trazas().slice(trazasAntes) });
+      return nuevos.map((e) => e.salida);
+    },
     dicta: (t, o) => correr('audio', t, {}, o?.despuesMs),
     toca: (titulo, o) => {
       const con = [...mensajero.enviados].reverse().map((e) => ('opciones' in e.salida ? buscar(e.salida.opciones, titulo) : undefined)).filter((x): x is { id: string; titulo: string } => !!x);

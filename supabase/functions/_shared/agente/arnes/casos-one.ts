@@ -13,10 +13,18 @@
 
 import type { NegocioMem } from '../one/puerto-memoria.ts';
 
+/** Los soportes sintéticos del arnés (`arnes/soportes/`): el recibo de Uber de $6.880 y la foto de una factura de $84.500. */
+export type SoporteSintetico = 'uber' | 'factura';
+
 export interface PasoCasoOne {
   escribe?: string;
-  /** Una foto, con su pie (vacío = sin texto). */
+  /** Una foto, con su pie (vacío = sin texto). Con `archivo`, la foto es ese soporte sintético (el bot la lee). */
   foto?: string;
+  /** Un PDF, con su pie (vacío = sin texto). `archivo` por defecto: el recibo de Uber. */
+  pdf?: string;
+  archivo?: SoporteSintetico;
+  /** Varios mensajes casi juntos (la ventana de los adjuntos): `despuesMs` es lo que pasa antes de cada uno. */
+  juntos?: Array<{ escribe?: string; pdf?: string; foto?: string; archivo?: SoporteSintetico; despuesMs?: number }>;
   dicta?: string;
   /** Toca el botón con ese título; si no lo hay, escribe `oEscribe` (o «sí»). */
   toca?: string;
@@ -31,6 +39,8 @@ export interface EsperadoOne {
   contactos?: Array<{ nombre: string }>;
   /** Nada escrito. */
   nada?: boolean;
+  /** Cifras o textos que alguna respuesta del bot tiene que decir (el choque de montos se señala, no se elige callado). */
+  menciona?: string[];
 }
 
 export interface CasoOne {
@@ -216,6 +226,45 @@ export const CASOS_ONE: CasoOne[] = [
     gastosHoy: [{ monto: 90000, categoria: 'transporte', descripcion: 'gasolina', negocio: 'E1 26 1' }, { monto: 18900, categoria: 'transporte', descripcion: 'peaje', negocio: 'E1 26 1' }],
     pasos: [{ escribe: 'Quiero ver los egresos' }, { escribe: 'Quiero saber cuánto gasté hoy' }, { escribe: 'Movimientos' }],
     esperado: { nada: true }, viejoOk: false,
+  },
+  // ── Soportes en foto o PDF, leídos y combinados con lo que dice la persona (2026-10-21) ──────────────
+  {
+    id: 's-pdf-caso-real', titulo: 'el caso real: gasto de 27.000 registrado y llega el PDF de Uber de 6.880 «Este fue la ida»', mundo: 'interno',
+    pasos: [
+      { escribe: 'Registra un gasto de 27000 por transportes al proyecto vértice' }, { toca: 'Registrar' },
+      { pdf: 'Este fue la ida', archivo: 'uber' },
+      { toca: 'Cambiar', oEscribe: 'sí, que quede con lo del recibo' },
+    ],
+    objetivo: 'Registraste un gasto de 27.000 de transportes al negocio V1 26 5 (Vértice Impermeables), pero era un estimado: el recibo de Uber que mandaste es de la ida y dice 6.880. Quieres que ese gasto quede por lo que dice el recibo, con el recibo como soporte. No quieres registrar nada más ahora. Cuando te muestren el resumen con un botón para confirmar, tócalo.',
+    esperado: { gastos: [{ monto: 6880, negocio: 'V1 26 5', soporte: true }], menciona: ['6.880'] }, viejoOk: false,
+  },
+  {
+    id: 's-foto-pie-negocio', titulo: 'foto de la factura con el negocio en el pie', mundo: 'interno',
+    pasos: [{ foto: 'pintura para la obra de vértice', archivo: 'factura' }, { toca: 'Registrar' }],
+    esperado: { gastos: [{ monto: 84500, negocio: 'V1 26 5', soporte: true, categoria: 'materiales' }] }, viejoOk: false,
+  },
+  {
+    id: 's-pdf-sin-pie-contexto', titulo: 'PDF sin pie después de decir el negocio en el turno anterior', mundo: 'interno',
+    pasos: [
+      { escribe: 'te voy a mandar el recibo del Uber que pedí para ir a la obra de vértice' },
+      { pdf: '', archivo: 'uber' },
+      { toca: 'Registrar' },
+    ],
+    esperado: { gastos: [{ monto: 6880, negocio: 'V1 26 5', soporte: true, categoria: 'transporte' }] }, viejoOk: false,
+  },
+  {
+    id: 's-juntos-ventana', titulo: 'el PDF y el texto en mensajes separados dentro de la ventana', mundo: 'interno',
+    pasos: [
+      { juntos: [{ pdf: '', archivo: 'uber' }, { escribe: 'es de la ida a la obra de vértice', despuesMs: 2000 }] },
+      { toca: 'Registrar' },
+    ],
+    esperado: { gastos: [{ monto: 6880, negocio: 'V1 26 5', soporte: true }] }, viejoOk: false,
+  },
+  {
+    id: 's-choque-monto', titulo: 'la persona dice 27.000 y el recibo dice 6.880: el bot lo señala', mundo: 'interno',
+    pasos: [{ pdf: 'gasto de 27000 de transporte al vértice', archivo: 'uber' }, { toca: 'Registrar' }],
+    objetivo: 'Mandaste el recibo de Uber diciendo 27.000, pero te equivocaste: lo que vale es lo que dice el recibo. Quieres registrar el gasto por el monto del recibo al negocio V1 26 5 (Vértice Impermeables), con el recibo de soporte. Cuando te muestren el resumen con un botón para confirmar, tócalo.',
+    esperado: { gastos: [{ monto: 6880, negocio: 'V1 26 5', soporte: true }], menciona: ['6.880'] }, viejoOk: false,
   },
   {
     id: 't-no-confirma', titulo: 'cancela en la confirmación: nada se escribe', mundo: 'taller',

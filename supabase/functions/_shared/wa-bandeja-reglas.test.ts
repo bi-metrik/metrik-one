@@ -195,6 +195,9 @@ describe('cuerpo del mensaje', () => {
 
   it('foto: el pie si lo hay; sin pie, cuerpo vacío (el archivo queda por su id)', () => {
     expect(cuerpoDelMensaje({ type: 'image', text: 'hotel que le gustó' })).toEqual({ cuerpo: 'hotel que le gustó', origen: 'pie_de_foto' })
+    // Un PDF reenviado (2026-10-21) se guarda como la foto: su pie es el cuerpo y no se pierde.
+    expect(cuerpoDelMensaje({ type: 'document', text: 'itinerario del cliente' })).toEqual({ cuerpo: 'itinerario del cliente', origen: 'pie_de_foto' })
+    expect(cuerpoDelMensaje({ type: 'document', text: '' })).toEqual({ cuerpo: null, origen: null })
     expect(cuerpoDelMensaje({ type: 'image', text: '' })).toEqual({ cuerpo: null, origen: null })
   })
 

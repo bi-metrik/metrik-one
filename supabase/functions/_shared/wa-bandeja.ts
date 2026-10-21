@@ -486,7 +486,8 @@ export async function atenderEnBandeja(
 
   let { cuerpo, origen } = cuerpoDelMensaje(message);
   let errorTranscripcion: string | null = null;
-  let mediaId: string | null = message.image_id ?? null;
+  // Un documento (un PDF reenviado) queda con su id de Meta, igual que una foto: no se pierde.
+  let mediaId: string | null = message.image_id ?? message.document_id ?? null;
 
   if (message.type === 'audio') {
     mediaId = message.audio_id ?? null;
