@@ -379,8 +379,36 @@ export const AREA_UI_CONFIG = [
 // se desincroniza sin ruido: un botón que aparece y falla, o un permiso que existe
 // y nadie puede usar.
 
+//
+// SOE-028 (2026-10-21): un workspace puede SUMAR roles al default, nunca quitarlos, con
+// `workspaces.config_extra.roles_descarga_negocios_extra` (p. ej. `["operator"]` en
+// SOENA). Sin la clave, el default de siempre. Lo que no sea un rol conocido se ignora.
+// Un operator que descarga solo baja SUS negocios: la lista sale de `getNegociosV2`,
+// que ya lo acota por responsable.
+//
+// El servidor lo resuelve con `puedeDescargarNegociosDelWorkspace`
+// (`src/lib/negocios/permiso-descarga.ts`), que lee la config y llama a esta función.
+
 export const ROLES_DESCARGA_NEGOCIOS = ['owner', 'admin', 'supervisor'] as const
 
-export function puedeDescargarNegocios(role?: string | null): boolean {
-  return (ROLES_DESCARGA_NEGOCIOS as readonly string[]).includes(role ?? '')
+/** Clave de `workspaces.config_extra` con los roles que se suman al default. */
+export const CLAVE_ROLES_DESCARGA_NEGOCIOS_EXTRA = 'roles_descarga_negocios_extra'
+
+/** Los roles que pueden descargar en un workspace: el default más los de su config. */
+export function rolesDescargaNegocios(configExtra?: unknown): readonly string[] {
+  const extra =
+    configExtra && typeof configExtra === 'object'
+      ? (configExtra as Record<string, unknown>)[CLAVE_ROLES_DESCARGA_NEGOCIOS_EXTRA]
+      : undefined
+  const sumados = Array.isArray(extra)
+    ? extra.filter(
+        (r): r is string =>
+          typeof r === 'string' && Object.prototype.hasOwnProperty.call(ROLE_PERMISSIONS, r),
+      )
+    : []
+  return [...new Set<string>([...ROLES_DESCARGA_NEGOCIOS, ...sumados])]
+}
+
+export function puedeDescargarNegocios(role?: string | null, configExtra?: unknown): boolean {
+  return rolesDescargaNegocios(configExtra).includes(role ?? '')
 }

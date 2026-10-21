@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { getWorkspace } from '@/lib/actions/get-workspace'
-import { puedeDescargarNegocios } from '@/lib/roles'
+import { puedeDescargarNegociosDelWorkspace } from '@/lib/negocios/permiso-descarga'
 import { todayBogotaISO } from '@/lib/dates/bogota'
 import { construirExportNegocios } from '@/lib/negocios/construir-export-negocios'
 import { leerIdsExport, MAX_IDS_EXPORT } from '@/lib/negocios/ids-export'
@@ -15,8 +15,9 @@ import { leerIdsExport, MAX_IDS_EXPORT } from '@/lib/negocios/ids-export'
  *
  * Solo lectura. No escribe nada, no hay migración.
  *
- * Quién: owner / admin / supervisor (`puedeDescargarNegocios`, fuente única con el
- * botón). La lista de negocios sale de `getNegociosV2`, que ya acota por workspace y,
+ * Quién: owner / admin / supervisor, más los roles que sume el workspace en
+ * `config_extra.roles_descarga_negocios_extra` (`puedeDescargarNegociosDelWorkspace`,
+ * fuente única con el botón). La lista de negocios sale de `getNegociosV2`, que ya acota por workspace y,
  * si el rol fuera operator, por responsable; los ids que no pertenezcan a lo que ese
  * usuario puede ver se ignoran en silencio.
  *
@@ -36,7 +37,9 @@ const PREFIJO = '[negocios-export]'
 export async function POST(req: NextRequest) {
   const { supabase, workspaceId, role, error } = await getWorkspace()
   if (error || !workspaceId) return new NextResponse('No autenticado', { status: 401 })
-  if (!puedeDescargarNegocios(role)) return new NextResponse('Sin permisos', { status: 403 })
+  if (!(await puedeDescargarNegociosDelWorkspace(supabase, workspaceId, role))) {
+    return new NextResponse('Sin permisos', { status: 403 })
+  }
 
   let body: unknown
   try {

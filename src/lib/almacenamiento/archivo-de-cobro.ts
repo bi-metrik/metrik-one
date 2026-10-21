@@ -31,7 +31,7 @@
 // archivo del Drive de MeTRIK: un hueco peor que el que se esta cerrando.
 // ============================================================
 
-import { esReferenciaArchivo, hrefArchivo } from './referencia'
+import { esReferenciaArchivo, hrefArchivo, idDeArchivoDrive } from './referencia'
 import { recibosDelCobro } from '@/lib/siigo/recibo-componentes'
 
 /** Ruta que baja los bytes de un archivo de cobro con la cuenta de servicio. */
@@ -65,41 +65,10 @@ const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
 /** Un id de Drive: base64url, y nunca tan corto como para confundirlo con otra cosa. */
 const ID_DRIVE = /^[A-Za-z0-9_-]{10,}$/
 
-const HOSTS_DRIVE = new Set(['drive.google.com', 'docs.google.com'])
-
-/**
- * El id de Drive detras de un enlace, con un parser EXPLICITO y no un split.
- *
- * Existe porque `cobros.siigo_recibo` guarda `archivo_url` y no el id (medido contra
- * produccion el 2026-09-16: 7 de 7 con la forma `/file/d/<id>/view?usp=drivesdk`). Desde
- * este cambio el id se guarda aparte; esto queda para las filas anteriores.
- *
- * Devuelve null ante cualquier cosa que no sea inequivocamente un enlace de Drive: un
- * `one://`, una URL de otro host, o un id con forma sospechosa. Null significa "no se
- * abre", nunca "se intenta igual".
- */
-export function idDeArchivoDrive(url: unknown): string | null {
-  if (typeof url !== 'string' || !url.startsWith('http')) return null
-  let u: URL
-  try {
-    u = new URL(url)
-  } catch {
-    return null
-  }
-  if (!HOSTS_DRIVE.has(u.hostname.toLowerCase())) return null
-
-  // `.../file/d/<id>/view`, `.../d/<id>/edit`
-  const segmentos = u.pathname.split('/').filter(Boolean)
-  const i = segmentos.indexOf('d')
-  const porRuta = i >= 0 ? segmentos[i + 1] : undefined
-  if (porRuta && ID_DRIVE.test(porRuta)) return porRuta
-
-  // `.../open?id=<id>`, `.../uc?export=download&id=<id>`
-  const porQuery = u.searchParams.get('id')
-  if (porQuery && ID_DRIVE.test(porQuery)) return porQuery
-
-  return null
-}
+// `idDeArchivoDrive` vive en `referencia.ts` desde SOE-026 (la usa `hrefArchivo` para la
+// descarga directa) y se re-exporta aquí para no mover a quienes ya la importan de este
+// módulo. Al revés no se puede: este módulo importa de `referencia.ts`.
+export { idDeArchivoDrive }
 
 /** La parte de un cobro que este modulo necesita. Se lee con filtro por workspace. */
 export interface FilaCobroArchivo {
