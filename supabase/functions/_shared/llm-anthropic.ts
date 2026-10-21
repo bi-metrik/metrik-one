@@ -248,7 +248,7 @@ type Bloque = Record<string, unknown>;
 interface MensajeAnthropic { role: 'user' | 'assistant'; content: Bloque[] }
 
 export type Traduccion =
-  | { ok: true; cuerpo: Record<string, unknown>; conEsquema: boolean }
+  | { ok: true; cuerpo: Record<string, unknown>; conEsquema: boolean; jsonSinEsquema?: boolean }
   | { ok: false; motivo: string };
 
 function textoDeSistema(c: Record<string, unknown>): string {
@@ -405,7 +405,7 @@ export function cuerpoAnthropicDesdeGemini(cuerpo: unknown, modelo: string = MOD
     ...(herramientas.length ? { tools: herramientas, tool_choice: toolChoice } : {}),
     ...(stop?.length ? { stop_sequences: stop } : {}),
   };
-  return { ok: true, cuerpo: salida, conEsquema: !!esquema };
+  return { ok: true, cuerpo: salida, conEsquema: !!esquema, jsonSinEsquema: quiereJson && !esquema };
 }
 
 // ── La respuesta ────────────────────────────────────────────────────────────
@@ -454,6 +454,12 @@ export function respuestaGeminiDesdeAnthropic(r: RespuestaAnthropic): Record<str
     },
     modelVersion: r.model ?? MODELO_HAIKU,
   };
+}
+
+/** Quita las cercas de código (```json … ```) que rodean un JSON. Pura. */
+export function sinCercas(texto: string): string {
+  const m = texto.trim().match(/^```[a-zA-Z]*\s*\n?([\s\S]*?)\n?\s*```$/);
+  return m ? m[1].trim() : texto;
 }
 
 /** El código HTTP que verán los sitios: el de Anthropic, salvo 529 (saturado) que en Gemini es 503. */
@@ -548,6 +554,8 @@ export function crearFetchModelo(o: OpcionesFetchModelo = {}): typeof fetch {
         body: JSON.stringify(cuerpo),
         signal: init?.signal ?? undefined,
       });
+    // Sin salida estructurada (JSON sin esquema, o esquema dicho en el sistema) hay que quitar cercas a la respuesta.
+    let limpiarCercas = !!t.jsonSinEsquema;
     let res: Response;
     try {
       res = await llamar(t.cuerpo);
@@ -567,6 +575,7 @@ export function crearFetchModelo(o: OpcionesFetchModelo = {}): typeof fetch {
         const sistema = [resto.system, instruccionEsquemaEnSistema(esquema)]
           .filter(Boolean).join('\n\n');
         avisar(`[llm] la salida estructurada rechazó el esquema; reintento con el esquema en el sistema: ${detalle.slice(0, 200)}`);
+        limpiarCercas = true;
         res = await llamar({ ...resto, ...oc, system: sistema });
       }
     }
@@ -590,7 +599,15 @@ export function crearFetchModelo(o: OpcionesFetchModelo = {}): typeof fetch {
     } catch {
       return respuestaJson({ error: { code: 502, message: 'anthropic: respuesta que no es JSON', status: 'ANTHROPIC_ERROR' } }, 502);
     }
-    return respuestaJson(respuestaGeminiDesdeAnthropic(datos), 200);
+    const gem = respuestaGeminiDesdeAnthropic(datos);
+    // JSON pedido sin salida estructurada: Gemini en modo JSON nunca pone cercas de código; Haiku a veces sí. Se quitan
+    // para que el sitio reciba lo mismo que recibía (el eval de RUT dio «JSON no válido» por eso).
+    if (limpiarCercas) {
+      for (const parte of ((gem.candidates as Array<{ content: { parts: ParteGemini[] } }>)[0]?.content.parts ?? [])) {
+        if (typeof parte.text === 'string') parte.text = sinCercas(parte.text);
+      }
+    }
+    return respuestaJson(gem, 200);
   };
   return fetchModelo as typeof fetch;
 }

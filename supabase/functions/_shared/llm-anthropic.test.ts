@@ -14,6 +14,7 @@ import {
   promoverOpcionales,
   LIMITE_OPCIONALES,
   proveedorDe,
+  sinCercas,
 } from './llm-anthropic.ts';
 import { esquemaCarga } from './agente/bandeja/extraccion.ts';
 import { CAMPOS_ARNES } from './agente/arnes/conjuntos.ts';
@@ -371,5 +372,29 @@ describe('interruptor por familia (LLM_PROVEEDOR_DOCUMENTOS, LLM_PROVEEDOR_ACTAS
     const f = crearFetchModelo({ ...docs, fetch: real as unknown as typeof fetch, entorno: ent({ ANTHROPIC_API_KEY: 'sk' }) });
     await f(URL_G, { method: 'POST', body: JSON.stringify(cuerpoG()) });
     expect(real.mock.calls[0][0]).toBe(URL_G);
+  });
+});
+
+describe('JSON sin esquema: sin cercas de código (RUT)', () => {
+  it('sinCercas quita ```json … ``` y deja lo demás igual', () => {
+    expect(sinCercas('```json\n{"a":1}\n```')).toBe('{"a":1}');
+    expect(sinCercas('```\n{"a":1}```')).toBe('{"a":1}');
+    expect(sinCercas('{"a":1}')).toBe('{"a":1}');
+    expect(sinCercas('texto con ``` en medio')).toBe('texto con ``` en medio');
+  });
+
+  it('la respuesta de Haiku con cercas llega al sitio como JSON limpio cuando no hubo salida estructurada', async () => {
+    const real = vi.fn(async () => respuestaA({ content: [{ type: 'text', text: '```json\n{"nit":{"value":"1"}}\n```' }], stop_reason: 'end_turn' }));
+    const f = crearFetchModelo({ fetch: real as unknown as typeof fetch, entorno: (k) => (k === 'ANTHROPIC_API_KEY' ? 'sk' : undefined) });
+    const res = await f(URL_G, { method: 'POST', body: JSON.stringify({ contents: [{ parts: [{ text: 'x' }] }], generationConfig: { responseMimeType: 'application/json' } }) });
+    const texto = (await res.json()).candidates[0].content.parts[0].text;
+    expect(JSON.parse(texto)).toEqual({ nit: { value: '1' } });
+  });
+
+  it('un texto libre (sin JSON pedido) no se toca', async () => {
+    const real = vi.fn(async () => respuestaA({ content: [{ type: 'text', text: '```js\nx\n```' }], stop_reason: 'end_turn' }));
+    const f = crearFetchModelo({ fetch: real as unknown as typeof fetch, entorno: (k) => (k === 'ANTHROPIC_API_KEY' ? 'sk' : undefined) });
+    const res = await f(URL_G, { method: 'POST', body: JSON.stringify({ contents: [{ parts: [{ text: 'x' }] }] }) });
+    expect((await res.json()).candidates[0].content.parts[0].text).toBe('```js\nx\n```');
   });
 });

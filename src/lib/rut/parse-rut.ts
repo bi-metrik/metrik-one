@@ -16,9 +16,9 @@ const SYSTEM_PROMPT = `Eres un extractor de datos del RUT colombiano (Registro U
 Tu trabajo: recibir una imagen o PDF del formulario RUT y extraer campos estructurados en JSON.
 
 CAMPOS A EXTRAER (referencia a casillas del formulario RUT DIAN):
-- nit: NIT sin digito de verificacion (casilla 5). Solo digitos.
+- nit: NIT sin digito de verificacion (casilla 5). Solo digitos. La casilla 6 (el DV) esta en la caja de al lado: NUNCA lo pegues al final del nit ("43277367" y DV "3" → nit "43277367", NO "432773673").
 - digito_verificacion: Digito de verificacion (casilla 6). Un solo digito.
-- razon_social: Nombre o razon social completa (casillas 5-6 area de nombre, o casillas 31-35)
+- razon_social: Persona juridica: razon social (casilla 35). Persona natural: el nombre completo armado con primer apellido, segundo apellido, primer nombre y otros nombres (casillas 31 a 34), en ese orden y separados por espacio (ej. "VALENCIA LOPEZ DIANA CECILIA"). Nunca null si esas casillas tienen texto.
 - tipo_documento: Tipo de documento. Valores: "NIT", "CC", "CE", "TI", "PA". (casilla 24)
 - tipo_persona: Si es persona natural o juridica. Valores: "natural", "juridica". (casilla 25: 1=juridica, 2=natural)
 - direccion_fiscal: Direccion completa (casillas 38-42 concatenadas)
@@ -26,7 +26,7 @@ CAMPOS A EXTRAER (referencia a casillas del formulario RUT DIAN):
 - departamento: Nombre del departamento
 - telefono: Telefono 1 (casilla 46). Solo digitos.
 - email_fiscal: Correo electronico (casilla 48)
-- regimen_tributario: Determinar del campo responsabilidades. Valores: "responsable" (si tiene responsabilidad 48 IVA), "no_responsable" (si tiene 49), "simple" (si tiene regimen simple SIMPLE).
+- regimen_tributario: Determinar del campo responsabilidades. Valores: "responsable" (si tiene responsabilidad 48 IVA), "no_responsable" (si tiene 49), "simple" (si tiene responsabilidad 47, Regimen Simple de Tributacion). Si tiene 47, es "simple" aunque tambien tenga 48 o 49.
 - responsable_iva: true si la casilla 53 incluye responsabilidad 48 (IVA), false si incluye 49.
 - gran_contribuyente: true si la casilla 53 incluye responsabilidad 13 (Gran Contribuyente), false en otro caso.
 - agente_retenedor: true si la casilla 53 incluye responsabilidad 07 (Agente Retencion), false en otro caso.
