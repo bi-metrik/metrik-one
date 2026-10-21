@@ -550,7 +550,35 @@ function soportesDe(p: PuertoMemoria, viajeId: string): number {
   return p.soportes.filter((x) => x.viajeId === viajeId).length;
 }
 
+// La base manda (2026-10-21): un viaje abierto en la conversación y después borrado en la app; llegan dos archivos y
+// «vuélvelos a cargar» en ese viaje. No se escribe en lo que no existe ni se dice que existe.
+const SEMILLA_VIAJE_BORRADO: CasoArnes['semilla'] = [
+  { direccion: 'entrante', clase: 'escrito', texto: 'Abre un viaje nuevo para Laura Gómez a San Andrés, lo llevo yo', turno_id: 'semilla-v1' },
+  { direccion: 'saliente', clase: 'bot', texto: '¿Abro este viaje?\nLaura Gomez (cel. …5521) · San Andrés · Viaje a medida\nLo llevas tú (Carla Comercial)', turno_id: 'semilla-v1' },
+  {
+    direccion: 'entrante', clase: 'toque', texto: 'Sí, ábrelo', turno_id: 'semilla-v2',
+    traza: { tipo: 'toque_propuesta', bot: 'bandeja-solicitudes', ejecucion: { huella: 'h-v', accion: 'viaje_nuevo', resultado: 'ejecutada', lineas: ['Abrí G1 26 9 · San Andrés para LAURA GOMEZ. Lo llevas tú.'], nombrados: ['G1 26 9'], escrituras: [{ tipo: 'viaje', id: 'v-borrado', codigo: 'G1 26 9', nombre: 'SAN ANDRÉS', contactoId: 'c-laura', destino: 'San Andrés', responsableId: 'staff-carla' }] } },
+  },
+  { direccion: 'saliente', clase: 'bot', texto: 'Abrí G1 26 9 · San Andrés para LAURA GOMEZ. Lo llevas tú.', turno_id: 'semilla-v2' },
+];
+
 export const CONJUNTO_ADJUNTOS: CasoArnes[] = [
+  {
+    id: 'a-viaje-borrado', conjunto: 1, titulo: 'viaje abierto aquí y borrado en la app; dos archivos y «vuélvelos a cargar» en él',
+    contactos: DIRECTORIO, viajes: VIAJES, viajesPermitidos: [], sinClienteNuevo: true, extraccion: true, semilla: SEMILLA_VIAJE_BORRADO,
+    pasos: [
+      { adjunta: { archivo: 'solicitud', reenviado: true } },
+      { adjunta: { archivo: 'pantallazo', reenviado: true } },
+      { escribe: 'Estos dos cárgalos en el G1 26 9, vuélvelos a cargar' },
+      { escribe: 'Sí' },
+    ],
+    esperado: (p, t) => {
+      if (de(p, 'carga').length) return mal('cargó en un viaje que ya no existe');
+      const dijo = t.map((x) => x.salida?.texto ?? '').join('\n');
+      if (/G1 26 9[^.?!\n]*(est[aá] (abierto|registrad)|ya est[aá])/iu.test(dijo) && !/no existe|ya no est/iu.test(dijo)) return mal('dijo que G1 26 9 existe');
+      return ok('no cargó en el viaje borrado ni dijo que existe');
+    },
+  },
   {
     id: 'a-pdf-tanda', conjunto: 1, titulo: 'PDF de la solicitud reenviado y «cárgalo»: datos del PDF y el PDF de soporte',
     contactos: DIRECTORIO, viajes: [...VIAJES, VIAJE_LAURA_SA], viajesPermitidos: ['G1 26 7'], sinClienteNuevo: true, extraccion: true,

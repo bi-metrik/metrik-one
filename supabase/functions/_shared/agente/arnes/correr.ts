@@ -185,7 +185,8 @@ async function correrCaso(caso: CasoArnes): Promise<{ r: ResultadoCaso; usoSimul
   } catch (err) {
     error = String(err).slice(0, 300);
   }
-  let r = calificar(caso, e.pasos, e.puerto, e.almacen.trazas(), PRECIOS_312, error);
+  // Solo las trazas del caso: las de la semilla (un registro de antes, ya borrado) no escribieron en esta base.
+  let r = calificar(caso, e.pasos, e.puerto, e.pasos.flatMap((p) => p.trazas), PRECIOS_312, error);
   // r-ignora: además de no abrir, la pregunta tiene que seguir en pie (el último mensaje vuelve a preguntar).
   if (caso.id === 'r-ignora' && r.exito.ok && !preguntaQuienLleva(e.pasos)) r = { ...r, exito: { ok: false, motivo: 'no abrió, pero dejó de preguntar quién lleva el viaje' } };
   return { r, usoSimulador, comercial };

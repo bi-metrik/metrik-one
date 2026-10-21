@@ -108,7 +108,7 @@ describe('el caso real: gasto de $27.000 registrado y llega el recibo de $6.880 
       { name: 'proponer', args: { accion: 'gasto', datos: { monto: 27000, negocio: 'V1 26 5', categoria: 'transporte', descripcion: 'transportes' } } },
       // Llega el PDF: el modelo intenta adjuntarlo al G1 y el candado no lo deja.
       (p) => {
-        expect(textoDelTurno(p)).toContain('G1 · $27.000 · V1 26 5 · Vértice Impermeables — Impermeabilización bodega · sin soporte')
+        expect(textoDelTurno(p)).toContain('G1 · gasto de $27.000 · V1 26 5 · Vértice Impermeables — Impermeabilización bodega · sin soporte')
         expect(textoDelTurno(p)).toContain('"Este fue la ida" · lo que dice el archivo: total $6.880')
         return { name: 'proponer', args: { accion: 'adjuntar_soporte', datos: { gasto: 'G1', soporte: '#5' } } }
       },

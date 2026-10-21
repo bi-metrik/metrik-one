@@ -21,5 +21,9 @@ y regresión con llave SIN correr (no había llave en el subagente).
 - Interruptor sin desplegar: `bot_conversacional.agente_config.leer_adjuntos = false`.
 - Dominio ONE: el Estado cruza los G1, G2… de la traza con `gastosPorId` (borrados → «ya no están en ONE», candado
   `gasto_borrado`). Un soporte usado por un gasto borrado sigue contando como usado (`fotosUsadas` es pura).
+- Principio «la base manda» (Mauricio, 2026-10-21) vive en el núcleo: `Dominio.registros` + `registros.ts`. Un dominio
+  nuevo que escriba registros tiene que declarar `registros` (si no, el historial vuelve a servir de prueba).
+- La preparación de adjuntos no se descuenta del turno (15 s aparte) y reintenta lecturas fallidas; NO verifiqué en prod
+  por qué los dos PDF del caso real no se leyeron (no tenía acceso a la base): hipótesis = tope de 9 s compartido.
 - Aviso de datos de Trappvel no se tocó: ahora se mandan documentos (incl. pasaportes) a Anthropic/Gemini → legal.
 Relacionado: [[wa-soporte-pdf-agente]], [[bandeja-hibrida]].

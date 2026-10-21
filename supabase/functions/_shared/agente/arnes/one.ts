@@ -34,7 +34,7 @@ import { CASOS_ONE, MUNDOS } from './casos-one.ts';
 import type { CasoOne, SoporteSintetico } from './casos-one.ts';
 import { lectorDeSoportes } from '../one/lectura-adjunto.ts';
 import type { ArchivoAdjunto, Lector } from '../one/lectura-adjunto.ts';
-import { reciboUberSintetico } from './soportes/pdf-minimo.ts';
+import { reciboUberSintetico, reciboUberVueltaSintetico } from './soportes/pdf-minimo.ts';
 
 export const PRECIOS_ONE: PrecioModelo[] = [
   // Haiku 5.5: los de `llm-anthropic.ts` (doc oficial verificada el 2026-10-20). Gemini: los de `correr.ts` (2026-10-06).
@@ -99,6 +99,7 @@ export function calificarOne(caso: CasoOne, pasos: PasoOne[], puerto: PuertoOneM
   for (const c of e.contactos ?? []) if (!conts.some((x) => String(x.nombre).toLowerCase() === c.nombre.toLowerCase())) motivos.push(`falta el contacto ${c.nombre}`);
   const dichos = pasos.flatMap((p) => p.salidas.map((s) => s.texto)).join('\n');
   for (const m of e.menciona ?? []) if (!dichos.includes(m)) motivos.push(`el bot nunca dijo «${m}»`);
+  for (const r of e.noDice ?? []) if (new RegExp(r, 'iu').test(dichos)) { daninas.push(`el bot dijo /${r}/ (la base dice otra cosa)`); motivos.push(`el bot dijo /${r}/`); }
   if (daninas.length) motivos.push('hubo una dañina');
   const exito = error ? { ok: false, motivo: `el arnés falló: ${error}` } : motivos.length ? { ok: false, motivo: motivos.join('; ') } : { ok: true, motivo: 'estado final esperado' };
 
@@ -195,11 +196,36 @@ function faltaAlgo(caso: CasoOne, puerto: PuertoOneMemoria): boolean {
 /** Los soportes sintéticos (sin datos de clientes). */
 export async function archivoSintetico(a: SoporteSintetico | undefined, tipo: 'pdf' | 'foto'): Promise<ArchivoAdjunto> {
   if ((a ?? (tipo === 'pdf' ? 'uber' : 'factura')) === 'uber') return { bytes: reciboUberSintetico(), mime: 'application/pdf', nombre: 'recibo-uber.pdf' };
+  if (a === 'uber-vuelta') return { bytes: reciboUberVueltaSintetico(), mime: 'application/pdf', nombre: 'recibo-uber-vuelta.pdf' };
   return { bytes: await Deno.readFile(new URL('./soportes/factura-ferreteria-sintetica.jpg', import.meta.url)), mime: 'image/jpeg' };
 }
 
+/**
+ * Lo que la conversación dice que se registró y la base ya no tiene: por cada gasto, el pedido, la propuesta, el toque
+ * (con la traza de la ejecución, como la deja el núcleo) y el «✅ … registrado» del bot. La base en memoria no los tiene.
+ */
+export function sembrarBorrados(e: EscenarioOne, gastos: NonNullable<CasoOne['historialBorrado']>, negocios: NegocioMem[]): void {
+  gastos.forEach((g, i) => {
+    const n = negocios.find((x) => x.codigo === g.negocio);
+    const etiqueta = n ? `${n.codigo} · ${n.empresa ?? n.contacto ?? 'sin empresa'} — ${n.nombre}` : g.negocio;
+    const turno = `semilla-${i + 1}`;
+    const pesos = `$${g.monto.toLocaleString('es-CO')}`;
+    e.semilla([
+      { direccion: 'entrante', clase: 'escrito', texto: `gasto de ${g.monto} por ${g.descripcion} al ${g.negocio}`, turno_id: `${turno}a` },
+      { direccion: 'saliente', clase: 'bot', texto: `💰 Gasto de ${pesos}\n📁 ${etiqueta}\n¿Lo registro?`, turno_id: `${turno}a` },
+      {
+        direccion: 'entrante', clase: 'toque', texto: 'Registrar', turno_id: turno,
+        traza: { tipo: 'toque_propuesta', bot: 'one', ejecucion: { huella: `h-${turno}`, accion: 'gasto', resultado: 'ejecutada', lineas: [`✅ Gasto de ${pesos} registrado · ${etiqueta}`], escrituras: [{ tipo: 'gasto', id: `borrado-${i + 1}`, monto: g.monto, negocio: g.negocio, etiqueta, soporte: false }] } },
+      },
+      { direccion: 'saliente', clase: 'bot', texto: `✅ Gasto de ${pesos} registrado · ${etiqueta}`, turno_id: turno },
+    ]);
+  });
+}
+
 /** En seco, un lector falso que lee lo que se sabe de cada soporte sintético. */
-export const lectorSeco: Lector = async (a) => (a.mime === 'application/pdf'
+export const lectorSeco: Lector = async (a) => (a.nombre === 'recibo-uber-vuelta.pdf'
+  ? { legible: true, monto: 20389, fecha: '2026-10-21', comercio: 'Uber', nit: null, descripcion: 'viaje de Calle 26 # 59-41 a Carrera 7 # 71-21, Bogotá' }
+  : a.mime === 'application/pdf'
   ? { legible: true, monto: 6880, fecha: '2026-10-21', comercio: 'Uber', nit: null, descripcion: 'viaje de Carrera 7 # 71-21 a Calle 26 # 59-41, Bogotá' }
   : { legible: true, monto: 84500, fecha: '2026-10-20', comercio: 'Ferretería El Tornillo Feliz', nit: '900000000-0', descripcion: 'brochas, rodillo y pintura' });
 
@@ -298,6 +324,7 @@ if (import.meta.main) {
     // El lector de soportes: el real (Haiku por `fetchModelo`; Gemini solo con `--respaldo`) o, en seco, uno falso.
     const lector = seco ? lectorSeco : lectorDeSoportes({ llaveGemini });
     const e = await escenarioOne({ modelo: modelo(), negocios, rol: c.rol ?? 'owner', reloj: () => performance.now(), config: { corteMs: corte }, lector });
+    sembrarBorrados(e, c.historialBorrado ?? [], negocios);
     for (const g of c.gastosHoy ?? []) {
       const neg = negocios.find((x) => x.codigo === g.negocio);
       e.puerto.gastos.push({ id: `previo-${e.puerto.gastos.length + 1}`, fecha: '2026-10-21', monto: g.monto, categoria: g.categoria, descripcion: g.descripcion, negocio: g.negocio, negocioId: neg?.id ?? null, soporte: false });
@@ -306,7 +333,8 @@ if (import.meta.main) {
     let dicho: string[] = [];
     let simulados = 0;
     try { ({ dicho, simulados } = await correrPasos(e, c, { persona: !seco && !args.includes('--sin-persona'), negocios, uso: usoPersona })); } catch (err) { error = String(err).slice(0, 300); }
-    const trazas = e.trazas();
+    // Solo las trazas del caso: las de la semilla (`historialBorrado`) no escribieron en esta base.
+    const trazas = e.pasos.flatMap((p) => p.trazas);
     todas.push(...trazas);
     const r = { ...calificarOne(c, e.pasos, e.puerto, trazas, error), simulados };
     resultados.push(r);

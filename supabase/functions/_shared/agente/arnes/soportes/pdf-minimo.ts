@@ -59,6 +59,24 @@ export function reciboUberSintetico(): Uint8Array {
   ], 'Recibo de viaje Uber');
 }
 
+/** El recibo sintético de la vuelta (caso del 2026-10-21, dos PDF juntos): $20.389, Bogotá, 21 de octubre de 2026. */
+export function reciboUberVueltaSintetico(): Uint8Array {
+  return pdfMinimo([
+    { texto: 'Uber', x: 60, y: 720, tam: 28, negrita: true },
+    { texto: 'Gracias por viajar, Ana', x: 60, y: 690, tam: 14 },
+    { texto: '21 de octubre de 2026, 6:15 p. m.', x: 60, y: 668 },
+    { texto: 'Total', x: 60, y: 630, tam: 18, negrita: true },
+    { texto: 'COP 20.389', x: 420, y: 630, tam: 18, negrita: true },
+    { texto: 'Tarifa del viaje', x: 60, y: 600 },
+    { texto: 'COP 20.389', x: 420, y: 600 },
+    { texto: 'UberX  -  9,8 km  -  41 min', x: 60, y: 560 },
+    { texto: 'Origen: Calle 26 # 59-41, Bogotá', x: 60, y: 540 },
+    { texto: 'Destino: Carrera 7 # 71-21, Bogotá', x: 60, y: 522 },
+    { texto: 'Pagado con Visa terminada en 0000', x: 60, y: 490 },
+    { texto: 'Recibo de viaje generado para pruebas (sintético).', x: 60, y: 440, tam: 9 },
+  ], 'Recibo de viaje Uber');
+}
+
 /**
  * La solicitud de viaje sintética de la bandeja (2026-10-21): lo que un cliente le manda a la agencia en PDF (destino,
  * fechas, viajeros con edades, hotel, presupuesto). Inventado: Laura Prueba, San Andrés, 8-13 de enero de 2027.
@@ -85,5 +103,6 @@ if (import.meta.main) {
   const dir = new URL('.', import.meta.url);
   await Deno.writeFile(new URL('recibo-uber-sintetico.pdf', dir), reciboUberSintetico());
   await Deno.writeFile(new URL('solicitud-viaje-sintetica.pdf', dir), solicitudViajeSintetica());
-  console.log('recibo-uber-sintetico.pdf y solicitud-viaje-sintetica.pdf escritos');
+  await Deno.writeFile(new URL('recibo-uber-vuelta-sintetico.pdf', dir), reciboUberVueltaSintetico());
+  console.log('recibo-uber-sintetico.pdf, recibo-uber-vuelta-sintetico.pdf y solicitud-viaje-sintetica.pdf escritos');
 }

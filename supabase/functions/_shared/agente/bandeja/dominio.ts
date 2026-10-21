@@ -33,7 +33,7 @@ import {
 } from '../../perfil-contacto.ts';
 import type { HechoExistente, HechoFuera, HechoPerfil, OrigenPerfil } from '../../perfil-contacto.ts';
 import type { PlanCarga } from './carga.ts';
-import type { ContextoDominio, DeclaracionHerramienta, Dominio, FilaConversacion, Hechos, Propuesta, ResultadoHerramienta } from '../tipos.ts';
+import type { ContextoDominio, DeclaracionHerramienta, Dominio, FilaConversacion, Hechos, Propuesta, RegistroConversacion, ResultadoHerramienta } from '../tipos.ts';
 
 export interface ViajeAgente {
   id: string;
@@ -896,8 +896,32 @@ export function dominioBandeja(puerto: PuertoBandeja, o: { lector?: Lector | nul
     };
   };
 
+  /**
+   * La base manda (2026-10-21): los viajes que se abrieron en esta conversación, revisados en la base en este turno (uno
+   * borrado o cerrado en la app ya no se nombra como abierto). Los demás registros (cargas, clientes) cuelgan de un viaje
+   * o se buscan con `buscar`, que ya lee la base.
+   */
+  const registros = async (ctx: ContextoDominio): Promise<RegistroConversacion[] | 'error'> => {
+    const abiertos = new Map<string, { id: string; codigo: string }>();
+    for (const f of ctx.conversacion) {
+      const e = f.traza?.ejecucion;
+      if (e?.resultado !== 'ejecutada') continue;
+      for (const w of e.escrituras ?? []) if (w.tipo === 'viaje' && typeof w.id === 'string' && typeof w.codigo === 'string') abiertos.set(w.id, { id: w.id, codigo: w.codigo });
+    }
+    if (!abiertos.size) return [];
+    const out: RegistroConversacion[] = [];
+    for (const a of abiertos.values()) {
+      const v = await puerto.viaje(a.codigo);
+      if (v === 'error') return 'error';
+      if (!v || v.id !== a.id) out.push({ id: a.id, alias: a.codigo, que: `viaje ${a.codigo} abierto aquí`, estado: 'borrado' });
+      else out.push({ id: a.id, alias: a.codigo, que: `viaje ${v.codigo} · ${v.cliente ?? 'sin cliente'}${v.destino ? ` · ${v.destino}` : ''}${v.abierto ? '' : ' · ya cerrado'}`, estado: 'vigente' });
+    }
+    return out;
+  };
+
   return {
     bot: BOT_BANDEJA,
+    registros,
     ...(prepararTurno ? { prepararTurno, ventanaAdjuntosMs: VENTANA_ADJUNTOS_BANDEJA_MS } : {}),
     lecturas: LECTURAS,
     acciones: ACCIONES,

@@ -1,7 +1,8 @@
 import { describe, expect, it } from 'vitest'
 import { escenarioOne } from './escenario'
 import { modeloGuionado } from '../modelo-guionado'
-import { cruzarConLaBase, gastosDeLaConversacion, lineasGastos } from './dominio'
+import { cruzarConLaBase, gastosDeLaConversacion, registrosDeGastos } from './dominio'
+import { lineasRegistros } from '../registros'
 import type { PedidoModelo } from '../tipos'
 
 /**
@@ -49,10 +50,12 @@ describe('gastos de la conversación borrados en la base (caso real del 2026-10-
     e.puerto.borrarGasto('gasto-2')
     e.reloj.avanzar(3 * 3600 * 1000)
     await e.escribe('¿qué gastos quedaron registrados hoy?')
-    expect(visto).toContain('Gastos registrados en esta conversación: ninguno.')
-    expect(visto).toContain('Ya NO están en ONE (los borraron después de registrarlos aquí): G1 ($27.000 · V1 26 5')
-    expect(visto).toContain('G2 ($6.880 · V1 26 5')
-    expect(visto).not.toMatch(/Gastos registrados en esta conversación: G1/)
+    expect(visto).toContain('revisados en la base en este turno (el historial NO prueba que algo exista; esto sí): ninguno sigue en la base.')
+    expect(visto).toContain('YA NO EXISTEN en la base (los borraron después): G1 (gasto de $27.000 · V1 26 5')
+    expect(visto).toContain('G2 (gasto de $6.880 · V1 26 5')
+    // El mensaje viejo del bot que dijo «registrado» lleva la nota del sistema.
+    expect(visto).toContain('(nota del sistema: G1 ya no existe en la base)')
+    expect(visto).toContain('(nota del sistema: G2 ya no existe en la base)')
   })
 
   it('borrado uno solo: el otro sigue como registrado, con el monto que tiene HOY en la base', async () => {
@@ -66,11 +69,11 @@ describe('gastos de la conversación borrados en la base (caso real del 2026-10-
     e.puerto.borrarGasto('gasto-1')
     e.puerto.gastos[0].monto = 7000 // alguien lo corrigió en la app
     await e.escribe('¿cómo quedaron?')
-    expect(visto).toContain('Gastos registrados en esta conversación: G2 · $7.000 · V1 26 5')
-    expect(visto).toContain('Ya NO están en ONE (los borraron después de registrarlos aquí): G1 ($27.000')
+    expect(visto).toContain('esto sí): G2 · gasto de $7.000 · V1 26 5')
+    expect(visto).toContain('YA NO EXISTEN en la base (los borraron después): G1 (gasto de $27.000')
   })
 
-  it('corregir_gasto o adjuntar_soporte sobre un gasto borrado: candado gasto_borrado, nada se escribe', async () => {
+  it('corregir_gasto o adjuntar_soporte sobre un gasto borrado: el núcleo lo ataja (registro_borrado), nada se escribe', async () => {
     const e = await dosGastos([
       { name: 'proponer', args: { accion: 'corregir_gasto', datos: { gasto: 'G1', monto: 25000 } } },
       { name: 'responder', args: { tema: 'gasto', texto: 'Ese gasto ya no está en ONE.' } },
@@ -81,9 +84,9 @@ describe('gastos de la conversación borrados en la base (caso real del 2026-10-
     e.puerto.borrarGasto('gasto-2')
     const escritas = e.puerto.escrituras.length
     await e.escribe('el de 27000 eran 25000')
-    expect(e.trazas().at(-1)!.candados!.map((c) => c.candado)).toEqual(['gasto_borrado'])
+    expect(e.trazas().at(-1)!.candados!.map((c) => c.candado)).toEqual(['registro_borrado'])
     await e.foto()
-    expect(e.trazas().at(-1)!.candados!.map((c) => c.candado)).toEqual(['gasto_borrado'])
+    expect(e.trazas().at(-1)!.candados!.map((c) => c.candado)).toEqual(['registro_borrado'])
     expect(e.puerto.escrituras.length).toBe(escritas)
   })
 
@@ -98,7 +101,7 @@ describe('gastos de la conversación borrados en la base (caso real del 2026-10-
     ])
     e.puerto.caida = true
     await e.escribe('el de 27000 eran 25000')
-    expect(visto).toContain('(no pude revisar si siguen en ONE: no afirmes que están)')
+    expect(visto).toContain('Registros hechos en esta conversación: no pude revisar la base ahora. No afirmes que algo está registrado')
     expect(e.trazas().at(-1)!.candados!.map((c) => c.candado)).toEqual(['gasto_no_leido'])
   })
 })
@@ -140,14 +143,48 @@ describe('cruzarConLaBase (pura)', () => {
     expect(c.revisada).toBe(true)
     expect(c.borrados.map((g) => g.ref)).toEqual(['G1'])
     expect(c.vigentes).toEqual([expect.objectContaining({ ref: 'G2', monto: 7000, soporte: true, revisado: true })])
-    expect(lineasGastos(c)[0]).toContain('G2 · $7.000 · V1 26 5 · Vértice · con soporte · ya revisado por contabilidad')
+    expect(lineasRegistros(registrosDeGastos(c))[0]).toContain('G2 · gasto de $7.000 · V1 26 5 · Vértice · con soporte · ya revisado por contabilidad')
+    expect(lineasRegistros(registrosDeGastos(c))[1]).toContain('G1 (gasto de $27.000 · V1 26 5 · Vértice)')
   })
   it('sin base: quedan como dice la traza, marcados como no revisados', () => {
     const c = cruzarConLaBase(deAqui, 'error')
     expect(c).toEqual({ vigentes: deAqui, borrados: [], revisada: false })
-    expect(lineasGastos(c)[0]).toContain('no pude revisar si siguen en ONE')
+    expect(registrosDeGastos(c)).toBe('error')
+    expect(lineasRegistros('error')[0]).toContain('no pude revisar la base ahora')
   })
   it('gastosDeLaConversacion sigue leyendo solo trazas (la base la cruza el dominio)', () => {
     expect(gastosDeLaConversacion([])).toEqual([])
+  })
+})
+
+describe('el verificador del núcleo no deja salir «ya están registrados» de un gasto borrado', () => {
+  it('la frase del caso real («G1 … ya están registrados, no los toco») no sale; la corregida sí', async () => {
+    const e = await dosGastos([
+      { name: 'responder', args: { tema: 'gasto', texto: 'G1 por $27.000 y G2 por $6.880 ya están registrados, no los toco.' } },
+      { name: 'responder', args: { tema: 'gasto', texto: 'G1 y G2 ya no están en ONE: los borraron. ¿Los registro de nuevo?' } },
+    ])
+    e.puerto.borrarGasto('gasto-1')
+    e.puerto.borrarGasto('gasto-2')
+    const t = await e.escribe('¿y los de impervium?')
+    const traza = e.trazas().at(-1)!
+    expect(traza.verificador!.map((v) => v.motivo).join(' ')).toContain('dice que G1 está registrado, pero ya no existe en la base')
+    expect(t[0].texto).toBe('G1 y G2 ya no están en ONE: los borraron. ¿Los registro de nuevo?')
+    expect(traza.registros).toEqual([{ alias: 'G1', estado: 'borrado' }, { alias: 'G2', estado: 'borrado' }])
+  })
+})
+
+describe('el soporte de un gasto borrado vuelve a quedar libre', () => {
+  it('registrar de nuevo con la misma foto: no dice «ya es el soporte de otro gasto»', async () => {
+    const modelo = modeloGuionado([
+      { name: 'proponer', args: { accion: 'gasto', datos: { monto: 27000, negocio: 'V1 26 5', categoria: 'transporte', soporte: '#1' } } },
+      { name: 'proponer', args: { accion: 'gasto', datos: { monto: 27000, negocio: 'V1 26 5', categoria: 'transporte', soporte: '#1' } } },
+    ])
+    const e = await escenarioOne({ modelo, negocios: NEGOCIOS })
+    await e.foto('uber de 27000 al V1 26 5')
+    await e.toca('Registrar')
+    e.puerto.borrarGasto('gasto-1')
+    const t = await e.escribe('vuélvelo a cargar')
+    expect(e.trazas().at(-1)!.candados ?? []).toEqual([])
+    expect(t[0].texto).toContain('📷 Con la foto #1 como soporte')
   })
 })

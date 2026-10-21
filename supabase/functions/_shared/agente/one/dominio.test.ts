@@ -131,7 +131,7 @@ describe('el soporte del gasto', () => {
     const modelo = modeloGuionado([
       { name: 'proponer', args: { accion: 'gasto', datos: { monto: 30000, negocio: 'A1 26 1', categoria: 'otros' } } },
       (p) => {
-        expect(p.mensajes[0].parts[0].text).toContain('G1 · $30.000 · A1 26 1 · Alfa Grupo — Concesión de prueba · sin soporte')
+        expect(p.mensajes[0].parts[0].text).toContain('G1 · gasto de $30.000 · A1 26 1 · Alfa Grupo — Concesión de prueba · sin soporte')
         expect(p.mensajes[0].parts[0].text).toContain('todavía no son soporte de ningún gasto: #5 (foto')
         return { name: 'proponer', args: { accion: 'adjuntar_soporte', datos: { gasto: 'G1', soporte: '#5' } } }
       },

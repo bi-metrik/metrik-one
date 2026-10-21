@@ -20,7 +20,7 @@
 import { CATEGORIA_LABELS } from '../../types.ts';
 import { formatCOP } from '../../wa-format.ts';
 import { renderizar } from '../render.ts';
-import type { ContextoDominio, DeclaracionHerramienta, Dominio, FilaConversacion, Hechos, LecturaAdjunto, MediaFila, Propuesta, ResultadoHerramienta, Salida } from '../tipos.ts';
+import type { ContextoDominio, DeclaracionHerramienta, Dominio, FilaConversacion, Hechos, LecturaAdjunto, MediaFila, Propuesta, RegistroConversacion, ResultadoHerramienta, Salida } from '../tipos.ts';
 import type { ArchivoAdjunto, Lector } from './lectura-adjunto.ts';
 import { esAdjuntoEntrante, preparadorDeAdjuntos } from '../adjuntos.ts';
 import { BOT_ONE } from './reglamento.ts';
@@ -161,12 +161,18 @@ export function numeroDeFila(v: unknown): number | null {
   return Number.isInteger(n) && n >= 1 ? n : null;
 }
 
-/** Ids de las filas de foto o PDF que ya son soporte de un gasto escrito en esta conversación. */
-function fotosUsadas(filas: FilaConversacion[]): Set<string> {
+/**
+ * Ids de las filas de foto o PDF que ya son soporte de un gasto escrito en esta conversación. `borrados`: gastos que ya no
+ * están en la base: su soporte vuelve a quedar libre (para registrarlo de nuevo). Pura.
+ */
+function fotosUsadas(filas: FilaConversacion[], borrados: ReadonlySet<string> = new Set()): Set<string> {
   const s = new Set<string>();
   for (const f of filas) {
     if (f.traza?.ejecucion?.resultado !== 'ejecutada') continue;
-    for (const e of f.traza.ejecucion.escrituras ?? []) if (typeof e.foto === 'string') s.add(e.foto);
+    for (const e of f.traza.ejecucion.escrituras ?? []) {
+      const gasto = e.tipo === 'gasto' ? e.id : e.gasto;
+      if (typeof e.foto === 'string' && !(typeof gasto === 'string' && borrados.has(gasto))) s.add(e.foto);
+    }
   }
   return s;
 }
@@ -190,13 +196,13 @@ export interface SoporteDeLaConversacion {
  * El soporte `#n`: una fila entrante con foto o PDF (escrita o reenviada) que no es ya soporte de otro gasto. Devuelve
  * lo que hace falta para adjuntarlo, o el error para el modelo. Pura.
  */
-export function soporteDe(filas: FilaConversacion[], v: unknown): SoporteDeLaConversacion | { error: string } {
+export function soporteDe(filas: FilaConversacion[], v: unknown, borrados: ReadonlySet<string> = new Set()): SoporteDeLaConversacion | { error: string } {
   const n = numeroDeFila(v);
   const f = n ? filas[n - 1] : undefined;
   if (!esSoporte(f)) {
     return { error: `«${String(v)}» no es una foto ni un PDF de esta conversación. El soporte es el #n de una línea «[foto de …]» o «[documento de …]».` };
   }
-  if (fotosUsadas(filas).has(f.id)) return { error: `El #${n} ya es el soporte de otro gasto. Pregunta si hay otro soporte.` };
+  if (fotosUsadas(filas, borrados).has(f.id)) return { error: `El #${n} ya es el soporte de otro gasto. Pregunta si hay otro soporte.` };
   return {
     fila: f.id, mediaId: f.media.id, ref: f.media.ref ?? null, tipo: f.media.tipo as 'imagen' | 'documento',
     nombre: f.media.nombre ?? null, lectura: f.media.lectura ?? null, n: n!,
@@ -223,8 +229,8 @@ export function montoDistinto(lectura: LecturaAdjunto | null | undefined, monto:
 const lineaDistinto = (l: LecturaAdjunto, monto: number) => `⚠️ El soporte dice ${formatCOP(l.monto!)}, no ${formatCOP(monto)}`;
 
 /** Los soportes de esta conversación que todavía no son soporte de ningún gasto, con lo leído (para el Estado). Pura. */
-export function fotosSinUsar(filas: FilaConversacion[]): string {
-  const usadas = fotosUsadas(filas);
+export function fotosSinUsar(filas: FilaConversacion[], borrados: ReadonlySet<string> = new Set()): string {
+  const usadas = fotosUsadas(filas, borrados);
   const n = filas.map((f, i) => {
     if (!esSoporte(f) || usadas.has(f.id)) return null;
     const l = f.media.lectura;
@@ -233,7 +239,7 @@ export function fotosSinUsar(filas: FilaConversacion[]): string {
     return `#${i + 1} (${que}, ${leido})`;
   }).filter(Boolean);
   return n.length
-    ? `Soportes (fotos o PDF) que todavía no son soporte de ningún gasto: ${n.join(', ')}. Cada uno es el soporte de UN gasto: va en \`soporte\` del gasto que propones.`
+    ? `Soportes (fotos o PDF) que todavía no son soporte de ningún gasto: ${n.join(', ')}. Cada uno es el soporte de UN gasto: va en \`soporte\` del gasto que propones. Si el soporte dice el monto, no lo preguntes: propón con ese monto.`
     : 'Soportes sin usar: ninguno.';
 }
 
@@ -294,19 +300,18 @@ export function cruzarConLaBase(
   return { vigentes, borrados, revisada: true };
 }
 
-/** Las líneas del Estado sobre los gastos de la conversación, ya cruzados con la base. Pura. */
-export function lineasGastos(c: ReturnType<typeof cruzarConLaBase>): string[] {
-  const linea = (g: GastoDeLaConversacion & { revisado?: boolean }) =>
-    `${g.ref} · ${formatCOP(g.monto)} · ${g.etiqueta} · ${g.soporte ? 'con soporte' : 'sin soporte'}${g.revisado ? ' · ya revisado por contabilidad' : ''}`;
-  const out = [
-    c.vigentes.length
-      ? `Gastos registrados en esta conversación${c.revisada ? '' : ' (no pude revisar si siguen en ONE: no afirmes que están)'}: ${c.vigentes.slice(-5).map(linea).join(' | ')}.`
-      : 'Gastos registrados en esta conversación: ninguno.',
-  ];
-  if (c.borrados.length) {
-    out.push(`Ya NO están en ONE (los borraron después de registrarlos aquí): ${c.borrados.map((g) => `${g.ref} (${formatCOP(g.monto)} · ${g.etiqueta})`).join(', ')}. Aunque la conversación diga que quedaron registrados, no existen: no los cuentes como registrados, no les propongas corregir_gasto ni adjuntar_soporte. Si la persona pregunta por ellos, dile que ya no están en ONE y ofrece registrarlos de nuevo.`);
-  }
-  return out;
+/**
+ * Los gastos de la conversación como registros para el núcleo (`../registros.ts`): G1, G2… con su estado en la base. Si
+ * la base no se pudo leer, `'error'` (el núcleo dice que no pudo revisar). Pura.
+ */
+export function registrosDeGastos(c: ReturnType<typeof cruzarConLaBase>): RegistroConversacion[] | 'error' {
+  if (!c.revisada) return c.vigentes.length ? 'error' : [];
+  const que = (g: GastoDeLaConversacion & { revisado?: boolean }) =>
+    `gasto de ${formatCOP(g.monto)} · ${g.etiqueta} · ${g.soporte ? 'con soporte' : 'sin soporte'}${g.revisado ? ' · ya revisado por contabilidad' : ''}`;
+  return [
+    ...c.vigentes.map((g) => ({ id: g.id, alias: g.ref, que: que(g), estado: 'vigente' as const, montos: [g.monto] })),
+    ...c.borrados.map((g) => ({ id: g.id, alias: g.ref, que: `gasto de ${formatCOP(g.monto)} · ${g.etiqueta}`, estado: 'borrado' as const, montos: [g.monto] })),
+  ].sort((a, b) => Number(a.alias.slice(1)) - Number(b.alias.slice(1)));
 }
 
 /** El último texto que escribió (o dictó, o puso de pie de foto) el equipo: es el `mensaje_original` del gasto. Pura. */
@@ -461,6 +466,9 @@ export function dominioOne(puerto: PuertoOne, o: { rol: string; ahora?: () => nu
     return p;
   }
 
+  /** Los gastos de la conversación que ya no están en la base (su soporte vuelve a quedar libre). */
+  const borradosDe = async (ctx: ContextoDominio) => new Set((await gastosVigentes(ctx)).borrados.map((g) => g.id));
+
   /**
    * El gasto al que va un soporte o una corrección: uno de esta conversación (G1, G2…) o el id que devolvió
    * `gastos_recientes`, y que SIGUE en la base (uno borrado en la app no se toca ni se nombra como registrado).
@@ -577,7 +585,7 @@ export function dominioOne(puerto: PuertoOne, o: { rol: string; ahora?: () => nu
     }
     let foto: SoporteDeLaConversacion | null = null;
     if (d.soporte !== undefined && d.soporte !== null && String(d.soporte).trim() !== '') {
-      const f = soporteDe(ctx.conversacion, d.soporte);
+      const f = soporteDe(ctx.conversacion, d.soporte, await borradosDe(ctx));
       if ('error' in f) return { ok: false, error: f.error, candado: 'foto' };
       foto = f;
     }
@@ -613,7 +621,7 @@ export function dominioOne(puerto: PuertoOne, o: { rol: string; ahora?: () => nu
   }
 
   async function proponerSoporte(d: Record<string, unknown>, ctx: ContextoDominio): Promise<Resultado<Propuesta>> {
-    const f = soporteDe(ctx.conversacion, d.soporte);
+    const f = soporteDe(ctx.conversacion, d.soporte, await borradosDe(ctx));
     if ('error' in f) return { ok: false, error: f.error, candado: 'foto' };
     const r = await gastoParaTocar(String(d.gasto ?? '').trim(), ctx);
     if (!r.ok) return r;
@@ -659,7 +667,7 @@ export function dominioOne(puerto: PuertoOne, o: { rol: string; ahora?: () => nu
     if (Math.abs(monto - g.monto) <= 1) return { ok: false, error: `El gasto ${g.ref} ya es de ${formatCOP(g.monto)}: no hay nada que corregir.`, candado: 'mismo_monto' };
     let f: SoporteDeLaConversacion | null = null;
     if (d.soporte !== undefined && d.soporte !== null && String(d.soporte).trim() !== '') {
-      const s2 = soporteDe(ctx.conversacion, d.soporte);
+      const s2 = soporteDe(ctx.conversacion, d.soporte, await borradosDe(ctx));
       if ('error' in s2) return { ok: false, error: s2.error, candado: 'foto' };
       if (g.soporte) return { ok: false, error: `El gasto ${g.ref} ya tiene soporte: corrige solo el monto, o propón un gasto nuevo con este soporte.`, candado: 'ya_tiene_soporte' };
       f = s2;
@@ -809,6 +817,8 @@ export function dominioOne(puerto: PuertoOne, o: { rol: string; ahora?: () => nu
       const quedan = ctx.conversacion.some((f) => esSoporte(f) && !usadas.has(f.id) && !usado.has(f.id) && f.media.lectura !== undefined);
       return p.accion === 'corregir_gasto' || (quedan && ['gasto', 'adjuntar_soporte'].includes(p.accion)) ? { lineas: h.lineas, seguir: true } : null;
     },
+    // La base manda (2026-10-21): los gastos que la conversación dice que se registraron, revisados en este turno.
+    registros: async (ctx) => registrosDeGastos(await gastosVigentes(ctx)),
     cierres: CIERRES_ONE,
     cerrar: (n, a) => cerrar(n, a),
     reenvios: 'mensaje',
@@ -825,9 +835,8 @@ export function dominioOne(puerto: PuertoOne, o: { rol: string; ahora?: () => nu
       return [
         `Su rol permite: ${puede.length ? puede.join(', ') : 'nada por este chat'}.`,
         ultimaLista(ctx.conversacion),
-        fotosSinUsar(ctx.conversacion),
-        // Revisados contra la base: un gasto borrado en la app no se nombra como registrado aunque el historial lo diga.
-        ...lineasGastos(await gastosVigentes(ctx)),
+        // Los gastos de la conversación (vigentes y borrados) los pone el núcleo con `registros`, revisados en la base.
+        fotosSinUsar(ctx.conversacion, await borradosDe(ctx)),
       ];
     },
   };

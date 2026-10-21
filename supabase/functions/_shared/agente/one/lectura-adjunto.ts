@@ -21,7 +21,8 @@ import type { LecturaAdjunto } from '../tipos.ts';
 
 export const MODELO_LECTURA_GEMINI = 'gemini-3.5-flash-lite';
 const URL_BASE = 'https://generativelanguage.googleapis.com/v1beta/models';
-export const TOPE_LECTURA_MS = 8000;
+// 12 s (2026-10-21): un PDF de varias páginas con Haiku pasaba de 8 s; la preparación del turno tiene 15 s aparte.
+export const TOPE_LECTURA_MS = 12000;
 
 export interface ArchivoAdjunto {
   bytes: Uint8Array;

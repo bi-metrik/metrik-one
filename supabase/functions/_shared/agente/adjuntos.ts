@@ -29,6 +29,20 @@ export function esAdjuntoEntrante(f: FilaConversacion | undefined): f is FilaCon
   return !!f && f.direccion === 'entrante' && (f.media?.tipo === 'imagen' || f.media?.tipo === 'documento') && !!f.media.id;
 }
 
+/** Motivos de una lectura fallida que vale la pena reintentar (tiempo, red); un archivo ilegible no se reintenta. */
+const MOTIVOS_REINTENTABLES = new Set(['no se pudo bajar el archivo', 'el lector no respondió']);
+/** Intentos de lectura por archivo, contando el primero. */
+export const MAX_INTENTOS_LECTURA = 3;
+
+/**
+ * ¿Hay que (re)preparar este adjunto? Sí si nunca se leyó, o si la lectura falló por tiempo o por la descarga y quedan
+ * intentos (2026-10-21: un PDF que no alcanzó a leerse una vez quedaba sin leer para siempre y el bot pedía su monto). Pura.
+ */
+export function faltaPreparar(m: MediaFila): boolean {
+  if (m.lectura === undefined) return true;
+  return !!m.lectura && !m.lectura.legible && MOTIVOS_REINTENTABLES.has(m.lectura.motivo ?? '') && (m.intentos ?? 1) < MAX_INTENTOS_LECTURA;
+}
+
 /** Una lectura vacía con el motivo (no se pudo bajar, el lector no respondió). Pura. */
 export const sinLectura = (motivo: string): LecturaAdjunto => ({ legible: false, monto: null, fecha: null, comercio: null, nit: null, descripcion: null, motivo });
 
@@ -54,9 +68,10 @@ export function preparadorDeAdjuntos(puerto: PuertoAdjuntos, o: OpcionesPreparad
   const vacia = o.vacia ?? sinLectura;
 
   async function prepararUno(f: FilaConversacion & { media: MediaFila }): Promise<MediaFila> {
+    const intentos = f.media.lectura === undefined ? 1 : (f.media.intentos ?? 1) + 1;
     const archivo = await puerto.bajarAdjunto(f.media.id).catch(() => null);
     if (!archivo) {
-      const m: MediaFila = { ...f.media, lectura: vacia('no se pudo bajar el archivo') };
+      const m: MediaFila = { ...f.media, intentos, lectura: vacia('no se pudo bajar el archivo') };
       await puerto.anotarMedia(f.id, m);
       return m;
     }
@@ -67,7 +82,7 @@ export function preparadorDeAdjuntos(puerto: PuertoAdjuntos, o: OpcionesPreparad
       o.lector ? o.lector(conNombre).catch(() => null) : Promise.resolve(null),
     ]);
     const m: MediaFila = {
-      ...f.media, mime: f.media.mime ?? archivo.mime, ref: ref ?? null,
+      ...f.media, intentos, mime: f.media.mime ?? archivo.mime, ref: ref ?? null,
       lectura: lectura ?? vacia(o.lector ? 'el lector no respondió' : 'sin lector'),
     };
     await puerto.anotarMedia(f.id, m);
@@ -78,14 +93,16 @@ export function preparadorDeAdjuntos(puerto: PuertoAdjuntos, o: OpcionesPreparad
     const omitidas = o.omitir?.(ctx) ?? new Set<string>();
     const desde = o.ahora() - o.desdeMs;
     const faltan = ctx.conversacion
-      .filter((f): f is FilaConversacion & { media: MediaFila } => esAdjuntoEntrante(f) && f.media.lectura === undefined && !omitidas.has(f.id) && Date.parse(f.created_at) >= desde)
+      .filter((f): f is FilaConversacion & { media: MediaFila } => esAdjuntoEntrante(f) && faltaPreparar(f.media) && !omitidas.has(f.id) && Date.parse(f.created_at) >= desde)
       .slice(-o.max);
     const t0 = o.ahora();
     return await Promise.all(faltan.map(async (f) => {
-      let p = enCurso.get(f.id);
+      // Una lectura en curso se espera (la pidieron la ventana y el turno a la vez); una terminada que falló se reintenta.
+      const clave = `${f.id}:${f.media.intentos ?? 0}`;
+      let p = enCurso.get(clave);
       if (!p) {
         p = prepararUno(f);
-        enCurso.set(f.id, p);
+        enCurso.set(clave, p);
       }
       const m = await p;
       f.media = m;
