@@ -28,6 +28,18 @@ export const ROTULO_CSV: Record<TipoCsv, string> = {
 
 export type Fila = Record<string, string | number>
 
+/** Las columnas de cada archivo, en orden. Salen aunque no haya filas. */
+export const COLUMNAS_CSV: Record<TipoCsv, readonly string[]> = {
+  pagos: ['fecha', 'codigo_obra', 'obra', 'rubro', 'categoria_fiscal', 'descripcion', 'valor', 'numero_transaccion', 'numero_repetido'],
+  ingresos: ['fecha', 'codigo_obra', 'obra', 'cliente', 'factura', 'valor', 'numero_transaccion', 'tipo', 'notas'],
+  jornadas: ['fecha', 'hora_llegada', 'colaborador', 'codigo_obra', 'obra', 'jornada', 'fraccion', 'valor_jornada', 'costo'],
+  obras: [
+    'codigo_obra', 'obra', 'nombre_corto', 'cliente', 'estado', 'vendido', 'gastado', 'mano_obra', 'jornadas', 'jornadas_sin_valor',
+    'utilidad', 'utilidad_pct', 'facturado', 'cobrado', 'retenido', 'saldo_facturas_abiertas', 'por_cobrar',
+  ],
+  retenido: ['factura', 'fecha_factura', 'codigo_obra', 'obra', 'cliente', 'total', 'recibido', 'retenido', 'pagada_el'],
+}
+
 export interface ObraRef {
   codigo: string | null
   nombre: string | null

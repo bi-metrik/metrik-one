@@ -1,5 +1,5 @@
 import { getWorkspace } from '@/lib/actions/get-workspace'
-import { getDestinosParaGasto } from './gasto-action'
+import { getDestinosParaGasto, getRubrosObraParaGasto } from './gasto-action'
 import NuevoGastoForm from './nuevo-gasto-form'
 
 /**
@@ -19,10 +19,11 @@ async function usaCentroCostos(): Promise<boolean> {
 }
 
 export default async function NuevoGastoPage({ searchParams }: { searchParams: Promise<{ proyecto?: string; negocio?: string }> }) {
-  const [destinos, params, centroCostosEnabled] = await Promise.all([
+  const [destinos, params, centroCostosEnabled, rubrosObra] = await Promise.all([
     getDestinosParaGasto(),
     searchParams,
     usaCentroCostos(),
+    getRubrosObraParaGasto(),
   ])
   return (
     <NuevoGastoForm
@@ -30,6 +31,7 @@ export default async function NuevoGastoPage({ searchParams }: { searchParams: P
       defaultNegocioId={params.negocio}
       defaultProyectoId={params.proyecto}
       centroCostosEnabled={centroCostosEnabled}
+      rubrosObra={rubrosObra}
     />
   )
 }
