@@ -259,8 +259,16 @@ function Eleccion({ itemId, vista, costoActual, ocupado, onCambio }: { itemId: s
   const c = vista.composicion
   const cal = vista.calendario
   const [sinFiltro, setSinFiltro] = useState(false)
+  // Reemplazar un costo que ya existe (modo «Cambiar el costo», brief del 2026-10-21, punto 1): la
+  // fila de hoy se SEÑALA («La que usas hoy») pero no viene marcada. Marcada, elegir otra la sumaba
+  // y salía «Viajan 2 adultos y eligiste tarifa para 4: quita una»; ahora cambiar es un clic y el
+  // botón. Sin costo confirmado (p. ej. faltó la tasa), la elección de antes sí vuelve marcada.
+  const reemplaza = costoActual !== null && costoActual > 0
+  const actuales = new Set((vista.elegida?.filas ?? []).map((f) => f.indice_fila))
   const [marcadas, setMarcadas] = useState<Record<number, FilaElegida>>(() =>
-    Object.fromEntries((vista.elegida?.filas ?? []).map((f) => [f.indice_fila, { indice: f.indice_fila, cantidad: f.cantidad, noches: f.noches, tipo: f.tipo }])),
+    reemplaza
+      ? {}
+      : Object.fromEntries((vista.elegida?.filas ?? []).map((f) => [f.indice_fila, { indice: f.indice_fila, cantidad: f.cantidad, noches: f.noches, tipo: f.tipo }])),
   )
   const [noPagan, setNoPagan] = useState<TipoPasajero[]>(vista.elegida?.noPagan ?? [])
   const [ajustes, setAjustes] = useState<AjustesDeCosto>(
@@ -271,7 +279,7 @@ function Eleccion({ itemId, vista, costoActual, ocupado, onCambio }: { itemId: s
   const [tasa, setTasa] = useState('')
   const [isPending, startTransition] = useTransitionTolerante()
 
-  const visibles = vista.opciones.filter((o) => sinFiltro || o.fueraPor.length === 0 || marcadas[o.indice])
+  const visibles = vista.opciones.filter((o) => sinFiltro || o.fueraPor.length === 0 || marcadas[o.indice] || actuales.has(o.indice))
   const ocultas = vista.opciones.length - vista.opciones.filter((o) => o.fueraPor.length === 0).length
   const eleccion = { filas: Object.values(marcadas), noPagan }
   const calculo = useMemo(
@@ -282,7 +290,6 @@ function Eleccion({ itemId, vista, costoActual, ocupado, onCambio }: { itemId: s
   const moneda = calculo?.ok ? calculo.calculo.moneda : null
   // Reemplazar un costo que ya existe es de una vez: en otra moneda, con la tasa escrita. Sin ella el
   // costo nuevo quedaría pendiente y la línea a medias entre el de antes y el de ahora.
-  const reemplaza = costoActual !== null && costoActual > 0
   const faltaTasa = reemplaza && !!moneda && moneda !== 'COP' && numero(tasa) === null
   const menores = c ? TIPOS_PASAJERO.filter((t) => t !== 'adulto' && (t === 'nino' ? c.ninos : c.infantes) > 0) : []
 
@@ -328,70 +335,82 @@ function Eleccion({ itemId, vista, costoActual, ocupado, onCambio }: { itemId: s
         )}
       </div>
       {vista.avisos.map((a) => <p key={a} className="m-0 text-amber-700">{a}</p>)}
+      {/* De dónde salió el costo de hoy: en su propia caja y con aire debajo, FUERA del área con
+          scroll (brief del 2026-10-21, punto 3). Pegado a la lista, la primera tarifa que subía al
+          desplazarse parecía montarse sobre este texto. */}
       {vista.elegida && (
-        <p className="m-0 text-muted-foreground" data-tarifa-elegida>
+        <p className="rounded bg-muted/50 px-2 py-1 text-muted-foreground" data-tarifa-elegida>
           El costo de la línea salió de {vista.elegida.filas.length === 1 ? 'la fila' : 'las filas'} {vista.elegida.filas.map((f) => f.indice_fila + 1).join(', ')}
           {vista.elegida.archivo ? ` de «${vista.elegida.archivo}»` : ''}{vista.elegida.por ? `, elegida por ${vista.elegida.por}` : ''}.
         </p>
       )}
 
-      <ul className="m-0 max-h-80 list-none space-y-1 overflow-y-auto p-0" data-opciones-tarifa>
-        {visibles.map((o) => {
-          const m = marcadas[o.indice]
-          const deshabilitada = !o.base
-          return (
-            <li key={o.indice} className={`rounded border px-2 py-1.5 ${m ? 'border-[#10B981] bg-[rgba(16,185,129,0.06)]' : ''} ${o.fueraPor.length ? 'opacity-70' : ''}`} data-opcion-tarifa={o.indice}>
-              <label className="flex cursor-pointer items-start gap-2">
-                <input type="checkbox" className="mt-0.5" checked={!!m} disabled={deshabilitada || !vista.editable} onChange={() => alternar(o)} aria-label={`Elegir la fila ${o.indice + 1}`} />
-                <span className="min-w-0 flex-1">
-                  <span className="flex flex-wrap items-baseline justify-between gap-x-2">
-                    <span className="font-medium text-[#1A1A1A]">
-                      {[o.categoria, o.plan, o.ocupacion, o.pasajero].filter(Boolean).join(' · ') || `Fila ${o.indice + 1}`}
+      {/* El área con scroll tiene borde propio: la lista se corta en su marco, no bajo el texto de
+          arriba. `relative isolate` para que WebKit (iPhone) recorte también las filas con opacidad. */}
+      <div className="relative isolate max-h-80 overflow-y-auto overscroll-contain rounded border bg-muted/20 p-1" data-lista-tarifas>
+        <ul className="m-0 list-none space-y-1 p-0" data-opciones-tarifa>
+          {visibles.map((o) => {
+            const m = marcadas[o.indice]
+            const deshabilitada = !o.base
+            return (
+              <li key={o.indice} className={`rounded border px-2 py-1.5 ${m ? 'border-[#10B981] bg-[rgba(16,185,129,0.06)]' : 'bg-background'} ${o.fueraPor.length ? 'opacity-70' : ''}`} data-opcion-tarifa={o.indice}>
+                <label className="flex cursor-pointer items-start gap-2">
+                  <input type="checkbox" className="mt-0.5" checked={!!m} disabled={deshabilitada || !vista.editable} onChange={() => alternar(o)} aria-label={`Elegir la fila ${o.indice + 1}`} />
+                  <span className="min-w-0 flex-1">
+                    <span className="flex flex-wrap items-baseline justify-between gap-x-2">
+                      <span className="font-medium text-[#1A1A1A]">
+                        {[o.categoria, o.plan, o.ocupacion, o.pasajero].filter(Boolean).join(' · ') || `Fila ${o.indice + 1}`}
+                        {reemplaza && actuales.has(o.indice) && (
+                          <span className="ml-1.5 whitespace-nowrap rounded bg-muted px-1 py-px text-[10px] font-medium text-muted-foreground" data-tarifa-actual>
+                            La que usas hoy
+                          </span>
+                        )}
+                      </span>
+                      <span className="tabular-nums font-semibold">{formatoMonto(o.precio, o.moneda)}{o.moneda === 'COP' && <span className="font-normal text-muted-foreground"> COP</span>}</span>
                     </span>
-                    <span className="tabular-nums font-semibold">{formatoMonto(o.precio, o.moneda)}{o.moneda === 'COP' && <span className="font-normal text-muted-foreground"> COP</span>}</span>
+                    <span className="block text-muted-foreground">
+                      {o.baseTexto}
+                      {o.temporada ? ` · ${textoTemporada(o, vista.fechas)}` : ''}
+                      {o.pax ? ` · ${o.pax} pax` : ''}
+                      {o.precioTipo ? ` · precio ${o.precioTipo}` : ''}
+                    </span>
+                    <span className="block text-[10px] text-muted-foreground">
+                      Fila {o.indice + 1}{o.archivo ? ` de «${o.archivo}»` : ''}{o.pagina ? `, pág. ${o.pagina}` : ''}{o.establecimiento ? ` · ${o.establecimiento}` : ''}
+                    </span>
+                    {o.nota && <span className="block text-[10px] italic text-muted-foreground">{o.nota}</span>}
+                    {o.fueraPor.length > 0 && <span className="block text-[10px] text-amber-700">{o.fueraPor.map((f) => TEXTO_FUERA[f]).join(' · ')}</span>}
+                    {deshabilitada && <span className="block text-[10px] text-amber-700">Sin base de precio: escribe este costo a mano.</span>}
                   </span>
-                  <span className="block text-muted-foreground">
-                    {o.baseTexto}
-                    {o.temporada ? ` · ${textoTemporada(o, vista.fechas)}` : ''}
-                    {o.pax ? ` · ${o.pax} pax` : ''}
-                    {o.precioTipo ? ` · precio ${o.precioTipo}` : ''}
-                  </span>
-                  <span className="block text-[10px] text-muted-foreground">
-                    Fila {o.indice + 1}{o.archivo ? ` de «${o.archivo}»` : ''}{o.pagina ? `, pág. ${o.pagina}` : ''}{o.establecimiento ? ` · ${o.establecimiento}` : ''}
-                  </span>
-                  {o.nota && <span className="block text-[10px] italic text-muted-foreground">{o.nota}</span>}
-                  {o.fueraPor.length > 0 && <span className="block text-[10px] text-amber-700">{o.fueraPor.map((f) => TEXTO_FUERA[f]).join(' · ')}</span>}
-                  {deshabilitada && <span className="block text-[10px] text-amber-700">Sin base de precio: escribe este costo a mano.</span>}
-                </span>
-              </label>
-              {m && (
-                <div className="mt-1 flex flex-wrap items-center gap-2 pl-5 text-[11px]">
-                  {o.unidad === 'persona' && c && (
-                    <label className="flex items-center gap-1">
-                      Para
-                      <select value={m.tipo ?? 'adulto'} onChange={(e) => cambiar(o.indice, { tipo: e.target.value as TipoPasajero })} className="rounded border bg-background px-1 py-0.5">
-                        {TIPOS_PASAJERO.filter((t) => (t === 'adulto' ? c.adultos : t === 'nino' ? c.ninos : c.infantes) > 0).map((t) => <option key={t} value={t}>{NOMBRE_TIPO[t]}</option>)}
-                      </select>
-                    </label>
-                  )}
-                  {o.unidad && o.unidad !== 'grupo' && (
-                    <label className="flex items-center gap-1">
-                      {o.unidad === 'persona' ? 'Cuántos' : o.unidad === 'habitacion' ? 'Habitaciones' : 'Vehículos'}
-                      <input type="number" min={1} max={50} value={m.cantidad ?? ''} onChange={(e) => cambiar(o.indice, { cantidad: e.target.value === '' ? null : Number(e.target.value) })} className="w-12 rounded border bg-background px-1 py-0.5 tabular-nums" />
-                    </label>
-                  )}
-                  {o.porNoche && (
-                    <label className="flex items-center gap-1">
-                      Noches
-                      <input type="number" min={1} max={365} value={m.noches ?? ''} onChange={(e) => cambiar(o.indice, { noches: e.target.value === '' ? null : Number(e.target.value) })} className="w-12 rounded border bg-background px-1 py-0.5 tabular-nums" />
-                    </label>
-                  )}
-                </div>
-              )}
-            </li>
-          )
-        })}
-      </ul>
+                </label>
+                {m && (
+                  <div className="mt-1 flex flex-wrap items-center gap-2 pl-5 text-[11px]">
+                    {o.unidad === 'persona' && c && (
+                      <label className="flex items-center gap-1">
+                        Para
+                        <select value={m.tipo ?? 'adulto'} onChange={(e) => cambiar(o.indice, { tipo: e.target.value as TipoPasajero })} className="rounded border bg-background px-1 py-0.5">
+                          {TIPOS_PASAJERO.filter((t) => (t === 'adulto' ? c.adultos : t === 'nino' ? c.ninos : c.infantes) > 0).map((t) => <option key={t} value={t}>{NOMBRE_TIPO[t]}</option>)}
+                        </select>
+                      </label>
+                    )}
+                    {o.unidad && o.unidad !== 'grupo' && (
+                      <label className="flex items-center gap-1">
+                        {o.unidad === 'persona' ? 'Cuántos' : o.unidad === 'habitacion' ? 'Habitaciones' : 'Vehículos'}
+                        <input type="number" min={1} max={50} value={m.cantidad ?? ''} onChange={(e) => cambiar(o.indice, { cantidad: e.target.value === '' ? null : Number(e.target.value) })} className="w-12 rounded border bg-background px-1 py-0.5 tabular-nums" />
+                      </label>
+                    )}
+                    {o.porNoche && (
+                      <label className="flex items-center gap-1">
+                        Noches
+                        <input type="number" min={1} max={365} value={m.noches ?? ''} onChange={(e) => cambiar(o.indice, { noches: e.target.value === '' ? null : Number(e.target.value) })} className="w-12 rounded border bg-background px-1 py-0.5 tabular-nums" />
+                      </label>
+                    )}
+                  </div>
+                )}
+              </li>
+            )
+          })}
+        </ul>
+      </div>
 
       {Object.keys(marcadas).length > 0 && vista.editable && (
         <div className="space-y-2 rounded border bg-muted/30 p-2" data-calculo-tarifa>
