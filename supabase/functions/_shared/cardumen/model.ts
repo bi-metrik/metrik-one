@@ -6,7 +6,7 @@
 //   Mauricio del 2026-09-08: el lector no es Haiku, se queda en Gemini.
 
 import type { ModelAdapter, ModelCallOpts, ModelResult, ModelMessage } from "./types.ts";
-import { generate } from "../venezuela/gemini.ts";
+import { generate } from "../modelo-texto.ts";
 
 async function withRetry<T>(fn: () => Promise<T>, tries = 5, baseMs = 800): Promise<T> {
   let lastErr: unknown;
@@ -86,7 +86,7 @@ const PRECIOS_GEMINI: Record<string, { in: number; out: number }> = {
 
 /**
  * Adaptador Gemini con el mismo contrato que `claudeHaiku()`. Reusa `generate()` de
- * `../venezuela/gemini.ts` (el mismo fetch, retry y usage que ya usan los bots de VE y de
+ * `../modelo-texto.ts` (el mismo fetch, retry y usage que ya usan los bots de VE y de
  * customer en produccion con esta llave), asi que aqui no hay una segunda copia del cliente.
  *
  * Salida JSON siempre (`responseMimeType: application/json`), salvo que quien llama pida

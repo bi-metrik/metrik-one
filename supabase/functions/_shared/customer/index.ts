@@ -13,7 +13,7 @@
 // `config_extra.wa_customer_bot`. Sin esa config nada de esto corre.
 
 import { sendTextMessage, sendTypingIndicator } from "../wa-respond.ts";
-import { generate, type Msg } from "../venezuela/gemini.ts";
+import { generate, type Msg } from "../modelo-texto.ts";
 import { buildSystem, BLOQUE_DATO_SENSIBLE, type EstadoPagos, type Frecuente, type PerfilCliente } from "./prompt.ts";
 import { detectarDatoSensible, enmascarar } from "./deteccion.ts";
 import { escalarALlamada } from "./cierre.ts";
