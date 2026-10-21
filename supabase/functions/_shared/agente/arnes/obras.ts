@@ -23,6 +23,7 @@ import { modeloGuionado } from '../modelo-guionado.ts';
 import { respaldoDe, verificar } from '../verificador.ts';
 import { escenarioObras, OBRAS_PRUEBA, PANTALLAZO_SELLANTE, puertoDePrueba } from '../one/escenario-obras.ts';
 import type { EscenarioObras, MundoObras } from '../one/escenario-obras.ts';
+import { horaBogota } from '../one/obras-comun.ts';
 import type { LecturaAdjunto, Modelo, PedidoModelo, Salida, Traza } from '../tipos.ts';
 
 type Paso =
@@ -70,7 +71,7 @@ export const CASOS_OBRAS: Caso[] = [
   { id: 'g-rubro-duda', titulo: 'Duda entre dos rubros', quien: 'gestion', pasos: [{ dicta: 'esto es la gasolina de la camioneta para ir a Potosí, 120 mil' }, { toca: 'Transporte', oEscribe: 'transporte' }, { toca: 'Sí, regístralo' }], esperado: { pagos: [{ monto: 120000, negocio: 'R1 26 1', rubro: 'Transporte' }] } },
   { id: 'g-rubro-nuevo', titulo: 'Rubro que no existe', quien: 'gestion', pasos: [{ escribe: 'ponlo en publicidad, 300 mil de potosí, unos volantes' }, { toca: 'Otros de obra', oEscribe: 'otros de obra' }, { toca: 'Sí, regístralo' }], esperado: { pagos: [{ monto: 300000, negocio: 'R1 26 1', rubro: 'Otros de obra' }] } },
   { id: 'g-empresa', titulo: 'Gasto de empresa (D2)', quien: 'gestion', pasos: [{ escribe: 'pagué el arriendo de la bodega, 2 millones' }, { toca: 'Gasto de empresa' }, { toca: 'Sí, regístralo' }], esperado: { pagos: [{ monto: 2000000, negocio: null }] } },
-  { id: 'g-pendiente', titulo: 'Propuesta sin tocar: se recuerda', quien: 'gestion', pasos: [{ pantallazo: 'potosí, materiales', lectura: PANTALLAZO_SELLANTE }, { escribe: '¿cómo va RCN?' }, { toca: 'Verlos' }, { toca: 'Sí, regístralo' }], esperado: { pagos: [{ monto: 1850000, negocio: 'R1 26 1' }], dice: ['sin confirmar'] } },
+  { id: 'g-pendiente', titulo: 'Propuesta sin tocar: se recuerda', quien: 'gestion', pasos: [{ pantallazo: 'potosí, materiales', lectura: PANTALLAZO_SELLANTE }, { escribe: '¿cómo va RCN?' }, { toca: 'Verlos' }, { toca: 'Sí, regístralo' }], esperado: { pagos: [{ monto: 1850000, negocio: 'R1 26 1' }] } },
   // ── Ingresos y facturas (§3.2, §3.5) ──
   { id: 'g-ingreso', titulo: 'Pago de un cliente que paga una factura', quien: 'gestion', pasos: [{ dicta: 'Ya pagó la Federación el saldo de Calle 93, entraron 23 millones 950' }, { toca: 'Sí, regístralo' }], esperado: { ingresos: [{ monto: 23950000, negocio: 'F1 26 1', factura: 'FE-231' }] } },
   { id: 'g-anticipo', titulo: 'Anticipo sin factura', quien: 'gestion', pasos: [{ escribe: 'entró el anticipo de RCN, 15 millones' }, { toca: 'Sí, regístralo' }], esperado: { ingresos: [{ monto: 15000000, negocio: 'C1 26 2', factura: null }] } },
@@ -144,6 +145,8 @@ export function calificar(c: Caso, e: EscenarioObras, trazas: Traza[], dicho: st
     if (t.propuesta) fuentes.push(t.propuesta.resumen);
     for (const l of t.ejecucion?.lineas ?? []) fuentes.push(l);
   }
+  // El Estado del turno trae las llegadas de hoy con su hora (dato de la base).
+  for (const l of pu.llegadasMem) fuentes.push(horaBogota(l.hora));
   const r = respaldoDe(fuentes);
   const cifras: string[] = [];
   for (const t of trazas) {

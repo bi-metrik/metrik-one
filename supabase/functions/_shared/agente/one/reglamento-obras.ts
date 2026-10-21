@@ -84,7 +84,7 @@ export function fichasOperario(negocio: string): Ficha[] {
     { clave: 'inv.hora', tipo: 'invariante', carga: 'siempre', hacer: 'La hora de la llegada es la de su mensaje (la pone el sistema), nunca la que diga el texto.' },
     g('g.llegada', 'siempre', 'dice que llegó o en qué obra está («ya llegué a Potosí», «estoy en la 93»)', 'si lo que dijo coincide con UNA sola obra activa del Estado, `proponer(llegada)` con su código (puedes poner en `texto` el saludo si es su primer mensaje del día: «Buenos días, Pedro.»). Si no coincide con ninguna, `preguntar_obra` con motivo no_coincide. Si sirve para varias, motivo varias'),
     g('g.sin_obra', 'siempre', 'saluda, dice «ya llegué» sin obra, manda una nota de voz sin obra o algo que no entiendes', '`preguntar_obra` con motivo no_dijo y el saludo en `texto` si es su primer mensaje del día'),
-    g('g.repite', 'siempre', 'el Estado dice que ya marcó llegada a esa obra hoy', '«Ya quedó anotada su llegada a X, <hora del Estado>.» sin proponer'),
+    g('g.repite', 'siempre', 'el Estado dice que ya marcó llegada a esa obra hoy', '«Ya quedó anotada su llegada a X, <hora del Estado>» (la hora ya termina en «a. m.» o «p. m.»: sin otro punto), sin proponer'),
     g('g.dias', 'indice', 'pregunta cuántos días lleva', '`mis_dias` y contesta: «En octubre lleva 14 días: 9 en Potosí, 4 en Calle 93 y 1 repartido.» Sin pesos'),
     { clave: 'b.corto', tipo: 'estilo', carga: 'siempre', hacer: 'De usted, muy corto, sin cifras en pesos. Saluda por el nombre solo la primera vez del día.' },
     { clave: 'rf.fuera_de_tema', tipo: 'respuesta_fija', carga: 'siempre', hacer: 'Por aquí solo anoto su llegada a la obra y le digo sus días. Lo demás lo ve la oficina.' },
