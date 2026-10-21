@@ -81,6 +81,14 @@ Relacionado: [[valida-alta-autogestionada]], [[secop-autogestion-registro]].
   Los T&C de ePayco NO traen cláusula de encargo, y eControl exige al comercio autorización para
   consultar centrales de riesgo. Emilio (19-oct): ePayco es RESPONSABLE (sin acuerdo de encargo) y el
   aviso pasa a v1.5 (a91419cc, huella con cobro 4e0c3bdd…) con la autorización de esa consulta.
+- 20-oct: merge de main (d9df2e7a). UN adaptador ePayco: con `token_ref` cobra por token (detrás de
+  EPAYCO_HABILITADO + EPAYCO_PRODUCCION en prod), sin él crea el link de #1182. Confirmación: `?ref=` y,
+  si falta, `x_id_invoice` (medido: ePayco SÍ lo manda en el cargo con token). #1191 retargeteado a main;
+  la pila #1104→#1107→#1110→#1169 queda dentro y se cierra tras el merge.
+- ⚠️⚠️ `CLAUSULA_COBRO_APROBADA_PARA_PRODUCCION = false` (condiciones-cobro.ts): en producción el registro
+  sale SIN tarjeta aunque estén las variables. Subirla es decisión aparte (checklist de Vera).
+- ⚠️ Un plan `epayco` recibe enlace solo tras un rechazo de tarjeta (paso 6): un plan pasado a `epayco` para
+  usar links de #1182 no recibiría enlace. Hoy no hay ninguno.
 - Gotcha: el aislamiento del worktree bloquea git sobre otros checkouts; un `git clone` de GitHub en
   el scratchpad sí deja trabajar otro repo (rama, commit, push, `gh pr create -R`).
 - Cierre de los 3 contratos de prueba (futuras, -2, -3) en `scratchpad/cerrar_futuras3.sql` (sin correr al
