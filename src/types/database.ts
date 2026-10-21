@@ -17662,3 +17662,6 @@ export type TutorialProgress = Database['public']['Tables']['tutorial_progress']
 export type CuentaCobroEmitida = Database['public']['Tables']['cuentas_cobro_emitidas']['Row']
 export type PlanillaPilaPeriodo = Database['public']['Tables']['planillas_pila_periodo']['Row']
 
+export type ObraRubro = Database['public']['Tables']['obra_rubros']['Row']
+export type LlegadaObra = Database['public']['Tables']['llegadas_obra']['Row']
+export type ColaboradorJornadaValor = Database['public']['Tables']['colaborador_jornada_valores']['Row']
