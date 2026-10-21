@@ -26,6 +26,7 @@ de «…al proyecto impervium» sin código ni empresa. Haiku 5.5 principal, Gem
 - Eval (`arnes/one.ts`, banco real fuera del repo con `--banco`): la llave sale del jsonl de la sesión (lo indicó el
   coordinador). Persona simulada (Haiku) solo donde el bot nuevo no ofreció el botón del bot viejo, marcada y contada.
   ⚠️ El 2026-10-21 la cuenta de Anthropic se quedó SIN CRÉDITO a mitad de corrida («credit balance is too low» = 400).
+  Con llave nueva: 6 corridas completas (3 real + 3 inventado) en 92ea1066 → 100 %, 0 dañinas, 0 regresiones, p90 ≤ 2,7 s.
 - Invariantes que salieron del eval: propuesta ONE vence con cualquier mensaje posterior del modelo
   (`propuestaVenceConRespuesta`, la bandeja no); la lista del destino la arma el código (`preguntar_destino`, empresa al
   final); empresa solo como respuesta a esa lista (`empresa_dicho_en`); `mensaje_original` fuera de `datos` (si no,
