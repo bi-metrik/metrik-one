@@ -198,3 +198,37 @@ Entradas que vivían en la sección «Referencias» de MEMORY.md (proyectos viej
 - ⚠️⚠️ [Razón social METRIK IA S.A.S.](project_razon_social_metrik_ia.md) — sin «IA» es otra sociedad
 - [Agrupación de hotel y traslado in-out (COT-2026-0018)](project_agrupacion_hotel_traslado_inout.md) — comparar opciones por `lecturaDeOpcion`; no fusiona las duplicadas
 - [Ciudad de actividad y tasa en Revisar (Trappvel)](project_ciudad_actividad_nombre_tour.md) — regla ANGOSTA (Punta Cana es destino); tasa solo en el editor
+
+## Movidas del índice caliente (2026-10-21)
+
+- ⚠️ [Letras no latinas: bloqueo en todo ONE](project_pdf_cirilico_winansi.md) — `texto-latino.ts` + copia exacta en `_shared/`; guarda de CI sobre drawText
+- ⚠️ [Carta de autorización: copias y generar desde Cita](project_copia_carta_autorizacion.md) — `genera_en_origen`; UPDATE de f25d432f tras el merge
+- ⚠️ [Copia de la factura escribe en su origen](project_factura_copia_escribe_origen.md) — criterio único `copiaDeSoloLectura`; origen ambiguo rechaza
+- ⚠️ [ONE aguanta red lenta (7-oct)](project_red_lenta_aguanta.md) — aviso por falta de avance; copia de chunk con `src` relativo; páginas de 30
+- ⚠️ [Aviso «No pudimos conectar con ONE»](project_aviso_conexion_fallida.md) — script módulo async en el head; quita hojas colgadas; tope CSS de 25 s
+- ⚠️ [Chunks que aguantan pérdida + SW de estáticos para todos](project_resiliencia_chunks_sw.md) — runtime se cuelga del `<script>` del HTML; llave sin ?dpl
+- ⚠️ [Piloto de red en soena (#1042 y siguientes)](project_piloto_red_soena.md) — falla carga/RSC, no descargas; SW con interruptor; tabla SIN aplicar
+- ⚠️ [Cargue en segundo plano y acciones largas (#1035, #1036)](project_cargue_segundo_plano.md) — marca `data._lectura`; #1036 mergeado; /conciliacion tiene 300 s
+- ⚠️ [Acciones lentas SOENA (#1010-#1012)](project_acciones_lentas_soena.md) — `cache()` no memoiza en server actions; `after()` lanza fuera de request
+- ⚠️ [/negocios paginada en el servidor](project_lista_negocios_paginada.md) — viajan 30 tarjetas; `.in()` de 400+ uuid rompe por `Content-Location`
+- ⚠️ [loading.tsx de (app) no cubre la ficha](project_loading_app_no_cubre_ficha.md) — /negocios → /negocios/[id] no lo remonta, ni con precarga
+- ⚠️ [RUM y lecturas sin server actions (C y D)](project_rum_y_lecturas_sin_actions.md) — `[error-cliente]` se cuenta por `id`; `--query` sin corchetes
+- ⚠️ [Respuesta al tocar sin red (#1006)](project_respuesta_al_tocar.md) — CardLink en useTransition + capa en el shell; Link nuevo del shell lleva SenalDeEnlace
+- ⚠️ [Recuperación de errores de red](project_recuperacion_red_iphone.md) — escalera suave→backoff→tope; refresh fallido = recarga MPA; no reintenta escrituras
+- ⚠️ [«13» pegado a la casilla 26 del RUT (#908, #909)](project_rut_prefijo_tipo_documento.md) — tolerar ≠ proponer; #909 migración SIN aplicar
+- ⚠️ [Falsos avisos del certificado](project_falsos_avisos_certificado.md) — una regla para 2 motores; relectura solo absuelve; V0071/V0019 son config
+- ⚠️ [Animación de marca y RPC de Tableros (caída 2026-10-03)](project_animacion_marca_y_rpc_tableros.md) — loading de (app) por segmento; 12 RPC en paralelo por apertura; cacheables por ws+params
+- ⚠️ [Limpieza tras merge (hook)](project_limpieza_tras_merge.md) — settings.json vivo NO es symlink; registro del hook pendiente
+- ⚠️ [Hook de presupuesto al editar CLAUDE.md](project_hook_presupuesto_claude_md.md) — salta siempre; cifras de `.claude/rules/`
+- ⚠️ [El trigger de rol no espeja 'contador' (#988)](project_trigger_staff_rol_sin_contador.md) — staff 'contador' deja profiles.role NULL; no se autocrea
+- ⚠️ [Montos de SOENA por parseMontoCop (#842)](project_soena_parse_monto_cop.md) — el regex viejo daba NaN con 2+ puntos; extractor cerrado en #843
+- ⚠️ [SOE-012: banco en la factura exige leasing](project_cruce_banco_leasing.md) — tipo `entidad_financiera`; config SOENA SIN aplicar
+- [Post-cotización ola 1: servicios del viaje F0](project_post_cotizacion_servicios_f0.md) — migración APLICADA; datos en `_servicios`; Q1-Q8 sin medir
+- [«Activar plan»: WhatsApp solo de respaldo](project_activar_plan_whatsapp_temporal.md) — desde la pila #1107: botón a /valida/activar; WA solo con la activación cerrada
+- ⚠️ [R1: el servidor sí toma la Recomendada](project_r1_total_recomendada_adicionales.md) — la diferencia eran adicionales; precio_venta no los suma
+- ⚠️ [SOE-015: leads por ciudad de residencia](project_leads_por_ciudad_soe015.md) — copia JS de la CTE leads; cuadre sin medir en prod; DIVIPOLA solo servidor
+- ⚠️ [Lo leído contra el texto del PDF](project_verificar_contra_texto_pdf.md) — #987 SIN mergear (clasificador); 3 radicados 0↔9 quedan para el script
+- ⚠️ [Certificado UPME por correo, sin VIN](project_certificado_correo_contacto.md) — migración SIN aplicar; solo avisa; @contacto como fuente; sin celular
+- ⚠️ [NIT con DV pegado y retorno del reproceso](project_nit_dv_y_retorno_reproceso.md) — #705 SIN mergear: SQL de V0388 ANTES del merge
+- ⚠️ [«No aplica» por línea](project_no_aplica_por_linea.md) — SIN aplicar; avisa, no cierra
+- ⚠️ [Tableros operativos por fase (#939)](project_tableros_operativos.md) — inerte hasta encender config_extra.tableros_operativos en metrik
