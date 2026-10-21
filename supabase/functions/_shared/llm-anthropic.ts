@@ -456,6 +456,18 @@ export function respuestaGeminiDesdeAnthropic(r: RespuestaAnthropic): Record<str
   };
 }
 
+/**
+ * El modelo que respondió DE VERDAD, para la telemetría (`wa_message_log.gemini_model`, logs): el `modelVersion` de
+ * la respuesta, que pone tanto Gemini como la traducción de Haiku (`respuestaGeminiDesdeAnthropic`), y también el
+ * respaldo en Gemini cuando Haiku falla. Sin `modelVersion`, el modelo que pidió el sitio. Pura.
+ *
+ * Antes cada sitio registraba el modelo que PIDIÓ (un nombre de Gemini), aunque contestara Claude Haiku 5.5.
+ */
+export function modeloQueRespondio(respuesta: unknown, pedido: string): string {
+  const v = (respuesta as { modelVersion?: unknown } | null | undefined)?.modelVersion;
+  return typeof v === 'string' && v.trim() ? v.trim() : pedido;
+}
+
 /** Quita las cercas de código (```json … ```) que rodean un JSON. Pura. */
 export function sinCercas(texto: string): string {
   const m = texto.trim().match(/^```[a-zA-Z]*\s*\n?([\s\S]*?)\n?\s*```$/);

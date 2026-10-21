@@ -46,8 +46,8 @@ export interface PedidoDecision {
   timeoutMs: number;
 }
 export type RespuestaDecision =
-  | { ok: true; json: unknown; ms: number; tokensIn?: number | null; tokensOut?: number | null }
-  | { ok: false; motivo: 'timeout' | 'http' | 'esquema'; ms: number; detalle?: string };
+  | { ok: true; json: unknown; ms: number; tokensIn?: number | null; tokensOut?: number | null; modelo?: string }
+  | { ok: false; motivo: 'timeout' | 'http' | 'esquema'; ms: number; detalle?: string; modelo?: string };
 
 /**
  * Quién contesta: Gemini, con el mismo llamado del intérprete (un intento, con tiempo máximo). Las pruebas lo
@@ -175,7 +175,7 @@ export async function atenderEnPuntoDeDecision(
     generationConfig: generacionPara(modelo, esquemaDecision()), timeoutMs: cfg.timeoutMs,
   });
   if (!r.ok) {
-    await telemetria(supabase, user, message, punto, `fallback_${r.motivo}`, null, modelo, r.ms);
+    await telemetria(supabase, user, message, punto, `fallback_${r.motivo}`, null, r.modelo ?? modelo, r.ms);
     // El cambio de fondo frente a hoy: sin modelo, el bot no adivina.
     return await volverAPreguntar(message.phone, ws, punto, 'modelo');
   }
@@ -183,11 +183,11 @@ export async function atenderEnPuntoDeDecision(
   // El modelo reconoció un viaje («van en el de Esneider»): no se carga; se propone con [Sí, ese] y la lista otra vez.
   if (v.tipo === 'solo_toque' && esViajePropuesto(punto, v.opcion)) {
     const guardada: PropuestaGuardada = { ref: punto.ref, version: punto.version, clave: v.opcion.clave };
-    await telemetria(supabase, user, message, punto, 'propuesta', { ...(r.json as Record<string, unknown>), propuesta: guardada }, modelo, r.ms);
+    await telemetria(supabase, user, message, punto, 'propuesta', { ...(r.json as Record<string, unknown>), propuesta: guardada }, r.modelo ?? modelo, r.ms);
     await enviarPropuesta(message.phone, ws, punto, v.opcion);
     return 'atendido';
   }
-  await telemetria(supabase, user, message, punto, v.tipo, r.json, modelo, r.ms);
+  await telemetria(supabase, user, message, punto, v.tipo, r.json, r.modelo ?? modelo, r.ms);
   return await actuar(supabase, user, message, config, punto, v, texto, opts);
 }
 

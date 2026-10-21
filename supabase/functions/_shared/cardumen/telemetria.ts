@@ -74,7 +74,7 @@ export function conTelemetria(
       const r = await adapter.call(opts);
       try {
         onUso({
-          modelo: adapter.id,
+          modelo: r.modelo ?? adapter.id,
           tokensEntrada: r.usage?.in ?? 0,
           tokensSalida: r.usage?.out ?? 0,
           latenciaMs: Math.max(0, Math.round(ahora() - t0)),

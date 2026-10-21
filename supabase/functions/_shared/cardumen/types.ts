@@ -147,7 +147,12 @@ export interface ModelCallOpts {
   temperature?: number;
   maxTokens?: number;
 }
-export interface ModelResult { text: string; usage?: { in: number; out: number } }
+export interface ModelResult {
+  text: string;
+  usage?: { in: number; out: number };
+  /** El modelo que respondió de verdad (Haiku 5.5 o Gemini), si el adaptador lo sabe. La telemetría lo prefiere a `id`. */
+  modelo?: string;
+}
 export interface ModelAdapter {
   id: string;            // ej "gemini-2.5-flash-lite"
   pricing: { in: number; out: number }; // USD / 1M tokens (de arquitectura-conversacional-yuto.md)
