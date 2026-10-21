@@ -81,6 +81,11 @@ export interface ProveedorEnLista {
   /** El semáforo sale del tarifario del mayorista («se compra a través de»). */
   delMayorista: boolean
   miniatura: string | null
+  /**
+   * Las tarifas que se pueden citar (`tarifasCitables`, el MISMO criterio del buscador de la
+   * cotización): con extracción revisada, y si hay un borrador más nuevo («por revisar»).
+   */
+  tarifas: { citable: boolean; porRevisar: boolean; hasta: string | null }
 }
 
 export interface TarifarioVista {

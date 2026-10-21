@@ -9,10 +9,16 @@
  *   · `seguro`: misma ciudad y las MISMAS palabras de nombre una vez quitadas las genéricas
  *     («hotel», artículos), la ciudad, tildes, mayúsculas, signos y el orden. Se guarda el alias
  *     solo, sin preguntar.
- *   · `duda`: misma ciudad y nombres parecidos sin ser iguales («Iberostar Selection Bávaro» y
- *     «Iberostar Selection Bávaro Suites», que en la vida real son dos hoteles). La tarjeta pregunta
- *     «¿Es el mismo hotel que …?» y la respuesta se guarda (alias o perfil propio).
+ *   · `duda`: nombres parecidos sin ser iguales («Iberostar Selection Bávaro» y «Iberostar Selection
+ *     Bávaro Suites»). Desde el 2026-10-21 (brief «cotizar con tarifa», punto 5) NO se pregunta:
+ *       - un ÚNICO candidato parecido y en la MISMA ciudad → se asocia igual (`seguro`, `porDuda`);
+ *         la tarjeta dice «Fotos de: <ficha> · <ciudad>» con «No es este» para deshacer;
+ *       - dos o más candidatos, o uno sin la misma ciudad → `duda`: no se asocia ni se crea ficha;
+ *         el caso va a «Por clasificar» de Proveedores, con sus `candidatos`.
  *   · `nuevo`: nada parecido. Perfil propio.
+ *
+ * La ciudad: la del pantallazo; si no trae, la del destino del viaje (`ciudadDelViaje`). Solo para
+ * comparar: la llave del nombre (`clave`) no cambia.
  *
  * Por qué sin modelo: los nombres llegan de pantallazos de mayoristas y la regla de palabras lo
  * cubre; la duda la resuelve la persona, que es quien sabe. Un modelo gastaría cuota por cada
@@ -32,9 +38,15 @@ export interface NombreConocido {
   ciudad: string | null
 }
 
+export interface CandidatoDuda {
+  clavePerfil: string
+  nombre: string
+  ciudad: string | null
+}
+
 export type Reconocimiento =
-  | { tipo: 'exacto' | 'seguro'; clavePerfil: string }
-  | { tipo: 'duda'; clavePerfil: string; nombre: string; ciudad: string | null }
+  | { tipo: 'exacto' | 'seguro'; clavePerfil: string; /** Era una duda con un solo candidato en la misma ciudad. */ porDuda?: true }
+  | { tipo: 'duda'; clavePerfil: string; nombre: string; ciudad: string | null; candidatos: CandidatoDuda[] }
   | { tipo: 'nuevo' }
 
 /** Palabras que no distinguen un hotel de otro. */
@@ -95,23 +107,44 @@ function ciudadCompatible(a: string | null, b: string | null): boolean {
 }
 
 /** Qué es este hotel o tour para el espacio (ver arriba). */
-export function reconocer(o: Pick<ObjetivoFoto, 'clave' | 'nombre' | 'ciudad'> & { tipo: TipoPerfil }, conocidos: readonly NombreConocido[]): Reconocimiento {
+export function reconocer(
+  o: Pick<ObjetivoFoto, 'clave' | 'nombre' | 'ciudad'> & { tipo: TipoPerfil },
+  conocidos: readonly NombreConocido[],
+  /**
+   * `preguntarDudas`: lo que crea una persona a propósito («Agregar proveedor», el importador) no se
+   * une solo a un parecido: con un candidato también es `duda` (como antes del 2026-10-21).
+   */
+  opciones?: { ciudadDelViaje?: string | null; preguntarDudas?: boolean },
+): Reconocimiento {
   const delTipo = conocidos.filter((c) => c.tipo === o.tipo)
   const exacto = delTipo.find((c) => c.clave === o.clave)
   if (exacto) return { tipo: 'exacto', clavePerfil: exacto.clavePerfil }
 
-  const mias = palabrasDelNombre(o.tipo, o.nombre, o.ciudad)
-  let mejor: { c: NombreConocido; p: number } | null = null
+  // Sin ciudad en el pantallazo, la del destino del viaje (solo para comparar).
+  const ciudad = o.ciudad ?? opciones?.ciudadDelViaje ?? null
+  const mias = palabrasDelNombre(o.tipo, o.nombre, ciudad)
   const seguros = new Set<string>()
+  const parecidos = new Map<string, { c: NombreConocido; p: number }>()
   for (const c of delTipo) {
-    if (!ciudadCompatible(o.ciudad, c.ciudad)) continue
+    if (!ciudadCompatible(ciudad, c.ciudad)) continue
     const suyas = palabrasDelNombre(o.tipo, c.nombre, c.ciudad)
     const p = parecido(mias, suyas)
-    if (p === 1 && mias.length === suyas.length && ciudadComparable(o.ciudad) === ciudadComparable(c.ciudad)) seguros.add(c.clavePerfil)
-    if (p >= UMBRAL_DUDA && (!mejor || p > mejor.p)) mejor = { c, p }
+    if (p === 1 && mias.length === suyas.length && ciudadComparable(ciudad) === ciudadComparable(c.ciudad)) seguros.add(c.clavePerfil)
+    if (p >= UMBRAL_DUDA && (!parecidos.has(c.clavePerfil) || p > (parecidos.get(c.clavePerfil)?.p ?? 0))) parecidos.set(c.clavePerfil, { c, p })
   }
-  // Iguales con UN solo perfil: el mismo. Iguales con dos perfiles distintos: que decida la persona.
+  // Iguales con UN solo perfil: el mismo. Iguales con dos perfiles distintos: duda.
   if (seguros.size === 1) return { tipo: 'seguro', clavePerfil: [...seguros][0] }
-  if (mejor) return { tipo: 'duda', clavePerfil: mejor.c.clavePerfil, nombre: mejor.c.nombre, ciudad: mejor.c.ciudad }
-  return { tipo: 'nuevo' }
+  const candidatos = [...parecidos.values()].sort((a, b) => b.p - a.p)
+  if (candidatos.length === 0) return { tipo: 'nuevo' }
+  const [mejor] = candidatos
+  // Un único parecido, en la misma ciudad (con ciudad de los dos lados): se asocia sin preguntar.
+  const mismaCiudad = !!ciudadComparable(ciudad) && ciudadComparable(ciudad) === ciudadComparable(mejor.c.ciudad)
+  if (candidatos.length === 1 && seguros.size === 0 && mismaCiudad && !opciones?.preguntarDudas) return { tipo: 'seguro', clavePerfil: mejor.c.clavePerfil, porDuda: true }
+  return {
+    tipo: 'duda',
+    clavePerfil: mejor.c.clavePerfil,
+    nombre: mejor.c.nombre,
+    ciudad: mejor.c.ciudad,
+    candidatos: candidatos.map(({ c }) => ({ clavePerfil: c.clavePerfil, nombre: c.nombre, ciudad: c.ciudad })),
+  }
 }

@@ -1036,6 +1036,30 @@ export function fuenteDeLectura(l: Pick<LecturaCasilla, 'origen'> | null | undef
 }
 
 /**
+ * De dónde dice la línea que salieron sus pasajeros («Esta línea cubre: 2 adultos · …», brief del
+ * 2026-10-21, punto 6). Los del viaje se dicen «la del viaje» aunque la línea los tenga escritos
+ * (un tarifario o una línea guardada con los mismos): «ajustado en esta línea» solo cuando DIFIEREN
+ * y nadie más los puso. Un pantallazo que los leyó lo dice; escritos a mano, «escrito a mano».
+ */
+export function origenDeLaOcupacion(a: {
+  composicion: Composicion
+  composicionViaje: Composicion | null
+  /** La línea guarda sus pasajeros (`tarifa.composicion`). */
+  esPropia: boolean
+  /** La lectura de la casilla 1 los puso (sus pasajeros son los de la línea). `null` = no. */
+  laPusoLaLectura: FuenteDeLectura | null
+  /** De dónde salió la casilla 1 (aunque no haya puesto los pasajeros). `null` = sin lectura. */
+  fuente: FuenteDeLectura | null
+}): string {
+  const delViaje = !!a.composicionViaje && mismaComposicion(a.composicion, a.composicionViaje)
+  if (a.laPusoLaLectura === 'pantallazo') return 'leído del pantallazo'
+  if (a.laPusoLaLectura === 'manual' || (a.esPropia && a.fuente === 'manual')) return 'escrito a mano'
+  if (delViaje) return 'la del viaje'
+  if (a.laPusoLaLectura === 'tarifario') return 'el de la tarifa del proveedor'
+  return a.esPropia ? 'ajustado en esta línea' : 'la del viaje'
+}
+
+/**
  * Las monedas que se ofrecen con un clic. Cualquier otro código ISO se escribe a mano: la
  * lista es comodidad, no el límite (Trappvel cotiza también en otras monedas locales).
  */
@@ -1246,7 +1270,7 @@ function listaTipos(tipos: TipoPasajero[]): string {
  * eligió una persona manda sobre la leída. Sin ella, la de la captura 1.
  */
 /** Lo que dice la opción escrita a mano sin costo mientras nadie lo elige. */
-export const MENSAJE_COSTO_PENDIENTE = 'Esta opción todavía no tiene costo: elígelo en «Tarifas del proveedor», pega un pantallazo o escríbelo a mano.'
+export const MENSAJE_COSTO_PENDIENTE = 'Esta opción todavía no tiene costo: elígelo con «Usar tarifa de proveedor», pega un pantallazo o escríbelo a mano.'
 
 /**
  * ¿La opción se escribió a mano sin costo, para sacarlo del tarifario del proveedor? Casilla 1, o
@@ -1835,6 +1859,12 @@ export interface TarifaPax {
    * mientras la casilla 1 sea la que escribió (`origenVigente`). Ausente = como siempre.
    */
   tarifaExtraida?: OrigenTarifaExtraida
+  /**
+   * La llave del perfil (ficha) que la persona dijo que NO es el de esta línea («No es este» en la
+   * tarjeta, brief del 2026-10-21, punto 5). Mientras esté, esa ficha no vuelve sola por el nombre:
+   * ni fotos ni proveedor. Ausente = como siempre.
+   */
+  fichaDescartada?: string
 }
 
 /** Lo escrito a mano de un tipo de pasajero, con quién y cuándo. */
@@ -2071,6 +2101,7 @@ export function leerTarifaPax(raw: unknown): TarifaPax {
   const noVa = leerMarcaNoVa(r.noVa)
   const costosAMano = leerCostosAMano(r.costosAMano)
   const tarifaExtraida = leerOrigenTarifaExtraida(r.tarifaExtraida)
+  const fichaDescartada = typeof r.fichaDescartada === 'string' && r.fichaDescartada.trim() ? r.fichaDescartada.slice(0, 300) : null
   return {
     composicion: normalizarComposicion(r.composicion),
     casillas,
@@ -2095,6 +2126,8 @@ export function leerTarifaPax(raw: unknown): TarifaPax {
     ...(costosAMano ? { costosAMano } : {}),
     // Igual: sin tarifa elegida del tarifario la llave no aparece.
     ...(tarifaExtraida ? { tarifaExtraida } : {}),
+    // Igual: sin «No es este» en la tarjeta la llave no aparece.
+    ...(fichaDescartada ? { fichaDescartada } : {}),
   }
 }
 

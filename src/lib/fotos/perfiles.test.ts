@@ -43,17 +43,33 @@ describe('reconocer el mismo hotel entre cotizaciones', () => {
     expect(reconocer(pedido('hotel', 'CATALONIA PUERTA DEL SÓL', 'MADRID'), [CATALONIA])).toEqual({ tipo: 'exacto', clavePerfil: CATALONIA.clave })
   })
 
-  it('parecido sin ser igual: pregunta, con el nombre que ya conoce', () => {
+  it('parecido sin ser igual, UN solo candidato en la misma ciudad: se asocia sin preguntar (2026-10-21, punto 5)', () => {
     expect(reconocer(pedido('hotel', 'Iberostar Selection Bávaro Suites', 'Punta Cana'), [IBEROSTAR])).toEqual({
-      tipo: 'duda',
+      tipo: 'seguro',
       clavePerfil: IBEROSTAR.clave,
-      nombre: 'Iberostar Selection Bávaro',
-      ciudad: 'Punta Cana',
+      porDuda: true,
     })
   })
 
-  it('el mismo nombre sin ciudad en uno de los dos: pregunta (no lo da por hecho)', () => {
+  it('parecido a DOS fichas de la misma ciudad: no asocia; queda la duda con los dos candidatos', () => {
+    const otro = conocido('hotel', 'Iberostar Selection Bávaro Beach', 'Punta Cana')
+    const r = reconocer(pedido('hotel', 'Iberostar Selection Bávaro Suites', 'Punta Cana'), [IBEROSTAR, otro])
+    expect(r.tipo).toBe('duda')
+    expect(r.tipo === 'duda' && r.candidatos.map((c) => c.clavePerfil).sort()).toEqual([IBEROSTAR.clave, otro.clave].sort())
+  })
+
+  it('el mismo nombre sin ciudad en el pantallazo: sin destino del viaje, duda; con él, la ciudad del viaje cuenta', () => {
     expect(reconocer(pedido('hotel', 'Catalonia Puerta del Sol', null), [CATALONIA]).tipo).toBe('duda')
+    expect(reconocer(pedido('hotel', 'Catalonia Puerta del Sol', null), [CATALONIA], { ciudadDelViaje: 'Madrid' })).toEqual({ tipo: 'seguro', clavePerfil: CATALONIA.clave })
+    // Parecido (no igual) sin ciudad en el pantallazo: con el destino del viaje, un solo candidato ahí → se asocia.
+    expect(reconocer(pedido('hotel', 'Iberostar Selection Bávaro Suites', null), [IBEROSTAR], { ciudadDelViaje: 'Punta Cana' })).toEqual({ tipo: 'seguro', clavePerfil: IBEROSTAR.clave, porDuda: true })
+    // El destino del viaje es otra ciudad: no se asocia ni se da por nuevo con la ciudad equivocada.
+    expect(reconocer(pedido('hotel', 'Iberostar Selection Bávaro Suites', null), [IBEROSTAR], { ciudadDelViaje: 'Cartagena' })).toEqual({ tipo: 'nuevo' })
+  })
+
+  it('un candidato parecido que no tiene ciudad: no se asocia (no se sabe si es la misma)', () => {
+    const sinCiudad = conocido('hotel', 'Iberostar Selection Bávaro', null)
+    expect(reconocer(pedido('hotel', 'Iberostar Selection Bávaro Suites', 'Punta Cana'), [sinCiudad]).tipo).toBe('duda')
   })
 
   it('otra ciudad, otro hotel; otra cadena, otro hotel; otro tipo, otro perfil', () => {

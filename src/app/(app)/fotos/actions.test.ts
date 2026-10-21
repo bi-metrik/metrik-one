@@ -163,20 +163,66 @@ describe('el mismo hotel con otro nombre', () => {
     expect([...doc.hoteles.keys()]).toEqual([clave(CATALONIA_LARGO)])
   })
 
-  it('dudoso: pregunta «¿Es el mismo hotel que …?» con la foto del conocido, y no escribe nada hasta la respuesta', async () => {
+  it('parecido, UN solo candidato en la misma ciudad: se asocia sin preguntar y trae sus fotos (brief del 2026-10-21, punto 5)', async () => {
     await fotosParaTarjetas([IBEROSTAR])
     await subirFotoABiblioteca(IBEROSTAR, await dataUrl(), null, null, AUTORIZADA)
     const r = await fotosParaTarjetas([IBEROSTAR_SUITES])
     expect(r.ok).toBe(true)
     if (!r.ok) return
-    expect(r.tarjetas[0].elemento).toBeNull()
-    expect(r.tarjetas[0].duda).toMatchObject({ clave: clave(IBEROSTAR), nombre: 'Iberostar Selection Bávaro', ciudad: 'Punta Cana' })
-    expect(r.tarjetas[0].duda?.url).toMatch(/^https:\/\/firmada\.example\//)
+    expect(r.tarjetas[0]).toMatchObject({ duda: null, elemento: { clave: clave(IBEROSTAR) }, fotosDe: { nombre: 'Iberostar Selection Bávaro', ciudad: 'Punta Cana', deshacer: true } })
+    expect(r.tarjetas[0].elemento?.fotos).toHaveLength(1)
+    expect(base.tablas.fotos_perfiles).toHaveLength(1)
+    expect(base.tablas.fotos_perfiles_alias.map((a) => a.nombre)).toEqual(['Iberostar Selection Bávaro Suites'])
+  })
+
+  it('parecido a DOS fichas de la misma ciudad: no se asocia, no se crea ficha ni se pregunta; queda «por clasificar»', async () => {
+    const BEACH: PedidoFoto = { tipo: 'hotel', nombre: 'Iberostar Selection Bávaro Beach', ciudad: 'Punta Cana' }
+    await fotosParaTarjetas([IBEROSTAR])
+    // La segunda ficha la crea una persona («es otro»): sola, se habría asociado a la primera.
+    await contestarMismoPerfil(BEACH, clave(IBEROSTAR), false)
+    expect(base.tablas.fotos_perfiles).toHaveLength(2)
+    const r = await fotosParaTarjetas([IBEROSTAR_SUITES])
+    expect(r.ok).toBe(true)
+    if (!r.ok) return
+    expect(r.tarjetas[0]).toMatchObject({ elemento: null, duda: null, proveedor: null, fotosDe: null, porClasificar: 2 })
+    expect(base.tablas.fotos_perfiles).toHaveLength(2)
+    expect(base.tablas.fotos_perfiles_alias).toHaveLength(0)
+    // Subir una foto no adivina: pide clasificarlo.
+    const s = await subirFotoABiblioteca(IBEROSTAR_SUITES, await dataUrl(), null, null, AUTORIZADA)
+    expect(s.ok === false && s.error).toMatch(/Por clasificar/)
+  })
+
+  it('sin ciudad en el pantallazo, se compara con el destino del viaje', async () => {
+    await fotosParaTarjetas([IBEROSTAR])
+    const sinCiudad: PedidoFoto = { tipo: 'hotel', nombre: 'Iberostar Selection Bávaro Suites', ciudad: null }
+    const con = await fotosParaTarjetas([sinCiudad], { destino: 'Punta Cana' })
+    expect(con.ok && con.tarjetas[0]).toMatchObject({ elemento: { clave: clave(IBEROSTAR) }, fotosDe: { nombre: 'Iberostar Selection Bávaro' } })
+    expect(con.ok && con.tarjetas[0].porClasificar).toBeUndefined()
+    sembrar()
+    await fotosParaTarjetas([IBEROSTAR])
+    const sin = await fotosParaTarjetas([sinCiudad])
+    expect(sin.ok && sin.tarjetas[0]).toMatchObject({ elemento: null, porClasificar: 1 })
+    expect(base.tablas.fotos_perfiles).toHaveLength(1)
+  })
+
+  it('la línea con la ficha fijada trae las fotos de ESA ficha, sin escribir nada por el nombre', async () => {
+    await fotosParaTarjetas([IBEROSTAR])
+    await subirFotoABiblioteca(IBEROSTAR, await dataUrl(), null, null, AUTORIZADA)
+    const id = 'd0000000-0000-4000-8000-0000000000aa'
+    base.tablas.fotos_perfiles[0].id = id
+    const otroNombre: PedidoFoto = { tipo: 'hotel', nombre: 'Un Nombre Ficticio Distinto', ciudad: 'Cartagena', proveedorId: id }
+    const r = await fotosParaTarjetas([otroNombre])
+    expect(r.ok && r.tarjetas.find((t) => t.proveedorId === id)).toMatchObject({ elemento: { clave: clave(IBEROSTAR) }, fotosDe: { nombre: 'Iberostar Selection Bávaro' } })
     expect(base.tablas.fotos_perfiles).toHaveLength(1)
     expect(base.tablas.fotos_perfiles_alias).toHaveLength(0)
-    // Subir antes de contestar no adivina: pide la respuesta.
-    const s = await subirFotoABiblioteca(IBEROSTAR_SUITES, await dataUrl(), null, null, AUTORIZADA)
-    expect(s.ok === false && s.error).toMatch(/Primero dinos si es el mismo hotel/)
+  })
+
+  it('«No es este» en una línea (`descartada`): esa ficha no vuelve sola, ni sus fotos', async () => {
+    await fotosParaTarjetas([IBEROSTAR])
+    await subirFotoABiblioteca(IBEROSTAR, await dataUrl(), null, null, AUTORIZADA)
+    const r = await fotosParaTarjetas([{ ...IBEROSTAR_SUITES, descartada: clave(IBEROSTAR) }])
+    expect(r.ok && r.tarjetas.find((t) => t.descartada)).toMatchObject({ elemento: null, proveedor: null, fotosDe: null })
+    expect(base.tablas.fotos_perfiles_alias).toHaveLength(0)
   })
 
   it('«Sí, es el mismo»: queda como alias, trae las fotos y la próxima vez no pregunta', async () => {
@@ -199,15 +245,31 @@ describe('el mismo hotel con otro nombre', () => {
     expect(base.tablas.fotos_perfiles_alias).toHaveLength(0)
   })
 
-  it('separar un alias equivocado: la próxima cotización vuelve a preguntar', async () => {
+  it('separar un alias equivocado lo quita del perfil', async () => {
     await fotosParaTarjetas([IBEROSTAR])
     const r = await contestarMismoPerfil(IBEROSTAR_SUITES, clave(IBEROSTAR), true)
     const alias = r.ok ? r.elemento?.alias[0] : null
     expect(alias).toBeTruthy()
     const s = await separarNombreDelPerfil(alias!.id)
     expect(s.ok && s.elemento?.alias).toEqual([])
-    const otra = await fotosParaTarjetas([IBEROSTAR_SUITES])
-    expect(otra.ok && otra.tarjetas[0].duda?.clave).toBe(clave(IBEROSTAR))
+    expect(base.tablas.fotos_perfiles_alias).toHaveLength(0)
+  })
+})
+
+describe('una línea escrita a mano nunca crea ficha, tampoco al subirle una foto (brief del 2026-10-21, punto 5)', () => {
+  it('subir la foto de un hotel escrito a mano sin ficha: no crea perfil y pide guardarla en la opción', async () => {
+    const A_MANO: PedidoFoto = { tipo: 'hotel', nombre: 'Hotel Ficticio a Mano', ciudad: 'Santa Marta', aMano: true }
+    const s = await subirFotoABiblioteca(A_MANO, await dataUrl(), null, null, AUTORIZADA)
+    expect(s).toMatchObject({ ok: false, codigo: 'A_MANO' })
+    expect(base.tablas.fotos_perfiles).toEqual([])
+    expect(base.tablas.fotos_catalogo ?? []).toEqual([])
+  })
+
+  it('con una ficha que ya existe con ese nombre, la foto va a esa ficha (sin crear otra)', async () => {
+    await fotosParaTarjetas([CATALONIA])
+    const s = await subirFotoABiblioteca({ ...CATALONIA, aMano: true }, await dataUrl(), null, null, AUTORIZADA)
+    expect(s.ok && s.elemento?.clave).toBe(clave(CATALONIA))
+    expect(base.tablas.fotos_perfiles).toHaveLength(1)
   })
 })
 
@@ -235,6 +297,7 @@ describe('fotos del perfil', () => {
     const seguro = await crearPerfil(CATALONIA_LARGO)
     expect(seguro.ok && seguro.elemento?.clave).toBe(clave(CATALONIA))
     await crearPerfil(IBEROSTAR)
+    // Lo que una persona crea a propósito sí pregunta (no se une solo a un parecido).
     const dudoso = await crearPerfil(IBEROSTAR_SUITES)
     expect(dudoso.ok && 'duda' in dudoso && dudoso.duda.clave).toBe(clave(IBEROSTAR))
   })

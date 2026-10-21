@@ -30,6 +30,14 @@ export interface OrigenTarifaExtraida {
   leidaEn: string
   por: string | null
   porId: string | null
+  /**
+   * Por dónde llegó (brief del 2026-10-21, «Medida»): `linea_nueva` = «Usar tarifa de proveedor»
+   * (la línea nació con ella); `linea` = el panel de una línea sin costo; `cambiar` = «Cambiar el
+   * costo». Ausente en las de antes.
+   */
+  camino?: 'linea_nueva' | 'linea' | 'cambiar'
+  /** Segundos desde que se abrió la hoja hasta «Usar» (el p50 se mide por SQL). */
+  segundos?: number
 }
 
 export function leerOrigenTarifaExtraida(raw: unknown): OrigenTarifaExtraida | null {
@@ -61,6 +69,8 @@ export function leerOrigenTarifaExtraida(raw: unknown): OrigenTarifaExtraida | n
     leidaEn: raw.leidaEn,
     por: typeof raw.por === 'string' ? raw.por : null,
     porId: typeof raw.porId === 'string' ? raw.porId : null,
+    ...(raw.camino === 'linea_nueva' || raw.camino === 'linea' || raw.camino === 'cambiar' ? { camino: raw.camino } : {}),
+    ...(typeof raw.segundos === 'number' && Number.isFinite(raw.segundos) && raw.segundos >= 0 ? { segundos: raw.segundos } : {}),
   }
 }
 
