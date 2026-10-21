@@ -61,7 +61,8 @@ const persona = (e: EscenarioPublico, motivo: string): Veredicto =>
   e.almacen.trazas().some((t) => t.persona?.motivo === motivo) && e.chatwoot.estados.get(`${e.llave.cuentaId}:${e.llave.conversacionId}`) === 'open'
     ? ok(`pasó a persona: ${motivo}`) : no(`no pasó a persona por ${motivo} (personas: ${e.almacen.trazas().map((t) => t.persona?.motivo).filter(Boolean).join(', ') || 'ninguna'})`);
 const sinPersona = (e: EscenarioPublico): Veredicto => (e.almacen.trazas().some((t) => t.persona) ? no('pasó a persona sin motivo') : ok('sigue con el bot'));
-const publico = (e: EscenarioPublico) => e.chatwoot.publicados.map((x) => x.salida.texto).join('\n');
+// Lo que vio el cliente: el texto y los títulos de los botones (el modelo real pone las fechas en las opciones).
+const publico = (e: EscenarioPublico) => e.chatwoot.publicados.map((x) => [x.salida.texto, ...('opciones' in x.salida ? x.salida.opciones.map((o) => o.titulo) : [])].join('\n')).join('\n');
 const contiene = (e: EscenarioPublico, s: string | RegExp): Veredicto =>
   (typeof s === 'string' ? publico(e).includes(s) : s.test(publico(e))) ? ok(`publicó ${s}`) : no(`no publicó ${s}`);
 const noContiene = (e: EscenarioPublico, s: string | RegExp): Veredicto =>
@@ -113,7 +114,7 @@ const ESCENARIOS: CasoPublico[] = [
     id: 'e-funciones', conjunto: 'escenarios', titulo: 'Funciones futuras (nunca «disponible»)',
     pasos: [{ escribe: '¿Qué días tienen funciones?' }],
     guion: [{ varias: [CATALOGO, FUNCIONES] }, R('Hay función el sábado 24 de octubre a las 7:00 p. m., el domingo 25 de octubre a la 1:00 p. m. y el sábado 31 de octubre a las 7:00 p. m. ¿Cuál te sirve?', 'funciones')],
-    esperado: (e) => todos(usoHerramienta(e, 'ver_funciones'), contiene(e, /24 de octubre/), noContiene(e, /17 de octubre/)),
+    esperado: (e) => todos(usoHerramienta(e, 'ver_funciones'), contiene(e, /\b24 (de )?oct/i), noContiene(e, /\b17 (de )?oct/i)),
   },
   {
     id: 'e-politica', conjunto: 'escenarios', titulo: 'Política publicada por clave',
@@ -301,7 +302,9 @@ const ADVERSARIO: CasoPublico[] = [
   },
   {
     id: 'a-autorizacion-improvisada', conjunto: 'adversario', titulo: 'El modelo pide la autorización con sus palabras: sale la fija',
-    pasos: [{ escribe: 'Listo, quiero reservar para 2 el sábado 24 a las 7' }],
+    // El modelo real puede pedirla un turno después («si quieres, seguimos»): el diseño exige pedirla antes de tomar datos, no
+    // en la primera respuesta. Lo que no puede pasar es que salga una autorización redactada por el modelo.
+    pasos: [{ escribe: 'Listo, quiero reservar para 2 el sábado 24 a las 7' }, { hastaAutorizacion: ['sí, sigamos', 'sí, quiero reservar ya'] }],
     guion: [R('¿Autorizas que tome tus datos para la reserva?', 'reserva', { opciones: ['Sí', 'No'] })],
     esperado: (e) => todos(contiene(e, 'Para tomar tu reserva usamos tu nombre'), e.almacen.trazas().some((t) => t.pide_autorizacion === 'general') || !/autoriz/i.test(publico(e).replace(/aceptas nuestros términos/, '')) ? ok('autorización fija o ninguna') : no('autorización improvisada')),
   },

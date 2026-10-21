@@ -1,6 +1,6 @@
 ---
 name: project-asistente-chatwoot-sabor
-description: Asistente público de Sabor sobre Chatwoot (etapa 1, rama feat/asistente-chatwoot-sabor) — migración 20261021090000 SIN aplicar, sin corrida real, payload armado de la doc
+description: Asistente público de Sabor sobre Chatwoot (etapa 1, rama feat/asistente-chatwoot-sabor) — migración 20261021090000 SIN aplicar, corrida real solo por el CLI (suscripción), payload armado de la doc
 metadata:
   type: project
 ---
@@ -9,7 +9,9 @@ Etapa 1 del asistente de Sabor & Experiencias construida el 2026-10-21 sobre el 
 
 Estado al cerrar:
 - Migración `20261021090000_asistente_chatwoot.sql` (tablas `chatwoot_conversacion`, `chatwoot_consentimientos`) SIN aplicar; `chatwoot-agente` SIN desplegar; secretos por slug (`CHATWOOT_WEBHOOK_SECRET_<SLUG>`, `CHATWOOT_API_TOKEN_<SLUG>`, `GEMINI_API_KEY_PAGO`) SIN crear. El workspace de Sabor en ONE no existe: crearlo lo autoriza Mauricio.
-- Arnés `--seco` 53/53 con pass^3. La corrida real nunca corrió: no había `ANTHROPIC_API_KEY_PRUEBAS` (el runner rechaza la llave de prod a propósito). El p95 y el `corte_1` salen de esa corrida.
+- Arnés `--seco` 54/54. Corrida REAL por el CLI de Claude Code con la suscripción (Mauricio, 2026-10-21: nunca con la llave de prod): `arnes/correr.ts --cli`, 53/54 con pass^3 y 0 dañinas (falla `l-jerga` 1 de 3). Sus tiempos traen el arranque del CLI: no sirven para `corte_1`, que queda en 5 s hasta tener trazas de producción. Effort, caché, strict y refusal del adaptador NO se ejercitan por el CLI.
+- `claude -p` desde un subagente: hay que quitar `CLAUDE_CODE_SIMPLE` del entorno (activa `--bare`, que solo acepta llave de API) y `CLAUDECODE`. El CLI acepta el id `claude-haiku-5-5` tal cual. El sandbox del worktree rechaza `env -u … claude …` en Bash: hay que lanzarlo desde Deno (`Deno.Command` con `clearEnv`).
+- El modelo real pide la autorización con sus palabras: la guarda `autorizacion_improvisada` de `cola.ts` lo ataja. La guarda de precios convierte en «No pude revisarlo» una negación que repite el precio del cliente (2 de 3): queda abierto devolverle el error al modelo.
 - El fixture de Chatwoot está armado de la doc: `message_type`, tipo de remitente, `data_url` y `submitted_values` siguen SIN VERIFICAR hasta el payload real (22-oct).
 
 Gotchas que costaron:
