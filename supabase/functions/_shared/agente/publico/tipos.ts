@@ -56,17 +56,17 @@ export interface Tramos {
 
 export type MotivoPersona =
   | 'reserva_lista' | 'restriccion' | 'celebracion' | 'grupo' | 'pide_persona' | 'queja' | 'pago' | 'no_entiende'
-  | 'menor' | 'crisis' | 'abuso' | 'datos' | 'falla';
+  | 'menor' | 'crisis' | 'abuso' | 'duda_abierta' | 'datos' | 'falla';
 
 export const MOTIVOS_PERSONA: MotivoPersona[] = [
   'reserva_lista', 'restriccion', 'celebracion', 'grupo', 'pide_persona', 'queja', 'pago', 'no_entiende',
-  'menor', 'crisis', 'abuso', 'datos', 'falla',
+  'menor', 'crisis', 'abuso', 'duda_abierta', 'datos', 'falla',
 ];
 
 /** La etiqueta de Chatwoot de cada motivo (§6.1). */
 export const ETIQUETA_MOTIVO: Record<MotivoPersona, string> = {
   reserva_lista: 'reserva', restriccion: 'restriccion', celebracion: 'celebracion', grupo: 'grupo', pide_persona: 'persona',
-  queja: 'queja', pago: 'pago', no_entiende: 'no_entiende', menor: 'menor', crisis: 'crisis', abuso: 'abuso', datos: 'datos', falla: 'falla',
+  queja: 'queja', pago: 'pago', no_entiende: 'no_entiende', menor: 'menor', crisis: 'crisis', abuso: 'abuso', duda_abierta: 'duda', datos: 'datos', falla: 'falla',
 };
 
 export type TipoAutorizacion = 'general' | 'sensible';
@@ -112,6 +112,8 @@ export type TrazaPublica = Traza & {
   enlaces_rechazados?: string[];
   /** Cuántas veces se descartó el borrador porque entró otro mensaje mientras generaba. */
   regenerado?: number;
+  /** La mesa o zona que pidió el cliente: PREFERENCIA, nunca asignación (§8.4.2). */
+  preferencia_mesa?: string | null;
   /** Topes que actuaron (presupuesto, turnos por conversación, anti-spam). */
   topes?: string[];
 };

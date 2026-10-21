@@ -23,7 +23,8 @@
 // ============================================================
 
 import { RF_AUTORIZACION, RF_AUTORIZACION_SENSIBLE, estadoAutorizacion, salidaAutorizacion } from './autorizacion.ts';
-import { cuandoBogota, funcionesFuturas, pesos, politicas, vigentes } from './catalogo.ts';
+import { CLAVES_REGLAS, condicionesVigentes, cuandoBogota, funcionesFuturas, pesos, politicas, vigentes, zonaDe } from './catalogo.ts';
+import type { Experiencia } from './catalogo.ts';
 import { respuestaFija } from '../reglamento.ts';
 import type { ContextoDominio, DeclaracionHerramienta, Dominio, Propuesta, Reglamento, ResultadoHerramienta, Salida } from '../tipos.ts';
 import type { FilaPublica, MotivoPersona, TrazaPublica } from './tipos.ts';
@@ -33,10 +34,14 @@ export const BOT_PUBLICO = 'asistente-publico';
 export const PASAR_A_PERSONA = 'pasar_a_persona';
 export const RESPUESTA_FIJA = 'respuesta_fija';
 export const RF_TARJETA = 'rf.tarjeta';
-export const FIJAS_DEL_MODELO = [RF_AUTORIZACION, RF_AUTORIZACION_SENSIBLE, RF_TARJETA] as const;
+export const RF_PREFERENCIA_MESA = 'rf.preferencia_mesa';
+export const RF_CUPO = 'rf.cupo_lo_confirma_el_equipo';
+export const RF_SIGUIENTE_PASO = 'rf.siguiente_paso';
+export const RF_DUDA_ABIERTA = 'rf.duda_abierta';
+export const FIJAS_DEL_MODELO = [RF_AUTORIZACION, RF_AUTORIZACION_SENSIBLE, RF_TARJETA, RF_PREFERENCIA_MESA, RF_CUPO] as const;
 
 /** Motivos que sí se repiten: la persona lo vuelve a pedir, o es otra reserva, o es urgente. */
-const REPETIBLES: MotivoPersona[] = ['pide_persona', 'reserva_lista', 'datos', 'crisis'];
+const REPETIBLES: MotivoPersona[] = ['pide_persona', 'reserva_lista', 'datos', 'crisis', 'duda_abierta'];
 
 /** Etapa 2: declaradas para que la etapa 2 no rompa nada; apagadas (el modelo no las ve). */
 export const HERRAMIENTAS_ETAPA_2: Array<DeclaracionHerramienta & { encendida: false }> = [
@@ -80,6 +85,39 @@ export function dichoTras(campo: 'nombre' | 'cedula' | 'telefono', valor: string
 
 // ── El dominio ───────────────────────────────────────────────────────────────
 
+/** La ficha que ve el modelo: lo que escribió Sabor, con las condiciones de HOY y los montos en pesos. Pura. */
+export function fichaParaModelo(e: Experiencia, ahoraMs: number): Record<string, unknown> {
+  const unidad = (u: string | null) => (u ? ` ${u}` : '');
+  const conds = condicionesVigentes(e, ahoraMs);
+  return {
+    id: e.id, nombre: e.nombre,
+    ...(e.historia ? { historia: e.historia } : {}),
+    incluye: e.incluye,
+    precio_por_persona: pesos(e.precioPersona),
+    ...(e.precioPareja !== null ? { precio_por_pareja: pesos(e.precioPareja) } : {}),
+    cobro_grupo: e.cobroGrupo ?? 'sin_dato: no digas cómo se cobra un grupo de otro tamaño (duda_abierta)',
+    condiciones_vigentes_hoy: conds.map((c) => ({ id: c.id, tipo: c.tipo, monto: `${pesos(c.monto)}${unidad(c.unidad)}`, condicion: c.condicion, hasta: c.hasta, acumulable: c.acumulable ? 'sí' : 'no' })),
+    ...(conds.length > 1 && !conds.every((c) => c.acumulable) ? { nota_condiciones: 'No se suman entre sí.' } : {}),
+    ...(e.capacidad !== null ? { puestos: `${e.capacidad} (describe la experiencia; NO dice que hay cupo)` } : {}),
+    ...(e.disposicion ? { disposicion: e.disposicion } : {}),
+    ubicaciones: e.ubicaciones.map((u) => ({ zona: u.zona, descripcion: u.descripcion, recargo: u.recargo !== null ? `${pesos(u.recargo)}${unidad(u.unidad)}` : 'sin recargo' })),
+    elige_mesa: e.eligeMesa === 'si' ? 'sí: se anota como preferencia' : e.eligeMesa === 'se_pide' ? 'se pide y el equipo confirma' : e.eligeMesa === 'no' ? 'no se elige mesa' : 'sin_dato',
+    ...(e.abono !== null ? { abono: pesos(e.abono) } : {}),
+    ...(e.duracion ? { duracion: e.duracion } : {}), ...(e.edadSugerida ? { edad_sugerida: e.edadSugerida } : {}), ...(e.direccion ? { direccion: e.direccion } : {}),
+    version: e.version, ...(e.fechaFicha ? { fecha_ficha: e.fechaFicha } : {}),
+  };
+}
+
+/** La preferencia de mesa vigente en la conversación (la última anotada). Pura. */
+export function preferenciaMesa(filas: FilaPublica[]): string | null {
+  return filas.map((f) => (f.traza as TrazaPublica | null)?.preferencia_mesa).filter((x): x is string => !!x).at(-1) ?? null;
+}
+
+/** La línea fija de la preferencia de mesa en el resumen: nunca una asignación. Pura. */
+export function lineaPreferenciaMesa(p: string): string {
+  return `Preferencia de mesa: ${p.replace(/\s+/g, ' ').slice(0, 60)} (por confirmar)`;
+}
+
 export interface OpcionesDominioPublico {
   reglamento: Reglamento;
   ahoraMs: () => number;
@@ -91,13 +129,13 @@ export interface OpcionesDominioPublico {
 
 export function dominioPublico(o: OpcionesDominioPublico): Dominio {
   const r = o.reglamento;
-  const claves = politicas(r).map((p) => p.clave);
+  const claves: string[] = [...CLAVES_REGLAS];
   const caida = () => { if (o.fallar?.()) throw new Error('herramienta caída (simulada)'); };
 
   const lecturas: DeclaracionHerramienta[] = [
     {
       name: 'ver_catalogo',
-      description: 'Las experiencias vigentes hoy: nombre, qué incluye, precio por persona, abono, duración, edad sugerida, dirección, versión y fecha de la ficha. Úsala antes de decir cualquier precio, qué incluye o dónde queda. Si no hay ninguna vigente, no inventes ni uses una anterior: pasa a persona con motivo `falla`.',
+      description: 'La ficha de cada experiencia vigente hoy: historia, qué incluye, precio por persona y por pareja, cómo se cobra un grupo (si la ficha lo dice), condiciones especiales VIGENTES HOY con su condición completa, puestos (describen la experiencia, nunca dicen que hay cupo), disposición, ubicaciones con su recargo, si se elige mesa, abono, duración, edad sugerida y dirección. Úsala antes de decir cualquier precio, condición o dato de la experiencia; lo que no esté aquí no lo deduzcas (duda abierta). Nunca sumes dos condiciones ni apliques una fuera de su condición. Si no hay ninguna vigente, pasa a persona con motivo `falla`.',
       parameters: { type: 'object', properties: {}, required: [] },
     },
     {
@@ -107,15 +145,15 @@ export function dominioPublico(o: OpcionesDominioPublico): Dominio {
     },
     {
       name: 'consultar_reglas',
-      description: `Una política publicada por su clave. Claves: ${claves.length ? claves.join(', ') : '(ninguna publicada)'}. Si la que preguntan no está, di que no la tienes y ofrece pasar con una persona.`,
-      parameters: { type: 'object', properties: { clave: { type: 'string', enum: claves.length ? claves : ['ninguna'] } }, required: ['clave'] },
+      description: `La información general publicada, por clave: ${claves.join(', ')}. Si devuelve \`sin_dato\`, no adivines ni deduzcas («seguro hay parqueadero cerca»): pasa a persona con motivo \`duda_abierta\` (el sistema le dice al cliente que no tienes ese dato confirmado).`,
+      parameters: { type: 'object', properties: { clave: { type: 'string', enum: claves } }, required: ['clave'] },
     },
   ];
 
   const cierres: DeclaracionHerramienta[] = [
     {
       name: PASAR_A_PERSONA,
-      description: 'Pasa la conversación a una persona del equipo. El sistema arma la nota interna, pone la etiqueta y le dice al cliente qué sigue. Usa el motivo exacto: reserva_lista (lo pone el sistema tras la confirmación, no lo uses tú), restriccion, celebracion, grupo, pide_persona, queja, pago (soporte, «ya pagué», doble cobro), no_entiende (dos turnos sin entender o frustración), menor, crisis, abuso, datos (borrar datos o revocar la autorización), falla.',
+      description: 'Pasa la conversación a una persona del equipo. El sistema arma la nota interna, pone la etiqueta y le dice al cliente qué sigue. Usa el motivo exacto: reserva_lista (lo pone el sistema tras la confirmación, no lo uses tú), restriccion, celebracion, grupo, pide_persona, queja, pago (soporte, «ya pagué», doble cobro), no_entiende (dos turnos sin entender o frustración), menor, crisis, abuso, duda_abierta (pregunta del tema que la ficha y las reglas no contestan: no adivines), datos (borrar datos o revocar la autorización), falla.',
       parameters: {
         type: 'object',
         properties: {
@@ -127,8 +165,15 @@ export function dominioPublico(o: OpcionesDominioPublico): Dominio {
     },
     {
       name: RESPUESTA_FIJA,
-      description: `Manda una respuesta fija, tal cual la escribe el sistema. ${RF_AUTORIZACION}: antes de pedir nombre, cédula o teléfono para la reserva (pide la autorización con Sí / No; es la ÚNICA forma de pedirla: nunca la redactes tú en responder). ${RF_AUTORIZACION_SENSIBLE}: si la persona menciona una restricción alimentaria, alergia o dato de salud (no repitas el dato). ${RF_TARJETA}: si escribe o pide escribir datos de tarjeta.`,
-      parameters: { type: 'object', properties: { clave: { type: 'string', enum: [...FIJAS_DEL_MODELO] } }, required: ['clave'] },
+      description: `Manda una respuesta fija, tal cual la escribe el sistema. ${RF_AUTORIZACION}: antes de pedir nombre, cédula o teléfono para la reserva (pide la autorización con Sí / No; es la ÚNICA forma de pedirla: nunca la redactes tú en responder). ${RF_AUTORIZACION_SENSIBLE}: si la persona menciona una restricción alimentaria, alergia o dato de salud (no repitas el dato). ${RF_TARJETA}: si escribe o pide escribir datos de tarjeta. ${RF_PREFERENCIA_MESA}: si pide una mesa o zona (pon en \`preferencia\` lo que pidió; el sistema la anota como preferencia, nunca como asignada, y dice el recargo de la zona si lo hay). ${RF_CUPO}: si pregunta si hay cupo o pide que se lo asegures.`,
+      parameters: {
+        type: 'object',
+        properties: {
+          clave: { type: 'string', enum: [...FIJAS_DEL_MODELO] },
+          preferencia: { type: 'string', description: 'Solo con rf.preferencia_mesa: la mesa o zona que pidió, con sus palabras.' },
+        },
+        required: ['clave'],
+      },
     },
   ];
 
@@ -143,6 +188,7 @@ export function dominioPublico(o: OpcionesDominioPublico): Dominio {
       nombre: { type: 'string', description: 'como lo escribió el cliente después de autorizar' },
       cedula: { type: 'string' },
       telefono: { type: 'string' },
+      preferencia_mesa: { type: 'string', description: 'Opcional: la mesa o zona que pidió el cliente (queda como preferencia por confirmar)' },
     },
     cierres,
 
@@ -155,11 +201,7 @@ export function dominioPublico(o: OpcionesDominioPublico): Dominio {
         return {
           ok: true,
           datos: {
-            experiencias: vs.map((e) => ({
-              id: e.id, nombre: e.nombre, incluye: e.incluye, precio_por_persona: pesos(e.precioPersona), ...(e.abono !== null ? { abono: pesos(e.abono) } : {}),
-              ...(e.duracion ? { duracion: e.duracion } : {}), ...(e.edadSugerida ? { edad_sugerida: e.edadSugerida } : {}), ...(e.direccion ? { direccion: e.direccion } : {}),
-              version: e.version, ...(e.fechaFicha ? { fecha_ficha: e.fechaFicha } : {}),
-            })),
+            experiencias: vs.map((e) => fichaParaModelo(e, ahora)),
           },
         };
       }
@@ -171,7 +213,11 @@ export function dominioPublico(o: OpcionesDominioPublico): Dominio {
         return { ok: true, datos: { funciones: fs.map((f) => ({ id: f.id, cuando: cuandoBogota(f.inicio) })) }, sobre: exp };
       }
       if (nombre === 'consultar_reglas') {
-        const p = politicas(r).find((x) => x.clave === String(args.clave ?? ''));
+        const clave = String(args.clave ?? '');
+        if (!claves.includes(clave)) return { ok: false, datos: null, error: `Clave desconocida. Usa una de: ${claves.join(', ')}.` };
+        const p = politicas(r).find((x) => x.clave === clave);
+        // Sin ficha: no hay dato. El modelo no deduce: duda abierta y persona (§8.3).
+        if (!p) return { ok: true, datos: { clave, sin_dato: true, que_hacer: 'No hay ficha: llama pasar_a_persona con motivo duda_abierta. No adivines.' } };
         if (!p) return { ok: false, datos: null, error: `No hay una política publicada con esa clave. Claves: ${claves.join(', ') || '(ninguna)'}.` };
         return { ok: true, datos: { clave: p.clave, politica: p.texto } };
       }
@@ -201,18 +247,24 @@ export function dominioPublico(o: OpcionesDominioPublico): Dominio {
       if (faltan.length) {
         return { ok: false, error: `Falta ${faltan.join(', ')} escrito por el cliente después de autorizar (lo que dijo antes no cuenta). Pídelo.`, candado: 'dato_sin_autorizacion' };
       }
-      const total = exp.precioPersona * personas;
+      // La mesa: PREFERENCIA (§8.4.2), la del estado o la que trae el modelo, y solo si la ficha deja elegirla.
+      const pedida = String(datos.preferencia_mesa ?? '').trim() || preferenciaMesa(filas);
+      if (pedida && exp.eligeMesa !== 'si' && exp.eligeMesa !== 'se_pide') {
+        return { ok: false, error: exp.eligeMesa === 'no' ? 'En esta función no se elige mesa: díselo al cliente y propón sin preferencia de mesa.' : 'La ficha no dice si se elige mesa: no la anotes; propón sin ella.', candado: 'mesa_no_se_elige' };
+      }
+      // Sin total (§8.4.4): precios unitarios de la ficha y «el equipo te confirma el total» (D17 abierta).
       const resumen = [
         'Revisa tu reserva:',
         `• ${exp.nombre}`,
         `• ${cuandoBogota(fun.inicio)}`,
-        `• ${personas} ${personas === 1 ? 'persona' : 'personas'} · ${pesos(exp.precioPersona)} c/u · total ${pesos(total)}`,
+        `• ${personas} ${personas === 1 ? 'persona' : 'personas'} · ${pesos(exp.precioPersona)} por persona${exp.precioPareja !== null ? ` (${pesos(exp.precioPareja)} por pareja)` : ''}`,
+        ...(pedida ? [`• ${lineaPreferenciaMesa(pedida)}`] : []),
         `• ${campos.nombre} · C.C. ${digitos(campos.cedula)} · Tel. ${digitos(campos.telefono)}`,
-        '¿Está bien? Una persona del equipo te confirma el cupo y el pago.',
+        'El equipo de Sabor te confirma el total, el cupo, la mesa y el pago. ¿Está bien?',
       ].join('\n');
       const propuesta: Propuesta = {
         accion: 'reserva',
-        datos: { experiencia: exp.id, experiencia_version: exp.version, funcion: fun.id, inicio: fun.inicio, personas, nombre: campos.nombre, cedula: digitos(campos.cedula), telefono: digitos(campos.telefono), total },
+        datos: { experiencia: exp.id, experiencia_version: exp.version, funcion: fun.id, inicio: fun.inicio, personas, nombre: campos.nombre, cedula: digitos(campos.cedula), telefono: digitos(campos.telefono), ...(pedida ? { preferencia_mesa: pedida } : {}) },
         resumen, si: 'Sí, está bien', no: 'Corregir',
       };
       return { ok: true, propuesta };
@@ -220,7 +272,7 @@ export function dominioPublico(o: OpcionesDominioPublico): Dominio {
 
     async ejecutar(p) {
       // Etapa 1: confirmar no escribe ninguna reserva (cupos y pago son etapa 2). Pasa a persona con el resumen.
-      return { lineas: [respuestaFija(r, 'rf.persona.reserva_lista') || respuestaFija(r, 'rf.persona')], escrituras: [{ tipo: 'persona', motivo: 'reserva_lista', datos: p.datos }] };
+      return { lineas: [respuestaFija(r, RF_SIGUIENTE_PASO) || respuestaFija(r, 'rf.persona.reserva_lista') || respuestaFija(r, 'rf.persona')], escrituras: [{ tipo: 'persona', motivo: 'reserva_lista', datos: p.datos }] };
     },
 
     async estado(ctx) {
@@ -235,6 +287,7 @@ export function dominioPublico(o: OpcionesDominioPublico): Dominio {
       return [
         `Autorización de datos para la reserva: ${lineaG}.`,
         ...(sen.estado !== 'no_pedida' ? [`Dato de salud: ${sen.estado === 'si' ? 'autorizado (ya pasó a persona)' : sen.estado === 'no' ? 'no autorizado: no lo menciones ni lo guardes' : 'autorización pedida, sin respuesta'}.`] : []),
+        ...(preferenciaMesa(filas) ? [`Preferencia de mesa anotada (por confirmar, no asignada): ${preferenciaMesa(filas)}.`] : []),
         ...(pasados.length ? [`Ya pasó a persona por: ${[...new Set(pasados)].join(', ')} (no repitas esos motivos salvo pide_persona).`] : []),
       ];
     },
@@ -247,7 +300,8 @@ export function dominioPublico(o: OpcionesDominioPublico): Dominio {
         if (!REPETIBLES.includes(motivo) && motivosYaPasados(filas).includes(motivo)) {
           return { ok: false, error: `Esta conversación ya pasó a persona por «${motivo}» y la devolvieron: atiéndela tú (sin volver a pasarla por lo mismo).`, candado: 'motivo_repetido' };
         }
-        const texto = respuestaFija(r, `rf.persona.${motivo}`) || respuestaFija(r, 'rf.persona');
+        // La duda abierta dice `rf.duda_abierta` («no tengo ese dato confirmado…») y no adivina (§8.3).
+        const texto = (motivo === 'duda_abierta' ? respuestaFija(r, RF_DUDA_ABIERTA) : '') || respuestaFija(r, `rf.persona.${motivo}`) || respuestaFija(r, 'rf.persona');
         return { ok: true, salidas: [{ tipo: 'texto', texto }], datos: { motivo }, privado: { persona: { motivo, pidio: String(args.pidio ?? '').slice(0, 200) } } };
       }
       if (nombre === RESPUESTA_FIJA) {
@@ -265,6 +319,24 @@ export function dominioPublico(o: OpcionesDominioPublico): Dominio {
         if (clave === RF_TARJETA) {
           const s: Salida = { tipo: 'texto', texto: respuestaFija(r, RF_TARJETA) };
           return { ok: true, salidas: [s], privado: { enmascarar: true } };
+        }
+        if (clave === RF_CUPO) return { ok: true, salidas: [{ tipo: 'texto', texto: respuestaFija(r, RF_CUPO) }] };
+        if (clave === RF_PREFERENCIA_MESA) {
+          const pedida = String(args.preferencia ?? '').trim();
+          if (!pedida) return { ok: false, error: 'Pon en `preferencia` la mesa o zona que pidió el cliente.', candado: 'preferencia_vacia' };
+          const vs = vigentes(r, o.ahoraMs());
+          const exp = vs.find((e) => zonaDe(e, pedida)) ?? (vs.length === 1 ? vs[0] : null);
+          if (!exp || (exp.eligeMesa !== 'si' && exp.eligeMesa !== 'se_pide')) {
+            return {
+              ok: false, candado: 'mesa_no_se_elige',
+              error: exp?.eligeMesa === 'no' ? 'En esta función no se elige mesa: díselo al cliente con responder y no la anotes.' : 'La ficha no dice si se elige mesa: no la anotes; es una duda abierta (pasar_a_persona duda_abierta).',
+            };
+          }
+          // La zona con sobrecosto se dice con su monto, armado por el código desde la ficha (§8.4.2).
+          const zona = zonaDe(exp, pedida);
+          const recargo = zona && zona.recargo !== null ? `La zona ${zona.descripcion || zona.zona} tiene un recargo de ${pesos(zona.recargo)}${zona.unidad ? ` ${zona.unidad}` : ''}.` : '';
+          const texto = [respuestaFija(r, RF_PREFERENCIA_MESA), recargo].filter(Boolean).join(' ');
+          return { ok: true, salidas: [{ tipo: 'texto', texto }], privado: { preferencia_mesa: pedida.slice(0, 80) } };
         }
         return { ok: false, error: `Usa una de: ${FIJAS_DEL_MODELO.join(', ')}.`, candado: 'fija_desconocida' };
       }

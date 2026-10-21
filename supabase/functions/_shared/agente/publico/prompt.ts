@@ -4,7 +4,8 @@
 // Secciones con etiquetas XML, en el orden del diseño; cada una sale de las fichas del reglamento (así se ajusta sin
 // desplegar y se prueba por separado):
 //   <identidad> perfil · <alcance> alcance · <reglas_que_no_ceden> invariantes · <contenido_no_confiable> fijo ·
-//   <herramientas> fijo · <flujo_de_reserva> procedimientos · <paso_a_persona> guías `persona.*` · <estilo> estilo ·
+//   <herramientas> fijo · <flujo_de_reserva> procedimientos · <paso_a_persona> guías `persona.*` ·
+//   <seguridad_del_cliente> guías `seg.*` (§7.7b, 2026-10-21) · <estilo> estilo ·
 //   <ejemplos> guías `ej.*` (HUECO hasta las 20 conversaciones reales).
 // El contenido variable (precios, fechas, funciones, dirección, políticas) nunca va aquí: llega por herramienta.
 // El aviso de bot, las autorizaciones, los pasos a persona y la demora son respuestas fijas: las escribe el código.
@@ -49,8 +50,9 @@ export function sistemaPublico(r: Reglamento, c: Pick<ConfigAgente, 'topes'>): s
     ].join('\n')),
     seccion('flujo_de_reserva', de(r, (f) => f.tipo === 'procedimiento')),
     seccion('paso_a_persona', de(r, (f) => f.tipo === 'guia' && f.clave.startsWith('persona.'))),
+    seccion('seguridad_del_cliente', de(r, (f) => f.tipo === 'guia' && f.clave.startsWith('seg.'))),
     seccion('estilo', de(r, (f) => f.tipo === 'estilo' || (f.tipo === 'glosario'))),
     seccion('ejemplos', de(r, (f) => f.tipo === 'guia' && f.clave.startsWith('ej.'))),
-    seccion('guias', de(r, (f) => f.tipo === 'guia' && !f.clave.startsWith('persona.') && !f.clave.startsWith('ej.') && !esCatalogo(f))),
+    seccion('guias', de(r, (f) => f.tipo === 'guia' && !f.clave.startsWith('persona.') && !f.clave.startsWith('seg.') && !f.clave.startsWith('ej.') && !esCatalogo(f))),
   ].filter(Boolean).join('\n\n');
 }
