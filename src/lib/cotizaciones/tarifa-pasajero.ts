@@ -1835,6 +1835,12 @@ export interface TarifaPax {
    * mientras la casilla 1 sea la que escribió (`origenVigente`). Ausente = como siempre.
    */
   tarifaExtraida?: OrigenTarifaExtraida
+  /**
+   * La llave del perfil (ficha) que la persona dijo que NO es el de esta línea («No es este» en la
+   * tarjeta, brief del 2026-10-21, punto 5). Mientras esté, esa ficha no vuelve sola por el nombre:
+   * ni fotos ni proveedor. Ausente = como siempre.
+   */
+  fichaDescartada?: string
 }
 
 /** Lo escrito a mano de un tipo de pasajero, con quién y cuándo. */
@@ -2071,6 +2077,7 @@ export function leerTarifaPax(raw: unknown): TarifaPax {
   const noVa = leerMarcaNoVa(r.noVa)
   const costosAMano = leerCostosAMano(r.costosAMano)
   const tarifaExtraida = leerOrigenTarifaExtraida(r.tarifaExtraida)
+  const fichaDescartada = typeof r.fichaDescartada === 'string' && r.fichaDescartada.trim() ? r.fichaDescartada.slice(0, 300) : null
   return {
     composicion: normalizarComposicion(r.composicion),
     casillas,
@@ -2095,6 +2102,8 @@ export function leerTarifaPax(raw: unknown): TarifaPax {
     ...(costosAMano ? { costosAMano } : {}),
     // Igual: sin tarifa elegida del tarifario la llave no aparece.
     ...(tarifaExtraida ? { tarifaExtraida } : {}),
+    // Igual: sin «No es este» en la tarjeta la llave no aparece.
+    ...(fichaDescartada ? { fichaDescartada } : {}),
   }
 }
 
