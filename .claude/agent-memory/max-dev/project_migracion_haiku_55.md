@@ -10,6 +10,13 @@ PR #1217 abierto el 2026-10-20, checks verdes, NO mergear sin Mauricio: Vercel y
 Eval de la sesión principal (2.ª corrida): bot 20/20, intención WA 24/34, gastos 15/18 (revisados).
 El esquema de carga del bot pasaba de 24 opcionales (400): el traductor ahora lo dice en el sistema de una.
 
+Decisiones del 2026-10-20 (Mauricio): respaldo SIEMPRE en Gemini (bot: respaldo directo; fetchModelo: 429/5xx/red
+→ mismo pedido a Gemini si el sitio trae su llave); bot Voz de Venezuela APAGADO por código (`VE_APAGADO`, la palabra
+clave era el único interruptor); cardumen y customer en Haiku vía `_shared/modelo-texto.ts` (ex `venezuela/gemini.ts`).
+Documentos y actas tienen interruptor propio (`LLM_PROVEEDOR_DOCUMENTOS` / `_ACTAS`, por defecto gemini) tras el
+eval real: documento 91 % de campos, rut con cercas de código, acta 8/12. El arnés tiene que aplicar
+`aplicarNormalizaciones` como producción o reporta NIT con DV que en prod no pasa.
+
 Mauricio aprobó el 2026-10-20 apagar Gemini y poner `claude-haiku-5-5` en todo ONE salvo el audio.
 
 Diseño elegido: los sitios siguen armando el cuerpo de `generateContent` de Gemini y cambian `fetch` por
