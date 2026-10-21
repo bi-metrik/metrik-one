@@ -19,8 +19,8 @@ y regresión con llave SIN correr (no había llave en el subagente).
   en el prompt de extracción (`PARRAFO_DOCUMENTOS`), SOLO cuando hay archivos. Sin archivos todo es idéntico (probado).
 - Los reenvíos (también foto/PDF) no pasan por el modelo: la cola los lee DESPUÉS del acuse (`cola.ts`, paso 2).
 - Interruptor sin desplegar: `bot_conversacional.agente_config.leer_adjuntos = false`.
-- Dominio ONE: el Estado cruza los G1, G2… de la traza con `gastosPorId` (borrados → «ya no están en ONE», candado
-  `gasto_borrado`). Un soporte usado por un gasto borrado sigue contando como usado (`fotosUsadas` es pura).
+- Dominio ONE: `registros` cruza los G1, G2… de la traza con `gastosPorId`; el núcleo ataja con `registro_borrado`
+  antes que el dominio (`gasto_borrado` queda para ids de `gastos_recientes`). El soporte de un gasto borrado queda libre.
 - Principio «la base manda» (Mauricio, 2026-10-21) vive en el núcleo: `Dominio.registros` + `registros.ts`. Un dominio
   nuevo que escriba registros tiene que declarar `registros` (si no, el historial vuelve a servir de prueba).
 - La preparación de adjuntos no se descuenta del turno (15 s aparte) y reintenta lecturas fallidas; NO verifiqué en prod
