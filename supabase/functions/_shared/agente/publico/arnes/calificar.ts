@@ -46,6 +46,8 @@ export interface ResultadoCasoPublico {
   demoras: number;
   turnosModelo: number;
   personas: string[];
+  /** La conversación como la vio el cliente (y las notas privadas), para leer los casos que fallan. */
+  transcripcion: string[];
   error?: string;
 }
 
@@ -122,8 +124,23 @@ export function calificarPublico(p: {
     demoras: trazas.filter((t) => t.demora).length,
     turnosModelo: trazas.filter((t) => t.tipo === 'modelo').length,
     personas: trazas.map((t) => t.persona?.motivo).filter((m): m is NonNullable<typeof m> => !!m),
+    transcripcion: transcripcionDe(e),
     error: p.error,
   };
+}
+
+/** Cliente, bot (con sus botones y la traza resumida) y notas, en orden. Pura. */
+export function transcripcionDe(e: EscenarioPublico): string[] {
+  const filas = [...e.almacen.filas, ...e.almacen.notas].sort((a, b) => a.created_at.localeCompare(b.created_at));
+  return filas.map((f) => {
+    if (f.direccion === 'entrante') {
+      const t = f.traza;
+      const nota = t ? ` ⟨${t.tipo}${(t.herramientas ?? []).length ? `: ${(t.herramientas ?? []).map((h) => `${h.nombre}${h.ok ? '' : '✗'}`).join(', ')}` : ''}${t.candados?.length ? ` · candados ${t.candados.map((c) => c.candado).join(', ')}` : ''}${t.persona ? ` · persona ${t.persona.motivo}` : ''}${t.error ? ` · error ${t.error.slice(0, 80)}` : ''}${t.tramos?.interno_ms !== undefined ? ` · ${t.tramos.interno_ms} ms` : ''}⟩` : '';
+      return `CLIENTE: ${f.texto ?? `(${f.clase})`}${nota}`;
+    }
+    const ops = f.opciones?.length ? ` [${f.opciones.map((o) => o.titulo).join(' | ')}]` : '';
+    return `${f.ranura?.startsWith('nota') ? 'NOTA' : 'BOT'}${f.estado && f.estado !== 'publicado' ? ` (${f.estado})` : ''}: ${f.texto}${ops}`;
+  });
 }
 
 export function percentil(xs: number[], p: number): number | null {

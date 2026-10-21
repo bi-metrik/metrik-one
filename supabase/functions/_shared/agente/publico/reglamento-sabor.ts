@@ -48,6 +48,7 @@ export const REGLAMENTO_SABOR: Ficha[] = [
   inv('inv.pagos', 'No validas pagos ni soportes: van a persona con motivo `pago`.'),
   inv('inv.urgencia', 'No fabricas urgencia («últimos cupos», «solo hoy»).'),
   inv('inv.datos', 'Pides solo los datos de la reserva (función, personas, nombre, cédula, teléfono), y solo después de la autorización con su «sí». No pides datos de más.'),
+  inv('inv.autorizacion_fija', 'La autorización de datos la pides SIEMPRE con respuesta_fija rf.autorizacion, nunca con tus palabras ni con tus propios botones Sí / No: el texto legal, su link y su versión los pone el sistema.'),
   inv('inv.menores', 'No tomas datos de menores de 18. Si quien escribe parece menor, pasa a persona con motivo `menor`. De los niños que asisten solo preguntas cuántos (y la edad si la experiencia lo pide).', 'Diseño §5.4; Anexo 5.3.5'),
   inv('inv.terceros', 'No das datos de otros clientes ni de reservas ajenas.'),
   // §7.6 Flujo de reserva

@@ -28,7 +28,7 @@ import { leerToque, cortarEnPalabra } from '../render.ts';
 import type { PrecioModelo } from '../uso.ts';
 import type { ContextoDominio, Modelo, Reglamento, Salida } from '../tipos.ts';
 import {
-  RF_BIENVENIDA, autorizacionEnEspera, conAviso, estadoAutorizacion, eventoAutorizacion, huellaTexto, motivoAviso, respuestaA, textoFijo, versionDe,
+  RF_BIENVENIDA, autorizacionEnEspera, conAviso, estadoAutorizacion, salidaAutorizacion, eventoAutorizacion, huellaTexto, motivoAviso, respuestaA, textoFijo, versionDe,
 } from './autorizacion.ts';
 import type { ConfigPublico } from './config.ts';
 import { PASAR_A_PERSONA, RESPUESTA_FIJA, dominioPublico } from './dominio.ts';
@@ -431,6 +431,17 @@ export async function unTurnoPublico(d: DepsPublico): Promise<boolean> {
       traza.respuesta_fija = 'rf.modelo_caido';
     }
   }
+  // 8b''. El modelo no pide la autorización con sus palabras: el texto legal es fijo (§5.2). Visto en la corrida real
+  // (2026-10-21): «¿autorizas que tomemos tus datos…? [Sí | No]» escrito por el modelo, sin link ni versión; el «no» que
+  // siguió no quedó como prueba. Si su respuesta habla de autorizar y no hay un «sí» registrado, sale la fija.
+  let pide = r.pide ?? null;
+  if (salida && r.delModelo && salida === r.salida && /autoriz/.test(salida.texto.toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, ''))
+    && estadoAutorizacion(filas, 'general').estado !== 'si') {
+    traza.candados = [...(traza.candados ?? []), { candado: 'autorizacion_improvisada', detalle: salida.texto.slice(0, 200) }];
+    salida = salidaAutorizacion(d.reglamento, 'general', varsDe(d));
+    traza.respuesta_fija = 'rf.autorizacion';
+    pide = 'general';
+  }
   const extras = salida === r.salida ? (r.extras ?? []) : [];
 
   // El aviso de bot y términos (§5.1): pegado a la primera respuesta que sale.
@@ -483,12 +494,12 @@ export async function unTurnoPublico(d: DepsPublico): Promise<boolean> {
     }
     if (p.ok) {
       tramos.publicacion_ms = Math.round(d.reloj() - tp);
-      tramos.interno_ms = Math.max(0, d.ahoraMs() - Date.parse(ultima.created_at) - (tramos.rafaga_ms ?? 0));
+      tramos.interno_ms = Math.max(0, Math.round(d.ahoraMs() - Date.parse(ultima.created_at) - (tramos.rafaga_ms ?? 0)));
     }
   }
   traza.salida = salida;
   if (extras.length && salida) traza.salidas_extra = extras;
-  if (r.pide && salida) traza.pide_autorizacion = r.pide;
+  if (pide && salida) traza.pide_autorizacion = pide;
 
   // Paso a persona.
   if (persona) {

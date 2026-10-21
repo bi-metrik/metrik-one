@@ -12,6 +12,7 @@ import { escenarioPublico, reglamentoSabor } from '../escenario.ts';
 import type { EscenarioPublico } from '../escenario.ts';
 import { REGLAMENTO_SABOR } from '../reglamento-sabor.ts';
 import type { PrecioModelo } from '../../uso.ts';
+import type { ConfigPublico } from '../config.ts';
 import { calificarPublico, corte1Propuesto, percentil } from './calificar.ts';
 import type { ResultadoCasoPublico } from './calificar.ts';
 import type { CasoPublico } from './conjuntos.ts';
@@ -22,15 +23,24 @@ export interface OpcionesCorrida {
   k: number;
   vivo?: boolean;
   precios?: PrecioModelo[];
+  /** Configuración base del escenario (antes de la del caso): la corrida por CLI agranda los cortes. */
+  configBase?: Partial<ConfigPublico>;
+  /** Multiplica los cortes que fija el propio caso (operación). */
+  escala?: number;
 }
 
 const PRECIOS_GUION: PrecioModelo[] = [{ modelo: 'guion', entrada: 0.1, salida: 0.5, cache: null }];
+
+function escalar(c: Partial<ConfigPublico> | undefined, x: number): Partial<ConfigPublico> {
+  if (!c) return {};
+  return { ...c, ...(c.corte1Ms ? { corte1Ms: c.corte1Ms * x } : {}), ...(c.corteTotalMs ? { corteTotalMs: c.corteTotalMs * x } : {}) };
+}
 
 export async function correrUnaVez(caso: CasoPublico, o: OpcionesCorrida): Promise<ResultadoCasoPublico> {
   if (caso.soloCodigo) {
     let exito;
     try { exito = await caso.soloCodigo(); } catch (err) { exito = { ok: false, motivo: String(err).slice(0, 200) }; }
-    return { id: caso.id, conjunto: caso.conjunto, titulo: caso.titulo, exito, daninas: [], atajadas: [], internos: [], demoras: 0, turnosModelo: 0, personas: [] };
+    return { id: caso.id, conjunto: caso.conjunto, titulo: caso.titulo, exito, daninas: [], atajadas: [], internos: [], demoras: 0, turnosModelo: 0, personas: [], transcripcion: [] };
   }
   const reglamento = await reglamentoSabor(caso.fichas ? caso.fichas(REGLAMENTO_SABOR) : REGLAMENTO_SABOR);
   const base = o.modelo ? o.modelo() : modeloGuionado(caso.guion ?? []);
@@ -38,7 +48,7 @@ export async function correrUnaVez(caso: CasoPublico, o: OpcionesCorrida): Promi
   const ref: { e?: EscenarioPublico } = {};
   const modelo = caso.envolver ? caso.envolver(base, () => ref.e!) : base;
   const e = ref.e = await escenarioPublico({
-    modelo, canal: caso.canal, config: caso.config, reglamento, vivo: o.vivo, fallarHerramienta: caso.fallarHerramienta ? () => true : undefined,
+    modelo, canal: caso.canal, config: { ...o.configBase, ...escalar(caso.config, o.escala ?? 1) }, reglamento, vivo: o.vivo, fallarHerramienta: caso.fallarHerramienta ? () => true : undefined,
     precios: o.modelo ? (o.precios ?? []) : PRECIOS_GUION,
   });
   let error: string | undefined;
@@ -48,6 +58,13 @@ export async function correrUnaVez(caso: CasoPublico, o: OpcionesCorrida): Promi
       else if ('toca' in p) {
         try { await e.toca(p.toca); } catch { await e.escribe(p.oEscribe ?? 'sí'); }
       } else if ('audio' in p) await e.audio(p.audio, { noSoportado: p.noSoportado });
+      else if ('hastaAutorizacion' in p) {
+        for (const t of p.hastaAutorizacion) {
+          const ultimo = e.chatwoot.publicados.at(-1)?.salida;
+          if (ultimo && 'opciones' in ultimo && ultimo.opciones.some((x) => x.id.startsWith('ag|a|general|'))) break;
+          await e.escribe(t);
+        }
+      }
       else await p.hacer(e);
     }
   } catch (err) {
@@ -74,7 +91,7 @@ export interface Reporte {
   casos: number;
   k: number;
   passK: number;
-  porConjunto: Record<string, { casos: number; passK: number }>;
+  porConjunto: Record<string, { casos: number; passK: number; daninas: number }>;
   daninas: number;
   atajadas: number;
   internos: { n: number; p50: number | null; p90: number | null; p95: number | null };
@@ -82,7 +99,7 @@ export interface Reporte {
   demoras: number;
   turnosModelo: number;
   personasPorMotivo: Record<string, number>;
-  fallan: Array<{ id: string; motivo: string; daninas: string[] }>;
+  fallan: Array<{ id: string; conjunto: string; titulo: string; corridasMal: number; motivo: string; daninas: string[]; transcripcion: string[] }>;
 }
 
 export function reporte(rs: ResultadoPassK[], k: number): Reporte {
@@ -90,8 +107,9 @@ export function reporte(rs: ResultadoPassK[], k: number): Reporte {
   const internos = todas.flatMap((r) => r.internos);
   const porConjunto: Reporte['porConjunto'] = {};
   for (const r of rs) {
-    const c = porConjunto[r.conjunto] ??= { casos: 0, passK: 0 };
+    const c = porConjunto[r.conjunto] ??= { casos: 0, passK: 0, daninas: 0 };
     c.casos++;
+    c.daninas += r.corridas.reduce((n, x) => n + x.daninas.length, 0);
     if (r.pasa) c.passK++;
   }
   const personasPorMotivo: Record<string, number> = {};
@@ -107,7 +125,7 @@ export function reporte(rs: ResultadoPassK[], k: number): Reporte {
     personasPorMotivo,
     fallan: rs.filter((r) => !r.pasa).map((r) => {
       const mala = r.corridas.find((c) => !c.exito.ok || c.daninas.length) ?? r.corridas[0];
-      return { id: r.id, motivo: mala.exito.motivo, daninas: mala.daninas };
+      return { id: r.id, conjunto: r.conjunto, titulo: r.titulo, corridasMal: r.corridas.filter((c) => !c.exito.ok || c.daninas.length).length, motivo: mala.exito.motivo, daninas: mala.daninas, transcripcion: mala.transcripcion };
     }),
   };
 }

@@ -113,9 +113,10 @@ export async function escenarioPublico(p: {
     },
     async toca(titulo, o) {
       const t = titulo.toLowerCase();
-      const op = [...chatwoot.publicados].reverse().map((x) => ('opciones' in x.salida ? x.salida.opciones : []))
-        .map((ops) => ops.find((y) => y.titulo.toLowerCase() === t) ?? ops.find((y) => y.titulo.toLowerCase().startsWith(t)))
-        .find((x) => !!x);
+      // Exacto primero en todos los mensajes: «Sí» no puede tocar «Sí, esa función» (corrida real, 2026-10-21).
+      const listas = [...chatwoot.publicados].reverse().map((x) => ('opciones' in x.salida ? x.salida.opciones : []));
+      const op = listas.map((ops) => ops.find((y) => y.titulo.toLowerCase() === t)).find((x) => !!x)
+        ?? listas.map((ops) => ops.find((y) => y.titulo.toLowerCase().startsWith(t))).find((x) => !!x);
       if (!op) throw new Error(`no hay una opción «${titulo}» en los mensajes del bot`);
       reloj.avanzar(o?.despuesMs ?? 5_000);
       entrante('toque', op.titulo, { toqueId: op.id });

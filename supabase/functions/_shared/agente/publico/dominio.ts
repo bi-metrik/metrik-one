@@ -127,7 +127,7 @@ export function dominioPublico(o: OpcionesDominioPublico): Dominio {
     },
     {
       name: RESPUESTA_FIJA,
-      description: `Manda una respuesta fija, tal cual la escribe el sistema. ${RF_AUTORIZACION}: antes de pedir nombre, cédula o teléfono para la reserva (pide la autorización con Sí / No). ${RF_AUTORIZACION_SENSIBLE}: si la persona menciona una restricción alimentaria, alergia o dato de salud (no repitas el dato). ${RF_TARJETA}: si escribe o pide escribir datos de tarjeta.`,
+      description: `Manda una respuesta fija, tal cual la escribe el sistema. ${RF_AUTORIZACION}: antes de pedir nombre, cédula o teléfono para la reserva (pide la autorización con Sí / No; es la ÚNICA forma de pedirla: nunca la redactes tú en responder). ${RF_AUTORIZACION_SENSIBLE}: si la persona menciona una restricción alimentaria, alergia o dato de salud (no repitas el dato). ${RF_TARJETA}: si escribe o pide escribir datos de tarjeta.`,
       parameters: { type: 'object', properties: { clave: { type: 'string', enum: [...FIJAS_DEL_MODELO] } }, required: ['clave'] },
     },
   ];
