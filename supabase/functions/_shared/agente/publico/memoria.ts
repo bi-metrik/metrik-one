@@ -14,9 +14,14 @@ import { llaveTexto } from './tipos.ts';
 let secuencia = 0;
 export const nuevoIdPublico = () => `00000000-0000-4000-9000-${String(++secuencia).padStart(12, '0')}`;
 
+/**
+ * La hora de pared de las pruebas. `vivo`: además corre con el tiempo real (el arnés mide la latencia interna con la
+ * hora de las filas); `avanzar` salta sin esperar (la ráfaga, los pasos entre mensajes).
+ */
 export class RelojPublico {
-  constructor(public ms = Date.parse('2026-10-23T15:00:00Z')) {}
-  ahora = () => this.ms;
+  private t0 = performance.now();
+  constructor(public ms = Date.parse('2026-10-23T15:00:00Z'), public vivo = false) {}
+  ahora = () => this.ms + (this.vivo ? performance.now() - this.t0 : 0);
   avanzar(ms: number) { this.ms += ms; }
 }
 

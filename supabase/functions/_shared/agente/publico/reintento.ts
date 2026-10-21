@@ -24,7 +24,8 @@ export interface Intento { n: number; ms: number; ok: boolean; motivo?: string; 
 export function fallaDelModelo(r: SalidaTurno): string | null {
   const e = r.traza.error ?? '';
   if (e.startsWith('modelo:')) return e.slice(7).trim();
-  if (e === 'tope de tiempo del turno' || e === 'tope de llamados sin respuesta' || e === 'el modelo no llamó ninguna herramienta') return e;
+  // El tope de llamados no es una falla del modelo: el turno ya terminó con la respuesta fija de «no pude».
+  if (e === 'tope de tiempo del turno' || e === 'el modelo no llamó ninguna herramienta') return e;
   return null;
 }
 

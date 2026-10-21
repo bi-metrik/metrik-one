@@ -34,6 +34,7 @@ import {
 import type { ConfigPublico } from './config.ts';
 import { PASAR_A_PERSONA, RESPUESTA_FIJA, dominioPublico } from './dominio.ts';
 import { enlacesFueraDeLista } from './enlaces.ts';
+import { preciosSinHerramienta } from './precios.ts';
 import { sistemaPublico } from './prompt.ts';
 import type { AlmacenPublico, AvisosInternos, MensajeroChatwoot, Transcriptor } from './puertos.ts';
 import { turnoConReintento } from './reintento.ts';
@@ -302,7 +303,7 @@ async function decidir(d: DepsPublico, turnoId: string, filas: FilaPublica[], pe
           if (enFilas) enFilas.texto = t.texto;
         } else fallidos++;
       }
-      tramos.transcripcion_ms = Math.round(d.reloj() - t0);
+      tramos.transcripcion_ms = (tramos.transcripcion_ms ?? 0) + Math.round(d.reloj() - t0);
       if (fallidos && pend.every((f) => f.clase !== 'audio' ? false : !f.texto)) {
         return { salida: fija(d, 'rf.audio_fallo'), traza: sinTurno(d, { respuesta_fija: 'rf.audio_fallo' }) };
       }
@@ -381,6 +382,18 @@ export async function unTurnoPublico(d: DepsPublico): Promise<boolean> {
   }
   tramos.rafaga_ms = Math.round(rafaga);
 
+  // Un audio que llegó sin URL (`message_created` antes de que Chatwoot tenga el archivo): se espera su
+  // `message_updated` hasta 8 s. TikTok no entrega audios (§4.2): ahí no se espera.
+  let esperaAudio = 0;
+  const sinUrl = () => pend.some((f) => f.clase === 'audio' && !f.texto && !f.adjunto?.url && !f.adjunto?.no_soportado);
+  while (d.canal !== 'tiktok' && sinUrl() && esperaAudio < 8000) {
+    await d.dormir(1000);
+    esperaAudio += 1000;
+    filas = await d.almacen.leer(d.llave, desde());
+    pend = pendientesPublico(filas);
+  }
+  if (esperaAudio) tramos.transcripcion_ms = esperaAudio;
+
   let r: Resultado | null = null;
   let regenerado = 0;
   for (;;) {
@@ -402,10 +415,19 @@ export async function unTurnoPublico(d: DepsPublico): Promise<boolean> {
   let salida = r.salida;
   let persona = r.persona ?? null;
   if (salida && r.delModelo) {
-    const fuera = enlacesFueraDeLista([salida.texto, ...(r.extras ?? []).map((x) => x.texto)].join('\n'), [d.config.terminosUrl, ...d.config.enlacesPermitidos]);
-    if (fuera.length) {
-      traza.enlaces_rechazados = fuera;
-      traza.candados = [...(traza.candados ?? []), { candado: 'link_fuera_de_lista', detalle: fuera.join(' ') }];
+    const texto = [salida.texto, ...(r.extras ?? []).map((x) => x.texto)].join('\n');
+    const fuera = enlacesFueraDeLista(texto, [d.config.terminosUrl, ...d.config.enlacesPermitidos]);
+    // 8b'. Plata solo de herramienta (el catálogo) o del resumen del código, nunca de lo que dijo el cliente.
+    const deHerramienta = [...filas, ...pend].flatMap((f) => (f.traza?.herramientas ?? []).map((h) => JSON.stringify(h.datos ?? '')))
+      .concat((traza.herramientas ?? []).map((h) => JSON.stringify(h.datos ?? '')), traza.propuesta?.resumen ?? '');
+    const plata = preciosSinHerramienta(traza.propuesta ? salida.texto.replace(traza.propuesta.resumen, '') : texto, deHerramienta);
+    if (fuera.length || plata.length) {
+      if (fuera.length) traza.enlaces_rechazados = fuera;
+      traza.candados = [
+        ...(traza.candados ?? []),
+        ...(fuera.length ? [{ candado: 'link_fuera_de_lista', detalle: fuera.join(' ') }] : []),
+        ...(plata.length ? [{ candado: 'precio_sin_herramienta', detalle: plata.join(' ') }] : []),
+      ];
       salida = fija(d, 'rf.modelo_caido');
       traza.respuesta_fija = 'rf.modelo_caido';
     }
