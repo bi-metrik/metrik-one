@@ -16,6 +16,8 @@
 // El interruptor (`LLM_PROVEEDOR`):
 //   · `anthropic` (por defecto) → Haiku 5.5, si hay `ANTHROPIC_API_KEY`.
 //   · `gemini` → el `fetch` de siempre, sin tocar nada. Vuelve a Gemini sin redesplegar código.
+//   · Respaldo SIEMPRE en Gemini: si Haiku falla por saturación, límite, servidor o red, el mismo pedido sale a Gemini
+//     (si el sitio trae su llave de Gemini; si no, sin respaldo y aviso en el log).
 //   · Sin `ANTHROPIC_API_KEY` → también Gemini (con un aviso en el log). Así el código puede desplegarse antes que
 //     la llave y no cambia nada hasta que la llave exista.
 //
@@ -71,6 +73,33 @@ export function proveedorLLM(valor: string | undefined | null): ProveedorLLM {
 
 export function esUrlGemini(url: string): boolean {
   return /^https:\/\/generativelanguage\.googleapis\.com\/.+:generateContent/.test(url);
+}
+
+/** ¿Los pedidos de Gemini van hoy a Haiku? (proveedor `anthropic` y llave puesta). */
+export function haikuActivo(entorno: Entorno = entornoPorDefecto): boolean {
+  return proveedorLLM(entorno('LLM_PROVEEDOR')) === 'anthropic' && !!(entorno('ANTHROPIC_API_KEY') ?? '').trim();
+}
+
+/** ¿El pedido de Gemini trae su llave (en `?key=` o en `x-goog-api-key`)? Sin ella no hay respaldo posible. */
+export function pedidoTraeLlaveGemini(url: string, init?: RequestInit): boolean {
+  try {
+    if ((new URL(url).searchParams.get('key') ?? '').trim()) return true;
+  } catch {
+    // URL rara: se mira la cabecera.
+  }
+  const h = init?.headers;
+  if (!h) return false;
+  const valor = h instanceof Headers
+    ? h.get('x-goog-api-key')
+    : Array.isArray(h)
+      ? h.find(([k]) => k.toLowerCase() === 'x-goog-api-key')?.[1]
+      : Object.entries(h as Record<string, string>).find(([k]) => k.toLowerCase() === 'x-goog-api-key')?.[1];
+  return !!(valor ?? '').trim();
+}
+
+/** Lo que justifica ir al respaldo: saturación, límite o falla del servidor. Un 4xx de pedido no se arregla con otro modelo. */
+export function falloTransitorio(estado: number): boolean {
+  return estado === 429 || estado === 408 || estado >= 500;
 }
 
 // ── Esquemas ────────────────────────────────────────────────────────────────
@@ -486,6 +515,18 @@ export function crearFetchModelo(o: OpcionesFetchModelo = {}): typeof fetch {
       avisar(`[llm] pedido sin traducir a Anthropic (${t.motivo}): sigue en Gemini`);
       return real(entrada, init);
     }
+    // Respaldo SIEMPRE en Gemini (Mauricio, 2026-10-20): si Haiku falla por saturación, límite, servidor o red, el MISMO
+    // pedido sale a Gemini con la llave que trae el sitio. Sin esa llave no hay respaldo, y queda en el log. Si el
+    // tiempo del sitio ya se acabó (signal abortado), no hay respaldo: el sitio maneja su corte como siempre.
+    const alRespaldo = (motivo: string, fallo: () => Response | Promise<Response>): Response | Promise<Response> => {
+      if (init?.signal?.aborted) return fallo();
+      if (!pedidoTraeLlaveGemini(url, init)) {
+        avisar(`[llm] Haiku falló (${motivo}) y no hay GEMINI_API_KEY: sin respaldo`);
+        return fallo();
+      }
+      avisar(`[llm] Haiku falló (${motivo}): respaldo en Gemini`);
+      return real(entrada, init);
+    };
     const llamar = (cuerpo: Record<string, unknown>) =>
       real(URL_ANTHROPIC, {
         method: 'POST',
@@ -493,7 +534,14 @@ export function crearFetchModelo(o: OpcionesFetchModelo = {}): typeof fetch {
         body: JSON.stringify(cuerpo),
         signal: init?.signal ?? undefined,
       });
-    let res = await llamar(t.cuerpo);
+    let res: Response;
+    try {
+      res = await llamar(t.cuerpo);
+    } catch (e) {
+      const nombre = (e as { name?: string })?.name ?? '';
+      if (nombre === 'AbortError' || nombre === 'TimeoutError' || init?.signal?.aborted) throw e;
+      return alRespaldo(`red: ${String(e).slice(0, 80)}`, () => { throw e; });
+    }
     if (res.status === 400 && t.conEsquema) {
       // El esquema puede pasarse de lo que acepta la salida estructurada (complejidad, uniones). Se reintenta una
       // vez sin `format`, con el esquema dicho en el sistema: el sitio igual valida el JSON como siempre.
@@ -517,6 +565,9 @@ export function crearFetchModelo(o: OpcionesFetchModelo = {}): typeof fetch {
         // texto plano
       }
       const estado = estadoParaGemini(res.status);
+      if (falloTransitorio(res.status)) {
+        return alRespaldo(`http ${res.status}`, () => respuestaJson({ error: { code: estado, message: `anthropic ${res.status}: ${mensaje}`, status: 'ANTHROPIC_ERROR' } }, estado));
+      }
       return respuestaJson({ error: { code: estado, message: `anthropic ${res.status}: ${mensaje}`, status: 'ANTHROPIC_ERROR' } }, estado);
     }
     let datos: RespuestaAnthropic;

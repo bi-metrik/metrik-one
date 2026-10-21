@@ -228,12 +228,53 @@ describe('crearFetchModelo', () => {
     expect(d.candidates[0].finishReason).toBe('STOP');
   });
 
-  it('529 de Anthropic llega como 503 (lo que los sitios reintentan)', async () => {
+  const URL_SIN_LLAVE = 'https://generativelanguage.googleapis.com/v1beta/models/gemini-3.5-flash-lite:generateContent';
+  const conLlaveA = (k: string) => (k === 'ANTHROPIC_API_KEY' ? 'sk' : undefined);
+
+  it('529 sin llave de Gemini: no hay respaldo, llega como 503 (lo que los sitios reintentan) y queda en el log', async () => {
     const real = vi.fn(async () => respuestaA({ type: 'error', error: { type: 'overloaded_error', message: 'Overloaded' } }, 529));
-    const f = crearFetchModelo({ fetch: real as unknown as typeof fetch, entorno: (k) => (k === 'ANTHROPIC_API_KEY' ? 'sk' : undefined) });
-    const res = await f(URL_G, init);
+    const avisar = vi.fn();
+    const f = crearFetchModelo({ fetch: real as unknown as typeof fetch, entorno: conLlaveA, avisar });
+    const res = await f(URL_SIN_LLAVE, init);
     expect(res.status).toBe(503);
     expect(await res.text()).toMatch(/Overloaded/);
+    expect(real).toHaveBeenCalledTimes(1);
+    expect(avisar.mock.calls.flat().join(' ')).toMatch(/no hay GEMINI_API_KEY: sin respaldo/);
+  });
+
+  it('529 con llave de Gemini: el MISMO pedido sale al respaldo en Gemini', async () => {
+    const real = vi.fn()
+      .mockResolvedValueOnce(respuestaA({ type: 'error', error: { type: 'overloaded_error' } }, 529))
+      .mockResolvedValueOnce(respuestaA({ candidates: [{ content: { parts: [{ text: '{"a":"g"}' }] }, finishReason: 'STOP' }] }));
+    const f = crearFetchModelo({ fetch: real as unknown as typeof fetch, entorno: conLlaveA, avisar: () => {} });
+    const res = await f(URL_G, init);
+    expect(real.mock.calls[0][0]).toBe(URL_ANTHROPIC);
+    expect(real.mock.calls[1]).toEqual([URL_G, init]);
+    expect((await res.json()).candidates[0].content.parts[0].text).toBe('{"a":"g"}');
+  });
+
+  it('la llave en la cabecera x-goog-api-key también habilita el respaldo; un error de red de Haiku va al respaldo', async () => {
+    const real = vi.fn()
+      .mockRejectedValueOnce(new TypeError('fetch failed'))
+      .mockResolvedValueOnce(respuestaA({ ok: 1 }));
+    const f = crearFetchModelo({ fetch: real as unknown as typeof fetch, entorno: conLlaveA, avisar: () => {} });
+    const initH = { ...init, headers: { 'x-goog-api-key': 'g' } };
+    await f(URL_SIN_LLAVE, initH);
+    expect(real.mock.calls[1]).toEqual([URL_SIN_LLAVE, initH]);
+  });
+
+  it('sin respaldo: un 400 del pedido, o el corte del sitio ya vencido', async () => {
+    const r400 = vi.fn(async () => respuestaA({ type: 'error', error: { type: 'invalid_request_error', message: 'mal' } }, 400));
+    const f1 = crearFetchModelo({ fetch: r400 as unknown as typeof fetch, entorno: conLlaveA, avisar: () => {} });
+    expect((await f1(URL_G, { method: 'POST', body: JSON.stringify({ contents: [{ parts: [{ text: 'x' }] }] }) })).status).toBe(400);
+    expect(r400).toHaveBeenCalledTimes(1);
+
+    const corte = new AbortController();
+    corte.abort();
+    const r529 = vi.fn(async () => respuestaA({}, 529));
+    const f2 = crearFetchModelo({ fetch: r529 as unknown as typeof fetch, entorno: conLlaveA, avisar: () => {} });
+    expect((await f2(URL_G, { ...init, signal: corte.signal })).status).toBe(503);
+    expect(r529).toHaveBeenCalledTimes(1);
   });
 
   it('400 por el esquema: reintenta una vez sin format, con el esquema en el sistema', async () => {

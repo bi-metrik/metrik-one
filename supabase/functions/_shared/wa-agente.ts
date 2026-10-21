@@ -13,6 +13,7 @@ import { agenteActivo, leerConfigAgente } from './agente/config.ts';
 import { atenderPendientes } from './agente/cola.ts';
 import { BOT_BANDEJA, dominioBandeja } from './agente/bandeja/dominio.ts';
 import { modeloGemini } from './agente/modelo-gemini.ts';
+import { haikuActivo } from './llm-anthropic.ts';
 import { almacenSupabase, cargarReglamento, cupoSupabase, mensajeroWa, puertoBandejaSupabase } from './agente/produccion.ts';
 import { leerToque } from './agente/render.ts';
 import { revisarCupo } from './agente/uso.ts';
@@ -39,8 +40,10 @@ export async function atenderConAgente(supabase: SupabaseClient, user: WaUser, m
     return false;
   }
   const llave = Deno.env.get('GEMINI_API_KEY') ?? '';
-  if (!llave) {
-    console.error('[agente] sin GEMINI_API_KEY: sigue el bot de siempre');
+  // Con Haiku de principal, la llave de Gemini solo hace falta para el respaldo (sin ella corre sin respaldo, con aviso
+  // en el log). Sin Haiku ni Gemini no hay modelo: sigue el bot de siempre.
+  if (!llave && !haikuActivo()) {
+    console.error('[agente] sin GEMINI_API_KEY ni Haiku activo: sigue el bot de siempre');
     return false;
   }
 
