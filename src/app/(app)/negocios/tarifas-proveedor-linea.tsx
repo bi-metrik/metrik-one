@@ -1,6 +1,6 @@
 'use client'
 
-import { useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { AlertTriangle, ChevronDown, ChevronRight, ExternalLink, Loader2, Search } from 'lucide-react'
 import { toast } from 'sonner'
 
@@ -19,6 +19,7 @@ import {
   propuestaDeFila,
   TEXTO_CANAL,
   TEXTO_FUERA,
+  textoTemporada,
   type AjustesDeCosto,
   type CanalCosto,
   type FilaElegida,
@@ -45,16 +46,42 @@ export default function TarifasProveedorLinea({
   itemId,
   onCambio,
   inicial = null,
+  titulo = 'Tarifas del proveedor',
+  costoActual = null,
+  abiertaDeEntrada = false,
 }: {
   itemId: string
   onCambio: () => void
   /** Para verla ya abierta (pruebas y capturas). En la cotización se pide al abrir. */
   inicial?: TarifasDeLinea | null
+  /**
+   * Lo que dice el botón. En una línea con el costo ya confirmado: «Cambiar el costo por una tarifa
+   * del proveedor» (brief del 2026-10-20, punto 1).
+   */
+  titulo?: string
+  /**
+   * El costo que la línea tiene hoy, en pesos y sin IVA. Con él la persona ve el actual y el nuevo
+   * antes de «Usar», y el botón dice que lo reemplaza. `null` = la línea todavía no tiene costo.
+   */
+  costoActual?: number | null
+  /**
+   * Abierta y pidiendo las tarifas desde que se pinta: la línea escrita a mano «sin costo» porque
+   * el precio sale del tarifario (brief del 2026-10-20, punto 1).
+   */
+  abiertaDeEntrada?: boolean
 }) {
-  const [abierta, setAbierta] = useState(!!inicial)
+  const [abierta, setAbierta] = useState(!!inicial || abiertaDeEntrada)
   const [vista, setVista] = useState<TarifasDeLinea | null>(inicial)
   const [error, setError] = useState<string | null>(null)
   const [isPending, startTransition] = useTransitionTolerante()
+  // La que nace abierta pide sus tarifas una sola vez, al montarse.
+  const pedidaDeEntrada = useRef(false)
+  useEffect(() => {
+    if (!abiertaDeEntrada || inicial || pedidaDeEntrada.current) return
+    pedidaDeEntrada.current = true
+    cargar()
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [abiertaDeEntrada, inicial])
 
   function cargar() {
     startTransition(async () => {
@@ -78,7 +105,7 @@ export default function TarifasProveedorLinea({
         }}
       >
         {abierta ? <ChevronDown className="h-3.5 w-3.5" /> : <ChevronRight className="h-3.5 w-3.5" />}
-        Tarifas del proveedor
+        {titulo}
         {vista?.proveedor && <span className="font-normal text-muted-foreground">· {vista.proveedor.nombre}</span>}
         {isPending && <Loader2 className="ml-auto h-3.5 w-3.5 animate-spin" />}
       </button>
@@ -90,6 +117,7 @@ export default function TarifasProveedorLinea({
             <Contenido
               itemId={itemId}
               vista={vista}
+              costoActual={costoActual}
               ocupado={isPending}
               recargar={cargar}
               onCambio={() => {
@@ -104,7 +132,7 @@ export default function TarifasProveedorLinea({
   )
 }
 
-function Contenido({ itemId, vista, ocupado, recargar, onCambio }: { itemId: string; vista: TarifasDeLinea; ocupado: boolean; recargar: () => void; onCambio: () => void }) {
+function Contenido({ itemId, vista, costoActual, ocupado, recargar, onCambio }: { itemId: string; vista: TarifasDeLinea; costoActual: number | null; ocupado: boolean; recargar: () => void; onCambio: () => void }) {
   const [buscando, setBuscando] = useState(!vista.proveedor)
   const p = vista.proveedor
   return (
@@ -161,7 +189,7 @@ function Contenido({ itemId, vista, ocupado, recargar, onCambio }: { itemId: str
           ) : vista.conHabitaciones ? (
             <p className="m-0 text-amber-700">Esta opción ya tiene habitaciones de pantallazo: para usar la tarifa del proveedor, agrega otra opción.</p>
           ) : (
-            <Eleccion itemId={itemId} vista={vista} ocupado={ocupado} onCambio={onCambio} />
+            <Eleccion itemId={itemId} vista={vista} costoActual={costoActual} ocupado={ocupado} onCambio={onCambio} />
           )}
         </>
       )}
@@ -227,7 +255,7 @@ const numero = (t: string): number | null => {
   return n === null || !Number.isFinite(n) ? null : n
 }
 
-function Eleccion({ itemId, vista, ocupado, onCambio }: { itemId: string; vista: TarifasDeLinea; ocupado: boolean; onCambio: () => void }) {
+function Eleccion({ itemId, vista, costoActual, ocupado, onCambio }: { itemId: string; vista: TarifasDeLinea; costoActual: number | null; ocupado: boolean; onCambio: () => void }) {
   const c = vista.composicion
   const cal = vista.calendario
   const [sinFiltro, setSinFiltro] = useState(false)
@@ -252,6 +280,10 @@ function Eleccion({ itemId, vista, ocupado, onCambio }: { itemId: string; vista:
     [JSON.stringify(eleccion), ajustes, vista.opciones, c, cal],
   )
   const moneda = calculo?.ok ? calculo.calculo.moneda : null
+  // Reemplazar un costo que ya existe es de una vez: en otra moneda, con la tasa escrita. Sin ella el
+  // costo nuevo quedaría pendiente y la línea a medias entre el de antes y el de ahora.
+  const reemplaza = costoActual !== null && costoActual > 0
+  const faltaTasa = reemplaza && !!moneda && moneda !== 'COP' && numero(tasa) === null
   const menores = c ? TIPOS_PASAJERO.filter((t) => t !== 'adulto' && (t === 'nino' ? c.ninos : c.infantes) > 0) : []
 
   function alternar(o: OpcionTarifa) {
@@ -282,7 +314,7 @@ function Eleccion({ itemId, vista, ocupado, onCambio }: { itemId: string; vista:
       <div className="flex flex-wrap items-center gap-1 text-[11px]" data-filtro-tarifas>
         <span className="rounded bg-muted px-1.5 py-0.5">
           {vista.fechas.entrada
-            ? `${fechaCorta(vista.fechas.entrada)}${vista.fechas.salida ? ` – ${fechaCorta(vista.fechas.salida)}` : ''}${cal?.noches ? ` · ${cal.noches} ${cal.noches === 1 ? 'noche' : 'noches'}` : ''}${vista.fechas.deLaLinea ? '' : ' (del viaje)'}`
+            ? `${fechaCorta(vista.fechas.entrada)}${vista.fechas.salida ? ` – ${fechaCorta(vista.fechas.salida)}` : ''}${cal?.noches && vista.opciones.some((o) => o.porNoche) ? ` · ${cal.noches} ${cal.noches === 1 ? 'noche' : 'noches'}` : ''}${vista.fechas.deLaLinea ? '' : ' (del viaje)'}`
             : 'Sin fechas'}
         </span>
         {cal && Object.values(cal.temporadas).filter((t) => (t.dias ?? 0) > 0).map((t) => (
@@ -320,7 +352,7 @@ function Eleccion({ itemId, vista, ocupado, onCambio }: { itemId: string; vista:
                   </span>
                   <span className="block text-muted-foreground">
                     {o.baseTexto}
-                    {o.temporada ? ` · temporada ${o.temporada.nombre}${o.temporada.dias === null ? ' (sin fechas: elige tú)' : o.temporada.dias > 0 ? ` (${o.temporada.dias} ${o.temporada.dias === 1 ? 'noche' : 'noches'} del viaje)` : ''}` : ''}
+                    {o.temporada ? ` · ${textoTemporada(o, vista.fechas)}` : ''}
                     {o.pax ? ` · ${o.pax} pax` : ''}
                     {o.precioTipo ? ` · precio ${o.precioTipo}` : ''}
                   </span>
@@ -410,21 +442,39 @@ function Eleccion({ itemId, vista, ocupado, onCambio }: { itemId: string; vista:
               {calculo.calculo.avisos.map((a) => <p key={a} className="m-0 text-[10px] text-muted-foreground">{a}</p>)}
             </div>
           )}
+          {reemplaza && calculo?.ok && (
+            <p className="m-0 rounded bg-amber-50 px-1.5 py-1 tabular-nums text-amber-900" data-costo-actual-y-nuevo>
+              Costo actual de la línea: <strong>{formatoMonto(costoActual, 'COP')}</strong>. Con {Object.keys(marcadas).length === 1 ? 'esta tarifa' : 'estas tarifas'}:{' '}
+              <strong>
+                {calculo.calculo.moneda === 'COP'
+                  ? formatoMonto(calculo.calculo.aPagarAgencia ?? calculo.calculo.total, 'COP')
+                  : numero(tasa) !== null
+                    ? formatoMonto(Math.round((calculo.calculo.aPagarAgencia ?? calculo.calculo.total) * (numero(tasa) as number)), 'COP')
+                    : `${formatoMonto(calculo.calculo.aPagarAgencia ?? calculo.calculo.total, calculo.calculo.moneda)} (falta la tasa)`}
+              </strong>
+              . Nada cambia hasta que toques el botón.
+            </p>
+          )}
           {moneda && moneda !== 'COP' && (
             <label className="flex items-center gap-1">
               Tasa {moneda} → COP
               <input type="text" inputMode="decimal" placeholder="ej. 4150" value={tasa} onChange={(e) => setTasa(e.target.value)} className="w-20 rounded border bg-background px-1 py-0.5 tabular-nums" />
-              <span className="text-[10px] text-muted-foreground">El sistema no consulta la TRM. Sin tasa, el costo queda pendiente.</span>
+              <span className="text-[10px] text-muted-foreground">
+                El sistema no consulta la TRM. {reemplaza ? 'Para reemplazar el costo hace falta la tasa.' : 'Sin tasa, el costo queda pendiente.'}
+              </span>
             </label>
           )}
           <button
             type="button"
             onClick={usar}
-            disabled={isPending || ocupado || !calculo?.ok}
+            disabled={isPending || ocupado || !calculo?.ok || faltaTasa}
             className="inline-flex items-center gap-1 rounded-md bg-[#10B981] px-3 py-1.5 font-semibold text-white hover:bg-[#059669] disabled:opacity-50"
             data-usar-tarifa
           >
-            {isPending && <Loader2 className="h-3 w-3 animate-spin" />} Usar {Object.keys(marcadas).length === 1 ? 'esta tarifa' : 'estas tarifas'} en la línea
+            {isPending && <Loader2 className="h-3 w-3 animate-spin" />}{' '}
+            {reemplaza
+              ? `Usar ${Object.keys(marcadas).length === 1 ? 'esta tarifa' : 'estas tarifas'} y reemplazar el costo`
+              : `Usar ${Object.keys(marcadas).length === 1 ? 'esta tarifa' : 'estas tarifas'} en la línea`}
           </button>
         </div>
       )}

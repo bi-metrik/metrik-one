@@ -138,10 +138,12 @@ export async function resolverPedidos(
   staffId: string | null,
   objetivos: ObjetivoFoto[],
   c: Conocidos,
-  opts: { escribir: boolean },
+  /** `escribir` también por objetivo: la tarjeta de un servicio escrito a mano no crea nada (2026-10-20). */
+  opts: { escribir: boolean | ((o: ObjetivoFoto) => boolean) },
 ): Promise<Resuelto[]> {
   const salida: Resuelto[] = []
   for (const o of objetivos) {
+    const escribir = typeof opts.escribir === 'function' ? opts.escribir(o) : opts.escribir
     if (!esTipoPerfil(o.tipo)) {
       salida.push({ pedido: o, perfil: o, duda: null })
       continue
@@ -153,13 +155,13 @@ export async function resolverPedidos(
       continue
     }
     if (r.tipo === 'nuevo') {
-      if (opts.escribir) await asegurarPerfil(supabase, workspaceId, staffId, pedido, c)
+      if (escribir) await asegurarPerfil(supabase, workspaceId, staffId, pedido, c)
       salida.push({ pedido: o, perfil: o, duda: null })
       continue
     }
     const datos = datosDePerfiles(c).get(`${o.tipo}:${r.clavePerfil}`)
     const perfil: ObjetivoFoto = datos ? { tipo: o.tipo, clave: datos.clave, nombre: datos.nombre, ciudad: datos.ciudad } : o
-    if (opts.escribir) {
+    if (escribir) {
       const fila = await asegurarPerfil(supabase, workspaceId, staffId, perfil as ObjetivoFoto & { tipo: TipoPerfil }, c)
       if (r.tipo === 'seguro' && fila) await guardarAlias(supabase, workspaceId, staffId, pedido, fila, c)
     }

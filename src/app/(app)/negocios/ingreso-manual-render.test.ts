@@ -189,6 +189,17 @@ describe('el formulario', () => {
     }
   })
 
+  it('por pasos, cada tipo deja empezar sin costo para sacarlo del tarifario; el ingreso de siempre no (2026-10-20)', () => {
+    for (const tipoInicial of ['vuelo', 'hotel', 'traslado', 'actividad', 'otro'] as const) {
+      const html = renderToStaticMarkup(React.createElement(IngresoManualForm, {
+        composicion: { adultos: 2, ninos: 0, infantes: 0 }, onEnviar: async () => ({ ok: true as const }), onCerrar: () => {}, tipoInicial, porPasos: true,
+      }))
+      expect(html, tipoInicial).toContain('data-sin-costo')
+      expect(texto(html), tipoInicial).toContain('Todavía no tengo el costo: lo saco del tarifario del proveedor')
+    }
+    expect(pintar()).not.toContain('data-sin-costo')
+  })
+
   it('no pide cancelación: esa es la condición del proveedor y el cliente no la ve', () => {
     expect(texto(pintar())).not.toMatch(/Cancelaci/)
   })

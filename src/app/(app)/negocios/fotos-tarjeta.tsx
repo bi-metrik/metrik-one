@@ -24,8 +24,12 @@ export function avisarCambioDeFotos(): void {
   if (typeof window !== 'undefined') window.dispatchEvent(new Event(EVENTO_FOTOS_BIBLIOTECA))
 }
 
-/** La llave de la tarjeta: la del nombre y, si la línea fijó su ficha, también su id. */
-const llave = (p: PedidoFoto) => `${p.tipo}:${claveDeFoto(p.tipo, p.nombre, p.ciudad)}${p.proveedorId ? `#${p.proveedorId}` : ''}`
+/**
+ * La llave de la tarjeta: la del nombre y, si la línea fijó su ficha, también su id. Sin ficha fijada,
+ * la de un servicio escrito a mano va aparte (`~a`): no toma ficha por el nombre (2026-10-20).
+ */
+const sufijo = (x: { proveedorId?: string | null; aMano?: boolean }) => (x.proveedorId ? `#${x.proveedorId}` : x.aMano ? '~a' : '')
+const llave = (p: PedidoFoto) => `${p.tipo}:${claveDeFoto(p.tipo, p.nombre, p.ciudad)}${sufijo(p)}`
 
 interface Leido {
   elemento: ElementoVista | null
@@ -78,7 +82,7 @@ export function FotosEnTarjetas({
           return
         }
         disponible.current = true
-        const porLlave = new Map(r.tarjetas.map((t) => [`${t.tipo}:${t.clave}${t.proveedorId ? `#${t.proveedorId}` : ''}`, t]))
+        const porLlave = new Map(r.tarjetas.map((t) => [`${t.tipo}:${t.clave}${sufijo(t)}`, t]))
         setEstado((e) => {
           const leidos = { ...e.leidos }
           for (const [k] of faltan) {
@@ -150,11 +154,12 @@ export function useFotoDeBiblioteca(pedido: PedidoFoto | null): FotoDeBiblioteca
   const nombre = pedido?.nombre
   const ciudad = pedido?.ciudad ?? null
   const proveedorId = pedido?.proveedorId ?? null
+  const aMano = pedido?.aMano === true
   const registrar = ctx?.registrar
   useEffect(() => {
     if (!registrar || !tipo || !nombre) return
-    return registrar({ tipo, nombre, ciudad, ...(proveedorId ? { proveedorId } : {}) })
-  }, [registrar, tipo, nombre, ciudad, proveedorId])
+    return registrar({ tipo, nombre, ciudad, ...(proveedorId ? { proveedorId } : {}), ...(aMano ? { aMano } : {}) })
+  }, [registrar, tipo, nombre, ciudad, proveedorId, aMano])
   if (!ctx || !pedido || !pedido.nombre) return null
   const leido = ctx.estado.leidos[llave(pedido)]
   return {

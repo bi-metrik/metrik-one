@@ -343,6 +343,15 @@ export interface LecturaCasilla {
    */
   sinPrecio?: TipoPasajero[]
   /**
+   * Escrita a mano SIN COSTO porque el precio va a salir del tarifario del proveedor («✎ Escríbelo a
+   * mano», brief del 2026-10-20, punto 1). La lectura trae los datos del servicio y ningún precio:
+   * `total` en 0 y sin filas por tipo. Mientras esté, el costo NO se resuelve (`resolverTarifa` dice
+   * `sin_costo`): ni un 0 confirmado ni un costo inventado. Se va sola cuando la persona elige una
+   * tarifa del proveedor (la casilla 1 pasa a ser la del tarifario) o pega un pantallazo. Ausente en
+   * toda otra lectura.
+   */
+  costoPendiente?: true
+  /**
    * Dónde quedó guardado el pantallazo (`sbext://…`, en el almacenamiento propio del
    * workspace): se sube al ACEPTAR, nunca mientras la captura sigue en la bandeja
    * (`imagen-captura.ts`). Ausente en las lecturas anteriores al 2026-09-24 y en los
@@ -1127,6 +1136,8 @@ export interface CostoPorTipo {
 
 export type EstadoTarifa =
   | { estado: 'vacia'; siguiente: CasillaDef; mensaje: string }
+  /** La casilla 1 se escribió a mano sin costo (`LecturaCasilla.costoPendiente`): falta elegirlo. */
+  | { estado: 'sin_costo'; mensaje: string }
   | { estado: 'falta'; siguiente: CasillaDef; faltan: CasillaDef[]; mensaje: string }
   | { estado: 'confirmar_menor_no_paga'; casilla: CasillaDef; tipo: TipoPasajero; mensaje: string }
   | { estado: 'inconsistente'; mensaje: string }
@@ -1212,6 +1223,18 @@ function listaTipos(tipos: TipoPasajero[]): string {
  * `opciones.moneda` es la moneda con la que se costea la línea (`monedaDeTarifa`): la que
  * eligió una persona manda sobre la leída. Sin ella, la de la captura 1.
  */
+/** Lo que dice la opción escrita a mano sin costo mientras nadie lo elige. */
+export const MENSAJE_COSTO_PENDIENTE = 'Esta opción todavía no tiene costo: elígelo en «Tarifas del proveedor», pega un pantallazo o escríbelo a mano.'
+
+/**
+ * ¿La opción se escribió a mano sin costo, para sacarlo del tarifario del proveedor? Casilla 1, o
+ * alguna de sus habitaciones (`LecturaCasilla.costoPendiente`).
+ */
+export function costoPendienteDelTarifario(tarifa: Pick<TarifaPax, 'casillas' | 'habitaciones'>): boolean {
+  if (tarifa.casillas?.grupo_completo?.costoPendiente) return true
+  return (tarifa.habitaciones ?? []).some(h => h.lectura?.costoPendiente && h.correccion?.total == null)
+}
+
 export function resolverTarifa(
   c: Composicion,
   casillas: CasillasLeidas,
@@ -1232,6 +1255,8 @@ export function resolverTarifa(
   if (!l1) {
     return { estado: 'vacia', siguiente: def1, mensaje: `Pega el pantallazo 1: ${def1.busqueda.charAt(0).toLowerCase()}${def1.busqueda.slice(1)}.` }
   }
+  // Escrita a mano sin costo (2026-10-20): con esta lectura no hay precio que resolver.
+  if (l1.costoPendiente) return { estado: 'sin_costo', mensaje: MENSAJE_COSTO_PENDIENTE }
   const viejas = capturasDesactualizadas(c, casillas, ranuraSlug)
   if (viejas.length > 0) {
     return { estado: 'desactualizada', capturas: viejas, mensaje: viejas[0].mensaje }

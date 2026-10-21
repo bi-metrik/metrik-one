@@ -435,6 +435,9 @@ export default function TarifaPasajeroItem({
           {estado?.estado === 'inconsistente' && (
             <p className="rounded-md bg-red-50 p-2 text-[11px] font-medium text-red-900">{estado.mensaje}</p>
           )}
+          {estado?.estado === 'sin_costo' && (
+            <p className="rounded-md bg-amber-50 p-2 text-[11px] font-medium text-amber-900" data-sin-costo-tarifario>{estado.mensaje}</p>
+          )}
           {estado?.estado === 'confirmar_menor_no_paga' && (
             <div className="rounded-md border border-amber-300 bg-amber-50 p-2">
               <p className="text-[11px] font-medium text-amber-900">{estado.mensaje}</p>

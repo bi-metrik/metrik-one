@@ -3,7 +3,7 @@
 ## Project memories
 
 - ⚠️⚠️ [Gemini → Haiku 5.5 (fetchModelo)](project_migracion_haiku_55.md) — #1217 sin mergear; respaldo Gemini; VE apagado; documentos/actas en Gemini por defecto
-- ⚠️⚠️ [Tarifas extraídas en la cotización](project_tarifas_en_cotizacion.md) — 20261019233000 SIN aplicar; elegir = casilla 1 'tarifario' + confirmar de siempre
+- ⚠️⚠️ [Tarifas extraídas en la cotización](project_tarifas_en_cotizacion.md) — elegir = casilla 1 'tarifario' + confirmar; a mano = aMano; costoPendiente ⇒ sin_costo
 - ⚠️⚠️ [Suscripciones multiproducto (#1191)](project_suscripciones_multiproducto.md) — 10 migraciones aplicadas (180000 sin ver); backfill SIN correr; cobro por lista de correos
 - ⚠️ [Alta autogestionada de Valida](project_valida_alta_autogestionada.md) — pila #1104→#1169 dentro de #1191; sus migraciones YA aplicadas (20-oct); canal 'registro'
 - ⚠️⚠️ [Cobro con tarjeta por lista de correos](project_valida_cobro_correos_prueba.md) — VALIDA_COBRO_CORREOS_PRUEBA; correo de SESIÓN; después del registro no mira la lista

@@ -7,6 +7,7 @@ import {
   PREGUNTA_HORA_LLEGADA,
   camposDeRevision,
   correccionesDeRevision,
+  costoLegible,
   preguntaDeRevision,
   tituloDeCaptura,
 } from './revision-captura'
@@ -103,5 +104,13 @@ describe('lo que viaja con «Aceptar con cambios»', () => {
     if (r.ok) return
     expect(r.errores.hora_llegada).toContain('07:45')
     expect(r.errores.fecha_salida).toBe('La fecha no es válida.')
+  })
+})
+
+describe('la fila de una opción escrita a mano sin costo (2026-10-20)', () => {
+  it('dice que el costo está pendiente y sale del tarifario, en vez de quedar vacía', () => {
+    const l = lectura('actividad_detalle', { nombre: 'City Tour Ficticio', moneda: 'COP' }, { total: 0, costoPendiente: true })
+    expect(costoLegible(l)).toBe('Pendiente: sale del tarifario del proveedor')
+    expect(tituloDeCaptura('actividad', l, true)).toBe('City Tour Ficticio · Pendiente: sale del tarifario del proveedor')
   })
 })

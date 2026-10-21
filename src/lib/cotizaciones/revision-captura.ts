@@ -67,6 +67,8 @@ function lugar(texto: string | null | undefined): string | null {
 
 /** El monto con el que se costea la captura, sin el signo en pesos: «2.360.000». */
 export function costoLegible(l: LecturaCasilla): string {
+  // Escrita a mano sin costo (2026-10-20): la fila de la bandeja lo dice en vez de quedar vacía.
+  if (l.costoPendiente) return 'Pendiente: sale del tarifario del proveedor'
   const monto = montoDeCosto(l)
   if (!Number.isFinite(monto) || monto <= 0) return ''
   const moneda = (l.moneda || 'COP').toUpperCase()

@@ -346,6 +346,8 @@ export function leerOtroServicioManual(raw: unknown): OtroServicioManual {
 }
 
 const OBLIGATORIO = 'Escríbelo.'
+/** Lo que no se pide cuando el costo sale del tarifario (`lecturaManual({ sinCosto })`). */
+const CAMPOS_DE_COSTO = ['netoAdulto', 'netoNino', 'netoInfante', 'neto', 'precio'] as const
 const HORA = /^([01]\d|2[0-3]):[0-5]\d$/
 
 function erroresDePasajeros(p: { adultos: number; ninos: number; infantes: number }, e: ErroresManual) {
@@ -677,8 +679,16 @@ export function lecturaManual(args: {
    * como el resto de lo que no lleva *. El ingreso manual de siempre la sigue pidiendo.
    */
   fuenteOpcional?: boolean
+  /**
+   * «Todavía no tengo el costo: lo saco del tarifario del proveedor» (brief del 2026-10-20, punto
+   * 1). Los costos no se piden y la lectura sale sin precio, marcada `costoPendiente`: la opción
+   * entra con su costo pendiente y el panel de tarifas del proveedor se abre en ella. Solo la forma
+   * por pasos lo ofrece.
+   */
+  sinCosto?: boolean
 }): ResultadoManual {
   const { ranura, entrada } = args
+  const sinCosto = args.sinCosto === true
   const errores = entrada.tipo === 'hotel'
     ? validarHotelManual(entrada.datos)
     : entrada.tipo === 'traslado'
@@ -689,8 +699,9 @@ export function lecturaManual(args: {
           ? validarActividadManual(entrada.datos)
           : validarOtroServicioManual(entrada.datos)
   if (args.fuenteOpcional) delete errores.fuente
+  if (sinCosto) for (const k of CAMPOS_DE_COSTO) delete errores[k]
   if (Object.keys(errores).length > 0) return { ok: false, errores }
-  const cruda = entrada.tipo === 'hotel'
+  const conPrecio = entrada.tipo === 'hotel'
     ? crudaDeHotelManual(entrada.datos)
     : entrada.tipo === 'traslado'
       ? crudaDeTrasladoManual(entrada.datos)
@@ -699,15 +710,24 @@ export function lecturaManual(args: {
         : entrada.tipo === 'actividad'
           ? crudaDeActividadManual(entrada.datos)
           : crudaDeOtroServicioManual(entrada.datos)
-  const veredicto = evaluarLectura(ranura, cruda, { soloMinimosDeCosto: true, manual: true, ...(args.hoy ? { hoy: args.hoy } : {}) })
+  // Sin costo: los datos del servicio, sin ningún precio (ni filas por pasajero, ni total).
+  const cruda: LecturaCruda = sinCosto
+    ? { ...conPrecio, porTipoPax: [], totalGeneral: null, campos: { ...conPrecio.campos, precio_total: leido(null) } }
+    : conPrecio
+  const veredicto = evaluarLectura(ranura, cruda, { soloMinimosDeCosto: true, manual: true, ...(sinCosto ? { sinCosto: true } : {}), ...(args.hoy ? { hoy: args.hoy } : {}) })
   if (!veredicto.ok) return { ok: false, errores: { _: veredicto.instruccion } }
   const lectura = construirLecturaCasilla(ranura, veredicto, args.leidaEn)
   const h = entrada.tipo === 'hotel' ? entrada.datos : null
   lectura.origen = 'manual'
   const aviso = h ? avisoFechasFueraDelViaje(h.entrada, h.salida, args.viaje) : null
   if (aviso) lectura.alertas = [...lectura.alertas, aviso]
+  if (sinCosto) {
+    lectura.total = 0
+    lectura.aPagarAgencia = null
+    lectura.costoPendiente = true
+  }
   // Vuelo y actividad: el niño o el infante sin costo escrito viajan igual, sin precio (C5).
-  if (entrada.tipo === 'vuelo' || entrada.tipo === 'actividad') {
+  if (!sinCosto && (entrada.tipo === 'vuelo' || entrada.tipo === 'actividad')) {
     const d = entrada.datos
     const sinPrecio = ([['nino', d.ninos, d.netoNino], ['infante', d.infantes, d.netoInfante]] as const)
       .filter(([, cantidad, neto]) => cantidad > 0 && neto === null)

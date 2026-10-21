@@ -158,7 +158,7 @@ export async function fijarProveedorDeLinea(itemId: string, proveedorId: string 
   return { ok: true }
 }
 
-/** La ficha de la línea: la fijada (`items.proveedor_id`) o la que se reconoce por el nombre leído (sin escribir). */
+/** La ficha de la línea: la fijada (`items.proveedor_id`) o la que se reconoce por el nombre leído de un pantallazo (sin escribir). */
 async function fichaDeLinea(ctx: Contexto): Promise<{ ficha: FilaFicha; por: 'linea' | 'nombre' } | null> {
   const fijada = typeof ctx.item.proveedor_id === 'string' ? ctx.item.proveedor_id : null
   if (fijada) {
@@ -166,6 +166,9 @@ async function fichaDeLinea(ctx: Contexto): Promise<{ ficha: FilaFicha; por: 'li
     return data ? { ficha: data as FilaFicha, por: 'linea' } : null
   }
   const p = pedidoDeLinea({ nombre: (ctx.item.nombre ?? null) as string | null, grupo: (ctx.item.grupo ?? null) as string | null, tarifa_pax: ctx.item.tarifa_pax })
+  // Un servicio escrito a mano no es un proveedor (brief del 2026-10-20, punto 2): sin ficha fijada,
+  // la pantalla abre el buscador en vez de tomar una ficha por el nombre de la actividad.
+  if (p?.aMano) return null
   const o = p ? objetivo(p.tipo, p.nombre, p.ciudad) : null
   if (!o) return null
   const leidos = await leerConocidos(ctx.db, ctx.workspaceId)
