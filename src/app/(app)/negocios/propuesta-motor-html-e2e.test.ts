@@ -169,6 +169,18 @@ describe('motor html de la propuesta en la acción del PDF', () => {
     expect(entrada.lugaresDeOpcionales).toEqual([{ ciudad: null, fecha: '25 nov 2026' }])
   })
 
+  it('prueba del #1229 · la actividad de una tarifa llega al documento con su nombre y lo que incluye, sin MAYÚSCULAS', async () => {
+    sembrar({ motor: true })
+    const lectura = { origen: 'tarifario', leidaEn: 'L1', moneda: 'COP', total: 190_000, nombre: 'Playa Ficticia con almuerzo', descripcion: 'Incluye: almuerzo típico y transporte en lancha.', notasCliente: ['Incluye: almuerzo típico y transporte en lancha.'], campos: [{ label: 'Actividad', valor: 'Playa Ficticia con almuerzo' }] }
+    ;(base.tablas.items as Fila[]).push(
+      linea('a-playa', 300_000, { nombre: 'PLAYA FICTICIA CON ALMUERZO', descripcion: 'INCLUYE: ALMUERZO TÍPICO Y TRANSPORTE EN LANCHA.', grupo: 'actividad: Actividad en San Andrés', orden: 3, dia_relativo: 2, tarifa_pax: { casillas: { grupo_completo: lectura } } }),
+    )
+    await generar()
+    const entrada = motor.llamadas[0] as EntradaModeloPropuesta
+    const enElDia = entrada.props.dias?.flatMap(d => d.items).find(i => i.nombre === 'Playa Ficticia con almuerzo')
+    expect(enElDia?.descripcion).toBe('Incluye: almuerzo típico y transporte en lancha.')
+  })
+
   it('si el motor falla, sale el PDF de @react-pdf con un aviso', async () => {
     sembrar({ motor: true })
     motor.falla = true
