@@ -100,6 +100,8 @@ alter table public.facturas
   add column created_by_wa_name text,
   add column propuesta_huella text,
   add constraint facturas_pagada_con_fecha check ((estado = 'pagada') = (pagada_at is not null));
+-- Una factura de obra cuelga del negocio, no de un proyecto legado: `proyecto_id` deja de ser obligatorio (0 filas hoy).
+alter table public.facturas alter column proyecto_id drop not null;
 create index facturas_negocio on public.facturas (negocio_id) where negocio_id is not null;
 create index facturas_numero on public.facturas (workspace_id, lower(numero_factura));
 
@@ -234,7 +236,7 @@ create or replace view public.v_facturas_obra with (security_invoker = on) as
   from public.facturas f
   left join public.negocios n on n.id = f.negocio_id
   left join lateral (
-    select sum(c.monto) as recibido from public.cobros c where c.factura_id = f.id and c.anulado_at is null
+    select sum(c.monto) as recibido from public.cobros c where c.factura_id = f.id and c.anulado_at is null and c.fecha is not null and c.tipo_cobro is distinct from 'devolucion_pendiente'
   ) r on true
   where f.negocio_id is not null;
 grant select on public.v_facturas_obra to authenticated;
@@ -277,7 +279,9 @@ create or replace view public.v_cierre_obra with (security_invoker = on) as
     from public.v_facturas_obra f where f.negocio_id = n.id
   ) fa on true
   left join lateral (
+    -- Como `cobradoDelNegocio` de la app: sin fecha es una cuota programada sin pagar; la devolución pendiente no es cobro.
     select sum(c.monto) as cobrado from public.cobros c where c.negocio_id = n.id and c.anulado_at is null
+      and c.fecha is not null and c.tipo_cobro is distinct from 'devolucion_pendiente'
   ) co on true;
 grant select on public.v_cierre_obra to authenticated;
 
