@@ -6,7 +6,7 @@
 // empresa o el contacto. Sin datos reales.
 // ============================================================
 
-import type { GastoOne, NegocioOne, PuertoOne, SoporteGuardado, TipoActividad } from './dominio.ts';
+import type { CobroPendiente, GastoOne, NegocioOne, PuertoOne, SoporteGuardado, TipoActividad } from './dominio.ts';
 import type { ArchivoAdjunto } from './lectura-adjunto.ts';
 import type { MediaFila } from '../tipos.ts';
 
@@ -34,6 +34,8 @@ export class PuertoOneMemoria implements PuertoOne {
   /** Lo que se subió a `gastos-soportes` al llegar (ref → media id) y lo anotado en cada fila. */
   subidos = new Map<string, string>();
   anotados = new Map<string, MediaFila>();
+  /** Cobros programados (cuotas) por negocio; `fecha` null = pendiente. */
+  cobros: Array<CobroPendiente & { negocioId: string; fecha: string | null; soporte: unknown }> = [];
   /** Gastos ya revisados (no se corrigen por aquí). */
   revisados = new Set<string>();
   private n = 0;
@@ -149,6 +151,24 @@ export class PuertoOneMemoria implements PuertoOne {
     g.soporte = true;
     this.escrituras.push({ tipo: 'soporte', gasto: gastoId });
     return true;
+  }
+
+  async cobrosPendientes(negocioId: string): Promise<CobroPendiente[] | 'error'> {
+    if (this.caida) return 'error';
+    return this.cobros.filter((c) => c.negocioId === negocioId && c.fecha === null)
+      .sort((a, b) => String(a.fechaEsperada).localeCompare(String(b.fechaEsperada)))
+      .map(({ id, numeroCuota, monto, fechaEsperada, notas }) => ({ id, numeroCuota, monto, fechaEsperada, notas }));
+  }
+
+  async confirmarCobro(p: Parameters<PuertoOne['confirmarCobro']>[0]): Promise<{ ok: true; soporte: SoporteGuardado } | { ok: false; motivo: 'ya_confirmado' | 'error'; error: string }> {
+    const c = this.cobros.find((x) => x.id === p.cobroId);
+    if (!c || c.fecha !== null) return { ok: false, motivo: 'ya_confirmado', error: 'ya confirmado' };
+    c.fecha = p.fecha;
+    if (p.monto) c.monto = p.monto;
+    const soporte = this.soporteDe(p.mediaId, p.ref);
+    if (soporte === 'guardado' && !c.soporte) c.soporte = { url: p.ref, file_name: p.nombre, mime_type: p.mime };
+    this.escrituras.push({ tipo: 'cobro', id: c.id, fecha: p.fecha, monto: c.monto, soporte: soporte === 'guardado' });
+    return { ok: true, soporte };
   }
 
   async registrarActividad(p: { negocioId: string; tipo: TipoActividad; texto: string }): Promise<void> {

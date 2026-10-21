@@ -2,6 +2,7 @@
 
 ## Project memories
 
+- ⚠️ [Bot ONE registra ingresos (cuotas)](project_ingresos_wa_one.md) — copia de confirmarPagoCobroProgramado con prueba de equivalencia; choca con #1230
 - ⚠️ [Bot ONE: soporte en foto/PDF leído](project_wa_soporte_pdf_agente.md) — documento = clase 'otro' + media; lectura aparte; ventana 5 s; arnés s-* sin correr
 - ⚠️⚠️ [Modo agente ONE en todo workspace](project_agente_one_todo_workspace.md) — #1226; deploy de wa-webhook lo enciende en todos; AGENTE_ONE=off; eval Haiku 6/6 limpio (21-oct)
 - ⚠️⚠️ [Gemini → Haiku 5.5 (fetchModelo)](project_migracion_haiku_55.md) — #1217 mergeado (ea16c7d2); respaldo Gemini; VE apagado; documentos/actas en Gemini por defecto

@@ -51,6 +51,16 @@ export interface GastoOne {
 
 export type SoporteGuardado = 'guardado' | 'fallo' | 'sin';
 
+/** Un cobro programado del negocio que todavía no se pagó (una cuota de un plan de cobro), leído de la base en el turno. */
+export interface CobroPendiente {
+  id: string;
+  numeroCuota: number | null;
+  monto: number;
+  /** AAAA-MM-DD. */
+  fechaEsperada: string | null;
+  notas: string | null;
+}
+
 export interface PuertoOne {
   /** Negocios abiertos por código, nombre del negocio, empresa o contacto (`wa_find_negocios`). */
   buscarNegocios(texto: string, limite: number): Promise<NegocioOne[] | 'error'>;
@@ -89,10 +99,21 @@ export interface PuertoOne {
   /** Deja en la fila de la conversación lo preparado del archivo (`ref`, `lectura`). Nunca lanza. */
   anotarMedia(filaId: string, media: MediaFila): Promise<void>;
   registrarActividad(p: { negocioId: string; tipo: TipoActividad; texto: string }): Promise<void>;
+  /**
+   * Los cobros programados del negocio que siguen sin pagar (`tipo_cobro = 'programado'`, sin `fecha`, sin anular), las
+   * cuotas más viejas primero. Se leen en el turno: la base manda.
+   */
+  cobrosPendientes(negocioId: string): Promise<CobroPendiente[] | 'error'>;
+  /**
+   * Marca la cuota como pagada por el MISMO camino de la app (`confirmarPagoCobroProgramado`: fecha, `vencido = false`,
+   * monto real si es otro, cierra los avisos de vencido; el trigger apaga el plan con la última cuota) y, si viene, deja
+   * el soporte en `cobros.soporte` (solo si no tenía). `ya_confirmado`: otro la confirmó o la anularon entre medio.
+   */
+  confirmarCobro(p: { cobroId: string; fecha: string; monto: number | null; notas: string | null; mediaId: string | null; ref: string | null; nombre: string | null; mime: string | null }): Promise<{ ok: true; soporte: SoporteGuardado } | { ok: false; motivo: 'ya_confirmado' | 'error'; error: string }>;
   crearContacto(p: { nombre: string; telefono: string | null; cargo: string | null; decisor: boolean }): Promise<{ id: string }>;
 }
 
-export const ACCIONES_ONE = ['gasto', 'adjuntar_soporte', 'corregir_gasto', 'actividad', 'contacto_nuevo'];
+export const ACCIONES_ONE = ['gasto', 'adjuntar_soporte', 'corregir_gasto', 'ingreso', 'actividad', 'contacto_nuevo'];
 export const TIPOS_ACTIVIDAD = ['llamada', 'reunion', 'correo', 'visita', 'mensaje', 'nota'] as const;
 export type TipoActividad = typeof TIPOS_ACTIVIDAD[number];
 export const EMOJI_ACTIVIDAD: Record<TipoActividad, string> = { llamada: '📞', reunion: '🤝', correo: '📧', visita: '🚗', mensaje: '💬', nota: '📝' };
@@ -102,27 +123,33 @@ const ETAPAS = ['venta', 'ejecucion', 'cobro', 'cierre'];
 
 export interface Permisos {
   escribir: boolean;
+  /** Registrar un pago recibido (ingreso): los roles que en la app pueden registrar cobros (`canRegisterCobro`). */
+  ingresos: boolean;
   contactos: boolean;
   negocios: boolean;
   plata: boolean;
   gastos: boolean;
 }
 
-/** Pura. owner/admin: todo. supervisor/operator (y colaboradores): gastos y actividades. contador: consultas. read_only: sus números. */
+/**
+ * Pura. owner/admin: todo. supervisor: gastos, actividades e ingresos. operator (y colaboradores): gastos y actividades.
+ * contador: consultas. read_only: sus números. `ingresos` sigue a `canRegisterCobro` de `src/lib/roles.ts`.
+ */
 export function permisosDe(rol: string): Permisos {
   switch (rol) {
     case 'owner':
     case 'admin':
-      return { escribir: true, contactos: true, negocios: true, plata: true, gastos: true };
+      return { escribir: true, ingresos: true, contactos: true, negocios: true, plata: true, gastos: true };
     case 'supervisor':
+      return { escribir: true, ingresos: true, contactos: false, negocios: true, plata: false, gastos: false };
     case 'operator':
-      return { escribir: true, contactos: false, negocios: true, plata: false, gastos: false };
+      return { escribir: true, ingresos: false, contactos: false, negocios: true, plata: false, gastos: false };
     case 'contador':
-      return { escribir: false, contactos: false, negocios: true, plata: true, gastos: true };
+      return { escribir: false, ingresos: false, contactos: false, negocios: true, plata: true, gastos: true };
     case 'read_only':
-      return { escribir: false, contactos: false, negocios: false, plata: true, gastos: true };
+      return { escribir: false, ingresos: false, contactos: false, negocios: false, plata: true, gastos: true };
     default:
-      return { escribir: false, contactos: false, negocios: false, plata: false, gastos: false };
+      return { escribir: false, ingresos: false, contactos: false, negocios: false, plata: false, gastos: false };
   }
 }
 
@@ -212,6 +239,17 @@ export function lineaSoporte(s: Pick<SoporteDeLaConversacion, 'tipo' | 'nombre' 
 export function montoDistinto(lectura: LecturaAdjunto | null | undefined, monto: number): boolean | null {
   if (!lectura?.legible || lectura.monto === null) return null;
   return Math.abs(lectura.monto - monto) > 1;
+}
+
+const MESES_CORTOS = ['ene', 'feb', 'mar', 'abr', 'may', 'jun', 'jul', 'ago', 'sep', 'oct', 'nov', 'dic'];
+/** «26-oct» desde «2026-10-26». Pura. */
+export function fechaCorta(iso: string): string {
+  const [, m, d] = iso.split('-');
+  return `${Number(d)}-${MESES_CORTOS[Number(m) - 1] ?? m}`;
+}
+/** Hoy en Bogotá (UTC-5), AAAA-MM-DD. Pura. */
+export function fechaHoyBogota(ms: number): string {
+  return new Date(ms - 5 * 3600 * 1000).toISOString().slice(0, 10);
 }
 
 const lineaDistinto = (l: LecturaAdjunto, monto: number) => `⚠️ El soporte dice ${formatCOP(l.monto!)}, no ${formatCOP(monto)}`;
@@ -366,15 +404,17 @@ export const OPCION_EMPRESA = 'Gasto de empresa';
 const categorias = Object.keys(CATEGORIA_LABELS);
 
 const DATOS_PROPONER_ONE: Record<string, unknown> = {
-  monto: { type: 'number', description: 'gasto: el monto en pesos como número (47.600 → 47600; 27 mil → 27000). corregir_gasto: el monto nuevo.' },
-  negocio: { type: 'string', description: 'gasto / actividad: el código del negocio tal como lo devolvió una herramienta («I1 26 5»). Vacío si es gasto de empresa.' },
+  monto: { type: 'number', description: 'gasto / ingreso: el monto en pesos como número (47.600 → 47600; 27 mil → 27000). corregir_gasto: el monto nuevo.' },
+  negocio: { type: 'string', description: 'gasto / actividad / ingreso: el código del negocio tal como lo devolvió una herramienta («I1 26 5»). Vacío si es gasto de empresa.' },
   empresa: { type: 'boolean', description: 'gasto: true si es gasto de empresa (sin negocio). Solo si la persona lo dijo o lo eligió.' },
   empresa_dicho_en: { type: 'string', description: 'gasto de empresa: el #n del mensaje de la persona donde lo dijo o donde tocó «Gasto de empresa».' },
   categoria: { type: 'string', enum: categorias, description: 'gasto: la deduces del concepto; sin concepto, otros.' },
   descripcion: { type: 'string', description: 'gasto: el concepto con las palabras de la persona, corto, sin el monto ni el negocio. Vacío si no dijo concepto.' },
-  soporte: { type: 'string', description: 'gasto / corregir_gasto: el #n de la foto o el PDF del recibo, si llegó uno. adjuntar_soporte: ese #n.' },
+  soporte: { type: 'string', description: 'gasto / corregir_gasto / ingreso: el #n de la foto o el PDF del recibo o del comprobante, si llegó uno. adjuntar_soporte: ese #n.' },
   gasto: { type: 'string', description: 'adjuntar_soporte / corregir_gasto: el gasto (G1, G2… del Estado; adjuntar_soporte también acepta el id que devolvió gastos_recientes).' },
   monto_distinto: { type: 'boolean', description: 'adjuntar_soporte: true solo si la persona ya dijo que ese soporte va con ese gasto aunque el monto leído sea otro.' },
+  cuota: { type: 'string', description: 'ingreso: opcional. La cuota que la persona eligió (su número, «1»), si el sistema mostró varias o el pago es parcial.' },
+  parcial: { type: 'boolean', description: 'ingreso: true solo si la persona dijo que es un pago PARCIAL de esa cuota (abono por menos).' },
   tipo: { type: 'string', enum: [...TIPOS_ACTIVIDAD], description: 'actividad: qué fue.' },
   texto: { type: 'string', description: 'actividad: lo que pasó, con las palabras de la persona.' },
   nombre: { type: 'string', description: 'contacto_nuevo: el nombre completo.' },
@@ -643,6 +683,76 @@ export function dominioOne(puerto: PuertoOne, o: { rol: string; ahora?: () => nu
     };
   }
 
+  /**
+   * Un pago recibido de un negocio (2026-10-21, Mauricio: «dale con los ingresos»). Se cruza con las cuotas pendientes del
+   * negocio, leídas de la base en este turno, por monto: si cuadra con una, se propone marcarla pagada con el soporte; si
+   * no cuadra con ninguna, no se inventa: vuelve al modelo con las cuotas para que lo diga y pregunte.
+   */
+  async function proponerIngreso(d: Record<string, unknown>, ctx: ContextoDominio): Promise<Resultado<Propuesta>> {
+    if (!permisos.ingresos) return sinPermiso('registrar ingresos (pagos recibidos)');
+    const n = await negocioReal(d.negocio);
+    if (!n.ok) return n;
+    let foto: SoporteDeLaConversacion | null = null;
+    if (d.soporte !== undefined && d.soporte !== null && String(d.soporte).trim() !== '') {
+      const f = soporteDe(ctx.conversacion, d.soporte);
+      if ('error' in f) return { ok: false, error: f.error, candado: 'foto' };
+      foto = f;
+    }
+    const dado = typeof d.monto === 'number' ? d.monto : /^\d+$/.test(String(d.monto ?? '').trim()) ? Number(d.monto) : NaN;
+    const monto = Number.isFinite(dado) && dado > 0 ? dado : foto?.lectura?.legible && foto.lectura.monto ? foto.lectura.monto : NaN;
+    if (!Number.isFinite(monto) || monto <= 0) return { ok: false, error: 'Falta el monto del pago (un número mayor que cero). Si llegó el comprobante, usa lo que dice; si no, pregúntalo.', candado: 'monto' };
+    const pendientes = await puerto.cobrosPendientes(n.v.id);
+    if (pendientes === 'error') return { ok: false, error: 'No pude revisar los cobros pendientes del negocio ahora. Dilo así; no registres nada.', candado: 'cobros_no_leidos' };
+    const lista = pendientes.map((c) => `cuota ${c.numeroCuota ?? '?'} de ${formatCOP(c.monto)}${c.fechaEsperada ? ` (esperada el ${c.fechaEsperada})` : ''}`).join('; ');
+    if (!pendientes.length) {
+      return { ok: false, error: `${nombreNegocio(n.v)} no tiene cobros programados pendientes en ONE. No lo registres: dilo, y que un pago no programado se registra en la app (o pregunta si es de otro negocio).`, candado: 'sin_cobros_pendientes' };
+    }
+    const cuotaDicha = String(d.cuota ?? '').trim();
+    let cobro: CobroPendiente | undefined;
+    if (cuotaDicha) {
+      cobro = pendientes.find((c) => c.id === cuotaDicha || String(c.numeroCuota ?? '') === cuotaDicha.replace(/^#|^cuota\s*/i, ''));
+      if (!cobro) return { ok: false, error: `La cuota «${cuotaDicha}» no está pendiente en ${nombreNegocio(n.v)}. Las pendientes: ${lista}.`, candado: 'cuota_inexistente' };
+    } else {
+      // La más vieja que cuadra por monto (las cuotas se pagan en orden).
+      cobro = pendientes.find((c) => Math.abs(c.monto - monto) <= 1);
+    }
+    const parcial = d.parcial === true;
+    if (!cobro || (Math.abs(cobro.monto - monto) > 1 && !parcial)) {
+      return {
+        ok: false,
+        error: `El pago de ${formatCOP(monto)} no cuadra con ninguna cuota pendiente de ${nombreNegocio(n.v)}${cobro ? ` (la cuota ${cobro.numeroCuota ?? '?'} es de ${formatCOP(cobro.monto)})` : ''}. Pendientes: ${lista}. No lo registres callado: dilo con las cifras y pregunta si es un pago parcial de una cuota (propón con \`cuota\` y \`parcial: true\`), si es de otro negocio, o si es un pago no programado (ese se registra en la app).`,
+        candado: 'ingreso_no_cuadra',
+      };
+    }
+    if (parcial && monto > cobro.monto + 1) return { ok: false, error: `Un pago parcial no puede ser mayor que la cuota (${formatCOP(cobro.monto)}).`, candado: 'parcial_mayor' };
+    const fecha = foto?.lectura?.fecha ?? fechaHoyBogota(ahora());
+    const esParcial = Math.abs(cobro.monto - monto) > 1;
+    const leidoOtro = foto?.lectura && montoDistinto(foto.lectura, monto);
+    const resumen = [
+      esParcial
+        ? `💵 Pago parcial de ${formatCOP(monto)} a la cuota ${cobro.numeroCuota ?? ''} de ${formatCOP(cobro.monto)} de ${nombreNegocio(n.v)}${cobro.fechaEsperada ? `, esperada el ${fechaCorta(cobro.fechaEsperada)}` : ''}`
+        : `💵 Cuadra con la cuota ${cobro.numeroCuota ?? ''} de ${formatCOP(cobro.monto)} de ${nombreNegocio(n.v)}${cobro.fechaEsperada ? `, esperada el ${fechaCorta(cobro.fechaEsperada)}` : ''}`,
+      ...(esParcial ? [`⚠️ La cuota queda confirmada por ${formatCOP(monto)} (lo que entró), no por ${formatCOP(cobro.monto)}`] : []),
+      `📅 Pagado el ${fechaCorta(fecha)}`,
+      foto ? lineaSoporte(foto) : '📎 Sin soporte',
+      ...(leidoOtro ? [lineaDistinto(foto!.lectura!, monto)] : []),
+      foto ? '¿La marco como pagada con este soporte?' : '¿La marco como pagada?',
+    ].join('\n');
+    return {
+      ok: true,
+      v: {
+        accion: 'ingreso',
+        datos: {
+          cobro_id: cobro.id, cuota: cobro.numeroCuota, monto_cuota: cobro.monto, monto, parcial: esParcial, fecha,
+          negocio_id: n.v.id, negocio: n.v.codigo, etiqueta: nombreNegocio(n.v),
+          foto: foto?.fila ?? null, media_id: foto?.mediaId ?? null, ref: foto?.ref ?? null,
+          ...(foto ? { nombre_soporte: foto.nombre, tipo_soporte: foto.tipo } : {}),
+        },
+        resumen, sobre: n.v.codigo, si: 'Marcar pagada', no: 'No',
+      },
+    };
+  }
+
   async function proponerActividad(d: Record<string, unknown>): Promise<Resultado<Propuesta>> {
     const texto = String(d.texto ?? '').trim();
     if (!texto) return { ok: false, error: 'Falta el texto de la actividad (lo que pasó, con las palabras de la persona).', candado: 'sin_texto' };
@@ -683,12 +793,17 @@ export function dominioOne(puerto: PuertoOne, o: { rol: string; ahora?: () => nu
   }
 
   async function proponer(accion: string, datos: Record<string, unknown>, ctx: ContextoDominio): Promise<{ ok: true; propuesta: Propuesta } | { ok: false; error: string; candado: string }> {
+    if (accion === 'ingreso') {
+      const r = await proponerIngreso(datos, ctx);
+      return r.ok ? { ok: true, propuesta: r.v } : r;
+    }
     if (accion === 'contacto_nuevo' ? !permisos.contactos : !permisos.escribir) {
       return sinPermiso(accion === 'contacto_nuevo' ? 'crear contactos' : 'registrar');
     }
     const r = accion === 'gasto' ? await proponerGasto(datos, ctx)
       : accion === 'adjuntar_soporte' ? await proponerSoporte(datos, ctx)
       : accion === 'corregir_gasto' ? await proponerCorreccion(datos, ctx)
+      // `ingreso` se atiende arriba (sus permisos son otros).
         : accion === 'actividad' ? await proponerActividad(datos)
           : accion === 'contacto_nuevo' ? await proponerContacto(datos, ctx)
             : { ok: false as const, error: `Acción desconocida. Usa una de: ${ACCIONES_ONE.join(', ')}.`, candado: 'accion_desconocida' };
@@ -725,6 +840,19 @@ export function dominioOne(puerto: PuertoOne, o: { rol: string; ahora?: () => nu
         lineas,
         escrituras: [{ tipo: 'correccion', gasto: d.gasto_id, monto_antes: Number(d.monto_antes), monto: Number(d.monto), soporte: r.soporte === 'guardado', ...(r.soporte === 'guardado' ? { foto: d.foto } : {}) }],
       };
+    }
+    if (p.accion === 'ingreso') {
+      const r = await puerto.confirmarCobro({
+        cobroId: String(d.cobro_id), fecha: String(d.fecha), monto: d.parcial === true ? Number(d.monto) : null,
+        notas: null, mediaId: (d.media_id as string | null) ?? null, ref: (d.ref as string | null) ?? null,
+        nombre: (d.nombre_soporte as string | null) ?? null, mime: d.tipo_soporte === 'documento' ? 'application/pdf' : d.tipo_soporte === 'imagen' ? 'image/jpeg' : null,
+      });
+      if (!r.ok) throw new Error(r.motivo === 'ya_confirmado' ? 'esa cuota ya estaba pagada o la anularon: no se registró nada' : r.error);
+      const lineas = [
+        `✅ Cuota ${d.cuota ?? ''} de ${String(d.etiqueta)} marcada como pagada: ${formatCOP(Number(d.monto))}, ${fechaCorta(String(d.fecha))}.`,
+        ...(d.media_id ? [r.soporte === 'guardado' ? '📎 Con su soporte.' : '⚠️ No pude guardar el soporte: súbelo después desde la app.'] : []),
+      ];
+      return { lineas, escrituras: [{ tipo: 'cobro', id: d.cobro_id, monto: Number(d.monto), negocio: d.negocio, etiqueta: d.etiqueta, soporte: r.soporte === 'guardado', ...(r.soporte === 'guardado' ? { foto: d.foto } : {}) }] };
     }
     if (p.accion === 'actividad') {
       await puerto.registrarActividad({ negocioId: String(d.negocio_id), tipo: d.tipo as TipoActividad, texto: String(d.texto) });
@@ -785,7 +913,7 @@ export function dominioOne(puerto: PuertoOne, o: { rol: string; ahora?: () => nu
     estado(ctx) {
       const gastos = gastosDeLaConversacion(ctx.conversacion).slice(-5);
       const p = permisos;
-      const puede = [p.escribir ? 'registrar gastos y actividades' : null, p.contactos ? 'crear contactos' : null, p.negocios ? 'consultar negocios' : null, p.gastos ? 'consultar gastos' : null].filter(Boolean);
+      const puede = [p.escribir ? 'registrar gastos y actividades' : null, p.ingresos ? 'registrar ingresos (pagos recibidos de cuotas de un negocio)' : null, p.contactos ? 'crear contactos' : null, p.negocios ? 'consultar negocios' : null, p.gastos ? 'consultar gastos' : null].filter(Boolean);
       return [
         `Su rol permite: ${puede.length ? puede.join(', ') : 'nada por este chat'}.`,
         ultimaLista(ctx.conversacion),
