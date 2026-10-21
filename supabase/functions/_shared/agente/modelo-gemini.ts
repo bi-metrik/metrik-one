@@ -13,8 +13,13 @@
 //   que responda bien y el otro se cancela (2026-10-09). Antes el principal se cortaba ahí: medido en vivo, 13 de 68
 //   llamados de 3.8 llegaron al corte y cada uno botó los 2,5-4 s que ya llevaba; ahora, si el principal llega poco
 //   después del corte, contesta él. Los usos de los dos quedan en la traza (el que pierde, con su motivo).
+// · Respaldo SIEMPRE en Gemini (Mauricio, 2026-10-20: «Si, siempre el respaldo de gemini»): el principal va por
+//   `fetchModelo` (Haiku 5.5 si está activo) y el respaldo va DIRECTO a Gemini con su `fetch` de siempre, nunca a Haiku.
+//   Sin llave de Gemini no hay respaldo, y queda en el log. Lo que contestó Haiku se marca con su modelo, así la firma
+//   de razonamiento de relleno viaja cuando ese historial va a Gemini y la traza dice quién contestó.
 // ============================================================
 
+import { fetchModelo, haikuActivo } from '../llm-anthropic.ts';
 import type { ConfigModelo } from './config.ts';
 import type { Mensaje, Modelo, Parte, PedidoModelo, RespuestaModelo, UsoLlamado } from './tipos.ts';
 
@@ -26,8 +31,12 @@ export interface OpcionesGemini {
   principal: ConfigModelo;
   respaldo: ConfigModelo | null;
   corteMs: number;
-  /** Reemplazable en pruebas. */
+  /** Reemplazable en pruebas (principal y respaldo). */
   fetch?: typeof fetch;
+  /** Solo pruebas: el `fetch` del respaldo (por defecto, el de siempre: directo a Gemini). */
+  fetchRespaldo?: typeof fetch;
+  /** Solo pruebas: ¿el principal va a Haiku? (por defecto lo dice el entorno). */
+  haiku?: boolean;
   ahora?: () => number;
 }
 
@@ -37,7 +46,8 @@ export function historialPara(mensajes: Mensaje[], modelo: string): Array<{ role
     const ajeno = m.role === 'model' && m.modelo && m.modelo !== modelo;
     return {
       role: m.role,
-      parts: m.parts.map((p) => (ajeno && p.thoughtSignature ? { ...p, thoughtSignature: FIRMA_DE_RELLENO } : p)),
+      // Una llamada a función de otro modelo (Haiku no firma) lleva la firma de relleno: sin ella Gemini responde 400.
+      parts: m.parts.map((p) => (ajeno && (p.thoughtSignature || p.functionCall) ? { ...p, thoughtSignature: FIRMA_DE_RELLENO } : p)),
     };
   });
 }
@@ -59,9 +69,10 @@ export function cuerpoGemini(p: PedidoModelo, c: ConfigModelo): Record<string, u
 
 type Intento = { ok: true; mensaje: Mensaje; uso: UsoLlamado } | { ok: false; motivo: string; uso: UsoLlamado };
 
-async function intentar(p: PedidoModelo, c: ConfigModelo, timeoutMs: number, o: OpcionesGemini, cancelar?: AbortSignal): Promise<Intento> {
+async function intentar(p: PedidoModelo, c: ConfigModelo, timeoutMs: number, o: OpcionesGemini, cancelar?: AbortSignal, esRespaldo = false): Promise<Intento> {
   const ahora = o.ahora ?? (() => performance.now());
-  const f = o.fetch ?? fetch;
+  // El respaldo va directo a Gemini (el `fetch` de siempre, leído al llamar); el principal, por `fetchModelo`.
+  const f = esRespaldo ? (o.fetchRespaldo ?? o.fetch ?? ((u: RequestInfo | URL, i?: RequestInit) => globalThis.fetch(u, i))) : (o.fetch ?? fetchModelo);
   const t0 = ahora();
   const uso = (ok: boolean, extra: Partial<UsoLlamado> = {}): UsoLlamado => ({
     modelo: c.modelo, entrada: 0, salida: 0, razonamiento: 0, cache: 0, ms: Math.round(ahora() - t0), ok, ...extra,
@@ -85,11 +96,14 @@ async function intentar(p: PedidoModelo, c: ConfigModelo, timeoutMs: number, o: 
     };
     const cand = d?.candidates?.[0];
     const partes = (cand?.content?.parts ?? []) as Parte[];
+    // Quién contestó de verdad: `fetchModelo` pone `modelVersion: claude-…` cuando fue Haiku.
+    const version = typeof d?.modelVersion === 'string' ? d.modelVersion : '';
+    const modelo = version.startsWith('claude') ? version : c.modelo;
     if (!partes.some((x) => x.functionCall)) {
       const motivo = `sin llamada (${cand?.finishReason ?? 'vacío'})`;
-      return { ok: false, motivo, uso: uso(false, { ...tokens, motivo }) };
+      return { ok: false, motivo, uso: uso(false, { ...tokens, modelo, motivo }) };
     }
-    return { ok: true, mensaje: { role: 'model', parts: partes, modelo: c.modelo }, uso: uso(true, tokens) };
+    return { ok: true, mensaje: { role: 'model', parts: partes, modelo }, uso: uso(true, { ...tokens, modelo }) };
   } catch (e) {
     const nombre = (e as Error)?.name;
     const motivo = cancelar?.aborted ? String(cancelar.reason ?? 'cancelado')
@@ -108,7 +122,15 @@ function espera(ms: number): { hecho: Promise<void>; soltar: () => void } {
   return { hecho, soltar };
 }
 
+let avisoSinRespaldo = false;
+
 export function modeloGemini(o: OpcionesGemini): Modelo {
+  // Con Haiku de principal, el respaldo es Gemini y necesita su llave. Sin ella, sin respaldo (en el log, una vez).
+  if (o.respaldo && !o.llave && (o.haiku ?? haikuActivo())) {
+    if (!avisoSinRespaldo) console.warn('[agente] principal en Haiku y sin GEMINI_API_KEY: el bot corre SIN respaldo');
+    avisoSinRespaldo = true;
+    o = { ...o, respaldo: null };
+  }
   return {
     async llamar(p: PedidoModelo): Promise<RespuestaModelo> {
       const ahora = o.ahora ?? (() => performance.now());
@@ -130,7 +152,7 @@ export function modeloGemini(o: OpcionesGemini): Modelo {
       if (antes) {
         // Falló antes del corte (429, 5xx, red): al respaldo con lo que quede, como siempre.
         if (resta() < 300) return { ok: false, motivo: antes.motivo, usos: [antes.uso] };
-        const r = await intentar(pr, respaldo, resta(), o);
+        const r = await intentar(pr, respaldo, resta(), o, undefined, true);
         return r.ok
           ? { ok: true, mensaje: r.mensaje, usos: [antes.uso, r.uso] }
           : { ok: false, motivo: `${antes.motivo}; respaldo: ${r.motivo}`, usos: [antes.uso, r.uso] };
@@ -142,7 +164,7 @@ export function modeloGemini(o: OpcionesGemini): Modelo {
         return p1.ok ? { ok: true, mensaje: p1.mensaje, usos: [p1.uso] } : { ok: false, motivo: p1.motivo, usos: [p1.uso] };
       }
       const cancelarRespaldo = new AbortController();
-      const segundo = intentar(pr, respaldo, resta(), o, cancelarRespaldo.signal);
+      const segundo = intentar(pr, respaldo, resta(), o, cancelarRespaldo.signal, true);
       const ganador = await new Promise<'principal' | 'respaldo' | null>((resolver) => {
         let pendientes = 2;
         const fin = (quien: 'principal' | 'respaldo') => (r: Intento) => {

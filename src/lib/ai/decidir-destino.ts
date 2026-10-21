@@ -19,6 +19,7 @@
  * Es texto, sin imagen: la lectura ya dice lo que se vio.
  */
 
+import { fetchModelo } from '@/lib/ai/modelo-llm'
 import type { ComoPorPasos, DecisionDelModelo } from '@/lib/cotizaciones/destino-por-pasos'
 
 /** El modelo de la decisión: rápido y sin pensar, para caber en el corte. */
@@ -129,7 +130,7 @@ export async function decidirDestinoConModelo(
   const corte = new AbortController()
   const reloj = setTimeout(() => corte.abort(), opciones.corteMs ?? CORTE_DESTINO_MS)
   try {
-    const res = await (opciones.fetchImpl ?? fetch)(url, {
+    const res = await (opciones.fetchImpl ?? fetchModelo)(url, {
       method: 'POST',
       signal: corte.signal,
       headers: { 'Content-Type': 'application/json' },

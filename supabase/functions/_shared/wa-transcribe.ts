@@ -115,6 +115,8 @@ async function geminiTranscribe(
     return { text: null, error: 'GEMINI_NO_KEY: API key no configurada' };
   }
 
+  // Se queda en Gemini a propósito (migración a Claude Haiku 5.5, 2026-10-20): Haiku 5.5 no recibe audio, y no hay
+  // otro proveedor de voz a texto aprobado. Por eso usa el fetch de siempre y no `fetchModelo` (_shared/llm-anthropic.ts).
   const url = `https://generativelanguage.googleapis.com/v1beta/models/${GEMINI_MODEL}:generateContent?key=${apiKey}`;
 
   console.log(`[wa-transcribe] Calling Gemini with mime_type=${mimeType}, base64 length=${base64Audio.length}`);

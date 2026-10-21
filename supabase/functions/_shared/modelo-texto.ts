@@ -1,6 +1,10 @@
-// Adaptador Gemini para el bot de escucha "Voz de Venezuela" (Cardumen, despliegue standalone).
-// Portado VERBATIM del harness de eval (eval/gemini.ts); unico cambio: la key sale de Deno.env
-// en vez de process.env. Mismo patron: fetch nativo, usageMetadata, retry con backoff, thinking OFF.
+// Generación de texto compartida (pedido con forma de Gemini; el modelo lo pone `fetchModelo`: Haiku 5.5 o Gemini).
+// La usan el lector de Navigate de cardumen (`cardumen/model.ts`) y el bot de servicio al cliente (`customer/`).
+// Nació en `venezuela/gemini.ts` (bot "Voz de Venezuela"); se movió aquí el 2026-10-20, cuando Mauricio apagó ese
+// bot y dejó cardumen en Haiku: así apagar Venezuela no toca a nadie más. Mismo patrón: fetch nativo, usageMetadata,
+// retry con backoff, thinking OFF.
+
+import { fetchModelo, haikuActivo } from './llm-anthropic.ts';
 
 export interface GenUsage {
   in: number;        // promptTokenCount
@@ -40,9 +44,15 @@ async function withRetry<T>(fn: () => Promise<T>, tries = 6, baseMs = 1200): Pro
   throw lastErr;
 }
 
+interface RespuestaGenerar {
+  candidates?: Array<{ content?: { parts?: Array<{ text?: string }> } }>;
+  usageMetadata?: { promptTokenCount?: number; candidatesTokenCount?: number; thoughtsTokenCount?: number; totalTokenCount?: number };
+}
+
 export async function generate(opts: CallOpts): Promise<GenResult> {
-  const key = Deno.env.get("GEMINI_API_KEY");
-  if (!key) throw new Error("GEMINI_API_KEY no esta en el entorno");
+  const key = Deno.env.get("GEMINI_API_KEY") ?? "";
+  // Con Haiku activo, la llave de Gemini solo sirve de respaldo: sin ella se corre sin respaldo.
+  if (!key && !haikuActivo()) throw new Error("GEMINI_API_KEY no esta en el entorno");
 
   const contents = opts.messages.map((m) => ({ role: m.role, parts: [{ text: m.text }] }));
 
@@ -61,10 +71,10 @@ export async function generate(opts: CallOpts): Promise<GenResult> {
     generationConfig,
   };
 
-  const url = `https://generativelanguage.googleapis.com/v1beta/models/${opts.model}:generateContent?key=${key}`;
+  const url = `https://generativelanguage.googleapis.com/v1beta/models/${opts.model}:generateContent${key ? `?key=${key}` : ""}`;
 
-  const data: any = await withRetry(async () => {
-    const res = await fetch(url, {
+  const data: RespuestaGenerar = await withRetry(async (): Promise<RespuestaGenerar> => {
+    const res = await fetchModelo(url, {
       method: "POST",
       headers: { "content-type": "application/json" },
       body: JSON.stringify(body),
@@ -74,7 +84,7 @@ export async function generate(opts: CallOpts): Promise<GenResult> {
   });
 
   const text: string =
-    data?.candidates?.[0]?.content?.parts?.map((p: { text?: string }) => p.text ?? "").join("") ?? "";
+    data?.candidates?.[0]?.content?.parts?.map((p) => p.text ?? "").join("") ?? "";
   const um = data?.usageMetadata ?? {};
   const usage: GenUsage = {
     in: um.promptTokenCount ?? 0,

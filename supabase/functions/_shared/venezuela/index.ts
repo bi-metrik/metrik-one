@@ -6,7 +6,7 @@
 // Motor portado verbatim del eval (proyectos/reframeit/venezuela). thinking OFF obligatorio.
 
 import { sendTextMessage, sendTypingIndicator, sendContact, sendButtons, sendLocationRequest } from "../wa-respond.ts";
-import { generate, type Msg } from "./gemini.ts";
+import { generate, type Msg } from "../modelo-texto.ts";
 import { detectCrisis, crisisPromptBlock, type CrisisType } from "./crisis.ts";
 import { BOT_SYSTEM } from "./prompt.ts";
 import { serializeVe } from "./serialize.ts";
@@ -18,6 +18,16 @@ const BASE_MODEL = "gemini-3.1-flash-lite";
 const CRISIS_MODEL = "gemini-3.5-flash";
 const TURN_CAP = 16;
 const CRISIS_TURN_CAP = 10; // tope suave en crisis: acompanar sin colgarse ni disparar costo
+
+/**
+ * APAGADO (Mauricio, 2026-10-20: «Apaga el bot de venezuela»). El bot no tiene interruptor en la base: se enciende
+ * por la palabra clave "venezuela" en `wa-webhook`. Con esto en `true`:
+ *   · la palabra clave ya no abre conversación (el mensaje sigue el camino normal de ONE);
+ *   · una conversación que quedó ABIERTA en `ve_chat_sessions` se cierra con un mensaje de despedida en el siguiente
+ *     mensaje de la persona y se guarda su registro en `ve_respuestas`, como cualquier cierre (sin la tarjeta del bot).
+ * Volver a encenderlo es poner `false` y desplegar `wa-webhook`.
+ */
+export const VE_APAGADO = true;
 
 const VE_KEYWORDS = ["venezuela"];
 const EXIT_WORDS = ["salir", "cancelar", "terminar"];
@@ -196,12 +206,32 @@ export async function continueVeChat(
   }
 }
 
+/** Bot apagado: cierra la conversación abierta de este teléfono, se despide y guarda el registro. Nunca lanza. */
+export async function cerrarVeChatPorApagado(supabase: Supa, phone: string, text: string): Promise<void> {
+  try {
+    const { data: row } = await supabase
+      .from("ve_chat_sessions")
+      .select("state")
+      .eq("phone", phone)
+      .eq("closed", false)
+      .maybeSingle();
+    if (!row) return;
+    const state = row.state as VeState;
+    if ((text || "").trim()) state.history.push({ role: "user", text });
+    await supabase.from("ve_chat_sessions").update({ state, closed: true, updated_at: new Date().toISOString() }).eq("phone", phone);
+    await sendTextMessage(phone, "Esta conversación ya terminó. Gracias de corazón por lo que compartiste. Cuídate mucho 🙏");
+    await closeAndSerialize(supabase, phone, state, { sinTarjeta: true });
+  } catch (e) {
+    console.error("[ve-chat] no se pudo cerrar la conversación del bot apagado:", (e as Error).message ?? "");
+  }
+}
+
 // Al cerrar: estructura la conversacion en ve_respuestas. Si hubo crisis, guarda un registro
 // marcado y NO difundible (no se extraen campos de difusion). Nunca rompe el cierre.
-async function closeAndSerialize(supabase: Supa, phone: string, state: VeState): Promise<void> {
+async function closeAndSerialize(supabase: Supa, phone: string, state: VeState, o: { sinTarjeta?: boolean } = {}): Promise<void> {
   // Cierre normal: enviar el contacto del bot como tarjeta (vCard) para que la persona lo reenvie
-  // con un toque. En crisis NO aplica (fue una emergencia, no el cierre de difusion).
-  if (!state.crisis && state.bot_phone) {
+  // con un toque. En crisis NO aplica (fue una emergencia, no el cierre de difusion), ni con el bot apagado.
+  if (!o.sinTarjeta && !state.crisis && state.bot_phone) {
     try { await sendContact(phone, "Voz de Venezuela", state.bot_phone); } catch { /* cosmetico, no rompe el cierre */ }
   }
   try {

@@ -7,6 +7,7 @@
 // arnés es la de PRUEBAS.
 // ============================================================
 
+import { fetchModelo } from '../../llm-anthropic.ts';
 import { esquemaCarga, esquemaCargaCompacta } from '../bandeja/extraccion.ts';
 import { mensajesDeTextos } from '../bandeja/carga.ts';
 import { textoParaModelo } from '../../wa-guardianes.ts';
@@ -29,7 +30,7 @@ export interface MedidaExtraccion { ms: number; ok: boolean; salida?: number; en
 export function extraccionGemini(llave: string, registro: MedidaExtraccion[] = [], o: { compacta?: boolean } = {}): ExtractorMemoria {
   return async ({ textos, campos, instrucciones, perfil }) => {
     const t0 = performance.now();
-    const res = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${MODELO_EXTRACCION}:generateContent`, {
+    const res = await fetchModelo(`https://generativelanguage.googleapis.com/v1beta/models/${MODELO_EXTRACCION}:generateContent`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', 'x-goog-api-key': llave },
       body: JSON.stringify({

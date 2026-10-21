@@ -12,6 +12,10 @@ export default defineConfig({
     // `scripts/**` entra por la guarda de migraciones: un chequeo que nadie ejercita
     // no es un chequeo, y esa es justo la falla que motivo su regla de vistas.
     include: ['src/**/*.test.ts', 'supabase/functions/**/*.test.ts', 'scripts/**/*.test.mjs'],
+    // Las pruebas de los sitios de IA simulan respuestas de Gemini con un fetch falso. Si la shell trae
+    // ANTHROPIC_API_KEY, `fetchModelo` mandaría esos pedidos a Anthropic: aquí se fija el proveedor de
+    // siempre. El traductor (`_shared/llm-anthropic.test.ts`) recibe su entorno explícito y no depende de esto.
+    env: { LLM_PROVEEDOR: 'gemini' },
   },
   resolve: {
     alias: {

@@ -7,7 +7,7 @@
 // El escalamiento es el producto, no el fallback. Un bot de servicio que
 // nunca escala es un bot que está inventando respuestas.
 
-import { generate } from "../venezuela/gemini.ts";
+import { generate } from "../modelo-texto.ts";
 import type { PerfilCliente } from "./prompt.ts";
 
 // deno-lint-ignore no-explicit-any

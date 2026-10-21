@@ -31,7 +31,7 @@ import {
   continueObjetos,
 } from '../_shared/cardumen/index.ts';
 import { ctxCardumen } from '../_shared/cardumen/telemetria.ts';
-import { isVeTrigger, hasOpenVeChat, startVeChat, continueVeChat } from '../_shared/venezuela/index.ts';
+import { isVeTrigger, hasOpenVeChat, startVeChat, continueVeChat, VE_APAGADO, cerrarVeChatPorApagado } from '../_shared/venezuela/index.ts';
 import { resolverCustomerTrigger, hasOpenCustomerChat, startCustomerChat, continueCustomerChat } from '../_shared/customer/index.ts';
 import { checkInboundLimit, logMessage } from '../_shared/wa-rate-limit.ts';
 import { enviarAvisoInterno } from '../_shared/wa-alerta.ts';
@@ -318,6 +318,11 @@ async function processMessage(message: IncomingMessage): Promise<void> {
   //     de escucha ABIERTA para este telefono, TODO mensaje (texto o audio) va al motor Gemini de escucha
   //     y retorna ANTES de cualquier logica de ONE. Estudio aparte: estado en ve_chat_sessions.
   if (await hasOpenVeChat(supabase, message.phone)) {
+    // Bot apagado (2026-10-20): la conversación abierta se cierra con despedida y no cae a la lógica de ONE.
+    if (VE_APAGADO) {
+      await cerrarVeChatPorApagado(supabase, message.phone, message.text || '');
+      return;
+    }
     let texto = message.text || '';
     if (message.type === 'audio' && message.audio_id) {
       const result = await transcribeAudio(message.audio_id);
@@ -342,7 +347,7 @@ async function processMessage(message: IncomingMessage): Promise<void> {
     return;
   }
   // 0a-ve trigger. Palabra clave publica "venezuela" abre la conversacion de escucha (solo si no hay una abierta).
-  if (message.type === 'text' && isVeTrigger(message.text)) {
+  if (!VE_APAGADO && message.type === 'text' && isVeTrigger(message.text)) {
     await startVeChat(supabase, message.phone, message.wa_message_id, message.bot_phone);
     return;
   }

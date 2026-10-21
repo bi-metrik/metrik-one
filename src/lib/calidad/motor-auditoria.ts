@@ -21,6 +21,8 @@
  * en silencio la proxima vez que alguien afine otra cosa.
  */
 
+import { fetchModelo } from '@/lib/ai/modelo-llm'
+
 /** Modelo unico para las dos pasadas. Medido contra 2.5 (lento) y 3.1 Pro (preambulo). */
 export const MODELO_AUDITORIA = 'gemini-3.6-flash'
 
@@ -231,7 +233,7 @@ export function semaforoDesdeBanderas(banderas: BanderaDetectada[]) {
 }
 
 async function llamarGemini(prompt: string, apiKey: string) {
-  const res = await fetch(
+  const res = await fetchModelo(
     `https://generativelanguage.googleapis.com/v1beta/models/${MODELO_AUDITORIA}:generateContent?key=${apiKey}`,
     {
       method: 'POST',

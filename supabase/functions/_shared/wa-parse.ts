@@ -2,6 +2,7 @@
 // Gemini — NLP Parser (MVP — 8 intents)
 // ============================================================
 
+import { fetchModelo } from './llm-anthropic.ts';
 import type { ParseResult, Intent, LastContext } from './types.ts';
 import { CONFIDENCE_THRESHOLD, enrichFields, fastPathParse, regexParse } from './wa-parse-reglas.ts';
 
@@ -20,12 +21,12 @@ const SYSTEM_PROMPT = `Parser WA colombiano → JSON (schema).
 Negocio = unidad de trabajo, atraviesa venta→ejecución→cobro→cierre.
 
 INTENTS:
-- GASTO: pagué/gasté/compré + monto. Devolver: amount, descripcion, concept, project_code o entity_hint si menciona negocio/empresa.
+- GASTO: pagué/gasté/compré + monto, o la orden de registrar/cargar un gasto aunque no traiga monto. Devolver: amount, descripcion, concept, project_code o entity_hint si menciona negocio/empresa.
 - CONTACTO_NUEVO: registrar persona/empresa nueva. Devolver: name, phone si presente.
 - ACTIVIDAD: cualquier texto que describe un hecho/observación sobre un negocio (llamada, reunión, visita, correo, nota, comentario). Devolver: activity_text, project_code o entity_hint.
 - MIS_NUMEROS: "cómo voy", "resumen del mes", "mis números".
 - CARTERA: "quién me debe", "por cobrar", "cartera".
-- ESTADO_NEGOCIOS: "qué negocios tengo", con stage_filter venta|ejecucion|cobro|all.
+- ESTADO_NEGOCIOS: "qué negocios tengo", "cuántos viajes/proyectos/trabajos tengo" (cada empresa llama al negocio a su manera), con stage_filter venta|ejecucion|cobro|all.
 - AYUDA: saludos, ?, menu, "ayuda".
 - UNCLEAR: si confidence<0.7 → UNCLEAR + suggested_actions (2-3 labels ≤20 chars).
 
@@ -43,7 +44,9 @@ CAMPOS:
 REGLAS:
 1. Si hay monto numérico → GASTO siempre (sin importar otras pistas).
 2. ESTADO_NEGOCIOS: "qué negocios activos/abiertos/tengo" → stage_filter=all; "en venta/pipeline/horno" → venta; "en ejecución/haciendo" → ejecucion; "en cobro/por cobrar" → cobro.
-3. confidence<0.7 → UNCLEAR + suggested_actions: 2-3 labels ≤20 chars.`;
+3. confidence<0.7 → UNCLEAR + suggested_actions: 2-3 labels ≤20 chars.
+
+CONFIDENCE (0 a 1): qué tan seguro estás de la INTENCIÓN, nada más. NO mide si el mensaje trae todos los datos: el monto, el negocio o la descripción que falten se le piden al usuario después. "Registrar gastos" → GASTO con confidence alta aunque no traiga monto ni negocio; "necesito cargar un gasto a mantenimiento correctivo" → GASTO alto (descripcion "mantenimiento correctivo"); "cuántos viajes tengo" → ESTADO_NEGOCIOS alto con stage_filter=all. Baja la confidence solo cuando no sabes QUÉ quiere hacer el usuario.`;
 
 // Response schema for Gemini structured output (JSON Schema subset)
 const INTENT_ENUM: Intent[] = [
@@ -197,7 +200,7 @@ async function tryGemini(
   }
 
   try {
-    const res = await fetch(url, {
+    const res = await fetchModelo(url, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
