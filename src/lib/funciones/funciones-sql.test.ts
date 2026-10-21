@@ -668,3 +668,23 @@ describe('20. formulario de alta (F1): pasa por las RPC y respeta los candados',
     }
   })
 })
+
+describe('semilla de PRUEBA (sql/sabor/2026-10-21_montaje-funciones-PRUEBA.sql)', () => {
+  const SEMILLA = leer('sql/sabor/2026-10-21_montaje-funciones-PRUEBA.sql')
+  const WS_PRUEBA = '00000000-0000-4000-8000-00000000f0aa'
+
+  it('se niega en un workspace que no es de pruebas, y en uno de pruebas deja un montaje inventado que cuadra', async () => {
+    await q(`alter table workspaces add column if not exists config_extra jsonb default '{}'::jsonb`)
+    await q(`insert into workspaces (id, slug, config_extra) values ($1, 'pruebas', '{"espacio_de_pruebas": true}')`, [WS_PRUEBA])
+    expect(await codigo(db.exec(SEMILLA.replaceAll('<WORKSPACE_DE_PRUEBA>', WS)))).toMatch(/espacio_de_pruebas/)
+    await db.exec(SEMILLA.replaceAll('<WORKSPACE_DE_PRUEBA>', WS_PRUEBA))
+    const r = await q<{ mesas: number; puestos: number; funciones: number; nombre: string }>(
+      `select (select count(*)::int from funcion_mesas where workspace_id = $1) as mesas,
+              (select sum(puestos)::int from funcion_mesas where workspace_id = $1) as puestos,
+              (select count(*)::int from funcion_funciones where workspace_id = $1) as funciones,
+              (select nombre from funcion_experiencias where workspace_id = $1) as nombre`,
+      [WS_PRUEBA],
+    )
+    expect(r[0]).toEqual({ mesas: 5, puestos: 18, funciones: 2, nombre: '[EJEMPLO] Ratatouille' })
+  })
+})
