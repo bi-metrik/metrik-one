@@ -2,7 +2,7 @@
 
 ## Project memories
 
-- ⚠️⚠️ [Asistente de Sabor sobre Chatwoot (etapa 1)](project_asistente_chatwoot_sabor.md) — 20261021090000 SIN aplicar; corrida real por CLI (suscripción) 53/54, tiempos no aptos; payload de la doc
+- ⚠️⚠️ [Asistente de Sabor sobre Chatwoot (etapa 1)](project_asistente_chatwoot_sabor.md) — #1225 mergeado, migración aplicada, sin deploy; sobreventa en PR aparte; tope 400 tokens por ficha
 - ⚠️ [Bot ONE: soporte en foto/PDF leído](project_wa_soporte_pdf_agente.md) — documento = clase 'otro' + media; lectura aparte; ventana 5 s; arnés s-* sin correr
 - ⚠️⚠️ [Modo agente ONE en todo workspace](project_agente_one_todo_workspace.md) — #1226; deploy de wa-webhook lo enciende en todos; AGENTE_ONE=off; eval Haiku 6/6 limpio (21-oct)
 - ⚠️⚠️ [Gemini → Haiku 5.5 (fetchModelo)](project_migracion_haiku_55.md) — #1217 mergeado (ea16c7d2); respaldo Gemini; VE apagado; documentos/actas en Gemini por defecto
