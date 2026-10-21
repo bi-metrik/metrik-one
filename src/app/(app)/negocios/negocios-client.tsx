@@ -125,7 +125,7 @@ export default function NegociosClient({
   canAsignar?: boolean
   /** Rol gerencial: habilita poner/quitar marcas de condición desde la lista. */
   canMarcar?: boolean
-  /** owner/admin/supervisor: pinta «Descargar Excel» (el gate real está en la ruta). */
+  /** owner/admin/supervisor (+ config del workspace): pinta «Descargar Excel» (el gate real está en la ruta). */
   canDescargar?: boolean
   /** false en un workspace con almacenamiento externo: la hoja no se publica en Drive. */
   canPublicarEnDrive?: boolean

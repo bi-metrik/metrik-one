@@ -7,7 +7,7 @@ metadata:
 
 PR #1234 (rama `feat/funciones-mapa-salon`, 2026-10-21): módulo `funciones` (cupo, reservas, mapa, formulario con PDF).
 Migración `20261021120000_modulo_funciones.sql` **SIN aplicar**; va DESPUÉS de `20261021090000_asistente_chatwoot.sql`
-(#1225, tampoco aplicada): referencia `chatwoot_consentimientos` y le pone un trigger de borrado. Dry-run:
+(#1225; según main del 2026-10-21 ya aplicada: confirmarlo en el ledger antes): referencia `chatwoot_consentimientos` y le pone un trigger de borrado. Dry-run:
 `node scripts/funciones-dry-run.mjs` (el archivo pesa 72 KB, no cabe en el cuerpo del PR).
 
 **Why:** Mauricio decidió (2026-10-21) que la mesa la asigna el equipo, el precio no depende de la mesa, la recepción no

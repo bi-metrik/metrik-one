@@ -34,6 +34,7 @@ import type { ConfigPublico } from './config.ts';
 import { PASAR_A_PERSONA, RESPUESTA_FIJA, dominioPublico } from './dominio.ts';
 import { enlacesFueraDeLista } from './enlaces.ts';
 import { preciosSinHerramienta } from './precios.ts';
+import { frasesDeSobreventa } from './sobreventa.ts';
 import { sistemaPublico } from './prompt.ts';
 import type { AlmacenPublico, AvisosInternos, MensajeroChatwoot, Transcriptor } from './puertos.ts';
 import { turnoConReintento } from './reintento.ts';
@@ -117,16 +118,19 @@ export function notaPersona(p: {
   const reserva = r
     ? `${r.experiencia ?? '?'} · función ${r.funcion ?? '?'} (${r.inicio ?? '?'}) · ${r.personas ?? '?'} personas · ${r.nombre ?? '?'} · C.C. ${r.cedula ?? '?'} · Tel. ${r.telefono ?? '?'}`
     : 'sin datos tomados';
+  // La mesa que pidió es preferencia: la asigna el equipo (§8.4.2). Vale la de la reserva o la última anotada.
+  const preferencia = (r?.preferencia_mesa as string | undefined) ?? p.filas.map((f) => (f.traza as TrazaPublica | null)?.preferencia_mesa).filter(Boolean).at(-1) ?? null;
   const siguiente: Record<MotivoPersona, string> = {
     reserva_lista: 'confirmar cupo y enviar el pago', restriccion: 'revisar la restricción para el menú', celebracion: 'coordinar la celebración',
     grupo: 'cotizar el grupo', pide_persona: 'atender lo que pide', queja: 'atender la queja', pago: 'revisar el pago (el asistente no lo vio)',
     no_entiende: 'retomar la conversación', menor: 'pedir que escriba un adulto', crisis: 'atender ya', abuso: 'revisar la conversación',
-    datos: 'atender la solicitud de datos', falla: 'contestar: el asistente falló',
+    duda_abierta: 'contestar la duda (la ficha y las reglas no la cubren)', datos: 'atender la solicitud de datos', falla: 'contestar: el asistente falló',
   };
   return [
     `[Asistente] Paso a persona · motivo: ${p.motivo}`,
     `Pidió: ${p.pidio || '(ver el chat)'}`,
     `Reserva: ${reserva}`,
+    ...(preferencia ? [`Preferencia de mesa: ${preferencia} (por confirmar: la asigna el equipo)`] : []),
     `Autorización de datos: ${aut}`,
     ...(alimentacion ? [`Alimentación: ${alimentacion}`] : []),
     ...(p.herramientas.length ? [`Consultó: ${[...new Set(p.herramientas)].join(', ')}`] : []),
@@ -201,26 +205,32 @@ function depsTurno(d: DepsPublico, turnoMs: number): DepsTurno {
     sistema: (r, c) => sistemaPublico(r, c),
     // Plata solo de herramienta: vuelve al modelo una vez para que corrija (Yuto, 2026-10-21). La guarda del final
     // (antes de publicar) queda igual: nunca sale un monto que no devolvió una herramienta.
-    guardaTexto: (texto, herramientas) => preciosSinHerramienta(texto, herramientas)
-      .map((x) => `el monto ${x} no viene de ver_catalogo/ver_funciones; no lo repitas, usa el precio de la herramienta o di que no lo puedes confirmar`),
+    // Más los candados contra la sobreventa de §8.4 (confirmación, escasez, condiciones sumadas o no listadas).
+    guardaTexto: (texto, herramientas) => [
+      ...preciosSinHerramienta(texto, herramientas)
+        .map((x) => `el monto ${x} no viene de ver_catalogo/ver_funciones; no lo repitas, usa el precio de la herramienta o di que no lo puedes confirmar`),
+      ...frasesDeSobreventa(texto, herramientas),
+    ],
   };
 }
 
 /** Lo que el turno del modelo dejó para el código (los cierres del dominio con su `privado`). Pura. */
-export function efectosDelTurno(t: TrazaPublica): { persona: { motivo: MotivoPersona; pidio: string } | null; pide: 'general' | 'sensible' | null; enmascarar: boolean } {
+export function efectosDelTurno(t: TrazaPublica): { persona: { motivo: MotivoPersona; pidio: string } | null; pide: 'general' | 'sensible' | null; enmascarar: boolean; preferencia: string | null } {
   let persona: { motivo: MotivoPersona; pidio: string } | null = null;
   let pide: 'general' | 'sensible' | null = null;
   let enmascarar = false;
+  let preferencia: string | null = null;
   for (const h of t.herramientas ?? []) {
     if (!h.ok) continue;
-    const pv = (h.privado ?? {}) as { persona?: { motivo: MotivoPersona; pidio: string }; pide_autorizacion?: 'general' | 'sensible'; enmascarar?: boolean };
+    const pv = (h.privado ?? {}) as { persona?: { motivo: MotivoPersona; pidio: string }; pide_autorizacion?: 'general' | 'sensible'; enmascarar?: boolean; preferencia_mesa?: string };
     if (h.nombre === PASAR_A_PERSONA && pv.persona) persona = pv.persona;
     if (h.nombre === RESPUESTA_FIJA) {
       if (pv.pide_autorizacion) pide = pv.pide_autorizacion;
       if (pv.enmascarar) enmascarar = true;
+      if (pv.preferencia_mesa) preferencia = pv.preferencia_mesa;
     }
   }
-  return { persona, pide, enmascarar };
+  return { persona, pide, enmascarar, preferencia };
 }
 
 /** El turno del modelo con el reintento con aviso. */
@@ -243,10 +253,12 @@ async function turnoModelo(d: DepsPublico, turnoId: string, filas: FilaPublica[]
   const base = { canal: d.canal, demora: res.demora, ...extra };
   const des = res.desenlace;
   if (des.tipo === 'respuesta') {
-    const t: TrazaPublica = { ...des.r.traza, ...base };
-    const ef = efectosDelTurno(t);
+    const ef0 = efectosDelTurno(des.r.traza as TrazaPublica);
+    // La mesa queda en el estado como PREFERENCIA (§8.4.2): en la traza del turno, nunca como asignación.
+    const t: TrazaPublica = { ...des.r.traza, ...base, ...(ef0.preferencia ? { preferencia_mesa: ef0.preferencia } : {}) };
+    const ef = ef0;
     const reserva = t.propuesta ? t.propuesta.datos : null;
-    return { salida: des.r.salida, extras: des.r.extras, traza: t, persona: ef.persona, pide: ef.pide, enmascarar: ef.enmascarar, reserva, delModelo: !t.respuesta_fija && !ef.pide && !ef.persona && !ef.enmascarar };
+    return { salida: des.r.salida, extras: des.r.extras, traza: t, persona: ef.persona, pide: ef.pide, enmascarar: ef.enmascarar, reserva, delModelo: !t.respuesta_fija && !ef.pide && !ef.persona && !ef.enmascarar && !(t.herramientas ?? []).some((h) => h.ok && (h.nombre === RESPUESTA_FIJA || h.nombre === PASAR_A_PERSONA)) };
   }
   // Rechazo o falla: respuesta fija y persona (falla). La traza del intento queda (cuenta en el uso del día).
   const ultimo = des.tipo === 'rechazo' ? des.r : des.ultimo;
