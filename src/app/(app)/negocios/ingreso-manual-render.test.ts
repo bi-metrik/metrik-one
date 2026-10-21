@@ -189,13 +189,14 @@ describe('el formulario', () => {
     }
   })
 
-  it('por pasos, cada tipo deja empezar sin costo para sacarlo del tarifario; el ingreso de siempre no (2026-10-20)', () => {
+  it('«Escríbelo a mano» siempre lleva costo: ya no hay «Todavía no tengo el costo» (brief del 2026-10-21, punto 2)', () => {
     for (const tipoInicial of ['vuelo', 'hotel', 'traslado', 'actividad', 'otro'] as const) {
       const html = renderToStaticMarkup(React.createElement(IngresoManualForm, {
         composicion: { adultos: 2, ninos: 0, infantes: 0 }, onEnviar: async () => ({ ok: true as const }), onCerrar: () => {}, tipoInicial, porPasos: true,
       }))
-      expect(html, tipoInicial).toContain('data-sin-costo')
-      expect(texto(html), tipoInicial).toContain('Todavía no tengo el costo: lo saco del tarifario del proveedor')
+      expect(html, tipoInicial).not.toContain('data-sin-costo')
+      expect(texto(html), tipoInicial).not.toContain('Todavía no tengo el costo')
+      expect(html, tipoInicial).toMatch(/data-campo-manual="(netoAdulto|neto)"/)
     }
     expect(pintar()).not.toContain('data-sin-costo')
   })

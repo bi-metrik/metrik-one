@@ -14,7 +14,7 @@ import 'server-only'
  */
 import { leerTodasLasFotos, ordenar, sinTabla, MENSAJE_SIN_TABLA, type FilaCatalogo } from './catalogo'
 import { esTipoPerfil, type ObjetivoFoto, type TipoPerfil } from './clave'
-import { reconocer, type NombreConocido } from './perfiles'
+import { reconocer, type CandidatoDuda, type NombreConocido } from './perfiles'
 
 const TABLA_PERFILES = 'fotos_perfiles'
 const TABLA_ALIAS = 'fotos_perfiles_alias'
@@ -88,7 +88,9 @@ export interface Resuelto {
   pedido: ObjetivoFoto
   /** El perfil donde viven sus fotos (`null` mientras la persona no conteste la duda). */
   perfil: ObjetivoFoto | null
-  duda: { clave: string; nombre: string; ciudad: string | null } | null
+  duda: { clave: string; nombre: string; ciudad: string | null; candidatos?: CandidatoDuda[] } | null
+  /** Cómo se reconoció (`ciudad` = las ciudades no tienen perfil). Ausente en los de antes. */
+  como?: 'exacto' | 'seguro' | 'nuevo' | 'duda' | 'ciudad'
 }
 
 /** Crea la fila del perfil (si ya estaba, la devuelve). `null` si no se pudo. */
@@ -138,34 +140,41 @@ export async function resolverPedidos(
   staffId: string | null,
   objetivos: ObjetivoFoto[],
   c: Conocidos,
-  /** `escribir` también por objetivo: la tarjeta de un servicio escrito a mano no crea nada (2026-10-20). */
-  opts: { escribir: boolean | ((o: ObjetivoFoto) => boolean) },
+  /**
+   * `escribir` también por objetivo: la tarjeta de un servicio escrito a mano no crea nada (2026-10-20).
+   * `ciudadDelViaje`: el destino del viaje, para comparar un nombre que llegó sin ciudad (2026-10-21).
+   */
+  opts: { escribir: boolean | ((o: ObjetivoFoto) => boolean); ciudadDelViaje?: string | null; preguntarDudas?: boolean },
 ): Promise<Resuelto[]> {
   const salida: Resuelto[] = []
   for (const o of objetivos) {
     const escribir = typeof opts.escribir === 'function' ? opts.escribir(o) : opts.escribir
     if (!esTipoPerfil(o.tipo)) {
-      salida.push({ pedido: o, perfil: o, duda: null })
+      salida.push({ pedido: o, perfil: o, duda: null, como: 'ciudad' })
       continue
     }
     const pedido = o as ObjetivoFoto & { tipo: TipoPerfil }
-    const r = reconocer(pedido, nombresConocidos(c))
+    const r = reconocer(pedido, nombresConocidos(c), { ciudadDelViaje: opts.ciudadDelViaje ?? null, preguntarDudas: opts.preguntarDudas === true })
+    // Duda (dos o más candidatos, o uno que no es de la misma ciudad): no se asocia NI se crea
+    // ficha (brief del 2026-10-21, punto 5). Queda para «Por clasificar» de Proveedores.
     if (r.tipo === 'duda') {
-      salida.push({ pedido: o, perfil: null, duda: { clave: r.clavePerfil, nombre: r.nombre, ciudad: r.ciudad } })
+      salida.push({ pedido: o, perfil: null, duda: { clave: r.clavePerfil, nombre: r.nombre, ciudad: r.ciudad, candidatos: r.candidatos }, como: 'duda' })
       continue
     }
     if (r.tipo === 'nuevo') {
       if (escribir) await asegurarPerfil(supabase, workspaceId, staffId, pedido, c)
-      salida.push({ pedido: o, perfil: o, duda: null })
+      salida.push({ pedido: o, perfil: o, duda: null, como: 'nuevo' })
       continue
     }
     const datos = datosDePerfiles(c).get(`${o.tipo}:${r.clavePerfil}`)
     const perfil: ObjetivoFoto = datos ? { tipo: o.tipo, clave: datos.clave, nombre: datos.nombre, ciudad: datos.ciudad } : o
     if (escribir) {
       const fila = await asegurarPerfil(supabase, workspaceId, staffId, perfil as ObjetivoFoto & { tipo: TipoPerfil }, c)
+      // `seguro` (también el de una duda con un solo candidato en la misma ciudad): el alias se
+      // guarda y la próxima vez es `exacto`. «No es este» lo quita (`separarAlias`).
       if (r.tipo === 'seguro' && fila) await guardarAlias(supabase, workspaceId, staffId, pedido, fila, c)
     }
-    salida.push({ pedido: o, perfil, duda: null })
+    salida.push({ pedido: o, perfil, duda: null, como: r.tipo })
   }
   return salida
 }
@@ -214,6 +223,11 @@ export async function separarAlias(supabase: Cliente, workspaceId: string, alias
   const { error } = await supabase.from(TABLA_ALIAS).delete().eq('workspace_id', workspaceId).eq('id', aliasId)
   if (error) return { ok: false, mensaje: 'No se pudo separar. Vuelve a intentarlo.' }
   return { ok: true, tipo: (a as AliasFila).tipo, clavePerfil: (p as { clave?: string } | null)?.clave ?? '' }
+}
+
+/** El alias (si lo hay) por el que un nombre de la cotización se une a su perfil. */
+export function aliasDelPedido(c: Conocidos, o: Pick<ObjetivoFoto, 'tipo' | 'clave'>): AliasFila | null {
+  return c.alias.find((a) => a.tipo === o.tipo && a.clave === o.clave) ?? null
 }
 
 /** Los alias de cada perfil, por la llave del perfil. */

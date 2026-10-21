@@ -24,6 +24,11 @@ export interface PedidoDeLinea {
    * Las fotos de un perfil que ya existe se siguen viendo.
    */
   aMano: boolean
+  /**
+   * La ficha que la persona descartó en esta línea («No es este», `TarifaPax.fichaDescartada`): la
+   * llave de su perfil. Quien resuelve el pedido no la vuelve a tomar por el nombre.
+   */
+  descartada?: string
 }
 
 /** ¿El servicio de la línea lo escribió una persona? Casilla 1, o su primera habitación. */
@@ -34,6 +39,12 @@ export function lineaEscritaAMano(item: Pick<ItemConLectura, 'tarifa_pax'>): boo
 }
 
 export function pedidoDeLinea(item: ItemConLectura): PedidoDeLinea | null {
+  const p = pedidoSinDescarte(item)
+  const descartada = p ? leerTarifaPax(item.tarifa_pax).fichaDescartada : undefined
+  return p && descartada ? { ...p, descartada } : p
+}
+
+function pedidoSinDescarte(item: ItemConLectura): PedidoDeLinea | null {
   const slug = ranuraDeGrupo(item.grupo)?.slug
   if (slug === 'hotel_detalle') {
     const [hotel] = hotelesDeItems([item])

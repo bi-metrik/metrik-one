@@ -1,6 +1,6 @@
 ---
 name: tarifas-en-cotizacion
-description: Trappvel 2026-10-19/20 (#1215 mergeado; alcance en feat/panel-tarifas-alcance) — tarifas extraídas ofrecidas en la línea y elegidas por la persona; items.proveedor_id ya en prod; elección = casilla 1 'tarifario' + confirmar de siempre; línea a mano = aMano (no es proveedor) y puede nacer costoPendiente
+description: Trappvel 2026-10-19/21 (#1215, #1224, #1227 mergeados; feat/cotizar-con-tarifa) — tarifas extraídas en la cotización; línea nueva con tarifa entra por la aceptación de la bandeja; citable = revisada; reconocer asocia un candidato sin preguntar
 metadata:
   type: project
 ---
@@ -42,3 +42,13 @@ Sigue a [[motor-v13]]. Decisión de Mauricio: ONE ofrece, la persona elige; nunc
 - «Montarse sobre la lista» no era solapamiento CSS: la lista con scroll iba pegada al texto, sin marco ni aire, y al
   desplazarse las tarifas se cortaban justo bajo él. Se vio en Chromium con `scrollTop` puesto por script.
 
+
+**Cotizar con tarifa (brief del 2026-10-21, feat/cotizar-con-tarifa, sin migración):**
+- Línea nueva: `crearLineaConTarifa` firma la lectura del tarifario y reusa `aceptarCapturaDeBandeja`/`aceptarPorPasos`
+  (decisión `opcion`); después escribe `proveedor_id` + `tarifaExtraida` (`camino`, `segundos`). No crear ítems a mano.
+- `costoPendiente`/«Todavía no tengo el costo» quedó solo de lectura (la UI y el servidor ya no lo crean).
+- Preselección: nunca comparar precios entre monedas (pasó: USD 210 «ganaba» a COP 300.000).
+- `reconocer`: duda con UN candidato en la misma ciudad = `seguro porDuda`; lo creado a propósito pasa `preguntarDudas`.
+  «No es este» = `fichaDescartada` por línea (el alias global se borra pero `seguro` lo recrearía).
+- Capturas: arnés happy-dom → innerHTML + CSS de `@tailwindcss/postcss` → chromium CDP (receta en
+  [[build-en-worktree]] no aplica; ver bitácora 2026-10-21).

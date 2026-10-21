@@ -10,7 +10,8 @@ import { nombreLlano } from '@/lib/fotos/clave'
 import { NOMBRE_TIPO_PROVEEDOR, TIPOS_PROVEEDOR, type TipoProveedor } from '@/lib/proveedores/tipos'
 import { mesAnio, NOMBRE_SEMAFORO, type Semaforo } from '@/lib/proveedores/vigencia'
 import { porRenovar, type ProveedorEnLista } from '@/lib/proveedores/vista'
-import { crearProveedor, type PersonaEquipo, type ResultadoCrear } from './actions'
+import { contestarMismoPerfil } from '../fotos/actions'
+import { crearProveedor, type NombreSinClasificar, type PersonaEquipo, type ResultadoCrear } from './actions'
 import { PastillaSemaforo } from './semaforo'
 
 const FILTROS_SEMAFORO: (Semaforo | 'todos')[] = ['todos', 'vigente', 'por_vencer', 'vencido', 'sin_fechas', 'sin_tarifario']
@@ -26,12 +27,20 @@ export default function ListaProveedores({
   yo,
   editable,
   crear = crearProveedor,
+  sinClasificar = [],
+  porClasificarDeEntrada = false,
+  contestar = contestarMismoPerfil,
 }: {
   proveedores: ProveedorEnLista[]
   equipo: PersonaEquipo[]
   yo: string | null
   editable: boolean
   crear?: typeof crearProveedor
+  /** Nombres de cotizaciones que se parecen a varias fichas: no se asociaron (brief del 2026-10-21, punto 5). */
+  sinClasificar?: NombreSinClasificar[]
+  /** Llegó desde la tarjeta («Proveedores, Por clasificar»): abre con el filtro puesto. */
+  porClasificarDeEntrada?: boolean
+  contestar?: typeof contestarMismoPerfil
 }) {
   const router = useRouter()
   const [buscar, setBuscar] = useState('')
@@ -40,7 +49,10 @@ export default function ListaProveedores({
   const [etiqueta, setEtiqueta] = useState('')
   const [estado, setEstado] = useState<Semaforo | 'todos'>('todos')
   const [mios, setMios] = useState(false)
-  const [porClasificar, setPorClasificar] = useState(false)
+  const [porClasificar, setPorClasificar] = useState(porClasificarDeEntrada)
+  // «Con tarifas / Sin tarifas» (brief del 2026-10-21, punto 4): el criterio del buscador de la
+  // cotización. Con tarifas = extracción revisada; subir el archivo no cuenta.
+  const [conTarifas, setConTarifas] = useState<'todas' | 'con' | 'sin'>('todas')
   const [destino, setDestino] = useState('')
   const [nuevo, setNuevo] = useState<{ nombre: string; tipoProveedor: TipoProveedor; ciudad: string } | null>(null)
   const [duda, setDuda] = useState<{ id: string | null; nombre: string; ciudad: string | null } | null>(null)
@@ -64,6 +76,7 @@ export default function ListaProveedores({
   const nombrePersona = useMemo(() => new Map(equipo.map((p) => [p.id, p.nombre])), [equipo])
   const destinos = useMemo(() => [...new Set(proveedores.map((p) => p.destino).filter((d): d is string => !!d))].sort((a, b) => a.localeCompare(b, 'es')), [proveedores])
   const incompletas = useMemo(() => proveedores.filter((p) => p.faltas.length > 0).length, [proveedores])
+  const cuantasConTarifas = useMemo(() => proveedores.filter((p) => p.tarifas?.citable).length, [proveedores])
   const misPorRenovar = useMemo(() => proveedores.filter((p) => p.responsableId === yo && porRenovar(p.semaforo)).length, [proveedores, yo])
 
   const visibles = useMemo(() => {
@@ -77,9 +90,10 @@ export default function ListaProveedores({
         (estado === 'todos' || p.semaforo === estado) &&
         (!destino || p.destino === destino) &&
         (!porClasificar || p.faltas.length > 0) &&
+        (conTarifas === 'todas' || (conTarifas === 'con') === !!p.tarifas?.citable) &&
         (!mios || (p.responsableId === yo && porRenovar(p.semaforo))),
     )
-  }, [proveedores, buscar, tipo, ciudad, etiqueta, estado, destino, porClasificar, mios, yo])
+  }, [proveedores, buscar, tipo, ciudad, etiqueta, estado, destino, porClasificar, conTarifas, mios, yo])
 
   const terminar = (r: ResultadoCrear) => {
     if (!r.ok) return void toast.error(r.error)
@@ -246,8 +260,22 @@ export default function ListaProveedores({
           className={`rounded-full px-3 py-1 text-xs ${porClasificar ? 'bg-foreground text-background' : 'border text-muted-foreground hover:bg-accent'}`}
           data-por-clasificar
         >
-          Por clasificar{incompletas > 0 ? ` (${incompletas})` : ''}
+          Por clasificar{incompletas + sinClasificar.length > 0 ? ` (${incompletas + sinClasificar.length})` : ''}
         </button>
+        <div className="inline-flex overflow-hidden rounded-full border text-xs" role="group" aria-label="Tarifas" data-filtro-tarifas>
+          {(['con', 'sin'] as const).map((k) => (
+            <button
+              key={k}
+              type="button"
+              onClick={() => setConTarifas((v) => (v === k ? 'todas' : k))}
+              aria-pressed={conTarifas === k}
+              className={`px-3 py-1 ${conTarifas === k ? 'bg-foreground text-background' : 'text-muted-foreground hover:bg-accent'}`}
+              data-con-tarifas={k}
+            >
+              {k === 'con' ? `Con tarifas (${cuantasConTarifas})` : `Sin tarifas (${proveedores.length - cuantasConTarifas})`}
+            </button>
+          ))}
+        </div>
         {yo && (
           <button
             type="button"
@@ -260,10 +288,18 @@ export default function ListaProveedores({
           </button>
         )}
         </div>
+        {conTarifas !== 'todas' && (
+          <p className="m-0 text-[11px] text-muted-foreground">
+            Con tarifas = tiene una extracción revisada: es lo que se puede usar en una cotización. Haber subido el archivo no cuenta.
+          </p>
+        )}
         {porClasificar && (
           <p className="m-0 text-[11px] text-muted-foreground">
             Fichas que no se pueden usar para cotizar: les falta la ciudad (el municipio), el país o el tipo, o la ciudad está por confirmar.
           </p>
+        )}
+        {porClasificar && sinClasificar.length > 0 && (
+          <NombresSinClasificar nombres={sinClasificar} editable={editable} contestar={contestar} onListo={() => router.refresh()} />
         )}
       </div>
 
@@ -275,7 +311,9 @@ export default function ListaProveedores({
               ? 'No tienes tarifarios vencidos ni por vencer. Nada que pedir por ahora.'
               : porClasificar
                 ? 'Todas las fichas están completas. Nada por clasificar.'
-                : 'Nada coincide con los filtros.'}
+                : conTarifas === 'con'
+                  ? 'Ningún proveedor tiene tarifas revisadas todavía. Se revisan en la ficha, después de extraer el tarifario.'
+                  : 'Nada coincide con los filtros.'}
         </p>
       ) : (
         <ul className="divide-y rounded-lg border" data-filas-proveedores>
@@ -305,12 +343,70 @@ export default function ListaProveedores({
                   <PastillaSemaforo semaforo={p.semaforo} />
                   {p.hasta && (p.semaforo === 'vencido' || p.semaforo === 'por_vencer') && <span className="text-[10.5px] text-muted-foreground">hasta {mesAnio(p.hasta)}</span>}
                   {p.delMayorista && <span className="text-[10.5px] text-muted-foreground">del mayorista</span>}
+                  {p.tarifas?.citable && <span className="text-[10.5px] text-[#047857]" data-con-tarifas-fila>con tarifas</span>}
+                  {p.tarifas?.porRevisar && <span className="text-[10.5px] text-[#9A5F0C]" data-por-revisar>por revisar</span>}
                 </span>
               </Link>
             </li>
           ))}
         </ul>
       )}
+    </div>
+  )
+}
+
+/**
+ * Los nombres de las cotizaciones que se parecen a varias fichas (o a una de otra ciudad): ONE no
+ * los asoció ni les creó ficha (brief del 2026-10-21, punto 5). Aquí la persona dice cuál es (queda
+ * como otro nombre de esa ficha y la tarjeta trae sus fotos) o que es otro (ficha propia).
+ */
+function NombresSinClasificar({ nombres, editable, contestar, onListo }: { nombres: NombreSinClasificar[]; editable: boolean; contestar: typeof contestarMismoPerfil; onListo: () => void }) {
+  const [ocupado, setOcupado] = useState<string | null>(null)
+  async function decidir(n: NombreSinClasificar, clave: string, mismo: boolean) {
+    const llave = `${n.tipo}:${n.nombre}:${n.ciudad ?? ''}`
+    if (ocupado) return
+    setOcupado(llave)
+    try {
+      const r = await contestar({ tipo: n.tipo, nombre: n.nombre, ciudad: n.ciudad }, clave, mismo)
+      if (!r.ok) return void toast.error(r.error)
+      toast.success(mismo ? 'Listo: ese nombre queda como de esa ficha.' : 'Listo: quedó con su propia ficha.')
+      onListo()
+    } catch {
+      toast.error('No se pudo guardar. Vuelve a intentarlo.')
+    } finally {
+      setOcupado(null)
+    }
+  }
+  return (
+    <div className="space-y-1.5 rounded-lg border border-[#F4D7A1] bg-[#FFF8EC] p-2.5" data-sin-clasificar>
+      <p className="m-0 text-xs font-medium">Nombres de cotizaciones sin ficha ({nombres.length})</p>
+      <p className="m-0 text-[11px] text-muted-foreground">Se parecen a más de un proveedor, así que ONE no los asoció solo y sus líneas van sin fotos. Dinos cuál es.</p>
+      <ul className="m-0 list-none space-y-1.5 p-0">
+        {nombres.map((n) => {
+          const llave = `${n.tipo}:${n.nombre}:${n.ciudad ?? ''}`
+          return (
+            <li key={llave} className="rounded-md border bg-background p-2 text-xs" data-nombre-sin-clasificar={n.nombre}>
+              <p className="m-0">
+                <b>{n.nombre}</b>
+                {n.ciudad ? ` · ${n.ciudad}` : ' · sin ciudad'}
+                <span className="text-muted-foreground"> · {n.lineas} {n.lineas === 1 ? 'línea' : 'líneas'}</span>
+              </p>
+              {editable && (
+                <div className="mt-1 flex flex-wrap gap-1.5">
+                  {n.candidatos.map((c) => (
+                    <button key={c.clave} type="button" disabled={!!ocupado} onClick={() => void decidir(n, c.clave, true)} className="min-h-9 rounded-md border px-2 py-1 hover:bg-accent disabled:opacity-50">
+                      Es {c.nombre}{c.ciudad ? ` (${c.ciudad})` : ''}
+                    </button>
+                  ))}
+                  <button type="button" disabled={!!ocupado} onClick={() => void decidir(n, n.candidatos[0]?.clave ?? '', false)} className="min-h-9 rounded-md px-2 py-1 text-muted-foreground underline disabled:opacity-50">
+                    Es otro: crear su ficha
+                  </button>
+                </div>
+              )}
+            </li>
+          )
+        })}
+      </ul>
     </div>
   )
 }
