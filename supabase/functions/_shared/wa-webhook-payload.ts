@@ -32,8 +32,10 @@ export type MetaMensaje = {
   timestamp?: string;
   type?: string;
   text?: { body?: string };
-  image?: { id?: string; caption?: string };
+  image?: { id?: string; caption?: string; mime_type?: string };
   audio?: { id?: string };
+  document?: { id?: string; caption?: string; mime_type?: string; filename?: string };
+  video?: { id?: string; caption?: string };
   interactive?: {
     type?: string;
     nfm_reply?: { response_json?: string };
@@ -250,6 +252,7 @@ function contactoDelRemitente(contactos: MetaContacto[] | undefined, bsuid: stri
 export function textoLegible(msg: MetaMensaje): string {
   const texto = presente(msg.text?.body)
     ?? presente(msg.image?.caption)
+    ?? presente(msg.document?.caption)
     ?? presente(msg.interactive?.button_reply?.title)
     ?? presente(msg.interactive?.list_reply?.title);
   if (texto) return texto;
@@ -265,6 +268,9 @@ export function textoLegible(msg: MetaMensaje): string {
   }
   return `[${msg.type ?? 'desconocido'}]`;
 }
+
+/** Tipos de Meta que el bot no lee pero contesta («no lo puedo leer»). */
+export const TIPOS_NO_SOPORTADOS = new Set(['video', 'sticker', 'contacts']);
 
 /** El mensaje de siempre, con su telefono. `null` para los tipos que el bot no atiende. */
 function mensajeConTelefono(msg: MetaMensaje, phone: string, botPhone: string | undefined): IncomingMessage | null {
@@ -287,6 +293,38 @@ function mensajeConTelefono(msg: MetaMensaje, phone: string, botPhone: string | 
       text: msg.image?.caption || '',
       type: 'image',
       image_id: msg.image?.id,
+      wa_message_id: msg.id,
+      bot_phone: botPhone,
+      timestamp,
+    };
+  }
+
+  // Un archivo (el PDF del recibo de Uber, 2026-10-21): antes no se construía y se perdía sin rastro. El pie va como
+  // texto, igual que el de una foto.
+  if (msg.type === 'document') {
+    return {
+      phone,
+      text: msg.document?.caption || '',
+      type: 'document',
+      document_id: msg.document?.id,
+      document_mime: (msg.document?.mime_type || '').split(';')[0].trim().toLowerCase() || undefined,
+      document_filename: msg.document?.filename || undefined,
+      wa_message_id: msg.id,
+      bot_phone: botPhone,
+      timestamp,
+    };
+  }
+
+  // Lo que el bot no lee (un video, un sticker, una tarjeta de contacto): llega para decir que no se puede leer, en vez
+  // de callar. Las reacciones y los eventos del sistema siguen sin construirse (contestarle a un 👍 sería ruido).
+  if (msg.type && TIPOS_NO_SOPORTADOS.has(msg.type)) {
+    return {
+      phone,
+      text: msg.video?.caption || '',
+      type: 'no_soportado',
+      tipo_meta: msg.type,
+      wa_message_id: msg.id,
+      bot_phone: botPhone,
       timestamp,
     };
   }

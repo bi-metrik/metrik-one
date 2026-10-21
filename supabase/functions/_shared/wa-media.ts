@@ -55,14 +55,62 @@ export async function downloadMediaBinary(
   return { buffer, mimeType, rawMimeType, sizeKB };
 }
 
-/** Map MIME type to file extension */
-function mimeToExt(mime: string): string {
+/** Map MIME type to file extension. Pura. */
+export function mimeToExt(mime: string): string {
   const map: Record<string, string> = {
     'image/jpeg': 'jpg',
     'image/png': 'png',
     'image/webp': 'webp',
+    'application/pdf': 'pdf',
   };
   return map[mime] || 'jpg';
+}
+
+/** Tope del soporte: 5 MB una foto (como siempre), 10 MB un PDF (la app acepta hasta 20). Pura. */
+export function topeSoporteBytes(mime: string): number {
+  return mime === 'application/pdf' ? 10 * 1024 * 1024 : 5 * 1024 * 1024;
+}
+
+/** Baja un archivo de Meta (foto o documento) por su id. null si algún paso falla. */
+export async function bajarMedia(mediaId: string): Promise<{ buffer: Uint8Array; mimeType: string; sizeKB: number } | null> {
+  try {
+    const url = await getMediaUrl(mediaId);
+    if (!url) return null;
+    const media = await downloadMediaBinary(url);
+    if (!media) return null;
+    return { buffer: media.buffer, mimeType: media.mimeType, sizeKB: media.sizeKB };
+  } catch (err) {
+    console.error('[wa-media] no se pudo bajar el archivo:', err);
+    return null;
+  }
+}
+
+/**
+ * Sube un soporte ya bajado a `gastos-soportes/<workspace>/<nombre>.<ext>` y devuelve su referencia `one://`. null si
+ * el archivo pasa del tope o la subida falla.
+ */
+export async function subirSoporte(
+  supabase: SupabaseClient,
+  workspaceId: string,
+  nombre: string,
+  media: { buffer: Uint8Array; mimeType: string; sizeKB?: number },
+): Promise<string | null> {
+  try {
+    if (media.buffer.length > topeSoporteBytes(media.mimeType)) {
+      console.error(`[wa-media] soporte demasiado grande: ${Math.round(media.buffer.length / 1024)}KB (${media.mimeType})`);
+      return null;
+    }
+    const filePath = `${workspaceId}/${nombre}.${mimeToExt(media.mimeType)}`;
+    const { error } = await supabase.storage.from(BUCKET_SOPORTES_GASTO).upload(filePath, media.buffer, { contentType: media.mimeType, upsert: true });
+    if (error) {
+      console.error('[wa-media] Storage upload failed:', error.message);
+      return null;
+    }
+    return construirReferenciaOne(BUCKET_SOPORTES_GASTO, filePath);
+  } catch (err) {
+    console.error('[wa-media] no se pudo subir el soporte:', err);
+    return null;
+  }
 }
 
 /**
@@ -91,8 +139,8 @@ export async function downloadAndStoreImage(
     const media = await downloadMediaBinary(mediaUrl);
     if (!media) return null;
 
-    // 3. Validate size (5MB limit)
-    if (media.buffer.length > 5 * 1024 * 1024) {
+    // 3. Validate size (5 MB una foto, 10 MB un PDF)
+    if (media.buffer.length > topeSoporteBytes(media.mimeType)) {
       console.error(`[wa-media] Image too large: ${media.sizeKB}KB`);
       return null;
     }

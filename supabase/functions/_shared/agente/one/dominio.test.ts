@@ -46,7 +46,7 @@ describe('gasto a un negocio por la empresa (el caso «al proyecto impervium»)'
 
     const t3 = await e.toca('Registrar')
     expect(t3[0].texto).toContain('✅ Gasto de $27.000 registrado · V1 26 5 · Vértice Impermeables — Flujo corto')
-    expect(t3[0].texto).toContain('mándamela')
+    expect(t3[0].texto).toContain('📎 Si tienes el soporte, mándamelo: foto o PDF.')
     expect(e.puerto.escrituras).toEqual([{ tipo: 'gasto', id: 'gasto-1', monto: 27000, negocio: 'V1 26 5', categoria: 'transporte', descripcion: 'transportes', soporte: false, centro: 'directa_negocio' }])
     expect(modelo.restantes()).toBe(0)
   })
@@ -123,7 +123,7 @@ describe('el soporte del gasto', () => {
     expect(t[0].texto).toContain('📷 Con la foto #1 como soporte')
     expect(t[0].texto).toContain('📁 A1 26 1 · Alfa Grupo — Concesión de prueba')
     const hecho = await e.toca('Registrar')
-    expect(hecho[0].texto).toContain('📷 Con su soporte.')
+    expect(hecho[0].texto).toContain('📎 Con su soporte.')
     expect(e.puerto.escrituras[0]).toMatchObject({ tipo: 'gasto', monto: 18900, negocio: 'A1 26 1', soporte: true })
   })
 
@@ -132,7 +132,7 @@ describe('el soporte del gasto', () => {
       { name: 'proponer', args: { accion: 'gasto', datos: { monto: 30000, negocio: 'A1 26 1', categoria: 'otros' } } },
       (p) => {
         expect(p.mensajes[0].parts[0].text).toContain('G1 · $30.000 · A1 26 1 · Alfa Grupo — Concesión de prueba · sin soporte')
-        expect(p.mensajes[0].parts[0].text).toContain('todavía no son soporte de ningún gasto: #5.')
+        expect(p.mensajes[0].parts[0].text).toContain('todavía no son soporte de ningún gasto: #5 (foto')
         return { name: 'proponer', args: { accion: 'adjuntar_soporte', datos: { gasto: 'G1', soporte: '#5' } } }
       },
     ])
@@ -170,7 +170,7 @@ describe('el soporte del gasto', () => {
       fila('d', { clase: 'imagen', media: { tipo: 'imagen', id: 'm2' } }),
     ]
     expect(fotoDe(filas, '#1')).toHaveProperty('error')
-    expect(fotoDe(filas, '#2')).toEqual({ error: 'La foto #2 ya es el soporte de otro gasto. Pregunta si hay otra foto.' })
+    expect(fotoDe(filas, '#2')).toEqual({ error: 'El #2 ya es el soporte de otro gasto. Pregunta si hay otro soporte.' })
     expect(fotoDe(filas, 4)).toEqual({ fila: 'd', mediaId: 'm2' })
     expect(fotoDe(filas, '#9')).toHaveProperty('error')
   })
