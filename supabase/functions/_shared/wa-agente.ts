@@ -10,7 +10,7 @@
 // escribió `registrarEntrante` justo antes.
 // ============================================================
 
-import { agenteOnePorDefecto, dominioDelAgente, leerConfigAgente, leerConfigOne } from './agente/config.ts';
+import { agenteOnePorDefecto, dominioDelAgente, leerConfigAgente, leerConfigOne, modoObras } from './agente/config.ts';
 import { atenderPendientes } from './agente/cola.ts';
 import { BOT_BANDEJA, dominioBandeja } from './agente/bandeja/dominio.ts';
 import { modeloGemini } from './agente/modelo-gemini.ts';
@@ -19,6 +19,11 @@ import { BOT_ONE, dominioOne } from './agente/one/dominio.ts';
 import { puertoOneSupabase } from './agente/one/puerto-supabase.ts';
 import { lectorDeSoportes } from './agente/one/lectura-adjunto.ts';
 import { reglamentoOne } from './agente/one/reglamento.ts';
+import { dominioObras } from './agente/one/obras.ts';
+import { BOT_OPERARIO, dominioOperario, sinPesos } from './agente/one/operario.ts';
+import { puertoObrasSupabase } from './agente/one/puerto-obras-supabase.ts';
+import { reglamentoObras, reglamentoOperario } from './agente/one/reglamento-obras.ts';
+import type { Dominio, Reglamento } from './agente/tipos.ts';
 import { logMessage } from './wa-rate-limit.ts';
 import { almacenSupabase, cargarReglamento, cupoSupabase, mensajeroWa, puertoBandejaSupabase } from './agente/produccion.ts';
 import { leerToque } from './agente/render.ts';
@@ -118,8 +123,11 @@ export async function atenderConAgenteOne(supabase: SupabaseClient, user: WaUser
   const phone = message.phone.replace(/\D/g, '');
   try {
     const { data: ws } = await supabase.from('workspaces').select('name, slug').eq('id', user.workspace_id).maybeSingle();
+    const lector = lectorDeSoportes({ llaveGemini: llave });
+    // Modo obras (2026-10-21): gestión, operario o, para el resto del equipo, el dominio ONE de siempre.
+    const obras = modoObras(bot) ? await armarObras(supabase, user, String(ws?.name ?? 'la empresa'), String(ws?.slug ?? ''), lector, config.reglamentoId) : null;
     // Un reglamento propio publicado (`bot_reglamentos`, bot 'one') reemplaza al del código.
-    const reglamento = (await cargarReglamento(supabase, user.workspace_id, BOT_ONE, config.reglamentoId))
+    const reglamento = obras?.reglamento ?? (await cargarReglamento(supabase, user.workspace_id, BOT_ONE, config.reglamentoId))
       ?? await reglamentoOne(String(ws?.name ?? 'la empresa'));
 
     // Un audio se transcribe antes del turno (lo que dice es un escrito dictado).
@@ -134,7 +142,8 @@ export async function atenderConAgenteOne(supabase: SupabaseClient, user: WaUser
     await atenderPendientes({
       modelo: modeloGemini({ llave, principal: config.principal, respaldo: config.respaldo, corteMs: config.corteMs }),
       // Las fotos y los PDF que llegan se guardan como soporte al llegar y se leen con el modelo (Haiku; respaldo Gemini).
-      dominio: dominioOne(puertoOneSupabase(supabase, user), { rol: user.role, lector: lectorDeSoportes({ llaveGemini: llave }) }),
+      dominio: obras?.dominio ?? dominioOne(puertoOneSupabase(supabase, user), { rol: user.role, lector }),
+      ...(obras?.guardaTexto ? { guardaTexto: obras.guardaTexto } : {}),
       reglamento,
       config,
       ahoraMs: () => Date.now(),
@@ -146,7 +155,8 @@ export async function atenderConAgenteOne(supabase: SupabaseClient, user: WaUser
       remitente: { nombre: user.name || 'quien escribe', rol: user.collaborator_id ? 'colaborador' : user.role },
       nuevoId: () => crypto.randomUUID(),
       despuesDelTurno: async () => {
-        await revisarCupo(cupoSupabase(supabase, almacen), {
+        // En modo obras el cupo del contrato se cuenta en mensajes (Anexo 1.4), con el desglose gestión / operarios.
+        await revisarCupo(cupoSupabase(supabase, almacen, { mensajes: !!obras }), {
           workspaceId: user.workspace_id, workspaceNombre: String(ws?.slug ?? user.workspace_id), cupo: config.cupoTurnosMes, ahoraMs: Date.now(),
         });
       },
@@ -173,4 +183,36 @@ async function soltarDelAgente(supabase: SupabaseClient, message: IncomingMessag
   } catch (err) {
     console.error('[agente-one] no se pudo soltar el mensaje:', err);
   }
+}
+
+// ── Modo obras (2026-10-21) ──────────────────────────────────────────────────
+//
+// Diseño: proyectos/imperviun/proyecto-360/docs/diseno/asistente-whatsapp.md. Con `bot_conversacional.obras = true`:
+//   · un colaborador de tipo `operario` (C5) entra con el dominio del operario: solo marca su llegada y ve sus días, y la
+//     guarda del texto no deja salir pesos. Si no se puede leer su tipo, entra como operario (lo mínimo, nunca de más);
+//   · un usuario de gestión (owner/admin) entra con el dominio de obras (pagos, ingresos, facturas, cierre, asistencia);
+//   · el resto del equipo, con el dominio ONE de siempre.
+// Un reglamento publicado por el workspace (bot `one` o `one_operario`) reemplaza al del código.
+
+export async function armarObras(
+  supabase: SupabaseClient, user: WaUser, nombre: string, slug: string, lector: ReturnType<typeof lectorDeSoportes>, reglamentoId: string | null,
+): Promise<{ dominio: Dominio; reglamento: Reglamento; guardaTexto?: (t: string) => string[] } | null> {
+  const puerto = puertoObrasSupabase(supabase, user);
+  if (user.collaborator_id) {
+    const { data, error } = await supabase.from('wa_collaborators').select('tipo').eq('id', user.collaborator_id).eq('workspace_id', user.workspace_id).maybeSingle();
+    if (error) console.error('[agente-obras] no se pudo leer el tipo del colaborador; entra como operario:', error.message);
+    const tipo = error ? 'operario' : String((data as { tipo?: string } | null)?.tipo ?? 'equipo');
+    if (tipo !== 'operario') return null;
+    return {
+      dominio: dominioOperario(puerto, { collaboratorId: user.collaborator_id, nombre: user.name || 'el operario' }),
+      reglamento: (await cargarReglamento(supabase, user.workspace_id, BOT_OPERARIO, null)) ?? await reglamentoOperario(nombre),
+      guardaTexto: sinPesos,
+    };
+  }
+  if (!['owner', 'admin'].includes(user.role)) return null;
+  const base = (Deno.env.get('APP_BASE_DOMAIN') || 'metrikone.co').trim();
+  return {
+    dominio: dominioObras(puerto, { rol: user.role, empresa: nombre, urlApp: slug ? `https://${slug}.${base}` : null, lector }),
+    reglamento: (await cargarReglamento(supabase, user.workspace_id, BOT_ONE, reglamentoId)) ?? await reglamentoObras(nombre),
+  };
 }

@@ -190,3 +190,11 @@ export function leerConfigOne(botConversacional: unknown): ConfigAgente {
   const propio = obj(obj(botConversacional)?.agente_config)?.corte_ms;
   return typeof propio === 'number' ? c : { ...c, corteMs: CORTE_ONE_MS };
 }
+
+/**
+ * `bot_conversacional.obras === true` (2026-10-21): el modo obras del dominio ONE (pagos con pantallazo, ingresos,
+ * facturas, rubros propios, llegadas de los operarios, cierre y asistencia). Solo con `true` literal. Pura.
+ */
+export function modoObras(botConversacional: unknown): boolean {
+  return obj(botConversacional)?.obras === true;
+}

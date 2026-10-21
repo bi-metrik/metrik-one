@@ -69,11 +69,22 @@ export const UMBRALES_CUPO = [80, 100] as const;
 export interface PuertosCupo {
   /** Turnos del modelo del workspace en ese mes (`bot_uso_mes`). `null` si no se pudo contar. */
   turnosDelMes(workspaceId: string, mes: string): Promise<number | null>;
+  /**
+   * Mensajes del mes que llegaron al modelo (Anexo 1.4 de un contrato con cupo en mensajes, `bot_mensajes_mes`), con el
+   * desglose gestión / operarios. Con esto, el cupo se cuenta en mensajes y no en turnos. `null` = no se pudo contar.
+   */
+  mensajesDelMes?(workspaceId: string, mes: string): Promise<{ total: number; gestion: number; operario: number } | null>;
   tomarCandado(clave: string, segundos: number): Promise<boolean>;
   avisar(texto: string, variables: Record<string, string>): Promise<void>;
 }
 
-export function textoAvisoCupo(p: { workspace: string; mes: string; turnos: number; cupo: number; umbral: number }): string {
+export function textoAvisoCupo(p: { workspace: string; mes: string; turnos: number; cupo: number; umbral: number; desglose?: { gestion: number; operario: number } }): string {
+  if (p.desglose) {
+    const d = `(gestión ${p.desglose.gestion}, operarios ${p.desglose.operario})`;
+    return p.umbral >= 100
+      ? `📈 El asistente de ${p.workspace} pasó los mensajes incluidos de ${p.mes}: ${p.turnos} de ${p.cupo} ${d}. No se cortó el servicio: es para que MéTRIK hable con el cliente.`
+      : `📈 El asistente de ${p.workspace} va en el ${p.umbral} % de los mensajes incluidos de ${p.mes}: ${p.turnos} de ${p.cupo} ${d}.`;
+  }
   return p.umbral >= 100
     ? `📈 El bot conversacional de ${p.workspace} pasó su cupo de uso justo de ${p.mes}: ${p.turnos} turnos del modelo de ${p.cupo}. No se cortó el servicio: es para hablar con el cliente.`
     : `📈 El bot conversacional de ${p.workspace} va en el ${p.umbral} % de su cupo de uso justo de ${p.mes}: ${p.turnos} turnos del modelo de ${p.cupo}.`;
@@ -87,14 +98,17 @@ export async function revisarCupo(
   p: PuertosCupo, o: { workspaceId: string; workspaceNombre: string; cupo: number; ahoraMs: number },
 ): Promise<number[]> {
   const mes = mesBogota(o.ahoraMs);
-  const turnos = await p.turnosDelMes(o.workspaceId, mes);
+  const m = p.mensajesDelMes ? await p.mensajesDelMes(o.workspaceId, mes) : undefined;
+  const turnos = m !== undefined ? m?.total ?? null : await p.turnosDelMes(o.workspaceId, mes);
   if (turnos === null) return [];
+  const desglose = m ? { gestion: m.gestion, operario: m.operario } : undefined;
   const avisados: number[] = [];
   for (const umbral of UMBRALES_CUPO) {
     if (turnos < Math.ceil((o.cupo * umbral) / 100)) continue;
     if (!(await p.tomarCandado(`agente:cupo:${o.workspaceId}:${mes}:${umbral}`, 40 * 24 * 3600))) continue;
-    await p.avisar(textoAvisoCupo({ workspace: o.workspaceNombre, mes, turnos, cupo: o.cupo, umbral }), {
+    await p.avisar(textoAvisoCupo({ workspace: o.workspaceNombre, mes, turnos, cupo: o.cupo, umbral, ...(desglose ? { desglose } : {}) }), {
       workspace: o.workspaceNombre, mes, turnos: String(turnos), cupo: String(o.cupo), umbral: String(umbral),
+      ...(desglose ? { gestion: String(desglose.gestion), operarios: String(desglose.operario) } : {}),
     });
     avisados.push(umbral);
   }
