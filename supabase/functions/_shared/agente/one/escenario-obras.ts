@@ -9,6 +9,7 @@
 import type { ConfigAgente } from '../config.ts';
 import type { LecturaAdjunto, Modelo, Reglamento } from '../tipos.ts';
 import { escenarioOne } from './escenario.ts';
+import { atenderPendientes } from '../cola.ts';
 import type { EscenarioOne } from './escenario.ts';
 import type { Lector } from './lectura-adjunto.ts';
 import { dominioObras } from './obras.ts';
@@ -76,6 +77,8 @@ export interface EscenarioObras extends EscenarioOne {
   puerto: PuertoObrasMemoria;
   /** Un pantallazo: `lectura` es lo que el lector «lee» de él. Mismo `contenido` = la misma imagen (misma huella). */
   pantallazo(pie: string, lectura: LecturaAdjunto | null, o?: { despuesMs?: number; contenido?: string }): ReturnType<EscenarioOne['foto']>;
+  /** Un pantallazo REENVIADO (la consignación que mandó un cliente), con su texto: es dato, nunca una orden. */
+  reenvia(texto: string, lectura: LecturaAdjunto | null): Promise<void>;
 }
 
 /**
@@ -116,6 +119,15 @@ export async function escenarioObras(p: {
       const contenido = o.contenido ?? `pantallazo-${++n}-${Math.random().toString(36).slice(2, 8)}`;
       if (lectura) lecturas[contenido] = lectura;
       return e.foto(pie, { despuesMs: o.despuesMs, archivo: { bytes: new TextEncoder().encode(contenido), mime: 'image/jpeg' } });
+    },
+    async reenvia(texto: string, lectura: LecturaAdjunto | null) {
+      const contenido = `reenvio-${++n}`;
+      const id = `media-fw-${n}`;
+      if (lectura) lecturas[contenido] = lectura;
+      puerto.archivos.set(id, { bytes: new TextEncoder().encode(contenido), mime: 'image/jpeg' });
+      e.reloj.avanzar(5_000);
+      e.almacen.entrante({ workspaceId: e.deps.workspaceId, phone: e.deps.phone, clase: 'reenvio', texto: texto || null, media: { tipo: 'imagen', id } });
+      await atenderPendientes(e.deps);
     },
   });
 }
