@@ -289,8 +289,20 @@ export async function turnoDelModelo(deps: DepsTurno, e: EntradaTurno): Promise<
     const nombre = cierre.functionCall.name;
     const args = (cierre.functionCall.args ?? {}) as Record<string, unknown>;
     if (Array.isArray(args.reglas_usadas)) traza.reglas_usadas!.push(...args.reglas_usadas.map(String));
+    // Cada llamada del mensaje lleva su respuesta: Claude rechaza (HTTP 400) un `tool_use` sin su `tool_result` (medido
+    // en el arnés del 2026-10-21: el modelo cerró con dos llamadas y el segundo llamado del turno falló). Solo se atiende
+    // la primera; las demás vuelven sin ejecutar.
     const devolver = (error: string) => {
-      mensajes.push({ role: 'user', parts: [{ functionResponse: { name: nombre, response: { ok: false, error }, ...(cierre.functionCall.id ? { id: cierre.functionCall.id } : {}) } }] });
+      mensajes.push({
+        role: 'user',
+        parts: cierres.map((c) => ({
+          functionResponse: {
+            name: c.functionCall.name,
+            response: { ok: false, error: c === cierre ? error : 'No se ejecutó: llama una sola herramienta que cierre el turno por vez.' },
+            ...(c.functionCall.id ? { id: c.functionCall.id } : {}),
+          },
+        })),
+      });
     };
 
     if (nombre === TERMINAR) {

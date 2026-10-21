@@ -116,7 +116,7 @@ describe('los candados del gasto', () => {
 describe('el soporte del gasto', () => {
   it('la foto que llega con el pedido va en la propuesta y se guarda con el toque', async () => {
     const modelo = modeloGuionado([
-      { name: 'proponer', args: { accion: 'gasto', datos: { monto: 18900, empresa: true, categoria: 'transporte', descripcion: 'peaje', soporte: '#1' } } },
+      { name: 'proponer', args: { accion: 'gasto', datos: { monto: 18900, empresa: true, empresa_dicho_en: '#1', categoria: 'transporte', descripcion: 'peaje', soporte: '#1' } } },
     ])
     const e = await escenarioOne({ modelo, negocios: NEGOCIOS })
     const t = await e.foto('peaje 18900 de empresa')
@@ -306,7 +306,7 @@ describe('la configuración del dominio ONE', () => {
 describe('una propuesta vence cuando el bot manda otro mensaje (arnés 2026-10-21, t-mantenimiento)', () => {
   it('el «Registrar» de una propuesta vieja no escribe si el bot ya volvió a preguntar', async () => {
     const modelo = modeloGuionado([
-      { name: 'proponer', args: { accion: 'gasto', datos: { monto: 47600, empresa: true, categoria: 'otros' } } },
+      { name: 'proponer', args: { accion: 'gasto', datos: { monto: 47600, empresa: true, empresa_dicho_en: '#1', categoria: 'otros' } } },
       { name: 'negocios_abiertos', args: {} },
       { name: 'responder', args: { tema: 'gasto', texto: '¿A cuál va?', opciones: [{ titulo: 'A1 26 1' }, { titulo: 'Gasto de empresa' }] } },
     ])
@@ -372,5 +372,40 @@ describe('preguntar_destino: la lista la arma el código', () => {
     expect(t[0].tipo).toBe('botones')
     expect(t[0].texto).toBe('¿En cuál negocio?\n• V1 26 5 · Vértice Impermeables — Flujo corto — de la obra vendida a la utilidad de cada obra\n• A1 26 1 · Alfa Grupo — Concesión de prueba')
     expect('opciones' in t[0] && t[0].opciones.map((o) => o.titulo)).toEqual(['V1 26 5', 'A1 26 1'])
+  })
+})
+
+describe('gasto de empresa solo si la persona lo dijo o lo eligió', () => {
+  it('sin #n de la persona, o apuntando al bot, no hay propuesta; con el toque de «Gasto de empresa», sí', async () => {
+    const modelo = modeloGuionado([
+      { name: 'proponer', args: { accion: 'gasto', datos: { monto: 20000, empresa: true, categoria: 'alimentacion' } } },
+      { name: 'preguntar_destino', args: { para: 'gasto', texto: '¿A cuál negocio va?' } },
+      { name: 'proponer', args: { accion: 'gasto', datos: { monto: 20000, empresa: true, empresa_dicho_en: '#2', categoria: 'alimentacion' } } },
+      { name: 'proponer', args: { accion: 'gasto', datos: { monto: 20000, empresa: true, empresa_dicho_en: '#3', categoria: 'alimentacion' } } },
+    ])
+    const e = await escenarioOne({ modelo, negocios: NEGOCIOS })
+    await e.escribe('Bebidas de 20000')
+    expect(e.trazas().at(-1)!.candados!.map((c) => c.candado)).toEqual(['empresa_sin_respaldo'])
+    await e.toca('Gasto de empresa')
+    expect(e.trazas().at(-1)!.candados!.map((c) => c.candado)).toEqual(['empresa_sin_respaldo'])
+    await e.toca('Registrar')
+    expect(e.puerto.escrituras[0]).toMatchObject({ monto: 20000, negocio: null })
+  })
+
+  it('dos llamadas que cierran en el mismo mensaje: las dos reciben respuesta (Claude exige un tool_result por tool_use)', async () => {
+    const modelo = modeloGuionado([
+      { varias: [
+        { name: 'proponer', args: { accion: 'gasto', datos: { monto: 1000, categoria: 'otros' } } },
+        { name: 'responder', args: { tema: 'gasto', texto: '¿A cuál?' } },
+      ] },
+      (p) => {
+        const partes = p.mensajes.at(-1)!.parts
+        expect(partes.map((x) => x.functionResponse?.name)).toEqual(['proponer', 'responder'])
+        return { name: 'responder', args: { tema: 'gasto', texto: '¿A cuál negocio va?' } }
+      },
+    ])
+    const e = await escenarioOne({ modelo, negocios: NEGOCIOS })
+    await e.escribe('gasté 1000')
+    expect(modelo.restantes()).toBe(0)
   })
 })

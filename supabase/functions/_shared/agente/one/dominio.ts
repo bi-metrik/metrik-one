@@ -197,6 +197,20 @@ function ultimoTextoDelEquipo(filas: FilaConversacion[]): string | null {
 
 const digitos = (s: unknown) => String(s ?? '').replace(/\D/g, '');
 
+/**
+ * ¿El gasto de empresa tiene de dónde salir? (2026-10-21: en el arnés el modelo lo puso por su cuenta cuando no
+ * encontró el negocio). `#n` tiene que ser un mensaje de la persona: un escrito, un audio o el pie de una foto (qué dice
+ * lo lee el modelo), o el toque de la opción «Gasto de empresa» que puso el código en `preguntar_destino`. Estructural:
+ * no lee el texto de la persona. Pura.
+ */
+export function empresaDicha(filas: FilaConversacion[], v: unknown): boolean {
+  const n = numeroDeFila(v);
+  const f = n ? filas[n - 1] : undefined;
+  if (!f || f.direccion !== 'entrante' || f.clase === 'reenvio') return false;
+  if (f.clase === 'toque') return (f.texto ?? '').trim() === OPCION_EMPRESA;
+  return ['escrito', 'audio', 'imagen'].includes(f.clase);
+}
+
 /** ¿El teléfono está escrito por el equipo en la conversación? (solo dígitos; el valor tiene que existir). Pura. */
 export function telefonoEnLaConversacion(filas: FilaConversacion[], telefono: string): boolean {
   const t = digitos(telefono);
@@ -273,7 +287,8 @@ const categorias = Object.keys(CATEGORIA_LABELS);
 const DATOS_PROPONER_ONE: Record<string, unknown> = {
   monto: { type: 'number', description: 'gasto: el monto en pesos como número (47.600 → 47600; 27 mil → 27000).' },
   negocio: { type: 'string', description: 'gasto / actividad: el código del negocio tal como lo devolvió una herramienta («I1 26 5»). Vacío si es gasto de empresa.' },
-  empresa: { type: 'boolean', description: 'gasto: true si es gasto de empresa (sin negocio).' },
+  empresa: { type: 'boolean', description: 'gasto: true si es gasto de empresa (sin negocio). Solo si la persona lo dijo o lo eligió.' },
+  empresa_dicho_en: { type: 'string', description: 'gasto de empresa: el #n del mensaje de la persona donde lo dijo o donde tocó «Gasto de empresa».' },
   categoria: { type: 'string', enum: categorias, description: 'gasto: la deduces del concepto; sin concepto, otros.' },
   descripcion: { type: 'string', description: 'gasto: el concepto con las palabras de la persona, corto, sin el monto ni el negocio. Vacío si no dijo concepto.' },
   soporte: { type: 'string', description: 'gasto: el #n de la foto del recibo, si llegó una. adjuntar_soporte: la foto.' },
@@ -368,6 +383,9 @@ export function dominioOne(puerto: PuertoOne, o: { rol: string; ahora?: () => nu
     const deEmpresa = d.empresa === true;
     if (!codigo && !deEmpresa) return { ok: false, error: 'Falta el destino: pregunta a qué negocio va (código, empresa o nombre) o si es gasto de empresa. No lo supongas.', candado: 'sin_destino' };
     if (codigo && deEmpresa) return { ok: false, error: 'Un gasto va a un negocio O es de empresa, no las dos. Si no está claro, pregunta.', candado: 'destino_doble' };
+    if (deEmpresa && !empresaDicha(ctx.conversacion, d.empresa_dicho_en)) {
+      return { ok: false, error: 'Gasto de empresa solo si la persona lo dijo o lo eligió: pon en `empresa_dicho_en` el #n de ese mensaje suyo. Si no lo dijo, llama `preguntar_destino`.', candado: 'empresa_sin_respaldo' };
+    }
     let negocio: NegocioOne | null = null;
     if (codigo) {
       const n = await negocioReal(codigo);
