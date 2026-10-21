@@ -41,6 +41,9 @@ export default function ListaProveedores({
   const [estado, setEstado] = useState<Semaforo | 'todos'>('todos')
   const [mios, setMios] = useState(false)
   const [porClasificar, setPorClasificar] = useState(false)
+  // «Con tarifas / Sin tarifas» (brief del 2026-10-21, punto 4): el criterio del buscador de la
+  // cotización. Con tarifas = extracción revisada; subir el archivo no cuenta.
+  const [conTarifas, setConTarifas] = useState<'todas' | 'con' | 'sin'>('todas')
   const [destino, setDestino] = useState('')
   const [nuevo, setNuevo] = useState<{ nombre: string; tipoProveedor: TipoProveedor; ciudad: string } | null>(null)
   const [duda, setDuda] = useState<{ id: string | null; nombre: string; ciudad: string | null } | null>(null)
@@ -64,6 +67,7 @@ export default function ListaProveedores({
   const nombrePersona = useMemo(() => new Map(equipo.map((p) => [p.id, p.nombre])), [equipo])
   const destinos = useMemo(() => [...new Set(proveedores.map((p) => p.destino).filter((d): d is string => !!d))].sort((a, b) => a.localeCompare(b, 'es')), [proveedores])
   const incompletas = useMemo(() => proveedores.filter((p) => p.faltas.length > 0).length, [proveedores])
+  const cuantasConTarifas = useMemo(() => proveedores.filter((p) => p.tarifas?.citable).length, [proveedores])
   const misPorRenovar = useMemo(() => proveedores.filter((p) => p.responsableId === yo && porRenovar(p.semaforo)).length, [proveedores, yo])
 
   const visibles = useMemo(() => {
@@ -77,9 +81,10 @@ export default function ListaProveedores({
         (estado === 'todos' || p.semaforo === estado) &&
         (!destino || p.destino === destino) &&
         (!porClasificar || p.faltas.length > 0) &&
+        (conTarifas === 'todas' || (conTarifas === 'con') === !!p.tarifas?.citable) &&
         (!mios || (p.responsableId === yo && porRenovar(p.semaforo))),
     )
-  }, [proveedores, buscar, tipo, ciudad, etiqueta, estado, destino, porClasificar, mios, yo])
+  }, [proveedores, buscar, tipo, ciudad, etiqueta, estado, destino, porClasificar, conTarifas, mios, yo])
 
   const terminar = (r: ResultadoCrear) => {
     if (!r.ok) return void toast.error(r.error)
@@ -248,6 +253,20 @@ export default function ListaProveedores({
         >
           Por clasificar{incompletas > 0 ? ` (${incompletas})` : ''}
         </button>
+        <div className="inline-flex overflow-hidden rounded-full border text-xs" role="group" aria-label="Tarifas" data-filtro-tarifas>
+          {(['con', 'sin'] as const).map((k) => (
+            <button
+              key={k}
+              type="button"
+              onClick={() => setConTarifas((v) => (v === k ? 'todas' : k))}
+              aria-pressed={conTarifas === k}
+              className={`px-3 py-1 ${conTarifas === k ? 'bg-foreground text-background' : 'text-muted-foreground hover:bg-accent'}`}
+              data-con-tarifas={k}
+            >
+              {k === 'con' ? `Con tarifas (${cuantasConTarifas})` : `Sin tarifas (${proveedores.length - cuantasConTarifas})`}
+            </button>
+          ))}
+        </div>
         {yo && (
           <button
             type="button"
@@ -260,6 +279,11 @@ export default function ListaProveedores({
           </button>
         )}
         </div>
+        {conTarifas !== 'todas' && (
+          <p className="m-0 text-[11px] text-muted-foreground">
+            Con tarifas = tiene una extracción revisada: es lo que se puede usar en una cotización. Haber subido el archivo no cuenta.
+          </p>
+        )}
         {porClasificar && (
           <p className="m-0 text-[11px] text-muted-foreground">
             Fichas que no se pueden usar para cotizar: les falta la ciudad (el municipio), el país o el tipo, o la ciudad está por confirmar.
@@ -275,7 +299,9 @@ export default function ListaProveedores({
               ? 'No tienes tarifarios vencidos ni por vencer. Nada que pedir por ahora.'
               : porClasificar
                 ? 'Todas las fichas están completas. Nada por clasificar.'
-                : 'Nada coincide con los filtros.'}
+                : conTarifas === 'con'
+                  ? 'Ningún proveedor tiene tarifas revisadas todavía. Se revisan en la ficha, después de extraer el tarifario.'
+                  : 'Nada coincide con los filtros.'}
         </p>
       ) : (
         <ul className="divide-y rounded-lg border" data-filas-proveedores>
@@ -305,6 +331,8 @@ export default function ListaProveedores({
                   <PastillaSemaforo semaforo={p.semaforo} />
                   {p.hasta && (p.semaforo === 'vencido' || p.semaforo === 'por_vencer') && <span className="text-[10.5px] text-muted-foreground">hasta {mesAnio(p.hasta)}</span>}
                   {p.delMayorista && <span className="text-[10.5px] text-muted-foreground">del mayorista</span>}
+                  {p.tarifas?.citable && <span className="text-[10.5px] text-[#047857]" data-con-tarifas-fila>con tarifas</span>}
+                  {p.tarifas?.porRevisar && <span className="text-[10.5px] text-[#9A5F0C]" data-por-revisar>por revisar</span>}
                 </span>
               </Link>
             </li>

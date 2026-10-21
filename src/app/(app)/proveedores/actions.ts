@@ -30,6 +30,7 @@ import { INSTRUCCION_VERSION, instruccionVigente } from '@/lib/proveedores/instr
 import { correrMotor, type ArchivoParaMotor } from '@/lib/proveedores/motor'
 import { revisarAjustesMoneda, tarifasParaCotizar, TEXTO_NO_COTIZA, vigenciaParaCerrar, type AjustesMoneda } from '@/lib/proveedores/tarifas-extraidas'
 import { extraccionParaCotizar } from '@/lib/proveedores/extraccion-para-cotizar'
+import { SIN_TARIFAS, tarifasCitablesPorProveedor, type ExtraccionParaCitar, type TarifasCitables } from '@/lib/proveedores/tarifas-citables'
 import { ciudadDeFichaEsDepartamento, faltasDeFicha, quitarNotaCiudadPorConfirmar, textoCiudadEsDepartamento, tieneNotaCiudadPorConfirmar, type FaltaFicha } from '@/lib/proveedores/completitud'
 import { aliasPorCambio, claveCiudad, claveDeProveedor, ciudadDeClave, espacioDeTipo, esTipoProveedor, tieneFotos, type EspacioProveedor, type TarifaCanal, type TipoProveedor } from '@/lib/proveedores/tipos'
 import { hoyBogota, type VigenciaTarifario } from '@/lib/proveedores/vigencia'
@@ -147,6 +148,7 @@ export async function leerProveedores(): Promise<ListaProveedores> {
     }
   }
   const urls = await enlacesDeCatalogo(ctx.workspaceId, [...primera.values()])
+  const citables = await tarifasDeLaLista(ctx, (p.data ?? []) as FilaProveedor[])
   const proveedores = ((p.data ?? []) as FilaProveedor[])
     .map((f): ProveedorEnLista => {
       const estado = estadoDeProveedor(f, porProveedor, hoy)
@@ -166,10 +168,35 @@ export async function leerProveedores(): Promise<ListaProveedores> {
         responsableId: f.responsable_tarifas_id,
         ...estado,
         miniatura: ref ? urls.get(ref) ?? null : null,
+        tarifas: (() => {
+          const t = citables.get(f.id) ?? SIN_TARIFAS
+          return { citable: t.citable, porRevisar: t.porRevisar, hasta: t.vigencia?.hasta ?? null }
+        })(),
       }
     })
     .sort((a, b) => a.nombre.localeCompare(b.nombre, 'es'))
   return { ok: true, proveedores, equipo: personas, yo: ctx.staffId, editable: ctx.editable, hoy }
+}
+
+/**
+ * «Con tarifas / Sin tarifas» de la lista (brief del 2026-10-21, punto 4): el mismo criterio del
+ * buscador de la cotización (`tarifasCitables`). `proveedor_extracciones` es server-only (cliente de
+ * servicio, SIEMPRE por workspace). Sin la migración del motor, todos quedan «sin tarifas».
+ */
+async function tarifasDeLaLista(ctx: Contexto, fichas: readonly FilaProveedor[]): Promise<Map<string, TarifasCitables>> {
+  try {
+    const servicio = createServiceClient() as Cliente
+    const [x, cadenas] = await Promise.all([
+      servicio.from('proveedor_extracciones').select('proveedor_id, estado, created_at, vigencia_desde, vigencia_hasta').eq('workspace_id', ctx.workspaceId).in('estado', ['revisada', 'borrador']).limit(TOPE * 2),
+      // La sucursal de una cadena toma el tarifario de la cadena (`tarifario_de_id`, motor v13).
+      ctx.db.from('fotos_perfiles').select('id, tarifario_de_id').eq('workspace_id', ctx.workspaceId).limit(TOPE),
+    ])
+    if (x.error) return new Map()
+    const deCadena = new Map(((cadenas.error ? [] : cadenas.data ?? []) as { id: string; tarifario_de_id: string | null }[]).map((c) => [c.id, c.tarifario_de_id]))
+    return tarifasCitablesPorProveedor(fichas.map((f) => ({ id: f.id, tarifario_de_id: deCadena.get(f.id) ?? null })), (x.data ?? []) as ExtraccionParaCitar[])
+  } catch {
+    return new Map()
+  }
 }
 
 // ── Crear ────────────────────────────────────────────────────────────────────

@@ -1036,6 +1036,30 @@ export function fuenteDeLectura(l: Pick<LecturaCasilla, 'origen'> | null | undef
 }
 
 /**
+ * De dónde dice la línea que salieron sus pasajeros («Esta línea cubre: 2 adultos · …», brief del
+ * 2026-10-21, punto 6). Los del viaje se dicen «la del viaje» aunque la línea los tenga escritos
+ * (un tarifario o una línea guardada con los mismos): «ajustado en esta línea» solo cuando DIFIEREN
+ * y nadie más los puso. Un pantallazo que los leyó lo dice; escritos a mano, «escrito a mano».
+ */
+export function origenDeLaOcupacion(a: {
+  composicion: Composicion
+  composicionViaje: Composicion | null
+  /** La línea guarda sus pasajeros (`tarifa.composicion`). */
+  esPropia: boolean
+  /** La lectura de la casilla 1 los puso (sus pasajeros son los de la línea). `null` = no. */
+  laPusoLaLectura: FuenteDeLectura | null
+  /** De dónde salió la casilla 1 (aunque no haya puesto los pasajeros). `null` = sin lectura. */
+  fuente: FuenteDeLectura | null
+}): string {
+  const delViaje = !!a.composicionViaje && mismaComposicion(a.composicion, a.composicionViaje)
+  if (a.laPusoLaLectura === 'pantallazo') return 'leído del pantallazo'
+  if (delViaje) return 'la del viaje'
+  if (a.laPusoLaLectura === 'manual' || (a.esPropia && a.fuente === 'manual')) return 'escrito a mano'
+  if (a.laPusoLaLectura === 'tarifario') return 'el de la tarifa del proveedor'
+  return a.esPropia ? 'ajustado en esta línea' : 'la del viaje'
+}
+
+/**
  * Las monedas que se ofrecen con un clic. Cualquier otro código ISO se escribe a mano: la
  * lista es comodidad, no el límite (Trappvel cotiza también en otras monedas locales).
  */

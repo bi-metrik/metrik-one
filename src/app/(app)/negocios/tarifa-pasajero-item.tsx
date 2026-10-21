@@ -41,6 +41,7 @@ import {
   MONEDAS_FRECUENTES,
   monedaDeTarifa,
   ocupacionObservada,
+  origenDeLaOcupacion,
   origenDeLecturas,
   resolverTarifa,
   tarifaMasReciente,
@@ -393,6 +394,8 @@ export default function TarifaPasajeroItem({
           composicion={composicion}
           esPropia={!!tarifa.composicion}
           laPusoLaLectura={ocupacionLaPuso}
+          fuente={primera ? fuentePrimera : null}
+          composicionViaje={composicionViaje ?? null}
           faltan={faltan}
           hayViaje={!!composicionViaje}
           editando={editandoComposicion || pedirComposicion}
@@ -1109,6 +1112,8 @@ function ComposicionDeLinea({
   composicion,
   esPropia,
   laPusoLaLectura,
+  fuente,
+  composicionViaje,
   faltan,
   hayViaje,
   editando,
@@ -1126,6 +1131,10 @@ function ComposicionDeLinea({
    * no una que alguien ajustó en la línea. `null` = no la puso la lectura.
    */
   laPusoLaLectura: FuenteDeLectura | null
+  /** De dónde salió la casilla 1 (`null` sin lectura): una línea escrita a mano lo dice. */
+  fuente: FuenteDeLectura | null
+  /** Los pasajeros del viaje: si la línea cubre los mismos, son «la del viaje». */
+  composicionViaje: Composicion | null
   /** Pasajeros del viaje que esta línea deja sin acomodar, o `null` si no falta nadie. */
   faltan: Composicion | null
   hayViaje: boolean
@@ -1162,14 +1171,8 @@ function ComposicionDeLinea({
         <div className="flex flex-wrap items-center justify-between gap-2">
           <p className="text-[11px]">
             <span className="font-medium">Esta línea cubre:</span> {describirOcupacion(composicion, 'y')}
-            <span className="ml-1 text-muted-foreground">
-              · {laPusoLaLectura === 'pantallazo'
-                ? 'leído del pantallazo'
-                : laPusoLaLectura === 'manual'
-                  ? 'escrito a mano'
-                  : laPusoLaLectura === 'tarifario'
-                    ? 'el de la tarifa del proveedor'
-                    : esPropia ? 'ajustado en esta línea' : 'la del viaje'}
+            <span className="ml-1 text-muted-foreground" data-origen-ocupacion>
+              · {origenDeLaOcupacion({ composicion, composicionViaje, esPropia, laPusoLaLectura, fuente })}
             </span>
           </p>
           <button
