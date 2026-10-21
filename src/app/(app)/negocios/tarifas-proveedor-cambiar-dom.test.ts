@@ -151,8 +151,10 @@ describe('cambiar el costo por otra tarifa del proveedor', () => {
   it('el texto de dónde salió el costo queda fuera de la lista con scroll', async () => {
     await montar(210000)
     const origen = contenedor.querySelector('[data-tarifa-elegida]')!
-    const lista = contenedor.querySelector('[data-opciones-tarifa]')!
-    expect(lista.contains(origen)).toBe(false)
-    expect(origen.compareDocumentPosition(lista) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
+    const area = contenedor.querySelector('[data-lista-tarifas]')!
+    expect(area.className).toContain('overflow-y-auto')
+    expect(area.contains(contenedor.querySelector('[data-opciones-tarifa]'))).toBe(true)
+    expect(area.contains(origen)).toBe(false)
+    expect(origen.compareDocumentPosition(area) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
   })
 })
