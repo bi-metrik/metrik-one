@@ -2,6 +2,7 @@
 
 ## Project memories
 
+- ⚠️⚠️ [Obras parte web (#1237)](project_obras_web_fase1.md) — modules.obras; migración 20261021183000 SIN aplicar: facturas.proyecto_id NOT NULL rompe facturas
 - ⚠️⚠️ [Asistente de Sabor sobre Chatwoot (etapa 1)](project_asistente_chatwoot_sabor.md) — #1225 mergeado, migración aplicada, sin deploy; sobreventa en PR aparte; tope 400 tokens por ficha
 - ⚠️ [Bot ONE: soporte en foto/PDF leído](project_wa_soporte_pdf_agente.md) — documento = clase 'otro' + media; lectura aparte; ventana 5 s; arnés s-* sin correr
 - ⚠️⚠️ [Modo agente ONE en todo workspace](project_agente_one_todo_workspace.md) — #1226; deploy de wa-webhook lo enciende en todos; AGENTE_ONE=off; eval Haiku 6/6 limpio (21-oct)
