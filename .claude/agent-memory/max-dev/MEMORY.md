@@ -2,6 +2,7 @@
 
 ## Project memories
 
+- ⚠️⚠️ [Módulo funciones: cupo y mapa de Sabor (#1234)](project_funciones_mapa_salon.md) — 20261021120000 SIN aplicar, tras 20261021090000; 4 listas del catálogo; PDF solo borrador
 - ⚠️⚠️ [Asistente de Sabor sobre Chatwoot (etapa 1)](project_asistente_chatwoot_sabor.md) — 20261021090000 SIN aplicar; corrida real por CLI (suscripción) 53/54, tiempos no aptos; payload de la doc
 - ⚠️ [Bot ONE: soporte en foto/PDF leído](project_wa_soporte_pdf_agente.md) — documento = clase 'otro' + media; lectura aparte; ventana 5 s; arnés s-* sin correr
 - ⚠️⚠️ [Modo agente ONE en todo workspace](project_agente_one_todo_workspace.md) — #1226; deploy de wa-webhook lo enciende en todos; AGENTE_ONE=off; eval Haiku 6/6 limpio (21-oct)
