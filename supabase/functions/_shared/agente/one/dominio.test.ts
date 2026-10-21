@@ -116,15 +116,15 @@ describe('los candados del gasto', () => {
 describe('el soporte del gasto', () => {
   it('la foto que llega con el pedido va en la propuesta y se guarda con el toque', async () => {
     const modelo = modeloGuionado([
-      { name: 'proponer', args: { accion: 'gasto', datos: { monto: 18900, empresa: true, empresa_dicho_en: '#1', categoria: 'transporte', descripcion: 'peaje', soporte: '#1' } } },
+      { name: 'proponer', args: { accion: 'gasto', datos: { monto: 18900, negocio: 'A1 26 1', categoria: 'transporte', descripcion: 'peaje', soporte: '#1' } } },
     ])
     const e = await escenarioOne({ modelo, negocios: NEGOCIOS })
-    const t = await e.foto('peaje 18900 de empresa')
+    const t = await e.foto('peaje 18900 al A1 26 1')
     expect(t[0].texto).toContain('📷 Con la foto #1 como soporte')
-    expect(t[0].texto).toContain('🏢 Gasto de empresa (sin negocio)')
+    expect(t[0].texto).toContain('📁 A1 26 1 · Alfa Grupo — Concesión de prueba')
     const hecho = await e.toca('Registrar')
     expect(hecho[0].texto).toContain('📷 Con su soporte.')
-    expect(e.puerto.escrituras[0]).toMatchObject({ tipo: 'gasto', monto: 18900, negocio: null, soporte: true })
+    expect(e.puerto.escrituras[0]).toMatchObject({ tipo: 'gasto', monto: 18900, negocio: 'A1 26 1', soporte: true })
   })
 
   it('la foto que llega después se adjunta al gasto de la conversación (G1), con su toque', async () => {
@@ -307,7 +307,7 @@ describe('la configuración del dominio ONE', () => {
 describe('una propuesta vence cuando el bot manda otro mensaje (arnés 2026-10-21, t-mantenimiento)', () => {
   it('el «Registrar» de una propuesta vieja no escribe si el bot ya volvió a preguntar', async () => {
     const modelo = modeloGuionado([
-      { name: 'proponer', args: { accion: 'gasto', datos: { monto: 47600, empresa: true, empresa_dicho_en: '#1', categoria: 'otros' } } },
+      { name: 'proponer', args: { accion: 'gasto', datos: { monto: 47600, negocio: 'A1 26 1', categoria: 'otros' } } },
       { name: 'negocios_abiertos', args: {} },
       { name: 'responder', args: { tema: 'gasto', texto: '¿A cuál va?', opciones: [{ titulo: 'A1 26 1' }, { titulo: 'Gasto de empresa' }] } },
     ])
@@ -408,5 +408,18 @@ describe('gasto de empresa solo si la persona lo dijo o lo eligió', () => {
     const e = await escenarioOne({ modelo, negocios: NEGOCIOS })
     await e.escribe('gasté 1000')
     expect(modelo.restantes()).toBe(0)
+  })
+})
+
+describe('«de empresa» dicho antes de la lista del destino', () => {
+  it('no basta: primero preguntar_destino y la persona toca la opción', async () => {
+    const modelo = modeloGuionado([
+      { name: 'proponer', args: { accion: 'gasto', datos: { monto: 50000, empresa: true, empresa_dicho_en: '#1', categoria: 'otros' } } },
+      { name: 'responder', args: { tema: 'gasto', texto: '¿A cuál negocio va?' } },
+    ])
+    const e = await escenarioOne({ modelo, negocios: NEGOCIOS })
+    await e.escribe('50 mil en papelería, gasto de empresa')
+    expect(e.trazas().at(-1)!.candados!.map((c) => c.candado)).toEqual(['empresa_sin_respaldo'])
+    expect(e.puerto.escrituras).toEqual([])
   })
 })

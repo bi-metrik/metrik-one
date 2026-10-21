@@ -208,14 +208,18 @@ const digitos = (s: unknown) => String(s ?? '').replace(/\D/g, '');
 
 /**
  * ¿El gasto de empresa tiene de dónde salir? (2026-10-21: en el arnés el modelo lo puso por su cuenta cuando no
- * encontró el negocio). `#n` tiene que ser un mensaje de la persona: un escrito, un audio o el pie de una foto (qué dice
- * lo lee el modelo), o el toque de la opción «Gasto de empresa» que puso el código en `preguntar_destino`. Estructural:
- * no lee el texto de la persona. Pura.
+ * encontró el negocio, y una vez apuntó `empresa_dicho_en` a «Bebidas de 20000»). `#n` tiene que ser una respuesta de la
+ * persona a la pregunta del destino que armó el código (`preguntar_destino`, con su opción «Gasto de empresa»): el toque
+ * de esa opción, o un escrito/audio que llega DESPUÉS de esa lista (qué dice lo lee el modelo). Si la persona dijo «de
+ * empresa» antes de cualquier lista, el bot pregunta el destino y ella toca la opción: un paso más, a cambio de que
+ * nadie registre a empresa por suposición. Estructural: no lee el texto de la persona. Pura.
  */
 export function empresaDicha(filas: FilaConversacion[], v: unknown): boolean {
   const n = numeroDeFila(v);
   const f = n ? filas[n - 1] : undefined;
   if (!f || f.direccion !== 'entrante' || f.clase === 'reenvio') return false;
+  const lista = filas.slice(0, n! - 1).some((x) => x.direccion === 'saliente' && (x.opciones ?? []).some((o) => o.id.startsWith('ag|c|') && o.titulo === OPCION_EMPRESA));
+  if (!lista) return false;
   if (f.clase === 'toque') return (f.texto ?? '').trim() === OPCION_EMPRESA;
   return ['escrito', 'audio', 'imagen'].includes(f.clase);
 }
@@ -393,7 +397,7 @@ export function dominioOne(puerto: PuertoOne, o: { rol: string; ahora?: () => nu
     if (!codigo && !deEmpresa) return { ok: false, error: 'Falta el destino: llama `preguntar_destino` (el sistema manda la lista). No lo supongas ni armes tú la lista.', candado: 'sin_destino' };
     if (codigo && deEmpresa) return { ok: false, error: 'Un gasto va a un negocio O es de empresa, no las dos. Si no está claro, pregunta.', candado: 'destino_doble' };
     if (deEmpresa && !empresaDicha(ctx.conversacion, d.empresa_dicho_en)) {
-      return { ok: false, error: 'Gasto de empresa solo si la persona lo dijo o lo eligió: pon en `empresa_dicho_en` el #n de ese mensaje suyo. Si no lo dijo, llama `preguntar_destino`.', candado: 'empresa_sin_respaldo' };
+      return { ok: false, error: 'Gasto de empresa solo como respuesta de la persona a `preguntar_destino` (que toque «Gasto de empresa» o lo diga después de esa lista): pon en `empresa_dicho_en` el #n de esa respuesta. Si todavía no se le preguntó, llama `preguntar_destino`, aunque ya lo haya dicho.', candado: 'empresa_sin_respaldo' };
     }
     let negocio: NegocioOne | null = null;
     if (codigo) {
