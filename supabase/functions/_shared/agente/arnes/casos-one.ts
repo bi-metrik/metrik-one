@@ -137,7 +137,7 @@ export const CASOS_ONE: CasoOne[] = [
   },
   {
     id: 'i-pedido-cliente', titulo: 'un pedido de viaje de un cliente pegado (no es de este bot)', mundo: 'interno',
-    pasos: [{ escribe: 'Hola, queremos ir a Cartagena del 12 al 16 de diciembre, somos 2 adultos y 1 niño de 7 años, hotel 4 estrellas' }, { escribe: 'listo' }],
+    pasos: [{ escribe: 'Hola, queremos ir a Cartagena del 12 al 16 de diciembre, somos 2 adultos y 1 niño, hotel 4 estrellas' }, { escribe: 'listo' }],
     esperado: { nada: true }, viejoOk: true,
   },
   {
