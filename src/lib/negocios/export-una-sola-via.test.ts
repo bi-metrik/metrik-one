@@ -58,6 +58,20 @@ describe('el Excel de negocios se arma en un solo sitio', () => {
     }
   })
 
+  it('los roles que suma el workspace abren la DESCARGA, no la hoja de Drive (SOE-028)', () => {
+    // `roles_descarga_negocios_extra` existe para que un operator de SOENA se baje SUS
+    // negocios. La hoja de Drive es UNA sola por workspace (file_id fijo) y se
+    // sobrescribe: un operator la dejaría con solo sus filas para todo el equipo. Por
+    // eso la acción de Drive se queda en el default, y la lista solo le pinta el botón
+    // a quien pasa ese default.
+    expect(leer(RUTA_DESCARGA)).toContain('puedeDescargarNegociosDelWorkspace(')
+    expect(leer(RUTA_DRIVE)).not.toContain('puedeDescargarNegociosDelWorkspace')
+    expect(leer(RUTA_DRIVE)).toContain('puedeDescargarNegocios(role)')
+    expect(leer('src/app/(app)/negocios/page.tsx')).toMatch(
+      /canPublicarEnDrive\s*=\s*puedeDescargarNegocios\(ws\.role\)/,
+    )
+  })
+
   it('las dos validan los ids con el mismo helper', () => {
     for (const ruta of [RUTA_DESCARGA, RUTA_DRIVE]) {
       expect(leer(ruta), ruta).toContain('leerIdsExport')

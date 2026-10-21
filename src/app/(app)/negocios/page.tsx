@@ -3,6 +3,7 @@ import { Plus } from 'lucide-react'
 import { getWorkspaceStagesActivos, getStaffParaAsignarNegocio } from './negocio-v2-actions'
 import { getWorkspace } from '@/lib/actions/get-workspace'
 import { getRolePermissions, puedeDescargarNegocios, puedeMarcarCondicionNegocio } from '@/lib/roles'
+import { puedeDescargarNegociosDelWorkspace } from '@/lib/negocios/permiso-descarga'
 import NegociosClient from './negocios-client'
 import { usaAlmacenamientoExterno } from '@/lib/almacenamiento/proveedor'
 import { cargarVistaLista } from '@/lib/negocios/cargar-vista-lista'
@@ -55,11 +56,15 @@ export default async function NegociosPage({
   ])
   // Mismo guard que validan `agregarMarcaNegocio`/`quitarMarcaNegocio`.
   const canMarcar = puedeMarcarCondicionNegocio(ws.role)
-  // Mismo gate que aplica `POST /api/negocios/export` (owner/admin/supervisor).
-  const canDescargar = puedeDescargarNegocios(ws.role)
+  // Mismo gate que aplica `POST /api/negocios/export` (owner/admin/supervisor, más los
+  // roles que sume el workspace en `config_extra.roles_descarga_negocios_extra`).
+  const canDescargar = await puedeDescargarNegociosDelWorkspace(ws.supabase, ws.workspaceId, ws.role)
   // La hoja viva en Drive no se ofrece donde el workspace guarda sus archivos fuera de
   // Drive (el servidor tambien la rechaza). Si la marca no se puede leer, no se ofrece.
-  const canPublicarEnDrive = ws.workspaceId
+  // Y solo con el permiso DEFAULT, sin los roles que suma el workspace (SOE-028): la hoja
+  // es una sola y se sobrescribe, y un operator la dejaría con solo sus negocios. Es el
+  // mismo gate de `subirExportNegociosADrive`.
+  const canPublicarEnDrive = puedeDescargarNegocios(ws.role) && ws.workspaceId
     ? !(await usaAlmacenamientoExterno(ws.workspaceId).catch(() => true))
     : false
   const abiertos = vista?.resumen.totalAbiertos ?? 0
