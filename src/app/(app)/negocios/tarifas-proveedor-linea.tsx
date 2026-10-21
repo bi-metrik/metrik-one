@@ -245,7 +245,6 @@ function Buscador({ modo, editable, onElegir, onCancelar }: { modo: Modo; editab
       }
     }, texto ? 250 : 0)
     return () => clearTimeout(espera)
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [texto, modo.tipo, donde])
 
   useEffect(() => { entrada.current?.focus() }, [])

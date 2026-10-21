@@ -65,7 +65,8 @@ describe('lo que viene marcado al abrir (punto 3)', () => {
     ], { adultos: 2, ninos: 1, infantes: 0 }, '2027-02-01', null)
     const p = preseleccion(o.opciones, o.composicion, o.calendario)
     const monedas = Object.keys(p.marcadas).map((k) => o.opciones.find((x) => x.indice === Number(k))!.moneda)
-    expect(new Set(monedas).size).toBe(1)
+    // 90 USD no es «más barato» que 400.000 COP: con tarifas en pesos, la línea va en pesos.
+    expect(monedas).toEqual(['COP', 'COP'])
   })
 })
 

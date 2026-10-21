@@ -3,6 +3,7 @@
 import { MENSAJE_LECTURA_INTERRUMPIDA } from '@/lib/cotizaciones/lectura-sin-silencio'
 import { useEffect, useId, useRef, useState, type DragEvent, type ReactNode } from 'react'
 import { useTransitionTolerante } from '@/hooks/use-transition-tolerante'
+import Link from 'next/link'
 import { toast } from 'sonner'
 
 import {
@@ -728,7 +729,7 @@ export default function TarjetaOpcion({
           {conBiblioteca && !bib?.fotosDe && (bib?.porClasificar ?? 0) > 0 && (
             <p className="m-0 px-3 pb-1 text-[11px] text-[#9A5F0C]" data-por-clasificar-tarjeta>
               Sin fotos: el nombre se parece a {bib!.porClasificar} proveedores. Elige cuál es en{' '}
-              <a href="/proveedores?por=clasificar" className="underline">Proveedores, «Por clasificar»</a>.
+              <Link href="/proveedores?por=clasificar" className="underline">Proveedores, «Por clasificar»</Link>.
             </p>
           )}
           {conBiblioteca && pedidoFoto && (

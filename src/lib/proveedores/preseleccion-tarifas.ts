@@ -52,13 +52,14 @@ export function preseleccion(opciones: readonly OpcionTarifa[], c: Composicion |
   const porPersona = sirven.filter((o) => o.unidad === 'persona')
   const conAdulto = porPersona.some((o) => (o.tipo ?? 'adulto') === 'adulto')
   const candidatas = conAdulto ? porPersona : sirven.filter((o) => o.unidad !== 'persona')
-  // Una sola moneda: la de la más barata manda (no se mezclan monedas en una línea).
   const puestos = new Map<string, OpcionTarifa[]>()
   for (const o of candidatas) puestos.set(cupoDeFila(o, cal), [...(puestos.get(cupoDeFila(o, cal)) ?? []), o])
   if (puestos.size === 0) return { marcadas: {}, como: null }
   let varias = false
   const marcadas: Record<number, FilaElegida> = {}
-  let moneda: string | null = null
+  // Una sola moneda, y los precios de monedas distintas no se comparan: si hay tarifas en pesos,
+  // la línea va en pesos (una en USD sin tasa no «gana» por ser un número más chico).
+  let moneda: string | null = candidatas.some((o) => o.moneda === 'COP') ? 'COP' : null
   for (const filas of puestos.values()) {
     const mismas: OpcionTarifa[] = moneda ? filas.filter((o) => o.moneda === moneda) : filas
     if (mismas.length === 0) continue
