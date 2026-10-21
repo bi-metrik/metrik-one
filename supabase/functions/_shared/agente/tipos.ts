@@ -47,6 +47,8 @@ export interface LecturaAdjunto {
   fecha: string | null;
   comercio: string | null;
   nit: string | null;
+  /** El número de la transacción o del comprobante (C1). Ausente en lecturas viejas. */
+  numero_transaccion?: string | null;
   descripcion: string | null;
   /** Por qué no hay lectura (no se pudo bajar, el modelo no respondió). */
   motivo?: string;
@@ -63,6 +65,8 @@ export interface MediaFila {
   nombre?: string;
   ref?: string | null;
   lectura?: LecturaAdjunto | null;
+  /** sha256 del archivo (C22): el mismo pantallazo dos veces. */
+  huella?: string | null;
 }
 
 // ── El modelo ────────────────────────────────────────────────────────────────
