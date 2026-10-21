@@ -141,7 +141,9 @@ export async function crearEspacioValida(datos: DatosRegistroValida): Promise<Re
   if (!datos.acepta) {
     return { tipo: 'dato', campo: 'acepta', texto: 'Para empezar la prueba tienes que aceptar las condiciones y la política de datos.' }
   }
-  const condiciones = condicionesVigentes()
+  // Con el correo de la SESIÓN: en producción decide si rige la lista de pruebas del cobro. Una
+  // versión con cobro que llegue en el cuerpo sin que la sesión la habilite cae en el chequeo de abajo.
+  const condiciones = condicionesVigentes(process.env, undefined, correo)
   if (datos.condicionesVersion !== versionAceptada(condiciones)) {
     // La pantalla mostró otro texto (estaba abierta desde antes de un cambio): que lo vuelva a leer.
     return { tipo: 'dato', campo: 'acepta', texto: 'Las condiciones cambiaron mientras tenías la página abierta. Recarga y vuelve a leerlas.' }

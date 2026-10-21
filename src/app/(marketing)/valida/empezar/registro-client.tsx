@@ -1,6 +1,7 @@
 'use client'
 
 import { useEffect, useRef, useState } from 'react'
+import { useRouter } from 'next/navigation'
 import MetrikLockup from '@/components/metrik-lockup'
 import { createClient } from '@/lib/supabase/client'
 import { fetchPropio } from '@/lib/version/fetch-propio'
@@ -96,6 +97,7 @@ export default function RegistroValidaClient({
   tarjeta = null,
   terminos = null,
 }: Props) {
+  const router = useRouter()
   const [paso, setPaso] = useState<Paso>('correo')
   const [correo, setCorreo] = useState('')
   const [codigo, setCodigo] = useState('')
@@ -172,7 +174,12 @@ export default function RegistroValidaClient({
       type: 'email',
     })
     if (error) setError('Ese código no sirvió. Revisa que sea el del último correo, o pide uno nuevo.')
-    else setPaso('empresa')
+    else {
+      setPaso('empresa')
+      // Las Condiciones dependen de quién entró (lista de pruebas del cobro en producción): el servidor
+      // las vuelve a decidir con la sesión recién abierta.
+      router.refresh()
+    }
     setOcupado(false)
   }
 
