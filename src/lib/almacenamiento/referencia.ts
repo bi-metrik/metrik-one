@@ -226,18 +226,85 @@ export function duenoDeReferencia(ref: unknown): DuenoArchivo | null {
   return { workspaceId: ws.toLowerCase(), negocioId: negocioDeRuta(resto.join('/')) }
 }
 
+/** Un id de Drive: base64url, y nunca tan corto como para confundirlo con otra cosa. */
+const ID_DRIVE = /^[A-Za-z0-9_-]{10,}$/
+
+const HOSTS_DRIVE = new Set(['drive.google.com', 'docs.google.com'])
+
+/**
+ * El id de Drive detras de un enlace, con un parser EXPLICITO y no un split.
+ *
+ * Nació para `cobros.siigo_recibo`, que guarda `archivo_url` y no el id (medido contra
+ * produccion el 2026-09-16: 7 de 7 con la forma `/file/d/<id>/view?usp=drivesdk`).
+ *
+ * Devuelve null ante cualquier cosa que no sea inequivocamente un enlace de Drive: un
+ * `one://`, una URL de otro host, o un id con forma sospechosa. Null significa "no se
+ * abre", nunca "se intenta igual".
+ */
+export function idDeArchivoDrive(url: unknown): string | null {
+  if (typeof url !== 'string' || !url.startsWith('http')) return null
+  let u: URL
+  try {
+    u = new URL(url)
+  } catch {
+    return null
+  }
+  if (!HOSTS_DRIVE.has(u.hostname.toLowerCase())) return null
+
+  // `.../file/d/<id>/view`, `.../d/<id>/edit`
+  const segmentos = u.pathname.split('/').filter(Boolean)
+  const i = segmentos.indexOf('d')
+  const porRuta = i >= 0 ? segmentos[i + 1] : undefined
+  if (porRuta && ID_DRIVE.test(porRuta)) return porRuta
+
+  // `.../open?id=<id>`, `.../uc?export=download&id=<id>`
+  const porQuery = u.searchParams.get('id')
+  if (porQuery && ID_DRIVE.test(porQuery)) return porQuery
+
+  return null
+}
+
+/**
+ * La URL que DESCARGA un archivo de Drive en vez de abrir el visor (SOE-026).
+ *
+ * Por qué hace falta: `<a download>` sobre otro dominio el navegador lo IGNORA, así que
+ * «Descargar» con la URL `/file/d/<id>/view` abría el visor igual que «Ver». Google sirve
+ * `uc?export=download` con `Content-Disposition: attachment`, y con la sesión de Google
+ * del usuario baja el mismo archivo que ya puede ver.
+ *
+ * Solo `drive.google.com`: un `docs.google.com/document/d/<id>` es un Doc nativo, que
+ * `uc?export=download` no baja (pide `export?format=`), y se deja como está. Lo mismo
+ * cualquier URL que no sea inequívocamente un archivo (una carpeta, otro host): `null`.
+ */
+export function urlDescargaDrive(url: string): string | null {
+  let host: string
+  try {
+    host = new URL(url).hostname.toLowerCase()
+  } catch {
+    return null
+  }
+  if (host !== 'drive.google.com') return null
+  const id = idDeArchivoDrive(url)
+  return id ? `https://drive.google.com/uc?export=download&id=${encodeURIComponent(id)}` : null
+}
+
 /**
  * El `href` con el que la pantalla abre un archivo. Una referencia (de cualquiera de los
  * dos esquemas) pasa por el endpoint que firma; cualquier otra URL (Drive, Storage
  * público heredado) queda igual, así que ni un workspace en Drive ni una fila que todavía
  * no se ha migrado cambian un solo enlace.
+ *
+ * Excepción: con `descargar`, un archivo de Drive va a su URL de descarga directa
+ * (`urlDescargaDrive`), porque la del visor no descarga. «Ver» no cambia.
  */
 export function hrefArchivo(
   url: string | null | undefined,
   opciones: { descargar?: boolean } = {},
 ): string | null {
   if (!url) return null
-  if (!esReferenciaArchivo(url)) return url
+  if (!esReferenciaArchivo(url)) {
+    return (opciones.descargar && urlDescargaDrive(url)) || url
+  }
   const descargar = opciones.descargar ? '&descargar=1' : ''
   return `${RUTA_ABRIR_ARCHIVO}?ref=${encodeURIComponent(url)}${descargar}`
 }
