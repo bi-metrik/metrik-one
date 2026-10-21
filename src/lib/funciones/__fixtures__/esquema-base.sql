@@ -1,8 +1,8 @@
 -- Lo mínimo de ONE que necesitan `20261021090000_asistente_chatwoot.sql` y `20261021120000_modulo_funciones.sql`
--- para correr de verdad: roles de Supabase, `auth.uid()`, workspaces, perfiles, contactos y su guardián de teléfono,
--- y las tres tablas cuyas listas de módulos reescribe la migración. Lo usan `funciones-sql.test.ts` (PGlite) y
--- `scripts/funciones-concurrencia.sh` (Postgres real en CI). No es una copia del esquema de producción: solo las
--- columnas que estas migraciones tocan.
+-- para correr de verdad: roles de Supabase (`service_role` con BYPASSRLS, como allá), `auth.uid()`, workspaces,
+-- perfiles, contactos y su guardián de teléfono, y las tres tablas cuyas listas de módulos reescribe la migración.
+-- Lo usan `funciones-sql.test.ts` y `_shared/funciones/servicios.test.ts` (PGlite) y `scripts/funciones-concurrencia.sh`
+-- (Postgres real en CI). No es una copia del esquema de producción: solo las columnas que estas migraciones tocan.
 
 set time zone 'UTC';
 
@@ -10,7 +10,7 @@ do $$
 begin
   if not exists (select 1 from pg_roles where rolname = 'anon') then create role anon nologin; end if;
   if not exists (select 1 from pg_roles where rolname = 'authenticated') then create role authenticated nologin; end if;
-  if not exists (select 1 from pg_roles where rolname = 'service_role') then create role service_role nologin; end if;
+  if not exists (select 1 from pg_roles where rolname = 'service_role') then create role service_role nologin bypassrls; end if;
 end $$;
 
 grant usage on schema public to anon, authenticated, service_role;
