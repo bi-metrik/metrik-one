@@ -6,6 +6,7 @@ import { soportePasaGate } from '@/lib/modulos/gate'
 import type { ValidaConsultaInput } from '@/lib/actions/valida-consultas'
 import { credencialValida } from './credencial-servidor'
 import { motivoCorteDeError, type MotivoCorte, type PruebaValida } from './corte-bolsa'
+import { CODIGO_BUSQUEDA_INCOMPLETA } from './mensajes-error'
 import { llamarValida, persistirConsulta, recalcularScoreNegocio, type RespuestaValida } from './consulta-servidor'
 import {
   FILA_RECLAMO_S,
@@ -249,6 +250,20 @@ export async function procesarFilaLote(ctx: ContextoTurno, fila: FilaLote): Prom
     if (resultado.status === 401 || resultado.status === 402) {
       await devolver(svc, fila)
       return { tipo: 'rechazo', error: resultado.error }
+    }
+    // La búsqueda no se completó ni con el reintento: Valida no la registró ni la cobró, así que no
+    // va al historial (igual que la consulta puntual). La fila queda en error con el código, que el
+    // XLSX de resultados traduce a «No completada, reintenta».
+    if (resultado.error === CODIGO_BUSQUEDA_INCOMPLETA) {
+      await terminar(svc, fila, {
+        estado: 'error',
+        severidad: 'error',
+        consulta: null,
+        validaId: null,
+        matches: 0,
+        error: CODIGO_BUSQUEDA_INCOMPLETA,
+      })
+      return { tipo: 'hecha', negocioParaScore: null }
     }
   }
 
