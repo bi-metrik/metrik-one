@@ -9516,8 +9516,8 @@ export async function completarNegocio(
       autor_id: staffId,
       ...(esCierreNoFacturable ? { campo_modificado: 'cierre_no_facturable' } : {}),
       contenido: esCierreNoFacturable
-        ? `Proyecto completado sin facturación. Motivo: ${motivoLabel}.${notaNoFacturable ? ` Nota: ${notaNoFacturable}` : ''}`
-        : 'Proyecto completado',
+        ? `Negocio cerrado sin facturación. Motivo: ${motivoLabel}.${notaNoFacturable ? ` Nota: ${notaNoFacturable}` : ''}`
+        : 'Negocio cerrado',
       valor_nuevo: 'completado',
     }, 'completarNegocio')
   }

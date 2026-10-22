@@ -198,9 +198,10 @@ export async function cargarVistaNegocio(id: string): Promise<VistaNegocio | nul
   // Documentos y entrega (F4): solo con `entrega_viaje.activo` y en la etapa que declara sus gates.
   // En viaje, Cierre económico y Postventa (F6): solo con `cierre_viaje.activo` y en su etapa.
   // Seguimiento (F1): la línea «Cotización enviada el …» solo en la etapa con `cotizacion_enviada`.
-  const [rielCobro, confirmacionViaje, facturaViaje, entregaViaje, viajeFinal, seguimientoViaje] = workspaceId
+  const [rielCobro, confirmacionViaje, facturaViaje, entregaViaje, viajeFinalLeido, seguimientoViaje] = workspaceId
     ? await Promise.all([leerRielCobro(supabase, argsViaje), leerConfirmacionViaje(supabase, argsViaje), leerFacturaViaje(supabase, argsViaje), leerEntregaViaje(supabase, argsViaje), leerViajeFinal(supabase, argsViaje), leerSeguimientoViaje(supabase, argsViaje)])
     : [null, null, null, null, null, null]
+  const viajeFinal = viajeFinalLeido?.panel ?? null
   const banner = bannerCierre || rielCobro || confirmacionViaje || facturaViaje || entregaViaje || viajeFinal || seguimientoViaje
     ? (
       <>
@@ -306,6 +307,7 @@ export async function cargarVistaNegocio(id: string): Promise<VistaNegocio | nul
     registrarPagoEnabled: conciliacionActiva,
     registrarPagoSimple: pagoSimpleActivo,
     puedeCierreNoFacturable: puedeCierreNoFacturable,
+    cierreViaje: viajeFinalLeido?.paraCerrar ?? null,
     puedeOmitirGates: puedeOmitirGates,
     puedeAvanzarCruces: puedeAvanzarCruces,
     puedeResolverAvisoRecaudo: puedeResolverAvisoRecaudo,

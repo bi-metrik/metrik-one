@@ -12,6 +12,7 @@ import {
 } from '../negocio-v2-actions'
 import { RAZONES_PERDIDA_NEGOCIO, RAZONES_DESCARTE_LEAD, MOTIVOS_CANCELACION } from '@/lib/negocios/constants'
 import { permiteCompletar, permiteCierreNoFacturable as puedeOfrecerNoFacturable, type EtapaCierre } from '@/lib/negocios/etapa-cierre'
+import { pesosCierre, type CierreParaCerrar } from '@/lib/viaje/cierre-viaje'
 
 // ── Helpers ─────────────────────────────────────────────────────────────────
 
@@ -48,6 +49,12 @@ interface CierreNegocioDialogProps {
    * cada uno sobre un `value` global. Ausente = la lista global de siempre.
    */
   motivosPerdida?: ReadonlyArray<{ value: string; label: string }>
+  /**
+   * Línea con `cierre_viaje.activo` (barrido ámbar, 2026-10-22): el resumen muestra el margen del
+   * panel de Cierre económico, y lo que falta de postventa se dice en el primer paso y deshabilita
+   * el cierre. Ausente = como hoy (SOENA/AFI/Termotech). El servidor sigue frenando igual.
+   */
+  cierreViaje?: CierreParaCerrar | null
   onClose: () => void
 }
 
@@ -209,19 +216,21 @@ function CancelarForm({ negocioId, onClose }: { negocioId: string; onClose: () =
   )
 }
 
-// ── Stage: COBRO — Completar proyecto ───────────────────────────────────────
+// ── Stage: COBRO — Cerrar el negocio ────────────────────────────────────────
 
-function CompletarForm({
+export function CompletarForm({
   negocioId,
   resumenFinanciero,
   precioAprobado,
   permiteCierreNoFacturable,
+  cierreViaje = null,
   onClose,
 }: {
   negocioId: string
   resumenFinanciero: { totalCobrado: number; porCobrar: number; costosEjecutados: number }
   precioAprobado: number | null
   permiteCierreNoFacturable: boolean
+  cierreViaje?: CierreParaCerrar | null
   onClose: () => void
 }) {
   const router = useRouter()
@@ -232,7 +241,10 @@ function CompletarForm({
   const [motivoNoFacturable, setMotivoNoFacturable] = useState('')
   const [notaNoFacturable, setNotaNoFacturable] = useState('')
 
-  const margen = resumenFinanciero.totalCobrado - resumenFinanciero.costosEjecutados
+  // En viaje, el margen es el del panel de Cierre económico (resta el IVA sobre el ingreso propio
+  // y no suma horas): dos cifras distintas para el mismo viaje confundían a la dirección.
+  const margen = cierreViaje ? cierreViaje.margenReal : resumenFinanciero.totalCobrado - resumenFinanciero.costosEjecutados
+  const faltaPostventa = cierreViaje?.faltaPostventa ?? null
   const requiereNota = motivoNoFacturable === 'otro'
   const cierreNoFacturableValido = !cerrarSinFactura
     || (!!motivoNoFacturable && (!requiereNota || !!notaNoFacturable.trim()))
@@ -252,7 +264,7 @@ function CompletarForm({
       if (res.error) {
         toast.error(res.error)
       } else {
-        toast.success('Proyecto completado')
+        toast.success('Negocio cerrado')
         onClose()
         router.refresh()
       }
@@ -262,11 +274,16 @@ function CompletarForm({
   if (step === 1) {
     return (
       <>
-        <h3 className="text-sm font-bold text-tinta">Cerrar proyecto</h3>
+        <h3 className="text-sm font-bold text-tinta">Cerrar negocio</h3>
+        {faltaPostventa && (
+          <p data-falta-postventa className="mt-3 rounded-lg border border-amber-200 bg-amber-50 p-3 text-xs text-amber-900">
+            Antes de cerrar: {faltaPostventa}
+          </p>
+        )}
         <textarea
           value={lecciones}
           onChange={e => setLecciones(e.target.value)}
-          placeholder="Que aprendiste de este proyecto? Que mejorarias?"
+          placeholder="¿Qué aprendiste de este negocio? ¿Qué mejorarías?"
           rows={4}
           className="mt-3 w-full rounded-md border border-[#E5E7EB] px-3 py-2 text-sm resize-none focus:border-acento focus:outline-none focus:ring-2 focus:ring-acento/15"
         />
@@ -317,7 +334,7 @@ function CompletarForm({
           </button>
           <button
             onClick={() => setStep(2)}
-            disabled={!cierreNoFacturableValido}
+            disabled={!cierreNoFacturableValido || !!faltaPostventa}
             className="flex-1 rounded-lg bg-acento py-2 text-sm font-medium text-white hover:bg-acento-hover disabled:cursor-not-allowed disabled:opacity-50"
           >
             Ver resumen
@@ -332,16 +349,35 @@ function CompletarForm({
     <>
       <h3 className="text-sm font-bold text-tinta">Resumen financiero</h3>
 
-      <div className="mt-3 grid grid-cols-2 gap-2">
-        <FinCard label="Precio aprobado" value={formatCOP(precioAprobado ?? 0)} />
-        <FinCard label="Total cobrado" value={formatCOP(resumenFinanciero.totalCobrado)} />
-        <FinCard label="Costos ejecutados" value={formatCOP(resumenFinanciero.costosEjecutados)} />
-        <FinCard
-          label="Margen"
-          value={`${margen >= 0 ? '+' : ''}${formatCOP(margen)}`}
-          highlight={margen}
-        />
-      </div>
+      {cierreViaje ? (
+        // Las mismas cifras y el mismo formato del panel de Cierre económico.
+        <div className="mt-3 grid grid-cols-2 gap-2">
+          <FinCard label="Precio aprobado" value={pesosCierre(precioAprobado ?? 0)} />
+          <FinCard label="Total cobrado" value={pesosCierre(resumenFinanciero.totalCobrado)} />
+          <FinCard label="Costo real" value={pesosCierre(cierreViaje.costoReal)} />
+          <FinCard
+            label="Margen real"
+            value={`${pesosCierre(margen)}${cierreViaje.margenRealPct !== null ? ` (${cierreViaje.margenRealPct} %)` : ''}`}
+            highlight={margen}
+            dataMargen
+          />
+          {cierreViaje.iva > 0 && (
+            <p className="col-span-2 text-[11px] text-tinta-suave">Descuenta {pesosCierre(cierreViaje.iva)} de IVA sobre el ingreso propio.</p>
+          )}
+        </div>
+      ) : (
+        <div className="mt-3 grid grid-cols-2 gap-2">
+          <FinCard label="Precio aprobado" value={formatCOP(precioAprobado ?? 0)} />
+          <FinCard label="Total cobrado" value={formatCOP(resumenFinanciero.totalCobrado)} />
+          <FinCard label="Costos ejecutados" value={formatCOP(resumenFinanciero.costosEjecutados)} />
+          <FinCard
+            label="Margen"
+            value={`${margen >= 0 ? '+' : ''}${formatCOP(margen)}`}
+            highlight={margen}
+            dataMargen
+          />
+        </div>
+      )}
 
       {cerrarSinFactura && (
         <div className="mt-3 rounded-lg border border-amber-200 bg-amber-50 p-3 text-xs text-amber-900">
@@ -363,7 +399,7 @@ function CompletarForm({
         </button>
         <button
           onClick={handleConfirm}
-          disabled={isPending}
+          disabled={isPending || !!faltaPostventa}
           className="flex-1 rounded-lg bg-acento py-2 text-sm font-medium text-white hover:bg-acento-hover disabled:opacity-50"
         >
           {isPending ? 'Cerrando...' : 'Confirmar cierre'}
@@ -373,9 +409,9 @@ function CompletarForm({
   )
 }
 
-function FinCard({ label, value, highlight }: { label: string; value: string; highlight?: number }) {
+function FinCard({ label, value, highlight, dataMargen }: { label: string; value: string; highlight?: number; dataMargen?: boolean }) {
   return (
-    <div className="rounded-lg border border-[#E5E7EB] p-3">
+    <div className="rounded-lg border border-[#E5E7EB] p-3" {...(dataMargen ? { 'data-margen': value } : {})}>
       <p className="text-[10px] text-tinta-suave">{label}</p>
       <p className={`text-sm font-bold mt-0.5 tabular-nums ${
         highlight !== undefined
@@ -401,6 +437,7 @@ export default function CierreNegocioDialog({
   precioAprobado,
   puedeCierreNoFacturable = false,
   motivosPerdida,
+  cierreViaje = null,
   onClose,
 }: CierreNegocioDialogProps) {
   // El stage dice QUIEN trabaja la etapa, no si el proceso termina ahi. Con la linea
@@ -453,6 +490,7 @@ export default function CierreNegocioDialog({
             resumenFinanciero={resumenFinanciero}
             precioAprobado={precioAprobado}
             permiteCierreNoFacturable={puedeOfrecerNoFacturable(etapaParaCierre, lineaDeclaraCierre) && puedeCierreNoFacturable}
+            cierreViaje={cierreViaje}
             onClose={onClose}
           />
         )}

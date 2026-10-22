@@ -236,6 +236,25 @@ export function calcularCierre(e: EntradaCierre): Cierre {
   }
 }
 
+/**
+ * Lo que el diálogo de «Cerrar negocio» necesita del cierre del viaje (barrido ámbar, 2026-10-22):
+ * el margen es el MISMO del panel de Cierre económico (cobrado − IVA sobre el ingreso propio −
+ * gastos), no `totalCobrado − costosEjecutados`, que no resta el IVA y suma las horas. Y lo que
+ * falta de postventa, para decirlo en el primer paso y no después de las dos pantallas.
+ */
+export interface CierreParaCerrar {
+  margenReal: number
+  margenRealPct: number | null
+  costoReal: number
+  iva: number
+  /** Solo en la etapa de Postventa (`postventa_completa`); `null` si no falta nada o no aplica. */
+  faltaPostventa: string | null
+}
+
+export function cierreParaCerrar(c: Pick<Cierre, 'margenReal' | 'margenRealPct' | 'costoReal' | 'iva'>, faltaPostventa: string | null): CierreParaCerrar {
+  return { margenReal: c.margenReal, margenRealPct: c.margenRealPct, costoReal: c.costoReal, iva: c.iva, faltaPostventa }
+}
+
 /** La huella de lo que la dirección confirma: si cambia un gasto o un pago, deja de valer. */
 export function huellaCierre(c: Pick<Cierre, 'ingresoReal' | 'costoReal' | 'iva' | 'recargo'>): string {
   return `${c.ingresoReal}|${c.costoReal}|${c.iva}|${c.recargo}`
