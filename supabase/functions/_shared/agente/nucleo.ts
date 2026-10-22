@@ -162,6 +162,12 @@ function estable(v: unknown): string {
   return JSON.stringify(v ?? null);
 }
 
+/** ¿El texto del bot dice que NO registra lo que propone («lo cancelo», «solo puedo anotar gastos»)? Pura. */
+export function anunciaQueNoRegistra(texto: string): boolean {
+  const t = texto.toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '');
+  return /\b(lo cancelo|la cancelo|cancelad[oa]|lo anulo|no (lo|la) (registro|anoto|voy a registrar)|no (puedo|se puede) (registrar|anotar)|solo (puedo )?(anotar|registrar) gastos)\b/.test(t);
+}
+
 /** ¿Es la misma propuesta (misma acción, mismos datos resueltos por el código) que la pendiente? Pura. */
 export function mismaPropuesta(a: Pick<Propuesta, 'accion' | 'datos'>, b: Pick<Propuesta, 'accion' | 'datos'>): boolean {
   return a.accion === b.accion && estable(a.datos) === estable(b.datos);
@@ -416,8 +422,12 @@ export async function turnoDelModelo(deps: DepsTurno, e: EntradaTurno): Promise<
         ? await d.proponer(accion, datos, e.ctx)
         : { ok: false as const, error: `Acción desconocida. Usa una de: ${d.acciones.join(', ')}.`, candado: 'accion_desconocida' };
       traza.ms_herramientas! += Math.round(deps.reloj() - th);
-      traza.herramientas!.push({ nombre, args, ok: p.ok, ...(p.ok ? { datos: p.propuesta.resumen } : { error: p.error }), ms: Math.round(deps.reloj() - th) });
+      const respaldoCandado = !p.ok && 'respaldo' in p ? p.respaldo : undefined;
+      traza.herramientas!.push({ nombre, args, ok: p.ok, ...(p.ok ? { datos: p.propuesta.resumen } : { error: p.error, ...(respaldoCandado !== undefined ? { datos: respaldoCandado } : {}) }), ms: Math.round(deps.reloj() - th) });
       if (!p.ok) {
+        // Lo que el candado leyó de la base (las cuotas de un ingreso que no cuadra) respalda las cifras que el modelo diga
+        // de ese error, en este turno y en los siguientes (queda en `traza.herramientas[].datos`).
+        if (respaldoCandado !== undefined) resultadosTurno.push(JSON.stringify(respaldoCandado));
         traza.candados!.push({ candado: p.candado, detalle: p.error });
         devolver(p.error);
         continue;
@@ -425,6 +435,14 @@ export async function turnoDelModelo(deps: DepsTurno, e: EntradaTurno): Promise<
       // La respuesta que va arriba del resumen (opcional): mismo tope y mismo verificador que `responder`.
       let arriba: string | null = null;
       let texto = String(args.texto ?? '').trim();
+      // Un resumen con su botón de registrar no sale debajo de un texto que dice que no se registra (caso real 2026-10-21:
+      // «solo puedo anotar gastos… lo cancelo» y, en el mismo mensaje, la propuesta de gasto con «¿Lo registro?»). Es una
+      // invariante sobre lo que escribe el bot, no una lectura de lo que dijo la persona.
+      if (texto && anunciaQueNoRegistra(texto)) {
+        traza.candados!.push({ candado: 'propuesta_contradicha', detalle: texto.slice(0, 200) });
+        devolver('No se envió: el texto dice que no lo registras y abajo iba la propuesta para registrarlo. Si no se registra, contesta con `responder` sin propuesta; si es otra cosa (p. ej. un ingreso y no un gasto), propón eso.');
+        continue;
+      }
       // Del respaldo no sale texto arriba de una propuesta (`respaldoEstricto`): su declaración no lo trae, y si igual lo
       // escribe, se ignora. Lo decide quién escribió el llamado, no lo que dice.
       if (texto && c.respaldoEstricto && c.respaldo && res.mensaje.modelo === c.respaldo.modelo && c.respaldo.modelo !== c.principal.modelo) {

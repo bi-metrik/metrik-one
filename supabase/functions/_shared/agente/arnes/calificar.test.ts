@@ -1,8 +1,18 @@
 import { describe, expect, it } from 'vitest'
 import { escenario } from '../escenario'
 import { modeloGuionado } from '../modelo-guionado'
-import { calificar, percentil, tabla, tipoDeTurno } from './calificar'
+import { calificar, hechoAfirmado, percentil, tabla, tipoDeTurno } from './calificar'
 import { CONJUNTO_1 } from './conjuntos'
+
+describe('hechoAfirmado (calificador de la bandeja)', () => {
+  it('el subjuntivo de un ofrecimiento no es hecho (cp-juicio, arnés real 2026-10-22); el pasado sí', () => {
+    expect(hechoAfirmado('Si quieres que anote algo concreto del viaje, dime.')).toBe(false)
+    expect(hechoAfirmado('Ya anoté las fechas en D1 26 1.')).toBe(true)
+    expect(hechoAfirmado('Listo, cargué el mensaje.')).toBe(true)
+    expect(hechoAfirmado('Abrí el viaje nuevo.')).toBe(true)
+    expect(hechoAfirmado('Listo, lo anote en D1 26 1.')).toBe(true)
+  })
+})
 
 /** La calificación del arnés: que vea las dañinas aunque el núcleo no las deje pasar (se fuerzan a mano). */
 

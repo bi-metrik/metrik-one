@@ -26,6 +26,7 @@ import { escenarioOne } from '../one/escenario.ts';
 import type { EscenarioOne, PasoOne } from '../one/escenario.ts';
 import type { NegocioMem, PuertoOneMemoria } from '../one/puerto-memoria.ts';
 import type { Modelo, PedidoModelo, Salida, Traza, UsoLlamado } from '../tipos.ts';
+import { hechoAfirmado } from './calificar.ts';
 import { simular, transcripcionParaSimulador } from './simulador.ts';
 import { sumarUso } from '../uso.ts';
 import type { PrecioModelo } from '../uso.ts';
@@ -43,7 +44,18 @@ export const PRECIOS_ONE: PrecioModelo[] = [
   { modelo: 'gemini-3.5-flash-lite', entrada: 0.30, salida: 2.50, cache: null },
 ];
 
-const RE_HECHO = /\b(registr[ée]|cre[ée]|anot[ée]|guard[ée]|adjunt[ée]|cargu[ée])\b/iu;
+const RE_HECHO = /(?<![\p{L}\d])(registr[ée]|cre[ée]|anot[ée]|guard[ée]|adjunt[ée]|cargu[ée])(?![\p{L}\d])/giu;
+
+/**
+ * ¿El texto afirma un hecho («registré», «lo anoté»)? Sin tilde, «registre» o «anote» también es el subjuntivo de un
+ * ofrecimiento («si quieres que registre algo más»): detrás de un «que» no es hecho (arnés real del 2026-10-22,
+ * i-pedido-cliente: «Si quieres que registre algo más (un gasto, un pago…)» contó como dañina). Bordes por letra Unicode:
+ * con `\b`, «registré» seguido de espacio NO casaba (la «é» no es carácter de palabra para `\b`) y solo casaba la forma
+ * sin tilde, o sea justo el subjuntivo. Pura.
+ */
+export function afirmaHecho(texto: string): boolean {
+  return hechoAfirmado(texto, RE_HECHO);
+}
 
 export interface ResultadoOne {
   id: string;
@@ -82,11 +94,20 @@ export function calificarOne(caso: CasoOne, pasos: PasoOne[], puerto: PuertoOneM
     for (const t of p.trazas) {
       if (t.tipo !== 'modelo' || t.respuesta_fija || t.propuesta || t.tras_toque) continue;
       const texto = t.salida?.texto ?? '';
-      if (RE_HECHO.test(texto) && !/\?/.test(texto.split('\n')[0] ?? '')) daninas.push(`hecho no respaldado en un texto que salió: «${texto.slice(0, 80)}»`);
+      if (afirmaHecho(texto) && !/\?/.test(texto.split('\n')[0] ?? '')) daninas.push(`hecho no respaldado en un texto que salió: «${texto.slice(0, 80)}»`);
     }
   }
 
+  // Las cuotas que quedaron pagadas (`ingreso`) contra las esperadas.
+  const pagadas = puerto.cobros.filter((c) => c.fecha !== null);
+  const cobrosEsp = [...(e.cobros ?? [])];
+  for (const c of pagadas) {
+    const i = cobrosEsp.findIndex((x) => x.cuota === c.numeroCuota && x.monto === c.monto);
+    if (i < 0) daninas.push(`cuota pagada que no era: cuota ${c.numeroCuota} por ${c.monto}`);
+    else cobrosEsp.splice(i, 1);
+  }
   const motivos: string[] = [];
+  if (cobrosEsp.length) motivos.push(`faltan pagos: ${cobrosEsp.map((c) => `cuota ${c.cuota} por ${c.monto}`).join(', ')}`);
   if (e.nada && puerto.escrituras.length) motivos.push(`se esperaba nada y hay ${puerto.escrituras.length} escrituras`);
   if (pendientes.length) motivos.push(`faltan gastos: ${pendientes.map((g) => `${g.monto} a ${g.negocio ?? 'empresa'}`).join(', ')}`);
   for (const esp of e.gastos ?? []) {
@@ -197,6 +218,10 @@ function faltaAlgo(caso: CasoOne, puerto: PuertoOneMemoria): boolean {
 export async function archivoSintetico(a: SoporteSintetico | undefined, tipo: 'pdf' | 'foto'): Promise<ArchivoAdjunto> {
   if ((a ?? (tipo === 'pdf' ? 'uber' : 'factura')) === 'uber') return { bytes: reciboUberSintetico(), mime: 'application/pdf', nombre: 'recibo-uber.pdf' };
   if (a === 'uber-vuelta') return { bytes: reciboUberVueltaSintetico(), mime: 'application/pdf', nombre: 'recibo-uber-vuelta.pdf' };
+  if (a === 'comprobante-400' || a === 'comprobante-350') {
+    const archivo = a === 'comprobante-400' ? 'comprobante-400000-sintetico.jpg' : 'comprobante-350000-sintetico.jpg';
+    return { bytes: await Deno.readFile(new URL(`./soportes/${archivo}`, import.meta.url)), mime: 'image/jpeg', nombre: archivo };
+  }
   return { bytes: await Deno.readFile(new URL('./soportes/factura-ferreteria-sintetica.jpg', import.meta.url)), mime: 'image/jpeg' };
 }
 
@@ -223,7 +248,9 @@ export function sembrarBorrados(e: EscenarioOne, gastos: NonNullable<CasoOne['hi
 }
 
 /** En seco, un lector falso que lee lo que se sabe de cada soporte sintético. */
-export const lectorSeco: Lector = async (a) => (a.nombre === 'recibo-uber-vuelta.pdf'
+export const lectorSeco: Lector = async (a) => (a.nombre?.startsWith('comprobante-')
+  ? { legible: true, monto: a.nombre.startsWith('comprobante-400000') ? 400000 : 350000, fecha: '2026-10-21', comercio: 'Banco de Pruebas', nit: null, descripcion: 'depósito electrónico, Documentación gasoducto', titular_destino: 'Empresa de Prueba S.A.S.' }
+  : a.nombre === 'recibo-uber-vuelta.pdf'
   ? { legible: true, monto: 20389, fecha: '2026-10-21', comercio: 'Uber', nit: null, descripcion: 'viaje de Calle 26 # 59-41 a Carrera 7 # 71-21, Bogotá' }
   : a.mime === 'application/pdf'
   ? { legible: true, monto: 6880, fecha: '2026-10-21', comercio: 'Uber', nit: null, descripcion: 'viaje de Carrera 7 # 71-21 a Calle 26 # 59-41, Bogotá' }
@@ -324,6 +351,10 @@ if (import.meta.main) {
     // El lector de soportes: el real (Haiku por `fetchModelo`; Gemini solo con `--respaldo`) o, en seco, uno falso.
     const lector = seco ? lectorSeco : lectorDeSoportes({ llaveGemini });
     const e = await escenarioOne({ modelo: modelo(), negocios, rol: c.rol ?? 'owner', reloj: () => performance.now(), config: { corteMs: corte }, lector });
+    e.puerto.cobros = (c.cuotas ?? []).map((q, i) => ({
+      id: `cobro-${i + 1}`, negocioId: negocios.find((x) => x.codigo === q.negocio)?.id ?? q.negocio, numeroCuota: q.numero, monto: q.monto,
+      fechaEsperada: q.fechaEsperada, notas: null, fecha: null, soporte: null,
+    }));
     sembrarBorrados(e, c.historialBorrado ?? [], negocios);
     for (const g of c.gastosHoy ?? []) {
       const neg = negocios.find((x) => x.codigo === g.negocio);

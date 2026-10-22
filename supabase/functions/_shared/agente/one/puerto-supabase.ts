@@ -18,7 +18,8 @@ import type { MediaFila } from '../tipos.ts';
 import { descripcionParaGuardar } from '../../wa-gasto-descripcion.ts';
 import { tieneServiciosPorPagar } from '../../handlers/registro/servicio-viaje.ts';
 import { EMOJI_ACTIVIDAD } from './dominio.ts';
-import type { GastoOne, NegocioOne, PuertoOne } from './dominio.ts';
+import type { CobroPendiente, GastoOne, NegocioOne, PuertoOne } from './dominio.ts';
+import { confirmarPagoCobroProgramado } from '../../confirmar-cobro-programado.ts';
 
 type Fila = Record<string, unknown>;
 const uno = (v: unknown): Fila | null => (Array.isArray(v) ? (v[0] as Fila | undefined) ?? null : (v as Fila | null) ?? null);
@@ -208,6 +209,38 @@ export function puertoOneSupabase(supabase: SupabaseClient, user: WaUser): Puert
       } catch (err) {
         console.error('[agente-one] no se pudo anotar el soporte en la conversación:', err);
       }
+    },
+    async cobrosPendientes(negocioId) {
+      const { data, error } = await supabase.from('cobros').select('id, numero_cuota, monto, fecha_esperada, notas')
+        .eq('workspace_id', ws).eq('negocio_id', negocioId).eq('tipo_cobro', 'programado').is('fecha', null).is('anulado_at', null)
+        .order('fecha_esperada', { ascending: true, nullsFirst: false }).order('numero_cuota', { ascending: true }).limit(24);
+      if (error) {
+        console.error('[agente-one] cobros pendientes:', error.message);
+        return 'error';
+      }
+      return ((data ?? []) as Fila[]).map((c): CobroPendiente => ({
+        id: String(c.id), numeroCuota: c.numero_cuota == null ? null : Number(c.numero_cuota), monto: Number(c.monto) || 0,
+        fechaEsperada: c.fecha_esperada ? String(c.fecha_esperada).slice(0, 10) : null, notas: (c.notas as string | null) ?? null,
+      }));
+    },
+    async confirmarCobro(p) {
+      // El mismo camino que el botón «Confirmar pago manual» de la app (`confirmarCobroProgramado` →
+      // `confirmarPagoCobroProgramado`). Sin `fuente`: la manual no la pone (la `fuente` la leen las reglas de anulación).
+      const r = await confirmarPagoCobroProgramado(supabase, { cobroId: p.cobroId, workspaceId: ws, fecha: p.fecha, monto: p.monto, notas: p.notas });
+      if (!r.ok) return { ok: false, motivo: r.motivo === 'ya_confirmado' ? 'ya_confirmado' : 'error', error: r.error };
+      if (!p.ref && !p.mediaId) return { ok: true, soporte: 'sin' };
+      // El soporte del pago va en `cobros.soporte` (la forma que abre `hrefArchivoDeCobro`: `{ url, file_name, mime_type }`),
+      // solo si la cuota no tenía. Si no se subió al llegar, se baja y se sube ahora.
+      let ref = p.ref;
+      if (!ref && p.mediaId) {
+        const m = await bajarMedia(p.mediaId);
+        ref = m ? await subirSoporte(supabase, ws, `cobros/${p.cobroId}`, { buffer: m.buffer, mimeType: m.mimeType }) : null;
+      }
+      if (!ref) return { ok: true, soporte: 'fallo' };
+      const { error } = await supabase.from('cobros').update({ soporte: { url: ref, file_name: p.nombre ?? 'soporte-whatsapp', mime_type: p.mime } })
+        .eq('id', p.cobroId).eq('workspace_id', ws).is('soporte', null);
+      if (error) console.error('[agente-one] soporte del cobro:', error.message);
+      return { ok: true, soporte: error ? 'fallo' : 'guardado' };
     },
     async registrarActividad({ negocioId, tipo, texto }) {
       let autorId: string | null = null;

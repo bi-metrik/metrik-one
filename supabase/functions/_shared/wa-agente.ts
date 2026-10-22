@@ -140,7 +140,7 @@ export async function atenderConAgenteOne(supabase: SupabaseClient, user: WaUser
     await atenderPendientes({
       modelo: modeloGemini({ llave, principal: config.principal, respaldo: config.respaldo, corteMs: config.corteMs }),
       // Las fotos y los PDF que llegan se guardan como soporte al llegar y se leen con el modelo (Haiku; respaldo Gemini).
-      dominio: dominioOne(puertoOneSupabase(supabase, user), { rol: user.role, lector: lectorDeSoportes({ llaveGemini: llave }) }),
+      dominio: dominioOne(puertoOneSupabase(supabase, user), { rol: user.role, lector: lectorDeSoportes({ llaveGemini: llave }), empresa: ws?.name ? String(ws.name) : null }),
       reglamento,
       config,
       ahoraMs: () => Date.now(),
