@@ -27,6 +27,9 @@ import {
   type Tablero,
   type ViajePendiente,
 } from './mis-pendientes'
+import { hitosDelViaje, type Hito } from './hitos'
+import { hitosVisibles } from './agenda'
+import { leerViajesParaHitos, lineasConHitos, nombresDeStaff } from './hitos-datos'
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type Db = any
@@ -44,14 +47,27 @@ const fecha = (v: unknown): string | null => (typeof v === 'string' ? /^(\d{4}-\
 
 export type MisPendientes =
   | { activo: false }
-  | { activo: true; hoy: string; persona: Persona; pendientes: Pendiente[]; servicios: ServicioProximo[]; proximo: { texto: string; fecha: string } | null; tablero: Tablero | null }
+  | { activo: true; hoy: string; persona: Persona; pendientes: Pendiente[]; servicios: ServicioProximo[]; proximo: { texto: string; fecha: string } | null; tablero: Tablero | null; agenda: DatosAgenda | null }
 
-/** ¿El espacio tiene líneas de viaje? (para mostrar la pestaña sin cargar todo). */
-export async function hayLineasDeViaje(): Promise<boolean> {
+/**
+ * La Agenda (hitos de gestión, 2026-10-22): solo si alguna línea tiene `config_extra.hitos.activo`.
+ * `null` = «Mis pendientes» como antes. A la asesora solo le viajan sus hitos (no los de otra).
+ */
+export interface DatosAgenda {
+  hitos: Hito[]
+  /** Primer nombre por staff id (inicial, contador, «hecho por»). */
+  nombres: Record<string, string>
+  esDireccion: boolean
+  staffId: string | null
+}
+
+/** La pestaña de viaje de /negocios: si existe y si se llama «Agenda» (hitos encendidos en alguna línea). */
+export async function pestanaDeViaje(): Promise<{ hay: boolean; agenda: boolean }> {
   const { supabase, workspaceId } = await getWorkspace()
-  if (!workspaceId) return false
-  const { data } = await (supabase as Db).from('lineas_negocio').select('config_extra').eq('workspace_id', workspaceId)
-  return ((data ?? []) as Array<{ config_extra: unknown }>).some(l => configPlanPagos(l.config_extra).activo || serviciosViajeActivo(l.config_extra))
+  if (!workspaceId) return { hay: false, agenda: false }
+  const { data } = await (supabase as Db).from('lineas_negocio').select('id, config_extra').eq('workspace_id', workspaceId)
+  const deViaje = ((data ?? []) as Array<{ id: string; config_extra: unknown }>).filter(l => configPlanPagos(l.config_extra).activo || serviciosViajeActivo(l.config_extra))
+  return { hay: deViaje.length > 0, agenda: lineasConHitos(deViaje).length > 0 }
 }
 
 export async function cargarMisPendientes(): Promise<MisPendientes> {
@@ -148,8 +164,28 @@ export async function cargarMisPendientes(): Promise<MisPendientes> {
     }
   })
 
-  const tablero = esDireccion ? await cargarTablero(db, workspaceId, lineaIds, staffId ?? null) : null
-  return { activo: true, hoy, persona, pendientes: pendientesDe(viajes, persona, hoy), servicios: serviciosProximosDe(viajes, persona, hoy), proximo: loProximo(viajes, hoy), tablero }
+  const [tablero, agenda] = await Promise.all([
+    esDireccion ? cargarTablero(db, workspaceId, lineaIds, staffId ?? null) : Promise.resolve(null),
+    // Si la agenda no se puede leer, «Mis pendientes» de siempre (no se cae la pestaña).
+    cargarAgenda(db, workspaceId, lineas, persona, hoy).catch(e => {
+      console.error('[agenda] no se pudo leer:', e instanceof Error ? e.message : String(e))
+      return null
+    }),
+  ])
+  return { activo: true, hoy, persona, pendientes: pendientesDe(viajes, persona, hoy), servicios: serviciosProximosDe(viajes, persona, hoy), proximo: loProximo(viajes, hoy), tablero, agenda }
+}
+
+/** Los hitos que le tocan a quien mira. `null` sin ninguna línea con hitos encendidos. */
+async function cargarAgenda(db: Db, workspaceId: string, lineas: Array<{ id: string; config_extra: unknown }>, persona: Persona, hoy: string): Promise<DatosAgenda | null> {
+  if (lineasConHitos(lineas).length === 0) return null
+  const viajes = await leerViajesParaHitos(db, { lineas, workspaceId })
+  const aprobadores = new Map(viajes.map(v => [v.id, v.aprobadoresStaffIds]))
+  const hitos = hitosVisibles(viajes.flatMap(v => hitosDelViaje(v, hoy)), { staffId: persona.staffId, esDireccion: persona.esDireccion }, aprobadores)
+  const nombres = await nombresDeStaff(db, workspaceId, [
+    ...hitos.flatMap(h => h.responsables),
+    ...hitos.map(h => h.marca?.hecho_por ?? ''),
+  ])
+  return { hitos, nombres, esDireccion: persona.esDireccion, staffId: persona.staffId }
 }
 
 async function cargarTablero(db: Db, workspaceId: string, lineaIds: string[], staffId: string | null): Promise<Tablero> {
