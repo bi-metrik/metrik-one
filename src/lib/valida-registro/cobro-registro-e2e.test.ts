@@ -188,6 +188,14 @@ vi.mock('@/lib/suscripciones/pasarela/epayco', async (original) => ({
   },
 }))
 const clientesEpayco: Record<string, unknown>[] = []
+// La bienvenida: se registra lo que se habría enviado, corriendo en línea (sin `after()`).
+const bienvenidas: { correo: string; razonSocial: string; slug: string; registroId: string }[] = []
+vi.mock('@/lib/acceso-espacio/servidor', () => ({
+  enSegundoPlano: async (_e: string, t: () => Promise<void>) => t(),
+  enviarBienvenidaValida: async (p: { correo: string; razonSocial: string; slug: string; registroId: string }) => {
+    bienvenidas.push(p)
+  },
+}))
 // La prueba la emite Valida; aquí, lo que deja en el registro (con el cobro programado de verdad).
 vi.mock('./prueba-servidor', async () => {
   const { momentoDelCobro, entornoDeCobro } = await import('./cobro-prueba')
@@ -275,6 +283,8 @@ describe('registro → 14 minutos → cobro de la tarjeta con el plan activado',
     })
     expect(alta).toMatchObject({ tipo: 'ok' })
     const reg = tablas.valida_registros[0]
+    // La bienvenida con la dirección del espacio sale una vez, al correo de la sesión.
+    expect(bienvenidas).toEqual([{ correo: PERSONA.email, razonSocial: 'ACME S.A.S.', slug: 'acme', registroId: reg.id }])
     expect(reg).toMatchObject({
       estado: 'creado',
       // «ACME S.A.S.» → `acme`: el slug sale sin la forma societaria (2026-10-20).
