@@ -39,6 +39,13 @@ export interface Pendiente {
   negocioId: string
   viaje: string
   accion: Accion
+  /**
+   * Agenda (hitos, 2026-10-22): lo de plata (cuotas, pagos, saldo, aprobaciones de pago) va al final
+   * del día y en gris. «Mis pendientes» sin hitos no lo usa.
+   */
+  plata?: boolean
+  /** Agenda: el día en que la línea aparece, si no es su `fecha` (el paquete, a 7 días de la salida). */
+  fechaAgenda?: string
 }
 
 export interface AprobacionPendiente {
@@ -119,6 +126,8 @@ const MOTIVO_APROBACION: Record<string, string> = {
   forzar_factura: 'facturar antes de tiempo',
 }
 
+const maxFecha = (a: string, b: string) => (a > b ? a : b)
+
 function esMio(staffId: string | null, persona: Persona): boolean {
   return !!persona.staffId && staffId === persona.staffId
 }
@@ -147,12 +156,14 @@ export function pendientesDe(viajes: readonly ViajePendiente[], persona: Persona
         if (c.estado !== 'vencida' && c.estado !== 'vence_hoy') continue
         add({ grupo: c.estado === 'vencida' ? 'vencido' : 'hoy', fecha: c.fecha, negocioId: v.id, viaje,
           texto: c.estado === 'vencida' ? `Cuota de ${quien} vencida: faltan ${pesosCierre(c.saldo)}.` : `Hoy vence la cuota de ${quien}: ${pesosCierre(c.saldo)}.`,
-          accion: { tipo: 'abrir', label: 'Pegar comprobante' } })
+          accion: { tipo: 'abrir', label: 'Pegar comprobante' }, plata: true })
       }
       if (v.salida && !leerPaqueteEnviado(v.metadata) && v.etapaGates.includes('paquete_enviado')) {
         const g = grupoDe(v.salida, hoy)
         if (g && v.salida >= hoy) add({ grupo: g === 'semana' ? 'semana' : 'hoy', fecha: v.salida, negocioId: v.id, viaje,
-          texto: `Paquete por enviar: ${quien} viaja el ${v.salida.slice(5).split('-').reverse().join('/')}.`, accion: { tipo: 'abrir', label: 'Ver paquete' } })
+          texto: `Paquete por enviar: ${quien} viaja el ${v.salida.slice(5).split('-').reverse().join('/')}.`, accion: { tipo: 'abrir', label: 'Ver paquete' },
+          // Hito «Enviar el paquete de viaje» (−7, móvil): en la agenda sale ese día, no el de la salida.
+          fechaAgenda: maxFecha(hoy, sumarDias(v.salida, -7)) })
       }
       if (v.regreso && leerPostventa(v.metadata).calificacion === null && v.etapaGates.includes('postventa_completa')) {
         const desde = sumarDias(v.regreso, 2)
@@ -163,7 +174,7 @@ export function pendientesDe(viajes: readonly ViajePendiente[], persona: Persona
       if (pre && pre.estado === 'vigente' && pagado === 0 && pre.vence_at.slice(0, 10) <= hoy) {
         add({ grupo: 'hoy', fecha: hoy, negocioId: v.id, viaje,
           texto: `Prerreserva de ${quien} vence hoy a las ${new Date(pre.vence_at).toLocaleTimeString('es-CO', { hour: 'numeric', minute: '2-digit', timeZone: 'America/Bogota' })}.`,
-          accion: { tipo: 'abrir', label: 'Pegar comprobante' } })
+          accion: { tipo: 'abrir', label: 'Pegar comprobante' }, plata: true })
       }
     }
 
@@ -176,13 +187,13 @@ export function pendientesDe(viajes: readonly ViajePendiente[], persona: Persona
           const g = s.fecha_limite_pago < hoy ? 'vencido' : s.fecha_limite_pago === hoy ? 'hoy' : s.fecha_limite_pago <= sumarDias(hoy, 3) ? 'semana' : null
           if (g) add({ grupo: g, fecha: s.fecha_limite_pago, negocioId: v.id, viaje,
             texto: g === 'vencido' ? `${s.nombre} venció sin pagar.` : g === 'hoy' ? `Paga ${s.nombre}: vence hoy.` : `Paga ${s.nombre}: vence el ${s.fecha_limite_pago.slice(5).split('-').reverse().join('/')}.`,
-            accion: { tipo: 'abrir', label: 'Abrir fila' } })
+            accion: { tipo: 'abrir', label: 'Abrir fila' }, plata: true })
         }
         if (est === 'por_reservar' && (v.etapaNumero ?? 0) >= 5 && !s.fecha_limite_pago) {
           add({ grupo: 'semana', fecha: hoy, negocioId: v.id, viaje, texto: `Reserva ${s.nombre}.`, accion: { tipo: 'abrir', label: 'Abrir fila' } })
         }
         if (est === 'pagado' && v.salida && v.salida >= hoy && v.salida <= sumarDias(hoy, 7)) {
-          add({ grupo: 'semana', fecha: v.salida, negocioId: v.id, viaje, texto: `Confirma ${s.nombre} con el proveedor final.`, accion: { tipo: 'abrir', label: 'Abrir fila' } })
+          add({ grupo: 'semana', fecha: v.salida, negocioId: v.id, viaje, texto: `Confirma ${s.nombre} con el proveedor final.`, accion: { tipo: 'abrir', label: 'Abrir fila' }, fechaAgenda: hoy })
         }
       }
       for (const a of v.aprobaciones) {
@@ -190,7 +201,7 @@ export function pendientesDe(viajes: readonly ViajePendiente[], persona: Persona
         if (diasEntre(a.decidida_at.slice(0, 10), hoy) > 7) continue
         const s = v.servicios.find(x => x.id === a.entidad_id)
         add({ grupo: 'hoy', fecha: a.decidida_at.slice(0, 10), negocioId: v.id, viaje,
-          texto: `No aprobó ${s?.nombre ?? 'el pago'}: ${a.motivo ?? 'sin motivo'}.`, accion: { tipo: 'abrir', label: 'Abrir fila' } })
+          texto: `No aprobó ${s?.nombre ?? 'el pago'}: ${a.motivo ?? 'sin motivo'}.`, accion: { tipo: 'abrir', label: 'Abrir fila' }, plata: true })
       }
     }
 
@@ -203,12 +214,12 @@ export function pendientesDe(viajes: readonly ViajePendiente[], persona: Persona
         const que = s ? `pagar${monto} a ${s.proveedor_nombre?.trim() || s.nombre}` : 'aprobar el plan de pagos'
         add({ id: `apr:${a.id}`, grupo: 'hoy', fecha: hoy, negocioId: v.id, viaje,
           texto: `${a.solicitada_por_nombre ?? 'El equipo'} pide ${que}: ${MOTIVO_APROBACION[a.tipo] ?? a.tipo}.`,
-          accion: { tipo: 'aprobar', label: 'Aprobar', aprobacionId: a.id, servicioId: s?.id ?? null } })
+          accion: { tipo: 'aprobar', label: 'Aprobar', aprobacionId: a.id, servicioId: s?.id ?? null }, plata: true })
       }
       for (const c of cuotas) {
         if (c.estado === 'vencida' && diasEntre(c.fecha, hoy) >= 2) {
           add({ grupo: 'vencido', fecha: c.fecha, negocioId: v.id, viaje,
-            texto: `Cuota vencida: ${v.cliente} · ${pesosCierre(c.saldo)} · hace ${diasEntre(c.fecha, hoy)} días.`, accion: { tipo: 'abrir', label: 'Abrir' } })
+            texto: `Cuota vencida: ${v.cliente} · ${pesosCierre(c.saldo)} · hace ${diasEntre(c.fecha, hoy)} días.`, accion: { tipo: 'abrir', label: 'Abrir' }, plata: true })
         }
       }
       if (v.etapaGates.includes('margen_confirmado') && !leerCierreGuardado(v.metadata).confirmado) {
@@ -218,7 +229,7 @@ export function pendientesDe(viajes: readonly ViajePendiente[], persona: Persona
       }
       if (v.salida && saldo > 0 && v.salida >= hoy && v.salida <= sumarDias(hoy, 7)) {
         add({ grupo: v.salida === hoy ? 'hoy' : 'semana', fecha: v.salida, negocioId: v.id, viaje,
-          texto: `${v.cliente} viaja ${v.salida === hoy ? 'hoy' : `el ${v.salida.slice(5).split('-').reverse().join('/')}`} con saldo de ${pesosCierre(saldo)}.`, accion: { tipo: 'abrir', label: 'Abrir' } })
+          texto: `${v.cliente} viaja ${v.salida === hoy ? 'hoy' : `el ${v.salida.slice(5).split('-').reverse().join('/')}`} con saldo de ${pesosCierre(saldo)}.`, accion: { tipo: 'abrir', label: 'Abrir' }, plata: true, fechaAgenda: hoy })
       }
     }
   }

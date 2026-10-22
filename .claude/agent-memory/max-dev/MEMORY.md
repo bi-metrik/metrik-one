@@ -3,8 +3,9 @@
 ## Project memories
 
 - [Recuperar dirección del espacio y bienvenida Valida (22-oct)](project_recuperar_direccion_espacio.md) — #1242; tope por instancia + idempotencia Resend; textos en acceso-espacio/textos.ts
+- ⚠️⚠️ [Hitos de gestión y Agenda (Trappvel)](project_hitos_de_gestion.md) — #1245; 20261022090000 dry-run de Mik OK, SIN aplicar; MX sin plazo
 - ⚠️ [Bandeja Trappvel lee foto/PDF + gastos vigentes ONE](project_bandeja_adjuntos_trappvel.md) — soporte = comentario con one://; leer_adjuntos; arnés a-* sin llave
-- ⚠️⚠️ [Fechas completas de los servicios del viaje](project_fechas_servicios_viaje.md) — 20261021120000 SIN aplicar; corrección a mano manda; reproceso pierde con rastro
+- ⚠️⚠️ [Fechas completas de los servicios del viaje](project_fechas_servicios_viaje.md) — #1236 mergeado (8d29ec61), 20261021120000 APLICADA; corrección a mano manda; reproceso pierde con rastro
 - [Tablero Novedades (21-oct)](project_novedades_tablero.md) — archivo versionado + panel; visto por ids; el 503 crudo ya lo arregló #1241
 - [Errores de Valida en llano (21-oct)](project_valida_mensajes_error.md) — mensajes-error.ts; busqueda_incompleta no entra a valida_consultas
 - ⚠️⚠️ [Asistente de Sabor sobre Chatwoot (etapa 1)](project_asistente_chatwoot_sabor.md) — #1225 mergeado, migración aplicada, sin deploy; sobreventa en PR aparte; tope 400 tokens por ficha
