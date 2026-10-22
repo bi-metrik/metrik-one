@@ -260,7 +260,7 @@ export function dominioPublico(o: OpcionesDominioPublico): Dominio {
         `• ${personas} ${personas === 1 ? 'persona' : 'personas'} · ${pesos(exp.precioPersona)} por persona${exp.precioPareja !== null ? ` (${pesos(exp.precioPareja)} por pareja)` : ''}`,
         ...(pedida ? [`• ${lineaPreferenciaMesa(pedida)}`] : []),
         `• ${campos.nombre} · C.C. ${digitos(campos.cedula)} · Tel. ${digitos(campos.telefono)}`,
-        'El equipo de Sabor te confirma el total, el cupo, la mesa y el pago. ¿Está bien?',
+        'El equipo de Sabor te confirma el total, el cupo y el pago. ¿Está bien?',
       ].join('\n');
       const propuesta: Propuesta = {
         accion: 'reserva',
