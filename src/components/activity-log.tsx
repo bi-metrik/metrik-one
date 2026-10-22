@@ -541,7 +541,7 @@ function Autor({ nombre }: { nombre: string | null | undefined }) {
   )
 }
 
-function ChangeEntry({ entry }: { entry: ActivityEntry }) {
+export function ChangeEntry({ entry }: { entry: ActivityEntry }) {
   const autorName = entry.autor?.full_name
   const timestamp = entry.created_at ? timeAgo(entry.created_at) : ''
 
@@ -751,6 +751,23 @@ function ChangeEntry({ entry }: { entry: ActivityEntry }) {
           <Autor nombre={autorName} />
           <span>actualizo datos de bloque</span>
           {entry.contenido && <span className="font-medium text-foreground">{entry.contenido}</span>}
+          <span className="text-[10px]">{timestamp}</span>
+        </div>
+      </div>
+    )
+  }
+
+  // Una fila sin campo pero con texto (confirmación del viaje, etapas por fecha, cierre del
+  // viaje, servicios, entrega, facturación): el texto ES el cambio. Antes caía al genérico y se
+  // pintaba «cambio — → —» sin decir qué pasó (barrido ámbar, 2026-10-22). Solo se toca el
+  // render: las filas viejas se arreglan solas al pintarse.
+  if (!campo && entry.contenido) {
+    return (
+      <div className="flex items-start gap-2 rounded-lg px-3 py-2 text-[11px] text-muted-foreground">
+        <div className="mt-1 h-1.5 w-1.5 rounded-full bg-muted-foreground/30 shrink-0" />
+        <div className="flex items-center gap-1 flex-wrap min-w-0" data-cambio-contenido>
+          <Autor nombre={autorName} />
+          <span className="text-foreground/80">{entry.contenido}</span>
           <span className="text-[10px]">{timestamp}</span>
         </div>
       </div>
