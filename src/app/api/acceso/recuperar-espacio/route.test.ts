@@ -13,7 +13,7 @@ vi.mock('@/lib/acceso-espacio/servidor', async (original) => {
     ...real,
     depsRecuperarReales: (ahoraMs: number) => ({
       buscarUsuario: async (c: string) => (c.startsWith('existe') ? 'u-1' : null),
-      espaciosDe: async () => [{ slug: 'acme', nombre: 'ACME' }],
+      espaciosDe: async () => [{ slug: 'acme', nombre: 'ACME', soloValida: false }],
       enviar: async (m: { to: string }) => {
         enviados.push(m.to)
         return { ok: true, id: null }

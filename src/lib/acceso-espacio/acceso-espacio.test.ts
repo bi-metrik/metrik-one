@@ -1,7 +1,7 @@
 import { describe, expect, it, vi } from 'vitest'
-import { slugDeEntrada, urlDelEspacio, urlLoginGeneral } from './direcciones'
+import { esEspacioSoloValida, slugDeEntrada, urlDelEspacio, urlLoginGeneral } from './direcciones'
 import { LimiteEnMemoria } from './limite'
-import { LOGO_URL, PIE_MARCA, TEXTOS_LOGIN, correoBienvenidaValida, correoRecuperarEspacio } from './textos'
+import { MARCAS, TEXTOS_LOGIN, correoBienvenidaValida, correoRecuperarEspacio, type CorreoArmado, type Marca } from './textos'
 import {
   VENTANA_RECUPERAR_MS,
   correoSolicitado,
@@ -76,6 +76,17 @@ describe('correoSolicitado', () => {
   })
 })
 
+describe('esEspacioSoloValida', () => {
+  it('Valida sola o en vitrina sí; con otro módulo de gestión no; sin Valida no', () => {
+    expect(esEspacioSoloValida({ valida_consulta: true }, {})).toBe(true)
+    expect(esEspacioSoloValida({ valida_consulta: true, valida_api: true, business: false }, null)).toBe(true)
+    expect(esEspacioSoloValida({ valida_consulta: true, business: true }, { modo_vitrina: true })).toBe(true)
+    expect(esEspacioSoloValida({ valida_consulta: true, business: true }, {})).toBe(false)
+    expect(esEspacioSoloValida({ business: true }, { modo_vitrina: true })).toBe(false)
+    expect(esEspacioSoloValida(null, null)).toBe(false)
+  })
+})
+
 describe('idsDeEspacios', () => {
   it('suma staff activo y el espacio del perfil, y descarta donde lo desactivaron', () => {
     expect(
@@ -95,8 +106,8 @@ function deps(over: Partial<DepsRecuperar> = {}) {
   const d: DepsRecuperar = {
     buscarUsuario: async (c) => (c === 'ana@acme.example' ? 'u-ana' : null),
     espaciosDe: async () => [
-      { slug: 'acme', nombre: 'ACME S.A.S.' },
-      { slug: 'beta', nombre: 'Beta' },
+      { slug: 'acme', nombre: 'ACME S.A.S.', soloValida: true },
+      { slug: 'beta', nombre: 'Beta', soloValida: false },
     ],
     enviar: async (m) => {
       enviados.push(m)
@@ -128,6 +139,23 @@ describe('enviarDireccionesDeEspacio', () => {
     const siguiente = deps({ ahoraMs: d.ahoraMs + VENTANA_RECUPERAR_MS })
     await enviarDireccionesDeEspacio('ana@acme.example', siguiente.d)
     expect(siguiente.enviados[0].idempotencyKey).not.toBe(m.idempotencyKey)
+  })
+
+  it('la marca: Valida solo si TODOS los espacios son solo Valida; si no, MéTRIK ONE', async () => {
+    const mixto = deps()
+    await enviarDireccionesDeEspacio('ana@acme.example', mixto.d)
+    expect(mixto.enviados[0].html).toContain(MARCAS.one.logoUrl)
+    expect(mixto.enviados[0].html).not.toContain(MARCAS.valida.logoUrl)
+    const soloValida = deps({
+      espaciosDe: async () => [
+        { slug: 'acme', nombre: 'ACME S.A.S.', soloValida: true },
+        { slug: 'beta', nombre: 'Beta', soloValida: true },
+      ],
+    })
+    await enviarDireccionesDeEspacio('ana@acme.example', soloValida.d)
+    expect(soloValida.enviados[0].html).toContain(MARCAS.valida.logoUrl)
+    expect(soloValida.enviados[0].text).toContain(MARCAS.valida.pie[0])
+    expect(soloValida.enviados[0].html).not.toContain(MARCAS.one.logoUrl)
   })
 
   it('sin cuenta o sin espacios: no envía nada', async () => {
@@ -197,19 +225,40 @@ describe('textos de cara al cliente', () => {
     expect(recuperar.subject).toBe('La dirección de tu espacio en MéTRIK ONE')
   })
 
-  it('los dos correos llevan la marca: logo hospedado arriba y pie de marca, en HTML y en texto', () => {
-    expect(LOGO_URL).toMatch(/^https:\/\/metrikone\.co\/icons\/metrik-icono-192\.png$/)
-    for (const c of [bienvenida, recuperar]) {
-      expect(c.html).toMatch(new RegExp(`<img src="${LOGO_URL.replace(/[.]/g, '\\.')}"[^>]*alt="MéTRIK"`))
-      // El logo va antes del cuerpo y el pie después.
-      expect(c.html.indexOf(LOGO_URL)).toBeLessThan(c.html.indexOf('Hola:'))
-      expect(c.html.indexOf(PIE_MARCA.linea1)).toBeGreaterThan(c.html.indexOf('Hola:'))
-      expect(c.html).toContain(PIE_MARCA.linea2)
-      expect(c.text.endsWith(`--\n${PIE_MARCA.linea1}\n${PIE_MARCA.linea2}`)).toBe(true)
-      // Sin adjuntos ni imágenes embebidas.
-      expect(c.html).not.toContain('data:image')
-      expect(c.html).not.toContain('cid:')
+  /** Logo hospedado arriba del cuerpo y pie de marca abajo, en HTML y en texto; sin adjuntos. */
+  function conMarca(c: CorreoArmado, marca: Marca) {
+    const m = MARCAS[marca]
+    const otra = MARCAS[marca === 'one' ? 'valida' : 'one']
+    expect(c.html).toContain(`<img src="${m.logoUrl}"`)
+    expect(c.html).toContain(`alt="${m.logoAlt}"`)
+    expect(c.html).toContain(`>${m.nombre}</div>`)
+    expect(c.html.indexOf(m.logoUrl)).toBeLessThan(c.html.indexOf('Hola:'))
+    for (const linea of m.pie) {
+      expect(c.html.lastIndexOf(linea)).toBeGreaterThan(c.html.indexOf('Hola:'))
     }
+    expect(c.text.endsWith(['--', ...m.pie].join('\n'))).toBe(true)
+    expect(c.html).not.toContain(otra.logoUrl)
+    expect(c.html).not.toContain('data:image')
+    expect(c.html).not.toContain('cid:')
+  }
+
+  it('logos en PNG por URL pública', () => {
+    expect(MARCAS.one.logoUrl).toBe('https://metrikone.co/icons/metrik-icono-192.png')
+    expect(MARCAS.valida.logoUrl).toBe('https://valida.metrik.com.co/marca/icono-180.png')
+  })
+
+  it('la bienvenida sale con la marca Valida y su pie', () => {
+    conMarca(bienvenida, 'valida')
+    expect(MARCAS.valida.pie).toEqual(['Valida es un producto de MéTRIK · METRIK IA S.A.S.'])
+    expect(bienvenida.html).not.toContain('MéTRIK ONE</div>')
+  })
+
+  it('la recuperación sale con MéTRIK ONE, o con Valida si se le pide', () => {
+    conMarca(recuperar, 'one')
+    const deValida = correoRecuperarEspacio({ correo: 'ana@acme.example', espacios: [{ nombre: 'ACME', url: 'https://acme.metrikone.co/login' }], marca: 'valida' })
+    conMarca(deValida, 'valida')
+    // Los textos del cuerpo no cambian con la marca.
+    expect(deValida.text.split('\n--\n')[0]).toBe(recuperar.text.split('\n--\n')[0])
   })
 
   it('sin léxico vetado de marca', () => {

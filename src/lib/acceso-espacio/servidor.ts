@@ -5,7 +5,7 @@ import { createServiceClient } from '@/lib/supabase/server'
 import { buscarIdDeAuthPorCorreo } from '@/lib/espacio-pruebas/auth'
 import type { CorreoSaliente, ResultadoEnvio } from '@/lib/cobros/enlace-automatico-servidor'
 import { correoBienvenidaValida, correoRecuperarEspacio } from './textos'
-import { urlDelEspacio, urlLoginGeneral } from './direcciones'
+import { esEspacioSoloValida, urlDelEspacio, urlLoginGeneral } from './direcciones'
 
 /**
  * Volver a entrar al espacio: el correo con la dirección de los espacios de una persona (quien la
@@ -71,6 +71,8 @@ export function correoSolicitado(texto: unknown): string | null {
 interface EspacioDeUsuario {
   slug: string
   nombre: string
+  /** Solo Valida (`esEspacioSoloValida`): si todos lo son, el correo sale con la marca de Valida. */
+  soloValida: boolean
 }
 
 export interface DepsRecuperar {
@@ -102,6 +104,7 @@ export async function enviarDireccionesDeEspacio(correo: string, deps: DepsRecup
     const armado = correoRecuperarEspacio({
       correo,
       espacios: espacios.slice(0, MAX_ESPACIOS).map((e) => ({ nombre: e.nombre, url: deps.urlLogin(e.slug) })),
+      marca: espacios.every((e) => e.soloValida) ? 'valida' : 'one',
     })
     const huella = createHash('sha256').update(correo, 'utf8').digest('hex').slice(0, 32)
     const ventana = Math.floor(deps.ahoraMs / VENTANA_RECUPERAR_MS)
@@ -148,11 +151,12 @@ async function espaciosDeUsuario(usuarioId: string): Promise<EspacioDeUsuario[]>
     (staff.data ?? []) as { workspace_id: string; is_active: boolean | null }[],
   )
   if (ids.length === 0) return []
-  const ws = await svc.from('workspaces').select('slug, name').in('id', ids)
+  const ws = await svc.from('workspaces').select('slug, name, modules, config_extra').in('id', ids)
   if (ws.error) throw new Error(`espacios: ${ws.error.message}`)
-  return ((ws.data ?? []) as { slug: string | null; name: string | null }[])
-    .filter((w): w is { slug: string; name: string | null } => !!w.slug)
-    .map((w) => ({ slug: w.slug, nombre: w.name || w.slug }))
+  type Fila = { slug: string | null; name: string | null; modules: unknown; config_extra: unknown }
+  return ((ws.data ?? []) as Fila[])
+    .filter((w): w is Fila & { slug: string } => !!w.slug)
+    .map((w) => ({ slug: w.slug, nombre: w.name || w.slug, soloValida: esEspacioSoloValida(w.modules, w.config_extra) }))
     .sort((a, b) => a.nombre.localeCompare(b.nombre, 'es'))
 }
 

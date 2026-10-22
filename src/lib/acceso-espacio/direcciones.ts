@@ -39,3 +39,19 @@ export function urlLoginGeneral(env: { NODE_ENV?: string; NEXT_PUBLIC_BASE_DOMAI
   const base = (env.NEXT_PUBLIC_BASE_DOMAIN || 'metrikone.co').trim()
   return `https://${base}/login`
 }
+
+/** Los módulos que son Valida (la pantalla de consulta y la API directa). */
+const MODULOS_VALIDA: readonly string[] = ['valida_consulta', 'valida_api']
+
+/**
+ * ¿El espacio es solo Valida? Sí cuando tiene Valida encendido y además está en modo vitrina (la
+ * forma de los CDA y del alta autogestionada) o no tiene encendido ningún otro módulo. Decide con qué
+ * marca sale el correo con la dirección del espacio.
+ */
+export function esEspacioSoloValida(modules: unknown, configExtra: unknown): boolean {
+  const m = (modules && typeof modules === 'object' ? modules : {}) as Record<string, unknown>
+  const encendidos = Object.entries(m).filter(([, v]) => v === true).map(([k]) => k)
+  if (!encendidos.some((k) => MODULOS_VALIDA.includes(k))) return false
+  const vitrina = (configExtra as { modo_vitrina?: unknown } | null)?.modo_vitrina === true
+  return vitrina || encendidos.every((k) => MODULOS_VALIDA.includes(k))
+}

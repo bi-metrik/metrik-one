@@ -23,17 +23,35 @@ import { escaparHtml } from '@/lib/usuarios-espacio/correo'
 const CORREO_AYUDA = 'mauricio.moreno@metrik.com.co'
 
 /**
- * El ícono de marca, hospedado: es el mismo `public/icons/metrik-icono-192.png` del manifiesto de la
- * app, servido por el dominio de producción. Va por URL, no adjunto. Dirección fija a propósito: un
- * correo enviado desde un preview o en desarrollo tiene que mostrar el logo igual.
+ * La marca con la que sale cada correo: encabezado (logo + nombre) y pie.
+ *
+ * Los logos van por URL pública, no adjuntos, y en PNG (los clientes de correo no muestran SVG).
+ * Direcciones fijas a propósito: un correo enviado desde un preview o en desarrollo tiene que mostrar
+ * el logo igual.
+ *
+ *   - `one`: el ícono del manifiesto de la app (`public/icons/metrik-icono-192.png`), servido por
+ *     metrikone.co.
+ *   - `valida`: el ícono que publica la página de Valida (`public/marca/icono-180.png` del repo
+ *     metrik-valida, servido por valida.metrik.com.co). Valida solo tiene su lockup en SVG; por eso el
+ *     nombre va en texto, con los mismos colores del lockup (#191713 y el acento #0E5C43, que son los
+ *     de `PALETA`).
  */
-export const LOGO_URL = 'https://metrikone.co/icons/metrik-icono-192.png'
-
-/** El pie de marca de los correos de acceso: el tagline canónico y la razón social. */
-export const PIE_MARCA = {
-  linea1: 'MéTRIK ONE · Claridad para decidir',
-  linea2: 'METRIK IA S.A.S. · metrikone.co',
+export const MARCAS = {
+  one: {
+    logoUrl: 'https://metrikone.co/icons/metrik-icono-192.png',
+    logoAlt: 'MéTRIK',
+    nombre: 'MéTRIK ONE',
+    pie: ['MéTRIK ONE · Claridad para decidir', 'METRIK IA S.A.S. · metrikone.co'],
+  },
+  valida: {
+    logoUrl: 'https://valida.metrik.com.co/marca/icono-180.png',
+    logoAlt: 'Valida',
+    nombre: 'Valida',
+    pie: ['Valida es un producto de MéTRIK · METRIK IA S.A.S.'],
+  },
 } as const
+
+export type Marca = keyof typeof MARCAS
 
 // ── Pantalla de metrikone.co/login ───────────────────────────────────────────
 
@@ -77,7 +95,8 @@ type Bloque =
   | { tipo: 'espacio'; nombre: string; url: string }
   | { tipo: 'nota'; texto: string }
 
-function htmlDeBloques(titulo: string, bloques: Bloque[]): string {
+function htmlDeBloques(titulo: string, bloques: Bloque[], marca: Marca): string {
+  const m = MARCAS[marca]
   const cuerpo = bloques
     .map((b) => {
       if (b.tipo === 'parrafo') return `<p style="margin:0 0 10px 0;">${escaparHtml(b.texto)}</p>`
@@ -100,9 +119,9 @@ function htmlDeBloques(titulo: string, bloques: Bloque[]): string {
       <table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="max-width:520px;background:#FFFFFF;border-radius:8px;border:1px solid #E5E7EB;">
         <tr><td style="padding:24px 28px 4px 28px;">
           <table role="presentation" cellspacing="0" cellpadding="0"><tr>
-            <td style="padding-right:12px;vertical-align:middle;"><img src="${LOGO_URL}" width="40" height="40" alt="MéTRIK" style="display:block;border:0;outline:none;text-decoration:none;border-radius:8px;"></td>
+            <td style="padding-right:12px;vertical-align:middle;"><img src="${m.logoUrl}" width="40" height="40" alt="${escaparHtml(m.logoAlt)}" style="display:block;border:0;outline:none;text-decoration:none;border-radius:8px;"></td>
             <td style="vertical-align:middle;">
-              <div style="font-size:20px;font-weight:700;color:${PALETA.tinta};">MéTRIK ONE</div>
+              <div style="font-size:20px;font-weight:700;color:${PALETA.tinta};">${escaparHtml(m.nombre)}</div>
               <div style="height:2px;width:42px;background:${PALETA.acento};margin-top:4px;"></div>
             </td>
           </tr></table>
@@ -111,8 +130,7 @@ function htmlDeBloques(titulo: string, bloques: Bloque[]): string {
           ${cuerpo}
         </td></tr>
         <tr><td style="padding:14px 28px 20px 28px;border-top:1px solid #E5E7EB;font-size:11px;line-height:1.5;color:${PALETA.tintaSuave};">
-          <strong style="color:${PALETA.tinta};">${PIE_MARCA.linea1}</strong><br>
-          ${PIE_MARCA.linea2}
+          <strong style="color:${PALETA.tinta};">${escaparHtml(m.pie[0])}</strong>${m.pie.slice(1).map((l) => `<br>\n          ${escaparHtml(l)}`).join('')}
         </td></tr>
       </table>
     </td></tr>
@@ -121,14 +139,14 @@ function htmlDeBloques(titulo: string, bloques: Bloque[]): string {
 </html>`
 }
 
-function textoDeBloques(bloques: Bloque[]): string {
+function textoDeBloques(bloques: Bloque[], marca: Marca): string {
   return bloques
     .map((b) => {
       if (b.tipo === 'parrafo' || b.tipo === 'nota') return b.texto
       if (b.tipo === 'boton') return `${b.etiqueta}: ${b.url}`
       return `${b.nombre}: ${b.url}`
     })
-    .concat([`--\n${PIE_MARCA.linea1}\n${PIE_MARCA.linea2}`])
+    .concat([['--', ...MARCAS[marca].pie].join('\n')])
     .join('\n\n')
 }
 
@@ -145,7 +163,12 @@ export interface EspacioParaCorreo {
   url: string
 }
 
-export function correoRecuperarEspacio(p: { correo: string; espacios: EspacioParaCorreo[] }): CorreoArmado {
+/**
+ * `marca`: `valida` solo cuando TODOS los espacios de la persona son de Valida y nada más
+ * (`esEspacioSoloValida`); si no, `one`. Los textos del cuerpo son los mismos en los dos casos.
+ */
+export function correoRecuperarEspacio(p: { correo: string; espacios: EspacioParaCorreo[]; marca?: Marca }): CorreoArmado {
+  const marca: Marca = p.marca ?? 'one'
   const varios = p.espacios.length > 1
   const subject = varios ? 'Las direcciones de tus espacios en MéTRIK ONE' : 'La dirección de tu espacio en MéTRIK ONE'
   const bloques: Bloque[] = [
@@ -164,7 +187,7 @@ export function correoRecuperarEspacio(p: { correo: string; espacios: EspacioPar
     { tipo: 'parrafo', texto: 'Guarda este correo para la próxima vez.' },
     { tipo: 'nota', texto: `Si no pediste este correo, puedes ignorarlo. ¿Dudas? Escribe a ${CORREO_AYUDA}.` },
   ]
-  return { subject, text: textoDeBloques(bloques), html: htmlDeBloques(subject, bloques) }
+  return { subject, text: textoDeBloques(bloques, marca), html: htmlDeBloques(subject, bloques, marca) }
 }
 
 // ── Correo: bienvenida al alta autogestionada de Valida ──────────────────────
@@ -193,5 +216,5 @@ export function correoBienvenidaValida(p: {
       texto: `Si olvidas la dirección, entra a ${p.urlLoginGeneral} y pide que te la enviemos. ¿Dudas? Escribe a ${CORREO_AYUDA}.`,
     },
   ]
-  return { subject, text: textoDeBloques(bloques), html: htmlDeBloques(subject, bloques) }
+  return { subject, text: textoDeBloques(bloques, 'valida'), html: htmlDeBloques(subject, bloques, 'valida') }
 }
