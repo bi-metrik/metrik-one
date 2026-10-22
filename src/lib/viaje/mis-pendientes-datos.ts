@@ -61,12 +61,13 @@ export interface DatosAgenda {
   staffId: string | null
 }
 
-/** ¿El espacio tiene líneas de viaje? (para mostrar la pestaña sin cargar todo). */
-export async function hayLineasDeViaje(): Promise<boolean> {
+/** La pestaña de viaje de /negocios: si existe y si se llama «Agenda» (hitos encendidos en alguna línea). */
+export async function pestanaDeViaje(): Promise<{ hay: boolean; agenda: boolean }> {
   const { supabase, workspaceId } = await getWorkspace()
-  if (!workspaceId) return false
-  const { data } = await (supabase as Db).from('lineas_negocio').select('config_extra').eq('workspace_id', workspaceId)
-  return ((data ?? []) as Array<{ config_extra: unknown }>).some(l => configPlanPagos(l.config_extra).activo || serviciosViajeActivo(l.config_extra))
+  if (!workspaceId) return { hay: false, agenda: false }
+  const { data } = await (supabase as Db).from('lineas_negocio').select('id, config_extra').eq('workspace_id', workspaceId)
+  const deViaje = ((data ?? []) as Array<{ id: string; config_extra: unknown }>).filter(l => configPlanPagos(l.config_extra).activo || serviciosViajeActivo(l.config_extra))
+  return { hay: deViaje.length > 0, agenda: lineasConHitos(deViaje).length > 0 }
 }
 
 export async function cargarMisPendientes(): Promise<MisPendientes> {
