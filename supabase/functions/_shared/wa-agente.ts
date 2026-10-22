@@ -18,6 +18,7 @@ import { entornoPorDefecto, haikuActivo } from './llm-anthropic.ts';
 import { BOT_ONE, dominioOne } from './agente/one/dominio.ts';
 import { puertoOneSupabase } from './agente/one/puerto-supabase.ts';
 import { lectorDeSoportes } from './agente/one/lectura-adjunto.ts';
+import { lectorDeDocumentosDeViaje } from './agente/bandeja/lectura-adjunto.ts';
 import { reglamentoOne } from './agente/one/reglamento.ts';
 import { logMessage } from './wa-rate-limit.ts';
 import { almacenSupabase, cargarReglamento, cupoSupabase, mensajeroWa, puertoBandejaSupabase } from './agente/produccion.ts';
@@ -63,7 +64,12 @@ export async function atenderConAgente(supabase: SupabaseClient, user: WaUser, m
   const staffId = user.collaborator_id ? null : await staffIdDelRemitente(supabase, user);
   await atenderPendientes({
     modelo: modeloGemini({ llave, principal: config.principal, respaldo: config.respaldo, corteMs: config.corteMs }),
-    dominio: dominioBandeja(puertoBandejaSupabase(supabase, user.workspace_id, staffId, { extraccionCompacta: config.extraccionCompacta })),
+    // Las fotos y los PDF (2026-10-21): se guardan al llegar, se leen (Haiku; respaldo Gemini) y lo leído entra a la carga
+    // del viaje; con el toque quedan de soporte en la actividad del viaje. `agente_config.leer_adjuntos: false` lo apaga.
+    dominio: dominioBandeja(
+      puertoBandejaSupabase(supabase, user.workspace_id, staffId, { extraccionCompacta: config.extraccionCompacta, adjuntos: config.leerAdjuntos }),
+      { lector: config.leerAdjuntos ? lectorDeDocumentosDeViaje({ llaveGemini: llave }) : null },
+    ),
     reglamento,
     config,
     ahoraMs: () => Date.now(),

@@ -47,11 +47,12 @@ describe('normalizarLectura', () => {
     expect(normalizarLectura({ legible: true, monto: '6880', fecha: '21/10/2026' })).toMatchObject({ monto: 6880, fecha: null })
   })
 
-  it('sin monto no es legible; basura no rompe', () => {
+  it('sin monto no es legible; con el total leído sí, aunque el modelo dude; basura no rompe', () => {
     expect(normalizarLectura({ legible: true, monto: 0 })).toMatchObject({ legible: false, monto: null })
     expect(normalizarLectura({ legible: true, monto: -5 })).toMatchObject({ legible: false })
     expect(normalizarLectura(null)).toMatchObject({ legible: false, monto: null, fecha: null, comercio: null })
-    expect(normalizarLectura({ legible: false, monto: 6880 })).toMatchObject({ legible: false, monto: 6880 })
+    // Arnés con el modelo real (2026-10-21): un comprobante de depósito volvió con el total y `legible: false`.
+    expect(normalizarLectura({ legible: false, monto: 6880 })).toMatchObject({ legible: true, monto: 6880 })
   })
 
   it('jsonDeRespuesta quita cercas y descarta lo que no es JSON', () => {

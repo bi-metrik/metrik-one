@@ -154,6 +154,9 @@ export async function unTurno(d: DepsCola, ventana: { esperado?: boolean } = {})
       traza: { tipo: 'reenvio', bot: d.dominio.bot, respuesta_fija: acuse ? 'rf.acuse_reenvio' : null },
     };
     await enviarYCerrar(d, turnoId, pend, r, 'agente.reenvio');
+    // Una foto o un PDF reenviado se guarda y se lee AL LLEGAR (2026-10-21, bandeja): cuando el comercial pida cargar la
+    // tanda, lo leído ya está en la fila y la carga no espera la lectura. Después del acuse: el comercial no la espera.
+    if (d.dominio.prepararTurno && pend.some(esAdjunto)) await d.dominio.prepararTurno(ctx).catch((err) => console.error('[agente] preparar adjuntos:', err));
     return true;
   }
 
