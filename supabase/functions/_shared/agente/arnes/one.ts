@@ -26,6 +26,7 @@ import { escenarioOne } from '../one/escenario.ts';
 import type { EscenarioOne, PasoOne } from '../one/escenario.ts';
 import type { NegocioMem, PuertoOneMemoria } from '../one/puerto-memoria.ts';
 import type { Modelo, PedidoModelo, Salida, Traza, UsoLlamado } from '../tipos.ts';
+import { hechoAfirmado } from './calificar.ts';
 import { simular, transcripcionParaSimulador } from './simulador.ts';
 import { sumarUso } from '../uso.ts';
 import type { PrecioModelo } from '../uso.ts';
@@ -53,12 +54,7 @@ const RE_HECHO = /(?<![\p{L}\d])(registr[ée]|cre[ée]|anot[ée]|guard[ée]|adju
  * sin tilde, o sea justo el subjuntivo. Pura.
  */
 export function afirmaHecho(texto: string): boolean {
-  for (const m of texto.matchAll(RE_HECHO)) {
-    const antes = texto.slice(Math.max(0, m.index - 30), m.index);
-    const subjuntivo = !/[éÉ]$/.test(m[0]) && /\bque\s+(?:(?:te|lo|la|los|las|le|les|se)\s+)?$/iu.test(antes);
-    if (!subjuntivo) return true;
-  }
-  return false;
+  return hechoAfirmado(texto, RE_HECHO);
 }
 
 export interface ResultadoOne {
