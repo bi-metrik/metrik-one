@@ -2,7 +2,8 @@ import Link from 'next/link'
 import { Plus } from 'lucide-react'
 import { getWorkspaceStagesActivos, getStaffParaAsignarNegocio } from './negocio-v2-actions'
 import { getWorkspace } from '@/lib/actions/get-workspace'
-import { getRolePermissions, puedeDescargarNegocios, puedeMarcarCondicionNegocio } from '@/lib/roles'
+import { puedeDescargarNegocios, puedeMarcarCondicionNegocio } from '@/lib/roles'
+import { puedeAsignarResponsableEnWorkspace } from '@/lib/permissions/asignar-responsable-servidor'
 import { puedeDescargarNegociosDelWorkspace } from '@/lib/negocios/permiso-descarga'
 import NegociosClient from './negocios-client'
 import { usaAlmacenamientoExterno } from '@/lib/almacenamiento/proveedor'
@@ -53,9 +54,9 @@ export default async function NegociosPage({
     )
   }
   const ws = await getWorkspace()
-  // Mismo gate que validan `agregarResponsable`/`quitarResponsable` server-side
-  // (owner/admin/supervisor): replicado en UI para no ofrecer un control que fallaría.
-  const canAsignar = getRolePermissions(ws.role ?? 'read_only').canAssignResponsable
+  // MISMA función que el guard de `agregarResponsable`/`quitarResponsable`:
+  // owner/admin/supervisor, o la persona en `config_extra.asignar_responsable.staff_ids`.
+  const canAsignar = await puedeAsignarResponsableEnWorkspace(ws.workspaceId, { role: ws.role, staffId: ws.staffId })
   const [vista, stagesActivos, staffList, conPendientes] = await Promise.all([
     cargarVistaLista(sp),
     getWorkspaceStagesActivos(),

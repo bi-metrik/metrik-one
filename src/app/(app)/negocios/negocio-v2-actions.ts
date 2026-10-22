@@ -131,6 +131,7 @@ import { resolverDerivado, type LockWhen } from '@/lib/negocios/campo-derivado'
 import { soloSiCumple, type SoloSiBloque } from '@/lib/negocios/condicion-bloque'
 import { puedeOmitirGate, marcaOmitido, CLAVE_OMITIDO } from '@/lib/negocios/gate-omitible'
 import { puedeOmitirGatesConMotivo } from '@/lib/permissions/omitir-gates'
+import { puedeAsignarResponsableEnWorkspace } from '@/lib/permissions/asignar-responsable-servidor'
 import { tiposReprocesoOperativo } from '@/lib/negocios/reproceso-operativo'
 import {
   anclaDeBloques,
@@ -9565,11 +9566,12 @@ export async function agregarResponsable(
 }> {
   // userId = profile.id, que es lo que `assigned_by` exige (FK a profiles). El staff.id
   // del autor lo traduce `asignarResponsable` al anotar, acotado al workspace del negocio.
-  const { supabase, workspaceId, role, userId, error } = await getWorkspace()
+  const { supabase, workspaceId, role, userId, staffId, error } = await getWorkspace()
   if (error || !workspaceId) return { error: 'No autenticado' }
 
-  const allowed = ['owner', 'admin', 'supervisor']
-  if (!role || !allowed.includes(role)) {
+  // owner/admin/supervisor, o la persona declarada en
+  // `config_extra.asignar_responsable.staff_ids`. MISMA regla que la lista y el detalle.
+  if (!(await puedeAsignarResponsableEnWorkspace(workspaceId, { role, staffId }))) {
     return { error: 'Sin permisos para asignar responsable' }
   }
 
@@ -9621,8 +9623,8 @@ export async function quitarResponsable(
   const { supabase, workspaceId, role, staffId, error } = await getWorkspace()
   if (error || !workspaceId) return { error: 'No autenticado' }
 
-  const allowed = ['owner', 'admin', 'supervisor']
-  if (!role || !allowed.includes(role)) {
+  // Misma regla que `agregarResponsable` (`puedeAsignarResponsable`).
+  if (!(await puedeAsignarResponsableEnWorkspace(workspaceId, { role, staffId }))) {
     return { error: 'Sin permisos para quitar responsable' }
   }
 

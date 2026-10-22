@@ -12,6 +12,7 @@ import BloqueRiesgoSarlaft from './bloques/BloqueRiesgoSarlaft'
 import CerradoHeaderBanner from './cerrado-header-banner'
 import { negocioCerrado } from '@/lib/negocios/motivo-cierre'
 import { puedeOmitirGatesConMotivo } from '@/lib/permissions/omitir-gates'
+import { puedeAsignarResponsable } from '@/lib/permissions/asignar-responsable'
 import { puedeAvanzarCruces as puedeAvanzarCrucesConMotivo } from '@/lib/negocios/cruces-avance'
 import { exigeCarpetaLocal } from '@/lib/negocios/carpeta-local'
 import { resolverPermisoCarpetaLocal } from '@/lib/negocios/carpeta-local-servidor'
@@ -130,6 +131,10 @@ export async function cargarVistaNegocio(id: string): Promise<VistaNegocio | nul
   // «Avanzar de todas formas» sobre un cruce: solo la lista `avanzar_cruces.staff_ids`.
   // MISMA función que el guard de `avanzarCrucesConMotivo`.
   let puedeAvanzarCruces = false
+  // Asignar/quitar responsables: owner/admin/supervisor, o la persona en
+  // `config_extra.asignar_responsable.staff_ids`. MISMA función que el guard de
+  // `agregarResponsable`/`quitarResponsable`. Sin config legible, solo el rol.
+  let puedeAsignarResponsables = puedeAsignarResponsable({ role, staffId }, null)
   // Carpeta del cerebro: el campo solo existe donde el workspace exige la carpeta, y se
   // edita con el MISMO resolvedor que usa `actualizarCarpetaLocalNegocio`.
   const carpetaLocal = { visible: false, puedeEditar: false }
@@ -146,6 +151,7 @@ export async function cargarVistaNegocio(id: string): Promise<VistaNegocio | nul
     const modules = (ws?.modules ?? {}) as Record<string, boolean>
     puedeOmitirGates = puedeOmitirGatesConMotivo({ role, staffId }, ws?.config_extra ?? null)
     puedeAvanzarCruces = puedeAvanzarCrucesConMotivo(staffId, ws?.config_extra ?? null)
+    puedeAsignarResponsables = puedeAsignarResponsable({ role, staffId }, ws?.config_extra ?? null)
     almacenamientoExterno = esAlmacenamientoExterno(ws?.config_extra ?? null)
     if (exigeCarpetaLocal(ws?.config_extra ?? null)) {
       carpetaLocal.visible = true
@@ -308,6 +314,7 @@ export async function cargarVistaNegocio(id: string): Promise<VistaNegocio | nul
     puedeCierreNoFacturable: puedeCierreNoFacturable,
     puedeOmitirGates: puedeOmitirGates,
     puedeAvanzarCruces: puedeAvanzarCruces,
+    puedeAsignarResponsables: puedeAsignarResponsables,
     puedeResolverAvisoRecaudo: puedeResolverAvisoRecaudo,
     carpetaLocal: carpetaLocal,
     almacenamientoExterno: almacenamientoExterno,
