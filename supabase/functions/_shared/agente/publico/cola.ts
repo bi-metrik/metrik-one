@@ -12,7 +12,8 @@
 //   3. audio: TikTok → respuesta fija; WhatsApp/Instagram → transcripción (Gemini); si falla, respuesta fija (§4.2).
 //   4. respuesta a una autorización en espera («sí»/«no» solo o el botón): la registra el código con su prueba (§5).
 //   5. toque o «sí» sobre la propuesta de reserva vigente → el núcleo la confirma → paso a persona `reserva_lista`.
-//   6. «persona» escrito solo → paso a persona sin modelo.
+//   6. «persona» escrito solo, sin modelo (§6.4): la primera vez, `rf.persona_por_que` (una sola por conversación); si ya
+//      salió, o si la conversación volvió de una persona, paso a persona `pide_persona`.
 //   7. turno del modelo con el reintento con aviso (`reintento.ts`); el aviso de bot va pegado a la primera respuesta.
 //   8. antes de publicar: links en la lista blanca, ¿entró otro mensaje mientras generaba? (se regenera con todo),
 //      ventana del canal (§9) y que la conversación siga en `pending` (si la tomó una persona, no se publica).
@@ -31,7 +32,7 @@ import {
   RF_BIENVENIDA, autorizacionEnEspera, conAviso, estadoAutorizacion, salidaAutorizacion, eventoAutorizacion, huellaTexto, motivoAviso, respuestaA, textoFijo, versionDe,
 } from './autorizacion.ts';
 import type { ConfigPublico } from './config.ts';
-import { PASAR_A_PERSONA, RESPUESTA_FIJA, dominioPublico } from './dominio.ts';
+import { PASAR_A_PERSONA, RESPUESTA_FIJA, RF_PERSONA_POR_QUE, dominioPublico, porQueYaSalio, volvioDePersona } from './dominio.ts';
 import { enlacesFueraDeLista } from './enlaces.ts';
 import { preciosSinHerramienta } from './precios.ts';
 import { frasesDeSobreventa } from './sobreventa.ts';
@@ -361,9 +362,15 @@ async function decidir(d: DepsPublico, turnoId: string, filas: FilaPublica[], pe
     return { salida: rt.salida, traza, reserva, persona: persona ? { motivo: 'reserva_lista', pidio: 'reservar (confirmó el resumen)' } : null };
   }
 
-  // 6. «persona» escrito solo (el aviso de bot lo ofrece): sin modelo.
+  // 6. «persona» escrito solo (el aviso de bot lo ofrece): sin modelo. Una pregunta por qué, una sola vez en la
+  // conversación (§6.4.1 y §6.4.4); a quien vuelve de una persona no se le pregunta (§6.4.5).
   if (solo && esPalabraSola(solo.texto, 'persona')) {
-    return { salida: fija(d, 'rf.persona'), traza: sinTurno(d, { respuesta_fija: 'rf.persona' }), persona: { motivo: 'pide_persona', pidio: 'escribió «persona»' } };
+    const volvio = volvioDePersona(filas);
+    if (!volvio && !porQueYaSalio(filas)) {
+      return { salida: fija(d, RF_PERSONA_POR_QUE), traza: sinTurno(d, { respuesta_fija: RF_PERSONA_POR_QUE }) };
+    }
+    const pidio = volvio ? 'escribió «persona» (ya lo había atendido una persona)' : 'escribió «persona» otra vez, tras la pregunta de para qué';
+    return { salida: fija(d, 'rf.persona'), traza: sinTurno(d, { respuesta_fija: 'rf.persona' }), persona: { motivo: 'pide_persona', pidio } };
   }
 
   // 7. El modelo.

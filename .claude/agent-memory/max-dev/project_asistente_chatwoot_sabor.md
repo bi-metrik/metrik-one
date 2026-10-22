@@ -1,6 +1,6 @@
 ---
 name: project-asistente-chatwoot-sabor
-description: Asistente público de Sabor sobre Chatwoot (etapa 1, rama feat/asistente-chatwoot-sabor) — migración 20261021090000 SIN aplicar, corrida real solo por el CLI (suscripción), payload armado de la doc
+description: Asistente público de Sabor sobre Chatwoot (etapa 1) — #1225 mergeado, migración aplicada, sin deploy; §6.4 pregunta por qué una vez; corrida real solo por CLI
 metadata:
   type: project
 ---
@@ -18,6 +18,7 @@ Kickoff 22-oct (PR `feat/asistente-sabor-mesa-orden-llegada`, sin mergear al esc
 - Yuto (22-oct) quitó «mesa» del cierre del resumen (`dominio.ts`) y de `rf.siguiente_paso` («confirmar cupo y pago»). Luego también de `inv.confirmacion`, `seg.quien_confirma` y el error de `sobreventa.ts`: «mesa» ya no aparece en ningún texto al cliente.
 
 Gotchas que costaron:
+- §6.4 (22-oct, rama `feat/asistente-sabor-persona-por-que`): «persona» pregunta una vez por qué (`rf.persona_por_que`). «Ya salió» se mide por lo PUBLICADO (`traza.salida`), no por lo decidido; «volvió de una persona» = hay un paso a persona previo (el bot solo atiende en `pending`). Por CLI el modelo NO reofrecía persona tras contestar el precio (2 de 3) hasta que el estado del turno le dijo «tu último mensaje fue la pregunta» (6 de 6). Si el primer mensaje es «persona», la pregunta sale pegada al aviso de bienvenida, que ya dice «escríbeme "persona"»: suena redundante, queda a criterio de Yuto.
 - Un calificador por regex sobre texto del modelo da falsos positivos cuando la regla de la ficha es una NEGACIÓN que el modelo repite («no hay descuento por pareja»): `RE_DESCUENTO` ya excluye no/ni/nunca. Al escribir una regla nueva en la semilla, correr el CLI y mirar las dañinas antes de creerlas.
 - El núcleo recorta cada resultado de herramienta a 400 tokens (`TOPES_BLOQUE.resultado`). Con la ficha ampliada, la experiencia de ejemplo cabe por poco y hay una prueba que lo vigila. Con 2 o más experiencias vigentes se pasaría.
 - El verificador del núcleo deja pasar una cifra que escribió el CLIENTE («la promo es a $50.000» → el bot la repite). Por eso existe `publico/precios.ts`: la plata solo sale de lo que devolvió una herramienta.
