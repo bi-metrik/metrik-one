@@ -298,6 +298,10 @@ export function pantallazosEnCotizacion(items: readonly { id: string; tarifa_pax
     const lecturas: unknown[] = habs.length > 0 ? habs.map(h => h?.lectura) : Object.values(t.casillas ?? {})
     lecturas.forEach((l, i) => {
       if (!l || typeof l !== 'object') return
+      // Una línea escrita a mano o costeada con la tarifa del proveedor no es un pantallazo
+      // (prueba del #1229, punto b: «Otro pantallazo ya está en la cotización» sin ninguno).
+      const origen = (l as { origen?: unknown }).origen
+      if (origen === 'manual' || origen === 'tarifario') return
       const huella = (l as { huellaImagen?: unknown }).huellaImagen
       llaves.push(typeof huella === 'string' && huella ? huella : `${it.id}:${i}`)
     })

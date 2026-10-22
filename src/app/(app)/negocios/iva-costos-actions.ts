@@ -22,6 +22,8 @@
 import { getWorkspace } from '@/lib/actions/get-workspace'
 import { casillaIva, ivaDeLinea, pctDeIva } from '@/lib/cotizaciones/iva-costo'
 import { pedidoDeLinea } from '@/lib/cotizaciones/proveedor-de-linea'
+import { origenVigente } from '@/lib/cotizaciones/origen-tarifa'
+import { leerTarifaPax } from '@/lib/cotizaciones/tarifa-pasajero'
 import { objetivo, type ObjetivoFoto } from '@/lib/fotos/clave'
 import { leerConocidos, resolverPedidos } from '@/lib/fotos/perfiles-db'
 import { leerViajeDelNegocio } from '@/lib/cotizaciones/viaje-negocio'
@@ -113,7 +115,7 @@ async function aplicar(cotizacionId: string, cambio: { encendida?: boolean; viaj
   const { data: itemsData } = await db.from('items').select('*').eq('cotizacion_id', cot.id)
   const items = ((itemsData ?? []) as FilaItem[]).filter((i) => !i.es_ajuste)
 
-  const declara = new Map<string, { nombre: string; iva: boolean }>()
+  const declara = new Map<string, { nombre: string; iva: boolean | null }>()
   // 1 · La ficha que la línea guardó manda (2026-10-19).
   const fijadas = items.filter((i) => typeof i.proveedor_id === 'string' && UUID.test(i.proveedor_id))
   if (fijadas.length > 0) {
@@ -122,7 +124,7 @@ async function aplicar(cotizacionId: string, cambio: { encendida?: boolean; viaj
     const porId = new Map(((fichas ?? []) as { id: string; nombre: string; iva_declarado: boolean | null }[]).map((f) => [f.id, f]))
     for (const i of fijadas) {
       const f = porId.get(i.proveedor_id as string)
-      if (f) declara.set(i.id, { nombre: f.nombre, iva: f.iva_declarado === true })
+      if (f) declara.set(i.id, { nombre: f.nombre, iva: f.iva_declarado ?? null })
     }
   }
   // 2 · Las demás: el mismo pedido de la tarjeta, reconocido sin escribir.
@@ -156,7 +158,7 @@ async function aplicar(cotizacionId: string, cambio: { encendida?: boolean; viaj
           if (perfil && descartadas.get(itemId) === perfil.clave) continue
           const ficha = perfil ? porClave.get(`${perfil.tipo}:${perfil.clave}`) : undefined
           if (!ficha) continue
-          declara.set(itemId, { nombre: ficha.nombre, iva: ficha.iva_declarado === true })
+          declara.set(itemId, { nombre: ficha.nombre, iva: ficha.iva_declarado ?? null })
           const item = items.find((i) => i.id === itemId)
           if (item && 'proveedor_id' in item && item.proveedor_id == null && typeof ficha.id === 'string') reconocidas.push({ itemId, fichaId: ficha.id })
         }
@@ -164,6 +166,15 @@ async function aplicar(cotizacionId: string, cambio: { encendida?: boolean; viaj
     }
   }
 
+  // 3 · Una línea costeada con la tarifa del proveedor (prueba del #1229, punto 3): si la ficha no
+  // dice si cobra IVA, lo dice la tarifa elegida (`tarifaExtraida.iva_pct`, `null` = el tarifario
+  // no lo declara). Lo que una persona anotó en la ficha (sí o no) manda.
+  for (const i of items) {
+    const d = declara.get(i.id)
+    if (!d || d.iva !== null) continue
+    const t = leerTarifaPax(i.tarifa_pax)
+    if (origenVigente(t.tarifaExtraida, t.casillas?.grupo_completo)) d.iva = t.tarifaExtraida.iva_pct !== null
+  }
   const proveedoresConIva = [...new Set([...declara.values()].filter((d) => d.iva).map((d) => d.nombre))].sort((a, b) => a.localeCompare(b, 'es'))
   const estado = casillaIva({ guardada, algunProveedorDeclaraIva: proveedoresConIva.length > 0, viajeroResidente: residente })
 

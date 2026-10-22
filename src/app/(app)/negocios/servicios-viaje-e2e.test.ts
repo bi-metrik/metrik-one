@@ -182,8 +182,9 @@ function constructor(tabla: string) {
 }
 
 import { aceptarCotizacionNegocio, corregirCotizacionAceptada } from './[id]/cotizacion/actions'
-import { actualizarServicio, traerServiciosDeCotizacion } from './servicios-viaje-actions'
-import { generarServiciosDesdeTarifa } from '@/lib/viaje/servicios-viaje-datos'
+import { actualizarFechasServicio, actualizarServicio, traerServiciosDeCotizacion } from './servicios-viaje-actions'
+import { completarFechasDeServicios, generarServiciosDesdeTarifa } from '@/lib/viaje/servicios-viaje-datos'
+import { datosDelTablero } from '@/lib/viaje/servicios-tablero-datos'
 import { reiniciarModulo } from '../../../../test/exigir-modulo-doble'
 
 // ── Escenario: Cusco, tres tarifas en la ranura de vuelo ─────────────────────
@@ -298,7 +299,7 @@ describe('aceptar con servicios del viaje encendidos', () => {
   it('generar otra vez no duplica (F0-3)', async () => {
     await aceptarCotizacionNegocio(COT, NEG, 'it-eco')
     const r = await generarServiciosDesdeTarifa(clienteFalso(), { workspaceId: WS, negocioId: NEG, cotizacionId: COT })
-    expect(r).toEqual({ ok: true, creadas: 0, existentes: 4 })
+    expect(r).toEqual({ ok: true, creadas: 0, existentes: 4, completadas: 0 })
     expect(servicios()).toHaveLength(4)
   })
 
@@ -414,5 +415,149 @@ describe('permisos en el servidor (§7.4)', () => {
     ;(tablas.negocios[0] as Fila).estado = 'completado'
     rol = 'owner'
     expect((await actualizarServicio(hotel.id as string, { localizador: 'X' })).ok).toBe(false)
+  })
+})
+
+// ── Fechas de los servicios (2026-10-21) ─────────────────────────────────────
+//
+// VISTO FALLAR (2026-10-21), una mutación a la vez: sin las fechas en `aFila` (2), sin completar al
+// traer (1), sin completar al abrir el tablero (1), sin `origen = 'cotizacion'` al completar (1),
+// sin la marca de corrección en la acción (3), sin el rastro al soltar (1). La guarda de
+// «corregida a mano» va DOS veces (en la lectura y en el UPDATE): quitar una sola no cae nada;
+// quitar las dos tumba 2.
+
+/** La lectura del pantallazo de una línea, como la guarda la cotización (datos ficticios). */
+const lectura = (identidad: Record<string, string | null>, campos: Array<{ label: string; valor: string }> = []) => ({
+  casillas: { grupo_completo: { total: 1, moneda: 'COP', identidad, campos } },
+})
+
+/** Cusco con lecturas: vuelo redondo con horas, hotel de 3 noches, tour del día 2. Salida 10-nov. */
+function sembrarConFechas() {
+  sembrar({ activo: true })
+  const item = (id: string) => tablas.items.find(i => i.id === id) as Fila
+  item('va').tarifa_pax = lectura(
+    { aerolinea: 'Aerolínea X', origen: 'BOG', destino: 'CUZ', fecha_salida: '2026-11-10', fecha_regreso: '2026-11-13' },
+    [
+      { label: 'Hora de salida (ida)', valor: '06:10' },
+      { label: 'Hora de llegada (ida)', valor: '09:45' },
+      { label: 'Hora de salida (regreso)', valor: '18:30' },
+      { label: 'Hora de llegada (regreso)', valor: '22:05' },
+      { label: 'Nº de vuelo', valor: 'XX100' },
+    ],
+  )
+  item('hotel').tarifa_pax = lectura({ hotel: 'Hotel Andino', check_in: '2026-11-10', check_out: '2026-11-13' })
+  // El tour entra al precio y no trae fecha leída: sale del día 2 del viaje.
+  item('tour').entra_al_precio = null
+  item('tour').dia_relativo = 2
+  tablas.negocio_bloques = [{ id: 'nb-1', negocio_id: NEG, fecha_salida: '2026-11-10' }]
+  rol = 'operator'
+  areas = ['operaciones']
+}
+
+const fila = (itemId: string) => servicios().find(s => s.item_id === itemId) as Fila
+
+describe('fechas de los servicios', () => {
+  beforeEach(() => sembrarConFechas())
+
+  it('aceptar guarda los dos tramos del vuelo con hora, el check-out del hotel y el día del tour', async () => {
+    await aceptarCotizacionNegocio(COT, NEG, 'it-eco')
+    const vuelo = fila('va')
+    expect([vuelo.fecha_servicio, vuelo.hora_inicio, vuelo.fecha_fin, vuelo.hora_fin]).toEqual(['2026-11-10', '06:10', '2026-11-13', '22:05'])
+    expect(vuelo.tramos).toEqual([
+      { fecha: '2026-11-10', hora_salida: '06:10', hora_llegada: '09:45', origen: 'BOG', destino: 'CUZ', aerolinea: 'Aerolínea X', numero_vuelo: 'XX100' },
+      { fecha: '2026-11-13', hora_salida: '18:30', hora_llegada: '22:05', origen: 'CUZ', destino: 'BOG', aerolinea: 'Aerolínea X', numero_vuelo: null },
+    ])
+    expect([fila('hotel').fecha_servicio, fila('hotel').fecha_fin]).toEqual(['2026-11-10', '2026-11-13'])
+    expect(fila('tour').fecha_servicio).toBe('2026-11-11')
+    expect(servicios().every(s => typeof s.fechas_leidas_at === 'string')).toBe(true)
+  })
+
+  it('el cuadre Σ costo cotizado = costo directo de la tarifa sigue intacto (F0-2)', async () => {
+    await aceptarCotizacionNegocio(COT, NEG, 'it-rec')
+    const suma = servicios().reduce((a, f) => a + Number(f.costo_cotizado), 0)
+    expect(suma).toBe(2_100_000 + 1_100_000 + 200_000 + 50_000 + 300_000)
+  })
+
+  it('una fecha corregida a mano sobrevive a traer los servicios otra vez y al completado', async () => {
+    await aceptarCotizacionNegocio(COT, NEG, 'it-eco')
+    const hotel = fila('hotel')
+    expect(await actualizarFechasServicio(hotel.id as string, { fecha_servicio: '2026-11-11', fecha_fin: '2026-11-14' })).toEqual({ ok: true })
+    expect([hotel.fecha_servicio, hotel.fecha_fin, hotel.fechas_corregidas_por]).toEqual(['2026-11-11', '2026-11-14', 's-ale'])
+    expect(typeof hotel.fechas_corregidas_at).toBe('string')
+
+    expect((await traerServiciosDeCotizacion(NEG)).ok).toBe(true)
+    await generarServiciosDesdeTarifa(clienteFalso(), { workspaceId: WS, negocioId: NEG, cotizacionId: COT })
+    await completarFechasDeServicios(clienteFalso(), { workspaceId: WS, negocioId: NEG })
+    expect([fila('hotel').fecha_servicio, fila('hotel').fecha_fin]).toEqual(['2026-11-11', '2026-11-14'])
+  })
+
+  it('un vuelo corregido a mano: el fin sale del último tramo y regenerar no lo pisa', async () => {
+    await aceptarCotizacionNegocio(COT, NEG, 'it-eco')
+    const vuelo = fila('va')
+    const r = await actualizarFechasServicio(vuelo.id as string, {
+      tramos: [{ fecha: '2026-11-10', hora_salida: '07:00' }, { fecha: '2026-11-14', hora_salida: '20:15' }],
+    })
+    expect(r).toEqual({ ok: true })
+    await generarServiciosDesdeTarifa(clienteFalso(), { workspaceId: WS, negocioId: NEG, cotizacionId: COT })
+    expect([fila('va').hora_inicio, fila('va').fecha_fin]).toEqual(['07:00', '2026-11-14'])
+  })
+
+  it('fin anterior al inicio se rechaza sin escribir', async () => {
+    await aceptarCotizacionNegocio(COT, NEG, 'it-eco')
+    const hotel = fila('hotel')
+    const r = await actualizarFechasServicio(hotel.id as string, { fecha_servicio: '2026-11-13', fecha_fin: '2026-11-10' })
+    expect(r).toEqual({ ok: false, error: 'El fin no puede ser antes del inicio.' })
+    expect([hotel.fecha_servicio, hotel.fecha_fin, hotel.fechas_corregidas_at]).toEqual(['2026-11-10', '2026-11-13', undefined])
+  })
+
+  it('una comercial que no edita servicios no corrige fechas', async () => {
+    await aceptarCotizacionNegocio(COT, NEG, 'it-eco')
+    areas = ['comercial']
+    const hotel = fila('hotel')
+    expect((await actualizarFechasServicio(hotel.id as string, { fecha_servicio: '2026-11-12' })).ok).toBe(false)
+    expect(hotel.fecha_servicio).toBe('2026-11-10')
+  })
+
+  it('las filas ya generadas sin fechas completas las ganan al abrir el tablero; lo manual y lo corregido no se toca', async () => {
+    await aceptarCotizacionNegocio(COT, NEG, 'it-eco')
+    // Como quedaron las filas de antes de esta migración: solo el inicio, sin marca.
+    for (const f of servicios()) Object.assign(f, { fecha_fin: null, hora_inicio: null, hora_fin: null, tramos: null, fechas_leidas_at: null })
+    Object.assign(fila('traslado'), { fecha_servicio: '2026-11-20', fechas_corregidas_at: '2026-10-20T10:00:00Z', fechas_corregidas_por: 's-ale' })
+    tablas.negocio_servicios.push({ id: 'manual-1', workspace_id: WS, negocio_id: NEG, item_id: 'hotel', origen: 'manual', tipo: 'hotel', nombre: 'Noche extra', fecha_servicio: null, fechas_leidas_at: null })
+
+    const tablero = await datosDelTablero(clienteFalso(), {
+      workspaceId: WS, negocioId: NEG, configLinea: { servicios_viaje: { activo: true } }, hayCotizacionAceptada: true,
+      quien: { role: 'operator', areas: ['operaciones'], staffId: 's-ale', aprobadores: [] },
+    })
+    expect(fila('va').fecha_fin).toBe('2026-11-13')
+    expect((fila('va').tramos as unknown[]).length).toBe(2)
+    expect(fila('hotel').fecha_fin).toBe('2026-11-13')
+    expect(fila('traslado').fecha_servicio).toBe('2026-11-20')
+    const manual = servicios().find(s => s.id === 'manual-1') as Fila
+    expect([manual.fecha_servicio, manual.fechas_leidas_at]).toEqual([null, null])
+    // Lo que pinta el tablero ya trae las fechas completas.
+    expect(tablero.filas.find(f => f.item_id === 'va')?.tramos?.length).toBe(2)
+
+    // Idempotente: una segunda pasada no reescribe (las marcas quedaron puestas).
+    const marca = fila('hotel').fechas_leidas_at
+    expect((await completarFechasDeServicios(clienteFalso(), { workspaceId: WS, negocioId: NEG, soloSinMarca: true })).completadas).toBe(0)
+    expect(fila('hotel').fechas_leidas_at).toBe(marca)
+  })
+
+  it('traer los servicios otra vez también completa las filas ya generadas (con la marca puesta)', async () => {
+    await aceptarCotizacionNegocio(COT, NEG, 'it-eco')
+    for (const f of servicios()) Object.assign(f, { fecha_fin: null, tramos: null, fechas_leidas_at: '2026-10-01T00:00:00Z' })
+    const r = await generarServiciosDesdeTarifa(clienteFalso(), { workspaceId: WS, negocioId: NEG, cotizacionId: COT })
+    expect(r).toMatchObject({ ok: true, creadas: 0, completadas: 2 }) // vuelo y hotel; traslado y fee no tienen fin
+    expect([fila('hotel').fecha_fin, (fila('va').tramos as unknown[]).length]).toEqual(['2026-11-13', 2])
+  })
+
+  it('corregir la aceptación deja en la Actividad las fechas corregidas a mano que se pierden', async () => {
+    await aceptarCotizacionNegocio(COT, NEG, 'it-eco')
+    await actualizarFechasServicio(fila('hotel').id as string, { fecha_servicio: '2026-11-11', fecha_fin: '2026-11-14' })
+    rol = 'owner'
+    expect(await corregirCotizacionAceptada(COT, NEG)).toEqual({ success: true })
+    const rastro = tablas.activity_log.map(a => String(a.contenido)).find(t => t.startsWith('Se descartaron fechas corregidas a mano'))
+    expect(rastro).toBe('Se descartaron fechas corregidas a mano: Hotel Andino (2026-11-11 a 2026-11-14). Si siguen valiendo, escríbelas otra vez en la fila nueva.')
   })
 })

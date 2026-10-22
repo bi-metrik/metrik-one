@@ -7,11 +7,13 @@
 
 import { useState } from 'react'
 import Link from 'next/link'
+import { BedDouble, Car, HeartPulse, Package, Plane, Ticket } from 'lucide-react'
 import { useRouter } from 'next/navigation'
 import { toast } from 'sonner'
 import { useTransitionTolerante } from '@/hooks/use-transition-tolerante'
 import { pesosCierre } from '@/lib/viaje/cierre-viaje'
-import type { Grupo, Pendiente, Tablero } from '@/lib/viaje/mis-pendientes'
+import type { Grupo, Pendiente, ServicioProximo, Tablero } from '@/lib/viaje/mis-pendientes'
+import { FALTA_LA_FECHA, fechaEnPalabras } from '@/lib/viaje/fechas-servicio'
 import { decidirAprobacionServicio } from './servicios-viaje-actions'
 import { decidirAprobacionPlan } from './confirmacion-viaje-actions'
 
@@ -19,6 +21,52 @@ const TITULO: Record<Grupo, string> = { vencido: 'Vencido', hoy: 'Hoy', semana: 
 const COLOR: Record<Grupo, string> = { vencido: 'text-red-700', hoy: 'text-foreground', semana: 'text-muted-foreground' }
 const MESES = ['enero', 'febrero', 'marzo', 'abril', 'mayo', 'junio', 'julio', 'agosto', 'septiembre', 'octubre', 'noviembre', 'diciembre']
 const fechaCorta = (f: string) => { const [, m, d] = f.split('-').map(Number); return `${d} ${MESES[m - 1].slice(0, 3)}` }
+
+/** Ícono y color de la cotización (`--tipo-*` de globals.css): el color nunca va solo. */
+const ICONO_TIPO: Record<string, typeof Plane> = { vuelo: Plane, hotel: BedDouble, traslado: Car, actividad: Ticket, asistencia: HeartPulse, otro: Package }
+const ETIQUETA_TIPO: Record<string, string> = { vuelo: 'Vuelo', hotel: 'Hotel', traslado: 'Traslado', actividad: 'Actividad', asistencia: 'Asistencia', otro: 'Otro' }
+const COLOR_TIPO = (tipo: string) => `var(--tipo-${['vuelo', 'hotel', 'traslado', 'actividad'].includes(tipo) ? tipo : 'otro'})`
+
+/** «Tus servicios próximos»: por fecha y hora, con el ícono del tipo; sin fecha, «Falta la fecha». */
+export function ServiciosProximos({ servicios, hoy }: { servicios: ServicioProximo[]; hoy?: string }) {
+  if (servicios.length === 0) return null
+  return (
+    <section className="space-y-2" data-servicios-proximos>
+      <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">Tus servicios próximos · {servicios.length}</p>
+      <ul className="space-y-2">
+        {servicios.map(s => {
+          const Icono = ICONO_TIPO[s.tipo] ?? Package
+          return (
+            <li key={`${s.id}:${s.fecha ?? ''}`}>
+              <Link href={`/negocios/${s.negocioId}`} className="flex min-h-11 items-start gap-3 rounded-lg border p-3 text-sm" style={{ borderLeftWidth: 4, borderLeftColor: COLOR_TIPO(s.tipo) }}>
+                <span className="mt-0.5 inline-flex h-7 w-7 shrink-0 items-center justify-center rounded-full text-white" style={{ backgroundColor: COLOR_TIPO(s.tipo) }} aria-hidden>
+                  <Icono className="h-4 w-4" />
+                </span>
+                <span className="min-w-0 flex-1 space-y-0.5">
+                  <span className="block text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">
+                    {ETIQUETA_TIPO[s.tipo] ?? 'Otro'}{s.momento ? ` · ${s.momento}` : ''}
+                  </span>
+                  <span className="block break-words font-medium">{s.nombre}</span>
+                  <span className="block break-words text-xs text-muted-foreground">{s.viaje}</span>
+                </span>
+                <span className="shrink-0 text-right text-xs tabular-nums">
+                  {s.fecha ? (
+                    <>
+                      <span className="block font-medium">{s.fecha === hoy ? 'Hoy' : fechaEnPalabras(s.fecha)}</span>
+                      {s.hora && <span className="block text-muted-foreground">{s.hora}</span>}
+                    </>
+                  ) : (
+                    <span className="block text-amber-600">{FALTA_LA_FECHA}</span>
+                  )}
+                </span>
+              </Link>
+            </li>
+          )
+        })}
+      </ul>
+    </section>
+  )
+}
 
 function Aprobar({ p }: { p: Pendiente }) {
   const router = useRouter()
@@ -51,10 +99,14 @@ function Aprobar({ p }: { p: Pendiente }) {
 
 export default function MisPendientes({
   pendientes,
+  servicios = [],
+  hoy,
   proximo,
   tablero,
 }: {
   pendientes: Pendiente[]
+  servicios?: ServicioProximo[]
+  hoy?: string
   proximo: { texto: string; fecha: string } | null
   tablero: Tablero | null
 }) {
@@ -113,6 +165,9 @@ export default function MisPendientes({
           </ul>
         </section>
       ))}
+
+      {/* Aparte de Vencido · Hoy · Esta semana: un servicio con fecha no es una tarea vencida. */}
+      <ServiciosProximos servicios={servicios} hoy={hoy} />
     </div>
   )
 }

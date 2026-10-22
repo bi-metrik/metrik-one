@@ -26,6 +26,15 @@ import { lineaConAsistenciaMedica } from '@/lib/cotizaciones/asistencia-medica'
 import { lecturaDeOpcion } from '@/lib/cotizaciones/habitaciones'
 import { leerTarifaPax } from '@/lib/cotizaciones/tarifa-pasajero'
 import type { ItemDeCotizacion } from '@/lib/cotizaciones/itinerarios-datos'
+import {
+  SIN_FECHAS,
+  esFechaIso,
+  fechaPorDiaDelViaje,
+  fechasDeTramos,
+  horaHHMM,
+  type FechasServicio,
+  type TramoServicio,
+} from './fechas-servicio'
 
 export const TIPOS_SERVICIO = ['vuelo', 'hotel', 'traslado', 'actividad', 'asistencia', 'otro'] as const
 export type TipoServicio = (typeof TIPOS_SERVICIO)[number]
@@ -37,6 +46,10 @@ export interface FilaServicioNueva {
   nombre: string
   proveedor_nombre: string | null
   fecha_servicio: string | null
+  fecha_fin: string | null
+  hora_inicio: string | null
+  hora_fin: string | null
+  tramos: TramoServicio[] | null
   costo_cotizado: number
   orden: number
 }
@@ -89,6 +102,23 @@ export function fechaIso(v: unknown): string | null {
   return `${m[1]}-${m[2]}-${m[3]}`
 }
 
+type Lectura = NonNullable<ReturnType<typeof lecturaDeOpcion>>
+
+function leer(item: Pick<ItemParaServicio, 'tarifa_pax'>): Lectura | null {
+  if (item.tarifa_pax === null || item.tarifa_pax === undefined) return null
+  try {
+    return lecturaDeOpcion(leerTarifaPax(item.tarifa_pax))
+  } catch {
+    return null
+  }
+}
+
+/** Un campo leído por su etiqueta. Lo que vino del viaje («… (del viaje)») no es lectura: no cuenta. */
+function campoLeido(lectura: Lectura, etiqueta: string): string | null {
+  const v = texto(lectura.campos?.find(c => c.label.trim().toLowerCase() === etiqueta.toLowerCase())?.valor)
+  return v && !/\(del viaje\)$/.test(v) ? v : null
+}
+
 /**
  * Proveedor y fecha leídos del pantallazo de la línea, si los hay. Lo leído PROPONE: la fila
  * dice «Falta el proveedor» cuando no se leyó, y quien reserva lo escribe.
@@ -97,28 +127,104 @@ export function lecturaDelServicio(item: Pick<ItemParaServicio, 'tarifa_pax'>, t
   proveedor: string | null
   fecha: string | null
 } {
-  if (item.tarifa_pax === null || item.tarifa_pax === undefined) return { proveedor: null, fecha: null }
-  let lectura: ReturnType<typeof lecturaDeOpcion> = null
-  try {
-    lectura = lecturaDeOpcion(leerTarifaPax(item.tarifa_pax))
-  } catch {
-    return { proveedor: null, fecha: null }
-  }
+  const lectura = leer(item)
   if (!lectura) return { proveedor: null, fecha: null }
   const id = lectura.identidad ?? {}
-  const campo = (etiqueta: string) =>
-    texto(lectura?.campos?.find(c => c.label.trim().toLowerCase() === etiqueta)?.valor)
   const proveedor =
     tipo === 'hotel' ? texto(id.hotel)
-      : tipo === 'vuelo' ? texto(id.aerolinea) ?? campo('aerolínea')
-        : campo('proveedor')
-  const fecha =
-    tipo === 'hotel' ? fechaIso(id.check_in)
-      : tipo === 'vuelo' ? fechaIso(id.fecha_salida)
-        : tipo === 'actividad' ? fechaIso(id.fecha)
-          : tipo === 'traslado' ? fechaIso(id.fecha_hora)
-            : null
-  return { proveedor: proveedor ? proveedor.slice(0, MAX_NOMBRE) : null, fecha }
+      : tipo === 'vuelo' ? texto(id.aerolinea) ?? campoLeido(lectura, 'aerolínea')
+        : campoLeido(lectura, 'proveedor')
+  return { proveedor: proveedor ? proveedor.slice(0, MAX_NOMBRE) : null, fecha: fechasLeidas(lectura, tipo).fecha_servicio }
+}
+
+/**
+ * Los tramos de un vuelo leído: la ida (`fecha_salida`) y, si hay, el regreso (`fecha_regreso`),
+ * con sus horas, la ruta, la aerolínea y el número. Sin fecha de ida no hay tramos (no se arma un
+ * vuelo que empieza en el regreso). Un regreso anterior a la ida es una lectura rota: se queda la ida.
+ */
+function tramosLeidos(lectura: Lectura): TramoServicio[] {
+  const id = lectura.identidad ?? {}
+  const ida = fechaIso(id.fecha_salida)
+  if (!ida) return []
+  const origen = texto(id.origen)
+  const destino = texto(id.destino)
+  const aerolinea = texto(id.aerolinea) ?? campoLeido(lectura, 'aerolínea')
+  const tramos: TramoServicio[] = [{
+    fecha: ida,
+    hora_salida: horaHHMM(campoLeido(lectura, 'Hora de salida (ida)')),
+    hora_llegada: horaHHMM(campoLeido(lectura, 'Hora de llegada (ida)')),
+    origen,
+    destino,
+    aerolinea,
+    // Tal como se lee («AV8520 / AV8521»): repartirlo entre tramos sería adivinar.
+    numero_vuelo: campoLeido(lectura, 'Nº de vuelo'),
+  }]
+  const regreso = fechaIso(id.fecha_regreso)
+  if (regreso && regreso >= ida) {
+    tramos.push({
+      fecha: regreso,
+      hora_salida: horaHHMM(campoLeido(lectura, 'Hora de salida (regreso)')),
+      hora_llegada: horaHHMM(campoLeido(lectura, 'Hora de llegada (regreso)')),
+      origen: destino,
+      destino: origen,
+      aerolinea,
+      numero_vuelo: null,
+    })
+  }
+  return tramos.map(t => ({
+    ...t,
+    origen: t.origen?.slice(0, 100) ?? null,
+    destino: t.destino?.slice(0, 100) ?? null,
+    aerolinea: t.aerolinea?.slice(0, 100) ?? null,
+    numero_vuelo: t.numero_vuelo?.slice(0, 100) ?? null,
+  }))
+}
+
+/** La hora de un `fecha_hora` que la trae («2026-11-10T14:30», «2026-11-10 14:30»). */
+function horaDeFechaHora(v: unknown): string | null {
+  const t = texto(v)
+  const m = t ? /^\d{4}-\d{2}-\d{2}[T ](\d{2}:\d{2})/.exec(t) : null
+  return m ? horaHHMM(m[1]) : null
+}
+
+function fechasLeidas(lectura: Lectura, tipo: TipoServicio): FechasServicio {
+  const id = lectura.identidad ?? {}
+  switch (tipo) {
+    case 'vuelo': {
+      const tramos = tramosLeidos(lectura)
+      return tramos.length > 0 ? fechasDeTramos(tramos) : SIN_FECHAS
+    }
+    case 'hotel': {
+      const entra = fechaIso(id.check_in)
+      const sale = fechaIso(id.check_out)
+      return { ...SIN_FECHAS, fecha_servicio: entra, fecha_fin: entra && sale && sale >= entra ? sale : null }
+    }
+    case 'actividad':
+      return { ...SIN_FECHAS, fecha_servicio: fechaIso(id.fecha) }
+    case 'traslado': {
+      const fecha = fechaIso(id.fecha_hora)
+      return { ...SIN_FECHAS, fecha_servicio: fecha, hora_inicio: fecha ? horaDeFechaHora(id.fecha_hora) : null }
+    }
+    default:
+      return SIN_FECHAS
+  }
+}
+
+/**
+ * Las fechas de la fila: las leídas del pantallazo y, en una actividad o un traslado sin fecha
+ * leída, el día del viaje (`items.dia_relativo = N` → salida + (N − 1)). Sin salida o sin día,
+ * vacías: «Falta la fecha».
+ */
+export function fechasDelServicio(
+  item: Pick<ItemParaServicio, 'tarifa_pax' | 'dia_relativo'>,
+  tipo: TipoServicio,
+  salidaViaje: string | null | undefined,
+): FechasServicio {
+  const lectura = leer(item)
+  const leidas = lectura ? fechasLeidas(lectura, tipo) : SIN_FECHAS
+  if (leidas.fecha_servicio || (tipo !== 'actividad' && tipo !== 'traslado')) return leidas
+  const porDia = fechaPorDiaDelViaje(esFechaIso(salidaViaje) ? salidaViaje : null, item.dia_relativo)
+  return porDia ? { ...leidas, fecha_servicio: porDia } : leidas
 }
 
 function nombreDelServicio(item: Pick<ItemParaServicio, 'nombre' | 'grupo'>): string {
@@ -139,6 +245,8 @@ export function filasDeServicioDeTarifa(args: {
   seleccion: string[] | null
   params: ParametrosCascada
   tipoRanuraPorItem?: Record<string, string | null | undefined>
+  /** Salida del viaje (`negocio_bloques.data.fecha_salida`): el día N de una actividad sin fecha. */
+  salidaViaje?: string | null
 }): FilaServicioNueva[] {
   const { items, seleccion, params } = args
   const ids = seleccion ? itemsDelItinerario(items, seleccion) : itemsQueAportanAlTotal(items)
@@ -151,13 +259,14 @@ export function filasDeServicioDeTarifa(args: {
 
   const filas: FilaServicioNueva[] = incluidos.map((item, orden) => {
     const tipo = tipoDeServicio(item, args.tipoRanuraPorItem?.[item.id])
-    const { proveedor, fecha } = lecturaDelServicio(item, tipo)
+    const { proveedor } = lecturaDelServicio(item, tipo)
+    const fechas = fechasDelServicio(item, tipo, args.salidaViaje)
     return {
       item_id: item.id,
       tipo,
       nombre: nombreDelServicio(item),
       proveedor_nombre: proveedor,
-      fecha_servicio: fecha,
+      ...fechas,
       costo_cotizado: Math.max(0, calcularCascada([item], params).costoDirecto),
       orden,
     }

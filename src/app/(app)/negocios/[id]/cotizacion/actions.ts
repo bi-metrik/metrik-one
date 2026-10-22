@@ -600,6 +600,16 @@ export async function corregirCotizacionAceptada(cotizacionId: string, negocioId
     valor_nuevo: null,
     contenido: `${cot.consecutivo ? `Cotización ${cot.consecutivo}` : 'La cotización'} volvió a borrador para corregirla${venia}.`.slice(0, 280),
   }, 'corregirCotizacionAceptada')
+  if (soltados.rastro) {
+    await registrarActividad(supabase, {
+      workspace_id: workspaceId,
+      entidad_tipo: 'negocio',
+      entidad_id: negocioId,
+      tipo: 'sistema',
+      autor_id: null,
+      contenido: soltados.rastro,
+    }, 'corregirCotizacionAceptada')
+  }
 
   revalidatePath(`/negocios/${negocioId}`)
   return { success: true as const }

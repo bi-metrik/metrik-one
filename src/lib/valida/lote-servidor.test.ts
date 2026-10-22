@@ -300,6 +300,43 @@ describe('una fila nunca se cobra ni se guarda dos veces', () => {
   })
 })
 
+// ─── 2b. Búsqueda incompleta (503 de metrik-valida#66) ───────────────────────────
+
+describe('búsqueda incompleta: Valida no la registró, ONE tampoco la guarda como resultado', () => {
+  const incompleta = () => ({ status: 503, body: { error: 'busqueda_incompleta' } })
+
+  it('consulta puntual: devuelve el código para la pantalla y no deja fila en el historial', async () => {
+    responder = incompleta
+    const r = await consultarValida({ tipo: 'natural', nombre: 'Ana Ruiz' })
+    expect(r).toEqual({ ok: false, error: 'busqueda_incompleta' })
+    expect(consultas()).toHaveLength(0)
+  })
+
+  it('CONTROL — otro error del motor sí se sigue guardando como siempre', async () => {
+    responder = () => ({ status: 500, body: { error: 'db_error' } })
+    await consultarValida({ tipo: 'natural', nombre: 'Ana Ruiz' })
+    expect(consultas()).toHaveLength(1)
+    expect(consultas()[0].severidad).toBe('error')
+  })
+
+  it('cargue masivo: tras el reintento, la fila queda en error con el código y sin consulta en el historial', async () => {
+    responder = incompleta
+    const lote = sembrarLote({ filas: [{ tipo: 'natural', nombre: 'Ana Ruiz' }] })
+    await procesarFilaLote(ctx(lote), await reclamar(lote))
+    expect(llamadas).toHaveLength(2)
+    expect(consultas()).toHaveLength(0)
+    expect(doble.tablas.valida_lote_filas[0]).toMatchObject({ estado: 'error', resultado_error: 'busqueda_incompleta' })
+    expect(doble.tablas.valida_lotes[0].procesadas).toBe(1)
+  })
+
+  it('si el reintento sí completa, la fila tiene su resultado', async () => {
+    responder = (c, n) => (n === 1 ? incompleta() : respuestaNormal(c))
+    const lote = sembrarLote({ filas: [{ tipo: 'natural', nombre: 'Ana Ruiz' }] })
+    await procesarFilaLote(ctx(lote), await reclamar(lote))
+    expect(consultas()[0].severidad).toBe('sin_hallazgo')
+  })
+})
+
 // ─── 3. Corte de la bolsa y rechazo ──────────────────────────────────────────────
 
 describe('corte y rechazo de Valida', () => {

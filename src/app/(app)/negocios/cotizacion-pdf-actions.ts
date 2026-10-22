@@ -963,7 +963,8 @@ export async function generateCotizacionPDF(
     return {
       // Hotel y traslado con el nombre de su lectura, no en MAYÚSCULAS (`nombre-visible.ts`).
       nombre: nombreVisibleDeLinea(i),
-      descripcion: i.descripcion ?? null,
+      // Y la descripción igual (prueba del #1229, punto 2: lo que incluye la tarifa no en MAYÚSCULAS).
+      descripcion: descripcionVisibleDeLinea(i),
       precio_venta: Number(i.precio_venta) || 0,
       descuento_porcentaje: descuentoVisible(i),
       cantidad: Number(i.cantidad) || 1,

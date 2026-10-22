@@ -14,7 +14,7 @@ import { cobradoConfirmado } from '@/lib/cobros/saldo-negocio'
 import type { DatosBloqueServicios } from './bloque-servicios'
 import { aprobadoresDeLinea, serviciosViajeActivo } from './estado-servicio'
 import { configReglasPago, mediosPagoProveedor, type MedioPagoProveedor } from './reglas-pago'
-import { leerServiciosDelNegocio } from './servicios-viaje-datos'
+import { completarFechasDeServicios, leerServiciosDelNegocio, type ServicioDelNegocio } from './servicios-viaje-datos'
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type Db = any
@@ -48,12 +48,23 @@ export async function datosDelTablero(
     quien: DatosBloqueServicios['quien']
   },
 ): Promise<DatosBloqueServicios> {
-  const [filas, medios, plata] = await Promise.all([
+  const activo = serviciosViajeActivo(args.configLinea)
+  const [leidas, medios, plata] = await Promise.all([
     leerServiciosDelNegocio(db, { workspaceId: args.workspaceId, negocioId: args.negocioId }),
     mediosDelEspacio(args.workspaceId).catch(() => [] as MedioPagoProveedor[]),
     plataDelCliente(db, args.workspaceId, args.negocioId).catch(() => ({ cobrado: 0, precio: 0 })),
   ])
-  const pidieron = [...new Set((filas ?? []).flatMap(f => f.aprobaciones.map(a => a.solicitada_por ?? '')).filter(Boolean))]
+  // Filas generadas antes de las fechas completas (2026-10-21): la primera vez que se abre el
+  // tablero ganan fin, horas y tramos desde su ítem. Una sola vez por fila (`fechas_leidas_at`).
+  let filas = leidas
+  if (activo && filas && filas.some(faltaCompletar)) {
+    const { completadas } = await completarFechasDeServicios(db, { workspaceId: args.workspaceId, negocioId: args.negocioId, soloSinMarca: true })
+    if (completadas > 0) filas = (await leerServiciosDelNegocio(db, { workspaceId: args.workspaceId, negocioId: args.negocioId })) ?? filas
+  }
+  const pidieron = [...new Set((filas ?? []).flatMap(f => [
+    ...f.aprobaciones.map(a => a.solicitada_por ?? ''),
+    f.fechas_corregidas_por ?? '',
+  ]).filter(Boolean))]
   const nombres: Record<string, string> = {}
   if (pidieron.length > 0) {
     const { data } = await db.from('staff').select('id, full_name').eq('workspace_id', args.workspaceId).in('id', pidieron)
@@ -63,7 +74,7 @@ export async function datosDelTablero(
     }
   }
   return {
-    activo: serviciosViajeActivo(args.configLinea),
+    activo,
     hayCotizacionAceptada: args.hayCotizacionAceptada,
     filas: filas ?? [],
     quien: { ...args.quien, aprobadores: args.quien.aprobadores ?? aprobadoresDeLinea(args.configLinea) },
@@ -73,4 +84,9 @@ export async function datosDelTablero(
     precioAprobado: plata.precio,
     nombres,
   }
+}
+
+/** Una fila de la cotización que nunca ganó las fechas completas y nadie corrigió a mano. */
+export function faltaCompletar(f: Pick<ServicioDelNegocio, 'origen' | 'item_id' | 'fechas_leidas_at' | 'fechas_corregidas_at'>): boolean {
+  return f.origen === 'cotizacion' && !!f.item_id && !f.fechas_leidas_at && !f.fechas_corregidas_at
 }
