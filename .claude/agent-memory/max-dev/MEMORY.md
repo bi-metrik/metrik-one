@@ -2,6 +2,7 @@
 
 ## Project memories
 
+- ⚠️⚠️ [Valida: PEP desde archivo oficial DAFP (#69)](project_valida_pep_carga_oficial.md) — 0040 y carga en prod SIN correr; >4,5 MB por CLI
 - ⚠️⚠️ [Aviso de factura cargada al pagador](project_aviso_factura_cuota_cargada.md) — #1244; 20261022153000 APLICADA; solo el designado; activo manda
 - ⚠️⚠️ [Hitos de gestión y Agenda (Trappvel)](project_hitos_de_gestion.md) — #1245; 20261022090000 dry-run de Mik OK, SIN aplicar; MX sin plazo
 - ⚠️ [Bandeja Trappvel lee foto/PDF + gastos vigentes ONE](project_bandeja_adjuntos_trappvel.md) — soporte = comentario con one://; leer_adjuntos; arnés a-* sin llave
