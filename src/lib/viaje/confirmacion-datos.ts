@@ -266,17 +266,25 @@ export async function cobrosDelNegocio(db: Db, workspaceId: string, negocioId: s
   return ((data ?? []) as CobroLeido[]).filter((c) => !c.anulado_at)
 }
 
+/**
+ * ¿El plan acordado está vigente? Dentro de la regla, sí; fuera, solo con una aprobación `aprobada`
+ * de ESAS cuotas (la huella manda, F2-3). Una sola regla para el gate `plan_pagos_acordado` y el
+ * panel: el panel miraba solo la última aprobación y podía decir «sin aprobar» con una vigente
+ * (barrido 2026-10-22).
+ */
+export async function planVigenteDe(db: Db, negocioId: string, acordado: PlanGuardado | null): Promise<boolean> {
+  if (!acordado) return false
+  if (acordado.dentro_de_regla) return true
+  return !!(await aprobacionVigenteParaHuella(db, negocioId, huellaPlan(acordado.cuotas, acordado.total)))
+}
+
 /** El estado de los tres gates de la etapa Confirmación, leído de la base. */
 export async function estadoConfirmacion(
   db: Db,
   args: { workspaceId: string; negocioId: string; metadata: Record<string, unknown> | null },
 ): Promise<EstadoConfirmacion> {
   const confirmado = !!(args.metadata?.confirmacion_cliente as Record<string, unknown> | undefined)?.registrada_at
-  const plan = await planAcordado(db, args.negocioId)
-  let planVigente = !!plan
-  if (plan && !plan.dentro_de_regla) {
-    planVigente = !!(await aprobacionVigenteParaHuella(db, args.negocioId, huellaPlan(plan.cuotas, plan.total)))
-  }
+  const planVigente = await planVigenteDe(db, args.negocioId, await planAcordado(db, args.negocioId))
   const cobros = await cobrosDelNegocio(db, args.workspaceId, args.negocioId)
   return { confirmado, planVigente, anticipoConSoporte: cobros.some(esAnticipoConSoporte) }
 }
@@ -364,11 +372,7 @@ export async function leerVistaConfirmacion(db: Db, workspaceId: string, negocio
   const hayPago = cobros.some((c) => !!c.fecha && Number(c.monto ?? 0) > 0)
 
   const plan = planes.find((p) => p.estado === 'acordado') ?? planes.find((p) => p.estado === 'propuesta') ?? null
-  let planVigente = planes.some((p) => p.estado === 'acordado')
-  const acordado = planes.find((p) => p.estado === 'acordado')
-  if (acordado && !acordado.dentro_de_regla) {
-    planVigente = !!aprobacion && aprobacion.estado === 'aprobada' && aprobacion.huella === huellaPlan(acordado.cuotas, acordado.total)
-  }
+  const planVigente = await planVigenteDe(db, negocioId, planes.find((p) => p.estado === 'acordado') ?? null)
 
   const etapaConf = etapaDeConfirmacion(etapas)
   const etapaActual = etapas.find((e) => e.id === negocio.etapa_actual_id) ?? null
