@@ -158,7 +158,8 @@ describe('ofrecer y elegir', () => {
     expect(t.casillas?.grupo_completo).toMatchObject({ origen: 'tarifario', total: 900000, moneda: 'COP' })
     expect(t.tarifaExtraida).toMatchObject({ extraccion_id: EXT, proveedor_id: HOTEL, filas: [{ indice_fila: 0, cantidad: 1, noches: 3, tipo: null }], canal: 'neta', moneda: 'COP', por: 'Ana Ficticia' })
     expect(t.confirmada).toMatchObject({ costoTotalCOP: 900000 })
-    expect(item().nombre).toBe('HOTEL FICTICIO PLAYA')
+    // Con la tarifa del proveedor, la columna guarda la capitalización normal (brief del 2026-10-22, punto 2).
+    expect(item().nombre).toBe('Hotel Ficticio Playa')
     // La vista dice qué tarifa tiene elegida la línea.
     const v = await tarifasDeLinea(ITEM)
     expect(v.ok && v.elegida?.filas[0].indice_fila).toBe(0)
