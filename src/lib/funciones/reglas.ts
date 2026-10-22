@@ -126,3 +126,6 @@ export const ETIQUETA_ESTADO_CAMPANA: Record<string, string> = {
 /** «$180.000». Pura. */
 export const pesos = (n: number | null | undefined) =>
   n === null || n === undefined ? '—' : `$${Math.round(n).toString().replace(/\B(?=(\d{3})+(?!\d))/g, '.')}`
+
+/** El instante de referencia de una pantalla (hoy y «ya pasó» de la agenda). Fuera del render, para que sea puro. */
+export const instanteActual = () => Date.now()

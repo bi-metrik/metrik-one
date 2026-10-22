@@ -3,7 +3,7 @@ import type { SupabaseClient } from '@supabase/supabase-js'
 import { getWorkspace } from '@/lib/actions/get-workspace'
 import { exigirModulo, REQUISITO } from '@/lib/modulos/exigir-modulo'
 import { leerPanelCampana } from '@/lib/funciones/datos'
-import { puedeEditarFunciones } from '@/lib/funciones/reglas'
+import { instanteActual, puedeEditarFunciones } from '@/lib/funciones/reglas'
 import { CampanaCliente } from './campana-cliente'
 
 export const dynamic = 'force-dynamic'
@@ -18,5 +18,5 @@ export default async function CampanaPage({ params }: { params: Promise<{ id: st
   if (!/^[0-9a-f-]{36}$/i.test(id)) notFound()
   const campana = await leerPanelCampana(supabase as unknown as SupabaseClient, id)
   if (!campana) notFound()
-  return <CampanaCliente campana={campana} puedeEditar={puedeEditarFunciones(role)} ahoraMs={Date.now()} />
+  return <CampanaCliente campana={campana} puedeEditar={puedeEditarFunciones(role)} ahoraMs={instanteActual()} />
 }
