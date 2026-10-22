@@ -140,6 +140,10 @@ describe('dominio: reglas, mesa y resumen (§8.3, §8.4, §8.5)', () => {
     const resumen = p.ok ? p.propuesta.resumen : ''
     expect(resumen).toContain('2 personas · $95.000 por persona\n')
     expect(resumen).not.toMatch(/Preferencia de mesa|por pareja/)
+    expect(resumen).toContain('te confirma el total, el cupo y el pago.')
+    expect(resumen).not.toMatch(/\bmesa\b/)
+    const h = await d.ejecutar(p.ok ? p.propuesta : (null as never), ctx(filasConSi))
+    expect(h.lineas[0]).toBe('Listo, ya tengo tus datos. Todavía no está reservado: el equipo de Sabor te escribe por aquí para confirmar cupo y pago. La reserva queda hecha cuando el pago esté aprobado.')
     expect(p.ok && p.propuesta.datos).not.toHaveProperty('preferencia_mesa')
   })
 })

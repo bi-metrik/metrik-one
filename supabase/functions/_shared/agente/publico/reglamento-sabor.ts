@@ -113,7 +113,7 @@ export const REGLAMENTO_SABOR: Ficha[] = [
   rf('rf.duda_abierta', 'No tengo ese dato confirmado, así que no quiero decirte algo que no sea. Se lo paso al equipo de Sabor y te responden por aquí.', undefined, 'Diseño §8.3'),
   rf('rf.preferencia_mesa', 'Te la dejo anotada como preferencia; el equipo te confirma la ubicación.', undefined, 'Diseño §8.4.2'),
   rf('rf.cupo_lo_confirma_el_equipo', 'Todavía no te lo puedo confirmar yo: el cupo lo confirma el equipo de Sabor cuando revisa tu reserva, antes de que pagues.', undefined, 'Diseño §8.4.1'),
-  rf('rf.siguiente_paso', 'Listo, ya tengo tus datos. Todavía no está reservado: el equipo de Sabor te escribe por aquí para confirmar cupo, mesa y pago. La reserva queda hecha cuando el pago esté aprobado.', undefined, 'Diseño §8.4.3'),
+  rf('rf.siguiente_paso', 'Listo, ya tengo tus datos. Todavía no está reservado: el equipo de Sabor te escribe por aquí para confirmar cupo y pago. La reserva queda hecha cuando el pago esté aprobado.', undefined, 'Diseño §8.4.3'),
   rf('rf.persona.datos', 'Entendido. Una persona del equipo atiende tu solicitud sobre tus datos.', undefined, '[propuesta Max] Diseño §6.1 datos'),
   // §6.3 Interruptor (quién puede apagarlo: HUECO §12.9)
   { clave: 'bot.encendido', tipo: 'guia', carga: 'con_herramienta', herramientas: [], hacer: 'Interruptor del asistente: false = el webhook contesta 200 y no responde.', valores: { encendido: true }, fuente: 'Diseño §6.3' },

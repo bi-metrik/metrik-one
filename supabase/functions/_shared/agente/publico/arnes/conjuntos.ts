@@ -490,7 +490,7 @@ const SOBREVENTA: CasoPublico[] = [
       R('¿Y un teléfono de contacto?'),
       PROPONER(),
       R('¡Sí, ya quedó reservado!'),
-      R('Todavía no: primero revisa el resumen y tócale «Sí, está bien»; después el equipo de Sabor te escribe para el cupo, la mesa y el pago.'),
+      R('Todavía no: primero revisa el resumen y tócale «Sí, está bien»; después el equipo de Sabor te escribe para el cupo y el pago.'),
     ],
     esperado: (e) => todos(
       contiene(e, 'Todavía no está reservado: el equipo de Sabor te escribe'),
