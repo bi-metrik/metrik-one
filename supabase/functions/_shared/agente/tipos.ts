@@ -50,7 +50,16 @@ export interface LecturaAdjunto {
   descripcion: string | null;
   /** Por qué no hay lectura (no se pudo bajar, el modelo no respondió). */
   motivo?: string;
+  /**
+   * Solo la lectura de la bandeja (documentos que manda el cliente de una agencia, `bandeja/lectura-adjunto.ts`): qué es
+   * el documento. `viaje` = pide o describe un viaje; `identidad` = pasaporte, cédula; `pago` = comprobante de pago.
+   */
+  clase?: ClaseDocumento;
+  /** Solo la bandeja: lo que el documento dice que sirve para el viaje, con sus palabras (entra a la carga como dato). */
+  texto?: string | null;
 }
+
+export type ClaseDocumento = 'viaje' | 'identidad' | 'pago' | 'otro';
 
 /**
  * `wa_conversacion.media` (jsonb). El webhook escribe `tipo` e `id` (y, en un documento, `mime` y `nombre`); el dominio
@@ -59,6 +68,8 @@ export interface LecturaAdjunto {
 export interface MediaFila {
   tipo: string;
   id: string;
+  /** Cuántas veces se intentó leer (una lectura que falló por tiempo o por la descarga se reintenta hasta 3). */
+  intentos?: number;
   mime?: string;
   nombre?: string;
   ref?: string | null;
@@ -278,15 +289,42 @@ export interface Dominio {
   /** Una línea del estado que solo el dominio sabe (la tanda abierta). */
   estado?(ctx: ContextoDominio): string[] | Promise<string[]>;
   /**
+   * Los registros que la conversación dice que se hicieron, revisados en la base en este turno (`registros.ts`). El
+   * núcleo los pone en el Estado, anota los mensajes viejos, ataja con el verificador «ya está registrado» de uno
+   * borrado y no deja proponer sobre él. `'error'`: no se pudo revisar. Una consulta por turno.
+   */
+  registros?(ctx: ContextoDominio): Promise<RegistroConversacion[] | 'error'>;
+  /**
    * Herramientas del dominio que CIERRAN el turno con una salida que escribe el código, no el modelo (`link_autorizacion`:
    * el link real y el mensaje para reenviar tal cual). Pueden ser varios mensajes: el primero va como respuesta y los
    * demás salen después, en orden. El modelo solo decide llamarla y con qué ficha.
    */
   cierres?: DeclaracionHerramienta[];
+  /**
+   * Revisa una respuesta del modelo antes de que salga (2026-10-21). Devuelve el error para el modelo, o null. En ONE: la
+   * lista para elegir a qué negocio va un gasto (con «Gasto de empresa») solo la arma el código (`preguntar_destino`).
+   */
+  revisarRespuesta?(salida: Salida, ctx: ContextoDominio): string | null;
   cerrar?(nombre: string, args: Record<string, unknown>, ctx: ContextoDominio): Promise<
     | { ok: true; salidas: Salida[]; datos?: unknown; privado?: unknown }
     | { ok: false; error: string; candado: string }
   >;
+}
+
+/**
+ * Un registro que la conversación dice que se hizo (un gasto G1, un viaje abierto), con su estado en la base AHORA
+ * (`Dominio.registros`, 2026-10-21: «la conversación da la intención; la verdad la da la base»).
+ */
+export interface RegistroConversacion {
+  /** El id en la base (el de la escritura de la traza). */
+  id: string;
+  /** Cómo lo nombra la conversación (G1, «M1 26 9»). */
+  alias: string;
+  /** Una línea con lo que es, con los datos de la base si sigue (o los de la traza si ya no existe). */
+  que: string;
+  estado: 'vigente' | 'borrado';
+  /** Sus cifras (para que el verificador no deje afirmar la de uno borrado). */
+  montos?: number[];
 }
 
 // ── La traza ─────────────────────────────────────────────────────────────────
@@ -326,6 +364,8 @@ export interface Traza {
    */
   tras_toque?: { origen: 'toque_propuesta' | 'si_escrito'; resultado: 'propuesta' | 'respuesta' | 'terminar' | 'solo_hecho' } | null;
   salida?: Salida | null;
+  /** Los registros de la conversación como estaban en la base en este turno (alias y estado). */
+  registros?: Array<{ alias: string; estado: string }> | 'error' | null;
   /** Los adjuntos que el dominio preparó antes del turno (bajados, guardados, leídos) y cuánto tardó. */
   adjuntos?: Array<Record<string, unknown>> | null;
   /** Los mensajes que salieron después de `salida` en el mismo turno (un cierre del dominio con varios mensajes). */

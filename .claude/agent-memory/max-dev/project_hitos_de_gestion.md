@@ -1,6 +1,6 @@
 ---
 name: hitos-de-gestion
-description: Hitos de gestión + Agenda de Trappvel (apilado sobre #1236) — migración 20261022090000 SIN aplicar; pendientes se calculan; RD por copia archivada, MX sin plazo
+description: Hitos de gestión + Agenda de Trappvel (#1245, #1236 ya en main) — migración 20261022090000 SIN aplicar (dry-run OK); pendientes se calculan; RD por copia archivada, MX sin plazo
 metadata:
   type: project
 ---
@@ -8,7 +8,7 @@ metadata:
 PR `feat/trappvel-hitos-de-gestion` (2026-10-22), apilado sobre #1236 (fechas de servicios). Migración
 `20261022090000_negocio_hitos.sql` SIN aplicar: tabla `negocio_hitos` (solo lo cerrado: hecho/no_aplica/
 no_se_hizo; `unique nulls not distinct`) + tipos `agenda_del_dia`/`hito_vencido` sobre el CHECK vivo.
-Dry-run en prod NO hecho (sin MCP); PGlite sí, incluido el envoltorio `DO $dry$ … RAISE` del archivo real.
+Dry-run en prod hecho por Mik (2026-10-22, Postgres 17, dos veces, nada persistió); PGlite también.
 
 **Why:** Edgar quiere registro de gestiones («se nos pasó»); nada automático al viajero.
 

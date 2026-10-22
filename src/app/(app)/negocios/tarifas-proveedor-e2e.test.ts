@@ -144,7 +144,8 @@ describe('ofrecer y elegir', () => {
   it('ofrece las tarifas con el filtro a la vista; nada se elige solo', async () => {
     const r = await tarifasDeLinea(ITEM)
     expect(r.ok && r.opciones.map((o) => [o.indice, o.fueraPor])).toEqual([[0, []], [1, ['temporada']], [2, []], [3, ['pasajero']], [4, []]])
-    expect(r.ok && r.ajustes).toEqual({ canal: 'neta', comisionPct: null, ivaIncluido: false, ivaPct: 19 })
+    // El tarifario ficticio no declara IVA ni la ficha lo dice: sin % (prueba del #1229, punto 3).
+    expect(r.ok && r.ajustes).toEqual({ canal: 'neta', comisionPct: null, ivaIncluido: false, ivaPct: null })
     expect(item().tarifa_pax).toBeNull()
     expect(base.tablas.rubros).toEqual([])
   })

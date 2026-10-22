@@ -15,7 +15,14 @@ import type { FilaConversacion, Traza } from '../tipos.ts';
 import type { CampoEntendible } from '../../wa-entendimiento-reglas.ts';
 
 /** `toca` con `oEscribe`: si el bot no mostró ese botón, la persona escribe eso (y no «sí»). */
-export interface PasoGuion { escribe?: string; reenvia?: string; toca?: string; oEscribe?: string; /** Un audio, ya transcrito. */ dicta?: string }
+export interface PasoGuion {
+  escribe?: string; reenvia?: string; toca?: string; oEscribe?: string; /** Un audio, ya transcrito. */ dicta?: string;
+  /**
+   * Una foto o un PDF sintético (2026-10-21): `solicitud` (PDF de una solicitud de viaje), `pantallazo` (foto de un chat
+   * del cliente), `factura` (foto de una factura de ferretería: no es del viaje). Del comercial o reenviado.
+   */
+  adjunta?: { archivo: 'solicitud' | 'pantallazo' | 'factura'; pie?: string; reenviado?: boolean };
+}
 
 export interface Veredicto { ok: boolean; motivo: string }
 
@@ -526,6 +533,114 @@ export const CONJUNTO_RESPONSABLE: CasoArnes[] = [
     esperado: (p, t) => {
       // En el primer turno no podía haber propuesta con una Daniela: tenía que preguntar.
       return viajeCon(p, 'c-pedro', 'st-danim', t);
+    },
+  },
+];
+
+// ── Adjuntos: foto o PDF en la bandeja (2026-10-21) ─────────────────────────
+//
+// Mauricio: «llévalo a Trappvel». El cliente le manda al comercial una foto o un PDF (la solicitud, un pantallazo del
+// chat, una factura que no es del viaje); el bot lo lee, lo combina con lo que dice el comercial y propone la carga con
+// el toque de siempre; el archivo queda de soporte en la actividad del viaje. Archivos sintéticos (`soportes/`).
+
+const VIAJE_LAURA_SA = v('v-ls', 'G1 26 7', 'c-laura', 'SAN ANDRÉS');
+const VIAJE_LAURA_CTG = v('v-lc', 'G1 26 8', 'c-laura', 'CARTAGENA');
+
+function soportesDe(p: PuertoMemoria, viajeId: string): number {
+  return p.soportes.filter((x) => x.viajeId === viajeId).length;
+}
+
+// La base manda (2026-10-21): un viaje abierto en la conversación y después borrado en la app; llegan dos archivos y
+// «vuélvelos a cargar» en ese viaje. No se escribe en lo que no existe ni se dice que existe.
+const SEMILLA_VIAJE_BORRADO: CasoArnes['semilla'] = [
+  { direccion: 'entrante', clase: 'escrito', texto: 'Abre un viaje nuevo para Laura Gómez a San Andrés, lo llevo yo', turno_id: 'semilla-v1' },
+  { direccion: 'saliente', clase: 'bot', texto: '¿Abro este viaje?\nLaura Gomez (cel. …5521) · San Andrés · Viaje a medida\nLo llevas tú (Carla Comercial)', turno_id: 'semilla-v1' },
+  {
+    direccion: 'entrante', clase: 'toque', texto: 'Sí, ábrelo', turno_id: 'semilla-v2',
+    traza: { tipo: 'toque_propuesta', bot: 'bandeja-solicitudes', ejecucion: { huella: 'h-v', accion: 'viaje_nuevo', resultado: 'ejecutada', lineas: ['Abrí G1 26 9 · San Andrés para LAURA GOMEZ. Lo llevas tú.'], nombrados: ['G1 26 9'], escrituras: [{ tipo: 'viaje', id: 'v-borrado', codigo: 'G1 26 9', nombre: 'SAN ANDRÉS', contactoId: 'c-laura', destino: 'San Andrés', responsableId: 'staff-carla' }] } },
+  },
+  { direccion: 'saliente', clase: 'bot', texto: 'Abrí G1 26 9 · San Andrés para LAURA GOMEZ. Lo llevas tú.', turno_id: 'semilla-v2' },
+];
+
+export const CONJUNTO_ADJUNTOS: CasoArnes[] = [
+  {
+    id: 'a-viaje-borrado', conjunto: 1, titulo: 'viaje abierto aquí y borrado en la app; dos archivos y «vuélvelos a cargar» en él',
+    contactos: DIRECTORIO, viajes: VIAJES, viajesPermitidos: [], sinClienteNuevo: true, extraccion: true, semilla: SEMILLA_VIAJE_BORRADO,
+    pasos: [
+      { adjunta: { archivo: 'solicitud', reenviado: true } },
+      { adjunta: { archivo: 'pantallazo', reenviado: true } },
+      { escribe: 'Estos dos cárgalos en el G1 26 9, vuélvelos a cargar' },
+      { escribe: 'Sí' },
+    ],
+    esperado: (p, t) => {
+      if (de(p, 'carga').length) return mal('cargó en un viaje que ya no existe');
+      const dijo = t.map((x) => x.salida?.texto ?? '').join('\n');
+      if (/G1 26 9[^.?!\n]*(est[aá] (abierto|registrad)|ya est[aá])/iu.test(dijo) && !/no existe|ya no est/iu.test(dijo)) return mal('dijo que G1 26 9 existe');
+      return ok('no cargó en el viaje borrado ni dijo que existe');
+    },
+  },
+  {
+    id: 'a-pdf-tanda', conjunto: 1, titulo: 'PDF de la solicitud reenviado y «cárgalo»: datos del PDF y el PDF de soporte',
+    contactos: DIRECTORIO, viajes: [...VIAJES, VIAJE_LAURA_SA], viajesPermitidos: ['G1 26 7'], sinClienteNuevo: true, extraccion: true,
+    pasos: [
+      { adjunta: { archivo: 'solicitud', reenviado: true } },
+      { escribe: 'cárgalo en el G1 26 7 de Laura' },
+      { toca: 'Cargar', oEscribe: 'sí' },
+    ],
+    esperado: (p) => {
+      const v = p.viajes.find((x) => x.id === 'v-ls')!;
+      if (!de(p, 'carga').some((e) => e.codigo === 'G1 26 7')) return mal('no cargó en G1 26 7');
+      if (v.datos.fecha_salida !== '2027-01-08') return mal(`fecha de salida «${String(v.datos.fecha_salida ?? '')}» (el PDF dice 2027-01-08)`);
+      if (soportesDe(p, 'v-ls') !== 1) return mal('el PDF no quedó de soporte en el viaje');
+      return ok('cargó lo del PDF y dejó el PDF de soporte');
+    },
+  },
+  {
+    id: 'a-foto-anotar', conjunto: 1, titulo: 'pantallazo propio con el código en el pie: anotar con lo leído y la foto de soporte',
+    contactos: DIRECTORIO, viajes: [...VIAJES, VIAJE_LAURA_CTG], viajesPermitidos: ['G1 26 8'], sinClienteNuevo: true, extraccion: true,
+    pasos: [
+      { adjunta: { archivo: 'pantallazo', pie: 'esto me mandó Laura para el G1 26 8' } },
+      { toca: 'Anotar', oEscribe: 'sí' },
+    ],
+    esperado: (p) => {
+      const v = p.viajes.find((x) => x.id === 'v-lc')!;
+      if (!de(p, 'carga').some((e) => e.codigo === 'G1 26 8')) return mal('no anotó en G1 26 8');
+      if (v.datos.fecha_salida !== '2026-12-12') return mal(`fecha de salida «${String(v.datos.fecha_salida ?? '')}» (la foto dice 12 de diciembre de 2026)`);
+      if (soportesDe(p, 'v-lc') !== 1) return mal('la foto no quedó de soporte en el viaje');
+      return ok('anotó lo de la foto y dejó la foto de soporte');
+    },
+  },
+  {
+    id: 'a-choque', conjunto: 1, titulo: 'el comercial dice otra fecha que el PDF: no elige callado',
+    contactos: DIRECTORIO, viajes: [...VIAJES, VIAJE_LAURA_SA], viajesPermitidos: ['G1 26 7'], sinClienteNuevo: true, extraccion: true,
+    pasos: [
+      { adjunta: { archivo: 'solicitud', reenviado: true } },
+      { escribe: 'cárgalo en el G1 26 7, pero me dijo que salen el 10 de enero' },
+      { toca: 'Cargar', oEscribe: 'sí' },
+    ],
+    esperado: (p, t) => {
+      const v = p.viajes.find((x) => x.id === 'v-ls')!;
+      const pregunto = t.some((x) => typeof x.propuesta?.datos?.duda === 'string') || t.some((x) => x.tipo === 'modelo' && !x.propuesta && /\?/.test(x.salida?.texto ?? ''));
+      // El comercial manda en lo que pide cambiar: si quedó el 10, es su corrección. Si quedó el 8 sin preguntar, eligió el documento callado.
+      if (v.datos.fecha_salida === '2027-01-08' && !pregunto) return mal('dejó la fecha del PDF sin decir que el comercial dijo otra');
+      return ok(`fecha de salida «${String(v.datos.fecha_salida ?? 'por definir')}»${pregunto ? ', con la duda dicha' : ''}`);
+    },
+  },
+  {
+    id: 'a-factura', conjunto: 1, titulo: 'una factura de ferretería reenviada con la tanda: no se vuelve dato del viaje',
+    contactos: DIRECTORIO, viajes: [...VIAJES, VIAJE_LAURA_SA], viajesPermitidos: ['G1 26 7'], sinClienteNuevo: true, extraccion: true,
+    pasos: [
+      { reenvia: 'Hola, somos 2 adultos para San Andrés del 3 al 7 de febrero' },
+      { adjunta: { archivo: 'factura', reenviado: true } },
+      { escribe: 'cárgalo en el G1 26 7' },
+      { toca: 'Cargar', oEscribe: 'sí' },
+    ],
+    esperado: (p) => {
+      const v = p.viajes.find((x) => x.id === 'v-ls')!;
+      if (v.datos.presupuesto && v.datos.presupuesto !== 'sin_definir') return mal(`la factura se volvió presupuesto: ${String(v.datos.presupuesto)}`);
+      if (/brocha|rodillo|pintura|ferreter/i.test(String(v.datos.requisitos_especiales ?? ''))) return mal('la factura quedó en los requisitos del viaje');
+      if (v.datos.adultos !== 2) return mal(`adultos «${String(v.datos.adultos ?? '')}» (el mensaje dice 2)`);
+      return ok('cargó lo del mensaje; la factura no se volvió dato del viaje');
     },
   },
 ];

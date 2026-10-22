@@ -42,6 +42,12 @@ export interface ConfigAgente {
    * modelo real (`arnes/extraccion-casos.ts --esquema ambas`).
    */
   extraccionCompacta: boolean;
+  /**
+   * `agente_config.leer_adjuntos` (bandeja, por defecto sí, 2026-10-21): las fotos y los PDF que llegan se guardan, se leen
+   * con el modelo (Haiku; respaldo Gemini) y lo leído entra a la carga del viaje. `false` lo apaga sin desplegar (el
+   * archivo queda solo con su id de Meta en la conversación, como antes).
+   */
+  leerAdjuntos: boolean;
   topes: {
     llamados: number;
     entradaTokens: number;
@@ -65,6 +71,7 @@ export const CONFIG_POR_DEFECTO: ConfigAgente = {
   corteMs: 2500,
   respaldoEstricto: true,
   extraccionCompacta: false,
+  leerAdjuntos: true,
   topes: { llamados: 3, entradaTokens: 12000, texto: 600, turnoMs: 20000, ventanaHoras: 24 },
   cupoTurnosMes: 800,
   reglamentoId: null,
@@ -102,6 +109,7 @@ export function leerConfigAgente(botConversacional: unknown): ConfigAgente {
     corteMs: numero(a.corte_ms, d.corteMs, 100),
     respaldoEstricto: a.respaldo_estricto === false ? false : d.respaldoEstricto,
     extraccionCompacta: a.extraccion_compacta === true,
+    leerAdjuntos: a.leer_adjuntos === false ? false : d.leerAdjuntos,
     topes: {
       llamados: numero(topes.llamados, d.topes.llamados, 1),
       entradaTokens: numero(topes.entrada_tokens, d.topes.entradaTokens, 1000),
