@@ -158,18 +158,18 @@ let conversaciones = 1000
 async function apartarAsistente(
   funcion: string,
   personas: number,
-  o: { clave?: string; conv?: number; datos?: Record<string, unknown>; modalidad?: string } = {},
+  o: { clave?: string; conv?: number; datos?: Record<string, unknown>; modalidad?: string; ws?: string } = {},
 ): Promise<Apartado> {
   let conv = o.conv
   if (conv === undefined) {
     conv = ++conversaciones
-    await autorizacion(conv, 'general', 'si')
+    await autorizacion(conv, 'general', 'si', o.ws ?? WS)
   }
   const datos = { canal: 'instagram', chatwoot_cuenta_id: 1, chatwoot_conversacion_id: conv, nombre: 'Cliente', ...o.datos }
   return siendo('servidor', async () => {
     const r = await q<{ r: Apartado }>(
       `select funcion_apartar($1, $2, $3, $4, $5::jsonb, $6, 'asistente') as r`,
-      [WS, funcion, personas, o.modalidad ?? 'total', JSON.stringify(datos), o.clave ?? `clave-${uuid()}`],
+      [o.ws ?? WS, funcion, personas, o.modalidad ?? 'total', JSON.stringify(datos), o.clave ?? `clave-${uuid()}`],
     )
     return r[0].r
   })
@@ -224,9 +224,10 @@ async function estado(reserva: string) {
   return (await q<{ estado: string }>(`select estado from funcion_reservas where id = $1`, [reserva]))[0].estado
 }
 
-const consultar = (funcion: string, ws = WS) =>
-  rpc<{ disponible: boolean; motivo: string | null; cupo_libre: number; agotada: boolean; tarifa: Tarifa }>(
-    `select funcion_consultar_cupo($1, $2) as r`, [ws, funcion], 'servidor')
+interface Alternativa { funcion_id: string; experiencia: string; campana: string; campana_codigo: string; inicia_at: string; inicia_texto: string; tarifa: Tarifa; alcanza: boolean; grupo: string }
+interface Consulta { funcion_id: string; campana_codigo: string; inicia_at: string; inicia_texto: string; estado: string; tarifa: Tarifa; alternativas: Alternativa[] }
+const consultar = (funcion: string, ws = WS, personas = 1) =>
+  rpc<Consulta>(`select funcion_consultar_cupo($1, $2, $3) as r`, [ws, funcion, personas], 'servidor')
 
 beforeAll(async () => {
   db = new PGlite()
@@ -355,7 +356,8 @@ describe('dos cupos: capacidad y cupo del asistente', () => {
   it('lo que agrega el equipo le resta al asistente (una sola suma)', async () => {
     const e = await escenario({ capacidad: 10, cupoAsistente: 6 })
     await apartarEquipo(e.funcion, 4)
-    expect((await consultar(e.funcion)).cupo_libre).toBe(2)
+    expect((await consultar(e.funcion, WS, 2)).estado).toBe('alcanza')
+    expect((await consultar(e.funcion, WS, 3)).estado).toBe('llena_para_asistente')
     expect(await codigo(apartarAsistente(e.funcion, 3))).toBe('sin_cupo')
     expect((await apartarAsistente(e.funcion, 2)).estado).toBe('apartada')
     expect((await ocupacion(e.funcion)).libres).toBe(4)
@@ -467,10 +469,10 @@ describe('precios: una tarifa y la foto del monto', () => {
 describe('campañas y disponibilidad para el asistente', () => {
   it('el asistente no ve ni aparta en campaña borrador, pausada, cerrada o sin publicar, ni en función pausada o archivada', async () => {
     const borrador = await escenario({ publicada: false })
-    expect(await codigo(consultar(borrador.funcion))).toBe('funcion_no_existe')
+    expect((await consultar(borrador.funcion)).estado).toBe('no_disponible')
     expect(await codigo(apartarAsistente(borrador.funcion, 1))).toBe('funcion_no_existe')
     const pausada = await escenario({ campanaEstado: 'pausada' })
-    expect((await consultar(pausada.funcion)).motivo).toBe('campana_no_activa')
+    expect((await consultar(pausada.funcion)).estado).toBe('no_disponible')
     expect(await codigo(apartarAsistente(pausada.funcion, 1))).toBe('campana_no_activa')
     const cerrada = await escenario({ campanaEstado: 'cerrada' })
     expect(await codigo(apartarAsistente(cerrada.funcion, 1))).toBe('campana_no_activa')
@@ -508,10 +510,11 @@ describe('campañas y disponibilidad para el asistente', () => {
     const ok = await guardar('hp-oct26', { precio_persona: 180000, abono_persona: 100000 })
     const ids = await lote(ok, [{ fecha: '2099-10-24', hora: '13:00' }, { fecha: '2099-10-24', hora: '17:00' }], 24)
     expect((await q<{ codigo: string }>(`select codigo from funcion_campanas where id = $1`, [ok]))[0].codigo).toBe('HP-OCT26')
-    expect(await codigo(consultar(ids[0]))).toBe('funcion_no_existe')
+    expect((await consultar(ids[0])).estado).toBe('no_disponible')
     await rpc(`select funcion_publicar_agenda($1) as r`, [ok])
-    const c = await consultar(ids[0])
-    expect([c.disponible, c.cupo_libre, c.tarifa.precio_persona]).toEqual([true, 24, 180_000])
+    const c = await consultar(ids[0], WS, 24)
+    expect([c.estado, c.tarifa.precio_persona, c.inicia_texto]).toEqual(['alcanza', 180_000, 'sábado 24 de octubre, 1:00 p. m.'])
+    expect((await consultar(ids[0], WS, 25)).estado).toBe('llena_para_asistente')
     const f = (await q<{ capacidad: number; cupo_asistente: number }>(`select capacidad, cupo_asistente from funcion_funciones where id = $1`, [ids[0]]))[0]
     expect(f).toEqual({ capacidad: 30, cupo_asistente: 24 })
     // El código no cambia después de publicar.
@@ -683,13 +686,14 @@ describe('datos y permisos', () => {
     }
   })
 
-  it('el asistente solo ve lo libre del asistente y la tarifa, nunca la capacidad', async () => {
+  it('el asistente ve un estado y la tarifa, nunca un número de cupo', async () => {
     const e = await escenario({ capacidad: 10, cupoAsistente: 4 })
-    const c = await consultar(e.funcion)
-    expect(Object.keys(c).sort()).toEqual(['agotada', 'campana_codigo', 'cupo_libre', 'disponible', 'funcion_id', 'inicia_at', 'motivo', 'tarifa'])
-    expect(c.cupo_libre).toBe(4)
+    const c = await consultar(e.funcion, WS, 4)
+    expect(Object.keys(c).sort()).toEqual(['alternativas', 'campana_codigo', 'estado', 'funcion_id', 'inicia_at', 'inicia_texto', 'tarifa'])
+    expect([c.estado, c.alternativas]).toEqual(['alcanza', []])
     expect(await codigo(consultar(e.funcion, OTRO_WS))).toBe('funcion_no_existe')
-    expect(await codigo(rpc(`select funcion_consultar_cupo($1, $2) as r`, [WS, e.funcion]))).toMatch(/permission denied/)
+    expect(await codigo(consultar(e.funcion, WS, 0))).toBe('personas_invalidas')
+    expect(await codigo(rpc(`select funcion_consultar_cupo($1, $2, 1) as r`, [WS, e.funcion]))).toMatch(/permission denied/)
   })
 
   it('el cliente queda en contactos: se crea por teléfono la primera vez y se reusa después', async () => {
@@ -894,5 +898,190 @@ describe('pagos: uno o varios apartados en un solo link (P13)', () => {
     const b = await dosApartados()
     const p2 = await preparar([b.a1.reserva_id])
     expect(await codigo(vincular(p2.pago_id, ref))).toMatch(/funcion_pagos_referencia_unica/)
+  })
+})
+
+describe('nunca dejar ir a un cliente: estado y alternativas para el asistente', () => {
+  const WS4 = '00000000-0000-4000-8000-00000000f004'
+  const EQUIPO4 = '00000000-0000-4000-8000-00000000f014'
+  beforeAll(async () => {
+    await q(`insert into workspaces (id, slug) values ($1, 'alternativas')`, [WS4])
+    await q(`insert into profiles values ($1, $2, 'operator')`, [EQUIPO4, WS4])
+  })
+
+  /** Una función más en una campaña existente, a `horas` de ahora. */
+  async function otra(campana: string, horas: number, o: { capacidad?: number; cupo?: number; estado?: string; archivada?: boolean } = {}) {
+    const id = uuid()
+    await q(
+      `insert into funcion_funciones (id, workspace_id, campana_id, inicia_at, capacidad, cupo_asistente, estado, archivada_at)
+       values ($1, $2, $3, now() + $4::numeric * interval '1 hour', $5, $6, $7, $8)`,
+      [id, WS4, campana, horas, o.capacidad ?? 10, o.cupo ?? o.capacidad ?? 10, o.estado ?? 'activa', o.archivada ? new Date().toISOString() : null],
+    )
+    return id
+  }
+
+  it('función llena para el asistente: alternativas de la misma campaña por cercanía, y estados según las personas', async () => {
+    const e = await escenario({ ws: WS4, capacidad: 4, cupoAsistente: 2 })
+    // La pedida es mañana (+24 h). Candidatas de la misma campaña:
+    const cerca = await otra(e.campana, 26)
+    const antes = await otra(e.campana, 21)
+    const lejos = await otra(e.campana, 72)
+    await otra(e.campana, 25, { estado: 'pausada' })
+    await otra(e.campana, 24.5, { archivada: true })
+    await otra(e.campana, 25.5, { capacidad: 1 })
+    // Otra experiencia, publicada; y una sin publicar.
+    const x = await escenario({ ws: WS4 })
+    await escenario({ ws: WS4, publicada: false })
+    await apartarEquipo(e.funcion, 2, { ws: WS4, perfil: EQUIPO4 })
+
+    const c = await consultar(e.funcion, WS4, 2)
+    expect(c.estado).toBe('llena_para_asistente')
+    expect(c.alternativas.map((a) => [a.funcion_id, a.grupo, a.alcanza])).toEqual([
+      [cerca, 'misma_campana', true], [antes, 'misma_campana', true], [lejos, 'misma_campana', true],
+    ])
+    expect(c.alternativas[0].inicia_texto).toMatch(/^[a-záéíóú]+ \d{1,2} de [a-z]+, \d{1,2}:\d{2} [ap]\. m\.$/)
+    // Con 3 personas ya no cabe ni en la capacidad.
+    expect((await consultar(e.funcion, WS4, 3)).estado).toBe('llena')
+    // Si la misma campaña no alcanza a 3, se completan con otras experiencias, por fecha.
+    await q(`update funcion_funciones set estado = 'pausada' where id = $1`, [lejos])
+    const d = await consultar(e.funcion, WS4, 2)
+    expect(d.alternativas.map((a) => [a.funcion_id, a.grupo])).toEqual([[cerca, 'misma_campana'], [antes, 'misma_campana'], [x.funcion, 'otra_experiencia']])
+  })
+
+  it('el tope es 3 en total y las otras experiencias van por fecha', async () => {
+    const e = await escenario({ ws: WS4, capacidad: 2, cupoAsistente: 1 })
+    await apartarEquipo(e.funcion, 1, { ws: WS4, perfil: EQUIPO4 })
+    const c = await consultar(e.funcion, WS4, 1)
+    expect(c.alternativas.length).toBeLessThanOrEqual(3)
+    const otras = c.alternativas.filter((a) => a.grupo === 'otra_experiencia')
+    const fechas = otras.map((a) => Date.parse(a.inicia_at))
+    expect([...fechas].sort((a, b) => a - b)).toEqual(fechas)
+    expect(c.alternativas.map((a) => a.funcion_id)).not.toContain(e.funcion)
+  })
+
+  it('alcanza no trae alternativas; no disponible sí, y pausadas, archivadas o sin publicar nunca aparecen', async () => {
+    const e = await escenario({ ws: WS4, capacidad: 10 })
+    expect(await consultar(e.funcion, WS4, 2)).toMatchObject({ estado: 'alcanza', alternativas: [] })
+    const pausada = await escenario({ ws: WS4, estado: 'pausada' })
+    const p = await consultar(pausada.funcion, WS4, 2)
+    expect(p.estado).toBe('no_disponible')
+    expect(p.alternativas.length).toBeGreaterThan(0)
+    const malas = (await q<{ id: string }>(
+      `select f.id from funcion_funciones f join funcion_campanas c on c.id = f.campana_id
+        where f.workspace_id = $1 and (f.estado <> 'activa' or f.archivada_at is not null or c.agenda_publicada_at is null or c.estado <> 'activa')`, [WS4])).map((r) => r.id)
+    expect(p.alternativas.map((a) => a.funcion_id).filter((id) => malas.includes(id))).toEqual([])
+    const ventaCerrada = await escenario({ ws: WS4, cierraVentaAt: new Date(Date.now() - 60_000).toISOString() })
+    expect((await consultar(ventaCerrada.funcion, WS4, 1)).estado).toBe('no_disponible')
+  })
+
+  it('apartar sin cupo devuelve el mismo estado y las mismas alternativas, sin números', async () => {
+    const e = await escenario({ ws: WS4, capacidad: 3, cupoAsistente: 2 })
+    await otra(e.campana, 30)
+    await apartarAsistente(e.funcion, 2, { ws: WS4 })
+    const detalle = await (async () => {
+      const conv = ++conversaciones
+      await autorizacion(conv, 'general', 'si', WS4)
+      return siendo('servidor', async () => {
+        try {
+          await q(`select funcion_apartar($1, $2, 1, 'total', $3::jsonb, $4, 'asistente')`,
+            [WS4, e.funcion, JSON.stringify({ canal: 'instagram', chatwoot_cuenta_id: 1, chatwoot_conversacion_id: conv }), `x-${uuid()}`])
+          return null
+        } catch (x) {
+          return { mensaje: (x as Error).message, detalle: JSON.parse((x as { detail: string }).detail) }
+        }
+      })
+    })()
+    const consulta = await consultar(e.funcion, WS4, 1)
+    expect(detalle?.mensaje).toBe('sin_cupo')
+    expect(detalle?.detalle).toEqual({ estado: consulta.estado, alternativas: consulta.alternativas })
+    expect(consulta.estado).toBe('llena_para_asistente')
+    expect(JSON.stringify(detalle?.detalle)).not.toMatch(/cupo_libre|libres|ocupadas|capacidad|cupo_asistente|puestos/)
+  })
+
+  it('ninguna lectura del asistente trae un número de cupo', async () => {
+    const e = await escenario({ ws: WS4, capacidad: 4, cupoAsistente: 2 })
+    await apartarEquipo(e.funcion, 2, { ws: WS4, perfil: EQUIPO4 })
+    const salidas = [
+      await consultar(e.funcion, WS4, 1),
+      await rpc(`select funcion_ver_disponibles($1, null) as r`, [WS4], 'servidor'),
+      await rpc(`select funcion_campanas_activas($1) as r`, [WS4], 'servidor'),
+    ]
+    const claves: string[] = []
+    const recorrer = (v: unknown) => {
+      if (Array.isArray(v)) v.forEach(recorrer)
+      else if (v && typeof v === 'object') for (const [k, x] of Object.entries(v)) { claves.push(k); recorrer(x) }
+    }
+    salidas.forEach(recorrer)
+    expect(claves.filter((k) => /cupo|libre|ocupad|capacidad|puesto/.test(k))).toEqual([])
+  })
+})
+
+describe('el panel: estado efectivo, anuncios, duplicar y cambios de estado', () => {
+  const panel = () => rpc<Array<{ campana_id: string; estado: string; funciones: number; llenas: number; llenas_asistente: number }>>(`select funcion_panel_campanas($1) as r`, [WS])
+
+  it('P6: la campaña se cierra sola cuando pasa su última función (al leer, sin cron)', async () => {
+    const e = await escenario()
+    expect((await panel()).find((c) => c.campana_id === e.campana)?.estado).toBe('activa')
+    await q(`update funcion_funciones set inicia_at = now() - interval '1 hour' where id = $1`, [e.funcion])
+    expect((await panel()).find((c) => c.campana_id === e.campana)?.estado).toBe('cerrada')
+    expect((await q<{ estado: string }>(`select estado from funcion_campanas where id = $1`, [e.campana]))[0].estado).toBe('activa')
+    const activas = await rpc<{ campanas: Array<{ campana_id: string }> }>(`select funcion_campanas_activas($1) as r`, [WS], 'servidor')
+    expect(activas.campanas.map((c) => c.campana_id)).not.toContain(e.campana)
+  })
+
+  it('agotada cuando todas sus funciones futuras están llenas; el detalle pone las llenas al final', async () => {
+    const e = await escenario({ capacidad: 2 })
+    await apartarEquipo(e.funcion, 2)
+    expect((await panel()).find((c) => c.campana_id === e.campana)).toMatchObject({ estado: 'agotada', llenas: 1 })
+    const [libre] = await rpc<string[]>(`select funcion_crear_funciones($1, $2, 5, null, null, null, '[{"fecha":"2099-01-10","hora":"13:00"}]'::jsonb) as r`, [WS, e.campana])
+    const d = await rpc<{ estado: string; funciones: Array<{ funcion_id: string; ocupadas: number; reservas_activas: number }> }>(`select funcion_panel_campana($1) as r`, [e.campana])
+    expect(d.estado).toBe('activa')
+    expect(d.funciones.map((f) => f.funcion_id)).toEqual([libre, e.funcion])
+    expect(d.funciones[1]).toMatchObject({ ocupadas: 2, reservas_activas: 1 })
+    expect(await codigo(rpc(`select funcion_panel_campana($1) as r`, [e.campana], { equipo: AJENO }))).toBe('campana_no_existe')
+  })
+
+  it('P10: anuncios por campaña, y el asistente encuentra la campaña por anuncio o por código', async () => {
+    const e = await escenario()
+    const b = await escenario()
+    await rpc(`select funcion_guardar_anuncio($1, '120208765432100001', false) as r`, [e.campana])
+    await rpc(`select funcion_guardar_anuncio($1, '120208765432100001', false) as r`, [e.campana])
+    expect(await codigo(rpc(`select funcion_guardar_anuncio($1, '120208765432100001', false) as r`, [b.campana]))).toBe('anuncio_de_otra_campana')
+    expect(await codigo(rpc(`select funcion_guardar_anuncio($1, 'con espacio', false) as r`, [e.campana]))).toBe('anuncio_invalido')
+    const porAnuncio = await rpc<{ campana_id: string; activa: boolean } | null>(`select funcion_campana_por_anuncio($1, '120208765432100001') as r`, [WS], 'servidor')
+    expect(porAnuncio).toMatchObject({ campana_id: e.campana, activa: true })
+    const porCodigo = await rpc<{ campana_id: string } | null>(`select funcion_campana_por_codigo($1, $2) as r`, [WS, e.codigo.toLowerCase()], 'servidor')
+    expect(porCodigo?.campana_id).toBe(e.campana)
+    const borrador = await escenario({ publicada: false })
+    expect(await rpc(`select funcion_campana_por_codigo($1, $2) as r`, [WS, borrador.codigo], 'servidor')).toBeNull()
+    await rpc(`select funcion_guardar_anuncio($1, '120208765432100001', true) as r`, [e.campana])
+    expect(await rpc(`select funcion_campana_por_anuncio($1, '120208765432100001') as r`, [WS], 'servidor')).toBeNull()
+    expect(await codigo(rpc(`select funcion_guardar_anuncio($1, 'x1', false) as r`, [e.campana], 'servidor'))).toMatch(/permission denied/)
+    expect(await codigo(rpc(`select funcion_campana_por_anuncio($1, 'x1') as r`, [WS]))).toMatch(/permission denied/)
+  })
+
+  it('duplicar copia experiencia, precios y reglas, con código libre y la agenda vacía', async () => {
+    const e = await escenario({ precio: 180_000, abono: 100_000 })
+    const id = await rpc<string>(`select funcion_duplicar_campana($1) as r`, [e.campana])
+    const c = (await q<{ codigo: string; estado: string; precio_persona: number; abono_persona: number; experiencia_id: string }>(
+      `select codigo, estado, precio_persona, abono_persona, experiencia_id from funcion_campanas where id = $1`, [id]))[0]
+    expect(c).toEqual({ codigo: `${e.codigo}-2`, estado: 'borrador', precio_persona: 180_000, abono_persona: 100_000, experiencia_id: e.experiencia })
+    expect((await q(`select 1 from funcion_funciones where campana_id = $1`, [id])).length).toBe(0)
+    const otraCopia = await rpc<string>(`select funcion_duplicar_campana($1) as r`, [e.campana])
+    expect((await q<{ codigo: string }>(`select codigo from funcion_campanas where id = $1`, [otraCopia]))[0].codigo).toBe(`${e.codigo}-3`)
+  })
+
+  it('pausar, reactivar y cerrar la campaña; pausar o cancelar una función dice cuántas reservas tiene', async () => {
+    const e = await escenario()
+    await rpc(`select funcion_cambiar_estado_campana($1, 'pausada') as r`, [e.campana])
+    expect(await codigo(apartarAsistente(e.funcion, 1))).toBe('campana_no_activa')
+    await rpc(`select funcion_cambiar_estado_campana($1, 'activa') as r`, [e.campana])
+    expect((await apartarAsistente(e.funcion, 1)).estado).toBe('apartada')
+    const borrador = await escenario({ publicada: false })
+    expect(await codigo(rpc(`select funcion_cambiar_estado_campana($1, 'activa') as r`, [borrador.campana]))).toBe('campana_no_publicada')
+    const r = await rpc<{ estado: string; reservas_activas: number }>(`select funcion_cambiar_estado_funcion($1, 'cancelada') as r`, [e.funcion])
+    expect(r).toMatchObject({ estado: 'cancelada', reservas_activas: 1 })
+    expect(await codigo(rpc(`select funcion_cambiar_estado_funcion($1, 'activa') as r`, [e.funcion], 'servidor'))).toMatch(/permission denied/)
+    expect(await codigo(rpc(`select funcion_cambiar_estado_campana($1, 'cerrada') as r`, [e.campana], { equipo: LECTOR }))).toBe('sin_permiso')
   })
 })
