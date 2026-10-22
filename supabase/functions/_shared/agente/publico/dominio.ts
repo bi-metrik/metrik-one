@@ -80,6 +80,12 @@ export function porQueYaSalio(filas: FilaPublica[]): boolean {
   });
 }
 
+/** ¿El último mensaje que le salió al cliente fue `rf.persona_por_que`? (lo que conteste ahora es la respuesta). Pura. */
+export function ultimoFuePorQue(filas: FilaPublica[]): boolean {
+  const ultima = filas.filter((f) => (f.traza as TrazaPublica | null)?.salida).at(-1);
+  return !!ultima && porQueYaSalio([ultima]);
+}
+
 const normal = (s: string) => s.toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '').replace(/[^a-z0-9ñ]+/g, ' ').trim();
 const digitos = (s: string) => s.replace(/\D/g, '');
 
@@ -309,7 +315,9 @@ export function dominioPublico(o: OpcionesDominioPublico): Dominio {
         ...(sen.estado !== 'no_pedida' ? [`Dato de salud: ${sen.estado === 'si' ? 'autorizado (ya pasó a persona)' : sen.estado === 'no' ? 'no autorizado: no lo menciones ni lo guardes' : 'autorización pedida, sin respuesta'}.`] : []),
         ...(preferenciaMesa(filas) ? [`Preferencia de mesa anotada (por confirmar, no asignada): ${preferenciaMesa(filas)}.`] : []),
         ...(pasados.length ? [`Ya pasó a persona por: ${[...new Set(pasados)].join(', ')} (no repitas esos motivos salvo pide_persona). Si pide una persona otra vez: pasar_a_persona motivo pide_persona, sin preguntar por qué.`] : []),
-        ...(!pasados.length && porQueYaSalio(filas) ? ['Ya le preguntaste por qué quiere una persona (rf.persona_por_que): no lo vuelvas a preguntar. Si contesta algo que resuelves, contéstalo y ofrécele de nuevo pasar con una persona; si vuelve a pedir una persona o dice que solo quiere hablar con alguien: pasar_a_persona motivo pide_persona.'] : []),
+        ...(!pasados.length && porQueYaSalio(filas) ? [ultimoFuePorQue(filas)
+          ? 'Tu último mensaje fue la pregunta de para qué quiere una persona (rf.persona_por_que). Si ahora pide algo que resuelves, contéstalo y TERMINA el mensaje ofreciéndole otra vez pasar con una persona del equipo. Si es algo que no resuelves, pasa con ese motivo. Si insiste en una persona o dice que solo quiere hablar con alguien: pasar_a_persona motivo pide_persona. No vuelvas a preguntar por qué.'
+          : 'Ya le preguntaste por qué quiere una persona (rf.persona_por_que): no lo vuelvas a preguntar. Si vuelve a pedir una persona o dice que solo quiere hablar con alguien: pasar_a_persona motivo pide_persona.'] : []),
       ];
     },
 
