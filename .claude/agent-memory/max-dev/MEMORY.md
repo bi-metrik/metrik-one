@@ -3,8 +3,9 @@
 ## Project memories
 
 - ⚠️ [Bot ONE registra ingresos (#1231)](project_ingresos_wa_one.md) — cuotas programadas; candado con `respaldo`; depósito propio = ingreso; v4
+- ⚠️⚠️ [Hitos de gestión y Agenda (Trappvel)](project_hitos_de_gestion.md) — #1245; 20261022090000 dry-run de Mik OK, SIN aplicar; MX sin plazo
 - ⚠️ [Bandeja Trappvel lee foto/PDF + gastos vigentes ONE](project_bandeja_adjuntos_trappvel.md) — soporte = comentario con one://; leer_adjuntos; arnés a-* sin llave
-- ⚠️⚠️ [Fechas completas de los servicios del viaje](project_fechas_servicios_viaje.md) — 20261021120000 SIN aplicar; corrección a mano manda; reproceso pierde con rastro
+- ⚠️⚠️ [Fechas completas de los servicios del viaje](project_fechas_servicios_viaje.md) — #1236 mergeado (8d29ec61), 20261021120000 APLICADA; corrección a mano manda; reproceso pierde con rastro
 - [Tablero Novedades (21-oct)](project_novedades_tablero.md) — archivo versionado + panel; visto por ids; el 503 crudo ya lo arregló #1241
 - [Errores de Valida en llano (21-oct)](project_valida_mensajes_error.md) — mensajes-error.ts; busqueda_incompleta no entra a valida_consultas
 - ⚠️⚠️ [Asistente de Sabor sobre Chatwoot (etapa 1)](project_asistente_chatwoot_sabor.md) — #1225 mergeado, migración aplicada, sin deploy; sobreventa en PR aparte; tope 400 tokens por ficha
@@ -99,6 +100,7 @@
 
 - [Build en worktree sin una dependencia](reference_build_en_worktree.md) — copiar el paquete, no symlink (raíz de Turbopack)
 - [Comandos en worktree aislado](reference_worktree_aislado_comandos.md) — editar y mutar con python; git siempre simple
+- [Capturas de un componente sin servidor](reference_capturas_componente_sin_servidor.md) — vitest temporal + postcss + Playwright de npx
 - [Reproducir el PDF real solo lectura](reference_reproducir_pdf_real_solo_lectura.md) — supabase-js con fetch solo GET; sin MCP
 - [Frentes secundarios](indice_frentes_secundarios.md) — ~145 entradas viejas: cobros, Valida, SOENA, recibos, Siigo, recetas; buscar ahí antes de crear
 

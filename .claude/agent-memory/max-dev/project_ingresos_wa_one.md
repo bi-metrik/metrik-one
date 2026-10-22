@@ -21,4 +21,8 @@ PR #1231 feat/wa-ingresos-one (2026-10-21/22), sin migración. Ya trae main con 
 - `entraALaEmpresa` compara `lectura.titular_destino` con `workspaces.name` (no con la razón social del perfil fiscal):
   si el nombre del workspace difiere mucho de la razón social, el invariante no salta y queda solo la regla del modelo.
 - El eval con modelo real lo corre la sesión principal: en el worktree no hay ANTHROPIC_API_KEY.
+- Una regresión del eval real no siempre la abrió el PR: r-t-gasolina (22-oct) era un hueco de `empresaDicha` desde #1226
+  que el modelo pisó por varianza. Antes de culpar al diff, reproducir con guion el `#n` exacto que mandó el modelo
+  (está en `resultados.json`, `empresa_dicho_en`) y probar la función de main contra él.
+- `\b` en JS no ve la «é» como letra: `registr[ée]\b` no casa «registré ». Bordes con `(?<![\p{L}\d])…(?![\p{L}\d])` y flag `u`.
 Relacionado: [[bandeja-adjuntos-trappvel]], [[wa-soporte-pdf-agente]].

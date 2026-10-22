@@ -2,7 +2,7 @@
 
 import { useState, useEffect, useCallback, useRef } from 'react'
 import { useRouter } from 'next/navigation'
-import { Bell, Check, X, CheckCheck, Flame, FolderKanban, AtSign, TrendingDown, UserPlus, UserCheck, Package, CircleDollarSign, ShieldAlert } from 'lucide-react'
+import { Bell, Check, X, CheckCheck, Flame, FolderKanban, AtSign, TrendingDown, UserPlus, UserCheck, Package, CircleDollarSign, ShieldAlert, CalendarCheck, AlarmClock } from 'lucide-react'
 import { LoadingSpinner } from '@/components/ui/loading-spinner'
 import {
   marcarCompletada,
@@ -13,6 +13,7 @@ import {
 import { leerNotificaciones, REFRESCO_MINIMO_AL_VOLVER_MS } from '@/lib/notificaciones/leer'
 import { toast } from 'sonner'
 import { seCierraDecidiendo } from '@/lib/compliance/alarma-hallazgo'
+import { BotonWhatsApp } from '@/components/boton-whatsapp'
 
 // ── Helpers ───────────────────────────────────────────
 
@@ -46,6 +47,9 @@ const TIPO_ICON: Record<string, React.ElementType> = {
   cuenta_cobro_pendiente_aprobacion: CircleDollarSign,
   compliance_hallazgo: ShieldAlert,
   compliance_delta_contraparte: ShieldAlert,
+  // Hitos de gestión del viaje (2026-10-22): el resumen del día abre la Agenda; el vencido, el viaje.
+  agenda_del_dia: CalendarCheck,
+  hito_vencido: AlarmClock,
 }
 
 const TIPO_COLOR: Record<string, string> = {
@@ -63,6 +67,8 @@ const TIPO_COLOR: Record<string, string> = {
   cuenta_cobro_pendiente_aprobacion: '#8B5CF6',
   compliance_hallazgo: 'var(--alerta)',
   compliance_delta_contraparte: 'var(--alerta)',
+  agenda_del_dia: 'var(--acento)',
+  hito_vencido: 'var(--alerta)',
 }
 
 // ── Componente principal ──────────────────────────────
@@ -402,6 +408,7 @@ export default function NotificationBell({ userId, initialItems, initialTotal }:
                     <p className="mt-0.5 text-[11px] text-muted-foreground">
                       {tiempoRelativo(item.created_at)}
                     </p>
+                    <BotonWhatsApp metadata={item.metadata} />
                   </div>
 
                   {/* Acciones */}

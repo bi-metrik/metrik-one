@@ -15,6 +15,8 @@ import type { DatosBloqueServicios } from './bloque-servicios'
 import { aprobadoresDeLinea, serviciosViajeActivo } from './estado-servicio'
 import { configReglasPago, mediosPagoProveedor, type MedioPagoProveedor } from './reglas-pago'
 import { completarFechasDeServicios, leerServiciosDelNegocio, type ServicioDelNegocio } from './servicios-viaje-datos'
+import { configHitos, type Hito } from './hitos'
+import { hitosDelNegocio } from './hitos-datos'
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type Db = any
@@ -61,10 +63,13 @@ export async function datosDelTablero(
     const { completadas } = await completarFechasDeServicios(db, { workspaceId: args.workspaceId, negocioId: args.negocioId, soloSinMarca: true })
     if (completadas > 0) filas = (await leerServiciosDelNegocio(db, { workspaceId: args.workspaceId, negocioId: args.negocioId })) ?? filas
   }
-  const pidieron = [...new Set((filas ?? []).flatMap(f => [
-    ...f.aprobaciones.map(a => a.solicitada_por ?? ''),
-    f.fechas_corregidas_por ?? '',
-  ]).filter(Boolean))]
+  // Hitos de gestión (píldoras y «Sigue:»), solo con `config_extra.hitos.activo`. Si no se pueden
+  // calcular, el tablero se ve como siempre.
+  const hitos = configHitos(args.configLinea).activo ? await hitosDelTablero(db, args).catch(() => [] as Hito[]) : []
+  const pidieron = [...new Set([
+    ...(filas ?? []).flatMap(f => [...f.aprobaciones.map(a => a.solicitada_por ?? ''), f.fechas_corregidas_por ?? '']),
+    ...hitos.map(h => h.marca?.hecho_por ?? ''),
+  ].filter(Boolean))]
   const nombres: Record<string, string> = {}
   if (pidieron.length > 0) {
     const { data } = await db.from('staff').select('id, full_name').eq('workspace_id', args.workspaceId).in('id', pidieron)
@@ -83,7 +88,17 @@ export async function datosDelTablero(
     cobradoCliente: plata.cobrado,
     precioAprobado: plata.precio,
     nombres,
+    ...(hitos.length > 0 ? { hitos } : {}),
   }
+}
+
+/** Los hitos de las filas del negocio (sin los del viaje: esos viven en la agenda). */
+async function hitosDelTablero(db: Db, args: { workspaceId: string; negocioId: string; configLinea: unknown }): Promise<Hito[]> {
+  const { data } = await db.from('negocios').select('linea_id').eq('id', args.negocioId).eq('workspace_id', args.workspaceId).maybeSingle()
+  const lineaId = (data as { linea_id?: string | null } | null)?.linea_id
+  if (!lineaId) return []
+  const { hitos } = await hitosDelNegocio(db, { workspaceId: args.workspaceId, negocioId: args.negocioId, linea: { id: lineaId, config_extra: args.configLinea } })
+  return hitos.filter(h => h.servicioId)
 }
 
 /** Una fila de la cotización que nunca ganó las fechas completas y nadie corrigió a mano. */

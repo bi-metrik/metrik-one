@@ -3,6 +3,7 @@ import { createClient } from '@supabase/supabase-js'
 import { candadoDeCron } from '@/lib/idempotencia/candado-cron'
 import { todayBogotaISO } from '@/lib/dates/bogota'
 import { correrRecordatorios } from '@/lib/recordatorios/motor'
+import { correrHitos } from '@/lib/recordatorios/hitos-motor'
 import { aplicarPrerreservaVencida, prerreservasVencidas } from '@/lib/viaje/confirmacion-datos'
 import { duplicarCotizacionCompleta } from '@/lib/cotizaciones/duplicar-cotizacion'
 
@@ -43,7 +44,14 @@ export async function GET(req: NextRequest) {
   try {
     const resumen = await correrRecordatorios(svc, { hoy })
     const prerreservas = await vencerPrerreservas(svc)
-    return NextResponse.json({ ok: true, hoy, ...resumen, prerreservas_vencidas: prerreservas })
+    // Hitos de gestión (resumen diario y escalamiento, `config_extra.hitos.activo`): si fallan, los
+    // recordatorios de siempre ya salieron y la corrida no se marca como caída.
+    const hitos = await correrHitos(svc, { hoy }).catch((e: unknown) => {
+      const msg = e instanceof Error ? e.message : String(e)
+      console.error('[cron recordatorios] hitos', msg)
+      return { error: msg }
+    })
+    return NextResponse.json({ ok: true, hoy, ...resumen, prerreservas_vencidas: prerreservas, hitos })
   } catch (e) {
     const msg = e instanceof Error ? e.message : String(e)
     console.error('[cron recordatorios]', msg)
