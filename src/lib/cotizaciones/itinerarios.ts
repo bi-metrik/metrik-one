@@ -369,10 +369,46 @@ export function cascadaDeItinerario<T extends ItemConGrupo & ItemParaCascada>(
  *
  * Es del AGREGADO a propósito: una línea sin costo dentro de un agregado que sí lo tiene
  * (el recargo fijo, un fee) no lo vuelve inmedible.
+ *
+ * ## Tarifa pública (2026-10-22, `tarifa-publica.ts`)
+ *
+ * Las líneas de tarifa PÚBLICA no entran: su ganancia es la comisión, que ONE no conoce al
+ * cotizar, y medirlas al 0 % hundía el margen de la tarifa entera. Se mide sobre las Netas: su
+ * venta (con su parte del descuento comercial, que se reparte en proporción) contra su costo.
+ * Sin líneas Públicas es exactamente la cuenta de siempre. Si TODO es Público, `null`, y
+ * `exentaDelMinimo` dice que no hay nada que exigir (no es «falta el costo»).
  */
-export function margenMedible(cascada: Pick<Cascada, 'precioVenta' | 'costoDeVenta' | 'margenRealPct'>): number | null {
-  if (!(cascada.precioVenta > 0) || !(cascada.costoDeVenta > 0)) return null
-  return cascada.margenRealPct
+export function margenMedible(cascada: Pick<Cascada, 'precioVenta' | 'costoDeVenta' | 'margenRealPct'> & { ventaBruta?: number; publicas?: Cascada['publicas'] }): number | null {
+  const p = cascada.publicas
+  if (!p || p.lineas === 0) {
+    if (!(cascada.precioVenta > 0) || !(cascada.costoDeVenta > 0)) return null
+    return cascada.margenRealPct
+  }
+  if (p.exentaDelMinimo) return null
+  const bruta = Number(cascada.ventaBruta) || 0
+  const factor = bruta > 0 ? cascada.precioVenta / bruta : 1
+  const precio = (bruta - p.ventaBruta) * factor
+  const costo = cascada.costoDeVenta - p.costoDeVenta
+  if (!(precio > 0) || !(costo > 0)) return null
+  return ((precio - costo) / precio) * 100
+}
+
+/**
+ * ¿Este agregado no tiene margen que exigir? Solo cuando lo que cobra es de tarifa pública
+ * (`PesoDeLasPublicas.exentaDelMinimo`): ahí `margenMedible` es `null` y NO significa «falta el
+ * costo».
+ */
+export function exentaDelMinimo(cascada: { publicas?: Cascada['publicas'] }): boolean {
+  return cascada.publicas?.exentaDelMinimo === true
+}
+
+/**
+ * El margen contra el que se juzga el mínimo donde el piso NO se exige en la salida (la regla de
+ * siempre: sin precio, `null`, que no bloquea). Con líneas de tarifa pública, el de las Netas.
+ */
+export function margenParaElMinimo(cascada: Pick<Cascada, 'precioVenta' | 'costoDeVenta' | 'margenRealPct'> & { ventaBruta?: number; publicas?: Cascada['publicas'] }): number | null {
+  if (!cascada.publicas || cascada.publicas.lineas === 0) return cascada.margenRealPct
+  return margenMedible(cascada)
 }
 
 /** Por qué un itinerario no puede salir en la propuesta. `null` = sí puede. */
@@ -401,10 +437,16 @@ export function motivoDeRechazo(args: {
   ranurasFaltantes: string[]
   margenRealPct: number | null
   pisoPct: number
+  /**
+   * Todo lo que cobra es de tarifa pública (`exentaDelMinimo`): no hay margen que exigir. La
+   * completitud se exige igual.
+   */
+  exenta?: boolean
 }): MotivoRechazo | null {
   if (args.ranurasFaltantes.length > 0) {
     return { tipo: 'incompleto', grupos: args.ranurasFaltantes }
   }
+  if (args.exenta === true) return null
   const nivel = nivelDeMargen(args.margenRealPct, { pisoPct: args.pisoPct, avisoPct: args.pisoPct })
   if (nivel === 'bajo_piso' || nivel === 'sin_dato') {
     return { tipo: 'bajo_piso', margenRealPct: args.margenRealPct, pisoPct: args.pisoPct }

@@ -138,6 +138,7 @@ import {
 import {
   itemsDelItinerario,
   itemsQueAportanAlTotal,
+  margenParaElMinimo,
   normalizarGrupo,
   ranurasPorSupuesto,
 } from '@/lib/cotizaciones/itinerarios'
@@ -902,6 +903,8 @@ export default function CotizacionEditor({ oportunidadId, cotizacion, initialIte
       precio_manual: item.precio_manual,
       // Punto 11 del brief del 2026-10-05: lo mismo que `recalcularTotales`.
       pasajeros: pasajerosParaCuadre(item.tarifa_pax, costoSinIva),
+      // Tarifa pública (2026-10-22): la línea sale de la medida del margen mínimo.
+      tarifa_pax: item.tarifa_pax,
     }
   }), Object.values(adicionales.porItem).flat())
   const paramsCascada = {
@@ -3996,7 +3999,8 @@ function TotalesMargen({ cascada, margenPct, convencionMargen, descuentoPct, edi
   const margenRealEsOtraCosa =
     cascada.margenRealPct !== null && Math.abs(cascada.margenRealPct - margenPct) >= 0.05
 
-  const nivelConsolidado = nivelDeMargen(cascada.margenRealPct, umbrales)
+  // El nivel (rojo/ámbar) se juzga como el mínimo: sin las líneas de tarifa pública.
+  const nivelConsolidado = nivelDeMargen(margenParaElMinimo(cascada), umbrales)
   const margenConsolidado = formatMargenPct(cascada.margenRealPct)
 
   return (

@@ -17,6 +17,7 @@ import {
   estadoDeServicioPorPasos,
   juntarServicioPorPasos,
   mandarTarifa,
+  margenDeLaCotizacionEnOpciones,
   margenPorPasos,
   moverOpcionPorPasos,
   pedirAutorizacionPorPasos,
@@ -33,6 +34,7 @@ import { ItemMenu, SeparadorMenu } from '@/components/viaje/menu-acciones'
 import type { FilaAdicional } from '@/lib/cotizaciones/adicionales'
 import type { ParametrosCascada } from '@/lib/cotizaciones/totales'
 import { ranurasConAlternativas } from '@/lib/cotizaciones/itinerarios'
+import { lineasConMargenPropio } from '@/lib/cotizaciones/margen-propio'
 import { estadosPermitidos, type EstadoServicio } from '@/lib/cotizaciones/estado-servicio'
 import { YA_CAMBIO } from '@/lib/cotizaciones/deshacer-por-pasos'
 import { textoCortoDeOpcion, tiposSinPrecio } from '@/lib/cotizaciones/precio-que-falta'
@@ -312,6 +314,21 @@ export default function VistaPorPasos(p: PropsVistaPorPasos) {
     })
   }
 
+  // Punto 2 (reunión del 2026-10-22): las opciones Netas que no siguen el margen de la cotización.
+  const propios = useMemo(
+    () => lineasConMargenPropio(lineas, Number(params.margenPct) || 0, params.convencionMargen)
+      .map(l => ({ id: l.id, margen: Number(l.margen_porcentaje) })),
+    [lineas, params],
+  )
+  const seguirMargen = () => {
+    void correr(async () => {
+      const r = await margenDeLaCotizacionEnOpciones(p.cotizacionId, propios.map(x => x.id))
+      if (!r.success) { toast.error(r.error); return }
+      toast.success(r.cambiadas === 1 ? 'Esa opción ya usa el margen de la cotización.' : `Esas ${r.cambiadas} opciones ya usan el margen de la cotización.`)
+      p.refrescar()
+    })
+  }
+
   const margen = (pct: number) => {
     setMargenLocal(pct)
     void correr(async () => {
@@ -555,6 +572,8 @@ export default function VistaPorPasos(p: PropsVistaPorPasos) {
       onElegir={elegir}
       onMandar={mandar}
       onMargen={margen}
+      propios={propios.map(x => ({ ...x, nombre: nombreDeOpcion(x.id) }))}
+      onSeguirMargen={seguirMargen}
       onPedir={() => void correr(async () => {
         const r = await pedirAutorizacionPorPasos(p.cotizacionId)
         if (!r.success) { toast.error(r.error); return }

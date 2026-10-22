@@ -677,6 +677,8 @@ export default function TarjetaOpcion({
             onCambio={onCambio}
             autorizador={autorizador}
             apilable={porPasos !== null}
+            tipoTarifa={tarifa.tipoTarifa?.tipo ?? 'neta'}
+            tipoPropuesto={tarifa.tipoTarifa?.origen === 'tarifario'}
           />
 
           {/* Las tarifas del proveedor: UN panel (brief del 2026-10-21, punto 6). Sin costo,

@@ -44,6 +44,7 @@ import {
 } from './precio-item'
 import { totalesDeAdicionales, type AdicionalParaSuma } from './adicionales'
 import { precioCuadradoPorPasajero, type FilaDePasajeros } from './cuadre-pasajero'
+import { esTarifaPublica } from './tarifa-publica'
 
 export interface ItemParaCascada {
   id?: string
@@ -77,6 +78,12 @@ export interface ItemParaCascada {
    * todo lo que no es Trappvel: la cascada da exactamente lo de antes.
    */
   pasajeros?: readonly FilaDePasajeros[] | null
+  /**
+   * La lectura de la línea (`items.tarifa_pax`). Aquí solo se mira si la línea es de tarifa
+   * PÚBLICA (`tarifa-publica.ts`): el precio no cambia, pero la línea sale de la medida del
+   * margen mínimo. Ausente = Neta, que es todo lo anterior al 2026-10-22.
+   */
+  tarifa_pax?: unknown
 }
 
 export interface ParametrosCascada {
@@ -151,6 +158,25 @@ export interface LineaCalculada {
    * tiene que decirlo.
    */
   margenRealPct: number | null
+  /** La línea es de tarifa pública (`tarifa-publica.ts`): no entra en la medida del mínimo. */
+  publica: boolean
+}
+
+/**
+ * Lo que pesan las líneas de tarifa PÚBLICA dentro de la cascada (`tarifa-publica.ts`). Con
+ * `lineas: 0` la cascada es exactamente la de siempre.
+ */
+export interface PesoDeLasPublicas {
+  lineas: number
+  /** Su costo de venta (con su parte de administrativos y sus adicionales). */
+  costoDeVenta: number
+  /** Lo que suman a la venta bruta, adicionales incluidos. */
+  ventaBruta: number
+  /**
+   * No hay margen que exigir: todo lo que cobra la tarifa es Público, o lo demás no tiene costo
+   * pero sí precio (el recargo fijo). Una línea Neta sin costo NI precio no exime: falta su costo.
+   */
+  exentaDelMinimo: boolean
 }
 
 export interface Cascada {
@@ -167,6 +193,8 @@ export interface Cascada {
    * "vendido a costo" y es otra cosa.
    */
   margenRealPct: number | null
+  /** Ver `PesoDeLasPublicas`. */
+  publicas: PesoDeLasPublicas
 }
 
 /**
@@ -217,6 +245,12 @@ export function calcularCascada(items: ItemParaCascada[], params: ParametrosCasc
    * las dos variables valen lo mismo y todo esto es un no-op.
    */
   let costoBaseDeAdministrativos = 0
+  // Tarifa pública (2026-10-22): lo que pesa, para medir el mínimo sin ella.
+  let publicasLineas = 0
+  let publicasCosto = 0
+  let publicasVenta = 0
+  let netaConCosto = false
+  let netaSinNada = false
 
   for (const item of items) {
     const costoUnitario = item.es_ajuste === true
@@ -276,6 +310,16 @@ export function calcularCascada(items: ItemParaCascada[], params: ParametrosCasc
     // romper la suma (ver el encabezado del archivo).
     const costoDeVentaLinea = costoLinea * (1 + adminPct / 100)
 
+    const publica = item.es_ajuste !== true && esTarifaPublica(item.tarifa_pax)
+    if (publica) {
+      publicasLineas++
+      publicasCosto += costoDeVentaLinea + adic.costo
+      publicasVenta += precioConAdicionales
+    } else if (item.es_ajuste !== true) {
+      if (costoLinea + adic.costo > 0) netaConCosto = true
+      else if (!(precioConAdicionales > 0)) netaSinNada = true
+    }
+
     lineas.push({
       id: item.id,
       costoUnitario,
@@ -291,6 +335,7 @@ export function calcularCascada(items: ItemParaCascada[], params: ParametrosCasc
       // calcularlo con los exactos deja un porcentaje que no cuadra con las dos
       // cifras impresas al lado, y el usuario no tiene cómo saber cuál falla.
       margenRealPct: margenRealDeLinea(Math.round(costoDeVentaLinea), Math.round(precioLinea)),
+      publica,
     })
   }
 
@@ -311,5 +356,11 @@ export function calcularCascada(items: ItemParaCascada[], params: ParametrosCasc
     descuentoComercial: Math.round(descuentoComercial),
     precioVenta: Math.round(precioVenta),
     margenRealPct: precioVenta > 0 ? ((precioVenta - costoDeVenta) / precioVenta) * 100 : null,
+    publicas: {
+      lineas: publicasLineas,
+      costoDeVenta: Math.round(publicasCosto),
+      ventaBruta: Math.round(publicasVenta),
+      exentaDelMinimo: publicasLineas > 0 && !netaConCosto && !netaSinNada,
+    },
   }
 }

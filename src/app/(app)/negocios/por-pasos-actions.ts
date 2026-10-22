@@ -38,6 +38,7 @@ import { evaluarSalida, leerUltimaExcepcion, recortarParaLog, TABLA_EXCEPCIONES 
 import { pctTexto } from '@/lib/cotizaciones/piso-salida'
 import { CAUSA_RETIRADA } from '@/lib/cotizaciones/autorizacion-vista'
 import { esDuenoDelWorkspace, leerPlatformAdmin } from '@/lib/permissions/dueno-workspace'
+import { lineasConMargenPropio } from '@/lib/cotizaciones/margen-propio'
 
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -356,6 +357,37 @@ export async function margenPorPasos(
   const c = await cerrarAccion(supabase, { workspaceId, cotizacionId, antes: null, staffId })
   if (!c.success) return c
   return { success: true, anterior, valorTotal: c.valorTotal }
+}
+
+/**
+ * «Que usen el margen de la cotización» (reunión del 2026-10-22, punto 2, `margen-propio.ts`): las
+ * opciones Netas con un margen propio escrito por una persona vuelven a heredar el de la
+ * cotización. Las Públicas, las de precio a mano y las del margen del proveedor no se tocan, aunque
+ * el navegador las mande: el servidor vuelve a decidir cuáles son.
+ */
+export async function margenDeLaCotizacionEnOpciones(
+  cotizacionId: string,
+  itemIds: string[],
+): Promise<ResultadoPorPasos<{ cambiadas: number; valorTotal: number | null }>> {
+  const { supabase, workspaceId, staffId, error } = await getWorkspace()
+  if (error || !workspaceId) return { success: false, error: 'No autenticado' }
+  if (!Array.isArray(itemIds) || itemIds.length === 0 || itemIds.length > 200) return { success: false, error: 'No hay opciones que cambiar.' }
+  const guard = await exigirPorPasos(supabase, cotizacionId)
+  if (!guard.ok) return { success: false, error: guard.error }
+  const antes = await fotoDeTarifas(supabase, cotizacionId)
+  if (!antes) return { success: false, error: 'Cotización no encontrada' }
+  const pedidas = new Set(itemIds.filter(id => typeof id === 'string'))
+  const propias = lineasConMargenPropio(
+    antes.ctx.items.filter(i => pedidas.has(i.id)),
+    Number(antes.ctx.params.margenPct) || 0,
+    antes.ctx.params.convencionMargen,
+  ).map(i => i.id)
+  if (propias.length === 0) return { success: false, error: 'Esas opciones ya usan el margen de la cotización.' }
+  const { error: errUpd } = await supabase.from('items').update({ margen_porcentaje: null }).eq('cotizacion_id', cotizacionId).in('id', propias)
+  if (errUpd) return { success: false, error: errUpd.message }
+  const c = await cerrarAccion(supabase, { workspaceId, cotizacionId, antes: null, staffId })
+  if (!c.success) return c
+  return { success: true, cambiadas: propias.length, valorTotal: c.valorTotal }
 }
 
 /**

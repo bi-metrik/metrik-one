@@ -29,6 +29,8 @@ import {
   itemsDelItinerario,
   itemsQueAportanAlTotal,
   margenMedible,
+  margenParaElMinimo,
+  exentaDelMinimo,
   motivoDeRechazo,
   ranurasSinResolver,
   textoDeRechazo,
@@ -478,8 +480,11 @@ export function calcularItinerario(ctx: ContextoCotizacion, fila: FilaItinerario
     // Donde el piso se exige en la salida, el margen es el de `margenMedible` —sin costo
     // tampoco hay margen—, el mismo que usa la salida: la tabla no puede dar por buena
     // una tarifa que el PDF va a marcar como borrador. En las demás líneas, como antes.
-    margenRealPct: ctx.pisoEnLaSalida === true ? margenMedible(cascada) : cascada.margenRealPct,
+    // Tarifa pública (2026-10-22): sus líneas no entran en la medida, y una tarifa que solo
+    // cobra Públicas no tiene margen que exigir.
+    margenRealPct: ctx.pisoEnLaSalida === true ? margenMedible(cascada) : margenParaElMinimo(cascada),
     pisoPct: ctx.umbrales.pisoPct,
+    exenta: exentaDelMinimo(cascada),
   })
   // Donde el piso se exige en la SALIDA, bajo el piso deja de impedir marcar la tarifa:
   // el candado pasa al PDF, a «Enviar» y a «Aprobar», donde el dueño puede autorizarla.

@@ -46,6 +46,7 @@ import {
 } from '@/lib/cotizaciones/tarifa-pasajero'
 import { margenDelProveedor, margenDeLineaSegunConvencion } from '@/lib/cotizaciones/margen-proveedor'
 import { origenDelMargen } from '@/lib/cotizaciones/margen-vista'
+import { margenAlElegirTipo, type TipoTarifa } from '@/lib/cotizaciones/tarifa-publica'
 import { CONVENCION_MARGEN_POR_DEFECTO, type ConvencionMargen } from '@/lib/cotizaciones/precio-item'
 import { leerViajeDelNegocio } from '@/lib/cotizaciones/viaje-negocio'
 import { nombreAlConfirmarLectura } from '@/lib/cotizaciones/nombre-linea'
@@ -1380,6 +1381,12 @@ export interface CambiosDeAjuste {
   precios?: Record<string, number | null>
   /** «Volver a lo que calculó ONE»: sin precios a mano y con el margen que ONE puso. */
   volverACalculado?: boolean
+  /**
+   * Tarifa pública o neta (reunión del 2026-10-22, `tarifa-publica.ts`). Pública deja el margen de
+   * la opción en 0 (o en el del proveedor, si la captura trajo los dos precios); Neta lo devuelve
+   * al de la cotización (o al del proveedor). Queda como decisión de una persona.
+   */
+  tipoTarifa?: TipoTarifa
 }
 
 /**
@@ -1396,11 +1403,22 @@ export async function ajustarOpcion(itemId: string, cambios: CambiosDeAjuste): P
     ? (conf.costos.length > 0 ? conf.costos.map(c => c.tipo as string) : (conf.porHabitacion ?? []).map(h => claveDeHabitacion(h.numero)))
     : [])
 
+  if (cambios.tipoTarifa !== undefined && cambios.tipoTarifa !== 'neta' && cambios.tipoTarifa !== 'publica') {
+    return { success: false, error: 'Elige si la tarifa es neta o pública.' }
+  }
+  const margenDelProveedor = conf?.margenProveedor
+    ? margenDeLineaSegunConvencion(conf.margenProveedor, item.convencionMargen ?? CONVENCION_MARGEN_POR_DEFECTO)
+    : null
   let margen: number | null | undefined
+  if (cambios.tipoTarifa !== undefined) {
+    // El tipo decide el margen con que arranca la opción; un margen escrito en la misma llamada
+    // (abajo) manda sobre él.
+    margen = margenAlElegirTipo(cambios.tipoTarifa, margenDelProveedor)
+  }
   if (cambios.volverACalculado) {
-    margen = conf?.margenProveedor
-      ? margenDeLineaSegunConvencion(conf.margenProveedor, item.convencionMargen ?? CONVENCION_MARGEN_POR_DEFECTO)
-      : null
+    // Lo que calcula ONE: el margen del proveedor si lo hay; si no, el del tipo de la tarifa
+    // (Pública en 0, Neta hereda el de la cotización).
+    margen = margenAlElegirTipo(cambios.tipoTarifa ?? tarifa.tipoTarifa?.tipo ?? 'neta', margenDelProveedor)
   } else if (cambios.margenPct !== undefined) {
     const m = cambios.margenPct
     if (m !== null && (!Number.isFinite(m) || m < 0 || m >= 100)) return { success: false, error: 'El margen va de 0 a 99,9 %.' }
@@ -1413,7 +1431,10 @@ export async function ajustarOpcion(itemId: string, cambios: CambiosDeAjuste): P
 
   const { por, porId } = await quienEscribe(supabase)
   const en = new Date().toISOString()
-  const guardado = await guardarTarifa(supabase, itemId, actual => {
+  const guardado = await guardarTarifa(supabase, itemId, leida => {
+    const actual: TarifaPax = cambios.tipoTarifa !== undefined
+      ? { ...leida, tipoTarifa: { tipo: cambios.tipoTarifa, origen: 'persona', por, en } }
+      : leida
     const precios = cambios.volverACalculado ? {} : { ...(actual.preciosAMano ?? {}) }
     for (const [clave, v] of Object.entries(cambios.precios ?? {})) {
       if (v === null) delete precios[clave]

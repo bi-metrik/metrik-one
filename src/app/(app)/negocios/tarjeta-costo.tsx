@@ -22,6 +22,7 @@ import {
   type FilaCosto,
 } from '@/lib/cotizaciones/tarjeta-opcion'
 import { parseMontoCop } from '@/lib/negocios/monto-cop'
+import { AYUDA_TIPO_TARIFA, ETIQUETA_TIPO_TARIFA, type TipoTarifa } from '@/lib/cotizaciones/tarifa-publica'
 
 /**
  * «Costo y precio» de la tarjeta (prototipo del 2026-09-24): UNA tabla (Pasajero / Cant. /
@@ -54,6 +55,8 @@ export default function TarjetaCosto({
   onCambio,
   autorizador = null,
   apilable = false,
+  tipoTarifa = 'neta',
+  tipoPropuesto = false,
 }: {
   itemId: string
   editable: boolean
@@ -83,6 +86,13 @@ export default function TarjetaCosto({
    * siempre (`tarjeta-costo-apilada.test.ts`).
    */
   apilable?: boolean
+  /**
+   * Tarifa pública o neta (reunión del 2026-10-22, `tarifa-publica.ts`). Pública: el margen
+   * arranca en 0 y la opción no pide autorización por margen. Ausente = Neta.
+   */
+  tipoTarifa?: TipoTarifa
+  /** El tipo lo propuso ONE con lo que dice el tarifario del proveedor (la persona lo cambia). */
+  tipoPropuesto?: boolean
 }) {
   const [ajustando, setAjustando] = useState(false)
   const [conAdicional, setConAdicional] = useState(false)
@@ -138,7 +148,9 @@ export default function TarjetaCosto({
   const margenReal = costoTotal > 0 && precioTotal > 0
     ? (convencion === 'sobre_venta' ? ((precioTotal - costoTotal) / precioTotal) * 100 : (precioTotal / costoTotal - 1) * 100)
     : null
-  const bajo = margenReal !== null && margenReal < pisoPct
+  // Una Pública no pide autorización por margen: su ganancia es la comisión (`tarifa-publica.ts`).
+  const publica = tipoTarifa === 'publica'
+  const bajo = !publica && margenReal !== null && margenReal < pisoPct
 
   function guardar(fn: () => Promise<{ success: boolean; error?: string }>, limpiar: () => void) {
     startTransition(async () => {
@@ -147,6 +159,11 @@ export default function TarjetaCosto({
       limpiar()
       onCambio()
     })
+  }
+
+  function elegirTipo(t: TipoTarifa) {
+    if (t === tipoTarifa && !tipoPropuesto) return
+    guardar(() => ajustarOpcion(itemId, { tipoTarifa: t }), () => setMargenEscrito(null))
   }
 
   function guardarMargen() {
@@ -365,7 +382,33 @@ export default function TarjetaCosto({
             )}
           </span>
         </span>
-        <span className="flex items-center gap-1.5 text-[13px] text-[#6E6A62]">
+        <span className={`flex ${apilable ? 'flex-wrap ' : ''}items-center gap-1.5 text-[13px] text-[#6E6A62]`}>
+          {/* Tarifa pública o neta: un clic, junto al margen (reunión del 2026-10-22). Solo en la
+              cotización por pasos: apagada, la tarjeta es byte a byte la de siempre. */}
+          {apilable && <span className="inline-flex items-center gap-1" data-tipo-tarifa={tipoTarifa}>
+            <span className="text-xs">Tarifa</span>
+            <span role="radiogroup" aria-label="Tipo de tarifa" className="inline-flex overflow-hidden rounded-md border border-[#CFCAC0]">
+              {(['neta', 'publica'] as const).map(t => {
+                const on = t === tipoTarifa
+                return (
+                  <button
+                    key={t}
+                    type="button"
+                    role="radio"
+                    aria-checked={on}
+                    title={AYUDA_TIPO_TARIFA[t]}
+                    disabled={!editable || isPending}
+                    onClick={() => elegirTipo(t)}
+                    data-elegir-tipo={t}
+                    className={`border-0 px-2 py-0.5 text-xs font-semibold ${on ? 'bg-[#191713] text-[#F3F1EC]' : 'bg-white text-[#191713] hover:bg-[#F8F7F3]'} ${t === 'publica' ? 'border-l border-[#CFCAC0]' : ''}`}
+                  >
+                    {ETIQUETA_TIPO_TARIFA[t]}
+                  </button>
+                )
+              })}
+            </span>
+            {tipoPropuesto && <span className="text-[11px] text-[#9A5F0C]" data-tipo-propuesto>según el tarifario</span>}
+          </span>}
           Margen <b className="tabular-nums text-[#191713]">{margenReal === null ? '—' : porcentaje(margenReal)}</b>
           {bajo && (
             <AlertaDecision tip="Con este margen necesitas autorización para enviar">
@@ -379,6 +422,11 @@ export default function TarjetaCosto({
           )}
         </span>
       </div>
+      {publica && (
+        <p className="m-0 text-xs text-[#6E6A62]" data-aviso-publica>
+          Tarifa pública: el cliente paga el precio del proveedor y tu ganancia es la comisión. No entra en el margen mínimo ni pide autorización.
+        </p>
+      )}
 
       {ajustando && editable && (
         <div className="flex flex-col gap-2.5 rounded-lg border border-[#CFCAC0] bg-[#F8F7F3] p-3" data-panel-ajustar>

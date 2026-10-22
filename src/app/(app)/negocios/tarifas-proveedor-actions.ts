@@ -57,6 +57,8 @@ import { esTarifaCanal, type TarifaCanal } from '@/lib/proveedores/tipos'
 import { avisoDeTarifario, fechaCorta, hoyBogota, type AvisoTarifario } from '@/lib/proveedores/vigencia'
 import { createServiceClient } from '@/lib/supabase/server'
 import { aceptarCapturaDeBandeja, confirmarTarifaPorPasajero, type BorradorParaAceptar } from './tarifa-pax-actions'
+import { recalcularTotales } from './cotizacion-actions'
+import { propuestaDelTarifario } from '@/lib/cotizaciones/tarifa-publica'
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type Cliente = any
@@ -588,6 +590,7 @@ export async function elegirTarifasDeLinea(
 
   // El costo se confirma con la acción de siempre: ella resuelve, escribe los rubros y recalcula.
   const conf = await confirmarTarifaPorPasajero(ctx.item.id as string, tasaValida(tasa))
+  await proponerTipoDelTarifario(ctx.db, ctx.item.id as string, x.calculo.ajustes.canal)
   if (ctx.negocioId) revalidatePath(`/negocios/${ctx.negocioId}`)
   return {
     ok: true,
@@ -597,6 +600,40 @@ export async function elegirTarifasDeLinea(
     total: x.calculo.total,
     aPagarAgencia: x.calculo.aPagarAgencia,
   }
+}
+
+// ── Tarifa pública o neta, propuesta por el tarifario (reunión del 2026-10-22) ──
+
+/**
+ * Si el tarifario dice que el precio es al público o comisionable, la línea se propone como
+ * PÚBLICA: margen 0, el cliente paga el precio público (`tarifa-publica.ts`). Con la comisión
+ * declarada, la confirmación ya dejó el costo en el neto y el margen en la comisión: ese margen no
+ * se toca. Lo que eligió una persona en la tarjeta no se pisa. Un tarifario neto (o que deja de
+ * decir público) retira la propuesta anterior y la línea vuelve a heredar el margen.
+ *
+ * No falla la elección: si no se puede escribir, la línea queda Neta, como antes, y se anota.
+ */
+async function proponerTipoDelTarifario(db: Cliente, itemId: string, canal: string | null): Promise<void> {
+  const { data: fila, error } = await db.from('items').select('*').eq('id', itemId).maybeSingle()
+  if (error || !fila) return
+  const actual = leerTarifaPax(fila.tarifa_pax)
+  const propuesta = propuestaDelTarifario(actual.tipoTarifa ?? null, canal, new Date().toISOString())
+  if (propuesta === null) return
+  const siguiente: TarifaPax = { ...actual }
+  if (propuesta === 'quitar') delete siguiente.tipoTarifa
+  else siguiente.tipoTarifa = propuesta
+  const patch: Record<string, unknown> = { tarifa_pax: siguiente }
+  const conComision = !!actual.confirmada?.margenProveedor
+  if (fila.precio_manual !== true && !conComision) {
+    if (propuesta !== 'quitar') patch.margen_porcentaje = 0
+    else if (Number(fila.margen_porcentaje) === 0 && fila.margen_porcentaje !== null) patch.margen_porcentaje = null
+  }
+  const { error: eUpd } = await db.from('items').update(patch).eq('id', itemId)
+  if (eUpd) {
+    console.warn('[tarifas-proveedor] no se pudo proponer la tarifa pública:', eUpd.message)
+    return
+  }
+  if (typeof fila.cotizacion_id === 'string' && 'margen_porcentaje' in patch) await recalcularTotales(fila.cotizacion_id)
 }
 
 // ── Crear la línea con la tarifa (brief del 2026-10-21, punto 2) ─────────────
@@ -710,6 +747,7 @@ export async function crearLineaConTarifa(
     const conf = await confirmarTarifaPorPasajero(aceptada.itemId, t)
     pendiente = conf.success ? null : conf.error ?? pendiente
   }
+  await proponerTipoDelTarifario(ctx.db, aceptada.itemId, x.calculo.ajustes.canal)
   if (ctx.negocioId) revalidatePath(`/negocios/${ctx.negocioId}`)
   return {
     ok: true,

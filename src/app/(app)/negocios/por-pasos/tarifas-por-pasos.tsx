@@ -62,6 +62,8 @@ export function TarifasPorPasos({
   onElegir,
   onMandar,
   onMargen,
+  propios = [],
+  onSeguirMargen,
   onPedir,
   onAutorizar,
   onRetirar,
@@ -91,6 +93,12 @@ export function TarifasPorPasos({
   onElegir: (tarifaId: string, grupo: string, itemId: string) => void
   onMandar: (tarifaId: string, va: boolean) => void
   onMargen: (pct: number) => void
+  /**
+   * Las opciones Netas con margen propio: no cambian con el margen de la cotización (punto 2 de la
+   * reunión del 2026-10-22, `margen-propio.ts`).
+   */
+  propios?: { id: string; nombre: string; margen: number }[]
+  onSeguirMargen?: () => void
   onPedir: () => void
   onAutorizar: (motivo: string) => void
   onRetirar: () => void
@@ -111,7 +119,10 @@ export function TarifasPorPasos({
   const [renombrando, setRenombrando] = useState<string | null>(null)
   const [verCalculo, setVerCalculo] = useState(false)
   const vanAlCliente = (t: TarifaCalculada) => t.esPrincipal || (t.vaEnPropuesta && !t.igualA)
-  const bajoMinimo = tarifas.filter(t => vanAlCliente(t) && t.margenReal !== null && t.margenReal < pisoPct)
+  const bajoMinimo = tarifas.filter(t => vanAlCliente(t) && !t.exenta && t.margenReal !== null && t.margenReal < pisoPct)
+  /** El margen real de una tarifa, dicho con las líneas de tarifa pública que no cuenta. */
+  const margenDeTarifa = (t: TarifaCalculada) => (t.exenta ? 'solo tarifa pública' : pct(t.margenReal))
+  const notaPublicas = (t: TarifaCalculada) => (!t.exenta && t.publicas > 0 ? ` (sin ${t.publicas === 1 ? '1 de tarifa pública' : `${t.publicas} de tarifa pública`})` : '')
 
   const pregunta = (() => {
     const que = [...new Set(servicios.map(s => s.tipo === 'hotel' ? 'qué hotel' : s.tipo === 'vuelo' ? 'qué vuelo' : s.tipo === 'traslado' ? 'qué traslado' : `qué opción de ${s.nombre}`))]
@@ -155,14 +166,29 @@ export function TarifasPorPasos({
         <span>%</span>
         <span className="text-xs text-[#6E6A62]">uno para las tres tarifas · mínimo {pct(pisoPct)}</span>
       </label>
+      {propios.length > 0 && (
+        <div className="flex flex-col gap-1 rounded-lg border border-[#F0D9B5] bg-[#FBF1E2] p-2.5 text-[13px]" data-margen-propio>
+          <span>
+            <b>{propios.length === 1 ? '1 opción tiene su propio margen' : `${propios.length} opciones tienen su propio margen`}</b> y no cambia{propios.length === 1 ? '' : 'n'} con este:{' '}
+            {propios.slice(0, 4).map(x => `${x.nombre} ${pct(x.margen)}`).join(' · ')}{propios.length > 4 ? ` y ${propios.length - 4} más` : ''}.
+          </span>
+          <span className="text-xs text-[#6E6A62]">Si su precio ya trae tu comisión, márcala «Pública» en su tarjeta en vez de dejarle 0 %.</span>
+          {editable && onSeguirMargen && (
+            <button type="button" className={`${BTN} self-start !text-xs`} disabled={ocupado} onClick={onSeguirMargen} data-seguir-margen>
+              Que usen el margen de la cotización
+            </button>
+          )}
+        </div>
+      )}
       <p className="m-0 text-[13px]" data-margenes-reales>
         Margen real:{' '}
         {tarifas.filter(vanAlCliente).map((t, i) => (
           <span key={t.id}>
             {i > 0 && ' · '}
-            <b className={t.margenReal !== null && t.margenReal < pisoPct ? 'text-[#B3382C]' : t.margenReal !== null && t.margenReal < avisoPct ? 'text-[#9A5F0C]' : ''}>
-              {t.nombre} {pct(t.margenReal)}
+            <b className={t.exenta ? '' : t.margenReal !== null && t.margenReal < pisoPct ? 'text-[#B3382C]' : t.margenReal !== null && t.margenReal < avisoPct ? 'text-[#9A5F0C]' : ''}>
+              {t.nombre} {margenDeTarifa(t)}
             </b>
+            {notaPublicas(t) && <span className="text-xs text-[#6E6A62]">{notaPublicas(t)}</span>}
           </span>
         ))}
       </p>
@@ -324,7 +350,7 @@ export function TarifasPorPasos({
       <div className="flex flex-wrap items-end gap-3 border-t-2 border-[#191713] pt-2" data-total-tarifa>
         <span className="min-w-0 flex-1">
           <small className="block text-[11px] font-bold uppercase tracking-wide text-[#6E6A62]">Total {t.nombre}</small>
-          <small className="block text-xs text-[#6E6A62] tabular-nums">costo {pesos(t.costo)} · ganas {pesos(t.precio - t.costo)} · margen real {pct(t.margenReal)}</small>
+          <small className="block text-xs text-[#6E6A62] tabular-nums">costo {pesos(t.costo)} · ganas {pesos(t.precio - t.costo)} · margen real {margenDeTarifa(t)}{notaPublicas(t)}</small>
           {t.canon === 'Recomendada' ? (
             <span className="text-[12.5px] font-semibold text-[#0E5C43]">✓ Siempre se manda: es el total de la cotización</span>
           ) : (
