@@ -194,6 +194,7 @@ interface Ocupacion {
   libres_asistente: number
   disponible_asistente: boolean
   motivo_asistente: string | null
+  tope_sobreventa: number | null
   tarifa: Tarifa
 }
 interface Tarifa {
