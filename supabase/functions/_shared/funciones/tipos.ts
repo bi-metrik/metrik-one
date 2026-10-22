@@ -114,6 +114,14 @@ export const ERRORES_FUNCIONES = [
   'datos_invalidos',
   'dato_no_admitido',
   'personas_invalidas',
+  'reserva_no_existe',
+  'reserva_inactiva',
+  'distinta_conversacion',
+  'apartado_vencido',
+  'reserva_en_otro_pago',
+  'ya_realineada',
+  'pago_con_link',
+  'pasarela_fallo',
 ] as const;
 
 /** `error_base`: cualquier otra falla (red, permiso, un código que este módulo no conoce). No es un «no hay cupo». */
@@ -142,6 +150,45 @@ export type ResultadoApartar = ({ ok: true } & Apartado) | { ok: false; error: C
 
 export type RespuestaAutorizacion = 'si' | 'no' | null;
 
+/** Una reserva dentro del resumen de un pago (`funcion_resumen_pago`). Montos calculados por la base. */
+export interface LineaResumenPago {
+  reserva_id: string;
+  funcion_id: string;
+  inicia_at: string;
+  personas: number;
+  precio_unitario: number;
+  tarifa: 'preventa' | 'completa';
+  modalidad: Modalidad;
+  monto_a_pagar: number;
+  /** Sigue apartada y sin vencer: se puede cobrar. */
+  vigente: boolean;
+  estado: string;
+}
+
+/** Lo que el asistente muestra antes de pedir el pago: cada reserva y el total SIN las vencidas. No suma: lee. */
+export interface ResumenPago {
+  reservas: LineaResumenPago[];
+  total: number;
+  vencidas: string[];
+}
+
+/** El pago que creó la base (`funcion_preparar_pago`), con sus reservas realineadas. */
+export interface PagoPreparado {
+  pago_id: string;
+  monto_esperado: number;
+  vence_at: string;
+  reservas: string[];
+}
+
+/** El link listo para mandar al cliente. */
+export interface LinkPago {
+  pagoId: string;
+  referencia: string;
+  url: string;
+  monto: number;
+  venceAt: string;
+}
+
 export interface PuertoFunciones {
   consultarCupo(workspaceId: string, funcionId: string): Promise<ResultadoCupo>;
   verDisponibles(workspaceId: string, codigoCampana: string | null): Promise<Resultado<FuncionDisponible[]>>;
@@ -149,6 +196,12 @@ export interface PuertoFunciones {
   /** La ÚLTIMA respuesta a la autorización `general` de la conversación (`null` = nunca respondió). */
   autorizacionGeneral(llave: LlaveConversacion): Promise<RespuestaAutorizacion>;
   apartar(p: PropuestaApartado): Promise<ResultadoApartar>;
+  /** Solo reservas de una conversación (`distinta_conversacion` si no). */
+  resumenPago(workspaceId: string, reservaIds: string[]): Promise<Resultado<ResumenPago>>;
+  /** Candados, realineación (una vez por reserva) y el pago con `monto_esperado`. */
+  prepararPago(workspaceId: string, reservaIds: string[]): Promise<Resultado<PagoPreparado>>;
+  /** Guarda la referencia y el link que devolvió la pasarela. */
+  vincularLink(pagoId: string, referencia: string, url: string): Promise<Resultado<null>>;
 }
 
 /** El código estable de un error de la base, o `error_base`. Pura. */

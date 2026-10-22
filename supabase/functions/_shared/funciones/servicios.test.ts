@@ -2,7 +2,8 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 import { readFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { PGlite } from '@electric-sql/pglite'
-import { apartar, campanasActivas, consultarCupo, verFuncionesDisponibles } from './servicios'
+import { apartar, campanasActivas, consultarCupo, generarLinkPago, resumenPago, verFuncionesDisponibles } from './servicios'
+import { cuerpoLinkBold, expiracionBold, pasarelaBold, pasarelaEnMemoria } from './pasarela'
 import { funcionesEnMemoria, type CampanaEnMemoria, type FuncionEnMemoria } from './memoria'
 import { datosDeApartado, puertoFuncionesSupabase, type ClienteFunciones } from './supabase'
 import { codigoDeError, type PropuestaApartado, type PuertoFunciones } from './tipos'
@@ -46,8 +47,10 @@ function clientePGlite(db: PGlite): ClienteFunciones {
   return {
     async rpc(nombre, args) {
       const claves = Object.keys(args)
-      const valores = claves.map((k) => (args[k] !== null && typeof args[k] === 'object' ? JSON.stringify(args[k]) : args[k]))
-      const lista = claves.map((k, i) => `${k} => $${i + 1}${typeof args[k] === 'object' && args[k] !== null ? '::jsonb' : ''}`).join(', ')
+      // Un arreglo viaja como arreglo de uuid (como lo convierte PostgREST); un objeto, como jsonb.
+      const esObjeto = (v: unknown) => v !== null && typeof v === 'object' && !Array.isArray(v)
+      const valores = claves.map((k) => (esObjeto(args[k]) ? JSON.stringify(args[k]) : args[k]))
+      const lista = claves.map((k, i) => `${k} => $${i + 1}${esObjeto(args[k]) ? '::jsonb' : Array.isArray(args[k]) ? '::uuid[]' : ''}`).join(', ')
       try {
         const r = await comoServidor(() => db.query<{ r: unknown }>(`select public.${nombre}(${lista}) as r`, valores))
         return { data: r.rows[0].r, error: null }
@@ -292,6 +295,50 @@ describe.each([
     expect(despues.ok && despues.dato.preguntar).toBe(despues.ok && despues.dato.total > 1)
   })
 
+  it('el resumen de pago lo arma ONE: cada reserva con su monto y el total sin las vencidas', async () => {
+    const l = await autorizada()
+    const a = await apartar(b.puerto, propuesta(l, await funcion(await campana()), 2, { modalidad: 'abono' }))
+    const c = await apartar(b.puerto, propuesta(l, await funcion(await campana({ precioPersona: 150_000 }), { iniciaAt: manana(5) }), 2))
+    if (!a.ok || !c.ok) throw new Error('no apartó')
+    const r = await resumenPago(b.puerto, b.ws, [a.reservaId, c.reservaId])
+    expect(r.ok && [r.dato.total, r.dato.reservas.map((x) => x.monto_a_pagar), r.dato.vencidas]).toEqual([200_000 + 300_000, [200_000, 300_000], []])
+    await b.vencer(c.reservaId)
+    const v = await resumenPago(b.puerto, b.ws, [a.reservaId, c.reservaId])
+    expect(v.ok && [v.dato.total, v.dato.vencidas]).toEqual([200_000, [c.reservaId]])
+    const otra = await apartar(b.puerto, propuesta(await autorizada(), await funcion(await campana()), 1))
+    if (!otra.ok) throw new Error(otra.error)
+    expect(await resumenPago(b.puerto, b.ws, [a.reservaId, otra.reservaId])).toEqual({ ok: false, error: 'distinta_conversacion' })
+  })
+
+  it('generar_link_pago: un link de monto fijo que vence con sus apartados realineados; no dos veces sobre lo mismo', async () => {
+    const l = await autorizada()
+    const a = await apartar(b.puerto, propuesta(l, await funcion(await campana()), 2, { modalidad: 'abono' }))
+    const c = await apartar(b.puerto, propuesta(l, await funcion(await campana(), { iniciaAt: manana(6) }), 1))
+    if (!a.ok || !c.ok) throw new Error('no apartó')
+    const doble = pasarelaEnMemoria()
+    const link = await generarLinkPago(b.puerto, doble.pasarela, b.ws, [a.reservaId, c.reservaId], 'Sabor: 2 funciones')
+    if (!link.ok) throw new Error(link.error)
+    expect(link.dato.monto).toBe(200_000 + 180_000)
+    const [pedido] = doble.pedidos()
+    expect(pedido.cuerpo).toEqual({
+      amount_type: 'CLOSE', amount: { currency: 'COP', total_amount: 380_000 }, description: 'Sabor: 2 funciones',
+      expiration_date: Date.parse(link.dato.venceAt),
+    })
+    expect(Date.parse(link.dato.venceAt) - Date.now()).toBeGreaterThan(25 * 60_000)
+    // Las dos ya están en un pago pendiente.
+    expect(await generarLinkPago(b.puerto, doble.pasarela, b.ws, [c.reservaId], 'x')).toEqual({ ok: false, error: 'reserva_en_otro_pago' })
+  })
+
+  it('generar_link_pago con un apartado vencido: apartado_vencido, y la pasarela ni se llama', async () => {
+    const l = await autorizada()
+    const a = await apartar(b.puerto, propuesta(l, await funcion(await campana()), 1))
+    if (!a.ok) throw new Error(a.error)
+    await b.vencer(a.reservaId)
+    const doble = pasarelaEnMemoria()
+    expect(await generarLinkPago(b.puerto, doble.pasarela, b.ws, [a.reservaId], 'x')).toEqual({ ok: false, error: 'apartado_vencido' })
+    expect(doble.pedidos()).toEqual([])
+  })
+
   it('una mesa o un monto colados por fuera del tipo no viajan; la solicitud llega como texto', async () => {
     const f = await funcion(await campana(), { capacidad: 8 })
     const colada = {
@@ -302,6 +349,34 @@ describe.each([
     if (!a.ok) throw new Error(a.error)
     expect(a.montoTotal).toBe(360_000)
     expect(await b.solicitudDe(a.reservaId)).toBe('vamos 6, queremos estar juntos')
+  })
+})
+
+describe('pasarela', () => {
+  it('expiration_date en milisegundos (SIN VERIFICAR en el sandbox): 13 dígitos, como los ejemplos de Bold', () => {
+    const v = expiracionBold('2026-10-24T18:30:00.000Z')
+    expect(v).toBe(Date.parse('2026-10-24T18:30:00.000Z'))
+    expect(String(v)).toHaveLength(13)
+    expect(() => expiracionBold('mañana')).toThrow()
+  })
+
+  it('el cuerpo de Bold va con monto fijo y entero', () => {
+    expect(cuerpoLinkBold({ pagoId: 'p', monto: 380_000, venceAt: '2026-10-24T18:30:00Z', descripcion: 'x' }).amount_type).toBe('CLOSE')
+    expect(() => cuerpoLinkBold({ pagoId: 'p', monto: 1.5, venceAt: '2026-10-24T18:30:00Z', descripcion: 'x' })).toThrow()
+  })
+
+  it('el adaptador de Bold no llama a nadie por su cuenta: usa el `enviar` que le den', async () => {
+    const enviados: unknown[] = []
+    const bold = pasarelaBold(async (cuerpo) => {
+      enviados.push(cuerpo)
+      return { referencia: 'LNK_X', url: 'https://checkout.ejemplo/LNK_X' }
+    })
+    expect(await bold.crearLink({ pagoId: 'p', monto: 100_000, venceAt: '2026-10-24T18:30:00Z', descripcion: 'x' })).toEqual({
+      ok: true, referencia: 'LNK_X', url: 'https://checkout.ejemplo/LNK_X',
+    })
+    expect(enviados).toHaveLength(1)
+    const caida = pasarelaBold(async () => { throw new Error('503') })
+    expect((await caida.crearLink({ pagoId: 'p', monto: 100_000, venceAt: '2026-10-24T18:30:00Z', descripcion: 'x' })).ok).toBe(false)
   })
 })
 

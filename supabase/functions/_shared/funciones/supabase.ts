@@ -13,10 +13,12 @@ import type {
   CampanasActivas,
   CupoPublico,
   FuncionDisponible,
+  PagoPreparado,
   PropuestaApartado,
   PuertoFunciones,
   RespuestaAutorizacion,
   ResultadoApartar,
+  ResumenPago,
 } from './tipos.ts';
 
 type Respuesta<T> = { data: T | null; error: { message: string } | null };
@@ -81,6 +83,26 @@ export function puertoFuncionesSupabase(db: ClienteFunciones): PuertoFunciones {
       if (error || !data || data.length === 0) return null;
       const r = (data[0] as { respuesta?: string }).respuesta;
       return r === 'si' ? 'si' : r === 'no' ? 'no' : null;
+    },
+
+    async resumenPago(workspaceId, reservaIds) {
+      const { data, error } = await db.rpc('funcion_resumen_pago', { p_workspace_id: workspaceId, p_reserva_ids: reservaIds });
+      if (error || !data) return { ok: false, error: codigoDeError(error?.message) };
+      const r = data as ResumenPago;
+      return { ok: true, dato: { ...r, total: Number(r.total) } };
+    },
+
+    async prepararPago(workspaceId, reservaIds) {
+      const { data, error } = await db.rpc('funcion_preparar_pago', { p_workspace_id: workspaceId, p_reserva_ids: reservaIds });
+      if (error || !data) return { ok: false, error: codigoDeError(error?.message) };
+      const r = data as PagoPreparado;
+      return { ok: true, dato: { ...r, monto_esperado: Number(r.monto_esperado) } };
+    },
+
+    async vincularLink(pagoId, referencia, url) {
+      const { error } = await db.rpc('funcion_vincular_link', { p_pago_id: pagoId, p_referencia: referencia, p_link_url: url });
+      if (error) return { ok: false, error: codigoDeError(error.message) };
+      return { ok: true, dato: null };
     },
 
     async apartar(p): Promise<ResultadoApartar> {

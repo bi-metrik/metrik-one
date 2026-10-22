@@ -8,7 +8,9 @@
 //     futura + venta abierta + cupo del asistente libre;
 //   · apartar (origen asistente): misma clave = misma foto; `sin_regla_apartado`, `sin_precio`,
 //     `modalidad_no_permitida`, `sin_autorizacion` y `sin_cupo` contra el cupo del asistente; el monto lo calcula aquí,
-//     como la base.
+//     como la base;
+//   · pagos (`funcion_resumen_pago`, `funcion_preparar_pago`, `funcion_vincular_link`): una conversación por pago,
+//     total sin vencidas, `apartado_vencido`, `reserva_en_otro_pago`, `ya_realineada` y la realineación del vencimiento.
 // `servicios.test.ts` corre las mismas pruebas contra este doble y contra la base real (PGlite): si se separan, falla.
 // ============================================================
 
@@ -17,6 +19,7 @@ import type {
   CampanaActiva,
   CupoPublico,
   FuncionDisponible,
+  LineaResumenPago,
   MotivoNoDisponible,
   PropuestaApartado,
   PuertoFunciones,
@@ -71,6 +74,18 @@ interface ReservaEnMemoria {
   modalidad: 'abono' | 'total';
   montoAPagar: number;
   propuesta: PropuestaApartado | null;
+  /** La conversación (`cuenta|conversación`), o `null` si la tomó el equipo. */
+  conversacion: string | null;
+  realineada: boolean;
+}
+
+interface PagoEnMemoria {
+  id: string;
+  reservas: string[];
+  estado: 'pendiente' | 'aprobado' | 'fallido' | 'vencido' | 'revisar';
+  monto: number;
+  venceAt: number;
+  referencia: string | null;
 }
 
 const llaveTexto = (l: LlaveConversacion) => `${l.workspaceId}|${l.cuentaId}|${l.conversacionId}`;
@@ -81,6 +96,7 @@ export function funcionesEnMemoria(o: { ahora?: () => number } = {}) {
   const funciones = new Map<string, FuncionEnMemoria>();
   const reservas: ReservaEnMemoria[] = [];
   const autorizaciones = new Map<string, 'si' | 'no'>();
+  const pagos = new Map<string, PagoEnMemoria>();
   let n = 0;
   const nuevoId = () => `00000000-0000-4000-9000-${(++n).toString(16).padStart(12, '0')}`;
 
@@ -128,6 +144,9 @@ export function funcionesEnMemoria(o: { ahora?: () => number } = {}) {
   const libres = (f: FuncionEnMemoria) => Math.max(cupoAsistente(f) - ocupadas(f.id), 0);
 
   const puerto: PuertoFunciones = {
+    resumenPago,
+    prepararPago,
+    vincularLink,
     async consultarCupo(workspaceId, funcionId) {
       const x = de(workspaceId, funcionId);
       if (!x) return { ok: false, error: 'funcion_no_existe' };
@@ -201,11 +220,77 @@ export function funcionesEnMemoria(o: { ahora?: () => number } = {}) {
         venceAt: ahora() + c.minutosApartado * 60_000, clave: p.huellaPropuesta, origen: 'asistente',
         tarifa: t.tarifa, precioUnitario: t.precio_persona, modalidad: p.modalidad,
         montoAPagar: p.personas * (abono ?? t.precio_persona), propuesta: structuredClone(p),
+        conversacion: `${p.llave.cuentaId}|${p.llave.conversacionId}`, realineada: false,
       };
       reservas.push(r);
       return foto(r, false);
     },
   };
+
+  /** `funcion_reservas_de_un_pago`: del workspace, sin repetidas, de una conversación. */
+  const deUnPago = (workspaceId: string, ids: string[]) => {
+    if (ids.length === 0 || ids.length > 20 || new Set(ids).size !== ids.length) return { error: 'datos_invalidos' as const };
+    const rs = ids.map((id) => reservas.find((r) => r.id === id && campanas.get(r.campanaId)?.workspaceId === workspaceId));
+    if (rs.some((r) => !r)) return { error: 'reserva_no_existe' as const };
+    const lista = rs as ReservaEnMemoria[];
+    const convs = new Set(lista.map((r) => r.conversacion));
+    if (convs.size > 1 || (lista.length > 1 && convs.has(null))) return { error: 'distinta_conversacion' as const };
+    return { lista };
+  };
+  const vigente = (r: ReservaEnMemoria) => r.estado === 'apartada' && r.venceAt > ahora();
+
+  async function resumenPago(workspaceId: string, ids: string[]): ReturnType<PuertoFunciones['resumenPago']> {
+    const x = deUnPago(workspaceId, ids);
+    if ('error' in x) return { ok: false, error: x.error! };
+    const lineas: LineaResumenPago[] = x.lista
+      .map((r) => ({
+        reserva_id: r.id, funcion_id: r.funcionId, inicia_at: funciones.get(r.funcionId)!.iniciaAt, personas: r.personas,
+        precio_unitario: r.precioUnitario, tarifa: r.tarifa, modalidad: r.modalidad, monto_a_pagar: r.montoAPagar,
+        vigente: vigente(r), estado: r.estado,
+      }))
+      .sort((a, b) => Date.parse(a.inicia_at) - Date.parse(b.inicia_at) || a.reserva_id.localeCompare(b.reserva_id));
+    return {
+      ok: true,
+      dato: {
+        reservas: lineas,
+        total: lineas.filter((l) => l.vigente).reduce((s, l) => s + l.monto_a_pagar, 0),
+        vencidas: lineas.filter((l) => !l.vigente).map((l) => l.reserva_id),
+      },
+    };
+  }
+
+  async function prepararPago(workspaceId: string, ids: string[]): ReturnType<PuertoFunciones['prepararPago']> {
+    const x = deUnPago(workspaceId, ids);
+    if ('error' in x) return { ok: false, error: x.error! };
+    for (const r of x.lista) vencer(r.funcionId);
+    const orden = [...x.lista].sort((a, b) => a.id.localeCompare(b.id));
+    const mala = orden.find((r) => !vigente(r));
+    if (mala) return { ok: false, error: mala.estado === 'vencida' || mala.estado === 'apartada' ? 'apartado_vencido' : 'reserva_inactiva' };
+    const enOtro = new Set([...pagos.values()].filter((p) => p.estado === 'pendiente').flatMap((p) => p.reservas));
+    if (orden.some((r) => enOtro.has(r.id))) return { ok: false, error: 'reserva_en_otro_pago' };
+    if (orden.some((r) => r.realineada)) return { ok: false, error: 'ya_realineada' };
+    const minutos = Math.min(...orden.map((r) => campanas.get(r.campanaId)!.minutosApartado ?? Infinity));
+    if (!Number.isFinite(minutos)) return { ok: false, error: 'sin_regla_apartado' };
+    const vence = ahora() + minutos * 60_000;
+    for (const r of orden) {
+      r.venceAt = vence;
+      r.realineada = true;
+    }
+    const pago: PagoEnMemoria = {
+      id: nuevoId(), reservas: orden.map((r) => r.id), estado: 'pendiente', monto: orden.reduce((s, r) => s + r.montoAPagar, 0),
+      venceAt: vence, referencia: null,
+    };
+    pagos.set(pago.id, pago);
+    return { ok: true, dato: { pago_id: pago.id, monto_esperado: pago.monto, vence_at: new Date(vence).toISOString(), reservas: pago.reservas } };
+  }
+
+  async function vincularLink(pagoId: string, referencia: string): ReturnType<PuertoFunciones['vincularLink']> {
+    const p = pagos.get(pagoId);
+    if (!p) return { ok: false, error: 'error_base' };
+    if (p.referencia !== null && p.referencia !== referencia) return { ok: false, error: 'pago_con_link' };
+    p.referencia = referencia;
+    return { ok: true, dato: null };
+  }
 
   function foto(r: ReservaEnMemoria, repetida: boolean): ResultadoApartar {
     return {
@@ -217,6 +302,13 @@ export function funcionesEnMemoria(o: { ahora?: () => number } = {}) {
 
   return {
     puerto,
+    /** Los pagos preparados, para que el arnés los mire. */
+    pagos: () => [...pagos.values()].map((p) => ({ ...p, reservas: [...p.reservas] })),
+    /** Lo que haría el aviso de la pasarela con un pago fallido o vencido: deja de estar pendiente. */
+    cerrarPago(pagoId: string, estado: 'fallido' | 'vencido') {
+      const p = pagos.get(pagoId);
+      if (p) p.estado = estado;
+    },
     agregarCampana(c: CampanaEnMemoria) {
       campanas.set(c.id, { estado: 'activa', publicada: true, permitePagoTotal: true, ...c, codigo: c.codigo.toUpperCase() });
     },
@@ -230,6 +322,7 @@ export function funcionesEnMemoria(o: { ahora?: () => number } = {}) {
       reservas.push({
         id: nuevoId(), funcionId, campanaId: f.campanaId, personas, estado: 'apartada', venceAt: ahora() + 3_600_000, clave: null,
         origen: 'equipo', tarifa: 'completa', precioUnitario: 1, modalidad: 'total', montoAPagar: personas, propuesta: null,
+        conversacion: null, realineada: false,
       });
       return true;
     },
