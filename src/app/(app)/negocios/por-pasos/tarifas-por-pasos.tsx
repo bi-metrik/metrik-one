@@ -50,6 +50,7 @@ export function TarifasPorPasos({
   noVan,
   nombreDeOpcion,
   detalleDeOpcion,
+  cabeEnTarifa = () => true,
   precioDeOpcion,
   margenPct,
   pisoPct,
@@ -81,6 +82,8 @@ export function TarifasPorPasos({
   noVan: { grupo: string; nombre: string }[]
   nombreDeOpcion: (id: string) => string
   detalleDeOpcion: (id: string) => string | null
+  /** El traslado que va con otro hotel no cabe en esta tarifa (`va-con-hotel.ts`). */
+  cabeEnTarifa?: (tarifaId: string, itemId: string) => boolean
   precioDeOpcion: (id: string) => number
   margenPct: number
   pisoPct: number
@@ -297,13 +300,15 @@ export function TarifasPorPasos({
             <div role="radiogroup" aria-label={`${s.nombre} en ${t.nombre}`} className="flex flex-col gap-1.5">
               {s.candidatas.map(id => {
                 const on = id === elegida
+                const cabe = cabeEnTarifa(t.id, id)
                 return (
                   <button
                     key={id}
                     type="button"
                     role="radio"
                     aria-checked={on}
-                    disabled={!editable || ocupado}
+                    disabled={!editable || ocupado || !cabe}
+                    title={cabe ? undefined : 'Va con otro hotel: no cabe en esta tarifa'}
                     onClick={() => { if (!on) onElegir(t.id, s.grupo, id) }}
                     data-opcion-tarifa={id}
                     className={`flex items-center gap-2.5 rounded-lg border px-3 py-2 text-left ${on ? 'border-[#0E5C43] bg-[#EAF1EE]' : 'border-[#E2DED5] bg-white hover:bg-[#F8F7F3]'}`}

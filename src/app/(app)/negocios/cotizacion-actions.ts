@@ -1198,6 +1198,8 @@ export async function recalcularTotales(cotizacionId: string) {
         orden: f.orden ?? 0,
         dia_relativo: f.dia_relativo ?? null,
         entra_al_precio: f.entra_al_precio ?? null,
+        // El traslado que va con un hotel (2026-10-22, `va-con-hotel.ts`).
+        tarifa_pax: f.tarifa_pax,
       })),
     ),
   )

@@ -39,6 +39,8 @@ import { pctTexto } from '@/lib/cotizaciones/piso-salida'
 import { CAUSA_RETIRADA } from '@/lib/cotizaciones/autorizacion-vista'
 import { esDuenoDelWorkspace, leerPlatformAdmin } from '@/lib/permissions/dueno-workspace'
 import { lineasConMargenPropio } from '@/lib/cotizaciones/margen-propio'
+import { hotelesAsociados } from '@/lib/cotizaciones/va-con-hotel'
+import { leerTarifaPax } from '@/lib/cotizaciones/tarifa-pasajero'
 import { motivoAutorizacionParaEnviar } from '@/lib/autorizacion-datos/envio'
 
 
@@ -80,6 +82,12 @@ export async function elegirOpcionEnTarifa(
   if (!ranura) return { success: false, error: 'Ese servicio no tiene opciones entre qué escoger.' }
   if (!ranura.candidatos.includes(itemId)) return { success: false, error: 'Esa opción no es de este servicio.' }
   const anterior = ranura.candidatos.find(id => cab.seleccion.includes(id)) ?? null
+  // El traslado que va con OTRA opción de hotel no cabe en esta tarifa (`va-con-hotel.ts`): el plan
+  // lo cambiaría solo por el de su hotel y la elección se perdería sin aviso.
+  const hotelDelTraslado = hotelesAsociados(antes.ctx.items).get(itemId)
+  if (hotelDelTraslado && !itemsDelItinerario(antes.ctx.items, cab.seleccion).includes(hotelDelTraslado)) {
+    return { success: false, error: 'Esa opción va con otro hotel, y en esta tarifa va otro. Cambia el hotel de la tarifa, o deja la opción como general en su tarjeta.' }
+  }
 
   if (anterior !== itemId) {
     const { error: errDel } = await supabase
@@ -358,6 +366,44 @@ export async function margenPorPasos(
   const c = await cerrarAccion(supabase, { workspaceId, cotizacionId, antes: null, staffId })
   if (!c.success) return c
   return { success: true, anterior, valorTotal: c.valorTotal }
+}
+
+/**
+ * «Va con el hotel…» de un traslado (reunión del 2026-10-22, punto 5, `va-con-hotel.ts`): la
+ * opción queda atada a UNA opción de hotel y cuenta solo en las tarifas que la llevan; `null` la
+ * deja general (sirve para cualquier hotel). Después, cada tarifa toma el traslado de su hotel.
+ */
+export async function asociarConHotel(
+  itemId: string,
+  hotelId: string | null,
+): Promise<ResultadoPorPasos<{ valorTotal: number | null }>> {
+  const { supabase, workspaceId, staffId, error } = await getWorkspace()
+  if (error || !workspaceId) return { success: false, error: 'No autenticado' }
+  const de = await cotizacionDeItem(supabase, itemId)
+  if (!de) return { success: false, error: 'Opción no encontrada' }
+  const guard = await exigirPorPasos(supabase, de.cotizacionId)
+  if (!guard.ok) return { success: false, error: guard.error }
+  const antes = await fotoDeTarifas(supabase, de.cotizacionId)
+  if (!antes) return { success: false, error: 'Cotización no encontrada' }
+  const item = antes.ctx.items.find(i => i.id === itemId)
+  if (!item) return { success: false, error: 'Opción no encontrada' }
+  if (resolverRanura(item.grupo ?? '')?.definicion.slug === 'hotel_detalle') return { success: false, error: 'Un hotel no va con otro hotel.' }
+  if (hotelId !== null) {
+    const hotel = antes.ctx.items.find(i => i.id === hotelId)
+    if (!hotel || resolverRanura(hotel.grupo ?? '')?.definicion.slug !== 'hotel_detalle') return { success: false, error: 'Esa opción de hotel ya no está en la cotización. Recarga.' }
+  }
+  const { data: fila, error: errLeer } = await supabase.from('items').select('tarifa_pax').eq('id', itemId).maybeSingle()
+  if (errLeer || !fila) return { success: false, error: 'No se pudo leer la opción. Vuelve a intentarlo.' }
+  const actual = leerTarifaPax(fila.tarifa_pax)
+  if ((actual.vaConHotel ?? null) === hotelId) return { success: true, valorTotal: null }
+  const siguiente = { ...actual, actualizadaEn: new Date().toISOString() }
+  if (hotelId === null) delete siguiente.vaConHotel
+  else siguiente.vaConHotel = hotelId
+  const { error: errUpd } = await supabase.from('items').update({ tarifa_pax: siguiente as never }).eq('id', itemId)
+  if (errUpd) return { success: false, error: errUpd.message }
+  const c = await cerrarAccion(supabase, { workspaceId, cotizacionId: de.cotizacionId, antes, staffId })
+  if (!c.success) return c
+  return { success: true, valorTotal: c.valorTotal }
 }
 
 /**

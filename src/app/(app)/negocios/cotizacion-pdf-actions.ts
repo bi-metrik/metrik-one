@@ -890,6 +890,8 @@ export async function generateCotizacionPDF(
       orden: i.orden ?? 0,
       dia_relativo: i.dia_relativo ?? null,
       entra_al_precio: i.entra_al_precio ?? null,
+      // El traslado que va con un hotel (2026-10-22, `va-con-hotel.ts`).
+      tarifa_pax: i.tarifa_pax,
     }))).length === 0
   const bloques = unaSolaManera ? null : bloquesLeidos
   const idsDeLaUnica = unaSolaManera ? new Set(bloquesLeidos![0].itemIds) : null
@@ -1043,6 +1045,8 @@ export async function generateCotizacionPDF(
       dia_relativo: i.dia_relativo ?? null,
       mostrar_en_sugeridos: i.mostrar_en_sugeridos ?? null,
       entra_al_precio: i.entra_al_precio ?? null,
+      // El traslado que va con un hotel (2026-10-22, `va-con-hotel.ts`).
+      tarifa_pax: i.tarifa_pax,
       es_ajuste: i.es_ajuste ?? false,
       orden: i.orden ?? 0,
     }))

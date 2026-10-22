@@ -19,6 +19,7 @@ import 'server-only'
 
 import { estadoDelContacto } from './servidor'
 import { faltaParaAvanzar, GATE_AUTORIZACION, hayMenores, type FaltaGate } from './estado'
+import { MENSAJE_ENVIO_PENDIENTE } from './mensajes'
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type Cliente = any
@@ -26,7 +27,7 @@ type Cliente = any
 /** Lo que se le dice a quien intenta enviar. */
 export const MENSAJE_ENVIO: Record<FaltaGate | 'error', string> = {
   sin_contacto: 'El negocio no tiene contacto: asígnale el cliente y pídele la autorización de datos antes de enviar la cotización.',
-  generales: 'Falta que el cliente autorice el tratamiento de sus datos: la cotización se puede armar, pero no enviar. Envíale el link desde «Autorización de datos».',
+  generales: MENSAJE_ENVIO_PENDIENTE,
   menores: 'El viaje lleva menores y el cliente no autorizó el uso de sus datos: la cotización se puede armar, pero no enviar. Envíale el link desde «Autorización de datos».',
   error: 'No se pudo revisar la autorización de datos del cliente. Vuelve a intentarlo.',
 }

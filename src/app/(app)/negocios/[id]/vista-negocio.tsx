@@ -326,6 +326,8 @@ export async function cargarVistaNegocio(id: string): Promise<VistaNegocio | nul
     carpetaLocal: carpetaLocal,
     almacenamientoExterno: almacenamientoExterno,
     banner: banner,
+    /** La autorización de datos del cliente falta (la línea la pide): se cotiza, no se envía. */
+    autorizacionPendiente: data.autorizacionPendiente === true,
     extras: extras,
     viaje,
   }

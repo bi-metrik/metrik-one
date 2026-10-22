@@ -35,6 +35,7 @@ import type { FilaAdicional } from '@/lib/cotizaciones/adicionales'
 import type { ParametrosCascada } from '@/lib/cotizaciones/totales'
 import { ranurasConAlternativas } from '@/lib/cotizaciones/itinerarios'
 import { lineasConMargenPropio } from '@/lib/cotizaciones/margen-propio'
+import { hotelesAsociados } from '@/lib/cotizaciones/va-con-hotel'
 import { estadosPermitidos, type EstadoServicio } from '@/lib/cotizaciones/estado-servicio'
 import { YA_CAMBIO } from '@/lib/cotizaciones/deshacer-por-pasos'
 import { textoCortoDeOpcion, tiposSinPrecio } from '@/lib/cotizaciones/precio-que-falta'
@@ -220,6 +221,7 @@ export default function VistaPorPasos(p: PropsVistaPorPasos) {
     if (!f) return null
     return textoCortoDeOpcion({ grupo: f.grupo ?? null, tarifa_pax: f.tarifa_pax }, p.composicionViaje)
   }, [porId, p.composicionViaje])
+  const asociados = useMemo(() => hotelesAsociados(lineas), [lineas])
   const candidatasPorServicio = useMemo(() => new Map(ranurasConAlternativas(lineas).map(r => [r.grupo, r.candidatos])), [lineas])
   const conOpciones: ServicioConOpciones[] = servicios
     .filter(s => s.estado === 'incluido' && (candidatasPorServicio.get(s.grupo)?.length ?? 0) > 1)
@@ -548,7 +550,9 @@ export default function VistaPorPasos(p: PropsVistaPorPasos) {
     .filter(s => s.estado === 'incluido' && (candidatasPorServicio.get(s.grupo)?.length ?? 0) <= 1)
     .map(s => {
       const id = s.opciones.find(o => precios.has(o)) ?? s.opciones[0]
-      return { grupo: s.grupo, nombre: s.nombre, opcion: nombreDeOpcion(id), precio: precios.get(id)?.precio ?? 0 }
+      // Un traslado único que va con un hotel no va en todas: solo donde va ese hotel.
+      const h = asociados.get(id)
+      return { grupo: s.grupo, nombre: s.nombre, opcion: h ? `${nombreDeOpcion(id)} (solo con ${nombreDeOpcion(h)})` : nombreDeOpcion(id), precio: precios.get(id)?.precio ?? 0 }
     })
 
   const paso2 = (
@@ -559,7 +563,19 @@ export default function VistaPorPasos(p: PropsVistaPorPasos) {
       opcionales={servicios.filter(s => s.estado === 'opcional').map(s => ({ grupo: s.grupo, nombre: s.nombre }))}
       noVan={servicios.filter(s => s.estado === 'no').map(s => ({ grupo: s.grupo, nombre: s.nombre }))}
       nombreDeOpcion={nombreDeOpcion}
-      detalleDeOpcion={id => (porId.get(id) ? resumenDeOpcion(porId.get(id)!) : null)}
+      detalleDeOpcion={id => {
+        const f = porId.get(id)
+        if (!f) return null
+        // El traslado que va con un hotel lo dice (reunión del 2026-10-22, `va-con-hotel.ts`).
+        const h = asociados.get(id)
+        return [resumenDeOpcion(f), h ? `va con ${nombreDeOpcion(h)}` : null].filter(Boolean).join(' · ') || null
+      }}
+      cabeEnTarifa={(tarifaId, id) => {
+        const h = asociados.get(id)
+        if (!h) return true
+        const t = tarifas.find(x => x.id === tarifaId)
+        return !t || t.cascada.lineas.some(l => l.id === h)
+      }}
       precioDeOpcion={id => precios.get(id)?.precio ?? 0}
       margenPct={margenLocal ?? p.margenPct}
       pisoPct={p.umbrales.pisoPct}

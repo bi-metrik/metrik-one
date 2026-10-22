@@ -927,6 +927,10 @@ export default function CotizacionEditor({ oportunidadId, cotizacion, initialIte
   // cascada que aplica `recalcularTotales` al guardar: si la pantalla tuviera su
   // propia regla, el total de arriba y el de la base volverían a discrepar, que fue
   // exactamente el defecto que obligó a compartir `calcularCascada`.
+  // «Va con el hotel» de un traslado (reunión del 2026-10-22): las opciones de hotel de la cotización.
+  const hotelesParaTraslados = initialItems
+    .filter(i => !i.es_ajuste && ranuraDeGrupo(i.grupo ?? null)?.slug === 'hotel_detalle')
+    .map(i => ({ id: i.id, nombre: nombreVisibleDeLinea(i as never) || i.nombre || 'Hotel' }))
   const itemsParaRanuras = initialItems.map(i => ({
     id: i.id,
     grupo: i.grupo ?? null,
@@ -937,6 +941,8 @@ export default function CotizacionEditor({ oportunidadId, cotizacion, initialIte
     // Sin estos dos, la pantalla sumaría lo que `recalcularTotales` ya no suma.
     dia_relativo: i.dia_relativo ?? null,
     entra_al_precio: i.entra_al_precio ?? null,
+    // El traslado que va con un hotel (2026-10-22, `va-con-hotel.ts`).
+    tarifa_pax: i.tarifa_pax,
   }))
   /**
    * Con principal, la decisión está tomada y el total sale de ÉL (R5): no hay supuesto
@@ -1118,6 +1124,8 @@ export default function CotizacionEditor({ oportunidadId, cotizacion, initialIte
     dia_relativo: i.dia_relativo ?? null,
     mostrar_en_sugeridos: i.mostrar_en_sugeridos ?? null,
     entra_al_precio: i.entra_al_precio ?? null,
+    // El traslado que va con un hotel (2026-10-22, `va-con-hotel.ts`).
+    tarifa_pax: i.tarifa_pax,
     es_ajuste: i.es_ajuste ?? false,
     orden: i.orden ?? 0,
     precio_venta: i.precio_venta ?? 0,
@@ -1454,6 +1462,8 @@ export default function CotizacionEditor({ oportunidadId, cotizacion, initialIte
         grupo: i.grupo ?? null,
         dia_relativo: i.dia_relativo ?? null,
         entra_al_precio: i.entra_al_precio ?? null,
+        // El traslado que va con un hotel (2026-10-22, `va-con-hotel.ts`).
+        tarifa_pax: i.tarifa_pax,
         mostrar_en_sugeridos: i.mostrar_en_sugeridos ?? null,
         orden: i.orden ?? 0,
       }))
@@ -1539,6 +1549,8 @@ export default function CotizacionEditor({ oportunidadId, cotizacion, initialIte
           es_ajuste: item.es_ajuste ?? false,
           dia_relativo: item.dia_relativo ?? null,
           entra_al_precio: item.entra_al_precio ?? null,
+          // El traslado que va con un hotel (2026-10-22, `va-con-hotel.ts`).
+          tarifa_pax: item.tarifa_pax,
         }
         const esFueraDelPrecio = fueraDelPrecio(lineaDelInterruptor)
         const puedeSalirDelPrecio =
@@ -2434,6 +2446,7 @@ export default function CotizacionEditor({ oportunidadId, cotizacion, initialIte
               onEliminar={porPasosDeOpcion ? () => porPasosDeOpcion.onEliminar() : nombre => eliminarOpcionDevolviendo(item, nombre)}
               porPasos={porPasosDeOpcion ? { enTarifas: porPasosDeOpcion.enTarifas, menuExtra: porPasosDeOpcion.menuExtra } : null}
               autorizador={salida?.dueno ?? null}
+              hotelesDelViaje={porPasosDeOpcion ? hotelesParaTraslados : []}
               onMover={() => setMoverGrupoDe(item.id)}
               mover={editable && moverGrupoDe === item.id ? (
                 <div className="px-3 pb-2">
