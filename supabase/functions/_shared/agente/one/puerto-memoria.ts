@@ -90,7 +90,19 @@ export class PuertoOneMemoria implements PuertoOne {
   }
 
   async gasto(id: string): Promise<GastoOne | null | 'error'> {
-    return this.gastos.find((g) => g.id === id) ?? null;
+    if (this.caida) return 'error';
+    const g = this.gastos.find((x) => x.id === id);
+    return g ? { ...g, ...(this.revisados.has(g.id) ? { revisado: true } : {}) } : null;
+  }
+
+  async gastosPorId(ids: string[]): Promise<GastoOne[] | 'error'> {
+    if (this.caida) return 'error';
+    return this.gastos.filter((g) => ids.includes(g.id)).map((g) => ({ ...g, ...(this.revisados.has(g.id) ? { revisado: true } : {}) }));
+  }
+
+  /** Borra un gasto como lo haría la app (o un SQL a mano): la conversación sigue diciendo que se registró. */
+  borrarGasto(id: string): void {
+    this.gastos = this.gastos.filter((g) => g.id !== id);
   }
 
   async contactoDuplicado(telefono: string): Promise<string | null | 'error'> {

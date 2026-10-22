@@ -269,6 +269,18 @@ const CLASIFICACION: Record<string, Clasificacion> = {
       'instrucción al lector de pantallazos: un menor de MENOS DE 2 AÑOS de edad es infante ' +
       '(R8, regla 7). No hay plazo de conservación en este archivo.',
   },
+  'supabase/functions/_shared/agente/arnes/correr.ts': {
+    tipo: 'no-es-plazo',
+    razon:
+      'EDAD de un viajero en la lectura falsa de la solicitud sintética del arnés («un niño de 7 años»). ' +
+      'No hay plazo de conservación en este archivo.',
+  },
+  'supabase/functions/_shared/agente/arnes/soportes/pdf-minimo.ts': {
+    tipo: 'no-es-plazo',
+    razon:
+      'EDAD de los viajeros inventados de la solicitud de viaje sintética del arnés («Laura Prueba, 38 años»). ' +
+      'No hay plazo de conservación en este archivo.',
+  },
 };
 
 const NUMEROS_EN_LETRAS: Record<string, number> = {

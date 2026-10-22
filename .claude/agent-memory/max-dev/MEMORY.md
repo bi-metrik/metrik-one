@@ -3,6 +3,7 @@
 ## Project memories
 
 - [Recuperar dirección del espacio y bienvenida Valida (22-oct)](project_recuperar_direccion_espacio.md) — #1242; tope por instancia + idempotencia Resend; textos en acceso-espacio/textos.ts
+- ⚠️ [Bandeja Trappvel lee foto/PDF + gastos vigentes ONE](project_bandeja_adjuntos_trappvel.md) — soporte = comentario con one://; leer_adjuntos; arnés a-* sin llave
 - ⚠️⚠️ [Fechas completas de los servicios del viaje](project_fechas_servicios_viaje.md) — 20261021120000 SIN aplicar; corrección a mano manda; reproceso pierde con rastro
 - [Tablero Novedades (21-oct)](project_novedades_tablero.md) — archivo versionado + panel; visto por ids; el 503 crudo ya lo arregló #1241
 - [Errores de Valida en llano (21-oct)](project_valida_mensajes_error.md) — mensajes-error.ts; busqueda_incompleta no entra a valida_consultas
@@ -98,6 +99,7 @@
 
 - [Build en worktree sin una dependencia](reference_build_en_worktree.md) — copiar el paquete, no symlink (raíz de Turbopack)
 - [Comandos en worktree aislado](reference_worktree_aislado_comandos.md) — editar y mutar con python; git siempre simple
+- [Capturas de un componente sin servidor](reference_capturas_componente_sin_servidor.md) — vitest temporal + postcss + Playwright de npx
 - [Reproducir el PDF real solo lectura](reference_reproducir_pdf_real_solo_lectura.md) — supabase-js con fetch solo GET; sin MCP
 - [Frentes secundarios](indice_frentes_secundarios.md) — ~145 entradas viejas: cobros, Valida, SOENA, recibos, Siigo, recetas; buscar ahí antes de crear
 
@@ -105,6 +107,7 @@
 
 - [Las cifras del brief caducan](feedback_cifras_del_brief_caducan.md) — se re-miden al hacer el QA
 - [Pruebas por mutación](feedback_pruebas_por_mutacion.md) — no creerle a una prueba hasta verla fallar
+- ⚠️ [Arnés real: comparar la entrada main vs rama](feedback_arnes_real_comparar_entrada.md) — diff del pedido al modelo antes de decir «ruido»
 - ⚠️ [El doble hace cumplir las llaves al escribir](feedback_doble_hace_cumplir_llaves.md) — cruzar contra database.ts; ciclos en null + UPDATE
 - [Medir antes de construir](feedback_medir_antes_de_construir.md) — las premisas se comprueban
 - [La referencia manda sobre el diseño](feedback_la_referencia_manda_sobre_el_diseno.md) — si el brief cita un artefacto real, ábrelo

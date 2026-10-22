@@ -10,6 +10,7 @@ PR #1242 (feat/login-recuperar-espacio-y-bienvenida-valida, 2026-10-22), sin mig
 - `POST /api/acceso/recuperar-espacio` responde siempre `{ ok: true }` (salvo 422 por formato); búsqueda y envío en `after()`.
 - El repo NO tiene limitador compartido: el tope es por instancia (`LimiteEnMemoria`). Lo que sí frena entre instancias es la `Idempotency-Key` de Resend (huella del correo + ventana de 10 min).
 - Bienvenida de Valida sale en `crearEspacioValida` tras perfil y staff, NO en `reintentarPruebaPendiente`.
+- Marca por correo en `MARCAS` (textos.ts): bienvenida = Valida; recuperación = Valida solo si TODOS los espacios son solo Valida (`esEspacioSoloValida`). Valida no publica lockup en PNG: el nombre va en texto.
 
 **Why:** quien se registraba en /valida/empezar no sabía su slug (derivado de la razón social) ni recibía correo.
 
