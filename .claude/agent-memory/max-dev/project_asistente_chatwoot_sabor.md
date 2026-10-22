@@ -14,7 +14,11 @@ Estado al cerrar:
 - El modelo real pide la autorización con sus palabras: la guarda `autorizacion_improvisada` de `cola.ts` lo ataja. La guarda de precios ahora le devuelve el error al modelo, con un reintento dentro del tope de llamados (gancho `DepsTurno.guardaTexto`, decisión de Yuto del 2026-10-21). Por CLI, 3 de 3 se corrigieron; la guarda antes de publicar sigue igual.
 - El fixture de Chatwoot está armado de la doc: `message_type`, tipo de remitente, `data_url` y `submitted_values` siguen SIN VERIFICAR hasta el payload real (22-oct).
 
+Kickoff 22-oct (PR `feat/asistente-sabor-mesa-orden-llegada`, sin mergear al escribir esto): la semilla va con `elige_mesa: no`, sin zonas, sin precio de pareja, solo la preventa (vencida a la hora del arnés, 23-oct) y las reglas parqueadero/ninos/grupos escritas. Marcas `[KICKOFF 22-oct]` vs `[EJEMPLO]`. Los candados que eso deja dormidos (zona con recargo, preferencia anotada, dos condiciones, regla sin ficha) se prueban con `arnes/fichas-prueba.ts`: si alguien vuelve a tocar la semilla, esos casos NO deben depender de ella. Arnés seco 70/70 k=3; CLI sobreventa 15/15 pass^3, 0 dañinas.
+- Yuto (22-oct) quitó «mesa» del cierre del resumen (`dominio.ts`) y de `rf.siguiente_paso` («confirmar cupo y pago»). Luego también de `inv.confirmacion`, `seg.quien_confirma` y el error de `sobreventa.ts`: «mesa» ya no aparece en ningún texto al cliente.
+
 Gotchas que costaron:
+- Un calificador por regex sobre texto del modelo da falsos positivos cuando la regla de la ficha es una NEGACIÓN que el modelo repite («no hay descuento por pareja»): `RE_DESCUENTO` ya excluye no/ni/nunca. Al escribir una regla nueva en la semilla, correr el CLI y mirar las dañinas antes de creerlas.
 - El núcleo recorta cada resultado de herramienta a 400 tokens (`TOPES_BLOQUE.resultado`). Con la ficha ampliada, la experiencia de ejemplo cabe por poco y hay una prueba que lo vigila. Con 2 o más experiencias vigentes se pasaría.
 - El verificador del núcleo deja pasar una cifra que escribió el CLIENTE («la promo es a $50.000» → el bot la repite). Por eso existe `publico/precios.ts`: la plata solo sale de lo que devolvió una herramienta.
 - `CHECK (estado in (...))` deja pasar NULL. Para exigirlo hay que escribir `estado is not null and ...` (lo atrapó la prueba en PGlite).

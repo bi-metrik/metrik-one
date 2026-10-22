@@ -26,6 +26,7 @@ import type { EscenarioPublico } from '../escenario.ts';
 import type { Canal } from '../tipos.ts';
 import type { Veredicto } from './calificar.ts';
 import { PAYLOAD_DOC_MESSAGE_CREATED } from './fixture-chatwoot.ts';
+import { conDosCondiciones, conZonaYMesaPedida, sinRegla } from './fichas-prueba.ts';
 
 export type PasoCaso =
   | { escribe: string | string[]; despuesMs?: number }
@@ -73,6 +74,11 @@ const usoHerramienta = (e: EscenarioPublico, n: string): Veredicto =>
   e.almacen.trazas().some((t) => (t.herramientas ?? []).some((h) => h.nombre === n && h.ok)) ? ok(`usó ${n}`) : no(`no usó ${n}`);
 const nPublicados = (e: EscenarioPublico, n: number): Veredicto => (e.chatwoot.publicados.length === n ? ok(`${n} publicados`) : no(`${e.chatwoot.publicados.length} publicados, se esperaban ${n}`));
 const sinPropuesta = (e: EscenarioPublico): Veredicto => (e.almacen.trazas().some((t) => t.propuesta) ? no('armó una propuesta') : ok('sin propuesta'));
+// La mesa (§8.4.2 y §8.5): ni anotada en el estado ni prometida. En lo publicado, una pregunta del bot sobre mesa o zona.
+const sinMesaAnotada = (e: EscenarioPublico): Veredicto =>
+  e.almacen.trazas().some((t) => t.preferencia_mesa) || publico(e).includes('anotada como preferencia') ? no('anotó una preferencia de mesa') : ok('sin preferencia de mesa');
+const PROMESA_MESA = /\btu mesa (es|ser[aá]|queda)\b|\bte (asign|separ)[eé] la mesa\b|\bmesa (confirmada|asegurada|garantizada)\b|\b(te|les) (guardo|guardamos|separo|separamos|aparto|apartamos|aseguro|aseguramos|reservo|reservamos) (la |una |su |tu )?mesa\b/i;
+const PREGUNTA_MESA = /¿[^?¿]*\b(mesa|zona|ubicaci[oó]n|sentarte|sentarse|sentarlos|sentarnos)\b[^?¿]*\?/i;
 
 const R = (texto: string, tema = 'reserva', extra: Record<string, unknown> = {}) => ({ name: 'responder', args: { tema, texto, ...extra } });
 const CATALOGO = { name: 'ver_catalogo', args: {} };
@@ -362,10 +368,10 @@ const LENGUAJE: CasoPublico[] = [
 
 const SOBREVENTA: CasoPublico[] = [
   {
-    id: 'v-precio-pareja', conjunto: 'sobreventa', titulo: 'Precio de pareja, tal cual la ficha',
+    id: 'v-precio-pareja', conjunto: 'sobreventa', titulo: '«¿Cuánto para una pareja?»: precio por persona, sin precio de pareja ni total',
     pasos: [{ escribe: '¿Cuánto vale para una pareja?' }],
-    guion: [CATALOGO, R('Para una pareja son $170.000.', 'precio')],
-    esperado: (e) => todos(usoHerramienta(e, 'ver_catalogo'), contiene(e, '$170.000')),
+    guion: [CATALOGO, R('Es por persona: $95.000 cada uno, sin precio especial por pareja.', 'precio')],
+    esperado: (e) => todos(usoHerramienta(e, 'ver_catalogo'), contiene(e, '$95.000'), noContiene(e, /\$170\.000|\$190\.000/)),
   },
   {
     id: 'v-2x1', conjunto: 'sobreventa', titulo: 'Un 2x1 que no existe: no lo tiene publicado y lo confirma el equipo',
@@ -374,23 +380,72 @@ const SOBREVENTA: CasoPublico[] = [
     esperado: (e) => todos(noContiene(e, /\b2 ?x ?1\b/i), contiene(e, /equipo/i)),
   },
   {
-    id: 'v-recargo-ubicacion', conjunto: 'sobreventa', titulo: 'Sobrecosto de una ubicación, con su monto de la ficha',
+    // Sabor no tiene zonas con recargo (kickoff 22-oct): el candado se prueba con una ficha propia del arnés.
+    id: 'v-recargo-ubicacion', conjunto: 'sobreventa', titulo: 'Sobrecosto de una ubicación, con su monto de la ficha (ficha de prueba con zonas)',
+    fichas: conZonaYMesaPedida,
     pasos: [{ escribe: '¿Cuánto más cuesta sentarse frente a la pantalla?' }],
     guion: [CATALOGO, R('La zona frente a la pantalla tiene un recargo de $12.000 por persona.', 'precio')],
     esperado: (e) => todos(contiene(e, '$12.000'), noContiene(e, /tu mesa es/i)),
   },
   {
-    id: 'v-mesa-frente', conjunto: 'sobreventa', titulo: '«Quiero la mesa del frente»: queda como preferencia, no asignada',
+    // El mecanismo de §8.4.2 queda dormido en Sabor (§8.5), pero sigue en el código: se prueba con la ficha de prueba.
+    id: 'v-mesa-frente-se-pide', conjunto: 'sobreventa', titulo: '«Quiero la mesa del frente» con una ficha que deja pedirla: preferencia, no asignada (ficha de prueba)',
+    fichas: conZonaYMesaPedida,
     pasos: [{ escribe: 'Quiero la mesa del frente, porfa' }],
     guion: [{ name: 'respuesta_fija', args: { clave: 'rf.preferencia_mesa', preferencia: 'la mesa del frente' } }],
     esperado: (e) => todos(
       contiene(e, 'anotada como preferencia'),
       e.almacen.trazas().some((t) => !!t.preferencia_mesa) ? ok('preferencia en el estado') : no('no quedó la preferencia en el estado'),
-      noContiene(e, /tu mesa es|te (asign|separ)[eé] la mesa|mesa confirmada/i),
+      noContiene(e, PROMESA_MESA),
     ),
   },
   {
-    id: 'v-parqueadero', conjunto: 'sobreventa', titulo: 'Parqueadero sin ficha: duda abierta y persona, sin adivinar',
+    // Kickoff 22-oct (§8.5): en Sabor no se elige mesa. Si el modelo intenta anotarla, el candado se lo devuelve y dice
+    // la disposición de la ficha.
+    id: 'v-mesa-frente', conjunto: 'sobreventa', titulo: '«Quiero la mesa del frente» con elige_mesa: no: orden de llegada, sin anotar preferencia',
+    pasos: [{ escribe: 'Quiero la mesa del frente, porfa' }],
+    guion: [
+      { name: 'respuesta_fija', args: { clave: 'rf.preferencia_mesa', preferencia: 'la mesa del frente' } },
+      CATALOGO,
+      R('Aquí no se elige mesa: los puestos se toman por orden de llegada, así que conviene llegar puntual.', 'reserva'),
+    ],
+    esperado: (e) => todos(contiene(e, /orden de llegada/i), sinMesaAnotada(e), noContiene(e, 'anotada como preferencia'), noContiene(e, PROMESA_MESA), sinPersona(e)),
+  },
+  {
+    id: 'v-donde-sentamos', conjunto: 'sobreventa', titulo: '«¿Dónde nos sentamos?»: orden de llegada, sin preguntar por mesa',
+    pasos: [{ escribe: '¿Y dónde nos sentamos?' }],
+    guion: [CATALOGO, R('Los puestos se toman por orden de llegada y las mesas son de hasta 9 personas. Conviene llegar puntual.', 'experiencia')],
+    esperado: (e) => todos(contiene(e, /orden de llegada/i), noContiene(e, PREGUNTA_MESA), sinMesaAnotada(e), noContiene(e, PROMESA_MESA)),
+  },
+  {
+    id: 'v-grupo-mesa-junta', conjunto: 'sobreventa', titulo: 'Grupo de 6 que quiere mesa junta: persona (grupo), sin prometer la mesa',
+    pasos: [{ escribe: 'Somos 6 y queremos sentarnos todos juntos en la misma mesa el sábado, ¿se puede?' }],
+    guion: [{ name: 'consultar_reglas', args: { clave: 'grupos' } }, PERSONA('grupo', 'grupo de 6 quiere mesa junta')],
+    esperado: (e) => todos(persona(e, 'grupo'), sinMesaAnotada(e), noContiene(e, PROMESA_MESA), sinPropuesta(e)),
+  },
+  {
+    id: 'v-grupo-14', conjunto: 'sobreventa', titulo: 'Grupo de 14: menciona la experiencia privada y pasa a persona (grupo)',
+    pasos: [{ escribe: 'Somos 14 personas y queremos ir el sábado 24, ¿cómo hacemos?' }],
+    guion: [{ name: 'consultar_reglas', args: { clave: 'grupos' } }, PERSONA('grupo', 'grupo de 14')],
+    esperado: (e) => todos(persona(e, 'grupo'), contiene(e, /privad/i), noContiene(e, PROMESA_MESA), sinPropuesta(e)),
+  },
+  {
+    // Kickoff 22-oct: la regla existe, así que ya no es duda abierta; y Sabor no responde por la bahía.
+    id: 'v-parqueadero', conjunto: 'sobreventa', titulo: 'Parqueadero: la respuesta sale de la regla (no es duda abierta) y no responde por la bahía',
+    pasos: [{ escribe: '¿Tienen parqueadero?' }],
+    guion: [{ name: 'consultar_reglas', args: { clave: 'parqueadero' } }, R('No tenemos parqueadero. Al frente hay una bahía sin vigilancia, de la que Sabor no responde, y hay un parqueadero a unas cuadras.', 'politicas')],
+    esperado: (e) => todos(
+      usoHerramienta(e, 'consultar_reglas'), sinPersona(e), contiene(e, /bah[ií]a/i), contiene(e, /cuadras/i),
+      // La respuesta tiene respaldo en la regla publicada (no en lo que el modelo supone).
+      e.almacen.trazas().some((t) => (t.herramientas ?? []).some((h) => h.nombre === 'consultar_reglas' && h.ok && /bah[ií]a/.test(JSON.stringify(h.datos ?? '')))) ? ok('la regla trae la bahía') : no('consultar_reglas no devolvió la regla de parqueadero'),
+      noContiene(e, 'No tengo ese dato confirmado'),
+      noContiene(e, /\b(s[ií] (tenemos|hay)|contamos con) parqueadero|bah[ií]a (vigilada|segura)|(cuidamos|vigilamos|respondemos por) (tu |el |los |la )?(carro|veh[ií]culo|bah[ií]a)/i),
+    ),
+  },
+  {
+    // Una clave sin ficha sigue siendo duda abierta: se prueba con una ficha propia sin la regla de parqueadero.
+    id: 'v-regla-sin-ficha', conjunto: 'sobreventa', titulo: 'Regla sin ficha (parqueadero, ficha de prueba): duda abierta y persona, sin adivinar',
+    fichas: sinRegla('parqueadero'),
     pasos: [{ escribe: '¿Tienen parqueadero?' }],
     guion: [{ name: 'consultar_reglas', args: { clave: 'parqueadero' } }, PERSONA('duda_abierta', 'pregunta por parqueadero')],
     esperado: (e) => todos(persona(e, 'duda_abierta'), contiene(e, 'No tengo ese dato confirmado'), noContiene(e, /parquea(dero)?s? (cerca|p[uú]blicos?)|puedes parquear/i)),
@@ -402,13 +457,15 @@ const SOBREVENTA: CasoPublico[] = [
     esperado: (e) => contiene(e, /el cupo lo confirma el equipo|el equipo (de sabor )?(te |lo )*confirma/i),
   },
   {
-    id: 'v-condicion-vencida', conjunto: 'sobreventa', titulo: 'Condición vencida: no se aplica',
-    pasos: [{ escribe: '¿Todavía aplica el descuento de la preventa de lanzamiento?' }],
-    guion: [CATALOGO, R('Sí, la preventa te da $20.000 de descuento por persona.', 'precio'), R('Ese descuento de preventa ya no está vigente. Hoy hay descuento por pago anticipado de $10.000 por persona si pagas el total antes del jueves de la función.', 'precio')],
+    id: 'v-condicion-vencida', conjunto: 'sobreventa', titulo: 'Preventa vencida: no se aplica',
+    pasos: [{ escribe: '¿Todavía aplica el descuento de la preventa?' }],
+    guion: [CATALOGO, R('Sí, la preventa te da $20.000 de descuento por persona.', 'precio'), R('La preventa ya no está vigente. Hoy el precio es $95.000 por persona.', 'precio')],
     esperado: (e) => noContiene(e, '20.000'),
   },
   {
-    id: 'v-dos-condiciones', conjunto: 'sobreventa', titulo: 'Dos condiciones que el cliente quiere sumar: no se suman',
+    // Sabor tiene una sola condición (la preventa): dos vigentes a la vez solo existen en la ficha de prueba.
+    id: 'v-dos-condiciones', conjunto: 'sobreventa', titulo: 'Dos condiciones que el cliente quiere sumar: no se suman (ficha de prueba con dos)',
+    fichas: conDosCondiciones,
     pasos: [{ escribe: 'Voy a pagar anticipado y es mi cumpleaños, ¿me sumas los dos descuentos?' }],
     guion: [CATALOGO, R('¡Claro! Puedes sumar los dos descuentos: te quedan $80.000.', 'precio'), R('No se pueden sumar: aplica una sola condición, y el equipo de Sabor te confirma el total.', 'precio')],
     esperado: (e) => todos(noContiene(e, '$80.000'), noContiene(e, /\b(s[ií],? )?(puedes|se pueden) sumar los dos\b(?![^.]*\bno\b)/i)),
@@ -433,13 +490,43 @@ const SOBREVENTA: CasoPublico[] = [
       R('¿Y un teléfono de contacto?'),
       PROPONER(),
       R('¡Sí, ya quedó reservado!'),
-      R('Todavía no: primero revisa el resumen y tócale «Sí, está bien»; después el equipo de Sabor te escribe para el cupo, la mesa y el pago.'),
+      R('Todavía no: primero revisa el resumen y tócale «Sí, está bien»; después el equipo de Sabor te escribe para el cupo y el pago.'),
     ],
     esperado: (e) => todos(
       contiene(e, 'Todavía no está reservado: el equipo de Sabor te escribe'),
       persona(e, 'reserva_lista'),
       e.almacen.trazas().some((t) => t.propuesta && !/total \$/i.test(t.propuesta.resumen)) ? ok('resumen sin total') : no('el resumen trae total o no hubo resumen'),
     ),
+  },
+  {
+    // §8.5: con elige_mesa: no, el resumen de proponer_reserva no lleva «Preferencia de mesa» aunque el cliente la pida.
+    id: 'v-resumen-sin-mesa', conjunto: 'sobreventa', titulo: 'Pide mesa en medio de la reserva: el resumen sale sin la línea de mesa',
+    pasos: [
+      { escribe: 'Quiero reservar para 2 el sábado 24 a las 7' },
+      { hastaAutorizacion: ['sí, esa función', 'sí, quiero reservar'] },
+      { toca: 'Sí', oEscribe: 'sí' },
+      { escribe: 'Ana Pérez' },
+      { escribe: '52123456' },
+      { escribe: '3001234567. Ah, y ojalá nos den la mesa del frente' },
+      { toca: 'Sí, está bien', oEscribe: 'sí, está bien' },
+    ],
+    guion: [
+      { varias: [CATALOGO, FUNCIONES] }, R('Hay función el sábado 24 de octubre a las 7:00 p. m. ¿Te sirve?', 'reserva'),
+      FIJA('rf.autorizacion'),
+      R('¡Gracias! ¿A nombre de quién hago la reserva?'),
+      R('¿Me das tu número de cédula?'),
+      R('¿Y un teléfono de contacto?'),
+      PROPONER({ ...RESERVA, preferencia_mesa: 'la mesa del frente' }),
+      PROPONER(),
+    ],
+    esperado: (e) => {
+      const props = e.almacen.trazas().filter((t) => t.propuesta).map((t) => t.propuesta!);
+      return todos(
+        props.length ? ok(`${props.length} resumen(es)`) : no('no hubo resumen'),
+        props.some((p) => /preferencia de mesa/i.test(p.resumen) || p.datos.preferencia_mesa) ? no('el resumen trae la mesa') : ok('resumen sin la línea de mesa'),
+        sinMesaAnotada(e), noContiene(e, PROMESA_MESA),
+      );
+    },
   },
 ];
 
