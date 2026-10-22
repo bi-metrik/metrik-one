@@ -1,7 +1,11 @@
 import 'server-only'
 
 /**
- * Lecturas del módulo `funciones` para las pantallas. Todas con el cliente de la SESIÓN (`authenticated`): el RLS
+ * Lecturas del módulo `funciones` para las pantallas.
+ *
+ * Puente MÍNIMO con el modelo del 2026-10-22 (campañas, dos cupos, precios): las pantallas de hoy siguen viendo
+ * `cupo_total` y los estados `abierta`/`cerrada`/`cancelada`; aquí se traducen desde `capacidad` y
+ * `activa`/`pausada`/`cancelada`. Se reemplaza con el panel nuevo (Noor y Sofía), que todavía no está. Todas con el cliente de la SESIÓN (`authenticated`): el RLS
  * acota al workspace y `funcion_ocupacion` verifica que la persona sea de ese workspace. Nada aquí escribe.
  */
 import type { SupabaseClient } from '@supabase/supabase-js'
@@ -76,10 +80,14 @@ function vistaReserva(r: FilaReserva): ReservaVista {
   }
 }
 
+/** `activa`/`pausada`/`cancelada` de la base → los estados que muestran las pantallas de hoy. Pura. */
+export const estadoParaPantalla = (e: string): EstadoFuncion => (e === 'activa' ? 'abierta' : e === 'cancelada' ? 'cancelada' : 'cerrada')
+
 export async function leerOcupacion(db: SupabaseClient, funcionId: string): Promise<Ocupacion | null> {
   const { data, error } = await db.rpc('funcion_ocupacion', { p_funcion_id: funcionId })
   if (error || !data) return null
-  return data as Ocupacion
+  const o = data as Omit<Ocupacion, 'cupo_total' | 'estado'> & { capacidad: number; estado: string }
+  return { ...o, cupo_total: o.capacidad, estado: estadoParaPantalla(o.estado) }
 }
 
 /** Las reservas ACTIVAS de una función (las que ocupan cupo). */
@@ -129,20 +137,21 @@ export interface FuncionProxima {
 export async function leerProximas(db: SupabaseClient, workspaceId: string, dias = 45): Promise<FuncionProxima[]> {
   const { data, error } = await db
     .from('funcion_funciones')
-    .select('id, inicia_at, estado, cupo_total, funcion_experiencias(nombre)')
+    .select('id, inicia_at, estado, capacidad, funcion_campanas(funcion_experiencias(nombre))')
     .eq('workspace_id', workspaceId)
+    .is('archivada_at', null)
     .gte('inicia_at', new Date(Date.now() - 6 * 3_600_000).toISOString())
     .lt('inicia_at', new Date(Date.now() + dias * 86_400_000).toISOString())
     .order('inicia_at', { ascending: true })
     .limit(200)
   if (error) throw new Error(`No se pudieron leer las funciones: ${error.message}`)
-  type Fila = { id: string; inicia_at: string; estado: EstadoFuncion; cupo_total: number; funcion_experiencias: { nombre: string } | null }
+  type Fila = { id: string; inicia_at: string; estado: string; capacidad: number; funcion_campanas: { funcion_experiencias: { nombre: string } | null } | null }
   return ((data ?? []) as unknown as Fila[]).map((f) => ({
     id: f.id,
     inicia_at: f.inicia_at,
-    estado: f.estado,
-    cupo_total: f.cupo_total,
-    experiencia: f.funcion_experiencias?.nombre ?? '',
+    estado: estadoParaPantalla(f.estado),
+    cupo_total: f.capacidad,
+    experiencia: f.funcion_campanas?.funcion_experiencias?.nombre ?? '',
   }))
 }
 
@@ -154,7 +163,8 @@ export interface ExperienciaCatalogo {
 }
 
 export async function leerExperiencias(db: SupabaseClient, workspaceId: string): Promise<ExperienciaCatalogo[]> {
-  const { data, error } = await db.from('funcion_experiencias').select('id, nombre, minutos_apartado, activa').eq('workspace_id', workspaceId).order('nombre')
+  const { data, error } = await db.from('funcion_experiencias').select('id, nombre, activa').eq('workspace_id', workspaceId).order('nombre')
   if (error) throw new Error(`No se pudieron leer las experiencias: ${error.message}`)
-  return (data ?? []) as ExperienciaCatalogo[]
+  // Los minutos de apartado viven ahora en la campaña: la pantalla de hoy no los tiene de dónde leer.
+  return ((data ?? []) as Array<Omit<ExperienciaCatalogo, 'minutos_apartado'>>).map((e) => ({ ...e, minutos_apartado: null }))
 }

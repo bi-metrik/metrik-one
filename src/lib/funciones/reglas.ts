@@ -69,6 +69,11 @@ const MENSAJES: Record<string, string> = {
   experiencia_no_existe: 'La experiencia no existe.',
   fecha_pasada: 'Una de las fechas ya pasó.',
   datos_invalidos: 'Revisa los datos del formulario.',
+  sin_precio: 'La función no tiene precio por persona.',
+  modalidad_no_permitida: 'Esa forma de pago no está habilitada para esta función.',
+  capacidad_bajo_ocupacion: 'Hay más personas reservadas que esa capacidad.',
+  cupo_asistente_invalido: 'El cupo del asistente va de 1 a la capacidad.',
+  abono_sobre_precio: 'El abono no puede pasar el precio por persona.',
   dato_no_admitido: 'Ese dato no se guarda en una reserva.',
 }
 

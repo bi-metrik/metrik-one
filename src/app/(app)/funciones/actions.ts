@@ -63,10 +63,12 @@ export async function apartarEquipoAction(
   if (!UUID.test(funcionId)) return { ok: false, error: 'La función no existe.' }
   if (!Number.isInteger(datos.personas) || datos.personas < 1) return { ok: false, error: 'Escribe cuántas personas.' }
   if (!datos.nombre.trim()) return { ok: false, error: 'Escribe el nombre de quien reserva.' }
+  // La pantalla de hoy no pregunta la modalidad: aparta con pago total (si la campaña no lo permite, la base lo dice).
   const { error } = await p.db.rpc('funcion_apartar', {
     p_workspace_id: p.ws,
     p_funcion_id: funcionId,
     p_personas: datos.personas,
+    p_modalidad: 'total',
     p_datos: { canal: 'equipo', nombre: datos.nombre, telefono: datos.telefono || null, solicitud_cliente: datos.solicitud_cliente || null },
     p_clave_idempotencia: datos.clave,
     p_origen: 'equipo',
@@ -79,20 +81,25 @@ export async function apartarEquipoAction(
 
 // ── Formulario de alta (F1): la única puerta ─────────────────────────────────
 
+/**
+ * Alta mínima de una experiencia (solo el nombre). Desde el 2026-10-22 los minutos de apartado y los precios viven en la
+ * CAMPAÑA: lo que traiga la pantalla de hoy en `minutos_apartado` no se guarda. El panel nuevo los pide donde van.
+ */
 export async function guardarExperienciaAction(e: { id: string | null; nombre: string; minutos_apartado: number | null }): Promise<Resultado<string>> {
   const p = await puerta()
   if (!p.ok) return p
   if (e.id !== null && !UUID.test(e.id)) return { ok: false, error: 'La experiencia no existe.' }
-  if (e.minutos_apartado !== null && (!Number.isInteger(e.minutos_apartado) || e.minutos_apartado < 1)) {
-    return { ok: false, error: 'Los minutos de apartado son un número entero, o se dejan vacíos.' }
-  }
   return llamar<string>(
     'funcion_guardar_experiencia',
-    { p_workspace_id: p.ws, p_experiencia_id: e.id, p_nombre: e.nombre, p_minutos_apartado: e.minutos_apartado, p_activa: true },
+    { p_workspace_id: p.ws, p_experiencia_id: e.id, p_nombre: e.nombre, p_historia: null, p_que_incluye: null, p_edad_minima: null, p_info_general: null },
     ['/funciones', '/funciones/nueva'],
   )
 }
 
+/**
+ * Las funciones se crean por CAMPAÑA desde el 2026-10-22 (`funcion_crear_funciones` con pares fecha + hora). El
+ * formulario de hoy no elige campaña, así que no crea nada y lo dice: el alta llega con el panel nuevo.
+ */
 export async function crearFuncionesAction(f: {
   experiencia_id: string
   cupo_total: number
@@ -102,30 +109,23 @@ export async function crearFuncionesAction(f: {
 }): Promise<Resultado<string[]>> {
   const p = await puerta()
   if (!p.ok) return p
-  if (!UUID.test(f.experiencia_id)) return { ok: false, error: 'Elige la experiencia.' }
-  const inicios = f.inicios.map((i) => inicioBogota(i.fecha, i.hora))
-  if (inicios.length === 0 || inicios.some((i) => i === null)) return { ok: false, error: 'Cada función necesita fecha y hora.' }
-  return llamar<string[]>(
-    'funcion_crear_funciones',
-    {
-      p_workspace_id: p.ws,
-      p_experiencia_id: f.experiencia_id,
-      p_cupo_total: f.cupo_total,
-      p_estado: f.estado,
-      p_cierre_minutos_antes: f.cierre_minutos_antes,
-      p_inicios: inicios,
-    },
-    ['/funciones', '/funciones/dia'],
-  )
+  void f
+  return { ok: false, error: 'Las funciones ahora se crean dentro de una campaña. Esta pantalla se reemplaza con el panel nuevo.' }
 }
 
+/** Cupo y estado desde el detalle de hoy: `cupo_total` es la capacidad; el cupo del asistente no pasa de ella. */
 export async function editarFuncionAction(f: { id: string; cupo_total: number; estado: 'abierta' | 'cerrada' | 'cancelada'; cierra_venta_at: string | null }): Promise<Resultado> {
   if (!UUID.test(f.id)) return { ok: false, error: 'La función no existe.' }
-  const r = await llamar('funcion_editar_funcion', { p_funcion_id: f.id, p_cupo_total: f.cupo_total, p_estado: f.estado, p_cierra_venta_at: f.cierra_venta_at }, [
-    `/funciones/${f.id}`,
-    '/funciones',
-    '/funciones/dia',
-  ])
+  const p = await puerta()
+  if (!p.ok) return p
+  const { data } = await p.db.from('funcion_funciones').select('cupo_asistente').eq('id', f.id).maybeSingle()
+  const actual = (data as { cupo_asistente?: number } | null)?.cupo_asistente ?? f.cupo_total
+  const estado = f.estado === 'abierta' ? 'activa' : f.estado === 'cerrada' ? 'pausada' : 'cancelada'
+  const r = await llamar(
+    'funcion_editar_funcion',
+    { p_funcion_id: f.id, p_capacidad: f.cupo_total, p_cupo_asistente: Math.min(actual, f.cupo_total), p_estado: estado, p_cierra_venta_at: f.cierra_venta_at, p_precios: null },
+    [`/funciones/${f.id}`, '/funciones', '/funciones/dia'],
+  )
   return r.ok ? { ok: true } : r
 }
 

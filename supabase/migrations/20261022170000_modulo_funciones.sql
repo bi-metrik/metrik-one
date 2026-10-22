@@ -1539,8 +1539,9 @@ $$;
 revoke execute on function public.funcion_crear_funciones(uuid, uuid, integer, integer, integer, jsonb, jsonb) from public, anon, service_role;
 grant execute on function public.funcion_crear_funciones(uuid, uuid, integer, integer, integer, jsonb, jsonb) to authenticated;
 
--- Cambia los cupos, el estado, el cierre de venta y los reemplazos de precio de una función, con el candado de la
--- función tomado (la capacidad no baja de lo ocupado: lo dice el trigger; la tarifa tiene que cuadrar).
+-- Cambia los cupos, el estado, el cierre de venta y (si `p_precios` no es nulo) los reemplazos de precio de una
+-- función, con el candado de la función tomado (la capacidad no baja de lo ocupado: lo dice el trigger; la tarifa
+-- tiene que cuadrar).
 create or replace function public.funcion_editar_funcion(
   p_funcion_id uuid,
   p_capacidad integer,
@@ -1579,13 +1580,18 @@ begin
   perform 1 from public.funcion_funciones where id = p_funcion_id for update;
   perform public.funcion_vencer_apartados(p_funcion_id);
   update public.funcion_funciones
-     set capacidad = p_capacidad, cupo_asistente = p_cupo_asistente, estado = p_estado, cierra_venta_at = p_cierra_venta_at,
-         es_preventa = coalesce((p_precios->>'es_preventa')::boolean, false),
-         precio_persona = public.funcion_precio_de(p_precios, 'precio_persona'),
-         precio_preventa_persona = public.funcion_precio_de(p_precios, 'precio_preventa_persona'),
-         abono_persona = public.funcion_precio_de(p_precios, 'abono_persona'),
-         permite_pago_total = (p_precios->>'permite_pago_total')::boolean
+     set capacidad = p_capacidad, cupo_asistente = p_cupo_asistente, estado = p_estado, cierra_venta_at = p_cierra_venta_at
    where id = p_funcion_id;
+  -- `p_precios` nulo = los reemplazos de precio no se tocan.
+  if p_precios is not null then
+    update public.funcion_funciones
+       set es_preventa = coalesce((p_precios->>'es_preventa')::boolean, false),
+           precio_persona = public.funcion_precio_de(p_precios, 'precio_persona'),
+           precio_preventa_persona = public.funcion_precio_de(p_precios, 'precio_preventa_persona'),
+           abono_persona = public.funcion_precio_de(p_precios, 'abono_persona'),
+           permite_pago_total = (p_precios->>'permite_pago_total')::boolean
+     where id = p_funcion_id;
+  end if;
   return public.funcion_ocupacion(p_funcion_id);
 end;
 $$;
