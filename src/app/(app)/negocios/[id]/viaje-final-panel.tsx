@@ -184,6 +184,11 @@ export default function ViajeFinalPanel({
           <Cifra titulo="Cotizado" valor={pesosCierre(c.margenCotizado)} nota={c.margenCotizadoPct !== null ? `${c.margenCotizadoPct} %` : null} />
         </div>
         {c.explicacion && <p>{c.explicacion}</p>}
+        {/* El mismo saldo que frena `saldo_cero`: sin esto el panel decía «Cerrado» en verde y el
+            avance se negaba sin explicación. */}
+        {vista.saldoPendiente && (
+          <p className="font-medium text-red-700" data-saldo-pendiente>{vista.saldoPendiente}. No se puede cerrar el viaje con saldo por cobrar.</p>
+        )}
         <ul className="divide-y rounded-md border">
           {c.filas.map(f => (
             <li key={f.id} className="flex flex-wrap justify-between gap-2 p-2">
