@@ -38,7 +38,9 @@ export const RF_PREFERENCIA_MESA = 'rf.preferencia_mesa';
 export const RF_CUPO = 'rf.cupo_lo_confirma_el_equipo';
 export const RF_SIGUIENTE_PASO = 'rf.siguiente_paso';
 export const RF_DUDA_ABIERTA = 'rf.duda_abierta';
-export const FIJAS_DEL_MODELO = [RF_AUTORIZACION, RF_AUTORIZACION_SENSIBLE, RF_TARJETA, RF_PREFERENCIA_MESA, RF_CUPO] as const;
+/** §6.4.1: antes de pasar a quien pide una persona, una sola pregunta por qué. */
+export const RF_PERSONA_POR_QUE = 'rf.persona_por_que';
+export const FIJAS_DEL_MODELO = [RF_AUTORIZACION, RF_AUTORIZACION_SENSIBLE, RF_TARJETA, RF_PREFERENCIA_MESA, RF_CUPO, RF_PERSONA_POR_QUE] as const;
 
 /** Motivos que sí se repiten: la persona lo vuelve a pedir, o es otra reserva, o es urgente. */
 const REPETIBLES: MotivoPersona[] = ['pide_persona', 'reserva_lista', 'datos', 'crisis', 'duda_abierta'];
@@ -58,6 +60,24 @@ const filasDe = (ctx: ContextoDominio) => ctx.conversacion as FilaPublica[];
 /** Los motivos por los que esta conversación ya pasó a persona. Pura. */
 export function motivosYaPasados(filas: FilaPublica[]): MotivoPersona[] {
   return filas.map((f) => (f.traza as TrazaPublica | null)?.persona?.motivo).filter((m): m is MotivoPersona => !!m);
+}
+
+/** ¿Ya volvió de una persona? El bot solo atiende en `pending`: un paso a persona previo es un `pending` tras `open`. Pura. */
+export function volvioDePersona(filas: FilaPublica[]): boolean {
+  return motivosYaPasados(filas).length > 0;
+}
+
+/**
+ * ¿Ya le salió al cliente `rf.persona_por_que` en esta conversación (§6.4.4)? Cuenta lo publicado (la traza con
+ * salida), venga del código («persona» escrito solo) o del modelo (`respuesta_fija`). Pura.
+ */
+export function porQueYaSalio(filas: FilaPublica[]): boolean {
+  return filas.some((f) => {
+    const t = f.traza as TrazaPublica | null;
+    if (!t?.salida) return false;
+    return t.respuesta_fija === RF_PERSONA_POR_QUE
+      || (t.herramientas ?? []).some((h) => h.ok && h.nombre === RESPUESTA_FIJA && (h.args as { clave?: unknown } | null)?.clave === RF_PERSONA_POR_QUE);
+  });
 }
 
 const normal = (s: string) => s.toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '').replace(/[^a-z0-9ñ]+/g, ' ').trim();
@@ -165,7 +185,7 @@ export function dominioPublico(o: OpcionesDominioPublico): Dominio {
     },
     {
       name: RESPUESTA_FIJA,
-      description: `Manda una respuesta fija, tal cual la escribe el sistema. ${RF_AUTORIZACION}: antes de pedir nombre, cédula o teléfono para la reserva (pide la autorización con Sí / No; es la ÚNICA forma de pedirla: nunca la redactes tú en responder). ${RF_AUTORIZACION_SENSIBLE}: si la persona menciona una restricción alimentaria, alergia o dato de salud (no repitas el dato). ${RF_TARJETA}: si escribe o pide escribir datos de tarjeta. ${RF_PREFERENCIA_MESA}: si pide una mesa o zona (pon en \`preferencia\` lo que pidió; el sistema la anota como preferencia, nunca como asignada, y dice el recargo de la zona si lo hay). ${RF_CUPO}: si pregunta si hay cupo o pide que se lo asegures.`,
+      description: `Manda una respuesta fija, tal cual la escribe el sistema. ${RF_AUTORIZACION}: antes de pedir nombre, cédula o teléfono para la reserva (pide la autorización con Sí / No; es la ÚNICA forma de pedirla: nunca la redactes tú en responder). ${RF_AUTORIZACION_SENSIBLE}: si la persona menciona una restricción alimentaria, alergia o dato de salud (no repitas el dato). ${RF_TARJETA}: si escribe o pide escribir datos de tarjeta. ${RF_PREFERENCIA_MESA}: si pide una mesa o zona (pon en \`preferencia\` lo que pidió; el sistema la anota como preferencia, nunca como asignada, y dice el recargo de la zona si lo hay). ${RF_CUPO}: si pregunta si hay cupo o pide que se lo asegures. ${RF_PERSONA_POR_QUE}: si pide una persona sin decir para qué (una sola vez por conversación; si ya la mandaste o ya lo atendió una persona, usa pasar_a_persona).`,
       parameters: {
         type: 'object',
         properties: {
@@ -288,7 +308,8 @@ export function dominioPublico(o: OpcionesDominioPublico): Dominio {
         `Autorización de datos para la reserva: ${lineaG}.`,
         ...(sen.estado !== 'no_pedida' ? [`Dato de salud: ${sen.estado === 'si' ? 'autorizado (ya pasó a persona)' : sen.estado === 'no' ? 'no autorizado: no lo menciones ni lo guardes' : 'autorización pedida, sin respuesta'}.`] : []),
         ...(preferenciaMesa(filas) ? [`Preferencia de mesa anotada (por confirmar, no asignada): ${preferenciaMesa(filas)}.`] : []),
-        ...(pasados.length ? [`Ya pasó a persona por: ${[...new Set(pasados)].join(', ')} (no repitas esos motivos salvo pide_persona).`] : []),
+        ...(pasados.length ? [`Ya pasó a persona por: ${[...new Set(pasados)].join(', ')} (no repitas esos motivos salvo pide_persona). Si pide una persona otra vez: pasar_a_persona motivo pide_persona, sin preguntar por qué.`] : []),
+        ...(!pasados.length && porQueYaSalio(filas) ? ['Ya le preguntaste por qué quiere una persona (rf.persona_por_que): no lo vuelvas a preguntar. Si contesta algo que resuelves, contéstalo y ofrécele de nuevo pasar con una persona; si vuelve a pedir una persona o dice que solo quiere hablar con alguien: pasar_a_persona motivo pide_persona.'] : []),
       ];
     },
 
@@ -319,6 +340,12 @@ export function dominioPublico(o: OpcionesDominioPublico): Dominio {
         if (clave === RF_TARJETA) {
           const s: Salida = { tipo: 'texto', texto: respuestaFija(r, RF_TARJETA) };
           return { ok: true, salidas: [s], privado: { enmascarar: true } };
+        }
+        if (clave === RF_PERSONA_POR_QUE) {
+          // §6.4.4 y §6.4.5: una sola vez por conversación, y nunca a quien vuelve de una persona.
+          if (volvioDePersona(filas)) return { ok: false, error: 'Ya lo atendió una persona y lo devolvieron: si pide una persona, pasar_a_persona motivo pide_persona, sin preguntar.', candado: 'persona_por_que_tras_persona' };
+          if (porQueYaSalio(filas)) return { ok: false, error: 'Ya le preguntaste por qué quiere una persona: no lo vuelvas a preguntar. Si pide una persona, pasar_a_persona motivo pide_persona.', candado: 'persona_por_que_repetida' };
+          return { ok: true, salidas: [{ tipo: 'texto', texto: respuestaFija(r, RF_PERSONA_POR_QUE) }] };
         }
         if (clave === RF_CUPO) return { ok: true, salidas: [{ tipo: 'texto', texto: respuestaFija(r, RF_CUPO) }] };
         if (clave === RF_PREFERENCIA_MESA) {
