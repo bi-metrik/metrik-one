@@ -33,6 +33,7 @@
 - ⚠️⚠️ [Propuesta: H33 (#1165) y motor html (PR 2)](project_propuesta_motor_html_h33.md) — SQL del interruptor SIN aplicar; anticipo en documento_cliente
 - ⚠️⚠️ [Propuesta PR 4: catálogo de fotos](project_fotos_catalogo.md) — migración 20261014221500 (tabla + bucket); hoteles NUNCA de Commons
 - ⚠️⚠️ [Perfil del contacto por el bot (corte 1)](project_perfil_contacto_bot.md) — migración 20261012234500 SIN aplicar; fichas sin publicar; el esquema manda sobre el prompt
+- ⚠️ [Asignar responsables por lista de staff](project_asignar_responsable_por_staff.md) — asignar_responsable.staff_ids; directorio fuera; RLS sin rol
 - ⚠️ [Operador sin staff no ve negocios (#1205)](project_operador_sin_staff_no_ve.md) — sin mergear; alma-afi tiene 4 staff sin profile (duplicaría)
 - ⚠️ [SOE-026/028: Descargar de Drive y Excel para operator](project_soe026_028_descarga.md) — config SOENA `roles_descarga_negocios_extra` SIN poner; Drive queda en default
 - [SOE-018: supervisor marca bloque restringido (#1203)](project_supervisor_marca_bloque_restringido.md) — pantalla usa canEditBloque; es_multi_pago solo pantalla
