@@ -29,6 +29,7 @@ let areas: string[] = ['comercial']
 let staffId = 's-dani'
 
 vi.mock('next/cache', () => ({ revalidatePath: () => {} }))
+vi.mock('next/navigation', () => ({ useRouter: () => ({ refresh: () => {}, push: () => {} }) }))
 vi.mock('@/lib/actions/get-workspace', () => ({
   getWorkspace: async () => ({
     supabase: clienteFalso(),
@@ -349,6 +350,9 @@ beforeEach(() => {
 
 import { anotarCortesia, confirmarCierre, decidirSaldoAFavor, reabrirCierre, registrarPostventa } from './viaje-final-actions'
 import { evaluarGateCierre, evaluarGatePostventa, leerVistaViajeFinal } from '@/lib/viaje/cierre-viaje-datos'
+import React from 'react'
+import { renderToStaticMarkup } from 'react-dom/server'
+import ViajeFinalPanel from './[id]/viaje-final-panel'
 
 const GATES_E8 = ['margen_confirmado']
 
@@ -443,6 +447,26 @@ describe('Cierre económico (F6-4, F6-5, F6-6)', () => {
     expect((await decidirSaldoAFavor(NEG, 'proximo_viaje', null)).ok).toBe(true)
     expect((await confirmarCierre(NEG)).ok).toBe(true)
     expect(await gate()).toEqual([])
+  })
+})
+
+describe('saldo pendiente en el Cierre (barrido 2026-10-22)', () => {
+  it('el panel dice el saldo con la cuenta del gate saldo_cero: un pago anulado no cubre', async () => {
+    await enCierre()
+    expect((await leerVistaViajeFinal(clienteFalso(), WS, NEG))?.saldoPendiente).toBeNull()
+    tablas.cobros[0].anulado_at = new Date().toISOString()
+    const v = await leerVistaViajeFinal(clienteFalso(), WS, NEG)
+    expect(v?.saldoPendiente).toMatch(/^Saldo pendiente: \$\s?[\d.]+$/)
+    // La pantalla lo pinta en el Cierre, arriba de la tabla.
+    const html = renderToStaticMarkup(React.createElement(ViajeFinalPanel, { vista: v!, esDireccion: true, puedeAnotar: true, puedePostventa: true, puedeComision: true }))
+    expect(html).toContain('data-saldo-pendiente')
+    expect(html).toContain('No se puede cerrar el viaje con saldo por cobrar.')
+  })
+
+  it('una cuota sin fecha tampoco cubre', async () => {
+    await enCierre()
+    tablas.cobros[0].fecha = null
+    expect((await leerVistaViajeFinal(clienteFalso(), WS, NEG))?.saldoPendiente).toMatch(/^Saldo pendiente/)
   })
 })
 

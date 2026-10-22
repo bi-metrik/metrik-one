@@ -127,7 +127,8 @@ describe('la línea nace con la tarifa (puntos 2 y 3)', () => {
     expect(r).toMatchObject({ ok: true, confirmada: true, pendiente: null, moneda: 'COP', total: 900000 })
     expect(lineas()).toHaveLength(1)
     const item = lineas()[0]
-    expect(item.nombre).toBe('HOTEL FICTICIO PLAYA')
+    // Desde la tarifa, la columna guarda la capitalización normal (brief del 2026-10-22, punto 2).
+    expect(item.nombre).toBe('Hotel Ficticio Playa')
     expect(item.proveedor_id).toBe(HOTEL)
     const t = leerTarifaPax(item.tarifa_pax)
     expect(t.casillas?.grupo_completo).toMatchObject({ origen: 'tarifario', total: 900000 })
@@ -198,6 +199,26 @@ describe('la línea nace con la tarifa (puntos 2 y 3)', () => {
     const t = leerTarifaPax(item.tarifa_pax)
     expect(t.tarifaExtraida?.iva_pct).toBeNull()
     expect(item.dia_relativo).toBe(1)
+  })
+
+  it('brief del 2026-10-22 · la columna guarda «Playa Ficticia con almuerzo», la nota aporta lo que incluye sin repetir el plan y el aviso nombra la actividad', async () => {
+    viaje.fechas = { inicio: '2027-02-01', fin: '2027-02-01' }
+    base.tablas.proveedor_extracciones[1].tarifario = {
+      canal: 'neta',
+      impuestos: { iva_declarado: false, iva_incluido: false, iva_pct: null },
+      planes: [{ codigo: 'CA', nombre: 'CON ALMUERZO', incluye: ['ALMUERZO'] }],
+      tarifas: [
+        fila({ categoria: 'PLAYA FICTICIA', plan: 'CA', base_precio: 'por_persona', tipo_pasajero: 'adulto', precio: 95000, nota: 'Horario 8:30 a 15:30. Incluye lancha, seguro, servicio de guía y almuerzo.' }),
+      ],
+    }
+    const v = await tarifasParaLineaNueva(COT, OPERADOR)
+    const r = await crearLineaConTarifa(COT, OPERADOR, { filas: [{ indice: 0 }] }, v.ok ? v.ajustes : null)
+    expect(r).toMatchObject({ ok: true, confirmada: true, servicio: 'Playa Ficticia con almuerzo' })
+    const item = lineas()[0]
+    // Lo que leen las columnas (cualquier vista o export), no solo el PDF.
+    expect(item.nombre).toBe('Playa Ficticia con almuerzo')
+    expect(item.descripcion).toBe('Incluye: almuerzo, lancha, seguro y servicio de guía.')
+    expect(item.descripcion).not.toMatch(/HORARIO|8:30/)
   })
 
   it('una cotización enviada o un rol de solo lectura no crean la línea', async () => {

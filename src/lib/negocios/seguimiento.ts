@@ -131,3 +131,14 @@ export const MENSAJE_GATE_COTIZACION_ENVIADA =
 export function mensajeTopeAplazamientos(maxPausas: number): string {
   return `Ya lo aplazaste ${maxPausas} veces. El negocio sigue abierto: marca si el cliente confirmó o si se perdió.`
 }
+
+/**
+ * La línea de estado de la etapa que exige `cotizacion_enviada` (barrido 2026-10-22): el gate no
+ * tenía panel ni bloque, y el equipo se enteraba cuando frenaba. Recibe la fecha ya en palabras
+ * («21 oct 2026») o `null` si ninguna cotización salió.
+ */
+export function lineaEstadoEnvio(fechaEnvio: string | null): { enviada: boolean; texto: string } {
+  return fechaEnvio
+    ? { enviada: true, texto: `Cotización enviada el ${fechaEnvio}.` }
+    : { enviada: false, texto: 'Falta enviar la cotización desde «Revisar y enviar».' }
+}

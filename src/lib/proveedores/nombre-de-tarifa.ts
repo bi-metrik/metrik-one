@@ -9,7 +9,7 @@
  *   · `nombreDeServicio`: la actividad, la habitación o la ruta con su plan y su modalidad
  *     («Playa Blanca con almuerzo», «Islas del Rosario · Pasadía (privado)»).
  *   · `incluyeDeFila`: lo que incluye la fila, del plan que la define en el tarifario
- *     (`planes[].incluye`), de la propia fila o de una nota que empieza por «Incluye».
+ *     (`planes[].incluye`), de la propia fila o de la frase «Incluye …» de una nota.
  *   · `mismoServicio`: qué es «el mismo servicio» para la preselección (punto 1): misma
  *     habitación o actividad, mismo plan, misma modalidad y mismo establecimiento.
  */
@@ -130,8 +130,9 @@ const MAX_INCLUYE = 12
 
 /**
  * Lo que incluye la fila, en el orden en que lo dice el tarifario y sin repetir: el plan que la
- * define (`planes[]` por código o nombre), la propia fila (`incluye`) y una nota que empieza por
- * «Incluye». Lo demás de la nota NO sale al cliente: son deducciones del motor («derivado»).
+ * define (`planes[]` por código o nombre), la propia fila (`incluye`) y la frase «Incluye …» de
+ * la nota, esté donde esté (`frasesIncluye`). Lo demás de la nota NO sale al cliente: son
+ * deducciones del motor («derivado») o datos como el horario.
  */
 export function incluyeDeFila(fila: Obj, tarifario: Obj | null | undefined): string[] {
   const out: string[] = []
@@ -151,9 +152,27 @@ export function incluyeDeFila(fila: Obj, tarifario: Obj | null | undefined): str
     }
   }
   for (const x of lista(fila.incluye)) sumar(x)
-  const nota = texto(fila.nota, 300)
-  const m = nota ? /^incluye[:\s]+(.+)$/i.exec(nota) : null
-  if (m) for (const x of m[1].split(/[,;]|\s+y\s+/)) sumar(x.trim().replace(/\.$/, ''))
+  for (const frase of frasesIncluye(texto(fila.nota, 300))) {
+    for (const x of frase.split(/[,;]|\s+y\s+/)) sumar(x.trim().replace(/\.$/, ''))
+  }
+  return out
+}
+
+/**
+ * Las frases «Incluye …» de una nota, empiece o no por ahí: «Horario 8:30 a 15:30. Incluye
+ * lancha, seguro y almuerzo.» → «lancha, seguro y almuerzo» (brief del 2026-10-22, punto 3: solo
+ * se tomaba la nota que EMPEZABA por «Incluye»). La frase va hasta el punto que la cierra; un
+ * «No incluye …» no cuenta: no es el inicio de una frase.
+ */
+export function frasesIncluye(nota: string | null | undefined): string[] {
+  if (!nota) return []
+  const out: string[] = []
+  // Inicio de frase: el comienzo de la nota o tras «.», «;», «!» o «?». Fin: punto seguido de espacio o el final.
+  const re = /(?:^|[.;!?]\s*)incluyen?\b[:\s]+(.+?)(?=\.(?:\s|$)|[;!?]|$)/giu
+  for (const m of nota.matchAll(re)) {
+    const t = m[1].trim()
+    if (t) out.push(t)
+  }
   return out
 }
 

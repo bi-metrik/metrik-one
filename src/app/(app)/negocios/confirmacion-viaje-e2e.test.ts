@@ -199,7 +199,7 @@ import {
   pedirAprobacionPlan,
   type EntradaConfirmacion,
 } from './confirmacion-viaje-actions'
-import { evaluarGatesConfirmacion } from '@/lib/viaje/confirmacion-datos'
+import { evaluarGatesConfirmacion, leerVistaConfirmacion } from '@/lib/viaje/confirmacion-datos'
 import { planSugerido, sumarDiasCivil, type CuotaPlan } from '@/lib/viaje/plan-pagos'
 import { todayBogotaISO } from '@/lib/dates/bogota'
 import { reiniciarModulo } from '../../../../test/exigir-modulo-doble'
@@ -461,6 +461,26 @@ describe('plan que no suma o fuera de la regla (F2-3)', () => {
     expect(r.ok).toBe(true)
     const acordado = planes().find(p => p.estado === 'acordado') as Fila
     expect(acordado).toMatchObject({ dentro_de_regla: false, aprobacion_id: ap.id })
+  })
+
+  it('el panel lee el plan vigente como el gate: una pedida más nueva no tapa la aprobada (barrido 2026-10-22)', async () => {
+    const mitad = Math.round(TOTAL_REC / 2)
+    const cuotas: CuotaPlan[] = [
+      { numero: 0, monto: mitad, fecha: HOY, concepto: null },
+      { numero: 1, monto: TOTAL_REC - mitad, fecha: SALIDA, concepto: null },
+    ]
+    await pedirAprobacionPlan(entrada({ cuotas, motivo: 'prima de diciembre' }))
+    const ap = tablas.aprobaciones_excepcion[0]
+    staffId = 's-edgar'; rol = 'operator'; areas = ['direccion']
+    await decidirAprobacionPlan(NEG, ap.id as string, 'aprobada', null)
+    staffId = 's-dani'; areas = ['comercial']
+    expect((await confirmarClienteViaje(entrada({ cuotas }))).ok).toBe(true)
+    // Después alguien pidió otra aprobación (otras cuotas) que sigue abierta: es la ÚLTIMA.
+    tablas.aprobaciones_excepcion.push({ id: 'ap-nueva', negocio_id: NEG, tipo: 'plan_fuera_de_regla', estado: 'solicitada', huella: 'otra', entidad_tipo: 'plan_pago', solicitada_at: '2999-01-01T00:00:00Z', detalle: {} })
+    const gates = await evaluarGatesConfirmacion(clienteFalso(), { workspaceId: WS, negocioId: NEG, gates: ['plan_pagos_acordado'], mensajes: {} })
+    expect(gates).toEqual([])
+    const vista = await leerVistaConfirmacion(clienteFalso(), WS, NEG)
+    expect(vista?.estado.planVigente).toBe(true)
   })
 
   it('«No aprobar» exige motivo', async () => {

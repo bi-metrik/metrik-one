@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 
-import { capitalizacionNormal, incluyeDeFila, mismoServicio, nombreDeServicio, textoIncluye } from './nombre-de-tarifa'
+import { capitalizacionNormal, frasesIncluye, incluyeDeFila, mismoServicio, nombreDeServicio, textoIncluye } from './nombre-de-tarifa'
 
 // Prueba del #1229, punto 2. Nombres FICTICIOS.
 describe('capitalización normal', () => {
@@ -65,5 +65,29 @@ describe('el mismo servicio', () => {
     expect(mismoServicio([f({ categoria: 'Tour', plan: 'Con almuerzo' }), f({ categoria: 'Tour' })])).toBe(false)
     expect(mismoServicio([f({ categoria: 'Tour', modalidad: 'privado' }), f({ categoria: 'Tour', modalidad: 'compartido' })])).toBe(false)
     expect(mismoServicio([f({ categoria: 'Estándar', ocupacion: 'doble' }), f({ categoria: 'Estándar', ocupacion: 'triple' })])).toBe(false)
+  })
+})
+
+// Brief del 2026-10-22, punto 3: la frase «Incluye …» dentro de la nota, no solo al empezar.
+describe('lo que incluye una nota con otras frases', () => {
+  it('«Horario … Incluye A, B y C.» aporta A, B y C, sin el horario', () => {
+    expect(frasesIncluye('Horario 8:30 a 15:30. Incluye lancha, seguro, servicio de guía y almuerzo.')).toEqual(['lancha, seguro, servicio de guía y almuerzo'])
+    expect(incluyeDeFila({ nota: 'Horario 8:30 a 15:30. Incluye lancha, seguro y almuerzo.' }, null)).toEqual(['lancha', 'seguro', 'almuerzo'])
+  })
+  it('no repite lo que ya vino del plan', () => {
+    const tarifario = { planes: [{ codigo: 'CA', nombre: 'Con almuerzo', incluye: ['ALMUERZO'] }] }
+    const fila = { plan: 'CA', nota: 'Horario 8:30 a 15:30. Incluye lancha, seguro, servicio de guía y almuerzo.' }
+    expect(textoIncluye(incluyeDeFila(fila, tarifario))).toBe('Incluye: almuerzo, lancha, seguro y servicio de guía.')
+  })
+  it('la frase sigue hasta su punto; una hora o un decimal no la cortan', () => {
+    expect(frasesIncluye('Salida 7.30 am. Incluye guía bilingüe y 1.5 litros de agua. Llevar bloqueador.')).toEqual(['guía bilingüe y 1.5 litros de agua'])
+  })
+  it('«No incluye …» no aporta, y una nota sin «Incluye» tampoco', () => {
+    expect(frasesIncluye('Horario 8:30. No incluye propinas.')).toEqual([])
+    expect(frasesIncluye('Horario 8:30 a 15:30.')).toEqual([])
+    expect(frasesIncluye(null)).toEqual([])
+  })
+  it('la nota que empieza por «Incluye» sigue como antes', () => {
+    expect(frasesIncluye('Incluye: guía, transporte en lancha')).toEqual(['guía, transporte en lancha'])
   })
 })

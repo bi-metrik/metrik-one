@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { aMayusculas, mayusculasDeBloqueDeViaje } from './mayusculas'
+import { aMayusculas, mayusculasDeBloqueDeViaje, textoDeLineaDeViaje } from './mayusculas'
 
 /** El bloque «Condiciones del viaje» de Trappvel, recortado a lo que decide. */
 const CONDICIONES_DEL_VIAJE = [
@@ -74,5 +74,18 @@ describe('mayusculasDeBloqueDeViaje', () => {
   it('no inventa claves que el dato no traía', () => {
     const r = mayusculasDeBloqueDeViaje(CONDICIONES_DEL_VIAJE, { destino: 'lima' })
     expect(Object.keys(r)).toEqual(['destino'])
+  })
+})
+
+// Brief del 2026-10-22, punto 2: la línea creada desde la tarifa de un proveedor no grita.
+describe('textoDeLineaDeViaje', () => {
+  it('desde la tarifa del proveedor guarda la capitalización normal', () => {
+    expect(textoDeLineaDeViaje('Playa Ficticia con almuerzo', 'tarifario')).toBe('Playa Ficticia con almuerzo')
+    expect(textoDeLineaDeViaje('Incluye: almuerzo.', 'tarifario')).toBe('Incluye: almuerzo.')
+  })
+  it('por pantallazo o a mano sigue en mayúscula', () => {
+    expect(textoDeLineaDeViaje('Tour ficticio en lancha', undefined)).toBe('TOUR FICTICIO EN LANCHA')
+    expect(textoDeLineaDeViaje('Tour ficticio', 'pantallazo')).toBe('TOUR FICTICIO')
+    expect(textoDeLineaDeViaje('Cena ficticia', 'manual')).toBe('CENA FICTICIA')
   })
 })

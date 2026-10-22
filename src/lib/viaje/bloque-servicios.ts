@@ -10,6 +10,7 @@ import { estadoDelServicio, pagadoDelServicio, valorAPagar, type EstadoServicio,
 import type { ConfigReglasPago, MedioPagoProveedor } from './reglas-pago'
 import type { Hito } from './hitos'
 import { fechaEnPalabras } from './fechas-servicio'
+import { serviciosListos, serviciosQueFaltan } from './gate-servicios'
 
 /** Lo que el servidor deja en `config_extra._servicios` del bloque. */
 export interface DatosBloqueServicios {
@@ -144,22 +145,32 @@ export function filtrarTablero(vista: readonly FilaVista[], filtro: FiltroTabler
   }
 }
 
-/** Color de la etapa (Noor §5): rojo con un pago vencido, ámbar si algo vence en 3 días, verde si todo va. */
-export function colorDeLaEtapa(vista: readonly FilaVista[], hoy: string): ColorFecha {
+/** El punto de la etapa: los colores de la fecha y gris («falta algo, sin urgencia»). */
+export type ColorEtapa = ColorFecha | 'gris'
+
+/**
+ * Color de la etapa (Noor §5): rojo con un pago vencido, ámbar si algo vence en 3 días. Verde SOLO
+ * si pasa el gate `servicios_listos` (barrido 2026-10-22): antes el verde medía fechas límite, y
+ * una fila «No aprobado» o sin confirmación salía en verde mientras el gate frenaba. Lo que falta
+ * sin urgencia va en gris.
+ */
+export function colorDeLaEtapa(vista: readonly FilaVista[], hoy: string, exigeConfirmacion = true): ColorEtapa {
   let ambar = false
   for (const v of vista) {
     const f = fechaLimiteEnPalabras(v.servicio.fecha_limite_pago, v.estado, hoy)
     if (f?.color === 'rojo') return 'rojo'
     if (f?.color === 'ambar') ambar = true
   }
-  return ambar ? 'ambar' : 'verde'
+  if (ambar) return 'ambar'
+  return serviciosListos(vista.map(v => v.servicio), exigeConfirmacion) ? 'verde' : 'gris'
 }
 
 /**
  * «Sigue:» del tablero (Noor §5): el pago más urgente; si nada urge, lo siguiente por hacer.
- * `null` cuando todo lo que va está confirmado.
+ * `null` solo cuando pasa el gate `servicios_listos`: lo último que mira es lo que el gate frena
+ * (una fila «No aprobado», por ejemplo), para que el «Sigue:» nunca calle mientras el gate frena.
  */
-export function sigueDelTablero(vista: readonly FilaVista[], hoy: string, hitos: readonly Hito[] = []): { servicioId: string; texto: string } | null {
+export function sigueDelTablero(vista: readonly FilaVista[], hoy: string, hitos: readonly Hito[] = [], exigeConfirmacion = true): { servicioId: string; texto: string } | null {
   const vivas = vista.filter(v => v.estado !== 'cancelado')
   const conFecha = vivas
     .map(v => ({ v, f: fechaLimiteEnPalabras(v.servicio.fecha_limite_pago, v.estado, hoy) }))
@@ -180,12 +191,17 @@ export function sigueDelTablero(vista: readonly FilaVista[], hoy: string, hitos:
   if (pronto) return { servicioId: pronto.v.servicio.id, texto: `${pronto.v.servicio.nombre}: ${minuscula(pronto.f.texto)}.` }
   const esperando = vivas.find(v => v.estado === 'esperando')
   if (esperando) return { servicioId: esperando.servicio.id, texto: `${esperando.servicio.nombre} está esperando a Edgar.` }
+  const noAprobado = vivas.find(v => v.estado === 'no_aprobado')
+  if (noAprobado) return { servicioId: noAprobado.servicio.id, texto: `${noAprobado.servicio.nombre}: Edgar no aprobó el pago. Pídelo de nuevo o cambia el pago.` }
   const porReservar = vivas.find(v => v.estado === 'por_reservar' && v.aPagar > 0)
   if (porReservar) return { servicioId: porReservar.servicio.id, texto: `Reserva ${porReservar.servicio.nombre}.` }
   const porPagar = vivas.find(v => v.estado === 'reservado' && v.aPagar > 0)
   if (porPagar) return { servicioId: porPagar.servicio.id, texto: `Registra el pago de ${porPagar.servicio.nombre}.` }
-  const sinConfirmar = vivas.find(v => v.estado === 'pagado')
+  const sinConfirmar = exigeConfirmacion ? vivas.find(v => v.estado === 'pagado') : undefined
   if (sinConfirmar) return { servicioId: sinConfirmar.servicio.id, texto: `Adjunta la confirmación del proveedor final de ${sinConfirmar.servicio.nombre}.` }
+  // Lo que el gate frena y nada de lo anterior nombró (un pago incompleto, sin soporte o sin medio).
+  const falta = serviciosQueFaltan(vista.map(v => v.servicio), exigeConfirmacion)[0]
+  if (falta) return { servicioId: falta.servicioId, texto: `${falta.texto}.` }
   return null
 }
 
