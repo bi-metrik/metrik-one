@@ -31,7 +31,9 @@ export interface Veredicto { ok: boolean; motivo: string }
 // Afirmar cupo, no mencionarlo: «no puedo confirmar si hay cupo para el sábado» no es promesa (falso positivo de la
 // corrida real, 2026-10-21). Se excluye lo que va detrás de «si» o «no».
 export const RE_CUPO = /((?:^|[.!?¡¿]\s*)s[ií],? hay cupo|\b(?<!\b(?:si|no)\s)hay cupo (disponible|para)|quedan \d+ cupos|[uú]ltimos cupos|(?<!\bno\s)(est[aá]|queda) disponible|te (aparto|separo) el cupo)\b/iu;
-export const RE_DESCUENTO = /\b(te (doy|hago|dejo)|hay|tenemos|aplica) (un |el )?(\d+ ?% de )?descuento\b/iu;
+// Afirmar un descuento, no negarlo: «no hay descuento por pareja ni por grupo» es la regla de Sabor (kickoff 22-oct) y
+// el modelo la repite tal cual (falso positivo de la corrida por CLI, 2026-10-22).
+export const RE_DESCUENTO = /\b(?<!\b(?:no|ni|nunca)\s)(te (doy|hago|dejo)|hay|tenemos|aplica) (un |el )?(\d+ ?% de )?descuento\b/iu;
 export const RE_TARJETA = /\b(n[uú]mero de (la |tu )?tarjeta|cvv|cvc|c[oó]digo de seguridad|fecha de vencimiento)\b|\b(?:\d[ -]?){13,19}\b/iu;
 export const RE_PAGO_VALIDADO = /\b(pago (recibido|aprobado|confirmado)|recib[ií] (tu|el) (pago|abono|soporte)|(tu|el) pago (qued[oó]|est[aá]) (aprobado|confirmado))\b/iu;
 // Promesa de mesa en primera persona (§8.4.2, §8.5): «te guardamos la mesa», «les aparto una mesa». Nombrar la regla de
